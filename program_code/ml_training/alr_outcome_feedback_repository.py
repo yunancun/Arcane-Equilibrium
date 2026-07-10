@@ -106,10 +106,20 @@ def persist_outcome_feedback(connection: Any, result: Mapping[str, Any]) -> dict
                     raise AlrOutcomeFeedbackConflict("run_feedback_conflict")
                 connection.commit()
                 return _result("DUPLICATE", plan)
+            artifact_rows_written = 0
+            payload_bytes_written = 0
             for artifact in plan["artifacts"]:
-                _insert_artifact(cursor, artifact)
+                inserted = _insert_artifact(cursor, artifact)
+                artifact_rows_written += int(inserted)
+                if inserted:
+                    payload_bytes_written += len(
+                        _canonical_json(
+                            artifact["canonical_payload"]
+                        ).encode("utf-8")
+                    )
+            provenance_rows_written = 0
             for edge in plan["edges"]:
-                _insert_edge(cursor, edge)
+                provenance_rows_written += int(_insert_edge(cursor, edge))
             cursor.execute(
                 "INSERT INTO learning.alr_outcome_feedback_events "
                 "(feedback_artifact_hash, run_hash, candidate_artifact_hash, "
@@ -140,12 +150,33 @@ def persist_outcome_feedback(connection: Any, result: Mapping[str, Any]) -> dict
                 if raced != plan["feedback_artifact_hash"]:
                     raise AlrOutcomeFeedbackConflict("run_feedback_conflict")
                 connection.commit()
-                return _result("DUPLICATE", plan)
+                return _result(
+                    "DUPLICATE",
+                    plan,
+                    artifact_rows_written=artifact_rows_written,
+                    provenance_rows_written=provenance_rows_written,
+                    payload_bytes_written=payload_bytes_written,
+                )
+            inserted_feedback_hash = _required_hash(
+                _row_field(inserted, 0, "feedback_artifact_hash"),
+                "inserted_feedback_hash",
+            )
+            if inserted_feedback_hash != plan["feedback_artifact_hash"]:
+                raise AlrOutcomeFeedbackRepositoryError(
+                    "inserted_feedback_hash_mismatch"
+                )
         connection.commit()
     except Exception:
         connection.rollback()
         raise
-    return _result("PERSISTED", plan)
+    return _result(
+        "PERSISTED",
+        plan,
+        artifact_rows_written=artifact_rows_written,
+        provenance_rows_written=provenance_rows_written,
+        feedback_event_rows_written=1,
+        payload_bytes_written=payload_bytes_written,
+    )
 
 
 def fetch_unreviewed_outcome_runs(connection: Any, *, limit: int) -> list[dict[str, Any]]:
@@ -184,24 +215,37 @@ def _find_feedback(cursor: Any, run_hash: str) -> str | None:
     return _required_hash(value, "existing_feedback_hash")
 
 
-def _insert_artifact(cursor: Any, artifact: Mapping[str, Any]) -> None:
+def _insert_artifact(cursor: Any, artifact: Mapping[str, Any]) -> bool:
     cursor.execute(
         "INSERT INTO learning.alr_artifact_nodes "
         "(artifact_hash, artifact_kind, canonical_payload) VALUES (%s, %s, %s::jsonb) "
-        "ON CONFLICT (artifact_hash) DO NOTHING",
+        "ON CONFLICT (artifact_hash) DO NOTHING RETURNING artifact_hash",
         (
             artifact["artifact_hash"],
             artifact["artifact_kind"],
             _canonical_json(artifact["canonical_payload"]),
         ),
     )
+    row = cursor.fetchone()
+    if row is None:
+        return False
+    inserted_hash = _required_hash(
+        _row_field(row, 0, "artifact_hash"),
+        "inserted_artifact_hash",
+    )
+    if inserted_hash != artifact["artifact_hash"]:
+        raise AlrOutcomeFeedbackRepositoryError(
+            "inserted_artifact_hash_mismatch"
+        )
+    return True
 
 
-def _insert_edge(cursor: Any, edge: Mapping[str, Any]) -> None:
+def _insert_edge(cursor: Any, edge: Mapping[str, Any]) -> bool:
     cursor.execute(
         "INSERT INTO learning.alr_provenance_edges "
         "(edge_hash, from_artifact_hash, to_artifact_hash, edge_role) "
-        "VALUES (%s, %s, %s, %s) ON CONFLICT (edge_hash) DO NOTHING",
+        "VALUES (%s, %s, %s, %s) ON CONFLICT (edge_hash) DO NOTHING "
+        "RETURNING edge_hash",
         (
             edge["edge_hash"],
             edge["from_artifact_hash"],
@@ -209,6 +253,16 @@ def _insert_edge(cursor: Any, edge: Mapping[str, Any]) -> None:
             edge["edge_role"],
         ),
     )
+    row = cursor.fetchone()
+    if row is None:
+        return False
+    inserted_hash = _required_hash(
+        _row_field(row, 0, "edge_hash"),
+        "inserted_edge_hash",
+    )
+    if inserted_hash != edge["edge_hash"]:
+        raise AlrOutcomeFeedbackRepositoryError("inserted_edge_hash_mismatch")
+    return True
 
 
 def _artifacts(value: Any) -> list[dict[str, Any]]:
@@ -311,7 +365,26 @@ def _required_hash(value: Any, field: str) -> str:
     return value
 
 
-def _result(status: str, plan: Mapping[str, Any]) -> dict[str, Any]:
+def _row_field(row: Any, index: int, key: str) -> Any:
+    if isinstance(row, Mapping):
+        return row.get(key)
+    try:
+        return row[index]
+    except (IndexError, KeyError, TypeError) as exc:
+        raise AlrOutcomeFeedbackRepositoryError(
+            "feedback_repository_row_invalid"
+        ) from exc
+
+
+def _result(
+    status: str,
+    plan: Mapping[str, Any],
+    *,
+    artifact_rows_written: int = 0,
+    provenance_rows_written: int = 0,
+    feedback_event_rows_written: int = 0,
+    payload_bytes_written: int = 0,
+) -> dict[str, Any]:
     return {
         "status": status,
         "run_hash": plan["run_hash"],
@@ -319,6 +392,14 @@ def _result(status: str, plan: Mapping[str, Any]) -> dict[str, Any]:
         "feedback_status": plan["feedback_status"],
         "rotate_next_target": plan["rotate_next_target"],
         "global_stop": plan["global_stop"],
+        "artifact_rows_written": artifact_rows_written,
+        "provenance_rows_written": provenance_rows_written,
+        "feedback_event_rows_written": feedback_event_rows_written,
+        "total_rows_written": artifact_rows_written
+        + provenance_rows_written
+        + feedback_event_rows_written,
+        "payload_bytes_written": payload_bytes_written,
+        "duplicate_retries": int(status == "DUPLICATE"),
         "no_authority": dict(plan["no_authority"]),
         "authority_counters": dict(plan["authority_counters"]),
     }

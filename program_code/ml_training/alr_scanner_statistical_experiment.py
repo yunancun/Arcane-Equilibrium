@@ -9,6 +9,7 @@ import re
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from ml_training.alr_stat_selector_baseline import (
@@ -38,6 +39,8 @@ EXPERIMENT_ARTIFACT_KIND = "statistical_experiment"
 CANDIDATE_ARTIFACT_KIND = "candidate_artifact"
 DEFER_ARTIFACT_KIND = "defer_evidence"
 TARGET_ARTIFACT_KIND = "learning_target"
+DEFER_DECISION_FINGERPRINT_SCHEMA_VERSION = "alr_defer_decision_fingerprint_v1"
+DEFER_REEVALUATION_MAX_SECONDS = 1800
 
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 _HEX40_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -70,6 +73,16 @@ _AFTER_COST_GAPS = (
     "matched_control_outcomes_missing",
     "repeat_oos_outcomes_missing",
 )
+_DEFER_DECISION_POLICY = {
+    "schema_version": "alr_defer_decision_policy_v1",
+    "decision": "DEFER_EVIDENCE",
+    "rotation_required": True,
+    "global_stop": False,
+    "max_suppression_seconds": DEFER_REEVALUATION_MAX_SECONDS,
+    "freshness_basis": "source_event_time",
+    "require_distinct_source_set": True,
+    "legacy_packet_reuse_allowed": False,
+}
 
 
 @dataclass(frozen=True)
@@ -161,16 +174,45 @@ def build_scanner_statistical_experiment(
         selector_output=selector_output,
     )
     experiment_hash = _canonical_sha256(experiment)
+    decision_fingerprint_components = _build_defer_decision_fingerprint_components(
+        source_head=source_head,
+        candidate_scope=candidate_scope,
+        target_metrics=target_metrics,
+        candidate_summary=candidate_summary,
+        control_symbols=control_symbols,
+        cycle_count=len(normalized_cycles),
+        scanner_config_hashes=sorted(
+            {
+                _canonical_sha256(item["canonical_payload"].get("config"))
+                for item in normalized_cycles
+            }
+        ),
+    )
+    decision_fingerprint = _canonical_sha256(decision_fingerprint_components)
+    next_evaluation_due_at = _add_seconds_utc_z(
+        as_of_ts,
+        DEFER_REEVALUATION_MAX_SECONDS,
+    )
     candidate_artifact = _build_candidate_artifact(
         candidate_scope=candidate_scope,
         target_hash=target_hash,
         pit_hash=pit_hash,
         experiment_hash=experiment_hash,
+        decision_fingerprint=decision_fingerprint,
+        decision_fingerprint_components=decision_fingerprint_components,
+        evaluated_at=as_of_ts,
+        next_evaluation_due_at=next_evaluation_due_at,
     )
     candidate_hash = _canonical_sha256(candidate_artifact)
     defer_artifact = _build_defer_artifact(
         candidate_scope=candidate_scope,
         candidate_hash=candidate_hash,
+        decision_fingerprint=decision_fingerprint,
+        decision_policy_hash=decision_fingerprint_components[
+            "decision_policy_hash"
+        ],
+        evaluated_at=as_of_ts,
+        next_evaluation_due_at=next_evaluation_due_at,
     )
     defer_hash = _canonical_sha256(defer_artifact)
 
@@ -213,6 +255,14 @@ def build_scanner_statistical_experiment(
             "source_hashes": [item["source_hash"] for item in normalized_cycles],
             "as_of_ts": as_of_ts,
             "cycle_count": len(normalized_cycles),
+            "source_identities": [
+                {
+                    "source_hash": item["source_hash"],
+                    "source_key": item["source_key"],
+                    "source_ts": item["source_ts"],
+                }
+                for item in normalized_cycles
+            ],
         },
         "learning_target": learning_target,
         "pit_dataset_manifest": pit_dataset,
@@ -268,6 +318,27 @@ def validate_scanner_statistical_experiment(
             reasons.append("after_cost_status_invalid")
         if candidate.get("serving_ready") is not False or candidate.get("promotion_ready") is not False:
             reasons.append("candidate_authority_invalid")
+        components = candidate.get("decision_fingerprint_components")
+        decision_fingerprint = candidate.get("decision_fingerprint")
+        if (
+            not isinstance(components, Mapping)
+            or not isinstance(decision_fingerprint, str)
+            or decision_fingerprint != _canonical_sha256(components)
+        ):
+            reasons.append("decision_fingerprint_mismatch")
+        elif candidate.get("decision_policy_hash") != components.get(
+            "decision_policy_hash"
+        ):
+            reasons.append("decision_policy_hash_mismatch")
+        defer = result.get("defer_evidence")
+        if not isinstance(defer, Mapping):
+            reasons.append("defer_evidence_missing")
+        elif (
+            defer.get("decision_fingerprint") != decision_fingerprint
+            or defer.get("decision_policy_hash")
+            != candidate.get("decision_policy_hash")
+        ):
+            reasons.append("defer_decision_fingerprint_mismatch")
     if not isinstance(result.get("artifacts"), list) or len(result["artifacts"]) != 5:
         reasons.append("artifact_bundle_invalid")
     if not isinstance(result.get("provenance_edges"), list):
@@ -629,6 +700,10 @@ def _build_candidate_artifact(
     target_hash: str,
     pit_hash: str,
     experiment_hash: str,
+    decision_fingerprint: str,
+    decision_fingerprint_components: Mapping[str, Any],
+    evaluated_at: str,
+    next_evaluation_due_at: str,
 ) -> dict[str, Any]:
     return {
         "schema_version": "alr_challenger_candidate_v1",
@@ -637,6 +712,15 @@ def _build_candidate_artifact(
         "target_artifact_hash": target_hash,
         "pit_dataset_manifest_hash": pit_hash,
         "statistical_experiment_hash": experiment_hash,
+        "decision_fingerprint": decision_fingerprint,
+        "decision_fingerprint_components": copy.deepcopy(
+            dict(decision_fingerprint_components)
+        ),
+        "decision_policy_hash": decision_fingerprint_components[
+            "decision_policy_hash"
+        ],
+        "evaluated_at": evaluated_at,
+        "next_evaluation_due_at": next_evaluation_due_at,
         "model_artifact": None,
         "after_cost_evaluation": {
             "status": "DEFER_EVIDENCE",
@@ -650,17 +734,103 @@ def _build_candidate_artifact(
     }
 
 
-def _build_defer_artifact(*, candidate_scope: Mapping[str, str], candidate_hash: str) -> dict[str, Any]:
+def _build_defer_artifact(
+    *,
+    candidate_scope: Mapping[str, str],
+    candidate_hash: str,
+    decision_fingerprint: str,
+    decision_policy_hash: str,
+    evaluated_at: str,
+    next_evaluation_due_at: str,
+) -> dict[str, Any]:
     return {
         "schema_version": "alr_defer_evidence_v1",
         "candidate_scope": dict(candidate_scope),
         "candidate_artifact_hash": candidate_hash,
+        "decision_fingerprint": decision_fingerprint,
+        "decision_policy_hash": decision_policy_hash,
+        "evaluated_at": evaluated_at,
+        "next_evaluation_due_at": next_evaluation_due_at,
         "status": "DEFER_EVIDENCE",
         "reasons": list(_AFTER_COST_GAPS),
         "rotate_next_target": True,
         "global_stop": False,
         "no_authority": dict(_NO_AUTHORITY),
     }
+
+
+def _build_defer_decision_fingerprint_components(
+    *,
+    source_head: str,
+    candidate_scope: Mapping[str, str],
+    target_metrics: Mapping[str, int],
+    candidate_summary: Mapping[str, Mapping[str, int]],
+    control_symbols: Sequence[str],
+    cycle_count: int,
+    scanner_config_hashes: Sequence[str],
+) -> dict[str, Any]:
+    decision_policy_hash = _canonical_sha256(_DEFER_DECISION_POLICY)
+    source_contract = {
+        "source_table": "trading.scanner_snapshots",
+        "feature_schema_version": "alr_scanner_novelty_features_v1",
+        "measurement_scope": "scanner_recurrence_and_novelty_not_after_cost_return",
+        "selector_schema_version": SELECTOR_INPUT_SCHEMA_VERSION,
+    }
+    return {
+        "schema_version": DEFER_DECISION_FINGERPRINT_SCHEMA_VERSION,
+        "source_head": source_head,
+        "candidate_identity": {
+            "candidate_id": candidate_scope["candidate_id"],
+            "strategy_name": candidate_scope["strategy_name"],
+            "strategy_version": "scanner_novelty_v1",
+            "strategy_config_hash": decision_policy_hash,
+            "symbol": candidate_scope["symbol"],
+            "side": candidate_scope["side"],
+            "horizon": "UNSPECIFIED",
+            "regime": "scanner_recurrence_not_return",
+            "engine_mode": candidate_scope["engine_mode"],
+        },
+        "regime_context": {
+            "source": "scanner_snapshot",
+            "measurement": "recurrence_not_return",
+        },
+        "semantic_evidence": {
+            "scanner_occurrences": int(target_metrics["occurrences"]),
+            "scanner_novelty": int(target_metrics["novelty"]),
+            "matched_control_symbols": list(control_symbols),
+            "candidate_summary": {
+                symbol: {
+                    "occurrences": int(metrics["occurrences"]),
+                    "novelty": int(metrics["novelty"]),
+                }
+                for symbol, metrics in sorted(candidate_summary.items())
+            },
+            "scanner_config_hashes": list(scanner_config_hashes),
+            "cycle_count": cycle_count,
+            "after_cost_measurement": "unavailable",
+        },
+        "blockers": list(_AFTER_COST_GAPS),
+        "reevaluation_policy": copy.deepcopy(_DEFER_DECISION_POLICY),
+        "decision_policy_hash": decision_policy_hash,
+        "source_contract_hash": _canonical_sha256(source_contract),
+        "code_schema_versions": {
+            "experiment": OUTPUT_SCHEMA_VERSION,
+            "candidate": "alr_challenger_candidate_v1",
+            "defer": "alr_defer_evidence_v1",
+        },
+    }
+
+
+def _add_seconds_utc_z(value: str, seconds: int) -> str:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise AlrScannerStatisticalExperimentError("source_ts_invalid") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise AlrScannerStatisticalExperimentError("source_ts_invalid")
+    return (
+        parsed.astimezone(timezone.utc) + timedelta(seconds=seconds)
+    ).isoformat().replace("+00:00", "Z")
 
 
 def _artifact(kind: str, artifact_hash: str, payload: Mapping[str, Any]) -> dict[str, Any]:

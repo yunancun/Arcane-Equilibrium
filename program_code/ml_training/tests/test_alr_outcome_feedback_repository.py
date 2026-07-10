@@ -93,11 +93,19 @@ class _Cursor:
         elif "FROM learning.alr_training_runs AS run" in sql:
             self.row = self.connection.unreviewed_rows
         elif "INSERT INTO learning.alr_artifact_nodes" in sql:
-            self.connection.artifacts[str(params[0])] = str(params[1])
-            self.row = None
+            artifact_hash = str(params[0])
+            if artifact_hash in self.connection.artifacts:
+                self.row = None
+            else:
+                self.connection.artifacts[artifact_hash] = str(params[1])
+                self.row = (artifact_hash,)
         elif "INSERT INTO learning.alr_provenance_edges" in sql:
-            self.connection.edges.add(str(params[0]))
-            self.row = None
+            edge_hash = str(params[0])
+            if edge_hash in self.connection.edges:
+                self.row = None
+            else:
+                self.connection.edges.add(edge_hash)
+                self.row = (edge_hash,)
         elif "INSERT INTO learning.alr_outcome_feedback_events" in sql:
             feedback_hash = str(params[0])
             run_hash = str(params[1])
@@ -120,6 +128,16 @@ def test_persists_feedback_once_and_replay_is_duplicate() -> None:
 
     assert first["status"] == "PERSISTED"
     assert second["status"] == "DUPLICATE"
+    assert first["artifact_rows_written"] == 3
+    assert first["provenance_rows_written"] == 3
+    assert first["feedback_event_rows_written"] == 1
+    assert first["total_rows_written"] == 7
+    assert first["payload_bytes_written"] > 0
+    assert second["artifact_rows_written"] == 0
+    assert second["provenance_rows_written"] == 0
+    assert second["feedback_event_rows_written"] == 0
+    assert second["total_rows_written"] == 0
+    assert second["payload_bytes_written"] == 0
     assert len(connection.feedback_by_run) == 1
     assert len(connection.artifacts) == 3
     assert len(connection.edges) == 3

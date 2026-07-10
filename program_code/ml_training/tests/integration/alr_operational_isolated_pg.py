@@ -31,12 +31,34 @@ def main() -> int:
             source_head="a" * 40,
             max_batch=8,
         )
-        if result != {
+        expected = {
             "training_runs": 1,
             "training_duplicates": 0,
             "training_deferred": 0,
             "training_insufficient_source_cycles": 0,
-        }:
+            "defer_suppressions": 0,
+            "suppression_duplicate_retries": 0,
+            "decision_write_attempts": 1,
+            "decision_writes_suppressed": 0,
+            "decision_duplicate_retries": 0,
+            "operational_artifact_rows_written": 5,
+            "operational_provenance_rows_written": 8,
+            "operational_run_rows_written": 1,
+            "operational_feedback_rows_written": 0,
+            "operational_defer_artifact_rows_written": 1,
+            "operational_source_rows_consumed": 4,
+        }
+        if (
+            set(result) != set(expected) | {
+                "operational_payload_bytes_written"
+            }
+            or any(result.get(key) != value for key, value in expected.items())
+            or not isinstance(
+                result.get("operational_payload_bytes_written"),
+                int,
+            )
+            or result["operational_payload_bytes_written"] <= 0
+        ):
             raise AssertionError(f"unexpected_first_result:{result}")
         shadow.commit()
 

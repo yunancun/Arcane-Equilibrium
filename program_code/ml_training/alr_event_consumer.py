@@ -213,6 +213,7 @@ def event_consumer_loop(
             connection=connection,
             source_head=source_head,
             max_batch=max_batch,
+            session_id=session_id,
         )
     while not should_stop():
         notifications = wait_for_notifications(
@@ -260,11 +261,19 @@ def event_consumer_loop(
                     connection=connection,
                     source_head=source_head,
                     max_batch=max_batch,
+                    session_id=session_id,
                 )
             else:
                 _accumulate_health(
                     totals,
-                    process_health_snapshot(connection, source_head=source_head),
+                    process_health_snapshot(
+                        connection,
+                        source_head=source_head,
+                        write_metrics=_build_write_metrics(
+                            totals,
+                            session_id=session_id,
+                        ),
+                    ),
                 )
     return totals
 
@@ -287,6 +296,13 @@ def process_outcome_feedback_backlog(connection: Any, *, max_batch: int) -> dict
         "feedback_deferred": 0,
         "feedback_rotations": 0,
         "feedback_boundary_blocks": 0,
+        "feedback_write_attempts": 0,
+        "feedback_duplicate_retries": 0,
+        "feedback_artifact_rows_written": 0,
+        "feedback_provenance_rows_written": 0,
+        "feedback_event_rows_written": 0,
+        "feedback_total_rows_written": 0,
+        "feedback_payload_bytes_written": 0,
     }
     for row in rows:
         if not isinstance(row, Mapping):
@@ -300,6 +316,56 @@ def process_outcome_feedback_backlog(connection: Any, *, max_batch: int) -> dict
         )
         persisted = persist_outcome_feedback(connection, feedback)
         status = persisted.get("status")
+        metric_fields = {
+            "artifact_rows_written",
+            "provenance_rows_written",
+            "feedback_event_rows_written",
+            "total_rows_written",
+            "payload_bytes_written",
+            "duplicate_retries",
+        }
+        if any(
+            isinstance(persisted.get(field), bool)
+            or not isinstance(persisted.get(field), int)
+            or persisted[field] < 0
+            for field in metric_fields
+        ):
+            raise AlrEventConsumerError("feedback_write_metrics_invalid")
+        if persisted["total_rows_written"] != (
+            persisted["artifact_rows_written"]
+            + persisted["provenance_rows_written"]
+            + persisted["feedback_event_rows_written"]
+        ):
+            raise AlrEventConsumerError("feedback_write_metric_total_invalid")
+        if (
+            status == "PERSISTED"
+            and persisted["duplicate_retries"] != 0
+        ) or (
+            status == "DUPLICATE"
+            and persisted["duplicate_retries"] != 1
+        ):
+            raise AlrEventConsumerError(
+                "feedback_duplicate_metric_status_mismatch"
+            )
+        totals["feedback_write_attempts"] += 1
+        totals["feedback_duplicate_retries"] += persisted[
+            "duplicate_retries"
+        ]
+        totals["feedback_artifact_rows_written"] += persisted[
+            "artifact_rows_written"
+        ]
+        totals["feedback_provenance_rows_written"] += persisted[
+            "provenance_rows_written"
+        ]
+        totals["feedback_event_rows_written"] += persisted[
+            "feedback_event_rows_written"
+        ]
+        totals["feedback_total_rows_written"] += persisted[
+            "total_rows_written"
+        ]
+        totals["feedback_payload_bytes_written"] += persisted[
+            "payload_bytes_written"
+        ]
         if status == "PERSISTED":
             totals["feedback_persisted"] += 1
         elif status == "DUPLICATE":
@@ -337,9 +403,21 @@ def process_retention_backlog(connection: Any, *, max_batch: int) -> dict[str, i
     return {f"retention_{key}": result[key] for key in required}
 
 
-def process_health_snapshot(connection: Any, *, source_head: str) -> dict[str, int]:
+def process_health_snapshot(
+    connection: Any,
+    *,
+    source_head: str,
+    write_metrics: Mapping[str, Any] | None = None,
+) -> dict[str, int]:
     """Persist one local ALR health snapshot after a bounded listener cycle."""
-    snapshot = collect_health_snapshot(connection, source_head=source_head)
+    collect_kwargs = (
+        {"write_metrics": write_metrics} if write_metrics is not None else {}
+    )
+    snapshot = collect_health_snapshot(
+        connection,
+        source_head=source_head,
+        **collect_kwargs,
+    )
     counters = snapshot.get("authority_counters")
     required_counters = {
         "run_authority_mismatch_count",
@@ -357,10 +435,34 @@ def process_health_snapshot(connection: Any, *, source_head: str) -> dict[str, i
     ):
         raise AlrEventConsumerError("health_authority_counters_invalid")
     persisted = persist_health_snapshot(connection, snapshot)
-    if persisted.get("status") != "PERSISTED":
+    status = persisted.get("status")
+    if status not in {"PERSISTED", "SUPPRESSED_NO_DELTA"}:
         raise AlrEventConsumerError("health_persistence_status_invalid")
+    emission_reason = persisted.get("emission_reason")
+    if status == "PERSISTED" and emission_reason not in {"STATE_DELTA", "HEARTBEAT"}:
+        raise AlrEventConsumerError("health_emission_reason_invalid")
+    metrics = {
+        "rows_written": persisted.get("rows_written"),
+        "payload_bytes_written": persisted.get("payload_bytes_written"),
+        "writes_suppressed": persisted.get("writes_suppressed"),
+    }
+    if any(
+        isinstance(value, bool) or not isinstance(value, int) or value < 0
+        for value in metrics.values()
+    ):
+        raise AlrEventConsumerError("health_write_metrics_invalid")
     return {
-        "health_snapshots": 1,
+        "health_attempts": 1,
+        "health_snapshots": int(status == "PERSISTED"),
+        "health_state_delta_writes": int(
+            status == "PERSISTED" and emission_reason == "STATE_DELTA"
+        ),
+        "health_heartbeat_writes": int(
+            status == "PERSISTED" and emission_reason == "HEARTBEAT"
+        ),
+        "health_writes_suppressed": metrics["writes_suppressed"],
+        "health_rows_written": metrics["rows_written"],
+        "health_payload_bytes_written": metrics["payload_bytes_written"],
         "health_authority_mismatches": int(
             counters.get("run_authority_mismatch_count", 0)
         )
@@ -401,11 +503,64 @@ def run_operational_backlog(
         return _operational_result("DEFER_EVIDENCE")
     persisted = persist_statistical_run(connection, experiment)
     status = persisted.get("status")
-    if status not in {"PERSISTED", "DUPLICATE"}:
+    if status not in {
+        "PERSISTED",
+        "DUPLICATE",
+        "SUPPRESSED_EQUIVALENT_DEFER",
+        "DUPLICATE_SUPPRESSION",
+    }:
         raise AlrEventConsumerError("operational_persistence_status_invalid")
+    metric_fields = {
+        "decision_writes_suppressed",
+        "duplicate_retries",
+        "artifact_rows_written",
+        "provenance_rows_written",
+        "run_rows_written",
+        "feedback_rows_written",
+        "defer_artifact_rows_written",
+        "payload_bytes_written",
+        "source_rows_consumed",
+    }
+    if any(
+        isinstance(persisted.get(field), bool)
+        or not isinstance(persisted.get(field), int)
+        or persisted[field] < 0
+        for field in metric_fields
+    ):
+        raise AlrEventConsumerError("operational_write_metrics_invalid")
     result = _operational_result(status)
     result["training_runs"] = 1 if status == "PERSISTED" else 0
     result["training_duplicates"] = 1 if status == "DUPLICATE" else 0
+    result["defer_suppressions"] = int(
+        status == "SUPPRESSED_EQUIVALENT_DEFER"
+    )
+    result["suppression_duplicate_retries"] = int(
+        status == "DUPLICATE_SUPPRESSION"
+    )
+    result["decision_write_attempts"] = 1
+    result["decision_writes_suppressed"] = persisted[
+        "decision_writes_suppressed"
+    ]
+    result["decision_duplicate_retries"] = persisted["duplicate_retries"]
+    result["operational_artifact_rows_written"] = persisted[
+        "artifact_rows_written"
+    ]
+    result["operational_provenance_rows_written"] = persisted[
+        "provenance_rows_written"
+    ]
+    result["operational_run_rows_written"] = persisted["run_rows_written"]
+    result["operational_feedback_rows_written"] = persisted[
+        "feedback_rows_written"
+    ]
+    result["operational_defer_artifact_rows_written"] = persisted[
+        "defer_artifact_rows_written"
+    ]
+    result["operational_payload_bytes_written"] = persisted[
+        "payload_bytes_written"
+    ]
+    result["operational_source_rows_consumed"] = persisted[
+        "source_rows_consumed"
+    ]
     return result
 
 
@@ -646,6 +801,7 @@ def _process_operational_cycle(
     connection: Any,
     source_head: str,
     max_batch: int,
+    session_id: str,
 ) -> None:
     """Fresh/history drain 後依既有順序執行 bounded research-only 工作。"""
     _accumulate_feedback(
@@ -666,7 +822,14 @@ def _process_operational_cycle(
     )
     _accumulate_health(
         totals,
-        process_health_snapshot(connection, source_head=source_head),
+        process_health_snapshot(
+            connection,
+            source_head=source_head,
+            write_metrics=_build_write_metrics(
+                totals,
+                session_id=session_id,
+            ),
+        ),
     )
 
 
@@ -691,7 +854,14 @@ def _accumulate(totals: dict[str, int], result: Mapping[str, int]) -> None:
 
 
 def _operational_result(status: str) -> dict[str, int]:
-    if status not in {"PERSISTED", "DUPLICATE", "DEFER_EVIDENCE", "INSUFFICIENT_SOURCE_CYCLES"}:
+    if status not in {
+        "PERSISTED",
+        "DUPLICATE",
+        "SUPPRESSED_EQUIVALENT_DEFER",
+        "DUPLICATE_SUPPRESSION",
+        "DEFER_EVIDENCE",
+        "INSUFFICIENT_SOURCE_CYCLES",
+    }:
         raise AlrEventConsumerError("operational_status_invalid")
     return {
         "training_runs": 0,
@@ -700,6 +870,18 @@ def _operational_result(status: str) -> dict[str, int]:
         "training_insufficient_source_cycles": 1
         if status == "INSUFFICIENT_SOURCE_CYCLES"
         else 0,
+        "defer_suppressions": 0,
+        "suppression_duplicate_retries": 0,
+        "decision_write_attempts": 0,
+        "decision_writes_suppressed": 0,
+        "decision_duplicate_retries": 0,
+        "operational_artifact_rows_written": 0,
+        "operational_provenance_rows_written": 0,
+        "operational_run_rows_written": 0,
+        "operational_feedback_rows_written": 0,
+        "operational_defer_artifact_rows_written": 0,
+        "operational_payload_bytes_written": 0,
+        "operational_source_rows_consumed": 0,
     }
 
 
@@ -709,6 +891,18 @@ def _accumulate_operational(totals: dict[str, int], result: Mapping[str, int]) -
         "training_duplicates",
         "training_deferred",
         "training_insufficient_source_cycles",
+        "defer_suppressions",
+        "suppression_duplicate_retries",
+        "decision_write_attempts",
+        "decision_writes_suppressed",
+        "decision_duplicate_retries",
+        "operational_artifact_rows_written",
+        "operational_provenance_rows_written",
+        "operational_run_rows_written",
+        "operational_feedback_rows_written",
+        "operational_defer_artifact_rows_written",
+        "operational_payload_bytes_written",
+        "operational_source_rows_consumed",
     }
     if set(result) != required or any(
         isinstance(result[key], bool) or not isinstance(result[key], int) or result[key] < 0
@@ -726,6 +920,13 @@ def _accumulate_feedback(totals: dict[str, int], result: Mapping[str, int]) -> N
         "feedback_deferred",
         "feedback_rotations",
         "feedback_boundary_blocks",
+        "feedback_write_attempts",
+        "feedback_duplicate_retries",
+        "feedback_artifact_rows_written",
+        "feedback_provenance_rows_written",
+        "feedback_event_rows_written",
+        "feedback_total_rows_written",
+        "feedback_payload_bytes_written",
     }
     if set(result) != required or any(
         isinstance(result[key], bool) or not isinstance(result[key], int) or result[key] < 0
@@ -755,7 +956,16 @@ def _accumulate_retention(totals: dict[str, int], result: Mapping[str, int]) -> 
 
 
 def _accumulate_health(totals: dict[str, int], result: Mapping[str, int]) -> None:
-    required = {"health_snapshots", "health_authority_mismatches"}
+    required = {
+        "health_attempts",
+        "health_snapshots",
+        "health_state_delta_writes",
+        "health_heartbeat_writes",
+        "health_writes_suppressed",
+        "health_rows_written",
+        "health_payload_bytes_written",
+        "health_authority_mismatches",
+    }
     if set(result) != required or any(
         isinstance(result[key], bool) or not isinstance(result[key], int) or result[key] < 0
         for key in required
@@ -763,6 +973,118 @@ def _accumulate_health(totals: dict[str, int], result: Mapping[str, int]) -> Non
         raise AlrEventConsumerError("health_result_invalid")
     for key in required:
         totals[key] = totals.get(key, 0) + result[key]
+
+
+def _build_write_metrics(
+    totals: Mapping[str, int],
+    *,
+    session_id: str,
+) -> dict[str, Any]:
+    def counter(key: str) -> int:
+        value = totals.get(key, 0)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise AlrEventConsumerError("write_metric_counter_invalid")
+        return value
+
+    def ratio(numerator: int, denominator: int) -> float:
+        if numerator > denominator:
+            raise AlrEventConsumerError("write_metric_ratio_invalid")
+        return numerator / denominator if denominator else 0.0
+
+    health_attempts = counter("health_attempts")
+    health_emitted = counter("health_snapshots")
+    health_suppressed = counter("health_writes_suppressed")
+    decision_attempts = counter("decision_write_attempts")
+    decision_suppressed = counter("decision_writes_suppressed")
+    feedback_attempts = counter("feedback_write_attempts")
+    feedback_persisted = counter("feedback_persisted")
+    feedback_duplicate_retries = counter("feedback_duplicate_retries")
+    feedback_artifact_rows = counter("feedback_artifact_rows_written")
+    feedback_provenance_rows = counter(
+        "feedback_provenance_rows_written"
+    )
+    feedback_event_rows = counter("feedback_event_rows_written")
+    feedback_total_rows = counter("feedback_total_rows_written")
+    feedback_payload_bytes = counter("feedback_payload_bytes_written")
+    if feedback_persisted + feedback_duplicate_retries != feedback_attempts:
+        raise AlrEventConsumerError("feedback_write_metric_attempt_invalid")
+    if feedback_total_rows != (
+        feedback_artifact_rows
+        + feedback_provenance_rows
+        + feedback_event_rows
+    ):
+        raise AlrEventConsumerError("feedback_write_metric_total_invalid")
+    return {
+        "schema_version": "alr_write_metrics_v1",
+        "scope": {
+            "kind": "consumer_session_cumulative",
+            "session_id": session_id,
+            "through_completed_health_attempt": health_attempts,
+        },
+        "health": {
+            "attempts": health_attempts,
+            "emitted": health_emitted,
+            "state_delta_writes": counter("health_state_delta_writes"),
+            "heartbeat_writes": counter("health_heartbeat_writes"),
+            "writes_suppressed": health_suppressed,
+            "rows_written": counter("health_rows_written"),
+            "payload_bytes_written": counter(
+                "health_payload_bytes_written"
+            ),
+            "suppression_ratio": ratio(
+                health_suppressed,
+                health_attempts,
+            ),
+        },
+        "decision": {
+            "attempts": decision_attempts,
+            "writes_suppressed": decision_suppressed,
+            "duplicate_retries": counter("decision_duplicate_retries"),
+            "artifact_rows_written": counter(
+                "operational_artifact_rows_written"
+            )
+            + feedback_artifact_rows,
+            "provenance_rows_written": counter(
+                "operational_provenance_rows_written"
+            )
+            + feedback_provenance_rows,
+            "run_rows_written": counter("operational_run_rows_written"),
+            "feedback_rows_written": feedback_event_rows
+            + counter("operational_feedback_rows_written"),
+            "defer_artifact_rows_written": counter(
+                "operational_defer_artifact_rows_written"
+            ),
+            "payload_bytes_written": counter(
+                "operational_payload_bytes_written"
+            )
+            + feedback_payload_bytes,
+            "source_rows_consumed": counter(
+                "operational_source_rows_consumed"
+            ),
+            "suppression_ratio": ratio(
+                decision_suppressed,
+                decision_attempts,
+            ),
+        },
+        "feedback": {
+            "attempts": feedback_attempts,
+            "persisted": feedback_persisted,
+            "duplicate_retries": feedback_duplicate_retries,
+            "persisted_ratio": ratio(
+                feedback_persisted,
+                feedback_attempts,
+            ),
+            "duplicate_retry_ratio": ratio(
+                feedback_duplicate_retries,
+                feedback_attempts,
+            ),
+            "artifact_rows_written": feedback_artifact_rows,
+            "provenance_rows_written": feedback_provenance_rows,
+            "event_rows_written": feedback_event_rows,
+            "total_rows_written": feedback_total_rows,
+            "payload_bytes_written": feedback_payload_bytes,
+        },
+    }
 
 
 def _row_value(row: Any, index: int, key: str) -> Any:

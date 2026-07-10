@@ -33,13 +33,27 @@ def main() -> int:
         if first["training_runs"] != 1:
             raise AssertionError(f"first_target_missing:{first}")
         feedback = process_outcome_feedback_backlog(connection, max_batch=4)
-        if feedback != {
+        expected_feedback = {
             "feedback_persisted": 1,
             "feedback_duplicates": 0,
             "feedback_deferred": 1,
             "feedback_rotations": 1,
             "feedback_boundary_blocks": 0,
-        }:
+            "feedback_write_attempts": 1,
+            "feedback_duplicate_retries": 0,
+            "feedback_artifact_rows_written": 3,
+            "feedback_provenance_rows_written": 3,
+            "feedback_event_rows_written": 1,
+            "feedback_total_rows_written": 7,
+        }
+        if (
+            set(feedback) != set(expected_feedback) | {
+                "feedback_payload_bytes_written"
+            }
+            or any(feedback.get(key) != value for key, value in expected_feedback.items())
+            or not isinstance(feedback.get("feedback_payload_bytes_written"), int)
+            or feedback["feedback_payload_bytes_written"] <= 0
+        ):
             raise AssertionError(f"feedback_rotation_failed:{feedback}")
         second = run_operational_backlog(connection, source_head="a" * 40, max_batch=4)
         if second["training_runs"] != 1:
