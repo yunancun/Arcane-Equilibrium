@@ -6,6 +6,12 @@
 > 它不是 active dispatch queue；當前 blocker、owner、gate、runtime evidence 一律讀根目錄 `TODO.md`。
 > 新增重要文檔時優先更新本索引或 `initiative_index.md`，不要把長表重新塞回 `docs/README.md`。
 
+### 2026-07-10 Gate-B 新上市自動 capture 授權（R3 修復包 WP-B）
+
+| 文件 | 内容 |
+|------|------|
+| `governance_dev/amendments/2026-07-10--AMD-2026-07-10-01-gate-b-auto-capture-next-5-listings.md` | Operator 授權（2026-07-10 經 R3 修復包主 session 轉達）：未來 5 個新上市自動觸發 R-0 隔離 Gate-B capture；cap=5 持久化計數、cap 滿自動停 + audit 行、R-0 zero-leak 邊界原樣（capture 產物不進交易路徑）；預設 OFF，`OPENCLAW_GATE_B_AUTO_CAPTURE=1` 啟用。 |
+
 ### 2026-07-09 ALR operational shadow P2
 
 | 文件 | 内容 |
