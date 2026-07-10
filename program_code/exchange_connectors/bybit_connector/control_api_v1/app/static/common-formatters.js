@@ -344,9 +344,10 @@ const _OC_CAT_CONFIG = {
 function ocCategoryTag(category) {
   const cat = (category || 'linear').toLowerCase();
   const cfg = _OC_CAT_CONFIG[cat] || { label: cat, color: '#94a3b8', bg: 'rgba(148,163,184,0.15)' };
-  return '<span style="display:inline-block;font-size:10px;padding:1px 5px;border-radius:3px;'
-    + 'color:' + cfg.color + ';background:' + cfg.bg + ';border:1px solid ' + cfg.color + ';'
-    + 'margin-left:4px;vertical-align:middle;line-height:14px">' + ocEsc(cfg.label) + '</span>';
+  // P0.2 中性化(刻意視覺變更,PM 已批):品類四色屬 palette 外色(canon 1
+  // 非數據 chrome 一律中性),樣式收斂到 oc-utilities.css §B .oc-cat-tag;
+  // _OC_CAT_CONFIG 的 color/bg 欄位自此僅存 label 在用,P0.4 複審清理。
+  return '<span class="oc-cat-tag">' + ocEsc(cfg.label) + '</span>';
 }
 
 // 渲染累計盈虧走勢。字段兼容：realized_pnl / closedPnl / pnl。左舊右新；
@@ -552,7 +553,7 @@ function ocSetPnlRangeButtons(containerId, activeRange) {
 function ocPnlCell(raw) {
   const pnl = parseFloat(raw);
   if (!isFinite(pnl) || Math.abs(pnl) < 0.0001) {
-    return '<td style="color:var(--text-dim)">—</td>';
+    return '<td class="t-dim">—</td>';
   }
   const cls = pnl >= 0 ? 'green' : 'red';
   const sign = pnl >= 0 ? '+' : '';
