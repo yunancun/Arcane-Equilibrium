@@ -205,6 +205,8 @@ docs/
 │   ├── api_contract/                  ← API 合同 / 路由草案 / 审核报告
 │   └── api_stub/                      ← API 骨架代码
 │
+├── research/                          ← 研究判准正本（预注册/冻结统计判准；先落档冻结、后跑分析）
+│
 ├── archive/                           ← 已归档/过期文档（DEPRECATED 文件、旧版摘要）
 │
 ├── CCAgentWorkSpace/                  ← Agent 工作空间（profile/memory/workspace per agent）

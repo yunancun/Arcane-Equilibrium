@@ -158,3 +158,23 @@
 - 前輪 P0/P1 全修復確認（donchian_prior/OU 殘差 σ/Kelly Wilson-LB/fast_track+slippage config 化/confluence load guard）；edge estimator 已內建 WF+PSR/DSR/bootstrap gate，113 real cells 0 過驗證、median n=6（樣本饑餓仍第一約束）。
 - 兩 HIGH 均在進化回路：(1) blocked-signal 反事實 markout fill-at-signal-price+4bps 平價成本，與同 cell realized EV 直接矛盾（ATOM|Sell +75 vs −16.8bps）——false-negative 敘事根基不保守；(2) standing envelope refresh 死循環=負淨貢獻 gate（v710-738 拒真率 100%），d0eeafb41 修判準側、TTL 12h 側殘留。
 - 復用教訓：反事實 lane 的矛盾檢查=同 cell realized edge 必附；probe n=2 對 75bps 檢定 power≈8%（驗證用途須明示）；per_trade_risk_pct 是 fraction（0.1=10%）與同塊 percent 欄位混雜，見 4 處 stale "2%" 註解。報告：workspace/reports/2026-07-03--qc-full-repo-math-audit.md
+
+## 2026-07-09 — 盈利研判 Stage 2（FINDINGS：10 diagnoses / 7 opportunities）
+- F1 逐位復核確認（5,058 NEAR outcomes = 2 distinct entry ×2529 偽複製，n_eff≈1-2）；誤殺偵測 lane 雙重失效（F1 膨脹 vs conservative_v1 成本 92.3bps ≈ 4× 實測 E[cost]~23bps 壓低），33/76 cells 落 GROSS_EDGE_POSITIVE_COST_CUSHION_INSUFFICIENT = 唯一可能藏誤殺母集。
+- 新結構事實：maker adverse selection 是 strategy-conditional（flash_dip −12.68/funding_arb −13.48 vs grid −2.45/ma −1.34/bb_rev −2.37 bps）——aggregate −7.57 掩蓋結構；bb_reversion gross +9.06bps 差一個執行檔（taker RT 19.5 vs maker RT ~8.7）。攻首位 = horizon arbitrage（1d klines 26sym×2yr 在位，$0 可驗，bull-heavy 標註強制）。
+- 教訓：成本模型「保守」≠ E[cost]×4——E[slip] 與 tail（p10 −37.79bps）必須分離（期望入 gate、tail 入 CVaR 預算）；counterfactual lane 修復前，gate 誤殺率雙向皆不可信。報告：workspace/reports/2026-07-09--profit-diagnosis-stage2-qc.md
+
+## 2026-07-09 — EXT 外部盈利情報掃描（FINDINGS：7 機會項，全 $0 read-only 第一步）
+- 三個前提變化未被舊裁決吸收：①Bybit Spread Trading（2025-04 API）把 funding carry 產品化為原子雙腿+費率 50% 折 → funding_short_v2 兩堵牆（leg risk+雙腿費）被交易所自己拆了，但 runtime 證實 25-symbol 宇宙 funding 現貼 IR floor（max APR 10.95%）→ 監測項非交易項；②RPI `rpiTakerAccess`（2026-06-03 changelog）= API taker 免費執行改善，maker-nogo 未覆蓋此 taker-腿 lever；③token unlock 事件軸有 16k+ 事件外部實證（~90% 負向、30d 前置 drift），多日持有攤薄 taker 牆，驗證必須 beta 中性化（down-beta 教訓內建）。
+- runtime 事實：`research.listing_capture_events`=0 rows（部署 5 週零捕捉）——新上市 niche 不會自己出證據，需 operator 授權自動 capture 排程。
+- 報告：workspace/reports/2026-07-09--ext-profit-intel-scan.md（Operator 副本已落）。
+
+## 2026-07-10 — 反事實重跑預註冊落檔(R3 修復包 WP-A.3)
+- 判準先於重跑凍結:`docs/research/2026-07-10--counterfactual_rerun_preregistration.md`——dedup=(cell,entry_minute,horizon)、n_eff=非重疊窗 greedy、E1-E5(n_eff≥30/days≥5/top-day≤50%/censored≤30%)、day-cluster CR1 t(df=G−1)、BH-FDR q=0.10 去重後 family、成本雙軌(E[cost]=2×5.5+2×E|slip| 無 SM;CVaR90 tail 並列不判)、PROMOTE/VETO/INSUFFICIENT 三態判定式+翻案條件。
+- 母集凍結新事實(metadata 級,未預看 outcome 統計):母集 A=71,207 精確重現(risk_verdicts⋈decision_features via context_id,join 守恆),僅 6 cells;FIL n_dedup=2、ARB n_dedup=1 → 預判必然 SAMPLE_INSUFFICIENT;僅 ETH(578min/8d)與 APT(1,387min/8d)可能過門檻。33-cell 母集 B 以分類規則+review artifact sha256(299751f2…)凍結,重跑第 0 步枚舉斷言=33。
+- 教訓:pre-registration 的凍結錨要用「輸入身分(sha256)+分類規則+計數斷言」三件套——review JSON 只留 top16 cells,清單不可直接凍結時,規則+輸入+斷言等價且更防篡改。
+
+## 2026-07-10 — 極端 funding 結算窗 event study(WP-B.4;REJECT+翻案條件)
+- 預註冊母集 |F|>30bps:2yr×20 majors 僅 11 事件,10/11=2025-10-11 00:00 UTC 清算瀑布同一瞬間(n_eff≈2,day-cluster G=2),且全部早於 1m kline 留存起點(2026-04-05)→ 分鐘級不可測,SAMPLE_INSUFFICIENT;SOL/APT 事件 F 精確=lowerFundingRate(cap 截尾)。
+- 敏感性(1m 窗 2026-04~06,n=3,894 事件):逆 funding 漂移各 tier gross 近零/負,扣 23bps taker RT 全 horizon 淨負(−18~−47bps),|F| 劑量反應 ρ≈0;唯一 nominal 顯著 cell(IR-floor 30m +2.15bps p=.005)= 假陽性候選(Bonferroni/day-cluster 雙殺)。
+- 教訓:major 宇宙的極端 funding 是「單一 cascade episode 的多份拷貝」(與 F1 偽複製同構);此 niche 證據只能前向捕捉(Gate-B 新上市 capture)或 1m REST 回補,不會從現有留存長出來。報告:workspace/reports/2026-07-10--extreme_funding_settlement_event_study.md

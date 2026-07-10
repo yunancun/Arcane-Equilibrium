@@ -6,6 +6,12 @@
 > 它不是 active dispatch queue；當前 blocker、owner、gate、runtime evidence 一律讀根目錄 `TODO.md`。
 > 新增重要文檔時優先更新本索引或 `initiative_index.md`，不要把長表重新塞回 `docs/README.md`。
 
+### 2026-07-10 反事實重跑預註冊（R3 修復包 WP-A.3）
+
+| 文件 | 内容 |
+|------|------|
+| `research/2026-07-10--counterfactual_rerun_preregistration.md` | QC 預註冊判準正本（先凍結後重跑）：per-(side_cell, entry_minute, horizon) 去重、非重疊窗 n_eff≥30、distinct UTC days≥5、top-day≤50%、day-cluster CR1 t（df=G−1）、BH-FDR q=0.10 只撤不扶、成本雙軌（E[cost] 主判 + CVaR90 尾部並列）、凍結錨（母集 A=71,207 / B=33 cells / review artifact sha `299751f2…`）。WP-A.4 重跑 verdict artifact（sha `d09bf86c…`，FALSE_KILL_HYPOTHESIS_HAMMERED）依此裁決；判準調整只能走 QC prereg v2，不得由執行側改。 |
+
 ### 2026-07-10 Gate-B 新上市自動 capture 授權（R3 修復包 WP-B）
 
 | 文件 | 内容 |
