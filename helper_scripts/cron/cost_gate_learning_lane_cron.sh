@@ -38,6 +38,9 @@ STATUS_LOG="${LOG_DIR}/cost_gate_learning_lane.log"
 LOCK_ROOT="${DATA}/locks"
 LOCK_DIR="${LOCK_ROOT}/cost_gate_learning_lane_cron.lock.d"
 HEARTBEAT_DIR="${DATA}/cron_heartbeat"
+ALR_CANDIDATE_EVIDENCE_DIR="${ALR_CANDIDATE_EVIDENCE_DIR:-$HOME/.local/share/openclaw/alr-candidate-evidence}"
+ALR_CANDIDATE_EVIDENCE_RETENTION="${ALR_CANDIDATE_EVIDENCE_RETENTION:-128}"
+ALR_CANDIDATE_EVIDENCE_MAX_BYTES="${ALR_CANDIDATE_EVIDENCE_MAX_BYTES:-67108864}"
 LEDGER="${OPENCLAW_COST_GATE_LEARNING_LEDGER:-$LANE_DIR/probe_ledger.jsonl}"
 SCORECARD_JSON="${OPENCLAW_COST_GATE_SCORECARD_JSON:-$DATA/cost_gate_counterfactual/cost_gate_reject_counterfactual_latest.json}"
 SCORECARD_MD="${OPENCLAW_COST_GATE_SCORECARD_MD:-$DATA/cost_gate_counterfactual/cost_gate_reject_counterfactual_latest.md}"
@@ -221,6 +224,18 @@ validate_int() {
     fi
 }
 
+validate_bounded_int() {
+    local name="$1"
+    local value="$2"
+    local minimum="$3"
+    local maximum="$4"
+    validate_int "$name" "$value"
+    if (( 10#$value < minimum || 10#$value > maximum )); then
+        echo "[$(ts)] FATAL: ${name} must be in ${minimum}..${maximum}: ${value}" | tee -a "$LOG" >&2
+        exit 2
+    fi
+}
+
 validate_bool01() {
     local name="$1"
     local value="$2"
@@ -335,6 +350,8 @@ validate_int "OPENCLAW_COST_GATE_FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_MAX
 validate_int "OPENCLAW_COST_GATE_FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_TOP_LIMIT" "$FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_TOP_LIMIT"
 validate_int "OPENCLAW_COST_GATE_SHADOW_PLACEMENT_MAX_ARTIFACT_AGE_HOURS" "$SHADOW_PLACEMENT_MAX_ARTIFACT_AGE_HOURS"
 validate_int "OPENCLAW_COST_GATE_LEARNING_STALE_LOCK_MIN" "$STALE_LOCK_MIN"
+validate_bounded_int "ALR_CANDIDATE_EVIDENCE_RETENTION" "$ALR_CANDIDATE_EVIDENCE_RETENTION" 1 128
+validate_bounded_int "ALR_CANDIDATE_EVIDENCE_MAX_BYTES" "$ALR_CANDIDATE_EVIDENCE_MAX_BYTES" 1 67108864
 
 PYBIN="${OPENCLAW_PYTHON_BIN:-}"
 if [[ -z "$PYBIN" ]]; then
@@ -576,6 +593,14 @@ REVIEW_ARGS=(
     --output "$REVIEW_OUT"
 )
 
+CANDIDATE_BOARD_PUBLISH_ARGS=(
+    -m cost_gate_learning_lane.candidate_board_publisher
+    --source "$REVIEW_OUT"
+    --destination "$ALR_CANDIDATE_EVIDENCE_DIR"
+    --retention-limit "$ALR_CANDIDATE_EVIDENCE_RETENTION"
+    --max-total-bytes "$ALR_CANDIDATE_EVIDENCE_MAX_BYTES"
+)
+
 FALSE_NEGATIVE_CANDIDATE_PACKET_ARGS=(
     -m cost_gate_learning_lane.false_negative_candidate_packet
     --blocked-outcome-review-json "$REVIEW_OUT"
@@ -810,6 +835,9 @@ historical_review_rc=0
 materializer_rc=0
 refresh_rc=0
 review_rc=0
+candidate_board_publish_rc=0
+candidate_board_publish_status="PENDING"
+candidate_board_publish_skip_reason=""
 false_negative_candidate_packet_rc=0
 false_negative_operator_review_rc=0
 learning_ssot_decision_rc=0
@@ -841,6 +869,8 @@ bounded_probe_shadow_placement_impact_skip_reason=""
 bounded_probe_result_review_skip_reason=""
 bounded_probe_execution_realism_review_skip_reason=""
 if [[ "$PREINSTALL_REFRESH_ONLY" == "1" ]]; then
+    candidate_board_publish_status="SKIPPED"
+    candidate_board_publish_skip_reason="preinstall_refresh_only"
     order_touchability_audit_skip_reason="preinstall_refresh_only"
     false_negative_candidate_packet_skip_reason="preinstall_refresh_only"
     false_negative_operator_review_skip_reason="preinstall_refresh_only"
@@ -898,6 +928,26 @@ else
         export PYTHONDONTWRITEBYTECODE=1
         "$PYBIN" "${REVIEW_ARGS[@]}"
     ) >> "$LOG" 2>&1 || review_rc=$?
+    if [[ "$review_rc" == "0" && -f "$REVIEW_OUT" ]]; then
+        (
+            cd "$BASE"
+            export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
+            export PYTHONDONTWRITEBYTECODE=1
+            "$PYBIN" "${CANDIDATE_BOARD_PUBLISH_ARGS[@]}"
+        ) >> "$LOG" 2>&1 || candidate_board_publish_rc=$?
+        if [[ "$candidate_board_publish_rc" != "0" ]]; then
+            candidate_board_publish_status="FAILED"
+            candidate_board_publish_skip_reason="publisher_nonzero"
+            echo "[$(ts)] ERROR: ALR candidate board publish failed rc=${candidate_board_publish_rc}; consumer rendezvous remains fail-closed" >> "$LOG"
+        else
+            candidate_board_publish_status="PUBLISHED_OR_ALREADY_PUBLISHED"
+        fi
+    else
+        candidate_board_publish_rc=1
+        candidate_board_publish_status="SKIPPED"
+        candidate_board_publish_skip_reason="outcome_review_incomplete"
+        echo "[$(ts)] ERROR: ALR candidate board not published because outcome review was incomplete rc=${review_rc}" >> "$LOG"
+    fi
     if [[ -f "$REVIEW_OUT" ]]; then
         cp "$REVIEW_OUT" "$REVIEW_LATEST"
     fi
@@ -1327,6 +1377,10 @@ export SEALED_HORIZON_LEARNING_EVIDENCE_RC="$sealed_horizon_learning_evidence_rc
 export SEALED_HORIZON_LEARNING_EVIDENCE_SKIP_REASON="$sealed_horizon_learning_evidence_skip_reason"
 export REFRESH_SEALED_HORIZON_LEARNING_EVIDENCE="$REFRESH_SEALED_HORIZON_LEARNING_EVIDENCE"
 export APPEND_SEALED_HORIZON_LEARNING_EVIDENCE="$APPEND_SEALED_HORIZON_LEARNING_EVIDENCE"
+export CANDIDATE_BOARD_PUBLISH_RC="$candidate_board_publish_rc"
+export CANDIDATE_BOARD_PUBLISH_STATUS="$candidate_board_publish_status"
+export CANDIDATE_BOARD_PUBLISH_SKIP_REASON="$candidate_board_publish_skip_reason"
+export CANDIDATE_BOARD_PUBLISH_ARTIFACT_PATH="$ALR_CANDIDATE_EVIDENCE_DIR/$(basename "$REVIEW_OUT")"
 
 STATUS_JSON=$(SCORECARD_JSON_OUT="$SCORECARD_JSON_OUT" SCORECARD_JSON="$SCORECARD_JSON" SCORECARD_RC="$scorecard_rc" REFRESH_SCORECARD="$REFRESH_SCORECARD" DATA_FLOW_JSON_OUT="$DATA_FLOW_JSON_OUT" DATA_FLOW_JSON="$DATA_FLOW_JSON" DATA_FLOW_MONITOR_RC="$data_flow_monitor_rc" REFRESH_DATA_FLOW_MONITOR="$REFRESH_DATA_FLOW_MONITOR" ORDER_TOUCHABILITY_JSON_OUT="$ORDER_TOUCHABILITY_JSON_OUT" ORDER_TOUCHABILITY_JSON="$ORDER_TOUCHABILITY_JSON" ORDER_TOUCHABILITY_AUDIT_RC="$order_touchability_audit_rc" ORDER_TOUCHABILITY_AUDIT_SKIP_REASON="$order_touchability_audit_skip_reason" REFRESH_ORDER_TOUCHABILITY_AUDIT="$REFRESH_ORDER_TOUCHABILITY_AUDIT" DECISION_PACKET_JSON_OUT="$DECISION_PACKET_JSON_OUT" DECISION_PACKET_JSON="$DECISION_PACKET_JSON" DECISION_PACKET_RC="$decision_packet_rc" REFRESH_DECISION_PACKET="$REFRESH_DECISION_PACKET" PLAN_OUT="$PLAN_OUT" PLAN_JSON="$PLAN_JSON" PLAN_RC="$plan_rc" REFRESH_PLAN="$REFRESH_PLAN" REFRESH_SOAK_PLAN="$REFRESH_SOAK_PLAN" SOAK_PLAN_JSON="$SOAK_PLAN_JSON" SOAK_PLAN_REMATERIALIZER_JSON="$SOAK_PLAN_REMATERIALIZER_JSON" SOAK_PLAN_REMATERIALIZER_RC="$soak_plan_rematerializer_rc" SOAK_PLAN_REMATERIALIZER_SKIP_REASON="$soak_plan_rematerializer_skip_reason" PREINSTALL_REFRESH_ONLY="$PREINSTALL_REFRESH_ONLY" HISTORICAL_REVIEW_OUT="$HISTORICAL_REVIEW_OUT" MATERIALIZER_OUT="$MATERIALIZER_OUT" REFRESH_OUT="$REFRESH_OUT" REVIEW_OUT="$REVIEW_OUT" BOUNDED_PROBE_PREFLIGHT_JSON="$BOUNDED_PROBE_PREFLIGHT_SOURCE_JSON" ORDER_TOUCHABILITY_JSON="$ORDER_TOUCHABILITY_JSON" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT="$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_LATEST="$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_LATEST" BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT="$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT" BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_LATEST="$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_LATEST" BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT="$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT" BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_LATEST="$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_LATEST" BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT="$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT" BOUNDED_PROBE_OPERATOR_AUTHORIZATION_LATEST="$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_LATEST" FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_OUT="$FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_OUT" FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_LATEST="$FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_LATEST" BOUNDED_PROBE_RESULT_REVIEW_OUT="$BOUNDED_PROBE_RESULT_REVIEW_OUT" BOUNDED_PROBE_RESULT_REVIEW_LATEST="$BOUNDED_PROBE_RESULT_REVIEW_LATEST" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_OUT="$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_OUT" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_LATEST="$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_LATEST" HISTORICAL_REVIEW_RC="$historical_review_rc" MATERIALIZER_RC="$materializer_rc" REFRESH_RC="$refresh_rc" REVIEW_RC="$review_rc" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_RC="$bounded_probe_touchability_preflight_rc" BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_RC="$bounded_probe_placement_repair_plan_rc" BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_RC="$bounded_probe_authority_patch_readiness_rc" BOUNDED_PROBE_OPERATOR_AUTHORIZATION_RC="$bounded_probe_operator_authorization_rc" FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_RC="$false_negative_candidate_friction_scorecard_rc" BOUNDED_PROBE_RESULT_REVIEW_RC="$bounded_probe_result_review_rc" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_RC="$bounded_probe_execution_realism_review_rc" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_SKIP_REASON="$bounded_probe_touchability_preflight_skip_reason" BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_SKIP_REASON="$bounded_probe_placement_repair_plan_skip_reason" BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_SKIP_REASON="$bounded_probe_authority_patch_readiness_skip_reason" BOUNDED_PROBE_OPERATOR_AUTHORIZATION_SKIP_REASON="$bounded_probe_operator_authorization_skip_reason" FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_SKIP_REASON="$false_negative_candidate_friction_scorecard_skip_reason" BOUNDED_PROBE_RESULT_REVIEW_SKIP_REASON="$bounded_probe_result_review_skip_reason" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_SKIP_REASON="$bounded_probe_execution_realism_review_skip_reason" REFRESH_BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT="$REFRESH_BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT" REFRESH_BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN="$REFRESH_BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN" REFRESH_BOUNDED_PROBE_AUTHORITY_PATCH_READINESS="$REFRESH_BOUNDED_PROBE_AUTHORITY_PATCH_READINESS" REFRESH_BOUNDED_PROBE_OPERATOR_AUTHORIZATION="$REFRESH_BOUNDED_PROBE_OPERATOR_AUTHORIZATION" REFRESH_FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD="$REFRESH_FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD" REFRESH_BOUNDED_PROBE_RESULT_REVIEW="$REFRESH_BOUNDED_PROBE_RESULT_REVIEW" REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW="$REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW" LEDGER="$LEDGER" MATERIALIZE_REJECTS="$MATERIALIZE_REJECTS" APPEND_MATERIALIZED_REJECTS="$APPEND_MATERIALIZED_REJECTS" APPEND_OUTCOMES="$APPEND_OUTCOMES" "$PYBIN" - <<'PY' 2>>"$LOG" || true
 import datetime
@@ -1358,6 +1412,9 @@ historical, historical_sha, historical_err = load(os.environ["HISTORICAL_REVIEW_
 materializer, materializer_sha, materializer_err = load(os.environ["MATERIALIZER_OUT"])
 refresh, refresh_sha, refresh_err = load(os.environ["REFRESH_OUT"])
 review, review_sha, review_err = load(os.environ["REVIEW_OUT"])
+candidate_board_publish, candidate_board_publish_sha, candidate_board_publish_err = load(
+    os.environ["CANDIDATE_BOARD_PUBLISH_ARTIFACT_PATH"]
+)
 false_negative_packet, false_negative_packet_sha, false_negative_packet_err = load(
     os.environ["FALSE_NEGATIVE_CANDIDATE_PACKET_OUT"]
 )
@@ -1422,6 +1479,23 @@ status = {
     "materializer_rc": int(os.environ["MATERIALIZER_RC"]),
     "refresh_rc": int(os.environ["REFRESH_RC"]),
     "review_rc": int(os.environ["REVIEW_RC"]),
+    "candidate_board_publish_rc": int(os.environ["CANDIDATE_BOARD_PUBLISH_RC"]),
+    "candidate_board_publish_status": os.environ["CANDIDATE_BOARD_PUBLISH_STATUS"],
+    "candidate_board_publish_skip_reason": os.environ["CANDIDATE_BOARD_PUBLISH_SKIP_REASON"] or None,
+    "candidate_board_publish_artifact_path": os.environ["CANDIDATE_BOARD_PUBLISH_ARTIFACT_PATH"],
+    "candidate_board_publish_source_content_sha256": (
+        review_sha
+        if int(os.environ["CANDIDATE_BOARD_PUBLISH_RC"]) == 0
+        and os.environ["CANDIDATE_BOARD_PUBLISH_STATUS"] == "PUBLISHED_OR_ALREADY_PUBLISHED"
+        else None
+    ),
+    "candidate_board_publish_artifact_sha256": (
+        candidate_board_publish_sha
+        if int(os.environ["CANDIDATE_BOARD_PUBLISH_RC"]) == 0
+        and os.environ["CANDIDATE_BOARD_PUBLISH_STATUS"] == "PUBLISHED_OR_ALREADY_PUBLISHED"
+        else None
+    ),
+    "candidate_board_publish_artifact_error": candidate_board_publish_err,
     "false_negative_candidate_packet_rc": int(os.environ["FALSE_NEGATIVE_CANDIDATE_PACKET_RC"]),
     "false_negative_operator_review_rc": int(os.environ["FALSE_NEGATIVE_OPERATOR_REVIEW_RC"]),
     "learning_ssot_decision_rc": int(os.environ["LEARNING_SSOT_DECISION_RC"]),
@@ -2075,7 +2149,7 @@ if [[ -n "$STATUS_JSON" ]]; then
     echo "$STATUS_JSON" >> "$STATUS_LOG"
 fi
 
-echo "[$(ts)] === Cost-gate learning lane refresh end scorecard_rc=${scorecard_rc} plan_rc=${plan_rc} soak_plan_rematerializer_rc=${soak_plan_rematerializer_rc} historical_review_rc=${historical_review_rc} materializer_rc=${materializer_rc} refresh_rc=${refresh_rc} review_rc=${review_rc} false_negative_candidate_packet_rc=${false_negative_candidate_packet_rc} false_negative_operator_review_rc=${false_negative_operator_review_rc} learning_ssot_decision_rc=${learning_ssot_decision_rc} autonomous_parameter_proposal_rc=${autonomous_parameter_proposal_rc} false_negative_bounded_preflight_rc=${false_negative_bounded_preflight_rc} sealed_horizon_learning_evidence_rc=${sealed_horizon_learning_evidence_rc} order_touchability_audit_rc=${order_touchability_audit_rc} bounded_probe_touchability_preflight_rc=${bounded_probe_touchability_preflight_rc} bounded_probe_placement_repair_plan_rc=${bounded_probe_placement_repair_plan_rc} bounded_probe_authority_patch_readiness_rc=${bounded_probe_authority_patch_readiness_rc} bounded_probe_operator_authorization_rc=${bounded_probe_operator_authorization_rc} false_negative_candidate_friction_scorecard_rc=${false_negative_candidate_friction_scorecard_rc} bounded_probe_shadow_placement_impact_rc=${bounded_probe_shadow_placement_impact_rc} bounded_probe_result_review_rc=${bounded_probe_result_review_rc} bounded_probe_execution_realism_review_rc=${bounded_probe_execution_realism_review_rc} ===" >> "$LOG"
+echo "[$(ts)] === Cost-gate learning lane refresh end scorecard_rc=${scorecard_rc} plan_rc=${plan_rc} soak_plan_rematerializer_rc=${soak_plan_rematerializer_rc} historical_review_rc=${historical_review_rc} materializer_rc=${materializer_rc} refresh_rc=${refresh_rc} review_rc=${review_rc} candidate_board_publish_rc=${candidate_board_publish_rc} false_negative_candidate_packet_rc=${false_negative_candidate_packet_rc} false_negative_operator_review_rc=${false_negative_operator_review_rc} learning_ssot_decision_rc=${learning_ssot_decision_rc} autonomous_parameter_proposal_rc=${autonomous_parameter_proposal_rc} false_negative_bounded_preflight_rc=${false_negative_bounded_preflight_rc} sealed_horizon_learning_evidence_rc=${sealed_horizon_learning_evidence_rc} order_touchability_audit_rc=${order_touchability_audit_rc} bounded_probe_touchability_preflight_rc=${bounded_probe_touchability_preflight_rc} bounded_probe_placement_repair_plan_rc=${bounded_probe_placement_repair_plan_rc} bounded_probe_authority_patch_readiness_rc=${bounded_probe_authority_patch_readiness_rc} bounded_probe_operator_authorization_rc=${bounded_probe_operator_authorization_rc} false_negative_candidate_friction_scorecard_rc=${false_negative_candidate_friction_scorecard_rc} bounded_probe_shadow_placement_impact_rc=${bounded_probe_shadow_placement_impact_rc} bounded_probe_result_review_rc=${bounded_probe_result_review_rc} bounded_probe_execution_realism_review_rc=${bounded_probe_execution_realism_review_rc} ===" >> "$LOG"
 
 # fail-soft: rc/status are recorded; alpha-discovery reads artifacts and ledger
 # state. Operator action is required for deploy, writer enablement, or probe authority.

@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
 import select
 import shlex
 import signal
-import stat
 import subprocess
 import threading
 import time
@@ -32,8 +32,17 @@ from ml_training.alr_freshness_runtime import (
 )
 from ml_training.alr_retention_repository import run_retention_pass
 from ml_training.alr_operational_repository import (
+    fetch_recent_candidate_projection_decisions,
     fetch_untrained_scanner_cycles,
+    persist_candidate_learning_projection,
     persist_statistical_run,
+)
+from ml_training.alr_candidate_evidence_adapter import (
+    load_candidate_evidence_snapshot,
+)
+from ml_training.alr_candidate_policy import (
+    CandidatePolicyError,
+    validate_candidate_policy_configuration,
 )
 from ml_training.alr_health_repository import (
     collect_health_snapshot,
@@ -46,7 +55,16 @@ from ml_training.alr_outcome_feedback_repository import (
 )
 from ml_training.alr_scanner_statistical_experiment import (
     AlrScannerStatisticalExperimentError,
+    build_candidate_aware_learning_projection,
     build_scanner_statistical_experiment,
+)
+from ml_training.alr_safe_file import (
+    AlrSafeFileError,
+    CHANGED,
+    MODE_INVALID,
+    NOT_REGULAR,
+    SIZE_INVALID,
+    read_bounded_regular_file,
 )
 
 
@@ -63,6 +81,9 @@ _LOCAL_DSN_REQUIRED = {
 _DSN_FORBIDDEN_KEYS = {"hostaddr", "service", "servicefile"}
 _SOURCE_HEAD_RE = re.compile(r"^[0-9a-f]{40}$")
 _RETENTION_GRACE_SECONDS = 900
+_CANDIDATE_EVIDENCE_MAX_AGE_SECONDS = 172_800
+_CANDIDATE_EVIDENCE_MAX_FILES = 128
+_CANDIDATE_EVIDENCE_MAX_BYTES = 64 * 1024 * 1024
 _ZERO_AUTHORITY_COUNTERS = {
     "exchange_contact_count": 0,
     "trading_action_count": 0,
@@ -185,6 +206,8 @@ def event_consumer_loop(
     wait_for_notifications: Any,
     session_id: str,
     source_head: str | None = None,
+    candidate_evidence_directory: Path | None = None,
+    candidate_policy: Mapping[str, Any] | None = None,
     notification_timeout_seconds: float = 5.0,
     history_interval_seconds: float = 60.0,
     monotonic_seconds: Any = time.monotonic,
@@ -214,6 +237,8 @@ def event_consumer_loop(
             source_head=source_head,
             max_batch=max_batch,
             session_id=session_id,
+            candidate_evidence_directory=candidate_evidence_directory,
+            candidate_policy=candidate_policy,
         )
     while not should_stop():
         notifications = wait_for_notifications(
@@ -262,6 +287,8 @@ def event_consumer_loop(
                     source_head=source_head,
                     max_batch=max_batch,
                     session_id=session_id,
+                    candidate_evidence_directory=candidate_evidence_directory,
+                    candidate_policy=candidate_policy,
                 )
             else:
                 _accumulate_health(
@@ -564,24 +591,163 @@ def run_operational_backlog(
     return result
 
 
+def run_candidate_aware_backlog(
+    connection: Any,
+    *,
+    source_head: str,
+    max_batch: int,
+    evidence_directory: Path | None = None,
+    candidate_policy: Mapping[str, Any] | None = None,
+    prior_decisions: Iterable[Mapping[str, Any]] | None = None,
+) -> dict[str, int]:
+    """Persist one candidate-aware decision node without a V152 training run."""
+    if not isinstance(source_head, str) or not _SOURCE_HEAD_RE.fullmatch(source_head):
+        raise AlrEventConsumerError("operational_source_head_invalid")
+    if (
+        isinstance(max_batch, bool)
+        or not isinstance(max_batch, int)
+        or not 1 <= max_batch <= 256
+    ):
+        raise AlrEventConsumerError("operational_batch_limit_invalid")
+    if max_batch < 3:
+        return _operational_result("INSUFFICIENT_SOURCE_CYCLES")
+    cycles = fetch_untrained_scanner_cycles(connection, limit=min(max_batch, 64))
+    if len(cycles) < 3:
+        return _operational_result("INSUFFICIENT_SOURCE_CYCLES")
+
+    evaluated_at = _candidate_evaluation_time(cycles)
+    evaluated_datetime = datetime.fromisoformat(
+        evaluated_at.replace("Z", "+00:00")
+    )
+    runtime_policy = dict(candidate_policy or {})
+    runtime_policy["decision_ts_s"] = int(evaluated_datetime.timestamp())
+    runtime_policy["as_of_utc_date"] = evaluated_datetime.date().isoformat()
+    if evidence_directory is None:
+        evidence_snapshot = _unconfigured_evidence_snapshot(evaluated_at)
+    else:
+        evidence_snapshot = load_candidate_evidence_snapshot(
+            evidence_directory,
+            evaluated_at=evaluated_at,
+            max_age_seconds=_CANDIDATE_EVIDENCE_MAX_AGE_SECONDS,
+            max_files=_CANDIDATE_EVIDENCE_MAX_FILES,
+            max_bytes=_CANDIDATE_EVIDENCE_MAX_BYTES,
+        )
+    history = (
+        list(prior_decisions)
+        if prior_decisions is not None
+        else fetch_recent_candidate_projection_decisions(connection, limit=64)
+    )
+    projection = build_candidate_aware_learning_projection(
+        source_head=source_head,
+        cycles=cycles,
+        evidence_snapshot=evidence_snapshot,
+        prior_decisions=history,
+        policy=runtime_policy,
+    )
+    persisted = persist_candidate_learning_projection(connection, projection)
+    status = persisted.get("status")
+    if status not in {"PERSISTED", "DUPLICATE"}:
+        raise AlrEventConsumerError("candidate_projection_persistence_status_invalid")
+    metric_fields = {
+        "artifact_rows_written",
+        "provenance_rows_written",
+        "payload_bytes_written",
+        "source_rows_consumed",
+        "training_run_rows_written",
+    }
+    if any(
+        isinstance(persisted.get(field), bool)
+        or not isinstance(persisted.get(field), int)
+        or persisted[field] < 0
+        for field in metric_fields
+    ):
+        raise AlrEventConsumerError("candidate_projection_write_metrics_invalid")
+    if (
+        persisted["training_run_rows_written"] != 0
+        or persisted.get("model_training_performed") is not False
+    ):
+        raise AlrEventConsumerError("candidate_projection_training_claim_invalid")
+
+    result = _operational_result(status)
+    result["decision_write_attempts"] = 1
+    result["decision_duplicate_retries"] = int(status == "DUPLICATE")
+    result["operational_artifact_rows_written"] = persisted[
+        "artifact_rows_written"
+    ]
+    result["operational_provenance_rows_written"] = persisted[
+        "provenance_rows_written"
+    ]
+    result["operational_run_rows_written"] = 0
+    result["operational_feedback_rows_written"] = 0
+    result["operational_defer_artifact_rows_written"] = 0
+    result["operational_payload_bytes_written"] = persisted[
+        "payload_bytes_written"
+    ]
+    result["operational_source_rows_consumed"] = persisted[
+        "source_rows_consumed"
+    ]
+    return result
+
+
 def read_local_dsn_file(dsn_path: Path) -> str:
     """Read a private local-PG DSN without falling back to ambient credentials."""
     try:
-        metadata = dsn_path.lstat()
-    except OSError as exc:
-        raise AlrEventConsumerError("dsn_file_unavailable") from exc
-    if not stat.S_ISREG(metadata.st_mode):
-        raise AlrEventConsumerError("dsn_file_not_regular")
-    if metadata.st_mode & 0o077:
-        raise AlrEventConsumerError("dsn_file_permissions_invalid")
-    try:
-        dsn = dsn_path.read_text(encoding="utf-8").strip()
-    except OSError as exc:
+        raw = read_bounded_regular_file(
+            dsn_path,
+            max_bytes=16_384,
+            require_nonempty=True,
+            require_private_mode=True,
+        )
+        dsn = raw.decode("utf-8").strip()
+    except AlrSafeFileError as exc:
+        reason = {
+            NOT_REGULAR: "dsn_file_not_regular",
+            MODE_INVALID: "dsn_file_permissions_invalid",
+            SIZE_INVALID: "dsn_file_blank",
+            CHANGED: "dsn_file_changed_during_read",
+        }.get(exc.code, "dsn_file_unavailable")
+        raise AlrEventConsumerError(reason) from exc
+    except UnicodeError as exc:
         raise AlrEventConsumerError("dsn_file_unreadable") from exc
     if not dsn:
         raise AlrEventConsumerError("dsn_file_blank")
     _validate_local_dsn(dsn)
     return dsn
+
+
+def read_candidate_policy_file(policy_path: Path) -> dict[str, Any]:
+    """Read an explicit private candidate policy without permissive fallbacks."""
+    try:
+        raw = read_bounded_regular_file(
+            policy_path,
+            max_bytes=65_536,
+            require_nonempty=True,
+            require_private_mode=True,
+        ).decode("utf-8")
+    except AlrSafeFileError as exc:
+        reason = {
+            NOT_REGULAR: "candidate_policy_not_regular",
+            MODE_INVALID: "candidate_policy_mode_invalid",
+            SIZE_INVALID: "candidate_policy_size_invalid",
+            CHANGED: "candidate_policy_changed_during_read",
+        }.get(exc.code, "candidate_policy_unavailable")
+        raise AlrEventConsumerError(reason) from exc
+    except UnicodeError as exc:
+        raise AlrEventConsumerError("candidate_policy_unavailable") from exc
+
+    def reject_constant(value: str) -> None:
+        raise ValueError(f"non_finite:{value}")
+
+    try:
+        payload = json.loads(raw, parse_constant=reject_constant)
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise AlrEventConsumerError("candidate_policy_json_invalid") from exc
+    if not isinstance(payload, dict):
+        raise AlrEventConsumerError("candidate_policy_json_invalid")
+    try:
+        return validate_candidate_policy_configuration(payload)
+    except CandidatePolicyError as exc:
+        raise AlrEventConsumerError("candidate_policy_semantics_invalid") from exc
 
 
 def wait_for_pg_notifications(
@@ -624,6 +790,8 @@ def run_event_consumer(
     max_batch: int,
     source_head: str,
     repo_root: Path | None = None,
+    candidate_evidence_directory: Path | None = None,
+    candidate_policy: Mapping[str, Any] | None = None,
 ) -> dict[str, int]:
     """驗證 checkout pin 後執行 shadow consumer，並持久化真實 lifecycle。"""
     verify_runtime_source_head(source_head, repo_root=repo_root)
@@ -651,6 +819,8 @@ def run_event_consumer(
                     wait_for_notifications=wait_for_pg_notifications,
                     session_id=session_id,
                     source_head=source_head,
+                    candidate_evidence_directory=candidate_evidence_directory,
+                    candidate_policy=candidate_policy,
                 )
                 stop_consumer_session(connection, session_id=session_id)
                 session_started = False
@@ -764,18 +934,55 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--lock-file", required=True, type=Path)
     parser.add_argument("--max-batch", type=int, default=32)
     parser.add_argument("--source-head", default=os.environ.get("ALR_SOURCE_HEAD"))
+    parser.add_argument(
+        "--candidate-evidence-dir",
+        type=Path,
+        default=os.environ.get("ALR_CANDIDATE_EVIDENCE_DIR"),
+    )
+    parser.add_argument(
+        "--candidate-policy-file",
+        type=Path,
+        default=os.environ.get("ALR_CANDIDATE_POLICY_FILE"),
+    )
     arguments = parser.parse_args(argv)
+    candidate_policy: Mapping[str, Any] | None = None
+    candidate_policy_status: dict[str, Any] = {
+        "status": "NOT_CONFIGURED_FAIL_CLOSED",
+        "policy_config_hash": None,
+        "reason": "candidate_policy_not_configured",
+    }
+    if arguments.candidate_policy_file is not None:
+        try:
+            candidate_policy = read_candidate_policy_file(
+                arguments.candidate_policy_file
+            )
+            candidate_policy_status = {
+                "status": "READY",
+                "policy_config_hash": candidate_policy["policy_config_hash"],
+                "reason": None,
+            }
+        except AlrEventConsumerError as exc:
+            # 初次 apply 必須先過外部 provision preflight；運行後 policy 漂移則
+            # listener 繼續 ingest，並讓 candidate projection durable 地記 REPAIR_DATA。
+            candidate_policy_status = {
+                "status": "UNAVAILABLE_FAIL_CLOSED",
+                "policy_config_hash": None,
+                "reason": str(exc),
+            }
     result = run_event_consumer(
         dsn_path=arguments.dsn_file,
         lock_path=arguments.lock_file,
         max_batch=arguments.max_batch,
         source_head=arguments.source_head,
+        candidate_evidence_directory=arguments.candidate_evidence_dir,
+        candidate_policy=candidate_policy,
     )
     print(
         json.dumps(
             {
                 "schema_version": "alr_event_consumer_result_v1",
                 "result": result,
+                "candidate_policy": candidate_policy_status,
                 "authority": {
                     "exchange_authority": False,
                     "trading_authority": False,
@@ -802,6 +1009,8 @@ def _process_operational_cycle(
     source_head: str,
     max_batch: int,
     session_id: str,
+    candidate_evidence_directory: Path | None = None,
+    candidate_policy: Mapping[str, Any] | None = None,
 ) -> None:
     """Fresh/history drain 後依既有順序執行 bounded research-only 工作。"""
     _accumulate_feedback(
@@ -810,10 +1019,12 @@ def _process_operational_cycle(
     )
     _accumulate_operational(
         totals,
-        run_operational_backlog(
+        run_candidate_aware_backlog(
             connection,
             source_head=source_head,
             max_batch=max_batch,
+            evidence_directory=candidate_evidence_directory,
+            candidate_policy=candidate_policy,
         ),
     )
     _accumulate_retention(
@@ -883,6 +1094,47 @@ def _operational_result(status: str) -> dict[str, int]:
         "operational_payload_bytes_written": 0,
         "operational_source_rows_consumed": 0,
     }
+
+
+def _candidate_evaluation_time(cycles: list[dict[str, Any]]) -> str:
+    """Bind each decision clock to the newest immutable source cycle."""
+    source_ts = cycles[-1].get("source_ts")
+    if isinstance(source_ts, datetime):
+        if source_ts.tzinfo is None:
+            raise AlrEventConsumerError("candidate_source_time_invalid")
+        return source_ts.astimezone(timezone.utc).isoformat().replace(
+            "+00:00", "Z"
+        )
+    if not isinstance(source_ts, str) or not source_ts.endswith("Z"):
+        raise AlrEventConsumerError("candidate_source_time_invalid")
+    try:
+        parsed = datetime.fromisoformat(source_ts.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise AlrEventConsumerError("candidate_source_time_invalid") from exc
+    if parsed.tzinfo is None:
+        raise AlrEventConsumerError("candidate_source_time_invalid")
+    return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _unconfigured_evidence_snapshot(evaluated_at: str) -> dict[str, Any]:
+    snapshot: dict[str, Any] = {
+        "schema_version": "alr_candidate_evidence_snapshot_v1",
+        "source_status": "EVIDENCE_DIRECTORY_NOT_CONFIGURED",
+        "evaluated_at": evaluated_at,
+        "candidate_universe_complete": False,
+        "candidate_rows": [],
+        "selection_allowed": False,
+        "latest_alias_used": False,
+    }
+    encoded = json.dumps(
+        snapshot,
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    snapshot["snapshot_hash"] = hashlib.sha256(encoded).hexdigest()
+    return snapshot
 
 
 def _accumulate_operational(totals: dict[str, int], result: Mapping[str, int]) -> None:

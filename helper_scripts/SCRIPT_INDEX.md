@@ -3,6 +3,27 @@
 本目錄存放 OpenClaw 系統的維護、啟動、CI 輔助腳本。
 最後更新：2026-07-10。每批詳情見下方對應 `## YYYY-MM-DD` 區塊（per-batch SSOT）；最新數批摘要見「最新補充」段。
 
+最新補充（2026-07-10 development-agent governance）：新增
+`maintenance_scripts/agent_governance.py`，以標準庫讀
+`.codex/agent_registry_v1.json`，提供 role registry lint、Claude/Codex/profile
+generated view、hybrid risk-DAG、lossless elastic context plan、typed authority
+conflict、`closure_packet_v1` 驗證、content-addressed test evidence key/reuse 與
+read-only Bash allowlist。這是開發 sub-agent 治理工具，不是 trading runtime
+Agent；不連 broker/PG、不讀 secret、不 deploy/restart、不授權 order/live。正本設計
+見 `docs/agents/development-agent-governance.md` / ADR-0050；回歸測試見
+`tests/structure/test_development_agent_governance.py`。
+
+最新補充（2026-07-10 ALR candidate rendezvous）：新增
+`research/cost_gate_learning_lane/candidate_board_publisher.py`，把完整 v5
+`blocked_outcome_review_<UTC stamp>.json` 以 no-replace atomic hard-link 發布至
+ALR consumer 專用 private 目錄。Publisher 拒絕 `_latest`/partial/symlink、同名
+內容碰撞、schema/board hash/row shape 漂移；retention 同時鎖定最多 128 files
+與 64 MiB，並以 file fsync → link → directory fsync → prune → directory fsync
+順序保留 last-known-good evidence。`cron/cost_gate_learning_lane_cron.sh` 在同輪
+outcome review 後呼叫它，status JSONL 記 rc/status/skip/path/source+destination
+SHA256。Boundary：source-only；未安裝 cron/service、未 provision policy、未碰
+Linux/PG/Bybit/network、無 training/order/Cost Gate/live/promotion authority。
+
 最新補充（2026-07-10 WP-A.4 反事實重跑管線）：新增
 `research/cost_gate_learning_lane/counterfactual_rerun.py`（one-shot research
 driver）：按 QC 預註冊 `docs/research/2026-07-10--counterfactual_rerun_

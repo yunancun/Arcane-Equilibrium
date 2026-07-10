@@ -10,6 +10,14 @@ WorkingDirectory=%h/BybitOpenClaw/srv
 Environment=PYTHONPATH=%h/BybitOpenClaw/srv/program_code
 # The gated installer replaces this with the immutable deployed source commit.
 Environment=ALR_SOURCE_HEAD=__ALR_SOURCE_HEAD__
+# WP2 candidate evidence 使用 durable 明示 rendezvous；PrivateTmp 不得成為隱式接點。
+# gated apply 必須先在 unit 外執行以下兩階段；四項 budget 不可使用 production default：
+# PYTHONPATH=$HOME/BybitOpenClaw/srv/program_code /usr/bin/python3 -m ml_training.alr_candidate_policy --template $HOME/BybitOpenClaw/srv/helper_scripts/deploy/openclaw-alr-candidate-policy.template.json --destination $HOME/.config/openclaw/alr-candidate-arbiter-policy.json --row-budget __ROW_BUDGET__ --byte-budget __BYTE_BUDGET__ --collection-window-days __COLLECTION_WINDOW_DAYS__ --max-new-entries-per-window __MAX_NEW_ENTRIES_PER_WINDOW__ [--apply]
+# PYTHONPATH=$HOME/BybitOpenClaw/srv/program_code /usr/bin/python3 -m ml_training.alr_candidate_policy --check-provisioned $HOME/.config/openclaw/alr-candidate-arbiter-policy.json
+# 為何不放 ExecStartPre：首次 apply 由上述 gate 擋住；其後 runtime drift 必須讓
+# listener 持續 ingest 並 durable 記 NO_QUALIFIED_CANDIDATE_REPAIR_DATA，不能 restart-loop。
+Environment=ALR_CANDIDATE_EVIDENCE_DIR=%h/.local/share/openclaw/alr-candidate-evidence
+Environment=ALR_CANDIDATE_POLICY_FILE=%h/.config/openclaw/alr-candidate-arbiter-policy.json
 ExecStart=/usr/bin/python3 -m ml_training.alr_event_consumer --dsn-file %h/.config/openclaw/alr-shadow.dsn --lock-file %t/alr-shadow/consumer.lock --max-batch 32
 Restart=on-failure
 RestartSec=5

@@ -2,15 +2,21 @@ from __future__ import annotations
 
 import ast
 import copy
+import hashlib
+import json
 from pathlib import Path
 
 import pytest
 
 from ml_training.alr_scanner_statistical_experiment import (
     AlrScannerStatisticalExperimentError,
+    build_candidate_aware_learning_projection,
     build_scanner_statistical_experiment,
     compute_scanner_statistical_experiment_hash,
     validate_scanner_statistical_experiment,
+)
+from ml_training.alr_operational_repository import (
+    build_candidate_learning_projection_plan,
 )
 
 
@@ -45,6 +51,183 @@ def _cycles() -> list[dict[str, object]]:
         _cycle(3, symbols=["ALPHAUSDT", "BETAUSDT", "GAMMAUSDT"], added=[]),
         _cycle(4, symbols=["ALPHAUSDT", "BETAUSDT", "GAMMAUSDT"], added=[]),
     ]
+
+
+def _candidate_policy() -> dict[str, object]:
+    body: dict[str, object] = {
+        "decision_ts_s": 1_783_684_800,
+        "as_of_utc_date": "2026-07-10",
+        "algorithm_version": "candidate_learning_arbiter_v1",
+        "tie_break_version": "candidate_learning_tie_break_v1",
+        "q18_scale": 18,
+        "thresholds": {
+            "e1_n_eff_min": 30,
+            "e2_utc_days_min": 5,
+            "e3_top_day_share_max": "0.5",
+            "e4_censored_share_max": "0.3",
+        },
+        "row_budget": 10_000,
+        "byte_budget": 1_000_000,
+        "collection_window_days": 7,
+        "max_new_entries_per_window": 70,
+        "cooldown_seconds": 1_800,
+        "unknown_portfolio_penalty": "1",
+    }
+    stable_config = {
+        key: value
+        for key, value in body.items()
+        if key not in {"decision_ts_s", "as_of_utc_date"}
+    }
+    body["policy_config_hash"] = hashlib.sha256(
+        json.dumps(
+            stable_config,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode("utf-8")
+    ).hexdigest()
+    return body
+
+
+def _candidate_row(*, n_eff: int = 30) -> dict[str, object]:
+    daily_buckets = [
+        {
+            "utc_date": f"2026-07-{day:02d}",
+            "scan_complete": True,
+            "distinct_entries": 5,
+        }
+        for day in range(3, 10)
+    ]
+    resource_payload: dict[str, object] = {
+        "daily_buckets": daily_buckets,
+        "estimated_rows_scanned": 700,
+        "predicted_canonical_bytes": 7_000,
+        "zero_resource_attested": False,
+    }
+    resource = {
+        **resource_payload,
+        "resource_estimator_hash": hashlib.sha256(
+            json.dumps(
+                resource_payload,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=True,
+            ).encode("utf-8")
+        ).hexdigest(),
+    }
+    regime_entry_counts = {
+        f"{trend}|{volatility}|{liquidity}": 0
+        for trend in ("bear", "neutral", "bull")
+        for volatility in ("low_vol", "mid_vol", "high_vol")
+        for liquidity in ("liquid", "thin")
+    }
+    regime_entry_counts["unknown"] = 0
+    regime_entry_counts["bull|high_vol|liquid"] = n_eff
+    return {
+        "identity": {
+            "strategy_name": "grid_trading",
+            "strategy_version": "v7",
+            "config_hash": "1" * 64,
+            "symbol": "ALPHAUSDT",
+            "side": "Buy",
+            "horizon_minutes": 60,
+            "target_regime": {
+                "label": "bull|high_vol|liquid",
+                "utc_date": "2026-07-09",
+                "hash": "2" * 64,
+                "point_in_time": "D-1",
+            },
+            "engine_mode": "shadow",
+            "evidence_engine_mode": "demo",
+            "venue": "bybit",
+            "product": "linear_perpetual",
+        },
+        "context_hashes": {
+            "data": "3" * 64,
+            "evidence": "4" * 64,
+            "cost": "5" * 64,
+            "portfolio": "6" * 64,
+        },
+        "quality": {
+            "hash_ok": True,
+            "integrity_ok": True,
+            "freshness_ok": True,
+            "censored_share": "0.1",
+            "cost_recomputable_share": "1",
+            "unknown_regime_share": "0",
+            "replica_inconsistency_count": 0,
+            "cluster_variance_clean": True,
+            "hidden_oos_consumed": False,
+            "top_day_share": "0.4",
+        },
+        "evidence": {
+            "n_eff": n_eff,
+            "utc_day_count": 5,
+            "mean_net_e": "-10",
+            "cluster_se": "2",
+            "proof_stage": 1,
+            "completed_proof_stages": [0, 1],
+            "next_gap": {
+                "kind": "NONE" if n_eff >= 30 else "LOCAL_PASSIVE",
+                "code": "DISTINCT_ENTRY_METRICS",
+            },
+            "regime_entry_counts": regime_entry_counts,
+        },
+        "resource": resource,
+        "portfolio": {
+            "sector_exposure_share": "0.1",
+            "strategy_active_target_share": "0.2",
+            "beta_to_portfolio": "0.3",
+        },
+    }
+
+
+def _board_row(candidate: dict[str, object] | None = None) -> dict[str, object]:
+    typed = candidate or _candidate_row()
+    return {
+        "candidate_id": hashlib.sha256(
+            json.dumps(
+                typed,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=True,
+            ).encode("utf-8")
+        ).hexdigest(),
+        "arbiter_input": {
+            "schema_version": "alr_candidate_arbiter_input_v1",
+            **typed,
+        },
+        "arbiter_input_complete": True,
+        "selection_eligible": True,
+    }
+
+
+def _evidence_snapshot(
+    *,
+    rows: list[dict[str, object]] | None = None,
+    status: str = "READY",
+) -> dict[str, object]:
+    ready = status == "READY"
+    snapshot = {
+        "schema_version": "alr_candidate_evidence_snapshot_v1",
+        "source_status": status,
+        "evaluated_at": "2026-07-10T12:00:00Z",
+        "source_content_sha256": "7" * 64 if ready else None,
+        "board_hash": "8" * 64 if ready else None,
+        "candidate_universe_complete": ready,
+        "candidate_rows": rows if rows is not None else ([_board_row()] if ready else []),
+        "selection_allowed": ready,
+        "latest_alias_used": False,
+    }
+    snapshot["snapshot_hash"] = hashlib.sha256(
+        json.dumps(
+            snapshot,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode("utf-8")
+    ).hexdigest()
+    return snapshot
 
 
 def test_builds_pit_research_experiment_and_deferred_challenger() -> None:
@@ -217,3 +400,226 @@ def test_source_is_pure_and_has_no_runtime_or_training_imports() -> None:
             assert node.module not in forbidden_imports
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
             assert node.func.id not in forbidden_calls
+
+
+def test_candidate_aware_bridge_selects_complete_identity_without_fake_run() -> None:
+    projection = build_candidate_aware_learning_projection(
+        source_head="a" * 40,
+        cycles=_cycles(),
+        evidence_snapshot=_evidence_snapshot(),
+        prior_decisions=[],
+        policy=_candidate_policy(),
+    )
+
+    plan = build_candidate_learning_projection_plan(projection)
+    assert plan["decision_code"] == "QUALIFIED_CANDIDATE_SELECTED"
+    assert plan["artifact"]["artifact_kind"] == "learning_target"
+    assert projection["decision"]["selected_candidate"] is not None
+    assert projection["decision"]["selected_collection_target"] is None
+    assert "run" not in projection
+    assert "pit_dataset_manifest" not in projection
+    assert "statistical_experiment" not in projection
+    assert projection["artifact"]["canonical_payload"]["training_run_created"] is False
+    assert all(value is False for value in projection["no_authority"].values())
+    assert all(value == 0 for value in projection["authority_counters"].values())
+
+
+def test_candidate_board_bridge_consumes_only_typed_arbiter_input() -> None:
+    typed = _candidate_row()
+    board_row = {
+        "candidate_id": "f" * 64,
+        "candidate_identity": {
+            "strategy_name": "must_not_be_used",
+            "symbol": "WRONGUSDT",
+        },
+        "arbiter_input": {
+            "schema_version": "alr_candidate_arbiter_input_v1",
+            **typed,
+        },
+        "arbiter_input_complete": True,
+        "selection_eligible": True,
+    }
+
+    projection = build_candidate_aware_learning_projection(
+        source_head="a" * 40,
+        cycles=_cycles(),
+        evidence_snapshot=_evidence_snapshot(rows=[board_row]),
+        prior_decisions=[],
+        policy=_candidate_policy(),
+    )
+
+    assert projection["decision"]["decision_code"] == "QUALIFIED_CANDIDATE_SELECTED"
+    assert projection["decision"]["selected_candidate"]["identity"]["symbol"] == "ALPHAUSDT"
+    assert all(
+        item["identity"]["symbol"] != "WRONGUSDT"
+        for item in projection["decision"]["evaluated_candidates"]
+    )
+
+
+def test_declared_incomplete_typed_input_cannot_be_laundered_by_flat_fields() -> None:
+    typed = _candidate_row()
+    board_row = {
+        **typed,
+        "candidate_id": "e" * 64,
+        "candidate_identity": {
+            "strategy_name": "grid_trading",
+            "strategy_version": "v7",
+            "strategy_config_hash": "1" * 64,
+            "symbol": "ALPHAUSDT",
+            "side": "Buy",
+            "horizon_minutes": 60,
+            "target_regime_context": typed["identity"]["target_regime"],
+            "engine_mode": "shadow",
+            "venue": "bybit",
+            "product": "linear_perpetual",
+        },
+        "arbiter_input": {
+            "schema_version": "alr_candidate_arbiter_input_v1",
+            **typed,
+        },
+        "arbiter_input_complete": False,
+        "selection_eligible": False,
+    }
+
+    projection = build_candidate_aware_learning_projection(
+        source_head="a" * 40,
+        cycles=_cycles(),
+        evidence_snapshot=_evidence_snapshot(rows=[board_row]),
+        prior_decisions=[],
+        policy=_candidate_policy(),
+    )
+
+    assert projection["decision"]["selected_candidate"] is None
+    assert projection["decision"]["eligible_candidate_count"] == 0
+    assert (
+        projection["decision"]["decision_code"]
+        == "NO_QUALIFIED_CANDIDATE_REPAIR_DATA"
+    )
+
+
+def test_omitted_typed_seam_cannot_fall_back_to_complete_flat_fields() -> None:
+    flat = {
+        **_candidate_row(),
+        "arbiter_input_complete": False,
+        "selection_eligible": False,
+    }
+
+    projection = build_candidate_aware_learning_projection(
+        source_head="a" * 40,
+        cycles=_cycles(),
+        evidence_snapshot=_evidence_snapshot(rows=[flat]),
+        prior_decisions=[],
+        policy=_candidate_policy(),
+    )
+
+    assert projection["decision"]["selected_candidate"] is None
+    assert projection["decision"]["eligible_candidate_count"] == 0
+    assert (
+        projection["decision"]["decision_code"]
+        == "NO_QUALIFIED_CANDIDATE_REPAIR_DATA"
+    )
+
+
+def test_scanner_novelty_alone_emits_durable_rotation_not_fake_candidate() -> None:
+    projection = build_candidate_aware_learning_projection(
+        source_head="b" * 40,
+        cycles=_cycles(),
+        evidence_snapshot=_evidence_snapshot(rows=[]),
+        prior_decisions=[],
+        policy=_candidate_policy(),
+    )
+
+    plan = build_candidate_learning_projection_plan(projection)
+    assert plan["decision_code"] == "NO_QUALIFIED_CANDIDATE_ROTATE_RESEARCH_DIRECTION"
+    assert plan["artifact"]["artifact_kind"] == "target_rotation"
+    assert projection["decision"]["candidate_count"] == 0
+    assert projection["decision"]["selected_candidate"] is None
+    assert projection["decision"]["selected_collection_target"] is None
+
+
+def test_insufficient_evidence_rotates_passive_collection_without_order() -> None:
+    projection = build_candidate_aware_learning_projection(
+        source_head="c" * 40,
+        cycles=_cycles(),
+        evidence_snapshot=_evidence_snapshot(rows=[_board_row(_candidate_row(n_eff=29))]),
+        prior_decisions=[],
+        policy=_candidate_policy(),
+    )
+
+    assert (
+        projection["decision"]["decision_code"]
+        == "NO_QUALIFIED_CANDIDATE_COLLECT_DISTINCT_ENTRIES"
+    )
+    assert projection["decision"]["selected_candidate"] is None
+    target = projection["decision"]["selected_collection_target"]
+    assert target["state"] == "COLLECT_DISTINCT_ENTRIES"
+    assert projection["artifact"]["canonical_payload"]["order_or_probe_created"] is False
+
+
+def test_missing_evidence_is_a_hash_bound_no_candidate_artifact() -> None:
+    projection = build_candidate_aware_learning_projection(
+        source_head="d" * 40,
+        cycles=_cycles(),
+        evidence_snapshot=_evidence_snapshot(status="DIRECTORY_MISSING"),
+        prior_decisions=[],
+        policy=_candidate_policy(),
+    )
+
+    plan = build_candidate_learning_projection_plan(projection)
+    refs = plan["artifact"]["canonical_payload"]["source_refs"]
+    assert plan["decision_code"] == "NO_QUALIFIED_CANDIDATE_REPAIR_DATA"
+    assert refs["evidence_source_status"] == "DIRECTORY_MISSING"
+    assert refs["evidence_snapshot_hash"] == _evidence_snapshot(
+        status="DIRECTORY_MISSING"
+    )["snapshot_hash"]
+    assert refs["evidence_content_sha256"] is None
+    assert refs["evidence_board_hash"] is None
+
+
+def test_missing_candidate_policy_is_durable_repair_not_generic_rotation() -> None:
+    projection = build_candidate_aware_learning_projection(
+        source_head="d" * 40,
+        cycles=_cycles(),
+        evidence_snapshot=_evidence_snapshot(rows=[]),
+        prior_decisions=[],
+        policy={},
+    )
+
+    assert (
+        projection["decision"]["decision_code"]
+        == "NO_QUALIFIED_CANDIDATE_REPAIR_DATA"
+    )
+    assert projection["decision"]["policy_hash"] is None
+    assert projection["decision"]["selected_candidate"] is None
+    assert projection["decision"]["selected_collection_target"] is None
+
+
+def test_candidate_ranking_is_deterministic_while_immutable_source_hash_stays_bound() -> None:
+    second = copy.deepcopy(_candidate_row())
+    second["identity"]["symbol"] = "BETAUSDT"
+    second["identity"]["config_hash"] = "f" * 64
+    forward = build_candidate_aware_learning_projection(
+        source_head="e" * 40,
+        cycles=_cycles(),
+        evidence_snapshot=_evidence_snapshot(rows=[_board_row(), _board_row(second)]),
+        prior_decisions=[],
+        policy=_candidate_policy(),
+    )
+    reverse = build_candidate_aware_learning_projection(
+        source_head="e" * 40,
+        cycles=list(reversed(_cycles())),
+        evidence_snapshot=_evidence_snapshot(rows=[_board_row(second), _board_row()]),
+        prior_decisions=[],
+        policy=_candidate_policy(),
+    )
+
+    assert forward["source_set"]["source_set_hash"] == reverse["source_set"][
+        "source_set_hash"
+    ]
+    assert forward["decision"]["selected_candidate"] == reverse["decision"][
+        "selected_candidate"
+    ]
+    assert forward["decision"]["evaluated_candidates"] == reverse["decision"][
+        "evaluated_candidates"
+    ]
+    assert forward["projection_hash"] != reverse["projection_hash"]
