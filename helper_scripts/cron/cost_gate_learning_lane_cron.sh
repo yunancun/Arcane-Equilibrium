@@ -569,6 +569,10 @@ REVIEW_ARGS=(
     --min-outcomes-per-side-cell "$REVIEW_MIN_OUTCOMES"
     --min-avg-net-bps "$REVIEW_MIN_AVG_NET_BPS"
     --min-net-positive-pct "$REVIEW_MIN_NET_POSITIVE_PCT"
+    # 成本雙軌主判(WP-A.2;R3 修復包 §六-6 活化):實測 E[cost] artifact 路徑。
+    # 檔缺失/過期/缺 mean_abs 時 outcome_review 自行 fail-closed 回退
+    # conservative_v1 主判,cron 不需前置判斷。
+    --slippage-artifact "${OPENCLAW_COST_GATE_SLIPPAGE_QUANTILES_JSON:-$LANE_DIR/slippage_quantiles_latest.json}"
     --output "$REVIEW_OUT"
 )
 
