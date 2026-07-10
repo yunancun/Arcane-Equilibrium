@@ -1,7 +1,7 @@
 # Governance Specification Register / 治理規範註冊表
 
 **Project:** 玄衡 · Arcane Equilibrium
-**Last Updated:** 2026-07-10 (AMD-2026-07-10-01 Gate-B auto-capture next-5-listings authorization; prior ADR-0049 + AMD-2026-07-09-02 ALR operational shadow authorization)
+**Last Updated:** 2026-07-10 (AMD-2026-07-10-03 Global Qualified Autonomous Learning Shadow V1; AMD-2026-07-10-02 terminal clause superseded only)
 **Maintained By:** R4 (Document Auditor) · TW catch-up（2026-04-29）· FA Sign-off path A（2026-05-02 AMD-2026-05-02-01）
 
 ---
@@ -45,6 +45,8 @@
 
 | AMD-2026-07-09-02 | ADR-0017 · ADR-0035 · ADR-0049 · TODO ALR P2 queue | `docs/governance_dev/amendments/2026-07-09--AMD-2026-07-09-02-alr-operational-shadow.md` | 2026-07-09 | **Active** — authorizes the local scanner-driven ALR P2 operational shadow only. Scanner stays evidence-only; ALR persistence is append-only `learning.alr_*`; no Bybit/official-MCP/order/Decision-Lease/Cost-Gate/serving/promotion authority. A fresh `PM -> E3 -> BB -> PM` gate remains mandatory before migration apply, service start, sustained Linux service consumption, or retention sweep. |
 | AMD-2026-07-10-01 | ADR-0047 · AMD-2026-05-31-01 · DOC-06 + AMD-2026-07-04-01（cron 活化 RM-1..2）| `docs/governance_dev/amendments/2026-07-10--AMD-2026-07-10-01-gate-b-auto-capture-next-5-listings.md` | 2026-07-10 | **Active** — Operator 授權（2026-07-10 經 R3 修復包主 session 轉達）「未來 5 個新上市自動觸發 Gate-B capture」。`gate_b_watch` 偵測 fresh 新上市（`prelaunch_active` / `announcement_pre_market_listing` 且 symbol 在標題內）→ 自動啟動 R-0 隔離 `aeg_gate_b_probe.py` 24h capture；cap=5 個新上市 symbol（`AUTO_CAPTURE_CAP=5` 測試釘死），計數器持久化 `gate_b_watch_state.json`，cap 滿自動停 + `cap_reached` audit 行（`gate_b_auto_capture_audit.jsonl`）。R-0 zero-leak 邊界原樣：capture 產物只落 `aeg_gate_b_runs`，不進交易路徑；零 order / 零 DB write / Cost Gate 零接觸。預設 OFF，`OPENCLAW_GATE_B_AUTO_CAPTURE=1` 才啟用；spawn 失敗不消耗名額。續期 / 調升 cap 需新 AMD。|
+| AMD-2026-07-10-02 | ADR-0017 · ADR-0035 · ADR-0049 · ALR P2 queue v2 | `docs/governance_dev/amendments/2026-07-10--AMD-2026-07-10-02-alr-freshness-learning-completion-v3.md` | 2026-07-10 | **Accepted; terminal clause superseded only by AMD-2026-07-10-03** — fresh identity/cursors, truthful health, adversarial soak, qualified-learning, retention, and hard boundaries remain active. Its `WAIT_OPERATOR_DEMO_AUTH_EXACT` / SUI binding is historical and non-consumable. |
+| AMD-2026-07-10-03 | ADR-0017 · ADR-0035 · ADR-0049 · GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1 | `docs/governance_dev/amendments/2026-07-10--AMD-2026-07-10-03-global-qualified-autonomous-learning-shadow-v1.md` | 2026-07-10 | **Active** — replaces only the old terminal/SUI-consumption truth with G1-G9 qualified autonomous learning shadow completion. SUI packet `1ab349...abde` is rotated; NEAR is frozen at `n_eff=1`; Goal continues through WP0-WP7. No exchange/order/lease/risk/Cost-Gate/live/serving/promotion/`_latest` authority. |
 
 ---
 

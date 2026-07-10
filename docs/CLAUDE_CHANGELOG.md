@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-07-10（TODO v781 L2 E2E-1 真 model call 達成收口）
+> 最後更新：2026-07-10（TODO v782 Global Qualified Autonomous Learning Shadow V1 WP0）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**TODO v782 Global Qualified Autonomous Learning Shadow V1 WP0（2026-07-10）**：Operator 啟動持續 Goal `GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1`，AMD-2026-07-10-03 只取代 AMD-02 / P2 queue v2 的舊 terminal 與 SUI packet binding，保留 fresh-lane、truthful health、adversarial、qualified-learning、retention 與全部 hard boundaries。Read-only WP0 baseline 綁定 Mac/origin/Linux `1a3ecdd579...`，running ALR pin `8dfa1200a...`（下次 restart 在 reviewed repin 前會 fail closed）：raw/ALR/history `80,495/5,261/75,234`，362 runs + 362 feedback 全 DEFER，proof/reward/training/hidden-OOS `0/0/0/0`，artifact `20,825` / `493.99 MB`，health 約每 `4.9s` 寫一筆。舊 SUI packet `1ab349...abde` 已轉 `ROTATED_UNCONSUMABLE_STALE_PACKET`、不再請求 Operator decision；NEAR 維持 `FROZEN_INVALIDATED_EFFECTIVE_SAMPLE` (`n_eff=1`)。新 durable stub 建立 WP0-WP7 queue、G1-G9 gap/baseline/loop/effect/manifest；root TODO 匯入唯一 active Goal。WP1 先處理 semantic-no-delta health 與 repeated-DEFER churn。Boundary：無 migration/PG write/service restart/runtime mutation/Bybit/order/lease/Cost Gate/live/serving/promotion/`_latest` action。
 
 **TODO v781 L2 E2E-1 真 model call 達成收口（2026-07-10）**：`P1-L2-ADVISORY-MESH-E2E-1` 由 `BLOCKED_CLOUD_SDK_MISSING` 轉 `DONE_WITH_CONCERNS_FENCE_SINK_FOLLOWUP`。operator 批准解鎖路徑 A（control API venv 裝 anthropic SDK）後 one-shot rerun 首次達成真 model call：`agent.l2_calls` row `l2r:724ac38bc4fc`（anthropic:sonnet、cost $0.0149、latency 17,801ms、raw_response 3,401 字元實質診斷）；復原比前次更強（registry TOML sha `a48b0a85...` byte-identical、12/12 per-worker in-memory probe `enabled=[]`、tree 乾淨、零服務重啟），L2 維持全 disabled。遺留 fence-parsing sink gap（executor 不剝 markdown fence → `agent.lessons` sink 未寫、stage 誤標）轉 follow-up 票，須走完整 PA->E1->E2->E4 鏈。證據：`docs/CCAgentWorkSpace/E1/workspace/reports/2026-07-10--l2_e2e1_oneshot_rerun_success.md`。
 

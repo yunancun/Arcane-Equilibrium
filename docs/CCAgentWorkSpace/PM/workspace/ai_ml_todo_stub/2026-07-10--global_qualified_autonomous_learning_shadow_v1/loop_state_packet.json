@@ -1,0 +1,180 @@
+{
+  "schema": "global_qualified_autonomous_learning_shadow_loop_state_v1",
+  "generated_at": "2026-07-10T10:13:05Z",
+  "goal_id": "GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1",
+  "goal_thread_id": "019f4b6d-1e5b-7551-9fce-7a2f029a1675",
+  "goal_status": "ACTIVE",
+  "current_work_package": "WP1-ARTIFACT-CHURN-CONTROL",
+  "current_work_package_state": "ACTIVE",
+  "baseline_packet": "baseline_state_packet.json",
+  "baseline_packet_sha256": "30c10a497f02794525ce6e1d70972829bde7942a6a0bb181e36a13e308400b60",
+  "baseline_evidence_delta_hash": "0ab0b80f307951108d0cf5edd3bb5940cb936bd093081c37c6d90e874e52ec28",
+  "source_runtime": {
+    "branch": "main",
+    "baseline_aligned_head": "1a3ecdd57927e70dd8c6dedfed4ecef04c7a46d3",
+    "mac_head": "a84917fd9190890d0bc0a9e1905a10e9bbe87979",
+    "mac_origin_main": "a84917fd9190890d0bc0a9e1905a10e9bbe87979",
+    "linux_head": "1a3ecdd57927e70dd8c6dedfed4ecef04c7a46d3",
+    "linux_origin_main": "1a3ecdd57927e70dd8c6dedfed4ecef04c7a46d3",
+    "mac_unrelated_dirty_worktree_preserved": true,
+    "linux_worktree_clean": true,
+    "post_baseline_drift_classification": "GUI_ONLY_NO_ALR_RUNTIME_SOURCE_SERVICE_MIGRATION_DIFF",
+    "service_pin": "8dfa1200a37351b142df60f8cd8bd84a5adce6c5",
+    "service_pid": 2073347,
+    "service_nrestarts": 0,
+    "service_failed_sessions": 0,
+    "service_unclean_sessions": 0,
+    "restart_gate": "FAIL_CLOSED_SOURCE_HEAD_MISMATCH_UNTIL_REVIEWED_REPIN"
+  },
+  "postgres": {
+    "physical_alr_tables": 11,
+    "physical_v151_to_v156_present": true,
+    "sqlx_ledger_max": 150,
+    "sqlx_v151_to_v156_rows": 0,
+    "acl_state": "REVERIFY_BEFORE_NEXT_RUNTIME_APPLY",
+    "v157_present": false,
+    "v157_reserved": false
+  },
+  "intake": {
+    "raw_rows": 80495,
+    "alr_rows": 5261,
+    "latest_identity_equal": true,
+    "ingest_lag_seconds": 0,
+    "fresh_raw_only_count": 0,
+    "historical_remaining": 75234,
+    "notifications_received": 583,
+    "notifications_consumed": 583,
+    "notifications_invalid": 0,
+    "notifications_duplicate": 0
+  },
+  "decision_and_candidate": {
+    "training_runs": 362,
+    "run_status_distribution": {"DEFER_EVIDENCE": 362},
+    "feedback_rows": 362,
+    "feedback_status_distribution": {"DEFER_EVIDENCE": 362},
+    "candidate_artifacts": 364,
+    "qualified_candidate_count": 0,
+    "candidate_identity": {
+      "strategy": "scanner_novelty",
+      "strategy_version": null,
+      "config_hash": null,
+      "symbol": "MULTIPLE_37_IDS",
+      "side": "NONE",
+      "horizon": null,
+      "regime": null,
+      "decision_context_hash": null
+    },
+    "distinct_entry_n_eff": null,
+    "utc_day_coverage": null,
+    "top_day_concentration": null,
+    "regime_coverage": null
+  },
+  "qualified_learning": {
+    "proof_packets": 0,
+    "reward_total": 0,
+    "pit_after_cost_complete_chains": 0,
+    "actual_training_runs": 0,
+    "model_artifacts": 0,
+    "challenger_registry_rows": 0,
+    "model_hash": null,
+    "data_hash": null,
+    "code_hash": null,
+    "hidden_oos_rows": 0,
+    "effect_review_decisions": 0,
+    "second_distinct_evidence_delta_proven": false
+  },
+  "artifact_and_retention": {
+    "artifact_rows": 20825,
+    "artifact_payload_mb": 493.99,
+    "last_60m_payload_mb": 52.9,
+    "last_60m_health_rows": 735,
+    "last_60m_health_payload_mb": 1.256,
+    "health_average_interval_seconds": 4.9,
+    "suppression_ratio": 0.0,
+    "derived_cache_rows": 0,
+    "retention_event_rows": 0
+  },
+  "supersession": {
+    "sui": {
+      "status": "ROTATED_UNCONSUMABLE_STALE_PACKET",
+      "packet_sha256": "1ab349a6f753e4d3846b0699d7404f18e231d8ca95b8f250bb19b9f89b7eabde",
+      "consumable": false,
+      "operator_decision_requested": false
+    },
+    "near": {
+      "status": "FROZEN_INVALIDATED_EFFECTIVE_SAMPLE",
+      "n_raw": 5058,
+      "distinct_entry_ts": 2,
+      "n_eff": 1,
+      "utc_days": 1,
+      "edge_claim_allowed": false,
+      "no_edge_claim_allowed": false,
+      "order_dispatch_allowed": false
+    }
+  },
+  "authority": {
+    "exchange": false,
+    "trading": false,
+    "order_or_probe": false,
+    "decision_lease": false,
+    "guardian_or_riskconfig_mutation": false,
+    "global_cost_gate_mutation": false,
+    "live_or_mainnet": false,
+    "serving_or_promotion": false,
+    "latest_pointer": false,
+    "protected_evidence_delete": false,
+    "direct_parameter_apply": false
+  },
+  "gates": {
+    "G1": "PARTIAL",
+    "G2": "FAIL",
+    "G3": "FAIL",
+    "G4": "FAIL",
+    "G5": "FAIL",
+    "G6": "FAIL",
+    "G7": "FAIL",
+    "G8": "PARTIAL",
+    "G9": "PARTIAL"
+  },
+  "terminal_eligible": false,
+  "operator_blocker_turn_count": 0,
+  "safety_boundary_conflict": false,
+  "forbidden_nonterminals": [
+    "ADVANCED",
+    "DEFER_EVIDENCE",
+    "NO_ELIGIBLE_CACHE",
+    "WAIT_OPERATOR_DEMO_AUTH_EXACT",
+    "DONE_SOURCE_ONLY",
+    "DONE_OPERATIONAL_SHADOW",
+    "BACKLOG_EXHAUSTED"
+  ],
+  "next_safe_action": "Dispatch WP1 health and repeated-DEFER churn control design, proving suppression cannot hot-loop replay, starve cursors, or hide genuine evidence deltas",
+  "remaining_safe_work_inventory": [
+    "WP1 state-delta health heartbeat and repeated-DEFER idempotency",
+    "WP2 candidate-aware arbiter",
+    "WP3 proof/reward repository adapters",
+    "WP4 versioned training/registry contracts",
+    "WP5 OOS and decision engine",
+    "WP6 event-delta evolution/restart/retention",
+    "WP7 adversarial final audit"
+  ],
+  "facts": [
+    "All three source heads matched at the read-only baseline; Mac and origin later advanced by two GUI-only commits while Linux remained clean at the baseline head",
+    "The running service pin is stale for the next restart",
+    "All current run and feedback rows are DEFER with zero proof, reward, training, and OOS",
+    "Semantic-no-delta health and candidate artifacts are repeatedly persisted"
+  ],
+  "inferences": [
+    "WP1 churn control is the highest-ROI safe next action",
+    "Zero qualified candidates is not a Goal blocker while source/test work remains"
+  ],
+  "assumptions": [
+    "The user is the project Operator",
+    "No unseen accepted artifact reserves V157 or changes the captured baseline"
+  ],
+  "authority_granted_by_goal": false,
+  "runtime_action_performed_this_loop": false,
+  "exchange_action_performed_this_loop": false,
+  "order_action_performed_this_loop": false,
+  "unrelated_worktree_changes_consumed": false
+}

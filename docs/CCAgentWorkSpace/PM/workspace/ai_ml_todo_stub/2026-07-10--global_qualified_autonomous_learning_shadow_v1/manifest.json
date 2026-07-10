@@ -1,0 +1,62 @@
+{
+  "schema": "global_qualified_autonomous_learning_shadow_manifest_v1",
+  "created_at": "2026-07-10T10:01:33Z",
+  "owner": "PM",
+  "goal_id": "GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1",
+  "goal_thread_id": "019f4b6d-1e5b-7551-9fce-7a2f029a1675",
+  "status": "ACTIVE_WP1_ARTIFACT_CHURN_CONTROL",
+  "baseline_repo_head": "1a3ecdd57927e70dd8c6dedfed4ecef04c7a46d3",
+  "checkpoint_mac_origin_head": "a84917fd9190890d0bc0a9e1905a10e9bbe87979",
+  "checkpoint_linux_head": "1a3ecdd57927e70dd8c6dedfed4ecef04c7a46d3",
+  "checkpoint_linux_origin_main": "1a3ecdd57927e70dd8c6dedfed4ecef04c7a46d3",
+  "checkpoint_linux_worktree_clean": true,
+  "post_baseline_drift_classification": "GUI_ONLY_NO_ALR_RUNTIME_SOURCE_SERVICE_MIGRATION_DIFF",
+  "runtime_source_pin_observed": "8dfa1200a37351b142df60f8cd8bd84a5adce6c5",
+  "baseline_packet_sha256": "30c10a497f02794525ce6e1d70972829bde7942a6a0bb181e36a13e308400b60",
+  "baseline_evidence_delta_sha256": "0ab0b80f307951108d0cf5edd3bb5940cb936bd093081c37c6d90e874e52ec28",
+  "current_item": "WP1-ARTIFACT-CHURN-CONTROL",
+  "terminal_eligible": false,
+  "files": {
+    "readme": "README.md",
+    "queue": "queue.md",
+    "gap_matrix": "gap_matrix.md",
+    "baseline": "baseline_state_packet.json",
+    "loop_state": "loop_state_packet.json",
+    "effect_review": "effect_review.json"
+  },
+  "historical_inputs_preserved": [
+    "docs/execution_plan/2026-07-10--alr-operational-shadow-p2-queue-v2.md",
+    "docs/governance_dev/amendments/2026-07-10--AMD-2026-07-10-02-alr-freshness-learning-completion-v3.md",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-10--alr_f5_exact_demo_authorization_packet.json"
+  ],
+  "supersession": {
+    "old_wait_terminal_active": false,
+    "sui_packet_status": "ROTATED_UNCONSUMABLE_STALE_PACKET",
+    "near_evidence_status": "FROZEN_INVALIDATED_EFFECTIVE_SAMPLE"
+  },
+  "goal_terminals": [
+    "DONE_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW",
+    "HARD_BLOCKED_OPERATOR_ACTION_REQUIRED_CURRENT",
+    "SAFETY_ABORT_BOUNDARY_CONFLICT"
+  ],
+  "authority": {
+    "engineering_goal_only": true,
+    "runtime_authority": false,
+    "exchange_authority": false,
+    "trading_authority": false,
+    "order_authority": false,
+    "serving_or_promotion_authority": false,
+    "protected_evidence_delete_authority": false
+  },
+  "compute_budget_contract": {
+    "track_training_and_inference_cost_latency_energy_or_api_budget": true,
+    "paid_external_service_default": false,
+    "local_zero_paid_service_fallback_required": true
+  },
+  "portfolio_context_contract": {
+    "exposure_required": true,
+    "correlation_cluster_required": true,
+    "strategy_overlap_required": true,
+    "capital_allocation_context_required": true
+  }
+}
