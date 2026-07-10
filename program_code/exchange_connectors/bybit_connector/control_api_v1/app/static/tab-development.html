@@ -56,7 +56,7 @@
   .dev-filter-row { display:flex; gap:6px; flex-wrap:wrap; margin:8px 0 10px; }
   .dev-filter-row .oc-btn.active { border-color:var(--accent); color:var(--accent); background:rgba(56,139,253,0.12); }
   .dev-code { font-family:monospace; font-size:11px; color:var(--text-dim); word-break:break-all; }
-  .dev-locked-note { display:none; }
+  .dev-locked-note { display:none; border-color:var(--warn); } /* P0.2 batch 3:inline 琥珀邊框收斂→--warn（承批次 1 idx-banner 全濃度先例;A3 複審）*/
   .dev-locked .dev-dashboard-body { display:none; }
   .dev-locked .dev-locked-note { display:block; }
   @media (max-width: 980px) {
@@ -66,7 +66,7 @@
 </style>
 
 <div id="development-root" class="dev-locked">
-  <div class="oc-card dev-locked-note" style="border-color:rgba(210,153,34,0.35)">
+  <div class="oc-card dev-locked-note">
     <h2>&#x1F6E0; 開发状态支持未啟用 / Development Support Disabled</h2>
     <div class="subtitle">請在 Settings 中啟用 Development Support。此页面只顯示全局開发過程状态，不影响交易、風控、live 授權或 engine runtime。</div>
   </div>
@@ -78,7 +78,7 @@
           <h2>&#x1F6E0; 全局開发状态 / Global Development Status</h2>
           <div class="subtitle">動態掃描 repo 的 migrations、git 状态、TODO、AgentTodo 与 PM handoff。每次刷新都会重新掃描，新增 V064+ migration 后會自動出現在本页。</div>
         </div>
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <div class="row wrap gap-2">
           <span id="dev-support-chip" class="oc-chip oc-chip-neutral">loading...</span>
           <span id="dev-refresh-chip" class="oc-chip oc-chip-neutral">auto refresh 60s</span>
           <button class="oc-btn" onclick="loadDevelopmentStatus()">&#x27F3; Refresh</button>
@@ -86,11 +86,11 @@
       </div>
 
       <div class="dev-summary">
-        <div class="oc-metric"><div class="oc-metric-label">Latest Migration</div><div class="oc-metric-val" style="font-size:16px" id="dev-latest">--</div><div class="oc-metric-sub" id="dev-latest-sub"></div></div>
-        <div class="oc-metric"><div class="oc-metric-label">Next Slot</div><div class="oc-metric-val blue" style="font-size:16px" id="dev-next">--</div><div class="oc-metric-sub">auto-discovered from sql/migrations</div></div>
-        <div class="oc-metric"><div class="oc-metric-label">Repo Head</div><div class="oc-metric-val" style="font-size:16px" id="dev-head">--</div><div class="oc-metric-sub" id="dev-head-sub"></div></div>
-        <div class="oc-metric"><div class="oc-metric-label">Dirty Files</div><div class="oc-metric-val" style="font-size:16px" id="dev-dirty">--</div><div class="oc-metric-sub" id="dev-dirty-sub"></div></div>
-        <div class="oc-metric"><div class="oc-metric-label">Last Scan</div><div class="oc-metric-val" style="font-size:16px" id="dev-last-scan">--</div><div class="oc-metric-sub">server-side scan per refresh</div></div>
+        <div class="oc-metric"><div class="oc-metric-label">Latest Migration</div><div class="oc-metric-val fs-section" id="dev-latest">--</div><div class="oc-metric-sub" id="dev-latest-sub"></div></div>
+        <div class="oc-metric"><div class="oc-metric-label">Next Slot</div><div class="oc-metric-val blue fs-section" id="dev-next">--</div><div class="oc-metric-sub">auto-discovered from sql/migrations</div></div>
+        <div class="oc-metric"><div class="oc-metric-label">Repo Head</div><div class="oc-metric-val fs-section" id="dev-head">--</div><div class="oc-metric-sub" id="dev-head-sub"></div></div>
+        <div class="oc-metric"><div class="oc-metric-label">Dirty Files</div><div class="oc-metric-val fs-section" id="dev-dirty">--</div><div class="oc-metric-sub" id="dev-dirty-sub"></div></div>
+        <div class="oc-metric"><div class="oc-metric-label">Last Scan</div><div class="oc-metric-val fs-section" id="dev-last-scan">--</div><div class="oc-metric-sub">server-side scan per refresh</div></div>
       </div>
 
       <div class="dev-panels">
@@ -104,8 +104,8 @@
         </div>
       </div>
 
-      <div class="dev-panel" style="margin-top:12px">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+      <div class="dev-panel mt-3">
+        <div class="row-between wrap gap-2">
           <h3>&#x1F5FA; Migration Intelligence</h3>
           <div class="dev-code" id="dev-migrations-dir">sql/migrations</div>
         </div>
@@ -126,7 +126,7 @@
         </div>
       </div>
 
-      <div class="dev-panels" style="margin-top:12px">
+      <div class="dev-panels mt-3">
         <div class="dev-panel">
           <h3>&#x1F5C2; 文档智能 / Documentation Intelligence</h3>
           <div class="dev-list" id="dev-doc-summary-list"><div class="oc-loading">Loading...</div></div>
@@ -137,7 +137,7 @@
         </div>
       </div>
 
-      <div class="dev-panels" style="margin-top:12px">
+      <div class="dev-panels mt-3">
         <div class="dev-panel">
           <h3>&#x2699; Useful Development Commands</h3>
           <div class="dev-list" id="dev-runbook-list"></div>

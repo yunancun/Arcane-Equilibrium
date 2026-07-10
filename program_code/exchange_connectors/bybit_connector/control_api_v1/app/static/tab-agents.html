@@ -68,9 +68,12 @@
     color: #ffa198;
     text-shadow: 0 0 8px rgba(248, 81, 73, 0.4);
   }
-  /* Tooltip-bearing inline label / 带提示的內联標簽 */
-  .agent-tip { color: var(--text); }
+  /* Tooltip-bearing inline label / 带提示的內联標簽
+     P0.2 batch 3:withTip inline style（border-bottom + cursor:help）併入本類 */
+  .agent-tip { color: var(--text); border-bottom: 1px dashed var(--text-secondary); cursor: help; }
   .agent-tip:hover { color: var(--accent); }
+  /* h3 內副標題:常規字重（.subtitle 全局只給字號/色/下距;存量 inline font-weight:normal 收斂)*/
+  .oc-card h3 .subtitle { font-weight: var(--weight-regular); }
   /* Agent card hover 微提亮 / Card hover lift */
   .agent-card:hover { box-shadow: 0 2px 12px rgba(56, 139, 253, 0.15); }
 
@@ -217,6 +220,47 @@
     background: rgba(248, 81, 73, 0.08);
   }
 
+  /* ─── agent-tracker.js 模板組件（P0.2 batch 3:inline style= → 頁內組件層,§8 級 3）───
+     渲染進本檔 #agent-tracker 容器,元素非 className-wipe,故直掛安全;字級/間距用
+     token,收斂見 05_utilities.md §5;palette 外色(深紅/深藍 gradient)verbatim
+     relocate,P0.4 裁決;dark 面板 rgba(13,17,23,*)→--bg-sunken 語義收斂。 */
+  .agent-card { border:1px solid var(--border); border-radius:var(--r-2);
+    padding:var(--sp-3); display:flex; flex-direction:column; gap:var(--sp-2);
+    background:var(--card-bg); }
+  /* Executor 真倉/影子底色 enum（§7 class-per-enum;gradient palette 外色 P0.4）*/
+  .agent-card--live { background:linear-gradient(135deg,#3d0d0d,#5c1a1a);
+    animation:agent-breathing 4s ease-in-out infinite; }
+  .agent-card--shadow { background:linear-gradient(135deg,#0d1f3d,#1a2f5c); }
+  .at-unknown-banner { background:var(--neg-bg); border:1px solid var(--neg);
+    border-radius:var(--r-1); padding:var(--sp-2) var(--sp-3); margin-bottom:var(--sp-2);
+    color:var(--neg); font-size:var(--fs-micro); }
+  .at-idrow { display:flex; justify-content:space-between; align-items:flex-start; gap:var(--sp-2); }
+  .at-note { background:var(--bg-sunken); border-left:2px solid var(--accent);
+    padding:var(--sp-2) var(--sp-3); border-radius:0 var(--r-1) var(--r-1) 0;
+    line-height:var(--lh-cjk); color:var(--text-primary); }
+  .at-note--warn { border-left-color:var(--warn); background:var(--warn-bg); }
+  .at-2col { display:grid; grid-template-columns:1fr 1fr; gap:var(--sp-3); }
+  .at-roster-grid { display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:var(--sp-3); }
+  .at-feed-row { padding:var(--sp-2) 0; border-bottom:1px solid var(--border-subtle); }
+  .at-eng-col { border-radius:var(--r-2); padding:var(--sp-3); }
+  .at-eng-col--demo { background:linear-gradient(135deg,#0d1f3d,#1a2f5c); border:1px solid #1a2f5c; }
+  .at-eng-col--live { background:linear-gradient(135deg,#3d0d0d,#5c1a1a); border:1px solid var(--neg); }
+  .at-eng-col--empty { background:var(--bg-sunken); border:1px dashed var(--border); }
+  .at-eng-diff { background:var(--bg-sunken); border:1px solid var(--border);
+    border-radius:var(--r-1); padding:var(--sp-2) var(--sp-3); display:flex;
+    justify-content:space-around; gap:var(--sp-2); flex-wrap:wrap; }
+  .at-lease-row { padding:var(--sp-1) var(--sp-2); background:var(--bg-sunken);
+    border-radius:var(--r-1); display:flex; justify-content:space-between; gap:var(--sp-2); }
+  .at-reject-row { padding:var(--sp-1) var(--sp-2); background:var(--neg-bg);
+    border-left:2px solid var(--neg); border-radius:0 var(--r-1) var(--r-1) 0; }
+  .at-budget-track { background:var(--bg-sunken); border-radius:var(--r-1); height:10px;
+    overflow:hidden; border:1px solid var(--border-subtle); }
+  .at-budget-fill { height:100%; transition:width var(--dur-base); }
+  .at-budget-fill--ok { background:var(--pos); }
+  .at-budget-fill--warn { background:var(--warn); }
+  .at-budget-fill--crit { background:var(--neg); }
+
   @media (max-width: 820px) {
     .agent-control-grid { grid-template-columns: 1fr; }
     .agent-control-kv { grid-template-columns: 1fr; }
@@ -228,7 +272,7 @@
      phase advisory + 4-mode badge baseline (read-only never-emit surface). -->
 <div class="agents-phase-row" role="status" aria-label="Agents Monitor P5 抽出 active / Agents Monitor P5 extraction active">
   <span class="agents-phase-chip">P5 抽出 active / P5 extraction active</span>
-  <span style="font-size:11px;color:var(--text-dim)">
+  <span class="fs-micro t-dim">
     Read-only · 永不送單 / Read-only · never submits orders
   </span>
   <div id="agents-mode-badges" class="agents-mode-slot"
@@ -244,13 +288,13 @@
     </div>
     <div id="openclaw-control-status-chip" aria-live="polite"></div>
   </div>
-  <div id="openclaw-control-loading" style="padding:10px;color:var(--text-dim);font-size:12px">
+  <div id="openclaw-control-loading" class="p-3 t-dim fs-dense">
     正在讀取 OpenClaw self-state…
   </div>
-  <div id="openclaw-control-error" style="display:none;padding:10px;color:var(--yellow);font-size:12px">
+  <div id="openclaw-control-error" class="hidden p-3 t-warn fs-dense">
     OpenClaw self-state 暫時不可用；交易 runtime 不受此面板影響。
   </div>
-  <div id="openclaw-control-data" style="display:none" tabindex="0">
+  <div id="openclaw-control-data" class="hidden" tabindex="0">
     <div class="agent-control-grid">
       <div class="agent-control-panel" id="openclaw-authority-panel"></div>
       <div class="agent-control-panel" id="openclaw-gateway-panel"></div>
@@ -271,7 +315,7 @@
 <section id="agent-tracker" role="region" aria-label="AI 團隊工作台 / AI Team Console">
   <div class="oc-card">
     <h3>&#x1F916; AI 團隊工作台 / AI Team Console
-      <span class="subtitle" style="font-size:12px;color:var(--text-dim);font-weight:normal;display:block;margin-top:2px">
+      <span class="subtitle block mt-1">
         你的 5 位 AI 員工今天在干什么、花了多少钱、谁進入執行链路
       </span>
     </h3>
@@ -280,32 +324,32 @@
 
   <!-- 區块 A: 5-Agent 卡片 grid / 5-Agent roster cards -->
   <div class="oc-card" role="region" aria-label="5-Agent Roster">
-    <h4 style="font-size:13px;margin-bottom:10px">&#x1F465; 5 位 Agent 現况 / 5-Agent Roster</h4>
-    <div id="agent-roster-loading" style="padding:12px;color:var(--text-dim);font-size:12px">
+    <h4 class="fs-base mb-3">&#x1F465; 5 位 Agent 現况 / 5-Agent Roster</h4>
+    <div id="agent-roster-loading" class="p-3 t-dim fs-dense">
       &#x23F3; 正在請 5 位 Agent 報告状况…
     </div>
-    <div id="agent-roster-empty" style="display:none;padding:12px;color:var(--text-dim);font-size:12px">
+    <div id="agent-roster-empty" class="hidden p-3 t-dim fs-dense">
       &#x1F4A4; 今天還没有 Agent 開始工作（系統刚啟動）
     </div>
-    <div id="agent-roster-error" style="display:none;padding:12px;color:var(--yellow);font-size:12px">
+    <div id="agent-roster-error" class="hidden p-3 t-warn fs-dense">
       &#x26A0;&#xFE0F; 连不上引擎 — 不代表 Agent 出问題，是仪表板自己迷路了，30 秒后再試
     </div>
-    <div id="agent-roster-data" style="display:none" tabindex="0"></div>
+    <div id="agent-roster-data" class="hidden" tabindex="0"></div>
   </div>
 
   <!-- 區块 D (MVP): 思考预算進度條 / Thinking budget bar (MVP simplified) -->
   <div class="oc-card" role="region" aria-label="今日思考预算 / Today's Thinking Budget">
-    <h4 style="font-size:13px;margin-bottom:10px">&#x1F9E0; 今日思考预算 / Today's Thinking Budget</h4>
-    <div id="agent-budget-loading" style="padding:8px;color:var(--text-dim);font-size:12px">
+    <h4 class="fs-base mb-3">&#x1F9E0; 今日思考预算 / Today's Thinking Budget</h4>
+    <div id="agent-budget-loading" class="p-2 t-dim fs-dense">
       &#x23F3; 正在請 5 位 Agent 報告状况…
     </div>
-    <div id="agent-budget-empty" style="display:none;padding:8px;color:var(--text-dim);font-size:12px">
+    <div id="agent-budget-empty" class="hidden p-2 t-dim fs-dense">
       &#x1F4A4; 今天還没有 Agent 開始工作（系統刚啟動）
     </div>
-    <div id="agent-budget-error" style="display:none;padding:8px;color:var(--yellow);font-size:12px">
+    <div id="agent-budget-error" class="hidden p-2 t-warn fs-dense">
       &#x26A0;&#xFE0F; 连不上引擎 — 不代表 Agent 出问題，是仪表板自己迷路了，30 秒后再試
     </div>
-    <div id="agent-budget-data" style="display:none" tabindex="0"></div>
+    <div id="agent-budget-data" class="hidden" tabindex="0"></div>
   </div>
 
   <!--
@@ -323,47 +367,47 @@
       risk_config TOML). Not related to ExecutorAgent _shadow_mode (intent log only).
   -->
   <div class="oc-card" role="region" aria-label="Demo 引擎 vs LiveDemo 引擎成交 / Engine Mode Fills">
-    <h4 style="font-size:13px;margin-bottom:10px">&#x1F7E6; Demo 引擎 vs &#x1F534; LiveDemo 引擎成交 / Engine Mode Fills</h4>
-    <div id="agent-shadow-live-loading" style="padding:12px;color:var(--text-dim);font-size:12px">
+    <h4 class="fs-base mb-3">&#x1F7E6; Demo 引擎 vs &#x1F534; LiveDemo 引擎成交 / Engine Mode Fills</h4>
+    <div id="agent-shadow-live-loading" class="p-3 t-dim fs-dense">
       &#x23F3; 正在請 5 位 Agent 報告状况…
     </div>
-    <div id="agent-shadow-live-empty" style="display:none;padding:12px;color:var(--text-dim);font-size:12px">
+    <div id="agent-shadow-live-empty" class="hidden p-3 t-dim fs-dense">
       &#x1F4A4; 今天還没有 Agent 開始工作（系統刚啟動）
     </div>
-    <div id="agent-shadow-live-error" style="display:none;padding:12px;color:var(--yellow);font-size:12px">
+    <div id="agent-shadow-live-error" class="hidden p-3 t-warn fs-dense">
       &#x26A0;&#xFE0F; 连不上引擎 — 不代表 Agent 出问題，是仪表板自己迷路了，30 秒后再試
     </div>
-    <div id="agent-shadow-live-data" style="display:none" tabindex="0"></div>
+    <div id="agent-shadow-live-data" class="hidden" tabindex="0"></div>
   </div>
 
   <!-- 區块 C: 最近活動 feed / Recent activity feed -->
   <div class="oc-card" role="region" aria-label="最近活動 / Recent Activity">
-    <h4 style="font-size:13px;margin-bottom:10px">&#x1F4DC; 最近活動 / Recent Activity</h4>
-    <div id="agent-feed-loading" style="padding:12px;color:var(--text-dim);font-size:12px">
+    <h4 class="fs-base mb-3">&#x1F4DC; 最近活動 / Recent Activity</h4>
+    <div id="agent-feed-loading" class="p-3 t-dim fs-dense">
       &#x23F3; 正在請 5 位 Agent 報告状况…
     </div>
-    <div id="agent-feed-empty" style="display:none;padding:12px;color:var(--text-dim);font-size:12px">
+    <div id="agent-feed-empty" class="hidden p-3 t-dim fs-dense">
       &#x1F4A4; 今天還没有 Agent 開始工作（系統刚啟動）
     </div>
-    <div id="agent-feed-error" style="display:none;padding:12px;color:var(--yellow);font-size:12px">
+    <div id="agent-feed-error" class="hidden p-3 t-warn fs-dense">
       &#x26A0;&#xFE0F; 连不上引擎 — 不代表 Agent 出问題，是仪表板自己迷路了，30 秒后再試
     </div>
-    <div id="agent-feed-data" style="display:none" tabindex="0"></div>
+    <div id="agent-feed-data" class="hidden" tabindex="0"></div>
   </div>
 
   <!-- 區块 F: Lease + reject / 決策租約 + 治理拒單 -->
   <div class="oc-card" role="region" aria-label="治理租約 &amp; 拒單 / Governance &amp; Rejects">
-    <h4 style="font-size:13px;margin-bottom:10px">&#x1F6E1;&#xFE0F; 治理租約 &amp; 拒單 / Governance &amp; Rejects</h4>
-    <div id="agent-governance-loading" style="padding:12px;color:var(--text-dim);font-size:12px">
+    <h4 class="fs-base mb-3">&#x1F6E1;&#xFE0F; 治理租約 &amp; 拒單 / Governance &amp; Rejects</h4>
+    <div id="agent-governance-loading" class="p-3 t-dim fs-dense">
       &#x23F3; 正在請 5 位 Agent 報告状况…
     </div>
-    <div id="agent-governance-empty" style="display:none;padding:12px;color:var(--text-dim);font-size:12px">
+    <div id="agent-governance-empty" class="hidden p-3 t-dim fs-dense">
       &#x1F4A4; 今天還没有 Agent 開始工作（系統刚啟動）
     </div>
-    <div id="agent-governance-error" style="display:none;padding:12px;color:var(--yellow);font-size:12px">
+    <div id="agent-governance-error" class="hidden p-3 t-warn fs-dense">
       &#x26A0;&#xFE0F; 连不上引擎 — 不代表 Agent 出问題，是仪表板自己迷路了，30 秒后再試
     </div>
-    <div id="agent-governance-data" style="display:none" tabindex="0"></div>
+    <div id="agent-governance-data" class="hidden" tabindex="0"></div>
   </div>
 </section>
 

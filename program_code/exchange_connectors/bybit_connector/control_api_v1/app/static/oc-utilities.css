@@ -118,3 +118,9 @@
   border-radius:var(--r-1); color:var(--text-secondary);
   background:var(--bg-raised); border:1px solid var(--border-strong);
   margin-left:var(--sp-1); vertical-align:middle; line-height:14px; }
+
+/* 數字輸入定寬修飾類(§5.4 裁決:width:80px 型輸入的歸宿;tab-ai/tab-risk 所屬批次應用)。
+   為何 !important:.oc-input 的 width 由 ocInjectBaseCSS 運行時注入 <style> 供給,
+   注入樣式永遠後載、同 specificity 勝出,定寬修飾必須壓回。
+   P0.2 batch 3 引入(tab-ai 7 個數字欄位);P0.4: 併入組件層 */
+.oc-input--num{ width:80px!important; }
