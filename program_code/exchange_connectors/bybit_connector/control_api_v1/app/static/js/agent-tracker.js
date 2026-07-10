@@ -125,13 +125,14 @@ function _agentClearAllTimers() {
  * @param {'loading'|'empty'|'error'|'data'} type - 當前要展示哪一态
  */
 function setLoadingState(prefix, type) {
+  // P0.2 batch 3:display 切換改 classList('hidden')（§3.3 引理:show 端原寫 '' ≡ remove hidden）
   const types = ["loading", "empty", "error"];
   types.forEach((t) => {
     const el = document.getElementById(prefix + "-" + t);
-    if (el) el.style.display = (t === type) ? "" : "none";
+    if (el) el.classList.toggle("hidden", t !== type);
   });
   const dataEl = document.getElementById(prefix + "-data");
-  if (dataEl) dataEl.style.display = (type === "data") ? "" : "none";
+  if (dataEl) dataEl.classList.toggle("hidden", type !== "data");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -210,8 +211,7 @@ const _AGENT_TOOLTIPS = {
  */
 function withTip(key, label) {
   const tip = _AGENT_TOOLTIPS[key] || "";
-  return '<span class="agent-tip" title="' + ocEsc(tip)
-    + '" style="border-bottom:1px dashed var(--text-dim);cursor:help">'
+  return '<span class="agent-tip" title="' + ocEsc(tip) + '">'
     + ocEsc(label) + '</span>';
 }
 
@@ -309,17 +309,18 @@ function renderAgentCard(agent) {
   const isUnknown = state === "unknown";
 
   // 卡片底色 / Card background — Executor shadow vs live triple-isolation (plan T3)
-  let bgStyle = "background:var(--card-bg);";
+  // P0.2 batch 3:底色 enum 改 class-per-enum（§7）；gradient 為 palette 外色,
+  // verbatim relocate 進 tab-agents 頁內 .agent-card--live/--shadow（P0.4 裁決）。
+  let cardMod = "";
   let bannerHtml = "";
   if (isExecutor && !executorUnclear) {
     if (isLive) {
-      bgStyle = "background:linear-gradient(135deg, #3d0d0d, #5c1a1a);"
-              + "animation:agent-breathing 4s ease-in-out infinite;";
+      cardMod = " agent-card--live";
       bannerHtml = '<div class="exec-banner exec-banner-live">'
         + '🔴 真倉執行中 — 這位 Agent 正在用真钱下單'
         + '</div>';
     } else {
-      bgStyle = "background:linear-gradient(135deg, #0d1f3d, #1a2f5c);";
+      cardMod = " agent-card--shadow";
       bannerHtml = '<div class="exec-banner exec-banner-shadow">'
         + '🌙 ' + withTip("shadow", "影子模式")
         + ' — 所有動作仅模擬，不會送真單到交易所'
@@ -334,8 +335,7 @@ function renderAgentCard(agent) {
     const txt = executorUnclear
       ? '⚠️ 后端未回報 shadow_mode 字段，已暂停接單 / Backend missing shadow_mode field, intake paused'
       : '⚠️ 状态未确認，已暂停接單 / State unknown, intake paused';
-    unknownBanner = '<div style="background:rgba(248,81,73,0.15);border:1px solid var(--red);'
-      + 'border-radius:6px;padding:6px 10px;margin-bottom:8px;color:var(--red);font-size:11px">'
+    unknownBanner = '<div class="at-unknown-banner">'
       + ocEsc(txt)
       + '</div>';
   }
@@ -369,44 +369,37 @@ function renderAgentCard(agent) {
     else                 decisionLabel = isLive ? "真實成單" : "模擬成單";
   }
 
-  let html = '<div class="agent-card" style="' + bgStyle
-    + 'border:1px solid var(--border);border-radius:10px;padding:14px;'
-    + 'display:flex;flex-direction:column;gap:8px">';
+  let html = '<div class="agent-card' + cardMod + '">';
 
   if (bannerHtml) html += bannerHtml;
   if (unknownBanner) html += unknownBanner;
 
   // Row 1: identity
-  html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">';
+  html += '<div class="at-idrow">';
   html += '<div>';
-  html += '<div style="font-size:18px;font-weight:600">' + emoji + ' ' + labelZh + '</div>';
-  html += '<div style="font-size:11px;color:var(--text-dim)">' + labelEn + '</div>';
+  html += '<div class="fs-title fw-semi">' + emoji + ' ' + labelZh + '</div>';
+  html += '<div class="fs-micro t-dim">' + labelEn + '</div>';
   html += '</div>';
-  html += '<div style="text-align:right">' + stateBadge + '</div>';
+  html += '<div class="t-right">' + stateBadge + '</div>';
   html += '</div>';
 
   // Row 2: now-doing summary
-  html += '<div style="font-size:12px;line-height:1.6;color:var(--text);'
-    + 'background:rgba(13,17,23,0.4);border-left:2px solid var(--accent);'
-    + 'padding:6px 10px;border-radius:0 6px 6px 0">'
-    + '<span style="color:var(--text-dim)">現在在做：</span>' + summary
+  html += '<div class="at-note fs-dense">'
+    + '<span class="t-dim">現在在做：</span>' + summary
     + '</div>';
   if (stateReason) {
-    html += '<div style="font-size:11px;line-height:1.5;color:var(--text-dim);'
-      + 'background:rgba(210,153,34,0.08);border-left:2px solid var(--yellow);'
-      + 'padding:6px 10px;border-radius:0 6px 6px 0">'
-      + '<span style="color:var(--yellow)">状态依據：</span>' + stateReason
+    html += '<div class="at-note at-note--warn fs-micro t-dim">'
+      + '<span class="t-warn">状态依據：</span>' + stateReason
       + '</div>';
   }
 
   // Row 3: stats (heartbeat + decisions + cost)
-  html += '<div style="display:flex;justify-content:space-between;align-items:center;'
-    + 'gap:8px;font-size:11px;color:var(--text-dim);flex-wrap:wrap">';
+  html += '<div class="row-between wrap gap-2 fs-micro t-dim">';
   html += '<div>' + runtimeChip + '</div>';
   html += '<div>' + withTip("heartbeat", "心跳") + '：' + heartbeat + '</div>';
-  html += '<div>' + ocEsc(decisionLabel) + '：<strong style="color:var(--text)">'
+  html += '<div>' + ocEsc(decisionLabel) + '：<strong class="t-primary">'
     + ocEsc(String(decisions)) + '</strong> 笔</div>';
-  html += '<div>今日成本：<strong style="color:var(--text)">$' + Number(cost).toFixed(2)
+  html += '<div>今日成本：<strong class="t-primary">$' + Number(cost).toFixed(2)
     + '</strong></div>';
   html += '</div>';
 
@@ -443,7 +436,7 @@ async function loadAgentRoster() {
     setLoadingState("agent-roster", "empty");
     return;
   }
-  let html = '<div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));gap:12px">';
+  let html = '<div class="at-roster-grid">';
   agents.forEach((a) => {
     html += renderAgentCard(a);
   });
@@ -567,7 +560,7 @@ async function loadAgentFeed() {
     setLoadingState("agent-feed", "empty");
     return;
   }
-  let html = '<div style="display:flex;flex-direction:column;gap:6px">';
+  let html = '<div class="col gap-2">';
   entries.slice(0, 15).forEach((e) => {
     let chipType = "info";
     let typeLabel = "動態";
@@ -578,16 +571,16 @@ async function loadAgentFeed() {
       typeLabel = "影子成交";
       chipType = "info";
     }
-    html += '<div style="padding:6px 0;border-bottom:1px solid #21262d;font-size:12px">';
-    html += '<div style="display:flex;justify-content:space-between;align-items:center;gap:6px">';
+    html += '<div class="at-feed-row fs-dense">';
+    html += '<div class="row-between gap-2">';
     html += '<span>' + ocChip(typeLabel, chipType) + ' '
       + ocChip(ocEsc(e.outcome || "--"), chipType)
       + (e.symbol ? ' <strong>' + ocEsc(e.symbol) + '</strong>' : '')
       + '</span>';
-    html += '<span style="color:var(--text-dim);font-size:11px">' + ocEsc(_agentRelTime(e.ts)) + '</span>';
+    html += '<span class="t-dim fs-micro">' + ocEsc(_agentRelTime(e.ts)) + '</span>';
     html += '</div>';
     if (e.summary) {
-      html += '<div style="margin-top:3px;color:var(--text-dim);font-size:11px;line-height:1.5">'
+      html += '<div class="mt-1 t-dim fs-micro lh-cjk">'
         + ocEsc(e.summary) + '</div>';
     }
     html += '</div>';
@@ -666,27 +659,26 @@ async function loadShadowLiveDiff() {
     return;
   }
 
-  let html = '<div style="display:flex;flex-direction:column;gap:10px">';
-  html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">';
+  let html = '<div class="col gap-3">';
+  html += '<div class="at-2col">';
 
   // Demo engine column (engine_mode='demo' fills) / Demo 引擎成交栏
   // Real fills to Bybit demo endpoint; uses risk_config_demo.toml.
   // 真實成交到 Bybit demo endpoint；使用 risk_config_demo.toml。
-  html += '<div style="background:linear-gradient(135deg, #0d1f3d, #1a2f5c);'
-    + 'border:1px solid #1a2f5c;border-radius:8px;padding:12px">';
-  html += '<div style="font-size:13px;font-weight:600;margin-bottom:8px">🟦 '
+  html += '<div class="at-eng-col at-eng-col--demo">';
+  html += '<div class="fs-base fw-semi mb-2">🟦 '
     + withTip("shadow", "Demo 引擎成交") + '</div>';
-  html += '<div style="font-size:11px;color:var(--text-dim);margin-bottom:6px">'
+  html += '<div class="fs-micro t-dim mb-2">'
     + 'Demo engine real fills（Bybit demo endpoint，使用 risk_config_demo.toml）</div>';
-  html += '<div style="font-size:18px;font-weight:700">Demo 成交 '
+  html += '<div class="fs-title fw-semi">Demo 成交 '
     + demoCount + ' 笔</div>';
   if (demoPnl != null) {
     const cls = ocPnlClass(demoPnl);
-    html += '<div class="' + cls + '" style="font-size:14px;margin-top:4px">Demo PnL '
+    html += '<div class="' + cls + ' fs-md mt-1">Demo PnL '
       + ocMoney(demoPnl) + '</div>';
   }
   if (demoSlip != null) {
-    html += '<div style="font-size:11px;color:var(--text-dim);margin-top:2px">'
+    html += '<div class="fs-micro t-dim mt-1">'
       + '平均滑点 ' + Number(demoSlip).toFixed(2) + ' bps</div>';
   }
   html += '</div>';
@@ -694,28 +686,27 @@ async function loadShadowLiveDiff() {
   // LiveDemo engine column (engine_mode='live_demo' fills) / LiveDemo 引擎成交栏
   // Live pipeline routed to Bybit demo endpoint; uses risk_config_live.toml.
   // Live 管線走 demo endpoint；使用 risk_config_live.toml（CLAUDE.md §三 engine_mode_tag_live_demo）。
-  const liveBg = liveCount > 0
-    ? "background:linear-gradient(135deg, #3d0d0d, #5c1a1a);border:1px solid var(--red);"
-    : "background:rgba(13,17,23,0.4);border:1px dashed var(--border);";
-  html += '<div style="' + liveBg + 'border-radius:8px;padding:12px">';
-  html += '<div style="font-size:13px;font-weight:600;margin-bottom:8px">🔴 LiveDemo 引擎成交</div>';
-  html += '<div style="font-size:11px;color:var(--text-dim);margin-bottom:6px">'
+  // P0.2 batch 3:liveBg style 串改 class-per-enum（§7）;gradient palette 外色進頁內組件
+  const liveColMod = liveCount > 0 ? " at-eng-col--live" : " at-eng-col--empty";
+  html += '<div class="at-eng-col' + liveColMod + '">';
+  html += '<div class="fs-base fw-semi mb-2">🔴 LiveDemo 引擎成交</div>';
+  html += '<div class="fs-micro t-dim mb-2">'
     + 'Live 管線走 demo endpoint（使用 risk_config_live.toml）</div>';
   if (liveCount > 0) {
-    html += '<div style="font-size:18px;font-weight:700">LiveDemo 成交 '
+    html += '<div class="fs-title fw-semi">LiveDemo 成交 '
       + liveCount + ' 笔</div>';
     if (livePnl != null) {
       const cls = ocPnlClass(livePnl);
-      html += '<div class="' + cls + '" style="font-size:14px;margin-top:4px">LiveDemo PnL '
+      html += '<div class="' + cls + ' fs-md mt-1">LiveDemo PnL '
         + ocMoney(livePnl) + '</div>';
     }
     if (liveSlip != null) {
-      html += '<div style="font-size:11px;color:var(--text-dim);margin-top:2px">'
+      html += '<div class="fs-micro t-dim mt-1">'
         + '平均滑点 ' + Number(liveSlip).toFixed(2) + ' bps</div>';
     }
   } else {
-    html += '<div style="font-size:14px;color:var(--text-dim)">— 此時段無 LiveDemo 成交 —</div>';
-    html += '<div style="font-size:11px;color:var(--text-dim);margin-top:4px">'
+    html += '<div class="fs-md t-dim">— 此時段無 LiveDemo 成交 —</div>';
+    html += '<div class="fs-micro t-dim mt-1">'
       + '流量稀疏 / 引擎運行中（pipeline 状态請看 System tab）</div>';
   }
   html += '</div>';
@@ -727,20 +718,18 @@ async function loadShadowLiveDiff() {
   const slipDelta = diff.slippage_delta_bps;
   if (fillDelta != null || slipDelta != null) {
     const fillRed = (fillDelta != null && Math.abs(Number(fillDelta)) >= 10);
-    const fillColor = fillRed ? "var(--red)" : "var(--text-dim)";
-    html += '<div style="background:rgba(13,17,23,0.6);border:1px solid var(--border);'
-      + 'border-radius:6px;padding:8px 12px;display:flex;justify-content:space-around;'
-      + 'gap:8px;flex-wrap:wrap;font-size:12px">';
+    const fillCls = fillRed ? "t-neg" : "t-dim";
+    html += '<div class="at-eng-diff fs-dense">';
     if (fillDelta != null) {
       const sign = Number(fillDelta) >= 0 ? "+" : "";
-      html += '<div>成交率差異（Demo vs LiveDemo）：<strong style="color:' + fillColor + '">'
+      html += '<div>成交率差異（Demo vs LiveDemo）：<strong class="' + fillCls + '">'
         + sign + Number(fillDelta).toFixed(1) + '%</strong>'
-        + (fillRed ? ' <span style="color:var(--red);font-size:11px">⚠ 偏离 ≥10%</span>' : '')
+        + (fillRed ? ' <span class="t-neg fs-micro">⚠ 偏离 ≥10%</span>' : '')
         + '</div>';
     }
     if (slipDelta != null) {
       const sign = Number(slipDelta) >= 0 ? "+" : "";
-      html += '<div>滑点差異（Demo vs LiveDemo）：<strong style="color:var(--text)">'
+      html += '<div>滑点差異（Demo vs LiveDemo）：<strong class="t-primary">'
         + sign + Number(slipDelta).toFixed(2) + ' bps</strong></div>';
     }
     html += '</div>';
@@ -815,56 +804,54 @@ async function loadAgentGovernance() {
     return;
   }
 
-  let html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">';
+  let html = '<div class="at-2col">';
 
   // Leases column
   html += '<div>';
-  html += '<div style="font-size:12px;font-weight:600;margin-bottom:6px">📜 '
+  html += '<div class="fs-dense fw-semi mb-2">📜 '
     + withTip("lease", "活跃決策租約") + '</div>';
   if (leases && leases.length) {
-    html += '<div style="display:flex;flex-direction:column;gap:4px">';
+    html += '<div class="col gap-1">';
     leases.slice(0, 6).forEach((l) => {
       const id = String(l.lease_id || l.id || "--").slice(0, 8);
       const sym = l.symbol || "--";
       const exp = l.expires_at || l.expiry || l.expires_ts;
-      html += '<div style="font-size:11px;padding:4px 8px;background:rgba(13,17,23,0.5);'
-        + 'border-radius:4px;display:flex;justify-content:space-between;gap:6px">';
+      html += '<div class="at-lease-row fs-micro">';
       html += '<span><code>' + ocEsc(id) + '</code> · ' + ocEsc(sym) + '</span>';
-      html += '<span style="color:var(--text-dim)">到期 ' + ocEsc(_agentRelTime(exp)) + '</span>';
+      html += '<span class="t-dim">到期 ' + ocEsc(_agentRelTime(exp)) + '</span>';
       html += '</div>';
     });
     html += '</div>';
   } else {
-    html += '<div style="font-size:11px;color:var(--text-dim);padding:8px 0">'
+    html += '<div class="fs-micro t-dim py-2">'
       + '當前没有活跃租約</div>';
   }
   html += '</div>';
 
   // Rejects column (round 2: real risk_verdicts.reject rows)
   html += '<div>';
-  html += '<div style="font-size:12px;font-weight:600;margin-bottom:6px">🛑 '
+  html += '<div class="fs-dense fw-semi mb-2">🛑 '
     + withTip("governance", "守门員拒單") + '（最近 5 條）</div>';
   if (rejects && rejects.length) {
-    html += '<div style="display:flex;flex-direction:column;gap:4px">';
+    html += '<div class="col gap-1">';
     rejects.slice(0, 5).forEach((r) => {
       const reason = r.reason || "--";
       const ts = r.ts;
       const sym = r.symbol || "?";
       const lvl = r.risk_level;
-      html += '<div style="font-size:11px;padding:4px 8px;background:rgba(248,81,73,0.06);'
-        + 'border-left:2px solid var(--red);border-radius:0 4px 4px 0">';
-      html += '<div style="display:flex;justify-content:space-between;gap:6px;align-items:center">';
-      html += '<span><code style="color:var(--text-dim)">' + ocEsc(_agentTimeShort(ts)) + '</code>'
+      html += '<div class="at-reject-row fs-micro">';
+      html += '<div class="row-between gap-2">';
+      html += '<span><code class="t-dim">' + ocEsc(_agentTimeShort(ts)) + '</code>'
         + '｜<strong>' + ocEsc(sym) + '</strong></span>';
       html += _riskLevelChip(lvl);
       html += '</div>';
-      html += '<div style="color:var(--text-dim);margin-top:2px">'
+      html += '<div class="t-dim mt-1">'
         + '被守门員擋下：' + ocEsc(reason) + '</div>';
       html += '</div>';
     });
     html += '</div>';
   } else {
-    html += '<div style="font-size:11px;color:var(--text-dim);padding:8px 0">'
+    html += '<div class="fs-micro t-dim py-2">'
       + '近期無拒單</div>';
   }
   html += '</div>';
@@ -922,21 +909,21 @@ async function loadAgentBudget() {
   const spentVal = Number(spent || 0);
   const capVal = Number(cap || 0);
   const pct = capVal > 0 ? Math.min(100, (spentVal / capVal) * 100) : 0;
-  let barColor = "var(--green)";
-  if (pct >= 90) barColor = "var(--red)";
-  else if (pct >= 70) barColor = "var(--yellow)";
+  // P0.2 batch 3:bar 顏色 enum 改 class-per-enum（§7）
+  let barLevel = "ok";
+  if (pct >= 90) barLevel = "crit";
+  else if (pct >= 70) barLevel = "warn";
 
   let html = '<div>';
-  html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">';
-  html += '<span style="font-size:12px">' + withTip("budget", "今日思考预算") + '</span>';
-  html += '<span style="font-size:13px;font-weight:600">$' + spentVal.toFixed(2)
+  html += '<div class="row-between mb-2">';
+  html += '<span class="fs-dense">' + withTip("budget", "今日思考预算") + '</span>';
+  html += '<span class="fs-base fw-semi">$' + spentVal.toFixed(2)
     + ' / $' + capVal.toFixed(2) + '</span>';
   html += '</div>';
-  html += '<div style="background:rgba(13,17,23,0.5);border-radius:4px;height:10px;overflow:hidden;border:1px solid #21262d">';
-  html += '<div style="background:' + barColor + ';height:100%;width:' + pct.toFixed(1)
-    + '%;transition:width 0.3s"></div>';
+  html += '<div class="at-budget-track">';
+  html += '<div class="at-budget-fill at-budget-fill--' + barLevel + '"></div>';
   html += '</div>';
-  html += '<div style="font-size:11px;color:var(--text-dim);margin-top:4px">';
+  html += '<div class="fs-micro t-dim mt-1">';
   if (capVal === 0) {
     html += '尚未設定每日预算上限';
   } else if (pct >= 90) {
@@ -952,6 +939,10 @@ async function loadAgentBudget() {
   html += '</div>';
 
   ocSetHtml("agent-budget-data", html);
+  // §7 真動態:進度條寬度以 JS 設 .style.width(非 style= 屬性,不計入 P0.2 度量;
+  // 目標形態 scoped-var 由 P0.4 統一;軸無 utility 掛此元素,無 §3.2 鐵則一衝突)
+  const _barFill = document.querySelector("#agent-budget-data .at-budget-fill");
+  if (_barFill) _barFill.style.width = pct.toFixed(1) + "%";
   setLoadingState("agent-budget", "data");
 }
 

@@ -47,13 +47,36 @@
   .roi-status .sub { margin-left:auto; font-size:11px; color:var(--text-dim); }
   @media (max-width: 820px) { .roi-band { grid-template-columns:repeat(2,minmax(0,1fr)); } }
   @media (max-width: 520px) { .roi-band { grid-template-columns:1fr; } .roi-status { align-items:flex-start; flex-direction:column; } .roi-status .sub { margin-left:0; } }
+
+  /* ─── P0.2 batch 3:inline style= 收斂組件（§8 級 3;字級/間距用 token,收斂見 05_utilities.md §5）─── */
+  .prov-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); }
+  .prov-btn { padding:var(--sp-1) var(--sp-2); font-size:var(--fs-micro); }
+  .prov-btn + .prov-btn { margin-left:var(--sp-1); }  /* 原第二鈕 margin-left:4px */
+  .card-edge-neutral { border-color:var(--border-strong); }  /* 舊藍框 canon 1 中性化;A3 複審 */
+  .card-edge-warn { border-color:var(--warn); }              /* 舊琥珀框→--warn */
+  .metrics-1col { grid-template-columns:1fr; }
+  .ai-ellipsis { max-width:150px; overflow:hidden; text-overflow:ellipsis; }
+  /* 進化引擎狀態點:靜態形制入本類,底色由 refreshEvolutionStatus 的 .style.background
+     覆蓋（§7 enum 留置,P0.4 class-per-enum;非 !important 故 JS inline 勝出,無鐵則一衝突）*/
+  .evo-dot { display:inline-block; width:8px; height:8px; border-radius:50%;
+    background:var(--text-secondary); margin-left:var(--sp-2); vertical-align:middle; }
+  .evo-field { flex:1 1 0%; min-width:120px; }
+  .tier-divider { border-top:1px dashed var(--border-subtle);
+    margin-top:var(--sp-2); padding-top:var(--sp-2); }
+  /* Engine Settings 下拉定寬（§5.4 零星定寬入頁內具名選擇器;以 id 供給,免動 class 屬性）*/
+  #ai-enabled, #ai-allow-opus, #ai-auto-submit { width:100px; }
+  #ai-provider, #ai-tier2-provider, #ai-tier3-provider { width:140px; }
+  #ai-model, #ai-tier2-model, #ai-tier3-model { width:160px; }
+  /* exp-status-badge 受 refreshExperimentStatus className 重寫(§3.2 鐵則二);
+     以 id 選擇器供 margin-left,免受 className-wipe 影響(id 不隨 className 改變) */
+  #exp-status-badge { margin-left:var(--sp-2); }
 </style>
 
 <!-- ═══ AI Engine Status ═══ -->
 <div class="oc-control-bar">
-  <span style="font-weight:600">&#x1F916; AI 推理引擎 / Layer 2 AI Engine</span>
+  <span class="fw-semi">&#x1F916; AI 推理引擎 / Layer 2 AI Engine</span>
   <span id="ai-badge" class="oc-chip oc-chip-neutral">checking...</span>
-  <span style="flex:1"></span>
+  <span class="flex-1"></span>
   <button class="oc-btn oc-btn-primary" onclick="showTriggerConfirm()">&#x26A1; Trigger Session</button>
   <button class="oc-btn" onclick="loadAll()">&#x1F504; Refresh</button>
 </div>
@@ -82,7 +105,7 @@
     <div class="oc-metric"><div class="oc-metric-label">预算倍數</div><div class="oc-metric-val" id="ab-mult">--</div><div class="oc-metric-sub">1.0 = 標准</div></div>
     <div class="oc-metric"><div class="oc-metric-label">AI 投資回報率</div><div class="oc-metric-val" id="ab-roi">--</div><div class="oc-metric-sub">AI 建議產生的收益/AI成本</div></div>
     <div class="oc-metric"><div class="oc-metric-label">有效预算</div><div class="oc-metric-val" id="ab-effective">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">調整原因</div><div class="oc-metric-val" id="ab-reason" style="font-size:12px">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">調整原因</div><div class="oc-metric-val fs-dense" id="ab-reason">--</div></div>
   </div>
 </div>
 
@@ -100,7 +123,7 @@
     <span class="text" id="roi-verdict">checking...</span>
     <span class="sub" id="roi-basis">paper_simulation_only</span>
   </div>
-  <div class="oc-table-wrap" style="margin-top:10px">
+  <div class="oc-table-wrap mt-3">
     <table class="oc-table">
       <thead><tr><th>Day</th><th>Cost</th><th>Tokens</th></tr></thead>
       <tbody id="roi-daily-body"><tr class="empty-row"><td colspan="3">--</td></tr></tbody>
@@ -109,27 +132,27 @@
 </div>
 
 <!-- ═══ AI Provider Management ═══ -->
-<div class="oc-card" style="border-color:rgba(56,139,253,0.3)">
+<div class="oc-card card-edge-neutral">
   <h3>&#x1F310; AI 供應商管理 / AI Provider Management</h3>
   <div id="explain-providers"></div>
-  <div style="font-size:10px;color:var(--text-dim);margin-top:6px">
-    標記 <span class="oc-chip oc-chip-good" style="font-size:9px">已配置 · Active</span> 表示密钥已存且 L2 客户端就緒；
-    <span class="oc-chip oc-chip-warn" style="font-size:9px">已存储 · 客户端未接</span> 表示密钥已写入但 L2 路徑暂無對應 client；
+  <div class="fs-micro t-dim mt-2">
+    標記 <span class="oc-chip oc-chip-good fs-micro">已配置 · Active</span> 表示密钥已存且 L2 客户端就緒；
+    <span class="oc-chip oc-chip-warn fs-micro">已存储 · 客户端未接</span> 表示密钥已写入但 L2 路徑暂無對應 client；
     Perplexity 已移到下方 Scout 搜索专用區域。
   </div>
 
-  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;margin-top:10px" id="provider-grid">
+  <div class="prov-grid gap-3 mt-3" id="provider-grid">
     <!-- Anthropic / Claude -->
     <div class="provider-card">
       <div class="prov-header"><span class="prov-name">&#x1F9E0; Anthropic (Claude)</span><span class="oc-chip oc-chip-neutral" id="prov-anthropic-badge">檢測中...</span></div>
       <div class="prov-models">模型：Claude Opus 4.7 / Sonnet 4.6 / Haiku 4.5</div>
       <div class="api-key-row">
         <input class="oc-input" id="key-anthropic" type="password" placeholder="sk-ant-..." />
-        <button class="oc-btn" style="padding:4px 8px;font-size:10px" onclick="saveProviderKey('anthropic',this)">保存</button>
-        <button class="oc-btn" style="padding:4px 8px;font-size:10px;margin-left:4px" onclick="clearProviderKey('anthropic',this)">清除</button>
+        <button class="oc-btn prov-btn" onclick="saveProviderKey('anthropic',this)">保存</button>
+        <button class="oc-btn prov-btn" onclick="clearProviderKey('anthropic',this)">清除</button>
       </div>
-      <div style="font-size:10px;color:var(--text-dim);margin-top:4px">参考價格：Haiku $0.25/Sonnet $3/Opus $15 per 1M tokens</div>
-      <div id="prov-anthropic-detail" style="font-size:10px;color:var(--text-dim);margin-top:4px">来源：檢測中...</div>
+      <div class="fs-micro t-dim mt-1">参考價格：Haiku $0.25/Sonnet $3/Opus $15 per 1M tokens</div>
+      <div id="prov-anthropic-detail" class="fs-micro t-dim mt-1">来源：檢測中...</div>
     </div>
 
     <!-- OpenAI -->
@@ -138,11 +161,11 @@
       <div class="prov-models">模型：GPT-4o / GPT-4o-mini / o1 / o3</div>
       <div class="api-key-row">
         <input class="oc-input" id="key-openai" type="password" placeholder="sk-..." />
-        <button class="oc-btn" style="padding:4px 8px;font-size:10px" onclick="saveProviderKey('openai',this)">保存</button>
-        <button class="oc-btn" style="padding:4px 8px;font-size:10px;margin-left:4px" onclick="clearProviderKey('openai',this)">清除</button>
+        <button class="oc-btn prov-btn" onclick="saveProviderKey('openai',this)">保存</button>
+        <button class="oc-btn prov-btn" onclick="clearProviderKey('openai',this)">清除</button>
       </div>
-      <div style="font-size:10px;color:var(--text-dim);margin-top:4px">参考價格：GPT-4o-mini $0.15/GPT-4o $2.5/o1 $15 per 1M tokens</div>
-      <div id="prov-openai-detail" style="font-size:10px;color:var(--text-dim);margin-top:4px">来源：檢測中...</div>
+      <div class="fs-micro t-dim mt-1">参考價格：GPT-4o-mini $0.15/GPT-4o $2.5/o1 $15 per 1M tokens</div>
+      <div id="prov-openai-detail" class="fs-micro t-dim mt-1">来源：檢測中...</div>
     </div>
 
     <!-- DeepSeek -->
@@ -151,11 +174,11 @@
       <div class="prov-models">模型：DeepSeek V4 Flash / V4 Pro</div>
       <div class="api-key-row">
         <input class="oc-input" id="key-deepseek" type="password" placeholder="sk-..." />
-        <button class="oc-btn" style="padding:4px 8px;font-size:10px" onclick="saveProviderKey('deepseek',this)">保存</button>
-        <button class="oc-btn" style="padding:4px 8px;font-size:10px;margin-left:4px" onclick="clearProviderKey('deepseek',this)">清除</button>
+        <button class="oc-btn prov-btn" onclick="saveProviderKey('deepseek',this)">保存</button>
+        <button class="oc-btn prov-btn" onclick="clearProviderKey('deepseek',this)">清除</button>
       </div>
-      <div style="font-size:10px;color:var(--text-dim);margin-top:4px">参考價格：V4 Flash $0.14/$0.28 per 1M input/output tokens</div>
-      <div id="prov-deepseek-detail" style="font-size:10px;color:var(--text-dim);margin-top:4px">来源：檢測中...</div>
+      <div class="fs-micro t-dim mt-1">参考價格：V4 Flash $0.14/$0.28 per 1M input/output tokens</div>
+      <div id="prov-deepseek-detail" class="fs-micro t-dim mt-1">来源：檢測中...</div>
     </div>
 
     <!-- Local LLM (Ollama) -->
@@ -164,10 +187,10 @@
       <div class="prov-models" id="ollama-models-line">Qwen 3.5 27B / 9B — 零 API 成本</div>
       <div class="api-key-row">
         <input class="oc-input" id="key-local" type="text" placeholder="http://127.0.0.1:11434" value="http://127.0.0.1:11434" />
-        <button class="oc-btn" style="padding:4px 8px;font-size:10px" onclick="saveProviderKey('local_llm',this)">保存</button>
-        <button class="oc-btn" style="padding:4px 8px;font-size:10px;margin-left:4px" onclick="checkOllamaStatus()">檢測</button>
+        <button class="oc-btn prov-btn" onclick="saveProviderKey('local_llm',this)">保存</button>
+        <button class="oc-btn prov-btn" onclick="checkOllamaStatus()">檢測</button>
       </div>
-      <div id="ollama-status-detail" style="font-size:10px;color:var(--text-dim);margin-top:4px">零成本，需要本地 GPU。正在檢測 Ollama 连通性...</div>
+      <div id="ollama-status-detail" class="fs-micro t-dim mt-1">零成本，需要本地 GPU。正在檢測 Ollama 连通性...</div>
     </div>
 
     <!-- Google -->
@@ -176,35 +199,35 @@
       <div class="prov-models">模型：Gemini 2.5 Pro / Flash</div>
       <div class="api-key-row">
         <input class="oc-input" id="key-google" type="password" placeholder="AI..." />
-        <button class="oc-btn" style="padding:4px 8px;font-size:10px" onclick="saveProviderKey('google',this)">保存</button>
-        <button class="oc-btn" style="padding:4px 8px;font-size:10px;margin-left:4px" onclick="clearProviderKey('google',this)">清除</button>
+        <button class="oc-btn prov-btn" onclick="saveProviderKey('google',this)">保存</button>
+        <button class="oc-btn prov-btn" onclick="clearProviderKey('google',this)">清除</button>
       </div>
-      <div style="font-size:10px;color:var(--text-dim);margin-top:4px">参考價格：Flash $0.075/Pro $1.25 per 1M tokens</div>
-      <div id="prov-google-detail" style="font-size:10px;color:var(--text-dim);margin-top:4px">来源：檢測中...</div>
+      <div class="fs-micro t-dim mt-1">参考價格：Flash $0.075/Pro $1.25 per 1M tokens</div>
+      <div id="prov-google-detail" class="fs-micro t-dim mt-1">来源：檢測中...</div>
     </div>
   </div>
 </div>
 
 <!-- ═══ Scout 搜索专用 (Search-only providers) ═══ -->
-<div class="oc-card" style="border-color:rgba(210,153,34,0.3)">
+<div class="oc-card card-edge-warn">
   <h3>&#x1F50D; Scout 搜索专用 / Scout Search-Only Providers</h3>
-  <div style="font-size:11px;color:var(--text-dim);margin:6px 0">
+  <div class="fs-micro t-dim mt-2 mb-2">
     此區域 provider 仅供 Scout 工具搜索實時市场信息使用，<strong>不参与 L2 推理</strong>，
     不可設为「默認供應商」或 Tier 2/3 fallback。<br>
     Used by Scout web-search tooling only — these never run L2 reasoning agent loop.
   </div>
-  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;margin-top:10px">
+  <div class="prov-grid gap-3 mt-3">
     <!-- Perplexity (search-only) -->
     <div class="provider-card">
       <div class="prov-header"><span class="prov-name">&#x1F50D; Perplexity</span><span class="oc-chip oc-chip-neutral" id="prov-perplexity-badge">檢測中...</span></div>
       <div class="prov-models">搜索增强型 AI — 實時市场信息（不接 L2 推理）</div>
       <div class="api-key-row">
         <input class="oc-input" id="key-perplexity" type="password" placeholder="pplx-..." />
-        <button class="oc-btn" style="padding:4px 8px;font-size:10px" onclick="saveProviderKey('perplexity',this)">保存</button>
-        <button class="oc-btn" style="padding:4px 8px;font-size:10px;margin-left:4px" onclick="clearProviderKey('perplexity',this)">清除</button>
+        <button class="oc-btn prov-btn" onclick="saveProviderKey('perplexity',this)">保存</button>
+        <button class="oc-btn prov-btn" onclick="clearProviderKey('perplexity',this)">清除</button>
       </div>
-      <div style="font-size:10px;color:var(--text-dim);margin-top:4px">参考價格：$5/1000 requests（含實時搜索）</div>
-      <div id="prov-perplexity-detail" style="font-size:10px;color:var(--text-dim);margin-top:4px">来源：檢測中...</div>
+      <div class="fs-micro t-dim mt-1">参考價格：$5/1000 requests（含實時搜索）</div>
+      <div id="prov-perplexity-detail" class="fs-micro t-dim mt-1">来源：檢測中...</div>
     </div>
   </div>
 </div>
@@ -213,30 +236,30 @@
 <div class="oc-card">
   <h3>
     &#x1F527; 引擎設置 / Engine Settings
-    <button class="oc-btn" onclick="refreshProviderModels(this)" title="刷新 provider 模型目录" style="padding:2px 8px;font-size:11px;margin-left:6px">&#x21BB; Models</button>
+    <button class="oc-btn oc-btn--xs ml-2" onclick="refreshProviderModels(this)" title="刷新 provider 模型目录">&#x21BB; Models</button>
   </h3>
   <div id="explain-settings"></div>
-  <div id="ai-model-catalog-status" style="font-size:11px;color:var(--text-dim);margin-top:8px">模型目录：載入中</div>
-  <div id="ai-local-model-options-status" style="font-size:11px;color:var(--text-dim);margin-top:4px">本地模型：載入中</div>
+  <div id="ai-model-catalog-status" class="fs-micro t-dim mt-2">模型目录：載入中</div>
+  <div id="ai-local-model-options-status" class="fs-micro t-dim mt-1">本地模型：載入中</div>
 
-  <div class="oc-grid-2" style="margin-top:10px">
-    <div style="display:grid;gap:10px">
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <div><div style="font-size:12px;font-weight:600">啟用 AI 引擎 / Enable</div><div style="font-size:10px;color:var(--text-dim)">關閉后所有 AI 查詢将停止</div></div>
-        <select class="oc-select" id="ai-enabled" style="width:100px"><option value="true">啟用</option><option value="false">禁用</option></select>
+  <div class="oc-grid-2 mt-3">
+    <div class="col gap-3">
+      <div class="row-between">
+        <div><div class="fs-dense fw-semi">啟用 AI 引擎 / Enable</div><div class="fs-micro t-dim">關閉后所有 AI 查詢将停止</div></div>
+        <select class="oc-select" id="ai-enabled"><option value="true">啟用</option><option value="false">禁用</option></select>
       </div>
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <div><div style="font-size:12px;font-weight:600">默認供應商 / Default Provider</div><div style="font-size:10px;color:var(--text-dim)">L2 推理首選；仅顯示已實装客户端的 provider</div></div>
-        <select class="oc-select" id="ai-provider" style="width:140px">
+      <div class="row-between">
+        <div><div class="fs-dense fw-semi">默認供應商 / Default Provider</div><div class="fs-micro t-dim">L2 推理首選；仅顯示已實装客户端的 provider</div></div>
+        <select class="oc-select" id="ai-provider">
           <option value="anthropic">Anthropic (Claude)</option>
           <option value="deepseek">DeepSeek</option>
           <option value="openai">OpenAI (GPT)</option>
           <option value="local_llm">Local LLM</option>
         </select>
       </div>
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <div><div style="font-size:12px;font-weight:600">默認模型 / Default Model</div><div style="font-size:10px;color:var(--text-dim)">tier_key — provider adapter 自動映射到具體 model_id</div></div>
-        <select class="oc-select" id="ai-model" style="width:160px">
+      <div class="row-between">
+        <div><div class="fs-dense fw-semi">默認模型 / Default Model</div><div class="fs-micro t-dim">tier_key — provider adapter 自動映射到具體 model_id</div></div>
+        <select class="oc-select" id="ai-model">
           <optgroup label="Anthropic">
             <option value="haiku">haiku — Claude Haiku 4.5</option>
             <option value="sonnet">sonnet — Claude Sonnet 4.6</option>
@@ -258,56 +281,56 @@
           </optgroup>
         </select>
       </div>
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <div><div style="font-size:12px;font-weight:600;color:var(--red)">日硬上限 / Daily Hard Cap</div><div style="font-size:10px;color:var(--text-dim)">所有供應商合計的每日成本硬上限</div></div>
-        <div style="display:flex;align-items:center;gap:6px"><span>$</span><input class="oc-input" id="ai-hard-cap" type="number" step="0.5" min="0" max="100" style="width:80px" /></div>
+      <div class="row-between">
+        <div><div class="fs-dense fw-semi t-neg">日硬上限 / Daily Hard Cap</div><div class="fs-micro t-dim">所有供應商合計的每日成本硬上限</div></div>
+        <div class="row gap-2"><span>$</span><input class="oc-input oc-input--num" id="ai-hard-cap" type="number" step="0.5" min="0" max="100" /></div>
       </div>
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <div><div style="font-size:12px;font-weight:600;color:var(--yellow)">弹性基准 / Adaptive Base</div><div style="font-size:10px;color:var(--text-dim)">自適應预算基准值</div></div>
-        <div style="display:flex;align-items:center;gap:6px"><span>$</span><input class="oc-input" id="ai-base-daily" type="number" step="0.5" min="0" max="50" style="width:80px" /></div>
+      <div class="row-between">
+        <div><div class="fs-dense fw-semi t-warn">弹性基准 / Adaptive Base</div><div class="fs-micro t-dim">自適應预算基准值</div></div>
+        <div class="row gap-2"><span>$</span><input class="oc-input oc-input--num" id="ai-base-daily" type="number" step="0.5" min="0" max="50" /></div>
       </div>
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <div><div style="font-size:12px;font-weight:600">弹性上限 / Max Multiplier</div><div style="font-size:10px;color:var(--text-dim)">预算最多擴大到基准的几倍</div></div>
-        <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="ai-max-mult" type="number" step="0.1" min="1" max="5" style="width:80px" /><span>x</span></div>
+      <div class="row-between">
+        <div><div class="fs-dense fw-semi">弹性上限 / Max Multiplier</div><div class="fs-micro t-dim">预算最多擴大到基准的几倍</div></div>
+        <div class="row gap-2"><input class="oc-input oc-input--num" id="ai-max-mult" type="number" step="0.1" min="1" max="5" /><span>x</span></div>
       </div>
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <div><div style="font-size:12px;font-weight:600">弹性下限 / Min Multiplier</div><div style="font-size:10px;color:var(--text-dim)">预算最少縮减到基准的几倍</div></div>
-        <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="ai-min-mult" type="number" step="0.1" min="0" max="1" style="width:80px" /><span>x</span></div>
+      <div class="row-between">
+        <div><div class="fs-dense fw-semi">弹性下限 / Min Multiplier</div><div class="fs-micro t-dim">预算最少縮减到基准的几倍</div></div>
+        <div class="row gap-2"><input class="oc-input oc-input--num" id="ai-min-mult" type="number" step="0.1" min="0" max="1" /><span>x</span></div>
       </div>
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <div><div style="font-size:12px;font-weight:600">允許自動升级模型 / Auto Upgrade</div><div style="font-size:10px;color:var(--text-dim)">允許系統自動選擇更貴但更准确的模型</div></div>
-        <select class="oc-select" id="ai-allow-opus" style="width:100px"><option value="true">允許</option><option value="false">不允許</option></select>
+      <div class="row-between">
+        <div><div class="fs-dense fw-semi">允許自動升级模型 / Auto Upgrade</div><div class="fs-micro t-dim">允許系統自動選擇更貴但更准确的模型</div></div>
+        <select class="oc-select" id="ai-allow-opus"><option value="true">允許</option><option value="false">不允許</option></select>
       </div>
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <div><div style="font-size:12px;font-weight:600">自動提交到 Paper 模擬 / Auto Submit</div><div style="font-size:10px;color:var(--text-dim)">AI 建議是否自動提交为 Paper 模擬訂單</div></div>
-        <select class="oc-select" id="ai-auto-submit" style="width:100px"><option value="true">自動</option><option value="false">手動</option></select>
+      <div class="row-between">
+        <div><div class="fs-dense fw-semi">自動提交到 Paper 模擬 / Auto Submit</div><div class="fs-micro t-dim">AI 建議是否自動提交为 Paper 模擬訂單</div></div>
+        <select class="oc-select" id="ai-auto-submit"><option value="true">自動</option><option value="false">手動</option></select>
       </div>
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <div><div style="font-size:12px;font-weight:600">最大迭代次數 / Max Iterations</div><div style="font-size:10px;color:var(--text-dim)">單次 AI 推理的最大思考轮數</div></div>
-        <input class="oc-input" id="ai-max-iter" type="number" step="1" min="1" max="50" style="width:80px" />
+      <div class="row-between">
+        <div><div class="fs-dense fw-semi">最大迭代次數 / Max Iterations</div><div class="fs-micro t-dim">單次 AI 推理的最大思考轮數</div></div>
+        <input class="oc-input oc-input--num" id="ai-max-iter" type="number" step="1" min="1" max="50" />
       </div>
 
       <!-- ── 预算降级 Tier 2 / Budget Fallback Tier 2 ── -->
-      <div style="border-top:1px dashed #21262d;margin-top:6px;padding-top:8px">
-        <div style="font-size:11px;font-weight:600;color:var(--yellow);margin-bottom:4px">&#x1F539; Tier 2 降级 — 中度成本壓縮</div>
-        <div style="font-size:10px;color:var(--text-dim);margin-bottom:6px">当今日花費 ≥ 阈值 × 日硬上限時，切到此 provider+model 繼續推理</div>
+      <div class="tier-divider">
+        <div class="fs-micro fw-semi t-warn mb-1">&#x1F539; Tier 2 降级 — 中度成本壓縮</div>
+        <div class="fs-micro t-dim mb-2">当今日花費 ≥ 阈值 × 日硬上限時，切到此 provider+model 繼續推理</div>
       </div>
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <div style="font-size:11px">触发阈值 / Trigger %</div>
-        <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="ai-tier2-threshold" type="number" step="0.05" min="0" max="1" style="width:80px" /><span>×cap</span></div>
+      <div class="row-between">
+        <div class="fs-micro">触发阈值 / Trigger %</div>
+        <div class="row gap-2"><input class="oc-input oc-input--num" id="ai-tier2-threshold" type="number" step="0.05" min="0" max="1" /><span>×cap</span></div>
       </div>
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <div style="font-size:11px">Tier 2 供應商 / Provider</div>
-        <select class="oc-select" id="ai-tier2-provider" style="width:140px">
+      <div class="row-between">
+        <div class="fs-micro">Tier 2 供應商 / Provider</div>
+        <select class="oc-select" id="ai-tier2-provider">
           <option value="anthropic">Anthropic (Claude)</option>
           <option value="deepseek">DeepSeek</option>
           <option value="openai">OpenAI (GPT)</option>
           <option value="local_llm">Local LLM</option>
         </select>
       </div>
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <div style="font-size:11px">Tier 2 模型 / Model</div>
-        <select class="oc-select" id="ai-tier2-model" style="width:160px">
+      <div class="row-between">
+        <div class="fs-micro">Tier 2 模型 / Model</div>
+        <select class="oc-select" id="ai-tier2-model">
           <optgroup label="Anthropic"><option value="haiku">haiku</option><option value="sonnet">sonnet</option></optgroup>
           <optgroup label="DeepSeek"><option value="deepseek-v4-flash">deepseek-v4-flash</option><option value="deepseek-v4-pro">deepseek-v4-pro</option><option value="deepseek-chat">deepseek-chat</option><option value="deepseek-reasoner">deepseek-reasoner</option></optgroup>
           <optgroup label="OpenAI"><option value="gpt-5.4-mini">gpt-5.4-mini</option><option value="gpt-5.4">gpt-5.4</option><option value="gpt-4o-mini">gpt-4o-mini</option><option value="gpt-4o">gpt-4o</option></optgroup>
@@ -315,37 +338,37 @@
       </div>
 
       <!-- ── 预算降级 Tier 3 / Budget Fallback Tier 3 ── -->
-      <div style="border-top:1px dashed #21262d;margin-top:6px;padding-top:8px">
-        <div style="font-size:11px;font-weight:600;color:var(--red);margin-bottom:4px">&#x1F538; Tier 3 降级 — 极限省钱</div>
-        <div style="font-size:10px;color:var(--text-dim);margin-bottom:6px">当今日花費 ≥ 阈值 × 日硬上限時，切到此 provider+model（仍受 hard_cap 拦截）</div>
+      <div class="tier-divider">
+        <div class="fs-micro fw-semi t-neg mb-1">&#x1F538; Tier 3 降级 — 极限省钱</div>
+        <div class="fs-micro t-dim mb-2">当今日花費 ≥ 阈值 × 日硬上限時，切到此 provider+model（仍受 hard_cap 拦截）</div>
       </div>
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <div style="font-size:11px">触发阈值 / Trigger %</div>
-        <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="ai-tier3-threshold" type="number" step="0.05" min="0" max="1" style="width:80px" /><span>×cap</span></div>
+      <div class="row-between">
+        <div class="fs-micro">触发阈值 / Trigger %</div>
+        <div class="row gap-2"><input class="oc-input oc-input--num" id="ai-tier3-threshold" type="number" step="0.05" min="0" max="1" /><span>×cap</span></div>
       </div>
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <div style="font-size:11px">Tier 3 供應商 / Provider</div>
-        <select class="oc-select" id="ai-tier3-provider" style="width:140px">
+      <div class="row-between">
+        <div class="fs-micro">Tier 3 供應商 / Provider</div>
+        <select class="oc-select" id="ai-tier3-provider">
           <option value="anthropic">Anthropic (Claude)</option>
           <option value="deepseek">DeepSeek</option>
           <option value="openai">OpenAI (GPT)</option>
           <option value="local_llm">Local LLM</option>
         </select>
       </div>
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <div style="font-size:11px">Tier 3 模型 / Model</div>
-        <select class="oc-select" id="ai-tier3-model" style="width:160px">
+      <div class="row-between">
+        <div class="fs-micro">Tier 3 模型 / Model</div>
+        <select class="oc-select" id="ai-tier3-model">
           <optgroup label="Anthropic"><option value="haiku">haiku</option></optgroup>
           <optgroup label="DeepSeek"><option value="deepseek-v4-flash">deepseek-v4-flash</option><option value="deepseek-chat">deepseek-chat</option></optgroup>
           <optgroup label="OpenAI"><option value="gpt-5.4-mini">gpt-5.4-mini</option><option value="gpt-4o-mini">gpt-4o-mini</option></optgroup>
         </select>
       </div>
 
-      <button class="oc-btn oc-btn-primary" onclick="saveAIConfig(this)" style="margin-top:4px">&#x1F4BE; 保存設置 / Save Settings</button>
+      <button class="oc-btn oc-btn-primary mt-1" onclick="saveAIConfig(this)">&#x1F4BE; 保存設置 / Save Settings</button>
     </div>
 
     <div>
-      <h4 style="font-size:13px;margin-bottom:8px">當前配置 / Current Config</h4>
+      <h4 class="fs-base mb-2">當前配置 / Current Config</h4>
       <div id="ai-config" class="oc-loading">Loading...</div>
     </div>
   </div>
@@ -358,7 +381,7 @@
     <div class="oc-metric"><div class="oc-metric-label">已啟用</div><div class="oc-metric-val" id="c-enabled">--</div></div>
     <div class="oc-metric"><div class="oc-metric-label">運行中</div><div class="oc-metric-val" id="c-running">--</div></div>
     <div class="oc-metric"><div class="oc-metric-label">總查詢次數</div><div class="oc-metric-val" id="c-queries">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">最后查詢</div><div class="oc-metric-val" id="c-last" style="font-size:12px">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">最后查詢</div><div class="oc-metric-val fs-dense" id="c-last">--</div></div>
   </div>
 </div>
 
@@ -375,10 +398,10 @@
 
 <!-- ═══ Pricing Table ═══ -->
 <details class="oc-collapse">
-  <summary>&#x1F4B2; 定價表 / Pricing Table <button class="oc-btn" onclick="refreshPricing(this);event.preventDefault();" style="padding:2px 8px;font-size:11px;margin-left:6px">&#x21BB; Pricing</button></summary>
+  <summary>&#x1F4B2; 定價表 / Pricing Table <button class="oc-btn oc-btn--xs ml-2" onclick="refreshPricing(this);event.preventDefault();">&#x21BB; Pricing</button></summary>
   <div class="oc-collapse-body">
     <div id="explain-pricing"></div>
-    <div id="pricing-refresh-status" style="font-size:11px;color:var(--text-dim);margin:8px 0">定價刷新：載入中</div>
+    <div id="pricing-refresh-status" class="fs-micro t-dim mt-2 mb-2">定價刷新：載入中</div>
     <div id="pricing-body" class="oc-loading">Loading...</div>
   </div>
 </details>
@@ -387,10 +410,10 @@
 <div class="oc-card">
   <h3>
     &#x1F9EA; 假設實驗狀態 / Experiment Status
-    <span class="oc-chip oc-chip-neutral" id="exp-status-badge" style="margin-left:6px">載入中</span>
-    <button class="oc-btn" onclick="refreshExperimentStatus()" title="手動刷新" style="padding:2px 8px;font-size:11px;margin-left:6px">&#x21BB;</button>
+    <span class="oc-chip oc-chip-neutral" id="exp-status-badge">載入中</span>
+    <button class="oc-btn oc-btn--xs ml-2" onclick="refreshExperimentStatus()" title="手動刷新">&#x21BB;</button>
   </h3>
-  <div class="oc-metrics" id="exp-status-grid" style="margin-top:10px">
+  <div class="oc-metrics mt-3" id="exp-status-grid">
     <div class="oc-metric">
       <div class="oc-metric-label">活躍假設</div>
       <div class="oc-metric-val" id="exp-active">--</div>
@@ -405,11 +428,11 @@
     </div>
     <div class="oc-metric">
       <div class="oc-metric-label">已過期</div>
-      <div class="oc-metric-val" id="exp-expired" style="color:var(--text-dim)">--</div>
+      <div class="oc-metric-val t-dim" id="exp-expired">--</div>
     </div>
   </div>
-  <div style="font-size:11px;color:var(--text-dim);margin-top:8px">
-    每 30 秒自動刷新 · <a href="#" onclick="refreshExperimentStatus();return false;" style="color:var(--accent)">立即刷新</a>
+  <div class="fs-micro t-dim mt-2">
+    每 30 秒自動刷新 · <a href="#" onclick="refreshExperimentStatus();return false;" class="t-accent">立即刷新</a>
   </div>
 </div>
 
@@ -417,9 +440,9 @@
 <div class="oc-card">
   <h3>
     &#x1F4CA; Kelly 資本配置 / Kelly Capital Allocation
-    <button class="oc-btn" onclick="refreshKellyData()" title="手動刷新" style="padding:2px 8px;font-size:11px;margin-left:6px">&#x21BB;</button>
+    <button class="oc-btn oc-btn--xs ml-2" onclick="refreshKellyData()" title="手動刷新">&#x21BB;</button>
   </h3>
-  <div class="oc-metrics" id="kelly-summary-grid" style="margin-top:10px">
+  <div class="oc-metrics mt-3" id="kelly-summary-grid">
     <div class="oc-metric">
       <div class="oc-metric-label">策略數</div>
       <div class="oc-metric-val" id="kelly-strategy-count">--</div>
@@ -433,7 +456,7 @@
       <div class="oc-metric-val" id="kelly-total-samples">--</div>
     </div>
   </div>
-  <div class="oc-table-wrap" style="margin-top:10px">
+  <div class="oc-table-wrap mt-3">
     <table class="oc-table" id="kelly-table">
       <thead><tr>
         <th>策略 / Strategy</th>
@@ -444,22 +467,22 @@
         <th>層級</th>
       </tr></thead>
       <tbody id="kelly-tbody">
-        <tr><td colspan="6" style="text-align:center;color:var(--text-dim)">載入中...</td></tr>
+        <tr><td colspan="6" class="t-center t-dim">載入中...</td></tr>
       </tbody>
     </table>
   </div>
-  <div style="font-size:11px;color:var(--text-dim);margin-top:8px">
-    每 60 秒自動刷新 · <a href="#" onclick="refreshKellyData();return false;" style="color:var(--accent)">立即刷新</a>
+  <div class="fs-micro t-dim mt-2">
+    每 60 秒自動刷新 · <a href="#" onclick="refreshKellyData();return false;" class="t-accent">立即刷新</a>
   </div>
 </div>
 
 <!-- ═══ Strategy Evolution / 策略參數進化 ═══ -->
-<div class="oc-card" style="border-color:rgba(56,139,253,0.3)">
+<div class="oc-card card-edge-neutral">
   <h3>
     &#x1F4C8; 策略參數進化 / Strategy Evolution
-    <span id="evo-status-dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--text-dim);margin-left:6px;vertical-align:middle" title="進化引擎狀態"></span>
+    <span id="evo-status-dot" class="evo-dot" title="進化引擎狀態"></span>
   </h3>
-  <div class="oc-metrics" id="evo-status-grid" style="margin-top:10px">
+  <div class="oc-metrics mt-3" id="evo-status-grid">
     <div class="oc-metric">
       <div class="oc-metric-label">累計進化次數</div>
       <div class="oc-metric-val" id="evo-total-runs">--</div>
@@ -471,15 +494,15 @@
   </div>
 
   <!-- 手動觸發進化（需 Operator 權限）/ Manual trigger (requires Operator role) -->
-  <div id="evo-run-form" style="margin-top:12px">
-    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-      <input id="evo-strategy" type="text" class="oc-input" placeholder="策略名 (e.g. ma_crossover)" style="flex:1;min-width:140px">
-      <input id="evo-symbol" type="text" class="oc-input" placeholder="Symbol (e.g. BTCUSDT)" style="flex:1;min-width:120px" value="BTCUSDT">
+  <div id="evo-run-form" class="mt-3">
+    <div class="row wrap gap-2">
+      <input id="evo-strategy" type="text" class="oc-input evo-field" placeholder="策略名 (e.g. ma_crossover)">
+      <input id="evo-symbol" type="text" class="oc-input evo-field" placeholder="Symbol (e.g. BTCUSDT)" value="BTCUSDT">
       <button class="oc-btn oc-btn-primary" onclick="runEvolution()" id="evo-run-btn">執行進化</button>
     </div>
-    <div id="evo-result" style="margin-top:8px;font-size:12px;color:var(--text-dim)"></div>
+    <div id="evo-result" class="mt-2 fs-dense"></div>
   </div>
-  <div style="font-size:11px;color:var(--text-dim);margin-top:8px">
+  <div class="fs-micro t-dim mt-2">
     自動排程：每週日 UTC 00:30 · Operator 認證後可手動觸發
   </div>
 </div>
@@ -492,13 +515,13 @@
       <strong>即将触发一次 AI 深度分析。</strong>
       <p>AI 会分析當前市场状况、持倉情况和歷史表現，然后給出交易建議。</p>
       <div class="cost-est">
-        <div style="font-weight:600;margin-bottom:4px">&#x1F4B0; 预估成本：</div>
+        <div class="fw-semi mb-1">&#x1F4B0; 预估成本：</div>
         <div id="trigger-cost-est">
           <div>默認模型 (Sonnet): <strong>~$0.02 - $0.08</strong></div>
           <div>如升级到 Opus: <strong>~$0.10 - $0.50</strong></div>
           <div>如使用 Haiku: <strong>~$0.002 - $0.01</strong></div>
           <div>如使用 DeepSeek: <strong>~$0.001 - $0.005</strong></div>
-          <div style="margin-top:4px;font-size:11px;color:var(--text-dim)">實際成本取決于分析復杂度和 token 用量</div>
+          <div class="mt-1 fs-micro t-dim">實際成本取決于分析復杂度和 token 用量</div>
         </div>
       </div>
     </div>
@@ -1119,19 +1142,19 @@ async function loadConsult() {
 
 async function loadSessions() {
   const d = await ocApi('/api/v1/paper/layer2/sessions?limit=20');
-  if (!d || !d.data) { ocSetHtml('sessions-tbody', '<tr class="empty-row"><td colspan="7" style="color:var(--text-dim)">⚠ 连接失败 / Connection failed</td></tr>'); return; }
+  if (!d || !d.data) { ocSetHtml('sessions-tbody', '<tr class="empty-row"><td colspan="7" class="t-dim">⚠ 连接失败 / Connection failed</td></tr>'); return; }
   const sessions = d.data.sessions || d.data || [];
   if (!sessions.length) { ocSetHtml('sessions-tbody', '<tr class="empty-row"><td colspan="7">暂無 AI 推理記錄</td></tr>'); return; }
   let html = '';
   sessions.slice(0, 20).forEach(s => {
     html += '<tr>';
-    html += '<td style="font-size:11px">' + ocEsc(String(s.session_id || s.id || '').slice(0, 8)) + '</td>';
+    html += '<td class="fs-micro">' + ocEsc(String(s.session_id || s.id || '').slice(0, 8)) + '</td>';
     html += '<td>' + ocTimeShort(s.created_at || s.timestamp) + '</td>';
     html += '<td>' + ocEsc(s.trigger || s.reason || '--') + '</td>';
     html += '<td>' + ocEsc(s.symbol || '--') + '</td>';
     html += '<td>' + ocChip(s.status || s.state || '--', s.status === 'completed' ? 'good' : s.status === 'failed' ? 'bad' : 'neutral') + '</td>';
     html += '<td>' + (s.cost != null ? ocBalance(s.cost, 4) : '--') + '</td>';
-    html += '<td style="font-size:11px;max-width:150px;overflow:hidden;text-overflow:ellipsis">' + ocEsc(s.result || s.recommendation || '--') + '</td>';
+    html += '<td class="fs-micro ai-ellipsis">' + ocEsc(s.result || s.recommendation || '--') + '</td>';
     html += '</tr>';
   });
   ocSetHtml('sessions-tbody', html);
@@ -1141,7 +1164,7 @@ async function loadConfig() {
   const d = await ocApi('/api/v1/paper/layer2/config');
   if (!d || !d.data) { ocSetHtml('ai-config', '<div class="oc-loading">No config</div>'); return; }
   const cfg = d.data;
-  let html = '<div class="oc-metrics" style="grid-template-columns:1fr">';
+  let html = '<div class="oc-metrics metrics-1col">';
   const t2 = (cfg.fallback_tier2_provider || '?') + ' / ' + (cfg.fallback_tier2_model || '?')
     + ' @ ' + ((cfg.fallback_tier2_threshold_pct ?? 0.5) * 100).toFixed(0) + '%';
   const t3 = (cfg.fallback_tier3_provider || '?') + ' / ' + (cfg.fallback_tier3_model || '?')
@@ -1160,7 +1183,7 @@ async function loadConfig() {
     ['Tier 3 降级', t3],
   ];
   fields.forEach(([label, val]) => {
-    html += '<div class="oc-metric"><div class="oc-metric-label">' + label + '</div><div class="oc-metric-val" style="font-size:13px">' + ocEsc(String(val)) + '</div></div>';
+    html += '<div class="oc-metric"><div class="oc-metric-label">' + label + '</div><div class="oc-metric-val fs-base">' + ocEsc(String(val)) + '</div></div>';
   });
   html += '</div>';
   ocSetHtml('ai-config', html);
@@ -1426,19 +1449,20 @@ async function refreshKellyData() {
 
     const tbody = document.getElementById('kelly-tbody');
     if (keys.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-dim)">無策略數據</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6" class="t-center t-dim">無策略數據</td></tr>';
       return;
     }
     tbody.innerHTML = keys.map(k => {
       const s = strategies[k];
-      const tierColor = s.kelly_tier === 'normal' ? 'green' : (s.kelly_tier === 'moderate' ? 'var(--accent)' : 'var(--text-dim)');
+      // P0.2 batch 3:層級色 enum → class-per-enum（§7;normal 綠 keyword→--pos 主題色）
+      const tierCls = s.kelly_tier === 'normal' ? 't-pos' : (s.kelly_tier === 'moderate' ? 't-accent' : 't-dim');
       return `<tr>
         <td>${ocEsc(k)}</td>
         <td>${(s.kelly_fraction * 100).toFixed(2)}%</td>
         <td>${s.recommended_qty.toFixed(4)}</td>
         <td>${(s.win_rate * 100).toFixed(1)}%</td>
         <td>${s.sample_size}</td>
-        <td style="color:${tierColor}">${ocEsc(s.kelly_tier)}</td>
+        <td class="${tierCls}">${ocEsc(s.kelly_tier)}</td>
       </tr>`;
     }).join('');
   } catch(e) {

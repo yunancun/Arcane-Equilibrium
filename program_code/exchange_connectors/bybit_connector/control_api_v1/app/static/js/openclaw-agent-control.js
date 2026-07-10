@@ -17,12 +17,13 @@ const _OPENCLAW_CONTROL_TIMERS = {
 let _openclawPollSeq = 0;
 
 function _openclawSetState(type) {
+  // P0.2 batch 3:display 切換改 classList('hidden')（§3.3 引理:show 端原寫 '' ≡ remove hidden）
   ["loading", "error"].forEach(function (name) {
     const el = document.getElementById("openclaw-control-" + name);
-    if (el) el.style.display = (name === type) ? "" : "none";
+    if (el) el.classList.toggle("hidden", name !== type);
   });
   const dataEl = document.getElementById("openclaw-control-data");
-  if (dataEl) dataEl.style.display = (type === "data") ? "" : "none";
+  if (dataEl) dataEl.classList.toggle("hidden", type !== "data");
 }
 
 function _openclawRequestId() {
@@ -126,7 +127,7 @@ function _renderOpenClawGateway(statusPayload) {
   const runtime = data.runtime || {};
   const budget = data.model_budget || {};
   const channels = gateway.channels || {};
-  let channelHtml = '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">';
+  let channelHtml = '<div class="row wrap gap-2 mt-2">';
   Object.keys(channels).forEach(function (name) {
     const value = channels[name];
     const chip = value === "available" ? "good" : "neutral";
@@ -199,14 +200,14 @@ function _renderOpenClawBlockers(selfPayload) {
   const blockers = data.open_blockers || [];
   let html = '<div class="agent-control-blockers">';
   if (!blockers.length) {
-    html += '<div style="color:var(--text-dim);font-size:12px">No active MAG-018 read-only blockers.</div>';
+    html += '<div class="t-dim fs-dense">No active MAG-018 read-only blockers.</div>';
   } else {
     blockers.forEach(function (blocker) {
       const severity = blocker.severity || "warn";
       html += '<div class="agent-control-blocker ' + (severity === "fail" ? "fail" : "") + '">';
       html += '<div><strong>' + ocEsc(blocker.code || "blocker") + '</strong> '
         + ocChip(severity, severity === "fail" ? "bad" : "warn") + '</div>';
-      html += '<div style="color:var(--text-dim);margin-top:3px">'
+      html += '<div class="t-dim mt-1">'
         + ocEsc(blocker.summary || "") + '</div>';
       html += '</div>';
     });
