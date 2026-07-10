@@ -11,7 +11,9 @@ MODULE_NOTE
 
 硬邊界：
   - public GET only，無 credential / signing / order / DB / runtime mutation。
-  - 本腳本不自動啟動 24h Gate-B probe；只給 operator 明確行動提示。
+  - probe 自動啟動僅限 AMD-2026-07-10-01 授權範圍：sibling 模塊 gate_b_auto_capture
+    （預設 OFF，OPENCLAW_GATE_B_AUTO_CAPTURE=1 啟用）對未來 5 個新上市自啟隔離探針，
+    cap=5 持久化計數、cap 滿自動停；其餘情形維持 alert-only 行動提示。
   - 任何外部文本只進 artifact 或短告警摘要，不展開公告 description。
   - 拉取失敗 fail-soft exit 0；連續失敗達閾值才發 health meta-alert。
 """
@@ -36,6 +38,7 @@ _HERE = str(Path(__file__).resolve().parent)
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 import alert_sink  # noqa: E402
+import gate_b_auto_capture  # noqa: E402
 
 logger = logging.getLogger("gate_b_watch")
 
@@ -602,7 +605,10 @@ def format_alert(candidate: dict[str, Any]) -> tuple[str, str]:
     if suggested.get("suggested_probe_start_utc"):
         body_lines.append(f"suggested_probe_start_utc: {suggested['suggested_probe_start_utc']}")
     body_lines.append(f"probe_command_hint: {_probe_command_hint(candidate)}")
-    body_lines.append("boundary: alert-only; this watcher does not start probe/trading/DB/runtime paths.")
+    body_lines.append(
+        "boundary: no trading/DB/runtime paths; probe autostart only under "
+        "operator-authorized cap (AMD-2026-07-10-01, default OFF)."
+    )
     return subject[:260], "\n".join(body_lines)
 
 
@@ -808,6 +814,20 @@ def run_once(
         sleep_fn=sleep_fn,
     )
 
+    # 自動觸發（AMD-2026-07-10-01）：operator 已授權未來 5 個新上市自啟隔離 Gate-B capture。
+    # 為什麼放在告警後、artifact 前：告警去重 state 不受影響；auto_capture 的計數 / audit
+    # 結果要進本輪 latest artifact 與 state 落地。模塊自身 fail-soft，flag OFF 零副作用。
+    auto_capture_summary = gate_b_auto_capture.maybe_auto_capture(
+        data_dir,
+        state,
+        candidates,
+        now=now,
+        dry_run=dry_run,
+        alert_fn=alert_fn,
+        alert_resolver=_resolve_alert_fn,
+        sleep_fn=sleep_fn,
+    )
+
     payload = {
         "schema_version": 1,
         "generated_at_utc": _iso_utc(now),
@@ -828,7 +848,15 @@ def run_once(
             "treat no transition as INCONCLUSIVE_NO_TRANSITION, not alpha evidence",
         ],
         "candidates": candidates,
-        "boundary": "alert-only; no probe autostart; no trading/runtime/DB mutation",
+        "auto_capture": auto_capture_summary,
+        # 為什麼 boundary 隨 flag 分流：artifact 是審計面，措辭必須反映真實行為，
+        # 不得在 auto-capture 啟用時仍宣稱 no probe autostart。
+        "boundary": (
+            "alert + operator-authorized bounded auto-capture "
+            "(AMD-2026-07-10-01, cap=5); no trading/runtime/DB mutation"
+            if auto_capture_summary.get("enabled")
+            else "alert-only; auto-capture disabled; no trading/runtime/DB mutation"
+        ),
     }
     _write_artifacts(data_dir, payload)
     save_state(data_dir, state)
