@@ -26,27 +26,50 @@
   .oc-source-note { color:var(--text-dim); font-size:10px; display:block; margin-top:2px; }
   .oc-spin { display:inline-block; animation:ocSpin 0.8s linear infinite; }
   @keyframes ocSpin { from { transform:rotate(0deg); } to { transform:rotate(360deg); } }
+
+  /* ── P0.2 批次 8a(demo)頁組件:inline style= 收斂的頁面級落點 ──
+     位於 body <style>,文檔序晚於 ocInjectBaseCSS 的 head 注入,同 specificity 頁塊勝,故不需 !important。
+     palette 外色(藍 tint/暗底/#eab308 琥珀警示/scrim)verbatim 保留,標 P0.4 併入組件層複審。
+     Demo=虛擬資金,此處琥珀為「破壞性操作警示」語義,非 canon 6 真金熱紅。 */
+  /* 風控導覽鈕:藍 tint(rgba 藍為 palette 外色,P0.4;文字色沿用 --blue 中性化後的 --text-secondary) */
+  .demo-risk-btn { border-color:rgba(56,139,253,0.45); color:var(--text-secondary); }
+  /* 盈亏走勢 sparkline 底圖 chrome(半透明暗底為 palette 外色,P0.4;邊框歸 --border-subtle) */
+  .demo-pnl-svg { display:block; background:rgba(13,17,23,0.5); border-radius:var(--r-1); border:1px solid var(--border-subtle); }
+  /* 盈亏序列表捲動高度上限(元素特定值,無 token) */
+  .demo-scroll-190 { max-height:190px; overflow:auto; }
+  /* 未連接說明區:在置中容器內改為左對齊(無 t-left utility,頁組件承載) */
+  .demo-help-left { text-align:left; }
+  /* 全平確認框 overlay/box/標題/動作列/確認鈕(琥珀 #eab308 為破壞性警示,palette 外色,P0.4) */
+  .demo-cta-overlay { position:fixed; top:0; right:0; bottom:0; left:0; background:rgba(0,0,0,0.6); z-index:9999; display:flex; align-items:center; justify-content:center; }
+  .demo-cta-box { background:var(--bg-surface); border:1px solid rgba(234,179,8,0.5); border-radius:var(--r-2); padding:var(--sp-5); max-width:440px; width:90%; box-shadow:0 8px 32px rgba(0,0,0,0.4); }
+  .demo-cta-title { margin:0 0 var(--sp-3) 0; font-size:var(--fs-section); color:#eab308; }
+  .demo-cta-actions { display:flex; gap:var(--sp-2); justify-content:flex-end; }
+  .demo-cta-confirm { border-color:rgba(234,179,8,0.7); color:#eab308; font-weight:var(--weight-semi); }
+  /* className-wipe 元素(sumEl.className 每次重寫 green/red/''):#id 選擇器抗抹除,鐵則二 */
+  #demo-close-all-summary { margin:0 0 var(--sp-4) 0; font-size:var(--fs-base); font-weight:var(--weight-semi); line-height:1.5; }
+  /* className-wipe 元素(badge.className 每刷新重寫 oc-chip*):#id 選擇器抗抹除,鐵則二 */
+  #demo-session-badge { margin-left:var(--sp-2); }
 </style>
 
 <!-- Connector Status + Demo Session Control / 连接状态 + Demo 會話控制 -->
 <div class="oc-control-bar">
-  <span style="font-weight:600">&#x1F3E6; Demo 演示</span>
+  <span class="fw-semi">&#x1F3E6; Demo 演示</span>
   <span id="demo-badge" class="oc-chip oc-chip-neutral">檢測中...</span>
-  <span id="demo-session-badge" class="oc-chip oc-chip-neutral" style="margin-left:8px">--</span>
-  <span style="flex:1"></span>
-  <button class="oc-btn" onclick="openDemoRisk()" title="跳转到 Demo 風控页 / Open Demo risk controls" style="font-size:12px;padding:4px 10px;border-color:rgba(56,139,253,0.45);color:var(--blue)">&#x1F6E1; 風控</button>
-  <button class="oc-btn oc-btn-success" id="btn-demo-start" onclick="demoSessionAction('start')" style="font-size:12px;padding:4px 10px">&#x25B6; 啟動</button>
-  <button class="oc-btn" id="btn-demo-pause" onclick="demoSessionAction('pause')" disabled style="font-size:12px;padding:4px 10px">&#x23F8; 暂停</button>
-  <button class="oc-btn" id="btn-demo-resume" onclick="demoSessionAction('resume')" disabled style="font-size:12px;padding:4px 10px">&#x25B6; 繼續</button>
-  <button class="oc-btn oc-btn-danger" id="btn-demo-stop" onclick="demoSessionAction('stop')" disabled style="font-size:12px;padding:4px 10px">&#x23F9; 停止</button>
-  <span style="font-size:12px;color:var(--text-dim);margin-left:8px" id="demo-api-info"></span>
+  <span id="demo-session-badge" class="oc-chip oc-chip-neutral">--</span>
+  <span class="flex-1"></span>
+  <button class="oc-btn fs-dense py-1 px-3 demo-risk-btn" onclick="openDemoRisk()" title="跳转到 Demo 風控页 / Open Demo risk controls">&#x1F6E1; 風控</button>
+  <button class="oc-btn oc-btn-success fs-dense py-1 px-3" id="btn-demo-start" onclick="demoSessionAction('start')">&#x25B6; 啟動</button>
+  <button class="oc-btn fs-dense py-1 px-3" id="btn-demo-pause" onclick="demoSessionAction('pause')" disabled>&#x23F8; 暂停</button>
+  <button class="oc-btn fs-dense py-1 px-3" id="btn-demo-resume" onclick="demoSessionAction('resume')" disabled>&#x25B6; 繼續</button>
+  <button class="oc-btn oc-btn-danger fs-dense py-1 px-3" id="btn-demo-stop" onclick="demoSessionAction('stop')" disabled>&#x23F9; 停止</button>
+  <span class="fs-dense t-dim ml-2" id="demo-api-info"></span>
 </div>
 
 <div id="explain-demo"></div>
 <div id="demo-status-banner" class="oc-demo-stale-banner"></div>
 
 <!-- Content (shown when connected) / 已连接時顯示 -->
-<div id="demo-content" style="display:none">
+<div id="demo-content" class="hidden">
 
   <!-- Account Balance / 賬户余额 -->
   <div class="oc-card">
@@ -72,25 +95,25 @@
       <div class="oc-metric"><div class="oc-metric-label" title="从峰值到最低点的最大跌幅百分比，衡量最坏情况下的資金回撤。越小越好。/ Largest peak-to-trough decline in equity. Lower is better.">最大回撤 / Max Drawdown</div><div class="oc-metric-val" id="d-maxdd">--</div></div>
     </div>
     <!-- PnL Trend Sparkline / 盈亏趋势圖 -->
-    <div style="margin-top:10px">
-      <div style="font-size:10px;color:var(--text-dim);margin-bottom:6px;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
-        <span>累計收益時間序列 / Cumulative PnL Timeline <span id="demo-pnl-range-label" style="font-size:9px;color:var(--text-dim)"></span></span>
-        <div id="demo-pnl-range-controls" style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">
-          <button class="oc-btn" data-pnl-range="1h" onclick="setDemoPnlRange('1h')" style="font-size:10px;padding:2px 8px">1H</button>
-          <button class="oc-btn" data-pnl-range="6h" onclick="setDemoPnlRange('6h')" style="font-size:10px;padding:2px 8px">6H</button>
-          <button class="oc-btn" data-pnl-range="24h" onclick="setDemoPnlRange('24h')" style="font-size:10px;padding:2px 8px">24H</button>
-          <button class="oc-btn" data-pnl-range="7d" onclick="setDemoPnlRange('7d')" style="font-size:10px;padding:2px 8px">7D</button>
-          <button class="oc-btn" data-pnl-range="30d" onclick="setDemoPnlRange('30d')" style="font-size:10px;padding:2px 8px">30D</button>
+    <div class="mt-3">
+      <div class="fs-micro t-dim mb-2 row-between gap-2 wrap">
+        <span>累計收益時間序列 / Cumulative PnL Timeline <span id="demo-pnl-range-label" class="fs-micro t-dim"></span></span>
+        <div id="demo-pnl-range-controls" class="row gap-1 wrap">
+          <button class="oc-btn oc-btn--xs" data-pnl-range="1h" onclick="setDemoPnlRange('1h')">1H</button>
+          <button class="oc-btn oc-btn--xs" data-pnl-range="6h" onclick="setDemoPnlRange('6h')">6H</button>
+          <button class="oc-btn oc-btn--xs" data-pnl-range="24h" onclick="setDemoPnlRange('24h')">24H</button>
+          <button class="oc-btn oc-btn--xs" data-pnl-range="7d" onclick="setDemoPnlRange('7d')">7D</button>
+          <button class="oc-btn oc-btn--xs" data-pnl-range="30d" onclick="setDemoPnlRange('30d')">30D</button>
         </div>
       </div>
       <svg id="demo-pnl-sparkline" width="100%" height="120"
-        style="display:block;background:rgba(13,17,23,0.5);border-radius:6px;border:1px solid #21262d"
+        class="demo-pnl-svg"
         viewBox="0 0 400 120" preserveAspectRatio="none">
         <line id="demo-pnl-zero" x1="8" x2="392" y1="60" y2="60" stroke="#30363d" stroke-width="0.5" stroke-dasharray="3,3"/>
         <polyline id="demo-pnl-line" points="" fill="none" stroke="var(--green)" stroke-width="2" stroke-linejoin="round"/>
         <text x="4" y="114" fill="var(--text-dim)" font-size="10" id="demo-pnl-label">no data</text>
       </svg>
-      <div class="oc-table-wrap" style="margin-top:8px;max-height:190px;overflow:auto">
+      <div class="oc-table-wrap mt-2 demo-scroll-190">
         <table class="oc-table">
           <thead><tr><th>時間 / Time</th><th>成交</th><th>區間净 PnL</th><th>累計净 PnL</th><th>手續費</th></tr></thead>
           <tbody id="demo-pnl-series-rows"><tr class="empty-row"><td colspan="5">loading...</td></tr></tbody>
@@ -101,9 +124,9 @@
 
   <!-- Positions / 持倉 -->
   <div class="oc-card">
-    <h3 style="display:flex;align-items:center;gap:10px">
+    <h3 class="row gap-3">
       &#x1F4CA; 持倉 / Positions
-      <button class="oc-btn oc-btn-danger" style="padding:3px 10px;font-size:11px;margin-left:auto" onclick="openDemoCloseAllDialog()">&#x274C; 全部平倉</button>
+      <button class="oc-btn oc-btn-danger py-1 px-3 fs-micro ml-auto" onclick="openDemoCloseAllDialog()">&#x274C; 全部平倉</button>
     </h3>
     <div class="oc-table-wrap">
       <table class="oc-table">
@@ -128,9 +151,9 @@
        即可掃完。預設摺疊。後端 payload 已 inject 所需欄位（0 後端動）。 -->
   <div class="oc-card">
     <details>
-      <summary style="cursor:pointer;font-weight:600;color:var(--text-dim)">&#x1FA99; 塵埃倉位匯總 / Dust Positions Summary (<span id="demoDustCount">0</span>)</summary>
-      <div id="demoDustPanel" style="margin-top:10px">
-        <p style="color:var(--text-dim);font-size:11px;margin:4px 0 8px 0">塵埃倉位：名義值低於 Bybit 最小交易額 · 引擎自動等待價格回升；需在 Bybit GUI 手動清。<br>Dust positions: notional below Bybit min; engine waits for price recovery, operator must clear manually on Bybit GUI.</p>
+      <summary class="pointer fw-semi t-dim">&#x1FA99; 塵埃倉位匯總 / Dust Positions Summary (<span id="demoDustCount">0</span>)</summary>
+      <div id="demoDustPanel" class="mt-3">
+        <p class="t-dim fs-micro m-0 mt-1 mb-2">塵埃倉位：名義值低於 Bybit 最小交易額 · 引擎自動等待價格回升；需在 Bybit GUI 手動清。<br>Dust positions: notional below Bybit min; engine waits for price recovery, operator must clear manually on Bybit GUI.</p>
         <div class="oc-table-wrap">
           <table class="oc-table" id="demoDustTable">
             <thead><tr>
@@ -140,14 +163,14 @@
             <tbody><!-- populated by loadPositions() / 由 loadPositions() 填入 --></tbody>
           </table>
         </div>
-        <p style="color:var(--text-dim);font-size:11px;margin:8px 0 0 0" id="demoDustFooter">— 無塵埃倉位 / No dust positions —</p>
+        <p class="t-dim fs-micro m-0 mt-2" id="demoDustFooter">— 無塵埃倉位 / No dust positions —</p>
       </div>
     </details>
   </div>
 
   <!-- Active Orders / 活跃訂單 -->
   <div class="oc-card">
-    <h3>&#x1F4DD; 活跃訂單 / Active Orders <span id="demo-order-counts" style="font-size:11px;color:var(--text-dim);font-weight:400"></span></h3>
+    <h3>&#x1F4DD; 活跃訂單 / Active Orders <span id="demo-order-counts" class="fs-micro t-dim fw-normal"></span></h3>
     <div class="oc-table-wrap">
       <table class="oc-table">
         <thead><tr><th>交易對</th><th>策略</th><th>品類</th><th>方向</th><th>類型</th><th>數量</th><th>價格</th><th>触发價</th><th>状态</th></tr></thead>
@@ -174,13 +197,13 @@
           <button class="oc-fill-tab" data-fill-tab="profit" onclick="setDemoFillView('profit')">收益 / PnL</button>
         </div>
         <div class="oc-fill-pager">
-          <button class="oc-btn" id="demo-fills-refresh" onclick="refreshDemoFillsNow()" title="重新讀取 PG 成交記錄" style="font-size:12px;padding:4px 10px"><span id="demo-fills-refresh-icon">&#x21BB;</span> <span id="demo-fills-refresh-label">刷新成交</span></button>
+          <button class="oc-btn fs-dense py-1 px-3" id="demo-fills-refresh" onclick="refreshDemoFillsNow()" title="重新讀取 PG 成交記錄"><span id="demo-fills-refresh-icon">&#x21BB;</span> <span id="demo-fills-refresh-label">刷新成交</span></button>
           <button class="oc-btn" id="demo-fills-prev" onclick="demoFillPrev()" disabled>上一页</button>
           <span id="demo-fills-page-info">Page 1 · 50/页</span>
           <button class="oc-btn" id="demo-fills-next" onclick="demoFillNext()" disabled>下一页</button>
         </div>
       </div>
-      <div class="oc-demo-source-bar" id="demo-fills-source" style="display:none">
+      <div class="oc-demo-source-bar hidden" id="demo-fills-source">
         <span class="oc-chip oc-chip-neutral">source=--</span>
         <span>cache age --</span>
       </div>
@@ -192,7 +215,7 @@
           <tbody id="demo-fills"><tr class="empty-row"><td colspan="10">載入中...</td></tr></tbody>
         </table>
       </div>
-    <div class="oc-metrics" style="margin-top:8px">
+    <div class="oc-metrics mt-2">
       <div class="oc-metric"><div class="oc-metric-label" title="本次會話的初始投入資金。/ Initial capital at session start.">初始投入 / Initial Capital</div><div class="oc-metric-val" id="d-fills-capital">--</div></div>
       <div class="oc-metric"><div class="oc-metric-label" title="已實現 + 未實現盈亏 = 當前净收益。正值盈利，負值亏損。/ Realized + Unrealized PnL = current net return.">累計收益 / Net Return</div><div class="oc-metric-val" id="d-fills-return">--</div></div>
     </div>
@@ -215,21 +238,21 @@
 </div>
 
 <!-- Not Connected State / 未连接状态 -->
-<div id="demo-offline" style="display:none">
+<div id="demo-offline" class="hidden">
   <div class="oc-card">
     <div class="oc-not-configured">
       <div class="icon">&#x1F3E6;</div>
       <h3>Demo 演示 未连接 / Not Connected</h3>
       <p>Demo 演示 需要配置 API 密钥才能使用。請在環境配置中設置 Bybit Demo API 密钥。</p>
-      <details class="oc-explain-deep" style="margin-top:16px;text-align:left">
-        <summary style="color:var(--accent);cursor:pointer">如何配置</summary>
+      <details class="oc-explain-deep mt-4 demo-help-left">
+        <summary class="t-accent pointer">如何配置</summary>
         <div class="oc-explain-content">
-          <p>1. 在 <a href="https://demo-trading.bybit.com" target="_blank" style="color:var(--accent)">demo-trading.bybit.com</a> 注册并获取 API 密钥</p>
+          <p>1. 在 <a href="https://demo-trading.bybit.com" target="_blank" class="t-accent">demo-trading.bybit.com</a> 注册并获取 API 密钥</p>
           <p>2. 将密钥添加到環境配置文件 <code>.env</code>：</p>
-          <pre class="oc-pre" style="margin:8px 0">BYBIT_DEMO_API_KEY=your_key_here
+          <pre class="oc-pre m-0 mt-2 mb-2">BYBIT_DEMO_API_KEY=your_key_here
 BYBIT_DEMO_API_SECRET=your_secret_here</pre>
           <p>3. 重啟交易系統以載入新配置</p>
-          <p style="margin-top:8px;color:var(--text-dim)">Demo 演示 使用真實市场數據但虚擬資金，訂單在 Bybit 的沙盒服務器上執行。与本地 Paper 模擬的區别是：Demo 訂單会經過 Bybit 的撮合引擎，更接近真實環境。</p>
+          <p class="mt-2 t-dim">Demo 演示 使用真實市场數據但虚擬資金，訂單在 Bybit 的沙盒服務器上執行。与本地 Paper 模擬的區别是：Demo 訂單会經過 Bybit 的撮合引擎，更接近真實環境。</p>
         </div>
       </details>
     </div>
@@ -451,7 +474,7 @@ function _renderDemoDustPanel(positions) {
       '<td>' + estCell + '</td>' +
       '<td>' + minCell + '</td>' +
       '<td>' + gap + '</td>' +
-      '<td style="font-size:11px">' + _ocRenderOwnerStrategy(owner, p) + '</td>' +
+      '<td class="fs-micro">' + _ocRenderOwnerStrategy(owner, p) + '</td>' +
       '</tr>';
   }).join('');
 }
@@ -469,8 +492,8 @@ async function loadDemoStatus() {
     $('demo-badge').className = 'oc-chip oc-chip-good';
     const pipeline = balD.data.pipeline_status || balD.data.pipelineStatus || '';
     $('demo-api-info').textContent = 'demo-trading.bybit.com' + (pipeline ? ' · pipeline=' + pipeline : '');
-    $('demo-content').style.display = '';
-    $('demo-offline').style.display = 'none';
+    $('demo-content').classList.remove('hidden');
+    $('demo-offline').classList.add('hidden');
     _demoSetStatusBanner('', '');
     renderBalance(balD.data);
     // 成交歷史表是折疊區，不應阻塞首屏。Positions 從後端 owner_strategy 快照拿歸屬；
@@ -494,8 +517,8 @@ async function loadDemoStatus() {
 function showOffline() {
   $('demo-badge').textContent = '未连接';
   $('demo-badge').className = 'oc-chip oc-chip-neutral';
-  $('demo-content').style.display = 'none';
-  $('demo-offline').style.display = '';
+  $('demo-content').classList.add('hidden');
+  $('demo-offline').classList.remove('hidden');
 }
 
 function renderBalance(raw) {
@@ -638,7 +661,7 @@ async function loadPositions() {
     const reasonAttr = ocEsc(String(p.frozen_reason || ''));
     html += '<tr>';
     html += '<td><strong>' + ocEsc(p.symbol) + '</strong></td>';
-    html += '<td style="font-size:11px">' + _ocRenderOwnerStrategy(strat, p) + '</td>';
+    html += '<td class="fs-micro">' + _ocRenderOwnerStrategy(strat, p) + '</td>';
     html += '<td>' + ocCategoryTag(cat) + '</td>';
     html += '<td class="' + (p.side === 'Buy' ? 'green' : 'red') + '">' + sideLabel + '</td>';
     html += '<td>' + ocNum(parseFloat(p.size || p.qty || 0), 4) + '</td>';
@@ -649,7 +672,7 @@ async function loadPositions() {
     html += '<td class="' + ocPnlClass(pnl) + '">' + ocMoney(pnl, pnlDecimals) + '</td>';
     html += '<td>' + (p.leverage || '1') + 'x</td>';
     html += '<td>' + ocNum(parseFloat(p.liqPrice || p.liq_price || 0), 2) + '</td>';
-    html += '<td><button class="oc-btn oc-btn-danger" style="padding:2px 8px;font-size:10px"' +
+    html += '<td><button class="oc-btn oc-btn-danger oc-btn--xs"' +
            ' data-owner-strategy="' + ownerAttr + '"' +
            ' data-frozen-reason="' + reasonAttr + '"' +
            ' onclick="closeDemoPosition(\'' + ocEsc(p.symbol) + '\', this.dataset.ownerStrategy, this.dataset.frozenReason)">' +
@@ -706,7 +729,7 @@ async function loadDemoOrders() {
     const strat = o.owner_strategy || o.strategy || o.strategy_name || '--';
     html += '<tr>';
     html += '<td>' + ocEsc(o.symbol) + '</td>';
-    html += '<td style="font-size:11px">' + ocEsc(strat) + '</td>';
+    html += '<td class="fs-micro">' + ocEsc(strat) + '</td>';
     html += '<td>' + ocCategoryTag(cat) + '</td>';
     html += '<td class="' + (o.side === 'Buy' ? 'green' : 'red') + '">' + sideLabel + '</td>';
     html += '<td>' + typeLabel + '</td>';
@@ -767,7 +790,7 @@ function _demoFillRow(f) {
   let html = '<tr>';
   html += '<td>' + ocFillTime(ts) + '</td>';
   html += '<td>' + ocEsc(sym) + '</td>';
-  html += '<td style="font-size:11px">' + (strategy ? _ocRenderOwnerStrategy(strategy, f) : '--') + '</td>';
+  html += '<td class="fs-micro">' + (strategy ? _ocRenderOwnerStrategy(strategy, f) : '--') + '</td>';
   html += '<td>' + ocCategoryTag(cat) + '</td>';
   html += '<td class="' + (f.side === 'Buy' ? 'green' : 'red') + '">' + sideLabel + '</td>';
   html += '<td>' + ocNum(qty, 4) + '</td>';
@@ -818,13 +841,13 @@ function _demoProfitRow(r) {
   return '<tr>' +
     '<td class="oc-fill-time" title="' + ocEsc(closeTime) + '">' + ocEsc(closeTime) + '</td>' +
     '<td>' + ocEsc(r.symbol || '') + '</td>' +
-    '<td style="font-size:11px" title="' + ocEsc(sourceLabel) + '">' +
+    '<td class="fs-micro" title="' + ocEsc(sourceLabel) + '">' +
       '<span class="' + (mutedStrategy ? 'oc-row-muted' : '') + '">' + ocEsc(strategyText) + '</span>' +
       '<span class="oc-source-note">' + ocEsc(sourceLabel) + '</span></td>' +
     '<td>' + (entryPrice != null ? ocNum(parseFloat(entryPrice), 2) : '--') + '</td>' +
     '<td>' + (exitPrice != null ? ocNum(parseFloat(exitPrice), 2) : '--') + '</td>' +
     '<td>' + ocEsc(String(qty != null ? qty : '--')) + '</td>' +
-    '<td style="color:var(--text-dim)">' + ocEsc(String(r.side || '--')) + '</td>' +
+    '<td class="t-dim">' + ocEsc(String(r.side || '--')) + '</td>' +
     '<td class="' + pnlCls + '" title="' + ocEsc(title) + '"><span aria-label="exchange-confirmed">&#x2705;</span> ' + ocEsc(String(closedPnlRaw != null ? closedPnlRaw : '--')) + driftHtml + '</td>' +
     '</tr>';
 }
@@ -843,7 +866,7 @@ function _demoUpdatePnlSource(payload) {
   const reason = payload && payload.degraded_reason;
   const failureCount = Number(payload && payload.bybit_failure_count_60s);
   const sourceBar = $('demo-fills-source');
-  if (sourceBar) sourceBar.style.display = _demoFillState.tab === 'profit' ? 'flex' : 'none';
+  if (sourceBar) sourceBar.classList.toggle('hidden', _demoFillState.tab !== 'profit');
   const ageLabel = Number.isFinite(age) ? age.toFixed(1) + 's' : '--';
   const tsLabel = Number.isFinite(sourceTs) && sourceTs > 0 ? ocFillTime(sourceTs) : '--';
   const cls = Number.isFinite(age) && age > 120 ? 'bad' : (Number.isFinite(age) && age > 30 ? 'warn' : '');
@@ -872,7 +895,7 @@ function _demoUpdateFillControls(payload, fills) {
   });
   const isProfitTab = _demoFillState.tab === 'profit';
   const sourceBar = $('demo-fills-source');
-  if (sourceBar) sourceBar.style.display = isProfitTab ? 'flex' : 'none';
+  if (sourceBar) sourceBar.classList.toggle('hidden', !isProfitTab);
   if (!isProfitTab) _demoSetStaleBanner('', '');
   if (isProfitTab) {
     const nextStart = (_demoPnlHistoryState.page + 1) * _demoFillState.limit;
@@ -1353,10 +1376,10 @@ function openDemoCloseAllDialog() {
       sumEl.className = '';
     }
   }
-  el.style.display = 'flex';
+  el.classList.remove('hidden');
 }
 function closeDemoDialog(id) {
-  document.getElementById(id).style.display = 'none';
+  document.getElementById(id).classList.add('hidden');
 }
 
 async function doDemoCloseAll() {
@@ -1427,18 +1450,18 @@ async function closeDemoPosition(symbol, ownerStrategy, frozenReason) {
 
 <!-- ── Close All Demo Positions Dialog ─────────────────────────── -->
 <!-- 關閉所有 Demo 倉位對話框 -->
-<div style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:9999;align-items:center;justify-content:center" id="dlg-demo-close-all">
-  <div style="background:var(--card-bg);border:1px solid rgba(234,179,8,0.5);border-radius:10px;padding:24px;max-width:440px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.4)">
-    <h3 style="margin:0 0 12px;font-size:16px;color:#eab308">&#x274C; 關閉所有 Demo 倉位</h3>
-    <p style="margin:0 0 16px;font-size:13px;color:var(--text-dim);line-height:1.6">
+<div class="demo-cta-overlay hidden" id="dlg-demo-close-all">
+  <div class="demo-cta-box">
+    <h3 class="demo-cta-title">&#x274C; 關閉所有 Demo 倉位</h3>
+    <p class="m-0 mb-4 fs-base t-dim lh-cjk">
       此操作將通過 Bybit Demo API 市價平掉所有 Demo 帳戶倉位並取消掛單。<br>
       <strong>使用虛擬資金，不影響真實帳戶。</strong>
     </p>
     <!-- 破壞性操作影響摘要（唯讀，來自已載入的持倉表）：ux-checklist §1 二次確認須顯示具體影響 -->
-    <p id="demo-close-all-summary" style="margin:0 0 16px;font-size:13px;font-weight:700;line-height:1.5">--</p>
-    <div style="display:flex;gap:8px;justify-content:flex-end">
+    <p id="demo-close-all-summary">--</p>
+    <div class="demo-cta-actions">
       <button class="oc-btn" onclick="closeDemoDialog('dlg-demo-close-all')">取消</button>
-      <button class="oc-btn" onclick="doDemoCloseAll()" style="border-color:rgba(234,179,8,0.7);color:#eab308;font-weight:700">確認關閉所有 Demo 倉位</button>
+      <button class="oc-btn demo-cta-confirm" onclick="doDemoCloseAll()">確認關閉所有 Demo 倉位</button>
     </div>
   </div>
 </div>
