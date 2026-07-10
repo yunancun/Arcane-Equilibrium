@@ -2,8 +2,9 @@
 
 ## 狀態欄
 - **STATUS**: IN_PROGRESS
-- **CURRENT**: P0.3 批次 B5/D demo(gated 倒二:tab-demo/app-paper;live_demo 數值上契約、app-paper 0dp bps→ocBps、4dp→2dp per-fill 保 4dp 例外;**顯示精度變更需 QC/operator 知悉**)
-- **LAST-COMMIT**: f066da5b1(P0.3 B3 analytics;B4 stock-etf NEAR-NO-OP 零 source)
+- **CURRENT**: P0.3 批次 B6/E live(gated 最後:tab-live/tab-live.js;合併 _edgeMetricValue→ocBps、ocPnlCell 4dp column 例外、修 fee!=='--'→ocIsBlank、4dp→2dp;**LIVE 顯示精度變更需 QC+operator 知悉**;E2 硬邊界親算最嚴+ocEsc 逐點)
+- **LAST-COMMIT**: 74f9cff53(P0.3 cache-buster 站點級 bump);d766df666(B5/D demo/paper)
+- **AWAITING-OPERATOR/QC**: demo/paper(B5/D)+ live(B6/E)顯示精度變更(4dp→2dp 聚合、bps 2dp、qty 6dp、負號 U+2212)需 QC/operator 知悉;deploy 須確認 cache-buster 已 bump(common-formatters.js 已站點 bump;CSS/common.js 見 P0.6)
 - 回歸基線更新:structure/ 6F→**4F**(兄弟 session commit 修掉 test_development_agent_governance+stable_boundary_docs;現 4F=stock_etf_ipc×2/ipc_tests/strategy_blocked_symbols 全 pre-existing 非 GUI)
 - **BLOCKERS**: —
 - **AWAITING-OPERATOR**: —
@@ -38,10 +39,12 @@
   - [x] B2 非資金 B(risk/governance/earn 實改;learning/autonomy NO-OP)——證據 `6dc50bd8c`:**移除 risk-tab.js fmtPctOrUnknown 量級猜測**(1 呼叫=Drawdown,判 fraction→ocPct);fraction→ocPct/already-%→ocPctVal(15+ cell)判定=舊碼 ×100-or-not 已編碼型別逐一匹配零量級變更;earn 假零→OC_EMPTY;governance:822 winRate*100 刻意留(POST payload 非顯示);E1a→E2 PASS 0 blocker(分類逐點 VERIFIED 零 100×)→回歸零 delta;**E2 LOW:E1a 遺留 10 node-check scratch 檔於 served dir(PM 已刪未提交,教訓:node-check 抽取檔須落 scratchpad)**
   - [x] B3 analytics(strategy/ai/edge-gates 實改;canary NO-OP)——證據 `f066da5b1`:fraction/percent 分類後端生產者親證(**同名陷阱** ai win_rate=fraction vs edge win_rate_24h_pct=already-% 未搞反);metricValue bps→ocBps/%→ocPctVal 抽出(消 bps 重複);**第二通道首真應用**(edge avg_net/strategy Net PnL val-*+sign、intents side→ocSide 三通道 CVD-safe,零 ▲▼ delta 壓 D/E);E1a→E2 PASS no RETURN(分類+同名陷阱+第二通道 XSS/CVD/邊界全親證)→回歸零 delta;2 LOW 留 P0.4(gate-40 .num 雙掛冪等/readinessValue 帶號 bps 無色)
   - [x] B4 stock-etf ×11 — **NEAR-NO-OP 零 source**(E1a 判定+PM 獨立 sanity 核):0 toFixed/0 pct;stock-etf 是 key/value 狀態/布林/compact-debug-label 儀表板,無 tabular/KPI 數值格;39 bps 提及全=欄名/scaffold 物件字面/se-code packed label(硬套 ocBps 會 `benchmark=0.00 bps` 冗長+右對齊破複合 label 違 §3.2);.num 應用 0;G0.5 guard 25/25 續綠;canon 7 假零=Phase2 read-only scaffold 佔位保留。**交接**:Phase2 真帳戶頭條數值格(cash/buying_power/PnL)引入時走 B0 契約新批
-  - [ ] B5/D demo(gated 倒二:tab-demo/app-paper;app-paper 0dp bps→ocBps)+ B6/E live(gated 最後:tab-live;合併 _edgeMetricValue→ocBps、ocPnlCell 4dp column 例外、修 fee!=='--'→ocIsBlank、4dp→2dp)——**顯示精度變更需 QC/operator 知悉**
+  - [x] B5/D demo/paper(gated 倒二)——證據 `d766df666`+cache-bust `74f9cff53`:app-paper/tab-demo/tab-paper 契約;app-paper:876 0dp bps→ocBps;per-fill 4dp 例外(demo fill 2dp→4dp 升防塌零、fee 6dp、聚合 2dp);**ocEsc 移除 13 處全 SAFE**(E2 逐點:side/qty/price/pnl→typed formatter,XSS 消除非削弱,ocSide 未回顯順帶修 non-Buy→SHORT 舊瑕疵);0 numeric ▲▼(無方向 delta)+ocSide 方向 badge;E1a→E2 PASS no RETURN(硬邊界 IDENTICAL/per-fill 防塌零/canon 6 琥珀);**站點級 cache-buster bump**(common-formatters.js ?v=,19+2 檔,防 pre-B0 快取 ReferenceError 頁破)
+  - [ ] B6/E live(gated 最後:tab-live;合併 _edgeMetricValue→ocBps、ocPnlCell 4dp column 例外、修 fee!=='--'→ocIsBlank、4dp→2dp)——**LIVE 顯示精度變更需 QC/operator 知悉**
   - **B0 QC 知悉**:perf-metric grid(live/demo/paper)7D TOTAL FEES/AI COST 兩格 money_abs 4dp→2dp(聚合非 per-fill,§1.5 SAFE)
   - **E2 B0 LOW 留 D/E**:ocFormatPerformanceMetric 內部 3 blank guard 仍回 '--' 非 OC_EMPTY(混合哨兵)、ocDate/ocTime 保 '--'(契約外)、governance _formatValue ''→'--'(intended)
   - **P0.4 量級猜測整併(來自 B2)**:governance-tab.js:822(winRate*100 POST payload)+risk-tab.js:836(snapshot-fallback p1_risk_pct<1?*100)兩處同類 fraction/percent 量級猜測——B2 因屬 POST/邏輯層刻意未碰,P0.4 統一(需後端契約確認送出格式,非純顯示)
+  - **P0.6 CI-guard/cache-bust 衛生(來自 B5/D)**:①oc-utilities.css/tokens.css/tokens-compat.css 為 `<link>` 無 ?v=(CSS stale 只樣式舊非頁破,低優)+ common.js ?v=20260527 P0.1 改動宜 deploy 複核——建立「shared static 改動→cache-buster bump」CI-guard;②`_ocMetric*`×3 dead helper(B5/D)+ ocPnlClass/paper-positive 註釋殘留 刪除候選;③E2 B0 混合哨兵('--' vs OC_EMPTY)統一
 - [ ] P0.4 樣式 fork 合併:`live-*`/`se-*`/`rc-*`/`gov-*` → `oc-*` 原語;83 裸 hex → 語義 token;半徑歸 5/8/12
 - [ ] P0.5 IBKR lane 語義 chips(DENIED/PRESENT/MISSING/OK)+治理 banner 統一(fake-$0 修復已 shipped,核對即可)
 - [ ] P0.6 CI 守衛升級:grep 禁 `style="`/`<style`(白名單殼層過渡)/裸 hex 新增
@@ -117,3 +120,4 @@
 | 2026-07-10 | R16 | P0.3 B2 非資金 B | 6dc50bd8c | **移除 risk-tab fmtPctOrUnknown 量級猜測**(correctness);fraction/percent 分類逐一匹配舊碼零 100× 變更(E2 全 VERIFIED);earn 假零→OC_EMPTY;governance:822 POST payload 刻意留;E1a→E2 PASS 0 blocker;回歸零 delta 4F;E2 LOW=10 scratch 檔已刪;P0.4 量級猜測整併×2 入帳 |
 | 2026-07-10 | R17 | P0.3 B3 analytics | f066da5b1 | strategy/ai/edge-gates 契約應用;fraction/percent 後端生產者親證(同名陷阱 ai win_rate vs edge win_rate_24h_pct 未搞反);metricValue bps/% 抽出消重複;**第二通道首真應用**(val-*+sign+ocSide,零 ▲▼);E1a→E2 PASS no RETURN;回歸零 delta 4F;2 LOW 留 P0.4;static/ clean(B2 教訓生效) |
 | 2026-07-11 | R18 | P0.3 B4 stock-etf | (doc-only) | **NEAR-NO-OP 零 source**:stock-etf 無 tabular/KPI 數值格,39 bps 全欄名/scaffold/packed-label(硬套違 §3.2);E1a 判定+PM 獨立 sanity 核(無漏 $ /headline/toFixed);G0.5 guard 25/25 續綠;doc-only commit(E1a 報告+帳本);Phase2 真帳戶數值格交接記錄。E2 略(零 diff 無可審,PM 親核 NO-OP 判定) |
+| 2026-07-11 | R19 | P0.3 B5/D demo/paper | d766df666 +cache `74f9cff53` | gated LiveDemo 顯示精度變更;app-paper 0dp bps→ocBps、per-fill 4dp 例外(demo fill 2dp→**4dp** 升防塌零);**ocEsc 移除 13 處 E2 逐點全 SAFE**(typed formatter,XSS 消除非削弱,ocSide 順帶修 non-Buy→SHORT 舊瑕疵);E1a→E2 PASS no RETURN(硬邊界 IDENTICAL);**站點級 cache-buster bump 21 檔**(E2 NEEDS-DEPLOY:pre-B0 快取 ReferenceError 頁破防護);QC/operator 知悉+P0.6 cache-bust CI-guard 入帳 |
