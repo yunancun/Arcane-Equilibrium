@@ -3,8 +3,12 @@
 
 MODULE_NOTE:
   模塊用途：從 read-only PG ``trading.fills`` 量測 90d taker |slippage_bps| 的
-    per-symbol 與 global(ROLLUP) 分位(q50/q75/q90)，落成 slippage_quantiles_latest.json，
-    供 outcome_writer 的保守成本模型離線讀取(lane 純函數性:writer 不直連 PG)。
+    per-symbol 與 global(ROLLUP) 分位(q50/q75/q90)+ 期望/尾部統計
+    (mean_abs=E[|slip|]、mean_signed 透明對照、cvar90=E[|slip| | |slip|≥q90])，
+    落成 slippage_quantiles_latest.json，供 outcome_writer 的保守成本模型與
+    outcome_review 的 E[cost] 主判/CVaR90 尾部欄離線讀取(lane 純函數性:
+    writer 不直連 PG)。mean_abs/cvar90 為 QC 預註冊 §6.1/§6.2 凍結成分
+    (docs/research/2026-07-10--counterfactual_rerun_preregistration.md)。
   主要函數：build_slippage_quantile_artifact(純函數，可用 fixture 行測試)、
     fetch_taker_slippage_rows(PG SELECT-only)、main(CLI)。
   依賴：helper_scripts.lib.pg_connect(read-only 連線)；OPENCLAW_DATA_DIR 決定輸出路徑。
@@ -38,7 +42,9 @@ for _path in (str(RESEARCH_ROOT), str(ROOT)):
         sys.path.insert(0, _path)
 
 
-ARTIFACT_SCHEMA_VERSION = "cost_gate_slippage_quantile_artifact_v1"
+# v2:加 mean_abs/mean_signed/cvar90 欄(預註冊 §6 成本雙軌成分);純增欄,
+# 舊消費端(cost_model.load_slippage_quantiles 讀 q75)不驗版、不受影響。
+ARTIFACT_SCHEMA_VERSION = "cost_gate_slippage_quantile_artifact_v2"
 ARTIFACT_FILENAME = "slippage_quantiles_latest.json"
 # thin_sample 純觀測標記:n<100 分位估計自身噪音大(addendum §C:全表僅 178 行)。
 # 不加新乘數旋鈕——SM=1.3 已覆蓋估計不確定性,避免死參數。
@@ -47,17 +53,28 @@ DEFAULT_WINDOW_DAYS = 90
 
 # addendum §C 內嵌 SQL(分位 artifact 生產必須用本查詢)。ROLLUP 產 per-symbol +
 # global(symbol IS NULL)兩層;engine_mode/liquidity_role/window 過濾與 spec 一致。
+# 預註冊 §6 擴欄:mean_abs=E[|slip|](§6.1 主判成分)、mean_signed(透明對照)、
+# cvar90=E[|slip| | |slip|≥q90](§6.2 尾部成分;相關子查詢按 ROLLUP 層對應
+# 全體/單 symbol 樣本,q90 為 NULL 時自然回傳 NULL → 消費端 fallback q90)。
 SLIPPAGE_QUANTILE_SQL = """
 WITH t AS (
-  SELECT symbol, abs(slippage_bps) AS s
+  SELECT symbol, abs(slippage_bps) AS s, slippage_bps AS s_signed
   FROM trading.fills
   WHERE engine_mode IN ('demo','live_demo') AND liquidity_role='taker'
-    AND ts > now() - make_interval(days => %(window_days)s) AND slippage_bps IS NOT NULL)
-SELECT symbol, count(*) AS n,
-       percentile_cont(0.5)  WITHIN GROUP (ORDER BY s) AS q50,
-       percentile_cont(0.75) WITHIN GROUP (ORDER BY s) AS q75,
-       percentile_cont(0.9)  WITHIN GROUP (ORDER BY s) AS q90
-FROM t GROUP BY ROLLUP(symbol)
+    AND ts > now() - make_interval(days => %(window_days)s) AND slippage_bps IS NOT NULL),
+q AS (
+  SELECT symbol, count(*) AS n,
+         avg(s) AS mean_abs,
+         avg(s_signed) AS mean_signed,
+         percentile_cont(0.5)  WITHIN GROUP (ORDER BY s) AS q50,
+         percentile_cont(0.75) WITHIN GROUP (ORDER BY s) AS q75,
+         percentile_cont(0.9)  WITHIN GROUP (ORDER BY s) AS q90
+  FROM t GROUP BY ROLLUP(symbol))
+SELECT q.symbol, q.n, q.mean_abs, q.mean_signed, q.q50, q.q75, q.q90,
+       (SELECT avg(t2.s) FROM t t2
+        WHERE (q.symbol IS NULL OR t2.symbol = q.symbol)
+          AND t2.s >= q.q90) AS cvar90
+FROM q
 """
 
 
@@ -86,8 +103,10 @@ def build_slippage_quantile_artifact(
 ) -> dict[str, Any]:
     """把 ROLLUP 分位查詢結果投影為 artifact payload(純函數)。
 
-    rows: 每列 {symbol(None=ROLLUP global), n, q50, q75, q90}。
-    outcome_writer 的 load_slippage_quantiles 讀本 payload:{asof, symbols[], global}。
+    rows: 每列 {symbol(None=ROLLUP global), n, mean_abs, mean_signed,
+    q50, q75, q90, cvar90}。outcome_writer 的 load_slippage_quantiles 讀本
+    payload:{asof, symbols[], global};outcome_review 的 E[cost] 主判讀
+    mean_abs、尾部欄讀 cvar90(缺失 fallback q90)。
     """
     asof = (now_utc or _utc_now()).astimezone(dt.timezone.utc).isoformat()
     symbols: list[dict[str, Any]] = []
@@ -97,9 +116,12 @@ def build_slippage_quantile_artifact(
         n = _int(row.get("n"))
         entry = {
             "n": n,
+            "mean_abs": _float(row.get("mean_abs")),
+            "mean_signed": _float(row.get("mean_signed")),
             "q50": _float(row.get("q50")),
             "q75": _float(row.get("q75")),
             "q90": _float(row.get("q90")),
+            "cvar90": _float(row.get("cvar90")),
             "thin_sample": n < THIN_SAMPLE_THRESHOLD,
         }
         if symbol is None or str(symbol).strip() == "":
@@ -114,7 +136,17 @@ def build_slippage_quantile_artifact(
         "window_days": window_days,
         "n_total_global": global_block.get("n") if global_block else 0,
         "symbols": symbols,
-        "global": global_block or {"n": 0, "q50": None, "q75": None, "q90": None, "thin_sample": True},
+        "global": global_block
+        or {
+            "n": 0,
+            "mean_abs": None,
+            "mean_signed": None,
+            "q50": None,
+            "q75": None,
+            "q90": None,
+            "cvar90": None,
+            "thin_sample": True,
+        },
         "boundary": (
             "slippage quantile artifact only; PG source is read-only SELECT-only; "
             "no PG write, Bybit call, order, config, risk, auth, or runtime mutation"
