@@ -121,8 +121,11 @@
     var reconTs = (d && d.last_recon_ts != null) ? d.last_recon_ts : null;
     var reconStatus = (d && d.recon_status) ? d.recon_status : 'pending_first_stake';
 
-    _el('earn-balance-usdt').textContent = (usdt == null) ? '0.0000' : ocNum(usdt, 4);
-    _el('earn-balance-claimable').textContent = (claimable == null) ? '0.0000' : ocNum(claimable, 4);
+    // canon 7 禁假零:無值時 ocNum 回 OC_EMPTY('—'),不再顯偽造的 '0.0000'。
+    // 保留 ocNum(不轉 ocBalance):Earn 餘額是 USDT-native,避免 ocBalance 的 FX 轉換把
+    // USDT 顯成當前幣別(與 stake 邏輯所用原值語義一致);4dp 為 sub-cent 收益精度。
+    _el('earn-balance-usdt').textContent = ocNum(usdt, 4);
+    _el('earn-balance-claimable').textContent = ocNum(claimable, 4);
     _el('earn-balance-recon-ts').textContent = reconTs ? ocTime(reconTs) : '尚未對賬';
 
     var statusType = 'neutral';
@@ -317,14 +320,14 @@
     var html = '';
     for (var j = 0; j < filtered.length; j++) {
       var item = filtered[j];
-      var aprPct = (Number(item.estimateApr) || 0).toFixed(2);
+      // estimateApr 為 already-percent(5.0→"5.00%";見 aprBps = estimateApr×100 = 500bps 佐證)→ ocPctVal。
       var aprChip = j === 0 ? ocChip('Sprint 1B 鎖定', 'info') : '';
       html += '<tr>' +
         '<td><code class="fs-micro">' + ocEsc(item.productId || '--') + '</code> ' + aprChip + '</td>' +
         '<td>' + ocEsc(item.coin || '--') + '</td>' +
-        '<td>' + ocEsc(aprPct) + ' %</td>' +
-        '<td>' + ocNum(item.minStake || 0, 2) + '</td>' +
-        '<td>' + ocNum(item.maxStake || 0, 2) + '</td>' +
+        '<td class="num">' + ocPctVal(Number(item.estimateApr) || 0) + '</td>' +
+        '<td class="num">' + ocNum(item.minStake || 0, 2) + '</td>' +
+        '<td class="num">' + ocNum(item.maxStake || 0, 2) + '</td>' +
         '<td>' + ocChip(ocEsc(item.status || '--'), 'good') + '</td>' +
         '</tr>';
     }
@@ -342,8 +345,8 @@
     var aprEl = _el('earn-apr');
     if (_state.selected_product) {
       pidEl.value = _state.selected_product.productId || '--';
-      var apr = (Number(_state.selected_product.estimateApr) || 0).toFixed(2);
-      aprEl.value = apr + ' %';
+      // estimateApr already-percent → ocPctVal(2dp);此為唯讀 input.value(非 cell),不掛 .num。
+      aprEl.value = ocPctVal(Number(_state.selected_product.estimateApr) || 0);
     } else {
       pidEl.value = '--';
       aprEl.value = '--';
@@ -507,7 +510,7 @@
         confirmClass: 'oc-btn-danger',
         actor: '當前 operator session',
         impact: String(Math.floor(amount)) + ' USDT FlexibleSaving stake @ ~'
-              + ((Number(_state.selected_product.estimateApr) || 0).toFixed(2)) + '% APR '
+              + ocPctVal(Number(_state.selected_product.estimateApr) || 0) + ' APR '
               + '（預期年化 ~$'
               + (Math.floor(amount) * (Number(_state.selected_product.estimateApr) || 0) / 100).toFixed(2)
               + '）',
@@ -615,9 +618,11 @@
       html += '<tr>' +
         '<td><code class="fs-micro">' + ocEsc(p.productId || '--') + '</code></td>' +
         '<td>' + ocEsc(p.coin || '--') + '</td>' +
-        '<td>' + ocNum(p.amount || 0, 4) + '</td>' +
-        '<td>' + ocNum(p.totalPnl || 0, 4) + '</td>' +
-        '<td>' + ocNum(p.claimableYield || 0, 4) + '</td>' +
+        // amount/totalPnl/claimableYield 為 USDT-native 收益量值(Earn 利息 ≥0,是水位非帶向 delta,
+        // 依 §2.2 不套 ▲▼/sign);保留 ocNum(4dp sub-cent,免 FX)+ .num 給 tabular 對齊。
+        '<td class="num">' + ocNum(p.amount || 0, 4) + '</td>' +
+        '<td class="num">' + ocNum(p.totalPnl || 0, 4) + '</td>' +
+        '<td class="num">' + ocNum(p.claimableYield || 0, 4) + '</td>' +
         '<td>' + ocChip(ocEsc(p.status || '--'), statusType) + '</td>' +
         '<td><code class="fs-micro">' + ocEsc(p.orderId || '--') + '</code></td>' +
         '</tr>';
@@ -667,8 +672,9 @@
       html += '<tr>' +
         '<td>' + ocEsc(ocTime(r.event_ts_utc)) + '</td>' +
         '<td>' + ocChip(ocEsc(r.direction || '--'), dirType) + '</td>' +
-        '<td>' + ocNum(r.amount || r.amount_usdt || 0, 2) + '</td>' +
-        '<td>' + ocNum((Number(r.apr) || 0), 2) + ' %</td>' +
+        // amount=USDT 量值(免 FX 保 ocNum);apr already-percent → ocPctVal(2dp)。
+        '<td class="num">' + ocNum(r.amount || r.amount_usdt || 0, 2) + '</td>' +
+        '<td class="num">' + ocPctVal(Number(r.apr) || 0) + '</td>' +
         '<td>' + ocChip(ocEsc(outcomeStr), outcomeType) + '</td>' +
         '<td><code class="fs-micro">' + ocEsc(r.lease_id || '--') + '</code></td>' +
         '<td><code class="fs-micro">' + ocEsc(r.movement_id || '--') + '</code></td>' +

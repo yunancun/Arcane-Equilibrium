@@ -518,11 +518,6 @@ async function askAIStopLoss() {
     const n = Number(v);
     return Number.isFinite(n) ? n.toFixed(decimals) : 'unavailable';
   };
-  const fmtPctOrUnknown = (v) => {
-    const n = Number(v);
-    if (!Number.isFinite(n)) return 'unavailable';
-    return (Math.abs(n) <= 1 ? n * 100 : n).toFixed(2) + '%';
-  };
 
   const pnl = session.pnl || {};
   const sess = session.session || {};
@@ -532,6 +527,14 @@ async function askAIStopLoss() {
     ? Number(initialBalance) + Number(netPnl)
     : null;
 
+  // Drawdown 與 loadRiskStatus 同源(/api/v1/paper/risk/status),該處以 (drawdown×100)
+  // 顯示 → 值為 fraction,故走 ocPct(內部 ×100,2dp)。移除原 fmtPctOrUnknown 的
+  // (Math.abs(n)<=1 ? n*100 : n) 量級猜測:呼叫端必須知道拿的是 fraction 還是 percent,
+  // 禁靠量級猜(06_numerics §1.1;真實 0.5 可能是 0.005 或 0.5,猜測會顯示錯數字)。
+  // prompt 缺值保留 'unavailable' 為刻意信號(見上方避免偽造 0 值註),數值路徑仍走契約。
+  const drawdownRaw = riskStatus.drawdown_pct ?? riskStatus.current_drawdown ?? riskStatus.drawdown;
+  const drawdownForPrompt = Number.isFinite(Number(drawdownRaw)) ? ocPct(drawdownRaw) : 'unavailable';
+
   const prompt = `You are an expert crypto trading risk manager. Analyze the current trading situation and recommend specific stop-loss settings.
 
 Current Account Status:
@@ -539,7 +542,7 @@ Current Account Status:
 - Net PnL: ${fmtMoneyOrUnknown(netPnl, 4)}
 - Open Positions: ${fmtNumOrUnknown(session.position_count)}
 - Total Orders: ${fmtNumOrUnknown(session.order_count)}
-- Drawdown: ${fmtPctOrUnknown(riskStatus.drawdown_pct ?? riskStatus.current_drawdown ?? riskStatus.drawdown)}
+- Drawdown: ${drawdownForPrompt}
 - Governor Tier: ${riskStatus.governor_tier || 'unavailable'}
 - Session Halted: ${riskStatus.session_halted !== undefined ? String(riskStatus.session_halted) : 'unavailable'}
 - Market Regime: ${orchestrator.market_regime || 'unavailable'}
@@ -654,15 +657,17 @@ async function loadRiskStatus() {
   const s = d.data;
 
   // Metrics
+  // pressure/drawdown 皆為 fraction(下方閾值 0.7/0.4/0.1/0.05 即以 fraction 比較)→ ocPct(×100,2dp)。
+  // 嚴重度色(red/yellow/green)是風控狀態指示非盈虧符號,保留不轉 val-*(P0.4);.num 給 tabular 對齊。
   const pressure = s.risk_pressure || s.pressure || s.drawdown_pct || 0;
   const elP = $('r-pressure');
-  elP.textContent = (pressure * 100).toFixed(0) + '%';
-  elP.className = 'oc-metric-val ' + (pressure > 0.7 ? 'red' : pressure > 0.4 ? 'yellow' : 'green');
+  elP.textContent = ocPct(pressure);
+  elP.className = 'oc-metric-val num ' + (pressure > 0.7 ? 'red' : pressure > 0.4 ? 'yellow' : 'green');
 
   const drawdown = s.current_drawdown || s.drawdown || s.drawdown_pct || 0;
   const elD = $('r-drawdown');
-  elD.textContent = (drawdown * 100).toFixed(1) + '%';
-  elD.className = 'oc-metric-val ' + (drawdown > 0.1 ? 'red' : drawdown > 0.05 ? 'yellow' : 'green');
+  elD.textContent = ocPct(drawdown);
+  elD.className = 'oc-metric-val num ' + (drawdown > 0.1 ? 'red' : drawdown > 0.05 ? 'yellow' : 'green');
 
   ocSetText('r-peak', ocBalance(s.peak_balance || s.peak_balance_usdt || s.peak, 2));
 
@@ -743,25 +748,27 @@ async function loadRiskConfig() {
     // Show allowed categories from global config
     const cats = gc.allowed_categories || [];
     html0 += '<div class="oc-metric"><div class="oc-metric-label">Allowed Categories</div><div class="oc-metric-val fs-base">' + (cats.length ? cats.join(', ') : '--') + '</div></div>';
-    html0 += '<div class="oc-metric"><div class="oc-metric-label">Max Single Position</div><div class="oc-metric-val fs-base">' + (gc.max_single_position_pct || '--') + '%</div></div>';
+    // max_single_position_pct 為 already-percent(config 直存 %)→ ocPctVal(2dp,不 ×100)。
+    html0 += '<div class="oc-metric"><div class="oc-metric-label">Max Single Position</div><div class="oc-metric-val fs-base num">' + (gc.max_single_position_pct != null ? ocPctVal(gc.max_single_position_pct) : '--') + '</div></div>';
   }
   html0 += '</div>';
   ocSetHtml('p0-config', html0);
 
   // P1 - Global config: field is "global_config"
   let html1 = '<div class="oc-metrics rc-metrics-1col">';
+  // *_pct 欄皆 already-percent(config 直存 %)→ ocPctVal(2dp);leverage/count/minutes/hours 非 % 保留裸數。
   const p1Fields = [
     ['Max Leverage', gc.max_leverage],
-    ['Max Session Drawdown', gc.max_session_drawdown_pct != null ? gc.max_session_drawdown_pct + '%' : null],
-    ['Max Daily Loss', gc.max_daily_loss_pct != null ? gc.max_daily_loss_pct + '%' : null],
-    ['Max Total Exposure', gc.max_total_exposure_pct != null ? gc.max_total_exposure_pct + '%' : null],
-    ['Max Correlated Exp', gc.max_correlated_exposure_pct != null ? gc.max_correlated_exposure_pct + '%' : null],
+    ['Max Session Drawdown', gc.max_session_drawdown_pct != null ? ocPctVal(gc.max_session_drawdown_pct) : null],
+    ['Max Daily Loss', gc.max_daily_loss_pct != null ? ocPctVal(gc.max_daily_loss_pct) : null],
+    ['Max Total Exposure', gc.max_total_exposure_pct != null ? ocPctVal(gc.max_total_exposure_pct) : null],
+    ['Max Correlated Exp', gc.max_correlated_exposure_pct != null ? ocPctVal(gc.max_correlated_exposure_pct) : null],
     ['Loss Cooldown Count', gc.consecutive_loss_cooldown_count],
     ['Cooldown Minutes', gc.consecutive_loss_cooldown_minutes],
     ['Max Holding Hours', gc.max_holding_hours],
   ];
   p1Fields.forEach(([label, val]) => {
-    html1 += '<div class="oc-metric"><div class="oc-metric-label">' + label + '</div><div class="oc-metric-val fs-md">' + (val != null ? val : '--') + '</div></div>';
+    html1 += '<div class="oc-metric"><div class="oc-metric-label">' + label + '</div><div class="oc-metric-val fs-md num">' + (val != null ? val : '--') + '</div></div>';
   });
   html1 += '</div>';
   ocSetHtml('p1-config', html1);
@@ -769,15 +776,17 @@ async function loadRiskConfig() {
   // P2 - Agent adjustable: field is "agent_adjustable" or from global config
   const p2 = cfg.agent_adjustable || cfg.agent || cfg.p2 || {};
   let html2 = '<div class="oc-metrics rc-metrics-1col">';
+  // *_pct 欄 already-percent → ocPctVal(2dp);position_size_factor 是比率(非 %)保留裸值。
+  const _p2pct = (v) => (v != null && v !== '' ? ocPctVal(v) : '--');
   const p2Fields = [
-    ['Max Stop Loss', (p2.max_stop_loss_pct || gc.max_stop_loss_pct || '--') + '%'],
-    ['Max Take Profit', (p2.max_take_profit_pct || gc.max_take_profit_pct || '--') + '%'],
-    ['Max Single Position', (p2.max_single_position_pct || gc.max_single_position_pct || '--') + '%'],
+    ['Max Stop Loss', _p2pct(p2.max_stop_loss_pct || gc.max_stop_loss_pct)],
+    ['Max Take Profit', _p2pct(p2.max_take_profit_pct || gc.max_take_profit_pct)],
+    ['Max Single Position', _p2pct(p2.max_single_position_pct || gc.max_single_position_pct)],
     ['Position Size Factor', p2.position_size_factor || '--'],
-    ['Trailing Stop', (p2.trailing_stop_pct || '--') + '%'],
+    ['Trailing Stop', _p2pct(p2.trailing_stop_pct)],
   ];
   p2Fields.forEach(([label, val]) => {
-    html2 += '<div class="oc-metric"><div class="oc-metric-label">' + label + '</div><div class="oc-metric-val fs-md">' + (val != null ? val : '--') + '</div></div>';
+    html2 += '<div class="oc-metric"><div class="oc-metric-label">' + label + '</div><div class="oc-metric-val fs-md num">' + (val != null ? val : '--') + '</div></div>';
   });
   html2 += '</div>';
   ocSetHtml('p2-config', html2);
@@ -796,23 +805,25 @@ async function loadRiskConfig() {
   // snapshot — lags one tick behind a config patch, so reading it first caused "Save success but
   // display shows old value" (user-visible fake success). Always prefer fresh config.
   // 顯示優先順序：fresh ConfigStore (gc) → state-reader snapshot (滯後一拍) → 預設值。
+  // 以下 *_pct 皆 already-percent(config 直存 %)→ ocPctVal(2dp,不 ×100);atr/time/leverage
+  // 帶 x/h 單位非 %,保留裸值。停用態顯「關閉 / OFF」文案(非數值路徑)。
   const hardStop = gc.max_stop_loss_pct ?? rStop.hard_stop_pct ?? 5;
-  ocSetText('s-hard', hardStop + '%');
+  ocSetText('s-hard', ocPctVal(hardStop));
   const tpOn = gc.tp_enabled === true || (gc.tp_enabled == null && rStop.take_profit_pct != null);
   const tpVal = gc.max_take_profit_pct ?? rStop.take_profit_pct ?? 20;
-  ocSetText('s-tp', tpOn ? (tpVal + '%') : '關閉 / OFF');
+  ocSetText('s-tp', tpOn ? ocPctVal(tpVal) : '關閉 / OFF');
   $('s-tp').style.color = tpOn ? 'var(--green)' : 'var(--text-dim)';
   const trailingVal = gc.trailing_stop_pct ?? rStop.trailing_stop_pct ?? ap.trailing_stop_distance_pct ?? null;
-  ocSetText('s-trailing', trailingVal != null && trailingVal !== '' ? trailingVal + '%' : '關閉 / OFF');
+  ocSetText('s-trailing', trailingVal != null && trailingVal !== '' ? ocPctVal(trailingVal) : '關閉 / OFF');
   const atrMult = gc.atr_multiplier ?? rStop.atr_multiplier ?? null;
   ocSetText('s-atr', atrMult != null && atrMult !== '' ? atrMult + 'x' : '關閉 / OFF');
   const timeStop = gc.max_holding_hours ?? rStop.time_stop_hours ?? null;
   ocSetText('s-time', timeStop != null ? timeStop + 'h' : '關閉 / OFF');
   const maxDD = gc.max_session_drawdown_pct ?? rGuard.max_drawdown_pct ?? 15;
-  ocSetText('s-drawdown', maxDD + '%');
+  ocSetText('s-drawdown', ocPctVal(maxDD));
   const maxLev = gc.max_leverage ?? rGuard.max_leverage ?? 20;
   ocSetText('s-leverage', maxLev + 'x');
-  ocSetText('s-daily', gc.max_daily_loss_pct != null ? gc.max_daily_loss_pct + '%' : '--');
+  ocSetText('s-daily', gc.max_daily_loss_pct != null ? ocPctVal(gc.max_daily_loss_pct) : '--');
 
   // Position Sizing & Exposure display — fresh ConfigStore first, snapshot fallback
   // P1 risk: Rust stores as fraction (0.03), display as % (3%)
@@ -826,11 +837,14 @@ async function loadRiskConfig() {
   } else {
     p1RiskPct = 2;
   }
-  ocSetText('s-p1-risk', p1RiskPct.toFixed(1) + '%');
-  ocSetText('s-single-pos', (gc.max_single_position_pct ?? rRisk.max_single_position_pct ?? '--') + '%');
-  ocSetText('s-total-exp', (gc.max_total_exposure_pct ?? rRisk.max_total_exposure_pct ?? '--') + '%');
+  // p1RiskPct 已由路由換算為 already-percent(見上方 §gcP1Pct 註)→ ocPctVal(2dp)。
+  ocSetText('s-p1-risk', ocPctVal(p1RiskPct));
+  const singlePosVal = gc.max_single_position_pct ?? rRisk.max_single_position_pct;
+  ocSetText('s-single-pos', singlePosVal != null ? ocPctVal(singlePosVal) : '--');
+  const totalExpVal = gc.max_total_exposure_pct ?? rRisk.max_total_exposure_pct;
+  ocSetText('s-total-exp', totalExpVal != null ? ocPctVal(totalExpVal) : '--');
   const corrExpDisplay = gc.max_correlated_exposure_pct;
-  ocSetText('s-corr-exp', corrExpDisplay != null ? corrExpDisplay + '%' : '--');
+  ocSetText('s-corr-exp', corrExpDisplay != null ? ocPctVal(corrExpDisplay) : '--');
   const allowedCatsDisplay = gc.allowed_categories;
   ocSetText('s-allowed-cats', Array.isArray(allowedCatsDisplay) && allowedCatsDisplay.length ? allowedCatsDisplay.join(', ') : '--');
   const sameDirVal = gc.max_same_direction_positions ?? rGuard.max_same_direction_positions ?? 3;
@@ -1058,10 +1072,12 @@ async function loadAiBudget() {
       const pct = limit > 0 ? Math.min(100, (usage / limit) * 100) : 0;
       const fillEl = document.getElementById('ai-budget-bar-fill');
       const textEl = document.getElementById('ai-budget-bar-text');
-      // P0.2 batch 7a:進度條寬度走 §7 form-1 scoped-var;.rc-budget-fill{width:var(--fill-w,0%)} 消費
-      if (fillEl) fillEl.style.setProperty('--fill-w', pct.toFixed(1) + '%');
+      // P0.2 batch 7a:進度條寬度走 §7 form-1 scoped-var;.rc-budget-fill{width:var(--fill-w,0%)} 消費。
+      // 幾何寬度用整數 %(0dp)即可;pct 為 already-percent(usage/limit×100)。
+      if (fillEl) fillEl.style.setProperty('--fill-w', pct.toFixed(0) + '%');
+      // 用量百分比 already-percent → ocPctVal(2dp);$ 金額為 AI 預算 USD 散文,保留原值。
       if (textEl) textEl.textContent =
-        'MTD: $' + usage.toFixed(2) + ' / $' + limit.toFixed(2) + ' (' + pct.toFixed(1) + '%)';
+        'MTD: $' + usage.toFixed(2) + ' / $' + limit.toFixed(2) + ' (' + ocPctVal(pct) + ')';
       // Degrade light: green/yellow/red/grey
       // 降級紅黃綠燈
       const lightEl = document.getElementById('ai-budget-degrade-light');

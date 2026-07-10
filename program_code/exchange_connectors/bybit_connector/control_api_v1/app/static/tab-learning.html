@@ -348,9 +348,11 @@ async function loadNetPnl() {
     ['AI Costs', pnl.ai_costs || pnl.ai_cost, false],
     ['Net Revenue', pnl.net_revenue || pnl.net_pnl, true],
   ];
+  // isPnl 欄用 ocMoney(自帶 +/− U+2212 符號通道=第二通道);非 PnL 用 ocBalance(4dp sub-cent)。
+  // 盈虧色沿用 ocPnlClass(green/red 舊 token,P0.4 統一遷 val-*);此處只加 .num 給 tabular 對齊。
   fields.forEach(([label, val, isPnl]) => {
     const cls = isPnl ? ocPnlClass(val) : '';
-    html += '<div class="oc-metric"><div class="oc-metric-label">' + label + '</div><div class="oc-metric-val ' + cls + ' fs-md">' + (val != null ? (isPnl ? ocMoney(val) : ocBalance(val, 4)) : '--') + '</div></div>';
+    html += '<div class="oc-metric"><div class="oc-metric-label">' + label + '</div><div class="oc-metric-val ' + cls + ' fs-md num">' + (val != null ? (isPnl ? ocMoney(val) : ocBalance(val, 4)) : '--') + '</div></div>';
   });
   html += '</div>';
 
@@ -359,7 +361,7 @@ async function loadNetPnl() {
   const elScore = $('l-score');
   if (score != null) {
     elScore.textContent = ocMoney(score);
-    elScore.className = 'oc-metric-val ' + ocPnlClass(score);
+    elScore.className = 'oc-metric-val num ' + ocPnlClass(score);
   }
 
   ocSetHtml('netpnl-body', html);
