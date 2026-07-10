@@ -885,3 +885,8 @@
 ## 2026-07-10 — R3 收口 wave commit 執行(E1 as commit executor,E4 PASS 後四批窄 staging)
 - E4 `2026-07-10--r3_closeout_regression.md`=PASS(zero regression)→ 按 PM §六 四批 commit(feat rerun 管線/test mutation-biting/docs 四證據報告+TODO v781/chore cron flag),全程逐檔點名絕不 add -A,禁 push。
 - TODO `P1-L2-ADVISORY-MESH-E2E-1` 由 BLOCKED_CLOUD_SDK_MISSING 如實轉 DONE_WITH_CONCERNS_FENCE_SINK_FOLLOWUP(真 model call l2r:724ac38bc4fc 達成、TOML byte-identical 復原、L2 維持 disabled;fence-parsing sink gap=follow-up 票);CLAUDE_CHANGELOG 補 v780 backfill+v781。教訓:TODO bump 時 changelog 增量須同批,否則留洞給後人。
+
+## 2026-07-10 — snapshot_stable 修復定稿(推翻上一條全清方案;E2 二輪 APPROVE_WITH_NITS→E4)
+- R1 全清 app.* 被 E2 RETURN(strategist_agent collection 期綁定 class+字串 patch 落重生模組=下游新紅);bisect 發現真機制=**CPython _handle_fromlist 父包屬性捷徑**:只刪 sys.modules 條目時 `from . import main_legacy` 從 app 包物件殘留屬性拿回舊模組,刪除形同虛設;~40 個 route/ops 模組模組層凍結 `_base` 構成單一同調實例,擴大刪除輕則 inert 重則劈半(401/讀寫分家 409)。
+- 定案=原 4 模組刪除保留+就地刷新同調實例(`base.settings=base.Settings()`+`base.STORE=base.JsonStateStore(...)`+`mark_compile_dirty()`;settings 可 reload 重建是 auth.py MODULE_NOTE 明言的套件契約)。最終驗收:solo 3p/agents+target 28p/csrf 19p/bridge+target 持平 pre-existing 基線/strategist 雙向 51p/tail-sweep 47 檔 FAILED 集全同零 collateral。
+- 教訓:①「刪 sys.modules 重 import」修法必查父包屬性捷徑,否則刪除是安慰劑;②歸因 probe 印出的 `.secrets` 解析值嚴禁入 repo 文件(本輪報告已核 0 命中)。

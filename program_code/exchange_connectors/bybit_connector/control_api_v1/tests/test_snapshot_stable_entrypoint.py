@@ -12,6 +12,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+# CSRF double-submit 自鑄對：main_legacy 無條件掛 CSRFMiddleware，所有 POST 需
+# cookie `oc_csrf` 與 header `X-CSRF-Token` 同時存在且同值，否則 403。豁免清單
+# 是源碼寫死的安全硬邊界（禁 env / 測試擴充），測試側自鑄同值對是合規通過路徑。
+_CSRF_TOKEN = "test-csrf-token"
+
 
 def build_client() -> TestClient:
     runtime_dir = Path(tempfile.mkdtemp(prefix="openclaw_test_runtime_stable_"))
@@ -25,11 +30,36 @@ def build_client() -> TestClient:
 
     stable_module = importlib.import_module("app.main_snapshot_stable")
     importlib.reload(stable_module)
-    return TestClient(stable_module.app)
+
+    # 為什麼就地刷新而非擴大 sys.modules 清理：上面只刪條目時，fresh main.py 的
+    # `from . import main_legacy` 走 CPython 父包屬性捷徑，拿回先行測試檔
+    # （collection 期 OPENCLAW_API_TOKEN / OPENCLAW_STATE_FILE 未設 → settings
+    # 落入隨機 token 與預設 state 檔）留下的同一個舊 main_legacy 模組；且 ~40 個
+    # route/ops 模組在模組層 `from . import main_legacy as _base` 凍結指向它，
+    # 構成單一同調實例。擴大刪除輕則 inert、重則把實例劈成新舊兩半（讀路徑
+    # 401 或讀寫分家 409），還會波及主圖之外被其他測試檔 collection 期綁定的
+    # 模組（app.strategist_agent 字串 patch 失效、conftest 對 app.db_pool 的
+    # 進程級 prod-DB 封鎖被拆，P0 2026-06-10）。正解＝保住同調實例，重建其 env 派生
+    # 狀態：settings 重讀本測試的 env、STORE 重綁本測試的 state 檔、殘留編譯
+    # 快取失效。
+    base = sys.modules["app.main"].base
+    base.settings = base.Settings()
+    base.STORE = base.JsonStateStore(base.settings.state_file_path)
+    base.mark_compile_dirty()
+
+    client = TestClient(stable_module.app)
+    # CSRF cookie 半邊：與 auth_headers() 的 X-CSRF-Token 同值，middleware
+    # constant-time 比對通過。
+    client.cookies.set("oc_csrf", _CSRF_TOKEN)
+    return client
 
 
 def auth_headers() -> dict[str, str]:
-    return {"Authorization": "Bearer test-token"}
+    return {
+        "Authorization": "Bearer test-token",
+        # CSRF header 半邊：GET 不檢查、附帶無害；POST 寫操作必需。
+        "X-CSRF-Token": _CSRF_TOKEN,
+    }
 
 
 def get_overview(client: TestClient) -> dict:
