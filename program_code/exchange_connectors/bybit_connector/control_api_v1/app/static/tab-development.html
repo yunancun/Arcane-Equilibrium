@@ -21,20 +21,20 @@
   .dev-header-row { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:14px; }
   .dev-summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:10px; margin-bottom:14px; }
   .dev-panels { display:grid; grid-template-columns:minmax(280px,0.9fr) minmax(360px,1.4fr); gap:12px; align-items:start; }
-  .dev-panel { background:var(--bg); border:1px solid var(--border); border-radius:var(--r-2); padding:12px; }
+  .dev-panel { background:var(--bg-app); border:1px solid var(--border-subtle); border-radius:var(--r-2); padding:12px; }
   .dev-panel h3 { margin:0 0 8px; font-size:14px; }
   .dev-list { display:grid; gap:7px; }
   .dev-list-item { padding:8px 10px; border:1px solid rgba(139,148,158,0.16); border-radius:var(--r-2); background:rgba(139,148,158,0.04); font-size:12px; line-height:1.45; }
-  .dev-table-wrap { overflow:auto; border:1px solid var(--border); border-radius:var(--r-2); }
+  .dev-table-wrap { overflow:auto; border:1px solid var(--border-subtle); border-radius:var(--r-2); }
   .dev-table { width:100%; border-collapse:collapse; min-width:900px; font-size:12px; }
   .dev-table th, .dev-table td { padding:8px 10px; border-bottom:1px solid rgba(139,148,158,0.12); vertical-align:top; }
-  .dev-table th { position:sticky; top:0; z-index:1; background:var(--card-bg); color:var(--text-dim); text-align:left; font-size:11px; }
+  .dev-table th { position:sticky; top:0; z-index:1; background:var(--bg-surface); color:var(--text-secondary); text-align:left; font-size:11px; }
   .dev-table-wrap[hidden], .dev-migration-grid[hidden] { display:none; }
   .dev-migration-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:10px; }
   .dev-migration-card {
     background:rgba(56,139,253,0.055); border:1px solid rgba(56,139,253,0.32); border-radius:var(--r-2);
     min-height:148px; padding:12px; display:flex; flex-direction:column; gap:8px;
-    color:var(--text); cursor:pointer; text-align:left; outline:none; min-width:0; overflow:hidden;
+    color:var(--text-primary); cursor:pointer; text-align:left; outline:none; min-width:0; overflow:hidden;
   }
   .dev-migration-card:hover, .dev-migration-card:focus { border-color:rgba(56,139,253,0.68); background:rgba(56,139,253,0.085); }
   .dev-migration-card.expanded { grid-column:span 2; background:rgba(56,139,253,0.10); }
@@ -45,17 +45,17 @@
   .dev-migration-card.expanded .dev-card-detail { display:grid; gap:8px; }
   .dev-detail-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px; }
   .dev-detail-box { border:1px solid rgba(139,148,158,0.14); border-radius:var(--r-2); padding:8px; background:rgba(13,17,23,0.34); }
-  .dev-detail-label { color:var(--text-dim); font-size:10px; text-transform:uppercase; margin-bottom:4px; }
-  .dev-detail-value { color:var(--text); font-size:12px; line-height:1.45; overflow-wrap:anywhere; word-break:break-word; }
+  .dev-detail-label { color:var(--text-secondary); font-size:10px; text-transform:uppercase; margin-bottom:4px; }
+  .dev-detail-value { color:var(--text-primary); font-size:12px; line-height:1.45; overflow-wrap:anywhere; word-break:break-word; }
   .dev-version { font-weight:800; color:var(--accent); white-space:nowrap; }
-  .dev-purpose { color:var(--text); line-height:1.45; max-width:520px; overflow-wrap:anywhere; word-break:break-word; }
+  .dev-purpose { color:var(--text-primary); line-height:1.45; max-width:520px; overflow-wrap:anywhere; word-break:break-word; }
   .dev-migration-card:not(.expanded) .dev-purpose {
     display:-webkit-box; -webkit-line-clamp:4; -webkit-box-orient:vertical; overflow:hidden;
   }
-  .dev-objects { color:var(--text-dim); font-family:monospace; font-size:11px; max-width:260px; }
+  .dev-objects { color:var(--text-secondary); font-family:monospace; font-size:11px; max-width:260px; }
   .dev-filter-row { display:flex; gap:6px; flex-wrap:wrap; margin:8px 0 10px; }
   .dev-filter-row .oc-btn.active { border-color:var(--accent); color:var(--accent); background:rgba(56,139,253,0.12); }
-  .dev-code { font-family:monospace; font-size:11px; color:var(--text-dim); word-break:break-all; }
+  .dev-code { font-family:monospace; font-size:11px; color:var(--text-secondary); word-break:break-all; }
   .dev-locked-note { display:none; border-color:var(--warn); } /* P0.2 batch 3:inline 琥珀邊框收斂→--warn（承批次 1 idx-banner 全濃度先例;A3 複審）*/
   .dev-locked .dev-dashboard-body { display:none; }
   .dev-locked .dev-locked-note { display:block; }

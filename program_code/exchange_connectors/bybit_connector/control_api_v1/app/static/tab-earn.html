@@ -41,14 +41,14 @@
   /* 標頭橫條 / Header bar */
   .earn-header-row {
     display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
-    padding: 10px 12px; background: var(--card-bg); border: 1px solid var(--border);
-    border-radius: var(--card-radius); margin-bottom: 12px;
+    padding: 10px 12px; background: var(--bg-surface); border: 1px solid var(--border-subtle);
+    border-radius: var(--r-2); margin-bottom: 12px;
   }
   .earn-header-title {
     font-size: 15px; font-weight: 700; margin: 0;
   }
   .earn-header-meta {
-    color: var(--text-dim); font-size: 11px; line-height: 1.6;
+    color: var(--text-secondary); font-size: 11px; line-height: 1.6;
   }
   .earn-header-actions {
     margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap;
@@ -62,7 +62,7 @@
     margin: 12px 0;
   }
   .earn-gate-box {
-    border: 1px solid var(--border);
+    border: 1px solid var(--border-subtle);
     border-radius: var(--r-2);
     padding: 12px 14px;
     background: rgba(13, 17, 23, 0.55);
@@ -79,13 +79,13 @@
   .earn-gate-label {
     font-size: 11px;
     font-weight: 700;
-    color: var(--text);
+    color: var(--text-primary);
     margin-bottom: 4px;
     line-height: 1.35;
   }
   .earn-gate-detail {
     font-size: 10px;
-    color: var(--text-dim);
+    color: var(--text-secondary);
     line-height: 1.4;
     overflow-wrap: anywhere;
   }
@@ -102,8 +102,8 @@
     font-weight: 700;
     text-align: center;
   }
-  .earn-gate-verdict.verdict-pass { background: rgba(63, 185, 80, 0.12); border: 1px solid rgba(63, 185, 80, 0.4); color: var(--green); }
-  .earn-gate-verdict.verdict-fail { background: rgba(248, 81, 73, 0.10); border: 1px solid rgba(248, 81, 73, 0.4); color: var(--red); }
+  .earn-gate-verdict.verdict-pass { background: rgba(63, 185, 80, 0.12); border: 1px solid rgba(63, 185, 80, 0.4); color: var(--pos); }
+  .earn-gate-verdict.verdict-fail { background: rgba(248, 81, 73, 0.10); border: 1px solid rgba(248, 81, 73, 0.4); color: var(--neg); }
 
   /* Stage 0R 3-state badge / Stage 0R 三狀態徽章 */
   .earn-stage0r-row {
@@ -124,14 +124,14 @@
     font-size: 11px;
     letter-spacing: 0.4px;
   }
-  .earn-stage0r-badge.stage0r-pass    { background: rgba(63, 185, 80, 0.18); color: var(--green); }
-  .earn-stage0r-badge.stage0r-pending { background: rgba(210, 153, 34, 0.2); color: var(--yellow); }
-  .earn-stage0r-badge.stage0r-fail    { background: rgba(248, 81, 73, 0.2);  color: var(--red); }
+  .earn-stage0r-badge.stage0r-pass    { background: rgba(63, 185, 80, 0.18); color: var(--pos); }
+  .earn-stage0r-badge.stage0r-pending { background: rgba(210, 153, 34, 0.2); color: var(--warn); }
+  .earn-stage0r-badge.stage0r-fail    { background: rgba(248, 81, 73, 0.2);  color: var(--neg); }
   .earn-stage0r-copy {
     margin-left: auto;
     font-family: monospace;
     font-size: 11px;
-    color: var(--text-dim);
+    color: var(--text-secondary);
     overflow-wrap: anywhere;
   }
 
@@ -145,7 +145,7 @@
   .earn-form-row { display: flex; flex-direction: column; gap: 4px; }
   .earn-form-label {
     font-size: 11px;
-    color: var(--text-dim);
+    color: var(--text-secondary);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.4px;
@@ -153,9 +153,9 @@
   .earn-form-input,
   .earn-form-select,
   .earn-form-textarea {
-    background: var(--bg);
-    border: 1px solid var(--border);
-    color: var(--text);
+    background: var(--bg-app);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-primary);
     border-radius: var(--r-1);
     padding: 8px 10px;
     font-size: 13px;
@@ -165,25 +165,25 @@
   .earn-form-input:focus,
   .earn-form-select:focus,
   .earn-form-textarea:focus { outline: none; border-color: var(--accent); }
-  .earn-form-input.input-error { border-color: var(--red); }
-  .earn-form-input.input-ok    { border-color: var(--green); }
+  .earn-form-input.input-error { border-color: var(--neg); }
+  .earn-form-input.input-ok    { border-color: var(--pos); }
   .earn-form-textarea { min-height: 64px; resize: vertical; font-family: inherit; }
   .earn-form-readonly {
     background: rgba(13, 17, 23, 0.6);
-    color: var(--text);
+    color: var(--text-primary);
     font-weight: 600;
   }
   .earn-form-hint {
     font-size: 11px;
-    color: var(--text-dim);
+    color: var(--text-secondary);
     line-height: 1.5;
   }
-  .earn-form-hint.hint-error { color: var(--red); }
-  .earn-form-hint.hint-ok    { color: var(--green); }
+  .earn-form-hint.hint-error { color: var(--neg); }
+  .earn-form-hint.hint-ok    { color: var(--pos); }
 
   /* P0.2 batch 4：原 inline style 遷入頁內組件（多屬性/非檔位值,不入 utility 詞彙）。 */
   /* h3 標題後的灰色小字說明（font-weight:normal 無對應 utility → 頁內組件）。 */
-  .earn-h3-note { font-size: 11px; color: var(--text-dim); font-weight: normal; }
+  .earn-h3-note { font-size: 11px; color: var(--text-secondary); font-weight: normal; }
   /* 記錄 filter 的緊湊 select（min-height 非檔位值 → 頁內組件；@media 之前定義,行動版 44px 仍生效）。 */
   .earn-form-select--sm { min-height: 32px; padding: 4px 8px; }
 
@@ -192,19 +192,19 @@
     margin: 12px 0;
     padding: 10px 14px;
     background: rgba(248, 81, 73, 0.06);
-    border-left: 3px solid var(--red);
+    border-left: 3px solid var(--neg);
     border-radius: 0 var(--r-2) var(--r-2) 0;
     font-size: 12px;
     line-height: 1.7;
-    color: var(--text);
+    color: var(--text-primary);
   }
-  .earn-typed-warn b { color: var(--red); }
+  .earn-typed-warn b { color: var(--neg); }
   .earn-typed-warn code {
     font-family: monospace;
     background: rgba(13, 17, 23, 0.7);
     padding: 2px 6px;
     border-radius: var(--r-1);
-    color: var(--yellow);
+    color: var(--warn);
   }
 
   .earn-submit-row {
@@ -223,7 +223,7 @@
   }
   .earn-submit-disabled-reason {
     font-size: 11px;
-    color: var(--red);
+    color: var(--neg);
     line-height: 1.5;
   }
 
@@ -233,11 +233,11 @@
     align-items: center;
     gap: 6px;
     font-size: 12px;
-    color: var(--text-dim);
+    color: var(--text-secondary);
   }
   .earn-spinner {
     width: 12px; height: 12px;
-    border: 2px solid var(--border);
+    border: 2px solid var(--border-subtle);
     border-top-color: var(--accent);
     border-radius: 50%;
     animation: earn-spin 0.7s linear infinite;

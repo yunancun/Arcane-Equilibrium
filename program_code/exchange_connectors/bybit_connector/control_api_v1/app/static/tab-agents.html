@@ -64,13 +64,13 @@
   }
   .exec-banner-live {
     background: rgba(248, 81, 73, 0.22);
-    border: 1px solid var(--red);
+    border: 1px solid var(--neg);
     color: #ffa198;
     text-shadow: 0 0 8px rgba(248, 81, 73, 0.4);
   }
   /* Tooltip-bearing inline label / 带提示的內联標簽
      P0.2 batch 3:withTip inline style（border-bottom + cursor:help）併入本類 */
-  .agent-tip { color: var(--text); border-bottom: 1px dashed var(--text-secondary); cursor: help; }
+  .agent-tip { color: var(--text-primary); border-bottom: 1px dashed var(--text-secondary); cursor: help; }
   .agent-tip:hover { color: var(--accent); }
   /* h3 內副標題:常規字重（.subtitle 全局只給字號/色/下距;存量 inline font-weight:normal 收斂)*/
   .oc-card h3 .subtitle { font-weight: var(--weight-regular); }
@@ -84,7 +84,7 @@
      Round 2 M-1: override oc-chip-live to red (page-scoped only). */
   .oc-chip.oc-chip-live {
     background: rgba(248, 81, 73, 0.22);
-    border: 1px solid var(--red);
+    border: 1px solid var(--neg);
     color: #ffa198;
   }
 
@@ -95,13 +95,13 @@
      paper tab pattern for visual consistency (read-only, no submit controls). */
   .agents-phase-row {
     display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
-    padding: 8px 10px; background: var(--card-bg); border: 1px solid var(--border);
-    border-radius: var(--card-radius); margin-bottom: 12px;
+    padding: 8px 10px; background: var(--bg-surface); border: 1px solid var(--border-subtle);
+    border-radius: var(--r-2); margin-bottom: 12px;
   }
   .agents-phase-chip {
     padding: 3px 10px; border-radius: var(--r-1);
     background: rgba(56,139,253,0.12); border: 1px solid rgba(56,139,253,0.3);
-    color: var(--blue); font-size: 11px; font-weight: 600;
+    color: var(--text-secondary); font-size: 11px; font-weight: 600;
   }
   .agents-mode-slot {
     margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap;
@@ -127,9 +127,9 @@
 
   /* ─── MAG-018 OpenClaw Agent Control foundation / 只讀控制面基礎 ─── */
   .agent-control-surface {
-    border: 1px solid var(--border);
-    background: var(--card-bg);
-    border-radius: var(--card-radius);
+    border: 1px solid var(--border-subtle);
+    background: var(--bg-surface);
+    border-radius: var(--r-2);
     padding: 12px;
     margin-bottom: 12px;
   }
@@ -147,7 +147,7 @@
     margin: 0;
   }
   .agent-control-subtitle {
-    color: var(--text-dim);
+    color: var(--text-secondary);
     font-size: 12px;
     line-height: 1.5;
     margin-top: 2px;
@@ -167,7 +167,7 @@
   .agent-control-panel h4 {
     font-size: 12px;
     margin: 0 0 8px 0;
-    color: var(--text);
+    color: var(--text-primary);
   }
   .agent-control-kv {
     display: grid;
@@ -176,7 +176,7 @@
     font-size: 12px;
     align-items: center;
   }
-  .agent-control-kv span:nth-child(odd) { color: var(--text-dim); }
+  .agent-control-kv span:nth-child(odd) { color: var(--text-secondary); }
   .agent-control-topology {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(116px, 1fr));
@@ -196,7 +196,7 @@
     overflow-wrap: anywhere;
   }
   .agent-control-node-meta {
-    color: var(--text-dim);
+    color: var(--text-secondary);
     font-size: 11px;
     overflow-wrap: anywhere;
   }
@@ -210,13 +210,13 @@
     font-size: 12px;
   }
   .agent-control-blocker {
-    border-left: 2px solid var(--yellow);
+    border-left: 2px solid var(--warn);
     padding: 5px 8px;
     background: rgba(210, 153, 34, 0.08);
     border-radius: 0 var(--r-1) var(--r-1) 0;
   }
   .agent-control-blocker.fail {
-    border-left-color: var(--red);
+    border-left-color: var(--neg);
     background: rgba(248, 81, 73, 0.08);
   }
 
@@ -224,9 +224,9 @@
      渲染進本檔 #agent-tracker 容器,元素非 className-wipe,故直掛安全;字級/間距用
      token,收斂見 05_utilities.md §5;palette 外色(深紅/深藍 gradient)verbatim
      relocate,P0.4 裁決;dark 面板 rgba(13,17,23,*)→--bg-sunken 語義收斂。 */
-  .agent-card { border:1px solid var(--border); border-radius:var(--r-2);
+  .agent-card { border:1px solid var(--border-subtle); border-radius:var(--r-2);
     padding:var(--sp-3); display:flex; flex-direction:column; gap:var(--sp-2);
-    background:var(--card-bg); }
+    background:var(--bg-surface); }
   /* Executor 真倉/影子底色 enum（§7 class-per-enum;gradient palette 外色 P0.4）*/
   .agent-card--live { background:linear-gradient(135deg,#3d0d0d,#5c1a1a);
     animation:agent-breathing 4s ease-in-out infinite; }
@@ -246,8 +246,8 @@
   .at-eng-col { border-radius:var(--r-2); padding:var(--sp-3); }
   .at-eng-col--demo { background:linear-gradient(135deg,#0d1f3d,#1a2f5c); border:1px solid #1a2f5c; }
   .at-eng-col--live { background:linear-gradient(135deg,#3d0d0d,#5c1a1a); border:1px solid var(--neg); }
-  .at-eng-col--empty { background:var(--bg-sunken); border:1px dashed var(--border); }
-  .at-eng-diff { background:var(--bg-sunken); border:1px solid var(--border);
+  .at-eng-col--empty { background:var(--bg-sunken); border:1px dashed var(--border-subtle); }
+  .at-eng-diff { background:var(--bg-sunken); border:1px solid var(--border-subtle);
     border-radius:var(--r-1); padding:var(--sp-2) var(--sp-3); display:flex;
     justify-content:space-around; gap:var(--sp-2); flex-wrap:wrap; }
   .at-lease-row { padding:var(--sp-1) var(--sp-2); background:var(--bg-sunken);

@@ -208,10 +208,10 @@
 }
 .confirm-modal-header h3 { margin: 0; font-size: 15px; font-weight: 600; }
 .confirm-close {
-  background: none; border: none; color: var(--text-dim);
+  background: none; border: none; color: var(--text-secondary);
   font-size: 20px; cursor: pointer; padding: 0 4px; line-height: 1;
 }
-.confirm-close:hover { color: var(--text); }
+.confirm-close:hover { color: var(--text-primary); }
 .confirm-modal-body { padding: 16px 20px; }
 .confirm-modal-footer {
   display: flex; gap: 8px; justify-content: flex-end;
@@ -223,20 +223,20 @@
 }
 .confirm-label {
   font-size: 11px; font-weight: 600; text-transform: uppercase;
-  color: var(--text-dim); margin-bottom: 8px; letter-spacing: 0.05em;
+  color: var(--text-secondary); margin-bottom: 8px; letter-spacing: 0.05em;
 }
 .button-muted {
-  background: none; border: 1px solid #30363d; color: var(--text-dim);
+  background: none; border: 1px solid #30363d; color: var(--text-secondary);
   border-radius: var(--r-1); padding: 5px 14px; font-size: 12px; cursor: pointer;
 }
-.button-muted:hover { border-color: #6e7681; color: var(--text); }
+.button-muted:hover { border-color: #6e7681; color: var(--text-primary); }
 .confirm-cancel { margin-right: auto; }
 
 /* ── Restart time options ─────────────────────────────────────── */
 .restart-time-opt {
   display: flex; align-items: center; gap: 6px;
   padding: 7px 14px; border: 1px solid #334155; border-radius: var(--r-2);
-  cursor: pointer; font-size: 13px; color: var(--text);
+  cursor: pointer; font-size: 13px; color: var(--text-primary);
   background: rgba(255,255,255,0.03); transition: border-color .15s, background .15s;
 }
 .restart-time-opt:has(input:checked) {
@@ -260,17 +260,17 @@
   max-width: 480px; /* P0.2:自 dlg-apikey inline style= 收入(唯一消費點) */
 }
 .oc-dialog .note {
-  font-size: 11px; color: var(--yellow, #f0c040);
+  font-size: 11px; color: var(--warn, #f0c040);
   background: rgba(240,192,64,0.08); border: 1px solid rgba(240,192,64,0.2);
   border-radius: var(--r-1); padding: 8px 10px; margin-bottom: 12px;
 }
 .oc-dialog .btn-row { display: flex; gap: 8px; justify-content: flex-end; }
 
 /* ── Product Family Toggle Switch ─────────────────────────────── */
-.pf-card { background:var(--bg); border:1px solid #21262d; border-radius:var(--r-2); padding:14px; }
+.pf-card { background:var(--bg-app); border:1px solid #21262d; border-radius:var(--r-2); padding:14px; }
 .pf-card-title { font-weight:600; font-size:13px; margin-bottom:10px; display:flex; align-items:center; gap:8px; }
 .pf-card-title .pf-cap { font-size:11px; padding:2px 6px; border-radius:var(--r-1); font-weight:500; }
-.pf-row { display:flex; align-items:center; justify-content:space-between; padding:5px 0; font-size:12px; color:var(--text-dim); }
+.pf-row { display:flex; align-items:center; justify-content:space-between; padding:5px 0; font-size:12px; color:var(--text-secondary); }
 .pf-row + .pf-row { border-top:1px solid rgba(255,255,255,0.04); }
 .pf-toggle { position:relative; width:36px; height:20px; flex-shrink:0; }
 .pf-toggle input { opacity:0; width:0; height:0; position:absolute; }
@@ -279,7 +279,7 @@
 .pf-toggle input:checked + .slider { background:rgba(56,139,253,0.3); }
 .pf-toggle input:checked + .slider::before { transform:translateX(16px); background:var(--accent); }
 .pf-toggle input:disabled + .slider { opacity:0.4; cursor:not-allowed; }
-.pf-mode-select { background:var(--bg); border:1px solid #30363d; color:var(--text); font-size:11px; padding:2px 6px; border-radius:var(--r-1); cursor:pointer; }
+.pf-mode-select { background:var(--bg-app); border:1px solid #30363d; color:var(--text-primary); font-size:11px; padding:2px 6px; border-radius:var(--r-1); cursor:pointer; }
 .pf-mode-select:disabled { opacity:0.4; cursor:not-allowed; }
 
 /* ── P0.2 批次 2:inline style= 收斂出的頁面組件(本塊在 body,文檔序晚於
@@ -1374,7 +1374,7 @@ async function peekApiKey(slotId) {
   if (data && data.key_hint) {
     if (el) {
       el.textContent = data.key_hint;
-      el.style.color = 'var(--green)';
+      el.style.color = 'var(--pos)';
       setTimeout(() => { el.textContent = '****'; el.style.color = ''; }, 5000);
     }
     ocToast(slotId + ' Key: ' + data.key_hint, 'info');

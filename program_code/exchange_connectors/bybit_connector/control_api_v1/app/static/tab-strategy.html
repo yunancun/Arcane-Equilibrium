@@ -27,7 +27,7 @@
   .sh-dist-fill--active{ left:0; background:var(--pos); }
   .sh-dist-fill--paused{ left:var(--fill-x,0); background:var(--warn); }
   /* 建立策略表單面板:內嵌卡(display 由 hidden class 切換,§3.3 引理) */
-  .strat-create-panel{ background:var(--bg); border:1px solid var(--border-subtle); border-radius:var(--r-2); }
+  .strat-create-panel{ background:var(--bg-app); border:1px solid var(--border-subtle); border-radius:var(--r-2); }
   /* 表單行:底對齊 flex(align-items:flex-end 非 center,故不套 .row) */
   .strat-form-row{ display:flex; gap:var(--sp-2); flex-wrap:wrap; align-items:flex-end; }
   /* 策略卡 #ID 標籤右間距(margin-right 全站僅 4 處,不升為 utility) */
@@ -36,13 +36,13 @@
   #new-symbol{ width:120px; }
   #new-qty{ width:90px; }
   /* scheduler cycle 健康度 footer 卡 */
-  .strat-cycle-footer{ background:var(--bg); border:1px solid var(--border-subtle); border-radius:var(--r-1); }
+  .strat-cycle-footer{ background:var(--bg-app); border:1px solid var(--border-subtle); border-radius:var(--r-1); }
   /* 指標/信號引擎 2 欄栅格 */
   .strat-engine-grid{ display:grid; grid-template-columns:1fr 1fr; gap:var(--sp-3); }
   /* reason 單行省略號截斷 */
   .strat-reason-cell{ max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   /* Diff / 7d Effect 詳情卡(oc-card 深底 + 緊湊內距) */
-  .strat-detail-card{ padding:var(--sp-3); background:var(--bg); }
+  .strat-detail-card{ padding:var(--sp-3); background:var(--bg-app); }
 </style>
 
 <!-- ═══ Orchestrator Status Bar ═══ -->

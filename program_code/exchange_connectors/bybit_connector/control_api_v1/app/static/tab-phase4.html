@@ -47,7 +47,7 @@
   min-width: 160px;
   padding: 12px 16px;
   border-radius: var(--r-2);
-  border: 1px solid var(--border, #30363d);
+  border: 1px solid var(--border-subtle, #30363d);
   background: var(--bg-raised);
   display: flex;
   align-items: center;
@@ -71,7 +71,7 @@
 
 /* Shared card wrapper / 共用 Card 包裝 — see _dashboard_card.html partial */
 .phase4-card {
-  border: 1px solid var(--border, #30363d);
+  border: 1px solid var(--border-subtle, #30363d);
   border-radius: var(--r-2);
   background: var(--bg-raised);
   padding: 14px 16px;
@@ -108,7 +108,7 @@
   text-align: center;
   color: var(--text-muted, #8b949e);
   font-size: 12px;
-  border: 1px dashed var(--border, #30363d);
+  border: 1px dashed var(--border-subtle, #30363d);
   border-radius: var(--r-1);
 }
 .phase4-degraded-banner {
@@ -132,13 +132,13 @@
 .phase4-card .p4-grid th,
 .phase4-card .p4-grid td { padding: 2px 6px; }
 .phase4-card .p4-grid td { background: var(--cell-bg, transparent); }
-.phase4-card .p4-thead-row { text-align: left; border-bottom: 1px solid var(--border, #30363d); }
+.phase4-card .p4-thead-row { text-align: left; border-bottom: 1px solid var(--border-subtle, #30363d); }
 .phase4-card .p4-report-link { text-decoration: underline; }
 
 /* LinUCB 收斂進度條行：label / track / 動態寬度 fill（--conv-w scoped-var）/ count */
 .phase4-card .p4-conv-row { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-micro); margin: 2px 0; }
 .phase4-card .p4-conv-label { flex: 0 0 160px; }
-.phase4-card .p4-conv-track { flex: 1 1 auto; background: var(--border, #30363d); border-radius: var(--r-1); overflow: hidden; height: 8px; }
+.phase4-card .p4-conv-track { flex: 1 1 auto; background: var(--border-subtle, #30363d); border-radius: var(--r-1); overflow: hidden; height: 8px; }
 .phase4-card .p4-conv-fill { display: block; height: 100%; width: var(--conv-w, 0%); background: #2ea043; }
 .phase4-card .p4-conv-count { flex: 0 0 48px; text-align: right; }
 
