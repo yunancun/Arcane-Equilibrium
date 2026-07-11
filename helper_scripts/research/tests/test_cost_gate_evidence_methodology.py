@@ -2251,7 +2251,8 @@ def test_expected_cost_artifact_rejects_signed_mean_above_absolute_mean(
         if block_name == "global"
         else artifact["symbols"][0]
     )
-    block["mean_signed"] = block["mean_abs"] + 0.000001
+    # The safety relation is exact: even sub-tolerance bps overages are invalid.
+    block["mean_signed"] = block["mean_abs"] + 0.0000000005
 
     packet = build_blocked_signal_outcome_review(
         rows,
