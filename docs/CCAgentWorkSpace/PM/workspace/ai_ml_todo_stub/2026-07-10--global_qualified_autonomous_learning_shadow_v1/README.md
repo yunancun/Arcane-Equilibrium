@@ -4,7 +4,7 @@ Date: 2026-07-10
 Owner: PM
 Goal: `GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1`
 Codex Goal thread: `019f4b6d-1e5b-7551-9fce-7a2f029a1675`
-Status: `ACTIVE_WP4_ISOLATED_TRAINER_REPOSITORY_TDD`
+Status: `ACTIVE_WP4_QUALIFIED_RECEIPT_READER_TDD`
 
 This is the durable PM-owned queue and state surface for the active Goal. It
 supersedes the old ALR P2 completion/terminal interpretation, but does not edit
@@ -84,9 +84,28 @@ schema harness compiled without running PG; independent final P0/P1/P2 are
 `0/0/0`. V158 was not applied, and PostgreSQL/Linux/runtime state was not
 refreshed. This source publication created no receipt/run/artifact/registry
 rows, fit, model bytes, symlink, serving/promotion state, or authority. G4
-remains failed. The next safe action is only the fake-connection
-durable-receipt repository tracer against V158's fixed receipt API. Trainer,
-fit, filesystem publication, migration apply, and runtime remain gated.
+remains failed. At that V158 checkpoint, the next source slice was the
+fake-connection durable-receipt repository tracer; it is now accepted at the
+checkpoint below. Trainer, fit, filesystem publication, migration apply, and
+runtime remained gated.
+
+The repository-only fixed-writer tracer is now source accepted at
+`c0aec6813b59f3c17b1fb93350794a3581ccd5ae`. It snapshots and fully validates
+the existing receipt-only training contract, independently derives the exact
+schema-versioned reward-set and 30-field durable-receipt payload hashes, and
+calls only `learning.persist_alr_qualified_training_receipt_v1` with its exact
+15 TEXT plus JSONB arguments. It accepts only exact PERSISTED/DUPLICATE full
+rows after typed response parity and requires a dedicated clean psycopg2 IDLE
+transaction so it cannot commit or roll back unrelated work.
+
+Focused verification passed `31`; adjacent contract/repository/V158 checks
+passed `121`; the optional-LightGBM-unavailable full ML posture passed `1920`
+with `28` skips, exactly `31` more passes than the same-environment baseline.
+Two exact-byte final reviews reported P0/P1/P2 `0/0/0`. This was fake-DB source
+TDD only: V158 was not applied, PostgreSQL was not contacted, and no durable
+receipt row, reader proof, fit, artifact, registry, filesystem, runtime, or
+authority fact was created. The next safe action is only V158 fixed receipt
+reader `FOUND/NOT_FOUND` TDD; result and trainer surfaces remain later.
 
 ## Earlier B2.2c event-primary reconciliation
 
