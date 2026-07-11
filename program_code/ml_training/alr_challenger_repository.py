@@ -1,10 +1,10 @@
-"""Fixed-function persistence for qualified challenger-training receipts.
+"""Fixed-function access for qualified challenger-training receipts.
 
 This module is deliberately narrower than a trainer.  It validates an already
 constructed ``alr_challenger_training_contract_v1``, derives the exact V158
-receipt payload, and calls only the fixed receipt writer.  It performs no fit,
-filesystem publication, direct table DML, registry write, serving action, or
-external request.
+receipt payload, and calls only the fixed receipt writer or reader.  It performs
+no fit, filesystem publication, direct table DML, registry write, serving
+action, or external request.
 """
 
 from __future__ import annotations
@@ -61,6 +61,11 @@ _PERSIST_RECEIPT_SQL = (
     ") AS repository_result "
     "/* alr-challenger-repository:qualified-receipt */"
 )
+_READ_RECEIPT_SQL = (
+    "SELECT learning.read_alr_qualified_training_receipt_v1("
+    "%s::text, %s::text) AS repository_result "
+    "/* alr-challenger-repository:qualified-receipt-reader */"
+)
 
 
 class AlrChallengerRepositoryError(ValueError):
@@ -93,6 +98,40 @@ def persist_qualified_training_receipt(
             response = _fixed_function_response(cursor.fetchone())
         status, receipt = _validate_persist_response(response, payload=payload)
         result = {"status": status, "receipt": copy.deepcopy(dict(receipt))}
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+
+    return result
+
+
+def read_qualified_training_receipt(
+    connection: Any,
+    *,
+    training_contract: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Read one exact V158 qualified receipt through its fixed API only."""
+
+    contract = _validated_contract(training_contract)
+    payload = _receipt_payload(contract)
+    _require_transactional_connection(connection)
+    params = (
+        payload["durable_receipt_hash"],
+        payload["training_key_hash"],
+    )
+
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(_READ_RECEIPT_SQL, params)
+            response = _fixed_function_response(cursor.fetchone())
+        status, receipt = _validate_read_response(response, payload=payload)
+        result = {
+            "status": status,
+            "receipt": (
+                None if receipt is None else copy.deepcopy(dict(receipt))
+            ),
+        }
         connection.commit()
     except Exception:
         connection.rollback()
@@ -222,7 +261,37 @@ def _validate_persist_response(
     status = response.get("status")
     if not isinstance(status, str) or status not in _PERSISTED_STATUSES:
         raise AlrChallengerRepositoryError("receipt_response_status_invalid")
-    receipt = response.get("receipt")
+    receipt = _validate_receipt_row(response.get("receipt"), payload=payload)
+    return status, receipt
+
+
+def _validate_read_response(
+    response: Mapping[str, Any],
+    *,
+    payload: Mapping[str, Any],
+) -> tuple[str, Mapping[str, Any] | None]:
+    if set(response) != {"status", "receipt"}:
+        raise AlrChallengerRepositoryError("receipt_response_fields_invalid")
+    status = response.get("status")
+    if not isinstance(status, str):
+        raise AlrChallengerRepositoryError("receipt_response_status_invalid")
+    if status == "NOT_FOUND":
+        if response.get("receipt") is not None:
+            raise AlrChallengerRepositoryError(
+                "receipt_not_found_payload_invalid"
+            )
+        return status, None
+    if status != "FOUND":
+        raise AlrChallengerRepositoryError("receipt_response_status_invalid")
+    receipt = _validate_receipt_row(response.get("receipt"), payload=payload)
+    return status, receipt
+
+
+def _validate_receipt_row(
+    receipt: Any,
+    *,
+    payload: Mapping[str, Any],
+) -> Mapping[str, Any]:
     if not isinstance(receipt, Mapping) or set(receipt) != _RECEIPT_ROW_FIELDS:
         raise AlrChallengerRepositoryError("receipt_row_fields_invalid")
     created_at = receipt.get("created_at")
@@ -239,7 +308,7 @@ def _validate_persist_response(
     actual = {key: value for key, value in receipt.items() if key != "created_at"}
     if _canonical_json(actual) != _canonical_json(expected):
         raise AlrChallengerRepositoryError("receipt_row_content_mismatch")
-    return status, receipt
+    return receipt
 
 
 def _mapping(value: Any, reason: str) -> Mapping[str, Any]:
@@ -280,4 +349,5 @@ __all__ = [
     "QUALIFIED_RECEIPT_SCHEMA_VERSION",
     "QUALIFIED_REWARD_SET_SCHEMA_VERSION",
     "persist_qualified_training_receipt",
+    "read_qualified_training_receipt",
 ]
