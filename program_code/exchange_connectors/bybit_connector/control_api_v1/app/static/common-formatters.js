@@ -366,12 +366,14 @@ function ocSanitizeClass(s) {
 
 // ─── Strategy Identity Color / 策略身份顏色 ─────────────────────────────────
 // Shared by Strategy, Demo, and Live so one strategy keeps the same color everywhere.
+// C6d follow-up：.color 欄為 dead-data（0 consumer；ocStrategyMeta 僅 label/zh/key
+// 被 ocStrategyLabel/ocStrategyChip 消費，真渲染色在 common.js CSS --strategy-color），已刪。
 const OC_STRATEGY_COLOR_META = {
-  grid_trading: { label: 'grid_trading', zh: '網格', color: '#58a6ff' },
-  ma_crossover: { label: 'ma_crossover', zh: '均線', color: '#3fb950' },
-  bb_reversion: { label: 'bb_reversion', zh: '回歸', color: '#a855f7' },
-  bb_breakout: { label: 'bb_breakout', zh: '突破', color: '#f78166' },
-  funding_arb: { label: 'funding_arb', zh: '費率', color: '#d29922' },
+  grid_trading: { label: 'grid_trading', zh: '網格' },
+  ma_crossover: { label: 'ma_crossover', zh: '均線' },
+  bb_reversion: { label: 'bb_reversion', zh: '回歸' },
+  bb_breakout: { label: 'bb_breakout', zh: '突破' },
+  funding_arb: { label: 'funding_arb', zh: '費率' },
 };
 
 function ocStrategyKey(strategy) {

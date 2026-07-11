@@ -18,8 +18,8 @@
 <script>ocAuthCheck(); ocInjectBaseCSS();</script>
 
 <style>
-/* ── Live page theme — purple accent (real money, distinct from red errors) ── */
-/* 實盤頁主題 — 紫色強調（真實資金，與紅色錯誤指示區分） */
+/* ── Live page theme — real-money hot-red accent (--live, distinct from --neg loss red) ── */
+/* 實盤頁主題 — 真金熱紅強調（--live，與 --neg 虧損紅區分） */
 html, body {
   height: 100%;
   margin: 0;
@@ -166,10 +166,10 @@ html, body {
 
 /* ── F5/A1 — Engine-kind / Endpoint visual modes ──────────────────────────
    Three Live visual modes coexist (per A3 audit 2026-04-26):
-   1. Mainnet (REAL FUNDS) — purple+red double underline, REAL FUNDS badge
+   1. Mainnet (REAL FUNDS) — red top border + --neg double bottom underline, REAL FUNDS badge
    2. LiveDemo (api-demo endpoint) — orange/silver, "LiveDemo · api-demo" badge
    3. Engine != live — gray integrity-fail view (no data rendered)
-   F5/A1 — engine_kind / endpoint 三態 UI 區分（避免 LiveDemo 套 Mainnet 紫「真實資金」） */
+   F5/A1 — engine_kind / endpoint 三態 UI 區分（避免 LiveDemo 套 Mainnet 熱紅「真實資金」） */
 .live-mode-mainnet .live-warn-bar {
   border: 1px solid rgba(239,68,68,0.6) !important;
   /* 塌平原紫→紅裝飾漸層(canon 5/1 去裝飾漸層):去紫,保 real-money 熱紅身分=--live-bg 熱紅 tint;
@@ -358,11 +358,11 @@ html, body {
       <div class="live-t-purple fw-semi mb-1">Live 槽雙態說明 / Live Slot — Dual-State</div>
       <div class="fs-dense t-primary">
         Live 槽可填入 Mainnet API 或 Live-Demo 虛擬 key（後者跑 Demo 服務器但走 Live 代碼路徑）。<br>
-        無論哪種填充，本 Tab 與風控均按 Live 最嚴標準：全局模式門禁 / 二次確認 / 完整風控棧；視覺上 Mainnet=紫紅+REAL FUNDS、LiveDemo=橙+api-demo 標。
+        無論哪種填充，本 Tab 與風控均按 Live 最嚴標準：全局模式門禁 / 二次確認 / 完整風控棧；視覺上 Mainnet=熱紅+REAL FUNDS、LiveDemo=橙+api-demo 標。
       </div>
       <div class="fs-micro t-dim mt-1">
         The Live slot accepts either a Mainnet API key or a Live-Demo virtual key (Demo server, Live code path).
-        Risk controls remain at strict Live standards regardless; visually Mainnet = purple/red + REAL FUNDS, LiveDemo = orange + api-demo badge.
+        Risk controls remain at strict Live standards regardless; visually Mainnet = hot-red + REAL FUNDS, LiveDemo = orange + api-demo badge.
       </div>
     </div>
   </div>
