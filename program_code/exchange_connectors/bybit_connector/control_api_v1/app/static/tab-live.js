@@ -993,7 +993,10 @@ async function checkLiveEngineStatus() {
       _liveModeState.actual_endpoint === 'mainnet' ? ' 🟣' :
       _liveModeState.actual_endpoint === 'live_demo' ? ' 🟠' : ''
     );
-    badge.className = 'oc-chip oc-chip-live';
+    // C6d follow-up：oc-chip-live 由紫改 --live 熱紅後會過度警示 —
+    // live_demo（demo endpoint 非真金）不該染真金熱紅，改用 oc-chip-warn（橙，
+    // 對齊 tab-live.html .live-mode-livedemo 橙主題）；mainnet/未知才用 oc-chip-live 熱紅真金。
+    badge.className = 'oc-chip ' + (_liveModeState.actual_endpoint === 'live_demo' ? 'oc-chip-warn' : 'oc-chip-live');
   } else if (isPausedOrStopped) {
     badge.textContent = epLabel + ' ' + stateZh;
     badge.className = 'oc-chip oc-chip-warn';
