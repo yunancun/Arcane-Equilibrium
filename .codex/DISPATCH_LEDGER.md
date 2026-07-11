@@ -1,30 +1,54 @@
 # Codex Dispatch Ledger
 
-Last updated: 2026-06-26
+Last updated: 2026-07-11
 
 Purpose:
 - keep a durable record of meaningful PM-first dispatch decisions
 - show which repo roles were used for a task
 - prevent workflow drift into anonymous `worker/explorer` execution
 
-Entry format:
+Entry format for new records (older fixed-chain records below are historical):
 
 ```text
 YYYY-MM-DD HH:MM TZ
 Task:
 - short task statement
 
-Chain:
-- PM -> PA(default) -> E1(worker) -> E2(explorer) -> PM
+Task facts:
+- shape / risk / surfaces / runtime and end-to-end claims
 
-Ownership:
-- PA(default): design / scope / risk framing
-- E1(worker): implementation in specific files
-- E2(explorer): adversarial review
+DAG:
+- DAG digest: `sha256:...`
+- required nodes: `node_id=ROLE(runtime_type)` with owned scope
+- skipped roles: reason + residual risk + owner
 
-Result:
-- outcome, blocker, or next action
+Closure:
+- `work_status` / `gate_verdict` / `disposition`
+- accepted evidence, preserved dissent, consumption, next action
 ```
+
+2026-07-11 00:14 CEST
+Task:
+- Replace the development sub-agent team/persona/fixed-chain sprawl with one executable, profit-adjusted, consumption-aware governance Module and close every audit finding.
+
+Task facts:
+- `implementation` / `high`; surfaces `architecture, governance, agent_workflow, full_audit, consumption, docs, python`; runtime claim false; end-to-end governance acceptance true.
+
+DAG:
+- DAG digest: `sha256:90670aba3965f0f597b89d5dde93edbcddcefeeab46c58d86439fd619616727b`
+- required nodes: `pa_design=PA`, `implementation=E1`, `independent_review=E2`, `regression=E4`, `constitutional_gate=CC`, `ai_economics_review=AI-E`, `docs_projection=TW`, `docs_integrity_review=R4`, `business_acceptance=QA`
+- adaptive second-thought/replay nodes were admitted with unique identities; E2/R4/QA dissent remained mandatory until fixed.
+- skipped runtime/broker effect owners remained residual source-only risk; no effect claim was made.
+
+Closure:
+- final source acceptance: `DONE` / `PASS` / `SOURCE_RELEASE_READY`; no retroactive `closure_packet_v1` was synthesized for this bootstrap migration because the trusted non-serialized host attestation capability did not exist when the work began.
+- hardening binds one typed task/context contract through fragments/closure, typed observation/test/authority receipts, strict consumption honesty, E2 + verifier-vote Full Audit semantics, and a closure-bound profit controller.
+- deletion second-thought removed the unused continuation contract, schema, validator, projection, tests, and saved-workflow checkpoint path. Full Audit overflow now remains explicit debt and recommends a new narrow task with a freshly compiled Context; predecessor verdicts are not inherited.
+- explicit Full Audit capacity is 44 unique nodes / 46 attempts / 4,416,000 planned-input-token lower-bound ceiling. Runtime matrices proved lazy 14-call no-finding behavior, complete two-view verification for one decision claim on all 13 axes, and fail-closed cold-restart debt on overflow.
+- capability boundary: deploy intent validation exists but apply is disabled without a trusted local runtime identity probe; development-agent broker/private/external contact remains unsupported. No runtime/effect claim was made.
+- consumption: exact platform token/cache/tool telemetry remains unavailable; compiler estimates and envelope caps are not reported as actual usage.
+- accepted evidence: governance `230/230` PASS; full structure `613` PASS with exactly four known unrelated failures and zero governance failures; adaptive recall `12/12` consecutive PASS; Registry/render/codegen/JS/Python/schema/scoped-diff gates PASS; independent PA final gate found no blocker or major.
+- next action: precisely stage only this governance checkpoint, commit/push, then perform source-only Mac/GitHub/Linux fast-forward alignment; do not deploy or restart services.
 
 2026-06-26 14:31 CEST
 Task:

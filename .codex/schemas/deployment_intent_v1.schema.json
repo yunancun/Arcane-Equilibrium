@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "deployment_intent_v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "intent_id",
+    "target_host",
+    "target_environment",
+    "expected_source_head",
+    "expected_deploy_script_sha256",
+    "expected_runtime_environment_identity_digest",
+    "require_clean_tree",
+    "approved_by",
+    "approved_at",
+    "expires_at",
+    "typed_confirm",
+    "hard_stops"
+  ],
+  "properties": {
+    "schema_version": {"const": "deployment_intent_v1"},
+    "intent_id": {"type": "string", "minLength": 8},
+    "target_host": {"type": "string", "minLength": 1},
+    "target_environment": {"enum": ["demo", "live_demo", "research_runtime"]},
+    "expected_source_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "expected_deploy_script_sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "expected_runtime_environment_identity_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "require_clean_tree": {"const": true},
+    "approved_by": {"type": "string", "minLength": 1},
+    "approved_at": {"type": "string", "format": "date-time"},
+    "expires_at": {"type": "string", "format": "date-time"},
+    "typed_confirm": {"type": "string", "minLength": 1},
+    "hard_stops": {
+      "type": "array",
+      "minItems": 2,
+      "items": {"type": "string", "minLength": 1}
+    }
+  }
+}

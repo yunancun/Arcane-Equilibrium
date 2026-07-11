@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -49,11 +50,12 @@ def test_archive_top_level_files_are_all_indexed() -> None:
         assert path.name in source
 
 
-def test_ccagent_workspace_count_and_mit_bb_rows_are_indexed() -> None:
+def test_ccagent_workspace_count_and_broker_ops_rows_are_indexed() -> None:
     source = DOCS_README.read_text()
-    assert "19 個 Agent" in source
-    assert "`CCAgentWorkSpace/MIT/`" in source
-    assert "`CCAgentWorkSpace/BB/`" in source
+    registry = json.loads((ROOT / ".codex/agent_registry_v1.json").read_text())
+    assert f"{len(registry['roles'])} 個 generated development role presets" in source
+    for role in ("MIT", "BB", "IB", "OPS"):
+        assert f"`CCAgentWorkSpace/{role}/`" in source
 
 
 def test_mit_bb_workspace_readmes_exist_at_workspace_level() -> None:

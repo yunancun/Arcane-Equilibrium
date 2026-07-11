@@ -11,6 +11,17 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-07-10 23:52 CEST (re-audited 2026-07-11)
+- replaced duplicated hand-maintained development-agent personas/protocols with one executable `development_agent_governance` Module: 20 capability presets, generated views, typed task facts, adaptive risk DAG, elastic context, route-bound closure, and deterministic effect seams
+- added missing `OPS` and `IB` capabilities without adding another orchestration tier; both remain read-only and gain no deploy/broker effect authority
+- compacted hot `.codex/MEMORY.md` from 1,997 to 131 lines while preserving the old bytes verbatim under `.codex/archive/`; retired automatic per-role report/memory growth
+- a later adversarial re-audit invalidated the premature final-PASS report and drove task-contract/context revalidation, typed observation/test/authority receipts, strict consumption aggregation, E2 + typed-vote Full Audit closure, isolated-fix debt, and a profit-diagnosis controller
+- deleted the speculative Full Audit continuation implementation after independent deletion review found no production host consumer or Closure endpoint and multiple avoidable cross-run trust seams; overflow now emits exact non-authoritative debt plus `NEW_TASK_COLD_RESTART_REQUIRED`
+- raised only the explicit Full Audit ceiling to 44 unique nodes / 46 attempts / 4,416,000 planned-input-token lower-bound capacity so 13 discovery axes can each receive two-view verification without designing rework into the budget; admission remains lazy and the ceiling is not a spend target
+- deploy apply is explicitly disabled until a trusted local runtime identity probe exists; development-agent broker/private/external contact remains fail-closed unsupported
+- final verification: governance `230/230` PASS; full `tests/structure` `613` PASS / `4` known unrelated failures; adaptive-recall test `12/12` consecutive PASS; Registry validate/render, codegen drift check, three workflow JS syntax checks, 44 governance Python module compiles, eight JSON schemas, and scoped diff check PASS; independent PA gate found no blocker or major
+- boundary: source/tests/docs only; final Mac/GitHub/Linux source alignment is an allowed handoff, but no runtime deploy/restart, PG/broker contact, auth/risk/order mutation, or actual provider-token telemetry claim is authorized
+
 2026-07-09 00:00 CEST
 - dispatched ALR todo-stub/prompt adversarial review chain: `CC`, `FA`, `QC`, `MIT`, `AI-E`, `E3`, `BB`, `PA`
 - result: created `docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/2026-07-09--scanner_driven_alr/` with queue, boundaries, loop contract, retention contract, manifest, and startup prompt

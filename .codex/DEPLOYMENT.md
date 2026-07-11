@@ -1,30 +1,33 @@
 # Codex Deployment
 
-Last updated: 2026-04-28
+Last updated: 2026-07-11
 
 ## Goal
 
-Mirror the useful parts of the existing Claude Code setup inside Codex without pretending the two systems are identical.
+Expose the canonical Development-Agent Registry as native, least-privilege
+Codex custom agents while keeping human and Claude projections synchronized.
 
 ## Source systems
 
-- Claude agent registry: `.claude/agents/*.md`
+- Canonical role registry: `.codex/agent_registry_v1.json`
+- Native Codex custom agents: `.codex/agents/*.toml`
+- Human role projections: `.codex/agents/*.md`
 - Claude skill corpus: `.claude/skills/*/SKILL.md`
 
 ## Current inventory
 
-- Claude agents: 18
-- Claude skills: 25
+- Registry roles: 20
+- Native Codex identities: 22 (PA and E4 each split writer/verifier authority)
 
 ## Codex deployment model
 
-Codex does not use the same repo-local first-class agent registry format as Claude Code. For this repository, the deployment model is:
+Codex loads project custom agents from standalone TOML files. For this repository:
 
 1. Git-root `AGENTS.md` is the Codex auto-load entry document for new sessions
-2. Agent role specs live in `.codex/agents/*.md`
-3. Shared skill SSOT stays in `.claude/skills/*/SKILL.md`
-4. Skill index for Codex lives in `.codex/skills/INDEX.md`
-5. Comparative inventory report lives in `.codex/reports/`
+2. `.codex/agents/*.toml` are the executable native custom-agent identities
+3. Adjacent `.md` files are generated human views, not runtime personas
+4. Shared skill SSOT stays in `.claude/skills/*/SKILL.md`
+5. `.codex/agent_registry_v1.json` deterministically generates every adapter
 
 ## Default project role
 
@@ -36,14 +39,16 @@ That means new sessions should begin in planning / orchestration mode, then disp
 
 When a Codex sub-agent is needed:
 
-1. Pick a role file from `.codex/agents/`
-2. Read the linked Claude source file in `.claude/agents/`
-3. Read the referenced skill files in `.claude/skills/`
-4. Bind the task to the repo role and report it as `ROLE(codex_type)`
-5. Spawn the sub-agent with the appropriate Codex type:
-   - `worker` for implementation / test-writing / doc-writing
-   - `explorer` for narrow read-only codebase investigation
-   - `default` for broad audits, design, synthesis, or mixed repo + web work
+1. Require explicit uncertainty, then route to the Registry-derived exact
+   `role + native_agent + node_class + permission` tuple.
+2. Spawn only the linked native TOML identity from `.codex/agents/INDEX.md`.
+3. Read only the admitted Context capsule and on-demand skills/evidence.
+4. Preserve the TOML sandbox: verifiers are `read-only`; builders are
+   `workspace-write` but remain bound by Registry permission and task ownership.
+5. For conflict roles, never use an ambiguous identity: select
+   `PA-design-writer` vs `PA-investigator`, or `E4-writer` vs `E4-verifier`.
+6. Every read-only Bash command uses the role-exact `authorize-command` preflight;
+   sandbox mode does not grant service/network/private-broker authority.
 
 See also:
 - `.codex/AGENT_DISPATCH_PROTOCOL.md`
@@ -51,25 +56,27 @@ See also:
 
 ## Important differences vs Claude Code
 
-- Codex sub-agent types are runtime-level (`default` / `explorer` / `worker`), not custom permanent personas
-- repo role binding is mandatory even though runtime types stay generic
+- Native TOML identity is executable; the Registry role remains governance SSOT
+- `codex_type` is retained as a cross-platform execution hint, not intelligence
 - Shared memory should be file-backed in `.codex/`, not assumed to persist implicitly
 - Skills are reused from `.claude/skills/` rather than duplicated unless divergence is intentional
 
 ## Files created by this deployment
 
 - `.codex/agents/INDEX.md`
+- `.codex/config.toml`
+- `.codex/agents/*.toml`
 - `.codex/agents/*.md`
 - `.codex/skills/INDEX.md`
 - `.codex/reports/2026-04-28--cc_agent_skill_inventory_and_codex_deployment.md`
 
 ## Operating rule
 
-If Claude agent definitions evolve:
+If a role or permission evolves:
 
-1. Update the relevant `.codex/agents/*.md`
-2. Update `.codex/skills/INDEX.md` if skill ownership changes
-3. Append a short note to `.codex/WORKLOG.md`
+1. Update `.codex/agent_registry_v1.json` only.
+2. Run `python3 helper_scripts/maintenance_scripts/agent_governance.py render`.
+3. Require `render --check` and the governance structure tests before closure.
 
 ## Commit / push reporting rule
 

@@ -1,146 +1,267 @@
 # Codex Agent Dispatch Protocol
 
-Last updated: 2026-06-18
+Last updated: 2026-07-11
+Canonical role Interface: `.codex/agent_registry_v1.json`
 
 ## Purpose
 
-Define how Codex should operate in this repository when a new session starts and when work needs to be delegated.
+Translate a user objective into the smallest sufficient, evidence-preserving
+execution DAG. The deep design and invariants live in
+`docs/agents/development-agent-governance.md`; this file is the Codex routing
+Adapter.
 
-## Default entry role
+## PM triage record
 
-For this project, the **default Codex entry role is `PM`**.
+Before local work or delegation, bind:
 
-Meaning:
-- a new Codex session should begin from the `PM` perspective
-- the first job is to understand the user request, current repo state, and active plan
-- only after that should work be done locally or dispatched to another role
+- objective, exact scope, acceptance, hard stops
+- exact `task_prompt` bytes and compiler-derived digest; objective is not a substitute
+- task shape and surfaces
+- risk and required `low|medium|high|unknown` uncertainty; omission fails before routing
+- source/runtime/external evidence being claimed
+- `claim_inputs` for every prior/evidence digest that can affect a verdict
+- current head + dirty scope
+- expected output and side-effect class
 
-Important boundary:
-- this is a **project operating rule stored in the repo**
-- it is enforced here through `AGENTS.md` at the git root plus the `.codex/` rule files
-- it is not a guarantee that the Codex product itself will globally auto-switch personas outside this project context
+The compiler accepts only its declared fields/surface vocabulary. Unknown fields
+or surfaces fail closed so a typo cannot silently omit a hard gate. Use exact
+`runtime_claim` and `end_to_end_claim` booleans. A `runtime` source surface alone
+loads context; operational surfaces (`service`, `cron`, `pg`, `runtime_effect`,
+`incident_rca`) or a runtime claim activate OPS.
 
-## PM boot sequence
+`side_effect_class` is part of the admitted task contract, not a comment. It must
+match the task shape and surfaces (`none`, scoped repo/test/docs write, deploy,
+`public_web_read`, or private external/broker effect). Source/docs/test write shapes deterministically derive
+`repo_write`/`docs_write`/`local_test` and cannot silently default to `none`.
+Contradictory combinations fail routing. `public_web_read` is read-only evidence
+acquisition and requires an opened public URL plus citation/capture provenance;
+platform tool availability is checked separately. `private_external_contact`
+and broker-private effects produce a mandatory unsupported-effect node; there is
+no development-agent Adapter that can turn them into PASS. Pure `task_shape=deploy`
+routes through OPS/effect governance without inventing E1/E2/E4 source work;
+source-plus-deploy keeps the source builder/review/regression chain.
 
-At session start, PM should read in this order:
+Feed those facts to:
 
-1. `CLAUDE.md`
-2. `.codex/MEMORY.md`
-3. `README.md`
-4. `docs/agents/context-loading.md`
-5. `TODO.md` for code, deploy, runtime, planning, sign-off, review, or unclear-continuity work
-6. `.codex/agents/PM.md`
-7. `.codex/SUBAGENT_EXECUTION_RULES.md`
-8. On demand: `.codex/DEPLOYMENT.md`, `.codex/skills/INDEX.md`
-9. On demand only: `AE_INVENTORY_CONSOLIDATED.md`
+```bash
+python3 helper_scripts/maintenance_scripts/agent_governance.py route @task_facts.json
+python3 helper_scripts/maintenance_scripts/agent_governance.py context --role ROLE @task_facts.json
+```
 
-## PM responsibilities
+The output is advisory except for hard edges and hard boundaries. PM may add a
+role when new evidence raises expected decision value, but it must be recorded
+under closure `dispatch.admitted_role_nodes` with a unique node ID, Registry
+role, exact native agent, `work|verification` class, permission, sorted
+predecessor `requires`, disjoint node-owned `path_scope`, result binding, and
+reason. The exact call-producing projection (including explicitly admitted
+nested calls, excluding only deterministic non-call controllers) is validated
+before spawn and carries one identical `dag_digest`, task inventory, edge set,
+and topological-wave projection through call/manifest/wave/closure receipts.
+Admission makes its coverage
+mandatory; omission or verifier dissent blocks PASS. Removal of a deterministic
+mandatory node is not permitted without explicit operator risk acceptance where
+policy allows an exception.
 
-PM must:
-- understand the user ask
-- identify whether the task is planning, implementation, review, test, deploy, or audit
-- decide whether to work locally or delegate
-- keep work aligned with existing hard boundaries and workflow
-- preserve minimal-scope commits and safe sync behavior
+## Hybrid DAG rules
 
-## Dispatch principles
+Hard edges are triggered by facts, not by task labels alone:
 
-PM should delegate only when it improves parallelism or separation of concerns.
+- source implementation: Builder -> independent E2 -> E4; mixed GUI/backend
+  work uses the fixed disjoint E1 backend -> E1a frontend shared-worktree
+  sequence, then joins both before E2
+- authority/live/risk/auth: CC + E3, plus E2/E4 when source changes
+- runtime claim or operational change/deploy: OPS preflight; deploy then uses
+  PM/operator exact intent -> Deploy Adapter contract -> independent OPS postcheck;
+  current apply remains fail closed without the trusted runtime probe
+- Bybit: BB Adapter reviewer; IBKR/TWS/stock_etf_cash: IB Adapter reviewer
+- quant/strategy/portfolio semantics: QC
+- ML/data/schema semantics: MIT; AI-E only when model/orchestration economics matter
+- end-to-end outcome: QA
 
-Use local PM handling when:
-- the task is small and blocking
-- the result is needed immediately for the next step
-- the work is mostly synthesis / planning / final judgment
+PA/FA/E5/A3/R4/TW and extra independent reviewers are added when uncertainty,
+cross-Interface reach, negative space, visual/docs impact, or expected rework
+justifies them. Unknown risk uses the full-audit context envelope.
+Unknown uncertainty does the same; omitted uncertainty is invalid rather than low.
 
-Use sub-agents when:
-- tasks are independent and can run in parallel
-- implementation and review should be separated
-- a narrow specialist role reduces confusion
+Every omitted role records reason, residual risk, and owner. A shorter route is
+good only when durable closure quality is unchanged.
 
-## Required role binding
+## Role and permission binding
 
-Every delegated task must declare:
-- bound role
-- codex type
-- ownership
-- deliverable
+Every dispatch declares `ROLE(codex_type)`, owned files/responsibility, expected
+fragment/patch, task shape, context digest, and acceptance. Codex type is a
+runtime substrate, never a model-intelligence tier.
 
-For delegated work touching Rust, Cargo, Linux `trade-core`, PG, deploy, or
-runtime verification, the dispatch must also declare the hygiene source and
-verification surface:
-- `hygiene_sop`: `docs/agents/sub-agent-hygiene-sop.md`
-- `verification_surface`: Mac source-test/check, Linux read-only probe, or
-  PM/operator-owned atomic deploy path
+Generated role views under `.codex/agents/` and `.claude/agents/` must match the
+Registry. Native Codex execution uses `.codex/agents/*.toml`; adjacent Markdown
+is a human projection only. Select the exact node-class identity from
+`.codex/agents/INDEX.md`: `PA-design-writer` vs `PA-investigator`, and
+`E4-writer` vs `E4-verifier`. Never spawn an ambiguous writer/verifier role.
+Read-only identities keep `sandbox_mode="read-only"` even when the parent has
+broader access; builders use `workspace-write` but remain task-owned and cannot
+self-approve. Read-only roles execute verification only through one Adapter call:
 
-Use the role form `ROLE(codex_type)` in updates and summaries.
+```bash
+python3 helper_scripts/maintenance_scripts/agent_governance.py capture-command \
+  --native-agent NATIVE --node-id NODE \
+  --context-artifact @context.json -- <argv...>
+```
 
-Do not use only temporary runtime labels such as `worker 1` as the authoritative identity.
+Identity, routed task and path scope come from the immutable Context; argv is
+not caller shell text. A denial becomes an Adapter intent/blocker. The receipt's
+`repository_policy_only` effect boundary is not OS network/no-contact isolation.
 
-## Codex type mapping
+## Context and consumption
 
-| Role family | Codex type | Typical roles |
-|---|---|---|
-| planning / audit / synthesis | `default` | `PM`, `PA`, `FA`, `CC`, `QC`, `BB`, `AI-E`, `MIT`, `A3` |
-| read-only targeted investigation | `explorer` | `E2`, `E3`, `E5`, `R4` |
-| implementation / execution | `worker` | `E1`, `E1a`, `E4`, `QA`, `TW` |
+Do not feed every agent the entire conversation or universal preload. Prefer an
+independent fork plus an exact capsule containing user scope, acceptance, hard
+stops, baseline, direct Interface/callers, previous concern, and relevant source
+pointers/digests.
 
-## Recommended dispatch chains
+`agent-wave` admission requires one inline compiled `context_artifact_v1` containing
+Python-canonical plan bytes plus their SHA-256, task-contract digest, and compiler
+budget-authority binding. It hashes, parses, embeds, and retries the same captured
+plan bytes without cross-language reserialization or path reopen; source bytes,
+producer, freshness, token estimate, role, baseline, and authority caps are
+recomputed. Verdict-relevant priors are bound under task-contract `claim_inputs`;
+the free-form task prompt is not an evidence substitution channel. Raw `contextPath`,
+bare legacy arrays, untyped/digest-only virtual evidence, omitted mandatory facts,
+unresolved sources, or `pass_allowed!=true` are rejected before any agent call.
+Admission locally recaptures Registry-selected repository/derived bytes; a
+caller-rehashed artifact cannot establish provenance. Because saved workflows
+run as standalone `AsyncFunction` bodies without a stable import seam, all three
+use the generated `CONTEXT_ADMISSION_V1` block and begin every model prompt with
+the exact `canonical_plan` bytes. Its existing artifact digest is therefore the
+common-prefix digest, improving cache reuse without truncation.
+Every returned fragment carries the same `task_contract_digest`; closure revalidates
+the PM context artifact at adjudication and rejects objective/scope/criterion drift.
 
-### Feature / bug work
+Every call attempt emits one canonical `workflow_call_record_v1` binding the
+workflow contract, node/role/payload, requested model/effort/isolation, prompt,
+task/context/dirty-scope/focus/schema, native identity/class/permission, DAG
+predecessors/topological wave, producer generation, retry lineage, timestamps,
+null state, and exact parsed-result digest. Dependencies are scheduled only after
+all predecessors finish. The complete `workflow_call_manifest_v1` closes into
+one `workflow_wave_record_v1` that accounts for every admitted node, call/retry/
+null, result fragment, planned input lower bound, coverage debt, and controller-
+overhead exclusion. A self-digest protects canonical integrity; it is not a
+provider signature or producer-authenticity proof. Any orchestrator structural
+ledger must reference exactly every wave in the closure capture index; omitted,
+extra, or duplicate wave identity fails closed.
 
-1. `PM` triage
-2. `PA` if design is unclear or risky
-3. `E1` or `E1a` for implementation
-4. `E2` for adversarial review
-5. `E4` for regression / test execution
-6. `QA` if end-to-end acceptance matters
-7. `PM` final integration / sign-off
+Budget authority separates target/reserve, reviewed single-call band, exact prompt
+UTF-8 bytes, UTF8/4 planned lower bounds, workflow planned input, unique nodes,
+attempts, and retry. Crossing target+reserve requires rationale; reaching a cap
+triggers split/escalation, never mandatory-content deletion. Planned lower bounds
+are not actual token/cache telemetry. The authenticated shared semantic capsule may
+improve prefix reuse, but only platform telemetry can quantify savings.
 
-### Compliance / policy / architecture
+AI-E owns quality-adjusted workflow consumption: input/output/cache tokens,
+tool calls, retry, fan-out, wall time, accepted decision-changing findings,
+rework, reopen, and cost per durable closure. Actual token/cache/tool/time values
+require `PLATFORM_OR_EXTERNAL_ATTESTED` telemetry plus exact reference/digest;
+`partial` lists every missing metric and `unavailable` carries no invented
+numbers. Orchestrator wave receipts may support partial structural accounting of
+calls, retries, fan-out, nulls, and planned input lower bounds, with controller
+overhead explicit; they never become actual usage. Closure recomputes admissible
+totals and quality-reserve use.
 
-1. `PM` triage
-2. `CC` for root-principle / hard-boundary review
-3. `FA` for functional gap audit
-4. `PA` for technical design implications
-5. `PM` decision
+After closure, AI-E may join a separate `closure_quality_followup_v1` by immutable
+closure digest to evaluate reopen, rework, false closure, decision-changing
+findings, and realized value. Measured follow-up requires caller-trusted
+platform/external attestation; missing telemetry remains scheduled/unavailable,
+never zero-filled.
 
-### Quant / ML / data work
+## Completion
 
-1. `PM` triage
-2. `QC` for alpha / strategy / validation judgment
-3. `MIT` for data / feature / CV / schema rigor
-4. `AI-E` if model-cost / routing / token economics matter
-5. `PM` decision
+Sub-agent output is a role fragment for `.codex/schemas/closure_packet_v1.schema.json`.
+PM merges fragments into one closure and preserves dissent. Work completion and
+gate success are independent; reviewers may return DONE+FAIL.
 
-### Security / deploy / runtime
+For closure PASS, work-only write nodes may report `NOT_APPLICABLE` as their own
+gate, but every routed verification node must report PASS. OPS fragments must
+reference fresh runtime evidence; QA and passed acceptance must reference direct
+outcome evidence; every mandatory Effect Adapter must provide a hash-pinned
+`effect_adapter_result_v1` receipt cross-bound to the intent authority, baseline,
+distinct OPS preflight/postcheck, truthful side effects, and passed acceptance.
+E4 must reference direct test evidence backed by an EXECUTED check or a fresh,
+hash-pinned reuse receipt; a self-declared `REUSED` label is not sufficient.
 
-1. `PM` triage
-2. `E3` for security review
-3. `BB` for Bybit-side compatibility if exchange-facing
-4. `PM` performs or supervises deploy
+Trust and evidence class are explicit:
 
-## Deploy rule
+- `LOCAL_REPRODUCIBLE`: exact repository/command bytes and locally recapturable
+  source/test facts.
+- `ORCHESTRATOR_BOUND`: controller-known task/context/role/result structural
+  lineage; packet-local call/wave receipts cannot self-authenticate execution.
+- `PLATFORM_OR_EXTERNAL_ATTESTED`: runtime, external-policy/outcome, and actual-
+  usage authenticity.
 
-Deploy requests should still start with `PM`, even if the final action is operational:
-- confirm scope
-- confirm branch / commit / host state
-- decide whether a deploy is warranted
-- then perform the deploy or delegate narrow checks
+Generic or self-authored digests are not direct proof. A unit command/test cannot
+stand in for E2E outcome, and repository evidence cannot stand in for runtime.
+`EXECUTED`/`REUSED` checks both bind a validated command capture; reuse additionally
+binds the eligible historical lineage. Closure admission performs trusted local
+replay of command captures under the same task/baseline/scope and rejects a
+non-reproducing PASS or task/whole-repository mutation. One Adapter invocation is
+not one total execution: without a host CommandCaptureVerifier, Closure deliberately
+re-executes strong evidence. Repository authority also requires
+the claim value to equal the deterministic identity projection of its exact
+pinned Context bytes; semantic interpretation belongs in typed `claim_inputs` or
+validated evidence. Repo mutation needs one task/role/node/scope-bound
+`repository_change_record_v1` per admitted writer in canonical writer order.
+Node-owned path scopes are non-empty/disjoint and writer nodes are transitively
+serialized. Each receipt binds its owned mutation plus exact task-wide before/
+after generation; adjacent receipts link G0 -> G1 -> ... -> Gn, and Gn/every
+owned after-state remain current. One mixed-role record cannot cover two writers.
+A snapshot or source-change summary alone proves no causality.
+Stale or unresolved conflict blocks PASS.
 
-## Linux cargo hygiene
+Full Audit and profit diagnosis have controller contracts, not advisory summaries.
+Both reject malformed inline Context, mismatched hard stops, task prompt, or
+compiler/Registry budget authority before the first model call; caller self-signed
+caps cannot spend resources and wait for Closure to reject them.
+Full Audit includes E2 discovery, derives outcome state from typed verifier votes,
+preserves malformed findings as canonical debt, and treats isolated fix candidates
+as not integrated. Profit diagnosis binds fresh priors/baseline, Registry evidence
+and probe axes, every fragment digest, bounded retries, deferred coverage debt, and
+the PA map. Controller debt or missing binding prevents PASS in either workflow.
+Closure `PASS` requires an out-of-band trusted-host verifier for the exact
+Context plus every delegated/runtime/outcome/effect digest. The standalone CLI
+has no host capability and therefore cannot authenticate PASS from packet bytes.
 
-Sub-agents must not run `cargo build`, `cargo test`, or `cargo check` on Linux
-`trade-core`. Rust implementation/review/regression validation uses Mac cargo
-commands unless PM explicitly takes over an atomic deploy path. Linux checks by
-delegated roles are read-only probes only, per
-`docs/agents/sub-agent-hygiene-sop.md`.
+Bare same-model retry is forbidden. Response ladder:
 
-## Documentation rule
+- missing task facts -> acquire exact context
+- capability/model mismatch -> select a stronger/different capability
+- task too broad -> split along Interface boundaries
+- hard/external blocker -> return BLOCKED with owner/action
 
-If PM changes the operating pattern:
-- update `.codex/MEMORY.md`
-- update this file
-- update `.codex/SUBAGENT_EXECUTION_RULES.md`
-- update `docs/agents/context-loading.md` or `docs/agents/todo-maintenance.md` when source routing or TODO lifecycle changes
-- update `.codex/DISPATCH_LEDGER.md` when the dispatch pattern or role usage is materially relevant
-- append `.codex/WORKLOG.md`
+No unchanged retry, no fabricated success, and no PASS when coverage or evidence
+is missing.
+
+## Runtime and deploy
+
+Delegated roles do not run Linux cargo, PG writes, service/cron mutation, or
+private broker effects. Linux evidence is read-only and timestamped. Effectful
+apply is unavailable to ordinary roles; any future closure-admissible apply must
+use an operator/PM-approved deterministic Adapter with exact source/build pin,
+rollback, and independent postcheck. QA is added only when an end-to-end
+business claim is part of completion.
+
+Direct `psql` is currently denied, even for apparent SELECT, until a local-
+socket/read-only-identity Adapter removes ambient `psqlrc` and `PG*` routing.
+Without a separately authorized platform-attested PG artifact, the runtime claim
+remains UNVERIFIED.
+
+Current capability limit: `deploy_intent_adapter.py` validates a typed exact-SHA
+intent, but actual apply is disabled because no trusted local probe can reproduce
+endpoint class/mainnet flag/mode/authorization/process identity. It must fail
+before the component script even when `--apply` is requested. Registry broker
+paths are reference surfaces only; Bybit development contact is unsupported and
+IBKR first-contact remains a gated operator/runtime path, not this workflow's
+Adapter.
+
+## Persistence
+
+Significant durable decisions may update `.codex/DISPATCH_LEDGER.md` and one PM
+closure projection. Do not create one report and memory append per role. Active
+work remains in `TODO.md`; old reports/memory are on-demand history.

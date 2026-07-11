@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/context_evidence_artifact_v1.schema.json",
+  "title": "context_evidence_artifact_v1",
+  "description": "Byte-backed evidence for one exact virtual Context Interface source.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "logical_source",
+    "capture_kind",
+    "observed_at",
+    "expires_at",
+    "baseline",
+    "producer",
+    "content",
+    "content_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "context_evidence_artifact_v1"},
+    "logical_source": {"type": "string", "minLength": 1},
+    "capture_kind": {
+      "enum": [
+        "source_snapshot",
+        "diff_snapshot",
+        "interface_inventory",
+        "caller_inventory",
+        "test_inventory",
+        "runtime_observation",
+        "external_policy_snapshot"
+      ]
+    },
+    "observed_at": {"type": "string", "format": "date-time"},
+    "expires_at": {"type": "string", "format": "date-time"},
+    "baseline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_head", "dirty_diff_hash", "untracked_relevant_hash"],
+      "properties": {
+        "source_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "dirty_diff_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "untracked_relevant_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      }
+    },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "input_digest"],
+      "properties": {
+        "id": {
+          "enum": [
+            "runtime_observation_adapter_v1",
+            "external_policy_capture_adapter_v1",
+            "repository_snapshot_adapter_v1"
+          ]
+        },
+        "input_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      }
+    },
+    "content": {},
+    "content_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}

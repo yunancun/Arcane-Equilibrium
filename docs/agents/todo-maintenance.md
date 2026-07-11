@@ -66,7 +66,7 @@ act without rereading a full report:
 | ID | Stable task id, never recycled for a different meaning |
 | Status | One of `ACTIVE`, `BLOCKED`, `WAITING`, `DEFERRED`, `DONE`, or an existing emoji-equivalent with the same meaning |
 | Priority | P0/P1/P2/P3 or the section that implies it |
-| Owner chain | PM / PA / E1 / E2 / E4 / QA / specialist roles when known |
+| Owner path | Hybrid DAG 已觸發的 current owner / verifier / Adapter；不得預填固定全角色 chain |
 | Acceptance | Concrete exit condition, not "looks good" |
 | Latest evidence | Timestamped source, command, report, commit, or healthcheck |
 | Next action | The next executable step or explicit wait condition |
@@ -113,11 +113,13 @@ When archiving:
 
 If TODO conflicts with README, memory, ADR, or runtime evidence:
 
-1. Surface the conflict explicitly.
-2. Prefer the newer verified source or the accepted ADR/governance doc,
-   depending on the subject.
-3. Update the stale source or add a cleanup TODO.
-4. Do not average conflicting states into a vague compromise.
+1. Classify each claim: TODO owns `active_work_state`; accepted ADR/policy owns
+   `normative_policy`; timestamped host evidence owns `runtime_observation`.
+2. Compare freshness/strength only within the same class.
+3. Across classes, preserve both claims and mark `DRIFT/CONFLICT`; runtime never
+   legalizes a normative denial.
+4. Repair the stale pointer inside its own class or add a cleanup TODO. Never
+   average conflicting states into a vague compromise.
 
 ## Agent enforcement
 

@@ -39,6 +39,31 @@ jobs:
       - name: Check Agent Spine stable_id literal duplication
         run: bash helper_scripts/ci/check_stable_id_duplication.sh
 
+  # Development-agent governance is stdlib + focused pytest only. Keep this on
+  # the Linux 1x runner so Registry/view/permission drift fails before merge
+  # without consuming a Rust build or macOS 10x minute.
+  development-agent-governance:
+    name: development-agent governance (cheap static gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install focused test dependency
+        run: python3 -m pip install --disable-pip-version-check pytest
+      - name: Validate Registry and generated views
+        run: |
+          python3 helper_scripts/maintenance_scripts/agent_governance.py validate
+          python3 helper_scripts/maintenance_scripts/agent_governance.py render --check
+      - name: Run focused development-agent governance tests
+        run: |
+          python3 -m pytest -q \
+            tests/structure/test_development_agent_governance.py \
+            tests/structure/test_agent_governance_*.py
+
   rust-check-linux:
     name: rust check (x86_64-unknown-linux-gnu)
     runs-on: ubuntu-latest

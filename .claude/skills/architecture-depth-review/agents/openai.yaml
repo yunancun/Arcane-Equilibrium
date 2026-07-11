@@ -1,0 +1,3 @@
+interface:
+  display_name: "Architecture Depth Review"
+  short_description: "Audit modules, seams, trust, and token annuity"

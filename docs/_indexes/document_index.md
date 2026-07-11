@@ -6,6 +6,13 @@
 > 它不是 active dispatch queue；當前 blocker、owner、gate、runtime evidence 一律讀根目錄 `TODO.md`。
 > 新增重要文檔時優先更新本索引或 `initiative_index.md`，不要把長表重新塞回 `docs/README.md`。
 
+### 2026-07-10 Development-Agent Governance Module
+
+| 文件 | 内容 |
+|------|------|
+| `agents/development-agent-governance.md` | 開發 sub-agent Registry/Context/Dispatch/Closure 深 Module；hybrid DAG、elastic quality reserve、typed authority、OPS/IB、effect Adapter、closure_packet_v1、test evidence reuse、Full Audit consumption 正本。 |
+| `adr/0050-development-agent-governance.md` | Accepted ADR-0050：角色改為 generated capability presets，退役 universal preload/fixed-chain/per-role auto-report-memory；新增唯讀 OPS/IB、可用的 report seam，以及 fail-closed effect contracts（deploy 目前僅 intent validation、broker development contact unsupported）。 |
+
 ### 2026-07-10 反事實重跑預註冊（R3 修復包 WP-A.3）
 
 | 文件 | 内容 |

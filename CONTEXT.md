@@ -141,8 +141,12 @@ The Sprint 1A-ζ governance gate output — 5 module spike（M1 LAL Tier 1 / M3 
 _Avoid_: "spike" (alone — 失去 PASS/FAIL verdict 語意), "prototype review" (太 generic 失去 module count + verdict 選項), "Sprint 1A-ζ gate" (失去 verdict 三選一 結構).
 
 **Multi-Session Dual Write**:
-The Sprint 1A-δ + 多 CC session memory race 教訓 per memory `project_multi_session_memory_race`（2026-04-23 事件）— 同一 module 在不同 CC session 寫成不同 naming convention（如 `decision_lease_lal_tiers` vs `lease_tier_ledger`）；協議 = **commit-first / 不認識的改動禁 revert / 接手三連加 memory log 檢查 / Mac 被 revert 從 Linux + origin 重建不可重做**。多 session 並行 dispatch 必先 fetch + 查遠端 branch（per feedback `fetch_before_dispatch`）；保留兩版直到 PM 仲裁明確 winner。
-_Avoid_: "session race" (太 generic 失去 memory + commit-first 紀律), "naming collision" (失去 dual-write 保留兩版的紀律), "merge conflict" (典型 git 概念 — 失去多 session memory race 特定教訓).
+2026-04-23 的歷史事故名：不同 session 對同一 Module 產出兩套 naming/
+Implementation。現行 mitigation 不是自動 commit/fetch/memory log；依
+`docs/agents/sub-agent-hygiene-sop.md` 綁 owned scope、保留 unrelated dirty diff、用
+checkpoint/`role_fragment_v1` 交接，未知改動不 revert，直到 PM 依 Interface/evidence
+仲裁。Commit/push/fetch 仍需當前 task 授權。
+_Avoid_: "session race" (太 generic), "commit-first protocol" (已退役), "merge conflict" (失去多 session dual-write 的特定語意).
 
 ### Decision Lease state machine (SM-02)
 
@@ -514,6 +518,116 @@ The deploy command that rebuilds engine binary + PyO3 in one step (post 2026-04-
 **18 Live blockers**:
 The Operator-tracked panorama of remaining gaps before true Live trading — a historical PM construct from the 2026-04/05 era. Current open blockers live in `TODO.md` §1 (P0 queue); do not cite the original "18 / N unresolved" counts in new prose.
 
+### Development-agent governance
+
+**Development-Agent Governance Module**:
+The deep repo module that owns four Interfaces for development sub-agents:
+Registry, Context, Dispatch, and Closure. Its machine Interface is
+`.codex/agent_registry_v1.json`; Claude/Codex/profile files are generated
+platform Adapters, not independent authorities.
+
+**Execution mode**:
+One of Conductor, Investigator, Builder, or Verifier. PM/PA/E1/QC and other role
+names are capability presets over these modes. Codex `default/explorer/worker`
+is only runtime substrate and does not represent intelligence level.
+
+**Hybrid execution DAG**:
+A task-fact-derived workflow with mandatory safety/evidence edges and advisory
+specialist nodes. It replaces fixed all-role chains while keeping independent
+review/test/runtime/venue/acceptance edges when their surfaces are present.
+
+**Elastic context envelope**:
+`target + quality reserve + review_at` planning guidance. It triggers expansion,
+split, or escalation; it never truncates user scope, acceptance, hard stops, or
+mandatory evidence.
+
+**Governance evidence trust tier**:
+One of `LOCAL_REPRODUCIBLE`, `ORCHESTRATOR_BOUND`, or
+`PLATFORM_OR_EXTERNAL_ATTESTED`. The first proves locally recapturable bytes; the
+second binds controller-known request/result provenance; the third attests
+runtime, external-policy/outcome, or actual-usage facts. A self-digest proves
+canonical integrity only, not producer authenticity.
+
+**Workflow call/wave record**:
+`workflow_call_record_v1` binds one requested role/node/model call to the exact
+task contract, context artifact, dirty scope, focus, response schema, attempt/
+retry lineage, native agent/node class/permission, DAG predecessors/topological
+wave, producer generation, time, and parsed-result digest. Its canonical call manifest is
+closed by `workflow_wave_record_v1`, which accounts for every admitted node,
+call/retry/null, result fragment, planned input lower bound, coverage debt, and
+controller-overhead boundary. A closure orchestrator ledger must exact-cover all
+captured waves; ghost, omitted, extra, or duplicate wave identity fails closed.
+
+**Native development-agent binding**:
+The Registry-derived pre-spawn tuple `role + native_agent + node_class + permission`.
+PA and E4 have distinct writer and read-only verifier TOML identities. Codex
+sandbox mode is an additional filesystem boundary, not authority for services,
+private/authenticated external contact/effects, or private broker effects;
+read-only Bash still needs exact native-identity command preflight.
+
+**Public Web Read**:
+Read-only evidence acquisition from an actually opened public URL. It requires
+citation/capture provenance and never implies permission for authenticated,
+private, transactional, messaging, or broker effects. Platform web-tool
+availability is checked separately from this authority class.
+
+**Private External Contact**:
+Authenticated/private communication, transaction, broker session, or other
+external effect. Development-Agent Governance has no closure-grade Adapter for
+this class, so it routes fail-closed as an unsupported effect.
+
+**Repository authority identity projection**:
+A repository-backed authority value is the exact pinned Context content for
+UTF-8/JSON, or the exact encoding+content wrapper for base64. A matching digest
+cannot be paired with interpreted or substituted semantics; those use typed
+`claim_inputs` or validated evidence. `command_capture_v2` derives native
+identity, routed task and path scope from immutable Context, executes argv after
+`--` with `shell=false`, streams bounded redacted previews plus exact output
+digests, and binds task plus whole-repository generations. Its
+`repository_policy_only` effect enforcement is not host network/no-contact
+attestation; strong PASS remains trusted-local-replayed until a host verifier exists.
+
+**External evidence capture** (`external_evidence_capture_v1`):
+An out-of-band host-verified public HTTPS policy/outcome capture binding opened
+URL, content/excerpt digest, selector, citation and bounded freshness. URL text,
+self-report, generic repo evidence, expired/future records, or a structurally
+valid capture without the host verifier remains evidence debt/INFERENCE.
+
+**Repository change record** (`repository_change_record_v1`):
+A task/role/node/scope-bound before/after pair of exact
+`repository_capture_v1` generations. A snapshot or diff digest alone can prove
+content integrity, but not mutation causality. Multiple admitted writers form one
+canonical writer order with exactly one record per node. Their owned scopes are
+non-empty/disjoint and writers are transitively serialized. Every record captures
+both its owned mutation and task-wide generation, so adjacent receipts link exact
+G0 -> G1 -> ... -> Gn digests; Gn and every owned after-state remain current.
+One mixed-role record cannot satisfy multiple writers.
+
+**Closure quality follow-up** (`closure_quality_followup_v1`):
+An immutable-closure-digest longitudinal record for reopen, rework, false closure,
+decision-changing findings, and realized value. Measured fields require a
+caller-trusted `PLATFORM_OR_EXTERNAL_ATTESTED` record; absent telemetry remains
+scheduled/unavailable and is never replaced with zero.
+
+**Closure Packet** (`closure_packet_v1`):
+The single task completion/evidence Interface. It separates work status, gate
+verdict, and disposition and preserves immutable role dissent, evidence scope,
+checks, side effects, consumption, and next action. Evidence classes do not
+substitute: unit tests are not E2E outcomes, source capture is not runtime proof,
+and actual consumption requires platform/external-attested telemetry.
+
+**Broker Compatibility Interface**:
+The shared broker review Seam. BB is its Bybit Adapter and IB is its IBKR Adapter;
+each preserves broker-specific policy/session/effect semantics. Review never
+performs broker contact. No development-agent broker contact/private-effect
+Adapter currently emits a closure-admissible receipt; such routes remain blocked.
+
+**Operations reviewer** (`OPS`):
+Read-only development preset for preflight, rollback, postcheck, source/build
+pin, observability, and incident RCA. The Deploy Adapter currently validates an
+exact intent/environment contract only; effectful apply remains disabled until a
+trusted reproducible local runtime probe exists, preserving maker/checker truth.
+
 ## Relationships
 
 - A **Strategy** produces signals on a **Symbol**, which generate intents that flow into the Rust **IntentProcessor**.
@@ -538,8 +652,8 @@ The Operator-tracked panorama of remaining gaps before true Live trading — a h
 - **"Demo" means the engine_mode OR the Bybit endpoint** — resolved: `demo` (lowercase) = engine_mode; "Bybit demo endpoint" = the API target. **LiveDemo** always means "Live pipeline → Bybit demo endpoint."
 - **Decision Lease deployment status** — Path A retrofit IMPL landed (commit `dbcf845b`); the router gate flag remains shadow/evidence semantics only (no true-live auth, no Executor order authority, no MAG-083/084). 2026-06 校準：SM end-state 已定為 Option 2（Rust 唯一權威，P5-SM）；step-i Rust (`a99bfa1d`) + E1b comparator (`e6aa5e37`) 完成，soak gate 因監測重設計暫停（2026-06-03 發現 Python shadow-hub 無 organic 流量時「0 divergence」屬空轉偽 pass），現狀以 `TODO.md` §0/§5 為準。
 - **`replay.simulated_fills.evidence_source_tier='synthetic_replay'`** looks usable but is explicitly non-training data. Always filter `IN ('calibrated_replay','counterfactual_replay')` before feeding MLDE / Dream / attribution.
-- **5-Agent runtime set (Scout / Strategist / Guardian / Analyst / Executor) vs 18-Agent dev role tiers (PM / FA / PA / CC / E1 / E2 …)** — different vocabularies. The 5-Agent set is a runtime trading construct (DOC-01); the 18 are dev workflow personas living under `.claude/agents/`.
+- **5-Agent runtime set (Scout / Strategist / Guardian / Analyst / Executor) vs development role presets (PM / FA / PA / CC / E1 / E2 / OPS / IB …)** — different vocabularies. The 5-Agent set is a runtime trading construct (DOC-01); development names are generated capability presets under the Development-Agent Governance Module. Neither Conductor nor a development preset is a sixth trading Agent.
 - **`OPENCLAW_BASE_DIR` vs `OPENCLAW_SRV_ROOT`** — `SRV_ROOT` is a legacy alias; new code must use `OPENCLAW_BASE_DIR`. They do not fall back to each other; Mac dev must export both to the same value.
-- **"Agent" overloaded** — can mean the 5 runtime trading Agents (Strategist etc.), the 18 development sub-agents (E1, FA, PM…), or a generic LLM agent. Always qualify: "Strategist Agent," "E1 sub-agent," "LLM agent." Never bare "Agent" in new prose.
+- **"Agent" overloaded** — can mean the 5 runtime trading Agents (Strategist etc.), the 20 generated development capability presets (E1, FA, PM, OPS, IB…), or a generic LLM agent. Always qualify: "Strategist Agent," "E1 sub-agent," "LLM agent." Never bare "Agent" in new prose.
 - **OpenClaw Gateway vs OpenClaw Control Console** — Gateway is the external communication/session layer; Control Console is the existing FastAPI GUI. There is no second trading GUI.
 - **MessageBus vs Agent Decision Spine** — MessageBus is legacy/advisory local routing; the authoritative spine is typed persisted objects plus Decision Lease and Rust enforcement.

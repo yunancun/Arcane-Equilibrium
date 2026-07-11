@@ -14,12 +14,12 @@ fi
 
 out=$(printf '%s\n' \
   '<workflow-hot-rules>' \
-  '1. 路由:動手前先查對口 skill(.claude/skills,描述=觸發條件;1% 可能適用即調用)與對口 agent(.claude/agents)。' \
-  '2. 代碼改動強制鏈:E1→E2(對抗)→E4(回歸)→PM 驗收,不可跳過;meta-doc commit 用 git commit --only;派工前必 git fetch+查遠端 branch。' \
-  '3. subagent 收尾四態:DONE/DONE_WITH_CONCERNS/NEEDS_CONTEXT/BLOCKED;BLOCKED 升級階梯=補 context→換模型→拆任務→升級 operator,禁同模型無變更裸重試;說「做不到」永遠可以,爛活比沒活糟。' \
+  '1. 路由:先依 .codex/agent_registry_v1.json 綁 task facts/role/context;skill 只按對口 surface 載入,禁 universal preload。' \
+  '2. hybrid DAG:source implementation 必有獨立 E2→E4;authority/runtime/venue/quant-ML/E2E 依 facts 加 owner,其餘按 decision value;skip 留 residual risk。' \
+  '3. closure_packet_v1 分 work_status/gate_verdict/disposition;DONE+FAIL 合法;缺 evidence/budget/coverage 不得 PASS;禁無變更同模型裸重試。' \
   '4. rtk:Bash 輸出已被 hook 自動壓縮;exit≠0 而摘要看似全綠→必讀輸出尾 [full output:] tee log 或 rtk proxy 重跑;測試基準線記 passed/failed/skipped/error 四元組。' \
-  '5. memory:寫前查重;topic 檔超配額先 MERGE 再新增;結論被推翻→寫「演變軌跡」節,不改寫原文。' \
-  '6. BG agent 死活唯一信號=subagents/agent-*.jsonl mtime;SOP 正本=CLAUDE.md §八+agents/PM.md。' \
+  '5. persistence:reviewer 不寫 per-role report/memory;PM closure 後只 promote 新 durable lesson;active state 只進 TODO。' \
+  '6. effect:OPS/IB/BB reviewer 唯讀;deploy/contact 走 approved deterministic Adapter;BG wave 用 journal/checkpoint,禁盲重跑。' \
   '</workflow-hot-rules>' \
   | jq -Rs '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: (. | rtrimstr("\n"))}}' 2>/dev/null) || exit 0
 

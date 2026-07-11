@@ -6,14 +6,15 @@ allowed-tools: Read, Grep, Glob, Bash
 
 # Regression Testing Protocol（回歸測試手冊）
 
-> 權威序：runtime RiskConfig TOML > Rust schema > srv/TODO.md > 治理文件（SPECIFICATION_REGISTER.md 索引）> 本 skill。衝突按權威序執行並在報告標註，不停下等待。
-> 即時狀態（策略名單/閾值/端點/baseline 等）以上述 SSOT 為準，本 skill 不寫死。
+> Authority 使用 `.codex/agent_registry_v1.json` typed matrix。測試證明
+> implementation behavior；runtime observation、active state、normative policy
+> 分屬不同 class，不能用某一類結果覆蓋另一類 denial。
 
 `SRV`=倉庫根（Mac: `~/Projects/TradeBot/srv`；Linux: `~/BybitOpenClaw/srv`）。
 
 ## 何時觸發
 
-- E4 收到 E2 通過的 PR → commit 前必跑（強制工作鏈 E2→E4 不可跳，含 P0 緊急）
+- Source Implementation 經獨立 E2 review 後，E4 負責 relevant regression evidence
 - 「跑測試」「驗證 fix 沒破壞其他」「測試數有沒有回退」
 - 新功能落地前的 baseline 確認
 - Rust `cargo test` + Python pytest 雙引擎同步
@@ -24,7 +25,8 @@ allowed-tools: Read, Grep, Glob, Bash
 2. **不允許刪測試使測試通過**：發現失敗 → 修代碼，不修測試
 3. **Mock 不掩蓋真實邏輯**：mock 只 stub IO 邊界，不 stub 業務邏輯
 4. 跨語言浮點 1e-4 容差：Python ↔ Rust 同輸入差異 ≥ 1e-4 = bug
-5. 跑兩遍：第一次過 ≠ 真綠（race / flaky）；第二次同樣綠才算
+5. **重跑按風險**：critical、已失敗、known-flaky、release gate 才要求第二遍；
+   其他 exact signature 綠證據不做儀式性重跑
 
 ## 1. 當前測試基準線（動態，每次審計前重跑命令拿，不信寫死數字）
 
@@ -37,11 +39,13 @@ allowed-tools: Read, Grep, Glob, Bash
 **baseline 規則**：
 - 任何 commit 不可降低 passed 數
 - 任何 commit 不可增加 pre-existing failed 數
-- 數字對照 E4 memory.md 最新 `BASELINE:` 行 +「改動前最後一次 baseline run」（不信本 skill 內任何寫死數字）
+- Baseline 來自 exact source/diff/toolchain/env signature 的前後結果；不以 E4
+  memory 的舊 passed count 當當前真相
 
 **Mac dev-only 注意**（唯一正本段）：
-- 部分整合測試打真實 Bybit → 3 secret slot rename 為 `*.dev_disabled_*` → 預期 fail-closed by design；mock-based unit test 不受影響
-- Rust release 真實基準 → `ssh trade-core "cd ~/BybitOpenClaw/srv/rust && cargo test --release -p openclaw_engine --lib"`
+- 部分整合測試需 external/runtime surface 時，source suite 只證明 source；
+  另由正確 Adapter/OPS/QA 取得 runtime evidence
+- Delegated E4 的 Rust build/test/check 全在 Mac；Linux cargo 一律禁止
 
 ## 2. Python pytest 標準命令
 
@@ -158,18 +162,16 @@ async def test_governance_concurrent_lease_request():
     assert success == 1, f"Expected 1 lease grant, got {success}"
 ```
 
-## 8. 工作流（10 步）
+## 8. 工作流
 
-1. **讀 E2 通過的 diff**
-2. **跑全量 Python pytest**（從 srv root）
-3. **跑 Rust cargo test --release**
-4. **驗 passed >= baseline + failed <= pre-existing**
-5. **新增測試 cover 邊界 + 並發 + 安全**
-6. **mock 審查**（沒 mock 業務邏輯）
-7. **浮點一致性**（如改 indicator / 計算）
-8. **SLA 壓測**（如改 hot path）
-9. **跑兩遍**（驗證非 flaky）
-10. **記錄測試數變化**（commit message 含 baseline 變動；回歸完成後追加 E4 memory `BASELINE:` 行）
+1. 讀 acceptance、E2 verdict、diff、direct callers 與 test impact。
+2. 先跑最小能 falsify change 的 focused test。
+3. 依 dependency/reach 擴至 relevant module/cross-language/regression suite。
+4. 新增缺少的邊界、並發、安全或 intent test；不寫 business code。
+5. 審 mock、浮點、SLA、PG/runtime evidence scope 是否誠實。
+6. critical/failed/known-flaky/release gate 才做第二遍或 independent recheck。
+7. 產 content-addressed evidence capsule，標 EXECUTED/REUSED/SKIPPED/FAILED。
+8. 回 immutable `role_fragment_v1` with `payload_kind=test_fragment_v1`；不寫 E4 memory/report。
 
 ## OpenClaw 特定核心
 
@@ -179,12 +181,13 @@ async def test_governance_concurrent_lease_request():
 - passive_wait_healthcheck.py：cron 6h 跑，被動等待 TODO 有對應 check
 - 跨語言浮點 1e-4 容差：indicator 計算（ATR / BB / Sharpe）必驗
 - SLA 硬限：閾值見 performance-profiling（唯一正本）
-- commit 即 push（由 PM 在通過 E4 / QA 後執行）
-- **failed 不可增**：pre-existing 數為上限（跑命令拿 + 對照 E4 memory BASELINE），新增 = BLOCKER
+- **failed 不可增**：以同一 evidence signature 的 before/after 或可重跑
+  baseline 判斷；舊 memory 數字不具 freshness
 
 ## Cross-Skill 互引（避免重述）
 
-- **C1.g E4 vs QA 階段**：本 skill = E4 階段（Python pytest + Rust cargo test + SLA 壓測 + mock 審查 + 浮點 1e-4）；**業務鏈完整 + 跨模塊一致 + Phase 6 hard gates**走 `e2e-integration-acceptance`（QA 階段，E4 過了才跑）
+- **E4 vs QA**：本 skill 證 source/test；只有任務宣稱 E2E/runtime business
+  outcome 時才加 `e2e-integration-acceptance` QA
 - **PR review 前置**：本 skill 跑前 E2 對抗審查走 `pr-adversarial-review`；E4 不做 code review
 
 ## 反模式（見即 BLOCKER）
@@ -192,45 +195,17 @@ async def test_governance_concurrent_lease_request():
 - 刪測試使 passed 增加
 - 改 assertion value 而非修代碼
 - mock 業務邏輯（不只 IO）
-- 「跑一次過了所以綠」（沒測 race）
+- critical/race/flaky/release surface 未做所需重跑或 independent recheck
 - skip / xfail 大量測試（看是否合理）
 - 浮點比較用 `==` 沒容差
 - 並發測試用單 task（fake concurrent）
 - SLA 不跑取單一次數值
-- commit 但 baseline 沒記錄變動
-- failed 數增加但 commit message 沒解釋
+- evidence signature 或 baseline provenance 缺失
+- failed 數增加但 closure fragment 沒解釋
 
 ## 輸出格式
 
-```markdown
-# E4 Regression Test Report — <commit> · <date>
-
-## Test 結果
-| 引擎 | passed | failed | baseline | delta |
-| Python pytest | | | 對照 E4 memory.md 最新 BASELINE 行 | |
-| Rust cargo test (lib) | | | 對照 E4 memory.md 最新 BASELINE 行 | |
-| Rust integration | | | varies | |
-
-## 新增測試
-| 文件 | tests count | scope (邊界/並發/安全) |
-
-## Mock 審查
-| Test | mock 內容 | OK? |
-
-## 浮點一致性（如改 indicator）
-| 函數 | py | rust | 相對誤差 | OK? |
-
-## SLA 壓測（如改 hot path）
-| Path | p50 | p95 | p99 | 目標 |
-
-## 跑兩遍結果
-1st run: passed=X / failed=Y
-2nd run: passed=A / failed=B
-flaky? Y/N（不一致測試單獨重跑 3 次；仍 fail → 標 FLAKY 附隔離建議）
-
-## 結論
-PASS / FAIL（具體 BLOCKER）
-
-## 退回 E1 修復清單（如 FAIL）
-1. <具體 test + 失敗原因>
-```
+`role_fragment_v1` 的 `payload_kind=test_fragment_v1` 至少包含：work status、gate verdict、source/dirty/untracked/
+command/selected tests/toolchain/lock/OS/arch/env/config/runtime/auth signature、
+passed/failed/skipped/error、EXECUTED/REUSED、expiry、flaky/critical 狀態、mock/
+浮點/SLA concerns、evidence refs、退回 E1 的具體失敗、next action。
