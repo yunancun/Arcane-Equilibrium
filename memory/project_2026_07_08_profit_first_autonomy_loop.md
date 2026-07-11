@@ -21,3 +21,7 @@ maker-first NO-GO(2026-07-06)後,operator **拒**「不賺錢=無可工程化方
 - **關鍵誠實事實**:strict NEAR 掃描 sha `ca4bf9cb` 有 **零 candidate-matched order/fill/fee/slippage 證據**;34,574 rows 是 stale ETH ledger 非 proof。**至今無任何 Bybit 呼叫 / Decision Lease / order / probe 執行過**。全 fail-closed:無 live、無降 Cost Gate、無 `_latest` promotion。
 
 **How to apply**:這是現行盈利工程主線,不是 dormant;但它「有候選、有學習列、無盈利 proof」。任何 order-capable 動作仍需獨立 same-window PM→E3→BB packet + 新鮮 Decision Lease/BBO/order-shape + Guardian/Rust authority,一個 invocation window 內完成。read/write 分離不因 loop 而鬆動。
+
+## 演變軌跡
+
+- **2026-07-09(盈利研判第三輪 F1,CRITICAL)**:「avg net 64.98bps / 5058 outcomes / bh_fdr_pass」被推翻——MIT 實證 + conductor 親自重跑復驗:5058 行只含 **2 個 distinct entry_ts**(2026-07-07 16:19Z ×2614 份 +70.28bps、16:20Z ×2444 份 +59.32bps),ma_crossover 秒級重發信號×被擋即生成 outcome、`outcome_review.py` 無 per-(cell,entry_ts) 去重 → 偽複製 ×2529,n_eff≈1-2,兩窗 60min markout 重疊 59/60。全部來自 NEAR 單日 +1.6%/1h pop=單 episode regime-bet,**非 edge 證據**。同輪發現 standing 授權已過期 ~20.7h(loop 正確 fail-closed defer)。含義:READY_FOR_PM_E3_DISPATCH 鏈在 outcome_review dedup+effective-n 修復前**凍結**,不得消耗 order-capable E3/BB 窗口。修復 owner=E1(dedup)+QC(預註冊判準)。證據:probe_ledger.20260707T163027Z/213755Z.jsonl uniq -c 兩行;凍結 SHA `a71b5ed93`;見 [[project_2026_07_09_profit_diagnosis_roi_map]]。
