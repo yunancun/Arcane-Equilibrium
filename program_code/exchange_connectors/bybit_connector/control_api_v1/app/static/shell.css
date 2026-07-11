@@ -1,0 +1,216 @@
+/* ═══════════════════════════════════════════════════════════════════
+   shell.css — 玄衡新殼 chrome 版式(P1.1-a strangler-fig 起步)
+   ═══════════════════════════════════════════════════════════════════
+   MODULE_NOTE
+   模塊用途:玄衡儀單文檔殼(shell.html)的 chrome 版式唯一宿主——topbar /
+     rail / content(iframe host)/ statusbar / 衡樑 / mode-band。只消費
+     tokens.css 的語義 var(--…),零裸 hex(過 test_gui_style_ratchet_static.py
+     hex=0);版式尺寸走 --sp-* 檔位與局部 --shell-* 語義 token(design/02_layout §0)。
+   為何存在(deletion test):刪本檔 → 殼版式只能回內聯樣式塊(ratchet 立即紅)
+     或無版式。故本檔是唯一 ratchet-合法的殼版式宿主;canon 8「單一 stylesheet、
+     零 inline sprawl」的正示範。
+   硬邊界:①絕不寫裸 hex(色一律 var(--…));②衡樑動態傾角由 shell.js 寫 scoped
+     var(--beam-angle),本檔只給靜態骨架與 blocked/warn 修飾;③本檔不含任何交易/
+     寫路徑樣式——真金硬化面續在 iframe 內既有 tab-*.html。
+   依賴:tokens.css(語義色/字體/間距)+ oc-utilities.css(共用原子),二者先載。
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ═══ 基礎重置(tokens.css 只給 var 與 .num/.silk 原子,不含 body/button 重置)═══ */
+*{ box-sizing:border-box; }
+html,body{ height:100%; margin:0; }
+body{
+  background:var(--bg-app); color:var(--text-primary);
+  font-family:var(--font-sans); font-size:var(--fs-base); line-height:var(--lh-cjk);
+}
+button{ font:inherit; color:inherit; background:none; border:none; cursor:pointer; }
+a{ color:inherit; text-decoration:none; }
+
+/* ═══ App shell grid(design/02_layout §1.2;statusbar 滿寬跨 rail 下方)═══ */
+.app-shell{
+  /* 局部語義 token(design/02_layout §0;tokens.css 未含 --shell-*,殼自持)*/
+  --shell-topbar-h:48px;
+  --shell-status-h:28px;
+  --shell-rail-w:240px;
+  --shell-content-pad:var(--sp-5);
+  display:grid;
+  grid-template-columns:var(--shell-rail-w) 1fr;
+  grid-template-rows:var(--shell-topbar-h) 1fr var(--shell-status-h);
+  grid-template-areas:
+    "topbar    topbar"
+    "rail      content"
+    "statusbar statusbar";
+  height:100dvh;
+  background:var(--bg-app);
+}
+/* 密度:compact 只改 rail 寬 + topbar 高 + content 內距(design/02 §6;statusbar 兩密度同 28)*/
+:root[data-density="compact"] .app-shell{
+  --shell-topbar-h:44px;
+  --shell-rail-w:200px;
+  --shell-content-pad:var(--sp-4);
+}
+
+/* ═══ 頂欄 topbar(design/02 §1.1 anatomy)═══ */
+.app-topbar{
+  grid-area:topbar; height:var(--shell-topbar-h);
+  display:flex; align-items:center; gap:var(--sp-4);
+  padding:0 var(--sp-4);
+  background:var(--bg-surface); border-bottom:1px solid var(--border-subtle);
+}
+/* 漢堡(≤960 顯示;寬屏隱藏)*/
+.rail-toggle{
+  display:none; align-items:center; justify-content:center;
+  width:var(--sp-6); height:var(--sp-6); flex:none;
+  border:1px solid var(--border-subtle); border-radius:var(--r-1);
+  color:var(--text-secondary); font-size:var(--fs-md);
+}
+.rail-toggle:hover{ border-color:var(--accent); color:var(--text-primary); }
+
+/* 品牌 玄衡(canon 11 銘文)*/
+.brand{ display:flex; flex-direction:column; line-height:var(--lh-tight); flex:none; }
+.brand .zh{ font-family:var(--font-serif); font-size:17px; letter-spacing:.08em; }
+.brand .en{ font-family:var(--font-mono); font-size:9px; letter-spacing:.2em;
+            text-transform:uppercase; color:var(--text-muted); }
+
+/* lane 切換 segmented control(PM 裁決 A=頂欄;樣品 L99–102 形制)*/
+.lane{ display:flex; flex:none; border:1px solid var(--border-subtle);
+       border-radius:var(--r-1); overflow:hidden; }
+.lane button{ padding:5px 12px; font-size:var(--fs-dense); color:var(--text-secondary);
+              white-space:nowrap; transition:background var(--dur-fast); }
+.lane button[aria-pressed="true"]{ background:var(--accent-weak); color:var(--accent);
+                                   font-weight:var(--weight-medium); }
+.lane button + button{ border-left:1px solid var(--border-subtle); }
+.lane button:hover{ color:var(--text-primary); }
+
+/* 衡樑 signature(canon 7:P1.1-a 無真值 → blocked 態,絕不 fake 傾角)*/
+.beam-wrap{ flex:1; min-width:140px; display:flex; flex-direction:column;
+            align-items:center; gap:2px; }
+.beam{ position:relative; width:min(280px,100%); height:16px; }
+.beam__bar{
+  position:absolute; left:0; right:0; top:7px; height:1.5px; border-radius:1px;
+  background:var(--accent); color:var(--accent);
+  transform:rotate(var(--beam-angle,0deg)); transform-origin:center;
+  transition:transform var(--dur-beam) var(--ease-out), background var(--dur-base);
+}
+.beam__bar::before,.beam__bar::after{
+  content:""; position:absolute; top:-3.5px; width:8px; height:8px;
+  border:1.5px solid currentColor; border-radius:50%; background:var(--bg-surface);
+}
+.beam__bar::before{ left:-2px; } .beam__bar::after{ right:-2px; }
+.beam__pivot{
+  position:absolute; left:50%; top:8px; transform:translateX(-50%);
+  width:0; height:0; border-left:5px solid transparent; border-right:5px solid transparent;
+  border-bottom:7px solid var(--accent);
+}
+/* warn 態(真值 ≥80% 時,P1.2 才啟);blocked 態(P1.1-a 常態:muted、水平靜置)*/
+.beam--warn .beam__bar{ background:var(--warn); color:var(--warn); }
+.beam--warn .beam__pivot{ border-bottom-color:var(--warn); }
+.beam--blocked .beam__bar{ background:var(--text-muted); color:var(--text-muted); }
+.beam--blocked .beam__pivot{ border-bottom-color:var(--text-muted); }
+.beam-lbl{ display:flex; justify-content:space-between; width:min(280px,100%);
+           font-family:var(--font-mono); font-size:10px; color:var(--text-muted); }
+.beam-lbl b{ color:var(--text-muted); font-weight:var(--weight-regular); }
+
+/* topbar 遙測(P1.1-a canon-7 blocked 佔位;真值屬 P1.2 shared WS)*/
+.topstat{ font-family:var(--font-mono); font-size:10.5px; color:var(--text-muted);
+          text-align:right; line-height:1.6; white-space:nowrap; flex:none; }
+.topstat .blocked{ color:var(--text-muted); }
+
+/* clock(唯一 client 真值;UTC 上 / local 下,mono tabular)*/
+.topclock{ font-family:var(--font-mono); font-size:10.5px; color:var(--text-secondary);
+           text-align:right; line-height:1.6; white-space:nowrap; flex:none;
+           font-variant-numeric:tabular-nums slashed-zero; }
+.topclock .lbl{ color:var(--text-muted); }
+
+/* 切換鈕(density 上線 / theme P1.3-gated)+ 帳號 */
+.toggles{ display:flex; gap:var(--sp-2); flex:none; }
+.toggles button{
+  border:1px solid var(--border-subtle); border-radius:var(--r-1);
+  padding:4px 10px; font-size:var(--fs-dense); color:var(--text-secondary);
+  transition:border-color var(--dur-fast); white-space:nowrap;
+}
+.toggles button:hover{ border-color:var(--accent); color:var(--text-primary); }
+/* P1.3-gated 主題鈕:渲染但 inert;視覺降級提示不可用,不冒充可切換 */
+.toggles button[aria-disabled="true"]{ color:var(--text-muted); cursor:not-allowed; }
+.toggles button[aria-disabled="true"]:hover{ border-color:var(--border-subtle); color:var(--text-muted); }
+.account{ display:flex; align-items:center; gap:var(--sp-2); flex:none;
+          font-size:var(--fs-micro); color:var(--text-muted); }
+.account .actor{ color:var(--text-secondary); }
+/* 反向 fallback:返回舊版 Console(beta 期一鍵退回;design §6.1)*/
+.account .legacy-link{ color:var(--accent); }
+.account button{ border:1px solid var(--border-subtle); border-radius:var(--r-1);
+                 padding:3px 8px; font-size:var(--fs-micro); color:var(--text-secondary); }
+.account button:hover{ border-color:var(--accent); color:var(--text-primary); }
+
+/* ═══ 左 rail(design/02 §1.3;lane 已上移頂欄 → rail = env ladder + cross-cutting)═══ */
+.app-rail{
+  grid-area:rail;
+  border-right:1px solid var(--border-subtle); background:var(--bg-surface);
+  display:flex; flex-direction:column; overflow-y:auto; overscroll-behavior:contain;
+}
+.rail-envs{ padding:var(--sp-3); flex:1 1 auto; min-height:0; }
+.rail-cross{ padding:var(--sp-3); border-top:1px solid var(--border-subtle); margin-top:auto; }
+.rail-grp-t{ margin-bottom:var(--sp-2); }
+.rail-item{
+  display:flex; align-items:center; justify-content:space-between;
+  padding:6px 10px; border-radius:var(--r-1); margin-bottom:1px;
+  color:var(--text-secondary); font-size:var(--fs-base); cursor:pointer;
+}
+.rail-item:hover{ background:var(--bg-hover); color:var(--text-primary); }
+.rail-item[aria-current="page"]{ background:var(--accent-weak); color:var(--accent);
+                                 font-weight:var(--weight-medium); }
+.rail-item .env-badge{ font-family:var(--font-mono); font-size:9.5px; color:var(--text-muted); }
+/* Live rung 視覺 gate(design/02 §1.3:hairline 分隔 + --live 左邊框;不跨 hairline 到不了真金面)*/
+.rail-item--live{ margin-top:var(--sp-2); border-top:1px solid var(--border-subtle);
+                  padding-top:8px; border-left:2px solid var(--live); padding-left:8px; }
+.rail-item--live .env-badge{ color:var(--live); }
+/* ⚑ 交易關鍵標記(P2 最後遷移;P1.1-a 仍 iframe 後備)*/
+.rail-item .flag{ font-size:9px; color:var(--text-muted); margin-left:4px; }
+
+/* ═══ 內容區 = iframe host(strangler-fig:18 view 全 iframe 後備)═══ */
+.app-content{ grid-area:content; position:relative; overflow:hidden; background:var(--bg-app); }
+.view-frame{ position:absolute; inset:0; width:100%; height:100%; border:0; display:none;
+             background:var(--bg-app); }
+.view-frame.is-active{ display:block; }
+/* iframe 載入失敗佔位(view 顯錯不崩,其他 view 續切;design §5.4)*/
+.view-error{
+  position:absolute; inset:0; display:none; flex-direction:column;
+  align-items:center; justify-content:center; gap:var(--sp-2); padding:var(--sp-6);
+  color:var(--text-secondary); text-align:center;
+}
+.view-error.is-active{ display:flex; }
+.view-error .code{ font-family:var(--font-mono); font-size:var(--fs-micro);
+                   color:var(--text-muted); letter-spacing:var(--ls-silk); text-transform:uppercase; }
+.view-error a{ color:var(--accent); }
+
+/* ═══ 底部 status strip(design/02 §1.2/§5.2:滿寬、rail collapse 的倖存者)═══ */
+.app-status{
+  grid-area:statusbar; height:var(--shell-status-h);
+  display:flex; align-items:center; gap:var(--sp-5);
+  padding:0 var(--sp-4);
+  background:var(--bg-sunken); border-top:1px solid var(--border-subtle);
+  font-family:var(--font-mono); font-size:10.5px; color:var(--text-muted);
+  overflow-x:auto; white-space:nowrap;
+}
+.app-status .blocked{ color:var(--text-muted); }
+.app-status .build{ margin-left:auto; }
+/* 寬屏攜完整遙測;≤960 促升為三 chip 核心(engine/mode/PnL 不截斷,design §5.2 硬 invariant)*/
+.app-status__wide{ display:flex; align-items:center; gap:var(--sp-5); }
+.app-status__core{ display:none; align-items:center; gap:var(--sp-4); }
+.app-status__core .chip{ display:inline-flex; align-items:center; gap:var(--sp-1); }
+
+/* ═══ 響應式(design/02 §5:960 rail collapse;status strip 促升)═══ */
+@media (max-width:960px){
+  .app-shell{ --shell-status-h:40px;
+    grid-template-columns:1fr; grid-template-areas:"topbar" "content" "statusbar"; }
+  .rail-toggle{ display:inline-flex; }
+  .app-rail{
+    position:fixed; inset:var(--shell-topbar-h) auto var(--shell-status-h) 0;
+    width:min(280px,80vw); transform:translateX(-100%);
+    transition:transform var(--dur-base) var(--ease-out); z-index:40;
+  }
+  :root[data-rail-open="true"] .app-rail{ transform:none; }
+  .beam-wrap{ display:none; }               /* 窄屏收起 signature,讓位核心遙測 */
+  .topstat{ display:none; }
+  .app-status__wide{ display:none; }
+  .app-status__core{ display:flex; }
+}
