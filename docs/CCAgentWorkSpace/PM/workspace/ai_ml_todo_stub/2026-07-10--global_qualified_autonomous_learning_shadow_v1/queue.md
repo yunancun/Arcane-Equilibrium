@@ -1,6 +1,6 @@
 # GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1 Queue
 
-Updated: 2026-07-11T21:55:09Z
+Updated: 2026-07-11T22:38:22Z
 Goal status: `ACTIVE`
 Current item: `WP4-ACTUAL-TRAINING-REGISTRY`
 WP1 checkpoint: behavioral code `c080c552b`, exact operational target
@@ -137,17 +137,31 @@ full-tree fixture gates, and hosted static checks are present. Focused `37`,
 full ML `1850 passed/36 skipped`, Rust compile-only PASS, and independent final
 P0/P1/P2 `0/0/0`.
 
-This is source publication, not PostgreSQL execution. V158 was not applied;
-`_sqlx_migrations`, Linux/runtime services, and production PG state were not
-refreshed. No durable receipt/run/artifact/registry row, fit, model byte,
-symlink, serving/promotion state, exchange action, or authority was created.
-The current safe action is only the fake-connection durable-receipt repository
-tracer against V158's fixed receipt API. Trainer, fit, filesystem publication,
-PG contact, and runtime action remain outside this cycle.
+That checkpoint was source publication, not PostgreSQL execution. V158 was not
+applied; `_sqlx_migrations`, Linux/runtime services, and production PG state
+were not refreshed. The V158 source step created no durable
+receipt/run/artifact/registry row, fit, model byte, symlink, serving/promotion
+state, exchange action, or authority. Its then-next fake-connection repository
+tracer is now accepted at the checkpoint recorded below.
 
 Publish alignment was observed at `2026-07-11T21:55:09Z`: Mac HEAD and
 `origin/main` both equaled V158 source checkpoint
 `beeb77325c83a157c74cf54e79b7146876ed5e27`.
+
+The repository-only durable-receipt writer tracer is source accepted at
+`c0aec6813b59f3c17b1fb93350794a3581ccd5ae`. It snapshots and validates the
+existing training contract before connection use, pins the reward-set and
+durable-receipt preimages, calls exactly V158's fixed writer, validates the
+complete server row before commit, and rejects autocommit or non-IDLE
+connections before opening a cursor. Focused `31`, adjacent `121`, and full ML
+`1920 passed/28 skipped`; exact-byte final P0/P1/P2 `0/0/0`.
+
+This remains source/fake-connection evidence. V158 was not applied or exercised
+against PostgreSQL; no receipt/run/artifact/registry row, fit, file, symlink,
+runtime, exchange action, or authority was created. The next safe action is
+only fixed receipt-reader `FOUND/NOT_FOUND` TDD. Result writer/reader, trainer,
+fit, filesystem publication, registry, PG/Linux/Bybit, and serving stay out of
+scope.
 
 Allowed nonterminal transitions are `ACTIVE -> ADVANCED -> ACTIVE`,
 `ACTIVE -> DEFER_EVIDENCE -> ROTATE -> ACTIVE`, `ACTIVE -> REJECT -> ROTATE ->
@@ -162,7 +176,7 @@ authority.
 | `WP1-ARTIFACT-CHURN-CONTROL` | 0 | `DONE_RUNTIME_ACCEPTED` | `PM -> PA -> E1 -> E2 -> E4 -> QA -> PM`; runtime `PM -> E3 -> BB -> PM` | WP0 `DONE`; source checkpoint `c080c552b`; operational target `7d1c24794` | Persist health only on state delta or bounded heartbeat; identical candidate/regime/evidence/blocker hash does not create another DEFER; record actual rows/bytes/cycle and durable health/decision/feedback ratios; heartbeat never triggers training; prove production reduction/no starvation | completed under exact R4 gate; no standing runtime authority | R4 isolated PG PASS; production session `bed1cba0-2a5b-45e3-8103-3243c80fdfd5`; `87` attempts, `74` suppressed, ratio `0.850575`; stale/new normalized row rates `740/117.05 h^-1`, bytes `1,755,280/406,509 h^-1`; decision suppression `1`; feedback `5/5`, exact `15+15+5=35` rows; authority mismatch/cache/retention `0/0/0/0`; no starvation; engine/API/watchdog unchanged; retry sequence R1-R4, successful R4 | No repeat. Preserve target runtime and advance WP2. |
 | `WP2-CANDIDATE-AWARE-ARBITER` | 0 | `DONE_SOURCE_ACCEPTED_B2_2C_EVENT_PRIMARY` | `PM -> QC -> MIT -> AI-E -> PA -> E1 -> E2 -> E4 -> QA -> PM` | B2.2b accepted `a7d8d5f8b`; restart-safe handoff `328125a08`; READY repair `03ef761b`; event primary `1b85318f` | Candidate identity remains hash-bound and globally ranked by evidence, quality, proof gap, cost, cooldown, portfolio/capital context, and event-time lineage. Candidate-board publication is a wake-only event; the bounded adapter remains content authority. | source/tests `false`; runtime `true`; authority `false` | Existing immutable handoff/replay semantics are preserved. The follow-up replaces five-second candidate polling with PG/inotify multiplexing, startup/overflow/rearm reconciliation, held-directory-fd ABA protection, candidate-only board wakes, and exact full-rescan content validation. Pristine origin exposed six B2.2c projection regressions; repaired focused `23`, event `33 passed/1 skipped`, full ML `1790 passed/36 skipped`; independent reviews PASS, P0/P1/P2 `0/0/0`. No Linux/runtime/PG/Bybit/training/authority action. | Do not deploy/apply. Any real inotify/service proof requires fresh exact E3/BB. WP3 source is accepted; continue WP4 contracts. |
 | `WP3-PROOF-REWARD-BRIDGE` | 0 | `DONE_SOURCE_ACCEPTED_READ_ONLY_REPOSITORY_ADAPTER` | `PM -> QC -> MIT -> AI-E -> PA -> E1 -> E2 -> E4 -> QA -> CC -> FA -> PM`; future acquisition `PM -> E3 -> BB -> Operator -> PM` | WP2 qualified current candidate; pure validation `8999aa2b`; repository adapter `c2bdefbf` | Current candidate projection and bounded exact lineage are repository-derived; binding is internal; existing V153 proof/reward containers are hash-validated; exact bytes and canonical inputs remain distinct; final head/lineage/bridge recheck is one snapshot. Receipts are in-memory only and never proof/runtime attestation. | source/tests `false`; any migration, Demo/order chain, or external acquisition remains gated | Focused `66 passed/1 skipped`; full ML `1818 passed/36 skipped`; E2/QA/CC-FA P0/P1/P2 `0/0/0`; rows/bytes written `0/0`; proof/reward/complete runtime chain remains `0/0/0`. Bridge or lineage overflow is explicit schema-required with no receipt. | Do not retrofit V153 or reopen WP3 absent material P0/P1. WP4 source contract is accepted; any external receipt acquisition remains fresh E3/BB/Operator gated. |
-| `WP4-ACTUAL-TRAINING-REGISTRY` | 0 | `ACTIVE_WP4_ISOLATED_TRAINER_REPOSITORY_TDD` | `PM -> QC -> MIT -> AI-E -> PA -> E1 -> E2 -> E4 -> QA -> E3 -> BB -> PM` | WP3 repository `c2bdefbf`; source contract `f36379b9`; approved V158 source `beeb77325` | V158 source fixes the durable receipt/training-run/q10-q50-q90 artifact/isolated NOT_SERVING registry boundary without editing V152/V153 or reusing V023/V157. The repository/trainer must consume only fixed APIs, rehash actual row/split/code/config bytes, publish immutable isolated bytes without symlinks, and report `model_training_performed=true` only after a real fit. | source schema complete; migration apply/runtime/real fit `true`; Operator `false`; runtime mutation gated | V158 source is accepted: focused `37`, full ML `1850/36`, Rust compile-only, independent P0/P1/P2 `0/0/0`. It is unexecuted; PG/runtime truth was not refreshed and source publication created `0/0/0/0` receipt/run/artifact/registry rows. Retry/RCA `0/0`. | Implement only the fake-connection durable-receipt repository tracer against V158's fixed receipt API. Do not touch trainer, fit, filesystem publication, V158 apply, PG/Linux/Bybit, registry, symlink, or serving authority in this slice. |
+| `WP4-ACTUAL-TRAINING-REGISTRY` | 0 | `ACTIVE_WP4_QUALIFIED_RECEIPT_READER_TDD` | `PM -> QC -> MIT -> AI-E -> PA -> E1 -> E2 -> E4 -> QA -> E3 -> BB -> PM` | WP3 repository `c2bdefbf`; source contract `f36379b9`; V158 source `beeb77325`; fixed-writer tracer `c0aec681` | V158 source fixes the durable receipt/training-run/q10-q50-q90 artifact/isolated NOT_SERVING registry boundary. The repository/trainer must consume only fixed APIs, rehash actual row/split/code/config bytes, publish immutable isolated bytes without symlinks, and report `model_training_performed=true` only after a real fit. | source schema complete; migration apply/runtime/real fit `true`; Operator `false`; runtime mutation gated | Writer tracer is accepted: exact 30-field payload, 20-field returned row, 16 ordered arguments, focused `31`, adjacent `121`, full ML `1920/28`, exact reviews P0/P1/P2 `0/0/0`. V158 remains unexecuted; source publication created `0/0/0/0` receipt/run/artifact/registry rows. Retry/RCA `0/0`. | Implement only V158 fixed receipt-reader `FOUND/NOT_FOUND` fake-connection TDD. Do not add training-result/trainer/fit/filesystem behavior, apply V158, contact PG/Linux/Bybit, write registry state, or create symlink/serving authority. |
 | `WP5-OOS-DECISION-ENGINE` | 0 | `PENDING` | `PM -> QC -> MIT -> AI-E -> PA -> E1 -> E2 -> E4 -> QA -> PM` | WP4 | Walk-forward plus purge/embargo, hidden OOS, matched controls, negative cells, regime breakdown, stress, leakage/dedup defenses; decisions include `DEFER/ROTATE/TRAIN/REJECT/CHALLENGER_ACCEPT/ROLLBACK/STOP`; all reasons/hash lineage durable | `false` source/tests; `false`; `false` | Baseline hidden OOS/effect decisions `0/0`; retry/RCA `0/0` | Pre-register evaluation and decision-state contracts with mutation-biting fixtures. |
 | `WP6-EVENT-DRIVEN-AUTO-EVOLUTION` | 1 | `PENDING` | `PM -> PA -> E1 -> E2 -> E4 -> QA -> E3 -> BB -> PM` | WP1-WP5 | LISTEN/inotify event-driven service, no cron/fixed training; natural cycles, restart recovery, two distinct evidence-delta hashes automatically re-evaluate/retrain/rotate; useful model/evaluation/registry/effect artifacts; safe retention | production service/restart/retention `true`; Operator only for external order evidence; runtime mutation `true` | Event-primary candidate-board source behavior exists at `1b85318f`, but the Linux integration test was skipped on Darwin and no service/runtime proof ran. Second-delta evolution remains unproven; retry/RCA `0/0`. | After WP3-WP5, run Linux ABI/service/restart/natural-cycle tests under a fresh exact E3/BB gate. |
 | `WP7-ADVERSARIAL-FINAL-AUDIT` | 1 | `PENDING` | `PM -> CC -> FA -> QC -> MIT -> AI-E -> PA -> E2 -> E4 -> QA -> E3 -> BB -> PM` | WP1-WP6 | G1-G9 machine evidence, stale/duplicate/no-delta/rollback/restart/resource/retention/authority attacks, three-head alignment, current runtime proof, and 16-root-principles/spec compliance all pass | runtime verification `true`; Operator only if an external effect is required; no automatic authority | Final retry/RCA counters aggregate all WPs | Execute independent audits; terminal only after all G1-G9 PASS. |

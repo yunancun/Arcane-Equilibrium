@@ -1,31 +1,32 @@
 {
   "schema": "global_qualified_autonomous_learning_shadow_loop_state_v1",
-  "generated_at": "2026-07-11T21:55:09Z",
+  "generated_at": "2026-07-11T22:38:22Z",
   "goal_id": "GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1",
   "goal_thread_id": "019f4b6d-1e5b-7551-9fce-7a2f029a1675",
   "goal_status": "ACTIVE",
   "current_work_package": "WP4-ACTUAL-TRAINING-REGISTRY",
-  "current_work_package_state": "ACTIVE_WP4_ISOLATED_TRAINER_REPOSITORY_TDD",
+  "current_work_package_state": "ACTIVE_WP4_QUALIFIED_RECEIPT_READER_TDD",
   "baseline_packet": "baseline_state_packet.json",
   "baseline_packet_sha256": "30c10a497f02794525ce6e1d70972829bde7942a6a0bb181e36a13e308400b60",
   "baseline_evidence_delta_hash": "0ab0b80f307951108d0cf5edd3bb5940cb936bd093081c37c6d90e874e52ec28",
   "source_runtime": {
     "branch": "agent/alr-wp4-contracts",
     "baseline_aligned_head": "1a3ecdd57927e70dd8c6dedfed4ecef04c7a46d3",
-    "mac_head": "beeb77325c83a157c74cf54e79b7146876ed5e27",
-    "mac_origin_main": "beeb77325c83a157c74cf54e79b7146876ed5e27",
-    "source_capture_kind": "WP4_V158_SOURCE_POST_PUSH_ALIGNMENT_OBSERVATION",
-    "alignment_observed_at": "2026-07-11T21:55:09Z",
-    "behavioral_source_checkpoint": "beeb77325c83a157c74cf54e79b7146876ed5e27",
+    "mac_head": "c0aec6813b59f3c17b1fb93350794a3581ccd5ae",
+    "mac_origin_main": "c0aec6813b59f3c17b1fb93350794a3581ccd5ae",
+    "source_capture_kind": "WP4_QUALIFIED_RECEIPT_REPOSITORY_POST_PUSH_ALIGNMENT_OBSERVATION",
+    "alignment_observed_at": "2026-07-11T22:38:22Z",
+    "behavioral_source_checkpoint": "c0aec6813b59f3c17b1fb93350794a3581ccd5ae",
     "training_contract_checkpoint": "f36379b9ddf10ee1055daeda27805c409c6ee8bd",
     "v158_source_checkpoint": "beeb77325c83a157c74cf54e79b7146876ed5e27",
+    "receipt_repository_checkpoint": "c0aec6813b59f3c17b1fb93350794a3581ccd5ae",
     "source_publish_pending": false,
     "origin_contains_behavioral_source_checkpoint": true,
     "linux_head": "7d1c247947f0fb6c139f8a0583c5e6ed6ae62c70",
     "linux_origin_main": "a927c37d14f768b923f11b29ea61d8e94ca8d5ff",
     "mac_unrelated_dirty_worktree_preserved": true,
     "linux_worktree_clean": true,
-    "post_baseline_drift_classification": "SOURCE_ALIGNED_RUNTIME_UNCHANGED_V158_UNAPPLIED",
+    "post_baseline_drift_classification": "DURABLE_RECEIPT_TRACER_SOURCE_ACCEPTED_PUBLISHED",
     "service_pin": "7d1c247947f0fb6c139f8a0583c5e6ed6ae62c70",
     "service_pid": 2381011,
     "service_nrestarts": 0,
@@ -55,9 +56,11 @@
     "v158_source_reserved": true,
     "v158_source_authored_published": true,
     "v158_runtime_apply_refreshed_this_loop": false,
-    "migration_reservation_creation_or_apply_performed_this_loop": true,
+    "migration_reservation_creation_or_apply_performed_this_loop": false,
     "migration_apply_performed_this_loop": false,
-    "production_pg_state": "UNVERIFIED_NOT_REFRESHED"
+    "production_pg_state": "UNVERIFIED_NOT_REFRESHED",
+    "receipt_repository_source_published": true,
+    "receipt_repository_runtime_or_pg_exercised": false
   },
   "intake": {
     "raw_rows": 80779,
@@ -281,7 +284,8 @@
   "wp4_source_checkpoint": {
     "contract_commit": "f36379b9ddf10ee1055daeda27805c409c6ee8bd",
     "v158_source_commit": "beeb77325c83a157c74cf54e79b7146876ed5e27",
-    "status": "DONE_SOURCE_ACCEPTED_V158_SCHEMA_UNAPPLIED",
+    "receipt_repository_commit": "c0aec6813b59f3c17b1fb93350794a3581ccd5ae",
+    "status": "DONE_SOURCE_ACCEPTED_QUALIFIED_RECEIPT_REPOSITORY_TRACER",
     "contract_schema": "alr_challenger_training_contract_v1",
     "repository_receipt_only": true,
     "raw_candidate_proof_reward_or_pit_arguments_allowed": false,
@@ -314,7 +318,18 @@
     "migration_source_reserved_created_runtime_applied": "true/true/false",
     "database_rows_or_bytes_written": "0/0",
     "runtime_or_pg_acceptance": false,
-    "next_work_id": "WP4-ISOLATED-TRAINER-REPOSITORY-TDD"
+    "receipt_repository_fixed_writer_only": true,
+    "receipt_payload_row_argument_counts": "30/20/16",
+    "receipt_repository_focused_tests": "31 passed",
+    "receipt_repository_adjacent_tests": "121 passed",
+    "receipt_repository_full_ml_tests": "1920 passed, 28 skipped in 15.10s",
+    "receipt_repository_same_environment_baseline": "1889 passed, 28 skipped in 12.84s",
+    "receipt_repository_reviews": "PASS/PASS",
+    "receipt_repository_hashes": {
+      "module": "92d8d692f07a8a573c1d2ce968919458d5e54ec10e2f4bd598a2fcb553e71b92",
+      "tests": "9344b2d4cc08c8cdf708a3bdb82d9b37bdc003b4add8f4778e9919fc6f7e863d"
+    },
+    "next_work_id": "WP4-QUALIFIED-RECEIPT-READER-TDD"
   },
   "supersession": {
     "sui": {
@@ -350,8 +365,8 @@
   "gates": {
     "G1": "PARTIAL",
     "G2": "PARTIAL_SOURCE_ACCEPTED",
-    "G3": "FAIL_SOURCE_SCHEMA_AUTHORED_UNAPPLIED",
-    "G4": "FAIL_SOURCE_SCHEMA_AUTHORED_TRAINER_PENDING",
+    "G3": "FAIL_SOURCE_WRITER_TRACER_AUTHORED_SCHEMA_UNAPPLIED",
+    "G4": "FAIL_SOURCE_WRITER_TRACER_ACCEPTED_TRAINER_PENDING",
     "G5": "FAIL",
     "G6": "FAIL",
     "G7": "FAIL",
@@ -370,9 +385,9 @@
     "DONE_OPERATIONAL_SHADOW",
     "BACKLOG_EXHAUSTED"
   ],
-  "next_safe_action": "Implement only the durable-receipt repository tracer against the fixed V158 receipt API with fake-connection TDD; do not touch trainer, fit, filesystem publication, V158 apply, PostgreSQL/Linux/Bybit, registry, or serving state",
+  "next_safe_action": "Implement only contract-bound FOUND/NOT_FOUND fake-connection TDD against V158's fixed qualified-receipt reader; do not add raw-hash lookup, result APIs, trainer, fit, filesystem publication, V158 apply, PostgreSQL/Linux/Bybit, registry, or serving state",
   "remaining_safe_work_inventory": [
-    "WP4 durable-receipt repository tracer, then separately reviewed trainer source contracts and gated apply/fit proof",
+    "WP4 fixed receipt reader, then separately reviewed result/trainer source contracts and gated apply/fit proof",
     "WP5 OOS and decision engine",
     "WP6 event-delta evolution/restart/retention",
     "WP7 adversarial final audit"
@@ -389,7 +404,9 @@
     "WP4 source contract at f36379b9 consumes only the repository receipt, recomputes proof-input and binding/projection parity, and binds PIT/data/split/reward/code/config/resource identities",
     "Repository source has 140 migrations through V158 with zero duplicates; V158 is occupied by published source checkpoint beeb77325 and was not applied or tested against PostgreSQL",
     "V158 source declares fixed durable receipt/result/read APIs and exact q10/q50/q90 plus NOT_SERVING registry invariants; production PG and runtime state remain unverified and unrefreshed",
-    "The existing WP4 admission contract remains SCHEMA_REQUIRED with training, model fit, registry write, runtime, serving, promotion, and symlink claims false until the durable-receipt repository, later trainer, and separately gated execution exist",
+    "WP4 repository tracer c0aec681 snapshots and validates the contract, derives exact reward-set and durable-receipt hashes, calls only the fixed V158 receipt writer, validates the full row before commit, and requires an IDLE dedicated transaction",
+    "Repository tracer verification passed focused 31, adjacent 121, and full ML 1920/28 with exact-byte P0/P1/P2 0/0/0; this source/fake-connection step created no database row or runtime fact",
+    "The existing WP4 admission contract remains SCHEMA_REQUIRED with training, model fit, registry write, runtime, serving, promotion, and symlink claims false until fixed readback, later trainer, and separately gated execution exist",
     "The last accepted WP1 runtime snapshot at 2026-07-10T14:43:50.582201Z had a clean Linux checkout and ALR service pin at 7d1c247947f0fb6c139f8a0583c5e6ed6ae62c70; WP2-B did not re-inspect or mutate runtime",
     "At the last accepted WP1 runtime snapshot, 638 run and 638 feedback rows were DEFER with zero proof, reward, actual training, and hidden OOS; WP2-B makes no newer runtime-count claim",
     "WP1 isolated and production runtime acceptance passed with durable suppression and write-accounting evidence",
@@ -397,8 +414,8 @@
   ],
   "inferences": [
     "B2.2c event-primary transport and READY-handoff repair are source accepted while actual Linux inotify runtime proof remains pending; no runtime fact was refreshed",
-    "WP3 source adapters and the V158 durable receipt schema are accepted while repository persistence integration, proof/reward external evidence, actual training, and registry/OOS work remain pending",
-    "WP4 V158 schema source is accepted while migration apply, the durable-receipt repository tracer, later isolated trainer, actual fitted-matrix rehash, immutable model bytes, and runtime challenger registry remain pending",
+    "WP3 source adapters, V158 durable receipt schema, and the fixed-writer repository tracer are source accepted while real persistence/readback, proof/reward external evidence, actual training, and registry/OOS work remain pending",
+    "WP4 writer mapping is accepted while the fixed receipt reader, migration apply, later isolated trainer, actual fitted-matrix rehash, immutable model bytes, and runtime challenger registry remain pending",
     "Zero qualified candidates is not a Goal blocker while source/test work remains"
   ],
   "assumptions": [
@@ -406,7 +423,7 @@
   ],
   "authority_granted_by_goal": false,
   "runtime_action_performed_this_loop": false,
-  "runtime_action_classification": "NONE_WP4_V158_SOURCE_AUTHORED_PUBLISHED_UNAPPLIED",
+  "runtime_action_classification": "NONE_WP4_RECEIPT_REPOSITORY_SOURCE_ONLY_V158_UNAPPLIED",
   "exchange_action_performed_this_loop": false,
   "order_action_performed_this_loop": false,
   "unrelated_worktree_changes_consumed": false
