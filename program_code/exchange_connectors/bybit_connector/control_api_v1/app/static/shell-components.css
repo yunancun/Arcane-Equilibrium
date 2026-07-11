@@ -66,9 +66,12 @@
 /* 數值格:消費 tokens.css .num 原子(等寬 tabular),此處只加不換行 */
 .tbl .num{ white-space:nowrap; }
 
-/* ═══ 標籤 tag(樣品 .mode-band .tag 之通用化;等寬小號 pill,warn 語義)═══ */
+/* ═══ 標籤 tag(樣品 .mode-band .tag 之通用化;等寬小號 pill)═══ */
+/* tone 走 scoped-var --tag-tone(預設 --warn):Phase 2 原生 view 首個消費者需 pass→--pos /
+   fail→--neg / warn→--warn 三態 status pill(canon 7),JS 以 .style.setProperty('--tag-tone', …)
+   上色(scoped-var 正法,非 inline style=);未設時回落 --warn,對既有 warn-only 用法向後相容。 */
 .tag{ font-family:var(--font-mono); font-size:var(--fs-micro);
-      color:var(--warn); border:1px solid var(--warn);
+      color:var(--tag-tone,var(--warn)); border:1px solid var(--tag-tone,var(--warn));
       border-radius:var(--r-1); padding:1px 7px; white-space:nowrap; }
 
 /* ═══ 新鮮度徽章 fresh-badge(canon 7 staleness;aging 態 warn 小徽)═══ */
@@ -93,6 +96,13 @@
 
 /* ═══ 附註文字 note(樣品 .danger-zone .note 之通用化;次級 helper 說明文)═══ */
 .note{ font-size:var(--fs-dense); color:var(--text-secondary); }
+
+/* ═══ 原生 view 迷你趨勢圖 gv-spark(Phase 2 gates 卡消費 common-formatters ocMiniTrendSvg)═══ */
+/* 為何在此:legacy .oc-mini-trend CSS 在 styles.css(iframe 作用域),殼不載;svg polyline
+   stroke 已由 helper 走 var(--pos/--neg/--warn) 上色,此處只補殼作用域的尺寸 + 零軸線 + 空態文。 */
+.gv-spark svg{ display:block; width:100%; height:52px; }
+.gv-spark .oc-mini-trend-zero{ stroke:var(--border-strong); stroke-width:1; stroke-dasharray:2 2; }
+.gv-spark .oc-mini-trend-empty{ font-family:var(--font-mono); font-size:var(--fs-micro); color:var(--text-muted); }
 
 /* ═══ 真金硬化區 danger-zone(樣品「真金硬化區」節;canon 6 熱紅、物理隔離、typed-confirm)═══ */
 .danger-zone{
