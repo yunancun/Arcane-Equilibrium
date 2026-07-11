@@ -5,7 +5,11 @@
    common.js ocInjectBaseCSS :root / console.html inline :root)後,
    存量代碼仍引用舊 token 名;本檔以 var() 別名橋接到 tokens.css 語義
    token,讓舊消費點在兩主題下自動取得正確值,全檔不寫任何 hex。
-   生命週期:P0.4 樣式收斂(全部消費點改用新語義 token)完成後整檔刪除。
+   生命週期:C4 遷移已將活躍 tab + 共用 JS 消費點改用 canonical token,
+   但殼層 legacy console.html / trading.html 仍消費舊名(2026-07-11 grep:
+   console 41 / trading 47;index.html 已 token-clean 但同屬 Phase 3
+   strangler-fig 刪除目標)(C5 defer)→ 本檔於 **Phase 3 與殼層同刪**
+   (非 P0.4;A3 L-6 修正)。
    載入順序:必須在 tokens.css 之後、其餘樣式之前 <link>。
    特別裁決:--blue → var(--text-secondary) 是 canon 1(monochrome
    chrome,非數據一律中性色)的中性化裁決 —— 舊 --blue 承載「中性資訊」

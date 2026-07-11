@@ -1535,7 +1535,7 @@ function ocPaperSubtabInit() {
       + 'font-size:11px;margin-top:2px}'
       + '.oc-replay-cells-grid{display:grid;gap:8px;margin-bottom:12px;'
       + 'grid-template-columns:repeat(auto-fill,minmax(180px,1fr))}'
-      + '.oc-replay-cell{background:rgba(13,17,23,0.4);border:1px solid #21262d;'
+      + '.oc-replay-cell{background:rgba(13,17,23,0.4);border:1px solid var(--border-subtle);'
       + 'border-radius:var(--r-1);padding:10px 12px;min-height:54px;cursor:help}'
       + '.oc-replay-cell:focus{outline:2px solid var(--accent);outline-offset:2px}'
       + '.oc-replay-cell-label{font-size:10px;color:var(--text-secondary);'

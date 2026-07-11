@@ -929,7 +929,7 @@ function ocInjectBaseCSS() {
     /* Strategy Cards */
     .oc-strat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
     .oc-strat-card { background: var(--bg-app); border: 1px solid var(--border-subtle); border-radius: var(--r-2); padding: 14px; position: relative; overflow: hidden; }
-    .oc-strat-card[class*="oc-strategy-card-"] { border-color: var(--strategy-border, #21262d); box-shadow: inset 3px 0 0 var(--strategy-color, transparent); }
+    .oc-strat-card[class*="oc-strategy-card-"] { border-color: var(--strategy-border, var(--border-subtle)); box-shadow: inset 3px 0 0 var(--strategy-color, transparent); }
     .oc-strat-card .strat-header { display: flex; justify-content: flex-start; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
     .oc-strat-card .strat-name { font-weight: 600; font-size: 14px; }
     .oc-strat-card .strat-name .oc-strategy-chip { font-size: 13px; padding: 3px 10px; }
@@ -991,19 +991,19 @@ function ocInjectBaseCSS() {
     .oc-confirm-overlay { display:none; position:fixed; inset:0; z-index:5000;
       background:rgba(0,0,0,0.7); align-items:center; justify-content:center; }
     .oc-confirm-overlay.show { display:flex; }
-    .oc-confirm-dialog { background:var(--bg-surface,#161b22); border:1px solid rgba(248,81,73,0.4);
+    .oc-confirm-dialog { background:var(--bg-surface); border:1px solid rgba(248,81,73,0.4);
       border-radius:var(--r-3); padding:24px; max-width:440px; width:90%; }
     .oc-confirm-dialog h3 { color:var(--neg); font-size:15px; margin-bottom:8px; }
     .oc-confirm-dialog p { font-size:13px; color:var(--text-primary); white-space:pre-line; margin-bottom:16px; line-height:1.6; }
     .oc-confirm-dialog .btn-row { display:flex; gap:8px; justify-content:flex-end; }
     .oc-prompt-label { display:block; font-size:12px; color:var(--text-secondary); margin-bottom:6px; }
     .oc-prompt-input, .oc-prompt-select, .oc-prompt-textarea { width:100%; box-sizing:border-box;
-      background:var(--bg-app,#0d1117); color:var(--text-primary,#c9d1d9); border:1px solid var(--border-subtle,#30363d);
+      background:var(--bg-app); color:var(--text-primary); border:1px solid var(--border-subtle);
       border-radius:var(--r-2); padding:9px 10px; font-size:13px; margin-bottom:10px; }
     .oc-prompt-textarea { min-height:96px; resize:vertical; line-height:1.5; }
     .oc-prompt-input:focus, .oc-prompt-select:focus, .oc-prompt-textarea:focus {
-      outline:2px solid var(--accent,#58a6ff); outline-offset:1px; border-color:var(--accent,#58a6ff); }
-    .oc-prompt-error { min-height:16px; color:var(--neg,#f85149); font-size:12px; margin-bottom:10px; }
+      outline:2px solid var(--accent); outline-offset:1px; border-color:var(--accent); }
+    .oc-prompt-error { min-height:16px; color:var(--neg); font-size:12px; margin-bottom:10px; }
   `;
   document.head.appendChild(style);
 }
