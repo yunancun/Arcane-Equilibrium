@@ -31,12 +31,12 @@
     width: 22px; height: 22px; border-radius: var(--r-1);
     display: inline-flex; align-items: center; justify-content: center;
     margin-right: 2px; font-size: 14px; font-weight: 700;
-    color: #f0f6fc; background: linear-gradient(135deg, rgba(56,139,253,0.28), rgba(139,92,246,0.22));
+    color: #f0f6fc; background: linear-gradient(135deg, rgba(180,155,95,0.28), rgba(180,155,95,0.16));
     border: 1px solid rgba(139,148,158,0.28);
   }
   .header h1 { font-size: 14px; font-weight: 600; white-space: nowrap; }
   .header .tag { font-size: 10px; padding: 2px 8px; border-radius: var(--r-2); }
-  .tag-blue { background: rgba(56,139,253,0.15); color: var(--blue); }
+  .tag-blue { background: var(--accent-weak); color: var(--accent); }
   .tag-green { background: rgba(63,185,80,0.15); color: var(--green); }
   .tag-yellow { background: rgba(210,153,34,0.15); color: var(--yellow); }
   /* P1-9：mode-tag 取到真值前的中性 loading 態，不冒充任何交易模式色。 */
@@ -61,7 +61,7 @@
     margin: 12px 0 5px; letter-spacing: 0.5px; }
   .sidebar h2:first-child { margin-top: 0; }
 
-  .mc { background: var(--bg); border: 1px solid #21262d; border-radius: var(--r-2);
+  .mc { background: var(--bg); border: 1px solid var(--border-subtle); border-radius: var(--r-2);
     padding: 7px 10px; margin-bottom: 5px; }
   .mc-label { font-size: 9px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.3px; }
   .mc-val { font-size: 17px; font-weight: 700; margin-top: 1px; }
@@ -93,8 +93,8 @@
   .tab-bar::-webkit-scrollbar { display: none; }
   .tab-group { display:flex; align-items:center; gap:5px; flex-shrink:0;
     border:1px solid rgba(139,148,158,0.24); border-radius:var(--r-2); padding:3px;
-    background:rgba(13,17,23,0.62); }
-  .tab-group.collapsed { border-style:dashed; background:rgba(13,17,23,0.34); }
+    background:var(--bg-sunken); }
+  .tab-group.collapsed { border-style:dashed; background:var(--bg-sunken); }
   .tab-group-label { display:inline-flex; align-items:center; gap:5px; min-height:30px;
     font-size:11px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.1px;
     padding:0 9px; border:1px solid rgba(139,148,158,0.16); border-radius:var(--r-2); background:rgba(139,148,158,0.06);
@@ -143,22 +143,24 @@
 
   /* ── F5/A3 — Live Tab visual hardening ───────────────────────────
      Live Tab 永遠醒目（即使 engine 未啟動 / Live 槽未配置 / LiveDemo 模式）。
-     紅+紫雙下劃線 + 「⚠ REAL FUNDS」徽章常駐，即使尚未進入 active live。
+     --live 熱紅下劃線 + 「⚠ REAL FUNDS」徽章常駐，即使尚未進入 active live。
+     （P1.pre-1 玄衡化：原紫底線 rgba(168,85,247) 升 --live 熱紅，消殼層紫同屏矛盾，
+     salience 只增不減；salmon 紅 rgb(248,113,113) 文字/邊框留待後續 canon-6 --live pass 逐點裁決。）
      避免 operator 點錯 tab 在不知情下下單。
-     Make Live Tab visually distinct at all times — purple+red double underline
+     Make Live Tab visually distinct at all times — --live hot-red underline
      + "⚠ REAL FUNDS" badge persists even when not active, to avoid operator
      accidentally placing trades while thinking they're on Demo. */
   .tab[data-tab="live"] {
     color: #f87171;
     font-weight: 700;
     border-bottom: 2px solid transparent;
-    box-shadow: inset 0 -4px 0 0 rgba(168,85,247,0.6);
+    box-shadow: inset 0 -4px 0 0 var(--live);
     padding-right: 4px;
   }
   .tab[data-tab="live"].active {
     color: #f87171;
     border-bottom-color: #f87171;
-    box-shadow: inset 0 -4px 0 0 rgba(168,85,247,0.85);
+    box-shadow: inset 0 -4px 0 0 var(--live);
   }
   .tab[data-tab="live"]::after {
     content: " ⚠ REAL FUNDS";
@@ -901,7 +903,7 @@ async function refreshSidebar() {
     const modeColor = actualEpt === 'mainnet' ? '#f87171'
                     : actualEpt === 'live_demo' ? '#f97316'
                     : ({
-                        live_reserved: '#a855f7',
+                        live_reserved: 'var(--accent)',
                         demo_reserved: '#3b82f6',
                         shadow_only:   '#f59e0b',
                         observe_only:  '#6b7280',

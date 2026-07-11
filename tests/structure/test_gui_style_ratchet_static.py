@@ -46,7 +46,7 @@ BASELINE: dict[str, dict[str, int]] = {
     "cards/teacher_card.html": {"hex": 5, "style_attr": 0, "style_block": 0},
     "common-formatters.js": {"hex": 0, "style_attr": 0, "style_block": 0},
     "common.js": {"hex": 13, "style_attr": 0, "style_block": 0},
-    "console.html": {"hex": 14, "style_attr": 0, "style_block": 1},
+    "console.html": {"hex": 12, "style_attr": 0, "style_block": 1},
     "handoff_helper.js": {"hex": 3, "style_attr": 0, "style_block": 0},
     "login.html": {"hex": 1, "style_attr": 0, "style_block": 1},
     "risk-tab.js": {"hex": 1, "style_attr": 0, "style_block": 1},
