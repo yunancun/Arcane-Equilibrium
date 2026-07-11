@@ -1214,23 +1214,6 @@ async function loadComparison(passedDemoBal) {
   ocSetHtml('comparison-tbody', html);
 }
 
-// 註:以下三 helper 現無呼叫者(loadDemoMetrics 走 ocFormatPerformanceMetric);仍對齊契約
-// 以清 §5.3 grep 基線並防未來復用時漂精度,P0.4 複審可考慮刪除。
-function _ocMetricPct(rate) {
-  // fraction(0.184→"18.40%")→ ocPct(內部 ×100,2dp);無值回 OC_EMPTY(canon 7)。
-  const v = parseFloat(rate);
-  return Number.isFinite(v) ? ocPct(v) : OC_EMPTY;
-}
-function _ocMetricRatio(ratio) {
-  if (ratio === 'inf') return '∞';
-  const v = parseFloat(ratio);
-  return Number.isFinite(v) && v > 0 ? ocNum(v, 2) : OC_EMPTY;
-}
-function _ocMetricBps(value) {
-  const v = parseFloat(value);
-  return Number.isFinite(v) ? ocBps(v) : OC_EMPTY;
-}
-
 async function loadDemoMetrics() {
   let m = null;
   try {
