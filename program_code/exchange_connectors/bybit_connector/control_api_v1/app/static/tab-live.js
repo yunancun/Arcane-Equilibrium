@@ -30,9 +30,9 @@ const TRUST_TIER_LABELS = {
   3: 'T3 Trusted',
 };
 const TRUST_TIER_COLORS = {
-  0: { bg: 'rgba(100,116,139,.2)', fg: '#94a3b8' },
+  0: { bg: 'rgba(100,116,139,.2)', fg: 'var(--text-secondary)' },
   1: { bg: 'rgba(34,197,94,.15)', fg: 'var(--pos)' },
-  2: { bg: 'rgba(59,130,246,.15)', fg: '#60a5fa' },
+  2: { bg: 'rgba(59,130,246,.15)', fg: 'var(--text-secondary)' },
   3: { bg: 'rgba(168,85,247,.15)', fg: '#a855f7' },
 };
 let _livePnlRange = '24h';
@@ -205,7 +205,7 @@ async function loadTrustStatus() {
       if (!pdBanner) {
         pdBanner = document.createElement('span');
         pdBanner.setAttribute('data-pd-banner', '1');
-        pdBanner.style.cssText = 'color:#f87171;font-weight:600;font-size:11px';
+        pdBanner.style.cssText = 'color:var(--neg);font-weight:600;font-size:11px';
         bar.insertBefore(pdBanner, bar.lastElementChild);
       }
       // XSS-safe: ocEsc wraps the reason string / ocEsc 包裝 reason 防 XSS
