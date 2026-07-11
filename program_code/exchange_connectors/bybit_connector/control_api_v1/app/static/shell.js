@@ -3,7 +3,9 @@
  * ═══════════════════════════════════════════════════════════════════
  * MODULE_NOTE
  * 模塊用途:玄衡儀單文檔殼的行為層。承載 (1) hash view-router(#/<lane>/<view>);
- *   (2) iframe host 管理(18 view 全 iframe 後備,直接移植 legacy console.html 機制);
+ *   (2) iframe host 管理(iframe view 直接移植 legacy console.html 機制)+ 原生 view hook
+ *       (Phase 2 strangler-fig:iframe:false 的 view 走 window.OC_NATIVE_VIEWS 的 render/pause/resume,
+ *        gates=首個;router 為穩定宿主,原生 render 為唯一擴充點,其餘 view 維持 iframe:true 不動);
  *   (3) lane segmented 切換 + rail 導航渲染;(4) density toggle(上線);
  *   (5) theme toggle(渲染但 P1.3-gated,不切換);(6) 衡樑 blocked 渲染;(7) clock 真值。
  * 主要函數:buildViews / navigate / onHashChange(router)、withBuildVersion /
@@ -19,6 +21,8 @@
  *   ③ topbar / status 遙測 P1.1-a 為 canon-7 blocked 佔位,零新 fetch;clock 是唯一 client 真值。
  *   ④ openclaw-tab-visibility 廣播=safety-critical,以 tab 既有消費形狀(ev.data.tab=legacy id)
  *      逐字移植;shape drift=隱藏 iframe WS 不暫停=freshness/safety 退步,非協商。
+ *   ⑤ 原生 view visibility:隱藏時呼其 pause(停輪詢/停 fetch),鏡像 iframe postMessage 暫停語義;
+ *      iframe view 的 postMessage 廣播(④)verbatim 不動——原生分支只是併行擴充,不改 iframe 面。
  * 誠實邊界:靜態 node --check + ratchet + smoke 只證 source 事實;router runtime 行為 /
  *   衡樑真傾角 / 帛晝 AA = NEEDS-LINUX,不由本刀 attest。
  * ═══════════════════════════════════════════════════════════════════
@@ -58,7 +62,9 @@
     { id: 'learning',   lane: 'cross', hash: '#/cross/learning',   src: '/static/tab-learning.html',   visId: 'learning',    label: '學習 Learning' },
     { id: 'development', lane: 'cross', hash: '#/cross/development', src: '/static/tab-development.html', visId: 'development', label: '開發 Support' },
     { id: 'phase4',     lane: 'cross', hash: '#/cross/phase4',     src: '/static/tab-phase4.html',     visId: 'phase4',      label: 'Phase 4' },
-    { id: 'gates',      lane: 'cross', hash: '#/cross/gates',      src: '/static/tab-edge-gates.html', visId: 'edge-gates',  label: '封驗 Gates' },
+    // gates:Phase 2 首個原生遷移(iframe:false)——render/pause/resume 由 view-gates.js 註冊於
+    //   window.OC_NATIVE_VIEWS(id=gates);src 保留 legacy 檔作 registry 完整性 + 回滾錨,原生渲染接管。
+    { id: 'gates',      lane: 'cross', hash: '#/cross/gates',      src: '/static/tab-edge-gates.html', visId: 'edge-gates',  label: '封驗 Gates', iframe: false },
     // charts:legacy `edge` 組 K線圖表(trading.html;內容守恆——design/09 §3 漏列,R51 補回 legacy parity,零靜默丟失)
     { id: 'charts',     lane: 'cross', hash: '#/cross/charts',     src: '/trading?embed=1',            visId: 'charts',      label: 'K線 Charts' },
     { id: 'governance', lane: 'cross', hash: '#/cross/governance', src: '/static/tab-governance.html', visId: 'governance',  label: '治理 Governance', flag: true },
@@ -99,6 +105,18 @@
   function notifyViewVisibility(activeViewId) {
     var browserVisible = document.visibilityState !== 'hidden';
     VIEWS.forEach(function (v) {
+      if (isNative(v)) {
+        // 原生 view 無 iframe/postMessage:可見→resume(啟輪詢)、隱藏/瀏覽器不可見→pause(停 fetch)。
+        // 鏡像 iframe visibility 語義(隱藏續輪詢=freshness/safety 退步,非協商)。
+        var api = nativeApi(v.id);
+        if (!api) return;
+        var on = browserVisible && v.id === activeViewId;
+        try {
+          if (on) { if (typeof api.resume === 'function') api.resume(); }
+          else { if (typeof api.pause === 'function') api.pause(); }
+        } catch (_) {}
+        return;
+      }
       var frame = byId('f-' + v.id);
       if (!frame || frame.dataset.loaded !== 'true' || !frame.contentWindow) return;
       try {
@@ -142,10 +160,50 @@
     pendingFrameMessages[viewId].push(message);
   }
 
-  // 建 18 iframe(lazy:首次 navigate 才 set src;load 標 loaded + flush + 發 visibility)。
+  // ═══ 原生 view hook(Phase 2 strangler-fig;iframe:false 的 view 走 render/pause/resume)═══
+  // 殼 router 為穩定宿主;每個原生 view 於 window.OC_NATIVE_VIEWS[id] 註冊 {render,pause,resume}
+  //   (view-gates.js = 首個)。iframe view 機制 verbatim 不動(R51 safety 面經 iframe 保全)。
+  var nativeRendered = {};             // 原生 view 是否已首渲(render 冪等)
+
+  function isNative(v) { return !!(v && v.iframe === false); }
+  function nativeApi(id) { return (window.OC_NATIVE_VIEWS || {})[id] || null; }
+
+  // 原生 view 宿主:建 <section>(非 iframe),沿用 .view-frame 顯隱機制 + --native 滾動修飾。
+  function buildNativeHost(host, v) {
+    var sec = document.createElement('section');
+    sec.id = 'n-' + v.id;
+    sec.className = 'view-frame view-frame--native';
+    sec.setAttribute('role', 'region');
+    sec.setAttribute('aria-label', v.label);
+    host.appendChild(sec);
+  }
+
+  // 首渲(冪等):原生 view 首次 navigate 到才呼 render(v 對應 section);之後只切顯隱。
+  function ensureNativeRendered(v, sec) {
+    if (nativeRendered[v.id]) return;
+    var api = nativeApi(v.id);
+    if (api && typeof api.render === 'function') {
+      try { api.render(sec); nativeRendered[v.id] = true; failedViews[v.id] = false; }
+      catch (e) {
+        // render 拋錯 → 可見化(對齊 iframe error 語義:標 failedViews,navigate 顯 .view-error 佔位,不留空白)。
+        console.warn('[shell] 原生 view render 失敗:', v.id, e);
+        failedViews[v.id] = true;
+        if (v.id === currentViewId) showErrorOverlay(true);
+      }
+    } else {
+      // 原生模組未註冊(view-*.js script 載入失敗 / OC_NATIVE_VIEWS 缺)→ fail-closed 可見化
+      // (E2 R56 nit:對齊 iframe 載入失敗的 .view-error 佔位,避免空白 view 無提示)。
+      console.warn('[shell] 原生 view 模組未註冊:', v.id);
+      failedViews[v.id] = true;
+      if (v.id === currentViewId) showErrorOverlay(true);
+    }
+  }
+
+  // 建 view host(iframe view lazy iframe;原生 view 建 <section> 容器)。
   function buildViews() {
     var host = byId('oc-view-host');
     VIEWS.forEach(function (v) {
+      if (isNative(v)) { buildNativeHost(host, v); return; }   // 原生 view:不建 iframe
       var frame = document.createElement('iframe');
       frame.id = 'f-' + v.id;
       frame.className = 'view-frame';
@@ -250,6 +308,14 @@
     currentViewId = viewId;
     if (v.lane !== 'cross') activeLane = v.lane;   // cross view 不改 active lane
     VIEWS.forEach(function (o) {
+      if (isNative(o)) {
+        // 原生 view:切 <section> 顯隱 + 首渲(resume/pause 由末尾 notifyViewVisibility 統一驅動)。
+        var sec = byId('n-' + o.id);
+        if (!sec) return;
+        if (o.id === viewId) { sec.classList.add('is-active'); ensureNativeRendered(o, sec); }
+        else { sec.classList.remove('is-active'); }
+        return;
+      }
       var frame = byId('f-' + o.id);
       if (!frame) return;
       if (o.id === viewId) {
