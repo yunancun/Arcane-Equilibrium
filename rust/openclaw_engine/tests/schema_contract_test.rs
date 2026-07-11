@@ -12,29 +12,27 @@
 //!
 //!   流程：先種 V005 brownfield 前置（見 seed_legacy_precondition——V005 PART 4 對 5 個
 //!   `public.X_legacy` 有 brownfield-only 假設，virgin ephemeral PG 缺那段歷史會在 ordinal 5
-//!   hard-fail），再用既有 public API `MigrationRunner::run_if_enabled` 對 ephemeral PG
-//!   跑真 V001-V139 全樹（`OPENCLAW_AUTO_MIGRATE=1`），最後逐表開 transaction、INSERT/SELECT
-//!   後 ROLLBACK（不留 row）。沿用 migrations_test.rs 的 maybe_pool() / srv_root()
-//!   模式與 `OPENCLAW_TEST_PG` env gate：未設則 SKIP（本機 `cargo test` 仍綠），CI
-//!   會設 → 真跑。
+//!   hard-fail），再以 seed_v158_role_preconditions 建立 V158 測試專用前置，最後用
+//!   既有 public API `MigrationRunner::run_if_enabled` 對 ephemeral PG
+//!   跑真 migration 全樹（`OPENCLAW_AUTO_MIGRATE=1`），最後逐表開 transaction、
+//!   INSERT/SELECT 後 ROLLBACK（不留 row）。沿用 migrations_test.rs 的 maybe_pool() /
+//!   srv_root() 模式與 `OPENCLAW_TEST_PG` env gate：未設則 SKIP（本機 `cargo test`
+//!   仍綠）；一旦設定 DSN，還必須明確設定
+//!   `OPENCLAW_TEST_PG_DESTRUCTIVE=1`，因為 V158 前置角色是 cluster-global DDL。
 //!
-//!   已知 BLOCKER（PA/PM follow-up，非本檔可解）：除 V005 外，migration 樹對
-//!   `learning.model_registry` 另有一條 brownfield-only 矛盾——V004:135 建舊 shape stub、
-//!   V005:168 建 `is_active` 索引（依賴舊欄位）、V023:67 schema_guard A 又要求新欄位否則
-//!   RAISE；且 run_if_enabled 的 legacy-seed canary 正是「model_registry 是否存在」，故
-//!   任何 pre-seed model_registry 都會反觸發 V001-V023 被 seed-skip（schema 不建全）→
-//!   V024 guard 連鎖炸。此矛盾**無法在 test-precondition 層解**，需 PA 以 migration-hygiene
-//!   收（V023 guard 改 repair-not-raise / V005 索引加 column-exists 守衛 / V004 stub 對齊），
-//!   在此之前對 **virgin** ephemeral DB 全樹仍會在 ordinal 23/24 fail。
+//!   V004/V005/V023 曾有的 virgin-tree `learning.model_registry` 衝突已在 migration
+//!   本體修復：V004 legacy shape 含 V005 所需的 `is_active`，V023 只會移除空的 legacy
+//!   stub 再建立新 shape，非空 drift 仍 fail closed。因此本 fixture 不預種
+//!   `model_registry`，讓完整 migration tree 自己驗證該 forward-compat 路徑。
 //!
-//!   邊界：**切勿**指向帶真實資料的 DB——測試會跑 migration 全樹建 schema；且本檔
-//!   會在隔離 transaction 內 INSERT 後 ROLLBACK，雖不 commit，仍不可指向 prod。
-//!   本檔不覆蓋 V037 類 REVOKE PUBLIC INSERT 的 permission 面（CI 單一 superuser
-//!   role，GRANT/REVOKE 分支不真 fire，與 prod role-absent NOTICE 路一致）。
+//!   邊界：**切勿**指向帶真實資料的 DB 或共用 cluster——測試會跑
+//!   migration 全樹建 schema，並建立四個 cluster-global fixture roles（V158 writer、
+//!   caller、trading_ai、alr_shadow）；表探針雖在隔離 transaction 內 INSERT 後
+//!   ROLLBACK，仍不可指向 prod。trading_ai/alr_shadow 存在，因此全樹中的對應
+//!   role-conditional GRANT/REVOKE 分支會執行；V158 的實際 ACL/denial 負向行為另由
+//!   explicit disposable Python probe 驗證。
 
-use openclaw_engine::database::migrations::{
-    MigrationRunner, RunOutcome, AUTO_MIGRATE_ENV_VAR,
-};
+use openclaw_engine::database::migrations::{MigrationRunner, RunOutcome, AUTO_MIGRATE_ENV_VAR};
 use sqlx::postgres::PgPool;
 use sqlx::Connection;
 use std::path::PathBuf;
@@ -52,22 +50,37 @@ fn srv_root() -> PathBuf {
         .join("..")
 }
 
-/// 用 OPENCLAW_TEST_PG 建 pool；未設回 None 由呼叫端 SKIP（與 migrations_test.rs 同）。
-/// Build a Postgres pool from OPENCLAW_TEST_PG. Returns None if unset.
+const DESTRUCTIVE_ACK_ENV_VAR: &str = "OPENCLAW_TEST_PG_DESTRUCTIVE";
+
+/// 用 OPENCLAW_TEST_PG 建 pool；只有未設才回 None 由呼叫端 SKIP。
+/// Build a Postgres pool from OPENCLAW_TEST_PG. Only an absent variable skips.
+/// A configured but invalid/unreachable target is a hard failure, and the
+/// cluster-global V158 role fixture requires an exact destructive-test ack.
 async fn maybe_pool() -> Option<PgPool> {
-    let url = std::env::var("OPENCLAW_TEST_PG").ok()?;
-    match sqlx::postgres::PgPoolOptions::new()
-        .max_connections(2)
-        .acquire_timeout(std::time::Duration::from_secs(5))
-        .connect(&url)
-        .await
-    {
-        Ok(p) => Some(p),
-        Err(e) => {
-            eprintln!("[schema_contract_test] OPENCLAW_TEST_PG set but connect failed: {e}");
-            None
+    let url = match std::env::var("OPENCLAW_TEST_PG") {
+        Ok(url) => url,
+        Err(std::env::VarError::NotPresent) => return None,
+        Err(std::env::VarError::NotUnicode(_)) => {
+            panic!("OPENCLAW_TEST_PG is set but is not valid Unicode")
         }
-    }
+    };
+    assert_eq!(
+        std::env::var(DESTRUCTIVE_ACK_ENV_VAR).as_deref(),
+        Ok("1"),
+        "OPENCLAW_TEST_PG is set; refuse schema and cluster-global role mutation without \
+         {DESTRUCTIVE_ACK_ENV_VAR}=1 for a disposable PostgreSQL cluster"
+    );
+
+    Some(
+        sqlx::postgres::PgPoolOptions::new()
+            .max_connections(2)
+            .acquire_timeout(std::time::Duration::from_secs(5))
+            .connect(&url)
+            .await
+            .unwrap_or_else(|e| {
+                panic!("[schema_contract_test] OPENCLAW_TEST_PG set but connect failed: {e}")
+            }),
+    )
 }
 
 /// 在跑 migration 前種下 V005 brownfield-only 的 legacy 前置表。
@@ -79,7 +92,7 @@ async fn maybe_pool() -> Option<PgPool> {
 /// PART 3 以 `IF EXISTS public.X THEN RENAME` 條件式產生。production 走過 V005 是因為
 /// 手跑的 init_trading_schema.sql 早就建了 public.X 基表，RENAME 才有東西可改名；
 /// 全新 ephemeral PG 沒有那段歷史 → PART 3 跳過 → X_legacy 不存在 → PART 4 的 VIEW
-/// 在 migration ordinal 5 hard-fail（V001-V139 全樹掛在這裡，6 個契約 probe 一個都跑不到）。
+/// 在 migration ordinal 5 hard-fail（完整 migration tree 掛在這裡，6 個契約 probe 一個都跑不到）。
 ///
 /// 修法=在 migration 前直接建好 5 個 `public.X_legacy` 最小 stub（欄位精確鏡像 PART 4
 /// VIEW 所 SELECT 的欄位），讓 ephemeral PG 進入與 production 相同的「V005 brownfield
@@ -116,8 +129,186 @@ async fn seed_legacy_precondition(pool: &PgPool) {
     }
 }
 
-/// 對 ephemeral PG 跑真 V001-V139 全樹後回 pool；未設 env 回 None（呼叫端 SKIP）。
-/// Apply the full V001-V139 tree to an ephemeral PG, then return the pool.
+/// Seed the exact role prerequisites required by V158 in this disposable
+/// schema-contract cluster. The migration deliberately cannot create or
+/// normalize its writer/caller roles; the two generic application fixtures
+/// are also present before apply so V158's explicit generic revocation paths
+/// are exercised rather than silently skipped.
+async fn seed_v158_role_preconditions(pool: &PgPool) {
+    let mut conn = pool
+        .acquire()
+        .await
+        .expect("acquire V158 role-precondition connection");
+    let mut tx = conn
+        .begin()
+        .await
+        .expect("begin V158 role-precondition transaction");
+
+    // Role DDL is cluster-global. Before any CREATE ROLE, require PostgreSQL
+    // 16 and a direct, un-switched superuser session that owns the explicitly
+    // acknowledged disposable database. The query intentionally returns only
+    // identities/catalog state and never exposes the configured DSN.
+    let (
+        server_version_num,
+        session_identity,
+        effective_identity,
+        can_login,
+        is_superuser,
+        database_owner,
+    ): (i32, String, String, bool, bool, String) = sqlx::query_as(
+        "SELECT \
+             pg_catalog.current_setting('server_version_num')::pg_catalog.int4, \
+             SESSION_USER::pg_catalog.text, \
+             CURRENT_USER::pg_catalog.text, \
+             current_role_row.rolcanlogin, \
+             current_role_row.rolsuper, \
+             pg_catalog.pg_get_userbyid(current_database_row.datdba)::pg_catalog.text \
+         FROM pg_catalog.pg_roles AS current_role_row \
+         JOIN pg_catalog.pg_database AS current_database_row \
+           ON current_database_row.datname = pg_catalog.current_database() \
+         WHERE current_role_row.rolname = CURRENT_USER",
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .expect("read PostgreSQL V158 role-fixture preflight identity");
+    assert!(
+        (160_000..170_000).contains(&server_version_num),
+        "V158 role fixture requires PostgreSQL 16, got server_version_num={server_version_num}"
+    );
+    assert_eq!(
+        effective_identity, session_identity,
+        "V158 role fixture refuses SET ROLE/SET SESSION AUTHORIZATION identity drift"
+    );
+    assert!(
+        can_login,
+        "V158 role fixture requires a direct login identity, not a NOLOGIN role"
+    );
+    assert!(
+        is_superuser,
+        "V158 role fixture requires a direct superuser-authenticated disposable session"
+    );
+    assert_eq!(
+        database_owner, session_identity,
+        "V158 role fixture requires the direct session identity to own the disposable database"
+    );
+
+    sqlx::query(
+        "DO $v158_roles$ \
+         BEGIN \
+             IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles \
+                            WHERE rolname = 'alr_challenger_writer') THEN \
+                 CREATE ROLE alr_challenger_writer NOLOGIN NOSUPERUSER NOCREATEDB \
+                     NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS; \
+             END IF; \
+             IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles \
+                            WHERE rolname = 'alr_challenger_trainer_caller') THEN \
+                 CREATE ROLE alr_challenger_trainer_caller LOGIN NOSUPERUSER NOCREATEDB \
+                     NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS CONNECTION LIMIT 1; \
+             END IF; \
+             IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles \
+                            WHERE rolname = 'trading_ai') THEN \
+                 CREATE ROLE trading_ai NOLOGIN NOSUPERUSER NOCREATEDB \
+                     NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS; \
+             END IF; \
+             IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles \
+                            WHERE rolname = 'alr_shadow') THEN \
+                 CREATE ROLE alr_shadow NOLOGIN NOSUPERUSER NOCREATEDB \
+                     NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS; \
+             END IF; \
+         END \
+         $v158_roles$",
+    )
+    .execute(&mut *tx)
+    .await
+    .expect("seed exact V158 role prerequisites");
+
+    let posture_is_exact: bool = sqlx::query_scalar(
+        "SELECT \
+             EXISTS ( \
+                 SELECT 1 FROM pg_catalog.pg_roles \
+                 WHERE rolname = 'alr_challenger_writer' \
+                   AND NOT rolcanlogin AND NOT rolsuper AND NOT rolcreatedb \
+                   AND NOT rolcreaterole AND NOT rolinherit AND NOT rolreplication \
+                   AND NOT rolbypassrls AND rolconnlimit = -1 \
+             ) \
+             AND EXISTS ( \
+                 SELECT 1 FROM pg_catalog.pg_roles \
+                 WHERE rolname = 'alr_challenger_trainer_caller' \
+                   AND rolcanlogin AND NOT rolsuper AND NOT rolcreatedb \
+                   AND NOT rolcreaterole AND NOT rolinherit AND NOT rolreplication \
+                   AND NOT rolbypassrls AND rolconnlimit = 1 \
+             ) \
+             AND ( \
+                 SELECT pg_catalog.count(*) = 2 \
+                 FROM pg_catalog.pg_roles \
+                 WHERE rolname IN ('trading_ai', 'alr_shadow') \
+                   AND NOT rolcanlogin AND NOT rolsuper AND NOT rolcreatedb \
+                   AND NOT rolcreaterole AND NOT rolinherit AND NOT rolreplication \
+                   AND NOT rolbypassrls AND rolconnlimit = -1 \
+             ) \
+             AND NOT EXISTS ( \
+                 SELECT 1 \
+                 FROM pg_catalog.pg_auth_members AS membership \
+                 WHERE membership.roleid IN ( \
+                     SELECT oid FROM pg_catalog.pg_roles \
+                     WHERE rolname IN ( \
+                         'alr_challenger_writer', \
+                         'alr_challenger_trainer_caller', \
+                         'trading_ai', \
+                         'alr_shadow' \
+                     ) \
+                 ) \
+                    OR membership.member IN ( \
+                     SELECT oid FROM pg_catalog.pg_roles \
+                     WHERE rolname IN ( \
+                         'alr_challenger_writer', \
+                         'alr_challenger_trainer_caller', \
+                         'trading_ai', \
+                         'alr_shadow' \
+                     ) \
+                 ) \
+             ) \
+             AND NOT pg_catalog.has_parameter_privilege( \
+                 'alr_challenger_writer', 'session_replication_role', 'SET' \
+             ) \
+             AND NOT pg_catalog.has_parameter_privilege( \
+                 'alr_challenger_trainer_caller', 'session_replication_role', 'SET' \
+             ) \
+             AND NOT pg_catalog.has_parameter_privilege( \
+                 'trading_ai', 'session_replication_role', 'SET' \
+             ) \
+             AND NOT pg_catalog.has_parameter_privilege( \
+                 'alr_shadow', 'session_replication_role', 'SET' \
+             ) \
+             AND NOT EXISTS ( \
+                 SELECT 1 \
+                 FROM pg_catalog.pg_parameter_acl AS parameter_acl \
+                 CROSS JOIN LATERAL pg_catalog.aclexplode(parameter_acl.paracl) AS privilege \
+                 JOIN pg_catalog.pg_roles AS grantee ON grantee.oid = privilege.grantee \
+                 WHERE parameter_acl.parname = 'session_replication_role' \
+                   AND grantee.rolname IN ( \
+                       'alr_challenger_writer', \
+                       'alr_challenger_trainer_caller', \
+                       'trading_ai', \
+                       'alr_shadow' \
+                   ) \
+                   AND privilege.privilege_type = 'SET' \
+             )",
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .expect("verify exact V158 role posture");
+    assert!(
+        posture_is_exact,
+        "V158 role fixture found attribute, membership, or parameter-privilege drift"
+    );
+    tx.commit()
+        .await
+        .expect("commit exact V158 role prerequisites in disposable cluster");
+}
+
+/// 對 ephemeral PG 跑真 migration 全樹後回 pool；未設 env 回 None（呼叫端 SKIP）。
+/// Apply the full migration tree to an ephemeral PG, then return the pool.
 ///
 /// 為什麼要在這裡跑 migration：契約測試必須對「migration 宣告的真實 schema」斷言，
 /// 而非對手寫 fixture——否則 fixture 與 migration drift 時測試會 silent 假綠。
@@ -126,6 +317,10 @@ async fn migrated_pool() -> Option<PgPool> {
     // 先種 V005 brownfield 前置（見 seed_legacy_precondition），否則全樹在 ordinal 5 掛。
     // 對已 migrate 過的 DB 是 no-op（CREATE TABLE IF NOT EXISTS / 表早已 rename 走）。
     seed_legacy_precondition(&pool).await;
+    // V158 intentionally fails closed unless its membership-free writer and
+    // caller already exist. The fixture also provisions both generic roles so
+    // their explicit revoke/Guard-C paths execute on every hosted run.
+    seed_v158_role_preconditions(&pool).await;
     std::env::set_var(AUTO_MIGRATE_ENV_VAR, "1");
     let outcome = MigrationRunner::run_if_enabled(Some(&pool), &srv_root()).await;
     std::env::remove_var(AUTO_MIGRATE_ENV_VAR);
@@ -136,7 +331,7 @@ async fn migrated_pool() -> Option<PgPool> {
             panic!("migration runner returned Disabled despite OPENCLAW_AUTO_MIGRATE=1");
         }
         Ok(_) => Some(pool),
-        Err(e) => panic!("V001-V139 full-tree apply failed: {e}"),
+        Err(e) => panic!("full migration-tree apply failed: {e}"),
     }
 }
 
@@ -333,7 +528,10 @@ async fn contract_model_registry_select() {
     .fetch_optional(&mut *conn)
     .await
     .expect("learning.model_registry SELECT contract broken");
-    assert!(row.is_none(), "fresh DB unexpectedly returned a registry row");
+    assert!(
+        row.is_none(),
+        "fresh DB unexpectedly returned a registry row"
+    );
 }
 
 /// 6) market.klines —— 最高頻 consumer SELECT（outcome_backfiller.rs:54 的 LATERAL
@@ -356,5 +554,8 @@ async fn contract_klines_select() {
     .fetch_optional(&mut *conn)
     .await
     .expect("market.klines SELECT contract broken");
-    assert!(close.is_none(), "fresh DB unexpectedly returned a kline row");
+    assert!(
+        close.is_none(),
+        "fresh DB unexpectedly returned a kline row"
+    );
 }
