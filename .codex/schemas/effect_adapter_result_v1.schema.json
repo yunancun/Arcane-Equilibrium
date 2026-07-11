@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/effect_adapter_result_v1.schema.json",
+  "title": "effect_adapter_result_v1",
+  "description": "Canonical self-hashed result emitted by deploy_adapter_v1 after a real apply attempt.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "adapter_id",
+    "effect_status",
+    "intent_id",
+    "intent_digest",
+    "approved_by",
+    "approved_at",
+    "intent_expires_at",
+    "typed_confirm",
+    "hard_stops",
+    "source_head",
+    "tree_clean",
+    "target_host",
+    "target_environment",
+    "runtime_environment_identity_digest",
+    "pre_runtime_attestation",
+    "post_runtime_attestation",
+    "component_digest",
+    "started_at",
+    "completed_at",
+    "evidence_expires_at",
+    "component_exit_code",
+    "stdout_digest",
+    "stderr_digest",
+    "deployed_binary_sha256",
+    "failure_reason",
+    "receipt_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "effect_adapter_result_v1"},
+    "adapter_id": {"const": "deploy_adapter_v1"},
+    "effect_status": {"enum": ["APPLIED_VERIFIED", "FAILED"]},
+    "intent_id": {"type": "string", "minLength": 8},
+    "intent_digest": {"$ref": "#/$defs/digest"},
+    "approved_by": {"type": "string", "minLength": 1},
+    "approved_at": {"$ref": "#/$defs/timestamp"},
+    "intent_expires_at": {"$ref": "#/$defs/timestamp"},
+    "typed_confirm": {"type": "string", "minLength": 1},
+    "hard_stops": {
+      "type": "array",
+      "minItems": 2,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "source_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "tree_clean": {"const": true},
+    "target_host": {"type": "string", "minLength": 1},
+    "target_environment": {"enum": ["demo", "live_demo", "research_runtime"]},
+    "runtime_environment_identity_digest": {"$ref": "#/$defs/digest"},
+    "pre_runtime_attestation": {"$ref": "#/$defs/runtimeAttestation"},
+    "post_runtime_attestation": {"$ref": "#/$defs/runtimeAttestation"},
+    "component_digest": {"$ref": "#/$defs/digest"},
+    "started_at": {"$ref": "#/$defs/timestamp"},
+    "completed_at": {"$ref": "#/$defs/timestamp"},
+    "evidence_expires_at": {"$ref": "#/$defs/timestamp"},
+    "component_exit_code": {"type": "integer"},
+    "stdout_digest": {"$ref": "#/$defs/digest"},
+    "stderr_digest": {"$ref": "#/$defs/digest"},
+    "deployed_binary_sha256": {
+      "anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]
+    },
+    "failure_reason": {
+      "anyOf": [{"type": "string", "minLength": 1}, {"type": "null"}]
+    },
+    "receipt_digest": {"$ref": "#/$defs/digest"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"effect_status": {"const": "APPLIED_VERIFIED"}}},
+      "then": {
+        "properties": {
+          "component_exit_code": {"const": 0},
+          "deployed_binary_sha256": {"$ref": "#/$defs/digest"},
+          "failure_reason": {"type": "null"}
+        }
+      },
+      "else": {
+        "properties": {
+          "deployed_binary_sha256": {"type": "null"},
+          "failure_reason": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "runtimeAttestation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "phase",
+        "probe_kind",
+        "host",
+        "source_head",
+        "config_identity_digest",
+        "actual_endpoint_class",
+        "allow_mainnet",
+        "runtime_mode",
+        "authorization_scope",
+        "process_identity_digest",
+        "environment_identity_digest",
+        "observed_at",
+        "expires_at",
+        "attestation_digest"
+      ],
+      "properties": {
+        "schema_version": {"const": "runtime_environment_attestation_v1"},
+        "phase": {"enum": ["preflight", "postcheck"]},
+        "probe_kind": {"const": "local_runtime_process_v1"},
+        "host": {"type": "string", "minLength": 1},
+        "source_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "config_identity_digest": {"$ref": "#/$defs/digest"},
+        "actual_endpoint_class": {
+          "enum": ["bybit_demo", "bybit_mainnet", "research_local", "unknown"]
+        },
+        "allow_mainnet": {"type": "boolean"},
+        "runtime_mode": {
+          "enum": ["demo", "live_demo", "research_runtime", "mainnet", "unknown"]
+        },
+        "authorization_scope": {
+          "enum": ["demo_only", "live_demo_only", "research_read_only", "mainnet", "unknown"]
+        },
+        "process_identity_digest": {"$ref": "#/$defs/digest"},
+        "environment_identity_digest": {"$ref": "#/$defs/digest"},
+        "observed_at": {"$ref": "#/$defs/timestamp"},
+        "expires_at": {"$ref": "#/$defs/timestamp"},
+        "attestation_digest": {"$ref": "#/$defs/digest"}
+      }
+    }
+  }
+}

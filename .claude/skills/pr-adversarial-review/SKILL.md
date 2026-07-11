@@ -6,8 +6,8 @@ allowed-tools: Read, Grep, Glob, Bash
 
 # PR Adversarial Review（對抗審核手冊）
 
-> 權威序：runtime RiskConfig TOML > Rust schema > srv/TODO.md > 治理文件（SPECIFICATION_REGISTER.md 索引）> 本 skill。衝突按權威序執行並在報告標註，不停下等待。
-> 即時狀態（策略名單/閾值/端點/baseline 等）以上述 SSOT 為準，本 skill 不寫死。
+> Authority 使用 `.codex/agent_registry_v1.json` typed matrix：normative policy、implementation contract、active work state、runtime observation、external policy、claim evidence 只在同類內比較。跨類不一致標 DRIFT/CONFLICT；runtime 不得合法化 policy denial。
+> 即時內容依相應 authority class 與 fresh evidence 取得，本 skill 不寫死也不建立全局總排序。
 
 ## 何時觸發
 
@@ -17,9 +17,9 @@ allowed-tools: Read, Grep, Glob, Bash
 
 ## ★ 核心立場
 
-**E2 = 資深 backend dev（資歷深於 E1）+ 獨立對抗審核者**：
-- 主要職責 = 找 issue 退回 E1，**不代寫業務邏輯**
-- **例外**：obvious typo / lint / dead import 可直接修
+**E2 = 獨立對抗審核者**（能力 preset，不靠虛構資歷建立權威）：
+- 主要職責 = 找 issue 退回 E1，**不修改被審 source**
+- typo / lint / dead import 同樣退回 Builder，保持 maker/checker separation
 - 對抗思路：**假設 E1 寫錯**，主動找 edge case / race / leakage / shortcut，**不接受 happy-path 答案**
 
 ## 1. 對抗審核 6 個視角
@@ -155,7 +155,7 @@ P0/P1 級別的 leak / look-ahead bias / selection bias / stale finding **必須
 | **CRITICAL** | 硬邊界繞過（live_execution_allowed） / SQL injection / panic 在交易路徑 | 立即 BLOCKER，回 E1 |
 | **HIGH** | 副作用未識別 / race / 跨平台路徑硬編碼 | 退回 E1 修，不過 E2 |
 | **MEDIUM** | except:pass / log f-string / 檔案達 E5 硬限需拆分（警告線僅標記，閾值正本見 E5.md 不寫死）/ 臃腫合入（超出方案必要面積的投機實作、一次性抽象、重複邏輯；熱檔升 HIGH，計價依 E5 token 稅軸） | 退回 E1 改 |
-| **LOW** | typo / lint / dead import | E2 直接修（小範圍）或退回 |
+| **LOW** | typo / lint / dead import | 退回 E1；E2 不直接修 |
 
 ## 6. 工作流（10 步）
 
@@ -172,13 +172,13 @@ P0/P1 級別的 leak / look-ahead bias / selection bias / stale finding **必須
 
 ## OpenClaw 特定核心
 
-- **強制工作鏈：E2 失敗 → E1 修 → 重 E2 → E4，任何情況不可跳（含 P0 緊急修復）**
-- **E2 不寫業務代碼**：發現 issue 退回 E1，例外只接受 typo/lint
+- **Implementation hard edge**：E2 FAIL → E1 修 → 新 signature 重 E2；E2 PASS 後 E4 取得 relevant test evidence。例外只能由 operator 在 policy 允許範圍明示承擔風險
+- **E2 嚴格唯讀**：發現任何 issue 都退回 E1，不接受 typo/lint write 例外
 - **engine_mode IN ('live', 'live_demo')**：filter 需含兩者
 - 跨平台 grep：見 §3.1（正本）
 - Migration Guard A/B/C：V023 silent-noop 教訓（§3.5）
 - healthcheck 配對：被動等待 TODO 附 check（§3.6）
-- commit 即 push：由 PM 在通過 E4 / QA 後執行，不留滯
+- commit/push 由 PM 按 operator/approved checkpoint scope 決定，不是 review 自動 side effect
 
 ## Cross-Skill 互引（避免重述）
 
@@ -201,31 +201,7 @@ P0/P1 級別的 leak / look-ahead bias / selection bias / stale finding **必須
 
 ## 輸出格式
 
-```markdown
-# E2 PR Adversarial Review — <branch / commit> · <date>
-
-## 改動範圍
-（diff stats + files touched）
-
-## 8 條 reviewer checklist
-| Item | 狀態 |
-
-## OpenClaw §3 checklist
-| Item | 狀態 |
-
-## 對抗反問結果（自證）
-1. Q: ... · 證據（file:line / 命令輸出）: ... · 結論: ...
-
-## Findings
-| 嚴重性 | 位置 | 描述 | 建議修法 |
-| CRITICAL | | | |
-| HIGH | | | |
-| MEDIUM | | | |
-| LOW | | | |
-
-## 結論
-PASS to E4 / RETURN to E1 (X 個 finding 待修)
-
-## 退回 E1 修復清單（如 RETURN）
-1. <具體 + 文件:行號>
-```
+回 immutable `role_fragment_v1` with `payload_kind=review_fragment_v1`：baseline/diff hash、work status、gate verdict、
+checklist 結果、FACT/INFERENCE/ASSUMPTION、severity/confidence、production caller
+proof、evidence refs、unverified scope、退回 E1 清單、next owner/action。E2 不寫
+role report/memory；PM 併入 `closure_packet_v1`。

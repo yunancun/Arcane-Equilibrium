@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/closure_quality_followup_v1.schema.json",
+  "title": "closure_quality_followup_v1",
+  "description": "Immutable durable-closure follow-up state. Measured values require a separately trusted closure_quality_attestation_v1 reference.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "closure_digest",
+    "closure_task_id",
+    "closure_adjudicated_at",
+    "followup_window",
+    "created_at",
+    "measurement_status",
+    "observed_at",
+    "attestation_ref",
+    "attestation_digest",
+    "unavailable_reason",
+    "metrics",
+    "record_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "closure_quality_followup_v1"},
+    "closure_digest": {"$ref": "#/$defs/digest"},
+    "closure_task_id": {"type": "string", "minLength": 1},
+    "closure_adjudicated_at": {"$ref": "#/$defs/timestamp"},
+    "followup_window": {"$ref": "#/$defs/window"},
+    "created_at": {"$ref": "#/$defs/timestamp"},
+    "measurement_status": {"enum": ["scheduled", "unavailable", "measured"]},
+    "observed_at": {
+      "anyOf": [{"$ref": "#/$defs/timestamp"}, {"type": "null"}]
+    },
+    "attestation_ref": {"type": ["string", "null"], "minLength": 1},
+    "attestation_digest": {
+      "anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]
+    },
+    "unavailable_reason": {"type": ["string", "null"], "minLength": 1},
+    "metrics": {
+      "anyOf": [{"$ref": "#/$defs/metrics"}, {"type": "null"}]
+    },
+    "record_digest": {"$ref": "#/$defs/digest"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"measurement_status": {"const": "scheduled"}}},
+      "then": {
+        "properties": {
+          "observed_at": {"type": "null"},
+          "attestation_ref": {"type": "null"},
+          "attestation_digest": {"type": "null"},
+          "unavailable_reason": {"type": "null"},
+          "metrics": {"type": "null"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"measurement_status": {"const": "unavailable"}}},
+      "then": {
+        "properties": {
+          "observed_at": {"type": "null"},
+          "attestation_ref": {"type": "null"},
+          "attestation_digest": {"type": "null"},
+          "unavailable_reason": {"type": "string", "minLength": 1},
+          "metrics": {"type": "null"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"measurement_status": {"const": "measured"}}},
+      "then": {
+        "properties": {
+          "observed_at": {"$ref": "#/$defs/timestamp"},
+          "attestation_ref": {"type": "string", "minLength": 1},
+          "attestation_digest": {"$ref": "#/$defs/digest"},
+          "unavailable_reason": {"type": "null"},
+          "metrics": {"$ref": "#/$defs/metrics"}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["opens_at", "closes_at"],
+      "properties": {
+        "opens_at": {"$ref": "#/$defs/timestamp"},
+        "closes_at": {"$ref": "#/$defs/timestamp"}
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reopened",
+        "false_closure",
+        "rework_count",
+        "accepted_decision_changing_findings",
+        "realized_value_status"
+      ],
+      "properties": {
+        "reopened": {"type": "boolean"},
+        "false_closure": {"type": "boolean"},
+        "rework_count": {"type": "integer", "minimum": 0},
+        "accepted_decision_changing_findings": {"type": "integer", "minimum": 0},
+        "realized_value_status": {
+          "enum": ["positive", "neutral", "negative", "not_realized", "indeterminate"]
+        }
+      }
+    }
+  }
+}

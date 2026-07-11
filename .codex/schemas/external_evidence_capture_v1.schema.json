@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/external_evidence_capture_v1.schema.json",
+  "title": "external_evidence_capture_v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "trust_tier", "capture_kind", "url", "content_digest",
+    "observed_at", "expires_at", "citation_ref", "selector", "excerpt",
+    "excerpt_digest", "record_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "external_evidence_capture_v1"},
+    "trust_tier": {"const": "PLATFORM_OR_EXTERNAL_ATTESTED"},
+    "capture_kind": {"enum": ["external_policy_snapshot", "external_outcome_snapshot"]},
+    "url": {"type": "string", "pattern": "^https://"},
+    "content_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "observed_at": {"type": "string", "format": "date-time"},
+    "expires_at": {"type": "string", "format": "date-time"},
+    "citation_ref": {"type": "string", "minLength": 1},
+    "selector": {"type": "string", "minLength": 1},
+    "excerpt": {"type": "string", "minLength": 1, "maxLength": 500},
+    "excerpt_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "record_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}

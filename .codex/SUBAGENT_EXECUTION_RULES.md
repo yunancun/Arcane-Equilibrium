@@ -1,119 +1,175 @@
 # Codex Sub-Agent Execution Rules
 
-Last updated: 2026-06-18
+Last updated: 2026-07-11
+Registry: `.codex/agent_registry_v1.json`
 
-## Purpose
+## Dispatch record
 
-Harden the PM-first dispatch model so Codex does not fall back to anonymous or temporary sub-agent naming when working in this repository.
+Every sub-agent is bound before spawn:
 
-## Core rule
+- repo role preset + exact native TOML identity + `work|verification` class + permission
+- owned scope and task shape
+- exact task prompt, objective, acceptance, hard stops, and required uncertainty
+- expected patch or immutable fragment
+- context digest and evidence scope
+- allowed side effects (normally none)
 
-Every Codex sub-agent dispatched in this repository must have:
-- a bound repo role from `.codex/agents/INDEX.md`
-- a Codex runtime type (`default`, `explorer`, or `worker`)
-- explicit ownership
-- an explicit deliverable
+The bound capsule is a validated `context_artifact_v1`, not a mutable summary.
+Its `task_contract_digest` covers normalized task/surface/risk/uncertainty, exact
+task-prompt digest, runtime/E2E claim,
+side-effect class, objective/scope/acceptance/hard stops, source baseline, direct
+interfaces, previous failure, and verdict-relevant `claim_inputs`. The returned
+fragment must repeat that exact digest; changing scope, evidence input, or effect
+class requires a new admission.
 
-The repo role is the authoritative identity. The runtime type is only the execution substrate.
+Temporary runtime nicknames are implementation detail. User-facing updates use
+`ROLE(type)`.
 
-## Required dispatch record
+## Intelligence and context
 
-Before or at spawn time, PM must define all of the following:
-- `bound_role`: one of `A3`, `AI-E`, `BB`, `CC`, `E1`, `E1a`, `E2`, `E3`, `E4`, `E5`, `FA`, `MIT`, `PA`, `PM`, `QA`, `QC`, `R4`, `TW`
-- `codex_type`: `default`, `explorer`, or `worker`
-- `scope_owner`: the files, module, or responsibility owned by that role
-- `task_shape`: implementation, review, audit, deploy, investigation, synthesis, or test
-- `expected_output`: patch, report, verdict, RCA, verification log, or deploy result
+All native presets set `model_reasoning_effort = "high"`. Consumption is reduced
+by routing fewer agents, loading less irrelevant context, and stopping when
+evidence closes—not by lowering a role's reasoning ceiling. Do not use runtime
+type, prompt length, or budget target as a proxy for intelligence.
 
-## Naming and reporting rule
+The PM-supplied capsule is the starting point, not a ceiling on autonomous source
+inspection. Mandatory objective/acceptance/hard-boundary/current-diff facts are
+lossless. If the capsule is incomplete, return `NEEDS_CONTEXT` with the exact
+missing source; do not guess or silently compress it away.
 
-Use the following notation in planning notes, commentary, and summaries:
-- `PA(default)`
-- `E1(worker)`
-- `E2(explorer)`
+## Permission enforcement
 
-Do not use only temporary labels such as:
-- `worker 1`
-- `explorer B`
-- `subagent-alpha`
+Registry permissions are binding even when a tool is technically exposed.
+Native TOML makes the platform sandbox an additional least-privilege layer:
+verification identities are `read-only`; writer identities are
+`workspace-write` and still constrained by Registry ownership. Claude saved
+workflows use matching generated native names; logical PA/E4 may not be invoked
+and relabelled as investigator/verifier after the call.
 
-If the runtime or UI assigns a temporary nickname, map it back to the bound repo role immediately in the next update.
+- Read-only reviewer: no repo edit/stage/commit, PG write, restart, runtime
+  mutation, private broker effect, unauthorized contact, memory/report append.
+- E1/E1a: task-owned source only.
+- E4-writer: test/fixture/test-helper writes only; E4-verifier is read-only.
+- PA-design-writer/TW: scoped design/docs writes; PA-investigator is read-only.
+- PM: orchestration/governance/closure/approved Adapter intent; no business code.
 
-## Dispatch constraints
+Every intended read-only verification argv runs only through the role/node-exact
+`python3 helper_scripts/maintenance_scripts/agent_governance.py capture-command`
+Adapter with the immutable Context and argv after `--`; do not preflight and then
+execute a second shell command. Native read-only sandboxing
+does not grant service mutation, private/authenticated external contact/effects,
+or private broker authority. `public_web_read` is distinct read-only evidence
+acquisition: open the public URL and bind citation/capture provenance; tool
+availability is a separate platform fact. Rust/source
+tests run on Mac. Linux `trade-core` cargo is forbidden to delegated roles;
+Linux empirical evidence is an allowlisted read-only probe. Deploy and broker
+contact cannot be inferred from visible runtime paths: deploy apply is presently
+disabled until a trusted local runtime identity probe exists, and development-
+agent broker/private external contact has no closure-admissible Adapter. Direct
+`psql` is also denied until a local-socket/read-only-identity Adapter removes
+ambient `psqlrc` and `PG*` routing.
 
-PM must not:
-- spawn a generic sub-agent without binding it to a repo role
-- merge implementation and adversarial review into the same role when separation matters
-- skip PM triage and jump straight into anonymous parallel work
-- describe the workflow as complete unless the bound roles and chain are clear
+## Independence
 
-## Cargo and atomic runtime hygiene
+- A Builder cannot be the only verifier of its patch.
+- E2 does not fix the code it reviews, including typo/lint exceptions.
+- OPS does not apply and then postcheck its own mutation.
+- BB/IB review but do not contact/effect the broker.
+- PM integrates; it cannot erase CC/E3/QA/OPS/venue dissent.
 
-For any delegated task that touches Rust, Cargo, Linux `trade-core`, PG,
-deploy, service restart, or runtime verification paths, PM must attach the
-mandatory hygiene source:
+## Completion fragment
 
-- `hygiene_sop`: `docs/agents/sub-agent-hygiene-sop.md`
-- `verification_surface`: Mac source-test/check, Linux read-only probe, or
-  PM/operator-owned atomic deploy path
-- `linux_write_policy`: no Linux cargo, no PG write, no sudo, no restart unless
-  the task is an explicit PM-supervised deploy action
+Return exactly one `role_fragment_v1` for PM to merge into
+`closure_packet_v1`:
 
-Delegated E1/E2/E4 Rust work is not complete after an edit/build-only signal.
-The role must report the focused Mac `cargo test` / `cargo check` /
-`cargo clippy` command that validates the atomic unit, or explicitly state why
-it was skipped and what PM must run before merge.
+- identity: fragment ID, immutable DAG node ID, Registry role, exact native agent,
+  node class/permission, payload kind
+- the exact admitted `task_contract_digest`
+- the exact `context_artifact_digest` plus producer record kind/call reference/
+  receipt digest
+- work status and gate verdict
+- fact/inference/assumption classification + confidence
+- non-empty summary, evidence references, concerns, and next owner/action
+- actual measured/partial consumption only with platform/external-attested
+  telemetry reference + digest, or an honest unavailable reason with no invented
+  metrics; closure-only wave-ledger partials remain structural/planned accounting
+- a lossless role-specific payload containing any check/contact/side-effect facts
 
-Sub-agents must not run `cargo build`, `cargo test`, or `cargo check` on Linux
-`trade-core`. If Linux empirical evidence is required, limit it to read-only
-`psql SELECT`, `ls`, `cat`, `tail`, `fuser`, process inspection, or approved
-healthcheck probes. If a Linux build/restart is required, stop and return that
-need to PM; PM decides whether to use `helper_scripts/build_then_restart_atomic.sh`.
+`DONE+FAIL` is valid. `BLOCKED/NEEDS_CONTEXT+PASS` is invalid. NO-OP is a
+packet disposition (`NO_CHANGE_NEEDED`), not an overloaded fragment status or
+verdict. Packet-level disposition, aggregate checks, side effects, acceptance,
+and skips are set only by PM closure; they are not extra fragment fields.
 
-## Forced chain reminder
+Do not automatically write a role report or append memory. PM may use the
+deterministic Report Sink for one durable task closure; immutable dissent remains
+referenced.
 
-- feature / bug work: `PM -> PA -> E1/E1a -> E2 -> E4 -> QA -> PM`
-- compliance / architecture work: `PM -> CC -> FA -> PA -> PM`
-- quant / ML / data work: `PM -> QC -> MIT -> AI-E -> PM`
-- security / deploy / runtime work: `PM -> E3 -> BB if exchange-facing -> PM`
+## Retry and stop
 
-If a chain is shortened, PM must say which role was skipped and why.
+- Missing context: add the exact missing context, then retry.
+- API/null failure: one checkpoint-aware relay may resume completed work.
+- Same input/model/shape failure: no bare retry; change capability or split.
+- Hard policy/external/operator blocker: stop with owner and unblock condition.
+- Budget review point: split or return UNVERIFIED; never convert to PASS.
 
-## Completion contract (mirror)
+## Evidence truth
 
-Sub-agent final status uses the four-state contract:
-`DONE` / `DONE_WITH_CONCERNS` / `NEEDS_CONTEXT` / `BLOCKED`.
-On `BLOCKED`, escalate by adding context, switching model, splitting the task,
-or raising to the operator — no bare same-model retry. Saying "cannot do it"
-is always acceptable. Canonical: `.claude/agents/PM.md`; this section only
-mirrors the pointer.
+Three trust tiers apply independently of evidence class:
 
-## Operator safety rule
+- `LOCAL_REPRODUCIBLE`: exact repository/command bytes can be regenerated and
+  compared locally.
+- `ORCHESTRATOR_BOUND`: canonical call/wave records bind controller-known task,
+  context, role, result, retry, and coverage facts.
+- `PLATFORM_OR_EXTERNAL_ATTESTED`: runtime, external-policy/outcome, and actual-
+  usage facts are attested beyond the local controller.
 
-If a delegated role discovers:
-- a hard-boundary conflict
-- a root-principle violation
-- a dangerous deploy path
-- contradictory evidence
-- unclear ownership that risks collateral edits
+A record self-digest proves canonical integrity only. It is not a provider/model
+signature and cannot upgrade a local or orchestrator record into the third tier.
+Every call attempt is retained in the call manifest; the wave record accounts for
+admitted nodes, retries, nulls, result fragments, planned input lower bounds,
+coverage debt, native identity/class/permission, DAG dependencies/topological
+wave, producer generation, and controller-overhead exclusions. Dependencies are
+not callable before predecessors finish. When closure reports
+orchestrator structural consumption, its wave refs exact-cover every captured
+wave; ghost, omitted, extra, or duplicate wave identity is invalid. Closure
+recomputes the delegated execution projection from routed plus adaptive
+admissions, so rehashing a graph after dropping a node, predecessor edge, or
+topological wave remains invalid.
 
-then the delegated role should stop and return the problem to PM instead of pushing through.
+Test reuse requires an exact signature over source/diff/untracked/command/test/
+toolchain/lock/OS/arch/env/config/runtime/auth plus TTL. Label `EXECUTED` and
+`REUSED` distinctly. Both statuses reference an exact validated command capture; a
+reused E4 check additionally needs a hash-pinned eligibility receipt matching
+signature, execution evidence, and closure-time TTL. Closure performs trusted
+local replay of command captures and rejects a claimed PASS that does not
+reproduce or mutates task/whole-repository generation. This deliberately means
+capture plus replay until a host verifier exists; one call does not mean one total
+execution. `effect_enforcement=repository_policy_only` is not a no-contact proof.
+Runtime PASS needs a
+`PLATFORM_OR_EXTERNAL_ATTESTED` host/environment/time capture. Raw journal or
+systemd Environment/argv output is not reviewer-safe evidence. Source-ready,
+runtime-active, and authorized are separate claims.
 
-## Ledger rule
+Generic digests and self-authored summaries do not prove acceptance. Evidence
+class must match the claim: unit test is not E2E outcome; source capture is not
+runtime; runtime observation is not authority. Repo mutation additionally needs
+exactly one task/role/node/scope-bound `repository_change_record_v1` per admitted
+writer, in canonical writer order. Writer path scopes are non-empty, disjoint,
+and exactly cover routed dirty scope; shared-worktree writers are transitively
+serialized. Each receipt binds an owned mutation and the task-wide before/after
+generation, forming exact G0 -> G1 -> ... -> Gn links. Gn and every owned after-
+state must remain current. One mixed record cannot satisfy two writers;
+a snapshot/diff or source-change summary cannot prove causality.
+Authority claims bind class + subject + canonical value + source/scope/strength/
+expiry + self-digest. Repository authority value must be the deterministic
+identity projection of the exact pinned Context bytes; interpreted semantics use
+typed claim evidence instead. A verification PASS must be FACT, not low confidence, and
+carry no unresolved concerns; otherwise return the honest non-PASS state.
 
-Significant dispatches should be summarized in `.codex/WORKLOG.md` with:
-- date
-- task
-- dispatch chain
-- key result or blocker
+Post-closure durability metrics use `closure_quality_followup_v1` bound to the
+immutable closure digest. Reopen/rework/false-closure/realized-value fields are
+measured only with caller-trusted platform/external attestation; unknowns remain
+scheduled/unavailable rather than zero.
 
-When the dispatch itself is operationally important or defines a reusable pattern, also add an entry to `.codex/DISPATCH_LEDGER.md`.
-
-## Context and TODO rule
-
-Delegated roles should receive only the context needed for their scope, but PM
-must preserve source routing:
-- active state and blockers come from `TODO.md`
-- stable project context comes from `README.md`
-- context routing comes from `docs/agents/context-loading.md`
-- TODO edits must follow `docs/agents/todo-maintenance.md`
+Canonical design and examples:
+`docs/agents/development-agent-governance.md`.

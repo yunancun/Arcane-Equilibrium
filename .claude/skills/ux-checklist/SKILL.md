@@ -6,8 +6,8 @@ allowed-tools: Read, Grep, Glob
 
 # UX Checklist（交易 GUI 可用性審查）
 
-> 權威序：runtime RiskConfig TOML > Rust schema > srv/TODO.md > 治理文件（SPECIFICATION_REGISTER.md 索引）> 本 skill。衝突按權威序執行並在報告標註，不停下等待。
-> 即時狀態（策略名單/閾值/端點/baseline 等）以上述 SSOT 為準，本 skill 不寫死；GUI surface 以 `srv/README.md` tab 表為準。
+> Authority 使用 `.codex/agent_registry_v1.json` typed matrix：normative policy、implementation contract、active work state、runtime observation、external policy、claim evidence 只在同類內比較。跨類不一致標 DRIFT/CONFLICT；runtime 不得合法化 policy denial。
+> 即時內容依相應 authority class 與 fresh evidence 取得，本 skill 不寫死也不建立全局總排序。
 
 ## 何時觸發
 
@@ -70,7 +70,7 @@ allowed-tools: Read, Grep, Glob
 1. **靜態走查** — 沿 click handler → API 調用 → state 變更鏈 trace 代碼，逐 flow 記錄阻力點，證據 = file:line；僅當環境提供 browser/preview 類工具時才實際操作，並在報告標註操作方式（靜態 trace vs 實際操作）
 2. **5 維度逐項** — 表格化打勾 + 證據（截圖 / 檔:行）
 3. **對抗性測試** — 「如果 op 凌晨 3 點睡眼惺忪，會誤觸什麼？」「如果 backend 突然慢 10s 會怎樣？」
-4. **產出報告** — `docs/CCAgentWorkSpace/A3/workspace/reports/YYYY-MM-DD--<feature>_ux.md`
+4. **產出 fragment** — 回 immutable `role_fragment_v1` with `payload_kind=finding_fragment_v1`（viewport/browser/accessibility evidence refs + concerns + next owner）；不自動寫 role report/memory
 
 ## 評級
 

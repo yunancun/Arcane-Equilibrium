@@ -8,15 +8,15 @@
 
 ## 0. Load
 
-每輪先讀：
+每輪先讀 `AGENTS.md`，再用 `.codex/agent_registry_v1.json` 與 Context
+Interface 按 task facts 載入最小充分 pack。Active loop 必讀 `TODO.md`；只讀它直接
+引用的 current evidence、相關 code/schema、normative boundary 與 timestamped runtime
+artifact。`.codex/MEMORY.md`、完整 README、所有角色 memory/report 不做 universal
+preload。
 
-1. `AGENTS.md`, `CLAUDE.md`, `.codex/MEMORY.md`
-2. `README.md`
-3. `docs/agents/context-loading.md`
-4. `TODO.md`
-5. `TODO.md` 引用的最新報告與 runtime artifacts
-
-事實衝突時：runtime/source 新證據優先；governance 以已接受 docs/ADR 優先；修 stale pointer，不重跑空審核。
+事實衝突使用 typed authority matrix：同 class 比 freshness/strength；跨 class 保留
+DRIFT/CONFLICT。Runtime/source observation 不得覆蓋 normative policy，也不靠重跑空審核
+製造假新鮮度。
 
 ## 1. Agent Role
 

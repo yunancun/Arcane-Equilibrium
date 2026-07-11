@@ -5,6 +5,21 @@
 
 ---
 
+## Development-Agent Governance
+
+**Executable capability registry and adaptive closure redesign（2026-07-10）**：將 18 套
+重複 persona、固定 chain、universal preload 與 per-role report/memory 稅收斂為一個
+`development_agent_governance` Module；Registry 生成 20 個 capability preset（新增
+OPS/IB），typed task facts 編譯 hybrid risk DAG 與 elastic context，single
+`role_fragment_v1` 經 route/admitted-node-bound `closure_packet_v1` 收口。Runtime／E2E／
+Effect Adapter 使用 direct evidence class，adaptive second-thought dissent 不得被 PM
+遺漏。Full Audit 採有 coverage debt 的 bounded adaptive-shadow；explicit ceiling 是 lazy
+44 unique / 46 attempts，而不是 spend target。沒有 production host consumer 的 continuation
+實作經 deletion second-thought 全部撤回，超額只產生 non-authoritative cold-restart debt；
+未完成 recall benchmark 前不宣稱優於固定全量。Hot `.codex/MEMORY.md` 1,997→131 lines，
+舊內容原樣歸檔；歷史 report 保留但不再自動增長。Boundary：development source/tests/docs
+與 source-only 三端對齊；無 runtime/PG/broker deploy/restart 或 trading effect。
+
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。

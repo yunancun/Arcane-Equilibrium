@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/runtime_environment_attestation_v1.schema.json",
+  "title": "runtime_environment_attestation_v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "phase",
+    "probe_kind",
+    "host",
+    "source_head",
+    "config_identity_digest",
+    "actual_endpoint_class",
+    "allow_mainnet",
+    "runtime_mode",
+    "authorization_scope",
+    "process_identity_digest",
+    "environment_identity_digest",
+    "observed_at",
+    "expires_at",
+    "attestation_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "runtime_environment_attestation_v1"},
+    "phase": {"enum": ["preflight", "postcheck"]},
+    "probe_kind": {"const": "local_runtime_process_v1"},
+    "host": {"type": "string", "minLength": 1},
+    "source_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "config_identity_digest": {"$ref": "#/$defs/digest"},
+    "actual_endpoint_class": {
+      "enum": ["bybit_demo", "bybit_mainnet", "research_local", "unknown"]
+    },
+    "allow_mainnet": {"type": "boolean"},
+    "runtime_mode": {
+      "enum": ["demo", "live_demo", "research_runtime", "mainnet", "unknown"]
+    },
+    "authorization_scope": {
+      "enum": ["demo_only", "live_demo_only", "research_read_only", "mainnet", "unknown"]
+    },
+    "process_identity_digest": {"$ref": "#/$defs/digest"},
+    "environment_identity_digest": {"$ref": "#/$defs/digest"},
+    "observed_at": {"$ref": "#/$defs/timestamp"},
+    "expires_at": {"$ref": "#/$defs/timestamp"},
+    "attestation_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "timestamp": {"type": "string", "format": "date-time"}
+  }
+}

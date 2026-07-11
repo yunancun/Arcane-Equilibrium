@@ -1,0 +1,1479 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/closure_packet_v1.schema.json",
+  "title": "closure_packet_v1",
+  "description": "Single human and machine closure authority for a development-agent task.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "task_id",
+    "human_summary",
+    "work_status",
+    "gate_verdict",
+    "disposition",
+    "confidence",
+    "adjudicated_at",
+    "baseline",
+    "dispatch",
+    "authority_refs",
+    "acceptance",
+    "evidence",
+    "role_fragments",
+    "checks",
+    "side_effects",
+    "unverified",
+    "skipped_roles",
+    "consumption",
+    "next_action"
+  ],
+  "properties": {
+    "schema_version": {"const": "closure_packet_v1"},
+    "task_id": {"type": "string", "minLength": 1},
+    "human_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["objective", "scope", "outcome"],
+      "properties": {
+        "objective": {"type": "string", "minLength": 1},
+        "scope": {
+          "anyOf": [
+            {"type": "string", "minLength": 1},
+            {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {"type": "string", "minLength": 1}
+            }
+          ]
+        },
+        "outcome": {"type": "string", "minLength": 1}
+      }
+    },
+    "work_status": {
+      "enum": ["DONE", "DONE_WITH_CONCERNS", "NEEDS_CONTEXT", "BLOCKED"]
+    },
+    "gate_verdict": {
+      "enum": ["PASS", "FAIL", "CONDITIONAL", "NOT_APPLICABLE", "UNVERIFIED"]
+    },
+    "disposition": {
+      "enum": ["CHANGED", "NO_CHANGE_NEEDED", "DEFERRED"]
+    },
+    "confidence": {"enum": ["high", "med", "low"]},
+    "adjudicated_at": {"$ref": "#/$defs/timestamp"},
+    "baseline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_head", "dirty_diff_hash", "untracked_relevant_hash", "runtime_head", "runtime_observed_at"],
+      "properties": {
+        "source_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "dirty_diff_hash": {"$ref": "#/$defs/digest"},
+        "untracked_relevant_hash": {"$ref": "#/$defs/digest"},
+        "runtime_head": {"type": ["string", "null"]},
+        "runtime_observed_at": {
+          "anyOf": [{"$ref": "#/$defs/timestamp"}, {"type": "null"}]
+        }
+      }
+    },
+    "dispatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_facts", "context_artifact", "dag_digest", "required_role_nodes", "admitted_role_nodes"],
+      "properties": {
+        "task_facts": {"type": "object"},
+        "context_artifact": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "schema_version", "artifact_digest", "task_contract_digest",
+            "budget_authority_digest", "budget_authority_canonical", "canonical_plan",
+            "shared_task_context_digest", "shared_task_context_canonical",
+            "role_context_delta_digest", "role_context_delta_canonical",
+            "semantic_input_tokens"
+          ],
+          "properties": {
+            "schema_version": {"const": "context_artifact_v1"},
+            "artifact_digest": {"$ref": "#/$defs/digest"},
+            "task_contract_digest": {"$ref": "#/$defs/digest"},
+            "budget_authority_digest": {"$ref": "#/$defs/digest"},
+            "budget_authority_canonical": {"type": "string", "minLength": 1},
+            "canonical_plan": {"type": "string", "minLength": 1},
+            "shared_task_context_digest": {"$ref": "#/$defs/digest"},
+            "shared_task_context_canonical": {"type": "string", "minLength": 1},
+            "role_context_delta_digest": {"$ref": "#/$defs/digest"},
+            "role_context_delta_canonical": {"type": "string", "minLength": 1},
+            "semantic_input_tokens": {"type": "integer", "minimum": 1}
+          }
+        },
+        "dag_digest": {"$ref": "#/$defs/digest"},
+        "required_role_nodes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "node_id", "role", "native_agent", "node_class", "permission",
+              "requires", "path_scope"
+            ],
+            "properties": {
+              "node_id": {"type": "string", "minLength": 1},
+              "role": {"type": "string", "minLength": 1},
+              "native_agent": {"type": "string", "minLength": 1},
+              "node_class": {"enum": ["work", "verification"]},
+              "permission": {"type": "string", "minLength": 1},
+              "requires": {
+                "type": "array", "uniqueItems": true,
+                "items": {"type": "string", "minLength": 1}
+              },
+              "path_scope": {
+                "type": "array", "uniqueItems": true,
+                "items": {"type": "string", "minLength": 1}
+              }
+            }
+          }
+        },
+        "admitted_role_nodes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "node_id", "role", "native_agent", "node_class", "permission",
+              "requires", "path_scope", "reason", "result_binding"
+            ],
+            "properties": {
+              "node_id": {"type": "string", "minLength": 1},
+              "role": {"type": "string", "minLength": 1},
+              "native_agent": {"type": "string", "minLength": 1},
+              "node_class": {"enum": ["work", "verification"]},
+              "permission": {"type": "string", "minLength": 1},
+              "requires": {
+                "type": "array", "uniqueItems": true,
+                "items": {"type": "string", "minLength": 1}
+              },
+              "path_scope": {
+                "type": "array", "uniqueItems": true,
+                "items": {"type": "string", "minLength": 1}
+              },
+              "reason": {"type": "string", "minLength": 1},
+              "result_binding": {"enum": ["role_fragment", "nested_payload"]}
+            }
+          }
+        }
+      }
+    },
+    "authority_refs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "class", "subject", "value", "source", "digest", "claim_digest",
+          "source_ref", "observed_at", "scope", "strength", "expiry"
+        ],
+        "properties": {
+          "class": {
+            "enum": [
+              "normative_policy",
+              "implementation_contract",
+              "active_work_state",
+              "runtime_observation",
+              "external_policy",
+              "claim_evidence"
+            ]
+          },
+          "subject": {"type": "string", "minLength": 1},
+          "value": {},
+          "source": {"type": "string", "minLength": 1},
+          "digest": {"$ref": "#/$defs/digest"},
+          "claim_digest": {"$ref": "#/$defs/digest"},
+          "source_ref": {"type": "string", "minLength": 1},
+          "observed_at": {"$ref": "#/$defs/timestamp"},
+          "scope": {"type": "string", "minLength": 1},
+          "strength": {"enum": ["direct", "derived", "asserted"]},
+          "expiry": {"anyOf": [{"$ref": "#/$defs/timestamp"}, {"type": "null"}]}
+        }
+      }
+    },
+    "acceptance": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["criterion", "status", "evidence_refs"],
+        "properties": {
+          "criterion": {"type": "string", "minLength": 1},
+          "status": {"enum": ["PASS", "FAIL", "UNVERIFIED", "NOT_APPLICABLE"]},
+          "evidence_refs": {
+            "type": "array",
+            "items": {"type": "string", "minLength": 1}
+          }
+        }
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/evidence"}
+    },
+    "role_fragments": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schema_version", "id", "node_id", "role", "task_contract_digest",
+          "context_artifact_digest", "producer_call_ref",
+          "producer_call_receipt_digest", "producer_record_kind", "work_status",
+          "gate_verdict", "classification", "confidence", "summary",
+          "evidence_refs", "concerns", "next_action", "consumption",
+          "payload_kind", "payload"
+        ],
+        "properties": {
+          "schema_version": {"const": "role_fragment_v1"},
+          "id": {"type": "string", "minLength": 1},
+          "node_id": {"type": "string", "minLength": 1},
+          "role": {"type": "string", "minLength": 1},
+          "task_contract_digest": {"$ref": "#/$defs/digest"},
+          "context_artifact_digest": {"$ref": "#/$defs/digest"},
+          "producer_call_ref": {"type": "string", "minLength": 1},
+          "producer_call_receipt_digest": {"$ref": "#/$defs/digest"},
+          "producer_record_kind": {
+            "enum": ["workflow_call_record_v1", "workflow_wave_record_v1"]
+          },
+          "work_status": {"enum": ["DONE", "DONE_WITH_CONCERNS", "NEEDS_CONTEXT", "BLOCKED"]},
+          "gate_verdict": {"enum": ["PASS", "FAIL", "CONDITIONAL", "NOT_APPLICABLE", "UNVERIFIED"]},
+          "classification": {"enum": ["FACT", "INFERENCE", "ASSUMPTION"]},
+          "confidence": {"enum": ["high", "med", "low"]},
+          "summary": {"type": "string", "minLength": 1},
+          "evidence_refs": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+          "concerns": {"type": "array", "items": {"type": "string"}},
+          "next_action": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["owner", "action"],
+            "properties": {
+              "owner": {"type": "string", "minLength": 1},
+              "action": {"type": "string", "minLength": 1}
+            }
+          },
+          "consumption": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["measurement_status"],
+            "properties": {
+              "measurement_status": {"enum": ["measured", "partial", "unavailable"]},
+              "unavailable_reason": {"type": "string"},
+              "measurement_source": {"enum": ["platform_telemetry", "provider_usage_api", "orchestrator_receipt"]},
+              "telemetry_digest": {"$ref": "#/$defs/digest"},
+              "telemetry_ref": {"type": "string", "minLength": 1},
+              "missing_metrics": {"type": "array", "items": {"type": "string"}},
+              "input_tokens": {"type": "integer", "minimum": 0},
+              "output_tokens": {"type": "integer", "minimum": 0},
+              "cache_read_tokens": {"type": "integer", "minimum": 0},
+              "tool_calls": {"type": "integer", "minimum": 0},
+              "retry_count": {"type": "integer", "minimum": 0},
+              "wall_time_ms": {"type": "integer", "minimum": 0},
+              "rework_count": {"type": "integer", "minimum": 0}
+            },
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "measurement_status": {"enum": ["measured", "partial"]}
+                  }
+                },
+                "then": {"required": ["telemetry_ref"]}
+              },
+              {
+                "if": {
+                  "properties": {"measurement_status": {"const": "unavailable"}}
+                },
+                "then": {"required": ["unavailable_reason"]}
+              }
+            ]
+          },
+          "payload_kind": {"type": "string", "minLength": 1},
+          "payload": {"type": "object"}
+        }
+      }
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "status", "command", "signature", "evidence_ref"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "status": {"enum": ["EXECUTED", "REUSED", "SKIPPED", "FAILED"]},
+          "command": {"type": "string"},
+          "signature": {"$ref": "#/$defs/digest"},
+          "evidence_ref": {"type": ["string", "null"]},
+          "command_capture_ref": {
+            "anyOf": [
+              {"type": "string", "minLength": 1},
+              {"type": "null"}
+            ]
+          },
+          "executed_at": {"anyOf": [{"$ref": "#/$defs/timestamp"}, {"type": "null"}]},
+          "reused_from": {"type": ["string", "null"]},
+          "skip_reason": {"type": ["string", "null"]},
+          "reuse_receipt": {
+            "anyOf": [
+              {"$ref": "#/$defs/testEvidenceReuseReceipt"},
+              {"type": "null"}
+            ]
+          },
+          "execution_receipt": {"type": ["object", "null"]}
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {"status": {"enum": ["EXECUTED", "REUSED"]}}
+            },
+            "then": {
+              "required": ["command_capture_ref"],
+              "properties": {
+                "command_capture_ref": {"type": "string", "minLength": 1}
+              }
+            }
+          }
+        ]
+      }
+    },
+    "side_effects": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo_mutation", "runtime_contact", "private_external_contact", "broker_effect"],
+      "properties": {
+        "repo_mutation": {"type": "boolean"},
+        "runtime_contact": {"type": "boolean"},
+        "private_external_contact": {"type": "boolean"},
+        "broker_effect": {"type": "boolean"}
+      }
+    },
+    "unverified": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "skipped_roles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["role", "reason", "residual_risk", "owner"],
+        "properties": {
+          "role": {"type": "string"},
+          "reason": {"type": "string"},
+          "residual_risk": {"type": "string"},
+          "owner": {"type": "string"}
+        }
+      }
+    },
+    "consumption": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["measurement_status"],
+      "properties": {
+        "measurement_status": {"enum": ["measured", "partial", "unavailable"]},
+        "unavailable_reason": {"type": "string"},
+        "measurement_source": {"enum": ["platform_telemetry", "provider_usage_api", "orchestrator_receipt"]},
+        "telemetry_digest": {"$ref": "#/$defs/digest"},
+        "telemetry_ref": {"type": "string", "minLength": 1},
+        "wave_record_refs": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "missing_metrics": {"type": "array", "items": {"type": "string"}},
+        "planned_tokens": {"type": "integer", "minimum": 0},
+        "input_tokens": {"type": "integer", "minimum": 0},
+        "output_tokens": {"type": "integer", "minimum": 0},
+        "cache_read_tokens": {"type": "integer", "minimum": 0},
+        "tool_calls": {"type": "integer", "minimum": 0},
+        "retry_count": {"type": "integer", "minimum": 0},
+        "fan_out": {"type": "integer", "minimum": 0},
+        "wall_time_ms": {"type": "integer", "minimum": 0},
+        "accepted_findings": {"type": "integer", "minimum": 0},
+        "rework_count": {"type": "integer", "minimum": 0},
+        "quality_reserve_used": {"type": "boolean"}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "measurement_status": {"enum": ["measured", "partial"]}
+            }
+          },
+          "then": {"required": ["measurement_source"]}
+        },
+        {
+          "if": {
+            "properties": {"measurement_status": {"const": "measured"}}
+          },
+          "then": {"required": ["telemetry_ref"]}
+        },
+        {
+          "if": {
+            "required": ["measurement_source"],
+            "properties": {
+              "measurement_status": {"const": "partial"},
+              "measurement_source": {"const": "orchestrator_receipt"}
+            }
+          },
+          "then": {"required": ["wave_record_refs"]}
+        },
+        {
+          "if": {
+            "required": ["measurement_source"],
+            "properties": {
+              "measurement_status": {"const": "partial"},
+              "measurement_source": {
+                "enum": ["platform_telemetry", "provider_usage_api"]
+              }
+            }
+          },
+          "then": {"required": ["telemetry_ref"]}
+        },
+        {
+          "if": {
+            "properties": {"measurement_status": {"const": "unavailable"}}
+          },
+          "then": {"required": ["unavailable_reason"]}
+        }
+      ]
+    },
+    "next_action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner", "action"],
+      "properties": {
+        "owner": {"type": "string", "minLength": 1},
+        "action": {"type": "string", "minLength": 1}
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"work_status": {"enum": ["BLOCKED", "NEEDS_CONTEXT"]}}},
+      "then": {"properties": {"gate_verdict": {"not": {"const": "PASS"}}}}
+    },
+    {
+      "if": {"properties": {"gate_verdict": {"const": "PASS"}}},
+      "then": {
+        "properties": {
+          "acceptance": {
+            "contains": {
+              "type": "object",
+              "required": ["status"],
+              "properties": {"status": {"const": "PASS"}}
+            }
+          },
+          "unverified": {"maxItems": 0},
+          "checks": {
+            "items": {
+              "type": "object",
+              "properties": {
+                "status": {"enum": ["EXECUTED", "REUSED", "SKIPPED"]}
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "testEvidenceReuseReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "eligible", "status", "reason", "current_signature",
+        "reused_from", "created_at", "expires_at", "assessed_at",
+        "execution_evidence_digest", "execution_receipt", "execution_receipt_digest",
+        "executor_role", "critical", "independent_recheck_receipt",
+        "independent_recheck_receipt_digest", "reviewer_role", "receipt_digest"
+      ],
+      "properties": {
+        "schema_version": {"const": "test_evidence_reuse_v2"},
+        "eligible": {"const": true},
+        "status": {"const": "REUSED"},
+        "reason": {"type": "string", "minLength": 1},
+        "current_signature": {"$ref": "#/$defs/digest"},
+        "reused_from": {"type": "string", "minLength": 1},
+        "created_at": {"$ref": "#/$defs/timestamp"},
+        "expires_at": {"$ref": "#/$defs/timestamp"},
+        "assessed_at": {"$ref": "#/$defs/timestamp"},
+        "execution_evidence_digest": {"$ref": "#/$defs/digest"},
+        "execution_receipt": {"type": "object"},
+        "execution_receipt_digest": {"$ref": "#/$defs/digest"},
+        "executor_role": {"type": "string", "minLength": 1},
+        "critical": {"type": "boolean"},
+        "independent_recheck_receipt": {"type": ["object", "null"]},
+        "independent_recheck_receipt_digest": {
+          "anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]
+        },
+        "reviewer_role": {"type": ["string", "null"]},
+        "receipt_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "fullAuditControl": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "workflow_contract_digest", "call_manifest_digest",
+        "workflow_wave_record_digest", "baseline", "scheduler", "selection_surfaces",
+        "run_sequence", "adaptive_recall_approved", "adaptive_recall_authority_digest",
+        "expected_axes", "admitted_axes", "deferred_axes", "axis_bindings",
+        "axis_fragment_digests", "coverage_debt", "coverage_holes",
+        "assumption_count", "disputed_count", "decision_changing_findings",
+        "seam_present", "seam_result", "seam_result_digest", "seam_call_ref",
+        "seam_call_receipt_digest", "pass_eligible", "unverified_projection"
+      ],
+      "properties": {
+        "schema_version": {"const": "full_audit_control_v1"},
+        "workflow_contract_digest": {"$ref": "#/$defs/digest"},
+        "call_manifest_digest": {"$ref": "#/$defs/digest"},
+        "workflow_wave_record_digest": {"$ref": "#/$defs/digest"},
+        "baseline": {"$ref": "#/properties/baseline"},
+        "scheduler": {"enum": ["full", "adaptive_shadow", "adaptive"]},
+        "selection_surfaces": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "run_sequence": {"type": "integer", "minimum": 0},
+        "adaptive_recall_approved": {"type": "boolean"},
+        "adaptive_recall_authority_digest": {
+          "anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]
+        },
+        "expected_axes": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "admitted_axes": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "deferred_axes": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "axis_bindings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["node_id", "role", "native_agent", "node_class", "permission", "reason"],
+            "properties": {
+              "node_id": {"type": "string", "minLength": 1},
+              "role": {"type": "string", "minLength": 1},
+              "native_agent": {"type": "string", "minLength": 1},
+              "node_class": {"const": "verification"},
+              "permission": {"const": "read_only"},
+              "reason": {"type": "string", "minLength": 1}
+            }
+          }
+        },
+        "axis_fragment_digests": {"type": "object"},
+        "coverage_debt": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "id", "reason"],
+            "properties": {
+              "kind": {"type": "string", "minLength": 1},
+              "id": {"type": "string", "minLength": 1},
+              "reason": {"type": "string", "minLength": 1},
+              "owner": {"type": "string", "minLength": 1},
+              "claim_key": {"type": "string", "minLength": 1}
+            }
+          }
+        },
+        "coverage_holes": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "assumption_count": {"type": "integer", "minimum": 0},
+        "disputed_count": {"type": "integer", "minimum": 0},
+        "decision_changing_findings": {"type": "integer", "minimum": 0},
+        "seam_present": {"type": "boolean"},
+        "seam_result": {"type": ["object", "null"]},
+        "seam_result_digest": {
+          "anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]
+        },
+        "seam_call_ref": {"type": "string", "minLength": 1},
+        "seam_call_receipt_digest": {"$ref": "#/$defs/digest"},
+        "pass_eligible": {"type": "boolean"},
+        "unverified_projection": {"type": "array", "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "fullAuditAxis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "audit", "confirmed_decision_claim_ids",
+        "disputed_claim_ids", "verification_outcomes", "assumptions_count",
+        "coverage_debt_count"
+      ],
+      "properties": {
+        "schema_version": {"const": "full_audit_axis_v1"},
+        "audit": {"type": "object"},
+        "confirmed_decision_claim_ids": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "disputed_claim_ids": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "verification_outcomes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["outcome", "outcome_digest"],
+            "properties": {
+              "outcome": {"type": "object"},
+              "outcome_digest": {"$ref": "#/$defs/digest"}
+            }
+          }
+        },
+        "assumptions_count": {"type": "integer", "minimum": 0},
+        "coverage_debt_count": {"type": "integer", "minimum": 0}
+      }
+    },
+    "opsDeployPreflight": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "adapter_id", "intent_id", "intent_digest",
+        "source_head", "target_host", "target_environment", "component_digest",
+        "runtime_environment_identity_digest", "runtime_attestation_digest",
+        "config_identity_digest", "actual_endpoint_class", "allow_mainnet",
+        "runtime_mode", "authorization_scope", "process_identity_digest",
+        "observed_at", "tree_clean", "ready"
+      ],
+      "properties": {
+        "schema_version": {"const": "ops_deploy_preflight_v1"},
+        "adapter_id": {"const": "deploy_adapter_v1"},
+        "intent_id": {"type": "string", "minLength": 8},
+        "intent_digest": {"$ref": "#/$defs/digest"},
+        "source_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "target_host": {"type": "string", "minLength": 1},
+        "target_environment": {"enum": ["demo", "live_demo", "research_runtime"]},
+        "component_digest": {"$ref": "#/$defs/digest"},
+        "runtime_environment_identity_digest": {"$ref": "#/$defs/digest"},
+        "runtime_attestation_digest": {"$ref": "#/$defs/digest"},
+        "config_identity_digest": {"$ref": "#/$defs/digest"},
+        "actual_endpoint_class": {"type": "string", "minLength": 1},
+        "allow_mainnet": {"const": false},
+        "runtime_mode": {"type": "string", "minLength": 1},
+        "authorization_scope": {"type": "string", "minLength": 1},
+        "process_identity_digest": {"$ref": "#/$defs/digest"},
+        "observed_at": {"$ref": "#/$defs/timestamp"},
+        "tree_clean": {"const": true},
+        "ready": {"const": true}
+      }
+    },
+    "opsDeployPostcheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "adapter_id", "intent_id", "intent_digest",
+        "source_head", "target_host", "target_environment", "component_digest",
+        "runtime_environment_identity_digest", "runtime_attestation_digest",
+        "config_identity_digest", "actual_endpoint_class", "allow_mainnet",
+        "runtime_mode", "authorization_scope", "process_identity_digest",
+        "observed_at", "effect_receipt_digest", "deployed_binary_sha256",
+        "running_binary_sha256", "service_active"
+      ],
+      "properties": {
+        "schema_version": {"const": "ops_deploy_postcheck_v1"},
+        "adapter_id": {"const": "deploy_adapter_v1"},
+        "intent_id": {"type": "string", "minLength": 8},
+        "intent_digest": {"$ref": "#/$defs/digest"},
+        "source_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "target_host": {"type": "string", "minLength": 1},
+        "target_environment": {"enum": ["demo", "live_demo", "research_runtime"]},
+        "component_digest": {"$ref": "#/$defs/digest"},
+        "runtime_environment_identity_digest": {"$ref": "#/$defs/digest"},
+        "runtime_attestation_digest": {"$ref": "#/$defs/digest"},
+        "config_identity_digest": {"$ref": "#/$defs/digest"},
+        "actual_endpoint_class": {"type": "string", "minLength": 1},
+        "allow_mainnet": {"const": false},
+        "runtime_mode": {"type": "string", "minLength": 1},
+        "authorization_scope": {"type": "string", "minLength": 1},
+        "process_identity_digest": {"$ref": "#/$defs/digest"},
+        "observed_at": {"$ref": "#/$defs/timestamp"},
+        "effect_receipt_digest": {"$ref": "#/$defs/digest"},
+        "deployed_binary_sha256": {"$ref": "#/$defs/digest"},
+        "running_binary_sha256": {"$ref": "#/$defs/digest"},
+        "service_active": {"const": true}
+      }
+    },
+    "byteCapture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["encoding", "content", "bytes", "digest"],
+      "properties": {
+        "encoding": {"const": "base64"},
+        "content": {"type": "string"},
+        "bytes": {"type": "integer", "minimum": 0},
+        "digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "repositoryUntrackedCapture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "encoding", "content", "bytes", "digest"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "encoding": {"const": "base64"},
+        "content": {"type": "string"},
+        "bytes": {"type": "integer", "minimum": 0},
+        "digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "repositoryCapture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "trust_tier", "scope", "source_head",
+        "tracked_diff", "tracked_paths", "untracked", "changed_paths",
+        "change_manifest_digest", "untracked_manifest_digest", "observed_at",
+        "record_digest"
+      ],
+      "properties": {
+        "schema_version": {"const": "repository_capture_v1"},
+        "trust_tier": {"const": "LOCAL_REPRODUCIBLE"},
+        "scope": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "source_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "tracked_diff": {"$ref": "#/$defs/byteCapture"},
+        "tracked_paths": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "untracked": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/repositoryUntrackedCapture"}
+        },
+        "changed_paths": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "change_manifest_digest": {"$ref": "#/$defs/digest"},
+        "untracked_manifest_digest": {"$ref": "#/$defs/digest"},
+        "observed_at": {"$ref": "#/$defs/timestamp"},
+        "record_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "repositoryChangeRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "trust_tier", "task_contract_digest", "node_id",
+        "role_id", "scope", "before", "after", "before_generation_digest",
+        "after_generation_digest", "owned_before", "owned_after",
+        "owned_before_generation_digest", "owned_after_generation_digest",
+        "mutation_observed", "affected_paths", "record_digest"
+      ],
+      "properties": {
+        "schema_version": {"const": "repository_change_record_v1"},
+        "trust_tier": {"const": "LOCAL_REPRODUCIBLE"},
+        "task_contract_digest": {"$ref": "#/$defs/digest"},
+        "node_id": {"type": "string", "minLength": 1},
+        "role_id": {"type": "string", "minLength": 1},
+        "scope": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "before": {"$ref": "#/$defs/repositoryCapture"},
+        "after": {"$ref": "#/$defs/repositoryCapture"},
+        "before_generation_digest": {"$ref": "#/$defs/digest"},
+        "after_generation_digest": {"$ref": "#/$defs/digest"},
+        "owned_before": {"$ref": "#/$defs/repositoryCapture"},
+        "owned_after": {"$ref": "#/$defs/repositoryCapture"},
+        "owned_before_generation_digest": {"$ref": "#/$defs/digest"},
+        "owned_after_generation_digest": {"$ref": "#/$defs/digest"},
+        "mutation_observed": {"type": "boolean"},
+        "affected_paths": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "record_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "authorizationDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allowed", "policy_class", "reason"],
+      "properties": {
+        "allowed": {"type": "boolean"},
+        "policy_class": {"type": "string", "minLength": 1},
+        "reason": {"type": "string", "minLength": 1}
+      }
+    },
+    "commandCapture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "trust_tier", "task_contract_digest", "node_id",
+        "role_id", "node_class", "argv", "command", "authorization", "replay_contract", "started_at",
+        "completed_at", "exit_code", "timed_out", "result", "stdout",
+        "stderr", "repository_before", "repository_after", "record_digest"
+      ],
+      "properties": {
+        "schema_version": {"const": "command_capture_v1"},
+        "trust_tier": {"const": "LOCAL_REPRODUCIBLE"},
+        "task_contract_digest": {"$ref": "#/$defs/digest"},
+        "node_id": {"type": "string", "minLength": 1},
+        "role_id": {"type": "string", "minLength": 1},
+        "node_class": {"enum": ["work", "verification"]},
+        "argv": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "command": {"type": "string", "minLength": 1},
+        "authorization": {"$ref": "#/$defs/authorizationDecision"},
+        "replay_contract": {
+          "enum": ["EXACT_OUTPUT", "CANONICAL_TEST_OUTPUT_V1", "RESULT_ONLY"]
+        },
+        "started_at": {"$ref": "#/$defs/timestamp"},
+        "completed_at": {"$ref": "#/$defs/timestamp"},
+        "exit_code": {"type": "integer"},
+        "timed_out": {"type": "boolean"},
+        "result": {"enum": ["PASS", "FAIL", "TIMED_OUT"]},
+        "stdout": {"$ref": "#/$defs/byteCapture"},
+        "stderr": {"$ref": "#/$defs/byteCapture"},
+        "repository_before": {"$ref": "#/$defs/repositoryCapture"},
+        "repository_after": {"$ref": "#/$defs/repositoryCapture"},
+        "record_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "repositoryGenerationSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "scope", "source_head", "generation_digest",
+        "observed_at", "record_digest"
+      ],
+      "properties": {
+        "schema_version": {"const": "repository_generation_summary_v1"},
+        "scope": {
+          "type": "array", "minItems": 1, "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "source_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "generation_digest": {"$ref": "#/$defs/digest"},
+        "observed_at": {"$ref": "#/$defs/timestamp"},
+        "record_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "governedOutputSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "encoding", "preview_text", "preview_base64", "preview_source_bytes",
+        "bytes", "digest", "replay_digest", "truncated", "preview_redacted"
+      ],
+      "properties": {
+        "encoding": {"enum": ["utf-8", "base64"]},
+        "preview_text": {"type": ["string", "null"]},
+        "preview_base64": {"type": ["string", "null"]},
+        "preview_source_bytes": {"type": "integer", "minimum": 0, "maximum": 4096},
+        "bytes": {"type": "integer", "minimum": 0},
+        "digest": {"$ref": "#/$defs/digest"},
+        "replay_digest": {
+          "anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]
+        },
+        "truncated": {"type": "boolean"},
+        "preview_redacted": {"type": "boolean"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"encoding": {"const": "utf-8"}}},
+          "then": {
+            "properties": {
+              "preview_text": {"type": "string"},
+              "preview_base64": {"type": "null"}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"encoding": {"const": "base64"}}},
+          "then": {
+            "properties": {
+              "preview_text": {"type": "null"},
+              "preview_base64": {"type": "string", "contentEncoding": "base64"}
+            }
+          }
+        }
+      ]
+    },
+    "nativeAuthorizationDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "allowed", "policy_class", "reason", "native_agent", "role_id",
+        "node_class", "effective_permission"
+      ],
+      "properties": {
+        "allowed": {"const": true},
+        "policy_class": {
+          "enum": [
+            "repo_or_local_test_read", "governance_readonly",
+            "local_test_adapter", "node_scoped_read_only"
+          ]
+        },
+        "reason": {"type": "string", "minLength": 1},
+        "native_agent": {"type": "string", "minLength": 1},
+        "role_id": {"type": "string", "minLength": 1},
+        "node_class": {"const": "verification"},
+        "effective_permission": {"const": "read_only"}
+      }
+    },
+    "governedExecutionTask": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "node_id", "role", "native_agent", "node_class", "permission",
+        "requires", "path_scope"
+      ],
+      "properties": {
+        "node_id": {"type": "string", "minLength": 1},
+        "role": {"type": "string", "minLength": 1},
+        "native_agent": {"type": "string", "minLength": 1},
+        "node_class": {"const": "verification"},
+        "permission": {"const": "read_only"},
+        "requires": {
+          "type": "array", "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "path_scope": {
+          "anyOf": [
+            {
+              "type": "array", "uniqueItems": true,
+              "items": {"type": "string", "minLength": 1}
+            },
+            {"type": "null"}
+          ]
+        }
+      }
+    },
+    "commandCaptureV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "trust_tier", "context_artifact_digest",
+        "task_contract_digest", "execution_task", "execution_task_digest",
+        "node_id", "role_id", "native_agent", "node_class", "permission",
+        "path_scope", "argv", "command", "authorization", "replay_contract",
+        "timeout_seconds", "started_at", "completed_at", "exit_code",
+        "timed_out", "result", "stdout", "stderr", "repository_before",
+        "repository_after", "whole_repository_before", "whole_repository_after",
+        "effect_enforcement", "host_sandbox_attestation_ref", "record_digest"
+      ],
+      "properties": {
+        "schema_version": {"const": "command_capture_v2"},
+        "trust_tier": {"const": "LOCAL_REPRODUCIBLE"},
+        "context_artifact_digest": {"$ref": "#/$defs/digest"},
+        "task_contract_digest": {"$ref": "#/$defs/digest"},
+        "execution_task": {"$ref": "#/$defs/governedExecutionTask"},
+        "execution_task_digest": {"$ref": "#/$defs/digest"},
+        "node_id": {"type": "string", "minLength": 1},
+        "role_id": {"type": "string", "minLength": 1},
+        "native_agent": {"type": "string", "minLength": 1},
+        "node_class": {"const": "verification"},
+        "permission": {"const": "read_only"},
+        "path_scope": {
+          "type": "array", "minItems": 1, "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "argv": {
+          "type": "array", "minItems": 1,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "command": {"type": "string", "minLength": 1},
+        "authorization": {"$ref": "#/$defs/nativeAuthorizationDecision"},
+        "replay_contract": {
+          "enum": ["EXACT_OUTPUT", "CANONICAL_TEST_OUTPUT_V1", "RESULT_ONLY"]
+        },
+        "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 900},
+        "started_at": {"$ref": "#/$defs/timestamp"},
+        "completed_at": {"$ref": "#/$defs/timestamp"},
+        "exit_code": {"type": "integer"},
+        "timed_out": {"type": "boolean"},
+        "result": {"enum": ["PASS", "FAIL", "TIMED_OUT"]},
+        "stdout": {"$ref": "#/$defs/governedOutputSummary"},
+        "stderr": {"$ref": "#/$defs/governedOutputSummary"},
+        "repository_before": {"$ref": "#/$defs/repositoryGenerationSummary"},
+        "repository_after": {"$ref": "#/$defs/repositoryGenerationSummary"},
+        "whole_repository_before": {"$ref": "#/$defs/repositoryGenerationSummary"},
+        "whole_repository_after": {"$ref": "#/$defs/repositoryGenerationSummary"},
+        "effect_enforcement": {"const": "repository_policy_only"},
+        "host_sandbox_attestation_ref": {"type": "null"},
+        "record_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "telemetryMetrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "input_tokens", "output_tokens", "cache_read_tokens", "tool_calls",
+        "retry_count", "wall_time_ms", "rework_count"
+      ],
+      "properties": {
+        "input_tokens": {"type": "integer", "minimum": 0},
+        "output_tokens": {"type": "integer", "minimum": 0},
+        "cache_read_tokens": {"type": "integer", "minimum": 0},
+        "tool_calls": {"type": "integer", "minimum": 0},
+        "retry_count": {"type": "integer", "minimum": 0},
+        "wall_time_ms": {"type": "integer", "minimum": 0},
+        "rework_count": {"type": "integer", "minimum": 0}
+      }
+    },
+    "telemetryBody": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "subject_call_ids", "observed_at", "metrics"],
+      "properties": {
+        "schema_version": {"const": "telemetry_body_v1"},
+        "subject_call_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "observed_at": {"$ref": "#/$defs/timestamp"},
+        "metrics": {"$ref": "#/$defs/telemetryMetrics"}
+      }
+    },
+    "telemetryRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "trust_tier", "assurance", "body", "body_digest",
+        "external_record", "record_digest"
+      ],
+      "properties": {
+        "schema_version": {"const": "telemetry_record_v1"},
+        "trust_tier": {
+          "enum": ["ORCHESTRATOR_BOUND", "PLATFORM_OR_EXTERNAL_ATTESTED"]
+        },
+        "assurance": {
+          "enum": ["unsigned_local_platform_record", "external_attested"]
+        },
+        "body": {"$ref": "#/$defs/telemetryBody"},
+        "body_digest": {"$ref": "#/$defs/digest"},
+        "external_record": {"type": ["object", "null"]},
+        "record_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "externalEvidenceCapture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "trust_tier", "capture_kind", "url", "content_digest",
+        "observed_at", "expires_at", "citation_ref", "selector", "excerpt",
+        "excerpt_digest", "record_digest"
+      ],
+      "properties": {
+        "schema_version": {"const": "external_evidence_capture_v1"},
+        "trust_tier": {"const": "PLATFORM_OR_EXTERNAL_ATTESTED"},
+        "capture_kind": {"enum": ["external_policy_snapshot", "external_outcome_snapshot"]},
+        "url": {"type": "string", "pattern": "^https://"},
+        "content_digest": {"$ref": "#/$defs/digest"},
+        "observed_at": {"$ref": "#/$defs/timestamp"},
+        "expires_at": {"$ref": "#/$defs/timestamp"},
+        "citation_ref": {"type": "string", "minLength": 1},
+        "selector": {"type": "string", "minLength": 1},
+        "excerpt": {"type": "string", "minLength": 1, "maxLength": 500},
+        "excerpt_digest": {"$ref": "#/$defs/digest"},
+        "record_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "requestedAgent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["logical_role", "platform", "platform_requested_agent", "native_binding", "model", "effort", "isolation", "node_class", "permission"],
+      "properties": {
+        "logical_role": {"type": "string", "minLength": 1},
+        "platform": {"const": "claude_saved_workflow"},
+        "platform_requested_agent": {"type": "string", "minLength": 1},
+        "native_binding": {
+          "type": "object", "additionalProperties": false,
+          "required": ["logical_role", "native_agent", "node_class", "permission"],
+          "properties": {
+            "logical_role": {"type": "string", "minLength": 1},
+            "native_agent": {"type": "string", "minLength": 1},
+            "node_class": {"enum": ["work", "verification"]},
+            "permission": {"type": "string", "minLength": 1}
+          }
+        },
+        "model": {"type": ["string", "null"]},
+        "effort": {"type": ["string", "null"]},
+        "isolation": {"type": ["string", "null"]},
+        "node_class": {"enum": ["work", "verification"]},
+        "permission": {"type": "string", "minLength": 1}
+      }
+    },
+    "workflowCallRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "workflow_contract_digest", "logical_call_id",
+        "node_id", "payload_kind", "attempt", "retry_parent_call_id",
+        "phase", "label", "requested", "prompt_digest",
+        "dag_digest", "requires", "topological_wave", "producer_generation",
+        "context_artifact_digest", "task_contract_digest",
+        "dirty_scope_digest", "focus_digest",
+        "compiler_input_tokens_lower_bound", "admitted_input_tokens_lower_bound",
+        "response_schema_digest", "started_at", "ended_at", "returned_null",
+        "parsed_result_digest", "record_digest"
+      ],
+      "properties": {
+        "schema_version": {"const": "workflow_call_record_v1"},
+        "workflow_contract_digest": {"$ref": "#/$defs/digest"},
+        "logical_call_id": {"type": "string", "minLength": 1},
+        "node_id": {"type": "string", "minLength": 1},
+        "payload_kind": {"type": "string", "minLength": 1},
+        "attempt": {"type": "integer", "minimum": 1},
+        "retry_parent_call_id": {"type": ["string", "null"]},
+        "phase": {"type": "string", "minLength": 1},
+        "label": {"type": "string", "minLength": 1},
+        "requested": {"$ref": "#/$defs/requestedAgent"},
+        "prompt_digest": {"$ref": "#/$defs/digest"},
+        "dag_digest": {"$ref": "#/$defs/digest"},
+        "requires": {
+          "type": "array", "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "topological_wave": {"type": "integer", "minimum": 0},
+        "producer_generation": {
+          "type": "object", "additionalProperties": {"$ref": "#/$defs/digest"}
+        },
+        "context_artifact_digest": {"$ref": "#/$defs/digest"},
+        "task_contract_digest": {"$ref": "#/$defs/digest"},
+        "dirty_scope_digest": {"$ref": "#/$defs/digest"},
+        "focus_digest": {"$ref": "#/$defs/digest"},
+        "compiler_input_tokens_lower_bound": {"type": "integer", "minimum": 0},
+        "admitted_input_tokens_lower_bound": {"type": "integer", "minimum": 0},
+        "response_schema_digest": {"$ref": "#/$defs/digest"},
+        "started_at": {"$ref": "#/$defs/timestamp"},
+        "ended_at": {"$ref": "#/$defs/timestamp"},
+        "returned_null": {"type": "boolean"},
+        "parsed_result_digest": {"$ref": "#/$defs/digest"},
+        "record_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "workflowCallManifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "workflow_contract_digest", "records", "manifest_digest"
+      ],
+      "properties": {
+        "schema_version": {"const": "workflow_call_manifest_v1"},
+        "workflow_contract_digest": {"$ref": "#/$defs/digest"},
+        "records": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/workflowCallRecord"}
+        },
+        "manifest_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "workflowAdmittedTask": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "node_id", "role", "native_agent", "requires", "node_class", "permission", "payload_kind", "task_contract_digest",
+        "context_artifact_digest", "description_digest", "base_prompt_digest",
+        "requested", "dirty_scope", "dirty_scope_digest", "focus",
+        "focus_digest", "compiler_estimated_input_tokens",
+        "admitted_input_tokens_lower_bound"
+      ],
+      "properties": {
+        "node_id": {"type": "string", "minLength": 1},
+        "role": {"type": "string", "minLength": 1},
+        "native_agent": {"type": "string", "minLength": 1},
+        "requires": {
+          "type": "array", "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "node_class": {"enum": ["work", "verification"]},
+        "permission": {"type": "string", "minLength": 1},
+        "payload_kind": {"type": "string", "minLength": 1},
+        "task_contract_digest": {"$ref": "#/$defs/digest"},
+        "context_artifact_digest": {"$ref": "#/$defs/digest"},
+        "description_digest": {"$ref": "#/$defs/digest"},
+        "base_prompt_digest": {"$ref": "#/$defs/digest"},
+        "requested": {"$ref": "#/$defs/requestedAgent"},
+        "dirty_scope": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "dirty_scope_digest": {"$ref": "#/$defs/digest"},
+        "focus": {"type": "string"},
+        "focus_digest": {"$ref": "#/$defs/digest"},
+        "compiler_estimated_input_tokens": {"type": "integer", "minimum": 0},
+        "admitted_input_tokens_lower_bound": {"type": "integer", "minimum": 0}
+      }
+    },
+    "workflowCoverageDebt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["node", "reason", "disposition"],
+      "properties": {
+        "node": {"type": "string", "minLength": 1},
+        "reason": {"type": "string", "minLength": 1},
+        "disposition": {"enum": ["DEFERRED", "UNVERIFIED"]}
+      }
+    },
+    "workflowWaveRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "workflow_contract_digest", "context_artifact_digests",
+        "dag_digest", "execution_waves",
+        "compiler_planned_input_tokens_lower_bound",
+        "admitted_planned_input_tokens_lower_bound",
+        "scheduled_call_compiler_input_tokens_lower_bound",
+        "scheduled_call_admitted_input_tokens_lower_bound", "admitted_tasks",
+        "call_manifest_digest", "call_record_digests", "first_attempt_call_count",
+        "retry_call_count", "null_call_count", "final_null_node_count",
+        "coverage_debt", "budget_authority", "result_fragment_digests",
+        "accounting_boundary", "record_digest"
+      ],
+      "properties": {
+        "schema_version": {"const": "workflow_wave_record_v1"},
+        "workflow_contract_digest": {"$ref": "#/$defs/digest"},
+        "dag_digest": {"$ref": "#/$defs/digest"},
+        "execution_waves": {
+          "type": "array", "minItems": 1,
+          "items": {
+            "type": "array", "minItems": 1, "uniqueItems": true,
+            "items": {"type": "string", "minLength": 1}
+          }
+        },
+        "context_artifact_digests": {
+          "type": "object",
+          "additionalProperties": {"$ref": "#/$defs/digest"}
+        },
+        "compiler_planned_input_tokens_lower_bound": {"type": "integer", "minimum": 0},
+        "admitted_planned_input_tokens_lower_bound": {"type": "integer", "minimum": 0},
+        "scheduled_call_compiler_input_tokens_lower_bound": {"type": "integer", "minimum": 0},
+        "scheduled_call_admitted_input_tokens_lower_bound": {"type": "integer", "minimum": 0},
+        "admitted_tasks": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/workflowAdmittedTask"}
+        },
+        "call_manifest_digest": {"$ref": "#/$defs/digest"},
+        "call_record_digests": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/digest"}
+        },
+        "first_attempt_call_count": {"type": "integer", "minimum": 1},
+        "retry_call_count": {"type": "integer", "minimum": 0},
+        "null_call_count": {"type": "integer", "minimum": 0},
+        "final_null_node_count": {"type": "integer", "minimum": 0},
+        "coverage_debt": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/workflowCoverageDebt"}
+        },
+        "budget_authority": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["authority_digest", "authority_canonical", "admitted_caps"],
+          "properties": {
+            "authority_digest": {"$ref": "#/$defs/digest"},
+            "authority_canonical": {"type": "string", "minLength": 1},
+            "admitted_caps": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["max_context_tokens_per_call", "max_prompt_utf8_bytes_per_call", "max_workflow_planned_input_tokens", "max_unique_nodes", "max_call_attempts", "retry_budget"],
+              "properties": {
+                "max_context_tokens_per_call": {"type": "integer", "minimum": 1},
+                "max_prompt_utf8_bytes_per_call": {"type": "integer", "minimum": 1},
+                "max_workflow_planned_input_tokens": {"type": "integer", "minimum": 1},
+                "max_unique_nodes": {"type": "integer", "minimum": 1},
+                "max_call_attempts": {"type": "integer", "minimum": 1},
+                "retry_budget": {"type": "integer", "minimum": 0}
+              }
+            }
+          }
+        },
+        "result_fragment_digests": {
+          "type": "object",
+          "additionalProperties": {
+            "anyOf": [
+              {"$ref": "#/$defs/digest"},
+              {"type": "null"}
+            ]
+          }
+        },
+        "accounting_boundary": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "usage_measurement_status", "controller_overhead_status",
+            "excluded_from_token_lower_bounds"
+          ],
+          "properties": {
+            "usage_measurement_status": {"const": "unavailable"},
+            "controller_overhead_status": {"const": "unavailable"},
+            "excluded_from_token_lower_bounds": {
+              "type": "array",
+              "minItems": 1,
+              "items": {"type": "string", "minLength": 1}
+            }
+          }
+        },
+        "record_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "scope", "kind", "digest"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "scope": {"enum": ["source", "runtime", "external", "test", "data"]},
+        "kind": {"type": "string", "minLength": 1},
+        "digest": {"$ref": "#/$defs/digest"},
+        "observed_at": {"anyOf": [{"$ref": "#/$defs/timestamp"}, {"type": "null"}]},
+        "expiry": {"anyOf": [{"$ref": "#/$defs/timestamp"}, {"type": "null"}]},
+        "host": {"type": ["string", "null"]},
+        "environment": {"type": ["string", "null"]},
+        "source": {"type": ["string", "null"]},
+        "receipt": {"type": ["object", "null"]},
+        "operation_receipt": {"type": ["object", "null"]},
+        "artifact": {"type": ["object", "null"]}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"scope": {"const": "runtime"}}},
+          "then": {"required": ["host", "environment", "observed_at", "expiry"]}
+        },
+        {
+          "if": {"properties": {"kind": {"const": "effect_adapter_result_v1"}}},
+          "then": {
+            "required": ["source", "receipt"],
+            "properties": {"scope": {"const": "runtime"}}
+          }
+        },
+        {
+          "if": {"properties": {"kind": {"enum": ["ops_preflight_v1", "ops_postcheck_v1"]}}},
+          "then": {
+            "required": ["source", "operation_receipt"],
+            "properties": {"scope": {"const": "runtime"}}
+          }
+        },
+        {
+          "if": {"properties": {"kind": {"const": "ops_preflight_v1"}}},
+          "then": {
+            "properties": {
+              "operation_receipt": {"$ref": "#/$defs/opsDeployPreflight"}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"kind": {"const": "ops_postcheck_v1"}}},
+          "then": {
+            "properties": {
+              "operation_receipt": {"$ref": "#/$defs/opsDeployPostcheck"}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"kind": {"const": "repository_capture_v1"}}},
+          "then": {
+            "required": ["artifact"],
+            "properties": {
+              "scope": {"const": "source"},
+              "artifact": {"$ref": "#/$defs/repositoryCapture"}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {"kind": {"const": "repository_change_record_v1"}}
+          },
+          "then": {
+            "required": ["artifact"],
+            "properties": {
+              "scope": {"const": "source"},
+              "artifact": {"$ref": "#/$defs/repositoryChangeRecord"}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"kind": {"const": "command_capture_v1"}}},
+          "then": {
+            "required": ["artifact"],
+            "properties": {
+              "scope": {"const": "test"},
+              "artifact": {"$ref": "#/$defs/commandCapture"}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"kind": {"const": "command_capture_v2"}}},
+          "then": {
+            "required": ["artifact"],
+            "properties": {
+              "scope": {"const": "test"},
+              "artifact": {"$ref": "#/$defs/commandCaptureV2"}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"kind": {"const": "workflow_call_record_v1"}}},
+          "then": {
+            "required": ["artifact"],
+            "properties": {
+              "scope": {"const": "data"},
+              "artifact": {"$ref": "#/$defs/workflowCallRecord"}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"kind": {"const": "workflow_call_manifest_v1"}}},
+          "then": {
+            "required": ["artifact"],
+            "properties": {
+              "scope": {"const": "data"},
+              "artifact": {"$ref": "#/$defs/workflowCallManifest"}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"kind": {"const": "workflow_wave_record_v1"}}},
+          "then": {
+            "required": ["artifact"],
+            "properties": {
+              "scope": {"const": "data"},
+              "artifact": {"$ref": "#/$defs/workflowWaveRecord"}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"kind": {"const": "telemetry_record_v1"}}},
+          "then": {
+            "required": ["artifact"],
+            "properties": {
+              "scope": {"const": "data"},
+              "artifact": {"$ref": "#/$defs/telemetryRecord"}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"kind": {"const": "external_evidence_capture_v1"}}},
+          "then": {
+            "required": ["artifact", "observed_at", "expiry"],
+            "properties": {
+              "scope": {"const": "external"},
+              "artifact": {"$ref": "#/$defs/externalEvidenceCapture"}
+            }
+          }
+        }
+      ]
+    }
+  }
+}

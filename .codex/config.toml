@@ -1,0 +1,7 @@
+# Native Codex subagent concurrency stays intentionally shallow: bounded
+# parallelism captures read-heavy speedups without recursive fan-out or
+# write-heavy coordination debt. Role-specific sandbox overrides live in the
+# generated custom-agent TOML adapters under `.codex/agents/`.
+[agents]
+max_threads = 4
+max_depth = 1

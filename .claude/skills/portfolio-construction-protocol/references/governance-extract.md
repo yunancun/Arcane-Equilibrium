@@ -1,7 +1,7 @@
 # Portfolio Construction — 治理映射與 Live 歸因細節（governance extract）
 
 > 本檔為 `portfolio-construction-protocol` SKILL.md 的外移節（原 §5 / §6），需要時讀。
-> 權威序：runtime RiskConfig TOML > Rust schema > srv/TODO.md > 治理文件（SPECIFICATION_REGISTER.md 索引）> 本檔。本檔引用治理原文屬語意重述，原文修改後可能漂移，以原文為準。
+> Authority 使用 `.codex/agent_registry_v1.json` typed matrix；只在同類內比較，跨類不一致標 DRIFT/CONFLICT，runtime 不得合法化 policy denial。
 
 ## 5. Drawdown Control（對齊 SM-04 + RiskConfig）
 

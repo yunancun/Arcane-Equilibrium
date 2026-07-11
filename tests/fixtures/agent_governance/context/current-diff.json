@@ -1,0 +1,8 @@
+{
+  "schema_version": "context_evidence_artifact_v1",
+  "logical_source": "current diff",
+  "capture_kind": "diff_snapshot",
+  "observed_at": "2026-07-10T12:00:00Z",
+  "content": [],
+  "content_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+}

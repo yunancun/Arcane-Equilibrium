@@ -1,91 +1,74 @@
-# Role Profile And Memory Standard
+# Role Profile, Closure, And Memory Standard
 
-Purpose: keep every repo role sharp without turning agent files into a second
-README or TODO. This standard applies to `docs/CCAgentWorkSpace/*/profile.md`
-and `docs/CCAgentWorkSpace/*/memory.md`.
+Canonical role Interface: `.codex/agent_registry_v1.json`
+Design: `docs/agents/development-agent-governance.md`
 
-## Source Split
+## Source split
 
-| Content type | Authority |
+| Content | Authority |
 |---|---|
-| Stable role identity, boundary, activation, deliverable standard | `profile.md` |
-| Durable role lessons, recurring mistakes, operator preference | `memory.md` |
-| Current active queue, blockers, runtime evidence, schedules | `TODO.md` |
-| Stable project shape, architecture entry, GUI/scripts map | `README.md` |
-| Detailed evidence and sign-off records | `workspace/reports/` and `Operator/` |
-| Completed historical detail | `docs/archive/` |
+| Stable role activation, capability, permission, output | Registry |
+| Claude/Codex/profile role text | generated Adapter; never hand-edit |
+| Domain review depth | referenced role skill/charter Implementation |
+| Current queue/blocker/runtime claim | `TODO.md` + fresh evidence |
+| One task's outcome/evidence/dissent | `closure_packet_v1` / Report Sink projection |
+| New durable recurring lesson | role/global memory after PM promotion |
+| Historical detail | reports/archive, on demand |
 
-## Profile Standard
+`docs/CCAgentWorkSpace/*/profile.md` remains for human navigation but is generated
+from Registry. It is not a fourth authority. Run:
 
-A profile is a stable role charter. It should answer:
+```bash
+python3 helper_scripts/maintenance_scripts/agent_governance.py render --check
+```
 
-- What this role owns and refuses to own.
-- When PM should activate or skip it.
-- What inputs it must read before judging.
-- What output format counts as a usable handoff.
-- Which checks are mandatory and which are optional.
-- When it must stop and escalate to PM/operator.
+## Memory promotion
 
-Avoid putting active project state in a profile. Examples that do not belong:
+Memory is a durable lesson index, not a task ledger. Promote only when a closure
+proves a lesson likely to change future judgment:
 
-- current score, current test count, current runtime PID, current blocker
-- long historical progress narrative
-- sprint-specific TODOs
-- stale report snapshots presented as current truth
+- repeated mistake and proven prevention
+- stable operator preference
+- recurring role heuristic
+- authority/source routing rule
+- conflict resolution likely to recur
 
-Historical baselines are allowed only when clearly labeled as historical and
-linked to the report that produced them. Active truth still comes from
-`TODO.md`, latest role report, code, and runtime evidence.
+Do not append daily progress, test counts, runtime PID, current blocker, full
+report, diff, stack trace, or repeated boundary boilerplate. Those belong in
+TODO/closure/report/archive.
 
-## Memory Standard
+Before promotion, deduplicate against the existing lesson. If superseded, record
+an evolution pointer instead of copying both full narratives. Large historical
+memory remains searchable but is never universal preload. New memory should use
+small topical shards/indexes; hot operating memory targets roughly 300 lines.
 
-A memory file is a durable lesson log, not an active ledger. Append only when
-the lesson is likely to improve future judgment:
+## Report/closure behavior
 
-- a repeated mistake to avoid
-- a proven operator preference
-- a role-specific review heuristic
-- a conflict-resolution decision that may recur
-- a source-of-truth routing rule
+Reviewers return immutable structured fragments. They do not write a report and
+append memory merely because they reached a conclusion. PM may project one
+durable task closure through `report_sink_v1` when future audit/handoff needs it.
 
-Do not paste full reports, stack traces, long diffs, or daily progress. Put
-those in `workspace/reports/` and link them from TODO or the relevant report.
+The projection preserves:
 
-When memory grows beyond roughly 1000 lines, new entries should be short
-summary-only entries unless the operator explicitly asks for detailed memory.
-Do not delete historical entries silently; if cleanup is needed, archive or
-summarize with an explicit note.
+- source/runtime/external evidence hashes and freshness
+- facts/inferences/assumptions
+- gate dissent and unresolved coverage
+- checks as EXECUTED/REUSED/SKIPPED/FAILED
+- skipped roles with reason/residual risk/owner
+- measured consumption or unavailable reason
 
-## Conflict Handling
+Identical input should produce a byte-stable projection. Operator-facing summary
+is a view of the same closure, not a second authority.
 
-If profile or memory conflicts with newer operating memory, README, TODO, code,
-or runtime evidence:
+## Historical files
 
-1. Trust the newer source or the source with direct evidence.
-2. Say which source lost and why.
-3. Keep the old memory as history unless the operator asked for cleanup.
-4. Add a concise correction note if the same conflict is likely to recur.
+Existing `memory.md` and per-role reports are retained as history. Their presence
+does not require startup reads or continued per-task growth. When cleanup is
+needed, archive mechanically with a pointer; do not silently delete evidence.
 
-## Startup Contract
+## Conflict handling
 
-For a role-specific task, read in this order unless the task prompt provides a
-stricter route:
-
-1. Repo operating memory: `CLAUDE.md` and, for Codex, `.codex/MEMORY.md`.
-2. Stable project map: `README.md` and `docs/agents/context-loading.md`.
-3. This role's `profile.md`.
-4. This role's `memory.md`, interpreted as historical lessons.
-5. The latest relevant `workspace/reports/` file when continuity matters.
-6. `TODO.md` whenever current state, code, runtime, planning, review, or
-   sign-off can affect the answer.
-
-If in doubt, read `TODO.md`. Stale active state is more dangerous than one
-extra context read in this repo.
-
-## Update Contract
-
-- Update `profile.md` only for stable role boundary or workflow changes.
-- Update `memory.md` only for durable role lessons.
-- Update `TODO.md` for active tasks, blockers, owners, evidence, and dates.
-- Update `README.md` for stable project entry points and architecture map.
-- Update `docs/agents/context-loading.md` when source routing changes.
+Role/profile/memory cannot override Registry permissions, normative policy,
+current TODO, direct source, or fresh runtime evidence. Use the typed authority
+matrix; do not apply a total-order winner across classes. Mark DRIFT/CONFLICT and
+preserve both claims in closure.

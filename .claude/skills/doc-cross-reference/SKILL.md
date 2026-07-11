@@ -6,8 +6,8 @@ allowed-tools: Read, Grep, Glob
 
 # Doc Cross-Reference（文件交叉引用審計）
 
-> 權威序：runtime RiskConfig TOML > Rust schema > `srv/TODO.md` > 治理文件（`SPECIFICATION_REGISTER.md` 索引）> 本 skill。衝突按權威序執行並在報告標註，不停下等待。
-> 即時狀態（策略名單/閾值/端點/baseline 等）以上述 SSOT 為準，本 skill 不寫死。
+> Authority 使用 `.codex/agent_registry_v1.json` typed matrix：normative policy、implementation contract、active work state、runtime observation、external policy、claim evidence 只在同類內比較。跨類不一致標 DRIFT/CONFLICT；runtime 不得合法化 policy denial。
+> 即時內容依相應 authority class 與 fresh evidence 取得，本 skill 不寫死也不建立全局總排序。
 
 ## 何時觸發
 
@@ -53,14 +53,14 @@ allowed-tools: Read, Grep, Glob
 
 ## 審計工作流（5 步）
 
-1. **載入 SSOT** — Read 優先級 1 文件全文 + 抽出全部編號（regex）
+1. **載入 SSOT** — 依 task scope 讀優先級 1 的相關 section + 抽出對口編號；只有 full index audit 才讀全文
 2. **掃所有引用點** — 用 Grep 工具（pattern=`(DOC|SM|EX|AMD|ADR|P0|P1|P2|P3|P4|LG|W-|G[1-6])-?[0-9]+`，path=docs / CLAUDE.md / .codex/MEMORY.md / README.md / TODO.md）執行；有 Bash 環境可等價用 `rg -n`
 3. **建反向索引** — 每個編號的所有引用點（檔:行）
 4. **三類漂移檢測**：
    - **A. 引用不存在的編號**（殭屍）：被 grep 命中但不在 SSOT
    - **B. SSOT 有但無人引用**（孤兒）：除非設計如此（如未啟用 LG-5）
    - **C. 狀態不一致**：TODO.md active state 與 runtime / reports / README source map 不一致
-5. **產出報告** — `docs/CCAgentWorkSpace/R4/workspace/reports/YYYY-MM-DD--cross_ref_audit.md`
+5. **產出 fragment** — 回 immutable `role_fragment_v1` with `payload_kind=review_fragment_v1`；不直接修文檔、不自動寫 role report/memory
 
 ## 已知漂移模式（G6-04 TODO drift 規則唯一正本：CC / R4 / QA / e2e 指向此處）
 
@@ -73,16 +73,17 @@ allowed-tools: Read, Grep, Glob
 
 ## 配置漂移偵測（R4 巡檢執行細則）
 
-- 抽查 `.claude/agents/` 與 `.claude/skills/` 內數字 / 名單型事實（端點數、check 數、文件數、agent 名單、閾值、baseline）。
-- 對照 canonical 來源：SPECIFICATION_REGISTER.md / README / TODO / E4 BASELINE / 各 agent 最新報告。
-- 漂移列 file:line + 建議修正入報告；修復派工由 PM 決定。
+- 先跑 `python3 helper_scripts/maintenance_scripts/agent_governance.py render --check`，驗 `.claude/agents` / `.codex/agents` / profiles 與 Registry byte-stable。
+- 抽查 `.claude/skills/` 內數字 / 名單型事實（端點數、check 數、閾值、baseline），對照相應 typed authority source。
+- 漂移列 file:line + 建議修正入 immutable fragment；修復派工由 PM 決定。
 - prompt 檔內即時狀態應寫「以 <canonical 來源> 為準」而非寫死數字；寫死即列 finding。
 
-## Memory 壓實規格（R4 巡檢 / PM 派工依據）
+## Memory / report 年金巡檢
 
-- 觸發：memory.md >300 行。壓實後結構：檔頭壓實規則 blockquote +「## 長期教訓」（蒸餾 ≤30 行）+「## 近期記錄」（最近完整條目 ~150 行）。
-- 舊條目以 Bash 機械切分原文遷同目錄 memory-archive.md（append-only，帶遷入日期分隔行，勿刪改）；行數守恆可驗。
-- E4 特例：含 `BASELINE` 的行永留主檔。各 agent 完成序列（檔尾追加）行為不變。
+- Hot operating memory 約 300 行是 review trigger，不是截斷 mandatory truth 的硬 cap。
+- Role memory/report 不再 universal preload，也不做每任務 automatic append；closure 後只 promote 新 durable lesson。
+- 需壓實時先原文機械 archive + pointer + hash/行數驗證，再留下 deduplicated durable index。Test baseline 改由 content-addressed evidence capsule承載，不保留 E4 memory 特例。
+- 追蹤 reports/memory 的讀頻率 × 體量 × 剩餘壽命；無 downstream consumer 的重複產物列 token annuity finding。
 
 ## DOC「廢棄 → 新版」轉換 SOP（24.2 P1）
 
@@ -93,7 +94,7 @@ allowed-tools: Read, Grep, Glob
 3. **掃所有引用**：找未升級引用點 — 用 Grep 工具掃 `DOC-04` 引用點後人工濾掉新版；有 Bash 環境可等價用 `rg -nP 'DOC-04(?!\sV2)' docs CLAUDE.md .codex/MEMORY.md README.md TODO.md`，逐個改為新 ID
 4. **memory 條目同步**：memory 引舊 DOC ID 的條目，**按 SOP 不直接刪**（保歷史線索），改加 `[已升級為 <new>]` 標記
 5. **archive 不動**：`docs/archive/` 內歷史 snapshot 用舊 ID 是**正確的**（凍結時間點），不改
-6. **產 R4 audit 報告**：列出所有 stale 引用點 + 修正狀態 + 殘留 known-orphan（如 archive）
+6. **產 R4 fragment**：列出所有 stale 引用點 + 修正狀態 + 殘留 known-orphan（如 archive），交 PM closure
 
 **判斷新舊**：當 sub-agent 看到同名 DOC 不同版本，**信 SPECIFICATION_REGISTER.md `Active` 標記 + 最大 V### 號**；無法判斷時在報告標註分歧並按 register Active 條目執行，**不單方面選舊版引用**。
 

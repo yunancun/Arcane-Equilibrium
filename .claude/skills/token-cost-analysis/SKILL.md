@@ -6,8 +6,8 @@ allowed-tools: Read, Grep, Glob, Bash
 
 # Token / Cost Analysis（AI 成本分析）
 
-> 權威序：runtime RiskConfig TOML > Rust schema > srv/TODO.md > 治理文件（SPECIFICATION_REGISTER.md 索引）> 本 skill。衝突按權威序執行並在報告標註，不停下等待。
-> 即時狀態（策略名單/閾值/端點/baseline 等）以上述 SSOT 為準，本 skill 不寫死。
+> Authority 使用 `.codex/agent_registry_v1.json` typed matrix：normative policy、implementation contract、active work state、runtime observation、external policy、claim evidence 只在同類內比較。跨類不一致標 DRIFT/CONFLICT；runtime 不得合法化 policy denial。
+> 即時內容依相應 authority class 與 fresh evidence 取得，本 skill 不寫死也不建立全局總排序。
 > **模型名與單價即時查證官方 pricing 頁 / console，不信本檔示例與記憶。**
 
 > **S3 上層 drift 防線**：本 skill 引用上層（CLAUDE.md / DOC-XX / SM-XX / EX-XX）為 extract；原文修改後可能漂移，發現不一致以原文為準。
@@ -20,6 +20,7 @@ allowed-tools: Read, Grep, Glob, Bash
 - 月度 AI 成本回顧
 - 新 Layer 2 工具 / agent 上線前 cost projection
 - `CLAUDE.md` Root Principles（AI 成本感知）相關決策
+- development sub-agent workflow / agent-wave / Full Audit 的 token、cache、tool、retry、fan-out、rework ROI
 
 ## OpenClaw AI 三層成本結構
 
@@ -77,14 +78,18 @@ cost_edge_ratio = AI_cost_per_trade / expected_edge_per_trade
 - ratio ≥ 0.8：**建議關倉 / 降頻 / 換 L1-only**（原則 13 強制）
 - 計算頻率：每策略 × 每天 + 全局滾動 7d
 
-### 2. Token 浪費熱點
+### 2. Token / orchestration 浪費熱點
 
 掃描：
 - **Prompt cache miss**：cache_creation 高但 cache_read 低 → prompt 結構不穩定
-- **過長 system prompt**：input_tokens P95 > 8K 但任務簡單 → 應拆 sub-agent / 縮 context
+- **context 與 complexity 不匹配**：mandatory evidence 很少但 input P95 遠高於同類 durable closure；先查 universal preload/重複 source，再決定拆分。複雜/Full Audit 不以 8K 類固定 cap 裁切
 - **過短 output 但高 input**：output < 100 tokens 但 input > 5K → 應移到 L1
 - **重複工具呼叫**：同 trace_id 內 same tool 呼 ≥ 3 次 → 邏輯 bug
 - **streaming 但未用**：開了 stream 但 client buffering → 浪費 stream overhead
+- **fan-out 低產出**：spawn 增加但 accepted decision-changing findings / verdict reversals / avoided rework 不增
+- **retry 無新資訊**：同 input/model/task shape 裸重試；合法 retry 必有 infrastructure-null、context/model/shape 改變或 checkpoint resume
+- **報告年金**：per-role report/memory 被後續重讀但沒有新 durable lesson
+- **false economy**：token 下降但 NEEDS_CONTEXT、reopen、operator reversal 或 false closure 上升
 
 ### 3. 模型路由效益
 
@@ -106,9 +111,17 @@ H1-H5 治理層含 budget。AI-E 必驗：
 - [ ] 超 80% 警告 + 超 100% fail-closed
 - [ ] cap 修改有 audit log
 
-## 穩定 cost 衛生 rule（不會 drift）
+## Development-agent consumption scorecard
 
-prompt cache TTL 默認 5min，另有 1h 選項（以官方文檔為準）→ session 內 `cache_read_tokens / total_input_tokens` 比例應 ≥ 50% 為健康；總成本 ÷ 月內 commit 數 = AI 對開發效率的單位成本（trend 分析）。實際賬單 / 型號 / 單價從 runtime TOML / env + 官方 console 取，不引本檔。
+主指標：`total model/tool/time cost / durable accepted closure`。同時列：
+
+- input/output/cache tokens（無 telemetry 就標 unavailable）
+- agent/tool calls、fan-out、retry、wall time
+- accepted decision-changing findings、verdict reversal
+- rework/reopen、false-positive、operator reversal
+- context envelope target/reserve 使用原因
+
+Cache hit、tokens/call、findings count、roles skipped、DONE 數都只是診斷量，不能單獨最佳化。Prompt cache TTL/定價/折扣以當前官方文件與 console 為準；不要在 skill 寫死命中率或成本門檻。
 
 ## 工作流（5 步）
 
@@ -116,7 +129,7 @@ prompt cache TTL 默認 5min，另有 1h 選項（以官方文檔為準）→ se
 2. **分組** — by provider / by model / by request_type / by trace_id
 3. **計 cost_edge_ratio** — 每策略每天 + 全局滾動
 4. **找熱點** — 套上述 5 種浪費 pattern 掃
-5. **產出** — `docs/CCAgentWorkSpace/AI-E/workspace/reports/YYYY-MM-DD--cost_audit.md`
+5. **產出** — 回 immutable `role_fragment_v1` with `payload_kind=finding_fragment_v1`；不自動寫 role report/memory
 
 ## 輸出格式
 

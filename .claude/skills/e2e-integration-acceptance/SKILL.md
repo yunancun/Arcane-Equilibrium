@@ -1,240 +1,113 @@
 ---
 name: e2e-integration-acceptance
-description: QA agent 主用：Wave/Phase 收尾 sign-off、Live 前置驗收、多模塊合入後首次集成驗收、重大架構改動後必讀；E4 管代碼層測試，QA 管業務鏈完整性。
+description: QA read-only verifier；只有任務宣稱 end-to-end、runtime-backed business outcome、major GUI journey 或 phase/wave acceptance 時使用。
 allowed-tools: Read, Grep, Glob, Bash
 ---
 
-# E2E Integration Acceptance（端到端集成驗收手冊）
+# E2E Integration Acceptance
 
-> 權威序：runtime RiskConfig TOML > Rust schema > `srv/TODO.md` > 治理文件（`SPECIFICATION_REGISTER.md` 索引）> 本 skill。衝突按權威序執行並在報告標註，不停下等待。
-> 即時狀態（策略名單/閾值/端點/baseline 等）以上述 SSOT 為準，本 skill 不寫死。
+> Authority 使用 `.codex/agent_registry_v1.json` typed matrix。Normative
+> permission、source contract、active TODO、runtime observation、external policy、
+> claim evidence 分類保留；runtime 綠不能合法化 policy denial。
 
-## 何時觸發
+## Activation
 
-- QA 收到「Wave 完成驗收」「Phase 結束 sign-off」「Paper → Live 前置」「重大架構改動後」
-- 多模塊 PR 合入後的第一次集成驗收
-- Demo 穩定期前後檢核（phase 狀態以 `TODO.md` 為準）
-- AI 治理層 / Layer 2 / 5-Agent 接線完成後
+Use QA only when completion claims a real cross-Interface outcome. Narrow source
+changes without an E2E/runtime claim stop at relevant source review/tests; QA is
+not ceremony.
 
-## ★ 核心立場
+## Permission
 
-**E4 看代碼層測試，QA 看業務層完整性**：
-- E4：unit / integration test 過了
-- QA：跑通完整業務鏈、跨模塊一致、上線前驗收清單
+QA is read-only. It does not implement fixes, deploy/restart, write PG, read raw
+secret content, mutate auth/risk/config, contact private broker effects, or write
+role reports/memory. Every Bash command must pass:
 
-**QA 失敗 = block 進入下一 Phase**，包括但不限於 Live 啟動。
-
-## 1. 既有 E2E 驗收清單
-
-> 數字會變；測試 baseline、healthcheck 數量、phase 狀態以 `TODO.md`
-> header / runtime evidence 和當次實測為準。
-
-```
-[ ] 測試數超過基準線（無新增 failed）— 數字以最近 baseline run 為準
-[ ] H0 Gate SLA 通過（<1ms，verify: passive_wait_healthcheck check_h0_gate）
-[ ] 治理端點 Operator 驗證完整 — 端點數以 grep "/api/v1" route 定義 + 實測為準
-[ ] paper_trading 完整流程：掃描 → 信號 → 審批 → 下單 → 止損
-[ ] GovernanceHub fail-closed 在 FREEZE 模式真實拒絕訂單
-[ ] 審計日誌完整（每筆訂單有 trace）
-[ ] TODO.md active state 與代碼 / runtime 現狀一致
-[ ] live_execution_allowed = false 確認
-```
-
-## 2. 業務鏈完整性（OpenClaw 5 階段）
-
-> **本拆法為業務鏈階段拆分唯一正本**：QA 驗收與 FA 對賬均按本拆法分段對齊。
-
-| 階段 | 端到端驗證 | 命令 / 證據 |
-|---|---|---|
-| **市場數據** | Bybit WS + REST 都連 | `tail bybit_listener_status_latest.json` 看 4 topics live |
-| **H0 本地判斷** | freshness / health / eligibility / risk envelope < 1ms | `passive_wait_healthcheck.py` check_h0_gate |
-| **AI 治理（H1-H5）** | thought_gate / budget / model_router / governor / cost_logging | `tail layer2_cost_tracker.log` |
-| **5-Agent + Conductor** | scout / strategist / guardian / analyst / executor 通信 | strategy_wiring.py 檢視 PID + log |
-| **Decision Lease + Rust Engine** | acquire_lease / release_lease + engine SubmitOrder | engine_alive=true + lease grant log |
-| **執行 + 止損** | order placed / fill received / stop manager active | trading.fills 最新 row |
-| **學習 / 歸因** | exit_features / outcome_backfiller / edge_estimator | learning.exit_features count + edge_estimates mtime |
-
-每階段 0 CRITICAL = 整體 PASS。
-
-## 3. 雙進程 E2E（Rust Engine + Python AI/GUI）
-
-### 3.1 啟動序
-```
-1. Rust openclaw_engine 啟動（systemd / restart_all.sh --rebuild）
-2. Python uvicorn 連 IPC（engine.sock）
-3. AI 請求送 Rust → Rust 處理 → 回 Python → GUI 讀
-```
-
-### 3.2 故障降級驗證
-```
-1. Python 主動斷連 → Rust L0 自動降級
-2. Python 重啟 → 重連 → state 恢復
-3. Rust 重啟 → Python 偵測 IPC fail → graceful retry
-```
-
-### 3.3 灰度驗收
-- 連續 7 天 CRITICAL=0 且 WARNING<10
-- Python 影子進程 vs Rust Engine tick 輸出差異 < 1e-4
-- DB row count 持續累積（無 silent dead）
-
-## 4. 冒煙測試（最短路徑）
-
-5 條全跑：
-
-### 4.1 Health
 ```bash
-ssh trade-core "curl -s http://localhost:8000/api/v1/health | jq"
-```
-預期：`{"status":"ok", "engine_alive":true}`
-
-### 4.2 Strategy 信號
-```bash
-ssh trade-core "curl -s http://localhost:8000/api/v1/paper/shadow/decisions?limit=5 | jq '.decisions | length'"
-```
-預期：> 0（last 5 min）
-
-### 4.3 Engine status
-```bash
-ssh trade-core "python3 helper_scripts/canary/engine_watchdog.py --data-dir /tmp/openclaw --status"
-```
-預期：engine_alive: true + binary mtime fresh
-
-### 4.4 DB write activity
-```bash
-ssh trade-core "psql -c 'SELECT max(ts), count(*) FROM trading.fills WHERE ts > now() - interval \\'5 min\\''"
+python3 helper_scripts/maintenance_scripts/agent_governance.py authorize-command \
+  --role QA --command "<exact command>"
 ```
 
-### 4.5 Healthcheck pipeline
-```bash
-ssh trade-core "python3 helper_scripts/db/passive_wait_healthcheck.py"
-```
-預期：check 全 PASS（或無新增 FAIL）；check 清單以 `SPECIFICATION_REGISTER.md` healthcheck 條目與實測為準
+If an effect is needed, return the exact OPS/Deploy/Broker Adapter intent and
+wait for new evidence; do not perform it as QA.
 
-## 5. Live 前置（Phase 6 / Mainnet 啟動）
+## Acceptance design
 
-hard gates 清單與指紋：見 `16-root-principles-checklist`（唯一正本）。QA 必逐項驗，驗證命令：
-```bash
-# Gate: live_reserved
-ssh trade-core "python3 -c 'from app.modes import is_live_reserved; print(is_live_reserved())'"
+Map each operator-visible acceptance item to one or more direct evidence refs:
 
-# Gate: env var
-ssh trade-core "echo \$OPENCLAW_ALLOW_MAINNET"
+- source contract and direct caller
+- focused/broad test capsule (EXECUTED or exact REUSED)
+- runtime host/environment/head/build/observed_at/expiry
+- API/IPC/schema boundary
+- browser screenshot/trace/viewport/keyboard/accessibility evidence for GUI
+- audit/reconstructability/denial evidence
+- correct BB or IB venue compatibility fragment
 
-# Gate: secret slot
-ssh trade-core "ls \$OPENCLAW_SECRETS_DIR/live/"
+An item without evidence is `UNVERIFIED`, never inferred PASS from test count or
+source readiness.
 
-# Gate: authorization.json
-ssh trade-core "python3 helper_scripts/live/verify_authorization.py"
-```
+## Core checks
 
-任一 fail = Live 啟動 BLOCKED。
+### Business journey
 
-## 6. 跨模塊一致性
+- Trace the actual input -> authority/gate -> effect/read -> persisted state ->
+  operator feedback chain.
+- Verify failure/recovery and honest error state, not only happy path.
+- Check source/runtime generations align; stale evidence remains visible.
+- Distinguish source-ready, deployed, active, authorized, and profit-proven.
 
-### 6.1 API ↔ GUI ↔ DB 同步
-- API response schema vs GUI render
-- DB schema vs API response
-- 命名術語：`engine_mode` 在 API / GUI / DB 都用同一字串
+### Cross-language/process
 
-### 6.2 Python ↔ Rust 一致
-- IPC schema 雙向對應
-- Indicator 計算 1e-4 容差
-- engine_mode 標籤 ('paper'/'demo'/'live_demo'/'live') 兩側統一
+- Python/Rust IPC schema and error semantics align.
+- Rust remains trading/risk/config authority; GUI/Python do not fake success.
+- Process outage/reconnect behavior is observed through an approved read-only
+  health surface; QA does not create the outage.
+- DB/API/GUI terms and identity keys remain consistent.
 
-### 6.3 RAM ↔ DB ↔ TOML 一致
-- `RiskConfig` 熱重載：TOML edit → IPC patch → engine RAM 同步
-- 不應出現「TOML 改了但 engine 沒生效」
+### GUI visual/accessibility
 
-## 7. 工作流（12 步 Wave 驗收 SOP）
+- Use a real browser capability when available; do not replace it with a prose
+  screenshot description.
+- Cover relevant viewport matrix, keyboard navigation/focus, accessibility tree,
+  loading/empty/error/stale states, destructive confirmations, and recovery.
+- Capture artifact digest and timestamp; source inspection alone is not visual
+  acceptance.
 
-1. **E4 baseline 確認**（測試數無回退）
-2. **5 階段業務鏈逐項**（§2 表）
-3. **雙進程 E2E**（啟動 / 降級 / 重連）
-4. **冒煙 5 條**（§4）
-5. **跨模塊一致性 3 維**（§6）
-6. **E2E 8 條 checklist**（§1）
-7. **Live 前置 hard gates**（如 Phase 6；§5）
-8. **灰度 7 天驗證**（CRITICAL=0 / WARNING<10）
-9. **healthcheck cron 24h 全 PASS**（check 清單以 SSOT 與實測為準）
-10. **GovernanceHub FREEZE 模式真實拒單測試**
-11. **TODO.md active state 對照**（drift 檢查；G6-04 規則正本：`doc-cross-reference`）
-12. **report + sign-off**
+### Hard boundaries
 
-## 穩定平台規則（不隨 runtime drift）
+- Load the exact applicable Root Principle/Hard Boundary/ADR denial.
+- Verify existing typed gate evidence without exposing secret values.
+- Bybit LiveDemo remains live-grade; IBKR remains ADR-0048 read-only/paper/shadow
+  and live/tiny-live denied.
+- Missing/expired authorization or stale runtime proof blocks the claim.
 
-- 強制工作鏈 E1→E2→E4→QA→PM 不可跳。
-- engine_mode 4 值：paper / demo / live_demo / live。
-- Mac 端 `engine_alive=false` 是預期（取真值走 `ssh trade-core`）。
-- commit 即 push，由 PM 執行。
-- TODO / report 任何 runtime 數值採納前 source-of-truth 實測。
+## Evidence freshness
 
-即時 snapshot（phase 狀態 / baseline / check 數 / 端點數 / Demo 穩定期時鐘）不在本 skill 重述，以檔首權威序 SSOT 取得。
+Runtime evidence requires host, environment, source/runtime head, observed_at,
+expiry, and digest. A cached runtime health result outside TTL is UNVERIFIED.
+Test proof uses the content-addressed signature from Development-Agent
+Governance. Failed/flaky/critical evidence is not reused as green.
 
-## Cross-Skill 互引（避免重述）
+## Verdict
 
-- **C1.g E4 vs QA 角色界定**：本 skill 看「業務鏈完整 + 跨模塊一致 + 灰度趨勢 + Phase 6 hard gates」；**單元/整合/並發/SLA 壓測 baseline 細節**走 `regression-testing-protocol`。E4 過了 QA 才能跑，**不是同層**
-- **PR review 前置**：QA 之前 E2 對抗審查走 `pr-adversarial-review`，QA 不重做 code review
+QA returns immutable `role_fragment_v1` with `payload_kind=gate_fragment_v1` with:
 
-## 反模式（見即 BLOCKER）
+- work status and gate verdict (DONE+FAIL is valid)
+- acceptance criterion -> evidence mapping
+- source/runtime/external scopes and freshness
+- browser/accessibility artifacts when applicable
+- FACT/INFERENCE/ASSUMPTION + confidence
+- concerns, skipped/unverified scope, side effects
+- next owner/action
 
-- E4 過了直接放行 QA（不跑業務鏈）
-- 冒煙測試只跑 1 條
-- 雙進程不驗降級 + 重連
-- Live 前置只驗部分 gate
-- 7d 灰度沒看 CRITICAL 趨勢
-- healthcheck cron 沒跑就宣稱「stable」
-- TODO / report 數值沒對照 runtime 實測
-- 跨模塊一致性沒驗 API ↔ GUI ↔ DB
-- TOML 改了但 IPC 沒 patch（RAM 不同步）
+QA does not automatically write a report or memory. PM merges the fragment into
+one `closure_packet_v1`; PM cannot override QA hard failure without new evidence.
 
-## 輸出格式
+## Anti-patterns
 
-```markdown
-# QA E2E Acceptance — <Wave / Phase> · <date>
-
-## E4 baseline
-| Engine | passed | failed | baseline 變動 |
-
-## 5 階段業務鏈
-| 階段 | 證據 | 狀態 |
-| 市場數據 | | |
-| H0 本地 | | |
-| H1-H5 AI | | |
-| 5-Agent | | |
-| Decision Lease + Rust | | |
-| 執行 + 止損 | | |
-| 學習 + 歸因 | | |
-
-## 雙進程 E2E
-- 啟動: Y/N
-- 降級: Y/N (Python 斷 → Rust L0)
-- 重連: Y/N
-
-## 冒煙 5 條
-| Test | 證據 | 狀態 |
-
-## 跨模塊一致性
-- API ↔ GUI ↔ DB: ...
-- Python ↔ Rust 1e-4: ...
-- RAM ↔ DB ↔ TOML: ...
-
-## E2E 8 checklist
-| Item | 狀態 |
-
-## Live 前置 hard gates（如適用）
-| Gate | 狀態 |
-
-## 灰度 7d 統計
-- CRITICAL: X (target = 0)
-- WARNING: Y (target < 10)
-- Healthcheck pass rate: Z%
-
-## TODO drift check
-| 數值 | source-of-truth 實測 | drift? |
-
-## 結論
-PASS to next Phase / BLOCK (X 個 finding)
-
-## BLOCKER 清單（如 BLOCK）
-1. <具體 + 修法 + owner>
-```
+- Always running QA for a docs-only or narrow source change
+- Treating E4 passed count as business-chain proof
+- Treating Mac engine absence as Linux runtime failure
+- Running restart, auth, broker, PG-write, or secret-inspection commands as QA
+- Accepting a GUI path without real visual evidence when visual outcome is claimed
+- Declaring stable from one stale snapshot or an unexpired-window assumption
+- Hiding a failed criterion behind overall DONE

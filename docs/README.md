@@ -22,7 +22,7 @@ This directory holds all engineering documents, logs, handoff records, and decis
 | 路径迁移 / redirect 记录 | `_indexes/path_redirects.md` |
 | 版本增量历史 | `CLAUDE_CHANGELOG.md` |
 | 历史归档 | `archive/` |
-| 角色报告 | `CCAgentWorkSpace/*/workspace/reports/` |
+| Development-agent 正本 / task closure | `../.codex/agent_registry_v1.json` / `agents/development-agent-governance.md` |
 
 ## Multi-Agent 接手路径
 
@@ -33,7 +33,7 @@ This directory holds all engineering documents, logs, handoff records, and decis
 | 查历史文档或近期交付清单 | `_indexes/document_index.md` | 历史/导航用途；不是 active queue。 |
 | 查审计证据 | `_indexes/audit_index.md` | 先确认 `TODO.md` 是否仍 active，再读 audit/report。 |
 | 写新文档 / 移动路径 | 本文件 + `_indexes/path_redirects.md` | 先分类和命名；移动前保留 redirect/stub 计划。 |
-| 读取 role report | `CCAgentWorkSpace/README.md` | report 是证据；最终当前状态仍回到 `TODO.md`。 |
+| 读取历史 role evidence | `CCAgentWorkSpace/README.md` | 只按 task link 读取；当前 sign-off 用同一 closure packet，active state 回到 `TODO.md`。 |
 | 执行 runbook / 操作手册 | `runbooks/README.md` | runbook 不是授权；运行态操作先看 `TODO.md` operator actions。 |
 | 查架构背景 | `architecture/README.md` + `../README.md` | 旧架构文档可能是 reference，读 banner 和当前 ADR/AMD。 |
 
@@ -49,6 +49,7 @@ This directory holds all engineering documents, logs, handoff records, and decis
 | `agents/issue-tracker.md` | Issue tracker and TODO hygiene reference |
 | `agents/triage-labels.md` | Triage label vocabulary and classification reference |
 | `agents/role-profile-memory-standard.md` | 角色 profile / memory 標準（active state 讀 TODO，項目定位讀 README）|
+| `agents/development-agent-governance.md` | Development-Agent Governance Module：Registry/Context/Dispatch/Closure、OPS/IB、consumption 與 effect Adapter 正本 |
 | `agents/todo-maintenance.md` | TODO.md 維護標準（編輯 TODO 前必讀）|
 | `agents/sub-agent-hygiene-sop.md` | 後台 sub-agent 防殺 / 活性偵測 SOP |
 | `agents/profit-first-fast-demo-promotion-loop.md` | profit-first 快速 Demo 晉升迴圈 |
@@ -61,10 +62,12 @@ This directory holds all engineering documents, logs, handoff records, and decis
 
 ### docs/CCAgentWorkSpace/
 
-当前 workspace 目录包含 19 個 Agent / role directories。MIT 與 BB 是 Stock/ETF / Bybit 邊界審計時的穩定入口：
+当前 workspace 目录包含 20 個 generated development role presets + Operator 目錄。MIT、BB、IB、OPS 是 data/venue/runtime 邊界審計時的穩定入口：
 
 - `CCAgentWorkSpace/MIT/` — Market / Information Theory Auditor；data、feature、CV、schema rigor。
 - `CCAgentWorkSpace/BB/` — Bybit Boundary Reviewer；交易所/Bybit 相容性與隔離審查。
+- `CCAgentWorkSpace/IB/` — IBKR Broker Compatibility Adapter reviewer；ADR-0048/TWS/session/entitlement/paper-shadow denial。
+- `CCAgentWorkSpace/OPS/` — read-only operations reviewer；preflight/rollback/postcheck/RCA，不 apply。
 - `CCAgentWorkSpace/Operator/` — Operator-facing 摘要與交接 trace。
 
 ### docs/archive/

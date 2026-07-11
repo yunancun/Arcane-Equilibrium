@@ -6,12 +6,16 @@ allowed-tools: Read, Grep, Glob
 
 # 16 根原則 Checklist（CLAUDE.md Root Principles + DOC-01 項目憲法）
 
-> 權威序：runtime RiskConfig TOML > Rust schema > `srv/TODO.md` > 治理文件（`SPECIFICATION_REGISTER.md` 索引）> 本 skill。衝突按權威序執行並在報告標註，不停下等待。
-> 即時狀態（策略名單/閾值/端點/baseline 等）以上述 SSOT 為準，本 skill 不寫死。
-
-> **本檔為唯一正本**：5 hard gates 指紋與 AgentTool 訪問權限分類以本檔為準（CC / QA / spec-compliance / e2e-integration-acceptance 指向此處）；硬邊界 regex 與 `spec-compliance` 統一，以本檔為準。
-
-> **S3 上層 drift 防線**：本 skill 16 條根原則為 DOC-01 V2 §5.1-§5.16 的 extract（**真 SSOT 是 `srv/docs/decisions/DOC-01_..._V2.md`，不是 memory**），原文修改後可能漂移，發現不一致以 DOC-01 原文為準。
+> Authority 使用 `.codex/agent_registry_v1.json` 定義的 typed matrix：
+> normative policy、implementation contract、active work state、runtime
+> observation、external policy、claim evidence 只在同類內比較。跨類不一致
+> 標 DRIFT/CONFLICT 並保留雙方；runtime RiskConfig 或實際行為不得合法化
+> Root Principle/Hard Boundary denial。
+>
+> 16 條條文以 `CLAUDE.md` Root Principles + accepted DOC-01/ADR/AMD 為
+> normative source；本 skill 是 CC 的檢查 Implementation，不是更高權威。
+> 即時策略/閾值/端點/baseline 來自相應 implementation/runtime/active-state
+> class，不能反向改寫 normative permission。
 
 > **S6 P0/P1/P2 cross-ref**：三層風控定義見 `srv/docs/decisions/EX-01_..._V2.md` §2.1-§2.3；本 skill 引用屬語意重述。
 
@@ -99,26 +103,10 @@ Rust Engine 降級 L0 時 16 條原則**全部仍成立**：
 
 ## 輸出物
 
-```markdown
-# CC 合規審計 — <commit> · <date>
-
-評級：A / B / B- / C / F
-合規：N/16
-
-## 16 原則逐條
-| # | 原則 | 狀態 | 證據 |
-|---|---|---|---|
-| 1 | ... | ✅/⚠️/❌ | <file:line> |
-
-## 安全不變量（9 條）
-| # | 不變量 | 狀態 | 證據 |
-
-## 硬邊界
-（被觸碰列出，否則「無」）
-
-## 違規清單 + 建議
-判定：Approve / Conditional / Reject
-```
+回傳 immutable `role_fragment_v1` with `payload_kind=gate_fragment_v1`：work status、gate verdict、16 原則與安全
+不變量逐條狀態、FACT/INFERENCE/ASSUMPTION、evidence refs、severity/confidence、
+unverified scope、next owner/action。CC 不直接寫 report/memory；PM 將 fragment
+併入單一 `closure_packet_v1`，且不得覆蓋 CC hard-gate FAIL。
 
 ## 反模式
 

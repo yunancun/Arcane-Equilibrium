@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/closure_quality_attestation_v1.schema.json",
+  "title": "closure_quality_attestation_v1",
+  "description": "Payload contract for a platform or external observer. This schema does not confer trust; the reference must also be trusted by the consumer-supplied attestation index.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "trust_tier",
+    "closure_digest",
+    "followup_window",
+    "observed_at",
+    "producer",
+    "metrics",
+    "record_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "closure_quality_attestation_v1"},
+    "trust_tier": {"const": "PLATFORM_OR_EXTERNAL_ATTESTED"},
+    "closure_digest": {"$ref": "#/$defs/digest"},
+    "followup_window": {"$ref": "#/$defs/window"},
+    "observed_at": {"$ref": "#/$defs/timestamp"},
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "kind": {"enum": ["platform", "external"]}
+      }
+    },
+    "metrics": {"$ref": "#/$defs/metrics"},
+    "record_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["opens_at", "closes_at"],
+      "properties": {
+        "opens_at": {"$ref": "#/$defs/timestamp"},
+        "closes_at": {"$ref": "#/$defs/timestamp"}
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reopened",
+        "false_closure",
+        "rework_count",
+        "accepted_decision_changing_findings",
+        "realized_value_status"
+      ],
+      "properties": {
+        "reopened": {"type": "boolean"},
+        "false_closure": {"type": "boolean"},
+        "rework_count": {"type": "integer", "minimum": 0},
+        "accepted_decision_changing_findings": {"type": "integer", "minimum": 0},
+        "realized_value_status": {
+          "enum": ["positive", "neutral", "negative", "not_realized", "indeterminate"]
+        }
+      }
+    }
+  }
+}

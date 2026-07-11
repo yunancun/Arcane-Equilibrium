@@ -5,19 +5,16 @@ lessons. It is not the active project ledger.
 
 ## Context Loading
 
-Default route:
+Start from the repository entry rule and compile the task-specific pack instead
+of universal preload. Canonical role/pack Interface:
+`.codex/agent_registry_v1.json`; router:
+`docs/agents/context-loading.md`; executable compiler:
+`helper_scripts/maintenance_scripts/agent_governance.py context`.
 
-1. Read this file.
-2. Read `README.md` for stable project shape and source routing.
-3. Read `docs/agents/context-loading.md` for where each context class lives.
-4. Read `TODO.md` for code, deploy, runtime, planning, sign-off, review, or
-   unclear-continuity work.
-5. Read `CONTEXT.md` and relevant `docs/adr/*` when naming domain concepts or
-   touching architecture.
-
-Current progress, runtime facts, active blockers, and schedules live in
-`TODO.md`. Stable project overview lives in `README.md`. Completed detail lives
-in reports/archive. Do not mirror long status paragraphs here.
+Exact user scope, acceptance, hard stops, baseline, direct Interface/callers,
+and relevant prior failure are never truncated for a token target. Read
+`TODO.md` when current state can affect the answer, relevant README/CONTEXT/ADR
+when stable shape or architecture matters, and history only on demand.
 
 ## 一、Product Boundary
 
@@ -27,9 +24,9 @@ in reports/archive. Do not mirror long status paragraphs here.
 - Bybit remains the only active live execution exchange. ADR-approved
   non-Bybit exceptions are explicitly scoped: Binance market-data-only per
   ADR-0033/0040, and IBKR `stock_etf_cash` read-only/paper/shadow research per
-  ADR-0048 + AMD-2026-06-29-01, with Phase 2 read-only external contact
-  authorized per AMD-2026-07-08-01 (Rust-owned read-only TWS client only; gated).
-  IBKR live/tiny-live remains denied.
+  ADR-0048 + AMD-2026-06-29-01. IBKR live/tiny-live remains denied. Phase 2
+  read-only external contact is separately gated by AMD-2026-07-08-01 and the
+  Rust-owned read-only TWS client.
 - Rust `openclaw_engine` is the trading, risk, strategy-config, and execution
   authority.
 - Python/FastAPI is the control plane, GUI backend, bridge, replay surface, and
@@ -74,6 +71,33 @@ ranks first among the safeguards precisely because ruin is irreversible
 with it (root principle 5). Fail-closed hard boundaries do not loosen for any
 near-term PnL argument.
 
+## Typed Authority Matrix
+
+Authority is a partial order by fact class, not one global winner:
+
+- `normative_policy`: Root Principles, Hard Boundaries, accepted ADR/AMD,
+  explicit operator decisions.
+- `implementation_contract`: code, schema, migration, tests.
+- `active_work_state`: `TODO.md` owner/blocker/next action.
+- `runtime_observation`: timestamped host/environment/process/config/PG/artifact.
+- `external_policy`: official broker/vendor rule with verification time.
+- `claim_evidence`: hash-pinned proof/test/closure artifact.
+
+Compare freshness or strength only within one class. Across classes, preserve
+both claims and emit DRIFT/CONFLICT. Runtime can prove what happened; it cannot
+decide what policy permits.
+
+Evidence assurance is separate from authority class. `LOCAL_REPRODUCIBLE`
+captures bind locally recapturable repository/command bytes;
+`ORCHESTRATOR_BOUND` records bind controller-known call/task/context/role/result
+facts structurally, but packet-local receipts cannot authenticate their own
+execution; `PLATFORM_OR_EXTERNAL_ATTESTED` is required for runtime, external-policy/
+outcome, and actual-usage authenticity. A canonical self-digest proves integrity
+only, never who produced a result or whether an external fact is true.
+Any Closure `PASS` also needs an out-of-band trusted-host capability to verify
+the exact Context and delegated/runtime/outcome/effect digests. The standalone
+CLI performs offline structure/integrity checks and cannot authenticate PASS.
+
 ## 三、Active State Routing
 
 `TODO.md` is the active state authority. Anything that used to live in the old
@@ -81,7 +105,8 @@ CLAUDE §三 current-state panorama must now be read from:
 
 - `TODO.md` for active blockers, runtime facts, current phase, schedules, and
   next work.
-- `docs/CCAgentWorkSpace/*/workspace/reports/` for evidence and sign-off.
+- Task closure packets and their hash-pinned evidence for current sign-off;
+  `docs/CCAgentWorkSpace/*/workspace/reports/` is historical/on-demand context only.
 - `docs/archive/` for completed historical detail.
 
 If an agent prompt asks for CLAUDE §三, interpret it as: read this routing note,
@@ -163,10 +188,14 @@ Unless the operator explicitly overrides this:
    verified.
 5. Use model judgment only for judgment work; deterministic routing, retries,
    and data transforms belong in code.
-6. Token budgets are hard guidance: 4,000 per task and 30,000 per session; when
-   close, summarize/reset and disclose.
-7. Surface conflicts; choose the newer or better-tested pattern and mark the
-   other as cleanup debt.
+6. Context and token budgets use the Registry's elastic target + quality reserve
+   + review point. Overrun triggers scoped split/escalation, never deletion of
+   mandatory evidence. Optimize cost per durable accepted closure, not raw
+   tokens; Full Audit may use a larger justified reserve.
+7. Within one authority class, surface conflicts and choose the newer or
+   better-tested pattern; mark the other as cleanup debt. Across authority
+   classes, preserve both and emit DRIFT/CONFLICT under the Typed Authority
+   Matrix above.
 8. Read before writing: exports, direct callers, shared helpers.
 9. Tests verify intent, not only behavior.
 10. Checkpoint after significant steps with done, verified, and remaining work.
@@ -202,22 +231,64 @@ Unless the operator explicitly overrides this:
 
 ## 八、Workflow
 
-- Main session role is PM + Conductor.
-- Non-trivial work starts with triage: task type, risk, source of truth,
-  acceptance criteria, and whether sub-agent dispatch is warranted.
-- Feature / bug chain: `PM -> PA -> E1/E1a -> E2 -> E4 -> QA -> PM`.
-- Compliance / architecture chain: `PM -> CC -> FA -> PA -> PM`.
-- Quant / ML / data chain: `PM -> QC -> MIT -> AI-E -> PM`.
-- Security / deploy / runtime chain: `PM -> E3 -> BB if exchange-facing -> PM`.
-- E2 review and E4 regression are not skipped for implementation work unless the
-  operator explicitly accepts the risk for a narrow emergency.
+- Main session role is PM/Conductor. The canonical workflow Interface is
+  `.codex/agent_registry_v1.json`; executable routing/context/closure lives in
+  `helper_scripts/maintenance_scripts/agent_governance.py`; design detail is
+  `docs/agents/development-agent-governance.md`.
+- Non-trivial work begins with exact objective/scope/acceptance/hard stops,
+  task surfaces, risk/uncertainty, evidence scope, head/dirty scope, and allowed
+  effects. Any prior or evidence digest used to decide a claim is admitted under
+  task-contract `claim_inputs`; free prompt text cannot silently replace it.
+- `uncertainty` is required (`low|medium|high|unknown`); omission fails before
+  routing. Dispatch binds exact native agent, node class, and permission before
+  spawn, including PA/E4 writer-versus-verifier identities.
+- Dispatch is a hybrid risk-DAG. Source Implementation has independent E2 then
+  E4 hard edges. Authority/security, runtime/OPS, correct BB/IB venue Adapter,
+  quant/ML semantics, and end-to-end QA are added when task facts trigger them.
+  Other roles are advisory and admitted by expected decision gain after
+  preserving quality reserve.
+- Read-only reviewers do not modify source, append memory/report, perform
+  runtime mutation, or invoke private broker effects. Their Bash calls use the
+  Registry command allowlist.
+- OPS performs preflight/rollback/postcheck/RCA only. The Deploy Adapter can
+  validate an exact PM/operator-approved intent and environment contract, but
+  actual apply is disabled until a trusted reproducible runtime probe exists;
+  it cannot currently support a successful effect closure. BB and IB review
+  venue policy only. Development-agent broker contact/private effects have no
+  closure-admissible Adapter and therefore route to an unsupported-effect blocker.
+- Completion uses one `closure_packet_v1`; work status, gate verdict, and
+  disposition are separate. Immutable dissent and unverified scope are
+  preserved. Each fragment is bound to a canonical workflow call record; each
+  wave retains the full call manifest, retries/nulls, planned lower bounds,
+  coverage debt, DAG predecessors/topological wave, producer generation, exact
+  native identity/permission, and explicit controller-overhead boundary. Per-role automatic
+  report/memory growth is retired. Any orchestrator structural ledger must
+  exact-cover all captured waves; ghost/omitted/extra/duplicate wave identity is
+  invalid.
+- Evidence class must match the claim: repository/command capture can prove
+  source/test facts, not runtime or E2E; unit tests are not business outcomes.
+  Repository mutation needs exact before/after `repository_change_record_v1`;
+  `EXECUTED`/`REUSED` checks need a closure-trusted-replayable
+  Context-bound `command_capture_v2`. Its one Adapter call is replayed before
+  strong PASS when no host verifier exists, and `repository_policy_only` is not
+  no-contact attestation. Repository authority value must equal its exact pinned
+  Context-byte identity projection; interpreted claims use typed `claim_inputs`
+  or validated evidence. Actual usage needs
+  platform/external-attested telemetry; wave accounting remains a planned/
+  structural lower bound.
+- Multiple admitted writers each produce exactly one node-owned change record in
+  canonical writer order; scopes are non-empty/disjoint and every scoped
+  after-generation must remain current.
+- Post-closure durability uses `closure_quality_followup_v1`; realized metrics are
+  measured only from caller-trusted platform/external attestation, never zero-filled.
 - Desktop local-agent background waves: a session pause (idle 900s) kills all
   in-flight background subagents, unrecoverable. After dispatching, stay
   in-turn (blocking `TaskOutput` or foreground-parallel Agent calls). The only
   reliable liveness signal is the agent transcript mtime under the session's
   `subagents/` dir; stat it before any TaskStop and suspect death only after
   ≥30 min of silence. Clear zombie `running` tasks after session resume.
-  Canonical SOP: `.claude/agents/PM.md` 「後台 wave 防殺與降損」.
+  Canonical SOP: `docs/agents/sub-agent-hygiene-sop.md` and
+  `.codex/SUBAGENT_EXECUTION_RULES.md`.
 - Token hygiene and hooks: `.claude/settings.json` wires a PreToolUse hook
   (`.claude/hooks/rtk-rewrite.sh`) that rewrites Bash commands to `rtk`
   equivalents for compressed output. It fails open (missing rtk/jq or rewrite
@@ -226,16 +297,16 @@ Unless the operator explicitly overrides this:
   tee log or rerun via `rtk proxy <cmd>`; escape hatches are `rtk proxy <cmd>`
   and the rtk config `exclude_commands`. Binary install is pinned per
   `tools/rtk/README.md`. A SessionStart hook (`session-start.sh`) injects a
-  ≤300-token workflow router and re-injects it after compact. Subagent
-  completion follows the four-state contract DONE / DONE_WITH_CONCERNS /
-  NEEDS_CONTEXT / BLOCKED (canonical: `.claude/agents/PM.md`).
-- Every delegated task must bind a repo role, ownership, expected output, and
-  task shape.
-- If a role is skipped, say which role and why.
+  ≤300-token workflow router and re-injects it after compact. Sub-agent
+  fragments follow the closure schema; budget/retry failure never means PASS.
+- Every delegated task binds role preset, runtime type, ownership, output,
+  task facts, context digest, acceptance, and hard stops. Skips record reason,
+  residual risk, and owner.
 - Bybit-facing REST/WS/IPC work must check
   `docs/references/2026-04-04--bybit_api_reference.md`; new endpoints or
   semantics update that reference. BB review should push back on exchange-side
   violations.
+- IBKR/TWS/stock_etf_cash work uses IB and ADR-0048; BB cannot substitute.
 
 ## 九、Code Structure Guardrails
 
@@ -253,7 +324,10 @@ If an agent prompt asks for old CLAUDE §九, use this guardrail section plus
 ## Data, Migrations, And Validation
 
 - For V### migrations with PG reflection, transaction control, or schema
-  assumptions, do Linux PG empirical dry-run before implementation sign-off.
+  assumptions, Linux PG empirical evidence is still required before runtime
+  sign-off, but delegated development roles cannot obtain it with direct `psql`.
+  Use a separately authorized read-only-identity Adapter/operator artifact and
+  preserve its platform-attested capture; otherwise keep the claim UNVERIFIED.
 - `CREATE TABLE IF NOT EXISTS` needs Guard A; type-sensitive `ADD COLUMN` needs
   Guard B; hot-path indexes should use Guard C where applicable.
 - Migration idempotency must be tested by applying twice when relevant.
@@ -264,10 +338,9 @@ If an agent prompt asks for old CLAUDE §九, use this guardrail section plus
   sign-off.
 - Any passive wait in `TODO.md` must have a healthcheck, review date, named
   external action, or explicit reason automation is impossible.
-- PG connection examples + dry-run patterns: see
-  `docs/agents/context-loading.md` "PG Connection Examples (Linux runtime
-  authoritative)". Mac sandbox uses mocked pytest and cannot catch PG
-  runtime semantics; always `ssh trade-core` for empirical reflection.
+- Direct `psql` is denied by the governance preflight until a local-socket/
+  read-only-identity Adapter eliminates ambient `psqlrc` and `PG*` routing.
+  Mac mocked tests cannot establish PG runtime semantics.
 
 ## 十、Next Work And TODO Maintenance
 

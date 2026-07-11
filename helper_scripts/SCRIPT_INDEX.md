@@ -1,17 +1,24 @@
 # helper_scripts/ — 腳本索引 (Script Index)
 
 本目錄存放 OpenClaw 系統的維護、啟動、CI 輔助腳本。
-最後更新：2026-07-10。每批詳情見下方對應 `## YYYY-MM-DD` 區塊（per-batch SSOT）；最新數批摘要見「最新補充」段。
+最後更新：2026-07-11。每批詳情見下方對應 `## YYYY-MM-DD` 區塊（per-batch SSOT）；最新數批摘要見「最新補充」段。
 
-最新補充（2026-07-10 development-agent governance）：新增
+最新補充（2026-07-11 development-agent governance）：新增
 `maintenance_scripts/agent_governance.py`，以標準庫讀
 `.codex/agent_registry_v1.json`，提供 role registry lint、Claude/Codex/profile
-generated view、hybrid risk-DAG、lossless elastic context plan、typed authority
-conflict、`closure_packet_v1` 驗證、content-addressed test evidence key/reuse 與
-read-only Bash allowlist。這是開發 sub-agent 治理工具，不是 trading runtime
+generated view、typed task contract + hybrid risk-DAG、lossless elastic Context artifact、
+three-tier capture、canonical call-manifest/wave receipts、before/after repo-change proof、
+strict consumption aggregation、Full Audit/
+profit controller、`closure_packet_v1` 驗證、deterministic `project-closure` Report Sink 與
+fail-closed read-only Bash allowlist。Deploy intent/receipt contract 已定義，但 apply 因缺少
+trusted local runtime identity probe 而停用；IBKR/Bybit paths 是 reference surface，
+development-agent broker contact Adapter 尚未實作。這是開發 sub-agent 治理工具，不是 trading runtime
 Agent；不連 broker/PG、不讀 secret、不 deploy/restart、不授權 order/live。正本設計
 見 `docs/agents/development-agent-governance.md` / ADR-0050；回歸測試見
-`tests/structure/test_development_agent_governance.py`。
+`tests/structure/test_development_agent_governance.py` 與
+`tests/structure/test_agent_governance_*.py`。Governance permission preflight 目前連 apparent
+SELECT 的 direct `psql` 都拒絕，直到 local-socket/read-only-identity Adapter 能排除 ambient
+`psqlrc`/`PG*` routing。
 
 最新補充（2026-07-10 ALR candidate rendezvous）：新增
 `research/cost_gate_learning_lane/candidate_board_publisher.py`，把完整 v5
@@ -1636,6 +1643,39 @@ fail-closed，total-miss + partial-miss 同歸此判，絕不誤報 PASS_CAPTURE
 
 | 腳本 | 用途 |
 |------|------|
+| `maintenance_scripts/agent_governance.py` | Development-Agent Governance Module 的穩定 stdlib facade/CLI：Registry/render、route/context、typed authority、route-bound closure/project、evidence reuse 與 read-only command preflight；不自行 deploy/contact/寫 PG。 |
+| `maintenance_scripts/agent_governance_registry.py` | Governance Module 內部 Registry/render Implementation；生成 role/profile/skill index 並偵測 ghost view。 |
+| `maintenance_scripts/agent_governance_execution.py` | Dispatch/Context 穩定 Python facade；匯出 task-contract digest、baseline capture、context compile/materialize/validate 與 closure constants。 |
+| `maintenance_scripts/agent_governance_routing.py` | Typed task-fact、`side_effect_class` 與 hybrid DAG compiler；矛盾/未知 facts fail closed，未支援 broker/external effect 形成 mandatory blocker。 |
+| `maintenance_scripts/agent_governance_context.py` | Byte-backed Context compiler producer；安全讀 concrete source，捕獲 current diff/untracked/direct interface/caller/test provenance，綁 baseline 與 capture TTL。 |
+| `maintenance_scripts/agent_governance_context_projection.py` | Context reachability 與 semantic-capsule 投影；把完整 capture envelope 壓成共享 task semantics + role delta，保留 claim/evidence debt 而不把 ambient dirty metadata 納入 cache identity。 |
+| `maintenance_scripts/agent_governance_context_validation.py` | 獨立重算 `context_artifact_v1` exact canonical bytes、task contract、source content/producer/freshness、token estimate 與 compiler budget authority。 |
+| `maintenance_scripts/agent_governance_external_evidence.py` | Trusted-host external/runtime evidence capture與 verifier seam；caller JSON/self-hash 只證 integrity，不可自鑄 PLATFORM/EXTERNAL provenance。 |
+| `maintenance_scripts/agent_governance_execution_attestation.py` | 提供不序列化進 caller packet 的 trusted-host verifier capability；Closure PASS 以 exact digest 驗證 Context、workflow execution、runtime/outcome 與 effect receipts，self-hash 不作執行 provenance。 |
+| `maintenance_scripts/agent_governance_registry_budget.py` | Registry budget contract validator；統一 target/reserve、exact UTF-8 byte cap、planned lower bound、workflow/unique-node/attempt/retry 上限。 |
+| `maintenance_scripts/agent_governance_workflow_budget.py` | Saved-workflow pre-call budget gate與 cumulative accounting；依最終 `boundPrompt` exact bytes 與 `ceil(bytes/4)` planned lower bound fail closed。 |
+| `maintenance_scripts/agent_governance_workflow_identity.py` | Native agent selector、requested identity 與 semantic workflow identity canonicalization；拒 selector/profile/route 混淆與 cache-key 漂移。 |
+| `maintenance_scripts/agent_governance_workflow_capture.py` | Workflow call/result capture與 authenticated receipt binding；區分 planned accounting 與僅由平台 attested 的 actual-token telemetry。 |
+| `maintenance_scripts/agent_governance_workflow_codegen.py` | 從 Registry + 單一 JS fragment 驗證三個 standalone saved workflows 的 `CONTEXT_ADMISSION_V1` 生成區塊；拒 byte drift、shadow contract、loader import/require 與未使用 canonical Context prefix。 |
+| `maintenance_scripts/agent_governance_closure.py` | Closure adjudicator；重算 route/context/task binding、mandatory/admitted fragments、typed evidence/authority、effect class、Full Audit/profit controller 與 PASS eligibility。 |
+| `maintenance_scripts/agent_governance_closure_quality.py` | `closure_quality_followup_v1` deep module：以 canonical closure digest 綁定 immutable closure，記 scheduled/unavailable/measured follow-up window、reopened/false-closure/rework、decision-changing findings 與 realized-value status；只有 caller-trusted `PLATFORM_OR_EXTERNAL_ATTESTED` ref/digest 可進 measured aggregate，缺 telemetry 保持 unavailable 且不補 0。只提供 builder/validator/read-only summary consumer，不含 runtime producer。 |
+| `maintenance_scripts/agent_governance_capture.py` | Trust-tier capture primitives：`LOCAL_REPRODUCIBLE` scoped repo/command capture、attested telemetry envelope；self-digest 只證 integrity，不升級 external authenticity。 |
+| `maintenance_scripts/agent_governance_capture_binding.py` | Closure capture index/binder：重驗 repo/change/command/call-manifest/wave/telemetry artifacts，拒 orphan manifest、重複 ID 與 trust-tier substitution。 |
+| `maintenance_scripts/agent_governance_repository_changes.py` | `repository_change_record_v1` before/after generation producer/validator；task/role/node/scope-bound mutation causality，單一 snapshot 不算 mutation proof。 |
+| `maintenance_scripts/agent_governance_workflow_receipts.py` | Canonical rich call/manifest/wave receipts；綁 task/context/role/result/retry/null，記 planned lower bound、coverage debt 與 controller overhead boundary。 |
+| `maintenance_scripts/agent_governance_trust.py` | Closure trust policy/evidence-class matrix；source/test、runtime/E2E、authority、mutation、command check 與 producer-call exact binding fail closed。 |
+| `maintenance_scripts/agent_governance_authority.py` | Typed authority claim builder/validator/resolver；綁 subject/value/source/scope/strength/expiry/self-digest，只在同 class/subject/scope 內選 strongest/freshest。 |
+| `maintenance_scripts/agent_governance_observations.py` | Source review/change、runtime observation 與 business outcome 的 content-addressed typed receipt builder/validator。 |
+| `maintenance_scripts/agent_governance_consumption.py` | `measured/partial/unavailable` usage truth contract 與 fragment→closure deterministic aggregation；拒假 telemetry、hidden metrics 與低報總數。 |
+| `maintenance_scripts/agent_governance_effects.py` | Deploy runtime-attestation/effect/OPS receipt contract；canonical self-digest、safe environment、intent/baseline/pre-post/binary/acceptance cross-binding。 |
+| `maintenance_scripts/agent_governance_evidence.py` | Typed test execution/recheck/reuse Implementation；exact content/environment signature、TTL、flaky 與 independent critical recheck。 |
+| `maintenance_scripts/agent_governance_full_audit.py` | Full Audit closure binding；E2/backstop axes、typed verifier votes、structural finding debt、controller/admissions/fragments/unverified projection 與 eligibility 重算。 |
+| `maintenance_scripts/agent_governance_profit.py` | Profit-diagnosis controller validator；綁 baseline/priors、Registry evidence/probe axes、fragment digests、coverage debt、PA map 與 bounded envelope。 |
+| `maintenance_scripts/agent_governance_profit_payloads.py` | Profit-diagnosis nested payload validator；重算 fact/diagnosis/opportunity/negative-result/top-move 的完整 shape、evidence refs 與來源 lineage。 |
+| `maintenance_scripts/agent_governance_projection.py` | 已驗證 `closure_packet_v1` 的 deterministic Markdown projection；不另造 authority。 |
+| `maintenance_scripts/agent_governance_permissions.py` | Governance Module 內部 permission Implementation：repo/runtime path scope、single-command shell policy、safe health curl；direct `psql` 全拒直到 read-only-identity Adapter 完成；由 public CLI 呼叫。 |
+| `maintenance_scripts/agent_governance_schema.py` | Governance Module 共用 stdlib JSON-Schema subset；實際執行 closure、effect receipt 與 typed context-evidence 的 checked-in schema。 |
+| `maintenance_scripts/deploy_intent_adapter.py` | `deployment_intent_v1` seam：驗 exact intent 與 typed safe-runtime contract；目前因沒有 trusted local runtime identity probe，intent-only 回 apply-disabled，`--apply` 會在 component invocation 前 fail closed。 |
 | `maintenance_scripts/prune_dated_files.sh` | 清理過期的 dated 輸出文件 |
 | `maintenance_scripts/regen_doc_inventory.py` | 重生 docs/_indexes/ 內 doc cleanup dry-run JSON（schema v2，含 supersedes_candidate 偵測；TW doc cleanup SOP 用） |
 
