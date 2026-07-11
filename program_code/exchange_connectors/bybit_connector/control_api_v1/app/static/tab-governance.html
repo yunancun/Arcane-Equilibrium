@@ -1696,7 +1696,8 @@ window.addEventListener('message', function(ev) {
   const target = document.getElementById(targetId);
   if (!target) return;
   target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  target.style.boxShadow = '0 0 0 2px rgba(168,85,247,0.65)';
+  // P0.4 C6d:scroll flash 為 highlight affordance,原紫 authority tint → 青銅 --accent(canon 10)
+  target.style.boxShadow = '0 0 0 2px var(--accent)';
   setTimeout(() => { target.style.boxShadow = ''; }, 1800);
 });
 
