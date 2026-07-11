@@ -1,68 +1,52 @@
 {
   "schema": "global_qualified_autonomous_learning_shadow_effect_review_v1",
-  "generated_at": "2026-07-11T14:07:42Z",
+  "generated_at": "2026-07-11T14:51:13Z",
   "goal_id": "GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1",
-  "loop": "WP2B_B2_2B_COST_PROVENANCE_SOURCE_ACCEPTANCE",
-  "status": "DONE_SOURCE_ACCEPTED_B2_2B_COST_PROVENANCE",
+  "loop": "WP2B_B2_2C_RESTART_SAFE_HANDOFF_SOURCE_ACCEPTANCE",
+  "status": "DONE_SOURCE_ACCEPTED_B2_2C_RESTART_SAFE_HANDOFF",
   "terminal": false,
-  "source_checkpoint": "a7d8d5f8b3af3282ab75667b31e45a40a712b2c4",
-  "source_commits": [
-    "d42671056e14d3e008327ff35b5278510d0d6f0a",
-    "bb73120336289073abd0cecd3f1fe160f4814746",
-    "c91b41c12292c87ae33c17fc55275a1a47ac9c2f",
-    "a7d8d5f8b3af3282ab75667b31e45a40a712b2c4"
-  ],
+  "source_checkpoint": "328125a08e0f15057a110c69266d6a6ea71c8826",
   "before": {
-    "wp2b_source_status": "PARTIAL_SOURCE_ACCEPTED_COLD_EVALUATION_BOARD_V2_ACTIVE",
-    "global_cost_provenance_closed": false,
-    "candidate_board_v2_cost_binding_complete": false,
-    "event_driven_primary_present": false
+    "board_handoff_durable": false,
+    "scanner_idle_board_delta_processed": false,
+    "exact_replay_zero_write": false,
+    "lineage_incomplete_replay_fail_closed": false
   },
   "after": {
     "goal_status": "ACTIVE",
-    "wp2b_source_status": "DONE_SOURCE_ACCEPTED_B2_2B_COST_PROVENANCE",
-    "global_cost_provenance_closed": true,
-    "global_mean_abs_count_weighted": true,
-    "signed_cost_bounded_by_absolute_cost": true,
-    "strict_typed_finite_keyset_count_validation": true,
-    "thin_symbol_fallback_conservative": true,
-    "publisher_board_adapter_arbiter_cost_binding": true,
-    "key_order_canonical_hash_invariant": true,
-    "material_value_hash_binding": true,
-    "candidate_eligibility_ranking_cooldown_proof_cannot_bypass_cost": true,
+    "board_handoff_durable": true,
+    "board_handoff_schema": "alr_candidate_board_handoff_v1",
+    "scanner_idle_board_delta_processed": true,
+    "exact_replay_zero_write": true,
+    "lineage_incomplete_replay_fail_closed": true,
+    "no_qualified_rotation_durable": true,
     "authority_counters_zero": true,
-    "next_work_id": "WP2-B2.2c-RESTART-SAFE-EVENT-DRIVEN-PRIMARY-HANDOFF",
-    "event_driven_primary_present": false
+    "next_work_id": "WP3-PROOF-REWARD-BRIDGE-SOURCE-ADAPTERS",
+    "b2_2c_runtime_gate_pending": true
   },
   "machine_verification": {
-    "e1_focused": "4 passed",
+    "e1_focused": "109 passed",
     "e2": "PASS",
-    "qc": "PASS",
-    "e4_integrated_final_generation": "586 passed in 6.38s",
+    "qc": "PASS_AFTER_P1_REPAIR",
+    "e4_integrated_final_generation": "190 passed in 0.80s",
     "qa": "PASS_SOURCE_CHECKPOINT_TO_PM",
     "p0_p1": "0/0",
     "git_diff_check": "PASS",
-    "governance_wrapper_interpreter_substitution": "DENIED_BEFORE_SUBPROCESS; direct existing mac_dev interpreter used once under explicit source/test authorization",
     "runtime_or_pg_probe": false,
-    "production_benefit_proven": false,
     "authority_delta": "NONE"
   },
   "minimality_decision": {
-    "finding": "QC_GLOBAL_COST_CLOSURE",
-    "classification": "CURRENT_SLICE_BLOCKER",
-    "production_boundaries": [
-      "outcome_review untrusted producer normalization",
-      "alr_candidate_evidence_adapter independently revalidates persisted ingress"
-    ],
-    "shared_helper_rejected": "would introduce a new abstraction across independent fail-closed ingress boundaries",
-    "scope_expansion": "none beyond the already-authorized two-boundary micro-fix; final signed-bound repair changed only two guards and two tests",
-    "followups": []
+    "sub_ticket": "WP2-B2.2c-HANDOFF-STATE-DELTA",
+    "reason": "event primary, immutable board identity, and restart-safe no-delta suppression cannot be safely expressed as a two-file micro-fix",
+    "production_files": 3,
+    "production_line_delta": "+506/-12",
+    "no_migration_reason": "existing immutable projection artifacts provide the atomic idempotency receipt; SQL, cron, service, and runtime surfaces remain unchanged",
+    "post_review_p1": "suppression now verifies existing artifact kind/payload/hash and complete provenance edges before zero-write return"
   },
   "anti_repeat": {
-    "review_fix_waves": 3,
+    "review_fix_waves": 2,
     "same_generation_integrated_runs": 1,
-    "third_reopen_allowed": false,
-    "next_loop_must_change": "WP2-B2.2c restart-safe event-driven primary handoff; do not add another provenance feature wave"
+    "next_loop_must_change": "WP3 proof/reward source adapters; do not reopen B2.2c without a material source finding"
   },
   "authority_delta": "NONE",
   "runtime_delta": "NONE_SOURCE_ONLY",
