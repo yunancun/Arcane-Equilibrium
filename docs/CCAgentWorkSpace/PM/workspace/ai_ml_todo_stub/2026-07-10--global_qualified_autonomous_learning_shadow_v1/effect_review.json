@@ -1,15 +1,15 @@
 {
   "schema": "global_qualified_autonomous_learning_shadow_effect_review_v1",
-  "generated_at": "2026-07-11T18:12:12Z",
+  "generated_at": "2026-07-11T18:22:13Z",
   "goal_id": "GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1",
   "loop": "WP3_READ_ONLY_PROOF_REWARD_REPOSITORY_ADAPTER",
   "status": "DONE_SOURCE_ACCEPTED_READ_ONLY_REPOSITORY_ADAPTER",
   "terminal": false,
   "source_checkpoint": "c2bdefbfdb52eeaab4e801de783719ecfe0da7bc",
   "publish_alignment": {
-    "observed_at": "2026-07-11T18:12:12Z",
-    "mac_head": "c2bdefbfdb52eeaab4e801de783719ecfe0da7bc",
-    "origin_main": "c2bdefbfdb52eeaab4e801de783719ecfe0da7bc",
+    "observed_at": "2026-07-11T18:22:13Z",
+    "mac_head": "a6693d8ced81c6cbd96e0cb17b52af51af7e2184",
+    "origin_main": "a6693d8ced81c6cbd96e0cb17b52af51af7e2184",
     "behavioral_source_checkpoint_contained": true
   },
   "before": {
