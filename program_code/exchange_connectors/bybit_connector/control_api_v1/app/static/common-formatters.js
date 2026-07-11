@@ -192,6 +192,8 @@ function ocDate(ts) {
   return Number.isFinite(d.getTime()) ? d : null;
 }
 
+// P0.4-C1 註記:以下時間 formatter 家族(ocTime/ocTimeShort/ocFillTime/ocFillDateTime)的
+// '--' 是時間佔位契約,非數值顯示哨兵(OC_EMPTY em-dash),刻意保留不改。
 function ocTime(ts) { const d = ocDate(ts); return d ? d.toLocaleString('zh-CN', { hour12: false }) : '--'; }
 function ocTimeShort(ts) { const d = ocDate(ts); return d ? d.toLocaleTimeString('zh-CN', { hour12: false }) : '--'; }
 
@@ -246,13 +248,15 @@ function ocPerformanceMetricsFromPayload(payload) {
 
 // 格式化後端 metric 描述，避免各 tab 重複實作單位邏輯。
 function ocFormatPerformanceMetric(metric) {
-  if (!metric) return '--';
+  // P0.4-C1:blank/non-finite 走顯示哨兵 OC_EMPTY(em-dash),與 canon 7 禁假零
+  // 及 P0.3 顯示層統一(不再殘留 '--' 字面);ocIsBlank 對兩者皆真,消費端無需改。
+  if (!metric) return OC_EMPTY;
   const value = metric.value;
-  if (value == null || value === '') return '--';
+  if (value == null || value === '') return OC_EMPTY;
   if (value === 'inf') return '∞';
   const unit = String(metric.unit || '');
   const n = Number(value);
-  if (!Number.isFinite(n)) return '--';
+  if (!Number.isFinite(n)) return OC_EMPTY;
   // 單位分派對齊 §1.2 契約:一律走 canonical formatter,消除本地 1dp/4dp 手寫。
   if (unit === 'count') return String(Math.round(n));
   if (unit === 'money' || unit === 'usdt') return ocMoney(n);
@@ -425,17 +429,17 @@ function ocStrategyChip(strategy, options) {
 // ─── Product Category Tag / 產品品類標籤 ─────────────────────────────────────
 // 在持倉/訂單/成交旁顯示帶顏色的品類標籤，便於區分不同產品類型。
 const _OC_CAT_CONFIG = {
-  linear:  { label: 'U本位',   color: '#3b82f6', bg: 'rgba(59,130,246,0.15)' },
-  spot:    { label: '現货',     color: '#22c55e', bg: 'rgba(34,197,94,0.15)' },
-  inverse: { label: '币本位',   color: '#f59e0b', bg: 'rgba(245,158,11,0.15)' },
-  option:  { label: '期權',     color: '#a855f7', bg: 'rgba(168,85,247,0.15)' },
+  linear:  { label: 'U本位' },
+  spot:    { label: '現货' },
+  inverse: { label: '币本位' },
+  option:  { label: '期權' },
 };
 function ocCategoryTag(category) {
   const cat = (category || 'linear').toLowerCase();
-  const cfg = _OC_CAT_CONFIG[cat] || { label: cat, color: '#94a3b8', bg: 'rgba(148,163,184,0.15)' };
+  const cfg = _OC_CAT_CONFIG[cat] || { label: cat };
   // P0.2 中性化(刻意視覺變更,PM 已批):品類四色屬 palette 外色(canon 1
-  // 非數據 chrome 一律中性),樣式收斂到 oc-utilities.css §B .oc-cat-tag;
-  // _OC_CAT_CONFIG 的 color/bg 欄位自此僅存 label 在用,P0.4 複審清理。
+  // 非數據 chrome 一律中性),樣式收斂到 oc-utilities.css §B .oc-cat-tag。
+  // P0.4-C1:color/bg 欄位已 0 caller(中性化後死數據),刪除只留 label(仍被消費)。
   return '<span class="oc-cat-tag">' + ocEsc(cfg.label) + '</span>';
 }
 
