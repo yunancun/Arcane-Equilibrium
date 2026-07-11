@@ -4,7 +4,7 @@ Date: 2026-07-10
 Owner: PM
 Goal: `GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1`
 Codex Goal thread: `019f4b6d-1e5b-7551-9fce-7a2f029a1675`
-Status: `ACTIVE_WP3_PROOF_REWARD_BRIDGE_SOURCE_ADAPTERS`
+Status: `ACTIVE_WP3_PROOF_REWARD_REPOSITORY_ADAPTERS`
 
 This is the durable PM-owned queue and state surface for the active Goal. It
 supersedes the old ALR P2 completion/terminal interpretation, but does not edit
@@ -25,6 +25,25 @@ order authority.
 
 ## Current source checkpoint
 
+WP3's first source-only bridge checkpoint is accepted at
+`8999aa2b7e4a3bba3841f4c72cf054d88cb69c5c`.  The new pure
+`candidate_proof_adapter_v1` validates a complete B2.2c projection through the
+existing public projection-plan validator, requires its immutable handoff, and
+derives candidate/context identity from the selected identity/context hashes.
+It only summarizes caller-provided ProofPacket and RewardLedger artifacts: no
+proof, reward, fill, receipt, durable record, training, service, runtime, or
+broker fact is created. Exact artifact/decision/handoff provenance, PIT
+candidate scope and decision-time causality, no-fill-as-non-reward, canonical
+reward-set ordering, and all-false/zero authority summaries are fail-closed.
+
+Focused tests passed `10`; the one current-generation integrated suite passed
+`263`. E2, QC, and QA final P0/P1 are `0/0`. This is a source checkpoint only:
+actual proof/reward/training/OOS runtime evidence remains zero, the B2.2c
+runtime gate remains pending, and the next source-only scope is
+`WP3-PROOF-REWARD-REPOSITORY-ADAPTERS`.
+
+## Prior source checkpoint
+
 WP2-B B2.2c restart-safe event-driven handoff is source accepted at
 `328125a08e0f15057a110c69266d6a6ea71c8826`; Mac and `origin/main` matched at
 source push. A validated v2 candidate board now has a canonical immutable
@@ -36,7 +55,8 @@ B2.2c source criteria are accepted: focused `109 passed`, final integration
 `190 passed`, and E2/QC/QA PASS with P0/P1 `0/0`. Runtime deployment/receipt
 is pending a fresh exact E3/BB gate. This is not candidate qualification,
 proof, reward, training, OOS, serving, promotion, or profit evidence. The next
-source-only scope is `WP3-PROOF-REWARD-BRIDGE-SOURCE-ADAPTERS`.
+source-only scope at that checkpoint was the now-accepted WP3 validation
+adapter; current work is `WP3-PROOF-REWARD-REPOSITORY-ADAPTERS`.
 
 This checkpoint refreshed no Linux, service, PostgreSQL, Bybit, data-freshness,
 training, serving, promotion, or profit fact. The last accepted WP1 Linux and

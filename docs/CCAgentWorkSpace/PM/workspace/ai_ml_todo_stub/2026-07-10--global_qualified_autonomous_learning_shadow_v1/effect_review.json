@@ -1,34 +1,36 @@
 {
   "schema": "global_qualified_autonomous_learning_shadow_effect_review_v1",
-  "generated_at": "2026-07-11T14:51:13Z",
+  "generated_at": "2026-07-11T15:14:35Z",
   "goal_id": "GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1",
-  "loop": "WP2B_B2_2C_RESTART_SAFE_HANDOFF_SOURCE_ACCEPTANCE",
-  "status": "DONE_SOURCE_ACCEPTED_B2_2C_RESTART_SAFE_HANDOFF",
+  "loop": "WP3_PROOF_REWARD_VALIDATION_ADAPTER_SOURCE_ACCEPTANCE",
+  "status": "DONE_SOURCE_ACCEPTED_VALIDATION_ADAPTER",
   "terminal": false,
-  "source_checkpoint": "328125a08e0f15057a110c69266d6a6ea71c8826",
+  "source_checkpoint": "8999aa2b7e4a3bba3841f4c72cf054d88cb69c5c",
   "before": {
-    "board_handoff_durable": false,
-    "scanner_idle_board_delta_processed": false,
-    "exact_replay_zero_write": false,
-    "lineage_incomplete_replay_fail_closed": false
+    "selected_projection_to_proof_input_binding": false,
+    "b2_2c_handoff_required_before_proof_summary": false,
+    "reward_set_permutation_canonical": false,
+    "proof_or_reward_created": false
   },
   "after": {
     "goal_status": "ACTIVE",
-    "board_handoff_durable": true,
-    "board_handoff_schema": "alr_candidate_board_handoff_v1",
-    "scanner_idle_board_delta_processed": true,
-    "exact_replay_zero_write": true,
-    "lineage_incomplete_replay_fail_closed": true,
-    "no_qualified_rotation_durable": true,
+    "selected_projection_to_proof_input_binding": true,
+    "b2_2c_handoff_required_before_proof_summary": true,
+    "candidate_context_caller_substitution_rejected": true,
+    "exact_projection_decision_handoff_provenance_required": true,
+    "pit_future_of_projection_decision_rejected": true,
+    "no_fill_cannot_be_reward": true,
+    "reward_set_permutation_canonical": true,
+    "proof_or_reward_created": false,
+    "durable_receipt_status": "unverified_source_only",
     "authority_counters_zero": true,
-    "next_work_id": "WP3-PROOF-REWARD-BRIDGE-SOURCE-ADAPTERS",
-    "b2_2c_runtime_gate_pending": true
+    "next_work_id": "WP3-PROOF-REWARD-REPOSITORY-ADAPTERS"
   },
   "machine_verification": {
-    "e1_focused": "109 passed",
-    "e2": "PASS",
-    "qc": "PASS_AFTER_P1_REPAIR",
-    "e4_integrated_final_generation": "190 passed in 0.80s",
+    "e1_focused": "10 passed in 0.08s",
+    "e2": "PASS_AFTER_P1_REPAIRS",
+    "qc": "PASS_AFTER_P1_REPAIRS",
+    "e4_integrated_final_generation": "263 passed in 1.08s",
     "qa": "PASS_SOURCE_CHECKPOINT_TO_PM",
     "p0_p1": "0/0",
     "git_diff_check": "PASS",
@@ -36,17 +38,24 @@
     "authority_delta": "NONE"
   },
   "minimality_decision": {
-    "sub_ticket": "WP2-B2.2c-HANDOFF-STATE-DELTA",
-    "reason": "event primary, immutable board identity, and restart-safe no-delta suppression cannot be safely expressed as a two-file micro-fix",
-    "production_files": 3,
-    "production_line_delta": "+506/-12",
-    "no_migration_reason": "existing immutable projection artifacts provide the atomic idempotency receipt; SQL, cron, service, and runtime surfaces remain unchanged",
-    "post_review_p1": "suppression now verifies existing artifact kind/payload/hash and complete provenance edges before zero-write return"
+    "sub_ticket": "WP3-PROOF-REWARD-VALIDATION-ADAPTER",
+    "reason": "Existing proof and reward validators had no caller for the current immutable B2.2c selected projection; one pure adapter and adversarial tests close that source seam without a repository, migration, runtime, or external receipt path.",
+    "production_files": 1,
+    "test_files": 1,
+    "production_line_delta": "+546/-0",
+    "test_line_delta": "+313/-0",
+    "new_modules": 1,
+    "no_repository_or_migration_reason": "Durable receipt and repository attestation remain a separate WP3 seam; this adapter explicitly labels them unverified instead of fabricating persistence."
   },
+  "review_repairs": [
+    "E2 rejected caller-invented candidate/context binding; final contract derives both from the selected identity/context hashes.",
+    "QC rejected optional legacy handoff and enforces a non-null B2.2c handoff.",
+    "QC rejected order-dependent reward-set hashes; final summaries are sorted by computed record hash and permutation-tested."
+  ],
   "anti_repeat": {
-    "review_fix_waves": 2,
+    "review_fix_waves": 3,
     "same_generation_integrated_runs": 1,
-    "next_loop_must_change": "WP3 proof/reward source adapters; do not reopen B2.2c without a material source finding"
+    "next_loop_must_change": "WP3 repository adapter source seam; do not reopen validation semantics without a material P0/P1 finding."
   },
   "authority_delta": "NONE",
   "runtime_delta": "NONE_SOURCE_ONLY",

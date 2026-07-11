@@ -1,21 +1,21 @@
 {
   "schema": "global_qualified_autonomous_learning_shadow_loop_state_v1",
-  "generated_at": "2026-07-11T14:51:13Z",
+  "generated_at": "2026-07-11T15:14:35Z",
   "goal_id": "GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1",
   "goal_thread_id": "019f4b6d-1e5b-7551-9fce-7a2f029a1675",
   "goal_status": "ACTIVE",
-  "current_work_package": "WP2-CANDIDATE-AWARE-ARBITER",
-  "current_work_package_state": "ACTIVE_WP3_PROOF_REWARD_BRIDGE_SOURCE_ADAPTERS",
+  "current_work_package": "WP3-PROOF-REWARD-BRIDGE",
+  "current_work_package_state": "ACTIVE_WP3_PROOF_REWARD_REPOSITORY_ADAPTERS",
   "baseline_packet": "baseline_state_packet.json",
   "baseline_packet_sha256": "30c10a497f02794525ce6e1d70972829bde7942a6a0bb181e36a13e308400b60",
   "baseline_evidence_delta_hash": "0ab0b80f307951108d0cf5edd3bb5940cb936bd093081c37c6d90e874e52ec28",
   "source_runtime": {
     "branch": "main",
     "baseline_aligned_head": "1a3ecdd57927e70dd8c6dedfed4ecef04c7a46d3",
-    "mac_head": "328125a08e0f15057a110c69266d6a6ea71c8826",
-    "mac_origin_main": "328125a08e0f15057a110c69266d6a6ea71c8826",
-    "source_capture_kind": "WP2B_B2_2C_RESTART_SAFE_HANDOFF_SOURCE_ACCEPTANCE_CHECKPOINT",
-    "behavioral_source_checkpoint": "328125a08e0f15057a110c69266d6a6ea71c8826",
+    "mac_head": "8999aa2b7e4a3bba3841f4c72cf054d88cb69c5c",
+    "mac_origin_main": "8999aa2b7e4a3bba3841f4c72cf054d88cb69c5c",
+    "source_capture_kind": "WP3_PROOF_REWARD_VALIDATION_ADAPTER_SOURCE_ACCEPTANCE_CHECKPOINT",
+    "behavioral_source_checkpoint": "8999aa2b7e4a3bba3841f4c72cf054d88cb69c5c",
     "linux_head": "7d1c247947f0fb6c139f8a0583c5e6ed6ae62c70",
     "linux_origin_main": "a927c37d14f768b923f11b29ea61d8e94ca8d5ff",
     "mac_unrelated_dirty_worktree_preserved": true,
@@ -225,6 +225,20 @@
     "event_driven_primary_proven": false,
     "runtime_or_pg_acceptance": false
   },
+  "wp3_source_checkpoint": {
+    "proof_reward_validation_adapter_commit": "8999aa2b7e4a3bba3841f4c72cf054d88cb69c5c",
+    "status": "DONE_SOURCE_ACCEPTED_VALIDATION_ADAPTER",
+    "focused_tests": "10 passed in 0.08s",
+    "integrated_tests": "263 passed in 1.08s",
+    "e2_qc_qa": "PASS/PASS/PASS_SOURCE_CHECKPOINT_TO_PM",
+    "p0_p1": "0/0",
+    "projection_handoff_required": true,
+    "candidate_context_caller_substitution_allowed": false,
+    "proof_reward_or_receipt_created": false,
+    "durable_receipt_status": "unverified_source_only",
+    "runtime_or_pg_acceptance": false,
+    "next_work_id": "WP3-PROOF-REWARD-REPOSITORY-ADAPTERS"
+  },
   "supersession": {
     "sui": {
       "status": "ROTATED_UNCONSUMABLE_STALE_PACKET",
@@ -279,9 +293,8 @@
     "DONE_OPERATIONAL_SHADOW",
     "BACKLOG_EXHAUSTED"
   ],
-  "next_safe_action": "Execute WP3-PROOF-REWARD-BRIDGE-SOURCE-ADAPTERS: read and validate only PIT/candidate/order-fill/cost-proof inputs, persist no authority, and defer all external acquisition to a fresh exact E3/BB gate",
+  "next_safe_action": "Execute WP3-PROOF-REWARD-REPOSITORY-ADAPTERS: preserve the accepted immutable projection-to-proof contract across source repository read/plan seams, persist no authority, and defer all external acquisition to a fresh exact E3/BB gate",
   "remaining_safe_work_inventory": [
-    "WP3 proof/reward read-validation-repository adapters",
     "WP3 proof/reward repository adapters",
     "WP4 versioned training/registry contracts",
     "WP5 OOS and decision engine",
@@ -293,13 +306,14 @@
     "B2.2a preserves only validated prospective context losslessly through event, decision, ledger, and blocked outcome; no evaluation or board projection is synthesized",
     "Only explicit_source_rows may carry prospective context; PG, snapshot, and unmarked historical rows remain contextless and UNQUALIFIED_CONTEXT_MISSING",
     "B2.2c binds v2 board handoff identity to immutable source/policy/prior state, processes scanner-idle board deltas, and suppresses only integrity-verified exact replays",
+    "WP3 validation adapter at 8999aa2b requires the B2.2c handoff and derives selected candidate/context proof identity; it validates only caller-provided proof/reward artifacts and does not create a receipt, proof, reward, or durable record",
     "The last accepted WP1 runtime snapshot at 2026-07-10T14:43:50.582201Z had a clean Linux checkout and ALR service pin at 7d1c247947f0fb6c139f8a0583c5e6ed6ae62c70; WP2-B did not re-inspect or mutate runtime",
     "At the last accepted WP1 runtime snapshot, 638 run and 638 feedback rows were DEFER with zero proof, reward, actual training, and hidden OOS; WP2-B makes no newer runtime-count claim",
     "WP1 isolated and production runtime acceptance passed with durable suppression and write-accounting evidence",
     "The earlier unauthorized QA disposable local-PG probe remains retracted; R4 produced the only accepted isolated evidence"
   ],
   "inferences": [
-    "B2.2c source handoff is accepted while runtime proof remains pending; WP3 source adapters are now the highest-ROI safe gap",
+    "WP3 validation adapter is accepted while proof/reward external evidence and the remaining repository seam remain pending; no runtime fact was refreshed",
     "Zero qualified candidates is not a Goal blocker while source/test work remains"
   ],
   "assumptions": [
@@ -308,7 +322,7 @@
   ],
   "authority_granted_by_goal": false,
   "runtime_action_performed_this_loop": false,
-  "runtime_action_classification": "NONE_WP2B_B2_2C_SOURCE_ONLY",
+  "runtime_action_classification": "NONE_WP3_VALIDATION_ADAPTER_SOURCE_ONLY",
   "exchange_action_performed_this_loop": false,
   "order_action_performed_this_loop": false,
   "unrelated_worktree_changes_consumed": false
