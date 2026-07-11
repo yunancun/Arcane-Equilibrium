@@ -2,8 +2,8 @@
 
 ## 狀態欄
 - **STATUS**: IN_PROGRESS
-- **CURRENT**: P0.4 C1b(交易死碼:tab-demo _ocMetric×3 [0-caller] + tab-risk 懸空 --bg-card→--bg-surface;E1a→E2 硬邊界親算)
-- **LAST-COMMIT**: aaa784f09(P0.4 C1 非交易死碼/懸空/哨兵/常量)
+- **CURRENT**: P0.4 C2(半徑收斂:~118 off-scale border-radius→5/8/12,整組轉避 5/6 錯位;承 05_utilities §5.3+07 §3.1 映射表)
+- **LAST-COMMIT**: 325ed2cea(P0.4 C1b 交易死碼/懸空 var)
 - **回歸基線漂移(2026-07-11)**:structure/ 4F→浮動 **7-9F**——兄弟 session commit `aa67c3afd` 引入 test_development_agent_governance(新治理框架)**order-dependent** 測試(solo 2F/混跑 3-5F,不掃 GUI 檔);GUI 面基線=formatter/spec-drift/gui guard 全綠(48/0),用 `-k gui or numeric or utilities or tokens or fork` 或 comm 對照法驗 GUI 零新失敗
 - **DRIFT/待裁(P0.4 PA findings)**:①working doc §9 step4 fork-delete 掛 Phase0 vs P1.4 共用組件凍結相衝→PA 以 P1.4 為準(fork bulk-rename 移 P1.4),建議更新 §9;②legacy 殼(console/trading/index=Phase3 刪除目標)仍消費舊 token 名,阻塞刪 tokens-compat.css→**C3/C5 開批前須向 OPS/operator 取 index/trading served-status**(遷 legacy vs defer 刪檔到 Phase3 二選一);③styles.css 仍 1 個 `:root`(疑 P0.1 逃逸)C3 驗;④POST 量級猜測×2 需後端契約=C8 defer Issue
 - **AWAITING-OPERATOR/QC**: demo/paper(B5/D)+ live(B6/E)顯示精度變更(4dp→2dp 聚合、bps 2dp、qty 6dp、負號 U+2212、closed-pnl per-trade 隨幣別 FX 轉換)需 QC/operator 知悉;deploy 須確認 cache-buster 已 bump(common-formatters.js 站點 p03-numerics;tab-live.js 自身 p03-b6e-live;CSS/common.js 見 P0.6)
@@ -50,7 +50,7 @@
   - **P0.6 CI-guard/cache-bust 衛生(來自 B5/D)**:①oc-utilities.css/tokens.css/tokens-compat.css 為 `<link>` 無 ?v=(CSS stale 只樣式舊非頁破,低優)+ common.js ?v=20260527 P0.1 改動宜 deploy 複核——建立「shared static 改動→cache-buster bump」CI-guard;②`_ocMetric*`×3 dead helper(B5/D)+ ocPnlClass/paper-positive 註釋殘留 刪除候選;③E2 B0 混合哨兵('--' vs OC_EMPTY)統一
 - [~] P0.4 樣式收斂——**設計正本 `design/07_consolidation.md`(PA `6f8fb17fb`)**;實測度量:裸 hex ~367/off-scale 半徑 ~118/fork class ~1138(全 tab-local,**bulk-rename 移 P1.4**)/tokens-compat 舊名消費 688;C1-C8 子批:
   - [x] C1 非交易死碼/懸空 var/blank guard/越界常量——證據 `aaa784f09`:common-formatters 刪 _OC_CAT_CONFIG color/bg 死欄(0-caller)+3 blank guard→OC_EMPTY;tab-phase4 --bg-elevated→--bg-raised(刪 #161b22 primer hex);common-modals oc-tc-meta whiteSpace→.pre-line;E1a→E2 PASS 0 blocker(死欄/懸空/哨兵/whiteSpace 全親證,零邏輯改動)→GUI structure guard 48/0 綠、C1 零新失敗(comm 對照;基線漂移=兄弟 governance 框架 order-dependent);E2 LOW 留 sentinel sweep(呼叫端 '--' 殘留)
-  - [ ] C1b 交易死碼(tab-demo _ocMetric×3/tab-risk 懸空 --bg-card)走 E2 硬邊界親算
+  - [x] C1b 交易死碼(tab-demo _ocMetric×3/tab-risk 懸空 --bg-card)——證據 `325ed2cea`:三死函數 0-caller 親證(rg ocMetric 全站 0 code caller;B5/D 後成死碼,−17 行)+tab-risk .rc-dlg-detail --bg-card→--bg-surface(懸空修正);E1a→E2 硬邊界親算 PASS no RETURN(含隱藏調用掃描/canon 6 熱紅未觸/刪除邊界乾淨)→PM 親跑 node --check 4/4(補 E2 治理路徑限制)+GUI guard 48/0+comm 對照零新失敗
   - [ ] C2 半徑收斂(~118→5/8/12,整組轉避 5/6 錯位)
   - [ ] C3 tokens-compat 遷移-非交易+殼(688 舊名→canonical,computed-identical;**前置:OPS 取 index/trading served-status + styles.css :root 驗**)
   - [ ] C4 tokens-compat 遷移-交易(live/demo/governance/risk,E2 硬邊界親算)
@@ -137,3 +137,4 @@
 | 2026-07-11 | R20 | P0.3 B6/E live | 9f1a82019 | **P0.3 完結**;gated REAL FUNDS 顯示精度變更;E2 最嚴親算:硬邊界全 IDENTICAL(typed-confirm/五閘/emergency/flatten byte-identical)、canon 6 熱紅 <style> 零 diff、**ocEsc 移除 21 處全 SAFE**、per-fill 4dp 無塌零、_edgeMetricValue bps helper #2 消除、fee!=='--'→ocIsBlank、刪 _formatSignedMoneyValue=canon7 改善;tab-live.js 1908<2000;E1a→E2 PASS no RETURN 6 lens;回歸零 delta;CURRENT=P0.4 累積收斂(需 PA 組織) |
 | 2026-07-11 | R21 | P0.4 設計 | 6f8fb17fb | PA 出 P0.4 spec-of-record `design/07_consolidation.md`(C1-C8 子批+tokens-compat 遷移映射/hex→token 對照/半徑表/fork 策略/死碼修正);重估 fork 449→~1138 全 tab-local→bulk-rename 移 P1.4(縮小 P0.4);紫中性化/琥珀→--warn;POST 量級猜測剝 C8 defer;DRIFT×3(§9 vs P1.4/legacy 殼阻塞刪 compat/styles.css :root);設計 checkpoint 完成,C1 下輪 |
 | 2026-07-11 | R22 | P0.4 C1 | aaa784f09 | 非交易死碼/懸空/哨兵/常量收斂(3 檔);_OC_CAT_CONFIG color/bg 死欄刪+3 blank guard→OC_EMPTY+--bg-elevated→--bg-raised(刪 primer hex)+oc-tc-meta whiteSpace→.pre-line;E1a→E2 PASS 0 blocker;GUI structure guard 48/0 綠、C1 零新失敗(comm 對照);**基線漂移 4F→7-9F=兄弟 aa67c3afd governance 框架 order-dependent 非 GUI**;E2 LOW 呼叫端 '--' 留 sentinel sweep |
+| 2026-07-11 | R23 | P0.4 C1b | 325ed2cea | 交易檔死碼刪除+懸空 var 修復(tab-demo 三死函數 0-caller/tab-risk --bg-card→--bg-surface);E1a→E2 硬邊界親算 PASS no RETURN(隱藏調用掃描/canon 6 熱紅未觸/刪除乾淨);PM 親跑 node --check 4/4 補 E2 治理路徑限制+GUI guard 48/0+comm 零新失敗 |
