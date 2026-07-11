@@ -228,6 +228,40 @@ def _extract_baseline_brier(report: Any) -> Optional[float]:
     return None
 
 
+# Q4 guard：two-way shadow-capped 退路的指標是 in-sample（CQR fit+evaluate 與
+#   early-stopping+回報共用單一 holdout），近乎完美的 coverage 是自評假象，絕不能
+#   被 auto-promoter 靜默推進到 promoting/production。以下常數鏡射 quantile_trainer /
+#   quantile_reports 的字面值（不 import，避免把 lightgbm 依賴鏈拉進 promoter）。
+_PARTITION_MODE_TWO_WAY = "two_way_shadow_capped"
+_IN_SAMPLE_METRIC_SOURCE_MARKERS = ("two_way", "in_sample")
+
+
+def _is_in_sample_two_way_artifact(acceptance_report: Any) -> bool:
+    """判定 registry row 的 acceptance_report 是否為 two-way in-sample 退路產物。
+
+    為什麼要在 promoter 檔這道 gate：verdict 已被 quantile_reports 封頂 shadow_only，
+      但 shadow_only 仍在 auto-promoter 的 shadow→promoting 合格 verdict 集內，故單看
+      verdict 不足以擋 in-sample 退路被自動推進。partition_mode ==
+      "two_way_shadow_capped"（或 ship_gate_metric_source 帶 in-sample 標記）即命中。
+    fail-open 保守：解析不出結構時回 False（不誤擋正常 three_way 產物），封鎖只在
+      「明確偵測到 in-sample 退路」時發生。
+    """
+    if not isinstance(acceptance_report, dict):
+        return False
+    if str(acceptance_report.get("partition_mode", "")) == _PARTITION_MODE_TWO_WAY:
+        return True
+    source = str(acceptance_report.get("ship_gate_metric_source", "")).lower()
+    if any(marker in source for marker in _IN_SAMPLE_METRIC_SOURCE_MARKERS):
+        return True
+    # 次要：任一 gate detail 明示 in_sample=True 亦視為命中（Q4 per-gate 標記）。
+    gates = acceptance_report.get("gates")
+    if isinstance(gates, dict):
+        for detail in gates.values():
+            if isinstance(detail, dict) and detail.get("in_sample") is True:
+                return True
+    return False
+
+
 def _model_name_candidates(strategy: str, engine_mode: str, quantile: str) -> Tuple[str, ...]:
     """Known model_name shapes used by training/observability writers.
     training/observability writer 可能使用的 model_name 形狀。
@@ -421,6 +455,19 @@ def evaluate_canary_eligibility(
     # 終態：跳過。
     if current in (CANARY_PRODUCTION, CANARY_REJECTED, "retired"):
         res.reasons.append(f"current_status={current!r} is terminal/no-op")
+        return res
+
+    # Q4 guard：two-way in-sample 退路產物一律 HOLD，永不自動推進（shadow→promoting
+    #   或 promoting→production 皆封）。理由：其 ship-gate 指標是 in-sample 自評，
+    #   不足以作為自動晉升依據。operator 若確有意推進，須經 transition_canary_status
+    #   顯式人工操作，不走 auto-promoter 這條靜默路徑。
+    if _is_in_sample_two_way_artifact(acceptance_report):
+        res.metrics["in_sample_two_way"] = True
+        res.reasons.append(
+            "acceptance_report partition_mode=two_way_shadow_capped (in-sample "
+            "ship-gate metrics) — auto-promotion blocked; operator manual "
+            "promotion only"
+        )
         return res
 
     if current == CANARY_SHADOW:

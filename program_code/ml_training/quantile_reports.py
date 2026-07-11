@@ -236,6 +236,38 @@ def _check_label_composition(
     }
 
 
+# Per-gate metric provenance markers (Q4 / MIT Item-1 re-review)。
+#   three_way 下 ship-gate 指標取自未污染的 test 分區 → OOS。
+#   two_way_shadow_capped 退路下，CQR fit+evaluate 與 early-stopping+回報「共用同一
+#   holdout」→ 每道 gate 的指標其實是 in-sample（近乎完美的 coverage 可能只是自我
+#   評估的假象）。把此事實直接蓋進每個 gate detail dict，讓人快速掃 shadow report
+#   時不會把 in-sample 的漂亮數字誤讀成真 OOS 表現。
+GATE_METRIC_SOURCE_OOS = "oos_test_partition"
+GATE_METRIC_SOURCE_IN_SAMPLE_TWO_WAY = "post_cqr_in_sample_two_way"
+
+
+def _stamp_gate_metric_provenance(
+    gates: Dict[str, Dict[str, Any]],
+    partition_mode: str,
+) -> None:
+    """把 in-sample-ness 蓋進每個 gate detail dict（Q4）。
+
+    為什麼用 metric_partition_source 這個獨立 key（而非覆寫既有 `source`）：coverage /
+      lgbm_vs_linear_qr 的 per_quantile 及 label_composition 的 gate 級 `source` 已有
+      各自語義（post_cqr/pre_cqr/unavailable），覆寫會毀既有欄；獨立 key 不衝突且明示。
+    無論 mode 都蓋（two_way→in_sample、three_way→oos），使報告永遠自證來源，而非只在
+      退路時才標，避免「沒標＝OOS」的隱含推斷歧義。
+    """
+    two_way = partition_mode == "two_way_shadow_capped"
+    marker = (
+        GATE_METRIC_SOURCE_IN_SAMPLE_TWO_WAY if two_way else GATE_METRIC_SOURCE_OOS
+    )
+    for gate_detail in gates.values():
+        if isinstance(gate_detail, dict):
+            gate_detail["metric_partition_source"] = marker
+            gate_detail["in_sample"] = two_way
+
+
 def _sample_size_bucket(n_labeled: int) -> str:
     """spec §6.5 bucket: prod / shadow / none.
     spec §6.5 樣本分層：production / shadow_only / no_ship。"""
@@ -376,6 +408,12 @@ def generate_acceptance_report(
         "lgbm_vs_linear_qr": {"passed": floor_pass, **floor_detail},
         "label_composition": {"passed": composition_pass, **composition_detail},
     }
+    # Q4：把每道 gate 的指標來源（OOS test 分區 vs two-way 退路的 in-sample 共用 holdout）
+    #   直接蓋進 gate detail，讓 shadow report 不會被誤讀成真 OOS。partition_mode 由
+    #   result 溯源（與 top-level ship_gate_metric_source / partition_mode 一致）。
+    _stamp_gate_metric_provenance(
+        report["gates"], getattr(result, "partition_mode", "three_way"),
+    )
     all_hard_gates_pass = all([
         skill_pass, coverage_pass, lift_pass, crossing_pass, floor_pass, composition_pass,
     ])

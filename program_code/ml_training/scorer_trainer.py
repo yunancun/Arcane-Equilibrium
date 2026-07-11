@@ -172,6 +172,7 @@ def train_scorer(
     config: Optional[ScorerConfig] = None,
     timestamps: Optional[np.ndarray] = None,
     strategy_type: str = "trending",
+    dsn: Optional[str] = None,
 ) -> TrainingResult:
     """Train LightGBM scorer with CPCV.
     使用 CPCV 訓練 LightGBM 評分器。
@@ -184,6 +185,9 @@ def train_scorer(
         timestamps: (n_samples,) epoch-ms timestamps. When provided enables CPCV
             validation. Falls back to 80/20 split when None (legacy path).
         strategy_type: trending/reversion/arb/grid — selects embargo period.
+        dsn: PostgreSQL DSN threaded into validate_cpcv → _persist_cpcv_result
+            (Item 6). None → env 解析。由 run_training_pipeline 以 config.dsn 傳入，
+            統一 CPCV 持久化的 DSN 來源（OPENCLAW_DATABASE_URL 為權威）。
     """
     cfg = config or ScorerConfig()
     result = TrainingResult(n_samples=len(labels), n_features=len(feature_names))
@@ -237,6 +241,7 @@ def train_scorer(
             )
             cpcv_result = validate_cpcv(
                 features, labels, timestamps, strategy_type, _lgb_fold_model, cpcv_cfg,
+                dsn=dsn,
             )
             # Item 5：對「最終 holdout」施加 purge + embargo，使 reported metrics.json
             # 的 rmse/correlation 來自一個已清洗的分割。原註解宣稱「final fit leak-free
