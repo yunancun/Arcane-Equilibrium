@@ -1,0 +1,114 @@
+<!doctype html>
+<!--
+  shell.html — 玄衡新殼骨架(P1.1-a strangler-fig 起步)
+  ═══════════════════════════════════════════════════════════════════
+  MODULE_NOTE
+  用途:玄衡儀單文檔殼的 markup 骨架——chrome 容器(topbar / rail / content
+    iframe host / statusbar)。與 legacy /console 並存,opt-in 進入(/static/shell.html)。
+  canon 守恆:①零內聯樣式塊、零 inline 樣式屬性、零裸 hex(全走 tokens.css + oc-utilities.css + shell.css,
+    canon 8 單一 stylesheet 正示範);②data-theme="dark" 釘死玄夜(帛晝待 P1.3);
+    ③衡樑 / 遙測無真值 → blocked 佔位(canon 7),絕不 fake;clock 是唯一 client 真值。
+  誠實邊界:殼 = 純 chrome + router,零寫路徑;交易/寫面經 iframe 保全既有硬化面。
+  ═══════════════════════════════════════════════════════════════════
+-->
+<html lang="zh-Hant" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>玄衡 · Arcane Equilibrium — Shell (beta)</title>
+<!-- 樣式:token 正本 → 工具集 → 殼 chrome(依序;殼零 inline 樣式,canon 8)-->
+<link rel="stylesheet" href="/static/tokens.css" />
+<link rel="stylesheet" href="/static/oc-utilities.css" />
+<link rel="stylesheet" href="/static/shell.css" />
+</head>
+<body>
+
+<div class="app-shell">
+
+  <!-- ═══ 頂欄:漢堡 · 品牌 · lane · 衡樑 · 遙測 · clock · 切換 · 帳號 ═══ -->
+  <header class="app-topbar">
+    <button class="rail-toggle" id="oc-rail-toggle" aria-label="開關導航" title="開關導航">☰</button>
+    <div class="brand"><span class="zh">玄衡</span><span class="en">Arcane Equilibrium</span></div>
+
+    <!-- lane segmented control(PM 裁決 A=頂欄;shell.js 接線切換 + 重繪 rail env ladder)-->
+    <nav class="lane" aria-label="資產 lane">
+      <button type="button" data-lane="crypto" aria-pressed="true">Crypto Perp · Bybit</button>
+      <button type="button" data-lane="stock" aria-pressed="false">Stock ETF · IBKR</button>
+    </nav>
+
+    <!-- 衡樑 signature(canon 7:P1.1-a 待風控包絡接線 P1.2 → blocked、水平靜置,不 fake 傾角)-->
+    <div class="beam-wrap" title="風控包絡衡樑;待 P1.2 shared WS 接真值(canon 7 blocked,不假傾角)">
+      <div class="beam beam--blocked" id="oc-beam"><div class="beam__bar"></div><div class="beam__pivot"></div></div>
+      <div class="beam-lbl"><span>包絡 <b id="oc-beam-used">—</b></span><span>待接線 · P1.2 <b id="oc-beam-left">—</b></span></div>
+    </div>
+
+    <!-- engine / lease 遙測(canon 7 blocked 佔位;真值 P1.2,零新 fetch)-->
+    <div class="topstat" title="引擎心跳 / 租約遙測待接線 P1.2(canon 7,不假 heartbeat)">
+      engine <span class="blocked">待接線 · P1.2</span><br>lease <span class="blocked">—</span>
+    </div>
+
+    <!-- clock:唯一 client 真值(UTC 上 / local 下)-->
+    <div class="topclock">
+      <span id="oc-clock-utc" class="lbl">— UTC</span><br><span id="oc-clock-local">—</span>
+    </div>
+
+    <div class="toggles">
+      <button type="button" id="oc-density-btn" title="切換密度(舒適 / 緊湊)">舒適</button>
+      <button type="button" id="oc-theme-btn" aria-disabled="true" title="帛晝主題待 P1.3(AA 三綠);P1.1-a 釘死玄夜">帛晝 · 待 P1.3</button>
+    </div>
+
+    <div class="account">
+      <span class="actor" id="oc-account-actor">—</span>
+      <a class="legacy-link" href="/console" title="返回舊版 Console(beta 期一鍵退回)">舊版</a>
+      <button type="button" id="oc-logout" title="登出">登出</button>
+    </div>
+  </header>
+
+  <!-- ═══ 左 rail:env ladder(scoped active lane)+ cross-cutting(釘底);shell.js 注入 ═══ -->
+  <nav class="app-rail" aria-label="主導航">
+    <div class="rail-envs" id="oc-rail-envs"></div>
+    <div class="rail-cross" id="oc-rail-cross"></div>
+  </nav>
+
+  <!-- ═══ 內容區 = iframe host(18 view 全 iframe 後備;shell.js 注入 iframe)═══ -->
+  <main class="app-content">
+    <div id="oc-view-host"></div>
+    <div class="view-error" id="oc-view-error">
+      <div>視圖載入失敗 · 殼未崩,可切其他視圖</div>
+      <div class="code">IFRAME LOAD ERROR</div>
+      <a href="/console">返回舊版 · Legacy Console</a>
+    </div>
+  </main>
+
+  <!-- ═══ 底部 status strip:滿寬跨 rail 下方;≤960 促升三 chip(engine/mode/PnL 不失)═══ -->
+  <footer class="app-status">
+    <div class="app-status__wide">
+      <span>engine <span class="blocked">待接線 · P1.2</span></span>
+      <span>mode <span class="blocked">—</span></span>
+      <span>Live/Demo PnL <span class="blocked">—</span></span>
+      <span>latency <span class="blocked">—</span></span>
+      <span>sync <span class="blocked">—</span></span>
+      <span>queue <span class="blocked">—</span></span>
+      <span class="build" id="oc-build">build —</span>
+    </div>
+    <div class="app-status__core">
+      <span class="chip">engine <span class="blocked">待接線</span></span>
+      <span class="chip">mode <span class="blocked">—</span></span>
+      <span class="chip">PnL <span class="blocked">—</span></span>
+    </div>
+  </footer>
+
+</div>
+
+<!-- 依賴序(design/09 §1):fetch_with_csrf → common-formatters → common-mode-badge
+     → common-modals → common(ocAuthCheck/ocLogout/ocEsc) → i18n_zh → shell。不重造 auth/CSRF/formatter。 -->
+<script src="/static/js/fetch_with_csrf.js?v=20260527.ops1"></script>
+<script src="/static/common-formatters.js?v=20260711.p03-numerics"></script>
+<script src="/static/common-mode-badge.js?v=20260519.split-p2"></script>
+<script src="/static/common-modals.js?v=20260519.split-p2"></script>
+<script src="/static/common.js?v=20260527.ops1-csrf"></script>
+<script src="/static/i18n_zh.js"></script>
+<script src="/static/shell.js?v=20260711.shell-p11a"></script>
+
+</body>
+</html>
