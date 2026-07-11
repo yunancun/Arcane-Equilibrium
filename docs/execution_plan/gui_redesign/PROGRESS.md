@@ -1,7 +1,8 @@
 # GUI 大改 · 進度帳本(loop 持久狀態;協議見 LOOP-DRIVER.md)
 
 ## 狀態欄
-- **STATUS**: ⏸ PAUSED_AT_PHASE_0_COMPLETE(operator 定 Phase 1 暫緩;loop 到此停,重啟 /loop 可續)
+- **STATUS**: ▶ PHASE_1_IN_PROGRESS(operator 2026-07-11 P0 驗收通過後放行續跑;驗收記錄見「P0 驗收」節)
+- **NEXT**: P1.pre-1 殼層紫斷點小補丁 → P1.pre-2 C6f 掃尾 → P1.0 smoke tests(Phase 1 節)
 - **CURRENT**: ⏸ **operator「小項收尾+三端同步」計劃全完成 · loop 停於 Phase 0 收官點**。已完成:emoji 🟣→🔴(R39)+ C6e/P0.5 裁決 defer(R40)+ **三端同步 Mac=origin=Linux=`1b16115bc`**(Linux runtime on-disk GUI 驗證反映玄衡改版[tokens.css 雙主題暖底/tab-live 🔴/P0.6 守衛/seal-mark]+control_api 運行)。**Phase 1(單文檔殼重大架構)operator 暫緩**——loop 無更多自動可推項(deferred 項均 blocked),停於此;operator 要啟 Phase 1 或解 defer 時 /loop 重啟
 - **LAST-COMMIT**: 三端同步後 origin/main=`1b16115bc`(含全 GUI 工作+協調者 ML-audit);GUI R40 帳本本次提交
 - **C6e 裁決=DEFER**:styles.css 119 hex 由 console(active 主殼 /console)+index/trading/login 消費,**非純 Phase3 legacy**,但①119 hex 是**不同 Tailwind slate/navy 調色**(#020617/#1e293b/#166534/#cbd5e1/#86efac,非 tab 的 GitHub-primer)需自己映射 spec+②console/index/trading 是 Phase3 strangler-fig **刪除目標**→re-theme=白工(Phase 1 新殼取代)。**flag**:Phase 1 暫緩期 operator 會見「冷 slate 殼 chrome + 暖玄衡 tab 內容」視覺接縫;若接縫困擾可提前做 C6e(需 PA Tailwind→玄衡映射 spec),否則 defer 到 Phase 1 新殼
@@ -24,6 +25,17 @@
 - **AWAITING-OPERATOR**: —（**C6d gate 2026-07-11 已裁決**,operator via AskUserQuestion + working doc §0.1）:①族B live/real-money 標記→**升 --live 熱紅**（採 PA 強推非灰化,canon6+root5/6 保真錢警示 salience）;②T3 authority 徽章→**加 .seal-mark 朱印方印**（動 renderTrustTier，已於 C6d-1 落地）。C6d-1 已完成，C6d-2/3 開批中
 - **NEEDS-LINUX-RUNTIME**: —
 - 行數基線:static/ 61 檔 36,337 行(tag `gui-baseline-2026-07-09`);當前:未量測
+
+## P0 驗收(2026-07-11,operator 指令;PM 量化門 + E4-verifier + A3 三方獨立)
+- **裁決:P0 驗收通過(PASS-WITH-FINDINGS,零 sign-off blocker);operator 放行 Phase 1 續跑。**
+- PM 量化門:style= 全站 5 全 legit ✅ / node --check 全綠 ✅ / 檔案全 <2000(tab-live.js 1924、tab-settings.html 1899 逼近 cap,P2 拆分觀察)/ tokens link 22+_dashboard_card fragment 豁免 ✅ / structure 622P+4F=基線身分逐一吻合 ✅ / GUI 子集 53/0+四 guard 7/0+G0.5 25/25 ✅ / 淨行數 35,486<36,337 基線 ✅
+- E4-verifier:**VERIFIED-WITH-GAPS**(證據成立;gap=歷史計數快照不可重放——**引用紀律:回歸引用一律以「4F 失敗者身分基線」為準,不引 passed 絕對數**;`stock_etf.rs`>800 cap 致 2F=IBKR 軸欠帳,建議獨立 ticket 勿長期當 pre-existing 吸收)
+- A3:**PASS-WITH-FINDINGS**(報告正本=該輪 agent 回覆;findings 路由如下)
+  - **H-1 帛晝 token 級 AA 不達**(muted 3.27-3.72/warn/live/語義疊 α-bg 全 <4.5;玄夜健康)+ **H-2 33 處硬編碼冷調 rgba(13,17,23,α) 面板底**(帛晝下 1.0-2.6 不可讀)→ **P1.3 硬 gate**(見 Phase 1)
+  - **M-1 殼層紫同屏矛盾** → **P1.pre-1**(~10 行 console.html 外科 swap:152-165 live tab 紫底線→--live 系/904 mode 色表紫/34 logo 漸層/39 tag-blue/64 .mc 邊框 #21262d→--border-subtle/96-97 rgba(13,17,23)→--bg-sunken;消九成接縫,/gui /trading 容忍至 Phase 3)
+  - M-2 玄夜 --seal 對比 3.05-3.47(non-text 可辯)→P1.3 retune 一併;M-3 uppercase 套 CJK 混排 ~10 類→Phase 2 copy pass 綁定;M-4 --blue 中性化後品類通道歸零+撞 stale dim 慣例→Phase 2 眉標/weight 方案;L-1~L-7 小項留 A3 報告(L-6 tokens-compat.css:9 生命週期註釋漂移→P1.pre-2 順帶修)
+  - **V5 runtime 視檢 defer 清單 8 項**(帛晝全站/seal DPI/三態真值/鍵盤走查/接縫目視/stale 誤讀/壓線對比/uppercase 混排)=終驗收 V5 執行清單正本
+- PM 新發現 → **P1.pre-2 C6f 掃尾**:cards/*.html 15 hex(news 9/teacher 3/dl3 2/linucb 1)+app-paper.js 1+login.html:23 1 → token 化;common.js var() 冷調 fallback 值(932-1006)對齊玄衡或刪(tokens.css 22 檔必載);tokens-compat.css 註釋改「Phase 3 與殼層同刪」;risk-tab.js:1086 hex=注釋內容非違規
 
 ## Phase 0 · token 統一+清污(可逆,iframe 內,零架構風險)
 - [x] P0.1 `tokens.css` 玄衡儀版複製入 `static/`,全部 18 tab+console.html+index.html+login.html `<link>` 引入;刪三處 token fork(styles.css :root / common.js ocInjectBaseCSS 內 :root / console.html inline :root),消 unstyled-flash race
@@ -88,10 +100,12 @@
 - [x] P0.6 CI 守衛 baseline-ratchet——證據 `f388260ae`:`tests/structure/test_gui_style_ratchet_static.py`;三維 per-file 快照(61 檔 hex=237/style_attr=5/style_block=32,34 非零)禁回歸增長,允許現有 defer/保留;第二測試釘死正則防空洞綠;守衛 2 passed+四 GUI guard 併跑 7 passed+合成注入 style→FAIL 精確定位→還原 PASS(有牙);誠實校正 inline style= 非全 0(5 處 scoped-var/孤兒納 baseline 鎖死)
 
 ## Phase 1 · 單文檔殼(strangler-fig 起步;交易 tab 仍走 iframe)
-- [ ] P1.0 **GUI smoke tests 從零建立**(現狀零覆蓋=最大風險;先於一切遷移)
+- [ ] P1.pre-1 殼層紫斷點小補丁(A3 M-1,~10 行 console.html 外科 swap;先於一切——不動 styles.css 不算 C6e)
+- [ ] P1.pre-2 C6f 掃尾(cards hex 15+app-paper 1+login 1 token 化/common.js 冷 fallback 對齊/compat 註釋修)
+- [ ] P1.0 **GUI smoke tests 從零建立**(現狀零覆蓋=最大風險;先於一切遷移;PA-investigator 先出 Mac 可跑之最小方案——node+jsdom 級 DOM smoke 或等效,Linux runtime smoke 列 NEEDS-LINUX-RUNTIME)
 - [ ] P1.1 新殼 shell:玄衡頂欄(品牌+lane 切換+**衡樑**+engine/lease 狀態)+ rail(lane×environment IA)+ 底部狀態帶;view-router(hash 路由;未遷移 view 掛 iframe 後備)
 - [ ] P1.2 共享數據層:單一 WebSocket+按 view 訂閱;每 view 新鮮度徽章(canon 7)
-- [ ] P1.3 主題/密度切換(玄夜/帛晝+舒適/緊湊,持久化 localStorage)+ ⌘K 命令面板(跳轉 view/常用查詢)
+- [ ] P1.3 主題/密度切換(玄夜/帛晝+舒適/緊湊,持久化 localStorage)+ ⌘K 命令面板(跳轉 view/常用查詢)。**硬 gate(A3 驗收,三綠才解 data-theme="dark" 釘死)**:①PA 出泛用 α-overlay token 並遷移 H-2 的 33 處冷調面板底;②帛晝 --warn/--live/--muted/--seal AA retune(muted 文檔化為「非必讀文字專用」;--live 帛晝走加深路線 vs 調紙底,PA 裁決,canon 6 不稀釋);③token-pair AA 對比寫成 P0.6 式靜態 ratchet 測試(純算術 CI 化)
 - [ ] P1.4 共用組件凍結:panel/KPI/table/chip/badge/logblock/朱印/typed-confirm modal(形制=樣品正本)
 - [ ] P1.5 Live 硬化快照+client audit events 先行快照(§9 Guard)
 
