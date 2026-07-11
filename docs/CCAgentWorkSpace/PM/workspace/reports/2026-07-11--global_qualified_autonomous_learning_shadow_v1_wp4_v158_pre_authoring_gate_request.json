@@ -1,10 +1,11 @@
 {
-  "schema_version": "global_qualified_autonomous_learning_shadow_wp4_v158_pre_authoring_gate_request_v1",
-  "generated_at": "2026-07-11T19:02:04Z",
+  "schema_version": "global_qualified_autonomous_learning_shadow_wp4_v158_pre_authoring_gate_request_v2",
+  "generated_at": "2026-07-11T19:30:33Z",
   "goal_id": "GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1",
   "goal_thread_id": "019f4b6d-1e5b-7551-9fce-7a2f029a1675",
   "request_id": "WP4-V158-PRE-AUTHORING-GATE-REQUEST",
-  "request_status": "REQUEST_E3_REVIEW_NO_MIGRATION_AUTHORITY",
+  "revision": 2,
+  "request_status": "E3_REVIEW_REPAIR_R1_PENDING",
   "requester": "PM",
   "gate_sequence": [
     "E3",
@@ -12,8 +13,13 @@
     "PM"
   ],
   "source_binding": {
-    "request_parent_head": "9bce6877c2388a2df20df0b6ce2f8e3279e8a6fe",
-    "request_parent_origin_main": "9bce6877c2388a2df20df0b6ce2f8e3279e8a6fe",
+    "request_parent_head": "d6c9fb862c565e42cb88dc6fec110bcfd9781f13",
+    "request_parent_origin_main": "d6c9fb862c565e42cb88dc6fec110bcfd9781f13",
+    "r1_reviewed_source_head": "53771890c3ea522f278046752e376dacf5dfafd8",
+    "r1_reviewed_origin_main": "53771890c3ea522f278046752e376dacf5dfafd8",
+    "r1_reviewed_request_sha256": "a033656c126306030b764fee1b073ca394e07c40fdfdfaa3d964b44ad3441d5f",
+    "r1_e3_report": "docs/CCAgentWorkSpace/E3/workspace/reports/2026-07-11--global_qualified_autonomous_learning_shadow_v1_wp4_v158_pre_authoring_gate_r1.md",
+    "review_target_is_commit_containing_this_packet": true,
     "behavioral_contract_checkpoint": "f36379b9ddf10ee1055daeda27805c409c6ee8bd",
     "documentation_checkpoint": "e7223997e9678fe0f9de7d158160e4fca783e377",
     "publish_alignment_checkpoint": "9bce6877c2388a2df20df0b6ce2f8e3279e8a6fe",
@@ -22,6 +28,40 @@
     "v157_sha256": "0b81e5795f4d387b2768ebf22440641c30a61ded7ed5115db92c542f67ff8000",
     "source_checksum_manifest_sha256": "ef9a6d058b55c5a2c0b286c8bdbf2148780e586795913d5540efb9a2fbb5526d",
     "source_drift_invalidates_review": true
+  },
+  "intervening_source_drift": {
+    "observed_after_r1_head": "53771890c3ea522f278046752e376dacf5dfafd8",
+    "latest_origin_main_before_v2_publish": "d6c9fb862c565e42cb88dc6fec110bcfd9781f13",
+    "commits": [
+      "719e5a3cf6f8d5ceee47a9db3d47058ce41128e1",
+      "d6c9fb862c565e42cb88dc6fec110bcfd9781f13"
+    ],
+    "changed_paths": [
+      "tests/structure/test_gui_live_hardening_snapshot_static.py",
+      "docs/execution_plan/gui_redesign/PROGRESS.md"
+    ],
+    "classification": "GUI_TEST_AND_DOCUMENTATION_ONLY",
+    "alr_migrations_contracts_ml_training_goal_state_or_gate_packet_changed": false,
+    "v158_collision_introduced": false,
+    "review_will_bind_fresh_commit_containing_v2": true
+  },
+  "r1_repair": {
+    "r1_verdict": "REJECT_WITH_FINDINGS",
+    "r1_severity": {
+      "p0": 0,
+      "p1": 2,
+      "p2": 1
+    },
+    "direct_application_table_dml_removed": true,
+    "dedicated_nologin_writer_and_fixed_function_seam_required": true,
+    "generic_application_function_execute_removed_and_separate_trainer_caller_required": true,
+    "composite_lineage_and_exact_quantile_trio_invariant_required": true,
+    "feature_and_model_schema_parity_required": true,
+    "postgres_16_security_definer_deferred_trigger_required": true,
+    "postgres_atomicity_scoped_to_database_only": true,
+    "filesystem_stage_two_parent_fsync_no_replace_rename_database_first_recovery_contract_required": true,
+    "bb_review_started": false,
+    "authority_granted": false
   },
   "collision_scan": {
     "eligible_migration_count": 139,
@@ -52,7 +92,7 @@
     "serving_or_promotion_action": false
   },
   "forward_schema_design": {
-    "design_version": "alr_qualified_challenger_training_schema_v1",
+    "design_version": "alr_qualified_challenger_training_schema_v2",
     "schema": "learning",
     "forward_only": true,
     "backfill": false,
@@ -60,6 +100,59 @@
     "v152_v153_file_or_table_contract_mutation": false,
     "v157_or_legacy_model_registry_reuse": false,
     "artifact_kind_or_provenance_edge_constraint_expansion": false,
+    "writer_role_precondition": {
+      "role": "alr_challenger_writer",
+      "must_exist_before_migration": true,
+      "created_only_by_future_gated_secure_apply_or_preflight": true,
+      "migration_creates_role": false,
+      "login_or_secret_material_in_repository": false,
+      "required_attributes": [
+        "NOLOGIN",
+        "NOSUPERUSER",
+        "NOCREATEDB",
+        "NOCREATEROLE",
+        "NOINHERIT",
+        "NOREPLICATION",
+        "NOBYPASSRLS"
+      ],
+      "incoming_or_outgoing_role_memberships_allowed": false,
+      "application_role_can_set_role_to_writer": false,
+      "migration_fails_closed_if_role_or_membership_posture_differs": true
+    },
+    "trainer_caller_role_precondition": {
+      "role": "alr_challenger_trainer_caller",
+      "purpose": "separately authenticated least-privilege caller for fixed challenger receipt, result, and readback functions; this is the explicit trusted boundary for claiming a completed local shadow fit",
+      "must_exist_before_migration": true,
+      "created_only_by_future_gated_secure_apply_or_preflight": true,
+      "migration_creates_role_or_credentials": false,
+      "private_dsn_and_secret_material_stored_outside_repository": true,
+      "required_attributes": [
+        "LOGIN",
+        "NOSUPERUSER",
+        "NOCREATEDB",
+        "NOCREATEROLE",
+        "NOINHERIT",
+        "NOREPLICATION",
+        "NOBYPASSRLS",
+        "CONNECTION LIMIT 1"
+      ],
+      "incoming_or_outgoing_role_memberships_allowed": false,
+      "trading_ai_or_alr_shadow_can_set_role_to_trainer_caller": false,
+      "migration_fails_closed_if_role_or_membership_posture_differs": true,
+      "future_secure_apply_preflight_not_sql_migration_verifies_private_dsn_mode_and_credential_separation": true
+    },
+    "future_apply_credential_attestation": {
+      "producer": "OPS",
+      "independent_reviewer": "E3",
+      "scope": "future apply only; not satisfied or authorized by this source-authoring packet",
+      "must_bind": [
+        "exact apply source head and request SHA",
+        "alr_challenger_trainer_caller role OID and exact role attributes",
+        "private DSN file identity, owner, and mode 0600 without recording its secret",
+        "credential is independently provisioned and not shared with trading_ai or alr_shadow"
+      ],
+      "sql_migration_can_self_attest_credentials": false
+    },
     "tables": [
       {
         "name": "learning.alr_qualified_training_receipts",
@@ -88,10 +181,12 @@
           "created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP"
         ],
         "constraints": [
-          "all identity/hash columns are lowercase 64-hex except source head fields not present here",
+          "all identity/hash columns are lowercase 64-hex",
           "projection_artifact_hash references learning.alr_artifact_nodes(artifact_hash)",
           "training_key_hash is unique",
+          "durable_receipt_hash plus training_key_hash is unique and is the referenced run lineage key",
           "source_receipt_hash plus training_key_hash is unique",
+          "primary key and every unique replay or foreign-key arbiter are NOT DEFERRABLE",
           "receipt_status equals QUALIFIED_INPUT_PERSISTED",
           "canonical_payload is a JSON object",
           "no_authority equals the exact all-false schema constant",
@@ -114,6 +209,7 @@
           "actual_training_config_hash TEXT NOT NULL",
           "actual_feature_schema_hash TEXT NOT NULL",
           "actual_label_schema_hash TEXT NOT NULL",
+          "model_schema_version TEXT NOT NULL",
           "actual_training_rows INTEGER NOT NULL",
           "model_artifact_set_hash TEXT NOT NULL",
           "metrics_hash TEXT NOT NULL",
@@ -130,15 +226,19 @@
         "constraints": [
           "training_run_hash and all content identities are lowercase 64-hex",
           "source_head is lowercase 40-hex",
-          "durable_receipt_hash references learning.alr_qualified_training_receipts(durable_receipt_hash)",
-          "training_key_hash is unique and must be repository-verified against its receipt before insert",
+          "durable_receipt_hash plus training_key_hash is a composite foreign key to the exact receipt pair",
+          "training_key_hash is unique",
+          "training_run_hash plus training_key_hash plus model_artifact_set_hash is unique and is the referenced result lineage key",
+          "training_run_hash plus training_key_hash plus model_artifact_set_hash plus actual_feature_schema_hash plus model_schema_version is unique and is the referenced artifact lineage key",
+          "primary key and every unique replay or foreign-key arbiter are NOT DEFERRABLE",
           "run_status equals TRAINING_PERFORMED",
           "model_training_performed is exactly true",
           "actual_training_rows is positive",
+          "model_schema_version is a non-empty schema identifier",
           "fit_completed_at is not earlier than fit_started_at",
           "canonical_payload is a JSON object",
           "no_authority equals the exact all-false schema constant",
-          "authority_counters allows model_fit_count exactly one and keeps every authority counter zero"
+          "authority_counters allows model_fit_count exactly one and keeps every order, serving, promotion, risk, lease, and exchange authority counter zero"
         ]
       },
       {
@@ -148,6 +248,8 @@
         "columns": [
           "artifact_hash TEXT NOT NULL",
           "training_run_hash TEXT NOT NULL",
+          "training_key_hash TEXT NOT NULL",
+          "model_artifact_set_hash TEXT NOT NULL",
           "quantile TEXT NOT NULL",
           "artifact_format TEXT NOT NULL",
           "artifact_path TEXT NOT NULL",
@@ -159,13 +261,15 @@
           "created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP"
         ],
         "constraints": [
-          "artifact_hash and feature_schema_hash are lowercase 64-hex",
-          "training_run_hash references learning.alr_challenger_training_runs(training_run_hash)",
+          "artifact_hash, training_run_hash, training_key_hash, model_artifact_set_hash, and feature_schema_hash are lowercase 64-hex",
+          "training_run_hash plus training_key_hash plus model_artifact_set_hash plus feature_schema_hash plus model_schema_version is a composite foreign key to the exact completed run and forces both schema fields to match",
           "quantile is exactly q10, q50, or q90",
           "training_run_hash plus quantile is unique",
+          "primary key and every unique replay or foreign-key arbiter are NOT DEFERRABLE",
+          "artifact_hashes for the three quantiles are distinct",
           "artifact_format equals onnx",
           "artifact_size_bytes is positive",
-          "artifact_path is non-empty and must be repository-verified inside an immutable isolated root",
+          "artifact_path is non-empty and repository-verified inside the immutable isolated root before the database writer is called",
           "symlink_created is exactly false",
           "serving_visible is exactly false"
         ]
@@ -189,7 +293,10 @@
         ],
         "constraints": [
           "challenger_hash, training_key_hash, model_artifact_set_hash, and training_run_hash are lowercase 64-hex",
-          "training_run_hash references learning.alr_challenger_training_runs(training_run_hash) and is unique",
+          "training_run_hash plus training_key_hash plus model_artifact_set_hash is a composite foreign key to the exact completed run",
+          "training_run_hash is unique",
+          "training_key_hash is unique",
+          "primary key and every unique replay or foreign-key arbiter are NOT DEFERRABLE",
           "registry_status equals NOT_SERVING",
           "serving_allowed is exactly false",
           "promotion_allowed is exactly false",
@@ -199,34 +306,155 @@
         ]
       }
     ],
+    "model_artifact_set_hash_contract": {
+      "algorithm": "sha256",
+      "input_encoding": "UTF-8",
+      "canonical_text": "q10=<lowercase-64-hex-artifact-hash>\nq50=<lowercase-64-hex-artifact-hash>\nq90=<lowercase-64-hex-artifact-hash>\n",
+      "postgres_expression_semantics": "pg_catalog.encode(public.digest(pg_catalog.convert_to(canonical_text, 'UTF8'::pg_catalog.name), 'sha256'::pg_catalog.text), 'hex'::pg_catalog.text)",
+      "caller_supplied_hash_is_recomputed_and_must_match": true,
+      "public_digest_bytea_text_exact_signature_extension_membership_and_trusted_owner_require_future_apply_preflight": true,
+      "v158_must_not_silently_install_or_relocate_pgcrypto": true
+    },
+    "writer_functions": [
+      {
+        "name": "learning.persist_alr_qualified_training_receipt_v1",
+        "kind": "fixed typed receipt writer",
+        "security": "SECURITY DEFINER owned by alr_challenger_writer with SET search_path = pg_catalog, pg_temp",
+        "sql_shape": "fully qualified static SQL only; no dynamic SQL and no caller-selected relation, column, status, or authority field",
+        "behavior": "insert exactly one qualified receipt or compare every deterministic caller-bound and function-owned content field on an idempotent replay; created_at is generated only on first insert, never supplied or regenerated for comparison, and the original persisted created_at is returned; any content mismatch raises and aborts"
+      },
+      {
+        "name": "learning.persist_alr_challenger_training_result_v1",
+        "kind": "fixed typed completed-result writer",
+        "security": "SECURITY DEFINER owned by alr_challenger_writer with SET search_path = pg_catalog, pg_temp",
+        "sql_shape": "fully qualified static SQL only; no dynamic SQL and three required non-variadic typed artifact argument groups named q10, q50, and q90",
+        "behavior": "verify the exact receipt pair without SELECT FOR UPDATE and rely on NOT DEFERRABLE unique and foreign-key serialization; set only the named completeness constraint triggers DEFERRED before inserts; require three distinct artifact hashes; recompute the canonical artifact-set hash; insert exactly one run, q10/q50/q90 artifacts, and one NOT_SERVING registry row; set only those named triggers IMMEDIATE after all inserts so completeness is checked before return; on replay compare every deterministic caller-bound and function-owned content field while returning the original server-generated created_at values; any mismatch raises and aborts"
+      }
+    ],
+    "readback_functions": [
+      {
+        "name": "learning.read_alr_qualified_training_receipt_v1",
+        "kind": "fixed typed exact receipt reader",
+        "security": "SECURITY DEFINER owned by alr_challenger_writer with SET search_path = pg_catalog, pg_temp",
+        "sql_shape": "fully qualified static SELECT by durable_receipt_hash plus training_key_hash; no dynamic SQL, predicate, relation, column, or lock mode supplied by caller",
+        "behavior": "return the complete receipt or a typed not-found result; multiple, partial, or malformed state raises and aborts"
+      },
+      {
+        "name": "learning.read_alr_challenger_training_result_v1",
+        "kind": "fixed typed exact completed-result reader",
+        "security": "SECURITY DEFINER owned by alr_challenger_writer with SET search_path = pg_catalog, pg_temp",
+        "sql_shape": "fully qualified static SELECT by training_run_hash plus training_key_hash with artifacts ordered q10/q50/q90; no dynamic SQL or caller-selected predicate",
+        "behavior": "return one complete run, its exact three artifacts, and one registry row only after rechecking composite lineage, schema parity, quantile-set, and set-hash invariants; return typed not-found only when none of those rows exist; partial or divergent state raises and aborts"
+      }
+    ],
+    "writer_owned_field_contract": {
+      "receipt_status": "function emits QUALIFIED_INPUT_PERSISTED; caller cannot select a status",
+      "run_status": "function emits TRAINING_PERFORMED only inside the completed-result writer; caller cannot select a status",
+      "registry_status": "function emits NOT_SERVING; caller cannot select a status",
+      "authority_booleans_and_counters": "functions construct the exact schema constants; caller cannot supply or override authority",
+      "receipt_canonical_payload": "must be an exact schema-versioned object whose content-addressed identities are recomputed or compared to the typed receipt arguments",
+      "result_canonical_payload": "is constructed from the fixed typed result arguments and fixed no-authority constants rather than accepted as an opaque caller-selected claim",
+      "database_row_self_attests_filesystem_bytes": false,
+      "dedicated_trainer_caller_is_an_explicit_trust_boundary_not_a_cryptographic_fit_attestation": true
+    },
+    "function_entry_guards": {
+      "persistence_functions_require_session_user": "alr_challenger_trainer_caller",
+      "persistence_and_trigger_functions_require_session_replication_role": "origin",
+      "non_origin_or_unexpected_session_user_behavior": "raise before any insert or readback mutation and abort the transaction",
+      "reader_functions_require_session_user": "alr_challenger_trainer_caller",
+      "security_definer_current_user_must_equal": "alr_challenger_writer"
+    },
+    "commit_time_invariants": {
+      "implementation": "DEFERRABLE INITIALLY DEFERRED constraint triggers on training runs, model artifacts, and registry rows plus immutable update/delete guards",
+      "constraint_trigger_names": [
+        "learning.alr_challenger_run_complete_ct_v1",
+        "learning.alr_challenger_artifact_complete_ct_v1",
+        "learning.alr_challenger_registry_complete_ct_v1"
+      ],
+      "constraint_mode_choreography": "the result writer uses SET CONSTRAINTS on exactly these names, never ALL: force DEFERRED before the first run insert so a caller's prior IMMEDIATE setting cannot cause partial-order failure, then force IMMEDIATE after all five result rows are present so every queued completeness check runs before the function returns",
+      "trigger_function_security": "every invariant and immutability trigger function is SECURITY DEFINER owned by alr_challenger_writer, uses SET search_path = pg_catalog, pg_temp, fully qualified static SQL only, has PUBLIC EXECUTE revoked, and is Guard-C verified",
+      "postgres_16_commit_identity_test": "an isolated PostgreSQL 16 test commits as alr_challenger_trainer_caller with zero table SELECT/DML and proves deferred checks execute successfully under the restricted definer; a partial trio and schema mismatch fail at SET CONSTRAINTS/COMMIT",
+      "for_each_training_run": [
+        "exactly three artifact rows exist",
+        "the distinct quantile set equals q10, q50, and q90",
+        "all artifact hashes are distinct",
+        "all artifact composite lineage triples equal the run triple",
+        "all three artifact feature_schema_hash values equal the run actual_feature_schema_hash",
+        "all three artifact model_schema_version values equal the run model_schema_version",
+        "the canonical q10/q50/q90 artifact hash recomputation equals model_artifact_set_hash",
+        "exactly one registry row exists and its composite lineage triple equals the run triple"
+      ],
+      "generic_application_role_bypass_possible": false,
+      "dedicated_trainer_caller_is_explicit_trusted_input_boundary": true,
+      "database_superuser_or_schema_owner_is_outside_application_threat_model_and_remains_operator_gated": true
+    },
     "transaction_contract": {
-      "receipt_persistence": "one append-only transaction with exact existing-row readback on replay",
-      "post_fit_persistence": "one append-only transaction for completed training run, exact q10/q50/q90 artifacts, and isolated registry row",
-      "partial_success_allowed": false,
+      "receipt_persistence": "one fixed function call with append-only insert and exact full-row readback on replay",
+      "post_fit_database_persistence": "one fixed function call and one PostgreSQL transaction for the completed run, exact q10/q50/q90 artifacts, and isolated registry row",
+      "postgres_and_filesystem_claimed_as_one_atomic_transaction": false,
+      "partial_database_success_allowed": false,
       "on_conflict_do_nothing_without_readback_allowed": false,
       "update_or_delete_allowed": false
     },
     "privilege_contract": {
-      "public_insert_update_delete": false,
-      "application_roles": [
+      "public_table_permissions": [],
+      "generic_application_roles": [
         "trading_ai if present",
         "alr_shadow if present"
       ],
-      "application_role_permissions": [
+      "generic_application_role_new_table_permissions": [],
+      "generic_application_role_new_function_permissions": [],
+      "generic_application_role_schema_create": false,
+      "trainer_caller_role": "alr_challenger_trainer_caller",
+      "trainer_caller_table_permissions": [],
+      "trainer_caller_function_permissions": [
+        "EXECUTE learning.persist_alr_qualified_training_receipt_v1",
+        "EXECUTE learning.persist_alr_challenger_training_result_v1",
+        "EXECUTE learning.read_alr_qualified_training_receipt_v1",
+        "EXECUTE learning.read_alr_challenger_training_result_v1"
+      ],
+      "trainer_caller_schema_permissions": [
+        "USAGE ON SCHEMA learning"
+      ],
+      "trainer_caller_direct_select_insert_update_delete_truncate_references_trigger": false,
+      "trainer_caller_schema_create": false,
+      "generic_or_trainer_role_can_set_session_replication_role": false,
+      "generic_or_trainer_role_has_set_privilege_on_session_replication_role_parameter": false,
+      "writer_role_schema_permissions_after_migration": [
+        "USAGE ON SCHEMA learning",
+        "USAGE ON SCHEMA public"
+      ],
+      "writer_role_function_permissions": [
+        "EXECUTE ON FUNCTION public.digest(bytea, text)"
+      ],
+      "writer_role_table_permissions": [
         "SELECT",
         "INSERT"
       ],
-      "application_role_update_delete": false,
+      "writer_role_update_delete_truncate_references_trigger": false,
+      "writer_role_owns_functions_only_not_schema_or_tables": true,
+      "public_execute_revoked_on_all_four_new_fixed_functions_and_all_new_trigger_functions": true,
       "sequence_privileges_required": false
     },
     "guard_contract": {
-      "guard_a_required_columns": true,
-      "guard_b_required_constraints_and_indexes": true,
-      "guard_c_exact_privilege_posture": true,
+      "guard_a_required_columns_both_roles_pgcrypto_and_function_owners": true,
+      "guard_b_required_composite_constraints_indexes_triggers_and_exact_function_definitions": true,
+      "guard_c_exact_acl_ownership_role_membership_parameter_privilege_and_security_definer_posture": true,
+      "guard_b_requires_all_replay_and_fk_unique_arbiters_not_deferrable_and_only_named_completeness_triggers_deferrable": true,
+      "guard_c_requires_writer_public_schema_usage_and_execute_on_exact_extension_owned_public_digest_bytea_text_only": true,
+      "guard_c_requires_server_generated_created_at_and_replay_preservation_contract": true,
+      "generic_application_and_trainer_caller_roles_must_not_own_new_tables_functions_or_learning_schema": true,
+      "writer_role_must_own_only_fixed_functions_and_have_no_create_or_role_membership": true,
+      "first_apply_choreography": "future secure preflight creates and verifies the membership-free writer and separately authenticated trainer caller; an exact E3/BB-gated PostgreSQL superuser migration session is required because no membership in the NOLOGIN writer may be granted. That session creates tables and fixed functions, transfers only function ownership to the writer, removes any temporary schema CREATE, applies exact grants and revokes, then runs Guards A/B/C before commit",
+      "second_apply_choreography": "the same source is executed again by the isolated-fixture PostgreSQL superuser with roles already present; CREATE IF NOT EXISTS or exact replacement paths must preserve table data, function owners, ACLs, trigger posture, and hashes, and Guards A/B/C must reject any drift rather than silently normalize unsafe ownership or membership",
       "double_apply_required": true,
       "rollback_preflight_required_before_any_future_apply": true,
       "source_static_tests_required": true,
-      "isolated_postgres_tests_required_before_apply": true
+      "isolated_postgres_tests_required_before_apply": true,
+      "negative_tests_require_generic_function_execute_denial_direct_dml_denial_session_replication_role_denial_mismatched_lineage_schema_parity_rejection_partial_trio_rejection_and_replay_conflict_rejection": true,
+      "concurrency_tests_require_simultaneous_identical_and_divergent_calls_alternate_unique_key_first_writer_poisoning_and_partial_bundle_replay": true,
+      "conflict_branch_must_insert_no_children_then_perform_complete_exact_readback": true,
+      "double_apply_test_must_prove_superuser_function_owner_transfer_and_final_membership_free_usage_only_writer_posture": true
     }
   },
   "isolated_trainer_design": {
@@ -244,6 +472,38 @@
       "q90"
     ],
     "immutable_isolated_output_directory_required": true,
+    "filesystem_persistence_protocol": {
+      "atomicity_scope": "filesystem publication is ordered before a separate atomic PostgreSQL result transaction; no cross-system transaction or two-phase-commit claim",
+      "staging_path": "an isolated same-filesystem root/.staging/<training_run_hash>.<unguessable-nonce> directory created without following symlinks",
+      "single_writer_coordination": "the trainer holds an exclusive no-follow per-training-run filesystem lock from staging creation through database commit acknowledgement; recovery must acquire the same lock, and the dedicated database role connection limit of one prevents a second authorized result writer session",
+      "staging_write_order": [
+        "open new files with exclusive create and O_NOFOLLOW where supported; reject symlink or non-regular-file components by descriptor-relative and lstat checks",
+        "write exactly q10.onnx, q50.onnx, and q90.onnx plus a content-addressed canonical recovery manifest containing every typed argument needed by both persistence functions, every artifact path/size/hash/schema field, receipt/run/training/set identities, timestamps, fixed statuses and no-authority constants, and no credential material",
+        "fsync every file after writing",
+        "rehash the persisted bytes and verify positive size, distinct artifact hashes, the feature schema, the exact quantile set, and the canonical model_artifact_set_hash",
+        "fsync the staging directory"
+      ],
+      "publish_order": [
+        "atomically rename within the same filesystem to root/runs/<training_run_hash> with no-overwrite semantics",
+        "if the final directory already exists, rehash and accept only an exact immutable replay; otherwise fail and quarantine the staging directory",
+        "fsync both affected parents root/.staging and root/runs after the cross-directory rename",
+        "only after final-path durability and exact readback call persist_alr_challenger_training_result_v1"
+      ],
+      "quarantine_move_durability": "every authorized staging-to-quarantine rename, or runs-to-quarantine rename made only after authoritative proof of zero result rows, is same-filesystem and no-replace, followed by fsync of both source and destination parents plus exact readback of the moved manifest; a failed fsync is fail-closed evidence",
+      "crash_before_final_rename": "a later recovery scan first performs fixed database receipt/result readback, then may move stale staging directories older than a configured grace period into an append-only quarantine namespace after exact manifest, lstat, and lock checks; ordinary deletion is forbidden",
+      "crash_after_final_rename_before_database_commit": "recovery acquires the exclusive run lock and is database-first: call both fixed readback functions before deciding. If an authoritative read proves zero result rows, the durable receipt and immutable final manifest/bytes are exact, and no partial rows exist, perform one exact idempotent persistence retry; if zero rows are authoritative but bytes or receipt are invalid, a no-replace quarantine move is allowed. If a complete exact result exists, acknowledge it. Any partial or divergent database state freezes the final directory in place and emits corruption-review evidence. Any unavailable, ambiguous, timed-out, or otherwise indeterminate database read freezes the final directory in place, emits RECOVERY_PENDING_DB_INDETERMINATE, and retries later; it never relocates a path that might already be referenced by a committed row",
+      "crash_after_database_commit_before_process_ack": "recovery calls read_alr_challenger_training_result_v1 first and requires complete database full-row readback plus immutable final-manifest and byte rehash. An exact result is acknowledged. A result/filesystem mismatch freezes the final directory in place and emits corruption-review evidence; an indeterminate read freezes it in place and emits RECOVERY_PENDING_DB_INDETERMINATE for retry",
+      "final_directory_relocation_rule": "authoritative fixed-function proof that zero run, artifact, and registry rows exist is mandatory before runs/<training_run_hash> may be moved; DB unavailability or uncertainty never counts as absence",
+      "rename_fallback": "fail closed if a native no-replace atomic directory rename primitive is unavailable; plain overwrite-capable rename and copy-into-final fallbacks are forbidden",
+      "symlink_or_latest_pointer_creation_allowed": false,
+      "ordinary_artifact_or_quarantine_delete_allowed": false
+    },
+    "database_call_preconditions": [
+      "the durable receipt is reconstructed from the repository and all source contract hashes are revalidated",
+      "actual rows, split membership, code and dependency manifest, effective config, feature schema, and label schema are rehashed after fit inputs are materialized",
+      "the real fit completed successfully and produced exact persisted q10/q50/q90 ONNX bytes",
+      "the immutable final directory and every file were read back without symlink traversal and match the function arguments"
+    ],
     "legacy_run_training_pipeline_call_allowed": false,
     "legacy_model_registry_call_allowed": false,
     "transition_canary_status_call_allowed": false,
@@ -274,6 +534,10 @@
     "must_bind_request_file_sha256": true,
     "must_bind_reviewed_source_head": true,
     "must_confirm_v158_is_provisional_until_e3_and_bb_pass": true,
+    "must_confirm_generic_application_roles_have_no_new_table_or_function_authority_and_only_the_separate_trainer_caller_can_execute_fixed_functions": true,
+    "must_confirm_composite_lineage_feature_and_model_schema_parity_and_exact_deferred_trio_invariant": true,
+    "must_confirm_security_definer_pg16_commit_identity_named_constraint_mode_digest_acl_created_at_replay_session_user_and_session_replication_role_entry_guards": true,
+    "must_confirm_filesystem_and_database_atomicity_boundaries_two_parent_fsync_manifest_database_first_recovery_and_indeterminate_db_in_place_freeze": true,
     "must_not_grant_apply_runtime_or_training_authority": true
   },
   "authority_granted_by_packet": false,
