@@ -110,14 +110,18 @@
 <script src="/static/common-modals.js?v=20260519.split-p2"></script>
 <script src="/static/common.js?v=20260527.ops1-csrf"></script>
 <script src="/static/i18n_zh.js"></script>
-<!-- Phase 2 原生 view(strangler-fig 遷移:gates 首遷 · monitor 第 2 遷 · development 第 3 遷 · learning 第 4 遷/首含寫 · agents 第 5 遷/read-only);於 shell.js 前載入以註冊 window.OC_NATIVE_VIEWS。
-     agents 拆檔:view-agents-openclaw.js(OpenClaw companion,掛 OC_AGENTS_OPENCLAW)須先於 view-agents.js 主檔載入。 -->
+<!-- Phase 2 原生 view(strangler-fig 遷移:gates 首遷 · monitor 第 2 遷 · development 第 3 遷 · learning 第 4 遷/首含寫 · agents 第 5 遷/read-only · ai 第 6 遷/含寫+typed-confirm);於 shell.js 前載入以註冊 window.OC_NATIVE_VIEWS。
+     agents 拆檔:view-agents-openclaw.js(OpenClaw companion,掛 OC_AGENTS_OPENCLAW)須先於 view-agents.js 主檔載入。
+     ai 拆檔:view-ai-cost.js(掛 OC_AI_COST)/ view-ai-providers.js(掛 OC_AI_PROVIDERS,承 3 config/DELETE 寫 + typed-confirm)須先於 view-ai.js 主檔載入。 -->
 <script src="/static/view-gates.js?v=20260711.p2-gates"></script>
 <script src="/static/view-monitor.js?v=20260711.p2-monitor"></script>
 <script src="/static/view-development.js?v=20260712.p2-development"></script>
 <script src="/static/view-learning.js?v=20260712.p2-learning"></script>
 <script src="/static/view-agents-openclaw.js?v=20260712.p2-agents"></script>
 <script src="/static/view-agents.js?v=20260712.p2-agents"></script>
+<script src="/static/view-ai-cost.js?v=20260712.p2-ai"></script>
+<script src="/static/view-ai-providers.js?v=20260712.p2-ai"></script>
+<script src="/static/view-ai.js?v=20260712.p2-ai"></script>
 <script src="/static/shell.js?v=20260711.shell-p11a"></script>
 
 </body>
