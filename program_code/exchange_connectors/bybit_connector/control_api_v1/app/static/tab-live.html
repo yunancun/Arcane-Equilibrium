@@ -243,13 +243,14 @@ html, body {
 .trust-conditions li::before { content: "✓ "; color: var(--pos); margin-left: -14px; }
 .trust-conditions li.fail::before { content: "✗ "; color: var(--neg); }
 
-/* ── P0.2 批次 8b:inline style→頁內組件(語義 token;palette 外色 verbatim P0.4)── */
-/* 紫為 Live 頁 authority accent(真金，非 canon 6 熱紅，非 --seal);verbatim 待 P0.4 收斂 */
-.live-btn-purple { border-color: rgba(168,85,247,0.55); color: #a855f7; }
-.live-t-purple { color: #a855f7; }
+/* ── P0.2 批次 8b:inline style→頁內組件(語義 token) / P0.4 C6d 中性化 ── */
+/* 原紫 authority accent 已收斂:live-btn-purple → --accent 青銅 CTA;live-t-purple → --text-secondary;
+   live-auth-hint → --bg-raised / --border-strong。類名沿用不改引用。非 canon 6 熱紅,非 --seal。 */
+.live-btn-purple { border-color: var(--accent); color: var(--accent); }
+.live-t-purple { color: var(--text-secondary); }
 .live-auth-hint {
   margin-top: var(--sp-3); padding: var(--sp-3);
-  background: rgba(168,85,247,0.08); border: 1px solid rgba(168,85,247,0.35);
+  background: var(--bg-raised); border: 1px solid var(--border-strong);
   border-radius: var(--r-2); font-size: var(--fs-dense);
 }
 #live-global-mode-control-note {
