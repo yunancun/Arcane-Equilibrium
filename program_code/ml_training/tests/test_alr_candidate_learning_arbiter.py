@@ -2,12 +2,13 @@
 
 import hashlib
 import json
+import math
 from decimal import Decimal, ROUND_HALF_EVEN, localcontext
 
 import pytest
 
 from program_code.ml_training.alr_candidate_learning_arbiter import (
-    build_candidate_learning_decision,
+    build_candidate_learning_decision as _raw_build_candidate_learning_decision,
 )
 
 
@@ -27,11 +28,41 @@ def _canonical_hash(value: object) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _rehash_candidate(candidate: dict[str, object]) -> dict[str, object]:
+    candidate.setdefault("schema_version", "alr_candidate_arbiter_input_v2")
+    candidate.pop("arbiter_input_hash", None)
+    candidate["arbiter_input_hash"] = _canonical_hash(candidate)
+    return candidate
+
+
+def build_candidate_learning_decision(**kwargs: object) -> dict[str, object]:
+    candidates = kwargs.get("candidate_evidence_board")
+    if isinstance(candidates, list):
+        for candidate in candidates:
+            if isinstance(candidate, dict):
+                _rehash_candidate(candidate)
+    prior_decisions = kwargs.get("prior_decisions")
+    if isinstance(prior_decisions, list):
+        kwargs["prior_decisions"] = [
+            {
+                **prior,
+                "decision_schema_version": prior.get(
+                    "decision_schema_version",
+                    "alr_candidate_learning_decision_v2",
+                ),
+            }
+            if isinstance(prior, dict)
+            else prior
+            for prior in prior_decisions
+        ]
+    return _raw_build_candidate_learning_decision(**kwargs)
+
+
 def _policy(**overrides: object) -> dict[str, object]:
     body: dict[str, object] = {
         "decision_ts_s": 1_782_086_400,
         "as_of_utc_date": "2026-06-22",
-        "algorithm_version": "candidate_learning_arbiter_v1",
+        "algorithm_version": "candidate_learning_arbiter_v2",
         "tie_break_version": "candidate_learning_tie_break_v1",
         "q18_scale": 18,
         "thresholds": {
@@ -58,19 +89,25 @@ def _policy(**overrides: object) -> dict[str, object]:
 
 
 def _candidate(**overrides: object) -> dict[str, object]:
+    target_regime_context = {
+        "label": "bull|high_vol|liquid",
+        "utc_date": "2026-06-21",
+        "point_in_time": "D-1",
+        "source_complete": True,
+        "source_hash": "7" * 64,
+        "classifier_hash": "8" * 64,
+    }
     candidate: dict[str, object] = {
         "identity": {
             "strategy_name": "ma_crossover",
-            "strategy_version": "v2.1.0",
+            "strategy_version": "a" * 40,
             "config_hash": "1" * 64,
             "symbol": "BTCUSDT",
             "side": "Buy",
             "horizon_minutes": 60,
             "target_regime": {
-                "label": "bull_high_vol",
-                "utc_date": "2026-06-21",
-                "hash": "2" * 64,
-                "point_in_time": "D-1",
+                **target_regime_context,
+                "hash": _canonical_hash(target_regime_context),
             },
             "engine_mode": "shadow",
             "evidence_engine_mode": "demo",
@@ -83,23 +120,48 @@ def _candidate(**overrides: object) -> dict[str, object]:
             "cost": "5" * 64,
             "portfolio": "6" * 64,
         },
+        "cost_evidence": {
+            "schema_version": "alr_candidate_cost_evidence_v2",
+            "basis": "expected_slippage_mean_abs_v1",
+            "source_payload_sha256": "9" * 64,
+            "source_asof_utc": "2026-06-21T00:00:00+00:00",
+            "normalized_projection_sha256": "b" * 64,
+            "max_age_hours": 48,
+            "fee_floor_bps": 11.0,
+            "mean_abs_source": {
+                "scope": "GLOBAL",
+                "symbol": None,
+                "sample_count": 100,
+                "mean_abs_bps": 2.0,
+            },
+            "tail_source": {
+                "scope": "GLOBAL",
+                "symbol": None,
+                "sample_count": 100,
+                "tail_bps": 8.0,
+                "tail_metric": "cvar90",
+            },
+        },
         "quality": {
             "hash_ok": True,
             "integrity_ok": True,
             "freshness_ok": True,
-            "censored_share": "0.10",
-            "cost_recomputable_share": "1",
-            "unknown_regime_share": "0",
+            "censored_share": 0.10,
+            "cost_recomputable_share": 1.0,
+            "unknown_regime_share": 0.0,
             "replica_inconsistency_count": 0,
             "cluster_variance_clean": True,
             "hidden_oos_consumed": False,
-            "top_day_share": "0.40",
+            "legacy_optimistic_cost_present": False,
+            "top_day_share": 0.40,
         },
         "evidence": {
             "n_eff": 30,
             "utc_day_count": 5,
-            "mean_net_e": "0.05",
-            "cluster_se": "0.02",
+            "mean_net_e": 0.05,
+            "day_cluster_variance": 0.0004,
+            "cluster_se": 0.02,
+            "cluster_count": 5,
             "proof_stage": 6,
             "completed_proof_stages": [0, 1, 2, 3, 4, 5, 6],
             "next_gap": {"kind": "NONE", "code": "PROOF_COMPLETE"},
@@ -121,21 +183,19 @@ def _candidate(**overrides: object) -> dict[str, object]:
                     "utc_date": f"2026-06-{day:02d}",
                     "scan_complete": True,
                     "distinct_entries": 5,
-                    "estimated_rows_scanned": 100,
-                    "predicted_canonical_bytes": 1_000,
                 }
                 for day in range(15, 22)
             ]
         },
         "portfolio": {
-            "sector_exposure_share": "0.10",
-            "strategy_active_target_share": "0.20",
-            "beta_to_portfolio": "0.30",
+            "sector_exposure_share": "0.1",
+            "strategy_active_target_share": "0.2",
+            "beta_to_portfolio": "0.3",
         },
     }
     _rehash_resource(candidate["resource"])
     candidate.update(overrides)
-    return candidate
+    return _rehash_candidate(candidate)
 
 
 def _rehash_resource(resource: dict[str, object]) -> None:
@@ -215,6 +275,95 @@ def test_complete_candidate_identity_can_become_decision_ready() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("mutation", "expected"),
+    (
+        ("missing", "ARBITER_INPUT_FIELDS_INVALID"),
+        ("extra", "COST_EVIDENCE_FIELDS_INVALID"),
+    ),
+)
+def test_cost_evidence_is_an_exact_hash_bound_arbiter_input(
+    mutation: str,
+    expected: str,
+) -> None:
+    candidate = _candidate()
+    if mutation == "missing":
+        candidate.pop("cost_evidence")
+    else:
+        candidate["cost_evidence"]["unexpected"] = True
+
+    result = build_candidate_learning_decision(
+        source_head=SOURCE_HEAD,
+        scanner_research_seeds=[],
+        candidate_evidence_board=[candidate],
+        prior_decisions=[],
+        policy=_policy(),
+    )
+
+    assert result["evaluated_candidates"][0]["blocker_codes"] == [expected]
+
+
+@pytest.mark.parametrize(
+    ("source_asof_utc", "expected_state", "expected_blocker"),
+    (
+        ("2026-06-20T00:00:00+00:00", "DECISION_READY", None),
+        (
+            "2026-06-19T23:59:59+00:00",
+            "INELIGIBLE",
+            "COST_EVIDENCE_STALE",
+        ),
+        (
+            "2026-06-22T00:00:01+00:00",
+            "INELIGIBLE",
+            "COST_EVIDENCE_FROM_FUTURE",
+        ),
+    ),
+)
+def test_cost_evidence_freshness_is_exact_against_decision_time(
+    source_asof_utc: str,
+    expected_state: str,
+    expected_blocker: str | None,
+) -> None:
+    candidate = _candidate()
+    candidate["cost_evidence"]["source_asof_utc"] = source_asof_utc
+
+    result = build_candidate_learning_decision(
+        source_head=SOURCE_HEAD,
+        scanner_research_seeds=[],
+        candidate_evidence_board=[candidate],
+        prior_decisions=[],
+        policy=_policy(),
+    )
+    assessment = result["evaluated_candidates"][0]
+
+    assert assessment["state"] == expected_state
+    assert assessment["blocker_codes"] == (
+        [] if expected_blocker is None else [expected_blocker]
+    )
+
+
+def test_cost_source_hash_delta_changes_material_not_evaluation_identity() -> None:
+    baseline = build_candidate_learning_decision(
+        source_head=SOURCE_HEAD,
+        scanner_research_seeds=[],
+        candidate_evidence_board=[_candidate()],
+        prior_decisions=[],
+        policy=_policy(),
+    )["evaluated_candidates"][0]
+    changed_candidate = _candidate()
+    changed_candidate["cost_evidence"]["source_payload_sha256"] = "c" * 64
+    changed = build_candidate_learning_decision(
+        source_head=SOURCE_HEAD,
+        scanner_research_seeds=[],
+        candidate_evidence_board=[changed_candidate],
+        prior_decisions=[],
+        policy=_policy(),
+    )["evaluated_candidates"][0]
+
+    assert changed["evaluation_id"] == baseline["evaluation_id"]
+    assert changed["material_fingerprint"] != baseline["material_fingerprint"]
+
+
 def test_n_eff_gate_collects_at_29_and_opens_at_30() -> None:
     low = _candidate()
     low_evidence = dict(low["evidence"])
@@ -247,12 +396,63 @@ def test_n_eff_gate_collects_at_29_and_opens_at_30() -> None:
     assert ready["state"] == "DECISION_READY"
 
 
+def test_mixed_ineligible_assessment_shapes_sort_deterministically() -> None:
+    zero_resource = _candidate()
+    evidence = dict(zero_resource["evidence"])
+    _set_n_eff(evidence, 29)
+    evidence["next_gap"] = {
+        "kind": "LOCAL_PASSIVE",
+        "code": "ZERO_RESOURCE_NO_COLLECTION",
+    }
+    zero_resource["evidence"] = evidence
+    resource = dict(zero_resource["resource"])
+    resource.update(
+        {
+            "estimated_rows_scanned": 0,
+            "predicted_canonical_bytes": 0,
+            "zero_resource_attested": True,
+            "daily_buckets": [
+                {**bucket, "distinct_entries": 0}
+                for bucket in resource["daily_buckets"]
+            ],
+        }
+    )
+    _rehash_resource(resource)
+    zero_resource["resource"] = resource
+    kwargs = {
+        "source_head": SOURCE_HEAD,
+        "scanner_research_seeds": [],
+        "prior_decisions": [],
+        "policy": _policy(),
+    }
+
+    forward = build_candidate_learning_decision(
+        **kwargs,
+        candidate_evidence_board=[zero_resource, {}],
+    )
+    reverse = build_candidate_learning_decision(
+        **kwargs,
+        candidate_evidence_board=[{}, zero_resource],
+    )
+
+    assert forward["evaluated_candidates"] == reverse["evaluated_candidates"]
+    assert [item["state"] for item in forward["evaluated_candidates"]] == [
+        "INELIGIBLE",
+        "INELIGIBLE",
+    ]
+    assert [item["metrics"] is None for item in forward["evaluated_candidates"]] == [
+        False,
+        True,
+    ]
+
+
 def test_utc_day_gate_collects_at_4_and_opens_at_5() -> None:
     low = _candidate()
     evidence = dict(low["evidence"])
     evidence.update(
         {
             "utc_day_count": 4,
+            "cluster_count": 4,
             "next_gap": {"kind": "LOCAL_PASSIVE", "code": "NEED_UTC_DAY"},
         }
     )
@@ -282,12 +482,12 @@ def test_utc_day_gate_collects_at_4_and_opens_at_5() -> None:
 def test_top_day_share_accepts_half_and_blocks_above_half() -> None:
     boundary = _candidate()
     boundary_quality = dict(boundary["quality"])
-    boundary_quality["top_day_share"] = "0.500000000000000000"
+    boundary_quality["top_day_share"] = 0.5
     boundary["quality"] = boundary_quality
 
     above = _candidate()
     above_quality = dict(above["quality"])
-    above_quality["top_day_share"] = "0.500000000000000001"
+    above_quality["top_day_share"] = math.nextafter(0.5, 1.0)
     above["quality"] = above_quality
     above_evidence = dict(above["evidence"])
     above_evidence["next_gap"] = {
@@ -321,12 +521,12 @@ def test_top_day_share_accepts_half_and_blocks_above_half() -> None:
 def test_censored_share_accepts_point_three_and_repairs_above_it() -> None:
     boundary = _candidate()
     quality = dict(boundary["quality"])
-    quality["censored_share"] = "0.300000000000000000"
+    quality["censored_share"] = 0.3
     boundary["quality"] = quality
 
     above = _candidate()
     quality = dict(above["quality"])
-    quality["censored_share"] = "0.300000000000000001"
+    quality["censored_share"] = math.nextafter(0.3, 1.0)
     above["quality"] = quality
     evidence = dict(above["evidence"])
     evidence["next_gap"] = {
@@ -362,10 +562,15 @@ def test_censored_share_accepts_point_three_and_repairs_above_it() -> None:
         ("hash_ok", False, "HASH_CHECK_FAILED"),
         ("integrity_ok", False, "INTEGRITY_CHECK_FAILED"),
         ("freshness_ok", False, "FRESHNESS_CHECK_FAILED"),
-        ("cost_recomputable_share", "0.999999999999999999", "COST_NOT_RECOMPUTABLE"),
+        ("cost_recomputable_share", math.nextafter(1.0, 0.0), "COST_NOT_RECOMPUTABLE"),
         ("replica_inconsistency_count", 1, "REPLICA_INCONSISTENT"),
         ("cluster_variance_clean", False, "CLUSTER_VARIANCE_DEGENERATE"),
         ("hidden_oos_consumed", True, "HIDDEN_OOS_CONSUMED"),
+        (
+            "legacy_optimistic_cost_present",
+            True,
+            "LEGACY_OPTIMISTIC_COST_UNBACKFILLED",
+        ),
     ],
 )
 def test_data_quality_hard_gates_require_repair(
@@ -376,6 +581,9 @@ def test_data_quality_hard_gates_require_repair(
     quality[field] = bad_value
     candidate["quality"] = quality
     evidence = dict(candidate["evidence"])
+    if field == "cluster_variance_clean":
+        evidence["day_cluster_variance"] = 0.0
+        evidence["cluster_se"] = None
     evidence["next_gap"] = {"kind": "LOCAL_ENGINEERING", "code": code}
     candidate["evidence"] = evidence
 
@@ -394,7 +602,7 @@ def test_data_quality_hard_gates_require_repair(
 def test_clean_negative_evidence_remains_a_decision_target() -> None:
     candidate = _candidate()
     evidence = dict(candidate["evidence"])
-    evidence["mean_net_e"] = "-0.05"
+    evidence["mean_net_e"] = -0.05
     candidate["evidence"] = evidence
 
     result = build_candidate_learning_decision(
@@ -422,9 +630,9 @@ def test_evi_resource_and_portfolio_cost_outrank_scanner_novelty() -> None:
     _rehash_resource(resource)
     expensive["resource"] = resource
     expensive["portfolio"] = {
-        "sector_exposure_share": "0.90",
-        "strategy_active_target_share": "0.90",
-        "beta_to_portfolio": "0.90",
+        "sector_exposure_share": "0.9",
+        "strategy_active_target_share": "0.9",
+        "beta_to_portfolio": "0.9",
     }
 
     result = build_candidate_learning_decision(
@@ -503,7 +711,7 @@ def test_missing_policy_or_resource_never_becomes_a_target() -> None:
         assert result["state"] == "INELIGIBLE"
 
 
-def test_missing_portfolio_blocks_decision_but_allows_labeled_passive_collection() -> None:
+def test_missing_portfolio_is_rejected_by_atomic_v2_input_even_for_passive_gap() -> None:
     blocked = _candidate()
     blocked.pop("portfolio")
 
@@ -534,10 +742,11 @@ def test_missing_portfolio_blocks_decision_but_allows_labeled_passive_collection
 
     assert blocked_result["state"] == "INELIGIBLE"
     assert blocked_result["selected_candidate"] is None
-    assert passive_result["state"] == "COLLECT_DISTINCT_ENTRIES"
+    assert passive_result["state"] == "INELIGIBLE"
     assessment = passive_result["evaluated_candidates"][0]
-    assert assessment["portfolio_assumption"] == "UNKNOWN"
-    assert assessment["metrics"]["portfolio_redundancy"] == "0.750000000000000000"
+    assert assessment["portfolio_assumption"] is None
+    assert assessment["metrics"] is None
+    assert assessment["blocker_codes"] == ["ARBITER_INPUT_FIELDS_INVALID"]
 
 
 def test_proof_prefix_cannot_skip_and_external_gap_never_auto_collects() -> None:
@@ -628,7 +837,7 @@ def test_cooldown_waits_at_1799_and_consecutive_guard_holds_at_1800() -> None:
     assert opened["state"] == "WAIT_COOLDOWN"
 
 
-def test_raw_count_delta_does_not_bypass_cooldown_but_threshold_delta_does() -> None:
+def test_raw_count_and_threshold_deltas_are_material_for_cooldown() -> None:
     policy = _policy()
     baseline = build_candidate_learning_decision(
         source_head=SOURCE_HEAD,
@@ -649,7 +858,7 @@ def test_raw_count_delta_does_not_bypass_cooldown_but_threshold_delta_does() -> 
         }
     ]
 
-    waiting = build_candidate_learning_decision(
+    raw_delta_opened = build_candidate_learning_decision(
         source_head=SOURCE_HEAD,
         scanner_research_seeds=[],
         candidate_evidence_board=[raw_delta],
@@ -687,8 +896,77 @@ def test_raw_count_delta_does_not_bypass_cooldown_but_threshold_delta_does() -> 
         policy=policy,
     )
 
-    assert waiting["state"] == "WAIT_COOLDOWN"
+    assert raw_delta_opened["state"] == "DECISION_READY"
     assert opened["state"] == "DECISION_READY"
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "mean_net_e",
+        "cluster_scale",
+        "quality_share",
+        "regime_counts",
+        "resource_bucket",
+        "portfolio_beta",
+        "data_context",
+        "scanner_context",
+    ),
+)
+def test_normalized_decision_input_deltas_are_material_for_cooldown(
+    mutation: str,
+) -> None:
+    policy = _policy()
+    baseline = build_candidate_learning_decision(
+        source_head=SOURCE_HEAD,
+        scanner_research_seeds=[],
+        candidate_evidence_board=[_candidate()],
+        prior_decisions=[],
+        policy=policy,
+    )["selected_candidate"]
+    candidate = _candidate()
+    scanner_seeds: list[dict[str, object]] = []
+    if mutation == "mean_net_e":
+        candidate["evidence"]["mean_net_e"] = 0.10
+    elif mutation == "cluster_scale":
+        candidate["evidence"]["day_cluster_variance"] = 0.0009
+        candidate["evidence"]["cluster_se"] = 0.03
+    elif mutation == "quality_share":
+        candidate["quality"]["top_day_share"] = 0.45
+    elif mutation == "regime_counts":
+        counts = candidate["evidence"]["regime_entry_counts"]
+        counts[REGIME_BUCKETS[0]] -= 1
+        counts[REGIME_BUCKETS[-1]] += 1
+    elif mutation == "resource_bucket":
+        candidate["resource"]["daily_buckets"][0]["distinct_entries"] = 6
+        _rehash_resource(candidate["resource"])
+    elif mutation == "portfolio_beta":
+        candidate["portfolio"]["beta_to_portfolio"] = "0.4"
+    elif mutation == "data_context":
+        candidate["context_hashes"]["data"] = "9" * 64
+    else:
+        scanner_seeds = [
+            {"symbol": "BTCUSDT", "novelty": "1", "recurrence": "2"}
+        ]
+
+    result = build_candidate_learning_decision(
+        source_head=SOURCE_HEAD,
+        scanner_research_seeds=scanner_seeds,
+        candidate_evidence_board=[candidate],
+        prior_decisions=[
+            {
+                "family_key": baseline["family_key"],
+                "decision_ts_s": policy["decision_ts_s"] - 1,
+                "material_fingerprint": baseline["material_fingerprint"],
+            }
+        ],
+        policy=policy,
+    )
+    assessment = result["evaluated_candidates"][0]
+
+    assert assessment["material_fingerprint"] != baseline["material_fingerprint"]
+    assert assessment["state"] == "DECISION_READY"
+    assert result["state"] == "DECISION_READY"
 
 
 def test_candidate_and_scanner_permutations_are_byte_deterministic() -> None:
@@ -724,10 +1002,14 @@ def test_candidate_and_scanner_permutations_are_byte_deterministic() -> None:
 
 def test_zero_cluster_se_is_a_degenerate_variance_hard_gate() -> None:
     candidate = _candidate()
+    quality = dict(candidate["quality"])
+    quality["cluster_variance_clean"] = False
+    candidate["quality"] = quality
     evidence = dict(candidate["evidence"])
     evidence.update(
         {
-            "cluster_se": "0",
+            "day_cluster_variance": 0.0,
+            "cluster_se": None,
             "next_gap": {"kind": "LOCAL_ENGINEERING", "code": "REPAIR_VARIANCE"},
         }
     )
@@ -747,11 +1029,79 @@ def test_zero_cluster_se_is_a_degenerate_variance_hard_gate() -> None:
     ]
 
 
+@pytest.mark.parametrize(
+    "mutation",
+    ("day_cluster_variance", "cluster_count", "raw_attempt_count"),
+)
+def test_valid_statistical_material_change_alters_fingerprint_and_decision(
+    mutation: str,
+) -> None:
+    baseline = build_candidate_learning_decision(
+        source_head=SOURCE_HEAD,
+        scanner_research_seeds=[],
+        candidate_evidence_board=[_candidate()],
+        prior_decisions=[],
+        policy=_policy(),
+    )
+    candidate = _candidate()
+    evidence = dict(candidate["evidence"])
+    if mutation == "day_cluster_variance":
+        evidence["day_cluster_variance"] = 0.0009
+        evidence["cluster_se"] = 0.03
+    elif mutation == "cluster_count":
+        evidence["cluster_count"] = 6
+        evidence["utc_day_count"] = 6
+    else:
+        evidence["raw_attempt_count"] = 31
+    candidate["evidence"] = evidence
+
+    changed = build_candidate_learning_decision(
+        source_head=SOURCE_HEAD,
+        scanner_research_seeds=[],
+        candidate_evidence_board=[candidate],
+        prior_decisions=[],
+        policy=_policy(),
+    )
+
+    assert changed["evaluated_candidates"][0]["material_fingerprint"] != (
+        baseline["evaluated_candidates"][0]["material_fingerprint"]
+    )
+    assert changed["decision_hash"] != baseline["decision_hash"]
+
+
+def test_legacy_optimistic_cost_is_a_material_quality_gate() -> None:
+    baseline = build_candidate_learning_decision(
+        source_head=SOURCE_HEAD,
+        scanner_research_seeds=[],
+        candidate_evidence_board=[_candidate()],
+        prior_decisions=[],
+        policy=_policy(),
+    )
+    candidate = _candidate()
+    quality = dict(candidate["quality"])
+    quality["legacy_optimistic_cost_present"] = True
+    candidate["quality"] = quality
+    changed = build_candidate_learning_decision(
+        source_head=SOURCE_HEAD,
+        scanner_research_seeds=[],
+        candidate_evidence_board=[candidate],
+        prior_decisions=[],
+        policy=_policy(),
+    )
+
+    assessment = changed["evaluated_candidates"][0]
+    assert "LEGACY_OPTIMISTIC_COST_UNBACKFILLED" in assessment["blocker_codes"]
+    assert assessment["material_fingerprint"] != baseline["evaluated_candidates"][0][
+        "material_fingerprint"
+    ]
+    assert changed["decision_hash"] != baseline["decision_hash"]
+
+
 def test_hard_gate_flip_is_a_material_cooldown_delta() -> None:
     policy = _policy()
     concentrated = _candidate()
     quality = dict(concentrated["quality"])
-    quality["top_day_share"] = "0.500000000000000001"
+    quality["top_day_share"] = math.nextafter(0.5, 1.0)
     concentrated["quality"] = quality
     evidence = dict(concentrated["evidence"])
     evidence["next_gap"] = {"kind": "LOCAL_PASSIVE", "code": "DIVERSIFY_DAYS"}
@@ -780,3 +1130,149 @@ def test_hard_gate_flip_is_a_material_cooldown_delta() -> None:
     )
 
     assert result["state"] == "DECISION_READY"
+
+
+def test_atomic_v2_candidate_contract_rejects_v1_and_hash_tampering() -> None:
+    legacy = _candidate()
+    legacy["schema_version"] = "alr_candidate_arbiter_input_v1"
+    legacy.pop("arbiter_input_hash")
+    legacy["arbiter_input_hash"] = _canonical_hash(legacy)
+    legacy_result = _raw_build_candidate_learning_decision(
+        source_head=SOURCE_HEAD,
+        scanner_research_seeds=[],
+        candidate_evidence_board=[legacy],
+        prior_decisions=[],
+        policy=_policy(),
+    )
+
+    tampered = _candidate()
+    tampered["evidence"]["n_eff"] = 31
+    tampered_result = _raw_build_candidate_learning_decision(
+        source_head=SOURCE_HEAD,
+        scanner_research_seeds=[],
+        candidate_evidence_board=[tampered],
+        prior_decisions=[],
+        policy=_policy(),
+    )
+
+    assert legacy_result["evaluated_candidates"][0]["blocker_codes"] == [
+        "ARBITER_INPUT_SCHEMA_INVALID"
+    ]
+    assert tampered_result["evaluated_candidates"][0]["blocker_codes"] == [
+        "ARBITER_INPUT_HASH_MISMATCH"
+    ]
+
+
+def test_v1_prior_is_ignored_but_v2_prior_enforces_cooldown() -> None:
+    policy = _policy()
+    candidate = _candidate()
+    baseline = _raw_build_candidate_learning_decision(
+        source_head=SOURCE_HEAD,
+        scanner_research_seeds=[],
+        candidate_evidence_board=[candidate],
+        prior_decisions=[],
+        policy=policy,
+    )["selected_candidate"]
+    prior_body = {
+        "family_key": baseline["family_key"],
+        "decision_ts_s": policy["decision_ts_s"] - 1,
+        "material_fingerprint": baseline["material_fingerprint"],
+    }
+
+    ignored = _raw_build_candidate_learning_decision(
+        source_head=SOURCE_HEAD,
+        scanner_research_seeds=[],
+        candidate_evidence_board=[candidate],
+        prior_decisions=[
+            {
+                **prior_body,
+                "decision_schema_version": "alr_candidate_learning_decision_v1",
+            }
+        ],
+        policy=policy,
+    )
+    enforced = _raw_build_candidate_learning_decision(
+        source_head=SOURCE_HEAD,
+        scanner_research_seeds=[],
+        candidate_evidence_board=[candidate],
+        prior_decisions=[
+            {
+                **prior_body,
+                "decision_schema_version": "alr_candidate_learning_decision_v2",
+            }
+        ],
+        policy=policy,
+    )
+
+    assert ignored["state"] == "DECISION_READY"
+    assert enforced["state"] == "WAIT_COOLDOWN"
+
+
+def test_v2_output_and_family_hash_use_frozen_raw_nine_field_identity() -> None:
+    candidate = _candidate()
+    result = build_candidate_learning_decision(
+        source_head=SOURCE_HEAD,
+        scanner_research_seeds=[],
+        candidate_evidence_board=[candidate],
+        prior_decisions=[],
+        policy=_policy(),
+    )
+    identity = candidate["identity"]
+    expected_family = _canonical_hash(
+        {
+            "schema_version": "candidate_learning_family_v2",
+            "identity": {
+                "strategy_name": identity["strategy_name"],
+                "strategy_version": identity["strategy_version"],
+                "strategy_config_hash": identity["config_hash"],
+                "symbol": identity["symbol"],
+                "side": identity["side"],
+                "horizon_minutes": identity["horizon_minutes"],
+                "venue": identity["venue"],
+                "product": identity["product"],
+                "evidence_engine_mode": identity["evidence_engine_mode"],
+            },
+        }
+    )
+
+    assert result["schema_version"] == "alr_candidate_learning_arbiter_v2"
+    assert result["algorithm_version"] == "candidate_learning_arbiter_v2"
+    assert result["tie_break_version"] == "candidate_learning_tie_break_v1"
+    assert result["evaluated_candidates"][0]["family_key"] == expected_family
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected"),
+    (
+        ("top_extra", "ARBITER_INPUT_FIELDS_INVALID"),
+        ("identity_extra", "IDENTITY_FIELDS_INVALID"),
+        ("identity_whitespace", "IDENTITY_INCOMPLETE"),
+        ("mode_case", "EVIDENCE_ENGINE_MODE_INVALID"),
+    ),
+)
+def test_v2_input_rejects_hash_bound_extras_and_identity_coercion(
+    mutation: str,
+    expected: str,
+) -> None:
+    candidate = _candidate()
+    if mutation == "top_extra":
+        candidate["ignored_extension"] = "must-not-be-silent"
+    else:
+        identity = dict(candidate["identity"])
+        if mutation == "identity_extra":
+            identity["ignored_extension"] = "must-not-be-silent"
+        elif mutation == "identity_whitespace":
+            identity["strategy_name"] = " ma_crossover"
+        else:
+            identity["evidence_engine_mode"] = "DEMO"
+        candidate["identity"] = identity
+
+    result = build_candidate_learning_decision(
+        source_head=SOURCE_HEAD,
+        scanner_research_seeds=[],
+        candidate_evidence_board=[candidate],
+        prior_decisions=[],
+        policy=_policy(),
+    )
+
+    assert result["evaluated_candidates"][0]["blocker_codes"] == [expected]

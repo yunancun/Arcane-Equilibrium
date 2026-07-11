@@ -980,7 +980,7 @@ def main(argv: list[str] | None = None) -> int:
     print(
         json.dumps(
             {
-                "schema_version": "alr_event_consumer_result_v1",
+                "schema_version": "alr_event_consumer_result_v2",
                 "result": result,
                 "candidate_policy": candidate_policy_status,
                 "authority": {
@@ -1118,7 +1118,7 @@ def _candidate_evaluation_time(cycles: list[dict[str, Any]]) -> str:
 
 def _unconfigured_evidence_snapshot(evaluated_at: str) -> dict[str, Any]:
     snapshot: dict[str, Any] = {
-        "schema_version": "alr_candidate_evidence_snapshot_v1",
+        "schema_version": "alr_candidate_evidence_snapshot_v2",
         "source_status": "EVIDENCE_DIRECTORY_NOT_CONFIGURED",
         "evaluated_at": evaluated_at,
         "candidate_universe_complete": False,

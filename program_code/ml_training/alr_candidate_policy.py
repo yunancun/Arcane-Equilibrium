@@ -24,7 +24,7 @@ from typing import Any
 from ml_training.alr_safe_file import AlrSafeFileError, read_bounded_regular_file
 
 
-ALGORITHM_VERSION = "candidate_learning_arbiter_v1"
+ALGORITHM_VERSION = "candidate_learning_arbiter_v2"
 TIE_BREAK_VERSION = "candidate_learning_tie_break_v1"
 Q18_SCALE = 18
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -41,7 +41,8 @@ _POLICY_KEYS = {
     "unknown_portfolio_penalty",
     "policy_config_hash",
 }
-_TEMPLATE_SCHEMA_VERSION = "alr_candidate_arbiter_policy_template_v1"
+_TEMPLATE_SCHEMA_VERSION = "alr_candidate_arbiter_policy_template_v2"
+_PROVISION_SCHEMA_VERSION = "alr_candidate_policy_provision_v2"
 _TEMPLATE_KEYS = _POLICY_KEYS | {"schema_version"}
 _BUDGET_KEYS = (
     "row_budget",
@@ -266,7 +267,7 @@ def _provision_result(
     destination_write_performed: bool,
 ) -> dict[str, Any]:
     return {
-        "schema_version": "alr_candidate_policy_provision_v1",
+        "schema_version": _PROVISION_SCHEMA_VERSION,
         "status": status,
         "policy_config_hash": template["policy_config_hash"],
         "rendered_policy": copy.deepcopy(dict(template)),
@@ -401,7 +402,7 @@ def main(argv: list[str] | None = None) -> int:
                 raise CandidatePolicyError("policy_cli_mode_invalid")
             policy = check_provisioned_candidate_policy(arguments.check_provisioned)
             result = {
-                "schema_version": "alr_candidate_policy_provision_v1",
+                "schema_version": _PROVISION_SCHEMA_VERSION,
                 "status": "PROVISIONED_POLICY_READY",
                 "policy_config_hash": policy["policy_config_hash"],
                 "destination": str(arguments.check_provisioned),
@@ -437,7 +438,7 @@ def main(argv: list[str] | None = None) -> int:
         print(
             json.dumps(
                 {
-                    "schema_version": "alr_candidate_policy_provision_v1",
+                    "schema_version": _PROVISION_SCHEMA_VERSION,
                     "status": "POLICY_PREFLIGHT_FAILED",
                     "reason": str(exc),
                     "service_preflight_ready": False,

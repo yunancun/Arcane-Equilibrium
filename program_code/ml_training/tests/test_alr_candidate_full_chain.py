@@ -14,6 +14,9 @@ import pytest
 _RESEARCH_ROOT = Path(__file__).resolve().parents[3] / "helper_scripts" / "research"
 if str(_RESEARCH_ROOT) not in sys.path:
     sys.path.insert(0, str(_RESEARCH_ROOT))
+_RESEARCH_TEST_ROOT = _RESEARCH_ROOT / "tests"
+if str(_RESEARCH_TEST_ROOT) not in sys.path:
+    sys.path.insert(0, str(_RESEARCH_TEST_ROOT))
 
 from cost_gate_learning_lane.outcome_review import (  # noqa: E402
     build_blocked_signal_outcome_review,
@@ -21,13 +24,21 @@ from cost_gate_learning_lane.outcome_review import (  # noqa: E402
 from cost_gate_learning_lane.candidate_board_publisher import (  # noqa: E402
     publish_candidate_board,
 )
+from cost_gate_learning_lane.slippage_quantile_artifact import (  # noqa: E402
+    build_slippage_quantile_artifact,
+)
+from candidate_lineage_v2_test_support import (  # noqa: E402
+    attach_candidate_lineage_v2,
+)
 from ml_training import alr_event_consumer as consumer  # noqa: E402
 
 
 _NOW = datetime(2026, 7, 4, 18, 0, tzinfo=timezone.utc)
 _DAY_MS = 86_400_000
 _HOUR_MS = 3_600_000
-_ENTRY_BASE_TS_MS = 1_782_000_000_000
+_ENTRY_BASE_TS_MS = int(
+    datetime(2026, 6, 27, tzinfo=timezone.utc).timestamp() * 1_000
+)
 
 
 def _sha(value: object) -> str:
@@ -42,68 +53,6 @@ def _sha(value: object) -> str:
     ).hexdigest()
 
 
-def _resource() -> dict[str, object]:
-    body: dict[str, object] = {
-        "daily_buckets": [
-            {
-                "utc_date": f"2026-{month_day}",
-                "scan_complete": True,
-                "distinct_entries": 5,
-            }
-            for month_day in (
-                "06-27",
-                "06-28",
-                "06-29",
-                "06-30",
-                "07-01",
-                "07-02",
-                "07-03",
-            )
-        ],
-        "estimated_rows_scanned": 700,
-        "predicted_canonical_bytes": 7_000,
-        "zero_resource_attested": False,
-    }
-    return {**body, "resource_estimator_hash": _sha(body)}
-
-
-def _candidate_context(*, complete: bool = True) -> dict[str, object]:
-    context: dict[str, object] = {
-        "strategy_version": "v3.2.1",
-        "strategy_config_hash": "1" * 64,
-        "target_regime_context": {
-            "label": "range_low_vol",
-            "utc_date": "2026-07-03",
-            "point_in_time": "D-1",
-        },
-        "target_regime_hash": "2" * 64,
-        "venue": "bybit",
-        "product": "linear_perpetual",
-        "evidence_engine_mode": "demo",
-        "evidence_regime_label": "neutral|low_vol|liquid",
-        "context_hashes": {
-            "data": "3" * 64,
-            "evidence": "4" * 64,
-            "cost": "5" * 64,
-            "portfolio": "6" * 64,
-        },
-        "resource": _resource(),
-        "portfolio": {
-            "sector_exposure_share": "0.10",
-            "strategy_active_target_share": "0.20",
-            "beta_to_portfolio": "0.30",
-        },
-        "proof": {
-            "proof_stage": 1,
-            "completed_proof_stages": [0, 1],
-            "next_gap": {"kind": "NONE", "code": "DATA_GATES_READY"},
-        },
-    }
-    if complete:
-        context["hidden_oos_consumed"] = False
-    return context
-
-
 def _outcome_rows(
     count: int = 30,
     *,
@@ -113,49 +62,89 @@ def _outcome_rows(
     rows: list[dict[str, object]] = []
     for index in range(count):
         gross = -20.0 + day_effects[index // 5] + (index % 5) * 0.1
-        rows.append(
-            {
-                "record_type": "blocked_signal_outcome",
-                "attempt_id": f"full-chain-{index}",
-                "side_cell_key": "strat|TYPEDUSDT|Buy",
-                "symbol": "TYPEDUSDT",
-                "strategy_name": "strat",
-                "side": "Buy",
-                "horizon_minutes": 60,
-                "gross_bps": gross,
-                "realized_net_bps": gross - 4.0,
-                "net_bps_optimistic": gross - 4.0,
-                "cost_bps": 4.0,
-                "cost_model_version": "conservative_v1",
-                "entry_ts_ms": (
-                    _ENTRY_BASE_TS_MS
-                    + (index // 5) * _DAY_MS
-                    + (index % 5) * _HOUR_MS
-                ),
-                "candidate_summary": {
-                    "candidate_learning_context": _candidate_context(
-                        complete=complete_context
-                    )
-                },
-            }
+        entry_ts_ms = (
+            _ENTRY_BASE_TS_MS
+            + (index // 5) * _DAY_MS
+            + (index % 5) * _HOUR_MS
         )
+        base = {
+            "record_type": "blocked_signal_outcome",
+            "gross_bps": gross,
+            "realized_net_bps": gross - 4.0,
+            "net_bps_optimistic": gross - 4.0,
+            "cost_bps": 4.0,
+            "cost_bps_optimistic": 4.0,
+            "slippage_bps": 0.0,
+            "funding_drag_bps": 0.0,
+            "cost_model_version": "conservative_v1",
+            "cost_model_source": "full_chain_frozen_v1",
+            "censored": False,
+            "censor_reason": None,
+            "entry_ts_ms": entry_ts_ms,
+            "exit_ts_ms": entry_ts_ms + _HOUR_MS,
+            "last_observation_ts_ms": entry_ts_ms + _HOUR_MS,
+            "outcome_source": "deterministic_full_chain_fixture",
+            "funding_crossings": 0,
+            "exit_delay_ms": 0,
+            "entry_price": 100.0,
+            "exit_price": 99.0,
+        }
+        attached = attach_candidate_lineage_v2(
+            base,
+            context_id=f"full-chain-{index}",
+            captured_at_ms=entry_ts_ms,
+            strategy_name="strat",
+            symbol="TYPEDUSDT",
+            side="Buy",
+            horizon_minutes=60,
+            as_of_utc_date=_NOW.date().isoformat(),
+            evidence_regime_label="neutral|low_vol|liquid",
+            evidence_engine_mode="demo",
+        )
+        if not complete_context:
+            attached["candidate_summary"]["candidate_learning_context"].pop(
+                "hidden_oos_consumed"
+            )
+        rows.append(attached)
     return rows
 
 
 def _cost_artifact(now: datetime) -> dict[str, object]:
-    return {
-        "asof": now.isoformat(),
-        "symbols": [],
-        "global": {
-            "n": 500,
-            "mean_abs": 2.0,
-            "mean_signed": 1.0,
-            "q50": 1.0,
-            "q75": 4.0,
-            "q90": 8.0,
-            "cvar90": 8.0,
-        },
-    }
+    return build_slippage_quantile_artifact(
+        [
+            {
+                "symbol": None,
+                "n": 500,
+                "mean_abs": 2.0,
+                "mean_signed": 1.0,
+                "q50": 1.0,
+                "q75": 4.0,
+                "q90": 8.0,
+                "cvar90": 9.0,
+            },
+            {
+                "symbol": "TYPEDUSDT",
+                "n": 200,
+                "mean_abs": 1.5,
+                "mean_signed": 0.5,
+                "q50": 1.0,
+                "q75": 3.0,
+                "q90": 6.0,
+                "cvar90": 7.0,
+            },
+            {
+                "symbol": "ZZZFILLUSDT",
+                "n": 300,
+                "mean_abs": 2.5,
+                "mean_signed": 1.5,
+                "q50": 1.0,
+                "q75": 4.0,
+                "q90": 8.0,
+                "cvar90": 9.0,
+            },
+        ],
+        now_utc=now,
+    )
 
 
 def _write_board(
@@ -165,9 +154,10 @@ def _write_board(
     count: int = 30,
     complete_context: bool = True,
 ) -> Path:
+    slippage_artifact = _cost_artifact(now)
     packet = build_blocked_signal_outcome_review(
         _outcome_rows(count, complete_context=complete_context),
-        slippage_quantiles=_cost_artifact(now),
+        slippage_quantiles=slippage_artifact,
         now_utc=now,
     )
     stamp = now.strftime("%Y%m%dT%H%M%SZ")
@@ -178,10 +168,17 @@ def _write_board(
         json.dumps(packet, ensure_ascii=True, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+    slippage_artifact_path = producer_directory / "slippage_quantiles_latest.json"
+    slippage_artifact_path.write_text(
+        json.dumps(slippage_artifact, ensure_ascii=True, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     result = publish_candidate_board(
         source_path,
         evidence_directory,
         retention_limit=128,
+        slippage_artifact_path=slippage_artifact_path,
+        now_utc=now,
     )
     assert result["status"] in {"PUBLISHED", "ALREADY_PUBLISHED"}
     return evidence_directory / source_path.name
@@ -189,7 +186,7 @@ def _write_board(
 
 def _policy() -> dict[str, object]:
     stable: dict[str, object] = {
-        "algorithm_version": "candidate_learning_arbiter_v1",
+        "algorithm_version": "candidate_learning_arbiter_v2",
         "tie_break_version": "candidate_learning_tie_break_v1",
         "q18_scale": 18,
         "thresholds": {
@@ -266,12 +263,32 @@ class _Cursor:
         if "artifact_kind = ANY" in sql:
             kinds = set(params[0])
             self.row = [
-                {"canonical_payload": copy.deepcopy(payload)}
+                {
+                    "artifact_hash": artifact_hash,
+                    "artifact_kind": self.connection.kinds[artifact_hash],
+                    "canonical_payload": copy.deepcopy(payload),
+                }
                 for artifact_hash, payload in reversed(
                     list(self.connection.artifacts.items())
                 )
                 if self.connection.kinds[artifact_hash] in kinds
+                and (
+                    payload["decision"].get("selected_candidate") is not None
+                    or payload["decision"].get("selected_collection_target")
+                    is not None
+                )
             ][: int(params[2])]
+        elif "SELECT artifact_kind, canonical_payload" in sql:
+            artifact_hash = str(params[0])
+            payload = self.connection.artifacts.get(artifact_hash)
+            self.row = (
+                None
+                if payload is None
+                else {
+                    "artifact_kind": self.connection.kinds[artifact_hash],
+                    "canonical_payload": copy.deepcopy(payload),
+                }
+            )
         elif "SELECT canonical_payload FROM learning.alr_artifact_nodes" in sql:
             payload = self.connection.artifacts.get(str(params[0]))
             self.row = (
@@ -279,6 +296,17 @@ class _Cursor:
                 if payload is None
                 else {"canonical_payload": copy.deepcopy(payload)}
             )
+        elif "SELECT edge_hash, from_artifact_hash" in sql:
+            self.row = [
+                {
+                    "edge_hash": edge_hash,
+                    "from_artifact_hash": self.connection.edges[edge_hash][0],
+                    "to_artifact_hash": self.connection.edges[edge_hash][1],
+                    "edge_role": self.connection.edges[edge_hash][2],
+                }
+                for edge_hash in params[0]
+                if edge_hash in self.connection.edges
+            ]
         elif "SELECT count(*) FROM learning.alr_provenance_edges" in sql:
             self.row = (
                 sum(str(edge_hash) in self.connection.edges for edge_hash in params[0]),

@@ -21,6 +21,9 @@ from ml_training.alr_candidate_policy import (
 
 ROOT = Path(__file__).resolve().parents[3]
 TEMPLATE = ROOT / "helper_scripts/deploy/openclaw-alr-candidate-policy.template.json"
+EXPECTED_V2_POLICY_HASH = (
+    "27fe66f8fffb58c70395f04897e8b894ddec10ec4889f57ff099b88701d95ef3"
+)
 
 
 def _budgets() -> dict[str, int]:
@@ -47,7 +50,7 @@ def _policy_hash(policy: dict[str, object]) -> str:
 def test_checked_in_template_has_no_production_budget_defaults() -> None:
     template = load_candidate_policy_template(TEMPLATE)
 
-    assert template["schema_version"] == "alr_candidate_arbiter_policy_template_v1"
+    assert template["schema_version"] == "alr_candidate_arbiter_policy_template_v2"
     assert template["policy_config_hash"] is None
     assert {template[key] for key in _budgets()} == {None}
     with pytest.raises(CandidatePolicyError, match="policy_fields_invalid"):
@@ -62,7 +65,7 @@ def test_explicit_budgets_render_canonical_semantically_valid_policy() -> None:
 
     assert validate_candidate_policy_configuration(policy) == policy
     assert policy == {
-        "algorithm_version": "candidate_learning_arbiter_v1",
+        "algorithm_version": "candidate_learning_arbiter_v2",
         "tie_break_version": "candidate_learning_tie_break_v1",
         "q18_scale": 18,
         "thresholds": {
@@ -77,8 +80,20 @@ def test_explicit_budgets_render_canonical_semantically_valid_policy() -> None:
         "max_new_entries_per_window": 70,
         "cooldown_seconds": 1_800,
         "unknown_portfolio_penalty": "1",
-        "policy_config_hash": "ec3d536698329b21a45a529b3c39c3b0f7332d6b5c52e24b36cc6b3514f40bb7",
+        "policy_config_hash": EXPECTED_V2_POLICY_HASH,
     }
+
+
+def test_v1_policy_is_explicitly_rejected_after_atomic_v2_cutover() -> None:
+    policy = render_candidate_policy_configuration(
+        load_candidate_policy_template(TEMPLATE),
+        **_budgets(),
+    )
+    policy["algorithm_version"] = "candidate_learning_arbiter_v1"
+    policy["policy_config_hash"] = _policy_hash(policy)
+
+    with pytest.raises(CandidatePolicyError, match="policy_version_invalid"):
+        validate_candidate_policy_configuration(policy)
 
 
 def test_semantic_validator_rejects_rehashed_frozen_threshold_drift() -> None:
@@ -121,6 +136,7 @@ def test_dry_run_reports_missing_destination_fail_closed_without_writing(
     )
 
     assert result["status"] == "DRY_RUN_PROVISION_REQUIRED"
+    assert result["schema_version"] == "alr_candidate_policy_provision_v2"
     assert result["service_preflight_ready"] is False
     assert result["destination_write_performed"] is False
     assert result["policy_file_mutation_performed"] is False
@@ -144,6 +160,7 @@ def test_explicit_apply_atomically_provisions_private_canonical_policy(
     )
 
     assert result["status"] == "PROVISIONED"
+    assert result["schema_version"] == "alr_candidate_policy_provision_v2"
     assert result["service_preflight_ready"] is True
     assert result["destination_write_performed"] is True
     assert result["policy_file_mutation_performed"] is True
@@ -183,10 +200,12 @@ def test_cli_dry_run_missing_destination_is_nonzero_and_machine_readable(
     payload = json.loads(capsys.readouterr().out)
     assert rc == 3
     assert payload["status"] == "DRY_RUN_PROVISION_REQUIRED"
+    assert payload["schema_version"] == "alr_candidate_policy_provision_v2"
     assert payload["service_preflight_ready"] is False
-    assert payload["rendered_policy"]["policy_config_hash"] == (
-        "ec3d536698329b21a45a529b3c39c3b0f7332d6b5c52e24b36cc6b3514f40bb7"
+    assert payload["rendered_policy"]["algorithm_version"] == (
+        "candidate_learning_arbiter_v2"
     )
+    assert payload["rendered_policy"]["policy_config_hash"] == EXPECTED_V2_POLICY_HASH
     assert not destination.exists()
 
 
