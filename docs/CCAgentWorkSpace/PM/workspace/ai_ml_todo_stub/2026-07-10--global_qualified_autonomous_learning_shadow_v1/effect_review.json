@@ -1,15 +1,15 @@
 {
   "schema": "global_qualified_autonomous_learning_shadow_effect_review_v1",
-  "generated_at": "2026-07-11T18:50:34Z",
+  "generated_at": "2026-07-11T18:59:25Z",
   "goal_id": "GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1",
   "loop": "WP4_SCHEMA_REQUIRED_CHALLENGER_TRAINING_CONTRACT",
   "status": "DONE_SOURCE_ACCEPTED_SCHEMA_REQUIRED_TRAINING_CONTRACT",
   "terminal": false,
   "source_checkpoint": "f36379b9ddf10ee1055daeda27805c409c6ee8bd",
   "publish_alignment": {
-    "observed_at": "2026-07-11T18:50:34Z",
-    "mac_head": "f36379b9ddf10ee1055daeda27805c409c6ee8bd",
-    "origin_main": "f36379b9ddf10ee1055daeda27805c409c6ee8bd",
+    "observed_at": "2026-07-11T18:59:25Z",
+    "mac_head": "e7223997e9678fe0f9de7d158160e4fca783e377",
+    "origin_main": "e7223997e9678fe0f9de7d158160e4fca783e377",
     "behavioral_source_checkpoint_contained": true
   },
   "before": {
@@ -81,8 +81,8 @@
     "authority_delta": "NONE"
   },
   "migration_collision_scan": {
-    "source_head": "f36379b9ddf10ee1055daeda27805c409c6ee8bd",
-    "origin_main": "f36379b9ddf10ee1055daeda27805c409c6ee8bd",
+    "source_head": "e7223997e9678fe0f9de7d158160e4fca783e377",
+    "origin_main": "e7223997e9678fe0f9de7d158160e4fca783e377",
     "eligible_migrations": 139,
     "highest_version": 157,
     "duplicate_versions": 0,
