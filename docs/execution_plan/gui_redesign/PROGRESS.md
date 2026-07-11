@@ -2,7 +2,9 @@
 
 ## 狀態欄
 - **STATUS**: IN_PROGRESS
-- **CURRENT**: P0.4 樣式 fork 合併+收斂(累積清單需 PA 組織:style forks live-*/se-*/rc-*/gov-*→oc-*、半徑整併群 6px→r-1、83 裸 hex→語義 token、tokens-compat 整檔刪、懸空 var、量級猜測×2、dead helper、混合哨兵、tabbed-compat 消費點複審)
+- **CURRENT**: P0.4 C1(最低風險起手:common-formatters 死欄刪+tab-phase4 懸空 var→--bg-raised+blank guard '--'→OC_EMPTY+oc-tc-meta 越界常量;非交易 E1a→E2)
+- **LAST-COMMIT**: 6f8fb17fb(P0.4 設計正本 07_consolidation.md)
+- **DRIFT/待裁(P0.4 PA findings)**:①working doc §9 step4 fork-delete 掛 Phase0 vs P1.4 共用組件凍結相衝→PA 以 P1.4 為準(fork bulk-rename 移 P1.4),建議更新 §9;②legacy 殼(console/trading/index=Phase3 刪除目標)仍消費舊 token 名,阻塞刪 tokens-compat.css→**C3/C5 開批前須向 OPS/operator 取 index/trading served-status**(遷 legacy vs defer 刪檔到 Phase3 二選一);③styles.css 仍 1 個 `:root`(疑 P0.1 逃逸)C3 驗;④POST 量級猜測×2 需後端契約=C8 defer Issue
 - **LAST-COMMIT**: 9f1a82019(P0.3 B6/E live,**P0.3 完結**)
 - **AWAITING-OPERATOR/QC**: demo/paper(B5/D)+ live(B6/E)顯示精度變更(4dp→2dp 聚合、bps 2dp、qty 6dp、負號 U+2212、closed-pnl per-trade 隨幣別 FX 轉換)需 QC/operator 知悉;deploy 須確認 cache-buster 已 bump(common-formatters.js 站點 p03-numerics;tab-live.js 自身 p03-b6e-live;CSS/common.js 見 P0.6)
 - 回歸基線更新:structure/ 6F→**4F**(兄弟 session commit 修掉 test_development_agent_governance+stable_boundary_docs;現 4F=stock_etf_ipc×2/ipc_tests/strategy_blocked_symbols 全 pre-existing 非 GUI)
@@ -46,7 +48,17 @@
   - **E2 B0 LOW 留 D/E**:ocFormatPerformanceMetric 內部 3 blank guard 仍回 '--' 非 OC_EMPTY(混合哨兵)、ocDate/ocTime 保 '--'(契約外)、governance _formatValue ''→'--'(intended)
   - **P0.4 量級猜測整併(來自 B2)**:governance-tab.js:822(winRate*100 POST payload)+risk-tab.js:836(snapshot-fallback p1_risk_pct<1?*100)兩處同類 fraction/percent 量級猜測——B2 因屬 POST/邏輯層刻意未碰,P0.4 統一(需後端契約確認送出格式,非純顯示)
   - **P0.6 CI-guard/cache-bust 衛生(來自 B5/D)**:①oc-utilities.css/tokens.css/tokens-compat.css 為 `<link>` 無 ?v=(CSS stale 只樣式舊非頁破,低優)+ common.js ?v=20260527 P0.1 改動宜 deploy 複核——建立「shared static 改動→cache-buster bump」CI-guard;②`_ocMetric*`×3 dead helper(B5/D)+ ocPnlClass/paper-positive 註釋殘留 刪除候選;③E2 B0 混合哨兵('--' vs OC_EMPTY)統一
-- [ ] P0.4 樣式 fork 合併:`live-*`/`se-*`/`rc-*`/`gov-*` → `oc-*` 原語;83 裸 hex → 語義 token;半徑歸 5/8/12
+- [~] P0.4 樣式收斂——**設計正本 `design/07_consolidation.md`(PA `6f8fb17fb`)**;實測度量:裸 hex ~367/off-scale 半徑 ~118/fork class ~1138(全 tab-local,**bulk-rename 移 P1.4**)/tokens-compat 舊名消費 688;C1-C8 子批:
+  - [ ] C1 非交易死碼/懸空 var/blank guard/越界常量(最低風險起手)
+  - [ ] C1b 交易死碼(tab-demo _ocMetric×3/tab-risk 懸空 --bg-card)走 E2 硬邊界親算
+  - [ ] C2 半徑收斂(~118→5/8/12,整組轉避 5/6 錯位)
+  - [ ] C3 tokens-compat 遷移-非交易+殼(688 舊名→canonical,computed-identical;**前置:OPS 取 index/trading served-status + styles.css :root 驗**)
+  - [ ] C4 tokens-compat 遷移-交易(live/demo/governance/risk,E2 硬邊界親算)
+  - [ ] C5 刪 tokens-compat.css(gate:全站 16 舊名 grep=0+移 link+cache-bust+guard)
+  - [ ] C6 裸 hex→token(~360 primer legacy=帛晝破版修正,雙主題+A3;紫 #a855f7 中性化/琥珀→--warn/scrim verbatim;REAL FUNDS 熱紅永不觸)
+  - [ ] C7 enum-painting 收尾+共用 .live-metric*(選配)
+  - [ ] C8 POST 量級猜測×2(需後端契約,defer Issue 不阻塞)
+  - PA 死碼修正:僅 _ocMetric×3 真死;**ocPnlClass=7-caller 活碼遷移非刪**;_OC_CAT_CONFIG=死欄;_formatSignedMoneyValue 已刪
 - [ ] P0.5 IBKR lane 語義 chips(DENIED/PRESENT/MISSING/OK)+治理 banner 統一(fake-$0 修復已 shipped,核對即可)
 - [ ] P0.6 CI 守衛升級:grep 禁 `style="`/`<style`(白名單殼層過渡)/裸 hex 新增
 
@@ -123,3 +135,4 @@
 | 2026-07-11 | R18 | P0.3 B4 stock-etf | (doc-only) | **NEAR-NO-OP 零 source**:stock-etf 無 tabular/KPI 數值格,39 bps 全欄名/scaffold/packed-label(硬套違 §3.2);E1a 判定+PM 獨立 sanity 核(無漏 $ /headline/toFixed);G0.5 guard 25/25 續綠;doc-only commit(E1a 報告+帳本);Phase2 真帳戶數值格交接記錄。E2 略(零 diff 無可審,PM 親核 NO-OP 判定) |
 | 2026-07-11 | R19 | P0.3 B5/D demo/paper | d766df666 +cache `74f9cff53` | gated LiveDemo 顯示精度變更;app-paper 0dp bps→ocBps、per-fill 4dp 例外(demo fill 2dp→**4dp** 升防塌零);**ocEsc 移除 13 處 E2 逐點全 SAFE**(typed formatter,XSS 消除非削弱,ocSide 順帶修 non-Buy→SHORT 舊瑕疵);E1a→E2 PASS no RETURN(硬邊界 IDENTICAL);**站點級 cache-buster bump 21 檔**(E2 NEEDS-DEPLOY:pre-B0 快取 ReferenceError 頁破防護);QC/operator 知悉+P0.6 cache-bust CI-guard 入帳 |
 | 2026-07-11 | R20 | P0.3 B6/E live | 9f1a82019 | **P0.3 完結**;gated REAL FUNDS 顯示精度變更;E2 最嚴親算:硬邊界全 IDENTICAL(typed-confirm/五閘/emergency/flatten byte-identical)、canon 6 熱紅 <style> 零 diff、**ocEsc 移除 21 處全 SAFE**、per-fill 4dp 無塌零、_edgeMetricValue bps helper #2 消除、fee!=='--'→ocIsBlank、刪 _formatSignedMoneyValue=canon7 改善;tab-live.js 1908<2000;E1a→E2 PASS no RETURN 6 lens;回歸零 delta;CURRENT=P0.4 累積收斂(需 PA 組織) |
+| 2026-07-11 | R21 | P0.4 設計 | 6f8fb17fb | PA 出 P0.4 spec-of-record `design/07_consolidation.md`(C1-C8 子批+tokens-compat 遷移映射/hex→token 對照/半徑表/fork 策略/死碼修正);重估 fork 449→~1138 全 tab-local→bulk-rename 移 P1.4(縮小 P0.4);紫中性化/琥珀→--warn;POST 量級猜測剝 C8 defer;DRIFT×3(§9 vs P1.4/legacy 殼阻塞刪 compat/styles.css :root);設計 checkpoint 完成,C1 下輪 |
