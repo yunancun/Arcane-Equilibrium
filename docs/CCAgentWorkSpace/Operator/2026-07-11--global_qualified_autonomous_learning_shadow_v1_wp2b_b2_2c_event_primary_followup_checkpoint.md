@@ -3,6 +3,9 @@
 Date: 2026-07-11
 Goal: `GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1`
 Source state: `DONE_SOURCE_ACCEPTED_B2_2C_EVENT_PRIMARY`
+Publish alignment observed: Mac/origin
+`2320536b25b444a8e24141248f22106fd19cbc7a` at
+`2026-07-11T17:05:42Z`
 Current Goal item: `WP3-PROOF-REWARD-REPOSITORY-ADAPTERS`
 
 Two narrow source commits completed the B2.2c reconciliation without

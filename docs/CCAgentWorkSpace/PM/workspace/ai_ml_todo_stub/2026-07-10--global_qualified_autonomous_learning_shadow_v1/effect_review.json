@@ -1,11 +1,17 @@
 {
   "schema": "global_qualified_autonomous_learning_shadow_effect_review_v1",
-  "generated_at": "2026-07-11T16:53:42Z",
+  "generated_at": "2026-07-11T17:05:42Z",
   "goal_id": "GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1",
   "loop": "B2_2C_EVENT_PRIMARY_RECONCILIATION_SOURCE_ACCEPTANCE",
   "status": "DONE_SOURCE_ACCEPTED_B2_2C_EVENT_PRIMARY",
   "terminal": false,
   "source_checkpoint": "1b85318f29a16d5a7575b27cb158486fdfd47331",
+  "publish_alignment": {
+    "observed_at": "2026-07-11T17:05:42Z",
+    "mac_head": "2320536b25b444a8e24141248f22106fd19cbc7a",
+    "origin_main": "2320536b25b444a8e24141248f22106fd19cbc7a",
+    "behavioral_source_checkpoint_contained": true
+  },
   "before": {
     "origin_handoff_checkpoint": "328125a08e0f15057a110c69266d6a6ea71c8826",
     "candidate_board_delivery": "FIVE_SECOND_IDLE_POLL",
@@ -35,6 +41,7 @@
     "repaired_projection_focused": "23 passed in 0.09s",
     "event_consumer_focused": "33 passed, 1 skipped in 0.06s",
     "current_full_ml_training": "1790 passed, 36 skipped in 11.89s",
+    "github_fast_forward": "a6c0b2ebd9f29152f879358c1d541fd1ea25f372 -> 2320536b25b444a8e24141248f22106fd19cbc7a",
     "independent_event_e2": "PASS",
     "independent_handoff_causality_review": "PASS",
     "p0_p1_p2": "0/0/0",
