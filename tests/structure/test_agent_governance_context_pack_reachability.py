@@ -212,19 +212,44 @@ def test_high_cardinality_interface_inventory_is_bounded_and_spawnable() -> None
 
 
 def test_standard_review_band_avoids_a_more_expensive_duplicate_context_split() -> None:
-    plan = compile_context(
-        "E5",
-        _facts(
-            surfaces=["performance"], risk="medium", uncertainty="medium",
-            direct_interfaces=["context"],
-            objective="review the real Context interface without duplicating core and callers",
-        ),
+    facts = _facts(
+        surfaces=["performance"], risk="medium", uncertainty="medium",
+        direct_interfaces=["context"],
+        objective="review the real Context interface without duplicating core and callers",
+    )
+    base_plan = compile_context("E5", facts)
+    base_budget = base_plan["budget"]
+    reserve_end = (
+        base_budget["target_context_tokens"]
+        + base_budget["quality_reserve_context_tokens"]
+    )
+    required_padding = max(
+        0, 4 * (reserve_end + 1 - base_budget["estimated_tokens"]),
+    )
+    plan = None
+    for extra_bytes in range(required_padding, required_padding + 8_193, 512):
+        candidate = compile_context(
+            "E5", {
+                **facts,
+                "task_prompt": "Review the bound Context interface. " + "x" * extra_bytes,
+            },
+        )
+        candidate_budget = candidate["budget"]
+        if (
+            reserve_end < candidate_budget["estimated_tokens"]
+            < candidate_budget["max_context_tokens_per_call"]
+        ):
+            plan = candidate
+            break
+    assert plan is not None, (
+        "bounded deterministic padding could not reach the reviewed band",
+        base_budget,
     )
     budget = plan["budget"]
-    reserve_end = (
+    assert (
         budget["target_context_tokens"]
         + budget["quality_reserve_context_tokens"]
-    )
+    ) == reserve_end
     assert reserve_end < budget["estimated_tokens"] < budget["max_context_tokens_per_call"]
     assert budget["action"] == "review_required"
     assert budget["review_required"] is True

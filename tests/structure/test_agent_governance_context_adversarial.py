@@ -1183,8 +1183,11 @@ async function execute(input, nullFirst = false) {
     ).replace("__EXPIRED__", json.dumps(expired_artifact)).replace(
         "__NEAR_CAP__", json.dumps(near_cap_args)
     )
+    script_path = tmp_path / "agent-wave-context-adversarial.js"
+    script_path.write_text(script, encoding="utf-8")
     completed = subprocess.run(
-        ["node", "-e", script], cwd=ROOT, text=True, capture_output=True, check=False
+        ["node", str(script_path)], cwd=ROOT, text=True,
+        capture_output=True, check=False,
     )
     assert completed.returncode == 0, completed.stderr
     result = json.loads(completed.stdout)

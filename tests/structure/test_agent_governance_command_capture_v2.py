@@ -109,7 +109,7 @@ def test_absent_claims_are_canonical_false_and_live_facade_is_readable() -> None
             "capture-command", "--native-agent", "E2",
             "--node-id", "independent_review",
             "--context-artifact", json.dumps(artifact, separators=(",", ":")),
-            "--", "rg", "--version",
+            "--", "git", "rev-parse", "--is-inside-work-tree",
         ],
         cwd=ROOT, check=False, capture_output=True, text=True,
         env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
@@ -118,7 +118,7 @@ def test_absent_claims_are_canonical_false_and_live_facade_is_readable() -> None
     record = json.loads(completed.stdout)
     assert record["result"] == "PASS"
     assert record["stdout"]["encoding"] == "utf-8"
-    assert record["stdout"]["preview_text"].startswith("ripgrep ")
+    assert record["stdout"]["preview_text"] == "true\n"
     assert record["effect_enforcement"] == "repository_policy_only"
     assert record["host_sandbox_attestation_ref"] is None
 
@@ -229,7 +229,8 @@ def test_forged_scope_and_host_attestation_are_rejected() -> None:
     artifact, _ = _review_context()
     record = capture_v2.capture_governed_command(
         native_agent="E2", node_id="independent_review",
-        context_artifact=artifact, argv=["rg", "--version"], root=ROOT,
+        context_artifact=artifact,
+        argv=["git", "rev-parse", "--is-inside-work-tree"], root=ROOT,
     )
     forged_scope = deepcopy(record)
     forged_scope["path_scope"] = ["."]
