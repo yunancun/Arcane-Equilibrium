@@ -2,8 +2,9 @@
 
 ## 狀態欄
 - **STATUS**: IN_PROGRESS
-- **CURRENT**: P0.4 C3a(tokens-compat 遷移-非交易 tab,排除殼層 console/trading/index;computed-identical 機械遷移;殼層+C5 刪檔待 operator served-status 決策)
-- **LAST-COMMIT**: b131fe683(P0.4 C2 半徑全站 token 化 180 literal)
+- **CURRENT**: P0.4 C4(tokens-compat 遷移-交易 tab+共用 JS:governance/live/paper/demo/risk+risk-tab.js/tab-live.js/app-paper.js+common.js/common-formatters/common-modals/handoff_helper/common-mode-badge;E2 硬邊界親算,--red 逐點分類 loss/alert→--neg vs live-marker→--live truth-table)
+- **LAST-COMMIT**: cc44ecef3(P0.4 C3a 非交易 tab tokens-compat 遷移 158 舊名)
+- **殼層/C5 裁決(已查證)**:gui_legacy_routes.py 仍 served /console(active 主殼)·/gui(index.html)·/trading(trading.html);**C5 刪 tokens-compat.css defer Phase3**(殼層舊名由 compat 續服務,無害;避免遷移註定 Phase3 刪的 legacy 殼白工)——PM 自主裁決,不阻塞
 - **回歸基線漂移(2026-07-11)**:structure/ 4F→浮動 **7-9F**——兄弟 session commit `aa67c3afd` 引入 test_development_agent_governance(新治理框架)**order-dependent** 測試(solo 2F/混跑 3-5F,不掃 GUI 檔);GUI 面基線=formatter/spec-drift/gui guard 全綠(48/0),用 `-k gui or numeric or utilities or tokens or fork` 或 comm 對照法驗 GUI 零新失敗
 - **DRIFT/待裁(P0.4 PA findings)**:①working doc §9 step4 fork-delete 掛 Phase0 vs P1.4 共用組件凍結相衝→PA 以 P1.4 為準(fork bulk-rename 移 P1.4),建議更新 §9;②legacy 殼(console/trading/index=Phase3 刪除目標)仍消費舊 token 名,阻塞刪 tokens-compat.css→**C3/C5 開批前須向 OPS/operator 取 index/trading served-status**(遷 legacy vs defer 刪檔到 Phase3 二選一);③styles.css 仍 1 個 `:root`(疑 P0.1 逃逸)C3 驗;④POST 量級猜測×2 需後端契約=C8 defer Issue
 - **AWAITING-OPERATOR/QC**: demo/paper(B5/D)+ live(B6/E)顯示精度變更(4dp→2dp 聚合、bps 2dp、qty 6dp、負號 U+2212、closed-pnl per-trade 隨幣別 FX 轉換)需 QC/operator 知悉;deploy 須確認 cache-buster 已 bump(common-formatters.js 站點 p03-numerics;tab-live.js 自身 p03-b6e-live;CSS/common.js 見 P0.6)
@@ -52,7 +53,9 @@
   - [x] C1 非交易死碼/懸空 var/blank guard/越界常量——證據 `aaa784f09`:common-formatters 刪 _OC_CAT_CONFIG color/bg 死欄(0-caller)+3 blank guard→OC_EMPTY;tab-phase4 --bg-elevated→--bg-raised(刪 #161b22 primer hex);common-modals oc-tc-meta whiteSpace→.pre-line;E1a→E2 PASS 0 blocker(死欄/懸空/哨兵/whiteSpace 全親證,零邏輯改動)→GUI structure guard 48/0 綠、C1 零新失敗(comm 對照;基線漂移=兄弟 governance 框架 order-dependent);E2 LOW 留 sentinel sweep(呼叫端 '--' 殘留)
   - [x] C1b 交易死碼(tab-demo _ocMetric×3/tab-risk 懸空 --bg-card)——證據 `325ed2cea`:三死函數 0-caller 親證(rg ocMetric 全站 0 code caller;B5/D 後成死碼,−17 行)+tab-risk .rc-dlg-detail --bg-card→--bg-surface(懸空修正);E1a→E2 硬邊界親算 PASS no RETURN(含隱藏調用掃描/canon 6 熱紅未觸/刪除邊界乾淨)→PM 親跑 node --check 4/4(補 E2 治理路徑限制)+GUI guard 48/0+comm 對照零新失敗
   - [x] C2 半徑收斂(180 literal→var(--r-*))——證據 `b131fe683`:23 檔確定性映射(3/4/5/6→r-1、7/8/9/10→r-2、12/14/18→r-3;多值逐非零 0 保留);保留 2px seal/999/50%/0;交易檔 E2 硬邊界親算(每 ±行含 border-radius,canon 6 熱紅 verbatim,邊界防誤 border-width/padding/box-shadow 未誤轉)→E2 PASS no RETURN、GUI guard 48/0、node --check 全 OK;var(--card-radius)屬 C3/C4 未動;login.html 排除
-  - [ ] C3 tokens-compat 遷移-非交易+殼(688 舊名→canonical,computed-identical;**前置:OPS 取 index/trading served-status + styles.css :root 驗**)
+  - [x] C3a tokens-compat 遷移-非交易 tab(158 舊名→canonical,13 檔)——證據 `cc44ecef3`:純機械 computed-identical(別名解析同 canonical 零視覺);boundary 防誤傷(E2 negative lookahead 0 殘留);fallback hex 保留(C6);13 個 --red→--neg 機械不升 --live;E1a 逆映射 SURGICAL→E2 PASS no blocker→PM 補跑 node --check 13/13(E2 治理禁寫 probe)+GUI guard 48/0+G0.5 25/25;E2 NOTE:tab-agents live-marker 落 --neg 待 canon6 --live pass 逐點裁決(forward-pointer)
+  - [ ] C3b/C4 tokens-compat 遷移-交易+共用 JS(governance/live/paper/demo/risk+risk-tab.js/tab-live.js/app-paper.js+common.js 96 等注入交易的共用 JS;E2 硬邊界親算+--red 逐點 truth-table)
+  - **殼層遷移**:defer(compat 續服務 console/index/trading);**C5 刪 tokens-compat.css defer Phase3**(PM 自主裁決,served 查證見狀態欄)
   - [ ] C4 tokens-compat 遷移-交易(live/demo/governance/risk,E2 硬邊界親算)
   - [ ] C5 刪 tokens-compat.css(gate:全站 16 舊名 grep=0+移 link+cache-bust+guard)
   - [ ] C6 裸 hex→token(~360 primer legacy=帛晝破版修正,雙主題+A3;紫 #a855f7 中性化/琥珀→--warn/scrim verbatim;REAL FUNDS 熱紅永不觸)
@@ -139,3 +142,4 @@
 | 2026-07-11 | R22 | P0.4 C1 | aaa784f09 | 非交易死碼/懸空/哨兵/常量收斂(3 檔);_OC_CAT_CONFIG color/bg 死欄刪+3 blank guard→OC_EMPTY+--bg-elevated→--bg-raised(刪 primer hex)+oc-tc-meta whiteSpace→.pre-line;E1a→E2 PASS 0 blocker;GUI structure guard 48/0 綠、C1 零新失敗(comm 對照);**基線漂移 4F→7-9F=兄弟 aa67c3afd governance 框架 order-dependent 非 GUI**;E2 LOW 呼叫端 '--' 留 sentinel sweep |
 | 2026-07-11 | R23 | P0.4 C1b | 325ed2cea | 交易檔死碼刪除+懸空 var 修復(tab-demo 三死函數 0-caller/tab-risk --bg-card→--bg-surface);E1a→E2 硬邊界親算 PASS no RETURN(隱藏調用掃描/canon 6 熱紅未觸/刪除乾淨);PM 親跑 node --check 4/4 補 E2 治理路徑限制+GUI guard 48/0+comm 零新失敗 |
 | 2026-07-11 | R24 | P0.4 C2 半徑 | b131fe683 | 全站 border-radius 180 literal→var(--r-*)確定性 token 化(23 檔);保留 2px seal/999/50%/0;交易檔 E2 硬邊界親算(每 ±行含 border-radius/canon6 熱紅 verbatim/邊界防誤)→E2 PASS no RETURN、GUI guard 48/0、node --check 全 OK(E2 用治理 authorize-command preflight 親跑) |
+| 2026-07-11 | R25 | P0.4 C3a compat 遷移 | cc44ecef3 | 非交易 13 tab 舊名 158→canonical 機械遷移(computed-identical 別名同值零視覺);boundary 防誤傷(E2 negative lookahead 0 殘留)、fallback hex 保留 C6、--red→--neg 機械不升 --live;E1a 逆映射 SURGICAL→E2 PASS no blocker(158 逐條核/零邏輯改動);PM 補跑 node --check 13/13(E2 治理禁寫 probe)+GUI guard 48/0+G0.5 25/25;殼層+C5 刪檔 defer Phase3(served 查證);forward-pointer:tab-agents live-marker 待 canon6 --live pass |
