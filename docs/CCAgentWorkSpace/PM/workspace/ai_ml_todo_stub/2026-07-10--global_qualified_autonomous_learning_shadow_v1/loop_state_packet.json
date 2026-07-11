@@ -1,6 +1,6 @@
 {
   "schema": "global_qualified_autonomous_learning_shadow_loop_state_v1",
-  "generated_at": "2026-07-11T18:50:34Z",
+  "generated_at": "2026-07-11T18:59:25Z",
   "goal_id": "GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1",
   "goal_thread_id": "019f4b6d-1e5b-7551-9fce-7a2f029a1675",
   "goal_status": "ACTIVE",
@@ -12,10 +12,10 @@
   "source_runtime": {
     "branch": "agent/alr-wp4-contracts",
     "baseline_aligned_head": "1a3ecdd57927e70dd8c6dedfed4ecef04c7a46d3",
-    "mac_head": "f36379b9ddf10ee1055daeda27805c409c6ee8bd",
-    "mac_origin_main": "f36379b9ddf10ee1055daeda27805c409c6ee8bd",
-    "source_capture_kind": "WP4_BEHAVIORAL_POST_PUSH_ALIGNMENT_OBSERVATION",
-    "alignment_observed_at": "2026-07-11T18:50:34Z",
+    "mac_head": "e7223997e9678fe0f9de7d158160e4fca783e377",
+    "mac_origin_main": "e7223997e9678fe0f9de7d158160e4fca783e377",
+    "source_capture_kind": "WP4_DOCUMENTATION_POST_PUSH_ALIGNMENT_OBSERVATION",
+    "alignment_observed_at": "2026-07-11T18:59:25Z",
     "behavioral_source_checkpoint": "f36379b9ddf10ee1055daeda27805c409c6ee8bd",
     "source_publish_pending": false,
     "origin_contains_behavioral_source_checkpoint": true,

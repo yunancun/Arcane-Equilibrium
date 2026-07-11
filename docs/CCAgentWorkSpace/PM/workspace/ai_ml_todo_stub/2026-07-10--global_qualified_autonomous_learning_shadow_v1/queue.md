@@ -1,6 +1,6 @@
 # GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1 Queue
 
-Updated: 2026-07-11T18:50:34Z
+Updated: 2026-07-11T18:59:25Z
 Goal status: `ACTIVE`
 Current item: `WP4-ACTUAL-TRAINING-REGISTRY`
 WP1 checkpoint: behavioral code `c080c552b`, exact operational target
@@ -126,9 +126,10 @@ promotion paths are explicitly disallowed. Focused `32`, adjacent
 and QA final P0/P1/P2 `0/0/0`. No migration, DB write, fit, artifact, registry,
 runtime, or authority action occurred.
 
-Publish alignment was observed at `2026-07-11T18:50:34Z`: Mac HEAD and
-`origin/main` both equaled behavioral checkpoint
-`f36379b9ddf10ee1055daeda27805c409c6ee8bd`.
+Publish alignment was observed at `2026-07-11T18:59:25Z`: Mac HEAD and
+`origin/main` both equaled documentation checkpoint
+`e7223997e9678fe0f9de7d158160e4fca783e377`, which contains behavioral
+checkpoint `f36379b9ddf10ee1055daeda27805c409c6ee8bd`.
 
 Allowed nonterminal transitions are `ACTIVE -> ADVANCED -> ACTIVE`,
 `ACTIVE -> DEFER_EVIDENCE -> ROTATE -> ACTIVE`, `ACTIVE -> REJECT -> ROTATE ->
