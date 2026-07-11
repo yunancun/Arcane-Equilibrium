@@ -2,9 +2,10 @@
 
 ## 狀態欄
 - **STATUS**: IN_PROGRESS
-- **CURRENT**: P0.4 C6c(裸 hex→token-共用 JS:common.js 35/common-formatters/common-modals/handoff_helper;注入所有 tab 含交易,E2 親算 palette 內 hex→token;紫/scrim 保留)
-- **LAST-COMMIT**: 7df893916(P0.4 C6a 非交易 tab hex→token 49 個)
-- **C6 子批(hex→token,大批分)**:C6a 非交易 tab ✅ / C6b 交易 tab+深紅漸層塌平(E2 硬邊界)/ C6c 共用 JS / C6d 紫中性化(跨檔朱印形制,A3 可見美學)/ C6e 殼層 styles.css 119(Phase3 目標,defer or 非-legacy);A3 雙主題目視全 defer Phase0 全審(Mac 無法真渲染)
+- **CURRENT**: P0.4 C6b(交易 tab 裸 hex→token + 深紅漸層塌平 #3d0d0d/#5c1a1a + tab-agents 漸層卡;E2 硬邊界親算;紫/scrim/REAL-FUNDS 保留)
+- **LAST-COMMIT**: a04c4cb16(P0.4 C6c 共用 JS hex→token 32 個+modal 外緣 border-strong;五-lens 對抗驗證全 PASS)
+- **C6 子批(hex→token,大批分)**:C6a 非交易 tab ✅ / C6c 共用 JS ✅ / C6b 交易 tab+深紅漸層塌平(E2 硬邊界)/ C6d 紫中性化(跨檔朱印形制,A3 可見美學)/ C6e 殼層 styles.css 119(Phase3 目標,defer or 非-legacy);A3 雙主題目視全 defer Phase0 全審(Mac 無法真渲染)
+- **帛晝(亮主題)就緒前置(C6c 五-lens MED+LOW forward-pointer)**:多面板底仍硬編碼冷調 rgba(13,17,23,α)/rgba(56,139,253,α)/rgba(139,148,158,α),tokens.css 無泛用 alpha/overlay token 可機械映射→帛晝下深字疊深底低對比(WCAG <4.5:1,尤 --text-secondary/--muted 標籤);**非本批回歸**(diff 未觸這些 rgba),但帛晝可交付前須新增專屬 alpha token 並 tokenize(PA 決策,非機械 swap);strategy 身份色整組(common-formatters 5 dead-data hex+common.js 4 --strategy-color)defer C6b/C6d,建議刪 dead-data 勿當權威暖色(defer-audit#0/#1)
 - **canon 6 --live pass 待辦(來自 C3a/C4b forward-pointer)**:live/auth marker 現落 --neg,未來獨立 pass 逐點裁決升 --live(A3+operator canon6):tab-agents(C3a)+ gov:1352/1360/1446 auth 狀態/tab-live.js:90/99/138 live auth/risk-tab.js:226 live 徽章(C4b 7 點);--live 升級=增強非修復,不阻塞刪檔
 - **殼層/C5 裁決(已查證)**:gui_legacy_routes.py 仍 served /console(active 主殼)·/gui(index.html)·/trading(trading.html);**C5 刪 tokens-compat.css defer Phase3**(殼層舊名由 compat 續服務,無害;避免遷移註定 Phase3 刪的 legacy 殼白工)——PM 自主裁決,不阻塞
 - **回歸基線漂移(2026-07-11)**:structure/ 4F→浮動 **7-9F**——兄弟 session commit `aa67c3afd` 引入 test_development_agent_governance(新治理框架)**order-dependent** 測試(solo 2F/混跑 3-5F,不掃 GUI 檔);GUI 面基線=formatter/spec-drift/gui guard 全綠(48/0),用 `-k gui or numeric or utilities or tokens or fork` 或 comm 對照法驗 GUI 零新失敗
@@ -63,7 +64,7 @@
   - [ ] C5 刪 tokens-compat.css(gate:全站 16 舊名 grep=0+移 link+cache-bust+guard)
   - [~] C6 裸 hex→token(~380,大批分 C6a-e;primer 冷調→暖玄衡 token=執行 operator 暖調裁決,A3 雙主題目視 defer Phase0)
     - [x] C6a 非交易 tab(49 hex→token,6 檔)——證據 `7df893916`:red→neg/琥珀→warn/綠→pos/灰→secondary/海拔 raised·subtle 逐點判;E1a→E2 PASS no 退回(49 映射逐檔親證/熱紅未觸/added 與 removed 鏡像零邏輯/殘餘=保留集);GUI guard 50/0;紫/漸層/scrim/fallback 保留
-    - [ ] C6c 共用 JS(common.js 35 等注入交易,E2 親算)
+    - [x] C6c 共用 JS(3 檔 32 hex→token)——證據 `a04c4cb16`:common.js 20/common-modals 1/handoff 11;--border-subtle×22/--text-primary×4/--neg×3(三紅收斂 canon9:destructive #ff7b72/confirm-h3 #f85149/live-metric.neg #f87171→--neg 消第四 salmon 紅)/--bg-surface×1/--bg-raised×1/--text-secondary×1;modal 外緣 #30363d→--border-strong(04_identity §2.3 浮層 recipe);**五-lens 對抗驗證全 PASS**(computed-value/canon6熱紅位元完整/雙主題定義齊/語法-rgba鏡像net0-交易語義未動/defer稽核):9 findings→3 誤報反駁+6 存活全 LOW/MED 非本 diff 回歸;node --check×3+GUI guard 50/0;紫/scrim/REAL-FUNDS rgba(248,81,73)位元不動/fallback/strategy 身份色保留
     - [ ] C6b 交易 tab hex+深紅漸層塌平+tab-agents 漸層卡(E2 硬邊界親算)
     - [ ] C6d 紫中性化(跨檔朱印形制 §2.3,A3 可見美學;canon 9/10 禁 --purple)
     - [ ] C6e 殼層 styles.css 119+console/trading(Phase3 目標,defer or 非-legacy 部分)
@@ -154,3 +155,4 @@
 | 2026-07-11 | R26 | P0.4 C4a compat 遷移共用 JS | 81aebe9d2 | 5 共用 JS(注入所有 tab 含交易)169 舊名→canonical 機械遷移;E2 親算 computed-identical airtight(雙向 override 空→注入交易零視覺);--red 23 點全 loss/alert(防詐 sentinel 非 live-marker)機械→--neg;零邏輯改動 134 ins/134 del 平衡 formatter 契約未觸;E1a→E2 PASS no blocker→formatter+spec-drift 3 passed+GUI guard 50/0+node --check 5/5(E2 親跑無治理限制) |
 | 2026-07-11 | R27 | P0.4 C4b compat 遷移交易 tab | 98ad2fb64 | 8 交易 tab 170 舊名→canonical 機械遷移(computed-identical);E2 交易面最嚴 word-diff 逐 hunk 全量零邏輯改動(控制流原封 154 ins/154 del)、canon 6 熱紅 rgba HEAD↔WORK 逐檔相等 var(--live)未動、--red 14 分類(7 loss/alert+7 live-marker forward-pointer 機械--neg 不升 --live)→E2 PASS no issue→GUI guard 50/0+node --check 全綠;**活躍 tab tokens-compat 遷移完結**(C3a+C4a+C4b),剩殼層 defer C5 |
 | 2026-07-11 | R28 | P0.4 C6a hex→token 非交易 | 7df893916 | 6 非交易 tab 49 palette 內裸 hex→主題自適應 token(red→neg/琥珀→warn/綠→pos/灰→secondary/海拔逐點判);視覺變更=執行 operator 暖調裁決(冷 primer→暖玄衡)修正非退化 A3 雙主題 defer Phase0;E1a→E2 PASS no 退回(49 映射逐檔親證/熱紅未觸/零邏輯鏡像/殘餘=保留集無遺漏/token 雙主題定義齊備)→GUI guard 50/0;紫/漸層/scrim/fallback 保留;C6 分 C6a-e 子批 |
+| 2026-07-11 | R29 | P0.4 C6c hex→token 共用 JS | a04c4cb16 | 3 共用 JS(注入所有 tab 含交易)32 裸 hex→token;--border-subtle×22/--text-primary×4/三紅收斂--neg×3(destructive#ff7b72+confirm#f85149+live-metric#f87171,消第四 salmon 紅)/surface·raised·secondary;modal 外緣 #30363d→--border-strong(浮層 recipe 校正);**ultracode 五-lens 對抗驗證 workflow 全 PASS**(computed-value/canon6熱紅位元完整/雙主題/語法-rgba鏡像net0-交易語義0動/defer稽核)→9 findings 對抗複核 3 誤報反駁+6 存活全 LOW/MED 且非本 diff 回歸;node --check×3+GUI guard 50/0+rgba 鏡像 net=0;**帛晝亮主題就緒需專屬 alpha token**(冷 rgba 面板底,PA 決策 forward-pointer);多 session 分岔→detached worktree cherry-pick 救援推送(主樹 155 dirty=兄弟 governance 改,不碰) |
