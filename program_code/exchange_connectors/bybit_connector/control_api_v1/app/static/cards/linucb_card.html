@@ -78,7 +78,7 @@
   var REGIMES    = ['trending','ranging','volatile'];
 
   function colorFor(pulls, max) {
-    if (!pulls || pulls <= 0) return '#30363d';
+    if (!pulls || pulls <= 0) return 'var(--bg-raised)';
     var ratio = Math.min(1.0, pulls / Math.max(1, max));
     var g = Math.round(80 + 120 * ratio);
     return 'rgb(40,' + g + ',80)';

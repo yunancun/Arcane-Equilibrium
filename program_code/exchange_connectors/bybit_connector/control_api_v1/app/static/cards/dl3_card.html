@@ -109,7 +109,7 @@
         const ts = r.time ? new Date(r.time).toLocaleString() : '—';
         const lat = (r.latency_ms === null || r.latency_ms === undefined) ? '—' : String(r.latency_ms);
         const okTxt = r.ok ? 'OK' : 'FAIL';
-        const okColor = r.ok ? 'color:var(--green,#3fb950);' : 'color:var(--red,#f85149);';
+        const okColor = r.ok ? 'color:var(--pos);' : 'color:var(--neg);';
         tr.appendChild(td(ts, 'padding:2px 6px;'));
         tr.appendChild(td(r.model || '—', 'padding:2px 6px;'));
         tr.appendChild(td(r.symbol || '—', 'padding:2px 6px;'));
@@ -122,7 +122,7 @@
         const emptyTd = document.createElement('td');
         emptyTd.colSpan = 5;
         emptyTd.textContent = '(no inferences in window)';
-        emptyTd.style.cssText = 'padding:6px;text-align:center;color:var(--text-muted,#8b949e);';
+        emptyTd.style.cssText = 'padding:6px;text-align:center;color:var(--text-muted);';
         tr.appendChild(emptyTd);
         tbody.appendChild(tr);
       }

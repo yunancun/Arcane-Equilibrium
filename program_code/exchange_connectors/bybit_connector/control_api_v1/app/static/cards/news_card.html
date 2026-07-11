@@ -80,15 +80,15 @@
   // 冪等載入器：註冊全域 async 函數，給 tab-phase4 30s 輪詢呼叫。多次載入安全。
 
   // Severity → color mapping / severity 對應顏色
-  // 0.95+ red, 0.8+ orange, 0.5+ yellow, else muted.
+  // ≥0.95 與 ≥0.8 併紅(玄衡克制調色,無橙 token)、≥0.5 黃、else 淡。
   function severityColor(sev) {
     if (sev === null || sev === undefined) return '';
     var s = Number(sev);
     if (isNaN(s)) return '';
-    if (s >= 0.95) return 'color:var(--red,#f85149);font-weight:600;';
-    if (s >= 0.8)  return 'color:#d2691e;font-weight:600;';
-    if (s >= 0.5)  return 'color:var(--yellow,#d29922);';
-    return 'color:var(--text-muted,#8b949e);';
+    if (s >= 0.95) return 'color:var(--neg);font-weight:600;';
+    if (s >= 0.8)  return 'color:var(--neg);font-weight:600;';
+    if (s >= 0.5)  return 'color:var(--warn);';
+    return 'color:var(--text-muted);';
   }
 
   // XSS-safe td builder / XSS 安全 td 建構器
@@ -151,7 +151,7 @@
         var tdEmpty = document.createElement('td');
         tdEmpty.colSpan = 4;
         tdEmpty.textContent = '(no news in window)';
-        tdEmpty.style.cssText = 'padding:6px;text-align:center;color:var(--text-muted,#8b949e);';
+        tdEmpty.style.cssText = 'padding:6px;text-align:center;color:var(--text-muted);';
         trEmpty.appendChild(tdEmpty);
         tbody.appendChild(trEmpty);
       }
@@ -165,10 +165,10 @@
         var p = provs[j] || {};
         var tr2 = document.createElement('tr');
         var statusColor = p.status === 'ok'
-          ? 'color:var(--green,#3fb950);'
+          ? 'color:var(--pos);'
           : (p.status === 'down'
-            ? 'color:var(--red,#f85149);'
-            : 'color:var(--text-muted,#8b949e);');
+            ? 'color:var(--neg);'
+            : 'color:var(--text-muted);');
         var quota = (p.quota_remaining === null || p.quota_remaining === undefined)
           ? '—' : String(p.quota_remaining);
         var lastFetch = p.last_fetch ? new Date(p.last_fetch).toLocaleString() : '—';
@@ -183,7 +183,7 @@
         var tdP = document.createElement('td');
         tdP.colSpan = 4;
         tdP.textContent = '(no providers registered)';
-        tdP.style.cssText = 'padding:6px;text-align:center;color:var(--text-muted,#8b949e);';
+        tdP.style.cssText = 'padding:6px;text-align:center;color:var(--text-muted);';
         trP.appendChild(tdP);
         pbody.appendChild(trP);
       }
