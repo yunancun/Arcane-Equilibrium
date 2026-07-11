@@ -178,3 +178,39 @@
 - 預註冊母集 |F|>30bps:2yr×20 majors 僅 11 事件,10/11=2025-10-11 00:00 UTC 清算瀑布同一瞬間(n_eff≈2,day-cluster G=2),且全部早於 1m kline 留存起點(2026-04-05)→ 分鐘級不可測,SAMPLE_INSUFFICIENT;SOL/APT 事件 F 精確=lowerFundingRate(cap 截尾)。
 - 敏感性(1m 窗 2026-04~06,n=3,894 事件):逆 funding 漂移各 tier gross 近零/負,扣 23bps taker RT 全 horizon 淨負(−18~−47bps),|F| 劑量反應 ρ≈0;唯一 nominal 顯著 cell(IR-floor 30m +2.15bps p=.005)= 假陽性候選(Bonferroni/day-cluster 雙殺)。
 - 教訓:major 宇宙的極端 funding 是「單一 cascade episode 的多份拷貝」(與 F1 偽複製同構);此 niche 證據只能前向捕捉(Gate-B 新上市 capture)或 1m REST 回補,不會從現有留存長出來。報告:workspace/reports/2026-07-10--extreme_funding_settlement_event_study.md
+
+## 2026-07-10 — EXT 外部掃描：bb_rev maker 化重放方法論（PROCEED + 10 條預註冊要求）
+- 外部收斂三錨點：①DeLise 2024（TY 期貨）adverse fill=確定性機制，negative drift ≈ 半價差的 ~90% 回吞、1/3 不成交集中贏家側、touch-based fill 規則 85% vs 真值 60%；②MM Dilemma（arXiv 2502.18625，Binance BTC perp 最小單 live n=233k）fill 率 vs post-fill 報酬 90%/10% 負相關、隊尾 markout −0.775bp vs 隊頭 −0.058bp；③校正正本 = per-signal 無條件記帳（fill/no_fill/reject 三態入分母，Handa-Schwartz 1996 起）。全部 [外部類比]。
+- 對本地：stage2「maker RT ~8.7bps」= 樂觀上界，唯一無條件節省是費率差 ~7bps RT；本地 fill_sim 3-case resolver 已在外部最嚴慣例級，重放缺的是信號條件化+無條件記帳+markout 延窗（5/15/30s 只夠 AS 分量，信號存活需 60s/5m/持有全程）+ 贏家/輸家 fill 率分層。報告：workspace/reports/2026-07-10--move2_external.md
+
+## 2026-07-10 — Move 3 日級 horizon arbitrage 取數盤點（純證據,無裁決）
+- 最重事實:Bybit REST 對已下架 symbol 回 retCode=0 但 0 bars(TON/MATIC 實測)→ 任何今日回補的 2yr 日線面板必為 survivor-conditioned;forward daily cron(已在,05:29)是唯一 PIT 無偏累積路徑。1d 在庫=26 syms(=roster+TON)×730d 截斷、僅共同缺 2026-06-27 一日;宇宙擴張=改 backfill_universe.toml+一次 --apply($0,1 page/symbol,617 USDT perp 可選),唯一前置=PIT liquidity cutoff 未定義。
+- 執行面:多日持有無硬阻擋(holding_hours_max=168h time stop/funding_arb 72h 前例/funding_settlements 有記帳);KlineManager 無 1d buffer 但 flash_dip 有 DB 直讀前例。成本:23bps RT 5d 攤提=4.6bps/day/腿(L/S 9.2);funding 中位 +0.35bps/day(short 收)但負尾 TRX −4.0bps/day=短腿 5d 付 20bps→per-symbol funding 必入成本模型。2yr funding 史不在庫(REST ~11 pages/sym 可補)。報告:workspace/reports/2026-07-10--move3_evidence.md
+
+## 2026-07-10 — EXT Move 3 外部掃描:日級 XS horizon arbitrage(PROCEED 進本地驗證)
+- 外部證據淨結論:液態大幣 XS momentum/trend 扣費存活有正刊證據(CTREND JFQA 2024:top-100 net 2.45%/wk、BETC 1.25%/wk,樣本止 2022-05)但 post-2020 衰減實證在(FMPM 2025 單調性斷裂);**日級反轉=小幣 illiquidity artifact,液態層呈日級動量 → h=1 反轉 DOA**;h≥14d+maker+banding 成本 drag ≈2-4%/yr → 此域瓶頸是 IC×√breadth 非成本牆(與 1m maker-nogo 相反)。
+- Breadth 數學:26 名宇宙 N_eff≈8-12(待 PCA),h=14d 單因子 net IR 1.0 需 IC≈0.10 = 2-5× 常態 → 必須跨族複合(mom×低波×量價);本地 2.1yr 1d 窗 t=2 只能確認 SR≳1.38 → p<0.05 gate 拒真率≈100%,裁決須改 effect-size CI+先驗+三態。
+- 新 FACT:market.klines 1d=19,776 行/26 sym/2024-06-02→2026-07-09(mixed-regime 完整 boom-bust,BTC 62.7k→126k→58.6k→63.2k,非 bull-heavy);另有 153-sym 1h 宇宙自 2026-04-05(寬 breadth 輔助窗);26 名單有 end-of-sample survivorship(momentum 保守/reversal 樂觀)。報告:workspace/reports/2026-07-10--move3_external.md
+
+## 2026-07-10 — Move 2 取數：bb_rev maker 化重放證據盤點（供數，不裁決）
+- 三更正落錘：①`maker_markout_bps`=fill vs submit-reference（reference_source 異質），非 post-fill markout——60s/300s 真 markout DB 不存在須 L1 重算；②bb_rev maker markout 有效 n=**1**（−2.37 單筆，Stage 2 的 n=3 是 fill 數）；③60d gross 僅 +3.66bps（31-60d 單獨 −7.07），maker 化算術 60d 窗 markout=0 也負——「+0.3bps/RT」全押 30d 窗 gross 持續性。
+- 重放可行性正面：l1_events 實 332.4M 行（hypertable 21GB；n_live_tup 4.3M stale 再證 count(*) 鐵則）06-20→07-10/85sym；bb_rev 25 信號 episodes（gap-dedup；跨 symbol 聚簇後 ≈14 獨立簇）100% 對齊 L1±60s；fills 無偽複製但 top-day 07-06 佔 30d gross 52%；harness 需改僅 placement 觸發+單側+episode 聚類（--horizons 60,300 免改碼）；exit 72% phys_lock giveback → 只能 execution-counterfactual。報告：workspace/reports/2026-07-10--move2_evidence.md
+
+## 2026-07-10 — Move 3 方法論預註冊草案 v1(PROCEED 設計層,未凍結)
+- K=114(19 信號×h{7,14,28}×2 權重)+ 單一 primary endpoint `M5|h14|EW`(CTREND-lite 複合趨勢×量能,pre-outcome 指定);GO=G1-G9 全真(含 dispatch 指定 PSR(0)≥0.95 demo gate)、KILL 僅允許在 P100 寬面板(功效前置 PC)、默認結局=INSUFFICIENT。
+- Gate 雙向計價核心數字:PSR gate 於 2.1yr 窗拒真率 82%(真 SR=0.5)/58%(SR=1.0);26 名 grid+Bonferroni114 功效 ≤0.35 → 26 名窗禁 discovery/禁 KILL;宇宙擴張=並行但為 KILL 前置;成本鎖 taker 23bps/RT+funding 逐日,maker 僅 annex。
+- 教訓:高拒真 gate 要可用,必須配「誤殺可逆」結構(fail→INSUFFICIENT 非 KILL + pooled evidence 追加);h=14/28 與 holding_hours_max=168h 衝突是 demo 實作最早的硬前置。報告:workspace/reports/2026-07-10--move3_methodology_prereg_draft.md
+
+## 2026-07-10 — Move 2 方法論預註冊草案（bb_rev maker 化重放;PROCEED 送審）
+- 估計對象重定義落錘:「net=+0.3bps」在 σ_Δ≈8bps 下需 ~4,400 episodes(10 年)=正式宣告不可檢定;改測三分量(無條件 fill rate/真 post-fill 60s+300s markout/Lane A 配對 Δcost,MDE@n=30≈3.6bps 恰可辨 3.5bps 費率差)。判定式 SCREEN_PASS(G1-G8)/KILL(K1-K4)/INSUFFICIENT 三態機械可裁;queue 折扣拒 50% 檔(resolver 已動態建模 cancel-ahead,靜態折扣=重複計算)主判 back-of-queue;記帳=per-episode ITT 三軌(T/M-fb/M-skip),fill-only 僅機制分解。
+- 邊界釘死:execution routing for existing signal ≠ market-making quoting——maker-nogo(0/172,break-even≤0.4bps)不重打不觸碰;SCREEN_PASS ≠ cell 可盈利(60d gross 下淨值仍負);probe「21d≥200 trades」在單 cell 不可達 → 解除條件改 200 signal-episode 對應物+V1 fill-rate 0.7-1.3 校準帶。報告:workspace/reports/2026-07-10--move2_methodology_prereg_draft.md
+
+## 2026-07-10 — Move 3 prereg 對抗紅隊(REVISE;FIX-1..7 後可凍結)
+- 核心 finding RT1:GO 閘鏈功效≠IC 檢定功效——用 prereg 自己的表 P3 相乘,IC 0.07-0.08 → net SR 0.18-0.42 → P(G2 PSR gate)≈8-15%,coin-flip GO 需 IC≈0.18-0.21;Stage A(26 名窗)實質不可 GO,demo 路徑只有 pooled E100⊕E_fwd。另 T 混同:功效表用 765d 但 E26 實長≈504d(174d warmup+90d 首 train),PSR 門檻 1.14→1.40。
+- 新 FACT($0 可重跑):Bybit announcements REST type=delistings 全歷史檔可枚舉(total 442;in-window 2024-06→2026-07 398 則/perp-titled 238)→ survivorship 通道 A 可量化非只標註;通道 B(roster-churn:WIF/ORDI/1000PEPE/SHIB1000 等仍 Trading)可由 Stage B retro top-100 完整修復。單缺席 short-leg 衰退幣 ≈ +0.8bps/day 動量低估=與全部淨 edge 同量級(一階項)。
+- 教訓:regime 穩健性的獨立單位是 episode 非 day(bear 273d=1 episode,與 F1 偽複製同構);demo-cell≠GO-cell(h14 被 holding_hours_max=168h 硬截)是 prereg 最易漏的實作斷點;R2 邊界的嚴格寫法=成本歸一化差 7-14×+投影正交+外部先驗非空,但同資訊集/同線性 IC 法的弱負先驗必須顯式入折減。報告:workspace/reports/2026-07-10--move3_redteam.md
+
+## 2026-07-10 — Move 2 紅隊審計（REVISE；R1 保留、probe/敘事殺掉）
+- 六攻擊面 0 FATAL 於 R1 重放本體，但 5 條強制修正（FIX-1 fallback晚於realized exit 記帳未定義=G4/K3 承重洞;FIX-2 G6 gross_all 分母漏回選擇效應;FIX-3 決策樣本 ≥15 post-reg episodes;FIX-4 **`l1_events` retention=21d 滾動**——累積數學前提不存在、凍結斷言 07-19 起蒸發、R1 本週必跑+切片釘 artifact;FIX-5 descope：probe 需新 Rust 管道（bb_rev 無 use_maker_entry，registry.rs:144/242/272）、單 cell 價值 0.77-9.0 USDT/月=經濟死、宿主經濟正解是 grid）。
+- 「JS 自鎖零成本破鎖」敘事三腿全斷（FACT）：soak 全攔 07-02 已結束（415,651 拒全落 06-29→07-02，withhold 時代僅 6 筆）、標籤已自流（bb_rev 15/15 closes 7d 內標齊）、probe 對 label 量零增量、cost_gate 不因 fill 解鎖；新 finding=V147 label_source 半接線（14/15 NULL）→ label_source 基監測少算 ~15×。
+- 教訓：任何「每週累積重放」設計必先查 timescaledb retention job（滾動窗 vs 累積庫）；motivating cell 作為 max-of-K 其 30d gross 證據含量≈0（Sidak K=6 → p 0.084），但執行分量估計對象可與 cell 選擇解耦——耦合殘留只在以 gross 為分母的 gate。報告：workspace/reports/2026-07-10--move2_redteam.md
