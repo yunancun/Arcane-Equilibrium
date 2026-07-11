@@ -108,6 +108,8 @@ Committed + three-end synced (Mac=origin=Linux) at **`c66338e8b`**:
 GUI root: `srv/program_code/exchange_connectors/bybit_connector/control_api_v1/app/static/`
 Shell: `console.html` (TABS array). Shared: `common.js` (`ocInjectBaseCSS` 303-line CSS string), `styles.css` (651 lines), `common-formatters.js`, `common-modals.js`, `i18n_zh.js`.
 
+**P1.1 新殼 shell 建置分解正本(2026-07-11,R50)=`design/09_shell_p1.md`**(PA-design-writer):shell.html/shell.css/shell.js 新檔拓撲(ratchet 逼 0/0/0)+ topbar/rail/status 規格 + hash view-router(18 view 全 iframe 後備,`openclaw-tab-visibility` verbatim 移植)+ flag opt-in(靜態 `/static/shell.html`,已被 static_auth_guard auth-gated,零 runtime 路由改動)+ P1.1-a 首刀邊界。**待 PM 裁**:lane 位置 DRIFT(頂欄 segmented vs design/02 §1.3 rail-header)+ opt-in 機制 + 乾淨 `/shell` 路由(NEEDS-OPERATOR/RUNTIME)。deep-spec 索引:`design/` 01 排級 / 02 排版 / 03 文案 / 04 識別 / 05 utilities / 06 numerics / 07 consolidation / 08 smoke / 09 shell-P1。
+
 ---
 
 ## 8 · IBKR backend track (handed off — do NOT pursue in this session)
