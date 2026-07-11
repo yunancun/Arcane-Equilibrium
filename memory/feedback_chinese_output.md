@@ -18,3 +18,4 @@ originSessionId: e658c1ef-0aa7-451b-9716-b76e1b29acfb
 - Commit message 仍依倉庫風格（多半英文 + 中文副標題）
 - 當用戶用英文提問或粘貼英文規格時，回覆可以「中文論述 + 引用英文原詞」混合，不必強行翻譯技術名詞
 - 文檔（docs/worklogs/, docs/references/）依既有風格雙語或中文，不為此規則改動
+- **長 /loop session 易漂移（2026-07-11 再次提醒）**：多輪自動推進時每輪收尾的 user-facing 總結會不知不覺變英文；每輪最終訊息送出前自檢語言。subagent 派工 prompt 可中英混用（既有慣例），但回給 operator 的文字一律中文。
