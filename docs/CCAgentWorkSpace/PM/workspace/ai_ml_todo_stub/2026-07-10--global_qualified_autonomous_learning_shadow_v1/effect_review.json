@@ -1,15 +1,15 @@
 {
   "schema": "global_qualified_autonomous_learning_shadow_effect_review_v1",
-  "generated_at": "2026-07-11T22:38:22Z",
+  "generated_at": "2026-07-11T23:18:05Z",
   "goal_id": "GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1",
-  "loop": "WP4_QUALIFIED_RECEIPT_REPOSITORY_WRITER_TRACER",
-  "status": "DONE_SOURCE_ACCEPTED_QUALIFIED_RECEIPT_REPOSITORY_TRACER",
+  "loop": "WP4_QUALIFIED_RECEIPT_READER_TRACER",
+  "status": "DONE_SOURCE_ACCEPTED_QUALIFIED_RECEIPT_READER_TRACER",
   "terminal": false,
-  "source_checkpoint": "c0aec6813b59f3c17b1fb93350794a3581ccd5ae",
+  "source_checkpoint": "fb842a36f006ad58249ff536a455232d2c455f8b",
   "publish_alignment": {
-    "observed_at": "2026-07-11T22:38:22Z",
-    "mac_head": "c0aec6813b59f3c17b1fb93350794a3581ccd5ae",
-    "origin_main": "c0aec6813b59f3c17b1fb93350794a3581ccd5ae",
+    "observed_at": "2026-07-11T23:18:05Z",
+    "mac_head": "fb842a36f006ad58249ff536a455232d2c455f8b",
+    "origin_main": "fb842a36f006ad58249ff536a455232d2c455f8b",
     "behavioral_source_checkpoint_contained": true
   },
   "before": {
@@ -21,17 +21,17 @@
     "code_and_effective_config_bound": true,
     "v158_source_file_present": true,
     "v158_runtime_applied_or_pg_tested": false,
-    "receipt_repository_module_present": false,
-    "fixed_receipt_writer_mapping_present": false,
-    "durable_receipt_rows": 0,
-    "actual_training_runs": 0,
-    "model_artifacts": 0,
-    "challenger_registry_rows": 0
+    "receipt_repository_checkpoint": "c0aec6813b59f3c17b1fb93350794a3581ccd5ae",
+    "receipt_repository_module_present": true,
+    "fixed_receipt_writer_mapping_present": true,
+    "fixed_receipt_reader_mapping_present": false,
+    "database_rows_created_by_prior_source_step": 0,
+    "fit_or_model_bytes_created_by_prior_source_step": false
   },
   "after": {
     "goal_status": "ACTIVE",
     "current_work_package": "WP4-ACTUAL-TRAINING-REGISTRY",
-    "current_work_package_state": "ACTIVE_WP4_QUALIFIED_RECEIPT_READER_TDD",
+    "current_work_package_state": "ACTIVE_WP4_QUALIFIED_TRAINING_RESULT_CONTRACT_TDD",
     "contract_schema": "alr_challenger_training_contract_v1",
     "repository_receipt_only_admission": true,
     "caller_raw_candidate_proof_reward_pit_allowed": false,
@@ -74,36 +74,51 @@
     "receipt_writer_argument_count": 16,
     "contract_snapshot_before_validation": true,
     "dedicated_clean_transaction_required": true,
-    "receipt_reader_present": false,
+    "receipt_reader_checkpoint": "fb842a36f006ad58249ff536a455232d2c455f8b",
+    "receipt_reader_present": true,
+    "receipt_reader_fixed_function_only": true,
+    "receipt_reader_argument_count": 2,
+    "receipt_reader_contract_derived_identity_only": true,
+    "receipt_reader_found_exact_row_required": true,
+    "receipt_reader_not_found_exact_null_required": true,
+    "receipt_reader_runtime_or_pg_exercised": false,
     "database_rows_written": 0,
     "payload_bytes_written": 0,
-    "actual_training_runs": 0,
-    "model_artifacts": 0,
-    "challenger_registry_rows": 0,
-    "next_work_id": "WP4-QUALIFIED-RECEIPT-READER-TDD"
+    "actual_training_runs_created_by_source_step": 0,
+    "model_artifacts_created_by_source_step": 0,
+    "challenger_registry_rows_created_by_source_step": 0,
+    "next_work_id": "WP4-QUALIFIED-TRAINING-RESULT-CONTRACT-TDD"
   },
   "machine_verification": {
-    "tdd_red": "ModuleNotFoundError: ml_training.alr_challenger_repository",
-    "focused_repository_tests": "31 passed",
-    "adjacent_repository_contract_v158_tests": "121 passed",
-    "current_full_ml_training": "1920 passed, 28 skipped in 15.10s",
-    "same_environment_baseline": "1889 passed, 28 skipped in 12.84s",
-    "native_full_environment_issue": "11 existing optional LightGBM tests failed because local libomp.dylib is absent; repository tests remained green",
-    "independent_source_reviews": "PASS/PASS",
+    "tdd_reds": [
+      "ImportError: cannot import name read_qualified_training_receipt",
+      "NOT_FOUND rejected with receipt_response_status_invalid"
+    ],
+    "focused_repository_tests": "61 passed",
+    "adjacent_repository_contract_v158_tests": "130 passed",
+    "current_full_ml_training": "1911 passed, 36 skipped in 20.12s",
+    "same_environment_baseline": "1881 passed, 36 skipped",
+    "exact_reader_test_delta": 30,
+    "independent_source_reviews": "E2/E4/MIT/PARALLEL PASS/PASS/PASS/PASS",
     "p0_p1_p2": "0/0/0",
     "python_compile": "PASS",
     "git_diff_check": "PASS",
     "runtime_or_pg_probe": false,
     "disposable_pg_probes_executed": false,
+    "e4_capture_records": {
+      "focused": "79d0c1ce5f00cff5597d798aa1d6495059cb63f2e7fd383fea8973049504b552",
+      "adjacent": "5175cc83b3bc9186cce5a947f2ca4598ee801d783e1c7712b9650d6ff361941c",
+      "diff_check": "75dcc6d9a44b375aa093fd8943ead24a1bac3da789842c423604993b1f73989b"
+    },
     "source_hashes": {
-      "repository_module": "92d8d692f07a8a573c1d2ce968919458d5e54ec10e2f4bd598a2fcb553e71b92",
-      "repository_tests": "9344b2d4cc08c8cdf708a3bdb82d9b37bdc003b4add8f4778e9919fc6f7e863d"
+      "repository_module": "fbf733ab82428cbee5b450f9b06243cd155fea850287d50018436184bb48ea72",
+      "repository_tests": "683688b4da417a49eb065e8c3ffdab8ad16cb28248266c2169f94b6106676628"
     },
     "authority_delta": "NONE"
   },
   "migration_collision_scan": {
-    "source_head": "c0aec6813b59f3c17b1fb93350794a3581ccd5ae",
-    "origin_main": "c0aec6813b59f3c17b1fb93350794a3581ccd5ae",
+    "source_head": "fb842a36f006ad58249ff536a455232d2c455f8b",
+    "origin_main": "fb842a36f006ad58249ff536a455232d2c455f8b",
     "eligible_migrations": 140,
     "highest_version": 158,
     "duplicate_versions": 0,
@@ -115,30 +130,30 @@
     "verdict": "V158_SOURCE_OCCUPIED_PUBLISHED_UNAPPLIED"
   },
   "semantic_adjudication": {
-    "verdict": "RECEIPT_WRITER_TRACER_SOURCE_ACCEPTED_G3_G4_STILL_FAILED",
-    "reason": "Source now maps the validated contract exactly to V158's fixed receipt writer, but fake-connection publication is not PostgreSQL execution; this source step created no durable row, fixed reader, trainer, fitted matrix, model bytes, or runtime registry row",
+    "verdict": "RECEIPT_READER_TRACER_SOURCE_ACCEPTED_G3_G4_STILL_FAILED",
+    "reason": "Source now derives exact contract-bound lookup identities and validates V158 FOUND/NOT_FOUND read responses, but fake-connection publication is not PostgreSQL execution; this source step created no durable row, qualified result contract, trainer, fitted matrix, model bytes, or runtime registry row",
     "v152_v153_modified": false,
     "v157_modified_or_reused": false,
     "legacy_model_registry_reused": false,
     "model_training_performed_true_allowed": false,
     "migration_runtime_apply_verified": false,
-    "next_route": "DURABLE_RECEIPT_FIXED_READER_TDD_SOURCE_ONLY"
+    "next_route": "QUALIFIED_TRAINING_RESULT_CONTRACT_TDD_SOURCE_ONLY"
   },
   "review_repairs": [
-    "Narrow the public return to the exact validated status/receipt envelope rather than echoing caller memory.",
-    "Pin the reward-set and durable-receipt hash preimages with independent literal goldens.",
-    "Reject PostgreSQL INTEGER overflow and require offset-aware server created_at before commit.",
-    "Snapshot the caller Mapping before validation and use only that same immutable snapshot.",
-    "Reject autocommit and non-IDLE psycopg2 connections before cursor acquisition so unrelated work is never committed or rolled back.",
-    "Pin the complete normalized fixed-function SQL so a comment substring cannot mask an alternate target."
+    "Expose no public raw-hash lookup; derive durable-receipt and training-key hashes only from one validated snapshot.",
+    "Separate FOUND and NOT_FOUND response validation so writer statuses cannot leak into the reader.",
+    "Require NOT_FOUND to contain the exact receipt-null envelope and reject extra fields.",
+    "Reuse complete typed 20-field row parity for FOUND, including offset-aware created_at and canonical payload equality.",
+    "Preserve strict autocommit-false and integer-IDLE preflight before cursor acquisition.",
+    "Pin the exact two-argument reader SQL and forbid writer/result/direct-table/trainer surfaces."
   ],
   "anti_repeat": {
     "same_scope_retries": 0,
     "review_repair_rounds": 6,
-    "next_loop_must_change": "Implement only contract-bound FOUND/NOT_FOUND fake-connection TDD against V158's fixed receipt reader; do not add raw-hash lookup, result APIs, trainer, fit, filesystem publication, V158 apply, PG/Linux/Bybit, registry, or serving state."
+    "next_loop_must_change": "Implement only a pure qualified training-result contract builder/validator; do not call receipt/result APIs, execute trainer or fit, create model/ONNX/files, apply V158, contact PG/Linux/Bybit, mutate registry, or create serving state."
   },
   "authority_delta": "NONE",
-  "runtime_delta": "NONE_RECEIPT_REPOSITORY_SOURCE_ONLY_V158_UNAPPLIED",
+  "runtime_delta": "NONE_RECEIPT_READER_SOURCE_ONLY_V158_UNAPPLIED",
   "database_delta": "NONE_SOURCE_STEP_ZERO_WRITES_PG_UNREFRESHED",
   "exchange_delta": "NONE"
 }

@@ -4,7 +4,7 @@ Date: 2026-07-10
 Owner: PM
 Goal: `GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1`
 Codex Goal thread: `019f4b6d-1e5b-7551-9fce-7a2f029a1675`
-Status: `ACTIVE_WP4_QUALIFIED_RECEIPT_READER_TDD`
+Status: `ACTIVE_WP4_QUALIFIED_TRAINING_RESULT_CONTRACT_TDD`
 
 This is the durable PM-owned queue and state surface for the active Goal. It
 supersedes the old ALR P2 completion/terminal interpretation, but does not edit
@@ -104,8 +104,28 @@ with `28` skips, exactly `31` more passes than the same-environment baseline.
 Two exact-byte final reviews reported P0/P1/P2 `0/0/0`. This was fake-DB source
 TDD only: V158 was not applied, PostgreSQL was not contacted, and no durable
 receipt row, reader proof, fit, artifact, registry, filesystem, runtime, or
-authority fact was created. The next safe action is only V158 fixed receipt
-reader `FOUND/NOT_FOUND` TDD; result and trainer surfaces remain later.
+authority fact was created. Its then-next V158 fixed receipt reader is now
+accepted at the checkpoint below.
+
+The contract-bound qualified-receipt reader is source accepted at
+`fb842a36f006ad58249ff536a455232d2c455f8b`. It snapshots and validates the
+same training contract, derives both durable-receipt and training-key lookup
+identities internally, and calls only
+`learning.read_alr_qualified_training_receipt_v1` with exactly two TEXT
+arguments. `FOUND` must reproduce the exact typed 20-field row and canonical
+payload; `NOT_FOUND` must be the exact two-key null-receipt response. The same
+dedicated clean psycopg2 ownership contract closes success with commit and
+failures with one rollback without touching rejected pending work.
+
+Two RED-to-GREEN cycles covered the missing API and the initially rejected
+`NOT_FOUND` branch. Focused `61`, adjacent `130`, full ML `1911 passed/36
+skipped`, same-environment baseline `1881 passed/36 skipped`, exact reader
+delta `+30`; E2/E4/MIT and independent P0/P1/P2 `0/0/0`. This was source and
+fake-connection work only: V158 was not applied and no PostgreSQL, Linux,
+runtime, exchange, trainer, fit, model/file, registry, serving, promotion, or
+authority effect occurred. The next safe slice is only a pure qualified
+training-result contract builder/validator; the broad result writer/reader and
+all execution remain later.
 
 ## Earlier B2.2c event-primary reconciliation
 
