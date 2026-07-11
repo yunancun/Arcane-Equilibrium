@@ -1350,12 +1350,7 @@ def _validate_slippage_stat_block(
         or q90 is None and cvar90 is not None
     ):
         raise ValueError("EXPECTED_COST_SOURCE_INVALID")
-    if abs(mean_signed) > mean_abs and not math.isclose(
-        abs(mean_signed),
-        mean_abs,
-        rel_tol=_SLIPPAGE_MEAN_REL_TOL,
-        abs_tol=_SLIPPAGE_MEAN_ABS_TOL_BPS,
-    ):
+    if abs(mean_signed) > mean_abs:
         raise ValueError("EXPECTED_COST_SOURCE_INVALID")
     quantiles = [item for item in (q50, q75, q90) if item is not None]
     if quantiles != sorted(quantiles) or (

@@ -1430,13 +1430,21 @@ def test_adapter_rejects_fully_rehashed_inconsistent_weighted_global_mean(
     assert result["source_status"] == "EXPECTED_COST_SOURCE_INVALID"
 
 
+@pytest.mark.parametrize("block_name", ("global", "symbol"))
 def test_adapter_rejects_fully_rehashed_signed_mean_above_absolute_mean(
     tmp_path: Path,
+    block_name: str,
 ) -> None:
     payload = _payload()
     outer = payload["expected_cost_artifact"]
     source_payload = outer["source_payload"]
-    source_payload["symbols"][0]["mean_signed"] = 2.000001
+    block = (
+        source_payload["global"]
+        if block_name == "global"
+        else source_payload["symbols"][0]
+    )
+    # This must fail before the 1e-9 rollup-comparison tolerance is relevant.
+    block["mean_signed"] = block["mean_abs"] + 0.0000000005
     _rehash_expected_cost_contract(payload)
     _write_snapshot(tmp_path, payload=payload)
 

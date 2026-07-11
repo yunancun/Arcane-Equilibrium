@@ -273,12 +273,7 @@ def _validate_slippage_stat_block(
             and cvar90 is None
         ):
             raise ValueError("slippage producer statistic completeness invalid")
-    if abs(mean_signed) > mean_abs and not math.isclose(
-        abs(mean_signed),
-        mean_abs,
-        rel_tol=_SLIPPAGE_MEAN_REL_TOL,
-        abs_tol=_SLIPPAGE_MEAN_ABS_TOL_BPS,
-    ):
+    if abs(mean_signed) > mean_abs:
         raise ValueError("slippage signed mean exceeds absolute mean")
     thin_sample = block["thin_sample"]
     if not isinstance(thin_sample, bool) or thin_sample is not (n < 100):
