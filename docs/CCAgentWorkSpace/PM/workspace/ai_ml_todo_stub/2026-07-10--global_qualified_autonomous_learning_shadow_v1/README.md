@@ -63,12 +63,21 @@ suite passed `1818` with `36` platform/optional skips. E2, QA, and CC/FA final
 P0/P1/P2 are `0/0/0`. No Linux, PostgreSQL, service, Bybit, or runtime action
 occurred.
 
-WP4 is now active. Its first safe step is a fresh migration collision scan and
-versioned training/registry contract design. V152/V153 bytes remain frozen;
-no migration may be reserved, created, or applied until the exact next version
-and fresh `E3 -> BB` gate are current.
+WP4's first source slice is accepted at
+`f36379b9ddf10ee1055daeda27805c409c6ee8bd`. The collision scan found 139
+migrations through V157, zero duplicates, and no observed V158 reservation;
+V158 is provisional only. `alr_challenger_training_contract_v1` now binds only
+repository-derived proof/reward receipts to exact PIT/data/split/reward/code/
+config/resource hashes. It rejects forged or split lineage and always remains
+`SCHEMA_REQUIRED`, with training/model/registry/runtime authority false.
 
-## Latest source checkpoint: B2.2c event-primary reconciliation
+Focused tests passed `32`; full ML passed `1850` with `36` skips; independent
+E2 and QA final P0/P1/P2 are `0/0/0`. No migration, fit, model, registry,
+runtime, or authority action occurred. V152/V153 bytes remain frozen. The next
+step is a fresh exact `E3 -> BB` gate for provisional forward-schema
+reservation/creation plus isolated no-symlink trainer/repository design.
+
+## Earlier B2.2c event-primary reconciliation
 
 After the WP3 validation adapter landed, source reconciliation proved that
 `origin/main` still handled scanner-idle candidate boards by five-second idle
