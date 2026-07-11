@@ -293,6 +293,83 @@ def test_projection_duplicate_is_not_mislabeled_as_training_duplicate(
     assert result["operational_run_rows_written"] == 0
 
 
+def test_unchanged_handoff_is_reported_as_zero_write_suppression(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        consumer,
+        "fetch_untrained_scanner_cycles",
+        lambda connection, *, limit: _cycles(),
+    )
+    monkeypatch.setattr(
+        consumer,
+        "build_candidate_aware_learning_projection",
+        lambda **kwargs: {"projection": True},
+    )
+    monkeypatch.setattr(
+        consumer,
+        "persist_candidate_learning_projection",
+        lambda connection, projection: _persisted(
+            status="SUPPRESSED_UNCHANGED",
+            artifact_rows_written=0,
+            provenance_rows_written=0,
+            payload_bytes_written=0,
+            source_rows_consumed=0,
+        ),
+    )
+
+    result = run_candidate_aware_backlog(
+        object(), source_head="c" * 40, max_batch=32
+    )
+
+    assert result["decision_writes_suppressed"] == 1
+    assert result["decision_duplicate_retries"] == 0
+    assert result["operational_artifact_rows_written"] == 0
+    assert result["operational_provenance_rows_written"] == 0
+
+
+def test_configured_handoff_uses_recent_sources_when_untrained_floor_is_empty(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(
+        consumer,
+        "fetch_untrained_scanner_cycles",
+        lambda connection, *, limit: _cycles()[:2],
+    )
+    monkeypatch.setattr(
+        consumer,
+        "fetch_recent_candidate_scanner_cycles",
+        lambda connection, *, limit: calls.append("recent") or _cycles(),
+    )
+    monkeypatch.setattr(
+        consumer,
+        "load_candidate_evidence_snapshot",
+        lambda *args, **kwargs: {"source_status": "READY"},
+    )
+    monkeypatch.setattr(
+        consumer,
+        "build_candidate_aware_learning_projection",
+        lambda **kwargs: {"projection": True},
+    )
+    monkeypatch.setattr(
+        consumer,
+        "persist_candidate_learning_projection",
+        lambda connection, projection: _persisted(),
+    )
+
+    result = run_candidate_aware_backlog(
+        object(),
+        source_head="c" * 40,
+        max_batch=32,
+        evidence_directory=tmp_path,
+    )
+
+    assert calls == ["recent"]
+    assert result == _result()
+
+
 def test_default_path_reads_bounded_prior_decisions_for_cooldown(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -260,7 +260,26 @@ class _Cursor:
     def execute(self, sql: str, params: tuple[Any, ...] | None = None) -> None:
         self.connection.calls.append((sql, params))
         assert params is not None
-        if "artifact_kind = ANY" in sql:
+        if "{source_refs,handoff,handoff_hash}" in sql:
+            handoff_hash = str(params[1])
+            self.row = next(
+                (
+                    {
+                        "artifact_kind": self.connection.kinds[artifact_hash],
+                        "canonical_payload": copy.deepcopy(payload),
+                    }
+                    for artifact_hash, payload in reversed(
+                        list(self.connection.artifacts.items())
+                    )
+                    if self.connection.kinds[artifact_hash] in set(params[0])
+                    and payload.get("source_refs", {})
+                    .get("handoff", {})
+                    .get("handoff_hash")
+                    == handoff_hash
+                ),
+                None,
+            )
+        elif "artifact_kind = ANY" in sql:
             kinds = set(params[0])
             self.row = [
                 {
