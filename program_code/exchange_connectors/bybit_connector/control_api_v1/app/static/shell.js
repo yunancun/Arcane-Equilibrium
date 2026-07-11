@@ -62,7 +62,9 @@
     { id: 'ai',         lane: 'cross', hash: '#/cross/ai',         src: '/static/tab-ai.html',         visId: 'ai',          label: 'AI 狀態' },
     { id: 'agents',     lane: 'cross', hash: '#/cross/agents',     src: '/static/tab-agents.html',     visId: 'agents',      label: 'Agent 團隊' },
     { id: 'learning',   lane: 'cross', hash: '#/cross/learning',   src: '/static/tab-learning.html',   visId: 'learning',    label: '學習 Learning' },
-    { id: 'development', lane: 'cross', hash: '#/cross/development', src: '/static/tab-development.html', visId: 'development', label: '開發 Support' },
+    // development:Phase 2 第 3 個原生遷移(iframe:false)——render/pause/resume 由 view-development.js 註冊於
+    //   window.OC_NATIVE_VIEWS(id=development);src 保留 legacy tab-development 作 registry 完整性 + 回滾錨,原生渲染接管。
+    { id: 'development', lane: 'cross', hash: '#/cross/development', src: '/static/tab-development.html', visId: 'development', label: '開發 Support', iframe: false },
     { id: 'phase4',     lane: 'cross', hash: '#/cross/phase4',     src: '/static/tab-phase4.html',     visId: 'phase4',      label: 'Phase 4' },
     // gates:Phase 2 首個原生遷移(iframe:false)——render/pause/resume 由 view-gates.js 註冊於
     //   window.OC_NATIVE_VIEWS(id=gates);src 保留 legacy 檔作 registry 完整性 + 回滾錨,原生渲染接管。
