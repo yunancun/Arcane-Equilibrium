@@ -152,6 +152,20 @@ def _canonical_bytes(value: Any) -> bytes:
     _canonical(value, output)
     return "".join(output).encode("utf-8")
 
+
+def _exact_value_equal(left: Any, right: Any) -> bool:
+    """遞迴比較值與型別，避免 Python 把 True 與 1 視為相同 lineage。"""
+    if isinstance(left, Mapping) and isinstance(right, Mapping):
+        return set(left) == set(right) and all(
+            _exact_value_equal(left[key], right[key]) for key in left
+        )
+    if isinstance(left, list) and isinstance(right, list):
+        return len(left) == len(right) and all(
+            _exact_value_equal(left_item, right_item)
+            for left_item, right_item in zip(left, right)
+        )
+    return type(left) is type(right) and left == right
+
 def build_candidate_evaluation_context(
     *,
     candidate_event_context: Mapping[str, Any],
@@ -272,6 +286,62 @@ def candidate_learning_context_projection(value: Mapping[str, Any]) -> dict[str,
         "proof": copy.deepcopy(context["proof"]),
         "hidden_oos_consumed": context["hidden_oos_consumed"],
     }
+
+
+def attach_candidate_evaluation_context(
+    candidate_summary: Mapping[str, Any],
+    *,
+    candidate_evaluation_context: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """把冷端 evaluation lineage 接到 candidate summary，不讀取目前狀態。"""
+    if not isinstance(candidate_summary, Mapping):
+        raise CandidateEvaluationContextError("CANDIDATE_SUMMARY_INVALID")
+    summary = copy.deepcopy(dict(candidate_summary))
+    if candidate_evaluation_context is None:
+        return summary
+    if summary.get("candidate_event_context_status") != "VALID":
+        raise CandidateEvaluationContextError("EVENT_CONTEXT_STATUS_NOT_VALID")
+    raw_identity, raw_event_hash = _event_parts(
+        summary.get("candidate_event_context")
+    )
+    evaluation = validate_candidate_evaluation_context(candidate_evaluation_context)
+    if evaluation["event_hash"] != raw_event_hash:
+        raise CandidateEvaluationContextError("EVALUATION_EVENT_HASH_MISMATCH")
+    if evaluation["identity"] != raw_identity:
+        raise CandidateEvaluationContextError("EVALUATION_IDENTITY_MISMATCH")
+    projection = candidate_learning_context_projection(evaluation)
+    stored_contracts = (
+        (
+            "candidate_evaluation_context",
+            evaluation,
+            "CANDIDATE_EVALUATION_CONTEXT_CONFLICT",
+        ),
+        (
+            "candidate_evaluation_context_status",
+            "VALID",
+            "CANDIDATE_EVALUATION_CONTEXT_STATUS_CONFLICT",
+        ),
+        (
+            "candidate_learning_context_projection",
+            projection,
+            "CANDIDATE_LEARNING_CONTEXT_PROJECTION_CONFLICT",
+        ),
+        (
+            "candidate_learning_context",
+            projection,
+            "CANDIDATE_LEARNING_CONTEXT_CONFLICT",
+        ),
+    )
+    for field, expected, error in stored_contracts:
+        if field in summary and not _exact_value_equal(
+            summary[field], expected
+        ):
+            raise CandidateEvaluationContextError(error)
+    summary["candidate_evaluation_context"] = copy.deepcopy(evaluation)
+    summary["candidate_evaluation_context_status"] = "VALID"
+    summary["candidate_learning_context_projection"] = copy.deepcopy(projection)
+    summary["candidate_learning_context"] = copy.deepcopy(projection)
+    return summary
 
 def _event_parts(value: Any) -> tuple[dict[str, Any], str]:
     """驗證 Rust 捕獲的 flat event；缺值時不得從目前狀態回填。"""
@@ -813,6 +883,7 @@ __all__ = [
     "EVENT_SCHEMA_VERSION",
     "REGIME_BUCKETS",
     "SCHEMA_VERSION",
+    "attach_candidate_evaluation_context",
     "build_candidate_evaluation_context",
     "candidate_learning_context_projection",
     "canonical_sha256",

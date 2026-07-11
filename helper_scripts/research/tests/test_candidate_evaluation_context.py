@@ -12,6 +12,7 @@ import pytest
 from cost_gate_learning_lane.candidate_evaluation_context import (
     CandidateEvaluationContextError,
     REGIME_BUCKETS,
+    attach_candidate_evaluation_context,
     build_candidate_evaluation_context,
     candidate_learning_context_projection,
     canonical_sha256,
@@ -176,6 +177,246 @@ def _build_valid(**overrides: object) -> dict[str, object]:
     kwargs = _valid_build_kwargs()
     kwargs.update(overrides)
     return build_candidate_evaluation_context(**kwargs)  # type: ignore[arg-type]
+
+
+def _candidate_summary(event: dict[str, object] | None = None, **extra: object) -> dict[str, object]:
+    return {
+        "candidate_event_context_status": "VALID",
+        "candidate_event_context": event if event is not None else _event_context(),
+        **extra,
+    }
+
+
+def test_attach_without_evaluation_is_an_exact_recursively_detached_noop() -> None:
+    summary = {
+        "candidate_event_context_status": "UNQUALIFIED_CONTEXT_MISSING",
+        "nested": {"items": [1, {"reason": "legacy"}]},
+    }
+    attached = attach_candidate_evaluation_context(summary)
+    assert attached == summary
+    assert attached is not summary
+    attached["nested"]["items"][1]["reason"] = "changed"  # type: ignore[index]
+    assert summary["nested"]["items"][1]["reason"] == "legacy"  # type: ignore[index]
+
+
+def test_attach_requires_mapping_even_without_evaluation() -> None:
+    with pytest.raises(CandidateEvaluationContextError, match="CANDIDATE_SUMMARY_INVALID"):
+        attach_candidate_evaluation_context([])  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("explicit_evaluation", [False, True])
+def test_attach_materializes_mapping_subclass_as_detached_plain_dict(explicit_evaluation: bool) -> None:
+    from collections import UserDict
+    from types import MappingProxyType
+
+    event = _event_context()
+    payload = _candidate_summary(event, nested={"items": []})
+    summary = UserDict(payload) if explicit_evaluation else MappingProxyType(payload)
+    evaluation = _build_valid(candidate_event_context=event) if explicit_evaluation else None
+
+    attached = attach_candidate_evaluation_context(summary, candidate_evaluation_context=evaluation)
+
+    assert type(attached) is dict
+    attached["nested"]["items"].append("changed")  # type: ignore[index]
+    assert summary["nested"]["items"] == []  # type: ignore[index]
+
+
+def test_attach_binds_against_the_frozen_summary_snapshot() -> None:
+    class DivergentDict(dict):
+        def __init__(self, snapshot: dict, live: dict) -> None:
+            super().__init__(snapshot)
+            self.live = live
+
+        def get(self, key, default=None):
+            return self.live.get(key, default)
+
+    event_a = _event_context()
+    event_b = deepcopy(event_a)
+    event_b["context_id"] = "ctx-live_demo-BTCUSDT-divergent"
+    event_b["portfolio_snapshot_ref"] = "paper_state:live_demo:ctx-live_demo-BTCUSDT-divergent:1783700000000"
+    event_b = _rehash_event(event_b)
+    summary = DivergentDict(_candidate_summary(event_a), _candidate_summary(event_b))
+    with pytest.raises(CandidateEvaluationContextError, match="EVALUATION_EVENT_HASH_MISMATCH"):
+        attach_candidate_evaluation_context(summary, candidate_evaluation_context=_build_valid(candidate_event_context=event_b))
+
+
+def test_attach_stores_canonical_evaluation_and_two_independent_projections() -> None:
+    event = _event_context()
+    evaluation = _build_valid(candidate_event_context=event)
+    projection = candidate_learning_context_projection(evaluation)
+    summary = _candidate_summary(event, nested={"items": ["preserved"]})
+    attached = attach_candidate_evaluation_context(summary, candidate_evaluation_context=evaluation)
+    assert attached["candidate_evaluation_context"] == evaluation
+    assert attached["candidate_evaluation_context_status"] == "VALID"
+    assert attached["candidate_learning_context_projection"] == projection
+    assert attached["candidate_learning_context"] == projection
+    assert attached["candidate_learning_context_projection"] is not attached["candidate_learning_context"]
+    attached["candidate_evaluation_context"]["resource"]["daily_buckets"][0]["distinct_entries"] = 999  # type: ignore[index]
+    attached["candidate_learning_context_projection"]["proof"]["next_gap"]["code"] = "CHANGED"  # type: ignore[index]
+    attached["candidate_event_context"]["market_inputs"]["last_price"] = 1.0  # type: ignore[index]
+    assert evaluation["resource"]["daily_buckets"][0]["distinct_entries"] == 5  # type: ignore[index]
+    assert attached["candidate_learning_context"]["proof"]["next_gap"]["code"] == "COLLECT_MORE"  # type: ignore[index]
+    assert summary["nested"]["items"] == ["preserved"]  # type: ignore[index]
+    assert summary["candidate_event_context"]["market_inputs"]["last_price"] == 2_500.0  # type: ignore[index]
+
+
+@pytest.mark.parametrize(
+    ("summary", "error"),
+    [
+        ([], "CANDIDATE_SUMMARY_INVALID"),
+        ({"candidate_event_context": {}}, "EVENT_CONTEXT_STATUS_NOT_VALID"),
+        ({"candidate_event_context_status": "UNQUALIFIED_CONTEXT_MISSING"}, "EVENT_CONTEXT_STATUS_NOT_VALID"),
+    ],
+)
+def test_attach_requires_mapping_summary_with_exact_valid_raw_status(summary: object, error: str) -> None:
+    with pytest.raises(CandidateEvaluationContextError, match=error):
+        attach_candidate_evaluation_context(summary, candidate_evaluation_context=_build_valid())  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("kind", "error"),
+    [
+        ("raw_missing", "EVENT_CONTEXT_MISSING_OR_INVALID"),
+        ("raw_hash", "EVENT_CONTEXT_HASH_MISMATCH"),
+        ("raw_blocked", "EVENT_CONTEXT_CAPTURE_INCOMPLETE"),
+        ("raw_semantic", "SYMBOL_INVALID"),
+        ("evaluation_hash", "EVALUATION_HASH_MISMATCH"),
+        ("evaluation_schema", "EVALUATION_SCHEMA_INVALID"),
+    ],
+)
+def test_attach_revalidates_raw_and_evaluation_contexts(kind: str, error: str) -> None:
+    event = _event_context()
+    evaluation = _build_valid(candidate_event_context=event)
+    summary = _candidate_summary(event)
+    if kind == "raw_missing":
+        summary.pop("candidate_event_context")
+    elif kind == "raw_hash":
+        event["event_hash"] = "0" * 64
+    elif kind == "raw_blocked":
+        event["capture_status"] = "CAPTURE_BLOCKED"
+        summary["candidate_event_context"] = _rehash_event(event)
+    elif kind == "raw_semantic":
+        event["symbol"] = "btcusdt"
+        summary["candidate_event_context"] = _rehash_event(event)
+    elif kind == "evaluation_hash":
+        evaluation["candidate_evaluation_context_hash"] = "0" * 64
+    else:
+        evaluation["schema_version"] = "candidate_evaluation_context_v2"
+        evaluation = _rehash_evaluation(evaluation)
+    with pytest.raises(CandidateEvaluationContextError, match=error):
+        attach_candidate_evaluation_context(summary, candidate_evaluation_context=evaluation)
+
+
+def test_attach_rejects_fully_rehashed_event_hash_transplant() -> None:
+    original_event = _event_context()
+    evaluation = _build_valid(candidate_event_context=original_event)
+    transplanted_event = deepcopy(original_event)
+    transplanted_event["context_id"] = "ctx-live_demo-BTCUSDT-transplanted"
+    transplanted_event["portfolio_snapshot_ref"] = (
+        "paper_state:live_demo:ctx-live_demo-BTCUSDT-transplanted:1783700000000"
+    )
+    transplanted_event = _rehash_event(transplanted_event)
+    with pytest.raises(
+        CandidateEvaluationContextError,
+        match="EVALUATION_EVENT_HASH_MISMATCH",
+    ):
+        attach_candidate_evaluation_context(
+            _candidate_summary(transplanted_event),
+            candidate_evaluation_context=evaluation,
+        )
+
+
+def test_attach_rejects_fully_rehashed_identity_transplant() -> None:
+    event = _event_context()
+    evaluation = _build_valid(candidate_event_context=event)
+    evaluation["identity"] = {
+        **evaluation["identity"],  # type: ignore[dict-item]
+        "strategy_name": "grid_trading",
+        "strategy_version": "f" * 40,
+        "strategy_config_hash": "e" * 64,
+        "symbol": "ETHUSDT",
+        "side": "Sell",
+        "horizon_minutes": 30,
+        "evidence_engine_mode": "demo",
+    }
+    evaluation = _rehash_evaluation(evaluation)
+    with pytest.raises(
+        CandidateEvaluationContextError,
+        match="EVALUATION_IDENTITY_MISMATCH",
+    ):
+        attach_candidate_evaluation_context(
+            _candidate_summary(event),
+            candidate_evaluation_context=evaluation,
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "error"),
+    [
+        ("candidate_evaluation_context", {}, "CANDIDATE_EVALUATION_CONTEXT_CONFLICT"),
+        ("candidate_evaluation_context_status", "STALE",
+         "CANDIDATE_EVALUATION_CONTEXT_STATUS_CONFLICT"),
+        ("candidate_learning_context_projection", {},
+         "CANDIDATE_LEARNING_CONTEXT_PROJECTION_CONFLICT"),
+        ("candidate_learning_context", {}, "CANDIDATE_LEARNING_CONTEXT_CONFLICT"),
+    ],
+)
+def test_attach_rejects_each_stored_lineage_conflict_with_stable_code(
+    field: str,
+    value: object,
+    error: str,
+) -> None:
+    event = _event_context()
+    evaluation = _build_valid(candidate_event_context=event)
+    summary = _candidate_summary(event, **{field: value})
+    with pytest.raises(CandidateEvaluationContextError, match=error):
+        attach_candidate_evaluation_context(
+            summary,
+            candidate_evaluation_context=evaluation,
+        )
+
+
+def test_attach_requires_type_exact_existing_lineage_values() -> None:
+    event = _event_context()
+    evaluation = _build_valid(candidate_event_context=event)
+    projection = candidate_learning_context_projection(evaluation)
+    projection["proof"]["proof_stage"] = True  # type: ignore[index]
+    with pytest.raises(
+        CandidateEvaluationContextError,
+        match="CANDIDATE_LEARNING_CONTEXT_PROJECTION_CONFLICT",
+    ):
+        attach_candidate_evaluation_context(
+            _candidate_summary(event, candidate_learning_context_projection=projection),
+            candidate_evaluation_context=evaluation,
+        )
+
+
+def test_attach_accepts_exact_existing_values_idempotently_and_detached() -> None:
+    event = _event_context()
+    evaluation = _build_valid(candidate_event_context=event)
+    first = attach_candidate_evaluation_context(
+        _candidate_summary(event),
+        candidate_evaluation_context=evaluation,
+    )
+    second = attach_candidate_evaluation_context(
+        first,
+        candidate_evaluation_context=evaluation,
+    )
+    assert second == first
+    assert second is not first
+    second["candidate_evaluation_context"]["proof"]["next_gap"]["code"] = (  # type: ignore[index]
+        "CHANGED_EVALUATION"
+    )
+    second["candidate_learning_context_projection"]["proof"]["next_gap"][  # type: ignore[index]
+        "code"
+    ] = "CHANGED_PROJECTION"
+    assert first["candidate_evaluation_context"]["proof"]["next_gap"]["code"] == (  # type: ignore[index]
+        "COLLECT_MORE"
+    )
+    assert second["candidate_learning_context"]["proof"]["next_gap"]["code"] == (  # type: ignore[index]
+        "COLLECT_MORE"
+    )
+    assert evaluation["proof"]["next_gap"]["code"] == "COLLECT_MORE"  # type: ignore[index]
 
 
 def test_builds_valid_hash_bound_context_and_compatible_projection() -> None:
