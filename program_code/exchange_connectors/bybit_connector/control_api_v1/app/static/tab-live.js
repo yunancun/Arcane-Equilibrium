@@ -31,7 +31,7 @@ const TRUST_TIER_LABELS = {
 };
 const TRUST_TIER_COLORS = {
   0: { bg: 'rgba(100,116,139,.2)', fg: '#94a3b8' },
-  1: { bg: 'rgba(34,197,94,.15)', fg: 'var(--green)' },
+  1: { bg: 'rgba(34,197,94,.15)', fg: 'var(--pos)' },
   2: { bg: 'rgba(59,130,246,.15)', fg: '#60a5fa' },
   3: { bg: 'rgba(168,85,247,.15)', fg: '#a855f7' },
 };
@@ -66,10 +66,10 @@ function _livePriceCell(v) {
 function _signedAuthDisplayState(signed, liveHalt) {
   const known = !!(signed && signed.status);
   if (!known) {
-    return { known: false, bad: false, text: 'Signed auth: --', color: 'var(--text-dim)', title: '' };
+    return { known: false, bad: false, text: 'Signed auth: --', color: 'var(--text-secondary)', title: '' };
   }
   if (signed.valid_for_engine === true) {
-    return { known: true, bad: false, text: 'Signed auth: valid', color: 'var(--green)', title: '' };
+    return { known: true, bad: false, text: 'Signed auth: valid', color: 'var(--pos)', title: '' };
   }
 
   const status = String(signed.status || 'invalid').replace(/_/g, ' ').toUpperCase();
@@ -87,7 +87,7 @@ function _signedAuthDisplayState(signed, liveHalt) {
       known: true,
       bad: true,
       text: 'Signed auth: MISSING - auto-revoked after Live halt' + detail,
-      color: 'var(--red)',
+      color: 'var(--neg)',
       title: 'Renew can be accepted, then Rust deletes authorization.json while the Live session remains halted. Clear/reset the risk halt before renewing again.'
     };
   }
@@ -96,7 +96,7 @@ function _signedAuthDisplayState(signed, liveHalt) {
     known: true,
     bad: true,
     text: 'Signed auth: ' + status + ' - Renew required',
-    color: 'var(--red)',
+    color: 'var(--neg)',
     title: ''
   };
 }
@@ -130,17 +130,17 @@ async function loadTrustStatus() {
   // Compute expiry text and color / 計算到期文字與顏色
   const expiresMs = d.last_auth_expires_ts_ms;
   let expiresText = 'Trust TTL: --';
-  let expiresColor = 'var(--text-dim)';
+  let expiresColor = 'var(--text-secondary)';
   if (expiresMs) {
     const diffMs = expiresMs - Date.now();
     if (diffMs <= 0) {
       expiresText = 'Trust TTL: EXPIRED';
-      expiresColor = 'var(--red)';
+      expiresColor = 'var(--neg)';
     } else {
       const h = Math.floor(diffMs / 3600000);
       const m = Math.floor((diffMs % 3600000) / 60000);
       expiresText = 'Trust TTL: ' + h + 'h ' + m + 'm';
-      expiresColor = diffMs < 7200000 ? 'var(--yellow)' : 'var(--text-dim)';
+      expiresColor = diffMs < 7200000 ? 'var(--warn)' : 'var(--text-secondary)';
     }
   }
 

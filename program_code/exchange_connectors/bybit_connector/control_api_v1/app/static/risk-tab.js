@@ -12,7 +12,7 @@ if (!document.getElementById('oc-modal-css')) {
   modalStyle.id = 'oc-modal-css';
   modalStyle.textContent = `
     .oc-modal { position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center; z-index:1000; }
-    .oc-modal-content { background:var(--card-bg); border-radius:var(--r-3); padding:24px; width:480px; max-width:90vw; }
+    .oc-modal-content { background:var(--bg-surface); border-radius:var(--r-3); padding:24px; width:480px; max-width:90vw; }
   `;
   document.head.appendChild(modalStyle);
 }
@@ -221,9 +221,9 @@ function selectRiskEngine(engine) {
 function _updateEngineBadges(engine) {
   const labels = { paper: 'Paper', demo: 'Demo', live: 'Live' };
   const colors = {
-    paper: { bg: 'rgba(56,139,253,0.15)', border: 'rgba(56,139,253,0.5)', text: 'var(--blue)' },
-    demo:  { bg: 'rgba(210,153,34,0.15)', border: 'rgba(210,153,34,0.5)', text: 'var(--yellow)' },
-    live:  { bg: 'rgba(248,81,73,0.15)',  border: 'rgba(248,81,73,0.5)',  text: 'var(--red)' },
+    paper: { bg: 'rgba(56,139,253,0.15)', border: 'rgba(56,139,253,0.5)', text: 'var(--text-secondary)' },
+    demo:  { bg: 'rgba(210,153,34,0.15)', border: 'rgba(210,153,34,0.5)', text: 'var(--warn)' },
+    live:  { bg: 'rgba(248,81,73,0.15)',  border: 'rgba(248,81,73,0.5)',  text: 'var(--neg)' },
   };
   const c = colors[engine] || colors.paper;
   document.querySelectorAll('.rc-engine-badge').forEach(badge => {
@@ -812,7 +812,7 @@ async function loadRiskConfig() {
   const tpOn = gc.tp_enabled === true || (gc.tp_enabled == null && rStop.take_profit_pct != null);
   const tpVal = gc.max_take_profit_pct ?? rStop.take_profit_pct ?? 20;
   ocSetText('s-tp', tpOn ? ocPctVal(tpVal) : '關閉 / OFF');
-  $('s-tp').style.color = tpOn ? 'var(--green)' : 'var(--text-dim)';
+  $('s-tp').style.color = tpOn ? 'var(--pos)' : 'var(--text-secondary)';
   const trailingVal = gc.trailing_stop_pct ?? rStop.trailing_stop_pct ?? ap.trailing_stop_distance_pct ?? null;
   ocSetText('s-trailing', trailingVal != null && trailingVal !== '' ? ocPctVal(trailingVal) : '關閉 / OFF');
   const atrMult = gc.atr_multiplier ?? rStop.atr_multiplier ?? null;
