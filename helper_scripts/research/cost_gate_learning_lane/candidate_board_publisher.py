@@ -2,8 +2,8 @@
 MODULE_NOTE
 模塊用途：把完整 R3 candidate board 發布到 ALR consumer 的專用 immutable rendezvous。
 主要函數：publish_candidate_board。
-依賴：僅 Python 標準庫。
-硬邊界：只接受 stamped v5 board；目的端永不建立 latest alias，也不覆寫同名 artifact。
+依賴：Python 標準庫及 candidate_board v2 純驗證接口。
+硬邊界：只接受 stamped v6/board-v2；目的端永不建立 latest alias，也不覆寫同名 artifact。
 """
 
 from __future__ import annotations
@@ -13,9 +13,11 @@ import errno
 import fcntl
 import hashlib
 import json
+import math
 import os
 import re
 import stat
+import sys
 import tempfile
 from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
@@ -23,12 +25,27 @@ from pathlib import Path
 from typing import Any
 
 
-SOURCE_SCHEMA_VERSION = "cost_gate_demo_learning_lane_blocked_outcome_review_v5"
-BOARD_SCHEMA_VERSION = "cost_gate_learning_candidate_board_v1"
+RESEARCH_ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[3]
+for _path in (str(RESEARCH_ROOT), str(ROOT)):
+    if _path not in sys.path:
+        sys.path.insert(0, _path)
+
+from cost_gate_learning_lane.candidate_board import (
+    candidate_cost_evidence_v2,
+    validate_learning_candidate_board_v2,
+)
+from cost_gate_learning_lane.cost_model import QUANTILE_ARTIFACT_MAX_AGE_HOURS
+from cost_gate_learning_lane.outcome_review import _load_expected_slippage
+
+
+SOURCE_SCHEMA_VERSION = "cost_gate_demo_learning_lane_blocked_outcome_review_v6"
+BOARD_SCHEMA_VERSION = "cost_gate_learning_candidate_board_v2"
 _STAMPED_NAME_RE = re.compile(
     r"^blocked_outcome_review_(?P<stamp>[0-9]{8}T[0-9]{6}Z)\.json$"
 )
 _MAX_SOURCE_BYTES = 16 * 1024 * 1024
+_MAX_SLIPPAGE_ARTIFACT_BYTES = 16 * 1024 * 1024
 _CONSUMER_MAX_TOTAL_BYTES = 64 * 1024 * 1024
 _MAX_FUTURE_SKEW_SECONDS = 5
 _LOCK_FILE_NAME = ".alr-candidate-board.lock"
@@ -43,6 +60,7 @@ def publish_candidate_board(
     destination_directory: str | Path,
     *,
     retention_limit: int,
+    slippage_artifact_path: str | Path | None = None,
     max_total_bytes: int = _CONSUMER_MAX_TOTAL_BYTES,
     now_utc: datetime | None = None,
 ) -> dict[str, Any]:
@@ -53,7 +71,14 @@ def publish_candidate_board(
         error="source_name_not_stamped",
     )
     raw = _read_bounded_regular(source, max_bytes=_MAX_SOURCE_BYTES)
-    generated_at = _validate_payload(raw)
+    generated_at = _validate_payload(
+        raw,
+        slippage_artifact_path=(
+            Path(slippage_artifact_path)
+            if slippage_artifact_path is not None
+            else None
+        ),
+    )
     evaluated_at = _normalize_now(now_utc)
     if source_stamp > generated_at:
         raise CandidateBoardPublishError("filename_stamp_after_generated_at")
@@ -262,7 +287,7 @@ def _publish_result(
     retained_total_bytes: int,
 ) -> dict[str, Any]:
     return {
-        "schema_version": "alr_candidate_board_publish_result_v1",
+        "schema_version": "alr_candidate_board_publish_result_v2",
         "status": status,
         "published_path": str(published),
         "source_content_sha256": hashlib.sha256(raw).hexdigest(),
@@ -273,7 +298,11 @@ def _publish_result(
     }
 
 
-def _validate_payload(raw: bytes) -> datetime:
+def _validate_payload(
+    raw: bytes,
+    *,
+    slippage_artifact_path: Path | None,
+) -> datetime:
     def reject_constant(value: str) -> None:
         raise ValueError(f"non_finite:{value}")
 
@@ -303,16 +332,168 @@ def _validate_payload(raw: bytes) -> datetime:
         raise CandidateBoardPublishError("board_schema_invalid")
     if board.get("candidate_universe_complete") is not True:
         raise CandidateBoardPublishError("candidate_universe_incomplete")
-    candidate_rows = board.get("candidate_rows")
-    if not isinstance(candidate_rows, list) or not all(
-        isinstance(row, Mapping) for row in candidate_rows
-    ):
-        raise CandidateBoardPublishError("candidate_rows_invalid")
-    supplied_hash = board.get("board_hash")
-    body = {key: value for key, value in board.items() if key != "board_hash"}
-    if supplied_hash != _canonical_hash(body):
-        raise CandidateBoardPublishError("board_hash_invalid")
+    try:
+        validate_learning_candidate_board_v2(board)
+    except ValueError as exc:
+        raise CandidateBoardPublishError(str(exc)) from exc
+    if board.get("as_of_utc_date") != generated.date().isoformat():
+        raise CandidateBoardPublishError("board_as_of_generated_at_mismatch")
+    basis = payload.get("cost_basis_main")
+    if basis not in {"conservative_v1", "expected_slippage_mean_abs_v1"}:
+        raise CandidateBoardPublishError("cost_basis_main_invalid")
+    projected = None
+    if basis == "expected_slippage_mean_abs_v1":
+        projected = _validate_independent_expected_cost_artifact(
+            payload,
+            generated_at=generated.astimezone(timezone.utc),
+            slippage_artifact_path=slippage_artifact_path,
+        )
+    _validate_outer_and_board_cost_contract(
+        payload,
+        board=board,
+        projected=projected,
+    )
     return generated.astimezone(timezone.utc)
+
+
+def _validate_independent_expected_cost_artifact(
+    payload: Mapping[str, Any],
+    *,
+    generated_at: datetime,
+    slippage_artifact_path: Path | None,
+) -> dict[str, Any]:
+    if slippage_artifact_path is None:
+        raise CandidateBoardPublishError(
+            "expected_cost_independent_artifact_required"
+        )
+    try:
+        raw = _read_bounded_regular(
+            slippage_artifact_path,
+            max_bytes=_MAX_SLIPPAGE_ARTIFACT_BYTES,
+        )
+    except (CandidateBoardPublishError, OSError) as exc:
+        raise CandidateBoardPublishError(
+            "expected_cost_independent_artifact_invalid"
+        ) from exc
+
+    def reject_constant(value: str) -> None:
+        raise ValueError(f"non_finite:{value}")
+
+    try:
+        independent_payload = json.loads(raw, parse_constant=reject_constant)
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        raise CandidateBoardPublishError(
+            "expected_cost_independent_artifact_invalid"
+        ) from exc
+    projected = _load_expected_slippage(
+        independent_payload,
+        now=generated_at,
+    )
+    if projected is None:
+        raise CandidateBoardPublishError(
+            "expected_cost_independent_artifact_invalid"
+        )
+    expected = {
+        "available": True,
+        "asof": projected["asof"],
+        "source_asof_utc": projected["asof"],
+        "source_payload_sha256": projected["source_payload_sha256"],
+        "source_payload": projected["source_payload"],
+        "normalized_projection": projected["normalized_projection"],
+        "normalized_projection_sha256": projected[
+            "normalized_projection_sha256"
+        ],
+        "global_mean_abs_bps": projected["global_mean_abs"],
+        "global_tail_bps": projected["global_tail_bps"],
+        "global_tail_metric": projected["global_tail_metric"],
+        "n_total_global": projected["n_total_global"],
+        "max_age_hours": QUANTILE_ARTIFACT_MAX_AGE_HOURS,
+    }
+    if not _exact_value_equal(payload.get("expected_cost_artifact"), expected):
+        raise CandidateBoardPublishError(
+            "expected_cost_independent_artifact_mismatch"
+        )
+    return projected
+
+
+def _validate_outer_and_board_cost_contract(
+    payload: Mapping[str, Any],
+    *,
+    board: Mapping[str, Any],
+    projected: Mapping[str, Any] | None,
+) -> None:
+    if projected is None:
+        expected_outer = {
+            "available": False,
+            "asof": None,
+            "source_asof_utc": None,
+            "source_payload_sha256": None,
+            "source_payload": None,
+            "normalized_projection": None,
+            "normalized_projection_sha256": None,
+            "global_mean_abs_bps": None,
+            "global_tail_bps": None,
+            "global_tail_metric": None,
+            "n_total_global": 0,
+            "max_age_hours": QUANTILE_ARTIFACT_MAX_AGE_HOURS,
+        }
+    else:
+        expected_outer = {
+            "available": True,
+            "asof": projected["asof"],
+            "source_asof_utc": projected["asof"],
+            "source_payload_sha256": projected["source_payload_sha256"],
+            "source_payload": projected["source_payload"],
+            "normalized_projection": projected["normalized_projection"],
+            "normalized_projection_sha256": projected[
+                "normalized_projection_sha256"
+            ],
+            "global_mean_abs_bps": projected["global_mean_abs"],
+            "global_tail_bps": projected["global_tail_bps"],
+            "global_tail_metric": projected["global_tail_metric"],
+            "n_total_global": projected["n_total_global"],
+            "max_age_hours": QUANTILE_ARTIFACT_MAX_AGE_HOURS,
+        }
+    if not _exact_value_equal(payload.get("expected_cost_artifact"), expected_outer):
+        raise CandidateBoardPublishError("outer_cost_evidence_mismatch")
+    expected_basis = (
+        "expected_slippage_mean_abs_v1"
+        if projected is not None
+        else "conservative_v1"
+    )
+    if payload.get("cost_basis_main") != expected_basis:
+        raise CandidateBoardPublishError("outer_cost_evidence_mismatch")
+    rows = board.get("candidate_rows")
+    if not isinstance(rows, list):
+        raise CandidateBoardPublishError("candidate_rows_invalid")
+    for row in rows:
+        try:
+            symbol = row["arbiter_input"]["identity"]["symbol"]
+            actual = row["arbiter_input"]["cost_evidence"]
+        except (KeyError, TypeError):
+            raise CandidateBoardPublishError("candidate_cost_evidence_mismatch") from None
+        expected = candidate_cost_evidence_v2(projected, symbol=symbol)
+        if (
+            row.get("cost_basis_main") != expected_basis
+            or not _exact_value_equal(actual, expected)
+        ):
+            raise CandidateBoardPublishError("candidate_cost_evidence_mismatch")
+
+
+def _exact_value_equal(left: Any, right: Any) -> bool:
+    if isinstance(left, Mapping) and isinstance(right, Mapping):
+        return set(left) == set(right) and all(
+            _exact_value_equal(left[key], right[key]) for key in left
+        )
+    if isinstance(left, list) and isinstance(right, list):
+        return len(left) == len(right) and all(
+            _exact_value_equal(a, b) for a, b in zip(left, right)
+        )
+    if type(left) is not type(right):
+        return False
+    if type(left) is float and left == right == 0.0:
+        return math.copysign(1.0, left) == math.copysign(1.0, right)
+    return left == right
 
 
 def _canonical_hash(value: Any) -> str:
@@ -421,12 +602,14 @@ def _read_bounded_regular(path: Path, *, max_bytes: int) -> bytes:
             before.st_ino,
             before.st_size,
             before.st_mtime_ns,
+            before.st_ctime_ns,
         )
         identity_after = (
             after.st_dev,
             after.st_ino,
             after.st_size,
             after.st_mtime_ns,
+            after.st_ctime_ns,
         )
         if identity_before != identity_after or len(raw) != before.st_size:
             raise CandidateBoardPublishError("source_changed_during_read")
@@ -440,6 +623,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", required=True, type=Path)
     parser.add_argument("--destination", required=True, type=Path)
+    parser.add_argument("--slippage-artifact", type=Path)
     parser.add_argument("--retention-limit", required=True, type=int)
     parser.add_argument(
         "--max-total-bytes",
@@ -447,18 +631,24 @@ def main(argv: list[str] | None = None) -> int:
         default=_CONSUMER_MAX_TOTAL_BYTES,
     )
     arguments = parser.parse_args(argv)
+    slippage_artifact = (
+        arguments.slippage_artifact
+        if arguments.slippage_artifact is not None
+        else arguments.source.parent / "slippage_quantiles_latest.json"
+    )
     try:
         result = publish_candidate_board(
             arguments.source,
             arguments.destination,
             retention_limit=arguments.retention_limit,
+            slippage_artifact_path=slippage_artifact,
             max_total_bytes=arguments.max_total_bytes,
         )
     except (CandidateBoardPublishError, OSError) as exc:
         print(
             json.dumps(
                 {
-                    "schema_version": "alr_candidate_board_publish_result_v1",
+                    "schema_version": "alr_candidate_board_publish_result_v2",
                     "status": "PUBLISH_FAILED",
                     "reason": str(exc),
                     "latest_alias_written": False,
