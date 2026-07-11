@@ -716,63 +716,63 @@ function ocInjectBaseCSS() {
   style.id = 'oc-base-css';
   style.textContent = `
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    html, body { height: 100%; background: var(--bg); color: var(--text);
+    html, body { height: 100%; background: var(--bg-app); color: var(--text-primary);
       font: 13px/1.6 -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', Roboto, sans-serif; }
     body { padding: 16px; overflow-y: auto; }
 
     /* Cards */
-    .oc-card { background: var(--card-bg); border: 1px solid var(--border);
-      border-radius: var(--card-radius); padding: 16px; margin-bottom: 14px; }
+    .oc-card { background: var(--bg-surface); border: 1px solid var(--border-subtle);
+      border-radius: var(--r-2); padding: 16px; margin-bottom: 14px; }
     .oc-card h2 { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
-    .oc-card h3 { font-size: 13px; font-weight: 600; margin-bottom: 8px; color: var(--text); }
-    .oc-card .subtitle { font-size: 12px; color: var(--text-dim); margin-bottom: 12px; }
+    .oc-card h3 { font-size: 13px; font-weight: 600; margin-bottom: 8px; color: var(--text-primary); }
+    .oc-card .subtitle { font-size: 12px; color: var(--text-secondary); margin-bottom: 12px; }
 
     /* Metric Row */
     .oc-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
-    .oc-metric { background: var(--bg); border: 1px solid #21262d; border-radius: var(--r-2); padding: 10px 12px; }
-    .oc-metric-label { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.4px; }
+    .oc-metric { background: var(--bg-app); border: 1px solid #21262d; border-radius: var(--r-2); padding: 10px 12px; }
+    .oc-metric-label { font-size: 10px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.4px; }
     .oc-metric-val { font-size: 20px; font-weight: 700; margin-top: 2px; }
-    .oc-metric-sub { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+    .oc-metric-sub { font-size: 11px; color: var(--text-secondary); margin-top: 2px; }
     .oc-performance-metrics { grid-template-columns: repeat(auto-fit, minmax(184px, 1fr)); align-items: stretch; }
     .oc-performance-metrics .oc-metric { min-height: 118px; display: flex; flex-direction: column; }
     .oc-performance-metrics .oc-metric-label { min-height: 42px; line-height: 1.45; display: block; }
     .oc-performance-metrics .oc-metric-val { margin-top: auto; font-size: 18px; line-height: 1.2; overflow-wrap: anywhere; }
     .oc-edge-gate-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; }
-    .oc-edge-gate-card { background: var(--bg); border: 1px solid #21262d; border-radius: var(--r-2); padding: 12px; min-height: 160px; }
+    .oc-edge-gate-card { background: var(--bg-app); border: 1px solid #21262d; border-radius: var(--r-2); padding: 12px; min-height: 160px; }
     .oc-edge-gate-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
-    .oc-edge-gate-title { font-size: 12px; font-weight: 700; line-height: 1.35; color: var(--text); }
-    .oc-edge-gate-sub { font-size: 10px; color: var(--text-dim); margin-top: 2px; line-height: 1.35; }
+    .oc-edge-gate-title { font-size: 12px; font-weight: 700; line-height: 1.35; color: var(--text-primary); }
+    .oc-edge-gate-sub { font-size: 10px; color: var(--text-secondary); margin-top: 2px; line-height: 1.35; }
     .oc-edge-gate-values { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 8px 0; }
     .oc-edge-gate-value { min-width: 0; }
-    .oc-edge-gate-value .label { font-size: 9px; color: var(--text-dim); text-transform: uppercase; line-height: 1.25; }
+    .oc-edge-gate-value .label { font-size: 9px; color: var(--text-secondary); text-transform: uppercase; line-height: 1.25; }
     .oc-edge-gate-value .value { font-size: 14px; font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
-    .oc-edge-gate-summary { color: var(--text-dim); font-size: 11px; line-height: 1.45; margin-top: 6px; }
+    .oc-edge-gate-summary { color: var(--text-secondary); font-size: 11px; line-height: 1.45; margin-top: 6px; }
     .oc-mini-trend { width: 100%; height: 54px; display: block; background: rgba(13,17,23,0.45); border: 1px solid #21262d; border-radius: var(--r-1); }
     .oc-mini-trend-zero { stroke: rgba(139,148,158,0.45); stroke-width: 1; stroke-dasharray: 3 3; }
-    .oc-mini-trend-empty { height: 54px; display: flex; align-items: center; justify-content: center; color: var(--text-dim); font-size: 11px; border: 1px dashed #30363d; border-radius: var(--r-1); }
+    .oc-mini-trend-empty { height: 54px; display: flex; align-items: center; justify-content: center; color: var(--text-secondary); font-size: 11px; border: 1px dashed #30363d; border-radius: var(--r-1); }
     .oc-readiness-list { border: 1px solid #21262d; border-radius: var(--r-2); margin-top: 10px; overflow: hidden; }
     .oc-readiness-row { display: grid; grid-template-columns: minmax(120px, 1fr) auto minmax(100px, 1fr); gap: 10px; align-items: center; padding: 9px 11px; border-top: 1px solid #21262d; }
     .oc-readiness-row:first-child { border-top: none; }
     .oc-readiness-label { font-size: 12px; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
-    .oc-readiness-detail { font-size: 10px; color: var(--text-dim); line-height: 1.35; }
-    .oc-readiness-target { color: var(--text-dim); font-size: 11px; text-align: right; overflow-wrap: anywhere; }
+    .oc-readiness-detail { font-size: 10px; color: var(--text-secondary); line-height: 1.35; }
+    .oc-readiness-target { color: var(--text-secondary); font-size: 11px; text-align: right; overflow-wrap: anywhere; }
 
     /* Status Chips */
     .oc-chip { display: inline-flex; align-items: center; gap: 5px; border-radius: 999px;
       padding: 3px 10px; font-size: 11px; font-weight: 500; border: 1px solid transparent; }
-    .oc-chip-good { background: rgba(63,185,80,0.12); border-color: rgba(63,185,80,0.25); color: var(--green); }
-    .oc-chip-warn { background: rgba(210,153,34,0.12); border-color: rgba(210,153,34,0.25); color: var(--yellow); }
-    .oc-chip-bad { background: rgba(248,81,73,0.12); border-color: rgba(248,81,73,0.25); color: var(--red); }
-    .oc-chip-neutral { background: rgba(139,148,158,0.1); border-color: rgba(139,148,158,0.2); color: var(--text-dim); }
-    .oc-chip-info { background: rgba(56,139,253,0.12); border-color: rgba(56,139,253,0.25); color: var(--blue); }
+    .oc-chip-good { background: rgba(63,185,80,0.12); border-color: rgba(63,185,80,0.25); color: var(--pos); }
+    .oc-chip-warn { background: rgba(210,153,34,0.12); border-color: rgba(210,153,34,0.25); color: var(--warn); }
+    .oc-chip-bad { background: rgba(248,81,73,0.12); border-color: rgba(248,81,73,0.25); color: var(--neg); }
+    .oc-chip-neutral { background: rgba(139,148,158,0.1); border-color: rgba(139,148,158,0.2); color: var(--text-secondary); }
+    .oc-chip-info { background: rgba(56,139,253,0.12); border-color: rgba(56,139,253,0.25); color: var(--text-secondary); }
     .oc-chip-live { background: rgba(168,85,247,0.12); border-color: rgba(168,85,247,0.3); color: #a855f7; }
 
     /* Strategy Identity Chips */
     .oc-strategy-chip { display: inline-flex; align-items: center; gap: 5px; border-radius: 999px;
       padding: 2px 8px; font-size: 11px; font-weight: 700; border: 1px solid var(--strategy-border, rgba(139,148,158,0.22));
-      background: var(--strategy-bg, rgba(139,148,158,0.1)); color: var(--strategy-color, var(--text)); white-space: nowrap; }
+      background: var(--strategy-bg, rgba(139,148,158,0.1)); color: var(--strategy-color, var(--text-primary)); white-space: nowrap; }
     .oc-strategy-dot { width: 7px; height: 7px; border-radius: 999px;
-      background: var(--strategy-color, var(--text-dim)); box-shadow: 0 0 0 2px var(--strategy-bg, rgba(139,148,158,0.1)); flex: 0 0 auto; }
+      background: var(--strategy-color, var(--text-secondary)); box-shadow: 0 0 0 2px var(--strategy-bg, rgba(139,148,158,0.1)); flex: 0 0 auto; }
     .oc-strategy-grid_trading, .oc-strategy-card-grid_trading { --strategy-color: #58a6ff; --strategy-bg: rgba(88,166,255,0.13); --strategy-border: rgba(88,166,255,0.34); }
     .oc-strategy-ma_crossover, .oc-strategy-card-ma_crossover { --strategy-color: #3fb950; --strategy-bg: rgba(63,185,80,0.13); --strategy-border: rgba(63,185,80,0.34); }
     .oc-strategy-bb_reversion, .oc-strategy-card-bb_reversion { --strategy-color: #a855f7; --strategy-bg: rgba(168,85,247,0.13); --strategy-border: rgba(168,85,247,0.34); }
@@ -780,44 +780,44 @@ function ocInjectBaseCSS() {
     .oc-strategy-funding_arb, .oc-strategy-card-funding_arb { --strategy-color: #d29922; --strategy-bg: rgba(210,153,34,0.13); --strategy-border: rgba(210,153,34,0.34); }
 
     /* Colors */
-    .green { color: var(--green); } .red { color: var(--red); }
-    .yellow { color: var(--yellow); } .blue { color: var(--blue); }
+    .green { color: var(--pos); } .red { color: var(--neg); }
+    .yellow { color: var(--warn); } .blue { color: var(--text-secondary); }
 
     /* Control Bar */
     .oc-control-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-      padding: 12px 16px; background: var(--card-bg); border: 1px solid var(--border);
-      border-radius: var(--card-radius); margin-bottom: 14px; }
+      padding: 12px 16px; background: var(--bg-surface); border: 1px solid var(--border-subtle);
+      border-radius: var(--r-2); margin-bottom: 14px; }
     .oc-fill-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
     .oc-fill-tabs { display: inline-flex; gap: 6px; flex-wrap: wrap; }
-    .oc-fill-tab { border: 1px solid var(--border); background: var(--bg); color: var(--text-dim);
+    .oc-fill-tab { border: 1px solid var(--border-subtle); background: var(--bg-app); color: var(--text-secondary);
       border-radius: var(--r-1); padding: 5px 10px; font-size: 12px; cursor: pointer; font-family: inherit; }
-    .oc-fill-tab.active { border-color: var(--blue); color: var(--blue); background: rgba(56,139,253,0.12); }
-    .oc-fill-pager { display: inline-flex; align-items: center; gap: 8px; color: var(--text-dim); font-size: 11px; }
-    .oc-fill-summary { color: var(--text-dim); font-size: 11px; line-height: 1.4; margin: 4px 0 8px; }
+    .oc-fill-tab.active { border-color: var(--text-secondary); color: var(--text-secondary); background: rgba(56,139,253,0.12); }
+    .oc-fill-pager { display: inline-flex; align-items: center; gap: 8px; color: var(--text-secondary); font-size: 11px; }
+    .oc-fill-summary { color: var(--text-secondary); font-size: 11px; line-height: 1.4; margin: 4px 0 8px; }
     .oc-fill-table { min-width: 1080px; }
     .oc-fill-table th, .oc-fill-table td { white-space: nowrap; }
     .oc-fill-table th:nth-child(3), .oc-fill-table td:nth-child(3) { white-space: normal; min-width: 140px; }
     .oc-fill-time { white-space: nowrap; }
 
     /* Buttons */
-    .oc-btn { padding: 6px 14px; border-radius: var(--r-1); border: 1px solid var(--border);
-      background: var(--bg); color: var(--text); font-size: 12px; cursor: pointer;
+    .oc-btn { padding: 6px 14px; border-radius: var(--r-1); border: 1px solid var(--border-subtle);
+      background: var(--bg-app); color: var(--text-primary); font-size: 12px; cursor: pointer;
       transition: all 0.15s; font-family: inherit; white-space: nowrap; }
     .oc-btn:hover { border-color: var(--accent); color: #fff; }
     .oc-btn:disabled { opacity: 0.35; cursor: not-allowed; }
-    .oc-btn-primary { background: rgba(56,139,253,0.15); border-color: var(--blue); color: var(--blue); }
+    .oc-btn-primary { background: rgba(56,139,253,0.15); border-color: var(--text-secondary); color: var(--text-secondary); }
     .oc-btn-primary:hover { background: rgba(56,139,253,0.3); }
-    .oc-btn-success { background: rgba(63,185,80,0.12); border-color: var(--green); color: var(--green); }
+    .oc-btn-success { background: rgba(63,185,80,0.12); border-color: var(--pos); color: var(--pos); }
     .oc-btn-success:hover { background: rgba(63,185,80,0.25); }
-    .oc-btn-warning { background: rgba(210,153,34,0.10); border-color: rgba(210,153,34,0.36); color: var(--yellow); }
+    .oc-btn-warning { background: rgba(210,153,34,0.10); border-color: rgba(210,153,34,0.36); color: var(--warn); }
     .oc-btn-warning:hover { background: rgba(210,153,34,0.22); color: #fff; }
-    .oc-btn-danger { background: rgba(248,81,73,0.08); border-color: rgba(248,81,73,0.3); color: var(--red); }
+    .oc-btn-danger { background: rgba(248,81,73,0.08); border-color: rgba(248,81,73,0.3); color: var(--neg); }
     .oc-btn-danger:hover { background: rgba(248,81,73,0.2); }
     .oc-btn-critical { border-width: 2px; font-weight: 700; }
     .oc-btn-destructive { border-style: dashed; background: rgba(248,81,73,0.12); border-color: rgba(248,81,73,0.48); color: #ff7b72; font-weight: 700; }
     .oc-btn-destructive:hover { background: rgba(248,81,73,0.26); color: #fff; }
     .oc-btn-future { border-style: dashed; opacity: 0.4; cursor: default; }
-    .oc-btn-future:hover { border-color: var(--border); color: var(--text); }
+    .oc-btn-future:hover { border-color: var(--border-subtle); color: var(--text-primary); }
 
     /* Action risk zoning: used to separate reversible, stop, and destructive controls. */
     .oc-action-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -834,31 +834,31 @@ function ocInjectBaseCSS() {
     /* Tables */
     .oc-table-wrap { overflow-x: auto; margin-top: 8px; }
     .oc-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-    .oc-table th { text-align: left; padding: 8px 10px; color: var(--text-dim); font-weight: 500;
+    .oc-table th { text-align: left; padding: 8px 10px; color: var(--text-secondary); font-weight: 500;
       font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px;
-      border-bottom: 1px solid var(--border); background: rgba(13,17,23,0.5); }
+      border-bottom: 1px solid var(--border-subtle); background: rgba(13,17,23,0.5); }
     .oc-table td { padding: 8px 10px; border-bottom: 1px solid #21262d; }
     .oc-table tr:last-child td { border-bottom: none; }
     .oc-table tr:hover td { background: rgba(56,139,253,0.04); }
-    .oc-table .empty-row td { text-align: center; color: var(--text-dim); padding: 20px; }
+    .oc-table .empty-row td { text-align: center; color: var(--text-secondary); padding: 20px; }
 
     /* Explainer */
     .oc-explain { margin-bottom: 14px; }
-    .oc-explain-simple { color: var(--text-dim); font-size: 12px; line-height: 1.7;
+    .oc-explain-simple { color: var(--text-secondary); font-size: 12px; line-height: 1.7;
       padding: 10px 14px; background: rgba(13,17,23,0.6); border-left: 3px solid var(--accent);
       border-radius: 0 var(--r-2) var(--r-2) 0; }
     .oc-explain-deep { margin-top: 4px; }
     .oc-explain-deep summary { color: var(--accent); font-size: 11px; cursor: pointer;
       padding: 4px 14px; user-select: none; }
-    .oc-explain-content { padding: 10px 14px; color: var(--text-dim); font-size: 12px; line-height: 1.7;
+    .oc-explain-content { padding: 10px 14px; color: var(--text-secondary); font-size: 12px; line-height: 1.7;
       background: rgba(13,17,23,0.4); border-radius: var(--r-2); margin-top: 4px; }
 
     /* Collapsed Section */
-    .oc-collapse { border: 1px solid #21262d; border-radius: var(--card-radius); margin-top: 10px; }
+    .oc-collapse { border: 1px solid #21262d; border-radius: var(--r-2); margin-top: 10px; }
     .oc-collapse summary { cursor: pointer; padding: 10px 14px; font-size: 13px;
-      color: var(--text); user-select: none; list-style: none; }
+      color: var(--text-primary); user-select: none; list-style: none; }
     .oc-collapse summary::-webkit-details-marker { display: none; }
-    .oc-collapse summary::before { content: '\\25B6  '; font-size: 9px; color: var(--text-dim); }
+    .oc-collapse summary::before { content: '\\25B6  '; font-size: 9px; color: var(--text-secondary); }
     .oc-collapse[open] summary::before { content: '\\25BC  '; }
     .oc-collapse[open] summary { border-bottom: 1px solid #21262d; }
     .oc-collapse .oc-collapse-body { padding: 12px 14px; }
@@ -889,12 +889,12 @@ function ocInjectBaseCSS() {
       border-radius: var(--r-2); font-size: 13px; z-index: 9999; transform: translateY(20px);
       opacity: 0; transition: all 0.3s; pointer-events: none; max-width: 420px; word-break: break-word; }
     .oc-toast.show { transform: translateY(0); opacity: 1; }
-    .oc-toast-info { background: #1f2937; color: var(--text); border: 1px solid var(--border); }
-    .oc-toast-success { background: rgba(63,185,80,0.15); color: var(--green); border: 1px solid rgba(63,185,80,0.3); }
-    .oc-toast-error { background: rgba(248,81,73,0.15); color: var(--red); border: 1px solid rgba(248,81,73,0.3); }
+    .oc-toast-info { background: #1f2937; color: var(--text-primary); border: 1px solid var(--border-subtle); }
+    .oc-toast-success { background: rgba(63,185,80,0.15); color: var(--pos); border: 1px solid rgba(63,185,80,0.3); }
+    .oc-toast-error { background: rgba(248,81,73,0.15); color: var(--neg); border: 1px solid rgba(248,81,73,0.3); }
     /* warn = 黃色「需注意」語意；之前缺此 class → 'warn' toast 退回無樣式（透明背景無邊框）。
        對應 --yellow token，與 success(綠)/error(紅)/info(灰) 視覺區分。 */
-    .oc-toast-warn { background: rgba(210,153,34,0.15); color: var(--yellow); border: 1px solid rgba(210,153,34,0.4); }
+    .oc-toast-warn { background: rgba(210,153,34,0.15); color: var(--warn); border: 1px solid rgba(210,153,34,0.4); }
     /* trace 短碼可點擊複製；.oc-toast 本身 pointer-events:none，故 chip 需顯式 auto 才能收 click。 */
     .oc-toast-trace { pointer-events: auto; cursor: pointer; text-decoration: underline;
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -903,44 +903,44 @@ function ocInjectBaseCSS() {
     /* Persistent Residual-Risk Banner / 常駐殘留風險橫幅 — 只能點擊關閉，refreshPage 不清除 */
     .oc-residual-banner { position: fixed; left: 50%; transform: translateX(-50%);
       max-width: 720px; width: calc(100% - 24px); z-index: 10000;
-      background: rgba(248,81,73,0.16); border: 1px solid var(--red); border-radius: var(--r-2);
+      background: rgba(248,81,73,0.16); border: 1px solid var(--neg); border-radius: var(--r-2);
       padding: 12px 16px; display: flex; align-items: center; gap: 14px;
       box-shadow: 0 4px 18px rgba(0,0,0,0.5); }
-    .oc-residual-banner-text { color: var(--red); font-size: 13px; font-weight: 600;
+    .oc-residual-banner-text { color: var(--neg); font-size: 13px; font-weight: 600;
       line-height: 1.5; flex: 1; word-break: break-word; }
-    .oc-residual-banner-close { background: rgba(248,81,73,0.2); border: 1px solid var(--red);
-      color: var(--red); border-radius: var(--r-1); padding: 6px 12px; font-size: 12px;
+    .oc-residual-banner-close { background: rgba(248,81,73,0.2); border: 1px solid var(--neg);
+      color: var(--neg); border-radius: var(--r-1); padding: 6px 12px; font-size: 12px;
       font-weight: 600; cursor: pointer; white-space: nowrap; flex-shrink: 0; }
     .oc-residual-banner-close:hover { background: rgba(248,81,73,0.32); }
 
     /* Danger Zone */
     .oc-danger-zone { background: rgba(248,81,73,0.04); border: 1px solid rgba(248,81,73,0.15);
-      border-radius: var(--card-radius); padding: 14px; margin-top: 14px; }
-    .oc-danger-zone h3 { color: var(--red); font-size: 12px; text-transform: uppercase;
+      border-radius: var(--r-2); padding: 14px; margin-top: 14px; }
+    .oc-danger-zone h3 { color: var(--neg); font-size: 12px; text-transform: uppercase;
       letter-spacing: 0.5px; margin-bottom: 8px; }
 
     /* Form Elements */
-    .oc-input { background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-1);
-      color: var(--text); padding: 7px 10px; font-size: 13px; font-family: inherit; }
+    .oc-input { background: var(--bg-app); border: 1px solid var(--border-subtle); border-radius: var(--r-1);
+      color: var(--text-primary); padding: 7px 10px; font-size: 13px; font-family: inherit; }
     .oc-input:focus { outline: none; border-color: var(--accent); }
-    .oc-select { background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-1);
-      color: var(--text); padding: 7px 10px; font-size: 13px; font-family: inherit; cursor: pointer; }
+    .oc-select { background: var(--bg-app); border: 1px solid var(--border-subtle); border-radius: var(--r-1);
+      color: var(--text-primary); padding: 7px 10px; font-size: 13px; font-family: inherit; cursor: pointer; }
 
     /* Strategy Cards */
     .oc-strat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
-    .oc-strat-card { background: var(--bg); border: 1px solid #21262d; border-radius: var(--r-2); padding: 14px; position: relative; overflow: hidden; }
+    .oc-strat-card { background: var(--bg-app); border: 1px solid #21262d; border-radius: var(--r-2); padding: 14px; position: relative; overflow: hidden; }
     .oc-strat-card[class*="oc-strategy-card-"] { border-color: var(--strategy-border, #21262d); box-shadow: inset 3px 0 0 var(--strategy-color, transparent); }
     .oc-strat-card .strat-header { display: flex; justify-content: flex-start; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
     .oc-strat-card .strat-name { font-weight: 600; font-size: 14px; }
     .oc-strat-card .strat-name .oc-strategy-chip { font-size: 13px; padding: 3px 10px; }
-    .oc-strat-card .strat-meta { font-size: 11px; color: var(--text-dim); margin-bottom: 10px; }
+    .oc-strat-card .strat-meta { font-size: 11px; color: var(--text-secondary); margin-bottom: 10px; }
     .oc-strat-card .strat-actions { display: flex; gap: 6px; }
 
     /* Loading Shimmer */
-    .oc-loading { color: var(--text-dim); font-size: 12px; padding: 20px; text-align: center; }
+    .oc-loading { color: var(--text-secondary); font-size: 12px; padding: 20px; text-align: center; }
 
     /* Pre/Code */
-    .oc-pre { background: var(--bg); border: 1px solid #21262d; border-radius: var(--r-2);
+    .oc-pre { background: var(--bg-app); border: 1px solid #21262d; border-radius: var(--r-2);
       padding: 12px; font-size: 12px; font-family: 'SF Mono', Consolas, monospace;
       overflow: auto; max-height: 300px; white-space: pre-wrap; word-break: break-word; }
 
@@ -948,62 +948,62 @@ function ocInjectBaseCSS() {
     .oc-not-configured { text-align: center; padding: 40px 20px; }
     .oc-not-configured .icon { font-size: 48px; margin-bottom: 16px; opacity: 0.5; }
     .oc-not-configured h3 { font-size: 16px; margin-bottom: 8px; }
-    .oc-not-configured p { color: var(--text-dim); font-size: 13px; max-width: 400px; margin: 0 auto; }
+    .oc-not-configured p { color: var(--text-secondary); font-size: 13px; max-width: 400px; margin: 0 auto; }
 
     /* Currency Toggle Badge — clickable pill showing active currency */
     /* 計價货币切换徽章 — 點擊循環切换 USDT / USD / EUR */
     .oc-curr-badge { display: inline-block; padding: 2px 9px; border-radius: 999px;
       font-size: 11px; font-weight: 600; letter-spacing: 0.3px; cursor: pointer;
       background: rgba(56,139,253,0.12); border: 1px solid rgba(56,139,253,0.3);
-      color: var(--blue); user-select: none; transition: background 0.15s; }
+      color: var(--text-secondary); user-select: none; transition: background 0.15s; }
     .oc-curr-badge:hover { background: rgba(56,139,253,0.25); }
 
     /* Tooltip on metric labels — shows on hover */
-    .oc-metric-label[title] { cursor: help; border-bottom: 1px dotted var(--text-dim); display: inline-block; }
+    .oc-metric-label[title] { cursor: help; border-bottom: 1px dotted var(--text-secondary); display: inline-block; }
     .oc-performance-metrics .oc-metric-label[title] { display: block; width: fit-content; max-width: 100%; }
 
     /* live-metric: unified alias for tab-live.html metric cells (§6.1 CSS unification)
        live-metric 是 oc-metric 的别名，用于實盤 tab。保持视觉一致，特殊修飾词在各 tab 自定义。
        Note: mc/mc-val (console.html sidebar) is a separate narrower context — not unified. */
     .live-metrics { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
-    .live-metric { background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-2); padding: 10px 12px; }
+    .live-metric { background: var(--bg-app); border: 1px solid var(--border-subtle); border-radius: var(--r-2); padding: 10px 12px; }
     .live-metric.span2 { grid-column: span 2; }
-    .live-metric-label { font-size: 11px; color: var(--text-dim); margin-bottom: 4px; font-weight: 500; }
+    .live-metric-label { font-size: 11px; color: var(--text-secondary); margin-bottom: 4px; font-weight: 500; }
     .live-metric-val { font-size: 20px; font-weight: 700; }
     .live-metric-val.large { font-size: 24px; }
-    .live-metric-val.pos { color: var(--green); }
+    .live-metric-val.pos { color: var(--pos); }
     .live-metric-val.neg { color: #f87171; }
-    .live-metric-val.neutral { color: var(--text); }
+    .live-metric-val.neutral { color: var(--text-primary); }
     .live-metric-val.purple { color: #a855f7; }
-    .live-metric-sub { font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+    .live-metric-sub { font-size: 10px; color: var(--text-secondary); margin-top: 2px; }
 
     /* Load-error state / 載入失败状态 — used by ocLoadError() */
-    .oc-load-error { color: var(--red); font-size: 12px; padding: 10px 0;
+    .oc-load-error { color: var(--neg); font-size: 12px; padding: 10px 0;
       display: flex; align-items: center; gap: 8px; }
     .oc-load-error button { padding: 2px 8px; font-size: 10px; }
 
     /* Diff-highlight on risk form cells / 風控表單原值對比高亮 — used by §4.1 diff mode */
     .oc-diff-changed { background: rgba(210,153,34,0.12) !important;
       border-color: rgba(210,153,34,0.4) !important; }
-    .oc-diff-label { font-size: 9px; color: var(--yellow); margin-top: 3px; font-style: italic; }
+    .oc-diff-label { font-size: 9px; color: var(--warn); margin-top: 3px; font-style: italic; }
 
     /* Generic confirm modal (shared across tab iframes) / 通用确認弹窗（各 tab iframe 共用） */
     .oc-confirm-overlay { display:none; position:fixed; inset:0; z-index:5000;
       background:rgba(0,0,0,0.7); align-items:center; justify-content:center; }
     .oc-confirm-overlay.show { display:flex; }
-    .oc-confirm-dialog { background:var(--card-bg,#161b22); border:1px solid rgba(248,81,73,0.4);
+    .oc-confirm-dialog { background:var(--bg-surface,#161b22); border:1px solid rgba(248,81,73,0.4);
       border-radius:var(--r-3); padding:24px; max-width:440px; width:90%; }
     .oc-confirm-dialog h3 { color:#f85149; font-size:15px; margin-bottom:8px; }
     .oc-confirm-dialog p { font-size:13px; color:#c9d1d9; white-space:pre-line; margin-bottom:16px; line-height:1.6; }
     .oc-confirm-dialog .btn-row { display:flex; gap:8px; justify-content:flex-end; }
-    .oc-prompt-label { display:block; font-size:12px; color:var(--text-dim); margin-bottom:6px; }
+    .oc-prompt-label { display:block; font-size:12px; color:var(--text-secondary); margin-bottom:6px; }
     .oc-prompt-input, .oc-prompt-select, .oc-prompt-textarea { width:100%; box-sizing:border-box;
-      background:var(--bg,#0d1117); color:var(--text,#c9d1d9); border:1px solid var(--border,#30363d);
+      background:var(--bg-app,#0d1117); color:var(--text-primary,#c9d1d9); border:1px solid var(--border-subtle,#30363d);
       border-radius:var(--r-2); padding:9px 10px; font-size:13px; margin-bottom:10px; }
     .oc-prompt-textarea { min-height:96px; resize:vertical; line-height:1.5; }
     .oc-prompt-input:focus, .oc-prompt-select:focus, .oc-prompt-textarea:focus {
       outline:2px solid var(--accent,#58a6ff); outline-offset:1px; border-color:var(--accent,#58a6ff); }
-    .oc-prompt-error { min-height:16px; color:var(--red,#f85149); font-size:12px; margin-bottom:10px; }
+    .oc-prompt-error { min-height:16px; color:var(--neg,#f85149); font-size:12px; margin-bottom:10px; }
   `;
   document.head.appendChild(style);
 }
