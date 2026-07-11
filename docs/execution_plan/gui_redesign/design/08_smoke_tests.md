@@ -21,16 +21,20 @@
 - **anti-vacuous-green 紀律(鏡像 ratchet)**:每個掃描測試斷言「scanned-count 下限 + substantive-detector 錨點」,
   glob 壞掉/regex 被架空時大聲 fail 而非空綠。
 - 與既有 61 GUI-guard 斷言零衝突(獨立 read-only 模組,不碰 ratchet BASELINE dict/scanned≥50 floor)。
-  唯一成本=~33+~55 次 node 子進程;per-file parametrize 使單一失敗點名檔案。
+  唯一成本=33+51 次 node 子進程;per-file parametrize 使單一失敗點名檔案。
 
 ## 2 · 首批切片(P1.0-impl 第一刀,單輪 E4 可驗)= 家族 (2)+(3)+(4)〔(1) 可選折入〕
 **「syntax + reference-integrity floor」**——當前樹**即綠**(親證 33/33 JS 過 node --check;ref 是靜態檔查找),
 首 commit=乾淨基線非清理專案;零 baseline curation、零路由解析複雜度(切片可控)。
 
 - **(2) `node --check` 每 JS**:全 30 `*.js` + 3 `js/*.js`。把現行**手動** node --check sign-off gate 升為**強制** CI 測試。
-- **(3) `node --check` 每 inline `<script>`**:23 HTML 內 ~55 inline block(tab-phase4 一檔就 8)**今日零覆蓋=最大盲區**。
-  抽取每 block(濾 `type="module"`/`application/json`;偵測 top-level `await` 需 wrap/skip——impl 細節,E4-writer 處理),
+- **(3) `node --check` 每 inline `<script>`**:27 HTML 內 51 inline JS block(tab-phase4 一檔就 8)**今日零覆蓋=最大盲區**
+  (R45 E4 實測 27/51;原設計估 23/~55 為實作前低估——實際覆蓋更廣)。
+  抽取每 block(濾 `type="module"`/`application/json`;偵測 top-level `await` 以 async-wrap 容忍——impl 細節,已由 E4-writer 處理),
   syntax-only 檢查(缺 browser globals `ocAuthCheck`/`document` **不**造成假失敗)。
+  **前瞻 hardening(今日 0 影響,R45 E4-verifier 揭)**:抽取器以 script goal(CommonJS)解析,僅 top-level `await` 被 async-wrap;
+  若**未來**新增 `type="module"` 的 inline `<script>` 且用 `import`/`export`,會被 node 判「Cannot use import outside module」假失敗
+  → 屆時需 `--input-type=module` 分流(當前樹 0 個 module inline block,無現行假陽性)。
 - **(4) asset-ref existence**:每 `<script src="/static/…">`/`<link href="/static/…">` 解析到真檔(strip `?v=` cache-bust)。
 - **(1) 可選**:HTML parse/structure floor——每 `*.html` 過 Python stdlib `html.parser` 無例外 + 選定容器集
   (html/head/body/div/section/table/tbody/tr)tag-stack 平衡檢查。**誠實 caveat**:html.parser 是 HTML5-lenient
