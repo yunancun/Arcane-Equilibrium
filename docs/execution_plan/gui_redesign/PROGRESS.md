@@ -5,7 +5,6 @@
 - **CURRENT**: P0.4 C1(最低風險起手:common-formatters 死欄刪+tab-phase4 懸空 var→--bg-raised+blank guard '--'→OC_EMPTY+oc-tc-meta 越界常量;非交易 E1a→E2)
 - **LAST-COMMIT**: 6f8fb17fb(P0.4 設計正本 07_consolidation.md)
 - **DRIFT/待裁(P0.4 PA findings)**:①working doc §9 step4 fork-delete 掛 Phase0 vs P1.4 共用組件凍結相衝→PA 以 P1.4 為準(fork bulk-rename 移 P1.4),建議更新 §9;②legacy 殼(console/trading/index=Phase3 刪除目標)仍消費舊 token 名,阻塞刪 tokens-compat.css→**C3/C5 開批前須向 OPS/operator 取 index/trading served-status**(遷 legacy vs defer 刪檔到 Phase3 二選一);③styles.css 仍 1 個 `:root`(疑 P0.1 逃逸)C3 驗;④POST 量級猜測×2 需後端契約=C8 defer Issue
-- **LAST-COMMIT**: 9f1a82019(P0.3 B6/E live,**P0.3 完結**)
 - **AWAITING-OPERATOR/QC**: demo/paper(B5/D)+ live(B6/E)顯示精度變更(4dp→2dp 聚合、bps 2dp、qty 6dp、負號 U+2212、closed-pnl per-trade 隨幣別 FX 轉換)需 QC/operator 知悉;deploy 須確認 cache-buster 已 bump(common-formatters.js 站點 p03-numerics;tab-live.js 自身 p03-b6e-live;CSS/common.js 見 P0.6)
 - 回歸基線更新:structure/ 6F→**4F**(兄弟 session commit 修掉 test_development_agent_governance+stable_boundary_docs;現 4F=stock_etf_ipc×2/ipc_tests/strategy_blocked_symbols 全 pre-existing 非 GUI)
 - **BLOCKERS**: —
