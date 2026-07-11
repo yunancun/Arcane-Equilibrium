@@ -11,6 +11,11 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-07-11 12:51 CEST
+- closed `P0-IBKR-STOCK-ETF-FULL-LIVE-CAPABILITY-W1` as `DONE_SOURCE_SECURED`: Phase-2 sealed artifact consumption now requires the current `BUILD_GIT_SHA`, an exact euid-owned `0400` regular artifact, and a data-root → `governance` → `ibkr_phase2` secure FD traversal (`lstat`/`O_NOFOLLOW`/`fstatat`/`openat` plus dev/inode binding); the final open is nonblocking so FIFO substitution fails closed rather than stalls
+- adversarial remediation covered special permission bits, owner mismatch, cross/unknown build generation, final-file replacement, data-root replacement, symlink/nonregular paths, and FIFO lstat-to-open replacement; final E2 and E3 security reviews PASS; E4 rerun: 32 focused Rust tests, 26 phase2 static tests, 45 type acceptance tests, rustfmt and scoped diff checks PASS
+- boundary: source/test only; no IBKR credential/session/contact/order, deployment, restart, or activation. W2 is active to design the controlled Rust production seal/supersession caller, still default inactive and without contact authority
+
 2026-07-10 23:52 CEST (re-audited 2026-07-11)
 - replaced duplicated hand-maintained development-agent personas/protocols with one executable `development_agent_governance` Module: 20 capability presets, generated views, typed task facts, adaptive risk DAG, elastic context, route-bound closure, and deterministic effect seams
 - added missing `OPS` and `IB` capabilities without adding another orchestration tier; both remain read-only and gain no deploy/broker effect authority

@@ -170,8 +170,12 @@ pub struct Phase2LegStatus {
 /// producer 一次評估的結果。現階段 env-wrapper 恒回 `Blocked`（report-only，不寫檔）；
 /// `Sealed`/`AlreadySealed` 為 seal 啟用後的形狀（現由測試觸達 seal 直接映射）。
 pub enum Phase2ProducerOutcome {
-    Sealed { path: PathBuf },
-    AlreadySealed { path: PathBuf },
+    Sealed {
+        path: PathBuf,
+    },
+    AlreadySealed {
+        path: PathBuf,
+    },
     Blocked {
         blockers: Vec<String>,
         leg_status: Phase2LegStatus,
@@ -258,7 +262,11 @@ fn compute_approval_lineage_hash(a: &Phase2SealApproval) -> String {
         "issued_at_ms": a.issued_at_ms,
         "expires_at_ms": a.expires_at_ms,
     });
-    sha256_hex(serde_json::to_string(&canonical).unwrap_or_default().as_bytes())
+    sha256_hex(
+        serde_json::to_string(&canonical)
+            .unwrap_or_default()
+            .as_bytes(),
+    )
 }
 
 /// pre-seal 自洽閘：重算兩 hash 與 artifact 內存欄位比對（因 types `validate()` 只驗
@@ -394,38 +402,368 @@ fn account_fingerprint_triangulation_ok(a: &IbkrPhase2GateArtifactV1) -> bool {
     !secret_fp.is_empty() && *secret_fp == a.api_session_topology.account_fingerprint_hash
 }
 
-/// post-seal 磁碟 re-verify（design 命名）：讀 `artifact.immutable_storage_path`、解析、
-/// 與傳入 artifact 全等（含 path 欄位）、hash 自洽、且 `validate()` 放行。
-fn verify_sealed_artifact(artifact: &IbkrPhase2GateArtifactV1) -> bool {
-    let path = Path::new(&artifact.immutable_storage_path);
-    let raw = match std::fs::read_to_string(path) {
-        Ok(r) => r,
-        Err(_) => return false,
+/// owner-only path 的 permission 比對必須涵蓋 permission special bits；不能只 mask
+/// 低九位，否則 setuid/setgid/sticky 可偽裝成安全 mode。
+#[cfg(unix)]
+fn owner_only_mode_is_exact(mode: u32, expected: u32) -> bool {
+    (mode & 0o7777) == expected
+}
+
+/// sealed artifact consume-time metadata 必須同時是 euid 所有的 regular file、非
+/// symlink、且**精確** `0o400`。這是 lstat/fstat 共用的 invariant；任一偏差均不讀。
+#[cfg(unix)]
+fn sealed_artifact_metadata_is_secure(meta: &std::fs::Metadata, expected_euid: u32) -> bool {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+    !meta.file_type().is_symlink()
+        && meta.is_file()
+        && meta.uid() as u32 == expected_euid
+        && owner_only_mode_is_exact(meta.permissions().mode(), 0o400)
+}
+
+/// owner-only directory 亦要求精確 `0o700`；不能僅 mask 低九個 permission bits，
+/// 否則 special bits 可偽裝成安全目錄。lstat 與 fstat 都使用同一 predicate。
+#[cfg(unix)]
+fn owner_only_dir_metadata_is_secure(meta: &std::fs::Metadata, expected_euid: u32) -> bool {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+    !meta.file_type().is_symlink()
+        && meta.is_dir()
+        && meta.uid() as u32 == expected_euid
+        && owner_only_mode_is_exact(meta.permissions().mode(), 0o700)
+}
+
+/// `lstat`/`fstatat(AT_SYMLINK_NOFOLLOW)` 和稍後由 FD 取得的 `fstat` 必須指向同一
+/// inode；否則 lstat→open 間的 replacement race 不能被視為可 consume。
+#[cfg(unix)]
+#[derive(Clone, Copy)]
+struct SecureInode {
+    dev: u64,
+    ino: u64,
+}
+
+#[cfg(unix)]
+fn metadata_matches_inode(meta: &std::fs::Metadata, inode: SecureInode) -> bool {
+    use std::os::unix::fs::MetadataExt;
+
+    meta.dev() == inode.dev && meta.ino() == inode.ino
+}
+
+#[cfg(unix)]
+fn inode_from_metadata(meta: &std::fs::Metadata) -> SecureInode {
+    use std::os::unix::fs::MetadataExt;
+
+    SecureInode {
+        dev: meta.dev(),
+        ino: meta.ino(),
+    }
+}
+
+/// 從已打開的 parent dirfd 對 child 做 `fstatat(..., AT_SYMLINK_NOFOLLOW)`，並以
+/// type/owner/exact-mode 檢查該 lstat inode。下一步的 `openat` 必須以
+/// `O_NOFOLLOW` 打開並比對此 inode，避免任何 path-based re-resolution；因此
+/// data-root 一旦 FD-bound，後續目錄與檔案皆不再依賴可替換的字串路徑。
+#[cfg(unix)]
+fn lstatat_owner_only_inode(
+    parent_fd: std::os::unix::io::RawFd,
+    child: &std::ffi::CStr,
+    expected_euid: u32,
+    expected_file_type: u32,
+    expected_mode: u32,
+) -> Option<SecureInode> {
+    let mut stat: libc::stat = unsafe { std::mem::zeroed() };
+    if unsafe {
+        libc::fstatat(
+            parent_fd,
+            child.as_ptr(),
+            &mut stat,
+            libc::AT_SYMLINK_NOFOLLOW,
+        )
+    } != 0
+    {
+        return None;
+    }
+    let mode = stat.st_mode as u32;
+    if (mode & libc::S_IFMT as u32) != expected_file_type
+        || stat.st_uid as u32 != expected_euid
+        || !owner_only_mode_is_exact(mode, expected_mode)
+    {
+        return None;
+    }
+    Some(SecureInode {
+        dev: stat.st_dev as u64,
+        ino: stat.st_ino as u64,
+    })
+}
+
+/// 從 parent dirfd 安全地打開 owner-only child directory：lstatat（不跟 symlink）→
+/// `openat(O_NOFOLLOW|O_DIRECTORY)`→fstat+inode equality。所有失敗都 fail-closed。
+#[cfg(unix)]
+fn open_owner_only_child_dir(
+    parent: &std::fs::File,
+    child_name: &str,
+    expected_euid: u32,
+) -> Option<std::fs::File> {
+    use std::os::unix::io::{AsRawFd, FromRawFd};
+
+    let child = std::ffi::CString::new(child_name).ok()?;
+    let before = lstatat_owner_only_inode(
+        parent.as_raw_fd(),
+        child.as_c_str(),
+        expected_euid,
+        libc::S_IFDIR as u32,
+        0o700,
+    )?;
+
+    let fd = unsafe {
+        libc::openat(
+            parent.as_raw_fd(),
+            child.as_ptr(),
+            libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_DIRECTORY | libc::O_CLOEXEC,
+        )
     };
-    let on_disk: IbkrPhase2GateArtifactV1 = match serde_json::from_str(&raw) {
-        Ok(a) => a,
-        Err(_) => return false,
+    if fd < 0 {
+        return None;
+    }
+    let file = unsafe { std::fs::File::from_raw_fd(fd) };
+    let after = file.metadata().ok()?;
+    if !owner_only_dir_metadata_is_secure(&after, expected_euid)
+        || !metadata_matches_inode(&after, before)
+    {
+        return None;
+    }
+    Some(file)
+}
+
+/// 從已綁定 `ibkr_phase2` dirfd 讀 sealed artifact：fstatat→
+/// `openat(O_NOFOLLOW|O_NONBLOCK)`→fstat+inode equality→FD read。這個 helper 沒有
+/// 任何 path-based re-open，故組件遭替換或變 symlink 都會拒絕。`O_NONBLOCK` 是
+/// consume-time 防線的一部分：即使 attacker 在 lstat 與 open 間把 regular sealed
+/// file 換成 FIFO，open 也不能先卡住，必須抵達 post-open type/inode reject。
+#[cfg(unix)]
+fn read_owner_only_sealed_child_after_lstat<F>(
+    parent: &std::fs::File,
+    expected_euid: u32,
+    after_lstat: F,
+) -> Option<String>
+where
+    F: FnOnce(),
+{
+    use std::io::Read;
+    use std::os::unix::io::{AsRawFd, FromRawFd};
+
+    let sealed_name = std::ffi::CString::new(SEALED_FILENAME).ok()?;
+    let before = lstatat_owner_only_inode(
+        parent.as_raw_fd(),
+        sealed_name.as_c_str(),
+        expected_euid,
+        libc::S_IFREG as u32,
+        0o400,
+    )?;
+
+    after_lstat();
+
+    let fd = unsafe {
+        libc::openat(
+            parent.as_raw_fd(),
+            sealed_name.as_ptr(),
+            libc::O_RDONLY | libc::O_NONBLOCK | libc::O_NOCTTY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+        )
+    };
+    if fd < 0 {
+        return None;
+    }
+    let mut file = unsafe { std::fs::File::from_raw_fd(fd) };
+    let after = file.metadata().ok()?;
+    if !sealed_artifact_metadata_is_secure(&after, expected_euid)
+        || !metadata_matches_inode(&after, before)
+    {
+        return None;
+    }
+
+    let mut raw = String::new();
+    file.read_to_string(&mut raw).ok()?;
+    Some(raw)
+}
+
+/// Production wrapper keeps the final-file race hook inert. The generic helper above is also
+/// used by the Unix-only test to inject a FIFO replacement exactly after `fstatat`.
+#[cfg(unix)]
+fn read_owner_only_sealed_child(parent: &std::fs::File, expected_euid: u32) -> Option<String> {
+    read_owner_only_sealed_child_after_lstat(parent, expected_euid, || {})
+}
+
+/// 從 data-root path 打開第一個安全 dirfd。lstat+`O_NOFOLLOW|O_DIRECTORY`+fstat
+/// inode equality 把 root 鎖在單一 inode；其後只能用 `openat` 沿固定
+/// `governance/ibkr_phase2` 組件下降。
+#[cfg(unix)]
+fn open_owner_only_data_root_after_lstat<F>(path: &Path, after_lstat: F) -> Option<std::fs::File>
+where
+    F: FnOnce(),
+{
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let expected_euid = unsafe { libc::geteuid() } as u32;
+    let before = std::fs::symlink_metadata(path).ok()?;
+    if !owner_only_dir_metadata_is_secure(&before, expected_euid) {
+        return None;
+    }
+    let before_inode = inode_from_metadata(&before);
+
+    after_lstat();
+
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_DIRECTORY | libc::O_CLOEXEC)
+        .open(path)
+        .ok()?;
+    let after = file.metadata().ok()?;
+    if !owner_only_dir_metadata_is_secure(&after, expected_euid)
+        || !metadata_matches_inode(&after, before_inode)
+    {
+        return None;
+    }
+    Some(file)
+}
+
+#[cfg(unix)]
+fn sealed_artifact_data_root(path: &Path) -> Option<&Path> {
+    let ibkr_phase2 = path.parent()?;
+    let governance = ibkr_phase2.parent()?;
+    let data_root = governance.parent()?;
+    if path.file_name()?.to_str()? != SEALED_FILENAME
+        || ibkr_phase2.file_name()?.to_str()? != "ibkr_phase2"
+        || governance.file_name()?.to_str()? != "governance"
+        || data_root.as_os_str().is_empty()
+    {
+        return None;
+    }
+    Some(data_root)
+}
+
+/// 由 data-root 的安全 dirfd 逐層 consume sealed artifact。`after_data_root_lstat`
+/// 只供 deterministic ancestor-replacement attack 測試；production 呼叫空 closure。
+#[cfg(unix)]
+fn read_sealed_artifact_from_secure_tree_after_data_root_lstat<F>(
+    path: &Path,
+    after_data_root_lstat: F,
+) -> Option<String>
+where
+    F: FnOnce(),
+{
+    let expected_euid = unsafe { libc::geteuid() } as u32;
+    let data_root = sealed_artifact_data_root(path)?;
+    let root_fd = open_owner_only_data_root_after_lstat(data_root, after_data_root_lstat)?;
+    let governance_fd = open_owner_only_child_dir(&root_fd, "governance", expected_euid)?;
+    let ibkr_phase2_fd = open_owner_only_child_dir(&governance_fd, "ibkr_phase2", expected_euid)?;
+    read_owner_only_sealed_child(&ibkr_phase2_fd, expected_euid)
+}
+
+#[cfg(unix)]
+fn read_sealed_artifact_from_secure_tree(path: &Path) -> Option<String> {
+    read_sealed_artifact_from_secure_tree_after_data_root_lstat(path, || {})
+}
+
+/// 僅供測試釘 final-file lstat→open inode replacement 防線。production consume 走
+/// `read_sealed_artifact_from_secure_tree`，不保留 path-based reopen。
+#[cfg(all(unix, test))]
+fn read_sealed_artifact_from_secure_fd_after_lstat<F>(path: &Path, after_lstat: F) -> Option<String>
+where
+    F: FnOnce(),
+{
+    use std::io::Read;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let expected_euid = unsafe { libc::geteuid() } as u32;
+    let before = std::fs::symlink_metadata(path).ok()?;
+    if !sealed_artifact_metadata_is_secure(&before, expected_euid) {
+        return None;
+    }
+    let before_inode = inode_from_metadata(&before);
+    after_lstat();
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(path)
+        .ok()?;
+    let after = file.metadata().ok()?;
+    if !sealed_artifact_metadata_is_secure(&after, expected_euid)
+        || !metadata_matches_inode(&after, before_inode)
+    {
+        return None;
+    }
+    let mut raw = String::new();
+    file.read_to_string(&mut raw).ok()?;
+    Some(raw)
+}
+
+/// 將 immutable artifact 從 secure tree FD parse；data-root、governance、
+/// ibkr_phase2 與 sealed file 都在 lstat/no-follow-open/fstat inode binding 下。
+#[cfg(unix)]
+fn parse_sealed_artifact_from_secure_fd(path: &Path) -> Option<IbkrPhase2GateArtifactV1> {
+    let raw = read_sealed_artifact_from_secure_tree(path)?;
+    serde_json::from_str(&raw).ok()
+}
+
+#[cfg(not(unix))]
+fn parse_sealed_artifact_from_secure_fd(path: &Path) -> Option<IbkrPhase2GateArtifactV1> {
+    let _ = path;
+    None
+}
+
+/// post-seal 磁碟 re-verify（design 命名）：secure-FD consume、build-generation 綁定、
+/// 與傳入 artifact 全等（含 path 欄位）、hash 自洽、且 `validate()` 放行。
+fn verify_sealed_artifact_for_build(
+    artifact: &IbkrPhase2GateArtifactV1,
+    expected_build_sha: &str,
+) -> bool {
+    if !source_commit_is_known(expected_build_sha)
+        || !source_commit_is_known(&artifact.source_commit)
+        || artifact.source_commit != expected_build_sha
+    {
+        return false;
+    }
+    let path = Path::new(&artifact.immutable_storage_path);
+    let on_disk = match parse_sealed_artifact_from_secure_fd(path) {
+        Some(a) => a,
+        None => return false,
     };
     &on_disk == artifact
+        && on_disk.source_commit == expected_build_sha
         && verify_artifact_hashes(&on_disk)
         && on_disk.validate().ibkr_contact_allowed
 }
 
-/// precontact / summary 用的磁碟 re-verify（path-first，含 anti-relocation）。
-fn reverify_sealed_artifact_at(path: &Path) -> bool {
-    let raw = match std::fs::read_to_string(path) {
-        Ok(r) => r,
-        Err(_) => return false,
+/// Production build wrapper：sealed artifact 必須屬於當前 `BUILD_GIT_SHA`，舊世代
+/// 即使 shape/hash 均合法也不可被新 binary consume。
+fn verify_sealed_artifact(artifact: &IbkrPhase2GateArtifactV1) -> bool {
+    verify_sealed_artifact_for_build(artifact, BUILD_GIT_SHA)
+}
+
+/// precontact / summary 用的磁碟 re-verify（path-first，含 anti-relocation、
+/// secure-FD consume、以及 expected build generation 綁定）。
+fn reverify_sealed_artifact_at_for_build(path: &Path, expected_build_sha: &str) -> bool {
+    if !source_commit_is_known(expected_build_sha) {
+        return false;
+    }
+    let artifact = match parse_sealed_artifact_from_secure_fd(path) {
+        Some(a) => a,
+        None => return false,
     };
-    let artifact: IbkrPhase2GateArtifactV1 = match serde_json::from_str(&raw) {
-        Ok(a) => a,
-        Err(_) => return false,
-    };
-    // anti-relocation：磁碟聲明的 path 必等於實際讀取的 path（防搬檔偽造 PASS）。
-    if artifact.immutable_storage_path != path.to_string_lossy().into_owned() {
+    if !source_commit_is_known(&artifact.source_commit)
+        || artifact.source_commit != expected_build_sha
+        // anti-relocation：磁碟聲明的 path 必等於實際讀取的 path（防搬檔偽造 PASS）。
+        || artifact.immutable_storage_path != path.to_string_lossy().into_owned()
+    {
         return false;
     }
     verify_artifact_hashes(&artifact) && artifact.validate().ibkr_contact_allowed
+}
+
+/// Production build wrapper：只能 consume 與現 binary 同一 `BUILD_GIT_SHA` 的 sealed
+/// artifact；unknown fallback 或跨世代 artifact 均 fail-closed。
+fn reverify_sealed_artifact_at(path: &Path) -> bool {
+    reverify_sealed_artifact_at_for_build(path, BUILD_GIT_SHA)
 }
 
 // ---------------------------------------------------------------------------
@@ -526,26 +864,24 @@ fn resolve_phase2_governance_dir() -> Result<PathBuf, Phase2SealError> {
 // approval reader（owner-only；#[cfg(unix)]）
 // ---------------------------------------------------------------------------
 
-/// gov_dir 與其父 `governance/` 皆須 mode==0o700 且 owner==euid（bind #1 祖先鏈）。
-/// 用 lstat：symlink 祖先的 mode 不會是 0o700 → 自然 fail-closed。
+/// gov_dir 與其父 `governance/` 皆須是 euid owner 的 regular directory 且精確
+/// mode==0o700（包含拒 special bits）。這是 seal/approval path 的 owner-only
+/// invariant；production sealed consume 另外以 dirfd/openat 鎖整條 data-root 鏈。
 #[cfg(unix)]
 fn check_dir_pair_owner_only(gov_dir: &Path) -> Result<(), String> {
-    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    use std::os::unix::fs::PermissionsExt;
 
     let euid = unsafe { libc::geteuid() } as u32;
     for dir in [Some(gov_dir), gov_dir.parent()] {
         let path = dir.ok_or_else(|| "gov_dir has no parent (governance) dir".to_string())?;
         let meta = std::fs::symlink_metadata(path)
             .map_err(|e| format!("gov ancestor stat {} failed: {e}", path.display()))?;
-        if (meta.permissions().mode() & 0o777) != 0o700 {
+        if !owner_only_dir_metadata_is_secure(&meta, euid) {
             return Err(format!(
-                "gov ancestor not 0o700: {} mode={:#o}",
+                "gov ancestor not owner-only regular 0o700 dir: {} mode={:#o}",
                 path.display(),
-                meta.permissions().mode() & 0o777
+                meta.permissions().mode() & 0o7777
             ));
-        }
-        if meta.uid() as u32 != euid {
-            return Err(format!("gov ancestor not owned by euid: {}", path.display()));
         }
     }
     Ok(())
@@ -568,25 +904,34 @@ pub(crate) fn load_phase2_seal_approval_from_dir(
     };
     // bind #1：檔本身不得為 symlink（lstat 不跟隨）。
     if meta.file_type().is_symlink() {
-        return Err(format!("approval file is symlink (denied): {}", path.display()));
+        return Err(format!(
+            "approval file is symlink (denied): {}",
+            path.display()
+        ));
     }
     if !meta.is_file() {
-        return Err(format!("approval path is not a regular file: {}", path.display()));
+        return Err(format!(
+            "approval path is not a regular file: {}",
+            path.display()
+        ));
     }
     let euid = unsafe { libc::geteuid() } as u32;
     if (meta.permissions().mode() & 0o777) != 0o600 {
         return Err(format!("approval file not 0o600: {}", path.display()));
     }
     if meta.uid() as u32 != euid {
-        return Err(format!("approval file not owned by euid: {}", path.display()));
+        return Err(format!(
+            "approval file not owned by euid: {}",
+            path.display()
+        ));
     }
     // bind #1：0o700 祖先鏈。
     check_dir_pair_owner_only(gov_dir)?;
 
     let raw = std::fs::read_to_string(&path)
         .map_err(|e| format!("read approval {} failed: {e}", path.display()))?;
-    let approval: Phase2SealApproval =
-        toml::from_str(&raw).map_err(|e| format!("parse approval {} failed: {e}", path.display()))?;
+    let approval: Phase2SealApproval = toml::from_str(&raw)
+        .map_err(|e| format!("parse approval {} failed: {e}", path.display()))?;
     Ok(Some(approval))
 }
 
@@ -643,12 +988,18 @@ fn seal_phase2_artifact(
         .recursive(true)
         .mode(0o700)
         .create(gov_dir)
-        .map_err(|e| Phase2SealError::IoError(format!("create gov_dir {} failed: {e}", gov_dir.display())))?;
+        .map_err(|e| {
+            Phase2SealError::IoError(format!("create gov_dir {} failed: {e}", gov_dir.display()))
+        })?;
     // 寫前驗 owner-only（既有目錄權限過寬即 Err）。
     check_dir_pair_owner_only(gov_dir).map_err(Phase2SealError::IoError)?;
 
     // write-once：唯一 tmp（pid.nanos）→ create_new → sync_all。
-    let tmp_path = gov_dir.join(format!("{SEALED_FILENAME}.{}.{}.tmp", std::process::id(), now_ns()));
+    let tmp_path = gov_dir.join(format!(
+        "{SEALED_FILENAME}.{}.{}.tmp",
+        std::process::id(),
+        now_ns()
+    ));
     let json = serde_json::to_string_pretty(artifact)
         .map_err(|e| Phase2SealError::IoError(format!("serialize artifact failed: {e}")))?;
     {
@@ -657,13 +1008,21 @@ fn seal_phase2_artifact(
             .create_new(true)
             .mode(0o600)
             .open(&tmp_path)
-            .map_err(|e| Phase2SealError::IoError(format!("create_new tmp {} failed: {e}", tmp_path.display())))?;
-        f.write_all(json.as_bytes())
-            .map_err(|e| Phase2SealError::IoError(format!("write tmp {} failed: {e}", tmp_path.display())))?;
-        f.flush()
-            .map_err(|e| Phase2SealError::IoError(format!("flush tmp {} failed: {e}", tmp_path.display())))?;
-        f.sync_all()
-            .map_err(|e| Phase2SealError::IoError(format!("sync_all tmp {} failed: {e}", tmp_path.display())))?;
+            .map_err(|e| {
+                Phase2SealError::IoError(format!(
+                    "create_new tmp {} failed: {e}",
+                    tmp_path.display()
+                ))
+            })?;
+        f.write_all(json.as_bytes()).map_err(|e| {
+            Phase2SealError::IoError(format!("write tmp {} failed: {e}", tmp_path.display()))
+        })?;
+        f.flush().map_err(|e| {
+            Phase2SealError::IoError(format!("flush tmp {} failed: {e}", tmp_path.display()))
+        })?;
+        f.sync_all().map_err(|e| {
+            Phase2SealError::IoError(format!("sync_all tmp {} failed: {e}", tmp_path.display()))
+        })?;
     }
 
     // hard_link → final；final 已存在 = 拒二次 seal（絕不 rename overwrite）。
@@ -683,8 +1042,9 @@ fn seal_phase2_artifact(
     // 移除 tmp（inode 經 final link 存活）；set final 唯讀 0o400；fsync 父目錄使 dir
     // entry durable（crash 半檔由 consume 端 verify 抓——hash 不符）。
     let _ = std::fs::remove_file(&tmp_path);
-    std::fs::set_permissions(&final_path, std::fs::Permissions::from_mode(0o400))
-        .map_err(|e| Phase2SealError::IoError(format!("chmod final {} failed: {e}", final_path.display())))?;
+    std::fs::set_permissions(&final_path, std::fs::Permissions::from_mode(0o400)).map_err(|e| {
+        Phase2SealError::IoError(format!("chmod final {} failed: {e}", final_path.display()))
+    })?;
     if let Ok(dir) = std::fs::File::open(gov_dir) {
         let _ = dir.sync_all();
     }
@@ -822,9 +1182,12 @@ pub(crate) fn phase2_gate_producer_summary() -> serde_json::Value {
             blockers,
             leg_status,
         } => ("blocked", blockers, Some(leg_status), None),
-        Phase2ProducerOutcome::Sealed { path } => {
-            ("sealed", Vec::new(), None, Some(path.to_string_lossy().into_owned()))
-        }
+        Phase2ProducerOutcome::Sealed { path } => (
+            "sealed",
+            Vec::new(),
+            None,
+            Some(path.to_string_lossy().into_owned()),
+        ),
         Phase2ProducerOutcome::AlreadySealed { path } => (
             "already_sealed",
             Vec::new(),
@@ -879,6 +1242,9 @@ mod tests {
         let gov_parent = root.join("governance");
         let gov = gov_parent.join("ibkr_phase2");
         fs::create_dir_all(&gov).unwrap();
+        // tempfile 在 macOS 預設可能是 0o755；這裡扮演 production data-root，
+        // 故 fixture 也必須滿足 consume-time owner-only 0o700 invariant。
+        fs::set_permissions(root, fs::Permissions::from_mode(0o700)).unwrap();
         fs::set_permissions(&gov_parent, fs::Permissions::from_mode(0o700)).unwrap();
         fs::set_permissions(&gov, fs::Permissions::from_mode(0o700)).unwrap();
         gov
@@ -942,9 +1308,8 @@ mod tests {
 
     /// 組全綠候選（approval 直建有效），immutable_storage_path=gov/SEALED。
     /// T2：topology 用 `matched_topology`（fp 對齊 secret）令 triangulation 過。
-    fn build_full_green(gov: &Path) -> IbkrPhase2GateArtifactV1 {
-        let sha = fake_sha();
-        let approval = direct_approval(FIXED_NOW, &sha);
+    fn build_full_green_for_sha(gov: &Path, sha: &str) -> IbkrPhase2GateArtifactV1 {
+        let approval = direct_approval(FIXED_NOW, sha);
         let path = gov.join(SEALED_FILENAME).to_string_lossy().into_owned();
         let secret = valid_secret();
         build_phase2_artifact_candidate(
@@ -954,9 +1319,13 @@ mod tests {
             &matched_topology(&secret),
             Some(&approval),
             &path,
-            &sha,
+            sha,
             FIXED_NOW,
         )
+    }
+
+    fn build_full_green(gov: &Path) -> IbkrPhase2GateArtifactV1 {
+        build_full_green_for_sha(gov, &fake_sha())
     }
 
     // --- T1: 全綠 → validate + verify 雙綠 → seal 寫檔 0o400 + verify_sealed true ---
@@ -979,17 +1348,226 @@ mod tests {
 
         let artifact = build_full_green(&gov);
         let v = artifact.validate();
-        assert!(v.ibkr_contact_allowed, "unexpected blockers: {:?}", v.blockers);
+        assert!(
+            v.ibkr_contact_allowed,
+            "unexpected blockers: {:?}",
+            v.blockers
+        );
         assert!(verify_artifact_hashes(&artifact));
         // T1：sealed 檔自記 contact AMD（= 常量）+ 非空 approval lineage hash（64-hex）。
         assert_eq!(artifact.contact_authorization_amd, IBKR_PHASE2_CONTACT_AMD);
-        assert!(openclaw_types::is_sha256_hex(&artifact.approval_lineage_hash));
+        assert!(openclaw_types::is_sha256_hex(
+            &artifact.approval_lineage_hash
+        ));
 
         let sealed = seal_phase2_artifact(&artifact, &gov).expect("seal ok");
-        let mode = fs::symlink_metadata(&sealed).unwrap().permissions().mode() & 0o777;
+        let mode = fs::symlink_metadata(&sealed).unwrap().permissions().mode() & 0o7777;
         assert_eq!(mode, 0o400, "sealed file must be read-only 0o400");
-        assert!(verify_sealed_artifact(&artifact), "post-seal disk re-verify must pass");
-        assert!(reverify_sealed_artifact_at(&sealed));
+        assert!(
+            verify_sealed_artifact_for_build(&artifact, &fake_sha()),
+            "post-seal secure-FD re-verify must pass for its exact build generation"
+        );
+        assert!(reverify_sealed_artifact_at_for_build(&sealed, &fake_sha()));
+    }
+
+    // --- W1: consumer generation binding（valid hash/shape 也不可跨 BUILD_GIT_SHA）---
+    #[test]
+    fn sealed_consume_rejects_cross_generation_and_unknown_build_sha() {
+        let tmp = tempfile::tempdir().unwrap();
+        let gov = make_gov_chain(tmp.path());
+        let artifact = build_full_green(&gov);
+        let sealed = seal_phase2_artifact(&artifact, &gov).unwrap();
+
+        assert!(reverify_sealed_artifact_at_for_build(&sealed, &fake_sha()));
+        assert!(!reverify_sealed_artifact_at_for_build(
+            &sealed,
+            &"b".repeat(40),
+        ));
+        assert!(!reverify_sealed_artifact_at_for_build(&sealed, "unknown"));
+    }
+
+    // --- W1: artifact 的 generation 也不得為 build.rs unknown fallback ---
+    #[test]
+    fn sealed_consume_rejects_unknown_artifact_generation_even_with_valid_hashes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let gov = make_gov_chain(tmp.path());
+        let artifact = build_full_green(&gov);
+        let sealed = seal_phase2_artifact(&artifact, &gov).unwrap();
+
+        fs::set_permissions(&sealed, fs::Permissions::from_mode(0o600)).unwrap();
+        let mut on_disk: IbkrPhase2GateArtifactV1 =
+            serde_json::from_str(&fs::read_to_string(&sealed).unwrap()).unwrap();
+        on_disk.source_commit = "unknown".to_string();
+        on_disk.raw_artifact_hash = compute_raw_artifact_hash(&on_disk);
+        on_disk.redacted_summary_hash = compute_redacted_summary_hash(&on_disk);
+        fs::write(&sealed, serde_json::to_string_pretty(&on_disk).unwrap()).unwrap();
+        fs::set_permissions(&sealed, fs::Permissions::from_mode(0o400)).unwrap();
+
+        assert!(
+            verify_artifact_hashes(&on_disk),
+            "fixture must be hash-valid"
+        );
+        assert!(!reverify_sealed_artifact_at_for_build(&sealed, &fake_sha()));
+    }
+
+    // --- W1: consume-time lstat rejects wrong mode, symlink, and non-regular file ---
+    #[test]
+    fn sealed_consume_rejects_insecure_file_kinds_and_mode() {
+        let tmp = tempfile::tempdir().unwrap();
+        let gov = make_gov_chain(tmp.path());
+        let artifact = build_full_green(&gov);
+        let sealed = seal_phase2_artifact(&artifact, &gov).unwrap();
+
+        fs::set_permissions(&sealed, fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(!reverify_sealed_artifact_at_for_build(&sealed, &fake_sha()));
+        fs::set_permissions(&sealed, fs::Permissions::from_mode(0o400)).unwrap();
+
+        let replacement_target = gov.join("sealed-artifact-symlink-target.json");
+        fs::copy(&sealed, &replacement_target).unwrap();
+        fs::set_permissions(&replacement_target, fs::Permissions::from_mode(0o400)).unwrap();
+        fs::remove_file(&sealed).unwrap();
+        std::os::unix::fs::symlink(&replacement_target, &sealed).unwrap();
+        assert!(!reverify_sealed_artifact_at_for_build(&sealed, &fake_sha()));
+
+        fs::remove_file(&sealed).unwrap();
+        fs::create_dir(&sealed).unwrap();
+        assert!(!reverify_sealed_artifact_at_for_build(&sealed, &fake_sha()));
+    }
+
+    // --- W1/E2: exact owner-only modes reject setuid/setgid/sticky, even where
+    // the host filesystem declines to materialize special bits for an unprivileged user. ---
+    #[test]
+    fn sealed_consume_mode_guard_rejects_special_bits_for_file_and_every_secure_dir() {
+        assert!(owner_only_mode_is_exact(0o400, 0o400));
+        assert!(owner_only_mode_is_exact(0o700, 0o700));
+        for insecure_file_mode in [0o1400, 0o2400, 0o4400] {
+            assert!(
+                !owner_only_mode_is_exact(insecure_file_mode, 0o400),
+                "sealed 0o400 must reject special bits: {insecure_file_mode:#o}"
+            );
+        }
+        for insecure_dir_mode in [0o1700, 0o2700, 0o4700] {
+            assert!(
+                !owner_only_mode_is_exact(insecure_dir_mode, 0o700),
+                "owner-only 0o700 dir must reject special bits: {insecure_dir_mode:#o}"
+            );
+        }
+    }
+
+    // --- W1/E3: pure metadata owner mismatch test; no chown and no root-only skip. ---
+    #[test]
+    fn sealed_consume_rejects_owner_mismatch_without_mutating_fixture_ownership() {
+        let tmp = tempfile::tempdir().unwrap();
+        let gov = make_gov_chain(tmp.path());
+        let artifact = build_full_green(&gov);
+        let sealed = seal_phase2_artifact(&artifact, &gov).unwrap();
+        let euid = unsafe { libc::geteuid() } as u32;
+        let foreign_uid = if euid == 0 { 1 } else { 0 };
+
+        let sealed_meta = fs::symlink_metadata(&sealed).unwrap();
+        let root_meta = fs::symlink_metadata(tmp.path()).unwrap();
+        assert!(!sealed_artifact_metadata_is_secure(
+            &sealed_meta,
+            foreign_uid
+        ));
+        assert!(!owner_only_dir_metadata_is_secure(&root_meta, foreign_uid));
+    }
+
+    // --- W1/E3: replacing data-root after lstat cannot redirect the fd-bound tree. ---
+    #[test]
+    fn sealed_consume_rejects_data_root_lstat_to_open_replacement_attack() {
+        let tmp = tempfile::tempdir().unwrap();
+        let data_root = tmp.path().join("data-root");
+        let retired_root = tmp.path().join("retired-data-root");
+        let replacement_root = tmp.path().join("replacement-data-root");
+        fs::create_dir(&data_root).unwrap();
+        let gov = make_gov_chain(&data_root);
+        let artifact = build_full_green(&gov);
+        let sealed = seal_phase2_artifact(&artifact, &gov).unwrap();
+        fs::create_dir(&replacement_root).unwrap();
+        fs::set_permissions(&replacement_root, fs::Permissions::from_mode(0o700)).unwrap();
+
+        assert!(
+            read_sealed_artifact_from_secure_tree_after_data_root_lstat(&sealed, || {
+                fs::rename(&data_root, &retired_root).unwrap();
+                fs::rename(&replacement_root, &data_root).unwrap();
+            })
+            .is_none(),
+            "replacement data-root after lstat must never be consumed"
+        );
+    }
+
+    // --- W1/E3: production wrappers bind to this binary's BUILD_GIT_SHA or fail closed. ---
+    #[test]
+    fn sealed_consume_production_wrappers_require_current_build_generation() {
+        let tmp = tempfile::tempdir().unwrap();
+        let gov = make_gov_chain(tmp.path());
+
+        if source_commit_is_known(BUILD_GIT_SHA) {
+            let artifact = build_full_green_for_sha(&gov, BUILD_GIT_SHA);
+            let sealed = seal_phase2_artifact(&artifact, &gov).unwrap();
+            assert!(verify_sealed_artifact(&artifact));
+            assert!(reverify_sealed_artifact_at(&sealed));
+        } else {
+            let artifact = build_full_green(&gov);
+            let sealed = seal_phase2_artifact(&artifact, &gov).unwrap();
+            assert!(!verify_sealed_artifact(&artifact));
+            assert!(!reverify_sealed_artifact_at(&sealed));
+        }
+    }
+
+    // --- W1: replacement between lstat and open is detected by fstat dev/inode binding ---
+    #[test]
+    fn sealed_consume_rejects_lstat_to_open_replacement_attack() {
+        let tmp = tempfile::tempdir().unwrap();
+        let gov = make_gov_chain(tmp.path());
+        let artifact = build_full_green(&gov);
+        let sealed = seal_phase2_artifact(&artifact, &gov).unwrap();
+        let replacement = gov.join("replacement.sealed.json");
+        fs::copy(&sealed, &replacement).unwrap();
+        fs::set_permissions(&replacement, fs::Permissions::from_mode(0o400)).unwrap();
+
+        assert!(
+            read_sealed_artifact_from_secure_fd_after_lstat(&sealed, || {
+                fs::rename(&replacement, &sealed).unwrap();
+            })
+            .is_none(),
+            "an inode replacement after lstat must never reach the parser"
+        );
+    }
+
+    // --- W1/P1: a FIFO swapped in after final-file lstat must not make `openat` block.
+    // O_NONBLOCK brings the descriptor far enough to fstat/type+inode rejection; no wall-clock
+    // assertion is needed (or desirable) because the absence of a FIFO writer would otherwise
+    // make the old blocking open hang this deterministic test. ---
+    #[test]
+    fn sealed_consume_rejects_lstat_to_open_fifo_replacement_without_blocking() {
+        use std::os::unix::ffi::OsStrExt;
+        use std::os::unix::fs::FileTypeExt;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let gov = make_gov_chain(tmp.path());
+        let artifact = build_full_green(&gov);
+        let sealed = seal_phase2_artifact(&artifact, &gov).unwrap();
+        let parent = fs::File::open(&gov).unwrap();
+        let euid = unsafe { libc::geteuid() } as u32;
+
+        let result = read_owner_only_sealed_child_after_lstat(&parent, euid, || {
+            fs::remove_file(&sealed).unwrap();
+            let fifo_path = std::ffi::CString::new(sealed.as_os_str().as_bytes()).unwrap();
+            assert_eq!(unsafe { libc::mkfifo(fifo_path.as_ptr(), 0o400) }, 0);
+        });
+
+        let fifo_meta = fs::symlink_metadata(&sealed).unwrap();
+        fs::remove_file(&sealed).unwrap();
+        assert!(
+            fifo_meta.file_type().is_fifo(),
+            "fixture must replace with FIFO"
+        );
+        assert!(
+            result.is_none(),
+            "FIFO replacement after lstat must be rejected without blocking"
+        );
     }
 
     // --- T2: 二次 seal → AlreadySealed，原檔 byte-identical ---
@@ -1004,7 +1582,10 @@ mod tests {
         let err = seal_phase2_artifact(&artifact, &gov).unwrap_err();
         assert_eq!(err, Phase2SealError::AlreadySealed);
         let bytes2 = fs::read(&sealed).unwrap();
-        assert_eq!(bytes1, bytes2, "original sealed file must be byte-identical");
+        assert_eq!(
+            bytes1, bytes2,
+            "original sealed file must be byte-identical"
+        );
         // 無殘留 tmp。
         let tmp_left: Vec<_> = fs::read_dir(&gov)
             .unwrap()
@@ -1038,7 +1619,10 @@ mod tests {
         assert!(v.blockers.contains(&B::SecretSlotContractRejected));
         assert!(v.blockers.contains(&B::ExternalSurfaceGateRejected));
         assert!(seal_phase2_artifact(&artifact, &gov).is_err());
-        assert!(!gov.join(SEALED_FILENAME).exists(), "no sealed file must be written");
+        assert!(
+            !gov.join(SEALED_FILENAME).exists(),
+            "no sealed file must be written"
+        );
     }
 
     // --- T4: approval absent → Blocked 含 OperatorReviewerMissing，無檔 ---
@@ -1097,7 +1681,10 @@ mod tests {
         artifact.redacted_summary_hash = compute_redacted_summary_hash(&artifact);
 
         assert!(verify_artifact_hashes(&artifact));
-        assert!(artifact.validate().blockers.contains(&B::IbkrCallAlreadyPerformed));
+        assert!(artifact
+            .validate()
+            .blockers
+            .contains(&B::IbkrCallAlreadyPerformed));
         assert!(seal_phase2_artifact(&artifact, &gov).is_err());
         assert!(!gov.join(SEALED_FILENAME).exists());
     }
@@ -1122,7 +1709,10 @@ mod tests {
             "unknown",
             FIXED_NOW,
         );
-        assert!(artifact.validate().blockers.contains(&B::OperatorReviewerMissing));
+        assert!(artifact
+            .validate()
+            .blockers
+            .contains(&B::OperatorReviewerMissing));
         assert!(seal_phase2_artifact(&artifact, &gov).is_err());
         assert!(!gov.join(SEALED_FILENAME).exists());
     }
@@ -1232,7 +1822,11 @@ mod tests {
             .join("broker");
         let bundle = load_phase2_policy_bundle_from_dir(&dir).expect("load real policies TOML");
         let v = bundle.validate();
-        assert!(v.accepted, "real policies bundle rejected: {:?}", v.blockers);
+        assert!(
+            v.accepted,
+            "real policies bundle rejected: {:?}",
+            v.blockers
+        );
     }
 
     // --- F1(finding-1): 兩 account_fingerprint_hash 不等 → 拒 seal ---
@@ -1375,7 +1969,9 @@ mod tests {
             compute_approval_lineage_hash(&a1),
             compute_approval_lineage_hash(&a3)
         );
-        assert!(openclaw_types::is_sha256_hex(&compute_approval_lineage_hash(&a1)));
+        assert!(openclaw_types::is_sha256_hex(
+            &compute_approval_lineage_hash(&a1)
+        ));
     }
 
     // --- 補: verify_sealed_artifact 抓磁碟竄改（parse 後欄位不符）---
@@ -1385,7 +1981,7 @@ mod tests {
         let gov = make_gov_chain(tmp.path());
         let artifact = build_full_green(&gov);
         let sealed = seal_phase2_artifact(&artifact, &gov).unwrap();
-        assert!(verify_sealed_artifact(&artifact));
+        assert!(verify_sealed_artifact_for_build(&artifact, &fake_sha()));
 
         // 竄改磁碟檔（先放寬 0o400 → 改 source_commit → 回寫）。
         fs::set_permissions(&sealed, fs::Permissions::from_mode(0o600)).unwrap();
@@ -1395,10 +1991,10 @@ mod tests {
         fs::write(&sealed, serde_json::to_string_pretty(&on_disk).unwrap()).unwrap();
 
         assert!(
-            !verify_sealed_artifact(&artifact),
+            !verify_sealed_artifact_for_build(&artifact, &fake_sha()),
             "on-disk tamper must fail re-verify"
         );
-        assert!(!reverify_sealed_artifact_at(&sealed));
+        assert!(!reverify_sealed_artifact_at_for_build(&sealed, &fake_sha()));
     }
 
     // --- 補: summary 形狀（現狀 blocked + immutable_pass=false）---
