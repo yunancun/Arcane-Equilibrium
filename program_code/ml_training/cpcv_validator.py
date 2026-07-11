@@ -77,6 +77,17 @@ class CPCVResult:
     n_folds: int
     embargo_hours: int
     strategy_type: str
+    # 持久化狀態（Item 6）：validate_cpcv 不再無條件吞掉 _persist_cpcv_result 的結果，
+    #   而是把 distinct 狀態記到此欄供下游/稽核判讀。取值：
+    #     "not_attempted"       — 尚未嘗試（預設）
+    #     "ok"                  — 已寫入 learning.cpcv_results
+    #     "skipped_no_driver"   — psycopg2 未安裝（Mac 開發機，良性跳過）
+    #     "skipped_no_target"   — 無 DSN 且 host/port 連線失敗（良性跳過）
+    #     "connect_failed"      — 有目標但連線失敗（LOUD WARN，潛在脆弱性）
+    #     "write_failed"        — 連上但 INSERT 失敗（LOUD WARN）
+    # 為什麼是持久欄而非僅 log：log 會消失、無法被消費端 honor；原碼把回傳值丟棄
+    #   （line 298 呼叫後不接收）等於無條件吞掉，正是本 item 要修的 latent fragility。
+    persist_status: str = "not_attempted"
 
 
 def get_embargo_hours(strategy_type: str, config: Optional[CPCVConfig] = None) -> int:
@@ -219,6 +230,7 @@ def validate_cpcv(
     config: Optional[CPCVConfig] = None,
     model_name: str = "lightgbm_scorer",
     model_version: str = "v1",
+    dsn: Optional[str] = None,
 ) -> CPCVResult:
     """Run full CPCV validation pipeline.
     執行完整 CPCV 驗證管線。
@@ -235,6 +247,9 @@ def validate_cpcv(
         config: CPCV configuration. / CPCV 配置。
         model_name: Model identifier for DB persistence. / 模型標識符，用於 DB 持久化。
         model_version: Model version for DB persistence. / 模型版本，用於 DB 持久化。
+        dsn: Explicit PostgreSQL DSN threaded from the caller (Item 6).
+            None → 走 env 解析（OPENCLAW_DATABASE_URL 為權威）。呼叫端
+            （scorer_trainer.train_scorer）以 config.dsn 傳入，統一 DSN 來源。
 
     Returns:
         CPCVResult with aggregated metrics and pass/fail decision.
@@ -294,37 +309,98 @@ def validate_cpcv(
         strategy_type=strategy_type,
     )
 
-    # Persist to PG (fail-soft) / 持久化到 PG（失敗不中斷）
-    _persist_cpcv_result(result, model_name=model_name, model_version=model_version)
+    # Persist to PG (fail-soft) / 持久化到 PG（失敗不中斷）。
+    # Item 6：不再無條件吞掉回傳值 —— 把 distinct 狀態記到 result.persist_status，
+    #   並在「有目標卻失敗」時 LOUD WARN（良性跳過只記 info），讓 latent
+    #   persistence fragility 在 runtime 可被看見、可被下游/稽核 honor。
+    persist_status = _persist_cpcv_result(
+        result, model_name=model_name, model_version=model_version, dsn=dsn,
+    )
+    result.persist_status = persist_status
+    if persist_status in ("connect_failed", "write_failed"):
+        logger.warning(
+            "CPCV PERSISTENCE FAILED (status=%s): result for %s/%s NOT written to "
+            "learning.cpcv_results (passed=%s sharpe=%.4f). Downstream CPCV audit "
+            "trail is incomplete for this run. / CPCV 持久化失敗，稽核鏈缺這筆。",
+            persist_status, model_name, model_version, result.passed, result.mean_sharpe,
+        )
+    elif persist_status != "ok":
+        logger.info(
+            "CPCV persistence skipped (status=%s) for %s/%s — benign (no driver/target).",
+            persist_status, model_name, model_version,
+        )
 
     return result
 
 
-def _persist_cpcv_result(result: CPCVResult, model_name: str = "lightgbm_scorer", model_version: str = "v1") -> bool:
+def _resolve_persist_dsn(explicit_dsn: Optional[str]) -> Optional[str]:
+    """Resolve the canonical CPCV persistence DSN (Item 6).
+
+    Precedence（統一 DSN 來源，OPENCLAW_DATABASE_URL 為權威）：
+      1. explicit_dsn — caller-threaded config.dsn（scorer_trainer → validate_cpcv）。
+      2. OPENCLAW_DATABASE_URL — 全 ml_training 模組的規範 DSN env（model_registry /
+         ml_training_maintenance / parquet_etl 皆以此為首選）。
+      3. OPENCLAW_PG_DSN / PG_DSN — 保留舊 fallback 相容，不破壞既有部署。
+    回 None 表示無 DSN，呼叫端改走 host/port env 直連（cron wrapper 導出
+    PG_HOST/PORT/DB/USER + loopback 空密碼慣例）。
+    """
+    return (
+        explicit_dsn
+        or os.environ.get("OPENCLAW_DATABASE_URL")
+        or os.environ.get("OPENCLAW_PG_DSN")
+        or os.environ.get("PG_DSN")
+    )
+
+
+def _persist_cpcv_result(
+    result: CPCVResult,
+    model_name: str = "lightgbm_scorer",
+    model_version: str = "v1",
+    dsn: Optional[str] = None,
+) -> str:
     """Write CPCV result to learning.cpcv_results. Fail-soft.
     將 CPCV 結果寫入 learning.cpcv_results。失敗不中斷。
+
+    回傳 distinct 狀態字串（Item 6，取代原本的 bool）供呼叫端判讀 + LOUD WARN：
+      "ok" / "skipped_no_driver" / "skipped_no_target" / "connect_failed" / "write_failed"。
+    DSN 統一走 _resolve_persist_dsn（OPENCLAW_DATABASE_URL 權威）；host/port 直連的
+    密碼欄同時接受 PG_PASSWORD（與 realized_edge_stats 對齊的規範名）與舊 PG_PASS。
     """
     try:
         import psycopg2
     except ImportError:
-        return False
+        return "skipped_no_driver"
 
-    dsn = os.environ.get("OPENCLAW_PG_DSN") or os.environ.get("PG_DSN")
+    resolved_dsn = _resolve_persist_dsn(dsn)
+    # host/port 直連時的密碼：統一接受 PG_PASSWORD（規範名，realized_edge_stats /
+    #   james_stein_estimator / edge_cluster_analysis 皆用此）優先，PG_PASS 舊名 fallback。
+    #   為什麼不直接改名：跨模組 rename 有破壞其他 reader 風險（E3 須先枚舉全消費者，
+    #   如 optuna_optimizer:442 仍單用 PG_PASS）→ 此處採 additive 相容，不動它處。
+    pg_password = os.getenv("PG_PASSWORD")
+    if pg_password is None:
+        pg_password = os.getenv("PG_PASS", "")
     try:
-        if dsn:
-            conn = psycopg2.connect(dsn)
+        if resolved_dsn:
+            conn = psycopg2.connect(resolved_dsn)
         else:
             conn = psycopg2.connect(
                 host=os.getenv("PG_HOST", "127.0.0.1"),
                 port=int(os.getenv("PG_PORT", "5432")),
                 user=os.getenv("PG_USER", "trading_admin"),
-                password=os.getenv("PG_PASS", ""),
+                password=pg_password,
                 dbname=os.getenv("PG_DB", "trading_ai"),
                 connect_timeout=5,
             )
     except Exception as e:
-        logger.warning("CPCV PG connection failed (non-fatal): %s / CPCV PG 連接失敗（非致命）：%s", e, e)
-        return False
+        # 區分「有明確 DSN 目標卻連不上」（真脆弱性 → connect_failed，呼叫端 LOUD WARN）
+        #   與「無 DSN、host/port 直連也失敗」（多為 Mac 無本地 PG → skipped_no_target）。
+        status = "connect_failed" if resolved_dsn else "skipped_no_target"
+        logger.warning(
+            "CPCV PG connection failed (status=%s, non-fatal): %s / "
+            "CPCV PG 連接失敗（非致命）：%s",
+            status, e, e,
+        )
+        return status
 
     try:
         # Compute mean_accuracy from fold_metrics if available
@@ -352,9 +428,9 @@ def _persist_cpcv_result(result: CPCVResult, model_name: str = "lightgbm_scorer"
             )
         conn.commit()
         logger.info("Persisted CPCV result: passed=%s sharpe=%.4f / 已持久化 CPCV 結果", result.passed, result.mean_sharpe)
-        return True
+        return "ok"
     except Exception as e:
         logger.warning("Failed to persist CPCV result (non-fatal): %s / 持久化 CPCV 結果失敗（非致命）：%s", e, e)
-        return False
+        return "write_failed"
     finally:
         conn.close()

@@ -161,6 +161,41 @@ def _resolve_symbol_slot(config: PipelineConfig) -> tuple[bool, str]:
     return False, sym
 
 
+def _training_window_bounds(
+    timestamps: Any,
+) -> tuple[Optional[datetime], Optional[datetime]]:
+    """從訓練 timestamps 導出 (window_start, window_end) 的 UTC datetime（Item 7）。
+
+    為什麼在此計算而非交給 DB：register 路徑本就持有本次訓練的 timestamps，min/max
+      即訓練資料的實際時窗，是 PIT lineage 最小可重建錨點。單位偵測與
+      cpcv_validator.generate_folds / scorer_trainer 保持一致（>1e12 視為毫秒轉秒），
+      避免跨模組單位漂移。空/無效輸入 → (None, None)，讓欄位落 NULL 而非炸掉 register
+      （registry 是審計目錄，lineage 缺席不得擋訓練）。
+    """
+    try:
+        import numpy as np
+
+        arr = np.asarray(timestamps, dtype=np.float64)
+        arr = arr[np.isfinite(arr)]
+        if arr.size == 0:
+            return (None, None)
+        lo = float(arr.min())
+        hi = float(arr.max())
+    except Exception:  # noqa: BLE001 — lineage 是 best-effort，絕不擋 register
+        return (None, None)
+    # epoch-ms 自動偵測（與 generate_folds 一致）：>1e12 視為毫秒。
+    if hi > 1e12:
+        lo /= 1000.0
+        hi /= 1000.0
+    try:
+        return (
+            datetime.fromtimestamp(lo, tz=timezone.utc),
+            datetime.fromtimestamp(hi, tz=timezone.utc),
+        )
+    except (OverflowError, OSError, ValueError):
+        return (None, None)
+
+
 def _text(value: Any) -> str:
     if value is None:
         return ""
@@ -845,6 +880,14 @@ def _run_quantile_pipeline(
             f"{config.strategy_type}/{config.engine_mode} verdict={result.verdict}: "
             "DB connectivity precheck failed"
         )
+    # Item 7 (PIT lineage, V157)：每次 register 一併寫入可重建 lineage 的三欄。
+    #   training_window_start/end 取自本次訓練 timestamps 的最小/最大（epoch-ms 自動
+    #   偵測轉秒），pit_manifest_hash 取自 PIT binding（非 contract-bound run 為空 →
+    #   存 NULL）。此為 SOURCE 路線：不翻動 production contract_bound_run 亦能讓
+    #   registry row 自身承載訓練資料時窗，供稽核直接重建，而非只能靠 acceptance
+    #   report sidecar。_latest / proof 晉升路徑完全不動。
+    training_window_start, training_window_end = _training_window_bounds(timestamps)
+    pit_manifest_hash = pit_binding.manifest_hash or None
     try:
         registry_kwargs = {
             "onnx_out": onnx_out,
@@ -861,6 +904,9 @@ def _run_quantile_pipeline(
                 if label_composition else train_result.n_samples_labeled
             ),
             "dsn": config.dsn,
+            "training_window_start": training_window_start,
+            "training_window_end": training_window_end,
+            "pit_manifest_hash": pit_manifest_hash,
         }
         if registry_serving_contract is not None:
             registry_kwargs["registry_serving_contract"] = registry_serving_contract
@@ -935,6 +981,9 @@ def _run_legacy_scorer_pipeline(
         config=scorer_cfg,
         timestamps=timestamps,
         strategy_type=config.strategy_type,
+        # Item 6：把 pipeline 的 config.dsn 一路 thread 到 validate_cpcv →
+        #   _persist_cpcv_result，統一 CPCV 持久化 DSN 來源，不再只靠 env。
+        dsn=config.dsn,
     )
     if not train_result.success:
         result.error = f"training failed: {train_result.error}"

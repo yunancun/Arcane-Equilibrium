@@ -48,32 +48,41 @@ from program_code.ml_training.registry_serving_contract import (
 
 logger = logging.getLogger(__name__)
 
+# Item 7 (PIT lineage, V157)：新增 training_window_start / training_window_end /
+#   pit_manifest_hash 三欄一起持久化，讓 PIT lineage 可在「不翻動 production
+#   contract_bound_run」的前提下由 registry row 直接重建。三欄一律 append 在
+#   既有欄之後，param tuple 位序不變（既有測試按位讀 params[2]/[8] 不受影響）。
 _REGISTER_MODEL_SQL = """
                 INSERT INTO learning.model_registry (
                     strategy, engine_mode, quantile, schema_version, train_date,
                     artifact_path, artifact_size_bytes, artifact_sha256,
                     acceptance_report, verdict,
                     feature_schema_hash, training_config_hash, training_sample_size,
-                    created_by
+                    created_by,
+                    training_window_start, training_window_end, pit_manifest_hash
                 ) VALUES (
                     %s, %s, %s, %s, %s::date,
                     %s, %s, %s,
                     %s::jsonb, %s,
                     %s, %s, %s,
-                    %s
+                    %s,
+                    %s, %s, %s
                 )
                 ON CONFLICT (strategy, engine_mode, quantile, schema_version, train_date)
                 DO UPDATE SET
-                    artifact_path        = EXCLUDED.artifact_path,
-                    artifact_size_bytes  = EXCLUDED.artifact_size_bytes,
-                    artifact_sha256      = EXCLUDED.artifact_sha256,
-                    acceptance_report    = EXCLUDED.acceptance_report,
-                    verdict              = EXCLUDED.verdict,
-                    feature_schema_hash  = EXCLUDED.feature_schema_hash,
-                    training_config_hash = EXCLUDED.training_config_hash,
-                    training_sample_size = EXCLUDED.training_sample_size,
-                    created_by           = EXCLUDED.created_by,
-                    updated_at           = NOW()
+                    artifact_path         = EXCLUDED.artifact_path,
+                    artifact_size_bytes   = EXCLUDED.artifact_size_bytes,
+                    artifact_sha256       = EXCLUDED.artifact_sha256,
+                    acceptance_report     = EXCLUDED.acceptance_report,
+                    verdict               = EXCLUDED.verdict,
+                    feature_schema_hash   = EXCLUDED.feature_schema_hash,
+                    training_config_hash  = EXCLUDED.training_config_hash,
+                    training_sample_size  = EXCLUDED.training_sample_size,
+                    created_by            = EXCLUDED.created_by,
+                    training_window_start = EXCLUDED.training_window_start,
+                    training_window_end   = EXCLUDED.training_window_end,
+                    pit_manifest_hash     = EXCLUDED.pit_manifest_hash,
+                    updated_at            = NOW()
                 WHERE learning.model_registry.canary_status NOT IN ('promoting', 'production')
                 RETURNING id
                 """
@@ -232,6 +241,9 @@ def register_model(
     training_sample_size: Optional[int] = None,
     dsn: Optional[str] = None,
     created_by: str = "run_training_pipeline",
+    training_window_start: Any = None,
+    training_window_end: Any = None,
+    pit_manifest_hash: Optional[str] = None,
 ) -> Optional[int]:
     """Insert or refresh a row in `learning.model_registry`.
     插入或刷新 `learning.model_registry` 一列。
@@ -304,6 +316,9 @@ def register_model(
                 training_config_hash=training_config_hash,
                 training_sample_size=training_sample_size,
                 created_by=created_by,
+                training_window_start=training_window_start,
+                training_window_end=training_window_end,
+                pit_manifest_hash=pit_manifest_hash,
             )
     except Exception as e:  # noqa: BLE001
         logger.warning("model_registry: upsert failed for %s/%s/%s: %s",
@@ -348,6 +363,9 @@ def register_quantile_trio_from_onnx_out(
     training_sample_size: Optional[int] = None,
     dsn: Optional[str] = None,
     created_by: str = "run_training_pipeline",
+    training_window_start: Any = None,
+    training_window_end: Any = None,
+    pit_manifest_hash: Optional[str] = None,
 ) -> List[int]:
     """Convenience wrapper — register q10 + q50 + q90 from
     `export_quantile_trio_to_onnx`'s return value. Mirrors the trio structure
@@ -401,6 +419,9 @@ def register_quantile_trio_from_onnx_out(
             training_sample_size=training_sample_size,
             dsn=dsn,
             created_by=created_by,
+            training_window_start=training_window_start,
+            training_window_end=training_window_end,
+            pit_manifest_hash=pit_manifest_hash,
         )
 
     registered: List[int] = []
@@ -428,6 +449,9 @@ def register_quantile_trio_from_onnx_out(
             training_sample_size=training_sample_size,
             dsn=dsn,
             created_by=created_by,
+            training_window_start=training_window_start,
+            training_window_end=training_window_end,
+            pit_manifest_hash=pit_manifest_hash,
         )
         if row_id is None and registry_serving_contract is not None:
             # 這裡仍不是單一 DB transaction；未來需把三筆 registry write
@@ -458,6 +482,9 @@ def _register_model_row(
     training_config_hash: Optional[str],
     training_sample_size: Optional[int],
     created_by: str,
+    training_window_start: Any = None,
+    training_window_end: Any = None,
+    pit_manifest_hash: Optional[str] = None,
 ) -> Optional[int]:
     cur.execute(
         _REGISTER_MODEL_SQL,
@@ -467,6 +494,7 @@ def _register_model_row(
             report_jsonb, verdict,
             feature_schema_hash, training_config_hash, training_sample_size,
             created_by,
+            training_window_start, training_window_end, pit_manifest_hash,
         ),
     )
     row = cur.fetchone()
@@ -492,6 +520,9 @@ def _register_serving_contract_trio_atomic(
     training_sample_size: Optional[int],
     dsn: Optional[str],
     created_by: str,
+    training_window_start: Any = None,
+    training_window_end: Any = None,
+    pit_manifest_hash: Optional[str] = None,
 ) -> List[int]:
     conn = _connect(dsn)
     if conn is None:
@@ -524,6 +555,9 @@ def _register_serving_contract_trio_atomic(
                         training_config_hash=training_config_hash,
                         training_sample_size=training_sample_size,
                         created_by=created_by,
+                        training_window_start=training_window_start,
+                        training_window_end=training_window_end,
+                        pit_manifest_hash=pit_manifest_hash,
                     )
                     if row_id is None:
                         raise RegistryServingContractError(
