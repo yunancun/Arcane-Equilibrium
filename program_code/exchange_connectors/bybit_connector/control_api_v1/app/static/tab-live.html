@@ -55,7 +55,7 @@ html, body {
 }
 .live-close-all-action {
   border-color: rgba(248,81,73,0.48) !important;
-  color: #ff7b72 !important;
+  color: var(--neg) !important;
 }
 
 /* Card groups / 指標卡片組 */
@@ -122,7 +122,7 @@ html, body {
 .btn-emergency {
   background: rgba(239,68,68,0.12);
   border: 2px solid rgba(239,68,68,0.7);
-  color: #f87171;
+  color: var(--neg);
   border-radius: var(--r-2);
   padding: 10px 24px;
   font-size: 14px; font-weight: 700;
@@ -130,7 +130,7 @@ html, body {
 }
 .btn-emergency:hover {
   background: rgba(239,68,68,0.25);
-  border-color: #f87171; color: #fff;
+  border-color: var(--neg); color: #fff;
 }
 .btn-emergency:disabled {
   opacity: 0.4; cursor: not-allowed;
@@ -155,7 +155,7 @@ html, body {
 .oc-dialog h3 { margin: 0 0 12px; font-size: 16px; }
 .oc-dialog p  { margin: 0 0 16px; font-size: 13px; color: var(--text-secondary); line-height: 1.6; }
 .oc-dialog .btn-row { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
-.oc-dialog .note { font-size: 11px; color: #d29922; margin-bottom: 12px; }
+.oc-dialog .note { font-size: 11px; color: var(--warn); margin-bottom: 12px; }
 
 /* Container padding / 容器內邊距 */
 .live-wrap { padding: 16px; max-width: 1200px; margin: 0 auto; }
@@ -169,7 +169,7 @@ html, body {
 .live-mode-mainnet .live-warn-bar {
   border: 1px solid rgba(239,68,68,0.6) !important;
   background: linear-gradient(135deg,rgba(168,85,247,0.12),rgba(239,68,68,0.08)) !important;
-  border-bottom: 3px double #f87171 !important;
+  border-bottom: 3px double var(--neg) !important;
 }
 .live-mode-livedemo .live-warn-bar {
   background: rgba(249,115,22,0.07) !important;
@@ -181,22 +181,22 @@ html, body {
 .live-mode-livedemo .live-card-group.live-accent {
   border-color: rgba(249,115,22,0.3) !important;
 }
-.live-mode-livedemo .live-warn-bar strong { color: #f97316 !important; }
-.live-mode-mainnet .live-warn-bar strong { color: #f87171 !important; }
+.live-mode-livedemo .live-warn-bar strong { color: var(--warn) !important; }
+.live-mode-mainnet .live-warn-bar strong { color: var(--neg) !important; }
 
 /* Real-funds badge (Mainnet only) / 真實資金徽章（僅 Mainnet 顯示） */
 .real-funds-badge {
   display: inline-flex; align-items: center; gap: 4px;
   padding: 3px 10px; border-radius: var(--r-1);
   background: rgba(239,68,68,0.18); border: 1px solid rgba(239,68,68,0.6);
-  color: #f87171; font-size: 11px; font-weight: 700; letter-spacing: 0.4px;
+  color: var(--neg); font-size: 11px; font-weight: 700; letter-spacing: 0.4px;
   margin-left: 8px;
 }
 .live-demo-badge {
   display: inline-flex; align-items: center; gap: 4px;
   padding: 3px 10px; border-radius: var(--r-1);
   background: rgba(249,115,22,0.18); border: 1px solid rgba(249,115,22,0.6);
-  color: #f97316; font-size: 11px; font-weight: 700; letter-spacing: 0.4px;
+  color: var(--warn); font-size: 11px; font-weight: 700; letter-spacing: 0.4px;
   margin-left: 8px;
 }
 
@@ -210,7 +210,7 @@ html, body {
   text-align: center;
 }
 .integrity-fail-view h2 {
-  color: #94a3b8; font-size: 18px; font-weight: 700; margin-bottom: 12px;
+  color: var(--text-secondary); font-size: 18px; font-weight: 700; margin-bottom: 12px;
 }
 .integrity-fail-view .ifv-detail {
   color: var(--text-secondary); font-size: 13px; line-height: 1.7;
@@ -241,7 +241,7 @@ html, body {
 .trust-conditions { margin: 8px 0 0; font-size: 11px; color: var(--text-secondary); line-height: 1.8; }
 .trust-conditions li { list-style: none; padding-left: 14px; }
 .trust-conditions li::before { content: "✓ "; color: var(--pos); margin-left: -14px; }
-.trust-conditions li.fail::before { content: "✗ "; color: #f87171; }
+.trust-conditions li.fail::before { content: "✗ "; color: var(--neg); }
 
 /* ── P0.2 批次 8b:inline style→頁內組件(語義 token;palette 外色 verbatim P0.4)── */
 /* 紫為 Live 頁 authority accent(真金，非 canon 6 熱紅，非 --seal);verbatim 待 P0.4 收斂 */
@@ -256,8 +256,8 @@ html, body {
   background: rgba(168,85,247,0.05); border-color: rgba(168,85,247,0.25);
   align-items: flex-start;
 }
-/* 未配置(silver)身份標籤;palette 外銀灰 verbatim,待 P0.4 收斂 */
-.live-slot-empty-label { color: #94a3b8; }
+/* 未配置(silver)身份標籤:銀灰 #94a3b8 → --text-secondary(C6b canon 1 中性化) */
+.live-slot-empty-label { color: var(--text-secondary); }
 /* PnL sparkline 面板;深色底 palette 外色 verbatim(待 P0.4);邊框走 --border-subtle(§5.5 收斂) */
 .live-pnl-sparkline {
   display: block; background: rgba(13,17,23,0.5);
@@ -437,7 +437,7 @@ html, body {
       <svg id="live-pnl-sparkline" width="100%" height="120"
         class="live-pnl-sparkline"
         viewBox="0 0 400 120" preserveAspectRatio="none">
-        <line id="live-pnl-zero" x1="8" x2="392" y1="60" y2="60" stroke="#30363d" stroke-width="0.5" stroke-dasharray="3,3"/>
+        <line id="live-pnl-zero" x1="8" x2="392" y1="60" y2="60" stroke="var(--border-subtle)" stroke-width="0.5" stroke-dasharray="3,3"/>
         <polyline id="live-pnl-line" points="" fill="none" stroke="var(--pos)" stroke-width="2" stroke-linejoin="round"/>
         <text x="4" y="114" fill="var(--text-secondary)" font-size="10" id="live-pnl-label">no data</text>
       </svg>

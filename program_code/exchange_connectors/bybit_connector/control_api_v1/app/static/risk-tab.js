@@ -1083,10 +1083,12 @@ async function loadAiBudget() {
       const lightEl = document.getElementById('ai-budget-degrade-light');
       const labelEl = document.getElementById('ai-budget-degrade-label');
       const lvl = data.degrade_level || 'none';
+      // killswitch 深血紅 #8b1a1a 無對應 token(比 hard_limit --neg 更重的殺停級),
+      // 保留以區隔嚴重度;其餘綠/琥珀/紅走語義 token,fallback 灰走中性文字色
       const colorMap = {
-        none: '#2ea043', soft_warn: '#d29922', hard_limit: '#f85149', killswitch: '#8b1a1a',
+        none: 'var(--pos)', soft_warn: 'var(--warn)', hard_limit: 'var(--neg)', killswitch: '#8b1a1a',
       };
-      if (lightEl) lightEl.style.background = colorMap[lvl] || '#888';
+      if (lightEl) lightEl.style.background = colorMap[lvl] || 'var(--text-secondary)';
       if (labelEl) labelEl.textContent = 'degrade: ' + lvl;
       statusEl.textContent = 'OK · refreshed ' + new Date().toLocaleTimeString();
       statusEl.className = '';
