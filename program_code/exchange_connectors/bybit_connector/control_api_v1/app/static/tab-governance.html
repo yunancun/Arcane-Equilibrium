@@ -316,11 +316,13 @@
     border-left: 4px solid var(--warn); border-radius: 0 var(--r-1) var(--r-1) 0; color: var(--warn);
     font-size: var(--fs-dense); line-height: var(--lh-cjk);
   }
-  /* P0.4：紫 #a855f7 為 palette 外色（Live Auth / T3 authority 識別色），待 canon 1 中性化複審。
-     注：非朱印——canon 9 朱印僅方印形制；此處為文字 / 按鈕 tint，不套 --seal */
-  .gov-purple-text { color: #a855f7; }
-  .gov-btn-purple { background: rgba(168, 85, 247, .2); border-color: rgba(168, 85, 247, .6); color: #a855f7; }
-  .gov-btn-purple-soft { background: rgba(168, 85, 247, .1); border-color: rgba(168, 85, 247, .4); color: #a855f7; }
+  /* P0.4 C6d：原紫 #a855f7 authority tint 已中性化（canon 1）。
+     gov-purple-text → --warn（⚠ Full Review 本質為警示語義）；
+     gov-btn-purple 已移除（Renew Live Auth 回落 oc-btn-primary 青銅）；
+     gov-btn-purple-soft → 中性描邊（T3 Full Review 走 oc-btn 中性態）。
+     類名沿用不改 HTML/JS 引用。非朱印——canon 9 朱印僅方印形制，不套此處。 */
+  .gov-purple-text { color: var(--warn); }
+  .gov-btn-purple-soft { border-color: var(--border-strong); color: var(--text-primary); }
   /* trust tier 徽章：靜態形制走 token；初始 T0 銀灰 #94a3b8 → --text-secondary（C6b），JS 依 tier 覆蓋 background/color */
   .gov-trust-tier-badge {
     display: inline-block; padding: var(--sp-1) var(--sp-2); border-radius: var(--r-1);
@@ -705,7 +707,7 @@
 
   <!-- Action buttons / 操作按鈕 -->
   <div class="row wrap gap-2">
-    <button class="oc-btn oc-btn-primary gov-btn-purple" id="gov-btn-renew-live-auth" onclick="govRenewLiveAuth()">
+    <button class="oc-btn oc-btn-primary" id="gov-btn-renew-live-auth" onclick="govRenewLiveAuth()">
       &#x1F511; Renew Live Auth / 續期
     </button>
     <button class="oc-btn gov-btn-purple-soft hidden" id="gov-btn-full-review" onclick="govRenewReview()">
@@ -1311,7 +1313,7 @@ const GOV_TRUST_TIER_COLORS = {
   0: { bg: 'rgba(100,116,139,.2)',  fg: 'var(--text-secondary)' },
   1: { bg: 'rgba(34,197,94,.15)',   fg: 'var(--pos)' },
   2: { bg: 'rgba(59,130,246,.15)',  fg: 'var(--text-secondary)' },
-  3: { bg: 'rgba(168,85,247,.15)', fg: '#a855f7' },
+  3: { bg: 'var(--bg-raised)', fg: 'var(--text-secondary)' },
 };
 const GOV_LIVE_AUTH_REFRESH_MS = 30000;
 let _govLiveAuthVisible = true;
@@ -1429,9 +1431,21 @@ async function govLoadLiveAuthStatus(options) {
   // Tier badge / 階梯徽章
   const badge = document.getElementById('gov-trust-tier-badge');
   if (badge) {
-    badge.textContent = label;
     badge.style.background = colors.bg;
     badge.style.color = colors.fg;
+    if (tier === 3) {
+      // T3 最高授權態:雙頁 parity,同 tab-live 以朱印方印形制(canon 9)區辨,非以色;旁配 T3 label。
+      badge.textContent = '';
+      const seal = document.createElement('span');
+      seal.className = 'seal-mark';
+      seal.textContent = '印';
+      seal.style.verticalAlign = 'middle';
+      seal.style.marginRight = '4px';
+      badge.appendChild(seal);
+      badge.appendChild(document.createTextNode(label));
+    } else {
+      badge.textContent = label;
+    }
   }
 
   // TTL countdown / 倒計時

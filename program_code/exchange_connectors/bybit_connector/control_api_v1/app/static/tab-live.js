@@ -33,7 +33,7 @@ const TRUST_TIER_COLORS = {
   0: { bg: 'rgba(100,116,139,.2)', fg: 'var(--text-secondary)' },
   1: { bg: 'rgba(34,197,94,.15)', fg: 'var(--pos)' },
   2: { bg: 'rgba(59,130,246,.15)', fg: 'var(--text-secondary)' },
-  3: { bg: 'rgba(168,85,247,.15)', fg: '#a855f7' },
+  3: { bg: 'var(--bg-raised)', fg: 'var(--text-secondary)' },
 };
 let _livePnlRange = '24h';
 let _liveMetricsLoadedOnce = false;
@@ -181,9 +181,22 @@ async function loadTrustStatus() {
 
     const badge = document.getElementById(badgeId);
     if (badge) {
-      badge.textContent = label;
       badge.style.background = colors.bg;
       badge.style.color = colors.fg;
+      if (tier === 3) {
+        // T3 最高授權態:中性化後改以朱印方印形制(canon 9)區辨,非以色;旁配 T3 label。
+        // 每輪輪詢重建 badge 內容,不累積;label 來自靜態 LABELS map,以 textNode 注入不觸 HTML 解析。
+        badge.textContent = '';
+        const seal = document.createElement('span');
+        seal.className = 'seal-mark';
+        seal.textContent = '印';
+        seal.style.verticalAlign = 'middle';
+        seal.style.marginRight = '4px';
+        badge.appendChild(seal);
+        badge.appendChild(document.createTextNode(label));
+      } else {
+        badge.textContent = label;
+      }
     }
     const cleanEl = document.getElementById(cleanDaysId);
     if (cleanEl) cleanEl.textContent = cleanDaysText;
