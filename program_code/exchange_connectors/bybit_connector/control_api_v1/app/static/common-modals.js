@@ -367,7 +367,7 @@ function openTypedConfirmModal(options) {
       '<div class="oc-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="oc-tc-title" tabindex="-1">' +
         '<h3 id="oc-tc-title"></h3>' +
         '<p id="oc-tc-body" class="pre-line"></p>' +
-        '<div id="oc-tc-meta" class="fs-micro t-dim mt-2 mb-3 lh-cjk hidden"></div>' +
+        '<div id="oc-tc-meta" class="fs-micro t-dim mt-2 mb-3 lh-cjk pre-line hidden"></div>' +
         // P0.2:hint 原 inline 的 display:block/font-size/color 與注入 CSS .oc-prompt-label 宣告重複,僅補 margin-top
         '<label class="oc-prompt-label mt-2" for="oc-tc-input" id="oc-tc-hint"></label>' +
         // P0.2:width:100% 與注入 CSS .oc-prompt-input 重複刪除;monospace→.mono、1px 字距→.ls-wide(§4 歸宿)
@@ -390,7 +390,7 @@ function openTypedConfirmModal(options) {
   if (metaParts.length) {
     metaEl.textContent = metaParts.join('\n');
     metaEl.classList.remove('hidden');
-    metaEl.style.whiteSpace = 'pre-line';
+    // P0.4-C1:whiteSpace:pre-line 越界常量已收斂到靜態 .pre-line utility(§A),移除 JS inline 寫點。
   } else {
     metaEl.classList.add('hidden');
   }
