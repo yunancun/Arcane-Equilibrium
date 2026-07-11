@@ -729,7 +729,7 @@ function ocInjectBaseCSS() {
 
     /* Metric Row */
     .oc-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
-    .oc-metric { background: var(--bg-app); border: 1px solid #21262d; border-radius: var(--r-2); padding: 10px 12px; }
+    .oc-metric { background: var(--bg-app); border: 1px solid var(--border-subtle); border-radius: var(--r-2); padding: 10px 12px; }
     .oc-metric-label { font-size: 10px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.4px; }
     .oc-metric-val { font-size: 20px; font-weight: 700; margin-top: 2px; }
     .oc-metric-sub { font-size: 11px; color: var(--text-secondary); margin-top: 2px; }
@@ -738,7 +738,7 @@ function ocInjectBaseCSS() {
     .oc-performance-metrics .oc-metric-label { min-height: 42px; line-height: 1.45; display: block; }
     .oc-performance-metrics .oc-metric-val { margin-top: auto; font-size: 18px; line-height: 1.2; overflow-wrap: anywhere; }
     .oc-edge-gate-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; }
-    .oc-edge-gate-card { background: var(--bg-app); border: 1px solid #21262d; border-radius: var(--r-2); padding: 12px; min-height: 160px; }
+    .oc-edge-gate-card { background: var(--bg-app); border: 1px solid var(--border-subtle); border-radius: var(--r-2); padding: 12px; min-height: 160px; }
     .oc-edge-gate-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
     .oc-edge-gate-title { font-size: 12px; font-weight: 700; line-height: 1.35; color: var(--text-primary); }
     .oc-edge-gate-sub { font-size: 10px; color: var(--text-secondary); margin-top: 2px; line-height: 1.35; }
@@ -747,11 +747,11 @@ function ocInjectBaseCSS() {
     .oc-edge-gate-value .label { font-size: 9px; color: var(--text-secondary); text-transform: uppercase; line-height: 1.25; }
     .oc-edge-gate-value .value { font-size: 14px; font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
     .oc-edge-gate-summary { color: var(--text-secondary); font-size: 11px; line-height: 1.45; margin-top: 6px; }
-    .oc-mini-trend { width: 100%; height: 54px; display: block; background: rgba(13,17,23,0.45); border: 1px solid #21262d; border-radius: var(--r-1); }
+    .oc-mini-trend { width: 100%; height: 54px; display: block; background: rgba(13,17,23,0.45); border: 1px solid var(--border-subtle); border-radius: var(--r-1); }
     .oc-mini-trend-zero { stroke: rgba(139,148,158,0.45); stroke-width: 1; stroke-dasharray: 3 3; }
-    .oc-mini-trend-empty { height: 54px; display: flex; align-items: center; justify-content: center; color: var(--text-secondary); font-size: 11px; border: 1px dashed #30363d; border-radius: var(--r-1); }
-    .oc-readiness-list { border: 1px solid #21262d; border-radius: var(--r-2); margin-top: 10px; overflow: hidden; }
-    .oc-readiness-row { display: grid; grid-template-columns: minmax(120px, 1fr) auto minmax(100px, 1fr); gap: 10px; align-items: center; padding: 9px 11px; border-top: 1px solid #21262d; }
+    .oc-mini-trend-empty { height: 54px; display: flex; align-items: center; justify-content: center; color: var(--text-secondary); font-size: 11px; border: 1px dashed var(--border-subtle); border-radius: var(--r-1); }
+    .oc-readiness-list { border: 1px solid var(--border-subtle); border-radius: var(--r-2); margin-top: 10px; overflow: hidden; }
+    .oc-readiness-row { display: grid; grid-template-columns: minmax(120px, 1fr) auto minmax(100px, 1fr); gap: 10px; align-items: center; padding: 9px 11px; border-top: 1px solid var(--border-subtle); }
     .oc-readiness-row:first-child { border-top: none; }
     .oc-readiness-label { font-size: 12px; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
     .oc-readiness-detail { font-size: 10px; color: var(--text-secondary); line-height: 1.35; }
@@ -803,19 +803,19 @@ function ocInjectBaseCSS() {
     .oc-btn { padding: 6px 14px; border-radius: var(--r-1); border: 1px solid var(--border-subtle);
       background: var(--bg-app); color: var(--text-primary); font-size: 12px; cursor: pointer;
       transition: all 0.15s; font-family: inherit; white-space: nowrap; }
-    .oc-btn:hover { border-color: var(--accent); color: #fff; }
+    .oc-btn:hover { border-color: var(--accent); color: var(--text-primary); }
     .oc-btn:disabled { opacity: 0.35; cursor: not-allowed; }
     .oc-btn-primary { background: rgba(56,139,253,0.15); border-color: var(--text-secondary); color: var(--text-secondary); }
     .oc-btn-primary:hover { background: rgba(56,139,253,0.3); }
     .oc-btn-success { background: rgba(63,185,80,0.12); border-color: var(--pos); color: var(--pos); }
     .oc-btn-success:hover { background: rgba(63,185,80,0.25); }
     .oc-btn-warning { background: rgba(210,153,34,0.10); border-color: rgba(210,153,34,0.36); color: var(--warn); }
-    .oc-btn-warning:hover { background: rgba(210,153,34,0.22); color: #fff; }
+    .oc-btn-warning:hover { background: rgba(210,153,34,0.22); color: var(--text-primary); }
     .oc-btn-danger { background: rgba(248,81,73,0.08); border-color: rgba(248,81,73,0.3); color: var(--neg); }
     .oc-btn-danger:hover { background: rgba(248,81,73,0.2); }
     .oc-btn-critical { border-width: 2px; font-weight: 700; }
-    .oc-btn-destructive { border-style: dashed; background: rgba(248,81,73,0.12); border-color: rgba(248,81,73,0.48); color: #ff7b72; font-weight: 700; }
-    .oc-btn-destructive:hover { background: rgba(248,81,73,0.26); color: #fff; }
+    .oc-btn-destructive { border-style: dashed; background: rgba(248,81,73,0.12); border-color: rgba(248,81,73,0.48); color: var(--neg); font-weight: 700; }
+    .oc-btn-destructive:hover { background: rgba(248,81,73,0.26); color: var(--text-primary); }
     .oc-btn-future { border-style: dashed; opacity: 0.4; cursor: default; }
     .oc-btn-future:hover { border-color: var(--border-subtle); color: var(--text-primary); }
 
@@ -837,7 +837,7 @@ function ocInjectBaseCSS() {
     .oc-table th { text-align: left; padding: 8px 10px; color: var(--text-secondary); font-weight: 500;
       font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px;
       border-bottom: 1px solid var(--border-subtle); background: rgba(13,17,23,0.5); }
-    .oc-table td { padding: 8px 10px; border-bottom: 1px solid #21262d; }
+    .oc-table td { padding: 8px 10px; border-bottom: 1px solid var(--border-subtle); }
     .oc-table tr:last-child td { border-bottom: none; }
     .oc-table tr:hover td { background: rgba(56,139,253,0.04); }
     .oc-table .empty-row td { text-align: center; color: var(--text-secondary); padding: 20px; }
@@ -854,13 +854,13 @@ function ocInjectBaseCSS() {
       background: rgba(13,17,23,0.4); border-radius: var(--r-2); margin-top: 4px; }
 
     /* Collapsed Section */
-    .oc-collapse { border: 1px solid #21262d; border-radius: var(--r-2); margin-top: 10px; }
+    .oc-collapse { border: 1px solid var(--border-subtle); border-radius: var(--r-2); margin-top: 10px; }
     .oc-collapse summary { cursor: pointer; padding: 10px 14px; font-size: 13px;
       color: var(--text-primary); user-select: none; list-style: none; }
     .oc-collapse summary::-webkit-details-marker { display: none; }
     .oc-collapse summary::before { content: '\\25B6  '; font-size: 9px; color: var(--text-secondary); }
     .oc-collapse[open] summary::before { content: '\\25BC  '; }
-    .oc-collapse[open] summary { border-bottom: 1px solid #21262d; }
+    .oc-collapse[open] summary { border-bottom: 1px solid var(--border-subtle); }
     .oc-collapse .oc-collapse-body { padding: 12px 14px; }
 
     /* Two-column Grid */
@@ -882,14 +882,14 @@ function ocInjectBaseCSS() {
     }
 
     /* Separator */
-    .oc-sep { border: none; border-top: 1px solid #21262d; margin: 14px 0; }
+    .oc-sep { border: none; border-top: 1px solid var(--border-subtle); margin: 14px 0; }
 
     /* Toast */
     .oc-toast { position: fixed; right: 20px; padding: 10px 18px;
       border-radius: var(--r-2); font-size: 13px; z-index: 9999; transform: translateY(20px);
       opacity: 0; transition: all 0.3s; pointer-events: none; max-width: 420px; word-break: break-word; }
     .oc-toast.show { transform: translateY(0); opacity: 1; }
-    .oc-toast-info { background: #1f2937; color: var(--text-primary); border: 1px solid var(--border-subtle); }
+    .oc-toast-info { background: var(--bg-raised); color: var(--text-primary); border: 1px solid var(--border-subtle); }
     .oc-toast-success { background: rgba(63,185,80,0.15); color: var(--pos); border: 1px solid rgba(63,185,80,0.3); }
     .oc-toast-error { background: rgba(248,81,73,0.15); color: var(--neg); border: 1px solid rgba(248,81,73,0.3); }
     /* warn = 黃色「需注意」語意；之前缺此 class → 'warn' toast 退回無樣式（透明背景無邊框）。
@@ -928,7 +928,7 @@ function ocInjectBaseCSS() {
 
     /* Strategy Cards */
     .oc-strat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
-    .oc-strat-card { background: var(--bg-app); border: 1px solid #21262d; border-radius: var(--r-2); padding: 14px; position: relative; overflow: hidden; }
+    .oc-strat-card { background: var(--bg-app); border: 1px solid var(--border-subtle); border-radius: var(--r-2); padding: 14px; position: relative; overflow: hidden; }
     .oc-strat-card[class*="oc-strategy-card-"] { border-color: var(--strategy-border, #21262d); box-shadow: inset 3px 0 0 var(--strategy-color, transparent); }
     .oc-strat-card .strat-header { display: flex; justify-content: flex-start; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
     .oc-strat-card .strat-name { font-weight: 600; font-size: 14px; }
@@ -940,7 +940,7 @@ function ocInjectBaseCSS() {
     .oc-loading { color: var(--text-secondary); font-size: 12px; padding: 20px; text-align: center; }
 
     /* Pre/Code */
-    .oc-pre { background: var(--bg-app); border: 1px solid #21262d; border-radius: var(--r-2);
+    .oc-pre { background: var(--bg-app); border: 1px solid var(--border-subtle); border-radius: var(--r-2);
       padding: 12px; font-size: 12px; font-family: 'SF Mono', Consolas, monospace;
       overflow: auto; max-height: 300px; white-space: pre-wrap; word-break: break-word; }
 
@@ -972,7 +972,7 @@ function ocInjectBaseCSS() {
     .live-metric-val { font-size: 20px; font-weight: 700; }
     .live-metric-val.large { font-size: 24px; }
     .live-metric-val.pos { color: var(--pos); }
-    .live-metric-val.neg { color: #f87171; }
+    .live-metric-val.neg { color: var(--neg); }
     .live-metric-val.neutral { color: var(--text-primary); }
     .live-metric-val.purple { color: #a855f7; }
     .live-metric-sub { font-size: 10px; color: var(--text-secondary); margin-top: 2px; }
@@ -993,8 +993,8 @@ function ocInjectBaseCSS() {
     .oc-confirm-overlay.show { display:flex; }
     .oc-confirm-dialog { background:var(--bg-surface,#161b22); border:1px solid rgba(248,81,73,0.4);
       border-radius:var(--r-3); padding:24px; max-width:440px; width:90%; }
-    .oc-confirm-dialog h3 { color:#f85149; font-size:15px; margin-bottom:8px; }
-    .oc-confirm-dialog p { font-size:13px; color:#c9d1d9; white-space:pre-line; margin-bottom:16px; line-height:1.6; }
+    .oc-confirm-dialog h3 { color:var(--neg); font-size:15px; margin-bottom:8px; }
+    .oc-confirm-dialog p { font-size:13px; color:var(--text-primary); white-space:pre-line; margin-bottom:16px; line-height:1.6; }
     .oc-confirm-dialog .btn-row { display:flex; gap:8px; justify-content:flex-end; }
     .oc-prompt-label { display:block; font-size:12px; color:var(--text-secondary); margin-bottom:6px; }
     .oc-prompt-input, .oc-prompt-select, .oc-prompt-textarea { width:100%; box-sizing:border-box;
