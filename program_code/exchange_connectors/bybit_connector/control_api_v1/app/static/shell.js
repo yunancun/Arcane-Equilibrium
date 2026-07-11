@@ -59,7 +59,12 @@
     // monitor:Phase 2 第 2 個原生遷移(iframe:false)——render/pause/resume 由 view-monitor.js 註冊於
     //   window.OC_NATIVE_VIEWS(id=monitor);src 保留 legacy tab-monitoring 作 registry 完整性 + 回滾錨,原生渲染接管。
     { id: 'monitor',    lane: 'cross', hash: '#/cross/monitor',    src: '/static/tab-monitoring.html', visId: 'monitoring',  label: '監控 Monitor', iframe: false },
-    { id: 'ai',         lane: 'cross', hash: '#/cross/ai',         src: '/static/tab-ai.html',         visId: 'ai',          label: 'AI 狀態' },
+    // ai:Phase 2 第 6 個原生遷移(iframe:false;**含寫 + typed-confirm**)——render/pause/resume 由 view-ai.js
+    //   註冊於 window.OC_NATIVE_VIEWS(id=ai);拆檔:成本面 view-ai-cost.js(掛 OC_AI_COST)、供應商+設置面
+    //   view-ai-providers.js(掛 OC_AI_PROVIDERS,承 3 config/DELETE 寫 + typed-confirm CLEAR)。src 保留 legacy
+    //   tab-ai 作 registry 完整性 + 回滾錨,原生渲染接管。5 寫 preserve 既有 layer2 端點(trigger/config/DELETE
+    //   providers/evolution run),零新寫路徑;response-gated 非 fake;清除密鑰 typed-confirm 逐字保留不弱化。
+    { id: 'ai',         lane: 'cross', hash: '#/cross/ai',         src: '/static/tab-ai.html',         visId: 'ai',          label: 'AI 狀態', iframe: false },
     // agents:Phase 2 第 5 個原生遷移(iframe:false;read-only)——render/pause/resume 由 view-agents.js 註冊於
     //   window.OC_NATIVE_VIEWS(id=agents);OpenClaw 控制面拆出 view-agents-openclaw.js(companion,掛 OC_AGENTS_OPENCLAW)。
     //   src 保留 legacy tab-agents 作 registry 完整性 + 回滾錨,原生渲染接管。全唯讀:9 GET(7 團隊 + 2 openclaw),零寫路徑。
