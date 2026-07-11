@@ -1,0 +1,281 @@
+{
+  "schema_version": "global_qualified_autonomous_learning_shadow_wp4_v158_pre_authoring_gate_request_v1",
+  "generated_at": "2026-07-11T19:02:04Z",
+  "goal_id": "GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1",
+  "goal_thread_id": "019f4b6d-1e5b-7551-9fce-7a2f029a1675",
+  "request_id": "WP4-V158-PRE-AUTHORING-GATE-REQUEST",
+  "request_status": "REQUEST_E3_REVIEW_NO_MIGRATION_AUTHORITY",
+  "requester": "PM",
+  "gate_sequence": [
+    "E3",
+    "BB",
+    "PM"
+  ],
+  "source_binding": {
+    "request_parent_head": "9bce6877c2388a2df20df0b6ce2f8e3279e8a6fe",
+    "request_parent_origin_main": "9bce6877c2388a2df20df0b6ce2f8e3279e8a6fe",
+    "behavioral_contract_checkpoint": "f36379b9ddf10ee1055daeda27805c409c6ee8bd",
+    "documentation_checkpoint": "e7223997e9678fe0f9de7d158160e4fca783e377",
+    "publish_alignment_checkpoint": "9bce6877c2388a2df20df0b6ce2f8e3279e8a6fe",
+    "challenger_training_contract_sha256": "9549db6557f6d2241cbfe375f1d012db06f7e988438d3c6b13f2768c94ca4776",
+    "challenger_training_contract_tests_sha256": "ebf829140c5b755e21259f6909ded1240295f40ebaf0a4b058e3b2dc4306e927",
+    "v157_sha256": "0b81e5795f4d387b2768ebf22440641c30a61ded7ed5115db92c542f67ff8000",
+    "source_checksum_manifest_sha256": "ef9a6d058b55c5a2c0b286c8bdbf2148780e586795913d5540efb9a2fbb5526d",
+    "source_drift_invalidates_review": true
+  },
+  "collision_scan": {
+    "eligible_migration_count": 139,
+    "highest_version": 157,
+    "duplicate_version_count": 0,
+    "v158_or_higher_source_file_present": false,
+    "v158_or_higher_current_ref_or_registered_worktree_file_present": false,
+    "active_v158_reservation_present": false,
+    "source_checksum_manifest_max": 150,
+    "postgres_runtime_state_refreshed": false,
+    "provisional_next_version": 158,
+    "provisional_next_version_status": "COLLISION_FREE_OBSERVATION_NOT_RESERVED"
+  },
+  "requested_scope": {
+    "request_kind": "SOURCE_AUTHORING_GATE_ONLY",
+    "provisional_filename": "sql/migrations/V158__alr_qualified_challenger_training.sql",
+    "reserve_v158_if_e3_and_bb_approve": true,
+    "author_v158_source_if_e3_and_bb_approve": true,
+    "author_static_and_isolated_pg_tests_if_e3_and_bb_approve": true,
+    "apply_migration": false,
+    "contact_postgres": false,
+    "contact_linux": false,
+    "restart_or_mutate_service": false,
+    "contact_exchange": false,
+    "run_model_fit": false,
+    "write_model_or_registry_row": false,
+    "create_or_update_symlink": false,
+    "serving_or_promotion_action": false
+  },
+  "forward_schema_design": {
+    "design_version": "alr_qualified_challenger_training_schema_v1",
+    "schema": "learning",
+    "forward_only": true,
+    "backfill": false,
+    "existing_table_updates": false,
+    "v152_v153_file_or_table_contract_mutation": false,
+    "v157_or_legacy_model_registry_reuse": false,
+    "artifact_kind_or_provenance_edge_constraint_expansion": false,
+    "tables": [
+      {
+        "name": "learning.alr_qualified_training_receipts",
+        "purpose": "Append-only durable training-input receipt; persistence is not proof, fit, serving, or promotion authority.",
+        "primary_key": "durable_receipt_hash",
+        "columns": [
+          "durable_receipt_hash TEXT NOT NULL",
+          "source_receipt_hash TEXT NOT NULL",
+          "source_contract_hash TEXT NOT NULL",
+          "projection_artifact_hash TEXT NOT NULL",
+          "selection_binding_hash TEXT NOT NULL",
+          "proof_input_hash TEXT NOT NULL",
+          "proof_packet_hash TEXT NOT NULL",
+          "reward_set_hash TEXT NOT NULL",
+          "pit_dataset_manifest_hash TEXT NOT NULL",
+          "after_cost_label_set_hash TEXT NOT NULL",
+          "evidence_set_hash TEXT NOT NULL",
+          "training_input_hash TEXT NOT NULL",
+          "training_key_hash TEXT NOT NULL",
+          "code_manifest_hash TEXT NOT NULL",
+          "training_config_hash TEXT NOT NULL",
+          "receipt_status TEXT NOT NULL",
+          "canonical_payload JSONB NOT NULL",
+          "no_authority JSONB NOT NULL",
+          "authority_counters JSONB NOT NULL",
+          "created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP"
+        ],
+        "constraints": [
+          "all identity/hash columns are lowercase 64-hex except source head fields not present here",
+          "projection_artifact_hash references learning.alr_artifact_nodes(artifact_hash)",
+          "training_key_hash is unique",
+          "source_receipt_hash plus training_key_hash is unique",
+          "receipt_status equals QUALIFIED_INPUT_PERSISTED",
+          "canonical_payload is a JSON object",
+          "no_authority equals the exact all-false schema constant",
+          "authority_counters equals the exact all-zero schema constant"
+        ]
+      },
+      {
+        "name": "learning.alr_challenger_training_runs",
+        "purpose": "Append-only completed real-fit ledger; a row may claim model_training_performed only after actual data/code/config/split rehash and immutable artifact hashing.",
+        "primary_key": "training_run_hash",
+        "columns": [
+          "training_run_hash TEXT NOT NULL",
+          "durable_receipt_hash TEXT NOT NULL",
+          "training_key_hash TEXT NOT NULL",
+          "source_head TEXT NOT NULL",
+          "actual_dataset_hash TEXT NOT NULL",
+          "actual_row_ids_hash TEXT NOT NULL",
+          "actual_split_hash TEXT NOT NULL",
+          "actual_code_manifest_hash TEXT NOT NULL",
+          "actual_training_config_hash TEXT NOT NULL",
+          "actual_feature_schema_hash TEXT NOT NULL",
+          "actual_label_schema_hash TEXT NOT NULL",
+          "actual_training_rows INTEGER NOT NULL",
+          "model_artifact_set_hash TEXT NOT NULL",
+          "metrics_hash TEXT NOT NULL",
+          "resource_usage_hash TEXT NOT NULL",
+          "run_status TEXT NOT NULL",
+          "model_training_performed BOOLEAN NOT NULL",
+          "canonical_payload JSONB NOT NULL",
+          "no_authority JSONB NOT NULL",
+          "authority_counters JSONB NOT NULL",
+          "fit_started_at TIMESTAMPTZ NOT NULL",
+          "fit_completed_at TIMESTAMPTZ NOT NULL",
+          "created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP"
+        ],
+        "constraints": [
+          "training_run_hash and all content identities are lowercase 64-hex",
+          "source_head is lowercase 40-hex",
+          "durable_receipt_hash references learning.alr_qualified_training_receipts(durable_receipt_hash)",
+          "training_key_hash is unique and must be repository-verified against its receipt before insert",
+          "run_status equals TRAINING_PERFORMED",
+          "model_training_performed is exactly true",
+          "actual_training_rows is positive",
+          "fit_completed_at is not earlier than fit_started_at",
+          "canonical_payload is a JSON object",
+          "no_authority equals the exact all-false schema constant",
+          "authority_counters allows model_fit_count exactly one and keeps every authority counter zero"
+        ]
+      },
+      {
+        "name": "learning.alr_challenger_model_artifacts",
+        "purpose": "Immutable exact ONNX q10/q50/q90 bytes/path/hash metadata in an isolated directory with no symlink or serving semantics.",
+        "primary_key": "artifact_hash",
+        "columns": [
+          "artifact_hash TEXT NOT NULL",
+          "training_run_hash TEXT NOT NULL",
+          "quantile TEXT NOT NULL",
+          "artifact_format TEXT NOT NULL",
+          "artifact_path TEXT NOT NULL",
+          "artifact_size_bytes BIGINT NOT NULL",
+          "feature_schema_hash TEXT NOT NULL",
+          "model_schema_version TEXT NOT NULL",
+          "symlink_created BOOLEAN NOT NULL",
+          "serving_visible BOOLEAN NOT NULL",
+          "created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP"
+        ],
+        "constraints": [
+          "artifact_hash and feature_schema_hash are lowercase 64-hex",
+          "training_run_hash references learning.alr_challenger_training_runs(training_run_hash)",
+          "quantile is exactly q10, q50, or q90",
+          "training_run_hash plus quantile is unique",
+          "artifact_format equals onnx",
+          "artifact_size_bytes is positive",
+          "artifact_path is non-empty and must be repository-verified inside an immutable isolated root",
+          "symlink_created is exactly false",
+          "serving_visible is exactly false"
+        ]
+      },
+      {
+        "name": "learning.alr_challenger_registry",
+        "purpose": "Immutable isolated challenger catalog; never read by Rust serving and never transitionable through legacy canary APIs.",
+        "primary_key": "challenger_hash",
+        "columns": [
+          "challenger_hash TEXT NOT NULL",
+          "training_run_hash TEXT NOT NULL",
+          "training_key_hash TEXT NOT NULL",
+          "model_artifact_set_hash TEXT NOT NULL",
+          "registry_status TEXT NOT NULL",
+          "serving_allowed BOOLEAN NOT NULL",
+          "promotion_allowed BOOLEAN NOT NULL",
+          "latest_pointer_allowed BOOLEAN NOT NULL",
+          "symlink_allowed BOOLEAN NOT NULL",
+          "canonical_payload JSONB NOT NULL",
+          "created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP"
+        ],
+        "constraints": [
+          "challenger_hash, training_key_hash, model_artifact_set_hash, and training_run_hash are lowercase 64-hex",
+          "training_run_hash references learning.alr_challenger_training_runs(training_run_hash) and is unique",
+          "registry_status equals NOT_SERVING",
+          "serving_allowed is exactly false",
+          "promotion_allowed is exactly false",
+          "latest_pointer_allowed is exactly false",
+          "symlink_allowed is exactly false",
+          "canonical_payload is a JSON object"
+        ]
+      }
+    ],
+    "transaction_contract": {
+      "receipt_persistence": "one append-only transaction with exact existing-row readback on replay",
+      "post_fit_persistence": "one append-only transaction for completed training run, exact q10/q50/q90 artifacts, and isolated registry row",
+      "partial_success_allowed": false,
+      "on_conflict_do_nothing_without_readback_allowed": false,
+      "update_or_delete_allowed": false
+    },
+    "privilege_contract": {
+      "public_insert_update_delete": false,
+      "application_roles": [
+        "trading_ai if present",
+        "alr_shadow if present"
+      ],
+      "application_role_permissions": [
+        "SELECT",
+        "INSERT"
+      ],
+      "application_role_update_delete": false,
+      "sequence_privileges_required": false
+    },
+    "guard_contract": {
+      "guard_a_required_columns": true,
+      "guard_b_required_constraints_and_indexes": true,
+      "guard_c_exact_privilege_posture": true,
+      "double_apply_required": true,
+      "rollback_preflight_required_before_any_future_apply": true,
+      "source_static_tests_required": true,
+      "isolated_postgres_tests_required_before_apply": true
+    }
+  },
+  "isolated_trainer_design": {
+    "new_module": "program_code/ml_training/alr_challenger_trainer.py",
+    "new_repository_module": "program_code/ml_training/alr_challenger_repository.py",
+    "consume_only_repository_reconstructed_durable_receipt": true,
+    "actual_row_bytes_rehash_required": true,
+    "exact_split_membership_rehash_required": true,
+    "actual_code_and_dependency_rehash_required": true,
+    "effective_config_rehash_required": true,
+    "call_train_quantile_trio_for_real_fit": true,
+    "minimum_exact_model_set": [
+      "q10",
+      "q50",
+      "q90"
+    ],
+    "immutable_isolated_output_directory_required": true,
+    "legacy_run_training_pipeline_call_allowed": false,
+    "legacy_model_registry_call_allowed": false,
+    "transition_canary_status_call_allowed": false,
+    "onnx_current_symlink_update_allowed": false,
+    "rust_serving_reader_change_allowed": false,
+    "model_training_performed_true_before_fit_and_artifact_readback_allowed": false
+  },
+  "hard_boundaries": {
+    "demo_or_shadow_only": true,
+    "live_or_mainnet": false,
+    "exchange_contact": false,
+    "order_or_probe": false,
+    "decision_lease": false,
+    "guardian_or_riskconfig_mutation": false,
+    "global_cost_gate_change": false,
+    "serving_or_promotion": false,
+    "latest_pointer_or_symlink": false,
+    "protected_evidence_delete": false,
+    "v152_v153_edit": false,
+    "v157_reuse": false,
+    "legacy_learning_model_registry_write": false
+  },
+  "requested_e3_decision": {
+    "allow_values": [
+      "APPROVE_SOURCE_AUTHORING_ONLY",
+      "REJECT_WITH_FINDINGS"
+    ],
+    "must_bind_request_file_sha256": true,
+    "must_bind_reviewed_source_head": true,
+    "must_confirm_v158_is_provisional_until_e3_and_bb_pass": true,
+    "must_not_grant_apply_runtime_or_training_authority": true
+  },
+  "authority_granted_by_packet": false,
+  "terminal_eligible": false
+}
