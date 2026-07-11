@@ -32,24 +32,24 @@
   .oc-banner {
     display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
     padding: 10px 14px; margin-bottom: 12px;
-    border-radius: var(--card-radius); font-size: 12px; line-height: 1.5;
+    border-radius: var(--r-2); font-size: 12px; line-height: 1.5;
   }
   .oc-banner-info {
     background: rgba(56, 139, 253, 0.10);
     border: 1px solid rgba(56, 139, 253, 0.35);
-    color: var(--text);
+    color: var(--text-primary);
   }
   .oc-banner-link {
-    color: var(--blue); font-weight: 600; text-decoration: underline;
+    color: var(--text-secondary); font-weight: 600; text-decoration: underline;
     cursor: pointer;
   }
   .oc-banner-link:hover { color: var(--accent); }
   .oc-banner-close {
-    margin-left: auto; background: transparent; border: 1px solid var(--border);
-    border-radius: var(--r-1); color: var(--text-dim); font-size: 14px;
+    margin-left: auto; background: transparent; border: 1px solid var(--border-subtle);
+    border-radius: var(--r-1); color: var(--text-secondary); font-size: 14px;
     padding: 2px 8px; cursor: pointer; min-width: 28px;
   }
-  .oc-banner-close:hover { border-color: var(--accent); color: var(--text); }
+  .oc-banner-close:hover { border-color: var(--accent); color: var(--text-primary); }
   /* Mobile (≤700px) touch target retrofit — pattern from tab-paper.html SEV-2 #1
      行動裝置觸控目標 ≥44px (WCAG 2.1 AA 2.5.5 Target Size) */
   @media (max-width: 700px) {

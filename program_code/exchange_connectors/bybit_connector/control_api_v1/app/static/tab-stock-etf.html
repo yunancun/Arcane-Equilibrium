@@ -18,36 +18,36 @@
 <script>ocAuthCheck(); ocInjectBaseCSS();</script>
 
 <style>
-  html, body { min-height:100%; margin:0; overflow-y:auto; background:var(--bg); color:var(--text); }
+  html, body { min-height:100%; margin:0; overflow-y:auto; background:var(--bg-app); color:var(--text-primary); }
   .se-wrap { padding:16px; max-width:1280px; margin:0 auto; }
   .se-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
   .se-title { margin:0; font-size:18px; line-height:1.25; }
-  .se-sub { margin-top:4px; color:var(--text-dim); font-size:12px; line-height:1.5; }
+  .se-sub { margin-top:4px; color:var(--text-secondary); font-size:12px; line-height:1.5; }
   .se-toolbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
   .se-summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:10px; margin-bottom:14px; }
   .se-metric {
-    background:var(--card-bg); border:1px solid var(--border); border-radius:var(--r-2);
+    background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:var(--r-2);
     padding:10px; min-height:84px;
   }
-  .se-metric-label { font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.3px; }
+  .se-metric-label { font-size:10px; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.3px; }
   .se-metric-value { margin-top:5px; font-size:16px; font-weight:700; line-height:1.25; overflow-wrap:anywhere; }
-  .se-metric-sub { margin-top:5px; color:var(--text-dim); font-size:11px; line-height:1.35; overflow-wrap:anywhere; }
+  .se-metric-sub { margin-top:5px; color:var(--text-secondary); font-size:11px; line-height:1.35; overflow-wrap:anywhere; }
   .se-grid { display:grid; grid-template-columns:repeat(2,minmax(280px,1fr)); gap:12px; }
   .se-panel {
-    background:var(--card-bg); border:1px solid var(--border); border-radius:var(--r-2);
+    background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:var(--r-2);
     padding:12px; min-height:132px;
   }
   .se-panel-title { display:flex; align-items:center; justify-content:space-between; gap:10px; font-size:13px; font-weight:700; margin-bottom:10px; }
   .se-kv { width:100%; border-collapse:collapse; font-size:12px; }
   .se-kv th {
-    text-align:left; width:44%; padding:7px 8px; color:var(--text-dim); font-weight:600;
+    text-align:left; width:44%; padding:7px 8px; color:var(--text-secondary); font-weight:600;
     border-bottom:1px solid rgba(139,148,158,0.16);
   }
   .se-kv td { padding:7px 8px; border-bottom:1px solid rgba(139,148,158,0.16); vertical-align:top; overflow-wrap:anywhere; }
   .se-kv tr:last-child th, .se-kv tr:last-child td { border-bottom:none; }
   .se-chip-row { display:flex; gap:6px; flex-wrap:wrap; }
   .se-list { display:flex; gap:6px; flex-wrap:wrap; min-height:25px; }
-  .se-muted { color:var(--text-dim); font-size:12px; }
+  .se-muted { color:var(--text-secondary); font-size:12px; }
   .se-code { font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size:11px; }
   .se-bad-line { border-color:rgba(248,81,73,0.36); }
   .se-warn-line { border-color:rgba(210,153,34,0.36); }
