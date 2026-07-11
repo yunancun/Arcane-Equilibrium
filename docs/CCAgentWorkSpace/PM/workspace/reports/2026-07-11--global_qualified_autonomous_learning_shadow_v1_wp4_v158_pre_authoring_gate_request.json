@@ -1,11 +1,11 @@
 {
-  "schema_version": "global_qualified_autonomous_learning_shadow_wp4_v158_pre_authoring_gate_request_v2",
-  "generated_at": "2026-07-11T19:30:33Z",
+  "schema_version": "global_qualified_autonomous_learning_shadow_wp4_v158_pre_authoring_gate_request_v3",
+  "generated_at": "2026-07-11T19:34:36Z",
   "goal_id": "GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1",
   "goal_thread_id": "019f4b6d-1e5b-7551-9fce-7a2f029a1675",
   "request_id": "WP4-V158-PRE-AUTHORING-GATE-REQUEST",
-  "revision": 2,
-  "request_status": "E3_REVIEW_REPAIR_R1_PENDING",
+  "revision": 3,
+  "request_status": "E3_REVIEW_REPAIR_R2_SOURCE_BINDING_PENDING",
   "requester": "PM",
   "gate_sequence": [
     "E3",
@@ -13,12 +13,16 @@
     "PM"
   ],
   "source_binding": {
-    "request_parent_head": "d6c9fb862c565e42cb88dc6fec110bcfd9781f13",
-    "request_parent_origin_main": "d6c9fb862c565e42cb88dc6fec110bcfd9781f13",
+    "request_parent_head": "7e38c27ef7cdf0023b9820e24a8352517498c248",
+    "request_parent_origin_main": "7e38c27ef7cdf0023b9820e24a8352517498c248",
     "r1_reviewed_source_head": "53771890c3ea522f278046752e376dacf5dfafd8",
     "r1_reviewed_origin_main": "53771890c3ea522f278046752e376dacf5dfafd8",
     "r1_reviewed_request_sha256": "a033656c126306030b764fee1b073ca394e07c40fdfdfaa3d964b44ad3441d5f",
     "r1_e3_report": "docs/CCAgentWorkSpace/E3/workspace/reports/2026-07-11--global_qualified_autonomous_learning_shadow_v1_wp4_v158_pre_authoring_gate_r1.md",
+    "r2_reviewed_source_head": "071433fa1c59733cd0e4d0585fb5fef8d829c794",
+    "r2_observed_origin_main": "7e38c27ef7cdf0023b9820e24a8352517498c248",
+    "r2_reviewed_request_sha256": "f1eb9381bf4b503e8855b901d334722272b395f044c94b4055e830660b7b5195",
+    "r2_e3_report": "docs/CCAgentWorkSpace/E3/workspace/reports/2026-07-11--global_qualified_autonomous_learning_shadow_v1_wp4_v158_pre_authoring_gate_r2.md",
     "review_target_is_commit_containing_this_packet": true,
     "behavioral_contract_checkpoint": "f36379b9ddf10ee1055daeda27805c409c6ee8bd",
     "documentation_checkpoint": "e7223997e9678fe0f9de7d158160e4fca783e377",
@@ -45,6 +49,23 @@
     "v158_collision_introduced": false,
     "review_will_bind_fresh_commit_containing_v2": true
   },
+  "r2_intervening_source_drift": {
+    "reviewed_packet_head": "071433fa1c59733cd0e4d0585fb5fef8d829c794",
+    "origin_main_observed_during_review": "7e38c27ef7cdf0023b9820e24a8352517498c248",
+    "commits": [
+      "3aa6ac7a2ea0eca3c2af5442bd963cbd7a4a47f0",
+      "7e38c27ef7cdf0023b9820e24a8352517498c248"
+    ],
+    "changed_paths": [
+      "docs/execution_plan/gui_redesign/PROGRESS.md",
+      "program_code/exchange_connectors/bybit_connector/control_api_v1/app/static/shell-components.css",
+      "program_code/exchange_connectors/bybit_connector/control_api_v1/app/static/shell.html"
+    ],
+    "classification": "GUI_SOURCE_AND_DOCUMENTATION_ONLY",
+    "alr_migrations_contracts_ml_training_goal_state_or_gate_packet_changed": false,
+    "v158_collision_introduced": false,
+    "review_will_bind_fresh_commit_containing_v3": true
+  },
   "r1_repair": {
     "r1_verdict": "REJECT_WITH_FINDINGS",
     "r1_severity": {
@@ -60,6 +81,19 @@
     "postgres_16_security_definer_deferred_trigger_required": true,
     "postgres_atomicity_scoped_to_database_only": true,
     "filesystem_stage_two_parent_fsync_no_replace_rename_database_first_recovery_contract_required": true,
+    "bb_review_started": false,
+    "authority_granted": false
+  },
+  "r2_review": {
+    "verdict": "REJECT_WITH_FINDINGS",
+    "severity": {
+      "p0": 0,
+      "p1": 1,
+      "p2": 0
+    },
+    "finding": "exact source binding drift while origin/main advanced by two GUI-only commits",
+    "substantive_v2_design_findings_remaining": 0,
+    "repair_scope": "source binding and review-history refresh only; forward schema and filesystem designs unchanged",
     "bb_review_started": false,
     "authority_granted": false
   },
