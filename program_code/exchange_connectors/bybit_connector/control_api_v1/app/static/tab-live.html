@@ -33,7 +33,8 @@ html, body {
 
 .live-warn-bar {
   display: flex; align-items: center; gap: 10px;
-  background: rgba(168,85,247,0.08); border: 1px solid rgba(168,85,247,0.35);
+  /* 族B real-money 主題:base=mainnet/默認 真金熱紅 tint(canon 6);livedemo 由下方 override 轉橙 */
+  background: var(--live-bg); border: 1px solid var(--live);
   border-radius: var(--r-2); padding: 10px 16px;
   font-size: 13px; margin-bottom: 14px;
 }
@@ -42,7 +43,8 @@ html, body {
 .live-control-bar {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
   background: var(--bg-surface);
-  border: 1px solid rgba(168,85,247,0.4);
+  /* 族B real-money 主題:base 真金熱紅描邊(canon 6);livedemo override 轉橙 */
+  border: 1px solid var(--live);
   border-radius: var(--r-2); padding: 12px 16px;
   margin-bottom: 14px;
 }
@@ -70,7 +72,8 @@ html, body {
   text-transform: uppercase; letter-spacing: 0.5px;
   margin-bottom: 12px; display: flex; align-items: center; gap: 6px;
 }
-.live-card-group.live-accent { border-color: rgba(168,85,247,0.3); }
+/* 族B real-money 主題:base 真金熱紅描邊(canon 6);livedemo override 轉橙 */
+.live-card-group.live-accent { border-color: var(--live); }
 
 /* Metrics grid / 指標網格 — defined in common.js ocInjectBaseCSS() (§6.1 unified)
    live-metric* classes are now canonical in common.js; this comment marks the migration.
@@ -113,7 +116,8 @@ html, body {
   width: 100%; text-align: left; margin-bottom: 8px;
   transition: border-color 0.15s;
 }
-.live-fills-toggle:hover { border-color: rgba(168,85,247,0.4); color: var(--text-primary); }
+/* 族B real-money 主題:hover 真金熱紅描邊(canon 6);color 已 --text-primary 不動 */
+.live-fills-toggle:hover { border-color: var(--live); color: var(--text-primary); }
 .live-fills-toggle .arrow { transition: transform 0.2s; }
 .live-fills-toggle.open .arrow { transform: rotate(90deg); }
 
@@ -168,7 +172,9 @@ html, body {
    F5/A1 — engine_kind / endpoint 三態 UI 區分（避免 LiveDemo 套 Mainnet 紫「真實資金」） */
 .live-mode-mainnet .live-warn-bar {
   border: 1px solid rgba(239,68,68,0.6) !important;
-  background: linear-gradient(135deg,rgba(168,85,247,0.12),rgba(239,68,68,0.08)) !important;
+  /* 塌平原紫→紅裝飾漸層(canon 5/1 去裝飾漸層):去紫,保 real-money 熱紅身分=--live-bg 熱紅 tint;
+     REAL-FUNDS 身分仍由上緣 red border(見上行)+下緣 border-bottom var(--neg) double 承載 */
+  background: var(--live-bg) !important;
   border-bottom: 3px double var(--neg) !important;
 }
 .live-mode-livedemo .live-warn-bar {
@@ -229,13 +235,17 @@ html, body {
 .trust-bar.ok   { background: rgba(34,197,94,0.07); border-color: rgba(34,197,94,0.3); }
 .trust-bar.warn { background: rgba(210,153,34,0.1);  border-color: rgba(210,153,34,0.5); }
 .trust-bar.crit { background: rgba(239,68,68,0.08);  border-color: rgba(239,68,68,0.4); }
-.trust-bar.review { background: rgba(168,85,247,0.08); border-color: rgba(168,85,247,0.4); }
+/* 族A authority-chrome:requires_full_review 態走中性 attention chrome(非嚴重度色軸),
+   刻意有別於 .trust-bar.warn 琥珀(避撞色·保 review/warn 二態可辨);警示語義由欄內
+   「Full Review Required」文案承載,對齊 C6d-1 chrome→中性 / warning-text→--warn 分工 */
+.trust-bar.review { background: var(--bg-raised); border-color: var(--border-strong); }
 .trust-tier-badge {
   display: inline-block; padding: 2px 8px; border-radius: var(--r-1);
   font-size: 10px; font-weight: 700; letter-spacing: 0.3px;
 }
 .trust-renew-card {
-  background: var(--bg-surface); border: 1px solid rgba(168,85,247,0.4);
+  /* 族A authority-chrome:中性描邊(bg 已 var(--bg-surface));非嚴重度色 */
+  background: var(--bg-surface); border: 1px solid var(--border-strong);
   border-radius: var(--r-2); padding: 14px 16px; margin-bottom: 14px;
 }
 .trust-conditions { margin: 8px 0 0; font-size: 11px; color: var(--text-secondary); line-height: 1.8; }
@@ -254,7 +264,8 @@ html, body {
   border-radius: var(--r-2); font-size: var(--fs-dense);
 }
 #live-global-mode-control-note {
-  background: rgba(168,85,247,0.05); border-color: rgba(168,85,247,0.25);
+  /* 族A authority-chrome:中性 note(升起底+細描邊);非嚴重度色 */
+  background: var(--bg-raised); border-color: var(--border-subtle);
   align-items: flex-start;
 }
 /* 未配置(silver)身份標籤:銀灰 #94a3b8 → --text-secondary(C6b canon 1 中性化) */
