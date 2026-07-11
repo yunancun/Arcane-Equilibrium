@@ -1,6 +1,6 @@
 # GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1 Queue
 
-Updated: 2026-07-11T16:53:42Z
+Updated: 2026-07-11T17:05:42Z
 Goal status: `ACTIVE`
 Current item: `WP3-PROOF-REWARD-REPOSITORY-ADAPTERS`
 WP1 checkpoint: behavioral code `c080c552b`, exact operational target
@@ -88,6 +88,10 @@ ML suite passed `1790` with `36` platform/optional skips. Two independent
 reviews passed with P0/P1/P2 `0/0/0`. This proves source behavior only: Linux
 inotify, service, PostgreSQL, and natural-cycle runtime evidence were not
 refreshed. WP3 repository adapters remain the active next work item.
+Publish alignment was observed at `2026-07-11T17:05:42Z`: Mac HEAD and
+`origin/main` both equaled the documentation checkpoint
+`2320536b25b444a8e24141248f22106fd19cbc7a`, which contains behavioral source
+checkpoint `1b85318f29a16d5a7575b27cb158486fdfd47331`.
 
 Allowed nonterminal transitions are `ACTIVE -> ADVANCED -> ACTIVE`,
 `ACTIVE -> DEFER_EVIDENCE -> ROTATE -> ACTIVE`, `ACTIVE -> REJECT -> ROTATE ->
