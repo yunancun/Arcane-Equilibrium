@@ -21,12 +21,12 @@
 <style>
   .tip-metric { position: relative; cursor: help; }
   .tip-metric .tip-box { display: none; position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
-    background: #1c2128; border: 1px solid var(--border-subtle); border-radius: var(--r-2); padding: 10px 14px; min-width: 260px; max-width: 360px;
+    background: var(--bg-raised); border: 1px solid var(--border-subtle); border-radius: var(--r-2); padding: 10px 14px; min-width: 260px; max-width: 360px;
     z-index: 100; box-shadow: 0 8px 24px rgba(0,0,0,0.4); font-size: 12px; line-height: 1.6; }
   .tip-metric:hover .tip-box { display: block; }
   .tip-box .tip-raw { font-family: monospace; color: var(--accent); font-size: 11px; margin-bottom: 6px; word-break: break-all; }
   .tip-box .tip-desc { color: var(--text-secondary); }
-  .quick-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; padding-top: 14px; border-top: 1px solid #21262d; align-items: center; }
+  .quick-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border-subtle); align-items: center; }
   .qa-status-row { display: inline-flex; align-items: center; gap: 5px; padding: 6px 10px;
     border-radius: var(--r-2); border: 1px solid var(--border-subtle); background: var(--bg-app);
     font-size: 12px; color: var(--text-secondary); cursor: default; }
@@ -53,9 +53,9 @@
   /* Confirm Modal */
   .confirm-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 200; }
   .confirm-overlay.show { display: flex; align-items: center; justify-content: center; }
-  .confirm-dialog { background: #161b22; border: 1px solid var(--border-subtle); border-radius: var(--r-3); width: min(480px, 90vw);
+  .confirm-dialog { background: var(--bg-raised); border: 1px solid var(--border-subtle); border-radius: var(--r-3); width: min(480px, 90vw);
     box-shadow: 0 20px 50px rgba(0,0,0,0.5); }
-  .confirm-header { padding: 16px 20px; border-bottom: 1px solid #21262d; font-size: 15px; font-weight: 600; }
+  .confirm-header { padding: 16px 20px; border-bottom: 1px solid var(--border-subtle); font-size: 15px; font-weight: 600; }
   .confirm-body { padding: 16px 20px; font-size: 13px; line-height: 1.7; color: var(--text-secondary); }
   .confirm-body strong { color: var(--text-primary); }
   .confirm-body .warn-box { background: rgba(248,81,73,0.08); border: 1px solid rgba(248,81,73,0.2);
@@ -67,7 +67,7 @@
   .live-hold-bar { width: 0%; height: 100%; border-radius: inherit; background: #a855f7; transition: width 0.08s linear; }
   #confirm-ok.confirm-ok-live-ready { border-color: rgba(168,85,247,0.7); }
   #confirm-ok.confirm-ok-holding { background: #7e22ce; border-color: #c084fc; }
-  .confirm-footer { padding: 12px 20px; border-top: 1px solid #21262d; display: flex; justify-content: flex-end; gap: 8px; }
+  .confirm-footer { padding: 12px 20px; border-top: 1px solid var(--border-subtle); display: flex; justify-content: flex-end; gap: 8px; }
   /* ── P0.2 批次 2:inline style= 收斂出的頁面組件(本塊在 body,文檔序晚於
      ocInjectBaseCSS 注入的 head <style>,同 specificity 由本塊勝出)── */
   /* 父層字級修飾:oc-metric-val 的 className 會被 JS 整串重寫(鐵則二),字級掛不被觸碰的包裹層 */
