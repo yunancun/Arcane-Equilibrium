@@ -2,8 +2,9 @@
 
 ## 狀態欄
 - **STATUS**: IN_PROGRESS
-- **CURRENT**: P0.4 C6(裸 hex→token,~360;primer legacy 深色硬編=帛晝破版修正需雙主題+A3;紫 #a855f7 中性化/琥珀→--warn/scrim rgba 保留;REAL FUNDS 熱紅永不觸)——大批,開工先按 07 §2 分類切子批
-- **LAST-COMMIT**: 98ad2fb64(P0.4 C4b 交易 tab tokens-compat 遷移 170 舊名,**活躍 tab 遷移完結**)
+- **CURRENT**: P0.4 C6c(裸 hex→token-共用 JS:common.js 35/common-formatters/common-modals/handoff_helper;注入所有 tab 含交易,E2 親算 palette 內 hex→token;紫/scrim 保留)
+- **LAST-COMMIT**: 7df893916(P0.4 C6a 非交易 tab hex→token 49 個)
+- **C6 子批(hex→token,大批分)**:C6a 非交易 tab ✅ / C6b 交易 tab+深紅漸層塌平(E2 硬邊界)/ C6c 共用 JS / C6d 紫中性化(跨檔朱印形制,A3 可見美學)/ C6e 殼層 styles.css 119(Phase3 目標,defer or 非-legacy);A3 雙主題目視全 defer Phase0 全審(Mac 無法真渲染)
 - **canon 6 --live pass 待辦(來自 C3a/C4b forward-pointer)**:live/auth marker 現落 --neg,未來獨立 pass 逐點裁決升 --live(A3+operator canon6):tab-agents(C3a)+ gov:1352/1360/1446 auth 狀態/tab-live.js:90/99/138 live auth/risk-tab.js:226 live 徽章(C4b 7 點);--live 升級=增強非修復,不阻塞刪檔
 - **殼層/C5 裁決(已查證)**:gui_legacy_routes.py 仍 served /console(active 主殼)·/gui(index.html)·/trading(trading.html);**C5 刪 tokens-compat.css defer Phase3**(殼層舊名由 compat 續服務,無害;避免遷移註定 Phase3 刪的 legacy 殼白工)——PM 自主裁決,不阻塞
 - **回歸基線漂移(2026-07-11)**:structure/ 4F→浮動 **7-9F**——兄弟 session commit `aa67c3afd` 引入 test_development_agent_governance(新治理框架)**order-dependent** 測試(solo 2F/混跑 3-5F,不掃 GUI 檔);GUI 面基線=formatter/spec-drift/gui guard 全綠(48/0),用 `-k gui or numeric or utilities or tokens or fork` 或 comm 對照法驗 GUI 零新失敗
@@ -60,7 +61,12 @@
   - **殼層遷移**:defer(compat 續服務 console/index/trading);**C5 刪 tokens-compat.css defer Phase3**(PM 自主裁決,served 查證見狀態欄)
   - [ ] C4 tokens-compat 遷移-交易(live/demo/governance/risk,E2 硬邊界親算)
   - [ ] C5 刪 tokens-compat.css(gate:全站 16 舊名 grep=0+移 link+cache-bust+guard)
-  - [ ] C6 裸 hex→token(~360 primer legacy=帛晝破版修正,雙主題+A3;紫 #a855f7 中性化/琥珀→--warn/scrim verbatim;REAL FUNDS 熱紅永不觸)
+  - [~] C6 裸 hex→token(~380,大批分 C6a-e;primer 冷調→暖玄衡 token=執行 operator 暖調裁決,A3 雙主題目視 defer Phase0)
+    - [x] C6a 非交易 tab(49 hex→token,6 檔)——證據 `7df893916`:red→neg/琥珀→warn/綠→pos/灰→secondary/海拔 raised·subtle 逐點判;E1a→E2 PASS no 退回(49 映射逐檔親證/熱紅未觸/added 與 removed 鏡像零邏輯/殘餘=保留集);GUI guard 50/0;紫/漸層/scrim/fallback 保留
+    - [ ] C6c 共用 JS(common.js 35 等注入交易,E2 親算)
+    - [ ] C6b 交易 tab hex+深紅漸層塌平+tab-agents 漸層卡(E2 硬邊界親算)
+    - [ ] C6d 紫中性化(跨檔朱印形制 §2.3,A3 可見美學;canon 9/10 禁 --purple)
+    - [ ] C6e 殼層 styles.css 119+console/trading(Phase3 目標,defer or 非-legacy 部分)
   - [ ] C7 enum-painting 收尾+共用 .live-metric*(選配)
   - [ ] C8 POST 量級猜測×2(需後端契約,defer Issue 不阻塞)
   - PA 死碼修正:僅 _ocMetric×3 真死;**ocPnlClass=7-caller 活碼遷移非刪**;_OC_CAT_CONFIG=死欄;_formatSignedMoneyValue 已刪
@@ -147,3 +153,4 @@
 | 2026-07-11 | R25 | P0.4 C3a compat 遷移 | cc44ecef3 | 非交易 13 tab 舊名 158→canonical 機械遷移(computed-identical 別名同值零視覺);boundary 防誤傷(E2 negative lookahead 0 殘留)、fallback hex 保留 C6、--red→--neg 機械不升 --live;E1a 逆映射 SURGICAL→E2 PASS no blocker(158 逐條核/零邏輯改動);PM 補跑 node --check 13/13(E2 治理禁寫 probe)+GUI guard 48/0+G0.5 25/25;殼層+C5 刪檔 defer Phase3(served 查證);forward-pointer:tab-agents live-marker 待 canon6 --live pass |
 | 2026-07-11 | R26 | P0.4 C4a compat 遷移共用 JS | 81aebe9d2 | 5 共用 JS(注入所有 tab 含交易)169 舊名→canonical 機械遷移;E2 親算 computed-identical airtight(雙向 override 空→注入交易零視覺);--red 23 點全 loss/alert(防詐 sentinel 非 live-marker)機械→--neg;零邏輯改動 134 ins/134 del 平衡 formatter 契約未觸;E1a→E2 PASS no blocker→formatter+spec-drift 3 passed+GUI guard 50/0+node --check 5/5(E2 親跑無治理限制) |
 | 2026-07-11 | R27 | P0.4 C4b compat 遷移交易 tab | 98ad2fb64 | 8 交易 tab 170 舊名→canonical 機械遷移(computed-identical);E2 交易面最嚴 word-diff 逐 hunk 全量零邏輯改動(控制流原封 154 ins/154 del)、canon 6 熱紅 rgba HEAD↔WORK 逐檔相等 var(--live)未動、--red 14 分類(7 loss/alert+7 live-marker forward-pointer 機械--neg 不升 --live)→E2 PASS no issue→GUI guard 50/0+node --check 全綠;**活躍 tab tokens-compat 遷移完結**(C3a+C4a+C4b),剩殼層 defer C5 |
+| 2026-07-11 | R28 | P0.4 C6a hex→token 非交易 | 7df893916 | 6 非交易 tab 49 palette 內裸 hex→主題自適應 token(red→neg/琥珀→warn/綠→pos/灰→secondary/海拔逐點判);視覺變更=執行 operator 暖調裁決(冷 primer→暖玄衡)修正非退化 A3 雙主題 defer Phase0;E1a→E2 PASS no 退回(49 映射逐檔親證/熱紅未觸/零邏輯鏡像/殘餘=保留集無遺漏/token 雙主題定義齊備)→GUI guard 50/0;紫/漸層/scrim/fallback 保留;C6 分 C6a-e 子批 |
