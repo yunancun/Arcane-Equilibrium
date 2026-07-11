@@ -50,6 +50,11 @@ from ml_training.alr_candidate_policy import (
     CandidatePolicyError,
     validate_candidate_policy_configuration,
 )
+from ml_training.candidate_proof_repository import (
+    BATCH_SCHEMA_VERSION as CANDIDATE_PROOF_BATCH_SCHEMA_VERSION,
+    compute_candidate_proof_repository_receipt_hash,
+    discover_candidate_proof_receipts,
+)
 from ml_training.alr_health_repository import (
     collect_health_snapshot,
     persist_health_snapshot,
@@ -673,6 +678,188 @@ def process_outcome_feedback_backlog(connection: Any, *, max_batch: int) -> dict
         elif feedback_status != "EVIDENCE_OBSERVED_NO_PROMOTION":
             raise AlrEventConsumerError("feedback_status_invalid")
     return totals
+
+
+def process_candidate_proof_repository_backlog(
+    connection: Any,
+    *,
+    max_batch: int,
+) -> dict[str, int]:
+    """Reconstruct current proof inputs from immutable rows with zero writes."""
+    if (
+        isinstance(max_batch, bool)
+        or not isinstance(max_batch, int)
+        or not 1 <= max_batch <= 256
+    ):
+        raise AlrEventConsumerError("candidate_proof_batch_limit_invalid")
+    batch = discover_candidate_proof_receipts(
+        connection,
+        limit=min(max_batch, 64),
+    )
+    if (
+        not isinstance(batch, Mapping)
+        or batch.get("schema_version") != CANDIDATE_PROOF_BATCH_SCHEMA_VERSION
+        or batch.get("status")
+        not in {
+            "READY",
+            "NO_CURRENT_SELECTED_CANDIDATE",
+            "SCHEMA_REQUIRED_OVERFLOW",
+        }
+    ):
+        raise AlrEventConsumerError("candidate_proof_batch_invalid")
+    metrics = batch.get("metrics")
+    required_metrics = {
+        "candidate_projection_rows_read",
+        "source_event_rows_read",
+        "projection_edge_rows_read",
+        "source_event_rows_rechecked",
+        "projection_edge_rows_rechecked",
+        "outcome_bridge_rows_scanned",
+        "outcome_bridge_rows_rechecked",
+        "receipts_built",
+        "pending_receipts",
+        "no_fill_receipts",
+        "ready_for_reward_validation_receipts",
+        "invalid_receipts",
+        "rows_written",
+        "payload_bytes_written",
+    }
+    if (
+        not isinstance(metrics, Mapping)
+        or set(metrics) != required_metrics
+        or any(
+            isinstance(metrics[key], bool)
+            or not isinstance(metrics[key], int)
+            or metrics[key] < 0
+            for key in required_metrics
+        )
+    ):
+        raise AlrEventConsumerError("candidate_proof_metrics_invalid")
+    if metrics["rows_written"] != 0 or metrics["payload_bytes_written"] != 0:
+        raise AlrEventConsumerError("candidate_proof_write_claim")
+    receipts = batch.get("receipts")
+    if not isinstance(receipts, list) or not all(
+        isinstance(item, Mapping) for item in receipts
+    ):
+        raise AlrEventConsumerError("candidate_proof_receipts_invalid")
+    receipt_statuses = [item.get("status") for item in receipts]
+    allowed_receipt_statuses = {
+        "PENDING_EVIDENCE",
+        "no_matched_fills",
+        "READY_FOR_REWARD_VALIDATION",
+        "INVALID",
+    }
+    if any(status not in allowed_receipt_statuses for status in receipt_statuses):
+        raise AlrEventConsumerError("candidate_proof_receipt_status_invalid")
+    expected_counts = {
+        "receipts_built": len(receipts),
+        "pending_receipts": receipt_statuses.count("PENDING_EVIDENCE"),
+        "no_fill_receipts": receipt_statuses.count("no_matched_fills"),
+        "ready_for_reward_validation_receipts": receipt_statuses.count(
+            "READY_FOR_REWARD_VALIDATION"
+        ),
+        "invalid_receipts": receipt_statuses.count("INVALID"),
+    }
+    if any(metrics[key] != value for key, value in expected_counts.items()):
+        raise AlrEventConsumerError("candidate_proof_receipt_metrics_mismatch")
+    if sum(expected_counts[key] for key in expected_counts if key != "receipts_built") != len(
+        receipts
+    ):
+        raise AlrEventConsumerError("candidate_proof_receipt_status_invalid")
+    if (
+        batch["status"] == "READY" and not receipts
+    ) or (
+        batch["status"] != "READY" and receipts
+    ) or (
+        batch["status"] == "SCHEMA_REQUIRED_OVERFLOW"
+        and metrics["outcome_bridge_rows_scanned"] <= min(max_batch, 64)
+    ):
+        raise AlrEventConsumerError("candidate_proof_batch_status_mismatch")
+    no_authority = batch.get("no_authority")
+    counters = batch.get("authority_counters")
+    expected_no_authority = {
+        "exchange_authority": False,
+        "trading_authority": False,
+        "order_or_probe_authority": False,
+        "decision_lease_authority": False,
+        "cost_gate_authority": False,
+        "proof_authority": False,
+        "serving_authority": False,
+        "promotion_authority": False,
+        "latest_authority": False,
+    }
+    expected_counters = {
+        "exchange_contact_count": 0,
+        "trading_action_count": 0,
+        "order_or_probe_count": 0,
+        "decision_lease_count": 0,
+        "cost_gate_change_count": 0,
+        "proof_claim_count": 0,
+        "serving_or_promotion_count": 0,
+    }
+    if (
+        no_authority != expected_no_authority
+        or counters != expected_counters
+    ):
+        raise AlrEventConsumerError("candidate_proof_authority_invalid")
+    for receipt in receipts:
+        durability = receipt.get("durability")
+        if (
+            receipt.get("schema_version")
+            != "candidate_proof_repository_receipt_v1"
+            or receipt.get("projection_identity_status")
+            != "RECONSTRUCTED_FROM_HASH_VALIDATED_ROWS"
+            or receipt.get("original_ephemeral_projection_hash_attested") is not False
+            or receipt.get("receipt_hash")
+            != compute_candidate_proof_repository_receipt_hash(receipt)
+            or receipt.get("no_authority") != expected_no_authority
+            or receipt.get("authority_counters") != expected_counters
+            or not isinstance(durability, Mapping)
+            or durability.get("source_container")
+            not in {
+                "HASH_VALIDATED_APPEND_ONLY_ROW",
+                "NO_MATCHING_HASH_VALIDATED_ROW",
+            }
+            or durability.get("runtime_or_exchange_attested") is not False
+            or durability.get("receipt_persisted") is not False
+        ):
+            raise AlrEventConsumerError("candidate_proof_receipt_authority_invalid")
+    return {
+        "candidate_proof_scans": 1,
+        "candidate_proof_projection_rows_read": metrics[
+            "candidate_projection_rows_read"
+        ],
+        "candidate_proof_source_event_rows_read": metrics[
+            "source_event_rows_read"
+        ],
+        "candidate_proof_projection_edge_rows_read": metrics[
+            "projection_edge_rows_read"
+        ],
+        "candidate_proof_source_event_rows_rechecked": metrics[
+            "source_event_rows_rechecked"
+        ],
+        "candidate_proof_projection_edge_rows_rechecked": metrics[
+            "projection_edge_rows_rechecked"
+        ],
+        "candidate_proof_outcome_bridge_rows_scanned": metrics[
+            "outcome_bridge_rows_scanned"
+        ],
+        "candidate_proof_outcome_bridge_rows_rechecked": metrics[
+            "outcome_bridge_rows_rechecked"
+        ],
+        "candidate_proof_receipts": metrics["receipts_built"],
+        "candidate_proof_pending": metrics["pending_receipts"],
+        "candidate_proof_no_fill": metrics["no_fill_receipts"],
+        "candidate_proof_ready_for_reward_validation": metrics[
+            "ready_for_reward_validation_receipts"
+        ],
+        "candidate_proof_invalid": metrics["invalid_receipts"],
+        "candidate_proof_schema_required_overflow": int(
+            batch["status"] == "SCHEMA_REQUIRED_OVERFLOW"
+        ),
+        "candidate_proof_rows_written": 0,
+        "candidate_proof_payload_bytes_written": 0,
+    }
 
 
 def process_retention_backlog(connection: Any, *, max_batch: int) -> dict[str, int]:
@@ -1318,6 +1505,13 @@ def _process_operational_cycle(
             candidate_policy=candidate_policy,
         ),
     )
+    _accumulate_candidate_proof_repository(
+        totals,
+        process_candidate_proof_repository_backlog(
+            connection,
+            max_batch=max_batch,
+        ),
+    )
     _accumulate_retention(
         totals,
         process_retention_backlog(connection, max_batch=max_batch),
@@ -1354,6 +1548,13 @@ def _process_candidate_reconciliation(
             max_batch=max_batch,
             evidence_directory=candidate_evidence_directory,
             candidate_policy=candidate_policy,
+        ),
+    )
+    _accumulate_candidate_proof_repository(
+        totals,
+        process_candidate_proof_repository_backlog(
+            connection,
+            max_batch=max_batch,
         ),
     )
     _accumulate_health(
@@ -1508,6 +1709,44 @@ def _accumulate_feedback(totals: dict[str, int], result: Mapping[str, int]) -> N
         for key in required
     ):
         raise AlrEventConsumerError("feedback_result_invalid")
+    for key in required:
+        totals[key] = totals.get(key, 0) + result[key]
+
+
+def _accumulate_candidate_proof_repository(
+    totals: dict[str, int],
+    result: Mapping[str, int],
+) -> None:
+    required = {
+        "candidate_proof_scans",
+        "candidate_proof_projection_rows_read",
+        "candidate_proof_source_event_rows_read",
+        "candidate_proof_projection_edge_rows_read",
+        "candidate_proof_source_event_rows_rechecked",
+        "candidate_proof_projection_edge_rows_rechecked",
+        "candidate_proof_outcome_bridge_rows_scanned",
+        "candidate_proof_outcome_bridge_rows_rechecked",
+        "candidate_proof_receipts",
+        "candidate_proof_pending",
+        "candidate_proof_no_fill",
+        "candidate_proof_ready_for_reward_validation",
+        "candidate_proof_invalid",
+        "candidate_proof_schema_required_overflow",
+        "candidate_proof_rows_written",
+        "candidate_proof_payload_bytes_written",
+    }
+    if set(result) != required or any(
+        isinstance(result[key], bool)
+        or not isinstance(result[key], int)
+        or result[key] < 0
+        for key in required
+    ):
+        raise AlrEventConsumerError("candidate_proof_result_invalid")
+    if (
+        result["candidate_proof_rows_written"] != 0
+        or result["candidate_proof_payload_bytes_written"] != 0
+    ):
+        raise AlrEventConsumerError("candidate_proof_write_claim")
     for key in required:
         totals[key] = totals.get(key, 0) + result[key]
 

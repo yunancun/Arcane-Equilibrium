@@ -380,6 +380,28 @@ def _patch_non_candidate_boundaries(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr(
         consumer,
+        "process_candidate_proof_repository_backlog",
+        lambda connection, *, max_batch: {
+            "candidate_proof_scans": 1,
+            "candidate_proof_projection_rows_read": 0,
+            "candidate_proof_source_event_rows_read": 0,
+            "candidate_proof_projection_edge_rows_read": 0,
+            "candidate_proof_source_event_rows_rechecked": 0,
+            "candidate_proof_projection_edge_rows_rechecked": 0,
+            "candidate_proof_outcome_bridge_rows_scanned": 0,
+            "candidate_proof_outcome_bridge_rows_rechecked": 0,
+            "candidate_proof_receipts": 0,
+            "candidate_proof_pending": 0,
+            "candidate_proof_no_fill": 0,
+            "candidate_proof_ready_for_reward_validation": 0,
+            "candidate_proof_invalid": 0,
+            "candidate_proof_schema_required_overflow": 0,
+            "candidate_proof_rows_written": 0,
+            "candidate_proof_payload_bytes_written": 0,
+        },
+    )
+    monkeypatch.setattr(
+        consumer,
         "process_retention_backlog",
         lambda connection, *, max_batch: {
             "retention_scanned": 0,

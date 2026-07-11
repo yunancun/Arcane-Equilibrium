@@ -10,6 +10,9 @@ import pytest
 
 from ml_training import alr_event_consumer as consumer
 from ml_training import alr_freshness_runtime as freshness
+from ml_training.candidate_proof_repository import (
+    compute_candidate_proof_repository_receipt_hash,
+)
 from ml_training.alr_event_consumer import (
     ALR_SCANNER_NOTIFY_CHANNEL,
     AlrEventConsumerError,
@@ -20,6 +23,7 @@ from ml_training.alr_event_consumer import (
     runtime_file_lock,
     release_single_instance,
     parse_scanner_notification,
+    process_candidate_proof_repository_backlog,
     process_health_snapshot,
     process_outcome_feedback_backlog,
     process_retention_backlog,
@@ -27,6 +31,28 @@ from ml_training.alr_event_consumer import (
     verify_runtime_source_head,
     wait_for_pg_notifications,
 )
+
+
+_CANDIDATE_PROOF_NO_AUTHORITY = {
+    "exchange_authority": False,
+    "trading_authority": False,
+    "order_or_probe_authority": False,
+    "decision_lease_authority": False,
+    "cost_gate_authority": False,
+    "proof_authority": False,
+    "serving_authority": False,
+    "promotion_authority": False,
+    "latest_authority": False,
+}
+_CANDIDATE_PROOF_AUTHORITY_COUNTERS = {
+    "exchange_contact_count": 0,
+    "trading_action_count": 0,
+    "order_or_probe_count": 0,
+    "decision_lease_count": 0,
+    "cost_gate_change_count": 0,
+    "proof_claim_count": 0,
+    "serving_or_promotion_count": 0,
+}
 
 
 def _notification_payload(**overrides: object) -> str:
@@ -51,6 +77,75 @@ def _drain_result(**overrides: int) -> dict[str, int]:
     }
     result.update(overrides)
     return result
+
+
+def _candidate_proof_result(**overrides: int) -> dict[str, int]:
+    result = {
+        "candidate_proof_scans": 1,
+        "candidate_proof_projection_rows_read": 0,
+        "candidate_proof_source_event_rows_read": 0,
+        "candidate_proof_projection_edge_rows_read": 0,
+        "candidate_proof_source_event_rows_rechecked": 0,
+        "candidate_proof_projection_edge_rows_rechecked": 0,
+        "candidate_proof_outcome_bridge_rows_scanned": 0,
+        "candidate_proof_outcome_bridge_rows_rechecked": 0,
+        "candidate_proof_receipts": 0,
+        "candidate_proof_pending": 0,
+        "candidate_proof_no_fill": 0,
+        "candidate_proof_ready_for_reward_validation": 0,
+        "candidate_proof_invalid": 0,
+        "candidate_proof_schema_required_overflow": 0,
+        "candidate_proof_rows_written": 0,
+        "candidate_proof_payload_bytes_written": 0,
+    }
+    result.update(overrides)
+    return result
+
+
+def _pending_candidate_proof_receipt() -> dict[str, object]:
+    receipt: dict[str, object] = {
+        "schema_version": "candidate_proof_repository_receipt_v1",
+        "status": "PENDING_EVIDENCE",
+        "projection_identity_status": "RECONSTRUCTED_FROM_HASH_VALIDATED_ROWS",
+        "original_ephemeral_projection_hash_attested": False,
+        "durability": {
+            "source_container": "NO_MATCHING_HASH_VALIDATED_ROW",
+            "runtime_or_exchange_attested": False,
+            "receipt_persisted": False,
+        },
+        "no_authority": dict(_CANDIDATE_PROOF_NO_AUTHORITY),
+        "authority_counters": dict(_CANDIDATE_PROOF_AUTHORITY_COUNTERS),
+    }
+    receipt["receipt_hash"] = compute_candidate_proof_repository_receipt_hash(
+        receipt
+    )
+    return receipt
+
+
+def _valid_candidate_proof_batch() -> dict[str, object]:
+    return {
+        "schema_version": "candidate_proof_repository_batch_v1",
+        "status": "READY",
+        "receipts": [_pending_candidate_proof_receipt()],
+        "metrics": {
+            "candidate_projection_rows_read": 2,
+            "source_event_rows_read": 3,
+            "projection_edge_rows_read": 3,
+            "source_event_rows_rechecked": 3,
+            "projection_edge_rows_rechecked": 3,
+            "outcome_bridge_rows_scanned": 0,
+            "outcome_bridge_rows_rechecked": 0,
+            "receipts_built": 1,
+            "pending_receipts": 1,
+            "no_fill_receipts": 0,
+            "ready_for_reward_validation_receipts": 0,
+            "invalid_receipts": 0,
+            "rows_written": 0,
+            "payload_bytes_written": 0,
+        },
+        "no_authority": dict(_CANDIDATE_PROOF_NO_AUTHORITY),
+        "authority_counters": dict(_CANDIDATE_PROOF_AUTHORITY_COUNTERS),
+    }
 
 
 def test_accepts_only_identity_bound_scanner_notification() -> None:
@@ -606,6 +701,12 @@ def test_candidate_board_wake_runs_candidate_only_with_zero_scanner_drain_rows(
     monkeypatch.setattr(consumer, "run_candidate_aware_backlog", candidate_only)
     monkeypatch.setattr(
         consumer,
+        "process_candidate_proof_repository_backlog",
+        lambda connection, *, max_batch: calls.append("proof_repository")
+        or _candidate_proof_result(),
+    )
+    monkeypatch.setattr(
+        consumer,
         "process_health_snapshot",
         lambda *args, **kwargs: calls.append("health")
         or {
@@ -658,7 +759,13 @@ def test_candidate_board_wake_runs_candidate_only_with_zero_scanner_drain_rows(
         monotonic_seconds=iter([0.0, 61.0]).__next__,
     )
 
-    assert calls == ["startup_full", "candidate_only", "health"]
+    assert calls == [
+        "startup_full",
+        "candidate_only",
+        "proof_repository",
+        "health",
+    ]
+
     assert candidate_inputs == [
         (
             "a" * 40,
@@ -1147,6 +1254,132 @@ def test_feedback_backlog_persists_absence_and_requests_rotation(
     }
 
 
+def test_candidate_proof_repository_backlog_maps_only_read_only_metrics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed_limits: list[int] = []
+
+    def discover(connection: object, *, limit: int) -> dict[str, object]:
+        del connection
+        observed_limits.append(limit)
+        return {
+            "schema_version": "candidate_proof_repository_batch_v1",
+            "status": "READY",
+            "receipts": [_pending_candidate_proof_receipt()],
+            "metrics": {
+                "candidate_projection_rows_read": 1,
+                "source_event_rows_read": 3,
+                "projection_edge_rows_read": 3,
+                "source_event_rows_rechecked": 3,
+                "projection_edge_rows_rechecked": 3,
+                "outcome_bridge_rows_scanned": 0,
+                "outcome_bridge_rows_rechecked": 0,
+                "receipts_built": 1,
+                "pending_receipts": 1,
+                "no_fill_receipts": 0,
+                "ready_for_reward_validation_receipts": 0,
+                "invalid_receipts": 0,
+                "rows_written": 0,
+                "payload_bytes_written": 0,
+            },
+            "no_authority": dict(_CANDIDATE_PROOF_NO_AUTHORITY),
+            "authority_counters": dict(_CANDIDATE_PROOF_AUTHORITY_COUNTERS),
+        }
+
+    monkeypatch.setattr(consumer, "discover_candidate_proof_receipts", discover)
+
+    result = process_candidate_proof_repository_backlog(object(), max_batch=8)
+
+    assert result == _candidate_proof_result(
+        candidate_proof_projection_rows_read=1,
+        candidate_proof_source_event_rows_read=3,
+        candidate_proof_projection_edge_rows_read=3,
+        candidate_proof_source_event_rows_rechecked=3,
+        candidate_proof_projection_edge_rows_rechecked=3,
+        candidate_proof_receipts=1,
+        candidate_proof_pending=1,
+    )
+    assert observed_limits == [8]
+
+
+def test_candidate_proof_repository_backlog_rejects_any_write_claim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    batch = {
+        "schema_version": "candidate_proof_repository_batch_v1",
+        "status": "READY",
+        "receipts": [],
+        "metrics": {
+            "candidate_projection_rows_read": 0,
+            "source_event_rows_read": 0,
+            "projection_edge_rows_read": 0,
+            "source_event_rows_rechecked": 0,
+            "projection_edge_rows_rechecked": 0,
+            "outcome_bridge_rows_scanned": 0,
+            "outcome_bridge_rows_rechecked": 0,
+            "receipts_built": 0,
+            "pending_receipts": 0,
+            "no_fill_receipts": 0,
+            "ready_for_reward_validation_receipts": 0,
+            "invalid_receipts": 0,
+            "rows_written": 1,
+            "payload_bytes_written": 0,
+        },
+        "no_authority": dict(_CANDIDATE_PROOF_NO_AUTHORITY),
+        "authority_counters": dict(_CANDIDATE_PROOF_AUTHORITY_COUNTERS),
+    }
+    monkeypatch.setattr(
+        consumer,
+        "discover_candidate_proof_receipts",
+        lambda connection, *, limit: batch,
+    )
+
+    with pytest.raises(AlrEventConsumerError, match="candidate_proof_write_claim"):
+        process_candidate_proof_repository_backlog(object(), max_batch=8)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "reason"),
+    (
+        ("unknown_status", "receipt_status"),
+        ("truncated_authority", "authority"),
+        ("receipt_authority", "receipt_authority"),
+        ("ready_without_receipt", "batch_status"),
+        ("no_current_with_receipt", "batch_status"),
+    ),
+)
+def test_candidate_proof_backlog_rejects_contract_or_authority_drift(
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+    reason: str,
+) -> None:
+    batch = _valid_candidate_proof_batch()
+    receipts = batch["receipts"]
+    metrics = batch["metrics"]
+    assert isinstance(receipts, list) and isinstance(metrics, dict)
+    if mutation == "unknown_status":
+        receipts[0]["status"] = "UNREVIEWED_POSITIVE"
+        metrics["pending_receipts"] = 0
+    elif mutation == "truncated_authority":
+        batch["no_authority"] = {"proof_authority": False}
+    elif mutation == "receipt_authority":
+        receipts[0]["no_authority"]["proof_authority"] = True
+    elif mutation == "ready_without_receipt":
+        batch["receipts"] = []
+        metrics["receipts_built"] = 0
+        metrics["pending_receipts"] = 0
+    else:
+        batch["status"] = "NO_CURRENT_SELECTED_CANDIDATE"
+    monkeypatch.setattr(
+        consumer,
+        "discover_candidate_proof_receipts",
+        lambda connection, *, limit: batch,
+    )
+
+    with pytest.raises(AlrEventConsumerError, match=reason):
+        process_candidate_proof_repository_backlog(object(), max_batch=8)
+
+
 def test_event_loop_processes_feedback_before_next_target_rotation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1215,6 +1448,18 @@ def test_event_loop_processes_feedback_before_next_target_rotation(
     monkeypatch.setattr(consumer, "run_candidate_aware_backlog", target)
     monkeypatch.setattr(
         consumer,
+        "process_candidate_proof_repository_backlog",
+        lambda connection, *, max_batch: calls.append("proof_repository")
+        or _candidate_proof_result(
+            candidate_proof_projection_rows_read=1,
+            candidate_proof_source_event_rows_read=3,
+            candidate_proof_projection_edge_rows_read=3,
+            candidate_proof_receipts=1,
+            candidate_proof_pending=1,
+        ),
+    )
+    monkeypatch.setattr(
+        consumer,
         "process_retention_backlog",
         lambda connection, *, max_batch: calls.append("retention")
         or {
@@ -1259,9 +1504,17 @@ def test_event_loop_processes_feedback_before_next_target_rotation(
         candidate_policy={"policy_hash": "b" * 64},
     )
 
-    assert calls == ["feedback", "target", "retention", "health"]
+    assert calls == [
+        "feedback",
+        "target",
+        "proof_repository",
+        "retention",
+        "health",
+    ]
     assert result["feedback_rotations"] == 1
     assert result["training_runs"] == 0
+    assert result["candidate_proof_pending"] == 1
+    assert result["candidate_proof_rows_written"] == 0
     assert captured_target_config == [
         (Path("/durable/evidence"), {"policy_hash": "b" * 64})
     ]
@@ -1316,6 +1569,7 @@ def test_idle_health_heartbeat_does_not_trigger_another_training_cycle(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     target_calls = 0
+    proof_repository_calls = 0
     health_calls = 0
     waits = 0
 
@@ -1380,6 +1634,17 @@ def test_idle_health_heartbeat_does_not_trigger_another_training_cycle(
         }
 
     monkeypatch.setattr(consumer, "run_candidate_aware_backlog", target)
+
+    def proof_repository(*args: object, **kwargs: object) -> dict[str, int]:
+        nonlocal proof_repository_calls
+        proof_repository_calls += 1
+        return _candidate_proof_result()
+
+    monkeypatch.setattr(
+        consumer,
+        "process_candidate_proof_repository_backlog",
+        proof_repository,
+    )
     monkeypatch.setattr(
         consumer,
         "process_retention_backlog",
@@ -1409,6 +1674,7 @@ def test_idle_health_heartbeat_does_not_trigger_another_training_cycle(
     )
 
     assert target_calls == 1
+    assert proof_repository_calls == 1
     assert health_calls == 2
 
 
