@@ -765,7 +765,7 @@ function ocInjectBaseCSS() {
     .oc-chip-bad { background: rgba(248,81,73,0.12); border-color: rgba(248,81,73,0.25); color: var(--neg); }
     .oc-chip-neutral { background: rgba(139,148,158,0.1); border-color: rgba(139,148,158,0.2); color: var(--text-secondary); }
     .oc-chip-info { background: rgba(56,139,253,0.12); border-color: rgba(56,139,253,0.25); color: var(--text-secondary); }
-    .oc-chip-live { background: rgba(168,85,247,0.12); border-color: rgba(168,85,247,0.3); color: #a855f7; }
+    .oc-chip-live { background: var(--live-bg); border-color: var(--live); color: var(--live); }
 
     /* Strategy Identity Chips */
     .oc-strategy-chip { display: inline-flex; align-items: center; gap: 5px; border-radius: 999px;
@@ -974,7 +974,7 @@ function ocInjectBaseCSS() {
     .live-metric-val.pos { color: var(--pos); }
     .live-metric-val.neg { color: var(--neg); }
     .live-metric-val.neutral { color: var(--text-primary); }
-    .live-metric-val.purple { color: #a855f7; }
+    .live-metric-val.purple { color: var(--text-primary); }
     .live-metric-sub { font-size: 10px; color: var(--text-secondary); margin-top: 2px; }
 
     /* Load-error state / 載入失败状态 — used by ocLoadError() */
