@@ -61,7 +61,10 @@
     { id: 'monitor',    lane: 'cross', hash: '#/cross/monitor',    src: '/static/tab-monitoring.html', visId: 'monitoring',  label: '監控 Monitor', iframe: false },
     { id: 'ai',         lane: 'cross', hash: '#/cross/ai',         src: '/static/tab-ai.html',         visId: 'ai',          label: 'AI 狀態' },
     { id: 'agents',     lane: 'cross', hash: '#/cross/agents',     src: '/static/tab-agents.html',     visId: 'agents',      label: 'Agent 團隊' },
-    { id: 'learning',   lane: 'cross', hash: '#/cross/learning',   src: '/static/tab-learning.html',   visId: 'learning',    label: '學習 Learning' },
+    // learning:Phase 2 第 4 個原生遷移(iframe:false;**首個含寫**)——render/pause/resume 由 view-learning.js 註冊於
+    //   window.OC_NATIVE_VIEWS(id=learning);src 保留 legacy tab-learning 作 registry 完整性 + 回滾錨,原生渲染接管。
+    //   3 學習治理寫(review/decide × approve/reject/ask_ai + auto/{scan})preserve 既有端點,不新增寫路徑。
+    { id: 'learning',   lane: 'cross', hash: '#/cross/learning',   src: '/static/tab-learning.html',   visId: 'learning',    label: '學習 Learning', iframe: false },
     // development:Phase 2 第 3 個原生遷移(iframe:false)——render/pause/resume 由 view-development.js 註冊於
     //   window.OC_NATIVE_VIEWS(id=development);src 保留 legacy tab-development 作 registry 完整性 + 回滾錨,原生渲染接管。
     { id: 'development', lane: 'cross', hash: '#/cross/development', src: '/static/tab-development.html', visId: 'development', label: '開發 Support', iframe: false },
