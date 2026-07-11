@@ -353,6 +353,7 @@ def _evidence_snapshot(
     snapshot = {
         "schema_version": "alr_candidate_evidence_snapshot_v2",
         "source_status": status,
+        "generated_at": "2026-07-10T11:59:00Z" if ready else None,
         "evaluated_at": "2026-07-10T12:00:00Z",
         "source_content_sha256": "7" * 64 if ready else None,
         "board_hash": "8" * 64 if ready else None,
@@ -720,11 +721,23 @@ def test_missing_evidence_is_a_hash_bound_no_candidate_artifact() -> None:
     refs = plan["artifact"]["canonical_payload"]["source_refs"]
     assert plan["decision_code"] == "NO_QUALIFIED_CANDIDATE_REPAIR_DATA"
     assert projection["decision"]["evidence_source_status"] == "DIRECTORY_MISSING"
-    assert refs == {
+    assert {
+        key: refs[key]
+        for key in (
+            "evidence_source_status",
+            "evidence_selection_hash",
+            "candidate_set_hash",
+        )
+    } == {
         "evidence_source_status": "DIRECTORY_MISSING",
         "evidence_selection_hash": None,
         "candidate_set_hash": None,
     }
+    assert refs["handoff"]["schema_version"] == "alr_candidate_board_handoff_v1"
+    assert refs["handoff"]["evidence"]["source_status"] == "DIRECTORY_MISSING"
+    assert refs["handoff"]["source_head"] == "d" * 40
+    assert refs["handoff"]["decision_time"] == "2026-07-10T12:00:00Z"
+    assert len(refs["handoff"]["handoff_hash"]) == 64
 
 
 def test_missing_candidate_policy_is_durable_repair_not_generic_rotation() -> None:
@@ -743,6 +756,9 @@ def test_missing_candidate_policy_is_durable_repair_not_generic_rotation() -> No
     assert projection["decision"]["policy_hash"] is None
     assert projection["decision"]["selected_candidate"] is None
     assert projection["decision"]["selected_collection_target"] is None
+    assert projection["decision"]["evaluated_at"] == "2026-07-10T12:00:00Z"
+    handoff = projection["artifact"]["canonical_payload"]["source_refs"]["handoff"]
+    assert handoff["decision_time"] == "2026-07-10T12:00:00Z"
 
 
 def test_candidate_ranking_is_deterministic_while_immutable_source_hash_stays_bound() -> None:
@@ -776,19 +792,22 @@ def test_candidate_ranking_is_deterministic_while_immutable_source_hash_stays_bo
     assert forward == reverse
 
 
-def test_audit_only_evidence_mutation_is_byte_identical_but_selection_delta_is_not() -> None:
+def test_path_only_evidence_mutation_is_stable_but_handoff_hash_delta_is_not() -> None:
     base = _evidence_snapshot()
-    audit_only = copy.deepcopy(base)
-    audit_only.update(
+    path_only = copy.deepcopy(base)
+    path_only["source_file"] = "/different/immutable/file.json"
+    path_only.pop("snapshot_hash")
+    path_only["snapshot_hash"] = _sha(path_only)
+    handoff_delta = copy.deepcopy(base)
+    handoff_delta.update(
         {
-            "source_file": "/different/immutable/file.json",
             "source_content_sha256": "a" * 64,
             "board_hash": "b" * 64,
             "audit_hash": "c" * 64,
         }
     )
-    audit_only.pop("snapshot_hash")
-    audit_only["snapshot_hash"] = _sha(audit_only)
+    handoff_delta.pop("snapshot_hash")
+    handoff_delta["snapshot_hash"] = _sha(handoff_delta)
     changed_candidate = _candidate_row()
     changed_identity = dict(changed_candidate["identity"])
     changed_identity.update({"symbol": "BETAUSDT", "config_hash": "f" * 64})
@@ -802,10 +821,17 @@ def test_audit_only_evidence_mutation_is_byte_identical_but_selection_delta_is_n
         prior_decisions=[],
         policy=_candidate_policy(),
     )
-    audit_changed = build_candidate_aware_learning_projection(
+    path_changed = build_candidate_aware_learning_projection(
         source_head="f" * 40,
         cycles=_cycles(),
-        evidence_snapshot=audit_only,
+        evidence_snapshot=path_only,
+        prior_decisions=[],
+        policy=_candidate_policy(),
+    )
+    handoff_changed = build_candidate_aware_learning_projection(
+        source_head="f" * 40,
+        cycles=_cycles(),
+        evidence_snapshot=handoff_delta,
         prior_decisions=[],
         policy=_candidate_policy(),
     )
@@ -817,12 +843,14 @@ def test_audit_only_evidence_mutation_is_byte_identical_but_selection_delta_is_n
         policy=_candidate_policy(),
     )
 
-    assert first == audit_changed
+    assert first == path_changed
+    assert first["projection_hash"] != handoff_changed["projection_hash"]
     assert first["projection_hash"] != selection_changed["projection_hash"]
     assert set(first["artifact"]["canonical_payload"]["source_refs"]) == {
         "evidence_source_status",
         "evidence_selection_hash",
         "candidate_set_hash",
+        "handoff",
     }
 
 
