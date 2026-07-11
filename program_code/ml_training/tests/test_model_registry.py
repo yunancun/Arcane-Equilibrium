@@ -44,6 +44,7 @@ from program_code.ml_training.model_registry import (
     check_db_connectivity,
     RegistryPersistenceError,
 )
+from program_code.ml_training import model_registry as _model_registry_mod
 from program_code.ml_training.registry_serving_contract import (
     PIT_DATASET_MANIFEST_SCHEMA_VERSION,
     REGISTRY_SERVING_CONTRACT_FIELD,
@@ -51,6 +52,15 @@ from program_code.ml_training.registry_serving_contract import (
     RegistryServingContractError,
     compute_registry_serving_contract_hash,
 )
+
+
+@pytest.fixture(autouse=True)
+def _reset_lineage_probe_cache():
+    # V157 tolerance：_lineage_columns_present 的進程級快取須逐測試歸零，讓每個
+    #   register 測試都以確定狀態（探測會實際觸發）執行，避免跨測試快取滲漏。
+    _model_registry_mod._LINEAGE_COLUMNS_PRESENT = None
+    yield
+    _model_registry_mod._LINEAGE_COLUMNS_PRESENT = None
 
 
 # ───── P1-14: required-artifact persistence criteria + fail-loud ─────
@@ -290,12 +300,20 @@ def test_register_quantile_trio_attaches_serving_contract_to_each_report(tmp_pat
     class FakeCursor:
         def __init__(self):
             self.params = []
+            self._last_was_probe = False
 
         def __enter__(self): return self
         def __exit__(self, *a): return False
-        def execute(self, _sql, params=None):
+        def execute(self, sql, params=None):
+            # V157 tolerance：lineage schema 探測 query 不計入 insert params。
+            if "information_schema.columns" in sql:
+                self._last_was_probe = True
+                return
+            self._last_was_probe = False
             self.params.append(params)
         def fetchone(self):
+            if self._last_was_probe:
+                return (1,)  # 三欄已存在 → 走 full SQL
             return (len(self.params),)
 
     class FakeConn:
@@ -340,12 +358,20 @@ def test_serving_contract_partial_trio_persistence_rolls_back_single_transaction
         def __init__(self):
             self.params = []
             self.rows = [(1,), None, (3,)]
+            self._last_was_probe = False
 
         def __enter__(self): return self
         def __exit__(self, *a): return False
-        def execute(self, _sql, params=None):
+        def execute(self, sql, params=None):
+            # V157 tolerance：lineage schema 探測 query 不消耗 self.rows。
+            if "information_schema.columns" in sql:
+                self._last_was_probe = True
+                return
+            self._last_was_probe = False
             self.params.append(params)
         def fetchone(self):
+            if self._last_was_probe:
+                return (1,)  # 三欄已存在 → 走 full SQL
             return self.rows.pop(0)
 
     class FakeConn:

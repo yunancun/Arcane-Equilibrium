@@ -158,6 +158,7 @@ def test_validate_cpcv_threads_dsn_and_records_status(monkeypatch):
 # Item 7 — model_registry PIT lineage columns
 # =====================================================================
 
+import program_code.ml_training.model_registry as _model_registry_mod
 from program_code.ml_training.model_registry import (
     VERDICT_SHADOW_ONLY,
     register_model,
@@ -165,9 +166,23 @@ from program_code.ml_training.model_registry import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _reset_lineage_probe_cache():
+    # Item 7 tolerance：_lineage_columns_present 用進程級快取，測試間須歸零，
+    #   否則前一測試的探測結果會滲漏到下一測試。
+    _model_registry_mod._LINEAGE_COLUMNS_PRESENT = None
+    yield
+    _model_registry_mod._LINEAGE_COLUMNS_PRESENT = None
+
+
 class _FakeCursor:
-    def __init__(self):
+    def __init__(self, lineage_present: bool = True):
+        # lineage_present 模擬 V157 是否已 apply：True → schema 探測回一列（走 full
+        #   SQL）；False → 探測回 None（走 legacy SQL，V157 pending）。
         self.params = []
+        self.sqls = []
+        self._lineage_present = lineage_present
+        self._last_was_probe = False
 
     def __enter__(self):
         return self
@@ -175,16 +190,25 @@ class _FakeCursor:
     def __exit__(self, *a):
         return False
 
-    def execute(self, _sql, params=None):
+    def execute(self, sql, params=None):
+        if "information_schema.columns" in sql:
+            # schema 探測 query：不計入 insert params，只設旗標供 fetchone 回應。
+            self._last_was_probe = True
+            return
+        self._last_was_probe = False
+        self.sqls.append(sql)
         self.params.append(params)
 
     def fetchone(self):
+        if self._last_was_probe:
+            # 欄位存在 → 回一列；不存在 → None（觸發 legacy 路徑）。
+            return (1,) if self._lineage_present else None
         return (len(self.params),)
 
 
 class _FakeConn:
-    def __init__(self):
-        self.cursor_obj = _FakeCursor()
+    def __init__(self, lineage_present: bool = True):
+        self.cursor_obj = _FakeCursor(lineage_present=lineage_present)
         self.closed = False
 
     def __enter__(self):
@@ -255,6 +279,45 @@ def test_register_quantile_trio_threads_lineage_to_each_row():
         assert params[-3] == start
         assert params[-2] == end
         assert params[-1] == "b" * 64
+
+
+def test_register_model_tolerant_when_lineage_columns_absent():
+    # V157 tolerance：schema 探測回報三欄尚未存在時，register 必須改走 legacy SQL
+    #   （14 param、無 lineage 欄）且仍回傳 id——即 register 不因欄位缺席而失敗。
+    start = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    end = datetime(2026, 6, 20, tzinfo=timezone.utc)
+    fake = _FakeConn(lineage_present=False)
+    with patch("program_code.ml_training.model_registry._connect", return_value=fake):
+        row_id = register_model(
+            strategy="grid_trading",
+            engine_mode="demo",
+            quantile="q50",
+            schema_version="v1",
+            train_date="2026-06-20",
+            artifact_path="/tmp/does_not_exist_q50.onnx",
+            verdict=VERDICT_SHADOW_ONLY,
+            # 即使 caller 帶了 lineage 值，legacy 路徑也應丟棄它們而非把 SQL 撐爆。
+            training_window_start=start,
+            training_window_end=end,
+            pit_manifest_hash="c" * 64,
+        )
+    # 註冊成功（未拋、有 id）= 容忍性成立。
+    assert row_id == 1
+    params = fake.cursor_obj.params[0]
+    # legacy 只綁 14 個 param（drop 掉三個 lineage 值）。
+    assert len(params) == 14
+    # 位序不變性：quantile 仍在 [2]，created_by 是最後一個 param。
+    assert params[2] == "q50"
+    assert params[-1] == "run_training_pipeline"
+    # lineage 值確實不在 param tuple 內。
+    assert start not in params
+    assert end not in params
+    assert ("c" * 64) not in params
+    # 使用的是 legacy SQL：INSERT column list 不含 lineage 欄。
+    used_sql = fake.cursor_obj.sqls[0]
+    assert "pit_manifest_hash" not in used_sql
+    assert "training_window_start" not in used_sql
+    assert "training_window_end" not in used_sql
 
 
 # =====================================================================

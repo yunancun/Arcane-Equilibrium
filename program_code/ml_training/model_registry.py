@@ -87,6 +87,66 @@ _REGISTER_MODEL_SQL = """
                 RETURNING id
                 """
 
+# Item 7 tolerance (V157 pending)：legacy INSERT，故意 **不含** 三個 PIT lineage 欄
+#   （training_window_start / training_window_end / pit_manifest_hash）。當 prod PG
+#   仍在 V150、V157 尚未 apply 時，full SQL 會因欄位不存在而整筆 register 失敗
+#   （quantile 路徑更會升成 RegistryServingContractError）。此 legacy 版只綁 14 個
+#   param，讓 register 在欄位缺席下仍成功；欄位到位後自動切回 full SQL。其餘語意
+#   （ON CONFLICT DO UPDATE、canary_status NOT IN ('promoting','production') guard、
+#   RETURNING id）與 full 版完全一致。
+# Item 7 tolerance (EN): legacy INSERT WITHOUT the 3 PIT-lineage columns; used when
+#   V157 has not been applied yet so `register_model` degrades gracefully instead of
+#   hard-failing. Identical ON CONFLICT / canary guard / RETURNING semantics.
+_LEGACY_REGISTER_MODEL_SQL = """
+                INSERT INTO learning.model_registry (
+                    strategy, engine_mode, quantile, schema_version, train_date,
+                    artifact_path, artifact_size_bytes, artifact_sha256,
+                    acceptance_report, verdict,
+                    feature_schema_hash, training_config_hash, training_sample_size,
+                    created_by
+                ) VALUES (
+                    %s, %s, %s, %s, %s::date,
+                    %s, %s, %s,
+                    %s::jsonb, %s,
+                    %s, %s, %s,
+                    %s
+                )
+                ON CONFLICT (strategy, engine_mode, quantile, schema_version, train_date)
+                DO UPDATE SET
+                    artifact_path         = EXCLUDED.artifact_path,
+                    artifact_size_bytes   = EXCLUDED.artifact_size_bytes,
+                    artifact_sha256       = EXCLUDED.artifact_sha256,
+                    acceptance_report     = EXCLUDED.acceptance_report,
+                    verdict               = EXCLUDED.verdict,
+                    feature_schema_hash   = EXCLUDED.feature_schema_hash,
+                    training_config_hash  = EXCLUDED.training_config_hash,
+                    training_sample_size  = EXCLUDED.training_sample_size,
+                    created_by            = EXCLUDED.created_by,
+                    updated_at            = NOW()
+                WHERE learning.model_registry.canary_status NOT IN ('promoting', 'production')
+                RETURNING id
+                """
+
+# 一次性 schema 探測：查 information_schema 確認 lineage 欄是否已存在。
+#   pit_manifest_hash 是 V157 三欄中最後 append 的一欄，存在即代表三欄齊備。
+# One-time schema probe: pit_manifest_hash is the last of the three V157 columns,
+#   so its presence implies the whole lineage trio is available.
+_LINEAGE_PROBE_SQL = """
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_schema = 'learning'
+                  AND table_name = 'model_registry'
+                  AND column_name = 'pit_manifest_hash'
+                LIMIT 1
+                """
+
+# 進程級快取：None=尚未探測；True=三欄存在（走 full SQL）；False=尚未存在（走
+#   legacy SQL，V157 pending）。cron 是一次性進程，V157 對整段執行要嘛全 applied
+#   要嘛全未 applied，故一次探測快取到進程結束即可；下一次 cron 進程 cache 歸零重探，
+#   V157 apply 後自動切回 full。測試可將本 global 設回 None 重置。
+# Process-scoped cache for the lineage-column probe (tests reset it to None).
+_LINEAGE_COLUMNS_PRESENT: Optional[bool] = None
+
 # Canary status state-machine values (keep aligned with V023 CHECK constraint).
 # 狀態機值（與 V023 CHECK 對齊）。
 CANARY_SHADOW = "shadow"
@@ -388,6 +448,11 @@ def register_quantile_trio_from_onnx_out(
             logger.warning("model_registry: acceptance_report read %s failed: %s",
                            acceptance_report_path, e)
 
+    # V157 tolerance note：production cron 以 contract_bound_run=False 執行 →
+    #   registry_serving_contract 恆為 None → 走下方 per-quantile register_model 迴圈，
+    #   而非 _register_serving_contract_trio_atomic。兩條路徑最終都經 _register_model_row，
+    #   已對 lineage 欄缺席容忍（V157 pending 走 legacy SQL），故 serving-contract 路徑
+    #   （僅 contract_bound_run=True 才進，prod 永不觸及）同樣容忍，不硬性要求三欄存在。
     if registry_serving_contract is not None:
         # registry_serving_contract 是 JSONB 內的 source-only advisory metadata。
         # 只有完整且唯一的 q10/q50/q90 written trio 可攜帶它；partial/q50-only
@@ -465,6 +530,37 @@ def register_quantile_trio_from_onnx_out(
     return registered
 
 
+def _lineage_columns_present(cur: Any) -> bool:
+    """探測 `learning.model_registry` 是否已具備 V157 的三個 PIT lineage 欄。
+    Probe whether the V157 PIT-lineage columns exist yet (cached process-wide).
+
+    為何需要：V157 是 PENDING migration（prod 仍在 V150），若 register 無條件寫三欄，
+    欄位缺席時整筆 INSERT 會失敗、quantile 路徑更會升成 RegistryServingContractError。
+    先探測一次並快取，讓 register 路徑在欄位到位前走 legacy SQL、到位後走 full SQL。
+    探測失敗（極少：多半代表連線已壞，屆時 INSERT 也會失敗）→ 保守回 legacy 且不快取，
+    下次重探。
+    """
+    global _LINEAGE_COLUMNS_PRESENT
+    if _LINEAGE_COLUMNS_PRESENT is not None:
+        return _LINEAGE_COLUMNS_PRESENT
+    try:
+        cur.execute(_LINEAGE_PROBE_SQL)
+        row = cur.fetchone()
+    except Exception as e:  # noqa: BLE001 — 探測失敗保守走 legacy，不快取以便重探
+        logger.warning(
+            "model_registry: lineage 欄位探測失敗，暫走 legacy register 路徑: %s", e,
+        )
+        return False
+    present = row is not None
+    _LINEAGE_COLUMNS_PRESENT = present
+    if not present:
+        # 只在首次判定為缺席時 log 一行（快取後不再重複）。
+        logger.info(
+            "model_registry: PIT lineage 欄位尚未存在（V157 pending）；register 暫走 legacy 路徑"
+        )
+    return present
+
+
 def _register_model_row(
     cur: Any,
     *,
@@ -486,17 +582,32 @@ def _register_model_row(
     training_window_end: Any = None,
     pit_manifest_hash: Optional[str] = None,
 ) -> Optional[int]:
-    cur.execute(
-        _REGISTER_MODEL_SQL,
-        (
-            strategy, engine_mode, quantile, schema_version, train_date,
-            artifact_path, artifact_size_bytes, artifact_sha256,
-            report_jsonb, verdict,
-            feature_schema_hash, training_config_hash, training_sample_size,
-            created_by,
-            training_window_start, training_window_end, pit_manifest_hash,
-        ),
-    )
+    # V157 已 apply → full SQL（17 param，含三個 lineage 欄）；未 apply → legacy SQL
+    #   （14 param，丟掉三個 lineage 值）。兩條路徑其餘語意一致，故 register_model
+    #   與 _register_serving_contract_trio_atomic 兩個上游都自動獲得容忍性。
+    if _lineage_columns_present(cur):
+        cur.execute(
+            _REGISTER_MODEL_SQL,
+            (
+                strategy, engine_mode, quantile, schema_version, train_date,
+                artifact_path, artifact_size_bytes, artifact_sha256,
+                report_jsonb, verdict,
+                feature_schema_hash, training_config_hash, training_sample_size,
+                created_by,
+                training_window_start, training_window_end, pit_manifest_hash,
+            ),
+        )
+    else:
+        cur.execute(
+            _LEGACY_REGISTER_MODEL_SQL,
+            (
+                strategy, engine_mode, quantile, schema_version, train_date,
+                artifact_path, artifact_size_bytes, artifact_sha256,
+                report_jsonb, verdict,
+                feature_schema_hash, training_config_hash, training_sample_size,
+                created_by,
+            ),
+        )
     row = cur.fetchone()
     row_id = int(row[0]) if row else None
     logger.info(
