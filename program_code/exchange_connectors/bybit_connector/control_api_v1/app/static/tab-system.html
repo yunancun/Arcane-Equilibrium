@@ -191,7 +191,7 @@
       <div class="mode-btn-desc">Paper 模擬 + Bybit Demo 演示沙盒雙重執行</div>
     </button>
     <button class="mode-btn mode-btn--live" id="mbtn-live_reserved"  onclick="confirmMode('live_reserved')">
-      <div class="mode-btn-icon">🟣</div>
+      <div class="mode-btn-icon">🔴</div>
       <div class="mode-btn-name">實盤</div>
       <div class="mode-btn-sub">live_reserved</div>
       <div class="mode-btn-desc">Live 引擎開放 — 真實資金交易</div>
@@ -430,8 +430,8 @@ const MODE_CONFIRM = {
 <p class="mt-2 fs-dense t-dim">適用場景：完整測試交易鏈路（含 Bybit 訂單撮合），驗證策略在真實訂單流中的表現。</p>`
   },
   live_reserved: {
-    icon: '🟣', label: '實盤',
-    title: '🟣 切換到實盤模式 / live_reserved',
+    icon: '🔴', label: '實盤',
+    title: '🔴 切換到實盤模式 / live_reserved',
     body: `<strong class="purple">⚠ 實盤模式 — 真實資金風險</strong>
 <ul class="confirm-list">
   <li>引擎模式：<strong>live_reserved</strong> — 允許實盤引擎啟動</li>
@@ -440,7 +440,7 @@ const MODE_CONFIRM = {
   <li>真實資金：<strong>所有訂單使用真實 Bybit 賬戶資金</strong></li>
   <li>前置條件：OPENCLAW_ALLOW_MAINNET=1 + Live API Key 配置</li>
 </ul>
-<div class="warn-box warn-box--live">🟣 此模式開放實盤交易權限。確認前請檢查風控參數和 API Key 配置。</div>
+<div class="warn-box warn-box--live">🔴 此模式開放實盤交易權限。確認前請檢查風控參數和 API Key 配置。</div>
 <p class="mt-2 fs-dense t-dim">切換後 Paper/Demo session 繼續獨立運行，live session 需單獨在實盤 Tab 啟動/停止。</p>`
   },
 };

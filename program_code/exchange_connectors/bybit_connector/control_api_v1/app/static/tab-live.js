@@ -976,10 +976,10 @@ async function checkLiveEngineStatus() {
   if (!badge) return;
 
   // F5/A1: badge text reflects endpoint identity (Mainnet vs LiveDemo)
-  //        instead of always saying "Live 實盤 運行中 🟣" which misled
+  //        instead of always saying "Live 實盤 運行中 🔴" which misled
   //        operators when the slot was actually demo-bound.
   // F5/A1：徽章文字反映 endpoint 身份（Mainnet vs LiveDemo），不再永遠寫
-  // 「Live 實盤 運行中 🟣」誤導 — 槽是 demo 時就明確寫 LiveDemo。
+  // 「Live 實盤 運行中 🔴」誤導 — 槽是 demo 時就明確寫 LiveDemo。
   const isActive = sessionState === 'active';
   const isPausedOrStopped = sessionState === 'paused' || sessionState === 'stopped';
   const epLabel = _liveModeState.actual_endpoint === 'mainnet' ? 'Mainnet'
@@ -990,7 +990,7 @@ async function checkLiveEngineStatus() {
                   : '引擎離線';
   if (isActive) {
     badge.textContent = epLabel + ' ' + stateZh + (
-      _liveModeState.actual_endpoint === 'mainnet' ? ' 🟣' :
+      _liveModeState.actual_endpoint === 'mainnet' ? ' 🔴' :
       _liveModeState.actual_endpoint === 'live_demo' ? ' 🟠' : ''
     );
     // C6d follow-up：oc-chip-live 由紫改 --live 熱紅後會過度警示 —
