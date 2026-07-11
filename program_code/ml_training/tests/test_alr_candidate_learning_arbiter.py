@@ -198,6 +198,37 @@ def _candidate(**overrides: object) -> dict[str, object]:
     return _rehash_candidate(candidate)
 
 
+def _with_conservative_cost_evidence(
+    candidate: dict[str, object],
+) -> dict[str, object]:
+    candidate["cost_evidence"] = {
+        "schema_version": "alr_candidate_cost_evidence_v2",
+        "basis": "conservative_v1",
+        "source_payload_sha256": None,
+        "source_asof_utc": None,
+        "normalized_projection_sha256": None,
+        "max_age_hours": 48,
+        "fee_floor_bps": 11.0,
+        "mean_abs_source": {
+            "scope": "NONE",
+            "symbol": None,
+            "sample_count": 0,
+            "mean_abs_bps": None,
+        },
+        "tail_source": {
+            "scope": "NONE",
+            "symbol": None,
+            "sample_count": 0,
+            "tail_bps": None,
+            "tail_metric": None,
+        },
+    }
+    quality = dict(candidate["quality"])
+    quality["cost_recomputable_share"] = 0.0
+    candidate["quality"] = quality
+    return candidate
+
+
 def _rehash_resource(resource: dict[str, object]) -> None:
     daily_buckets = [
         {
@@ -301,6 +332,22 @@ def test_cost_evidence_is_an_exact_hash_bound_arbiter_input(
     )
 
     assert result["evaluated_candidates"][0]["blocker_codes"] == [expected]
+
+
+def test_conservative_cost_evidence_accepts_exact_integer_zero_sample_counts() -> None:
+    result = build_candidate_learning_decision(
+        source_head=SOURCE_HEAD,
+        scanner_research_seeds=[],
+        candidate_evidence_board=[
+            _with_conservative_cost_evidence(_candidate())
+        ],
+        prior_decisions=[],
+        policy=_policy(),
+    )
+
+    assessment = result["evaluated_candidates"][0]
+    assert assessment["state"] == "REPAIR_DATA_QUALITY"
+    assert assessment["blocker_codes"] == ["COST_NOT_RECOMPUTABLE"]
 
 
 @pytest.mark.parametrize(

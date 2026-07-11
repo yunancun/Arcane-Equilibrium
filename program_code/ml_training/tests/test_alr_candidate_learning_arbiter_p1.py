@@ -6,9 +6,6 @@ import copy
 
 import pytest
 
-from program_code.ml_training.alr_candidate_learning_arbiter import (
-    build_candidate_learning_decision,
-)
 from program_code.ml_training.tests.test_alr_candidate_learning_arbiter import (
     SOURCE_HEAD,
     _candidate,
@@ -16,6 +13,8 @@ from program_code.ml_training.tests.test_alr_candidate_learning_arbiter import (
     _policy,
     _rehash_resource,
     _set_n_eff,
+    _with_conservative_cost_evidence,
+    build_candidate_learning_decision,
 )
 
 
@@ -23,7 +22,7 @@ def _policy_v2(**overrides: object) -> dict[str, object]:
     policy: dict[str, object] = {
         "decision_ts_s": 1_782_086_400,
         "as_of_utc_date": "2026-06-22",
-        "algorithm_version": "candidate_learning_arbiter_v1",
+        "algorithm_version": "candidate_learning_arbiter_v2",
         "tie_break_version": "candidate_learning_tie_break_v1",
         "q18_scale": 18,
         "thresholds": {
@@ -47,6 +46,219 @@ def _policy_v2(**overrides: object) -> dict[str, object]:
     }
     policy["policy_config_hash"] = _canonical_hash(stable_config)
     return policy
+
+
+def _rehash_direct_policy(policy: dict[str, object]) -> None:
+    stable_config = {
+        key: value
+        for key, value in policy.items()
+        if key not in {"decision_ts_s", "as_of_utc_date", "policy_config_hash"}
+    }
+    policy["policy_config_hash"] = _canonical_hash(stable_config)
+
+
+@pytest.mark.parametrize("mutation", ["top_level", "threshold"])
+def test_rehashed_direct_policy_rejects_noncanonical_field_shapes(
+    mutation: str,
+) -> None:
+    policy = _policy_v2()
+    if mutation == "top_level":
+        policy["unexpected_policy_field"] = True
+    else:
+        thresholds = dict(policy["thresholds"])
+        thresholds["unexpected_threshold"] = "0.1"
+        policy["thresholds"] = thresholds
+    _rehash_direct_policy(policy)
+
+    result = build_candidate_learning_decision(
+        source_head=SOURCE_HEAD,
+        scanner_research_seeds=[],
+        candidate_evidence_board=[_candidate()],
+        prior_decisions=[],
+        policy=policy,
+    )
+
+    assert result["candidate_assessments"][0]["blocker_codes"] == [
+        "POLICY_INVALID"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_code"),
+    [
+        ("strategy_version", "STRATEGY_VERSION_INVALID"),
+        ("symbol_case", "SYMBOL_INVALID"),
+        ("venue", "MARKET_IDENTITY_INVALID"),
+        ("product", "MARKET_IDENTITY_INVALID"),
+        ("horizon", "HORIZON_INVALID"),
+        ("target_label", "TARGET_REGIME_INVALID"),
+        ("target_hash", "TARGET_REGIME_HASH_INVALID"),
+        ("identity_extra", "IDENTITY_FIELDS_INVALID"),
+        ("target_extra", "TARGET_REGIME_INVALID"),
+        ("context_extra", "CONTEXT_HASHES_FIELDS_INVALID"),
+        ("cost_extra", "COST_EVIDENCE_FIELDS_INVALID"),
+        ("cost_symbol", "COST_EVIDENCE_SEMANTICS_INVALID"),
+        ("cost_sample_count", "COST_EVIDENCE_SEMANTICS_INVALID"),
+        ("cost_timestamp", "COST_EVIDENCE_TIMESTAMP_INVALID"),
+        ("cost_conservative_mean_bool_zero", "COST_EVIDENCE_SEMANTICS_INVALID"),
+        ("cost_conservative_mean_float_zero", "COST_EVIDENCE_SEMANTICS_INVALID"),
+        ("cost_conservative_tail_bool_zero", "COST_EVIDENCE_SEMANTICS_INVALID"),
+        ("cost_conservative_tail_float_zero", "COST_EVIDENCE_SEMANTICS_INVALID"),
+        ("quality_extra", "QUALITY_FIELDS_INVALID"),
+        ("quality_coercion", "QUALITY_TYPES_INVALID"),
+        ("evidence_extra", "EVIDENCE_FIELDS_INVALID"),
+        ("evidence_coercion", "EVIDENCE_TYPES_INVALID"),
+        ("next_gap_extra", "NEXT_GAP_INVALID"),
+        ("resource_extra", "RESOURCE_FIELDS_INVALID"),
+        ("resource_bucket_extra", "RESOURCE_BUCKET_FIELDS_INVALID"),
+        ("portfolio_extra", "PORTFOLIO_FIELDS_INVALID"),
+        ("portfolio_coercion", "PORTFOLIO_TYPES_INVALID"),
+    ],
+)
+def test_arbiter_rejects_rehashed_noncanonical_producer_shapes(
+    mutation: str,
+    expected_code: str,
+) -> None:
+    candidate = _candidate()
+    if mutation.startswith("cost_conservative_"):
+        _with_conservative_cost_evidence(candidate)
+    identity = candidate["identity"]
+    if mutation == "strategy_version":
+        identity["strategy_version"] = "v2.1.0"
+    elif mutation == "symbol_case":
+        identity["symbol"] = "btcusdt"
+    elif mutation == "venue":
+        identity["venue"] = "binance"
+    elif mutation == "product":
+        identity["product"] = "spot"
+    elif mutation == "horizon":
+        identity["horizon_minutes"] = 1_441
+    elif mutation == "identity_extra":
+        identity["unexpected"] = True
+    elif mutation in {"target_label", "target_hash", "target_extra"}:
+        target = dict(identity["target_regime"])
+        if mutation == "target_label":
+            target["label"] = "bull_high_vol"
+            target["hash"] = _canonical_hash(
+                {key: value for key, value in target.items() if key != "hash"}
+            )
+        elif mutation == "target_hash":
+            target["hash"] = "f" * 64
+        else:
+            target["unexpected"] = True
+            target["hash"] = _canonical_hash(
+                {key: value for key, value in target.items() if key != "hash"}
+            )
+        identity["target_regime"] = target
+    elif mutation == "context_extra":
+        candidate["context_hashes"] = {
+            **candidate["context_hashes"],
+            "unexpected": "f" * 64,
+        }
+    elif mutation in {
+        "cost_extra",
+        "cost_symbol",
+        "cost_sample_count",
+        "cost_timestamp",
+    }:
+        cost_evidence = copy.deepcopy(candidate["cost_evidence"])
+        if mutation == "cost_extra":
+            cost_evidence["unexpected"] = True
+        elif mutation == "cost_timestamp":
+            cost_evidence["source_asof_utc"] = "2026-06-21T00:00:00Z"
+        else:
+            cost_evidence["mean_abs_source"] = {
+                "scope": "SYMBOL",
+                "symbol": "ETHUSDT" if mutation == "cost_symbol" else "BTCUSDT",
+                "sample_count": 100 if mutation == "cost_symbol" else 19,
+                "mean_abs_bps": 2.0,
+            }
+        candidate["cost_evidence"] = cost_evidence
+    elif mutation.startswith("cost_conservative_"):
+        cost_evidence = copy.deepcopy(candidate["cost_evidence"])
+        source_field = (
+            "mean_abs_source" if "_mean_" in mutation else "tail_source"
+        )
+        cost_evidence[source_field]["sample_count"] = (
+            False if mutation.endswith("bool_zero") else 0.0
+        )
+        candidate["cost_evidence"] = cost_evidence
+    elif mutation in {"quality_extra", "quality_coercion"}:
+        quality = dict(candidate["quality"])
+        if mutation == "quality_extra":
+            quality["unexpected"] = True
+        else:
+            quality["censored_share"] = "0.1"
+        candidate["quality"] = quality
+    elif mutation in {"evidence_extra", "evidence_coercion", "next_gap_extra"}:
+        evidence = dict(candidate["evidence"])
+        if mutation == "evidence_extra":
+            evidence["unexpected"] = True
+        elif mutation == "evidence_coercion":
+            evidence["mean_net_e"] = "0.05"
+        else:
+            evidence["next_gap"] = {
+                **evidence["next_gap"],
+                "unexpected": True,
+            }
+        candidate["evidence"] = evidence
+    elif mutation in {"resource_extra", "resource_bucket_extra"}:
+        resource = copy.deepcopy(candidate["resource"])
+        if mutation == "resource_extra":
+            resource["unexpected"] = True
+        else:
+            resource["daily_buckets"][0]["unexpected"] = 1
+        _rehash_resource(resource)
+        candidate["resource"] = resource
+    else:
+        portfolio = dict(candidate["portfolio"])
+        if mutation == "portfolio_extra":
+            portfolio["unexpected"] = "0"
+        else:
+            portfolio["sector_exposure_share"] = 0.1
+        candidate["portfolio"] = portfolio
+
+    result = build_candidate_learning_decision(
+        source_head=SOURCE_HEAD,
+        scanner_research_seeds=[],
+        candidate_evidence_board=[candidate],
+        prior_decisions=[],
+        policy=_policy_v2(),
+    )
+
+    assert result["candidate_assessments"][0]["blocker_codes"] == [
+        expected_code
+    ]
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ("cluster_algebra", "cluster_count", "raw_attempt_count"),
+)
+def test_arbiter_rejects_rehashed_producer_count_and_cluster_drift(
+    mutation: str,
+) -> None:
+    candidate = _candidate()
+    evidence = dict(candidate["evidence"])
+    if mutation == "cluster_algebra":
+        evidence["cluster_se"] = 0.03
+    elif mutation == "cluster_count":
+        evidence["cluster_count"] = 4
+    else:
+        evidence["raw_attempt_count"] = 29
+    candidate["evidence"] = evidence
+
+    result = build_candidate_learning_decision(
+        source_head=SOURCE_HEAD,
+        scanner_research_seeds=[],
+        candidate_evidence_board=[candidate],
+        prior_decisions=[],
+        policy=_policy_v2(),
+    )
+
+    assert result["candidate_assessments"][0]["blocker_codes"] == [
+        "EVIDENCE_ALGEBRA_INVALID"
+    ]
 
 
 def _with_candidate_resource(
@@ -218,10 +430,10 @@ def test_zero_resource_requires_attestation_and_never_becomes_collection_target(
         policy=_policy_v2(),
     )
 
-    assert contradiction_result["state"] == "REPAIR_DATA_QUALITY"
-    assert "RESOURCE_ESTIMATE_ZERO_WITH_ENTRIES" in contradiction_result[
-        "evaluated_candidates"
-    ][0]["blocker_codes"]
+    assert contradiction_result["state"] == "INELIGIBLE"
+    assert contradiction_result["evaluated_candidates"][0]["blocker_codes"] == [
+        "RESOURCE_SEMANTICS_INVALID"
+    ]
     assert zero_result["selected_collection_target"] is None
     assert zero_result["state"] == "INELIGIBLE"
 
@@ -260,9 +472,8 @@ def test_asymmetric_zero_resource_never_becomes_free_collection(
     )
 
     assessment = result["evaluated_candidates"][0]
-    assert assessment["state"] == "REPAIR_DATA_QUALITY"
-    assert "RESOURCE_ESTIMATE_ASYMMETRIC_ZERO" in assessment["blocker_codes"]
-    assert "ZERO_RESOURCE_ATTESTATION_MISSING" in assessment["blocker_codes"]
+    assert assessment["state"] == "INELIGIBLE"
+    assert assessment["blocker_codes"] == ["RESOURCE_SEMANTICS_INVALID"]
     assert result["selected_collection_target"] is None
 
 
@@ -502,7 +713,7 @@ def test_evidence_engine_mode_is_required_and_demo_bounded(value: object) -> Non
 
     assert result["selected_candidate"] is None
     assert result["evaluated_candidates"][0]["blocker_codes"] == [
-        "EVIDENCE_ENGINE_MODE_INVALID"
+        "IDENTITY_FIELDS_INVALID" if value is None else "EVIDENCE_ENGINE_MODE_INVALID"
     ]
 
 
@@ -612,11 +823,14 @@ def test_exact_metric_tie_across_target_regimes_is_permutation_stable() -> None:
     first = _with_regimes(_with_candidate_resource(_candidate()))
     second = copy.deepcopy(first)
     second_identity = dict(second["identity"])
-    second_identity["target_regime"] = {
+    second_target = {
         **second_identity["target_regime"],
-        "label": "bear_low_vol",
-        "hash": "7" * 64,
+        "label": "bear|low_vol|liquid",
     }
+    second_target["hash"] = _canonical_hash(
+        {key: value for key, value in second_target.items() if key != "hash"}
+    )
+    second_identity["target_regime"] = second_target
     second["identity"] = second_identity
 
     forward = build_candidate_learning_decision(
@@ -702,7 +916,7 @@ def test_only_proven_complete_zero_day_is_counted_as_zero() -> None:
         ("regime", "TARGET_REGIME_INVALID"),
         ("mode", "ENGINE_MODE_NOT_SHADOW"),
         ("config", "CONFIG_HASH_INVALID"),
-        ("context", "CONTEXT_HASHES_INCOMPLETE"),
+        ("context", "CONTEXT_HASHES_FIELDS_INVALID"),
     ],
 )
 def test_partial_or_non_shadow_identity_is_ineligible(
@@ -742,7 +956,10 @@ def test_family_key_excludes_regime_and_context_but_evaluation_id_binds_them() -
     second = _candidate()
     identity = dict(second["identity"])
     regime = dict(identity["target_regime"])
-    regime.update({"label": "bear_low_vol", "hash": "9" * 64})
+    regime["label"] = "bear|low_vol|liquid"
+    regime["hash"] = _canonical_hash(
+        {key: value for key, value in regime.items() if key != "hash"}
+    )
     identity["target_regime"] = regime
     second["identity"] = identity
     context_hashes = dict(second["context_hashes"])

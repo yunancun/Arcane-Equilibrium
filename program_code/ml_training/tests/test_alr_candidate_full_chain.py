@@ -115,8 +115,8 @@ def _cost_artifact(now: datetime) -> dict[str, object]:
             {
                 "symbol": None,
                 "n": 500,
-                "mean_abs": 2.0,
-                "mean_signed": 1.0,
+                "mean_abs": 2.1,
+                "mean_signed": 1.1,
                 "q50": 1.0,
                 "q75": 4.0,
                 "q90": 8.0,

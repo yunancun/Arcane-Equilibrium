@@ -44,6 +44,8 @@ _AUDIT_SCHEMA_VERSION = "cost_gate_learning_candidate_audit_v2"
 FEE_FLOOR_BPS = 11.0
 MIN_SYMBOL_FILLS_FOR_QUANTILE = 20
 QUANTILE_ARTIFACT_MAX_AGE_HOURS = 48
+_SLIPPAGE_MEAN_ABS_TOL_BPS = 1e-9
+_SLIPPAGE_MEAN_REL_TOL = 1e-12
 _SLIPPAGE_ARTIFACT_SCHEMA_VERSION = "cost_gate_slippage_quantile_artifact_v2"
 _SLIPPAGE_PROJECTION_SCHEMA_VERSION = "cost_gate_expected_cost_projection_v2"
 _SLIPPAGE_ARTIFACT_FIELDS = {
@@ -404,6 +406,7 @@ def load_candidate_evidence_snapshot(
         return _failure("BOARD_REASON_COUNTS_INVALID", canonical_evaluated_at)
     cost_status, cost_projection = _validate_outer_cost_contract(
         payload,
+        generated=generated,
         evaluated=evaluated,
     )
     if cost_status is not None:
@@ -1347,7 +1350,12 @@ def _validate_slippage_stat_block(
         or q90 is None and cvar90 is not None
     ):
         raise ValueError("EXPECTED_COST_SOURCE_INVALID")
-    if abs(mean_signed) > mean_abs:
+    if abs(mean_signed) > mean_abs and not math.isclose(
+        abs(mean_signed),
+        mean_abs,
+        rel_tol=_SLIPPAGE_MEAN_REL_TOL,
+        abs_tol=_SLIPPAGE_MEAN_ABS_TOL_BPS,
+    ):
         raise ValueError("EXPECTED_COST_SOURCE_INVALID")
     quantiles = [item for item in (q50, q75, q90) if item is not None]
     if quantiles != sorted(quantiles) or (
@@ -1391,6 +1399,7 @@ def _tail_projection(block: Mapping[str, Any]) -> tuple[float | None, str | None
 def _project_embedded_slippage_v2(
     value: Any,
     *,
+    generated: datetime,
     evaluated: datetime,
 ) -> dict[str, Any]:
     if (
@@ -1412,6 +1421,8 @@ def _project_embedded_slippage_v2(
         or value["asof"] != source_asof.isoformat()
     ):
         raise ValueError("EXPECTED_COST_SOURCE_INVALID")
+    if source_asof > generated:
+        raise ValueError("EXPECTED_COST_SOURCE_AFTER_BOARD_GENERATED")
     age_seconds = (evaluated - source_asof).total_seconds()
     if not 0.0 <= age_seconds <= QUANTILE_ARTIFACT_MAX_AGE_HOURS * 3600:
         raise ValueError("EXPECTED_COST_SOURCE_STALE")
@@ -1434,12 +1445,31 @@ def _project_embedded_slippage_v2(
         or symbol_names != sorted(symbol_names)
         or len(symbol_names) != len(set(symbol_names))
         or sum(item["n"] for item in symbols) != global_block["n"]
+    ):
+        raise ValueError("EXPECTED_COST_SOURCE_INVALID")
+    try:
+        weighted_mean_abs = math.fsum(
+            item["mean_abs"] * item["n"] for item in symbols
+        ) / global_block["n"]
+        weighted_mean_signed = math.fsum(
+            item["mean_signed"] * item["n"] for item in symbols
+        ) / global_block["n"]
+    except (OverflowError, ValueError):
+        raise ValueError("EXPECTED_COST_SOURCE_INVALID") from None
+    if (
+        not math.isfinite(weighted_mean_abs)
+        or not math.isfinite(weighted_mean_signed)
         or not math.isclose(
             global_block["mean_abs"],
-            math.fsum(item["n"] * item["mean_abs"] for item in symbols)
-            / global_block["n"],
-            rel_tol=1e-12,
-            abs_tol=1e-12,
+            weighted_mean_abs,
+            rel_tol=_SLIPPAGE_MEAN_REL_TOL,
+            abs_tol=_SLIPPAGE_MEAN_ABS_TOL_BPS,
+        )
+        or not math.isclose(
+            global_block["mean_signed"],
+            weighted_mean_signed,
+            rel_tol=_SLIPPAGE_MEAN_REL_TOL,
+            abs_tol=_SLIPPAGE_MEAN_ABS_TOL_BPS,
         )
     ):
         raise ValueError("EXPECTED_COST_SOURCE_INVALID")
@@ -1566,6 +1596,7 @@ def _candidate_cost_evidence_from_projection(
 def _validate_outer_cost_contract(
     payload: Mapping[str, Any],
     *,
+    generated: datetime,
     evaluated: datetime,
 ) -> tuple[str | None, dict[str, Any] | None]:
     basis = payload.get("cost_basis_main")
@@ -1597,6 +1628,7 @@ def _validate_outer_cost_contract(
     try:
         projection = _project_embedded_slippage_v2(
             outer.get("source_payload"),
+            generated=generated,
             evaluated=evaluated,
         )
     except ValueError as exc:

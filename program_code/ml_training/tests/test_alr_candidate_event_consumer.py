@@ -252,6 +252,7 @@ def test_missing_evidence_configuration_persists_durable_repair_rotation(
 
     assert result == _result()
     assert captured[0]["source_status"] == "EVIDENCE_DIRECTORY_NOT_CONFIGURED"
+    assert captured[0]["schema_version"] == "alr_candidate_evidence_snapshot_v2"
     assert captured[0]["selection_allowed"] is False
     assert captured[0]["candidate_rows"] == []
     assert len(captured[0]["snapshot_hash"]) == 64
@@ -297,6 +298,7 @@ def test_default_path_reads_bounded_prior_decisions_for_cooldown(
 ) -> None:
     history = [
         {
+            "decision_schema_version": "alr_candidate_learning_decision_v2",
             "family_key": "a" * 64,
             "material_fingerprint": "b" * 64,
             "decision_ts_s": 1_783_684_000,
@@ -479,6 +481,7 @@ def test_entrypoint_missing_runtime_policy_keeps_listener_fail_closed(
     assert rc == 0
     assert observed["candidate_policy"] is None
     assert payload["candidate_policy"]["status"] == "UNAVAILABLE_FAIL_CLOSED"
+    assert payload["schema_version"] == "alr_event_consumer_result_v2"
     assert payload["result"]["training_runs"] == 0
     assert set(payload["authority_counters"].values()) == {0}
 
@@ -524,3 +527,7 @@ def test_entrypoint_semantic_policy_drift_keeps_listener_fail_closed(
         assert set(payload["authority_counters"].values()) == {0}
 
     assert observed == [None, None]
+
+
+def test_atomic_v2_cutover_does_not_rename_existing_single_instance_lock() -> None:
+    assert consumer._SINGLE_INSTANCE_LOCK_NAME == "alr_event_consumer_v1"

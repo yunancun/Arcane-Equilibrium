@@ -154,7 +154,7 @@ def test_expected_cost_provenance_is_typed_inside_arbiter_input() -> None:
                 "symbol": None,
                 "n": 200,
                 "mean_abs": 1.5,
-                "mean_signed": 0.5,
+                "mean_signed": 0.25,
                 "q50": 1.0,
                 "q75": 3.0,
                 "q90": 6.0,

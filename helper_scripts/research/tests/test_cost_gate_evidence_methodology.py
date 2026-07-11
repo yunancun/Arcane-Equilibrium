@@ -2231,12 +2231,43 @@ def test_expected_cost_artifact_requires_complete_rollup_symbol_counts():
     assert packet["cost_basis_main"] == "conservative_v1"
 
 
-def test_expected_cost_artifact_requires_global_mean_abs_weighted_by_symbols():
-    """Rehashed global mean must still close to its accepted per-symbol rollup."""
+@pytest.mark.parametrize("block_name", ("global", "symbol"))
+def test_expected_cost_artifact_rejects_signed_mean_above_absolute_mean(
+    block_name: str,
+) -> None:
     rows = [
         _blocked_outcome_row(
-            f"weighted-global-{index}",
-            "strat|WEIGHTEDUSDT|Buy",
+            f"signed-mean-{block_name}-{index}",
+            "strat|SIGNEDMEANUSDT|Buy",
+            30.0 + _COST_TRACK_JITTER[index],
+            cost_model_version="conservative_v1",
+            entry_ts_ms=_spread_entry_ts(index, per_day=1),
+        )
+        for index in range(5)
+    ]
+    artifact = _expected_cost_artifact(mean_abs=2.0, cvar90=8.0)
+    block = (
+        artifact["global"]
+        if block_name == "global"
+        else artifact["symbols"][0]
+    )
+    block["mean_signed"] = block["mean_abs"] + 0.000001
+
+    packet = build_blocked_signal_outcome_review(
+        rows,
+        slippage_quantiles=artifact,
+        cfg=_COST_TRACK_CFG,
+        now_utc=NOW,
+    )
+
+    assert packet["cost_basis_main"] == "conservative_v1"
+
+
+def test_expected_cost_artifact_rejects_inconsistent_weighted_global_means() -> None:
+    rows = [
+        _blocked_outcome_row(
+            f"weighted-mean-{index}",
+            "strat|WEIGHTEDMEANUSDT|Buy",
             30.0 + _COST_TRACK_JITTER[index],
             cost_model_version="conservative_v1",
             entry_ts_ms=_spread_entry_ts(index, per_day=1),
@@ -2247,37 +2278,26 @@ def test_expected_cost_artifact_requires_global_mean_abs_weighted_by_symbols():
         mean_abs=2.0,
         cvar90=8.0,
         symbol_rows=[
-            {"symbol": "ALPHAUSDT", "n": 100, "mean_abs": 1.0},
-            {"symbol": "BETAUSDT", "n": 100, "mean_abs": 3.0},
+            {
+                "symbol": "AUSDT",
+                "n": 20,
+                "mean_abs": 1.0,
+                "mean_signed": 1.0,
+            },
+            {
+                "symbol": "BUSDT",
+                "n": 80,
+                "mean_abs": 3.0,
+                "mean_signed": 1.0,
+            },
         ],
     )
-    artifact["global"]["mean_abs"] = 0.25
-    artifact["global"]["mean_signed"] = 0.0
 
     packet = build_blocked_signal_outcome_review(
-        rows, slippage_quantiles=artifact, cfg=_COST_TRACK_CFG, now_utc=NOW
-    )
-
-    assert packet["cost_basis_main"] == "conservative_v1"
-
-
-def test_expected_cost_artifact_requires_signed_mean_bounded_by_mean_abs():
-    """A producer's signed statistic cannot exceed its absolute mean."""
-    rows = [
-        _blocked_outcome_row(
-            f"signed-bound-{index}",
-            "strat|SIGNEDUSDT|Buy",
-            30.0 + _COST_TRACK_JITTER[index],
-            cost_model_version="conservative_v1",
-            entry_ts_ms=_spread_entry_ts(index, per_day=1),
-        )
-        for index in range(5)
-    ]
-    artifact = _expected_cost_artifact(mean_abs=2.0, cvar90=8.0)
-    artifact["global"]["mean_signed"] = -2.1
-
-    packet = build_blocked_signal_outcome_review(
-        rows, slippage_quantiles=artifact, cfg=_COST_TRACK_CFG, now_utc=NOW
+        rows,
+        slippage_quantiles=artifact,
+        cfg=_COST_TRACK_CFG,
+        now_utc=NOW,
     )
 
     assert packet["cost_basis_main"] == "conservative_v1"
@@ -2326,6 +2346,7 @@ def test_expected_cost_source_hash_is_key_order_invariant():
                 "symbol": "ORDERUSDT",
                 "n": 200,
                 "mean_abs": 1.5,
+                "mean_signed": 0.75,
                 "q90": 7.0,
                 "cvar90": 7.5,
             }
