@@ -212,17 +212,35 @@ def diff(exp: MigrationExpectations, live) -> MigrationGaps:
 # Main
 # ---------------------------------------------------------------------------
 
+# 由本檔位置反推 repo root，取代先前硬編的開發機絕對路徑（跨平台規則）：
+# helper_scripts/db/audit_migrations.py → 上溯三層即 srv repo root，
+# Mac/Linux 任一 checkout 位置皆成立，不再綁單一主機。
+_REPO_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
+
 MIGRATIONS_DIR_CANDIDATES = [
     # cwd-relative：CI 從 srv repo root 跑時命中（GH checkout 路徑非固定），
     # 也讓本腳本可攜不依賴硬編主機路徑。
     os.path.join(os.getcwd(), "sql", "migrations"),
+    # repo-relative：由 __file__ 反推，涵蓋非 cwd-root 的呼叫情境。
+    os.path.join(_REPO_ROOT, "sql", "migrations"),
     os.path.expanduser("~/BybitOpenClaw/srv/sql/migrations"),
     os.path.expanduser("~/srv/sql/migrations"),
-    "/Users/ncyu/Projects/TradeBot/srv/sql/migrations",
 ]
 
 
 def find_migrations_dir() -> str:
+    # 環境變數覆寫優先：部署/CI 可明確指定路徑，繞過候選推斷。
+    # 為什麼 fail-closed：一旦顯式設定卻非有效目錄，直接中止而非靜默回退候選，
+    # 避免誤對錯誤的 migrations 目錄做稽核。
+    env_dir = os.environ.get("OPENCLAW_MIGRATIONS_DIR")
+    if env_dir:
+        if os.path.isdir(env_dir):
+            return env_dir
+        raise SystemExit(
+            f"ERROR: OPENCLAW_MIGRATIONS_DIR set but not a directory: {env_dir}"
+        )
     for d in MIGRATIONS_DIR_CANDIDATES:
         if os.path.isdir(d):
             return d

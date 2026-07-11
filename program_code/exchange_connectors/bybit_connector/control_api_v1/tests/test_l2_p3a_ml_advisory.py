@@ -453,7 +453,11 @@ class TestCascadeOllamaScreen:
         assert len(eng.calls) == 2
 
     def test_cloud_unavailable_fail_soft_no_sink(self, _mock_ledger):
-        """cloud 回 None（provider 不可用）→ fail-soft，不寫 sink（D3 記 inactive error packet）。"""
+        """cloud 回 None（provider 不可用，真 outage）→ fail-soft，stage=cloud_unavailable，不寫 sink。
+
+        誠實邊界：只有「provider 回 None」才標 cloud_unavailable（真 outage）；有回覆但無法 parse
+        另標 parse_failed（見 test_present_but_unparsable_reply_yields_parse_failed）。
+        """
         store: list[dict[str, Any]] = []
         eng = _FakeEngine(screen_text='{"verdict":"pass"}', cloud_text=None)
         res = _run(EXEC.run_ml_advisory_cascade(
@@ -463,13 +467,13 @@ class TestCascadeOllamaScreen:
             sink_conn_provider=_conn_provider_factory(store),
         ))
         assert res.ok is False
-        assert res.stage == "cloud_unavailable_or_unparsable"
+        assert res.stage == "cloud_unavailable"
         assert store == []
         kwargs = _mock_ledger.record_l2_call.call_args.kwargs
         parsed_output = kwargs["parsed_output"]
         assert parsed_output["mode"] == "diagnose_leak"
-        assert parsed_output["stage"] == "cloud_unavailable_or_unparsable"
-        assert parsed_output["error"] == "cloud_no_output_or_unparsable"
+        assert parsed_output["stage"] == "cloud_unavailable"
+        assert parsed_output["error"] == "cloud_unavailable_no_reply"
         assert parsed_output["no_output"] is True
         assert parsed_output["advisory_success"] is False
         assert parsed_output["l2_reply_id"] == res.l2_reply_id
@@ -477,6 +481,55 @@ class TestCascadeOllamaScreen:
         assert parsed_output["advisory_review_packet"] == res.advisory_review_packet
         assert validate_advisory_review_packet(parsed_output["advisory_review_packet"])
         assert parsed_output["advisory_review_packet"]["ledger_ref"] == res.l2_reply_id
+
+    def test_fenced_json_reply_parses_and_writes_sink(self):
+        """```json fence + 前後散文包裹的合法回覆 → 剝殼後 parse 成 dict → guard pass → sink 寫入。
+
+        Item 8 核心：舊碼對帶 fence 的回覆直接 json.loads 會失敗 → 誤判 cloud outage 且永不到 sink。
+        修後：帶殼回覆能正確 parse，走完 guard 並真的寫 agent.lessons sink。
+        """
+        store: list[dict[str, Any]] = []
+        fenced = (
+            "Here is the diagnosis you asked for:\n\n"
+            "```json\n" + json.dumps(_VALID_DIAGNOSE_OUTPUT) + "\n```\n\n"
+            "Hope this helps."
+        )
+        eng = _FakeEngine(screen_text='{"verdict":"pass"}', cloud_text=fenced)
+        res = _run(EXEC.run_ml_advisory_cascade(
+            capability_id="ml_advisory.diagnose_leak", mode="diagnose_leak",
+            context=_diagnose_context(), engine=eng,
+            contract_ver="cv", schema_ver="sv", calibration=_enabled_calibration(),
+            sink_conn_provider=_conn_provider_factory(store),
+        ))
+        assert res.ok is True
+        assert res.stage == "sink_written"
+        assert res.guard_verdict == "pass"
+        assert res.sink_written is True
+        assert len(store) == 1  # agent.lessons sink 真的寫了一筆
+
+    def test_present_but_unparsable_reply_yields_parse_failed(self, _mock_ledger):
+        """有回覆但無法 parse（非 JSON 散文）→ stage=parse_failed（非 outage），不寫 sink。
+
+        誠實邊界：cloud 明明有回覆、只是格式無法 parse，絕不標成 cloud_unavailable outage。
+        """
+        store: list[dict[str, Any]] = []
+        eng = _FakeEngine(
+            screen_text='{"verdict":"pass"}',
+            cloud_text="Sorry, I cannot produce structured output right now.",
+        )
+        res = _run(EXEC.run_ml_advisory_cascade(
+            capability_id="ml_advisory.diagnose_leak", mode="diagnose_leak",
+            context=_diagnose_context(), engine=eng,
+            contract_ver="cv", schema_ver="sv", calibration=_enabled_calibration(),
+            sink_conn_provider=_conn_provider_factory(store),
+        ))
+        assert res.ok is False
+        assert res.stage == "parse_failed"
+        assert res.stage != "cloud_unavailable"  # 非 outage
+        assert store == []
+        parsed_output = _mock_ledger.record_l2_call.call_args.kwargs["parsed_output"]
+        assert parsed_output["stage"] == "parse_failed"
+        assert parsed_output["error"] == "cloud_reply_present_but_unparsable"
 
     def test_mutation_bite_cloud_only_on_screen_survivors(self):
         """mutation 驗：cloud 只在 screen pass 後跑。

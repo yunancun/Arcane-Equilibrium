@@ -197,7 +197,9 @@ def _fake_quantile_result(n_labeled: int, feature_names: list[str]) -> QuantileT
         )
         for key, alpha in (("q10", 0.10), ("q50", 0.50), ("q90", 0.90))
     }
-    holdout = np.linspace(1.0, 2.0, 20, dtype=np.float32)
+    # 反洩漏後 result 快取兩組互斥分區：calibration_*（供 CQR 擬合）與 test_*（供回報）。
+    calib = np.linspace(1.0, 2.0, 20, dtype=np.float32)
+    test = np.linspace(1.0, 2.0, 20, dtype=np.float32)
     return QuantileTrainingResult(
         success=True,
         strategy_name="grid_trading",
@@ -205,7 +207,10 @@ def _fake_quantile_result(n_labeled: int, feature_names: list[str]) -> QuantileT
         feature_names=feature_names,
         n_samples_total=n_labeled,
         n_samples_labeled=n_labeled,
-        n_holdout=20,
+        n_holdout=60,
+        n_validation=20,
+        n_calibration=20,
+        n_test=20,
         models={"q10": object(), "q50": object(), "q90": object()},
         per_quantile_metrics=metrics,
         decile_lift_point=2.0,
@@ -214,11 +219,15 @@ def _fake_quantile_result(n_labeled: int, feature_names: list[str]) -> QuantileT
         crossing_rate=0.0,
         feature_schema_hash="f" * 64,
         feature_definition_hash="e" * 64,
-        embargo_config=EmbargoConfig(n_folds=5, embargo_hours=24, holdout_tail_days=7.0),
-        holdout_labels=holdout,
-        holdout_q10_pred=holdout - 0.1,
-        holdout_q50_pred=holdout,
-        holdout_q90_pred=holdout + 0.1,
+        embargo_config=EmbargoConfig(embargo_hours=24, holdout_tail_days=7.0),
+        calibration_labels=calib,
+        calibration_q10_pred=calib - 0.1,
+        calibration_q50_pred=calib,
+        calibration_q90_pred=calib + 0.1,
+        test_labels=test,
+        test_q10_pred=test - 0.1,
+        test_q50_pred=test,
+        test_q90_pred=test + 0.1,
     )
 
 
@@ -335,7 +344,11 @@ def test_contract_bound_pooled_symbol_fails_before_quantile_train(
 
     assert not result.success
     assert result.error == "pit_manifest_pooled_symbol_not_allowed"
-    assert result.stages_completed == ["etl", "labels", "pit_manifest_gate_failed"]
+    # 反洩漏 name-pattern 預篩在 fit 前先跑並通過（audit item 4 wiring），故排在
+    # PIT gate 失敗之前；["f0","f1","f2"] 無 forbidden pattern。
+    assert result.stages_completed == [
+        "etl", "labels", "feature_leakage_prescreen", "pit_manifest_gate_failed",
+    ]
     assert calls["train"] == 0
 
 

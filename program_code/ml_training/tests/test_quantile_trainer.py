@@ -11,7 +11,11 @@ from program_code.ml_training.quantile_trainer import (
     QuantileTrainingConfig,
     _compute_feature_definition_hash,
     _compute_feature_schema_hash,
+    _partition_holdout_three_way,
     _split_tail_holdout,
+    MIN_CALIBRATION_ROWS,
+    MIN_TEST_ROWS,
+    MIN_VALIDATION_ROWS,
     check_quantile_crossing_rate,
     compute_coverage_error,
     compute_decile_lift_bootstrap,
@@ -28,21 +32,20 @@ from program_code.ml_training.quantile_trainer import (
 def test_get_embargo_config_funding_arb_carve_out():
     cfg = get_embargo_config("funding_arb")
     assert isinstance(cfg, EmbargoConfig)
-    assert cfg.n_folds == 3
+    # n_folds 已移除（dead param）：分位路徑走單一尾段 holdout，非 k-fold CV。
     assert cfg.embargo_hours == 72
     assert cfg.holdout_tail_days == 14.0
 
 
 def test_get_embargo_config_default_trending():
     cfg = get_embargo_config("ma_crossover")
-    assert cfg.n_folds == 5
     assert cfg.embargo_hours == 24
     assert cfg.holdout_tail_days == 7.0
 
 
 def test_get_embargo_config_case_insensitive():
-    assert get_embargo_config("FUNDING_ARB").n_folds == 3
-    assert get_embargo_config("  Funding_Arb  ").n_folds == 3
+    assert get_embargo_config("FUNDING_ARB").embargo_hours == 72
+    assert get_embargo_config("  Funding_Arb  ").embargo_hours == 72
 
 
 # ──────────────── compute_sample_weights ────────────────
@@ -240,6 +243,103 @@ def test_split_tail_holdout_falls_back_to_fraction_on_short_span():
     train_idx, holdout_idx = _split_tail_holdout(ts, holdout_tail_days=7.0, min_fraction=0.2)
     assert len(holdout_idx) == int(n * 0.2)
     assert len(train_idx) == n - len(holdout_idx)
+
+
+# ──────────────── three-way holdout partition (anti-leakage) ────────────────
+
+@pytest.mark.parametrize("n", [30, 40, 51, 80, 100, 137, 400, 1001])
+def test_partition_holdout_three_way_pairwise_disjoint_and_exhaustive(n):
+    """反洩漏核心性質：val / calib / test 三分區「兩兩互斥」且「聯集恰為整個 holdout」。
+    這證明 early-stopping 選模型的列、CQR 校準的列、以及回報指標的列彼此不重疊。"""
+    holdout_idx = np.arange(1000, 1000 + n, dtype=np.intp)  # 任意非零起點的索引
+    val_idx, calib_idx, test_idx = _partition_holdout_three_way(holdout_idx)
+
+    sval, scalib, stest = set(val_idx.tolist()), set(calib_idx.tolist()), set(test_idx.tolist())
+    # 兩兩互斥
+    assert sval.isdisjoint(scalib)
+    assert sval.isdisjoint(stest)
+    assert scalib.isdisjoint(stest)
+    # 聯集 == 整個 holdout（無遺漏、無重複）
+    assert sval | scalib | stest == set(holdout_idx.tolist())
+    assert len(sval) + len(scalib) + len(stest) == n
+    # 三段皆非空
+    assert len(val_idx) >= 1 and len(calib_idx) >= 1 and len(test_idx) >= 1
+    # 時間升序連續：val 最舊、test 最新（索引嚴格遞增分段）
+    assert list(val_idx) == sorted(val_idx.tolist())
+    assert list(test_idx) == sorted(test_idx.tolist())
+    if len(val_idx) and len(calib_idx):
+        assert val_idx[-1] < calib_idx[0]
+    if len(calib_idx) and len(test_idx):
+        assert calib_idx[-1] < test_idx[0]
+    # test 佔最大（承載 ship-gate）：預設 val/calib 各 25% → test ≈ 50%。
+    assert len(test_idx) >= len(val_idx)
+    assert len(test_idx) >= len(calib_idx)
+
+
+def test_partition_holdout_three_way_tiny_inputs_stay_nonempty():
+    # 邊界：n=3 剛好三段各 1；n=0 三段皆空。
+    val, calib, test = _partition_holdout_three_way(np.arange(3, dtype=np.intp))
+    assert (len(val), len(calib), len(test)) == (1, 1, 1)
+    val0, calib0, test0 = _partition_holdout_three_way(np.empty((0,), dtype=np.intp))
+    assert len(val0) == 0 and len(calib0) == 0 and len(test0) == 0
+
+
+def test_train_quantile_trio_three_partitions_disjoint_end_to_end():
+    """端到端：三分區列數合計 == n_holdout，各過地板，回報指標取自 test 分區。
+    需 lightgbm。"""
+    pytest.importorskip("lightgbm")
+
+    rng = np.random.default_rng(3)
+    n = 900
+    n_features = 6
+    X = rng.standard_normal((n, n_features)).astype(np.float32)
+    y = (X[:, 0] * 1.5 + rng.standard_normal(n) * 0.5 + 1.0).astype(np.float32)
+    ts = (np.arange(n, dtype=np.int64) * 60_000)
+
+    cfg = QuantileTrainingConfig(
+        n_estimators=60, early_stopping_rounds=10, bootstrap_iterations=50,
+    )
+    result = train_quantile_trio(
+        features=X, labels=y, timestamps_ms=ts,
+        feature_names=[f"f{i}" for i in range(n_features)],
+        strategy_name="ma_crossover", engine_mode="paper", config=cfg,
+    )
+
+    assert result.success, result.error
+    # 三分區皆過地板，且合計等於整個尾段 holdout（無遺漏、無重複）。
+    assert result.n_validation >= MIN_VALIDATION_ROWS
+    assert result.n_calibration >= MIN_CALIBRATION_ROWS
+    assert result.n_test >= MIN_TEST_ROWS
+    assert result.n_validation + result.n_calibration + result.n_test == result.n_holdout
+    # 快取的 calibration_* / test_* 長度分別對應各自分區。
+    assert len(result.calibration_labels) == result.n_calibration
+    assert len(result.test_labels) == result.n_test
+    assert len(result.test_q50_pred) == result.n_test
+    # 回報指標的 n_holdout（PerQuantileMetrics）= test 分區列數（反洩漏後語意）。
+    assert result.per_quantile_metrics["q50"].n_holdout == result.n_test
+
+
+def test_train_quantile_trio_degenerate_split_fails_closed_below_floor():
+    """holdout 太小無法形成三個過地板分區 → fail-closed（success=False）→ 下游 no_ship。
+    這是「低於樣本地板 → 強制 no_ship」的路徑，非靜默放行。需 lightgbm。"""
+    pytest.importorskip("lightgbm")
+
+    rng = np.random.default_rng(5)
+    # 65 樣本、壓縮時間戳 → holdout 走 min_fraction≈10%（≈6 列）< 三分地板 → degenerate。
+    n = 65
+    n_features = 5
+    X = rng.standard_normal((n, n_features)).astype(np.float32)
+    y = (X[:, 0] + rng.standard_normal(n) * 0.5).astype(np.float32)
+    ts = (np.arange(n, dtype=np.int64) * 60_000)
+
+    result = train_quantile_trio(
+        features=X, labels=y, timestamps_ms=ts,
+        feature_names=[f"f{i}" for i in range(n_features)],
+        strategy_name="ma_crossover", engine_mode="paper",
+        config=QuantileTrainingConfig(),
+    )
+    assert not result.success
+    assert "degenerate split" in result.error
 
 
 # ──────────────── train_quantile_trio (needs lightgbm) ────────────────

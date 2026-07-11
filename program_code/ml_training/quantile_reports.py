@@ -284,7 +284,10 @@ def generate_acceptance_report(
       200 ≤ n_labeled < 500                  → shadow_only (regardless of metrics)
       n_labeled ≥ 500 AND all hard gates     → should_ship
       n_labeled ≥ 500 AND any gate fails     → shadow_only (downgrade)
-    裁決邏輯見上；JSON 持久化可選。
+      then two post-caps (never upgrade no_ship, only cap should_ship):
+      embargo NOT enforced                   → cap should_ship → shadow_only
+      partition_mode == two_way_shadow_capped→ cap should_ship → shadow_only (MIT Item 1)
+    裁決邏輯見上；JSON 持久化可選。two-way 退路（sub-floor holdout）封頂 shadow_only。
     """
     report: Dict[str, Any] = {
         "strategy_name": result.strategy_name,
@@ -295,10 +298,29 @@ def generate_acceptance_report(
         "n_samples_total": int(result.n_samples_total),
         "n_samples_labeled": int(result.n_samples_labeled),
         "n_holdout": int(result.n_holdout),
+        # 反洩漏三分 holdout 的分區列數 + 指標來源標記（claim-0002 HIGH）：
+        #   three_way 下 ship_gate_metric_source="test_partition"，明示所有 ship-gate 指標
+        #   （pinball_skill / coverage_error / decile_lift / crossing / CQR-後-coverage）
+        #   一律取自未被 early-stopping 選模型或 CQR 校準觸碰的 test 分區。
+        # MIT Item 1 修訂：trainer 可能因 holdout 太小走 two_way_shadow_capped 退路，此時
+        #   來源標記為 "holdout_two_way_shadow_capped"（單一 holdout 三角色共用），且下方
+        #   verdict 會據 partition_mode 硬性封頂 shadow_only。故此欄改為由 result 溯源，
+        #   不再寫死；partition_mode 一併落 report 供稽核（getattr 保留舊呼叫端相容）。
+        "n_validation": int(result.n_validation),
+        "n_calibration": int(result.n_calibration),
+        "n_test": int(result.n_test),
+        "ship_gate_metric_source": getattr(
+            result, "ship_gate_metric_source", "test_partition",
+        ),
+        "partition_mode": getattr(result, "partition_mode", "three_way"),
         "embargo_config": asdict(result.embargo_config) if result.embargo_config else None,
         # embargo 意圖配置（embargo_config）之外，另記本次是否「實際」執行 embargo：
         # 樣本不足時 trainer fail-open 靜默停用，此欄使 report 誠實反映 runtime 事實。
         "embargo_enforced": bool(result.embargo_enforced),
+        # 邊界 label-realization 重疊計數（trainer 記錄）：因 embargo 未強制而殘留在
+        #   訓練集、落在 holdout 起點 embargo 窗內的 train 列數。>0 且
+        #   embargo_enforced=False 代表邊界洩漏風險，下方 verdict 據此封頂 shadow_only。
+        "embargo_boundary_overlap_count": int(getattr(result, "embargo_overlap_count", 0)),
         "training_success": bool(result.success),
         "training_error": result.error or None,
         # P1-3：label 組成永遠落 report（None = 呼叫端未提供，如 dry-run），
@@ -388,6 +410,38 @@ def generate_acceptance_report(
                 ) if not passed
             ]
             reason = f"sample ≥ prod but gate(s) failed: {failed} → downgrade to shadow"
+
+    # embargo fail-open 封頂裁決：embargo_enforced=False 表示 trainer 因 embargo 後
+    #   樣本不足而 fail-open 停用 embargo（見 quantile_trainer.train_quantile_trio），
+    #   此時 embargo_boundary_overlap_count 筆 train 列的 label 實現窗與 holdout 邊界
+    #   重疊，ship-gate 指標可能因洩漏而樂觀偏誤。
+    # 為什麼硬性封頂：先前 verdict 完全「忽略」embargo_enforced，等於在已知邊界洩漏
+    #   風險下仍可宣告 should_ship —— 不得如此。此處封頂至 shadow_only（no_ship 維持
+    #   no_ship，永不升級），並於 reason 留下 overlap 計數誠實揭露，不得靜默丟棄
+    #   embargo（冷審計 R2 MIT[MEDIUM] Item 3）。
+    overlap_count = int(getattr(result, "embargo_overlap_count", 0))
+    if not result.embargo_enforced and verdict == VERDICT_SHIP:
+        verdict = VERDICT_SHADOW
+        reason = (
+            f"{reason}; embargo NOT enforced "
+            f"(boundary_overlap={overlap_count}) → capped at shadow_only"
+        )
+
+    # two-way 退路封頂裁決（MIT Item 1 修訂）：partition_mode == "two_way_shadow_capped"
+    #   表示 trainer 因尾段 holdout 太小無法三分，退回「train + 單一 holdout」，該單一
+    #   holdout 同時被 early-stopping / CQR / 回報共用 = 潛在洩漏。ship gate 絕不得消費
+    #   可能洩漏的兩分指標 → 硬性封頂 shadow_only（no_ship 維持 no_ship，永不升級）。
+    # 為什麼與 §6.5 一致而非冗餘：sub-floor 樣本通常落在 §6.5 的 no_ship / shadow band，
+    #   但當時間窗恰使大樣本 run 也 sub-floor（holdout 落在兩分區間）時，§6.5 可能給
+    #   should_ship —— 此封頂即在該情境下防止 ship gate 採信兩分指標（防禦縱深）。
+    partition_mode = getattr(result, "partition_mode", "three_way")
+    if partition_mode == "two_way_shadow_capped" and verdict == VERDICT_SHIP:
+        verdict = VERDICT_SHADOW
+        reason = (
+            f"{reason}; two-way holdout fallback (sub-floor split, "
+            f"metrics from shared single holdout) → capped at shadow_only"
+        )
+
     report["verdict"] = verdict
     report["verdict_reason"] = reason
 

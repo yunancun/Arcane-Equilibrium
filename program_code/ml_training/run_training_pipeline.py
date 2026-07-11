@@ -712,18 +712,20 @@ def _run_quantile_pipeline(
         return result
     result.stages_completed.append("quantile_train")
 
-    # Stage 3: CQR calibration on holdout.
+    # Stage 3: CQR calibration on the CALIBRATION partition; post-coverage on TEST.
+    # 反洩漏後：CQR 位移在 calibration 分區擬合，「CQR 後 coverage」（ship-gate 指標）
+    # 在未污染的 test 分區回報 —— 校準集與回報集互斥，不再共用資料列（claim-0002 HIGH）。
     cqr_offsets = fit_cqr_trio(
-        train_result.holdout_labels,
-        train_result.holdout_q10_pred,
-        train_result.holdout_q50_pred,
-        train_result.holdout_q90_pred,
+        train_result.calibration_labels,
+        train_result.calibration_q10_pred,
+        train_result.calibration_q50_pred,
+        train_result.calibration_q90_pred,
     )
     post_coverage = evaluate_cqr_coverage(
-        train_result.holdout_labels,
-        train_result.holdout_q10_pred,
-        train_result.holdout_q50_pred,
-        train_result.holdout_q90_pred,
+        train_result.test_labels,
+        train_result.test_q10_pred,
+        train_result.test_q50_pred,
+        train_result.test_q90_pred,
         cqr_offsets,
     )
     result.stages_completed.append("cqr_calibration")
@@ -888,6 +890,16 @@ def _run_quantile_pipeline(
         "verdict": result.verdict,
         "n_samples_labeled": train_result.n_samples_labeled,
         "n_holdout": train_result.n_holdout,
+        # 三分區列數 + 指標來源標記，供消費端溯源 ship-gate 指標取自未污染的 test 分區。
+        # MIT Item 1 修訂：可能走 two_way_shadow_capped 退路（holdout 太小），故來源標記與
+        #   partition_mode 由 train_result 溯源，不寫死；two_way 時 verdict 已被封頂 shadow_only。
+        "n_validation": train_result.n_validation,
+        "n_calibration": train_result.n_calibration,
+        "n_test": train_result.n_test,
+        "ship_gate_metric_source": getattr(
+            train_result, "ship_gate_metric_source", "test_partition",
+        ),
+        "partition_mode": getattr(train_result, "partition_mode", "three_way"),
         "pinball_skill_q10": train_result.per_quantile_metrics["q10"].pinball_skill,
         "pinball_skill_q50": train_result.per_quantile_metrics["q50"].pinball_skill,
         "pinball_skill_q90": train_result.per_quantile_metrics["q90"].pinball_skill,
@@ -982,6 +994,39 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
             logger.warning(result.error)
             return result
 
+        # 反洩漏 name-pattern 預篩（audit remediation item 4）：任何 fit 之前先用
+        # leakage_check 掃描特徵名的 forbidden pattern。此模塊是 L2 ml_advisory
+        # PromptContract 唯一引用的 name_pattern_check producer
+        # （l2_prompt_contract_registry.py:152-190），故不可刪除；但它只是 weak
+        # necessary-not-sufficient screen，不能宣稱 leak-free PIT——真正的值級 gate
+        # （shift1_compliance / is_oos_gap）是 P3b MIT-owned producer，尚未接線。
+        # 為什麼 strict=False：ALLOWED_PREFIXES 白名單相對 EDGE_P3_FEATURE_NAMES 已過時
+        # （17 個真特徵有 12 個不匹配前綴），strict 會誤殺合法特徵並中斷訓練；只有
+        # forbidden pattern（outcome_/future_/target_/label/realized_pnl…）才是無歧義
+        # 的洩漏訊號。為什麼 fail-closed：特徵名內出現 forbidden pattern 代表 label 或
+        # 未來資訊直接進入特徵集，任何下游 ship-gate metric 都失去意義，必須在 fit 前中止。
+        from program_code.ml_training.leakage_check import check_feature_leakage
+
+        leakage_passed, leakage_violations = check_feature_leakage(
+            feature_names, strict=False,
+        )
+        leakage_prescreen = {
+            "source_class": "name_pattern_check",
+            "strict": False,
+            "passed": leakage_passed,
+            "violations": leakage_violations,
+            # name-pattern 不足以支撐 leak-free 斷言，明確標 False 供 L2 advisory typing。
+            "leak_free_pit_claim": False,
+        }
+        if not leakage_passed:
+            result.metrics["leakage_prescreen"] = leakage_prescreen
+            result.error = "feature_leakage_forbidden_pattern: " + "; ".join(
+                leakage_violations[:5]
+            )
+            result.stages_completed.append("feature_leakage_prescreen_failed")
+            logger.warning(result.error)
+            return result
+
         if config.use_quantile_predictor:
             inner = _run_quantile_pipeline(
                 config, features, labels, timestamps, feature_names,
@@ -990,8 +1035,13 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
         else:
             inner = _run_legacy_scorer_pipeline(config, features, labels, timestamps, feature_names)
 
-        # Merge inner into outer keeping etl + labels stages first.
-        inner.stages_completed = ["etl", "labels"] + inner.stages_completed
+        # Merge inner into outer keeping etl + labels + leakage pre-screen first.
+        # 反洩漏預篩已在 fit 前通過，補進 stages 與 metrics，讓消費端（含 L2 advisory）
+        # 能溯源 name_pattern_check 這個 evidence 確實被產出，而非僅 prompt 宣稱。
+        inner.stages_completed = [
+            "etl", "labels", "feature_leakage_prescreen",
+        ] + inner.stages_completed
+        inner.metrics["leakage_prescreen"] = leakage_prescreen
         logger.info(
             "[pipeline] complete: success=%s stages=%s verdict=%s",
             inner.success, inner.stages_completed, inner.verdict,
