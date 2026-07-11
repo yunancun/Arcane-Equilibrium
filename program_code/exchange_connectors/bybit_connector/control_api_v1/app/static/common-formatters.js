@@ -328,10 +328,10 @@ function ocMiniTrendSvg(values, opts) {
     return x.toFixed(1) + ',' + y.toFixed(1);
   }).join(' ');
   var tone = opts.tone || 'info';
-  var stroke = tone === 'good' ? 'var(--green)'
-             : tone === 'bad' ? 'var(--red)'
-             : tone === 'warn' ? 'var(--yellow)'
-             : 'var(--blue)';
+  var stroke = tone === 'good' ? 'var(--pos)'
+             : tone === 'bad' ? 'var(--neg)'
+             : tone === 'warn' ? 'var(--warn)'
+             : 'var(--text-secondary)';
   var zeroLine = '';
   if (opts.includeZero && minV < 0 && maxV > 0) {
     var zy = pad + (1 - ((0 - minV) / span)) * usableH;
@@ -452,7 +452,7 @@ function ocPnlTrend(lineId, labelId, fills, zeroLineId) {
   if (!lineEl) return;
   if (!fills || !fills.length) {
     lineEl.setAttribute('points', '');
-    if (labelEl) { labelEl.textContent = 'no data'; labelEl.setAttribute('fill', 'var(--text-dim)'); }
+    if (labelEl) { labelEl.textContent = 'no data'; labelEl.setAttribute('fill', 'var(--text-secondary)'); }
     return;
   }
   var sorted = fills.slice().reverse().slice(0, 50);
@@ -482,7 +482,7 @@ function ocPnlTrend(lineId, labelId, fills, zeroLineId) {
   }).join(' ');
   lineEl.setAttribute('points', points);
   var last = series[series.length - 1];
-  lineEl.setAttribute('stroke', last >= 0 ? 'var(--green)' : 'var(--red)');
+  lineEl.setAttribute('stroke', last >= 0 ? 'var(--pos)' : 'var(--neg)');
   if (zeroLineId) {
     var zEl = document.getElementById(zeroLineId);
     if (zEl) {
@@ -495,7 +495,7 @@ function ocPnlTrend(lineId, labelId, fills, zeroLineId) {
   }
   if (labelEl) {
     labelEl.textContent = (last >= 0 ? '+' : '') + last.toFixed(4) + ' USDT (' + series.length + ' fills)';
-    labelEl.setAttribute('fill', last >= 0 ? 'var(--green)' : 'var(--red)');
+    labelEl.setAttribute('fill', last >= 0 ? 'var(--pos)' : 'var(--neg)');
   }
 }
 
@@ -506,7 +506,7 @@ function ocPnlSeriesTrend(lineId, labelId, points, zeroLineId, summary) {
   var rows = Array.isArray(points) ? points : [];
   if (!rows.length) {
     lineEl.setAttribute('points', '');
-    if (labelEl) { labelEl.textContent = 'no data'; labelEl.setAttribute('fill', 'var(--text-dim)'); }
+    if (labelEl) { labelEl.textContent = 'no data'; labelEl.setAttribute('fill', 'var(--text-secondary)'); }
     return;
   }
   var series = rows.map(function(p) {
@@ -524,7 +524,7 @@ function ocPnlSeriesTrend(lineId, labelId, points, zeroLineId, summary) {
   }).join(' ');
   lineEl.setAttribute('points', pointsAttr);
   var last = series[series.length - 1];
-  lineEl.setAttribute('stroke', last >= 0 ? 'var(--green)' : 'var(--red)');
+  lineEl.setAttribute('stroke', last >= 0 ? 'var(--pos)' : 'var(--neg)');
   if (zeroLineId) {
     var zEl = document.getElementById(zeroLineId);
     if (zEl) {
@@ -540,7 +540,7 @@ function ocPnlSeriesTrend(lineId, labelId, points, zeroLineId, summary) {
     var rangeLabel = summary && summary.range ? String(summary.range).toUpperCase() : '';
     labelEl.textContent = (last >= 0 ? '+' : '') + last.toFixed(4) + ' USDT' +
       (rangeLabel ? ' · ' + rangeLabel : '') + ' · ' + fills + ' fills';
-    labelEl.setAttribute('fill', last >= 0 ? 'var(--green)' : 'var(--red)');
+    labelEl.setAttribute('fill', last >= 0 ? 'var(--pos)' : 'var(--neg)');
   }
 }
 
@@ -637,7 +637,7 @@ function ocSetPnlRangeButtons(containerId, activeRange) {
     btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
     btn.style.borderColor = isActive ? 'rgba(56,139,253,0.75)' : '';
     btn.style.background = isActive ? 'rgba(56,139,253,0.16)' : '';
-    btn.style.color = isActive ? 'var(--blue)' : '';
+    btn.style.color = isActive ? 'var(--text-secondary)' : '';
   });
 }
 
