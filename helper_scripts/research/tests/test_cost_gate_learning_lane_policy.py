@@ -2012,7 +2012,7 @@ def test_activation_preflight_surfaces_blocked_outcome_review_candidate(
         "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT"
     )
     assert preflight["ledger"]["blocked_signal_outcome_review_schema_version"] == (
-        "cost_gate_demo_learning_lane_blocked_outcome_review_v5"
+        "cost_gate_demo_learning_lane_blocked_outcome_review_v6"
     )
     assert preflight["ledger"]["blocked_signal_top_review_side_cell_key"] == (
         "ma_crossover|ETHUSDT|Sell"
@@ -2476,7 +2476,7 @@ def test_alpha_discovery_routes_positive_blocked_outcome_review_candidate(
         "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATE"
     )
     assert row["blocked_signal_outcome_review_schema_version"] == (
-        "cost_gate_demo_learning_lane_blocked_outcome_review_v5"
+        "cost_gate_demo_learning_lane_blocked_outcome_review_v6"
     )
     assert row["blocked_signal_top_review_side_cell_key"] == (
         "ma_crossover|ETHUSDT|Sell"
@@ -3651,7 +3651,7 @@ def test_blocked_signal_outcome_review_scorecard_is_conservative():
     # 立案需 BH pass,marginal 小樣本只可作 exploration 排序)。
     assert scorecard["status"] == "NO_DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATE"
     assert scorecard["schema_version"] == (
-        "cost_gate_demo_learning_lane_blocked_outcome_review_v5"
+        "cost_gate_demo_learning_lane_blocked_outcome_review_v6"
     )
     assert scorecard["review_candidate_side_cell_count"] == 0
     assert scorecard["promotion_evidence"] is False

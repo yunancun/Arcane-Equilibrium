@@ -519,16 +519,16 @@ def _expected_slippage_payload(
     symbol_mean_abs: float = 1.5,
 ) -> dict[str, object]:
     global_mean_abs = (
-        (symbol_mean_abs * 200.0 + 2.0 * 300.0) / 500.0
-        if symbol is not None
-        else 2.0
+        2.0
+        if symbol is None
+        else (200 * symbol_mean_abs + 300 * 2.0) / 500
     )
     rows: list[dict[str, object]] = [
         {
             "symbol": None,
             "n": 500,
             "mean_abs": global_mean_abs,
-            "mean_signed": 1.0,
+            "mean_signed": global_mean_abs / 2.0,
             "q50": 1.0,
             "q75": 4.0,
             "q90": 8.0,
@@ -578,6 +578,62 @@ def _expected_slippage_payload(
 
 def _write_json_payload(path: Path, payload: object) -> None:
     path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _forged_expected_cost_outer(
+    source_payload: dict[str, object],
+) -> dict[str, object]:
+    def tail(block: dict[str, object]) -> tuple[object, str | None]:
+        if block["cvar90"] is not None:
+            return block["cvar90"], "cvar90"
+        if block["q90"] is not None:
+            return block["q90"], "q90_fallback"
+        return None, None
+
+    global_block = source_payload["global"]
+    assert isinstance(global_block, dict)
+    global_tail, global_tail_metric = tail(global_block)
+    symbols = source_payload["symbols"]
+    assert isinstance(symbols, list)
+    normalized_symbols = []
+    for row in symbols:
+        assert isinstance(row, dict)
+        tail_bps, tail_metric = tail(row)
+        normalized_symbols.append(
+            {
+                "symbol": row["symbol"],
+                "n": row["n"],
+                "mean_abs_bps": row["mean_abs"],
+                "tail_bps": tail_bps,
+                "tail_metric": tail_metric,
+            }
+        )
+    projection = {
+        "schema_version": "cost_gate_expected_cost_projection_v2",
+        "source_asof_utc": source_payload["asof"],
+        "source_window_days": source_payload["window_days"],
+        "global": {
+            "n": global_block["n"],
+            "mean_abs_bps": global_block["mean_abs"],
+            "tail_bps": global_tail,
+            "tail_metric": global_tail_metric,
+        },
+        "symbols": normalized_symbols,
+    }
+    return {
+        "available": True,
+        "asof": source_payload["asof"],
+        "source_asof_utc": source_payload["asof"],
+        "source_payload_sha256": _canonical_hash(source_payload),
+        "source_payload": copy.deepcopy(source_payload),
+        "normalized_projection": projection,
+        "normalized_projection_sha256": _canonical_hash(projection),
+        "global_mean_abs_bps": global_block["mean_abs"],
+        "global_tail_bps": global_tail,
+        "global_tail_metric": global_tail_metric,
+        "n_total_global": source_payload["n_total_global"],
+        "max_age_hours": 48,
+    }
 
 
 def _write_expected_cost_review(path: Path) -> dict[str, object]:
@@ -775,6 +831,76 @@ def test_expected_basis_rejects_independent_slippage_artifact_mismatch(
     with pytest.raises(
         CandidateBoardPublishError,
         match="expected_cost_independent_artifact_mismatch",
+    ):
+        publish_candidate_board(
+            source,
+            tmp_path / "rendezvous",
+            retention_limit=128,
+            slippage_artifact_path=independent,
+            now_utc=datetime(2026, 7, 10, 12, tzinfo=timezone.utc),
+        )
+
+
+def test_publisher_rejects_thin_symbol_low_global_laundering_before_fallback(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "blocked_outcome_review_20260710T120000Z.json"
+    _write_expected_cost_review(source)
+    attack = _expected_slippage_payload(
+        symbol="BTCUSDT",
+        symbol_mean_abs=1.5,
+    )
+    attack_symbols = {
+        row["symbol"]: row for row in attack["symbols"]
+    }
+    attack_symbols["BTCUSDT"].update({"n": 19, "thin_sample": True})
+    attack_symbols["ZZZFILLUSDT"].update({"n": 481, "thin_sample": False})
+    attack["global"].update({"mean_abs": 0.0, "mean_signed": 0.0})
+    forged_outer = _forged_expected_cost_outer(attack)
+
+    payload = json.loads(source.read_text(encoding="utf-8"))
+    payload["expected_cost_artifact"] = forged_outer
+    _write_json_payload(source, payload)
+
+    def bind_laundered_global_fallback(row: dict[str, object]) -> None:
+        cost_evidence = row["arbiter_input"]["cost_evidence"]
+        cost_evidence.update(
+            {
+                "source_payload_sha256": forged_outer[
+                    "source_payload_sha256"
+                ],
+                "source_asof_utc": forged_outer["source_asof_utc"],
+                "normalized_projection_sha256": forged_outer[
+                    "normalized_projection_sha256"
+                ],
+                "mean_abs_source": {
+                    "scope": "GLOBAL",
+                    "symbol": None,
+                    "sample_count": 500,
+                    "mean_abs_bps": 0.0,
+                },
+                "tail_source": {
+                    "scope": "GLOBAL",
+                    "symbol": None,
+                    "sample_count": 500,
+                    "tail_bps": forged_outer["global_tail_bps"],
+                    "tail_metric": forged_outer["global_tail_metric"],
+                },
+            }
+        )
+        row["avg_expected_cost_bps"] = 11.0
+        row["avg_tail_cost_bps"] = (
+            11.0 + 2.0 * forged_outer["global_tail_bps"]
+        )
+        row["tail_metric"] = forged_outer["global_tail_metric"]
+
+    _rewrite_rehashed_candidate(source, bind_laundered_global_fallback)
+    independent = tmp_path / "slippage_quantiles_latest.json"
+    _write_json_payload(independent, attack)
+
+    with pytest.raises(
+        CandidateBoardPublishError,
+        match="expected_cost_independent_artifact_invalid",
     ):
         publish_candidate_board(
             source,

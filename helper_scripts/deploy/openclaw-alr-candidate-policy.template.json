@@ -1,5 +1,5 @@
 {
-  "algorithm_version": "candidate_learning_arbiter_v1",
+  "algorithm_version": "candidate_learning_arbiter_v2",
   "byte_budget": null,
   "collection_window_days": null,
   "cooldown_seconds": 1800,
@@ -7,7 +7,7 @@
   "policy_config_hash": null,
   "q18_scale": 18,
   "row_budget": null,
-  "schema_version": "alr_candidate_arbiter_policy_template_v1",
+  "schema_version": "alr_candidate_arbiter_policy_template_v2",
   "thresholds": {
     "e1_n_eff_min": 30,
     "e2_utc_days_min": 5,

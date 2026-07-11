@@ -101,6 +101,8 @@ _SLIPPAGE_STAT_FIELDS = {
 }
 _SLIPPAGE_SYMBOL_FIELDS = {*_SLIPPAGE_STAT_FIELDS, "symbol"}
 _SLIPPAGE_WINDOW_DAYS = 90
+_SLIPPAGE_MEAN_ABS_TOL_BPS = 1e-9
+_SLIPPAGE_MEAN_REL_TOL = 1e-12
 _SLIPPAGE_BOUNDARY = (
     "slippage quantile artifact only; PG source is read-only SELECT-only; "
     "no PG write, Bybit call, order, config, risk, auth, or runtime mutation"
@@ -271,7 +273,12 @@ def _validate_slippage_stat_block(
             and cvar90 is None
         ):
             raise ValueError("slippage producer statistic completeness invalid")
-    if abs(mean_signed) > mean_abs:
+    if abs(mean_signed) > mean_abs and not math.isclose(
+        abs(mean_signed),
+        mean_abs,
+        rel_tol=_SLIPPAGE_MEAN_REL_TOL,
+        abs_tol=_SLIPPAGE_MEAN_ABS_TOL_BPS,
+    ):
         raise ValueError("slippage signed mean exceeds absolute mean")
     thin_sample = block["thin_sample"]
     if not isinstance(thin_sample, bool) or thin_sample is not (n < 100):
@@ -376,12 +383,31 @@ def _load_expected_slippage(
         or symbols != sorted(symbols)
         or len(symbols) != len(set(symbols))
         or sum(row["n"] for row in normalized_rows) != global_n
+    ):
+        return None
+    try:
+        weighted_mean_abs = math.fsum(
+            row["mean_abs"] * row["n"] for row in normalized_rows
+        ) / global_n
+        weighted_mean_signed = math.fsum(
+            row["mean_signed"] * row["n"] for row in normalized_rows
+        ) / global_n
+    except (OverflowError, ValueError):
+        return None
+    if (
+        not math.isfinite(weighted_mean_abs)
+        or not math.isfinite(weighted_mean_signed)
         or not math.isclose(
             global_mean_abs,
-            math.fsum(row["n"] * row["mean_abs"] for row in normalized_rows)
-            / global_n,
-            rel_tol=1e-12,
-            abs_tol=1e-12,
+            weighted_mean_abs,
+            rel_tol=_SLIPPAGE_MEAN_REL_TOL,
+            abs_tol=_SLIPPAGE_MEAN_ABS_TOL_BPS,
+        )
+        or not math.isclose(
+            global_block["mean_signed"],
+            weighted_mean_signed,
+            rel_tol=_SLIPPAGE_MEAN_REL_TOL,
+            abs_tol=_SLIPPAGE_MEAN_ABS_TOL_BPS,
         )
     ):
         return None

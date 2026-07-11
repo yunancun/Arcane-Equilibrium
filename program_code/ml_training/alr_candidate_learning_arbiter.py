@@ -614,6 +614,10 @@ def _validate_cost_evidence(
             value.get("source_payload_sha256") is not None
             or value.get("source_asof_utc") is not None
             or value.get("normalized_projection_sha256") is not None
+            or type(mean_source.get("sample_count")) is not int
+            or mean_source["sample_count"] != 0
+            or type(tail_source.get("sample_count")) is not int
+            or tail_source["sample_count"] != 0
             or dict(mean_source)
             != {
                 "scope": "NONE",

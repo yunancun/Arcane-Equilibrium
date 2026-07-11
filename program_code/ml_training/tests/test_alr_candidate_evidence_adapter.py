@@ -1243,6 +1243,29 @@ def _load(directory: Path, **overrides: object) -> dict[str, object]:
     return load_candidate_evidence_snapshot(directory, **kwargs)
 
 
+def _rehash_expected_cost_contract(payload: dict[str, object]) -> None:
+    outer = payload["expected_cost_artifact"]
+    assert isinstance(outer, dict)
+    source_payload = outer["source_payload"]
+    normalized_projection = outer["normalized_projection"]
+    outer["source_payload_sha256"] = _canonical_sha256(source_payload)
+    outer["normalized_projection_sha256"] = _canonical_sha256(
+        normalized_projection
+    )
+    board = payload["learning_candidate_board"]
+    assert isinstance(board, dict)
+    for row in board["candidate_rows"]:
+        cost_evidence = row["arbiter_input"]["cost_evidence"]
+        cost_evidence["source_payload_sha256"] = outer[
+            "source_payload_sha256"
+        ]
+        cost_evidence["normalized_projection_sha256"] = outer[
+            "normalized_projection_sha256"
+        ]
+        _rehash_candidate_contract(row)
+    _rehash_board(board)
+
+
 def test_missing_directory_is_structured_fail_closed_not_an_exception(
     tmp_path: Path,
 ) -> None:
@@ -1390,29 +1413,16 @@ def test_adapter_rejects_rehashed_outer_projection_detached_from_source_payload(
     assert result["source_status"] == "OUTER_COST_EVIDENCE_INVALID"
 
 
-def test_adapter_rejects_fully_rehashed_global_mean_detached_from_symbol_rollup(
+def test_adapter_rejects_fully_rehashed_inconsistent_weighted_global_mean(
     tmp_path: Path,
 ) -> None:
-    """Hash refreshes cannot make an anti-conservative global fallback admissible."""
     payload = _payload()
     outer = payload["expected_cost_artifact"]
-    source = outer["source_payload"]
-    source["global"]["mean_abs"] = 0.25
-    source["global"]["mean_signed"] = 0.0
-    outer["source_payload_sha256"] = _canonical_sha256(source)
-    outer["normalized_projection"]["global"]["mean_abs_bps"] = 0.25
-    outer["normalized_projection_sha256"] = _canonical_sha256(
-        outer["normalized_projection"]
-    )
-    outer["global_mean_abs_bps"] = 0.25
-    for row in payload["learning_candidate_board"]["candidate_rows"]:
-        cost_evidence = row["arbiter_input"]["cost_evidence"]
-        cost_evidence["source_payload_sha256"] = outer["source_payload_sha256"]
-        cost_evidence["normalized_projection_sha256"] = outer[
-            "normalized_projection_sha256"
-        ]
-        _rehash_candidate_contract(row)
-    _rehash_board(payload["learning_candidate_board"])
+    source_payload = outer["source_payload"]
+    source_payload["global"]["mean_abs"] = 1.0
+    outer["global_mean_abs_bps"] = 1.0
+    outer["normalized_projection"]["global"]["mean_abs_bps"] = 1.0
+    _rehash_expected_cost_contract(payload)
     _write_snapshot(tmp_path, payload=payload)
 
     result = _load(tmp_path)
@@ -1420,10 +1430,51 @@ def test_adapter_rejects_fully_rehashed_global_mean_detached_from_symbol_rollup(
     assert result["source_status"] == "EXPECTED_COST_SOURCE_INVALID"
 
 
+def test_adapter_rejects_fully_rehashed_signed_mean_above_absolute_mean(
+    tmp_path: Path,
+) -> None:
+    payload = _payload()
+    outer = payload["expected_cost_artifact"]
+    source_payload = outer["source_payload"]
+    source_payload["symbols"][0]["mean_signed"] = 2.000001
+    _rehash_expected_cost_contract(payload)
+    _write_snapshot(tmp_path, payload=payload)
+
+    result = _load(tmp_path)
+
+    assert result["source_status"] == "EXPECTED_COST_SOURCE_INVALID"
+
+
+def test_adapter_rejects_fully_rehashed_cost_source_after_board_generation(
+    tmp_path: Path,
+) -> None:
+    payload = _payload()
+    payload["generated_at_utc"] = "2026-07-10T10:59:59Z"
+    _rehash_board(payload["learning_candidate_board"])
+    _write_snapshot(
+        tmp_path,
+        name="blocked_outcome_review_20260710T105959Z.json",
+        payload=payload,
+    )
+
+    result = _load(tmp_path, max_age_seconds=3_601)
+
+    assert result["source_status"] == (
+        "EXPECTED_COST_SOURCE_AFTER_BOARD_GENERATED"
+    )
+
+
 def test_adapter_expected_cost_source_freshness_is_exact_48_hours(
     tmp_path: Path,
 ) -> None:
-    _write_snapshot(tmp_path, payload=_payload())
+    payload = _payload()
+    payload["generated_at_utc"] = "2026-07-10T11:00:00Z"
+    _rehash_board(payload["learning_candidate_board"])
+    _write_snapshot(
+        tmp_path,
+        name="blocked_outcome_review_20260710T110000Z.json",
+        payload=payload,
+    )
 
     boundary = _load(
         tmp_path,
