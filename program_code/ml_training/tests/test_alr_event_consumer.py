@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+import struct
 from types import SimpleNamespace
 
 import pytest
@@ -387,6 +389,496 @@ def test_event_loop_history_is_fixed_smaller_bound_after_idle_fresh_zero(
         ("history", 8),
     ]
     assert result["drains"] == 3
+
+
+def test_candidate_board_inotify_source_wakes_on_immutable_create_and_recovers_overflow(
+    tmp_path: Path,
+) -> None:
+    read_fd, write_fd = os.pipe()
+    os.set_blocking(read_fd, False)
+    rearms: list[Path] = []
+
+    def open_watch(directory: Path) -> tuple[int, int, int]:
+        assert directory == tmp_path
+        return read_fd, 17, -1
+
+    def reopen_watch(directory: Path) -> tuple[int, int, int]:
+        rearms.append(directory)
+        return read_fd, 23, -1
+
+    source = consumer.open_candidate_board_event_source(
+        tmp_path,
+        open_watch=open_watch,
+        reopen_watch=reopen_watch,
+    )
+    try:
+        assert source.consume_reconciliation_request() is True
+        assert source.consume_reconciliation_request() is False
+
+        for mask in (
+            consumer._IN_CREATE,
+            consumer._IN_MOVED_TO,
+            consumer._IN_CLOSE_WRITE,
+            consumer._IN_DELETE,
+        ):
+            name = b"blocked_outcome_review_20260711T120000Z.json\x00"
+            padded = name + b"\x00" * ((4 - len(name) % 4) % 4)
+            os.write(
+                write_fd,
+                struct.pack("iIII", 17, mask, 0, len(padded)) + padded,
+            )
+            source.drain_ready()
+            assert source.consume_reconciliation_request() is True
+
+        os.write(
+            write_fd,
+            struct.pack("iIII", -1, consumer._IN_Q_OVERFLOW, 0, 0),
+        )
+        source.drain_ready()
+        assert source.consume_reconciliation_request() is True
+        assert rearms == [tmp_path]
+
+        os.write(
+            write_fd,
+            struct.pack("iIII", 17, consumer._IN_IGNORED, 0, 0),
+        )
+        source.drain_ready()
+        assert source.consume_reconciliation_request() is False
+        assert rearms == [tmp_path]
+
+        os.write(
+            write_fd,
+            struct.pack("iIII", 23, consumer._IN_IGNORED, 0, 0),
+        )
+        source.drain_ready()
+        assert source.consume_reconciliation_request() is True
+        assert rearms == [tmp_path, tmp_path]
+    finally:
+        source.close()
+        with pytest.raises(OSError):
+            os.fstat(read_fd)
+        os.close(write_fd)
+
+
+def test_candidate_board_rearm_closes_old_descriptors_and_owns_new_pair(
+    tmp_path: Path,
+) -> None:
+    old_read_fd, old_write_fd = os.pipe()
+    new_read_fd, new_write_fd = os.pipe()
+    os.set_blocking(old_read_fd, False)
+    old_directory_fd = os.open(tmp_path, os.O_RDONLY)
+    new_directory_fd = os.open(tmp_path, os.O_RDONLY)
+
+    source = consumer.open_candidate_board_event_source(
+        tmp_path,
+        open_watch=lambda directory: (old_read_fd, 17, old_directory_fd),
+        reopen_watch=lambda directory: (new_read_fd, 23, new_directory_fd),
+    )
+    try:
+        source.consume_reconciliation_request()
+        os.write(
+            old_write_fd,
+            struct.pack("iIII", 17, consumer._IN_IGNORED, 0, 0),
+        )
+        source.drain_ready()
+
+        with pytest.raises(OSError):
+            os.fstat(old_read_fd)
+        with pytest.raises(OSError):
+            os.fstat(old_directory_fd)
+        os.fstat(new_read_fd)
+        os.fstat(new_directory_fd)
+        assert source.consume_reconciliation_request() is True
+    finally:
+        source.close()
+        os.close(old_write_fd)
+        os.close(new_write_fd)
+
+    with pytest.raises(OSError):
+        os.fstat(new_read_fd)
+    with pytest.raises(OSError):
+        os.fstat(new_directory_fd)
+
+
+def test_empty_pg_wait_uses_rearmed_candidate_board_descriptor(
+    tmp_path: Path,
+) -> None:
+    pg_read_fd, pg_write_fd = os.pipe()
+    old_read_fd, old_write_fd = os.pipe()
+    new_read_fd, new_write_fd = os.pipe()
+    os.set_blocking(old_read_fd, False)
+    os.set_blocking(new_read_fd, False)
+
+    class Connection:
+        def __init__(self) -> None:
+            self.notifies: list[object] = []
+            self.polls = 0
+
+        def fileno(self) -> int:
+            return pg_read_fd
+
+        def poll(self) -> None:
+            self.polls += 1
+
+    source = consumer.open_candidate_board_event_source(
+        tmp_path,
+        open_watch=lambda directory: (old_read_fd, 17, -1),
+        reopen_watch=lambda directory: (new_read_fd, 23, -1),
+    )
+    connection = Connection()
+    try:
+        source.consume_reconciliation_request()
+        os.write(
+            old_write_fd,
+            struct.pack("iIII", 17, consumer._IN_IGNORED, 0, 0),
+        )
+        assert wait_for_pg_notifications(
+            connection,
+            timeout_seconds=1.0,
+            max_batch=8,
+            candidate_board_source=source,
+        ) == []
+        assert source.consume_reconciliation_request() is True
+
+        name = b"blocked_outcome_review_20260711T120001Z.json\x00"
+        padded = name + b"\x00" * ((4 - len(name) % 4) % 4)
+        os.write(
+            new_write_fd,
+            struct.pack("iIII", 23, consumer._IN_CREATE, 0, len(padded)) + padded,
+        )
+        assert wait_for_pg_notifications(
+            connection,
+            timeout_seconds=1.0,
+            max_batch=8,
+            candidate_board_source=source,
+        ) == []
+        assert source.consume_reconciliation_request() is True
+        assert connection.polls == 0
+    finally:
+        source.close()
+        os.close(pg_read_fd)
+        os.close(pg_write_fd)
+        os.close(old_write_fd)
+        os.close(new_write_fd)
+
+
+def test_candidate_board_wake_runs_candidate_only_with_zero_scanner_drain_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    candidate_inputs: list[tuple[str, int, Path | None, object]] = []
+    waits = 0
+
+    class BoardWake:
+        def __init__(self) -> None:
+            self.pending = False
+
+        def consume_reconciliation_request(self) -> bool:
+            pending, self.pending = self.pending, False
+            return pending
+
+    board_wake = BoardWake()
+    monkeypatch.setattr(
+        consumer,
+        "drain_fresh_lane",
+        lambda connection, *, session_id, max_batch: _drain_result(),
+    )
+    monkeypatch.setattr(
+        consumer,
+        "_process_operational_cycle",
+        lambda *args, **kwargs: calls.append("startup_full"),
+    )
+    def candidate_only(
+        connection: object,
+        *,
+        source_head: str,
+        max_batch: int,
+        evidence_directory: Path | None,
+        candidate_policy: object,
+    ) -> dict[str, int]:
+        del connection
+        calls.append("candidate_only")
+        candidate_inputs.append(
+            (source_head, max_batch, evidence_directory, candidate_policy)
+        )
+        return consumer._operational_result("INSUFFICIENT_SOURCE_CYCLES")
+
+    monkeypatch.setattr(consumer, "run_candidate_aware_backlog", candidate_only)
+    monkeypatch.setattr(
+        consumer,
+        "process_health_snapshot",
+        lambda *args, **kwargs: calls.append("health")
+        or {
+            "health_attempts": 0,
+            "health_snapshots": 0,
+            "health_state_delta_writes": 0,
+            "health_heartbeat_writes": 0,
+            "health_writes_suppressed": 0,
+            "health_rows_written": 0,
+            "health_payload_bytes_written": 0,
+            "health_authority_mismatches": 0,
+        },
+    )
+    monkeypatch.setattr(
+        consumer,
+        "process_outcome_feedback_backlog",
+        lambda *args, **kwargs: pytest.fail("board wake must not run feedback"),
+    )
+    monkeypatch.setattr(
+        consumer,
+        "process_retention_backlog",
+        lambda *args, **kwargs: pytest.fail("board wake must not run retention"),
+    )
+
+    def wait(
+        connection: object,
+        *,
+        timeout_seconds: float,
+        max_batch: int,
+        candidate_board_source: object,
+    ) -> list[tuple[str, str]]:
+        del connection, timeout_seconds, max_batch
+        nonlocal waits
+        waits += 1
+        assert candidate_board_source is board_wake
+        if waits == 1:
+            board_wake.pending = True
+        return []
+
+    event_consumer_loop(
+        object(),
+        max_batch=8,
+        should_stop=lambda: waits >= 2,
+        wait_for_notifications=wait,
+        session_id="00000000-0000-0000-0000-000000000001",
+        source_head="a" * 40,
+        candidate_evidence_directory=Path("/durable/evidence"),
+        candidate_policy={"policy_config_hash": "b" * 64},
+        candidate_board_source=board_wake,
+        monotonic_seconds=iter([0.0, 61.0]).__next__,
+    )
+
+    assert calls == ["startup_full", "candidate_only", "health"]
+    assert candidate_inputs == [
+        (
+            "a" * 40,
+            8,
+            Path("/durable/evidence"),
+            {"policy_config_hash": "b" * 64},
+        )
+    ]
+
+
+def test_candidate_board_event_source_rejects_truncated_kernel_record(
+    tmp_path: Path,
+) -> None:
+    read_fd, write_fd = os.pipe()
+    os.set_blocking(read_fd, False)
+    source = consumer.open_candidate_board_event_source(
+        tmp_path,
+        open_watch=lambda directory: (read_fd, 7, -1),
+        reopen_watch=lambda directory: (read_fd, 7, -1),
+    )
+    source.consume_reconciliation_request()
+    try:
+        os.write(write_fd, b"truncated")
+        with pytest.raises(AlrEventConsumerError, match="candidate_board_event_truncated"):
+            source.drain_ready()
+    finally:
+        source.close()
+        os.close(write_fd)
+
+
+def test_inotify_watch_binds_held_directory_fd_across_configured_path_aba(
+    tmp_path: Path,
+) -> None:
+    configured = tmp_path / "configured"
+    replacement = tmp_path / "replacement"
+    held_name = tmp_path / "held-original"
+    configured.mkdir()
+    replacement.mkdir()
+    original_identity = configured.stat().st_dev, configured.stat().st_ino
+    replacement_identity = replacement.stat().st_dev, replacement.stat().st_ino
+    observed_paths: list[bytes] = []
+
+    class AddWatch:
+        argtypes: object = None
+        restype: object = None
+
+        def __call__(self, event_fd: int, path: bytes, mask: int) -> int:
+            assert event_fd == 41
+            assert mask & consumer._IN_ONLYDIR
+            assert mask & consumer._IN_DONT_FOLLOW
+            observed_paths.append(path)
+            decoded = os.fsdecode(path)
+            prefix = "/proc/self/fd/"
+            assert decoded.startswith(prefix)
+            assert decoded.endswith("/.")
+            directory_fd = int(decoded[len(prefix) : -2])
+            assert (os.fstat(directory_fd).st_dev, os.fstat(directory_fd).st_ino) == (
+                original_identity
+            )
+
+            configured.rename(held_name)
+            replacement.rename(configured)
+            try:
+                assert (configured.stat().st_dev, configured.stat().st_ino) == (
+                    replacement_identity
+                )
+                assert (os.fstat(directory_fd).st_dev, os.fstat(directory_fd).st_ino) == (
+                    original_identity
+                )
+            finally:
+                configured.rename(replacement)
+                held_name.rename(configured)
+            return 19
+
+    class Libc:
+        inotify_add_watch = AddWatch()
+
+    descriptor, directory_fd = consumer._add_linux_candidate_board_watch(
+        Libc(),
+        41,
+        configured,
+    )
+    try:
+        assert descriptor == 19
+        assert observed_paths == [os.fsencode(f"/proc/self/fd/{directory_fd}/.")]
+        assert (configured.stat().st_dev, configured.stat().st_ino) == (
+            original_identity
+        )
+    finally:
+        os.close(directory_fd)
+
+
+def test_prequeued_pg_notification_still_services_ready_board_fd() -> None:
+    read_fd, write_fd = os.pipe()
+    drained: list[bool] = []
+
+    class BoardSource:
+        def fileno(self) -> int:
+            return read_fd
+
+        def drain_ready(self) -> None:
+            os.read(read_fd, 1)
+            drained.append(True)
+
+    class Connection:
+        def __init__(self) -> None:
+            self.notifies = [SimpleNamespace(channel="channel", payload="payload")]
+
+    os.write(write_fd, b"w")
+    try:
+        result = wait_for_pg_notifications(
+            Connection(),
+            timeout_seconds=1.0,
+            max_batch=8,
+            candidate_board_source=BoardSource(),
+        )
+    finally:
+        os.close(read_fd)
+        os.close(write_fd)
+
+    assert result == [("channel", "payload")]
+    assert drained == [True]
+
+
+@pytest.mark.skipif(consumer.sys.platform != "linux", reason="Linux inotify integration")
+def test_linux_inotify_real_link_publish_wakes_bounded_source(tmp_path: Path) -> None:
+    evidence_directory = tmp_path / "evidence"
+    evidence_directory.mkdir()
+    producer_path = tmp_path / "producer.json"
+    producer_path.write_text("{}\n", encoding="utf-8")
+    source = consumer.open_candidate_board_event_source(evidence_directory)
+    try:
+        assert source.consume_reconciliation_request() is True
+        os.link(
+            producer_path,
+            evidence_directory / "blocked_outcome_review_20260711T120000Z.json",
+        )
+        ready, _, _ = consumer.select.select([source], [], [], 1.0)
+        assert ready == [source]
+        source.drain_ready()
+        assert source.consume_reconciliation_request() is True
+    finally:
+        source.close()
+
+
+def test_missing_candidate_directory_fails_before_db_listener_connect(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    active_lock = False
+
+    class Lock:
+        def __enter__(self) -> None:
+            nonlocal active_lock
+            active_lock = True
+
+        def __exit__(self, *args: object) -> None:
+            nonlocal active_lock
+            active_lock = False
+
+    monkeypatch.setattr(consumer, "verify_runtime_source_head", lambda *args, **kwargs: "a" * 40)
+    monkeypatch.setattr(consumer, "read_local_dsn_file", lambda path: "local-dsn")
+    monkeypatch.setattr(consumer, "_install_shutdown_handlers", lambda event: {})
+    monkeypatch.setattr(consumer, "_restore_shutdown_handlers", lambda previous: None)
+    monkeypatch.setattr(consumer, "runtime_file_lock", lambda path: Lock())
+
+    def fail_watch(path: Path) -> object:
+        assert active_lock is True
+        raise AlrEventConsumerError("candidate_board_directory_unavailable")
+
+    monkeypatch.setattr(consumer, "open_candidate_board_event_source", fail_watch)
+    monkeypatch.setattr(
+        consumer,
+        "_connect_listener",
+        lambda dsn: pytest.fail("DB listener must not open without board watch"),
+    )
+
+    with pytest.raises(
+        AlrEventConsumerError,
+        match="candidate_board_directory_unavailable",
+    ):
+        consumer.run_event_consumer(
+            dsn_path=tmp_path / "dsn",
+            lock_path=tmp_path / "lock",
+            max_batch=8,
+            source_head="a" * 40,
+            candidate_evidence_directory=tmp_path / "missing",
+        )
+
+
+def test_busy_runtime_lock_never_opens_candidate_board_watch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    class BusyLock:
+        def __enter__(self) -> None:
+            raise AlrEventConsumerError("runtime_file_lock_busy")
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+    monkeypatch.setattr(consumer, "verify_runtime_source_head", lambda *args, **kwargs: "a" * 40)
+    monkeypatch.setattr(consumer, "read_local_dsn_file", lambda path: "local-dsn")
+    monkeypatch.setattr(consumer, "_install_shutdown_handlers", lambda event: {})
+    monkeypatch.setattr(consumer, "_restore_shutdown_handlers", lambda previous: None)
+    monkeypatch.setattr(consumer, "runtime_file_lock", lambda path: BusyLock())
+    monkeypatch.setattr(
+        consumer,
+        "open_candidate_board_event_source",
+        lambda path: pytest.fail("busy lock must prevent a second watcher"),
+    )
+
+    with pytest.raises(AlrEventConsumerError, match="runtime_file_lock_busy"):
+        consumer.run_event_consumer(
+            dsn_path=tmp_path / "dsn",
+            lock_path=tmp_path / "lock",
+            max_batch=8,
+            source_head="a" * 40,
+            candidate_evidence_directory=tmp_path / "evidence",
+        )
 
 
 def test_operational_backlog_is_bounded_and_deferred_without_training_authority(
@@ -916,7 +1408,7 @@ def test_idle_health_heartbeat_does_not_trigger_another_training_cycle(
         source_head="a" * 40,
     )
 
-    assert target_calls == 2
+    assert target_calls == 1
     assert health_calls == 2
 
 
