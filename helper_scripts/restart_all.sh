@@ -881,6 +881,81 @@ ensure_docker_network() {
     fi
 }
 
+report_build_deploy_drift() {
+    # ── OPS 部署漂移偵測（Item 11；DETECTION-ONLY，永不自動 rebuild/restart） ──
+    # 為什麼：2026-07-03 冷審計 P0-1「重啟未 rebuild / 半部署」盲區——checkout 的
+    #   git HEAD 前進了，但運行中的引擎 binary 仍是舊世代（其 build_sha 落後 HEAD）。
+    #   本函數比對 boot_history.jsonl 裡最後一筆引擎 boot 的 build_sha 與
+    #   `git rev-parse HEAD`：當 build_sha 是 HEAD 的祖先（linear ancestor）即為半部署，
+    #   發出 distinct WARN 讓 operator 察覺「該 rebuild 卻沒 rebuild」。
+    # 硬邊界（TIER-A Item 11 vs TIER-B B5 的分界）：本函數**只回報**，絕不觸發
+    #   rebuild 或 restart——真正的 gap-closure 重建屬 TIER-B、需 operator 批准。
+    #   在此新增任何 rebuild/restart 副作用都違反 detection-only 契約，故刻意無副作用。
+    local boot_history="$DATA_DIR/boot_history.jsonl"
+    echo "=== Deploy Drift ==="
+    if [[ ! -s "$boot_history" ]]; then
+        # 沒有 boot 紀錄（全新部署 / 尚未啟動過引擎）——無從比對，安靜跳過。
+        echo ">>> deploy-drift check: no boot_history.jsonl yet (skipping)"
+        return 0
+    fi
+    # 取最後一筆「帶 build_sha 欄位」的紀錄（= 引擎 boot record）。control_api 記的是
+    # repo_head（boot 時的 git rev-parse）而非編譯期 build_sha，對「binary 是否 rebuild」
+    # 的半部署偵測無意義，故略過；只有引擎 binary 的 build_sha 能證明運行世代。
+    # 用純標準庫 python3 逐行解析，避免脆弱的 grep/sed JSON 剖析。
+    local running_sha
+    running_sha="$(python3 - "$boot_history" 2>/dev/null <<'PY'
+import json
+import sys
+
+running = ""
+with open(sys.argv[1], encoding="utf-8") as fh:
+    for line in fh:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue
+        sha = rec.get("build_sha")
+        if isinstance(sha, str) and sha:
+            running = sha  # 保留到最後一筆帶 build_sha 者 = 目前運行的引擎世代
+print(running)
+PY
+)" || true
+    if [[ -z "$running_sha" || "$running_sha" == "unknown" ]]; then
+        # build_sha 缺席，或編譯期 git 不可得（build.rs fallback "unknown"）——
+        # 誠實跳過而非誤判 drift（可觀測性面不得製造假陽性告警）。
+        echo ">>> deploy-drift check: no usable engine build_sha in boot_history.jsonl (skipping)"
+        return 0
+    fi
+    local head_sha
+    head_sha="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || true)"
+    if [[ -z "$head_sha" ]]; then
+        echo ">>> deploy-drift check: git HEAD unavailable (skipping)"
+        return 0
+    fi
+    if [[ "$running_sha" == "$head_sha" ]]; then
+        echo ">>> deploy-drift check: running engine build_sha in sync with HEAD ($head_sha)"
+        return 0
+    fi
+    # build_sha ≠ HEAD——分兩種 distinct 訊號：
+    #  (a) build_sha 是 HEAD 的祖先 → 半部署（HEAD 已前進、binary 未 rebuild）。
+    #  (b) 其餘（build_sha 不在 HEAD 歷史內 / 未知 commit / 已分叉）→ 無法斷定為
+    #      單純落後，另發 distinct 訊號請 operator 手動釐清（merge-base 對未知 object
+    #      回非零，一律落到此分支，fail-safe 不誤標成半部署）。
+    if git -C "$REPO_ROOT" merge-base --is-ancestor "$running_sha" "$head_sha" 2>/dev/null; then
+        echo "WARN: DEPLOY-DRIFT (half-deploy): running engine build_sha $running_sha is an ANCESTOR of checkout HEAD $head_sha" >&2
+        echo "WARN:   the running engine predates the checked-out code — a rebuild+restart is required to close the gap" >&2
+        echo "WARN:   detection-only: this script will NOT auto-rebuild/restart (operator-gated; see remediation TIER-B B5)" >&2
+    else
+        echo "WARN: DEPLOY-DRIFT (indeterminate): running engine build_sha $running_sha is not an ancestor of HEAD $head_sha" >&2
+        echo "WARN:   build_sha may be ahead of / diverged from / absent in this checkout — operator should reconcile heads manually" >&2
+        echo "WARN:   detection-only: no auto-rebuild/restart performed" >&2
+    fi
+    return 0
+}
+
 wait_and_verify() {
     ensure_docker_network
     echo ">>> Waiting 10s for startup..."
@@ -890,6 +965,8 @@ wait_and_verify() {
         --data-dir "$DATA_DIR" --stale-threshold 45 --grace-period 120 --status 2>&1 || true
     echo "=== Ticks ==="
     python3 -c "import json;s=json.load(open('$DATA_DIR/pipeline_snapshot.json'));print('ticks:', s['stats']['total_ticks'], 'fills:', s['stats']['total_fills'], 'paused:', s.get('paper_paused'))" 2>&1 || true
+    # 半部署偵測（僅回報，不觸發任何重建/重啟；見 report_build_deploy_drift 函數頭）。
+    report_build_deploy_drift
 }
 
 # ── Pre-flight rebuild (if requested) / 啟動前重建（如有請求） ──

@@ -72,6 +72,10 @@ def _make_result(
         n_samples_total=n_labeled,
         n_samples_labeled=n_labeled,
         n_holdout=100,
+        # 反洩漏三分 holdout：val 25 + calib 25 + test 50 = 100（test 承載 ship-gate）。
+        n_validation=25,
+        n_calibration=25,
+        n_test=50,
         models={"q10": object(), "q50": object(), "q90": object()},
         per_quantile_metrics={
             "q10": _make_metrics(skill, cov_err, linear_skill, 0.10),
@@ -84,7 +88,7 @@ def _make_result(
         crossing_rate=crossing,
         feature_schema_hash="sha256:" + "0" * 16,
         feature_definition_hash="sha256:" + "1" * 16,
-        embargo_config=EmbargoConfig(n_folds=5, embargo_hours=24, holdout_tail_days=7.0),
+        embargo_config=EmbargoConfig(embargo_hours=24, holdout_tail_days=7.0),
     )
     return result
 
@@ -119,6 +123,22 @@ def test_verdict_downgrades_to_shadow_when_gates_fail_despite_full_sample():
     report = generate_acceptance_report(res, cfg, include_train_serve_harness=False)
     assert report["verdict"] == VERDICT_SHADOW
     assert report["all_hard_gates_pass"] is False
+
+
+# ──────────────── ship-gate metric provenance (anti-leakage) ────────────────
+
+def test_report_declares_ship_gate_metrics_sourced_from_test_partition():
+    """驗收指標的來源溯源：report 明示 ship-gate 指標取自未污染的 test 分區，
+    並回報三分區列數。這是 claim-0002 HIGH 反洩漏修復的可稽核證據欄。"""
+    cfg = QuantileTrainingConfig()
+    res = _make_result(n_labeled=SAMPLE_GATE_PROD + 50, all_gates_passing=True)
+    report = generate_acceptance_report(res, cfg, include_train_serve_harness=False)
+    assert report["ship_gate_metric_source"] == "test_partition"
+    assert report["n_validation"] == 25
+    assert report["n_calibration"] == 25
+    assert report["n_test"] == 50
+    # 三分區合計等於整個尾段 holdout（無遺漏）。
+    assert report["n_validation"] + report["n_calibration"] + report["n_test"] == report["n_holdout"]
 
 
 # ──────────────── P1-3 label composition gate ────────────────

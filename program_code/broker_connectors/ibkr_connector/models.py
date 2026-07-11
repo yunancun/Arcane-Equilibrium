@@ -43,7 +43,11 @@ class IbkrReadOnlyEndpointConfig:
             blockers.append("environment_not_read_only")
         if self.host != "127.0.0.1":
             blockers.append("host_not_loopback")
-        if self.port not in (4001, 4002):
+        # 為什麼 fail-closed：4001 是 IBKR_LIVE_GATEWAY_PORT（見 Rust
+        # ibkr_phase2_gate.rs），Rust 側對 live gateway port 是硬拒。Python 邊界
+        # 若仍放行 4001，兩層契約不一致，可能讓 live 連線描述子通過驗證。這裡收緊
+        # 到只接受 4002（reserved paper TWS），與 Rust hard-deny 對齊。
+        if self.port != 4002:
             blockers.append("port_not_reserved_paper_tws")
         if self.client_id < 0:
             blockers.append("client_id_negative")

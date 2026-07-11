@@ -65,6 +65,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -357,6 +358,52 @@ async def _run_ollama_screen(
 # ═══════════════════════════════════════════════════════════════════════════════
 # cloud-L2 diagnose/interpret（單發 structured JSON；contract registry 模板）
 # ═══════════════════════════════════════════════════════════════════════════════
+#
+# 為什麼要「剝殼再 parse」：cloud/model 常把 structured JSON 包在 markdown code fence
+# （```json ... ```）或前後夾解說散文（"Here is the analysis:\n{...}\nHope this helps."）。
+# 對原始文本直接 json.loads 會 JSONDecodeError，舊碼把這種「有回覆但帶殼」誤判成 parsed=None，
+# 再被 caller 標成 cloud outage（cloud_unavailable）——這是誠實邊界違反：cloud 明明有回覆、
+# 只是格式帶殼，卻被記成「不可用」，會誤觸發 fail-safe 把 cloud 判定為 outage。故先剝 fence、
+# 再取第一個 '{' 到最後一個 '}' 的區段（本路徑診斷/解讀契約恆回單一 JSON object）才 json.loads。
+
+_JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL | re.IGNORECASE)
+
+
+def _extract_json_object_text(raw: str) -> str | None:
+    """從 model 回覆抽出 JSON object 字面：剝 ```json / ``` fence 與前後散文。
+
+    回抽出的 '{...}' 子字串；找不到花括號區段 → None（交呼叫端判 parse_failed，非 outage）。
+    為什麼取第一個 '{' 到最後一個 '}'：本路徑契約恆回單一 JSON object，此法同時吃掉 fence 外
+    殘留散文與 fence 內偶發前後綴，且不誤把散文中的裸字視為 JSON（無花括號即回 None）。
+    """
+    if not raw:
+        return None
+    text = raw.strip()
+    m = _JSON_FENCE_RE.search(text)
+    if m:
+        # 只取第一個 fenced block 內文（單發診斷/解讀恆回一個 JSON block）。
+        text = m.group(1).strip()
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end < start:
+        return None
+    return text[start : end + 1]
+
+
+def _parse_cloud_reply_json(raw: str) -> dict[str, Any] | None:
+    """剝 fence/散文後 json.loads，回 dict；非 dict / parse 失敗 → None。
+
+    為什麼回 None 而非 raise：本路徑 fail-soft——parse 失敗只「減去」L2 能力，交 caller 標
+    parse_failed（present-but-unparsable，絕不標成 cloud outage）。
+    """
+    candidate = _extract_json_object_text(raw)
+    if candidate is None:
+        return None
+    try:
+        parsed = json.loads(candidate)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
 
 
 async def _run_cloud_interpret(
@@ -402,15 +449,17 @@ async def _run_cloud_interpret(
         tools=None, max_tokens=_CLOUD_MAX_TOKENS, timeout=_CLOUD_TIMEOUT_S,
     )
     if resp is None:
+        # provider 回 None ＝ 真 outage（cloud 不可用）。meta 標 cloud_stage，caller 據此設
+        # stage=cloud_unavailable；絕不把「有回覆但無法 parse」誤標成 outage（誠實邊界）。
+        meta["cloud_stage"] = "cloud_unavailable"
         return None, "", 0.0, system_prompt, meta
     cost = _record_call_cost(engine, resp, eff_tier)
     raw = resp.text or ""
-    try:
-        parsed = json.loads(raw or "{}")
-        if not isinstance(parsed, dict):
-            parsed = None
-    except (json.JSONDecodeError, TypeError):
-        parsed = None
+    # 先剝 ```json fence 與前後散文再 json.loads（帶殼回覆＝有回應，非 outage）。
+    parsed = _parse_cloud_reply_json(raw)
+    # cloud_stage：parse 成功=ok；有回覆但無法 parse=parse_failed（present-but-unparsable）——
+    # caller 據此標 stage=parse_failed，不得標成 cloud outage。
+    meta["cloud_stage"] = "ok" if parsed is not None else "parse_failed"
     return parsed, raw, cost, system_prompt, meta
 
 
@@ -746,15 +795,23 @@ async def run_ml_advisory_cascade(
     model_str = str(cloud_meta.get("model", "cloud_l2"))
 
     if parsed is None:
-        # cloud 不可用 / 非 JSON → fail-soft（D3 記 error，不寫 sink）。
-        result.stage = "cloud_unavailable_or_unparsable"
-        result.notes.append("cloud diagnose/interpret 回 None 或非 JSON dict")
+        # 誠實邊界：區分「真 outage」（provider 回 None）vs「有回覆但無法 parse」
+        # （present-but-unparsable）。present-but-unparsable 絕不標成 cloud outage，否則會誤觸發
+        # fail-safe 把 cloud 判定為不可用。cloud_stage 由 _run_cloud_interpret 依 resp 是否 None 標定。
+        if str(cloud_meta.get("cloud_stage")) == "parse_failed":
+            result.stage = "parse_failed"
+            _error_label = "cloud_reply_present_but_unparsable"
+            result.notes.append("cloud diagnose/interpret 有回覆但無法 parse 成 JSON dict（非 outage）")
+        else:
+            result.stage = "cloud_unavailable"
+            _error_label = "cloud_unavailable_no_reply"
+            result.notes.append("cloud diagnose/interpret provider 不可用（回 None，真 outage）")
         ledger_context = _with_memory_recall_audit_context(context, memory_recall)
         error_out, packet = _build_inactive_error_advisory_output(
             capability_id=capability_id,
             mode=mode,
             stage=result.stage,
-            error="cloud_no_output_or_unparsable",
+            error=_error_label,
             input_context=ledger_context,
             l2_reply_id=l2_reply_id,
             cost_usd=result.cost_usd,
