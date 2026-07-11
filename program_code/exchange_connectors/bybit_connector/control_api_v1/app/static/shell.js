@@ -60,7 +60,10 @@
     //   window.OC_NATIVE_VIEWS(id=monitor);src 保留 legacy tab-monitoring 作 registry 完整性 + 回滾錨,原生渲染接管。
     { id: 'monitor',    lane: 'cross', hash: '#/cross/monitor',    src: '/static/tab-monitoring.html', visId: 'monitoring',  label: '監控 Monitor', iframe: false },
     { id: 'ai',         lane: 'cross', hash: '#/cross/ai',         src: '/static/tab-ai.html',         visId: 'ai',          label: 'AI 狀態' },
-    { id: 'agents',     lane: 'cross', hash: '#/cross/agents',     src: '/static/tab-agents.html',     visId: 'agents',      label: 'Agent 團隊' },
+    // agents:Phase 2 第 5 個原生遷移(iframe:false;read-only)——render/pause/resume 由 view-agents.js 註冊於
+    //   window.OC_NATIVE_VIEWS(id=agents);OpenClaw 控制面拆出 view-agents-openclaw.js(companion,掛 OC_AGENTS_OPENCLAW)。
+    //   src 保留 legacy tab-agents 作 registry 完整性 + 回滾錨,原生渲染接管。全唯讀:9 GET(7 團隊 + 2 openclaw),零寫路徑。
+    { id: 'agents',     lane: 'cross', hash: '#/cross/agents',     src: '/static/tab-agents.html',     visId: 'agents',      label: 'Agent 團隊', iframe: false },
     // learning:Phase 2 第 4 個原生遷移(iframe:false;**首個含寫**)——render/pause/resume 由 view-learning.js 註冊於
     //   window.OC_NATIVE_VIEWS(id=learning);src 保留 legacy tab-learning 作 registry 完整性 + 回滾錨,原生渲染接管。
     //   3 學習治理寫(review/decide × approve/reject/ask_ai + auto/{scan})preserve 既有端點,不新增寫路徑。
