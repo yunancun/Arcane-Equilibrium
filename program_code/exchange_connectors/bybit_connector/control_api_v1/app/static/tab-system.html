@@ -49,7 +49,7 @@
   .mode-btn-name { font-size: 14px; font-weight: 600; }
   .mode-btn-sub { font-size: 10px; color: var(--accent); font-family: monospace; margin: 2px 0 6px; }
   .mode-btn-desc { font-size: 11px; color: var(--text-secondary); line-height: 1.5; }
-  .purple { color: #a855f7; }
+  .purple { color: var(--live); }
   /* Confirm Modal */
   .confirm-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 200; }
   .confirm-overlay.show { display: flex; align-items: center; justify-content: center; }
@@ -60,13 +60,13 @@
   .confirm-body strong { color: var(--text-primary); }
   .confirm-body .warn-box { background: rgba(248,81,73,0.08); border: 1px solid rgba(248,81,73,0.2);
     border-radius: var(--r-2); padding: 10px 14px; margin-top: 10px; color: var(--neg); font-size: 12px; }
-  .confirm-live-guard { margin: 0 20px 16px; padding: 12px 14px; border: 1px solid rgba(168,85,247,0.45);
-    border-radius: var(--r-2); background: rgba(168,85,247,0.08); color: #c084fc; font-size: 12px; line-height: 1.6; }
+  .confirm-live-guard { margin: 0 20px 16px; padding: 12px 14px; border: 1px solid var(--live);
+    border-radius: var(--r-2); background: var(--live-bg); color: var(--live); font-size: 12px; line-height: 1.6; }
   .confirm-live-guard[hidden] { display: none; }
-  .live-hold-progress { height: 6px; margin-top: 8px; border-radius: 999px; background: rgba(168,85,247,0.18); overflow: hidden; }
-  .live-hold-bar { width: 0%; height: 100%; border-radius: inherit; background: #a855f7; transition: width 0.08s linear; }
-  #confirm-ok.confirm-ok-live-ready { border-color: rgba(168,85,247,0.7); }
-  #confirm-ok.confirm-ok-holding { background: #7e22ce; border-color: #c084fc; }
+  .live-hold-progress { height: 6px; margin-top: 8px; border-radius: 999px; background: var(--accent-weak); overflow: hidden; }
+  .live-hold-bar { width: 0%; height: 100%; border-radius: inherit; background: var(--accent); transition: width 0.08s linear; }
+  #confirm-ok.confirm-ok-live-ready { border-color: var(--accent); }
+  #confirm-ok.confirm-ok-holding { background: var(--accent); border-color: var(--accent); }
   .confirm-footer { padding: 12px 20px; border-top: 1px solid var(--border-subtle); display: flex; justify-content: flex-end; gap: 8px; }
   /* ── P0.2 批次 2:inline style= 收斂出的頁面組件(本塊在 body,文檔序晚於
      ocInjectBaseCSS 注入的 head <style>,同 specificity 由本塊勝出)── */
@@ -80,13 +80,14 @@
     font-size: var(--fs-micro); color: var(--text-secondary); margin-bottom: var(--sp-3);
     padding: var(--sp-2) var(--sp-3); background: var(--bg-app); border-radius: var(--r-1);
     border: 1px solid var(--border-subtle); }
-  /* live_reserved 紫色家族(.purple / confirm-live-guard / hold-bar 同色系)為 palette 外色,
-     P0.4 單點裁決其歸宿;本批僅把 inline 出現點按原值遷入本塊,不改觀感、不擴散新 hex 消費面 */
+  /* live_reserved 紫色家族原為 palette 外色;C6d-2 已中性化:
+     語義 real-money(.purple / confirm-live-guard / mode-btn--live / warn-box--live)→ --live 熱紅警示;
+     長按進度機制(hold-progress / hold-bar / ok-live-ready / ok-holding)→ --accent 青銅互動 affordance */
   /* 選擇器升為雙類(0,2,0)並置於 .mode-btn.active/:hover 之後,同權後載勝出;
      復現原 inline border-color 全狀態(含 hover / live_reserved 為當前模式 active)恆紫,
      不讓青銅 accent 蓋掉 live 風險識別框(E2 P0.2 批次 2 HIGH) */
-  .mode-btn.mode-btn--live { border-color: rgba(168,85,247,0.4); }
-  .confirm-body .warn-box--live { border-color: rgba(168,85,247,0.5); color: #a855f7; } /* 晚於 .warn-box 定義,同權後載勝出 */
+  .mode-btn.mode-btn--live { border-color: var(--live); }
+  .confirm-body .warn-box--live { border-color: var(--live); color: var(--live); } /* 晚於 .warn-box 定義,同權後載勝出 */
   .confirm-list { margin: var(--sp-2) 0; padding-left: var(--sp-4); line-height: 2; } /* line-height:2 是刻意鬆排,不在 §5 對照表,按組件層原樣保留 */
   .oc-metrics.metrics-2col { grid-template-columns: 1fr 1fr; }
   .oc-metrics.metrics-fit { grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); }
