@@ -1698,3 +1698,5 @@ fail-closed，total-miss + partial-miss 同歸此判，絕不誤報 PASS_CAPTURE
 `program_code/.../scripts/` 下剩餘 5 檔：`lib_trading_env.sh` / `run_with_trading_env.sh`
 兩個 shim 指向上面白名單，以及 3 個獨立原檔 `bybit_bind_active_route_env.sh`
 （shim 指 `misc_tools/`）、`bybit_h1_report_utils.py`、`bybit_readonly_loop_writer.sh`。
+
+最新補充（2026-07-11 R3 move2 L1 切片釘存 exporter）：`program_code/research/microstructure/episode_slice_pin.py` 是 dossier FIX-4/C2 的 $0 read-only 死線釘存工具——解析 bb_reversion entry 信號 episode（per-symbol 30min gap-dedup）∪ 已成交 fill（Buy 開倉+Sell 平倉）anchor，計算每窗 `[t-60s, t+360s]`（τ=60s）並匯出 `market.l1_events`/`trading.fills`/`orders`/`signals` 原始切片為 write-once immutable artifact（manifest.json + per-window parquet + sha256sums）。預設 `--dry-run`（0 PG）；`--apply` 才連線，走 `data_loader.connect()` read-only session + `SET default_transaction_read_only=on`/`statement_timeout` 護欄。G8 grid close_maker 校準 L1 已於 06-19 蒸發（`g8_status=unpinnable_l1_aged_out`）。2026-07-11 首跑釘存 31 窗/136,772 l1_events rows，manifest sha256 `0a4dff9c...`，07-19 保留崖 DEFUSED。測試 `program_code/research/tests/test_episode_slice_pin.py`（12 passed）。runbook `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-11--move2_slice_pin_runbook.md`。
