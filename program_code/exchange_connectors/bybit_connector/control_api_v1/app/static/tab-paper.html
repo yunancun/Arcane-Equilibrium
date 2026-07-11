@@ -36,21 +36,21 @@
      REF-20 R20-P1-U3: .order-form CSS removed (manual submit form retired)
      per UX subdoc §3 + V3 §12 #19 paper_replay_lab_no_order_submit acceptance */
   .feed-prices { display: flex; gap: 14px; flex-wrap: wrap; font-size: 13px; margin-top: 8px; }
-  .feed-price { background: var(--bg); border: 1px solid #21262d; border-radius: var(--r-1); padding: 4px 10px; }
-  .feed-price .sym { font-size: 11px; color: var(--text-dim); }
+  .feed-price { background: var(--bg-app); border: 1px solid #21262d; border-radius: var(--r-1); padding: 4px 10px; }
+  .feed-price .sym { font-size: 11px; color: var(--text-secondary); }
   .feed-price .price { font-weight: 600; }
 
   /* REF-20 R20-P1-U1: Legacy Paper sub-tab navigation styles
      REF-20 R20-P1-U1：Legacy Paper 子標籤導航樣式 */
   .oc-subtab-nav { display: flex; gap: 4px; flex-wrap: wrap; align-items: center;
-    padding: 8px 10px; background: var(--card-bg); border: 1px solid var(--border);
-    border-radius: var(--card-radius); margin-bottom: 12px; }
-  .oc-subtab-btn { padding: 6px 14px; border-radius: var(--r-1); border: 1px solid var(--border);
-    background: var(--bg); color: var(--text-dim); font-size: 12px; cursor: pointer;
+    padding: 8px 10px; background: var(--bg-surface); border: 1px solid var(--border-subtle);
+    border-radius: var(--r-2); margin-bottom: 12px; }
+  .oc-subtab-btn { padding: 6px 14px; border-radius: var(--r-1); border: 1px solid var(--border-subtle);
+    background: var(--bg-app); color: var(--text-secondary); font-size: 12px; cursor: pointer;
     transition: all 0.15s; font-family: inherit; white-space: nowrap; }
-  .oc-subtab-btn:hover:not([data-disabled="true"]) { border-color: var(--accent); color: var(--text); }
-  .oc-subtab-btn.active { background: rgba(56,139,253,0.15); border-color: var(--blue);
-    color: var(--blue); font-weight: 600; }
+  .oc-subtab-btn:hover:not([data-disabled="true"]) { border-color: var(--accent); color: var(--text-primary); }
+  .oc-subtab-btn.active { background: rgba(56,139,253,0.15); border-color: var(--text-secondary);
+    color: var(--text-secondary); font-weight: 600; }
   .oc-subtab-btn[data-disabled="true"] { opacity: 0.4; cursor: not-allowed;
     border-style: dashed; }
   .oc-subtab-btn[data-disabled="true"]:focus-visible {
@@ -60,11 +60,11 @@
   .oc-subtab-content { display: none; }
   .oc-subtab-content.active { display: block; }
   .oc-subtab-placeholder { padding: 24px 18px; text-align: center;
-    background: rgba(13,17,23,0.4); border: 1px dashed var(--border);
-    border-radius: var(--card-radius); color: var(--text-dim); font-size: 13px;
+    background: rgba(13,17,23,0.4); border: 1px dashed var(--border-subtle);
+    border-radius: var(--r-2); color: var(--text-secondary); font-size: 13px;
     line-height: 1.7; margin-top: 10px; }
   .oc-subtab-placeholder .gate-label { display: inline-block; margin-top: 6px;
-    padding: 3px 10px; background: rgba(248,81,73,0.08); color: var(--red);
+    padding: 3px 10px; background: rgba(248,81,73,0.08); color: var(--neg);
     border: 1px solid rgba(248,81,73,0.25); border-radius: var(--r-1); font-size: 11px; }
 
   /* REF-20 SEV-2 #1: mobile/iPad touch target retrofit (A3 finding 2026-05-03)
@@ -98,7 +98,7 @@
      走 classList('hidden') 切換,鐵則一同批原子化）。#161b22/#30363d/#21262d 按 §5.5 歸
      surface/border token;scrim/藍色 info tint/box-shadow 無對應 token,verbatim 遷入待 P0.4。 */
   .paper-confirm-overlay { position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; }
-  .paper-confirm-box { background: var(--card-bg); border: 1px solid var(--border-strong); border-radius: var(--r-3); width: min(420px,90vw); box-shadow: 0 20px 50px rgba(0,0,0,0.5); }
+  .paper-confirm-box { background: var(--bg-surface); border: 1px solid var(--border-strong); border-radius: var(--r-3); width: min(420px,90vw); box-shadow: 0 20px 50px rgba(0,0,0,0.5); }
   .paper-confirm-header { padding: var(--sp-4); border-bottom: 1px solid var(--border-subtle); display: flex; justify-content: space-between; align-items: center; }
   .paper-confirm-close { background: none; border: none; color: var(--text-secondary); font-size: var(--fs-title); cursor: pointer; }
   .paper-confirm-info { background: rgba(56,139,253,0.08); border: 1px solid rgba(56,139,253,0.2); border-radius: var(--r-2); padding: var(--sp-3); font-size: var(--fs-base); line-height: var(--lh-cjk); white-space: pre-line; }
@@ -214,8 +214,8 @@
         class="paper-pnl-sparkline"
         viewBox="0 0 400 120" preserveAspectRatio="none">
         <line id="pnl-sparkline-zero" x1="8" x2="392" y1="60" y2="60" stroke="#30363d" stroke-width="0.5" stroke-dasharray="3,3"/>
-        <polyline id="pnl-sparkline-line" points="" fill="none" stroke="var(--green)" stroke-width="2" stroke-linejoin="round"/>
-        <text x="4" y="114" fill="var(--text-dim)" font-size="10" id="pnl-sparkline-label">no data</text>
+        <polyline id="pnl-sparkline-line" points="" fill="none" stroke="var(--pos)" stroke-width="2" stroke-linejoin="round"/>
+        <text x="4" y="114" fill="var(--text-secondary)" font-size="10" id="pnl-sparkline-label">no data</text>
       </svg>
     </div>
   </div>

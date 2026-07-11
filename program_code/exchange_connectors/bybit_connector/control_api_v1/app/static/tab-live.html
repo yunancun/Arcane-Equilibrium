@@ -24,8 +24,8 @@ html, body {
   height: 100%;
   margin: 0;
   overflow-y: auto;
-  background: var(--bg);
-  color: var(--text);
+  background: var(--bg-app);
+  color: var(--text-primary);
 }
 
 /* ── Dashboard / 實盤儀表板 ─────────────────────────────────── */
@@ -41,7 +41,7 @@ html, body {
 
 .live-control-bar {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-  background: var(--card-bg);
+  background: var(--bg-surface);
   border: 1px solid rgba(168,85,247,0.4);
   border-radius: var(--r-2); padding: 12px 16px;
   margin-bottom: 14px;
@@ -60,13 +60,13 @@ html, body {
 
 /* Card groups / 指標卡片組 */
 .live-card-group {
-  background: var(--card-bg);
-  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--r-2); padding: 14px 16px;
   margin-bottom: 14px;
 }
 .live-card-group-title {
-  font-size: 11px; font-weight: 600; color: var(--text-dim);
+  font-size: 11px; font-weight: 600; color: var(--text-secondary);
   text-transform: uppercase; letter-spacing: 0.5px;
   margin-bottom: 12px; display: flex; align-items: center; gap: 6px;
 }
@@ -88,8 +88,8 @@ html, body {
 }
 .live-table th {
   text-align: left; padding: 7px 10px;
-  border-bottom: 1px solid var(--border);
-  color: var(--text-dim); font-weight: 500;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-secondary); font-weight: 500;
   font-size: 11px;
 }
 .live-table td {
@@ -97,9 +97,9 @@ html, body {
   border-bottom: 1px solid rgba(255,255,255,0.04);
 }
 .live-table tr:last-child td { border-bottom: none; }
-.oc-row-muted { color: var(--text-dim); }
+.oc-row-muted { color: var(--text-secondary); }
 .oc-source-note {
-  color: var(--text-dim);
+  color: var(--text-secondary);
   font-size: 10px;
   display: block;
   margin-top: 2px;
@@ -107,13 +107,13 @@ html, body {
 
 /* Fills collapsible / 成交記錄折疊區 */
 .live-fills-toggle {
-  background: none; border: 1px solid var(--border); border-radius: var(--r-2);
-  padding: 8px 14px; font-size: 12px; color: var(--text-dim);
+  background: none; border: 1px solid var(--border-subtle); border-radius: var(--r-2);
+  padding: 8px 14px; font-size: 12px; color: var(--text-secondary);
   cursor: pointer; display: flex; align-items: center; gap: 6px;
   width: 100%; text-align: left; margin-bottom: 8px;
   transition: border-color 0.15s;
 }
-.live-fills-toggle:hover { border-color: rgba(168,85,247,0.4); color: var(--text); }
+.live-fills-toggle:hover { border-color: rgba(168,85,247,0.4); color: var(--text-primary); }
 .live-fills-toggle .arrow { transition: transform 0.2s; }
 .live-fills-toggle.open .arrow { transform: rotate(90deg); }
 
@@ -146,14 +146,14 @@ html, body {
 }
 .oc-dialog-overlay.show { display: flex; }
 .oc-dialog {
-  background: var(--card-bg);
-  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--r-2); padding: 24px;
   max-width: 440px; width: 90%;
   box-shadow: 0 8px 32px rgba(0,0,0,0.4);
 }
 .oc-dialog h3 { margin: 0 0 12px; font-size: 16px; }
-.oc-dialog p  { margin: 0 0 16px; font-size: 13px; color: var(--text-dim); line-height: 1.6; }
+.oc-dialog p  { margin: 0 0 16px; font-size: 13px; color: var(--text-secondary); line-height: 1.6; }
 .oc-dialog .btn-row { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
 .oc-dialog .note { font-size: 11px; color: #d29922; margin-bottom: 12px; }
 
@@ -213,18 +213,18 @@ html, body {
   color: #94a3b8; font-size: 18px; font-weight: 700; margin-bottom: 12px;
 }
 .integrity-fail-view .ifv-detail {
-  color: var(--text-dim); font-size: 13px; line-height: 1.7;
+  color: var(--text-secondary); font-size: 13px; line-height: 1.7;
   max-width: 540px; margin: 0 auto;
 }
 .integrity-fail-view .ifv-divider {
-  border-top: 1px solid var(--border); margin: 16px auto; width: 60%;
+  border-top: 1px solid var(--border-subtle); margin: 16px auto; width: 60%;
 }
 
 /* ── Earned-Trust Tier bar / 贏得信任階梯欄 ────────────────── */
 .trust-bar {
   border-radius: var(--r-2); padding: 10px 16px; margin-bottom: 14px;
   font-size: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-subtle);
 }
 .trust-bar.ok   { background: rgba(34,197,94,0.07); border-color: rgba(34,197,94,0.3); }
 .trust-bar.warn { background: rgba(210,153,34,0.1);  border-color: rgba(210,153,34,0.5); }
@@ -235,12 +235,12 @@ html, body {
   font-size: 10px; font-weight: 700; letter-spacing: 0.3px;
 }
 .trust-renew-card {
-  background: var(--card-bg); border: 1px solid rgba(168,85,247,0.4);
+  background: var(--bg-surface); border: 1px solid rgba(168,85,247,0.4);
   border-radius: var(--r-2); padding: 14px 16px; margin-bottom: 14px;
 }
-.trust-conditions { margin: 8px 0 0; font-size: 11px; color: var(--text-dim); line-height: 1.8; }
+.trust-conditions { margin: 8px 0 0; font-size: 11px; color: var(--text-secondary); line-height: 1.8; }
 .trust-conditions li { list-style: none; padding-left: 14px; }
-.trust-conditions li::before { content: "✓ "; color: var(--green); margin-left: -14px; }
+.trust-conditions li::before { content: "✓ "; color: var(--pos); margin-left: -14px; }
 .trust-conditions li.fail::before { content: "✗ "; color: #f87171; }
 
 /* ── P0.2 批次 8b:inline style→頁內組件(語義 token;palette 外色 verbatim P0.4)── */
@@ -438,8 +438,8 @@ html, body {
         class="live-pnl-sparkline"
         viewBox="0 0 400 120" preserveAspectRatio="none">
         <line id="live-pnl-zero" x1="8" x2="392" y1="60" y2="60" stroke="#30363d" stroke-width="0.5" stroke-dasharray="3,3"/>
-        <polyline id="live-pnl-line" points="" fill="none" stroke="var(--green)" stroke-width="2" stroke-linejoin="round"/>
-        <text x="4" y="114" fill="var(--text-dim)" font-size="10" id="live-pnl-label">no data</text>
+        <polyline id="live-pnl-line" points="" fill="none" stroke="var(--pos)" stroke-width="2" stroke-linejoin="round"/>
+        <text x="4" y="114" fill="var(--text-secondary)" font-size="10" id="live-pnl-label">no data</text>
       </svg>
       <div class="live-pnl-scroll">
         <table class="live-table m-0">
