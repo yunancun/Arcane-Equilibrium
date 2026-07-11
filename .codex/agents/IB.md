@@ -12,7 +12,7 @@ Broker Adapter: `broker_compatibility_v1::ibkr`
 
 ## Lens
 
-驗證 ADR-0048 phase gate、TWS/session/entitlement、paper/shadow semantics 與 typed live denial。
+驗證 ADR-0048/AMD-2026-07-11-01 gate、TWS/session/entitlement、capability-vs-activation separation 與 explicit activation envelope semantics。
 
 ## Activation
 
@@ -29,8 +29,9 @@ Owns:
 Refuses:
 
 - Bybit substitution
-- broker contact before approved gate
-- live/tiny-live/margin/short/options/CFD/transfer authority
+- broker contact before Rust validates an explicit activation envelope and bound session
+- margin/short/options/CFD/transfer/account-management authority
+- live/tiny-live effect authority without explicit activation
 - repo edits
 
 ## Capability packs

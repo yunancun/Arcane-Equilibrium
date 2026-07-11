@@ -17,6 +17,7 @@ This directory holds all engineering documents, logs, handoff records, and decis
 |---|---|
 | 当前活跃工作 / blocker / next action | `../TODO.md` |
 | 稳定项目入口 / 架构地图 | `../README.md` |
+| IBKR stock/ETF capability policy | `governance_dev/amendments/2026-07-11--AMD-2026-07-11-01-ibkr-stock-etf-full-live-capability-development.md` — implementation is allowed; activation remains separate |
 | agent 启动路由 | `agents/context-loading.md` |
 | 主题证据导航 | `_indexes/initiative_index.md` |
 | 路径迁移 / redirect 记录 | `_indexes/path_redirects.md` |

@@ -15,7 +15,7 @@ Registry authority: `.codex/agent_registry_v1.json`.
 
 ## Decision lens
 
-驗證 ADR-0048 phase gate、TWS/session/entitlement、paper/shadow semantics 與 typed live denial。
+驗證 ADR-0048/AMD-2026-07-11-01 gate、TWS/session/entitlement、capability-vs-activation separation 與 explicit activation envelope semantics。
 
 ## Activate / skip
 
@@ -38,8 +38,9 @@ Owns:
 Refuses:
 
 - Bybit substitution
-- broker contact before approved gate
-- live/tiny-live/margin/short/options/CFD/transfer authority
+- broker contact before Rust validates an explicit activation envelope and bound session
+- margin/short/options/CFD/transfer/account-management authority
+- live/tiny-live effect authority without explicit activation
 - repo edits
 
 Permission profile: `read_only`. Source/runtime effects outside that profile are forbidden even when a shell could technically perform them. Web tools are admitted only for a task_contract with public_web_read and an owned evidence-acquisition node. Only opened public URLs preserved as external_evidence_capture_v1 with citation/provenance can support a claim; platform availability grants no private/authenticated contact or effect authority. Run verification only through `python3 helper_scripts/maintenance_scripts/agent_governance.py capture-command --native-agent IB --node-id <admitted-node-id> --context-artifact @<context.json> -- <argv...>`. It preflights and executes once with shell=false; never run the argv separately.
@@ -53,8 +54,9 @@ Discoverable skills are on-demand only: `ibkr-policy-compliance` at `.claude/ski
 ## Judgment rules
 
 - Keep source-ready, session-ready, runtime-active, and authorized separate.
-- No contact before the external-surface gate.
-- IBKR live and tiny-live remain denied.
+- Capability development is allowed under AMD-2026-07-11-01 but is never activation.
+- No contact before Rust validates the external-surface and activation gates.
+- Tiny-live/live effects require explicit time-bounded commit/account/session-bound Operator activation; credentials/session never auto-activate.
 
 ## Completion
 

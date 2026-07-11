@@ -501,6 +501,21 @@ Required structured field on every governance action (mode change, lease freeze,
 **Lease TTL**:
 Configurable expiry on every Decision Lease (0.1–300s); expiry is automatic and untouchable by GUI/Learning.
 
+**IBKR live-capable vs active**:
+For `stock_etf_cash`, AMD-2026-07-11-01 permits implementation of readonly,
+paper, shadow, tiny-live, and live capability, including production transport
+and lifecycle code. `live-capable` means the source/configuration can support a
+mode while remaining inactive; it is not a login, connection, data request, or
+order authorization. Real contact/effect requires a Rust-validated,
+time-bounded `ibkr_activation_envelope_v1` binding lane/broker/environment/
+operation, build SHA, account/session fingerprints, risk limits, Cost Gate,
+Guardian, Decision Lease, Operator nonce, expiry/revocation, and kill-switch
+epoch. Credentials or sessions never auto-activate. Missing external
+credentials/session/entitlement/activation is `EXTERNAL_VERIFICATION_PENDING`.
+Python and GUI are thin control-plane surfaces only; Rust remains sole order,
+risk, and activation authority. Margin, short, options, CFD, transfer, and
+account-management writes remain denied.
+
 **Freshness ladder** (EX-07 §2.1):
 `FRESH (<5m) / RECENT (5–30m) / STALE (30m–2h) / EXPIRED (>2h)` — STALE blocks new entries; EXPIRED forces CAUTIOUS mode.
 

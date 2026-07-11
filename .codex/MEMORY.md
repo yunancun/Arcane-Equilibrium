@@ -41,8 +41,12 @@ classes. Runtime observation cannot legalize normative denial.
   Python/FastAPI is control/GUI/bridge/replay/agent host, never trading truth.
 - Bybit remains the only active live execution exchange target.
 - Binance is market-data-only under accepted scope.
-- IBKR `stock_etf_cash` read-only/paper/shadow research per
-  ADR-0048 + AMD-2026-06-29-01. IBKR live/tiny-live remains denied.
+- AMD-2026-07-11-01 permits `stock_etf_cash` IBKR readonly/paper/shadow/
+  tiny-live/live **capability development**. The lane is default inactive;
+  `EXTERNAL_VERIFICATION_PENDING` records missing credentials/session/
+  entitlement/activation without stopping no-contact work. Actual contact or
+  effect needs the exact Rust-validated, time-bounded
+  `ibkr_activation_envelope_v1`; credentials/session never auto-activate.
 - Mac is development. Linux `trade-core` is runtime. Mac engine absence is
   expected; real process/PG/watchdog/deploy claims require Linux evidence.
 - New production code remains portable; do not hard-code Mac/Linux user paths.
@@ -54,8 +58,11 @@ classes. Runtime observation cannot legalize normative denial.
 - LiveDemo uses live-grade controls against a demo endpoint; it does not relax
   auth, TTL, risk, evidence, or audit.
 - Legacy crypto Paper is not active promotion evidence unless explicitly
-  reopened. The IBKR paper/shadow lane is separate research evidence and cannot auto-promote to
-  tiny-live, live, or durable-alpha proof.
+  reopened. IBKR live-capable source does not auto-promote or authorize broker
+  contact/effects; Rust authority, Guardian, Decision Lease, global Cost Gate,
+  account/session fingerprints, activation envelope, and kill switch remain
+  mandatory. IBKR margin/short/options/CFD/transfer/account-management writes
+  and Python order/risk/activation authority remain denied.
 - Rust authority, Guardian, Decision Lease, reconstructability, and global Cost
   Gate are not bypassed for speed or near-term PnL.
 - Candidate proof must be strategy/symbol/side matched and after-cost. Aggregate,

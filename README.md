@@ -6,7 +6,7 @@ Agentic trading governance system — 自主扫描 650+ 交易对，智能部署
 **软更名口径（2026-05-06）**：
 - 正式项目名：**玄衡 · Arcane Equilibrium**。
 - **OpenClaw** 保留为控制平面 / Gateway / Console / 通信服务族名称。
-- **Bybit** 仍是唯一 active live execution 交易所 adapter / connector；ADR 已批准的非 Bybit 例外必须逐项限定：Binance market-data-only（per ADR-0033/0040），以及 IBKR `stock_etf_cash` read-only / paper / shadow research lane（per ADR-0048 + AMD-2026-06-29-01；Phase 2 read-only 外部接觸 per AMD-2026-07-08-01，僅 Rust-owned 只讀 TWS client、gated）。IBKR live / tiny-live / margin / short / options / CFD / transfer 仍禁止。
+- **Bybit** 仍是目前唯一 active live execution 交易所 adapter / connector；Binance 仅 market-data-only（ADR-0033/0040）。AMD-2026-07-11-01 已授权开发 IBKR `stock_etf_cash` readonly / paper / shadow / tiny-live / live **capability**（production caller、TWS/Gateway、Rust authority、IPC、GUI、inactive deploy），但默认 inactive，绝不等于 broker login、API/socket contact 或下单授权。真实 contact/effect 必须有 Rust 验证的、限时且 commit/account/session-bound `ibkr_activation_envelope_v1`；credential/session 本身永不 auto-activate。IBKR margin / short / options / CFD / transfer / account-management write 与 Python authority 仍禁止。
 - 短期不改 `openclaw_engine`、`OPENCLAW_*`、`/tmp/openclaw`、GitHub 仓库名、Linux runtime 路径等运行面名称。
 
 ---
@@ -25,7 +25,7 @@ Agentic trading governance system — 自主扫描 650+ 交易对，智能部署
 |-----|------|
 | `system` | 系统总览、运行状态、章节状态 |
 | `edge-gates` | Pre-live / edge readiness gates |
-| `stock-etf` | Stock/ETF IBKR read-only / paper / shadow research lane（per ADR-0048 + AMD-2026-06-29-01；零真钱） |
+| `stock-etf` | Stock/ETF IBKR capability console：readonly/paper/shadow/tiny-live/live-capable implementation（AMD-2026-07-11-01）；默认 inactive，GUI 不授權 broker contact/order |
 | `paper` | Paper Archive 状态展示；不再启用为 promotion lane，legacy artifacts 仅作 replay diagnostics / fixture infrastructure |
 | `demo` | Demo trading / Stage 1 demo micro-canary 目标环境（当前未开放） |
 | `live` | Live_Ready 仪表盘、余额/PnL/持仓/成交/API key 管理 |
@@ -52,7 +52,7 @@ Agentic trading governance system — 自主扫描 650+ 交易对，智能部署
 
 实时面板：[`TODO.md`](TODO.md) — active blockers、P0/P1/P2 queue、runtime evidence、schedule 和 handoff checks 均在那里维护。README 不再镜像动态状态（避免 drift）。
 
-**关键里程碑（2026-05-15 / 2026-05-23 / 2026-06-29 口径收敛）**：Decision Lease 路径 A retrofit 已落地并在 shadow/evidence 语义下运行；`OPENCLAW_LEASE_ROUTER_GATE_ENABLED=1` 不等于真实 live 授权或 Executor order authority。AMD-2026-05-15-01 已冻结 legacy crypto paper promotion；2026-05-23 起 paper engine 口径为长期 Archive / replay infrastructure，Stage 1 改为未来 green Stage 0R 之后的 Demo micro-canary。ADR-0048 / AMD-2026-06-29-01 新增的 IBKR `stock_etf_cash` paper/shadow lane 是隔离 research lane，不是 live/tiny-live 或 durable-alpha promotion lane。
+**关键里程碑（2026-05-15 / 2026-05-23 / 2026-07-11 口径收敛）**：Decision Lease 路径 A retrofit 已落地并在 shadow/evidence 语义下运行；`OPENCLAW_LEASE_ROUTER_GATE_ENABLED=1` 不等于真实 live 授权或 Executor order authority。AMD-2026-05-15-01 已冻结 legacy crypto paper promotion；2026-05-23 起 paper engine 口径为长期 Archive / replay infrastructure，Stage 1 改为未来 green Stage 0R 之后的 Demo micro-canary。AMD-2026-07-11-01 取代 ADR-0048/旧 AMD 中相冲突的 IBKR capability-development 限制：`stock_etf_cash` 可完整实现至 live-capable，但仍非 active/live、不会因 credential/session 自动启用；实际 IBKR contact/order 另需 Rust-validated activation envelope 与人工 session/activation。
 
 **Context loading**：稳定入口见本 README；当前工作状态见 `TODO.md`；agent 启动路由见 `docs/agents/context-loading.md`；开发 multi-agent 的 trust / dispatch / closure 正本见 `docs/agents/development-agent-governance.md`；TODO 维护标准见 `docs/agents/todo-maintenance.md`。**领域词汇** → `CONTEXT.md`；**架构决策记录** → `docs/adr/`。
 

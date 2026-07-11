@@ -1,9 +1,19 @@
 # AMD-2026-06-29-01: IBKR Stock/ETF Paper + Shadow Lane Boundary
 
 Date: 2026-06-29
-Status: **Active - paper/shadow research amendment**
+Status: **Superseded in part by AMD-2026-07-11-01 (historic paper/shadow amendment retained)**
 Related ADRs: ADR-0001, ADR-0006, ADR-0033, ADR-0040, ADR-0047, ADR-0048.
 Scope: `stock_etf_cash` paper/shadow research lane only.
+
+> **Supersession notice (2026-07-11).** AMD-2026-07-11-01 supersedes this
+> amendment only where it limits `stock_etf_cash` capability development to
+> readonly/paper/shadow or denies tiny-live/live-capable source and production
+> wiring. It does not authorize actual broker contact or money effects: default
+> remains inactive; an exact Rust-validated, time-bounded
+> `ibkr_activation_envelope_v1` and human-provided bound session are required.
+> Credentials/session never auto-activate. Rust authority, fail-closed controls,
+> Bybit isolation, and denials for margin/short/options/CFD/transfer/
+> account-management writes remain binding.
 
 ## Decision
 

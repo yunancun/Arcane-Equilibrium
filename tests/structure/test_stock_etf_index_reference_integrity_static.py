@@ -20,6 +20,7 @@ PATH_PREFIXES = (
 REQUIRED_INDEX_REFERENCES = (
     "docs/adr/0048-ibkr-stock-etf-paper-shadow-lane.md",
     "docs/governance_dev/amendments/2026-06-29--AMD-2026-06-29-01-ibkr-stock-etf-paper-shadow-lane.md",
+    "docs/governance_dev/amendments/2026-07-11--AMD-2026-07-11-01-ibkr-stock-etf-full-live-capability-development.md",
     "docs/execution_plan/specs/2026-06-29--stock_etf_cash_phase0_named_contract_packet.md",
     "docs/execution_plan/specs/2026-06-29--stock_etf_cash_phase0_named_contract_packet.manifest.json",
     "docs/execution_plan/specs/2026-06-29--stock_etf_db_evidence_ddl_v1.source_only.sql",

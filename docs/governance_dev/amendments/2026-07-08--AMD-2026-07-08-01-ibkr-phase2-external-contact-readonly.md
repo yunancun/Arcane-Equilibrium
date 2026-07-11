@@ -1,10 +1,21 @@
 # AMD-2026-07-08-01: IBKR Stock/ETF Phase 2 Read-Only External-Contact Authorization
 
 Date: 2026-07-08
-Status: **Active - Phase 2 read-only external-contact authorization**
+Status: **Superseded in part by AMD-2026-07-11-01 (historic Phase 2 authorization retained)**
 Related ADRs: ADR-0033, ADR-0040, ADR-0047, ADR-0048.
 Related AMD: AMD-2026-06-29-01 (which this amendment extends).
 Scope: `stock_etf_cash` read-only research lane only. This amendment does **not** touch the Bybit `crypto_perp` runtime path.
+
+> **Supersession notice (2026-07-11).** AMD-2026-07-11-01 replaces this
+> amendment's conflicting readonly-only, live-port, live-secret, and no-order
+> capability-development denials. Production-wired readonly/paper/shadow/
+> tiny-live/live capability may now be built and fake-TWS tested. It does **not**
+> authorize real contact: default is inactive and any login/socket/API/data/order
+> effect still requires a Rust-validated, time-bounded
+> `ibkr_activation_envelope_v1` bound to the exact session/account/build and
+> safety lineage. Credentials/session never auto-activate. Python authority,
+> non-`stock_etf_cash` products, and all stated fail-closed protections remain
+> denied/binding.
 
 > Provenance: accepted after a PM→CC→FA→PA feasibility assessment (2026-07-08) returning `CERTIFIABLE_IF_GATES_PASS`. This amendment is the governance unlock those legs identified; nothing in the phased build (P0+) may begin before the gated sequence below is satisfied in order.
 
