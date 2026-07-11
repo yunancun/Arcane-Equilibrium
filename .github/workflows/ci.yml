@@ -39,9 +39,10 @@ jobs:
       - name: Check Agent Spine stable_id literal duplication
         run: bash helper_scripts/ci/check_stable_id_duplication.sh
 
-  # Development-agent governance is stdlib + focused pytest only. Keep this on
-  # the Linux 1x runner so Registry/view/permission drift fails before merge
-  # without consuming a Rust build or macOS 10x minute.
+  # Development-agent governance and the V158 migration source contract use
+  # stdlib + focused pytest only. Keep them on the Linux 1x runner so static
+  # authority/Registry/view/permission drift fails before merge without
+  # consuming a Rust build or macOS 10x minute.
   development-agent-governance:
     name: development-agent governance (cheap static gate)
     runs-on: ubuntu-latest
@@ -63,6 +64,8 @@ jobs:
           python3 -m pytest -q \
             tests/structure/test_development_agent_governance.py \
             tests/structure/test_agent_governance_*.py
+      - name: Run V158 qualified challenger source contract
+        run: python3 -m pytest -q tests/migrations/test_v158_alr_qualified_challenger_training.py
 
   rust-check-linux:
     name: rust check (x86_64-unknown-linux-gnu)
@@ -94,7 +97,7 @@ jobs:
       - name: Cargo check
         run: cargo check --target aarch64-apple-darwin --release -p openclaw_engine --bin openclaw-engine
 
-  # schema-consumer contract（P1-SCHEMA-1）：對 ephemeral PG 跑真 V001-V139 全樹，
+  # schema-consumer contract（P1-SCHEMA-1）：對 ephemeral PG 跑真完整 migration tree，
   # 再對代表性熱表執行與真實 writer/consumer 同形的 query，兜住「column rename/drop
   # 隱形至 runtime」這條主線（engine 全 runtime-checked sqlx，編譯期看不見 column drift）。
   # 成本紀律：限 pull_request → 只 PR 跑、ubuntu-latest 1x 倍率、零 macOS 10x；
@@ -141,6 +144,7 @@ jobs:
         # 正向：對代表性熱表跑真實 writer/consumer query（type/nullable/ON CONFLICT 都驗）。
         env:
           OPENCLAW_TEST_PG: postgres://contract_user:contract_pass@127.0.0.1:5432/contract_db
+          OPENCLAW_TEST_PG_DESTRUCTIVE: "1"
           OPENCLAW_AUTO_MIGRATE: "1"
         run: cargo test -p openclaw_engine --test schema_contract_test -- --test-threads=1
       - name: Migration-declared vs DB audit (python, informational-only)
