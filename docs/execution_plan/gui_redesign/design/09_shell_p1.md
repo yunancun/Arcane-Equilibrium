@@ -124,10 +124,12 @@ LOOP §6 + PROGRESS P1.3:**帛晝 AA 三綠前 data-theme 釘死玄夜,不宣稱
   (design/02 §1.3 的視覺 gate:不跨 hairline 到不了真金面)。
 - **`.rail-cross`**(`margin-top:auto` 釘底,頂 1px hairline):lane/env 正交的橫切導航。
 
-### VIEWS 註冊表(18 tab → lane×env cell;P1.1-a 全 `iframe:true`)
+### VIEWS 註冊表(19 tab → lane×env cell;P1.1-a 全 `iframe:true`)
 
-router 讀此表建 view + rail 導航。**內容守恆**(working doc §5:零靜默丟失)——18 全在,映射對 Phase 2 矩陣
-(PROGRESS §Phase 2)。
+router 讀此表建 view + rail 導航。**內容守恆**(working doc §5:零靜默丟失)——全在,映射對 Phase 2 矩陣
+(PROGRESS §Phase 2)。**R51 修正**:原表漏列 legacy `charts`(K線圖表 trading.html `/trading?embed=1`,legacy `edge` 組)
+=真功能 view 非死碼→E2 N1 揭,PM 補回為 `charts`(lane=cross,`#/cross/charts`,無 visibility 消費者故 visId 無害),
+恢復 legacy parity;18→**19 view**。
 
 | view id | lane | rail 區/rung | hash | iframe src | ⚑ |
 |---|---|---|---|---|---|
