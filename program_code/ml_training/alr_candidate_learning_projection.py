@@ -102,8 +102,14 @@ def build_candidate_aware_learning_projection(
         policy=normalized_policy,
     )
     decision_code = _decision_code(raw_decision, evidence["source_status"])
+    ready_evidence_time = (
+        evidence["handoff_evidence"].get("evaluated_at")
+        if evidence["source_status"] == "READY"
+        else None
+    )
     evaluated_at = _decision_time(
         raw_decision.get("evaluated_at"),
+        ready_evidence_time,
         normalized_cycles[-1]["source_ts"],
     )
     handoff = _build_handoff_identity(
