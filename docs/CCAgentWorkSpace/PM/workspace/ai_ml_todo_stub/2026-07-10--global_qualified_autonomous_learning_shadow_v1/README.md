@@ -4,7 +4,7 @@ Date: 2026-07-10
 Owner: PM
 Goal: `GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1`
 Codex Goal thread: `019f4b6d-1e5b-7551-9fce-7a2f029a1675`
-Status: `ACTIVE_WP4_VERSIONED_TRAINING_REGISTRY_CONTRACTS`
+Status: `ACTIVE_WP4_ISOLATED_TRAINER_REPOSITORY_TDD`
 
 This is the durable PM-owned queue and state surface for the active Goal. It
 supersedes the old ALR P2 completion/terminal interpretation, but does not edit
@@ -63,19 +63,30 @@ suite passed `1818` with `36` platform/optional skips. E2, QA, and CC/FA final
 P0/P1/P2 are `0/0/0`. No Linux, PostgreSQL, service, Bybit, or runtime action
 occurred.
 
-WP4's first source slice is accepted at
-`f36379b9ddf10ee1055daeda27805c409c6ee8bd`. The collision scan found 139
-migrations through V157, zero duplicates, and no observed V158 reservation;
-V158 is provisional only. `alr_challenger_training_contract_v1` now binds only
-repository-derived proof/reward receipts to exact PIT/data/split/reward/code/
-config/resource hashes. It rejects forged or split lineage and always remains
-`SCHEMA_REQUIRED`, with training/model/registry/runtime authority false.
+WP4's first source slice remains accepted at
+`f36379b9ddf10ee1055daeda27805c409c6ee8bd`.
+`alr_challenger_training_contract_v1` binds only repository-derived
+proof/reward receipts to exact PIT/data/split/reward/code/config/resource
+hashes. It rejects forged or split lineage and remains `SCHEMA_REQUIRED`, with
+training/model/registry/runtime authority false.
 
-Focused tests passed `32`; full ML passed `1850` with `36` skips; independent
-E2 and QA final P0/P1/P2 are `0/0/0`. No migration, fit, model, registry,
-runtime, or authority action occurred. V152/V153 bytes remain frozen. The next
-step is a fresh exact `E3 -> BB` gate for provisional forward-schema
-reservation/creation plus isolated no-symlink trainer/repository design.
+The exact E3/BB pre-authoring gate subsequently authorized source/tests only.
+Forward-only V158 source is published at
+`beeb77325c83a157c74cf54e79b7146876ed5e27`; repository source now contains
+140 migrations through V158 with zero duplicates. V158 defines isolated
+durable receipt, completed training-run, exact q10/q50/q90 artifact, and
+NOT_SERVING challenger-registry tables plus fixed APIs, replay/immutability,
+deferred completeness, exact role/ACL, and no-authority guards. It does not
+edit V152/V153 or reuse the legacy serving registry.
+
+Focused tests passed `37`; full ML passed `1850` with `36` skips; the Rust
+schema harness compiled without running PG; independent final P0/P1/P2 are
+`0/0/0`. V158 was not applied, and PostgreSQL/Linux/runtime state was not
+refreshed. This source publication created no receipt/run/artifact/registry
+rows, fit, model bytes, symlink, serving/promotion state, or authority. G4
+remains failed. The next safe action is only the fake-connection
+durable-receipt repository tracer against V158's fixed receipt API. Trainer,
+fit, filesystem publication, migration apply, and runtime remain gated.
 
 ## Earlier B2.2c event-primary reconciliation
 
