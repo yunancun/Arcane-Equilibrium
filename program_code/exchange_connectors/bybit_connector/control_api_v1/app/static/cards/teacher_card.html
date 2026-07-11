@@ -88,7 +88,7 @@
         const tr = document.createElement('tr');
         const pnl = r.outcome_pnl_24h;
         const pnlStr = pnl === null || pnl === undefined ? '—' : Number(pnl).toFixed(2);
-        const pnlColor = pnl === null || pnl === undefined ? '' : (pnl >= 0 ? 'color:var(--green,#3fb950);' : 'color:var(--red,#f85149);');
+        const pnlColor = pnl === null || pnl === undefined ? '' : (pnl >= 0 ? 'color:var(--pos);' : 'color:var(--neg);');
         // Use textContent (no innerHTML) for XSS safety on user-supplied directive fields.
         // 用 textContent（不用 innerHTML）防止 directive 欄位的 XSS。
         const td = (text, extra='') => {
@@ -101,7 +101,7 @@
         tr.appendChild(td(ts, 'padding:2px 6px;'));
         tr.appendChild(td(r.action_taken || '—', 'padding:2px 6px;'));
         tr.appendChild(td(r.strategy_scope || '—', 'padding:2px 6px;'));
-        tr.appendChild(td(r.success ? 'OK' : 'FAIL', 'padding:2px 6px;' + (r.success ? 'color:var(--green,#3fb950);' : 'color:var(--red,#f85149);')));
+        tr.appendChild(td(r.success ? 'OK' : 'FAIL', 'padding:2px 6px;' + (r.success ? 'color:var(--pos);' : 'color:var(--neg);')));
         tr.appendChild(td(pnlStr, 'padding:2px 6px;text-align:right;' + pnlColor));
         tbody.appendChild(tr);
       }
@@ -110,7 +110,7 @@
         const td = document.createElement('td');
         td.colSpan = 5;
         td.textContent = '(no directives in window)';
-        td.style.cssText = 'padding:6px;text-align:center;color:var(--text-muted,#8b949e);';
+        td.style.cssText = 'padding:6px;text-align:center;color:var(--text-muted);';
         tr.appendChild(td);
         tbody.appendChild(tr);
       }
