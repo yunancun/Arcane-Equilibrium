@@ -23,7 +23,7 @@ deletion, or direct parameter-apply authority.
 authority. `CHALLENGER_ACCEPT` is not serving, deployment, live eligibility, or
 order authority.
 
-## Current source checkpoint
+## Active WP3 source basis
 
 WP3's first source-only bridge checkpoint is accepted at
 `8999aa2b7e4a3bba3841f4c72cf054d88cb69c5c`.  The new pure
@@ -42,7 +42,33 @@ actual proof/reward/training/OOS runtime evidence remains zero, the B2.2c
 runtime gate remains pending, and the next source-only scope is
 `WP3-PROOF-REWARD-REPOSITORY-ADAPTERS`.
 
-## Prior source checkpoint
+## Latest source checkpoint: B2.2c event-primary reconciliation
+
+After the WP3 validation adapter landed, source reconciliation proved that
+`origin/main` still handled scanner-idle candidate boards by five-second idle
+polling. The stale seven-file local implementation was not pushed or
+cherry-picked. Instead, two narrow current-origin commits closed only the
+remaining gaps:
+
+- `03ef761bf92a6055ef3555d68d47a1f075b2298b` repairs READY-board
+  decision-time fallback when a missing/invalid policy leaves the arbiter time
+  empty. The validated board time remains hash-bound and the exact handoff
+  causality gate remains active.
+- `1b85318f29a16d5a7575b27cb158486fdfd47331` replaces candidate polling
+  with bounded PostgreSQL/inotify multiplexing. Startup, overflow, and watch
+  invalidation trigger full adapter reconciliation; the watch is bound through
+  a held directory fd to resist pathname ABA; event names never carry learning
+  content.
+
+The pristine origin test file reproduced `6 failed, 17 passed`. The repaired
+projection file passed `23`; the event suite passed `33` with one real-Linux
+test skipped on Darwin; the complete ML suite passed `1790` with `36`
+platform/optional skips. Two independent reviews reported P0/P1/P2 `0/0/0`.
+This is source acceptance only. Linux inotify, service, PostgreSQL, natural
+cycles, runtime proof/reward, and authority facts were not refreshed. WP3
+repository adapters remain active.
+
+## Earlier B2.2c handoff checkpoint
 
 WP2-B B2.2c restart-safe event-driven handoff is source accepted at
 `328125a08e0f15057a110c69266d6a6ea71c8826`; Mac and `origin/main` matched at

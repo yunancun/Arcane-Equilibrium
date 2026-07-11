@@ -34,6 +34,8 @@
 | `execution_plan/2026-07-09--alr-operational-shadow-p2-queue-v1.md` | Versioned P2 acceptance queue. Root `TODO.md` remains the live state authority; normal completion requires `DONE_OPERATIONAL_SHADOW`, not a source-only marker. |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-07-11--global_qualified_autonomous_learning_shadow_v1_wp3_validation_adapter_checkpoint.md` | WP3 source checkpoint `8999aa2b`: pure immutable B2.2c-projection to existing ProofPacket/RewardLedger validation bridge; derives selected identity, requires handoff/provenance/PIT causality, creates no evidence or durable state, and leaves external receipt acquisition gated. |
 | `CCAgentWorkSpace/Operator/2026-07-11--global_qualified_autonomous_learning_shadow_v1_wp3_validation_adapter_checkpoint.md` | Operator mirror of the WP3 source-only checkpoint, its zero-authority boundary, and the next repository-adapter work item. |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-07-11--global_qualified_autonomous_learning_shadow_v1_wp2b_b2_2c_event_primary_followup_checkpoint.md` | B2.2c reconciliation checkpoint: preserves concurrent WP3 work, repairs READY-handoff decision time, adds bounded PG/inotify candidate-board wakes with held-fd ABA protection, and records full source verification without a Linux/runtime claim. |
+| `CCAgentWorkSpace/Operator/2026-07-11--global_qualified_autonomous_learning_shadow_v1_wp2b_b2_2c_event_primary_followup_checkpoint.md` | Operator mirror of the B2.2c event-primary source acceptance, zero-authority boundary, Linux-runtime gate, and unchanged WP3 repository-adapter next item. |
 
 ### 2026-07 冷審計 R2 + soak dispatch / drift-gate 設計批（2026-07-04 TW per R4 補登）
 

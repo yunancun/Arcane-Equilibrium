@@ -1,6 +1,6 @@
 {
   "schema": "global_qualified_autonomous_learning_shadow_loop_state_v1",
-  "generated_at": "2026-07-11T15:14:35Z",
+  "generated_at": "2026-07-11T16:53:42Z",
   "goal_id": "GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1",
   "goal_thread_id": "019f4b6d-1e5b-7551-9fce-7a2f029a1675",
   "goal_status": "ACTIVE",
@@ -10,17 +10,19 @@
   "baseline_packet_sha256": "30c10a497f02794525ce6e1d70972829bde7942a6a0bb181e36a13e308400b60",
   "baseline_evidence_delta_hash": "0ab0b80f307951108d0cf5edd3bb5940cb936bd093081c37c6d90e874e52ec28",
   "source_runtime": {
-    "branch": "main",
+    "branch": "agent/alr-event-wake-followup",
     "baseline_aligned_head": "1a3ecdd57927e70dd8c6dedfed4ecef04c7a46d3",
-    "mac_head": "8999aa2b7e4a3bba3841f4c72cf054d88cb69c5c",
-    "mac_origin_main": "8999aa2b7e4a3bba3841f4c72cf054d88cb69c5c",
-    "source_capture_kind": "WP3_PROOF_REWARD_VALIDATION_ADAPTER_SOURCE_ACCEPTANCE_CHECKPOINT",
-    "behavioral_source_checkpoint": "8999aa2b7e4a3bba3841f4c72cf054d88cb69c5c",
+    "mac_head": "1b85318f29a16d5a7575b27cb158486fdfd47331",
+    "mac_origin_main": "a6c0b2ebd9f29152f879358c1d541fd1ea25f372",
+    "source_capture_kind": "B2_2C_EVENT_PRIMARY_RECONCILIATION_PRE_PUSH_CHECKPOINT",
+    "behavioral_source_checkpoint": "1b85318f29a16d5a7575b27cb158486fdfd47331",
+    "source_publish_pending": true,
+    "origin_contains_behavioral_source_checkpoint": false,
     "linux_head": "7d1c247947f0fb6c139f8a0583c5e6ed6ae62c70",
     "linux_origin_main": "a927c37d14f768b923f11b29ea61d8e94ca8d5ff",
     "mac_unrelated_dirty_worktree_preserved": true,
     "linux_worktree_clean": true,
-    "post_baseline_drift_classification": "SOURCE_AHEAD_RUNTIME_UNCHANGED_NO_WP2B_DEPLOY",
+    "post_baseline_drift_classification": "SOURCE_AHEAD_RUNTIME_UNCHANGED_AWAITING_PUSH",
     "service_pin": "7d1c247947f0fb6c139f8a0583c5e6ed6ae62c70",
     "service_pid": 2381011,
     "service_nrestarts": 0,
@@ -37,8 +39,10 @@
     "sqlx_ledger_max": 150,
     "sqlx_v151_to_v156_rows": 0,
     "acl_state": "WP1_VERIFIED_LEAST_PRIVILEGE_SCANNER_INSERT_HEALTH_UPDATE_RUN_DELETE_DENIED",
-    "v157_present": false,
-    "v157_reserved": false
+    "v157_present": true,
+    "v157_presence_scope": "SOURCE_FILE_ONLY",
+    "v157_reserved": true,
+    "v157_runtime_apply_refreshed_this_loop": false
   },
   "intake": {
     "raw_rows": 80779,
@@ -170,15 +174,22 @@
     "candidate_board_extraction_commit": "13d2b980cecd4b9f83de669c19220c820afe4e89",
     "prospective_lineage_commit": "1afdf423104ce8303d90f9e86b0896039948a692",
     "validated_lineage_propagation_commit": "38ccd014c5ce974fbd395625b9597e12832395ee",
-    "status": "DONE_SOURCE_ACCEPTED_B2_2C_RESTART_SAFE_HANDOFF",
+    "status": "DONE_SOURCE_ACCEPTED_B2_2C_EVENT_PRIMARY",
     "b2_2b_cost_provenance_commit": "a7d8d5f8b3af3282ab75667b31e45a40a712b2c4",
     "b2_2b_focused_tests": "4 passed",
     "b2_2b_integrated_tests": "586 passed in 6.38s",
     "b2_2b_e2_qc_qa": "PASS/PASS/PASS_SOURCE_CHECKPOINT_TO_PM",
     "b2_2c_restart_safe_handoff_commit": "328125a08e0f15057a110c69266d6a6ea71c8826",
+    "b2_2c_ready_handoff_repair_commit": "03ef761bf92a6055ef3555d68d47a1f075b2298b",
+    "b2_2c_event_primary_commit": "1b85318f29a16d5a7575b27cb158486fdfd47331",
     "b2_2c_focused_tests": "109 passed",
     "b2_2c_integrated_tests": "190 passed in 0.80s",
     "b2_2c_e2_qc_qa": "PASS/PASS/PASS_SOURCE_CHECKPOINT_TO_PM",
+    "b2_2c_origin_baseline_regression": "6 failed, 17 passed",
+    "b2_2c_repaired_projection_tests": "23 passed in 0.09s",
+    "b2_2c_event_focused_tests": "33 passed, 1 skipped in 0.06s",
+    "b2_2c_full_ml_training_tests": "1790 passed, 36 skipped in 11.89s",
+    "b2_2c_followup_reviews": "PASS/PASS",
     "b2_2c_runtime_gate_pending": true,
     "candidate_board_tests": "199 passed",
     "candidate_board_golden_hash_count": 4,
@@ -222,7 +233,8 @@
     "b2_2a_root_rust_module_tests": "10 passed",
     "b2_2a_qa_tests": "41 passed",
     "b2_2a_qa": "PASS_SOURCE_CHECKPOINT_TO_PM",
-    "event_driven_primary_proven": false,
+    "event_driven_primary_proven": true,
+    "event_driven_primary_runtime_proven": false,
     "runtime_or_pg_acceptance": false
   },
   "wp3_source_checkpoint": {
@@ -302,10 +314,11 @@
     "WP7 adversarial final audit"
   ],
   "facts": [
-    "WP2-B B2.2c source acceptance captured Mac and origin at 328125a08e0f15057a110c69266d6a6ea71c8826",
+    "WP2-B B2.2c event-primary source acceptance is checkpointed at 1b85318f29a16d5a7575b27cb158486fdfd47331 after the 03ef761b READY-handoff repair",
     "B2.2a preserves only validated prospective context losslessly through event, decision, ledger, and blocked outcome; no evaluation or board projection is synthesized",
     "Only explicit_source_rows may carry prospective context; PG, snapshot, and unmarked historical rows remain contextless and UNQUALIFIED_CONTEXT_MISSING",
-    "B2.2c binds v2 board handoff identity to immutable source/policy/prior state, processes scanner-idle board deltas, and suppresses only integrity-verified exact replays",
+    "B2.2c binds v2 board handoff identity to immutable source/policy/prior state, multiplexes PostgreSQL with bounded inotify board wakes, re-arms on startup/overflow/invalidation, and suppresses only integrity-verified exact replays",
+    "V157 is present and reserved in current source; its PostgreSQL runtime application state was not refreshed in this loop",
     "WP3 validation adapter at 8999aa2b requires the B2.2c handoff and derives selected candidate/context proof identity; it validates only caller-provided proof/reward artifacts and does not create a receipt, proof, reward, or durable record",
     "The last accepted WP1 runtime snapshot at 2026-07-10T14:43:50.582201Z had a clean Linux checkout and ALR service pin at 7d1c247947f0fb6c139f8a0583c5e6ed6ae62c70; WP2-B did not re-inspect or mutate runtime",
     "At the last accepted WP1 runtime snapshot, 638 run and 638 feedback rows were DEFER with zero proof, reward, actual training, and hidden OOS; WP2-B makes no newer runtime-count claim",
@@ -313,16 +326,16 @@
     "The earlier unauthorized QA disposable local-PG probe remains retracted; R4 produced the only accepted isolated evidence"
   ],
   "inferences": [
-    "WP3 validation adapter is accepted while proof/reward external evidence and the remaining repository seam remain pending; no runtime fact was refreshed",
+    "B2.2c event-primary transport and READY-handoff repair are source accepted while actual Linux inotify runtime proof remains pending; no runtime fact was refreshed",
+    "WP3 validation adapter remains accepted while proof/reward external evidence and the remaining repository seam remain pending",
     "Zero qualified candidates is not a Goal blocker while source/test work remains"
   ],
   "assumptions": [
-    "The user is the project Operator",
-    "No unseen accepted artifact reserves V157 or changes the captured baseline"
+    "The user is the project Operator"
   ],
   "authority_granted_by_goal": false,
   "runtime_action_performed_this_loop": false,
-  "runtime_action_classification": "NONE_WP3_VALIDATION_ADAPTER_SOURCE_ONLY",
+  "runtime_action_classification": "NONE_B2_2C_EVENT_PRIMARY_SOURCE_ONLY",
   "exchange_action_performed_this_loop": false,
   "order_action_performed_this_loop": false,
   "unrelated_worktree_changes_consumed": false
