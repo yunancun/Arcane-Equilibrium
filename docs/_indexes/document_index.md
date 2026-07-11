@@ -32,6 +32,8 @@
 | `adr/0049-scanner-driven-alr-operational-shadow.md` | Accepted ALR boundary plus 2026-07-10 Goal addendum: scanner remains evidence-only, append-only `learning.alr_*` and zero trading/serving authority remain; AMD-2026-07-10-03 makes G1-G9 qualified learning the active completion truth and rotates the historical SUI packet. |
 | `governance_dev/amendments/2026-07-09--AMD-2026-07-09-02-alr-operational-shadow.md` | Operator-accepted operational-shadow authorization. It permits P2 source/test and scoped later migration/service work, while retaining the fresh E3/BB gate and all broker/order/proof prohibitions. |
 | `execution_plan/2026-07-09--alr-operational-shadow-p2-queue-v1.md` | Versioned P2 acceptance queue. Root `TODO.md` remains the live state authority; normal completion requires `DONE_OPERATIONAL_SHADOW`, not a source-only marker. |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-07-11--global_qualified_autonomous_learning_shadow_v1_wp3_validation_adapter_checkpoint.md` | WP3 source checkpoint `8999aa2b`: pure immutable B2.2c-projection to existing ProofPacket/RewardLedger validation bridge; derives selected identity, requires handoff/provenance/PIT causality, creates no evidence or durable state, and leaves external receipt acquisition gated. |
+| `CCAgentWorkSpace/Operator/2026-07-11--global_qualified_autonomous_learning_shadow_v1_wp3_validation_adapter_checkpoint.md` | Operator mirror of the WP3 source-only checkpoint, its zero-authority boundary, and the next repository-adapter work item. |
 
 ### 2026-07 冷審計 R2 + soak dispatch / drift-gate 設計批（2026-07-04 TW per R4 補登）
 
