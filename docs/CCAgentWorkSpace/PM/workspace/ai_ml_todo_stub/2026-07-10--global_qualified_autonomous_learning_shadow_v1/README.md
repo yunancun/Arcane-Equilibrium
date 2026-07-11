@@ -4,7 +4,7 @@ Date: 2026-07-10
 Owner: PM
 Goal: `GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1`
 Codex Goal thread: `019f4b6d-1e5b-7551-9fce-7a2f029a1675`
-Status: `ACTIVE_WP3_PROOF_REWARD_REPOSITORY_ADAPTERS`
+Status: `ACTIVE_WP4_VERSIONED_TRAINING_REGISTRY_CONTRACTS`
 
 This is the durable PM-owned queue and state surface for the active Goal. It
 supersedes the old ALR P2 completion/terminal interpretation, but does not edit
@@ -23,7 +23,7 @@ deletion, or direct parameter-apply authority.
 authority. `CHALLENGER_ACCEPT` is not serving, deployment, live eligibility, or
 order authority.
 
-## Active WP3 source basis
+## WP3 source acceptance and active WP4 basis
 
 WP3's first source-only bridge checkpoint is accepted at
 `8999aa2b7e4a3bba3841f4c72cf054d88cb69c5c`.  The new pure
@@ -38,9 +38,35 @@ reward-set ordering, and all-false/zero authority summaries are fail-closed.
 
 Focused tests passed `10`; the one current-generation integrated suite passed
 `263`. E2, QC, and QA final P0/P1 are `0/0`. This is a source checkpoint only:
-actual proof/reward/training/OOS runtime evidence remains zero, the B2.2c
-runtime gate remains pending, and the next source-only scope is
-`WP3-PROOF-REWARD-REPOSITORY-ADAPTERS`.
+actual proof/reward/training/OOS runtime evidence remains zero and the B2.2c
+runtime gate remains pending. At that checkpoint the next source-only scope
+was `WP3-PROOF-REWARD-REPOSITORY-ADAPTERS`; it is now accepted below.
+
+The remaining WP3 repository seam is source accepted at
+`c2bdefbfdb52eeaab4e801de783719ecfe0da7bc`. It selects the newest candidate
+projection family before exact-v2 validation, reconstructs complete bounded
+`training_input` lineage from immutable source rows, derives the proof binding
+internally, and validates existing V153 outcome-bridge containers without
+reusing their run-bound kind/edge semantics for a new write. A final single
+PostgreSQL snapshot rechecks the projection head, lineage identities, and
+bounded bridge set before any semantic receipt is returned. Exact reward bytes
+retain their container order; a separately labelled canonical copy feeds the
+pure adapter. More than 64 bridge or lineage rows yields an explicit
+schema-required condition with no positive receipt.
+
+The result is only a hash-bound in-memory receipt. It states
+`receipt_persisted=false`, `runtime_or_exchange_attested=false`, preserves
+`unverified_source_only`, writes zero rows/bytes, and grants no proof, reward,
+training, serving, promotion, trading, lease, Cost Gate, or exchange authority.
+Focused verification passed `66` with one Darwin-only skip; the complete ML
+suite passed `1818` with `36` platform/optional skips. E2, QA, and CC/FA final
+P0/P1/P2 are `0/0/0`. No Linux, PostgreSQL, service, Bybit, or runtime action
+occurred.
+
+WP4 is now active. Its first safe step is a fresh migration collision scan and
+versioned training/registry contract design. V152/V153 bytes remain frozen;
+no migration may be reserved, created, or applied until the exact next version
+and fresh `E3 -> BB` gate are current.
 
 ## Latest source checkpoint: B2.2c event-primary reconciliation
 
@@ -65,8 +91,8 @@ projection file passed `23`; the event suite passed `33` with one real-Linux
 test skipped on Darwin; the complete ML suite passed `1790` with `36`
 platform/optional skips. Two independent reviews reported P0/P1/P2 `0/0/0`.
 This is source acceptance only. Linux inotify, service, PostgreSQL, natural
-cycles, runtime proof/reward, and authority facts were not refreshed. WP3
-repository adapters remain active.
+cycles, runtime proof/reward, and authority facts were not refreshed. WP3 is
+source accepted and WP4 versioned training/registry contracts are active.
 
 ## Earlier B2.2c handoff checkpoint
 
@@ -81,8 +107,8 @@ B2.2c source criteria are accepted: focused `109 passed`, final integration
 `190 passed`, and E2/QC/QA PASS with P0/P1 `0/0`. Runtime deployment/receipt
 is pending a fresh exact E3/BB gate. This is not candidate qualification,
 proof, reward, training, OOS, serving, promotion, or profit evidence. The next
-source-only scope at that checkpoint was the now-accepted WP3 validation
-adapter; current work is `WP3-PROOF-REWARD-REPOSITORY-ADAPTERS`.
+source-only scope at that checkpoint was the now-accepted WP3 validation and
+repository work; current work is WP4 versioned training/registry contracts.
 
 This checkpoint refreshed no Linux, service, PostgreSQL, Bybit, data-freshness,
 training, serving, promotion, or profit fact. The last accepted WP1 Linux and
