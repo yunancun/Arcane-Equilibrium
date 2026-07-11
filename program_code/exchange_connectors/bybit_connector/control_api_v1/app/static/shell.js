@@ -56,7 +56,9 @@
     // ── stock lane(IBKR read-only;殼不新增任何 IBKR 寫/激活 UI)──
     { id: 'stock',    lane: 'stock',  hash: '#/stock/overview',  src: '/static/tab-stock-etf.html',   visId: 'stock-etf',   label: '總覽 Overview',   badge: 'read-only' },
     // ── cross-cutting(lane/env 正交;釘 rail 底)──
-    { id: 'monitor',    lane: 'cross', hash: '#/cross/monitor',    src: '/static/tab-monitoring.html', visId: 'monitoring',  label: '監控 Monitor' },
+    // monitor:Phase 2 第 2 個原生遷移(iframe:false)——render/pause/resume 由 view-monitor.js 註冊於
+    //   window.OC_NATIVE_VIEWS(id=monitor);src 保留 legacy tab-monitoring 作 registry 完整性 + 回滾錨,原生渲染接管。
+    { id: 'monitor',    lane: 'cross', hash: '#/cross/monitor',    src: '/static/tab-monitoring.html', visId: 'monitoring',  label: '監控 Monitor', iframe: false },
     { id: 'ai',         lane: 'cross', hash: '#/cross/ai',         src: '/static/tab-ai.html',         visId: 'ai',          label: 'AI 狀態' },
     { id: 'agents',     lane: 'cross', hash: '#/cross/agents',     src: '/static/tab-agents.html',     visId: 'agents',      label: 'Agent 團隊' },
     { id: 'learning',   lane: 'cross', hash: '#/cross/learning',   src: '/static/tab-learning.html',   visId: 'learning',    label: '學習 Learning' },
