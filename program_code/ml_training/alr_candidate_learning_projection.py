@@ -11,16 +11,33 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from typing import Any
 
+from ml_training.alr_candidate_evidence_adapter import (
+    validate_candidate_selection_row_v2,
+)
 from ml_training.alr_candidate_learning_arbiter import (
     build_candidate_learning_decision,
 )
 
 
-PROJECTION_SCHEMA_VERSION = "alr_candidate_learning_projection_v1"
-DECISION_SCHEMA_VERSION = "alr_candidate_learning_decision_v1"
-ARTIFACT_SCHEMA_VERSION = "alr_candidate_learning_projection_artifact_v1"
-EVIDENCE_SCHEMA_VERSION = "alr_candidate_evidence_snapshot_v1"
-ARBITER_INPUT_SCHEMA_VERSION = "alr_candidate_arbiter_input_v1"
+PROJECTION_SCHEMA_VERSION = "alr_candidate_learning_projection_v2"
+DECISION_SCHEMA_VERSION = "alr_candidate_learning_decision_v2"
+ARTIFACT_SCHEMA_VERSION = "alr_candidate_learning_projection_artifact_v2"
+EVIDENCE_SCHEMA_VERSION = "alr_candidate_evidence_snapshot_v2"
+CANDIDATE_SCHEMA_VERSION = "cost_gate_learning_candidate_v2"
+ARBITER_INPUT_SCHEMA_VERSION = "alr_candidate_arbiter_input_v2"
+_SELECTION_SCHEMA_VERSION = "cost_gate_learning_candidate_selection_v2"
+_SELECTION_FIELDS = (
+    "schema_version",
+    "candidate_id",
+    "candidate_family_key",
+    "stable_cohort_hash",
+    "candidate_identity",
+    "identity_complete",
+    "arbiter_input",
+    "arbiter_input_complete",
+    "selection_eligible",
+    "blockers",
+)
 
 _HEX40 = re.compile(r"^[0-9a-f]{40}$")
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
@@ -83,7 +100,6 @@ def build_candidate_aware_learning_projection(
     decision_code = _decision_code(raw_decision, evidence["source_status"])
     evaluated_at = _decision_time(
         raw_decision.get("evaluated_at"),
-        evidence.get("evaluated_at"),
         normalized_cycles[-1]["source_ts"],
     )
     selected_candidate = (
@@ -107,7 +123,8 @@ def build_candidate_aware_learning_projection(
         "source_head": source_head,
         "source_set_hash": source_set_hash,
         "evidence_source_status": evidence["source_status"],
-        "evidence_snapshot_hash": evidence["snapshot_hash"],
+        "evidence_selection_hash": evidence["selection_hash"],
+        "candidate_set_hash": evidence["candidate_set_hash"],
         "policy_hash": raw_decision.get("policy_hash"),
         "selected_candidate": selected_candidate,
         "selected_collection_target": selected_collection_target,
@@ -144,12 +161,9 @@ def build_candidate_aware_learning_projection(
         "selected_collection_target": selected_collection_target,
         "decision": copy.deepcopy(decision),
         "source_refs": {
-            "scanner_source_set_hash": source_set_hash,
             "evidence_source_status": evidence["source_status"],
-            "evidence_snapshot_hash": evidence["snapshot_hash"],
-            "evidence_content_sha256": evidence.get("source_content_sha256"),
-            "evidence_board_hash": evidence.get("board_hash"),
-            "latest_alias_used": False,
+            "evidence_selection_hash": evidence["selection_hash"],
+            "candidate_set_hash": evidence["candidate_set_hash"],
         },
         "training_run_created": False,
         "model_training_performed": False,
@@ -255,67 +269,97 @@ def _normalize_evidence_snapshot(value: Any) -> dict[str, Any]:
         return _invalid_evidence("EVIDENCE_SOURCE_STATUS_INVALID", raw)
     if raw.get("latest_alias_used") is not False:
         return _invalid_evidence("LATEST_ALIAS_INVALID", raw)
-    evaluated_at = _optional_utc_z(raw.get("evaluated_at"))
     if status != "READY":
+        if (
+            raw.get("candidate_universe_complete") is not False
+            or raw.get("selection_allowed") is not False
+            or raw.get("candidate_rows") != []
+        ):
+            return _invalid_evidence("EVIDENCE_NONREADY_PAYLOAD_INVALID", raw)
         return {
             "source_status": status,
-            "snapshot_hash": declared_hash,
-            "evaluated_at": evaluated_at,
-            "source_content_sha256": None,
-            "board_hash": None,
+            "selection_hash": None,
+            "candidate_set_hash": None,
             "candidate_rows": [],
         }
-    content_hash = raw.get("source_content_sha256")
-    board_hash = raw.get("board_hash")
+    selection_hash = raw.get("selection_hash")
+    candidate_set_hash = raw.get("candidate_set_hash")
     rows = raw.get("candidate_rows")
     if (
-        not _is_hash(content_hash)
-        or not _is_hash(board_hash)
+        not _is_hash(selection_hash)
+        or not _is_hash(candidate_set_hash)
         or raw.get("candidate_universe_complete") is not True
         or raw.get("selection_allowed") is not True
         or not isinstance(rows, list)
         or not all(isinstance(row, Mapping) for row in rows)
     ):
         return _invalid_evidence("EVIDENCE_SNAPSHOT_INCOMPLETE", raw)
+    try:
+        semantic_rows = [
+            _semantic_candidate_row(row)
+            for row in rows
+        ]
+        candidate_ids = [row["candidate_id"] for row in semantic_rows]
+        if len(candidate_ids) != len(set(candidate_ids)):
+            return _invalid_evidence("EVIDENCE_CANDIDATE_ID_DUPLICATE", raw)
+        semantic_rows.sort(
+            key=lambda row: (row["candidate_id"], _canonical_sha256(row))
+        )
+    except (KeyError, TypeError, ValueError):
+        return _invalid_evidence("EVIDENCE_CANDIDATE_ROWS_INVALID", raw)
+    expected_selection_hash = _canonical_sha256(
+        {
+            "schema_version": _SELECTION_SCHEMA_VERSION,
+            "candidate_rows": semantic_rows,
+        }
+    )
+    if selection_hash != expected_selection_hash:
+        return _invalid_evidence("EVIDENCE_SELECTION_HASH_MISMATCH", raw)
+    if candidate_set_hash != _canonical_sha256(semantic_rows):
+        return _invalid_evidence("CANDIDATE_SET_HASH_MISMATCH", raw)
     return {
         "source_status": "READY",
-        "snapshot_hash": declared_hash,
-        "evaluated_at": evaluated_at,
-        "source_content_sha256": content_hash,
-        "board_hash": board_hash,
+        "selection_hash": selection_hash,
+        "candidate_set_hash": candidate_set_hash,
         "candidate_rows": [copy.deepcopy(dict(row)) for row in rows],
     }
 
 
 def _invalid_evidence(status: str, observed: Any) -> dict[str, Any]:
-    observation = (
-        copy.deepcopy(dict(observed))
-        if isinstance(observed, Mapping)
-        else {"observed_type": type(observed).__name__}
-    )
     return {
         "source_status": status,
-        "snapshot_hash": _canonical_sha256(
-            {"status": status, "observed": observation}
-        ),
-        "evaluated_at": None,
-        "source_content_sha256": None,
-        "board_hash": None,
+        "selection_hash": None,
+        "candidate_set_hash": None,
         "candidate_rows": [],
     }
 
 
 def _normalize_candidate_row(row: Mapping[str, Any]) -> dict[str, Any]:
-    if "arbiter_input" in row:
-        typed = row.get("arbiter_input")
-        if (
-            not isinstance(typed, Mapping)
-            or typed.get("schema_version") != ARBITER_INPUT_SCHEMA_VERSION
-            or row.get("arbiter_input_complete") is not True
-        ):
-            return {}
-        return copy.deepcopy(dict(typed))
-    return {}
+    status, semantic = validate_candidate_selection_row_v2(row)
+    if (
+        status is not None
+        or semantic is None
+        or semantic.get("arbiter_input_complete") is not True
+    ):
+        return {}
+    blockers = semantic.get("blockers")
+    if (
+        isinstance(blockers, list)
+        and "TAIL_COST_NOT_FULLY_RECOMPUTABLE" in blockers
+    ):
+        # Tail completeness is selection material but is not a field in the frozen
+        # arbiter input v2 seam. Preserve one fail-closed assessment rather than
+        # laundering the complete typed input into a selectable candidate.
+        return {}
+    typed = semantic.get("arbiter_input")
+    return copy.deepcopy(dict(typed)) if isinstance(typed, Mapping) else {}
+
+
+def _semantic_candidate_row(row: Mapping[str, Any]) -> dict[str, Any]:
+    status, semantic = validate_candidate_selection_row_v2(row)
+    if status is not None or semantic is None:
+        raise ValueError(status or "candidate_row_invalid")
+    return semantic
 
 
 def _scanner_research_seeds(

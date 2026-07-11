@@ -7,12 +7,16 @@ import hashlib
 import json
 import re
 from collections.abc import Mapping, Sequence
+from decimal import Decimal, InvalidOperation
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from ml_training.pit_dataset_manifest import compute_pit_dataset_manifest_hash
 from ml_training.alr_scanner_statistical_experiment import (
     validate_scanner_statistical_experiment,
+)
+from ml_training.alr_candidate_learning_arbiter import (
+    candidate_learning_assessment_rank_key_v2,
 )
 
 
@@ -24,6 +28,10 @@ SUPPRESSION_SCHEMA_VERSION = "alr_equivalent_defer_suppression_v1"
 MAX_DEFER_SUPPRESSION_SECONDS = 1800
 _HEX40_RE = re.compile(r"^[0-9a-f]{40}$")
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
+_CANONICAL_UTC_Z_RE = re.compile(
+    r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+)
+_CANONICAL_Q18_RE = re.compile(r"^-?(?:0|[1-9][0-9]*)\.[0-9]{18}$")
 _ARTIFACT_KINDS = {
     "learning_target",
     "pit_dataset",
@@ -38,11 +46,19 @@ _EDGE_ROLES = {
     "experiment_candidate",
     "candidate_defer_evidence",
 }
-_CANDIDATE_PROJECTION_SCHEMA_VERSION = "alr_candidate_learning_projection_v1"
+_CANDIDATE_PROJECTION_SCHEMA_VERSION = "alr_candidate_learning_projection_v2"
 _CANDIDATE_PROJECTION_ARTIFACT_SCHEMA_VERSION = (
-    "alr_candidate_learning_projection_artifact_v1"
+    "alr_candidate_learning_projection_artifact_v2"
 )
-_CANDIDATE_DECISION_SCHEMA_VERSION = "alr_candidate_learning_decision_v1"
+_CANDIDATE_DECISION_SCHEMA_VERSION = "alr_candidate_learning_decision_v2"
+_CANDIDATE_DECISION_CODES = {
+    "QUALIFIED_CANDIDATE_SELECTED",
+    "NO_QUALIFIED_CANDIDATE_COLLECT_DISTINCT_ENTRIES",
+    "NO_QUALIFIED_CANDIDATE_REPAIR_DATA",
+    "NO_QUALIFIED_CANDIDATE_WAIT_COOLDOWN",
+    "NO_QUALIFIED_CANDIDATE_EXTERNAL_GAP",
+    "NO_QUALIFIED_CANDIDATE_ROTATE_RESEARCH_DIRECTION",
+}
 _CANDIDATE_PROJECTION_ARTIFACT_KINDS = {"learning_target", "target_rotation"}
 _CANDIDATE_PROJECTION_FALSE_CLAIMS = (
     "training_run_created",
@@ -51,6 +67,160 @@ _CANDIDATE_PROJECTION_FALSE_CLAIMS = (
     "promotion_ready",
     "order_or_probe_created",
 )
+_CANDIDATE_NO_AUTHORITY = {
+    "exchange_authority": False,
+    "trading_authority": False,
+    "order_or_probe_authority": False,
+    "decision_lease_authority": False,
+    "cost_gate_authority": False,
+    "proof_authority": False,
+    "serving_authority": False,
+    "promotion_authority": False,
+    "latest_authority": False,
+}
+_CANDIDATE_AUTHORITY_COUNTERS = {
+    "exchange_contact_count": 0,
+    "trading_action_count": 0,
+    "order_or_probe_count": 0,
+    "decision_lease_count": 0,
+    "cost_gate_change_count": 0,
+    "proof_claim_count": 0,
+    "serving_or_promotion_count": 0,
+}
+_CANDIDATE_PROJECTION_FIELDS = {
+    "schema_version",
+    "source_head",
+    "source_set",
+    "decision",
+    "artifact",
+    "provenance_edges",
+    "no_authority",
+    "authority_counters",
+    "projection_hash",
+}
+_CANDIDATE_SOURCE_SET_FIELDS = {
+    "source_set_hash",
+    "source_hashes",
+    "source_count",
+    "as_of_ts",
+    "source_identities",
+}
+_CANDIDATE_SOURCE_IDENTITY_FIELDS = {
+    "source_hash",
+    "source_key",
+    "source_ts",
+}
+_CANDIDATE_DECISION_FIELDS = {
+    "schema_version",
+    "decision_code",
+    "evaluated_at",
+    "source_head",
+    "source_set_hash",
+    "evidence_source_status",
+    "evidence_selection_hash",
+    "candidate_set_hash",
+    "policy_hash",
+    "selected_candidate",
+    "selected_collection_target",
+    "candidate_count",
+    "eligible_candidate_count",
+    "evaluated_candidates",
+    *_CANDIDATE_PROJECTION_FALSE_CLAIMS,
+    "no_authority",
+    "authority_counters",
+    "decision_hash",
+}
+_CANDIDATE_ARTIFACT_FIELDS = {
+    "artifact_kind",
+    "artifact_hash",
+    "canonical_payload",
+}
+_CANDIDATE_ARTIFACT_PAYLOAD_FIELDS = {
+    "schema_version",
+    "decision_code",
+    "decision_hash",
+    "selected_candidate",
+    "selected_collection_target",
+    "decision",
+    "source_refs",
+    *_CANDIDATE_PROJECTION_FALSE_CLAIMS,
+    "next_stage",
+    "no_authority",
+    "authority_counters",
+}
+_CANDIDATE_EDGE_FIELDS = {
+    "from_artifact_hash",
+    "to_artifact_hash",
+    "edge_role",
+    "edge_hash",
+}
+_CANDIDATE_SELECTION_VIEW_FIELDS = {
+    "family_key",
+    "candidate_family_key",
+    "evaluation_id",
+    "candidate_eval_id",
+    "material_fingerprint",
+    "state",
+    "identity",
+    "context_hashes",
+    "proof_stage",
+    "next_gap",
+    "blocker_codes",
+    "metrics",
+    "portfolio_assumption",
+    "learning_only",
+    "evi",
+}
+_CANDIDATE_METRICS_ASSESSMENT_FIELDS = {
+    "family_key",
+    "evaluation_id",
+    "material_fingerprint",
+    "identity",
+    "context_hashes",
+    "proof_stage",
+    "next_gap",
+    "learning_only",
+    "state",
+    "eligible",
+    "blocker_codes",
+    "portfolio_assumption",
+    "scanner_context",
+    "metrics",
+    "rank",
+}
+_CANDIDATE_INELIGIBLE_ASSESSMENT_FIELDS = {
+    "family_key",
+    "evaluation_id",
+    "material_fingerprint",
+    "identity",
+    "state",
+    "eligible",
+    "blocker_codes",
+    "portfolio_assumption",
+    "scanner_context",
+    "metrics",
+    "rank",
+}
+_CANDIDATE_ASSESSMENT_METRIC_FIELDS = {
+    "n_eff",
+    "median_distinct_entries_7d",
+    "expected_new_entries",
+    "information_gain",
+    "gate_progress",
+    "ambiguity",
+    "quality",
+    "compute",
+    "storage",
+    "resource",
+    "portfolio_redundancy",
+    "day_coverage",
+    "day_deficit",
+    "regime_coverage",
+    "regime_deficit",
+    "bull_share",
+    "evi",
+}
+_CANDIDATE_SCANNER_CONTEXT_FIELDS = {"novelty", "recurrence"}
 
 
 class AlrOperationalError(ValueError):
@@ -368,6 +538,8 @@ def build_candidate_learning_projection_plan(
     """Validate a candidate decision artifact without inventing a V152 run."""
     if not isinstance(projection, Mapping):
         raise AlrOperationalError("candidate_projection_invalid")
+    if set(projection) != _CANDIDATE_PROJECTION_FIELDS:
+        raise AlrOperationalError("candidate_projection_fields_invalid")
     if projection.get("schema_version") != _CANDIDATE_PROJECTION_SCHEMA_VERSION:
         raise AlrOperationalError("candidate_projection_schema_invalid")
     source_head = _required_hash(
@@ -375,11 +547,11 @@ def build_candidate_learning_projection_plan(
         "candidate_projection_source_head",
         length=40,
     )
-    no_authority = _all_false_mapping(
+    no_authority = _candidate_no_authority(
         projection.get("no_authority"),
         "candidate_projection_authority",
     )
-    authority_counters = _all_zero_mapping(
+    authority_counters = _candidate_authority_counters(
         projection.get("authority_counters"),
         "candidate_projection_authority",
     )
@@ -388,6 +560,8 @@ def build_candidate_learning_projection_plan(
         projection.get("source_set"),
         "candidate_projection_source_set",
     )
+    if set(source_set) != _CANDIDATE_SOURCE_SET_FIELDS:
+        raise AlrOperationalError("candidate_projection_source_set_fields_invalid")
     source_hashes_raw = source_set.get("source_hashes")
     if not isinstance(source_hashes_raw, list) or not source_hashes_raw:
         raise AlrOperationalError("candidate_projection_source_hashes_invalid")
@@ -410,18 +584,40 @@ def build_candidate_learning_projection_plan(
     )
     if source_set_hash != _canonical_sha256(source_hashes):
         raise AlrOperationalError("candidate_projection_source_set_hash_mismatch")
+    source_identities = _candidate_projection_source_identities(
+        source_set.get("source_identities"),
+        source_hashes=source_hashes,
+    )
+    as_of_ts = _candidate_projection_timestamp(
+        source_set.get("as_of_ts"),
+        "candidate_projection_source_set_as_of_invalid",
+    )
+    if _parse_utc_z(as_of_ts) != max(
+        _parse_utc_z(identity["source_ts"]) for identity in source_identities
+    ):
+        raise AlrOperationalError("candidate_projection_source_set_as_of_mismatch")
 
     decision = _required_mapping(
         projection.get("decision"),
         "candidate_projection_decision",
     )
+    if set(decision) != _CANDIDATE_DECISION_FIELDS:
+        raise AlrOperationalError("candidate_projection_decision_fields_invalid")
     if decision.get("schema_version") != _CANDIDATE_DECISION_SCHEMA_VERSION:
         raise AlrOperationalError("candidate_projection_decision_schema_invalid")
-    decision_code = decision.get("decision_code")
-    if not isinstance(decision_code, str) or not (
-        decision_code == "QUALIFIED_CANDIDATE_SELECTED"
-        or decision_code.startswith("NO_QUALIFIED_CANDIDATE_")
+    if any(
+        decision.get(field) is not False
+        for field in _CANDIDATE_PROJECTION_FALSE_CLAIMS
     ):
+        raise AlrOperationalError("candidate_projection_training_claim_invalid")
+    decision_evaluated_at = _candidate_projection_timestamp(
+        decision.get("evaluated_at"),
+        "candidate_projection_decision_evaluated_at_invalid",
+    )
+    if _parse_utc_z(decision_evaluated_at) < _parse_utc_z(as_of_ts):
+        raise AlrOperationalError("candidate_projection_decision_before_source")
+    decision_code = decision.get("decision_code")
+    if decision_code not in _CANDIDATE_DECISION_CODES:
         raise AlrOperationalError("candidate_projection_decision_code_invalid")
     decision_hash = _required_hash(
         decision.get("decision_hash"),
@@ -431,16 +627,25 @@ def build_candidate_learning_projection_plan(
         {key: value for key, value in decision.items() if key != "decision_hash"}
     ):
         raise AlrOperationalError("candidate_projection_decision_hash_mismatch")
-    decision_authority = _all_false_mapping(
+    if decision.get("source_head") != source_head:
+        raise AlrOperationalError(
+            "candidate_projection_decision_source_head_mismatch"
+        )
+    if decision.get("source_set_hash") != source_set_hash:
+        raise AlrOperationalError(
+            "candidate_projection_decision_source_set_mismatch"
+        )
+    decision_authority = _candidate_no_authority(
         decision.get("no_authority"),
         "candidate_projection_authority",
     )
-    decision_counters = _all_zero_mapping(
+    decision_counters = _candidate_authority_counters(
         decision.get("authority_counters"),
         "candidate_projection_authority",
     )
     if decision_authority != no_authority or decision_counters != authority_counters:
         raise AlrOperationalError("candidate_projection_authority_mismatch")
+    _validate_candidate_decision_semantics(decision)
     selected_candidate = decision.get("selected_candidate")
     if decision_code == "QUALIFIED_CANDIDATE_SELECTED":
         if not isinstance(selected_candidate, Mapping):
@@ -455,6 +660,8 @@ def build_candidate_learning_projection_plan(
         projection.get("artifact"),
         "candidate_projection_artifact",
     )
+    if set(artifact) != _CANDIDATE_ARTIFACT_FIELDS:
+        raise AlrOperationalError("candidate_projection_artifact_fields_invalid")
     artifact_kind = artifact.get("artifact_kind")
     if artifact_kind not in _CANDIDATE_PROJECTION_ARTIFACT_KINDS:
         raise AlrOperationalError("candidate_projection_artifact_kind_invalid")
@@ -464,6 +671,10 @@ def build_candidate_learning_projection_plan(
         artifact.get("canonical_payload"),
         "candidate_projection_artifact_payload",
     )
+    if set(artifact_payload) != _CANDIDATE_ARTIFACT_PAYLOAD_FIELDS:
+        raise AlrOperationalError(
+            "candidate_projection_artifact_payload_fields_invalid"
+        )
     if (
         artifact_payload.get("schema_version")
         != _CANDIDATE_PROJECTION_ARTIFACT_SCHEMA_VERSION
@@ -471,6 +682,11 @@ def build_candidate_learning_projection_plan(
         raise AlrOperationalError("candidate_projection_artifact_schema_invalid")
     if any(
         artifact_payload.get(field) is not False
+        for field in _CANDIDATE_PROJECTION_FALSE_CLAIMS
+    ):
+        raise AlrOperationalError("candidate_projection_training_claim_invalid")
+    if any(
+        artifact_payload.get(field) is not decision.get(field)
         for field in _CANDIDATE_PROJECTION_FALSE_CLAIMS
     ):
         raise AlrOperationalError("candidate_projection_training_claim_invalid")
@@ -483,46 +699,57 @@ def build_candidate_learning_projection_plan(
         artifact_payload.get("source_refs"),
         "candidate_projection_source_refs",
     )
-    if source_refs.get("latest_alias_used") is not False:
-        raise AlrOperationalError("candidate_projection_latest_alias_invalid")
+    if set(source_refs) != {
+        "evidence_source_status",
+        "evidence_selection_hash",
+        "candidate_set_hash",
+    }:
+        raise AlrOperationalError("candidate_projection_source_refs_invalid")
     evidence_source_status = source_refs.get("evidence_source_status")
     if not isinstance(evidence_source_status, str) or not evidence_source_status:
         raise AlrOperationalError("candidate_projection_evidence_status_invalid")
-    _required_hash(
-        source_refs.get("evidence_snapshot_hash"),
-        "candidate_projection_evidence_snapshot_hash",
-    )
+    evidence_selection_hash = source_refs.get("evidence_selection_hash")
+    candidate_set_hash = source_refs.get("candidate_set_hash")
     if evidence_source_status == "READY":
         _required_hash(
-            source_refs.get("evidence_content_sha256"),
-            "candidate_projection_evidence_content_sha256",
+            evidence_selection_hash,
+            "candidate_projection_evidence_selection_hash",
         )
         _required_hash(
-            source_refs.get("evidence_board_hash"),
-            "candidate_projection_evidence_board_hash",
+            candidate_set_hash,
+            "candidate_projection_candidate_set_hash",
         )
     elif (
-        source_refs.get("evidence_content_sha256") is not None
-        or source_refs.get("evidence_board_hash") is not None
+        evidence_selection_hash is not None
+        or candidate_set_hash is not None
         or decision_code == "QUALIFIED_CANDIDATE_SELECTED"
     ):
         raise AlrOperationalError("candidate_projection_invalid_source_claim")
-    if source_refs.get("scanner_source_set_hash") != source_set_hash:
-        raise AlrOperationalError("candidate_projection_scanner_source_set_mismatch")
     if (
-        artifact_payload.get("decision") != decision
+        decision.get("evidence_source_status") != evidence_source_status
+        or decision.get("evidence_selection_hash") != evidence_selection_hash
+        or decision.get("candidate_set_hash") != candidate_set_hash
+    ):
+        raise AlrOperationalError("candidate_projection_evidence_binding_mismatch")
+    if (
+        not _exact_value_equal(artifact_payload.get("decision"), decision)
         or artifact_payload.get("decision_code") != decision_code
         or artifact_payload.get("decision_hash") != decision_hash
-        or artifact_payload.get("selected_candidate") != selected_candidate
-        or artifact_payload.get("selected_collection_target")
-        != decision.get("selected_collection_target")
+        or not _exact_value_equal(
+            artifact_payload.get("selected_candidate"),
+            selected_candidate,
+        )
+        or not _exact_value_equal(
+            artifact_payload.get("selected_collection_target"),
+            decision.get("selected_collection_target"),
+        )
     ):
         raise AlrOperationalError("candidate_projection_decision_payload_mismatch")
-    payload_authority = _all_false_mapping(
+    payload_authority = _candidate_no_authority(
         artifact_payload.get("no_authority"),
         "candidate_projection_authority",
     )
-    payload_counters = _all_zero_mapping(
+    payload_counters = _candidate_authority_counters(
         artifact_payload.get("authority_counters"),
         "candidate_projection_authority",
     )
@@ -543,6 +770,8 @@ def build_candidate_learning_projection_plan(
     seen_sources: set[str] = set()
     for raw_edge in edges_raw:
         edge = _required_mapping(raw_edge, "candidate_projection_edge")
+        if set(edge) != _CANDIDATE_EDGE_FIELDS:
+            raise AlrOperationalError("candidate_projection_edge_fields_invalid")
         edge_hash = _required_hash(
             edge.get("edge_hash"),
             "candidate_projection_edge_hash",
@@ -591,6 +820,8 @@ def build_candidate_learning_projection_plan(
         "source_set_hash": source_set_hash,
         "source_hashes": source_hashes,
         "source_count": source_count,
+        "as_of_ts": as_of_ts,
+        "source_identities": source_identities,
         "decision_code": decision_code,
         "decision_hash": decision_hash,
         "artifact": {
@@ -613,9 +844,18 @@ def persist_candidate_learning_projection(
     artifact = plan["artifact"]
     try:
         with connection.cursor() as cursor:
-            existing = _find_artifact_payload(cursor, artifact["artifact_hash"])
+            existing = _find_candidate_projection_artifact(
+                cursor,
+                artifact["artifact_hash"],
+            )
             if existing is not None:
-                if existing != artifact["canonical_payload"]:
+                if (
+                    existing["artifact_kind"] != artifact["artifact_kind"]
+                    or existing["canonical_payload"]
+                    != artifact["canonical_payload"]
+                    or _canonical_sha256(existing["canonical_payload"])
+                    != artifact["artifact_hash"]
+                ):
                     raise AlrOperationalConflict(
                         "candidate_projection_artifact_hash_conflict"
                     )
@@ -689,9 +929,16 @@ def fetch_recent_candidate_projection_decisions(
     kinds = ["learning_target", "target_rotation"]
     with connection.cursor() as cursor:
         cursor.execute(
-            "SELECT canonical_payload FROM learning.alr_artifact_nodes "
+            "SELECT artifact_hash, artifact_kind, canonical_payload "
+            "FROM learning.alr_artifact_nodes "
             "WHERE artifact_kind = ANY(%s) "
             "AND canonical_payload ->> 'schema_version' = %s "
+            "AND (((canonical_payload #> '{decision,selected_candidate}') "
+            "IS NOT NULL AND (canonical_payload #> "
+            "'{decision,selected_candidate}') <> 'null'::jsonb) OR "
+            "((canonical_payload #> '{decision,selected_collection_target}') "
+            "IS NOT NULL AND (canonical_payload #> "
+            "'{decision,selected_collection_target}') <> 'null'::jsonb)) "
             "ORDER BY created_at DESC, artifact_hash DESC LIMIT %s",
             (kinds, _CANDIDATE_PROJECTION_ARTIFACT_SCHEMA_VERSION, limit),
         )
@@ -700,24 +947,19 @@ def fetch_recent_candidate_projection_decisions(
         raise AlrOperationalError("candidate_projection_history_rows_invalid")
     result: list[dict[str, Any]] = []
     for row in rows:
-        payload = _row_field(row, 0, "canonical_payload")
-        if not isinstance(payload, Mapping):
-            raise AlrOperationalError("candidate_projection_history_invalid")
-        decision = payload.get("decision")
-        if not isinstance(decision, Mapping):
-            raise AlrOperationalError("candidate_projection_history_invalid")
-        selected_candidate = decision.get("selected_candidate")
-        selected_collection = decision.get("selected_collection_target")
-        selected_values = [
-            item
-            for item in (selected_candidate, selected_collection)
-            if item is not None
-        ]
-        if not selected_values:
+        artifact_hash = _row_field(row, 0, "artifact_hash")
+        artifact_kind = _row_field(row, 1, "artifact_kind")
+        payload = _row_field(row, 2, "canonical_payload")
+        validated = _validate_candidate_history_artifact(
+            artifact_hash=artifact_hash,
+            artifact_kind=artifact_kind,
+            payload=payload,
+        )
+        if validated is None:
             continue
-        if len(selected_values) != 1 or not isinstance(selected_values[0], Mapping):
-            raise AlrOperationalError("candidate_projection_history_invalid")
-        selected = selected_values[0]
+        decision, selected = validated
+        if selected is None:
+            continue
         family_key = selected.get("family_key") or selected.get(
             "candidate_family_key"
         )
@@ -735,12 +977,428 @@ def fetch_recent_candidate_projection_decisions(
             ) from exc
         result.append(
             {
+                "decision_schema_version": _CANDIDATE_DECISION_SCHEMA_VERSION,
                 "family_key": family_key,
                 "material_fingerprint": material_fingerprint,
                 "decision_ts_s": decision_ts_s,
             }
         )
     return result
+
+
+def _candidate_selection_view_from_assessment(
+    assessment: Mapping[str, Any],
+) -> dict[str, Any]:
+    required = {
+        "family_key",
+        "evaluation_id",
+        "material_fingerprint",
+        "identity",
+        "context_hashes",
+        "proof_stage",
+        "next_gap",
+        "blocker_codes",
+        "metrics",
+        "portfolio_assumption",
+        "learning_only",
+        "state",
+    }
+    if not required.issubset(assessment):
+        raise AlrOperationalError("candidate_projection_decision_semantics_invalid")
+    family_key = assessment.get("family_key")
+    evaluation_id = assessment.get("evaluation_id")
+    material_fingerprint = assessment.get("material_fingerprint")
+    metrics = assessment.get("metrics")
+    if (
+        not isinstance(family_key, str)
+        or not _HEX64_RE.fullmatch(family_key)
+        or not isinstance(evaluation_id, str)
+        or not _HEX64_RE.fullmatch(evaluation_id)
+        or not isinstance(material_fingerprint, str)
+        or not _HEX64_RE.fullmatch(material_fingerprint)
+        or not isinstance(assessment.get("identity"), Mapping)
+        or not isinstance(assessment.get("context_hashes"), Mapping)
+        or isinstance(assessment.get("proof_stage"), bool)
+        or not isinstance(assessment.get("proof_stage"), int)
+        or assessment["proof_stage"] < 0
+        or not isinstance(assessment.get("next_gap"), Mapping)
+        or not isinstance(assessment.get("blocker_codes"), list)
+        or not all(
+            isinstance(code, str) and code for code in assessment["blocker_codes"]
+        )
+        or not isinstance(metrics, Mapping)
+        or "evi" not in metrics
+        or not isinstance(assessment.get("portfolio_assumption"), str)
+        or type(assessment.get("learning_only")) is not bool
+    ):
+        raise AlrOperationalError("candidate_projection_decision_semantics_invalid")
+    return {
+        "family_key": family_key,
+        "candidate_family_key": family_key,
+        "evaluation_id": evaluation_id,
+        "candidate_eval_id": evaluation_id,
+        "material_fingerprint": material_fingerprint,
+        "state": assessment["state"],
+        "identity": copy.deepcopy(dict(assessment["identity"])),
+        "context_hashes": copy.deepcopy(dict(assessment["context_hashes"])),
+        "proof_stage": assessment["proof_stage"],
+        "next_gap": copy.deepcopy(dict(assessment["next_gap"])),
+        "blocker_codes": list(assessment["blocker_codes"]),
+        "metrics": copy.deepcopy(dict(metrics)),
+        "portfolio_assumption": assessment["portfolio_assumption"],
+        "learning_only": assessment["learning_only"],
+        "evi": metrics["evi"],
+    }
+
+
+def _validate_candidate_decision_semantics(
+    decision: Mapping[str, Any],
+) -> None:
+    assessments = decision.get("evaluated_candidates")
+    candidate_count = decision.get("candidate_count")
+    eligible_count = decision.get("eligible_candidate_count")
+    if (
+        not isinstance(assessments, list)
+        or not all(isinstance(item, Mapping) for item in assessments)
+        or isinstance(candidate_count, bool)
+        or not isinstance(candidate_count, int)
+        or candidate_count != len(assessments)
+        or isinstance(eligible_count, bool)
+        or not isinstance(eligible_count, int)
+    ):
+        raise AlrOperationalError("candidate_projection_decision_semantics_invalid")
+    allowed_states = {
+        "DECISION_READY",
+        "COLLECT_DISTINCT_ENTRIES",
+        "REPAIR_DATA_QUALITY",
+        "WAIT_COOLDOWN",
+        "EXTERNAL_GAP",
+        "INELIGIBLE",
+    }
+    for index, assessment in enumerate(assessments, start=1):
+        metrics = assessment.get("metrics")
+        expected_fields = (
+            _CANDIDATE_INELIGIBLE_ASSESSMENT_FIELDS
+            if metrics is None
+            else _CANDIDATE_METRICS_ASSESSMENT_FIELDS
+        )
+        if assessment.get("state") == "WAIT_COOLDOWN" and metrics is not None:
+            expected_fields = {*expected_fields, "cooldown_remaining_seconds"}
+        cooldown = assessment.get("cooldown_remaining_seconds")
+        scanner_context = assessment.get("scanner_context")
+        ranking_inputs_valid = bool(
+            isinstance(scanner_context, Mapping)
+            and set(scanner_context) == _CANDIDATE_SCANNER_CONTEXT_FIELDS
+            and all(_canonical_q18(value) for value in scanner_context.values())
+            and (
+                metrics is None
+                or isinstance(metrics, Mapping)
+                and set(metrics) == _CANDIDATE_ASSESSMENT_METRIC_FIELDS
+                and all(_canonical_q18(value) for value in metrics.values())
+                and type(assessment.get("proof_stage")) is int
+                and 0 <= assessment["proof_stage"] <= 6
+            )
+        )
+        if (
+            set(assessment) != expected_fields
+            or not ranking_inputs_valid
+            or (
+                "cooldown_remaining_seconds" in expected_fields
+                and (type(cooldown) is not int or cooldown < 0)
+            )
+            or type(assessment.get("rank")) is not int
+            or assessment.get("rank") != index
+            or assessment.get("state") not in allowed_states
+            or type(assessment.get("eligible")) is not bool
+            or assessment["eligible"]
+            is not (assessment.get("state") == "DECISION_READY")
+            or (
+                assessment.get("metrics") is None
+                and assessment.get("state") != "INELIGIBLE"
+            )
+        ):
+            raise AlrOperationalError(
+                "candidate_projection_decision_semantics_invalid"
+            )
+    try:
+        canonically_ranked = sorted(
+            assessments,
+            key=candidate_learning_assessment_rank_key_v2,
+        )
+    except (KeyError, TypeError, ValueError, ArithmeticError) as exc:
+        raise AlrOperationalError(
+            "candidate_projection_decision_semantics_invalid"
+        ) from exc
+    if not _exact_value_equal(assessments, canonically_ranked):
+        raise AlrOperationalError("candidate_projection_decision_semantics_invalid")
+    if eligible_count != sum(
+        assessment["eligible"] is True for assessment in assessments
+    ):
+        raise AlrOperationalError("candidate_projection_decision_semantics_invalid")
+
+    ready = [item for item in assessments if item.get("state") == "DECISION_READY"]
+    collection = [
+        item
+        for item in assessments
+        if item.get("state") == "COLLECT_DISTINCT_ENTRIES"
+    ]
+    repair = [
+        item for item in assessments if item.get("state") == "REPAIR_DATA_QUALITY"
+    ]
+    waiting = [item for item in assessments if item.get("state") == "WAIT_COOLDOWN"]
+    external = [item for item in assessments if item.get("state") == "EXTERNAL_GAP"]
+    decision_code = decision.get("decision_code")
+    evidence_status = decision.get("evidence_source_status")
+    policy_hash = decision.get("policy_hash")
+    if policy_hash is not None and (
+        not isinstance(policy_hash, str) or not _HEX64_RE.fullmatch(policy_hash)
+    ):
+        raise AlrOperationalError("candidate_projection_decision_semantics_invalid")
+    if evidence_status != "READY" and assessments:
+        raise AlrOperationalError("candidate_projection_decision_semantics_invalid")
+    if (
+        evidence_status != "READY"
+        or policy_hash is None
+    ):
+        expected_code = "NO_QUALIFIED_CANDIDATE_REPAIR_DATA"
+    elif ready:
+        expected_code = "QUALIFIED_CANDIDATE_SELECTED"
+    elif collection:
+        expected_code = "NO_QUALIFIED_CANDIDATE_COLLECT_DISTINCT_ENTRIES"
+    elif repair:
+        expected_code = "NO_QUALIFIED_CANDIDATE_REPAIR_DATA"
+    elif any(item.get("metrics") is None for item in assessments):
+        expected_code = "NO_QUALIFIED_CANDIDATE_REPAIR_DATA"
+    elif waiting:
+        expected_code = "NO_QUALIFIED_CANDIDATE_WAIT_COOLDOWN"
+    elif external:
+        expected_code = "NO_QUALIFIED_CANDIDATE_EXTERNAL_GAP"
+    else:
+        expected_code = "NO_QUALIFIED_CANDIDATE_ROTATE_RESEARCH_DIRECTION"
+    if decision_code != expected_code:
+        raise AlrOperationalError("candidate_projection_decision_semantics_invalid")
+    selected_candidate = decision.get("selected_candidate")
+    selected_collection = decision.get("selected_collection_target")
+    if decision_code == "QUALIFIED_CANDIDATE_SELECTED":
+        if (
+            not ready
+            or selected_collection is not None
+            or not isinstance(selected_candidate, Mapping)
+            or set(selected_candidate) != _CANDIDATE_SELECTION_VIEW_FIELDS
+            or not _exact_value_equal(
+                selected_candidate,
+                _candidate_selection_view_from_assessment(ready[0]),
+            )
+        ):
+            raise AlrOperationalError(
+                "candidate_projection_decision_semantics_invalid"
+            )
+    elif decision_code == "NO_QUALIFIED_CANDIDATE_COLLECT_DISTINCT_ENTRIES":
+        if (
+            ready
+            or not collection
+            or selected_candidate is not None
+            or not isinstance(selected_collection, Mapping)
+            or set(selected_collection) != _CANDIDATE_SELECTION_VIEW_FIELDS
+            or not _exact_value_equal(
+                selected_collection,
+                _candidate_selection_view_from_assessment(collection[0]),
+            )
+        ):
+            raise AlrOperationalError(
+                "candidate_projection_decision_semantics_invalid"
+            )
+    elif decision_code in (
+        _CANDIDATE_DECISION_CODES
+        - {
+            "QUALIFIED_CANDIDATE_SELECTED",
+            "NO_QUALIFIED_CANDIDATE_COLLECT_DISTINCT_ENTRIES",
+        }
+    ):
+        if (
+            ready
+            or collection
+            or selected_candidate is not None
+            or selected_collection is not None
+        ):
+            raise AlrOperationalError(
+                "candidate_projection_decision_semantics_invalid"
+            )
+    else:
+        raise AlrOperationalError("candidate_projection_decision_semantics_invalid")
+
+
+def _validate_candidate_history_artifact(
+    *,
+    artifact_hash: Any,
+    artifact_kind: Any,
+    payload: Any,
+) -> tuple[Mapping[str, Any], Mapping[str, Any] | None] | None:
+    """Validate a durable v2 decision node before it can influence cooldown."""
+    if not isinstance(payload, Mapping):
+        raise AlrOperationalError("candidate_projection_history_invalid")
+    if payload.get("schema_version") == (
+        "alr_candidate_learning_projection_artifact_v1"
+    ):
+        return None
+    if (
+        payload.get("schema_version")
+        != _CANDIDATE_PROJECTION_ARTIFACT_SCHEMA_VERSION
+        or set(payload) != _CANDIDATE_ARTIFACT_PAYLOAD_FIELDS
+        or artifact_kind not in _CANDIDATE_PROJECTION_ARTIFACT_KINDS
+    ):
+        raise AlrOperationalError("candidate_projection_history_invalid")
+    try:
+        durable_hash = _required_hash(
+            artifact_hash,
+            "candidate_projection_history_artifact_hash",
+        )
+    except AlrOperationalError as exc:
+        raise AlrOperationalError("candidate_projection_history_invalid") from exc
+    if durable_hash != _canonical_sha256(payload):
+        raise AlrOperationalError("candidate_projection_history_invalid")
+    if (
+        any(
+            payload.get(field) is not False
+            for field in _CANDIDATE_PROJECTION_FALSE_CLAIMS
+        )
+        or payload.get("next_stage")
+        != "WP4_VERSIONED_TRAINING_SCHEMA_REQUIRED"
+    ):
+        raise AlrOperationalError("candidate_projection_history_invalid")
+    try:
+        payload_authority = _candidate_no_authority(
+            payload.get("no_authority"),
+            "candidate_projection_history_authority",
+        )
+        payload_counters = _candidate_authority_counters(
+            payload.get("authority_counters"),
+            "candidate_projection_history_authority",
+        )
+    except AlrOperationalError as exc:
+        raise AlrOperationalError("candidate_projection_history_invalid") from exc
+
+    decision = payload.get("decision")
+    if (
+        not isinstance(decision, Mapping)
+        or set(decision) != _CANDIDATE_DECISION_FIELDS
+        or decision.get("schema_version") != _CANDIDATE_DECISION_SCHEMA_VERSION
+        or any(
+            decision.get(field) is not False
+            for field in _CANDIDATE_PROJECTION_FALSE_CLAIMS
+        )
+    ):
+        raise AlrOperationalError("candidate_projection_history_invalid")
+    try:
+        decision_hash = _required_hash(
+            decision.get("decision_hash"),
+            "candidate_projection_history_decision_hash",
+        )
+        _required_hash(
+            decision.get("source_head"),
+            "candidate_projection_history_source_head",
+            length=40,
+        )
+        _required_hash(
+            decision.get("source_set_hash"),
+            "candidate_projection_history_source_set_hash",
+        )
+        _candidate_projection_timestamp(
+            decision.get("evaluated_at"),
+            "candidate_projection_history_evaluated_at",
+        )
+        decision_authority = _candidate_no_authority(
+            decision.get("no_authority"),
+            "candidate_projection_history_authority",
+        )
+        decision_counters = _candidate_authority_counters(
+            decision.get("authority_counters"),
+            "candidate_projection_history_authority",
+        )
+    except AlrOperationalError as exc:
+        raise AlrOperationalError("candidate_projection_history_invalid") from exc
+    if (
+        decision_hash
+        != _canonical_sha256(
+            {key: value for key, value in decision.items() if key != "decision_hash"}
+        )
+        or decision_authority != payload_authority
+        or decision_counters != payload_counters
+        or any(
+            decision.get(field) is not payload.get(field)
+            for field in _CANDIDATE_PROJECTION_FALSE_CLAIMS
+        )
+    ):
+        raise AlrOperationalError("candidate_projection_history_invalid")
+    try:
+        _validate_candidate_decision_semantics(decision)
+    except AlrOperationalError as exc:
+        raise AlrOperationalError("candidate_projection_history_invalid") from exc
+
+    source_refs = payload.get("source_refs")
+    if not isinstance(source_refs, Mapping) or set(source_refs) != {
+        "evidence_source_status",
+        "evidence_selection_hash",
+        "candidate_set_hash",
+    }:
+        raise AlrOperationalError("candidate_projection_history_invalid")
+    evidence_status = source_refs.get("evidence_source_status")
+    selection_hash = source_refs.get("evidence_selection_hash")
+    candidate_set_hash = source_refs.get("candidate_set_hash")
+    if not isinstance(evidence_status, str) or not evidence_status:
+        raise AlrOperationalError("candidate_projection_history_invalid")
+    if evidence_status == "READY":
+        if not (
+            isinstance(selection_hash, str)
+            and _HEX64_RE.fullmatch(selection_hash)
+            and isinstance(candidate_set_hash, str)
+            and _HEX64_RE.fullmatch(candidate_set_hash)
+        ):
+            raise AlrOperationalError("candidate_projection_history_invalid")
+    elif selection_hash is not None or candidate_set_hash is not None:
+        raise AlrOperationalError("candidate_projection_history_invalid")
+    if (
+        decision.get("evidence_source_status") != evidence_status
+        or decision.get("evidence_selection_hash") != selection_hash
+        or decision.get("candidate_set_hash") != candidate_set_hash
+        or payload.get("decision_hash") != decision_hash
+        or payload.get("decision_code") != decision.get("decision_code")
+        or not _exact_value_equal(payload.get("decision"), decision)
+        or not _exact_value_equal(
+            payload.get("selected_candidate"),
+            decision.get("selected_candidate"),
+        )
+        or not _exact_value_equal(
+            payload.get("selected_collection_target"),
+            decision.get("selected_collection_target"),
+        )
+    ):
+        raise AlrOperationalError("candidate_projection_history_invalid")
+
+    decision_code = decision.get("decision_code")
+    selected_candidate = decision.get("selected_candidate")
+    selected_collection = decision.get("selected_collection_target")
+    if decision_code == "QUALIFIED_CANDIDATE_SELECTED":
+        if (
+            artifact_kind != "learning_target"
+            or not isinstance(selected_candidate, Mapping)
+            or selected_collection is not None
+        ):
+            raise AlrOperationalError("candidate_projection_history_invalid")
+        selected: Mapping[str, Any] | None = selected_candidate
+    elif isinstance(decision_code, str) and decision_code.startswith(
+        "NO_QUALIFIED_CANDIDATE_"
+    ):
+        if artifact_kind != "target_rotation" or selected_candidate is not None:
+            raise AlrOperationalError("candidate_projection_history_invalid")
+        if selected_collection is not None and not isinstance(
+            selected_collection, Mapping
+        ):
+            raise AlrOperationalError("candidate_projection_history_invalid")
+        selected = selected_collection
+    else:
+        raise AlrOperationalError("candidate_projection_history_invalid")
+    return decision, selected
 
 
 def _find_reusable_defer(
@@ -907,6 +1565,32 @@ def _find_artifact_payload(cursor: Any, artifact_hash: str) -> dict[str, Any] | 
     return copy.deepcopy(dict(payload))
 
 
+def _find_candidate_projection_artifact(
+    cursor: Any,
+    artifact_hash: str,
+) -> dict[str, Any] | None:
+    cursor.execute(
+        "SELECT artifact_kind, canonical_payload "
+        "FROM learning.alr_artifact_nodes WHERE artifact_hash = %s",
+        (artifact_hash,),
+    )
+    row = cursor.fetchone()
+    if row is None:
+        return None
+    artifact_kind = _row_field(row, 0, "artifact_kind")
+    payload = _row_field(row, 1, "canonical_payload")
+    if (
+        not isinstance(artifact_kind, str)
+        or artifact_kind not in _CANDIDATE_PROJECTION_ARTIFACT_KINDS
+        or not isinstance(payload, Mapping)
+    ):
+        raise AlrOperationalError("existing_candidate_projection_artifact_invalid")
+    return {
+        "artifact_kind": artifact_kind,
+        "canonical_payload": copy.deepcopy(dict(payload)),
+    }
+
+
 def _suppression_edges_complete(
     cursor: Any,
     edges: Sequence[Mapping[str, str]],
@@ -928,17 +1612,43 @@ def _candidate_projection_edges_complete(
     cursor: Any,
     edges: Sequence[Mapping[str, str]],
 ) -> bool:
-    edge_hashes = [edge["edge_hash"] for edge in edges]
+    expected_by_hash = {edge["edge_hash"]: dict(edge) for edge in edges}
+    edge_hashes = list(expected_by_hash)
     cursor.execute(
-        "SELECT count(*) FROM learning.alr_provenance_edges "
+        "SELECT edge_hash, from_artifact_hash, to_artifact_hash, edge_role "
+        "FROM learning.alr_provenance_edges "
         "WHERE edge_hash = ANY(%s)",
         (edge_hashes,),
     )
-    row = cursor.fetchone()
-    count = _row_field(row, 0, "count") if row is not None else None
-    if isinstance(count, bool) or not isinstance(count, int) or count < 0:
-        raise AlrOperationalError("candidate_projection_edge_count_invalid")
-    return count == len(edge_hashes)
+    rows = cursor.fetchall()
+    if not isinstance(rows, list) or len(rows) != len(expected_by_hash):
+        return False
+    seen: set[str] = set()
+    for row in rows:
+        edge_hash = _row_field(row, 0, "edge_hash")
+        from_hash = _row_field(row, 1, "from_artifact_hash")
+        to_hash = _row_field(row, 2, "to_artifact_hash")
+        edge_role = _row_field(row, 3, "edge_role")
+        stored = {
+            "from_artifact_hash": from_hash,
+            "to_artifact_hash": to_hash,
+            "edge_role": edge_role,
+        }
+        if (
+            not isinstance(edge_hash, str)
+            or not _HEX64_RE.fullmatch(edge_hash)
+            or not isinstance(from_hash, str)
+            or not _HEX64_RE.fullmatch(from_hash)
+            or not isinstance(to_hash, str)
+            or not _HEX64_RE.fullmatch(to_hash)
+            or not isinstance(edge_role, str)
+            or edge_hash in seen
+            or expected_by_hash.get(edge_hash) != {**stored, "edge_hash": edge_hash}
+            or _canonical_sha256(stored) != edge_hash
+        ):
+            return False
+        seen.add(edge_hash)
+    return seen == set(expected_by_hash)
 
 
 def _insert_artifact(cursor: Any, artifact: Mapping[str, Any]) -> bool:
@@ -1092,6 +1802,31 @@ def _all_false_mapping(value: Any, field: str) -> dict[str, bool]:
     return {str(key): False for key in value}
 
 
+def _candidate_no_authority(value: Any, field: str) -> dict[str, bool]:
+    if (
+        not isinstance(value, Mapping)
+        or set(value) != set(_CANDIDATE_NO_AUTHORITY)
+        or any(value[key] is not False for key in _CANDIDATE_NO_AUTHORITY)
+    ):
+        raise AlrOperationalError(f"{field}_invalid")
+    return dict(_CANDIDATE_NO_AUTHORITY)
+
+
+def _candidate_authority_counters(value: Any, field: str) -> dict[str, int]:
+    if (
+        not isinstance(value, Mapping)
+        or set(value) != set(_CANDIDATE_AUTHORITY_COUNTERS)
+        or any(
+            isinstance(value[key], bool)
+            or not isinstance(value[key], int)
+            or value[key] != 0
+            for key in _CANDIDATE_AUTHORITY_COUNTERS
+        )
+    ):
+        raise AlrOperationalError(f"{field}_invalid")
+    return dict(_CANDIDATE_AUTHORITY_COUNTERS)
+
+
 def _all_zero_mapping(value: Any, field: str) -> dict[str, int]:
     if not isinstance(value, Mapping) or not value:
         raise AlrOperationalError(f"{field}_invalid")
@@ -1134,6 +1869,75 @@ def _source_identities(
     if [item["source_hash"] for item in identities] != list(source_hashes):
         raise AlrOperationalError("source_identity_hash_order_mismatch")
     return identities
+
+
+def _candidate_projection_source_identities(
+    value: Any,
+    *,
+    source_hashes: Sequence[str],
+) -> list[dict[str, str]]:
+    """逐位置綁定 projection source；排序或 timestamp 漂移均 fail-closed。"""
+    if not isinstance(value, list) or len(value) != len(source_hashes):
+        raise AlrOperationalError("candidate_projection_source_identities_invalid")
+    identities: list[dict[str, str]] = []
+    for expected_hash, item in zip(source_hashes, value, strict=True):
+        if not isinstance(item, Mapping) or set(item) != (
+            _CANDIDATE_SOURCE_IDENTITY_FIELDS
+        ):
+            raise AlrOperationalError(
+                "candidate_projection_source_identity_fields_invalid"
+            )
+        source_hash = _required_hash(
+            item.get("source_hash"),
+            "candidate_projection_source_identity_hash",
+        )
+        if source_hash != expected_hash:
+            raise AlrOperationalError(
+                "candidate_projection_source_identity_hash_order_mismatch"
+            )
+        source_key = item.get("source_key")
+        if (
+            not isinstance(source_key, str)
+            or not source_key
+            or source_key != source_key.strip()
+        ):
+            raise AlrOperationalError(
+                "candidate_projection_source_identity_key_invalid"
+            )
+        identities.append(
+            {
+                "source_hash": source_hash,
+                "source_key": source_key,
+                "source_ts": _candidate_projection_timestamp(
+                    item.get("source_ts"),
+                    "candidate_projection_source_identity_ts_invalid",
+                ),
+            }
+        )
+    if identities != sorted(
+        identities,
+        key=lambda item: (
+            item["source_ts"],
+            item["source_key"],
+            item["source_hash"],
+        ),
+    ):
+        raise AlrOperationalError(
+            "candidate_projection_source_identity_order_invalid"
+        )
+    return identities
+
+
+def _candidate_projection_timestamp(value: Any, reason: str) -> str:
+    if not isinstance(value, str) or not _CANONICAL_UTC_Z_RE.fullmatch(value):
+        raise AlrOperationalError(reason)
+    try:
+        canonical = _canonical_utc_z(value)
+    except AlrOperationalError as exc:
+        raise AlrOperationalError(reason) from exc
+    if canonical != value:
+        raise AlrOperationalError(reason)
+    return canonical
 
 
 def _required_mapping(value: Any, field: str) -> Mapping[str, Any]:
@@ -1280,6 +2084,28 @@ def _result(
 
 def _canonical_sha256(value: Any) -> str:
     return hashlib.sha256(_canonical_json(value).encode("utf-8")).hexdigest()
+
+
+def _exact_value_equal(left: Any, right: Any) -> bool:
+    if isinstance(left, Mapping) and isinstance(right, Mapping):
+        return set(left) == set(right) and all(
+            _exact_value_equal(left[key], right[key]) for key in left
+        )
+    if isinstance(left, list) and isinstance(right, list):
+        return len(left) == len(right) and all(
+            _exact_value_equal(a, b) for a, b in zip(left, right, strict=True)
+        )
+    return type(left) is type(right) and left == right
+
+
+def _canonical_q18(value: Any) -> bool:
+    if not isinstance(value, str) or not _CANONICAL_Q18_RE.fullmatch(value):
+        return False
+    try:
+        parsed = Decimal(value)
+    except InvalidOperation:
+        return False
+    return parsed.is_finite() and format(parsed, "f") == value
 
 
 def _canonical_json(value: Any) -> str:
