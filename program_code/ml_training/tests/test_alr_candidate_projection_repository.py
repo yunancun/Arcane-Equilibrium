@@ -14,6 +14,9 @@ from ml_training.alr_operational_repository import (
     fetch_recent_candidate_projection_decisions,
     persist_candidate_learning_projection,
 )
+from ml_training.alr_candidate_learning_projection import (
+    build_candidate_aware_learning_projection,
+)
 
 
 def _sha(value: object) -> str:
@@ -245,6 +248,41 @@ def _rehash_decision_and_projection(projection: dict[str, Any]) -> None:
     _rehash_projection(projection)
 
 
+def _with_handoff(projection: dict[str, Any]) -> dict[str, Any]:
+    payload = projection["artifact"]["canonical_payload"]
+    refs = payload["source_refs"]
+    source_set = projection["source_set"]
+    decision = projection["decision"]
+    handoff = {
+        "schema_version": "alr_candidate_board_handoff_v1",
+        "evidence": {
+            "schema_version": "alr_candidate_evidence_snapshot_v2",
+            "source_status": refs["evidence_source_status"],
+            "source_content_sha256": "6" * 64,
+            "board_hash": "7" * 64,
+            "selection_hash": refs["evidence_selection_hash"],
+            "audit_hash": "8" * 64,
+            "candidate_set_hash": refs["candidate_set_hash"],
+            "generated_at": "2026-07-10T11:30:00Z",
+            "evaluated_at": decision["evaluated_at"],
+            "cost_source_payload_sha256": None,
+            "cost_normalized_projection_sha256": None,
+            "cost_source_asof_utc": None,
+        },
+        "source_head": projection["source_head"],
+        "source_set_hash": source_set["source_set_hash"],
+        "source_cursor": copy.deepcopy(source_set["source_identities"][-1]),
+        "decision_time": decision["evaluated_at"],
+        "policy_input_hash": "f" * 64,
+        "policy_config_hash": decision["policy_hash"],
+        "prior_decisions_hash": "0" * 64,
+    }
+    handoff["handoff_hash"] = _sha(handoff)
+    refs["handoff"] = handoff
+    _rehash_projection(projection)
+    return projection
+
+
 def _history_artifact(projection: dict[str, Any]) -> dict[str, Any]:
     return {
         "artifact_hash": projection["artifact"]["artifact_hash"],
@@ -253,6 +291,42 @@ def _history_artifact(projection: dict[str, Any]) -> dict[str, Any]:
             projection["artifact"]["canonical_payload"]
         ),
     }
+
+
+def _nonready_snapshot(*, evaluated_at: str) -> dict[str, Any]:
+    snapshot = {
+        "schema_version": "alr_candidate_evidence_snapshot_v2",
+        "source_status": "EVIDENCE_DIRECTORY_NOT_CONFIGURED",
+        "evaluated_at": evaluated_at,
+        "candidate_universe_complete": False,
+        "candidate_rows": [],
+        "selection_allowed": False,
+        "latest_alias_used": False,
+    }
+    snapshot["snapshot_hash"] = _sha(snapshot)
+    return snapshot
+
+
+def _builder_cycles(*, extra: bool = False) -> list[dict[str, object]]:
+    rows = [
+        {
+            "source_hash": f"{ordinal:064x}",
+            "source_key": f"scan-{ordinal}",
+            "source_ts": f"2026-07-10T12:0{ordinal}:00Z",
+            "canonical_payload": {"candidates": []},
+        }
+        for ordinal in range(1, 4)
+    ]
+    if extra:
+        rows.append(
+            {
+                "source_hash": f"{4:064x}",
+                "source_key": "scan-4",
+                "source_ts": "2026-07-10T12:04:00Z",
+                "canonical_payload": {"candidates": []},
+            }
+        )
+    return rows
 
 
 class _Connection:
@@ -306,7 +380,25 @@ class _Cursor:
     def execute(self, sql: str, params: tuple[Any, ...] | None = None) -> None:
         self.connection.calls.append((sql, params))
         assert params is not None
-        if "artifact_kind = ANY" in sql:
+        if "{source_refs,handoff,handoff_hash}" in sql:
+            handoff_hash = str(params[1])
+            self.row = next(
+                (
+                    {
+                        "artifact_kind": self.connection.artifact_kinds[artifact_hash],
+                        "canonical_payload": copy.deepcopy(payload),
+                    }
+                    for artifact_hash, payload in self.connection.artifacts.items()
+                    if self.connection.artifact_kinds[artifact_hash]
+                    in set(params[0])
+                    and payload.get("source_refs", {})
+                    .get("handoff", {})
+                    .get("handoff_hash")
+                    == handoff_hash
+                ),
+                None,
+            )
+        elif "artifact_kind = ANY" in sql:
             self.row = copy.deepcopy(
                 [
                     artifact
@@ -707,6 +799,109 @@ def test_persists_projection_once_then_replay_is_duplicate_without_training_run(
     assert "ALR_TRAINING_RUNS" not in sql
     assert "UPDATE " not in sql
     assert "DELETE " not in sql
+
+
+def test_handoff_replay_suppresses_exact_rotation_but_board_delta_persists() -> None:
+    connection = _Connection()
+    projection = _with_handoff(_projection())
+
+    first = persist_candidate_learning_projection(connection, projection)
+    replay = persist_candidate_learning_projection(connection, projection)
+
+    assert first["status"] == "PERSISTED"
+    assert replay["status"] == "SUPPRESSED_UNCHANGED"
+    assert replay["artifact_rows_written"] == 0
+    assert replay["provenance_rows_written"] == 0
+    assert replay["payload_bytes_written"] == 0
+    assert len(connection.artifacts) == 1
+
+    changed = copy.deepcopy(projection)
+    handoff = changed["artifact"]["canonical_payload"]["source_refs"]["handoff"]
+    handoff["evidence"]["board_hash"] = "9" * 64
+    handoff.pop("handoff_hash")
+    handoff["handoff_hash"] = _sha(handoff)
+    _rehash_projection(changed)
+
+    changed_result = persist_candidate_learning_projection(connection, changed)
+
+    assert changed_result["status"] == "PERSISTED"
+    assert changed_result["artifact_rows_written"] == 1
+    assert changed_result["provenance_rows_written"] == 2
+    assert len(connection.artifacts) == 2
+
+
+def test_handoff_replay_fails_closed_when_existing_lineage_is_incomplete() -> None:
+    connection = _Connection()
+    projection = _with_handoff(_projection())
+    persist_candidate_learning_projection(connection, projection)
+    connection.edges.pop(next(iter(connection.edges)))
+
+    with pytest.raises(
+        AlrOperationalConflict,
+        match="candidate_projection_lineage_incomplete",
+    ):
+        persist_candidate_learning_projection(connection, projection)
+
+    assert connection.rollbacks == 1
+
+
+def test_handoff_material_source_policy_and_cooldown_deltas_reopen_rotation() -> None:
+    connection = _Connection()
+    source_head = "9" * 40
+    cycles = _builder_cycles()
+    evaluated_at = str(cycles[-1]["source_ts"])
+    base = build_candidate_aware_learning_projection(
+        source_head=source_head,
+        cycles=cycles,
+        evidence_snapshot=_nonready_snapshot(evaluated_at=evaluated_at),
+        prior_decisions=[],
+        policy={},
+    )
+    replay = copy.deepcopy(base)
+    policy_delta = build_candidate_aware_learning_projection(
+        source_head=source_head,
+        cycles=cycles,
+        evidence_snapshot=_nonready_snapshot(evaluated_at=evaluated_at),
+        prior_decisions=[],
+        policy={"unrecognized": "still_fail_closed"},
+    )
+    cooldown_delta = build_candidate_aware_learning_projection(
+        source_head=source_head,
+        cycles=cycles,
+        evidence_snapshot=_nonready_snapshot(evaluated_at=evaluated_at),
+        prior_decisions=[{"prior": "changed"}],
+        policy={},
+    )
+    source_cycles = _builder_cycles(extra=True)
+    source_delta = build_candidate_aware_learning_projection(
+        source_head=source_head,
+        cycles=source_cycles,
+        evidence_snapshot=_nonready_snapshot(
+            evaluated_at=str(source_cycles[-1]["source_ts"])
+        ),
+        prior_decisions=[],
+        policy={},
+    )
+
+    results = [
+        persist_candidate_learning_projection(connection, item)
+        for item in (base, replay, policy_delta, cooldown_delta, source_delta)
+    ]
+
+    assert [item["status"] for item in results] == [
+        "PERSISTED",
+        "SUPPRESSED_UNCHANGED",
+        "PERSISTED",
+        "PERSISTED",
+        "PERSISTED",
+    ]
+    assert all(
+        item["decision"]["decision_code"]
+        == "NO_QUALIFIED_CANDIDATE_REPAIR_DATA"
+        for item in (base, policy_delta, cooldown_delta, source_delta)
+    )
+    assert results[1]["artifact_rows_written"] == 0
+    assert results[1]["provenance_rows_written"] == 0
 
 
 def test_selected_projection_replay_rejects_existing_wrong_artifact_kind() -> None:

@@ -23,6 +23,7 @@ PROJECTION_SCHEMA_VERSION = "alr_candidate_learning_projection_v2"
 DECISION_SCHEMA_VERSION = "alr_candidate_learning_decision_v2"
 ARTIFACT_SCHEMA_VERSION = "alr_candidate_learning_projection_artifact_v2"
 EVIDENCE_SCHEMA_VERSION = "alr_candidate_evidence_snapshot_v2"
+HANDOFF_SCHEMA_VERSION = "alr_candidate_board_handoff_v1"
 CANDIDATE_SCHEMA_VERSION = "cost_gate_learning_candidate_v2"
 ARBITER_INPUT_SCHEMA_VERSION = "alr_candidate_arbiter_input_v2"
 _SELECTION_SCHEMA_VERSION = "cost_gate_learning_candidate_selection_v2"
@@ -90,17 +91,37 @@ def build_candidate_aware_learning_projection(
     candidate_rows.sort(key=_canonical_sha256)
     normalized_prior = _normalized_mappings(prior_decisions, "prior_decisions_invalid")
     normalized_prior.sort(key=_canonical_sha256)
+    normalized_policy = (
+        copy.deepcopy(dict(policy)) if isinstance(policy, Mapping) else {}
+    )
     raw_decision = build_candidate_learning_decision(
         source_head=source_head,
         scanner_research_seeds=_scanner_research_seeds(normalized_cycles),
         candidate_evidence_board=candidate_rows,
         prior_decisions=normalized_prior,
-        policy=copy.deepcopy(dict(policy)) if isinstance(policy, Mapping) else {},
+        policy=normalized_policy,
     )
     decision_code = _decision_code(raw_decision, evidence["source_status"])
     evaluated_at = _decision_time(
         raw_decision.get("evaluated_at"),
         normalized_cycles[-1]["source_ts"],
+    )
+    handoff = _build_handoff_identity(
+        evidence=evidence,
+        source_head=source_head,
+        source_set_hash=source_set_hash,
+        source_identities=[
+            {
+                "source_hash": cycle["source_hash"],
+                "source_key": cycle["source_key"],
+                "source_ts": cycle["source_ts"],
+            }
+            for cycle in normalized_cycles
+        ],
+        evaluated_at=evaluated_at,
+        policy=normalized_policy,
+        policy_config_hash=raw_decision.get("policy_hash"),
+        prior_decisions=normalized_prior,
     )
     selected_candidate = (
         copy.deepcopy(raw_decision.get("selected_candidate"))
@@ -164,6 +185,7 @@ def build_candidate_aware_learning_projection(
             "evidence_source_status": evidence["source_status"],
             "evidence_selection_hash": evidence["selection_hash"],
             "candidate_set_hash": evidence["candidate_set_hash"],
+            "handoff": handoff,
         },
         "training_run_created": False,
         "model_training_performed": False,
@@ -260,7 +282,7 @@ def _normalize_evidence_snapshot(value: Any) -> dict[str, Any]:
     declared_hash = raw.get("snapshot_hash")
     semantic = {key: item for key, item in raw.items() if key != "snapshot_hash"}
     computed_hash = _canonical_sha256(semantic)
-    if declared_hash != computed_hash:
+    if not _is_hash(declared_hash) or declared_hash != computed_hash:
         return _invalid_evidence("SNAPSHOT_HASH_MISMATCH", raw)
     if raw.get("schema_version") != EVIDENCE_SCHEMA_VERSION:
         return _invalid_evidence("EVIDENCE_SNAPSHOT_SCHEMA_INVALID", raw)
@@ -281,6 +303,20 @@ def _normalize_evidence_snapshot(value: Any) -> dict[str, Any]:
             "selection_hash": None,
             "candidate_set_hash": None,
             "candidate_rows": [],
+            "handoff_evidence": {
+                "schema_version": raw["schema_version"],
+                "source_status": status,
+                "source_content_sha256": None,
+                "board_hash": None,
+                "selection_hash": None,
+                "audit_hash": None,
+                "candidate_set_hash": None,
+                "generated_at": _optional_utc_z(raw.get("generated_at")),
+                "evaluated_at": _optional_utc_z(raw.get("evaluated_at")),
+                "cost_source_payload_sha256": None,
+                "cost_normalized_projection_sha256": None,
+                "cost_source_asof_utc": None,
+            },
         }
     selection_hash = raw.get("selection_hash")
     candidate_set_hash = raw.get("candidate_set_hash")
@@ -317,11 +353,46 @@ def _normalize_evidence_snapshot(value: Any) -> dict[str, Any]:
         return _invalid_evidence("EVIDENCE_SELECTION_HASH_MISMATCH", raw)
     if candidate_set_hash != _canonical_sha256(semantic_rows):
         return _invalid_evidence("CANDIDATE_SET_HASH_MISMATCH", raw)
+    generated_at = _optional_utc_z(raw.get("generated_at"))
+    evaluated_at = _optional_utc_z(raw.get("evaluated_at"))
+    cost_source_asof = raw.get("cost_source_asof_utc")
+    if cost_source_asof is not None:
+        cost_source_asof = _optional_utc_z(cost_source_asof)
+    if (
+        generated_at is None
+        or evaluated_at is None
+        or not _is_hash(raw.get("source_content_sha256"))
+        or not _is_hash(raw.get("board_hash"))
+        or not _is_hash(raw.get("audit_hash"))
+        or cost_source_asof is None
+        and raw.get("cost_source_asof_utc") is not None
+        or raw.get("cost_source_payload_sha256") is not None
+        and not _is_hash(raw.get("cost_source_payload_sha256"))
+        or raw.get("cost_normalized_projection_sha256") is not None
+        and not _is_hash(raw.get("cost_normalized_projection_sha256"))
+    ):
+        return _invalid_evidence("EVIDENCE_HANDOFF_METADATA_INVALID", raw)
     return {
         "source_status": "READY",
         "selection_hash": selection_hash,
         "candidate_set_hash": candidate_set_hash,
         "candidate_rows": [copy.deepcopy(dict(row)) for row in rows],
+        "handoff_evidence": {
+            "schema_version": raw["schema_version"],
+            "source_status": "READY",
+            "source_content_sha256": raw["source_content_sha256"],
+            "board_hash": raw["board_hash"],
+            "selection_hash": selection_hash,
+            "audit_hash": raw["audit_hash"],
+            "candidate_set_hash": candidate_set_hash,
+            "generated_at": generated_at,
+            "evaluated_at": evaluated_at,
+            "cost_source_payload_sha256": raw.get("cost_source_payload_sha256"),
+            "cost_normalized_projection_sha256": raw.get(
+                "cost_normalized_projection_sha256"
+            ),
+            "cost_source_asof_utc": cost_source_asof,
+        },
     }
 
 
@@ -331,7 +402,65 @@ def _invalid_evidence(status: str, observed: Any) -> dict[str, Any]:
         "selection_hash": None,
         "candidate_set_hash": None,
         "candidate_rows": [],
+        "handoff_evidence": {
+            "schema_version": EVIDENCE_SCHEMA_VERSION,
+            "source_status": status,
+            "source_content_sha256": None,
+            "board_hash": None,
+            "selection_hash": None,
+            "audit_hash": None,
+            "candidate_set_hash": None,
+            "generated_at": None,
+            "evaluated_at": None,
+            "cost_source_payload_sha256": None,
+            "cost_normalized_projection_sha256": None,
+            "cost_source_asof_utc": None,
+        },
     }
+
+
+def _build_handoff_identity(
+    *,
+    evidence: Mapping[str, Any],
+    source_head: str,
+    source_set_hash: str,
+    source_identities: list[dict[str, str]],
+    evaluated_at: str,
+    policy: Mapping[str, Any],
+    policy_config_hash: Any,
+    prior_decisions: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Bind only validated immutable inputs that can change a projection."""
+    evidence_view = evidence.get("handoff_evidence")
+    if not isinstance(evidence_view, Mapping):
+        raise AlrCandidateLearningProjectionError("handoff_evidence_missing")
+    normalized_evidence = copy.deepcopy(dict(evidence_view))
+    source_status = evidence.get("source_status")
+    if normalized_evidence.get("source_status") != source_status:
+        raise AlrCandidateLearningProjectionError("handoff_evidence_status_mismatch")
+    if source_status == "READY":
+        generated_at = _canonical_utc_z(normalized_evidence.get("generated_at"))
+        evidence_evaluated_at = _canonical_utc_z(
+            normalized_evidence.get("evaluated_at")
+        )
+        if evidence_evaluated_at != evaluated_at or generated_at > evaluated_at:
+            raise AlrCandidateLearningProjectionError("handoff_time_causality_invalid")
+        cost_asof = normalized_evidence.get("cost_source_asof_utc")
+        if cost_asof is not None and _canonical_utc_z(cost_asof) > generated_at:
+            raise AlrCandidateLearningProjectionError("handoff_cost_time_causality_invalid")
+    cursor = copy.deepcopy(source_identities[-1])
+    identity = {
+        "schema_version": HANDOFF_SCHEMA_VERSION,
+        "evidence": normalized_evidence,
+        "source_head": source_head,
+        "source_set_hash": source_set_hash,
+        "source_cursor": cursor,
+        "decision_time": evaluated_at,
+        "policy_input_hash": _canonical_sha256(dict(policy)),
+        "policy_config_hash": policy_config_hash,
+        "prior_decisions_hash": _canonical_sha256(prior_decisions),
+    }
+    return {**identity, "handoff_hash": _canonical_sha256(identity)}
 
 
 def _normalize_candidate_row(row: Mapping[str, Any]) -> dict[str, Any]:

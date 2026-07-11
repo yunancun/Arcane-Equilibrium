@@ -148,6 +148,47 @@ _CANDIDATE_ARTIFACT_PAYLOAD_FIELDS = {
     "no_authority",
     "authority_counters",
 }
+_CANDIDATE_SOURCE_REF_FIELDS = {
+    "evidence_source_status",
+    "evidence_selection_hash",
+    "candidate_set_hash",
+}
+_CANDIDATE_SOURCE_REF_HANDOFF_FIELDS = {
+    *_CANDIDATE_SOURCE_REF_FIELDS,
+    "handoff",
+}
+_CANDIDATE_HANDOFF_FIELDS = {
+    "schema_version",
+    "evidence",
+    "source_head",
+    "source_set_hash",
+    "source_cursor",
+    "decision_time",
+    "policy_input_hash",
+    "policy_config_hash",
+    "prior_decisions_hash",
+    "handoff_hash",
+}
+_CANDIDATE_HANDOFF_EVIDENCE_FIELDS = {
+    "schema_version",
+    "source_status",
+    "source_content_sha256",
+    "board_hash",
+    "selection_hash",
+    "audit_hash",
+    "candidate_set_hash",
+    "generated_at",
+    "evaluated_at",
+    "cost_source_payload_sha256",
+    "cost_normalized_projection_sha256",
+    "cost_source_asof_utc",
+}
+_CANDIDATE_HANDOFF_CURSOR_FIELDS = {
+    "source_hash",
+    "source_key",
+    "source_ts",
+}
+_CANDIDATE_HANDOFF_SCHEMA_VERSION = "alr_candidate_board_handoff_v1"
 _CANDIDATE_EDGE_FIELDS = {
     "from_artifact_hash",
     "to_artifact_hash",
@@ -699,10 +740,9 @@ def build_candidate_learning_projection_plan(
         artifact_payload.get("source_refs"),
         "candidate_projection_source_refs",
     )
-    if set(source_refs) != {
-        "evidence_source_status",
-        "evidence_selection_hash",
-        "candidate_set_hash",
+    if set(source_refs) not in {
+        frozenset(_CANDIDATE_SOURCE_REF_FIELDS),
+        frozenset(_CANDIDATE_SOURCE_REF_HANDOFF_FIELDS),
     }:
         raise AlrOperationalError("candidate_projection_source_refs_invalid")
     evidence_source_status = source_refs.get("evidence_source_status")
@@ -731,6 +771,19 @@ def build_candidate_learning_projection_plan(
         or decision.get("candidate_set_hash") != candidate_set_hash
     ):
         raise AlrOperationalError("candidate_projection_evidence_binding_mismatch")
+    handoff = None
+    if "handoff" in source_refs:
+        handoff = _validate_candidate_handoff(
+            source_refs["handoff"],
+            source_head=source_head,
+            source_set_hash=source_set_hash,
+            source_identities=source_identities,
+            decision_evaluated_at=decision_evaluated_at,
+            decision_policy_hash=decision.get("policy_hash"),
+            evidence_source_status=evidence_source_status,
+            evidence_selection_hash=evidence_selection_hash,
+            candidate_set_hash=candidate_set_hash,
+        )
     if (
         not _exact_value_equal(artifact_payload.get("decision"), decision)
         or artifact_payload.get("decision_code") != decision_code
@@ -830,6 +883,7 @@ def build_candidate_learning_projection_plan(
             "canonical_payload": copy.deepcopy(dict(artifact_payload)),
         },
         "edges": edges,
+        "handoff": handoff,
         "no_authority": no_authority,
         "authority_counters": authority_counters,
     }
@@ -844,6 +898,44 @@ def persist_candidate_learning_projection(
     artifact = plan["artifact"]
     try:
         with connection.cursor() as cursor:
+            handoff = plan["handoff"]
+            if handoff is not None:
+                existing_handoff = _find_candidate_projection_handoff(
+                    cursor,
+                    handoff["handoff_hash"],
+                )
+                if existing_handoff is not None:
+                    if not _candidate_handoff_matches(
+                        existing_handoff,
+                        handoff,
+                    ):
+                        raise AlrOperationalConflict(
+                            "candidate_projection_handoff_conflict"
+                        )
+                    if (
+                        existing_handoff["artifact_kind"] != artifact["artifact_kind"]
+                        or existing_handoff["canonical_payload"]
+                        != artifact["canonical_payload"]
+                        or _canonical_sha256(
+                            existing_handoff["canonical_payload"]
+                        )
+                        != artifact["artifact_hash"]
+                    ):
+                        raise AlrOperationalConflict(
+                            "candidate_projection_artifact_hash_conflict"
+                        )
+                    if not _candidate_projection_edges_complete(
+                        cursor,
+                        plan["edges"],
+                    ):
+                        raise AlrOperationalConflict(
+                            "candidate_projection_lineage_incomplete"
+                        )
+                    connection.commit()
+                    return _candidate_projection_result(
+                        "SUPPRESSED_UNCHANGED",
+                        plan,
+                    )
             existing = _find_candidate_projection_artifact(
                 cursor,
                 artifact["artifact_hash"],
@@ -915,6 +1007,37 @@ def fetch_untrained_scanner_cycles(connection: Any, *, limit: int) -> list[dict[
         item = dict(row)
         item["source_ts"] = _canonical_utc_z(item.get("source_ts"))
         normalized.append(item)
+    return normalized
+
+
+def fetch_recent_candidate_scanner_cycles(
+    connection: Any,
+    *,
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Read a bounded immutable scanner window for board-delta re-evaluation."""
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 3 <= limit <= 64:
+        raise AlrOperationalError("candidate_recent_fetch_limit_invalid")
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT source.source_hash, source.source_key, source.source_ts, "
+            "node.canonical_payload "
+            "FROM learning.alr_source_events AS source "
+            "JOIN learning.alr_artifact_nodes AS node "
+            "ON node.artifact_hash = source.source_hash "
+            "WHERE source.source_table = %s "
+            "ORDER BY source.source_ts DESC, source.source_scan_id DESC LIMIT %s",
+            (SOURCE_TABLE, limit),
+        )
+        rows = cursor.fetchall()
+    if not isinstance(rows, list) or not all(isinstance(row, Mapping) for row in rows):
+        raise AlrOperationalError("candidate_recent_fetch_rows_invalid")
+    normalized: list[dict[str, Any]] = []
+    for row in rows:
+        item = dict(row)
+        item["source_ts"] = _canonical_utc_z(item.get("source_ts"))
+        normalized.append(item)
+    normalized.sort(key=lambda item: (item["source_ts"], item["source_key"]))
     return normalized
 
 
@@ -1336,10 +1459,9 @@ def _validate_candidate_history_artifact(
         raise AlrOperationalError("candidate_projection_history_invalid") from exc
 
     source_refs = payload.get("source_refs")
-    if not isinstance(source_refs, Mapping) or set(source_refs) != {
-        "evidence_source_status",
-        "evidence_selection_hash",
-        "candidate_set_hash",
+    if not isinstance(source_refs, Mapping) or set(source_refs) not in {
+        frozenset(_CANDIDATE_SOURCE_REF_FIELDS),
+        frozenset(_CANDIDATE_SOURCE_REF_HANDOFF_FIELDS),
     }:
         raise AlrOperationalError("candidate_projection_history_invalid")
     evidence_status = source_refs.get("evidence_source_status")
@@ -1374,6 +1496,14 @@ def _validate_candidate_history_artifact(
         )
     ):
         raise AlrOperationalError("candidate_projection_history_invalid")
+    if "handoff" in source_refs and not _candidate_history_handoff_matches(
+        source_refs["handoff"],
+        decision=decision,
+        evidence_status=evidence_status,
+        selection_hash=selection_hash,
+        candidate_set_hash=candidate_set_hash,
+    ):
+        raise AlrOperationalError("candidate_projection_history_invalid")
 
     decision_code = decision.get("decision_code")
     selected_candidate = decision.get("selected_candidate")
@@ -1399,6 +1529,177 @@ def _validate_candidate_history_artifact(
     else:
         raise AlrOperationalError("candidate_projection_history_invalid")
     return decision, selected
+
+
+def _validate_candidate_handoff(
+    value: Any,
+    *,
+    source_head: str,
+    source_set_hash: str,
+    source_identities: Sequence[Mapping[str, str]],
+    decision_evaluated_at: str,
+    decision_policy_hash: Any,
+    evidence_source_status: str,
+    evidence_selection_hash: Any,
+    candidate_set_hash: Any,
+) -> dict[str, Any]:
+    """Validate the immutable semantic inputs before using no-delta suppression."""
+    handoff = _required_mapping(value, "candidate_projection_handoff")
+    if set(handoff) != _CANDIDATE_HANDOFF_FIELDS:
+        raise AlrOperationalError("candidate_projection_handoff_fields_invalid")
+    if handoff.get("schema_version") != _CANDIDATE_HANDOFF_SCHEMA_VERSION:
+        raise AlrOperationalError("candidate_projection_handoff_schema_invalid")
+    handoff_hash = _required_hash(
+        handoff.get("handoff_hash"),
+        "candidate_projection_handoff_hash",
+    )
+    if handoff_hash != _canonical_sha256(
+        {key: item for key, item in handoff.items() if key != "handoff_hash"}
+    ):
+        raise AlrOperationalError("candidate_projection_handoff_hash_mismatch")
+    if handoff.get("source_head") != source_head:
+        raise AlrOperationalError("candidate_projection_handoff_source_head_mismatch")
+    if handoff.get("source_set_hash") != source_set_hash:
+        raise AlrOperationalError("candidate_projection_handoff_source_set_mismatch")
+    if _candidate_projection_timestamp(
+        handoff.get("decision_time"),
+        "candidate_projection_handoff_decision_time_invalid",
+    ) != decision_evaluated_at:
+        raise AlrOperationalError("candidate_projection_handoff_decision_time_mismatch")
+    cursor = _required_mapping(
+        handoff.get("source_cursor"),
+        "candidate_projection_handoff_cursor",
+    )
+    if set(cursor) != _CANDIDATE_HANDOFF_CURSOR_FIELDS or not _exact_value_equal(
+        cursor,
+        source_identities[-1],
+    ):
+        raise AlrOperationalError("candidate_projection_handoff_cursor_mismatch")
+    _required_hash(
+        handoff.get("policy_input_hash"),
+        "candidate_projection_handoff_policy_hash",
+    )
+    policy_config_hash = handoff.get("policy_config_hash")
+    if policy_config_hash is not None:
+        _required_hash(
+            policy_config_hash,
+            "candidate_projection_handoff_policy_config_hash",
+        )
+    if policy_config_hash != decision_policy_hash:
+        raise AlrOperationalError("candidate_projection_handoff_policy_mismatch")
+    _required_hash(
+        handoff.get("prior_decisions_hash"),
+        "candidate_projection_handoff_prior_hash",
+    )
+    evidence = _required_mapping(
+        handoff.get("evidence"),
+        "candidate_projection_handoff_evidence",
+    )
+    if set(evidence) != _CANDIDATE_HANDOFF_EVIDENCE_FIELDS:
+        raise AlrOperationalError("candidate_projection_handoff_evidence_fields_invalid")
+    if (
+        evidence.get("schema_version") != "alr_candidate_evidence_snapshot_v2"
+        or evidence.get("source_status") != evidence_source_status
+    ):
+        raise AlrOperationalError("candidate_projection_handoff_evidence_invalid")
+    if evidence_source_status == "READY":
+        for field in (
+            "source_content_sha256",
+            "board_hash",
+            "selection_hash",
+            "audit_hash",
+            "candidate_set_hash",
+        ):
+            _required_hash(
+                evidence.get(field),
+                "candidate_projection_handoff_evidence_hash",
+            )
+        if (
+            evidence.get("selection_hash") != evidence_selection_hash
+            or evidence.get("candidate_set_hash") != candidate_set_hash
+        ):
+            raise AlrOperationalError("candidate_projection_handoff_evidence_binding_mismatch")
+        generated_at = _candidate_projection_timestamp(
+            evidence.get("generated_at"),
+            "candidate_projection_handoff_generated_at_invalid",
+        )
+        evaluated_at = _candidate_projection_timestamp(
+            evidence.get("evaluated_at"),
+            "candidate_projection_handoff_evaluated_at_invalid",
+        )
+        if (
+            evaluated_at != decision_evaluated_at
+            or _parse_utc_z(generated_at) > _parse_utc_z(evaluated_at)
+        ):
+            raise AlrOperationalError("candidate_projection_handoff_time_causality_invalid")
+        cost_asof = evidence.get("cost_source_asof_utc")
+        if cost_asof is not None:
+            cost_time = _candidate_projection_timestamp(
+                cost_asof,
+                "candidate_projection_handoff_cost_asof_invalid",
+            )
+            if _parse_utc_z(cost_time) > _parse_utc_z(generated_at):
+                raise AlrOperationalError(
+                    "candidate_projection_handoff_cost_time_causality_invalid"
+                )
+        for field in (
+            "cost_source_payload_sha256",
+            "cost_normalized_projection_sha256",
+        ):
+            if evidence.get(field) is not None:
+                _required_hash(
+                    evidence.get(field),
+                    "candidate_projection_handoff_cost_hash_invalid",
+                )
+    elif any(
+        evidence.get(field) is not None
+        for field in (
+            "source_content_sha256",
+            "board_hash",
+            "selection_hash",
+            "audit_hash",
+            "candidate_set_hash",
+            "cost_source_payload_sha256",
+            "cost_normalized_projection_sha256",
+            "cost_source_asof_utc",
+        )
+    ):
+        raise AlrOperationalError("candidate_projection_handoff_nonready_invalid")
+    return copy.deepcopy(dict(handoff))
+
+
+def _candidate_history_handoff_matches(
+    value: Any,
+    *,
+    decision: Mapping[str, Any],
+    evidence_status: str,
+    selection_hash: Any,
+    candidate_set_hash: Any,
+) -> bool:
+    """Keep v1 handoff history usable for cooldown without reopening its inputs."""
+    if not isinstance(value, Mapping) or set(value) != _CANDIDATE_HANDOFF_FIELDS:
+        return False
+    if value.get("schema_version") != _CANDIDATE_HANDOFF_SCHEMA_VERSION:
+        return False
+    handoff_hash = value.get("handoff_hash")
+    if not isinstance(handoff_hash, str) or not _HEX64_RE.fullmatch(
+        handoff_hash
+    ) or handoff_hash != _canonical_sha256(
+        {key: item for key, item in value.items() if key != "handoff_hash"}
+    ):
+        return False
+    evidence = value.get("evidence")
+    if not isinstance(evidence, Mapping) or set(evidence) != _CANDIDATE_HANDOFF_EVIDENCE_FIELDS:
+        return False
+    return (
+        value.get("source_head") == decision.get("source_head")
+        and value.get("source_set_hash") == decision.get("source_set_hash")
+        and value.get("decision_time") == decision.get("evaluated_at")
+        and value.get("policy_config_hash") == decision.get("policy_hash")
+        and evidence.get("source_status") == evidence_status
+        and evidence.get("selection_hash") == selection_hash
+        and evidence.get("candidate_set_hash") == candidate_set_hash
+    )
 
 
 def _find_reusable_defer(
@@ -1589,6 +1890,46 @@ def _find_candidate_projection_artifact(
         "artifact_kind": artifact_kind,
         "canonical_payload": copy.deepcopy(dict(payload)),
     }
+
+
+def _find_candidate_projection_handoff(
+    cursor: Any,
+    handoff_hash: str,
+) -> dict[str, Any] | None:
+    cursor.execute(
+        "SELECT artifact_kind, canonical_payload "
+        "FROM learning.alr_artifact_nodes "
+        "WHERE artifact_kind = ANY(%s) "
+        "AND canonical_payload #>> '{source_refs,handoff,handoff_hash}' = %s "
+        "ORDER BY created_at DESC, artifact_hash DESC LIMIT 1",
+        (sorted(_CANDIDATE_PROJECTION_ARTIFACT_KINDS), handoff_hash),
+    )
+    row = cursor.fetchone()
+    if row is None:
+        return None
+    artifact_kind = _row_field(row, 0, "artifact_kind")
+    payload = _row_field(row, 1, "canonical_payload")
+    if artifact_kind not in _CANDIDATE_PROJECTION_ARTIFACT_KINDS or not isinstance(
+        payload, Mapping
+    ):
+        raise AlrOperationalError("existing_candidate_handoff_invalid")
+    return {
+        "artifact_kind": artifact_kind,
+        "canonical_payload": copy.deepcopy(dict(payload)),
+    }
+
+
+def _candidate_handoff_matches(
+    existing: Mapping[str, Any],
+    handoff: Mapping[str, Any],
+) -> bool:
+    payload = existing.get("canonical_payload")
+    if not isinstance(payload, Mapping):
+        return False
+    source_refs = payload.get("source_refs")
+    if not isinstance(source_refs, Mapping):
+        return False
+    return _exact_value_equal(source_refs.get("handoff"), handoff)
 
 
 def _suppression_edges_complete(
@@ -2028,7 +2369,7 @@ def _candidate_projection_result(
     artifact_rows_written: int = 0,
     provenance_rows_written: int = 0,
 ) -> dict[str, Any]:
-    if status not in {"PERSISTED", "DUPLICATE"}:
+    if status not in {"PERSISTED", "DUPLICATE", "SUPPRESSED_UNCHANGED"}:
         raise AlrOperationalError("candidate_projection_result_status_invalid")
     payload_bytes_written = (
         len(

@@ -32,6 +32,7 @@ from ml_training.alr_freshness_runtime import (
 )
 from ml_training.alr_retention_repository import run_retention_pass
 from ml_training.alr_operational_repository import (
+    fetch_recent_candidate_scanner_cycles,
     fetch_recent_candidate_projection_decisions,
     fetch_untrained_scanner_cycles,
     persist_candidate_learning_projection,
@@ -291,6 +292,20 @@ def event_consumer_loop(
                     candidate_policy=candidate_policy,
                 )
             else:
+                if source_head is not None:
+                    # A stamped board may arrive while the scanner is idle.  The
+                    # handoff identity in the projection repository turns an
+                    # unchanged replay into a zero-write suppression.
+                    _accumulate_operational(
+                        totals,
+                        run_candidate_aware_backlog(
+                            connection,
+                            source_head=source_head,
+                            max_batch=max_batch,
+                            evidence_directory=candidate_evidence_directory,
+                            candidate_policy=candidate_policy,
+                        ),
+                    )
                 _accumulate_health(
                     totals,
                     process_health_snapshot(
@@ -612,6 +627,11 @@ def run_candidate_aware_backlog(
     if max_batch < 3:
         return _operational_result("INSUFFICIENT_SOURCE_CYCLES")
     cycles = fetch_untrained_scanner_cycles(connection, limit=min(max_batch, 64))
+    if len(cycles) < 3 and evidence_directory is not None:
+        cycles = fetch_recent_candidate_scanner_cycles(
+            connection,
+            limit=min(max_batch, 64),
+        )
     if len(cycles) < 3:
         return _operational_result("INSUFFICIENT_SOURCE_CYCLES")
 
@@ -646,7 +666,7 @@ def run_candidate_aware_backlog(
     )
     persisted = persist_candidate_learning_projection(connection, projection)
     status = persisted.get("status")
-    if status not in {"PERSISTED", "DUPLICATE"}:
+    if status not in {"PERSISTED", "DUPLICATE", "SUPPRESSED_UNCHANGED"}:
         raise AlrEventConsumerError("candidate_projection_persistence_status_invalid")
     metric_fields = {
         "artifact_rows_written",
@@ -670,6 +690,9 @@ def run_candidate_aware_backlog(
 
     result = _operational_result(status)
     result["decision_write_attempts"] = 1
+    result["decision_writes_suppressed"] = int(
+        status == "SUPPRESSED_UNCHANGED"
+    )
     result["decision_duplicate_retries"] = int(status == "DUPLICATE")
     result["operational_artifact_rows_written"] = persisted[
         "artifact_rows_written"
@@ -1070,6 +1093,7 @@ def _operational_result(status: str) -> dict[str, int]:
         "DUPLICATE",
         "SUPPRESSED_EQUIVALENT_DEFER",
         "DUPLICATE_SUPPRESSION",
+        "SUPPRESSED_UNCHANGED",
         "DEFER_EVIDENCE",
         "INSUFFICIENT_SOURCE_CYCLES",
     }:

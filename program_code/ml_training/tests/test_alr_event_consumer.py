@@ -916,7 +916,7 @@ def test_idle_health_heartbeat_does_not_trigger_another_training_cycle(
         source_head="a" * 40,
     )
 
-    assert target_calls == 1
+    assert target_calls == 2
     assert health_calls == 2
 
 
