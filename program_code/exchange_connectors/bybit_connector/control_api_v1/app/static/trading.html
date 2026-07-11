@@ -32,7 +32,7 @@
   .header { display: flex; align-items: center; gap: 12px; padding: 10px 16px;
     background: var(--card-bg); border-bottom: 1px solid var(--border); }
   .header h1 { font-size: 15px; font-weight: 600; white-space: nowrap; }
-  .header .tag { font-size: 11px; padding: 2px 8px; border-radius: 10px; }
+  .header .tag { font-size: 11px; padding: 2px 8px; border-radius: var(--r-2); }
   .tag-blue { background: rgba(56,139,253,0.15); color: var(--blue); }
   .tag-green { background: rgba(63,185,80,0.15); color: var(--green); }
   .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-dim); flex-shrink: 0; }
@@ -54,7 +54,7 @@
 
   /* Cards */
   .card { background: var(--bg); border: 1px solid var(--border);
-    border-radius: 6px; padding: 8px 10px; margin-bottom: 6px; }
+    border-radius: var(--r-1); padding: 8px 10px; margin-bottom: 6px; }
   .card-label { font-size: 10px; color: var(--text-dim); text-transform: uppercase; }
   .card-val { font-size: 18px; font-weight: 600; margin-top: 2px; }
   .card-sub { font-size: 10px; color: var(--text-dim); margin-top: 2px; }
@@ -69,14 +69,14 @@
 
   /* Buttons */
   .btn-group { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px; }
-  .btn { padding: 5px 10px; border-radius: 5px; border: 1px solid var(--border);
+  .btn { padding: 5px 10px; border-radius: var(--r-1); border: 1px solid var(--border);
     background: var(--bg); color: var(--text-dim); font-size: 11px; cursor: pointer;
     transition: all 0.15s; font-family: inherit; }
   .btn:hover { border-color: var(--accent); color: var(--text); }
   .btn.active { background: rgba(56,139,253,0.15); border-color: var(--blue); color: var(--blue); }
 
   /* Symbol selector */
-  .sym-select { background: var(--bg); border: 1px solid var(--border); border-radius: 5px;
+  .sym-select { background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-1);
     color: var(--text); font-size: 12px; padding: 5px 8px; width: 100%; font-family: inherit;
     cursor: pointer; appearance: none; -webkit-appearance: none;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%238b949e'/%3E%3C/svg%3E");
@@ -116,7 +116,7 @@
 
   /* PnL row */
   .pnl-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-  .pnl-item { background: var(--card-bg); border-radius: 4px; padding: 6px 8px; }
+  .pnl-item { background: var(--card-bg); border-radius: var(--r-1); padding: 6px 8px; }
   .pnl-item .label { font-size: 10px; color: var(--text-dim); }
   .pnl-item .value { font-size: 14px; font-weight: 600; }
 

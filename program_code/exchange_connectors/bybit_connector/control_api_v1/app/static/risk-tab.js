@@ -12,7 +12,7 @@ if (!document.getElementById('oc-modal-css')) {
   modalStyle.id = 'oc-modal-css';
   modalStyle.textContent = `
     .oc-modal { position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center; z-index:1000; }
-    .oc-modal-content { background:var(--card-bg); border-radius:12px; padding:24px; width:480px; max-width:90vw; }
+    .oc-modal-content { background:var(--card-bg); border-radius:var(--r-3); padding:24px; width:480px; max-width:90vw; }
   `;
   document.head.appendChild(modalStyle);
 }

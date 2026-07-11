@@ -729,7 +729,7 @@ function ocInjectBaseCSS() {
 
     /* Metric Row */
     .oc-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
-    .oc-metric { background: var(--bg); border: 1px solid #21262d; border-radius: 8px; padding: 10px 12px; }
+    .oc-metric { background: var(--bg); border: 1px solid #21262d; border-radius: var(--r-2); padding: 10px 12px; }
     .oc-metric-label { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.4px; }
     .oc-metric-val { font-size: 20px; font-weight: 700; margin-top: 2px; }
     .oc-metric-sub { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
@@ -738,7 +738,7 @@ function ocInjectBaseCSS() {
     .oc-performance-metrics .oc-metric-label { min-height: 42px; line-height: 1.45; display: block; }
     .oc-performance-metrics .oc-metric-val { margin-top: auto; font-size: 18px; line-height: 1.2; overflow-wrap: anywhere; }
     .oc-edge-gate-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; }
-    .oc-edge-gate-card { background: var(--bg); border: 1px solid #21262d; border-radius: 8px; padding: 12px; min-height: 160px; }
+    .oc-edge-gate-card { background: var(--bg); border: 1px solid #21262d; border-radius: var(--r-2); padding: 12px; min-height: 160px; }
     .oc-edge-gate-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
     .oc-edge-gate-title { font-size: 12px; font-weight: 700; line-height: 1.35; color: var(--text); }
     .oc-edge-gate-sub { font-size: 10px; color: var(--text-dim); margin-top: 2px; line-height: 1.35; }
@@ -747,10 +747,10 @@ function ocInjectBaseCSS() {
     .oc-edge-gate-value .label { font-size: 9px; color: var(--text-dim); text-transform: uppercase; line-height: 1.25; }
     .oc-edge-gate-value .value { font-size: 14px; font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
     .oc-edge-gate-summary { color: var(--text-dim); font-size: 11px; line-height: 1.45; margin-top: 6px; }
-    .oc-mini-trend { width: 100%; height: 54px; display: block; background: rgba(13,17,23,0.45); border: 1px solid #21262d; border-radius: 6px; }
+    .oc-mini-trend { width: 100%; height: 54px; display: block; background: rgba(13,17,23,0.45); border: 1px solid #21262d; border-radius: var(--r-1); }
     .oc-mini-trend-zero { stroke: rgba(139,148,158,0.45); stroke-width: 1; stroke-dasharray: 3 3; }
-    .oc-mini-trend-empty { height: 54px; display: flex; align-items: center; justify-content: center; color: var(--text-dim); font-size: 11px; border: 1px dashed #30363d; border-radius: 6px; }
-    .oc-readiness-list { border: 1px solid #21262d; border-radius: 8px; margin-top: 10px; overflow: hidden; }
+    .oc-mini-trend-empty { height: 54px; display: flex; align-items: center; justify-content: center; color: var(--text-dim); font-size: 11px; border: 1px dashed #30363d; border-radius: var(--r-1); }
+    .oc-readiness-list { border: 1px solid #21262d; border-radius: var(--r-2); margin-top: 10px; overflow: hidden; }
     .oc-readiness-row { display: grid; grid-template-columns: minmax(120px, 1fr) auto minmax(100px, 1fr); gap: 10px; align-items: center; padding: 9px 11px; border-top: 1px solid #21262d; }
     .oc-readiness-row:first-child { border-top: none; }
     .oc-readiness-label { font-size: 12px; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
@@ -790,7 +790,7 @@ function ocInjectBaseCSS() {
     .oc-fill-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
     .oc-fill-tabs { display: inline-flex; gap: 6px; flex-wrap: wrap; }
     .oc-fill-tab { border: 1px solid var(--border); background: var(--bg); color: var(--text-dim);
-      border-radius: 6px; padding: 5px 10px; font-size: 12px; cursor: pointer; font-family: inherit; }
+      border-radius: var(--r-1); padding: 5px 10px; font-size: 12px; cursor: pointer; font-family: inherit; }
     .oc-fill-tab.active { border-color: var(--blue); color: var(--blue); background: rgba(56,139,253,0.12); }
     .oc-fill-pager { display: inline-flex; align-items: center; gap: 8px; color: var(--text-dim); font-size: 11px; }
     .oc-fill-summary { color: var(--text-dim); font-size: 11px; line-height: 1.4; margin: 4px 0 8px; }
@@ -800,7 +800,7 @@ function ocInjectBaseCSS() {
     .oc-fill-time { white-space: nowrap; }
 
     /* Buttons */
-    .oc-btn { padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border);
+    .oc-btn { padding: 6px 14px; border-radius: var(--r-1); border: 1px solid var(--border);
       background: var(--bg); color: var(--text); font-size: 12px; cursor: pointer;
       transition: all 0.15s; font-family: inherit; white-space: nowrap; }
     .oc-btn:hover { border-color: var(--accent); color: #fff; }
@@ -822,7 +822,7 @@ function ocInjectBaseCSS() {
     /* Action risk zoning: used to separate reversible, stop, and destructive controls. */
     .oc-action-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
     .oc-action-cluster { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap;
-      padding: 3px; border: 1px solid transparent; border-radius: 8px; }
+      padding: 3px; border: 1px solid transparent; border-radius: var(--r-2); }
     .oc-action-cluster-state { background: rgba(139,148,158,0.06); border-color: rgba(139,148,158,0.18); }
     .oc-action-cluster-pause { background: rgba(210,153,34,0.06); border-color: rgba(210,153,34,0.22); }
     .oc-action-cluster-stop { background: rgba(248,81,73,0.05); border-color: rgba(248,81,73,0.24); }
@@ -846,12 +846,12 @@ function ocInjectBaseCSS() {
     .oc-explain { margin-bottom: 14px; }
     .oc-explain-simple { color: var(--text-dim); font-size: 12px; line-height: 1.7;
       padding: 10px 14px; background: rgba(13,17,23,0.6); border-left: 3px solid var(--accent);
-      border-radius: 0 8px 8px 0; }
+      border-radius: 0 var(--r-2) var(--r-2) 0; }
     .oc-explain-deep { margin-top: 4px; }
     .oc-explain-deep summary { color: var(--accent); font-size: 11px; cursor: pointer;
       padding: 4px 14px; user-select: none; }
     .oc-explain-content { padding: 10px 14px; color: var(--text-dim); font-size: 12px; line-height: 1.7;
-      background: rgba(13,17,23,0.4); border-radius: 8px; margin-top: 4px; }
+      background: rgba(13,17,23,0.4); border-radius: var(--r-2); margin-top: 4px; }
 
     /* Collapsed Section */
     .oc-collapse { border: 1px solid #21262d; border-radius: var(--card-radius); margin-top: 10px; }
@@ -886,7 +886,7 @@ function ocInjectBaseCSS() {
 
     /* Toast */
     .oc-toast { position: fixed; right: 20px; padding: 10px 18px;
-      border-radius: 8px; font-size: 13px; z-index: 9999; transform: translateY(20px);
+      border-radius: var(--r-2); font-size: 13px; z-index: 9999; transform: translateY(20px);
       opacity: 0; transition: all 0.3s; pointer-events: none; max-width: 420px; word-break: break-word; }
     .oc-toast.show { transform: translateY(0); opacity: 1; }
     .oc-toast-info { background: #1f2937; color: var(--text); border: 1px solid var(--border); }
@@ -903,13 +903,13 @@ function ocInjectBaseCSS() {
     /* Persistent Residual-Risk Banner / 常駐殘留風險橫幅 — 只能點擊關閉，refreshPage 不清除 */
     .oc-residual-banner { position: fixed; left: 50%; transform: translateX(-50%);
       max-width: 720px; width: calc(100% - 24px); z-index: 10000;
-      background: rgba(248,81,73,0.16); border: 1px solid var(--red); border-radius: 8px;
+      background: rgba(248,81,73,0.16); border: 1px solid var(--red); border-radius: var(--r-2);
       padding: 12px 16px; display: flex; align-items: center; gap: 14px;
       box-shadow: 0 4px 18px rgba(0,0,0,0.5); }
     .oc-residual-banner-text { color: var(--red); font-size: 13px; font-weight: 600;
       line-height: 1.5; flex: 1; word-break: break-word; }
     .oc-residual-banner-close { background: rgba(248,81,73,0.2); border: 1px solid var(--red);
-      color: var(--red); border-radius: 6px; padding: 6px 12px; font-size: 12px;
+      color: var(--red); border-radius: var(--r-1); padding: 6px 12px; font-size: 12px;
       font-weight: 600; cursor: pointer; white-space: nowrap; flex-shrink: 0; }
     .oc-residual-banner-close:hover { background: rgba(248,81,73,0.32); }
 
@@ -920,15 +920,15 @@ function ocInjectBaseCSS() {
       letter-spacing: 0.5px; margin-bottom: 8px; }
 
     /* Form Elements */
-    .oc-input { background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    .oc-input { background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-1);
       color: var(--text); padding: 7px 10px; font-size: 13px; font-family: inherit; }
     .oc-input:focus { outline: none; border-color: var(--accent); }
-    .oc-select { background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    .oc-select { background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-1);
       color: var(--text); padding: 7px 10px; font-size: 13px; font-family: inherit; cursor: pointer; }
 
     /* Strategy Cards */
     .oc-strat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
-    .oc-strat-card { background: var(--bg); border: 1px solid #21262d; border-radius: 8px; padding: 14px; position: relative; overflow: hidden; }
+    .oc-strat-card { background: var(--bg); border: 1px solid #21262d; border-radius: var(--r-2); padding: 14px; position: relative; overflow: hidden; }
     .oc-strat-card[class*="oc-strategy-card-"] { border-color: var(--strategy-border, #21262d); box-shadow: inset 3px 0 0 var(--strategy-color, transparent); }
     .oc-strat-card .strat-header { display: flex; justify-content: flex-start; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
     .oc-strat-card .strat-name { font-weight: 600; font-size: 14px; }
@@ -940,7 +940,7 @@ function ocInjectBaseCSS() {
     .oc-loading { color: var(--text-dim); font-size: 12px; padding: 20px; text-align: center; }
 
     /* Pre/Code */
-    .oc-pre { background: var(--bg); border: 1px solid #21262d; border-radius: 8px;
+    .oc-pre { background: var(--bg); border: 1px solid #21262d; border-radius: var(--r-2);
       padding: 12px; font-size: 12px; font-family: 'SF Mono', Consolas, monospace;
       overflow: auto; max-height: 300px; white-space: pre-wrap; word-break: break-word; }
 
@@ -966,7 +966,7 @@ function ocInjectBaseCSS() {
        live-metric 是 oc-metric 的别名，用于實盤 tab。保持视觉一致，特殊修飾词在各 tab 自定义。
        Note: mc/mc-val (console.html sidebar) is a separate narrower context — not unified. */
     .live-metrics { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
-    .live-metric { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+    .live-metric { background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-2); padding: 10px 12px; }
     .live-metric.span2 { grid-column: span 2; }
     .live-metric-label { font-size: 11px; color: var(--text-dim); margin-bottom: 4px; font-weight: 500; }
     .live-metric-val { font-size: 20px; font-weight: 700; }
@@ -992,14 +992,14 @@ function ocInjectBaseCSS() {
       background:rgba(0,0,0,0.7); align-items:center; justify-content:center; }
     .oc-confirm-overlay.show { display:flex; }
     .oc-confirm-dialog { background:var(--card-bg,#161b22); border:1px solid rgba(248,81,73,0.4);
-      border-radius:12px; padding:24px; max-width:440px; width:90%; }
+      border-radius:var(--r-3); padding:24px; max-width:440px; width:90%; }
     .oc-confirm-dialog h3 { color:#f85149; font-size:15px; margin-bottom:8px; }
     .oc-confirm-dialog p { font-size:13px; color:#c9d1d9; white-space:pre-line; margin-bottom:16px; line-height:1.6; }
     .oc-confirm-dialog .btn-row { display:flex; gap:8px; justify-content:flex-end; }
     .oc-prompt-label { display:block; font-size:12px; color:var(--text-dim); margin-bottom:6px; }
     .oc-prompt-input, .oc-prompt-select, .oc-prompt-textarea { width:100%; box-sizing:border-box;
       background:var(--bg,#0d1117); color:var(--text,#c9d1d9); border:1px solid var(--border,#30363d);
-      border-radius:8px; padding:9px 10px; font-size:13px; margin-bottom:10px; }
+      border-radius:var(--r-2); padding:9px 10px; font-size:13px; margin-bottom:10px; }
     .oc-prompt-textarea { min-height:96px; resize:vertical; line-height:1.5; }
     .oc-prompt-input:focus, .oc-prompt-select:focus, .oc-prompt-textarea:focus {
       outline:2px solid var(--accent,#58a6ff); outline-offset:1px; border-color:var(--accent,#58a6ff); }
