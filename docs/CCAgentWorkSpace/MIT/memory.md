@@ -465,3 +465,11 @@
 **Min work to microstructure-grade (both A+B)**: 已在位只缺接線=(1) maker markout mid_at_submit 覆蓋（open-maker 也記 mid 基準，非只 close-maker）；缺=(2) per-fill forward-markout@1/5/30s enrichment job（JOIN fills×l1_events 事後回填，新欄或 sidecar 表）；(3) fill-time queue-context snapshot（best_bid/ask/size@submit 存入 fill 或 sidecar，免事後 JOIN 259M 表）；(4) candidate-matched execution-evidence 表（bounded-probe order→fill→fee→slippage→l1-context 綁 candidate_id，P0 substrate）。(A) 純離線可即跑 fill_sim（無需授權）；(B) 需 P0 unblock 授權 bounded Demo execution 才有 own-candidate outcome。
 
 **Report**: returned inline to PM（no .md per contract）。
+
+## 2026-07-09 read-only 盈利證據取數（Probe 供數）— NEAR 候選 5058 outcomes = 2 個真實觀測
+
+CRITICAL：profit-first loop 唯一 false-negative 候選 `ma_crossover|NEARUSDT|Buy` 的「avg net 64.98bps/5058 outcomes/BH-FDR pass」實為 **2 個 distinct entry_ts（2026-07-07 16:19/16:20Z）各複製 2614/2444 份**（ledger jq 實證），單日單 episode 偽複製 ×2529，t/FDR 無效 → regime-bet 非 edge。另證：30d 全策略 true net 負（gross −150.7/fees 255.4/net −406.1 USDT；fills.realized_pnl 是 gross，pipeline_helpers.rs:507-529）；拒絕率 99.93%（soak isolation 06-29 起擋全部 ordinary demo entry 415k 次 → realized_fill 標籤 7d 僅 14 行，訓練斷糧）；model_registry 93/93 shadow、MLDE applier 06-29 後 0 applied；standing auth 已過期 20.7h（loop 正確 defer）；候選零 order/fill proof（strict scan + DB 雙證，NEAR×ma 停在 06-18）。報告：workspace/reports/2026-07-09--profit-evidence-readonly-probe.md（已複製 Operator/）。
+
+## 2026-07-09 盈利研判 Stage 2（守/攻，ML/DB lens）
+
+三個新結構診斷：(1) model promotion 死鎖——canary_promoter.py:82 需 decision_shadow_exits≥500 但該表 0 row/writer 死 → 93/93 永鎖 shadow 與質量無關；(2) 訓練集確認 realized-only（parquet_etl.py:471 排除 rejected_governance），316/836=90d 存量、增速≈2/day（soak isolation 斷糧）；(3) outcome_review.py 零 entry_ts 去重（grep 0 hit）→ F1 偽複製升格 FACT。新取證：deribit_vol_axis 12 daily runs（06-21 起，surface 1,592 行/日）+ polymarket 1,130 runs 累積中但零消費者。攻側主提案：fills-free counterfactual markout 標籤軸（paradigm_challenge，PRFS/reject-inference 文獻支持）+ 49,388 正-edge 母集 realistic-cost 重跑 + option surface regime 防禦消費端。報告：workspace/reports/2026-07-09--profit-diagnosis-stage2-ml-lens.md

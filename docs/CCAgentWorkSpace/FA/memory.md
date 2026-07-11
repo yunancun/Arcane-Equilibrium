@@ -290,3 +290,8 @@ WP-04 F-01 `budget_config.toml × 2` daily 100→2 / monthly 150→60 已 deploy
 
 ## 2026-07-03 全倉功能審計（read-only, runtime 實測）
 - 三大 HIGH：(1) 學習 SSOT probe_ledger.jsonl(393MB)+全治理證據在 /tmp（tmpfiles `D /tmp` 開機清空+30d age 清理，~07-22 起證據 sha 斷鏈）；(2) 06-27 crontab 70→5 行掉 12 個 producer cron（edge_label_backfill/canary_audit_pg_writer/alpha discovery 等）無治理記錄；(3) bounded probe lane 100% 凍結（5h 內 11,075/12,646 PLAN_STALE 拒絕、0 admission；standing auth 過期 42h；TTL 12h<審批週期=結構性 over-gate）。writer=1 已解凍但上游 artifact 新鮮度鎖死全鏈。業務鏈 ≈55-60%，最弱=進化 20%。報告：workspace/reports/2026-07-03--full_repo_functional_audit.md
+
+## 2026-07-09 IBKR read-only TWS connector 功能規格（build-now「B」件）
+- 授權 AMD-2026-07-08-01；build 源碼 now，run=G4（Operator 一次性批准+BB+E3）。此件=G4 前置連接器 build，非「P3 gate」（AMD 表無 P3；序 P0→P1→P2→G4→P4→P5→P6），IPC/dispatch fork/normalizer lockstep=P4(post-G4)。
+- 落契約現況（read-only 實測 types/engine）：connect handshake + reqCurrentTime 有契約可接（IbkrSessionAttestationV1 / IbkrApiSessionTopologyV1，無需新 row）→ 可 build now（Phase-B1=G4 最小首接觸）。**硬缺口確認**：positions-row(S3)/quote-bar-row(S5)/account-summary-row **runtime 資料列型別皆不存在**；現存 stock_etf_instrument_identity/market_data_provenance/probe_result_import 皆為 hash-provenance 信封（只帶 *_hash，無 qty/bid/ask/last/NetLiq 實值）→ reqAccountSummary/reqPositions/reqMktData/reqContractDetails 真值落地=blocked on 缺 row 契約（B2/B3 前置）。
+- 建議模組名 `ibkr_readonly_tws_client`（engine crate 單一 named 模組）；flag：TWS wire codec 體量恐破 800 review-attn / 逼近 2000 硬頂 → 單模組令 vs 2000 行上限張力 = PM/CC 開放問題。AMD 表 P5 掛 positions read 但「需新 positions-row」註記掛 P6 = 內部不一致，須拍板。
