@@ -1,6 +1,6 @@
 # GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1 Queue
 
-Updated: 2026-07-11T18:12:12Z
+Updated: 2026-07-11T18:22:13Z
 Goal status: `ACTIVE`
 Current item: `WP4-ACTUAL-TRAINING-REGISTRY`
 WP1 checkpoint: behavioral code `c080c552b`, exact operational target
@@ -111,9 +111,10 @@ action occurred. V152/V153 remain frozen. WP4 versioned training/registry
 contracts are active; its first safe action is a fresh source migration
 collision scan without reserving, creating, or applying a migration.
 
-Publish alignment was observed at `2026-07-11T18:12:12Z`: Mac HEAD and
-`origin/main` both equaled the WP3 behavioral checkpoint
-`c2bdefbfdb52eeaab4e801de783719ecfe0da7bc`.
+Publish alignment was observed at `2026-07-11T18:22:13Z`: Mac HEAD and
+`origin/main` both equaled documentation checkpoint
+`a6693d8ced81c6cbd96e0cb17b52af51af7e2184`, which contains WP3 behavioral
+checkpoint `c2bdefbfdb52eeaab4e801de783719ecfe0da7bc`.
 
 Allowed nonterminal transitions are `ACTIVE -> ADVANCED -> ACTIVE`,
 `ACTIVE -> DEFER_EVIDENCE -> ROTATE -> ACTIVE`, `ACTIVE -> REJECT -> ROTATE ->
