@@ -9,6 +9,7 @@ MODULE_NOTE:
 
 from __future__ import annotations
 
+import copy
 import datetime as dt
 import hashlib
 import json
@@ -18,6 +19,9 @@ import sys
 
 import pytest
 
+from helper_scripts.research.tests.candidate_lineage_v2_test_support import (
+    attach_candidate_lineage_v2,
+)
 _PROGRAM_CODE = Path(__file__).resolve().parents[3] / "program_code"
 if str(_PROGRAM_CODE) not in sys.path:
     sys.path.insert(0, str(_PROGRAM_CODE))
@@ -47,6 +51,18 @@ from program_code.ml_training.alr_operational_repository import (
 
 
 NOW = dt.datetime(2026, 7, 4, 18, 0, 0, tzinfo=dt.timezone.utc)
+
+
+def _canonical_hash(value):
+    return hashlib.sha256(
+        json.dumps(
+            value,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
 
 
 def _quantile_payload(*, symbols, global_q75, asof=None, global_n=200):
@@ -198,7 +214,7 @@ def _blocked_outcome_row(
 # 窗全入選),跨日分散滿足預註冊 §3 E2(days≥5)/E3(top-day≤50%)。
 _DAY_MS = 86_400_000
 _HOUR_MS = 3_600_000
-_ENTRY_BASE_TS_MS = 1_782_000_000_000  # 整日 UTC 邊界
+_ENTRY_BASE_TS_MS = 1_782_518_400_000  # 2026-06-27 整日 UTC 邊界
 
 
 def _spread_entry_ts(index: int, *, per_day: int = 5) -> int:
@@ -211,87 +227,51 @@ def _spread_entry_ts(index: int, *, per_day: int = 5) -> int:
 
 def _with_complete_candidate_lineage(
     row,
-    *,
-    strategy_version="v1",
-    config_hash="a" * 64,
 ):
-    complete = _with_typed_candidate_learning_context(row)
-    context = dict(complete["candidate_summary"]["candidate_learning_context"])
-    context["strategy_version"] = strategy_version
-    context["strategy_config_hash"] = config_hash
-    context["target_regime_hash"] = "b" * 64
-    complete["candidate_summary"] = {"candidate_learning_context": context}
-    return complete
+    return _with_typed_candidate_learning_context(row)
 
 
-def _with_typed_candidate_learning_context(row):
+def _with_typed_candidate_learning_context(
+    row,
+    *,
+    evidence_regime_label="neutral|low_vol|liquid",
+    stable_projection_overrides=None,
+    strategy_version=None,
+    strategy_params=None,
+    conf_scale=1.0,
+):
     typed = dict(row)
-    daily_buckets = [
-        {
-            "utc_date": f"2026-{month_day}",
-            "scan_complete": True,
-            "distinct_entries": 5,
-        }
-        for month_day in (
-            "06-27",
-            "06-28",
-            "06-29",
-            "06-30",
-            "07-01",
-            "07-02",
-            "07-03",
-        )
-    ]
-    estimator_payload = {
-        "daily_buckets": daily_buckets,
-        "estimated_rows_scanned": 700,
-        "predicted_canonical_bytes": 7_000,
-        "zero_resource_attested": False,
-    }
-    resource = dict(estimator_payload)
-    resource["resource_estimator_hash"] = hashlib.sha256(
-        json.dumps(
-            estimator_payload,
-            ensure_ascii=True,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-    ).hexdigest()
-    typed["candidate_summary"] = {
-        "candidate_learning_context": {
-            "strategy_version": "v3.2.1",
-            "strategy_config_hash": "1" * 64,
-            "target_regime_context": {
-                "label": "range_low_vol",
-                "utc_date": "2026-07-03",
-                "point_in_time": "D-1",
-            },
-            "target_regime_hash": "2" * 64,
-            "venue": "bybit",
-            "product": "linear_perpetual",
-            "evidence_engine_mode": "demo",
-            "evidence_regime_label": "neutral|low_vol|liquid",
-            "hidden_oos_consumed": False,
-            "context_hashes": {
-                "data": "3" * 64,
-                "evidence": "4" * 64,
-                "cost": "5" * 64,
-                "portfolio": "6" * 64,
-            },
-            "resource": resource,
-            "portfolio": {
-                "sector_exposure_share": "0.10",
-                "strategy_active_target_share": "0.20",
-                "beta_to_portfolio": "0.30",
-            },
-            "proof": {
-                "proof_stage": 1,
-                "completed_proof_stages": [0, 1],
-                "next_gap": {"kind": "NONE", "code": "DATA_GATES_READY"},
-            },
-        }
-    }
-    return typed
+    typed.pop("candidate_summary", None)
+    typed.pop("event_ts_ms", None)
+    attempt_id = str(typed["attempt_id"])
+    entry_ts_ms = typed.get("entry_ts_ms")
+    captured_at_ms = entry_ts_ms if isinstance(entry_ts_ms, int) else None
+    if captured_at_ms is not None:
+        captured_date = dt.datetime.fromtimestamp(
+            captured_at_ms / 1_000, tz=dt.timezone.utc
+        ).date()
+        if not dt.date(2026, 6, 27) <= captured_date <= dt.date(2026, 7, 3):
+            captured_at_ms = None
+    lineage_kwargs = {}
+    if strategy_version is not None:
+        lineage_kwargs["strategy_version"] = strategy_version
+    if strategy_params is not None:
+        lineage_kwargs["strategy_params"] = strategy_params
+    return attach_candidate_lineage_v2(
+        typed,
+        context_id=attempt_id,
+        captured_at_ms=captured_at_ms,
+        strategy_name=str(typed["strategy_name"]),
+        symbol=str(typed["symbol"]),
+        side=str(typed["side"]),
+        horizon_minutes=int(typed["horizon_minutes"]),
+        as_of_utc_date=NOW.date().isoformat(),
+        evidence_regime_label=evidence_regime_label,
+        evidence_engine_mode="demo",
+        stable_projection_overrides=stable_projection_overrides,
+        conf_scale=conf_scale,
+        **lineage_kwargs,
+    )
 
 
 def test_learning_candidate_board_emits_typed_arbiter_input_with_cr1_cluster_se():
@@ -321,18 +301,14 @@ def test_learning_candidate_board_emits_typed_arbiter_input_with_cr1_cluster_se(
 
     candidate = packet["learning_candidate_board"]["candidate_rows"][0]
     typed = candidate["arbiter_input"]
+    expected_context = rows[0]["candidate_summary"]["candidate_learning_context"]
     assert candidate["arbiter_input_complete"] is True
     assert candidate["selection_eligible"] is True
-    assert typed["schema_version"] == "alr_candidate_arbiter_input_v1"
+    assert typed["schema_version"] == "alr_candidate_arbiter_input_v2"
     assert typed["identity"]["engine_mode"] == "shadow"
     assert typed["identity"]["evidence_engine_mode"] == "demo"
-    assert typed["identity"]["config_hash"] == "1" * 64
-    assert typed["context_hashes"] == {
-        "data": "3" * 64,
-        "evidence": "4" * 64,
-        "cost": "5" * 64,
-        "portfolio": "6" * 64,
-    }
+    assert typed["identity"]["config_hash"] == expected_context["strategy_config_hash"]
+    assert typed["context_hashes"] == expected_context["context_hashes"]
     assert typed["quality"]["hidden_oos_consumed"] is False
     assert typed["quality"]["replica_inconsistency_count"] == 0
     assert typed["evidence"]["n_eff"] == 30
@@ -376,11 +352,11 @@ def test_learning_candidate_board_emits_typed_arbiter_input_with_cr1_cluster_se(
         ).encode("utf-8")
     ).hexdigest()
     assert len(typed["resource"]["daily_buckets"]) == 7
-    assert typed["portfolio"]["beta_to_portfolio"] == "0.30"
+    assert typed["portfolio"]["beta_to_portfolio"] == "-1.5"
     policy_body = {
-        "decision_ts_s": int(NOW.replace(hour=0).timestamp()),
+        "decision_ts_s": int(NOW.timestamp()),
         "as_of_utc_date": "2026-07-04",
-        "algorithm_version": "candidate_learning_arbiter_v1",
+        "algorithm_version": "candidate_learning_arbiter_v2",
         "tie_break_version": "candidate_learning_tie_break_v1",
         "q18_scale": 18,
         "thresholds": {
@@ -419,6 +395,102 @@ def test_learning_candidate_board_emits_typed_arbiter_input_with_cr1_cluster_se(
     )
     assert decision["decision"] == "QUALIFIED_CANDIDATE_SELECTED", decision
     assert decision["candidate_assessments"][0]["state"] == "DECISION_READY"
+
+
+def test_candidate_board_selection_gates_ignore_nondefault_legacy_review_cfg() -> None:
+    def rows(count: int) -> list[dict[str, object]]:
+        day_effects = (-3.0, -2.0, -1.0, 1.0, 2.0, 3.0)
+        return [
+            _with_typed_candidate_learning_context(
+                _blocked_outcome_row(
+                    f"fixed-gate-{count}-{index}",
+                    "strat|FIXEDGATEUSDT|Buy",
+                    -20.0 + day_effects[index // 5] + (index % 5) * 0.1,
+                    cost_model_version="conservative_v1",
+                    entry_ts_ms=_spread_entry_ts(index),
+                )
+            )
+            for index in range(count)
+        ]
+
+    expected_cost = _expected_cost_artifact(mean_abs=2.0, cvar90=8.0)
+    canonical = build_blocked_signal_outcome_review(
+        rows(30), slippage_quantiles=expected_cost, now_utc=NOW
+    )["learning_candidate_board"]
+    stricter = build_blocked_signal_outcome_review(
+        rows(30),
+        slippage_quantiles=expected_cost,
+        cfg=BlockedOutcomeReviewConfig(
+            min_effective_entries_per_side_cell=31,
+            min_distinct_entry_utc_days=7,
+            max_top_entry_day_share_pct=10.0,
+        ),
+        now_utc=NOW,
+    )["learning_candidate_board"]
+    canonical_below = build_blocked_signal_outcome_review(
+        rows(29), slippage_quantiles=expected_cost, now_utc=NOW
+    )["learning_candidate_board"]
+    looser_below = build_blocked_signal_outcome_review(
+        rows(29),
+        slippage_quantiles=expected_cost,
+        cfg=BlockedOutcomeReviewConfig(
+            min_effective_entries_per_side_cell=1,
+            min_distinct_entry_utc_days=1,
+            max_top_entry_day_share_pct=100.0,
+        ),
+        now_utc=NOW,
+    )["learning_candidate_board"]
+
+    assert stricter["selection_hash"] == canonical["selection_hash"]
+    assert stricter["candidate_rows"][0]["selection_eligible"] is True
+    assert stricter["candidate_rows"][0]["blockers"] == []
+    assert looser_below["selection_hash"] == canonical_below["selection_hash"]
+    assert "EFFECTIVE_ENTRY_SAMPLE_INSUFFICIENT" in looser_below[
+        "candidate_rows"
+    ][0]["blockers"]
+
+
+def test_candidate_board_projects_legacy_optimistic_cost_as_exact_quality_blocker() -> None:
+    def rows(*, conservative: bool) -> list[dict[str, object]]:
+        day_effects = (-3.0, -2.0, -1.0, 1.0, 2.0, 3.0)
+        return [
+            _with_typed_candidate_learning_context(
+                _blocked_outcome_row(
+                    f"legacy-quality-{conservative}-{index}",
+                    "strat|LEGACYCOSTUSDT|Buy",
+                    -20.0 + day_effects[index // 5] + (index % 5) * 0.1,
+                    cost_model_version=(
+                        "conservative_v1" if conservative else None
+                    ),
+                    entry_ts_ms=_spread_entry_ts(index),
+                )
+            )
+            for index in range(30)
+        ]
+
+    expected_cost = _expected_cost_artifact(mean_abs=2.0, cvar90=8.0)
+    legacy = build_blocked_signal_outcome_review(
+        rows(conservative=False),
+        slippage_quantiles=expected_cost,
+        now_utc=NOW,
+    )["learning_candidate_board"]["candidate_rows"][0]
+    conservative = build_blocked_signal_outcome_review(
+        rows(conservative=True),
+        slippage_quantiles=expected_cost,
+        now_utc=NOW,
+    )["learning_candidate_board"]["candidate_rows"][0]
+
+    assert legacy["legacy_optimistic_cost_present"] is True
+    assert legacy["arbiter_input"]["quality"][
+        "legacy_optimistic_cost_present"
+    ] is True
+    assert "LEGACY_OPTIMISTIC_COST_UNBACKFILLED" in legacy["blockers"]
+    assert legacy["selection_eligible"] is False
+    assert conservative["legacy_optimistic_cost_present"] is False
+    assert conservative["arbiter_input"]["quality"][
+        "legacy_optimistic_cost_present"
+    ] is False
+    assert "LEGACY_OPTIMISTIC_COST_UNBACKFILLED" not in conservative["blockers"]
 
 
 def test_real_board_file_flows_through_bounded_adapter_and_projection(
@@ -462,7 +534,7 @@ def test_real_board_file_flows_through_bounded_adapter_and_projection(
             dt.datetime.fromisoformat(evaluated_at.replace("Z", "+00:00")).timestamp()
         ),
         "as_of_utc_date": "2026-07-04",
-        "algorithm_version": "candidate_learning_arbiter_v1",
+        "algorithm_version": "candidate_learning_arbiter_v2",
         "tie_break_version": "candidate_learning_tie_break_v1",
         "q18_scale": 18,
         "thresholds": {
@@ -533,19 +605,18 @@ def test_learning_candidate_board_aggregates_regimes_across_same_family():
             "bear|low_vol|thin",
         )
     ):
-        row = _with_typed_candidate_learning_context(
-            _blocked_outcome_row(
-                f"regime-{index}",
-                "strat|REGIMEUSDT|Buy",
-                -20.0 + index,
-                cost_model_version="conservative_v1",
-                entry_ts_ms=_spread_entry_ts(index, per_day=1),
+        rows.append(
+            _with_typed_candidate_learning_context(
+                _blocked_outcome_row(
+                    f"regime-{index}",
+                    "strat|REGIMEUSDT|Buy",
+                    -20.0 + index,
+                    cost_model_version="conservative_v1",
+                    entry_ts_ms=_spread_entry_ts(index, per_day=1),
+                ),
+                evidence_regime_label=label,
             )
         )
-        context = dict(row["candidate_summary"]["candidate_learning_context"])
-        context["evidence_regime_label"] = label
-        row["candidate_summary"] = {"candidate_learning_context": context}
-        rows.append(row)
 
     packet = build_blocked_signal_outcome_review(
         rows,
@@ -577,6 +648,16 @@ def test_learning_candidate_board_aggregates_regimes_across_same_family():
 def test_learning_candidate_board_never_synthesizes_hidden_oos_false(
     hidden_value,
 ):
+    overrides = None
+    if hidden_value is True:
+        overrides = {
+            "hidden_oos_state": {
+                "state": "consumed",
+                "open_count": 1,
+                "opened_for_iteration": True,
+                "consumed": True,
+            }
+        }
     row = _with_typed_candidate_learning_context(
         _blocked_outcome_row(
             "hidden-oos",
@@ -584,14 +665,15 @@ def test_learning_candidate_board_never_synthesizes_hidden_oos_false(
             -20.0,
             cost_model_version="conservative_v1",
             entry_ts_ms=_spread_entry_ts(0),
-        )
+        ),
+        stable_projection_overrides=overrides,
     )
-    context = dict(row["candidate_summary"]["candidate_learning_context"])
     if hidden_value is None:
-        context.pop("hidden_oos_consumed")
-    else:
-        context["hidden_oos_consumed"] = hidden_value
-    row["candidate_summary"] = {"candidate_learning_context": context}
+        summary = copy.deepcopy(row["candidate_summary"])
+        summary["candidate_learning_context_projection"].pop(
+            "hidden_oos_consumed"
+        )
+        row["candidate_summary"] = summary
 
     candidate = build_blocked_signal_outcome_review([row], now_utc=NOW)[
         "learning_candidate_board"
@@ -604,7 +686,7 @@ def test_learning_candidate_board_never_synthesizes_hidden_oos_false(
         assert "HIDDEN_OOS_CONSUMED" in candidate["blockers"]
     else:
         assert candidate["arbiter_input_complete"] is False
-        assert "HIDDEN_OOS_STATUS_MISSING_OR_INVALID" in candidate["blockers"]
+        assert "INVALID_LINEAGE_EXACT_COHORT_ROWS_PRESENT" in candidate["blockers"]
 
 
 def test_learning_candidate_board_accepts_finite_beta_above_one() -> None:
@@ -615,14 +697,11 @@ def test_learning_candidate_board_accepts_finite_beta_above_one() -> None:
             -20.0,
             cost_model_version="conservative_v1",
             entry_ts_ms=_spread_entry_ts(0),
-        )
+        ),
+        stable_projection_overrides={
+            "portfolio": {"beta_to_portfolio": "1.5"}
+        },
     )
-    context = dict(row["candidate_summary"]["candidate_learning_context"])
-    context["portfolio"] = {
-        **context["portfolio"],
-        "beta_to_portfolio": "1.5",
-    }
-    row["candidate_summary"] = {"candidate_learning_context": context}
 
     candidate = build_blocked_signal_outcome_review([row], now_utc=NOW)[
         "learning_candidate_board"
@@ -635,12 +714,14 @@ def test_learning_candidate_board_accepts_finite_beta_above_one() -> None:
 
 def test_learning_candidate_board_uses_full_universe_not_legacy_top16():
     rows = [
-        _blocked_outcome_row(
-            f"full-{index:02d}",
-            f"strat|S{index:02d}USDT|Buy",
-            10.0 + index,
-            cost_model_version="conservative_v1",
-            entry_ts_ms=_spread_entry_ts(index),
+        _with_typed_candidate_learning_context(
+            _blocked_outcome_row(
+                f"full-{index:02d}",
+                f"strat|S{index:02d}USDT|Buy",
+                10.0 + index,
+                cost_model_version="conservative_v1",
+                entry_ts_ms=_spread_entry_ts(index),
+            )
         )
         for index in range(17)
     ]
@@ -649,7 +730,7 @@ def test_learning_candidate_board_uses_full_universe_not_legacy_top16():
 
     assert len(packet["top_side_cells"]) == 16
     board = packet["learning_candidate_board"]
-    assert board["schema_version"] == "cost_gate_learning_candidate_board_v1"
+    assert board["schema_version"] == "cost_gate_learning_candidate_board_v2"
     assert board["candidate_universe_complete"] is True
     assert len(board["candidate_rows"]) == 17
 
@@ -670,6 +751,8 @@ def test_learning_candidate_board_splits_horizons_without_changing_legacy_cell()
         entry_ts_ms=_spread_entry_ts(1),
     )
     long["horizon_minutes"] = 240
+    short = _with_typed_candidate_learning_context(short)
+    long = _with_typed_candidate_learning_context(long)
 
     packet = build_blocked_signal_outcome_review([short, long], now_utc=NOW)
 
@@ -677,11 +760,11 @@ def test_learning_candidate_board_splits_horizons_without_changing_legacy_cell()
     assert len(legacy) == 1
     assert legacy[0]["horizon_minutes"] == [60, 240]
     board_rows = packet["learning_candidate_board"]["candidate_rows"]
-    assert [row["horizon_minutes"] for row in board_rows] == [60, 240]
-    assert [row["raw_outcome_count"] for row in board_rows] == [1, 1]
+    assert sorted(row["horizon_minutes"] for row in board_rows) == [60, 240]
+    assert sorted(row["qualified_raw_outcome_count"] for row in board_rows) == [1, 1]
 
 
-def test_learning_candidate_board_keeps_legacy_row_but_blocks_incomplete_identity():
+def test_learning_candidate_board_excludes_legacy_row_from_candidate_universe():
     legacy = _blocked_outcome_row(
         "legacy-lineage",
         "strat|LEGACYUSDT|Buy",
@@ -692,25 +775,15 @@ def test_learning_candidate_board_keeps_legacy_row_but_blocks_incomplete_identit
 
     packet = build_blocked_signal_outcome_review([legacy], now_utc=NOW)
 
-    row = packet["learning_candidate_board"]["candidate_rows"][0]
-    assert row["identity_complete"] is False
-    assert row["arbiter_input_complete"] is False
-    assert row["selection_eligible"] is False
-    assert "IDENTITY_LINEAGE_INCOMPLETE" in row["blockers"]
-    assert "CANDIDATE_LEARNING_CONTEXT_MISSING" in row["blockers"]
-    assert "DATA_CONTEXT_HASH_MISSING_OR_INVALID" in row["blockers"]
-    assert "RESOURCE_ESTIMATOR_HASH_MISSING_OR_INVALID" in row["blockers"]
-    assert "RESOURCE_DAILY_BUCKETS_INCOMPLETE" in row["blockers"]
-    assert "PORTFOLIO_METRICS_MISSING_OR_INVALID" in row["blockers"]
-    assert "PROOF_PREFIX_MISSING_OR_INVALID" in row["blockers"]
-    assert row["candidate_identity"]["strategy_version"] is None
-    assert row["candidate_identity"]["strategy_config_hash"] is None
-    assert row["candidate_identity"]["target_regime_context"] is None
-    assert row["arbiter_input"]["identity"]["engine_mode"] == "shadow"
-    assert row["arbiter_input"]["identity"]["evidence_engine_mode"] is None
+    board = packet["learning_candidate_board"]
+    assert board["candidate_rows"] == []
+    assert board["unqualified_lineage_outcome_row_count"] == 1
+    assert board["lineage_exclusion_reason_counts"] == {
+        "UNQUALIFIED_CONTEXT_MISSING": 1
+    }
 
 
-def test_learning_candidate_board_retains_complete_identity_without_version_pooling():
+def test_learning_candidate_board_splits_version_and_config_identity():
     base = _blocked_outcome_row(
         "identity-v1",
         "strat|IDENTITYUSDT|Buy",
@@ -718,15 +791,19 @@ def test_learning_candidate_board_retains_complete_identity_without_version_pool
         cost_model_version="conservative_v1",
         entry_ts_ms=_spread_entry_ts(0),
     )
-    first = _with_complete_candidate_lineage(base, strategy_version="v1")
-    second = _with_complete_candidate_lineage(
+    first = _with_typed_candidate_learning_context(
+        base,
+        strategy_version="1" * 40,
+        strategy_params={"fast": 5, "slow": 20},
+    )
+    second = _with_typed_candidate_learning_context(
         {
             **base,
             "attempt_id": "identity-v2",
             "entry_ts_ms": _spread_entry_ts(1),
         },
-        strategy_version="v2",
-        config_hash="c" * 64,
+        strategy_version="2" * 40,
+        strategy_params={"fast": 8, "slow": 34},
     )
 
     packet = build_blocked_signal_outcome_review([second, first], now_utc=NOW)
@@ -734,24 +811,24 @@ def test_learning_candidate_board_retains_complete_identity_without_version_pool
     board_rows = packet["learning_candidate_board"]["candidate_rows"]
     assert len(board_rows) == 2
     identities = [row["candidate_identity"] for row in board_rows]
-    assert [identity["strategy_version"] for identity in identities] == ["v1", "v2"]
-    assert identities[0]["strategy_config_hash"] == "a" * 64
-    assert identities[1]["strategy_config_hash"] == "c" * 64
+    assert {identity["strategy_version"] for identity in identities} == {
+        "1" * 40,
+        "2" * 40,
+    }
+    assert len({identity["strategy_config_hash"] for identity in identities}) == 2
     assert all(row["identity_complete"] is True for row in board_rows)
     candidate_ids = [row["candidate_id"] for row in board_rows]
     assert len(set(candidate_ids)) == 2
     assert all(len(candidate_id) == 64 for candidate_id in candidate_ids)
+    assert len({row["candidate_family_key"] for row in board_rows}) == 2
 
 
 def test_learning_candidate_board_splits_target_regimes_within_stable_family():
     rows = []
-    regimes = (
-        ("range_low_vol", "2" * 64),
-        ("trend_high_vol", "7" * 64),
-    )
-    for regime_index, (label, regime_hash) in enumerate(regimes):
+    regimes = ("neutral|low_vol|liquid", "bull|high_vol|thin")
+    for regime_index, label in enumerate(regimes):
         for observation_index, gross in enumerate((-20.0, -18.0)):
-            row = _with_typed_candidate_learning_context(
+            rows.append(_with_typed_candidate_learning_context(
                 _blocked_outcome_row(
                     f"regime-identity-{regime_index}-{observation_index}",
                     "strat|REGIMEIDENTITYUSDT|Buy",
@@ -760,16 +837,11 @@ def test_learning_candidate_board_splits_target_regimes_within_stable_family():
                     entry_ts_ms=_spread_entry_ts(
                         regime_index + observation_index * 5
                     ),
-                )
-            )
-            context = dict(row["candidate_summary"]["candidate_learning_context"])
-            context["target_regime_context"] = {
-                **context["target_regime_context"],
-                "label": label,
-            }
-            context["target_regime_hash"] = regime_hash
-            row["candidate_summary"] = {"candidate_learning_context": context}
-            rows.append(row)
+                ),
+                stable_projection_overrides={
+                    "target_regime_context": {"label": label}
+                },
+            ))
 
     board = build_blocked_signal_outcome_review(rows, now_utc=NOW)[
         "learning_candidate_board"
@@ -779,18 +851,18 @@ def test_learning_candidate_board_splits_target_regimes_within_stable_family():
     assert {
         row["candidate_identity"]["target_regime_context"]["label"]
         for row in board["candidate_rows"]
-    } == {label for label, _ in regimes}
-    assert {
+    } == set(regimes)
+    assert len({
         row["candidate_identity"]["target_regime_hash"]
         for row in board["candidate_rows"]
-    } == {regime_hash for _, regime_hash in regimes}
+    }) == 2
     assert len({row["candidate_family_key"] for row in board["candidate_rows"]}) == 1
     assert len({row["candidate_id"] for row in board["candidate_rows"]}) == 2
 
     policy_body = {
         "decision_ts_s": int(NOW.replace(hour=0).timestamp()),
         "as_of_utc_date": "2026-07-04",
-        "algorithm_version": "candidate_learning_arbiter_v1",
+        "algorithm_version": "candidate_learning_arbiter_v2",
         "tie_break_version": "candidate_learning_tie_break_v1",
         "q18_scale": 18,
         "thresholds": {
@@ -837,7 +909,7 @@ def test_learning_candidate_board_splits_target_regimes_within_stable_family():
     assert len({item["evaluation_id"] for item in assessments}) == 2
 
 
-def test_dynamic_evaluation_context_conflict_does_not_fragment_stable_cohort():
+def test_stable_projection_change_with_context_hash_splits_cohort():
     first = _with_typed_candidate_learning_context(
         _blocked_outcome_row(
             "cohort-first",
@@ -854,29 +926,23 @@ def test_dynamic_evaluation_context_conflict_does_not_fragment_stable_cohort():
             -19.0,
             cost_model_version="conservative_v1",
             entry_ts_ms=_spread_entry_ts(1),
-        )
+        ),
+        stable_projection_overrides={
+            "portfolio": {"strategy_active_target_share": "0.25"},
+            "context_hashes": {"portfolio": "9" * 64},
+        },
     )
-    context = dict(second["candidate_summary"]["candidate_learning_context"])
-    context["portfolio"] = {
-        **context["portfolio"],
-        "strategy_active_target_share": "0.25",
-    }
-    context["context_hashes"] = {
-        **context["context_hashes"],
-        "portfolio": "9" * 64,
-    }
-    second["candidate_summary"] = {"candidate_learning_context": context}
 
     board = build_blocked_signal_outcome_review(
         [second, first], now_utc=NOW
     )["learning_candidate_board"]
 
-    assert len(board["candidate_rows"]) == 1
-    candidate = board["candidate_rows"][0]
-    assert candidate["raw_outcome_count"] == 2
-    assert candidate["arbiter_input_complete"] is False
-    assert candidate["selection_eligible"] is False
-    assert "CANDIDATE_EVALUATION_CONTEXT_CONFLICT" in candidate["blockers"]
+    assert len(board["candidate_rows"]) == 2
+    assert all(
+        candidate["qualified_raw_outcome_count"] == 1
+        and candidate["arbiter_input_complete"] is True
+        for candidate in board["candidate_rows"]
+    )
 
 
 def test_learning_candidate_board_reports_dedup_n_eff_not_raw_rows():
@@ -894,11 +960,11 @@ def test_learning_candidate_board_reports_dedup_n_eff_not_raw_rows():
     packet = build_blocked_signal_outcome_review(rows, now_utc=NOW)
 
     candidate = packet["learning_candidate_board"]["candidate_rows"][0]
-    assert candidate["raw_outcome_count"] == 3
-    assert candidate["distinct_entry_observation_count"] == 1
-    assert candidate["duplicate_outcome_row_count"] == 2
+    assert candidate["qualified_raw_outcome_count"] == 3
+    assert candidate["qualified_distinct_entry_observation_count"] == 1
+    assert candidate["qualified_duplicate_outcome_row_count"] == 2
     assert candidate["n_eff"] == 1
-    assert candidate["window_overlap_excluded_entry_count"] == 0
+    assert candidate["qualified_window_overlap_excluded_entry_count"] == 0
 
 
 def test_learning_candidate_board_hash_is_canonical_and_permutation_stable():
@@ -1000,9 +1066,9 @@ def test_learning_candidate_board_invalid_uncensored_row_blocks_selection():
     )
 
     candidate = packet["learning_candidate_board"]["candidate_rows"][0]
-    assert candidate["raw_outcome_count"] == 31
-    assert candidate["valid_uncensored_outcome_count"] == 30
-    assert candidate["invalid_outcome_row_count"] == 1
+    assert candidate["qualified_raw_outcome_count"] == 31
+    assert candidate["qualified_valid_uncensored_outcome_count"] == 30
+    assert candidate["qualified_invalid_outcome_row_count"] == 1
     assert "INVALID_OUTCOME_ROWS_PRESENT" in candidate["blockers"]
     assert candidate["selection_eligible"] is False
 
@@ -1021,16 +1087,17 @@ def test_learning_candidate_board_censoring_share_uses_raw_plus_censored_rows():
         for index in range(30)
     ]
     for index in range(14):
-        rows.append(
-            {
-                **rows[0],
-                "attempt_id": f"censored-{index}",
-                "entry_ts_ms": _spread_entry_ts(40 + index),
-                "censored": True,
-                "gross_bps": None,
-                "realized_net_bps": None,
-            }
+        censored = _blocked_outcome_row(
+            f"censored-{index}",
+            "strat|CENSORUSDT|Buy",
+            0.0,
+            cost_model_version="conservative_v1",
+            entry_ts_ms=_spread_entry_ts(40 + index),
         )
+        censored.update(
+            {"censored": True, "gross_bps": None, "realized_net_bps": None}
+        )
+        rows.append(_with_complete_candidate_lineage(censored))
 
     packet = build_blocked_signal_outcome_review(
         rows,
@@ -1039,8 +1106,8 @@ def test_learning_candidate_board_censoring_share_uses_raw_plus_censored_rows():
     )
 
     candidate = packet["learning_candidate_board"]["candidate_rows"][0]
-    assert candidate["raw_outcome_count"] == 44
-    assert candidate["censored_count"] == 14
+    assert candidate["qualified_raw_outcome_count"] == 44
+    assert candidate["qualified_censored_outcome_count"] == 14
     assert candidate["censored_share"] == pytest.approx(14.0 / 44.0)
     assert "CENSORING_EXCESS" in candidate["blockers"]
     assert candidate["selection_eligible"] is False
@@ -1641,18 +1708,60 @@ def test_f1_t_test_n_is_effective_entry_count_not_raw_row_count():
 
 def _expected_cost_artifact(*, mean_abs, cvar90=None, symbol_rows=None, asof=None):
     """v2 artifact 形狀:mean_abs 為主判成分;cvar90 缺省時消費端 fallback q90。"""
+    source_rows = list(symbol_rows or [])
+    if not source_rows:
+        source_rows = [
+            {
+                "symbol": "ZZZGLOBALUSDT",
+                "n": 500,
+                "mean_abs": mean_abs,
+                "mean_signed": mean_abs / 2.0,
+                "q50": mean_abs / 2.0,
+                "q75": mean_abs * 2.0,
+                "q90": mean_abs * 4.0,
+                "cvar90": cvar90,
+            }
+        ]
+    symbols = []
+    for source in source_rows:
+        row = dict(source)
+        n = row.get("n", 0)
+        row_mean_abs = row.get("mean_abs")
+        symbols.append(
+            {
+                "symbol": row["symbol"],
+                "n": n,
+                "mean_abs": row_mean_abs,
+                "mean_signed": row.get("mean_signed", 0.0),
+                "q50": row.get("q50", row_mean_abs),
+                "q75": row.get("q75", row_mean_abs),
+                "q90": row.get("q90", row_mean_abs),
+                "cvar90": row.get("cvar90", row.get("q90", row_mean_abs)),
+                "thin_sample": n < 100,
+            }
+        )
+    symbols.sort(key=lambda row: row["symbol"])
+    global_n = sum(row["n"] for row in symbols)
     return {
+        "schema_version": "cost_gate_slippage_quantile_artifact_v2",
         "asof": (asof or NOW.isoformat()),
-        "symbols": symbol_rows or [],
+        "window_days": 90,
+        "n_total_global": global_n,
+        "symbols": symbols,
         "global": {
-            "n": 500,
+            "n": global_n,
             "mean_abs": mean_abs,
             "mean_signed": mean_abs / 2.0,
             "q50": mean_abs / 2.0,
             "q75": mean_abs * 2.0,
             "q90": mean_abs * 4.0,
             "cvar90": cvar90,
+            "thin_sample": global_n < 100,
         },
+        "boundary": (
+            "slippage quantile artifact only; PG source is read-only SELECT-only; "
+            "no PG write, Bybit call, order, config, risk, auth, or runtime mutation"
+        ),
     }
 
 
@@ -1691,6 +1800,41 @@ def test_expected_cost_main_judgment_with_artifact():
     assert packet["expected_cost_artifact"]["global_mean_abs_bps"] == pytest.approx(2.0)
     assert packet["expected_cost_artifact"]["global_tail_bps"] == pytest.approx(8.0)
     assert packet["expected_cost_artifact"]["global_tail_metric"] == "cvar90"
+    cost_artifact = packet["expected_cost_artifact"]
+    assert cost_artifact["source_payload_sha256"] == hashlib.sha256(
+        json.dumps(
+            artifact,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+    assert cost_artifact["source_payload"] == artifact
+    assert cost_artifact["source_asof_utc"] == NOW.isoformat()
+    assert cost_artifact["normalized_projection"] == {
+        "schema_version": "cost_gate_expected_cost_projection_v2",
+        "source_asof_utc": NOW.isoformat(),
+        "source_window_days": 90,
+        "global": {
+            "n": 500,
+            "mean_abs_bps": 2.0,
+            "tail_bps": 8.0,
+            "tail_metric": "cvar90",
+        },
+        "symbols": [
+            {
+                "symbol": "ZZZGLOBALUSDT",
+                "n": 500,
+                "mean_abs_bps": 2.0,
+                "tail_bps": 8.0,
+                "tail_metric": "cvar90",
+            }
+        ],
+    }
+    assert cost_artifact["normalized_projection_sha256"] == _canonical_hash(
+        cost_artifact["normalized_projection"]
+    )
     assert cell["cost_basis_main"] == "expected_slippage_mean_abs_v1"
     assert cell["avg_expected_cost_bps"] == pytest.approx(15.0)
     assert cell["avg_net_bps"] == pytest.approx(30.0 - 15.0)
@@ -1727,6 +1871,34 @@ def test_expected_cost_tail_falls_back_to_q90_when_cvar90_missing():
     assert cell["tail_metric"] == "q90_fallback"
     assert cell["avg_tail_cost_bps"] == pytest.approx(27.0)
     assert cell["mean_net_tail"] == pytest.approx(3.0)
+
+
+def test_expected_cost_accepts_canonical_missing_tail_as_incomplete():
+    """global mean 可用而 tail 統計皆缺時，主判仍是 expected，tail 只留缺口。"""
+    rows = [
+        _blocked_outcome_row(
+            f"no-tail-{index}",
+            "strat|NOTAILUSDT|Buy",
+            30.0 + _COST_TRACK_JITTER[index],
+            cost_model_version="conservative_v1",
+            entry_ts_ms=_spread_entry_ts(index, per_day=1),
+        )
+        for index in range(5)
+    ]
+    artifact = _expected_cost_artifact(mean_abs=2.0)
+    artifact["global"]["q90"] = None
+    artifact["global"]["cvar90"] = None
+
+    packet = build_blocked_signal_outcome_review(
+        rows, slippage_quantiles=artifact, cfg=_COST_TRACK_CFG, now_utc=NOW
+    )
+
+    cell = packet["top_side_cells"][0]
+    assert packet["cost_basis_main"] == "expected_slippage_mean_abs_v1"
+    assert packet["expected_cost_artifact"]["global_tail_bps"] is None
+    assert packet["expected_cost_artifact"]["global_tail_metric"] is None
+    assert cell["avg_expected_cost_bps"] == pytest.approx(15.0)
+    assert cell["avg_tail_cost_bps"] is None
 
 
 def test_expected_cost_track_requires_mean_abs_column():
@@ -1822,8 +1994,373 @@ def test_expected_cost_track_unavailable_falls_back_conservative():
     assert stale_packet["cost_basis_main"] == "conservative_v1"
 
 
-def test_expected_cost_respects_fee_floor():
-    """E[cost] 不得低於純 taker fee 雙腿 floor(11.0bps,手續費不打折)。"""
+def test_future_expected_cost_artifact_fails_closed_to_conservative():
+    """Artifact asof 晚於 review generated_at 不得成為 expected-cost 證據。"""
+    rows = [
+        _blocked_outcome_row(
+            f"future-{index}",
+            "strat|FUTUREUSDT|Buy",
+            30.0 + _COST_TRACK_JITTER[index],
+            cost_model_version="conservative_v1",
+            entry_ts_ms=_spread_entry_ts(index, per_day=1),
+        )
+        for index in range(5)
+    ]
+    artifact = _expected_cost_artifact(
+        mean_abs=2.0,
+        cvar90=8.0,
+        asof=(NOW + dt.timedelta(seconds=1)).isoformat(),
+    )
+
+    packet = build_blocked_signal_outcome_review(
+        rows, slippage_quantiles=artifact, cfg=_COST_TRACK_CFG, now_utc=NOW
+    )
+
+    assert packet["cost_basis_main"] == "conservative_v1"
+    assert packet["expected_cost_artifact"]["available"] is False
+
+
+def test_noncanonical_utc_expected_cost_asof_fails_closed():
+    """Producer contract 的 UTC asof 必須是 datetime.isoformat() 的 +00:00 形狀。"""
+    rows = [
+        _blocked_outcome_row(
+            f"utc-{index}",
+            "strat|UTCUSDT|Buy",
+            30.0 + _COST_TRACK_JITTER[index],
+            cost_model_version="conservative_v1",
+            entry_ts_ms=_spread_entry_ts(index, per_day=1),
+        )
+        for index in range(5)
+    ]
+    artifact = _expected_cost_artifact(
+        mean_abs=2.0,
+        cvar90=8.0,
+        asof=NOW.isoformat().replace("+00:00", "Z"),
+    )
+
+    packet = build_blocked_signal_outcome_review(
+        rows, slippage_quantiles=artifact, cfg=_COST_TRACK_CFG, now_utc=NOW
+    )
+
+    assert packet["cost_basis_main"] == "conservative_v1"
+
+
+def test_expected_cost_artifact_requires_exact_global_sample_count():
+    """n_total_global 必須與 global.n 精確一致，不得沉默選一個。"""
+    rows = [
+        _blocked_outcome_row(
+            f"count-{index}",
+            "strat|COUNTUSDT|Buy",
+            30.0 + _COST_TRACK_JITTER[index],
+            cost_model_version="conservative_v1",
+            entry_ts_ms=_spread_entry_ts(index, per_day=1),
+        )
+        for index in range(5)
+    ]
+    artifact = _expected_cost_artifact(mean_abs=2.0, cvar90=8.0)
+    artifact["n_total_global"] = 499
+
+    packet = build_blocked_signal_outcome_review(
+        rows, slippage_quantiles=artifact, cfg=_COST_TRACK_CFG, now_utc=NOW
+    )
+
+    assert packet["cost_basis_main"] == "conservative_v1"
+
+
+def test_expected_cost_artifact_requires_v2_producer_schema():
+    """沒有 exact v2 schema 的 payload 不得開啟 expected-cost 主判。"""
+    rows = [
+        _blocked_outcome_row(
+            f"schema-{index}",
+            "strat|SCHEMAUSDT|Buy",
+            30.0 + _COST_TRACK_JITTER[index],
+            cost_model_version="conservative_v1",
+            entry_ts_ms=_spread_entry_ts(index, per_day=1),
+        )
+        for index in range(5)
+    ]
+    artifact = _expected_cost_artifact(mean_abs=2.0, cvar90=8.0)
+    artifact["schema_version"] = "cost_gate_slippage_quantile_artifact_v1"
+
+    packet = build_blocked_signal_outcome_review(
+        rows, slippage_quantiles=artifact, cfg=_COST_TRACK_CFG, now_utc=NOW
+    )
+
+    assert packet["cost_basis_main"] == "conservative_v1"
+
+
+def test_expected_cost_artifact_rejects_invalid_symbol_sample_count():
+    """Per-symbol n 必須是非負 exact int，畸形列不得被忽略後用 global 漂白。"""
+    rows = [
+        _blocked_outcome_row(
+            f"symbol-count-{index}",
+            "strat|SYMBOLUSDT|Buy",
+            30.0 + _COST_TRACK_JITTER[index],
+            cost_model_version="conservative_v1",
+            entry_ts_ms=_spread_entry_ts(index, per_day=1),
+        )
+        for index in range(5)
+    ]
+    artifact = _expected_cost_artifact(
+        mean_abs=2.0,
+        cvar90=8.0,
+        symbol_rows=[
+            {
+                "symbol": "SYMBOLUSDT",
+                "n": -1,
+                "mean_abs": 1.0,
+                "q90": 3.0,
+            }
+        ],
+    )
+
+    packet = build_blocked_signal_outcome_review(
+        rows, slippage_quantiles=artifact, cfg=_COST_TRACK_CFG, now_utc=NOW
+    )
+
+    assert packet["cost_basis_main"] == "conservative_v1"
+
+
+def test_expected_cost_artifact_rejects_unknown_v2_fields():
+    """Pre-acceptance v2 是 exact contract，未識別欄位不得進入成本證據。"""
+    rows = [
+        _blocked_outcome_row(
+            f"unknown-field-{index}",
+            "strat|FIELDUSDT|Buy",
+            30.0 + _COST_TRACK_JITTER[index],
+            cost_model_version="conservative_v1",
+            entry_ts_ms=_spread_entry_ts(index, per_day=1),
+        )
+        for index in range(5)
+    ]
+    artifact = _expected_cost_artifact(mean_abs=2.0, cvar90=8.0)
+    artifact["unbound_note"] = "must-not-be-silently-ignored"
+
+    packet = build_blocked_signal_outcome_review(
+        rows, slippage_quantiles=artifact, cfg=_COST_TRACK_CFG, now_utc=NOW
+    )
+
+    assert packet["cost_basis_main"] == "conservative_v1"
+
+
+def test_expected_cost_artifact_rejects_unknown_global_fields():
+    """v2 global block 也是 exact producer contract，未知欄不可被投影忽略。"""
+    rows = [
+        _blocked_outcome_row(
+            f"unknown-global-{index}",
+            "strat|GLOBALFIELDUSDT|Buy",
+            30.0 + _COST_TRACK_JITTER[index],
+            cost_model_version="conservative_v1",
+            entry_ts_ms=_spread_entry_ts(index, per_day=1),
+        )
+        for index in range(5)
+    ]
+    artifact = _expected_cost_artifact(mean_abs=2.0, cvar90=8.0)
+    artifact["global"]["unbound_note"] = "must-not-be-silently-ignored"
+
+    packet = build_blocked_signal_outcome_review(
+        rows, slippage_quantiles=artifact, cfg=_COST_TRACK_CFG, now_utc=NOW
+    )
+
+    assert packet["cost_basis_main"] == "conservative_v1"
+
+
+def test_expected_cost_artifact_rejects_coerced_global_numbers():
+    """Producer v2 輸出 JSON float；字串數字不可經 `_float` 漂白為測量。"""
+    rows = [
+        _blocked_outcome_row(
+            f"coerced-global-{index}",
+            "strat|COERCEDUSDT|Buy",
+            30.0 + _COST_TRACK_JITTER[index],
+            cost_model_version="conservative_v1",
+            entry_ts_ms=_spread_entry_ts(index, per_day=1),
+        )
+        for index in range(5)
+    ]
+    artifact = _expected_cost_artifact(mean_abs=2.0, cvar90=8.0)
+    artifact["global"]["mean_abs"] = "2.0"
+
+    packet = build_blocked_signal_outcome_review(
+        rows, slippage_quantiles=artifact, cfg=_COST_TRACK_CFG, now_utc=NOW
+    )
+
+    assert packet["cost_basis_main"] == "conservative_v1"
+
+
+def test_expected_cost_artifact_requires_exact_90_day_integer_window():
+    """`90.0 == 90` 不得繞過 producer 的 exact integer/window 契約。"""
+    rows = [
+        _blocked_outcome_row(
+            f"float-window-{index}",
+            "strat|WINDOWUSDT|Buy",
+            30.0 + _COST_TRACK_JITTER[index],
+            cost_model_version="conservative_v1",
+            entry_ts_ms=_spread_entry_ts(index, per_day=1),
+        )
+        for index in range(5)
+    ]
+    artifact = _expected_cost_artifact(mean_abs=2.0, cvar90=8.0)
+    artifact["window_days"] = 90.0
+
+    packet = build_blocked_signal_outcome_review(
+        rows, slippage_quantiles=artifact, cfg=_COST_TRACK_CFG, now_utc=NOW
+    )
+
+    assert packet["cost_basis_main"] == "conservative_v1"
+
+
+def test_expected_cost_artifact_requires_complete_rollup_symbol_counts():
+    """global n>0 時 producer 必有完整 symbol rows，且其 n 合計等於 global。"""
+    rows = [
+        _blocked_outcome_row(
+            f"rollup-count-{index}",
+            "strat|ROLLUPUSDT|Buy",
+            30.0 + _COST_TRACK_JITTER[index],
+            cost_model_version="conservative_v1",
+            entry_ts_ms=_spread_entry_ts(index, per_day=1),
+        )
+        for index in range(5)
+    ]
+    artifact = _expected_cost_artifact(mean_abs=2.0, cvar90=8.0)
+    artifact["symbols"] = []
+
+    packet = build_blocked_signal_outcome_review(
+        rows, slippage_quantiles=artifact, cfg=_COST_TRACK_CFG, now_utc=NOW
+    )
+
+    assert packet["cost_basis_main"] == "conservative_v1"
+
+
+def test_expected_cost_artifact_requires_global_mean_abs_weighted_by_symbols():
+    """Rehashed global mean must still close to its accepted per-symbol rollup."""
+    rows = [
+        _blocked_outcome_row(
+            f"weighted-global-{index}",
+            "strat|WEIGHTEDUSDT|Buy",
+            30.0 + _COST_TRACK_JITTER[index],
+            cost_model_version="conservative_v1",
+            entry_ts_ms=_spread_entry_ts(index, per_day=1),
+        )
+        for index in range(5)
+    ]
+    artifact = _expected_cost_artifact(
+        mean_abs=2.0,
+        cvar90=8.0,
+        symbol_rows=[
+            {"symbol": "ALPHAUSDT", "n": 100, "mean_abs": 1.0},
+            {"symbol": "BETAUSDT", "n": 100, "mean_abs": 3.0},
+        ],
+    )
+    artifact["global"]["mean_abs"] = 0.25
+    artifact["global"]["mean_signed"] = 0.0
+
+    packet = build_blocked_signal_outcome_review(
+        rows, slippage_quantiles=artifact, cfg=_COST_TRACK_CFG, now_utc=NOW
+    )
+
+    assert packet["cost_basis_main"] == "conservative_v1"
+
+
+def test_expected_cost_artifact_requires_signed_mean_bounded_by_mean_abs():
+    """A producer's signed statistic cannot exceed its absolute mean."""
+    rows = [
+        _blocked_outcome_row(
+            f"signed-bound-{index}",
+            "strat|SIGNEDUSDT|Buy",
+            30.0 + _COST_TRACK_JITTER[index],
+            cost_model_version="conservative_v1",
+            entry_ts_ms=_spread_entry_ts(index, per_day=1),
+        )
+        for index in range(5)
+    ]
+    artifact = _expected_cost_artifact(mean_abs=2.0, cvar90=8.0)
+    artifact["global"]["mean_signed"] = -2.1
+
+    packet = build_blocked_signal_outcome_review(
+        rows, slippage_quantiles=artifact, cfg=_COST_TRACK_CFG, now_utc=NOW
+    )
+
+    assert packet["cost_basis_main"] == "conservative_v1"
+
+
+def test_nonfinite_present_tail_cost_evidence_fails_closed():
+    """Tail 可缺，但只要出現就必須是 finite/nonnegative，Infinity 不可當成缺值。"""
+    rows = [
+        _blocked_outcome_row(
+            f"tail-inf-{index}",
+            "strat|TAILINFUSDT|Buy",
+            30.0 + _COST_TRACK_JITTER[index],
+            cost_model_version="conservative_v1",
+            entry_ts_ms=_spread_entry_ts(index, per_day=1),
+        )
+        for index in range(5)
+    ]
+    artifact = _expected_cost_artifact(mean_abs=2.0)
+    artifact["global"]["q90"] = None
+    artifact["global"]["cvar90"] = float("inf")
+
+    packet = build_blocked_signal_outcome_review(
+        rows, slippage_quantiles=artifact, cfg=_COST_TRACK_CFG, now_utc=NOW
+    )
+
+    assert packet["cost_basis_main"] == "conservative_v1"
+
+
+def test_expected_cost_source_hash_is_key_order_invariant():
+    """相同 JSON object 只調整 key order，source/projection hash 必須完全一致。"""
+    rows = [
+        _blocked_outcome_row(
+            f"key-order-{index}",
+            "strat|ORDERUSDT|Buy",
+            30.0 + _COST_TRACK_JITTER[index],
+            cost_model_version="conservative_v1",
+            entry_ts_ms=_spread_entry_ts(index, per_day=1),
+        )
+        for index in range(5)
+    ]
+    artifact = _expected_cost_artifact(
+        mean_abs=1.5,
+        cvar90=8.0,
+        symbol_rows=[
+            {
+                "symbol": "ORDERUSDT",
+                "n": 200,
+                "mean_abs": 1.5,
+                "q90": 7.0,
+                "cvar90": 7.5,
+            }
+        ],
+    )
+    reordered = {
+        key: (
+            {nested: value[nested] for nested in reversed(tuple(value))}
+            if isinstance(value, dict)
+            else [
+                {nested: row[nested] for nested in reversed(tuple(row))}
+                for row in value
+            ]
+            if key == "symbols"
+            else value
+        )
+        for key, value in reversed(tuple(artifact.items()))
+    }
+
+    first = build_blocked_signal_outcome_review(
+        rows, slippage_quantiles=artifact, cfg=_COST_TRACK_CFG, now_utc=NOW
+    )["expected_cost_artifact"]
+    second = build_blocked_signal_outcome_review(
+        rows, slippage_quantiles=reordered, cfg=_COST_TRACK_CFG, now_utc=NOW
+    )["expected_cost_artifact"]
+
+    assert first["source_payload_sha256"] == second["source_payload_sha256"]
+    assert (
+        first["normalized_projection_sha256"]
+        == second["normalized_projection_sha256"]
+    )
+
+
+def test_negative_expected_cost_artifact_fails_closed_to_conservative():
+    """負 mean_abs 不是可夾值的測量證據，必須整軌拒絕並回退 conservative。"""
     rows = [
         _blocked_outcome_row(
             f"ff{i}",
@@ -1834,14 +2371,29 @@ def test_expected_cost_respects_fee_floor():
         )
         for i in range(5)
     ]
-    # 畸形負 mean_abs → 夾到 fee floor(尾部軌同 floor)。
+    # 畸形負 mean_abs 不得被夾值後假裝成獨立測量證據。
     artifact = _expected_cost_artifact(mean_abs=-50.0)
     packet = build_blocked_signal_outcome_review(
         rows, slippage_quantiles=artifact, cfg=_COST_TRACK_CFG, now_utc=NOW
     )
     cell = packet["top_side_cells"][0]
-    assert cell["avg_expected_cost_bps"] == pytest.approx(cost_model.FEE_FLOOR_BPS)
-    assert cell["avg_tail_cost_bps"] == pytest.approx(cost_model.FEE_FLOOR_BPS)
+    assert packet["cost_basis_main"] == "conservative_v1"
+    assert packet["expected_cost_artifact"] == {
+        "available": False,
+        "asof": None,
+        "source_asof_utc": None,
+        "source_payload_sha256": None,
+        "source_payload": None,
+        "normalized_projection": None,
+        "normalized_projection_sha256": None,
+        "global_mean_abs_bps": None,
+        "global_tail_bps": None,
+        "global_tail_metric": None,
+        "n_total_global": 0,
+        "max_age_hours": cost_model.QUANTILE_ARTIFACT_MAX_AGE_HOURS,
+    }
+    assert cell["avg_expected_cost_bps"] is None
+    assert cell["avg_tail_cost_bps"] is None
 
 
 # ---------------------------------------------------------------------------

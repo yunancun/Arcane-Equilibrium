@@ -28,8 +28,10 @@ docs/research/2026-07-10--counterfactual_rerun_preregistration.md):
 from __future__ import annotations
 
 import argparse
+import copy
 import datetime as dt
 from dataclasses import dataclass
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -65,18 +67,44 @@ from cost_gate_learning_lane.evidence_stats import (
 from cost_gate_learning_lane.runtime_adapter import read_jsonl_ledger
 
 
-# v5:樣本語義對齊 QC 預註冊 §2/§3(分鐘量化去重 + 非重疊窗 n_eff + E2/E3 天數
-# eligibility + 複本一致性)。v4 的毫秒精確去重仍開著近似複製通道(同分鐘
-# distinct-ms re-fire 可虛增 n_eff),升版讓 false_negative_candidate_packet 等
-# schema-gated 消費端 fail-closed 拒收 v4/v3 存檔 artifact。
+# v6:learning_candidate_board 先做 prospective raw/evaluation lineage 三分區，
+# 再以 qualified subset 計算統計；另加 event_hash 衝突 quarantine 及 selection/audit
+# 雜湊分面。升版使 v5 的 legacy candidate_learning_context board 在 consumer ingress
+# fail-closed，不能被誤認為可供 autonomous learning 的 lineage-complete 證據。
 BLOCKED_OUTCOME_REVIEW_SCHEMA_VERSION = (
-    "cost_gate_demo_learning_lane_blocked_outcome_review_v5"
+    "cost_gate_demo_learning_lane_blocked_outcome_review_v6"
 )
 BLOCKED_OUTCOME_REVIEW_RECORD_TYPE = "blocked_signal_outcome_review"
 
 # 樂觀成本 fallback 常數(舊 legacy row 的 gross−4.0 對照軌),與 outcome_writer
 # 的 cfg.cost_bps 歷史默認一致。
 _LEGACY_OPTIMISTIC_COST_BPS = 4.0
+_SLIPPAGE_ARTIFACT_SCHEMA_VERSION = "cost_gate_slippage_quantile_artifact_v2"
+_SLIPPAGE_ARTIFACT_FIELDS = {
+    "schema_version",
+    "asof",
+    "window_days",
+    "n_total_global",
+    "symbols",
+    "global",
+    "boundary",
+}
+_SLIPPAGE_STAT_FIELDS = {
+    "n",
+    "mean_abs",
+    "mean_signed",
+    "q50",
+    "q75",
+    "q90",
+    "cvar90",
+    "thin_sample",
+}
+_SLIPPAGE_SYMBOL_FIELDS = {*_SLIPPAGE_STAT_FIELDS, "symbol"}
+_SLIPPAGE_WINDOW_DAYS = 90
+_SLIPPAGE_BOUNDARY = (
+    "slippage quantile artifact only; PG source is read-only SELECT-only; "
+    "no PG write, Bybit call, order, config, risk, auth, or runtime mutation"
+)
 
 
 @dataclass(frozen=True)
@@ -160,6 +188,17 @@ def _mean(values: list[float]) -> float | None:
     return sum(values) / len(values) if values else None
 
 
+def _canonical_sha256(value: Any) -> str:
+    encoded = json.dumps(
+        value,
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def _parse_iso_utc(value: Any) -> dt.datetime | None:
     """解析 ISO8601 為 UTC datetime。artifact 新鮮度檢查用(不可解析 → None)。"""
     if not value:
@@ -187,6 +226,84 @@ def _project_tail_slippage(block: dict[str, Any]) -> tuple[float | None, str | N
     return None, None
 
 
+def _producer_float_or_none(value: Any, *, nonnegative: bool) -> float | None:
+    """Validate the exact JSON-number type emitted by the v2 producer."""
+    if value is None:
+        return None
+    if type(value) is not float or not math.isfinite(value):
+        raise ValueError("slippage statistic must be an exact finite float")
+    if nonnegative and value < 0.0:
+        raise ValueError("absolute slippage statistic must be nonnegative")
+    return value
+
+
+def _validate_slippage_stat_block(
+    block: Any,
+    *,
+    symbol_row: bool,
+) -> dict[str, Any]:
+    expected_fields = _SLIPPAGE_SYMBOL_FIELDS if symbol_row else _SLIPPAGE_STAT_FIELDS
+    if not isinstance(block, dict) or set(block) != expected_fields:
+        raise ValueError("slippage statistic fields invalid")
+    n = block["n"]
+    if isinstance(n, bool) or not isinstance(n, int) or n <= 0:
+        raise ValueError("slippage sample count invalid")
+    mean_abs = _producer_float_or_none(block["mean_abs"], nonnegative=True)
+    mean_signed = _producer_float_or_none(block["mean_signed"], nonnegative=False)
+    q50 = _producer_float_or_none(block["q50"], nonnegative=True)
+    q75 = _producer_float_or_none(block["q75"], nonnegative=True)
+    q90 = _producer_float_or_none(block["q90"], nonnegative=True)
+    cvar90 = _producer_float_or_none(block["cvar90"], nonnegative=True)
+    if (
+        mean_abs is None
+        or mean_signed is None
+        or q50 is None
+        or q75 is None
+        or (q90 is None) is not (cvar90 is None)
+    ):
+        # CVaR may be absent while q90 is present (the canonical q90 fallback).
+        if not (
+            mean_abs is not None
+            and mean_signed is not None
+            and q50 is not None
+            and q75 is not None
+            and q90 is not None
+            and cvar90 is None
+        ):
+            raise ValueError("slippage producer statistic completeness invalid")
+    if abs(mean_signed) > mean_abs:
+        raise ValueError("slippage signed mean exceeds absolute mean")
+    thin_sample = block["thin_sample"]
+    if not isinstance(thin_sample, bool) or thin_sample is not (n < 100):
+        raise ValueError("slippage thin-sample flag invalid")
+    ordered_quantiles = [value for value in (q50, q75, q90) if value is not None]
+    if ordered_quantiles != sorted(ordered_quantiles):
+        raise ValueError("slippage quantile order invalid")
+    if cvar90 is not None and q90 is not None and cvar90 < q90:
+        raise ValueError("slippage cvar order invalid")
+    result = {
+        "n": n,
+        "mean_abs": mean_abs,
+        "mean_signed": mean_signed,
+        "q50": q50,
+        "q75": q75,
+        "q90": q90,
+        "cvar90": cvar90,
+        "thin_sample": thin_sample,
+    }
+    if symbol_row:
+        symbol = block["symbol"]
+        if (
+            not isinstance(symbol, str)
+            or not symbol
+            or symbol != symbol.strip()
+            or symbol != symbol.upper()
+        ):
+            raise ValueError("slippage symbol invalid")
+        result["symbol"] = symbol
+    return result
+
+
 def _load_expected_slippage(
     payload: dict[str, Any] | None,
     *,
@@ -204,42 +321,115 @@ def _load_expected_slippage(
     """
     if not isinstance(payload, dict):
         return None
-    asof = _parse_iso_utc(payload.get("asof"))
-    if asof is None:
+    if (
+        set(payload) != _SLIPPAGE_ARTIFACT_FIELDS
+        or payload.get("schema_version") != _SLIPPAGE_ARTIFACT_SCHEMA_VERSION
+        or type(payload.get("window_days")) is not int
+        or payload.get("window_days") != _SLIPPAGE_WINDOW_DAYS
+        or payload.get("boundary") != _SLIPPAGE_BOUNDARY
+    ):
         return None
-    if now.astimezone(dt.timezone.utc) - asof > dt.timedelta(hours=max_age_hours):
+    raw_asof = payload.get("asof")
+    asof = _parse_iso_utc(raw_asof)
+    if asof is None or not isinstance(raw_asof, str) or raw_asof != asof.isoformat():
         return None
-    global_block = payload.get("global")
-    if not isinstance(global_block, dict):
+    review_time = now.astimezone(dt.timezone.utc)
+    if asof > review_time:
         return None
-    global_mean_abs = _float(global_block.get("mean_abs"))
+    if review_time - asof > dt.timedelta(hours=max_age_hours):
+        return None
+    try:
+        global_block = _validate_slippage_stat_block(
+            payload.get("global"),
+            symbol_row=False,
+        )
+    except ValueError:
+        return None
+    global_n = global_block.get("n")
+    n_total_global = payload.get("n_total_global")
+    if (
+        not isinstance(global_n, int)
+        or isinstance(global_n, bool)
+        or global_n <= 0
+        or not isinstance(n_total_global, int)
+        or isinstance(n_total_global, bool)
+        or n_total_global != global_n
+    ):
+        return None
+    global_mean_abs = global_block["mean_abs"]
     if global_mean_abs is None:
         return None
     global_tail, global_tail_metric = _project_tail_slippage(global_block)
     per_symbol: dict[str, dict[str, Any]] = {}
     rows = payload.get("symbols")
-    if isinstance(rows, list):
-        for row in rows:
-            if not isinstance(row, dict):
-                continue
-            symbol = _str(row.get("symbol")).upper()
-            mean_abs = _float(row.get("mean_abs"))
-            if not symbol or mean_abs is None:
-                continue
-            tail, tail_metric = _project_tail_slippage(row)
-            per_symbol[symbol] = {
-                "n": _int(row.get("n")),
-                "mean_abs": mean_abs,
-                "tail_bps": tail,
-                "tail_metric": tail_metric,
+    if not isinstance(rows, list):
+        return None
+    try:
+        normalized_rows = [
+            _validate_slippage_stat_block(row, symbol_row=True) for row in rows
+        ]
+    except ValueError:
+        return None
+    symbols = [row["symbol"] for row in normalized_rows]
+    if (
+        not symbols
+        or symbols != sorted(symbols)
+        or len(symbols) != len(set(symbols))
+        or sum(row["n"] for row in normalized_rows) != global_n
+        or not math.isclose(
+            global_mean_abs,
+            math.fsum(row["n"] * row["mean_abs"] for row in normalized_rows)
+            / global_n,
+            rel_tol=1e-12,
+            abs_tol=1e-12,
+        )
+    ):
+        return None
+    for row in normalized_rows:
+        symbol = row["symbol"]
+        mean_abs = row["mean_abs"]
+        if mean_abs is None:
+            return None
+        tail, tail_metric = _project_tail_slippage(row)
+        per_symbol[symbol] = {
+            "n": row["n"],
+            "mean_abs": mean_abs,
+            "tail_bps": tail,
+            "tail_metric": tail_metric,
+        }
+    canonical_asof = asof.isoformat()
+    normalized_projection = {
+        "schema_version": "cost_gate_expected_cost_projection_v2",
+        "source_asof_utc": canonical_asof,
+        "source_window_days": payload["window_days"],
+        "global": {
+            "n": global_n,
+            "mean_abs_bps": global_mean_abs,
+            "tail_bps": global_tail,
+            "tail_metric": global_tail_metric,
+        },
+        "symbols": [
+            {
+                "symbol": symbol,
+                "n": item["n"],
+                "mean_abs_bps": item["mean_abs"],
+                "tail_bps": item["tail_bps"],
+                "tail_metric": item["tail_metric"],
             }
+            for symbol, item in sorted(per_symbol.items())
+        ],
+    }
     return {
         "per_symbol": per_symbol,
         "global_mean_abs": global_mean_abs,
         "global_tail_bps": global_tail,
         "global_tail_metric": global_tail_metric,
-        "asof": _str(payload.get("asof")) or None,
-        "n_total_global": _int(global_block.get("n")),
+        "asof": canonical_asof,
+        "n_total_global": global_n,
+        "source_payload_sha256": _canonical_sha256(payload),
+        "source_payload": copy.deepcopy(payload),
+        "normalized_projection": normalized_projection,
+        "normalized_projection_sha256": _canonical_sha256(normalized_projection),
     }
 
 
@@ -1427,6 +1617,29 @@ def build_blocked_signal_outcome_review(
         "expected_cost_artifact": {
             "available": expected_slippage is not None,
             "asof": expected_slippage.get("asof") if expected_slippage else None,
+            "source_asof_utc": (
+                expected_slippage.get("asof") if expected_slippage else None
+            ),
+            "source_payload_sha256": (
+                expected_slippage.get("source_payload_sha256")
+                if expected_slippage
+                else None
+            ),
+            "source_payload": (
+                expected_slippage.get("source_payload")
+                if expected_slippage
+                else None
+            ),
+            "normalized_projection": (
+                expected_slippage.get("normalized_projection")
+                if expected_slippage
+                else None
+            ),
+            "normalized_projection_sha256": (
+                expected_slippage.get("normalized_projection_sha256")
+                if expected_slippage
+                else None
+            ),
             "global_mean_abs_bps": (
                 expected_slippage.get("global_mean_abs") if expected_slippage else None
             ),
