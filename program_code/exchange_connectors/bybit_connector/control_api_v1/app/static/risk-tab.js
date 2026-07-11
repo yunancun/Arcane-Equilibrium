@@ -1083,10 +1083,10 @@ async function loadAiBudget() {
       const lightEl = document.getElementById('ai-budget-degrade-light');
       const labelEl = document.getElementById('ai-budget-degrade-label');
       const lvl = data.degrade_level || 'none';
-      // killswitch 深血紅 #8b1a1a 無對應 token(比 hard_limit --neg 更重的殺停級),
-      // 保留以區隔嚴重度;其餘綠/琥珀/紅走語義 token,fallback 灰走中性文字色
+      // killswitch 併入 hard_limit 同 --neg(canon 9 三紅內解決,#8b1a1a 深血紅確認非第四紅);
+      // killswitch↔hard_limit 嚴重度區辨由下方 label「degrade: killswitch」承載;fallback 灰走中性文字色
       const colorMap = {
-        none: 'var(--pos)', soft_warn: 'var(--warn)', hard_limit: 'var(--neg)', killswitch: '#8b1a1a',
+        none: 'var(--pos)', soft_warn: 'var(--warn)', hard_limit: 'var(--neg)', killswitch: 'var(--neg)',
       };
       if (lightEl) lightEl.style.background = colorMap[lvl] || 'var(--text-secondary)';
       if (labelEl) labelEl.textContent = 'degrade: ' + lvl;

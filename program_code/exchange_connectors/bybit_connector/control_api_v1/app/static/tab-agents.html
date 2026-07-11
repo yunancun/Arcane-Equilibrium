@@ -228,9 +228,9 @@
     padding:var(--sp-3); display:flex; flex-direction:column; gap:var(--sp-2);
     background:var(--bg-surface); }
   /* Executor 真倉/影子底色 enum（§7 class-per-enum;gradient palette 外色 P0.4）*/
-  .agent-card--live { background:linear-gradient(135deg,#3d0d0d,#5c1a1a);
+  .agent-card--live { background:var(--live-bg);
     animation:agent-breathing 4s ease-in-out infinite; }
-  .agent-card--shadow { background:linear-gradient(135deg,#0d1f3d,#1a2f5c); }
+  .agent-card--shadow { background:var(--bg-raised); }
   .at-unknown-banner { background:var(--neg-bg); border:1px solid var(--neg);
     border-radius:var(--r-1); padding:var(--sp-2) var(--sp-3); margin-bottom:var(--sp-2);
     color:var(--neg); font-size:var(--fs-micro); }
@@ -244,8 +244,8 @@
     grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:var(--sp-3); }
   .at-feed-row { padding:var(--sp-2) 0; border-bottom:1px solid var(--border-subtle); }
   .at-eng-col { border-radius:var(--r-2); padding:var(--sp-3); }
-  .at-eng-col--demo { background:linear-gradient(135deg,#0d1f3d,#1a2f5c); border:1px solid #1a2f5c; }
-  .at-eng-col--live { background:linear-gradient(135deg,#3d0d0d,#5c1a1a); border:1px solid var(--neg); }
+  .at-eng-col--demo { background:var(--bg-raised); border:1px solid var(--border-strong); }
+  .at-eng-col--live { background:var(--live-bg); border:1px solid var(--live); }
   .at-eng-col--empty { background:var(--bg-sunken); border:1px dashed var(--border-subtle); }
   .at-eng-diff { background:var(--bg-sunken); border:1px solid var(--border-subtle);
     border-radius:var(--r-1); padding:var(--sp-2) var(--sp-3); display:flex;
