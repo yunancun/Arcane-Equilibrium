@@ -378,5 +378,161 @@ C8 前後端語義剝離最後/掛起,不阻塞前端收斂。
 
 ---
 
+## 13 · C6d micro-spec — palette 外色中性化(逐處映射;唯一可見美學批)
+
+> **地位**:§2.3 palette 外色裁決的**逐處細化**,承 §11 的 C6b(palette 外色)拆出「唯一可見美學決策」批 =
+> **C6d**。§2.3 四條裁決(紫中性化不新增 --purple / 深紅漸層塌平 / 藍 tint 中性化 / scrim 保留)**不推翻**,本節
+> 只細化到 class:行 級,供 E1a 機械執行、E2 對抗核。scrim 不在本節(§2.3 已定保留)。
+> **實測基準**:static/ HEAD `bdb689d7a`(晚於 §0 的 `01dcc43cf`;C6d 相關行號/值當日 grep 逐點無漂移)。
+> **鐵則(tokens.css:10/73/132)**:`--seal` 只以**方印形制** `.seal-mark` 出現,**絕不做文字色**;故任何紫**文字色**
+> 一律 → 中性 `--text-*`(**不可** `color:var(--seal)`);只有真授權態可**加** `.seal-mark` 方印元素(結構性 badge)。
+> **canon 約束**:1(chrome 單色)/ 9(三紅 `--neg`/`--live`/`--seal`,無第四紅;seal 只方印)/ 10(不新增彩色 token,
+> 無 `--purple`)。本節**零新增 token**,只用既有 `--seal/--seal-bg/--neg/--neg-bg/--live/--live-bg/--bg-sunken/`
+> `--bg-raised/--accent/--accent-weak/--border-strong/--warn/--warn-bg/--text-*`。
+
+### 13.0 逐處 grep 揭出的三個紫語義族(§2.3「紫=authority chrome」的細化更正)
+
+§2.3 把**所有**紫建模為「T3 authority / Live-Auth 識別色 = chrome 級身分」。逐點 grep 後,紫實際分**三族**,處置
+**不同**(這是本節對 §2.3 的細化,非推翻——與 §1.3「`--red` 機械→`--neg`,但 live/real-money 子集→`--live`」
+**同一手法**:先分族,real-money 子集走 canon 6):
+
+- **族 A — authority / trust-tier / Live-Auth chrome**(身分識別,**中性化** 同 §2.3):trust-tier T3 徽章、
+  governance Live-Auth 動作鈕、Live 頁 authority accent 鈕/標題、console mode 標籤。→ 文字色→`--text-*`;tint 底→
+  `--bg-raised`/`--accent-weak`;動作鈕→ 現有 `oc-btn`/`oc-btn-primary`(青銅 `--accent`)。authority 區辨(若須存活)
+  由 **`.seal-mark` 方印 + label** 承載(canon 9),非顏色(§13.7)。
+- **族 B — Live / real-money 標記**(canon 6 領域):tab-system `.purple`(「實盤(真實資金)」labels + m-mode/m-auth 當
+  live)、live typed-confirm guard、live warn-box、live chip、mode-btn 的 live 風險識別框、live executor 深紅漸層。
+  **PA 裁決:→ `--live`/`--live-bg`(canon 6,真金熱紅,既有 token,零新增)**,**不中性化到灰**——把 real-money 警示灰化
+  = **降低生存性訊號**(root principle 5/6 反向),且違 §1.3 已立的「live/real-money 標記走 `--live`」先例。
+  **⇒ §13.2 是本節唯一「§2.3-literal(灰) vs canon-6(--live)」的 operator-gate**(見 §13.8 開放裁決)。
+- **族 C — strategy 身分色**(bb_reversion 紫):與另 4 策略(藍/綠/橙/琥珀)同組的彩虹身分系統。→ **DEFER 至
+  strategy-identity 整組(C6b/C6c,已 defer)**;C6d **不單動** bb_reversion(單改 1/5 破身分系統,且整套彩虹是 canon 10
+  的**另案**)。並:`OC_STRATEGY_COLOR_META.color` 欄位 = **dead-data**(§13.4)。
+
+### 13.1 族 A — authority chrome 中性化(逐處)
+
+| 檔:行 | class/context | 現值 | → 決定 | 授權態? | 交易面?(E2) | A3 可見變更 |
+|---|---|---|---|---|---|---|
+| tab-live.js:36 | `TRUST_TIER_COLORS[3]` T3 徽章(render @127-128) | `bg:rgba(168,85,247,.15) fg:#a855f7` | `fg`→`var(--text-secondary)`(對齊同表 T2 既有中性 fg);`bg`→`var(--bg-raised)` 中性 tint。**+ operator-gated:T3 加 `.seal-mark`(§13.7)** | **是**(T3 trust) | 是(live auth)E2 | T3 徽章去紫,退為近 T0 灰;採納則多一方印 □ |
+| tab-governance.html:1314 | `GOV_TRUST_TIER_COLORS[3]`(render @1426) | 同上 | 同 tab-live.js:36(保持雙頁 parity) | 是 | 是(gov)E2 | 同上 |
+| tab-governance.html:321 | `.gov-purple-text`(消費 @701「⚠ Full Review Required」flag) | `color:#a855f7` | → **`var(--warn)`**(本質是 ⚠ 待辦警示,已帶 ⚠ 符 canon 10) | 授權警示 | 是 E2 | 旗標轉琥珀 |
+| tab-governance.html:322 | `.gov-btn-purple`(消費 @708「🔑 Renew Live Auth」,已含 `oc-btn-primary`) | `bg:rgba(.2) border:rgba(.6) color:#a855f7` | → **移除紫 override,回落 `oc-btn-primary`(青銅 --accent)**;🔑+label 承載授權義,`.seal-mark` 選配非必須 | **是**(授權動作) | 是 E2 | 鈕轉青銅 |
+| tab-governance.html:323 | `.gov-btn-purple-soft`(消費 @711「🔍 T3 Full Review」) | `bg:rgba(.1) border:rgba(.4) color:#a855f7` | → **`oc-btn` 中性**(`border:var(--border-strong)`;`color:var(--text-primary)`) | 授權動作 | 是 E2 | 次鈕轉中性 |
+| tab-governance.html:319 | 註釋「紫…待 canon 1 中性化複審」 | — | 更新註釋為「已 C6d 中性化」 | — | — | 無 |
+| tab-live.html:248 | `.live-btn-purple`(消費 @308 openLiveAuth、@366 openLiveRisk 鈕) | `border:rgba(.55) color:#a855f7` | → **`--accent`(青銅 CTA:`border-color/color:var(--accent)`)** 或直接 `oc-btn-primary`;openLiveAuth 可選 `.seal-mark` | **是**(live 授權動作) | 是 E2 | 鈕轉青銅 |
+| tab-live.html:249 | `.live-t-purple`(消費 @346「Live 槽雙態說明」標題) | `color:#a855f7` | → **`var(--text-secondary)`**(chrome 標題) | chrome | 是 E2 | 標題轉中性 |
+| tab-live.html:250-251 | `.live-auth-hint`(同族相鄰底/框) | `bg:rgba(.08) border:rgba(.35)` | → `bg:var(--bg-raised)` + `border:var(--border-strong)` | chrome | 是 E2 | 提示框轉中性 |
+| console.html:904 | `live_reserved` mode 色(mode-color map) | `'#a855f7'` | → **`var(--text-secondary)`**(中性;姊妹 mainnet/live_demo 已載熱色,live_reserved 是「預留未 live」態)。殼層 → 可 defer | chrome | 否(殼層) | mode 標籤轉中性 |
+
+> tab-live.html:247 註釋自證「紫為 Live 頁 authority accent(真金,**非 canon 6 熱紅,非 --seal**)」——設計原意即
+> 非 --seal/非熱紅的第三色;canon 下無此第三色,故回落青銅 accent(CTA 的 canon 10 合法家)。
+
+### 13.2 族 B — Live / real-money 標記 → `--live`(canon 6;operator-gate)
+
+> **PA 裁決**:以下皆真 live/real-money 標記,**→ `--live`/`--live-bg`**(既有 token,零新增,canon 6 salience 保全)。
+> **理由**:tab-system 的 mode 色階 = paper(`.green`=`--pos`)< demo(`.yellow`=`--warn`)< live → 若 live 灰化,**斷了
+> 危險色階**(live 應最醒目);且「實盤(真實資金)」是 real-money 警示,灰化 = 安全訊號回歸。**§2.3-literal(全灰)為
+> 備選**,是本節唯一 operator-gate(§13.8)。
+
+| 檔:行 | class/context | 現值 | → 決定 | 授權態? | 交易面?(E2) | A3 可見變更 |
+|---|---|---|---|---|---|---|
+| tab-system.html:52 | `.purple`(消費 @163「🟣 實盤」real-money label、@202 mode-flow、@434 confirm「⚠ 實盤模式—真實資金風險」、@822/828 m-mode/m-auth 當 live) | `color:#a855f7` | → **`var(--live)`**(mode 色階 pos<warn<live 完備;real-money 警示保熱) | **是**(real-money) | 是 E2 親算 | 實盤 labels + live metric 轉熱紅 |
+| tab-system.html:63-64 | `.confirm-live-guard`(live confirm 守衛框,live-exclusive) | `border:rgba(.45) bg:rgba(.08) color:#c084fc` | → `border:var(--live)` + `bg:var(--live-bg)` + `color:var(--live)` | real-money | 是 E2(confirm 流) | 守衛框轉熱紅 |
+| tab-system.html:88 | `.mode-btn.mode-btn--live`(live 模式鈕的 live 風險識別框;@85-87 註釋標 E2-HIGH「不讓青銅蓋掉 live 風險框」) | `border-color:rgba(.4)` | → **`border-color:var(--live)`**(正合原意:保 live 風險框,青銅不蓋) | real-money | 是 E2 親算 | live 模式鈕框轉熱紅 |
+| tab-system.html:89 | `.confirm-body .warn-box--live`(live warn-box;比 base `.warn-box`=`--neg` 更重) | `border:rgba(.5) color:#a855f7` | → `border:var(--live)` + `color:var(--live)` | real-money | 是 E2 | live 警示框轉熱紅 |
+| common.js:768 | `.oc-chip-live`(live 態 chip;殼層注入,跨 tab) | `bg:rgba(.12) border:rgba(.3) color:#a855f7` | → `bg:var(--live-bg)` + `border:var(--live)` + `color:var(--live)` | real-money | 是 E2 + **寬 blast 目視**(全 tab) | live chip 轉熱紅 |
+| common.js:977 | `.live-metric-val.purple`(metric 值變體;姊妹 .pos/.neg/.neutral) | `color:#a855f7` | → **消費點核**:若標 live/real-money metric → `var(--live)`;否則 → `var(--text-primary)`(對齊 `.neutral`)。E1a 查 `className` 施加點 | 依消費 | 是 E2 + 寬 blast | live metric 轉熱紅或中性 |
+
+### 13.3 typed-confirm 長按視覺 → `--accent`(青銅;勿破功能)
+
+> 長按進度/holding 是**互動 affordance**(非語義狀態)→ 青銅 `--accent`(canon 10:accent 給焦點/互動)。與 §13.2 的
+> **語義** live 框(--live)分工:紅框=警示,青銅=進度機制。**只改色,不動 width/transition/timing**。
+> **前置(E1a/E2 驗)**:`#confirm-ok.confirm-ok-holding`(69)非 live-suffixed,須確認長按 confirm 是否 live 專用;若被
+> 非-live confirm 共用,青銅正確(中性通用);若確 live 專用,operator 可選改 `--live` 提最大 salience。
+
+| 檔:行 | class/context | 現值 | → 決定 | 授權態? | 交易面?(E2) | A3 可見變更 |
+|---|---|---|---|---|---|---|
+| tab-system.html:66 | `.live-hold-progress`(長按進度**軌**) | `bg:rgba(168,85,247,.18)` | → `bg:var(--accent-weak)` | 互動 | 是 E2 | 進度軌轉青銅弱 |
+| tab-system.html:67 | `.live-hold-bar`(長按進度**填充**) | `background:#a855f7` | → `background:var(--accent)` | 互動 | 是 E2 | 進度條轉青銅 |
+| tab-system.html:68 | `#confirm-ok.confirm-ok-live-ready`(ready 態框) | `border-color:rgba(.7)` | → `border-color:var(--accent)` | 互動 | 是 E2 | ready 框青銅 |
+| tab-system.html:69 | `#confirm-ok.confirm-ok-holding`(holding 態) | `bg:#7e22ce border:#c084fc` | → `background:var(--accent)` + `border-color:var(--accent)` | 互動 | 是 E2(前置核 live 專用性) | holding 態青銅 |
+
+### 13.4 族 C — strategy 身分色 + 孤兒(DEFER)
+
+| 檔:行 | class/context | 現值 | → 決定 | 授權態? | 交易面? | A3 可見變更 |
+|---|---|---|---|---|---|---|
+| common-formatters.js:372 | `OC_STRATEGY_COLOR_META.bb_reversion.color` | `'#a855f7'` | **dead-data**(`ocStrategyMeta().color` 0 消費者;策略色實由 CSS class 出;同 _OC_CAT_CONFIG §5)→ **刪 5 策略全 `.color` 欄位**(留 label/zh),隨 strategy-group 清理 | 否 | 否 | 無(dead-data 刪) |
+| common.js:778 | `.oc-strategy-bb_reversion`(`--strategy-color/bg/border`;消費 @773-775/@932) | `#a855f7 / rgba(.13) / rgba(.34)` | **DEFER C6b/C6c strategy-identity 整組**(單改 1/5 破身分系統;整套彩虹=canon 10 另案)。C6d 不動 | 否 | 否 | C6d 內無 |
+| app-learning.js:34,37 | `#9b59b6`(proposed/testing/in_progress 提案態色) | `"#9b59b6"` | **DEFER Phase 2**(孤兒,§5 已定 P0.4 不動) | 否 | 否 | C6d 內無 |
+
+### 13.5 深紅漸層 + 藍 tint 塌平(tab-agents;§2.3 細化)
+
+> 塌平漸層(canon 5 只准近黑上漸層/陰影 punch-hole;canon 1 禁裝飾漸層)→ 扁平 token。appliers:
+> agent-tracker.js:318/323/668/690。tab-agents = 監控面(非下單寫面)→ **E2-light**(觸 live/demo 語義須過目)。
+> 註:`.agent-card--live` 另帶 `agent-breathing` 動效(canon 1 裝飾動效**另案**,**不在 C6d**,只塌漸層色)。
+
+| 檔:行 | class/context | 現值 | → 決定 | 授權態? | 交易面? | A3 可見變更 |
+|---|---|---|---|---|---|---|
+| tab-agents.html:231 | `.agent-card--live`(executor 真倉底) | `linear-gradient(135deg,#3d0d0d,#5c1a1a)` | → 扁平 **`background:var(--live-bg)`**(live 真倉,canon 6 扁平 live tint) | live 標記 | E2-light | 卡片轉扁平 live tint |
+| tab-agents.html:248 | `.at-eng-col--live`(live 引擎欄,liveCount>0) | `gradient(#3d0d0d,#5c1a1a)` + `border:1px solid var(--neg)` | → 扁平 **`background:var(--live-bg)`** + `border:1px solid var(--live)`(欄=live→border 統一 --live;保 --neg 亦可) | live 標記 | E2-light | 欄轉扁平 live tint |
+| tab-agents.html:233 | `.agent-card--shadow`(shadow/paper 底) | `gradient(#0d1f3d,#1a2f5c)` | → 扁平 **`background:var(--bg-raised)`**(中性 raised) | 否 | 否 | 卡片轉中性 |
+| tab-agents.html:247 | `.at-eng-col--demo`(demo 引擎欄) | `gradient(#0d1f3d,#1a2f5c)` + `border:1px solid #1a2f5c` | → 扁平 **`background:var(--bg-raised)`** + `border:1px solid var(--border-strong)` | 否 | 否 | 欄轉中性 |
+
+### 13.6 killswitch `#8b1a1a` → `--neg`(canon 9 三紅內解決,了結第四紅 forward-pointer)
+
+| 檔:行 | class/context | 現值 | → 決定 | 授權態? | 交易面?(E2) | A3 可見變更 |
+|---|---|---|---|---|---|---|
+| risk-tab.js:1089 | AI budget degrade 燈底 `colorMap.killswitch`(姊妹 none=--pos/soft_warn=--warn/hard_limit=--neg,皆**實心** token;`lightEl.style.background`) | `'#8b1a1a'` | → **`var(--neg)`**(併入 hard_limit 同紅);嚴重度區辨改由 label 文字「degrade: killswitch」承載。同步更新 @1086-1087 註釋 | 嚴重度狀態 | **是 E2 親算** | killswitch 燈與 hard_limit 同紅,label 區辨 |
+
+> **PA pushback(對任務建議的 `--neg-bg/--live-bg/--bg-sunken` 三選一)**:此點是**實心狀態燈底**,姊妹皆實心語義 token。
+> 三個備選皆不合:`--live-bg` **稀釋 canon 6**(AI 預算 kill ≠ 交易真金);`--bg-sunken` 在深/淺主題都近底色 → **燈熄=不可見**
+> (殺停態反須最醒目,legibility 陷阱);`--neg-bg` 半透明 **比 hard_limit 實心 --neg 更弱** → **倒置嚴重度階**。唯一 canon-純
+> 且可讀且不倒階者 = **實心 `--neg`**(重用既有紅,無第四紅);killswitch↔hard_limit 區辨由 label 承載(已存在)。
+> **此裁決同時了結 C6b canon-9 forward-pointer**:`#8b1a1a` **確認非第四紅**,收斂進 `--neg`。
+> (次要註:若 operator 視「AI 花費 kill」為 real-money 標記,`--live` 亦可辯;PA 傾向 --neg,因 canon 6 熱紅專屬**交易**真金。)
+
+### 13.7 `.seal-mark` 判斷(task 點 1:authority 是否值得保留區辨)
+
+- **T3 trust-tier 徽章(tab-live.js:36 / tab-governance:1314)**:**YES,值得加 `.seal-mark`**。T3=最高 earned-trust 授權態;
+  中性化後 T3 與 T0 同灰不可辨。`.seal-mark`(□ 印 badge)+「T3 Trusted」label 以**形制**(非色)承載授權(canon 9)。
+  **scope 註**:須 E1a 動 **render fn**(tab-live.js:127 `renderTrustTier` 段 / tab-governance:1426)於 `tier===3` 注入
+  `.seal-mark` span——**超出純 CSS**,標 render-scope。**operator-gate**:授權區辨是否值得此 render 變更?PA=值得;
+  **CSS-only 備選**=T3 僅中性 + label 文字承載(可接受降級)。
+- **Live-Auth 動作鈕(gov Renew Live Auth / tab-live openLiveAuth)**:`.seal-mark` **選配非必須**——已含 🔑 emoji + label
+  + 青銅 accent 足;鈕加方印偏重。PA=不加(除非 operator 要授權強調)。
+- **其餘紫**(mode 標記、strategy、漸層、killswitch)**非授權態 → 不加 `.seal-mark`**,只換 token。
+
+### 13.8 推薦子批拆分(task 點 7:C6d-1…4)+ 排序 + gate
+
+> 原則:族 A(中性化,中風險)/ 族 B(→--live,canon-6 最高審)/ confirm affordance / 漸層+killswitch(機械塌平)分開;
+> **元素級原子**(同檔全紫同 commit);common.js 殼層寬 blast 獨立單位;strategy/孤兒 defer。
+
+| 子批 | 範圍(檔) | 內容 | 風險 | gate | A3/E2 需求 |
+|---|---|---|---|---|---|
+| **C6d-4** 漸層+killswitch(機械塌平,先) | tab-agents.html:231/233/247/248、risk-tab.js:1089 | 漸層扁平化(§13.5);killswitch→`--neg`(§13.6) | 中 | E1a→**E2 親算(risk-tab)** + tab-agents E2-light | A3 塌平可見;**了結 canon-9 forward-pointer**;無 --live-vs-灰 歧義 → 先行建信心 |
+| **C6d-1** authority chrome 中性化 | tab-live.js:36、tab-live.html:248/249/250-251、tab-governance.html:319/321/322/323/1314、console.html:904 | 族 A 全點(§13.1)→ `--text-*`/`--accent`/`--warn`/`--bg-raised`;T3 `.seal-mark`(operator-gated render) | 中 | E1a→**E2**→**A3** | 授權徽章/鈕去紫;**帶 T3 `.seal-mark` operator 裁決** |
+| **C6d-2** tab-system live/real-money + confirm | tab-system.html:52/63-64/66/67/68/69/88/89 | 族 B live 標記→`--live`(§13.2)+ confirm affordance→`--accent`(§13.3);單檔元素級原子 | **高**(real-money + confirm 流) | E1a→**E2 親算 + truth-table**→**A3 + operator-gate** | 實盤/live 框轉熱紅、進度轉青銅;**承 §13.8 operator-gate** |
+| **C6d-3** 殼層共用紫(寬 blast) | common.js:768(+977 消費核) | `.oc-chip-live`→`--live` 家族;`.live-metric-val.purple` 依消費核 | 中(全 tab 注入) | E1a→**E2 + 三面(demo/live/paper)目視** | live chip 轉熱紅 |
+| **DEFER** | common-formatters.js:372 / common.js:778 / app-learning.js:34,37 | strategy `.color` dead-data 刪(隨 strategy 清理)、`.oc-strategy-*` → C6b/C6c、app-learning → Phase 2 | 低 | — | C6d 內無視覺變更 |
+
+**排序**:C6d-4(機械、無歧義、了結 canon-9 pointer)→ **先解 §13.8 operator-gate** → C6d-1(chrome + seal-mark 裁決)
+→ C6d-2(最高審 real-money/confirm)→ C6d-3(殼層寬 blast)。C6d-2/3 的 --live 路由**必待 operator-gate 定案**才開批。
+
+### 13.9 需 operator 裁的真歧義(task 收尾)
+
+1. **【主 gate】族 B live/real-money 標記:`--live`(canon 6,PA 推薦)vs `--text-*` 中性(§2.3-literal)。**
+   PA 強推 `--live`:灰化 real-money 警示 = 降生存訊號(root principle 5/6),且違 §1.3 已立「live 標記→--live」先例;
+   `--live` 既有 token,canon 10 滿足。範圍 = tab-system `.purple`/confirm-live-guard/warn-box--live/mode-btn--live、
+   common.js oc-chip-live、tab-agents `--live` 漸層。**此為本節唯一「可見美學 + 安全訊號」雙重 operator 決策點。**
+2. **T3 trust-tier `.seal-mark`**:授權區辨是否值得 render 變更(§13.7)?PA=值得;CSS-only(label-only)為可接受降級。
+3. **confirm-ok-holding(69)live 專用性**:E1a/E2 前置核長按 confirm 是否 live 專用;共用→青銅(§13.3 已定),
+   live 專用且 operator 要 salience→ 可改 `--live`。
+4. **console.html:904 live_reserved**:殼層點,可隨 C6d-1 或 defer(低優)。
+
+---
+
 *變更記錄:2026-07-11 PA 初版(P0.4 子批 C1 前定稿)。度量對賬見 §0.3;fork/dead-helper PM 清單修正見 §4.1/§5。
 映射/子批變更走 §12 append-only。*
+*2026-07-11 PA 追加 §13 C6d micro-spec(palette 外色中性化逐處映射,實測 static/ HEAD `bdb689d7a`);紫拆三族
+(A chrome 中性 / B live→--live canon-6 gate / C strategy defer)、漸層塌平、killswitch→--neg(了結 canon-9 第四紅
+forward-pointer)、`.seal-mark` 判斷、C6d-1…4 子批。§13 映射循 §12 append-only。*
