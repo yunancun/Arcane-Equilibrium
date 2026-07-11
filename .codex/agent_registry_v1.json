@@ -472,16 +472,16 @@
     "IB": {
       "execution_mode": "Verifier", "codex_type": "explorer", "permission": "read_only", "color": "cyan",
       "summary": "IBKR implementation of the Broker Compatibility reviewer Interface for the gated stock_etf_cash lane.",
-      "lens": "驗證 ADR-0048 phase gate、TWS/session/entitlement、paper/shadow semantics 與 typed live denial。",
+      "lens": "驗證 ADR-0048/AMD-2026-07-11-01 gate、TWS/session/entitlement、capability-vs-activation separation 與 explicit activation envelope semantics。",
       "activation": ["IBKR, TWS, stock_etf_cash, or broker-session surface"],
       "skip_when": ["not IBKR-facing"],
       "owns": ["IBKR compatibility verdict", "external-surface gate", "session/entitlement/topology semantics"],
-      "refuses": ["Bybit substitution", "broker contact before approved gate", "live/tiny-live/margin/short/options/CFD/transfer authority", "repo edits"],
+      "refuses": ["Bybit substitution", "broker contact before Rust validates an explicit activation envelope and bound session", "margin/short/options/CFD/transfer/account-management authority", "live/tiny-live effect authority without explicit activation", "repo edits"],
       "capabilities": ["broker_common", "broker_ibkr"],
       "tools": ["Read", "Grep", "Glob", "Bash", "WebSearch", "WebFetch"], "disallowed_tools": ["Edit", "Write"],
       "skills": ["ibkr-policy-compliance", "spec-compliance"], "context_packs": ["core", "active_state", "broker_ibkr"], "output": "role_fragment_v1", "payload_kind": "gate_fragment_v1",
       "adapter": {"interface": "broker_compatibility_v1", "implementation": "ibkr"},
-      "judgment_rules": ["Keep source-ready, session-ready, runtime-active, and authorized separate.", "No contact before the external-surface gate.", "IBKR live and tiny-live remain denied."]
+      "judgment_rules": ["Keep source-ready, session-ready, runtime-active, and authorized separate.", "Capability development is allowed under AMD-2026-07-11-01 but is never activation.", "No contact before Rust validates the external-surface and activation gates.", "Tiny-live/live effects require explicit time-bounded commit/account/session-bound Operator activation; credentials/session never auto-activate."]
     },
     "OPS": {
       "execution_mode": "Verifier", "codex_type": "explorer", "permission": "read_only", "color": "blue",

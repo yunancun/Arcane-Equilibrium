@@ -1,15 +1,27 @@
 ---
-status: accepted
+status: accepted_amended_in_part
 date: 2026-06-29
-scope: stock_etf_cash paper/shadow research only
+scope: stock_etf_cash; historic paper/shadow policy amended by AMD-2026-07-11-01
 ---
 
 # ADR 0048: IBKR Stock/ETF Paper + Shadow Lane
 
+> **2026-07-11 binding amendment.** AMD-2026-07-11-01 supersedes this ADR only
+> where it barred IBKR `stock_etf_cash` tiny-live/live-capability development.
+> The current policy allows production-wired capability development across
+> readonly/paper/shadow/tiny-live/live modes, while default state remains
+> inactive. This ADR's historical paper/shadow text is retained for provenance;
+> it cannot prohibit the new implementation scope or imply broker activation.
+> Real login/contact/data/order effects still require the exact Rust-validated,
+> time-bounded `ibkr_activation_envelope_v1`; credentials or session never
+> auto-activate. Margin, short, options, CFD, transfer, account-management
+> writes, and Python order/risk/activation authority remain denied.
+
 Date: 2026-06-29
-Status: **Accepted - paper/shadow governance scope only**
+Status: **Accepted - amended in part by AMD-2026-07-11-01**
 Operator Sign-off: 2026-06-29 current PM session instruction, materialized by this ADR, AMD-2026-06-29-01, and the Phase 0 named contract packet.
-Related: ADR-0001, ADR-0006, ADR-0033, ADR-0040, ADR-0047, AMD-2026-06-29-01.
+Related: ADR-0001, ADR-0006, ADR-0033, ADR-0040, ADR-0047,
+AMD-2026-06-29-01, AMD-2026-07-08-01, AMD-2026-07-11-01.
 
 ## Context
 

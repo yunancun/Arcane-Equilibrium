@@ -35,8 +35,12 @@ narrow stable questions may skip it.
   legalize policy drift.
 - Mac is development; Linux `trade-core` is runtime. Delegated roles do not run
   Linux cargo, write PG, restart services, or contact private broker effects.
-- Bybit is the only active live execution venue. IBKR is the separately gated
-  ADR-0048 read-only/paper/shadow lane; live/tiny-live remains denied.
+- Bybit is the only currently active live execution venue. AMD-2026-07-11-01
+  permits IBKR `stock_etf_cash` readonly/paper/shadow/tiny-live/live capability
+  development, but it remains inactive and no development agent may contact a
+  broker. Real contact/effects require the Rust-validated, explicit,
+  time-bounded `ibkr_activation_envelope_v1` and a human-provided bound session;
+  credentials/session never auto-activate.
 - Never fake tests, runtime state, fills, lineage, broker contact, or evidence.
 - Preserve unrelated dirty-tree work. No destructive git action without explicit
   operator approval.

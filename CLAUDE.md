@@ -21,12 +21,16 @@ when stable shape or architecture matters, and history only on demand.
 - Formal product: `玄衡 · Arcane Equilibrium`.
 - `OpenClaw` is the control-plane / Gateway / Console / communication service
   family, not the total product name.
-- Bybit remains the only active live execution exchange. ADR-approved
-  non-Bybit exceptions are explicitly scoped: Binance market-data-only per
-  ADR-0033/0040, and IBKR `stock_etf_cash` read-only/paper/shadow research per
-  ADR-0048 + AMD-2026-06-29-01. IBKR live/tiny-live remains denied. Phase 2
-  read-only external contact is separately gated by AMD-2026-07-08-01 and the
-  Rust-owned read-only TWS client.
+- Bybit remains the only currently active live execution exchange. Binance is
+  market-data-only per ADR-0033/0040. AMD-2026-07-11-01 authorizes development
+  of a production-wired IBKR `stock_etf_cash` capability across readonly,
+  paper, shadow, tiny-live, and live modes, but it does **not** activate IBKR
+  or authorize broker contact. Until a Rust-validated, time-bounded
+  `ibkr_activation_envelope_v1` binds the exact lane/broker/environment/
+  operation, build SHA, account/session fingerprints, risk/Cost Gate/Guardian/
+  Decision Lease lineage, nonce, expiry, revocation, and kill-switch epoch,
+  IBKR is inactive and `EXTERNAL_VERIFICATION_PENDING`. Credentials and
+  sessions never auto-activate it.
 - Rust `openclaw_engine` is the trading, risk, strategy-config, and execution
   authority.
 - Python/FastAPI is the control plane, GUI backend, bridge, replay surface, and
@@ -133,8 +137,20 @@ then read `TODO.md` and the linked report/archive needed for the task.
 - Legacy crypto Paper is not an active promotion evidence lane unless a future
   explicit operator decision reopens it. Stage 1 alpha-bearing promotion is
   Demo-only after a green Stage 0R replay preflight. The ADR-0048 IBKR
-  `stock_etf_cash` paper/shadow lane is a separate research/evidence lane and
-  still cannot auto-promote to tiny-live, live, or durable-alpha proof.
+  `stock_etf_cash` lane may be developed as live-capable under
+  AMD-2026-07-11-01, but it remains inactive and cannot auto-promote, contact a
+  broker, or create an order/funds effect. Credentials and sessions never
+  activate it; the exact Rust-validated activation envelope is mandatory.
+- IBKR `margin`, `short`, `options`, `cfd`, `transfer`, and account-management
+  writes remain denied. Python/FastAPI/GUI never become IBKR order/risk/
+  activation authority; Guardian, Decision Lease, and the global Cost Gate
+  remain mandatory and cannot be weakened.
+- Every IBKR real-contact activation must originate from a Rust-owned,
+  authenticated Operator activation record. Rust atomically consumes its nonce
+  and enforces expiry/revocation/kill-switch epochs; the Phase 2 owner-only
+  read-only seal is never activation authority. Credential custody remains
+  Rust-only: no Python/FastAPI/GUI plaintext ingress, serialization, logging,
+  return, or environment-variable fallback.
 
 ## Alpha Evidence Governance
 

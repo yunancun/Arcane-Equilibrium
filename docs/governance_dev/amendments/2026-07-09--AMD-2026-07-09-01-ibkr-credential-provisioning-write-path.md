@@ -1,9 +1,17 @@
 # AMD-2026-07-09-01: IBKR Credential-Provisioning Write Path (paper/readonly, GUI-triggered, Rust-authority)
 
 Date: 2026-07-09
-Status: **DRAFT — pending Operator acceptance + explicit ACK of the new trust face** (not yet in force)
+Status: **Superseded before acceptance by AMD-2026-07-11-01; never in force**
 Related ADRs: ADR-0048. Related AMD: AMD-2026-06-29-01, AMD-2026-07-08-01 (which this amendment extends).
 Scope: `stock_etf_cash` read-only research lane only. Does **not** touch the Bybit `crypto_perp` runtime path.
+
+> **Supersession notice (2026-07-11).** This draft was never accepted and grants
+> no credential-write authority. AMD-2026-07-11-01 supersedes it before
+> acceptance with a broader capability-development policy while preserving the
+> separate activation boundary: credential/session presence never activates a
+> broker mode or permits contact/effects. Any real contact still needs the exact
+> Rust-validated `ibkr_activation_envelope_v1` and the corresponding human
+> session/activation.
 
 > Provenance: PM→CC governance gate (2026-07-09). CC ruled that a GUI-triggered credential-write path is **substantive** (a new trust face, not a CC-level clarification) and requires this Operator-approved amendment before any build. This draft materializes CC's ruling for Operator review. Nothing in the credential-write path (design or code) may begin before the Operator accepts this amendment **and** explicitly acknowledges the new trust face in the sign-off table.
 

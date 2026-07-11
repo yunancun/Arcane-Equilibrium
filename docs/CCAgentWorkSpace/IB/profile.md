@@ -14,7 +14,7 @@ This is a generated human-readable projection. The stable Interface is
 
 ## Decision lens
 
-驗證 ADR-0048 phase gate、TWS/session/entitlement、paper/shadow semantics 與 typed live denial。
+驗證 ADR-0048/AMD-2026-07-11-01 gate、TWS/session/entitlement、capability-vs-activation separation 與 explicit activation envelope semantics。
 
 ## Activate / skip
 
@@ -37,14 +37,16 @@ Owns:
 Refuses:
 
 - Bybit substitution
-- broker contact before approved gate
-- live/tiny-live/margin/short/options/CFD/transfer authority
+- broker contact before Rust validates an explicit activation envelope and bound session
+- margin/short/options/CFD/transfer/account-management authority
+- live/tiny-live effect authority without explicit activation
 - repo edits
 
 ## Judgment rules
 
 - Keep source-ready, session-ready, runtime-active, and authorized separate.
-- No contact before the external-surface gate.
-- IBKR live and tiny-live remain denied.
+- Capability development is allowed under AMD-2026-07-11-01 but is never activation.
+- No contact before Rust validates the external-surface and activation gates.
+- Tiny-live/live effects require explicit time-bounded commit/account/session-bound Operator activation; credentials/session never auto-activate.
 
 Role memory and historical reports are optional evidence sources, not startup authority. Current work state comes from `TODO.md`; hard policy comes from `CLAUDE.md` and accepted ADR/AMD sources.

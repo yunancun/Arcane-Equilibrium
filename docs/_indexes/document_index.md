@@ -96,7 +96,15 @@
 | `governance_dev/amendments/2026-07-04--AMD-2026-07-04-01-doc06-runtime-mutation-record-rule.md` | AMD-2026-07-04-01：DOC-06 Runtime Mutation 紀錄規則泛化（RM-1..RM-4：before/after + manifest + 持久位置 + 移除裁決 + pin-by-reference），泛化 FA F2 crontab 治理規則為 DOC-06 通用條款。 |
 | `references/2000_line_exception_registry.md` | 2000 行硬上限 documented pre-existing exception 正本（冷審計 R2 CC-2）：登記 10 個超標生產檔（路徑+行數+拆分歸屬）；CLAUDE.md §七/§九 指針指向此檔，冷審計據此不再重複觸發 retroactive finding。禁在登記波實際拆檔。 |
 
-### 2026-06-29 IBKR Stock/ETF paper + shadow feasibility lane
+### 2026-07-11 IBKR Stock/ETF full live-capability development
+
+| 文件 | 内容 |
+|------|------|
+| `governance_dev/amendments/2026-07-11--AMD-2026-07-11-01-ibkr-stock-etf-full-live-capability-development.md` | Current binding policy: complete `stock_etf_cash` live-capable source and production wiring is allowed, but default is inactive. `ibkr_activation_envelope_v1` must be Rust-validated and commit/account/session/time-bound before real contact or order effects; credentials/session never auto-activate. |
+| `adr/0048-ibkr-stock-etf-paper-shadow-lane.md` | Historic paper/shadow ADR, amended in part by AMD-2026-07-11-01. It retains lane isolation and permanent product/Python-authority denials; it cannot prohibit capability development or imply activation. |
+| `../TODO.md` | Current W1–W11 dispatch queue. `EXTERNAL_VERIFICATION_PENDING` may block only human credentials/session/activation and real broker receipts, never remaining no-contact work. |
+
+### 2026-06-29 IBKR Stock/ETF paper + shadow feasibility lane (historic)
 
 | 文件 | 内容 |
 |------|------|
