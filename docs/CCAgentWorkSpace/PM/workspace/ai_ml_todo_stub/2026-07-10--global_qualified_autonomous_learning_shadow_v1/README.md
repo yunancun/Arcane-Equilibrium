@@ -4,7 +4,7 @@ Date: 2026-07-10
 Owner: PM
 Goal: `GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1`
 Codex Goal thread: `019f4b6d-1e5b-7551-9fce-7a2f029a1675`
-Status: `ACTIVE_WP2B_COLD_EVALUATION_BOARD_V2`
+Status: `ACTIVE_WP2B_B2_2C_RESTART_SAFE_EVENT_DRIVEN_PRIMARY_HANDOFF`
 
 This is the durable PM-owned queue and state surface for the active Goal. It
 supersedes the old ALR P2 completion/terminal interpretation, but does not edit
@@ -25,23 +25,21 @@ order authority.
 
 ## Current source checkpoint
 
-WP2-B B2.2a validated-lineage propagation is source accepted at
-`38ccd014c5ce974fbd395625b9597e12832395ee`; Mac and `origin/main` matched at
-that checkpoint. Valid prospective `candidate_event_context_v1` now travels
-losslessly from the raw event through decision, ledger, and blocked outcome.
-Exact strategy, symbol, side, context ID, signal ID, engine mode, and timestamp
-bindings are checked without aliasing, trimming, coercion, or backfill. Invalid
-hashes, grafts, conflicting summaries, and missing bindings fail closed.
+WP2-B B2.2b cost-provenance source vertical is accepted at
+`a7d8d5f8b3af3282ab75667b31e45a40a712b2c4`; Mac and `origin/main` matched at
+source push. Candidate-board v2 now binds its cost evidence through publisher,
+board, adapter, and arbiter. A global `mean_abs` must exactly reconstruct from
+accepted symbol rows by sample count; signed cost is bounded by absolute cost;
+invalid types/keysets/counts/non-finite values fail closed; and a thin symbol
+can use only the reconciled global fallback.
 
-Only rows explicitly marked `explicit_source_rows` may carry prospective
-context. PostgreSQL decision-feature, pipeline-snapshot, and unmarked
-historical rows remain contextless and are marked
-`UNQUALIFIED_CONTEXT_MISSING`; the implementation does not synthesize an
-evaluation context or board projection. Candidate-board, outcome-writer, and
-price-observation production code was unchanged in B2.2a. The next source-only
-scope is B2.2b: explicit cold evaluation attachment plus candidate-board v2 and
-arbiter-input versioning, followed by the restart-safe event-driven primary
-handoff. Cron remains reconciliation only.
+The B2.2b frozen cost-provenance criteria are source accepted: focused
+adversarial tests `4 passed`, the one final-generation integrated suite
+`586 passed`, and E2/QC/QA PASS with P0/P1 `0/0`. This is not runtime,
+candidate qualification, proof, reward, training, OOS, serving, promotion, or
+profit evidence. The next source-only scope is
+`WP2-B2.2c-RESTART-SAFE-EVENT-DRIVEN-PRIMARY-HANDOFF`; cron remains
+reconciliation only.
 
 This checkpoint refreshed no Linux, service, PostgreSQL, Bybit, data-freshness,
 training, serving, promotion, or profit fact. The last accepted WP1 Linux and
