@@ -1,8 +1,8 @@
 # GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1 Queue
 
-Updated: 2026-07-11T14:07:42Z
+Updated: 2026-07-11T14:51:13Z
 Goal status: `ACTIVE`
-Current item: `WP2-B2.2c-RESTART-SAFE-EVENT-DRIVEN-PRIMARY-HANDOFF`
+Current item: `WP3-PROOF-REWARD-BRIDGE-SOURCE-ADAPTERS`
 WP1 checkpoint: behavioral code `c080c552b`, exact operational target
 `7d1c247947f0fb6c139f8a0583c5e6ed6ae62c70`, state `DONE_RUNTIME_ACCEPTED`.
 R4 passed the authorized disposable PostgreSQL proof and left zero residue;
@@ -49,8 +49,14 @@ accepted symbol count, rejects malformed or anti-conservative artifacts,
 preserves causal/hashing bindings through publisher, board, adapter, and
 arbiter, and keeps thin-symbol fallback conservative. Focused adversarial tests
 passed `4`; the single complete final-generation suite passed `586`. E2, QC,
-and QA found final P0/P1 `0/0`. No runtime was inspected or changed. B2.2c
-restart-safe event-driven primary handoff is active; cron remains reconciliation.
+and QA found final P0/P1 `0/0`. B2.2c is source accepted at
+`328125a08e0f15057a110c69266d6a6ea71c8826`: validated v2 board handoff is
+immutable/hash-bound, artifact-store replay is zero-write only after
+kind/payload/hash/edge integrity checks, and configured board deltas can
+re-evaluate while scanner traffic is idle. Focused `109` and final B2.2c
+integration `190` passed; E2/QC/QA final P0/P1 `0/0`. No runtime was inspected
+or changed. WP3 source adapters are now active; B2.2c runtime proof remains a
+later exact E3/BB gate.
 
 Allowed nonterminal transitions are `ACTIVE -> ADVANCED -> ACTIVE`,
 `ACTIVE -> DEFER_EVIDENCE -> ROTATE -> ACTIVE`, `ACTIVE -> REJECT -> ROTATE ->
@@ -63,7 +69,7 @@ authority.
 |---|---:|---|---|---|---|---|---|---|
 | `WP0-GOVERNANCE-BASELINE` | 0 | `DONE` | `PM -> CC -> FA -> PA -> PM` | Operator Goal directive; current source/runtime read-only facts | New stub, G1-G9 matrix, baseline/state/effect packets, root TODO import, ADR-0049 addendum, accepted AMD register entry; old SUI is rotated; NEAR frozen; historical files untouched | `false`, `false`, `false` | Governance reconciliation complete; retry/RCA `0/0` | Do not reselect unless governance semantics change. |
 | `WP1-ARTIFACT-CHURN-CONTROL` | 0 | `DONE_RUNTIME_ACCEPTED` | `PM -> PA -> E1 -> E2 -> E4 -> QA -> PM`; runtime `PM -> E3 -> BB -> PM` | WP0 `DONE`; source checkpoint `c080c552b`; operational target `7d1c24794` | Persist health only on state delta or bounded heartbeat; identical candidate/regime/evidence/blocker hash does not create another DEFER; record actual rows/bytes/cycle and durable health/decision/feedback ratios; heartbeat never triggers training; prove production reduction/no starvation | completed under exact R4 gate; no standing runtime authority | R4 isolated PG PASS; production session `bed1cba0-2a5b-45e3-8103-3243c80fdfd5`; `87` attempts, `74` suppressed, ratio `0.850575`; stale/new normalized row rates `740/117.05 h^-1`, bytes `1,755,280/406,509 h^-1`; decision suppression `1`; feedback `5/5`, exact `15+15+5=35` rows; authority mismatch/cache/retention `0/0/0/0`; no starvation; engine/API/watchdog unchanged; retry sequence R1-R4, successful R4 | No repeat. Preserve target runtime and advance WP2. |
-| `WP2-CANDIDATE-AWARE-ARBITER` | 0 | `ACTIVE_WP2B_B2_2C_RESTART_SAFE_EVENT_DRIVEN_PRIMARY_HANDOFF` | `PM -> QC -> MIT -> AI-E -> PA -> E1 -> E2 -> E4 -> QA -> PM` | WP1 `DONE_RUNTIME_ACCEPTED`; B2.2b source accepted at `a7d8d5f8b` | Candidate identity remains hash-bound and globally ranked by evidence, quality, proof gap, cost, cooldown, portfolio/capital context, and event-time lineage. | `false` source/tests; `false`; `false` | `DONE_SOURCE_ACCEPTED_B2_2B_COST_PROVENANCE`: board v2 and adapter/arbiter reconstruct identical accepted cost evidence; global mean is count-weighted, any `abs(signed) > absolute` rejected exactly, malformed artifacts rejected, thin fallback conservative. Focused `4 passed`; one integrated final-generation suite `586 passed`; E2/QC/QA PASS, P0/P1 `0/0`. No Linux/runtime/PG/Bybit/training/authority action; last accepted WP1 pin remains `7d1c24794`. | Execute B2.2c: event-driven primary, cron reconciliation only, restart-safe cursor/state, durable no-candidate/rotate, and no duplicate no-delta DEFER. Later runtime work requires a new exact E3/BB gate. |
+| `WP2-CANDIDATE-AWARE-ARBITER` | 0 | `DONE_SOURCE_ACCEPTED_B2_2C_RESTART_SAFE_HANDOFF` | `PM -> QC -> MIT -> AI-E -> PA -> E1 -> E2 -> E4 -> QA -> PM` | B2.2b accepted `a7d8d5f8b`; B2.2c accepted `328125a08` | Candidate identity remains hash-bound and globally ranked by evidence, quality, proof gap, cost, cooldown, portfolio/capital context, and event-time lineage. | source/tests `false`; runtime `true`; authority `false` | B2.2c adds immutable v1 board-handoff identity inside the existing projection artifact, scanner-idle board delta processing, bounded recent-source fallback, and integrity-checked `SUPPRESSED_UNCHANGED` zero-write replay. Missing provenance edges fail closed; no-qualified paths remain durable rotation. Focused `109`; integration `190`; E2/QC/QA PASS, P0/P1 `0/0`. No Linux/runtime/PG/Bybit/training/authority action. | Do not deploy/apply. Any B2.2c runtime proof requires fresh exact E3/BB. Advance source-only work to WP3 proof/reward adapters. |
 | `WP3-PROOF-REWARD-BRIDGE` | 0 | `PENDING` | `PM -> QC -> MIT -> AI-E -> PA -> E1 -> E2 -> E4 -> QA -> PM`; future acquisition `PM -> E3 -> BB -> Operator -> PM` | WP2 qualified current candidate | Repository adapter joins PIT manifest -> current candidate -> controlled Rust order/fill -> actual fee/slippage/funding -> reconstruction -> ProofPacket -> RewardLedger -> after-cost label; one chain proves integration, not training sufficiency | source/tests `false`; any Demo/order chain `true,true,true` with exact SHA and same-window Rust/Guardian/Lease/BBO/risk checks | Baseline proof/reward/complete chain `0/0/0`; retry/RCA `0/0` | Implement only read/validation/repository adapters until a fresh exact candidate packet exists. |
 | `WP4-ACTUAL-TRAINING-REGISTRY` | 0 | `PENDING` | `PM -> QC -> MIT -> AI-E -> PA -> E1 -> E2 -> E4 -> QA -> E3 -> BB -> PM` | WP2 eligibility; WP3 qualified labels; fresh migration reservation | New versioned migration (V157 only after fresh collision scan/gate) permits real decision/run kinds without editing V152/V153; actual training writes artifact plus model/data/code/config hashes and isolated challenger registry lineage; `model_training_performed=true` only after real fit | source design/tests `false`; migration creation/apply and runtime `true`; Operator `false`; runtime mutation gated | Baseline actual training/artifact/registry `0/0/0`; retry/RCA `0/0` | Specify migration and registry contracts without creating/applying migration before exact E3/BB gate. |
 | `WP5-OOS-DECISION-ENGINE` | 0 | `PENDING` | `PM -> QC -> MIT -> AI-E -> PA -> E1 -> E2 -> E4 -> QA -> PM` | WP4 | Walk-forward plus purge/embargo, hidden OOS, matched controls, negative cells, regime breakdown, stress, leakage/dedup defenses; decisions include `DEFER/ROTATE/TRAIN/REJECT/CHALLENGER_ACCEPT/ROLLBACK/STOP`; all reasons/hash lineage durable | `false` source/tests; `false`; `false` | Baseline hidden OOS/effect decisions `0/0`; retry/RCA `0/0` | Pre-register evaluation and decision-state contracts with mutation-biting fixtures. |
