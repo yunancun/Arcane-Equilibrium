@@ -4,7 +4,7 @@ Date: 2026-07-10
 Owner: PM
 Goal: `GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1`
 Codex Goal thread: `019f4b6d-1e5b-7551-9fce-7a2f029a1675`
-Status: `ACTIVE_WP4_TRUSTED_ED25519_VERIFIER_SOURCE_TDD_GATE`
+Status: `ACTIVE_WP4_V160_STYLE_ATOMIC_CONSUMPTION_SOURCE_TDD_GATE`
 
 This is the durable PM-owned queue and state surface for the active Goal. It
 supersedes the old ALR P2 completion/terminal interpretation, but does not edit
@@ -418,6 +418,47 @@ distinct-target offline replay and supply-chain inventory, and obtains
 independent source reviews. V160, PG apply/runtime activation, real bytes,
 issuer/runner contact, fit/model, serving/promotion, broker/order/risk, and
 authority remain separate gates.
+
+That source gate is now accepted below.
+
+## Trusted Ed25519 verifier source checkpoint
+
+Source checkpoint `0b9038c78a9e1a5256895901aa22376d645adbd4`
+completed `DONE_SOURCE_ACCEPTED_TRUSTED_ED25519_VERIFIER`. The exact accepted
+nine-path slice adds the isolated `openclaw_alr_fit_verifier` crate, its locked
+default-off dependencies, closed phase/API/receipt/error/allocation contracts,
+a bounded structured lexer/parser source guard, and dedicated online/offline
+CI. No engine/core/types or runtime consumer can reach the crate.
+
+The source success ceiling remains
+`STRICT_SIGNATURES_VALID_INPUT_BINDINGS_CAPABILITY_UNATTESTED` and
+`SOURCE_ONLY_UNATTESTED`. Source and hosted build/test success do not establish
+semantic phase, canonical envelope parity, policy/time adjudication, production
+platform attestation, durable consumption, persistence, fit, training, or
+model execution. All authority values remain false/zero and model training
+remains `NOT_ESTABLISHED`.
+
+Exact local verification passed Rust unit/integration `5+28`, structured
+scanner `10/10` metadata-free plus `10/10` metadata-aware, locked offline
+replay, `cargo check -Dwarnings`, rustfmt, direct CLI, pycompile, and diff
+checks. E2/E3/E4 final P0/P1/P2 is `0/0/0`. Hosted CI run `29213814965`
+(#1101) completed `8/8` jobs SUCCESS. Public crates.io dependency fetch is
+disclosed; no private/authenticated external contact occurred.
+
+The source checkpoint created no trusted platform wrapper, real issuer/runner
+bytes, V160 migration, PG/runtime state, fit, model artifact, registry row,
+serving/promotion state, broker/order/risk effect, Cost Gate change, or
+authority. Production/runtime V159 remains unapplied. G3/G4 remain failed,
+production proof/reward/model rows remain `0/0/0`, and
+`model_training_performed=false`. Source PASS is not training.
+
+The next state is directly
+`ACTIVE_WP4_V160_STYLE_ATOMIC_CONSUMPTION_SOURCE_TDD_GATE`, reusing the accepted
+v805 design without a new design-only gate. It must first obtain the required
+fresh migration collision/effect authorization, then author the fixed guarded
+V160 coordinator and proceed to disposable PostgreSQL verification. With no
+qualified candidate, only evidence collection or ROTATE is lawful; a fit must
+not be forced.
 
 ## Earlier B2.2c event-primary reconciliation
 
