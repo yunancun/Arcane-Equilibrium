@@ -4,7 +4,7 @@ Date: 2026-07-10
 Owner: PM
 Goal: `GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1`
 Codex Goal thread: `019f4b6d-1e5b-7551-9fce-7a2f029a1675`
-Status: `ACTIVE_WP4_DURABLE_FIT_ATTESTATION_SCHEMA_SOURCE_TDD`
+Status: `ACTIVE_WP4_DURABLE_FIT_ATTESTATION_DISPOSABLE_PG_VERIFICATION_GATE`
 
 This is the durable PM-owned queue and state surface for the active Goal. It
 supersedes the old ALR P2 completion/terminal interpretation, but does not edit
@@ -197,6 +197,33 @@ effect. The next safe slice is
 `WP4-DURABLE-FIT-ATTESTATION-SCHEMA-SOURCE-TDD`: repeat that scan at the
 then-current head, then author only the forward migration and isolated/static
 tests. Migration apply, runtime contact, and real fit remain separately gated.
+
+The forward durable-attestation schema source is now accepted and published at
+`27bfe34b608b732071205c351dd1aa3fdd7d2283` on
+`origin/agent/alr-wp4-contracts`, based on `origin/main`
+`b83ddee0d2c1e74db52355fbcce9ff0c49cee44f`. V159 contractually closes the
+direct V158 unattested persistence surface through exact authenticated receipt
+bytes, immutable attestation lineage, structural/durable identity separation,
+atomic complete binding, database-time expiry/replay, v1 hard closure, least
+privilege, and false/zero authority. The collision scan is `max159/duplicates0`
+and frozen V158 remains byte-identical at SHA-256 `b1ff8e2d...`.
+
+Source/static verification passed `232/232`, V158+V159 passed `269/269`, and
+the governed Rust schema harness passed `7/7`; E2/CC/E3/MIT final P0/P1/P2 are
+`0/0/0`, with E4 `SOURCE_ONLY_PASS`. The V006 `trading_ai` CI precondition was
+caught with `4 RED` and repaired to `4 GREEN`. The Rust run used an isolated
+HOME but fetched public crates.io dependencies; an offline retry failed before
+tests because that home lacked a cache. Zero-network/offline reproducibility is
+therefore not proven.
+
+V159 was not applied and neither disposable probe ran. Beyond the expected
+GitHub source fetch/push, no private trading/runtime or broker endpoint,
+PG/Linux/runtime, trainer/fit, model/file, durable row, registry,
+serving/promotion, or authority effect occurred. G3/G4 remain failed. The next
+highest-ROI safe item is
+`WP4-DURABLE-FIT-ATTESTATION-DISPOSABLE-PG-VERIFICATION-GATE`: governed,
+isolated PG16/Timescale execution of the functional and concurrency probes
+only. External issuer evidence and a real fit remain a later separate gate.
 
 ## Earlier B2.2c event-primary reconciliation
 
