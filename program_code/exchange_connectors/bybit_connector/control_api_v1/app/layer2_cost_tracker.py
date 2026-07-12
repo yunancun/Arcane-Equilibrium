@@ -74,6 +74,9 @@ from . import layer2_adaptive as _adaptive_sibling
 from . import layer2_cost_recording as _recording_sibling
 from . import layer2_h_state_snapshots as _h_state_sibling
 from . import l2_secret_redactor as _redactor
+# 隊列 H：grandfather 正規化用的靜態白名單來源（無循環——provider_client
+# 頂層不 import 任何 app 模組，layer2_types 只在函數內延遲 import）。
+from . import provider_client
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +127,33 @@ def _sanitize_session_dict_for_persist(session_dict: dict[str, Any]) -> dict[str
 # ═══════════════════════════════════════════════════════════════════════════════
 # Cost State Store / 成本状态存储
 # ═══════════════════════════════════════════════════════════════════════════════
+
+# 隊列 H：provider/model 配對欄位（default + tier2/3 降級），與 layer2_routes
+# 的 _PROVIDER_MODEL_CONFIG_KEYS 覆蓋的 6 鍵一一對應。
+_PROVIDER_MODEL_PAIR_FIELDS: tuple[tuple[str, str], ...] = (
+    ("default_provider", "default_model"),
+    ("fallback_tier2_provider", "fallback_tier2_model"),
+    ("fallback_tier3_provider", "fallback_tier3_model"),
+)
+
+
+def _pair_statically_legal(provider: str, model: str) -> bool:
+    """靜態判定 provider/model 配對是否合法（純記憶體查表，不打網路）。
+
+    cloud provider（anthropic/deepseek/openai）：model 必須在
+    provider_client.PROVIDER_TIERS 靜態白名單內——與 layer2_routes 線上校驗
+    用的 provider_model_catalog.allowed_model_values 對 cloud provider 逐字
+    等價（兩者同源自 TIER_* 常量），故本檢查放行的配對線上校驗必也放行。
+    local_llm：allowed_model_values 依賴 Ollama 即時列表（掉線=空表），
+    啟動載入時不可依賴；只做弱前綴檢查（``local:`` 前綴），細粒度合法性
+    仍由線上校驗把關——避免 Ollama 掉線時把合法 local 配對誤重置。
+    """
+    if provider not in provider_client.L2_PROVIDERS:
+        return False
+    if provider == provider_client.PROVIDER_LOCAL_LLM:
+        return provider_client.is_local_tier(model)
+    return model in provider_client.PROVIDER_TIERS.get(provider, [])
+
 
 def _default_cost_state() -> dict[str, Any]:
     """Default cost state structure / 默认成本状态结构"""
@@ -238,19 +268,49 @@ class Layer2CostTracker:
                 try:
                     with self._file_path.open("r", encoding="utf-8") as f:
                         data = json.load(f)
-                    self._apply_state(data)
+                    if self._apply_state(data):
+                        # 隊列 H：grandfather 修復後立即持久化，避免非法舊值
+                        # 殘留檔案。_save 走 _state_lock（RLock 可重入 + flock）；
+                        # 冪等——修復後配對合法，下次載入不再觸發回寫。
+                        self._save()
                     return
                 except (json.JSONDecodeError, KeyError, TypeError):
                     logger.warning("layer2_cost_state.json corrupted, reinitializing")
             self._save()
 
-    def _apply_state(self, data: dict[str, Any]) -> None:
-        """Apply loaded state to in-memory objects / 将加载的状态应用到内存对象"""
+    def _apply_state(self, data: dict[str, Any]) -> bool:
+        """Apply loaded state to in-memory objects / 将加载的状态应用到内存对象
+
+        回傳值：是否觸發了 grandfather 配對修復（True 時呼叫端須回寫持久化）。
+        """
         # Config
         cfg = data.get("config", {})
         for k, v in cfg.items():
             if hasattr(self._config, k):
                 setattr(self._config, k, v)
+
+        # 隊列 H grandfather 正規化：歷史 state 檔可能殘留靜態非法的
+        # provider/model 配對（例 default=(anthropic, "qwen3.5:9b")）。
+        # layer2_routes._validate_layer2_model_config 對 6 鍵做整體校驗，
+        # 非法舊值會把全部 6 鍵鎖成事實唯讀。此處在狀態擁有者的 load 路徑
+        # 逐對重置為出廠對（Layer2Config dataclass 預設）。行為保持：引擎
+        # map_tier_to_provider 對未知 tier 取 rank 3 本就映到出廠 tier
+        # （anthropic→sonnet），重置只是把實際行為誠實化。
+        factory = Layer2Config()
+        repaired = False
+        for provider_key, model_key in _PROVIDER_MODEL_PAIR_FIELDS:
+            provider = str(getattr(self._config, provider_key) or "")
+            model = str(getattr(self._config, model_key) or "")
+            if _pair_statically_legal(provider, model):
+                continue
+            setattr(self._config, provider_key, getattr(factory, provider_key))
+            setattr(self._config, model_key, getattr(factory, model_key))
+            repaired = True
+            logger.warning(
+                "layer2 config grandfather 修復：(%s, %s)=(%r, %r) 非法，重置為出廠對 (%r, %r)",
+                provider_key, model_key, provider, model,
+                getattr(factory, provider_key), getattr(factory, model_key),
+            )
 
         # Pricing
         pricing_data = data.get("pricing", {})
@@ -272,6 +332,8 @@ class Layer2CostTracker:
         self._adaptive.paper_pnl_7d_usd = adp.get("paper_pnl_7d_usd", 0.0)
         self._adaptive.data_days = adp.get("data_days", 0)
         self._adaptive.last_recalculated_ms = adp.get("last_recalculated_ms", 0)
+
+        return repaired
 
     def _save(self) -> None:
         """Atomic persist: tmp-file-then-replace / 原子持久化：tmp→replace 防止損壞
