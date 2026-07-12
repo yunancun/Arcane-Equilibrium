@@ -1,9 +1,9 @@
 # GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1 Queue
 
-Updated: 2026-07-12T18:07:23Z
+Updated: 2026-07-12T18:58:46Z
 Goal status: `ACTIVE`
 Current item: `WP4-ACTUAL-TRAINING-REGISTRY`
-Current state: `ACTIVE_WP4_TRUSTED_ED25519_VERIFIER_SOURCE_PREAUTHORING_GATE`
+Current state: `ACTIVE_WP4_TRUSTED_ED25519_VERIFIER_SOURCE_TDD_GATE`
 WP1 checkpoint: behavioral code `c080c552b`, exact operational target
 `7d1c247947f0fb6c139f8a0583c5e6ed6ae62c70`, state `DONE_RUNTIME_ACCEPTED`.
 R4 passed the authorized disposable PostgreSQL proof and left zero residue;
@@ -296,12 +296,27 @@ Rust verifier, platform attestation, V160, PostgreSQL/runtime, fit/model,
 registry/serving/promotion, broker, order, risk, Cost Gate, or authority effect
 exists. Production/runtime V159 remains unapplied; G3/G4 remain failed.
 
-The active safe slice is now read-only
-`WP4-TRUSTED-ED25519-VERIFIER-SOURCE-PREAUTHORING-GATE`: bind one exact Rust
-strict-Ed25519 verifier module and phase-receipt source/test boundary, with
-production trust and runtime activation still separate. Do not author source,
-reserve/author/apply V160, contact PG/runtime/issuer/runner, run fit, create
-model state, or grant authority in this gate.
+That source-preauthoring slice is now
+`DONE_DESIGN_ACCEPTED_TRUSTED_ED25519_VERIFIER_SOURCE_PREAUTHORING_GATE` at
+reviewed clean head `75f3db2b55cd1d9737d83c811d291abecb67ad49`. It freezes one
+isolated non-engine Rust library, exact default-off crypto pins, one deep
+phase-ordered Interface, internally built strict preimages, source-only
+unattested canonical receipts, total errors/allocation bounds, redacted Debug,
+17 false/17 zero authority, a same-process non-launderable future attestation
+seam, and distinct-target offline plus metadata/lock supply-chain proof.
+
+FA/CC/E3 initial findings `0/5/1`, `0/2/0`, and `0/4/4` were repaired. Final
+PA/FA/CC/E3/MIT P0/P1/P2 are `0/0/0`. This design gate authored/fetched/
+compiled no verifier source or crate and created no V160, PG/runtime, real-byte,
+fit/model, registry/serving, broker/order/risk, Cost Gate, or authority effect.
+G3/G4 remain failed.
+
+The active safe slice is now separately governed
+`WP4-TRUSTED-ED25519-VERIFIER-SOURCE-TDD-GATE`: author only the exact nine-path
+slice, start RED, record the public crates.io fetch, prove clean distinct-target
+offline replay and supply-chain/source reviews. Do not reserve/author/apply
+V160, contact PG/private runtime/issuer/runner, run fit, create model state, or
+grant authority.
 
 Allowed nonterminal transitions are `ACTIVE -> ADVANCED -> ACTIVE`,
 `ACTIVE -> DEFER_EVIDENCE -> ROTATE -> ACTIVE`, `ACTIVE -> REJECT -> ROTATE ->
@@ -316,7 +331,7 @@ authority.
 | `WP1-ARTIFACT-CHURN-CONTROL` | 0 | `DONE_RUNTIME_ACCEPTED` | `PM -> PA -> E1 -> E2 -> E4 -> QA -> PM`; runtime `PM -> E3 -> BB -> PM` | WP0 `DONE`; source checkpoint `c080c552b`; operational target `7d1c24794` | Persist health only on state delta or bounded heartbeat; identical candidate/regime/evidence/blocker hash does not create another DEFER; record actual rows/bytes/cycle and durable health/decision/feedback ratios; heartbeat never triggers training; prove production reduction/no starvation | completed under exact R4 gate; no standing runtime authority | R4 isolated PG PASS; production session `bed1cba0-2a5b-45e3-8103-3243c80fdfd5`; `87` attempts, `74` suppressed, ratio `0.850575`; stale/new normalized row rates `740/117.05 h^-1`, bytes `1,755,280/406,509 h^-1`; decision suppression `1`; feedback `5/5`, exact `15+15+5=35` rows; authority mismatch/cache/retention `0/0/0/0`; no starvation; engine/API/watchdog unchanged; retry sequence R1-R4, successful R4 | No repeat. Preserve target runtime and advance WP2. |
 | `WP2-CANDIDATE-AWARE-ARBITER` | 0 | `DONE_SOURCE_ACCEPTED_B2_2C_EVENT_PRIMARY` | `PM -> QC -> MIT -> AI-E -> PA -> E1 -> E2 -> E4 -> QA -> PM` | B2.2b accepted `a7d8d5f8b`; restart-safe handoff `328125a08`; READY repair `03ef761b`; event primary `1b85318f` | Candidate identity remains hash-bound and globally ranked by evidence, quality, proof gap, cost, cooldown, portfolio/capital context, and event-time lineage. Candidate-board publication is a wake-only event; the bounded adapter remains content authority. | source/tests `false`; runtime `true`; authority `false` | Existing immutable handoff/replay semantics are preserved. The follow-up replaces five-second candidate polling with PG/inotify multiplexing, startup/overflow/rearm reconciliation, held-directory-fd ABA protection, candidate-only board wakes, and exact full-rescan content validation. Pristine origin exposed six B2.2c projection regressions; repaired focused `23`, event `33 passed/1 skipped`, full ML `1790 passed/36 skipped`; independent reviews PASS, P0/P1/P2 `0/0/0`. No Linux/runtime/PG/Bybit/training/authority action. | Do not deploy/apply. Any real inotify/service proof requires fresh exact E3/BB. WP3 source is accepted; continue WP4 contracts. |
 | `WP3-PROOF-REWARD-BRIDGE` | 0 | `DONE_SOURCE_ACCEPTED_READ_ONLY_REPOSITORY_ADAPTER` | `PM -> QC -> MIT -> AI-E -> PA -> E1 -> E2 -> E4 -> QA -> CC -> FA -> PM`; future acquisition `PM -> E3 -> BB -> Operator -> PM` | WP2 qualified current candidate; pure validation `8999aa2b`; repository adapter `c2bdefbf` | Current candidate projection and bounded exact lineage are repository-derived; binding is internal; existing V153 proof/reward containers are hash-validated; exact bytes and canonical inputs remain distinct; final head/lineage/bridge recheck is one snapshot. Receipts are in-memory only and never proof/runtime attestation. | source/tests `false`; any migration, Demo/order chain, or external acquisition remains gated | Focused `66 passed/1 skipped`; full ML `1818 passed/36 skipped`; E2/QA/CC-FA P0/P1/P2 `0/0/0`; rows/bytes written `0/0`; proof/reward/complete runtime chain remains `0/0/0`. Bridge or lineage overflow is explicit schema-required with no receipt. | Do not retrofit V153 or reopen WP3 absent material P0/P1. WP4 source contract is accepted; any external receipt acquisition remains fresh E3/BB/Operator gated. |
-| `WP4-ACTUAL-TRAINING-REGISTRY` | 0 | `ACTIVE_WP4_TRUSTED_ED25519_VERIFIER_SOURCE_PREAUTHORING_GATE` | `PM -> QC -> MIT -> AI-E -> PA -> E1 -> E2 -> E4 -> QA -> E3 -> BB -> PM` | WP3 repository `c2bdefbf`; WP4 chain through V159/disposable PG; handshake source `c900d1ecb`; atomic-consumption design head `9a41c8d2a` | Authorize only the future source/test seam for one dedicated Rust strict-Ed25519 verifier and closed phase receipts. Production capability attestation, DB coordinator, and runtime remain separate. | current gate read-only `false`; verifier source, V160 source/PG/runtime, external issuer/runner, and real fit/model remain fresh separate gates; Operator `false` | `DONE_DESIGN_ACCEPTED_V160_STYLE_ATOMIC_CONSUMPTION_PREAUTHORING_GATE`: phase receipts, append-only lifecycle, exact replay/conflict oracle, success-only V159 atomicity, DB expiry, roles/ACL and deletion test frozen; final PA/FA/CC/E3/MIT `0/0/0`. No verifier/source/SQL/PG/runtime/fit/model/authority effect. G3/G4 still fail. | Execute only `WP4-TRUSTED-ED25519-VERIFIER-SOURCE-PREAUTHORING-GATE`. No source authoring yet, V160 reserve/author/apply, real bytes, PG/files/network/runtime, external contact, trainer/fit, model publication, serving/promotion, broker, order, risk, Cost Gate, or authority effect. |
+| `WP4-ACTUAL-TRAINING-REGISTRY` | 0 | `ACTIVE_WP4_TRUSTED_ED25519_VERIFIER_SOURCE_TDD_GATE` | `PM -> QC -> MIT -> AI-E -> PA -> E1 -> E2 -> E4 -> QA -> E3 -> BB -> PM` | WP3 repository `c2bdefbf`; WP4 chain through V159/disposable PG; handshake source `c900d1ecb`; atomic-consumption design `9a41c8d2a`; verifier preauthoring head `75f3db2b5` | Implement only the exact isolated strict-Ed25519 nine-path source/test/lock/CI seam and prove its source-only unattested receipt contract. Production capability attestation, DB coordinator, and runtime remain separate. | public crates.io fetch allowed and recorded; source/tests `false`; V160/PG/runtime/external issuer/runner/real fit/model fresh separate gates; Operator `false` | `DONE_DESIGN_ACCEPTED_TRUSTED_ED25519_VERIFIER_SOURCE_PREAUTHORING_GATE`: exact primitive/API/phases/receipt/errors/bounds/Debug/attestation/offline/graph contract frozen; final PA/FA/CC/E3/MIT `0/0/0`. No verifier source/fetch/compile/SQL/PG/runtime/fit/model/authority effect yet. G3/G4 still fail. | Execute only `WP4-TRUSTED-ED25519-VERIFIER-SOURCE-TDD-GATE`: RED first, exact nine paths, recorded public fetch, distinct-target offline replay, supply-chain and independent source reviews. No V160, real bytes, PG/private runtime/external contact, fit/model, serving/promotion, broker/order/risk/Cost Gate, or authority effect. |
 | `WP5-OOS-DECISION-ENGINE` | 0 | `PENDING` | `PM -> QC -> MIT -> AI-E -> PA -> E1 -> E2 -> E4 -> QA -> PM` | WP4 | Walk-forward plus purge/embargo, hidden OOS, matched controls, negative cells, regime breakdown, stress, leakage/dedup defenses; decisions include `DEFER/ROTATE/TRAIN/REJECT/CHALLENGER_ACCEPT/ROLLBACK/STOP`; all reasons/hash lineage durable | `false` source/tests; `false`; `false` | Baseline hidden OOS/effect decisions `0/0`; retry/RCA `0/0` | Pre-register evaluation and decision-state contracts with mutation-biting fixtures. |
 | `WP6-EVENT-DRIVEN-AUTO-EVOLUTION` | 1 | `PENDING` | `PM -> PA -> E1 -> E2 -> E4 -> QA -> E3 -> BB -> PM` | WP1-WP5 | LISTEN/inotify event-driven service, no cron/fixed training; natural cycles, restart recovery, two distinct evidence-delta hashes automatically re-evaluate/retrain/rotate; useful model/evaluation/registry/effect artifacts; safe retention | production service/restart/retention `true`; Operator only for external order evidence; runtime mutation `true` | Event-primary candidate-board source behavior exists at `1b85318f`, but the Linux integration test was skipped on Darwin and no service/runtime proof ran. Second-delta evolution remains unproven; retry/RCA `0/0`. | After WP3-WP5, run Linux ABI/service/restart/natural-cycle tests under a fresh exact E3/BB gate. |
 | `WP7-ADVERSARIAL-FINAL-AUDIT` | 1 | `PENDING` | `PM -> CC -> FA -> QC -> MIT -> AI-E -> PA -> E2 -> E4 -> QA -> E3 -> BB -> PM` | WP1-WP6 | G1-G9 machine evidence, stale/duplicate/no-delta/rollback/restart/resource/retention/authority attacks, three-head alignment, current runtime proof, and 16-root-principles/spec compliance all pass | runtime verification `true`; Operator only if an external effect is required; no automatic authority | Final retry/RCA counters aggregate all WPs | Execute independent audits; terminal only after all G1-G9 PASS. |
