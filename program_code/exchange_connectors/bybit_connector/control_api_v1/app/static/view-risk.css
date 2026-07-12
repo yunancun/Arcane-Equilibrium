@@ -155,7 +155,7 @@
 .risk-view .oc-chip-warn    { background: var(--warn-bg);  border-color: var(--warn);          color: var(--warn); }
 .risk-view .oc-chip-bad     { background: var(--neg-bg);   border-color: var(--neg);           color: var(--neg); }
 .risk-view .oc-chip-neutral { background: var(--bg-hover); border-color: var(--border-strong); color: var(--text-secondary); }
-.risk-view .oc-chip-info    { background: rgba(56,139,253,0.12); border-color: rgba(56,139,253,0.25); color: var(--text-secondary); }
+.risk-view .oc-chip-info    { background: rgba(var(--ov-accent-rgb),0.12); border-color: rgba(var(--ov-accent-rgb),0.25); color: var(--text-secondary); }
 
 /* ── Explainer(ocExplain 輸出;暗底 rgba→--bg-sunken)── */
 .risk-view .oc-explain { margin-bottom: 14px; }
