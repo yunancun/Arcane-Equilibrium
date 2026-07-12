@@ -45,7 +45,7 @@ _V158 = (_ROOT / "sql/migrations/V158__alr_qualified_challenger_training.sql").r
 _V159 = (_ROOT / "sql/migrations/V159__alr_durable_fit_attestation.sql").resolve()
 _EXPECTED_SHA256 = {
     "V158": "7ed70599c6bd5f3cdb3376bc135a952d8c18f4ad62a62432c2bfdd8ee84e446b",
-    "V159": "5941b2b2b164e4b5408be32507d26e58faccc35f73cf83f6bc057498580fae5e",
+    "V159": "5fcd091057c8aa02bf58e649e5294fbb675c081ba02805f4024df5adaa6dba25",
 }
 _ON_ERROR_STOP_EQUIVALENT = True
 _SAFE_FAILURE_MESSAGE = "V159 durable-fit disposable probe failed safely"

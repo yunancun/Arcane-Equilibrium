@@ -85,6 +85,41 @@ def test_v159_plpgsql_if_guards_do_not_terminate_at_nested_case_then() -> None:
     _assert_top_level_case_guards_are_parenthesized(_sql())
 
 
+def _assert_json_type_predicates_are_parseable(sql: str) -> None:
+    assert "IS DISTINCT FROM 'string' IS FALSE" not in sql
+    assert "IS DISTINCT FROM 'number' IS FALSE" not in sql
+    assert sql.count("IS NOT DISTINCT FROM 'string'") == 74
+    assert sql.count("IS NOT DISTINCT FROM 'number'") == 8
+
+
+def test_v159_json_type_predicates_do_not_chain_is_operators() -> None:
+    _assert_json_type_predicates_are_parseable(_sql())
+
+
+@pytest.mark.parametrize(
+    "safe,unsafe",
+    (
+        (
+            "IS NOT DISTINCT FROM 'string'",
+            "IS DISTINCT FROM 'string' IS FALSE",
+        ),
+        (
+            "IS NOT DISTINCT FROM 'number'",
+            "IS DISTINCT FROM 'number' IS FALSE",
+        ),
+    ),
+)
+def test_v159_chained_json_type_predicate_mutations_are_rejected(
+    safe: str, unsafe: str
+) -> None:
+    sql = _sql()
+    assert safe in sql
+    with pytest.raises(AssertionError):
+        _assert_json_type_predicates_are_parseable(
+            sql.replace(safe, unsafe, 1)
+        )
+
+
 @pytest.mark.parametrize("safe,unsafe", _TOP_LEVEL_CASE_GUARDS)
 def test_v159_unparenthesized_top_level_case_guard_mutations_are_rejected(
     safe: str, unsafe: str
@@ -216,12 +251,12 @@ def _assert_core_binding_contract(sql: str) -> None:
     ):
         assert field in attestation_table, field
     assert code.count("jsonb_typeof(") >= 30
-    assert code.count("IS DISTINCT FROM 'string'") >= 20
+    assert code.count("IS NOT DISTINCT FROM 'string'") >= 20
     assert (
         "jsonb_typeof(receipt_projection->'schema_version') "
-        "IS DISTINCT FROM 'string' IS FALSE"
+        "IS NOT DISTINCT FROM 'string'"
     ) in attestation_table
-    assert "IS DISTINCT FROM 'number'" in code
+    assert "IS NOT DISTINCT FROM 'number'" in code
     assert attestation_table.count("~'^[1-9][0-9]{0,18}$'") == 3
     assert attestation_table.count("::NUMERIC BETWEEN 1 AND 9223372036854775807") == 3
     assert attestation_table.count("artifact_hash}'<>") == 3
@@ -284,8 +319,8 @@ def test_v159_core_binding_viability_contract() -> None:
             "'authentication_status','subject','claims','removed_result_observation',",
         ),
         (
-            "jsonb_typeof(receipt_projection->'schema_version') IS DISTINCT FROM 'string' IS FALSE",
-            "jsonb_typeof(receipt_projection->'schema_version') IS DISTINCT FROM 'number' IS FALSE",
+            "jsonb_typeof(receipt_projection->'schema_version') IS NOT DISTINCT FROM 'string'",
+            "jsonb_typeof(receipt_projection->'schema_version') IS NOT DISTINCT FROM 'number'",
         ),
         (
             "actual_input fields/type mismatch",
@@ -2104,10 +2139,10 @@ def _assert_functional_positive_helper_contracts(tree: ast.Module) -> None:
 def _assert_functional_probe_contract(source: str) -> None:
     compile(source, str(FUNCTIONAL_PROBE), "exec")
     assert hashlib.sha256(V159.read_bytes()).hexdigest() == (
-        "5941b2b2b164e4b5408be32507d26e58faccc35f73cf83f6bc057498580fae5e"
+        "5fcd091057c8aa02bf58e649e5294fbb675c081ba02805f4024df5adaa6dba25"
     )
     assert (
-        '"V159": "5941b2b2b164e4b5408be32507d26e58faccc35f73cf83f6bc057498580fae5e"'
+        '"V159": "5fcd091057c8aa02bf58e649e5294fbb675c081ba02805f4024df5adaa6dba25"'
         in source
     )
     assert '_ACK_ENV = "ALR_V159_DISPOSABLE_ACK"' in source
@@ -2647,7 +2682,7 @@ def test_v159_functional_probe_ast_contract() -> None:
             "allow_role_default_session(connection)",
         ),
         (
-            '"V159": "5941b2b2b164e4b5408be32507d26e58faccc35f73cf83f6bc057498580fae5e"',
+            '"V159": "5fcd091057c8aa02bf58e649e5294fbb675c081ba02805f4024df5adaa6dba25"',
             '"V159": "' + "0" * 64 + '"',
         ),
         ("BYTE_EXACT_READBACK", "BYTE_READBACK_SKIPPED"),
@@ -2977,7 +3012,7 @@ def test_v159_functional_probe_ast_rejects_composed_scenario_bypass() -> None:
 
 _CONCURRENCY_EXPECTED_SHA256 = {
     "V158": "7ed70599c6bd5f3cdb3376bc135a952d8c18f4ad62a62432c2bfdd8ee84e446b",
-    "V159": "5941b2b2b164e4b5408be32507d26e58faccc35f73cf83f6bc057498580fae5e",
+    "V159": "5fcd091057c8aa02bf58e649e5294fbb675c081ba02805f4024df5adaa6dba25",
 }
 _CONCURRENCY_SCENARIO_ORDER = (
     "_scenario_identical_attestation",
