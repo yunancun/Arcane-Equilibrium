@@ -573,11 +573,8 @@ RESOLVED_CONCAT_SEEDS: set[tuple[str, str]] = {
 
 # KNOWN_MISMATCH_ALLOWLIST:GUI 呼一條後端**無**的路由(真 drift / forward-ref),各附處置。
 KNOWN_MISMATCH_ALLOWLIST: set[tuple[str, str]] = {
-    # M1 governance.js:93  GET /api/v1/paper/status —— 真 drift(HIGH)。後端無此路由
-    #   (有 /paper/session/status·/metrics·/positions·/pnl);try/catch→404→paperState={}
-    #   → govPostReconcile 靜默 POST 空 paper_state = dead call。
-    #   處置=待修 P1.0-5-M1(repoint GUI 到正確路由;修好即刪本列=收緊)。暫 allowlist 使綠。
-    ("GET", "/api/v1/paper/status"),
+    # M1 已解決(reconcile Path B):govPostReconcile 改為伺服器端組裝快照,前端不再呼叫
+    #   GET /api/v1/paper/status → drift 從源頭消失,ratchet 自動收緊(移除本列)。
     # M2 handoff_helper.js:363  GET /api/v1/replay/handoff/state —— known forward-ref(HIGH)。
     #   碼自證「Endpoint not yet shipped, Wave 8 sibling S13 in flight」+ graceful pending。
     #   處置=allowlist(Wave 8 closure 建後端路由時刪),非 bug。

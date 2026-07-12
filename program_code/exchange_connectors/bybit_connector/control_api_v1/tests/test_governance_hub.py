@@ -30,6 +30,10 @@ from unittest import mock
 import pytest
 
 from app.governance_hub import GovernanceHub, GovernanceStatus, GovernanceMode
+from app.governance_hub_event_handlers import (
+    apply_reconcile_advisory_cap,
+    RECONCILE_ADVISORY_FIRST_MAX_ESCALATION,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -598,6 +602,147 @@ class TestReconciliation:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Test: Advisory-First cap (reconcile Path B §4 / CC-1) — E4 追加
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestReconcileAdvisoryCap:
+    """apply_reconcile_advisory_cap / RECONCILE_ADVISORY_FIRST_MAX_ESCALATION（2a 純函數）。
+
+    這是手動對賬「永不 freeze」唯一 load-bearing 的防護:FATAL 升級 token 必須被封頂為
+    MISMATCH_MAJOR(僅升風控,永不 auth-freeze / circuit-break);其餘 token 原樣通過。
+    """
+
+    def test_constant_value_is_mismatch_major(self):
+        # 「按鈕是否已武裝?」grep 一個常數即可回答;值必須恰為 MISMATCH_MAJOR。
+        assert RECONCILE_ADVISORY_FIRST_MAX_ESCALATION == "MISMATCH_MAJOR"
+
+    def test_fatal_is_capped_to_major(self):
+        assert apply_reconcile_advisory_cap("FATAL") == "MISMATCH_MAJOR"
+        assert apply_reconcile_advisory_cap("FATAL") == RECONCILE_ADVISORY_FIRST_MAX_ESCALATION
+
+    def test_major_passes_through(self):
+        assert apply_reconcile_advisory_cap("MISMATCH_MAJOR") == "MISMATCH_MAJOR"
+
+    def test_minor_passes_through(self):
+        assert apply_reconcile_advisory_cap("MISMATCH_MINOR") == "MISMATCH_MINOR"
+
+    def test_none_passes_through(self):
+        assert apply_reconcile_advisory_cap(None) is None
+
+
+class TestReconcileAdvisoryFirstInvariant:
+    """真 GovernanceHub 端到端:genuine FATAL 對賬對絕不 freeze(2a invariant / 2e / task 3)。"""
+
+    @staticmethod
+    def _fatal_pair():
+        # remote(demo)有 BTCUSDT 持倉、local(paper)沒有 → 引擎真判 POSITION_MISSING = FATAL。
+        # 這才是「真 FATAL 對」,而非退化 trivial-MATCH,確保封頂測試餵的是真嚴重度。
+        now = int(time.time() * 1000)
+        paper = {
+            "orders": [], "positions": {}, "fills": [],
+            "balances": {"USDT": 10000.0}, "snapshot_ts_ms": now,
+        }
+        demo = {
+            "orders": [],
+            "positions": {"BTCUSDT": {"side": "Buy", "size": 1.0, "avg_entry_price": 50000.0}},
+            "fills": [], "balances": {"USDT": 10000.0}, "snapshot_ts_ms": now,
+        }
+        return paper, demo
+
+    def _active_auth(self, hub):
+        auth_obj = hub._authorization_sm.create_draft(
+            title="Advisory Test Auth",
+            scope={"lease_scopes": ["TRADE_ENTRY"]},
+            created_by="test",
+            expires_at_ms=int(time.time() * 1000) + 3600_000,
+        )
+        hub._authorization_sm.submit_for_approval(auth_obj.authorization_id)
+        hub._authorization_sm.approve(auth_obj.authorization_id, approved_by="operator")
+        return auth_obj
+
+    def test_fatal_pair_token_capped_and_no_freeze(self, tmp_audit_dir):
+        # 隔離斷言:把 _on_reconciliation_mismatch 換成 recording mock —— 唯一 freeze 路徑
+        #（FATAL 分支)因而不被執行,直接證明「回調交給 cascade 的 token 已被封頂」:
+        #   - token == MISMATCH_MAJOR(絕不 "FATAL")
+        #   - mode 維持 NORMAL、0 auth frozen(cascade 未跑,天然成立)
+        #   - 3 個 action 只升級一次(report_id 去重,task 3)
+        hub = GovernanceHub(audit_dir=tmp_audit_dir, enabled=True)
+        hub._ensure_initialized()
+        self._active_auth(hub)
+        assert len(hub._authorization_sm.get_effective()) > 0
+
+        spy = mock.MagicMock()
+        hub._on_reconciliation_mismatch = spy
+
+        paper, demo = self._fatal_pair()
+        report = hub.reconcile(paper_state=paper, demo_state=demo)
+
+        # 引擎確實判為 FATAL(封頂前的診斷真值)——證明餵進去的是真 FATAL 而非退化 MATCH
+        assert report["overall_result"] == "MISMATCH_MAJOR"
+        assert any(d["severity"] == "FATAL" for d in report["discrepancies"])
+
+        # 唯一升級入口只被叫一次(3 action 去重),且 token 已封頂
+        assert spy.call_count == 1
+        passed_token = spy.call_args[0][0]
+        assert passed_token == "MISMATCH_MAJOR"
+        assert passed_token != "FATAL"
+
+        # cascade 未執行 → mode 維持 NORMAL、授權未凍結
+        assert hub._mode == GovernanceMode.NORMAL
+        assert len(hub._authorization_sm.get_effective()) > 0
+        assert all(a.state.value != "FROZEN" for a in hub._authorization_sm.get_all())
+
+    def test_fatal_pair_real_cascade_never_freezes(self, tmp_audit_dir):
+        # 讓真 cascade 跑(不 mock):genuine FATAL 對必須永不進 FATAL/freeze 分支。
+        # 誠實標註:MISMATCH_MAJOR 會把風控升到 REDUCED → mode 變 RESTRICTED(諮詢升風控,
+        # 非 NORMAL);故此處斷言核心不變量「絕不 FROZEN、絕不凍結授權」,而非 == NORMAL。
+        hub = GovernanceHub(audit_dir=tmp_audit_dir, enabled=True)
+        hub._ensure_initialized()
+        self._active_auth(hub)
+
+        paper, demo = self._fatal_pair()
+        hub.reconcile(paper_state=paper, demo_state=demo)
+
+        assert hub._mode not in (GovernanceMode.FROZEN, GovernanceMode.MANUAL_REVIEW)
+        assert all(a.state.value != "FROZEN" for a in hub._authorization_sm.get_all())
+
+    def test_reconcile_demo_state_none_short_circuits_no_engine_call(self, tmp_audit_dir):
+        # 2e：demo_state=None → 防禦性 fail-closed 回 demo_state_required,且絕不自比對
+        #（不呼叫底層 engine.reconcile → 不會退化成 trivial-MATCH、不會偽造空 demo)。
+        hub = GovernanceHub(audit_dir=tmp_audit_dir, enabled=True)
+        hub._ensure_initialized()
+        engine_spy = mock.MagicMock()
+        hub._reconciliation_engine.reconcile = engine_spy
+
+        result = hub.reconcile(paper_state={"positions": {}}, demo_state=None)
+
+        assert result == {"ok": False, "reason": "demo_state_required"}
+        engine_spy.assert_not_called()
+
+    def test_dedup_deque_full_does_not_evict_current_report(self, tmp_audit_dir):
+        # task 3 determinism：預填 deque 至 maxlen(512),再餵 FATAL 對(單次 reconcile 觸發
+        # 3 個 action)。第一個 action append current report_id → 淘汰「最舊」的預填 id;後兩個
+        # action 必須仍能在 deque 找到 current id 而去重 → 只升級一次。證明 deque(maxlen) FIFO
+        # 淘汰絕不會丟掉「剛加入」的 id(舊 set 隨機截斷可能丟掉 → 非確定性,本測試守住修正)。
+        hub = GovernanceHub(audit_dir=tmp_audit_dir, enabled=True)
+        hub._ensure_initialized()
+        maxlen = hub._escalated_report_ids.maxlen
+        for i in range(maxlen):
+            hub._escalated_report_ids.append(f"filler-{i}")
+        assert len(hub._escalated_report_ids) == maxlen
+
+        spy = mock.MagicMock()
+        hub._on_reconciliation_mismatch = spy
+
+        paper, demo = self._fatal_pair()
+        report = hub.reconcile(paper_state=paper, demo_state=demo)
+
+        assert spy.call_count == 1  # 3 action 去重成 1 次升級
+        assert report["report_id"] in hub._escalated_report_ids  # 剛加入的 id 未被同次淘汰
+        assert len(hub._escalated_report_ids) == maxlen  # deque 未超界
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Test: Cross-SM Wiring
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -951,7 +1096,9 @@ class TestErrorResilience:
             "reconcile",
             side_effect=Exception("Recon error"),
         ):
-            report = hub.reconcile({"orders": []})
+            # reconcile Path B §6：demo_state 必須非 None 才會呼叫引擎(None → 先短路為
+            # demo_state_required,不自比對)。此處提供 demo_state 以到達引擎、驗證異常韌性。
+            report = hub.reconcile({"orders": []}, {"orders": []})
             assert report.get("ok") is False
             assert "reconciliation_error" in report.get("reason", "")
 
