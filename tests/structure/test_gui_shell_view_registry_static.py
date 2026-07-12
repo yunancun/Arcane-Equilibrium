@@ -264,3 +264,170 @@ def test_anti_vacuous_lower_bounds() -> None:
         f"被消費 tab id 數 {len(consumed_ids)} < 下限 {MIN_CONSUMERS};"
         f"consumed={sorted(consumed_ids)}"
     )
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 5. 原生 view 註冊完整性(R64:strangler-fig iframe:false → OC_NATIVE_VIEWS handler)
+# ════════════════════════════════════════════════════════════════════════════
+# 背景:殼 isNative(v)=(v.iframe===false);對原生 view 殼經
+#   window.OC_NATIVE_VIEWS[<id>] 取 {render,pause,resume} 渲染。每個原生 view
+#   於其 view-<id>.js 以 `OC_NATIVE_VIEWS['<id>'] = {...}` 註冊(key=VIEWS 的 id,
+#   非 visId)。當前樹:monitor/ai/agents/learning/development/phase4/gates 共 7 個。
+# 回歸風險:未來遷移把某 entry 翻 iframe:false 卻忘記/拼錯註冊 → 殼判 isNative=true
+#   但 OC_NATIVE_VIEWS[<id>] undefined → 該 tab 靜默空白/壞。本節機械化擋這條漂移。
+#
+# 誠實邊界(綠 ≠ runtime handler 真被呼叫):本節純靜態,只證「某 view-*.js 內存在
+#   OC_NATIVE_VIEWS['<id>'] 註冊字面」。不證 ① 該檔真被 shell.html 載入並執行
+#   ② render/pause/resume 真被殼 router 呼叫 ③ 渲染出正確 DOM。那些是 runtime 事實
+#   (NEEDS-LINUX:FastAPI + engine + 瀏覽器),不在靜態範圍。
+
+# 原生 view 下限(當前樹:monitor/ai/agents/learning/development/phase4/gates = 7)。
+MIN_NATIVE_VIEWS = 7
+
+# 註冊字面:`OC_NATIVE_VIEWS['<id>'] =` 或 `["<id>"]`(要求 `=` 賦值,排除純讀取,
+# 如 shell.js 的 `OC_NATIVE_VIEWS[v.id]` 變數下標=非字面,不誤判為註冊)。
+_NATIVE_REG_RE = re.compile(
+    r"OC_NATIVE_VIEWS\s*\[\s*['\"]([A-Za-z0-9_-]+)['\"]\s*\]\s*="
+)
+
+
+def _native_view_ids() -> list[str]:
+    """VIEWS 內所有 iframe === false 的 entry 的 id(= 原生 view,殼走 OC_NATIVE_VIEWS)。"""
+    return sorted(v["id"] for v in _extract_views() if v.get("iframe") is False)
+
+
+def _registered_native_ids() -> dict[str, list[str]]:
+    """掃全 static/*.js 的 `OC_NATIVE_VIEWS['<id>'] =` 註冊字面 → {id: [檔名, ...]}。"""
+    out: dict[str, list[str]] = {}
+    for path in sorted(STATIC_DIR.glob("*.js")):
+        if path.name in EXCLUDE_FILES:
+            continue
+        for m in _NATIVE_REG_RE.finditer(_read(path)):
+            out.setdefault(m.group(1), []).append(path.name)
+    return out
+
+
+def _unregistered_native_ids(native_ids, registered_ids: set[str]) -> list[str]:
+    """純函數:回傳「iframe:false 但無 OC_NATIVE_VIEWS 註冊」的 id 排序清單(空=全註冊)。"""
+    return sorted(set(native_ids) - set(registered_ids))
+
+
+def test_native_views_have_registered_handler() -> None:
+    """每個 VIEWS iframe:false 的原生 view id 必須有對應 OC_NATIVE_VIEWS['<id>'] 註冊。
+
+    紅 = 殼判 isNative=true 卻取不到 handler → 該 tab 靜默空白/壞 —— 點名失配 id。
+    """
+    native = _native_view_ids()
+    registered = _registered_native_ids()
+    missing = _unregistered_native_ids(native, set(registered))
+    assert not missing, (
+        "strangler-fig BREAK:以下 VIEWS iframe:false 原生 view id 無對應 "
+        f"OC_NATIVE_VIEWS['<id>'] 註冊字面(殼 isNative=true 但 handler undefined → "
+        f"該 tab 靜默空白/壞):{missing};已註冊 id={sorted(registered)};"
+        f"原生 id 全集={native}"
+    )
+
+
+def test_native_registration_detector_has_teeth() -> None:
+    """反向 substantive:證原生註冊檢測器有牙(非空過)。
+
+    (a) 下限:須解析出 ≥7 原生 id(解析壞→空集合→假綠 的防護);
+    (b) 掃描器須真抓到註冊字面(registered 非空);
+    (c) 真樹全註冊(前置一致性);
+    (d) 合成負例:注入一個無註冊的 iframe:false id → 必被精確判為 unregistered。
+    """
+    native = _native_view_ids()
+    registered = _registered_native_ids()
+
+    assert len(native) >= MIN_NATIVE_VIEWS, (
+        f"原生 view id 數 {len(native)} < 下限 {MIN_NATIVE_VIEWS}"
+        f"(疑 VIEWS 解析退化或原生遷移遺失);native={native}"
+    )
+    assert registered, "OC_NATIVE_VIEWS 註冊掃描為空 → 掃描器/正則壞(vacuous green 防護)"
+    assert not _unregistered_native_ids(native, set(registered)), (
+        "前置矛盾:真樹原生 id 應全註冊(此測試專驗檢測器有牙)"
+    )
+
+    bogus = "__synthetic_missing__"
+    flagged = _unregistered_native_ids(native + [bogus], set(registered))
+    assert flagged == [bogus], (
+        f"檢測器無牙:合成「iframe:false 但無註冊」id 未被精確抓;flagged={flagged}"
+    )
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 6. 寫面 view 的殼 CSS 依賴鎖(R64:鎖 R63 修復,防靜默回退)
+# ════════════════════════════════════════════════════════════════════════════
+# 背景:已遷 4 寫面 view(view-ai / view-ai-providers / view-ai-cost / view-learning)
+#   用 ocToast / openConfirmModal → emit .oc-toast* / .oc-confirm-* / .oc-prompt-* /
+#   .oc-btn* class。殼跳過 ocInjectBaseCSS,故 R63 把這組 class port 進
+#   shell-components.css 並由 shell.html 載入。回歸風險:該 port 被靜默回退 →
+#   寫面 modal/toast 視覺退化(無樣式)。本節鎖住 shell.html 載入 + class 定義存在。
+#
+# 誠實邊界:純靜態,只證「shell.html 載入 shell-components.css 且該檔定義這組 class
+#   selector」。不證 runtime 樣式真套用到寫面 view DOM(那需瀏覽器,NEEDS-LINUX)。
+
+SHELL_HTML = STATIC_DIR / "shell.html"
+SHELL_COMPONENTS_CSS = STATIC_DIR / "shell-components.css"
+
+# 寫面 view 依賴的最小 class 集(toast / typed-confirm modal / prompt 表單 / 按鈕)。
+WRITE_FACE_CSS_CLASSES = (
+    ".oc-toast",
+    ".oc-confirm-overlay",
+    ".oc-confirm-dialog",
+    ".oc-prompt-input",
+    ".oc-btn",
+    ".oc-btn-danger",
+)
+
+
+def _css_defines_selector(css: str, cls: str) -> bool:
+    r"""css 內是否有以 `cls` 為 selector 的規則(排除註釋文句的裸提及,如 `(.oc-toast*)`)。
+
+    要求 cls 前為行首/空白/`,`/`}`,後接 selector 終止字元 `[\s.,:{]` —— 故 `.oc-btn`
+    不會誤配 `.oc-btn-primary`(後接 `-`,不在終止集),`(.oc-toast*)` 亦不誤配(後接 `*`)。
+    """
+    pat = re.compile(r"(?:^|[\s,}])" + re.escape(cls) + r"[\s.,:{]", re.MULTILINE)
+    return bool(pat.search(css))
+
+
+def test_shell_loads_write_face_component_css() -> None:
+    """寫面 view 的殼 CSS 依賴鎖(R63):shell.html 載 shell-components.css 且該檔定義
+    寫面 modal/toast/form/按鈕 class。紅 = R63 修復被靜默回退 → 寫面視覺退化。
+    """
+    html = _read(SHELL_HTML)
+    assert "shell-components.css" in html, (
+        "shell.html 未載入 shell-components.css(殼跳過 ocInjectBaseCSS,寫面 view 的 "
+        "toast/modal/表單/按鈕 class 無來源 → 視覺退化)"
+    )
+    css = _read(SHELL_COMPONENTS_CSS)
+    missing = [c for c in WRITE_FACE_CSS_CLASSES if not _css_defines_selector(css, c)]
+    assert not missing, (
+        "R63 修復被靜默回退:shell-components.css 缺寫面 class selector 定義="
+        f"{missing}(寫面 view 的 ocToast/openConfirmModal 視覺退化)"
+    )
+
+
+def test_write_face_css_lock_detector_has_teeth() -> None:
+    """反向 substantive:證 CSS selector 檢測器有牙(非子字串鬆判)。
+
+    (a) 真樹全數存在(前置一致性);
+    (b) 合成不存在的 class → 必判為缺;
+    (c) 註釋裸提及(`.oc-toast*` 後接 `*`)不算「已定義」→ 精確 selector 判別。
+    """
+    css = _read(SHELL_COMPONENTS_CSS)
+
+    for cls in WRITE_FACE_CSS_CLASSES:
+        assert _css_defines_selector(css, cls), (
+            f"前置矛盾:真樹應定義 {cls}(此測試專驗檢測器有牙)"
+        )
+
+    assert not _css_defines_selector(css, ".oc-nonexistent-write-face-class"), (
+        "檢測器無牙:合成不存在 class 被誤判為已定義"
+    )
+
+    # 純提及但非 selector 的合成串:`(.oc-only-in-comment*)` 不應算已定義。
+    comment_only = "/* 說明:(.oc-only-in-comment*) 僅文句提及,非規則 */"
+    assert not _css_defines_selector(comment_only, ".oc-only-in-comment"), (
+        "檢測器無牙:註釋裸提及(後接 `*`)被誤判為 selector 定義"
+    )
