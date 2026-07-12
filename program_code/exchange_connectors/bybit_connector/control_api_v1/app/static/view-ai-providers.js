@@ -392,7 +392,7 @@
   }
 
   // ═══ 寫①:保存 provider 密鑰(POST /paper/layer2/config {provider_keys};response-gated envelope)═══
-  async function saveProviderKey(provider) {
+  async function saveProviderKey(provider, btn) {
     var input = q('.pk-' + provider);
     if (!input) { toast('未知供應商 / Unknown provider', 'error'); return; }
     var key = input.value.trim();
@@ -402,32 +402,38 @@
       if (fmt.prefix && key.indexOf(fmt.prefix) !== 0) { toast('格式錯誤:' + fmt.hint, 'error'); return; }
       if (key.length < fmt.minLen) { toast('Key 太短(至少 ' + fmt.minLen + ' 個字符)', 'error'); return; }
     }
-    var d = await ocPost('/api/v1/paper/layer2/config', { provider_keys: (function () { var o = {}; o[provider] = key; return o; })() });
-    if (!d) { toast('保存失敗(後端無響應)/ Backend not responding', 'error'); return; }
-    // 後端回 envelope:provider_results / provider_errors / provider_status。
-    var errs = (d.data && d.data.provider_errors) || [];
-    var results = (d.data && d.data.provider_results) || [];
-    var myErr = errs.filter(function (e) { return e.provider === provider; })[0];
-    var myResult = results.filter(function (r) { return r.provider === provider; })[0];
-    if (myErr) {
-      toast(provider + ' 保存失敗:' + (myErr.detail || myErr.reason_code), 'error');
-    } else if (myResult) {
-      input.value = '';
-      if (myResult.client_implemented) {
-        var hot = myResult.hot_reloaded ? '(已熱重載客戶端)' : '';
-        if (myResult.validated) toast(provider + ' API Key 已驗證並保存 ' + hot, 'success');
-        else toast(provider + ' API Key 已保存,但未完成可用性驗證', 'warn');
+    // in-flight 真 disabled 防雙送(前置驗證失敗在此之前已 return,尚未 disable 不會漏還原);disable 緊貼網路調用、finally 必還原。
+    if (btn) btn.disabled = true;
+    try {
+      var d = await ocPost('/api/v1/paper/layer2/config', { provider_keys: (function () { var o = {}; o[provider] = key; return o; })() });
+      if (!d) { toast('保存失敗(後端無響應)/ Backend not responding', 'error'); return; }
+      // 後端回 envelope:provider_results / provider_errors / provider_status。
+      var errs = (d.data && d.data.provider_errors) || [];
+      var results = (d.data && d.data.provider_results) || [];
+      var myErr = errs.filter(function (e) { return e.provider === provider; })[0];
+      var myResult = results.filter(function (r) { return r.provider === provider; })[0];
+      if (myErr) {
+        toast(provider + ' 保存失敗:' + (myErr.detail || myErr.reason_code), 'error');
+      } else if (myResult) {
+        input.value = '';
+        if (myResult.client_implemented) {
+          var hot = myResult.hot_reloaded ? '(已熱重載客戶端)' : '';
+          if (myResult.validated) toast(provider + ' API Key 已驗證並保存 ' + hot, 'success');
+          else toast(provider + ' API Key 已保存,但未完成可用性驗證', 'warn');
+        } else {
+          // 誠實提示:key 落地但推理路徑未接,避免以為立即生效(canon 7 不假成功)。
+          toast(provider + ' Key 已存儲;客戶端尚未實裝(僅存盤待用)', 'warn');
+        }
+        if (d.data && d.data.provider_status && d.data.provider_status.providers) {
+          Object.keys(d.data.provider_status.providers).forEach(function (name) { renderProviderBadge(name, d.data.provider_status.providers[name]); });
+        } else { loadProviderStatus(); }
+        if (['anthropic', 'openai', 'deepseek', 'local_llm'].indexOf(provider) >= 0) await loadProviderModelCatalog(true);
       } else {
-        // 誠實提示:key 落地但推理路徑未接,避免以為立即生效(canon 7 不假成功)。
-        toast(provider + ' Key 已存儲;客戶端尚未實裝(僅存盤待用)', 'warn');
+        toast(provider + ' 已提交,但後端未返回結果 — 請檢查 / 重試', 'warn');
+        loadProviderStatus();
       }
-      if (d.data && d.data.provider_status && d.data.provider_status.providers) {
-        Object.keys(d.data.provider_status.providers).forEach(function (name) { renderProviderBadge(name, d.data.provider_status.providers[name]); });
-      } else { loadProviderStatus(); }
-      if (['anthropic', 'openai', 'deepseek', 'local_llm'].indexOf(provider) >= 0) await loadProviderModelCatalog(true);
-    } else {
-      toast(provider + ' 已提交,但後端未返回結果 — 請檢查 / 重試', 'warn');
-      loadProviderStatus();
+    } finally {
+      if (btn) btn.disabled = false;
     }
   }
 
@@ -435,7 +441,7 @@
   // W-AUDIT-7c:API Key clear 屬 governance critical 寫(刪 secrets 文件 + 移進程 env)。
   //   用 openTypedConfirmModal 取代 native confirm() 防誤觸;await 包 try/catch(singleton reject 不靜默),
   //   cancel 顯 toast 不靜默 return。DELETE 只在 phrase='CLEAR' 相符 + 確認後才送(安全閘,response-gated)。
-  async function clearProviderKey(provider) {
+  async function clearProviderKey(provider, btn) {
     if (!q('.pk-' + provider)) { toast('未知供應商', 'error'); return; }
     if (typeof window.openTypedConfirmModal !== 'function') { toast('確認對話框不可用 / Confirm dialog unavailable', 'error'); return; }
     var proceed;
@@ -458,20 +464,28 @@
       return;
     }
     if (!proceed) { toast('已取消清除 ' + provider + ' / Clear cancelled', 'neutral'); return; }
-    var d = await ocApi('/api/v1/paper/layer2/providers/' + encodeURIComponent(provider), { method: 'DELETE' });
-    if (!d) { toast('清除失敗(後端無響應)', 'error'); return; }
-    if (d.data && d.data.deleted) toast(provider + ' API Key 已清除', 'success');
-    else toast(provider + ' 無密鑰可清除(已是空狀態)', 'neutral');
-    if (d.data && d.data.provider_status && d.data.provider_status.providers) {
-      Object.keys(d.data.provider_status.providers).forEach(function (name) { renderProviderBadge(name, d.data.provider_status.providers[name]); });
-    } else { loadProviderStatus(); }
-    if (['anthropic', 'openai', 'deepseek', 'local_llm'].indexOf(provider) >= 0) await loadProviderModelCatalog(true);
+    // in-flight 真 disabled 防雙送(typed-confirm 通過後才 disable);disable 緊貼 DELETE、finally 必還原。
+    if (btn) btn.disabled = true;
+    try {
+      var d = await ocApi('/api/v1/paper/layer2/providers/' + encodeURIComponent(provider), { method: 'DELETE' });
+      if (!d) { toast('清除失敗(後端無響應)', 'error'); return; }
+      if (d.data && d.data.deleted) toast(provider + ' API Key 已清除', 'success');
+      else toast(provider + ' 無密鑰可清除(已是空狀態)', 'neutral');
+      if (d.data && d.data.provider_status && d.data.provider_status.providers) {
+        Object.keys(d.data.provider_status.providers).forEach(function (name) { renderProviderBadge(name, d.data.provider_status.providers[name]); });
+      } else { loadProviderStatus(); }
+      if (['anthropic', 'openai', 'deepseek', 'local_llm'].indexOf(provider) >= 0) await loadProviderModelCatalog(true);
+    } finally {
+      if (btn) btn.disabled = false;
+    }
   }
 
   // ═══ 寫③:保存 AI 設置(POST /paper/layer2/config 全 body;response-gated d.action_result==='success')═══
   function numOr(cls, dflt) { var el = q('.' + cls); var n = el ? parseFloat(el.value) : NaN; return isNaN(n) ? dflt : n; }
   function intOr(cls, dflt) { var el = q('.' + cls); var n = el ? parseInt(el.value, 10) : NaN; return isNaN(n) ? dflt : n; }
-  async function saveAIConfig() {
+  async function saveAIConfig(btn) {
+    // re-entry guard:同一儲存飛行期不再進場(此旗標僅由本函數寫;loadConfig 讀它決定是否回填表單)。
+    if (AI_CONFIG_SAVING) return;
     syncModelSelectsFromProviders();
     var body = {
       daily_hard_cap_usd: numOr('f-hard-cap', 2),
@@ -492,6 +506,7 @@
       fallback_tier3_model: selVal('f-ai-tier3-model'),
     };
     AI_CONFIG_SAVING = true;
+    if (btn) btn.disabled = true;   // in-flight 真 disabled 防雙送
     try {
       var d = await ocPost('/api/v1/paper/layer2/config', body);
       if (d && d.action_result === 'success') {
@@ -506,6 +521,7 @@
       }
     } finally {
       AI_CONFIG_SAVING = false;
+      if (btn) btn.disabled = false;   // finally 必還原真 disabled
     }
   }
 
@@ -569,12 +585,13 @@
       var t = ev.target;
       var btn = (t && typeof t.closest === 'function') ? t.closest('button[data-key], button.settings-save, button.models-refresh') : null;
       if (!btn) return;
-      if (btn.classList.contains('settings-save')) { saveAIConfig(); return; }
+      if (btn.classList.contains('settings-save')) { saveAIConfig(btn); return; }
       if (btn.classList.contains('models-refresh')) { refreshProviderModels(); return; }
       var key = btn.getAttribute('data-key');
       if (!key) return;
-      if (btn.classList.contains('pv-save')) saveProviderKey(key);
-      else if (btn.classList.contains('pv-clear')) clearProviderKey(key);
+      // 傳觸發按鈕給寫函數:in-flight 真 disabled 防雙送(checkOllamaStatus 為唯讀 GET,不傳)。
+      if (btn.classList.contains('pv-save')) saveProviderKey(key, btn);
+      else if (btn.classList.contains('pv-clear')) clearProviderKey(key, btn);
       else if (btn.classList.contains('pv-detect')) checkOllamaStatus();
     });
     // 供應商切換 → dirty + 重算模型下拉;模型切換 → dirty。

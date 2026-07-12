@@ -32,7 +32,7 @@
  *   pauseAiView(隱藏→停輪詢/停 fetch)、loadAll(5 主 GET + 2 companion load)、
  *   loadConsult / loadSessions / loadExperiments / loadEvolution / loadKelly、
  *   doTriggerSession(POST paper/layer2/trigger)、runEvolution(POST evolution/run)。
- * 依賴(全復用,不重造):common.js ocApi / ocPost / ocFetch / ocToast;common-modals.js
+ * 依賴(全復用,不重造):common.js ocApi / ocPost / ocToast;common-modals.js
  *   openConfirmModal(trigger 確認);common-formatters.js ocEsc / ocBalance / ocNum / ocPct / ocQty /
  *   ocTimeShort / OC_EMPTY;組件庫 shell-components.css(.panel/.panel-t/.kpi/.tbl/.tag/.note/.logblock)
  *   + tokens.css(.silk/.num)+ oc-utilities.css(flex/間距/t-* 色階/.hidden/.mono/.pointer)。
@@ -316,12 +316,11 @@
   function kellyTierTone(t) { return t === 'normal' ? 'good' : t === 'moderate' ? 'accent' : 'muted'; }
   async function loadKelly() {
     var body = q('.kelly-body');
-    var r;
-    try { r = await ocFetch('/api/v1/strategy/kelly-recommendations'); }
-    catch (e) { if (body) body.innerHTML = '<tr><td colspan="6" class="note t-warn">連線失敗 / Load failed</td></tr>'; return; }
-    if (!r || !r.ok) { if (body) body.innerHTML = '<tr><td colspan="6" class="note t-warn">無法載入 / Load failed</td></tr>'; return; }
-    var data = await r.json();
+    // 用 ocApi(回已解析 JSON 或 null;對齊本檔 loadEvolution/loadExperiments 慣例)。
+    //   先前的裸 ocFetch 全域未定義,每次拋 ReferenceError → Kelly 表永不載入,故收斂成單一 !data 分支。
+    var data = await ocApi('/api/v1/strategy/kelly-recommendations');
     if (!built) return;
+    if (!data) { if (body) body.innerHTML = '<tr><td colspan="6" class="note t-warn">無法載入 / Load failed</td></tr>'; return; }
     var strategies = (data && data.strategies) || {};
     var keys = Object.keys(strategies);
     setKpi('kelly-count', keys.length);
@@ -410,7 +409,8 @@
       if (resEl) { resEl.textContent = '請輸入策略名稱'; resEl.className = 'evo-result note t-warn mt-2'; }
       return;
     }
-    if (btn) btn.setAttribute('aria-disabled', 'true');
+    // 用真 disabled 阻止雙觸(aria-disabled 純無障礙語意、不擋 click;真 disabled 的 button 不發 click 事件 = 機械擋雙觸)。
+    if (btn) btn.disabled = true;
     if (resEl) { resEl.textContent = '執行中…'; resEl.className = 'evo-result note t-muted mt-2'; }
     try {
       var d = await ocApi('/api/v1/evolution/run', {
@@ -436,7 +436,7 @@
     } catch (e) {
       if (resEl) { resEl.textContent = '執行失敗:' + esc(String(e && e.message || e)); resEl.className = 'evo-result note t-neg mt-2'; }
     } finally {
-      if (btn) btn.removeAttribute('aria-disabled');
+      if (btn) btn.disabled = false;   // finally 必還原真 disabled,允許再次觸發
     }
   }
 
