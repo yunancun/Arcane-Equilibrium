@@ -47,7 +47,12 @@
   var VIEWS = [
     // ── crypto lane:environment ladder(scoped 於 active lane)──
     { id: 'overview', lane: 'crypto', hash: '#/crypto/overview', src: '/static/tab-system.html',     visId: 'system',      label: '總覽 Overview',   badge: 'overview' },
-    { id: 'paper',    lane: 'crypto', hash: '#/crypto/paper',    src: '/static/tab-paper.html',       visId: 'paper',       label: 'Legacy Paper',    badge: 'paper' },
+    // paper:Phase 2 第 11 個原生遷移(iframe:false;**復用遷移**,Legacy Paper=模擬紙上交易/預設關/非交易關鍵四者)——
+    //   render/pause/resume 由 view-paper.js 註冊於 window.OC_NATIVE_VIEWS(id=paper)。策略=**verbatim 復用
+    //   tab-paper.html 內聯 script**:view-paper.js 於 render fetch tab-paper.html 注入其 paper DOM(byte-parity)
+    //   後重跑內聯 script(session 寫 start/pause/resume/stop/stop-all/close 經 Rust IPC,byte-parity 復用;
+    //   confirm 全保留;submitPaperOrder 維持 HTTP 410 停用)。src 保留 legacy tab-paper 作 registry 完整性 + 回滾錨。
+    { id: 'paper',    lane: 'crypto', hash: '#/crypto/paper',    src: '/static/tab-paper.html',       visId: 'paper',       label: 'Legacy Paper',    badge: 'paper', iframe: false },
     // replay:Phase 2 第 10 個原生遷移(iframe:false;**復用遷移**)——render/pause/resume 由 view-replay.js
     //   註冊於 window.OC_NATIVE_VIEWS(id=replay)。策略=**verbatim 復用 app-paper.js 的 OpenClawReplaySubtab**:
     //   view-replay.js 只復現 tab-replay.html 的 replay DOM(byte-parity #subtab-replay-disabled-card 掛載點)

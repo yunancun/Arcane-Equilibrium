@@ -1,0 +1,221 @@
+/* ═══════════════════════════════════════════════════════════════════
+   view-paper.css — 玄衡原生 view「Legacy Paper / 舊 Paper 引擎」頁級樣式(Phase 2 第 11 遷)
+   ═══════════════════════════════════════════════════════════════════
+   MODULE_NOTE
+   模塊用途:承載 view-paper.js 注入的 paper DOM 所需樣式。分兩層:
+     ① paper-specific —— 子標籤導航(.oc-subtab-*)、行情價位(.feed-*)、初始餘額輸入 /
+        行情徽 id 選擇器、PnL sparkline、平倉確認 modal(.paper-confirm-*)。此為對
+        tab-paper.html 頁內樣式塊(行 34-106)的**重複(非移動)**:legacy iframe 路徑
+        仍靠 tab-paper.html 自帶頁內樣式塊,故 tab-paper.html 不動作回滾錨。
+     ② `.paper-view` scope 的 legacy 短名 shim(oc-card / oc-metric* / oc-table* / oc-chip* /
+        oc-control-bar / oc-collapse* / oc-fill-* / oc-performance-metrics / oc-action-* /
+        oc-row-close-action / oc-toolbar-danger-action / oc-explain* / oc-loading)—— 殼**刻意
+        不呼** common.js ocInjectBaseCSS()(避免其 body{padding}+`*` reset 破殼 chrome),而
+        這批 class 的樣式原只在 ocInjectBaseCSS 內。故逐字 port 進本檔並以 `.paper-view` 收束
+        作用域(防全域外溢)。此為對 ocInjectBaseCSS 同名規則的**重複(非移動)**:legacy iframe
+        續靠 ocInjectBaseCSS 運行時注入。按鈕(.oc-btn*)、toast、typed-confirm/prompt modal
+        (.oc-toast* / .oc-confirm-* / .oc-prompt-*)已在 shell-components.css(殼已載),不重複;
+        方向徽(.side-badge)、品類徽(.oc-cat-tag)、正負值色(.val-pos/.val-neg)、.num 與版式
+        utility 已在 oc-utilities.css / tokens.css(殼已載),不重複。
+   ratchet(born-clean 0/0/0):全檔零裸 hex —— tab-paper.html 頁內樣式塊唯一裸 hex(feed-price
+     暗色描邊)改 var(--border-subtle);其餘色字面沿 codebase 慣例(shell-components.css 亦保留
+     rgba tint 字面)保 rgba(ratchet 只禁 #hex,rgba 合法);語意明確者(oc-chip 三態)改語義 token。
+     零 inline style 屬性、零內聯樣式塊(本檔是 .css)。過 test_gui_style_ratchet_static.py。
+   誠實邊界:靜態只證 source;真渲染 / session 三態徽色 / 平倉 modal 可讀性 = NEEDS-LINUX + operator。
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ═══ ① paper-specific(port tab-paper.html 頁內樣式塊,scoped .paper-view)═══ */
+
+/* ── 實時行情價位 / Market Feed prices ── */
+.paper-view .feed-prices { display: flex; gap: 14px; flex-wrap: wrap; font-size: 13px; margin-top: 8px; }
+.paper-view .feed-price {
+  background: var(--bg-app); border: 1px solid var(--border-subtle);
+  border-radius: var(--r-1); padding: 4px 10px;
+}
+.paper-view .feed-price .sym { font-size: 11px; color: var(--text-secondary); }
+.paper-view .feed-price .price { font-weight: 600; }
+
+/* ── Legacy Paper 子標籤導航 / sub-tab nav ── */
+.paper-view .oc-subtab-nav {
+  display: flex; gap: 4px; flex-wrap: wrap; align-items: center;
+  padding: 8px 10px; background: var(--bg-surface); border: 1px solid var(--border-subtle);
+  border-radius: var(--r-2); margin-bottom: 12px;
+}
+.paper-view .oc-subtab-btn {
+  padding: 6px 14px; border-radius: var(--r-1); border: 1px solid var(--border-subtle);
+  background: var(--bg-app); color: var(--text-secondary); font-size: 12px; cursor: pointer;
+  transition: all 0.15s; font-family: inherit; white-space: nowrap;
+}
+.paper-view .oc-subtab-btn:hover:not([data-disabled="true"]) { border-color: var(--accent); color: var(--text-primary); }
+.paper-view .oc-subtab-btn.active {
+  background: var(--accent-weak); border-color: var(--text-secondary);
+  color: var(--text-secondary); font-weight: 600;
+}
+.paper-view .oc-subtab-btn[data-disabled="true"] { opacity: 0.4; cursor: not-allowed; border-style: dashed; }
+.paper-view .oc-subtab-btn[data-disabled="true"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.paper-view .oc-subtab-mode-slot {
+  margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; min-height: 22px;
+}
+.paper-view .oc-subtab-content { display: none; }
+.paper-view .oc-subtab-content.active { display: block; }
+.paper-view .oc-subtab-placeholder {
+  padding: 24px 18px; text-align: center;
+  background: var(--bg-sunken); border: 1px dashed var(--border-subtle);
+  border-radius: var(--r-2); color: var(--text-secondary); font-size: 13px;
+  line-height: 1.7; margin-top: 10px;
+}
+.paper-view .oc-subtab-placeholder .gate-label {
+  display: inline-block; margin-top: 6px; padding: 3px 10px;
+  background: var(--neg-bg); color: var(--neg);
+  border: 1px solid var(--neg); border-radius: var(--r-1); font-size: 11px;
+}
+
+/* 行動裝置觸控目標(WCAG 2.1 AA 2.5.5 Target Size;港自頁內 @media) */
+@media (max-width: 700px) {
+  .paper-view .oc-subtab-btn { min-height: 44px; padding: 12px 14px; font-size: 13px; }
+  .paper-view .oc-mode-badge { min-height: 32px; padding: 6px 10px; font-size: 12px; }
+}
+
+/* ── id 選擇器承載樣式(className 每次刷新整串重寫,樣式改掛 id 不被抹) ── */
+.paper-view #paper-init-bal { width: 90px; }
+.paper-view [id="feed-badge"] { margin-left: var(--sp-2); font-size: var(--fs-micro); }
+.paper-view .paper-pnl-sparkline {
+  display: block; background: var(--bg-sunken);
+  border-radius: var(--r-1); border: 1px solid var(--border-subtle);
+}
+
+/* ── 平倉確認 modal(顯隱走 .hidden;scrim/box-shadow 保 rgba 字面,codebase 慣例) ── */
+.paper-view .paper-confirm-overlay {
+  position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,0.6);
+  display: flex; align-items: center; justify-content: center;
+}
+.paper-view .paper-confirm-box {
+  background: var(--bg-surface); border: 1px solid var(--border-strong);
+  border-radius: var(--r-3); width: min(420px, 90vw); box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+}
+.paper-view .paper-confirm-header {
+  padding: var(--sp-4); border-bottom: 1px solid var(--border-subtle);
+  display: flex; justify-content: space-between; align-items: center;
+}
+.paper-view .paper-confirm-close {
+  background: none; border: none; color: var(--text-secondary); font-size: var(--fs-title); cursor: pointer;
+}
+.paper-view .paper-confirm-info {
+  background: var(--accent-weak); border: 1px solid var(--border-subtle);
+  border-radius: var(--r-2); padding: var(--sp-3); font-size: var(--fs-base);
+  line-height: var(--lh-cjk); white-space: pre-line;
+}
+.paper-view .paper-confirm-footer {
+  padding: var(--sp-3) var(--sp-4); border-top: 1px solid var(--border-subtle);
+  display: flex; gap: var(--sp-2); justify-content: flex-end;
+}
+
+/* ═══ ② `.paper-view` scope 的 legacy 短名 shim(port ocInjectBaseCSS,色字面→token)═══ */
+
+/* Cards */
+.paper-view .oc-card {
+  background: var(--bg-surface); border: 1px solid var(--border-subtle);
+  border-radius: var(--r-2); padding: 16px; margin-bottom: 14px;
+}
+.paper-view .oc-card h3 { font-size: 13px; font-weight: 600; margin-bottom: 8px; color: var(--text-primary); }
+
+/* Metric row */
+.paper-view .oc-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+.paper-view .oc-metric { background: var(--bg-app); border: 1px solid var(--border-subtle); border-radius: var(--r-2); padding: 10px 12px; }
+.paper-view .oc-metric-label { font-size: 10px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.4px; }
+.paper-view .oc-metric-val { font-size: 20px; font-weight: 700; margin-top: 2px; }
+.paper-view .oc-metric-sub { font-size: 11px; color: var(--text-secondary); margin-top: 2px; }
+.paper-view .oc-performance-metrics { grid-template-columns: repeat(auto-fit, minmax(184px, 1fr)); align-items: stretch; }
+.paper-view .oc-performance-metrics .oc-metric { min-height: 118px; display: flex; flex-direction: column; }
+.paper-view .oc-performance-metrics .oc-metric-label { min-height: 42px; line-height: 1.45; display: block; }
+.paper-view .oc-performance-metrics .oc-metric-val { margin-top: auto; font-size: 18px; line-height: 1.2; overflow-wrap: anywhere; }
+
+/* Status chips(ocChip / loadSession 三態;色字面→語義 token,對齊 view-earn.css)*/
+.paper-view .oc-chip {
+  display: inline-flex; align-items: center; gap: 5px; border-radius: var(--r-full);
+  padding: 3px 10px; font-size: 11px; font-weight: 500; border: 1px solid transparent;
+}
+.paper-view .oc-chip-good    { background: var(--pos-bg);   border-color: var(--pos);           color: var(--pos); }
+.paper-view .oc-chip-warn    { background: var(--warn-bg);  border-color: var(--warn);          color: var(--warn); }
+.paper-view .oc-chip-bad     { background: var(--neg-bg);   border-color: var(--neg);           color: var(--neg); }
+.paper-view .oc-chip-neutral { background: var(--bg-hover); border-color: var(--border-strong); color: var(--text-secondary); }
+
+/* Control bar(Paper 會話控制欄)*/
+.paper-view .oc-control-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 12px 16px; background: var(--bg-surface); border: 1px solid var(--border-subtle);
+  border-radius: var(--r-2); margin-bottom: 14px;
+}
+
+/* Tables(th 底 / hover 保 rgba 字面,codebase 慣例;ratchet 只禁 #hex)*/
+.paper-view .oc-table-wrap { overflow-x: auto; margin-top: 8px; }
+.paper-view .oc-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.paper-view .oc-table th {
+  text-align: left; padding: 8px 10px; color: var(--text-secondary); font-weight: 500;
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px;
+  border-bottom: 1px solid var(--border-subtle); background: var(--bg-sunken);
+}
+.paper-view .oc-table td { padding: 8px 10px; border-bottom: 1px solid var(--border-subtle); }
+.paper-view .oc-table tr:last-child td { border-bottom: none; }
+.paper-view .oc-table tr:hover td { background: var(--bg-hover); }
+.paper-view .oc-table .empty-row td { text-align: center; color: var(--text-secondary); padding: 20px; }
+
+/* Collapsed section(details/summary 三角標記)*/
+.paper-view .oc-collapse { border: 1px solid var(--border-subtle); border-radius: var(--r-2); margin-top: 10px; }
+.paper-view .oc-collapse summary {
+  cursor: pointer; padding: 10px 14px; font-size: 13px;
+  color: var(--text-primary); user-select: none; list-style: none;
+}
+.paper-view .oc-collapse summary::-webkit-details-marker { display: none; }
+.paper-view .oc-collapse summary::before { content: '\25B6  '; font-size: 9px; color: var(--text-secondary); }
+.paper-view .oc-collapse[open] summary::before { content: '\25BC  '; }
+.paper-view .oc-collapse[open] summary { border-bottom: 1px solid var(--border-subtle); }
+.paper-view .oc-collapse .oc-collapse-body { padding: 12px 14px; }
+
+/* Fill history 工具列 / 摘要 / 分頁 */
+.paper-view .oc-fill-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.paper-view .oc-fill-summary { color: var(--text-secondary); font-size: 11px; line-height: 1.4; margin: 4px 0 8px; }
+.paper-view .oc-fill-pager { display: inline-flex; align-items: center; gap: 8px; color: var(--text-secondary); font-size: 11px; }
+
+/* Action risk zoning(state/pause/stop/destructive 分區;zone tint 保 rgba 字面,codebase 慣例)*/
+.paper-view .oc-action-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.paper-view .oc-action-cluster {
+  display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  padding: 3px; border: 1px solid transparent; border-radius: var(--r-2);
+}
+.paper-view .oc-action-cluster-state { background: rgba(139,148,158,0.06); border-color: rgba(139,148,158,0.18); }
+.paper-view .oc-action-cluster-pause { background: rgba(210,153,34,0.06); border-color: rgba(210,153,34,0.22); }
+.paper-view .oc-action-cluster-stop { background: rgba(248,81,73,0.05); border-color: rgba(248,81,73,0.24); }
+.paper-view .oc-action-cluster-destructive {
+  background: rgba(248,81,73,0.10); border-color: rgba(248,81,73,0.42);
+  box-shadow: inset 3px 0 0 rgba(248,81,73,0.55);
+}
+.paper-view .oc-toolbar-danger-action,
+.paper-view .oc-row-close-action { min-width: 72px; }
+.paper-view .oc-row-close-action { padding: 2px 8px; font-size: 10px; }
+
+/* Explainer(ocExplain 輸出;暗底 rgba→--bg-sunken)*/
+.paper-view .oc-explain { margin-bottom: 14px; }
+.paper-view .oc-explain-simple {
+  color: var(--text-secondary); font-size: 12px; line-height: 1.7;
+  padding: 10px 14px; background: var(--bg-sunken); border-left: 3px solid var(--accent);
+  border-radius: 0 var(--r-2) var(--r-2) 0;
+}
+.paper-view .oc-explain-deep { margin-top: 4px; }
+.paper-view .oc-explain-deep summary { color: var(--accent); font-size: 11px; cursor: pointer; padding: 4px 14px; user-select: none; }
+.paper-view .oc-explain-content {
+  padding: 10px 14px; color: var(--text-secondary); font-size: 12px; line-height: 1.7;
+  background: var(--bg-sunken); border-radius: var(--r-2); margin-top: 4px;
+}
+
+/* Loading 佔位 */
+.paper-view .oc-loading { color: var(--text-secondary); font-size: 12px; padding: 20px; text-align: center; }
+
+/* ═══ 行動裝置 a11y:表格 / 控件 / metrics 促升(port ocInjectBaseCSS @media 相關子集)═══ */
+@media (max-width: 700px) {
+  .paper-view .oc-table td, .paper-view .oc-table th { padding: 6px 7px; font-size: 11px; }
+  .paper-view .oc-control-bar { gap: 6px; padding: 8px 10px; }
+  .paper-view .oc-metrics { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
+  .paper-view .oc-performance-metrics { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  .paper-view .oc-card { padding: 12px; }
+}
