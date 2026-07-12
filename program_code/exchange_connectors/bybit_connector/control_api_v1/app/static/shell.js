@@ -76,7 +76,10 @@
     // development:Phase 2 第 3 個原生遷移(iframe:false)——render/pause/resume 由 view-development.js 註冊於
     //   window.OC_NATIVE_VIEWS(id=development);src 保留 legacy tab-development 作 registry 完整性 + 回滾錨,原生渲染接管。
     { id: 'development', lane: 'cross', hash: '#/cross/development', src: '/static/tab-development.html', visId: 'development', label: '開發 Support', iframe: false },
-    { id: 'phase4',     lane: 'cross', hash: '#/cross/phase4',     src: '/static/tab-phase4.html',     visId: 'phase4',      label: 'Phase 4' },
+    // phase4:Phase 2 第 7 個原生遷移(iframe:false;read-only card-host 儀表板)——render/pause/resume 由 view-phase4.js
+    //   註冊於 window.OC_NATIVE_VIEWS(id=phase4);card 片段(teacher/linucb/news/dl3)沿用 legacy /static/cards/*.html
+    //   (fetch+innerHTML 注入+重跑內嵌 script,verbatim tab-phase4);src 保留 legacy tab-phase4 作 registry 完整性 + 回滾錨,原生渲染接管。全唯讀:status + 4 card GET,零寫路徑。
+    { id: 'phase4',     lane: 'cross', hash: '#/cross/phase4',     src: '/static/tab-phase4.html',     visId: 'phase4',      label: 'Phase 4', iframe: false },
     // gates:Phase 2 首個原生遷移(iframe:false)——render/pause/resume 由 view-gates.js 註冊於
     //   window.OC_NATIVE_VIEWS(id=gates);src 保留 legacy 檔作 registry 完整性 + 回滾錨,原生渲染接管。
     { id: 'gates',      lane: 'cross', hash: '#/cross/gates',      src: '/static/tab-edge-gates.html', visId: 'edge-gates',  label: '封驗 Gates', iframe: false },
