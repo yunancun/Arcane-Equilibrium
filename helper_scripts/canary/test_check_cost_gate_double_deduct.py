@@ -28,6 +28,11 @@ sys.path.insert(0, str(_HEALTHCHECKS_DIR))
 
 import check_cost_gate_double_deduct as cgdd  # noqa: E402
 
+# py3.10 無 stdlib tomllib 且 tomli 未裝時，受測模組 fail-soft 為 tomllib=None，
+# run() 端到端斷言會失真 → 整檔明確 skip（取代先前的 collection error）。
+if cgdd.tomllib is None:  # pragma: no cover
+    pytest.skip("tomllib/tomli 皆不可用（py3.10 需安裝 tomli）", allow_module_level=True)
+
 
 # ───────────────────────────────────────────────────────────────────────────
 # fixtures：tmp srv root + risk_config + edge_estimates
