@@ -1,26 +1,26 @@
 {
   "schema": "global_qualified_autonomous_learning_shadow_effect_review_v1",
-  "generated_at": "2026-07-12T18:58:46Z",
+  "generated_at": "2026-07-12T23:50:01Z",
   "goal_id": "GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1",
-  "loop": "WP4_TRUSTED_ED25519_VERIFIER_SOURCE_PREAUTHORING_GATE",
-  "status": "DONE_DESIGN_ACCEPTED_TRUSTED_ED25519_VERIFIER_SOURCE_PREAUTHORING_GATE",
+  "loop": "WP4_TRUSTED_ED25519_VERIFIER_SOURCE_TDD_GATE",
+  "status": "DONE_SOURCE_ACCEPTED_TRUSTED_ED25519_VERIFIER",
   "terminal": false,
-  "reviewed_source_head": "75f3db2b55cd1d9737d83c811d291abecb67ad49",
+  "reviewed_source_head": "0b9038c78a9e1a5256895901aa22376d645adbd4",
   "behavioral_source_checkpoint": "c900d1ecb2eac495994b8715f09ad10bee6d9583",
   "prior_handshake_source_checkpoint": "c900d1ecb2eac495994b8715f09ad10bee6d9583",
   "prior_disposable_pg_checkpoint": "74d8475e32ff89b67e2b6a1346e0839bbcfa646f",
   "publish_alignment": {
-    "observed_at": "2026-07-12T18:58:46Z",
+    "observed_at": "2026-07-12T23:50:01Z",
     "branch": "agent/alr-wp4-contracts",
-    "mac_head": "75f3db2b55cd1d9737d83c811d291abecb67ad49",
-    "origin_work_branch": "75f3db2b55cd1d9737d83c811d291abecb67ad49",
-    "origin_main": "7f0a73d672872963775ff0a62b26875533c815a3",
+    "mac_head": "0b9038c78a9e1a5256895901aa22376d645adbd4",
+    "origin_work_branch": "0b9038c78a9e1a5256895901aa22376d645adbd4",
+    "origin_main": "df787960d4c7f010f208c073712d859ce9ca5bf4",
     "source_checkpoint_contained": true
   },
   "before": {
-    "current_work_package_state": "ACTIVE_WP4_TRUSTED_ED25519_VERIFIER_SOURCE_PREAUTHORING_GATE",
-    "completed_gate": "DONE_DESIGN_ACCEPTED_V160_STYLE_ATOMIC_CONSUMPTION_PREAUTHORING_GATE",
-    "verifier_source_seam_status": "UNAUTHORIZED",
+    "current_work_package_state": "ACTIVE_WP4_TRUSTED_ED25519_VERIFIER_SOURCE_TDD_GATE",
+    "completed_gate": "DONE_DESIGN_ACCEPTED_TRUSTED_ED25519_VERIFIER_SOURCE_PREAUTHORING_GATE",
+    "verifier_source_seam_status": "AUTHORIZED_EXACT_NINE_PATHS",
     "production_verifier_status": "ABSENT",
     "durable_consumption_claim": "NOT_ESTABLISHED",
     "execution_claim": "NOT_ESTABLISHED"
@@ -28,52 +28,41 @@
   "after": {
     "goal_status": "ACTIVE",
     "current_work_package": "WP4-ACTUAL-TRAINING-REGISTRY",
-    "current_work_package_state": "ACTIVE_WP4_TRUSTED_ED25519_VERIFIER_SOURCE_TDD_GATE",
-    "completed_gate": "DONE_DESIGN_ACCEPTED_TRUSTED_ED25519_VERIFIER_SOURCE_PREAUTHORING_GATE",
+    "current_work_package_state": "ACTIVE_WP4_V160_STYLE_ATOMIC_CONSUMPTION_SOURCE_TDD_GATE",
+    "completed_gate": "DONE_SOURCE_ACCEPTED_TRUSTED_ED25519_VERIFIER",
     "atomic_consumption_design_status": "ACCEPTED_DESIGN_ONLY",
-    "source_authoring_authorized": true,
-    "source_authoring_scope": "EXACT_NINE_PATH_SEPARATELY_GOVERNED_TDD_ONLY",
-    "verifier_source_present": false,
-    "public_crates_fetch_performed": false,
-    "production_verifier_status": "ABSENT",
+    "source_authoring_authorized": false,
+    "source_authoring_scope": "EXACT_NINE_PATH_COMPLETED",
+    "verifier_source_present": true,
+    "public_crates_fetch_performed": true,
+    "production_verifier_status": "SOURCE_ONLY_UNATTESTED",
     "platform_attested_verifier_capability": false,
     "v160_reserved_or_authored": false,
     "durable_consumption_claim": "NOT_ESTABLISHED",
     "production_v159_applied": false,
     "execution_claim": "NOT_ESTABLISHED",
     "model_training_performed_claim": "NOT_ESTABLISHED",
-    "next_work_id": "WP4-TRUSTED-ED25519-VERIFIER-SOURCE-TDD-GATE"
+    "model_training_performed": false,
+    "production_proof_rows": 0,
+    "production_reward_rows": 0,
+    "production_model_rows": 0,
+    "next_work_id": "WP4-V160-STYLE-ATOMIC-CONSUMPTION-SOURCE-TDD-GATE"
   },
   "governed_review": {
-    "task_contract_digest": "sha256:f52552dcae71880051a13d9e7a76e3defd00fa4c556309bc272f526c3db04492",
-    "route_dag_digest": "sha256:9a1c318b0df5dad246ee8116e4b0ae0a42795987543d1b368bb7e958eb5e9f4c",
-    "context_artifacts": {
-      "PA": "sha256:23a0b13179a868f3975697d15bc145da84c7ad65a94ff789a402ad2324aeb81f",
-      "FA": "sha256:4df5dec17eb6ff9da102607f04e9c20a96048d2cb16a1b22c71cc7a35513f2fe",
-      "CC": "sha256:f1fc0e06ff7a3e20b1b72ff1e6aa07e8b6129a1c14b5c9745abbfc5aacf37c8b",
-      "E3": "sha256:b6e56b513cd95b6fc661f702e2c43b5891438ddb577287dcb839e5718e540b3b",
-      "MIT": "sha256:41d336bbf64b5e4531c2c3f00bd0f11158a77e8e4c21ae06c3bb9842540702b8"
-    },
-    "initial_findings": {
-      "FA": "0/5/1",
-      "CC": "0/2/0",
-      "E3": "0/4/4"
-    },
-    "repair_summary": [
-      "Removed provenance and governance overclaim; froze exact unattested verdict and capability literals.",
-      "Closed top-level, evidence, job, 17-false, and 17-zero canonical receipt schemas and byte grammar.",
-      "Added total field/role error precedence, 10 MiB aggregate accounting, fallible allocation, and redacted Debug.",
-      "Separated first-party unsafe/build-script bans from transitive inventory and required distinct-target offline compilation plus parsed metadata/lock review.",
-      "Prevented receipt laundering with same-process verify_and_attest(original_inputs) and immutable source-field binding."
-    ],
-    "final_reviews": "PA/FA/CC/E3/MIT ACCEPT/ACCEPT/ACCEPT/ACCEPT/ACCEPT",
-    "final_p0_p1_p2": "0/0/0"
+    "source_commit": "0b9038c78a9e1a5256895901aa22376d645adbd4",
+    "source_base": "a393159a327b624112e3b76b1f644b9d2f8cf6de",
+    "E2_verdict_sha256": "7a85dba8272edcfda274f8af62da8012e50c18c293eb8934d35288e4872f7e36",
+    "E3_verdict_sha256": "fa4992d24fee595a57c705d92033c0632a33aef2af1c775de563f3c48804caca",
+    "E4_verdict_sha256": "ee3b1cfaf640bb3f514a4fc0c1e603bfddbbe816657fe792444d272c5895bcb3",
+    "final_reviews": "E2/E3/E4 ACCEPT/ACCEPT/ACCEPT",
+    "final_p0_p1_p2": "0/0/0",
+    "adapter_pytest_failures_relabelled_pass": false
   },
-  "verifier_source_design_evidence": {
+  "verifier_source_evidence": {
     "verifier_crate": "rust/openclaw_alr_fit_verifier",
     "source_paths_authorized": 9,
-    "source_currently_present": false,
-    "public_crates_fetch_performed": false,
+    "source_currently_present": true,
+    "public_crates_fetch_performed": true,
     "normal_dependency_pins": "base64=0.22.1;ed25519-dalek=2.2.0;sha2=0.10.9;default_features=false",
     "dev_dependency_pin": "serde_json=1.0.149",
     "crypto_api_allowlist": "VerifyingKey::from_bytes,Signature::from_bytes,VerifyingKey::verify_strict",
@@ -105,14 +94,29 @@
     "distinct_online_offline_target_required": true,
     "metadata_lock_supply_chain_inventory_required": true,
     "engine_dependency_reachability": false,
-    "all_authority_false_zero": true
+    "all_authority_false_zero": true,
+    "rust_tests": "5 unit + 28 integration passed",
+    "static_tests": "10 metadata-free + 10 metadata-aware passed",
+    "offline_check_rustfmt_cli_pycompile_diff": "PASS",
+    "hosted_ci_run_id": 29213814965,
+    "hosted_ci_run_number": 1101,
+    "hosted_ci_jobs": "8/8 SUCCESS"
   },
   "source_hashes": {
     "v158_sql": "7ed70599c6bd5f3cdb3376bc135a952d8c18f4ad62a62432c2bfdd8ee84e446b",
     "v159_sql": "2e11d0ae0cbc2c1161a47d04bed4054c31b728e8cf945f931197f9b3455b7d74",
     "handshake_module": "32181c5f14e099c996befa9f84009b372b969edfecfce3741169aca7b5acb81d",
     "handshake_design_report": "72101e4da8f3b372fdafa5e6b211dc933e9c6994356b4a07219b92d9c5f0a927",
-    "verifier_preauthoring_fragment": "9d957cf70f9beba5a9c48e66fd64bcef772f3e550cc1c636d9bcddf56d6de361"
+    "verifier_preauthoring_fragment": "9d957cf70f9beba5a9c48e66fd64bcef772f3e550cc1c636d9bcddf56d6de361",
+    "verifier_crate_manifest": "24ebf0b61ec5559ed0c0ad9cebbf39c53c4dfea73e48f42be01623c6a5797754",
+    "verifier_lib": "e547de860b89c9a750fc6d0b6eadcac9431f1d6b6898e610abafcc93ac5467b1",
+    "verifier_contract": "b0abc1a08835cbeee730e753349145bb722262136c8538d39d80c2f82c7f5e69",
+    "verifier_implementation": "d390a31ce316c0ae053735dc31ffaf48fe38a25fda7b4042b0a1b31aae31c766",
+    "verifier_integration_tests": "c19bdfe4f476fb5abd9196a26d713f4dcfac4fed5ae2c8623224d434cc02f675",
+    "verifier_static_scanner": "baa134fec15ce19fa2d3797b9c52223d108f31fc032d1e450239ed8a22fd9eab",
+    "workspace_cargo_manifest": "a0336d0623ee65d9aed77d6e81d91062a9dd8a619985f71a618ef8f318de8f09",
+    "workspace_cargo_lock": "27ed7364041fc17c14e0b27f19d54f247a61c12b78a567d2abcc0b11038b27f8",
+    "ci_workflow": "cd6ec5e87df6c9a09898122d5d56e40318e8a594d6fa878de0fd5addc7c1bfcb"
   },
   "migration_collision_scan": {
     "eligible_migrations": 141,
@@ -123,7 +127,7 @@
     "migration_or_pg_effect": false
   },
   "semantic_adjudication": {
-    "verdict": "TRUSTED_ED25519_VERIFIER_SOURCE_SEAM_ACCEPTED_IMPLEMENTATION_AND_EXECUTION_NOT_ESTABLISHED",
+    "verdict": "TRUSTED_ED25519_VERIFIER_SOURCE_ACCEPTED_SOURCE_ONLY_EXECUTION_NOT_ESTABLISHED",
     "G1": "PARTIAL",
     "G2": "PARTIAL_DISPOSABLE_PG_VERIFIED",
     "G3": "FAIL_DISPOSABLE_PG_VERIFIED_NO_REAL_RECEIPT_OR_OUTCOME_CHAIN",
@@ -133,15 +137,17 @@
     "G7": "FAIL",
     "G8": "PARTIAL_WP1_PASS",
     "G9": "PARTIAL_WP1_PASS",
-    "next_route": "TRUSTED_ED25519_VERIFIER_SOURCE_TDD_GATE"
+    "production_proof_reward_model_rows": "0/0/0",
+    "model_training_performed": false,
+    "next_route": "V160_STYLE_ATOMIC_CONSUMPTION_SOURCE_TDD_GATE"
   },
   "effect_boundary": {
     "authority_delta": "NONE",
-    "runtime_delta": "NONE_DESIGN_DOCS_ONLY",
+    "runtime_delta": "NONE_SOURCE_AND_CI_ONLY",
     "database_delta": "NONE_THIS_LOOP",
     "exchange_delta": "NONE",
-    "network_delta": "PUBLIC_OFFICIAL_DOCUMENT_RESEARCH_ONLY_NO_CRATE_FETCH",
-    "source_sql_test_workflow_delta": "NONE",
+    "network_delta": "PUBLIC_CRATES_AND_HOSTED_CI_DEPENDENCY_FETCH_ONLY",
+    "source_sql_test_workflow_delta": "EXACT_NINE_PATH_VERIFIER_SOURCE_TEST_LOCK_CI",
     "real_request_receipt_bytes_delta": "NONE",
     "private_runtime_broker_contact": false,
     "linux_trade_core_contact": false,
@@ -151,11 +157,11 @@
   "anti_repeat": {
     "same_scope_retries": 0,
     "review_repair_rounds": 2,
-    "next_loop_must_change": "Author only the exact nine-path Rust verifier TDD slice with RED-first tests, recorded public crates.io fetch, distinct-target offline replay, supply-chain inventory, and independent source review; do not repeat preauthoring or author V160."
+    "next_loop_must_change": "Advance directly to the accepted V160 atomic-consumption source TDD gate; do not add another design-only gate and do not treat source PASS as runtime or training."
   },
   "authority_delta": "NONE",
-  "runtime_delta": "NONE_DESIGN_DOCS_ONLY",
+  "runtime_delta": "NONE_SOURCE_AND_CI_ONLY",
   "database_delta": "NONE_THIS_LOOP",
   "exchange_delta": "NONE",
-  "network_delta": "PUBLIC_OFFICIAL_DOCUMENT_RESEARCH_ONLY_NO_CRATE_FETCH"
+  "network_delta": "PUBLIC_CRATES_AND_HOSTED_CI_DEPENDENCY_FETCH_ONLY"
 }
