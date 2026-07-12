@@ -1,0 +1,46 @@
+/* ═══════════════════════════════════════════════════════════════════
+   view-replay.css — 玄衡原生 view「回放 / 回測 Replay」頁級樣式(Phase 2 第 10 遷)
+   ═══════════════════════════════════════════════════════════════════
+   MODULE_NOTE
+   模塊用途:承載 view-replay.js 注入的 replay DOM 中「非 app-paper.js 自注入」的那薄層樣式。
+     只兩類:
+       ① .replay-head / .replay-head-title / .replay-note —— 對 tab-replay.html 頁內樣式塊
+          (page-level style block,lines 22-35)的**重複(非移動)**:legacy iframe 路徑仍靠 tab-replay.html 自帶頁內樣式,
+          故 tab-replay.html 不動作回滾錨。
+       ② `.replay-view` scope 的 legacy 短名 shim(.oc-chip / .oc-chip-info)—— 殼**刻意不呼**
+          common.js ocInjectBaseCSS()(那會注入 body{padding}+`*` reset 破殼 chrome),而 .oc-chip*
+          原本只在 ocInjectBaseCSS 內。故逐字 port 並以 `.replay-view` 收束作用域。此為對 ocInjectBaseCSS
+          同名規則的**重複(非移動)**:legacy iframe 續靠 ocInjectBaseCSS 運行時注入。
+     **不在此檔**:ready-card 的 .oc-replay-*(app-paper.js `_injectReplayReadyCss()` 執行期自注入)、
+       degraded-card(OpenClawDisabledStateCard 自帶)、.oc-btn*(shell-components.css,殼已載)、
+       .flex-1(oc-utilities.css,殼已載)。故本檔刻意極薄。
+   ratchet(born-clean 0/0/0):全檔零裸 hex。tab-replay.html 頁內樣式塊的 sky-blue
+     rgba(14,165,233,…)(邊框/底 tint)不屬玄衡調色盤(暖調近黑+青銅),skin-only 遷移一律改玄衡
+     語義 token:accent tint→--accent-weak、邊框→--border-subtle、文字→--text-secondary/--text-primary、
+     底→--bg-surface;pill 半徑 999px→--r-full。過 test_gui_style_ratchet_static.py(hex/style_attr/style_block 皆 0)。
+   誠實邊界:靜態只證 source;真渲染 / ready·degraded 卡真態 / 對比可讀性 = NEEDS-LINUX + operator。
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ═══ ① replay-head / replay-note(port tab-replay.html 頁內樣式塊,色字面→token)═══ */
+
+.replay-head {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  background: var(--bg-surface); border: 1px solid var(--border-subtle);
+  border-radius: var(--r-2); padding: 12px 16px; margin-bottom: 14px;
+}
+.replay-head-title { font-weight: 700; font-size: 14px; }
+
+.replay-note {
+  background: var(--accent-weak); border: 1px solid var(--border-subtle);
+  border-radius: var(--r-2); padding: 10px 14px; margin-bottom: 14px;
+  color: var(--text-secondary); font-size: 12px; line-height: 1.65;
+}
+.replay-note strong { color: var(--text-primary); }
+
+/* ═══ ② `.replay-view` scope 的 legacy 短名 shim(port ocInjectBaseCSS 的 .oc-chip*,色→token)═══ */
+.replay-view .oc-chip {
+  display: inline-flex; align-items: center; gap: 5px; border-radius: var(--r-full);
+  padding: 3px 10px; font-size: 11px; font-weight: 500; border: 1px solid transparent;
+}
+/* info chip(Replay Engine 標籤):藍→玄衡青銅弱色 accent-weak,邊框走 border-subtle */
+.replay-view .oc-chip-info { background: var(--accent-weak); border-color: var(--border-subtle); color: var(--text-secondary); }
