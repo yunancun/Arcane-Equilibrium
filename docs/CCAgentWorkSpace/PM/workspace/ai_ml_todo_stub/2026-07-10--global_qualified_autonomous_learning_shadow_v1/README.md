@@ -4,7 +4,7 @@ Date: 2026-07-10
 Owner: PM
 Goal: `GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1`
 Codex Goal thread: `019f4b6d-1e5b-7551-9fce-7a2f029a1675`
-Status: `ACTIVE_WP4_TRUSTED_FIT_CAPTURE_ATTESTATION_CONTRACT_DESIGN_TDD`
+Status: `ACTIVE_WP4_DURABLE_FIT_ATTESTATION_SCHEMA_DESIGN_PREAUTHORING_GATE`
 
 This is the durable PM-owned queue and state surface for the active Goal. It
 supersedes the old ALR P2 completion/terminal interpretation, but does not edit
@@ -154,12 +154,38 @@ applied; no PostgreSQL, Linux, runtime, exchange, fit, model/ONNX file,
 artifact readback, attestation, registry, symlink, serving, promotion, or
 authority effect occurred.
 
-The next safe slice is only a pure trusted fit-capture attestation
-contract/verifier. It must bind runner identity, actual input rehashes,
-trainer-spec/seed, result hash, and artifact readback without treating caller
-data or synthetic fixtures as execution proof. New migration authoring/apply,
-the V158 writer/reader adapter, trainer execution, filesystem publication,
-registry, PostgreSQL/Linux/runtime, and exchange work remain later gates.
+The pure fit-capture candidate is source accepted at
+`a09c70f243723fea1645b597e96c6cf08795fd6c`. It revalidates the complete
+result contract and internally derives source-head, canonical input-lineage,
+dataset/row/split/code/config/feature/label, runner-identity, and q10/q50/q90
+readback hashes from bounded raw bytes. Raw materials are absent from the
+serialized candidate.
+
+The serialized status is fixed to `OUT_OF_BAND_FIT_ATTESTATION_REQUIRED`.
+Literal verifier `True` produces only `FIT_CAPTURE_ATTESTED_EPHEMERAL` with
+`EXTERNAL_HOST_UNCHECKED` authenticity. Execution and model-training claims
+remain `NOT_ESTABLISHED`, persistence is false, every authority flag is false,
+and every authority counter is zero. Callback exceptions, truthy aliases,
+mutation, and malformed bounded structures fail closed.
+
+Focused `43`, adjacent `217`, and full ML `1998 passed/36 skipped` passed.
+Current-head E2/E4/CC/MIT final P0/P1/P2 are `0/0/0`; governed E4 capture is
+`9250f3ab31b17ec557f613629c7eb3eb70a4625e70e6677a4094c81daef61447`.
+This remains source-only synthetic evidence. It did not run a trainer/fit,
+create/read model files, apply V158, contact PostgreSQL/Linux/runtime/Bybit,
+write a durable row/registry, create a symlink, or grant serving/promotion or
+trading authority.
+
+The next safe slice is
+`WP4-DURABLE-FIT-ATTESTATION-SCHEMA-DESIGN-PREAUTHORING-GATE`. Fresh scan found
+140 migrations through V158, zero duplicate versions, and no V159 source or
+reservation. The loop may design and adversarially review a forward relation
+and fixed writer/read boundary that binds receipt, result, fit capture, runner,
+actual-input material set, artifact trio, and a current trusted issuer receipt.
+It must reject `EXTERNAL_HOST_UNCHECKED` and close V158 v1's unattested
+`TRAINING_PERFORMED` path after the forward schema. This loop does not
+reserve/author/apply V159, execute a trainer/fit, create model/files, contact
+PG/Linux/Bybit/runtime, mutate registry, or create serving/promotion authority.
 
 ## Earlier B2.2c event-primary reconciliation
 
