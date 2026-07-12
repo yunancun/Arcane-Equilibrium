@@ -4,7 +4,7 @@ Date: 2026-07-10
 Owner: PM
 Goal: `GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1`
 Codex Goal thread: `019f4b6d-1e5b-7551-9fce-7a2f029a1675`
-Status: `ACTIVE_WP4_DURABLE_FIT_ATTESTATION_DISPOSABLE_PG_VERIFICATION_GATE`
+Status: `ACTIVE_WP4_TRUSTED_ISSUER_ISOLATED_RUNNER_HANDSHAKE_DESIGN_PREAUTHORING_GATE`
 
 This is the durable PM-owned queue and state surface for the active Goal. It
 supersedes the old ALR P2 completion/terminal interpretation, but does not edit
@@ -224,6 +224,32 @@ highest-ROI safe item is
 `WP4-DURABLE-FIT-ATTESTATION-DISPOSABLE-PG-VERIFICATION-GATE`: governed,
 isolated PG16/Timescale execution of the functional and concurrency probes
 only. External issuer evidence and a real fit remain a later separate gate.
+
+## Disposable PostgreSQL verification checkpoint
+
+Exact head `74d8475e32ff89b67e2b6a1346e0839bbcfa646f` passed hosted run
+`29195892105` and schema job `86658665742`. Functional and concurrency probes
+ran against distinct disposable PG16/Timescale databases; both force-drop
+cleanups, schema consumer, and teardown passed. The migration audit executed
+informational-only/non-gating. Intended transient
+fixture writes were destroyed, surviving rows are `0`, and production/runtime
+writes are `0`. The green run was attempt 12 after `11` same-scope failed-safe
+repairs. Current hashes are V158 `7ed70599...`, V159 `2e11d0ae...`, functional
+probe `d29d4b81...`, concurrency probe `5965ae7e...`, and static contract
+`f6ffc199...`.
+
+Completed gate is `DONE_DISPOSABLE_PG_VERIFIED`; Goal and WP4 remain `ACTIVE`.
+The fixtures were synthetic: no external real receipt, isolated runner use,
+fit, model training, production row, serving/promotion, profit, or authority
+was established. G1 is partial; G2 is partial with disposable-PG verification;
+G3/G4 and G5-G7 remain failed; G8/G9 remain partial. Production/runtime V159
+is still unapplied and unrefreshed.
+
+Next is the pure design-only
+`WP4-TRUSTED-ISSUER-ISOLATED-RUNNER-HANDSHAKE-DESIGN-PREAUTHORING-GATE`.
+It may define a request/receipt handshake, but may not consume raw receipt
+bytes, open PG/files/network, contact runtime/brokers, execute trainer/fit,
+create model files, apply V159 to runtime, or grant any authority.
 
 ## Earlier B2.2c event-primary reconciliation
 
