@@ -36,14 +36,13 @@
 //!   - **write-once**：`create_new` 唯一 tmp → `sync_all` → `hard_link(tmp,final)`
 //!     （final 已存在 = 拒二次 seal，絕不 rename overwrite）→ 0o400 → fsync 父目錄。
 //!
-//! TODO(later phase)：現階段唯一 production 消費者是 precontact 的
-//!   `phase2_immutable_pass_artifact_present`（現狀恒 false）；`seal`/`outcome`/
-//!   `summary`/`build`/approval-reader 皆為後續 phase 接入前的 scaffold（僅測試觸
-//!   達），故用檔案級 `#![allow(dead_code)]`（沿 crate 既有慣例：見 P1
-//!   `ibkr_secret_slot_loader`）。真 seal 啟用 = operator 決策（現狀必然 BLOCKED）。
+//! W2（AMD-2026-07-11-01）把原 report-only 的 gap 替換為 Rust-only controlled
+//! seal control：預設 dry-run；只有 standalone bin 的 `--apply` **以及** literal
+//! `OPENCLAW_IBKR_PHASE2_SEAL_APPLY=1` 才可 append immutable generation/control
+//! records。這仍不是 activation、不是 broker contact，G4 與後續 Rust activation
+//! envelope 仍是獨立硬閘。production path 從不把 fixture/template 當作 seal input。
 
-#![allow(dead_code)]
-
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -63,23 +62,35 @@ use crate::boot_observability::BUILD_GIT_SHA;
 // ---------------------------------------------------------------------------
 
 /// 穩定 artifact_id（=contract_id 字串）：二次 seal 撞 `create_new`/`hard_link`。
+#[cfg(test)]
 const PHASE2_ARTIFACT_ID: &str = "phase2_ibkr_external_surface_gate_v1";
 
 /// sealed artifact 磁碟檔名（write-once，0o400）。
+#[cfg(test)]
 const SEALED_FILENAME: &str = "phase2_ibkr_external_surface_gate_v1.sealed.json";
 
+/// W2 production input/control filenames.  They are provisioned owner-only by
+/// the operator/runtime; source templates and accepted fixtures are never read
+/// through these names.
+const CONTROL_INPUTS_FILENAME: &str = "phase2_seal_inputs.json";
+const CONTROL_APPROVAL_FILENAME: &str = "phase2_seal_control_approval.json";
+const GENERATIONS_DIRNAME: &str = "generations";
+const CONTROLS_DIRNAME: &str = "controls";
+const W2_CONTROL_AMD: &str = "AMD-2026-07-11-01";
+const W2_CONTROL_CONTRACT_ID: &str = "ibkr_phase2_seal_control_v1";
+const W2_INPUTS_CONTRACT_ID: &str = "ibkr_phase2_seal_inputs_v1";
+
 /// approval A-model 來源檔名（owner-only 0o600 TOML）。
+#[cfg(test)]
 const APPROVAL_FILENAME: &str = "phase2_seal_approval.toml";
 
 /// 政策 bundle 來源檔名（settings/broker）。
+#[cfg(test)]
 const POLICIES_FILENAME: &str = "ibkr_phase2_policies.toml";
 
 /// approval issue→now 上界（bounded freshness，30 天）；超齡即視為過期（fail-closed）。
 const MAX_APPROVAL_AGE_MS: u64 = 30 * 24 * 60 * 60 * 1000;
 
-/// producer-層 blocker reason（非 types `validate()` 覆蓋的三項）。
-const REASON_EPHEMERAL: &str = "ephemeral_data_dir";
-const REASON_TRIANGULATION: &str = "account_fingerprint_triangulation_mismatch";
 const REASON_SOURCE_COMMIT_UNKNOWN: &str = "source_commit_unknown";
 
 /// 易失路徑前綴（refuse-ephemeral）。跨平台涵蓋 Linux `/tmp`、Mac `/private/tmp`
@@ -100,6 +111,7 @@ const EPHEMERAL_PREFIXES: &[&str] = &[
 
 /// Phase 2 seal approval（TOML deser）。producer 絕不自注 "Operator"——僅在本結構
 /// 通過 `approval_is_valid` 的 6 綁定後，才把其 `reviewer_roles` 綁進 artifact。
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Phase2SealApproval {
     pub adr: String,
@@ -116,6 +128,7 @@ pub struct Phase2SealApproval {
 /// 4) reviewer_roles 含 PM 且 Operator；
 /// 5) 時窗有效：issued>0、issued<=now、expires>now、expires>issued；
 /// 6) bounded freshness：now-issued<=30d；clock 異常（future-dated）判無效不 fail-open。
+#[cfg(test)]
 fn approval_is_valid(a: &Phase2SealApproval, now_ms: u64, build_sha: &str) -> bool {
     a.adr == IBKR_PHASE2_ADR
         && a.amd == IBKR_PHASE2_CONTACT_AMD
@@ -130,9 +143,11 @@ fn approval_is_valid(a: &Phase2SealApproval, now_ms: u64, build_sha: &str) -> bo
         && now_ms.saturating_sub(a.issued_at_ms) <= MAX_APPROVAL_AGE_MS
 }
 
-/// source_commit 必須是真世代——拒空 / 拒 build.rs 的 "unknown" fallback。
+/// source_commit 必須是可被 current-build ledger 目錄表達的真世代：精確的
+/// 40-hex git SHA。只拒 `unknown` 仍會讓 apply 寫入 reader 永遠無法枚舉的
+/// generation 目錄，因而產生 applied-but-unconsumable 的假成功。
 fn source_commit_is_known(sha: &str) -> bool {
-    !sha.trim().is_empty() && sha != "unknown"
+    sha.len() == 40 && sha.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 // ---------------------------------------------------------------------------
@@ -151,37 +166,6 @@ pub enum Phase2SealError {
 }
 
 /// 各 leg 接受度（report 面；零明文，皆 bool）。
-#[derive(Debug, Clone, Serialize)]
-pub struct Phase2LegStatus {
-    pub data_dir_ephemeral: bool,
-    pub source_commit_known: bool,
-    pub policy_bundle_accepted: bool,
-    pub api_allowlist_accepted: bool,
-    pub secret_contract_accepted: bool,
-    pub api_topology_accepted: bool,
-    pub external_surface_gate_accepted: bool,
-    pub approval_present: bool,
-    pub approval_valid: bool,
-    pub account_fingerprint_triangulation_ok: bool,
-    pub artifact_contact_allowed: bool,
-    pub artifact_hashes_verified: bool,
-}
-
-/// producer 一次評估的結果。現階段 env-wrapper 恒回 `Blocked`（report-only，不寫檔）；
-/// `Sealed`/`AlreadySealed` 為 seal 啟用後的形狀（現由測試觸達 seal 直接映射）。
-pub enum Phase2ProducerOutcome {
-    Sealed {
-        path: PathBuf,
-    },
-    AlreadySealed {
-        path: PathBuf,
-    },
-    Blocked {
-        blockers: Vec<String>,
-        leg_status: Phase2LegStatus,
-    },
-}
-
 // ---------------------------------------------------------------------------
 // hash（raw 自洽覆蓋所有實質欄位；redacted 只含 hash/bool/enum/contract_id）
 // ---------------------------------------------------------------------------
@@ -251,6 +235,7 @@ fn compute_redacted_summary_hash(a: &IbkrPhase2GateArtifactV1) -> String {
 /// 絕不用裸 `to_string(&approval)`（struct 欄位序 / roles 元素序不保證穩定 → hash
 /// 漂移，令 tamper-evidence 失效）。此 hash 於 seal-time 填入 artifact，令 sealed 檔
 /// tamper-evidently 自記是哪份 approval 授權了它。
+#[cfg(test)]
 fn compute_approval_lineage_hash(a: &Phase2SealApproval) -> String {
     let mut roles = a.reviewer_roles.clone();
     roles.sort();
@@ -319,6 +304,7 @@ fn build_external_surface_gate(
 /// - `api_session_topology` 用其自身之值（T2：不再覆寫 fp）；triangulation 由 seal /
 ///   outcome 以真 equality cross-check enforce，types 不 cross-check。
 /// - 兩 hash 於組裝末尾計算（覆蓋所有實質欄位，含上述兩新欄）。
+#[cfg(test)]
 fn build_phase2_artifact_candidate(
     policy_bundle: &IbkrPhase2PolicyBundleV1,
     allowlist: &NonBybitApiAllowlistV1,
@@ -436,7 +422,7 @@ fn owner_only_dir_metadata_is_secure(meta: &std::fs::Metadata, expected_euid: u3
 /// `lstat`/`fstatat(AT_SYMLINK_NOFOLLOW)` 和稍後由 FD 取得的 `fstat` 必須指向同一
 /// inode；否則 lstat→open 間的 replacement race 不能被視為可 consume。
 #[cfg(unix)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 struct SecureInode {
     dev: u64,
     ino: u64,
@@ -541,8 +527,9 @@ fn open_owner_only_child_dir(
 /// consume-time 防線的一部分：即使 attacker 在 lstat 與 open 間把 regular sealed
 /// file 換成 FIFO，open 也不能先卡住，必須抵達 post-open type/inode reject。
 #[cfg(unix)]
-fn read_owner_only_sealed_child_after_lstat<F>(
+fn read_owner_only_named_child_after_lstat<F>(
     parent: &std::fs::File,
+    child_name: &str,
     expected_euid: u32,
     after_lstat: F,
 ) -> Option<String>
@@ -552,7 +539,7 @@ where
     use std::io::Read;
     use std::os::unix::io::{AsRawFd, FromRawFd};
 
-    let sealed_name = std::ffi::CString::new(SEALED_FILENAME).ok()?;
+    let sealed_name = std::ffi::CString::new(child_name).ok()?;
     let before = lstatat_owner_only_inode(
         parent.as_raw_fd(),
         sealed_name.as_c_str(),
@@ -586,11 +573,37 @@ where
     Some(raw)
 }
 
+/// Dynamic-name version of the W1 secure consumer primitive.  W2 uses this
+/// only after strict generated-file-name validation; `openat` remains
+/// nonblocking/no-follow and binds the post-open inode to the pre-open lstat.
+#[cfg(unix)]
+fn read_owner_only_named_child(
+    parent: &std::fs::File,
+    child_name: &str,
+    expected_euid: u32,
+) -> Option<String> {
+    read_owner_only_named_child_after_lstat(parent, child_name, expected_euid, || {})
+}
+
+#[cfg(unix)]
+#[cfg(test)]
+fn read_owner_only_sealed_child_after_lstat<F>(
+    parent: &std::fs::File,
+    expected_euid: u32,
+    after_lstat: F,
+) -> Option<String>
+where
+    F: FnOnce(),
+{
+    read_owner_only_named_child_after_lstat(parent, SEALED_FILENAME, expected_euid, after_lstat)
+}
+
 /// Production wrapper keeps the final-file race hook inert. The generic helper above is also
 /// used by the Unix-only test to inject a FIFO replacement exactly after `fstatat`.
 #[cfg(unix)]
+#[cfg(test)]
 fn read_owner_only_sealed_child(parent: &std::fs::File, expected_euid: u32) -> Option<String> {
-    read_owner_only_sealed_child_after_lstat(parent, expected_euid, || {})
+    read_owner_only_named_child(parent, SEALED_FILENAME, expected_euid)
 }
 
 /// 從 data-root path 打開第一個安全 dirfd。lstat+`O_NOFOLLOW|O_DIRECTORY`+fstat
@@ -627,6 +640,7 @@ where
 }
 
 #[cfg(unix)]
+#[cfg(test)]
 fn sealed_artifact_data_root(path: &Path) -> Option<&Path> {
     let ibkr_phase2 = path.parent()?;
     let governance = ibkr_phase2.parent()?;
@@ -644,6 +658,7 @@ fn sealed_artifact_data_root(path: &Path) -> Option<&Path> {
 /// 由 data-root 的安全 dirfd 逐層 consume sealed artifact。`after_data_root_lstat`
 /// 只供 deterministic ancestor-replacement attack 測試；production 呼叫空 closure。
 #[cfg(unix)]
+#[cfg(test)]
 fn read_sealed_artifact_from_secure_tree_after_data_root_lstat<F>(
     path: &Path,
     after_data_root_lstat: F,
@@ -660,6 +675,7 @@ where
 }
 
 #[cfg(unix)]
+#[cfg(test)]
 fn read_sealed_artifact_from_secure_tree(path: &Path) -> Option<String> {
     read_sealed_artifact_from_secure_tree_after_data_root_lstat(path, || {})
 }
@@ -700,12 +716,14 @@ where
 /// 將 immutable artifact 從 secure tree FD parse；data-root、governance、
 /// ibkr_phase2 與 sealed file 都在 lstat/no-follow-open/fstat inode binding 下。
 #[cfg(unix)]
+#[cfg(test)]
 fn parse_sealed_artifact_from_secure_fd(path: &Path) -> Option<IbkrPhase2GateArtifactV1> {
     let raw = read_sealed_artifact_from_secure_tree(path)?;
     serde_json::from_str(&raw).ok()
 }
 
 #[cfg(not(unix))]
+#[cfg(test)]
 fn parse_sealed_artifact_from_secure_fd(path: &Path) -> Option<IbkrPhase2GateArtifactV1> {
     let _ = path;
     None
@@ -713,6 +731,7 @@ fn parse_sealed_artifact_from_secure_fd(path: &Path) -> Option<IbkrPhase2GateArt
 
 /// post-seal 磁碟 re-verify（design 命名）：secure-FD consume、build-generation 綁定、
 /// 與傳入 artifact 全等（含 path 欄位）、hash 自洽、且 `validate()` 放行。
+#[cfg(test)]
 fn verify_sealed_artifact_for_build(
     artifact: &IbkrPhase2GateArtifactV1,
     expected_build_sha: &str,
@@ -736,12 +755,14 @@ fn verify_sealed_artifact_for_build(
 
 /// Production build wrapper：sealed artifact 必須屬於當前 `BUILD_GIT_SHA`，舊世代
 /// 即使 shape/hash 均合法也不可被新 binary consume。
+#[cfg(test)]
 fn verify_sealed_artifact(artifact: &IbkrPhase2GateArtifactV1) -> bool {
     verify_sealed_artifact_for_build(artifact, BUILD_GIT_SHA)
 }
 
 /// precontact / summary 用的磁碟 re-verify（path-first，含 anti-relocation、
 /// secure-FD consume、以及 expected build generation 綁定）。
+#[cfg(test)]
 fn reverify_sealed_artifact_at_for_build(path: &Path, expected_build_sha: &str) -> bool {
     if !source_commit_is_known(expected_build_sha) {
         return false;
@@ -762,6 +783,7 @@ fn reverify_sealed_artifact_at_for_build(path: &Path, expected_build_sha: &str) 
 
 /// Production build wrapper：只能 consume 與現 binary 同一 `BUILD_GIT_SHA` 的 sealed
 /// artifact；unknown fallback 或跨世代 artifact 均 fail-closed。
+#[cfg(test)]
 fn reverify_sealed_artifact_at(path: &Path) -> bool {
     reverify_sealed_artifact_at_for_build(path, BUILD_GIT_SHA)
 }
@@ -791,6 +813,7 @@ fn now_ns() -> u128 {
 /// 純載入器：從指定 dir 讀 `ibkr_phase2_policies.toml` 並 `toml::from_str` 成 bundle。
 /// 為什麼收 dir：與 P1 / stock_etf 同構——路徑解析與 load+parse 拆開，令測試以真
 /// repo TOML 直驗，繞過全域 env。回 Err（不捏值）→ 呼叫端計為 leg 失敗（fail-closed）。
+#[cfg(test)]
 pub(crate) fn load_phase2_policy_bundle_from_dir(
     dir: &Path,
 ) -> Result<IbkrPhase2PolicyBundleV1, String> {
@@ -800,18 +823,6 @@ pub(crate) fn load_phase2_policy_bundle_from_dir(
     let bundle: IbkrPhase2PolicyBundleV1 =
         toml::from_str(&raw).map_err(|e| format!("parse {} failed: {e}", path.display()))?;
     Ok(bundle)
-}
-
-/// broker settings dir 解析（不硬編平台路徑）：優先 `OPENCLAW_BROKER_SETTINGS_DIR`，
-/// 否則相對 `settings/broker`（沿 stock_etf risk policy 的 settings-dir 約定）。
-fn resolve_broker_settings_dir() -> PathBuf {
-    std::env::var("OPENCLAW_BROKER_SETTINGS_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("settings").join("broker"))
-}
-
-fn load_phase2_policy_bundle() -> Result<IbkrPhase2PolicyBundleV1, String> {
-    load_phase2_policy_bundle_from_dir(&resolve_broker_settings_dir())
 }
 
 // ---------------------------------------------------------------------------
@@ -868,6 +879,7 @@ fn resolve_phase2_governance_dir() -> Result<PathBuf, Phase2SealError> {
 /// mode==0o700（包含拒 special bits）。這是 seal/approval path 的 owner-only
 /// invariant；production sealed consume 另外以 dirfd/openat 鎖整條 data-root 鏈。
 #[cfg(unix)]
+#[cfg(test)]
 fn check_dir_pair_owner_only(gov_dir: &Path) -> Result<(), String> {
     use std::os::unix::fs::PermissionsExt;
 
@@ -891,6 +903,7 @@ fn check_dir_pair_owner_only(gov_dir: &Path) -> Result<(), String> {
 /// symlink / 非 0o600 / 非本人所有 / 祖先鏈非 0o700 → `Err`（fail-closed）；存在且
 /// 合法 → `Ok(Some)`。內容 6 綁定由 `approval_is_valid` 於組裝/seal 時判定。
 #[cfg(unix)]
+#[cfg(test)]
 pub(crate) fn load_phase2_seal_approval_from_dir(
     gov_dir: &Path,
 ) -> Result<Option<Phase2SealApproval>, String> {
@@ -938,6 +951,7 @@ pub(crate) fn load_phase2_seal_approval_from_dir(
 /// 非 unix：無法驗權限/owner → 結構性 fail-closed 視為無 approval（不注入 Operator）。
 /// 部署目標皆 unix（Linux / Apple Silicon），此路徑實務不觸發。
 #[cfg(not(unix))]
+#[cfg(test)]
 pub(crate) fn load_phase2_seal_approval_from_dir(
     gov_dir: &Path,
 ) -> Result<Option<Phase2SealApproval>, String> {
@@ -959,6 +973,7 @@ pub(crate) fn load_phase2_seal_approval_from_dir(
 /// tempdir（tempdir 本就落 /tmp）。production 唯一到達 seal 的路徑仍經 resolve 的
 /// ephemeral 閘。
 #[cfg(unix)]
+#[cfg(test)]
 fn seal_phase2_artifact(
     artifact: &IbkrPhase2GateArtifactV1,
     gov_dir: &Path,
@@ -1053,6 +1068,7 @@ fn seal_phase2_artifact(
 
 /// 非 unix：無 owner-only/mode 保證 → 結構性拒 seal。
 #[cfg(not(unix))]
+#[cfg(test)]
 fn seal_phase2_artifact(
     artifact: &IbkrPhase2GateArtifactV1,
     gov_dir: &Path,
@@ -1064,160 +1080,1927 @@ fn seal_phase2_artifact(
 }
 
 // ---------------------------------------------------------------------------
-// 秘密槽 leg（復用 P1 OnceLock；Err → 同一 denied fallback）
+// W2 controlled no-contact seal/supersession ledger
 // ---------------------------------------------------------------------------
 
-fn secret_slot_contract_cloned() -> IbkrSecretSlotContractV1 {
-    match crate::ibkr_secret_slot_loader::ibkr_secret_slot_contract() {
-        Ok(c) => c.clone(),
-        Err(_) => crate::ibkr_secret_slot_loader::denied_ibkr_secret_slot_contract_fallback(),
+// ---------------------------------------------------------------------------
+// W2 controlled no-contact seal/supersession ledger
+// ---------------------------------------------------------------------------
+
+/// A provisioned, no-credential input bundle.  It is intentionally a concrete
+/// JSON value rather than a source template: all legs must be independently
+/// supplied by the owner-only runtime directory, or the evaluation remains
+/// `external_verification_pending` and writes nothing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Phase2SealProductionInputsV1 {
+    pub contract_id: String,
+    pub source_version: u32,
+    pub policy_bundle: IbkrPhase2PolicyBundleV1,
+    pub api_allowlist: NonBybitApiAllowlistV1,
+    pub secret_slot_contract: IbkrSecretSlotContractV1,
+    pub api_session_topology: IbkrApiSessionTopologyV1,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Phase2SealControlAction {
+    Seal,
+    Supersede,
+    Revoke,
+}
+
+/// An operator-provisioned control approval.  It authorizes only the local,
+/// no-contact artifact control action; it is never an activation envelope and
+/// contains no session, account ID, or credential material.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Phase2SealControlApprovalV1 {
+    pub contract_id: String,
+    pub source_version: u32,
+    pub approval_id: String,
+    pub action: Phase2SealControlAction,
+    pub authorization_amd: String,
+    pub reviewer_roles: Vec<String>,
+    pub approved_source_commit: String,
+    pub issued_at_ms: u64,
+    pub expires_at_ms: u64,
+    pub predecessor_artifact_id: Option<String>,
+    pub predecessor_raw_hash: Option<String>,
+}
+
+/// Each generation owns both the typed gate artifact and the approval expiry
+/// that bounds it.  This wrapper is immutable and is sealed as one 0400 file.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Phase2SealedGenerationV1 {
+    contract_id: String,
+    source_version: u32,
+    generation_id: String,
+    approval_id: String,
+    approval_digest: String,
+    valid_until_ms: u64,
+    artifact: IbkrPhase2GateArtifactV1,
+    generation_hash: String,
+}
+
+/// Append-only action record.  There is deliberately no mutable `current`
+/// file: consumers derive the one active leaf from this hash chain.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Phase2SealControlRecordV1 {
+    contract_id: String,
+    source_version: u32,
+    control_id: String,
+    action: Phase2SealControlAction,
+    approval_id: String,
+    approval_digest: String,
+    source_commit: String,
+    recorded_at_ms: u64,
+    valid_until_ms: u64,
+    target_artifact_id: String,
+    target_raw_hash: String,
+    predecessor_artifact_id: Option<String>,
+    predecessor_raw_hash: Option<String>,
+    previous_control_hash: Option<String>,
+    control_hash: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Phase2SealEvaluation {
+    pub status: String,
+    pub blockers: Vec<String>,
+    pub inputs_present: bool,
+    pub inputs_valid: bool,
+    pub approval_present: bool,
+    pub approval_valid: bool,
+    pub active_current_build: bool,
+    pub no_contact: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Phase2SealApplyOutcome {
+    pub status: String,
+    pub blockers: Vec<String>,
+    pub action: Option<Phase2SealControlAction>,
+    pub no_contact: bool,
+    pub wrote_generation: bool,
+    pub wrote_control: bool,
+}
+
+#[derive(Debug, Clone)]
+struct Phase2LineageState {
+    active: Option<Phase2SealedGenerationV1>,
+    tail_hash: Option<String>,
+    approval_ids: BTreeSet<String>,
+    approval_digests: BTreeSet<String>,
+}
+
+/// A successful immutable publication can either create a record or discover
+/// the byte-identical record left behind by an interrupted prior attempt.  The
+/// latter is deliberately *not* an error: callers must be able to complete the
+/// missing sibling record without minting a fork.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ImmutablePublication {
+    Written,
+    AlreadyPresent,
+}
+
+/// The lock file is coordination only, never an authority record and never a
+/// consumer input.  `flock` is tied to this fd/open-file-description, so a
+/// crash releases it automatically.  The immutable generation/control ledger
+/// remains the sole active-authority input.
+#[cfg(unix)]
+struct Phase2ApplyLock {
+    file: std::fs::File,
+    /// The `governance/` dirfd which owns the `ibkr_phase2` pathname.  Holding
+    /// this flock prevents a replacement `ibkr_phase2` directory from gaining
+    /// a second writer while the original critical section is still alive.
+    governance: std::fs::File,
+    parent: std::fs::File,
+    governance_inode: SecureInode,
+    parent_inode: SecureInode,
+    inode: SecureInode,
+}
+
+#[cfg(unix)]
+impl Phase2ApplyLock {
+    const FILENAME: &'static str = ".phase2_seal_apply.lock";
+
+    fn acquire(gov_dir: &Path) -> Result<Self, String> {
+        Self::acquire_inner(gov_dir, false)
+    }
+
+    #[cfg(test)]
+    fn try_acquire(gov_dir: &Path) -> Result<Self, String> {
+        Self::acquire_inner(gov_dir, true)
+    }
+
+    fn acquire_inner(gov_dir: &Path, nonblocking: bool) -> Result<Self, String> {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        use std::os::unix::io::{AsRawFd, FromRawFd};
+
+        let euid = unsafe { libc::geteuid() } as u32;
+        // Bind the directory chain first; path text is never used to reopen
+        // a ledger child after this point.  Keep both the `governance/` and
+        // `ibkr_phase2/` dirfds: the former serializes an attempted whole
+        // `ibkr_phase2` directory replacement, while the latter is the only
+        // parent used for ledger I/O during this apply.
+        let (governance, parent) = open_secure_phase2_parent_and_child(gov_dir)
+            .ok_or_else(|| "secure phase2 apply-lock directory unavailable".to_string())?;
+        let governance_metadata = governance
+            .metadata()
+            .map_err(|error| format!("secure phase2 governance stat failed: {error}"))?;
+        let parent_metadata = parent
+            .metadata()
+            .map_err(|error| format!("secure phase2 apply-lock parent stat failed: {error}"))?;
+        if !owner_only_dir_metadata_is_secure(&governance_metadata, euid)
+            || !owner_only_dir_metadata_is_secure(&parent_metadata, euid)
+        {
+            return Err("secure phase2 apply-lock directory is not owner-only 0700".to_string());
+        }
+        let governance_inode = inode_from_metadata(&governance_metadata);
+        let parent_inode = inode_from_metadata(&parent_metadata);
+        // The child lock alone cannot serialize a compliant sibling writer if
+        // its pathname is unlinked and replaced after the first flock: the
+        // sibling could otherwise lock that new inode.  Lock the inode-bound
+        // parent directory for the whole critical section as well, so every
+        // Phase2ApplyLock user remains serialized across a rejected swap.
+        let mut operation = libc::LOCK_EX;
+        if nonblocking {
+            operation |= libc::LOCK_NB;
+        }
+        loop {
+            let result = unsafe { libc::flock(governance.as_raw_fd(), operation) };
+            if result == 0 {
+                break;
+            }
+            let error = std::io::Error::last_os_error();
+            if error.raw_os_error() == Some(libc::EINTR) {
+                continue;
+            }
+            return Err(format!(
+                "secure phase2 apply-lock governance directory acquire failed: {error}"
+            ));
+        }
+        loop {
+            let result = unsafe { libc::flock(parent.as_raw_fd(), operation) };
+            if result == 0 {
+                break;
+            }
+            let error = std::io::Error::last_os_error();
+            if error.raw_os_error() == Some(libc::EINTR) {
+                continue;
+            }
+            return Err(format!(
+                "secure phase2 apply-lock directory acquire failed: {error}"
+            ));
+        }
+        let name = std::ffi::CString::new(Self::FILENAME)
+            .map_err(|_| "invalid phase2 apply-lock filename".to_string())?;
+        let fd = unsafe {
+            libc::openat(
+                parent.as_raw_fd(),
+                name.as_ptr(),
+                libc::O_RDWR | libc::O_CREAT | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+                0o600,
+            )
+        };
+        if fd < 0 {
+            return Err(format!(
+                "secure phase2 apply-lock open failed: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        let file = unsafe { std::fs::File::from_raw_fd(fd) };
+        let metadata = file
+            .metadata()
+            .map_err(|error| format!("secure phase2 apply-lock stat failed: {error}"))?;
+        if !metadata.is_file()
+            || metadata.uid() as u32 != euid
+            || !owner_only_mode_is_exact(metadata.permissions().mode(), 0o600)
+        {
+            return Err("secure phase2 apply-lock is not owner-only regular 0600".to_string());
+        }
+        // Bind the opened fd to its current directory entry.  This catches a
+        // replacement that races creation/open before the child flock begins.
+        let inode = lstatat_owner_only_inode(
+            parent.as_raw_fd(),
+            name.as_c_str(),
+            euid,
+            libc::S_IFREG as u32,
+            0o600,
+        )
+        .ok_or_else(|| "secure phase2 apply-lock is not owner-only regular 0600".to_string())?;
+        if !metadata_matches_inode(&metadata, inode) {
+            return Err("secure phase2 apply-lock changed during open".to_string());
+        }
+        loop {
+            let result = unsafe { libc::flock(file.as_raw_fd(), operation) };
+            if result == 0 {
+                break;
+            }
+            let error = std::io::Error::last_os_error();
+            if error.raw_os_error() == Some(libc::EINTR) {
+                continue;
+            }
+            return Err(format!("secure phase2 apply-lock acquire failed: {error}"));
+        }
+        let lock = Self {
+            file,
+            governance,
+            parent,
+            governance_inode,
+            parent_inode,
+            inode,
+        };
+        // No caller may enter the ledger critical section after an unlink or
+        // pathname redirect to a different lock inode.
+        lock.ensure_bound()?;
+        Ok(lock)
+    }
+
+    /// Verify that the lock pathname still resolves through the original
+    /// parent dirfd to the exact inode held by this critical section.  The
+    /// apply path calls this at each immutable publication boundary.
+    fn ensure_bound(&self) -> Result<(), String> {
+        use std::os::unix::io::AsRawFd;
+
+        let euid = unsafe { libc::geteuid() } as u32;
+        let name = std::ffi::CString::new(Self::FILENAME)
+            .map_err(|_| "invalid phase2 apply-lock filename".to_string())?;
+        let fd_metadata = self
+            .file
+            .metadata()
+            .map_err(|error| format!("secure phase2 apply-lock fd stat failed: {error}"))?;
+        let governance_metadata = self
+            .governance
+            .metadata()
+            .map_err(|error| format!("secure phase2 governance fd stat failed: {error}"))?;
+        let parent_metadata = self
+            .parent
+            .metadata()
+            .map_err(|error| format!("secure phase2 apply-lock parent fd stat failed: {error}"))?;
+        let phase2_name = std::ffi::CString::new("ibkr_phase2")
+            .map_err(|_| "invalid phase2 directory name".to_string())?;
+        if !owner_only_dir_metadata_is_secure(&governance_metadata, euid)
+            || !metadata_matches_inode(&governance_metadata, self.governance_inode)
+            || !owner_only_dir_metadata_is_secure(&parent_metadata, euid)
+            || !metadata_matches_inode(&parent_metadata, self.parent_inode)
+            || lstatat_owner_only_inode(
+                self.governance.as_raw_fd(),
+                phase2_name.as_c_str(),
+                euid,
+                libc::S_IFDIR as u32,
+                0o700,
+            ) != Some(self.parent_inode)
+            || !fd_metadata.is_file()
+            || !metadata_matches_inode(&fd_metadata, self.inode)
+            || lstatat_owner_only_inode(
+                self.parent.as_raw_fd(),
+                name.as_c_str(),
+                euid,
+                libc::S_IFREG as u32,
+                0o600,
+            ) != Some(self.inode)
+        {
+            return Err(
+                "secure phase2 apply-lock or bound directory was unlinked or replaced".to_string(),
+            );
+        }
+        Ok(())
     }
 }
 
-// ---------------------------------------------------------------------------
-// producer outcome + summary（report-only 現狀；不寫檔）
-// ---------------------------------------------------------------------------
+#[cfg(unix)]
+impl Drop for Phase2ApplyLock {
+    fn drop(&mut self) {
+        use std::os::unix::io::AsRawFd;
 
-/// env-wrapper：解析 dir → 組裝 → verdict。**現狀只 report 不 seal**（真槽 absent +
-/// 無 approval → 必然 Blocked，這是正確 fail-closed）。收集 producer-層 reason
-/// （ephemeral / source_commit_unknown / triangulation）+ artifact `validate()`
-/// blockers（PascalCase 字串）。
-fn phase2_producer_outcome() -> Phase2ProducerOutcome {
-    let source_commit = BUILD_GIT_SHA.to_string();
-    let now = now_ms();
-    let mut blockers: Vec<String> = Vec::new();
-
-    // gov_dir / refuse-ephemeral
-    let gov_dir_res = resolve_phase2_governance_dir();
-    let data_dir_ephemeral = matches!(&gov_dir_res, Err(Phase2SealError::EphemeralDataDir));
-    if data_dir_ephemeral {
-        blockers.push(REASON_EPHEMERAL.to_string());
+        // Closing the fd also releases flock; this explicit unlock only makes
+        // the hand-off point obvious and never influences ledger authority.
+        unsafe {
+            libc::flock(self.file.as_raw_fd(), libc::LOCK_UN);
+            libc::flock(self.parent.as_raw_fd(), libc::LOCK_UN);
+            libc::flock(self.governance.as_raw_fd(), libc::LOCK_UN);
+        }
     }
+}
 
-    // source_commit 世代
-    let source_commit_known = source_commit_is_known(&source_commit);
-    if !source_commit_known {
-        blockers.push(REASON_SOURCE_COMMIT_UNKNOWN.to_string());
+#[cfg(not(unix))]
+struct Phase2ApplyLock;
+
+#[cfg(not(unix))]
+impl Phase2ApplyLock {
+    fn acquire(_gov_dir: &Path) -> Result<Self, String> {
+        Err("phase2 apply lock unsupported on non-unix".to_string())
     }
+}
 
-    // legs
-    let policy_bundle = load_phase2_policy_bundle().ok();
-    let policy_bundle_accepted = policy_bundle
-        .as_ref()
-        .map(|b| b.validate().accepted)
-        .unwrap_or(false);
-    let bundle_for_build = policy_bundle.unwrap_or_default();
+fn control_approval_digest(approval: &Phase2SealControlApprovalV1) -> String {
+    let mut roles = approval.reviewer_roles.clone();
+    roles.sort();
+    let canonical = serde_json::json!({
+        "contract_id": approval.contract_id,
+        "source_version": approval.source_version,
+        "approval_id": approval.approval_id,
+        "action": approval.action,
+        "authorization_amd": approval.authorization_amd,
+        "reviewer_roles": roles,
+        "approved_source_commit": approval.approved_source_commit,
+        "issued_at_ms": approval.issued_at_ms,
+        "expires_at_ms": approval.expires_at_ms,
+        "predecessor_artifact_id": approval.predecessor_artifact_id,
+        "predecessor_raw_hash": approval.predecessor_raw_hash,
+    });
+    sha256_hex(
+        serde_json::to_string(&canonical)
+            .unwrap_or_default()
+            .as_bytes(),
+    )
+}
 
-    let allowlist = NonBybitApiAllowlistV1::accepted_fixture();
-    let api_allowlist_accepted = allowlist.validate().accepted;
+fn phase2_control_approval_is_valid(
+    approval: &Phase2SealControlApprovalV1,
+    now: u64,
+    expected_build_sha: &str,
+) -> bool {
+    approval.contract_id == W2_CONTROL_CONTRACT_ID
+        && approval.source_version == 1
+        && openclaw_types::is_sha256_hex(&approval.approval_id)
+        && approval.authorization_amd == W2_CONTROL_AMD
+        && source_commit_is_known(expected_build_sha)
+        && approval.approved_source_commit == expected_build_sha
+        && approval.reviewer_roles.iter().any(|r| r == "PM")
+        && approval.reviewer_roles.iter().any(|r| r == "Operator")
+        && approval.issued_at_ms > 0
+        && approval.issued_at_ms <= now
+        && approval.expires_at_ms > now
+        && approval.expires_at_ms > approval.issued_at_ms
+        && now.saturating_sub(approval.issued_at_ms) <= MAX_APPROVAL_AGE_MS
+        && approval
+            .predecessor_artifact_id
+            .as_deref()
+            .map(openclaw_types::is_sha256_hex)
+            .unwrap_or(matches!(approval.action, Phase2SealControlAction::Seal))
+        && approval
+            .predecessor_raw_hash
+            .as_deref()
+            .map(openclaw_types::is_sha256_hex)
+            .unwrap_or(matches!(approval.action, Phase2SealControlAction::Seal))
+}
 
-    let secret = secret_slot_contract_cloned();
-    let secret_contract_accepted = secret.validate().accepted;
+fn production_inputs_are_valid(inputs: &Phase2SealProductionInputsV1) -> bool {
+    inputs.contract_id == W2_INPUTS_CONTRACT_ID
+        && inputs.source_version == 1
+        && inputs.policy_bundle.validate().accepted
+        && inputs.api_allowlist.validate().accepted
+        && inputs.secret_slot_contract.validate().accepted
+        && inputs.api_session_topology.validate().accepted
+        && inputs.secret_slot_contract.account_fingerprint_hash
+            == inputs.api_session_topology.account_fingerprint_hash
+}
 
-    let topology = IbkrApiSessionTopologyV1::source_template();
+fn generation_hash(generation: &Phase2SealedGenerationV1) -> String {
+    let mut canonical = generation.clone();
+    canonical.generation_hash.clear();
+    sha256_hex(
+        serde_json::to_string(&canonical)
+            .unwrap_or_default()
+            .as_bytes(),
+    )
+}
 
-    let approval = match &gov_dir_res {
-        Ok(gd) => load_phase2_seal_approval_from_dir(gd).unwrap_or(None),
-        Err(_) => None,
+fn control_id(record: &Phase2SealControlRecordV1) -> String {
+    let canonical = serde_json::json!({
+        "action": record.action,
+        "approval_id": record.approval_id,
+        "approval_digest": record.approval_digest,
+        "source_commit": record.source_commit,
+        "target_artifact_id": record.target_artifact_id,
+        "target_raw_hash": record.target_raw_hash,
+        "predecessor_artifact_id": record.predecessor_artifact_id,
+        "predecessor_raw_hash": record.predecessor_raw_hash,
+        "previous_control_hash": record.previous_control_hash,
+    });
+    sha256_hex(
+        serde_json::to_string(&canonical)
+            .unwrap_or_default()
+            .as_bytes(),
+    )
+}
+
+fn control_hash(record: &Phase2SealControlRecordV1) -> String {
+    let mut canonical = record.clone();
+    canonical.control_hash.clear();
+    sha256_hex(
+        serde_json::to_string(&canonical)
+            .unwrap_or_default()
+            .as_bytes(),
+    )
+}
+
+#[cfg(unix)]
+fn data_root_from_phase2_governance_dir(gov_dir: &Path) -> Option<&Path> {
+    let governance = gov_dir.parent()?;
+    let data_root = governance.parent()?;
+    if gov_dir.file_name()?.to_str()? != "ibkr_phase2"
+        || governance.file_name()?.to_str()? != "governance"
+        || data_root.as_os_str().is_empty()
+    {
+        return None;
+    }
+    Some(data_root)
+}
+
+/// Open the existing W1 data-root -> governance -> ibkr_phase2 chain entirely
+/// by inode-bound dirfds.  The pair form is used by `Phase2ApplyLock`: keeping
+/// the governance parent FD lets it reject and serialize a full `ibkr_phase2`
+/// pathname replacement rather than only a lock-file replacement.
+#[cfg(unix)]
+fn open_secure_phase2_parent_and_child(gov_dir: &Path) -> Option<(std::fs::File, std::fs::File)> {
+    let expected_euid = unsafe { libc::geteuid() } as u32;
+    let data_root = data_root_from_phase2_governance_dir(gov_dir)?;
+    let root_fd = open_owner_only_data_root_after_lstat(data_root, || {})?;
+    let governance_fd = open_owner_only_child_dir(&root_fd, "governance", expected_euid)?;
+    let phase2_fd = open_owner_only_child_dir(&governance_fd, "ibkr_phase2", expected_euid)?;
+    Some((governance_fd, phase2_fd))
+}
+
+/// Single-dirfd convenience form for read-only callers.  Apply owns the pair
+/// through `Phase2ApplyLock` and never reopens this path after acquisition.
+#[cfg(unix)]
+fn open_secure_phase2_dir(gov_dir: &Path) -> Option<std::fs::File> {
+    open_secure_phase2_parent_and_child(gov_dir).map(|(_, phase2_fd)| phase2_fd)
+}
+
+#[cfg(unix)]
+fn secure_phase2_file_read(gov_dir: &Path, filename: &str) -> Option<String> {
+    if filename.is_empty() || filename.contains('/') || filename.contains('\0') {
+        return None;
+    }
+    let expected_euid = unsafe { libc::geteuid() } as u32;
+    let phase2_fd = open_secure_phase2_dir(gov_dir)?;
+    read_owner_only_named_child(&phase2_fd, filename, expected_euid)
+}
+
+#[cfg(not(unix))]
+fn secure_phase2_file_read(_gov_dir: &Path, _filename: &str) -> Option<String> {
+    None
+}
+
+fn load_control_inputs_from_dir(
+    gov_dir: &Path,
+) -> Result<Option<Phase2SealProductionInputsV1>, String> {
+    let raw = match secure_phase2_file_read(gov_dir, CONTROL_INPUTS_FILENAME) {
+        Some(value) => value,
+        None => return Ok(None),
     };
-    let approval_present = approval.is_some();
-    let approval_valid = approval
-        .as_ref()
-        .map(|a| approval_is_valid(a, now, &source_commit))
-        .unwrap_or(false);
+    serde_json::from_str(&raw)
+        .map(Some)
+        .map_err(|e| format!("invalid controlled phase2 inputs: {e}"))
+}
 
-    let immutable_storage_path = gov_dir_res
-        .as_ref()
-        .map(|gd| gd.join(SEALED_FILENAME).to_string_lossy().into_owned())
-        .unwrap_or_default();
+fn load_control_approval_from_dir(
+    gov_dir: &Path,
+) -> Result<Option<Phase2SealControlApprovalV1>, String> {
+    let raw = match secure_phase2_file_read(gov_dir, CONTROL_APPROVAL_FILENAME) {
+        Some(value) => value,
+        None => return Ok(None),
+    };
+    serde_json::from_str(&raw)
+        .map(Some)
+        .map_err(|e| format!("invalid controlled phase2 approval: {e}"))
+}
 
-    let artifact = build_phase2_artifact_candidate(
-        &bundle_for_build,
-        &allowlist,
-        &secret,
-        &topology,
-        approval.as_ref(),
-        &immutable_storage_path,
-        &source_commit,
+#[cfg(unix)]
+fn secure_dir_entry_names(dir: &std::fs::File) -> Option<Vec<String>> {
+    use std::os::unix::io::AsRawFd;
+
+    let duplicate = unsafe { libc::dup(dir.as_raw_fd()) };
+    if duplicate < 0 {
+        return None;
+    }
+    let raw_dir = unsafe { libc::fdopendir(duplicate) };
+    if raw_dir.is_null() {
+        unsafe { libc::close(duplicate) };
+        return None;
+    }
+    let mut names = Vec::new();
+    let mut invalid_name = false;
+    loop {
+        let entry = unsafe { libc::readdir(raw_dir) };
+        if entry.is_null() {
+            break;
+        }
+        let name = match unsafe { std::ffi::CStr::from_ptr((*entry).d_name.as_ptr()) }.to_str() {
+            Ok(value) => value.to_string(),
+            Err(_) => {
+                invalid_name = true;
+                break;
+            }
+        };
+        if name != "." && name != ".." {
+            names.push(name);
+        }
+    }
+    unsafe { libc::closedir(raw_dir) };
+    if invalid_name {
+        return None;
+    }
+    names.sort();
+    Some(names)
+}
+
+/// Open one current-build ledger leaf from an already inode-bound Phase2
+/// directory.  Callers which must compose multiple ledger surfaces (the
+/// generation and control chains) retain the same `phase2_fd` for every
+/// branch, rather than re-resolving the path tree per branch.
+#[cfg(unix)]
+fn secure_open_current_build_dir_from_phase2(
+    phase2_fd: &std::fs::File,
+    top_level: &str,
+    expected_build_sha: &str,
+) -> Option<std::fs::File> {
+    if expected_build_sha.len() != 40 || !expected_build_sha.bytes().all(|b| b.is_ascii_hexdigit())
+    {
+        return None;
+    }
+    let expected_euid = unsafe { libc::geteuid() } as u32;
+    let top_fd = open_owner_only_child_dir(phase2_fd, top_level, expected_euid)?;
+    open_owner_only_child_dir(&top_fd, expected_build_sha, expected_euid)
+}
+
+#[cfg(unix)]
+fn generation_filename_is_valid(name: &str) -> bool {
+    name.strip_suffix(".sealed.json")
+        .map(openclaw_types::is_sha256_hex)
+        .unwrap_or(false)
+}
+
+#[cfg(unix)]
+fn control_filename_is_valid(name: &str) -> bool {
+    name.strip_suffix(".control.json")
+        .map(openclaw_types::is_sha256_hex)
+        .unwrap_or(false)
+}
+
+/// A process can die after creating/syncing its private tmp inode and before
+/// publishing it with `link(2)`.  Such an inode is never a ledger record and
+/// must not make an otherwise valid immutable lineage unreadable.  We ignore
+/// only the writer's exact hidden-name shape and still require it to be an
+/// owner-only regular 0400/0600 file; symlinks, special files, and arbitrary
+/// names remain fail-closed.
+#[cfg(unix)]
+fn interrupted_immutable_tmp_name_is_valid(name: &str) -> bool {
+    let Some(body) = name
+        .strip_prefix('.')
+        .and_then(|value| value.strip_suffix(".tmp"))
+    else {
+        return false;
+    };
+    let mut components = body.rsplitn(3, '.');
+    let nanos = components.next();
+    let pid = components.next();
+    let record = components.next();
+    record.is_some_and(|value| !value.is_empty())
+        && pid.is_some_and(|value| {
+            !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit())
+        })
+        && nanos.is_some_and(|value| {
+            !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit())
+        })
+}
+
+#[cfg(unix)]
+fn interrupted_immutable_tmp_is_secure(
+    parent: &std::fs::File,
+    name: &str,
+    expected_euid: u32,
+) -> bool {
+    use std::os::unix::io::AsRawFd;
+
+    let Ok(name) = std::ffi::CString::new(name) else {
+        return false;
+    };
+    let mut stat: libc::stat = unsafe { std::mem::zeroed() };
+    if unsafe {
+        libc::fstatat(
+            parent.as_raw_fd(),
+            name.as_ptr(),
+            &mut stat,
+            libc::AT_SYMLINK_NOFOLLOW,
+        )
+    } != 0
+    {
+        return false;
+    }
+    let mode = stat.st_mode as u32;
+    (mode & libc::S_IFMT as u32) == libc::S_IFREG as u32
+        && stat.st_uid as u32 == expected_euid
+        && (owner_only_mode_is_exact(mode, 0o400) || owner_only_mode_is_exact(mode, 0o600))
+}
+
+#[cfg(unix)]
+#[cfg(test)]
+fn read_current_build_records<T: for<'de> Deserialize<'de>>(
+    gov_dir: &Path,
+    top_level: &str,
+    expected_build_sha: &str,
+    valid_name: fn(&str) -> bool,
+) -> Result<Vec<T>, String> {
+    let phase2_fd = match open_secure_phase2_dir(gov_dir) {
+        Some(directory) => directory,
+        None => return Ok(Vec::new()),
+    };
+    read_current_build_records_from_phase2(&phase2_fd, top_level, expected_build_sha, valid_name)
+}
+
+/// Read one current-build ledger branch from a caller-owned, FD-bound
+/// `ibkr_phase2` snapshot.  In particular, `load_current_build_lineage`
+/// invokes this twice against the same directory FD so generation and control
+/// records cannot be composed from independently reopened trees.
+#[cfg(unix)]
+fn read_current_build_records_from_phase2<T: for<'de> Deserialize<'de>>(
+    phase2_fd: &std::fs::File,
+    top_level: &str,
+    expected_build_sha: &str,
+    valid_name: fn(&str) -> bool,
+) -> Result<Vec<T>, String> {
+    let directory =
+        match secure_open_current_build_dir_from_phase2(phase2_fd, top_level, expected_build_sha) {
+            Some(dir) => dir,
+            None => return Ok(Vec::new()),
+        };
+    let euid = unsafe { libc::geteuid() } as u32;
+    let names = secure_dir_entry_names(&directory)
+        .ok_or_else(|| "secure directory enumeration failed".to_string())?;
+    let mut records = Vec::new();
+    for name in names {
+        if interrupted_immutable_tmp_name_is_valid(&name) {
+            if interrupted_immutable_tmp_is_secure(&directory, &name, euid) {
+                continue;
+            }
+            return Err("insecure interrupted immutable temporary record".to_string());
+        }
+        if !valid_name(&name) {
+            return Err("unexpected immutable ledger entry".to_string());
+        }
+        let raw = read_owner_only_named_child(&directory, &name, euid)
+            .ok_or_else(|| "insecure immutable ledger entry".to_string())?;
+        records.push(
+            serde_json::from_str(&raw)
+                .map_err(|e| format!("invalid immutable ledger JSON: {e}"))?,
+        );
+    }
+    Ok(records)
+}
+
+#[cfg(not(unix))]
+#[cfg(test)]
+fn read_current_build_records<T: for<'de> Deserialize<'de>>(
+    _gov_dir: &Path,
+    _top_level: &str,
+    _expected_build_sha: &str,
+    _valid_name: fn(&str) -> bool,
+) -> Result<Vec<T>, String> {
+    Ok(Vec::new())
+}
+
+fn sealed_generation_is_valid(
+    generation: &Phase2SealedGenerationV1,
+    gov_dir: &Path,
+    expected_build_sha: &str,
+    now: u64,
+) -> bool {
+    generation.contract_id == W2_CONTROL_CONTRACT_ID
+        && generation.source_version == 1
+        && openclaw_types::is_sha256_hex(&generation.generation_id)
+        && openclaw_types::is_sha256_hex(&generation.approval_id)
+        && openclaw_types::is_sha256_hex(&generation.approval_digest)
+        && generation.valid_until_ms > now
+        && generation.generation_hash == generation_hash(generation)
+        && generation.artifact.artifact_id == generation.generation_id
+        && generation.artifact.source_commit == expected_build_sha
+        && generation.artifact.immutable_storage_path
+            == generation_path(gov_dir, expected_build_sha, &generation.generation_id)
+                .to_string_lossy()
+                .into_owned()
+        && generation.artifact.created_at_ms > 0
+        && generation.artifact.validate().ibkr_contact_allowed
+        && verify_artifact_hashes(&generation.artifact)
+        && account_fingerprint_triangulation_ok(&generation.artifact)
+}
+
+fn control_record_is_valid(record: &Phase2SealControlRecordV1, expected_build_sha: &str) -> bool {
+    record.contract_id == W2_CONTROL_CONTRACT_ID
+        && record.source_version == 1
+        && openclaw_types::is_sha256_hex(&record.control_id)
+        && openclaw_types::is_sha256_hex(&record.approval_id)
+        && openclaw_types::is_sha256_hex(&record.approval_digest)
+        && openclaw_types::is_sha256_hex(&record.target_artifact_id)
+        && openclaw_types::is_sha256_hex(&record.target_raw_hash)
+        && record.source_commit == expected_build_sha
+        && record.recorded_at_ms > 0
+        && record.valid_until_ms > record.recorded_at_ms
+        && record.control_id == control_id(record)
+        && record.control_hash == control_hash(record)
+}
+
+/// Validate the immutable generation/control graph using a single
+/// inode-bound `ibkr_phase2` directory snapshot.  The hook exists solely for
+/// the deterministic Unix test that swaps the pathname after generation read:
+/// controls must still come from this FD's original directory, never from a
+/// replacement tree re-opened by path.
+#[cfg(unix)]
+fn load_current_build_lineage_from_phase2_after_generations<F>(
+    phase2_fd: &std::fs::File,
+    gov_dir: &Path,
+    expected_build_sha: &str,
+    now: u64,
+    after_generations: F,
+) -> Result<Phase2LineageState, String>
+where
+    F: FnOnce(),
+{
+    let generations: Vec<Phase2SealedGenerationV1> = read_current_build_records_from_phase2(
+        phase2_fd,
+        GENERATIONS_DIRNAME,
+        expected_build_sha,
+        generation_filename_is_valid,
+    )?;
+    after_generations();
+    let controls: Vec<Phase2SealControlRecordV1> = read_current_build_records_from_phase2(
+        phase2_fd,
+        CONTROLS_DIRNAME,
+        expected_build_sha,
+        control_filename_is_valid,
+    )?;
+    evaluate_current_build_lineage_records(gov_dir, expected_build_sha, now, generations, controls)
+}
+
+#[cfg(unix)]
+fn load_current_build_lineage_from_phase2(
+    phase2_fd: &std::fs::File,
+    gov_dir: &Path,
+    expected_build_sha: &str,
+    now: u64,
+) -> Result<Phase2LineageState, String> {
+    load_current_build_lineage_from_phase2_after_generations(
+        phase2_fd,
+        gov_dir,
+        expected_build_sha,
         now,
-    );
+        || {},
+    )
+}
 
-    let triangulation_ok = account_fingerprint_triangulation_ok(&artifact);
-    if !triangulation_ok {
-        blockers.push(REASON_TRIANGULATION.to_string());
-    }
+fn load_current_build_lineage(
+    gov_dir: &Path,
+    expected_build_sha: &str,
+    now: u64,
+) -> Result<Phase2LineageState, String> {
+    #[cfg(unix)]
+    let phase2_fd = open_secure_phase2_dir(gov_dir)
+        .ok_or_else(|| "secure phase2 ledger directory unavailable".to_string())?;
+    #[cfg(unix)]
+    return load_current_build_lineage_from_phase2(&phase2_fd, gov_dir, expected_build_sha, now);
 
-    let artifact_verdict = artifact.validate();
-    for b in &artifact_verdict.blockers {
-        blockers.push(format!("{b:?}"));
-    }
-
-    let leg_status = Phase2LegStatus {
-        data_dir_ephemeral,
-        source_commit_known,
-        policy_bundle_accepted,
-        api_allowlist_accepted,
-        secret_contract_accepted,
-        api_topology_accepted: artifact.api_session_topology.validate().accepted,
-        external_surface_gate_accepted: artifact.gate.validate().ibkr_contact_allowed,
-        approval_present,
-        approval_valid,
-        account_fingerprint_triangulation_ok: triangulation_ok,
-        artifact_contact_allowed: artifact_verdict.ibkr_contact_allowed,
-        artifact_hashes_verified: verify_artifact_hashes(&artifact),
-    };
-
-    // 現狀：report-only，永不由本 wrapper 調 seal（真 seal 啟用 = operator 決策）。
-    Phase2ProducerOutcome::Blocked {
-        blockers,
-        leg_status,
+    #[cfg(not(unix))]
+    {
+        let _ = (gov_dir, expected_build_sha, now);
+        Ok(Phase2LineageState {
+            active: None,
+            tail_hash: None,
+            approval_ids: BTreeSet::new(),
+            approval_digests: BTreeSet::new(),
+        })
     }
 }
 
-/// IPC 顯示面（zero 明文；只回 posture/bool/64-hex/enum 與 blocker 名）。
-pub(crate) fn phase2_gate_producer_summary() -> serde_json::Value {
-    let present = phase2_immutable_pass_artifact_present();
-    let (producer_status, blockers, leg_status, sealed_path) = match phase2_producer_outcome() {
-        Phase2ProducerOutcome::Blocked {
-            blockers,
-            leg_status,
-        } => ("blocked", blockers, Some(leg_status), None),
-        Phase2ProducerOutcome::Sealed { path } => (
-            "sealed",
-            Vec::new(),
-            None,
-            Some(path.to_string_lossy().into_owned()),
-        ),
-        Phase2ProducerOutcome::AlreadySealed { path } => (
-            "already_sealed",
-            Vec::new(),
-            None,
-            Some(path.to_string_lossy().into_owned()),
-        ),
-    };
+fn evaluate_current_build_lineage_records(
+    gov_dir: &Path,
+    expected_build_sha: &str,
+    now: u64,
+    generations: Vec<Phase2SealedGenerationV1>,
+    controls: Vec<Phase2SealControlRecordV1>,
+) -> Result<Phase2LineageState, String> {
+    if generations.is_empty() && controls.is_empty() {
+        return Ok(Phase2LineageState {
+            active: None,
+            tail_hash: None,
+            approval_ids: BTreeSet::new(),
+            approval_digests: BTreeSet::new(),
+        });
+    }
+    if generations.is_empty() || controls.is_empty() {
+        return Err("incomplete immutable generation/control lineage".to_string());
+    }
 
-    serde_json::json!({
-        "producer_status": producer_status,
-        "immutable_pass_artifact_present": present,
-        "blockers": blockers,
-        "leg_status": leg_status,
-        "sealed_artifact_basename": sealed_path.map(|_| SEALED_FILENAME),
-        "adr": IBKR_PHASE2_ADR,
-        "artifact_shape_amd": IBKR_PHASE2_AMD,
-        "contact_authorization_amd": IBKR_PHASE2_CONTACT_AMD,
-        "ibkr_call_performed": false,
-        "seal_written_this_phase": false,
+    let mut generation_by_id = BTreeMap::new();
+    for generation in generations {
+        if !sealed_generation_is_valid(&generation, gov_dir, expected_build_sha, now)
+            || generation_by_id
+                .insert(generation.generation_id.clone(), generation)
+                .is_some()
+        {
+            return Err("invalid, stale, or duplicate sealed generation".to_string());
+        }
+    }
+    let mut by_hash = BTreeMap::new();
+    let mut referenced = BTreeSet::new();
+    let mut approval_ids = BTreeSet::new();
+    let mut approval_digests = BTreeSet::new();
+    for control in controls {
+        if !control_record_is_valid(&control, expected_build_sha)
+            || !approval_ids.insert(control.approval_id.clone())
+            || !approval_digests.insert(control.approval_digest.clone())
+            || by_hash
+                .insert(control.control_hash.clone(), control.clone())
+                .is_some()
+        {
+            return Err("invalid or replayed immutable control record".to_string());
+        }
+        if let Some(previous) = &control.previous_control_hash {
+            if !openclaw_types::is_sha256_hex(previous) || !referenced.insert(previous.clone()) {
+                return Err("invalid or forked immutable control chain".to_string());
+            }
+        }
+    }
+    let roots: Vec<_> = by_hash
+        .values()
+        .filter(|control| control.previous_control_hash.is_none())
+        .collect();
+    let leaves: Vec<_> = by_hash
+        .iter()
+        .filter(|(hash, _)| !referenced.contains(*hash))
+        .map(|(hash, _)| hash.clone())
+        .collect();
+    if roots.len() != 1 || leaves.len() != 1 {
+        return Err("ambiguous immutable control chain".to_string());
+    }
+
+    let mut reverse = Vec::new();
+    let mut cursor = leaves[0].clone();
+    let mut visited = BTreeSet::new();
+    loop {
+        if !visited.insert(cursor.clone()) {
+            return Err("cycle in immutable control chain".to_string());
+        }
+        let control = by_hash
+            .get(&cursor)
+            .ok_or_else(|| "missing immutable control predecessor".to_string())?;
+        reverse.push(control.clone());
+        match &control.previous_control_hash {
+            Some(previous) => cursor = previous.clone(),
+            None => break,
+        }
+    }
+    if reverse.len() != by_hash.len() {
+        return Err("disconnected immutable control chain".to_string());
+    }
+    reverse.reverse();
+
+    let mut active: Option<Phase2SealedGenerationV1> = None;
+    for (index, control) in reverse.iter().enumerate() {
+        let target = generation_by_id
+            .get(&control.target_artifact_id)
+            .ok_or_else(|| "control target generation missing".to_string())?;
+        if target.artifact.raw_artifact_hash != control.target_raw_hash {
+            return Err("control target raw hash mismatch".to_string());
+        }
+        match control.action {
+            Phase2SealControlAction::Seal if index == 0 && active.is_none() => {
+                if control.predecessor_artifact_id.is_some()
+                    || control.predecessor_raw_hash.is_some()
+                {
+                    return Err("genesis seal unexpectedly has predecessor".to_string());
+                }
+                active = Some(target.clone());
+            }
+            Phase2SealControlAction::Supersede => {
+                let previous = active
+                    .as_ref()
+                    .ok_or_else(|| "supersession without active predecessor".to_string())?;
+                if control.predecessor_artifact_id.as_deref()
+                    != Some(previous.generation_id.as_str())
+                    || control.predecessor_raw_hash.as_deref()
+                        != Some(previous.artifact.raw_artifact_hash.as_str())
+                {
+                    return Err("supersession predecessor mismatch".to_string());
+                }
+                active = Some(target.clone());
+            }
+            Phase2SealControlAction::Revoke => {
+                let previous = active
+                    .as_ref()
+                    .ok_or_else(|| "revoke without active predecessor".to_string())?;
+                if control.target_artifact_id != previous.generation_id
+                    || control.target_raw_hash != previous.artifact.raw_artifact_hash
+                    || control.predecessor_artifact_id.as_deref()
+                        != Some(previous.generation_id.as_str())
+                    || control.predecessor_raw_hash.as_deref()
+                        != Some(previous.artifact.raw_artifact_hash.as_str())
+                {
+                    return Err("revoke predecessor mismatch".to_string());
+                }
+                active = None;
+            }
+            _ => return Err("invalid immutable control action order".to_string()),
+        }
+    }
+    Ok(Phase2LineageState {
+        active,
+        tail_hash: Some(leaves[0].clone()),
+        approval_ids,
+        approval_digests,
     })
 }
 
-/// precontact 唯一 production 消費點：磁碟 sealed 態 re-verify（非 file-exists）。
-/// gov_dir 無法解析（未設 / 易失）或無合法 sealed 檔 → false（fail-closed）。
+fn evaluate_controlled_phase2_for_dir(
+    gov_dir: &Path,
+    expected_build_sha: &str,
+    now: u64,
+) -> Phase2SealEvaluation {
+    let mut blockers = Vec::new();
+    let inputs = match load_control_inputs_from_dir(gov_dir) {
+        Ok(value) => value,
+        Err(reason) => {
+            blockers.push(reason);
+            None
+        }
+    };
+    let approval = match load_control_approval_from_dir(gov_dir) {
+        Ok(value) => value,
+        Err(reason) => {
+            blockers.push(reason);
+            None
+        }
+    };
+    let inputs_present = inputs.is_some();
+    let inputs_valid = inputs
+        .as_ref()
+        .map(production_inputs_are_valid)
+        .unwrap_or(false);
+    let approval_present = approval.is_some();
+    let approval_valid = approval
+        .as_ref()
+        .map(|value| phase2_control_approval_is_valid(value, now, expected_build_sha))
+        .unwrap_or(false);
+    let lineage = load_current_build_lineage(gov_dir, expected_build_sha, now);
+    let active_current_build = lineage
+        .as_ref()
+        .map(|state| state.active.is_some())
+        .unwrap_or(false);
+    if !source_commit_is_known(expected_build_sha) {
+        blockers.push(REASON_SOURCE_COMMIT_UNKNOWN.to_string());
+    }
+    if !inputs_present {
+        blockers.push("external_verification_pending:controlled_inputs_missing".to_string());
+    } else if !inputs_valid {
+        blockers.push("controlled_inputs_rejected".to_string());
+    }
+    if !approval_present {
+        blockers.push("external_verification_pending:control_approval_missing".to_string());
+    } else if !approval_valid {
+        blockers.push("control_approval_rejected".to_string());
+    }
+    if let Err(reason) = lineage {
+        blockers.push(format!("immutable_lineage_rejected:{reason}"));
+    }
+    let status = if blockers.is_empty() {
+        "ready_no_contact".to_string()
+    } else if blockers
+        .iter()
+        .any(|reason| reason.starts_with("external_verification_pending:"))
+    {
+        "external_verification_pending".to_string()
+    } else {
+        "rejected".to_string()
+    };
+    Phase2SealEvaluation {
+        status,
+        blockers,
+        inputs_present,
+        inputs_valid,
+        approval_present,
+        approval_valid,
+        active_current_build,
+        no_contact: true,
+    }
+}
+
+/// Production dry-run entry point.  It only opens local owner-only files and
+/// returns a redacted state; it cannot create an artifact or contact a broker.
+pub fn phase2_seal_dry_run() -> Phase2SealEvaluation {
+    let gov_dir = match resolve_phase2_governance_dir() {
+        Ok(path) => path,
+        Err(_) => {
+            return Phase2SealEvaluation {
+                status: "external_verification_pending".to_string(),
+                blockers: vec![
+                    "external_verification_pending:owner_only_data_dir_missing_or_ephemeral"
+                        .to_string(),
+                ],
+                inputs_present: false,
+                inputs_valid: false,
+                approval_present: false,
+                approval_valid: false,
+                active_current_build: false,
+                no_contact: true,
+            }
+        }
+    };
+    evaluate_controlled_phase2_for_dir(&gov_dir, BUILD_GIT_SHA, now_ms())
+}
+
+#[cfg(unix)]
+fn ensure_owner_only_child_dir_after_lstat<F>(
+    parent: &std::fs::File,
+    child_name: &str,
+    after_lstat: F,
+) -> Result<std::fs::File, String>
+where
+    F: FnOnce(),
+{
+    use std::os::unix::io::{AsRawFd, FromRawFd};
+
+    if child_name.is_empty() || child_name.contains('/') || child_name.contains('\0') {
+        return Err("invalid immutable ledger directory name".to_string());
+    }
+    let euid = unsafe { libc::geteuid() } as u32;
+    let parent_meta = parent
+        .metadata()
+        .map_err(|error| format!("immutable ledger parent stat failed: {error}"))?;
+    if !owner_only_dir_metadata_is_secure(&parent_meta, euid) {
+        return Err("immutable ledger parent is not owner-only 0700".to_string());
+    }
+    let name = std::ffi::CString::new(child_name)
+        .map_err(|_| "invalid immutable ledger directory name".to_string())?;
+    if unsafe { libc::mkdirat(parent.as_raw_fd(), name.as_ptr(), 0o700) } != 0 {
+        let error = std::io::Error::last_os_error();
+        if error.raw_os_error() != Some(libc::EEXIST) {
+            return Err(format!("create immutable ledger directory failed: {error}"));
+        }
+    } else {
+        parent
+            .sync_all()
+            .map_err(|error| format!("sync immutable ledger parent failed: {error}"))?;
+    }
+    let before = lstatat_owner_only_inode(
+        parent.as_raw_fd(),
+        name.as_c_str(),
+        euid,
+        libc::S_IFDIR as u32,
+        0o700,
+    )
+    .ok_or_else(|| "immutable ledger child is not owner-only 0700".to_string())?;
+
+    after_lstat();
+
+    let fd = unsafe {
+        libc::openat(
+            parent.as_raw_fd(),
+            name.as_ptr(),
+            libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_DIRECTORY | libc::O_CLOEXEC,
+        )
+    };
+    if fd < 0 {
+        return Err(format!(
+            "secure immutable ledger child open failed: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    let child = unsafe { std::fs::File::from_raw_fd(fd) };
+    let after = child
+        .metadata()
+        .map_err(|error| format!("immutable ledger child stat failed: {error}"))?;
+    if !owner_only_dir_metadata_is_secure(&after, euid) || !metadata_matches_inode(&after, before) {
+        return Err("immutable ledger child changed during secure open".to_string());
+    }
+    Ok(child)
+}
+
+#[cfg(unix)]
+fn ensure_owner_only_child_dir(
+    parent: &std::fs::File,
+    child_name: &str,
+) -> Result<std::fs::File, String> {
+    ensure_owner_only_child_dir_after_lstat(parent, child_name, || {})
+}
+
+#[cfg(not(unix))]
+fn ensure_owner_only_child_dir(
+    _parent: &std::fs::File,
+    _child_name: &str,
+) -> Result<std::fs::File, String> {
+    Err("immutable ledger unsupported on non-unix".to_string())
+}
+
+/// Read an existing immutable record through the same inode-bound owner-only
+/// dirfd used for publication and compare exact canonical bytes.  A retry can
+/// therefore acknowledge only the record that this writer attempted to
+/// publish; path re-resolution never participates in that decision.
+#[cfg(unix)]
+fn immutable_record_matches(
+    dir: &std::fs::File,
+    filename: &str,
+    expected_raw: &[u8],
+) -> Result<bool, String> {
+    let euid = unsafe { libc::geteuid() } as u32;
+    let raw = read_owner_only_named_child(dir, filename, euid)
+        .ok_or_else(|| "existing immutable record is insecure or unreadable".to_string())?;
+    Ok(raw.as_bytes() == expected_raw)
+}
+
+/// Write-once JSON record.  The final name is generated only from a verified
+/// sha256 identifier.  The temporary inode is made 0400 *before* hard-link
+/// publication, so a crash after the link can never leave a 0600 final record.
+/// Retry compares an existing final record through a secure no-follow FD and
+/// returns `AlreadyPresent` only for byte-identical content.  Thus a crash
+/// between generation and control can be resumed without rewriting either.
+#[cfg(unix)]
+fn write_immutable_json<T: Serialize>(
+    dir: &std::fs::File,
+    filename: &str,
+    value: &T,
+) -> Result<ImmutablePublication, String> {
+    use std::io::Write;
+    use std::os::unix::io::{AsRawFd, FromRawFd};
+
+    if filename.is_empty() || filename.contains('/') || filename.contains('\0') {
+        return Err("invalid immutable ledger filename".to_string());
+    }
+    let euid = unsafe { libc::geteuid() } as u32;
+    let dir_meta = dir
+        .metadata()
+        .map_err(|e| format!("immutable ledger directory stat failed: {e}"))?;
+    if !owner_only_dir_metadata_is_secure(&dir_meta, euid) {
+        return Err("immutable ledger directory is insecure".to_string());
+    }
+    let filename_string = filename.to_string();
+    let filename = std::ffi::CString::new(filename_string.as_str())
+        .map_err(|_| "invalid immutable ledger filename".to_string())?;
+    let tmp_name = std::ffi::CString::new(format!(
+        ".{filename_string}.{}.{}.tmp",
+        std::process::id(),
+        now_ns()
+    ))
+    .map_err(|_| "invalid immutable ledger temporary filename".to_string())?;
+    let raw = serde_json::to_vec_pretty(value)
+        .map_err(|e| format!("serialize immutable record failed: {e}"))?;
+    {
+        let fd = unsafe {
+            libc::openat(
+                dir.as_raw_fd(),
+                tmp_name.as_ptr(),
+                libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+                0o600,
+            )
+        };
+        if fd < 0 {
+            return Err(format!(
+                "create immutable tmp failed: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        let mut file = unsafe { std::fs::File::from_raw_fd(fd) };
+        file.write_all(&raw)
+            .map_err(|e| format!("write immutable tmp failed: {e}"))?;
+        file.sync_all()
+            .map_err(|e| format!("sync immutable tmp failed: {e}"))?;
+        if unsafe { libc::fchmod(file.as_raw_fd(), 0o400) } != 0 {
+            let _ = unsafe { libc::unlinkat(dir.as_raw_fd(), tmp_name.as_ptr(), 0) };
+            return Err(format!(
+                "seal immutable tmp mode failed: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        let tmp_meta = file
+            .metadata()
+            .map_err(|e| format!("immutable tmp stat failed: {e}"))?;
+        if !sealed_artifact_metadata_is_secure(&tmp_meta, euid) {
+            let _ = unsafe { libc::unlinkat(dir.as_raw_fd(), tmp_name.as_ptr(), 0) };
+            return Err("immutable tmp failed owner-only verification".to_string());
+        }
+        let tmp_inode = inode_from_metadata(&tmp_meta);
+        if unsafe {
+            libc::linkat(
+                dir.as_raw_fd(),
+                tmp_name.as_ptr(),
+                dir.as_raw_fd(),
+                filename.as_ptr(),
+                0,
+            )
+        } != 0
+        {
+            let error = std::io::Error::last_os_error();
+            let _ = unsafe { libc::unlinkat(dir.as_raw_fd(), tmp_name.as_ptr(), 0) };
+            if error.kind() == std::io::ErrorKind::AlreadyExists
+                && immutable_record_matches(dir, &filename_string, &raw)?
+            {
+                return Ok(ImmutablePublication::AlreadyPresent);
+            }
+            return Err(format!("publish immutable record failed: {error}"));
+        }
+        let final_inode = lstatat_owner_only_inode(
+            dir.as_raw_fd(),
+            filename.as_c_str(),
+            euid,
+            libc::S_IFREG as u32,
+            0o400,
+        );
+        let _ = unsafe { libc::unlinkat(dir.as_raw_fd(), tmp_name.as_ptr(), 0) };
+        if final_inode != Some(tmp_inode) {
+            return Err("published immutable record changed before verification".to_string());
+        }
+    }
+    dir.sync_all()
+        .map_err(|e| format!("sync immutable directory failed: {e}"))?;
+    Ok(ImmutablePublication::Written)
+}
+
+#[cfg(not(unix))]
+fn write_immutable_json<T: Serialize>(
+    _dir: &std::fs::File,
+    _filename: &str,
+    _value: &T,
+) -> Result<ImmutablePublication, String> {
+    Err("immutable ledger unsupported on non-unix".to_string())
+}
+
+fn generation_path(gov_dir: &Path, source_commit: &str, generation_id: &str) -> PathBuf {
+    gov_dir
+        .join(GENERATIONS_DIRNAME)
+        .join(source_commit)
+        .join(format!("{generation_id}.sealed.json"))
+}
+
+/// The generation name is intentionally a stable identity of the approved
+/// lineage rather than a retry attempt.  A crash can therefore leave a single
+/// immutable generation that a later invocation must recover, not overwrite
+/// or fork.  Time remains inside the sealed artifact for auditability and is
+/// consequently *not* part of this name.
+fn controlled_generation_id(
+    source_commit: &str,
+    approval: &Phase2SealControlApprovalV1,
+    approval_digest: &str,
+    predecessor: Option<&Phase2SealedGenerationV1>,
+) -> String {
+    let predecessor_id = predecessor.map(|generation| generation.generation_id.as_str());
+    let predecessor_hash =
+        predecessor.map(|generation| generation.artifact.raw_artifact_hash.as_str());
+    let id_material = serde_json::json!({
+        "contract_id": W2_CONTROL_CONTRACT_ID,
+        "source_commit": source_commit,
+        "approval_id": approval.approval_id,
+        "approval_digest": approval_digest,
+        "predecessor_artifact_id": predecessor_id,
+        "predecessor_raw_hash": predecessor_hash,
+    });
+    sha256_hex(
+        serde_json::to_string(&id_material)
+            .unwrap_or_default()
+            .as_bytes(),
+    )
+}
+
+fn build_controlled_generation(
+    gov_dir: &Path,
+    inputs: &Phase2SealProductionInputsV1,
+    approval: &Phase2SealControlApprovalV1,
+    approval_digest: &str,
+    predecessor: Option<&Phase2SealedGenerationV1>,
+    source_commit: &str,
+    now: u64,
+) -> Result<Phase2SealedGenerationV1, String> {
+    if !production_inputs_are_valid(inputs)
+        || !phase2_control_approval_is_valid(approval, now, source_commit)
+    {
+        return Err("controlled generation inputs or approval rejected".to_string());
+    }
+    let generation_id =
+        controlled_generation_id(source_commit, approval, approval_digest, predecessor);
+    let immutable_storage_path = generation_path(gov_dir, source_commit, &generation_id)
+        .to_string_lossy()
+        .into_owned();
+    let policy_flags = inputs.policy_bundle.gate_prerequisite_flags();
+    let mut artifact = IbkrPhase2GateArtifactV1 {
+        contract_id: IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID.to_string(),
+        source_version: 1,
+        artifact_id: generation_id.clone(),
+        adr: IBKR_PHASE2_ADR.to_string(),
+        amd: IBKR_PHASE2_AMD.to_string(),
+        source_commit: source_commit.to_string(),
+        created_at_ms: now,
+        immutable_storage_path,
+        reviewer_roles: approval.reviewer_roles.clone(),
+        sealed: true,
+        gate: build_external_surface_gate(
+            policy_flags,
+            inputs.api_allowlist.validate().accepted,
+            inputs.secret_slot_contract.validate().accepted,
+            inputs.secret_slot_contract.live_secret_absent_or_empty,
+        ),
+        policy_flags,
+        secret_slot_contract: inputs.secret_slot_contract.clone(),
+        api_session_topology: inputs.api_session_topology.clone(),
+        raw_artifact_hash: String::new(),
+        redacted_summary_hash: String::new(),
+        // This shape field remains an old artifact compatibility requirement;
+        // W2's 07-11 control approval is separately recorded above and is not
+        // a contact/activation authorization.
+        contact_authorization_amd: IBKR_PHASE2_CONTACT_AMD.to_string(),
+        approval_lineage_hash: approval_digest.to_string(),
+        supersedes_artifact_id: predecessor.map(|value| value.generation_id.clone()),
+    };
+    artifact.raw_artifact_hash = compute_raw_artifact_hash(&artifact);
+    artifact.redacted_summary_hash = compute_redacted_summary_hash(&artifact);
+    if !artifact.validate().ibkr_contact_allowed
+        || !verify_artifact_hashes(&artifact)
+        || !account_fingerprint_triangulation_ok(&artifact)
+    {
+        return Err("controlled artifact construction rejected".to_string());
+    }
+    let mut generation = Phase2SealedGenerationV1 {
+        contract_id: W2_CONTROL_CONTRACT_ID.to_string(),
+        source_version: 1,
+        generation_id,
+        approval_id: approval.approval_id.clone(),
+        approval_digest: approval_digest.to_string(),
+        valid_until_ms: approval.expires_at_ms,
+        artifact,
+        generation_hash: String::new(),
+    };
+    generation.generation_hash = generation_hash(&generation);
+    Ok(generation)
+}
+
+fn build_control_record(
+    approval: &Phase2SealControlApprovalV1,
+    approval_digest: &str,
+    target: &Phase2SealedGenerationV1,
+    predecessor: Option<&Phase2SealedGenerationV1>,
+    previous_control_hash: Option<String>,
+    source_commit: &str,
+    now: u64,
+) -> Phase2SealControlRecordV1 {
+    let mut record = Phase2SealControlRecordV1 {
+        contract_id: W2_CONTROL_CONTRACT_ID.to_string(),
+        source_version: 1,
+        control_id: String::new(),
+        action: approval.action,
+        approval_id: approval.approval_id.clone(),
+        approval_digest: approval_digest.to_string(),
+        source_commit: source_commit.to_string(),
+        recorded_at_ms: now,
+        valid_until_ms: approval.expires_at_ms,
+        target_artifact_id: target.generation_id.clone(),
+        target_raw_hash: target.artifact.raw_artifact_hash.clone(),
+        predecessor_artifact_id: predecessor.map(|value| value.generation_id.clone()),
+        predecessor_raw_hash: predecessor.map(|value| value.artifact.raw_artifact_hash.clone()),
+        previous_control_hash,
+        control_hash: String::new(),
+    };
+    record.control_id = control_id(&record);
+    record.control_hash = control_hash(&record);
+    record
+}
+
+/// FD-bound form used inside `Phase2ApplyLock`.  It intentionally takes the
+/// caller-owned Phase2 directory instead of reopening `gov_dir`, so control
+/// replay checks cannot be composed from a swapped ledger tree.
+#[cfg(unix)]
+fn matching_control_for_approval_from_phase2(
+    phase2_fd: &std::fs::File,
+    source_commit: &str,
+    approval: &Phase2SealControlApprovalV1,
+    approval_digest: &str,
+) -> Result<Option<Phase2SealControlRecordV1>, String> {
+    let records: Vec<Phase2SealControlRecordV1> = read_current_build_records_from_phase2(
+        phase2_fd,
+        CONTROLS_DIRNAME,
+        source_commit,
+        control_filename_is_valid,
+    )?;
+    let mut matching = records.into_iter().filter(|record| {
+        record.approval_id == approval.approval_id || record.approval_digest == approval_digest
+    });
+    let first = matching.next();
+    if matching.next().is_some() {
+        return Err("multiple immutable controls match one approval".to_string());
+    }
+    match first {
+        Some(record)
+            if record.approval_id == approval.approval_id
+                && record.approval_digest == approval_digest
+                && record.action == approval.action
+                && record.source_commit == source_commit =>
+        {
+            Ok(Some(record))
+        }
+        Some(_) => Err("immutable control approval replay mismatch".to_string()),
+        None => Ok(None),
+    }
+}
+
+/// Lock-held version of the completed-retry proof.  All reads are derived from
+/// one Phase2 dirfd captured by `Phase2ApplyLock`; no ledger path is reopened
+/// between acquiring the lock and deciding an idempotent result.
+#[cfg(unix)]
+fn validate_completed_control_retry_from_phase2(
+    phase2_fd: &std::fs::File,
+    gov_dir: &Path,
+    source_commit: &str,
+    approval: &Phase2SealControlApprovalV1,
+    approval_digest: &str,
+    now: u64,
+) -> Result<bool, String> {
+    let lineage = load_current_build_lineage_from_phase2(phase2_fd, gov_dir, source_commit, now)?;
+    let Some(record) = matching_control_for_approval_from_phase2(
+        phase2_fd,
+        source_commit,
+        approval,
+        approval_digest,
+    )?
+    else {
+        return Ok(false);
+    };
+    match approval.action {
+        Phase2SealControlAction::Seal | Phase2SealControlAction::Supersede => {
+            if lineage
+                .active
+                .as_ref()
+                .map(|active| active.generation_id.as_str())
+                != Some(record.target_artifact_id.as_str())
+            {
+                return Err("completed control does not own active generation".to_string());
+            }
+        }
+        Phase2SealControlAction::Revoke if lineage.active.is_none() => {}
+        Phase2SealControlAction::Revoke => {
+            return Err("completed revoke still has an active generation".to_string())
+        }
+    }
+    Ok(true)
+}
+
+/// Find the one unpaired generation which an interrupted apply may have
+/// published before its matching control.  The object is re-read through the
+/// secure ledger reader and is bound to the current approval *and* expected
+/// predecessor before it can be used.  This is deliberately not a general
+/// "pick the newest generation" recovery path: any extra/unmatched orphan is
+/// a fail-closed lineage error.
+/// Lock-held orphan recovery.  This is the only form used by apply so an
+/// interrupted generation cannot be recovered from a replacement tree.
+#[cfg(unix)]
+fn recoverable_orphan_generation_from_phase2(
+    phase2_fd: &std::fs::File,
+    gov_dir: &Path,
+    source_commit: &str,
+    approval: &Phase2SealControlApprovalV1,
+    approval_digest: &str,
+    predecessor: Option<&Phase2SealedGenerationV1>,
+    now: u64,
+) -> Result<Option<Phase2SealedGenerationV1>, String> {
+    let generations: Vec<Phase2SealedGenerationV1> = read_current_build_records_from_phase2(
+        phase2_fd,
+        GENERATIONS_DIRNAME,
+        source_commit,
+        generation_filename_is_valid,
+    )?;
+    let controls: Vec<Phase2SealControlRecordV1> = read_current_build_records_from_phase2(
+        phase2_fd,
+        CONTROLS_DIRNAME,
+        source_commit,
+        control_filename_is_valid,
+    )?;
+    let controlled_generation_ids: BTreeSet<_> = controls
+        .iter()
+        .map(|control| control.target_artifact_id.as_str())
+        .collect();
+    let mut orphans: Vec<_> = generations
+        .into_iter()
+        .filter(|generation| !controlled_generation_ids.contains(generation.generation_id.as_str()))
+        .collect();
+    if orphans.is_empty() {
+        return Ok(None);
+    }
+    if orphans.len() != 1 {
+        return Err("multiple unpaired immutable generations prevent recovery".to_string());
+    }
+    let orphan = orphans.pop().expect("length checked");
+    let expected_id =
+        controlled_generation_id(source_commit, approval, approval_digest, predecessor);
+    if !sealed_generation_is_valid(&orphan, gov_dir, source_commit, now)
+        || orphan.generation_id != expected_id
+        || orphan.approval_id != approval.approval_id
+        || orphan.approval_digest != approval_digest
+        || orphan.valid_until_ms != approval.expires_at_ms
+        || orphan.artifact.supersedes_artifact_id
+            != predecessor.map(|value| value.generation_id.clone())
+    {
+        return Err(
+            "unpaired immutable generation does not match retry approval/lineage".to_string(),
+        );
+    }
+    Ok(Some(orphan))
+}
+
+fn apply_controlled_phase2_for_dir(
+    gov_dir: &Path,
+    inputs: Option<&Phase2SealProductionInputsV1>,
+    approval: &Phase2SealControlApprovalV1,
+    source_commit: &str,
+    now: u64,
+) -> Result<Phase2SealApplyOutcome, String> {
+    apply_controlled_phase2_for_dir_with_hooks(
+        gov_dir,
+        inputs,
+        approval,
+        source_commit,
+        now,
+        || {},
+        || {},
+    )
+}
+
+/// Both hooks are inert in production.  Unix tests use them to model a process
+/// dying after the generation link or after the control link, then prove that a
+/// retry revalidates the ledger and writes only the missing sibling record.
+fn apply_controlled_phase2_for_dir_with_hooks<AfterGeneration, AfterControl>(
+    gov_dir: &Path,
+    inputs: Option<&Phase2SealProductionInputsV1>,
+    approval: &Phase2SealControlApprovalV1,
+    source_commit: &str,
+    now: u64,
+    after_generation: AfterGeneration,
+    after_control: AfterControl,
+) -> Result<Phase2SealApplyOutcome, String>
+where
+    AfterGeneration: FnOnce(),
+    AfterControl: FnOnce(),
+{
+    apply_controlled_phase2_for_dir_with_lock_hook(
+        gov_dir,
+        inputs,
+        approval,
+        source_commit,
+        now,
+        || {},
+        after_generation,
+        after_control,
+    )
+}
+
+/// Inner apply transaction with a test-only pre-read hook.  Production passes
+/// an inert hook through `apply_controlled_phase2_for_dir_with_hooks`; the
+/// hook lets the regression model a whole `ibkr_phase2` pathname swap exactly
+/// after the lock owns its bound directory FDs and before any ledger read or
+/// write occurs.
+fn apply_controlled_phase2_for_dir_with_lock_hook<AfterLock, AfterGeneration, AfterControl>(
+    gov_dir: &Path,
+    inputs: Option<&Phase2SealProductionInputsV1>,
+    approval: &Phase2SealControlApprovalV1,
+    source_commit: &str,
+    now: u64,
+    after_lock: AfterLock,
+    after_generation: AfterGeneration,
+    after_control: AfterControl,
+) -> Result<Phase2SealApplyOutcome, String>
+where
+    AfterLock: FnOnce(),
+    AfterGeneration: FnOnce(),
+    AfterControl: FnOnce(),
+{
+    if !source_commit_is_known(source_commit)
+        || !phase2_control_approval_is_valid(approval, now, source_commit)
+    {
+        return Err("controlled phase2 approval rejected".to_string());
+    }
+    let lock = Phase2ApplyLock::acquire(gov_dir)?;
+    after_lock();
+    // From this point through completion, every ledger read and write is
+    // rooted in `lock.parent`.  `ensure_bound` also proves the governance
+    // entry still names that exact inode before any decision or publication.
+    lock.ensure_bound()?;
+    let approval_digest = control_approval_digest(approval);
+    let lineage =
+        match load_current_build_lineage_from_phase2(&lock.parent, gov_dir, source_commit, now) {
+            Ok(lineage) => {
+                if validate_completed_control_retry_from_phase2(
+                    &lock.parent,
+                    gov_dir,
+                    source_commit,
+                    approval,
+                    &approval_digest,
+                    now,
+                )? {
+                    return Ok(Phase2SealApplyOutcome {
+                        status: "already_applied_no_contact".to_string(),
+                        blockers: Vec::new(),
+                        action: Some(approval.action),
+                        no_contact: true,
+                        wrote_generation: false,
+                        wrote_control: false,
+                    });
+                }
+                lineage
+            }
+            Err(reason) => {
+                if !matches!(approval.action, Phase2SealControlAction::Seal)
+                    || recoverable_orphan_generation_from_phase2(
+                        &lock.parent,
+                        gov_dir,
+                        source_commit,
+                        approval,
+                        &approval_digest,
+                        None,
+                        now,
+                    )?
+                    .is_none()
+                {
+                    return Err(reason);
+                }
+                Phase2LineageState {
+                    active: None,
+                    tail_hash: None,
+                    approval_ids: BTreeSet::new(),
+                    approval_digests: BTreeSet::new(),
+                }
+            }
+        };
+    lock.ensure_bound()?;
+    if lineage.approval_ids.contains(&approval.approval_id)
+        || lineage.approval_digests.contains(&approval_digest)
+    {
+        return Err("controlled phase2 approval replay rejected".to_string());
+    }
+
+    let predecessor = lineage.active.as_ref();
+    match approval.action {
+        Phase2SealControlAction::Seal if predecessor.is_some() => {
+            return Err("seal rejected: active generation already exists".to_string())
+        }
+        Phase2SealControlAction::Seal
+            if approval.predecessor_artifact_id.is_some()
+                || approval.predecessor_raw_hash.is_some() =>
+        {
+            return Err("seal rejected: unexpected predecessor binding".to_string())
+        }
+        Phase2SealControlAction::Supersede | Phase2SealControlAction::Revoke => {
+            let previous = predecessor
+                .ok_or_else(|| "control rejected: active predecessor missing".to_string())?;
+            if approval.predecessor_artifact_id.as_deref() != Some(previous.generation_id.as_str())
+                || approval.predecessor_raw_hash.as_deref()
+                    != Some(previous.artifact.raw_artifact_hash.as_str())
+            {
+                return Err("control rejected: predecessor binding mismatch".to_string());
+            }
+        }
+        _ => {}
+    }
+
+    let target = match approval.action {
+        Phase2SealControlAction::Revoke => predecessor
+            .cloned()
+            .ok_or_else(|| "revoke rejected: active predecessor missing".to_string())?,
+        Phase2SealControlAction::Seal | Phase2SealControlAction::Supersede => {
+            match recoverable_orphan_generation_from_phase2(
+                &lock.parent,
+                gov_dir,
+                source_commit,
+                approval,
+                &approval_digest,
+                predecessor,
+                now,
+            )? {
+                Some(orphan) => orphan,
+                None => {
+                    let supplied = inputs.ok_or_else(|| {
+                        "external_verification_pending:controlled_inputs_missing".to_string()
+                    })?;
+                    build_controlled_generation(
+                        gov_dir,
+                        supplied,
+                        approval,
+                        &approval_digest,
+                        predecessor,
+                        source_commit,
+                        now,
+                    )?
+                }
+            }
+        }
+    };
+    let record = build_control_record(
+        approval,
+        &approval_digest,
+        &target,
+        predecessor,
+        lineage.tail_hash,
+        source_commit,
+        now,
+    );
+
+    lock.ensure_bound()?;
+    let generations_root = ensure_owner_only_child_dir(&lock.parent, GENERATIONS_DIRNAME)?;
+    let controls_root = ensure_owner_only_child_dir(&lock.parent, CONTROLS_DIRNAME)?;
+    let generation_dir = ensure_owner_only_child_dir(&generations_root, source_commit)?;
+    let control_dir = ensure_owner_only_child_dir(&controls_root, source_commit)?;
+    let mut wrote_generation = false;
+    if !matches!(approval.action, Phase2SealControlAction::Revoke) {
+        lock.ensure_bound()?;
+        wrote_generation = write_immutable_json(
+            &generation_dir,
+            &format!("{}.sealed.json", target.generation_id),
+            &target,
+        )? == ImmutablePublication::Written;
+        lock.ensure_bound()?;
+        after_generation();
+    }
+    lock.ensure_bound()?;
+    let wrote_control = write_immutable_json(
+        &control_dir,
+        &format!("{}.control.json", record.control_id),
+        &record,
+    )? == ImmutablePublication::Written;
+    lock.ensure_bound()?;
+    after_control();
+    lock.ensure_bound()?;
+    let completed = validate_completed_control_retry_from_phase2(
+        &lock.parent,
+        gov_dir,
+        source_commit,
+        approval,
+        &approval_digest,
+        now,
+    )?;
+    lock.ensure_bound()?;
+    if !completed {
+        return Err("post-write immutable lineage validation failed".to_string());
+    }
+    Ok(Phase2SealApplyOutcome {
+        status: "applied_no_contact".to_string(),
+        blockers: Vec::new(),
+        action: Some(approval.action),
+        no_contact: true,
+        wrote_generation,
+        wrote_control,
+    })
+}
+
+/// The only production mutation entry point.  A caller must explicitly pass
+/// `true` (the standalone bin only does so for `--apply`) and the environment
+/// must be exactly literal `1`.  Any missing input/approval leaves no ledger
+/// write and is reported as external verification pending.
+pub fn phase2_apply_seal_if_explicitly_requested(
+    cli_apply_requested: bool,
+) -> Phase2SealApplyOutcome {
+    if !cli_apply_requested {
+        return Phase2SealApplyOutcome {
+            status: "dry_run".to_string(),
+            blockers: vec!["apply_flag_required".to_string()],
+            action: None,
+            no_contact: true,
+            wrote_generation: false,
+            wrote_control: false,
+        };
+    }
+    if std::env::var("OPENCLAW_IBKR_PHASE2_SEAL_APPLY")
+        .ok()
+        .as_deref()
+        != Some("1")
+    {
+        return Phase2SealApplyOutcome {
+            status: "blocked".to_string(),
+            blockers: vec!["OPENCLAW_IBKR_PHASE2_SEAL_APPLY=1_required".to_string()],
+            action: None,
+            no_contact: true,
+            wrote_generation: false,
+            wrote_control: false,
+        };
+    }
+    let gov_dir = match resolve_phase2_governance_dir() {
+        Ok(path) => path,
+        Err(_) => {
+            return Phase2SealApplyOutcome {
+                status: "external_verification_pending".to_string(),
+                blockers: vec![
+                    "external_verification_pending:owner_only_data_dir_missing_or_ephemeral"
+                        .to_string(),
+                ],
+                action: None,
+                no_contact: true,
+                wrote_generation: false,
+                wrote_control: false,
+            }
+        }
+    };
+    let inputs = load_control_inputs_from_dir(&gov_dir).ok().flatten();
+    let approval = load_control_approval_from_dir(&gov_dir).ok().flatten();
+    let Some(approval) = approval else {
+        return Phase2SealApplyOutcome {
+            status: "external_verification_pending".to_string(),
+            blockers: vec!["external_verification_pending:control_approval_missing".to_string()],
+            action: None,
+            no_contact: true,
+            wrote_generation: false,
+            wrote_control: false,
+        };
+    };
+    match apply_controlled_phase2_for_dir(
+        &gov_dir,
+        inputs.as_ref(),
+        &approval,
+        BUILD_GIT_SHA,
+        now_ms(),
+    ) {
+        Ok(outcome) => outcome,
+        Err(reason) => Phase2SealApplyOutcome {
+            status: if reason.starts_with("external_verification_pending:") {
+                "external_verification_pending".to_string()
+            } else {
+                "blocked".to_string()
+            },
+            blockers: vec![reason],
+            action: Some(approval.action),
+            no_contact: true,
+            wrote_generation: false,
+            wrote_control: false,
+        },
+    }
+}
+
+/// IPC/display surface remains read-only and cannot invoke the apply entry.
+pub fn phase2_gate_producer_summary() -> serde_json::Value {
+    let evaluation = phase2_seal_dry_run();
+    serde_json::json!({
+        "producer_status": evaluation.status,
+        "immutable_pass_artifact_present": evaluation.active_current_build,
+        "blockers": evaluation.blockers,
+        "inputs_present": evaluation.inputs_present,
+        "inputs_valid": evaluation.inputs_valid,
+        "approval_present": evaluation.approval_present,
+        "approval_valid": evaluation.approval_valid,
+        "no_contact": true,
+        "seal_apply_requires_cli_and_env": true,
+        "activation_authority": "separate_rust_activation_envelope_required",
+        "ibkr_call_performed": false,
+    })
+}
+
+/// The precontact consumer derives exactly one active current-build, unexpired,
+/// non-revoked immutable lineage.  Ambiguity, replay, fork, stale build/expiry,
+/// insecure filesystem, or any parse failure returns false.
 pub(crate) fn phase2_immutable_pass_artifact_present() -> bool {
     let gov_dir = match resolve_phase2_governance_dir() {
-        Ok(d) => d,
+        Ok(path) => path,
         Err(_) => return false,
     };
-    reverify_sealed_artifact_at(&gov_dir.join(SEALED_FILENAME))
+    load_current_build_lineage(&gov_dir, BUILD_GIT_SHA, now_ms())
+        .map(|state| state.active.is_some())
+        .unwrap_or(false)
 }
 
 // ===========================================================================
@@ -1280,6 +3063,39 @@ mod tests {
             approved_source_commit: sha.to_string(),
             issued_at_ms: now - 1000,
             expires_at_ms: now + 3_600_000,
+        }
+    }
+
+    fn controlled_inputs() -> Phase2SealProductionInputsV1 {
+        let secret = valid_secret();
+        Phase2SealProductionInputsV1 {
+            contract_id: W2_INPUTS_CONTRACT_ID.to_string(),
+            source_version: 1,
+            policy_bundle: valid_bundle(),
+            api_allowlist: valid_allowlist(),
+            secret_slot_contract: secret.clone(),
+            api_session_topology: matched_topology(&secret),
+        }
+    }
+
+    fn controlled_approval(
+        approval_id: char,
+        action: Phase2SealControlAction,
+        sha: &str,
+        predecessor: Option<&Phase2SealedGenerationV1>,
+    ) -> Phase2SealControlApprovalV1 {
+        Phase2SealControlApprovalV1 {
+            contract_id: W2_CONTROL_CONTRACT_ID.to_string(),
+            source_version: 1,
+            approval_id: approval_id.to_string().repeat(64),
+            action,
+            authorization_amd: W2_CONTROL_AMD.to_string(),
+            reviewer_roles: vec!["PM".to_string(), "Operator".to_string()],
+            approved_source_commit: sha.to_string(),
+            issued_at_ms: FIXED_NOW - 1000,
+            expires_at_ms: FIXED_NOW + 3_600_000,
+            predecessor_artifact_id: predecessor.map(|value| value.generation_id.clone()),
+            predecessor_raw_hash: predecessor.map(|value| value.artifact.raw_artifact_hash.clone()),
         }
     }
 
@@ -1997,7 +3813,7 @@ mod tests {
         assert!(!reverify_sealed_artifact_at_for_build(&sealed, &fake_sha()));
     }
 
-    // --- 補: summary 形狀（現狀 blocked + immutable_pass=false）---
+    // --- W2: default summary is external-verification-pending and cannot apply. ---
     #[test]
     fn summary_reports_blocked_shape() {
         let _g = crate::test_env_lock::guard();
@@ -2005,22 +3821,479 @@ mod tests {
         std::env::remove_var("OPENCLAW_DATA_DIR");
 
         let s = phase2_gate_producer_summary();
-        assert_eq!(s["producer_status"], "blocked");
+        assert_eq!(s["producer_status"], "external_verification_pending");
         assert_eq!(s["immutable_pass_artifact_present"], false);
         assert_eq!(s["ibkr_call_performed"], false);
-        assert_eq!(s["contact_authorization_amd"], IBKR_PHASE2_CONTACT_AMD);
-        assert_eq!(s["artifact_shape_amd"], IBKR_PHASE2_AMD);
         assert!(s["blockers"].as_array().is_some());
-        // T2：production placeholder topology（"c"*64）≠ denied-secret fp（空）→
-        // triangulation mismatch，佐證覆寫移除後真 equality 生效（自然正確 BLOCKED）。
-        assert_eq!(
-            s["leg_status"]["account_fingerprint_triangulation_ok"],
-            false
-        );
+        assert_eq!(s["no_contact"], true);
+        assert_eq!(s["seal_apply_requires_cli_and_env"], true);
 
         match prev {
             Some(v) => std::env::set_var("OPENCLAW_DATA_DIR", v),
             None => std::env::remove_var("OPENCLAW_DATA_DIR"),
         }
+    }
+
+    #[test]
+    fn w2_controlled_seal_supersede_revoke_preserves_predecessor_and_consumes_once() {
+        let tmp = tempfile::tempdir().unwrap();
+        let gov = make_gov_chain(tmp.path());
+        let sha = fake_sha();
+        let inputs = controlled_inputs();
+        let seal = controlled_approval('d', Phase2SealControlAction::Seal, &sha, None);
+
+        let first = apply_controlled_phase2_for_dir(&gov, Some(&inputs), &seal, &sha, FIXED_NOW)
+            .expect("first no-contact seal");
+        assert_eq!(first.status, "applied_no_contact");
+        assert!(first.wrote_generation && first.wrote_control);
+        let state1 = load_current_build_lineage(&gov, &sha, FIXED_NOW).unwrap();
+        let predecessor = state1.active.clone().expect("active first generation");
+        let predecessor_path = generation_path(&gov, &sha, &predecessor.generation_id);
+        let predecessor_bytes = fs::read(&predecessor_path).unwrap();
+
+        let idempotent =
+            apply_controlled_phase2_for_dir(&gov, Some(&inputs), &seal, &sha, FIXED_NOW)
+                .expect("same approval must validate the already-complete publication");
+        assert_eq!(idempotent.status, "already_applied_no_contact");
+        assert!(!idempotent.wrote_generation && !idempotent.wrote_control);
+
+        let supersede = controlled_approval(
+            'e',
+            Phase2SealControlAction::Supersede,
+            &sha,
+            Some(&predecessor),
+        );
+        let second =
+            apply_controlled_phase2_for_dir(&gov, Some(&inputs), &supersede, &sha, FIXED_NOW + 1)
+                .expect("supersede no-contact seal");
+        assert!(second.wrote_generation && second.wrote_control);
+        assert_eq!(fs::read(&predecessor_path).unwrap(), predecessor_bytes);
+        let state2 = load_current_build_lineage(&gov, &sha, FIXED_NOW + 1).unwrap();
+        let active = state2.active.clone().expect("active successor generation");
+        assert_ne!(active.generation_id, predecessor.generation_id);
+        assert_eq!(
+            active.artifact.supersedes_artifact_id.as_deref(),
+            Some(predecessor.generation_id.as_str())
+        );
+
+        let revoke = controlled_approval('f', Phase2SealControlAction::Revoke, &sha, Some(&active));
+        let revoked = apply_controlled_phase2_for_dir(&gov, None, &revoke, &sha, FIXED_NOW + 2)
+            .expect("revoke no-contact seal");
+        assert!(!revoked.wrote_generation && revoked.wrote_control);
+        assert!(
+            load_current_build_lineage(&gov, &sha, FIXED_NOW + 2)
+                .unwrap()
+                .active
+                .is_none(),
+            "revocation must make the current-build consumer fail closed"
+        );
+    }
+
+    #[test]
+    fn w2_controlled_lineage_rejects_fork_crossbuild_and_expired_approval() {
+        let tmp = tempfile::tempdir().unwrap();
+        let gov = make_gov_chain(tmp.path());
+        let sha = fake_sha();
+        let inputs = controlled_inputs();
+        let seal = controlled_approval('a', Phase2SealControlAction::Seal, &sha, None);
+        apply_controlled_phase2_for_dir(&gov, Some(&inputs), &seal, &sha, FIXED_NOW).unwrap();
+        let state = load_current_build_lineage(&gov, &sha, FIXED_NOW).unwrap();
+        let active = state.active.clone().unwrap();
+
+        let mut expired =
+            controlled_approval('b', Phase2SealControlAction::Supersede, &sha, Some(&active));
+        expired.expires_at_ms = FIXED_NOW - 1;
+        assert!(!phase2_control_approval_is_valid(&expired, FIXED_NOW, &sha));
+        assert!(!phase2_control_approval_is_valid(
+            &seal,
+            FIXED_NOW,
+            &"b".repeat(40)
+        ));
+
+        // A syntactically valid second branch uses a distinct approval but the
+        // same predecessor control hash.  Reader must reject the ambiguity
+        // rather than selecting by filesystem enumeration order.
+        let branch_approval =
+            controlled_approval('c', Phase2SealControlAction::Revoke, &sha, Some(&active));
+        let branch = build_control_record(
+            &branch_approval,
+            &control_approval_digest(&branch_approval),
+            &active,
+            Some(&active),
+            state.tail_hash.clone(),
+            &sha,
+            FIXED_NOW + 1,
+        );
+        let controls = gov.join(CONTROLS_DIRNAME).join(&sha);
+        let controls_fd = fs::File::open(&controls).unwrap();
+        write_immutable_json(
+            &controls_fd,
+            &format!("{}.control.json", branch.control_id),
+            &branch,
+        )
+        .unwrap();
+        let second_branch_approval =
+            controlled_approval('d', Phase2SealControlAction::Revoke, &sha, Some(&active));
+        let second_branch = build_control_record(
+            &second_branch_approval,
+            &control_approval_digest(&second_branch_approval),
+            &active,
+            Some(&active),
+            state.tail_hash.clone(),
+            &sha,
+            FIXED_NOW + 2,
+        );
+        write_immutable_json(
+            &controls_fd,
+            &format!("{}.control.json", second_branch.control_id),
+            &second_branch,
+        )
+        .unwrap();
+        assert!(
+            load_current_build_lineage(&gov, &sha, FIXED_NOW + 1).is_err(),
+            "forked append-only chain must not yield an arbitrary active leaf"
+        );
+    }
+
+    #[test]
+    fn w2_writer_rejects_ledger_child_replacement_after_lstat() {
+        let tmp = tempfile::tempdir().unwrap();
+        let gov = make_gov_chain(tmp.path());
+        let phase2_fd = open_secure_phase2_dir(&gov).expect("secure writer parent");
+        let generations = gov.join(GENERATIONS_DIRNAME);
+        let retired = gov.join("retired-generations");
+
+        let result =
+            ensure_owner_only_child_dir_after_lstat(&phase2_fd, GENERATIONS_DIRNAME, || {
+                fs::rename(&generations, &retired).unwrap();
+                std::os::unix::fs::symlink(&retired, &generations).unwrap();
+            });
+        assert!(
+            result.is_err(),
+            "writer must reject a same-owner child replacement between lstat and openat"
+        );
+        assert!(
+            fs::symlink_metadata(&generations)
+                .unwrap()
+                .file_type()
+                .is_symlink(),
+            "fixture must exercise the replacement shape"
+        );
+    }
+
+    #[test]
+    fn w2_apply_requires_explicit_cli_flag_even_when_env_gate_is_set() {
+        let _g = crate::test_env_lock::guard();
+        let old = std::env::var("OPENCLAW_IBKR_PHASE2_SEAL_APPLY").ok();
+        std::env::set_var("OPENCLAW_IBKR_PHASE2_SEAL_APPLY", "1");
+        let outcome = phase2_apply_seal_if_explicitly_requested(false);
+        assert_eq!(outcome.status, "dry_run");
+        assert!(!outcome.wrote_generation && !outcome.wrote_control);
+        match old {
+            Some(value) => std::env::set_var("OPENCLAW_IBKR_PHASE2_SEAL_APPLY", value),
+            None => std::env::remove_var("OPENCLAW_IBKR_PHASE2_SEAL_APPLY"),
+        }
+    }
+
+    #[test]
+    fn w2_first_seal_interrupted_after_generation_retries_control_only_fail_closed_until_then() {
+        let tmp = tempfile::tempdir().unwrap();
+        let gov = make_gov_chain(tmp.path());
+        let sha = fake_sha();
+        let inputs = controlled_inputs();
+        let approval = controlled_approval('1', Phase2SealControlAction::Seal, &sha, None);
+
+        let interrupted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = apply_controlled_phase2_for_dir_with_hooks(
+                &gov,
+                Some(&inputs),
+                &approval,
+                &sha,
+                FIXED_NOW,
+                || panic!("simulated crash after generation publication"),
+                || {},
+            );
+        }));
+        assert!(interrupted.is_err());
+        assert!(
+            load_current_build_lineage(&gov, &sha, FIXED_NOW).is_err(),
+            "a generation without a control must never be consumed as active"
+        );
+        assert!(
+            !evaluate_controlled_phase2_for_dir(&gov, &sha, FIXED_NOW).active_current_build,
+            "no premature active consumer success before the control record exists"
+        );
+
+        let retry_now = FIXED_NOW + 17;
+        let retried =
+            apply_controlled_phase2_for_dir(&gov, Some(&inputs), &approval, &sha, retry_now)
+                .expect("later-time retry must append only the missing control");
+        assert_eq!(retried.status, "applied_no_contact");
+        assert!(!retried.wrote_generation && retried.wrote_control);
+        let active = load_current_build_lineage(&gov, &sha, retry_now)
+            .unwrap()
+            .active
+            .expect("recovered generation becomes active only with its control");
+        assert_eq!(
+            active.artifact.created_at_ms, FIXED_NOW,
+            "retry must reuse the persisted generation rather than minting a later-time variant"
+        );
+    }
+
+    #[test]
+    fn w2_supersede_interrupted_after_generation_retries_control_only_without_fork() {
+        let tmp = tempfile::tempdir().unwrap();
+        let gov = make_gov_chain(tmp.path());
+        let sha = fake_sha();
+        let inputs = controlled_inputs();
+        let first = controlled_approval('2', Phase2SealControlAction::Seal, &sha, None);
+        apply_controlled_phase2_for_dir(&gov, Some(&inputs), &first, &sha, FIXED_NOW).unwrap();
+        let predecessor = load_current_build_lineage(&gov, &sha, FIXED_NOW)
+            .unwrap()
+            .active
+            .unwrap();
+        let supersede = controlled_approval(
+            '3',
+            Phase2SealControlAction::Supersede,
+            &sha,
+            Some(&predecessor),
+        );
+
+        let interrupted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = apply_controlled_phase2_for_dir_with_hooks(
+                &gov,
+                Some(&inputs),
+                &supersede,
+                &sha,
+                FIXED_NOW + 1,
+                || panic!("simulated crash after supersede generation publication"),
+                || {},
+            );
+        }));
+        assert!(interrupted.is_err());
+        let before_retry = load_current_build_lineage(&gov, &sha, FIXED_NOW + 1)
+            .unwrap()
+            .active
+            .unwrap();
+        assert_eq!(
+            before_retry.generation_id, predecessor.generation_id,
+            "orphan successor must not become active before its control record"
+        );
+
+        let retry_now = FIXED_NOW + 19;
+        let retried =
+            apply_controlled_phase2_for_dir(&gov, Some(&inputs), &supersede, &sha, retry_now)
+                .expect("later-time supersede retry must append only the missing control");
+        assert!(!retried.wrote_generation && retried.wrote_control);
+        let active = load_current_build_lineage(&gov, &sha, retry_now)
+            .unwrap()
+            .active
+            .unwrap();
+        assert_ne!(active.generation_id, predecessor.generation_id);
+        assert_eq!(
+            active.artifact.created_at_ms,
+            FIXED_NOW + 1,
+            "retry must retain the orphan successor's original creation time"
+        );
+        let generations: Vec<Phase2SealedGenerationV1> = read_current_build_records(
+            &gov,
+            GENERATIONS_DIRNAME,
+            &sha,
+            generation_filename_is_valid,
+        )
+        .unwrap();
+        assert_eq!(generations.len(), 2, "recovery must not fork a successor");
+    }
+
+    #[test]
+    fn w2_ambiguous_post_control_write_retries_as_validated_idempotent_success() {
+        let tmp = tempfile::tempdir().unwrap();
+        let gov = make_gov_chain(tmp.path());
+        let sha = fake_sha();
+        let inputs = controlled_inputs();
+        let approval = controlled_approval('4', Phase2SealControlAction::Seal, &sha, None);
+
+        let interrupted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = apply_controlled_phase2_for_dir_with_hooks(
+                &gov,
+                Some(&inputs),
+                &approval,
+                &sha,
+                FIXED_NOW,
+                || {},
+                || panic!("simulated crash after control publication"),
+            );
+        }));
+        assert!(interrupted.is_err());
+        assert!(
+            load_current_build_lineage(&gov, &sha, FIXED_NOW)
+                .unwrap()
+                .active
+                .is_some(),
+            "a fully linked control must survive an ambiguous caller outcome"
+        );
+        let retried =
+            apply_controlled_phase2_for_dir(&gov, Some(&inputs), &approval, &sha, FIXED_NOW)
+                .expect("retry must verify rather than rewrite the completed pair");
+        assert_eq!(retried.status, "already_applied_no_contact");
+        assert!(!retried.wrote_generation && !retried.wrote_control);
+    }
+
+    #[test]
+    fn w2_apply_lock_serializes_sibling_controls_and_is_crash_releasable() {
+        let tmp = tempfile::tempdir().unwrap();
+        let gov = make_gov_chain(tmp.path());
+        let first = Phase2ApplyLock::try_acquire(&gov).expect("first writer owns lock");
+        assert!(
+            Phase2ApplyLock::try_acquire(&gov).is_err(),
+            "a concurrent/reentrant sibling writer must not observe an unlocked ledger"
+        );
+        drop(first);
+        assert!(
+            Phase2ApplyLock::try_acquire(&gov).is_ok(),
+            "advisory flock release on fd close is the safe stale-lock recovery"
+        );
+    }
+
+    #[test]
+    fn w2_apply_lock_rejects_inode_swap_without_admitting_a_second_writer() {
+        let tmp = tempfile::tempdir().unwrap();
+        let gov = make_gov_chain(tmp.path());
+        let first = Phase2ApplyLock::try_acquire(&gov).expect("first writer owns lock");
+        let lock_path = gov.join(Phase2ApplyLock::FILENAME);
+        let retired = gov.join("retired-phase2-seal-apply.lock");
+
+        // Simulate a same-owner attacker unlinking the locked inode and
+        // supplying a fresh, otherwise policy-shaped lock file.  A lock only
+        // on `first.file` would let a sibling lock this new inode.
+        fs::rename(&lock_path, &retired).unwrap();
+        fs::write(&lock_path, b"replacement lock inode").unwrap();
+        fs::set_permissions(&lock_path, fs::Permissions::from_mode(0o600)).unwrap();
+
+        assert!(
+            first.ensure_bound().is_err(),
+            "the original critical section must reject an unlinked/replaced lock"
+        );
+        assert!(
+            Phase2ApplyLock::try_acquire(&gov).is_err(),
+            "the inode-bound parent flock must keep a sibling from locking the swapped child"
+        );
+        drop(first);
+        let second = Phase2ApplyLock::try_acquire(&gov)
+            .expect("replacement may only become acquirable after first critical section exits");
+        second.ensure_bound().unwrap();
+    }
+
+    #[test]
+    fn w2_apply_rejects_whole_phase2_directory_swap_without_publication() {
+        let tmp = tempfile::tempdir().unwrap();
+        let gov = make_gov_chain(tmp.path());
+        let sha = fake_sha();
+        let inputs = controlled_inputs();
+        let approval = controlled_approval('7', Phase2SealControlAction::Seal, &sha, None);
+        let retired = gov
+            .parent()
+            .expect("governance parent")
+            .join("retired-ibkr-phase2");
+        let replacement = tmp.path().join("replacement-ibkr-phase2");
+        fs::create_dir(&replacement).unwrap();
+        fs::set_permissions(&replacement, fs::Permissions::from_mode(0o700)).unwrap();
+
+        let result = apply_controlled_phase2_for_dir_with_lock_hook(
+            &gov,
+            Some(&inputs),
+            &approval,
+            &sha,
+            FIXED_NOW,
+            || {
+                // The original transaction owns both the old `ibkr_phase2`
+                // FD and its governance-parent flock.  A same-owner rename
+                // must neither redirect its publication nor admit an
+                // independent writer through the replacement pathname.
+                fs::rename(&gov, &retired).unwrap();
+                fs::rename(&replacement, &gov).unwrap();
+                assert!(
+                    Phase2ApplyLock::try_acquire(&gov).is_err(),
+                    "replacement ibkr_phase2 path must remain serialized by original governance lock"
+                );
+            },
+            || {},
+            || {},
+        );
+
+        assert!(
+            result.is_err(),
+            "original transaction must reject a whole ibkr_phase2 directory swap"
+        );
+        for tree in [&gov, &retired] {
+            assert!(
+                !tree.join(GENERATIONS_DIRNAME).exists() && !tree.join(CONTROLS_DIRNAME).exists(),
+                "directory swap rejection must publish no immutable ledger record"
+            );
+        }
+    }
+
+    #[test]
+    fn w2_lineage_uses_one_phase2_dirfd_and_rejects_mixed_tree_composition() {
+        let tmp = tempfile::tempdir().unwrap();
+        let gov = make_gov_chain(tmp.path());
+        let sha = fake_sha();
+        let inputs = controlled_inputs();
+        let approval = controlled_approval('6', Phase2SealControlAction::Seal, &sha, None);
+        apply_controlled_phase2_for_dir(&gov, Some(&inputs), &approval, &sha, FIXED_NOW)
+            .expect("create a valid immutable pair before splitting its tree");
+
+        // Split a valid pair so old `ibkr_phase2` holds only generations and a
+        // replacement tree holds only matching controls.  A reader which
+        // opens the path once for generations and reopens it for controls
+        // would wrongly compose an active lineage across two trees.
+        let replacement = tmp.path().join("replacement-ibkr-phase2");
+        fs::create_dir(&replacement).unwrap();
+        fs::set_permissions(&replacement, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::rename(
+            gov.join(CONTROLS_DIRNAME),
+            replacement.join(CONTROLS_DIRNAME),
+        )
+        .unwrap();
+        let phase2_fd = open_secure_phase2_dir(&gov).expect("bind original phase2 tree");
+        let retired = tmp.path().join("retired-ibkr-phase2");
+
+        let result = load_current_build_lineage_from_phase2_after_generations(
+            &phase2_fd,
+            &gov,
+            &sha,
+            FIXED_NOW,
+            || {
+                fs::rename(&gov, &retired).unwrap();
+                fs::rename(&replacement, &gov).unwrap();
+            },
+        );
+        assert!(
+            result.is_err(),
+            "generation records from the original FD must not combine with controls from replacement pathname"
+        );
+        assert!(
+            gov.join(CONTROLS_DIRNAME).exists() && !gov.join(GENERATIONS_DIRNAME).exists(),
+            "fixture must leave the replacement tree containing controls only"
+        );
+    }
+
+    #[test]
+    fn w2_apply_rejects_malformed_nonunknown_build_sha_without_writes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let gov = make_gov_chain(tmp.path());
+        let malformed = "malformed-but-not-unknown";
+        let inputs = controlled_inputs();
+        let approval = controlled_approval('5', Phase2SealControlAction::Seal, malformed, None);
+        assert!(apply_controlled_phase2_for_dir(
+            &gov,
+            Some(&inputs),
+            &approval,
+            malformed,
+            FIXED_NOW,
+        )
+        .is_err());
+        assert!(!gov.join(GENERATIONS_DIRNAME).exists());
+        assert!(!gov.join(CONTROLS_DIRNAME).exists());
     }
 }

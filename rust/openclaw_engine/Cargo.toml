@@ -136,6 +136,13 @@ ibkr_g4_contact = []
 name = "openclaw-engine"
 path = "src/main.rs"
 
+# W2 IBKR Phase2 immutable no-contact seal control.  This standalone binary is
+# intentionally separate from boot/IPC: default execution is read-only status;
+# any append-only local write requires both `--apply` and the exact env gate.
+[[bin]]
+name = "ibkr_phase2_seal"
+path = "src/bin/ibkr_phase2_seal.rs"
+
 [[bench]]
 name = "hot_path_baseline"
 harness = false
