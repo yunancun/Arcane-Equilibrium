@@ -63,7 +63,12 @@
 /* Confirm Modal */
 .overview-view .confirm-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 200; }
 .overview-view .confirm-overlay.show { display: flex; align-items: center; justify-content: center; }
-.overview-view .confirm-dialog { background: var(--bg-raised); border: 1px solid var(--border-subtle); border-radius: var(--r-3); width: min(480px, 90vw);
+/* #16(A3 R88 裁 option b):容器由 --bg-raised 降海拔至 --bg-surface(對齊 shell .oc-confirm-dialog),
+   使下方 .warn-box 的 --neg 12px 警示文字(平倉/切 Live 破壞性操作)AA 對比**嚴格改善**——
+   平底 token-pair --neg/--bg-surface=4.54 達標;但實際 warn-box 疊 8% 紅 tint 僅 ≈3.92→≈4.16,殘差仍<4.5。
+   玄夜 --neg 值不動(canon-9 三紅不逼近 --live);仍有 box-shadow+border 保 modal 海拔感。
+   殘差(tinted 4.16)歸 A3 V5 runtime 走查最終決(#16 ratchet pair 仍 frozen-PENDING,未提前關閉)。 */
+.overview-view .confirm-dialog { background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--r-3); width: min(480px, 90vw);
   box-shadow: 0 20px 50px rgba(0,0,0,0.5); }
 .overview-view .confirm-header { padding: 16px 20px; border-bottom: 1px solid var(--border-subtle); font-size: 15px; font-weight: 600; }
 .overview-view .confirm-body { padding: 16px 20px; font-size: 13px; line-height: 1.7; color: var(--text-secondary); }
