@@ -7,7 +7,8 @@
 //!   - (a) 純 codec：`encode_frame` / `try_decode_frame` / `encode_fields` /
 //!     `decode_fields` / `encode_handshake_prefix` / `encode_start_api` /
 //!     `encode_req_current_time` / `decode_server_handshake_ack` /
-//!     `decode_current_time`（無 I/O，synthetic fixture 可測）。
+//!     `decode_current_time` / `managed_accounts_all_paper`（無 I/O，synthetic
+//!     fixture 可測）。
 //!   - (b) generic driver：`drive_handshake_and_current_time<S>`（pub(crate)，泛型於
 //!     `AsyncRead + AsyncWrite + Unpin`，不自持 socket；由 duplex / TcpStream 注入）。
 //!   - (c) structural guards：`assert_loopback_paper_endpoint`（literal `127.0.0.1` +
@@ -22,14 +23,18 @@
 //!     不接 IPC / dispatch / normalizer（P4）；不 auto-run；無 production caller。
 //!   - **loopback + paper-port only**：connect 目標硬編 literal `127.0.0.1:4002`；live
 //!     port（4001 / 7496）與非 loopback host 結構性拒，無 config 拓寬。
-//!   - **不洩帳號**：握手中 gateway push `managedAccounts`（msgId 15，含 paper `DU…`）——
-//!     payload 全欄 tokenize（僅為取 msgId）後**整體丟棄**，明文帳號從不 bind 具名變量、
-//!     從不 log / serialize（「hash-or-drop」中最保守的 drop 側）。
+//!   - **不洩帳號（prefix-only inspect then drop）**：握手中 gateway push
+//!     `managedAccounts`（msgId 15，含 paper `DU…`）——payload tokenize 後僅做
+//!     **前綴實檢**（每個帳號 token 必須 `DU` 開頭 = paper session），實檢只導出
+//!     boolean，明文帳號從不 bind 具名變量、從不 log / serialize / 進錯誤訊息，
+//!     檢畢即整體丟棄（保持「hash-or-drop」drop 側的保守性）。任一非 `DU` 帳號 →
+//!     `NonPaperSessionDetected`；直到 49 都未見 15 → `PaperSessionUnverified`
+//!     （fail-closed，不以「沒看到」當「已驗證」）。
 //!   - **untrusted-wire fail-closed**：length 讀 u32 BE（無負）；任何分配前比
 //!     `<= MAX_FRAME_LEN`；欄位 tokenizer 嚴限 frame slice 內，越界 / 非數字 / 非 ASCII /
 //!     缺終止 → typed `CodecError`，零 unwrap / expect / panic / 裸索引 on parsed data，
-//!     無捏造值（禁 `unwrap_or(0)`）；msgId 處理（ack + 49 done + 15/9 ignored + 4 ERR_MSG
-//!     按 code 分流 / 其餘 UnexpectedMsgId）。
+//!     無捏造值（禁 `unwrap_or(0)`）；msgId 處理（ack + 49 done + 15 paper 前綴實檢 +
+//!     9 ignored + 4 ERR_MSG 按 code 分流 / 其餘 UnexpectedMsgId）。
 //!   - **惰性 G4 gate（任何 socket syscall 之前）**：env `OPENCLAW_IBKR_G4_CONTACT_APPLY==
 //!     "1"` literal → `phase2_immutable_pass_artifact_present()`（真磁盤 re-verify，直接調
 //!     producer）→ G4 approval 6 綁定 valid → structural host/port → 才 connect。
@@ -303,6 +308,36 @@ fn decode_error_code(payload: &[u8]) -> Result<i64, CodecError> {
         .map_err(|_| CodecError::NonNumericField("error_code"))
 }
 
+/// decode MANAGED_ACCOUNTS（msgId 15）並做 **paper 前綴實檢**。IB 欄序：
+/// `[msgId, version, accountsCsv]`——fields[2] 為單欄逗號分隔帳號列表（與 fixture
+/// `"15\0 1\0 DU1234567\0"` 一致）。按逗號切 token，每個 token 必須 `DU` 開頭
+/// （IB paper 帳號固定前綴）；空列表 → `Malformed`（gateway 必回至少一個帳號，
+/// 空 = 損壞或偽造，fail-closed）。
+///
+/// 為什麼只回 boolean（prefix-only inspect then drop）：實檢只需「是否全 DU」，
+/// 明文帳號不 bind 具名變量、不 log、不 serialize、不進錯誤訊息——`fields` 於
+/// fn 結束即整體 drop，維持 drop 側保守性。
+fn managed_accounts_all_paper(payload: &[u8]) -> Result<bool, CodecError> {
+    let fields = decode_fields(payload)?;
+    let msg_id = fields
+        .first()
+        .ok_or(CodecError::Malformed("empty field list"))?
+        .parse::<i64>()
+        .map_err(|_| CodecError::NonNumericField("msg_id"))?;
+    if msg_id != MANAGED_ACCOUNTS_MSG_ID {
+        return Err(CodecError::UnexpectedMsgId { got: msg_id });
+    }
+    if fields.len() < 3 {
+        return Err(CodecError::Malformed("managed_accounts needs >=3 fields"));
+    }
+    // 空帳號欄 = 空列表 → Malformed（不以空欄當「已驗證」）。
+    if fields[2].is_empty() {
+        return Err(CodecError::Malformed("managed_accounts empty account list"));
+    }
+    // 逐 token 前綴實檢：任一空 token 或非 `DU` 開頭 → false（呼叫端 fail-closed）。
+    Ok(fields[2].split(',').all(|t| t.starts_with("DU")))
+}
+
 // ===========================================================================
 // (b) generic driver（pub(crate)，不自持 socket）
 // ===========================================================================
@@ -324,6 +359,15 @@ pub enum TwsClientError {
     /// numeric code（非明文 errorMsg），零明文逃逸。
     #[error("ib gateway error during handshake (code {code})")]
     GatewayError { code: i64 },
+    /// managedAccounts(15) 前綴實檢發現任一非 `DU` 帳號 = 非 paper session →
+    /// 立即 fail-closed（錯誤訊息刻意不含任何帳號明文）。
+    #[error("non-paper session detected (managedAccounts contains non-DU account)")]
+    NonPaperSessionDetected,
+    /// 直到 CURRENT_TIME(49) 都未收到 managedAccounts(15)，paper session 無從實檢 →
+    /// fail-closed（真 IB Gateway 於 startApi 後、49 前必推 15/9；異序只 false-fail
+    /// 可重試，不 fail-open）。
+    #[error("paper session unverified (no managedAccounts before current_time)")]
+    PaperSessionUnverified,
     #[error("endpoint denied: {0}")]
     EndpointDenied(String),
     /// env `OPENCLAW_IBKR_G4_CONTACT_APPLY` 非 literal "1"（dry-run 預設）。
@@ -465,11 +509,15 @@ async fn read_one_frame<S: AsyncRead + Unpin>(
 /// 驅動一次 handshake + reqCurrentTime。序：寫 handshake prefix → 讀 framed ACK →
 /// 寫 START_API → 寫 reqCurrentTime → 讀到 CURRENT_TIME(49)。**pub(crate) 不 pub**。
 ///
-/// msgId 處理（讀 currentTime 迴圈內）：49（done）/ 15（managedAccounts，全欄 tokenize 取
-/// msgId 後整體丟棄，明文帳號從不 bind/log/serialize）/ 9（nextValidId，ignored）/ 4
-/// （ERR_MSG：code≥2100 = 連線 info/warning → 續讀；code<2100 = 真錯誤 → fail-closed
-/// `GatewayError`）；其餘 → `UnexpectedMsgId`。真 IB Gateway 必在 49 之前推 id-4 通知，
-/// 故必須容忍（E2 RETURN #1）；read-budget/timeout 仍為終止上界。
+/// msgId 處理（讀 currentTime 迴圈內）：49（done，但須已 paper_confirmed）/ 15
+/// （managedAccounts，**paper 前綴實檢**：全 `DU` → paper_confirmed=true 續讀；任一非
+/// `DU` → 立即 `NonPaperSessionDetected`；明文帳號 prefix-only inspect then drop，從不
+/// bind/log/serialize）/ 9（nextValidId，ignored）/ 4（ERR_MSG：code≥2100 = 連線
+/// info/warning → 續讀；code<2100 = 真錯誤 → fail-closed `GatewayError`）；其餘 →
+/// `UnexpectedMsgId`。真 IB Gateway 必在 49 之前推 id-4 通知，故必須容忍（E2 RETURN
+/// #1）；同時序記錄證明 startApi 後、49 前必推 15/9 → 49 時若仍未見 15 →
+/// `PaperSessionUnverified`（異序只 false-fail 可重試，不 fail-open）。
+/// read-budget/timeout 仍為終止上界。
 pub(crate) async fn drive_handshake_and_current_time<S: AsyncRead + AsyncWrite + Unpin>(
     mut stream: S,
     cfg: &TwsProbeConfig,
@@ -490,7 +538,9 @@ pub(crate) async fn drive_handshake_and_current_time<S: AsyncRead + AsyncWrite +
     let req_time = encode_req_current_time();
     write_all_with_timeout(&mut stream, &req_time, cfg.io_timeout).await?;
 
-    // 4) 讀到 CURRENT_TIME(49)；握手 push 的 15 / 9 ignored，4（ERR_MSG）按 code 分流。
+    // 4) 讀到 CURRENT_TIME(49)；握手 push 的 15 做 paper 前綴實檢，9 ignored，
+    //    4（ERR_MSG）按 code 分流。
+    let mut paper_confirmed = false;
     let server_epoch_seconds = loop {
         let payload = read_one_frame(&mut stream, &mut buf, cfg.io_timeout, &mut budget).await?;
         let msg_id = frame_msg_id(&payload)?;
@@ -507,15 +557,28 @@ pub(crate) async fn drive_handshake_and_current_time<S: AsyncRead + AsyncWrite +
                 return Err(TwsClientError::GatewayError { code });
             }
             MANAGED_ACCOUNTS_MSG_ID => {
-                // managedAccounts：payload 全欄 tokenize（`frame_msg_id`→`decode_fields`）僅為
-                // 取 msgId，取畢即整體丟棄——明文 `DU…` 帳號從不 bind 具名變量 / log / serialize
-                // （hash-or-drop 中最保守的一側）。
+                // managedAccounts：由盲 drop 改為強制實檢（prefix-only inspect then drop）——
+                // 全帳號 `DU` 前綴 = paper session → 記 paper_confirmed 續讀；任一非 `DU` →
+                // 立即 fail-closed，絕不對 live session 繼續任何讀取。明文帳號僅在
+                // `managed_accounts_all_paper` 內短暫 tokenize，只導出 boolean，從不
+                // bind 具名變量 / log / serialize（維持 drop 側保守性）。
+                if !managed_accounts_all_paper(&payload)? {
+                    return Err(TwsClientError::NonPaperSessionDetected);
+                }
+                paper_confirmed = true;
                 continue;
             }
             NEXT_VALID_ID_MSG_ID => continue,
             other => return Err(TwsClientError::Codec(CodecError::UnexpectedMsgId { got: other })),
         }
     };
+
+    // 真 IB Gateway 於 startApi 後、CURRENT_TIME(49) 前必推 15/9（同檔 E2 RETURN #1 的
+    // 時序記錄同構）——若直到 49 都未見 15，paper session 無從實檢 → fail-closed。
+    // 異序（先 49 後 15）只會 false-fail，可重試；絕不 fail-open。
+    if !paper_confirmed {
+        return Err(TwsClientError::PaperSessionUnverified);
+    }
 
     Ok(TwsHealthProbeResult {
         server_version: ack.server_version,
@@ -898,12 +961,13 @@ mod tests {
             for _ in 0..len {
                 bytes.push((lcg_next(&mut state) & 0xFF) as u8);
             }
-            // 四個解析入口全部餵；任何 panic 都會令測試失敗。
+            // 全部解析入口全部餵；任何 panic 都會令測試失敗。
             let _ = try_decode_frame(&bytes);
             let _ = decode_fields(&bytes);
             let _ = decode_server_handshake_ack(&bytes);
             let _ = decode_current_time(&bytes);
             let _ = frame_msg_id(&bytes);
+            let _ = managed_accounts_all_paper(&bytes);
         }
         // 顯式對抗案例。
         assert!(matches!(try_decode_frame(&[0xFF, 0xFF, 0xFF, 0xFF]), Err(CodecError::FrameTooLarge)));
@@ -952,11 +1016,14 @@ mod tests {
     #[tokio::test]
     async fn driver_writes_exact_client_bytes() {
         let ack = encode_frame(b"176\x00t\x00");
+        // paper 實檢後 49 前必須有 15（否則 PaperSessionUnverified）。
+        let accounts = encode_frame(b"15\x001\x00DU1\x00");
         let current_time = encode_frame(b"49\x001\x001\x00");
 
         let (client, mut server) = tokio::io::duplex(64 * 1024);
         let mut preload = Vec::new();
         preload.extend_from_slice(&ack);
+        preload.extend_from_slice(&accounts);
         preload.extend_from_slice(&current_time);
         server.write_all(&preload).await.unwrap();
 
@@ -998,9 +1065,11 @@ mod tests {
 
     #[tokio::test]
     async fn driver_tolerates_info_err_msgs() {
-        // 真 IB Gateway 序列：ACK → id4(2104 farm OK) → id4(2106 HMDS OK) → CURRENT_TIME。
-        // code≥2100 = 連線 info → drain 續讀，最終仍取到 epoch。
+        // 真 IB Gateway 序列：ACK → 15(managedAccounts) → id4(2104 farm OK) →
+        // id4(2106 HMDS OK) → CURRENT_TIME。code≥2100 = 連線 info → drain 續讀，
+        // 最終仍取到 epoch（15 為 paper 實檢所需）。
         let ack = encode_frame(b"176\x00t\x00");
+        let accounts = encode_frame(b"15\x001\x00DU1234567\x00");
         let info1 = encode_frame(b"4\x002\x00-1\x002104\x00Market data farm connection is OK:usfarm\x00");
         let info2 = encode_frame(b"4\x002\x00-1\x002106\x00HMDS data farm connection is OK:ushmds\x00");
         let current_time = encode_frame(b"49\x001\x001700000000\x00");
@@ -1008,6 +1077,7 @@ mod tests {
         let (client, mut server) = tokio::io::duplex(64 * 1024);
         let mut preload = Vec::new();
         preload.extend_from_slice(&ack);
+        preload.extend_from_slice(&accounts);
         preload.extend_from_slice(&info1);
         preload.extend_from_slice(&info2);
         preload.extend_from_slice(&current_time);
@@ -1032,6 +1102,102 @@ mod tests {
         let cfg = TwsProbeConfig::g4_default();
         let err = drive_handshake_and_current_time(client, &cfg).await.unwrap_err();
         assert!(matches!(err, TwsClientError::GatewayError { code: 504 }));
+    }
+
+    #[tokio::test]
+    async fn driver_rejects_non_paper_account() {
+        // 非 DU 帳號（live 前綴 U…）→ 立即 NonPaperSessionDetected，不讀到 49。
+        let ack = encode_frame(b"176\x00t\x00");
+        let accounts = encode_frame(b"15\x001\x00U1234567\x00");
+        let current_time = encode_frame(b"49\x001\x001\x00");
+        let (client, mut server) = tokio::io::duplex(64 * 1024);
+        let mut preload = Vec::new();
+        preload.extend_from_slice(&ack);
+        preload.extend_from_slice(&accounts);
+        preload.extend_from_slice(&current_time);
+        server.write_all(&preload).await.unwrap();
+
+        let cfg = TwsProbeConfig::g4_default();
+        let err = drive_handshake_and_current_time(client, &cfg)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, TwsClientError::NonPaperSessionDetected));
+        // 錯誤的 Debug/Display 表示絕不含帳號明文。
+        let s = format!("{err:?} {err}");
+        assert!(!s.contains("U1234567"), "account leaked into error: {s}");
+    }
+
+    #[tokio::test]
+    async fn driver_rejects_mixed_paper_and_live_accounts() {
+        // 混合 DU1,U2 → 同拒（任一非 DU 即非 paper session）。
+        let ack = encode_frame(b"176\x00t\x00");
+        let accounts = encode_frame(b"15\x001\x00DU1,U2\x00");
+        let (client, mut server) = tokio::io::duplex(64 * 1024);
+        let mut preload = Vec::new();
+        preload.extend_from_slice(&ack);
+        preload.extend_from_slice(&accounts);
+        server.write_all(&preload).await.unwrap();
+
+        let cfg = TwsProbeConfig::g4_default();
+        let err = drive_handshake_and_current_time(client, &cfg)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, TwsClientError::NonPaperSessionDetected));
+    }
+
+    #[tokio::test]
+    async fn driver_requires_managed_accounts_before_current_time() {
+        // 缺 15 直達 49 → PaperSessionUnverified（fail-closed；異序只 false-fail 可重試）。
+        let ack = encode_frame(b"176\x00t\x00");
+        let current_time = encode_frame(b"49\x001\x001700000000\x00");
+        let (client, mut server) = tokio::io::duplex(64 * 1024);
+        let mut preload = Vec::new();
+        preload.extend_from_slice(&ack);
+        preload.extend_from_slice(&current_time);
+        server.write_all(&preload).await.unwrap();
+
+        let cfg = TwsProbeConfig::g4_default();
+        let err = drive_handshake_and_current_time(client, &cfg)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, TwsClientError::PaperSessionUnverified));
+    }
+
+    #[test]
+    fn managed_accounts_paper_prefix_check() {
+        // 全 DU（單帳號 / 多帳號 CSV）→ true。
+        assert_eq!(
+            managed_accounts_all_paper(b"15\x001\x00DU1234567\x00"),
+            Ok(true)
+        );
+        assert_eq!(
+            managed_accounts_all_paper(b"15\x001\x00DU1,DU2,DU3\x00"),
+            Ok(true)
+        );
+        // 任一非 DU → false（live 帳號前綴 U…）。
+        assert_eq!(
+            managed_accounts_all_paper(b"15\x001\x00U1234567\x00"),
+            Ok(false)
+        );
+        assert_eq!(
+            managed_accounts_all_paper(b"15\x001\x00DU1,U2\x00"),
+            Ok(false)
+        );
+        // 空帳號欄 = 空列表 → Malformed（不以空欄當已驗證）。
+        assert!(matches!(
+            managed_accounts_all_paper(b"15\x001\x00\x00"),
+            Err(CodecError::Malformed(_))
+        ));
+        // 欄數不足 → Malformed（不裸索引）。
+        assert!(matches!(
+            managed_accounts_all_paper(b"15\x001\x00"),
+            Err(CodecError::Malformed(_))
+        ));
+        // msgId 非 15 → UnexpectedMsgId（純 codec 層自帶 msgId 防呆）。
+        assert_eq!(
+            managed_accounts_all_paper(b"9\x001\x00DU1\x00"),
+            Err(CodecError::UnexpectedMsgId { got: 9 })
+        );
     }
 
     #[test]
