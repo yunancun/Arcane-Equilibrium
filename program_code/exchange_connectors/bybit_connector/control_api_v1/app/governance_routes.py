@@ -1196,6 +1196,11 @@ def trigger_manual_reconciliation(
                 "report_severity": report_severity,
                 "escalation_enacted": apply_reconcile_advisory_cap(report_severity),
                 "advisory_mode": True,
+                # orders_scope 讓 operator 明辨 MATCH 是「訂單已對賬乾淨」還是「訂單排除於範圍外」
+                # (v2.B,exchange-authoritative);remote_orders_observed = 諮詢用遠端掛單數,
+                # 即使排除對賬,異常大的掛單仍保持可見(CC Principle 10 + QC 可見性)。
+                "orders_scope": report.get("orders_scope"),
+                "remote_orders_observed": report.get("remote_orders_observed"),
                 "discrepancies": report.get("discrepancies", []),
                 "critical_count": report.get("critical_count"),
                 "timestamp_ms": int(time.time() * 1000),

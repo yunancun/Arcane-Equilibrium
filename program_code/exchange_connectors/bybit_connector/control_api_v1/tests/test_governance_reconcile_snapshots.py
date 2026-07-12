@@ -162,6 +162,29 @@ class TestBuildDemoReconcileSnapshot:
         assert snap["fills"] == [{"execId": "e1"}]
         assert isinstance(snap["snapshot_ts_ms"], int)
 
+    def test_funding_exectype_filtered_out_of_fills(self):
+        # v2.C：get_executions 混入的 execType=Funding/Settle 非成交列必須被濾掉,
+        # 只保留 {Trade,AdlTrade,BustTrade};缺 execType 的列保守視為 Trade 保留。
+        client = MagicMock()
+        client.get_positions_full_scan.return_value = []
+        client.get_active_orders_full_scan.return_value = []
+        client.get_executions.return_value = [
+            {"execId": "t1", "execType": "Trade"},
+            {"execId": "f1", "execType": "Funding"},     # 資金費結算 → 丟棄
+            {"execId": "a1", "execType": "AdlTrade"},
+            {"execId": "s1", "execType": "Settle"},       # 非成交 → 丟棄
+            {"execId": "b1", "execType": "BustTrade"},
+            {"execId": "u1"},                              # 缺 execType → 保守保留
+        ]
+        client.refresh_balance.return_value = {"coins": {}}
+        with patch("app.strategy_ai_routes._get_rust_client", return_value=client):
+            snap = build_demo_reconcile_snapshot()
+
+        kept = {f["execId"] for f in snap["fills"]}
+        assert kept == {"t1", "a1", "b1", "u1"}
+        assert "f1" not in kept  # Funding 已濾掉
+        assert "s1" not in kept  # Settle 已濾掉
+
     def test_client_none_raises_unavailable(self):
         # 憑證缺 / 槽位缺 → _get_rust_client 回 None → fail-closed(絕不回 {})。
         with patch("app.strategy_ai_routes._get_rust_client", return_value=None):

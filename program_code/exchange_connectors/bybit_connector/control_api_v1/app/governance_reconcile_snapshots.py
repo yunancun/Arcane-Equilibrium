@@ -65,8 +65,8 @@ def build_local_reconcile_snapshot(engine: str = "demo") -> Optional[dict[str, A
           size=float(size or qty),drop size==0,category 由 symbol 推斷。
         - balances: SCALAR → {"USDT": float(balance)}。
         - fills: get_recent_fills(mode=engine),缺 side 時由 is_long 補。
-        - orders: [] （v1,UNKNOWN-2：Rust 僅有 intents 非交易所掛單,缺 orderId 會誤報
-          ORDER_MISSING;暫關本地訂單對賬)。
+        - orders: [] （v2.B 範圍排除：交易所是掛單唯一權威,引擎 exchange 模式無權威本地掛單簿,
+          比對只是滯後回音 → race 誤報;對應 ReconciliationConfig.reconcile_orders 預設 False)。
     """
     reader = get_rust_reader()
     # fail-closed：reader 缺失或該引擎快照過期/不可用 → None,呼叫端短路為 STALE_DATA。
@@ -116,7 +116,12 @@ def build_local_reconcile_snapshot(engine: str = "demo") -> Optional[dict[str, A
         fills.append(row)
 
     return {
-        "orders": [],  # v1：本地訂單對賬關閉（UNKNOWN-2）
+        # 訂單刻意排除於對賬範圍外(v2.B 決策):交易所是掛單唯一權威,引擎在 exchange 模式
+        # 不保留權威本地掛單簿(paper_state/mod.rs:129-137);與交易所比對只是滯後回音,必然
+        # 製造 race 誤報。對應 ReconciliationConfig.reconcile_orders 預設 False。
+        # 未來若要開本地訂單對賬,務必在 orderLinkId 配對「之前」先濾掉空 orderLinkId 的條件單
+        # (Untriggered 條件停損),否則它們會全部塌成 key "" 互相誤報(v2.B.3 綁定約束)。
+        "orders": [],
         "positions": positions,
         "fills": fills,
         "snapshot_ts_ms": int(time.time() * 1000),
@@ -175,7 +180,16 @@ def build_demo_reconcile_snapshot() -> dict[str, Any]:
         orders = client.get_active_orders_full_scan("linear", settle_coin="USDT") or []
 
         # ── 成交：linear 最近成交（Bybit camelCase,reconcile 引擎容錯讀 execQty/execPrice）。──
-        fills = client.get_executions("linear", limit=50) or []
+        # 只保留真實成交 execType∈{Trade,AdlTrade,BustTrade};濾掉 Funding/Settle 等非成交事件。
+        # 為什麼:Bybit get_executions 會混入資金費結算(execType=Funding)列,虛增遠端成交數 →
+        # 誤報 FILL_COUNT。缺 execType 的列(真實 API 恆帶,僅極簡 stub 才缺)保守視為 Trade 保留,
+        # 避免誤丟合法成交(v2.C 遠端資料衛生)。
+        _TRADE_EXEC_TYPES = {"Trade", "AdlTrade", "BustTrade"}
+        raw_fills = client.get_executions("linear", limit=50) or []
+        fills = [
+            f for f in raw_fills
+            if isinstance(f, dict) and f.get("execType", "Trade") in _TRADE_EXEC_TYPES
+        ]
 
         # ── 餘額：refresh_balance()["coins"] = {coin: {wallet_balance, ...}} → {coin: bal}。──
         balances: dict[str, float] = {}

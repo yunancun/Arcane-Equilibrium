@@ -91,6 +91,27 @@ impl TickPipeline {
         self.paper_state
             .set_latest_bbo(sym, event.bid_price, event.ask_price);
 
+        // reconcile v2 wave A（DUST-FREEZE-INTRADAY-1，2026-07-12）：把本 symbol 的
+        // exchange qty_step 從 instrument_cache 鏡射進 paper_state，供 apply_fill 內
+        // `evict_if_dust` 判別「交易所可持有殘量（凍結）」vs「次-lot 幻影（驅逐）」。
+        // 為什麼在此 per-symbol per-tick 寫入而非 config-sync arm 批次推：instrument
+        // 規格經 `InstrumentInfoCache::refresh` 非同步網路填充，boot 時與 config 版本
+        // 變動皆無法可靠捕捉；此點與 `set_latest_price` 同一寫入模式做 per-tick
+        // best-effort 鏡射。
+        // 這**不**保證成交落地前 qty_step 必已就緒：WS 成交與 price tick 是獨立
+        // tokio::select! arm、無跨臂排序，且 refresh 冷窗 / 失敗 / 非 linear refresh 集
+        // 都可能讓某 symbol 整段 intraday 從未載入 spec（E2 M1）。該 spec-unknown 情形
+        // 由 `evict_if_dust` 的量級 fallback fail-safe-toward-retain 承接（real-strategy
+        // 殘量 >= PHANTOM_FLOOR_QTY 則保留而非誤驅逐），此處僅為 best-effort 加速。
+        // 成本可忽略（`get_lot_size` 僅 1 次 RwLock 讀 + f64 複製；缺快取回 None 時不寫）。
+        if let Some(step) = self
+            .instrument_cache
+            .as_ref()
+            .and_then(|ic| ic.get_lot_size(sym))
+        {
+            self.paper_state.set_dust_freeze_qty_step(sym, step);
+        }
+
         // DUST-EVICTION-GAP-1 / P1-8 FUP (2026-04-17): opportunistic per-tick re-triage for
         // positions wearing a synthetic owner label (bybit_sync / orphan_adopted /
         // orphan_frozen). Lets Agent autonomously recover from startup-time conditions

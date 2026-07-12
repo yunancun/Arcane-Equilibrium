@@ -27,6 +27,22 @@ use super::containers::PaperPosition;
 use super::PaperState;
 use openclaw_core::stop_manager::{self, PositionState, StopTrigger};
 
+/// reconcile v2 wave A（DUST-FREEZE-INTRADAY-1）：spec-known 時「至少一個交易所 lot」
+/// 判別的相對誤差容忍。**不可**用 raw `(qty/step).floor()*step > 0`：lossy 減法產生的
+/// 真實 1-lot 殘量（如 `0.3 - 0.2 = 0.09999999999999998` @ step 0.1）會 floor 到 0 被
+/// 誤驅逐，而交易所仍以 0.1 持有 → 重造本次修復要消滅的 FATAL POSITION_MISSING（BB M1）。
+/// 用 `residue_qty >= step * (1 - REL_EPS)` 容忍此類浮點誤差；7e-13 級幻影仍遠低於門檻
+/// → 照樣驅逐（phantom-spiral 保護不變）。
+const REPRESENTABLE_STEP_REL_EPS: f64 = 1e-9;
+
+/// reconcile v2 wave A（DUST-FREEZE-INTRADAY-1）：spec-unknown 量級 fallback 的絕對下限。
+/// 當 qty_step 對某 symbol 整段 intraday 從未載入（boot async-refresh 冷窗 / refresh 失敗
+/// / symbol 不在 linear refresh 集；WS 成交與 price tick 是獨立 select! arm、無跨臂排序
+/// → 冷快取無保證，E2 M1），對 real-strategy 殘量改以量級判別而非盲目驅逐：`>= 此值`
+/// 視為真殘量（保留），`<` 視為 float 噪音幻影（驅逐）。取 1e-6：遠高於 float 噪音
+/// （7e-13 級），低於任何真實 crypto-perp lot（USDT perp qty_step 通常 >= 1e-3）。
+const PHANTOM_FLOOR_QTY: f64 = 1e-6;
+
 impl PaperState {
     /// B-1 Phase 2: Seed paper_state positions from exchange snapshot at startup.
     /// Replaces the entire positions map with the supplied list. Use the tuple
@@ -647,9 +663,24 @@ impl PaperState {
     /// §1.2.5). Per-engine counter `dust_evictions_total` is incremented.
     ///
     /// EVICT-ON-DUST 單 symbol 閘：當 `qty × latest_price < self.dust_floor_usd`
-    /// 時就地驅逐並回傳被驅逐 USD 名目；否則 None。冪等。reduce / apply_fill
-    /// 後置呼叫（T1 / T2）。fail-closed：floor<=0 / 價格非有限 / 倉位缺失
-    /// → 全 no-op。寫 `tracing::warn!` audit + 累計計數，**不寫 trading.fills**。
+    /// 時處置 sub-floor 殘量；否則 None。冪等。reduce / apply_fill 後置呼叫
+    /// （T1 / T2）。fail-closed：floor<=0 / 價格非有限 / 倉位缺失 → 全 no-op。
+    ///
+    /// reconcile v2 wave A（DUST-FREEZE-INTRADAY-1，2026-07-12；E2 M1 + BB M1 修正）：
+    /// sub-floor 殘量僅在 **real strategy** 擁有時進入凍結路徑（synthetic 標籤由
+    /// `retriage_synthetic_owner` 每 tick 管理；already-orphan_frozen 於函數開頭
+    /// early-return），再依 qty_step spec 可得性二分：
+    ///   - 已知 qty_step：float-tolerant「至少一個 lot」判別
+    ///     `residue_qty >= step*(1 - REPRESENTABLE_STEP_REL_EPS)`（容忍 lossy 減法殘量，
+    ///     不被 raw floor 誤驅逐）→ 就地改標 `orphan_frozen` 並**保留**，回傳 None；
+    ///     累加 `dust_frozen_intraday_total`，交由 `retriage_synthetic_owner` 接管。
+    ///     封住 intraday under-sweep 殘量被本地丟棄、交易所仍持有 → reconcile 誤報
+    ///     FATAL POSITION_MISSING。
+    ///   - 未知 qty_step（冷快取 / refresh 失敗）：量級 fallback
+    ///     `residue_qty >= PHANTOM_FLOOR_QTY` → 保留；避免真殘量在冷快取下被誤驅逐。
+    ///   - 其餘（次-lot 幻影、`< PHANTOM_FLOOR_QTY` 噪音、synthetic-owned）→ 沿用既有
+    ///     `positions_remove` 驅逐，累加 `dust_evictions_total`，回傳被驅逐名目。
+    /// 兩路皆寫 `tracing::warn!` audit、**不寫 trading.fills**。
     pub(crate) fn evict_if_dust(
         &mut self,
         symbol: &str,
@@ -667,15 +698,73 @@ impl PaperState {
         if pos.owner_strategy == crate::position_reconciler::orphan_handler::DUST_FROZEN_STRATEGY {
             return None;
         }
-        let notional = pos.qty * latest_price;
+        // Capture before any mutation so audit fields + the discriminator read
+        // truthful values; captures also end the immutable `pos` borrow so the
+        // freeze branch can take `positions.get_mut`.
+        // 在任何 mutate 前先讀取：audit 欄位與判別器讀到正確值，且結束 `pos`
+        // 的不可變借用，凍結分支才能取 `positions.get_mut`。
+        let residue_qty = pos.qty;
+        let residue_is_long = pos.is_long;
+        let residue_owner = pos.owner_strategy.clone();
+        let notional = residue_qty * latest_price;
         if !notional.is_finite() || notional >= dust_floor_usd {
             return None;
         }
-        // Capture before remove() so audit fields read truthful values.
-        // 在 remove 前先讀取，audit 才能拿到正確值。
-        let evicted_qty = pos.qty;
-        let evicted_is_long = pos.is_long;
-        let evicted_owner = pos.owner_strategy.clone();
+
+        // reconcile v2 wave A（DUST-FREEZE-INTRADAY-1；E2 M1 + BB M1 修正）：在驅逐點
+        // 判別「交易所可持有殘量（凍結／保留）」vs「次-lot 幻影（驅逐）」。**僅** real
+        // strategy 擁有的殘量進入凍結路徑（synthetic 標籤 bybit_sync / orphan_adopted
+        // 的 dust 生命週期由 `retriage_synthetic_owner` 每 tick 管理；already-orphan_frozen
+        // 於函數開頭 early-return）—— 這正是本次修復的缺口：real-strategy→dust 轉換是
+        // 唯一 retriage 不碰、卻在 intraday 被驅逐的路徑。
+        //   real strategy 時再依 qty_step spec 可得性二分：
+        //   - 已知 qty_step：float-tolerant「至少一個 lot」判別
+        //     `residue_qty >= step*(1 - REPRESENTABLE_STEP_REL_EPS)`（BB M1：容忍
+        //     lossy 減法如 0.3-0.2 產生的真 1-lot 殘量，不被 raw floor 誤驅逐）。
+        //   - 未知 qty_step（冷快取 / refresh 失敗 / 非 linear refresh 集，E2 M1）：
+        //     退回量級 fallback `residue_qty >= PHANTOM_FLOOR_QTY` → 保留真殘量、
+        //     避免 FATAL 靜默殘留；真 spec 載入後由 retriage 以真 min_notional 自我
+        //     修正過度保留。7e-13 級幻影 `< PHANTOM_FLOOR_QTY` 仍驅逐。
+        // 保留後本地帳鏡射交易所 → reconcile 不再誤報 FATAL POSITION_MISSING
+        //   （v2.A 兩筆 FATAL 於源頭消失）。
+        let is_real_strategy = !super::SYNTHETIC_OWNER_LABELS
+            .iter()
+            .any(|label| *label == residue_owner);
+        let should_freeze = is_real_strategy
+            && match self.dust_freeze_qty_step.get(symbol).copied() {
+                Some(step) if step > 0.0 => {
+                    residue_qty >= step * (1.0 - REPRESENTABLE_STEP_REL_EPS)
+                }
+                _ => residue_qty >= PHANTOM_FLOOR_QTY,
+            };
+        if should_freeze {
+            // 就地改標並保留（apply_fill 仍是唯一 positions map mutator：本函數只在
+            // apply_fill / reduce_position 內被呼叫；改標經 get_mut 不 insert/remove，
+            // is_long 不變故 positions_mirror 無需更新）。**不**累加
+            // dust_evictions_total（那是「移除」計數），改累加凍結計數。
+            if let Some(p) = self.positions.get_mut(symbol) {
+                p.owner_strategy =
+                    crate::position_reconciler::orphan_handler::DUST_FROZEN_STRATEGY.to_string();
+            }
+            self.dust_frozen_intraday_total = self.dust_frozen_intraday_total.saturating_add(1);
+            tracing::warn!(
+                symbol = %symbol,
+                residue_notional_usd = notional,
+                dust_floor_usd,
+                trigger_point,
+                qty = residue_qty,
+                is_long = residue_is_long,
+                owner_strategy = %residue_owner,
+                "DUST-FREEZE-INTRADAY: exchange-representable residue frozen as orphan_frozen (retained, no trading.fills row) \
+                 / 交易所可持有殘量就地凍結為 orphan_frozen（保留、不寫 trading.fills）"
+            );
+            return None;
+        }
+
+        // 驅逐路徑（沿用既有行為）：spec-known 且殘量 < 1 lot 的次-lot 幻影、
+        // spec-unknown 且殘量 < PHANTOM_FLOOR_QTY 的 float 噪音、或 synthetic-owned
+        // 殘量（其生命週期由 retriage 管理，evict_if_dust 不介入）。7e-13 STRKUSDT 級
+        // phantom-spiral 保護不變。
         self.positions_remove(symbol);
         self.dust_evictions_total = self.dust_evictions_total.saturating_add(1);
         tracing::warn!(
@@ -683,9 +772,9 @@ impl PaperState {
             evicted_notional_usd = notional,
             dust_floor_usd,
             trigger_point,
-            qty = evicted_qty,
-            is_long = evicted_is_long,
-            owner_strategy = %evicted_owner,
+            qty = residue_qty,
+            is_long = residue_is_long,
+            owner_strategy = %residue_owner,
             "EVICT-ON-DUST: phantom dust position evicted (no trading.fills row) \
              / 殭屍 dust 倉位已驅逐（不寫 trading.fills）"
         );
