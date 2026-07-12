@@ -29,6 +29,7 @@
 | 9 | `helper_scripts/research/cost_gate_learning_lane/status.py` | 2238 | cost_gate lane 狀態彙整。研究面，拆分屬 E5/研究治理。 |
 | 10 | `helper_scripts/research/cost_gate_learning_lane/cost_gate_learning_lane_cron.sh` | ~2031 | cost_gate lane cron wrapper（shell）。該檔頭已由 E5-5 指向本 registry。研究面 cron，拆分屬 E5/研究治理。 |
 | 11 | `rust/openclaw_engine/src/demo_learning_lane_writer.rs` | 2093 | bounded Demo learning writer 熱路徑；WP2-B 僅補測試 fixture 的新 optional 欄位，production writer 語義未改。拆分觸寫入/輪轉語義，待 E5 plan。 |
+| 12 | `rust/openclaw_engine/src/ibkr_phase2_gate_producer.rs` | 4299 | IBKR Phase2 P2/W2 owner-only 只讀 seal 治理 producer（AMD-2026-07-11-01）。dormant/flag-off、未接 boot/IPC/DB/GUI/TWS，非熱路徑（origin 前身已 2026 行 pre-existing）。W2 controlled-lineage / immutable-writer / `Phase2ApplyLock` 區塊拆分屬 E5 plan。 |
 
 > 行數為 2026-07-05 快照（精確值以 `wc -l` 為準，會隨編輯漂移）；本表登記意圖=標記
 > 為已知 pre-existing exception，非行數 ledger。row 10 的 cron wrapper 於本檔建立時尚

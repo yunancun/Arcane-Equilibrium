@@ -116,10 +116,10 @@ pub mod health;
 // loader（scaffold-only leg，0 production caller；consumers = P5 attestation /
 // healthcheck 於後續 phase 接入）。
 pub mod ibkr_secret_slot_loader;
-// IBKR Phase 2 P2（AMD-2026-07-08-01）：external-surface gate producer——程式化組裝
-// `IbkrPhase2GateArtifactV1`、雙綠（validate + hash re-verify）+ approval A-model +
-// write-once seal（create_new/hard_link，refuse-ephemeral）。現狀必然 BLOCKED（真槽
-// absent + 無 approval），跑 report-only 不寫檔（正確 fail-closed）。
+// IBKR Phase 2 P2/W2（AMD-2026-07-11-01）：external-surface gate producer + standalone
+// `ibkr_phase2_seal` local control. Default is dry-run; immutable ledger writes require the
+// bin's --apply plus OPENCLAW_IBKR_PHASE2_SEAL_APPLY=1 and owner-only typed inputs. It is not
+// an activation/contact caller; boot, IPC, DB, GUI, and TWS remain outside this module.
 pub mod ibkr_phase2_gate_producer;
 // IBKR B1 只讀 TWS 連接器（ADR-0048 / AMD-2026-07-08-01，G4 首次接觸）：connect handshake
 // + reqCurrentTime 最小首接觸；純 codec + generic driver + 3 層惰性 gate；唯一具體
