@@ -44,6 +44,11 @@
      (metric 摘要格 / panel 網格 / kv 表 / chip-row / list / bad·warn 線框)+ legacy 短名 shim
      (.oc-chip 五態;殼不呼 ocInjectBaseCSS,見 view-stock.css MODULE_NOTE)-->
 <link rel="stylesheet" href="/static/view-stock.css?v=20260712.p2-stock" />
+<!-- overview 原生 view 頁級樣式(第 14 遷,交易關鍵/含 LIVE session stop 寫,復用遷移):`.overview-view` scope 的
+     overview-specific(tip-metric 懸浮 / quick-actions / mode-btn* / **確認 modal 含 §3 LIVE 硬化 --live 熱紅面**)
+     + legacy 短名 shim(oc-card/oc-metric*/oc-chip*[含 oc-chip-live]/oc-collapse*/oc-table*/oc-explain*/oc-loading/
+     oc-grid-2 + .green/.yellow/.red/.blue;殼不呼 ocInjectBaseCSS,見 view-overview.css MODULE_NOTE)-->
+<link rel="stylesheet" href="/static/view-overview.css?v=20260712.p2-overview" />
 </head>
 <body>
 
@@ -192,6 +197,16 @@
 <script src="/static/tab-stock-etf-evidence-paper.js?v=20260701.evidence-paper"></script>
 <script src="/static/tab-stock-etf-scorecard-launch.js?v=20260701.scorecard-launch"></script>
 <script src="/static/view-stock.js?v=20260712.p2-stock"></script>
+<!-- overview 第 14 遷(交易關鍵/含 LIVE session stop 寫,復用遷移):**verbatim 復用 tab-system.html 內聯 script**
+     (運行態摘要 / 全局模式控制 / 治理狀態 / 業務概覽 / 產品族 / 確認 modal;paper start/stop + **LIVE session stop** +
+     mode config-change 全 byte-parity 復用,經 Rust IPC;§3 LIVE 硬化面[5000ms 倒計時 + 1200ms 按住 confirm guard /
+     切離 live_reserved 自動 live-stop / --live 熱紅 / typed 二次確認]逐字保留零弱化)。view-overview.js 於 render fetch
+     /static/tab-system.html → 注入其 overview DOM(byte-parity)+ 重跑內聯 script;IIFE-wrap 隔離頂層詞法防污染
+     paper 的 window.loadAll(見 view-overview.js MODULE_NOTE ★★★)。governance.js(load-safe,只 define govAuthBadge 等,
+     loadGovernanceStatus 用)殼此前未載故新增,須先於 view-overview.js;於 shell.js 前載以註冊 OC_NATIVE_VIEWS['overview']。
+     tab-system.html / governance.js 零修改(reuse 正本 + 回滾錨)。 -->
+<script src="/static/governance.js"></script>
+<script src="/static/view-overview.js?v=20260712.p2-overview"></script>
 <script src="/static/shell.js?v=20260711.shell-p11a"></script>
 
 </body>
