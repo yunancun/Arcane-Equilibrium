@@ -37,7 +37,7 @@
 <link rel="stylesheet" href="/static/oc-utilities.css" />
 <link rel="stylesheet" href="/static/shell.css" />
 <!-- 內容組件庫(P1.4 共用組件凍結;供 Phase 2 原生 view 消費,與 shell.css chrome 分離)-->
-<link rel="stylesheet" href="/static/shell-components.css?v=20260711.p14-components" />
+<link rel="stylesheet" href="/static/shell-components.css?v=20260713.r97" />
 <!-- phase4 原生 view 頁級樣式(唯一 per-view CSS):cards/*.html 為 innerHTML 注入片段(無 <link>),
      故 .phase4-*/.p4-* class 須於殼文檔可見的 stylesheet 供給(view-phase4.css 詳見其 MODULE_NOTE)-->
 <link rel="stylesheet" href="/static/view-phase4.css?v=20260712.p2-phase4" />
@@ -64,7 +64,7 @@
      overview-specific(tip-metric 懸浮 / quick-actions / mode-btn* / **確認 modal 含 §3 LIVE 硬化 --live 熱紅面**)
      + legacy 短名 shim(oc-card/oc-metric*/oc-chip*[含 oc-chip-live]/oc-collapse*/oc-table*/oc-explain*/oc-loading/
      oc-grid-2 + .green/.yellow/.red/.blue;殼不呼 ocInjectBaseCSS,見 view-overview.css MODULE_NOTE)-->
-<link rel="stylesheet" href="/static/view-overview.css?v=20260712.p2-overview" />
+<link rel="stylesheet" href="/static/view-overview.css?v=20260713.r97" />
 <!-- risk 原生 view 頁級樣式(第 15 遷,交易關鍵四者之一/含 risk-config 寫 + LIVE engine risk save confirm,復用遷移):
      `.risk-view` scope 的 risk-specific(rtab/etab 切換鈕含 **--live 熱紅** / rc-orig-metrics 對照 grid /
      **§3 LIVE 硬化 rc-dlg-danger·rc-btn-live-confirm·rc-live-warn** / rc-budget-* / **rc-dirty-bar 浮動未保存條**)
@@ -178,8 +178,8 @@
 <!-- 依賴序(design/09 §1):fetch_with_csrf → common-formatters → common-mode-badge
      → common-modals → common(ocAuthCheck/ocLogout/ocEsc) → i18n_zh → shell。不重造 auth/CSRF/formatter。 -->
 <script src="/static/js/fetch_with_csrf.js?v=20260527.ops1"></script>
-<script src="/static/common-formatters.js?v=20260711.p03-numerics"></script>
-<script src="/static/common-mode-badge.js?v=20260519.split-p2"></script>
+<script src="/static/common-formatters.js?v=20260713.r97"></script>
+<script src="/static/common-mode-badge.js?v=20260713.r97"></script>
 <script src="/static/common-modals.js?v=20260519.split-p2"></script>
 <script src="/static/common.js?v=20260527.ops1-csrf"></script>
 <script src="/static/i18n_zh.js"></script>
@@ -261,7 +261,7 @@
      openConfirmModal / _riskFormDirty / REAL FUNDS / --live 熱紅]逐字保留零弱化;6+ 寫全在未改 text 內經 Rust IPC。
      **risk-tab.js 不在此以 <script src> 載入**(其底部自初始化需 DOM,由 IIFE fetch-text 復用);governance.js 上方已載勿重複;
      於 shell.js 前載以註冊 OC_NATIVE_VIEWS['risk']。tab-risk.html / risk-tab.js / governance.js 零修改(reuse 正本 + 回滾錨)。 -->
-<script src="/static/view-risk.js?v=20260712.p2-risk"></script>
+<script src="/static/view-risk.js?v=20260713.r97"></script>
 <!-- governance 第 16 遷(交易關鍵四者之一/12 寫治理,復用遷移):**共享 IIFE 復用 4 路 script**——view-governance.js
      於 render 併發 fetch /static/tab-governance.html + /static/autonomy-posture.js + /static/governance-tab.js +
      /static/canary-tab.js,注入 governance DOM(byte-parity)後把 inline Live-Auth 塊 + 3 路 JS text 依固定序
@@ -273,7 +273,7 @@
      <script src> 載入**(其自初始化需 DOM,由 IIFE fetch-text 復用);**governance.js 上方 :224 已載勿重複**;於 shell.js
      前載以註冊 OC_NATIVE_VIEWS['governance']。tab-governance.html / governance-tab.js / canary-tab.js /
      autonomy-posture.js / governance.js 五源檔零修改(reuse 正本 + 回滾錨)。 -->
-<script src="/static/view-governance.js?v=20260712.p2-governance"></script>
+<script src="/static/view-governance.js?v=20260713.r97"></script>
 <!-- demo 原生 view(交易關鍵/虛擬資金,復用遷移;flag ⚑ opt-in 保留):view-demo.js 於 render fetch
      /static/tab-demo.html → 注入其 demo DOM(byte-parity)+ IIFE-wrap 重跑唯一大內聯 script(4 寫 demo session/
      close-all/close-position 經 Rust IPC byte-parity 復用,confirm gate 逐字保留;canon-6 琥珀確認框不升 --live)。
@@ -290,7 +290,7 @@
      tab-live.js 既有 openclaw-tab-visibility listener。common* 殼已載,live 無其他外部 JS;於 shell.js 前載以註冊
      OC_NATIVE_VIEWS['live']。tab-live.html/tab-live.js 零修改(reuse 正本 + 回滾錨)。 -->
 <script src="/static/view-live.js?v=20260712.p2-live"></script>
-<script src="/static/shell.js?v=20260711.shell-p11a"></script>
+<script src="/static/shell.js?v=20260713.r97"></script>
 
 </body>
 </html>

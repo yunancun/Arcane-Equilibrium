@@ -34,7 +34,9 @@
   // ── 殼靜態 build 版號(mirror console.html BUILD_TS 機制)──
   // 來源:靜態注入常量(非 runtime git SHA;誠實標記=殼 build tag,每次殼部署更新);
   // 用途:iframe cache-bust(withBuildVersion)+ status strip 顯示。
-  var BUILD_TS = '20260711.shell-p11a';
+  // ⚠ 部署紀律(F-R96-1 HIGH 教訓):**每次改動任一 GUI 靜態檔的批必 bump 此值 + shell.html 對應檔的 `?v=`**;
+  //   凍結會令客戶端快取污染(改動不傳播,需硬刷新才見新版)。R55→R96 凍結 shell-p11a 致 R86-R96 全批未傳播。
+  var BUILD_TS = '20260713.r97';
   var USER_KEY = 'oc_username';
   // 預設 landing(PM 裁決 3:legacy parity=console 現行預設 view=tab-system=總覽)。
   var DEFAULT_HASH = '#/crypto/overview';
