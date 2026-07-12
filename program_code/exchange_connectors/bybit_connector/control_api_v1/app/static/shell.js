@@ -7,7 +7,8 @@
  *       (Phase 2 strangler-fig:iframe:false 的 view 走 window.OC_NATIVE_VIEWS 的 render/pause/resume,
  *        gates=首個;router 為穩定宿主,原生 render 為唯一擴充點,其餘 view 維持 iframe:true 不動);
  *   (3) lane segmented 切換 + rail 導航渲染;(4) density toggle(上線);
- *   (5) theme toggle(渲染但 P1.3-gated,不切換);(6) 衡樑 blocked 渲染;(7) clock 真值。
+ *   (5) theme toggle(P1.3 上線:OS 偏好默認 + 顯式 data-theme 覆蓋 + localStorage 持久;FOUC 首繪前定於 shell.html head);
+ *       (6) 衡樑 blocked 渲染;(7) clock 真值。
  * 主要函數:buildViews / navigate / onHashChange(router)、withBuildVersion /
  *   notifyViewVisibility / flushPendingFrameMessages / postToTabFrame(iframe host,verbatim 移植)、
  *   buildRailEnvs / buildRailCross / updateRailActive、switchLane、setBeam(P1.2 seam)。
@@ -495,14 +496,44 @@
     });
   }
 
-  // ═══ theme toggle(渲染但 P1.3-gated;帛晝 AA 三綠前 data-theme 釘死玄夜,不宣稱雙主題)═══
-  // 按鈕 inert(aria-disabled);不切換 data-theme。真雙主題=P1.3(LOOP §6 硬 gate)。
+  // ═══ theme toggle(P1.3 上線:OS 偏好默認 + 顯式覆蓋 + localStorage 持久)═══
+  // 切換協議(tokens.css:7):OS 偏好(prefers-color-scheme)作默認、顯式 data-theme 覆蓋且顯式必勝。
+  //   顯式選擇存 localStorage('oc-theme'),下次載入優先於 OS(FOUC 首繪前定=shell.html head inline 腳本)。
+  //   本函式 boot 時依「已存在的 data-theme(顯式 或 FOUC 腳本已設)否則 OS 偏好」同步當前態 → 設按鈕
+  //   label/aria;click 在 玄夜↔帛晝 間切並持久化。玄夜兩塊(tokens.css `@media prefers-dark` 與
+  //   `:root[data-theme=dark]`)token 值 byte-identical(28/28)→ 解釘後 OS-dark/顯式-dark 用戶零回歸,只讓 OS-light 進帛晝。
+  var THEME_KEY = 'oc-theme';
+
+  // 當前有效主題:顯式 data-theme 優先,無則回落 OS 偏好(與 tokens.css @media 判斷一致)。
+  function currentTheme() {
+    var explicit = document.documentElement.getAttribute('data-theme');
+    if (explicit === 'dark' || explicit === 'light') return explicit;
+    try {
+      if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark';
+    } catch (_) {}
+    return 'light';
+  }
+
+  // 按鈕 label/aria 反映當前主題(玄夜=dark / 帛晝=light);title/aria-label 併述點擊將切往的對面主題。
+  function syncThemeButton(btn, theme) {
+    var isDark = theme === 'dark';
+    var cur = isDark ? '玄夜' : '帛晝';
+    var other = isDark ? '帛晝' : '玄夜';
+    btn.textContent = cur;
+    btn.setAttribute('title', '當前主題:' + cur + ';點擊切換至' + other);
+    btn.setAttribute('aria-label', '切換主題,當前 ' + cur + ',點擊切換至' + other);
+  }
+
   function wireThemeToggle() {
     var btn = byId('oc-theme-btn');
     if (!btn) return;
-    btn.addEventListener('click', function (ev) {
-      ev.preventDefault();                   // P1.3-gated:不切換,僅提示
-      console.info('[shell] 帛晝主題待 P1.3(AA 三綠)才上線;P1.1-a data-theme 釘死玄夜。');
+    btn.removeAttribute('aria-disabled');       // 解 inert:P1.3 上線後按鈕真可用
+    syncThemeButton(btn, currentTheme());        // 初始 label/aria 反映當前主題
+    btn.addEventListener('click', function () {
+      var next = currentTheme() === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);   // 顯式必勝(覆蓋 OS 偏好)
+      try { localStorage.setItem(THEME_KEY, next); } catch (_) {}  // 持久;下次載入優先於 OS
+      syncThemeButton(btn, next);
     });
   }
 
