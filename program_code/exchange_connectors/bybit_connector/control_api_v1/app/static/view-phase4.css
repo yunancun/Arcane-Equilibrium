@@ -1,0 +1,130 @@
+/* ═══════════════════════════════════════════════════════════════════
+   view-phase4.css — 玄衡原生 view「Phase 4 儀表板」頁級樣式(Phase 2 第 7 遷)
+   ═══════════════════════════════════════════════════════════════════
+   MODULE_NOTE
+   模塊用途:承載 phase4 原生 view 的紅黃綠燈行(.phase4-light*)、共用 Card 包裝
+     (.phase4-card*)、降級橫幅(.phase4-degraded-banner)與 cards/*.html 注入片段
+     共用的密集表格 / 進度條 / 影子條組件(.p4-grid / .p4-conv-* / .p4-shadow-*)。
+   為何頁級 / 殼級共用(承 tab-phase4.html 原頁內樣式塊之精神):
+     cards/{teacher,linucb,news,dl3}_card.html 是 innerHTML 注入片段(無 head 段、
+     不接外部樣式表),由 view-phase4.js fetch 後注入殼文檔;四卡共用同一表格 / 進度條
+     樣式,故這些 class 須落在殼文檔可見的 stylesheet(本檔),片段靠繼承渲染。
+     這是對 tab-phase4.html 頁內樣式塊(lines 37-150)的「重複」(非移動):
+     legacy iframe 路徑仍需自己的頁內樣式塊,故 tab-phase4.html 保持不動作回滾錨。
+   燈號家族色:綠=--pos / 灰=--text-secondary / 琥珀=--warn / 紅=--neg,與 .phase4-light-dot
+     及進度綠 .p4-conv-fill 共用同一 token 家族,避免同頁綠燈與進度中間態不一。
+   ratchet:全檔零裸 hex(色一律 var(--…));保留 rgba 僅 dot 的 box-shadow 黑階微光
+     (tokens.css 無對應的小控件陰影 token);降級橫幅底色改用語義 token --neg-bg(對應
+     紅色 tint 且隨主題,優於原 rgba(218,54,51,.1) 字面)。過 test_gui_style_ratchet_static.py
+     (born-clean 0/0/0)。
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── 紅黃綠燈行 / traffic-light row ─────────────────────────────── */
+.phase4-light-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.phase4-light {
+  flex: 1 1 180px;
+  min-width: 160px;
+  padding: 12px 16px;
+  border-radius: var(--r-2);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-raised);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.phase4-light-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--text-secondary); /* grey default / 預設灰 */
+  box-shadow: 0 0 4px rgba(0,0,0,0.4); /* 小狀態點微光;tokens 無對應陰影 token,保留 rgba(非 #hex) */
+  flex-shrink: 0;
+}
+.phase4-light-dot.grey   { background: var(--text-secondary); }
+.phase4-light-dot.green  { background: var(--pos); }
+.phase4-light-dot.yellow { background: var(--warn); }
+.phase4-light-dot.red    { background: var(--neg); }
+.phase4-light-label { display: flex; flex-direction: column; }
+.phase4-light-label .name { font-weight: 600; font-size: 13px; }
+.phase4-light-label .sub  { font-size: 11px; color: var(--text-muted); }
+
+/* ── 共用 Card 包裝 / shared card wrapper ───────────────────────── */
+.phase4-card {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-2);
+  background: var(--bg-raised);
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+.phase4-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.phase4-card-title { font-size: 14px; font-weight: 600; margin: 0; }
+.phase4-card-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.phase4-card-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+  margin: 8px 0;
+}
+.phase4-card-footer {
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.phase4-card-placeholder {
+  padding: 12px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--r-1);
+}
+.phase4-degraded-banner {
+  padding: 8px 12px;
+  border-radius: var(--r-1);
+  background: var(--neg-bg); /* 語義負向 tint(隨主題);替原 rgba(218,54,51,.1) 字面 */
+  border: 1px solid var(--neg);
+  color: var(--neg);
+  font-size: 12px;
+  margin-bottom: 12px;
+  display: none;
+}
+
+/* ── 卡片內資料表格與進度組件(cards/*.html 注入片段共用)──────────
+   linucb/news/dl3/teacher 四卡共用同一密集表格與進度條 / 影子條樣式;片段是 innerHTML
+   注入(無 <link>),故組件放殼文檔可見的本檔,片段靠繼承(不在片段內建塊 / link)。 */
+.phase4-card .p4-grid { border-collapse: collapse; font-size: var(--fs-micro); }
+.phase4-card .p4-grid th,
+.phase4-card .p4-grid td { padding: 2px 6px; }
+.phase4-card .p4-grid td { background: var(--cell-bg, transparent); }
+.phase4-card .p4-thead-row { text-align: left; border-bottom: 1px solid var(--border-subtle); }
+.phase4-card .p4-report-link { text-decoration: underline; }
+
+/* LinUCB 收斂進度條行:label / track / 動態寬度 fill(--conv-w scoped-var)/ count */
+.phase4-card .p4-conv-row { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-micro); margin: 2px 0; }
+.phase4-card .p4-conv-label { flex: 0 0 160px; }
+.phase4-card .p4-conv-track { flex: 1 1 auto; background: var(--border-subtle); border-radius: var(--r-1); overflow: hidden; height: 8px; }
+.phase4-card .p4-conv-fill { display: block; height: 100%; width: var(--conv-w, 0%); background: var(--pos); }
+.phase4-card .p4-conv-count { flex: 0 0 48px; text-align: right; }
+
+/* LinUCB 影子比較條:enum 狀態色走 class-per-enum(canon 7),色沿用燈號家族 */
+.phase4-card .p4-shadow-bar { font-size: var(--fs-micro); padding: var(--sp-1); border: 1px solid; border-radius: var(--r-1); }
+.phase4-card .p4-shadow-bar.is-promote { border-color: var(--pos); color: var(--pos); }
+.phase4-card .p4-shadow-bar.is-keep    { border-color: var(--warn); color: var(--warn); }
+.phase4-card .p4-shadow-bar.is-other   { border-color: var(--text-secondary); color: var(--text-secondary); }
