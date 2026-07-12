@@ -117,7 +117,15 @@
     // charts:legacy `edge` 組 K線圖表(trading.html;內容守恆——design/09 §3 漏列,R51 補回 legacy parity,零靜默丟失)
     { id: 'charts',     lane: 'cross', hash: '#/cross/charts',     src: '/trading?embed=1',            visId: 'charts',      label: 'K線 Charts' },
     { id: 'governance', lane: 'cross', hash: '#/cross/governance', src: '/static/tab-governance.html', visId: 'governance',  label: '治理 Governance', flag: true },
-    { id: 'risk',       lane: 'cross', hash: '#/cross/risk',       src: '/static/tab-risk.html',       visId: 'risk',        label: '風控 Risk', flag: true },
+    // risk:Phase 2 第 15 個原生遷移(iframe:false;**交易關鍵四者之一/含 risk-config 寫 + LIVE engine risk save confirm**,復用遷移)——
+    //   render/pause/resume 由 view-risk.js 註冊於 window.OC_NATIVE_VIEWS(id=risk)。策略=**verbatim 復用 tab-risk.html 內聯 script
+    //   (switchRiskTab + 2 IIFE)+ 外部 risk-tab.js**:view-risk.js 於 render 併發 fetch 兩者,注入 risk DOM(byte-parity)後把
+    //   inline 塊 + risk-tab.js text 串接進**單一共享 IIFE** 重跑(兩段原互相引用;頂層 const/let→IIFE-local 隔離防撞 paper 的
+    //   window.loadAll,見 view-risk.js MODULE_NOTE)。6+ 寫(governance/risk/override、risk/config/{global,engine} save、
+    //   layer2/trigger、reset-cooldown、unhalt-session、ai_budget/config、dynamic-risk/toggle)全在未改 text 內經 Rust IPC,零新寫路徑;
+    //   §3 硬化面[confirmLiveEngineRiskSave / diff preview / reset-cooldown·unhalt openConfirmModal / _riskFormDirty / REAL FUNDS /
+    //   --live 熱紅]逐字保留不弱化。src 保留 legacy tab-risk 作 registry 完整性 + 回滾錨(=flag fallback 的 iframe src);flag ⚑ 保留。
+    { id: 'risk',       lane: 'cross', hash: '#/cross/risk',       src: '/static/tab-risk.html',       visId: 'risk',        label: '風控 Risk', flag: true, iframe: false },
     // settings:Phase 2 第 12 個原生遷移(iframe:false;**復用遷移**,設置中樞=非交易關鍵四者)——render/pause/resume
     //   由 view-settings.js 註冊於 window.OC_NATIVE_VIEWS(id=settings)。策略=**verbatim 復用 tab-settings.html 內聯
     //   script**:view-settings.js 於 render fetch tab-settings.html 注入其 settings DOM(byte-parity)後重跑內聯

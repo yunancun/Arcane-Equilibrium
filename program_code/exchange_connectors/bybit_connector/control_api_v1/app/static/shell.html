@@ -49,6 +49,13 @@
      + legacy 短名 shim(oc-card/oc-metric*/oc-chip*[含 oc-chip-live]/oc-collapse*/oc-table*/oc-explain*/oc-loading/
      oc-grid-2 + .green/.yellow/.red/.blue;殼不呼 ocInjectBaseCSS,見 view-overview.css MODULE_NOTE)-->
 <link rel="stylesheet" href="/static/view-overview.css?v=20260712.p2-overview" />
+<!-- risk 原生 view 頁級樣式(第 15 遷,交易關鍵四者之一/含 risk-config 寫 + LIVE engine risk save confirm,復用遷移):
+     `.risk-view` scope 的 risk-specific(rtab/etab 切換鈕含 **--live 熱紅** / rc-orig-metrics 對照 grid /
+     **§3 LIVE 硬化 rc-dlg-danger·rc-btn-live-confirm·rc-live-warn** / rc-budget-* / **rc-dirty-bar 浮動未保存條**)
+     + legacy 短名 shim(oc-card/oc-metric*/oc-chip*[good/warn/bad/neutral/info]/oc-explain*/oc-collapse*/oc-grid-2/
+     oc-grid-3/oc-loading/oc-danger-zone/oc-pre/oc-diff-*/oc-subtab-placeholder + .green/.yellow/.red/.blue;殼不呼
+     ocInjectBaseCSS,見 view-risk.css MODULE_NOTE)。pf-toggle 刻意不 port(legacy 亦原生 checkbox,byte-parity)。 -->
+<link rel="stylesheet" href="/static/view-risk.css?v=20260712.p2-risk" />
 </head>
 <body>
 
@@ -207,6 +214,15 @@
      tab-system.html / governance.js 零修改(reuse 正本 + 回滾錨)。 -->
 <script src="/static/governance.js"></script>
 <script src="/static/view-overview.js?v=20260712.p2-overview"></script>
+<!-- risk 第 15 遷(交易關鍵四者之一/含 risk-config 寫 + LIVE engine risk save confirm,復用遷移):**verbatim 復用
+     tab-risk.html 內聯 script(switchRiskTab + 2 IIFE)+ 外部 risk-tab.js**——view-risk.js 於 render 併發 fetch
+     /static/tab-risk.html + /static/risk-tab.js,注入 risk DOM(byte-parity)後把 inline 塊 + risk-tab.js text **串接進
+     單一共享 IIFE** 重跑(兩段原互相引用故須同 IIFE;頂層 const/let→IIFE-local 隔離防污染 paper 的 window.loadAll,
+     見 view-risk.js MODULE_NOTE ★★/★★★)。§3 硬化面[confirmLiveEngineRiskSave / diff preview / reset-cooldown·unhalt
+     openConfirmModal / _riskFormDirty / REAL FUNDS / --live 熱紅]逐字保留零弱化;6+ 寫全在未改 text 內經 Rust IPC。
+     **risk-tab.js 不在此以 <script src> 載入**(其底部自初始化需 DOM,由 IIFE fetch-text 復用);governance.js 上方已載勿重複;
+     於 shell.js 前載以註冊 OC_NATIVE_VIEWS['risk']。tab-risk.html / risk-tab.js / governance.js 零修改(reuse 正本 + 回滾錨)。 -->
+<script src="/static/view-risk.js?v=20260712.p2-risk"></script>
 <script src="/static/shell.js?v=20260711.shell-p11a"></script>
 
 </body>
