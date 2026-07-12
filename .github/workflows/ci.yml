@@ -39,7 +39,7 @@ jobs:
       - name: Check Agent Spine stable_id literal duplication
         run: bash helper_scripts/ci/check_stable_id_duplication.sh
 
-  # Development-agent governance and the V158 migration source contract use
+  # Development-agent governance and the V158/V159 migration source contracts use
   # stdlib + focused pytest only. Keep them on the Linux 1x runner so static
   # authority/Registry/view/permission drift fails before merge without
   # consuming a Rust build or macOS 10x minute.
@@ -64,8 +64,11 @@ jobs:
           python3 -m pytest -q \
             tests/structure/test_development_agent_governance.py \
             tests/structure/test_agent_governance_*.py
-      - name: Run V158 qualified challenger source contract
-        run: python3 -m pytest -q tests/migrations/test_v158_alr_qualified_challenger_training.py
+      - name: Run V158/V159 qualified challenger source contracts
+        run: |
+          python3 -m pytest -q \
+            tests/migrations/test_v158_alr_qualified_challenger_training.py \
+            tests/migrations/test_v159_alr_durable_fit_attestation.py
 
   rust-check-linux:
     name: rust check (x86_64-unknown-linux-gnu)
@@ -106,7 +109,11 @@ jobs:
     name: schema-consumer contract (linux + ephemeral pg)
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Two V157 preparations, both bounded V159 probes, and the existing cold
+    # Rust full-tree contract share this PR-only job; allow hosted compile time.
+    timeout-minutes: 30
+    env:
+      OPENCLAW_TEST_PG_DESTRUCTIVE: "1"
     defaults:
       run:
         working-directory: rust
@@ -140,11 +147,80 @@ jobs:
         run: |
           PGPASSWORD=contract_pass psql -h 127.0.0.1 -U contract_user -d contract_db \
             -c "CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;"
+      - name: Create isolated V159 probe databases
+        # Functional and concurrency probes both apply V158/V159 and require
+        # empty durable tables, so they must never share a database. V006 also
+        # unconditionally alters the historical compatibility DB `trading_ai`.
+        run: |
+          if ! PGPASSWORD=contract_pass psql -h 127.0.0.1 -U contract_user -d postgres -Atc \
+            "SELECT 1 FROM pg_catalog.pg_database AS d WHERE d.datname = 'trading_ai' AND pg_catalog.pg_get_userbyid(d.datdba) = 'contract_user'" \
+            | grep -qx 1; then
+            PGPASSWORD=contract_pass createdb --host 127.0.0.1 --username contract_user --owner contract_user trading_ai
+          fi
+          PGPASSWORD=contract_pass psql -h 127.0.0.1 -U contract_user -d postgres \
+            -c "CREATE DATABASE alr_v159_functional_ci OWNER contract_user;"
+          PGPASSWORD=contract_pass psql -h 127.0.0.1 -U contract_user -d postgres \
+            -c "CREATE DATABASE alr_v159_concurrency_ci OWNER contract_user;"
+          PGPASSWORD=contract_pass psql -h 127.0.0.1 -U contract_user -d alr_v159_functional_ci \
+            -c "CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;"
+          PGPASSWORD=contract_pass psql -h 127.0.0.1 -U contract_user -d alr_v159_concurrency_ci \
+            -c "CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;"
+      - name: Prepare V157 baseline for V159 functional probe
+        env:
+          OPENCLAW_TEST_PG: postgres://contract_user:contract_pass@127.0.0.1:5432/alr_v159_functional_ci
+          OPENCLAW_V159_PROBE_BASELINE: "1"
+        run: >-
+          cargo test -p openclaw_engine --test schema_contract_test
+          prepare_v159_probe_v157_baseline -- --exact --test-threads=1
+      - name: Prepare V157 baseline for V159 concurrency probe
+        env:
+          OPENCLAW_TEST_PG: postgres://contract_user:contract_pass@127.0.0.1:5432/alr_v159_concurrency_ci
+          OPENCLAW_V159_PROBE_BASELINE: "1"
+        run: >-
+          cargo test -p openclaw_engine --test schema_contract_test
+          prepare_v159_probe_v157_baseline -- --exact --test-threads=1
+      - name: Run V159 functional disposable-PG contract
+        working-directory: .
+        env:
+          ALR_V159_DISPOSABLE_ACK: "1"
+          ALR_V159_DISPOSABLE_ADMIN_DSN: >-
+            host=127.0.0.1 port=5432 dbname=alr_v159_functional_ci
+            user=contract_user password=contract_pass
+        run: >-
+          python3 program_code/ml_training/tests/integration/alr_durable_fit_attestation_isolated_pg.py
+          --confirm-disposable-v159
+          --expected-database alr_v159_functional_ci
+          --disposable-sentinel V159_DURABLE_FIT_DISPOSABLE_MUTATION_CONFIRMED:alr_v159_functional_ci
+      - name: Remove V159 functional probe database
+        if: always()
+        working-directory: .
+        # V159 fail-closes on cross-database ownership by its fixed roles.
+        # Force-drop the first target before the second probe can own objects.
+        run: >-
+          PGPASSWORD=contract_pass dropdb --force --if-exists
+          -h 127.0.0.1 -U contract_user alr_v159_functional_ci
+      - name: Run V159 concurrency disposable-PG contract
+        working-directory: .
+        env:
+          ALR_V159_CONCURRENCY_DISPOSABLE_ACK: "1"
+          ALR_V159_DISPOSABLE_ADMIN_DSN: >-
+            host=127.0.0.1 port=5432 dbname=alr_v159_concurrency_ci
+            user=contract_user password=contract_pass
+        run: >-
+          python3 program_code/ml_training/tests/integration/alr_durable_fit_attestation_concurrency_isolated_pg.py
+          --confirm-disposable-v159-concurrency
+          --expected-database alr_v159_concurrency_ci
+          --disposable-sentinel V159_DURABLE_FIT_CONCURRENCY_DISPOSABLE_MUTATION_CONFIRMED:alr_v159_concurrency_ci
+      - name: Remove V159 concurrency probe database
+        if: always()
+        working-directory: .
+        run: >-
+          PGPASSWORD=contract_pass dropdb --force --if-exists
+          -h 127.0.0.1 -U contract_user alr_v159_concurrency_ci
       - name: Schema-consumer contract test (cargo)
         # 正向：對代表性熱表跑真實 writer/consumer query（type/nullable/ON CONFLICT 都驗）。
         env:
           OPENCLAW_TEST_PG: postgres://contract_user:contract_pass@127.0.0.1:5432/contract_db
-          OPENCLAW_TEST_PG_DESTRUCTIVE: "1"
           OPENCLAW_AUTO_MIGRATE: "1"
         run: cargo test -p openclaw_engine --test schema_contract_test -- --test-threads=1
       - name: Migration-declared vs DB audit (python, informational-only)
