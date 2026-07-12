@@ -4,7 +4,7 @@ Date: 2026-07-10
 Owner: PM
 Goal: `GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1`
 Codex Goal thread: `019f4b6d-1e5b-7551-9fce-7a2f029a1675`
-Status: `ACTIVE_WP4_V160_STYLE_ATOMIC_CONSUMPTION_DESIGN_PREAUTHORING_GATE`
+Status: `ACTIVE_WP4_TRUSTED_ED25519_VERIFIER_SOURCE_PREAUTHORING_GATE`
 
 This is the durable PM-owned queue and state surface for the active Goal. It
 supersedes the old ALR P2 completion/terminal interpretation, but does not edit
@@ -299,14 +299,68 @@ serving/promotion state,
 persisted no request/receipt, and granted no authority. Production/runtime
 V159 remains unapplied and unrefreshed; G3/G4 remain failed.
 
-The next safe item is design/read-only
-`WP4-V160-STYLE-ATOMIC-CONSUMPTION-DESIGN-PREAUTHORING-GATE`: freeze one fixed
-guarded atomic coordinator that consumes the request/nonce singleton, persists
-the exact outer terminal receipt, independently reverifies the inner receipt,
-binds success to the V159 complete bundle, and closes reject/failed/expired
-semantics plus wrapper reachability/ACL. It may not reserve, author, or apply
-V160; contact PG/runtime/issuer/runner; run fit; create model state; or grant
-serving, promotion, trading, order, risk, Cost Gate, or other authority.
+That design gate is now accepted below.
+
+## V160-style atomic-consumption design checkpoint
+
+Reviewed clean head `9a41c8d2abf34dbdce01fde010a500b4c19ba4f4`
+completed
+`DONE_DESIGN_ACCEPTED_V160_STYLE_ATOMIC_CONSUMPTION_PREAUTHORING_GATE`.
+The design freezes one mutation Interface with bounded `REGISTER_REQUEST`,
+`CLAIM_REQUEST`, `RECORD_STATUS`, `CONSUME_TERMINAL`,
+`EXPIRE_UNCLAIMED`, and audit-only `MARK_RECONCILE_REQUIRED` actions. No
+PostgreSQL transaction spans fit.
+
+A dedicated platform-attested Rust verifier must use a pinned strict Ed25519
+primitive and emit one closed phase receipt: `REQUEST_ONLY`, `SIGNED_STATUS`,
+`TERMINAL_SUCCESS`, or `TERMINAL_NO_INNER`. Each binds only the bytes and
+verification results available in that phase. Bool callbacks, database roles,
+caller-supplied verification claims, and the current synthetic fixture are not
+production trust.
+
+The persistence design is append-only and byte-exact. It separates request,
+status/reconciliation, and terminal-consumption records; reserves admission,
+request, issuer/nonce, generation, and one-terminal identities; and retains the
+existing V159 attestation/run/q10-q50-q90/`NOT_SERVING` tables as the success
+sink. `SUCCEEDED` atomically binds the exact outer and independently verified
+inner receipt to the complete V159 bundle. Reject and expiry create zero V159
+success state. `FAILED_AFTER_START` atomically persists terminal failure plus
+reconciliation and forbids retry.
+
+Exact committed replay returns the original server-owned result. Divergent
+reuse creates no terminal/V159 mutation; the pre-existing immutable occupied
+request/nonce/generation/claim/terminal identity is the durable conflict oracle
+and blocks eligibility even when no optional reconcile audit marker is written.
+Expiry uses database time with `clock_timestamp() >= accept_by` and requires a
+registered request with no claim/status/terminal/reconcile/V159 state.
+
+The ACL design uses a membership-free `NOLOGIN NOINHERIT` coordinator owner and
+a `LOGIN NOINHERIT` connection-limit-one caller with only schema USAGE plus
+fixed coordinator/read EXECUTE. A forward migration must revoke and hard-close
+all old V159 application wrappers and direct write paths while preserving only
+the V158 qualified-receipt writer/reader still used by the repository adapter.
+Removing coordinator EXECUTE or the real verifier capability leaves no V159
+application write path.
+
+FA first found three P1 and one P2 lifecycle defects; repaired PA/FA returned
+`0/0/0`. CC then found one P1 atomic-reconcile dependency; the immutable
+conflict-oracle repair closed it. Final PA, FA, CC, E3, and MIT P0/P1/P2 are
+`0/0/0`. Governed task/route digests are `dba068f0...` / `9a1c318b...`; final
+PA/FA/CC/E3/MIT context-artifact digests are `7905eb3b...`, `b6404d8b...`,
+`32196714...`, `48efa818...`, and `dc415a8e...`.
+
+This gate created only design documentation. It did not create a verifier,
+reserve/author/apply V160, change V158/V159, contact PG/Linux/runtime/network/
+issuer/runner/broker, run fit, create a model or model-artifact file, mutate a
+registry, serve/promote, or grant authority. G3/G4 remain failed.
+
+The design is accepted but source authoring remains `NOT_AUTHORIZED_YET`.
+Next is only read-only
+`WP4-TRUSTED-ED25519-VERIFIER-SOURCE-PREAUTHORING-GATE`: bind the exact Rust
+verifier module/dependency, phase receipt API, negative controls, and source-only
+test boundary before any source is written. It does not authorize V160, PG,
+runtime capability activation, real request/receipt bytes, fit/model, serving,
+promotion, broker/order/risk, Cost Gate, or authority.
 
 ## Earlier B2.2c event-primary reconciliation
 
