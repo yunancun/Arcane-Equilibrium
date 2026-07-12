@@ -398,6 +398,23 @@ impl PaperState {
         self.dust_floor_usd
     }
 
+    /// reconcile v2 wave A（DUST-FREEZE-INTRADAY-1，2026-07-12）：把單一 symbol 的
+    /// exchange `qty_step` 鏡射進 PaperState，供 hot-path `evict_if_dust` 判別
+    /// 「交易所可持有殘量」vs「次-lot 幻影」。與 `set_latest_price` /
+    /// `set_latest_funding_rate` 同一 per-symbol per-tick 寫入模式（呼叫端在 step_0
+    /// 逐 tick 從 `instrument_cache.get_lot_size` 鏡射）。
+    ///
+    /// 為什麼守衛非有限 / 非正值：poisoned step 會讓「至少一個 lot」的可表示性判別
+    /// 失真；非法值直接不寫入（保留既有有效值或維持缺席），缺席時 `evict_if_dust`
+    /// 走 spec-unknown 量級 fallback（real-strategy 殘量按 PHANTOM_FLOOR_QTY 決定
+    /// 保留/驅逐）—— 絕不因壞規格而把幻影凍成永久倉。
+    pub fn set_dust_freeze_qty_step(&mut self, symbol: &str, qty_step: f64) {
+        if qty_step.is_finite() && qty_step > 0.0 {
+            self.dust_freeze_qty_step
+                .insert(symbol.to_string(), qty_step);
+        }
+    }
+
     /// EVICT-ON-DUST F3 (2026-04-26) observability accessor: read the
     /// cumulative count of dust evictions since process start. Surfaces via
     /// status arm log + healthcheck `[20]`. Reset to 0 on engine restart;
@@ -407,6 +424,13 @@ impl PaperState {
     /// （evict 是觀測事件不是狀態）。
     pub fn dust_evictions_total(&self) -> u64 {
         self.dust_evictions_total
+    }
+
+    /// reconcile v2 wave A（DUST-FREEZE-INTRADAY-1）觀測存取器：讀取自 process
+    /// 啟動起、被 `evict_if_dust` 就地凍結（保留）的 intraday 可持有殘量計數。
+    /// 與 `dust_evictions_total()`（驅逐＝移除）刻意分離。重啟歸零、不持久化。
+    pub fn dust_frozen_intraday_total(&self) -> u64 {
+        self.dust_frozen_intraday_total
     }
 
     /// Set Bybit Demo sync balance (Mode B). Call with None to disable sync mode.

@@ -1007,6 +1007,180 @@ fn retriage_no_min_notional_skips_dust_gate() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
+// reconcile v2 wave A（DUST-FREEZE-INTRADAY-1，2026-07-12）：evict_if_dust 於驅逐點
+// 判別「交易所可持有殘量（凍結）」vs「次-lot 幻影（驅逐）」。
+// ═══════════════════════════════════════════════════════════════════════
+
+#[test]
+fn evict_if_dust_freezes_exchange_representable_residue() {
+    // (a) real-strategy 平倉留下交易所可持有殘量（0.1 >= step*(1-eps)）→ 就地
+    //     凍結為 orphan_frozen 並保留；dust_frozen_intraday_total +1、
+    //     dust_evictions_total +0。這是 v2.A 兩筆 FATAL POSITION_MISSING 的源頭修復。
+    let mut s = PaperState::new(10_000.0);
+    // 開 real-strategy 倉：0.1 @ $10 → notional $1（< floor $5 → sub-floor）。
+    s.apply_fill("ATOMUSDT", true, 0.1, 10.0, 0.0, 1000, "ma_crossover");
+    s.set_dust_floor_usd(5.0);
+    s.set_dust_freeze_qty_step("ATOMUSDT", 0.001); // 0.1 >= 0.001*(1-1e-9) → representable
+
+    let out = s.evict_if_dust("ATOMUSDT", 10.0, "test_intraday_residue");
+    assert_eq!(out, None); // 凍結分支回 None（未驅逐）
+
+    assert_eq!(s.position_count(), 1);
+    let pos = s
+        .get_position("ATOMUSDT")
+        .expect("representable residue must be retained");
+    assert_eq!(pos.owner_strategy, "orphan_frozen");
+    assert!((pos.qty - 0.1).abs() < 1e-12); // qty 不變（僅改標）
+    // Mirror 仍含 symbol（is_long 不變）→ engine/exchange 保持同步。
+    assert!(s.positions_mirror.read().contains_key("ATOMUSDT"));
+    assert_eq!(s.dust_frozen_intraday_total(), 1);
+    assert_eq!(s.dust_evictions_total(), 0);
+}
+
+#[test]
+fn evict_if_dust_evicts_sub_lot_phantom_residue() {
+    // (b) 7e-13 STRKUSDT 幻影：7e-13 < step*(1-eps) → 交易所不可能持有 →
+    //     沿用既有驅逐（phantom-spiral 保護不變）；dust_evictions_total +1、凍結計數不變。
+    let mut s = PaperState::new(10_000.0);
+    s.apply_fill("STRKUSDT", true, 7e-13, 10.0, 0.0, 1000, "ma_crossover");
+    s.set_dust_floor_usd(5.0);
+    s.set_dust_freeze_qty_step("STRKUSDT", 0.001); // 7e-13 << 0.001 → not representable
+
+    let out = s.evict_if_dust("STRKUSDT", 10.0, "test_phantom");
+    assert!(out.is_some()); // 驅逐回傳被驅逐名目
+    assert_eq!(s.position_count(), 0);
+    assert!(s.get_position("STRKUSDT").is_none());
+    assert!(!s.positions_mirror.read().contains_key("STRKUSDT"));
+    assert_eq!(s.dust_evictions_total(), 1);
+    assert_eq!(s.dust_frozen_intraday_total(), 0);
+}
+
+#[test]
+fn evict_if_dust_freezes_float_lossy_representable_residue() {
+    // (a2·BB M1) lossy 減法殘量：Buy 0.3 → Sell 0.2 使 remaining = 0.3-0.2 =
+    //     0.09999999999999998 @ step 0.1。raw floor 會 floor 到 0 誤驅逐，但交易所仍
+    //     以 0.1 持有 → 必須用 float-tolerant `>= step*(1-1e-9)` 判為可表示 → FREEZE。
+    //     走真實 apply_fill 部分平倉 → evict_if_dust 鏈路（非直呼）。
+    let mut s = PaperState::new(10_000.0);
+    s.set_dust_floor_usd(5.0);
+    s.set_dust_freeze_qty_step("XUSDT", 0.1);
+    // Buy 0.3 @ 10（notional 3 < floor，但開倉分支不 evict）。
+    s.apply_fill("XUSDT", true, 0.3, 10.0, 0.0, 1000, "ma_crossover");
+    // Sell 0.2 @ 10 → remaining 0.09999999999999998（lossy）→ evict_if_dust 判可表示。
+    s.apply_fill("XUSDT", false, 0.2, 10.0, 0.0, 2000, "ma_crossover");
+
+    assert_eq!(s.position_count(), 1);
+    let pos = s
+        .get_position("XUSDT")
+        .expect("lossy 1-lot residue must be retained, not evicted");
+    assert_eq!(pos.owner_strategy, "orphan_frozen");
+    assert!(pos.qty > 0.0 && pos.qty < 0.1); // ~0.09999999999999998
+    assert_eq!(s.dust_frozen_intraday_total(), 1);
+    assert_eq!(s.dust_evictions_total(), 0);
+    // Sanity：raw floor 判別本會誤殺此殘量。
+    assert!((0.3_f64 - 0.2_f64) < 0.1); // 0.09999999999999998 < 0.1
+}
+
+#[test]
+fn evict_if_dust_freezes_spec_unknown_real_strategy_residue() {
+    // (c·E2 M1) qty_step 對 symbol 整段 intraday 從未載入（冷快取 / refresh 失敗 /
+    //     非 linear refresh 集）+ real strategy + 0.1 殘量（>= PHANTOM_FLOOR_QTY 1e-6）
+    //     → 量級 fallback 保留（凍結），避免把真殘量誤驅逐→FATAL 靜默殘留。
+    //     真 spec 載入後由 retriage 以真 min_notional 自我修正。
+    let mut s = PaperState::new(10_000.0);
+    s.apply_fill("COLDUSDT", true, 0.1, 10.0, 0.0, 1000, "ma_crossover");
+    s.set_dust_floor_usd(5.0);
+    // 刻意不呼叫 set_dust_freeze_qty_step → spec unknown。
+
+    let out = s.evict_if_dust("COLDUSDT", 10.0, "test_spec_unknown_real");
+    assert_eq!(out, None); // 凍結分支回 None
+    assert_eq!(s.position_count(), 1);
+    let pos = s
+        .get_position("COLDUSDT")
+        .expect("spec-unknown real residue must be retained (avoid re-manufacturing FATAL)");
+    assert_eq!(pos.owner_strategy, "orphan_frozen");
+    assert!((pos.qty - 0.1).abs() < 1e-12);
+    assert_eq!(s.dust_frozen_intraday_total(), 1);
+    assert_eq!(s.dust_evictions_total(), 0);
+}
+
+#[test]
+fn evict_if_dust_evicts_spec_unknown_sub_phantom() {
+    // (c2·E2 M1) spec unknown + 7e-13（< PHANTOM_FLOOR_QTY）→ 仍是 float 噪音幻影 →
+    //     EVICT（phantom-spiral 保護在冷快取下亦成立）。
+    let mut s = PaperState::new(10_000.0);
+    s.apply_fill("COLDUSDT", true, 7e-13, 10.0, 0.0, 1000, "ma_crossover");
+    s.set_dust_floor_usd(5.0);
+    // spec unknown（不設 qty_step）。
+
+    let out = s.evict_if_dust("COLDUSDT", 10.0, "test_spec_unknown_phantom");
+    assert!(out.is_some());
+    assert_eq!(s.position_count(), 0);
+    assert_eq!(s.dust_evictions_total(), 1);
+    assert_eq!(s.dust_frozen_intraday_total(), 0);
+}
+
+#[test]
+fn evict_if_dust_evicts_spec_unknown_synthetic_owner() {
+    // (c3) 量級 fallback **僅** 對 real strategy 生效：synthetic-owned（bybit_sync）
+    //     殘量即使 >= PHANTOM_FLOOR_QTY 也不由 evict_if_dust 凍結（其 dust 生命週期
+    //     由 retriage_synthetic_owner 管理）→ 維持既有驅逐行為，無非預期回歸。
+    let mut s = PaperState::new(10_000.0);
+    // import_positions 標 owner = "bybit_sync"（synthetic）。
+    seed_bybit_sync(&mut s, &[("SYNUSDT", true, 0.1, 10.0)]);
+    s.set_dust_floor_usd(5.0);
+    // spec unknown。
+
+    let out = s.evict_if_dust("SYNUSDT", 10.0, "test_spec_unknown_synthetic");
+    assert!(out.is_some());
+    assert_eq!(s.position_count(), 0);
+    assert_eq!(s.dust_evictions_total(), 1);
+    assert_eq!(s.dust_frozen_intraday_total(), 0);
+}
+
+#[test]
+fn evict_if_dust_genuine_full_close_removes_as_before() {
+    // (d) 真全平（residue 恰為 0）：反向全量 apply_fill → remaining≈0 → positions_remove，
+    //     隨後 apply_fill 內建的 evict_if_dust 對已移除 symbol no-op（不凍結、不計數）。
+    //     驗證凍結邏輯不影響正常全平路徑。
+    let mut s = PaperState::new(10_000.0);
+    s.set_dust_floor_usd(5.0);
+    s.set_dust_freeze_qty_step("BTCUSDT", 0.001);
+    // Buy 1.0 @ 10 → notional 10（> floor，開倉分支不 evict）。
+    s.apply_fill("BTCUSDT", true, 1.0, 10.0, 0.0, 1000, "ma_crossover");
+    assert_eq!(s.position_count(), 1);
+    // Sell 1.0 @ 10 → remaining 0 → 全平移除。
+    s.apply_fill("BTCUSDT", false, 1.0, 10.0, 0.0, 2000, "ma_crossover");
+    assert_eq!(s.position_count(), 0);
+    assert!(s.get_position("BTCUSDT").is_none());
+    // 全平不是 dust 處置：兩計數器皆為 0。
+    assert_eq!(s.dust_frozen_intraday_total(), 0);
+    assert_eq!(s.dust_evictions_total(), 0);
+}
+
+#[test]
+fn export_state_serialises_frozen_intraday_residue_qty() {
+    // (e) §v2.A.3：凍結後 export_state 必須序列化保留的殘量（qty>0 + orphan_frozen 標籤），
+    //     Python build_local_reconcile_snapshot 才看得到本地殘量、與交易所 0.1 對齊 →
+    //     不再誤報 POSITION_MISSING（不需 reconcile 側 dust 特例）。
+    let mut s = PaperState::new(10_000.0);
+    s.apply_fill("ATOMUSDT", true, 0.1, 10.0, 0.0, 1000, "ma_crossover");
+    s.set_dust_floor_usd(5.0);
+    s.set_dust_freeze_qty_step("ATOMUSDT", 0.001);
+    assert_eq!(s.evict_if_dust("ATOMUSDT", 10.0, "test"), None);
+
+    let snap = s.export_state();
+    let frozen = snap
+        .positions
+        .iter()
+        .find(|p| p.position.symbol == "ATOMUSDT")
+        .expect("frozen residue must appear in export_state");
+    assert_eq!(frozen.position.owner_strategy, "orphan_frozen");
+    assert!(frozen.position.qty > 0.0);
+    assert!((frozen.position.qty - 0.1).abs() < 1e-12);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
 // P0-6 adopt_orphan owner_strategy tests / P0-6 adopt_orphan 歸屬測試
 // ═══════════════════════════════════════════════════════════════════════
 

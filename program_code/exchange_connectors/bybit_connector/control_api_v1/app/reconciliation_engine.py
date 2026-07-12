@@ -39,6 +39,10 @@ from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
+# 成交窗口的時鐘偏差容忍(毫秒)。本地 recent_fills 與遠端 executions 的時間戳來自不同
+# 時鐘源,窗口邊界放寬數秒以免把邊界成交誤排除。ε 為秒級(見 v2.C 設計)。
+_FILL_WINDOW_EPSILON_MS = 5_000
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Enums / 枚举
@@ -107,6 +111,11 @@ class ReconciliationConfig:
     max_discrepancies_before_freeze: int = 5
     # Enable auto-correction for safe scenarios
     enable_auto_correct: bool = False
+    # 是否對賬本地訂單:預設 False(v2.B 範圍排除)。
+    # 為什麼預設關閉:exchange 模式下交易所是掛單唯一權威,引擎不保留權威本地掛單簿
+    #   (paper_state/mod.rs:129-137),與交易所比對只是滯後回音 → 必然製造 race 誤報
+    #   (remote-only ORDER_MISSING)。設 True 才恢復 v1 的 _reconcile_orders 行為。
+    reconcile_orders: bool = False
 
 
 @dataclass
@@ -153,6 +162,12 @@ class ReconciliationReport:
     overall_result: ReconciliationResult = ReconciliationResult.MATCH
     discrepancies: list = field(default_factory=list)
     orders_checked: int = 0
+    # 訂單對賬範圍標記:"reconciled"(已比對) 或 "excluded:exchange-authoritative"(v2.B 排除)。
+    # 為什麼要顯式字串:reconcile_orders=False 時 orders_checked=0 無法與「訂單已對賬乾淨」區分,
+    # 一個 MATCH 產物必須自我揭露訂單是否納入範圍(Principle 10:事實/推論/假設分離)。
+    orders_scope: str = "excluded:exchange-authoritative"
+    # 遠端掛單觀察數(諮詢用,非差異):即使訂單被排除對賬,異常大的掛單仍須 operator 可見(QC)。
+    remote_orders_observed: int = 0
     positions_checked: int = 0
     fills_checked: int = 0
     actions_triggered: list = field(default_factory=list)
@@ -190,6 +205,8 @@ class ReconciliationReport:
             "discrepancy_count": len(self.discrepancies),
             "critical_count": self.critical_count,
             "orders_checked": self.orders_checked,
+            "orders_scope": self.orders_scope,
+            "remote_orders_observed": self.remote_orders_observed,
             "positions_checked": self.positions_checked,
             "fills_checked": self.fills_checked,
             "actions_triggered": self.actions_triggered,
@@ -276,15 +293,26 @@ class ReconciliationEngine:
                     report.discrepancies.extend(freshness_issues)
 
                 # 2. Reconcile orders / 对账订单
-                order_discs = self._reconcile_orders(
-                    paper_state.get("orders", []),
-                    remote_state.get("orders", []),
-                )
-                report.discrepancies.extend(order_discs)
-                report.orders_checked = max(
-                    len(paper_state.get("orders", [])),
-                    len(remote_state.get("orders", [])),
-                )
+                # v2.B 範圍排除:預設 reconcile_orders=False 時完全跳過訂單對賬——交易所是掛單
+                # 唯一權威,本地無權威掛單簿,比對只會製造 race 誤報。此時 orders_checked 保持 0,
+                # 但 orders_scope 顯式標記為 excluded,讓 MATCH 產物不會被誤讀為「訂單已對賬乾淨」;
+                # 設 True 才恢復 v1 的訂單對賬行為。
+                # remote_orders_observed 一律記錄(諮詢用,非差異):即使排除對賬,異常大的遠端掛單
+                # 仍須 operator 可見(QC 可見性建議)。
+                report.remote_orders_observed = len(remote_state.get("orders", []) or [])
+                if self._config.reconcile_orders:
+                    report.orders_scope = "reconciled"
+                    order_discs = self._reconcile_orders(
+                        paper_state.get("orders", []),
+                        remote_state.get("orders", []),
+                    )
+                    report.discrepancies.extend(order_discs)
+                    report.orders_checked = max(
+                        len(paper_state.get("orders", [])),
+                        len(remote_state.get("orders", [])),
+                    )
+                else:
+                    report.orders_scope = "excluded:exchange-authoritative"
 
                 # 3. Reconcile positions / 对账持仓
                 pos_discs = self._reconcile_positions(
@@ -600,10 +628,32 @@ class ReconciliationEngine:
         paper_fills: list[dict],
         remote_fills: list[dict],
     ) -> list[Discrepancy]:
-        """Compare paper fills vs remote fills / 比对纸上成交与远端成交"""
+        """Compare paper fills vs remote fills / 比对纸上成交与远端成交
+
+        v2.C 窗口對齊:本地 recent_fills 是小環形緩衝,遠端 executions 橫跨數日/多幣種,
+        直接比 len 必誤報 FILL_COUNT。以本地成交時間戳界定窗口 [t_min, t_max],只把窗口內
+        的遠端成交納入比較。本地 TimestampedFill 無 execId/orderId,無法逐單配對 →
+        契約為 symbol + 時間窗 + 聚合量(不做逐單比對)。
+        """
         discs: list[Discrepancy] = []
 
-        # Count-level check
+        # 本地無成交 → 無法建立時間窗 → 跳過筆數檢查(空本地不得偽報 FILL_COUNT);
+        # 真實漂移仍由持倉/餘額對賬把守。
+        if not paper_fills:
+            return discs
+
+        # 從本地成交時間戳導出窗口;若本地無有效時間戳(舊測試夾具 / 降級快照無 ts)則不窗口化,
+        # 退回比對全部遠端(保持既有行為)。
+        local_ts = [t for t in (self._extract_fill_ts(f) for f in paper_fills) if t > 0]
+        if local_ts:
+            t_min = min(local_ts) - _FILL_WINDOW_EPSILON_MS
+            t_max = max(local_ts) + _FILL_WINDOW_EPSILON_MS
+            remote_fills = [
+                f for f in remote_fills
+                if t_min <= self._extract_fill_ts(f) <= t_max
+            ]
+
+        # Count-level check(窗口內)
         if len(paper_fills) != len(remote_fills):
             diff = abs(len(paper_fills) - len(remote_fills))
             severity = Severity.CRITICAL if diff > 2 else Severity.WARNING
@@ -611,7 +661,7 @@ class ReconciliationEngine:
                 disc_type=DiscrepancyType.FILL_COUNT,
                 severity=severity,
                 description=(
-                    f"Fill count mismatch: local={len(paper_fills)}, "
+                    f"Fill count mismatch (windowed): local={len(paper_fills)}, "
                     f"remote={len(remote_fills)}"
                 ),
                 local_value=len(paper_fills),
@@ -620,15 +670,15 @@ class ReconciliationEngine:
                 recommended_action=IncidentAction.MANUAL_REVIEW if severity == Severity.CRITICAL else IncidentAction.ALERT,
             ))
 
-        # Match fills by order_id + sequence for detailed comparison
-        paper_by_order = self._group_fills_by_order(paper_fills)
-        remote_by_order = self._group_fills_by_order(remote_fills)
+        # 逐 symbol 聚合比對(本地無 orderId,只能按 symbol 匯總量與加權均價)。
+        paper_by_symbol = self._group_fills_by_symbol(paper_fills)
+        remote_by_symbol = self._group_fills_by_symbol(remote_fills)
 
-        for oid in set(paper_by_order.keys()) | set(remote_by_order.keys()):
-            p_fills = paper_by_order.get(oid, [])
-            r_fills = remote_by_order.get(oid, [])
+        for sym in set(paper_by_symbol.keys()) | set(remote_by_symbol.keys()):
+            p_fills = paper_by_symbol.get(sym, [])
+            r_fills = remote_by_symbol.get(sym, [])
 
-            # Aggregate comparison for this order
+            # Aggregate comparison for this symbol
             p_total_qty = sum(self._extract_fill_qty(f) for f in p_fills)
             r_total_qty = sum(self._extract_fill_qty(f) for f in r_fills)
 
@@ -636,7 +686,8 @@ class ReconciliationEngine:
                 discs.append(Discrepancy(
                     disc_type=DiscrepancyType.FILL_QUANTITY,
                     severity=Severity.CRITICAL,
-                    description=f"Fill quantity mismatch for order {oid}: local={p_total_qty}, remote={r_total_qty}",
+                    symbol=sym,
+                    description=f"Fill quantity mismatch for symbol {sym}: local={p_total_qty}, remote={r_total_qty}",
                     local_value=p_total_qty,
                     remote_value=r_total_qty,
                     magnitude=abs(p_total_qty - r_total_qty),
@@ -652,7 +703,8 @@ class ReconciliationEngine:
                         discs.append(Discrepancy(
                             disc_type=DiscrepancyType.FILL_PRICE,
                             severity=Severity.WARNING,
-                            description=f"Fill price deviation for order {oid}: local={p_avg:.4f}, remote={r_avg:.4f}",
+                            symbol=sym,
+                            description=f"Fill price deviation for symbol {sym}: local={p_avg:.4f}, remote={r_avg:.4f}",
                             local_value=p_avg,
                             remote_value=r_avg,
                             magnitude=abs(p_avg - r_avg),
@@ -661,13 +713,31 @@ class ReconciliationEngine:
 
         return discs
 
-    def _group_fills_by_order(self, fills: list[dict]) -> dict[str, list[dict]]:
-        """Group fills by order_id / 按订单 ID 分组成交"""
+    def _group_fills_by_symbol(self, fills: list[dict]) -> dict[str, list[dict]]:
+        """Group fills by symbol / 按 symbol 分组成交。
+
+        為什麼按 symbol 而非 order_id:本地 TimestampedFill 無 execId/orderId,逐單配對
+        結構上不可能(全部塌成 "unknown");symbol 兩端皆有,是唯一可對齊的聚合鍵(v2.C)。
+        """
         grouped: dict[str, list[dict]] = {}
         for f in fills:
-            oid = f.get("order_id", f.get("orderId", "unknown"))
-            grouped.setdefault(oid, []).append(f)
+            sym = str(f.get("symbol", f.get("sym", "")) or "")
+            grouped.setdefault(sym, []).append(f)
         return grouped
+
+    def _extract_fill_ts(self, f: dict) -> int:
+        """Extract fill timestamp (ms) trying local/remote key conventions / 取成交時間戳(毫秒)。
+
+        本地 TimestampedFill 用 timestamp_ms;遠端 Bybit execution 用 execTime(字串毫秒)。
+        取不到或不可解析回 0(呼叫端視為無效,排除於窗口外)。
+        """
+        for key in ("timestamp_ms", "execTime", "exec_time_ms", "time"):
+            if key in f and f[key] not in (None, ""):
+                try:
+                    return int(float(f[key]))
+                except (TypeError, ValueError):
+                    continue
+        return 0
 
     def _weighted_avg_price(self, fills: list[dict]) -> float:
         """Calculate quantity-weighted average fill price / 计算加权平均成交价"""

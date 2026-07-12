@@ -71,6 +71,22 @@ logger = logging.getLogger(__name__)
 #   (C-ARM-2) 該 MATCH 必須是「全帳戶」：解決 build_demo_reconcile_snapshot 的 inverse/
 #             spot 覆蓋缺口,或永久收窄並明確標註範圍為 linear-USDT。
 #   (C-ARM-3) 重新武裝必須是「單一可審 diff」,附 operator + CC 簽核。
+#   (C-ARM-4) sole-actor(唯一交易者)必須在「武裝當下」重新驗證:一次 attribution 掃描證實
+#             武裝時點的 orders/fills 100% 由引擎發起(oc_…_dm_… orderLinkId / 引擎條件單),
+#             不得只憑 v1 的歷史 attribution。為什麼 v2 之後更嚴:v2 的訂單範圍排除 +
+#             成交窗口化,會讓「外來的次容差來回單」(foreign sub-tolerance round-trip)變得
+#             不可偵測——訂單根本不對賬、窗口外/容差內的成交也不會 flag,故必須在武裝點以
+#             新鮮掃描補回這層保證。
+#
+# v2 武裝假設(arming assumptions,記錄於此:cap 移除決策就在本檔做,不只寫在設計文件):
+#   (i)  dust-class 定義 = notional < dust_floor 「且」round_qty_floor(qty, step) > 0
+#        (可被交易所表示的殘塵才凍結,次 lot 幻影仍 evict);ft_dust_qty_floor_usd 須經確認
+#        確實是 dust 級別。此定義由 wave-A(Rust)持有,武裝前須確認未被放寬。
+#   (ii) positions + balances 對賬維持「全保真 / 不窗口化」(FULL-FIDELITY, unwindowed)——
+#        這是承載風險的兜底層,正因持倉/餘額仍逐一全比對,才使訂單/成交的範圍收窄是安全的。
+#        未來任何 wave 不得在缺 CC 重新審查下把持倉/餘額對賬也窗口化或收窄。
+#   (iii) C-ARM-1 的穩態 MATCH 必須在「operator 清理既有殘塵前置完成之後」的 LIVE shadow
+#        窗口觀察到;Mac fixture 造出的 MATCH「不是」武裝證據。
 # 目標：「按鈕是否已武裝?」一個 grep（本常數名）即可回答。
 RECONCILE_ADVISORY_FIRST_MAX_ESCALATION = "MISMATCH_MAJOR"  # 諮詢優先上限：手動對賬永不 freeze
 

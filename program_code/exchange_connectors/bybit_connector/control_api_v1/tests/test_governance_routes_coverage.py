@@ -1310,11 +1310,13 @@ class TestTriggerManualReconciliation:
 
     def test_completed_reconcile_exposes_advisory_schema(self):
         # 2d：完成的對賬回應必須帶 report_severity + escalation_enacted + advisory_mode。
+        # C1(CC)/QC：外加 orders_scope + remote_orders_observed,讓 MATCH 產物自我揭露訂單範圍。
         actor = _make_actor()
         hub = _make_hub(enabled=True)
         hub.reconcile.return_value = {
             "ok": True, "overall_result": "MATCH", "is_consistent": True,
             "discrepancies": [], "critical_count": 0,
+            "orders_scope": "excluded:exchange-authoritative", "remote_orders_observed": 3,
         }
         with patch(f"{GOV_MOD}._get_governance_hub", return_value=hub), \
              patch(f"{self.SNAP_MOD}.build_local_reconcile_snapshot", return_value={"positions": {}}), \
@@ -1324,6 +1326,8 @@ class TestTriggerManualReconciliation:
         assert "report_severity" in data
         assert "escalation_enacted" in data
         assert data["advisory_mode"] is True
+        assert data["orders_scope"] == "excluded:exchange-authoritative"
+        assert data["remote_orders_observed"] == 3
 
     def test_report_severity_fatal_but_escalation_capped(self):
         # 2d：report_severity 可誠實為 "FATAL"(不隱藏真實 divergence),但 escalation_enacted

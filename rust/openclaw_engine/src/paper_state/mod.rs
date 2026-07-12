@@ -169,6 +169,12 @@ pub struct PaperState {
     /// dust_evictions_total() 暴露給 status arm log 與 healthcheck [20]。
     /// 重啟歸零、不持久化 DB（驅逐純為觀測事件，不進 ML 訓練資料）。
     pub(super) dust_evictions_total: u64,
+    /// reconcile v2 wave A（DUST-FREEZE-INTRADAY-1，2026-07-12）：intraday 平倉留下
+    /// 「交易所可持有殘量」被 `evict_if_dust` 就地凍結為 orphan_frozen 的累積計數。
+    /// 與 `dust_evictions_total` 刻意分離：前者是「保留（凍結）」、後者是「移除（驅逐）」，
+    /// 混計會讓對帳觀測分不清本地帳是往交易所對齊還是往 flat 漂移。
+    /// 進程本地、重啟歸零、不持久化 DB（純觀測，不進 ML 訓練資料，同 PA §1.2.5）。
+    pub(super) dust_frozen_intraday_total: u64,
     /// EVICT-ON-DUST F3 (2026-04-26): cached USD-denominated dust floor for
     /// hot-path `apply_fill` / `reduce_position` post-mutation evict (T1/T2).
     /// Mirrors `RiskConfig.limits.ft_dust_qty_floor_usd` (re-uses the af48ee1
@@ -183,6 +189,15 @@ pub struct PaperState {
     /// `sync_risk_config_if_changed()` 在 RiskConfig 版本變動時透過
     /// `set_dust_floor_usd()` 刷入。`0.0` = 閘關閉。
     pub(super) dust_floor_usd: f64,
+    /// reconcile v2 wave A（DUST-FREEZE-INTRADAY-1，2026-07-12）：per-symbol qty_step
+    /// 鏡射，供 hot-path `evict_if_dust` 以 float-tolerant「至少一個 lot」判別
+    /// 「交易所可持有殘量（凍結）」vs「次-lot 幻影（驅逐）」。
+    /// 為什麼是 PaperState 自持鏡射而非直讀 instrument_cache：`instrument_cache` 掛在
+    /// `TickPipeline` 上、`PaperState` 無此 handle（與 `dust_floor_usd` 同一設計約束）；
+    /// 由 `set_dust_freeze_qty_step()` 於 on_tick per-symbol 寫入點（step_0，緊鄰
+    /// `set_latest_price`）逐 tick best-effort 鏡射。缺 symbol（冷快取 / refresh 失敗）
+    /// → `evict_if_dust` 走 spec-unknown 量級 fallback（不盲目驅逐真殘量）。
+    pub(super) dust_freeze_qty_step: HashMap<String, f64>,
 }
 
 impl PaperState {
@@ -209,7 +224,9 @@ impl PaperState {
             maker_stats: MakerStats::default(),
             funding_rates: HashMap::new(),
             dust_evictions_total: 0,
+            dust_frozen_intraday_total: 0,
             dust_floor_usd: 0.0,
+            dust_freeze_qty_step: HashMap::new(),
         }
     }
 

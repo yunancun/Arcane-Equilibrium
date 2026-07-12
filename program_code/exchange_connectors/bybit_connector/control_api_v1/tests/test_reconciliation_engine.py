@@ -144,6 +144,17 @@ def engine(config):
     e.close()
 
 
+@pytest.fixture
+def order_engine():
+    """啟用訂單對賬的引擎(v2.B 後 reconcile_orders 預設 False,訂單對賬改為 opt-in)。
+
+    本 fixture 顯式開啟以回歸驗證舊 _reconcile_orders 行為;無此旗標的預設引擎不再對賬訂單。
+    """
+    e = ReconciliationEngine(ReconciliationConfig(reconcile_orders=True))
+    yield e
+    e.close()
+
+
 def _now_ms():
     return int(time.time() * 1000)
 
@@ -223,56 +234,96 @@ class TestConsistentState:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestOrderReconciliation:
-    def test_order_state_mismatch(self, engine):
+    # v2.B：訂單對賬預設關閉,以下用 order_engine(reconcile_orders=True)回歸驗證舊行為。
+    def test_order_state_mismatch(self, order_engine):
         """Different order states should be detected / 订单状态不一致应被检测"""
         paper = _make_state(orders=[_make_order("o1", state="paper_order_filled")])
         remote = _make_state(orders=[_make_order("o1", state="paper_order_working")])
 
-        report = engine.reconcile(paper, remote)
+        report = order_engine.reconcile(paper, remote)
         assert not report.is_consistent
         order_discs = [d for d in report.discrepancies if d.disc_type == DiscrepancyType.ORDER_STATE]
         assert len(order_discs) == 1
         assert order_discs[0].severity == Severity.CRITICAL
 
-    def test_order_missing_on_remote(self, engine):
+    def test_order_missing_on_remote(self, order_engine):
         """Order exists locally but not remote / 本地有远端无"""
         paper = _make_state(orders=[_make_order("o1")])
         remote = _make_state(orders=[])
 
-        report = engine.reconcile(paper, remote)
+        report = order_engine.reconcile(paper, remote)
         missing = [d for d in report.discrepancies if d.disc_type == DiscrepancyType.ORDER_MISSING]
         assert len(missing) == 1
         assert missing[0].severity == Severity.WARNING
 
-    def test_order_missing_locally(self, engine):
+    def test_order_missing_locally(self, order_engine):
         """Order exists on remote but not locally / 远端有本地无"""
         paper = _make_state(orders=[])
         remote = _make_state(orders=[_make_order("o1")])
 
-        report = engine.reconcile(paper, remote)
+        report = order_engine.reconcile(paper, remote)
         missing = [d for d in report.discrepancies if d.disc_type == DiscrepancyType.ORDER_MISSING]
         assert len(missing) == 1
         assert missing[0].severity == Severity.CRITICAL
 
-    def test_bybit_state_mapping(self, engine):
+    def test_bybit_state_mapping(self, order_engine):
         """Bybit 'New' should map to paper 'working' / Bybit New 应映射为 working"""
         paper = _make_state(orders=[_make_order("o1", state="paper_order_working")])
         remote = _make_state(orders=[_make_order("o1", state="New")])
 
-        report = engine.reconcile(paper, remote)
+        report = order_engine.reconcile(paper, remote)
         order_discs = [d for d in report.discrepancies if d.disc_type == DiscrepancyType.ORDER_STATE]
         assert len(order_discs) == 0  # Should be treated as equivalent
 
-    def test_multiple_orders(self, engine):
+    def test_multiple_orders(self, order_engine):
         """Multiple matching orders should all pass / 多个匹配订单应全部通过"""
         orders = [_make_order(f"o{i}", state="paper_order_filled") for i in range(5)]
         paper = _make_state(orders=orders)
         remote = _make_state(orders=orders)
 
-        report = engine.reconcile(paper, remote)
+        report = order_engine.reconcile(paper, remote)
         assert report.orders_checked == 5
         order_discs = [d for d in report.discrepancies if d.disc_type in (DiscrepancyType.ORDER_STATE, DiscrepancyType.ORDER_MISSING)]
         assert len(order_discs) == 0
+
+    # ── v2.B 新增：預設範圍排除(reconcile_orders=False)+ opt-in 回歸 ──────────────
+
+    def test_orders_excluded_by_default_no_flag_and_checked_zero(self, engine):
+        """預設引擎(reconcile_orders=False):遠端有訂單、本地無 → 0 ORDER_* 差異 + orders_checked==0。
+
+        v2.B 核心:交易所是掛單唯一權威,訂單不入對賬範圍 → 不得因遠端掛單誤報。
+        """
+        paper = _make_state(orders=[])
+        remote = _make_state(orders=[_make_order("remote_only_1"), _make_order("remote_only_2")])
+
+        report = engine.reconcile(paper, remote)
+        order_discs = [
+            d for d in report.discrepancies
+            if d.disc_type in (DiscrepancyType.ORDER_STATE, DiscrepancyType.ORDER_MISSING)
+        ]
+        assert len(order_discs) == 0
+        assert report.orders_checked == 0
+        # 無其他差異 → 整體仍 MATCH(訂單被完全排除)。
+        assert report.overall_result == ReconciliationResult.MATCH
+        # C1(CC):MATCH 產物必須自我揭露訂單是「排除」而非「對賬乾淨」。
+        assert report.orders_scope == "excluded:exchange-authoritative"
+        assert report.to_dict()["orders_scope"] == "excluded:exchange-authoritative"
+        # QC 可見性:遠端 2 張掛單雖不對賬,仍記錄觀察數供 operator 可見。
+        assert report.remote_orders_observed == 2
+        assert report.to_dict()["remote_orders_observed"] == 2
+
+    def test_reconcile_orders_true_restores_old_behavior(self, order_engine):
+        """回歸守衛:reconcile_orders=True 時遠端多一單仍應報 CRITICAL ORDER_MISSING + orders_checked>0。"""
+        paper = _make_state(orders=[])
+        remote = _make_state(orders=[_make_order("o1")])
+
+        report = order_engine.reconcile(paper, remote)
+        missing = [d for d in report.discrepancies if d.disc_type == DiscrepancyType.ORDER_MISSING]
+        assert len(missing) == 1
+        assert missing[0].severity == Severity.CRITICAL
+        assert report.orders_checked == 1
+        # opt-in 路徑:orders_scope 標記為 reconciled(與排除路徑對照)。
+        assert report.orders_scope == "reconciled"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -387,6 +438,60 @@ class TestFillReconciliation:
         )]
         assert len(fill_discs) == 0
 
+    # ── v2.C 新增：窗口對齊 + 空本地跳過筆數檢查 ──────────────────────────────
+
+    def test_windowed_fills_exclude_out_of_window_remote(self, engine):
+        """遠端早於本地時間窗的舊成交被排除 → 不誤報 FILL_COUNT。
+
+        本地 1 筆(帶 timestamp_ms),遠端 = 1 筆同窗 + 1 筆遠早於窗口 → 窗口化後 1==1。
+        """
+        now = _now_ms()
+        paper = _make_state(fills=[
+            {"symbol": "ATOMUSDT", "side": "Buy", "qty": 0.1, "price": 10.0, "timestamp_ms": now},
+        ])
+        remote = _make_state(fills=[
+            {"symbol": "ATOMUSDT", "side": "Buy", "execQty": 0.1, "execPrice": 10.0, "execTime": now + 100},
+            {"symbol": "OLDUSDT", "side": "Buy", "execQty": 5.0, "execPrice": 1.0, "execTime": now - 10_000_000},
+        ])
+
+        report = engine.reconcile(paper, remote)
+        count_discs = [d for d in report.discrepancies if d.disc_type == DiscrepancyType.FILL_COUNT]
+        assert len(count_discs) == 0
+        # 窗口內 ATOMUSDT 兩端聚合量一致 → 無 FILL_QUANTITY。
+        qty_discs = [d for d in report.discrepancies if d.disc_type == DiscrepancyType.FILL_QUANTITY]
+        assert len(qty_discs) == 0
+
+    def test_empty_local_fills_skips_count_check(self, engine):
+        """本地無成交 → 跳過筆數檢查:遠端 50 筆也不得報 FILL_COUNT。"""
+        now = _now_ms()
+        remote_fills = [
+            {"symbol": "BTCUSDT", "side": "Buy", "execQty": 1.0, "execPrice": 50000.0, "execTime": now}
+            for _ in range(50)
+        ]
+        paper = _make_state(fills=[])
+        remote = _make_state(fills=remote_fills)
+
+        report = engine.reconcile(paper, remote)
+        fill_discs = [d for d in report.discrepancies if d.disc_type in (
+            DiscrepancyType.FILL_COUNT, DiscrepancyType.FILL_QUANTITY, DiscrepancyType.FILL_PRICE
+        )]
+        assert len(fill_discs) == 0
+
+    def test_populated_both_in_window_still_flags_real_qty_mismatch(self, engine):
+        """守衛:兩端皆有且在窗口內時,真實聚合量不符仍必須報 FILL_QUANTITY(不得被窗口弱化)。"""
+        now = _now_ms()
+        paper = _make_state(fills=[
+            {"symbol": "BTCUSDT", "side": "Buy", "qty": 1.0, "price": 50000.0, "timestamp_ms": now},
+        ])
+        remote = _make_state(fills=[
+            {"symbol": "BTCUSDT", "side": "Buy", "execQty": 0.5, "execPrice": 50000.0, "execTime": now},
+        ])
+
+        report = engine.reconcile(paper, remote)
+        qty_discs = [d for d in report.discrepancies if d.disc_type == DiscrepancyType.FILL_QUANTITY]
+        assert len(qty_discs) == 1
+        assert qty_discs[0].severity == Severity.CRITICAL
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # 5. Balance Reconciliation / 余额对账测试
@@ -431,12 +536,15 @@ class TestOverallResult:
         report = engine.reconcile(_make_state(), _make_state())
         assert report.overall_result == ReconciliationResult.MATCH
 
-    def test_minor_on_warning_only(self, engine):
-        """Only WARNING discrepancies → MISMATCH_MINOR / 仅 WARNING 应为 MISMATCH_MINOR"""
+    def test_minor_on_warning_only(self, order_engine):
+        """Only WARNING discrepancies → MISMATCH_MINOR / 仅 WARNING 应为 MISMATCH_MINOR
+
+        用 order_engine:本地有單、遠端無 = WARNING 級 ORDER_MISSING(v2.B 後訂單對賬需 opt-in)。
+        """
         paper = _make_state(orders=[_make_order("o1")])
         remote = _make_state(orders=[])  # Missing on remote = WARNING
 
-        report = engine.reconcile(paper, remote)
+        report = order_engine.reconcile(paper, remote)
         assert report.overall_result == ReconciliationResult.MISMATCH_MINOR
 
     def test_major_on_critical(self, engine):
@@ -893,3 +1001,51 @@ class TestBoundaryInputValidation:
         assert pos_discs[0].severity == Severity.CRITICAL, (
             "Large but valid positive qty mismatch should remain CRITICAL, not FATAL"
         )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 14. v2 端到端 MATCH-reachability（waves B+C）
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestV2MatchReachability:
+    """驗證 waves B(訂單範圍排除)+ C(成交窗口對齊)後可達乾淨 MATCH。
+
+    模擬 wave-A(Rust 引擎凍結殘塵)已生效:0.1 殘塵同時存在於本地與遠端(both-exist within
+    tolerance)。訂單以預設 reconcile_orders=False 排除,成交以本地時間窗過濾遠端。
+    注意:真實 runtime 的端到端 MATCH 仍依賴 wave-A(引擎凍結殘塵)+ operator 於 runtime
+    清理既有殘塵;本測試以 fixture 假設該前置已滿足,只證 Python 對賬層在該狀態下判 MATCH。
+    """
+
+    def test_end_to_end_match_orders_excluded_fills_windowed(self, engine):
+        now = _now_ms()
+        # wave-A 凍結後:本地與遠端皆持有 0.1 殘塵(方向、量一致)。
+        positions = {"ATOMUSDT": {"side": "Buy", "size": 0.1, "avg_entry_price": 10.0}}
+        paper = _make_state(
+            positions=positions,
+            balances={"USDT": 1000.0},
+            orders=[],  # 本地無掛單
+            fills=[{"symbol": "ATOMUSDT", "side": "Buy", "qty": 0.1, "price": 10.0, "timestamp_ms": now}],
+            ts_ms=now,
+        )
+        remote = _make_state(
+            positions=positions,
+            balances={"USDT": 1000.0},
+            # 遠端有掛單 + 窗口外舊成交 —— 皆不得造成差異(訂單排除、成交窗口化)。
+            orders=[_make_order("remote_conditional_stop", state="Untriggered")],
+            fills=[
+                {"symbol": "ATOMUSDT", "side": "Buy", "execQty": 0.1, "execPrice": 10.0, "execTime": now + 50},
+                {"symbol": "OLDUSDT", "side": "Buy", "execQty": 9.0, "execPrice": 2.0, "execTime": now - 5_000_000},
+            ],
+            ts_ms=now,
+        )
+
+        report = engine.reconcile(paper, remote)
+        assert report.overall_result == ReconciliationResult.MATCH
+        assert report.is_consistent
+        assert report.critical_count == 0
+        assert report.orders_checked == 0
+        assert len(report.discrepancies) == 0
+        # C1(CC):此 MATCH 必須揭露訂單是排除於範圍外,不得被讀成「訂單已對賬乾淨」;
+        # 遠端那張條件單雖不對賬,仍以 remote_orders_observed 保持可見(QC)。
+        assert report.orders_scope == "excluded:exchange-authoritative"
+        assert report.remote_orders_observed == 1
