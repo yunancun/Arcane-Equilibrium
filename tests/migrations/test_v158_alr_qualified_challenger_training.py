@@ -55,6 +55,32 @@ def _sql() -> str:
     return V158.read_text(encoding="utf-8")
 
 
+def _assert_top_level_case_guard_is_parenthesized(sql: str) -> None:
+    safe = (
+        "<> (CASE WHEN v_spec.caller_access THEN 1 ELSE 0 END) THEN"
+    )
+    assert safe in sql
+    assert "<> CASE WHEN v_spec.caller_access THEN 1 ELSE 0 END THEN" not in sql
+
+
+def test_v158_plpgsql_if_does_not_terminate_at_nested_case_then() -> None:
+    _assert_top_level_case_guard_is_parenthesized(_sql())
+
+
+def test_v158_unparenthesized_top_level_case_guard_mutation_is_rejected() -> None:
+    sql = _sql()
+    safe = "<> (CASE WHEN v_spec.caller_access THEN 1 ELSE 0 END) THEN"
+    assert safe in sql
+    with pytest.raises(AssertionError):
+        _assert_top_level_case_guard_is_parenthesized(
+            sql.replace(
+                safe,
+                "<> CASE WHEN v_spec.caller_access THEN 1 ELSE 0 END THEN",
+                1,
+            )
+        )
+
+
 def _code(sql: str | None = None) -> str:
     value = _sql() if sql is None else sql
     return "\n".join(re.sub(r"--.*$", "", line) for line in value.splitlines())

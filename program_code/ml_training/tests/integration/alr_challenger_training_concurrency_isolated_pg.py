@@ -28,7 +28,7 @@ _CANONICAL_MIGRATION = (
     _ROOT / "sql/migrations/V158__alr_qualified_challenger_training.sql"
 ).resolve()
 _EXPECTED_MIGRATION_SHA256 = (
-    "b1ff8e2da1878fc498b1bf87e61a105a113bd21b3194a60df84238c8f890d8b9"
+    "7ed70599c6bd5f3cdb3376bc135a952d8c18f4ad62a62432c2bfdd8ee84e446b"
 )
 # A single psycopg execute of the transaction-owned migration is the
 # ON_ERROR_STOP equivalent: the first database error is surfaced and no later
