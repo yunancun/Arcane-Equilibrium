@@ -28,6 +28,9 @@
 <!-- earn 原生 view 頁級樣式(第 9 遷,安全關鍵寫面):.earn-* + `.earn-view` scope 的 legacy 短名
      shim(oc-card/oc-metrics/oc-table/oc-chip*;殼不呼 ocInjectBaseCSS,見 view-earn.css MODULE_NOTE)-->
 <link rel="stylesheet" href="/static/view-earn.css?v=20260712.p2-earn" />
+<!-- replay 原生 view 頁級樣式(第 10 遷,復用遷移):極薄——只 .replay-head/.replay-note + `.replay-view`
+     scope 的 .oc-chip* shim;ready/degraded 卡樣式由 app-paper.js 執行期自注入(見 view-replay.css MODULE_NOTE)-->
+<link rel="stylesheet" href="/static/view-replay.css?v=20260712.p2-replay" />
 </head>
 <body>
 
@@ -138,6 +141,12 @@
      view-earn.js 載入,view-earn.js 於 render 內呼 startEarnTab;view-earn.js 於 shell.js 前載以註冊 OC_NATIVE_VIEWS['earn']。 -->
 <script src="/static/earn-tab.js?v=20260525.earn-wave-c"></script>
 <script src="/static/view-earn.js?v=20260712.p2-earn"></script>
+<!-- replay 第 10 遷(復用遷移):**verbatim 復用 app-paper.js 的 OpenClawReplaySubtab**(readiness probe +
+     5 態狀態機 + replay 寫端點)。app-paper.js load-safe(module-level 僅 replay namespace IIFE,零 fetch/DOM/
+     paper 寫),殼此前未載入故新增;須先於 view-replay.js。view-replay.js 只復現 replay DOM 後把生命週期交回
+     OpenClawReplaySubtab;於 shell.js 前載以註冊 OC_NATIVE_VIEWS['replay']。app-paper.js / tab-replay.html 零修改。 -->
+<script src="/static/app-paper.js?v=20260527.ops1-csrf"></script>
+<script src="/static/view-replay.js?v=20260712.p2-replay"></script>
 <script src="/static/shell.js?v=20260711.shell-p11a"></script>
 
 </body>
