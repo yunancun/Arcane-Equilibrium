@@ -1998,6 +1998,313 @@ def _compact_check(expression: str) -> str:
     return re.sub(r"\s+", "", expression).lower()
 
 
+_POSTGRES_ARE_BOUND_LIMIT = 255
+_POSTGRES_ARE_BOUND = re.compile(r"(?<!\\)\{(\d+)(?:,(\d*))?\}")
+_ATTESTATION_SIGNATURE_PATTERN = (
+    r"^[A-Za-z0-9_-]{43}[A-Za-z0-9_-]{0,255}"
+    r"[A-Za-z0-9_-]{0,214}={0,2}$"
+)
+_ATTESTATION_EVIDENCE_CHECK_SHA256 = (
+    "7e42b8382023589139a24a7b61050418d37a7338cfa444d10eb609c8be47dc82",
+    "247c61dbb9b95b0af30423e11ffe04751b5ffc1a10b440ded046354fec126cc2",
+)
+
+
+def _assert_attestation_signature_are_bounds_supported(pattern: str) -> None:
+    # This is intentionally scoped to the frozen signature alphabet below,
+    # which contains no literal brace.  It is not a general SQL/ARE parser.
+    bounds = list(_POSTGRES_ARE_BOUND.finditer(pattern))
+    assert bounds
+    for bound in bounds:
+        lower = int(bound.group(1))
+        upper_text = bound.group(2)
+        assert lower <= _POSTGRES_ARE_BOUND_LIMIT, (
+            pattern,
+            bound.group(0),
+        )
+        if upper_text not in (None, ""):
+            upper = int(upper_text)
+            assert lower <= upper <= _POSTGRES_ARE_BOUND_LIMIT, (
+                pattern,
+                bound.group(0),
+            )
+
+
+def _executable_named_checks(sql: str, name: str) -> list[str]:
+    code = _pg_top_level_code(sql)
+    declaration = re.compile(
+        rf"\bCONSTRAINT\s+{re.escape(name)}\s+CHECK\s*\(",
+        re.IGNORECASE,
+    )
+    expressions: list[str] = []
+    for match in declaration.finditer(code):
+        depth = 1
+        cursor = match.end()
+        while cursor < len(code) and depth:
+            if code[cursor] == "(":
+                depth += 1
+            elif code[cursor] == ")":
+                depth -= 1
+            cursor += 1
+        assert depth == 0, name
+        expressions.append(sql[match.end() : cursor - 1])
+    return expressions
+
+
+def _executed_dollar_ddl_bodies(function_body: str) -> list[str]:
+    marker = "$ddl$"
+    code = _pg_top_level_code(function_body)
+    bodies: list[str] = []
+    cursor = 0
+    while True:
+        opening = function_body.find(marker, cursor)
+        if opening < 0:
+            break
+        sentinel = "Q" * len(marker)
+        probe = (
+            function_body[:opening]
+            + sentinel
+            + function_body[opening + len(marker) :]
+        )
+        marker_is_top_level = (
+            _pg_top_level_code(probe)[opening : opening + len(marker)]
+            == sentinel
+        )
+        if not marker_is_top_level:
+            cursor = opening + len(marker)
+            continue
+        closing = function_body.find(marker, opening + len(marker))
+        assert closing >= 0
+        if re.search(r"\bEXECUTE\s*$", code[:opening], re.IGNORECASE):
+            bodies.append(
+                function_body[opening + len(marker) : closing]
+            )
+        cursor = closing + len(marker)
+    return bodies
+
+
+def _attestation_evidence_checks(sql: str) -> tuple[str, str]:
+    name = "alr_fit_attestations_evidence_check"
+    validator = _function_body(sql, "v159_catalog_validator")
+    expected = [
+        expression
+        for body in _executed_dollar_ddl_bodies(validator)
+        for expression in _executable_named_checks(body, name)
+    ]
+    authored = _executable_named_checks(
+        sql.split("$v159_catalog_validator$;", 1)[1],
+        name,
+    )
+    assert len(expected) == 1
+    assert len(authored) == 1
+    return expected[0], authored[0]
+
+
+@pytest.mark.parametrize(
+    "sql",
+    (
+        "EXECUTE /* $ddl$CHECK(TRUE)$ddl$ */ 'SELECT 1';",
+        "EXECUTE '$ddl$CHECK(TRUE)$ddl$';",
+        "EXECUTE -- $ddl$CHECK(TRUE)$ddl$\n'SELECT 1';",
+    ),
+)
+def test_v159_non_executable_dollar_ddl_decoys_are_rejected(sql: str) -> None:
+    assert _executed_dollar_ddl_bodies(sql) == []
+
+
+def _assert_exact_attestation_signature_patterns(sql: str) -> None:
+    checks = _attestation_evidence_checks(sql)
+    for expression, expected_hash in zip(
+        checks,
+        _ATTESTATION_EVIDENCE_CHECK_SHA256,
+        strict=True,
+    ):
+        assert hashlib.sha256(expression.encode("utf-8")).hexdigest() == (
+            expected_hash
+        )
+        assert expression.count(_ATTESTATION_SIGNATURE_PATTERN) == 1
+
+
+def test_v159_attestation_signature_pattern_is_exact_and_pg_compatible() -> None:
+    sql = _sql()
+    _assert_attestation_signature_are_bounds_supported(
+        _ATTESTATION_SIGNATURE_PATTERN
+    )
+    _assert_exact_attestation_signature_patterns(sql)
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    (
+        ("{43}", "{42}"),
+        ("{0,214}", "{0,215}"),
+        ("={0,2}", "={0,3}"),
+        ("A-Za-z0-9_-", "A-Za-z0-9_+/-"),
+        ("$", ""),
+    ),
+)
+def test_v159_attestation_signature_pattern_mutations_are_rejected(
+    old: str,
+    new: str,
+) -> None:
+    sql = _sql()
+    assert sql.count(_ATTESTATION_SIGNATURE_PATTERN) == 2
+    weakened_pattern = _ATTESTATION_SIGNATURE_PATTERN.replace(old, new, 1)
+    assert weakened_pattern != _ATTESTATION_SIGNATURE_PATTERN
+    weakened = sql.replace(
+        _ATTESTATION_SIGNATURE_PATTERN,
+        weakened_pattern,
+        1,
+    )
+    with pytest.raises(AssertionError):
+        _assert_exact_attestation_signature_patterns(weakened)
+
+
+def test_v159_unsupported_postgres_are_bound_mutation_is_rejected() -> None:
+    sql = _sql()
+    assert sql.count(_ATTESTATION_SIGNATURE_PATTERN) == 2
+    invalid_pattern = _ATTESTATION_SIGNATURE_PATTERN.replace(
+        "{0,214}",
+        "{0,256}",
+        1,
+    )
+    with pytest.raises(AssertionError):
+        _assert_attestation_signature_are_bounds_supported(invalid_pattern)
+    invalid = sql.replace(
+        _ATTESTATION_SIGNATURE_PATTERN,
+        invalid_pattern,
+        1,
+    )
+    with pytest.raises(AssertionError):
+        _assert_exact_attestation_signature_patterns(invalid)
+
+
+def test_v159_hosted_invalid_signature_pattern_mutation_is_rejected() -> None:
+    sql = _sql()
+    assert sql.count(_ATTESTATION_SIGNATURE_PATTERN) == 2
+    invalid_pattern = r"^[A-Za-z0-9_-]{43,512}={0,2}$"
+    invalid = sql.replace(
+        _ATTESTATION_SIGNATURE_PATTERN,
+        invalid_pattern,
+        1,
+    )
+    with pytest.raises(AssertionError):
+        _assert_attestation_signature_are_bounds_supported(invalid_pattern)
+    with pytest.raises(AssertionError):
+        _assert_exact_attestation_signature_patterns(invalid)
+
+
+def test_v159_dual_mirror_signature_comment_spoof_is_rejected() -> None:
+    sql = _sql().replace(_ATTESTATION_SIGNATURE_PATTERN, ".*")
+    expected_operand = (
+        "COALESCE(receipt_projection#>>'{authentication,signature}','')"
+        "~'.*'"
+    )
+    authored_operand = (
+        "COALESCE(receipt_projection#>>'{authentication,signature}', '')"
+        "\n            ~ '.*'"
+    )
+    frozen_operand_comment = (
+        "/*COALESCE(receipt_projection#>>'{authentication,signature}','')"
+        f"~'{_ATTESTATION_SIGNATURE_PATTERN}'*/"
+    )
+    assert sql.count(expected_operand) == 1
+    assert sql.count(authored_operand) == 1
+    spoofed = sql.replace(
+        expected_operand,
+        frozen_operand_comment + expected_operand,
+        1,
+    ).replace(
+        authored_operand,
+        frozen_operand_comment + authored_operand,
+        1,
+    )
+    assert spoofed.count(frozen_operand_comment) == 2
+    _assert_expected_checks_track_authored_ddl(spoofed)
+    with pytest.raises(AssertionError):
+        _assert_exact_attestation_signature_patterns(spoofed)
+
+
+def test_v159_dual_mirror_signature_dollar_spoof_is_rejected() -> None:
+    sql = _sql().replace(_ATTESTATION_SIGNATURE_PATTERN, ".*")
+    expected_operand = (
+        "COALESCE(receipt_projection#>>'{authentication,signature}','')"
+        "~'.*'"
+    )
+    authored_operand = (
+        "COALESCE(receipt_projection#>>'{authentication,signature}', '')"
+        "\n            ~ '.*'"
+    )
+    frozen_operand = (
+        "COALESCE(receipt_projection#>>'{authentication,signature}','')"
+        f"~'{_ATTESTATION_SIGNATURE_PATTERN}'"
+    )
+    spoof = f"($spoof${frozen_operand}$spoof$ IS NOT NULL) AND "
+    assert sql.count(expected_operand) == 1
+    assert sql.count(authored_operand) == 1
+    spoofed = sql.replace(
+        expected_operand,
+        spoof + expected_operand,
+        1,
+    ).replace(
+        authored_operand,
+        spoof + authored_operand,
+        1,
+    )
+    assert spoofed.count(spoof) == 2
+    _assert_expected_checks_track_authored_ddl(spoofed)
+    with pytest.raises(AssertionError):
+        _assert_exact_attestation_signature_patterns(spoofed)
+
+
+def test_v159_dual_mirror_full_check_comment_decoy_is_rejected() -> None:
+    sql = _sql()
+    expected_check, authored_check = _attestation_evidence_checks(sql)
+    weakened = sql.replace(_ATTESTATION_SIGNATURE_PATTERN, ".*")
+    expected_declaration = (
+        "ADD CONSTRAINT alr_fit_attestations_evidence_check CHECK("
+    )
+    authored_declaration = (
+        "    CONSTRAINT alr_fit_attestations_evidence_check CHECK ("
+    )
+    expected_decoy = (
+        "/* CONSTRAINT alr_fit_attestations_evidence_check CHECK("
+        f"{expected_check}) */ "
+    )
+    authored_decoy = (
+        "/* CONSTRAINT alr_fit_attestations_evidence_check CHECK("
+        f"{authored_check}) */\n"
+    )
+    assert weakened.count(expected_declaration) == 1
+    assert weakened.count(authored_declaration) == 1
+    spoofed = weakened.replace(
+        expected_declaration,
+        expected_decoy + expected_declaration,
+        1,
+    ).replace(
+        authored_declaration,
+        authored_decoy + authored_declaration,
+        1,
+    )
+    assert spoofed.count("~'.*'") == 1
+    assert spoofed.count("~ '.*'") == 1
+    _assert_expected_checks_track_authored_ddl(spoofed)
+    with pytest.raises(AssertionError):
+        _assert_exact_attestation_signature_patterns(spoofed)
+
+
+def test_v159_attestation_signature_pattern_preserves_frozen_boundaries() -> None:
+    pattern = re.compile(_ATTESTATION_SIGNATURE_PATTERN)
+    for core_length in (43, 44, 255, 256, 297, 298, 511, 512):
+        core = "A" * core_length
+        for padding in ("", "=", "=="):
+            assert pattern.fullmatch(core + padding)
+    for core_length in (0, 1, 42, 513, 514, 600):
+        assert pattern.fullmatch("A" * core_length) is None
+    for invalid in ("A" * 42 + "+", "A" * 43 + "===", "=" * 43):
+        assert pattern.fullmatch(invalid) is None
+
+
 def _assert_expected_checks_track_authored_ddl(sql: str) -> None:
     validator = _function_body(sql, "v159_catalog_validator")
     expected = _check_expressions(validator)
@@ -2763,10 +3070,10 @@ def _assert_functional_positive_helper_contracts(tree: ast.Module) -> None:
 def _assert_functional_probe_contract(source: str) -> None:
     compile(source, str(FUNCTIONAL_PROBE), "exec")
     assert hashlib.sha256(V159.read_bytes()).hexdigest() == (
-        "c5f7fd0e0cc1ccb263dc35541e4d2f4b9fa7e4adc475886d752638659c549d02"
+        "2e11d0ae0cbc2c1161a47d04bed4054c31b728e8cf945f931197f9b3455b7d74"
     )
     assert (
-        '"V159": "c5f7fd0e0cc1ccb263dc35541e4d2f4b9fa7e4adc475886d752638659c549d02"'
+        '"V159": "2e11d0ae0cbc2c1161a47d04bed4054c31b728e8cf945f931197f9b3455b7d74"'
         in source
     )
     assert '_ACK_ENV = "ALR_V159_DISPOSABLE_ACK"' in source
@@ -3306,7 +3613,7 @@ def test_v159_functional_probe_ast_contract() -> None:
             "allow_role_default_session(connection)",
         ),
         (
-            '"V159": "c5f7fd0e0cc1ccb263dc35541e4d2f4b9fa7e4adc475886d752638659c549d02"',
+            '"V159": "2e11d0ae0cbc2c1161a47d04bed4054c31b728e8cf945f931197f9b3455b7d74"',
             '"V159": "' + "0" * 64 + '"',
         ),
         ("BYTE_EXACT_READBACK", "BYTE_READBACK_SKIPPED"),
@@ -3636,7 +3943,7 @@ def test_v159_functional_probe_ast_rejects_composed_scenario_bypass() -> None:
 
 _CONCURRENCY_EXPECTED_SHA256 = {
     "V158": "7ed70599c6bd5f3cdb3376bc135a952d8c18f4ad62a62432c2bfdd8ee84e446b",
-    "V159": "c5f7fd0e0cc1ccb263dc35541e4d2f4b9fa7e4adc475886d752638659c549d02",
+    "V159": "2e11d0ae0cbc2c1161a47d04bed4054c31b728e8cf945f931197f9b3455b7d74",
 }
 _CONCURRENCY_SCENARIO_ORDER = (
     "_scenario_identical_attestation",
