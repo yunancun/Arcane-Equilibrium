@@ -484,15 +484,23 @@
   }
 
   // ═══ density toggle(上線,session-only;localStorage 持久化=P1.3,本刀不做)═══
+  // 按鈕反映當前密度(舒適/緊湊)+ aria-pressed(緊湊態=pressed)+ 動態 aria-label(對齊 theme toggle a11y;A3 R93 LOW-6)。
+  function syncDensityButton(btn, isCompact) {
+    btn.textContent = isCompact ? '緊湊' : '舒適';
+    btn.setAttribute('aria-pressed', String(isCompact));
+    btn.setAttribute('aria-label', isCompact ? '密度:緊湊,點擊切換至舒適' : '密度:舒適,點擊切換至緊湊');
+  }
+
   function wireDensityToggle() {
     var btn = byId('oc-density-btn');
     if (!btn) return;
+    var root = document.documentElement;
+    syncDensityButton(btn, root.getAttribute('data-density') === 'compact');  // 初始 aria/label 反映當前態
     btn.addEventListener('click', function () {
-      var root = document.documentElement;
       var compact = root.getAttribute('data-density') === 'compact';
       if (compact) root.removeAttribute('data-density');
       else root.setAttribute('data-density', 'compact');
-      btn.textContent = compact ? '舒適' : '緊湊';
+      syncDensityButton(btn, !compact);  // 切後新態
     });
   }
 
