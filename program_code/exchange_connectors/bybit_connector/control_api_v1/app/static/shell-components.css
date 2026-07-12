@@ -120,3 +120,82 @@
   background:transparent; transition:background var(--dur-fast);
 }
 .btn-emergency:hover{ background:var(--live); color:var(--bg-surface); }
+
+/* ═══ 殼級 toast / confirm-modal / form-input 樣式補齊(R63;寫面 view 消費)═══ */
+/* 為何殼需這些 class 的重複:殼 shell.html 刻意不呼 common.js ocInjectBaseCSS()——
+   後者會注入 body{padding:16px} + `*` reset,破壞殼自身 chrome 佈局。但 toast
+   (.oc-toast*)、typed-confirm/prompt modal(.oc-confirm-* / .oc-prompt-*)、表單控件
+   (.oc-input/.oc-select)的樣式全在 ocInjectBaseCSS 內。已遷的寫面 view
+   (view-ai/view-ai-providers/view-ai-cost/view-learning)用 ocToast / openConfirmModal /
+   openTypedConfirmModal / openPromptModal / 表單時,元素在殼內功能完整但視覺退化。
+   安全語義:ai-providers 清除 API Key 的 typed-confirm(phrase='CLEAR')對話框與其輸入框
+   必須清晰可讀,operator 才能安全確認。
+   此為對 common.js ocInjectBaseCSS 同名規則的**重複(非移動)**:legacy iframe 路徑仍靠
+   ocInjectBaseCSS 於運行時自帶注入;本節僅補殼文檔作用域(shell 只載 tokens/oc-utilities/
+   shell/shell-components/view-phase4),故兩份共存、勿刪 common.js 原本。
+   逐字 port 自 common.js ocInjectBaseCSS(var-only + rgba tint,零裸 hex)。所用工具修飾詞
+   (.mono/.ls-wide/.pre-line/.hidden/.mt-*/.fs-micro/.t-dim…)與 .oc-input--num 已在
+   oc-utilities.css(殼已載),不重複。modal 取消/確認鈕的 .oc-btn* 家族亦補齊(見下方 Buttons 節)。 */
+
+/* Toast(port common.js ~888-901)*/
+.oc-toast { position: fixed; right: 20px; padding: 10px 18px;
+  border-radius: var(--r-2); font-size: 13px; z-index: 9999; transform: translateY(20px);
+  opacity: 0; transition: all 0.3s; pointer-events: none; max-width: 420px; word-break: break-word; }
+.oc-toast.show { transform: translateY(0); opacity: 1; }
+.oc-toast-info { background: var(--bg-raised); color: var(--text-primary); border: 1px solid var(--border-subtle); }
+.oc-toast-success { background: rgba(63,185,80,0.15); color: var(--pos); border: 1px solid rgba(63,185,80,0.3); }
+.oc-toast-error { background: rgba(248,81,73,0.15); color: var(--neg); border: 1px solid rgba(248,81,73,0.3); }
+/* warn = 黃色「需注意」語意；之前缺此 class → 'warn' toast 退回無樣式（透明背景無邊框）。
+   對應 --yellow token，與 success(綠)/error(紅)/info(灰) 視覺區分。 */
+.oc-toast-warn { background: rgba(210,153,34,0.15); color: var(--warn); border: 1px solid rgba(210,153,34,0.4); }
+/* trace 短碼可點擊複製；.oc-toast 本身 pointer-events:none，故 chip 需顯式 auto 才能收 click。 */
+.oc-toast-trace { pointer-events: auto; cursor: pointer; text-decoration: underline;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px; opacity: 0.85; }
+
+/* Form input(port common.js ~923-927;.oc-input--num 在 oc-utilities.css 不重複)*/
+.oc-input { background: var(--bg-app); border: 1px solid var(--border-subtle); border-radius: var(--r-1);
+  color: var(--text-primary); padding: 7px 10px; font-size: 13px; font-family: inherit; }
+.oc-input:focus { outline: none; border-color: var(--accent); }
+.oc-select { background: var(--bg-app); border: 1px solid var(--border-subtle); border-radius: var(--r-1);
+  color: var(--text-primary); padding: 7px 10px; font-size: 13px; font-family: inherit; cursor: pointer; }
+
+/* Confirm / prompt / typed-confirm modal(port common.js ~991-1006)*/
+.oc-confirm-overlay { display:none; position:fixed; inset:0; z-index:5000;
+  background:rgba(0,0,0,0.7); align-items:center; justify-content:center; }
+.oc-confirm-overlay.show { display:flex; }
+.oc-confirm-dialog { background:var(--bg-surface); border:1px solid rgba(248,81,73,0.4);
+  border-radius:var(--r-3); padding:24px; max-width:440px; width:90%; }
+.oc-confirm-dialog h3 { color:var(--neg); font-size:15px; margin-bottom:8px; }
+.oc-confirm-dialog p { font-size:13px; color:var(--text-primary); white-space:pre-line; margin-bottom:16px; line-height:1.6; }
+.oc-confirm-dialog .btn-row { display:flex; gap:8px; justify-content:flex-end; }
+.oc-prompt-label { display:block; font-size:12px; color:var(--text-secondary); margin-bottom:6px; }
+.oc-prompt-input, .oc-prompt-select, .oc-prompt-textarea { width:100%; box-sizing:border-box;
+  background:var(--bg-app); color:var(--text-primary); border:1px solid var(--border-subtle);
+  border-radius:var(--r-2); padding:9px 10px; font-size:13px; margin-bottom:10px; }
+.oc-prompt-textarea { min-height:96px; resize:vertical; line-height:1.5; }
+.oc-prompt-input:focus, .oc-prompt-select:focus, .oc-prompt-textarea:focus {
+  outline:2px solid var(--accent); outline-offset:1px; border-color:var(--accent); }
+.oc-prompt-error { min-height:16px; color:var(--neg); font-size:12px; margin-bottom:10px; }
+
+/* Buttons(PM 裁決 R63 補齊;port common.js ~802-818)——
+   modal(common-modals.js)的取消/確認鈕 emit `.oc-btn` + 語意變體(-primary/-danger…),
+   其 CSS 僅在 ocInjectBaseCSS;殼載入面缺之 → 按鈕原生退化。補此非強制 view 改用
+   (已遷 view 仍用 .panel/.tag/.note + 原生控件),純為共用 modal 正確渲染 = additive。
+   排除 .oc-btn-future(placeholder,modal 不用)。 */
+.oc-btn { padding: 6px 14px; border-radius: var(--r-1); border: 1px solid var(--border-subtle);
+  background: var(--bg-app); color: var(--text-primary); font-size: 12px; cursor: pointer;
+  transition: all 0.15s; font-family: inherit; white-space: nowrap; }
+.oc-btn:hover { border-color: var(--accent); color: var(--text-primary); }
+.oc-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.oc-btn-primary { background: rgba(56,139,253,0.15); border-color: var(--text-secondary); color: var(--text-secondary); }
+.oc-btn-primary:hover { background: rgba(56,139,253,0.3); }
+.oc-btn-success { background: rgba(63,185,80,0.12); border-color: var(--pos); color: var(--pos); }
+.oc-btn-success:hover { background: rgba(63,185,80,0.25); }
+.oc-btn-warning { background: rgba(210,153,34,0.10); border-color: rgba(210,153,34,0.36); color: var(--warn); }
+.oc-btn-warning:hover { background: rgba(210,153,34,0.22); color: var(--text-primary); }
+.oc-btn-danger { background: rgba(248,81,73,0.08); border-color: rgba(248,81,73,0.3); color: var(--neg); }
+.oc-btn-danger:hover { background: rgba(248,81,73,0.2); }
+.oc-btn-critical { border-width: 2px; font-weight: 700; }
+.oc-btn-destructive { border-style: dashed; background: rgba(248,81,73,0.12); border-color: rgba(248,81,73,0.48); color: var(--neg); font-weight: 700; }
+.oc-btn-destructive:hover { background: rgba(248,81,73,0.26); color: var(--text-primary); }
