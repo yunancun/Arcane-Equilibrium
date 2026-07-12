@@ -49,12 +49,42 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 from .change_audit_log import ChangeType
 from .utils.time_utils import now_ms
 
 logger = logging.getLogger(__name__)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ADVISORY-FIRST 諮詢優先上限（手動對賬唯一 load-bearing 的 freeze 防護）
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# 為什麼這是唯一真正擋住凍結的機制：ReconciliationConfig.auto_freeze_on_critical=False
+# 只是 defense-in-depth 冗餘（E2 確認）;真正把手動對賬「永不 freeze」釘死的是本上限——
+# 把升級 token 封頂為 MISMATCH_MAJOR（僅升風控,永不 auth-freeze / circuit-break）。
+#
+# 移除本上限（= 讓手動按鈕可武裝凍結）前,以下前置條件必須「全部」成立：
+#   (C-ARM-1) UNKNOWN-1 定案：operator + Linux runtime 證實 engine="demo" 鏡像 ==
+#             api-demo 帳戶,且觀察到穩態 MATCH。
+#   (C-ARM-2) 該 MATCH 必須是「全帳戶」：解決 build_demo_reconcile_snapshot 的 inverse/
+#             spot 覆蓋缺口,或永久收窄並明確標註範圍為 linear-USDT。
+#   (C-ARM-3) 重新武裝必須是「單一可審 diff」,附 operator + CC 簽核。
+# 目標：「按鈕是否已武裝?」一個 grep（本常數名）即可回答。
+RECONCILE_ADVISORY_FIRST_MAX_ESCALATION = "MISMATCH_MAJOR"  # 諮詢優先上限：手動對賬永不 freeze
+
+
+def apply_reconcile_advisory_cap(token: Optional[str]) -> Optional[str]:
+    """把升級 token 封頂於 RECONCILE_ADVISORY_FIRST_MAX_ESCALATION（FATAL → 上限）。
+
+    手動對賬路徑唯一的 freeze 防護：FATAL → MISMATCH_MAJOR;其餘 token（含 None）原樣通過。
+    route 回應的 escalation_enacted 與 incident_callback 共用本函數,確保「系統實際採取的
+    升級」單一正本。
+    """
+    if token == "FATAL":
+        return RECONCILE_ADVISORY_FIRST_MAX_ESCALATION
+    return token
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -113,26 +143,38 @@ class GovernanceHubEventHandlersMixin:
         將對賬事件路由到對應的跨 SM 處理器。
         """
         def callback(action: str, report: dict[str, Any]) -> None:
+            # action ∈ IncidentAction 值 {"FREEZE_TRADING","MANUAL_REVIEW","ALERT",...};
+            # 引擎每個 report 依觸發動作數多次呼叫本回調,故以 report_id 去重,同一 report
+            # 最多升級一次。舊碼以不存在的 action 名（reconciliation_mismatch/…）過濾且以
+            # overall_result ∈ ["CRITICAL","FATAL"] 判嚴重度 —— 真值只會是 MISMATCH_MAJOR/
+            # MISMATCH_MINOR,兩層條件皆永假 → 整段死碼、升級被靜默 disarm。改用單一映射。
             try:
-                severity = report.get("overall_result", "").upper()
-                # Treat reconciliation failures as incidents
-                # 把對賬失敗視為事件
-                if action in ["reconciliation_mismatch", "reconciliation_failure"]:
-                    # Map overall_result to severity for callback
-                    # 將 overall_result 對應到 severity
-                    if severity in ["CRITICAL", "FATAL"]:
-                        # NOTE: _on_reconciliation_mismatch is provided by
-                        # GovernanceHubStatusCascadeMixin (cascades module).
-                        # 該方法由 cascades Mixin 提供。
-                        self._on_reconciliation_mismatch(severity, report)
-                    elif severity == "WARNING":
-                        # Minor mismatch - log but don't escalate
-                        # 輕微不一致：只記錄不升級
-                        if logger.isEnabledFor(logging.DEBUG):
-                            logger.debug(
-                                "Reconciliation warning: %s",
-                                report.get('result'),
-                            )
+                from .reconciliation_engine import map_report_to_escalation  # noqa: PLC0415
+
+                report_id = str(report.get("report_id", ""))
+                with self._lock:
+                    if report_id and report_id in self._escalated_report_ids:
+                        return  # 本 report 已升級過,跳過重複動作回調
+                    if report_id:
+                        # deque(maxlen=512) 插入序有界:滿載時自動淘汰「最舊」,current
+                        # report_id 絕不會在同一次呼叫被淘汰（修正舊 set 隨機截斷可能丟
+                        # 掉剛加入 id 的非確定性）。
+                        self._escalated_report_ids.append(report_id)
+
+                esc = map_report_to_escalation(report)
+                if esc is None:
+                    return  # MATCH,不升級
+
+                # ── ADVISORY-FIRST 安全門（CC-1 / UNKNOWN-1）────────────────────────
+                # 唯一 load-bearing 的 freeze 防護:把升級 token 封頂於
+                # RECONCILE_ADVISORY_FIRST_MAX_ESCALATION（FATAL → MISMATCH_MAJOR,僅升風控,
+                # 永不 auth-freeze / circuit-break）。武裝前置條件與理由見本檔頂部常數註解。
+                esc = apply_reconcile_advisory_cap(esc)
+
+                # NOTE: _on_reconciliation_mismatch is provided by
+                # GovernanceHubStatusCascadeMixin (cascades module).
+                # 該方法由 cascades Mixin 提供。
+                self._on_reconciliation_mismatch(esc, report)
             except Exception as e:
                 if logger.isEnabledFor(logging.DEBUG):
                     logger.debug(

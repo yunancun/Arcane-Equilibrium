@@ -872,6 +872,36 @@ class ReconciliationEngine:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Result → escalation token mapping / 结果 → 升级 token 映射（唯一正本）
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def map_report_to_escalation(report_dict: dict) -> Optional[str]:
+    """對賬報告 → _on_reconciliation_mismatch 可辨識的升級 token（手動 + 自動共用的唯一映射）。
+
+      "FATAL"          → 熔斷 + 凍結授權（僅當存在 FATAL 差異）
+      "MISMATCH_MAJOR" → 升級風控 REDUCED/DEFENSIVE（存在 CRITICAL 差異,或 overall=MISMATCH_MAJOR）
+      "MISMATCH_MINOR" → 僅記錄（WARNING 級）
+      None             → MATCH,不升級
+
+    為什麼必須看 discrepancies[].severity：_determine_overall_result 把 FATAL 與 CRITICAL
+    都塌成 MISMATCH_MAJOR,單看 overall_result 無法分辨「凍結」與「降風控」。STALE_DATA /
+    ERROR 由呼叫端 fail-closed 短路,不進本函數。
+    """
+    overall = str(report_dict.get("overall_result", "MATCH")).upper()
+    if overall == "MATCH":
+        return None
+    disc_sev = {
+        str(d.get("severity", "")).upper()
+        for d in report_dict.get("discrepancies", [])
+    }
+    if "FATAL" in disc_sev:
+        return "FATAL"
+    if overall == "MISMATCH_MAJOR" or "CRITICAL" in disc_sev:
+        return "MISMATCH_MAJOR"
+    return "MISMATCH_MINOR"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Scheduled Reconciliation Runner / 定时对账运行器
 # ═══════════════════════════════════════════════════════════════════════════════
 

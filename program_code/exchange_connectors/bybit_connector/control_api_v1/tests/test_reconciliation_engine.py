@@ -37,7 +37,90 @@ from app.reconciliation_engine import (
     ReconciliationResult,
     ScheduledReconciler,
     Severity,
+    map_report_to_escalation,
 )
+
+
+class TestMapReportToEscalation:
+    """map_report_to_escalation 唯一映射（reconcile Path B §4）。
+
+    為什麼要看 discrepancies[].severity：overall_result 把 FATAL 與 CRITICAL 都塌成
+    MISMATCH_MAJOR,單看 overall 無法分辨「凍結」與「降風控」。
+    """
+
+    def test_match_returns_none(self):
+        assert map_report_to_escalation({"overall_result": "MATCH", "discrepancies": []}) is None
+
+    def test_empty_dict_defaults_to_none(self):
+        assert map_report_to_escalation({}) is None
+
+    def test_warning_only_is_minor(self):
+        report = {"overall_result": "MISMATCH_MINOR", "discrepancies": [{"severity": "WARNING"}]}
+        assert map_report_to_escalation(report) == "MISMATCH_MINOR"
+
+    def test_critical_disc_is_major(self):
+        report = {"overall_result": "MISMATCH_MAJOR", "discrepancies": [{"severity": "CRITICAL"}]}
+        assert map_report_to_escalation(report) == "MISMATCH_MAJOR"
+
+    def test_major_overall_without_disc_is_major(self):
+        report = {"overall_result": "MISMATCH_MAJOR", "discrepancies": []}
+        assert map_report_to_escalation(report) == "MISMATCH_MAJOR"
+
+    def test_fatal_disc_beats_critical(self):
+        # overall 仍為 MISMATCH_MAJOR,但存在 FATAL 差異 → 必須升為 FATAL。
+        report = {
+            "overall_result": "MISMATCH_MAJOR",
+            "discrepancies": [{"severity": "CRITICAL"}, {"severity": "FATAL"}],
+        }
+        assert map_report_to_escalation(report) == "FATAL"
+
+    def test_real_report_to_dict_roundtrip(self):
+        # 用引擎真報告驗證：遠端多一個持倉 → FATAL POSITION_MISSING → token=FATAL。
+        report = ReconciliationReport(overall_result=ReconciliationResult.MISMATCH_MAJOR)
+        report.discrepancies.append(
+            Discrepancy(disc_type=DiscrepancyType.POSITION_MISSING, severity=Severity.FATAL)
+        )
+        assert map_report_to_escalation(report.to_dict()) == "FATAL"
+
+    # ── E4 追加：E2/CC flagged 的邊界案例（2b）——證明映射對髒輸入 fail-safe,不崩、不誤升 ──
+
+    def test_disc_missing_severity_key_does_not_crash(self):
+        # 差異 dict 缺 "severity" 鍵：str(d.get("severity","")).upper() → "" ,不 KeyError;
+        # overall=MISMATCH_MAJOR 仍走 major 分支。證明缺鍵不會炸也不會誤升為 FATAL。
+        report = {"overall_result": "MISMATCH_MAJOR", "discrepancies": [{}]}
+        assert map_report_to_escalation(report) == "MISMATCH_MAJOR"
+
+    def test_unknown_garbage_severity_string_treated_as_non_critical(self):
+        # 未知/垃圾 severity 字串不得被當成 CRITICAL/FATAL（否則會誤升級)。
+        report = {"overall_result": "MISMATCH_MINOR", "discrepancies": [{"severity": "BOGUS_SEV"}]}
+        assert map_report_to_escalation(report) == "MISMATCH_MINOR"
+
+    def test_unknown_overall_result_defaults_to_minor(self):
+        # 未知 overall_result（非 MATCH、非 MISMATCH_MAJOR)且無 CRITICAL/FATAL → 最保守 MINOR。
+        report = {"overall_result": "WHO_KNOWS", "discrepancies": []}
+        assert map_report_to_escalation(report) == "MISMATCH_MINOR"
+
+    def test_mixed_severities_critical_beats_warning(self):
+        # 混合嚴重度取最嚴重：WARNING + CRITICAL → MISMATCH_MAJOR（CRITICAL 勝 WARNING)。
+        report = {
+            "overall_result": "MISMATCH_MAJOR",
+            "discrepancies": [{"severity": "WARNING"}, {"severity": "CRITICAL"}],
+        }
+        assert map_report_to_escalation(report) == "MISMATCH_MAJOR"
+
+    def test_error_overall_with_critical_disc_maps_major(self):
+        # overall_result=="ERROR" 路徑（引擎內部異常會塞一條 CRITICAL UNKNOWN 差異)：
+        # 設計上由 route fail-closed 短路不進本函數,但即便進來也不得崩,且映為非 None 升級。
+        report = ReconciliationReport(overall_result=ReconciliationResult.ERROR)
+        report.discrepancies.append(
+            Discrepancy(disc_type=DiscrepancyType.UNKNOWN, severity=Severity.CRITICAL)
+        )
+        assert map_report_to_escalation(report.to_dict()) == "MISMATCH_MAJOR"
+
+    def test_error_overall_empty_disc_maps_minor(self):
+        # ERROR overall 但無差異 → 落到最保守 MINOR(仍非 None,誠實反映 non-MATCH)。
+        report = {"overall_result": "ERROR", "discrepancies": []}
+        assert map_report_to_escalation(report) == "MISMATCH_MINOR"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

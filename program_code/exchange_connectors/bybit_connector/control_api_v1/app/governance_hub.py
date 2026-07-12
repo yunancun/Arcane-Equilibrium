@@ -73,6 +73,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from collections import deque
 from pathlib import Path
 from typing import Any, Optional
 
@@ -162,6 +163,9 @@ class GovernanceHub(GovernanceHubStatusCascadeMixin, GovernanceHubEventHandlersM
         # Tracking for callbacks
         self._callback_errors = 0
         self._incident_count = 0
+        # 對賬升級去重：同一 report_id 最多升級一次（incident_callback 每動作觸發多次）。
+        # 用 deque(maxlen) 插入序有界:滿載淘汰最舊,current id 絕不被同呼叫淘汰（確定性）。
+        self._escalated_report_ids: deque[str] = deque(maxlen=512)
 
         # Lazy initialization flag
         self._initialized = False
@@ -436,8 +440,13 @@ class GovernanceHub(GovernanceHubStatusCascadeMixin, GovernanceHubEventHandlersM
             self._authorization_sm = AuthorizationStateMachine(audit_callback=auth_callback)
             self._risk_governor_sm = RiskGovernorStateMachine(audit_callback=risk_callback)
             self._lease_sm = DecisionLeaseStateMachine(audit_callback=lease_callback)
+            # ADVISORY-FIRST 安全門（CC-1 / UNKNOWN-1）：手動對賬路徑用的引擎以
+            # auto_freeze_on_critical=False 構造 —— CRITICAL 差異不自動凍結,僅升風控。
+            # 為什麼：手動對賬「本地引擎 vs api-demo」帳戶身分尚未 Linux runtime 證實同源;
+            # 未證實前不得讓一次對賬熔斷/凍結授權。第二道保險在 incident_callback（token
+            # 封頂 MISMATCH_MAJOR）。翻轉為自動凍結需 UNKNOWN-1 定案 + CC 簽核。
             self._reconciliation_engine = ReconciliationEngine(
-                config=ReconciliationConfig(),
+                config=ReconciliationConfig(auto_freeze_on_critical=False),
                 audit_callback=recon_callback,
                 incident_callback=incident_callback,
             )
@@ -1459,20 +1468,27 @@ class GovernanceHub(GovernanceHubStatusCascadeMixin, GovernanceHubEventHandlersM
                 return {"ok": False, "reason": "reconciliation_engine_unavailable"}
             reconciliation_engine = self._reconciliation_engine
 
+        # 防禦性 fail-closed：真實路徑下 route 已在伺服器端組裝 demo 快照,或短路為
+        # STALE_DATA,demo_state 不會為 None。若異常 caller 仍傳 None,絕不自比對、絕不
+        # 偽造空 demo（demo_state or paper_state 的自比對會退化成 trivial-MATCH,空 demo
+        # 會偽造 FATAL POSITION_MISSING → 誤凍結）。
+        if demo_state is None:
+            return {"ok": False, "reason": "demo_state_required"}
+
         try:
             # Execute I/O-bound reconciliation outside lock
             report = reconciliation_engine.reconcile(
                 paper_state=paper_state,
-                remote_state=demo_state or paper_state,
+                remote_state=demo_state,
             )
 
             # Convert dataclass to dict for downstream consumers
             report_dict = report.to_dict() if hasattr(report, "to_dict") else report
 
-            # Check for major mismatches and escalate risk
-            if report.critical_count > 0 if hasattr(report, "critical_count") else False:
-                severity = "CRITICAL"
-                self._on_reconciliation_mismatch(severity, report_dict)
+            # 升級唯一入口 = 引擎 incident_callback（reconcile 內 _execute_actions 觸發,經
+            # map_report_to_escalation 單一映射 + advisory-first 封頂）。此處舊的直接升級
+            # （曾傳字面 "CRITICAL",_on_reconciliation_mismatch 無此分支 → 空操作）已移除,
+            # 避免雙重升級與 token 不一致。
 
             if logger.isEnabledFor(logging.DEBUG):
                 logger.debug("Reconciliation complete: %s", report_dict.get("overall_result", "unknown"))
