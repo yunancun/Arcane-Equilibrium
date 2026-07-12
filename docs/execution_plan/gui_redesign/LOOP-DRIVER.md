@@ -70,3 +70,15 @@
 - 衡樑數據源=風控包絡真值;無真值按 canon 7 顯 blocked 態,不 fake 傾角。
 - 視覺驗證:靜態樣可用 artifact 截圖輔助;真渲染三態/鍵盤走查/帛晝全站=V5 defer 清單(A3 報告 8 項),需 Linux runtime。
 - A3 findings 的 Phase 2 綁定項(M-3 uppercase copy pass/M-4 品類眉標)在 Phase 2 各 tab 遷移時隨批處理,不提前。
+
+## 7 · P2 中期驗收固化(2026-07-12;驗收執行於 R65 邊界,兄弟 session 同期推進至 R74)
+- **E2 固化三查**(寫進每個遷移批的 E2 dispatch prompt):①防雙觸必用真 `disabled` 或 in-flight flag(aria-disabled 不算,CSS 無 pointer-events 規則)②view 內呼叫的 helper 必 grep 到定義點(死調用=finding;view-ai ocFetch 前科)③宣稱 byte-parity 必附 0 值/空值邊緣輸入對照。
+- **驗收 findings 修復隊列(高優先,先於新遷移)**:view-ai **MED-1**(runEvolution :413 aria-disabled 防雙觸失效→真 disabled)/**MED-2**(view-ai-providers :395/:438/:474 三寫面 in-flight 禁用全丟,legacy 有 try/finally→補回)/**MED-3**(view-ai.js:320 死調用 ocFetch→改 ocApi,MODULE_NOTE 失實一併修);MED-4(0 值 payload drift)行為宣告入帳+後端 clamp 查證;LOW-1~4 順帶或記 defer。
+- **live 例外**:其餘全部已授權(operator 2026-07-12);**live 遷移開工前仍需 operator 一句顯式 go**;一切 view 的 cutover 以 operator Linux/遠端批驗為門(不變)。
+- **帳本 SHA 錨紀律**(E4-verifier GAP-2 固化):worktree 推送後,矩陣/帳本回滾錨一律回寫 **HEAD 祖先 SHA**(雙胞胎 SHA 不可作錨;R56-R63 六錨祖先對應已記於帳本驗收節)。
+
+## 8 · 遠端批驗協議(operator 2026-07-12 授權)
+- **前置(每輪開頭檢測)**:operator 需在 loop session 的 Browser pane 開 `http://trade-core:8000/console`(Tailscale)並**親自登入**——loop/agent **絕不輸入任何憑證**(硬規則,無例外);loop 只檢測「console 已登入可達」,不可達則跳過本節繼續其他工作,並在帳本置頂提醒一句。
+- **可達時執行**(VERIFICATION-RUNBOOK 只讀子集):逐 view hash 導航→渲染對等目視(截圖)→canon 7 三態觀察(觀察真值所處態,不製造態)→雙主題對比(帛晝僅當 P1.3 gate 綠;未綠只驗玄夜)→pause/resume(切走切回)→console error 檢查。**只讀鐵則:不點任何寫控件(保存/觸發/清除/停止/下單)、不提交表單、不改設置;typed-confirm 只驗「modal 開+確認鈕初始 disabled」即 Esc 取消,絕不輸入 phrase。**
+- 結果記 runbook 簽核表(PASS/bug 清單)+帳本;**真寫入行為項列 OPERATOR-HAND 清單**,永遠留 operator 親手。
+- 批驗與遷移並行不阻塞;某 view 批驗出 bug 時,該 bug 修復優先於新遷移。
