@@ -54,8 +54,10 @@ def test_csp_report_only_header_present_on_responses() -> None:
     assert "Content-Security-Policy-Report-Only" in r.headers
     report_only = r.headers["Content-Security-Policy-Report-Only"]
     assert "report-uri /api/v1/csp/report" in report_only
-    # Wave A 影子規則必砍掉 unsafe-inline（與 enforcing CSP 對比的關鍵差異）
-    assert "'unsafe-inline'" not in report_only
+    # Report-Only stays aligned with current legacy GUI allowances until every
+    # tab has been moved off inline script/style. A stricter shadow policy
+    # floods /api/v1/csp/report and pollutes browser QA with 429 noise.
+    assert "'unsafe-inline'" in report_only
 
 
 def test_csp_report_endpoint_accepts_json_returns_204() -> None:
