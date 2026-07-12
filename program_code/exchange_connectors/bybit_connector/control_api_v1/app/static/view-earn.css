@@ -1,0 +1,200 @@
+/* ═══════════════════════════════════════════════════════════════════
+   view-earn.css — 玄衡原生 view「Earn 理財 / First Stake」頁級樣式(Phase 2 第 9 遷)
+   ═══════════════════════════════════════════════════════════════════
+   MODULE_NOTE
+   模塊用途:承載 view-earn.js 注入的 earn DOM 所需樣式。分兩層:
+     ① .earn-* 家族 —— gate light box / verdict / Stage 0R 三態徽 / first-stake 表單 /
+        typed-confirm 警示 / submit 列 / spinner。這是對 tab-earn.html 頁內樣式塊
+        (lines 38-254)的**重複(非移動)**:legacy iframe 路徑仍靠 tab-earn.html 自帶
+        頁內樣式塊,故 tab-earn.html 不動作回滾錨。earn-tab.js 執行期 toggle 的狀態 class
+        (gate-pass/fail/warn/na、verdict-pass/fail、stage0r-pass/pending/fail、
+        input-error/ok、hint-error/ok)之樣式全在此。
+     ② `.earn-view` scope 的 legacy 短名 shim(oc-card / oc-metrics / oc-metric* /
+        oc-table* / oc-control-bar / oc-chip*)—— 殼**刻意不呼** common.js
+        ocInjectBaseCSS()(避免其 body{padding}+`*` reset 破殼 chrome),而這批 class 的
+        樣式原只在 ocInjectBaseCSS 內;ocChip() 又硬 emit `.oc-chip`。故逐字 port 進本檔
+        並以 `.earn-view` 收束作用域(防全域外溢)。此為對 ocInjectBaseCSS 同名規則的
+        **重複(非移動)**:legacy iframe 續靠 ocInjectBaseCSS 運行時注入。write-face 的
+        toast/modal/按鈕(.oc-toast* / .oc-confirm-* / .oc-btn*)已在 shell-components.css
+        (殼已載),不重複。
+   ratchet(born-clean 0/0/0):全檔零裸 hex —— tab-earn.html 頁內樣式塊 與 ocInjectBaseCSS 的
+     rgba(63,185,80,…)/(248,81,73,…)/(210,153,34,…)/(139,148,158,…)/(13,17,23,…) 色字面
+     一律改語義 token:綠→--pos/--pos-bg、紅→--neg/--neg-bg、琥珀→--warn/--warn-bg、
+     灰→--text-secondary/--border-strong、暗底→--bg-sunken、hover→--bg-hover;
+     pill 半徑 999px→--r-full、monospace→--font-mono。過 test_gui_style_ratchet_static.py。
+   誠實邊界:靜態只證 source;真渲染 / 真三態色 / typed-confirm 對話框可讀性 = NEEDS-LINUX + operator。
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ═══ ① .earn-* 家族(port tab-earn.html 頁內樣式塊,色字面→token)═══ */
+
+/* ── 標頭橫條 / Header bar ── */
+.earn-header-row {
+  display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
+  padding: 10px 12px; background: var(--bg-surface); border: 1px solid var(--border-subtle);
+  border-radius: var(--r-2); margin-bottom: 12px;
+}
+.earn-header-title { font-size: 15px; font-weight: 700; margin: 0; }
+.earn-header-meta { color: var(--text-secondary); font-size: 11px; line-height: 1.6; }
+.earn-header-actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* ── 5-gate panel:5 個 light box ── */
+.earn-gate-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin: 12px 0; }
+.earn-gate-box {
+  border: 1px solid var(--border-subtle); border-radius: var(--r-2);
+  padding: 12px 14px; background: var(--bg-sunken);
+  text-align: left; min-height: 92px; position: relative;
+}
+.earn-gate-icon { font-size: 22px; line-height: 1; margin-bottom: 6px; display: block; }
+.earn-gate-label {
+  font-size: 11px; font-weight: 700; color: var(--text-primary);
+  margin-bottom: 4px; line-height: 1.35;
+}
+.earn-gate-detail { font-size: 10px; color: var(--text-secondary); line-height: 1.4; overflow-wrap: anywhere; }
+.earn-gate-box.gate-pass { border-color: var(--pos);  background: var(--pos-bg); }
+.earn-gate-box.gate-fail { border-color: var(--neg);  background: var(--neg-bg); }
+.earn-gate-box.gate-warn { border-color: var(--warn); background: var(--warn-bg); }
+.earn-gate-box.gate-na   { border-color: var(--border-strong); background: transparent; }
+
+.earn-gate-verdict {
+  margin-top: 10px; padding: 8px 12px; border-radius: var(--r-2);
+  font-size: 13px; font-weight: 700; text-align: center;
+}
+.earn-gate-verdict.verdict-pass { background: var(--pos-bg); border: 1px solid var(--pos); color: var(--pos); }
+.earn-gate-verdict.verdict-fail { background: var(--neg-bg); border: 1px solid var(--neg); color: var(--neg); }
+
+/* ── Stage 0R 3-state badge ── */
+.earn-stage0r-row {
+  margin-top: 8px; padding: 8px 12px; border-radius: var(--r-2);
+  font-size: 12px; line-height: 1.6;
+  display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+}
+.earn-stage0r-row.stage0r-pass    { background: var(--pos-bg);  border: 1px solid var(--pos); }
+.earn-stage0r-row.stage0r-pending { background: var(--warn-bg); border: 1px solid var(--warn); }
+.earn-stage0r-row.stage0r-fail    { background: var(--neg-bg);  border: 1px solid var(--neg); }
+.earn-stage0r-badge {
+  font-weight: 700; padding: 2px 8px; border-radius: var(--r-full);
+  font-size: 11px; letter-spacing: 0.4px;
+}
+.earn-stage0r-badge.stage0r-pass    { background: var(--pos-bg);  color: var(--pos); }
+.earn-stage0r-badge.stage0r-pending { background: var(--warn-bg); color: var(--warn); }
+.earn-stage0r-badge.stage0r-fail    { background: var(--neg-bg);  color: var(--neg); }
+.earn-stage0r-copy {
+  margin-left: auto; font-family: var(--font-mono); font-size: 11px;
+  color: var(--text-secondary); overflow-wrap: anywhere;
+}
+
+/* ── First-stake form ── */
+.earn-form-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px; margin: 10px 0;
+}
+.earn-form-row { display: flex; flex-direction: column; gap: 4px; }
+.earn-form-label {
+  font-size: 11px; color: var(--text-secondary); font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.4px;
+}
+.earn-form-input,
+.earn-form-select,
+.earn-form-textarea {
+  background: var(--bg-app); border: 1px solid var(--border-subtle);
+  color: var(--text-primary); border-radius: var(--r-1);
+  padding: 8px 10px; font-size: 13px; font-family: inherit; min-height: 36px;
+}
+.earn-form-input:focus,
+.earn-form-select:focus,
+.earn-form-textarea:focus { outline: none; border-color: var(--accent); }
+.earn-form-input.input-error { border-color: var(--neg); }
+.earn-form-input.input-ok    { border-color: var(--pos); }
+.earn-form-textarea { min-height: 64px; resize: vertical; font-family: inherit; }
+.earn-form-readonly { background: var(--bg-sunken); color: var(--text-primary); font-weight: 600; }
+.earn-form-hint { font-size: 11px; color: var(--text-secondary); line-height: 1.5; }
+.earn-form-hint.hint-error { color: var(--neg); }
+.earn-form-hint.hint-ok    { color: var(--pos); }
+
+/* h3 標題後的灰色小字說明(font-weight:normal 無對應 utility → 頁內組件)。 */
+.earn-h3-note { font-size: 11px; color: var(--text-secondary); font-weight: normal; }
+/* 記錄 filter 的緊湊 select(min-height 非檔位值 → 頁內組件)。 */
+.earn-form-select--sm { min-height: 32px; padding: 4px 8px; }
+
+/* ── Typed-confirm warning notice ── */
+.earn-typed-warn {
+  margin: 12px 0; padding: 10px 14px; background: var(--neg-bg);
+  border-left: 3px solid var(--neg); border-radius: 0 var(--r-2) var(--r-2) 0;
+  font-size: 12px; line-height: 1.7; color: var(--text-primary);
+}
+.earn-typed-warn b { color: var(--neg); }
+.earn-typed-warn code {
+  font-family: var(--font-mono); background: var(--bg-sunken);
+  padding: 2px 6px; border-radius: var(--r-1); color: var(--warn);
+}
+
+.earn-submit-row { margin-top: 10px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.earn-submit-btn { padding: 10px 22px; font-size: 13px; font-weight: 700; border-radius: var(--r-1); cursor: pointer; }
+.earn-submit-disabled-reason { font-size: 11px; color: var(--neg); line-height: 1.5; }
+
+/* ── Loading overlay on submit ── */
+.earn-submit-loading { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); }
+.earn-spinner {
+  width: 12px; height: 12px; border: 2px solid var(--border-subtle);
+  border-top-color: var(--accent); border-radius: 50%;
+  animation: earn-spin 0.7s linear infinite;
+}
+@keyframes earn-spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
+
+/* ═══ ② `.earn-view` scope 的 legacy 短名 shim(port ocInjectBaseCSS,色字面→token)═══ */
+
+/* Cards */
+.earn-view .oc-card {
+  background: var(--bg-surface); border: 1px solid var(--border-subtle);
+  border-radius: var(--r-2); padding: 16px; margin-bottom: 14px;
+}
+.earn-view .oc-card h3 { font-size: 13px; font-weight: 600; margin-bottom: 8px; color: var(--text-primary); }
+
+/* Metric row */
+.earn-view .oc-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+.earn-view .oc-metric { background: var(--bg-app); border: 1px solid var(--border-subtle); border-radius: var(--r-2); padding: 10px 12px; }
+.earn-view .oc-metric-label { font-size: 10px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.4px; }
+.earn-view .oc-metric-val { font-size: 20px; font-weight: 700; margin-top: 2px; }
+.earn-view .oc-metric-sub { font-size: 11px; color: var(--text-secondary); margin-top: 2px; }
+
+/* Status chips(ocChip emit;info→中性青銅弱色,blue 在玄衡無 token → 走 accent-weak/neutral)*/
+.earn-view .oc-chip {
+  display: inline-flex; align-items: center; gap: 5px; border-radius: var(--r-full);
+  padding: 3px 10px; font-size: 11px; font-weight: 500; border: 1px solid transparent;
+}
+.earn-view .oc-chip-good    { background: var(--pos-bg);  border-color: var(--pos);  color: var(--pos); }
+.earn-view .oc-chip-warn    { background: var(--warn-bg); border-color: var(--warn); color: var(--warn); }
+.earn-view .oc-chip-bad     { background: var(--neg-bg);  border-color: var(--neg);  color: var(--neg); }
+.earn-view .oc-chip-neutral { background: var(--bg-hover); border-color: var(--border-strong); color: var(--text-secondary); }
+.earn-view .oc-chip-info    { background: var(--accent-weak); border-color: var(--border-subtle); color: var(--text-secondary); }
+
+/* Control bar(records filter)*/
+.earn-view .oc-control-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 12px 16px; background: var(--bg-surface); border: 1px solid var(--border-subtle);
+  border-radius: var(--r-2); margin-bottom: 14px;
+}
+
+/* Tables */
+.earn-view .oc-table-wrap { overflow-x: auto; margin-top: 8px; }
+.earn-view .oc-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.earn-view .oc-table th {
+  text-align: left; padding: 8px 10px; color: var(--text-secondary); font-weight: 500;
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px;
+  border-bottom: 1px solid var(--border-subtle); background: var(--bg-sunken);
+}
+.earn-view .oc-table td { padding: 8px 10px; border-bottom: 1px solid var(--border-subtle); }
+.earn-view .oc-table tr:last-child td { border-bottom: none; }
+.earn-view .oc-table tr:hover td { background: var(--bg-hover); }
+
+/* ═══ 行動裝置 a11y:5-gate 5 col 過擠時 wrap / 表格與控件促升 ═══ */
+@media (max-width: 700px) {
+  .earn-gate-grid { grid-template-columns: repeat(2, 1fr); }
+  .earn-submit-btn { min-height: 44px; }
+  .earn-form-input, .earn-form-select, .earn-form-textarea { min-height: 44px; font-size: 14px; }
+  .earn-gate-box { min-height: 86px; }
+  .earn-view .oc-table td, .earn-view .oc-table th { padding: 6px 7px; font-size: 11px; }
+  .earn-view .oc-control-bar { gap: 6px; padding: 8px 10px; }
+  .earn-view .oc-metrics { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
+  .earn-view .oc-card { padding: 12px; }
+}
