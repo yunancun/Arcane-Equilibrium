@@ -46,7 +46,13 @@
   //       label/badge=rail 顯示;flag=⚑ 交易關鍵(P2 最後遷移);live=Live rung 視覺 gate。
   var VIEWS = [
     // ── crypto lane:environment ladder(scoped 於 active lane)──
-    { id: 'overview', lane: 'crypto', hash: '#/crypto/overview', src: '/static/tab-system.html',     visId: 'system',      label: '總覽 Overview',   badge: 'overview' },
+    // overview:Phase 2 第 14 個原生遷移(iframe:false;**交易關鍵/含 LIVE session stop 寫**,復用遷移)——render/pause/resume
+    //   由 view-overview.js 註冊於 window.OC_NATIVE_VIEWS(id=overview)。策略=**verbatim 復用 tab-system.html 內聯 script**:
+    //   view-overview.js 於 render fetch tab-system.html 注入其 overview DOM(byte-parity)後 IIFE-wrap 重跑內聯 script
+    //   (paper start/stop + **LIVE session stop(/api/v1/live/session/stop)** + mode config-change 全 byte-parity 復用,經
+    //   Rust IPC;§3 LIVE 硬化面[5000ms+1200ms confirm guard / 切離 live_reserved 自動 live-stop / --live 熱紅 / typed 二次確認]
+    //   逐字保留零弱化)。src 保留 legacy tab-system 作 registry 完整性 + 回滾錨(=flag fallback 的 iframe src)。
+    { id: 'overview', lane: 'crypto', hash: '#/crypto/overview', src: '/static/tab-system.html',     visId: 'system',      label: '總覽 Overview',   badge: 'overview', iframe: false },
     // paper:Phase 2 第 11 個原生遷移(iframe:false;**復用遷移**,Legacy Paper=模擬紙上交易/預設關/非交易關鍵四者)——
     //   render/pause/resume 由 view-paper.js 註冊於 window.OC_NATIVE_VIEWS(id=paper)。策略=**verbatim 復用
     //   tab-paper.html 內聯 script**:view-paper.js 於 render fetch tab-paper.html 注入其 paper DOM(byte-parity)

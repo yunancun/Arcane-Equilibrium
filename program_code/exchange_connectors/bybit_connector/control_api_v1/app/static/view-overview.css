@@ -1,0 +1,198 @@
+/* ═══════════════════════════════════════════════════════════════════
+   view-overview.css — 玄衡原生 view「總覽 / Overview」頁級樣式(Phase 2 第 14 遷,交易關鍵)
+   ═══════════════════════════════════════════════════════════════════
+   MODULE_NOTE
+   模塊用途:承載 view-overview.js 注入的 overview DOM 所需樣式。分兩層:
+     ① overview-specific —— tab-system.html 的**唯一頁內 style 塊**(行 21-94)逐字搬入
+        (scoped `.overview-view`):tip-metric 懸浮框、快捷操作(quick-actions / qa-*)、模式按鈕
+        (mode-btn* / mode-btn-grid / mode-flow)、**確認 modal(confirm-*)含 §3 LIVE 硬化面**、
+        metric 字級修飾(mv--sm / mv--md)、metrics 網格變體(metrics-2col / metrics-fit)。此為對
+        tab-system.html 頁內樣式塊的**重複(非移動)**:legacy iframe 路徑仍靠 tab-system.html 自帶
+        頁內塊,故該檔不動作回滾錨。
+     ② `.overview-view` scope 的 legacy 短名 shim(oc-card / oc-metric* / oc-chip*[含 **oc-chip-live**] /
+        oc-collapse* / oc-table* / oc-explain* / oc-loading / oc-grid-2 / oc-subtab-placeholder +
+        .green/.yellow/.red/.blue 色助手)—— 殼**刻意不呼** common.js ocInjectBaseCSS()(避免其
+        body{padding}+`*` reset 破殼 chrome),而這批 class 的樣式原只在 ocInjectBaseCSS 內。故逐字 port
+        進本檔並以 `.overview-view` 收束作用域(防全域外溢)。此為對 ocInjectBaseCSS 同名規則的**重複
+        (非移動)**:legacy iframe 續靠 ocInjectBaseCSS 運行時注入。按鈕(.oc-btn*)、toast、版式 utility
+        (row/gap/fs-*/t-*/num 等)已在 shell-components.css / oc-utilities.css / tokens.css(殼已載),不重複。
+   §3 LIVE 硬化 skin 逐字保留(本遷最高關注,零弱化):`--live` 熱紅主題 class 全在 ① 逐字搬入——
+     .purple(→ var(--live))、.mode-btn.mode-btn--live(→ border var(--live))、.confirm-body .warn-box--live
+     (→ var(--live))、.confirm-live-guard(→ border/bg/color var(--live*))、.oc-chip-live(② shim,→ var(--live*));
+     長按進度機制(.live-hold-progress / .live-hold-bar / #confirm-ok.confirm-ok-live-ready / .confirm-ok-holding)
+     → var(--accent) 青銅互動 affordance,byte-parity 保留;live_reserved 態 real-money 識別框不被青銅蓋掉。
+   ratchet(born-clean 0/0/0):全檔零裸 hex —— ① 塊 tab-system.html 本就零 #hex(色值全 rgba tint / var token,
+     ratchet 只禁 #hex,rgba 合法);② shim 沿 view-settings.css / view-paper.css 慣例(色字面→語義 token,
+     暗底 rgba→--bg-sunken)。零 inline style 屬性、零內聯樣式塊(本檔是 .css)。過 test_gui_style_ratchet_static.py。
+   誠實邊界:靜態只證 source;真渲染 / --live 熱紅真配色 / confirm modal 疊層 / 三態徽色 = NEEDS-LINUX + operator。
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ═══ ① overview-specific(port tab-system.html 頁內 style 塊 行 21-94,scoped .overview-view)═══ */
+
+.overview-view .tip-metric { position: relative; cursor: help; }
+.overview-view .tip-metric .tip-box { display: none; position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
+  background: var(--bg-raised); border: 1px solid var(--border-subtle); border-radius: var(--r-2); padding: 10px 14px; min-width: 260px; max-width: 360px;
+  z-index: 100; box-shadow: 0 8px 24px rgba(0,0,0,0.4); font-size: 12px; line-height: 1.6; }
+.overview-view .tip-metric:hover .tip-box { display: block; }
+.overview-view .tip-box .tip-raw { font-family: monospace; color: var(--accent); font-size: 11px; margin-bottom: 6px; word-break: break-all; }
+.overview-view .tip-box .tip-desc { color: var(--text-secondary); }
+.overview-view .quick-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border-subtle); align-items: center; }
+.overview-view .qa-status-row { display: inline-flex; align-items: center; gap: 5px; padding: 6px 10px;
+  border-radius: var(--r-2); border: 1px solid var(--border-subtle); background: var(--bg-app);
+  font-size: 12px; color: var(--text-secondary); cursor: default; }
+.overview-view .qa-btn { padding: 8px 16px; border-radius: var(--r-2); border: 1px solid var(--border-subtle); background: var(--bg-app);
+  color: var(--text-primary); font-size: 12px; cursor: pointer; transition: all 0.15s; display: flex; align-items: center; gap: 6px; }
+.overview-view .qa-btn:hover { border-color: var(--accent); }
+.overview-view .qa-btn .qa-dot { width: 8px; height: 8px; border-radius: 50%; }
+.overview-view .qa-dot-on { background: var(--pos); }
+.overview-view .qa-dot-off { background: var(--text-secondary); }
+/* Mode Buttons */
+.overview-view .mode-btn-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+.overview-view .mode-btn { background: var(--bg-app); border: 1px solid var(--border-subtle); border-radius: var(--r-2);
+  padding: 14px 12px; text-align: left; cursor: pointer; transition: all 0.15s;
+  color: var(--text-primary); position: relative; }
+.overview-view .mode-btn:hover { border-color: var(--accent); background: rgba(88,166,255,0.05); }
+.overview-view .mode-btn.active { border-color: var(--accent); background: rgba(88,166,255,0.1); }
+.overview-view .mode-btn.active::after { content: '✓ 當前'; position: absolute; top: 8px; right: 10px;
+  font-size: 10px; color: var(--accent); }
+.overview-view .mode-btn-icon { font-size: 22px; margin-bottom: 6px; }
+.overview-view .mode-btn-name { font-size: 14px; font-weight: 600; }
+.overview-view .mode-btn-sub { font-size: 10px; color: var(--accent); font-family: monospace; margin: 2px 0 6px; }
+.overview-view .mode-btn-desc { font-size: 11px; color: var(--text-secondary); line-height: 1.5; }
+.overview-view .purple { color: var(--live); }
+/* Confirm Modal */
+.overview-view .confirm-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 200; }
+.overview-view .confirm-overlay.show { display: flex; align-items: center; justify-content: center; }
+.overview-view .confirm-dialog { background: var(--bg-raised); border: 1px solid var(--border-subtle); border-radius: var(--r-3); width: min(480px, 90vw);
+  box-shadow: 0 20px 50px rgba(0,0,0,0.5); }
+.overview-view .confirm-header { padding: 16px 20px; border-bottom: 1px solid var(--border-subtle); font-size: 15px; font-weight: 600; }
+.overview-view .confirm-body { padding: 16px 20px; font-size: 13px; line-height: 1.7; color: var(--text-secondary); }
+.overview-view .confirm-body strong { color: var(--text-primary); }
+.overview-view .confirm-body .warn-box { background: rgba(248,81,73,0.08); border: 1px solid rgba(248,81,73,0.2);
+  border-radius: var(--r-2); padding: 10px 14px; margin-top: 10px; color: var(--neg); font-size: 12px; }
+.overview-view .confirm-live-guard { margin: 0 20px 16px; padding: 12px 14px; border: 1px solid var(--live);
+  border-radius: var(--r-2); background: var(--live-bg); color: var(--live); font-size: 12px; line-height: 1.6; }
+.overview-view .confirm-live-guard[hidden] { display: none; }
+.overview-view .live-hold-progress { height: 6px; margin-top: 8px; border-radius: 999px; background: var(--accent-weak); overflow: hidden; }
+.overview-view .live-hold-bar { width: 0%; height: 100%; border-radius: inherit; background: var(--accent); transition: width 0.08s linear; }
+.overview-view #confirm-ok.confirm-ok-live-ready { border-color: var(--accent); }
+.overview-view #confirm-ok.confirm-ok-holding { background: var(--accent); border-color: var(--accent); }
+.overview-view .confirm-footer { padding: 12px 20px; border-top: 1px solid var(--border-subtle); display: flex; justify-content: flex-end; gap: 8px; }
+/* ── P0.2 批次 2:inline style= 收斂出的頁面組件(本塊在 body,文檔序晚於
+   ocInjectBaseCSS 注入的 head style 塊,同 specificity 由本塊勝出)── */
+/* 父層字級修飾:oc-metric-val 的 className 會被 JS 整串重寫(鐵則二),字級掛不被觸碰的包裹層 */
+.overview-view .mv--sm .oc-metric-val { font-size: var(--fs-dense); }
+.overview-view .mv--md .oc-metric-val { font-size: var(--fs-md); }
+/* 小號 chip 內距;chip 2px 級內距屬組件層(§4 家族 8 註)。qa-feed-chip 的
+   className 重寫串(loadQuickStatus)先前已引用本類但全站無定義,此處補上正本 */
+.overview-view .qa-chip-sm { padding: 1px 7px; }
+.overview-view .mode-flow { display: flex; align-items: center; gap: var(--sp-1); flex-wrap: wrap;
+  font-size: var(--fs-micro); color: var(--text-secondary); margin-bottom: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3); background: var(--bg-app); border-radius: var(--r-1);
+  border: 1px solid var(--border-subtle); }
+/* live_reserved 紫色家族原為 palette 外色;C6d-2 已中性化:
+   語義 real-money(.purple / confirm-live-guard / mode-btn--live / warn-box--live)→ --live 熱紅警示;
+   長按進度機制(hold-progress / hold-bar / ok-live-ready / ok-holding)→ --accent 青銅互動 affordance */
+/* 選擇器升為雙類並置於 .mode-btn.active/:hover 之後,同權後載勝出;
+   復現原 inline border-color 全狀態(含 hover / live_reserved 為當前模式 active)恆熱紅,
+   不讓青銅 accent 蓋掉 live 風險識別框(§3 LIVE 硬化不弱化) */
+.overview-view .mode-btn.mode-btn--live { border-color: var(--live); }
+.overview-view .confirm-body .warn-box--live { border-color: var(--live); color: var(--live); } /* 晚於 .warn-box 定義,同權後載勝出 */
+.overview-view .confirm-list { margin: var(--sp-2) 0; padding-left: var(--sp-4); line-height: 2; } /* line-height:2 是刻意鬆排,按組件層原樣保留 */
+.overview-view .oc-metrics.metrics-2col { grid-template-columns: 1fr 1fr; }
+.overview-view .oc-metrics.metrics-fit { grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); }
+
+/* ═══ ② `.overview-view` scope 的 legacy 短名 shim(port ocInjectBaseCSS,色字面→token)═══ */
+
+/* ── Load-error / 佔位(showLoadError + loading)── */
+.overview-view .oc-subtab-placeholder {
+  padding: 24px 18px; text-align: center;
+  background: var(--bg-sunken); border: 1px dashed var(--border-subtle);
+  border-radius: var(--r-2); color: var(--text-secondary); font-size: 13px;
+  line-height: 1.7; margin-top: 10px;
+}
+
+/* ── Cards ── */
+.overview-view .oc-card {
+  background: var(--bg-surface); border: 1px solid var(--border-subtle);
+  border-radius: var(--r-2); padding: 16px; margin-bottom: 14px;
+}
+.overview-view .oc-card h2 { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+.overview-view .oc-card h3 { font-size: 13px; font-weight: 600; margin-bottom: 8px; color: var(--text-primary); }
+.overview-view .oc-card .subtitle { font-size: 12px; color: var(--text-secondary); margin-bottom: 12px; }
+
+/* ── Metric row ── */
+.overview-view .oc-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+.overview-view .oc-metric { background: var(--bg-app); border: 1px solid var(--border-subtle); border-radius: var(--r-2); padding: 10px 12px; }
+.overview-view .oc-metric-label { font-size: 10px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.4px; }
+.overview-view .oc-metric-val { font-size: 20px; font-weight: 700; margin-top: 2px; }
+
+/* 色助手(oc-metric-val 多態:JS 掛 green/yellow/red/blue;.purple 見 ① --live)*/
+.overview-view .green { color: var(--pos); }
+.overview-view .red { color: var(--neg); }
+.overview-view .yellow { color: var(--warn); }
+.overview-view .blue { color: var(--text-secondary); }
+
+/* ── Status chips(色字面→語義 token,對齊 view-settings.css;oc-chip-live=§3 LIVE 熱紅識別)── */
+.overview-view .oc-chip {
+  display: inline-flex; align-items: center; gap: 5px; border-radius: var(--r-full);
+  padding: 3px 10px; font-size: 11px; font-weight: 500; border: 1px solid transparent;
+}
+.overview-view .oc-chip-good    { background: var(--pos-bg);   border-color: var(--pos);           color: var(--pos); }
+.overview-view .oc-chip-warn    { background: var(--warn-bg);  border-color: var(--warn);          color: var(--warn); }
+.overview-view .oc-chip-bad     { background: var(--neg-bg);   border-color: var(--neg);           color: var(--neg); }
+.overview-view .oc-chip-neutral { background: var(--bg-hover); border-color: var(--border-strong); color: var(--text-secondary); }
+.overview-view .oc-chip-live    { background: var(--live-bg);  border-color: var(--live);          color: var(--live); }
+
+/* ── Explainer(ocExplain 輸出;暗底 rgba→--bg-sunken)── */
+.overview-view .oc-explain { margin-bottom: 14px; }
+.overview-view .oc-explain-simple {
+  color: var(--text-secondary); font-size: 12px; line-height: 1.7;
+  padding: 10px 14px; background: var(--bg-sunken); border-left: 3px solid var(--accent);
+  border-radius: 0 var(--r-2) var(--r-2) 0;
+}
+.overview-view .oc-explain-deep { margin-top: 4px; }
+.overview-view .oc-explain-deep summary { color: var(--accent); font-size: 11px; cursor: pointer; padding: 4px 14px; user-select: none; }
+.overview-view .oc-explain-content {
+  padding: 10px 14px; color: var(--text-secondary); font-size: 12px; line-height: 1.7;
+  background: var(--bg-sunken); border-radius: var(--r-2); margin-top: 4px;
+}
+
+/* ── Tables(產品族;th 底 / hover 保 rgba→token,對齊 view-paper.css)── */
+.overview-view .oc-table-wrap { overflow-x: auto; margin-top: 8px; }
+.overview-view .oc-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.overview-view .oc-table th {
+  text-align: left; padding: 8px 10px; color: var(--text-secondary); font-weight: 500;
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px;
+  border-bottom: 1px solid var(--border-subtle); background: var(--bg-sunken);
+}
+.overview-view .oc-table td { padding: 8px 10px; border-bottom: 1px solid var(--border-subtle); }
+.overview-view .oc-table tr:last-child td { border-bottom: none; }
+.overview-view .oc-table tr:hover td { background: var(--bg-hover); }
+.overview-view .oc-table .empty-row td { text-align: center; color: var(--text-secondary); padding: 20px; }
+
+/* ── Collapsed section(details/summary 三角標記;產品族)── */
+.overview-view .oc-collapse { border: 1px solid var(--border-subtle); border-radius: var(--r-2); margin-top: 10px; }
+.overview-view .oc-collapse summary {
+  cursor: pointer; padding: 10px 14px; font-size: 13px;
+  color: var(--text-primary); user-select: none; list-style: none;
+}
+.overview-view .oc-collapse summary::-webkit-details-marker { display: none; }
+.overview-view .oc-collapse summary::before { content: '\25B6  '; font-size: 9px; color: var(--text-secondary); }
+.overview-view .oc-collapse[open] summary::before { content: '\25BC  '; }
+.overview-view .oc-collapse[open] summary { border-bottom: 1px solid var(--border-subtle); }
+.overview-view .oc-collapse .oc-collapse-body { padding: 12px 14px; }
+
+/* ── Two-column grid(來源上下文 + 健康摘要)── */
+.overview-view .oc-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+
+/* ── Loading 佔位 ── */
+.overview-view .oc-loading { color: var(--text-secondary); font-size: 12px; padding: 20px; text-align: center; }
+
+/* ═══ 行動裝置 a11y:grid / metrics / table / card 促升(port ocInjectBaseCSS @media 相關子集)═══ */
+@media (max-width: 700px) {
+  .overview-view .oc-grid-2 { grid-template-columns: 1fr; }
+  .overview-view .oc-metrics { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
+  .overview-view .oc-table td, .overview-view .oc-table th { padding: 6px 7px; font-size: 11px; }
+  .overview-view .oc-card { padding: 12px; }
+}
