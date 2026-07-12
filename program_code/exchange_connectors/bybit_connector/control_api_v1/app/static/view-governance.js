@@ -212,7 +212,7 @@
     return out;
   }
 
-  // ── F1 born-safety:掃 fetched html 所有 on* 屬性值,抓**裸賦值目標**(IDENT=…);與頂層宣告名交集才建 proxy。──
+  // ── F1 born-safety:掃 fetched html∪combined 所有 on* 屬性值,抓**裸賦值目標**(IDENT=…);與頂層宣告名交集才建 proxy。──
   //   前置 (^|[^.\w$]) 排屬性賦值(this.x= / el.value=);`=` 後 [^=] 排 ==/===。governance 實測交集=∅
   //   (§4:全 on* 皆函式呼叫或 member 呼叫,html:937 的 `===` 是比較非賦值)→ proxyCode 空,不生成 proxy 碼。
   function onAttrBareAssignTargets(htmlText) {
@@ -250,7 +250,9 @@
     });
 
     // F1 born-safety(governance 產空集,不生成 proxy;保留檢查對齊 view-risk.js 手法,擋未來裸賦值弱化)。
-    var proxyNames = onAttrBareAssignTargets(htmlText).filter(function (nm) { return topNames[nm]; });
+    //   R87 OPEN-4 layer②:掃 html∪combined(對齊 discoverer 掃描域 + view-live.js §11),消 E3 R77 LOW-1
+    //   template-injected 裸賦值盲區;實測 proxyNames 兩域相同(=∅)→ 純掃描域擴大,生成 IIFE byte-identical、零行為變更。
+    var proxyNames = onAttrBareAssignTargets(htmlText + '\n' + combined).filter(function (nm) { return topNames[nm]; });
     var proxyCode = '';
     proxyNames.forEach(function (nm) {
       proxyCode +=

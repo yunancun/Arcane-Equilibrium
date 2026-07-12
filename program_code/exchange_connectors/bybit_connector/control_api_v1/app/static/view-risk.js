@@ -207,7 +207,9 @@
     //   此通用擋未來其他 onclick 裸賦值到 IIFE-local 的同類弱化;交集 topLevelDeclaredNames 確保只對真 IIFE-local
     //   binding 建 proxy(不誤中 DOM `.value=` / `this.x=`,那些被 (^|[^.\w$]) 前置排除且非頂層宣告名)。
     var topNames = topLevelDeclaredNames(combined);
-    var proxyNames = onAttrBareAssignTargets(htmlText).filter(function (nm) { return topNames[nm]; });
+    // R87 OPEN-4 layer②:掃 html∪combined(對齊 view-live.js §11 + governance),消 E3 R77 LOW-1 template-injected
+    //   裸賦值盲區;實測 proxyNames 兩域相同(=[_liveRiskSavePendingCallback])→ 純掃描域擴大,生成 IIFE byte-identical、零行為變更。
+    var proxyNames = onAttrBareAssignTargets(htmlText + '\n' + combined).filter(function (nm) { return topNames[nm]; });
     var proxyCode = '';
     proxyNames.forEach(function (nm) {
       // nm 由 [A-Za-z_$][\w$]* 限定(合法識別字,無注入);window key 走 JSON.stringify,IIFE-local 存取用裸名。
