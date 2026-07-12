@@ -49,7 +49,12 @@
     { id: 'overview', lane: 'crypto', hash: '#/crypto/overview', src: '/static/tab-system.html',     visId: 'system',      label: '總覽 Overview',   badge: 'overview' },
     { id: 'paper',    lane: 'crypto', hash: '#/crypto/paper',    src: '/static/tab-paper.html',       visId: 'paper',       label: 'Legacy Paper',    badge: 'paper' },
     { id: 'replay',   lane: 'crypto', hash: '#/crypto/replay',   src: '/static/tab-replay.html',      visId: 'replay',      label: '回放 Replay',     badge: 'replay' },
-    { id: 'strategy', lane: 'crypto', hash: '#/crypto/strategy', src: '/static/tab-strategy.html',    visId: 'strategy',    label: '策略 Strategy',   badge: 'strategy' },
+    // strategy:Phase 2 第 8 個原生遷移(iframe:false;**含 3 寫:create/pause·stop/delete**)——render/pause/resume
+    //   由 view-strategy.js 註冊於 window.OC_NATIVE_VIEWS(id=strategy);觀測面拆出 view-strategy-history.js
+    //   (掛 OC_STRATEGY_HISTORY,承 意圖 + 策略师變更歷史,全唯讀)。src 保留 legacy tab-strategy 作 registry
+    //   完整性 + 回滾錨,原生渲染接管。3 寫 preserve 既有 strategy-config 端點,零新寫路徑;delete 的
+    //   openConfirmModal("delete-strategy") 逐字保留不弱化(R61 fail-closed);response-gated 非 fake。
+    { id: 'strategy', lane: 'crypto', hash: '#/crypto/strategy', src: '/static/tab-strategy.html',    visId: 'strategy',    label: '策略 Strategy',   badge: 'strategy', iframe: false },
     { id: 'earn',     lane: 'crypto', hash: '#/crypto/earn',     src: '/static/tab-earn.html',        visId: 'earn',        label: 'Earn 理財',       badge: 'earn' },
     { id: 'demo',     lane: 'crypto', hash: '#/crypto/demo',     src: '/static/tab-demo.html',        visId: 'demo',        label: '演示 Demo',       badge: 'demo', flag: true },
     { id: 'live',     lane: 'crypto', hash: '#/crypto/live',     src: '/static/tab-live.html',        visId: 'live',        label: '實盤 Live',       badge: 'live', flag: true, live: true },
