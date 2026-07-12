@@ -1735,8 +1735,40 @@ FROM PUBLIC;
 
 -- All V158 result overloads were inventoried in Guard A.  Their first and
 -- only executable action is now an unconditional hard failure.
-CREATE OR REPLACE FUNCTION learning.persist_alr_challenger_training_result_v1(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,INTEGER,TEXT,TEXT,TEXT,TIMESTAMPTZ,TIMESTAMPTZ,TEXT,TEXT,BIGINT,TEXT,TEXT,BIGINT,TEXT,TEXT,BIGINT,TEXT) RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $v159_closed_writer$ BEGIN RAISE EXCEPTION 'V159 closed V158 result writer: durable fit attestation v2 required'; END $v159_closed_writer$;
-CREATE OR REPLACE FUNCTION learning.read_alr_challenger_training_result_v1(TEXT,TEXT) RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $v159_closed_reader$ BEGIN RAISE EXCEPTION 'V159 closed V158 result reader: durable fit attestation v2 required'; END $v159_closed_reader$;
+CREATE OR REPLACE FUNCTION learning.persist_alr_challenger_training_result_v1(
+    p_training_run_hash TEXT,
+    p_durable_receipt_hash TEXT,
+    p_training_key_hash TEXT,
+    p_source_head TEXT,
+    p_actual_dataset_hash TEXT,
+    p_actual_row_ids_hash TEXT,
+    p_actual_split_hash TEXT,
+    p_actual_code_manifest_hash TEXT,
+    p_actual_training_config_hash TEXT,
+    p_actual_feature_schema_hash TEXT,
+    p_actual_label_schema_hash TEXT,
+    p_model_schema_version TEXT,
+    p_actual_training_rows INTEGER,
+    p_model_artifact_set_hash TEXT,
+    p_metrics_hash TEXT,
+    p_resource_usage_hash TEXT,
+    p_fit_started_at TIMESTAMPTZ,
+    p_fit_completed_at TIMESTAMPTZ,
+    p_q10_artifact_hash TEXT,
+    p_q10_artifact_path TEXT,
+    p_q10_artifact_size_bytes BIGINT,
+    p_q50_artifact_hash TEXT,
+    p_q50_artifact_path TEXT,
+    p_q50_artifact_size_bytes BIGINT,
+    p_q90_artifact_hash TEXT,
+    p_q90_artifact_path TEXT,
+    p_q90_artifact_size_bytes BIGINT,
+    p_challenger_hash TEXT
+) RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $v159_closed_writer$ BEGIN RAISE EXCEPTION 'V159 closed V158 result writer: durable fit attestation v2 required'; END $v159_closed_writer$;
+CREATE OR REPLACE FUNCTION learning.read_alr_challenger_training_result_v1(
+    p_training_run_hash TEXT,
+    p_training_key_hash TEXT
+) RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $v159_closed_reader$ BEGIN RAISE EXCEPTION 'V159 closed V158 result reader: durable fit attestation v2 required'; END $v159_closed_reader$;
 
 ALTER FUNCTION learning.persist_alr_challenger_fit_attestation_v1(BYTEA,JSONB,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TIMESTAMPTZ,TIMESTAMPTZ)
     OWNER TO alr_challenger_fit_attestor;

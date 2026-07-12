@@ -11,6 +11,7 @@ import ast
 import hashlib
 import importlib.util
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -73,6 +74,465 @@ _TOP_LEVEL_CASE_GUARDS = (
 def _sql() -> str:
     assert V159.exists(), f"V159 migration is missing: {V159}"
     return V159.read_text(encoding="utf-8")
+
+
+_LEGACY_RESULT_FUNCTIONS = (
+    "persist_alr_challenger_training_result_v1",
+    "read_alr_challenger_training_result_v1",
+)
+_LEGACY_QUOTED_IDENTIFIERS = frozenset(("learning", *_LEGACY_RESULT_FUNCTIONS))
+_LEGACY_CLOSURE_START = (
+    "-- All V158 result overloads were inventoried in Guard A.  Their first and\n"
+    "-- only executable action is now an unconditional hard failure.\n"
+)
+_LEGACY_CLOSURE_END = (
+    "\nALTER FUNCTION learning.persist_alr_challenger_fit_attestation_v1"
+)
+
+
+def _is_pg_identifier_start(char: str) -> bool:
+    return (
+        char == "_"
+        or "A" <= char <= "Z"
+        or "a" <= char <= "z"
+        or not char.isascii()
+    )
+
+
+def _is_pg_identifier_continuation(char: str) -> bool:
+    return (
+        _is_pg_identifier_start(char)
+        or "0" <= char <= "9"
+        or char == "$"
+    )
+
+
+def _is_pg_dollar_quote_tag(tag: str) -> bool:
+    return not tag or (
+        _is_pg_identifier_start(tag[0])
+        and all(
+            _is_pg_identifier_continuation(char) and char != "$"
+            for char in tag[1:]
+        )
+    )
+
+
+def _pg_top_level_code(sql: str) -> str:
+    """Mask quoted data/comments while preserving top-level code positions."""
+    masked: list[str] = []
+    cursor = 0
+    previous_single_end: int | None = None
+    previous_single_uses_backslash = False
+
+    def mask(fragment: str) -> str:
+        return "".join("\n" if char == "\n" else " " for char in fragment)
+
+    while cursor < len(sql):
+        start = cursor
+        if sql.startswith("--", cursor):
+            newline = sql.find("\n", cursor + 2)
+            cursor = len(sql) if newline < 0 else newline
+            masked.append(mask(sql[start:cursor]))
+            continue
+        if sql.startswith("/*", cursor):
+            depth = 1
+            cursor += 2
+            while cursor < len(sql) and depth:
+                if sql.startswith("/*", cursor):
+                    depth += 1
+                    cursor += 2
+                elif sql.startswith("*/", cursor):
+                    depth -= 1
+                    cursor += 2
+                else:
+                    cursor += 1
+            masked.append(mask(sql[start:cursor]))
+            continue
+        if sql[cursor] == "'":
+            explicit_escape = (
+                cursor > 0
+                and sql[cursor - 1] in {"E", "e"}
+                and (
+                    cursor < 2
+                    or not _is_pg_identifier_continuation(sql[cursor - 2])
+                )
+            )
+            continuation_gap = (
+                sql[previous_single_end:cursor]
+                if previous_single_end is not None
+                else ""
+            )
+            continued_escape = (
+                previous_single_end is not None
+                and "\n" in continuation_gap
+                and continuation_gap.isspace()
+                and previous_single_uses_backslash
+            )
+            uses_backslash = explicit_escape or continued_escape
+            cursor += 1
+            while cursor < len(sql):
+                if uses_backslash and sql[cursor] == "\\":
+                    cursor = min(len(sql), cursor + 2)
+                    continue
+                if sql[cursor] != "'":
+                    cursor += 1
+                    continue
+                if cursor + 1 < len(sql) and sql[cursor + 1] == "'":
+                    cursor += 2
+                    continue
+                cursor += 1
+                break
+            previous_single_end = cursor
+            previous_single_uses_backslash = uses_backslash
+            masked.append(mask(sql[start:cursor]))
+            continue
+        if sql[cursor] == '"':
+            unicode_quoted = (
+                cursor >= 2
+                and sql[cursor - 2 : cursor].casefold() == "u&"
+                and (
+                    cursor < 3
+                    or not _is_pg_identifier_continuation(sql[cursor - 3])
+                )
+            )
+            cursor += 1
+            while cursor < len(sql):
+                if sql[cursor] != '"':
+                    cursor += 1
+                    continue
+                if cursor + 1 < len(sql) and sql[cursor + 1] == '"':
+                    cursor += 2
+                    continue
+                cursor += 1
+                break
+            fragment = sql[start:cursor]
+            content = (
+                fragment[1:-1].replace('""', '"')
+                if fragment.endswith('"')
+                else None
+            )
+            masked.append(
+                fragment
+                if unicode_quoted or content in _LEGACY_QUOTED_IDENTIFIERS
+                else mask(fragment)
+            )
+            continue
+        if sql[cursor] == "$":
+            delimiter_end = sql.find("$", cursor + 1)
+            tag = sql[cursor + 1 : delimiter_end] if delimiter_end >= 0 else None
+            opening_boundary = (
+                cursor == 0
+                or not _is_pg_identifier_continuation(sql[cursor - 1])
+            )
+            if (
+                opening_boundary
+                and tag is not None
+                and _is_pg_dollar_quote_tag(tag)
+            ):
+                marker = sql[cursor : delimiter_end + 1]
+                cursor += len(marker)
+                closing = sql.find(marker, cursor)
+                cursor = len(sql) if closing < 0 else closing + len(marker)
+                masked.append(mask(sql[start:cursor]))
+                continue
+        masked.append(sql[cursor])
+        cursor += 1
+    return "".join(masked)
+
+
+def _legacy_function_target_pattern(function_name: str) -> re.Pattern[str]:
+    schema = r'(?:"learning"|learning)'
+    function = rf'(?:"{re.escape(function_name)}"|{re.escape(function_name)})'
+    target = rf"(?:{schema}\s*[.]\s*)?{function}"
+    return re.compile(rf"{target}\s*(?=[(])", re.IGNORECASE)
+
+
+def _legacy_function_ddl_pattern(function_name: str) -> re.Pattern[str]:
+    target = _legacy_function_target_pattern(function_name).pattern
+    return re.compile(
+        rf"\b(?P<verb>CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION|"
+        rf"DROP\s+(?:FUNCTION|ROUTINE)(?:\s+IF\s+EXISTS)?|"
+        rf"ALTER\s+(?:FUNCTION|ROUTINE))\s+{target}\s*(?=[(])",
+        re.IGNORECASE,
+    )
+
+
+def _function_inputs_source(sql: str, function_name: str) -> str:
+    prefix = f"CREATE OR REPLACE FUNCTION learning.{function_name}("
+    assert sql.count(prefix) == 1, function_name
+    start = sql.index(prefix) + len(prefix)
+    end = sql.index(") RETURNS JSONB", start)
+    return sql[start:end]
+
+
+def _expected_legacy_closure_block(v158_sql: str) -> str:
+    writer_inputs = _function_inputs_source(
+        v158_sql, "persist_alr_challenger_training_result_v1"
+    )
+    reader_inputs = _function_inputs_source(
+        v158_sql, "read_alr_challenger_training_result_v1"
+    )
+    return (
+        _LEGACY_CLOSURE_START
+        + "CREATE OR REPLACE FUNCTION "
+        "learning.persist_alr_challenger_training_result_v1("
+        + writer_inputs
+        + ") RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER "
+        "SET search_path=pg_catalog,pg_temp AS $v159_closed_writer$ "
+        "BEGIN RAISE EXCEPTION 'V159 closed V158 result writer: "
+        "durable fit attestation v2 required'; END $v159_closed_writer$;\n"
+        "CREATE OR REPLACE FUNCTION "
+        "learning.read_alr_challenger_training_result_v1("
+        + reader_inputs
+        + ") RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER "
+        "SET search_path=pg_catalog,pg_temp AS $v159_closed_reader$ "
+        "BEGIN RAISE EXCEPTION 'V159 closed V158 result reader: "
+        "durable fit attestation v2 required'; END $v159_closed_reader$;\n"
+    )
+
+
+def _legacy_closure_block(sql: str) -> tuple[int, int, str]:
+    assert sql.count(_LEGACY_CLOSURE_START) == 1
+    assert sql.count(_LEGACY_CLOSURE_END) == 1
+    start = sql.index(_LEGACY_CLOSURE_START)
+    end = sql.index(_LEGACY_CLOSURE_END, start)
+    return start, end, sql[start:end]
+
+
+def _assert_legacy_v1_closures_preserve_catalog_inputs(
+    v159_sql: str,
+    v158_sql: str,
+) -> None:
+    executable_sql = _pg_top_level_code(v159_sql)
+    block_start, block_end, actual = _legacy_closure_block(v159_sql)
+    assert re.search(r"\bU&\"", executable_sql, re.IGNORECASE) is None
+    drop_statements = tuple(
+        re.finditer(
+            r"\bDROP\s+(?:FUNCTION|ROUTINE)(?:\s+IF\s+EXISTS)?"
+            r"(?P<targets>[^;]*);",
+            executable_sql,
+            re.IGNORECASE,
+        )
+    )
+    for function_name in _LEGACY_RESULT_FUNCTIONS:
+        declarations = tuple(
+            _legacy_function_ddl_pattern(function_name).finditer(executable_sql)
+        )
+        assert len(declarations) == 1, function_name
+        assert re.fullmatch(
+            r"CREATE\s+OR\s+REPLACE\s+FUNCTION",
+            declarations[0].group("verb"),
+            re.IGNORECASE,
+        )
+        prefix = f"CREATE OR REPLACE FUNCTION learning.{function_name}("
+        expected_start = v159_sql.index(prefix, block_start, block_end)
+        expected_end = expected_start + len(prefix) - 1
+        assert declarations[0].span() == (expected_start, expected_end)
+        target = _legacy_function_target_pattern(function_name)
+        assert not any(
+            target.search(statement.group("targets"))
+            for statement in drop_statements
+        )
+    assert actual == _expected_legacy_closure_block(v158_sql)
+
+
+def test_v159_legacy_v1_closures_preserve_catalog_input_names() -> None:
+    _assert_legacy_v1_closures_preserve_catalog_inputs(
+        _sql(), V158.read_text(encoding="utf-8")
+    )
+
+
+@pytest.mark.parametrize(
+    "function_name,parameter_name",
+    (
+        ("persist_alr_challenger_training_result_v1", "p_training_run_hash"),
+        ("read_alr_challenger_training_result_v1", "p_training_key_hash"),
+    ),
+)
+@pytest.mark.parametrize("mutation", ("rename", "omit"))
+def test_v159_legacy_v1_closure_parameter_name_mutations_are_rejected(
+    function_name: str,
+    parameter_name: str,
+    mutation: str,
+) -> None:
+    sql = _sql()
+    start, end, block = _legacy_closure_block(sql)
+    assert function_name in block and parameter_name in block
+    replacement = f"{parameter_name}_drift" if mutation == "rename" else ""
+    weakened = (
+        sql[:start]
+        + block.replace(parameter_name, replacement, 1)
+        + sql[end:]
+    )
+    with pytest.raises(AssertionError):
+        _assert_legacy_v1_closures_preserve_catalog_inputs(
+            weakened, V158.read_text(encoding="utf-8")
+        )
+
+
+@pytest.mark.parametrize(
+    "wrap",
+    (
+        lambda block: f"/* {block} */",
+        lambda block: f"$é$ {block} $é$",
+        lambda block: f"E'prefix\\' {block}'",
+    ),
+)
+def test_v159_legacy_v1_closure_nonexecuting_decoys_are_rejected(
+    wrap: Callable[[str], str],
+) -> None:
+    sql = _sql()
+    start, end, block = _legacy_closure_block(sql)
+    weakened = sql[:start] + wrap(block) + sql[end:]
+    with pytest.raises(AssertionError):
+        _assert_legacy_v1_closures_preserve_catalog_inputs(
+            weakened, V158.read_text(encoding="utf-8")
+        )
+
+
+def test_v159_legacy_v1_closure_straddling_comment_is_rejected() -> None:
+    sql = _sql()
+    start, end, _block = _legacy_closure_block(sql)
+    alter_end = sql.index(";", end) + 1
+    weakened = (
+        sql[:start]
+        + "/*\n"
+        + sql[start:alter_end]
+        + "\n*/"
+        + sql[alter_end:]
+    )
+    with pytest.raises(AssertionError):
+        _assert_legacy_v1_closures_preserve_catalog_inputs(
+            weakened, V158.read_text(encoding="utf-8")
+        )
+
+
+def test_v159_legacy_v1_closure_composed_mask_and_reopen_is_rejected() -> None:
+    sql = _sql()
+    start, end, _block = _legacy_closure_block(sql)
+    alter_end = sql.index(";", end) + 1
+    reopened = ""
+    for function_name in _LEGACY_RESULT_FUNCTIONS:
+        inputs = _function_inputs_source(
+            V158.read_text(encoding="utf-8"), function_name
+        )
+        reopened += (
+            f"\nCREATE OR REPLACE FUNCTION learning.{function_name}("
+            + inputs
+            + ") RETURNS JSONB LANGUAGE sql AS 'SELECT ''{}''::JSONB';\n"
+        )
+    commit = sql.rindex("\nCOMMIT;")
+    weakened = (
+        sql[:start]
+        + "/*\n"
+        + sql[start:alter_end]
+        + "\n*/"
+        + sql[alter_end:commit]
+        + reopened
+        + sql[commit:]
+    )
+    with pytest.raises(AssertionError):
+        _assert_legacy_v1_closures_preserve_catalog_inputs(
+            weakened, V158.read_text(encoding="utf-8")
+        )
+
+
+@pytest.mark.parametrize(
+    "opening,closing",
+    (
+        ("SELECT $outer$\n", "\n$outer$;"),
+        ('SELECT 1 AS "', '";'),
+    ),
+)
+def test_v159_legacy_v1_closure_straddling_quote_is_rejected(
+    opening: str,
+    closing: str,
+) -> None:
+    sql = _sql()
+    start, end, _block = _legacy_closure_block(sql)
+    alter_end = sql.index(";", end) + 1
+    weakened = (
+        sql[:start]
+        + opening
+        + sql[start:alter_end]
+        + closing
+        + sql[alter_end:]
+    )
+    with pytest.raises(AssertionError):
+        _assert_legacy_v1_closures_preserve_catalog_inputs(
+            weakened, V158.read_text(encoding="utf-8")
+        )
+
+
+@pytest.mark.parametrize("function_name", _LEGACY_RESULT_FUNCTIONS)
+@pytest.mark.parametrize(
+    "target_format",
+    (
+        "learning.{function_name}",
+        '"learning"."{function_name}"',
+        'U&"learning".U&"{function_name}"',
+        "unicode_escaped",
+    ),
+)
+@pytest.mark.parametrize("leading", ("", "\nSELECT 'x\\';\n"))
+def test_v159_legacy_v1_closure_later_reopen_is_rejected(
+    function_name: str,
+    target_format: str,
+    leading: str,
+) -> None:
+    sql = _sql()
+    inputs = _function_inputs_source(
+        V158.read_text(encoding="utf-8"), function_name
+    )
+    if target_format == "unicode_escaped":
+        first = f"{ord(function_name[0]):04X}"
+        escaped_name = f"\\{first}{function_name[1:]}"
+        target = f'U&"le\\0061rning".U&"{escaped_name}"'
+    else:
+        target = target_format.format(function_name=function_name)
+    reopened = (
+        f"\nCREATE\nOR REPLACE\nFUNCTION {target}("
+        + inputs
+        + ") RETURNS JSONB LANGUAGE sql AS 'SELECT ''{}''::JSONB';\n"
+    )
+    commit = sql.rindex("\nCOMMIT;")
+    weakened = sql[:commit] + leading + reopened + sql[commit:]
+    with pytest.raises(AssertionError):
+        _assert_legacy_v1_closures_preserve_catalog_inputs(
+            weakened, V158.read_text(encoding="utf-8")
+        )
+
+
+@pytest.mark.parametrize("function_name", _LEGACY_RESULT_FUNCTIONS)
+@pytest.mark.parametrize(
+    "override",
+    (
+        "DROP FUNCTION IF EXISTS learning.{function_name}({types});",
+        "DROP FUNCTION IF EXISTS public.unrelated(), learning.{function_name}({types});",
+        "DROP ROUTINE IF EXISTS learning.{function_name}({types});",
+        "ALTER FUNCTION learning.{function_name}({types}) SECURITY INVOKER;",
+        "ALTER ROUTINE learning.{function_name}({types}) SECURITY INVOKER;",
+    ),
+)
+def test_v159_legacy_v1_closure_drop_or_alter_is_rejected(
+    function_name: str,
+    override: str,
+) -> None:
+    sql = _sql()
+    inputs = _function_inputs_source(
+        V158.read_text(encoding="utf-8"), function_name
+    )
+    types = ",".join(
+        argument.strip().rsplit(" ", 1)[1]
+        for argument in inputs.split(",")
+    )
+    statement = override.format(function_name=function_name, types=types)
+    commit = sql.rindex("\nCOMMIT;")
+    weakened = sql[:commit] + "\n" + statement + sql[commit:]
+    with pytest.raises(AssertionError):
+        _assert_legacy_v1_closures_preserve_catalog_inputs(
+            weakened, V158.read_text(encoding="utf-8")
+        )
 
 
 def _assert_top_level_case_guards_are_parenthesized(sql: str) -> None:
@@ -2262,10 +2722,10 @@ def _assert_functional_positive_helper_contracts(tree: ast.Module) -> None:
 def _assert_functional_probe_contract(source: str) -> None:
     compile(source, str(FUNCTIONAL_PROBE), "exec")
     assert hashlib.sha256(V159.read_bytes()).hexdigest() == (
-        "210c99fe7ec53cb6ea7eb618cface034a645ee4df343eef92d8d98239d64dde1"
+        "9e570811210fa99cc65a19bbd1b62f5bd508ee6c0fe2856d980aa2299dec946c"
     )
     assert (
-        '"V159": "210c99fe7ec53cb6ea7eb618cface034a645ee4df343eef92d8d98239d64dde1"'
+        '"V159": "9e570811210fa99cc65a19bbd1b62f5bd508ee6c0fe2856d980aa2299dec946c"'
         in source
     )
     assert '_ACK_ENV = "ALR_V159_DISPOSABLE_ACK"' in source
@@ -2805,7 +3265,7 @@ def test_v159_functional_probe_ast_contract() -> None:
             "allow_role_default_session(connection)",
         ),
         (
-            '"V159": "210c99fe7ec53cb6ea7eb618cface034a645ee4df343eef92d8d98239d64dde1"',
+            '"V159": "9e570811210fa99cc65a19bbd1b62f5bd508ee6c0fe2856d980aa2299dec946c"',
             '"V159": "' + "0" * 64 + '"',
         ),
         ("BYTE_EXACT_READBACK", "BYTE_READBACK_SKIPPED"),
@@ -3135,7 +3595,7 @@ def test_v159_functional_probe_ast_rejects_composed_scenario_bypass() -> None:
 
 _CONCURRENCY_EXPECTED_SHA256 = {
     "V158": "7ed70599c6bd5f3cdb3376bc135a952d8c18f4ad62a62432c2bfdd8ee84e446b",
-    "V159": "210c99fe7ec53cb6ea7eb618cface034a645ee4df343eef92d8d98239d64dde1",
+    "V159": "9e570811210fa99cc65a19bbd1b62f5bd508ee6c0fe2856d980aa2299dec946c",
 }
 _CONCURRENCY_SCENARIO_ORDER = (
     "_scenario_identical_attestation",
