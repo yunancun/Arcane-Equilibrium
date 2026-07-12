@@ -125,13 +125,7 @@ def read_qualified_training_receipt(
         with connection.cursor() as cursor:
             cursor.execute(_READ_RECEIPT_SQL, params)
             response = _fixed_function_response(cursor.fetchone())
-        status, receipt = _validate_read_response(response, payload=payload)
-        result = {
-            "status": status,
-            "receipt": (
-                None if receipt is None else copy.deepcopy(dict(receipt))
-            ),
-        }
+        result = _validated_read_result(response, payload=payload)
         connection.commit()
     except Exception:
         connection.rollback()
@@ -140,12 +134,32 @@ def read_qualified_training_receipt(
     return result
 
 
+def validate_qualified_training_receipt_read(
+    qualified_receipt_read: Mapping[str, Any],
+    *,
+    training_contract: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Purely validate one fixed-reader response against its bound contract."""
+
+    contract = _validated_contract(training_contract)
+    payload = _receipt_payload(contract)
+    if not isinstance(qualified_receipt_read, Mapping):
+        raise AlrChallengerRepositoryError("receipt_response_not_mapping")
+    try:
+        response = copy.deepcopy(dict(qualified_receipt_read))
+    except Exception as exc:
+        raise AlrChallengerRepositoryError(
+            "receipt_response_snapshot_invalid"
+        ) from exc
+    return _validated_read_result(response, payload=payload)
+
+
 def _validated_contract(value: Any) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         raise AlrChallengerRepositoryError("training_contract_not_mapping")
     try:
         snapshot = copy.deepcopy(dict(value))
-    except (TypeError, ValueError) as exc:
+    except Exception as exc:
         raise AlrChallengerRepositoryError("training_contract_snapshot_invalid") from exc
     validation = validate_alr_challenger_training_contract(snapshot)
     if not validation.valid:
@@ -287,6 +301,18 @@ def _validate_read_response(
     return status, receipt
 
 
+def _validated_read_result(
+    response: Mapping[str, Any],
+    *,
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    status, receipt = _validate_read_response(response, payload=payload)
+    return {
+        "status": status,
+        "receipt": None if receipt is None else copy.deepcopy(dict(receipt)),
+    }
+
+
 def _validate_receipt_row(
     receipt: Any,
     *,
@@ -350,4 +376,5 @@ __all__ = [
     "QUALIFIED_REWARD_SET_SCHEMA_VERSION",
     "persist_qualified_training_receipt",
     "read_qualified_training_receipt",
+    "validate_qualified_training_receipt_read",
 ]
