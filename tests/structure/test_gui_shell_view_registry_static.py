@@ -431,3 +431,67 @@ def test_write_face_css_lock_detector_has_teeth() -> None:
     assert not _css_defines_selector(comment_only, ".oc-only-in-comment"), (
         "檢測器無牙:註釋裸提及(後接 `*`)被誤判為 selector 定義"
     )
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# cache-buster 一致性守衛(F-R96-1 HIGH 防復發)
+#   背景:R55→R96 期間 shell.js 的 BUILD_TS 與 shell.html 的 `shell.js?v=` 同凍結
+#   於 20260711.shell-p11a,致 shell.js 的 R86-R96 改動被客戶端快取污染(不傳播)。
+#   守衛:BUILD_TS 常量 **必等於** shell.html 載入 shell.js 的 `?v=` 版號 → 兩者不可
+#   靜默漂移;殼-loader 凍結 = 大聲 fail。(不涵蓋其他檔的 ?v=,但鎖住最關鍵的殼-loader。)
+# ════════════════════════════════════════════════════════════════════════════
+_BUILD_TS_RE = re.compile(r"var\s+BUILD_TS\s*=\s*'([^']+)'")
+_SHELL_JS_VER_RE = re.compile(r"shell\.js\?v=([A-Za-z0-9._-]+)")
+
+
+def _extract_build_ts(js_text: str) -> str | None:
+    m = _BUILD_TS_RE.search(js_text)
+    return m.group(1) if m else None
+
+
+def _extract_shell_js_cache_buster(html_text: str) -> str | None:
+    m = _SHELL_JS_VER_RE.search(html_text)
+    return m.group(1) if m else None
+
+
+def test_shell_js_cache_buster_matches_build_ts() -> None:
+    """shell.html 載入 shell.js 的 `?v=` 必等於 shell.js 的 BUILD_TS(F-R96-1 防復發)。
+
+    兩者漂移 = 殼-loader 快取凍結(shell.js 改動不傳播,需硬刷新)。此守衛令漂移大聲 fail。
+    """
+    build_ts = _extract_build_ts(_read(SHELL_JS))
+    assert build_ts, "shell.js 未找到 `var BUILD_TS = '...'`(解析器失效或常量被移除)"
+
+    shell_html = STATIC_DIR / "shell.html"
+    ver = _extract_shell_js_cache_buster(_read(shell_html))
+    assert ver, "shell.html 未找到 `shell.js?v=...`(shell.js 未帶 cache-buster ?v=)"
+
+    assert ver == build_ts, (
+        "F-R96-1 復發:shell.html 的 `shell.js?v=" + ver + "` 與 shell.js 的 "
+        "BUILD_TS='" + build_ts + "' 不一致 → 殼-loader 快取凍結(shell.js 改動不傳播)。"
+        "每次改 shell.js 的批必同步 bump 兩處。"
+    )
+
+
+def test_cache_buster_guard_has_teeth() -> None:
+    """反向 substantive:證 cache-buster 一致性檢測器有牙(非空綠)。
+
+    (a) 真樹兩正則都命中(前置一致性,否則守衛空過);
+    (b) 合成漂移(BUILD_TS 與 ?v= 不同)必被判不一致。
+    """
+    # (a) 真樹前置:兩者都可抽出(否則主守衛會因 None 而假過)。
+    assert _extract_build_ts(_read(SHELL_JS)), "前置矛盾:真樹 shell.js 應有 BUILD_TS"
+    assert _extract_shell_js_cache_buster(_read(STATIC_DIR / "shell.html")), (
+        "前置矛盾:真樹 shell.html 應有 shell.js?v="
+    )
+
+    # (b) 合成漂移:檢測器須能區分一致 vs 不一致。
+    same_js = "var BUILD_TS = '20260713.r99';"
+    same_html = '<script src="/static/shell.js?v=20260713.r99"></script>'
+    drift_html = '<script src="/static/shell.js?v=20260101.stale"></script>'
+    assert _extract_build_ts(same_js) == _extract_shell_js_cache_buster(same_html), (
+        "檢測器無牙:一致的合成對被判為不一致"
+    )
+    assert _extract_build_ts(same_js) != _extract_shell_js_cache_buster(drift_html), (
+        "檢測器無牙:漂移的合成對未被判為不一致"
+    )
