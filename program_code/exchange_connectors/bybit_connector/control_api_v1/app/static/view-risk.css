@@ -1,0 +1,214 @@
+/* ═══════════════════════════════════════════════════════════════════
+   view-risk.css — 玄衡原生 view「風控 / Risk & Stops」頁級樣式(Phase 2 第 15 遷,交易關鍵四者之一)
+   ═══════════════════════════════════════════════════════════════════
+   MODULE_NOTE
+   模塊用途:承載 view-risk.js 注入的 risk DOM 所需樣式。分兩層:
+     ① risk-specific —— tab-risk.html 的**唯一頁內 style 塊**(行 21-104,id=rc-page-style)逐字搬入
+        (scoped `.risk-view`):子分頁 / 引擎選擇切換鈕(rtab-nav-btn / etab-btn,含 **etab-btn.is-active-live
+        的 --live 熱紅**)、原值對照 grid(rc-orig-metrics)、表單 grid(rc-grid / rc-input-wide / rc-toggle-row)、
+        **§3 LIVE 硬化面**(rc-dlg-danger 2px 危險框 / rc-btn-live-confirm 實心紅確認鈕 / rc-dlg-detail /
+        rc-live-warn live 引擎警示橫幅)、danger-link、AI 建議·預算(rc-ai-advice / rc-budget-*)、
+        **rc-dirty-bar 浮動未保存提示條**。此為對 tab-risk.html 頁內樣式塊的**重複(非移動)**:legacy iframe
+        路徑仍靠 tab-risk.html 自帶頁內塊,故該檔不動作回滾錨。
+     ② `.risk-view` scope 的 legacy 短名 shim(oc-card / oc-metric* / oc-chip*[good/warn/bad/neutral/info] /
+        oc-explain* / oc-collapse* / oc-grid-2 / oc-grid-3 / oc-loading / oc-danger-zone / oc-pre / oc-diff-* /
+        oc-subtab-placeholder + .green/.yellow/.red/.blue 色助手)—— 殼**刻意不呼** common.js ocInjectBaseCSS()
+        (避免其 body{padding}+`*` reset 破殼 chrome),而這批 class 的樣式原只在 ocInjectBaseCSS 內。故逐字 port
+        進本檔並以 `.risk-view` 收束作用域(防全域外溢)。此為對 ocInjectBaseCSS 同名規則的**重複(非移動)**:
+        legacy iframe 續靠 ocInjectBaseCSS 運行時注入。按鈕(.oc-btn*)、toast、表單(.oc-input/.oc-select)、
+        oc-modal(risk-tab.js 執行期自注入 head)、版式 utility(row/gap/fs-*/t-*/num 等)、oc-input--num 已在
+        shell-components.css / oc-utilities.css / tokens.css(殼已載),不重複。
+   §3 LIVE 硬化 skin 逐字保留(本遷最高關注,零弱化):`--live` 熱紅主題全在 ① 逐字搬入——
+     .etab-btn.is-active-live(→ background/border/color var(--live*))、.rc-live-warn(→ var(--live*) 橫幅)、
+     .rc-dlg-danger(→ 2px var(--neg) 危險框)、.rc-btn-live-confirm(→ var(--neg) 底 + rgba(255,255,255,1) 白字,
+     真金操作醒目);REAL FUNDS 文案由 DOM(tab-risk.html)承載,不被青銅 accent 蓋掉,live 引擎態不稀釋。
+   ratchet(born-clean 0/0/0):全檔零裸 hex —— ① 塊 tab-risk.html 兩處 palette 外裸色值逐字轉**等值 rgba**
+     (原 fff 白 → rgba(255,255,255,1) 紅底白字;原 1a1a1a 近黑 → rgba(26,26,26,1) 琥珀底深字;皆 byte-identical 色,
+     只換表達式過 hex ratchet,兩者刻意主題無關以保對比,P0.4 複審);② shim 沿 view-overview/settings/paper.css
+     慣例(色字面→語義 token,暗底 rgba→--bg-sunken);oc-chip-info 藍 tint / oc-danger-zone 極淡紅 tint 無對應
+     token → 保 ocInjectBaseCSS 原 rgba(ratchet 只禁 #hex,rgba 合法;byte-parity legacy,P0.4)。零 inline style 屬性、零內聯樣式塊。
+   誠實邊界:靜態只證 source;真渲染 / --live 熱紅真配色 / rc-dirty-bar 疊層 / rc-btn-live-confirm 確認態 /
+     diff 高亮 / 三態徽色 = NEEDS-LINUX + operator。
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ═══ ① risk-specific(port tab-risk.html 頁內 style 塊 行 21-104,scoped .risk-view)═══ */
+
+/* 子分頁 / 引擎選擇切換鈕:active 用青銅 accent 高亮(canon 2:舊藍→accent 收斂) */
+.risk-view .rtab-nav-btn { opacity:0.55; }
+.risk-view .rtab-nav-btn.is-active { opacity:1; background:var(--accent-weak); border-color:var(--accent); color:var(--accent); }
+.risk-view .etab-btn { opacity:0.55; }
+.risk-view .etab-btn.is-active { opacity:1; background:var(--accent-weak); border-color:var(--accent); color:var(--accent); }
+/* live 引擎 tab active → --live 熱紅(§3 硬化不稀釋) */
+.risk-view .etab-btn.is-active-live { opacity:1; background:var(--live-bg); border-color:var(--live); color:var(--live); }
+
+/* 狀態 chip 字級(className 每刷新整串重寫,走 #id 選擇器不掛 utility) */
+.risk-view #r-engine-status, .risk-view #h0-status, .risk-view #dr-status, .risk-view #engine-risk-loaded-badge { font-size:var(--fs-micro); }
+
+/* 原值/Original 對照面板:2 欄 grid + 數值字級收斂 */
+.risk-view .rc-orig-metrics { grid-template-columns:1fr 1fr; }
+.risk-view .rc-orig-metrics .oc-metric-val { font-size:var(--fs-section); }
+.risk-view #s-allowed-cats, .risk-view #s-margin-mode, .risk-view #s-position-mode { font-size:var(--fs-base); }
+
+/* P0/P1/P2 顯示卡單欄 grid(risk-tab.js 模板) */
+.risk-view .rc-metrics-1col { grid-template-columns:1fr; }
+
+/* 「修改後高亮」副標 / abbr 提示 */
+.risk-view .rc-sub-hint { font-weight:400; font-size:var(--fs-micro); color:var(--text-secondary); }
+
+/* 表單 grid 容器(gap 走 utility)+ 較寬輸入 */
+.risk-view .rc-grid { display:grid; }
+.risk-view .rc-input-wide { width:130px; }
+
+/* 自動調整 / H0 toggle 行 */
+.risk-view .rc-toggle-row { display:flex; justify-content:space-between; align-items:center;
+  padding:var(--sp-2) var(--sp-3); background:var(--bg-app); border-radius:var(--r-1);
+  border:1px solid var(--border-subtle); }
+
+/* modal 底部按鈕列 */
+.risk-view .rc-modal-actions { display:flex; gap:var(--sp-2); justify-content:flex-end; margin-top:var(--sp-4); }
+
+/* modal 表單控件(select / textarea) */
+.risk-view .rc-form-control { width:100%; padding:var(--sp-2); border-radius:var(--r-1);
+  border:1px solid var(--border-subtle); background:var(--bg-app); color:var(--text-primary); resize:vertical; }
+
+/* live confirm dialog:2px 危險邊框 + 實心紅確認鈕(真金操作醒目,不用 oc-btn-danger 淡樣式) */
+.risk-view .rc-dlg-danger { border:2px solid var(--neg); }
+/* rgba(255,255,255,1)=原 fff 白等值(紅底白字,palette 外,P0.4);byte-identical 色,只換表達式過 hex ratchet */
+.risk-view .rc-btn-live-confirm { background:var(--neg); color:rgba(255,255,255,1); border-color:var(--neg); }
+/* live confirm 明細背景 */
+.risk-view .rc-dlg-detail { margin-top:var(--sp-3); padding:var(--sp-2); background:var(--bg-surface);
+  border-radius:var(--r-1); font-size:var(--fs-micro); color:var(--text-secondary); }
+
+/* live 引擎警示橫幅(§3 硬化:--live 熱紅) */
+.risk-view .rc-live-warn { padding:var(--sp-2) var(--sp-3); border-radius:var(--r-1);
+  background:var(--live-bg); border:1px solid var(--live); color:var(--live);
+  font-size:var(--fs-dense); margin-bottom:var(--sp-2); }
+
+/* Danger Zone 快捷連結 */
+.risk-view .rc-danger-link { font-size:var(--fs-dense); color:var(--neg); text-decoration:none;
+  display:inline-flex; align-items:center; gap:var(--sp-1);
+  padding:var(--sp-1) var(--sp-3); border:1px solid var(--neg);
+  border-radius:var(--r-1); background:var(--neg-bg); }
+
+/* AI 建議輸出區 */
+.risk-view .rc-ai-advice { min-height:120px; font-size:var(--fs-dense); white-space:pre-wrap; }
+
+/* AI 風控上下文 factors 列表(risk-tab.js 模板) */
+.risk-view .rc-factor-list { margin:var(--sp-2) 0 0 var(--sp-4); font-size:var(--fs-dense); color:var(--text-secondary); }
+
+/* Take Profit toggle 標籤 */
+.risk-view .rc-tp-toggle-label { margin-left:var(--sp-2); vertical-align:middle; }
+
+/* AI Budget:網格 / 進度條軌 / 填充(§7 form-1 scoped-var) / 降級燈 / 標籤 */
+.risk-view .rc-budget-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:var(--sp-2); }
+.risk-view .rc-budget-bar { margin-top:var(--sp-2); height:10px; background:var(--border-subtle); border-radius:var(--r-1); overflow:hidden; }
+.risk-view .rc-budget-fill { height:100%; width:var(--fill-w,0%); background:linear-gradient(90deg,var(--pos),var(--warn),var(--live)); transition:width 0.3s; }
+.risk-view .rc-degrade-light { display:inline-block; width:14px; height:14px; border-radius:50%; background:var(--text-muted); vertical-align:middle; }
+.risk-view .rc-degrade-label { font-size:var(--fs-dense); margin-left:var(--sp-2); vertical-align:middle; }
+
+/* 浮動未保存提示條(JS classList 切 hidden;rgba(26,26,26,1)=原 1a1a1a 近黑等值,琥珀底深字 palette 外,P0.4) */
+.risk-view .rc-dirty-bar { position:fixed; bottom:0; left:0; right:0; z-index:500; display:flex;
+  align-items:center; gap:var(--sp-3); padding:var(--sp-2) var(--sp-4);
+  background:var(--warn); color:rgba(26,26,26,1); font-size:var(--fs-base);
+  box-shadow:0 -2px 12px rgba(0,0,0,0.4); }
+.risk-view .rc-dirty-close { margin-left:auto; padding:var(--sp-1) var(--sp-3); background:rgba(0,0,0,0.2);
+  border:none; border-radius:var(--r-1); cursor:pointer; color:inherit; font-size:var(--fs-dense); }
+
+/* ═══ ② `.risk-view` scope 的 legacy 短名 shim(port ocInjectBaseCSS,色字面→token)═══ */
+
+/* ── Load-error / 佔位(showLoadError + loading)── */
+.risk-view .oc-subtab-placeholder {
+  padding: 24px 18px; text-align: center;
+  background: var(--bg-sunken); border: 1px dashed var(--border-subtle);
+  border-radius: var(--r-2); color: var(--text-secondary); font-size: 13px;
+  line-height: 1.7; margin-top: 10px;
+}
+
+/* ── Cards ── */
+.risk-view .oc-card {
+  background: var(--bg-surface); border: 1px solid var(--border-subtle);
+  border-radius: var(--r-2); padding: 16px; margin-bottom: 14px;
+}
+.risk-view .oc-card h2 { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+.risk-view .oc-card h3 { font-size: 13px; font-weight: 600; margin-bottom: 8px; color: var(--text-primary); }
+.risk-view .oc-card .subtitle { font-size: 12px; color: var(--text-secondary); margin-bottom: 12px; }
+
+/* ── Metric row ── */
+.risk-view .oc-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+.risk-view .oc-metric { background: var(--bg-app); border: 1px solid var(--border-subtle); border-radius: var(--r-2); padding: 10px 12px; }
+.risk-view .oc-metric-label { font-size: 10px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.4px; }
+.risk-view .oc-metric-val { font-size: 20px; font-weight: 700; margin-top: 2px; }
+.risk-view .oc-metric-sub { font-size: 11px; color: var(--text-secondary); margin-top: 2px; }
+
+/* 色助手(oc-metric-val 多態:JS 掛 green/yellow/red/blue)*/
+.risk-view .green { color: var(--pos); }
+.risk-view .red { color: var(--neg); }
+.risk-view .yellow { color: var(--warn); }
+.risk-view .blue { color: var(--text-secondary); }
+
+/* ── Status chips(色字面→語義 token;info 藍 tint 無對應 token → 保 rgba,byte-parity legacy)── */
+.risk-view .oc-chip {
+  display: inline-flex; align-items: center; gap: 5px; border-radius: var(--r-full);
+  padding: 3px 10px; font-size: 11px; font-weight: 500; border: 1px solid transparent;
+}
+.risk-view .oc-chip-good    { background: var(--pos-bg);   border-color: var(--pos);           color: var(--pos); }
+.risk-view .oc-chip-warn    { background: var(--warn-bg);  border-color: var(--warn);          color: var(--warn); }
+.risk-view .oc-chip-bad     { background: var(--neg-bg);   border-color: var(--neg);           color: var(--neg); }
+.risk-view .oc-chip-neutral { background: var(--bg-hover); border-color: var(--border-strong); color: var(--text-secondary); }
+.risk-view .oc-chip-info    { background: rgba(56,139,253,0.12); border-color: rgba(56,139,253,0.25); color: var(--text-secondary); }
+
+/* ── Explainer(ocExplain 輸出;暗底 rgba→--bg-sunken)── */
+.risk-view .oc-explain { margin-bottom: 14px; }
+.risk-view .oc-explain-simple {
+  color: var(--text-secondary); font-size: 12px; line-height: 1.7;
+  padding: 10px 14px; background: var(--bg-sunken); border-left: 3px solid var(--accent);
+  border-radius: 0 var(--r-2) var(--r-2) 0;
+}
+.risk-view .oc-explain-deep { margin-top: 4px; }
+.risk-view .oc-explain-deep summary { color: var(--accent); font-size: 11px; cursor: pointer; padding: 4px 14px; user-select: none; }
+.risk-view .oc-explain-content {
+  padding: 10px 14px; color: var(--text-secondary); font-size: 12px; line-height: 1.7;
+  background: var(--bg-sunken); border-radius: var(--r-2); margin-top: 4px;
+}
+
+/* ── Collapsed section(details/summary 三角標記;AI 風控上下文)── */
+.risk-view .oc-collapse { border: 1px solid var(--border-subtle); border-radius: var(--r-2); margin-top: 10px; }
+.risk-view .oc-collapse summary {
+  cursor: pointer; padding: 10px 14px; font-size: 13px;
+  color: var(--text-primary); user-select: none; list-style: none;
+}
+.risk-view .oc-collapse summary::-webkit-details-marker { display: none; }
+.risk-view .oc-collapse summary::before { content: '\25B6  '; font-size: 9px; color: var(--text-secondary); }
+.risk-view .oc-collapse[open] summary::before { content: '\25BC  '; }
+.risk-view .oc-collapse[open] summary { border-bottom: 1px solid var(--border-subtle); }
+.risk-view .oc-collapse .oc-collapse-body { padding: 12px 14px; }
+
+/* ── Grid(倉位/止損 2 欄;P0·P1·P2 3 欄)── */
+.risk-view .oc-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.risk-view .oc-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+
+/* ── Loading 佔位 ── */
+.risk-view .oc-loading { color: var(--text-secondary); font-size: 12px; padding: 20px; text-align: center; }
+
+/* ── Danger Zone(oc-danger-zone;極淡紅 tint 無對應 token → 保 ocInjectBaseCSS 原 rgba,byte-parity legacy)── */
+.risk-view .oc-danger-zone { background: rgba(248,81,73,0.04); border: 1px solid rgba(248,81,73,0.15);
+  border-radius: var(--r-2); padding: 14px; margin-top: 14px; }
+.risk-view .oc-danger-zone h3 { color: var(--neg); font-size: 12px; text-transform: uppercase;
+  letter-spacing: 0.5px; margin-bottom: 8px; }
+
+/* ── Pre/Code(AI 建議 body)── */
+.risk-view .oc-pre { background: var(--bg-app); border: 1px solid var(--border-subtle); border-radius: var(--r-2);
+  padding: 12px; font-size: 12px; font-family: var(--font-mono);
+  overflow: auto; max-height: 300px; white-space: pre-wrap; word-break: break-word; }
+
+/* ── Diff-highlight(§4.1 對比模式;琥珀 tint→--warn* token)── */
+.risk-view .oc-diff-changed { background: var(--warn-bg) !important; border-color: var(--warn) !important; }
+.risk-view .oc-diff-label { font-size: 9px; color: var(--warn); margin-top: 3px; font-style: italic; }
+
+/* ═══ 行動裝置 a11y:grid / metrics / card 促升(port ocInjectBaseCSS @media 相關子集)═══ */
+@media (max-width: 700px) {
+  .risk-view .oc-grid-2, .risk-view .oc-grid-3 { grid-template-columns: 1fr; }
+  .risk-view .oc-metrics { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
+  .risk-view .rc-orig-metrics { grid-template-columns: 1fr 1fr; }
+  .risk-view .oc-card { padding: 12px; }
+}
