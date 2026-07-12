@@ -266,6 +266,9 @@
   //   不用 window.loadAll,隔離 paper——見 ★★)。resume 不重跑 script,故不重複註冊內聯監聽器 / 不重啟 FX。
   function resumeDemoView() {
     if (!built || !wired) return;
+    // 通知內聯 visibilitychange 節流器 demo 已可見(_demoTabVisible=true):refocus 時允許刷新。
+    //   復用 tab-demo.html:1337 既有 message listener(origin-checked),零源改;targetOrigin 綁 same-origin。
+    try { window.postMessage({ type: 'openclaw-tab-visibility', tab: 'demo', visible: true }, window.location.origin); } catch (e) {}
     var fn = window.__ocDemoLoadAll;
     try { if (typeof fn === 'function') fn(); }
     catch (e) { warn('resume loadAll 失敗', e); }
@@ -277,11 +280,15 @@
   }
 
   // pause:view 隱藏 → 停 15s 輪詢(freshness/safety:隱藏不得續打後端,鏡像 iframe 暫停語義)。
-  //   ocStopRefresh 清 common.js 全域單例 timer;未啟輪詢時安全 no-op。內聯自帶 visibilitychange 監聽器
-  //   為 IIFE-local 無法外清(行為守恆限制,見 MODULE_NOTE;受 loadAll 重入閘 + 唯讀 GET 節流)。
+  //   ocStopRefresh 清 common.js 全域單例 timer;未啟輪詢時安全 no-op。
+  //   內聯自帶 visibilitychange 監聽器為 IIFE-local 無法外清,但**經 postMessage 令內聯 _demoTabVisible=false**
+  //   即抑制其 refocus 時觸發 loadAll(_isDemoTabRefreshVisible() 讀 _demoTabVisible)——消除 demo 非 active 時
+  //   瀏覽器重獲焦點的多餘唯讀 GET(R78 E2 LOW-1 修;同 governance OPEN-3 手法,復用既有 message listener 零源改)。
   function pauseDemoView() {
     try { if (typeof window.ocStopRefresh === 'function') window.ocStopRefresh(); }
     catch (e) { warn('pause 停輪詢失敗', e); }
+    // 通知內聯節流器 demo 已隱藏 → refocus 不再刷新(抑制多餘唯讀 loadAll GET)。
+    try { window.postMessage({ type: 'openclaw-tab-visibility', tab: 'demo', visible: false }, window.location.origin); } catch (e) {}
   }
 
   // 註冊進殼可見的原生 view 表(router 以 v.iframe===false 查此;key=VIEWS 的 id 'demo')。
