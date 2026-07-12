@@ -55,7 +55,12 @@
     //   完整性 + 回滾錨,原生渲染接管。3 寫 preserve 既有 strategy-config 端點,零新寫路徑;delete 的
     //   openConfirmModal("delete-strategy") 逐字保留不弱化(R61 fail-closed);response-gated 非 fake。
     { id: 'strategy', lane: 'crypto', hash: '#/crypto/strategy', src: '/static/tab-strategy.html',    visId: 'strategy',    label: '策略 Strategy',   badge: 'strategy', iframe: false },
-    { id: 'earn',     lane: 'crypto', hash: '#/crypto/earn',     src: '/static/tab-earn.html',        visId: 'earn',        label: 'Earn 理財',       badge: 'earn' },
+    // earn:Phase 2 第 9 個原生遷移(iframe:false;**安全關鍵寫面**——mainnet USDT stake + 5-gate + Stage 0R
+    //   + typed-confirm + cooldown)——render/pause/resume 由 view-earn.js 註冊於 window.OC_NATIVE_VIEWS(id=earn)。
+    //   策略=**verbatim 復用 earn-tab.js**:view-earn.js 只復現 tab-earn.html 的 earn DOM(byte-parity 選擇器依賴)
+    //   後呼 window.startEarnTab();唯一寫路徑=既有 POST /api/v1/earn/stake(9-gate + 再驗 phrase),零新寫路徑,
+    //   typed-confirm/5-gate/Stage0R/cooldown 全不弱化。src 保留 legacy tab-earn 作 registry 完整性 + 回滾錨。
+    { id: 'earn',     lane: 'crypto', hash: '#/crypto/earn',     src: '/static/tab-earn.html',        visId: 'earn',        label: 'Earn 理財',       badge: 'earn', iframe: false },
     { id: 'demo',     lane: 'crypto', hash: '#/crypto/demo',     src: '/static/tab-demo.html',        visId: 'demo',        label: '演示 Demo',       badge: 'demo', flag: true },
     { id: 'live',     lane: 'crypto', hash: '#/crypto/live',     src: '/static/tab-live.html',        visId: 'live',        label: '實盤 Live',       badge: 'live', flag: true, live: true },
     // ── stock lane(IBKR read-only;殼不新增任何 IBKR 寫/激活 UI)──

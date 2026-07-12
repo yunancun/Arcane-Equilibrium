@@ -25,6 +25,9 @@
 <!-- phase4 原生 view 頁級樣式(唯一 per-view CSS):cards/*.html 為 innerHTML 注入片段(無 <link>),
      故 .phase4-*/.p4-* class 須於殼文檔可見的 stylesheet 供給(view-phase4.css 詳見其 MODULE_NOTE)-->
 <link rel="stylesheet" href="/static/view-phase4.css?v=20260712.p2-phase4" />
+<!-- earn 原生 view 頁級樣式(第 9 遷,安全關鍵寫面):.earn-* + `.earn-view` scope 的 legacy 短名
+     shim(oc-card/oc-metrics/oc-table/oc-chip*;殼不呼 ocInjectBaseCSS,見 view-earn.css MODULE_NOTE)-->
+<link rel="stylesheet" href="/static/view-earn.css?v=20260712.p2-earn" />
 </head>
 <body>
 
@@ -130,6 +133,11 @@
 <script src="/static/view-phase4.js?v=20260712.p2-phase4"></script>
 <script src="/static/view-strategy-history.js?v=20260712.p2-strategy"></script>
 <script src="/static/view-strategy.js?v=20260712.p2-strategy"></script>
+<!-- earn 第 9 遷(安全關鍵寫面):**verbatim 復用 earn-tab.js**(IIFE,load-safe 只 define window.startEarnTab,
+     不觸 DOM;5-gate/Stage 0R/typed-confirm/cooldown/POST stake 全在其內,零修改)。earn-tab.js 須先於
+     view-earn.js 載入,view-earn.js 於 render 內呼 startEarnTab;view-earn.js 於 shell.js 前載以註冊 OC_NATIVE_VIEWS['earn']。 -->
+<script src="/static/earn-tab.js?v=20260525.earn-wave-c"></script>
+<script src="/static/view-earn.js?v=20260712.p2-earn"></script>
 <script src="/static/shell.js?v=20260711.shell-p11a"></script>
 
 </body>
