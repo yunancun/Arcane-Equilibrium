@@ -31,6 +31,10 @@
 <!-- replay 原生 view 頁級樣式(第 10 遷,復用遷移):極薄——只 .replay-head/.replay-note + `.replay-view`
      scope 的 .oc-chip* shim;ready/degraded 卡樣式由 app-paper.js 執行期自注入(見 view-replay.css MODULE_NOTE)-->
 <link rel="stylesheet" href="/static/view-replay.css?v=20260712.p2-replay" />
+<!-- paper 原生 view 頁級樣式(第 11 遷,復用遷移):`.paper-view` scope 的 paper-specific(subtab nav /
+     feed 價位 / 平倉 modal)+ legacy 短名 shim(oc-card/oc-metric*/oc-table*/oc-chip*/oc-collapse*/
+     oc-action*/oc-fill-*/oc-explain* 等;殼不呼 ocInjectBaseCSS,見 view-paper.css MODULE_NOTE)-->
+<link rel="stylesheet" href="/static/view-paper.css?v=20260712.p2-paper" />
 </head>
 <body>
 
@@ -147,6 +151,14 @@
      OpenClawReplaySubtab;於 shell.js 前載以註冊 OC_NATIVE_VIEWS['replay']。app-paper.js / tab-replay.html 零修改。 -->
 <script src="/static/app-paper.js?v=20260527.ops1-csrf"></script>
 <script src="/static/view-replay.js?v=20260712.p2-replay"></script>
+<!-- paper 第 11 遷(復用遷移):**verbatim 復用 tab-paper.html 內聯 script**(session 寫 start/pause/resume/
+     stop/stop-all/close + loadAll 全 GET + 子標籤 + 平倉 modal;全在 tab-paper.html 內聯 <script>,非 app-paper.js)。
+     view-paper.js 於 render fetch /static/tab-paper.html → 注入其 paper DOM(byte-parity)+ 重跑內聯 script;
+     app-paper.js 已於上方載入(replay 第 10 遷,提供 ocPaperSubtabInit)故不重複。handoff_helper.js
+     (window.OpenClawHandoff,IIFE load-safe 只 define)殼此前未載故新增,須先於 view-paper.js;於 shell.js 前載
+     以註冊 OC_NATIVE_VIEWS['paper']。tab-paper.html / app-paper.js / handoff_helper.js 零修改(reuse 正本 + 回滾錨)。 -->
+<script src="/static/handoff_helper.js?v=20260712.p2-paper"></script>
+<script src="/static/view-paper.js?v=20260712.p2-paper"></script>
 <script src="/static/shell.js?v=20260711.shell-p11a"></script>
 
 </body>
