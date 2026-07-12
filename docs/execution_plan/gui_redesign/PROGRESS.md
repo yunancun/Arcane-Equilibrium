@@ -69,6 +69,17 @@
 - **NEEDS-LINUX-RUNTIME**: **(R95 起)** ①**V5 真渲染走查 8 項**(帛晝全站可讀性/seal DPI/canon-7 三態真值/鍵盤走查+focus order/冷 slate 殼接縫目視/stale 誤讀/壓線對比含 #16 tinted 4.16 殘差/uppercase×CJK 混排)——Mac 不可誠實跑,需 Linux runtime 或 CI-headless ②**toggle 三向切換目視**(OS-dark↔顯式帛晝↔顯式玄夜+localStorage 持久+reload 不閃)③**#16 tinted 4.16 殘差** A3 runtime disposition(brighten --neg 已否決保 canon-9;減 tint/改文字色=A3 設計權)④真 fetch round-trip/response 欄位消費/WS 新鮮度=engine+WS。**低優自主可選(非阻 COMPLETE,heartbeat 期間 operator 若指名可做)**:MED-3 頂欄 role-tier chip(feature,需 role 資料源)/A3 LOW-2~7 polish/charts embed/E3 coverage-debt(tab-live.js:837 XSS·CSP Wave B)。
 - 行數基線:static/ 61 檔 36,337 行(tag `gui-baseline-2026-07-09`);當前:未量測
 
+## 遠端批驗 R96(2026-07-12,operator 授權 §8;PM 經 Claude-in-Chrome 只讀走查;trade-core 靜態已 ff-only 同步至 origin/main 後驗證)
+- **裁決:PASS-WITH-FINDINGS。** 玄衡儀識別全落地(玄夜/帛晝/青銅/銘文/絲印/衡樑形制);雙主題真切換且帛晝下 risk/live 數據密集面可讀(H-1/H-2 修復有效);雙密度有效;lane×env IA 生效(IBKR lane rail 正確變 read-only);canon 6 三態+硬化區隔離+啟動 Live 正確灰置;canon 7 全站 — 非假 0、IBKR readiness blocked 鏈模範;demo 真數據流動(PnL/fills/fees);**console 零錯誤**;R94 雙語眉標可見。真寫入按鈕/typed-confirm 真輸入=OPERATOR-HAND 未碰。
+- **新 findings**:
+  - **F-R96-1(HIGH,部署正確性)**:`BUILD_TS`/cache-buster 凍結 `20260711.shell-p11a`(R55 起未 bump)→ 靜態部署被客戶端快取污染,本輪硬刷新才見新版;修法=每次 GUI 批 bump 或改 git-SHA 注入;statusbar build 標籤同源失真。
+  - **F-R96-2(MED)**:P1.2 共享數據層未接 → 頂欄「engine 待接線」與 view 內「運行中」雙源矛盾;衡樑(signature)長期空置「包絡 —」。P1.2 接線=最高價值下一步。
+  - **F-R96-3(MED)**:AI/Monitor view「checking…/loading…」chips 卡住不收斂(canon 7 loading→終態缺失;console 無錯,疑 fetch 未回或 loader 吞)。
+  - **F-R96-4(LOW)**:risk 頁「Live (Real Money)」引擎選擇器 🟣 紫圓,違 🔴=LIVE 慣例(R39 漏網);live view 頂帶 🟣 同查。
+  - **F-R96-5(LOW)**:IBKR Phase 0 Packet 長 token pill 溢出裁切(manifest.schema)。
+  - F-R96-6(已知重申):demo 累計收益 timeline 空白(charts Phase-3)/中英雙標普遍(M-3 copy pass)。
+- **部署備註**:trade-core `git pull --ff-only`(main,0 髒檔)由 PM 執行——**僅靜態檔生效;Python 進程未重啟(在跑舊代碼),Rust 引擎未動**;如需 control_api 新路由生效,重啟屬 operator。
+
 ## P1/P2 中期驗收(2026-07-12,operator 指令;PM 量化門+E4-verifier+E2 對抗抽審;執行於 R65 邊界,兄弟 session 同期推進至 R74——驗收對象=殼層+前 7 view,結論對後續遷移 pattern 仍有效)
 - **裁決:PASS-WITH-FINDINGS(架構健全,無 HIGH);operator 三裁決解鎖(見下)。**
 - PM 量化門:殼層四檔+view-*.js 就位/style= ratchet 守 5/行數紅線無新增(tab-live.js 1924/tab-settings 1899/governance-tab 1878 三觀察檔)。
