@@ -4,7 +4,7 @@ Date: 2026-07-10
 Owner: PM
 Goal: `GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1`
 Codex Goal thread: `019f4b6d-1e5b-7551-9fce-7a2f029a1675`
-Status: `ACTIVE_WP4_TRUSTED_ED25519_VERIFIER_SOURCE_PREAUTHORING_GATE`
+Status: `ACTIVE_WP4_TRUSTED_ED25519_VERIFIER_SOURCE_TDD_GATE`
 
 This is the durable PM-owned queue and state surface for the active Goal. It
 supersedes the old ALR P2 completion/terminal interpretation, but does not edit
@@ -361,6 +361,63 @@ verifier module/dependency, phase receipt API, negative controls, and source-onl
 test boundary before any source is written. It does not authorize V160, PG,
 runtime capability activation, real request/receipt bytes, fit/model, serving,
 promotion, broker/order/risk, Cost Gate, or authority.
+
+That source preauthoring gate is now accepted below.
+
+## Trusted Ed25519 verifier source-preauthoring checkpoint
+
+Reviewed clean head `75f3db2b55cd1d9737d83c811d291abecb67ad49`
+completed
+`DONE_DESIGN_ACCEPTED_TRUSTED_ED25519_VERIFIER_SOURCE_PREAUTHORING_GATE`.
+The design selects one isolated `rust/openclaw_alr_fit_verifier` library with
+no core/engine/types or runtime dependency and no existing-crate consumer. Its
+only normal dependencies are exact-pinned, default-feature-disabled `base64
+0.22.1`, `ed25519-dalek 2.2.0`, and `sha2 0.10.9`; `serde_json 1.0.149` is
+dev-only for an independent receipt oracle.
+
+One deep Interface accepts exact bounded key/evidence inputs and an exact
+ordered job slice for `REQUEST_ONLY`, `SIGNED_STATUS`, `TERMINAL_SUCCESS`, or
+`TERMINAL_NO_INNER`. It constructs every frozen domain/NUL/u64be-length
+preimage internally and allows only `VerifyingKey::from_bytes`,
+`Signature::from_bytes`, and `verify_strict`. Missing, extra, duplicate,
+reordered, or wrong-role jobs fail before crypto.
+
+The maximum receipt verdict is
+`STRICT_SIGNATURES_VALID_INPUT_BINDINGS_CAPABILITY_UNATTESTED` with
+`capability_authenticity=SOURCE_ONLY_UNATTESTED`. Semantic phase, canonical
+input, envelope/payload parity, policy/overlay adjudication, trusted time,
+platform attestation, coordinator eligibility, durable consumption,
+persistence, training, and model execution remain false or `NOT_ESTABLISHED`.
+Exact nested canonical JSON, all 17 false authority fields, all 17 zero
+counters, a 10 MiB aggregate bound, fallible allocations, total first-error
+precedence, and redacted Debug are frozen.
+
+Any future attestation wrapper must call
+`verify_and_attest(original_inputs)` in-process. It cannot accept caller-made
+receipt bytes/digests or rewrite/promote source false/zero fields. Source CI
+must test online, rebuild from a distinct initially absent offline target, then
+parse metadata and Cargo.lock for every dependency kind, feature, source,
+checksum, target, reverse edge, license, build script, unsafe implementation,
+and advisory. First-party `forbid(unsafe_code)` is kept distinct from audited
+transitive crypto internals.
+
+FA initially found `0/5/1`, CC `0/2/0`, and E3 `0/4/4`. The repaired fragment
+closed all trust, schema, allocation, mutation, Debug, offline, graph, and
+attestation-laundering findings. Final PA/FA/CC/E3/MIT P0/P1/P2 are
+`0/0/0`; task/route digests are `f52552dc...` / `9a1c318b...`.
+
+This gate authored no Rust, Cargo, lock, test, workflow, SQL, or V160 and
+fetched no crate. Read-only public official-document research occurred, but no
+PG/Linux/private runtime/issuer/runner/broker/real-byte/fit/model/registry/
+serving/order/risk/Cost Gate or authority effect occurred. G3/G4 remain failed.
+
+The next separately governed state is
+`ACTIVE_WP4_TRUSTED_ED25519_VERIFIER_SOURCE_TDD_GATE`. It may author only the
+accepted nine paths, begins RED, records the public crates.io fetch, proves a
+distinct-target offline replay and supply-chain inventory, and obtains
+independent source reviews. V160, PG apply/runtime activation, real bytes,
+issuer/runner contact, fit/model, serving/promotion, broker/order/risk, and
+authority remain separate gates.
 
 ## Earlier B2.2c event-primary reconciliation
 

@@ -1,26 +1,26 @@
 {
   "schema": "global_qualified_autonomous_learning_shadow_effect_review_v1",
-  "generated_at": "2026-07-12T18:07:23Z",
+  "generated_at": "2026-07-12T18:58:46Z",
   "goal_id": "GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1",
-  "loop": "WP4_V160_STYLE_ATOMIC_CONSUMPTION_DESIGN_PREAUTHORING_GATE",
-  "status": "DONE_DESIGN_ACCEPTED_V160_STYLE_ATOMIC_CONSUMPTION_PREAUTHORING_GATE",
+  "loop": "WP4_TRUSTED_ED25519_VERIFIER_SOURCE_PREAUTHORING_GATE",
+  "status": "DONE_DESIGN_ACCEPTED_TRUSTED_ED25519_VERIFIER_SOURCE_PREAUTHORING_GATE",
   "terminal": false,
-  "reviewed_source_head": "9a41c8d2abf34dbdce01fde010a500b4c19ba4f4",
+  "reviewed_source_head": "75f3db2b55cd1d9737d83c811d291abecb67ad49",
   "behavioral_source_checkpoint": "c900d1ecb2eac495994b8715f09ad10bee6d9583",
   "prior_handshake_source_checkpoint": "c900d1ecb2eac495994b8715f09ad10bee6d9583",
   "prior_disposable_pg_checkpoint": "74d8475e32ff89b67e2b6a1346e0839bbcfa646f",
   "publish_alignment": {
-    "observed_at": "2026-07-12T18:07:23Z",
+    "observed_at": "2026-07-12T18:58:46Z",
     "branch": "agent/alr-wp4-contracts",
-    "mac_head": "9a41c8d2abf34dbdce01fde010a500b4c19ba4f4",
-    "origin_work_branch": "9a41c8d2abf34dbdce01fde010a500b4c19ba4f4",
-    "origin_main": "497ebb4b218108a355c1f48c763f80fea7cbccdb",
+    "mac_head": "75f3db2b55cd1d9737d83c811d291abecb67ad49",
+    "origin_work_branch": "75f3db2b55cd1d9737d83c811d291abecb67ad49",
+    "origin_main": "7f0a73d672872963775ff0a62b26875533c815a3",
     "source_checkpoint_contained": true
   },
   "before": {
-    "current_work_package_state": "ACTIVE_WP4_V160_STYLE_ATOMIC_CONSUMPTION_DESIGN_PREAUTHORING_GATE",
-    "completed_gate": "DONE_SOURCE_ACCEPTED_TRUSTED_ISSUER_ISOLATED_RUNNER_HANDSHAKE_CONTRACT",
-    "atomic_consumption_design_status": "ABSENT",
+    "current_work_package_state": "ACTIVE_WP4_TRUSTED_ED25519_VERIFIER_SOURCE_PREAUTHORING_GATE",
+    "completed_gate": "DONE_DESIGN_ACCEPTED_V160_STYLE_ATOMIC_CONSUMPTION_PREAUTHORING_GATE",
+    "verifier_source_seam_status": "UNAUTHORIZED",
     "production_verifier_status": "ABSENT",
     "durable_consumption_claim": "NOT_ESTABLISHED",
     "execution_claim": "NOT_ESTABLISHED"
@@ -28,10 +28,13 @@
   "after": {
     "goal_status": "ACTIVE",
     "current_work_package": "WP4-ACTUAL-TRAINING-REGISTRY",
-    "current_work_package_state": "ACTIVE_WP4_TRUSTED_ED25519_VERIFIER_SOURCE_PREAUTHORING_GATE",
-    "completed_gate": "DONE_DESIGN_ACCEPTED_V160_STYLE_ATOMIC_CONSUMPTION_PREAUTHORING_GATE",
+    "current_work_package_state": "ACTIVE_WP4_TRUSTED_ED25519_VERIFIER_SOURCE_TDD_GATE",
+    "completed_gate": "DONE_DESIGN_ACCEPTED_TRUSTED_ED25519_VERIFIER_SOURCE_PREAUTHORING_GATE",
     "atomic_consumption_design_status": "ACCEPTED_DESIGN_ONLY",
-    "source_authoring_authorized": false,
+    "source_authoring_authorized": true,
+    "source_authoring_scope": "EXACT_NINE_PATH_SEPARATELY_GOVERNED_TDD_ONLY",
+    "verifier_source_present": false,
+    "public_crates_fetch_performed": false,
     "production_verifier_status": "ABSENT",
     "platform_attested_verifier_capability": false,
     "v160_reserved_or_authored": false,
@@ -39,33 +42,43 @@
     "production_v159_applied": false,
     "execution_claim": "NOT_ESTABLISHED",
     "model_training_performed_claim": "NOT_ESTABLISHED",
-    "next_work_id": "WP4-TRUSTED-ED25519-VERIFIER-SOURCE-PREAUTHORING-GATE"
+    "next_work_id": "WP4-TRUSTED-ED25519-VERIFIER-SOURCE-TDD-GATE"
   },
   "governed_review": {
-    "task_contract_digest": "sha256:dba068f0a6c4d3933eae034e0c7c3e3fe18673cf93c4bbad0be3af225e68dcb3",
+    "task_contract_digest": "sha256:f52552dcae71880051a13d9e7a76e3defd00fa4c556309bc272f526c3db04492",
     "route_dag_digest": "sha256:9a1c318b0df5dad246ee8116e4b0ae0a42795987543d1b368bb7e958eb5e9f4c",
     "context_artifacts": {
-      "PA": "sha256:7905eb3b42f9dcae07b9a30f7a5fd387835026432fe25348bdd4854424b61071",
-      "FA": "sha256:b6404d8b9045679c2eb5dfde38f3b829a50d6bf46a30c0b43799b3a04daaa967",
-      "CC": "sha256:32196714771f258dcfb1165eab4baf1625ddc85cf74fb6ab5327e1199d8f5259",
-      "E3": "sha256:48efa81810b503a7f267dbe3af3309d5365acb9a07f3b81e18ad606aa70ec5a8",
-      "MIT": "sha256:dc415a8e536b012050a0334e7e02111a66503c78e7c1d26ec4a65067d0f5f288"
+      "PA": "sha256:23a0b13179a868f3975697d15bc145da84c7ad65a94ff789a402ad2324aeb81f",
+      "FA": "sha256:4df5dec17eb6ff9da102607f04e9c20a96048d2cb16a1b22c71cc7a35513f2fe",
+      "CC": "sha256:f1fc0e06ff7a3e20b1b72ff1e6aa07e8b6129a1c14b5c9745abbfc5aacf37c8b",
+      "E3": "sha256:b6e56b513cd95b6fc661f702e2c43b5891438ddb577287dcb839e5718e540b3b",
+      "MIT": "sha256:41d336bbf64b5e4531c2c3f00bd0f11158a77e8e4c21ae06c3bb9842540702b8"
     },
     "initial_findings": {
-      "FA": "0/3/1",
-      "CC": "0/1/0"
+      "FA": "0/5/1",
+      "CC": "0/2/0",
+      "E3": "0/4/4"
     },
     "repair_summary": [
-      "Split verifier evidence into REQUEST_ONLY, SIGNED_STATUS, TERMINAL_SUCCESS, and TERMINAL_NO_INNER phases.",
-      "Added reachable REGISTER_REQUEST and RECORD_STATUS actions with monotonic status replay and no deadline extension.",
-      "Made FAILED_AFTER_START terminal plus reconciliation atomic and defined exact accept_by database-time expiry.",
-      "Removed safety dependence on a second reconcile write by making immutable occupied identities the durable conflict oracle."
+      "Removed provenance and governance overclaim; froze exact unattested verdict and capability literals.",
+      "Closed top-level, evidence, job, 17-false, and 17-zero canonical receipt schemas and byte grammar.",
+      "Added total field/role error precedence, 10 MiB aggregate accounting, fallible allocation, and redacted Debug.",
+      "Separated first-party unsafe/build-script bans from transitive inventory and required distinct-target offline compilation plus parsed metadata/lock review.",
+      "Prevented receipt laundering with same-process verify_and_attest(original_inputs) and immutable source-field binding."
     ],
     "final_reviews": "PA/FA/CC/E3/MIT ACCEPT/ACCEPT/ACCEPT/ACCEPT/ACCEPT",
     "final_p0_p1_p2": "0/0/0"
   },
-  "design_evidence": {
-    "verifier_implementation": "DEDICATED_RUST_STRICT_ED25519_CAPABILITY_REQUIRED",
+  "verifier_source_design_evidence": {
+    "verifier_crate": "rust/openclaw_alr_fit_verifier",
+    "source_paths_authorized": 9,
+    "source_currently_present": false,
+    "public_crates_fetch_performed": false,
+    "normal_dependency_pins": "base64=0.22.1;ed25519-dalek=2.2.0;sha2=0.10.9;default_features=false",
+    "dev_dependency_pin": "serde_json=1.0.149",
+    "crypto_api_allowlist": "VerifyingKey::from_bytes,Signature::from_bytes,VerifyingKey::verify_strict",
+    "maximum_verdict": "STRICT_SIGNATURES_VALID_INPUT_BINDINGS_CAPABILITY_UNATTESTED",
+    "capability_authenticity": "SOURCE_ONLY_UNATTESTED",
     "verification_receipt_schema": "alr_fit_ed25519_verification_receipt_v1",
     "verification_phases": [
       "REQUEST_ONLY",
@@ -73,37 +86,33 @@
       "TERMINAL_SUCCESS",
       "TERMINAL_NO_INNER"
     ],
-    "coordinator_actions": [
-      "REGISTER_REQUEST",
-      "CLAIM_REQUEST",
-      "RECORD_STATUS",
-      "CONSUME_TERMINAL",
-      "EXPIRE_UNCLAIMED",
-      "MARK_RECONCILE_REQUIRED"
-    ],
-    "transactions_bounded_and_do_not_span_fit": true,
-    "append_only_exact_bytes": true,
-    "success_complete_v159_bundle_atomic": true,
-    "reject_expiry_v159_rows": 0,
-    "failed_after_start_retry_allowed": false,
-    "status_generation_monotonic": true,
-    "status_deadline_extension_allowed": false,
-    "expiry_boundary": "clock_timestamp() >= accept_by",
-    "exact_replay_server_owned": true,
-    "divergent_replay_terminal_or_v159_mutation": false,
-    "conflict_eligibility_oracle": "immutable_occupied_request_nonce_generation_claim_terminal_identity",
-    "optional_reconcile_marker_has_authority": false,
-    "sorted_lock_order": "admission/request/issuer_nonce/generation/v159_identities",
-    "unique_constraints_final_oracle": true,
-    "old_v159_application_write_path_after_future_migration": false,
-    "v158_receipt_qualification_preserved": true,
+    "aggregate_raw_input_cap_bytes": 10485760,
+    "receipt_cap_bytes": 32768,
+    "canonical_nested_schemas_frozen": true,
+    "no_authority_false_fields": 17,
+    "authority_zero_counters": 17,
+    "semantic_phase_established": false,
+    "canonical_input_bytes_established": false,
+    "envelope_payload_binding_established": false,
+    "policy_overlay_adjudication_established": false,
+    "platform_attested": false,
+    "coordinator_eligible": false,
+    "persistence_allowed": false,
+    "training_allowed": false,
+    "model_training_performed_claim": "NOT_ESTABLISHED",
+    "future_attestation_interface": "verify_and_attest(original_inputs)",
+    "caller_receipt_attestation_allowed": false,
+    "distinct_online_offline_target_required": true,
+    "metadata_lock_supply_chain_inventory_required": true,
+    "engine_dependency_reachability": false,
     "all_authority_false_zero": true
   },
   "source_hashes": {
     "v158_sql": "7ed70599c6bd5f3cdb3376bc135a952d8c18f4ad62a62432c2bfdd8ee84e446b",
     "v159_sql": "2e11d0ae0cbc2c1161a47d04bed4054c31b728e8cf945f931197f9b3455b7d74",
     "handshake_module": "32181c5f14e099c996befa9f84009b372b969edfecfce3741169aca7b5acb81d",
-    "handshake_design_report": "72101e4da8f3b372fdafa5e6b211dc933e9c6994356b4a07219b92d9c5f0a927"
+    "handshake_design_report": "72101e4da8f3b372fdafa5e6b211dc933e9c6994356b4a07219b92d9c5f0a927",
+    "verifier_preauthoring_fragment": "9d957cf70f9beba5a9c48e66fd64bcef772f3e550cc1c636d9bcddf56d6de361"
   },
   "migration_collision_scan": {
     "eligible_migrations": 141,
@@ -114,7 +123,7 @@
     "migration_or_pg_effect": false
   },
   "semantic_adjudication": {
-    "verdict": "ATOMIC_CONSUMPTION_DESIGN_ACCEPTED_VERIFIER_AND_EXECUTION_NOT_ESTABLISHED",
+    "verdict": "TRUSTED_ED25519_VERIFIER_SOURCE_SEAM_ACCEPTED_IMPLEMENTATION_AND_EXECUTION_NOT_ESTABLISHED",
     "G1": "PARTIAL",
     "G2": "PARTIAL_DISPOSABLE_PG_VERIFIED",
     "G3": "FAIL_DISPOSABLE_PG_VERIFIED_NO_REAL_RECEIPT_OR_OUTCOME_CHAIN",
@@ -124,14 +133,14 @@
     "G7": "FAIL",
     "G8": "PARTIAL_WP1_PASS",
     "G9": "PARTIAL_WP1_PASS",
-    "next_route": "TRUSTED_ED25519_VERIFIER_SOURCE_PREAUTHORING_GATE"
+    "next_route": "TRUSTED_ED25519_VERIFIER_SOURCE_TDD_GATE"
   },
   "effect_boundary": {
     "authority_delta": "NONE",
     "runtime_delta": "NONE_DESIGN_DOCS_ONLY",
     "database_delta": "NONE_THIS_LOOP",
     "exchange_delta": "NONE",
-    "network_delta": "NONE_THIS_LOOP",
+    "network_delta": "PUBLIC_OFFICIAL_DOCUMENT_RESEARCH_ONLY_NO_CRATE_FETCH",
     "source_sql_test_workflow_delta": "NONE",
     "real_request_receipt_bytes_delta": "NONE",
     "private_runtime_broker_contact": false,
@@ -142,11 +151,11 @@
   "anti_repeat": {
     "same_scope_retries": 0,
     "review_repair_rounds": 2,
-    "next_loop_must_change": "Preauthorize only the exact Rust Ed25519 verifier source/test seam; do not repeat atomic-consumption design or author verifier/V160 source without a new gate."
+    "next_loop_must_change": "Author only the exact nine-path Rust verifier TDD slice with RED-first tests, recorded public crates.io fetch, distinct-target offline replay, supply-chain inventory, and independent source review; do not repeat preauthoring or author V160."
   },
   "authority_delta": "NONE",
   "runtime_delta": "NONE_DESIGN_DOCS_ONLY",
   "database_delta": "NONE_THIS_LOOP",
   "exchange_delta": "NONE",
-  "network_delta": "NONE_THIS_LOOP"
+  "network_delta": "PUBLIC_OFFICIAL_DOCUMENT_RESEARCH_ONLY_NO_CRATE_FETCH"
 }
