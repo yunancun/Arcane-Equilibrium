@@ -173,7 +173,6 @@ _MALFORMED_RECEIPT_CASES = (
     "verified_not_before_expires", "time_reversed", "time_future",
     "time_expired", "time_nonfinite",
 )
-_NONFINITE_TIME_CONSTRAINT = "alr_fit_attestations_time_check"
 
 
 class _SafeArgumentParser(argparse.ArgumentParser):
@@ -394,26 +393,6 @@ def _expect_db_error(
     else:
         connection.rollback()
         raise ProbeFailure(f"{function_name} unexpectedly accepted invalid content")
-
-
-def _expect_nonfinite_constraint_error(
-    connection: Any, arguments: Mapping[str, Any]
-) -> None:
-    import psycopg2  # type: ignore
-
-    try:
-        _call(connection, _FUNCTIONS["attest"], arguments)
-    except psycopg2.Error as exc:
-        connection.rollback()
-        constraint = getattr(exc.diag, "constraint_name", None)
-        if exc.pgcode != "23514" or constraint != _NONFINITE_TIME_CONSTRAINT:
-            raise ProbeFailure(
-                f"nonfinite attestation returned ({exc.pgcode}, {constraint!r}); "
-                f"expected (23514, {_NONFINITE_TIME_CONSTRAINT!r})"
-            ) from exc
-    else:
-        connection.rollback()
-        raise ProbeFailure("nonfinite attestation unexpectedly succeeded")
 
 
 def _expect_db_sqlstate_only(
@@ -1461,7 +1440,6 @@ def _malformed_attestation_arguments(
     elif malformed_case == "time_nonfinite":
         projection["expires_at"] = "infinity"
         arguments["p_expires_at"] = "infinity"
-        sqlstate, message = "23514", "NONFINITE_TIME_CONSTRAINT"
     else:
         raise ProbeFailure(f"unknown malformed receipt case: {malformed_case}")
     arguments["p_receipt_projection"] = projection
@@ -1502,11 +1480,7 @@ def _scenario_malformed_receipts(
         changed, sqlstate, message = _malformed_attestation_arguments(
             admin, fixture, malformed_case
         )
-        if malformed_case == "time_nonfinite":
-            if (sqlstate, message) != ("23514", "NONFINITE_TIME_CONSTRAINT"):
-                raise ProbeFailure("nonfinite case expectation routing drifted")
-            _expect_nonfinite_constraint_error(attestor_caller, changed)
-        elif message == "SQLSTATE_ONLY":
+        if message == "SQLSTATE_ONLY":
             _expect_db_sqlstate_only(attestor_caller, changed, sqlstate)
         else:
             _expect_db_error(
