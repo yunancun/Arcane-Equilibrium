@@ -342,6 +342,63 @@ class TestTwoModesCascade:
         assert "leak" in kwargs["fact_inf_assm"]["evidence_kinds"]
 
 
+class TestD3LedgerTokenColumns:
+    """③ D3 token 欄修：P3a 兩處 _ledger 經 cloud_meta 透傳 input/output_tokens；
+    真 outage 保留 NULL；P3b（ollama_generate row）不掛 cloud token（歸屬錯位防護）。"""
+
+    def test_success_path_passes_tokens_to_ledger(self, _mock_ledger):
+        """成功路（guard pass → sink）：record_l2_call 收到 _FakeResponse 的 in=10/out=20。
+
+        mutation-bite：若 _ledger 不透傳（或 cascade 不從 cloud_meta 取），此二 kwargs
+        會退回 None → D3 row token 欄回到全 NULL（l2r:724ac38bc4fc 暴露的 gap）。"""
+        store: list[dict[str, Any]] = []
+        eng = _FakeEngine(cloud_text=json.dumps(_VALID_DIAGNOSE_OUTPUT))
+        _run(EXEC.run_ml_advisory_cascade(
+            capability_id="ml_advisory.diagnose_leak", mode="diagnose_leak",
+            context=_diagnose_context(), engine=eng,
+            contract_ver="cv", schema_ver="sv", calibration=_enabled_calibration(),
+            sink_conn_provider=_conn_provider_factory(store),
+        ))
+        kwargs = _mock_ledger.record_l2_call.call_args.kwargs
+        assert kwargs["input_tokens"] == 10
+        assert kwargs["output_tokens"] == 20
+
+    def test_parse_failed_path_still_passes_tokens(self, _mock_ledger):
+        """parse_failed（有回覆但無法 parse；E2E-1 row l2r:724ac38bc4fc 正是此形狀）：
+        error 早退路的 record_l2_call 仍收到真 token——token 有無 ≠ parse 成敗。"""
+        eng = _FakeEngine(cloud_text="prose only — not JSON at all")
+        res = _run(EXEC.run_ml_advisory_cascade(
+            capability_id="ml_advisory.diagnose_leak", mode="diagnose_leak",
+            context=_diagnose_context(), engine=eng,
+            contract_ver="cv", schema_ver="sv", calibration=_enabled_calibration(),
+        ))
+        assert res.stage == "parse_failed"
+        kwargs = _mock_ledger.record_l2_call.call_args.kwargs
+        assert kwargs["input_tokens"] == 10
+        assert kwargs["output_tokens"] == 20
+
+    def test_cloud_unavailable_keeps_tokens_null(self, _mock_ledger):
+        """真 outage（provider 回 None）：token 欄保留 None=NULL（無回應=無計量，不補 0）。"""
+        eng = _FakeEngine(cloud_text=None)
+        res = _run(EXEC.run_ml_advisory_cascade(
+            capability_id="ml_advisory.diagnose_leak", mode="diagnose_leak",
+            context=_diagnose_context(), engine=eng,
+            contract_ver="cv", schema_ver="sv", calibration=_enabled_calibration(),
+        ))
+        assert res.stage == "cloud_unavailable"
+        kwargs = _mock_ledger.record_l2_call.call_args.kwargs
+        assert kwargs["input_tokens"] is None
+        assert kwargs["output_tokens"] is None
+
+    def test_p3b_hypothesize_ledger_does_not_attach_cloud_tokens(self):
+        """deletion-test（顯式不做）：P3b 三處 _ledger 的 row model=ollama_generate*、
+        raw_response=raw_gen——掛 cloud token 會造歸屬錯位，故 hypothesize cascade 源碼
+        不得對 _ledger 傳 token kwargs（維持簽名預設 None=NULL）。"""
+        src = inspect.getsource(EXEC._run_hypothesize_cascade)
+        assert "input_tokens=" not in src
+        assert "output_tokens=" not in src
+
+
 class TestB3MemoryRecallWiring:
     def test_shadow_recall_is_ledger_only_not_model_prompt(self, monkeypatch, _mock_ledger):
         """OPENCLAW_L2_MEMORY_RECALL=shadow：算 bundle，但只入 D3 input_context，不改 prompt。"""

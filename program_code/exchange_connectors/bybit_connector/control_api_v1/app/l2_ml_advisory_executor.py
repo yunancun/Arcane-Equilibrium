@@ -454,6 +454,11 @@ async def _run_cloud_interpret(
         meta["cloud_stage"] = "cloud_unavailable"
         return None, "", 0.0, system_prompt, meta
     cost = _record_call_cost(engine, resp, eff_tier)
+    # token 欄透傳（沿 layer2_engine record_call 原樣透傳慣例）：只在 resp 存在時放 meta 鍵——
+    # resp=None（真 outage）分支不加鍵，caller 端 .get() 得 None → D3 row token 欄保留
+    # NULL=「無回應」的誠實語義（token 有無 ≠ parse 成敗：present-but-unparsable 仍有 token）。
+    meta["input_tokens"] = getattr(resp, "input_tokens", None)
+    meta["output_tokens"] = getattr(resp, "output_tokens", None)
     raw = resp.text or ""
     # 先剝 ```json fence 與前後散文再 json.loads（帶殼回覆＝有回應，非 outage）。
     parsed = _parse_cloud_reply_json(raw)
@@ -823,6 +828,10 @@ async def run_ml_advisory_cascade(
                 context=ledger_context,
                 raw_response=raw,
                 parsed_output=error_out, guard_verdict=None, cost_usd=result.cost_usd,
+                # token 欄：cloud_unavailable 時 meta 無鍵 → None（NULL=無回應）；
+                # parse_failed（有回覆）時透傳真 token（E2E-1 row 形狀正是此分支）。
+                input_tokens=cloud_meta.get("input_tokens"),
+                output_tokens=cloud_meta.get("output_tokens"),
                 latency_ms=int((time.time() - started) * 1000))
         _record_spend(spend_recorder, capability_id, result.cost_usd)
         return result
@@ -858,6 +867,8 @@ async def run_ml_advisory_cascade(
             context=_with_memory_recall_audit_context(context, memory_recall),
             raw_response=raw,
             parsed_output=guard_out, guard_verdict=gres.verdict, fact_inf_assm=fact_inf_assm,
+            input_tokens=cloud_meta.get("input_tokens"),
+            output_tokens=cloud_meta.get("output_tokens"),
             cost_usd=result.cost_usd, latency_ms=int((time.time() - started) * 1000))
 
     if gres.verdict == "reject":
@@ -2011,8 +2022,14 @@ def _ledger(
     contract_ver: str, schema_ver: str, system_prompt: str, context: dict[str, Any],
     raw_response: str, parsed_output: dict[str, Any] | None, guard_verdict: str | None,
     cost_usd: float, latency_ms: int | None, fact_inf_assm: dict[str, Any] | None = None,
+    input_tokens: int | None = None, output_tokens: int | None = None,
 ) -> None:
-    """落一筆 D3 ledger row（record_l2_call；消毒在 writer INSERT 前）。fail-soft。"""
+    """落一筆 D3 ledger row（record_l2_call；消毒在 writer INSERT 前）。fail-soft。
+
+    input_tokens/output_tokens：可選（預設 None=NULL）。只有 cloud 回應真實存在的路徑才傳
+    （P3a 兩處經 cloud_meta 透傳）；P3b ollama_generate 路徑的 row model 非 cloud，
+    不得掛 cloud token（歸屬錯位），維持 NULL。
+    """
     try:
         writer.record_l2_call(
             l2_reply_id=l2_reply_id, capability_id=capability_id, trigger=trigger,
@@ -2020,7 +2037,8 @@ def _ledger(
             contract_ver=contract_ver, schema_ver=schema_ver,
             system_prompt=system_prompt, input_context=context, raw_response=raw_response,
             parsed_output=parsed_output, guard_verdict=guard_verdict,
-            fact_inf_assm=fact_inf_assm, cost_usd=cost_usd, latency_ms=latency_ms,
+            fact_inf_assm=fact_inf_assm, input_tokens=input_tokens, output_tokens=output_tokens,
+            cost_usd=cost_usd, latency_ms=latency_ms,
         )
     except Exception as exc:  # noqa: BLE001 — D3 寫失敗不阻斷 cascade
         logger.warning("ml_advisory D3 ledger 記錄 skipped (fail-soft): %s", exc)

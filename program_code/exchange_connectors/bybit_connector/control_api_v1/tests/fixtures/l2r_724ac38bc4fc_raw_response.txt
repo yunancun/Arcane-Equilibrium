@@ -1,0 +1,35 @@
+```json
+{
+  "mode": "diagnose_leak",
+  "leak_drift_diagnosis": {
+    "suspected_cause": "Persistent mlde_shadow_advisor=error since 2026-07-01 combined with absent leakage_check artifact creates an unverified pipeline segment. The shadow advisor's repeated failure means its outputs (and any upstream feature construction feeding it) have not been validated for point-in-time integrity or distributional consistency across the 9-day failure window. The skipped heavy jobs (cpcv_validator, optuna_optimizer, dl3_foundation, thompson_sampling) further mean cross-validation and OOS-gap checks that would normally surface leakage or drift have not run during this period. The anthropic SDK install triggering a one-shot E2E rerun suggests an environment-level dependency change that may have silently altered feature availability or timestamp handling in the shadow advisor path without accompanying leakage re-screening.",
+    "evidence": [
+      {
+        "claim": "No leakage_check artifact is attached to this maintenance summary — name-pattern screen was not completed, so even necessary-not-sufficient name-pattern coverage is absent for this run.",
+        "kind": "leak",
+        "source_ref": "leakage_check.findings = 'no leakage_check artifact attached to this maintenance summary'",
+        "source_class": "name_pattern_check"
+      },
+      {
+        "claim": "mlde_shadow_advisor has errored every day since 2026-07-01 (9 consecutive daily runs); its feature pipeline has not been screened for leaking future-dated fields during this window.",
+        "kind": "leak",
+        "source_ref": "recurring_pattern: 'mlde_shadow_advisor=error daily since 2026-07-01'",
+        "source_class": "name_pattern_check"
+      },
+      {
+        "claim": "cpcv_validator skipped by weekday gate — combinatorial purged cross-validation providing OOS-gap evidence has not run; shift1_compliance and is_oos_gap evidence are therefore unavailable, so point-in-time integrity cannot be asserted for any trainer in this run.",
+        "kind": "leak",
+        "source_ref": "job_statuses.cpcv_validator = 'skipped'",
+        "source_class": "name_pattern_check"
+      },
+      {
+        "claim": "drift_signals field is null — no distributional drift check result is available; it is unknown whether the mlde_shadow_advisor failure correlates with a feature distribution shift introduced alongside or prior to the SDK environment change.",
+        "kind": "drift",
+        "source_ref": "drift_signals: null",
+        "source_class": "name_pattern_check"
+      }
+    ],
+    "recommended_check": "Force-run leakage_check.py in full artifact-generating mode against the mlde_shadow_advisor feature matrix specifically: (1) execute name-pattern screen AND shift1_compliance check on all input columns to confirm no future-dated or lookahead field names are present; (2) run is_oos_gap verification to confirm temporal holdout boundaries are intact after the SDK environment change; (3) surface the root-cause exception from the 2026-07-01 through 2026-07-10 shadow advisor error logs before rerunning — confirm the error is purely an SDK import failure and not a silent data-path rerouting that bypasses PIT guards; (4) ungate and run cpcv_validator on at least the shadow advisor model to obtain OOS-gap evidence before treating any of the currently-ok trainer outputs as pipeline-integrity-verified."
+  }
+}
+```
