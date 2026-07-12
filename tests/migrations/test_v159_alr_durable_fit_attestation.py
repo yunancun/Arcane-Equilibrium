@@ -1206,6 +1206,12 @@ def _assert_catalog_hardening_contract(sql: str) -> None:
         "c.reloptions IS NULL",
     ):
         assert catalog_signal in validator
+    for char_catalog_column in ("attgenerated", "attidentity"):
+        assert (
+            f"COALESCE(NULLIF(a.{char_catalog_column}::TEXT,''),'-')"
+            in validator
+        )
+        assert f"COALESCE(NULLIF(a.{char_catalog_column},''),'-')" not in validator
 
     assert "CREATE TEMP TABLE alr_v159_expected_" in code
     assert "pg_get_expr(a.conbin,a.conrelid,FALSE)" in validator
@@ -1322,6 +1328,14 @@ def test_v159_catalog_hardening_contract() -> None:
         ("p.prosrc='pg_digest'", "p.prosrc='rogue_digest'"),
         ("p.prorettype=CASE", "p.prorettype<>CASE"),
         ("a.attndims<>0", "a.attndims<0"),
+        (
+            "COALESCE(NULLIF(a.attgenerated::TEXT,''),'-')",
+            "COALESCE(NULLIF(a.attgenerated,''),'-')",
+        ),
+        (
+            "COALESCE(NULLIF(a.attidentity::TEXT,''),'-')",
+            "COALESCE(NULLIF(a.attidentity,''),'-')",
+        ),
         ("NOT i.indnullsnotdistinct", "i.indnullsnotdistinct"),
         ("privilege.grantor<>c.relowner", "privilege.grantor=c.relowner"),
         (
@@ -2139,10 +2153,10 @@ def _assert_functional_positive_helper_contracts(tree: ast.Module) -> None:
 def _assert_functional_probe_contract(source: str) -> None:
     compile(source, str(FUNCTIONAL_PROBE), "exec")
     assert hashlib.sha256(V159.read_bytes()).hexdigest() == (
-        "5fcd091057c8aa02bf58e649e5294fbb675c081ba02805f4024df5adaa6dba25"
+        "f98708b2ddcd57bda1bf861f0b3f49777b648aaa189ed7d69919998fca77852c"
     )
     assert (
-        '"V159": "5fcd091057c8aa02bf58e649e5294fbb675c081ba02805f4024df5adaa6dba25"'
+        '"V159": "f98708b2ddcd57bda1bf861f0b3f49777b648aaa189ed7d69919998fca77852c"'
         in source
     )
     assert '_ACK_ENV = "ALR_V159_DISPOSABLE_ACK"' in source
@@ -2682,7 +2696,7 @@ def test_v159_functional_probe_ast_contract() -> None:
             "allow_role_default_session(connection)",
         ),
         (
-            '"V159": "5fcd091057c8aa02bf58e649e5294fbb675c081ba02805f4024df5adaa6dba25"',
+            '"V159": "f98708b2ddcd57bda1bf861f0b3f49777b648aaa189ed7d69919998fca77852c"',
             '"V159": "' + "0" * 64 + '"',
         ),
         ("BYTE_EXACT_READBACK", "BYTE_READBACK_SKIPPED"),
@@ -3012,7 +3026,7 @@ def test_v159_functional_probe_ast_rejects_composed_scenario_bypass() -> None:
 
 _CONCURRENCY_EXPECTED_SHA256 = {
     "V158": "7ed70599c6bd5f3cdb3376bc135a952d8c18f4ad62a62432c2bfdd8ee84e446b",
-    "V159": "5fcd091057c8aa02bf58e649e5294fbb675c081ba02805f4024df5adaa6dba25",
+    "V159": "f98708b2ddcd57bda1bf861f0b3f49777b648aaa189ed7d69919998fca77852c",
 }
 _CONCURRENCY_SCENARIO_ORDER = (
     "_scenario_identical_attestation",
