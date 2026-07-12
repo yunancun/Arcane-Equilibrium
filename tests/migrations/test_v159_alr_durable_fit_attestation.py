@@ -2525,12 +2525,6 @@ _AST_ERROR_HELPERS = {
         frozenset({"pgcode"}),
         "_scenario_signed_field_mutations",
     ),
-    "_expect_nonfinite_constraint_error": (
-        "_call",
-        frozenset({"constraint", "_NONFINITE_TIME_CONSTRAINT"}),
-        frozenset({"pgcode"}),
-        "_scenario_malformed_receipts",
-    ),
     "_expect_db_sqlstate_only": (
         "_call",
         frozenset({"sqlstate"}),
@@ -3099,7 +3093,6 @@ def _assert_functional_probe_contract(source: str) -> None:
 
     for helper in (
         "_canonical_pg_jsonb_bytes",
-        "_expect_nonfinite_constraint_error",
         "_expect_db_sqlstate_only",
         "_persist_qualified_receipt",
         "_expected_durable_attestation_hash",
@@ -3153,11 +3146,6 @@ def _assert_functional_probe_contract(source: str) -> None:
     assert "for malformed_case in _MALFORMED_RECEIPT_CASES" in source
     assert source.count("AT TIME ZONE 'UTC'") >= 4
     assert "to_char(statement_timestamp()" not in source
-    assert (
-        '_NONFINITE_TIME_CONSTRAINT = "alr_fit_attestations_time_check"'
-        in source
-    )
-    assert 'getattr(exc.diag, "constraint_name", None)' in source
     assert "pg_sleep" in source
     assert "GREATEST(" in source
     assert '"happy", expiry_seconds=12.0' in source
@@ -3186,7 +3174,6 @@ def _assert_functional_probe_contract(source: str) -> None:
     assert '"alr_qualified_training_receipts"' in source
     assert '"qualified_receipt": receipt' in source
     assert 'fixture["qualified_receipt"]' in source
-    assert "constraint != _NONFINITE_TIME_CONSTRAINT" in source
     assert "def _safe_entrypoint(" in source
     assert "except ProbeFailure:" in source and "except Exception:" in source
     assert 'sys.stderr.write(_SAFE_FAILURE_MESSAGE + "\\n")' in source
@@ -3329,10 +3316,6 @@ def _assert_functional_probe_ast_contract(source: str) -> None:
     assert tuple(
         ast.literal_eval(_functional_assignment(tree, "_MALFORMED_RECEIPT_CASES"))
     ) == _AST_EXPECTED_MALFORMED_CASES
-    assert ast.literal_eval(
-        _functional_assignment(tree, "_NONFINITE_TIME_CONSTRAINT")
-    ) == "alr_fit_attestations_time_check"
-
     signed_mutations = _functional_function(
         tree, "_scenario_signed_field_mutations"
     )
@@ -3626,6 +3609,48 @@ def test_v159_functional_probe_checks_database_bind_time_against_attestation_row
     )
 
 
+def test_v159_functional_probe_nonfinite_time_matches_writer_fail_closed_path() -> None:
+    tree = _functional_probe_tree(_functional_probe_source())
+    argument_builder = _functional_function(
+        tree, "_malformed_attestation_arguments"
+    )
+    default_error = ast.parse(
+        'sqlstate, message = "P0001", '
+        '"V159 signed receipt bytes/projection/claim mismatch"'
+    ).body[0]
+    assert any(
+        _functional_ast_shape(statement) == _functional_ast_shape(default_error)
+        for statement in argument_builder.body
+    )
+    branch_test = ast.parse('malformed_case == "time_nonfinite"').body[0].value
+    branches = [
+        node
+        for node in ast.walk(argument_builder)
+        if isinstance(node, ast.If)
+        and _functional_ast_shape(node.test) == _functional_ast_shape(branch_test)
+    ]
+    assert len(branches) == 1
+    expected_body = ast.parse(
+        'projection["expires_at"] = "infinity"\n'
+        'arguments["p_expires_at"] = "infinity"\n'
+    ).body
+    assert [_functional_ast_shape(node) for node in branches[0].body] == [
+        _functional_ast_shape(node) for node in expected_body
+    ]
+
+    malformed_scenario = _functional_function(
+        tree, "_scenario_malformed_receipts"
+    )
+    assert not any(
+        isinstance(node, ast.Constant) and node.value == "time_nonfinite"
+        for node in ast.walk(malformed_scenario)
+    )
+    assert len(_functional_calls(malformed_scenario, "_expect_db_error")) == 1
+    assert not _functional_calls(
+        malformed_scenario, "_expect_nonfinite_constraint_error"
+    )
+
+
 @pytest.mark.parametrize(
     "needle,replacement",
     (
@@ -3696,10 +3721,6 @@ def test_v159_functional_probe_bind_time_oracle_mutations_are_rejected(
             "for field_name in ()",
         ),
         ("AT TIME ZONE 'UTC'", "AT TIME ZONE 'Europe/Madrid'"),
-        (
-            '_NONFINITE_TIME_CONSTRAINT = "alr_fit_attestations_time_check"',
-            '_NONFINITE_TIME_CONSTRAINT = "alr_fit_attestations_hashes_check"',
-        ),
         ("EXPIRED_REPLAY_DUPLICATE", "EXPIRY_REPLAY_SKIPPED"),
         (
             "BOUND_EXPIRED_RESULT_REPLAY_DUPLICATE",
