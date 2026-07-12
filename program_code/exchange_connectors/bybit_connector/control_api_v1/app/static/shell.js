@@ -329,7 +329,7 @@
     if (v.flag) {
       var flag = document.createElement('span');
       flag.className = 'flag';
-      flag.title = '交易關鍵 · P2 最後遷移(P1.1-a 仍 iframe 後備)';
+      flag.title = '交易關鍵 · 已原生遷移(flag opt-in;保 legacy iframe 回滾後備)';
       flag.textContent = '⚑';
       label.appendChild(flag);
     }
@@ -350,7 +350,7 @@
     box.textContent = '';
     var t = document.createElement('div');
     t.className = 'rail-grp-t silk';
-    t.textContent = 'Environment';
+    t.textContent = '環境 Environment';  // design/03 Mode C 首遇雙語(env-ladder legend;.rail-grp-t 無 uppercase 故 CJK 安全)
     box.appendChild(t);
     VIEWS.filter(function (v) { return v.lane === lane; })
       .forEach(function (v) { box.appendChild(railItem(v)); });
@@ -361,7 +361,7 @@
     box.textContent = '';
     var t = document.createElement('div');
     t.className = 'rail-grp-t silk';
-    t.textContent = 'Cross-cutting';
+    t.textContent = '橫切 Cross-cutting';  // design/03 Mode C 首遇雙語(cross-cutting 眉標;.rail-grp-t 無 uppercase 故 CJK 安全)
     box.appendChild(t);
     VIEWS.filter(function (v) { return v.lane === 'cross'; })
       .forEach(function (v) { box.appendChild(railItem(v)); });
