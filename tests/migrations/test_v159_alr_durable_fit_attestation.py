@@ -96,6 +96,59 @@ def test_v159_json_type_predicates_do_not_chain_is_operators() -> None:
     _assert_json_type_predicates_are_parseable(_sql())
 
 
+_JSONB_DELETE_SELECTOR_COUNTS = (
+    ("receipt_projection->'subject'", 2),
+    ("receipt_projection->'claims'", 2),
+    ("receipt_projection->'result_observation'", 2),
+    ("receipt_projection#>'{result_observation,actual_inputs}'", 2),
+    ("receipt_projection#>'{result_observation,model}'", 2),
+    ("receipt_projection#>'{result_observation,artifacts}'", 2),
+    ("receipt_projection#>'{result_observation,artifacts,q10}'", 2),
+    ("receipt_projection#>'{result_observation,artifacts,q50}'", 2),
+    ("receipt_projection#>'{result_observation,artifacts,q90}'", 2),
+    ("receipt_projection->'authentication'", 2),
+    ("v_obs->'actual_inputs'", 1),
+    ("v_obs->'model'", 1),
+    ("v_obs->'artifacts'", 1),
+)
+
+
+def _assert_jsonb_delete_selectors_are_parenthesized(sql: str) -> None:
+    for selector, expected_count in _JSONB_DELETE_SELECTOR_COUNTS:
+        safe = re.compile(
+            rf"\({re.escape(selector)}\)\s*-\s*ARRAY\["
+        )
+        unsafe = re.compile(
+            rf"(?<!\(){re.escape(selector)}\s*-\s*ARRAY\["
+        )
+        assert len(safe.findall(sql)) == expected_count, selector
+        assert unsafe.search(sql) is None, selector
+
+
+def test_v159_jsonb_delete_selector_precedence_is_explicit() -> None:
+    _assert_jsonb_delete_selectors_are_parenthesized(_sql())
+
+
+@pytest.mark.parametrize("selector,_expected_count", _JSONB_DELETE_SELECTOR_COUNTS)
+def test_v159_unparenthesized_jsonb_delete_selector_mutations_are_rejected(
+    selector: str, _expected_count: int
+) -> None:
+    sql = _sql()
+    safe = re.compile(
+        rf"\({re.escape(selector)}\)(?P<suffix>\s*-\s*ARRAY\[)"
+    )
+    match = safe.search(sql)
+    assert match is not None
+    weakened = (
+        sql[: match.start()]
+        + selector
+        + match.group("suffix")
+        + sql[match.end() :]
+    )
+    with pytest.raises(AssertionError):
+        _assert_jsonb_delete_selectors_are_parenthesized(weakened)
+
+
 @pytest.mark.parametrize(
     "safe,unsafe",
     (
@@ -2209,10 +2262,10 @@ def _assert_functional_positive_helper_contracts(tree: ast.Module) -> None:
 def _assert_functional_probe_contract(source: str) -> None:
     compile(source, str(FUNCTIONAL_PROBE), "exec")
     assert hashlib.sha256(V159.read_bytes()).hexdigest() == (
-        "05a33e1aaffb4edb7a280ce38367f15c29ac11c6d678df91562fb7e2f1e4ce6d"
+        "210c99fe7ec53cb6ea7eb618cface034a645ee4df343eef92d8d98239d64dde1"
     )
     assert (
-        '"V159": "05a33e1aaffb4edb7a280ce38367f15c29ac11c6d678df91562fb7e2f1e4ce6d"'
+        '"V159": "210c99fe7ec53cb6ea7eb618cface034a645ee4df343eef92d8d98239d64dde1"'
         in source
     )
     assert '_ACK_ENV = "ALR_V159_DISPOSABLE_ACK"' in source
@@ -2752,7 +2805,7 @@ def test_v159_functional_probe_ast_contract() -> None:
             "allow_role_default_session(connection)",
         ),
         (
-            '"V159": "05a33e1aaffb4edb7a280ce38367f15c29ac11c6d678df91562fb7e2f1e4ce6d"',
+            '"V159": "210c99fe7ec53cb6ea7eb618cface034a645ee4df343eef92d8d98239d64dde1"',
             '"V159": "' + "0" * 64 + '"',
         ),
         ("BYTE_EXACT_READBACK", "BYTE_READBACK_SKIPPED"),
@@ -3082,7 +3135,7 @@ def test_v159_functional_probe_ast_rejects_composed_scenario_bypass() -> None:
 
 _CONCURRENCY_EXPECTED_SHA256 = {
     "V158": "7ed70599c6bd5f3cdb3376bc135a952d8c18f4ad62a62432c2bfdd8ee84e446b",
-    "V159": "05a33e1aaffb4edb7a280ce38367f15c29ac11c6d678df91562fb7e2f1e4ce6d",
+    "V159": "210c99fe7ec53cb6ea7eb618cface034a645ee4df343eef92d8d98239d64dde1",
 }
 _CONCURRENCY_SCENARIO_ORDER = (
     "_scenario_identical_attestation",
