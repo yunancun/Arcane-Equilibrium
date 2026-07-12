@@ -1,0 +1,201 @@
+/* ═══════════════════════════════════════════════════════════════════
+   view-demo.css — 玄衡原生 view「演示 / Demo」頁級樣式(Phase 2 交易關鍵 view 遷移)
+   ═══════════════════════════════════════════════════════════════════
+   MODULE_NOTE
+   模塊用途:承載 view-demo.js 注入的 demo DOM 所需樣式。分兩層:
+     ① demo-specific —— tab-demo.html 的**頁內樣式塊**(行 19-53)逐字搬入(scoped `.demo-view`):
+        source-bar / stale-banner(canon-7 stale 態)/ oc-stale 降飽和 / pnl sparkline chrome / 成交序列
+        捲動高度 / 未連接說明左對齊 / **全平確認框(demo-cta-*)**,及兩個 className-wipe 的 id 選擇器
+        (#demo-close-all-summary / #demo-session-badge,class 每刷新被 JS 整串重寫,樣式改掛 id 抗抹除)。
+        此為對頁內樣式塊的**重複(非移動)**:legacy iframe 路徑仍靠 tab-demo.html 自帶頁內塊,故該檔不動作回滾錨。
+     ② `.demo-view` scope 的 legacy 短名 shim(oc-card / oc-metric* / oc-chip* / oc-control-bar / oc-table* /
+        oc-collapse* / oc-fill-* / oc-performance-metrics / oc-explain* / oc-loading / oc-not-configured / oc-pre +
+        .green/.red/.yellow 色助手 / oc-subtab-placeholder)—— 殼**刻意不呼** common.js ocInjectBaseCSS()
+        (避免其 body{padding}+`*` reset 破殼 chrome),而這批 class 的樣式原只在 ocInjectBaseCSS 內、殼全域
+        CSS(shell-components/oc-utilities/shell/tokens)**零定義**(實測)。所有已遷 view CSS(view-paper/
+        overview/settings/risk/governance.css)各自 port 同款 `.{view}-view` scoped shim,否則卡片全裸。本檔
+        照「類比 view-paper.css」補同款 shim(paper 為最貼近 demo 的姊妹:成交歷史 + 持倉 + 控制欄),另從
+        ocInjectBaseCSS 補 paper 未用的成交子標籤(oc-fill-tabs/tab/table/time)+ 未連接態(oc-not-configured)+
+        oc-pre。此為對 ocInjectBaseCSS 同名規則的**重複(非移動)**:legacy iframe 續靠 ocInjectBaseCSS 運行時注入。
+        按鈕(.oc-btn / oc-btn-success / oc-btn-danger / oc-btn-primary / oc-btn--xs)已在 shell-components.css /
+        oc-utilities.css(殼已載),不重複;方向徽(.side-badge)、品類徽(.oc-cat-tag)、正負值色(.val-pos/
+        .val-neg)、.num、.hidden 與版式 utility(row/gap/fs-*/t-*/mt-*/mb-* 等)已在 oc-utilities.css / tokens.css
+        (殼已載),不重複。oc-btn-warn(closeDemoPosition dust 確認 confirmClass)全域未定義=既有源碼債(pre-existing;
+        該按鈕在 common-modals.js 掛於 .demo-view 外),不在本 scoped shim 內、不新增——退回 .oc-btn 基樣式。
+   canon-6 政策(demo 琥珀 ≠ live 紅):demo=**虛擬資金**,demo-cta-* 全平確認框以**琥珀(--warn)**作破壞性操作
+     警示語義,**非** canon-6 真金熱紅、**非** --live。demo-cta-box / demo-cta-confirm 的 rgba(234,179,8,*) 琥珀
+     tint 為 palette 外色,byte-parity 逐字搬(源註「待組件層收斂」),標 pre-existing 債。本檔不引入任何 --live 類。
+   ratchet(born-clean 零裸 hex / 零內聯):全檔零裸十六進位色值 —— 頁內樣式塊本就零裸色碼(色值全 rgba tint /
+     var token);琥珀警示的語義色走 var(--warn),tint 走 rgba(合法,ratchet 只禁裸十六進位)。源頁內樣式塊註釋提及的
+     琥珀色碼**不進本檔**(改中文「琥珀色 → --warn」等義描述,避免裸色碼落入新檔;R77:純 findall 偵測器不剝註釋)。
+     動態值走 setProperty scoped-var(本 view 無新增動態幾何;sparkline polyline points 由 reused JS 以 SVG 屬性
+     設,非 CSS)。reused JS 執行期 .style inline(內聯 script 對 banner display / metric-val className 的操作)
+     不入本檔、不算本檔內聯違規。零內聯樣式屬性、零內聯樣式塊、零新框架。
+   誠實邊界:靜態只證 source;真渲染 / stale 三態徽色 / 琥珀確認框可讀性 / 琥珀不升 live = NEEDS-LINUX + operator。
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ═══ ① demo-specific(port tab-demo.html 頁內樣式塊 行 19-53,scoped .demo-view)═══ */
+
+/* ── 成交來源列 / stale banner(canon-7 stale 態;琥珀/朱紅 rgba tint 為 palette 外色,byte-parity)── */
+.demo-view .oc-demo-source-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 8px 0; font-size: 12px; color: var(--text-secondary); }
+.demo-view .oc-demo-source-bar .oc-chip { font-size: 11px; }
+.demo-view .oc-demo-stale-banner { display: none; margin: 8px 0; padding: 8px 10px; border-radius: var(--r-1); font-size: 12px; border: 1px solid rgba(210,153,34,0.35); background: rgba(210,153,34,0.10); color: var(--warn); }
+.demo-view .oc-demo-stale-banner.bad { border-color: rgba(248,81,73,0.35); background: rgba(248,81,73,0.10); color: var(--neg); }
+.demo-view .oc-stale { opacity: 0.58; filter: saturate(0.55); }
+.demo-view .oc-row-muted { color: var(--text-secondary); }
+.demo-view .oc-source-note { color: var(--text-secondary); font-size: 10px; display: block; margin-top: 2px; }
+.demo-view .oc-spin { display: inline-block; animation: ocSpin 0.8s linear infinite; }
+/* @keyframes 為全域規則(名稱空間全域,無法 scope);byte-parity 保留,與殼既有同名規則相容(冪等) */
+@keyframes ocSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+/* ── 風控導覽鈕(藍 rgba 為 palette 外色;文字色沿用中性化後的 --text-secondary)── */
+.demo-view .demo-risk-btn { border-color: rgba(56,139,253,0.45); color: var(--text-secondary); }
+/* ── 盈虧走勢 sparkline 底圖 chrome(半透明暗底為 palette 外色;邊框歸 --border-subtle)── */
+.demo-view .demo-pnl-svg { display: block; background: rgba(13,17,23,0.5); border-radius: var(--r-1); border: 1px solid var(--border-subtle); }
+/* ── 盈虧序列表捲動高度上限(元素特定值,無對應 token)── */
+.demo-view .demo-scroll-190 { max-height: 190px; overflow: auto; }
+/* ── 未連接說明區:置中容器內改左對齊 ── */
+.demo-view .demo-help-left { text-align: left; }
+
+/* ── 全平確認框 overlay / box / 標題 / 動作列 / 確認鈕(canon-6:demo 虛擬資金,琥珀警示語義非 live 熱紅)──
+   標題/確認文字的琥珀色 → --warn(破壞性操作警示);box / 確認鈕邊框的琥珀 rgba tint 為 palette 外色,
+   byte-parity 逐字保留(源註「待組件層收斂」),scrim / box-shadow 的黑 rgba 沿 codebase 慣例保留。 */
+.demo-view .demo-cta-overlay { position: fixed; top: 0; right: 0; bottom: 0; left: 0; background: rgba(0,0,0,0.6); z-index: 9999; display: flex; align-items: center; justify-content: center; }
+.demo-view .demo-cta-box { background: var(--bg-surface); border: 1px solid rgba(234,179,8,0.5); border-radius: var(--r-2); padding: var(--sp-5); max-width: 440px; width: 90%; box-shadow: 0 8px 32px rgba(0,0,0,0.4); }
+.demo-view .demo-cta-title { margin: 0 0 var(--sp-3) 0; font-size: var(--fs-section); color: var(--warn); }
+.demo-view .demo-cta-actions { display: flex; gap: var(--sp-2); justify-content: flex-end; }
+.demo-view .demo-cta-confirm { border-color: rgba(234,179,8,0.7); color: var(--warn); font-weight: var(--weight-semi); }
+
+/* ── className-wipe 元素:class 每次刷新被 JS 整串重寫,樣式改掛 #id 抗抹除(鐵則二)── */
+.demo-view #demo-close-all-summary { margin: 0 0 var(--sp-4) 0; font-size: var(--fs-base); font-weight: var(--weight-semi); line-height: 1.5; }
+.demo-view #demo-session-badge { margin-left: var(--sp-2); }
+
+/* ═══ ② `.demo-view` scope 的 legacy 短名 shim(port ocInjectBaseCSS / 類比 view-paper.css,色字面→token)═══ */
+
+/* ── Load-error / loading 佔位(view-demo.js showLoadError + placeholder)── */
+.demo-view .oc-subtab-placeholder {
+  padding: 24px 18px; text-align: center;
+  background: var(--bg-sunken); border: 1px dashed var(--border-subtle);
+  border-radius: var(--r-2); color: var(--text-secondary); font-size: 13px;
+  line-height: 1.7; margin-top: 10px;
+}
+
+/* ── Cards ── */
+.demo-view .oc-card {
+  background: var(--bg-surface); border: 1px solid var(--border-subtle);
+  border-radius: var(--r-2); padding: 16px; margin-bottom: 14px;
+}
+.demo-view .oc-card h3 { font-size: 13px; font-weight: 600; margin-bottom: 8px; color: var(--text-primary); }
+
+/* ── Metric row ── */
+.demo-view .oc-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+.demo-view .oc-metric { background: var(--bg-app); border: 1px solid var(--border-subtle); border-radius: var(--r-2); padding: 10px 12px; }
+.demo-view .oc-metric-label { font-size: 10px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.4px; }
+.demo-view .oc-metric-val { font-size: 20px; font-weight: 700; margin-top: 2px; }
+/* 性能指標網格(等高卡 + 多行 label 對齊,對齊 view-paper.css)*/
+.demo-view .oc-performance-metrics { grid-template-columns: repeat(auto-fit, minmax(184px, 1fr)); align-items: stretch; }
+.demo-view .oc-performance-metrics .oc-metric { min-height: 118px; display: flex; flex-direction: column; }
+.demo-view .oc-performance-metrics .oc-metric-label { min-height: 42px; line-height: 1.45; display: block; }
+.demo-view .oc-performance-metrics .oc-metric-val { margin-top: auto; font-size: 18px; line-height: 1.2; overflow-wrap: anywhere; }
+
+/* ── 色助手(oc-metric-val 多態 / loadComparison 匹配標記;JS 掛 green/yellow;.red 為家族齊備)── */
+.demo-view .green { color: var(--pos); }
+.demo-view .red { color: var(--neg); }
+.demo-view .yellow { color: var(--warn); }
+
+/* ── Status chips(demo-badge / session-badge 三態;色字面→語義 token,對齊 view-paper.css)── */
+.demo-view .oc-chip {
+  display: inline-flex; align-items: center; gap: 5px; border-radius: var(--r-full);
+  padding: 3px 10px; font-size: 11px; font-weight: 500; border: 1px solid transparent;
+}
+.demo-view .oc-chip-good    { background: var(--pos-bg);   border-color: var(--pos);           color: var(--pos); }
+.demo-view .oc-chip-warn    { background: var(--warn-bg);  border-color: var(--warn);          color: var(--warn); }
+.demo-view .oc-chip-bad     { background: var(--neg-bg);   border-color: var(--neg);           color: var(--neg); }
+.demo-view .oc-chip-neutral { background: var(--bg-hover); border-color: var(--border-strong); color: var(--text-secondary); }
+
+/* ── Control bar(Demo 會話控制欄)── */
+.demo-view .oc-control-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 12px 16px; background: var(--bg-surface); border: 1px solid var(--border-subtle);
+  border-radius: var(--r-2); margin-bottom: 14px;
+}
+
+/* ── Tables(th 底 / hover 保 rgba→token,對齊 view-paper.css;ratchet 只禁裸十六進位)── */
+.demo-view .oc-table-wrap { overflow-x: auto; margin-top: 8px; }
+.demo-view .oc-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.demo-view .oc-table th {
+  text-align: left; padding: 8px 10px; color: var(--text-secondary); font-weight: 500;
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px;
+  border-bottom: 1px solid var(--border-subtle); background: var(--bg-sunken);
+}
+.demo-view .oc-table td { padding: 8px 10px; border-bottom: 1px solid var(--border-subtle); }
+.demo-view .oc-table tr:last-child td { border-bottom: none; }
+.demo-view .oc-table tr:hover td { background: var(--bg-hover); }
+.demo-view .oc-table .empty-row td { text-align: center; color: var(--text-secondary); padding: 20px; }
+
+/* ── Collapsed section(成交歷史 / 對比;details/summary 三角標記)── */
+.demo-view .oc-collapse { border: 1px solid var(--border-subtle); border-radius: var(--r-2); margin-top: 10px; }
+.demo-view .oc-collapse summary {
+  cursor: pointer; padding: 10px 14px; font-size: 13px;
+  color: var(--text-primary); user-select: none; list-style: none;
+}
+.demo-view .oc-collapse summary::-webkit-details-marker { display: none; }
+.demo-view .oc-collapse summary::before { content: '\25B6  '; font-size: 9px; color: var(--text-secondary); }
+.demo-view .oc-collapse[open] summary::before { content: '\25BC  '; }
+.demo-view .oc-collapse[open] summary { border-bottom: 1px solid var(--border-subtle); }
+.demo-view .oc-collapse .oc-collapse-body { padding: 12px 14px; }
+
+/* ── Fill history 工具列 / 子標籤 / 分頁 / 摘要 / 寬表(port ocInjectBaseCSS;子標籤為 paper 未用故另補)── */
+.demo-view .oc-fill-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.demo-view .oc-fill-tabs { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.demo-view .oc-fill-tab {
+  border: 1px solid var(--border-subtle); background: var(--bg-app); color: var(--text-secondary);
+  border-radius: var(--r-1); padding: 5px 10px; font-size: 12px; cursor: pointer; font-family: inherit;
+}
+/* active 態藍 tint 為 palette 外色,byte-parity 保留(ratchet 只禁裸十六進位)*/
+.demo-view .oc-fill-tab.active { border-color: var(--text-secondary); color: var(--text-secondary); background: rgba(56,139,253,0.12); }
+.demo-view .oc-fill-pager { display: inline-flex; align-items: center; gap: 8px; color: var(--text-secondary); font-size: 11px; }
+.demo-view .oc-fill-summary { color: var(--text-secondary); font-size: 11px; line-height: 1.4; margin: 4px 0 8px; }
+.demo-view .oc-fill-table { min-width: 1080px; }
+.demo-view .oc-fill-table th, .demo-view .oc-fill-table td { white-space: nowrap; }
+.demo-view .oc-fill-table th:nth-child(3), .demo-view .oc-fill-table td:nth-child(3) { white-space: normal; min-width: 140px; }
+.demo-view .oc-fill-time { white-space: nowrap; }
+
+/* ── Explainer(ocExplain 輸出;暗底 rgba→--bg-sunken)── */
+.demo-view .oc-explain { margin-bottom: 14px; }
+.demo-view .oc-explain-simple {
+  color: var(--text-secondary); font-size: 12px; line-height: 1.7;
+  padding: 10px 14px; background: var(--bg-sunken); border-left: 3px solid var(--accent);
+  border-radius: 0 var(--r-2) var(--r-2) 0;
+}
+.demo-view .oc-explain-deep { margin-top: 4px; }
+.demo-view .oc-explain-deep summary { color: var(--accent); font-size: 11px; cursor: pointer; padding: 4px 14px; user-select: none; }
+.demo-view .oc-explain-content {
+  padding: 10px 14px; color: var(--text-secondary); font-size: 12px; line-height: 1.7;
+  background: var(--bg-sunken); border-radius: var(--r-2); margin-top: 4px;
+}
+
+/* ── Loading 佔位 ── */
+.demo-view .oc-loading { color: var(--text-secondary); font-size: 12px; padding: 20px; text-align: center; }
+
+/* ── Not-configured 態(demo-offline 未連接卡)── */
+.demo-view .oc-not-configured { text-align: center; padding: 40px 20px; }
+.demo-view .oc-not-configured .icon { font-size: 48px; margin-bottom: 16px; opacity: 0.5; }
+.demo-view .oc-not-configured h3 { font-size: 16px; margin-bottom: 8px; }
+.demo-view .oc-not-configured p { color: var(--text-secondary); font-size: 13px; max-width: 400px; margin: 0 auto; }
+
+/* ── 代碼塊(未連接說明 .env 範例)── */
+.demo-view .oc-pre {
+  background: var(--bg-app); border: 1px solid var(--border-subtle); border-radius: var(--r-2);
+  padding: 12px; font-size: 12px; font-family: 'SF Mono', Consolas, monospace;
+  overflow: auto; max-height: 300px; white-space: pre-wrap; word-break: break-word;
+}
+
+/* ═══ 行動裝置 a11y:表格 / 控件 / metrics / card 促升(port ocInjectBaseCSS @media 相關子集)═══ */
+@media (max-width: 700px) {
+  .demo-view .oc-table td, .demo-view .oc-table th { padding: 6px 7px; font-size: 11px; }
+  .demo-view .oc-control-bar { gap: 6px; padding: 8px 10px; }
+  .demo-view .oc-metrics { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
+  .demo-view .oc-performance-metrics { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  .demo-view .oc-card { padding: 12px; }
+}
