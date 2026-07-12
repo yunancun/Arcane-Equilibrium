@@ -72,6 +72,13 @@
      view-governance.css MODULE_NOTE)。oc-tabs-wrapper 全域無定義=byte-parity 無樣式 wrapper 刻意不 port;
      3 處 var() hex 後備移除為零-hex(token 恆定義,視覺 byte-identical),rgba 色字面逐字保留(pre-existing P0.4)。 -->
 <link rel="stylesheet" href="/static/view-governance.css?v=20260712.p2-governance" />
+<!-- live 第 17 遷(交易關鍵四者**最後**一個/§3 硬化最重):① 頁內樣式塊(行 20-285)port `.live-view` scope
+     ——real-money --live 熱紅主題 / F5/A1 三態(mainnet REAL FUNDS 熱紅+下緣雙線·livedemo 橙·integrity-fail 灰)/
+     trust-bar / btn-emergency / PnL sparkline;DROP html,body(殼 own chrome,OPEN-2);body.live-mode-* → body-anchored
+     port `.live-mode-* .live-view .live-*`(OPEN-1 PRIMARY,殼 body 加 mode class);死 .oc-dialog scope 防污染殼 SDK modal。
+     ② `.live-view` scoped oc-* shim(spec §10.4 undercount 同 governance §8,殼不呼 ocInjectBaseCSS,否則卡片全裸)。
+     冷家族 rgba → --ov-*-rgb token 化;--live/紅/橙/pos/warn/scrim 非冷家族 verbatim,見 view-live.css MODULE_NOTE。 -->
+<link rel="stylesheet" href="/static/view-live.css?v=20260712.p2-live" />
 </head>
 <body>
 
@@ -258,6 +265,15 @@
      view-governance.js(12 名含 ontoggle onDemoFillsToggle,與已遷 5 view onclick 集零交集),見 view-demo.js
      MODULE_NOTE。common* 殼已載,demo 無其他外部 JS;於 shell.js 前載以註冊 OC_NATIVE_VIEWS['demo']。tab-demo.html 零修改(reuse 正本 + 回滾錨)。 -->
 <script src="/static/view-demo.js?v=20260712.p2-demo"></script>
+<!-- live 原生 view(交易關鍵四者**最後**一個/§3 硬化最重,復用遷移;flag ⚑ opt-in 保留):view-live.js 於 render
+     併發 fetch /static/tab-live.html + /static/tab-live.js → 注入 body DOM(byte-parity)+ tab-live.js text 串接單一
+     IIFE 重跑(4 寫 session start/stop·emergency-stop·close-all·個別平倉經 Rust IPC byte-parity 復用,typed-confirm
+     START LIVE/STOP LIVE/EMERGENCY STOP/CLOSE ALL + 五閘 signed authorization.json + REAL FUNDS + --live 熱紅 +
+     canon-7 三態逐字保留零弱化)。強化 on* handler 發現掃 html∪combined 捕模板注入 closeLivePosition(否則個別平倉鈕死);
+     F1 裸賦值空集(無 proxy);live 無 loadAll(不寫 window.loadAll,paper 恆安全);pause/resume 經 postMessage 復用
+     tab-live.js 既有 openclaw-tab-visibility listener。common* 殼已載,live 無其他外部 JS;於 shell.js 前載以註冊
+     OC_NATIVE_VIEWS['live']。tab-live.html/tab-live.js 零修改(reuse 正本 + 回滾錨)。 -->
+<script src="/static/view-live.js?v=20260712.p2-live"></script>
 <script src="/static/shell.js?v=20260711.shell-p11a"></script>
 
 </body>

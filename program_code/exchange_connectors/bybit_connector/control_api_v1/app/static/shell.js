@@ -87,7 +87,16 @@
     //   IIFE-local 隔離防撞 paper 的 window.loadAll,改曝 __ocDemoLoadAll(見 view-demo.js MODULE_NOTE)。src 保留 legacy
     //   tab-demo 作 registry 完整性 + 回滾錨(=flag fallback 的 iframe src);flag ⚑ 保留(交易關鍵 opt-in)。
     { id: 'demo',     lane: 'crypto', hash: '#/crypto/demo',     src: '/static/tab-demo.html',        visId: 'demo',        label: '演示 Demo',       badge: 'demo', flag: true, iframe: false },
-    { id: 'live',     lane: 'crypto', hash: '#/crypto/live',     src: '/static/tab-live.html',        visId: 'live',        label: '實盤 Live',       badge: 'live', flag: true, live: true },
+    // live:Phase 2 交易關鍵四者**最後**一個原生遷移(iframe:false;**真金/LiveDemo 實盤·§3 硬化最重**,復用遷移;
+    //   flag ⚑ opt-in 保留 + live:true 熱紅 lane 標識)——render/pause/resume 由 view-live.js 註冊於
+    //   window.OC_NATIVE_VIEWS(id=live)。策略=**verbatim 復用 tab-live.html DOM + tab-live.js text 串接單一 IIFE**:
+    //   4 寫[session start/stop·emergency-stop·close-all·個別平倉 closeLivePosition]經 Rust IPC byte-parity 復用,
+    //   typed-confirm[START LIVE/STOP LIVE/EMERGENCY STOP/CLOSE ALL]+ 五閘 signed authorization.json gate + REAL FUNDS +
+    //   --live 熱紅 + canon-7 三態[integrity-fail·phantom-view·unconfigured]逐字保留零弱化(operator §0.2 硬邊界)。
+    //   強化 on* handler 發現掃 html∪combined 捕模板注入 closeLivePosition(否則個別平倉鈕死);live 無 loadAll(最乾淨);
+    //   pause/resume 經 postMessage 復用 tab-live.js 既有 openclaw-tab-visibility listener(停/啟唯一 15s 輪詢)。
+    //   common* 殼已載;於 shell.js 前載以註冊 OC_NATIVE_VIEWS['live']。tab-live.html/tab-live.js 零修改(reuse 正本 + 回滾錨)。
+    { id: 'live',     lane: 'crypto', hash: '#/crypto/live',     src: '/static/tab-live.html',        visId: 'live',        label: '實盤 Live',       badge: 'live', flag: true, live: true, iframe: false },
     // ── stock lane(IBKR read-only;殼不新增任何 IBKR 寫/激活 UI)──
     // stock:Phase 2 第 13 個原生遷移(iframe:false;**唯讀復用遷移**——全 16 GET readiness 快照/零寫/
     //   非交易關鍵四者)——render/pause/resume 由 view-stock.js 註冊於 window.OC_NATIVE_VIEWS(id=stock);
