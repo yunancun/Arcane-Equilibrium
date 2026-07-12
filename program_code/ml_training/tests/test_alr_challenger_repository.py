@@ -13,6 +13,7 @@ from ml_training.alr_challenger_repository import (
     AlrChallengerRepositoryError,
     persist_qualified_training_receipt,
     read_qualified_training_receipt,
+    validate_qualified_training_receipt_read,
 )
 from ml_training.alr_challenger_training_contract import (
     build_alr_challenger_training_contract,
@@ -358,6 +359,46 @@ def test_read_qualified_training_receipt_found_uses_contract_derived_identity_an
     assert "PERSIST_ALR_CHALLENGER_TRAINING_RESULT_V1" not in upper_sql
     assert "READ_ALR_CHALLENGER_TRAINING_RESULT_V1" not in upper_sql
     assert contract == original_contract
+
+
+def test_pure_receipt_read_validator_returns_exact_deep_copied_found_wrapper() -> None:
+    contract = _training_contract()
+    payload = _expected_payload(contract)
+    receipt_read = {
+        "status": "FOUND",
+        "receipt": _receipt_row(payload),
+    }
+    original_contract = copy.deepcopy(contract)
+    original_read = copy.deepcopy(receipt_read)
+
+    result = validate_qualified_training_receipt_read(
+        receipt_read,
+        training_contract=contract,
+    )
+
+    assert result == original_read
+    assert result is not receipt_read
+    assert result["receipt"] is not receipt_read["receipt"]
+    result["receipt"]["created_at"] = "mutated"
+    assert receipt_read == original_read
+    assert contract == original_contract
+
+
+def test_pure_receipt_read_validator_accepts_only_exact_public_inputs() -> None:
+    parameters = inspect.signature(
+        validate_qualified_training_receipt_read
+    ).parameters
+    contract = _training_contract()
+
+    assert tuple(parameters) == (
+        "qualified_receipt_read",
+        "training_contract",
+    )
+    assert parameters["training_contract"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert validate_qualified_training_receipt_read(
+        {"status": "NOT_FOUND", "receipt": None},
+        training_contract=contract,
+    ) == {"status": "NOT_FOUND", "receipt": None}
 
 
 def test_read_qualified_training_receipt_not_found_returns_exact_null_receipt() -> None:
