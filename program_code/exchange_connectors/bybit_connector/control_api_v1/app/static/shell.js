@@ -108,7 +108,13 @@
     { id: 'charts',     lane: 'cross', hash: '#/cross/charts',     src: '/trading?embed=1',            visId: 'charts',      label: 'K線 Charts' },
     { id: 'governance', lane: 'cross', hash: '#/cross/governance', src: '/static/tab-governance.html', visId: 'governance',  label: '治理 Governance', flag: true },
     { id: 'risk',       lane: 'cross', hash: '#/cross/risk',       src: '/static/tab-risk.html',       visId: 'risk',        label: '風控 Risk', flag: true },
-    { id: 'settings',   lane: 'cross', hash: '#/cross/settings',   src: '/static/tab-settings.html',   visId: 'settings',    label: '設置 Settings' }
+    // settings:Phase 2 第 12 個原生遷移(iframe:false;**復用遷移**,設置中樞=非交易關鍵四者)——render/pause/resume
+    //   由 view-settings.js 註冊於 window.OC_NATIVE_VIEWS(id=settings)。策略=**verbatim 復用 tab-settings.html 內聯
+    //   script**:view-settings.js 於 render fetch tab-settings.html 注入其 settings DOM(byte-parity)後重跑內聯
+    //   script(demo control / 全局模式 / 產品族 / config-change / paper-engine·development toggle / API-key 管理 /
+    //   告警通知,全 byte-parity 復用;§3 憑證遮罩三條逐字保留;scheduled-restart 保持後端 HTTP 410 停用態不復活)。
+    //   src 保留 legacy tab-settings 作 registry 完整性 + 回滾錨。
+    { id: 'settings',   lane: 'cross', hash: '#/cross/settings',   src: '/static/tab-settings.html',   visId: 'settings',    label: '設置 Settings', iframe: false }
   ];
 
   var VIEW_BY_ID = {};

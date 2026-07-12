@@ -35,6 +35,11 @@
      feed 價位 / 平倉 modal)+ legacy 短名 shim(oc-card/oc-metric*/oc-table*/oc-chip*/oc-collapse*/
      oc-action*/oc-fill-*/oc-explain* 等;殼不呼 ocInjectBaseCSS,見 view-paper.css MODULE_NOTE)-->
 <link rel="stylesheet" href="/static/view-paper.css?v=20260712.p2-paper" />
+<!-- settings 原生 view 頁級樣式(第 12 遷,復用遷移):`.settings-view` scope 的 settings-specific
+     (subtab id-tweak / restart·API-key modal / pf-* 開關 / rst-banner / apikey-card·slot-grid /
+     alert-* / pf-cap--*)+ legacy 短名 shim(oc-subtab*/oc-card/oc-metric*/oc-chip*/oc-collapse*/
+     oc-explain*/oc-loading/oc-grid-2/oc-pre;殼不呼 ocInjectBaseCSS,見 view-settings.css MODULE_NOTE)-->
+<link rel="stylesheet" href="/static/view-settings.css?v=20260712.p2-settings" />
 </head>
 <body>
 
@@ -159,6 +164,13 @@
      以註冊 OC_NATIVE_VIEWS['paper']。tab-paper.html / app-paper.js / handoff_helper.js 零修改(reuse 正本 + 回滾錨)。 -->
 <script src="/static/handoff_helper.js?v=20260712.p2-paper"></script>
 <script src="/static/view-paper.js?v=20260712.p2-paper"></script>
+<!-- settings 第 12 遷(復用遷移):**verbatim 復用 tab-settings.html 內聯 script**(demo control / 全局模式 /
+     產品族 / 成本·盈虧錄入 / config-change / paper-engine·development-support toggle / **Bybit API-key 管理** /
+     **告警通知**;全在 tab-settings.html 單一大內聯 <script>,無外部 JS)。view-settings.js 於 render fetch
+     /static/tab-settings.html → 注入其 settings DOM(byte-parity;type=password/遮罩 hint/提交清 DOM 三條 §3
+     憑證合規逐字保留)+ 重跑內聯 script;隔離全域 loadAll 防污染 paper(見 view-settings.js MODULE_NOTE ★★)。
+     common* 殼已載,settings 無其他外部 JS;於 shell.js 前載以註冊 OC_NATIVE_VIEWS['settings']。tab-settings.html 零修改(reuse 正本 + 回滾錨)。 -->
+<script src="/static/view-settings.js?v=20260712.p2-settings"></script>
 <script src="/static/shell.js?v=20260711.shell-p11a"></script>
 
 </body>
