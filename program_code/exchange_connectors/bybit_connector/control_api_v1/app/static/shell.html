@@ -6,16 +6,32 @@
   用途:玄衡儀單文檔殼的 markup 骨架——chrome 容器(topbar / rail / content
     iframe host / statusbar)。與 legacy /console 並存,opt-in 進入(/static/shell.html)。
   canon 守恆:①零內聯樣式塊、零 inline 樣式屬性、零裸 hex(全走 tokens.css + oc-utilities.css + shell.css,
-    canon 8 單一 stylesheet 正示範);②data-theme="dark" 釘死玄夜(帛晝待 P1.3);
+    canon 8 單一 stylesheet 正示範);②雙主題(玄夜/帛晝)已上線(P1.3 解釘):OS 偏好默認(prefers-color-scheme)
+    + 顯式 toggle 覆蓋(document.documentElement 的 data-theme),顯式選擇存 localStorage『oc-theme』且下次載入優先於 OS;
+    head 內極小 inline 腳本僅防 FOUC(首繪前依顯式選擇定 data-theme),零業務邏輯、非樣式塊,不破 canon 8;
+    OS-dark / 顯式-dark 用戶玄夜 token byte-identical、零視覺回歸,解釘只讓 OS-light 用戶進帛晝;
     ③衡樑 / 遙測無真值 → blocked 佔位(canon 7),絕不 fake;clock 是唯一 client 真值。
   誠實邊界:殼 = 純 chrome + router,零寫路徑;交易/寫面經 iframe 保全既有硬化面。
   ═══════════════════════════════════════════════════════════════════
 -->
-<html lang="zh-Hant" data-theme="dark">
+<html lang="zh-Hant">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>玄衡 · Arcane Equilibrium — Shell (beta)</title>
+<!-- FOUC 防閃(首繪前定主題):僅讀 localStorage 顯式選擇 → 條件 setAttribute('data-theme');無顯式
+     選擇則不設,交由 tokens.css 的 prefers-color-scheme 決定(OS-dark→玄夜 / OS-light→帛晝),故
+     OS-dark 用戶零回歸。零業務邏輯;inline 腳本非 ratchet 違規(ratchet 只管樣式塊與 inline 樣式屬性)。 -->
+<script>
+(function () {
+  try {
+    var t = localStorage.getItem('oc-theme');
+    if (t === 'dark' || t === 'light') {
+      document.documentElement.setAttribute('data-theme', t);
+    }
+  } catch (e) {}
+})();
+</script>
 <!-- 樣式:token 正本 → 工具集 → 殼 chrome(依序;殼零 inline 樣式,canon 8)-->
 <link rel="stylesheet" href="/static/tokens.css" />
 <link rel="stylesheet" href="/static/oc-utilities.css" />
@@ -113,7 +129,7 @@
 
     <div class="toggles">
       <button type="button" id="oc-density-btn" title="切換密度(舒適 / 緊湊)">舒適</button>
-      <button type="button" id="oc-theme-btn" aria-disabled="true" title="帛晝主題待 P1.3(AA 三綠);P1.1-a 釘死玄夜">帛晝 · 待 P1.3</button>
+      <button type="button" id="oc-theme-btn" title="切換主題(玄夜 / 帛晝)">主題</button>
     </div>
 
     <div class="account">
