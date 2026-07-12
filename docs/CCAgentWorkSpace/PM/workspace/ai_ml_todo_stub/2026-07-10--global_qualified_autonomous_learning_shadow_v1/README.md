@@ -4,7 +4,7 @@ Date: 2026-07-10
 Owner: PM
 Goal: `GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1`
 Codex Goal thread: `019f4b6d-1e5b-7551-9fce-7a2f029a1675`
-Status: `ACTIVE_WP4_TRUSTED_ISSUER_ISOLATED_RUNNER_HANDSHAKE_CONTRACT_SOURCE_TDD`
+Status: `ACTIVE_WP4_V160_STYLE_ATOMIC_CONSUMPTION_DESIGN_PREAUTHORING_GATE`
 
 This is the durable PM-owned queue and state surface for the active Goal. It
 supersedes the old ALR P2 completion/terminal interpretation, but does not edit
@@ -266,11 +266,47 @@ files/network/runtime contact, fit/model/registry, serving/promotion, or
 authority effect. G3/G4 remain failed and production/runtime V159 remains
 unapplied.
 
-Next is only
-`WP4-TRUSTED-ISSUER-ISOLATED-RUNNER-HANDSHAKE-CONTRACT-SOURCE-TDD`: one pure
-contract module and synthetic mutation-biting tests. It may not consume real
-bytes, contact an issuer/runner or PG/files/network/runtime, modify V158/V159,
-reserve V160, execute trainer/fit, create model files, or grant authority.
+That source gate is now accepted below.
+
+## Trusted-issuer / isolated-runner handshake source checkpoint
+
+Source checkpoint `c900d1ecb2eac495994b8715f09ad10bee6d9583` completed
+`DONE_SOURCE_ACCEPTED_TRUSTED_ISSUER_ISOLATED_RUNNER_HANDSHAKE_CONTRACT`.
+The pure `alr_trusted_fit_handshake` module implements the frozen signed
+request, accepted-in-progress status, terminal receipt, replay, immutable
+trust-policy plus current revocation-overlay, V158 admission, complete V159
+success projection, runner lineage, time/resource/artifact binding, and closed
+success/reject/failure branch contracts. It performs no I/O and imports only
+stdlib plus existing pure public validators.
+
+The synthetic fixture ceiling remains deliberately below execution proof.
+Final fixture verification is `EXTERNAL_HOST_UNCHECKED`, signatures are not
+production-valid, `AUTHENTICATED_UNCONSUMED` is never emitted from the fixture
+path, persistence and durable consumption remain false, execution and model
+training remain `NOT_ESTABLISHED`, and every authority field/counter remains
+false/zero. Source/test SHA-256 values are `32181c5f...` and `ac7ac687...`.
+
+Verification passed focused `105`, adjacent five-contract `285`, and full ML
+`2103 passed/36 skipped`. Independent E2, E3, E4, CC, and MIT final reviews
+reported P0/P1/P2 `0/0/0`. E4 governed record digests are focused
+`52d304f1...`, adjacent `a036fcfc...`, full `9df8dcea...`, full stdout
+`b3c12f99...`, and full replay `4247b5a1...`.
+
+This was source/test work only. It created or consumed no real issuer/runner
+bytes, contacted no PostgreSQL, Linux, runtime, network, broker, or exchange,
+ran no trainer/fit, created no model or model-artifact file, registry,
+serving/promotion state,
+persisted no request/receipt, and granted no authority. Production/runtime
+V159 remains unapplied and unrefreshed; G3/G4 remain failed.
+
+The next safe item is design/read-only
+`WP4-V160-STYLE-ATOMIC-CONSUMPTION-DESIGN-PREAUTHORING-GATE`: freeze one fixed
+guarded atomic coordinator that consumes the request/nonce singleton, persists
+the exact outer terminal receipt, independently reverifies the inner receipt,
+binds success to the V159 complete bundle, and closes reject/failed/expired
+semantics plus wrapper reachability/ACL. It may not reserve, author, or apply
+V160; contact PG/runtime/issuer/runner; run fit; create model state; or grant
+serving, promotion, trading, order, risk, Cost Gate, or other authority.
 
 ## Earlier B2.2c event-primary reconciliation
 
