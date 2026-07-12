@@ -4,6 +4,7 @@ import datetime as dt
 import json
 import sys
 
+from cost_gate_learning_lane import decision_packet as decision_packet_module
 from cost_gate_learning_lane.decision_packet import (
     build_profit_learning_decision_packet,
     main,
@@ -280,6 +281,10 @@ def test_stale_counterfactual_fails_closed_before_plan_review() -> None:
 def test_cli_missing_optional_sealed_evidence_fails_closed_to_packet(
     tmp_path, monkeypatch
 ) -> None:
+    # 凍結模組牆鐘：CLI main() 不接受 now_utc 參數，而本測試的 artifact 時間戳
+    # 是固定歷史日期；不凍結時鐘的話，真實日期一旦超過 max-artifact-age 視窗，
+    # 全部 artifact 變 STALE、status 漂成 REFRESH_REJECT_COUNTERFACTUAL（time-bomb）。
+    monkeypatch.setattr(decision_packet_module, "_utc_now", lambda: NOW)
     data_flow = tmp_path / "data_flow.json"
     counterfactual = tmp_path / "counterfactual.json"
     plan = tmp_path / "plan.json"

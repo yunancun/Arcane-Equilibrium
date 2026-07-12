@@ -8,6 +8,7 @@
 
 > ---
 > **2026-06-10 校準聲明**：本文件為 **2026-04-25 歷史快照**，2026-06-10 完成全盤校準（注記式，標記 `> **2026-06-10 校準**：...`，不改寫快照原文）。命名口徑：2026-05-06 軟更名後，正式項目名為 **玄衡 · Arcane Equilibrium（AE）**，「OpenClaw」僅保留為控制平面 / Gateway / Console / 通信服務族名稱；`openclaw_engine`、`OPENCLAW_*` 環境變量、`/tmp/openclaw`、GitHub repo 名與表格中 crate/模組名等運行面名稱維持不改。
+> **2026-07-12 歸檔注記**：本檔自 srv 根移入 `docs/archive/`（原路徑 `AE_INVENTORY_CONSOLIDATED.md`）；檔內 `.claude_reports/` 與 `srv/` 前綴相對連結為歷史死鏈（源於原上層目錄視角），按需以 repo 根為基準自行解析。
 
 ---
 

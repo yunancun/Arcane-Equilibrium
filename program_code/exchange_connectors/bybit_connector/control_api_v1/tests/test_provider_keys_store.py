@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sys
 import urllib.error
@@ -229,6 +230,75 @@ def test_layer2_model_config_accepts_matching_pairs() -> None:
         },
         Layer2Config(),
     )
+
+
+# ── 隊列 H：grandfathered 非法 provider/model 配對的 load 期修復 ──
+
+def _write_state_with_config(path: Path, config_overrides: dict) -> None:
+    cfg = Layer2Config().to_dict()
+    cfg.update(config_overrides)
+    path.write_text(json.dumps({"config": cfg}), encoding="utf-8")
+
+
+def test_cost_tracker_load_repairs_grandfathered_illegal_default_pair(tmp_path: Path) -> None:
+    state_file = tmp_path / "layer2_cost.json"
+    _write_state_with_config(
+        state_file, {"default_provider": "anthropic", "default_model": "qwen3.5:9b"},
+    )
+
+    tracker = Layer2CostTracker(state_file=str(state_file))
+    cfg = tracker.get_config()
+
+    # 非法配對重置為出廠對（與引擎 map_tier_to_provider 的實際落點一致）
+    assert (cfg.default_provider, cfg.default_model) == ("anthropic", "sonnet")
+    # 修復已回寫持久化（冪等：下次載入不再觸發）
+    on_disk = json.loads(state_file.read_text(encoding="utf-8"))
+    assert on_disk["config"]["default_model"] == "sonnet"
+    # 解鎖證明：修復前整體校驗會 400 鎖死 6 鍵，修復後可正常寫入
+    _validate_layer2_model_config({"default_model": "haiku"}, cfg)
+
+
+def test_cost_tracker_load_repairs_illegal_fallback_pair_only(tmp_path: Path) -> None:
+    state_file = tmp_path / "layer2_cost.json"
+    _write_state_with_config(
+        state_file, {"fallback_tier2_provider": "deepseek", "fallback_tier2_model": "sonnet"},
+    )
+
+    cfg = Layer2CostTracker(state_file=str(state_file)).get_config()
+
+    assert (cfg.fallback_tier2_provider, cfg.fallback_tier2_model) == (
+        "deepseek", "deepseek-v4-flash",
+    )
+    assert (cfg.default_provider, cfg.default_model) == ("anthropic", "sonnet")
+
+
+def test_cost_tracker_load_keeps_legal_pairs_untouched(tmp_path: Path) -> None:
+    # 合法非默認配對（含 local_llm 弱前綴，Ollama 掉線也不得誤重置）
+    state_file = tmp_path / "layer2_cost.json"
+    _write_state_with_config(state_file, {
+        "default_provider": "local_llm",
+        "default_model": "local:qwen3.5:9b",
+        "fallback_tier2_provider": "openai",
+        "fallback_tier2_model": "gpt-4o-mini",
+    })
+    before = state_file.read_text(encoding="utf-8")
+
+    cfg = Layer2CostTracker(state_file=str(state_file)).get_config()
+
+    assert (cfg.default_provider, cfg.default_model) == ("local_llm", "local:qwen3.5:9b")
+    assert (cfg.fallback_tier2_provider, cfg.fallback_tier2_model) == ("openai", "gpt-4o-mini")
+    # 無修復=無回寫（檔案 byte-identical）
+    assert state_file.read_text(encoding="utf-8") == before
+
+
+def test_pair_static_whitelist_matches_online_allowed_values_for_cloud() -> None:
+    # 未放鬆/未收緊證明：load 期靜態白名單與線上校驗白名單對 cloud 逐字等價
+    from app import provider_client
+
+    for provider in ("anthropic", "deepseek", "openai"):
+        assert provider_client.PROVIDER_TIERS[provider] == (
+            provider_model_catalog.allowed_model_values(provider)
+        )
 
 
 def test_deepseek_model_catalog_fetches_v4_and_marks_legacy_aliases(

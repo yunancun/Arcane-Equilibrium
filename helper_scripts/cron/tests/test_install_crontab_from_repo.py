@@ -105,11 +105,13 @@ def test_executable_strict_and_linux_guard() -> None:
     assert "rev-parse --short HEAD" in src
 
 
-def test_template_uses_head_placeholder_no_literal_sha() -> None:
+def test_template_has_no_inline_source_head_pin() -> None:
     body = _src(TEMPLATE)
-    assert "{{HEAD}}" in body
-    # 正本模板不得出現手寫 short-sha 字面在 pin 欄位（只准 {{HEAD}}）。
-    assert "OPENCLAW_EXPECTED_SOURCE_HEAD={{HEAD}}" in body
+    # 2026-07-12 升級：意圖從「禁手寫 short-sha 字面」升級為「禁 inline pin」——
+    # 世代 pin 權威=$OPENCLAW_DATA_DIR/runtime_generation/expected_source_head.json
+    # (寫者=restart_all.sh 成功啟動後+derive_expected_source_head.sh pull SOP 尾接),
+    # cron 行不得再帶任何 OPENCLAW_EXPECTED_SOURCE_HEAD 欄位（含 {{HEAD}} render）。
+    assert "OPENCLAW_EXPECTED_SOURCE_HEAD" not in body
 
 
 # ---------------------------------------------------------------------------

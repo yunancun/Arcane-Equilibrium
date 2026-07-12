@@ -303,9 +303,11 @@ class RiskOverrideRequest(BaseModel):
 
 
 class ManualReconciliationRequest(BaseModel):
-    """Request to trigger manual reconciliation / 触发手动对账的请求"""
-    paper_state: dict[str, Any] = Field(..., description="Local paper trading state")
-    demo_state: dict[str, Any] | None = Field(default=None, description="Demo/exchange state (optional)")
+    """Request to trigger manual reconciliation / 触发手动对账的请求
+
+    伺服器端組裝快照後,GUI 僅送 {reason};移除 client 可偽造的 paper_state/demo_state
+    治理輸入（原為必填 Field(...)），關閉 client-forgeable 升級輸入面（trust-boundary）。
+    """
     reason: str = Field(default="manual_trigger", description="Reason for reconciliation")
 
 
@@ -1119,10 +1121,60 @@ def trigger_manual_reconciliation(
             _sanitize_log(actor.actor_id), _sanitize_log(body.reason),
         )
 
-        report = hub.reconcile(
-            paper_state=body.paper_state,
-            demo_state=body.demo_state,
+        # ── 伺服器端組裝雙向快照（Option A）+ fail-closed 短路 ────────────────────
+        # 為什麼在 route 層短路：任一端快照建不出 → 回 STALE_DATA 且**絕不**呼叫
+        # hub.reconcile → 不進升級路徑 → demo 不可達永遠不會凍結交易。絕不以空 {}
+        # 代替 demo（空 demo 會偽造 FATAL POSITION_MISSING → 誤凍結）。
+        from .governance_reconcile_snapshots import (  # noqa: PLC0415
+            build_local_reconcile_snapshot,
+            build_demo_reconcile_snapshot,
+            DemoSnapshotUnavailable,
         )
+        from .reconciliation_engine import map_report_to_escalation  # noqa: PLC0415
+        from .governance_hub_event_handlers import apply_reconcile_advisory_cap  # noqa: PLC0415
+
+        # 1) 本地引擎快照（預設 engine="demo" = 綁定 Bybit Demo 錢包的引擎;UNKNOWN-1）
+        local_state = build_local_reconcile_snapshot(engine="demo")
+        if local_state is None:
+            # STALE_DATA 不是「成功對賬」:message 必須明講「未執行對賬」及原因,避免綠色
+            # toast 誤導 operator 以為真跑了一次對賬。
+            return GovernanceResponse.success(
+                data={
+                    "verdict": "STALE_DATA",
+                    "reason": "local_engine_unavailable",
+                    "is_consistent": None,
+                    "report_severity": None,
+                    "escalation_enacted": None,
+                    "advisory_mode": True,
+                    "discrepancies": [],
+                    "timestamp_ms": int(time.time() * 1000),
+                },
+                message="STALE_DATA: reconcile skipped — local engine unavailable / "
+                        "資料不足，未執行對賬（本地引擎不可用）",
+            )
+
+        # 2) demo 交易所快照（api-demo 只讀）；不可達 → STALE_DATA,不對賬、不升級、不凍結
+        try:
+            demo_state = build_demo_reconcile_snapshot()
+        except DemoSnapshotUnavailable as e:
+            logger.info("Demo snapshot unavailable, returning STALE_DATA: %s", _sanitize_log(e))
+            return GovernanceResponse.success(
+                data={
+                    "verdict": "STALE_DATA",
+                    "reason": "demo_unreachable",
+                    "is_consistent": None,
+                    "report_severity": None,
+                    "escalation_enacted": None,
+                    "advisory_mode": True,
+                    "discrepancies": [],
+                    "timestamp_ms": int(time.time() * 1000),
+                },
+                message="STALE_DATA: reconcile skipped — demo unreachable / "
+                        "資料不足，未執行對賬（Demo 端不可達）",
+            )
+
+        # 3) 兩端俱在 → 真雙向對賬
+        report = hub.reconcile(paper_state=local_state, demo_state=demo_state)
 
         if not report.get("ok", True):
             return GovernanceResponse.error(
@@ -1131,13 +1183,22 @@ def trigger_manual_reconciliation(
                 status_code=500
             )
 
+        # R3 response-shape 修復：report_dict 真實鍵為 overall_result/is_consistent/
+        # discrepancies/critical_count（無 result/severity）。
+        # report_severity = 診斷真值（未封頂,可為 "FATAL" 以誠實反映真實分歧嚴重度,不隱藏
+        #   真實 divergence）;escalation_enacted = 系統「實際採取」的升級（advisory 封頂,手動
+        #   路徑永不 "FATAL"）;advisory_mode=True 標示本路徑不會 auth-freeze / circuit-break。
+        report_severity = map_report_to_escalation(report)
         return GovernanceResponse.success(
             data={
-                "result": report.get("result"),
+                "verdict": report.get("overall_result"),
                 "is_consistent": report.get("is_consistent"),
-                "severity": report.get("severity"),
+                "report_severity": report_severity,
+                "escalation_enacted": apply_reconcile_advisory_cap(report_severity),
+                "advisory_mode": True,
                 "discrepancies": report.get("discrepancies", []),
-                "timestamp_ms": int(__import__("time").time() * 1000),
+                "critical_count": report.get("critical_count"),
+                "timestamp_ms": int(time.time() * 1000),
             },
             message="reconciliation_complete"
         )

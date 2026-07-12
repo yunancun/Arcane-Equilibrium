@@ -390,13 +390,9 @@ class TestPydanticModels:
             RiskOverrideRequest(target_level="NORMAL", reason="")
 
     def test_manual_reconciliation_request_valid(self):
-        obj = ManualReconciliationRequest(
-            paper_state={"balance": 1000},
-            demo_state=None,
-            reason="manual check"
-        )
-        assert obj.paper_state == {"balance": 1000}
-        assert obj.demo_state is None
+        # reconcile Path B §6：模型僅保留 reason（移除 client 可偽造的 paper_state/demo_state）。
+        obj = ManualReconciliationRequest(reason="manual check")
+        assert obj.reason == "manual check"
 
     def test_de_escalation_request_valid(self):
         obj = DeEscalationRequest(target_level=0, requested_by="operator1", reason="Calm market")
@@ -1229,8 +1225,12 @@ class TestRejectAuditChange:
 class TestTriggerManualReconciliation:
     """Tests for trigger_manual_reconciliation(). / trigger_manual_reconciliation() 測試。"""
 
+    # reconcile Path B §2/§5：route 伺服器端組裝快照,GUI 僅送 {reason}。
+    # 兩端快照由 governance_reconcile_snapshots 提供,故 route-level 測試需 patch 它們。
+    SNAP_MOD = "app.governance_reconcile_snapshots"
+
     def _make_body(self):
-        return ManualReconciliationRequest(paper_state={"balance": 1000}, reason="test")
+        return ManualReconciliationRequest(reason="test")
 
     def test_hub_unavailable_raises_503(self):
         actor = _make_actor()
@@ -1250,17 +1250,47 @@ class TestTriggerManualReconciliation:
     def test_happy_path_returns_reconciliation_result(self):
         actor = _make_actor()
         hub = _make_hub(enabled=True)
+        # report_dict 真實鍵：overall_result/is_consistent/discrepancies/critical_count。
         hub.reconcile.return_value = {
             "ok": True,
-            "result": "consistent",
+            "overall_result": "MATCH",
             "is_consistent": True,
-            "severity": "none",
             "discrepancies": [],
+            "critical_count": 0,
         }
-        with patch(f"{GOV_MOD}._get_governance_hub", return_value=hub):
+        with patch(f"{GOV_MOD}._get_governance_hub", return_value=hub), \
+             patch(f"{self.SNAP_MOD}.build_local_reconcile_snapshot", return_value={"positions": {}}), \
+             patch(f"{self.SNAP_MOD}.build_demo_reconcile_snapshot", return_value={"positions": {}}):
             result = trigger_manual_reconciliation(body=self._make_body(), actor=actor)
         assert result["ok"] is True
         assert result["data"]["is_consistent"] is True
+        assert result["data"]["verdict"] == "MATCH"
+
+    def test_local_unavailable_returns_stale_data_without_reconcile(self):
+        # fail-closed：本地引擎不可用 → STALE_DATA,且**絕不**呼叫 hub.reconcile（不升級/不凍結）。
+        actor = _make_actor()
+        hub = _make_hub(enabled=True)
+        with patch(f"{GOV_MOD}._get_governance_hub", return_value=hub), \
+             patch(f"{self.SNAP_MOD}.build_local_reconcile_snapshot", return_value=None):
+            result = trigger_manual_reconciliation(body=self._make_body(), actor=actor)
+        assert result["ok"] is True
+        assert result["data"]["verdict"] == "STALE_DATA"
+        hub.reconcile.assert_not_called()
+
+    def test_demo_unavailable_returns_stale_data_without_reconcile(self):
+        # fail-closed：demo 不可達 → STALE_DATA,且**絕不**呼叫 hub.reconcile（demo 不可達永不凍結）。
+        actor = _make_actor()
+        hub = _make_hub(enabled=True)
+        from app.governance_reconcile_snapshots import DemoSnapshotUnavailable
+        with patch(f"{GOV_MOD}._get_governance_hub", return_value=hub), \
+             patch(f"{self.SNAP_MOD}.build_local_reconcile_snapshot", return_value={"positions": {}}), \
+             patch(f"{self.SNAP_MOD}.build_demo_reconcile_snapshot",
+                   side_effect=DemoSnapshotUnavailable("demo down")):
+            result = trigger_manual_reconciliation(body=self._make_body(), actor=actor)
+        assert result["ok"] is True
+        assert result["data"]["verdict"] == "STALE_DATA"
+        assert result["data"]["reason"] == "demo_unreachable"
+        hub.reconcile.assert_not_called()
 
     def test_reconciliation_returns_error_response(self):
         actor = _make_actor()
@@ -1269,10 +1299,87 @@ class TestTriggerManualReconciliation:
             "ok": False,
             "reason": "State mismatch",
         }
-        with patch(f"{GOV_MOD}._get_governance_hub", return_value=hub):
+        with patch(f"{GOV_MOD}._get_governance_hub", return_value=hub), \
+             patch(f"{self.SNAP_MOD}.build_local_reconcile_snapshot", return_value={"positions": {}}), \
+             patch(f"{self.SNAP_MOD}.build_demo_reconcile_snapshot", return_value={"positions": {}}):
             result = trigger_manual_reconciliation(body=self._make_body(), actor=actor)
         assert result["ok"] is False
         assert result["code"] == "reconciliation_error"
+
+    # ── E4 追加：誠實回應 schema（2d）+ empty-{} 保證（2c）──
+
+    def test_completed_reconcile_exposes_advisory_schema(self):
+        # 2d：完成的對賬回應必須帶 report_severity + escalation_enacted + advisory_mode。
+        actor = _make_actor()
+        hub = _make_hub(enabled=True)
+        hub.reconcile.return_value = {
+            "ok": True, "overall_result": "MATCH", "is_consistent": True,
+            "discrepancies": [], "critical_count": 0,
+        }
+        with patch(f"{GOV_MOD}._get_governance_hub", return_value=hub), \
+             patch(f"{self.SNAP_MOD}.build_local_reconcile_snapshot", return_value={"positions": {}}), \
+             patch(f"{self.SNAP_MOD}.build_demo_reconcile_snapshot", return_value={"positions": {}}):
+            result = trigger_manual_reconciliation(body=self._make_body(), actor=actor)
+        data = result["data"]
+        assert "report_severity" in data
+        assert "escalation_enacted" in data
+        assert data["advisory_mode"] is True
+
+    def test_report_severity_fatal_but_escalation_capped(self):
+        # 2d：report_severity 可誠實為 "FATAL"(不隱藏真實 divergence),但 escalation_enacted
+        # 必被封頂 —— 手動路徑實際採取的升級永不是 "FATAL"。route 用真 map + 真 cap 計算,不 mock。
+        actor = _make_actor()
+        hub = _make_hub(enabled=True)
+        hub.reconcile.return_value = {
+            "ok": True,
+            "overall_result": "MISMATCH_MAJOR",
+            "is_consistent": False,
+            "discrepancies": [{"severity": "FATAL"}],
+            "critical_count": 1,
+        }
+        with patch(f"{GOV_MOD}._get_governance_hub", return_value=hub), \
+             patch(f"{self.SNAP_MOD}.build_local_reconcile_snapshot", return_value={"positions": {}}), \
+             patch(f"{self.SNAP_MOD}.build_demo_reconcile_snapshot", return_value={"positions": {}}):
+            result = trigger_manual_reconciliation(body=self._make_body(), actor=actor)
+        data = result["data"]
+        assert data["report_severity"] == "FATAL"          # 診斷真值(未封頂)
+        assert data["escalation_enacted"] == "MISMATCH_MAJOR"  # 實際採取(封頂)
+        assert data["escalation_enacted"] != "FATAL"
+        assert data["advisory_mode"] is True
+
+    def test_stale_data_message_does_not_read_as_success(self):
+        # 2d：STALE_DATA 分支的 message 不得看起來像「成功對賬」——必須明講 skipped/STALE_DATA,
+        # 且不得回 "reconciliation_complete"(避免綠色 toast 誤導 operator 以為真跑了對賬)。
+        actor = _make_actor()
+        hub = _make_hub(enabled=True)
+        with patch(f"{GOV_MOD}._get_governance_hub", return_value=hub), \
+             patch(f"{self.SNAP_MOD}.build_local_reconcile_snapshot", return_value=None):
+            result = trigger_manual_reconciliation(body=self._make_body(), actor=actor)
+        assert result["data"]["verdict"] == "STALE_DATA"
+        msg = result.get("message", "")
+        assert "STALE_DATA" in msg
+        assert "reconciliation_complete" not in msg
+
+    def test_reconcile_receives_real_demo_never_empty_dict(self):
+        # 2c：成功路徑下傳給 hub.reconcile 的 demo_state 必須是「真快照」,絕不是空 {}
+        #（空 demo 會偽造 FATAL POSITION_MISSING → 誤凍結)。捕捉實際傳入的 demo_state 斷言。
+        actor = _make_actor()
+        hub = _make_hub(enabled=True)
+        hub.reconcile.return_value = {
+            "ok": True, "overall_result": "MATCH", "is_consistent": True,
+            "discrepancies": [], "critical_count": 0,
+        }
+        real_demo = {"positions": {"BTCUSDT": {"side": "Buy", "size": 1.0}},
+                     "balances": {"USDT": 100.0}, "orders": [], "fills": []}
+        with patch(f"{GOV_MOD}._get_governance_hub", return_value=hub), \
+             patch(f"{self.SNAP_MOD}.build_local_reconcile_snapshot", return_value={"positions": {}}), \
+             patch(f"{self.SNAP_MOD}.build_demo_reconcile_snapshot", return_value=real_demo):
+            trigger_manual_reconciliation(body=self._make_body(), actor=actor)
+        hub.reconcile.assert_called_once()
+        passed_demo = hub.reconcile.call_args.kwargs["demo_state"]
+        assert passed_demo == real_demo
+        assert passed_demo != {}
+        assert passed_demo  # non-empty
 
 
 class TestGetLearningTierStatus:

@@ -404,6 +404,7 @@
 | `execution_plan/2026-06-10--ae_runtime_rename_migration_guide.md` | AE 運行面全面改名遷移指引（GATED：Apple Silicon 遷移時強制）；353 env/~6400 代碼處/8+ systemd/IPC/repo 名波及面實測快照 + P0-P6 分階段 + 風險緩解 + DONE 定義；gate 前禁止 AE_*/ae_* 新前綴。TODO §7 `P3-AE-RUNTIME-RENAME` 指向本檔 |
 
 > 同次 sweep：`OPENCLAW_INVENTORY_CONSOLIDATED.md`（2026-04-25 快照）經 71 條校準後更名 `AE_INVENTORY_CONSOLIDATED.md`（仍在 srv 根目錄，深歷史/RCA 按需讀）；清理 2026-04-20 占位目錄 backup_files/ research_notes/ stored_data/（README 所述子目錄從未建立）。
+> **2026-07-12 注記**（不改寫上行 06-10 敘述）：`AE_INVENTORY_CONSOLIDATED.md` 已自 srv 根移至 `docs/archive/2026-04-25--ae_inventory_consolidated.md`（TODO row `P3-AUDIT-AE-INVENTORY-ARCHIVE`；redirect 見 `path_redirects.md` Executed Redirects (2026-07-12)）。
 
 ### 2026-06-10 SKILLS_TODO 審計歸檔
 

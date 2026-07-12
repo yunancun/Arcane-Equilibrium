@@ -93,8 +93,16 @@ from _common import (  # noqa: E402
     severity_max,
 )
 
-# stdlib tomllib (3.11+)；passive_wait_healthcheck venv 為 3.12，可用。
-import tomllib  # noqa: E402
+# stdlib tomllib（3.11+）；py3.10 回退 tomli（同 engine_watchdog.py 寫法）。
+# 兩者皆缺 → tomllib=None，_load_toml fail-soft 回 None（caller 判 INSUFFICIENT_SAMPLE），
+# 避免 py3.10 環境（如 Mac dev / pytest collection）在 import 期直接炸。
+try:
+    import tomllib  # type: ignore[attr-defined]  # noqa: E402
+except ModuleNotFoundError:  # pragma: no cover
+    try:
+        import tomli as tomllib  # type: ignore[no-redef]  # noqa: E402
+    except ModuleNotFoundError:
+        tomllib = None  # type: ignore[assignment]
 
 # ───────────────────────────────────────────────────────────────────────────
 # 三環境 → risk_config TOML 檔名映射（與 settings/risk_control_rules/ 對齊）。
@@ -123,7 +131,9 @@ def _risk_config_path(srv_root: Path, env: str) -> Path:
 
 
 def _load_toml(path: Path) -> dict | None:
-    """讀 TOML；不存在 / 解析失敗 → None（caller 判 INSUFFICIENT_SAMPLE）。"""
+    """讀 TOML；tomllib/tomli 皆缺、不存在 / 解析失敗 → None（caller 判 INSUFFICIENT_SAMPLE）。"""
+    if tomllib is None:  # pragma: no cover
+        return None
     try:
         with path.open("rb") as f:
             return tomllib.load(f)

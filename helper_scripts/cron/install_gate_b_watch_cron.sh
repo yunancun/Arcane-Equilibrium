@@ -3,6 +3,10 @@
 #
 # Default is dry-run. Set OPENCLAW_GATE_B_WATCH_CRON_APPLY=1 on Linux runtime
 # to add/remove the crontab entry.
+#
+# crontab 治理（P0-2④）：live crontab 的正本是同目錄 crontab.trade-core.template，
+# 唯一被授權的 live crontab 寫入入口是 install_crontab_from_repo.sh；本檔條目的
+# 任何增刪或 cadence/env 變更必須同步 template 正本，避免 render 安裝時被覆蓋。
 set -euo pipefail
 
 if [[ "$(uname -s)" != "Linux" ]]; then
