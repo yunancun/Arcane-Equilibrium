@@ -396,6 +396,11 @@ single execution；未來只能由 host-attested verifier 取代，不能由 pac
   重算。
 - 目前 saved-workflow runtime 沒有完整可信 actual token/cache/tool telemetry，因此這些欄位
   必須 honest partial/unavailable；compiler estimate、budget cap 或模型 self-report 不是實測。
+- actual session spend 目前設計上**無 repo 端 cap**：邊界由 admission caps（fan-out /
+  retry / per-call planned prompt fail-closed）+ operator platform usage limit 聚合
+  backstop 構成；監測用 transcript-size proxy（見 sub-agent-hygiene-sop 的
+  Background-wave liveness 節，proxy 永不得充當 actual-usage accounting）；真 cap 延後至
+  runner 提供 turn/token limit 選項或 platform-attested telemetry 可得時再議。
 - Closure 後另以 immutable closure digest 綁 `closure_quality_followup_v1`，追蹤 reopen、
   rework、false closure、decision-changing findings 與 realized value；measured follow-up
   必須有 caller-trusted platform/external attestation，缺失保持 scheduled/unavailable，不補 0。

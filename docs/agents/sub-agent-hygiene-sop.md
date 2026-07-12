@@ -92,6 +92,13 @@ Platform transcript activity is preferred over worktree silence as liveness
 evidence. Exact platform-specific handling belongs in `agent-wave`, not every
 role prompt.
 
+When statting the session's `subagents/agent-*.jsonl` for liveness, also check
+byte size. A transcript growing past a threshold (suggested 10 MB) is a
+`RUNAWAY_SUSPECT`: apply the existing TaskStop preconditions and let PM
+adjudicate the stop. Transcript bytes are a proxy monitoring signal only; they
+must never stand in for actual-usage accounting (see the development-agent
+governance consumption truth contract).
+
 Every workflow retains one canonical call record per attempt and a complete
 wave ledger for admitted nodes, retries, nulls, planned input lower bounds,
 coverage debt, and controller-overhead exclusions. Those counts are structural
