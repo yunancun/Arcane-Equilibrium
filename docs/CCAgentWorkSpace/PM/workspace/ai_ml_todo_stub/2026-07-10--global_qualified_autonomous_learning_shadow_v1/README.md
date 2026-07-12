@@ -4,7 +4,7 @@ Date: 2026-07-10
 Owner: PM
 Goal: `GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1`
 Codex Goal thread: `019f4b6d-1e5b-7551-9fce-7a2f029a1675`
-Status: `ACTIVE_WP4_DURABLE_FIT_ATTESTATION_SCHEMA_DESIGN_PREAUTHORING_GATE`
+Status: `ACTIVE_WP4_DURABLE_FIT_ATTESTATION_SCHEMA_SOURCE_TDD`
 
 This is the durable PM-owned queue and state surface for the active Goal. It
 supersedes the old ALR P2 completion/terminal interpretation, but does not edit
@@ -176,16 +176,27 @@ create/read model files, apply V158, contact PostgreSQL/Linux/runtime/Bybit,
 write a durable row/registry, create a symlink, or grant serving/promotion or
 trading authority.
 
-The next safe slice is
-`WP4-DURABLE-FIT-ATTESTATION-SCHEMA-DESIGN-PREAUTHORING-GATE`. Fresh scan found
-140 migrations through V158, zero duplicate versions, and no V159 source or
-reservation. The loop may design and adversarially review a forward relation
-and fixed writer/read boundary that binds receipt, result, fit capture, runner,
-actual-input material set, artifact trio, and a current trusted issuer receipt.
-It must reject `EXTERNAL_HOST_UNCHECKED` and close V158 v1's unattested
-`TRAINING_PERFORMED` path after the forward schema. This loop does not
-reserve/author/apply V159, execute a trainer/fit, create model/files, contact
-PG/Linux/Bybit/runtime, mutate registry, or create serving/promotion authority.
+The durable schema design and preauthoring gate are now accepted at reviewed
+head `0c90de9c20052afab7f715a055f2df6a9d0d190b`. PA/CC/FA/MIT accepted the
+repaired architecture; E3 and BB returned `APPROVE_SOURCE_AUTHORING_ONLY`, and
+BB confirmed the verdict after the unrelated IBKR source advance. Final
+P0/P1/P2 are `0/0/0`.
+
+The frozen design requires exact V158 posture, fixed-order locks, zero result
+rows, an immutable attestation relation, byte-exact authenticated receipt SSOT,
+`PLATFORM_OR_EXTERNAL_ATTESTED` only, database-recomputed durable identities,
+structural-run artifact paths, atomic attestation/run/q10-q50-q90/NOT_SERVING
+binding, strict database-time expiry and replay behavior, and hard failure for
+every application-reachable v1 writer/reader overload. It introduces no generic
+DML/EXECUTE or authority.
+
+A fresh current-head scan found 140 migrations through V158, zero duplicate
+versions, and V159 absent/unreserved. The gate itself did not reserve, author,
+or apply V159 and created no PG/Linux/runtime/Bybit/fit/model/registry/serving
+effect. The next safe slice is
+`WP4-DURABLE-FIT-ATTESTATION-SCHEMA-SOURCE-TDD`: repeat that scan at the
+then-current head, then author only the forward migration and isolated/static
+tests. Migration apply, runtime contact, and real fit remain separately gated.
 
 ## Earlier B2.2c event-primary reconciliation
 
