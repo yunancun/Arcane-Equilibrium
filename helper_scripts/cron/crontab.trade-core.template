@@ -8,10 +8,12 @@
 #   本模板即該正本:live crontab 只是它經 install_crontab_from_repo.sh render 的
 #   產物,任何一行的增刪都應走 code review。
 #
-# render 契約:
-#   {{HEAD}} 佔位符由 installer 以 `git -C <repo> rev-parse --short HEAD` 派生,
-#   釘住 EXPECTED_SOURCE_HEAD(P1-4 pin-by-reference:pin 隨安裝時 HEAD 走,不手寫
-#   字面,避免 pin drift)。本模板內不出現任何 short-sha 字面。
+# 世代 pin 契約(2026-07-12 起,cron 行不再帶 inline pin):
+#   世代 pin 權威=$OPENCLAW_DATA_DIR/runtime_generation/expected_source_head.json
+#   (寫者=restart_all.sh 成功啟動後自動派生 + deploy/derive_expected_source_head.sh
+#   pull SOP 尾接)。lane 腳本經 env 鏈回落 pin 檔(env 保留為顯式覆蓋面);pin 檔
+#   缺失/舊值由 lane 端 fail-close。本模板內不出現任何 short-sha 字面或 inline pin;
+#   installer 的 HEAD 佔位符 sed 對本模板為 no-op(無害保留,installer 不動)。
 #
 # env 統一(operator 2026-07-04 已裁決):
 #   OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv
@@ -63,8 +65,10 @@
 31 6 * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron/flash_dip_l1_short_exit_replay_cron.sh >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/flash_dip_l1_short_exit_replay_cron.cronout.log 2>&1
 
 # ---- Tier 3 — research / alpha 軸(8);alpha_discovery 前置=log rotation ----
-# EXPECTED_SOURCE_HEAD 由 installer render {{HEAD}}→安裝時 short-sha(pin-by-reference)
-*/15 * * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw OPENCLAW_EXPECTED_SOURCE_HEAD={{HEAD}} /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron/alpha_discovery_throughput_cron.sh >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/alpha_discovery_throughput_cron.cronout.log 2>&1
+# 世代 pin 權威=$OPENCLAW_DATA_DIR/runtime_generation/expected_source_head.json
+# (寫者=restart_all.sh 成功啟動後+derive_expected_source_head.sh pull SOP 尾接);
+# cron 行不帶 inline pin,lane 腳本自行回落 pin 檔(缺失/舊值 fail-close)。
+*/15 * * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron/alpha_discovery_throughput_cron.sh >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/alpha_discovery_throughput_cron.cronout.log 2>&1
 */30 * * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw HOME=/home/ncyu /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron/adpe_runner_cron.sh >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/adpe_runner.cron.log 2>&1
 41 4 * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw OPENCLAW_POLYMARKET_QUERY_SET=v2 /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron/polymarket_axis_cron.sh daily >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/polymarket_axis_cron.cron.log 2>&1
 7,22,37,52 * * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw OPENCLAW_POLYMARKET_QUERY_SET=v2 /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron/polymarket_axis_cron.sh hourly-topn >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/polymarket_axis_cron.cron.log 2>&1

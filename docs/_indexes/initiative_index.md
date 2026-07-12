@@ -14,7 +14,7 @@
 | agent 启动路由 | `docs/agents/context-loading.md` |
 | TODO 维护规则 | `docs/agents/todo-maintenance.md` |
 | 版本增量历史 | `docs/CLAUDE_CHANGELOG.md` |
-| 深历史 / RCA | `AE_INVENTORY_CONSOLIDATED.md`（按需） |
+| 深历史 / RCA | `docs/archive/2026-04-25--ae_inventory_consolidated.md`（按需；2026-07-12 自 srv 根歸檔） |
 | 開發 sub-agent 治理 / consumption | `docs/agents/development-agent-governance.md`; `.codex/agent_registry_v1.json`; `docs/adr/0050-development-agent-governance.md` |
 
 ## Initiatives

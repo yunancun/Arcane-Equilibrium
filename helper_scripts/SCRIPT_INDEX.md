@@ -1,7 +1,9 @@
 # helper_scripts/ — 腳本索引 (Script Index)
 
 本目錄存放 OpenClaw 系統的維護、啟動、CI 輔助腳本。
-最後更新：2026-07-11。每批詳情見下方對應 `## YYYY-MM-DD` 區塊（per-batch SSOT）；最新數批摘要見「最新補充」段。
+最後更新：2026-07-12。每批詳情見下方對應 `## YYYY-MM-DD` 區塊（per-batch SSOT）；最新數批摘要見「最新補充」段。
+
+最新補充（2026-07-12 four-head reconcile probe）：新增 `healthchecks/four_head_reconcile_probe.py`（+ `healthchecks/tests/`）——四頭 head 對賬只讀探針（schema `four_head_reconcile_v1`）：Mac HEAD / `git ls-remote origin` 真 remote head（離線 fallback 標 `stale_possible`）/ Linux checkout HEAD / engine build_sha（pgrep `openclaw-engine` 連字符實名 + comm 驗證 → `/proc/<pid>/environ` 解析 `OPENCLAW_DATA_DIR`，**絕不默認 /tmp/openclaw**（該處有 stale boot_history）→ `boot_history.jsonl` 末筆引擎紀錄；順帶回報 control_api `repo_head` 滿足 TODO `P2-RUNTIME-SOURCE-BUILD-PIN-DRIFT-HYGIENE-2026-07-07` packet 面）；Mac 側 `merge-base --is-ancestor` 分類 `ALL_FOUR_SYNC` / `GIT_SYNC_ENGINE_ANCESTOR`（依 gap 觸 rust/ 非豁免面細分 `HALF_DEPLOY_REBUILD_REQUIRED` vs `SOURCE_ONLY_DRIFT`，豁免判準 import `cost_gate_learning_lane` 既有 policy 唯一正本，禁第二份豁免表）/ `MAC_BEHIND_ORIGIN` / `LINUX_BEHIND_ORIGIN` / `INDETERMINATE`（fail-close）；`--human`、`--json-output`、`--fail-on-drift` exit 3。硬邊界：只讀 git/ssh/proc/檔案，不 fetch/pull/rebuild/restart、不寫 PG、不下單。
 
 最新補充（2026-07-11 development-agent governance）：新增
 `maintenance_scripts/agent_governance.py`，以標準庫讀
