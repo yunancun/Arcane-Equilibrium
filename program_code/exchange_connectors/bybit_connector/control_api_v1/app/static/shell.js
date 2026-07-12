@@ -116,7 +116,19 @@
     { id: 'gates',      lane: 'cross', hash: '#/cross/gates',      src: '/static/tab-edge-gates.html', visId: 'edge-gates',  label: '封驗 Gates', iframe: false },
     // charts:legacy `edge` 組 K線圖表(trading.html;內容守恆——design/09 §3 漏列,R51 補回 legacy parity,零靜默丟失)
     { id: 'charts',     lane: 'cross', hash: '#/cross/charts',     src: '/trading?embed=1',            visId: 'charts',      label: 'K線 Charts' },
-    { id: 'governance', lane: 'cross', hash: '#/cross/governance', src: '/static/tab-governance.html', visId: 'governance',  label: '治理 Governance', flag: true },
+    // governance:Phase 2 第 16 個原生遷移(iframe:false;**交易關鍵四者之一/12 寫治理**——auth request·approve、
+    //   risk override(SM-04 降級)、reconcile、learning-tier promote、audit approve·reject、bulkAudit(critical
+    //   typed-confirm)、recovery approve、live/auth renew·renew-review、canary manual_promote、autonomy switch,
+    //   復用遷移)——render/pause/resume 由 view-governance.js 註冊於 window.OC_NATIVE_VIEWS(id=governance)。策略=
+    //   **共享 IIFE 復用**:view-governance.js 於 render 併發 fetch tab-governance.html + autonomy-posture.js +
+    //   governance-tab.js + canary-tab.js,注入 governance DOM(byte-parity)後把 inline Live-Auth 塊 + 3 路 JS text
+    //   依固定序 [inline, autonomy, govtab, canary] 串接進**單一共享 IIFE** 重跑(頂層 const/let/function→IIFE-local
+    //   隔離防撞 paper 的 window.loadAll;loadAll 唯一 onclick 重綁 __ocGovLoadAll,永不寫 window.loadAll,見
+    //   view-governance.js MODULE_NOTE)。§3 硬化面[typed-confirm CONFIRM/PROMOTE/CONFIRM SWITCH / 五閘 / 緊急熔斷·
+    //   防禦分離 / signed-auth·authorization.json / Paper 無真實資金]逐字保留不弱化;12 寫全在未改 text 內經 Rust IPC。
+    //   governance.js 殼已於 overview 遷移載入(shell.html:224),view-governance.js 勿重載、勿併入 IIFE。src 保留
+    //   legacy tab-governance 作 registry 完整性 + 回滾錨(=flag fallback 的 iframe src);flag ⚑ 保留(交易關鍵 opt-in)。
+    { id: 'governance', lane: 'cross', hash: '#/cross/governance', src: '/static/tab-governance.html', visId: 'governance',  label: '治理 Governance', flag: true, iframe: false },
     // risk:Phase 2 第 15 個原生遷移(iframe:false;**交易關鍵四者之一/含 risk-config 寫 + LIVE engine risk save confirm**,復用遷移)——
     //   render/pause/resume 由 view-risk.js 註冊於 window.OC_NATIVE_VIEWS(id=risk)。策略=**verbatim 復用 tab-risk.html 內聯 script
     //   (switchRiskTab + 2 IIFE)+ 外部 risk-tab.js**:view-risk.js 於 render 併發 fetch 兩者,注入 risk DOM(byte-parity)後把
