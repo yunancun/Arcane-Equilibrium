@@ -59,17 +59,21 @@
   --bg-hover:#EAE3D5; --bg-sunken:#E9E1D2;
   /* 髮絲線:玄墨的 alpha 階(海拔靠亮度+髮絲線,不靠陰影,canon 5) */
   --border-subtle:rgba(34,27,24,.13); --border-strong:rgba(34,27,24,.26);
+  /* overlay 三元組(供 rgba(var(--ov-*-rgb),α),α 留呼叫點,P1.3-b/-c 遷移用):
+     玄夜 = 原冷底字面 byte-identical、帛晝 = 暖淺 AA-readable */
+  --ov-panel-rgb:224,214,196; --ov-panel-b-rgb:224,214,196;
+  --ov-accent-rgb:124,100,52; --ov-muted-rgb:150,140,126;
   /* 文字:玄墨 */
-  --text-primary:#221B18; --text-secondary:#5C544B; --text-muted:#8A8073;
+  --text-primary:#221B18; --text-secondary:#5C544B; --text-muted:#8A8073; /* --text-muted 非必讀文字專用,ratchet 以 ≥3.0 檢;承載必讀語義用 --text-secondary */
   /* 青銅 accent:焦點/選中/衡樑/品牌刻度,不給數據不給裝飾(canon 10) */
   --accent:#7C6434; --accent-weak:rgba(124,100,52,.12);
   /* 語義:漲跌永附第二通道 ▲▼(canon 3) */
-  --pos:#1E7F5C; --pos-bg:rgba(30,127,92,.11);
-  --neg:#C13A3A; --neg-bg:rgba(193,58,58,.10);
+  --pos:#166B4C; --pos-bg:rgba(30,127,92,.11); /* 帛晝 AA retune:健康綠加深,WCAG on-surface 5.90 / 疊 tint 5.13(§3.5) */
+  --neg:#A83232; --neg-bg:rgba(193,58,58,.10); /* 帛晝 AA retune:虧損紅加深,WCAG on-surface 6.04 / 疊 tint 5.24(§3.5) */
   /* warn 用琥珀,與青銅拉開,必附 ⚠(canon 10) */
-  --warn:#9A6700; --warn-bg:rgba(154,103,0,.12);
+  --warn:#7A5200; --warn-bg:rgba(154,103,0,.12); /* 帛晝 AA retune:琥珀加深,WCAG on-surface 6.30(§3.2) */
   /* 真金熱紅:兩主題永不稀釋(canon 6) */
-  --live:#D93036; --live-bg:rgba(217,48,54,.12);
+  --live:#BE1E27; --live-bg:rgba(190,30,39,.12); /* 帛晝 AA retune:熱紅加深,WCAG on-surface 5.62(§3.2) */
   /* 朱鈐印:只給 sealed/authority 態,只以方印形制出現(canon 9) */
   --seal:#A63A26; --seal-bg:rgba(166,58,38,.08);
   --focus:var(--accent);
@@ -84,6 +88,9 @@
     --bg-app:#171114; --bg-surface:#1D1619; --bg-raised:#241B1F;
     --bg-hover:#2A2025; --bg-sunken:#120D10;
     --border-subtle:rgba(233,228,218,.10); --border-strong:rgba(233,228,218,.22);
+    /* overlay 三元組(供 rgba(var(--ov-*-rgb),α),α 留呼叫點):玄夜 = 原冷底字面 byte-identical */
+    --ov-panel-rgb:13,17,23; --ov-panel-b-rgb:22,27,34;
+    --ov-accent-rgb:56,139,253; --ov-muted-rgb:139,148,158;
     --text-primary:#E9E4DA; --text-secondary:#A89F92; --text-muted:#877F72;
     --accent:#B49B5F; --accent-weak:rgba(180,155,95,.13);
     --pos:#3FB68B; --pos-bg:rgba(63,182,139,.13);
@@ -99,6 +106,9 @@
   --bg-app:#171114; --bg-surface:#1D1619; --bg-raised:#241B1F;
   --bg-hover:#2A2025; --bg-sunken:#120D10;
   --border-subtle:rgba(233,228,218,.10); --border-strong:rgba(233,228,218,.22);
+  /* overlay 三元組(供 rgba(var(--ov-*-rgb),α),α 留呼叫點):玄夜 = 原冷底字面 byte-identical */
+  --ov-panel-rgb:13,17,23; --ov-panel-b-rgb:22,27,34;
+  --ov-accent-rgb:56,139,253; --ov-muted-rgb:139,148,158;
   --text-primary:#E9E4DA; --text-secondary:#A89F92; --text-muted:#877F72;
   --accent:#B49B5F; --accent-weak:rgba(180,155,95,.13);
   --pos:#3FB68B; --pos-bg:rgba(63,182,139,.13);
