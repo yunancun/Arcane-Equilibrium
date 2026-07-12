@@ -165,6 +165,8 @@ paper-shadow launch authority, tiny-live, and live.
 
 Phase 2 IBKR external contact may start only after `phase2_ibkr_external_surface_gate_v1` emits an immutable PASS artifact. The first read-only healthcheck is external contact and is not exempt.
 
+The Phase 2 owner-only read-only seal producer keeps an append-only control lineage per build SHA (`Seal` genesis → `Supersede` → `Revoke`). A genesis `Seal` is valid only on an empty chain, and `Revoke` is terminal per build SHA: re-sealing a revoked build SHA is not supported. Re-attestation uses `Supersede` before revoke, or a new build SHA. The producer rejects a `Seal` on a non-empty chain before any immutable write (fail-closed), so a rejected re-seal can never orphan an immutable `0400` record and brick the ledger (see the pre-write guard and `w2_reseal_*` regression tests in `rust/openclaw_engine/src/ibkr_phase2_gate_producer.rs`). This seal is never IBKR activation authority; activation remains the separate Rust-validated `ibkr_activation_envelope_v1`.
+
 `stock_etf_risk_policy_v1` must be machine-checkable before any paper-order
 rehearsal, shadow-fill reconstruction, or scorecard can rely on a
 `risk_config_hash`. It must prove the dormant paper/shadow source posture,

@@ -213,3 +213,14 @@ High-value hot interaction candidates:
 
 - 只 archive 不 delete；沿 phase 1/2 policy。
 - 本批為個別已完结檔歸檔，未留 per-path redirect stub；live 索引/導航活引用一律改指上表 New path glob。
+
+---
+
+## Executed Redirects (2026-07-12)
+
+> 來源：TODO row `P3-AUDIT-AE-INVENTORY-ARCHIVE`（422KB root blob 歸檔；2026-07-11 audit LOW）。命名依 archive 慣例=內容快照日期（2026-04-25）。
+> 已同步的 live 導航檔：`docs/_indexes/{initiative_index,document_index,path_redirects}.md`、`TODO.md`。凍結歷史檔（dated role reports / `docs/archive/**` / role memory / `CLAUDE_CHANGELOG.md`）舊路徑引用維持 correct-as-of-date，不改寫；`docs/execution_plan/2026-06-10--ae_runtime_rename_migration_guide.md` 為 grep-based sweep（path-agnostic）免改。
+
+| Old path | New path | Reason | Stub |
+|---|---|---|---|
+| `AE_INVENTORY_CONSOLIDATED.md` | `docs/archive/2026-04-25--ae_inventory_consolidated.md` | 2026-04-25 五-session 盤點歷史快照（深歷史/RCA 按需讀）；srv 根 422KB blob 歸檔 | — (無 stub；活引用改指新路徑；本行即舊名→新路徑 grep 召回鏈) |

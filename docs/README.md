@@ -107,6 +107,7 @@ Top-level archive 檔名索引如下；完整歷史語義仍以 `_indexes/docume
 - `2026-04-24--completed_todo_batch.md`
 - `2026-04-24--todo_refactor_audit.md`
 - `2026-04-24--todo_snapshot_pre_refactor.md`
+- `2026-04-25--ae_inventory_consolidated.md`
 - `2026-04-24--todo_v1_refactor_snapshot.md`
 - `2026-04-24--todo_v2_dual_axis_snapshot.md`
 - `2026-04-29--62finding-batch-A-to-F.md`

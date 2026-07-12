@@ -131,19 +131,23 @@ def test_external_evidence_capture_requires_host_verifier_and_populates_typed_in
 
 
 def test_external_evidence_default_adjudication_rejects_expired_and_future_capture() -> None:
+    # default adjudication 以真實牆鐘為準;fixture 必須用相對時間,硬編碼日期會隨時間腐化
+    def _iso(moment: datetime) -> str:
+        return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
+
     now = datetime.now(timezone.utc)
     expired = _resign_external({
         **_external_capture(),
-        "observed_at": (now - timedelta(days=2)).isoformat(),
-        "expires_at": (now - timedelta(days=1)).isoformat(),
+        "observed_at": _iso(now - timedelta(days=2)),
+        "expires_at": _iso(now - timedelta(days=1)),
     })
     assert "external evidence capture is stale at adjudication" in (
         validate_external_evidence_capture(expired, verifier=lambda _record: True)
     )
     future = _resign_external({
         **_external_capture(),
-        "observed_at": (now + timedelta(days=1)).isoformat(),
-        "expires_at": (now + timedelta(days=2)).isoformat(),
+        "observed_at": _iso(now + timedelta(days=1)),
+        "expires_at": _iso(now + timedelta(days=2)),
     })
     assert "external evidence capture is stale at adjudication" in (
         validate_external_evidence_capture(future, verifier=lambda _record: True)

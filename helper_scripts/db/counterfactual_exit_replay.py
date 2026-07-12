@@ -844,7 +844,7 @@ def main() -> int:
         default=5.5,
         help="Taker fee per side in bps for the fee_only cost model. Default "
              "5.5 = Bybit linear taker (0.00055; see "
-             "rust/openclaw_engine/src/account_manager.rs:136 DEFAULT_TAKER_FEE)",
+             "rust/openclaw_engine/src/account_manager.rs DEFAULT_TAKER_FEE)",
     )
     ap.add_argument(
         "--include-funding-arb",

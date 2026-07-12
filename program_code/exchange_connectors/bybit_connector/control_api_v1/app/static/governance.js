@@ -82,34 +82,10 @@ async function govPostOverride(targetLevel, reason) {
 }
 
 async function govPostReconcile(reason) {
-  // POST /api/v1/governance/reconcile
-  // 對賬前先拉取 paper engine 當前状态填充 paper_state
-  // Before reconciling, fetch current paper engine metrics to populate paper_state
-
-  let paperState = {};
-  try {
-    // 从 /api/v1/paper/status 获取倉位、余额和訂單數量
-    // Fetch positions, balance, total_orders from paper engine status
-    const ps = await ocApi('/api/v1/paper/status');
-    if (ps && ps.data) {
-      const d = ps.data;
-      paperState = {
-        positions: d.positions || [],
-        balance: d.balance !== undefined ? d.balance : null,
-        total_orders: d.total_orders !== undefined ? d.total_orders : null,
-      };
-    }
-  } catch (_e) {
-    // paper status 获取失败時回退到空對象，不阻斷對賬
-    // If paper status fetch fails, fall back to empty dict — do not block reconcile
-    paperState = {};
-  }
-
-  return ocPost('/api/v1/governance/reconcile', {
-    paper_state: paperState,
-    demo_state: null,
-    reason: reason || 'manual_trigger',
-  });
+  // POST /api/v1/governance/reconcile —— 伺服器端組裝 paper/demo 快照,GUI 僅觸發。
+  // 不再由前端拉 /paper/status 或建構 governance payload（移除死路由 /L2 shape /
+  // L3 self-compare 全部失效面）。回應含 verdict/severity/is_consistent/discrepancies。
+  return ocPost('/api/v1/governance/reconcile', { reason: reason || 'manual_trigger' });
 }
 
 async function govGetLeases() {
