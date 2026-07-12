@@ -637,8 +637,8 @@ function ocSetPnlRangeButtons(containerId, activeRange) {
     var isActive = String(btn.getAttribute('data-pnl-range') || '').toLowerCase() === active;
     btn.classList.toggle('active', isActive);
     btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
-    btn.style.borderColor = isActive ? 'rgba(56,139,253,0.75)' : '';
-    btn.style.background = isActive ? 'rgba(56,139,253,0.16)' : '';
+    btn.style.borderColor = isActive ? 'rgba(var(--ov-accent-rgb),0.75)' : '';
+    btn.style.background = isActive ? 'rgba(var(--ov-accent-rgb),0.16)' : '';
     btn.style.color = isActive ? 'var(--text-secondary)' : '';
   });
 }

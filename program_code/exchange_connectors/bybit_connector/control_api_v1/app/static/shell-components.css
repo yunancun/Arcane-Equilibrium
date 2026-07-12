@@ -188,8 +188,8 @@
   transition: all 0.15s; font-family: inherit; white-space: nowrap; }
 .oc-btn:hover { border-color: var(--accent); color: var(--text-primary); }
 .oc-btn:disabled { opacity: 0.35; cursor: not-allowed; }
-.oc-btn-primary { background: rgba(56,139,253,0.15); border-color: var(--text-secondary); color: var(--text-secondary); }
-.oc-btn-primary:hover { background: rgba(56,139,253,0.3); }
+.oc-btn-primary { background: rgba(var(--ov-accent-rgb),0.15); border-color: var(--text-secondary); color: var(--text-secondary); }
+.oc-btn-primary:hover { background: rgba(var(--ov-accent-rgb),0.3); }
 .oc-btn-success { background: rgba(63,185,80,0.12); border-color: var(--pos); color: var(--pos); }
 .oc-btn-success:hover { background: rgba(63,185,80,0.25); }
 .oc-btn-warning { background: rgba(210,153,34,0.10); border-color: rgba(210,153,34,0.36); color: var(--warn); }
