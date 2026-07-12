@@ -40,6 +40,10 @@
      alert-* / pf-cap--*)+ legacy 短名 shim(oc-subtab*/oc-card/oc-metric*/oc-chip*/oc-collapse*/
      oc-explain*/oc-loading/oc-grid-2/oc-pre;殼不呼 ocInjectBaseCSS,見 view-settings.css MODULE_NOTE)-->
 <link rel="stylesheet" href="/static/view-settings.css?v=20260712.p2-settings" />
+<!-- stock 原生 view 頁級樣式(第 13 遷,唯讀復用遷移):`.stock-view` scope 的 se-* stock-specific
+     (metric 摘要格 / panel 網格 / kv 表 / chip-row / list / bad·warn 線框)+ legacy 短名 shim
+     (.oc-chip 五態;殼不呼 ocInjectBaseCSS,見 view-stock.css MODULE_NOTE)-->
+<link rel="stylesheet" href="/static/view-stock.css?v=20260712.p2-stock" />
 </head>
 <body>
 
@@ -171,6 +175,23 @@
      憑證合規逐字保留)+ 重跑內聯 script;隔離全域 loadAll 防污染 paper(見 view-settings.js MODULE_NOTE ★★)。
      common* 殼已載,settings 無其他外部 JS;於 shell.js 前載以註冊 OC_NATIVE_VIEWS['settings']。tab-settings.html 零修改(reuse 正本 + 回滾錨)。 -->
 <script src="/static/view-settings.js?v=20260712.p2-settings"></script>
+<!-- stock 第 13 遷(唯讀復用遷移):**verbatim 復用 10 純渲染模組 + tab-stock-etf.js 編排器**(全 16 個
+     /api/v1/stock-etf/*-status GET 快照,零寫)。10 純渲染模組 load-safe(只 define window.render*/
+     window.*Fallback/全域函式,load 時零 DOM 存取)故於殼 boot 載入;**tab-stock-etf.js 不在此**——
+     它有 module-level waitForServerUp(loadReadiness) 自初始化需 DOM,故由 view-stock.js 於 render 時
+     動態注入(見 view-stock.js MODULE_NOTE)。view-stock.js 於 shell.js 前載以註冊 OC_NATIVE_VIEWS['stock']。
+     tab-stock-etf.html / 11 JS 零修改(reuse 正本 + 回滾錨)。 -->
+<script src="/static/tab-stock-etf-phase0.js?v=20260630.phase0"></script>
+<script src="/static/tab-stock-etf-release-packet.js?v=20260630.release-packet"></script>
+<script src="/static/tab-stock-etf-disable-cleanup.js?v=20260630.disable-cleanup"></script>
+<script src="/static/tab-stock-etf-reconciliation.js?v=20260630.reconciliation"></script>
+<script src="/static/tab-stock-etf-readiness.js?v=20260701.readiness"></script>
+<script src="/static/tab-stock-etf-data-policy.js?v=20260701.data-policy-renderers"></script>
+<script src="/static/tab-stock-etf-fallbacks.js?v=20260701.fallbacks"></script>
+<script src="/static/tab-stock-etf-auth-account.js?v=20260701.auth-account"></script>
+<script src="/static/tab-stock-etf-evidence-paper.js?v=20260701.evidence-paper"></script>
+<script src="/static/tab-stock-etf-scorecard-launch.js?v=20260701.scorecard-launch"></script>
+<script src="/static/view-stock.js?v=20260712.p2-stock"></script>
 <script src="/static/shell.js?v=20260711.shell-p11a"></script>
 
 </body>

@@ -75,7 +75,11 @@
     { id: 'demo',     lane: 'crypto', hash: '#/crypto/demo',     src: '/static/tab-demo.html',        visId: 'demo',        label: '演示 Demo',       badge: 'demo', flag: true },
     { id: 'live',     lane: 'crypto', hash: '#/crypto/live',     src: '/static/tab-live.html',        visId: 'live',        label: '實盤 Live',       badge: 'live', flag: true, live: true },
     // ── stock lane(IBKR read-only;殼不新增任何 IBKR 寫/激活 UI)──
-    { id: 'stock',    lane: 'stock',  hash: '#/stock/overview',  src: '/static/tab-stock-etf.html',   visId: 'stock-etf',   label: '總覽 Overview',   badge: 'read-only' },
+    // stock:Phase 2 第 13 個原生遷移(iframe:false;**唯讀復用遷移**——全 16 GET readiness 快照/零寫/
+    //   非交易關鍵四者)——render/pause/resume 由 view-stock.js 註冊於 window.OC_NATIVE_VIEWS(id=stock);
+    //   10 純渲染模組於殼 boot 載、tab-stock-etf.js 編排器 render 時動態注入;src 保留 tab-stock-etf.html
+    //   作 registry 完整性 + 回滾錨 + DOM 復用來源。pause/resume no-op(一次性快照,無輪詢;見 view-stock.js)。
+    { id: 'stock',    lane: 'stock',  hash: '#/stock/overview',  src: '/static/tab-stock-etf.html',   visId: 'stock-etf',   label: '總覽 Overview',   badge: 'read-only', iframe: false },
     // ── cross-cutting(lane/env 正交;釘 rail 底)──
     // monitor:Phase 2 第 2 個原生遷移(iframe:false)——render/pause/resume 由 view-monitor.js 註冊於
     //   window.OC_NATIVE_VIEWS(id=monitor);src 保留 legacy tab-monitoring 作 registry 完整性 + 回滾錨,原生渲染接管。

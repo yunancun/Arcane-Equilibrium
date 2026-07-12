@@ -1,0 +1,86 @@
+/* ═══════════════════════════════════════════════════════════════════
+   view-stock.css — 玄衡原生 view「Stock/ETF · IBKR Readiness」頁級樣式(Phase 2 第 13 遷)
+   ═══════════════════════════════════════════════════════════════════
+   MODULE_NOTE
+   模塊用途:承載 view-stock.js 注入的 stock DOM 所需樣式。分兩層:
+     ① stock-specific —— tab-stock-etf.html 頁內樣式塊(行 20-58)的 `.se-*` 規則(頭部 / metric
+        摘要格 / panel 網格 / kv 表 / chip-row / list / bad·warn 線框)。此為對頁內樣式塊的**重複
+        (非移動)**:legacy iframe 路徑仍靠 tab-stock-etf.html 自帶頁內樣式塊,故 tab-stock-etf.html
+        不動作回滾錨。**跳過** `html, body { … }` 規則(會與殼 chrome 相衝,如 ocInjectBaseCSS body
+        reset;滾動/背景由殼 view-frame--native 宿主供給)。全部以 `.stock-view` 收束作用域(防外溢)。
+     ② `.stock-view` scope 的 legacy 短名 shim —— `.oc-chip`(+ good/warn/bad/neutral/info 五態)。
+        殼**刻意不呼** common.js ocInjectBaseCSS()(避免其 body{padding}+`*` reset 破殼 chrome),而
+        oc-chip 家族樣式原只在 ocInjectBaseCSS 內。故逐字 port 並 `.stock-view` scope(對齊 view-paper.css
+        同名 shim)。五態=渲染模組 `'oc-chip oc-chip-' + safeType`(safeType∈good/warn/bad/neutral/info)
+        動態產出的全集。按鈕(.oc-btn / .oc-btn-primary)已在 shell-components.css(殼已載),不 shim;
+        版式 utility(.mb-2 / .mt-3)已在 oc-utilities.css(殼已載),不 shim。
+   ratchet(born-clean 0/0/0):全檔零裸 hex。tab-stock-etf.html 頁內樣式塊本就零 #hex;其 4 處語義
+     邊框色字面(se-kv th/td 底線 rgba(139,148,158,.16)→--border-subtle;se-bad-line→--neg;se-warn-line
+     →--warn)改語義 token(對齊 view-paper.css「色字面→token」;玄衡 skin 採 token)。oc-chip 三態亦
+     語義 token。零裸 hex、零 inline style 屬性、零內聯樣式塊(本檔是 .css)。過 test_gui_style_ratchet_static.py。
+   誠實邊界:靜態只證 source;真渲染 / readiness 三態徽色 / 未接 fallback 可讀性 = NEEDS-LINUX + operator。
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ═══ ① stock-specific(port tab-stock-etf.html 頁內樣式塊,scoped .stock-view;略 html/body)═══ */
+
+.stock-view .se-wrap { padding:16px; max-width:1280px; margin:0 auto; }
+.stock-view .se-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
+.stock-view .se-title { margin:0; font-size:18px; line-height:1.25; }
+.stock-view .se-sub { margin-top:4px; color:var(--text-secondary); font-size:12px; line-height:1.5; }
+.stock-view .se-toolbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+
+/* metric 摘要格 */
+.stock-view .se-summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:10px; margin-bottom:14px; }
+.stock-view .se-metric {
+  background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:var(--r-2);
+  padding:10px; min-height:84px;
+}
+.stock-view .se-metric-label { font-size:10px; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.3px; }
+.stock-view .se-metric-value { margin-top:5px; font-size:16px; font-weight:700; line-height:1.25; overflow-wrap:anywhere; }
+.stock-view .se-metric-sub { margin-top:5px; color:var(--text-secondary); font-size:11px; line-height:1.35; overflow-wrap:anywhere; }
+
+/* panel 網格 */
+.stock-view .se-grid { display:grid; grid-template-columns:repeat(2,minmax(280px,1fr)); gap:12px; }
+.stock-view .se-panel {
+  background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:var(--r-2);
+  padding:12px; min-height:132px;
+}
+.stock-view .se-panel-title { display:flex; align-items:center; justify-content:space-between; gap:10px; font-size:13px; font-weight:700; margin-bottom:10px; }
+
+/* kv 表(th/td 底線色字面→--border-subtle,語義等價的細分隔線)*/
+.stock-view .se-kv { width:100%; border-collapse:collapse; font-size:12px; }
+.stock-view .se-kv th {
+  text-align:left; width:44%; padding:7px 8px; color:var(--text-secondary); font-weight:600;
+  border-bottom:1px solid var(--border-subtle);
+}
+.stock-view .se-kv td { padding:7px 8px; border-bottom:1px solid var(--border-subtle); vertical-align:top; overflow-wrap:anywhere; }
+.stock-view .se-kv tr:last-child th, .stock-view .se-kv tr:last-child td { border-bottom:none; }
+
+.stock-view .se-chip-row { display:flex; gap:6px; flex-wrap:wrap; }
+.stock-view .se-list { display:flex; gap:6px; flex-wrap:wrap; min-height:25px; }
+.stock-view .se-muted { color:var(--text-secondary); font-size:12px; }
+.stock-view .se-code { font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size:11px; }
+
+/* panel 狀態線框(classList.toggle 動態掛;色字面→語義 token)*/
+.stock-view .se-bad-line { border-color:var(--neg); }
+.stock-view .se-warn-line { border-color:var(--warn); }
+
+@media (max-width: 860px) {
+  .stock-view .se-grid { grid-template-columns:1fr; }
+  .stock-view .se-kv th { width:40%; }
+}
+
+/* ═══ ② `.stock-view` scope 的 legacy 短名 shim(port ocInjectBaseCSS oc-chip,色字面→token)═══ */
+
+.stock-view .oc-chip {
+  display:inline-flex; align-items:center; gap:5px; border-radius:var(--r-full);
+  padding:3px 10px; font-size:11px; font-weight:500; border:1px solid transparent;
+}
+.stock-view .oc-chip-good    { background:var(--pos-bg);      border-color:var(--pos);           color:var(--pos); }
+.stock-view .oc-chip-warn    { background:var(--warn-bg);     border-color:var(--warn);          color:var(--warn); }
+.stock-view .oc-chip-bad     { background:var(--neg-bg);      border-color:var(--neg);           color:var(--neg); }
+.stock-view .oc-chip-neutral { background:var(--bg-hover);    border-color:var(--border-strong); color:var(--text-secondary); }
+.stock-view .oc-chip-info    { background:var(--accent-weak); border-color:var(--accent);        color:var(--accent); }
+
+/* view-stock.js 載入 / 錯誤佔位(非源 DOM;fail-closed 可見化)*/
+.stock-view .stock-note { padding:24px 18px; text-align:center; color:var(--text-secondary); font-size:13px; line-height:1.7; }
