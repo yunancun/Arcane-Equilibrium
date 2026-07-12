@@ -4362,6 +4362,38 @@ def _assert_concurrency_probe_contract(source: str) -> None:
         'row["state"] == "active"',
     ):
         assert token in blocked_source
+    blocked_loops = [
+        node
+        for node in functions["_wait_for_blocked"].body
+        if isinstance(node, ast.While)
+    ]
+    assert len(blocked_loops) == 1
+    blocked_cursor_contexts = [
+        node for node in blocked_loops[0].body if isinstance(node, ast.With)
+    ]
+    assert len(blocked_cursor_contexts) == 1
+    blocked_cursor_body = blocked_cursor_contexts[0].body
+    assert len(blocked_cursor_body) >= 3
+    clear_snapshot_statement = blocked_cursor_body[0]
+    activity_statement = blocked_cursor_body[1]
+    assert isinstance(clear_snapshot_statement, ast.Expr)
+    assert isinstance(clear_snapshot_statement.value, ast.Call)
+    assert (
+        _functional_dotted_name(clear_snapshot_statement.value.func)
+        == "cursor.execute"
+    )
+    assert len(clear_snapshot_statement.value.args) == 1
+    assert (
+        ast.literal_eval(clear_snapshot_statement.value.args[0])
+        == "SELECT pg_stat_clear_snapshot()"
+    )
+    assert isinstance(activity_statement, ast.Expr)
+    assert isinstance(activity_statement.value, ast.Call)
+    assert _functional_dotted_name(activity_statement.value.func) == "cursor.execute"
+    assert len(activity_statement.value.args) == 2
+    assert "FROM pg_stat_activity" in ast.literal_eval(
+        activity_statement.value.args[0]
+    )
     lock_source = ast.get_source_segment(
         source, functions["_observe_domain_locks"]
     ) or ""
@@ -4709,6 +4741,7 @@ def test_v159_concurrency_probe_static_ast_contract() -> None:
         ),
         ('row["wait_event_type"] == "Lock"', 'True'),
         ('row["state"] == "active"', 'True'),
+        ('SELECT pg_stat_clear_snapshot()', 'SELECT TRUE'),
         ('holder.granted IS TRUE', 'holder.granted IS NOT NULL'),
         ('waiter.granted IS FALSE', 'waiter.granted IS NOT NULL'),
         (

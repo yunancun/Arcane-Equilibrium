@@ -511,6 +511,7 @@ def _wait_for_blocked(
     observed: dict[str, Any] | None = None
     while observed is None:
         with admin.cursor() as cursor:
+            cursor.execute("SELECT pg_stat_clear_snapshot()")
             cursor.execute(
                 "SELECT wait_event_type,wait_event,state FROM pg_stat_activity "
                 "WHERE pid=%s AND datname=current_database()",
