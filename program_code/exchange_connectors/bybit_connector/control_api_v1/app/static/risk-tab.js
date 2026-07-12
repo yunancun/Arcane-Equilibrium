@@ -221,7 +221,7 @@ function selectRiskEngine(engine) {
 function _updateEngineBadges(engine) {
   const labels = { paper: 'Paper', demo: 'Demo', live: 'Live' };
   const colors = {
-    paper: { bg: 'rgba(56,139,253,0.15)', border: 'rgba(56,139,253,0.5)', text: 'var(--text-secondary)' },
+    paper: { bg: 'rgba(var(--ov-accent-rgb),0.15)', border: 'rgba(var(--ov-accent-rgb),0.5)', text: 'var(--text-secondary)' },
     demo:  { bg: 'rgba(210,153,34,0.15)', border: 'rgba(210,153,34,0.5)', text: 'var(--warn)' },
     live:  { bg: 'rgba(248,81,73,0.15)',  border: 'rgba(248,81,73,0.5)',  text: 'var(--neg)' },
   };

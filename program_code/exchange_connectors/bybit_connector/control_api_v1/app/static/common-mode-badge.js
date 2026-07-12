@@ -340,7 +340,7 @@ window.OpenClawModeBadge = {
     '.oc-mode-badge-state { font-weight: 700; }',
     '.oc-mode-badge[data-confidence-none="1"] {',
     '  /* 防誤觸詐 SENTINEL：灰底 + 警告 icon + 紅外框 */',
-    '  background: rgba(139,148,158,0.12);',
+    '  background: rgba(var(--ov-muted-rgb),0.12);',
     '  color: var(--neg);',
     '  border: 1px solid var(--neg);',
     '  box-shadow: 0 0 0 1px rgba(248,81,73,0.35) inset;',
