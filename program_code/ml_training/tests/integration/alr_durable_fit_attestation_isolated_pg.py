@@ -44,8 +44,8 @@ from ml_training.tests.integration.alr_challenger_training_isolated_pg import ( 
 _V158 = (_ROOT / "sql/migrations/V158__alr_qualified_challenger_training.sql").resolve()
 _V159 = (_ROOT / "sql/migrations/V159__alr_durable_fit_attestation.sql").resolve()
 _EXPECTED_SHA256 = {
-    "V158": "b1ff8e2da1878fc498b1bf87e61a105a113bd21b3194a60df84238c8f890d8b9",
-    "V159": "a4d24a28dbb189f47f15ddca2bb6505100eeb5837a8e8e819801f51207c82c63",
+    "V158": "7ed70599c6bd5f3cdb3376bc135a952d8c18f4ad62a62432c2bfdd8ee84e446b",
+    "V159": "5941b2b2b164e4b5408be32507d26e58faccc35f73cf83f6bc057498580fae5e",
 }
 _ON_ERROR_STOP_EQUIVALENT = True
 _SAFE_FAILURE_MESSAGE = "V159 durable-fit disposable probe failed safely"

@@ -32,10 +32,69 @@ CONCURRENCY_PROBE = (
 SCHEMA_CONTRACT = SRV_ROOT / "rust/openclaw_engine/tests/schema_contract_test.rs"
 CI_WORKFLOW = SRV_ROOT / ".github/workflows/ci.yml"
 
+_TOP_LEVEL_CASE_GUARDS = (
+    (
+        "IF v_count<>(CASE WHEN p_mode='legacy' THEN 13 ELSE 28 END) THEN",
+        "IF v_count<>CASE WHEN p_mode='legacy' THEN 13 ELSE 28 END THEN",
+    ),
+    (
+        "IF v_count<>(CASE WHEN p_mode='legacy' THEN 7 ELSE 11 END) THEN",
+        "IF v_count<>CASE WHEN p_mode='legacy' THEN 7 ELSE 11 END THEN",
+    ),
+    (
+        "IF v_count<>(CASE WHEN p_mode='legacy' THEN 6 ELSE 11 END) THEN",
+        "IF v_count<>CASE WHEN p_mode='legacy' THEN 6 ELSE 11 END THEN",
+    ),
+    (
+        ")<>(CASE WHEN v_spec.caller_kind IN('trainer','attestor_caller') OR "
+        "(v_spec.caller_kind='legacy_trainer' AND p_mode='legacy') THEN 2 ELSE 1 END) THEN",
+        ")<>CASE WHEN v_spec.caller_kind IN('trainer','attestor_caller') OR "
+        "(v_spec.caller_kind='legacy_trainer' AND p_mode='legacy') THEN 2 ELSE 1 END THEN",
+    ),
+    (
+        "IF v_writer_owned<>(CASE p_mode WHEN 'legacy' THEN 6 ELSE 9 END) OR "
+        "v_attestor_owned<>(CASE p_mode WHEN 'legacy' THEN 0 ELSE 2 END) OR",
+        "IF v_writer_owned<>CASE p_mode WHEN 'legacy' THEN 6 ELSE 9 END OR "
+        "v_attestor_owned<>CASE p_mode WHEN 'legacy' THEN 0 ELSE 2 END OR",
+    ),
+    (
+        ")<>(CASE WHEN v_spec.writer_insert THEN 2 WHEN v_spec.writer_select THEN 1 ELSE 0 END) OR "
+        "(SELECT count(*) FROM pg_class",
+        ")<>CASE WHEN v_spec.writer_insert THEN 2 WHEN v_spec.writer_select THEN 1 ELSE 0 END OR "
+        "(SELECT count(*) FROM pg_class",
+    ),
+    (
+        ")<>(CASE WHEN v_spec.attestor_insert THEN 2 WHEN v_spec.attestor_select THEN 1 ELSE 0 END) THEN",
+        ")<>CASE WHEN v_spec.attestor_insert THEN 2 WHEN v_spec.attestor_select THEN 1 ELSE 0 END THEN",
+    ),
+)
+
 
 def _sql() -> str:
     assert V159.exists(), f"V159 migration is missing: {V159}"
     return V159.read_text(encoding="utf-8")
+
+
+def _assert_top_level_case_guards_are_parenthesized(sql: str) -> None:
+    for safe, unsafe in _TOP_LEVEL_CASE_GUARDS:
+        assert safe in sql
+        assert unsafe not in sql
+
+
+def test_v159_plpgsql_if_guards_do_not_terminate_at_nested_case_then() -> None:
+    _assert_top_level_case_guards_are_parenthesized(_sql())
+
+
+@pytest.mark.parametrize("safe,unsafe", _TOP_LEVEL_CASE_GUARDS)
+def test_v159_unparenthesized_top_level_case_guard_mutations_are_rejected(
+    safe: str, unsafe: str
+) -> None:
+    sql = _sql()
+    assert safe in sql
+    with pytest.raises(AssertionError):
+        _assert_top_level_case_guards_are_parenthesized(
+            sql.replace(safe, unsafe, 1)
+        )
 
 
 def _function_body(sql: str, tag: str) -> str:
@@ -1171,10 +1230,13 @@ def _assert_catalog_hardening_contract(sql: str) -> None:
     assert "pg_shdepend" in validator
     assert "p.prorettype=CASE" in validator
     assert (
-        "v_writer_owned<>CASE p_mode WHEN 'legacy' THEN 6 ELSE 9 END"
+        "v_writer_owned<>(CASE p_mode WHEN 'legacy' THEN 6 ELSE 9 END)"
         in validator
     )
-    assert "v_attestor_owned<>CASE p_mode WHEN 'legacy' THEN 0 ELSE 2 END" in validator
+    assert (
+        "v_attestor_owned<>(CASE p_mode WHEN 'legacy' THEN 0 ELSE 2 END)"
+        in validator
+    )
 
     for digest_signal in (
         "p.prosrc='pg_digest'",
@@ -1228,7 +1290,7 @@ def test_v159_catalog_hardening_contract() -> None:
         ("NOT i.indnullsnotdistinct", "i.indnullsnotdistinct"),
         ("privilege.grantor<>c.relowner", "privilege.grantor=c.relowner"),
         (
-            "v_writer_owned<>CASE p_mode WHEN 'legacy' THEN 6 ELSE 9 END",
+            "v_writer_owned<>(CASE p_mode WHEN 'legacy' THEN 6 ELSE 9 END)",
             "v_writer_owned<0",
         ),
         (
@@ -2042,10 +2104,10 @@ def _assert_functional_positive_helper_contracts(tree: ast.Module) -> None:
 def _assert_functional_probe_contract(source: str) -> None:
     compile(source, str(FUNCTIONAL_PROBE), "exec")
     assert hashlib.sha256(V159.read_bytes()).hexdigest() == (
-        "a4d24a28dbb189f47f15ddca2bb6505100eeb5837a8e8e819801f51207c82c63"
+        "5941b2b2b164e4b5408be32507d26e58faccc35f73cf83f6bc057498580fae5e"
     )
     assert (
-        '"V159": "a4d24a28dbb189f47f15ddca2bb6505100eeb5837a8e8e819801f51207c82c63"'
+        '"V159": "5941b2b2b164e4b5408be32507d26e58faccc35f73cf83f6bc057498580fae5e"'
         in source
     )
     assert '_ACK_ENV = "ALR_V159_DISPOSABLE_ACK"' in source
@@ -2585,7 +2647,7 @@ def test_v159_functional_probe_ast_contract() -> None:
             "allow_role_default_session(connection)",
         ),
         (
-            '"V159": "a4d24a28dbb189f47f15ddca2bb6505100eeb5837a8e8e819801f51207c82c63"',
+            '"V159": "5941b2b2b164e4b5408be32507d26e58faccc35f73cf83f6bc057498580fae5e"',
             '"V159": "' + "0" * 64 + '"',
         ),
         ("BYTE_EXACT_READBACK", "BYTE_READBACK_SKIPPED"),
@@ -2914,8 +2976,8 @@ def test_v159_functional_probe_ast_rejects_composed_scenario_bypass() -> None:
 
 
 _CONCURRENCY_EXPECTED_SHA256 = {
-    "V158": "b1ff8e2da1878fc498b1bf87e61a105a113bd21b3194a60df84238c8f890d8b9",
-    "V159": "a4d24a28dbb189f47f15ddca2bb6505100eeb5837a8e8e819801f51207c82c63",
+    "V158": "7ed70599c6bd5f3cdb3376bc135a952d8c18f4ad62a62432c2bfdd8ee84e446b",
+    "V159": "5941b2b2b164e4b5408be32507d26e58faccc35f73cf83f6bc057498580fae5e",
 }
 _CONCURRENCY_SCENARIO_ORDER = (
     "_scenario_identical_attestation",

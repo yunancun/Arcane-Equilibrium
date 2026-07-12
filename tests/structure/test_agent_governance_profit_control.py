@@ -29,6 +29,7 @@ ADMITTED_CAP_FIELDS = (
     "max_workflow_planned_input_tokens", "max_unique_nodes",
     "max_call_attempts", "retry_budget",
 )
+NODE_STDIN_ARGS = "JSON.parse(fs.readFileSync(0, 'utf8'))"
 
 
 def _ext_probe_payload() -> dict:
@@ -1518,7 +1519,7 @@ const parallel = async jobs => Promise.all(jobs.map(job => job()));
                 "__WORKFLOW__",
                 json.dumps(str(ROOT / ".claude/workflows/profit-diagnosis.js")),
             )
-            .replace("__ARGS__", json.dumps(run_args))
+            .replace("__ARGS__", NODE_STDIN_ARGS)
             .replace("__MAP_READY__", "true" if map_ready else "false")
             .replace("__INJECT_NULL__", "true" if null_first else "false")
             .replace("__RUNTIME_FACT__", "true" if runtime_fact else "false")
@@ -1527,6 +1528,7 @@ const parallel = async jobs => Promise.all(jobs.map(job => job()));
         completed = subprocess.run(
             ["node", "-e", script],
             cwd=ROOT,
+            input=json.dumps(run_args),
             text=True,
             capture_output=True,
             check=False,
