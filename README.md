@@ -44,7 +44,9 @@ Agentic trading governance system — 自主扫描 650+ 交易对，智能部署
 
 > Tab 表以 `console.html` nav 定义为 SoT（2026-07-04 TW per R4 对齐：补 `stock-etf`/`charts`，移除已下架的 `phase4`；排序对齐 GUI group core/trading/edge/governance/intelligence/ops）。
 
-> **GUI 大修 baseline（2026-07-09 · 回滚/对比锚点）**：改版前的 Console GUI 已冻结快照在 git tag `gui-baseline-2026-07-09`（commit `d077949fc`，61 files / 36,337 lines）。**回滚**：`git checkout gui-baseline-2026-07-09 -- program_code/exchange_connectors/bybit_connector/control_api_v1/app/static/`；**对比**：`git diff gui-baseline-2026-07-09 -- <path>`。清单 + 便携镜像（`gui-baseline-2026-07-09-static.tar.gz`，sha256 `d6a15818…`）见 `docs/archive/2026-07-09--gui_baseline_pre_redesign_manifest.md`。改版设计正本 → `scratchpad/gui/GUI-DESIGN-WORKING-DOC.md`（方向 S1 Terminal；Phase 0 未开工）。
+> **GUI 大修 baseline（2026-07-09 · 回滚/对比锚点）**：改版前的 Console GUI 已冻结快照在 git tag `gui-baseline-2026-07-09`（commit `d077949fc`，61 files / 36,337 lines）。**回滚**：`git checkout gui-baseline-2026-07-09 -- program_code/exchange_connectors/bybit_connector/control_api_v1/app/static/`；**对比**：`git diff gui-baseline-2026-07-09 -- <path>`。清单 + 便携镜像（`gui-baseline-2026-07-09-static.tar.gz`，sha256 `d6a15818…`）见 `docs/archive/2026-07-09--gui_baseline_pre_redesign_manifest.md`。改版设计正本 → `docs/execution_plan/gui_redesign/GUI-DESIGN-WORKING-DOC.md`（「玄衡仪」视觉主张；Phase 0/1/2 迁移实质完成、双主题上线；cutover 待 operator Linux 批验）；深度规格索引 `docs/execution_plan/gui_redesign/design/01-13`。
+
+> **玄衡壳迁移状态（2026-07-12）**：18 个原生 view 已迁入新玄衡壳 `shell.html`（`iframe:false` + flag opt-in，保留 legacy iframe 回滚后备）；双主题（玄夜/帛昼）上线（OS 偏好默认 + `data-theme` toggle 持久）。**新壳仍是 flag opt-in；`console.html`（`/console`）仍是 served canonical GUI**；迁移实质完成，**cutover 待 operator Linux 批验**（帛昼真渲染 / 三态真值 / cutover = NEEDS-LINUX）。baseline tag `gui-baseline-2026-07-09` 回滚锚不变。
 
 ---
 
