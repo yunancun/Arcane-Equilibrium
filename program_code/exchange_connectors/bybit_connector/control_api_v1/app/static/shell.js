@@ -78,7 +78,15 @@
     //   後呼 window.startEarnTab();唯一寫路徑=既有 POST /api/v1/earn/stake(9-gate + 再驗 phrase),零新寫路徑,
     //   typed-confirm/5-gate/Stage0R/cooldown 全不弱化。src 保留 legacy tab-earn 作 registry 完整性 + 回滾錨。
     { id: 'earn',     lane: 'crypto', hash: '#/crypto/earn',     src: '/static/tab-earn.html',        visId: 'earn',        label: 'Earn 理財',       badge: 'earn', iframe: false },
-    { id: 'demo',     lane: 'crypto', hash: '#/crypto/demo',     src: '/static/tab-demo.html',        visId: 'demo',        label: '演示 Demo',       badge: 'demo', flag: true },
+    // demo:Phase 2 交易關鍵 view 原生遷移(iframe:false;**Demo 演示=虛擬資金/含 4 寫**,復用遷移)——render/pause/resume
+    //   由 view-demo.js 註冊於 window.OC_NATIVE_VIEWS(id=demo)。策略=**verbatim 復用 tab-demo.html 唯一大內聯 script**:
+    //   view-demo.js 於 render fetch tab-demo.html 注入其 demo DOM(byte-parity)後 IIFE-wrap 重跑內聯 script(demo
+    //   session start/pause/resume/stop + close-all-positions + positions/{symbol}/close 全 byte-parity 復用,經 Rust IPC;
+    //   confirm gate[#dlg-demo-close-all / openConfirmModal / classifyLiveMutation·ocResidualRiskBanner]逐字保留不弱化;
+    //   canon-6 政策=demo 虛擬資金,破壞性確認框用琥珀 --warn 警示語義,**非** live 熱紅 --live,不誤升)。頂層 loadAll
+    //   IIFE-local 隔離防撞 paper 的 window.loadAll,改曝 __ocDemoLoadAll(見 view-demo.js MODULE_NOTE)。src 保留 legacy
+    //   tab-demo 作 registry 完整性 + 回滾錨(=flag fallback 的 iframe src);flag ⚑ 保留(交易關鍵 opt-in)。
+    { id: 'demo',     lane: 'crypto', hash: '#/crypto/demo',     src: '/static/tab-demo.html',        visId: 'demo',        label: '演示 Demo',       badge: 'demo', flag: true, iframe: false },
     { id: 'live',     lane: 'crypto', hash: '#/crypto/live',     src: '/static/tab-live.html',        visId: 'live',        label: '實盤 Live',       badge: 'live', flag: true, live: true },
     // ── stock lane(IBKR read-only;殼不新增任何 IBKR 寫/激活 UI)──
     // stock:Phase 2 第 13 個原生遷移(iframe:false;**唯讀復用遷移**——全 16 GET readiness 快照/零寫/

@@ -56,6 +56,13 @@
      oc-grid-3/oc-loading/oc-danger-zone/oc-pre/oc-diff-*/oc-subtab-placeholder + .green/.yellow/.red/.blue;殼不呼
      ocInjectBaseCSS,見 view-risk.css MODULE_NOTE)。pf-toggle 刻意不 port(legacy 亦原生 checkbox,byte-parity)。 -->
 <link rel="stylesheet" href="/static/view-risk.css?v=20260712.p2-risk" />
+<!-- demo 原生 view 頁級樣式(交易關鍵/虛擬資金,復用遷移):`.demo-view` scope 分兩層——
+     ① demo-specific(port tab-demo.html 頁內樣式塊:source-bar / stale-banner canon-7 / pnl sparkline chrome /
+     **全平確認框 demo-cta-***[canon-6 琥珀 --warn 破壞性警示,**非** live 熱紅]/ className-wipe id 選擇器);
+     ② legacy 短名 shim(oc-card/oc-metric*/oc-chip*/oc-control-bar/oc-table*/oc-collapse*/oc-fill-*[含 paper 未用的
+     成交子標籤 tabs/tab/table/time]/oc-performance-metrics/oc-explain*/oc-loading/oc-not-configured/oc-pre +
+     .green/.red/.yellow;殼刻意不呼 ocInjectBaseCSS,類比 view-paper.css,見 view-demo.css MODULE_NOTE)。 -->
+<link rel="stylesheet" href="/static/view-demo.css?v=20260712.p2-demo" />
 <!-- governance 原生 view 頁級樣式(第 16 遷,交易關鍵四者之一/12 寫治理,復用遷移):
      `.governance-view` scope 分兩層——① governance-specific(port tab-governance.html 兩頁內樣式塊:SM 卡 /
      gov-learn 折疊 / gov-boundary-note / demo-admission / Graduated Canary stage-ladder·cohort-card·stage-badge /
@@ -244,6 +251,13 @@
      前載以註冊 OC_NATIVE_VIEWS['governance']。tab-governance.html / governance-tab.js / canary-tab.js /
      autonomy-posture.js / governance.js 五源檔零修改(reuse 正本 + 回滾錨)。 -->
 <script src="/static/view-governance.js?v=20260712.p2-governance"></script>
+<!-- demo 原生 view(交易關鍵/虛擬資金,復用遷移;flag ⚑ opt-in 保留):view-demo.js 於 render fetch
+     /static/tab-demo.html → 注入其 demo DOM(byte-parity)+ IIFE-wrap 重跑唯一大內聯 script(4 寫 demo session/
+     close-all/close-position 經 Rust IPC byte-parity 復用,confirm gate 逐字保留;canon-6 琥珀確認框不升 --live)。
+     頂層 loadAll IIFE-local 隔離防撞 paper 的 window.loadAll,改曝 __ocDemoLoadAll;強化 on* handler 發現參
+     view-governance.js(12 名含 ontoggle onDemoFillsToggle,與已遷 5 view onclick 集零交集),見 view-demo.js
+     MODULE_NOTE。common* 殼已載,demo 無其他外部 JS;於 shell.js 前載以註冊 OC_NATIVE_VIEWS['demo']。tab-demo.html 零修改(reuse 正本 + 回滾錨)。 -->
+<script src="/static/view-demo.js?v=20260712.p2-demo"></script>
 <script src="/static/shell.js?v=20260711.shell-p11a"></script>
 
 </body>
