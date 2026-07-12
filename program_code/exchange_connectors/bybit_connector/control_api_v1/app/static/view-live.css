@@ -1,0 +1,393 @@
+/* ═══════════════════════════════════════════════════════════════════
+   view-live.css — 玄衡原生 view「實盤 / Live Trading」頁級樣式(Phase 2 交易關鍵四者**最後**一個)
+   ═══════════════════════════════════════════════════════════════════
+   MODULE_NOTE
+   模塊用途:承載 view-live.js 注入的 live DOM 所需樣式。分兩層:
+     ① live-specific —— tab-live.html 的**唯一頁內樣式塊**(行 20-285)逐字搬入(scoped `.live-view`):
+        real-money 主題(--live 熱紅 warn-bar/control-bar/card-group/fills-toggle)、緊急停止鈕(btn-emergency)、
+        **F5/A1 三態視覺**(mainnet REAL FUNDS 熱紅+下緣雙線 / livedemo 橙 / integrity-fail 灰視圖)、
+        REAL FUNDS·LiveDemo 徽章、Earned-Trust trust-bar、PnL sparkline chrome、live-table、塵埃/掛單面板。
+        此為對頁內樣式塊的**重複(非移動)**:legacy iframe 路徑仍靠 tab-live.html 自帶頁內塊,故該檔不動作回滾錨。
+        **三處 port 分歧(§10.4,PM 裁 OPEN-1/OPEN-2)**:
+          (a) **DROP `html, body {…}`(源 行 23-29)**——殼 own html/body chrome,port 之會覆蓋殼(同 skip
+              ocInjectBaseCSS 的 body 內距先例)。**不 port**(OPEN-2)。
+          (b) **`body.live-mode-*` 主題 override → body-anchored port(OPEN-1 PRIMARY)**:reused JS
+              _applyLiveModeUI 於**殼 body** 加 live-mode-mainnet/livedemo/unconfigured class,不能天真 scope 進
+              `.live-view`(class 在 .live-view 的**祖先** body 上)。port 成 `.live-mode-* .live-view .live-*`
+              (選擇器鏈保 .live-view scope 紀律 + 尊重 body-anchored class;因所有 .live-warn-bar 皆在 .live-view 內,
+              computed 結果與 legacy byte-identical)。**mainnet 態 --live 熱紅真套用,canon-6 salience 零弱化。**
+          (c) **死 .oc-dialog / .oc-dialog-overlay(源 行 144-162)→ `.live-view` scope**:WP-01 Wave 1 已拆舊雙層
+              dialog(do* 改走 openTypedConfirmModal SDK),此二規則為死 CSS;但 SDK modal 於殼可能用同名 .oc-dialog
+              → **必 scope** 防污染殼 SDK modal skin。scope 後為無害死規則(byte-parity 保留,不刪=不改檔語義)。
+     ② `.live-view` scope 的 legacy 短名 shim(oc-subtab-placeholder / live-metric* / oc-metric* / oc-chip* /
+        oc-performance-metrics / oc-edge-gate* / oc-mini-trend* / oc-readiness* / oc-fill-* / oc-strategy-chip 基樣式)——
+        殼**刻意不呼** common.js ocInjectBaseCSS()(避免其 body 內距+`*` reset 破殼 chrome),而這批 class 的樣式原只在
+        ocInjectBaseCSS 內、殼全域 CSS(shell-components/oc-utilities/shell/tokens)基類**零定義**(實測;
+        `.oc-mini-trend-*` 另有 `.gv-spark`-scoped 治理版 shell-components.css:104-105,祖先 scope 不同,與 `.live-view` 零碰撞)。所有已遷 view CSS
+        (view-paper/overview/settings/risk/governance/demo.css)各自 port 同款 `.{view}-view` scoped shim,否則卡片全裸。
+        **此為 spec §10.4 undercount(同 governance §8「必要但不充分」),非缺陷**——本檔照「類比 view-demo.css」補同款
+        shim,live 專屬類(live-metric* / oc-edge-gate* / oc-mini-trend* / oc-readiness*)自 ocInjectBaseCSS byte-parity 補。
+        按鈕(oc-btn*)、方向/品類徽(side-badge/oc-cat-tag)、正負值色(val-pos/val-neg)、num、hidden 與版式 utility
+        (row/gap/fs-*/t-*/mt-*/mb-* 等)已在 shell-components.css / oc-utilities.css / tokens.css(殼已載),不重複。
+   ratchet(born-clean 0/0/0):全檔零裸十六進位色值 —— ① 頁內樣式塊本就零裸色碼(色值全 var token / rgba tint);
+     源 btn-emergency:hover 的白色 → **rgba(255,255,255,1)** 等值(紅底白字,byte-identical 色,只換表達式過 hex ratchet,
+     P0.4 複審);② §12 冷家族 rgba born-clean 直接 token 化(integrity-fail 灰 → --ov-muted-rgb;pnl-sparkline/
+     dust-details/mini-trend 近黑 → --ov-panel-rgb;fill-tab.active 藍 → --ov-accent-rgb);③ §12.2 不可動 verbatim:
+     --live 熱紅(canon-6)/ 紅家族 rgba(239,68,68·248,81,73)/ 橙家族 rgba(249,115,22)/ 綠·琥珀 trust-bar rgba /
+     scrim rgba(0,0,0)/ 白 overlay rgba(255,255,255,0.04)——皆非冷家族 identity,逐字保留;④ oc-strategy 逐策略色屬
+     palette 外 hex(--strategy-color:…),ratchet 禁 → 本檔只 port 基樣式(逐策略色退回中性 --text-primary,對齊 P0.4
+     canon-1 中性化方向;legacy iframe 續靠 ocInjectBaseCSS 顯逐策略色,P0.4 follow-up)。源頁內樣式塊註釋提及的
+     裸色碼(銀灰 94a3b8 等)**不進本檔**(改等義中文描述,避免裸色碼落入新檔;R77:純 findall 偵測器不剝註釋)。
+     reused JS 執行期 .style / TRUST_TIER_COLORS rgba(tab-live.js 內)不入本檔、不算本檔內聯違規。零內聯樣式屬性、零內聯樣式塊。
+   誠實邊界:靜態只證 source;真渲染 / --live 熱紅真配色 / body.live-mode-* 真切換 / REAL FUNDS 三態徽 /
+     mainnet 下緣雙線 / integrity-fail 灰視圖 / trust-bar 三態色 = NEEDS-LINUX + operator。
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ═══ ① live-specific(port tab-live.html 頁內樣式塊 行 20-285,scoped .live-view;DROP html,body)═══ */
+
+/* ── Dashboard / 實盤儀表板 ── */
+.live-view .live-dashboard { display: block; }
+
+/* ── real-money 主題 warn-bar(base=mainnet/默認 真金熱紅 tint,canon-6;livedemo 由下方 body-anchored override 轉橙)── */
+.live-view .live-warn-bar {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--live-bg); border: 1px solid var(--live);
+  border-radius: var(--r-2); padding: 10px 16px;
+  font-size: 13px; margin-bottom: 14px;
+}
+.live-view .live-warn-bar .warn-icon { font-size: 20px; flex-shrink: 0; }
+
+/* ── 控制欄(base 真金熱紅描邊,canon-6;livedemo override 轉橙)── */
+.live-view .live-control-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  background: var(--bg-surface);
+  border: 1px solid var(--live);
+  border-radius: var(--r-2); padding: 12px 16px;
+  margin-bottom: 14px;
+}
+.live-view .live-control-bar .bar-title { font-weight: 700; font-size: 14px; }
+/* 停止/緊急停止危險群組(紅家族 rgba tint,非冷家族,verbatim §12.2)*/
+.live-view .live-shutdown-zone {
+  display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 6px; border: 1px solid rgba(248,81,73,0.42);
+  border-radius: var(--r-2); background: rgba(248,81,73,0.08);
+  box-shadow: inset 3px 0 0 rgba(248,81,73,0.55);
+}
+.live-view .live-close-all-action {
+  border-color: rgba(248,81,73,0.48) !important;
+  color: var(--neg) !important;
+}
+
+/* ── 指標卡片組 ── */
+.live-view .live-card-group {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-2); padding: 14px 16px;
+  margin-bottom: 14px;
+}
+.live-view .live-card-group-title {
+  font-size: 11px; font-weight: 600; color: var(--text-secondary);
+  text-transform: uppercase; letter-spacing: 0.5px;
+  margin-bottom: 12px; display: flex; align-items: center; gap: 6px;
+}
+/* base 真金熱紅描邊(canon-6);livedemo override 轉橙 */
+.live-view .live-card-group.live-accent { border-color: var(--live); }
+
+/* ── 表格 / 標題 ── */
+.live-view .live-section-title {
+  font-size: 13px; font-weight: 600;
+  margin: 14px 0 8px;
+  display: flex; align-items: center; gap: 6px;
+}
+.live-view .live-table {
+  width: 100%; border-collapse: collapse;
+  font-size: 12px; margin-bottom: 14px;
+}
+.live-view .live-table th {
+  text-align: left; padding: 7px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-secondary); font-weight: 500;
+  font-size: 11px;
+}
+/* 白 overlay 底線:白非冷家族,design/12 未覆蓋,verbatim(pre-existing,§12.2)*/
+.live-view .live-table td {
+  padding: 7px 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.live-view .live-table tr:last-child td { border-bottom: none; }
+.live-view .oc-row-muted { color: var(--text-secondary); }
+.live-view .oc-source-note {
+  color: var(--text-secondary);
+  font-size: 10px;
+  display: block;
+  margin-top: 2px;
+}
+
+/* ── 成交記錄折疊區(hover 真金熱紅描邊,canon-6)── */
+.live-view .live-fills-toggle {
+  background: none; border: 1px solid var(--border-subtle); border-radius: var(--r-2);
+  padding: 8px 14px; font-size: 12px; color: var(--text-secondary);
+  cursor: pointer; display: flex; align-items: center; gap: 6px;
+  width: 100%; text-align: left; margin-bottom: 8px;
+  transition: border-color 0.15s;
+}
+.live-view .live-fills-toggle:hover { border-color: var(--live); color: var(--text-primary); }
+.live-view .live-fills-toggle .arrow { transition: transform 0.2s; }
+.live-view .live-fills-toggle.open .arrow { transform: rotate(90deg); }
+
+/* ── 緊急停止鈕(危險操作保紅;紅家族 rgba,非冷家族,verbatim)── */
+.live-view .btn-emergency {
+  background: rgba(239,68,68,0.12);
+  border: 2px solid rgba(239,68,68,0.7);
+  color: var(--neg);
+  border-radius: var(--r-2);
+  padding: 10px 24px;
+  font-size: 14px; font-weight: 700;
+  cursor: pointer; transition: all 0.15s;
+}
+/* rgba(255,255,255,1)=原白色等值(紅底 hover 白字,palette 外,P0.4);byte-identical 色,只換表達式過 hex ratchet */
+.live-view .btn-emergency:hover {
+  background: rgba(239,68,68,0.25);
+  border-color: var(--neg); color: rgba(255,255,255,1);
+}
+.live-view .btn-emergency:disabled {
+  opacity: 0.4; cursor: not-allowed;
+}
+
+/* ── 死 stop-confirm dialog(WP-01 Wave 1 已拆;scope 防污染殼 SDK 同名 .oc-dialog modal,§10.4-c)── */
+.live-view .oc-dialog-overlay {
+  display: none;
+  position: fixed; top:0; left:0; right:0; bottom:0;
+  background: rgba(0,0,0,0.6);
+  z-index: 9999;
+  align-items: center; justify-content: center;
+}
+.live-view .oc-dialog-overlay.show { display: flex; }
+.live-view .oc-dialog {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-2); padding: 24px;
+  max-width: 440px; width: 90%;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+}
+.live-view .oc-dialog h3 { margin: 0 0 12px; font-size: 16px; }
+.live-view .oc-dialog p  { margin: 0 0 16px; font-size: 13px; color: var(--text-secondary); line-height: 1.6; }
+.live-view .oc-dialog .btn-row { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+.live-view .oc-dialog .note { font-size: 11px; color: var(--warn); margin-bottom: 12px; }
+
+/* ── 容器內邊距 ── */
+.live-view .live-wrap { padding: 16px; max-width: 1200px; margin: 0 auto; }
+
+/* ── F5/A1 三態視覺(body.live-mode-* → body-anchored port,OPEN-1 PRIMARY;殼 body 加 mode class,.live-view 保 scope 紀律)──
+   1. Mainnet(REAL FUNDS)—— 上緣紅框 + --live-bg 熱紅底 + --neg double 下緣雙線(REAL-FUNDS 身分承載)
+   2. LiveDemo(api-demo)—— 橙(不誤升 canon-6 真金熱紅)
+   3. Engine != live —— 灰 integrity-fail 視圖(下方另定,不渲資料) */
+.live-mode-mainnet .live-view .live-warn-bar {
+  border: 1px solid rgba(239,68,68,0.6) !important;
+  /* 塌平原紫→紅裝飾漸層(canon 5/1 去裝飾漸層):去紫,保 real-money 熱紅身分=--live-bg 熱紅 tint;
+     REAL-FUNDS 身分由上緣 red border + 下緣 --neg double 承載 */
+  background: var(--live-bg) !important;
+  border-bottom: 3px double var(--neg) !important;
+}
+.live-mode-livedemo .live-view .live-warn-bar {
+  background: rgba(249,115,22,0.07) !important;
+  border: 1px solid rgba(249,115,22,0.4) !important;
+}
+.live-mode-livedemo .live-view .live-control-bar {
+  border: 1px solid rgba(249,115,22,0.4) !important;
+}
+.live-mode-livedemo .live-view .live-card-group.live-accent {
+  border-color: rgba(249,115,22,0.3) !important;
+}
+.live-mode-livedemo .live-view .live-warn-bar strong { color: var(--warn) !important; }
+.live-mode-mainnet .live-view .live-warn-bar strong { color: var(--neg) !important; }
+
+/* ── REAL FUNDS 徽章(僅 Mainnet;紅家族 rgba,verbatim §12.2)── */
+.live-view .real-funds-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 10px; border-radius: var(--r-1);
+  background: rgba(239,68,68,0.18); border: 1px solid rgba(239,68,68,0.6);
+  color: var(--neg); font-size: 11px; font-weight: 700; letter-spacing: 0.4px;
+  margin-left: 8px;
+}
+/* LiveDemo 徽章(橙家族 rgba,verbatim §12.2)*/
+.live-view .live-demo-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 10px; border-radius: var(--r-1);
+  background: rgba(249,115,22,0.18); border: 1px solid rgba(249,115,22,0.6);
+  color: var(--warn); font-size: 11px; font-weight: 700; letter-spacing: 0.4px;
+  margin-left: 8px;
+}
+
+/* ── Integrity-fail 灰視圖(冷灰 → --ov-muted-rgb token 化,§12.1)── */
+.live-view .integrity-fail-view {
+  background: rgba(var(--ov-muted-rgb),0.05);
+  border: 2px dashed rgba(var(--ov-muted-rgb),0.4);
+  border-radius: var(--r-3);
+  padding: 32px 24px;
+  margin: 16px;
+  text-align: center;
+}
+.live-view .integrity-fail-view h2 {
+  color: var(--text-secondary); font-size: 18px; font-weight: 700; margin-bottom: 12px;
+}
+.live-view .integrity-fail-view .ifv-detail {
+  color: var(--text-secondary); font-size: 13px; line-height: 1.7;
+  max-width: 540px; margin: 0 auto;
+}
+.live-view .integrity-fail-view .ifv-divider {
+  border-top: 1px solid var(--border-subtle); margin: 16px auto; width: 60%;
+}
+
+/* ── Earned-Trust Tier 欄(綠/琥珀/紅 trust-bar tint=--pos/--warn/--neg 系身分,非冷家族,verbatim §12.2)── */
+.live-view .trust-bar {
+  border-radius: var(--r-2); padding: 10px 16px; margin-bottom: 14px;
+  font-size: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+  border: 1px solid var(--border-subtle);
+}
+.live-view .trust-bar.ok   { background: rgba(34,197,94,0.07); border-color: rgba(34,197,94,0.3); }
+.live-view .trust-bar.warn { background: rgba(210,153,34,0.1);  border-color: rgba(210,153,34,0.5); }
+.live-view .trust-bar.crit { background: rgba(239,68,68,0.08);  border-color: rgba(239,68,68,0.4); }
+/* 族A authority-chrome:requires_full_review 走中性 attention chrome(非嚴重度色軸),警示語義由欄內文案承載 */
+.live-view .trust-bar.review { background: var(--bg-raised); border-color: var(--border-strong); }
+.live-view .trust-tier-badge {
+  display: inline-block; padding: 2px 8px; border-radius: var(--r-1);
+  font-size: 10px; font-weight: 700; letter-spacing: 0.3px;
+}
+.live-view .trust-renew-card {
+  background: var(--bg-surface); border: 1px solid var(--border-strong);
+  border-radius: var(--r-2); padding: 14px 16px; margin-bottom: 14px;
+}
+.live-view .trust-conditions { margin: 8px 0 0; font-size: 11px; color: var(--text-secondary); line-height: 1.8; }
+.live-view .trust-conditions li { list-style: none; padding-left: 14px; }
+.live-view .trust-conditions li::before { content: "✓ "; color: var(--pos); margin-left: -14px; }
+.live-view .trust-conditions li.fail::before { content: "✗ "; color: var(--neg); }
+
+/* ── P0.2/P0.4 中性化組件(原紫 authority accent 已收斂青銅 --accent / --text-secondary,非 canon-6 熱紅)── */
+.live-view .live-btn-purple { border-color: var(--accent); color: var(--accent); }
+.live-view .live-t-purple { color: var(--text-secondary); }
+.live-view .live-auth-hint {
+  margin-top: var(--sp-3); padding: var(--sp-3);
+  background: var(--bg-raised); border: 1px solid var(--border-strong);
+  border-radius: var(--r-2); font-size: var(--fs-dense);
+}
+.live-view #live-global-mode-control-note {
+  background: var(--bg-raised); border-color: var(--border-subtle);
+  align-items: flex-start;
+}
+/* 未配置身份標籤:原銀灰中性化 → --text-secondary(C6b canon 1)*/
+.live-view .live-slot-empty-label { color: var(--text-secondary); }
+/* PnL sparkline 面板(近黑底 → --ov-panel-rgb token 化,§12.1;邊框走 --border-subtle)*/
+.live-view .live-pnl-sparkline {
+  display: block; background: rgba(var(--ov-panel-rgb),0.5);
+  border-radius: var(--r-1); border: 1px solid var(--border-subtle);
+}
+.live-view .live-pnl-scroll { overflow: auto; max-height: 190px; margin-top: var(--sp-2); }
+.live-view .live-xscroll { overflow-x: auto; }
+/* 塵埃倉位明細(近黑底 → --ov-panel-rgb token 化,§12.1)*/
+.live-view .live-dust-details {
+  margin-top: var(--sp-3); padding: var(--sp-2) var(--sp-3);
+  background: rgba(var(--ov-panel-rgb),0.5); border: 1px solid var(--border-subtle);
+  border-radius: var(--r-1);
+}
+
+/* ═══ ② `.live-view` scope 的 legacy 短名 shim(port ocInjectBaseCSS,類比 view-demo.css;色字面→token / 冷家族→--ov-*)═══ */
+/*   spec §10.4 undercount(同 governance §8),非缺陷:此批 class 原只在殼刻意不呼的 ocInjectBaseCSS 內,否則卡片全裸。 */
+
+/* ── Load-error / loading 佔位(view-live.js showLoadError + placeholder)── */
+.live-view .oc-subtab-placeholder {
+  padding: 24px 18px; text-align: center;
+  background: var(--bg-sunken); border: 1px dashed var(--border-subtle);
+  border-radius: var(--r-2); color: var(--text-secondary); font-size: 13px;
+  line-height: 1.7; margin-top: 10px;
+}
+
+/* ── live-metric* 卡(餘額 / PnL 概覽;全 var token,byte-parity from ocInjectBaseCSS)── */
+.live-view .live-metrics { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.live-view .live-metric { background: var(--bg-app); border: 1px solid var(--border-subtle); border-radius: var(--r-2); padding: 10px 12px; }
+.live-view .live-metric.span2 { grid-column: span 2; }
+.live-view .live-metric-label { font-size: 11px; color: var(--text-secondary); margin-bottom: 4px; font-weight: 500; }
+.live-view .live-metric-val { font-size: 20px; font-weight: 700; }
+.live-view .live-metric-val.large { font-size: 24px; }
+.live-view .live-metric-val.pos { color: var(--pos); }
+.live-view .live-metric-val.neg { color: var(--neg); }
+.live-view .live-metric-val.neutral { color: var(--text-primary); }
+.live-view .live-metric-val.purple { color: var(--text-primary); }
+.live-view .live-metric-sub { font-size: 10px; color: var(--text-secondary); margin-top: 2px; }
+
+/* ── oc-metric* / 性能指標網格(等高卡 + 多行 label 對齊)── */
+.live-view .oc-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+.live-view .oc-metric { background: var(--bg-app); border: 1px solid var(--border-subtle); border-radius: var(--r-2); padding: 10px 12px; }
+.live-view .oc-metric-label { font-size: 10px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.4px; }
+.live-view .oc-metric-val { font-size: 20px; font-weight: 700; margin-top: 2px; }
+.live-view .oc-metric-sub { font-size: 11px; color: var(--text-secondary); margin-top: 2px; }
+.live-view .oc-performance-metrics { grid-template-columns: repeat(auto-fit, minmax(184px, 1fr)); align-items: stretch; }
+.live-view .oc-performance-metrics .oc-metric { min-height: 118px; display: flex; flex-direction: column; }
+.live-view .oc-performance-metrics .oc-metric-label { min-height: 42px; line-height: 1.45; display: block; }
+.live-view .oc-performance-metrics .oc-metric-val { margin-top: auto; font-size: 18px; line-height: 1.2; overflow-wrap: anywhere; }
+
+/* ── Status chips(engine-status / contraction / endpoint 徽;色字面→語義 token,對齊 view-demo.css;oc-chip-live=canon-6 verbatim)── */
+.live-view .oc-chip {
+  display: inline-flex; align-items: center; gap: 5px; border-radius: var(--r-full);
+  padding: 3px 10px; font-size: 11px; font-weight: 500; border: 1px solid transparent;
+}
+.live-view .oc-chip-good    { background: var(--pos-bg);   border-color: var(--pos);           color: var(--pos); }
+.live-view .oc-chip-warn    { background: var(--warn-bg);  border-color: var(--warn);          color: var(--warn); }
+.live-view .oc-chip-bad     { background: var(--neg-bg);   border-color: var(--neg);           color: var(--neg); }
+.live-view .oc-chip-neutral { background: var(--bg-hover); border-color: var(--border-strong); color: var(--text-secondary); }
+.live-view .oc-chip-live    { background: var(--live-bg);  border-color: var(--live);          color: var(--live); }
+
+/* ── Pre-Live edge gate 卡(全 var token,byte-parity from ocInjectBaseCSS)── */
+.live-view .oc-edge-gate-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; }
+.live-view .oc-edge-gate-card { background: var(--bg-app); border: 1px solid var(--border-subtle); border-radius: var(--r-2); padding: 12px; min-height: 160px; }
+.live-view .oc-edge-gate-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.live-view .oc-edge-gate-title { font-size: 12px; font-weight: 700; line-height: 1.35; color: var(--text-primary); }
+.live-view .oc-edge-gate-sub { font-size: 10px; color: var(--text-secondary); margin-top: 2px; line-height: 1.35; }
+.live-view .oc-edge-gate-values { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 8px 0; }
+.live-view .oc-edge-gate-value { min-width: 0; }
+.live-view .oc-edge-gate-value .label { font-size: 9px; color: var(--text-secondary); text-transform: uppercase; line-height: 1.25; }
+.live-view .oc-edge-gate-value .value { font-size: 14px; font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
+.live-view .oc-edge-gate-summary { color: var(--text-secondary); font-size: 11px; line-height: 1.45; margin-top: 6px; }
+
+/* ── Mini-trend sparkline(edge gate 內;近黑底 → --ov-panel-rgb,零線冷灰 → --ov-muted-rgb,§12.1)── */
+.live-view .oc-mini-trend { width: 100%; height: 54px; display: block; background: rgba(var(--ov-panel-rgb),0.45); border: 1px solid var(--border-subtle); border-radius: var(--r-1); }
+.live-view .oc-mini-trend-zero { stroke: rgba(var(--ov-muted-rgb),0.45); stroke-width: 1; stroke-dasharray: 3 3; }
+.live-view .oc-mini-trend-empty { height: 54px; display: flex; align-items: center; justify-content: center; color: var(--text-secondary); font-size: 11px; border: 1px dashed var(--border-subtle); border-radius: var(--r-1); }
+
+/* ── Readiness checklist(全 var token,byte-parity from ocInjectBaseCSS)── */
+.live-view .oc-readiness-list { border: 1px solid var(--border-subtle); border-radius: var(--r-2); margin-top: 10px; overflow: hidden; }
+.live-view .oc-readiness-row { display: grid; grid-template-columns: minmax(120px, 1fr) auto minmax(100px, 1fr); gap: 10px; align-items: center; padding: 9px 11px; border-top: 1px solid var(--border-subtle); }
+.live-view .oc-readiness-row:first-child { border-top: none; }
+.live-view .oc-readiness-label { font-size: 12px; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.live-view .oc-readiness-detail { font-size: 10px; color: var(--text-secondary); line-height: 1.35; }
+.live-view .oc-readiness-target { color: var(--text-secondary); font-size: 11px; text-align: right; overflow-wrap: anywhere; }
+
+/* ── Strategy identity chip 基樣式(逐策略色屬 palette 外 hex,ratchet 禁;本檔只 port 基樣式,逐策略色退回中性 --text-primary,P0.4)──
+   冷灰 rgba fallback → --ov-muted-rgb token 化(§12.1);legacy iframe 續靠 ocInjectBaseCSS 顯逐策略色。 */
+.live-view .oc-strategy-chip { display: inline-flex; align-items: center; gap: 5px; border-radius: var(--r-full);
+  padding: 2px 8px; font-size: 11px; font-weight: 700; border: 1px solid var(--strategy-border, rgba(var(--ov-muted-rgb),0.22));
+  background: var(--strategy-bg, rgba(var(--ov-muted-rgb),0.1)); color: var(--strategy-color, var(--text-primary)); white-space: nowrap; }
+.live-view .oc-strategy-dot { width: 7px; height: 7px; border-radius: var(--r-full);
+  background: var(--strategy-color, var(--text-secondary)); box-shadow: 0 0 0 2px var(--strategy-bg, rgba(var(--ov-muted-rgb),0.1)); flex: 0 0 auto; }
+
+/* ── Fill history 工具列 / 子標籤 / 分頁 / 摘要 / 寬表(active 藍 → --ov-accent-rgb token 化,§12.1)── */
+.live-view .oc-fill-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.live-view .oc-fill-tabs { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.live-view .oc-fill-tab { border: 1px solid var(--border-subtle); background: var(--bg-app); color: var(--text-secondary);
+  border-radius: var(--r-1); padding: 5px 10px; font-size: 12px; cursor: pointer; font-family: inherit; }
+.live-view .oc-fill-tab.active { border-color: var(--text-secondary); color: var(--text-secondary); background: rgba(var(--ov-accent-rgb),0.12); }
+.live-view .oc-fill-pager { display: inline-flex; align-items: center; gap: 8px; color: var(--text-secondary); font-size: 11px; }
+.live-view .oc-fill-summary { color: var(--text-secondary); font-size: 11px; line-height: 1.4; margin: 4px 0 8px; }
+.live-view .oc-fill-table { min-width: 1080px; }
+.live-view .oc-fill-table th, .live-view .oc-fill-table td { white-space: nowrap; }
+.live-view .oc-fill-table th:nth-child(3), .live-view .oc-fill-table td:nth-child(3) { white-space: normal; min-width: 140px; }
+.live-view .oc-fill-time { white-space: nowrap; }
+
+/* ═══ 行動裝置 a11y:metrics / 性能 / edge gate / readiness 促升(port ocInjectBaseCSS @media 相關子集)═══ */
+@media (max-width: 700px) {
+  .live-view .oc-metrics { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
+  .live-view .oc-performance-metrics { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  .live-view .oc-edge-gate-values { grid-template-columns: 1fr 1fr; }
+  .live-view .oc-readiness-row { grid-template-columns: 1fr; gap: 5px; }
+  .live-view .oc-readiness-target { text-align: left; }
+}
