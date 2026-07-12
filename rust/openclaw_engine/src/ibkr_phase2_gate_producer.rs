@@ -2782,6 +2782,15 @@ where
         Phase2SealControlAction::Seal if predecessor.is_some() => {
             return Err("seal rejected: active generation already exists".to_string())
         }
+        // Seal 僅能作創世 control。revoke 後 active=None 但鏈非空(tail_hash=Some)，
+        // 若放行，新 genesis Seal 會在寫入不可變 0400 記錄「後」才被 post-write
+        // evaluator 於 index>0 拒絕 → ledger 從此 load 失敗且無法再 apply(bricking)。
+        // 故在任何寫入前 fail-closed。revoke 對同一 build SHA 為終態。
+        Phase2SealControlAction::Seal if lineage.tail_hash.is_some() => {
+            return Err(
+                "seal rejected: build sha lineage already exists (revoke is terminal)".to_string(),
+            )
+        }
         Phase2SealControlAction::Seal
             if approval.predecessor_artifact_id.is_some()
                 || approval.predecessor_raw_hash.is_some() =>
@@ -3887,6 +3896,51 @@ mod tests {
                 .is_none(),
             "revocation must make the current-build consumer fail closed"
         );
+    }
+
+    /// P2 回歸：revoke 後對同一 build SHA 再發 genesis Seal 必須在寫入前被擋，
+    /// 不得留下不可變記錄而 brick ledger（修前：reseal 寫檔後 post-write 失敗，
+    /// 之後 load 永久 Err）。
+    #[test]
+    fn w2_reseal_after_revoke_is_rejected_without_bricking_ledger() {
+        let tmp = tempfile::tempdir().unwrap();
+        let gov = make_gov_chain(tmp.path());
+        let sha = fake_sha();
+        let inputs = controlled_inputs();
+
+        let seal = controlled_approval('1', Phase2SealControlAction::Seal, &sha, None);
+        apply_controlled_phase2_for_dir(&gov, Some(&inputs), &seal, &sha, FIXED_NOW)
+            .expect("genesis seal");
+        let active = load_current_build_lineage(&gov, &sha, FIXED_NOW)
+            .unwrap()
+            .active
+            .expect("active after seal");
+
+        let revoke = controlled_approval('2', Phase2SealControlAction::Revoke, &sha, Some(&active));
+        apply_controlled_phase2_for_dir(&gov, None, &revoke, &sha, FIXED_NOW + 1).expect("revoke");
+        assert!(
+            load_current_build_lineage(&gov, &sha, FIXED_NOW + 1)
+                .unwrap()
+                .active
+                .is_none(),
+            "revoke 後 active 必為 None"
+        );
+
+        // 對同一 build SHA 再發全新 genesis seal：必須被 pre-write guard 擋，回 Err。
+        let reseal = controlled_approval('3', Phase2SealControlAction::Seal, &sha, None);
+        let err =
+            apply_controlled_phase2_for_dir(&gov, Some(&inputs), &reseal, &sha, FIXED_NOW + 2)
+                .expect_err("reseal after revoke must be rejected pre-write");
+        assert!(
+            err.contains("lineage already exists") || err.contains("revoke is terminal"),
+            "unexpected rejection reason: {err}"
+        );
+
+        // 關鍵：ledger 未被 brick — load 仍成功且維持 revoked(None)。
+        // 修前此處會是 Err（不可變 reseal 記錄已落盤）。
+        let after = load_current_build_lineage(&gov, &sha, FIXED_NOW + 2)
+            .expect("ledger must remain loadable (not bricked) after rejected reseal");
+        assert!(after.active.is_none(), "ledger 應維持 revoked 狀態");
     }
 
     #[test]
