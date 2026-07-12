@@ -3943,6 +3943,142 @@ mod tests {
         assert!(after.active.is_none(), "ledger 應維持 revoked 狀態");
     }
 
+    /// P2 回歸（多 entry 鏈）：seal → supersede → revoke 之後，tail_hash 指向的是
+    /// 一條較長 control 鏈末端的 revoke（非單世代情形）。對同一 build SHA 再發全新
+    /// genesis Seal 仍必須在寫入前被 tail_hash guard 擋下，且 ledger 不得被 brick。
+    /// 用意：釘住 guard 不只覆蓋「seal→revoke」單代路徑，也涵蓋 tail_hash 深埋在
+    /// 多筆 control 之後的長鏈。
+    #[test]
+    fn w2_reseal_after_supersede_revoke_multi_entry_chain_is_rejected_without_brick() {
+        let tmp = tempfile::tempdir().unwrap();
+        let gov = make_gov_chain(tmp.path());
+        let sha = fake_sha();
+        let inputs = controlled_inputs();
+
+        // 世代 1：genesis seal。
+        let seal = controlled_approval('4', Phase2SealControlAction::Seal, &sha, None);
+        apply_controlled_phase2_for_dir(&gov, Some(&inputs), &seal, &sha, FIXED_NOW)
+            .expect("genesis seal");
+        let gen1 = load_current_build_lineage(&gov, &sha, FIXED_NOW)
+            .unwrap()
+            .active
+            .expect("active after seal");
+
+        // 世代 2：supersede（control 鏈加長至 2 筆）。
+        let supersede =
+            controlled_approval('5', Phase2SealControlAction::Supersede, &sha, Some(&gen1));
+        apply_controlled_phase2_for_dir(&gov, Some(&inputs), &supersede, &sha, FIXED_NOW + 1)
+            .expect("supersede");
+        let gen2 = load_current_build_lineage(&gov, &sha, FIXED_NOW + 1)
+            .unwrap()
+            .active
+            .expect("active after supersede");
+
+        // revoke 世代 2 → active=None、tail_hash=Some(第 3 筆 control=revoke)。
+        let revoke = controlled_approval('6', Phase2SealControlAction::Revoke, &sha, Some(&gen2));
+        apply_controlled_phase2_for_dir(&gov, None, &revoke, &sha, FIXED_NOW + 2).expect("revoke");
+        assert!(
+            load_current_build_lineage(&gov, &sha, FIXED_NOW + 2)
+                .unwrap()
+                .active
+                .is_none(),
+            "revoke 後 active 必為 None"
+        );
+
+        // 對同一 build SHA 再發全新 genesis seal（predecessor=None）：即使 tail_hash
+        // 深埋在較長鏈末端，仍須於任何寫入前被擋回 Err。
+        let reseal = controlled_approval('7', Phase2SealControlAction::Seal, &sha, None);
+        let err =
+            apply_controlled_phase2_for_dir(&gov, Some(&inputs), &reseal, &sha, FIXED_NOW + 3)
+                .expect_err("reseal after supersede+revoke must be rejected pre-write");
+        assert!(
+            err.contains("lineage already exists") || err.contains("revoke is terminal"),
+            "unexpected rejection reason: {err}"
+        );
+
+        // 關鍵：ledger 未被 brick — load 仍成功且維持 revoked(None)。
+        let after = load_current_build_lineage(&gov, &sha, FIXED_NOW + 3)
+            .expect("ledger must remain loadable (not bricked) after rejected reseal");
+        assert!(after.active.is_none(), "ledger 應維持 revoked 狀態");
+    }
+
+    /// P2 回歸（arm 排序鎖）：seal → revoke 之後 active=None、tail_hash=Some。
+    /// 若未來重構讓一個「攜帶 predecessor bindings 的 Seal」進入 apply，該 approval
+    /// 仍會通過 `phase2_control_approval_is_valid`——Seal 對 `Some(valid sha256_hex)`
+    /// 綁定回傳 true（見驗證斷言），故必然抵達 match。此測試釘住：tail_hash arm
+    /// 排在 predecessor-binding arm 之前，拒絕理由必須是 tail_hash guard
+    /// （"lineage already exists"/"revoke is terminal"），而非 "unexpected predecessor
+    /// binding"。否則一個帶綁定的 reseal 可能在未來繞過 guard 溜進寫入路徑。
+    #[test]
+    fn w2_reseal_after_revoke_with_predecessor_bindings_is_caught_by_tail_hash_guard() {
+        let tmp = tempfile::tempdir().unwrap();
+        let gov = make_gov_chain(tmp.path());
+        let sha = fake_sha();
+        let inputs = controlled_inputs();
+
+        let seal = controlled_approval('8', Phase2SealControlAction::Seal, &sha, None);
+        apply_controlled_phase2_for_dir(&gov, Some(&inputs), &seal, &sha, FIXED_NOW)
+            .expect("genesis seal");
+        let revoked_gen = load_current_build_lineage(&gov, &sha, FIXED_NOW)
+            .unwrap()
+            .active
+            .expect("active after seal");
+
+        let revoke = controlled_approval(
+            '9',
+            Phase2SealControlAction::Revoke,
+            &sha,
+            Some(&revoked_gen),
+        );
+        apply_controlled_phase2_for_dir(&gov, None, &revoke, &sha, FIXED_NOW + 1).expect("revoke");
+        assert!(
+            load_current_build_lineage(&gov, &sha, FIXED_NOW + 1)
+                .unwrap()
+                .active
+                .is_none(),
+            "revoke 後 active 必為 None"
+        );
+
+        // 帶 predecessor bindings 的 Seal（指向已被 revoke 的世代）。helper 以該世代的
+        // generation_id / raw_artifact_hash 填綁定，兩者皆 valid sha256_hex。
+        let bound_reseal =
+            controlled_approval('a', Phase2SealControlAction::Seal, &sha, Some(&revoked_gen));
+        // 前置健檢：確認此 Seal-with-bindings 確實攜帶綁定，且通過 approval 有效性
+        // ——唯有通過有效性才會真正抵達 match，測到 arm 排序（否則會測錯拒絕點）。
+        assert!(
+            bound_reseal.predecessor_artifact_id.is_some()
+                && bound_reseal.predecessor_raw_hash.is_some(),
+            "此 reseal 必須確實攜帶 predecessor bindings"
+        );
+        assert!(
+            phase2_control_approval_is_valid(&bound_reseal, FIXED_NOW + 2, &sha),
+            "帶合法 hex 綁定的 Seal 必須通過 approval 有效性，才能真正測到 arm 排序"
+        );
+
+        let err = apply_controlled_phase2_for_dir(
+            &gov,
+            Some(&inputs),
+            &bound_reseal,
+            &sha,
+            FIXED_NOW + 2,
+        )
+        .expect_err("bound reseal after revoke must be rejected");
+        // tail_hash arm 必須勝出（排在 predecessor-binding arm 之前）。
+        assert!(
+            err.contains("lineage already exists") || err.contains("revoke is terminal"),
+            "tail_hash guard 應先命中，實得: {err}"
+        );
+        assert!(
+            !err.contains("unexpected predecessor binding"),
+            "不得落入 predecessor-binding arm——那代表 arm 排序被破壞: {err}"
+        );
+
+        // ledger 未被 brick — load 仍成功且維持 revoked(None)。
+        let after = load_current_build_lineage(&gov, &sha, FIXED_NOW + 2)
+            .expect("ledger must remain loadable (not bricked)");
+        assert!(after.active.is_none(), "ledger 應維持 revoked 狀態");
+    }
+
     #[test]
     fn w2_controlled_lineage_rejects_fork_crossbuild_and_expired_approval() {
         let tmp = tempfile::tempdir().unwrap();
