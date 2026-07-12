@@ -56,6 +56,15 @@
      oc-grid-3/oc-loading/oc-danger-zone/oc-pre/oc-diff-*/oc-subtab-placeholder + .green/.yellow/.red/.blue;殼不呼
      ocInjectBaseCSS,見 view-risk.css MODULE_NOTE)。pf-toggle 刻意不 port(legacy 亦原生 checkbox,byte-parity)。 -->
 <link rel="stylesheet" href="/static/view-risk.css?v=20260712.p2-risk" />
+<!-- governance 原生 view 頁級樣式(第 16 遷,交易關鍵四者之一/12 寫治理,復用遷移):
+     `.governance-view` scope 分兩層——① governance-specific(port tab-governance.html 兩頁內樣式塊:SM 卡 /
+     gov-learn 折疊 / gov-boundary-note / demo-admission / Graduated Canary stage-ladder·cohort-card·stage-badge /
+     P0.2 batch 7b 頁內組件 gov-quickstat-bar·gov-liveauth-row·gov-level-badge·gov-autonomy-banner·gov-trust-tier-badge·
+     gov-risk-badge*·gov-gate-row / oc-modal 遮罩);② legacy 短名 shim(oc-card/oc-metric*/oc-chip*/oc-explain*/
+     oc-grid-2/oc-table*/oc-subtab-placeholder;殼刻意不呼 ocInjectBaseCSS,故 4 姊妹 view CSS 各自 port,見
+     view-governance.css MODULE_NOTE)。oc-tabs-wrapper 全域無定義=byte-parity 無樣式 wrapper 刻意不 port;
+     3 處 var() hex 後備移除為零-hex(token 恆定義,視覺 byte-identical),rgba 色字面逐字保留(pre-existing P0.4)。 -->
+<link rel="stylesheet" href="/static/view-governance.css?v=20260712.p2-governance" />
 </head>
 <body>
 
@@ -223,6 +232,18 @@
      **risk-tab.js 不在此以 <script src> 載入**(其底部自初始化需 DOM,由 IIFE fetch-text 復用);governance.js 上方已載勿重複;
      於 shell.js 前載以註冊 OC_NATIVE_VIEWS['risk']。tab-risk.html / risk-tab.js / governance.js 零修改(reuse 正本 + 回滾錨)。 -->
 <script src="/static/view-risk.js?v=20260712.p2-risk"></script>
+<!-- governance 第 16 遷(交易關鍵四者之一/12 寫治理,復用遷移):**共享 IIFE 復用 4 路 script**——view-governance.js
+     於 render 併發 fetch /static/tab-governance.html + /static/autonomy-posture.js + /static/governance-tab.js +
+     /static/canary-tab.js,注入 governance DOM(byte-parity)後把 inline Live-Auth 塊 + 3 路 JS text 依固定序
+     [inline, autonomy, govtab, canary] **串接進單一共享 IIFE** 重跑(autonomy 早於 govtab 滿足 const AUTONOMY_* 的
+     TDZ;canary 自成 IIFE 置末;頂層 const/let/function→IIFE-local 隔離防撞 paper 的 window.loadAll,loadAll 唯一
+     onclick 重綁 __ocGovLoadAll 永不寫 window.loadAll,見 view-governance.js MODULE_NOTE)。§3 硬化面[typed-confirm
+     CONFIRM/PROMOTE/CONFIRM SWITCH / 五閘 / 緊急熔斷·防禦分離 / signed-auth·authorization.json / Paper 無真實資金]
+     逐字保留零弱化;12 寫全在未改 text 內經 Rust IPC。**autonomy-posture.js/governance-tab.js/canary-tab.js 不在此以
+     <script src> 載入**(其自初始化需 DOM,由 IIFE fetch-text 復用);**governance.js 上方 :224 已載勿重複**;於 shell.js
+     前載以註冊 OC_NATIVE_VIEWS['governance']。tab-governance.html / governance-tab.js / canary-tab.js /
+     autonomy-posture.js / governance.js 五源檔零修改(reuse 正本 + 回滾錨)。 -->
+<script src="/static/view-governance.js?v=20260712.p2-governance"></script>
 <script src="/static/shell.js?v=20260711.shell-p11a"></script>
 
 </body>

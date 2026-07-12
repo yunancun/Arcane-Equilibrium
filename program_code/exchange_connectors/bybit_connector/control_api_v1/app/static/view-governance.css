@@ -1,0 +1,485 @@
+/* ═══════════════════════════════════════════════════════════════════
+   view-governance.css — 玄衡原生 view「治理 / Governance Control Center」頁級樣式(Phase 2 遷,交易關鍵四者之一)
+   ═══════════════════════════════════════════════════════════════════
+   MODULE_NOTE
+   模塊用途:承載 view-governance.js 注入的 governance DOM 所需樣式。分兩層:
+     ① governance-specific —— tab-governance.html 的**兩個頁內樣式塊**(行 20-375 主塊 + 行 1230-1247
+        oc-modal 塊)逐字搬入(scoped `.governance-view`):SM 卡/gov-sm-note/gov-learn 折疊/gov-boundary-note/
+        demo-admission/Graduated Canary(stage-ladder·cohort-card·stage-badge·progress)/P0.2 batch 7b 頁內組件
+        (gov-quickstat-bar·gov-liveauth-row·gov-panel-box·gov-level-badge·gov-autonomy-banner·gov-trust-tier-badge·
+        gov-risk-badge*·gov-gate-row 等)/oc-modal 遮罩。此為對兩頁內塊的**重複(非移動)**:legacy iframe 路徑仍靠
+        tab-governance.html 自帶頁內塊,故該檔不動作回滾錨。
+     ② `.governance-view` scope 的 legacy 短名 shim(oc-card / oc-metric* / oc-chip* / oc-explain* / oc-grid-2 /
+        oc-table* / oc-subtab-placeholder)—— 殼**刻意不呼** common.js ocInjectBaseCSS()(避免其 body{padding}+`*`
+        reset 破殼 chrome),而這批 class 的樣式原只在 ocInjectBaseCSS 內、殼全域 CSS(shell-components/oc-utilities/
+        shell/tokens)**零定義**。所有 4 個已遷 view CSS(view-risk/overview/settings/paper.css)各自 port 同款
+        `.{view}-view` scoped shim,否則卡片全裸。故此檔照「類比 view-risk.css」補同款 shim(此為 spec §8「2 style
+        塊」的 undercount:必要但不充分——結構類須另補,見 view-governance.js MODULE_NOTE ★★★★★★①)。此為對
+        ocInjectBaseCSS 同名規則的**重複(非移動)**:legacy iframe 續靠 ocInjectBaseCSS 運行時注入。按鈕(.oc-btn*)、
+        toast、表單(.oc-input/.oc-select)、版式 utility(row/gap/fs-*/t-*/mt-*/mb-* 等)已在 shell-components.css /
+        oc-utilities.css / tokens.css(殼已載),不重複。oc-tabs-wrapper 全域無定義=無樣式 wrapper(byte-parity),
+        刻意不新增(同 .trust-tier-badge 冗餘類 spec §8)。
+   ratchet(born-clean 零 hex / 零 inline):
+     - 兩頁內塊已 P0.2 refactor 為語義 token;既有 `rgba()` 色字面 = pre-existing,**逐字搬(byte-parity),不
+       re-tokenize**(改之即 skin 變更;canary stage chip / tint 背景 / oc-modal 遮罩 rgba(0,0,0,0.6) 等,源註明
+       「palette 外色 verbatim,P0.4 複審」,搬入時逐字保留,標 pre-existing 債,不計入本檔新違規)。
+     - 源塊 3 處 `var(--token, #hexfallback)` 的 **hex 後備**(canary-stage-badge active/stage-4 color、
+       canary-progress-bar-fill background)於本檔**移除後備**(→ `var(--token)`):殼恆載 tokens.css → token 必定義
+       → 後備永不觸發 → 視覺 byte-identical;此為 born-clean「零 hex」ratchet 硬要求 + 四姊妹 view CSS 零 hex 慣例。
+       原塊 3 處 hex 註釋(琥珀/紫/銀灰 palette 對照)本檔改寫為不含 hex 碼的等義中文,避免 hex 進新檔。
+     - 動態值走 `setProperty` scoped-var(`--canary-fill-w` html:222 / `--lt-progress-w` html:294 已是此模式,原樣保留)。
+     - reused JS 執行期 `.style` inline(governance.js / inline 塊 / autonomy)不入本檔、不算本檔 inline 違規。
+     - 零 inline style 屬性、零內聯樣式塊、零新框架。
+   誠實邊界:靜態只證 source;真渲染 / T3 朱印形制 / Trust TTL 配色 / 三態徽 / --live 態(governance 無 --live CSS 類,
+     live 態配色由 reused JS 執行期 .style 設)= NEEDS-LINUX + operator。
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ═══ ① governance-specific(port tab-governance.html 頁內 style 塊,scoped .governance-view)═══ */
+
+/* ── SM 卡 / note / learn 折疊 / state-flow / section-label ── */
+.governance-view .gov-sm-grid { align-items: stretch; margin-bottom: 14px; }
+.governance-view .gov-sm-card { display: flex; flex-direction: column; }
+.governance-view .gov-sm-card h3 { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.governance-view .gov-sm-note {
+  margin: 10px 0 12px;
+  padding: 10px 12px 10px 14px;
+  background: rgba(13, 17, 23, 0.58);
+  border-left: 4px solid var(--accent);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.governance-view .gov-learn { margin: 0 0 14px; }
+.governance-view .gov-learn summary {
+  list-style: none;
+  cursor: pointer;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  user-select: none;
+}
+.governance-view .gov-learn summary::-webkit-details-marker { display: none; }
+.governance-view .gov-learn summary::before {
+  content: "\25B6";
+  display: inline-block;
+  margin-right: 6px;
+  font-size: 10px;
+}
+.governance-view .gov-learn[open] summary::before { content: "\25BC"; }
+.governance-view .gov-learn-body {
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: var(--bg-app);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-2);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.75;
+}
+.governance-view .gov-state-flow {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+  font-size: 11px;
+}
+.governance-view .gov-flow-arrow { color: var(--text-secondary); }
+.governance-view .gov-section-label {
+  margin: 10px 0 8px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.governance-view .gov-full-row { margin-bottom: 14px; }
+.governance-view .gov-boundary-note {
+  margin: 10px 0 12px;
+  padding: 10px 12px;
+  background: rgba(245, 158, 11, 0.10);
+  border: 1px solid rgba(245, 158, 11, 0.28);
+  border-left: 4px solid var(--warn);
+  border-radius: 0 var(--r-1) var(--r-1) 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.65;
+}
+.governance-view .gov-boundary-note strong { color: var(--text-primary); }
+.governance-view .demo-admission-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+.governance-view .demo-admission-step {
+  background: var(--bg-app);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-2);
+  padding: 10px 12px;
+  min-height: 94px;
+}
+.governance-view .demo-admission-step h4 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--text-primary);
+}
+.governance-view .demo-admission-step p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+/* ── Graduated Canary section CSS（per AMD-2026-05-09-03 §4.3）── */
+/* 5-stage 視覺合約：5 個 chip 平行排列，scope 文案小字 */
+.governance-view .canary-stage-ladder {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+  margin: 12px 0;
+}
+.governance-view .canary-stage-chip {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-2);
+  padding: 10px 12px;
+  background: rgba(13, 17, 23, 0.55);
+  text-align: left;
+}
+.governance-view .canary-stage-chip-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+.governance-view .canary-stage-chip-scope {
+  font-size: 10px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+.governance-view .canary-stage-chip.stage-0 { border-color: rgba(100, 116, 139, 0.5); }
+.governance-view .canary-stage-chip.stage-active {
+  border-color: rgba(56, 139, 253, 0.5);
+  background: rgba(56, 139, 253, 0.06);
+}
+.governance-view .canary-stage-chip.stage-4 {
+  border-color: rgba(248, 81, 73, 0.45);
+  background: rgba(248, 81, 73, 0.05);
+}
+/* 行動裝置：5 col 過擠時 wrap 為 2-3 列 */
+@media (max-width: 700px) {
+  .governance-view .canary-stage-ladder { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* cohort 卡片 grid：每張卡 1 fr，自動 wrap */
+.governance-view .canary-cohort-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+  margin-top: 10px;
+}
+.governance-view .canary-cohort-card {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-2);
+  padding: 12px 14px;
+  background: var(--bg-surface, rgba(22, 27, 34, 0.65));
+}
+.governance-view .canary-cohort-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.governance-view .canary-cohort-id {
+  font-family: monospace;
+  font-size: 12px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 180px;
+}
+.governance-view .canary-stage-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+  letter-spacing: 0.4px;
+  flex-shrink: 0;
+}
+.governance-view .canary-stage-badge.stage-0 {
+  background: rgba(100, 116, 139, 0.18);
+  color: var(--text-secondary);
+  border-color: rgba(100, 116, 139, 0.45);
+}
+.governance-view .canary-stage-badge.stage-active {
+  background: rgba(56, 139, 253, 0.15);
+  /* 原 var() 銀藍 hex 後備已移除（token 恆定義，born-clean 零 hex） */
+  color: var(--text-secondary);
+  border-color: rgba(56, 139, 253, 0.4);
+}
+.governance-view .canary-stage-badge.stage-4 {
+  background: rgba(248, 81, 73, 0.12);
+  /* 原 var() 紅 hex 後備已移除（token 恆定義，born-clean 零 hex） */
+  color: var(--neg);
+  border-color: rgba(248, 81, 73, 0.4);
+}
+.governance-view .canary-cohort-scope {
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin-bottom: 10px;
+}
+.governance-view .canary-cohort-progress { margin: 8px 0 10px; }
+.governance-view .canary-progress-bar-wrap {
+  background: var(--bg-app);
+  border-radius: var(--r-1);
+  height: 6px;
+  overflow: hidden;
+}
+.governance-view .canary-progress-bar-fill {
+  height: 100%;
+  /* P0.2 batch 7b：寬度走 scoped-var（§7 form-1），JS 以 --canary-fill-w 自訂屬性供給 */
+  width: var(--canary-fill-w, 0%);
+  /* 原 var() 銀藍 / 朱紅 色值後備已移除（token 恆定義，born-clean 零裸色值） */
+  background: var(--accent);
+  border-radius: var(--r-1);
+  transition: width 0.4s ease;
+}
+.governance-view .canary-progress-meta {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+.governance-view .canary-cohort-meta {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+  line-height: 1.5;
+}
+.governance-view .canary-meta-key { color: var(--text-secondary); }
+.governance-view .canary-meta-val { color: var(--text-primary); }
+.governance-view .canary-cohort-actions { margin-top: 8px; }
+.governance-view .canary-promote-btn {
+  width: 100%;
+  /* WCAG 2.1 AA Target Size 2.5.5：行動版 44px touch target */
+  min-height: 36px;
+}
+@media (max-width: 700px) {
+  .governance-view .canary-promote-btn { min-height: 44px; padding: 12px 14px; font-size: 13px; }
+}
+.governance-view .canary-empty {
+  padding: 16px 18px;
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--r-2);
+  background: rgba(13, 17, 23, 0.4);
+}
+
+/* ═══ P0.2 batch 7b：inline style→頁內組件（語義 token；註記 rgba 色為 palette 外色 verbatim,P0.4 複審）═══ */
+/* 快速狀態橫幅容器 */
+.governance-view .gov-quickstat-bar {
+  display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap;
+  padding: var(--sp-2) var(--sp-3); background: var(--bg-surface);
+  border: 1px solid var(--border-subtle); border-radius: var(--r-2);
+  margin-bottom: var(--sp-3); font-size: var(--fs-dense);
+}
+/* 值顯示盒（risk-reason / recon-result；pre-wrap 保留多行原因文字換行） */
+.governance-view .gov-value-box {
+  font-size: var(--fs-dense); background: var(--bg-app); padding: var(--sp-2);
+  border-radius: var(--r-1); min-height: 32px; white-space: pre-wrap;
+}
+/* 待批准提示盒（藍 accent 左邊框） */
+.governance-view .gov-pending-note {
+  margin-bottom: var(--sp-3); padding: var(--sp-2); background: var(--accent-weak);
+  border-left: 3px solid var(--accent); border-radius: 0 var(--r-1) var(--r-1) 0;
+}
+/* Live Auth 狀態列（border-color 由 JS 依狀態覆蓋，故 component 不設 !important） */
+.governance-view .gov-liveauth-row {
+  display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap;
+  margin-bottom: var(--sp-3); padding: var(--sp-3); background: var(--bg-app);
+  border: 1px solid var(--border-subtle); border-radius: var(--r-2);
+}
+/* 通用 bg 面板盒 */
+.governance-view .gov-panel-box {
+  padding: var(--sp-3); background: var(--bg-app);
+  border: 1px solid var(--border-subtle); border-radius: var(--r-2);
+}
+/* 全大寫小標籤 */
+.governance-view .gov-caps-label {
+  font-size: var(--fs-micro); color: var(--text-secondary); font-weight: var(--weight-semi);
+  letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: var(--sp-2);
+}
+/* 進度條軌 + 填充（填充寬走 scoped-var，JS setProperty('--lt-progress-w')） */
+.governance-view .gov-progress-track { background: var(--bg-app); border-radius: var(--r-1); height: 8px; overflow: hidden; }
+.governance-view .lt-progress-fill {
+  height: 100%; width: var(--lt-progress-w, 0%); background: var(--accent);
+  border-radius: var(--r-1); transition: width var(--dur-base) var(--ease-out);
+}
+.governance-view .gov-learn-body--flush { padding: 0; background: transparent; border: none; }
+.governance-view .gov-toggle-caret { float: right; }
+.governance-view .gov-scroll-4 { max-height: 400px; overflow-y: auto; }
+.governance-view .gov-metrics-120 { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
+.governance-view .gov-textarea { width: 100%; height: 80px; resize: vertical; font-family: inherit; }
+.governance-view .gov-th-num { width: 60px; } .governance-view .gov-th-path { min-width: 200px; }
+.governance-view .gov-th-cat { min-width: 140px; } .governance-view .gov-th-lvl { min-width: 170px; }
+.governance-view .gov-col-wide { flex: 2; min-width: 300px; } .governance-view .gov-col { flex: 1; min-width: 240px; }
+.governance-view .gov-col-mid { flex: 1; min-width: 260px; }
+.governance-view .gov-switch-reason { font-size: var(--fs-micro); color: var(--text-secondary); margin-top: var(--sp-1); font-style: italic; }
+/* P0.4：Level badge 藍底 accent-weak，待中性化 / accent 二分複審 */
+.governance-view .gov-level-badge {
+  display: inline-block; padding: var(--sp-1) var(--sp-3); border-radius: var(--r-1);
+  font-size: var(--fs-md); font-weight: var(--weight-semi);
+  background: var(--accent-weak); color: var(--accent);
+}
+/* 琥珀色系 → --warn（C6b，與 .gov-boundary-note 同族）；bg 的 rgba 琥珀 tint 待組件層 */
+.governance-view .gov-autonomy-banner {
+  margin-bottom: var(--sp-3); padding: var(--sp-3); background: rgba(245, 158, 11, .12);
+  border-left: 4px solid var(--warn); border-radius: 0 var(--r-1) var(--r-1) 0; color: var(--warn);
+  font-size: var(--fs-dense); line-height: var(--lh-cjk);
+}
+/* P0.4 C6d：原紫 authority tint 已中性化（canon 1）。
+   gov-purple-text → --warn（⚠ Full Review 本質為警示語義）；
+   gov-btn-purple 已移除（Renew Live Auth 回落 oc-btn-primary 青銅）；
+   gov-btn-purple-soft → 中性描邊（T3 Full Review 走 oc-btn 中性態）。
+   類名沿用不改 HTML/JS 引用。非朱印——canon 9 朱印僅方印形制，不套此處。 */
+.governance-view .gov-purple-text { color: var(--warn); }
+.governance-view .gov-btn-purple-soft { border-color: var(--border-strong); color: var(--text-primary); }
+/* trust tier 徽章：靜態形制走 token；初始 T0 銀灰 → --text-secondary（C6b），JS 依 tier 覆蓋 background/color */
+.governance-view .gov-trust-tier-badge {
+  display: inline-block; padding: var(--sp-1) var(--sp-2); border-radius: var(--r-1);
+  font-size: var(--fs-micro); font-weight: var(--weight-semi);
+  background: rgba(100, 116, 139, .2); color: var(--text-secondary);
+}
+
+/* ═══ P0.2 batch 7b：governance-tab.js / autonomy-posture.js innerHTML 模板組件（單文檔宿主 → §8 頁內層）═══ */
+.governance-view .gov-event-row { padding: var(--sp-2) 0; border-bottom: 1px solid var(--border-subtle); }
+.governance-view .gov-cell { background: var(--bg-app); border: 1px solid var(--border-subtle); border-radius: var(--r-2); padding: var(--sp-3); }
+.governance-view .gov-recovery-card { background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--r-1); padding: var(--sp-3); font-size: var(--fs-dense); }
+.governance-view .gov-change-card { background: var(--bg-app); border: 1px solid var(--border-subtle); border-radius: var(--r-2); padding: var(--sp-3); font-size: var(--fs-dense); }
+.governance-view .gov-lease-card { background: var(--bg-app); border: 1px solid var(--border-subtle); border-radius: var(--r-1); padding: var(--sp-2) var(--sp-3); font-size: var(--fs-dense); }
+/* 展開/差異詳情盒（pre-line 保留換行） */
+.governance-view .gov-detail-box { margin-top: var(--sp-2); padding: var(--sp-2) var(--sp-3); background: var(--bg-surface);
+  border: 1px solid var(--border-subtle); border-radius: var(--r-1); color: var(--text-primary);
+  line-height: var(--lh-cjk); white-space: pre-line; font-size: var(--fs-micro); }
+.governance-view .gov-diff-box { margin: var(--sp-2) 0; padding: var(--sp-2) var(--sp-3); background: var(--bg-surface);
+  border: 1px solid var(--border-subtle); border-radius: var(--r-1); font-size: var(--fs-micro); line-height: var(--lh-cjk); }
+/* 藍 accent 資訊盒 */
+.governance-view .gov-info-box { margin-top: var(--sp-2); padding: var(--sp-2); background: var(--accent-weak);
+  border-radius: var(--r-1); font-size: var(--fs-micro); color: var(--text-secondary); line-height: var(--lh-cjk); }
+.governance-view .gov-info-box--left { margin-bottom: var(--sp-2); margin-top: 0; border-left: 3px solid var(--accent);
+  border-radius: 0 var(--r-1) var(--r-1) 0; color: var(--text-primary); }
+.governance-view .gov-noshrink { flex-shrink: 0; }
+.governance-view .gov-flex { display: flex; }
+.governance-view .gov-outcome-wrap { margin-top: var(--sp-3); border: 1px solid var(--border-subtle); border-radius: var(--r-1); overflow: hidden; font-size: var(--fs-micro); }
+.governance-view .gov-outcome { flex: 1; padding: var(--sp-2) var(--sp-3); }
+.governance-view .gov-outcome--pos { background: var(--pos-bg); border-right: 1px solid var(--border-subtle); }
+.governance-view .gov-outcome--neg { background: var(--neg-bg); }
+.governance-view .gov-scope-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: var(--sp-2); }
+.governance-view .gov-pre-json { font-size: var(--fs-micro); margin: var(--sp-1) 0; overflow-x: auto; }
+.governance-view .gov-details-caret { cursor: pointer; color: var(--accent); user-select: none; }
+.governance-view .gov-reason-cell { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.governance-view .gov-time { color: var(--text-secondary); font-size: var(--fs-micro); margin-right: var(--sp-2); }
+.governance-view .gov-capitalize { text-transform: capitalize; }
+.governance-view .gov-criteria-row { display: flex; align-items: flex-start; gap: var(--sp-2); font-size: var(--fs-dense); padding: var(--sp-1) 0; border-bottom: 1px solid var(--border-subtle); }
+.governance-view .gov-mw-360 { max-width: 360px; }
+/* 風險等級徽章（class-per-enum；bg/border 走 --neg/warn/pos-bg，取代原 var()+'22' 無效 alpha） */
+.governance-view .gov-risk-badge { display: inline-block; margin: 2px 0; padding: 1px 6px; border-radius: var(--r-1); font-size: var(--fs-micro); font-weight: var(--weight-semi); }
+.governance-view .gov-risk-badge--lg { padding: 2px 8px; margin: 0 0 var(--sp-2); border: 1px solid; }
+.governance-view .gov-risk-high { color: var(--neg); background: var(--neg-bg); border-color: var(--neg); }
+.governance-view .gov-risk-med { color: var(--warn); background: var(--warn-bg); border-color: var(--warn); }
+.governance-view .gov-risk-low { color: var(--pos); background: var(--pos-bg); border-color: var(--pos); }
+.governance-view .gov-risk-none { color: var(--text-secondary); background: var(--bg-raised); border-color: var(--border-subtle); }
+/* autonomy-posture.js 模板組件 */
+.governance-view .gov-gate-row { display: flex; justify-content: space-between; gap: var(--sp-3); align-items: flex-start;
+  padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border-subtle); border-radius: var(--r-1); background: var(--bg-app); }
+.governance-view .gov-minw0 { min-width: 0; }
+
+/* ── oc-modal 塊(port tab-governance.html 行 1230-1247;遮罩 rgba(0,0,0,0.6) verbatim pre-existing)── */
+.governance-view .oc-modal {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(0, 0, 0, 0.6); display: flex; align-items: center;
+  justify-content: center; z-index: 1000;
+}
+.governance-view .oc-modal-content {
+  background: var(--bg-surface); border-radius: var(--r-3); padding: 24px;
+  width: 480px; max-width: 90vw;
+}
+.governance-view .oc-modal-content h3 {
+  font-size: 15px; font-weight: 600; margin-bottom: 8px;
+}
+.governance-view .oc-modal-footer {
+  display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px;
+}
+
+/* ═══ ② `.governance-view` scope 的 legacy 短名 shim(port ocInjectBaseCSS;色字面→token,無 token tint 保 rgba)═══ */
+
+/* ── Load-error / loading 佔位(view-governance.js showLoadError + placeholder)── */
+.governance-view .oc-subtab-placeholder {
+  padding: 24px 18px; text-align: center;
+  background: var(--bg-sunken); border: 1px dashed var(--border-subtle);
+  border-radius: var(--r-2); color: var(--text-secondary); font-size: 13px;
+  line-height: 1.7; margin-top: 10px;
+}
+
+/* ── Cards ── */
+.governance-view .oc-card {
+  background: var(--bg-surface); border: 1px solid var(--border-subtle);
+  border-radius: var(--r-2); padding: 16px; margin-bottom: 14px;
+}
+.governance-view .oc-card h2 { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+.governance-view .oc-card h3 { font-size: 13px; font-weight: 600; margin-bottom: 8px; color: var(--text-primary); }
+.governance-view .oc-card .subtitle { font-size: 12px; color: var(--text-secondary); margin-bottom: 12px; }
+
+/* ── Metric row ── */
+.governance-view .oc-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+.governance-view .oc-metric { background: var(--bg-app); border: 1px solid var(--border-subtle); border-radius: var(--r-2); padding: 10px 12px; }
+.governance-view .oc-metric-label { font-size: 10px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.4px; }
+.governance-view .oc-metric-val { font-size: 20px; font-weight: 700; margin-top: 2px; }
+
+/* ── Status chips(色字面→語義 token;info 藍 tint 無對應 token → 保 rgba,byte-parity legacy)── */
+.governance-view .oc-chip {
+  display: inline-flex; align-items: center; gap: 5px; border-radius: var(--r-full);
+  padding: 3px 10px; font-size: 11px; font-weight: 500; border: 1px solid transparent;
+}
+.governance-view .oc-chip-good    { background: var(--pos-bg);   border-color: var(--pos);           color: var(--pos); }
+.governance-view .oc-chip-warn    { background: var(--warn-bg);  border-color: var(--warn);          color: var(--warn); }
+.governance-view .oc-chip-bad     { background: var(--neg-bg);   border-color: var(--neg);           color: var(--neg); }
+.governance-view .oc-chip-neutral { background: var(--bg-hover); border-color: var(--border-strong); color: var(--text-secondary); }
+.governance-view .oc-chip-info    { background: rgba(56,139,253,0.12); border-color: rgba(56,139,253,0.25); color: var(--text-secondary); }
+
+/* ── Explainer(ocExplain 輸出;暗底 rgba→--bg-sunken)── */
+.governance-view .oc-explain { margin-bottom: 14px; }
+.governance-view .oc-explain-simple {
+  color: var(--text-secondary); font-size: 12px; line-height: 1.7;
+  padding: 10px 14px; background: var(--bg-sunken); border-left: 3px solid var(--accent);
+  border-radius: 0 var(--r-2) var(--r-2) 0;
+}
+.governance-view .oc-explain-deep { margin-top: 4px; }
+.governance-view .oc-explain-deep summary { color: var(--accent); font-size: 11px; cursor: pointer; padding: 4px 14px; user-select: none; }
+.governance-view .oc-explain-content {
+  padding: 10px 14px; color: var(--text-secondary); font-size: 12px; line-height: 1.7;
+  background: var(--bg-sunken); border-radius: var(--r-2); margin-top: 4px;
+}
+
+/* ── Two-column Grid ── */
+.governance-view .oc-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+
+/* ── Tables(port ocInjectBaseCSS;header/hover 無對應 token → 保 rgba,byte-parity legacy)── */
+.governance-view .oc-table-wrap { overflow-x: auto; margin-top: 8px; }
+.governance-view .oc-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.governance-view .oc-table th { text-align: left; padding: 8px 10px; color: var(--text-secondary); font-weight: 500;
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px;
+  border-bottom: 1px solid var(--border-subtle); background: rgba(13,17,23,0.5); }
+.governance-view .oc-table td { padding: 8px 10px; border-bottom: 1px solid var(--border-subtle); }
+.governance-view .oc-table tr:last-child td { border-bottom: none; }
+.governance-view .oc-table tr:hover td { background: rgba(56,139,253,0.04); }
+.governance-view .oc-table .empty-row td { text-align: center; color: var(--text-secondary); padding: 20px; }
+
+/* ═══ 行動裝置 a11y:grid / metrics / card / table 促升(port ocInjectBaseCSS @media 子集)═══ */
+@media (max-width: 700px) {
+  .governance-view .oc-grid-2 { grid-template-columns: 1fr; }
+  .governance-view .oc-metrics { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
+  .governance-view .oc-card { padding: 12px; }
+  .governance-view .oc-table td, .governance-view .oc-table th { padding: 6px 7px; font-size: 11px; }
+}
