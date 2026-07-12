@@ -43,7 +43,7 @@
 .governance-view .gov-sm-note {
   margin: 10px 0 12px;
   padding: 10px 12px 10px 14px;
-  background: rgba(13, 17, 23, 0.58);
+  background: rgba(var(--ov-panel-rgb), 0.58);
   border-left: 4px solid var(--accent);
   color: var(--text-secondary);
   font-size: 12px;
@@ -142,7 +142,7 @@
   border: 1px solid var(--border-subtle);
   border-radius: var(--r-2);
   padding: 10px 12px;
-  background: rgba(13, 17, 23, 0.55);
+  background: rgba(var(--ov-panel-rgb), 0.55);
   text-align: left;
 }
 .governance-view .canary-stage-chip-label {
@@ -158,8 +158,8 @@
 }
 .governance-view .canary-stage-chip.stage-0 { border-color: rgba(100, 116, 139, 0.5); }
 .governance-view .canary-stage-chip.stage-active {
-  border-color: rgba(56, 139, 253, 0.5);
-  background: rgba(56, 139, 253, 0.06);
+  border-color: rgba(var(--ov-accent-rgb), 0.5);
+  background: rgba(var(--ov-accent-rgb), 0.06);
 }
 .governance-view .canary-stage-chip.stage-4 {
   border-color: rgba(248, 81, 73, 0.45);
@@ -181,7 +181,7 @@
   border: 1px solid var(--border-subtle);
   border-radius: var(--r-2);
   padding: 12px 14px;
-  background: var(--bg-surface, rgba(22, 27, 34, 0.65));
+  background: var(--bg-surface);
 }
 .governance-view .canary-cohort-header {
   display: flex;
@@ -214,10 +214,10 @@
   border-color: rgba(100, 116, 139, 0.45);
 }
 .governance-view .canary-stage-badge.stage-active {
-  background: rgba(56, 139, 253, 0.15);
+  background: rgba(var(--ov-accent-rgb), 0.15);
   /* 原 var() 銀藍 hex 後備已移除（token 恆定義，born-clean 零 hex） */
   color: var(--text-secondary);
-  border-color: rgba(56, 139, 253, 0.4);
+  border-color: rgba(var(--ov-accent-rgb), 0.4);
 }
 .governance-view .canary-stage-badge.stage-4 {
   background: rgba(248, 81, 73, 0.12);
@@ -273,7 +273,7 @@
   padding: 16px 18px;
   border: 1px dashed var(--border-subtle);
   border-radius: var(--r-2);
-  background: rgba(13, 17, 23, 0.4);
+  background: rgba(var(--ov-panel-rgb), 0.4);
 }
 
 /* ═══ P0.2 batch 7b：inline style→頁內組件（語義 token；註記 rgba 色為 palette 外色 verbatim,P0.4 複審）═══ */
@@ -446,7 +446,7 @@
 .governance-view .oc-chip-warn    { background: var(--warn-bg);  border-color: var(--warn);          color: var(--warn); }
 .governance-view .oc-chip-bad     { background: var(--neg-bg);   border-color: var(--neg);           color: var(--neg); }
 .governance-view .oc-chip-neutral { background: var(--bg-hover); border-color: var(--border-strong); color: var(--text-secondary); }
-.governance-view .oc-chip-info    { background: rgba(56,139,253,0.12); border-color: rgba(56,139,253,0.25); color: var(--text-secondary); }
+.governance-view .oc-chip-info    { background: rgba(var(--ov-accent-rgb),0.12); border-color: rgba(var(--ov-accent-rgb),0.25); color: var(--text-secondary); }
 
 /* ── Explainer(ocExplain 輸出;暗底 rgba→--bg-sunken)── */
 .governance-view .oc-explain { margin-bottom: 14px; }
@@ -470,10 +470,10 @@
 .governance-view .oc-table { width: 100%; border-collapse: collapse; font-size: 12px; }
 .governance-view .oc-table th { text-align: left; padding: 8px 10px; color: var(--text-secondary); font-weight: 500;
   font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px;
-  border-bottom: 1px solid var(--border-subtle); background: rgba(13,17,23,0.5); }
+  border-bottom: 1px solid var(--border-subtle); background: rgba(var(--ov-panel-rgb),0.5); }
 .governance-view .oc-table td { padding: 8px 10px; border-bottom: 1px solid var(--border-subtle); }
 .governance-view .oc-table tr:last-child td { border-bottom: none; }
-.governance-view .oc-table tr:hover td { background: rgba(56,139,253,0.04); }
+.governance-view .oc-table tr:hover td { background: rgba(var(--ov-accent-rgb),0.04); }
 .governance-view .oc-table .empty-row td { text-align: center; color: var(--text-secondary); padding: 20px; }
 
 /* ═══ 行動裝置 a11y:grid / metrics / card / table 促升(port ocInjectBaseCSS @media 子集)═══ */
