@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 from copy import deepcopy
+from datetime import datetime, timedelta, timezone
 import hashlib
 import inspect
 import json
@@ -130,18 +131,23 @@ def test_external_evidence_capture_requires_host_verifier_and_populates_typed_in
 
 
 def test_external_evidence_default_adjudication_rejects_expired_and_future_capture() -> None:
+    # default adjudication 以真實牆鐘為準;fixture 必須用相對時間,硬編碼日期會隨時間腐化
+    def _iso(moment: datetime) -> str:
+        return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    now = datetime.now(timezone.utc)
     expired = _resign_external({
         **_external_capture(),
-        "observed_at": "2026-07-09T10:00:00Z",
-        "expires_at": "2026-07-10T10:00:00Z",
+        "observed_at": _iso(now - timedelta(days=2)),
+        "expires_at": _iso(now - timedelta(days=1)),
     })
     assert "external evidence capture is stale at adjudication" in (
         validate_external_evidence_capture(expired, verifier=lambda _record: True)
     )
     future = _resign_external({
         **_external_capture(),
-        "observed_at": "2026-07-12T10:00:00Z",
-        "expires_at": "2026-07-13T10:00:00Z",
+        "observed_at": _iso(now + timedelta(days=1)),
+        "expires_at": _iso(now + timedelta(days=2)),
     })
     assert "external evidence capture is stale at adjudication" in (
         validate_external_evidence_capture(future, verifier=lambda _record: True)
