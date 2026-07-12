@@ -1,8 +1,9 @@
 # GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1 Queue
 
-Updated: 2026-07-11T22:38:22Z
+Updated: 2026-07-12T00:49:50Z
 Goal status: `ACTIVE`
 Current item: `WP4-ACTUAL-TRAINING-REGISTRY`
+Current state: `ACTIVE_WP4_TRUSTED_FIT_CAPTURE_ATTESTATION_CONTRACT_DESIGN_TDD`
 WP1 checkpoint: behavioral code `c080c552b`, exact operational target
 `7d1c247947f0fb6c139f8a0583c5e6ed6ae62c70`, state `DONE_RUNTIME_ACCEPTED`.
 R4 passed the authorized disposable PostgreSQL proof and left zero residue;
@@ -173,10 +174,29 @@ and independent P0/P1/P2 `0/0/0`.
 
 This is still source/fake-connection evidence. V158 remains unapplied; this
 step created no database row, fit, model/ONNX/file, registry, symlink,
-serving/promotion state, runtime/exchange action, or authority. The next safe
-slice is only a pure qualified training-result contract. Result writer/reader,
-trainer execution, filesystem publication, PG/Linux/Bybit, and serving remain
-outside that cycle.
+serving/promotion state, runtime/exchange action, or authority. Its then-next
+pure result observation contract is accepted below.
+
+The qualified post-fit observation contract is source accepted at
+`c64c5e28be80bad1093c39c90eda161004ab34d5`. It revalidates the complete
+training contract and exact `FOUND` receipt, accepts only closed raw trainer
+spec/seed, q10/q50/q90 bytes, metrics, resources, and timestamps, and derives
+every run/artifact/challenger/result identity internally. The exact
+V158 model-set formula is preserved, but the new run/challenger hashes are
+contract-local observation identities, not V158 execution proof.
+
+All observations remain `UNVERIFIED`; execution and model-training claims are
+`NOT_ESTABLISHED`; persistence is false; actual input rehash, trusted runner
+attestation, ONNX semantic/readback evidence, and a durable V158 attestation
+binding are required. Focused `105`, adjacent `174`, full ML `1955/36`, exact
+`+44`; PA/E2/E4/MIT final P0/P1/P2 `0/0/0`. This source-only step created no
+receipt/run/artifact/registry row, fit, file, symlink, runtime, exchange, or
+authority fact.
+
+The next safe slice is only a pure trusted fit-capture attestation
+contract/verifier. Migration authoring/apply, result writer/reader adapters,
+trainer execution, filesystem publication, PG/Linux/Bybit, registry, and
+serving remain outside that cycle.
 
 Allowed nonterminal transitions are `ACTIVE -> ADVANCED -> ACTIVE`,
 `ACTIVE -> DEFER_EVIDENCE -> ROTATE -> ACTIVE`, `ACTIVE -> REJECT -> ROTATE ->
@@ -191,7 +211,7 @@ authority.
 | `WP1-ARTIFACT-CHURN-CONTROL` | 0 | `DONE_RUNTIME_ACCEPTED` | `PM -> PA -> E1 -> E2 -> E4 -> QA -> PM`; runtime `PM -> E3 -> BB -> PM` | WP0 `DONE`; source checkpoint `c080c552b`; operational target `7d1c24794` | Persist health only on state delta or bounded heartbeat; identical candidate/regime/evidence/blocker hash does not create another DEFER; record actual rows/bytes/cycle and durable health/decision/feedback ratios; heartbeat never triggers training; prove production reduction/no starvation | completed under exact R4 gate; no standing runtime authority | R4 isolated PG PASS; production session `bed1cba0-2a5b-45e3-8103-3243c80fdfd5`; `87` attempts, `74` suppressed, ratio `0.850575`; stale/new normalized row rates `740/117.05 h^-1`, bytes `1,755,280/406,509 h^-1`; decision suppression `1`; feedback `5/5`, exact `15+15+5=35` rows; authority mismatch/cache/retention `0/0/0/0`; no starvation; engine/API/watchdog unchanged; retry sequence R1-R4, successful R4 | No repeat. Preserve target runtime and advance WP2. |
 | `WP2-CANDIDATE-AWARE-ARBITER` | 0 | `DONE_SOURCE_ACCEPTED_B2_2C_EVENT_PRIMARY` | `PM -> QC -> MIT -> AI-E -> PA -> E1 -> E2 -> E4 -> QA -> PM` | B2.2b accepted `a7d8d5f8b`; restart-safe handoff `328125a08`; READY repair `03ef761b`; event primary `1b85318f` | Candidate identity remains hash-bound and globally ranked by evidence, quality, proof gap, cost, cooldown, portfolio/capital context, and event-time lineage. Candidate-board publication is a wake-only event; the bounded adapter remains content authority. | source/tests `false`; runtime `true`; authority `false` | Existing immutable handoff/replay semantics are preserved. The follow-up replaces five-second candidate polling with PG/inotify multiplexing, startup/overflow/rearm reconciliation, held-directory-fd ABA protection, candidate-only board wakes, and exact full-rescan content validation. Pristine origin exposed six B2.2c projection regressions; repaired focused `23`, event `33 passed/1 skipped`, full ML `1790 passed/36 skipped`; independent reviews PASS, P0/P1/P2 `0/0/0`. No Linux/runtime/PG/Bybit/training/authority action. | Do not deploy/apply. Any real inotify/service proof requires fresh exact E3/BB. WP3 source is accepted; continue WP4 contracts. |
 | `WP3-PROOF-REWARD-BRIDGE` | 0 | `DONE_SOURCE_ACCEPTED_READ_ONLY_REPOSITORY_ADAPTER` | `PM -> QC -> MIT -> AI-E -> PA -> E1 -> E2 -> E4 -> QA -> CC -> FA -> PM`; future acquisition `PM -> E3 -> BB -> Operator -> PM` | WP2 qualified current candidate; pure validation `8999aa2b`; repository adapter `c2bdefbf` | Current candidate projection and bounded exact lineage are repository-derived; binding is internal; existing V153 proof/reward containers are hash-validated; exact bytes and canonical inputs remain distinct; final head/lineage/bridge recheck is one snapshot. Receipts are in-memory only and never proof/runtime attestation. | source/tests `false`; any migration, Demo/order chain, or external acquisition remains gated | Focused `66 passed/1 skipped`; full ML `1818 passed/36 skipped`; E2/QA/CC-FA P0/P1/P2 `0/0/0`; rows/bytes written `0/0`; proof/reward/complete runtime chain remains `0/0/0`. Bridge or lineage overflow is explicit schema-required with no receipt. | Do not retrofit V153 or reopen WP3 absent material P0/P1. WP4 source contract is accepted; any external receipt acquisition remains fresh E3/BB/Operator gated. |
-| `WP4-ACTUAL-TRAINING-REGISTRY` | 0 | `ACTIVE_WP4_QUALIFIED_TRAINING_RESULT_CONTRACT_TDD` | `PM -> QC -> MIT -> AI-E -> PA -> E1 -> E2 -> E4 -> QA -> E3 -> BB -> PM` | WP3 repository `c2bdefbf`; input contract `f36379b9`; V158 source `beeb77325`; fixed writer `c0aec681`; fixed reader `fb842a36` | V158 source fixes the durable receipt/training-run/q10-q50-q90 artifact/isolated NOT_SERVING registry boundary. Before exposing its broad result writer, a pure result contract must bind validated receipt identity, actual data/split/code/config/schema identities, timestamps, resource/metrics shape, exact q10/q50/q90 bundle shape, and zero serving/trading authority. | source contract `false`; migration apply/runtime/real fit `true`; Operator `false`; runtime mutation gated | Reader accepted: exact two derived args, `FOUND/NOT_FOUND`, 20-field parity, focused `61`, adjacent `130`, full ML `1911/36`, exact `+30`, E2/E4/MIT P0/P1/P2 `0/0/0`. V158 remains unexecuted; this source step created `0/0/0/0` receipt/run/artifact/registry rows. Retry/RCA `0/0`. | Implement only `WP4-QUALIFIED-TRAINING-RESULT-CONTRACT-TDD`. Do not call any writer/reader, execute trainer/fit, fabricate training facts, create model/ONNX/files, apply V158, contact PG/Linux/Bybit, mutate registry, or create symlink/serving authority. |
+| `WP4-ACTUAL-TRAINING-REGISTRY` | 0 | `ACTIVE_WP4_TRUSTED_FIT_CAPTURE_ATTESTATION_CONTRACT_DESIGN_TDD` | `PM -> QC -> MIT -> AI-E -> PA -> E1 -> E2 -> E4 -> QA -> E3 -> BB -> PM` | WP3 repository `c2bdefbf`; input contract `f36379b9`; V158 source `beeb77325`; fixed writer/reader `c0aec681` / `fb842a36`; result observation contract `c64c5e28` | V158 fixes the storage boundary but cannot durably bind trusted execution evidence. The accepted result observation contract binds exact admission, raw trainer spec/seed, q10/q50/q90 bytes, metrics/resources/timestamps, and contract-local identities while keeping execution unestablished. The next pure contract must define how a trusted fit-capture producer binds actual input rehashes, runner identity, result hash, and artifact readback without caller self-attestation. | source contract `false`; any migration authoring/apply/runtime/real fit `true`; Operator `false`; runtime mutation gated | Result observation accepted: focused `105`, adjacent `174`, full ML `1955/36`, exact `+44`, PA/E2/E4/MIT P0/P1/P2 `0/0/0`. `execution_claim` and `model_training_performed_claim` remain `NOT_ESTABLISHED`; persistence false; V158 remains unexecuted; source step created `0/0/0/0` receipt/run/artifact/registry rows. Retry/RCA `0/0`. | Implement only `WP4-TRUSTED-FIT-CAPTURE-ATTESTATION-CONTRACT-DESIGN-TDD`. Do not author/apply a migration, call writers/readers, execute trainer/fit, fabricate attestation, create model/ONNX/files, contact PG/Linux/Bybit, mutate registry, or create symlink/serving authority. |
 | `WP5-OOS-DECISION-ENGINE` | 0 | `PENDING` | `PM -> QC -> MIT -> AI-E -> PA -> E1 -> E2 -> E4 -> QA -> PM` | WP4 | Walk-forward plus purge/embargo, hidden OOS, matched controls, negative cells, regime breakdown, stress, leakage/dedup defenses; decisions include `DEFER/ROTATE/TRAIN/REJECT/CHALLENGER_ACCEPT/ROLLBACK/STOP`; all reasons/hash lineage durable | `false` source/tests; `false`; `false` | Baseline hidden OOS/effect decisions `0/0`; retry/RCA `0/0` | Pre-register evaluation and decision-state contracts with mutation-biting fixtures. |
 | `WP6-EVENT-DRIVEN-AUTO-EVOLUTION` | 1 | `PENDING` | `PM -> PA -> E1 -> E2 -> E4 -> QA -> E3 -> BB -> PM` | WP1-WP5 | LISTEN/inotify event-driven service, no cron/fixed training; natural cycles, restart recovery, two distinct evidence-delta hashes automatically re-evaluate/retrain/rotate; useful model/evaluation/registry/effect artifacts; safe retention | production service/restart/retention `true`; Operator only for external order evidence; runtime mutation `true` | Event-primary candidate-board source behavior exists at `1b85318f`, but the Linux integration test was skipped on Darwin and no service/runtime proof ran. Second-delta evolution remains unproven; retry/RCA `0/0`. | After WP3-WP5, run Linux ABI/service/restart/natural-cycle tests under a fresh exact E3/BB gate. |
 | `WP7-ADVERSARIAL-FINAL-AUDIT` | 1 | `PENDING` | `PM -> CC -> FA -> QC -> MIT -> AI-E -> PA -> E2 -> E4 -> QA -> E3 -> BB -> PM` | WP1-WP6 | G1-G9 machine evidence, stale/duplicate/no-delta/rollback/restart/resource/retention/authority attacks, three-head alignment, current runtime proof, and 16-root-principles/spec compliance all pass | runtime verification `true`; Operator only if an external effect is required; no automatic authority | Final retry/RCA counters aggregate all WPs | Execute independent audits; terminal only after all G1-G9 PASS. |

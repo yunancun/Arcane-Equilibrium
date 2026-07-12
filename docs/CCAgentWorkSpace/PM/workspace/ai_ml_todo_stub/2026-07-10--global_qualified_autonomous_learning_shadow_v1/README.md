@@ -4,7 +4,7 @@ Date: 2026-07-10
 Owner: PM
 Goal: `GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1`
 Codex Goal thread: `019f4b6d-1e5b-7551-9fce-7a2f029a1675`
-Status: `ACTIVE_WP4_QUALIFIED_TRAINING_RESULT_CONTRACT_TDD`
+Status: `ACTIVE_WP4_TRUSTED_FIT_CAPTURE_ATTESTATION_CONTRACT_DESIGN_TDD`
 
 This is the durable PM-owned queue and state surface for the active Goal. It
 supersedes the old ALR P2 completion/terminal interpretation, but does not edit
@@ -123,9 +123,43 @@ skipped`, same-environment baseline `1881 passed/36 skipped`, exact reader
 delta `+30`; E2/E4/MIT and independent P0/P1/P2 `0/0/0`. This was source and
 fake-connection work only: V158 was not applied and no PostgreSQL, Linux,
 runtime, exchange, trainer, fit, model/file, registry, serving, promotion, or
-authority effect occurred. The next safe slice is only a pure qualified
-training-result contract builder/validator; the broad result writer/reader and
-all execution remain later.
+authority effect occurred. Its then-next pure result contract is now accepted
+below.
+
+The pure post-fit observation contract is source accepted at
+`c64c5e28be80bad1093c39c90eda161004ab34d5`. It reuses a public pure validator
+for the exact `FOUND` receipt and preserves the complete bound training
+contract snapshot. Caller observations contain no hashes, paths, status, or
+authority switches: raw q10/q50/q90 bytes derive their own SHA-256 identities
+and the exact V158 ordered set hash; a closed LightGBM trainer spec uses
+exact-decimal parameters and a non-Boolean admitted seed; metrics and resource
+usage use closed canonical shapes.
+
+The envelope remains explicitly non-authoritative. Trainer, seed, timestamps,
+metrics, resources, ONNX semantics, and artifact bytes are all `UNVERIFIED`;
+`execution_claim` and `model_training_performed_claim` are
+`NOT_ESTABLISHED`; persistence is false; trusted fit attestation, actual
+dataset/row/split/code/config/schema rehash, artifact readback, and a durable
+V158 attestation-binding schema are required. The validator is total over
+malformed deep, wide, cyclic, exploding, and infinite container inputs under
+bounded snapshot budgets. It exposes no V158 result writer or legacy 28-arg
+surface.
+
+Focused repository/result verification passed `105`; adjacent
+training-contract/repository/result/V158 checks passed `174`; full ML passed
+`1955` with `36` platform/optional skips, exactly `44` more passes than the
+same-environment reader baseline. PA, E2, E4, and MIT final P0/P1/P2 are
+`0/0/0`. This remains source-only synthetic-fixture evidence. V158 was not
+applied; no PostgreSQL, Linux, runtime, exchange, fit, model/ONNX file,
+artifact readback, attestation, registry, symlink, serving, promotion, or
+authority effect occurred.
+
+The next safe slice is only a pure trusted fit-capture attestation
+contract/verifier. It must bind runner identity, actual input rehashes,
+trainer-spec/seed, result hash, and artifact readback without treating caller
+data or synthetic fixtures as execution proof. New migration authoring/apply,
+the V158 writer/reader adapter, trainer execution, filesystem publication,
+registry, PostgreSQL/Linux/runtime, and exchange work remain later gates.
 
 ## Earlier B2.2c event-primary reconciliation
 
