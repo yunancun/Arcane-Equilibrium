@@ -1163,6 +1163,37 @@ def test_v159_collision_function_md5_mutation_is_rejected(tag: str) -> None:
         _assert_collision_hardening_contract(sql.replace(digest, "0" * 32, 1))
 
 
+_FORWARD_V159_FUNCTION_IDENTITIES = (
+    "learning.persist_alr_challenger_fit_attestation_v1("
+    "bytea,jsonb,text,text,text,text,text,text,text,text,text,text,text,text,"
+    "text,text,timestamp with time zone,timestamp with time zone)",
+    "learning.persist_alr_challenger_training_result_v2("
+    "text,text,text,text,text,text,text,text,text,text,integer,text,text,"
+    "timestamp with time zone,timestamp with time zone,text,bigint,text,"
+    "bigint,text,bigint)",
+    "learning.read_alr_challenger_training_result_v2(text,text)",
+)
+_GENERIC_REACHABILITY_PROCEDURAL_GUARD = (
+    "IF p_mode<>'legacy' THEN\n"
+    "        IF EXISTS(SELECT 1 FROM pg_roles generic"
+)
+_GENERIC_REACHABILITY_BOOLEAN_GUARD = (
+    "IF p_mode<>'legacy' AND EXISTS(SELECT 1 FROM pg_roles generic"
+)
+
+
+def _forward_function_privilege_call(identity: str, *, nullable: bool) -> str:
+    resolver = (
+        f"to_regprocedure('{identity}')"
+        if nullable
+        else f"'{identity}'::regprocedure"
+    )
+    return (
+        "has_function_privilege(generic.rolname,"
+        f"{resolver},'EXECUTE')"
+    )
+
+
 def _assert_catalog_hardening_contract(sql: str) -> None:
     code = "\n".join(re.sub(r"--.*$", "", line) for line in sql.splitlines())
     validator = _function_body(sql, "v159_catalog_validator")
@@ -1301,12 +1332,13 @@ def _assert_catalog_hardening_contract(sql: str) -> None:
     assert "V159 catalog FAIL: projection-read ACL/posture" in validator
     assert "privilege.grantor<>c.relowner" in validator
     assert "left(generic.rolname,3)<>'pg_'" in validator
-    for function_name in (
-        "persist_alr_challenger_fit_attestation_v1",
-        "persist_alr_challenger_training_result_v2",
-        "read_alr_challenger_training_result_v2",
-    ):
-        assert function_name in validator
+    assert _GENERIC_REACHABILITY_PROCEDURAL_GUARD in validator
+    assert _GENERIC_REACHABILITY_BOOLEAN_GUARD not in validator
+    for identity in _FORWARD_V159_FUNCTION_IDENTITIES:
+        safe = _forward_function_privilege_call(identity, nullable=True)
+        unsafe = _forward_function_privilege_call(identity, nullable=False)
+        assert validator.count(safe) == 1
+        assert unsafe not in validator
     assert code.count("fit_completed_at <= attestation_verified_at") == 1
     assert "DROP CONSTRAINT alr_challenger_runs_v159_time_check" not in code
 
@@ -1354,6 +1386,30 @@ def test_v159_catalog_hardening_mutations_are_rejected(
     sql = _sql()
     assert needle in sql
     weakened = sql.replace(needle, replacement, 1)
+    with pytest.raises(AssertionError):
+        _assert_catalog_hardening_contract(weakened)
+
+
+@pytest.mark.parametrize("identity", _FORWARD_V159_FUNCTION_IDENTITIES)
+def test_v159_forward_function_eager_resolution_mutations_are_rejected(
+    identity: str,
+) -> None:
+    sql = _sql()
+    safe = _forward_function_privilege_call(identity, nullable=True)
+    unsafe = _forward_function_privilege_call(identity, nullable=False)
+    assert safe in sql
+    with pytest.raises(AssertionError):
+        _assert_catalog_hardening_contract(sql.replace(safe, unsafe, 1))
+
+
+def test_v159_generic_reachability_boolean_guard_mutation_is_rejected() -> None:
+    sql = _sql()
+    assert _GENERIC_REACHABILITY_PROCEDURAL_GUARD in sql
+    weakened = sql.replace(
+        _GENERIC_REACHABILITY_PROCEDURAL_GUARD,
+        _GENERIC_REACHABILITY_BOOLEAN_GUARD,
+        1,
+    )
     with pytest.raises(AssertionError):
         _assert_catalog_hardening_contract(weakened)
 
@@ -2153,10 +2209,10 @@ def _assert_functional_positive_helper_contracts(tree: ast.Module) -> None:
 def _assert_functional_probe_contract(source: str) -> None:
     compile(source, str(FUNCTIONAL_PROBE), "exec")
     assert hashlib.sha256(V159.read_bytes()).hexdigest() == (
-        "f98708b2ddcd57bda1bf861f0b3f49777b648aaa189ed7d69919998fca77852c"
+        "05a33e1aaffb4edb7a280ce38367f15c29ac11c6d678df91562fb7e2f1e4ce6d"
     )
     assert (
-        '"V159": "f98708b2ddcd57bda1bf861f0b3f49777b648aaa189ed7d69919998fca77852c"'
+        '"V159": "05a33e1aaffb4edb7a280ce38367f15c29ac11c6d678df91562fb7e2f1e4ce6d"'
         in source
     )
     assert '_ACK_ENV = "ALR_V159_DISPOSABLE_ACK"' in source
@@ -2696,7 +2752,7 @@ def test_v159_functional_probe_ast_contract() -> None:
             "allow_role_default_session(connection)",
         ),
         (
-            '"V159": "f98708b2ddcd57bda1bf861f0b3f49777b648aaa189ed7d69919998fca77852c"',
+            '"V159": "05a33e1aaffb4edb7a280ce38367f15c29ac11c6d678df91562fb7e2f1e4ce6d"',
             '"V159": "' + "0" * 64 + '"',
         ),
         ("BYTE_EXACT_READBACK", "BYTE_READBACK_SKIPPED"),
@@ -3026,7 +3082,7 @@ def test_v159_functional_probe_ast_rejects_composed_scenario_bypass() -> None:
 
 _CONCURRENCY_EXPECTED_SHA256 = {
     "V158": "7ed70599c6bd5f3cdb3376bc135a952d8c18f4ad62a62432c2bfdd8ee84e446b",
-    "V159": "f98708b2ddcd57bda1bf861f0b3f49777b648aaa189ed7d69919998fca77852c",
+    "V159": "05a33e1aaffb4edb7a280ce38367f15c29ac11c6d678df91562fb7e2f1e4ce6d",
 }
 _CONCURRENCY_SCENARIO_ORDER = (
     "_scenario_identical_attestation",
