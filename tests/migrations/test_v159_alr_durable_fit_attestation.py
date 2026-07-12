@@ -76,6 +76,47 @@ def _sql() -> str:
     return V159.read_text(encoding="utf-8")
 
 
+def _assert_attestation_column_aggregate_uses_implicit_single_group(
+    sql: str,
+) -> None:
+    start = sql.index(
+        "WITH expected(attnum, attname, data_type, not_null, has_default) AS ("
+    )
+    end = sql.index(") OR NOT EXISTS (", start)
+    aggregate = sql[start:end]
+    assert "GROUP BY TRUE" not in aggregate
+    assert "GROUP BY FALSE" not in aggregate
+    assert "GROUP BY" not in aggregate
+    assert "FULL JOIN actual AS a USING (attnum)" in aggregate
+    assert aggregate.count("HAVING count(*)=26") == 1
+    for exactness in (
+        "bool_and(e.attname IS NOT DISTINCT FROM a.attname)",
+        "bool_and(e.data_type IS NOT DISTINCT FROM a.data_type)",
+        "bool_and(e.not_null IS NOT DISTINCT FROM a.not_null)",
+        "bool_and(e.has_default IS NOT DISTINCT FROM a.has_default)",
+    ):
+        assert aggregate.count(exactness) == 1
+
+
+def test_v159_attestation_column_aggregate_has_no_constant_group_by() -> None:
+    _assert_attestation_column_aggregate_uses_implicit_single_group(_sql())
+
+
+@pytest.mark.parametrize("constant", ("TRUE", "FALSE"))
+def test_v159_constant_group_by_mutations_are_rejected(constant: str) -> None:
+    sql = _sql()
+    assert sql.count("HAVING count(*)=26") == 1
+    weakened = sql.replace(
+        "HAVING count(*)=26",
+        f"GROUP BY {constant}\n            HAVING count(*)=26",
+        1,
+    )
+    with pytest.raises(AssertionError):
+        _assert_attestation_column_aggregate_uses_implicit_single_group(
+            weakened
+        )
+
+
 _LEGACY_RESULT_FUNCTIONS = (
     "persist_alr_challenger_training_result_v1",
     "read_alr_challenger_training_result_v1",
@@ -2722,10 +2763,10 @@ def _assert_functional_positive_helper_contracts(tree: ast.Module) -> None:
 def _assert_functional_probe_contract(source: str) -> None:
     compile(source, str(FUNCTIONAL_PROBE), "exec")
     assert hashlib.sha256(V159.read_bytes()).hexdigest() == (
-        "9e570811210fa99cc65a19bbd1b62f5bd508ee6c0fe2856d980aa2299dec946c"
+        "c5f7fd0e0cc1ccb263dc35541e4d2f4b9fa7e4adc475886d752638659c549d02"
     )
     assert (
-        '"V159": "9e570811210fa99cc65a19bbd1b62f5bd508ee6c0fe2856d980aa2299dec946c"'
+        '"V159": "c5f7fd0e0cc1ccb263dc35541e4d2f4b9fa7e4adc475886d752638659c549d02"'
         in source
     )
     assert '_ACK_ENV = "ALR_V159_DISPOSABLE_ACK"' in source
@@ -3265,7 +3306,7 @@ def test_v159_functional_probe_ast_contract() -> None:
             "allow_role_default_session(connection)",
         ),
         (
-            '"V159": "9e570811210fa99cc65a19bbd1b62f5bd508ee6c0fe2856d980aa2299dec946c"',
+            '"V159": "c5f7fd0e0cc1ccb263dc35541e4d2f4b9fa7e4adc475886d752638659c549d02"',
             '"V159": "' + "0" * 64 + '"',
         ),
         ("BYTE_EXACT_READBACK", "BYTE_READBACK_SKIPPED"),
@@ -3595,7 +3636,7 @@ def test_v159_functional_probe_ast_rejects_composed_scenario_bypass() -> None:
 
 _CONCURRENCY_EXPECTED_SHA256 = {
     "V158": "7ed70599c6bd5f3cdb3376bc135a952d8c18f4ad62a62432c2bfdd8ee84e446b",
-    "V159": "9e570811210fa99cc65a19bbd1b62f5bd508ee6c0fe2856d980aa2299dec946c",
+    "V159": "c5f7fd0e0cc1ccb263dc35541e4d2f4b9fa7e4adc475886d752638659c549d02",
 }
 _CONCURRENCY_SCENARIO_ORDER = (
     "_scenario_identical_attestation",
