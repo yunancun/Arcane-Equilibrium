@@ -63,7 +63,7 @@ from ml_training.tests.integration.alr_durable_fit_attestation_isolated_pg impor
 
 _EXPECTED_SHA256 = {
     "V158": "7ed70599c6bd5f3cdb3376bc135a952d8c18f4ad62a62432c2bfdd8ee84e446b",
-    "V159": "210c99fe7ec53cb6ea7eb618cface034a645ee4df343eef92d8d98239d64dde1",
+    "V159": "9e570811210fa99cc65a19bbd1b62f5bd508ee6c0fe2856d980aa2299dec946c",
 }
 _ACK_ENV = "ALR_V159_CONCURRENCY_DISPOSABLE_ACK"
 _SENTINEL = "V159_DURABLE_FIT_CONCURRENCY_DISPOSABLE_MUTATION_CONFIRMED"
