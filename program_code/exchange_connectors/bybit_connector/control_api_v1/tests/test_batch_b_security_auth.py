@@ -127,6 +127,70 @@ def test_gui_auth_can_load_from_direct_environment(
     auth._AUTH_CREDENTIALS = None
 
 
+def test_partial_gui_env_falls_through_to_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A partial GUI env config must not shadow a valid gui_auth.env.
+    只設 GUI_USERNAME 或只設 GUI_PASSWORD（或另一個僅 whitespace）不得 shadow 掉
+    有效的 gui_auth.env，否則登入回 500 鎖死（可用性 footgun）。
+    """
+    env_dir = tmp_path / "environment_files"
+    env_dir.mkdir()
+    env_file = env_dir / "gui_auth.env"
+    env_file.write_text(
+        "GUI_USERNAME=fileuser\nGUI_PASSWORD=file-secret\n", encoding="utf-8"
+    )
+    monkeypatch.setenv("OPENCLAW_SECRETS_ROOT", str(tmp_path))
+    # 隔離 legacy fallback（~/BybitOpenClaw/secrets/gui_auth.env）：把 HOME 指向
+    # 空的 tmp_path，避免落到真實 runtime host 上的憑證檔干擾判定。
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    # 只設 GUI_USERNAME（GUI_PASSWORD 缺）→ fall through 到檔案 loader
+    monkeypatch.setenv("GUI_USERNAME", "envuser")
+    monkeypatch.delenv("GUI_PASSWORD", raising=False)
+    auth._AUTH_CREDENTIALS = None
+    assert auth_routes_common.load_expected_credentials() == ("fileuser", "file-secret")
+
+    # 只設 GUI_PASSWORD（GUI_USERNAME 缺）→ fall through 到檔案 loader
+    monkeypatch.delenv("GUI_USERNAME", raising=False)
+    monkeypatch.setenv("GUI_PASSWORD", "env-secret")
+    auth._AUTH_CREDENTIALS = None
+    assert auth_routes_common.load_expected_credentials() == ("fileuser", "file-secret")
+
+    # GUI_PASSWORD 僅 whitespace（strip 後為空）→ 視同未設，fall through
+    monkeypatch.setenv("GUI_USERNAME", "envuser")
+    monkeypatch.setenv("GUI_PASSWORD", "   ")
+    auth._AUTH_CREDENTIALS = None
+    assert auth_routes_common.load_expected_credentials() == ("fileuser", "file-secret")
+
+    auth._AUTH_CREDENTIALS = None
+
+
+def test_full_gui_env_wins_over_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Complete GUI env credentials take precedence over gui_auth.env.
+    同時提供完整 env 憑證與有效 gui_auth.env 時，env 必須勝出。
+    """
+    env_dir = tmp_path / "environment_files"
+    env_dir.mkdir()
+    env_file = env_dir / "gui_auth.env"
+    env_file.write_text(
+        "GUI_USERNAME=fileuser\nGUI_PASSWORD=file-secret\n", encoding="utf-8"
+    )
+    monkeypatch.setenv("OPENCLAW_SECRETS_ROOT", str(tmp_path))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("GUI_USERNAME", "envuser")
+    monkeypatch.setenv("GUI_PASSWORD", "env-secret")
+    auth._AUTH_CREDENTIALS = None
+
+    assert auth_routes_common.load_expected_credentials() == ("envuser", "env-secret")
+
+    auth._AUTH_CREDENTIALS = None
+
+
 def test_missing_gui_auth_reports_stable_error_code(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

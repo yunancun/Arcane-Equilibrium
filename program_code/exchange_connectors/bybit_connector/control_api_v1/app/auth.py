@@ -65,12 +65,14 @@ def _load_auth_credentials() -> dict[str, str]:
     启动时加载一次认证凭证并缓存，后续直接返回缓存值。
 
     Cross-platform path resolution (CLAUDE.md §七.★★.1):
-    1. GUI_USERNAME / GUI_PASSWORD environment variables
+    1. GUI_USERNAME AND GUI_PASSWORD environment variables (both required;
+       a partial env config falls through to the file loaders below)
     2. $OPENCLAW_SECRETS_ROOT/environment_files/gui_auth.env
     3. Linux legacy: ~/BybitOpenClaw/secrets/gui_auth.env
 
-    跨平台路徑解析（CLAUDE.md §七.★★.1）：優先讀顯式 env，再讀
-    $OPENCLAW_SECRETS_ROOT，最後 fallback 到 Linux legacy 預設路徑（不破壞既有部署）。
+    跨平台路徑解析（CLAUDE.md §七.★★.1）：GUI_USERNAME 與 GUI_PASSWORD 兩者都非空
+    才走 env 路徑，否則 fallback 到 $OPENCLAW_SECRETS_ROOT，再到 Linux legacy 預設
+    路徑（不破壞既有部署）。
     """
     global _AUTH_CREDENTIALS
     if _AUTH_CREDENTIALS is not None:
@@ -78,12 +80,22 @@ def _load_auth_credentials() -> dict[str, str]:
     creds: dict[str, str] = {}
     env_user = os.getenv("GUI_USERNAME", "").strip()
     env_pass = os.getenv("GUI_PASSWORD", "").strip()
-    if env_user or env_pass:
+    # 兩者都非空才採用 env 憑證（env_user/env_pass 已 strip，whitespace-only 視同未設）。
+    if env_user and env_pass:
         _AUTH_CREDENTIALS = {
             "GUI_USERNAME": env_user,
             "GUI_PASSWORD": env_pass,
         }
         return _AUTH_CREDENTIALS
+    if env_user or env_pass:
+        # 只設了其中一個（或另一個僅 whitespace）：不採用不完整的 env 憑證，
+        # 避免 shadow 掉一個有效的 gui_auth.env、使登入回 500 鎖死（可用性 footgun）。
+        # 直接 fall through 到下方檔案 loader（OPENCLAW_SECRETS_ROOT → Linux legacy）。
+        logger.warning(
+            "Partial GUI auth env config detected (only one of "
+            "GUI_USERNAME/GUI_PASSWORD is set); ignoring env and falling back "
+            "to gui_auth.env file loader."
+        )
     env_path: Path | None = None
     secrets_root = os.environ.get("OPENCLAW_SECRETS_ROOT")
     if secrets_root:
