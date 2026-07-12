@@ -109,6 +109,44 @@ def test_gui_password_blank_or_placeholder_rejected(
         with pytest.raises(HTTPException) as exc:
             auth_routes_common.load_expected_credentials()
         assert exc.value.status_code == 500
+        assert exc.value.detail["code"] == "AUTH_PASSWORD_MISSING"
+
+
+def test_gui_auth_can_load_from_direct_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Local/dev launchers may provide GUI auth directly via env vars."""
+    monkeypatch.setenv("GUI_USERNAME", "operator")
+    monkeypatch.setenv("GUI_PASSWORD", "local-secret")
+    auth._AUTH_CREDENTIALS = None
+
+    assert auth_routes_common.load_expected_credentials() == (
+        "operator",
+        "local-secret",
+    )
+    auth._AUTH_CREDENTIALS = None
+
+
+def test_missing_gui_auth_reports_stable_error_code(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Missing GUI auth must be diagnosable by code, not only prose."""
+    monkeypatch.delenv("GUI_USERNAME", raising=False)
+    monkeypatch.delenv("GUI_PASSWORD", raising=False)
+    monkeypatch.setenv("OPENCLAW_SECRETS_ROOT", str(tmp_path))
+    # 隔離 legacy fallback（~/BybitOpenClaw/secrets/gui_auth.env）：把 HOME 指向空
+    # tmp_path，使 expanduser 解析不到真實 runtime host 上的憑證檔，本測試才能在
+    # 有 legacy 檔的機器上仍真正驗證「完全無 auth config」路徑。
+    monkeypatch.setenv("HOME", str(tmp_path))
+    auth._AUTH_CREDENTIALS = None
+
+    with pytest.raises(HTTPException) as exc:
+        auth_routes_common.load_expected_credentials()
+
+    assert exc.value.status_code == 500
+    assert exc.value.detail["code"] == "AUTH_CONFIG_MISSING"
+    auth._AUTH_CREDENTIALS = None
 
 
 def test_cookie_secure_can_be_forced_and_proxy_trusted(

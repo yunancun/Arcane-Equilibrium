@@ -40,7 +40,7 @@ from typing import Any
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
@@ -368,14 +368,14 @@ async def security_headers_middleware(request: Request, call_next):
         "frame-src 'self' http://trade-core:3000; "
         "frame-ancestors 'self'"
     )
-    # OPS-1 Wave A: Report-Only shadow CSP（不阻擋，只記錄）— 為 Wave B 收
-    # 緊 `unsafe-inline` 提前蒐集 violation 樣本。CSP report-uri 指向自家
-    # POST /api/v1/csp/report endpoint。Wave B 完成後此 shadow 規則直接升
-    # 為 enforcing CSP，並刪掉 `unsafe-inline`。
+    # Keep Report-Only aligned with the current legacy GUI allowance. The app
+    # still contains inline handlers/styles across tab HTML; a stricter
+    # report-only policy floods /api/v1/csp/report and pollutes browser QA with
+    # 429 noise. Tighten this only after the full GUI is nonce/externalized.
     response.headers["Content-Security-Policy-Report-Only"] = (
         "default-src 'self'; "
-        "script-src 'self' https://unpkg.com; "
-        "style-src 'self'; "
+        "script-src 'self' 'unsafe-inline' https://unpkg.com; "
+        "style-src 'self' 'unsafe-inline'; "
         "img-src 'self' data:; "
         "connect-src 'self'; "
         "frame-src 'self' http://trade-core:3000; "
@@ -413,7 +413,7 @@ async def csp_report(request: Request):
             len(raw), _CSP_REPORT_MAX_BYTES,
             request.client.host if request.client else "unknown",
         )
-        return JSONResponse(status_code=413, content=None)
+        return Response(status_code=413)
     try:
         import json as _json  # 局部 import 避免污染 module top-level
         payload = _json.loads(raw.decode("utf-8")) if raw else {}
@@ -423,9 +423,9 @@ async def csp_report(request: Request):
             "CSP report received with invalid JSON body from %s",
             request.client.host if request.client else "unknown",
         )
-        return JSONResponse(status_code=204, content=None)
+        return Response(status_code=204)
     logger.info("csp_violation_report payload=%s", payload)
-    return JSONResponse(status_code=204, content=None)
+    return Response(status_code=204)
 
 
 @app.exception_handler(RateLimitExceeded)

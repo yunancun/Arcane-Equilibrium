@@ -135,9 +135,14 @@ def register_auth_legacy_routes(app) -> None:
         但沒有 csrf cookie；不 seed 的話 enforcing 切換瞬間所有寫操作 403。
         """
         cookie_token = request.cookies.get("oc_auth_token")
+        soft_check = request.query_params.get("soft") == "1"
         if not cookie_token:
+            if soft_check:
+                return JSONResponse({"authenticated": False})
             raise HTTPException(status_code=401, detail="Not authenticated")
         if not verify_token_constant_time(cookie_token):
+            if soft_check:
+                return JSONResponse({"authenticated": False})
             raise HTTPException(status_code=401, detail="Not authenticated")
 
         resp = JSONResponse({"authenticated": True})

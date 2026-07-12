@@ -65,16 +65,25 @@ def _load_auth_credentials() -> dict[str, str]:
     启动时加载一次认证凭证并缓存，后续直接返回缓存值。
 
     Cross-platform path resolution (CLAUDE.md §七.★★.1):
-    1. $OPENCLAW_SECRETS_ROOT/environment_files/gui_auth.env
-    2. Linux legacy: ~/BybitOpenClaw/secrets/gui_auth.env
+    1. GUI_USERNAME / GUI_PASSWORD environment variables
+    2. $OPENCLAW_SECRETS_ROOT/environment_files/gui_auth.env
+    3. Linux legacy: ~/BybitOpenClaw/secrets/gui_auth.env
 
-    跨平台路徑解析（CLAUDE.md §七.★★.1）：優先讀 $OPENCLAW_SECRETS_ROOT，
-    再 fallback 到 Linux legacy 預設路徑（不破壞既有部署）。
+    跨平台路徑解析（CLAUDE.md §七.★★.1）：優先讀顯式 env，再讀
+    $OPENCLAW_SECRETS_ROOT，最後 fallback 到 Linux legacy 預設路徑（不破壞既有部署）。
     """
     global _AUTH_CREDENTIALS
     if _AUTH_CREDENTIALS is not None:
         return _AUTH_CREDENTIALS
     creds: dict[str, str] = {}
+    env_user = os.getenv("GUI_USERNAME", "").strip()
+    env_pass = os.getenv("GUI_PASSWORD", "").strip()
+    if env_user or env_pass:
+        _AUTH_CREDENTIALS = {
+            "GUI_USERNAME": env_user,
+            "GUI_PASSWORD": env_pass,
+        }
+        return _AUTH_CREDENTIALS
     env_path: Path | None = None
     secrets_root = os.environ.get("OPENCLAW_SECRETS_ROOT")
     if secrets_root:

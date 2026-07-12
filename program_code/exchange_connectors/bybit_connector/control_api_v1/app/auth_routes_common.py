@@ -51,6 +51,16 @@ from .auth import (
 _PASSWORD_PLACEHOLDERS = frozenset({"YOUR_PASSWORD", "change-me", "CHANGE_ME", "password"})
 
 
+def _auth_config_error(code: str, message: str) -> HTTPException:
+    return HTTPException(
+        status_code=500,
+        detail={
+            "code": code,
+            "message": message,
+        },
+    )
+
+
 def _first_header_token(headers: Any, name: str) -> str:
     """Return the first comma-separated proxy header token."""
     raw = headers.get(name, "") if headers is not None else ""
@@ -184,17 +194,20 @@ def load_expected_credentials() -> tuple[str, str]:
     expected_pass = creds.get("GUI_PASSWORD", "")
 
     if not expected_user:
-        raise HTTPException(status_code=500, detail="Auth config not found")
+        raise _auth_config_error(
+            "AUTH_CONFIG_MISSING",
+            "GUI auth config not found — set GUI_USERNAME/GUI_PASSWORD or configure gui_auth.env",
+        )
 
     if expected_user == "YOUR_USERNAME":
-        raise HTTPException(
-            status_code=500,
-            detail="Auth not configured — edit gui_auth.env",
+        raise _auth_config_error(
+            "AUTH_CONFIG_PLACEHOLDER",
+            "GUI auth username placeholder is still configured — edit gui_auth.env",
         )
     if not expected_pass or expected_pass in _PASSWORD_PLACEHOLDERS:
-        raise HTTPException(
-            status_code=500,
-            detail="Auth password not configured — set GUI_PASSWORD",
+        raise _auth_config_error(
+            "AUTH_PASSWORD_MISSING",
+            "GUI auth password not configured — set GUI_PASSWORD",
         )
 
     return expected_user, expected_pass

@@ -283,6 +283,16 @@ def test_auth_check_without_auth_token_returns_401() -> None:
     assert r.status_code == 401
 
 
+def test_auth_check_soft_mode_without_auth_token_returns_false() -> None:
+    """Login page soft probe must avoid browser console 401 noise."""
+    from app import main_legacy as _base  # noqa: E402
+
+    client = TestClient(_base.app)
+    r = client.get("/api/v1/auth/check?soft=1")
+    assert r.status_code == 200
+    assert r.json() == {"authenticated": False}
+
+
 # ── F-4：CSP report rate-limit + body size ──────────────────────────────────
 
 
