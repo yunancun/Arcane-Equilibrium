@@ -235,11 +235,17 @@ class _StubEngine:
 
 def _interpret(reply_text: str | None):
     """跑真 _run_cloud_interpret，回 (parsed, cloud_stage)。 / drive real fn, return (parsed, stage)."""
+    parsed, meta = _interpret_meta(reply_text)
+    return parsed, meta.get("cloud_stage")
+
+
+def _interpret_meta(reply_text: str | None):
+    """跑真 _run_cloud_interpret，回 (parsed, meta 全量)——token 透傳斷言用。"""
     eng = _StubEngine(reply_text)
     parsed, _raw, _cost, _sysp, meta = asyncio.run(
         EXEC._run_cloud_interpret(eng, mode="diagnose_leak", context={"training_run_id": "r1"})
     )
-    return parsed, meta.get("cloud_stage")
+    return parsed, meta
 
 
 class TestStageClassificationHonestBoundary:
@@ -278,6 +284,89 @@ class TestStageClassificationHonestBoundary:
         assert outage_stage == "cloud_unavailable"
         assert unparsable_stage == "parse_failed"
         assert outage_stage != unparsable_stage
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 4) token meta 透傳（③ D3 token 欄 NULL 修）— resp 存在才放鍵；outage 不加鍵=NULL 語義
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestTokenMetaPassthrough:
+    def test_reply_present_puts_tokens_in_meta(self):
+        """有回覆且可 parse → meta 帶 input_tokens=5 / output_tokens=7（_StubResponse 預設）。
+
+        mutation-bite：若回退成「meta 不放 token 鍵」，此斷言 KeyError/None 轉紅——
+        D3 row 的 token 欄會退回全 NULL（正是 l2r:724ac38bc4fc 暴露的審計可讀性 gap）。"""
+        fenced = "```json\n" + json.dumps(_VALID_DIAGNOSE_OUTPUT) + "\n```"
+        parsed, meta = _interpret_meta(fenced)
+        assert isinstance(parsed, dict)
+        assert meta["input_tokens"] == 5
+        assert meta["output_tokens"] == 7
+
+    def test_present_but_unparsable_still_carries_tokens(self):
+        """有回覆但無法 parse（parse_failed）→ token 照放（token 有無 ≠ parse 成敗）。
+        E2E-1 真 row（l2r:724ac38bc4fc）正是此形狀：有 3401 字元回覆、cost>0，token 不得為 NULL。"""
+        parsed, meta = _interpret_meta("Sorry, prose only — no JSON.")
+        assert parsed is None
+        assert meta.get("cloud_stage") == "parse_failed"
+        assert meta["input_tokens"] == 5
+        assert meta["output_tokens"] == 7
+
+    def test_provider_none_keeps_token_keys_absent(self):
+        """provider 回 None（真 outage）→ meta「無」token 鍵——caller .get() 得 None →
+        D3 row token 欄保留 NULL=「無回應」的誠實語義（不得補 0 假裝有計量）。"""
+        parsed, meta = _interpret_meta(None)
+        assert parsed is None
+        assert "input_tokens" not in meta
+        assert "output_tokens" not in meta
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 5) 真實 E2E-1 回應 fixture（l2r:724ac38bc4fc；anthropic:sonnet 3401 字元原樣）
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# fixture 來源：2026-07-10 E2E-1 one-shot rerun 的 agent.l2_calls row l2r:724ac38bc4fc
+# raw_response 原樣（runtime 證據檔 l2_calls_raw_response.txt；報告
+# docs/CCAgentWorkSpace/E1/workspace/reports/2026-07-10--l2_e2e1_oneshot_rerun_success.md §3）。
+# 檔尾多存一個 POSIX 換行，載入時 removesuffix 還原 DB 精確 3401 字元。
+# 這是「修復被真實 model 輸出咬到」的回歸錨：當時 executor 不剝 fence → parsed=None → sink 0 row。
+
+_REAL_E2E1_FIXTURE = _HERE.parent / "fixtures" / "l2r_724ac38bc4fc_raw_response.txt"
+
+
+def _load_real_e2e1_raw() -> str:
+    return _REAL_E2E1_FIXTURE.read_text(encoding="utf-8").removesuffix("\n")
+
+
+class TestRealE2E1FencedResponse:
+    def test_fixture_matches_db_row_shape(self):
+        """fixture 與 DB row 形狀一致：3401 字元、```json fence 開頭、``` 結尾。"""
+        raw = _load_real_e2e1_raw()
+        assert len(raw) == 3401  # = agent.l2_calls length(raw_response) 親證值
+        assert raw.startswith("```json\n")
+        assert raw.endswith("```")
+
+    def test_real_response_parses_to_valid_diagnose_dict(self):
+        """真實回應剝殼後 parse 成合法 diagnose dict（mode/evidence×4/recommended_check）。"""
+        parsed = EXEC._parse_cloud_reply_json(_load_real_e2e1_raw())
+        assert isinstance(parsed, dict)
+        assert parsed["mode"] == "diagnose_leak"
+        diag = parsed["leak_drift_diagnosis"]
+        assert len(diag["evidence"]) == 4
+        assert diag["recommended_check"]
+        assert {e["kind"] for e in diag["evidence"]} == {"leak", "drift"}
+
+    def test_real_response_yields_stage_ok_not_parse_failed(self):
+        """真實回應經真 _run_cloud_interpret → stage=ok（歷史 bug 回歸錨）。
+
+        mutation-bite：若回退成「對原始文本直接 json.loads」（不剝 fence），此 3401 字元
+        帶殼回覆會 parse 失敗 → stage=parse_failed、sink 回到 0 row——本斷言即轉紅。"""
+        parsed, meta = _interpret_meta(_load_real_e2e1_raw())
+        assert isinstance(parsed, dict)
+        assert meta.get("cloud_stage") == "ok"
+        # token meta 同步在場（③ 修後 D3 row 此路徑不再落 NULL）。
+        assert meta["input_tokens"] == 5
+        assert meta["output_tokens"] == 7
 
 
 if __name__ == "__main__":  # pragma: no cover — 允許不經 pytest 直跑（快速 smoke）
