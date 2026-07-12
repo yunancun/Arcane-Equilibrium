@@ -440,7 +440,6 @@ BEGIN
             SELECT 1
             FROM expected AS e
             FULL JOIN actual AS a USING (attnum)
-            GROUP BY TRUE
             HAVING count(*)=26
                AND bool_and(e.attname IS NOT DISTINCT FROM a.attname)
                AND bool_and(e.data_type IS NOT DISTINCT FROM a.data_type)
