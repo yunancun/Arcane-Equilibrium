@@ -1197,8 +1197,14 @@ def _scenario_happy_path(
     markers.add("DURABLE_CHALLENGER_HASH_PARITY")
     with admin.cursor() as cursor:
         cursor.execute(
-            "SELECT verified_at<=attestation_bound_at AND attestation_bound_at<expires_at AS exact "
-            "FROM learning.alr_challenger_training_runs WHERE durable_attestation_hash=%s",
+            "SELECT a.verified_at<=r.attestation_bound_at "
+            "AND r.attestation_bound_at<a.expires_at "
+            "AND r.attestation_verified_at=a.verified_at "
+            "AND r.attestation_expires_at=a.expires_at AS exact "
+            "FROM learning.alr_challenger_training_runs r "
+            "JOIN learning.alr_challenger_fit_attestations a "
+            "ON a.durable_attestation_hash=r.durable_attestation_hash "
+            "WHERE r.durable_attestation_hash=%s",
             (fixture["durable_attestation_hash"],),
         )
         if cursor.fetchone() != {"exact": True}:

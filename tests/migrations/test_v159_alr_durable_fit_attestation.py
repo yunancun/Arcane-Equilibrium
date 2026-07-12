@@ -3261,8 +3261,38 @@ def _assert_functional_error_helper(
     assert _functional_calls(caller, helper_name), helper_name
 
 
+def _assert_functional_bind_time_oracle(tree: ast.Module) -> None:
+    happy_scenario = _functional_function(tree, "_scenario_happy_path")
+    bind_time_checks = [
+        statement
+        for statement in happy_scenario.body
+        if isinstance(statement, ast.With)
+    ]
+    assert len(bind_time_checks) == 1
+    expected = ast.parse(
+        'with admin.cursor() as cursor:\n'
+        '    cursor.execute(\n'
+        '        "SELECT a.verified_at<=r.attestation_bound_at "\n'
+        '        "AND r.attestation_bound_at<a.expires_at "\n'
+        '        "AND r.attestation_verified_at=a.verified_at "\n'
+        '        "AND r.attestation_expires_at=a.expires_at AS exact "\n'
+        '        "FROM learning.alr_challenger_training_runs r "\n'
+        '        "JOIN learning.alr_challenger_fit_attestations a "\n'
+        '        "ON a.durable_attestation_hash=r.durable_attestation_hash "\n'
+        '        "WHERE r.durable_attestation_hash=%s",\n'
+        '        (fixture["durable_attestation_hash"],),\n'
+        '    )\n'
+        '    if cursor.fetchone() != {"exact": True}:\n'
+        '        raise ProbeFailure("V159 database-owned bind time is invalid")\n'
+    ).body[0]
+    assert _functional_ast_shape(bind_time_checks[0]) == _functional_ast_shape(
+        expected
+    )
+
+
 def _assert_functional_probe_ast_contract(source: str) -> None:
     tree = _functional_probe_tree(source)
+    _assert_functional_bind_time_oracle(tree)
 
     pins = ast.literal_eval(_functional_assignment(tree, "_EXPECTED_SHA256"))
     assert pins == {
@@ -3588,6 +3618,38 @@ def test_v159_functional_probe_source_contract() -> None:
 
 def test_v159_functional_probe_ast_contract() -> None:
     _assert_functional_probe_ast_contract(_functional_probe_source())
+
+
+def test_v159_functional_probe_checks_database_bind_time_against_attestation_row() -> None:
+    _assert_functional_bind_time_oracle(
+        _functional_probe_tree(_functional_probe_source())
+    )
+
+
+@pytest.mark.parametrize(
+    "needle,replacement",
+    (
+        (
+            '"SELECT a.verified_at<=r.attestation_bound_at "',
+            '"SELECT TRUE AS exact /* bind-time oracle bypassed */ "',
+        ),
+        (
+            '"AND r.attestation_verified_at=a.verified_at "',
+            '"AND TRUE "',
+        ),
+        (
+            'if cursor.fetchone() != {"exact": True}:',
+            "if False:",
+        ),
+    ),
+)
+def test_v159_functional_probe_bind_time_oracle_mutations_are_rejected(
+    needle: str, replacement: str
+) -> None:
+    source = _functional_probe_source()
+    assert source.count(needle) == 1
+    with pytest.raises(AssertionError):
+        _assert_functional_probe_ast_contract(source.replace(needle, replacement))
 
 
 @pytest.mark.parametrize(
