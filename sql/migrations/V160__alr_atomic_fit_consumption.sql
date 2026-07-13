@@ -2189,17 +2189,26 @@ TO alr_challenger_consumption_caller;
 -- Close every old V159 application function and direct INSERT path.  The
 -- exact V158 qualified-receipt writer and reader ACLs are deliberately left
 -- untouched so admission can continue independently of fit consumption.
+GRANT USAGE ON SCHEMA learning TO alr_challenger_consumption_coordinator;
 DO $v160_relation_acl_closure$
 DECLARE
     v_acl RECORD;
+    v_schema_owner OID;
 BEGIN
+    SELECT nspowner INTO v_schema_owner FROM pg_namespace WHERE nspname='learning';
+    IF session_user<>current_user
+       OR current_user<>pg_get_userbyid(v_schema_owner) THEN
+        RAISE EXCEPTION 'V160 ACL closure requires trusted schema owner identity';
+    END IF;
+    EXECUTE 'SET LOCAL ROLE alr_challenger_consumption_coordinator';
+    IF current_user<>'alr_challenger_consumption_coordinator' THEN
+        RAISE EXCEPTION 'V160 ACL closure failed to assume relation owner';
+    END IF;
     FOR v_acl IN
         SELECT DISTINCT c.oid::regclass::TEXT AS relation_name,
                         privilege.grantee,
-                        privilege.grantor,
                         CASE WHEN privilege.grantee=0 THEN NULL
-                             ELSE pg_get_userbyid(privilege.grantee) END AS grantee_name,
-                        pg_get_userbyid(privilege.grantor) AS grantor_name
+                             ELSE pg_get_userbyid(privilege.grantee) END AS grantee_name
         FROM pg_class c
         CROSS JOIN LATERAL aclexplode(
             COALESCE(c.relacl,acldefault('r',c.relowner))) privilege
@@ -2215,18 +2224,41 @@ BEGIN
           'learning.alr_challenger_consumption_terminals'::regclass,
           'learning.alr_challenger_consumption_reconciliation_audit'::regclass)
           AND privilege.grantee<>c.relowner
-        ORDER BY 1,2,3
+        ORDER BY 1,2
     LOOP
         IF v_acl.grantee=0 THEN
             EXECUTE format(
-                'REVOKE ALL PRIVILEGES ON TABLE %s FROM PUBLIC GRANTED BY %I CASCADE',
-                v_acl.relation_name,v_acl.grantor_name);
+                'REVOKE ALL PRIVILEGES ON TABLE %s FROM PUBLIC CASCADE',
+                v_acl.relation_name);
         ELSE
             EXECUTE format(
-                'REVOKE ALL PRIVILEGES ON TABLE %s FROM %I GRANTED BY %I CASCADE',
-                v_acl.relation_name,v_acl.grantee_name,v_acl.grantor_name);
+                'REVOKE ALL PRIVILEGES ON TABLE %s FROM %I CASCADE',
+                v_acl.relation_name,v_acl.grantee_name);
         END IF;
     END LOOP;
+    IF EXISTS(
+        SELECT 1 FROM pg_class c
+        CROSS JOIN LATERAL aclexplode(
+            COALESCE(c.relacl,acldefault('r',c.relowner))) privilege
+        WHERE c.oid IN (
+          'learning.alr_challenger_fit_attestations'::regclass,
+          'learning.alr_challenger_training_runs'::regclass,
+          'learning.alr_challenger_model_artifacts'::regclass,
+          'learning.alr_challenger_registry'::regclass,
+          'learning.alr_challenger_consumption_requests'::regclass,
+          'learning.alr_challenger_consumption_claims'::regclass,
+          'learning.alr_challenger_consumption_statuses'::regclass,
+          'learning.alr_challenger_consumption_verifier_evidence'::regclass,
+          'learning.alr_challenger_consumption_terminals'::regclass,
+          'learning.alr_challenger_consumption_reconciliation_audit'::regclass)
+          AND privilege.grantee<>c.relowner) THEN
+        RAISE EXCEPTION 'V160 ACL closure left a non-owner relation grant';
+    END IF;
+    EXECUTE 'RESET ROLE';
+    IF current_user<>session_user
+       OR current_user<>pg_get_userbyid(v_schema_owner) THEN
+        RAISE EXCEPTION 'V160 ACL closure failed to restore trusted schema owner';
+    END IF;
 END
 $v160_relation_acl_closure$;
 
