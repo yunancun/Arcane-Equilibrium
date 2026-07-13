@@ -143,9 +143,9 @@ jobs:
     name: schema-consumer contract (linux + ephemeral pg)
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    # Two V157 preparations, both bounded V159 probes, and the existing cold
-    # Rust full-tree contract share this PR-only job; allow hosted compile time.
-    timeout-minutes: 30
+    # Four V157 preparations, bounded V159/V160 functional and concurrency
+    # probes, and the cold Rust full-tree contract share this PR-only job.
+    timeout-minutes: 40
     env:
       OPENCLAW_TEST_PG_DESTRUCTIVE: "1"
     defaults:
@@ -182,7 +182,7 @@ jobs:
           PGPASSWORD=contract_pass psql -h 127.0.0.1 -U contract_user -d contract_db \
             -c "CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;"
       - name: Create isolated V159 probe databases
-        # Functional and concurrency probes both apply V158/V159 and require
+        # Functional and concurrency probes apply their own forward migrations and require
         # empty durable tables, so they must never share a database. V006 also
         # unconditionally alters the historical compatibility DB `trading_ai`.
         run: |
@@ -195,9 +195,17 @@ jobs:
             -c "CREATE DATABASE alr_v159_functional_ci OWNER contract_user;"
           PGPASSWORD=contract_pass psql -h 127.0.0.1 -U contract_user -d postgres \
             -c "CREATE DATABASE alr_v159_concurrency_ci OWNER contract_user;"
+          PGPASSWORD=contract_pass psql -h 127.0.0.1 -U contract_user -d postgres \
+            -c "CREATE DATABASE alr_v160_functional_ci OWNER contract_user;"
+          PGPASSWORD=contract_pass psql -h 127.0.0.1 -U contract_user -d postgres \
+            -c "CREATE DATABASE alr_v160_concurrency_ci OWNER contract_user;"
           PGPASSWORD=contract_pass psql -h 127.0.0.1 -U contract_user -d alr_v159_functional_ci \
             -c "CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;"
           PGPASSWORD=contract_pass psql -h 127.0.0.1 -U contract_user -d alr_v159_concurrency_ci \
+            -c "CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;"
+          PGPASSWORD=contract_pass psql -h 127.0.0.1 -U contract_user -d alr_v160_functional_ci \
+            -c "CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;"
+          PGPASSWORD=contract_pass psql -h 127.0.0.1 -U contract_user -d alr_v160_concurrency_ci \
             -c "CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;"
       - name: Prepare V157 baseline for V159 functional probe
         env:
@@ -251,6 +259,56 @@ jobs:
         run: >-
           PGPASSWORD=contract_pass dropdb --force --if-exists
           -h 127.0.0.1 -U contract_user alr_v159_concurrency_ci
+      - name: Prepare V157 baseline for V160 functional probe
+        env:
+          OPENCLAW_TEST_PG: postgres://redacted@127.0.0.1:5432/alr_v160_functional_ci
+          OPENCLAW_V160_PROBE_BASELINE: "1"
+        run: >-
+          cargo test -p openclaw_engine --test schema_contract_test
+          prepare_v160_probe_v157_baseline -- --exact --test-threads=1
+      - name: Prepare V157 baseline for V160 concurrency probe
+        env:
+          OPENCLAW_TEST_PG: postgres://redacted@127.0.0.1:5432/alr_v160_concurrency_ci
+          OPENCLAW_V160_PROBE_BASELINE: "1"
+        run: >-
+          cargo test -p openclaw_engine --test schema_contract_test
+          prepare_v160_probe_v157_baseline -- --exact --test-threads=1
+      - name: Run V160 functional disposable-PG contract
+        working-directory: .
+        env:
+          ALR_V160_DISPOSABLE_ACK: "1"
+          ALR_V160_DISPOSABLE_ADMIN_DSN: >-
+            host=127.0.0.1 port=5432 dbname=alr_v160_functional_ci
+            user=contract_user password=contract_pass
+        run: >-
+          python3 program_code/ml_training/tests/integration/alr_atomic_fit_consumption_isolated_pg.py
+          --confirm-disposable-v160
+          --expected-database alr_v160_functional_ci
+          --disposable-sentinel V160_ATOMIC_FIT_DISPOSABLE_MUTATION_CONFIRMED:alr_v160_functional_ci
+      - name: Remove V160 functional probe database
+        if: always()
+        working-directory: .
+        run: >-
+          PGPASSWORD=contract_pass dropdb --force --if-exists
+          -h 127.0.0.1 -U contract_user alr_v160_functional_ci
+      - name: Run V160 concurrency disposable-PG contract
+        working-directory: .
+        env:
+          ALR_V160_CONCURRENCY_DISPOSABLE_ACK: "1"
+          ALR_V160_DISPOSABLE_ADMIN_DSN: >-
+            host=127.0.0.1 port=5432 dbname=alr_v160_concurrency_ci
+            user=contract_user password=contract_pass
+        run: >-
+          python3 program_code/ml_training/tests/integration/alr_atomic_fit_consumption_concurrency_isolated_pg.py
+          --confirm-disposable-v160-concurrency
+          --expected-database alr_v160_concurrency_ci
+          --disposable-sentinel V160_ATOMIC_FIT_CONCURRENCY_DISPOSABLE_MUTATION_CONFIRMED:alr_v160_concurrency_ci
+      - name: Remove V160 concurrency probe database
+        if: always()
+        working-directory: .
+        run: >-
+          PGPASSWORD=contract_pass dropdb --force --if-exists
+          -h 127.0.0.1 -U contract_user alr_v160_concurrency_ci
       - name: Schema-consumer contract test (cargo)
         # 正向：對代表性熱表跑真實 writer/consumer query（type/nullable/ON CONFLICT 都驗）。
         env:

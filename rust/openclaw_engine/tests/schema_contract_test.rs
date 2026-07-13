@@ -26,8 +26,9 @@
 //!   `model_registry`，讓完整 migration tree 自己驗證該 forward-compat 路徑。
 //!
 //!   邊界：**切勿**指向帶真實資料的 DB 或共用 cluster——測試會跑
-//!   migration 全樹建 schema，並建立六個 cluster-global fixture roles（V158 writer、
-//!   trainer caller、V159 attestor、attestor caller、trading_ai、alr_shadow）；表探針雖在隔離 transaction 內 INSERT 後
+//!   migration 全樹建 schema，並建立八個 cluster-global fixture roles（V158 writer、
+//!   trainer caller、V159 attestor、attestor caller、V160 coordinator、caller、
+//!   trading_ai、alr_shadow）；表探針雖在隔離 transaction 內 INSERT 後
 //!   ROLLBACK，仍不可指向 prod。trading_ai/alr_shadow 存在，因此全樹中的對應
 //!   role-conditional GRANT/REVOKE 分支會執行；V158/V159 的實際 ACL/denial 負向行為另由
 //!   respective explicit disposable Python probes 驗證。
@@ -54,7 +55,10 @@ fn srv_root() -> PathBuf {
 
 const DESTRUCTIVE_ACK_ENV_VAR: &str = "OPENCLAW_TEST_PG_DESTRUCTIVE";
 const V159_BASELINE_ACK_ENV_VAR: &str = "OPENCLAW_V159_PROBE_BASELINE";
+const V160_BASELINE_ACK_ENV_VAR: &str = "OPENCLAW_V160_PROBE_BASELINE";
 const V159_BASELINE_VERSION: i64 = 157;
+const V160_BASELINE_VERSION: i64 = 157;
+const V160_BASELINE_MIGRATION_COUNT: i64 = 142;
 
 /// 用 OPENCLAW_TEST_PG 建 pool；只有未設才回 None 由呼叫端 SKIP。
 /// Build a Postgres pool from OPENCLAW_TEST_PG. Only an absent variable skips.
@@ -133,7 +137,7 @@ async fn seed_legacy_precondition(pool: &PgPool) {
     }
 }
 
-/// Seed the exact role prerequisites required by V158/V159 in this disposable
+/// Seed the exact role prerequisites required by V158/V159/V160 in this disposable
 /// schema-contract cluster. The migrations deliberately cannot create or
 /// normalize their writer/caller roles; the two generic application fixtures
 /// are also present before apply so explicit generic revocation paths are
@@ -220,6 +224,16 @@ async fn seed_v158_role_preconditions(pool: &PgPool) {
                      NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS CONNECTION LIMIT 1; \
              END IF; \
              IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles \
+                            WHERE rolname = 'alr_challenger_consumption_coordinator') THEN \
+                 CREATE ROLE alr_challenger_consumption_coordinator NOLOGIN NOSUPERUSER NOCREATEDB \
+                     NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS; \
+             END IF; \
+             IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles \
+                            WHERE rolname = 'alr_challenger_consumption_caller') THEN \
+                 CREATE ROLE alr_challenger_consumption_caller LOGIN NOSUPERUSER NOCREATEDB \
+                     NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS CONNECTION LIMIT 1; \
+             END IF; \
+             IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles \
                             WHERE rolname = 'trading_ai') THEN \
                  CREATE ROLE trading_ai NOLOGIN NOSUPERUSER NOCREATEDB \
                      NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS; \
@@ -266,6 +280,20 @@ async fn seed_v158_role_preconditions(pool: &PgPool) {
                    AND NOT rolcreaterole AND NOT rolinherit AND NOT rolreplication \
                    AND NOT rolbypassrls AND rolconnlimit = 1 \
              ) \
+             AND EXISTS ( \
+                 SELECT 1 FROM pg_catalog.pg_roles \
+                 WHERE rolname = 'alr_challenger_consumption_coordinator' \
+                   AND NOT rolcanlogin AND NOT rolsuper AND NOT rolcreatedb \
+                   AND NOT rolcreaterole AND NOT rolinherit AND NOT rolreplication \
+                   AND NOT rolbypassrls AND rolconnlimit = -1 \
+             ) \
+             AND EXISTS ( \
+                 SELECT 1 FROM pg_catalog.pg_roles \
+                 WHERE rolname = 'alr_challenger_consumption_caller' \
+                   AND rolcanlogin AND NOT rolsuper AND NOT rolcreatedb \
+                   AND NOT rolcreaterole AND NOT rolinherit AND NOT rolreplication \
+                   AND NOT rolbypassrls AND rolconnlimit = 1 \
+             ) \
              AND ( \
                  SELECT pg_catalog.count(*) = 2 \
                  FROM pg_catalog.pg_roles \
@@ -284,6 +312,8 @@ async fn seed_v158_role_preconditions(pool: &PgPool) {
                          'alr_challenger_trainer_caller', \
                          'alr_challenger_fit_attestor', \
                          'alr_challenger_fit_attestor_caller', \
+                         'alr_challenger_consumption_coordinator', \
+                         'alr_challenger_consumption_caller', \
                          'trading_ai', \
                          'alr_shadow' \
                      ) \
@@ -295,6 +325,8 @@ async fn seed_v158_role_preconditions(pool: &PgPool) {
                          'alr_challenger_trainer_caller', \
                          'alr_challenger_fit_attestor', \
                          'alr_challenger_fit_attestor_caller', \
+                         'alr_challenger_consumption_coordinator', \
+                         'alr_challenger_consumption_caller', \
                          'trading_ai', \
                          'alr_shadow' \
                      ) \
@@ -309,7 +341,9 @@ async fn seed_v158_role_preconditions(pool: &PgPool) {
              AND NOT EXISTS ( \
                  SELECT 1 FROM pg_catalog.unnest(ARRAY[ \
                      'alr_challenger_fit_attestor', \
-                     'alr_challenger_fit_attestor_caller' \
+                     'alr_challenger_fit_attestor_caller', \
+                     'alr_challenger_consumption_coordinator', \
+                     'alr_challenger_consumption_caller' \
                  ]) AS role_name(name) \
                  WHERE pg_catalog.has_parameter_privilege( \
                      role_name.name, 'session_replication_role', 'SET' \
@@ -333,6 +367,8 @@ async fn seed_v158_role_preconditions(pool: &PgPool) {
                        'alr_challenger_trainer_caller', \
                        'alr_challenger_fit_attestor', \
                        'alr_challenger_fit_attestor_caller', \
+                       'alr_challenger_consumption_coordinator', \
+                       'alr_challenger_consumption_caller', \
                        'trading_ai', \
                        'alr_shadow' \
                    ) \
@@ -414,6 +450,175 @@ async fn prepare_v159_probe_v157_baseline() {
     assert_eq!(
         v158_relations, 0,
         "V159 baseline is not empty of V158/V159 durable relations"
+    );
+    pool.close().await;
+}
+
+/// Prepare an independently disposable pre-V158 database for each V160 probe.
+/// The Python probes own application of V158/V159/V160 and their replay checks;
+/// this Rust fixture only establishes the canonical V157 migration baseline and
+/// all eight exact role prerequisites shared by those forward migrations.
+#[tokio::test]
+async fn prepare_v160_probe_v157_baseline() {
+    if std::env::var(V160_BASELINE_ACK_ENV_VAR).as_deref() != Ok("1") {
+        eprintln!("SKIP: {V160_BASELINE_ACK_ENV_VAR}=1 not set");
+        return;
+    }
+    let pool = maybe_pool()
+        .await
+        .expect("V160 baseline acknowledgement requires OPENCLAW_TEST_PG");
+    seed_legacy_precondition(&pool).await;
+    let role_preconditions = seed_v158_role_preconditions(&pool);
+    role_preconditions.await;
+
+    let migrations_dir = srv_root().join("sql").join("migrations");
+    let all_migrations = load_migrations_from_dir(&migrations_dir)
+        .expect("load canonical migration tree for V160 probe baseline");
+    assert!(
+        all_migrations
+            .iter()
+            .any(|migration| migration.version == 158)
+            && all_migrations
+                .iter()
+                .any(|migration| migration.version == 159)
+            && all_migrations
+                .iter()
+                .any(|migration| migration.version == 160),
+        "V160 probe baseline requires canonical V158/V159/V160 sources"
+    );
+    let baseline_migrations = all_migrations
+        .into_iter()
+        .filter(|migration| migration.version <= V160_BASELINE_VERSION)
+        .collect();
+    build_migrator(baseline_migrations)
+        .run(&pool)
+        .await
+        .expect("apply canonical migration tree through V157 for V160 probe");
+
+    let (highest_version, migration_count, post_v157_count, durable_relations): (
+        Option<i64>,
+        i64,
+        i64,
+        i64,
+    ) = sqlx::query_as(
+        "SELECT \
+                 (SELECT max(version) FROM public._sqlx_migrations), \
+                 (SELECT count(*) FROM public._sqlx_migrations), \
+                 (SELECT count(*) FROM public._sqlx_migrations WHERE version > 157), \
+                 (SELECT count(*) FROM pg_catalog.pg_class AS relation \
+                    JOIN pg_catalog.pg_namespace AS namespace \
+                      ON namespace.oid = relation.relnamespace \
+                   WHERE namespace.nspname = 'learning' \
+                     AND relation.relname IN ( \
+                         'alr_qualified_training_receipts', \
+                         'alr_challenger_fit_attestations', \
+                         'alr_challenger_training_runs', \
+                         'alr_challenger_model_artifacts', \
+                         'alr_challenger_registry', \
+                         'alr_challenger_consumption_requests', \
+                         'alr_challenger_consumption_claims', \
+                         'alr_challenger_consumption_statuses', \
+                         'alr_challenger_consumption_verifier_evidence', \
+                         'alr_challenger_consumption_terminals', \
+                         'alr_challenger_consumption_reconciliation_audit' \
+                     ))",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("verify exact V157 V160-probe baseline");
+    assert_eq!(highest_version, Some(V160_BASELINE_VERSION));
+    assert_eq!(
+        post_v157_count, 0,
+        "V160 baseline applied a post-V157 migration"
+    );
+    assert_eq!(
+        migration_count, V160_BASELINE_MIGRATION_COUNT,
+        "V160 baseline migration ledger cardinality drifted"
+    );
+    assert_eq!(
+        durable_relations, 0,
+        "V160 baseline is not empty of V158/V159/V160 durable relations"
+    );
+
+    let sentinel_absent: bool = sqlx::query_scalar(
+        "SELECT pg_catalog.to_regclass( \
+             'public.alr_v160_disposable_probe_sentinel' \
+         ) IS NULL",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("inspect V160 disposable baseline sentinel absence");
+    assert!(
+        sentinel_absent,
+        "V160 disposable baseline sentinel already exists"
+    );
+    sqlx::query(
+        "CREATE TABLE public.alr_v160_disposable_probe_sentinel ( \
+             sentinel_id TEXT PRIMARY KEY, \
+             database_name TEXT NOT NULL, \
+             database_oid TEXT NOT NULL, \
+             server_version_num TEXT NOT NULL, \
+             postmaster_started_at TEXT NOT NULL, \
+             database_owner TEXT NOT NULL, \
+             baseline_session_user TEXT NOT NULL, \
+             baseline_current_user TEXT NOT NULL, \
+             highest_migration BIGINT NOT NULL, \
+             migration_count BIGINT NOT NULL, \
+             post_v157_count BIGINT NOT NULL, \
+             created_at TIMESTAMPTZ NOT NULL DEFAULT pg_catalog.clock_timestamp() \
+         )",
+    )
+    .execute(&pool)
+    .await
+    .expect("create V160 disposable baseline sentinel");
+    sqlx::query(
+        "INSERT INTO public.alr_v160_disposable_probe_sentinel ( \
+             sentinel_id,database_name,database_oid,server_version_num, \
+             postmaster_started_at,database_owner,baseline_session_user, \
+             baseline_current_user,highest_migration,migration_count, \
+             post_v157_count \
+         ) SELECT \
+             'V160_V157_BASELINE_DISPOSABLE_CONFIRMED:' || pg_catalog.current_database(), \
+             pg_catalog.current_database(), \
+             (SELECT oid::TEXT FROM pg_catalog.pg_database \
+              WHERE datname=pg_catalog.current_database()), \
+             pg_catalog.current_setting('server_version_num'), \
+             pg_catalog.pg_postmaster_start_time()::TEXT, \
+             pg_catalog.pg_get_userbyid(d.datdba),SESSION_USER,CURRENT_USER, \
+             (SELECT max(version) FROM public._sqlx_migrations), \
+             (SELECT count(*) FROM public._sqlx_migrations), \
+             (SELECT count(*) FROM public._sqlx_migrations WHERE version>157) \
+         FROM pg_catalog.pg_database d \
+         WHERE d.datname=pg_catalog.current_database()",
+    )
+    .execute(&pool)
+    .await
+    .expect("insert exact V160 disposable baseline sentinel");
+    let sentinel_is_exact: bool = sqlx::query_scalar(
+        "SELECT count(*)=1 AND bool_and( \
+             sentinel_id='V160_V157_BASELINE_DISPOSABLE_CONFIRMED:' || \
+                 pg_catalog.current_database() \
+             AND database_name=pg_catalog.current_database() \
+             AND database_oid=(SELECT oid::TEXT FROM pg_catalog.pg_database \
+                 WHERE datname=pg_catalog.current_database()) \
+             AND server_version_num=pg_catalog.current_setting('server_version_num') \
+             AND postmaster_started_at=pg_catalog.pg_postmaster_start_time()::TEXT \
+             AND database_owner=(SELECT pg_catalog.pg_get_userbyid(datdba) \
+                 FROM pg_catalog.pg_database \
+                 WHERE datname=pg_catalog.current_database()) \
+             AND baseline_session_user=SESSION_USER \
+             AND baseline_current_user=CURRENT_USER \
+             AND highest_migration=157 \
+             AND migration_count=142 \
+             AND post_v157_count=0 \
+         ) FROM public.alr_v160_disposable_probe_sentinel",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("verify exact V160 disposable baseline sentinel");
+    assert!(
+        sentinel_is_exact,
+        "V160 disposable baseline sentinel identity or ledger drifted"
     );
     pool.close().await;
 }
