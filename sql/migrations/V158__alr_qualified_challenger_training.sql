@@ -226,7 +226,7 @@ BEGIN
                   CROSS JOIN LATERAL aclexplode(
                     COALESCE(p.proacl, acldefault('f', p.proowner))
                   ) AS a WHERE p.oid=v_oid AND a.grantee=v_caller.oid)
-                 <> CASE WHEN v_spec.caller_access THEN 1 ELSE 0 END THEN
+                 <> (CASE WHEN v_spec.caller_access THEN 1 ELSE 0 END) THEN
                 RAISE EXCEPTION
                     'V158 Guard A FAIL: existing fixed function drift: %',
                     v_spec.identity;

@@ -5,6 +5,7 @@
 # 在那之前禁止新代碼使用 ae_*/AE_* 前綴（防雙前綴並存）。
 [workspace]
 members = [
+    "openclaw_alr_fit_verifier",
     "openclaw_types",
     "openclaw_core",
     "openclaw_engine",
