@@ -1109,11 +1109,11 @@ def _assert_exact_success_readback(
         or attestation.get("durable_receipt_hash") != subject["durable_receipt_hash"]
         or attestation.get("training_key_hash") != subject["training_key_hash"]
         or attestation.get("structural_result_hash")
-        != subject["structural_result_hash"]
+        != subject["result_hash"]
         or attestation.get("structural_fit_capture_hash")
-        != subject["structural_fit_capture_hash"]
+        != subject["fit_capture_hash"]
         or attestation.get("structural_candidate_hash")
-        != subject["structural_candidate_hash"]
+        != subject["candidate_attestation_hash"]
         or attestation.get("structural_training_run_hash")
         != subject["training_run_hash"]
         or attestation.get("structural_challenger_hash")
