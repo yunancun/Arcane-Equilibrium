@@ -48,7 +48,7 @@ _V160 = (_ROOT / "sql/migrations/V160__alr_atomic_fit_consumption.sql").resolve(
 _EXPECTED_SHA256 = {
     "V158": "7ed70599c6bd5f3cdb3376bc135a952d8c18f4ad62a62432c2bfdd8ee84e446b",
     "V159": "2e11d0ae0cbc2c1161a47d04bed4054c31b728e8cf945f931197f9b3455b7d74",
-    "V160": "3027cb3c8c87e016fc2d7ea278baf74af78d0c7b7dbccc5fa1798d6a0a4a3d06",
+    "V160": "97024130f766443bd6396536ad135f33becb0b563c9e251c0b8c58799eb6e055",
 }
 _ACK_ENV = "ALR_V160_DISPOSABLE_ACK"
 _ADMIN_DSN_ENV = "ALR_V160_DISPOSABLE_ADMIN_DSN"

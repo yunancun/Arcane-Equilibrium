@@ -392,7 +392,8 @@ BEGIN
                     COALESCE(c.relacl,acldefault('r',c.relowner))) privilege
                   WHERE c.oid=v_spec.relation_name::regclass
                     AND privilege.grantee=c.relowner
-                    AND privilege.is_grantable
+                    AND privilege.grantor=c.relowner
+                    AND NOT privilege.is_grantable
                     AND privilege.privilege_type IN (
                       'SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER'))<>7 THEN
                 RAISE EXCEPTION 'V160 exact replay catalog drift: %',
@@ -515,7 +516,8 @@ BEGIN
                     COALESCE(c.relacl,acldefault('r',c.relowner))) privilege
                   WHERE c.oid=v_spec.relation_name::regclass
                     AND privilege.grantee=c.relowner
-                    AND privilege.is_grantable
+                    AND privilege.grantor=c.relowner
+                    AND NOT privilege.is_grantable
                     AND privilege.privilege_type IN (
                       'SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER'))<>7 THEN
                 RAISE EXCEPTION 'V160 exact replay V159 owner/closure drift: %',
@@ -2546,7 +2548,8 @@ BEGIN
                 COALESCE(c.relacl,acldefault('r',c.relowner))) privilege
               WHERE c.oid=v_relation::regclass
                 AND privilege.grantee=c.relowner
-                AND privilege.is_grantable
+                AND privilege.grantor=c.relowner
+                AND NOT privilege.is_grantable
                 AND privilege.privilege_type IN (
                   'SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER'))<>7 THEN
             RAISE EXCEPTION 'V160 postflight table owner/ACL failed: %',v_relation;
