@@ -58,7 +58,6 @@ const V159_BASELINE_ACK_ENV_VAR: &str = "OPENCLAW_V159_PROBE_BASELINE";
 const V160_BASELINE_ACK_ENV_VAR: &str = "OPENCLAW_V160_PROBE_BASELINE";
 const V159_BASELINE_VERSION: i64 = 157;
 const V160_BASELINE_VERSION: i64 = 157;
-const V160_BASELINE_MIGRATION_COUNT: i64 = 142;
 
 /// 用 OPENCLAW_TEST_PG 建 pool；只有未設才回 None 由呼叫端 SKIP。
 /// Build a Postgres pool from OPENCLAW_TEST_PG. Only an absent variable skips.
@@ -486,25 +485,48 @@ async fn prepare_v160_probe_v157_baseline() {
                 .any(|migration| migration.version == 160),
         "V160 probe baseline requires canonical V158/V159/V160 sources"
     );
-    let baseline_migrations = all_migrations
+    let baseline_migrations: Vec<_> = all_migrations
         .into_iter()
         .filter(|migration| migration.version <= V160_BASELINE_VERSION)
         .collect();
+    let expected_baseline_migration_count = i64::try_from(baseline_migrations.len())
+        .expect("canonical V157 migration count fits BIGINT");
+    let mut canonical_baseline_versions: Vec<i64> = baseline_migrations
+        .iter()
+        .map(|migration| migration.version)
+        .collect();
+    canonical_baseline_versions.sort_unstable();
+    canonical_baseline_versions.dedup();
+    assert_eq!(
+        i64::try_from(canonical_baseline_versions.len())
+            .expect("canonical unique V157 migration count fits BIGINT"),
+        expected_baseline_migration_count,
+        "V160 canonical V157 source migration versions are not unique"
+    );
+    assert_eq!(
+        canonical_baseline_versions.last().copied(),
+        Some(V160_BASELINE_VERSION),
+        "V160 canonical baseline source does not terminate at V157"
+    );
     build_migrator(baseline_migrations)
         .run(&pool)
         .await
         .expect("apply canonical migration tree through V157 for V160 probe");
 
-    let (highest_version, migration_count, post_v157_count, durable_relations): (
-        Option<i64>,
-        i64,
-        i64,
-        i64,
-    ) = sqlx::query_as(
+    let (
+        highest_version,
+        migration_count,
+        distinct_migration_count,
+        post_v157_count,
+        failed_migration_count,
+        durable_relations,
+    ): (Option<i64>, i64, i64, i64, i64, i64) = sqlx::query_as(
         "SELECT \
                  (SELECT max(version) FROM public._sqlx_migrations), \
                  (SELECT count(*) FROM public._sqlx_migrations), \
+                 (SELECT count(DISTINCT version) FROM public._sqlx_migrations), \
                  (SELECT count(*) FROM public._sqlx_migrations WHERE version > 157), \
+                 (SELECT count(*) FROM public._sqlx_migrations WHERE success IS NOT TRUE), \
                  (SELECT count(*) FROM pg_catalog.pg_class AS relation \
                     JOIN pg_catalog.pg_namespace AS namespace \
                       ON namespace.oid = relation.relnamespace \
@@ -532,8 +554,16 @@ async fn prepare_v160_probe_v157_baseline() {
         "V160 baseline applied a post-V157 migration"
     );
     assert_eq!(
-        migration_count, V160_BASELINE_MIGRATION_COUNT,
-        "V160 baseline migration ledger cardinality drifted"
+        migration_count, expected_baseline_migration_count,
+        "V160 baseline ledger differs from the canonical loaded <=V157 sources"
+    );
+    assert_eq!(
+        distinct_migration_count, expected_baseline_migration_count,
+        "V160 baseline ledger contains duplicate migration versions"
+    );
+    assert_eq!(
+        failed_migration_count, 0,
+        "V160 baseline ledger contains a failed migration"
     );
     assert_eq!(
         durable_relations, 0,
@@ -564,6 +594,7 @@ async fn prepare_v160_probe_v157_baseline() {
              baseline_current_user TEXT NOT NULL, \
              highest_migration BIGINT NOT NULL, \
              migration_count BIGINT NOT NULL, \
+             expected_migration_count BIGINT NOT NULL, \
              post_v157_count BIGINT NOT NULL, \
              created_at TIMESTAMPTZ NOT NULL DEFAULT pg_catalog.clock_timestamp() \
          )",
@@ -576,7 +607,7 @@ async fn prepare_v160_probe_v157_baseline() {
              sentinel_id,database_name,database_oid,server_version_num, \
              postmaster_started_at,database_owner,baseline_session_user, \
              baseline_current_user,highest_migration,migration_count, \
-             post_v157_count \
+             expected_migration_count,post_v157_count \
          ) SELECT \
              'V160_V157_BASELINE_DISPOSABLE_CONFIRMED:' || pg_catalog.current_database(), \
              pg_catalog.current_database(), \
@@ -587,10 +618,12 @@ async fn prepare_v160_probe_v157_baseline() {
              pg_catalog.pg_get_userbyid(d.datdba),SESSION_USER,CURRENT_USER, \
              (SELECT max(version) FROM public._sqlx_migrations), \
              (SELECT count(*) FROM public._sqlx_migrations), \
+             $1, \
              (SELECT count(*) FROM public._sqlx_migrations WHERE version>157) \
          FROM pg_catalog.pg_database d \
          WHERE d.datname=pg_catalog.current_database()",
     )
+    .bind(expected_baseline_migration_count)
     .execute(&pool)
     .await
     .expect("insert exact V160 disposable baseline sentinel");
@@ -609,10 +642,12 @@ async fn prepare_v160_probe_v157_baseline() {
              AND baseline_session_user=SESSION_USER \
              AND baseline_current_user=CURRENT_USER \
              AND highest_migration=157 \
-             AND migration_count=142 \
+             AND migration_count=$1 \
+             AND expected_migration_count=$1 \
              AND post_v157_count=0 \
          ) FROM public.alr_v160_disposable_probe_sentinel",
     )
+    .bind(expected_baseline_migration_count)
     .fetch_one(&pool)
     .await
     .expect("verify exact V160 disposable baseline sentinel");

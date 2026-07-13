@@ -239,13 +239,15 @@ def _assert_v157_disposable_baseline(
         "database_owner": session["current_user"] if session else None,
     }:
         raise ProbeFailure("V160 baseline requires direct superuser database owner identity")
-    if ledger != {
-        "highest_migration": 157,
-        "migration_count": 142,
-        "distinct_count": 142,
-        "post_v157_count": 0,
-        "failed_count": 0,
-    }:
+    if (
+        not ledger
+        or ledger["highest_migration"] != 157
+        or not isinstance(ledger["migration_count"], int)
+        or ledger["migration_count"] <= 0
+        or ledger["distinct_count"] != ledger["migration_count"]
+        or ledger["post_v157_count"] != 0
+        or ledger["failed_count"] != 0
+    ):
         raise ProbeFailure("V160 exact V157 migration ledger proof failed")
     if len(sentinels) != 1:
         raise ProbeFailure("V160 database-resident disposable sentinel cardinality failed")
@@ -260,12 +262,18 @@ def _assert_v157_disposable_baseline(
         "baseline_session_user": session["current_user"],
         "baseline_current_user": session["current_user"],
         "highest_migration": 157,
-        "migration_count": 142,
+        "migration_count": ledger["migration_count"],
+        "expected_migration_count": ledger["migration_count"],
         "post_v157_count": 0,
         "relation_owner": session["current_user"],
     }
     observed = {key: sentinel.get(key) for key in expected_sentinel}
-    if observed != expected_sentinel or sentinel.get("created_at") is None:
+    if (
+        sentinel.get("expected_migration_count") != ledger["migration_count"]
+        or sentinel.get("migration_count") != ledger["distinct_count"]
+        or observed != expected_sentinel
+        or sentinel.get("created_at") is None
+    ):
         raise ProbeFailure("V160 database-resident sentinel identity proof failed")
 
 
