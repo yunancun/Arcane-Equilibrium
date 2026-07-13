@@ -524,9 +524,21 @@ app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 # SEC-D03: Auth guard for static files — prevent unauthenticated access to GUI HTML/JS.
 # SEC-D03：靜態文件認證守衛 — 防止未認證用戶訪問 GUI HTML/JS。
-# Exempt: styles.css (needed by login page before auth), favicon, and robots.txt.
-# 豁免：styles.css（登錄頁面認證前需要）、favicon、robots.txt。
-_STATIC_AUTH_EXEMPT = frozenset({"/static/styles.css", "/static/favicon.ico", "/static/robots.txt"})
+# Exempt: login-page CSS (design tokens + compat + utilities + styles, all linked by
+# login.html before auth), favicon, and robots.txt. These are pure design/layout CSS
+# with no secrets or business logic, so exempting them matches the styles.css precedent;
+# without them the login page loses every var(--*) token and renders unthemed (white).
+# 豁免：登錄頁 CSS（design token + compat + utilities + styles，login.html 認證前全部引用）、
+# favicon、robots.txt。皆為純設計/排版 CSS，無密鑰與業務邏輯，與 styles.css 先例一致；
+# 缺這些時登錄頁所有 var(--*) token 失效，會退化成未套主題的白底。
+_STATIC_AUTH_EXEMPT = frozenset({
+    "/static/tokens.css",
+    "/static/tokens-compat.css",
+    "/static/oc-utilities.css",
+    "/static/styles.css",
+    "/static/favicon.ico",
+    "/static/robots.txt",
+})
 
 
 @app.middleware("http")
