@@ -1491,10 +1491,10 @@ def _bundle_counts(admin: Any, request_hash: str) -> dict[str, int]:
         cursor.execute(
             "SELECT "
             "(SELECT count(*) FROM learning.alr_challenger_consumption_terminals WHERE request_hash=%s) AS terminals,"
-            "(SELECT count(*) FROM learning.alr_challenger_fit_attestations a JOIN learning.alr_challenger_consumption_requests r USING(durable_receipt_hash,training_key_hash) WHERE r.request_hash=%s) AS attestations,"
-            "(SELECT count(*) FROM learning.alr_challenger_training_runs x JOIN learning.alr_challenger_consumption_requests r USING(durable_receipt_hash,training_key_hash) WHERE r.request_hash=%s) AS runs,"
-            "(SELECT count(*) FROM learning.alr_challenger_model_artifacts m JOIN learning.alr_challenger_training_runs x ON x.training_run_hash=m.training_run_hash JOIN learning.alr_challenger_consumption_requests r USING(durable_receipt_hash,training_key_hash) WHERE r.request_hash=%s) AS artifacts,"
-            "(SELECT count(*) FROM learning.alr_challenger_registry g JOIN learning.alr_challenger_training_runs x ON x.training_run_hash=g.training_run_hash JOIN learning.alr_challenger_consumption_requests r USING(durable_receipt_hash,training_key_hash) WHERE r.request_hash=%s) AS registry,"
+            "(SELECT count(*) FROM learning.alr_challenger_fit_attestations a JOIN learning.alr_challenger_consumption_requests r ON r.durable_receipt_hash=a.durable_receipt_hash AND r.training_key_hash=a.training_key_hash WHERE r.request_hash=%s) AS attestations,"
+            "(SELECT count(*) FROM learning.alr_challenger_training_runs x JOIN learning.alr_challenger_consumption_requests r ON r.durable_receipt_hash=x.durable_receipt_hash AND r.training_key_hash=x.training_key_hash WHERE r.request_hash=%s) AS runs,"
+            "(SELECT count(*) FROM learning.alr_challenger_model_artifacts m JOIN learning.alr_challenger_training_runs x ON x.training_run_hash=m.training_run_hash JOIN learning.alr_challenger_consumption_requests r ON r.durable_receipt_hash=x.durable_receipt_hash AND r.training_key_hash=x.training_key_hash WHERE r.request_hash=%s) AS artifacts,"
+            "(SELECT count(*) FROM learning.alr_challenger_registry g JOIN learning.alr_challenger_training_runs x ON x.training_run_hash=g.training_run_hash JOIN learning.alr_challenger_consumption_requests r ON r.durable_receipt_hash=x.durable_receipt_hash AND r.training_key_hash=x.training_key_hash WHERE r.request_hash=%s) AS registry,"
             "(SELECT count(*) FROM learning.alr_challenger_consumption_reconciliation_audit WHERE request_hash=%s) AS reconciliation",
             (request_hash,) * 6,
         )
