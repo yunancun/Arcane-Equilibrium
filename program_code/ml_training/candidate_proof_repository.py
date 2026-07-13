@@ -907,7 +907,11 @@ def _canonical_utc_z(value: Any, field: str) -> str:
         parsed = parsed.astimezone(timezone.utc)
     else:
         raise CandidateProofRepositoryError(field + "_invalid")
-    return parsed.isoformat().replace("+00:00", "Z")
+    # Candidate projections deliberately bind scanner identities at whole-second
+    # precision.  PostgreSQL TIMESTAMPTZ readback retains the source row's
+    # fractional seconds, so normalize the catalog value to the producer's
+    # canonical contract before reconstructing and re-hashing the projection.
+    return parsed.isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def _row_field(row: Any, index: int, key: str) -> Any:

@@ -4,6 +4,7 @@ import copy
 import hashlib
 import inspect
 import json
+from datetime import datetime, timezone
 from typing import Any
 
 import pytest
@@ -282,6 +283,23 @@ def test_mapping_and_tuple_cursor_rows_have_repository_parity() -> None:
 
     assert batch["status"] == "READY"
     assert batch["receipts"][0]["status"] == READY_FOR_REWARD_VALIDATION
+
+
+def test_subsecond_timestamptz_lineage_reconstructs_whole_second_projection() -> None:
+    projection = _selected_projection()
+    connection = _Connection(projection)
+    artifact_hash = connection.primary_artifact_hash
+    for row in connection.lineage_by_artifact[artifact_hash]:
+        canonical = datetime.fromisoformat(
+            row["source_ts"].replace("Z", "+00:00")
+        ).astimezone(timezone.utc)
+        row["source_ts"] = canonical.replace(microsecond=123_000)
+
+    batch = discover_candidate_proof_receipts(connection, limit=8)
+
+    assert batch["status"] == "READY"
+    assert batch["receipts"][0]["status"] == PENDING_EVIDENCE
+    assert batch["metrics"]["source_event_rows_read"] == 2
 
 
 def test_hash_validated_bridge_uses_internal_binding_and_exact_source_bytes() -> None:
