@@ -17,6 +17,7 @@ ADMITTED_CAP_FIELDS = (
     "max_workflow_planned_input_tokens", "max_unique_nodes",
     "max_call_attempts", "retry_budget",
 )
+NODE_STDIN_ARGS = "JSON.parse(fs.readFileSync(0, 'utf8'))"
 
 
 def _load_governance():
@@ -1291,8 +1292,9 @@ const pipeline = async () => [];
             "budget_authority_digest": _digest(authority),
         }
         completed = subprocess.run(
-            ["node", "-e", script.replace("__ARGS__", json.dumps(run_args))],
+            ["node", "-e", script.replace("__ARGS__", NODE_STDIN_ARGS)],
             cwd=ROOT,
+            input=json.dumps(run_args),
             text=True,
             capture_output=True,
             check=False,
@@ -1339,9 +1341,10 @@ const pipeline = async () => [];
 """.replace(
         "__WORKFLOW__",
         json.dumps(str(ROOT / ".claude/workflows/openclaw-full-audit.js")),
-    ).replace("__ARGS__", json.dumps(run_args))
+    ).replace("__ARGS__", NODE_STDIN_ARGS)
     completed = subprocess.run(
-        ["node", "-e", script], cwd=ROOT, text=True, capture_output=True, check=False
+        ["node", "-e", script], cwd=ROOT, input=json.dumps(run_args), text=True,
+        capture_output=True, check=False
     )
     assert completed.returncode == 0, completed.stderr
     result = json.loads(completed.stdout)
@@ -1410,9 +1413,10 @@ const agent = async () => { calls += 1; return null; };
 })().catch(error => { console.error(error); process.exit(1); });
 """.replace(
         "__WORKFLOW__", json.dumps(str(ROOT / ".claude/workflows/openclaw-full-audit.js")),
-    ).replace("__ARGS__", json.dumps(args))
+    ).replace("__ARGS__", NODE_STDIN_ARGS)
     completed = subprocess.run(
-        ["node", "-e", script], cwd=ROOT, text=True, capture_output=True, check=False,
+        ["node", "-e", script], cwd=ROOT, input=json.dumps(args), text=True,
+        capture_output=True, check=False,
     )
     assert completed.returncode == 0, completed.stderr
     outcome = json.loads(completed.stdout)
@@ -1456,9 +1460,10 @@ const parallel = async jobs => Promise.all(jobs.map(job => job()));
   .catch(error => { console.error(error); process.exit(1); });
 """.replace(
         "__WORKFLOW__", json.dumps(str(ROOT / ".claude/workflows/openclaw-full-audit.js")),
-    ).replace("__ARGS__", json.dumps(args))
+    ).replace("__ARGS__", NODE_STDIN_ARGS)
     completed = subprocess.run(
-        ["node", "-e", script], cwd=ROOT, text=True, capture_output=True, check=False,
+        ["node", "-e", script], cwd=ROOT, input=json.dumps(args), text=True,
+        capture_output=True, check=False,
     )
     assert completed.returncode == 0, completed.stderr
     outcome = json.loads(completed.stdout)
@@ -1503,9 +1508,10 @@ const parallel = async jobs => Promise.all(jobs.map(job => job()));
   .catch(error => { console.error(error); process.exit(1); });
 """.replace(
         "__WORKFLOW__", json.dumps(str(ROOT / ".claude/workflows/openclaw-full-audit.js")),
-    ).replace("__ARGS__", json.dumps(args))
+    ).replace("__ARGS__", NODE_STDIN_ARGS)
     completed = subprocess.run(
-        ["node", "-e", script], cwd=ROOT, text=True, capture_output=True, check=False,
+        ["node", "-e", script], cwd=ROOT, input=json.dumps(args), text=True,
+        capture_output=True, check=False,
     )
     assert completed.returncode == 0, completed.stderr
     result = json.loads(completed.stdout)
@@ -1558,9 +1564,10 @@ const parallel = async jobs => Promise.all(jobs.map(job => job()));
   .catch(error => { console.error(error); process.exit(1); });
 """.replace(
         "__WORKFLOW__", json.dumps(str(ROOT / ".claude/workflows/openclaw-full-audit.js")),
-    ).replace("__ARGS__", json.dumps(args))
+    ).replace("__ARGS__", NODE_STDIN_ARGS)
     completed = subprocess.run(
-        ["node", "-e", script], cwd=ROOT, text=True, capture_output=True, check=False,
+        ["node", "-e", script], cwd=ROOT, input=json.dumps(args), text=True,
+        capture_output=True, check=False,
     )
     assert completed.returncode == 0, completed.stderr
     result = json.loads(completed.stdout)
