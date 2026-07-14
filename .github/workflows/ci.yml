@@ -43,8 +43,7 @@ jobs:
           set -euo pipefail
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             git diff --name-only -z \
-              "${{ github.event.pull_request.base.sha }}" \
-              "${{ github.event.pull_request.head.sha }}" \
+              "${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}" \
               | python3 helper_scripts/ci/classify_ci_changes.py \
                   --null --github-output "$GITHUB_OUTPUT"
           else
@@ -105,6 +104,12 @@ jobs:
           python3 -m pytest -q \
             tests/structure/test_development_agent_governance.py \
             tests/structure/test_agent_governance_*.py
+      - name: Run Git workflow policy tests
+        run: |
+          python3 -m pytest -q \
+            tests/structure/test_git_loop_guard.py \
+            tests/ci/test_classify_ci_changes.py \
+            tests/ci/test_github_ci_workflow_static.py
       - name: Run V158/V159 qualified challenger source contracts
         run: |
           python3 -m pytest -q \

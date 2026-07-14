@@ -52,13 +52,21 @@ Phases:
 The ceiling is a checkpoint trigger, not permission to widen scope. Raising it
 requires an explicit task/scope decision; a loop cannot self-raise it.
 
-## 1. Loop bootstrap
+## 1. Loop bootstrap and resume
 
-Capture immutable state in the loop packet:
+Expected identity comes from durable loop state, not from whatever checkout is
+currently open:
+
+- On resume, load the persisted `loop_branch` and `checkpoint_head` from the
+  latest validated loop state packet before inspecting the checkout. A resumed
+  loop must not recapture either value from `git branch` or `git rev-parse`.
+- On first boot only, PM admits one attached non-`main` feature branch and its
+  full current HEAD, then writes those exact values as `loop_branch` and
+  `checkpoint_head` to the bootstrap packet before dispatching any work.
+
+After those expected values are loaded or first admitted, run:
 
 ```bash
-LOOP_BRANCH=$(git branch --show-current)
-CHECKPOINT_HEAD=$(git rev-parse HEAD)
 python3 helper_scripts/maintenance_scripts/git_loop_guard.py \
   --phase start \
   --expected-branch "$LOOP_BRANCH" \

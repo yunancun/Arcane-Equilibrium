@@ -62,6 +62,10 @@ def test_ci_workflow_classifies_paths_before_expensive_jobs() -> None:
     classifier = _job("changes")
     assert "timeout-minutes: 2" in classifier
     assert "git diff --name-only -z" in classifier
+    assert (
+        '"${{ github.event.pull_request.base.sha }}...'
+        '${{ github.event.pull_request.head.sha }}"'
+    ) in classifier
     assert "helper_scripts/ci/classify_ci_changes.py" in classifier
 
     expected_gate = {
@@ -82,3 +86,13 @@ def test_ci_workflow_keeps_cheap_guards_unconditional() -> None:
     for job_name in ("migration-immutability-guard", "stable-id-duplication-guard"):
         job = _job(job_name)
         assert "needs: changes" not in job
+
+
+def test_ci_workflow_runs_git_policy_tests_in_cheap_governance_gate() -> None:
+    governance = _job("development-agent-governance")
+    for path in (
+        "tests/structure/test_git_loop_guard.py",
+        "tests/ci/test_classify_ci_changes.py",
+        "tests/ci/test_github_ci_workflow_static.py",
+    ):
+        assert path in governance

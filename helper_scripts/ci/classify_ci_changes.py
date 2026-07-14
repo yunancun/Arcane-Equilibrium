@@ -29,6 +29,8 @@ _CONTROL_PLANE_PATHS = {
 _RUST_WORKSPACE_FILES = {"rust/Cargo.toml", "rust/Cargo.lock"}
 _GIT_WORKFLOW_FILES = {
     "helper_scripts/maintenance_scripts/git_loop_guard.py",
+    "tests/ci/test_classify_ci_changes.py",
+    "tests/ci/test_github_ci_workflow_static.py",
     "tests/structure/test_git_loop_guard.py",
     "docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/"
     "2026-07-09--scanner_driven_alr/loop_contract.md",
@@ -72,10 +74,13 @@ def classify_paths(paths: Iterable[str], *, force_all: bool = False) -> dict[str
             path,
             exact={"AGENTS.md", "CLAUDE.md"} | _GIT_WORKFLOW_FILES,
             prefixes=(
+                ".agents/skills/",
                 ".codex/",
                 ".claude/",
+                "docs/adr/",
+                "docs/amd/",
                 "docs/agents/",
-                "helper_scripts/maintenance_scripts/agent_governance",
+                "helper_scripts/maintenance_scripts/",
                 "tests/structure/test_agent_governance_",
                 "tests/structure/test_development_agent_governance.py",
                 "tests/migrations/test_v158_",

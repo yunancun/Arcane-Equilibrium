@@ -15,17 +15,23 @@ Boundary label: `SOURCE_ONLY_OFFLINE_P0_P1`.
 6. Do not inherit current trading P0 candidate context, standing Demo
    authorization, prior no-order approval, prior Bybit public GET approval,
    operator-review-ready artifacts, or cached exchange credentials.
-7. Bind `LOOP_BRANCH` and full `CHECKPOINT_HEAD`, then run
-   `helper_scripts/maintenance_scripts/git_loop_guard.py --phase start` with
-   both expected values. The loop must use an attached non-`main` feature branch
-   and a clean worktree. Any pre-existing dirty path stops as
+7. Recover the latest validated persisted state packet before trusting the
+   current checkout. On resume, load `LOOP_BRANCH` from `loop_branch` and full
+   `CHECKPOINT_HEAD` from `checkpoint_head`; a resumed loop must not recapture
+   either value from the current Git branch or HEAD. On first boot only, bind an
+   attached non-`main` feature branch and full HEAD once, then persist those two
+   fields in a bootstrap state packet before dispatching work.
+8. Run `helper_scripts/maintenance_scripts/git_loop_guard.py --phase start`
+   with those expected values. A wrong branch/head or dirty worktree stops as
    `STOP_GIT_START_STATE`; preserve it exactly and do not stash/reset/clean it.
 
 ## Iteration
 
 Each iteration:
 
-1. Recover the latest ALR state packet if present.
+1. Reload the already-admitted persisted ALR state packet and verify its
+   `loop_branch` and `checkpoint_head` remain the expected identity; the loop
+   must not recapture them from the checkout.
 2. Re-read `queue.md`, `boundaries.md`, and `retention_guardian_contract.md`.
 3. Select exactly one row:
    - first `ACTIVE` row;
