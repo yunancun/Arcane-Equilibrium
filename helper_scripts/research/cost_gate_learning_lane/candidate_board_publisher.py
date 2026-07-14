@@ -33,6 +33,7 @@ for _path in (str(RESEARCH_ROOT), str(ROOT)):
 
 from cost_gate_learning_lane.candidate_board import (
     candidate_cost_evidence_v2,
+    candidate_cost_projection_for_recorded_date,
     validate_learning_candidate_board_v2,
 )
 from cost_gate_learning_lane.cost_model import QUANTILE_ARTIFACT_MAX_AGE_HOURS
@@ -456,12 +457,12 @@ def _validate_outer_and_board_cost_contract(
         }
     if not _exact_value_equal(payload.get("expected_cost_artifact"), expected_outer):
         raise CandidateBoardPublishError("outer_cost_evidence_mismatch")
-    expected_basis = (
+    outer_expected_basis = (
         "expected_slippage_mean_abs_v1"
         if projected is not None
         else "conservative_v1"
     )
-    if payload.get("cost_basis_main") != expected_basis:
+    if payload.get("cost_basis_main") != outer_expected_basis:
         raise CandidateBoardPublishError("outer_cost_evidence_mismatch")
     rows = board.get("candidate_rows")
     if not isinstance(rows, list):
@@ -469,12 +470,29 @@ def _validate_outer_and_board_cost_contract(
     for row in rows:
         try:
             symbol = row["arbiter_input"]["identity"]["symbol"]
+            target_date_raw = row["arbiter_input"]["identity"][
+                "target_regime"
+            ]["utc_date"]
+            if not isinstance(target_date_raw, str):
+                raise ValueError
+            target_date = datetime.fromisoformat(target_date_raw).date()
+            if target_date.isoformat() != target_date_raw:
+                raise ValueError
             actual = row["arbiter_input"]["cost_evidence"]
-        except (KeyError, TypeError):
+        except (KeyError, TypeError, ValueError):
             raise CandidateBoardPublishError("candidate_cost_evidence_mismatch") from None
-        expected = candidate_cost_evidence_v2(projected, symbol=symbol)
+        row_projected = candidate_cost_projection_for_recorded_date(
+            projected,
+            as_of_date=target_date + timedelta(days=1),
+        )
+        expected = candidate_cost_evidence_v2(row_projected, symbol=symbol)
+        row_expected_basis = (
+            "expected_slippage_mean_abs_v1"
+            if row_projected is not None
+            else "conservative_v1"
+        )
         if (
-            row.get("cost_basis_main") != expected_basis
+            row.get("cost_basis_main") != row_expected_basis
             or not _exact_value_equal(actual, expected)
         ):
             raise CandidateBoardPublishError("candidate_cost_evidence_mismatch")

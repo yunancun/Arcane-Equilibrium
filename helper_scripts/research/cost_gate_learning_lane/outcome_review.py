@@ -64,7 +64,9 @@ from cost_gate_learning_lane.evidence_stats import (
     one_sided_t_p_value,
     sign_flip_selection_p_value,
 )
-from cost_gate_learning_lane.runtime_adapter import read_jsonl_ledger
+from cost_gate_learning_lane.runtime_adapter import (
+    read_candidate_evidence_jsonl_ledger,
+)
 
 
 # v6:learning_candidate_board 先做 prospective raw/evaluation lineage 三分區，
@@ -75,6 +77,18 @@ BLOCKED_OUTCOME_REVIEW_SCHEMA_VERSION = (
     "cost_gate_demo_learning_lane_blocked_outcome_review_v6"
 )
 BLOCKED_OUTCOME_REVIEW_RECORD_TYPE = "blocked_signal_outcome_review"
+RESEARCH_COMPATIBILITY_BLOCKED_OUTCOME_REVIEW_SCHEMA_VERSION = (
+    "cost_gate_blocked_outcome_research_compatibility_no_authority_v1"
+)
+RESEARCH_COMPATIBILITY_BLOCKED_OUTCOME_REVIEW_RECORD_TYPE = (
+    "blocked_signal_outcome_research_compatibility_no_authority"
+)
+_RESEARCH_COMPATIBILITY_NO_AUTHORITY_BOUNDARY = (
+    "research-only compatibility statistics; not v6 production evidence; "
+    "not authority eligible; not operator-review eligible; not promotion "
+    "evidence; no PG, Bybit, order, config, risk, auth, runtime mutation, "
+    "or main Cost Gate lowering"
+)
 
 # 樂觀成本 fallback 常數(舊 legacy row 的 gross−4.0 對照軌),與 outcome_writer
 # 的 cfg.cost_bps 歷史默認一致。
@@ -1340,9 +1354,13 @@ def _build_learning_candidate_board(
     edge_estimates: dict[str, dict[str, Any]],
     expected_slippage: dict[str, Any] | None,
     as_of_date: dt.date,
+    qualified_rows_sink: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Compatibility façade for the extracted candidate-board Module."""
-    return build_learning_candidate_board(
+    eligible_rows_by_cohort: dict[str, list[dict[str, Any]]] | None = (
+        {} if qualified_rows_sink is not None else None
+    )
+    board = build_learning_candidate_board(
         ledger_rows,
         cfg=cfg,
         overlay=overlay,
@@ -1350,10 +1368,15 @@ def _build_learning_candidate_board(
         expected_slippage=expected_slippage,
         as_of_date=as_of_date,
         cohort_evaluator=_evaluate_candidate_cohort,
+        eligible_evaluator_rows_by_cohort_sink=eligible_rows_by_cohort,
     )
+    if qualified_rows_sink is not None and eligible_rows_by_cohort is not None:
+        for cohort_hash in sorted(eligible_rows_by_cohort):
+            qualified_rows_sink.extend(eligible_rows_by_cohort[cohort_hash])
+    return board
 
 
-def build_blocked_signal_outcome_review(
+def _build_blocked_signal_outcome_review_core(
     ledger_rows: list[dict[str, Any]],
     *,
     now_utc: dt.datetime | None = None,
@@ -1361,8 +1384,9 @@ def build_blocked_signal_outcome_review(
     overlay: dict[str, dict[str, Any]] | None = None,
     edge_estimates: dict[str, dict[str, Any]] | None = None,
     slippage_quantiles: dict[str, Any] | None = None,
+    qualified_lineage_only: bool,
 ) -> dict[str, Any]:
-    """Build a conservative scorecard from blocked-signal outcome rows.
+    """Shared statistical core for strict and research-only review facades.
 
     overlay: P1-2c 回填 overlay(attempt_id → 保守成本重算),覆蓋 legacy 樂觀成本 row。
     edge_estimates: F1 fix(c) realized 矛盾標記所需的 side-cell realized EV/n(strategy::symbol)。
@@ -1377,10 +1401,22 @@ def build_blocked_signal_outcome_review(
     generated_at = (now_utc or _utc_now()).astimezone(dt.timezone.utc)
     expected_slippage = _load_expected_slippage(slippage_quantiles, now=generated_at)
 
+    qualified_rows: list[dict[str, Any]] = []
+    learning_candidate_board = _build_learning_candidate_board(
+        ledger_rows,
+        cfg=cfg,
+        overlay=overlay,
+        edge_estimates=edge_estimates,
+        expected_slippage=expected_slippage,
+        as_of_date=generated_at.date(),
+        qualified_rows_sink=qualified_rows if qualified_lineage_only else None,
+    )
+    aggregation_rows = qualified_rows if qualified_lineage_only else ledger_rows
+
     grouped: dict[str, list[dict[str, Any]]] = {}
     censored_grouped: dict[str, int] = {}
     invalid_outcome_row_count = 0
-    for raw_row in ledger_rows:
+    for raw_row in aggregation_rows:
         if _str(raw_row.get("record_type")) != BLOCKED_SIGNAL_OUTCOME_RECORD_TYPE:
             continue
         side_cell_key = _str(raw_row.get("side_cell_key"))
@@ -1474,6 +1510,10 @@ def build_blocked_signal_outcome_review(
     mean_n = (
         sum(len(c) for c in eligible_nets) / len(eligible_nets) if eligible_nets else 0.0
     )
+    strict_side_cell_reviews_by_key = {
+        row["side_cell_key"]: copy.deepcopy(row)
+        for row in sorted(side_cells, key=lambda item: item["side_cell_key"])
+    }
     headline_selection = {
         "method": "sign_flip",
         "p_selection": signflip["p_selection"],
@@ -1578,7 +1618,11 @@ def build_blocked_signal_outcome_review(
         if row.get("edge_amplification_required") is True:
             edge_amplification_required_side_cell_count += 1
 
-    if outcome_count == 0:
+    if qualified_lineage_only and not qualified_rows:
+        status = "NO_QUALIFIED_LINEAGE_BLOCKED_SIGNAL_OUTCOMES"
+        reason = "candidate_board_qualified_evaluator_rows_missing"
+        next_trigger = "continue_collecting_qualified_candidate_lineage_outcomes"
+    elif outcome_count == 0:
         status = "NO_BLOCKED_SIGNAL_OUTCOMES"
         reason = "blocked_signal_outcome_rows_missing"
         next_trigger = "run_cost_gate_outcome_refresh_for_blocked_signal_outcomes"
@@ -1595,14 +1639,6 @@ def build_blocked_signal_outcome_review(
         reason = "reviewed_blocked_side_cells_do_not_clear_thresholds"
         next_trigger = "keep_cost_gate_blocked_for_reviewed_side_cells"
 
-    learning_candidate_board = _build_learning_candidate_board(
-        ledger_rows,
-        cfg=cfg,
-        overlay=overlay,
-        edge_estimates=edge_estimates,
-        expected_slippage=expected_slippage,
-        as_of_date=generated_at.date(),
-    )
     return {
         "schema_version": BLOCKED_OUTCOME_REVIEW_SCHEMA_VERSION,
         "record_type": BLOCKED_OUTCOME_REVIEW_RECORD_TYPE,
@@ -1610,6 +1646,14 @@ def build_blocked_signal_outcome_review(
         "status": status,
         "reason": reason,
         "next_trigger": next_trigger,
+        "require_qualified_lineage": qualified_lineage_only,
+        "outcome_aggregation_policy": (
+            "CANDIDATE_BOARD_QUALIFIED_EVALUATOR_ROWS"
+            if qualified_lineage_only
+            else "FULL_LEDGER_RESEARCH_COMPATIBILITY_NO_AUTHORITY"
+        ),
+        "source_ledger_row_count": len(ledger_rows),
+        "outcome_aggregation_input_row_count": len(aggregation_rows),
         "side_cell_count": len(side_cells),
         "review_candidate_side_cell_count": candidate_count,
         "insufficient_sample_side_cell_count": insufficient_count,
@@ -1741,6 +1785,10 @@ def build_blocked_signal_outcome_review(
             key: packet_cost_model_version_counts[key]
             for key in sorted(packet_cost_model_version_counts)
         },
+        # Full deterministic authority-facing lookup.  ``top_side_cells`` stays
+        # display-bounded; strict consumers that bind a selected candidate must
+        # resolve its own row here instead of borrowing the global top row.
+        "strict_side_cell_reviews_by_key": strict_side_cell_reviews_by_key,
         "top_side_cells": side_cells[:16],
         "learning_candidate_board": learning_candidate_board,
         "promotion_evidence": False,
@@ -1752,6 +1800,166 @@ def build_blocked_signal_outcome_review(
             "or main Cost Gate lowering"
         ),
     }
+
+
+def build_blocked_signal_outcome_review(
+    ledger_rows: list[dict[str, Any]],
+    *,
+    now_utc: dt.datetime | None = None,
+    cfg: BlockedOutcomeReviewConfig | None = None,
+    overlay: dict[str, dict[str, Any]] | None = None,
+    edge_estimates: dict[str, dict[str, Any]] | None = None,
+    slippage_quantiles: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build the production v6 review from qualified prospective lineage only."""
+    return _build_blocked_signal_outcome_review_core(
+        ledger_rows,
+        now_utc=now_utc,
+        cfg=cfg,
+        overlay=overlay,
+        edge_estimates=edge_estimates,
+        slippage_quantiles=slippage_quantiles,
+        qualified_lineage_only=True,
+    )
+
+
+def build_research_compatibility_blocked_signal_outcome_review_no_authority(
+    ledger_rows: list[dict[str, Any]],
+    *,
+    now_utc: dt.datetime | None = None,
+    cfg: BlockedOutcomeReviewConfig | None = None,
+    overlay: dict[str, dict[str, Any]] | None = None,
+    edge_estimates: dict[str, dict[str, Any]] | None = None,
+    slippage_quantiles: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Evaluate legacy rows for research statistics without authority semantics.
+
+    This deliberately emits a non-v6 schema.  It exists only for historical
+    methodology comparisons whose fixtures predate prospective candidate
+    lineage; production consumers must not accept it as review evidence.
+    """
+    review = _build_blocked_signal_outcome_review_core(
+        ledger_rows,
+        now_utc=now_utc,
+        cfg=cfg,
+        overlay=overlay,
+        edge_estimates=edge_estimates,
+        slippage_quantiles=slippage_quantiles,
+        qualified_lineage_only=False,
+    )
+
+    legacy_status = review["status"]
+    legacy_reason = review["reason"]
+    legacy_next_trigger = review["next_trigger"]
+    legacy_candidate_count = int(review.get("review_candidate_side_cell_count") or 0)
+    legacy_top_candidate_fields = {
+        key: review.get(key)
+        for key in tuple(review)
+        if key.startswith("top_review_candidate_")
+    }
+
+    sanitized_cells: list[dict[str, Any]] = []
+    for source_cell in review.get("top_side_cells") or []:
+        cell = copy.deepcopy(source_cell)
+        cell["research_only_legacy_status"] = cell.get("status")
+        cell["research_only_legacy_review_candidate"] = bool(
+            cell.get("review_candidate")
+        )
+        if cell["research_only_legacy_review_candidate"]:
+            cell["status"] = "RESEARCH_COMPATIBILITY_CANDIDATE_NO_AUTHORITY"
+        cell["review_candidate"] = False
+        cell["bounded_demo_probe_review_rank"] = None
+        cell["authority_eligible"] = False
+        cell["operator_review_eligible"] = False
+        cell["promotion_evidence"] = False
+        sanitized_cells.append(cell)
+
+    candidate_board = review.pop("learning_candidate_board", {}) or {}
+    qualified_lineage_outcome_row_count = int(
+        candidate_board.get("qualified_lineage_outcome_row_count") or 0
+    )
+    invalid_lineage_outcome_row_count = int(
+        candidate_board.get("invalid_lineage_outcome_row_count") or 0
+    )
+    unqualified_lineage_outcome_row_count = int(
+        candidate_board.get("unqualified_lineage_outcome_row_count") or 0
+    )
+    # This full-rank surface is production strict authority evidence.  The
+    # research compatibility facade removes it rather than exposing unsanitized
+    # review-candidate rows under a no-authority schema.
+    review.pop("strict_side_cell_reviews_by_key", None)
+    review.update(
+        {
+            "schema_version": (
+                RESEARCH_COMPATIBILITY_BLOCKED_OUTCOME_REVIEW_SCHEMA_VERSION
+            ),
+            "record_type": (
+                RESEARCH_COMPATIBILITY_BLOCKED_OUTCOME_REVIEW_RECORD_TYPE
+            ),
+            "status": (
+                "RESEARCH_COMPATIBILITY_METRICS_AVAILABLE_NO_AUTHORITY"
+                if review.get("blocked_signal_outcome_count")
+                else "RESEARCH_COMPATIBILITY_NO_OUTCOMES_NO_AUTHORITY"
+            ),
+            "reason": "legacy_rows_evaluated_for_research_statistics_only",
+            "next_trigger": (
+                "add_valid_prospective_candidate_lineage_for_production_review"
+            ),
+            "require_qualified_lineage": False,
+            "outcome_aggregation_policy": (
+                "FULL_LEDGER_RESEARCH_COMPATIBILITY_NO_AUTHORITY"
+            ),
+            "authority_eligible": False,
+            "operator_review_eligible": False,
+            "promotion_evidence": False,
+            "review_candidate_side_cell_count": 0,
+            "top_side_cells": sanitized_cells,
+            "top_side_cell_status": (
+                sanitized_cells[0].get("status") if sanitized_cells else None
+            ),
+            "top_review_candidate_side_cell_key": None,
+            "top_review_candidate_learning_diagnosis": None,
+            "top_review_candidate_cost_gate_escape_recommendation": None,
+            "top_review_candidate_wrongful_block_score": None,
+            "top_review_candidate_net_cost_cushion_bps": None,
+            "research_only_legacy_status": legacy_status,
+            "research_only_legacy_reason": legacy_reason,
+            "research_only_legacy_next_trigger": legacy_next_trigger,
+            "research_only_legacy_review_candidate_side_cell_count": (
+                legacy_candidate_count
+            ),
+            "research_only_legacy_top_review_candidate_fields": (
+                legacy_top_candidate_fields
+            ),
+            "candidate_lineage_audit": {
+                "source_schema_version": candidate_board.get("schema_version"),
+                "status": candidate_board.get("status"),
+                "count_unit": "outcome_rows",
+                "qualified_lineage_outcome_row_count": (
+                    qualified_lineage_outcome_row_count
+                ),
+                "invalid_lineage_outcome_row_count": (
+                    invalid_lineage_outcome_row_count
+                ),
+                "unqualified_lineage_outcome_row_count": (
+                    unqualified_lineage_outcome_row_count
+                ),
+                # Compatibility aliases retained exactly, despite their older
+                # candidate-oriented names.
+                "qualified_candidate_count": qualified_lineage_outcome_row_count,
+                "invalid_lineage_count": invalid_lineage_outcome_row_count,
+                "unqualified_lineage_count": unqualified_lineage_outcome_row_count,
+            },
+            "boundary": _RESEARCH_COMPATIBILITY_NO_AUTHORITY_BOUNDARY,
+        }
+    )
+    headline = review.get("headline_selection")
+    if isinstance(headline, dict):
+        headline["research_only_legacy_headline_edge_language_allowed"] = bool(
+            headline.get("headline_edge_language_allowed")
+        )
+        headline["headline_edge_language_allowed"] = False
+    return review
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -1803,7 +2011,7 @@ def main() -> int:
             args.slippage_artifact.read_text(encoding="utf-8")
         )
     scorecard = build_blocked_signal_outcome_review(
-        read_jsonl_ledger(args.ledger),
+        read_candidate_evidence_jsonl_ledger(args.ledger),
         cfg=cfg,
         slippage_quantiles=slippage_payload,
     )

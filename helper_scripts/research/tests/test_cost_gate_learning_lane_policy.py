@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import datetime as dt
 import json
 import math
@@ -9,6 +10,11 @@ import os
 from pathlib import Path
 import subprocess
 
+from helper_scripts.research.tests.candidate_lineage_v2_test_support import (
+    attach_candidate_lineage_v2,
+)
+from cost_gate_learning_lane import runtime_adapter as runtime_adapter_module
+from cost_gate_learning_lane import status as status_module
 from alpha_discovery_throughput.discovery_loop import build_discovery_plan
 from alpha_discovery_throughput.runtime_runner import collect_cost_gate_learning_lane_arm
 from cost_gate_learning_lane.policy import (
@@ -91,6 +97,9 @@ from cost_gate_learning_lane.runtime_adapter import (
     append_jsonl_ledger,
     summarize_side_cell_runtime_state,
 )
+
+
+LIVE_LINEAGE_AS_OF_UTC_DATE = dt.datetime.now(dt.timezone.utc).date().isoformat()
 
 
 def _scorecard_payload(generated_at: str = "2026-06-21T10:00:00+00:00") -> dict:
@@ -204,6 +213,125 @@ def _scorecard_payload(generated_at: str = "2026-06-21T10:00:00+00:00") -> dict:
             "rows": rows,
         },
     }
+
+
+def _qualified_blocked_outcome_rows(
+    rows: list[dict],
+    *,
+    context_prefix: str,
+    lineage_as_of_utc_date: str | None = None,
+) -> list[dict]:
+    """Upgrade authority-facing fixtures to prospective candidate lineage."""
+    default_ts_ms = int(
+        dt.datetime(2026, 6, 21, 12, tzinfo=dt.timezone.utc).timestamp() * 1_000
+    )
+    blocked_timestamps = [
+        int(row.get("entry_ts_ms") or default_ts_ms + index * 3_600_000)
+        for index, row in enumerate(rows)
+        if row.get("record_type") == "blocked_signal_outcome"
+    ]
+    if not blocked_timestamps:
+        return [dict(row) for row in rows]
+    if lineage_as_of_utc_date is None:
+        as_of_date = (
+            dt.datetime.fromtimestamp(
+                max(blocked_timestamps) / 1_000,
+                tz=dt.timezone.utc,
+            ).date()
+            + dt.timedelta(days=1)
+        )
+    else:
+        as_of_date = dt.date.fromisoformat(lineage_as_of_utc_date)
+    as_of_utc_date = as_of_date.isoformat()
+    explicit_capture_base_ms = int(
+        dt.datetime.combine(
+            as_of_date - dt.timedelta(days=1),
+            dt.time(12),
+            tzinfo=dt.timezone.utc,
+        ).timestamp()
+        * 1_000
+    )
+    qualified: list[dict] = []
+    for index, row in enumerate(rows):
+        if row.get("record_type") != "blocked_signal_outcome":
+            qualified.append(dict(row))
+            continue
+        captured_at_ms = (
+            explicit_capture_base_ms + index * 1_000
+            if lineage_as_of_utc_date is not None
+            else int(row.get("entry_ts_ms") or default_ts_ms + index * 3_600_000)
+        )
+        detached_row = dict(row)
+        detached_row.pop("candidate_summary", None)
+        qualified_row = attach_candidate_lineage_v2(
+            detached_row,
+            context_id=f"{context_prefix}-{index:03d}",
+            captured_at_ms=captured_at_ms,
+            strategy_name=str(row.get("strategy_name") or "ma_crossover"),
+            symbol=str(row.get("symbol") or "ETHUSDT"),
+            side=str(row.get("side") or "Sell"),
+            horizon_minutes=int(row.get("horizon_minutes") or 60),
+            as_of_utc_date=as_of_utc_date,
+        )
+        event_context = copy.deepcopy(
+            qualified_row["candidate_summary"]["candidate_event_context"]
+        )
+        qualified_row["event"] = {
+            "strategy_name": event_context["strategy_name"],
+            "symbol": event_context["symbol"],
+            "side": event_context["side"],
+            "context_id": event_context["context_id"],
+            "signal_id": event_context["signal_id"],
+            "engine_mode": event_context["evidence_engine_mode"],
+            "ts_ms": event_context["captured_at_ms"],
+            "candidate_event_context": copy.deepcopy(event_context),
+        }
+        qualified.append(qualified_row)
+    return qualified
+
+
+def _expected_cost_artifact() -> dict:
+    statistics = {
+        "n": 500,
+        "mean_abs": 2.0,
+        "mean_signed": 1.0,
+        "q50": 1.0,
+        "q75": 4.0,
+        "q90": 8.0,
+        "cvar90": 8.0,
+        "thin_sample": False,
+    }
+    return {
+        "schema_version": "cost_gate_slippage_quantile_artifact_v2",
+        "asof": "2026-06-21T12:00:00+00:00",
+        "window_days": 90,
+        "n_total_global": 500,
+        "symbols": [{"symbol": "ZZZGLOBALUSDT", **statistics}],
+        "global": statistics,
+        "boundary": (
+            "slippage quantile artifact only; PG source is read-only SELECT-only; "
+            "no PG write, Bybit call, order, config, risk, auth, or runtime mutation"
+        ),
+    }
+
+
+def _selection_eligible_blocked_outcome_rows(rows: list[dict]) -> list[dict]:
+    """Expand compact side-cell templates across the frozen 30-row/6-day floor."""
+    by_side_cell: dict[str, list[dict]] = {}
+    for row in rows:
+        by_side_cell.setdefault(str(row["side_cell_key"]), []).append(row)
+    first_entry = dt.datetime(2026, 6, 15, 12, tzinfo=dt.timezone.utc)
+    expanded: list[dict] = []
+    for side_cell_key in sorted(by_side_cell):
+        templates = by_side_cell[side_cell_key]
+        for index in range(30):
+            row = dict(templates[index % len(templates)])
+            entry = first_entry + dt.timedelta(days=index // 5, hours=index % 5)
+            row["attempt_id"] = f'{row.get("attempt_id", "blocked")}-eligible-{index:02d}'
+            row["entry_ts_ms"] = int(entry.timestamp() * 1_000)
+            row["generated_at_utc"] = entry.isoformat()
+            expanded.append(row)
+    return expanded
 
 
 def _sealed_horizon_replay_packet(*, status: str = "SEALED_HORIZON_REPLAY_READY_FOR_OPERATOR_REVIEW") -> dict:
@@ -1946,6 +2074,596 @@ def test_activation_preflight_routes_capture_error_rows_to_writer_config_fix(
     assert "demo_learning_lane_plan_or_writer_config" in preflight["missing_links"]
 
 
+def test_activation_preflight_quarantines_invalid_positive_lineage_from_readiness(
+    tmp_path: Path,
+) -> None:
+    data_dir = tmp_path
+    plan = build_plan_from_payload(
+        _scorecard_payload(),
+        now_utc=dt.datetime(2026, 6, 21, 11, tzinfo=dt.timezone.utc),
+    )
+    lane_dir = data_dir / "cost_gate_learning_lane"
+    lane_dir.mkdir(parents=True)
+    (lane_dir / "demo_learning_lane_plan_latest.json").write_text(
+        json.dumps(plan),
+        encoding="utf-8",
+    )
+    invalid_rows = []
+    for index in range(30):
+        row = attach_candidate_lineage_v2(
+            {
+                "record_type": "blocked_signal_outcome",
+                "realized_net_bps": 10_000.0,
+                "gross_bps": 10_012.0,
+                "cost_bps": 12.0,
+                "cost_model_version": "conservative_v1",
+            },
+            context_id=f"ctx-status-invalid-positive-{index:02d}",
+            as_of_utc_date=LIVE_LINEAGE_AS_OF_UTC_DATE,
+        )
+        row["side_cell_key"] = "ma_crossover|BTCUSDT|Sell"
+        invalid_rows.append(row)
+    capture_error = {
+        "record_type": "probe_capture_error",
+        "generated_at_utc": "2026-06-21T11:02:00+00:00",
+        "attempt_id": "ctx-status-capture-error",
+        "decision": "ADMISSION_NOT_EVALUATED",
+        "allowed_to_submit_order": False,
+        "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+        "capture_error": "candidate evaluation context unavailable",
+        "reason": "runtime_admission_evaluation_failed",
+    }
+    (lane_dir / "probe_ledger.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in [capture_error, *invalid_rows]),
+        encoding="utf-8",
+    )
+
+    preflight = build_cost_gate_learning_lane_activation_preflight(
+        data_dir,
+        now_utc=dt.datetime(2026, 6, 21, 14, 30, tzinfo=dt.timezone.utc),
+    )
+    ledger = preflight["ledger"]
+
+    assert ledger["blocked_signal_outcome_count"] == 0
+    assert ledger["blocked_signal_positive_outcome_count"] == 0
+    assert ledger["avg_blocked_signal_outcome_net_bps"] is None
+    assert ledger["blocked_signal_net_positive_pct"] is None
+    assert ledger["raw_blocked_signal_outcome_count"] == 30
+    assert ledger["raw_blocked_signal_positive_outcome_count"] == 30
+    assert ledger["raw_avg_blocked_signal_outcome_net_bps"] == 10_000.0
+    assert ledger["raw_invalid_lineage_outcome_row_count"] == 30
+    assert ledger["raw_unqualified_lineage_outcome_row_count"] == 0
+    assert ledger["raw_ledger_total_rows"] == 31
+    assert ledger["ledger_total_rows"] == 1
+    assert ledger["ledger_status"] == "BLOCKED_SIGNAL_OUTCOMES_NEED_LINEAGE_REPAIR"
+    assert ledger["capture_error_count"] == 1
+    assert ledger["blocked_signal_outcome_review_status"] == (
+        "NO_QUALIFIED_LINEAGE_BLOCKED_SIGNAL_OUTCOMES"
+    )
+    assert preflight["status"] == "BLOCKED_SIGNAL_OUTCOMES_NEED_LINEAGE_REPAIR"
+    assert preflight["answers"]["blocked_signal_outcomes_recorded"] is False
+    assert preflight["answers"]["blocked_signal_profitability_review_available"] is False
+    assert preflight["answers"]["admission_evaluation_errors_recorded"] is True
+
+
+def test_status_uses_candidate_evidence_projection_for_event_only_and_conflict(
+    tmp_path: Path,
+) -> None:
+    event_only = attach_candidate_lineage_v2(
+        {
+            "record_type": "blocked_signal_outcome",
+            "realized_net_bps": 10.0,
+            "gross_bps": 22.0,
+            "cost_bps": 12.0,
+            "cost_model_version": "conservative_v1",
+        },
+        context_id="ctx-status-event-only",
+        strategy_name="ma_crossover",
+        symbol="BTCUSDT",
+        side="Sell",
+        as_of_utc_date=LIVE_LINEAGE_AS_OF_UTC_DATE,
+    )
+    event_context = copy.deepcopy(
+        event_only["candidate_summary"]["candidate_event_context"]
+    )
+    event_only["candidate_summary"] = None
+    event_only["event"] = {
+        "strategy_name": event_context["strategy_name"],
+        "symbol": event_context["symbol"],
+        "side": event_context["side"],
+        "context_id": event_context["context_id"],
+        "signal_id": event_context["signal_id"],
+        "engine_mode": event_context["evidence_engine_mode"],
+        "ts_ms": event_context["captured_at_ms"],
+        "candidate_event_context": event_context,
+    }
+    conflicted = attach_candidate_lineage_v2(
+        {
+            "record_type": "blocked_signal_outcome",
+            "realized_net_bps": 10_000.0,
+            "gross_bps": 10_012.0,
+            "cost_bps": 12.0,
+            "cost_model_version": "conservative_v1",
+        },
+        context_id="ctx-status-conflicted",
+        strategy_name="ma_crossover",
+        symbol="BTCUSDT",
+        side="Sell",
+        as_of_utc_date=LIVE_LINEAGE_AS_OF_UTC_DATE,
+    )
+    conflicted_context = copy.deepcopy(
+        conflicted["candidate_summary"]["candidate_event_context"]
+    )
+    conflicted["event"] = {
+        "strategy_name": conflicted_context["strategy_name"],
+        "symbol": conflicted_context["symbol"],
+        "side": conflicted_context["side"],
+        "context_id": conflicted_context["context_id"],
+        "signal_id": conflicted_context["signal_id"],
+        "engine_mode": conflicted_context["evidence_engine_mode"],
+        "ts_ms": conflicted_context["captured_at_ms"],
+        "candidate_event_context": conflicted_context,
+    }
+    conflicted["event"]["candidate_event_context"]["symbol"] = "ETHUSDT"
+    ledger_path = tmp_path / "event_projection_attack.jsonl"
+    ledger_path.write_text(
+        "".join(json.dumps(row) + "\n" for row in (event_only, conflicted)),
+        encoding="utf-8",
+    )
+
+    summary = summarize_cost_gate_learning_lane_ledger(ledger_path)
+
+    assert summary["ledger_status"] == (
+        "BLOCKED_SIGNAL_OUTCOMES_NEED_LINEAGE_REPAIR"
+    )
+    assert summary["raw_blocked_signal_outcome_count"] == 2
+    assert summary["blocked_signal_outcome_count"] == 0
+    assert summary["raw_invalid_lineage_outcome_row_count"] == 1
+    assert summary["raw_unqualified_lineage_outcome_row_count"] == 1
+    assert summary["avg_blocked_signal_outcome_net_bps"] is None
+    assert summary["blocked_signal_outcome_review_status"] == (
+        "NO_QUALIFIED_LINEAGE_BLOCKED_SIGNAL_OUTCOMES"
+    )
+    assert summary["blocked_signal_top_review_side_cell_key"] is None
+
+
+def test_activation_preflight_routes_invalid_only_outcomes_to_lineage_repair(
+    tmp_path: Path,
+) -> None:
+    data_dir = tmp_path
+    plan = build_plan_from_payload(
+        _scorecard_payload(),
+        now_utc=dt.datetime(2026, 6, 21, 11, tzinfo=dt.timezone.utc),
+    )
+    lane_dir = data_dir / "cost_gate_learning_lane"
+    lane_dir.mkdir(parents=True)
+    (lane_dir / "demo_learning_lane_plan_latest.json").write_text(
+        json.dumps(plan),
+        encoding="utf-8",
+    )
+    invalid = attach_candidate_lineage_v2(
+        {
+            "record_type": "blocked_signal_outcome",
+            "realized_net_bps": 10_000.0,
+            "gross_bps": 10_012.0,
+            "cost_bps": 12.0,
+            "cost_model_version": "conservative_v1",
+        },
+        context_id="ctx-status-invalid-only",
+        strategy_name="ma_crossover",
+        symbol="BTCUSDT",
+        side="Sell",
+        as_of_utc_date=LIVE_LINEAGE_AS_OF_UTC_DATE,
+    )
+    invalid["side_cell_key"] = "ma_crossover|BTCUSDT|Buy"
+    (lane_dir / "probe_ledger.jsonl").write_text(
+        json.dumps(invalid) + "\n",
+        encoding="utf-8",
+    )
+
+    preflight = build_cost_gate_learning_lane_activation_preflight(
+        data_dir,
+        now_utc=dt.datetime(2026, 6, 21, 14, 30, tzinfo=dt.timezone.utc),
+    )
+    ledger = preflight["ledger"]
+
+    assert ledger["raw_ledger_total_rows"] == 1
+    assert ledger["raw_blocked_signal_outcome_count"] == 1
+    assert ledger["blocked_signal_outcome_count"] == 0
+    assert ledger["ledger_status"] == (
+        "BLOCKED_SIGNAL_OUTCOMES_NEED_LINEAGE_REPAIR"
+    )
+    assert ledger["blocked_signal_outcome_review_status"] == (
+        "NO_QUALIFIED_LINEAGE_BLOCKED_SIGNAL_OUTCOMES"
+    )
+    assert preflight["status"] == "BLOCKED_SIGNAL_OUTCOMES_NEED_LINEAGE_REPAIR"
+    assert preflight["reason"] == (
+        "blocked_signal_outcomes_lack_qualified_candidate_lineage"
+    )
+    assert preflight["missing_links"] == [
+        "qualified_prospective_candidate_lineage"
+    ]
+    assert preflight["answers"]["silent_drop_risk"] is False
+
+
+def test_admission_plus_invalid_unqualified_outcomes_routes_to_lineage_repair(
+    tmp_path: Path,
+) -> None:
+    data_dir = tmp_path
+    plan = build_plan_from_payload(
+        _scorecard_payload(),
+        now_utc=dt.datetime(2026, 6, 21, 11, tzinfo=dt.timezone.utc),
+    )
+    lane_dir = data_dir / "cost_gate_learning_lane"
+    lane_dir.mkdir(parents=True)
+    (lane_dir / "demo_learning_lane_plan_latest.json").write_text(
+        json.dumps(plan), encoding="utf-8"
+    )
+    invalid = attach_candidate_lineage_v2(
+        {
+            "record_type": "blocked_signal_outcome",
+            "realized_net_bps": 100.0,
+            "gross_bps": 112.0,
+            "cost_bps": 12.0,
+            "cost_model_version": "conservative_v1",
+        },
+        context_id="ctx-status-admission-invalid",
+        as_of_utc_date=LIVE_LINEAGE_AS_OF_UTC_DATE,
+    )
+    invalid["side_cell_key"] = "ma_crossover|BTCUSDT|Sell"
+    unqualified = {
+        "record_type": "blocked_signal_outcome",
+        "attempt_id": "ctx-status-admission-unqualified",
+        "side_cell_key": "ma_crossover|BTCUSDT|Buy",
+        "strategy_name": "ma_crossover",
+        "symbol": "BTCUSDT",
+        "side": "Buy",
+        "horizon_minutes": 60,
+        "realized_net_bps": 200.0,
+        "gross_bps": 212.0,
+        "cost_bps": 12.0,
+        "cost_model_version": "conservative_v1",
+    }
+    admission = {
+        "record_type": "probe_admission_decision",
+        "generated_at_utc": "2026-07-14T01:00:00+00:00",
+        "attempt_id": "ctx-status-admission-row",
+        "decision": "ORDER_AUTHORITY_NOT_GRANTED",
+        "allowed_to_submit_order": False,
+        "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+    }
+    (lane_dir / "probe_ledger.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in (admission, invalid, unqualified)),
+        encoding="utf-8",
+    )
+
+    preflight = build_cost_gate_learning_lane_activation_preflight(
+        data_dir,
+        now_utc=dt.datetime(2026, 6, 21, 14, 30, tzinfo=dt.timezone.utc),
+    )
+    ledger = preflight["ledger"]
+
+    assert ledger["raw_ledger_total_rows"] == 3
+    assert ledger["ledger_total_rows"] == 1
+    assert ledger["raw_blocked_signal_outcome_count"] == 2
+    assert ledger["blocked_signal_outcome_count"] == 0
+    assert ledger["raw_invalid_lineage_outcome_row_count"] == 1
+    assert ledger["raw_unqualified_lineage_outcome_row_count"] == 1
+    assert ledger["ledger_status"] == "BLOCKED_SIGNAL_OUTCOMES_NEED_LINEAGE_REPAIR"
+    assert ledger["blocked_signal_outcome_review_status"] == (
+        "NO_QUALIFIED_LINEAGE_BLOCKED_SIGNAL_OUTCOMES"
+    )
+    assert preflight["status"] == "BLOCKED_SIGNAL_OUTCOMES_NEED_LINEAGE_REPAIR"
+    assert preflight["reason"] == (
+        "blocked_signal_outcomes_lack_qualified_candidate_lineage"
+    )
+
+
+def test_activation_preflight_prioritizes_malformed_evidence_repair(
+    tmp_path: Path,
+) -> None:
+    data_dir = tmp_path
+    plan = build_plan_from_payload(
+        _scorecard_payload(),
+        now_utc=dt.datetime(2026, 6, 21, 11, tzinfo=dt.timezone.utc),
+    )
+    lane_dir = data_dir / "cost_gate_learning_lane"
+    lane_dir.mkdir(parents=True)
+    (lane_dir / "demo_learning_lane_plan_latest.json").write_text(
+        json.dumps(plan),
+        encoding="utf-8",
+    )
+    admission = {
+        "record_type": "probe_admission_decision",
+        "generated_at_utc": "2026-06-21T11:02:00+00:00",
+        "attempt_id": "ctx-malformed-evidence-admission",
+        "decision": "ORDER_AUTHORITY_NOT_GRANTED",
+        "allowed_to_submit_order": False,
+        "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+        "event": _selected_reject_event(),
+    }
+    blocked = _qualified_blocked_outcome_rows(
+        [
+            {
+                "record_type": "blocked_signal_outcome",
+                "generated_at_utc": "2026-06-21T12:15:00+00:00",
+                "attempt_id": "ctx-malformed-evidence-blocked",
+                "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+                "strategy_name": "ma_crossover",
+                "symbol": "ETHUSDT",
+                "side": "Sell",
+                "entry_ts_ms": 1_781_956_800_000,
+                "gross_bps": 14.0,
+                "cost_bps": 4.0,
+                "realized_net_bps": 10.0,
+                "cost_model_version": "conservative_v1",
+            }
+        ],
+        context_prefix="malformed-evidence",
+        lineage_as_of_utc_date=LIVE_LINEAGE_AS_OF_UTC_DATE,
+    )[0]
+    ledger_path = lane_dir / "probe_ledger.jsonl"
+    ledger_path.write_text(
+        json.dumps(admission) + "\n" + "{malformed-json\n" + json.dumps(blocked) + "\n",
+        encoding="utf-8",
+    )
+
+    preflight = build_cost_gate_learning_lane_activation_preflight(
+        data_dir,
+        now_utc=dt.datetime(2026, 6, 21, 14, 30, tzinfo=dt.timezone.utc),
+    )
+    ledger = preflight["ledger"]
+
+    assert ledger["raw_ledger_total_rows"] == 2
+    assert ledger["ledger_malformed_line_count"] == 1
+    assert ledger["admission_decision_count"] == 1
+    assert ledger["raw_blocked_signal_outcome_count"] == 1
+    assert ledger["ledger_status"] == "LEDGER_EVIDENCE_CORRUPTION"
+    assert ledger["ledger_source_error"] == (
+        "malformed_jsonl_line:probe_ledger.jsonl:2"
+    )
+    assert preflight["status"] == "LEDGER_EVIDENCE_CORRUPTION_NEEDS_REPAIR"
+    assert preflight["reason"] == (
+        "learning_lane_ledger_or_candidate_evidence_unreadable"
+    )
+    assert preflight["missing_links"] == [
+        "valid_candidate_evidence_jsonl_ledger"
+    ]
+    assert preflight["answers"]["silent_drop_risk"] is False
+
+
+def _snapshot_test_blocked_outcome(
+    context_id: str, generated_at_utc: str, symbol: str, side: str,
+    entry_ts_ms: int, realized_net_bps: float,
+) -> dict:
+    return _qualified_blocked_outcome_rows(
+        [{
+            "record_type": "blocked_signal_outcome",
+            "generated_at_utc": generated_at_utc,
+            "attempt_id": context_id,
+            "side_cell_key": f"ma_crossover|{symbol}|{side}",
+            "strategy_name": "ma_crossover",
+            "symbol": symbol,
+            "side": side,
+            "entry_ts_ms": entry_ts_ms,
+            "gross_bps": realized_net_bps + 12.0,
+            "cost_bps": 12.0,
+            "realized_net_bps": realized_net_bps,
+            "cost_model_version": "conservative_v1",
+        }],
+        context_prefix=context_id,
+        lineage_as_of_utc_date=LIVE_LINEAGE_AS_OF_UTC_DATE,
+    )[0]
+
+
+def test_status_uses_one_retained_snapshot_across_rotation_mutation(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    ledger_path = tmp_path / "probe_ledger.jsonl"
+    now = dt.datetime.now(dt.timezone.utc)
+    retained_path = ledger_path.with_name(
+        f"probe_ledger.{(now - dt.timedelta(minutes=2)).strftime('%Y%m%dT%H%M%SZ')}.jsonl"
+    )
+    retained_admission = {
+        "record_type": "probe_admission_decision",
+        "generated_at_utc": "2026-07-14T01:00:00+00:00",
+        "attempt_id": "ctx-snapshot-retained-admission",
+        "decision": "ORDER_AUTHORITY_NOT_GRANTED",
+        "allowed_to_submit_order": False,
+        "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+    }
+    retained_path.write_text(json.dumps(retained_admission) + "\n", encoding="utf-8")
+    captured_blocked = _snapshot_test_blocked_outcome(
+        "ctx-snapshot-captured-blocked", "2026-07-14T02:00:00+00:00",
+        "BTCUSDT", "Sell", 1_783_992_000_000, 10.0,
+    )
+    ledger_path.write_text(
+        json.dumps(captured_blocked) + "\n",
+        encoding="utf-8",
+    )
+    replacement = _snapshot_test_blocked_outcome(
+        "ctx-snapshot-replacement-attack", "2026-07-14T03:00:00+00:00",
+        "SOLUSDT", "Buy", 1_783_995_600_000, 1_000.0,
+    )
+    late_segment = ledger_path.with_name(
+        f"probe_ledger.{(now - dt.timedelta(minutes=1)).strftime('%Y%m%dT%H%M%SZ')}.jsonl"
+    )
+    mutation_calls: list[str] = []
+    mutated = False
+    original_path_projection = (
+        runtime_adapter_module.read_candidate_evidence_jsonl_ledger
+    )
+
+    def rotate_and_replace() -> None:
+        nonlocal mutated
+        if mutated:
+            return
+        mutated = True
+        ledger_path.replace(late_segment)
+        ledger_path.write_text(json.dumps(replacement) + "\n", encoding="utf-8")
+
+    def path_projection_hook(path: Path):
+        mutation_calls.append("path")
+        rotate_and_replace()
+        return original_path_projection(path)
+
+    def pure_projection_hook(rows):
+        mutation_calls.append("pure")
+        rotate_and_replace()
+        return runtime_adapter_module.project_candidate_evidence_rows(rows)
+
+    monkeypatch.setattr(
+        status_module,
+        "read_candidate_evidence_jsonl_ledger",
+        path_projection_hook,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        status_module,
+        "project_candidate_evidence_rows",
+        pure_projection_hook,
+        raising=False,
+    )
+
+    summary = status_module.summarize_cost_gate_learning_lane_ledger(ledger_path)
+
+    assert mutation_calls == ["pure"]
+    assert summary["raw_ledger_total_rows"] == 2
+    assert summary["ledger_total_rows"] == 1
+    assert summary["admission_decision_count"] == 1
+    assert summary["raw_blocked_signal_outcome_count"] == 1
+    assert summary["blocked_signal_outcome_count"] == 0
+    assert summary["avg_blocked_signal_outcome_net_bps"] is None
+    assert summary["latest_record_type"] == "blocked_signal_outcome"
+    assert summary["latest_generated_at_utc"] == "2026-07-14T02:00:00+00:00"
+    assert summary["latest_side_cell_key"] == "ma_crossover|BTCUSDT|Sell"
+    assert summary["blocked_signal_outcome_review"] is None
+    assert json.loads(ledger_path.read_text(encoding="utf-8")) == replacement
+
+
+def test_status_retries_rotation_between_identity_capture_and_active_open(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    ledger_path = tmp_path / "probe_ledger.jsonl"
+    now = dt.datetime.now(dt.timezone.utc)
+    retained_path = ledger_path.with_name(
+        f"probe_ledger.{(now - dt.timedelta(minutes=3)).strftime('%Y%m%dT%H%M%SZ')}.jsonl"
+    )
+    rotated_active_path = ledger_path.with_name(
+        f"probe_ledger.{(now - dt.timedelta(minutes=1)).strftime('%Y%m%dT%H%M%SZ')}.jsonl"
+    )
+    retained_admission = {
+        "record_type": "probe_admission_decision",
+        "generated_at_utc": "2026-07-14T01:00:00+00:00",
+        "attempt_id": "ctx-open-race-retained-admission",
+        "decision": "ORDER_AUTHORITY_NOT_GRANTED",
+        "allowed_to_submit_order": False,
+        "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+    }
+    retained_path.write_text(json.dumps(retained_admission) + "\n", encoding="utf-8")
+    old_active = _snapshot_test_blocked_outcome(
+        "ctx-open-race-old-active", "2026-07-14T02:00:00+00:00",
+        "BTCUSDT", "Sell", 1_783_992_000_000, 10.0,
+    )
+    new_active = _snapshot_test_blocked_outcome(
+        "ctx-open-race-new-active", "2026-07-14T03:00:00+00:00",
+        "SOLUSDT", "Buy", 1_783_995_600_000, 20.0,
+    )
+    ledger_path.write_text(json.dumps(old_active) + "\n", encoding="utf-8")
+    original_path_open = Path.open
+    active_binary_open_count = 0
+    rotated = False
+
+    def rotate_once_on_active_binary_open(self, *args, **kwargs):
+        nonlocal active_binary_open_count, rotated
+        mode = args[0] if args else kwargs.get("mode", "r")
+        if self == ledger_path and mode == "rb":
+            active_binary_open_count += 1
+            if not rotated:
+                rotated = True
+                ledger_path.replace(rotated_active_path)
+                with original_path_open(
+                    ledger_path,
+                    "w",
+                    encoding="utf-8",
+                ) as handle:
+                    handle.write(json.dumps(new_active) + "\n")
+        return original_path_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", rotate_once_on_active_binary_open)
+
+    summary = status_module.summarize_cost_gate_learning_lane_ledger(ledger_path)
+
+    assert active_binary_open_count == 2
+    assert summary["ledger_source_error"] is None
+    assert summary["raw_ledger_total_rows"] == 3
+    assert summary["ledger_total_rows"] == 1
+    assert summary["admission_decision_count"] == 1
+    assert summary["raw_blocked_signal_outcome_count"] == 2
+    assert summary["blocked_signal_outcome_count"] == 0
+    assert summary["avg_blocked_signal_outcome_net_bps"] is None
+    assert summary["blocked_signal_outcome_review"] is None
+    assert summary["latest_record_type"] == "blocked_signal_outcome"
+    assert summary["latest_generated_at_utc"] == "2026-07-14T03:00:00+00:00"
+    assert summary["latest_side_cell_key"] == "ma_crossover|SOLUSDT|Buy"
+
+
+def test_status_fails_closed_after_three_unstable_rotation_attempts(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    ledger_path = tmp_path / "probe_ledger.jsonl"
+    now = dt.datetime.now(dt.timezone.utc)
+    seed = _snapshot_test_blocked_outcome(
+        "ctx-perpetual-rotation-seed", "2026-07-14T01:00:00+00:00",
+        "BTCUSDT", "Sell", 1_783_988_400_000, 10.0,
+    )
+    ledger_path.write_text(json.dumps(seed) + "\n", encoding="utf-8")
+    replacement_payloads = [
+        json.dumps({**seed, "generated_at_utc": f"2026-07-14T0{attempt + 2}:00:00+00:00",
+                    "attempt_id": f"ctx-perpetual-rotation-{attempt + 1}"}) + "\n"
+        for attempt in range(3)
+    ]
+    original_path_open = Path.open
+    active_binary_open_count = 0
+
+    def rotate_on_every_active_binary_open(self, *args, **kwargs):
+        nonlocal active_binary_open_count
+        mode = args[0] if args else kwargs.get("mode", "r")
+        if self == ledger_path and mode == "rb":
+            active_binary_open_count += 1
+            segment_path = ledger_path.with_name(
+                "probe_ledger."
+                f"{(now - dt.timedelta(minutes=1)).strftime('%Y%m%dT%H%M%SZ')}"
+                f"_{active_binary_open_count}.jsonl"
+            )
+            ledger_path.replace(segment_path)
+            with original_path_open(
+                ledger_path,
+                "w",
+                encoding="utf-8",
+            ) as handle:
+                handle.write(replacement_payloads[active_binary_open_count - 1])
+        return original_path_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", rotate_on_every_active_binary_open)
+
+    summary = status_module.summarize_cost_gate_learning_lane_ledger(ledger_path)
+
+    assert active_binary_open_count == 3
+    assert summary["ledger_status"] == "LEDGER_EVIDENCE_CORRUPTION"
+    assert summary["ledger_source_error"] == (
+        "retained_ledger_generation_unstable_after_3_attempts"
+    )
+    assert summary["raw_ledger_total_rows"] == 0
+    assert summary["ledger_total_rows"] == 0
+    assert summary["raw_blocked_signal_outcome_count"] == 0
+    assert summary["blocked_signal_outcome_count"] == 0
+    assert summary["blocked_signal_outcome_review"] is None
+
+
 def test_activation_preflight_surfaces_blocked_outcome_review_candidate(
     tmp_path: Path,
 ):
@@ -1971,7 +2689,7 @@ def test_activation_preflight_surfaces_blocked_outcome_review_candidate(
         )
         for index, net in enumerate([12.5, 11.5, 10.5, 12.0, 11.0] * 6)
     ]
-    ledger_rows = [
+    ledger_rows = _qualified_blocked_outcome_rows([
         {
             "record_type": "blocked_signal_outcome",
             "cost_model_version": "conservative_v1",
@@ -1994,7 +2712,7 @@ def test_activation_preflight_surfaces_blocked_outcome_review_candidate(
         for index, (attempt_id, generated_at, gross, net) in enumerate(
             _blocked_fixture_rows
         )
-    ]
+    ], context_prefix="preflight-review", lineage_as_of_utc_date=LIVE_LINEAGE_AS_OF_UTC_DATE)
     (lane_dir / "probe_ledger.jsonl").write_text(
         "".join(json.dumps(row) + "\n" for row in ledger_rows),
         encoding="utf-8",
@@ -2005,34 +2723,12 @@ def test_activation_preflight_surfaces_blocked_outcome_review_candidate(
         now_utc=dt.datetime(2026, 6, 21, 14, 30, tzinfo=dt.timezone.utc),
     )
 
-    assert preflight["status"] == "REVIEW_CANDIDATE_OPERATOR_REVIEW"
-    assert preflight["answers"]["blocked_signal_outcomes_recorded"] is True
-    assert preflight["answers"]["blocked_signal_profitability_review_available"] is True
-    assert preflight["ledger"]["blocked_signal_outcome_review_status"] == (
-        "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT"
-    )
-    assert preflight["ledger"]["blocked_signal_outcome_review_schema_version"] == (
-        "cost_gate_demo_learning_lane_blocked_outcome_review_v6"
-    )
-    assert preflight["ledger"]["blocked_signal_top_review_side_cell_key"] == (
-        "ma_crossover|ETHUSDT|Sell"
-    )
-    assert preflight["ledger"]["blocked_signal_top_review_candidate_side_cell_key"] == (
-        "ma_crossover|ETHUSDT|Sell"
-    )
-    # P2-8/F1:tight-positive [12.5,11.5,10.5,12.0,11.0](通過 BH-FDR、n_eff=5),
-    # avg=11.5 → cushion=11.5、wrongful_block_score=11.5(sample_factor=1)。
-    assert round(
-        preflight["ledger"]["blocked_signal_top_review_wrongful_block_score"],
-        6,
-    ) == 11.5
-    assert round(
-        preflight["ledger"]["blocked_signal_top_review_net_cost_cushion_bps"],
-        6,
-    ) == 11.5
-    assert preflight["next_actions"] == [
-        "operator_review_blocked_outcome_scorecard_before_demo_probe_authority"
-    ]
+    assert preflight["status"] == "NOT_ACCUMULATING"
+    assert preflight["answers"]["blocked_signal_outcomes_recorded"] is False
+    assert preflight["answers"]["blocked_signal_profitability_review_available"] is False
+    assert preflight["ledger"]["raw_blocked_signal_outcome_count"] == 30
+    assert preflight["ledger"]["blocked_signal_outcome_count"] == 0
+    assert preflight["ledger"]["blocked_signal_outcome_review"] is None
 
 
 def test_activation_preflight_fails_closed_when_source_files_missing(
@@ -2262,7 +2958,8 @@ def test_alpha_discovery_surfaces_cost_gate_ledger_progress(tmp_path: Path):
         )
         + "\n"
         + json.dumps(
-            {
+            _qualified_blocked_outcome_rows(
+                [{
                 "record_type": "blocked_signal_outcome",
                 "cost_model_version": "conservative_v1",
                 "generated_at_utc": "2026-06-21T12:15:00+00:00",
@@ -2270,7 +2967,10 @@ def test_alpha_discovery_surfaces_cost_gate_ledger_progress(tmp_path: Path):
                 "side_cell_key": "ma_crossover|ETHUSDT|Sell",
                 "source_admission_decision": "ORDER_AUTHORITY_NOT_GRANTED",
                 "realized_net_bps": 12.5,
-            }
+                }],
+                context_prefix="discovery-progress",
+                lineage_as_of_utc_date=LIVE_LINEAGE_AS_OF_UTC_DATE,
+            )[0]
         )
         + "\n",
         encoding="utf-8",
@@ -2287,26 +2987,23 @@ def test_alpha_discovery_surfaces_cost_gate_ledger_progress(tmp_path: Path):
     row = discovery["profitability_blocker_scorecard"]["arms"][0]
 
     assert discovery["arms"][0]["action"] == "RUN_READ_ONLY_CAPTURE"
-    assert discovery["arms"][0]["reason"] == "cost_gate_blocked_outcomes_below_review_gate"
+    assert discovery["arms"][0]["reason"] == "cost_gate_admission_rows_without_refresh_loop"
     assert discovery["profitability_blocker_scorecard"]["status"] == (
-        "NO_ACTIONABLE_ALPHA_WAIT_OR_SAMPLE_GATED"
+        "NO_ACTIONABLE_ALPHA_RESEARCH_BLOCKED"
     )
-    assert row["blocker_class"] == "sample_gate"
-    assert row["primary_blocker"] == "cost_gate_blocked_signal_outcomes_accumulating"
-    assert row["next_trigger"] == (
-        "continue_recording_and_refreshing_blocked_signal_outcomes"
+    assert row["blocker_class"] == "data_coverage"
+    assert row["primary_blocker"] == (
+        "cost_gate_rejects_recorded_but_outcome_refresh_loop_not_running"
     )
-    assert row["ledger_status"] == "BLOCKED_SIGNAL_OUTCOMES_PRESENT"
+    assert row["next_trigger"] == "install_learning_lane_cron_or_run_outcome_refresh"
+    assert row["ledger_status"] == "ADMISSION_ROWS_PRESENT"
     assert row["admission_decision_count"] == 1
     assert row["order_authority_not_granted_count"] == 1
-    assert row["blocked_signal_outcome_count"] == 1
-    assert row["blocked_signal_positive_outcome_count"] == 1
-    assert row["avg_blocked_signal_outcome_net_bps"] == 12.5
-    assert row["blocked_signal_net_positive_pct"] == 100.0
-    assert row["blocked_signal_outcome_review_status"] == (
-        "COLLECT_MORE_BLOCKED_SIGNAL_OUTCOMES"
-    )
-    assert row["blocked_signal_outcome_review"]["review_candidate_side_cell_count"] == 0
+    assert row["blocked_signal_outcome_count"] == 0
+    assert row["blocked_signal_positive_outcome_count"] == 0
+    assert row["avg_blocked_signal_outcome_net_bps"] is None
+    assert row["blocked_signal_net_positive_pct"] is None
+    assert row["blocked_signal_outcome_review_status"] is None
 
 
 def test_alpha_discovery_surfaces_cost_gate_capture_errors(tmp_path: Path):
@@ -2378,7 +3075,7 @@ def test_alpha_discovery_routes_positive_blocked_outcome_review_candidate(
         json.dumps(plan),
         encoding="utf-8",
     )
-    ledger_rows = [
+    ledger_rows = _qualified_blocked_outcome_rows([
         {
             "record_type": "probe_admission_decision",
             "generated_at_utc": "2026-06-21T11:02:00+00:00",
@@ -2413,13 +3110,17 @@ def test_alpha_discovery_routes_positive_blocked_outcome_review_candidate(
             }
             for index, net in enumerate([12.5, 11.5, 10.5, 12.0, 11.0] * 6)
         ],
-    ]
+    ], context_prefix="discovery-positive", lineage_as_of_utc_date=LIVE_LINEAGE_AS_OF_UTC_DATE)
     (lane_dir / "probe_ledger.jsonl").write_text(
         "".join(json.dumps(row) + "\n" for row in ledger_rows),
         encoding="utf-8",
     )
     review = build_blocked_signal_outcome_review(
-        ledger_rows,
+        _qualified_blocked_outcome_rows(
+            ledger_rows,
+            context_prefix="discovery-positive-historical-review",
+        ),
+        slippage_quantiles=_expected_cost_artifact(),
         now_utc=dt.datetime(2026, 6, 21, 14, 20, tzinfo=dt.timezone.utc),
     )
     packet = build_false_negative_candidate_packet(
@@ -2456,37 +3157,13 @@ def test_alpha_discovery_routes_positive_blocked_outcome_review_candidate(
     )
     row = discovery["profitability_blocker_scorecard"]["arms"][0]
 
-    assert discovery["arms"][0]["action"] == "READY_FOR_PROBE"
-    assert discovery["arms"][0]["reason"] == "cost_gate_false_negative_candidate_packet_ready"
+    assert discovery["arms"][0]["action"] == "RUN_READ_ONLY_CAPTURE"
+    assert discovery["arms"][0]["reason"] == "cost_gate_blocked_signal_outcomes_missing"
     assert discovery["profitability_blocker_scorecard"]["status"] == (
-        "ACTIONABLE_PROBE_READY"
+        "NO_ACTIONABLE_ALPHA_RESEARCH_BLOCKED"
     )
-    assert row["blocker_class"] == "probe_ready"
-    assert row["primary_blocker"] == (
-        "cost_gate_false_negative_candidates_need_operator_review"
-    )
-    assert row["next_trigger"] == (
-        "operator_review_ranked_false_negative_candidates_before_bounded_demo_probe_authority"
-    )
-    assert row["blocked_signal_outcome_review_status"] == (
-        "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT"
-    )
-    assert row["blocked_signal_outcome_review"]["review_candidate_side_cell_count"] == 1
-    assert row["blocked_signal_outcome_review"]["top_side_cells"][0]["status"] == (
-        "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATE"
-    )
-    assert row["blocked_signal_outcome_review_schema_version"] == (
-        "cost_gate_demo_learning_lane_blocked_outcome_review_v6"
-    )
-    assert row["blocked_signal_top_review_side_cell_key"] == (
-        "ma_crossover|ETHUSDT|Sell"
-    )
-    assert row["blocked_signal_top_review_candidate_side_cell_key"] == (
-        "ma_crossover|ETHUSDT|Sell"
-    )
-    # P2-8/F1:tight-positive [12.5,11.5,10.5,12.0,11.0](BH 過、n_eff=5),avg=11.5。
-    assert round(row["blocked_signal_top_review_wrongful_block_score"], 6) == 11.5
-    assert round(row["blocked_signal_top_review_net_cost_cushion_bps"], 6) == 11.5
+    assert row["blocked_signal_outcome_count"] == 0
+    assert row["blocked_signal_outcome_review_status"] is None
 
 
 def test_alpha_discovery_blocks_when_blocked_outcome_review_fails_thresholds(
@@ -2504,7 +3181,7 @@ def test_alpha_discovery_blocks_when_blocked_outcome_review_fails_thresholds(
         encoding="utf-8",
     )
     # F1:補 distinct entry_ts(n_eff=3 ≥ min_outcomes,統計面可算;閾值仍不過)。
-    ledger_rows = [
+    ledger_rows = _qualified_blocked_outcome_rows([
         {
             "record_type": "blocked_signal_outcome",
             "cost_model_version": "conservative_v1",
@@ -2541,7 +3218,7 @@ def test_alpha_discovery_blocks_when_blocked_outcome_review_fails_thresholds(
             "entry_ts_ms": 1_781_964_000_000,
             "realized_net_bps": 0.5,
         },
-    ]
+    ], context_prefix="discovery-negative", lineage_as_of_utc_date=LIVE_LINEAGE_AS_OF_UTC_DATE)
     (lane_dir / "probe_ledger.jsonl").write_text(
         "".join(json.dumps(row) + "\n" for row in ledger_rows),
         encoding="utf-8",
@@ -2557,23 +3234,13 @@ def test_alpha_discovery_blocks_when_blocked_outcome_review_fails_thresholds(
     )
     row = discovery["profitability_blocker_scorecard"]["arms"][0]
 
-    assert discovery["arms"][0]["action"] == "BLOCK"
-    assert discovery["arms"][0]["reason"] == (
-        "cost_gate_blocked_outcomes_confirm_current_block"
-    )
+    assert discovery["arms"][0]["action"] == "RUN_READ_ONLY_CAPTURE"
     assert discovery["profitability_blocker_scorecard"]["status"] == (
         "NO_ACTIONABLE_ALPHA_RESEARCH_BLOCKED"
     )
-    assert row["blocker_class"] == "rejected_no_edge"
-    assert row["primary_blocker"] == (
-        "cost_gate_blocked_signal_outcomes_confirm_current_block"
-    )
-    assert row["next_trigger"] == "keep_cost_gate_blocked_for_reviewed_side_cells"
     assert row["operator_actionable"] is False
-    assert row["engineering_actionable"] is False
-    assert row["blocked_signal_outcome_review_status"] == (
-        "NO_DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATE"
-    )
+    assert row["engineering_actionable"] is True
+    assert row["blocked_signal_outcome_review_status"] is None
 
 
 def test_alpha_discovery_routes_cost_wall_blocked_outcomes_to_edge_amplification(
@@ -2590,7 +3257,7 @@ def test_alpha_discovery_routes_cost_wall_blocked_outcomes_to_edge_amplification
         json.dumps(plan),
         encoding="utf-8",
     )
-    ledger_rows = [
+    ledger_rows = _qualified_blocked_outcome_rows([
         {
             "record_type": "blocked_signal_outcome",
             "cost_model_version": "conservative_v1",
@@ -2633,7 +3300,7 @@ def test_alpha_discovery_routes_cost_wall_blocked_outcomes_to_edge_amplification
             "cost_bps": 4.0,
             "realized_net_bps": 1.0,
         },
-    ]
+    ], context_prefix="discovery-cost-wall", lineage_as_of_utc_date=LIVE_LINEAGE_AS_OF_UTC_DATE)
     (lane_dir / "probe_ledger.jsonl").write_text(
         "".join(json.dumps(row) + "\n" for row in ledger_rows),
         encoding="utf-8",
@@ -2650,20 +3317,10 @@ def test_alpha_discovery_routes_cost_wall_blocked_outcomes_to_edge_amplification
     row = discovery["profitability_blocker_scorecard"]["arms"][0]
 
     assert discovery["arms"][0]["action"] == "RUN_READ_ONLY_CAPTURE"
-    assert discovery["arms"][0]["reason"] == (
-        "cost_gate_blocked_outcomes_need_edge_amplification"
-    )
-    assert row["blocker_class"] == "cost_wall"
-    assert row["primary_blocker"] == (
-        "cost_gate_blocked_signal_edge_amplification_required"
-    )
-    assert row["next_trigger"] == "amplify_edge_or_reduce_friction_for_same_side_cell"
+    assert discovery["arms"][0]["reason"] == "cost_gate_learning_loop_not_seen"
     assert row["engineering_actionable"] is True
     assert row["operator_actionable"] is False
-    assert row["blocked_signal_top_review_learning_diagnosis"] == (
-        "GROSS_EDGE_POSITIVE_COST_CUSHION_INSUFFICIENT"
-    )
-    assert row["blocked_signal_review_edge_amplification_required_side_cell_count"] == 1
+    assert row["blocked_signal_outcome_review_status"] is None
 
 
 def test_alpha_discovery_routes_admission_only_ledger_to_price_observation_builder(
@@ -3585,7 +4242,7 @@ def test_outcome_refresh_pg_price_rows_feed_batch_without_duplicate_queries():
 
 def test_blocked_signal_outcome_review_scorecard_is_conservative():
     scorecard = build_blocked_signal_outcome_review(
-        [
+        _qualified_blocked_outcome_rows(_selection_eligible_blocked_outcome_rows([
             {
                 "record_type": "blocked_signal_outcome",
                 "cost_model_version": "conservative_v1",
@@ -3596,9 +4253,9 @@ def test_blocked_signal_outcome_review_scorecard_is_conservative():
                 "symbol": "ETHUSDT",
                 "side": "Sell",
                 "entry_ts_ms": 1_781_956_800_000,
-                "gross_bps": 16.5,
-                "cost_bps": 4.0,
-                "realized_net_bps": 12.5,
+                "gross_bps": 115.0,
+                "cost_bps": 15.0,
+                "realized_net_bps": 100.0,
                 "horizon_minutes": 60,
             },
             {
@@ -3611,9 +4268,9 @@ def test_blocked_signal_outcome_review_scorecard_is_conservative():
                 "symbol": "ETHUSDT",
                 "side": "Sell",
                 "entry_ts_ms": 1_781_960_400_000,
-                "gross_bps": 8.0,
-                "cost_bps": 4.0,
-                "realized_net_bps": 4.0,
+                "gross_bps": 15.1,
+                "cost_bps": 15.0,
+                "realized_net_bps": 0.1,
                 "horizon_minutes": 60,
             },
             {
@@ -3626,18 +4283,18 @@ def test_blocked_signal_outcome_review_scorecard_is_conservative():
                 "symbol": "ETHUSDT",
                 "side": "Sell",
                 "entry_ts_ms": 1_781_964_000_000,
-                "gross_bps": 3.0,
-                "cost_bps": 4.0,
-                "realized_net_bps": -1.0,
+                "gross_bps": -69.6,
+                "cost_bps": 15.0,
+                "realized_net_bps": -84.6,
                 "horizon_minutes": 60,
             },
-        ],
+        ]), context_prefix="review-conservative"),
+        slippage_quantiles=_expected_cost_artifact(),
         now_utc=dt.datetime(2026, 6, 21, 14, 30, tzinfo=dt.timezone.utc),
         cfg=BlockedOutcomeReviewConfig(
             min_outcomes_per_side_cell=3,
-            # F1:n_eff=3 fixture,n_eff 門檻對齊到 3;E2/E3 天數欄放到不攔
-            # (1 日/100%)—— 本測驗的是 BH 撤下路徑,不是 eligibility 攔截
-            # (eligibility 本體由 evidence methodology F1 測試組以默認值直測)。
+            # Review thresholds remain below the frozen board-selection floors; the
+            # fixture helper supplies the independently required 30 rows / 6 days.
             min_effective_entries_per_side_cell=3,
             min_distinct_entry_utc_days=1,
             max_top_entry_day_share_pct=100.0,
@@ -3646,7 +4303,8 @@ def test_blocked_signal_outcome_review_scorecard_is_conservative():
         ),
     )
 
-    # P2-8(b):n=3 高變異數 cell 通過保守閾值但不過 BH-FDR(q=0.10)→ 撤下候選,
+    # P2-8(b):high-variance cell clears descriptive thresholds but not BH-FDR
+    # (q=0.10) and is therefore removed from the candidate set.
     # 改標 EXPLORATION_CANDIDATE_BH_FDR_NOT_PASSED(這是方法學重設計的預期結果:
     # 立案需 BH pass,marginal 小樣本只可作 exploration 排序)。
     assert scorecard["status"] == "NO_DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATE"
@@ -3660,54 +4318,54 @@ def test_blocked_signal_outcome_review_scorecard_is_conservative():
     assert side_cell["status"] == "EXPLORATION_CANDIDATE_BH_FDR_NOT_PASSED"
     assert side_cell["bh_fdr_pass"] is False
     assert side_cell["review_candidate"] is False
-    assert side_cell["outcome_count"] == 3
+    assert side_cell["outcome_count"] == 30
     assert round(side_cell["avg_net_bps"], 6) == 5.166667
-    assert round(side_cell["avg_gross_bps"], 6) == 9.166667
-    assert side_cell["avg_cost_bps"] == 4.0
+    assert round(side_cell["avg_gross_bps"], 6) == 20.166667
+    assert side_cell["avg_cost_bps"] == 15.0
     assert round(side_cell["net_positive_pct"], 6) == 66.666667
-    assert side_cell["gross_positive_pct"] == 100.0
+    assert round(side_cell["gross_positive_pct"], 6) == 66.666667
     assert round(side_cell["net_cost_cushion_bps"], 6) == 5.166667
     assert round(side_cell["net_positive_margin_pct"], 6) == 6.666667
-    assert side_cell["sample_margin_count"] == 0
-    # wrongful_block_score 為排序分數(不受 BH 影響),margins 不變仍 3.44。
-    assert round(side_cell["wrongful_block_score"], 6) == 3.444444
+    assert side_cell["sample_margin_count"] == 27
+    # wrongful_block_score remains a ranking score independent of BH.
+    assert round(side_cell["wrongful_block_score"], 6) == 6.888889
     assert side_cell["review_rank"] == 1
     # BH 撤下候選後不再有 bounded probe rank。
     assert side_cell["bounded_demo_probe_review_rank"] is None
     assert side_cell["horizon_minutes"] == [60]
-    assert side_cell["horizon_counts"] == {"60": 3}
+    assert side_cell["horizon_counts"] == {"60": 30}
     assert side_cell["dominant_horizon_minutes"] == 60
     assert scorecard["top_side_cell_key"] == "ma_crossover|ETHUSDT|Sell"
     # 非候選 → 診斷落 BLOCK_CONFIRMED_AFTER_COST(review_candidate=False 路徑)。
     assert side_cell["learning_diagnosis"] == "BLOCK_CONFIRMED_AFTER_COST"
     assert scorecard["top_review_candidate_side_cell_key"] is None
     assert scorecard["false_negative_candidate_count"] == 0
-    assert round(scorecard["max_wrongful_block_score"], 6) == 3.444444
+    assert round(scorecard["max_wrongful_block_score"], 6) == 6.888889
 
     insufficient = build_blocked_signal_outcome_review(
-        [
+        _qualified_blocked_outcome_rows([
             {
                 "record_type": "blocked_signal_outcome",
                 "cost_model_version": "conservative_v1",
                 "side_cell_key": "ma_crossover|ETHUSDT|Sell",
                 "realized_net_bps": 12.5,
             }
-        ],
+            ], context_prefix="review-insufficient"),
         cfg=BlockedOutcomeReviewConfig(min_outcomes_per_side_cell=3),
+        slippage_quantiles=_expected_cost_artifact(),
+        now_utc=dt.datetime(2026, 6, 21, 14, 30, tzinfo=dt.timezone.utc),
     )
-    assert insufficient["status"] == "COLLECT_MORE_BLOCKED_SIGNAL_OUTCOMES"
+    assert insufficient["status"] == "NO_QUALIFIED_LINEAGE_BLOCKED_SIGNAL_OUTCOMES"
     assert insufficient["review_candidate_side_cell_count"] == 0
-    assert insufficient["top_side_cells"][0]["learning_diagnosis"] == (
-        "SAMPLE_INSUFFICIENT"
-    )
-    assert insufficient["top_side_cells"][0]["cost_gate_escape_recommendation"] == (
-        "continue_recording_same_side_cell_blocked_signal_outcomes"
-    )
+    assert insufficient["top_side_cells"] == []
+    candidate = insufficient["learning_candidate_board"]["candidate_rows"][0]
+    assert candidate["selection_eligible"] is False
+    assert "EFFECTIVE_ENTRY_SAMPLE_INSUFFICIENT" in candidate["blockers"]
 
 
 def test_blocked_signal_outcome_review_separates_cost_wall_from_no_edge():
     scorecard = build_blocked_signal_outcome_review(
-        [
+        _qualified_blocked_outcome_rows(_selection_eligible_blocked_outcome_rows([
             {
                 "record_type": "blocked_signal_outcome",
                 "cost_model_version": "conservative_v1",
@@ -3716,8 +4374,8 @@ def test_blocked_signal_outcome_review_separates_cost_wall_from_no_edge():
                 "symbol": "ETHUSDT",
                 "side": "Sell",
                 "entry_ts_ms": 1_781_956_800_000,
-                "gross_bps": 3.5,
-                "cost_bps": 4.0,
+                "gross_bps": 14.5,
+                "cost_bps": 15.0,
                 "realized_net_bps": -0.5,
             },
             {
@@ -3728,8 +4386,8 @@ def test_blocked_signal_outcome_review_separates_cost_wall_from_no_edge():
                 "symbol": "ETHUSDT",
                 "side": "Sell",
                 "entry_ts_ms": 1_781_960_400_000,
-                "gross_bps": 2.5,
-                "cost_bps": 4.0,
+                "gross_bps": 13.5,
+                "cost_bps": 15.0,
                 "realized_net_bps": -1.5,
             },
             {
@@ -3740,12 +4398,14 @@ def test_blocked_signal_outcome_review_separates_cost_wall_from_no_edge():
                 "symbol": "ETHUSDT",
                 "side": "Sell",
                 "entry_ts_ms": 1_781_964_000_000,
-                "gross_bps": 5.0,
-                "cost_bps": 4.0,
+                "gross_bps": 16.0,
+                "cost_bps": 15.0,
                 "realized_net_bps": 1.0,
             },
-        ],
+        ]), context_prefix="review-cost-wall"),
         cfg=BlockedOutcomeReviewConfig(min_outcomes_per_side_cell=3),
+        slippage_quantiles=_expected_cost_artifact(),
+        now_utc=dt.datetime(2026, 6, 21, 14, 30, tzinfo=dt.timezone.utc),
     )
 
     side_cell = scorecard["top_side_cells"][0]
@@ -3765,7 +4425,7 @@ def test_blocked_signal_outcome_review_separates_cost_wall_from_no_edge():
 
 def test_false_negative_candidate_packet_ranks_cost_gate_escape_paths():
     scorecard = build_blocked_signal_outcome_review(
-        [
+        _qualified_blocked_outcome_rows(_selection_eligible_blocked_outcome_rows([
             {
                 "record_type": "blocked_signal_outcome",
                 "cost_model_version": "conservative_v1",
@@ -3776,8 +4436,8 @@ def test_false_negative_candidate_packet_ranks_cost_gate_escape_paths():
                 "symbol": "AVAXUSDT",
                 "side": "Sell",
                 "entry_ts_ms": 1_781_956_800_000,
-                "gross_bps": 12.0,
-                "cost_bps": 4.0,
+                "gross_bps": 23.0,
+                "cost_bps": 15.0,
                 "realized_net_bps": 8.0,
                 "horizon_minutes": 60,
             },
@@ -3791,8 +4451,8 @@ def test_false_negative_candidate_packet_ranks_cost_gate_escape_paths():
                 "symbol": "AVAXUSDT",
                 "side": "Sell",
                 "entry_ts_ms": 1_781_960_400_000,
-                "gross_bps": 11.0,
-                "cost_bps": 4.0,
+                "gross_bps": 22.0,
+                "cost_bps": 15.0,
                 "realized_net_bps": 7.0,
                 "horizon_minutes": 60,
             },
@@ -3806,8 +4466,8 @@ def test_false_negative_candidate_packet_ranks_cost_gate_escape_paths():
                 "symbol": "AVAXUSDT",
                 "side": "Sell",
                 "entry_ts_ms": 1_781_964_000_000,
-                "gross_bps": 10.0,
-                "cost_bps": 4.0,
+                "gross_bps": 21.0,
+                "cost_bps": 15.0,
                 "realized_net_bps": 6.0,
                 "horizon_minutes": 60,
             },
@@ -3821,8 +4481,8 @@ def test_false_negative_candidate_packet_ranks_cost_gate_escape_paths():
                 "symbol": "ETHUSDT",
                 "side": "Sell",
                 "entry_ts_ms": 1_781_967_600_000,
-                "gross_bps": 3.5,
-                "cost_bps": 4.0,
+                "gross_bps": 14.5,
+                "cost_bps": 15.0,
                 "realized_net_bps": -0.5,
                 "horizon_minutes": 60,
             },
@@ -3836,8 +4496,8 @@ def test_false_negative_candidate_packet_ranks_cost_gate_escape_paths():
                 "symbol": "ETHUSDT",
                 "side": "Sell",
                 "entry_ts_ms": 1_781_971_200_000,
-                "gross_bps": 2.5,
-                "cost_bps": 4.0,
+                "gross_bps": 13.5,
+                "cost_bps": 15.0,
                 "realized_net_bps": -1.5,
                 "horizon_minutes": 60,
             },
@@ -3851,12 +4511,13 @@ def test_false_negative_candidate_packet_ranks_cost_gate_escape_paths():
                 "symbol": "ETHUSDT",
                 "side": "Sell",
                 "entry_ts_ms": 1_781_974_800_000,
-                "gross_bps": 5.0,
-                "cost_bps": 4.0,
+                "gross_bps": 16.0,
+                "cost_bps": 15.0,
                 "realized_net_bps": 1.0,
                 "horizon_minutes": 60,
             },
-        ],
+        ]), context_prefix="review-false-negative"),
+        slippage_quantiles=_expected_cost_artifact(),
         cfg=BlockedOutcomeReviewConfig(
             min_outcomes_per_side_cell=3,
             # F1:n_eff=3 同日 fixture,n_eff/天數欄對齊到不攔(候選/成本牆分流
@@ -3910,7 +4571,7 @@ def test_false_negative_candidate_packet_ranks_cost_gate_escape_paths():
 
 def _false_negative_candidate_packet_fixture() -> dict:
     scorecard = build_blocked_signal_outcome_review(
-        [
+        _qualified_blocked_outcome_rows(_selection_eligible_blocked_outcome_rows([
             {
                 "record_type": "blocked_signal_outcome",
                 "cost_model_version": "conservative_v1",
@@ -3921,8 +4582,8 @@ def _false_negative_candidate_packet_fixture() -> dict:
                 "symbol": "AVAXUSDT",
                 "side": "Sell",
                 "entry_ts_ms": 1_781_956_800_000,
-                "gross_bps": 12.0,
-                "cost_bps": 4.0,
+                "gross_bps": 23.0,
+                "cost_bps": 15.0,
                 "realized_net_bps": 8.0,
                 "horizon_minutes": 60,
             },
@@ -3936,8 +4597,8 @@ def _false_negative_candidate_packet_fixture() -> dict:
                 "symbol": "AVAXUSDT",
                 "side": "Sell",
                 "entry_ts_ms": 1_781_960_400_000,
-                "gross_bps": 7.0,
-                "cost_bps": 4.0,
+                "gross_bps": 18.0,
+                "cost_bps": 15.0,
                 "realized_net_bps": 3.0,
                 "horizon_minutes": 60,
             },
@@ -3951,12 +4612,13 @@ def _false_negative_candidate_packet_fixture() -> dict:
                 "symbol": "AVAXUSDT",
                 "side": "Sell",
                 "entry_ts_ms": 1_781_964_000_000,
-                "gross_bps": 6.0,
-                "cost_bps": 4.0,
+                "gross_bps": 17.0,
+                "cost_bps": 15.0,
                 "realized_net_bps": 2.0,
                 "horizon_minutes": 60,
             },
-        ],
+        ]), context_prefix="false-negative-fixture"),
+        slippage_quantiles=_expected_cost_artifact(),
         cfg=BlockedOutcomeReviewConfig(
             min_outcomes_per_side_cell=3,
             # F1:n_eff=3 同日 fixture,n_eff/天數欄對齊到不攔(候選/成本牆分流
