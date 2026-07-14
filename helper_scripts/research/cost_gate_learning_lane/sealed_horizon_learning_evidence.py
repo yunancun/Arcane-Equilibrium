@@ -415,19 +415,72 @@ def build_sealed_horizon_learning_evidence_packet(
         if isinstance(row, dict)
     ]
     raw_outcome_summary = _net_summary(blocked_outcomes)
-    top = (review.get("top_side_cells") or [{}])[0]
-    if not isinstance(top, dict):
-        top = {}
-    qualified_outcome_count = int(review.get("blocked_signal_outcome_count") or 0)
-    qualified_materialization_count = int(
-        review.get("outcome_aggregation_input_row_count") or 0
+    candidate_side_cell_key = _str(candidate.get("side_cell_key"))
+    strict_side_cell_reviews = _dict(
+        review.get("strict_side_cell_reviews_by_key")
     )
-    review_candidate = (
-        review.get("status")
-        == "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT"
-        and review.get("top_review_candidate_side_cell_key")
-        == candidate.get("side_cell_key")
+    selected_review_cell = _dict(
+        strict_side_cell_reviews.get(candidate_side_cell_key)
     )
+    if not selected_review_cell:
+        # Backward-compatible read of already-produced strict v6 artifacts.
+        # Current production reviews always carry the full keyed surface.
+        selected_review_cell = next(
+            (
+                row
+                for row in review.get("top_side_cells") or []
+                if isinstance(row, dict)
+                and _str(row.get("side_cell_key")) == candidate_side_cell_key
+            ),
+            {},
+        )
+    candidate_board = _dict(review.get("learning_candidate_board"))
+    selected_lineage_cell = next(
+        (
+            row
+            for row in candidate_board.get("candidate_rows") or []
+            if isinstance(row, dict)
+            and _str(row.get("side_cell_key")) == candidate_side_cell_key
+        ),
+        {},
+    )
+    qualified_outcome_count = int(
+        selected_review_cell.get("outcome_count") or 0
+    )
+    selected_qualified_input_count = int(
+        selected_lineage_cell.get("qualified_evaluator_input_count") or 0
+    )
+    selected_materializer_records = [
+        row
+        for row in records
+        if _str(row.get("side_cell_key")) == candidate_side_cell_key
+    ]
+    qualified_materialization_count = min(
+        selected_qualified_input_count,
+        feature_row_count,
+        len(selected_materializer_records),
+    )
+    selected_materializer_decision_counts = _decision_counts(
+        selected_materializer_records
+    )
+    selected_materializer_all_order_authority_not_granted = bool(
+        selected_materializer_records
+    ) and selected_materializer_decision_counts == {
+        "ORDER_AUTHORITY_NOT_GRANTED": len(selected_materializer_records)
+    }
+    raw_materialized_record_count = int(
+        materializer_batch.get("materialized_record_count") or 0
+    )
+    raw_appended_record_count = int(
+        materializer_batch.get("appended_record_count") or 0
+    )
+    qualified_appended_record_count = (
+        qualified_materialization_count
+        if raw_materialized_record_count == len(records)
+        and raw_appended_record_count == raw_materialized_record_count
+        else 0
+    )
+    review_candidate = bool(selected_review_cell.get("review_candidate"))
     horizon_minutes = _candidate_horizon_minutes(candidate, 60)
 
     return {
@@ -458,10 +511,7 @@ def build_sealed_horizon_learning_evidence_packet(
             # remain available below under raw_* for audit/diagnostics.
             "input_feature_row_count": qualified_materialization_count,
             "materialized_record_count": qualified_materialization_count,
-            "appended_record_count": min(
-                qualified_materialization_count,
-                int(materializer_batch.get("appended_record_count") or 0),
-            ),
+            "appended_record_count": qualified_appended_record_count,
             "decision_counts": (
                 {
                     "ORDER_AUTHORITY_NOT_GRANTED": (
@@ -469,25 +519,23 @@ def build_sealed_horizon_learning_evidence_packet(
                     )
                 }
                 if qualified_materialization_count
+                and selected_materializer_all_order_authority_not_granted
                 else {}
             ),
             "all_order_authority_not_granted": (
                 qualified_materialization_count > 0
+                and selected_materializer_all_order_authority_not_granted
             ),
             "raw_input_feature_row_count": feature_row_count,
-            "raw_materialized_record_count": materializer_batch.get(
-                "materialized_record_count"
-            ),
-            "raw_appended_record_count": materializer_batch.get(
-                "appended_record_count"
-            ),
+            "raw_materialized_record_count": raw_materialized_record_count,
+            "raw_appended_record_count": raw_appended_record_count,
             "raw_decision_counts": _decision_counts(records),
             "raw_all_order_authority_not_granted": (
                 bool(records)
                 and _decision_counts(records) == {"ORDER_AUTHORITY_NOT_GRANTED": len(records)}
             ),
             "qualified_outcome_row_count": int(
-                review.get("outcome_aggregation_input_row_count") or 0
+                selected_qualified_input_count
             ),
         },
         "outcomes": {
@@ -504,36 +552,34 @@ def build_sealed_horizon_learning_evidence_packet(
             **{f"raw_{key}": value for key, value in raw_outcome_summary.items()},
             "blocked_signal_outcome_count": qualified_outcome_count,
             "outcome_count": qualified_outcome_count,
-            "avg_net_bps": review.get("avg_blocked_signal_outcome_net_bps"),
-            "avg_gross_bps": top.get("avg_gross_bps"),
-            "net_positive_pct": review.get("blocked_signal_net_positive_pct"),
-            "gross_positive_pct": top.get("gross_positive_pct"),
-            "min_net_bps": top.get("min_net_bps"),
-            "max_net_bps": top.get("max_net_bps"),
+            "avg_net_bps": selected_review_cell.get("avg_net_bps"),
+            "avg_gross_bps": selected_review_cell.get("avg_gross_bps"),
+            "net_positive_pct": selected_review_cell.get("net_positive_pct"),
+            "gross_positive_pct": selected_review_cell.get("gross_positive_pct"),
+            "min_net_bps": selected_review_cell.get("min_net_bps"),
+            "max_net_bps": selected_review_cell.get("max_net_bps"),
         },
         "review": {
             "status": review.get("status"),
             "reason": review.get("reason"),
-            "review_candidate_side_cell_count": review.get(
-                "review_candidate_side_cell_count"
+            "review_candidate_side_cell_count": int(review_candidate),
+            "blocked_signal_outcome_count": qualified_outcome_count,
+            "avg_blocked_signal_outcome_net_bps": selected_review_cell.get(
+                "avg_net_bps"
             ),
-            "blocked_signal_outcome_count": review.get("blocked_signal_outcome_count"),
-            "avg_blocked_signal_outcome_net_bps": review.get(
-                "avg_blocked_signal_outcome_net_bps"
+            "blocked_signal_net_positive_pct": selected_review_cell.get(
+                "net_positive_pct"
             ),
-            "blocked_signal_net_positive_pct": review.get(
-                "blocked_signal_net_positive_pct"
+            "top_side_cell_key": selected_review_cell.get("side_cell_key"),
+            "top_side_cell_status": selected_review_cell.get("status"),
+            "top_side_cell_wrongful_block_score": selected_review_cell.get(
+                "wrongful_block_score"
             ),
-            "top_side_cell_key": review.get("top_side_cell_key"),
-            "top_side_cell_status": review.get("top_side_cell_status"),
-            "top_side_cell_wrongful_block_score": review.get(
-                "top_side_cell_wrongful_block_score"
-            ),
-            "top_side_cell": top,
+            "top_side_cell": selected_review_cell,
             "thresholds": review.get("thresholds"),
         },
         "answers": {
-            "sealed_candidate_materialized": qualified_outcome_count > 0,
+            "sealed_candidate_materialized": qualified_materialization_count > 0,
             "blocked_signal_outcomes_recorded": qualified_outcome_count > 0,
             "candidate_clears_operator_review_gate": review_candidate,
             "global_cost_gate_lowering_recommended": False,
