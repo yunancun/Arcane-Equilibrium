@@ -922,8 +922,8 @@ def summarize_cost_gate_learning_lane_ledger(path: Path) -> dict[str, Any]:
     ):
         summary["ledger_status"] = "LEDGER_EVIDENCE_CORRUPTION"
     elif (
-        summary["ledger_total_rows"] == 0
-        and summary["raw_blocked_signal_outcome_count"] > 0
+        summary["raw_blocked_signal_outcome_count"] > 0
+        and summary["blocked_signal_outcome_count"] == 0
         and (
             summary["raw_invalid_lineage_outcome_row_count"] > 0
             or summary["raw_unqualified_lineage_outcome_row_count"] > 0

@@ -32,6 +32,7 @@ _AUDIT_SCHEMA_VERSION = "cost_gate_learning_candidate_audit_v2"
 _SELECTION_N_EFF_MIN = 30
 _SELECTION_UTC_DAYS_MIN = 5
 _SELECTION_TOP_DAY_SHARE_MAX_PCT = 50.0
+_SIDE_CELL_AMBIGUITY_BLOCKER = "SIDE_CELL_STABLE_COHORT_AMBIGUITY"
 _UNQUALIFIED_EXCLUSION_REASONS = {
     "UNQUALIFIED_CONTEXT_MISSING",
     "UNQUALIFIED_LEGACY_PROJECTION_ONLY",
@@ -355,8 +356,27 @@ def validate_learning_candidate_board_v2(value: Mapping[str, Any]) -> dict[str, 
     if not isinstance(rows, list) or not all(isinstance(row, Mapping) for row in rows):
         raise ValueError("candidate_rows_invalid")
     normalized_rows = [dict(row) for row in rows]
-    for row in normalized_rows:
-        _validate_candidate_row_v2(row, as_of_date=as_of_date)
+    row_validations = [
+        _validate_candidate_row_v2(row) for row in normalized_rows
+    ]
+    if any(recorded_date > as_of_date for recorded_date, _ in row_validations):
+        raise ValueError("board_generation_precedes_evaluation")
+    otherwise_eligible_cohorts: dict[str, set[str]] = {}
+    for row, (_, base_blockers) in zip(normalized_rows, row_validations):
+        if not base_blockers:
+            otherwise_eligible_cohorts.setdefault(
+                row["side_cell_key"], set()
+            ).add(row["stable_cohort_hash"])
+    for row, (_, base_blockers) in zip(normalized_rows, row_validations):
+        expected_ambiguity = bool(
+            not base_blockers
+            and len(otherwise_eligible_cohorts.get(row["side_cell_key"], ())) > 1
+        )
+        actual_ambiguity = _SIDE_CELL_AMBIGUITY_BLOCKER in row["blockers"]
+        if actual_ambiguity is not expected_ambiguity:
+            raise ValueError("candidate_ambiguity_blockers_invalid")
+        if row.get("selection_eligible") is not (not row["blockers"]):
+            raise ValueError("candidate_selection_eligibility_invalid")
     if (
         sum(row["qualified_raw_outcome_count"] for row in normalized_rows)
         != board["qualified_lineage_outcome_row_count"]
@@ -466,9 +486,7 @@ def _valid_count_mapping(value: Any) -> bool:
 
 def _validate_candidate_row_v2(
     row: dict[str, Any],
-    *,
-    as_of_date: dt.date,
-) -> None:
+) -> tuple[dt.date, set[str]]:
     if set(row) != _CANDIDATE_ROW_FIELDS:
         raise ValueError("candidate_row_fields_invalid")
     if row.get("schema_version") != LEARNING_CANDIDATE_SCHEMA_VERSION:
@@ -499,15 +517,23 @@ def _validate_candidate_row_v2(
     if arbiter_input.get("arbiter_input_hash") != _canonical_sha256(arbiter_body):
         raise ValueError("arbiter_input_hash_invalid")
     _validate_arbiter_input_nested_fields(arbiter_input)
+    target_date_raw = arbiter_input["identity"]["target_regime"].get("utc_date")
+    try:
+        target_date = dt.date.fromisoformat(target_date_raw)
+    except (TypeError, ValueError):
+        raise ValueError("candidate_identity_semantics_invalid") from None
+    if target_date.isoformat() != target_date_raw:
+        raise ValueError("candidate_identity_semantics_invalid")
+    recorded_evaluation_date = target_date + dt.timedelta(days=1)
     _validate_arbiter_identity_semantics(
         arbiter_input["identity"],
-        as_of_date=as_of_date,
+        as_of_date=recorded_evaluation_date,
     )
     _validate_arbiter_input_semantics(arbiter_input)
     _validate_cost_evidence(
         arbiter_input["cost_evidence"],
         identity=arbiter_input["identity"],
-        as_of_date=as_of_date,
+        as_of_date=recorded_evaluation_date,
     )
     try:
         arbiter_identity = arbiter_input["identity"]
@@ -679,7 +705,9 @@ def _validate_candidate_row_v2(
         row["lineage_blocker_reason_counts"], expected_lineage_counts
     ) or any(code not in row["blockers"] for code in expected_lineage_counts):
         raise ValueError("candidate_lineage_counts_invalid")
-    _validate_candidate_blockers(row, evidence, expected_lineage_counts)
+    base_blockers = _validate_candidate_blockers(
+        row, evidence, expected_lineage_counts
+    )
     incomplete_codes = {
         "IDENTITY_LINEAGE_INCOMPLETE",
         "ARBITER_INPUT_CONTEXT_INCOMPLETE",
@@ -690,8 +718,6 @@ def _validate_candidate_row_v2(
     )
     if row.get("arbiter_input_complete") is not expected_input_complete:
         raise ValueError("candidate_input_completeness_invalid")
-    if row.get("selection_eligible") is not (not row["blockers"]):
-        raise ValueError("candidate_selection_eligibility_invalid")
     nonactionable_codes = incomplete_codes | {
         "INVALID_OUTCOME_ROWS_PRESENT",
         "DATA_INTEGRITY_SUSPECT",
@@ -759,6 +785,7 @@ def _validate_candidate_row_v2(
         for field, expected in expected_quality_bindings.items()
     ):
         raise ValueError("candidate_quality_binding_invalid")
+    return recorded_evaluation_date, base_blockers
 
 
 def _validate_arbiter_input_nested_fields(arbiter_input: Mapping[str, Any]) -> None:
@@ -922,7 +949,7 @@ def _validate_candidate_blockers(
     row: Mapping[str, Any],
     evidence: Mapping[str, Any],
     lineage_counts: Mapping[str, int],
-) -> None:
+) -> set[str]:
     expected = set(lineage_counts)
     conditions = {
         "EFFECTIVE_ENTRY_SAMPLE_INSUFFICIENT": (
@@ -959,9 +986,10 @@ def _validate_candidate_blockers(
         "HIDDEN_OOS_CONSUMED": row["hidden_oos_consumed"],
     }
     expected.update(code for code, active in conditions.items() if active)
-    actual = set(row["blockers"])
+    actual = set(row["blockers"]) - {_SIDE_CELL_AMBIGUITY_BLOCKER}
     if actual != expected:
         raise ValueError("candidate_blockers_invalid")
+    return expected
 
 
 def _validate_candidate_statistical_invariants(row: Mapping[str, Any]) -> None:

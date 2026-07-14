@@ -90,6 +90,66 @@ def _sealed_plan() -> dict:
     }
 
 
+def _expected_cost_artifact() -> dict:
+    statistics = {
+        "n": 500,
+        "mean_abs": 2.0,
+        "mean_signed": 1.0,
+        "q50": 1.0,
+        "q75": 4.0,
+        "q90": 8.0,
+        "cvar90": 8.0,
+        "thin_sample": False,
+    }
+    return {
+        "schema_version": "cost_gate_slippage_quantile_artifact_v2",
+        "asof": "2026-07-10T12:00:00+00:00",
+        "window_days": 90,
+        "n_total_global": 500,
+        "symbols": [{"symbol": "ZZZGLOBALUSDT", **statistics}],
+        "global": statistics,
+        "boundary": (
+            "slippage quantile artifact only; PG source is read-only SELECT-only; "
+            "no PG write, Bybit call, order, config, risk, auth, or runtime mutation"
+        ),
+    }
+
+
+def _eligible_cohort(
+    *,
+    symbol: str,
+    side: str,
+    nets: tuple[float, ...],
+    context_prefix: str,
+) -> list[dict]:
+    first_entry = dt.datetime(2026, 7, 4, 12, tzinfo=dt.timezone.utc)
+    rows = []
+    for index in range(30):
+        net_bps = nets[index % len(nets)]
+        entry = first_entry + dt.timedelta(days=index // 5, hours=index % 5)
+        captured_at_ms = int(entry.timestamp() * 1_000)
+        rows.append(
+            attach_candidate_lineage_v2(
+                {
+                    "record_type": "blocked_signal_outcome",
+                    "generated_at_utc": entry.isoformat(),
+                    "entry_ts_ms": captured_at_ms,
+                    "realized_net_bps": net_bps,
+                    "gross_bps": net_bps + 15.0,
+                    "cost_bps": 15.0,
+                    "cost_model_version": "conservative_v1",
+                },
+                context_id=f"{context_prefix}-{index:02d}",
+                captured_at_ms=captured_at_ms,
+                strategy_name="ma_crossover",
+                symbol=symbol,
+                side=side,
+                as_of_utc_date="2026-07-10",
+            )
+        )
+    return rows
+
+
 def test_sealed_horizon_reject_sql_filters_exact_mature_side_cell() -> None:
     plan = _sealed_plan()
     candidate = find_sealed_horizon_candidate(plan, "ma_crossover|BTCUSDT|Sell")
@@ -219,35 +279,27 @@ def test_sealed_packet_quarantines_invalid_positive_lineage_from_outcome_metrics
         plan,
         "ma_crossover|BTCUSDT|Sell",
     )
-    qualified = attach_candidate_lineage_v2(
-        {
-            "record_type": "blocked_signal_outcome",
-            "realized_net_bps": 10.0,
-            "gross_bps": 22.0,
-            "cost_bps": 12.0,
-            "cost_model_version": "conservative_v1",
-        },
-        context_id="ctx-sealed-qualified",
-        strategy_name="ma_crossover",
+    qualified = _eligible_cohort(
         symbol="BTCUSDT",
         side="Sell",
-        as_of_utc_date="2026-07-10",
+        nets=(9.0, 10.0, 11.0),
+        context_prefix="ctx-sealed-qualified",
     )
     invalid = attach_candidate_lineage_v2(
         {
             "record_type": "blocked_signal_outcome",
             "realized_net_bps": 10_000.0,
-            "gross_bps": 10_012.0,
-            "cost_bps": 12.0,
+            "gross_bps": 10_015.0,
+            "cost_bps": 15.0,
             "cost_model_version": "conservative_v1",
         },
         context_id="ctx-sealed-invalid-positive",
         strategy_name="ma_crossover",
-        symbol="BTCUSDT",
-        side="Sell",
+        symbol="ETHUSDT",
+        side="Buy",
         as_of_utc_date="2026-07-10",
     )
-    invalid["side_cell_key"] = "ma_crossover|BTCUSDT|Buy"
+    invalid["side_cell_key"] = "ma_crossover|ETHUSDT|Sell"
     review_cfg = BlockedOutcomeReviewConfig(
         min_outcomes_per_side_cell=1,
         min_effective_entries_per_side_cell=1,
@@ -256,13 +308,15 @@ def test_sealed_packet_quarantines_invalid_positive_lineage_from_outcome_metrics
         min_net_positive_pct=1.0,
     )
     baseline_review = build_blocked_signal_outcome_review(
-        [qualified],
+        qualified,
         cfg=review_cfg,
+        slippage_quantiles=_expected_cost_artifact(),
         now_utc=dt.datetime(2026, 7, 10, 18, tzinfo=dt.timezone.utc),
     )
     attacked_review = build_blocked_signal_outcome_review(
-        [qualified, invalid],
+        [*qualified, invalid],
         cfg=review_cfg,
+        slippage_quantiles=_expected_cost_artifact(),
         now_utc=dt.datetime(2026, 7, 10, 18, tzinfo=dt.timezone.utc),
     )
 
@@ -297,27 +351,27 @@ def test_sealed_packet_quarantines_invalid_positive_lineage_from_outcome_metrics
             ),
         )
 
-    baseline = packet([qualified], baseline_review)
-    attacked = packet([qualified, invalid], attacked_review)
+    baseline = packet(qualified, baseline_review)
+    attacked = packet([*qualified, invalid], attacked_review)
 
     assert attacked["status"] == baseline["status"]
     assert attacked["review"] == baseline["review"]
-    assert attacked["outcomes"]["blocked_signal_outcome_count"] == 1
-    assert attacked["outcomes"]["outcome_count"] == 1
+    assert attacked["outcomes"]["blocked_signal_outcome_count"] == 30
+    assert attacked["outcomes"]["outcome_count"] == 30
     assert attacked["outcomes"]["avg_net_bps"] == 10.0
     assert attacked["outcomes"]["net_positive_pct"] == 100.0
     assert attacked["answers"] == baseline["answers"]
     assert attacked["answers"]["candidate_clears_operator_review_gate"] is True
-    assert attacked["outcomes"]["raw_blocked_signal_outcome_count"] == 2
-    assert attacked["outcomes"]["raw_outcome_count"] == 2
-    assert attacked["outcomes"]["raw_avg_net_bps"] == 5_005.0
-    assert attacked["materialization"]["input_feature_row_count"] == 1
-    assert attacked["materialization"]["materialized_record_count"] == 1
+    assert attacked["outcomes"]["raw_blocked_signal_outcome_count"] == 31
+    assert attacked["outcomes"]["raw_outcome_count"] == 31
+    assert attacked["outcomes"]["raw_avg_net_bps"] == pytest.approx(10_300.0 / 31)
+    assert attacked["materialization"]["input_feature_row_count"] == 30
+    assert attacked["materialization"]["materialized_record_count"] == 30
     assert attacked["materialization"]["decision_counts"] == {
-        "ORDER_AUTHORITY_NOT_GRANTED": 1
+        "ORDER_AUTHORITY_NOT_GRANTED": 30
     }
     assert attacked["materialization"]["all_order_authority_not_granted"] is True
-    assert attacked["materialization"]["raw_materialized_record_count"] == 2
+    assert attacked["materialization"]["raw_materialized_record_count"] == 31
 
     counterfactual = {
         "friction_bps": 4.0,
@@ -372,9 +426,9 @@ def test_sealed_packet_quarantines_invalid_positive_lineage_from_outcome_metrics
     assert strict_path["status"] == (
         "SEALED_HORIZON_LEARNING_EVIDENCE_READY_FOR_OPERATOR_REVIEW"
     )
-    assert strict_path["evidence"]["sealed_learning_input_feature_row_count"] == 1
-    assert strict_path["evidence"]["sealed_learning_materialized_record_count"] == 1
-    assert strict_path["evidence"]["sealed_learning_blocked_signal_outcome_count"] == 1
+    assert strict_path["evidence"]["sealed_learning_input_feature_row_count"] == 30
+    assert strict_path["evidence"]["sealed_learning_materialized_record_count"] == 30
+    assert strict_path["evidence"]["sealed_learning_blocked_signal_outcome_count"] == 30
     assert strict_path["evidence"]["sealed_learning_avg_net_bps"] == 10.0
     assert not any(
         key.startswith("sealed_learning_raw_")
@@ -383,7 +437,7 @@ def test_sealed_packet_quarantines_invalid_positive_lineage_from_outcome_metrics
 
     compatibility_review = (
         build_research_compatibility_blocked_signal_outcome_review_no_authority(
-            [qualified, invalid],
+            [*qualified, invalid],
             cfg=review_cfg,
             now_utc=dt.datetime(2026, 7, 10, 18, tzinfo=dt.timezone.utc),
         )
@@ -416,38 +470,19 @@ def test_sealed_packet_scopes_counts_metrics_and_materialization_to_candidate(
         plan,
         "ma_crossover|BTCUSDT|Sell",
     )
-    selected = attach_candidate_lineage_v2(
-        {
-            "record_type": "blocked_signal_outcome",
-            "realized_net_bps": -10.0,
-            "gross_bps": 2.0,
-            "cost_bps": 12.0,
-            "cost_model_version": "conservative_v1",
-        },
-        context_id="ctx-sealed-selected-scoped",
-        strategy_name="ma_crossover",
+    selected = _eligible_cohort(
         symbol="BTCUSDT",
         side="Sell",
-        as_of_utc_date="2026-07-10",
+        nets=(-9.0, -10.0, -11.0),
+        context_prefix="ctx-sealed-selected-scoped",
     )
-    other_rows = [
-        attach_candidate_lineage_v2(
-            {
-                "record_type": "blocked_signal_outcome",
-                "realized_net_bps": net_bps,
-                "gross_bps": net_bps + 12.0,
-                "cost_bps": 12.0,
-                "cost_model_version": "conservative_v1",
-            },
-            context_id=f"ctx-sealed-other-scoped-{index}",
-            strategy_name="ma_crossover",
-            symbol="ETHUSDT",
-            side="Buy",
-            as_of_utc_date="2026-07-10",
-        )
-        for index, net_bps in enumerate((100.0, 200.0))
-    ]
-    rows = [selected, *other_rows]
+    other_rows = _eligible_cohort(
+        symbol="ETHUSDT",
+        side="Buy",
+        nets=(100.0, 150.0, 200.0),
+        context_prefix="ctx-sealed-other-scoped",
+    )
+    rows = [*selected, *other_rows]
     review = build_blocked_signal_outcome_review(
         rows,
         cfg=BlockedOutcomeReviewConfig(
@@ -457,6 +492,7 @@ def test_sealed_packet_scopes_counts_metrics_and_materialization_to_candidate(
             max_top_entry_day_share_pct=100.0,
             min_net_positive_pct=1.0,
         ),
+        slippage_quantiles=_expected_cost_artifact(),
         now_utc=dt.datetime(2026, 7, 10, 18, tzinfo=dt.timezone.utc),
     )
 
@@ -490,20 +526,20 @@ def test_sealed_packet_scopes_counts_metrics_and_materialization_to_candidate(
         ),
     )
 
-    assert review["blocked_signal_outcome_count"] == 3
-    assert packet["materialization"]["input_feature_row_count"] == 1
-    assert packet["materialization"]["materialized_record_count"] == 1
-    assert packet["materialization"]["appended_record_count"] == 1
-    assert packet["materialization"]["qualified_outcome_row_count"] == 1
-    assert packet["outcomes"]["blocked_signal_outcome_count"] == 1
-    assert packet["outcomes"]["outcome_count"] == 1
+    assert review["blocked_signal_outcome_count"] == 60
+    assert packet["materialization"]["input_feature_row_count"] == 30
+    assert packet["materialization"]["materialized_record_count"] == 30
+    assert packet["materialization"]["appended_record_count"] == 30
+    assert packet["materialization"]["qualified_outcome_row_count"] == 30
+    assert packet["outcomes"]["blocked_signal_outcome_count"] == 30
+    assert packet["outcomes"]["outcome_count"] == 30
     assert packet["outcomes"]["avg_net_bps"] == -10.0
-    assert packet["outcomes"]["avg_gross_bps"] == 2.0
+    assert packet["outcomes"]["avg_gross_bps"] == 5.0
     assert packet["outcomes"]["net_positive_pct"] == 0.0
-    assert packet["outcomes"]["min_net_bps"] == -10.0
-    assert packet["outcomes"]["max_net_bps"] == -10.0
+    assert packet["outcomes"]["min_net_bps"] == -11.0
+    assert packet["outcomes"]["max_net_bps"] == -9.0
     assert packet["review"]["top_side_cell_key"] == candidate["side_cell_key"]
-    assert packet["review"]["blocked_signal_outcome_count"] == 1
+    assert packet["review"]["blocked_signal_outcome_count"] == 30
     assert packet["answers"]["sealed_candidate_materialized"] is True
     assert packet["answers"]["candidate_clears_operator_review_gate"] is False
 
@@ -516,26 +552,20 @@ def test_sealed_packet_accepts_selected_candidate_that_is_not_global_top(
         plan,
         "ma_crossover|BTCUSDT|Sell",
     )
-    rows = []
-    for index, (symbol, side, net_bps) in enumerate(
-        (("BTCUSDT", "Sell", 10.0), ("ETHUSDT", "Buy", 100.0))
-    ):
-        rows.append(
-            attach_candidate_lineage_v2(
-                {
-                    "record_type": "blocked_signal_outcome",
-                    "realized_net_bps": net_bps,
-                    "gross_bps": net_bps + 12.0,
-                    "cost_bps": 12.0,
-                    "cost_model_version": "conservative_v1",
-                },
-                context_id=f"ctx-sealed-non-top-{index}",
-                strategy_name="ma_crossover",
-                symbol=symbol,
-                side=side,
-                as_of_utc_date="2026-07-10",
-            )
-        )
+    rows = [
+        *_eligible_cohort(
+            symbol="BTCUSDT",
+            side="Sell",
+            nets=(9.0, 10.0, 11.0),
+            context_prefix="ctx-sealed-non-top-selected",
+        ),
+        *_eligible_cohort(
+            symbol="ETHUSDT",
+            side="Buy",
+            nets=(99.0, 100.0, 101.0),
+            context_prefix="ctx-sealed-non-top-global",
+        ),
+    ]
     review = build_blocked_signal_outcome_review(
         rows,
         cfg=BlockedOutcomeReviewConfig(
@@ -545,6 +575,7 @@ def test_sealed_packet_accepts_selected_candidate_that_is_not_global_top(
             max_top_entry_day_share_pct=100.0,
             min_net_positive_pct=1.0,
         ),
+        slippage_quantiles=_expected_cost_artifact(),
         now_utc=dt.datetime(2026, 7, 10, 18, tzinfo=dt.timezone.utc),
     )
     selected_review_row = next(
@@ -598,22 +629,14 @@ def test_sealed_packet_requires_selected_identity_for_materialization_counts(
         plan,
         "ma_crossover|BTCUSDT|Sell",
     )
-    selected = attach_candidate_lineage_v2(
-        {
-            "record_type": "blocked_signal_outcome",
-            "realized_net_bps": 10.0,
-            "gross_bps": 22.0,
-            "cost_bps": 12.0,
-            "cost_model_version": "conservative_v1",
-        },
-        context_id="ctx-sealed-materializer-identity",
-        strategy_name="ma_crossover",
+    selected = _eligible_cohort(
         symbol="BTCUSDT",
         side="Sell",
-        as_of_utc_date="2026-07-10",
+        nets=(9.0, 10.0, 11.0),
+        context_prefix="ctx-sealed-materializer-identity",
     )
     review = build_blocked_signal_outcome_review(
-        [selected],
+        selected,
         cfg=BlockedOutcomeReviewConfig(
             min_outcomes_per_side_cell=1,
             min_effective_entries_per_side_cell=1,
@@ -621,6 +644,7 @@ def test_sealed_packet_requires_selected_identity_for_materialization_counts(
             max_top_entry_day_share_pct=100.0,
             min_net_positive_pct=1.0,
         ),
+        slippage_quantiles=_expected_cost_artifact(),
         now_utc=dt.datetime(2026, 7, 10, 18, tzinfo=dt.timezone.utc),
     )
 
@@ -631,11 +655,11 @@ def test_sealed_packet_requires_selected_identity_for_materialization_counts(
             feature_row_count=2,
             materializer_batch=materializer_batch,
             outcome_batch={
-                "blocked_signal_outcomes": [selected],
-                "blocked_signal_outcome_count": 1,
+                "blocked_signal_outcomes": selected,
+                "blocked_signal_outcome_count": 30,
                 "appended_outcome_count": 0,
-                "window_count": 1,
-                "price_observation_count": 1,
+                "window_count": 30,
+                "price_observation_count": 30,
                 "horizon_minutes": 60,
             },
             review=review,
@@ -664,7 +688,7 @@ def test_sealed_packet_requires_selected_identity_for_materialization_counts(
     assert other_only["materialization"]["all_order_authority_not_granted"] is False
     assert other_only["materialization"]["raw_materialized_record_count"] == 1
     assert other_only["answers"]["sealed_candidate_materialized"] is False
-    assert other_only["outcomes"]["blocked_signal_outcome_count"] == 1
+    assert other_only["outcomes"]["blocked_signal_outcome_count"] == 30
 
     partial_append = packet(
         {
@@ -695,38 +719,23 @@ def test_sealed_packet_uses_full_strict_lookup_for_rank_beyond_display_cap(
         plan,
         "ma_crossover|BTCUSDT|Sell",
     )
-    selected = attach_candidate_lineage_v2(
-        {
-            "record_type": "blocked_signal_outcome",
-            "realized_net_bps": 10.0,
-            "gross_bps": 22.0,
-            "cost_bps": 12.0,
-            "cost_model_version": "conservative_v1",
-        },
-        context_id="ctx-sealed-rank-beyond-cap-selected",
-        strategy_name="ma_crossover",
+    selected = _eligible_cohort(
         symbol="BTCUSDT",
         side="Sell",
-        as_of_utc_date="2026-07-10",
+        nets=(9.0, 10.0, 11.0),
+        context_prefix="ctx-sealed-rank-beyond-cap-selected",
     )
     higher_ranked = [
-        attach_candidate_lineage_v2(
-            {
-                "record_type": "blocked_signal_outcome",
-                "realized_net_bps": 100.0 + index,
-                "gross_bps": 112.0 + index,
-                "cost_bps": 12.0,
-                "cost_model_version": "conservative_v1",
-            },
-            context_id=f"ctx-sealed-rank-beyond-cap-{index:02d}",
-            strategy_name="ma_crossover",
+        row
+        for index in range(17)
+        for row in _eligible_cohort(
             symbol=f"ALT{index:02d}USDT",
             side="Buy",
-            as_of_utc_date="2026-07-10",
+            nets=tuple(100.0 + index + jitter for jitter in (-1.0, 0.0, 1.0)),
+            context_prefix=f"ctx-sealed-rank-beyond-cap-{index:02d}",
         )
-        for index in range(17)
     ]
-    rows = [selected, *higher_ranked]
+    rows = [*selected, *higher_ranked]
     review_cfg = BlockedOutcomeReviewConfig(
         min_outcomes_per_side_cell=1,
         min_effective_entries_per_side_cell=1,
@@ -737,6 +746,7 @@ def test_sealed_packet_uses_full_strict_lookup_for_rank_beyond_display_cap(
     review = build_blocked_signal_outcome_review(
         rows,
         cfg=review_cfg,
+        slippage_quantiles=_expected_cost_artifact(),
         now_utc=dt.datetime(2026, 7, 10, 18, tzinfo=dt.timezone.utc),
     )
 
@@ -780,7 +790,7 @@ def test_sealed_packet_uses_full_strict_lookup_for_rank_beyond_display_cap(
         ),
     )
     assert packet["review"]["top_side_cell_key"] == candidate["side_cell_key"]
-    assert packet["outcomes"]["blocked_signal_outcome_count"] == 1
+    assert packet["outcomes"]["blocked_signal_outcome_count"] == 30
     assert packet["answers"]["candidate_clears_operator_review_gate"] is True
 
     compatibility = (
