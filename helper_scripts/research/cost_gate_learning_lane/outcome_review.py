@@ -1357,36 +1357,23 @@ def _build_learning_candidate_board(
     qualified_rows_sink: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Compatibility façade for the extracted candidate-board Module."""
-    cohort_evaluator = _evaluate_candidate_cohort
-    if qualified_rows_sink is not None:
-        def cohort_evaluator(
-            side_cell_key: str,
-            rows: list[dict[str, Any]],
-            *,
-            cfg: BlockedOutcomeReviewConfig,
-            overlay: dict[str, dict[str, Any]],
-            edge_estimates: dict[str, dict[str, Any]],
-            expected_slippage: dict[str, Any] | None,
-        ) -> dict[str, Any]:
-            qualified_rows_sink.extend(rows)
-            return _evaluate_candidate_cohort(
-                side_cell_key,
-                rows,
-                cfg=cfg,
-                overlay=overlay,
-                edge_estimates=edge_estimates,
-                expected_slippage=expected_slippage,
-            )
-
-    return build_learning_candidate_board(
+    eligible_rows_by_cohort: dict[str, list[dict[str, Any]]] | None = (
+        {} if qualified_rows_sink is not None else None
+    )
+    board = build_learning_candidate_board(
         ledger_rows,
         cfg=cfg,
         overlay=overlay,
         edge_estimates=edge_estimates,
         expected_slippage=expected_slippage,
         as_of_date=as_of_date,
-        cohort_evaluator=cohort_evaluator,
+        cohort_evaluator=_evaluate_candidate_cohort,
+        eligible_evaluator_rows_by_cohort_sink=eligible_rows_by_cohort,
     )
+    if qualified_rows_sink is not None and eligible_rows_by_cohort is not None:
+        for cohort_hash in sorted(eligible_rows_by_cohort):
+            qualified_rows_sink.extend(eligible_rows_by_cohort[cohort_hash])
+    return board
 
 
 def _build_blocked_signal_outcome_review_core(

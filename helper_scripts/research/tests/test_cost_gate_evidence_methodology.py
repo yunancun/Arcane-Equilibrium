@@ -727,10 +727,17 @@ def test_learning_candidate_board_uses_full_universe_not_legacy_top16():
         for index in range(17)
     ]
 
-    packet = build_blocked_signal_outcome_review(rows, now_utc=NOW)
+    strict = build_blocked_signal_outcome_review(rows, now_utc=NOW)
+    packet = build_research_compatibility_blocked_signal_outcome_review_no_authority(
+        rows,
+        now_utc=NOW,
+    )
 
+    assert strict["top_side_cells"] == []
+    assert packet["authority_eligible"] is False
+    assert packet["operator_review_eligible"] is False
     assert len(packet["top_side_cells"]) == 16
-    board = packet["learning_candidate_board"]
+    board = strict["learning_candidate_board"]
     assert board["schema_version"] == "cost_gate_learning_candidate_board_v2"
     assert board["candidate_universe_complete"] is True
     assert len(board["candidate_rows"]) == 17
@@ -755,12 +762,19 @@ def test_learning_candidate_board_splits_horizons_without_changing_legacy_cell()
     short = _with_typed_candidate_learning_context(short)
     long = _with_typed_candidate_learning_context(long)
 
-    packet = build_blocked_signal_outcome_review([short, long], now_utc=NOW)
+    strict = build_blocked_signal_outcome_review([short, long], now_utc=NOW)
+    packet = build_research_compatibility_blocked_signal_outcome_review_no_authority(
+        [short, long],
+        now_utc=NOW,
+    )
 
+    assert strict["top_side_cells"] == []
+    assert packet["authority_eligible"] is False
+    assert packet["operator_review_eligible"] is False
     legacy = packet["top_side_cells"]
     assert len(legacy) == 1
     assert legacy[0]["horizon_minutes"] == [60, 240]
-    board_rows = packet["learning_candidate_board"]["candidate_rows"]
+    board_rows = strict["learning_candidate_board"]["candidate_rows"]
     assert sorted(row["horizon_minutes"] for row in board_rows) == [60, 240]
     assert sorted(row["qualified_raw_outcome_count"] for row in board_rows) == [1, 1]
 
@@ -1022,7 +1036,9 @@ def test_learning_candidate_board_exposes_cost_censoring_and_regime_inputs():
     )
 
     candidate = packet["learning_candidate_board"]["candidate_rows"][0]
-    assert packet["top_side_cells"][0]["review_candidate"] is False
+    assert packet["status"] == "NO_QUALIFIED_LINEAGE_BLOCKED_SIGNAL_OUTCOMES"
+    assert packet["outcome_aggregation_input_row_count"] == 0
+    assert packet["top_side_cells"] == []
     assert candidate["identity_complete"] is True
     assert candidate["selection_eligible"] is False
     assert "DAY_CLUSTER_VARIANCE_DEGENERATE" in candidate["blockers"]
@@ -1639,19 +1655,28 @@ def test_f1_effective_entry_floor_blocks_candidacy_below_preregistered_min():
 def test_f1_distinct_entries_meeting_floor_can_still_be_candidate():
     """n_eff=30(= 門檻)+ 跨 6 日 + BH 過 → 候選路徑不因 F1 修復被誤殺(默認 cfg)。"""
     nets = [12.5, 11.5, 10.5, 12.0, 11.0] * 6
+    day_effects = (-1.0, -0.5, -0.25, 0.25, 0.5, 1.0)
     rows = [
         _with_complete_candidate_lineage(
-            _blocked_outcome_row(
-                f"ok{i}",
-                "strat|PPPUSDT|Buy",
-                net + 4.0,
-                cost_model_version="conservative_v1",
-                entry_ts_ms=_spread_entry_ts(i),
-            )
+            {
+                **_blocked_outcome_row(
+                    f"ok{i}",
+                    "strat|PPPUSDT|Buy",
+                    net + 15.0 + day_effects[i // 5],
+                    cost_model_version="conservative_v1",
+                    entry_ts_ms=_spread_entry_ts(i),
+                ),
+                "cost_bps": 15.0,
+                "realized_net_bps": net + day_effects[i // 5],
+            }
         )
         for i, net in enumerate(nets)
     ]
-    packet = build_blocked_signal_outcome_review(rows, now_utc=NOW)
+    packet = build_blocked_signal_outcome_review(
+        rows,
+        slippage_quantiles=_expected_cost_artifact(mean_abs=2.0),
+        now_utc=NOW,
+    )
     cell = packet["top_side_cells"][0]
     assert cell["effective_entry_count"] == 30
     assert cell["distinct_entry_utc_days"] == 6
@@ -1994,14 +2019,15 @@ def test_expected_cost_flips_conservative_false_negative():
     「誤殺假說」要能翻出來的形狀。
     """
     rows = []
-    for i in range(5):
-        gross = 20.0 + _COST_TRACK_JITTER[i]
+    day_effects = (-1.0, -0.5, -0.25, 0.25, 0.5, 1.0)
+    for i in range(30):
+        gross = 20.0 + _COST_TRACK_JITTER[i % 5] + day_effects[i // 5]
         row = _blocked_outcome_row(
             f"fn{i}",
             "strat|SSSUSDT|Buy",
             gross,
             cost_model_version="conservative_v1",
-            entry_ts_ms=_spread_entry_ts(i, per_day=1),
+            entry_ts_ms=_spread_entry_ts(i),
         )
         row["cost_bps"] = 92.3
         row["realized_net_bps"] = gross - 92.3

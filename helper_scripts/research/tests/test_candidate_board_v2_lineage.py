@@ -80,6 +80,76 @@ def _board(rows: list[dict[str, object]]) -> dict[str, object]:
     ]
 
 
+def _eligible_cohort_rows(
+    context_prefix: str,
+    *,
+    stable_projection_overrides: dict[str, object] | None = None,
+) -> list[dict[str, object]]:
+    rows = []
+    day_effects = (-3.0, -2.0, -1.0, 1.0, 2.0, 3.0)
+    for index in range(30):
+        captured_at = dt.datetime(2026, 7, 3 + index // 5, index % 5,
+                                  tzinfo=dt.timezone.utc)
+        row = _qualified(
+            context_id=f"{context_prefix}-{index:02d}",
+            captured_at_ms=int(captured_at.timestamp() * 1_000),
+            stable_projection_overrides=stable_projection_overrides,
+        )
+        net = 10.0 + day_effects[index // 5] + (index % 5) * 0.1
+        row.update({"realized_net_bps": net, "gross_bps": net + 12.0})
+        rows.append(row)
+    return rows
+
+
+def _expected_cost_artifact() -> dict[str, object]:
+    return {
+        "schema_version": "cost_gate_slippage_quantile_artifact_v2",
+        "asof": NOW.isoformat(),
+        "window_days": 90,
+        "n_total_global": 500,
+        "symbols": [{
+            "symbol": "BTCUSDT",
+            "n": 500,
+            "mean_abs": 2.0,
+            "mean_signed": 1.0,
+            "q50": 1.0,
+            "q75": 4.0,
+            "q90": 8.0,
+            "cvar90": 8.0,
+            "thin_sample": False,
+        }],
+        "global": {
+            "n": 500,
+            "mean_abs": 2.0,
+            "mean_signed": 1.0,
+            "q50": 1.0,
+            "q75": 4.0,
+            "q90": 8.0,
+            "cvar90": 8.0,
+            "thin_sample": False,
+        },
+        "boundary": (
+            "slippage quantile artifact only; PG source is read-only SELECT-only; "
+            "no PG write, Bybit call, order, config, risk, auth, or runtime mutation"
+        ),
+    }
+
+
+def _rehash_selection_and_board(board: dict[str, object]) -> None:
+    semantic_rows = [
+        {field: row[field] for field in candidate_board_module._SELECTION_FIELDS}
+        for row in board["candidate_rows"]
+    ]
+    semantic_rows.sort(key=lambda row: (row["candidate_id"], canonical_sha256(row)))
+    board["selection_hash"] = canonical_sha256({
+        "schema_version": "cost_gate_learning_candidate_selection_v2",
+        "candidate_rows": semantic_rows,
+    })
+    board["board_hash"] = canonical_sha256({
+        key: value for key, value in board.items() if key != "board_hash"
+    })
+
+
 def test_legacy_rows_are_audit_only_and_cannot_change_qualified_selection() -> None:
     qualified = _qualified()
     baseline = _board([qualified])
@@ -611,7 +681,7 @@ def test_raw_valid_missing_evaluation_and_outside_window_are_unqualified() -> No
     }
 
 
-def test_stale_invalid_exact_only_row_is_audit_only_and_board_validates() -> None:
+def test_recorded_date_invalid_exact_row_remains_addressable_and_board_validates() -> None:
     event_ts_ms = int(
         dt.datetime(2026, 7, 9, 12, tzinfo=dt.timezone.utc).timestamp() * 1_000
     )
@@ -624,18 +694,23 @@ def test_stale_invalid_exact_only_row_is_audit_only_and_board_validates() -> Non
     )
     stale["side_cell_key"] = "ma_crossover|BTCUSDT|Sell"
 
-    board = _board([stale])
+    board = build_blocked_signal_outcome_review(
+        [stale], now_utc=dt.datetime(2026, 7, 17, 18, tzinfo=dt.timezone.utc)
+    )["learning_candidate_board"]
 
-    assert board["candidate_rows"] == []
+    assert len(board["candidate_rows"]) == 1
     assert board["invalid_lineage_outcome_row_count"] == 1
     assert board["invalid_exact_cohort_row_count"] == 1
     assert board["lineage_exclusion_reason_counts"] == {
         "INVALID_LINEAGE_EXACT_COHORT": 1
     }
+    candidate = board["candidate_rows"][0]
+    assert candidate["invalid_lineage_exact_cohort_row_count"] == 1
+    assert candidate["selection_eligible"] is False
     assert validate_learning_candidate_board_v2(board) == board
 
 
-def test_stale_qualified_lineage_is_demoted_to_audit_only_exact_invalid() -> None:
+def test_recorded_date_qualified_lineage_is_not_demoted_by_review_date() -> None:
     event_ts_ms = int(
         dt.datetime(2026, 7, 8, 12, tzinfo=dt.timezone.utc).timestamp() * 1_000
     )
@@ -648,13 +723,11 @@ def test_stale_qualified_lineage_is_demoted_to_audit_only_exact_invalid() -> Non
 
     board = _board([stale])
 
-    assert board["candidate_rows"] == []
-    assert board["qualified_lineage_outcome_row_count"] == 0
-    assert board["invalid_lineage_outcome_row_count"] == 1
-    assert board["invalid_exact_cohort_row_count"] == 1
-    assert board["lineage_exclusion_reason_counts"] == {
-        "INVALID_LINEAGE_EXACT_COHORT": 1
-    }
+    assert len(board["candidate_rows"]) == 1
+    assert board["qualified_lineage_outcome_row_count"] == 1
+    assert board["invalid_lineage_outcome_row_count"] == 0
+    assert board["invalid_exact_cohort_row_count"] == 0
+    assert board["lineage_exclusion_reason_counts"] == {}
     assert validate_learning_candidate_board_v2(board) == board
 
 
@@ -673,16 +746,24 @@ def test_stale_invalid_exact_hash_quarantines_addressable_current_cohort() -> No
     )
     stale["side_cell_key"] = "ma_crossover|BTCUSDT|Sell"
 
-    board = _board([stale, qualified])
+    board = build_blocked_signal_outcome_review(
+        [stale, qualified],
+        now_utc=dt.datetime(2026, 7, 17, 18, tzinfo=dt.timezone.utc),
+    )["learning_candidate_board"]
 
     assert board["invalid_exact_cohort_row_count"] == 1
     assert board["conflicting_duplicate_event_hash_row_count"] == 2
-    assert len(board["candidate_rows"]) == 1
-    candidate = board["candidate_rows"][0]
-    assert candidate["qualified_evaluator_input_count"] == 0
-    assert candidate["invalid_lineage_exact_cohort_row_count"] == 0
-    assert candidate["duplicate_event_hash_outcome_conflict_row_count"] == 2
-    assert "DUPLICATE_EVENT_HASH_OUTCOME_CONFLICT" in candidate["blockers"]
+    assert len(board["candidate_rows"]) == 2
+    assert all(
+        candidate["qualified_evaluator_input_count"] == 0
+        and candidate["conflicting_event_hash_row_count"] == 1
+        and "DUPLICATE_EVENT_HASH_COHORT_CONFLICT" in candidate["blockers"]
+        for candidate in board["candidate_rows"]
+    )
+    assert sorted(
+        candidate["invalid_lineage_exact_cohort_row_count"]
+        for candidate in board["candidate_rows"]
+    ) == [0, 1]
     assert validate_learning_candidate_board_v2(board) == board
 
 
@@ -1381,6 +1462,200 @@ def test_strict_review_keeps_invalid_unqualified_audits_but_aggregates_none() ->
     assert validate_learning_candidate_board_v2(board) == board
 
 
+@pytest.mark.parametrize(
+    ("expected_blocker", "stable_overrides", "with_cost_artifact"),
+    (
+        (
+            "HIDDEN_OOS_CONSUMED",
+            {"hidden_oos_state": {
+                "state": "consumed",
+                "open_count": 1,
+                "opened_for_iteration": True,
+                "consumed": True,
+            }},
+            True,
+        ),
+        (
+            "PROOF_GAP_OPEN",
+            {"proof": {"next_gap": {
+                "kind": "LOCAL_ENGINEERING",
+                "code": "PROOF_GAP_REMAINS",
+            }}},
+            True,
+        ),
+        ("EXPECTED_COST_NOT_FULLY_RECOMPUTABLE", None, False),
+    ),
+)
+def test_final_candidate_blockers_exclude_cohort_from_strict_aggregation(
+    expected_blocker: str,
+    stable_overrides: dict[str, object] | None,
+    with_cost_artifact: bool,
+) -> None:
+    review = build_blocked_signal_outcome_review(
+        _eligible_cohort_rows(
+            f"ctx-final-blocker-{expected_blocker.lower()}",
+            stable_projection_overrides=stable_overrides,
+        ),
+        slippage_quantiles=(
+            _expected_cost_artifact() if with_cost_artifact else None
+        ),
+        now_utc=NOW,
+    )
+    board = review["learning_candidate_board"]
+    candidate = board["candidate_rows"][0]
+
+    assert expected_blocker in candidate["blockers"]
+    assert candidate["selection_eligible"] is False
+    assert "eligible_evaluator_rows_by_cohort_sink" not in board
+    assert "evaluator_rows_by_cohort" not in board
+    assert review["outcome_aggregation_input_row_count"] == 0
+    assert review["review_candidate_side_cell_count"] == 0
+    assert review["top_side_cells"] == []
+
+
+def test_same_side_cell_stable_cohort_ambiguity_blocks_strict_pooling() -> None:
+    first = _eligible_cohort_rows(
+        "ctx-ambiguous-cohort-a",
+        stable_projection_overrides={"context_hashes": {"portfolio": "1" * 64}},
+    )
+    second = _eligible_cohort_rows(
+        "ctx-ambiguous-cohort-b",
+        stable_projection_overrides={"context_hashes": {"portfolio": "2" * 64}},
+    )
+
+    review = build_blocked_signal_outcome_review(
+        [*second, *first],
+        slippage_quantiles=_expected_cost_artifact(),
+        now_utc=NOW,
+    )
+    board = review["learning_candidate_board"]
+
+    assert len(board["candidate_rows"]) == 2
+    assert len({row["stable_cohort_hash"] for row in board["candidate_rows"]}) == 2
+    assert all(
+        "SIDE_CELL_STABLE_COHORT_AMBIGUITY" in row["blockers"]
+        and row["selection_eligible"] is False
+        for row in board["candidate_rows"]
+    )
+    assert review["outcome_aggregation_input_row_count"] == 0
+    assert review["blocked_signal_outcome_count"] == 0
+    assert review["side_cell_count"] == 0
+    assert review["review_candidate_side_cell_count"] == 0
+    assert review["top_side_cells"] == []
+
+
+def test_validator_reconstructs_required_side_cell_cohort_ambiguity() -> None:
+    rows = [
+        *_eligible_cohort_rows(
+            "ctx-validator-ambiguity-a",
+            stable_projection_overrides={"context_hashes": {"portfolio": "3" * 64}},
+        ),
+        *_eligible_cohort_rows(
+            "ctx-validator-ambiguity-b",
+            stable_projection_overrides={"context_hashes": {"portfolio": "4" * 64}},
+        ),
+    ]
+    board = build_blocked_signal_outcome_review(
+        rows, slippage_quantiles=_expected_cost_artifact(), now_utc=NOW
+    )["learning_candidate_board"]
+
+    assert validate_learning_candidate_board_v2(board) == board
+    poisoned = copy.deepcopy(board)
+    for row in poisoned["candidate_rows"]:
+        row["blockers"].remove("SIDE_CELL_STABLE_COHORT_AMBIGUITY")
+        row["selection_eligible"] = True
+    _rehash_selection_and_board(poisoned)
+    with pytest.raises(ValueError, match="candidate_ambiguity_blockers_invalid"):
+        validate_learning_candidate_board_v2(poisoned)
+
+
+def test_validator_rejects_extra_ambiguity_on_unique_or_base_blocked_row() -> None:
+    eligible = build_blocked_signal_outcome_review(
+        _eligible_cohort_rows("ctx-validator-unique"),
+        slippage_quantiles=_expected_cost_artifact(),
+        now_utc=NOW,
+    )["learning_candidate_board"]
+    base_blocked = _board([_qualified(context_id="ctx-validator-base-blocked")])
+
+    for source in (eligible, base_blocked):
+        poisoned = copy.deepcopy(source)
+        row = poisoned["candidate_rows"][0]
+        row["blockers"] = sorted({
+            *row["blockers"], "SIDE_CELL_STABLE_COHORT_AMBIGUITY"
+        })
+        row["selection_eligible"] = False
+        _rehash_selection_and_board(poisoned)
+        with pytest.raises(ValueError, match="candidate_ambiguity_blockers_invalid"):
+            validate_learning_candidate_board_v2(poisoned)
+
+
+def test_retained_evaluation_semantics_are_stable_across_review_rollover() -> None:
+    rows = _eligible_cohort_rows("ctx-retained-rollover")
+    early = build_blocked_signal_outcome_review(
+        rows,
+        slippage_quantiles=_expected_cost_artifact(),
+        now_utc=NOW,
+    )
+    late = build_blocked_signal_outcome_review(
+        rows,
+        slippage_quantiles=_expected_cost_artifact(),
+        now_utc=NOW + dt.timedelta(days=1),
+    )
+    early_board = early["learning_candidate_board"]
+    late_board = late["learning_candidate_board"]
+
+    assert early_board["as_of_utc_date"] == "2026-07-10"
+    assert late_board["as_of_utc_date"] == "2026-07-11"
+    assert validate_learning_candidate_board_v2(early_board) == early_board
+    assert validate_learning_candidate_board_v2(late_board) == late_board
+    for field in (
+        "qualified_lineage_outcome_row_count",
+        "unqualified_lineage_outcome_row_count",
+        "invalid_lineage_outcome_row_count",
+        "lineage_exclusion_reason_counts",
+        "candidate_rows",
+        "selection_hash",
+        "audit_hash",
+    ):
+        assert late_board[field] == early_board[field]
+    assert late["outcome_aggregation_input_row_count"] == (
+        early["outcome_aggregation_input_row_count"]
+    ) == 30
+    assert late["blocked_signal_outcome_count"] == (
+        early["blocked_signal_outcome_count"]
+    )
+    assert late["review_candidate_side_cell_count"] == (
+        early["review_candidate_side_cell_count"]
+    )
+    serialized_board = json.dumps(early_board, sort_keys=True)
+    assert "eligible_evaluator_rows_by_cohort_sink" not in serialized_board
+    assert rows[0]["attempt_id"] not in serialized_board
+
+    future_evidence = copy.deepcopy(early_board)
+    future_evidence["as_of_utc_date"] = "2026-07-09"
+    _rehash_selection_and_board(future_evidence)
+    with pytest.raises(ValueError, match="board_generation_precedes_evaluation"):
+        validate_learning_candidate_board_v2(future_evidence)
+
+
+def test_validator_binds_cost_window_to_recorded_evaluation_date() -> None:
+    board = build_blocked_signal_outcome_review(
+        _eligible_cohort_rows("ctx-validator-cost-date"),
+        slippage_quantiles=_expected_cost_artifact(),
+        now_utc=NOW + dt.timedelta(days=1),
+    )["learning_candidate_board"]
+    poisoned = copy.deepcopy(board)
+    arbiter = poisoned["candidate_rows"][0]["arbiter_input"]
+    arbiter["cost_evidence"]["source_asof_utc"] = "2026-07-11T18:00:00+00:00"
+    arbiter["arbiter_input_hash"] = canonical_sha256({
+        key: value for key, value in arbiter.items() if key != "arbiter_input_hash"
+    })
+    _rehash_selection_and_board(poisoned)
+
+    with pytest.raises(ValueError, match="cost_evidence_semantics_invalid"):
+        validate_learning_candidate_board_v2(poisoned)
+
+
 def test_research_compatibility_preserves_lineage_partition_audit_counts() -> None:
     qualified = _qualified(context_id="ctx-research-audit-qualified")
     invalid = _qualified(context_id="ctx-research-audit-invalid")
@@ -1494,8 +1769,8 @@ def test_strict_review_top_level_is_invariant_to_positive_lineage_attacks() -> N
         "top_side_cells",
     ):
         assert attacked[field] == baseline[field]
-    assert attacked["outcome_aggregation_input_row_count"] == 1
-    assert baseline["outcome_aggregation_input_row_count"] == 1
+    assert attacked["outcome_aggregation_input_row_count"] == 0
+    assert baseline["outcome_aggregation_input_row_count"] == 0
     baseline_board = baseline["learning_candidate_board"]
     attacked_board = attacked["learning_candidate_board"]
     assert attacked_board["invalid_lineage_outcome_row_count"] == 1

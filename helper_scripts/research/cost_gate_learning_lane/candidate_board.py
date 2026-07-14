@@ -818,12 +818,25 @@ def _candidate_identity(evaluation: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def _candidate_source_contract_valid(
-    item: Mapping[str, Any], *, as_of_date: dt.date
-) -> bool:
+def _validated_evaluation_as_of_date(evaluation: Mapping[str, Any]) -> dt.date:
+    value = evaluation.get("as_of_utc_date")
+    try:
+        parsed = dt.date.fromisoformat(value) if isinstance(value, str) else None
+    except ValueError:
+        parsed = None
+    if parsed is None or parsed.isoformat() != value:
+        raise ValueError("CANDIDATE_EVALUATION_AS_OF_DATE_INVALID")
+    return parsed
+
+
+def _candidate_source_contract_valid(item: Mapping[str, Any]) -> bool:
     """Return whether one lineage source can produce an exact current v2 row."""
     evaluation = item.get("evaluation")
     if not isinstance(evaluation, Mapping):
+        return False
+    try:
+        as_of_date = _validated_evaluation_as_of_date(evaluation)
+    except ValueError:
         return False
     identity = _candidate_identity(evaluation)
     if _candidate_identity_blockers(identity, as_of_date=as_of_date):
@@ -849,9 +862,9 @@ def _build_candidate_row(
     duplicate_audit: Mapping[str, int],
     cohort_evaluation: CandidateCohortEvaluation,
     expected_slippage: dict[str, Any] | None,
-    as_of_date: dt.date,
 ) -> dict[str, Any]:
     """建立單一 stable cohort；lineage blocker 與描述統計分面輸出。"""
+    as_of_date = _validated_evaluation_as_of_date(evaluation_context)
     identity = _candidate_identity(evaluation_context)
     identity_blockers = _candidate_identity_blockers(identity, as_of_date=as_of_date)
     context_hashes, resource, portfolio, proof, hidden_oos, context_blockers = (
@@ -1213,6 +1226,9 @@ def build_learning_candidate_board(
     expected_slippage: dict[str, Any] | None,
     as_of_date: dt.date,
     cohort_evaluator: CandidateCohortEvaluator,
+    eligible_evaluator_rows_by_cohort_sink: (
+        dict[str, list[dict[str, Any]]] | None
+    ) = None,
 ) -> dict[str, Any]:
     """先完成 prospective lineage 分區，再建立 qualified-only candidate board。"""
     blocked_rows = [
@@ -1225,8 +1241,7 @@ def build_learning_candidate_board(
     for row in blocked_rows:
         item = _classify_lineage(row)
         if item["partition"] == "QUALIFIED" and not _candidate_source_contract_valid(
-            item,
-            as_of_date=as_of_date,
+            item
         ):
             item = {
                 **item,
@@ -1268,7 +1283,7 @@ def build_learning_candidate_board(
     for item in invalid_exact:
         target = (
             current_invalid_exact
-            if _candidate_source_contract_valid(item, as_of_date=as_of_date)
+            if _candidate_source_contract_valid(item)
             else noncurrent_invalid_exact
         )
         target.append(item)
@@ -1395,9 +1410,21 @@ def build_learning_candidate_board(
                 duplicate_audit=duplicate,
                 cohort_evaluation=evaluation,
                 expected_slippage=expected_slippage,
-                as_of_date=as_of_date,
             )
         )
+
+    eligible_by_side_cell: dict[str, list[dict[str, Any]]] = {}
+    for row in candidate_rows:
+        if row["selection_eligible"]:
+            eligible_by_side_cell.setdefault(row["side_cell_key"], []).append(row)
+    for rows in eligible_by_side_cell.values():
+        if len(rows) > 1:
+            for row in rows:
+                row["blockers"] = sorted({
+                    *row["blockers"],
+                    "SIDE_CELL_STABLE_COHORT_AMBIGUITY",
+                })
+                row["selection_eligible"] = False
 
     candidate_rows.sort(
         key=lambda row: (
@@ -1419,6 +1446,13 @@ def build_learning_candidate_board(
         # 為什麼 fail-closed：candidate_id 是 downstream evaluation key；碰撞時繼續
         # 發布會把兩個不同 stable cohort 靜默池化成同一學習候選。
         raise ValueError("CANDIDATE_ID_COLLISION")
+    if eligible_evaluator_rows_by_cohort_sink is not None:
+        for row in candidate_rows:
+            if row["selection_eligible"]:
+                cohort_hash = row["stable_cohort_hash"]
+                eligible_evaluator_rows_by_cohort_sink[cohort_hash] = list(
+                    evaluator_rows.get(cohort_hash, [])
+                )
     semantic_rows = [
         {field: row[field] for field in _SELECTION_FIELDS} for row in candidate_rows
     ]
