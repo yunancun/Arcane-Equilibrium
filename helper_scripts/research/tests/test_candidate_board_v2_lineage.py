@@ -20,6 +20,7 @@ from helper_scripts.research.tests.candidate_lineage_v2_test_support import (
     attach_candidate_lineage_v2,
 )
 from cost_gate_learning_lane import candidate_board as candidate_board_module
+from cost_gate_learning_lane import outcome_review as outcome_review_module
 from cost_gate_learning_lane.outcome_review import (
     build_blocked_signal_outcome_review,
 )
@@ -1251,3 +1252,190 @@ def test_invalid_outcome_stays_qualified_and_censoring_uses_c_plus_u() -> None:
     assert "INVALID_OUTCOME_ROWS_PRESENT" in candidate["blockers"]
     assert candidate["qualified_metrics_actionable"] is False
     assert candidate["selection_eligible"] is False
+
+
+def test_default_review_keeps_full_ledger_compatibility_for_unqualified_rows() -> None:
+    legacy = _outcome(
+        attempt_id="ctx-default-compat-legacy",
+        realized_net_bps=100.0,
+    )
+    unqualified = _qualified(context_id="ctx-default-compat-unqualified")
+    unqualified["realized_net_bps"] = 100.0
+    for field in (
+        "candidate_evaluation_context",
+        "candidate_evaluation_context_status",
+        "candidate_learning_context_projection",
+    ):
+        unqualified["candidate_summary"].pop(field)
+
+    review = build_blocked_signal_outcome_review(
+        [legacy, unqualified],
+        now_utc=NOW,
+    )
+
+    assert review["outcome_aggregation_policy"] == "FULL_LEDGER_COMPATIBILITY"
+    assert review["outcome_aggregation_input_row_count"] == 2
+    assert review["status"] == "NO_DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATE"
+    assert review["blocked_signal_outcome_count"] == 2
+    assert review["side_cell_count"] == 1
+    assert review["top_side_cells"]
+
+
+def test_strict_review_keeps_invalid_unqualified_audits_but_aggregates_none() -> None:
+    invalid = _qualified(context_id="ctx-strict-empty-invalid")
+    invalid["side_cell_key"] = "ma_crossover|BTCUSDT|Sell"
+    invalid["realized_net_bps"] = 500.0
+    unqualified = _qualified(context_id="ctx-strict-empty-unqualified")
+    unqualified["realized_net_bps"] = 500.0
+    for field in (
+        "candidate_evaluation_context",
+        "candidate_evaluation_context_status",
+        "candidate_learning_context_projection",
+    ):
+        unqualified["candidate_summary"].pop(field)
+
+    review = build_blocked_signal_outcome_review(
+        [invalid, unqualified],
+        now_utc=NOW,
+        require_qualified_lineage=True,
+    )
+
+    assert review["require_qualified_lineage"] is True
+    assert (
+        review["outcome_aggregation_policy"]
+        == "CANDIDATE_BOARD_QUALIFIED_EVALUATOR_ROWS"
+    )
+    assert review["source_ledger_row_count"] == 2
+    assert review["outcome_aggregation_input_row_count"] == 0
+    assert review["status"] == "NO_QUALIFIED_LINEAGE_BLOCKED_SIGNAL_OUTCOMES"
+    assert review["reason"] == "candidate_board_qualified_evaluator_rows_missing"
+    assert (
+        review["next_trigger"]
+        == "continue_collecting_qualified_candidate_lineage_outcomes"
+    )
+    assert review["blocked_signal_outcome_count"] == 0
+    assert review["side_cell_count"] == 0
+    assert review["review_candidate_side_cell_count"] == 0
+    assert review["top_side_cells"] == []
+    board = review["learning_candidate_board"]
+    assert board["invalid_lineage_outcome_row_count"] == 1
+    assert board["unqualified_lineage_outcome_row_count"] == 1
+    assert validate_learning_candidate_board_v2(board) == board
+
+
+def test_strict_review_top_level_is_invariant_to_positive_lineage_attacks() -> None:
+    qualified = _qualified(context_id="ctx-strict-mixed-qualified")
+    invalid = _qualified(context_id="ctx-strict-mixed-invalid")
+    invalid["side_cell_key"] = "ma_crossover|BTCUSDT|Sell"
+    invalid["realized_net_bps"] = 10_000.0
+    unqualified = _qualified(context_id="ctx-strict-mixed-unqualified")
+    unqualified["realized_net_bps"] = 10_000.0
+    for field in (
+        "candidate_evaluation_context",
+        "candidate_evaluation_context_status",
+        "candidate_learning_context_projection",
+    ):
+        unqualified["candidate_summary"].pop(field)
+
+    baseline = build_blocked_signal_outcome_review(
+        [qualified],
+        now_utc=NOW,
+        require_qualified_lineage=True,
+    )
+    attacked = build_blocked_signal_outcome_review(
+        [invalid, unqualified, qualified],
+        now_utc=NOW,
+        require_qualified_lineage=True,
+    )
+
+    for field in (
+        "status",
+        "reason",
+        "next_trigger",
+        "side_cell_count",
+        "review_candidate_side_cell_count",
+        "blocked_signal_outcome_count",
+        "blocked_signal_effective_entry_count",
+        "blocked_signal_positive_outcome_count",
+        "avg_blocked_signal_outcome_net_bps",
+        "top_side_cells",
+    ):
+        assert attacked[field] == baseline[field]
+    assert attacked["outcome_aggregation_input_row_count"] == 1
+    assert baseline["outcome_aggregation_input_row_count"] == 1
+    baseline_board = baseline["learning_candidate_board"]
+    attacked_board = attacked["learning_candidate_board"]
+    assert attacked_board["invalid_lineage_outcome_row_count"] == 1
+    assert attacked_board["unqualified_lineage_outcome_row_count"] == 1
+    assert attacked_board["audit_hash"] != baseline_board["audit_hash"]
+    assert attacked_board["board_hash"] != baseline_board["board_hash"]
+
+
+def test_strict_review_reuses_board_duplicate_gate_for_same_event_conflict() -> None:
+    qualified = _qualified(context_id="ctx-strict-same-event-conflict")
+    conflicted = copy.deepcopy(qualified)
+    conflicted["realized_net_bps"] = qualified["realized_net_bps"] + 500.0
+    for field in (
+        "candidate_evaluation_context",
+        "candidate_evaluation_context_status",
+        "candidate_learning_context_projection",
+    ):
+        conflicted["candidate_summary"].pop(field)
+
+    review = build_blocked_signal_outcome_review(
+        [qualified, conflicted],
+        now_utc=NOW,
+        require_qualified_lineage=True,
+    )
+
+    assert review["outcome_aggregation_input_row_count"] == 0
+    assert review["blocked_signal_outcome_count"] == 0
+    assert review["top_side_cells"] == []
+    board = review["learning_candidate_board"]
+    assert board["qualified_lineage_outcome_row_count"] == 1
+    assert board["unqualified_lineage_outcome_row_count"] == 1
+    assert board["conflicting_duplicate_event_hash_row_count"] == 2
+    assert board["candidate_rows"][0]["qualified_evaluator_input_count"] == 0
+    assert validate_learning_candidate_board_v2(board) == board
+
+
+def test_cli_main_enables_strict_lineage_policy_and_quarantines_positive_rows(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:
+    ledger = tmp_path / "cli_strict_lineage.jsonl"
+    ledger.write_text(
+        json.dumps(
+            _outcome(
+                attempt_id="ctx-cli-strict-positive-unqualified",
+                realized_net_bps=10_000.0,
+            ),
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "outcome_review.py",
+            "--ledger",
+            str(ledger),
+            "--print-json",
+        ],
+    )
+
+    assert outcome_review_module.main() == 0
+    review = json.loads(capsys.readouterr().out)
+
+    assert review["require_qualified_lineage"] is True
+    assert (
+        review["outcome_aggregation_policy"]
+        == "CANDIDATE_BOARD_QUALIFIED_EVALUATOR_ROWS"
+    )
+    assert review["outcome_aggregation_input_row_count"] == 0
+    assert review["status"] == "NO_QUALIFIED_LINEAGE_BLOCKED_SIGNAL_OUTCOMES"
+    assert review["review_candidate_side_cell_count"] == 0
+    assert review["top_side_cells"] == []
