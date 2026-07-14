@@ -21,8 +21,10 @@ from helper_scripts.research.tests.candidate_lineage_v2_test_support import (
 )
 from cost_gate_learning_lane import candidate_board as candidate_board_module
 from cost_gate_learning_lane import outcome_review as outcome_review_module
+from cost_gate_learning_lane import runtime_adapter as runtime_adapter_module
 from cost_gate_learning_lane.outcome_review import (
     build_blocked_signal_outcome_review,
+    build_research_compatibility_blocked_signal_outcome_review_no_authority,
 )
 from cost_gate_learning_lane.candidate_board_validation import (
     validate_learning_candidate_board_v2,
@@ -263,6 +265,58 @@ def test_evidence_reader_quarantines_summary_event_conflict_without_aborting(
     }
     assert all(row["selection_eligible"] is False for row in board["candidate_rows"])
     assert validate_learning_candidate_board_v2(board) == board
+
+
+def test_pure_candidate_evidence_projection_matches_path_and_does_not_mutate(
+    tmp_path,
+) -> None:
+    qualified = _qualified(context_id="ctx-pure-projection-qualified")
+    qualified_context = copy.deepcopy(
+        qualified["candidate_summary"]["candidate_event_context"]
+    )
+    qualified["event"] = {
+        "strategy_name": qualified_context["strategy_name"],
+        "symbol": qualified_context["symbol"],
+        "side": qualified_context["side"],
+        "context_id": qualified_context["context_id"],
+        "signal_id": qualified_context["signal_id"],
+        "engine_mode": qualified_context["evidence_engine_mode"],
+        "ts_ms": qualified_context["captured_at_ms"],
+        "candidate_event_context": qualified_context,
+    }
+    conflicted = _qualified(context_id="ctx-pure-projection-conflicted")
+    conflicted_context = copy.deepcopy(
+        conflicted["candidate_summary"]["candidate_event_context"]
+    )
+    conflicted["event"] = {
+        "strategy_name": conflicted_context["strategy_name"],
+        "symbol": conflicted_context["symbol"],
+        "side": conflicted_context["side"],
+        "context_id": conflicted_context["context_id"],
+        "signal_id": conflicted_context["signal_id"],
+        "engine_mode": conflicted_context["evidence_engine_mode"],
+        "ts_ms": conflicted_context["captured_at_ms"],
+        "candidate_event_context": conflicted_context,
+    }
+    conflicted["event"]["candidate_event_context"]["symbol"] = "ETHUSDT"
+    source_rows = [qualified, conflicted]
+    source_before = copy.deepcopy(source_rows)
+    ledger_path = tmp_path / "pure_projection_parity.jsonl"
+    ledger_path.write_text(
+        "".join(json.dumps(row) + "\n" for row in source_rows),
+        encoding="utf-8",
+    )
+
+    projected = runtime_adapter_module.project_candidate_evidence_rows(
+        source_rows
+    )
+    path_projected = read_candidate_evidence_jsonl_ledger(ledger_path)
+
+    assert projected == path_projected
+    assert source_rows == source_before
+    assert projected is not source_rows
+    assert projected[0] is not source_rows[0]
+    assert projected[0]["event"] is not source_rows[0]["event"]
 
 
 def test_type_strict_bool_int_summary_conflict_is_rejected_and_quarantined(
@@ -1325,6 +1379,83 @@ def test_strict_review_keeps_invalid_unqualified_audits_but_aggregates_none() ->
     assert board["invalid_lineage_outcome_row_count"] == 1
     assert board["unqualified_lineage_outcome_row_count"] == 1
     assert validate_learning_candidate_board_v2(board) == board
+
+
+def test_research_compatibility_preserves_lineage_partition_audit_counts() -> None:
+    qualified = _qualified(context_id="ctx-research-audit-qualified")
+    invalid = _qualified(context_id="ctx-research-audit-invalid")
+    invalid["side_cell_key"] = "ma_crossover|BTCUSDT|Sell"
+    unqualified = _qualified(context_id="ctx-research-audit-unqualified")
+    for field in (
+        "candidate_evaluation_context",
+        "candidate_evaluation_context_status",
+        "candidate_learning_context_projection",
+    ):
+        unqualified["candidate_summary"].pop(field)
+
+    review = build_research_compatibility_blocked_signal_outcome_review_no_authority(
+        [qualified, invalid, unqualified],
+        now_utc=NOW,
+    )
+
+    assert review["schema_version"] != (
+        "cost_gate_demo_learning_lane_blocked_outcome_review_v6"
+    )
+    assert review["authority_eligible"] is False
+    assert review["operator_review_eligible"] is False
+    assert review["promotion_evidence"] is False
+    audit = review["candidate_lineage_audit"]
+    assert audit["source_schema_version"] == "cost_gate_learning_candidate_board_v2"
+    assert audit["qualified_candidate_count"] == 1
+    assert audit["invalid_lineage_count"] == 1
+    assert audit["unqualified_lineage_count"] == 1
+
+
+def test_research_compatibility_declares_outcome_row_units_and_aliases() -> None:
+    qualified = [
+        _qualified(context_id=f"ctx-research-row-unit-qualified-{index}")
+        for index in range(2)
+    ]
+    invalid = [
+        _qualified(context_id=f"ctx-research-row-unit-invalid-{index}")
+        for index in range(3)
+    ]
+    for row in invalid:
+        row["side_cell_key"] = "ma_crossover|BTCUSDT|Sell"
+    unqualified = [
+        _qualified(context_id=f"ctx-research-row-unit-unqualified-{index}")
+        for index in range(4)
+    ]
+    for row in unqualified:
+        for field in (
+            "candidate_evaluation_context",
+            "candidate_evaluation_context_status",
+            "candidate_learning_context_projection",
+        ):
+            row["candidate_summary"].pop(field)
+
+    review = build_research_compatibility_blocked_signal_outcome_review_no_authority(
+        [*qualified, *invalid, *unqualified],
+        now_utc=NOW,
+    )
+    audit = review["candidate_lineage_audit"]
+
+    assert review["authority_eligible"] is False
+    assert review["operator_review_eligible"] is False
+    assert review["promotion_evidence"] is False
+    assert audit["count_unit"] == "outcome_rows"
+    assert audit["qualified_lineage_outcome_row_count"] == 2
+    assert audit["invalid_lineage_outcome_row_count"] == 3
+    assert audit["unqualified_lineage_outcome_row_count"] == 4
+    assert audit["qualified_candidate_count"] == (
+        audit["qualified_lineage_outcome_row_count"]
+    )
+    assert audit["invalid_lineage_count"] == (
+        audit["invalid_lineage_outcome_row_count"]
+    )
+    assert audit["unqualified_lineage_count"] == (
+        audit["unqualified_lineage_outcome_row_count"]
+    )
 
 
 def test_strict_review_top_level_is_invariant_to_positive_lineage_attacks() -> None:

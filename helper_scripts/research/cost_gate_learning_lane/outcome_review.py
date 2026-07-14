@@ -1523,6 +1523,10 @@ def _build_blocked_signal_outcome_review_core(
     mean_n = (
         sum(len(c) for c in eligible_nets) / len(eligible_nets) if eligible_nets else 0.0
     )
+    strict_side_cell_reviews_by_key = {
+        row["side_cell_key"]: copy.deepcopy(row)
+        for row in sorted(side_cells, key=lambda item: item["side_cell_key"])
+    }
     headline_selection = {
         "method": "sign_flip",
         "p_selection": signflip["p_selection"],
@@ -1794,6 +1798,10 @@ def _build_blocked_signal_outcome_review_core(
             key: packet_cost_model_version_counts[key]
             for key in sorted(packet_cost_model_version_counts)
         },
+        # Full deterministic authority-facing lookup.  ``top_side_cells`` stays
+        # display-bounded; strict consumers that bind a selected candidate must
+        # resolve its own row here instead of borrowing the global top row.
+        "strict_side_cell_reviews_by_key": strict_side_cell_reviews_by_key,
         "top_side_cells": side_cells[:16],
         "learning_candidate_board": learning_candidate_board,
         "promotion_evidence": False,
@@ -1880,6 +1888,19 @@ def build_research_compatibility_blocked_signal_outcome_review_no_authority(
         sanitized_cells.append(cell)
 
     candidate_board = review.pop("learning_candidate_board", {}) or {}
+    qualified_lineage_outcome_row_count = int(
+        candidate_board.get("qualified_lineage_outcome_row_count") or 0
+    )
+    invalid_lineage_outcome_row_count = int(
+        candidate_board.get("invalid_lineage_outcome_row_count") or 0
+    )
+    unqualified_lineage_outcome_row_count = int(
+        candidate_board.get("unqualified_lineage_outcome_row_count") or 0
+    )
+    # This full-rank surface is production strict authority evidence.  The
+    # research compatibility facade removes it rather than exposing unsanitized
+    # review-candidate rows under a no-authority schema.
+    review.pop("strict_side_cell_reviews_by_key", None)
     review.update(
         {
             "schema_version": (
@@ -1926,15 +1947,21 @@ def build_research_compatibility_blocked_signal_outcome_review_no_authority(
             "candidate_lineage_audit": {
                 "source_schema_version": candidate_board.get("schema_version"),
                 "status": candidate_board.get("status"),
-                "qualified_candidate_count": candidate_board.get(
-                    "qualified_candidate_count"
+                "count_unit": "outcome_rows",
+                "qualified_lineage_outcome_row_count": (
+                    qualified_lineage_outcome_row_count
                 ),
-                "invalid_lineage_count": candidate_board.get(
-                    "invalid_lineage_count"
+                "invalid_lineage_outcome_row_count": (
+                    invalid_lineage_outcome_row_count
                 ),
-                "unqualified_lineage_count": candidate_board.get(
-                    "unqualified_lineage_count"
+                "unqualified_lineage_outcome_row_count": (
+                    unqualified_lineage_outcome_row_count
                 ),
+                # Compatibility aliases retained exactly, despite their older
+                # candidate-oriented names.
+                "qualified_candidate_count": qualified_lineage_outcome_row_count,
+                "invalid_lineage_count": invalid_lineage_outcome_row_count,
+                "unqualified_lineage_count": unqualified_lineage_outcome_row_count,
             },
             "boundary": _RESEARCH_COMPATIBILITY_NO_AUTHORITY_BOUNDARY,
         }

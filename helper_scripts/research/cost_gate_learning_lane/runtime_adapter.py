@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import argparse
 import copy
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 import datetime as dt
 from dataclasses import dataclass
 import json
@@ -270,8 +270,10 @@ def _exact_json_value_equal(left: Any, right: Any) -> bool:
     return left == right
 
 
-def read_candidate_evidence_jsonl_ledger(path: Path) -> list[dict[str, Any]]:
-    """讀取 candidate-board 的未判定 evidence view。
+def project_candidate_evidence_rows(
+    source_rows: Iterable[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Purely project ordered raw ledger rows into candidate evidence rows.
 
     live ledger 把 prospective context 寫在 ``event``，而 outcome row 不一定有
     ``candidate_summary``。此 evidence-only reader 因此把 event context 投影到一份
@@ -279,14 +281,15 @@ def read_candidate_evidence_jsonl_ledger(path: Path) -> list[dict[str, Any]]:
     不通過的 raw payload 原樣複製並保留非 ``VALID`` capture status，交由 v6 board
     分到 INVALID audit partition。summary/event 若已有互相衝突的第二份 lineage，
     evidence view 會標成 INVALID，並在 audit-only 欄位保留投影前的兩份 payload；
-    append-only ledger source 本身也不會被改寫。
+    append-only ledger source 本身也不會被改寫。輸入順序會原樣保留，每一列
+    都先 deep-copy，因此呼叫者持有的 immutable snapshot 不會被投影污染。
 
     Authority、admission、outcome generation 不得使用此 evidence-only 介面；
     它們仍必須走下方嚴格的 ``read_jsonl_ledger``。
     """
     rows: list[dict[str, Any]] = []
-    for source_row in _iter_jsonl_ledger_rows(path):
-        row = copy.deepcopy(source_row)
+    for source_row in source_rows:
+        row = copy.deepcopy(dict(source_row))
         event_value = row.get("event")
         if not isinstance(event_value, Mapping):
             summary_value = row.get("candidate_summary")
@@ -385,6 +388,11 @@ def read_candidate_evidence_jsonl_ledger(path: Path) -> list[dict[str, Any]]:
                 )
         rows.append(row)
     return rows
+
+
+def read_candidate_evidence_jsonl_ledger(path: Path) -> list[dict[str, Any]]:
+    """Read the retained path view, then delegate to the pure projector."""
+    return project_candidate_evidence_rows(_iter_jsonl_ledger_rows(path))
 
 
 def read_jsonl_ledger(path: Path) -> list[dict[str, Any]]:

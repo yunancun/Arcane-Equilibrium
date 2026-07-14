@@ -273,7 +273,11 @@ def test_sealed_packet_quarantines_invalid_positive_lineage_from_outcome_metrics
             feature_row_count=len(rows),
             materializer_batch={
                 "records": [
-                    {"decision": "ORDER_AUTHORITY_NOT_GRANTED"} for _ in rows
+                    {
+                        "decision": "ORDER_AUTHORITY_NOT_GRANTED",
+                        "side_cell_key": row.get("side_cell_key"),
+                    }
+                    for row in rows
                 ],
                 "materialized_record_count": len(rows),
                 "appended_record_count": 0,
@@ -402,6 +406,391 @@ def test_sealed_packet_quarantines_invalid_positive_lineage_from_outcome_metrics
     assert compatibility_path["evidence"][
         "sealed_learning_operator_review_ready"
     ] is False
+
+
+def test_sealed_packet_scopes_counts_metrics_and_materialization_to_candidate(
+    tmp_path,
+) -> None:
+    plan = _sealed_plan()
+    candidate = find_sealed_horizon_candidate(
+        plan,
+        "ma_crossover|BTCUSDT|Sell",
+    )
+    selected = attach_candidate_lineage_v2(
+        {
+            "record_type": "blocked_signal_outcome",
+            "realized_net_bps": -10.0,
+            "gross_bps": 2.0,
+            "cost_bps": 12.0,
+            "cost_model_version": "conservative_v1",
+        },
+        context_id="ctx-sealed-selected-scoped",
+        strategy_name="ma_crossover",
+        symbol="BTCUSDT",
+        side="Sell",
+        as_of_utc_date="2026-07-10",
+    )
+    other_rows = [
+        attach_candidate_lineage_v2(
+            {
+                "record_type": "blocked_signal_outcome",
+                "realized_net_bps": net_bps,
+                "gross_bps": net_bps + 12.0,
+                "cost_bps": 12.0,
+                "cost_model_version": "conservative_v1",
+            },
+            context_id=f"ctx-sealed-other-scoped-{index}",
+            strategy_name="ma_crossover",
+            symbol="ETHUSDT",
+            side="Buy",
+            as_of_utc_date="2026-07-10",
+        )
+        for index, net_bps in enumerate((100.0, 200.0))
+    ]
+    rows = [selected, *other_rows]
+    review = build_blocked_signal_outcome_review(
+        rows,
+        cfg=BlockedOutcomeReviewConfig(
+            min_outcomes_per_side_cell=1,
+            min_effective_entries_per_side_cell=1,
+            min_distinct_entry_utc_days=1,
+            max_top_entry_day_share_pct=100.0,
+            min_net_positive_pct=1.0,
+        ),
+        now_utc=dt.datetime(2026, 7, 10, 18, tzinfo=dt.timezone.utc),
+    )
+
+    packet = build_sealed_horizon_learning_evidence_packet(
+        plan=plan,
+        candidate=candidate,
+        feature_row_count=len(rows),
+        materializer_batch={
+            "records": [
+                {
+                    "decision": "ORDER_AUTHORITY_NOT_GRANTED",
+                    "side_cell_key": row.get("side_cell_key"),
+                }
+                for row in rows
+            ],
+            "materialized_record_count": len(rows),
+            "appended_record_count": len(rows),
+        },
+        outcome_batch={
+            "blocked_signal_outcomes": rows,
+            "blocked_signal_outcome_count": len(rows),
+            "appended_outcome_count": len(rows),
+            "window_count": len(rows),
+            "price_observation_count": len(rows),
+            "horizon_minutes": 60,
+        },
+        review=review,
+        ledger_path=tmp_path / "sealed_scoped.jsonl",
+        generated_at_utc=dt.datetime(
+            2026, 7, 10, 18, tzinfo=dt.timezone.utc
+        ),
+    )
+
+    assert review["blocked_signal_outcome_count"] == 3
+    assert packet["materialization"]["input_feature_row_count"] == 1
+    assert packet["materialization"]["materialized_record_count"] == 1
+    assert packet["materialization"]["appended_record_count"] == 1
+    assert packet["materialization"]["qualified_outcome_row_count"] == 1
+    assert packet["outcomes"]["blocked_signal_outcome_count"] == 1
+    assert packet["outcomes"]["outcome_count"] == 1
+    assert packet["outcomes"]["avg_net_bps"] == -10.0
+    assert packet["outcomes"]["avg_gross_bps"] == 2.0
+    assert packet["outcomes"]["net_positive_pct"] == 0.0
+    assert packet["outcomes"]["min_net_bps"] == -10.0
+    assert packet["outcomes"]["max_net_bps"] == -10.0
+    assert packet["review"]["top_side_cell_key"] == candidate["side_cell_key"]
+    assert packet["review"]["blocked_signal_outcome_count"] == 1
+    assert packet["answers"]["sealed_candidate_materialized"] is True
+    assert packet["answers"]["candidate_clears_operator_review_gate"] is False
+
+
+def test_sealed_packet_accepts_selected_candidate_that_is_not_global_top(
+    tmp_path,
+) -> None:
+    plan = _sealed_plan()
+    candidate = find_sealed_horizon_candidate(
+        plan,
+        "ma_crossover|BTCUSDT|Sell",
+    )
+    rows = []
+    for index, (symbol, side, net_bps) in enumerate(
+        (("BTCUSDT", "Sell", 10.0), ("ETHUSDT", "Buy", 100.0))
+    ):
+        rows.append(
+            attach_candidate_lineage_v2(
+                {
+                    "record_type": "blocked_signal_outcome",
+                    "realized_net_bps": net_bps,
+                    "gross_bps": net_bps + 12.0,
+                    "cost_bps": 12.0,
+                    "cost_model_version": "conservative_v1",
+                },
+                context_id=f"ctx-sealed-non-top-{index}",
+                strategy_name="ma_crossover",
+                symbol=symbol,
+                side=side,
+                as_of_utc_date="2026-07-10",
+            )
+        )
+    review = build_blocked_signal_outcome_review(
+        rows,
+        cfg=BlockedOutcomeReviewConfig(
+            min_outcomes_per_side_cell=1,
+            min_effective_entries_per_side_cell=1,
+            min_distinct_entry_utc_days=1,
+            max_top_entry_day_share_pct=100.0,
+            min_net_positive_pct=1.0,
+        ),
+        now_utc=dt.datetime(2026, 7, 10, 18, tzinfo=dt.timezone.utc),
+    )
+    selected_review_row = next(
+        row
+        for row in review["top_side_cells"]
+        if row["side_cell_key"] == candidate["side_cell_key"]
+    )
+    assert selected_review_row["review_candidate"] is True
+    assert selected_review_row["review_rank"] > 1
+
+    packet = build_sealed_horizon_learning_evidence_packet(
+        plan=plan,
+        candidate=candidate,
+        feature_row_count=len(rows),
+        materializer_batch={
+            "records": [
+                {
+                    "decision": "ORDER_AUTHORITY_NOT_GRANTED",
+                    "side_cell_key": row.get("side_cell_key"),
+                }
+                for row in rows
+            ],
+            "materialized_record_count": len(rows),
+            "appended_record_count": 0,
+        },
+        outcome_batch={
+            "blocked_signal_outcomes": rows,
+            "blocked_signal_outcome_count": len(rows),
+            "appended_outcome_count": 0,
+            "window_count": len(rows),
+            "price_observation_count": len(rows),
+            "horizon_minutes": 60,
+        },
+        review=review,
+        ledger_path=tmp_path / "sealed_non_top.jsonl",
+        generated_at_utc=dt.datetime(
+            2026, 7, 10, 18, tzinfo=dt.timezone.utc
+        ),
+    )
+
+    assert review["top_side_cell_key"] != candidate["side_cell_key"]
+    assert packet["review"]["top_side_cell_key"] == candidate["side_cell_key"]
+    assert packet["answers"]["candidate_clears_operator_review_gate"] is True
+
+
+def test_sealed_packet_requires_selected_identity_for_materialization_counts(
+    tmp_path,
+) -> None:
+    plan = _sealed_plan()
+    candidate = find_sealed_horizon_candidate(
+        plan,
+        "ma_crossover|BTCUSDT|Sell",
+    )
+    selected = attach_candidate_lineage_v2(
+        {
+            "record_type": "blocked_signal_outcome",
+            "realized_net_bps": 10.0,
+            "gross_bps": 22.0,
+            "cost_bps": 12.0,
+            "cost_model_version": "conservative_v1",
+        },
+        context_id="ctx-sealed-materializer-identity",
+        strategy_name="ma_crossover",
+        symbol="BTCUSDT",
+        side="Sell",
+        as_of_utc_date="2026-07-10",
+    )
+    review = build_blocked_signal_outcome_review(
+        [selected],
+        cfg=BlockedOutcomeReviewConfig(
+            min_outcomes_per_side_cell=1,
+            min_effective_entries_per_side_cell=1,
+            min_distinct_entry_utc_days=1,
+            max_top_entry_day_share_pct=100.0,
+            min_net_positive_pct=1.0,
+        ),
+        now_utc=dt.datetime(2026, 7, 10, 18, tzinfo=dt.timezone.utc),
+    )
+
+    def packet(materializer_batch):
+        return build_sealed_horizon_learning_evidence_packet(
+            plan=plan,
+            candidate=candidate,
+            feature_row_count=2,
+            materializer_batch=materializer_batch,
+            outcome_batch={
+                "blocked_signal_outcomes": [selected],
+                "blocked_signal_outcome_count": 1,
+                "appended_outcome_count": 0,
+                "window_count": 1,
+                "price_observation_count": 1,
+                "horizon_minutes": 60,
+            },
+            review=review,
+            ledger_path=tmp_path / "sealed_materializer_identity.jsonl",
+            generated_at_utc=dt.datetime(
+                2026, 7, 10, 18, tzinfo=dt.timezone.utc
+            ),
+        )
+
+    other_only = packet(
+        {
+            "records": [
+                {
+                    "decision": "ORDER_AUTHORITY_NOT_GRANTED",
+                    "side_cell_key": "ma_crossover|ETHUSDT|Buy",
+                }
+            ],
+            "materialized_record_count": 1,
+            "appended_record_count": 1,
+        }
+    )
+    assert other_only["materialization"]["input_feature_row_count"] == 0
+    assert other_only["materialization"]["materialized_record_count"] == 0
+    assert other_only["materialization"]["appended_record_count"] == 0
+    assert other_only["materialization"]["decision_counts"] == {}
+    assert other_only["materialization"]["all_order_authority_not_granted"] is False
+    assert other_only["materialization"]["raw_materialized_record_count"] == 1
+    assert other_only["answers"]["sealed_candidate_materialized"] is False
+    assert other_only["outcomes"]["blocked_signal_outcome_count"] == 1
+
+    partial_append = packet(
+        {
+            "records": [
+                {
+                    "decision": "ORDER_AUTHORITY_NOT_GRANTED",
+                    "side_cell_key": candidate["side_cell_key"],
+                },
+                {
+                    "decision": "ORDER_AUTHORITY_NOT_GRANTED",
+                    "side_cell_key": "ma_crossover|ETHUSDT|Buy",
+                },
+            ],
+            "materialized_record_count": 2,
+            "appended_record_count": 1,
+        }
+    )
+    assert partial_append["materialization"]["materialized_record_count"] == 1
+    assert partial_append["materialization"]["appended_record_count"] == 0
+    assert partial_append["answers"]["sealed_candidate_materialized"] is True
+
+
+def test_sealed_packet_uses_full_strict_lookup_for_rank_beyond_display_cap(
+    tmp_path,
+) -> None:
+    plan = _sealed_plan()
+    candidate = find_sealed_horizon_candidate(
+        plan,
+        "ma_crossover|BTCUSDT|Sell",
+    )
+    selected = attach_candidate_lineage_v2(
+        {
+            "record_type": "blocked_signal_outcome",
+            "realized_net_bps": 10.0,
+            "gross_bps": 22.0,
+            "cost_bps": 12.0,
+            "cost_model_version": "conservative_v1",
+        },
+        context_id="ctx-sealed-rank-beyond-cap-selected",
+        strategy_name="ma_crossover",
+        symbol="BTCUSDT",
+        side="Sell",
+        as_of_utc_date="2026-07-10",
+    )
+    higher_ranked = [
+        attach_candidate_lineage_v2(
+            {
+                "record_type": "blocked_signal_outcome",
+                "realized_net_bps": 100.0 + index,
+                "gross_bps": 112.0 + index,
+                "cost_bps": 12.0,
+                "cost_model_version": "conservative_v1",
+            },
+            context_id=f"ctx-sealed-rank-beyond-cap-{index:02d}",
+            strategy_name="ma_crossover",
+            symbol=f"ALT{index:02d}USDT",
+            side="Buy",
+            as_of_utc_date="2026-07-10",
+        )
+        for index in range(17)
+    ]
+    rows = [selected, *higher_ranked]
+    review_cfg = BlockedOutcomeReviewConfig(
+        min_outcomes_per_side_cell=1,
+        min_effective_entries_per_side_cell=1,
+        min_distinct_entry_utc_days=1,
+        max_top_entry_day_share_pct=100.0,
+        min_net_positive_pct=1.0,
+    )
+    review = build_blocked_signal_outcome_review(
+        rows,
+        cfg=review_cfg,
+        now_utc=dt.datetime(2026, 7, 10, 18, tzinfo=dt.timezone.utc),
+    )
+
+    assert len(review["top_side_cells"]) == 16
+    assert not any(
+        row["side_cell_key"] == candidate["side_cell_key"]
+        for row in review["top_side_cells"]
+    )
+    selected_lookup = review["strict_side_cell_reviews_by_key"][
+        candidate["side_cell_key"]
+    ]
+    assert selected_lookup["review_rank"] > 16
+    assert selected_lookup["review_candidate"] is True
+
+    packet = build_sealed_horizon_learning_evidence_packet(
+        plan=plan,
+        candidate=candidate,
+        feature_row_count=1,
+        materializer_batch={
+            "records": [
+                {
+                    "decision": "ORDER_AUTHORITY_NOT_GRANTED",
+                    "side_cell_key": candidate["side_cell_key"],
+                }
+            ],
+            "materialized_record_count": 1,
+            "appended_record_count": 1,
+        },
+        outcome_batch={
+            "blocked_signal_outcomes": rows,
+            "blocked_signal_outcome_count": len(rows),
+            "appended_outcome_count": 0,
+            "window_count": len(rows),
+            "price_observation_count": len(rows),
+            "horizon_minutes": 60,
+        },
+        review=review,
+        ledger_path=tmp_path / "sealed_rank_beyond_cap.jsonl",
+        generated_at_utc=dt.datetime(
+            2026, 7, 10, 18, tzinfo=dt.timezone.utc
+        ),
+    )
+    assert packet["review"]["top_side_cell_key"] == candidate["side_cell_key"]
+    assert packet["outcomes"]["blocked_signal_outcome_count"] == 1
+    assert packet["answers"]["candidate_clears_operator_review_gate"] is True
+
+    compatibility = (
+        build_research_compatibility_blocked_signal_outcome_review_no_authority(
+            rows,
+            cfg=review_cfg,
+            now_utc=dt.datetime(2026, 7, 10, 18, tzinfo=dt.timezone.utc),
+        )
+    )
+    assert "strict_side_cell_reviews_by_key" not in compatibility
 
 
 def test_non_sealed_candidate_is_rejected() -> None:
