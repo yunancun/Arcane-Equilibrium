@@ -25,6 +25,11 @@ ALR_LOOP = (
     / "docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/"
     "2026-07-09--scanner_driven_alr/loop_contract.md"
 ).read_text(encoding="utf-8")
+ALR_STARTUP = (
+    ROOT
+    / "docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/"
+    "2026-07-09--scanner_driven_alr/startup_prompt.md"
+).read_text(encoding="utf-8")
 SPEC = importlib.util.spec_from_file_location("git_loop_guard", SCRIPT)
 guard = importlib.util.module_from_spec(SPEC)
 assert SPEC and SPEC.loader
@@ -85,6 +90,34 @@ def test_start_requires_exact_clean_feature_head(tmp_path: Path) -> None:
     )
     assert dirty["status"] == "FAIL"
     assert "DIRTY_WORKTREE" in dirty["reasons"]
+
+
+def test_dirty_inventory_failures_block_every_phase(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repo, _ = _fixture(tmp_path)
+    head = _git(repo, "rev-parse", "HEAD")
+    monkeypatch.setattr(guard, "_nul_paths", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        guard, "_diff_lines", lambda *_args, **_kwargs: (0, False, True)
+    )
+
+    for phase in guard.PHASES:
+        packet = guard.evaluate(
+            repo,
+            phase=phase,
+            expected_branch="agent/test-loop",
+            expected_head=head,
+            expected_origin_head=head,
+            allow_paths=["owned.txt"],
+        )
+        assert packet["status"] == "FAIL"
+        assert {
+            "TRACKED_DIRTY_STATE_UNAVAILABLE",
+            "STAGED_STATE_UNAVAILABLE",
+            "UNTRACKED_STATE_UNAVAILABLE",
+            "DIFF_STATE_UNAVAILABLE",
+        }.issubset(packet["reasons"])
 
 
 def test_checkpoint_rejects_unowned_and_oversized_dirty_scope(tmp_path: Path) -> None:
@@ -169,7 +202,17 @@ def test_publish_and_post_push_bind_remote_branch_head(tmp_path: Path) -> None:
     )
     assert "REMOTE_BRANCH_HEAD_MISMATCH" in before_push["reasons"]
 
-    _git(repo, "push", "-q", "-u", "origin", "agent/test-loop")
+    _git(repo, "push", "-q", "origin", "agent/test-loop")
+    without_upstream = guard.evaluate(
+        repo,
+        phase="post-push",
+        expected_branch="agent/test-loop",
+        expected_head=head,
+    )
+    assert without_upstream["state"]["true_remote_branch_head"] == head
+    assert "UPSTREAM_MISMATCH" in without_upstream["reasons"]
+
+    _git(repo, "branch", "--set-upstream-to=origin/agent/test-loop")
     after_push = guard.evaluate(
         repo,
         phase="post-push",
@@ -236,6 +279,11 @@ def test_sync_contract_covers_exact_head_publication_merge_and_three_sides() -> 
         "EXTERNAL_ADMIN_VERIFICATION_PENDING",
     ):
         assert required in SYNC
+    for source in (SYNC, ALR_LOOP, ALR_STARTUP):
+        assert "persisted" in source
+        assert "loop_branch" in source
+        assert "checkpoint_head" in source
+        assert "must not recapture" in source
 
 
 def test_loop_contract_cannot_advance_with_unbounded_dirty_or_unsynced_heads() -> None:

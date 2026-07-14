@@ -81,10 +81,10 @@ def _is_ancestor(repo: Path, ancestor: str, descendant: str) -> bool | None:
     return None
 
 
-def _diff_lines(repo: Path) -> tuple[int, bool]:
+def _diff_lines(repo: Path) -> tuple[int, bool, bool]:
     proc = _git(repo, "diff", "--numstat", "HEAD")
     if proc.returncode != 0:
-        return 0, True
+        return 0, False, True
     total = 0
     binary = False
     for line in proc.stdout.decode("utf-8", errors="replace").splitlines():
@@ -98,7 +98,7 @@ def _diff_lines(repo: Path) -> tuple[int, bool]:
             total += int(fields[0]) + int(fields[1])
         except ValueError:
             binary = True
-    return total, binary
+    return total, binary, False
 
 
 def _untracked_bytes(repo: Path, paths: Iterable[str]) -> tuple[int, bool]:
@@ -139,7 +139,16 @@ def inspect_repository(repo: Path) -> dict[str, Any]:
     untracked = _nul_paths(
         repo, "ls-files", "--others", "--exclude-standard", "-z", "--"
     )
-    diff_lines, binary_diff = _diff_lines(repo)
+    diff_lines, binary_diff, diff_unavailable = _diff_lines(repo)
+    inspection_failures = []
+    if tracked is None:
+        inspection_failures.append("TRACKED_DIRTY_STATE_UNAVAILABLE")
+    if staged is None:
+        inspection_failures.append("STAGED_STATE_UNAVAILABLE")
+    if untracked is None:
+        inspection_failures.append("UNTRACKED_STATE_UNAVAILABLE")
+    if diff_unavailable:
+        inspection_failures.append("DIFF_STATE_UNAVAILABLE")
     untracked_bytes, unreadable_untracked = _untracked_bytes(repo, untracked or [])
     dirty_paths = sorted(set((tracked or []) + (untracked or [])))
     return {
@@ -154,6 +163,7 @@ def inspect_repository(repo: Path) -> dict[str, Any]:
         "binary_diff_present": binary_diff,
         "untracked_bytes": untracked_bytes,
         "untracked_unreadable": unreadable_untracked,
+        "inspection_failures": inspection_failures,
         "local_origin_main": _text(repo, "rev-parse", "origin/main"),
         "true_origin_main": _true_remote_head(repo, "refs/heads/main"),
     }
@@ -174,7 +184,7 @@ def evaluate(
     if phase not in PHASES:
         raise ValueError(f"unsupported phase: {phase}")
     state = inspect_repository(repo)
-    reasons: list[str] = []
+    reasons: list[str] = list(state["inspection_failures"])
     branch = state["branch"]
     head = state["head"]
     dirty = state["dirty_paths"]
@@ -199,7 +209,12 @@ def evaluate(
         elif head != expected_head:
             reasons.append("HEAD_DRIFT")
         expected_upstream = f"origin/{branch}" if branch else None
-        if state["upstream"] not in {None, expected_upstream}:
+        if phase == "post-push" and state["upstream"] != expected_upstream:
+            reasons.append("UPSTREAM_MISMATCH")
+        elif phase != "post-push" and state["upstream"] not in {
+            None,
+            expected_upstream,
+        }:
             reasons.append("UPSTREAM_MISMATCH")
 
     if phase in {"start", "publish", "post-push", "main-sync", "main-post-sync"} and dirty:

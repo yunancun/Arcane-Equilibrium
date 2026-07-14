@@ -49,6 +49,21 @@ def test_categories_are_narrow_but_cover_their_own_contracts() -> None:
     }
 
 
+def test_governance_gate_covers_direct_policy_and_adapter_inputs() -> None:
+    for path in (
+        "helper_scripts/maintenance_scripts/deploy_intent_adapter.py",
+        "docs/adr/0050-development-agent-governance.md",
+        ".agents/skills/16-root-principles-checklist/SKILL.md",
+    ):
+        result = classify_paths([path])
+        assert result["governance"] is True
+        assert all(
+            enabled is False
+            for gate, enabled in result.items()
+            if gate != "governance"
+        )
+
+
 def test_cli_writes_nul_safe_github_outputs(tmp_path) -> None:
     output = tmp_path / "github-output"
     completed = subprocess.run(
