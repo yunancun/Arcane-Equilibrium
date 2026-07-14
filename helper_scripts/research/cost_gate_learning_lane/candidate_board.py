@@ -46,19 +46,17 @@ from cost_gate_learning_lane.cost_model import (
 from cost_gate_learning_lane.contract import BLOCKED_SIGNAL_OUTCOME_RECORD_TYPE
 
 
-_DUPLICATE_EXACT_FIELDS = tuple(
-    """
+_DUPLICATE_EXACT_FIELDS = tuple("""
 record_type attempt_id side_cell_key strategy_name symbol side event_ts_ms horizon_minutes
 censored censor_reason entry_ts_ms exit_ts_ms last_observation_ts_ms outcome_source
 cost_model_version cost_model_source funding_crossings exit_delay_ms entry_price exit_price
-""".split()
-)
-_DUPLICATE_BPS_FIELDS = tuple(
-    """
+""".split())
+_DUPLICATE_BPS_FIELDS = tuple("""
 gross_bps cost_bps realized_net_bps cost_bps_optimistic net_bps_optimistic slippage_bps
 funding_drag_bps
-""".split()
-)
+""".split())
+
+
 class CandidateBoardConfig(Protocol):
     min_effective_entries_per_side_cell: int
     min_distinct_entry_utc_days: int
@@ -975,10 +973,7 @@ def _build_candidate_row(
         and cluster["clean"]
     )
     unknown_regime_share = regime_entry_counts["unknown"] / n_eff if n_eff else 1.0
-    cost_evidence = candidate_cost_evidence_v2(
-        expected_slippage,
-        symbol=identity["symbol"],
-    )
+    cost_evidence = candidate_cost_evidence_v2(expected_slippage, symbol=identity["symbol"])
     arbiter_input_body = {
         "schema_version": ARBITER_INPUT_SCHEMA_VERSION,
         "identity": arbiter_identity,
@@ -1135,86 +1130,56 @@ def _build_candidate_row(
     }
 
 
+def candidate_cost_projection_for_recorded_date(
+    expected_slippage: Mapping[str, Any] | None, *, as_of_date: dt.date) -> dict[str, Any] | None:
+    """Keep normalized cost evidence only when it is canonical for one row date."""
+    if (expected_slippage is None or type(as_of_date) is not dt.date
+            or not isinstance(source_asof_raw := expected_slippage.get("asof"), str)):
+        return None
+    try:
+        source_asof = dt.datetime.fromisoformat(source_asof_raw)
+    except ValueError:
+        return None
+    if (source_asof.tzinfo is None or source_asof.utcoffset() != dt.timedelta(0)
+            or source_asof.isoformat() != source_asof_raw
+            or not as_of_date - dt.timedelta(days=2) <= source_asof.date() <= as_of_date):
+        return None
+    return dict(expected_slippage)
+
+
+def _cost_source(scope: str, symbol: str | None, sample_count: int, **metrics: Any) -> dict[str, Any]:
+    return {"scope": scope, "symbol": symbol, "sample_count": sample_count, **metrics}
+
+
 def candidate_cost_evidence_v2(
-    expected_slippage: Mapping[str, Any] | None,
-    *,
-    symbol: str,
-) -> dict[str, Any]:
+    expected_slippage: Mapping[str, Any] | None, *, symbol: str) -> dict[str, Any]:
     """Bind compact selected-source provenance without duplicating full projection."""
+    base = {"schema_version": COST_EVIDENCE_SCHEMA_VERSION, "max_age_hours": QUANTILE_ARTIFACT_MAX_AGE_HOURS,
+            "fee_floor_bps": FEE_FLOOR_BPS}
     if expected_slippage is None:
-        return {
-            "schema_version": COST_EVIDENCE_SCHEMA_VERSION,
-            "basis": "conservative_v1",
-            "source_payload_sha256": None,
-            "source_asof_utc": None,
-            "normalized_projection_sha256": None,
-            "max_age_hours": QUANTILE_ARTIFACT_MAX_AGE_HOURS,
-            "fee_floor_bps": FEE_FLOOR_BPS,
-            "mean_abs_source": {
-                "scope": "NONE",
-                "symbol": None,
-                "sample_count": 0,
-                "mean_abs_bps": None,
-            },
-            "tail_source": {
-                "scope": "NONE",
-                "symbol": None,
-                "sample_count": 0,
-                "tail_bps": None,
-                "tail_metric": None,
-            },
-        }
+        return {**base, "basis": "conservative_v1", "source_payload_sha256": None,
+            "source_asof_utc": None, "normalized_projection_sha256": None,
+            "mean_abs_source": _cost_source("NONE", None, 0, mean_abs_bps=None),
+            "tail_source": _cost_source("NONE", None, 0, tail_bps=None, tail_metric=None)}
     symbol_entry = expected_slippage["per_symbol"].get(symbol)
-    use_symbol = bool(
-        isinstance(symbol_entry, Mapping)
-        and symbol_entry["n"] >= MIN_SYMBOL_FILLS_FOR_QUANTILE
-    )
-    if use_symbol:
-        mean_scope = "SYMBOL"
-        mean_symbol = symbol
-        mean_count = symbol_entry["n"]
-        mean_abs = symbol_entry["mean_abs"]
-    else:
-        mean_scope = "GLOBAL"
-        mean_symbol = None
-        mean_count = expected_slippage["n_total_global"]
-        mean_abs = expected_slippage["global_mean_abs"]
-    if use_symbol and symbol_entry["tail_bps"] is not None:
-        tail_scope = "SYMBOL"
-        tail_symbol = symbol
-        tail_count = symbol_entry["n"]
-        tail_bps = symbol_entry["tail_bps"]
-        tail_metric = symbol_entry["tail_metric"]
-    else:
-        tail_scope = "GLOBAL"
-        tail_symbol = None
-        tail_count = expected_slippage["n_total_global"]
-        tail_bps = expected_slippage["global_tail_bps"]
-        tail_metric = expected_slippage["global_tail_metric"]
-    return {
-        "schema_version": COST_EVIDENCE_SCHEMA_VERSION,
-        "basis": "expected_slippage_mean_abs_v1",
+    use_symbol = bool(isinstance(symbol_entry, Mapping)
+                      and symbol_entry["n"] >= MIN_SYMBOL_FILLS_FOR_QUANTILE)
+    use_symbol_tail = bool(use_symbol and symbol_entry["tail_bps"] is not None)
+    mean_source = _cost_source("SYMBOL" if use_symbol else "GLOBAL", symbol if use_symbol else None,
+        symbol_entry["n"] if use_symbol else expected_slippage["n_total_global"],
+        mean_abs_bps=symbol_entry["mean_abs"] if use_symbol
+        else expected_slippage["global_mean_abs"])
+    tail_source = _cost_source("SYMBOL" if use_symbol_tail else "GLOBAL", symbol if use_symbol_tail else None,
+        symbol_entry["n"] if use_symbol_tail else expected_slippage["n_total_global"],
+        tail_bps=symbol_entry["tail_bps"] if use_symbol_tail
+        else expected_slippage["global_tail_bps"],
+        tail_metric=symbol_entry["tail_metric"] if use_symbol_tail
+        else expected_slippage["global_tail_metric"])
+    return {**base, "basis": "expected_slippage_mean_abs_v1",
         "source_payload_sha256": expected_slippage["source_payload_sha256"],
         "source_asof_utc": expected_slippage["asof"],
-        "normalized_projection_sha256": expected_slippage[
-            "normalized_projection_sha256"
-        ],
-        "max_age_hours": QUANTILE_ARTIFACT_MAX_AGE_HOURS,
-        "fee_floor_bps": FEE_FLOOR_BPS,
-        "mean_abs_source": {
-            "scope": mean_scope,
-            "symbol": mean_symbol,
-            "sample_count": mean_count,
-            "mean_abs_bps": mean_abs,
-        },
-        "tail_source": {
-            "scope": tail_scope,
-            "symbol": tail_symbol,
-            "sample_count": tail_count,
-            "tail_bps": tail_bps,
-            "tail_metric": tail_metric,
-        },
-    }
+        "normalized_projection_sha256": expected_slippage["normalized_projection_sha256"],
+        "mean_abs_source": mean_source, "tail_source": tail_source}
 
 
 def build_learning_candidate_board(
@@ -1226,9 +1191,7 @@ def build_learning_candidate_board(
     expected_slippage: dict[str, Any] | None,
     as_of_date: dt.date,
     cohort_evaluator: CandidateCohortEvaluator,
-    eligible_evaluator_rows_by_cohort_sink: (
-        dict[str, list[dict[str, Any]]] | None
-    ) = None,
+    eligible_evaluator_rows_by_cohort_sink: dict[str, list[dict[str, Any]]] | None = None,
 ) -> dict[str, Any]:
     """先完成 prospective lineage 分區，再建立 qualified-only candidate board。"""
     blocked_rows = [
@@ -1389,13 +1352,16 @@ def build_learning_candidate_board(
             },
         )
         rows_for_evaluator = evaluator_rows.get(cohort_hash, [])
+        cohort_expected_slippage = candidate_cost_projection_for_recorded_date(
+            expected_slippage, as_of_date=_validated_evaluation_as_of_date(evaluation_context)
+        )
         evaluation = cohort_evaluator(
             side_cell_key,
             rows_for_evaluator,
             cfg=cfg,
             overlay=overlay,
             edge_estimates=edge_estimates,
-            expected_slippage=expected_slippage,
+            expected_slippage=cohort_expected_slippage,
         )
         candidate_rows.append(
             _build_candidate_row(
@@ -1409,7 +1375,7 @@ def build_learning_candidate_board(
                 family_invalid_count=family_count,
                 duplicate_audit=duplicate,
                 cohort_evaluation=evaluation,
-                expected_slippage=expected_slippage,
+                expected_slippage=cohort_expected_slippage,
             )
         )
 
