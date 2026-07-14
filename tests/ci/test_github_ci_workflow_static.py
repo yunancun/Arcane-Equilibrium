@@ -1,11 +1,20 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 
 WORKFLOW = (
     Path(__file__).resolve().parents[2] / ".github" / "workflows" / "ci.yml"
 ).read_text(encoding="utf-8")
+
+
+def _job(name: str) -> str:
+    marker = f"\n  {name}:\n"
+    assert marker in WORKFLOW
+    body = WORKFLOW.split(marker, 1)[1]
+    next_job = re.search(r"\n  [a-z0-9][a-z0-9-]*:\n", body)
+    return body if next_job is None else body[: next_job.start()]
 
 
 def test_ci_workflow_has_required_cross_platform_targets() -> None:
@@ -37,3 +46,56 @@ def test_ci_workflow_triggers_on_push_and_pull_request() -> None:
     assert "pull_request:" in WORKFLOW
     assert "branches:" in WORKFLOW
     assert "- main" in WORKFLOW
+
+
+def test_ci_workflow_cancels_obsolete_heads_and_uses_read_only_permissions() -> None:
+    assert "permissions:\n  contents: read" in WORKFLOW
+    assert (
+        "group: ci-${{ github.workflow }}-"
+        "${{ github.event_name }}-"
+        "${{ github.event.pull_request.number || github.ref }}"
+    ) in WORKFLOW
+    assert "cancel-in-progress: true" in WORKFLOW
+
+
+def test_ci_workflow_classifies_paths_before_expensive_jobs() -> None:
+    classifier = _job("changes")
+    assert "timeout-minutes: 2" in classifier
+    assert "git diff --name-only -z" in classifier
+    assert (
+        '"${{ github.event.pull_request.base.sha }}...'
+        '${{ github.event.pull_request.head.sha }}"'
+    ) in classifier
+    assert "helper_scripts/ci/classify_ci_changes.py" in classifier
+
+    expected_gate = {
+        "development-agent-governance": "governance",
+        "alr-fit-verifier": "alr_fit_verifier",
+        "rust-check-linux": "rust",
+        "rust-check-macos": "rust",
+        "schema-contract": "schema",
+        "stock-etf-static-guards": "stock_etf",
+    }
+    for job_name, output_name in expected_gate.items():
+        job = _job(job_name)
+        assert "needs: changes" in job
+        assert f"needs.changes.outputs.{output_name} == 'true'" in job
+
+
+def test_ci_workflow_keeps_cheap_guards_unconditional() -> None:
+    for job_name in ("migration-immutability-guard", "stable-id-duplication-guard"):
+        job = _job(job_name)
+        assert "needs: changes" not in job
+
+
+def test_ci_workflow_runs_git_policy_tests_in_unconditional_cheap_gate() -> None:
+    policy = _job("git-workflow-policy")
+    assert "needs: changes" not in policy
+    assert "needs.changes.outputs" not in policy
+    assert "ubuntu-latest" in policy
+    for path in (
+        "tests/structure/test_git_loop_guard.py",
+        "tests/ci/test_classify_ci_changes.py",
+        "tests/ci/test_github_ci_workflow_static.py",
+    ):
+        assert path in policy
