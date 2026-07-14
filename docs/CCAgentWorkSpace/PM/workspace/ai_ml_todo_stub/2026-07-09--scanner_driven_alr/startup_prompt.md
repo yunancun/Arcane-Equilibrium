@@ -33,9 +33,19 @@ Before acting:
    authorization, previous no-order public GET approval, prior BB exact-scope
    approval, operator-review-ready artifact, or cached exchange credential as
    authorization for ALR P0/P1.
+6. Recover the latest validated persisted ALR state packet before trusting the
+   checkout. On resume, load expected `LOOP_BRANCH` from `loop_branch` and full
+   `CHECKPOINT_HEAD` from `checkpoint_head`; a resumed loop must not recapture
+   either value from the current branch or HEAD. On first boot only, bind an
+   attached non-main feature branch and full HEAD once, persist both fields in a
+   bootstrap packet, then run `git_loop_guard.py --phase start` with those
+   expected values. Wrong branch/head or any dirty path is
+   `STOP_GIT_START_STATE`; do not stash, reset, clean, or absorb it.
 
 Loop logic:
-1. Recover the latest ALR state packet if one exists.
+1. Reload the persisted ALR state packet and retain its admitted
+   `loop_branch`/`checkpoint_head`; the loop must not recapture them from the
+   checkout.
 2. Select exactly one work item from queue.md: first ACTIVE row, otherwise first
    row whose waiting condition is satisfied.
 3. Dispatch the required role chain for that row:

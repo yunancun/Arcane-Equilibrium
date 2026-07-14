@@ -156,3 +156,36 @@ Profit proof 必須同時具備：
 - update stale pointer
 
 profit hypotheses 應由 TradeBot discovery/learning pipeline 產出。agent 只在工程診斷需要時補 developer hypotheses，字段固定：`program_gap`、`why_it_blocks_autonomy`、`fastest_safe_test`、`required_data`、`failure_condition`、`max_safe_next_action`。
+
+## 8. Hosted CI Cost Gate
+
+GitHub Actions 是 stable-head integration proof，不是 ALR 的 edit-debug loop。
+
+- 每個 PR 只設一個 PM-owned publication lane；其他 sub-agent 只回傳 fragment/patch，
+  不 push、不重跑、不輪詢相同 GitHub 狀態。
+- PR head 更新前必須先跑可行的 focused、adjacent 與 wider local regression，並把
+  同一 blocker 的已知修復合併成一次更新。
+- workflow 先按 changed paths 決定是否需要 Rust、macOS 10x、ephemeral PG 與
+  specialized guard；新 head 必須取消舊 head 的 in-flight run。
+- 同一 `workflow/job/step/failure fingerprint` 第二次出現即停止發布；下一步只能是
+  本地重現、改變驗證策略、縮小/修正 scope，或明確標記 external-only blocker。
+- unchanged head 不 rerun；stable current head 最多請求一次 automated review；舊 SHA
+  review 不得充當 current-head approval。
+- CI quota/預算耗盡是 hosted-validation blocker，不是提高預算、刪除 gate、降低 proof
+  標準或繼續 push 的理由。
+
+ALR strict-default 變更若使 legacy/offline fixture 失敗，先判斷 fixture 是否需要顯式
+選擇相容模式。只有被失敗集合精確點名的 fixture 可加入 checkpoint scope；production
+source scope 不因測試相容性而無界擴張。擴 scope 後仍須本地 wider regression 全綠，
+才可形成下一個 PR head。
+
+長 loop 的 Git 狀態同樣是 gate：每輪必須由 clean feature-branch checkpoint 開始，
+dirty scope 經 `git_loop_guard.py --phase checkpoint` 驗證後才可 stage；綠燈即由
+PM 做窄 commit，再以 exact new HEAD 的 `--phase start` clean PASS 進下一輪。不得把
+多輪改動留成一大包 dirty tree，也不得為了避免 dirty 而每輪 push 觸發 hosted CI。
+
+最終發布只做一次 stable feature-head push，並以 `post-push` 證明 remote branch SHA；
+merge 必須 `--match-head-commit`。之後按 `.codex/SYNC.md` 將 clean Mac main 與 clean
+Linux main ff-only 到同一 true `origin/main` SHA，再跑 four-head reconcile。三個 git
+head 未一致不得 `DONE`；engine 落後則誠實標記 `SOURCE_SYNCED_RUNTIME_PENDING`，不得
+把 source sync 冒充 runtime deploy。
