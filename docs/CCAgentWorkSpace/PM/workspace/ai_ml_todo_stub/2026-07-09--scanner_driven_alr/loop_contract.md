@@ -15,7 +15,11 @@ Boundary label: `SOURCE_ONLY_OFFLINE_P0_P1`.
 6. Do not inherit current trading P0 candidate context, standing Demo
    authorization, prior no-order approval, prior Bybit public GET approval,
    operator-review-ready artifacts, or cached exchange credentials.
-7. Run `git status --short --branch` and preserve unrelated dirty changes.
+7. Bind `LOOP_BRANCH` and full `CHECKPOINT_HEAD`, then run
+   `helper_scripts/maintenance_scripts/git_loop_guard.py --phase start` with
+   both expected values. The loop must use an attached non-`main` feature branch
+   and a clean worktree. Any pre-existing dirty path stops as
+   `STOP_GIT_START_STATE`; preserve it exactly and do not stash/reset/clean it.
 
 ## Iteration
 
@@ -31,18 +35,60 @@ Each iteration:
 5. If required dispatch tooling or role-chain execution is unavailable, stop as
    `STOP_DISPATCH_BLOCKED`; do not silently substitute single-agent PM/PA work.
 6. Implement only the selected row's allowlisted source/doc/test scope.
-7. Run focused unit/static checks and `git diff --check`.
-8. Write:
+7. Before staging, run `git_loop_guard.py --phase checkpoint` with the exact
+   branch, checkpoint head, and this row's file/prefix allowlist. Defaults are a
+   hard checkpoint trigger: at most 12 dirty files, 1500 tracked diff lines,
+   and 2 MB untracked. A binary diff, pre-staged path, unowned path, or exceeded
+   limit stops as `STOP_CHECKPOINT_SCOPE`.
+8. Run focused unit/static checks, required adjacent/wider regression, and
+   `git diff --check`.
+9. Write:
    - `alr_work_item_v1`
    - `alr_effect_review_v1`
    - `alr_loop_state_packet_v1`
    - PM report
    - Operator summary when useful
-9. Stage only owned files.
-10. Commit each green checkpoint with subject and body.
-11. Re-read state and continue while result is `ADVANCED`,
+10. The PM-owned checkpoint lane stages only exact owned files and verifies
+    `git diff --cached --name-only` before commit. No sub-agent stages, commits,
+    pushes, merges, or cleans up a branch/worktree.
+11. Commit each green checkpoint with subject and body, update the full
+    `CHECKPOINT_HEAD`, then rerun `git_loop_guard.py --phase start`; the next row
+    cannot begin until the worktree is clean at that exact commit.
+12. Re-read state and continue while result is `ADVANCED`,
     `ADVANCED_WITH_CONCERNS`, or a recovered `ROTATED` with a source-only next
     row.
+
+Local checkpoint commits are intentionally not pushed per iteration. This keeps
+hosted CI off the edit loop while bounding crash recovery to at most the current
+iteration instead of a multi-hour dirty tree.
+
+## Publication, merge, and three-side sync
+
+When the selected queue segment is locally complete:
+
+1. Require explicit publication authority and follow `.codex/SYNC.md`.
+2. Fetch/integrate current `origin/main` once without rewriting published
+   history; rerun affected local regression.
+3. Require `git_loop_guard.py --phase publish` PASS.
+4. Push one stable feature-branch head without force and require
+   `--phase post-push` to prove the true remote branch SHA equals
+   `CHECKPOINT_HEAD`.
+5. Request one exact-head review and one path-classified CI run. Never rerun an
+   unchanged head.
+6. Merge only with
+   `gh pr merge <PR> --merge --match-head-commit "$CHECKPOINT_HEAD"`; never use
+   `--admin` or automatic branch deletion.
+7. Capture the resulting true `origin/main` SHA. With separately authorized
+   source-sync effects, fast-forward clean Mac main and clean Linux main to that
+   exact SHA; no reset/clean/generic pull fallback is allowed.
+8. Run `four_head_reconcile_probe.py`. `ALL_FOUR_SYNC` completes source/runtime
+   alignment. `SOURCE_ONLY_DRIFT` completes three-side source sync.
+   `HALF_DEPLOY_REBUILD_REQUIRED` completes three-side source sync but returns
+   `SOURCE_SYNCED_RUNTIME_PENDING`; deploy remains separately governed.
+
+Without publication/merge/sync authority the loop returns
+`STOP_SYNC_AUTH_REQUIRED`, not `DONE`. It must never claim completion while
+commits are only local, the PR is unmerged, or Mac/origin/Linux differ.
 
 ## State Packet Minimum Fields
 
@@ -52,6 +98,12 @@ Every `alr_loop_state_packet_v1` must include:
 - `created_at`
 - `repo_head_before`
 - `repo_head_after`
+- `loop_branch`
+- `checkpoint_head`
+- `checkpoint_guard_status`
+- `checkpoint_dirty_file_count`
+- `checkpoint_tracked_diff_lines`
+- `checkpoint_untracked_bytes`
 - `selected_work_item`
 - `selection_reason`
 - `state`
@@ -73,6 +125,13 @@ Every `alr_loop_state_packet_v1` must include:
 - `boundary_escalation_required`
 - `dispatch_tooling_available`
 - `dispatch_blocker`
+- `published_head`
+- `remote_branch_head_verified`
+- `merged_origin_head`
+- `mac_main_head`
+- `linux_main_head`
+- `three_side_source_sync_status`
+- `four_head_reconcile_status`
 
 ## Stop States
 
@@ -87,6 +146,15 @@ Every `alr_loop_state_packet_v1` must include:
 | `STOP_NO_EDGE` | Proof-ready evidence shows non-positive conservative after-cost lower confidence bound. Not used for missing proof. |
 | `STOP_RETENTION_RISK` | Cleanup candidate touches proof, dispute, audit, lineage, unknown reference, or negative-example risk. |
 | `STOP_DISPATCH_BLOCKED` | Required role-chain dispatch tooling is unavailable. Stop and request operator direction instead of silently substituting single-agent implementation. |
+| `STOP_GIT_START_STATE` | Loop did not start from the exact clean feature-branch checkpoint. |
+| `STOP_CHECKPOINT_SCOPE` | Dirty scope escaped the row allowlist or exceeded the bounded checkpoint budget. |
+| `STOP_PUBLISH_PREFLIGHT` | Feature branch, upstream, origin tracking, or topology is unsafe/stale. |
+| `STOP_PUSH_VERIFY` | True remote branch SHA does not equal the stable checkpoint. |
+| `STOP_MERGE_HEAD_DRIFT` | Merge did not bind the exact reviewed head. |
+| `STOP_SYNC_AUTH_REQUIRED` | Publication/merge/Mac-Linux source-sync effect lacks exact authority. |
+| `STOP_MAC_MAIN_SYNC` | Mac main cannot cleanly fast-forward to the captured origin SHA. |
+| `STOP_LINUX_SYNC` | Linux checkout is dirty, non-main, stale, or diverged. |
+| `SOURCE_SYNCED_RUNTIME_PENDING` | Mac/origin/Linux match; runtime build/deploy remains separately pending. |
 | `BLOCKED_BOUNDARY` | Work would require runtime, PG, IPC, exchange, official MCP, order, scheduler, serving, promotion, or delete authority. Stop before the tool call and hand off. |
 
 ## Dispatch Chains
