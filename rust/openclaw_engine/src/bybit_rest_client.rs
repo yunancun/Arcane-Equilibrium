@@ -21,6 +21,25 @@ use thiserror::Error;
 use tokio::time::sleep;
 use tracing::{debug, warn};
 
+const BYBIT_CONNECTOR_WRITE_ENABLED_ENV_KEY: &str = "BYBIT_CONNECTOR_WRITE_ENABLED";
+const BYBIT_CONNECTOR_WRITE_DISABLED_MESSAGE: &str =
+    "Bybit POST blocked: BYBIT_CONNECTOR_WRITE_ENABLED is not explicitly enabled";
+
+fn connector_write_enabled(raw: Option<&str>) -> bool {
+    raw.map(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on" | "enabled"
+        )
+    })
+    .unwrap_or(false)
+}
+
+fn connector_write_enabled_from_env() -> bool {
+    let raw = std::env::var(BYBIT_CONNECTOR_WRITE_ENABLED_ENV_KEY).ok();
+    connector_write_enabled(raw.as_deref())
+}
+
 // ---------------------------------------------------------------------------
 // Error types / 錯誤類型
 // ---------------------------------------------------------------------------
@@ -993,6 +1012,11 @@ pub struct BybitRestClient {
     base_url: String,
     recv_window: String,
     rate_limit: RateLimitState,
+    /// Per-client write fence captured once at construction. Missing or
+    /// non-truthy values fail closed while signed GET/private WS stay usable.
+    /// 每個 client 在構造時一次性鎖定寫入閘；缺失或非 truthy 值 fail-closed，signed GET
+    /// 與 private WS 保持可用。
+    write_enabled: bool,
     /// PA-DRIFT-4 工作項 (1)：REST latency 60s rolling histogram。
     /// Arc 暴露給外部 `ApiLatencySourceProbe` 注入（per packet §1.2 工作項 (4)）；
     /// 同 client 既有共享機制（Arc<BybitRestClient> 廣播）對齊。
@@ -1122,6 +1146,12 @@ impl BybitRestClient {
             .build()
             .map_err(BybitApiError::Transport)?;
 
+        let write_enabled = connector_write_enabled_from_env();
+        tracing::info!(
+            bybit_connector_write_enabled = write_enabled,
+            "Bybit connector write fence captured at client construction / Bybit connector 寫入閘已在 client 構造時鎖定"
+        );
+
         Ok(Self {
             client,
             api_key,
@@ -1129,6 +1159,7 @@ impl BybitRestClient {
             base_url: env.rest_base_url().to_string(),
             recv_window: "5000".to_string(),
             rate_limit: RateLimitState::default(),
+            write_enabled,
             // PA-DRIFT-4：histogram + counter 初始化空；REST call hot path 自動
             // 累積。Arc 暴露給 `RealApiLatencySourceProbe` 注入（per packet
             // §1.2 工作項 (4) trait impl）。
@@ -1320,6 +1351,11 @@ impl BybitRestClient {
     /// Body is serialized as JSON, then the JSON string is signed.
     /// Body 序列化為 JSON，然後對 JSON 字串簽名。
     pub async fn post(&self, path: &str, body: &serde_json::Value) -> BybitResult<BybitResponse> {
+        if !self.write_enabled {
+            return Err(BybitApiError::Other(
+                BYBIT_CONNECTOR_WRITE_DISABLED_MESSAGE.to_string(),
+            ));
+        }
         if !self.has_credentials() {
             return Err(BybitApiError::NoCredentials);
         }

@@ -29,6 +29,7 @@ fn test_sign_known_vector() {
         base_url: "https://api-demo.bybit.com".to_string(),
         recv_window: "5000".to_string(),
         rate_limit: RateLimitState::default(),
+        write_enabled: true,
         // PA-DRIFT-4：test 端 manual struct 構造補 instrumentation 初值（test
         // 不驗 latency / retCode；空 histogram + counter 即可）。
         latency_histogram: std::sync::Arc::new(RestLatencyHistogram::new()),
@@ -68,6 +69,7 @@ fn test_sign_empty_params() {
         base_url: "https://api-demo.bybit.com".to_string(),
         recv_window: "5000".to_string(),
         rate_limit: RateLimitState::default(),
+        write_enabled: true,
         // PA-DRIFT-4：test 端 manual struct 構造補 instrumentation 初值（test
         // 不驗 latency / retCode；空 histogram + counter 即可）。
         latency_histogram: std::sync::Arc::new(RestLatencyHistogram::new()),
@@ -174,6 +176,7 @@ fn test_has_credentials() {
         base_url: "https://api-demo.bybit.com".to_string(),
         recv_window: "5000".to_string(),
         rate_limit: RateLimitState::default(),
+        write_enabled: true,
         // PA-DRIFT-4：test 端 manual struct 構造補 instrumentation 初值（test
         // 不驗 latency / retCode；空 histogram + counter 即可）。
         latency_histogram: std::sync::Arc::new(RestLatencyHistogram::new()),
@@ -188,6 +191,7 @@ fn test_has_credentials() {
         base_url: "https://api-demo.bybit.com".to_string(),
         recv_window: "5000".to_string(),
         rate_limit: RateLimitState::default(),
+        write_enabled: true,
         // PA-DRIFT-4：test 端 manual struct 構造補 instrumentation 初值（test
         // 不驗 latency / retCode；空 histogram + counter 即可）。
         latency_histogram: std::sync::Arc::new(RestLatencyHistogram::new()),
@@ -216,6 +220,7 @@ fn test_near_rate_limit() {
         base_url: "https://api-demo.bybit.com".to_string(),
         recv_window: "5000".to_string(),
         rate_limit: RateLimitState::default(),
+        write_enabled: true,
         // PA-DRIFT-4：test 端 manual struct 構造補 instrumentation 初值（test
         // 不驗 latency / retCode；空 histogram + counter 即可）。
         latency_histogram: std::sync::Arc::new(RestLatencyHistogram::new()),
@@ -645,6 +650,7 @@ async fn test_get_no_credentials_fails_closed() {
         base_url: "https://api-demo.bybit.com".to_string(),
         recv_window: "5000".to_string(),
         rate_limit: RateLimitState::default(),
+        write_enabled: true,
         // PA-DRIFT-4：test 端 manual struct 構造補 instrumentation 初值（test
         // 不驗 latency / retCode；空 histogram + counter 即可）。
         latency_histogram: std::sync::Arc::new(RestLatencyHistogram::new()),
@@ -668,6 +674,7 @@ async fn test_post_no_credentials_fails_closed() {
         base_url: "https://api-demo.bybit.com".to_string(),
         recv_window: "5000".to_string(),
         rate_limit: RateLimitState::default(),
+        write_enabled: true,
         // PA-DRIFT-4：test 端 manual struct 構造補 instrumentation 初值（test
         // 不驗 latency / retCode；空 histogram + counter 即可）。
         latency_histogram: std::sync::Arc::new(RestLatencyHistogram::new()),
@@ -690,6 +697,7 @@ async fn test_get_transport_error_fails_closed() {
         base_url: "http://127.0.0.1:1".to_string(), // unreachable port
         recv_window: "5000".to_string(),
         rate_limit: RateLimitState::default(),
+        write_enabled: true,
         // PA-DRIFT-4：test 端 manual struct 構造補 instrumentation 初值（test
         // 不驗 latency / retCode；空 histogram + counter 即可）。
         latency_histogram: std::sync::Arc::new(RestLatencyHistogram::new()),
@@ -735,6 +743,7 @@ async fn test_checked_methods_propagate_no_credentials() {
         base_url: "https://api-demo.bybit.com".to_string(),
         recv_window: "5000".to_string(),
         rate_limit: RateLimitState::default(),
+        write_enabled: true,
         // PA-DRIFT-4：test 端 manual struct 構造補 instrumentation 初值（test
         // 不驗 latency / retCode；空 histogram + counter 即可）。
         latency_histogram: std::sync::Arc::new(RestLatencyHistogram::new()),
@@ -767,6 +776,7 @@ fn test_client_timeout_configured() {
         base_url: "https://api-demo.bybit.com".to_string(),
         recv_window: "5000".to_string(),
         rate_limit: RateLimitState::default(),
+        write_enabled: true,
         // PA-DRIFT-4：test 端 manual struct 構造補 instrumentation 初值（test
         // 不驗 latency / retCode；空 histogram + counter 即可）。
         latency_histogram: std::sync::Arc::new(RestLatencyHistogram::new()),
@@ -821,6 +831,7 @@ async fn test_timeout_fires_on_hung_server_fail_closed() {
         base_url: format!("http://{}", addr),
         recv_window: "5000".to_string(),
         rate_limit: RateLimitState::default(),
+        write_enabled: true,
         // PA-DRIFT-4：test 端 manual struct 構造補 instrumentation 初值（test
         // 不驗 latency / retCode；空 histogram + counter 即可）。
         latency_histogram: std::sync::Arc::new(RestLatencyHistogram::new()),
@@ -903,6 +914,136 @@ impl Drop for EnvSnapshot {
 /// 指向空 tempdir 使 slot read 必定失敗；caller 持有 TempDir 生命週期。
 fn empty_secrets_dir() -> tempfile::TempDir {
     tempfile::tempdir().expect("create empty tempdir for secrets")
+}
+
+/// A credentialed client must reject every signed POST locally when the
+/// existing connector write gate is disabled.  The loopback URL proves the
+/// assertion does not depend on broker availability and must fail before I/O.
+/// 既有 connector 寫入閘關閉時，有憑證 client 的所有 signed POST 必須在本地
+/// 拒絕；loopback URL 證明結果不依賴 broker，且必須在網路 I/O 前失敗。
+#[tokio::test]
+async fn test_post_blocked_locally_when_connector_write_disabled() {
+    let _lock = crate::test_env_lock::guard();
+    let snap = EnvSnapshot::new(&["BYBIT_CONNECTOR_WRITE_ENABLED"]);
+    snap.set("BYBIT_CONNECTOR_WRITE_ENABLED", "false");
+
+    let listener =
+        std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback transport sentinel");
+    listener
+        .set_nonblocking(true)
+        .expect("make transport sentinel nonblocking");
+    let addr = listener.local_addr().expect("read loopback address");
+
+    let mut client = BybitRestClient::new(
+        BybitEnvironment::Demo,
+        Some("test_key".to_string()),
+        Some("test_secret".to_string()),
+    )
+    .expect("credentialed Demo client must construct");
+    // The runtime fence is a per-client construction-time decision: later env drift must
+    // not re-enable a client that was constructed fail-closed.
+    snap.set("BYBIT_CONNECTOR_WRITE_ENABLED", "true");
+    client.client = Client::builder()
+        .timeout(std::time::Duration::from_millis(100))
+        .build()
+        .expect("build bounded test client");
+    client.base_url = format!("http://{addr}");
+
+    let err = client
+        .post_checked("/v5/order/create", &serde_json::json!({}))
+        .await
+        .expect_err("disabled connector write gate must reject POST");
+    assert!(
+        matches!(
+            err,
+            BybitApiError::Other(ref msg)
+                if msg == "Bybit POST blocked: BYBIT_CONNECTOR_WRITE_ENABLED is not explicitly enabled"
+        ),
+        "error must be the stable fail-closed connector-write rejection, got: {err}"
+    );
+    assert!(
+        matches!(listener.accept(), Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock),
+        "disabled POST must not open a transport connection"
+    );
+}
+
+/// The write fence must not block signed GET: a disabled client still reaches
+/// the local transport sentinel, where the bounded request fails as transport.
+#[tokio::test]
+async fn test_signed_get_reaches_transport_when_connector_write_disabled() {
+    let _lock = crate::test_env_lock::guard();
+    let snap = EnvSnapshot::new(&["BYBIT_CONNECTOR_WRITE_ENABLED"]);
+    snap.set("BYBIT_CONNECTOR_WRITE_ENABLED", "false");
+
+    let listener =
+        std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback transport sentinel");
+    listener
+        .set_nonblocking(true)
+        .expect("make transport sentinel nonblocking");
+    let addr = listener.local_addr().expect("read loopback address");
+
+    let mut client = BybitRestClient::new(
+        BybitEnvironment::Demo,
+        Some("test_key".to_string()),
+        Some("test_secret".to_string()),
+    )
+    .expect("credentialed Demo client must construct");
+    client.client = Client::builder()
+        .timeout(std::time::Duration::from_millis(100))
+        .build()
+        .expect("build bounded test client");
+    client.base_url = format!("http://{addr}");
+
+    let err = client
+        .get_checked("/v5/account/wallet-balance", &[("accountType", "UNIFIED")])
+        .await
+        .expect_err("unserved loopback GET must fail at transport");
+    assert!(
+        matches!(err, BybitApiError::Transport(_)),
+        "write-disabled signed GET must reach transport, got: {err}"
+    );
+    assert!(
+        listener.accept().is_ok(),
+        "signed GET must open the loopback transport connection"
+    );
+}
+
+/// Explicit truthy configuration must wire through the public constructor.
+#[test]
+fn test_constructor_captures_explicit_truthy_write_gate() {
+    let _lock = crate::test_env_lock::guard();
+    let snap = EnvSnapshot::new(&["BYBIT_CONNECTOR_WRITE_ENABLED"]);
+    snap.set("BYBIT_CONNECTOR_WRITE_ENABLED", "true");
+
+    let client = BybitRestClient::new(
+        BybitEnvironment::Demo,
+        Some("test_key".to_string()),
+        Some("test_secret".to_string()),
+    )
+    .expect("credentialed Demo client must construct");
+
+    assert!(
+        client.write_enabled,
+        "constructor must capture explicit truthy write configuration"
+    );
+}
+
+/// Pin the established Python connector truthy set; everything else is denied.
+#[test]
+fn test_connector_write_gate_truthy_contract() {
+    for raw in ["1", "true", "TRUE", " yes ", "On", "enabled"] {
+        assert!(connector_write_enabled(Some(raw)), "must enable: {raw:?}");
+    }
+    for raw in [
+        None,
+        Some(""),
+        Some("0"),
+        Some("false"),
+        Some("off"),
+        Some("unexpected"),
+    ] {
+        assert!(!connector_write_enabled(raw), "must deny: {raw:?}");
+    }
 }
 
 /// Gate #1: unset OPENCLAW_ALLOW_MAINNET → construction must fail closed.
