@@ -1,6 +1,6 @@
 # Codex Agent Dispatch Protocol
 
-Last updated: 2026-07-11
+Last updated: 2026-07-14
 Canonical role Interface: `.codex/agent_registry_v1.json`
 
 ## Purpose
@@ -85,6 +85,35 @@ Unknown uncertainty does the same; omitted uncertainty is invalid rather than lo
 
 Every omitted role records reason, residual risk, and owner. A shorter route is
 good only when durable closure quality is unchanged.
+
+## Admission and publication economics
+
+Compiler-mandatory nodes are not optional, but PM must not add speculative
+reviewers, duplicate investigators, or status-polling agents. Every adaptive
+node records the concrete decision it may change; if that decision is already
+closed by current evidence, skip the node and retain the reason. One watcher can
+observe a running wave; fan-out does not make unchanged external state fresher.
+
+PR publication is a single-owner effect. Sub-agents return governed fragments;
+only the PM-owned publication lane updates the head, requests one current-head
+review, or considers a rerun. Use local reproduction as the development loop,
+then publish one stable batch. Hosted CI must use path classification and
+obsolete-run cancellation where available. The second identical failure
+fingerprint (`head/workflow/job/step/error family`) is a publication stop, not
+permission for another blind commit-and-push cycle.
+
+For a multi-iteration loop, PM also owns local checkpoint admission. It binds
+one feature branch and full checkpoint SHA, requires a clean `start` guard at
+every row boundary, runs the allowlisted bounded `checkpoint` guard before
+staging, and commits each green row locally. Hosted publication remains one
+stable batch, but crash recovery never spans an unbounded dirty tree.
+
+The publication/merge/sync sequence is fixed by `.codex/SYNC.md`: `publish` ->
+non-force feature-branch push -> `post-push` exact SHA -> current-head CI/review
+-> merge with `--match-head-commit` -> clean ff-only Mac main -> clean ff-only
+Linux main -> four-head reconciliation. No node may substitute force, reset,
+clean, stash, generic pull, admin bypass, branch deletion, or destructive
+worktree removal when a gate fails.
 
 ## Role and permission binding
 
