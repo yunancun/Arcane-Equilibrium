@@ -12,7 +12,45 @@ on:
   schedule:
     - cron: '0 3 * * 1'  # 每週一 03:00 UTC（北京 11:00）
 
+permissions:
+  contents: read
+
+# A newer head makes every in-flight result for the older head obsolete. Cancel
+# it before it can keep spending Linux minutes or macOS 10x minutes.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  changes:
+    name: classify changed paths (linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      governance: ${{ steps.classify.outputs.governance }}
+      alr_fit_verifier: ${{ steps.classify.outputs.alr_fit_verifier }}
+      rust: ${{ steps.classify.outputs.rust }}
+      schema: ${{ steps.classify.outputs.schema }}
+      stock_etf: ${{ steps.classify.outputs.stock_etf }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Classify the exact PR diff
+        id: classify
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            git diff --name-only -z \
+              "${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}" \
+              | python3 helper_scripts/ci/classify_ci_changes.py \
+                  --null --github-output "$GITHUB_OUTPUT"
+          else
+            python3 helper_scripts/ci/classify_ci_changes.py \
+              --all --github-output "$GITHUB_OUTPUT" </dev/null
+          fi
+
   migration-immutability-guard:
     name: applied migration immutability guard
     runs-on: ubuntu-latest
@@ -39,12 +77,36 @@ jobs:
       - name: Check Agent Spine stable_id literal duplication
         run: bash helper_scripts/ci/check_stable_id_duplication.sh
 
+  # This job is deliberately independent of the changed-path classifier. A
+  # defective classifier or workflow edit must never be able to skip the tests
+  # that validate that same control plane.
+  git-workflow-policy:
+    name: Git workflow policy (unconditional cheap gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install focused test dependency
+        run: python3 -m pip install --disable-pip-version-check pytest
+      - name: Run Git workflow policy tests
+        run: |
+          python3 -m pytest -q \
+            tests/structure/test_git_loop_guard.py \
+            tests/ci/test_classify_ci_changes.py \
+            tests/ci/test_github_ci_workflow_static.py
+
   # Development-agent governance and the V158/V159 migration source contracts use
   # stdlib + focused pytest only. Keep them on the Linux 1x runner so static
   # authority/Registry/view/permission drift fails before merge without
   # consuming a Rust build or macOS 10x minute.
   development-agent-governance:
     name: development-agent governance (cheap static gate)
+    needs: changes
+    if: needs.changes.outputs.governance == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -72,6 +134,8 @@ jobs:
 
   alr-fit-verifier:
     name: isolated ALR fit verifier (locked online + clean offline)
+    needs: changes
+    if: needs.changes.outputs.alr_fit_verifier == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -104,6 +168,8 @@ jobs:
 
   rust-check-linux:
     name: rust check (x86_64-unknown-linux-gnu)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
@@ -119,7 +185,8 @@ jobs:
   rust-check-macos:
     name: rust check (aarch64-apple-darwin)
     # macOS 10x 計費倍率：push 事件跳過，僅 PR / schedule 觸發
-    if: github.event_name != 'push'
+    needs: changes
+    if: github.event_name != 'push' && needs.changes.outputs.rust == 'true'
     runs-on: macos-latest
     timeout-minutes: 20
     defaults:
@@ -141,7 +208,8 @@ jobs:
   # push-to-main 與 weekly schedule 不觸發。
   schema-contract:
     name: schema-consumer contract (linux + ephemeral pg)
-    if: github.event_name == 'pull_request'
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.schema == 'true'
     runs-on: ubuntu-latest
     # Four V157 preparations, bounded V159/V160 functional and concurrency
     # probes, and the cold Rust full-tree contract share this PR-only job.
@@ -335,7 +403,8 @@ jobs:
   # 成本紀律（2000min/月，單 runner）：限 pull_request → 只 PR 跑、ubuntu-latest 1x 倍率、零 macOS 10x。
   stock-etf-static-guards:
     name: stock_etf static guards (python)
-    if: github.event_name == 'pull_request'
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.stock_etf == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
