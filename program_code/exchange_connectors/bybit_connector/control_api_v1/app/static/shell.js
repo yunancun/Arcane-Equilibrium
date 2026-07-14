@@ -11,15 +11,20 @@
  *       (6) 衡樑 blocked 渲染;(7) clock 真值。
  * 主要函數:buildViews / navigate / onHashChange(router)、withBuildVersion /
  *   notifyViewVisibility / flushPendingFrameMessages / postToTabFrame(iframe host,verbatim 移植)、
- *   buildRailEnvs / buildRailCross / updateRailActive、switchLane、setBeam(P1.2 seam)。
- * 依賴:common.js(ocAuthCheck / ocLogout / ocEsc);tokens.css / oc-utilities.css / shell.css。
- *   不重造 auth / formatter / CSRF。
+ *   buildRailEnvs / buildRailCross / updateRailActive、switchLane、setBeam(P1.2-b seam)、
+ *   wireControlPlaneChips / pollControlPlane / renderChip(P1.2-a Tier A topbar 類別 chips REST poll,canon 7)。
+ * 依賴:common.js(ocAuthCheck / ocLogout / ocEsc / ocApi);tokens.css / oc-utilities.css / shell.css。
+ *   不重造 auth / formatter / CSRF / fetch。
  * 硬邊界(canon / LOOP §6):
  *   ① 殼零寫路徑——無 POST、無 order、無 activation;交易/寫面全在 iframe 內既有 tab-*.html
  *      (五閘 / REAL FUNDS / typed-confirm / --live 熱紅 byte-identical 續生效)。
  *   ② 衡樑無真值 → blocked 態(canon 7),絕不 fake 傾角;setBeam 形制保留,P1.1-a 不呼叫,
  *      真接線=P1.2 shared WS。
- *   ③ topbar / status 遙測 P1.1-a 為 canon-7 blocked 佔位,零新 fetch;clock 是唯一 client 真值。
+ *   ③ topbar / status「類別狀態」chips(engine 存活 / mode / 風控包絡類別 / gate 總態)= P1.2-a Tier A:
+ *      復用既有 authoritative REST 路由(/system/overview · /system/control-plane · /openclaw/status)~10s poll,
+ *      canon 7 三態(null/timeout/401 → blocked,絕不 fake 0.00/假 heartbeat/假成功);全 GET,零寫。
+ *      衡樑數值傾角 + 高頻遙測(lease / PnL / latency / sync / queue)= P1.2-b Tier B NEEDS-LINUX,維持 blocked;
+ *      clock 是唯一 client 真值。
  *   ④ openclaw-tab-visibility 廣播=safety-critical,以 tab 既有消費形狀(ev.data.tab=legacy id)
  *      逐字移植;shape drift=隱藏 iframe WS 不暫停=freshness/safety 退步,非協商。
  *   ⑤ 原生 view visibility:隱藏時呼其 pause(停輪詢/停 fetch),鏡像 iframe postMessage 暫停語義;
@@ -36,7 +41,7 @@
   // 用途:iframe cache-bust(withBuildVersion)+ status strip 顯示。
   // ⚠ 部署紀律(F-R96-1 HIGH 教訓):**每次改動任一 GUI 靜態檔的批必 bump 此值 + shell.html 對應檔的 `?v=`**;
   //   凍結會令客戶端快取污染(改動不傳播,需硬刷新才見新版)。R55→R96 凍結 shell-p11a 致 R86-R96 全批未傳播。
-  var BUILD_TS = '20260713.r97';
+  var BUILD_TS = '20260714.r104';
   var USER_KEY = 'oc_username';
   // 預設 landing(PM 裁決 3:legacy parity=console 現行預設 view=tab-system=總覽)。
   var DEFAULT_HASH = '#/crypto/overview';
@@ -476,6 +481,128 @@
     var left = byId('oc-beam-left'); if (left) left.textContent = '—';
   }
 
+  // ═══ topbar / status 類別狀態 chips(P1.2-a Tier A:REST poll 接既有 authoritative 路由,canon 7 三態)═══
+  // 為什麼 Tier A:類別語義(engine 存活 / mode / 風控包絡類別 / gate 總態)由控制面 compiled state 推導,
+  //   復用既有 view 已消費的權威路由(second-adapter,零新路由 / 零 policy 複製),消解 F-R96-2 頂欄矛盾。
+  // canon 7 鐵律:null / timeout / 401 → blocked(`—` + muted),絕不 fake 0.00 / 假 heartbeat / 假成功。
+  // 衡樑數值傾角 + lease/PnL/latency/sync/queue 高頻遙測 = P1.2-b Tier B(NEEDS-LINUX),不在本 seam。
+
+  // tone → 既有 utility class(oc-utilities.css 已 <link> 載入;零新 CSS,ratchet 0/0/0)。
+  var CHIP_TONE_CLASS = { good: 't-pos', warn: 't-warn', bad: 't-neg', blocked: 'blocked' };
+
+  // 統一 chip 渲染:設真值文字 + 語義 tone class。每次先清 inline color(尤其 live 熱紅殘留)+ 重置單一
+  //   class,避免態切殘留(如 live→demo 未清紅)。live 態走 --live 熱紅(canon 6 真金,絕不稀釋為 --neg
+  //   虧損紅);--live 以 .style 設色(scoped 正法,非 style= 字面 / 非裸 hex,ratchet 安全)。
+  function renderChip(id, text, tone) {
+    var el = byId(id);
+    if (!el) return;
+    el.style.removeProperty('color');
+    el.textContent = (text == null || text === '') ? '—' : String(text);
+    if (tone === 'live') {
+      el.className = '';                                 // 去 muted,改熱紅
+      el.style.setProperty('color', 'var(--live)');      // canon 6:真金熱紅,永不稀釋
+      return;
+    }
+    el.className = CHIP_TONE_CLASS[tone] || 'blocked';
+  }
+
+  // canon 7 blocked:設 `—` + muted class,清任何前態 inline 色。null / timeout / 首載失敗共用。
+  function renderChipBlocked(id) {
+    var el = byId(id);
+    if (!el) return;
+    el.style.removeProperty('color');
+    el.textContent = '—';
+    el.className = 'blocked';
+  }
+
+  // 風控包絡類別 → tone(gui-style-guide:綠=安全 / 黃=注意;canon 6 保守)。
+  //   blocking=包絡阻擋操作,需注意 → warn;reserved/configured=包絡就緒(非阻擋)→ good;其餘/未知 → blocked。
+  function riskTone(state) {
+    var s = String(state || '').toLowerCase();
+    if (s === 'blocking') return 'warn';
+    if (s === 'reserved' || s === 'configured') return 'good';
+    return 'blocked';
+  }
+
+  // gate 總態 → tone:passed 類 → good;blocked/failed 類 → bad;not_evaluated/degraded 等 → warn(待評估注意)。
+  function gateTone(state) {
+    var s = String(state || '').toLowerCase();
+    if (['passed', 'healthy', 'ready', 'ok', 'fresh', 'complete'].indexOf(s) !== -1) return 'good';
+    if (['blocked', 'failed', 'down', 'tripped', 'unavailable', 'fail'].indexOf(s) !== -1) return 'bad';
+    return 'warn';
+  }
+
+  // engine 存活(byte-parity view-agents-openclaw.js:146 → d.data.runtime.engine_alive)。
+  //   true=運行中(good)/ false=離線(warn)/ null·缺 runtime snapshot·timeout → blocked(誠實;Mac 無 engine 常態)。
+  function updateEngineChips(status) {
+    var rt = status && status.data ? status.data.runtime : null;
+    var alive = rt ? rt.engine_alive : undefined;
+    ['oc-top-engine', 'oc-st-engine', 'oc-stc-engine'].forEach(function (id) {
+      if (alive === true) renderChip(id, '運行中', 'good');
+      else if (alive === false) renderChip(id, '離線', 'warn');
+      else renderChipBlocked(id);
+    });
+  }
+
+  // mode(byte-parity tab-system.html:818/821 → gr = d.data.global_runtime || d.data;gr.global_mode_state)。
+  //   命中 live_* → --live 熱紅(canon 6,比照 tab-system.html:852 badge 'live' 判斷);demo→warn;其餘→good;null→blocked。
+  function updateModeChips(overview) {
+    var ov = overview && overview.data ? overview.data : null;
+    var gr = ov ? (ov.global_runtime || ov) : null;
+    var mode = gr ? gr.global_mode_state : null;
+    ['oc-st-mode', 'oc-stc-mode'].forEach(function (id) {
+      if (!ov || !mode) { renderChipBlocked(id); return; }
+      var s = String(mode).toLowerCase();
+      if (s.indexOf('live') !== -1) renderChip(id, mode, 'live');
+      else if (s.indexOf('demo') !== -1) renderChip(id, mode, 'warn');
+      else renderChip(id, mode, 'good');
+    });
+  }
+
+  // 風控包絡類別 + gate 總態。envelope `.data` 解包 byte-parity 錨=tab-settings.html:960 loadControlPlane
+  //   (const cp=(cpRes&&cpRes.data)||{};同 /system/control-plane 的 live GUI 消費者)。字段名對後端真相核實
+  //   (state_store.py:198/205 → risk_envelope.effective_risk_envelope_state / health_gate_summary.health_gates_overall_state_summary)。
+  function updateRiskGateChips(cp) {
+    var cpd = cp && cp.data ? cp.data : null;
+    var risk = cpd && cpd.risk_envelope ? cpd.risk_envelope.effective_risk_envelope_state : null;
+    if (risk) renderChip('oc-top-risk', risk, riskTone(risk));
+    else renderChipBlocked('oc-top-risk');
+    var gate = cpd && cpd.health_gate_summary ? cpd.health_gate_summary.health_gates_overall_state_summary : null;
+    if (gate) renderChip('oc-top-gate', gate, gateTone(gate));
+    else renderChipBlocked('oc-top-gate');
+  }
+
+  var _cpInFlight = false;   // 重入閘(類比 common.js _ocRefreshInFlight):防輪詢 overlap。
+
+  // 三路併發 poll(canon 7:任一 null 只令該來源 chip blocked,其餘正常;部分失敗不整組崩)。全 GET,零寫。
+  //   復用 common.js ocApi(8s AbortSignal.timeout → null;不重造 fetch/CSRF)。
+  function pollControlPlane() {
+    if (document.visibilityState === 'hidden') return;    // 可見性暫停:背景分頁不空轉(鏡像 iframe pause 語義)
+    if (_cpInFlight) return;                               // 重入閘
+    if (typeof window.ocApi !== 'function') return;        // common.js 未載 → fail-safe(不崩,保留 html 佔位)
+    _cpInFlight = true;
+    Promise.all([
+      ocApi('/api/v1/system/overview'),
+      ocApi('/api/v1/system/control-plane'),
+      ocApi('/api/v1/openclaw/status')
+    ]).then(function (res) {
+      updateModeChips(res[0]);
+      updateRiskGateChips(res[1]);
+      updateEngineChips(res[2]);
+    }).catch(function (e) {
+      // ocApi 恆 resolve(內部吞例外回 null),故通常不觸;防禦性 fail-safe,不 fake。
+      console.warn('[shell] control-plane chips poll 失敗:', e);
+    }).finally(function () {
+      _cpInFlight = false;
+    });
+  }
+
+  // boot 接線:kick 一次 + ~10s setInterval(低頻;topbar 類別態足夠,非高頻遙測)。
+  function wireControlPlaneChips() {
+    pollControlPlane();
+    setInterval(pollControlPlane, 10000);
+  }
+
   // ═══ clock(唯一 client 真值;UTC 上 / local 下,mono tabular)═══
   function updateClock() {
     var d = new Date();
@@ -604,6 +731,9 @@
 
     updateClock();
     setInterval(updateClock, 1000);
+
+    // P1.2-a Tier A:topbar/status 類別 chips REST poll(canon 7 三態);renderBeamBlocked(上)不動,衡樑續 Tier B。
+    wireControlPlaneChips();
 
     window.addEventListener('hashchange', onHashChange);
     onHashChange();          // 首載:parse 現行 hash → 定位 view(深連結 / 刷新保持)

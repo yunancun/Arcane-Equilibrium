@@ -117,9 +117,15 @@
       <div class="beam-lbl"><span>包絡 <b id="oc-beam-used">—</b></span><span>待接線 · P1.2 <b id="oc-beam-left">—</b></span></div>
     </div>
 
-    <!-- engine / lease 遙測(canon 7 blocked 佔位;真值 P1.2,零新 fetch)-->
-    <div class="topstat" title="引擎心跳 / 租約遙測待接線 P1.2(canon 7,不假 heartbeat)">
-      engine <span class="blocked">待接線 · P1.2</span><br>lease <span class="blocked">—</span>
+    <!-- engine 存活(P1.2-a Tier A:shell.js wireControlPlaneChips 接 /api/v1/openclaw/status → engine_alive,canon 7 三態);
+         lease 遙測(P1.2-b Tier B NEEDS-LINUX:維持 blocked,不假 heartbeat)。既有 blocked 佔位=首載/失敗態(canon 7,非刪)。-->
+    <div class="topstat" title="引擎存活(P1.2-a 接線)/ 租約遙測(P1.2-b Tier B 待接線,canon 7 不假 heartbeat)">
+      engine <span class="blocked" id="oc-top-engine">待接線 · P1.2</span><br>lease <span class="blocked" id="oc-top-lease">—</span>
+    </div>
+    <!-- 風控包絡類別 / gate 總態(P1.2-a Tier A:接 /api/v1/system/control-plane,canon 7 三態;初始 blocked 佔位=首載/失敗態,絕不 fake)。
+         複用既有 .topstat / .blocked class,零新樣式。-->
+    <div class="topstat" title="風控包絡類別態 / 健康 gate 總態(P1.2-a 接 control-plane,canon 7 三態;— 為首載/失敗 blocked)">
+      包絡 <span class="blocked" id="oc-top-risk">—</span><br>gate <span class="blocked" id="oc-top-gate">—</span>
     </div>
 
     <!-- clock:唯一 client 真值(UTC 上 / local 下)-->
@@ -158,8 +164,8 @@
   <!-- ═══ 底部 status strip:滿寬跨 rail 下方;≤960 促升三 chip(engine/mode/PnL 不失)═══ -->
   <footer class="app-status">
     <div class="app-status__wide">
-      <span>engine <span class="blocked">待接線 · P1.2</span></span>
-      <span>mode <span class="blocked">—</span></span>
+      <span>engine <span class="blocked" id="oc-st-engine">待接線 · P1.2</span></span>
+      <span>mode <span class="blocked" id="oc-st-mode">—</span></span>
       <span>Live/Demo PnL <span class="blocked">—</span></span>
       <span>latency <span class="blocked">—</span></span>
       <span>sync <span class="blocked">—</span></span>
@@ -167,8 +173,8 @@
       <span class="build" id="oc-build">build —</span>
     </div>
     <div class="app-status__core">
-      <span class="chip">engine <span class="blocked">待接線</span></span>
-      <span class="chip">mode <span class="blocked">—</span></span>
+      <span class="chip">engine <span class="blocked" id="oc-stc-engine">待接線</span></span>
+      <span class="chip">mode <span class="blocked" id="oc-stc-mode">—</span></span>
       <span class="chip">PnL <span class="blocked">—</span></span>
     </div>
   </footer>
@@ -290,7 +296,7 @@
      tab-live.js 既有 openclaw-tab-visibility listener。common* 殼已載,live 無其他外部 JS;於 shell.js 前載以註冊
      OC_NATIVE_VIEWS['live']。tab-live.html/tab-live.js 零修改(reuse 正本 + 回滾錨)。 -->
 <script src="/static/view-live.js?v=20260712.p2-live"></script>
-<script src="/static/shell.js?v=20260713.r97"></script>
+<script src="/static/shell.js?v=20260714.r104"></script>
 
 </body>
 </html>
