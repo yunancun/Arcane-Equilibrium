@@ -77,6 +77,28 @@ jobs:
       - name: Check Agent Spine stable_id literal duplication
         run: bash helper_scripts/ci/check_stable_id_duplication.sh
 
+  # This job is deliberately independent of the changed-path classifier. A
+  # defective classifier or workflow edit must never be able to skip the tests
+  # that validate that same control plane.
+  git-workflow-policy:
+    name: Git workflow policy (unconditional cheap gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install focused test dependency
+        run: python3 -m pip install --disable-pip-version-check pytest
+      - name: Run Git workflow policy tests
+        run: |
+          python3 -m pytest -q \
+            tests/structure/test_git_loop_guard.py \
+            tests/ci/test_classify_ci_changes.py \
+            tests/ci/test_github_ci_workflow_static.py
+
   # Development-agent governance and the V158/V159 migration source contracts use
   # stdlib + focused pytest only. Keep them on the Linux 1x runner so static
   # authority/Registry/view/permission drift fails before merge without
@@ -104,12 +126,6 @@ jobs:
           python3 -m pytest -q \
             tests/structure/test_development_agent_governance.py \
             tests/structure/test_agent_governance_*.py
-      - name: Run Git workflow policy tests
-        run: |
-          python3 -m pytest -q \
-            tests/structure/test_git_loop_guard.py \
-            tests/ci/test_classify_ci_changes.py \
-            tests/ci/test_github_ci_workflow_static.py
       - name: Run V158/V159 qualified challenger source contracts
         run: |
           python3 -m pytest -q \

@@ -42,9 +42,11 @@ Phases:
 - `start`: exact branch + exact HEAD + clean feature worktree.
 - `checkpoint`: dirty paths are inside the selected work item's allowlist;
   default ceiling is 12 files, 1500 tracked diff lines, and 2 MB untracked.
-- `publish`: clean feature branch, fresh local `origin/main`, correct upstream,
-  and true origin main is an ancestor of the exact head.
-- `post-push`: the true remote feature-branch SHA equals the exact local head.
+- `publish`: clean feature branch, fresh local `origin/main`, upstream absent or
+  correct for the not-yet-pushed branch, and true origin main is an ancestor of
+  the exact head.
+- `post-push`: upstream is exactly `origin/<branch>` and the true remote
+  feature-branch SHA equals the exact local head.
 - `main-sync`: after an explicit fetch, clean local main is fast-forwardable to
   the expected true origin SHA.
 - `main-post-sync`: clean local main equals that exact SHA.

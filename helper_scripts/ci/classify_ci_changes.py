@@ -34,6 +34,8 @@ _GIT_WORKFLOW_FILES = {
     "tests/structure/test_git_loop_guard.py",
     "docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/"
     "2026-07-09--scanner_driven_alr/loop_contract.md",
+    "docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/"
+    "2026-07-09--scanner_driven_alr/startup_prompt.md",
 }
 _SCHEMA_PROBES = {
     "program_code/ml_training/tests/integration/"
@@ -72,7 +74,7 @@ def classify_paths(paths: Iterable[str], *, force_all: bool = False) -> dict[str
 
         if _matches(
             path,
-            exact={"AGENTS.md", "CLAUDE.md"} | _GIT_WORKFLOW_FILES,
+            exact={"AGENTS.md", "CLAUDE.md", "CONTEXT.md"} | _GIT_WORKFLOW_FILES,
             prefixes=(
                 ".agents/skills/",
                 ".codex/",
@@ -80,6 +82,7 @@ def classify_paths(paths: Iterable[str], *, force_all: bool = False) -> dict[str
                 "docs/adr/",
                 "docs/amd/",
                 "docs/agents/",
+                "docs/governance_dev/",
                 "helper_scripts/maintenance_scripts/",
                 "tests/structure/test_agent_governance_",
                 "tests/structure/test_development_agent_governance.py",
