@@ -17,12 +17,13 @@
   .login-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:40px;width:380px;text-align:center}
   .login-card h1{font-size:20px;margin-bottom:6px}
   .login-card p{color:var(--dim);font-size:12px;margin-bottom:24px}
+  /* 品牌方印:青銅 accent(canon 10 品牌刻度),不再用舊 GitHub 藍紫漸層 */
   .logo{
     width:54px;height:54px;margin:0 auto 16px;border-radius:14px;
     display:flex;align-items:center;justify-content:center;
-    font-size:28px;font-weight:700;color:#f0f6fc;
-    background:linear-gradient(135deg,rgba(56,139,253,0.28),rgba(139,92,246,0.22));
-    border:1px solid rgba(139,148,158,0.28);
+    font-size:28px;font-weight:700;color:var(--accent);
+    background:var(--accent-weak);
+    border:1px solid var(--border);
   }
   .field{margin-bottom:16px;text-align:left}
   .field label{display:block;font-size:12px;color:var(--dim);margin-bottom:4px}
@@ -32,8 +33,9 @@
   .pw-wrap input{padding-right:38px}
   .pw-toggle{position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--dim);cursor:pointer;font-size:16px;padding:0;line-height:1}
   .pw-toggle:hover{color:var(--text)}
-  .btn{width:100%;padding:12px;background:rgba(56,139,253,0.15);border:1px solid var(--accent);border-radius:6px;color:var(--accent);font-size:14px;font-weight:600;cursor:pointer;transition:all 0.2s}
-  .btn:hover{background:rgba(56,139,253,0.3)}
+  /* CTA 沿用 console .idx-banner-cta 青銅慣用法;hover 填實青銅(canon 10 焦點 CTA) */
+  .btn{width:100%;padding:12px;background:var(--accent-weak);border:1px solid var(--accent);border-radius:6px;color:var(--accent);font-size:14px;font-weight:600;cursor:pointer;transition:all 0.2s}
+  .btn:hover{background:var(--accent);color:var(--bg-app)}
   .btn:disabled{opacity:0.5;cursor:not-allowed}
   .error{color:var(--red);font-size:12px;margin-top:12px;display:none}
   .links{margin-top:20px;font-size:11px;color:var(--dim)}
@@ -80,6 +82,24 @@ document.getElementById('pwToggle').addEventListener('click', function() {
 
 const REDIRECT_KEY = 'oc_login_redirect';
 const USER_KEY = 'oc_username';
+const LOGIN_ERROR_FALLBACKS = {
+  'Auth config not found': {
+    code: 'AUTH_CONFIG_MISSING',
+    message: 'GUI auth config not found — set GUI_USERNAME/GUI_PASSWORD or configure gui_auth.env',
+  },
+  'Auth not configured — edit gui_auth.env': {
+    code: 'AUTH_CONFIG_PLACEHOLDER',
+    message: 'GUI auth username placeholder is still configured — edit gui_auth.env',
+  },
+  'Auth password not configured — set GUI_PASSWORD': {
+    code: 'AUTH_PASSWORD_MISSING',
+    message: 'GUI auth password not configured — set GUI_PASSWORD',
+  },
+  'Invalid credentials': {
+    code: 'AUTH_INVALID_CREDENTIALS',
+    message: 'Invalid username or password',
+  },
+};
 
 function safeRedirectTarget(value) {
   if (!value || typeof value !== 'string') return '';
@@ -105,6 +125,18 @@ function loginRedirectTarget() {
     '/';
 }
 
+function formatLoginError(detail) {
+  if (detail && typeof detail === 'object') {
+    const code = detail.code || 'AUTH_LOGIN_FAILED';
+    const message = detail.message || detail.detail || 'Login failed';
+    return code + ': ' + message;
+  }
+  const raw = typeof detail === 'string' ? detail : 'Login failed';
+  const fallback = LOGIN_ERROR_FALLBACKS[raw];
+  if (fallback) return fallback.code + ': ' + fallback.message;
+  return 'AUTH_LOGIN_FAILED: ' + raw;
+}
+
 document.getElementById('loginForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const btn = document.getElementById('loginBtn');
@@ -128,11 +160,7 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
 
     if (!resp.ok) {
       const data = await resp.json().catch(() => ({}));
-      const detail = data.detail;
-      const msg = typeof detail === 'string' ? detail
-        : (detail && detail.message) ? detail.message
-        : 'Login failed';
-      throw new Error(msg);
+      throw new Error(formatLoginError(data.detail));
     }
 
     const data = await resp.json();
@@ -159,8 +187,10 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
 // 如果已登录（cookie 有效），直接跳转。
 (async function() {
   try {
-    const r = await fetch('/api/v1/auth/check', { credentials: 'same-origin' });
+    const r = await fetch('/api/v1/auth/check?soft=1', { credentials: 'same-origin' });
     if (r.ok) {
+      const data = await r.json().catch(() => ({}));
+      if (!data.authenticated) return;
       const redirect = loginRedirectTarget();
       sessionStorage.removeItem(REDIRECT_KEY);
       window.location.href = redirect;
