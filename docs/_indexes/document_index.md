@@ -6,6 +6,14 @@
 > 它不是 active dispatch queue；當前 blocker、owner、gate、runtime evidence 一律讀根目錄 `TODO.md`。
 > 新增重要文檔時優先更新本索引或 `initiative_index.md`，不要把長表重新塞回 `docs/README.md`。
 
+### 2026-07-12 GUI E1a 歷史交付報告
+
+| 文件 | 内容 |
+|------|------|
+| `CCAgentWorkSpace/E1a/workspace/reports/2026-07-12--r75_view_ai_med_fixes.md` | view-ai 三項 MED 修復的 source-only 交付證據：寫入面防雙送、Kelly API 呼叫修復與語法驗證；runtime/DOM 行為仍留待 Linux + operator 驗證。 |
+| `CCAgentWorkSpace/E1a/workspace/reports/2026-07-12--r77_view_governance.md` | governance iframe 轉原生 view 的 E1a 交付報告，記錄 IIFE 隔離、handler re-export、雙輪詢與殼接線；明確保留 runtime/operator cutover 邊界。 |
+| `CCAgentWorkSpace/E1a/workspace/reports/2026-07-12--r78_view_demo.md` | Demo 交易關鍵 view 原生遷移的 E1a source 證據，記錄 IIFE、handler 與確認門契約；真渲染與寫入行為仍須 Linux + operator 驗證。 |
+
 ### 2026-07-10 Development-Agent Governance Module
 
 | 文件 | 内容 |
