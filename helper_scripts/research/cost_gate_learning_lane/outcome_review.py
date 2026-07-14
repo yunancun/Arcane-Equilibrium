@@ -1342,8 +1342,30 @@ def _build_learning_candidate_board(
     edge_estimates: dict[str, dict[str, Any]],
     expected_slippage: dict[str, Any] | None,
     as_of_date: dt.date,
+    qualified_rows_sink: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Compatibility façade for the extracted candidate-board Module."""
+    cohort_evaluator = _evaluate_candidate_cohort
+    if qualified_rows_sink is not None:
+        def cohort_evaluator(
+            side_cell_key: str,
+            rows: list[dict[str, Any]],
+            *,
+            cfg: BlockedOutcomeReviewConfig,
+            overlay: dict[str, dict[str, Any]],
+            edge_estimates: dict[str, dict[str, Any]],
+            expected_slippage: dict[str, Any] | None,
+        ) -> dict[str, Any]:
+            qualified_rows_sink.extend(rows)
+            return _evaluate_candidate_cohort(
+                side_cell_key,
+                rows,
+                cfg=cfg,
+                overlay=overlay,
+                edge_estimates=edge_estimates,
+                expected_slippage=expected_slippage,
+            )
+
     return build_learning_candidate_board(
         ledger_rows,
         cfg=cfg,
@@ -1351,7 +1373,7 @@ def _build_learning_candidate_board(
         edge_estimates=edge_estimates,
         expected_slippage=expected_slippage,
         as_of_date=as_of_date,
-        cohort_evaluator=_evaluate_candidate_cohort,
+        cohort_evaluator=cohort_evaluator,
     )
 
 
@@ -1363,6 +1385,7 @@ def build_blocked_signal_outcome_review(
     overlay: dict[str, dict[str, Any]] | None = None,
     edge_estimates: dict[str, dict[str, Any]] | None = None,
     slippage_quantiles: dict[str, Any] | None = None,
+    require_qualified_lineage: bool = False,
 ) -> dict[str, Any]:
     """Build a conservative scorecard from blocked-signal outcome rows.
 
@@ -1379,10 +1402,22 @@ def build_blocked_signal_outcome_review(
     generated_at = (now_utc or _utc_now()).astimezone(dt.timezone.utc)
     expected_slippage = _load_expected_slippage(slippage_quantiles, now=generated_at)
 
+    qualified_rows: list[dict[str, Any]] = []
+    learning_candidate_board = _build_learning_candidate_board(
+        ledger_rows,
+        cfg=cfg,
+        overlay=overlay,
+        edge_estimates=edge_estimates,
+        expected_slippage=expected_slippage,
+        as_of_date=generated_at.date(),
+        qualified_rows_sink=qualified_rows if require_qualified_lineage else None,
+    )
+    aggregation_rows = qualified_rows if require_qualified_lineage else ledger_rows
+
     grouped: dict[str, list[dict[str, Any]]] = {}
     censored_grouped: dict[str, int] = {}
     invalid_outcome_row_count = 0
-    for raw_row in ledger_rows:
+    for raw_row in aggregation_rows:
         if _str(raw_row.get("record_type")) != BLOCKED_SIGNAL_OUTCOME_RECORD_TYPE:
             continue
         side_cell_key = _str(raw_row.get("side_cell_key"))
@@ -1580,7 +1615,11 @@ def build_blocked_signal_outcome_review(
         if row.get("edge_amplification_required") is True:
             edge_amplification_required_side_cell_count += 1
 
-    if outcome_count == 0:
+    if require_qualified_lineage and not qualified_rows:
+        status = "NO_QUALIFIED_LINEAGE_BLOCKED_SIGNAL_OUTCOMES"
+        reason = "candidate_board_qualified_evaluator_rows_missing"
+        next_trigger = "continue_collecting_qualified_candidate_lineage_outcomes"
+    elif outcome_count == 0:
         status = "NO_BLOCKED_SIGNAL_OUTCOMES"
         reason = "blocked_signal_outcome_rows_missing"
         next_trigger = "run_cost_gate_outcome_refresh_for_blocked_signal_outcomes"
@@ -1597,14 +1636,6 @@ def build_blocked_signal_outcome_review(
         reason = "reviewed_blocked_side_cells_do_not_clear_thresholds"
         next_trigger = "keep_cost_gate_blocked_for_reviewed_side_cells"
 
-    learning_candidate_board = _build_learning_candidate_board(
-        ledger_rows,
-        cfg=cfg,
-        overlay=overlay,
-        edge_estimates=edge_estimates,
-        expected_slippage=expected_slippage,
-        as_of_date=generated_at.date(),
-    )
     return {
         "schema_version": BLOCKED_OUTCOME_REVIEW_SCHEMA_VERSION,
         "record_type": BLOCKED_OUTCOME_REVIEW_RECORD_TYPE,
@@ -1612,6 +1643,14 @@ def build_blocked_signal_outcome_review(
         "status": status,
         "reason": reason,
         "next_trigger": next_trigger,
+        "require_qualified_lineage": require_qualified_lineage,
+        "outcome_aggregation_policy": (
+            "CANDIDATE_BOARD_QUALIFIED_EVALUATOR_ROWS"
+            if require_qualified_lineage
+            else "FULL_LEDGER_COMPATIBILITY"
+        ),
+        "source_ledger_row_count": len(ledger_rows),
+        "outcome_aggregation_input_row_count": len(aggregation_rows),
         "side_cell_count": len(side_cells),
         "review_candidate_side_cell_count": candidate_count,
         "insufficient_sample_side_cell_count": insufficient_count,
@@ -1808,6 +1847,7 @@ def main() -> int:
         read_candidate_evidence_jsonl_ledger(args.ledger),
         cfg=cfg,
         slippage_quantiles=slippage_payload,
+        require_qualified_lineage=True,
     )
     if args.output:
         _write_json(args.output, scorecard)
