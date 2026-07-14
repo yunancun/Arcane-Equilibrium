@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import copy
 import datetime as dt
+import json
 
 import pytest
 
@@ -19,11 +20,19 @@ from helper_scripts.research.tests.candidate_lineage_v2_test_support import (
     attach_candidate_lineage_v2,
 )
 from cost_gate_learning_lane import candidate_board as candidate_board_module
+from cost_gate_learning_lane import outcome_review as outcome_review_module
+from cost_gate_learning_lane import runtime_adapter as runtime_adapter_module
 from cost_gate_learning_lane.outcome_review import (
     build_blocked_signal_outcome_review,
+    build_research_compatibility_blocked_signal_outcome_review_no_authority,
 )
 from cost_gate_learning_lane.candidate_board_validation import (
     validate_learning_candidate_board_v2,
+)
+from cost_gate_learning_lane.candidate_evaluation_context import canonical_sha256
+from cost_gate_learning_lane.runtime_adapter import (
+    read_candidate_evidence_jsonl_ledger,
+    read_jsonl_ledger,
 )
 
 
@@ -71,6 +80,76 @@ def _board(rows: list[dict[str, object]]) -> dict[str, object]:
     ]
 
 
+def _eligible_cohort_rows(
+    context_prefix: str,
+    *,
+    stable_projection_overrides: dict[str, object] | None = None,
+) -> list[dict[str, object]]:
+    rows = []
+    day_effects = (-3.0, -2.0, -1.0, 1.0, 2.0, 3.0)
+    for index in range(30):
+        captured_at = dt.datetime(2026, 7, 3 + index // 5, index % 5,
+                                  tzinfo=dt.timezone.utc)
+        row = _qualified(
+            context_id=f"{context_prefix}-{index:02d}",
+            captured_at_ms=int(captured_at.timestamp() * 1_000),
+            stable_projection_overrides=stable_projection_overrides,
+        )
+        net = 10.0 + day_effects[index // 5] + (index % 5) * 0.1
+        row.update({"realized_net_bps": net, "gross_bps": net + 12.0})
+        rows.append(row)
+    return rows
+
+
+def _expected_cost_artifact() -> dict[str, object]:
+    return {
+        "schema_version": "cost_gate_slippage_quantile_artifact_v2",
+        "asof": NOW.isoformat(),
+        "window_days": 90,
+        "n_total_global": 500,
+        "symbols": [{
+            "symbol": "BTCUSDT",
+            "n": 500,
+            "mean_abs": 2.0,
+            "mean_signed": 1.0,
+            "q50": 1.0,
+            "q75": 4.0,
+            "q90": 8.0,
+            "cvar90": 8.0,
+            "thin_sample": False,
+        }],
+        "global": {
+            "n": 500,
+            "mean_abs": 2.0,
+            "mean_signed": 1.0,
+            "q50": 1.0,
+            "q75": 4.0,
+            "q90": 8.0,
+            "cvar90": 8.0,
+            "thin_sample": False,
+        },
+        "boundary": (
+            "slippage quantile artifact only; PG source is read-only SELECT-only; "
+            "no PG write, Bybit call, order, config, risk, auth, or runtime mutation"
+        ),
+    }
+
+
+def _rehash_selection_and_board(board: dict[str, object]) -> None:
+    semantic_rows = [
+        {field: row[field] for field in candidate_board_module._SELECTION_FIELDS}
+        for row in board["candidate_rows"]
+    ]
+    semantic_rows.sort(key=lambda row: (row["candidate_id"], canonical_sha256(row)))
+    board["selection_hash"] = canonical_sha256({
+        "schema_version": "cost_gate_learning_candidate_selection_v2",
+        "candidate_rows": semantic_rows,
+    })
+    board["board_hash"] = canonical_sha256({
+        key: value for key, value in board.items() if key != "board_hash"
+    })
+
+
 def test_legacy_rows_are_audit_only_and_cannot_change_qualified_selection() -> None:
     qualified = _qualified()
     baseline = _board([qualified])
@@ -88,6 +167,482 @@ def test_legacy_rows_are_audit_only_and_cannot_change_qualified_selection() -> N
     assert attacked["selection_hash"] == baseline["selection_hash"]
     assert attacked["audit_hash"] != baseline["audit_hash"]
     assert attacked["board_hash"] != baseline["board_hash"]
+
+
+def test_evidence_reader_quarantines_intentional_capture_blocked_row(
+    tmp_path,
+) -> None:
+    complete = _qualified(context_id="ctx-evidence-reader-complete")
+    complete_context = copy.deepcopy(
+        complete["candidate_summary"]["candidate_event_context"]
+    )
+    complete["candidate_summary"] = None
+    complete["event"] = {
+        "strategy_name": complete_context["strategy_name"],
+        "symbol": complete_context["symbol"],
+        "side": complete_context["side"],
+        "context_id": complete_context["context_id"],
+        "signal_id": complete_context["signal_id"],
+        "engine_mode": complete_context["evidence_engine_mode"],
+        "ts_ms": complete_context["captured_at_ms"],
+        "candidate_event_context": complete_context,
+    }
+    blocked = _qualified(context_id="ctx-evidence-reader-capture-blocked")
+    blocked_context = copy.deepcopy(
+        blocked["candidate_summary"]["candidate_event_context"]
+    )
+    blocked_context["capture_status"] = "CAPTURE_BLOCKED"
+    blocked_context["capture_blockers"] = ["BBO_MISSING_OR_INVALID"]
+    blocked_body = {
+        key: value
+        for key, value in blocked_context.items()
+        if key != "event_hash"
+    }
+    blocked_context["event_hash"] = canonical_sha256(blocked_body)
+    blocked["candidate_summary"] = None
+    blocked["event"] = {
+        "strategy_name": blocked_context["strategy_name"],
+        "symbol": blocked_context["symbol"],
+        "side": blocked_context["side"],
+        "context_id": blocked_context["context_id"],
+        "signal_id": blocked_context["signal_id"],
+        "engine_mode": blocked_context["evidence_engine_mode"],
+        "ts_ms": blocked_context["captured_at_ms"],
+        "candidate_event_context": blocked_context,
+    }
+    ledger = tmp_path / "candidate_evidence_mixed.jsonl"
+    ledger.write_text(
+        "\n".join(
+            json.dumps(row, ensure_ascii=False, sort_keys=True)
+            for row in (complete, blocked)
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="EVENT_CONTEXT_CAPTURE_INCOMPLETE"):
+        read_jsonl_ledger(ledger)
+
+    evidence_rows = read_candidate_evidence_jsonl_ledger(ledger)
+    assert evidence_rows[0]["candidate_summary"][
+        "candidate_event_context_status"
+    ] == "VALID"
+    assert evidence_rows[0]["candidate_summary"][
+        "candidate_event_context"
+    ] == evidence_rows[0]["event"]["candidate_event_context"]
+    assert evidence_rows[0]["candidate_summary"][
+        "candidate_event_context"
+    ] is not evidence_rows[0]["event"]["candidate_event_context"]
+    assert evidence_rows[1]["candidate_summary"][
+        "candidate_event_context_status"
+    ] == "CAPTURE_BLOCKED"
+    review = build_blocked_signal_outcome_review(
+        evidence_rows,
+        now_utc=NOW,
+    )
+    board = review["learning_candidate_board"]
+
+    assert review["schema_version"] == (
+        "cost_gate_demo_learning_lane_blocked_outcome_review_v6"
+    )
+    assert board["schema_version"] == "cost_gate_learning_candidate_board_v2"
+    assert board["qualified_lineage_outcome_row_count"] == 0
+    assert board["unqualified_lineage_outcome_row_count"] == 1
+    assert board["unqualified_raw_valid_evaluation_missing_row_count"] == 1
+    assert board["invalid_lineage_outcome_row_count"] == 1
+    assert board["unassigned_invalid_lineage_outcome_row_count"] == 1
+    assert board["lineage_exclusion_reason_counts"] == {
+        "INVALID_LINEAGE_RAW_CONTEXT_INVALID": 1,
+        "UNQUALIFIED_RAW_VALID_EVALUATION_MISSING": 1,
+    }
+    assert board["candidate_rows"] == []
+    assert validate_learning_candidate_board_v2(board) == board
+
+
+def test_evidence_reader_quarantines_summary_event_conflict_without_aborting(
+    tmp_path,
+) -> None:
+    qualified = _qualified(context_id="ctx-evidence-reader-qualified")
+    qualified_context = copy.deepcopy(
+        qualified["candidate_summary"]["candidate_event_context"]
+    )
+    qualified["event"] = {
+        "strategy_name": qualified_context["strategy_name"],
+        "symbol": qualified_context["symbol"],
+        "side": qualified_context["side"],
+        "context_id": qualified_context["context_id"],
+        "signal_id": qualified_context["signal_id"],
+        "engine_mode": qualified_context["evidence_engine_mode"],
+        "ts_ms": qualified_context["captured_at_ms"],
+        "candidate_event_context": qualified_context,
+    }
+    conflicted = _qualified(context_id="ctx-evidence-reader-conflicted")
+    conflicted_context = copy.deepcopy(
+        conflicted["candidate_summary"]["candidate_event_context"]
+    )
+    conflicted["event"] = {
+        "strategy_name": conflicted_context["strategy_name"],
+        "symbol": conflicted_context["symbol"],
+        "side": conflicted_context["side"],
+        "context_id": conflicted_context["context_id"],
+        "signal_id": conflicted_context["signal_id"],
+        "engine_mode": conflicted_context["evidence_engine_mode"],
+        "ts_ms": conflicted_context["captured_at_ms"],
+        "candidate_event_context": conflicted_context,
+    }
+    conflicted["candidate_summary"]["candidate_event_context"] = copy.deepcopy(
+        qualified_context
+    )
+    conflicted_source_summary = copy.deepcopy(conflicted["candidate_summary"])
+    conflicted_source_event = copy.deepcopy(conflicted["event"])
+    ledger = tmp_path / "candidate_evidence_conflict.jsonl"
+    ledger.write_text(
+        "\n".join(
+            json.dumps(row, ensure_ascii=False, sort_keys=True)
+            for row in (qualified, conflicted)
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="CANDIDATE_EVENT_CONTEXT_SUMMARY_CONFLICT",
+    ):
+        read_jsonl_ledger(ledger)
+
+    evidence_rows = read_candidate_evidence_jsonl_ledger(ledger)
+    assert evidence_rows[0]["candidate_summary"][
+        "candidate_event_context_status"
+    ] == "VALID"
+    assert evidence_rows[1]["candidate_summary"][
+        "candidate_event_context_status"
+    ] == "INVALID_LINEAGE_CONFLICT"
+    assert evidence_rows[1]["candidate_lineage_conflict_audit"] == {
+        "status": "INVALID_LINEAGE_CONFLICT",
+        "source_candidate_summary": conflicted_source_summary,
+        "source_event": conflicted_source_event,
+    }
+    board = build_blocked_signal_outcome_review(
+        evidence_rows,
+        now_utc=NOW,
+    )["learning_candidate_board"]
+
+    assert board["qualified_lineage_outcome_row_count"] == 1
+    assert board["invalid_lineage_outcome_row_count"] == 1
+    assert board["lineage_exclusion_reason_counts"] == {
+        "INVALID_LINEAGE_EXACT_COHORT": 1
+    }
+    assert all(row["selection_eligible"] is False for row in board["candidate_rows"])
+    assert validate_learning_candidate_board_v2(board) == board
+
+
+def test_pure_candidate_evidence_projection_matches_path_and_does_not_mutate(
+    tmp_path,
+) -> None:
+    qualified = _qualified(context_id="ctx-pure-projection-qualified")
+    qualified_context = copy.deepcopy(
+        qualified["candidate_summary"]["candidate_event_context"]
+    )
+    qualified["event"] = {
+        "strategy_name": qualified_context["strategy_name"],
+        "symbol": qualified_context["symbol"],
+        "side": qualified_context["side"],
+        "context_id": qualified_context["context_id"],
+        "signal_id": qualified_context["signal_id"],
+        "engine_mode": qualified_context["evidence_engine_mode"],
+        "ts_ms": qualified_context["captured_at_ms"],
+        "candidate_event_context": qualified_context,
+    }
+    conflicted = _qualified(context_id="ctx-pure-projection-conflicted")
+    conflicted_context = copy.deepcopy(
+        conflicted["candidate_summary"]["candidate_event_context"]
+    )
+    conflicted["event"] = {
+        "strategy_name": conflicted_context["strategy_name"],
+        "symbol": conflicted_context["symbol"],
+        "side": conflicted_context["side"],
+        "context_id": conflicted_context["context_id"],
+        "signal_id": conflicted_context["signal_id"],
+        "engine_mode": conflicted_context["evidence_engine_mode"],
+        "ts_ms": conflicted_context["captured_at_ms"],
+        "candidate_event_context": conflicted_context,
+    }
+    conflicted["event"]["candidate_event_context"]["symbol"] = "ETHUSDT"
+    source_rows = [qualified, conflicted]
+    source_before = copy.deepcopy(source_rows)
+    ledger_path = tmp_path / "pure_projection_parity.jsonl"
+    ledger_path.write_text(
+        "".join(json.dumps(row) + "\n" for row in source_rows),
+        encoding="utf-8",
+    )
+
+    projected = runtime_adapter_module.project_candidate_evidence_rows(
+        source_rows
+    )
+    path_projected = read_candidate_evidence_jsonl_ledger(ledger_path)
+
+    assert projected == path_projected
+    assert source_rows == source_before
+    assert projected is not source_rows
+    assert projected[0] is not source_rows[0]
+    assert projected[0]["event"] is not source_rows[0]["event"]
+
+
+def test_type_strict_bool_int_summary_conflict_is_rejected_and_quarantined(
+    tmp_path,
+) -> None:
+    row = _qualified(context_id="ctx-evidence-reader-bool-int-conflict")
+    event_context = copy.deepcopy(
+        row["candidate_summary"]["candidate_event_context"]
+    )
+    row["candidate_summary"]["candidate_event_context"]["scanner_inputs"][
+        "legacy_would_block"
+    ] = 0
+    row["event"] = {
+        "strategy_name": event_context["strategy_name"],
+        "symbol": event_context["symbol"],
+        "side": event_context["side"],
+        "context_id": event_context["context_id"],
+        "signal_id": event_context["signal_id"],
+        "engine_mode": event_context["evidence_engine_mode"],
+        "ts_ms": event_context["captured_at_ms"],
+        "candidate_event_context": event_context,
+    }
+    ledger = tmp_path / "candidate_evidence_bool_int_conflict.jsonl"
+    ledger.write_text(
+        json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="CANDIDATE_EVENT_CONTEXT_SUMMARY_CONFLICT",
+    ):
+        read_jsonl_ledger(ledger)
+
+    evidence_rows = read_candidate_evidence_jsonl_ledger(ledger)
+    assert evidence_rows[0]["candidate_summary"][
+        "candidate_event_context_status"
+    ] == "INVALID_LINEAGE_CONFLICT"
+    assert "candidate_lineage_conflict_audit" in evidence_rows[0]
+    board = build_blocked_signal_outcome_review(
+        evidence_rows,
+        now_utc=NOW,
+    )["learning_candidate_board"]
+
+    assert board["qualified_lineage_outcome_row_count"] == 0
+    assert board["invalid_lineage_outcome_row_count"] == 1
+    assert board["lineage_exclusion_reason_counts"] == {
+        "INVALID_LINEAGE_EXACT_COHORT": 1
+    }
+    assert board["candidate_rows"]
+    assert all(row["selection_eligible"] is False for row in board["candidate_rows"])
+    assert validate_learning_candidate_board_v2(board) == board
+
+
+def test_type_strict_int_float_blocked_conflict_is_rejected_and_quarantined(
+    tmp_path,
+) -> None:
+    row = _qualified(context_id="ctx-evidence-reader-int-float-conflict")
+    blocked_context = copy.deepcopy(
+        row["candidate_summary"]["candidate_event_context"]
+    )
+    blocked_context["capture_status"] = "CAPTURE_BLOCKED"
+    blocked_context["capture_blockers"] = ["BBO_MISSING_OR_INVALID"]
+    blocked_context["event_hash"] = canonical_sha256(
+        {
+            key: value
+            for key, value in blocked_context.items()
+            if key != "event_hash"
+        }
+    )
+    summary_context = copy.deepcopy(blocked_context)
+    summary_context["captured_at_ms"] = float(summary_context["captured_at_ms"])
+    row["candidate_summary"]["candidate_event_context"] = summary_context
+    row["candidate_summary"][
+        "candidate_event_context_status"
+    ] = "CAPTURE_BLOCKED"
+    row["event"] = {
+        "strategy_name": blocked_context["strategy_name"],
+        "symbol": blocked_context["symbol"],
+        "side": blocked_context["side"],
+        "context_id": blocked_context["context_id"],
+        "signal_id": blocked_context["signal_id"],
+        "engine_mode": blocked_context["evidence_engine_mode"],
+        "ts_ms": blocked_context["captured_at_ms"],
+        "candidate_event_context": blocked_context,
+    }
+    ledger = tmp_path / "candidate_evidence_int_float_conflict.jsonl"
+    ledger.write_text(
+        json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="EVENT_CONTEXT_CAPTURE_INCOMPLETE"):
+        read_jsonl_ledger(ledger)
+
+    evidence_rows = read_candidate_evidence_jsonl_ledger(ledger)
+    assert evidence_rows[0]["candidate_summary"][
+        "candidate_event_context_status"
+    ] == "INVALID_LINEAGE_CONFLICT"
+    assert "candidate_lineage_conflict_audit" in evidence_rows[0]
+    board = build_blocked_signal_outcome_review(
+        evidence_rows,
+        now_utc=NOW,
+    )["learning_candidate_board"]
+
+    assert board["qualified_lineage_outcome_row_count"] == 0
+    assert board["invalid_lineage_outcome_row_count"] == 1
+    assert not any(row["selection_eligible"] for row in board["candidate_rows"])
+    assert validate_learning_candidate_board_v2(board) == board
+
+
+@pytest.mark.parametrize(
+    ("include_event", "event_value"),
+    (
+        (False, None),
+        (True, "not-an-object"),
+    ),
+)
+def test_evidence_reader_quarantines_valid_summary_without_object_event(
+    tmp_path,
+    include_event: bool,
+    event_value: object,
+) -> None:
+    row = _qualified(context_id="ctx-evidence-reader-no-object-event")
+    if include_event:
+        row["event"] = event_value
+    ledger = tmp_path / "candidate_evidence_no_object_event.jsonl"
+    ledger.write_text(
+        json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="CANDIDATE_EVENT_CONTEXT_SUMMARY_CONFLICT",
+    ):
+        read_jsonl_ledger(ledger)
+
+    evidence_rows = read_candidate_evidence_jsonl_ledger(ledger)
+    assert evidence_rows[0]["candidate_summary"][
+        "candidate_event_context_status"
+    ] == "INVALID_LINEAGE_EVENT_MISSING_OR_INVALID"
+    board = build_blocked_signal_outcome_review(
+        evidence_rows,
+        now_utc=NOW,
+    )["learning_candidate_board"]
+
+    assert board["qualified_lineage_outcome_row_count"] == 0
+    assert board["invalid_lineage_outcome_row_count"] == 1
+    assert board["lineage_exclusion_reason_counts"] == {
+        "INVALID_LINEAGE_EXACT_COHORT": 1
+    }
+    assert board["candidate_rows"]
+    assert all(row["selection_eligible"] is False for row in board["candidate_rows"])
+    assert validate_learning_candidate_board_v2(board) == board
+
+
+def test_evidence_reader_quarantines_valid_summary_when_event_lacks_context(
+    tmp_path,
+) -> None:
+    row = _qualified(context_id="ctx-evidence-reader-context-less-event")
+    context = row["candidate_summary"]["candidate_event_context"]
+    row["event"] = {
+        "strategy_name": context["strategy_name"],
+        "symbol": context["symbol"],
+        "side": context["side"],
+        "context_id": context["context_id"],
+        "signal_id": context["signal_id"],
+        "engine_mode": context["evidence_engine_mode"],
+        "ts_ms": context["captured_at_ms"],
+    }
+    ledger = tmp_path / "candidate_evidence_context_less_event.jsonl"
+    ledger.write_text(
+        json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="CANDIDATE_EVENT_CONTEXT_SUMMARY_CONFLICT",
+    ):
+        read_jsonl_ledger(ledger)
+
+    evidence_rows = read_candidate_evidence_jsonl_ledger(ledger)
+    assert evidence_rows[0]["candidate_summary"][
+        "candidate_event_context_status"
+    ] == "INVALID_LINEAGE_EVENT_CONTEXT_MISSING"
+    board = build_blocked_signal_outcome_review(
+        evidence_rows,
+        now_utc=NOW,
+    )["learning_candidate_board"]
+
+    assert board["qualified_lineage_outcome_row_count"] == 0
+    assert board["invalid_lineage_outcome_row_count"] == 1
+    assert board["lineage_exclusion_reason_counts"] == {
+        "INVALID_LINEAGE_EXACT_COHORT": 1
+    }
+    assert board["candidate_rows"]
+    assert all(row["selection_eligible"] is False for row in board["candidate_rows"])
+    assert validate_learning_candidate_board_v2(board) == board
+
+
+def test_evidence_reader_quarantines_outer_binding_mismatch_and_preserves_audit(
+    tmp_path,
+) -> None:
+    row = _qualified(context_id="ctx-evidence-reader-outer-binding-mismatch")
+    context = copy.deepcopy(
+        row["candidate_summary"]["candidate_event_context"]
+    )
+    row["event"] = {
+        "strategy_name": context["strategy_name"],
+        "symbol": "ETHUSDT",
+        "side": context["side"],
+        "context_id": context["context_id"],
+        "signal_id": context["signal_id"],
+        "engine_mode": context["evidence_engine_mode"],
+        "ts_ms": context["captured_at_ms"],
+        "candidate_event_context": context,
+    }
+    source_summary = copy.deepcopy(row["candidate_summary"])
+    source_event = copy.deepcopy(row["event"])
+    ledger = tmp_path / "candidate_evidence_outer_binding_mismatch.jsonl"
+    ledger.write_text(
+        json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="CANDIDATE_EVENT_CONTEXT_OUTER_BINDING_MISMATCH:symbol",
+    ):
+        read_jsonl_ledger(ledger)
+
+    evidence_rows = read_candidate_evidence_jsonl_ledger(ledger)
+    evidence_row = evidence_rows[0]
+    assert evidence_row["candidate_summary"][
+        "candidate_event_context_status"
+    ] == "INVALID_LINEAGE_CONFLICT"
+    assert evidence_row["candidate_lineage_conflict_audit"] == {
+        "status": "INVALID_LINEAGE_CONFLICT",
+        "source_candidate_summary": source_summary,
+        "source_event": source_event,
+    }
+    board = build_blocked_signal_outcome_review(
+        evidence_rows,
+        now_utc=NOW,
+    )["learning_candidate_board"]
+
+    assert board["qualified_lineage_outcome_row_count"] == 0
+    assert board["invalid_lineage_outcome_row_count"] == 1
+    assert board["lineage_exclusion_reason_counts"] == {
+        "INVALID_LINEAGE_EXACT_COHORT": 1
+    }
+    assert board["candidate_rows"]
+    assert all(row["selection_eligible"] is False for row in board["candidate_rows"])
+    assert validate_learning_candidate_board_v2(board) == board
 
 
 def test_raw_valid_missing_evaluation_and_outside_window_are_unqualified() -> None:
@@ -126,7 +681,7 @@ def test_raw_valid_missing_evaluation_and_outside_window_are_unqualified() -> No
     }
 
 
-def test_stale_invalid_exact_only_row_is_audit_only_and_board_validates() -> None:
+def test_recorded_date_invalid_exact_row_remains_addressable_and_board_validates() -> None:
     event_ts_ms = int(
         dt.datetime(2026, 7, 9, 12, tzinfo=dt.timezone.utc).timestamp() * 1_000
     )
@@ -139,18 +694,23 @@ def test_stale_invalid_exact_only_row_is_audit_only_and_board_validates() -> Non
     )
     stale["side_cell_key"] = "ma_crossover|BTCUSDT|Sell"
 
-    board = _board([stale])
+    board = build_blocked_signal_outcome_review(
+        [stale], now_utc=dt.datetime(2026, 7, 17, 18, tzinfo=dt.timezone.utc)
+    )["learning_candidate_board"]
 
-    assert board["candidate_rows"] == []
+    assert len(board["candidate_rows"]) == 1
     assert board["invalid_lineage_outcome_row_count"] == 1
     assert board["invalid_exact_cohort_row_count"] == 1
     assert board["lineage_exclusion_reason_counts"] == {
         "INVALID_LINEAGE_EXACT_COHORT": 1
     }
+    candidate = board["candidate_rows"][0]
+    assert candidate["invalid_lineage_exact_cohort_row_count"] == 1
+    assert candidate["selection_eligible"] is False
     assert validate_learning_candidate_board_v2(board) == board
 
 
-def test_stale_qualified_lineage_is_demoted_to_audit_only_exact_invalid() -> None:
+def test_recorded_date_qualified_lineage_is_not_demoted_by_review_date() -> None:
     event_ts_ms = int(
         dt.datetime(2026, 7, 8, 12, tzinfo=dt.timezone.utc).timestamp() * 1_000
     )
@@ -163,13 +723,11 @@ def test_stale_qualified_lineage_is_demoted_to_audit_only_exact_invalid() -> Non
 
     board = _board([stale])
 
-    assert board["candidate_rows"] == []
-    assert board["qualified_lineage_outcome_row_count"] == 0
-    assert board["invalid_lineage_outcome_row_count"] == 1
-    assert board["invalid_exact_cohort_row_count"] == 1
-    assert board["lineage_exclusion_reason_counts"] == {
-        "INVALID_LINEAGE_EXACT_COHORT": 1
-    }
+    assert len(board["candidate_rows"]) == 1
+    assert board["qualified_lineage_outcome_row_count"] == 1
+    assert board["invalid_lineage_outcome_row_count"] == 0
+    assert board["invalid_exact_cohort_row_count"] == 0
+    assert board["lineage_exclusion_reason_counts"] == {}
     assert validate_learning_candidate_board_v2(board) == board
 
 
@@ -188,16 +746,24 @@ def test_stale_invalid_exact_hash_quarantines_addressable_current_cohort() -> No
     )
     stale["side_cell_key"] = "ma_crossover|BTCUSDT|Sell"
 
-    board = _board([stale, qualified])
+    board = build_blocked_signal_outcome_review(
+        [stale, qualified],
+        now_utc=dt.datetime(2026, 7, 17, 18, tzinfo=dt.timezone.utc),
+    )["learning_candidate_board"]
 
     assert board["invalid_exact_cohort_row_count"] == 1
     assert board["conflicting_duplicate_event_hash_row_count"] == 2
-    assert len(board["candidate_rows"]) == 1
-    candidate = board["candidate_rows"][0]
-    assert candidate["qualified_evaluator_input_count"] == 0
-    assert candidate["invalid_lineage_exact_cohort_row_count"] == 0
-    assert candidate["duplicate_event_hash_outcome_conflict_row_count"] == 2
-    assert "DUPLICATE_EVENT_HASH_OUTCOME_CONFLICT" in candidate["blockers"]
+    assert len(board["candidate_rows"]) == 2
+    assert all(
+        candidate["qualified_evaluator_input_count"] == 0
+        and candidate["conflicting_event_hash_row_count"] == 1
+        and "DUPLICATE_EVENT_HASH_COHORT_CONFLICT" in candidate["blockers"]
+        for candidate in board["candidate_rows"]
+    )
+    assert sorted(
+        candidate["invalid_lineage_exact_cohort_row_count"]
+        for candidate in board["candidate_rows"]
+    ) == [0, 1]
     assert validate_learning_candidate_board_v2(board) == board
 
 
@@ -821,3 +1387,462 @@ def test_invalid_outcome_stays_qualified_and_censoring_uses_c_plus_u() -> None:
     assert "INVALID_OUTCOME_ROWS_PRESENT" in candidate["blockers"]
     assert candidate["qualified_metrics_actionable"] is False
     assert candidate["selection_eligible"] is False
+
+
+def test_default_review_quarantines_high_positive_unqualified_rows() -> None:
+    legacy = _outcome(
+        attempt_id="ctx-default-compat-legacy",
+        realized_net_bps=100.0,
+    )
+    unqualified = _qualified(context_id="ctx-default-compat-unqualified")
+    unqualified["realized_net_bps"] = 100.0
+    for field in (
+        "candidate_evaluation_context",
+        "candidate_evaluation_context_status",
+        "candidate_learning_context_projection",
+    ):
+        unqualified["candidate_summary"].pop(field)
+
+    review = build_blocked_signal_outcome_review(
+        [legacy, unqualified],
+        now_utc=NOW,
+    )
+
+    assert review["require_qualified_lineage"] is True
+    assert (
+        review["outcome_aggregation_policy"]
+        == "CANDIDATE_BOARD_QUALIFIED_EVALUATOR_ROWS"
+    )
+    assert review["outcome_aggregation_input_row_count"] == 0
+    assert review["status"] == "NO_QUALIFIED_LINEAGE_BLOCKED_SIGNAL_OUTCOMES"
+    assert review["blocked_signal_outcome_count"] == 0
+    assert review["side_cell_count"] == 0
+    assert review["review_candidate_side_cell_count"] == 0
+    assert review["top_side_cells"] == []
+
+
+def test_strict_review_keeps_invalid_unqualified_audits_but_aggregates_none() -> None:
+    invalid = _qualified(context_id="ctx-strict-empty-invalid")
+    invalid["side_cell_key"] = "ma_crossover|BTCUSDT|Sell"
+    invalid["realized_net_bps"] = 500.0
+    unqualified = _qualified(context_id="ctx-strict-empty-unqualified")
+    unqualified["realized_net_bps"] = 500.0
+    for field in (
+        "candidate_evaluation_context",
+        "candidate_evaluation_context_status",
+        "candidate_learning_context_projection",
+    ):
+        unqualified["candidate_summary"].pop(field)
+
+    review = build_blocked_signal_outcome_review(
+        [invalid, unqualified],
+        now_utc=NOW,
+    )
+
+    assert review["require_qualified_lineage"] is True
+    assert (
+        review["outcome_aggregation_policy"]
+        == "CANDIDATE_BOARD_QUALIFIED_EVALUATOR_ROWS"
+    )
+    assert review["source_ledger_row_count"] == 2
+    assert review["outcome_aggregation_input_row_count"] == 0
+    assert review["status"] == "NO_QUALIFIED_LINEAGE_BLOCKED_SIGNAL_OUTCOMES"
+    assert review["reason"] == "candidate_board_qualified_evaluator_rows_missing"
+    assert (
+        review["next_trigger"]
+        == "continue_collecting_qualified_candidate_lineage_outcomes"
+    )
+    assert review["blocked_signal_outcome_count"] == 0
+    assert review["side_cell_count"] == 0
+    assert review["review_candidate_side_cell_count"] == 0
+    assert review["top_side_cells"] == []
+    board = review["learning_candidate_board"]
+    assert board["invalid_lineage_outcome_row_count"] == 1
+    assert board["unqualified_lineage_outcome_row_count"] == 1
+    assert validate_learning_candidate_board_v2(board) == board
+
+
+@pytest.mark.parametrize(
+    ("expected_blocker", "stable_overrides", "with_cost_artifact"),
+    (
+        (
+            "HIDDEN_OOS_CONSUMED",
+            {"hidden_oos_state": {
+                "state": "consumed",
+                "open_count": 1,
+                "opened_for_iteration": True,
+                "consumed": True,
+            }},
+            True,
+        ),
+        (
+            "PROOF_GAP_OPEN",
+            {"proof": {"next_gap": {
+                "kind": "LOCAL_ENGINEERING",
+                "code": "PROOF_GAP_REMAINS",
+            }}},
+            True,
+        ),
+        ("EXPECTED_COST_NOT_FULLY_RECOMPUTABLE", None, False),
+    ),
+)
+def test_final_candidate_blockers_exclude_cohort_from_strict_aggregation(
+    expected_blocker: str,
+    stable_overrides: dict[str, object] | None,
+    with_cost_artifact: bool,
+) -> None:
+    review = build_blocked_signal_outcome_review(
+        _eligible_cohort_rows(
+            f"ctx-final-blocker-{expected_blocker.lower()}",
+            stable_projection_overrides=stable_overrides,
+        ),
+        slippage_quantiles=(
+            _expected_cost_artifact() if with_cost_artifact else None
+        ),
+        now_utc=NOW,
+    )
+    board = review["learning_candidate_board"]
+    candidate = board["candidate_rows"][0]
+
+    assert expected_blocker in candidate["blockers"]
+    assert candidate["selection_eligible"] is False
+    assert "eligible_evaluator_rows_by_cohort_sink" not in board
+    assert "evaluator_rows_by_cohort" not in board
+    assert review["outcome_aggregation_input_row_count"] == 0
+    assert review["review_candidate_side_cell_count"] == 0
+    assert review["top_side_cells"] == []
+
+
+def test_same_side_cell_stable_cohort_ambiguity_blocks_strict_pooling() -> None:
+    first = _eligible_cohort_rows(
+        "ctx-ambiguous-cohort-a",
+        stable_projection_overrides={"context_hashes": {"portfolio": "1" * 64}},
+    )
+    second = _eligible_cohort_rows(
+        "ctx-ambiguous-cohort-b",
+        stable_projection_overrides={"context_hashes": {"portfolio": "2" * 64}},
+    )
+
+    review = build_blocked_signal_outcome_review(
+        [*second, *first],
+        slippage_quantiles=_expected_cost_artifact(),
+        now_utc=NOW,
+    )
+    board = review["learning_candidate_board"]
+
+    assert len(board["candidate_rows"]) == 2
+    assert len({row["stable_cohort_hash"] for row in board["candidate_rows"]}) == 2
+    assert all(
+        "SIDE_CELL_STABLE_COHORT_AMBIGUITY" in row["blockers"]
+        and row["selection_eligible"] is False
+        for row in board["candidate_rows"]
+    )
+    assert review["outcome_aggregation_input_row_count"] == 0
+    assert review["blocked_signal_outcome_count"] == 0
+    assert review["side_cell_count"] == 0
+    assert review["review_candidate_side_cell_count"] == 0
+    assert review["top_side_cells"] == []
+
+
+def test_validator_reconstructs_required_side_cell_cohort_ambiguity() -> None:
+    rows = [
+        *_eligible_cohort_rows(
+            "ctx-validator-ambiguity-a",
+            stable_projection_overrides={"context_hashes": {"portfolio": "3" * 64}},
+        ),
+        *_eligible_cohort_rows(
+            "ctx-validator-ambiguity-b",
+            stable_projection_overrides={"context_hashes": {"portfolio": "4" * 64}},
+        ),
+    ]
+    board = build_blocked_signal_outcome_review(
+        rows, slippage_quantiles=_expected_cost_artifact(), now_utc=NOW
+    )["learning_candidate_board"]
+
+    assert validate_learning_candidate_board_v2(board) == board
+    poisoned = copy.deepcopy(board)
+    for row in poisoned["candidate_rows"]:
+        row["blockers"].remove("SIDE_CELL_STABLE_COHORT_AMBIGUITY")
+        row["selection_eligible"] = True
+    _rehash_selection_and_board(poisoned)
+    with pytest.raises(ValueError, match="candidate_ambiguity_blockers_invalid"):
+        validate_learning_candidate_board_v2(poisoned)
+
+
+def test_validator_rejects_extra_ambiguity_on_unique_or_base_blocked_row() -> None:
+    eligible = build_blocked_signal_outcome_review(
+        _eligible_cohort_rows("ctx-validator-unique"),
+        slippage_quantiles=_expected_cost_artifact(),
+        now_utc=NOW,
+    )["learning_candidate_board"]
+    base_blocked = _board([_qualified(context_id="ctx-validator-base-blocked")])
+
+    for source in (eligible, base_blocked):
+        poisoned = copy.deepcopy(source)
+        row = poisoned["candidate_rows"][0]
+        row["blockers"] = sorted({
+            *row["blockers"], "SIDE_CELL_STABLE_COHORT_AMBIGUITY"
+        })
+        row["selection_eligible"] = False
+        _rehash_selection_and_board(poisoned)
+        with pytest.raises(ValueError, match="candidate_ambiguity_blockers_invalid"):
+            validate_learning_candidate_board_v2(poisoned)
+
+
+def test_retained_evaluation_semantics_are_stable_across_review_rollover() -> None:
+    rows = _eligible_cohort_rows("ctx-retained-rollover")
+    early = build_blocked_signal_outcome_review(
+        rows,
+        slippage_quantiles=_expected_cost_artifact(),
+        now_utc=NOW,
+    )
+    late = build_blocked_signal_outcome_review(
+        rows,
+        slippage_quantiles=_expected_cost_artifact(),
+        now_utc=NOW + dt.timedelta(days=1),
+    )
+    early_board = early["learning_candidate_board"]
+    late_board = late["learning_candidate_board"]
+
+    assert early_board["as_of_utc_date"] == "2026-07-10"
+    assert late_board["as_of_utc_date"] == "2026-07-11"
+    assert validate_learning_candidate_board_v2(early_board) == early_board
+    assert validate_learning_candidate_board_v2(late_board) == late_board
+    for field in (
+        "qualified_lineage_outcome_row_count",
+        "unqualified_lineage_outcome_row_count",
+        "invalid_lineage_outcome_row_count",
+        "lineage_exclusion_reason_counts",
+        "candidate_rows",
+        "selection_hash",
+        "audit_hash",
+    ):
+        assert late_board[field] == early_board[field]
+    assert late["outcome_aggregation_input_row_count"] == (
+        early["outcome_aggregation_input_row_count"]
+    ) == 30
+    assert late["blocked_signal_outcome_count"] == (
+        early["blocked_signal_outcome_count"]
+    )
+    assert late["review_candidate_side_cell_count"] == (
+        early["review_candidate_side_cell_count"]
+    )
+    serialized_board = json.dumps(early_board, sort_keys=True)
+    assert "eligible_evaluator_rows_by_cohort_sink" not in serialized_board
+    assert rows[0]["attempt_id"] not in serialized_board
+
+    future_evidence = copy.deepcopy(early_board)
+    future_evidence["as_of_utc_date"] = "2026-07-09"
+    _rehash_selection_and_board(future_evidence)
+    with pytest.raises(ValueError, match="board_generation_precedes_evaluation"):
+        validate_learning_candidate_board_v2(future_evidence)
+
+
+def test_validator_binds_cost_window_to_recorded_evaluation_date() -> None:
+    board = build_blocked_signal_outcome_review(
+        _eligible_cohort_rows("ctx-validator-cost-date"),
+        slippage_quantiles=_expected_cost_artifact(),
+        now_utc=NOW + dt.timedelta(days=1),
+    )["learning_candidate_board"]
+    poisoned = copy.deepcopy(board)
+    arbiter = poisoned["candidate_rows"][0]["arbiter_input"]
+    arbiter["cost_evidence"]["source_asof_utc"] = "2026-07-11T18:00:00+00:00"
+    arbiter["arbiter_input_hash"] = canonical_sha256({
+        key: value for key, value in arbiter.items() if key != "arbiter_input_hash"
+    })
+    _rehash_selection_and_board(poisoned)
+
+    with pytest.raises(ValueError, match="cost_evidence_semantics_invalid"):
+        validate_learning_candidate_board_v2(poisoned)
+
+
+def test_research_compatibility_preserves_lineage_partition_audit_counts() -> None:
+    qualified = _qualified(context_id="ctx-research-audit-qualified")
+    invalid = _qualified(context_id="ctx-research-audit-invalid")
+    invalid["side_cell_key"] = "ma_crossover|BTCUSDT|Sell"
+    unqualified = _qualified(context_id="ctx-research-audit-unqualified")
+    for field in (
+        "candidate_evaluation_context",
+        "candidate_evaluation_context_status",
+        "candidate_learning_context_projection",
+    ):
+        unqualified["candidate_summary"].pop(field)
+
+    review = build_research_compatibility_blocked_signal_outcome_review_no_authority(
+        [qualified, invalid, unqualified],
+        now_utc=NOW,
+    )
+
+    assert review["schema_version"] != (
+        "cost_gate_demo_learning_lane_blocked_outcome_review_v6"
+    )
+    assert review["authority_eligible"] is False
+    assert review["operator_review_eligible"] is False
+    assert review["promotion_evidence"] is False
+    audit = review["candidate_lineage_audit"]
+    assert audit["source_schema_version"] == "cost_gate_learning_candidate_board_v2"
+    assert audit["qualified_candidate_count"] == 1
+    assert audit["invalid_lineage_count"] == 1
+    assert audit["unqualified_lineage_count"] == 1
+
+
+def test_research_compatibility_declares_outcome_row_units_and_aliases() -> None:
+    qualified = [
+        _qualified(context_id=f"ctx-research-row-unit-qualified-{index}")
+        for index in range(2)
+    ]
+    invalid = [
+        _qualified(context_id=f"ctx-research-row-unit-invalid-{index}")
+        for index in range(3)
+    ]
+    for row in invalid:
+        row["side_cell_key"] = "ma_crossover|BTCUSDT|Sell"
+    unqualified = [
+        _qualified(context_id=f"ctx-research-row-unit-unqualified-{index}")
+        for index in range(4)
+    ]
+    for row in unqualified:
+        for field in (
+            "candidate_evaluation_context",
+            "candidate_evaluation_context_status",
+            "candidate_learning_context_projection",
+        ):
+            row["candidate_summary"].pop(field)
+
+    review = build_research_compatibility_blocked_signal_outcome_review_no_authority(
+        [*qualified, *invalid, *unqualified],
+        now_utc=NOW,
+    )
+    audit = review["candidate_lineage_audit"]
+
+    assert review["authority_eligible"] is False
+    assert review["operator_review_eligible"] is False
+    assert review["promotion_evidence"] is False
+    assert audit["count_unit"] == "outcome_rows"
+    assert audit["qualified_lineage_outcome_row_count"] == 2
+    assert audit["invalid_lineage_outcome_row_count"] == 3
+    assert audit["unqualified_lineage_outcome_row_count"] == 4
+    assert audit["qualified_candidate_count"] == (
+        audit["qualified_lineage_outcome_row_count"]
+    )
+    assert audit["invalid_lineage_count"] == (
+        audit["invalid_lineage_outcome_row_count"]
+    )
+    assert audit["unqualified_lineage_count"] == (
+        audit["unqualified_lineage_outcome_row_count"]
+    )
+
+
+def test_strict_review_top_level_is_invariant_to_positive_lineage_attacks() -> None:
+    qualified = _qualified(context_id="ctx-strict-mixed-qualified")
+    invalid = _qualified(context_id="ctx-strict-mixed-invalid")
+    invalid["side_cell_key"] = "ma_crossover|BTCUSDT|Sell"
+    invalid["realized_net_bps"] = 10_000.0
+    unqualified = _qualified(context_id="ctx-strict-mixed-unqualified")
+    unqualified["realized_net_bps"] = 10_000.0
+    for field in (
+        "candidate_evaluation_context",
+        "candidate_evaluation_context_status",
+        "candidate_learning_context_projection",
+    ):
+        unqualified["candidate_summary"].pop(field)
+
+    baseline = build_blocked_signal_outcome_review(
+        [qualified],
+        now_utc=NOW,
+    )
+    attacked = build_blocked_signal_outcome_review(
+        [invalid, unqualified, qualified],
+        now_utc=NOW,
+    )
+
+    for field in (
+        "status",
+        "reason",
+        "next_trigger",
+        "side_cell_count",
+        "review_candidate_side_cell_count",
+        "blocked_signal_outcome_count",
+        "blocked_signal_effective_entry_count",
+        "blocked_signal_positive_outcome_count",
+        "avg_blocked_signal_outcome_net_bps",
+        "top_side_cells",
+    ):
+        assert attacked[field] == baseline[field]
+    assert attacked["outcome_aggregation_input_row_count"] == 0
+    assert baseline["outcome_aggregation_input_row_count"] == 0
+    baseline_board = baseline["learning_candidate_board"]
+    attacked_board = attacked["learning_candidate_board"]
+    assert attacked_board["invalid_lineage_outcome_row_count"] == 1
+    assert attacked_board["unqualified_lineage_outcome_row_count"] == 1
+    assert attacked_board["audit_hash"] != baseline_board["audit_hash"]
+    assert attacked_board["board_hash"] != baseline_board["board_hash"]
+
+
+def test_strict_review_reuses_board_duplicate_gate_for_same_event_conflict() -> None:
+    qualified = _qualified(context_id="ctx-strict-same-event-conflict")
+    conflicted = copy.deepcopy(qualified)
+    conflicted["realized_net_bps"] = qualified["realized_net_bps"] + 500.0
+    for field in (
+        "candidate_evaluation_context",
+        "candidate_evaluation_context_status",
+        "candidate_learning_context_projection",
+    ):
+        conflicted["candidate_summary"].pop(field)
+
+    review = build_blocked_signal_outcome_review(
+        [qualified, conflicted],
+        now_utc=NOW,
+    )
+
+    assert review["outcome_aggregation_input_row_count"] == 0
+    assert review["blocked_signal_outcome_count"] == 0
+    assert review["top_side_cells"] == []
+    board = review["learning_candidate_board"]
+    assert board["qualified_lineage_outcome_row_count"] == 1
+    assert board["unqualified_lineage_outcome_row_count"] == 1
+    assert board["conflicting_duplicate_event_hash_row_count"] == 2
+    assert board["candidate_rows"][0]["qualified_evaluator_input_count"] == 0
+    assert validate_learning_candidate_board_v2(board) == board
+
+
+def test_cli_main_enables_strict_lineage_policy_and_quarantines_positive_rows(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:
+    ledger = tmp_path / "cli_strict_lineage.jsonl"
+    ledger.write_text(
+        json.dumps(
+            _outcome(
+                attempt_id="ctx-cli-strict-positive-unqualified",
+                realized_net_bps=10_000.0,
+            ),
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "outcome_review.py",
+            "--ledger",
+            str(ledger),
+            "--print-json",
+        ],
+    )
+
+    assert outcome_review_module.main() == 0
+    review = json.loads(capsys.readouterr().out)
+
+    assert review["require_qualified_lineage"] is True
+    assert (
+        review["outcome_aggregation_policy"]
+        == "CANDIDATE_BOARD_QUALIFIED_EVALUATOR_ROWS"
+    )
+    assert review["outcome_aggregation_input_row_count"] == 0
+    assert review["status"] == "NO_QUALIFIED_LINEAGE_BLOCKED_SIGNAL_OUTCOMES"
+    assert review["review_candidate_side_cell_count"] == 0
+    assert review["top_side_cells"] == []

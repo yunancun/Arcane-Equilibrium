@@ -944,6 +944,86 @@ def test_expected_basis_accepts_exact_independent_artifact_with_reordered_keys(
     assert result["status"] == "PUBLISHED"
 
 
+def test_publisher_accepts_retained_cohort_with_current_future_cost_fallback(
+    tmp_path: Path,
+) -> None:
+    """D+1 current telemetry must not become future evidence for a retained D row."""
+    recorded_at = datetime(2026, 7, 10, 12, tzinfo=timezone.utc)
+    reviewed_at = recorded_at + timedelta(days=1)
+    base = datetime(2026, 7, 3, tzinfo=timezone.utc)
+    rows = []
+    for index in range(30):
+        entry = base + timedelta(days=index // 5, hours=index % 5)
+        entry_ts_ms = int(entry.timestamp() * 1_000)
+        rows.append(
+            attach_candidate_lineage_v2(
+                {
+                    "record_type": "blocked_signal_outcome",
+                    "gross_bps": 10.0 + index / 100.0,
+                    "realized_net_bps": -2.0 + index / 100.0,
+                    "net_bps_optimistic": 6.0 + index / 100.0,
+                    "cost_bps": 12.0,
+                    "cost_model_version": "conservative_v1",
+                    "entry_ts_ms": entry_ts_ms,
+                },
+                context_id=f"publisher-retained-rollover-{index}",
+                captured_at_ms=entry_ts_ms,
+                as_of_utc_date=recorded_at.date().isoformat(),
+            )
+        )
+    slippage_payload = _expected_slippage_payload(now_utc=reviewed_at)
+    payload = build_blocked_signal_outcome_review(
+        rows,
+        now_utc=reviewed_at,
+        slippage_quantiles=slippage_payload,
+    )
+    source = tmp_path / "blocked_outcome_review_20260711T120000Z.json"
+    source.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
+    independent = tmp_path / "slippage_quantiles_latest.json"
+    _write_json_payload(independent, slippage_payload)
+
+    result = publish_candidate_board(
+        source,
+        tmp_path / "rendezvous",
+        retention_limit=128,
+        slippage_artifact_path=independent,
+        now_utc=reviewed_at,
+    )
+
+    candidate = payload["learning_candidate_board"]["candidate_rows"][0]
+    cost_evidence = candidate["arbiter_input"]["cost_evidence"]
+    assert result["status"] == "PUBLISHED"
+    assert payload["cost_basis_main"] == "expected_slippage_mean_abs_v1"
+    assert payload["expected_cost_artifact"]["asof"] == slippage_payload["asof"]
+    assert candidate["cost_basis_main"] == "conservative_v1"
+    assert cost_evidence["basis"] == "conservative_v1"
+    assert cost_evidence["source_asof_utc"] is None
+    assert cost_evidence["source_payload_sha256"] is None
+    assert cost_evidence["normalized_projection_sha256"] is None
+    assert cost_evidence["mean_abs_source"] == {
+        "scope": "NONE",
+        "symbol": None,
+        "sample_count": 0,
+        "mean_abs_bps": None,
+    }
+    assert cost_evidence["tail_source"] == {
+        "scope": "NONE",
+        "symbol": None,
+        "sample_count": 0,
+        "tail_bps": None,
+        "tail_metric": None,
+    }
+    assert candidate["expected_cost_recomputable_count"] == 0
+    assert candidate["tail_cost_recomputable_count"] == 0
+    assert "EXPECTED_COST_NOT_FULLY_RECOMPUTABLE" in candidate["blockers"]
+    assert "TAIL_COST_NOT_FULLY_RECOMPUTABLE" in candidate["blockers"]
+    assert candidate["selection_eligible"] is False
+    assert payload["outcome_aggregation_input_row_count"] == 0
+    assert payload["review_candidate_side_cell_count"] == 0
+    assert payload["top_review_candidate_side_cell_key"] is None
+    assert payload["top_side_cells"] == []
+
+
 def test_expected_cost_cannot_fall_below_selected_source_projection(
     tmp_path: Path,
 ) -> None:

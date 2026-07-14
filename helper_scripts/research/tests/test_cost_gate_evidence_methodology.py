@@ -31,6 +31,7 @@ from cost_gate_learning_lane import evidence_stats
 from cost_gate_learning_lane.outcome_review import (
     BlockedOutcomeReviewConfig,
     build_blocked_signal_outcome_review,
+    build_research_compatibility_blocked_signal_outcome_review_no_authority,
 )
 from cost_gate_learning_lane.outcome_writer import (
     ProbeOutcomeConfig,
@@ -726,10 +727,17 @@ def test_learning_candidate_board_uses_full_universe_not_legacy_top16():
         for index in range(17)
     ]
 
-    packet = build_blocked_signal_outcome_review(rows, now_utc=NOW)
+    strict = build_blocked_signal_outcome_review(rows, now_utc=NOW)
+    packet = build_research_compatibility_blocked_signal_outcome_review_no_authority(
+        rows,
+        now_utc=NOW,
+    )
 
+    assert strict["top_side_cells"] == []
+    assert packet["authority_eligible"] is False
+    assert packet["operator_review_eligible"] is False
     assert len(packet["top_side_cells"]) == 16
-    board = packet["learning_candidate_board"]
+    board = strict["learning_candidate_board"]
     assert board["schema_version"] == "cost_gate_learning_candidate_board_v2"
     assert board["candidate_universe_complete"] is True
     assert len(board["candidate_rows"]) == 17
@@ -754,12 +762,19 @@ def test_learning_candidate_board_splits_horizons_without_changing_legacy_cell()
     short = _with_typed_candidate_learning_context(short)
     long = _with_typed_candidate_learning_context(long)
 
-    packet = build_blocked_signal_outcome_review([short, long], now_utc=NOW)
+    strict = build_blocked_signal_outcome_review([short, long], now_utc=NOW)
+    packet = build_research_compatibility_blocked_signal_outcome_review_no_authority(
+        [short, long],
+        now_utc=NOW,
+    )
 
+    assert strict["top_side_cells"] == []
+    assert packet["authority_eligible"] is False
+    assert packet["operator_review_eligible"] is False
     legacy = packet["top_side_cells"]
     assert len(legacy) == 1
     assert legacy[0]["horizon_minutes"] == [60, 240]
-    board_rows = packet["learning_candidate_board"]["candidate_rows"]
+    board_rows = strict["learning_candidate_board"]["candidate_rows"]
     assert sorted(row["horizon_minutes"] for row in board_rows) == [60, 240]
     assert sorted(row["qualified_raw_outcome_count"] for row in board_rows) == [1, 1]
 
@@ -1021,7 +1036,9 @@ def test_learning_candidate_board_exposes_cost_censoring_and_regime_inputs():
     )
 
     candidate = packet["learning_candidate_board"]["candidate_rows"][0]
-    assert packet["top_side_cells"][0]["review_candidate"] is False
+    assert packet["status"] == "NO_QUALIFIED_LINEAGE_BLOCKED_SIGNAL_OUTCOMES"
+    assert packet["outcome_aggregation_input_row_count"] == 0
+    assert packet["top_side_cells"] == []
     assert candidate["identity_complete"] is True
     assert candidate["selection_eligible"] is False
     assert "DAY_CLUSTER_VARIANCE_DEGENERATE" in candidate["blockers"]
@@ -1139,9 +1156,12 @@ def test_backfill_overlay_flip():
     }
     # F1:n_eff=5 fixture,n_eff 門檻對齊到 5(flip 語義本測不涉 n_eff floor)。
     cfg = BlockedOutcomeReviewConfig(min_effective_entries_per_side_cell=5)
-    packet = build_blocked_signal_outcome_review(
+    packet = build_research_compatibility_blocked_signal_outcome_review_no_authority(
         rows, overlay=overlay, cfg=cfg, now_utc=NOW
     )
+    assert packet["authority_eligible"] is False
+    assert packet["operator_review_eligible"] is False
+    assert packet["promotion_evidence"] is False
     cell = packet["top_side_cells"][0]
     assert cell["review_candidate"] is False
     assert cell["candidacy_flipped_by_cost_model"] is True
@@ -1161,7 +1181,11 @@ def test_realized_contradiction_flag():
         for i, gross in enumerate([77.0, 79.0, 81.0])
     ]
     edge = {"strat::HHHUSDT": {"realized_ev_bps": -16.76, "n": 18}}
-    packet = build_blocked_signal_outcome_review(rows, edge_estimates=edge, now_utc=NOW)
+    packet = build_research_compatibility_blocked_signal_outcome_review_no_authority(
+        rows,
+        edge_estimates=edge,
+        now_utc=NOW,
+    )
     cell = packet["top_side_cells"][0]
     assert cell["realized_contradiction"] is True
     assert cell["status"] == "EXECUTION_REALISM_SUSPECT"
@@ -1239,7 +1263,11 @@ def test_bh_fdr_gates_review_candidate():
     cfg = BlockedOutcomeReviewConfig(
         min_net_positive_pct=0.0, min_effective_entries_per_side_cell=6
     )
-    packet = build_blocked_signal_outcome_review(rows, cfg=cfg, now_utc=NOW)
+    packet = build_research_compatibility_blocked_signal_outcome_review_no_authority(
+        rows,
+        cfg=cfg,
+        now_utc=NOW,
+    )
     cell = packet["top_side_cells"][0]
     assert cell["bh_fdr_pass"] is False
     assert cell["review_candidate"] is False
@@ -1328,7 +1356,10 @@ def test_censored_excluded_from_stats():
                 "realized_net_bps": None,
             }
         )
-    packet = build_blocked_signal_outcome_review(rows, now_utc=NOW)
+    packet = build_research_compatibility_blocked_signal_outcome_review_no_authority(
+        rows,
+        now_utc=NOW,
+    )
     cell = packet["top_side_cells"][0]
     assert cell["outcome_count"] == 6
     assert cell["censored_count"] == 4
@@ -1374,7 +1405,10 @@ def test_f1_duplicate_entry_copies_collapse_to_single_effective_observation():
                 entry_ts_ms=entry_b,
             )
         )
-    packet = build_blocked_signal_outcome_review(rows, now_utc=NOW)
+    packet = build_research_compatibility_blocked_signal_outcome_review_no_authority(
+        rows,
+        now_utc=NOW,
+    )
     cell = packet["top_side_cells"][0]
     assert cell["outcome_count"] == 18
     assert cell["distinct_entry_observation_count"] == 2
@@ -1413,7 +1447,10 @@ def test_f1_near_replication_distinct_ms_same_minute_single_day_blocked():
         )
         for i in range(30)
     ]
-    packet = build_blocked_signal_outcome_review(rows, now_utc=NOW)
+    packet = build_research_compatibility_blocked_signal_outcome_review_no_authority(
+        rows,
+        now_utc=NOW,
+    )
     cell = packet["top_side_cells"][0]
     assert cell["outcome_count"] == 30
     assert cell["distinct_entry_observation_count"] == 1
@@ -1443,7 +1480,10 @@ def test_f1_single_day_episode_blocked_by_distinct_days_eligibility():
         )
         for i in range(35)
     ]
-    packet = build_blocked_signal_outcome_review(rows, now_utc=NOW)
+    packet = build_research_compatibility_blocked_signal_outcome_review_no_authority(
+        rows,
+        now_utc=NOW,
+    )
     cell = packet["top_side_cells"][0]
     assert cell["effective_entry_count"] == 35
     assert cell["distinct_entry_utc_days"] == 2
@@ -1481,7 +1521,10 @@ def test_f1_top_day_concentration_blocked_by_share_eligibility():
                     entry_ts_ms=_ENTRY_BASE_TS_MS + day * _DAY_MS + slot * _HOUR_MS,
                 )
             )
-    packet = build_blocked_signal_outcome_review(rows, now_utc=NOW)
+    packet = build_research_compatibility_blocked_signal_outcome_review_no_authority(
+        rows,
+        now_utc=NOW,
+    )
     cell = packet["top_side_cells"][0]
     assert cell["effective_entry_count"] == 30
     assert cell["distinct_entry_utc_days"] == 5
@@ -1503,7 +1546,10 @@ def test_f1_window_overlap_entries_not_double_counted():
         )
         for i in range(10)
     ]
-    packet = build_blocked_signal_outcome_review(rows, now_utc=NOW)
+    packet = build_research_compatibility_blocked_signal_outcome_review_no_authority(
+        rows,
+        now_utc=NOW,
+    )
     cell = packet["top_side_cells"][0]
     assert cell["distinct_entry_observation_count"] == 10
     assert cell["effective_entry_count"] == 5
@@ -1531,7 +1577,11 @@ def test_f1_replica_value_mismatch_marks_data_integrity_suspect():
         entry_ts_ms=_spread_entry_ts(0, per_day=1) + 500,
     )
     cfg = BlockedOutcomeReviewConfig(min_effective_entries_per_side_cell=5)
-    packet = build_blocked_signal_outcome_review(rows + [conflict], cfg=cfg, now_utc=NOW)
+    packet = build_research_compatibility_blocked_signal_outcome_review_no_authority(
+        rows + [conflict],
+        cfg=cfg,
+        now_utc=NOW,
+    )
     cell = packet["top_side_cells"][0]
     assert cell["replica_inconsistent_group_count"] == 1
     assert cell["data_integrity_suspect"] is True
@@ -1555,7 +1605,10 @@ def test_f1_zero_variance_sample_marks_data_integrity_suspect():
         )
         for i in range(30)
     ]
-    packet = build_blocked_signal_outcome_review(rows, now_utc=NOW)
+    packet = build_research_compatibility_blocked_signal_outcome_review_no_authority(
+        rows,
+        now_utc=NOW,
+    )
     cell = packet["top_side_cells"][0]
     assert cell["effective_entry_count"] == 30
     assert cell["zero_variance_suspect"] is True
@@ -1582,7 +1635,10 @@ def test_f1_effective_entry_floor_blocks_candidacy_below_preregistered_min():
         )
         for i in range(29)
     ]
-    packet = build_blocked_signal_outcome_review(rows, now_utc=NOW)
+    packet = build_research_compatibility_blocked_signal_outcome_review_no_authority(
+        rows,
+        now_utc=NOW,
+    )
     cell = packet["top_side_cells"][0]
     assert cell["effective_entry_count"] == 29
     assert cell["status"] == "EFFECTIVE_ENTRY_SAMPLE_INSUFFICIENT"
@@ -1590,24 +1646,37 @@ def test_f1_effective_entry_floor_blocks_candidacy_below_preregistered_min():
     assert cell["review_candidate"] is False
     assert cell["learning_diagnosis"] == "EFFECTIVE_ENTRY_SAMPLE_INSUFFICIENT"
     # 併入 insufficient 計數 → packet 落 continue_recording 而非誤判定案。
-    assert packet["status"] == "COLLECT_MORE_BLOCKED_SIGNAL_OUTCOMES"
+    assert packet["research_only_legacy_status"] == (
+        "COLLECT_MORE_BLOCKED_SIGNAL_OUTCOMES"
+    )
     assert packet["insufficient_sample_side_cell_count"] == 1
 
 
 def test_f1_distinct_entries_meeting_floor_can_still_be_candidate():
     """n_eff=30(= 門檻)+ 跨 6 日 + BH 過 → 候選路徑不因 F1 修復被誤殺(默認 cfg)。"""
     nets = [12.5, 11.5, 10.5, 12.0, 11.0] * 6
+    day_effects = (-1.0, -0.5, -0.25, 0.25, 0.5, 1.0)
     rows = [
-        _blocked_outcome_row(
-            f"ok{i}",
-            "strat|PPPUSDT|Buy",
-            net + 4.0,
-            cost_model_version="conservative_v1",
-            entry_ts_ms=_spread_entry_ts(i),
+        _with_complete_candidate_lineage(
+            {
+                **_blocked_outcome_row(
+                    f"ok{i}",
+                    "strat|PPPUSDT|Buy",
+                    net + 15.0 + day_effects[i // 5],
+                    cost_model_version="conservative_v1",
+                    entry_ts_ms=_spread_entry_ts(i),
+                ),
+                "cost_bps": 15.0,
+                "realized_net_bps": net + day_effects[i // 5],
+            }
         )
         for i, net in enumerate(nets)
     ]
-    packet = build_blocked_signal_outcome_review(rows, now_utc=NOW)
+    packet = build_blocked_signal_outcome_review(
+        rows,
+        slippage_quantiles=_expected_cost_artifact(mean_abs=2.0),
+        now_utc=NOW,
+    )
     cell = packet["top_side_cells"][0]
     assert cell["effective_entry_count"] == 30
     assert cell["distinct_entry_utc_days"] == 6
@@ -1625,7 +1694,10 @@ def test_f1_missing_entry_ts_rows_collapse_failclosed():
         )
         for i in range(5)
     ]
-    packet = build_blocked_signal_outcome_review(rows, now_utc=NOW)
+    packet = build_research_compatibility_blocked_signal_outcome_review_no_authority(
+        rows,
+        now_utc=NOW,
+    )
     cell = packet["top_side_cells"][0]
     assert cell["outcome_count"] == 5
     assert cell["effective_entry_count"] == 0
@@ -1652,7 +1724,10 @@ def test_f1_missing_entry_ts_rows_block_candidacy_of_qualified_sample():
             "mx-missing", "strat|SSSUSDT|Buy", 16.0, cost_model_version="conservative_v1"
         )
     )
-    packet = build_blocked_signal_outcome_review(rows, now_utc=NOW)
+    packet = build_research_compatibility_blocked_signal_outcome_review_no_authority(
+        rows,
+        now_utc=NOW,
+    )
     cell = packet["top_side_cells"][0]
     assert cell["effective_entry_count"] == 30
     assert cell["entry_ts_missing_row_count"] == 1
@@ -1683,7 +1758,10 @@ def test_f1_t_test_n_is_effective_entry_count_not_raw_row_count():
                     entry_ts_ms=_spread_entry_ts(i),
                 )
             )
-    packet = build_blocked_signal_outcome_review(rows, now_utc=NOW)
+    packet = build_research_compatibility_blocked_signal_outcome_review_no_authority(
+        rows,
+        now_utc=NOW,
+    )
     cell = packet["top_side_cells"][0]
     assert cell["outcome_count"] == 90
     assert cell["effective_entry_count"] == 30
@@ -1791,7 +1869,7 @@ def test_expected_cost_main_judgment_with_artifact():
         for i in range(5)
     ]
     artifact = _expected_cost_artifact(mean_abs=2.0, cvar90=8.0)
-    packet = build_blocked_signal_outcome_review(
+    packet = build_research_compatibility_blocked_signal_outcome_review_no_authority(
         rows, slippage_quantiles=artifact, cfg=_COST_TRACK_CFG, now_utc=NOW
     )
     cell = packet["top_side_cells"][0]
@@ -1863,7 +1941,7 @@ def test_expected_cost_tail_falls_back_to_q90_when_cvar90_missing():
     ]
     # mean_abs=2.0 → q90=8.0;無 cvar90 → tail 用 q90 → cost_tail=27。
     artifact = _expected_cost_artifact(mean_abs=2.0)
-    packet = build_blocked_signal_outcome_review(
+    packet = build_research_compatibility_blocked_signal_outcome_review_no_authority(
         rows, slippage_quantiles=artifact, cfg=_COST_TRACK_CFG, now_utc=NOW
     )
     cell = packet["top_side_cells"][0]
@@ -1889,7 +1967,7 @@ def test_expected_cost_accepts_canonical_missing_tail_as_incomplete():
     artifact["global"]["q90"] = None
     artifact["global"]["cvar90"] = None
 
-    packet = build_blocked_signal_outcome_review(
+    packet = build_research_compatibility_blocked_signal_outcome_review_no_authority(
         rows, slippage_quantiles=artifact, cfg=_COST_TRACK_CFG, now_utc=NOW
     )
 
@@ -1922,7 +2000,7 @@ def test_expected_cost_track_requires_mean_abs_column():
         "symbols": [],
         "global": {"n": 500, "q50": 2.0, "q75": 4.0, "q90": 8.0},
     }
-    packet = build_blocked_signal_outcome_review(
+    packet = build_research_compatibility_blocked_signal_outcome_review_no_authority(
         rows, slippage_quantiles=legacy_v1, cfg=_COST_TRACK_CFG, now_utc=NOW
     )
     assert packet["cost_basis_main"] == "conservative_v1"
@@ -1941,18 +2019,19 @@ def test_expected_cost_flips_conservative_false_negative():
     「誤殺假說」要能翻出來的形狀。
     """
     rows = []
-    for i in range(5):
-        gross = 20.0 + _COST_TRACK_JITTER[i]
+    day_effects = (-1.0, -0.5, -0.25, 0.25, 0.5, 1.0)
+    for i in range(30):
+        gross = 20.0 + _COST_TRACK_JITTER[i % 5] + day_effects[i // 5]
         row = _blocked_outcome_row(
             f"fn{i}",
             "strat|SSSUSDT|Buy",
             gross,
             cost_model_version="conservative_v1",
-            entry_ts_ms=_spread_entry_ts(i, per_day=1),
+            entry_ts_ms=_spread_entry_ts(i),
         )
         row["cost_bps"] = 92.3
         row["realized_net_bps"] = gross - 92.3
-        rows.append(row)
+        rows.append(_with_complete_candidate_lineage(row))
     artifact = _expected_cost_artifact(mean_abs=2.0)
     packet = build_blocked_signal_outcome_review(
         rows, slippage_quantiles=artifact, cfg=_COST_TRACK_CFG, now_utc=NOW
@@ -1978,7 +2057,10 @@ def test_expected_cost_track_unavailable_falls_back_conservative():
         for i in range(5)
     ]
     # 無 artifact。
-    packet = build_blocked_signal_outcome_review(rows, now_utc=NOW)
+    packet = build_research_compatibility_blocked_signal_outcome_review_no_authority(
+        rows,
+        now_utc=NOW,
+    )
     assert packet["cost_basis_main"] == "conservative_v1"
     assert packet["expected_cost_artifact"]["available"] is False
     cell = packet["top_side_cells"][0]
@@ -1988,7 +2070,7 @@ def test_expected_cost_track_unavailable_falls_back_conservative():
     stale = _expected_cost_artifact(
         mean_abs=2.0, asof=(NOW - dt.timedelta(hours=72)).isoformat()
     )
-    stale_packet = build_blocked_signal_outcome_review(
+    stale_packet = build_research_compatibility_blocked_signal_outcome_review_no_authority(
         rows, slippage_quantiles=stale, now_utc=NOW
     )
     assert stale_packet["cost_basis_main"] == "conservative_v1"
@@ -2395,7 +2477,7 @@ def test_negative_expected_cost_artifact_fails_closed_to_conservative():
     ]
     # 畸形負 mean_abs 不得被夾值後假裝成獨立測量證據。
     artifact = _expected_cost_artifact(mean_abs=-50.0)
-    packet = build_blocked_signal_outcome_review(
+    packet = build_research_compatibility_blocked_signal_outcome_review_no_authority(
         rows, slippage_quantiles=artifact, cfg=_COST_TRACK_CFG, now_utc=NOW
     )
     cell = packet["top_side_cells"][0]

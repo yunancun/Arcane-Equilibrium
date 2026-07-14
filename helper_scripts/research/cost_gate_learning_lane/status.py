@@ -24,6 +24,10 @@ from cost_gate_learning_lane.historical_review import (
 )
 from cost_gate_learning_lane.outcome_review import build_blocked_signal_outcome_review
 from cost_gate_learning_lane.proof_exclusion import proof_exclusion_reasons
+from cost_gate_learning_lane.runtime_adapter import (
+    project_candidate_evidence_rows,
+)
+from cost_gate_learning_lane.ledger_rotation import retained_ledger_files
 
 
 DEFAULT_COST_GATE_LEARNING_LOOP_MAX_AGE_SECONDS = 3 * 60 * 60
@@ -595,11 +599,162 @@ def _file_mtime_age(path: Path, *, now_utc: dt.datetime) -> tuple[bool, str | No
     return True, mtime.isoformat(), max(0.0, (now_utc - mtime).total_seconds())
 
 
+def _capture_retained_ledger_snapshot(
+    path: Path,
+) -> tuple[tuple[dict[str, Any], ...], int, str | None, bool]:
+    """Capture one generation-stable retained+active ledger snapshot.
+
+    The tuple is the sole parsed-row generation consumed by both raw status
+    audit and candidate-evidence projection.  Malformed/non-object lines stay
+    out of the row tuple but are preserved as corruption audit.  Enumeration,
+    opened-fd identity, pre/post-read metadata, and post-read enumeration must
+    match exactly; transient rotation/append drift retries at most three times.
+    """
+
+    def enumerate_generation() -> tuple[
+        tuple[str, int, int, int, int, int, int], ...
+    ]:
+        identities: list[tuple[str, int, int, int, int, int, int]] = []
+        for position, source_path in enumerate(retained_ledger_files(path)):
+            stat_result = source_path.stat()
+            identities.append(
+                (
+                    str(source_path),
+                    position,
+                    stat_result.st_dev,
+                    stat_result.st_ino,
+                    stat_result.st_size,
+                    stat_result.st_mtime_ns,
+                    stat_result.st_ctime_ns,
+                )
+            )
+        return tuple(identities)
+
+    def fd_identity(
+        source_path: str,
+        position: int,
+        stat_result: os.stat_result,
+    ) -> tuple[str, int, int, int, int, int, int]:
+        return (
+            source_path,
+            position,
+            stat_result.st_dev,
+            stat_result.st_ino,
+            stat_result.st_size,
+            stat_result.st_mtime_ns,
+            stat_result.st_ctime_ns,
+        )
+
+    stable_sources: tuple[tuple[str, bytes], ...] | None = None
+    stable_generation: tuple[
+        tuple[str, int, int, int, int, int, int], ...
+    ] = ()
+    for _attempt in range(3):
+        try:
+            initial_generation = enumerate_generation()
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            return (), 0, f"read_error:{type(exc).__name__}", True
+
+        captured_sources: list[tuple[str, bytes]] = []
+        generation_drifted = False
+        for expected_identity in initial_generation:
+            source_path_text, position, *_ = expected_identity
+            source_path = Path(source_path_text)
+            try:
+                with source_path.open("rb") as handle:
+                    opened_identity = fd_identity(
+                        source_path_text,
+                        position,
+                        os.fstat(handle.fileno()),
+                    )
+                    if opened_identity != expected_identity:
+                        generation_drifted = True
+                        break
+                    captured_bytes = handle.read()
+                    post_read_identity = fd_identity(
+                        source_path_text,
+                        position,
+                        os.fstat(handle.fileno()),
+                    )
+            except FileNotFoundError:
+                generation_drifted = True
+                break
+            except OSError as exc:
+                return (
+                    (),
+                    0,
+                    f"read_error:{source_path.name}:{type(exc).__name__}",
+                    True,
+                )
+            if (
+                post_read_identity != expected_identity
+                or len(captured_bytes) != expected_identity[4]
+            ):
+                generation_drifted = True
+                break
+            captured_sources.append((source_path_text, captured_bytes))
+        if generation_drifted:
+            continue
+
+        try:
+            post_read_generation = enumerate_generation()
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            return (), 0, f"read_error:{type(exc).__name__}", True
+        if post_read_generation != initial_generation:
+            continue
+        stable_generation = initial_generation
+        stable_sources = tuple(captured_sources)
+        break
+
+    if stable_sources is None:
+        return (
+            (),
+            0,
+            "retained_ledger_generation_unstable_after_3_attempts",
+            True,
+        )
+    if not stable_generation:
+        return (), 0, None, False
+
+    rows: list[dict[str, Any]] = []
+    malformed_line_count = 0
+    source_error: str | None = None
+    for source_path_text, captured_bytes in stable_sources:
+        source_path = Path(source_path_text)
+        try:
+            captured_text = captured_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            malformed_line_count += 1
+            source_error = f"invalid_utf8:{source_path.name}"
+            continue
+        for line_no, raw_line in enumerate(captured_text.splitlines(), start=1):
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                malformed_line_count += 1
+                source_error = f"malformed_jsonl_line:{source_path.name}:{line_no}"
+                continue
+            if not isinstance(row, dict):
+                malformed_line_count += 1
+                source_error = f"non_object_jsonl_line:{source_path.name}:{line_no}"
+                continue
+            rows.append(row)
+    return tuple(rows), malformed_line_count, source_error, True
+
+
 def summarize_cost_gate_learning_lane_ledger(path: Path) -> dict[str, Any]:
     summary: dict[str, Any] = {
         "ledger_path": str(path),
         "ledger_status": "MISSING",
         "ledger_source_error": None,
+        "raw_ledger_total_rows": 0,
         "ledger_total_rows": 0,
         "ledger_malformed_line_count": 0,
         "admission_decision_count": 0,
@@ -614,6 +769,11 @@ def summarize_cost_gate_learning_lane_ledger(path: Path) -> dict[str, Any]:
         "proof_excluded_probe_outcome_count": 0,
         "proof_exclusion_present": False,
         "proof_exclusion_reason_counts": {},
+        "raw_blocked_signal_outcome_count": 0,
+        "raw_blocked_signal_positive_outcome_count": 0,
+        "raw_avg_blocked_signal_outcome_net_bps": None,
+        "raw_invalid_lineage_outcome_row_count": 0,
+        "raw_unqualified_lineage_outcome_row_count": 0,
         "blocked_signal_outcome_count": 0,
         "blocked_signal_positive_outcome_count": 0,
         "latest_record_type": None,
@@ -645,36 +805,26 @@ def summarize_cost_gate_learning_lane_ledger(path: Path) -> dict[str, Any]:
         "blocked_signal_review_diagnosis_counts": {},
         "blocked_signal_review_cost_gate_escape_recommendation_counts": {},
     }
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except FileNotFoundError:
+    (
+        snapshot_rows,
+        malformed_line_count,
+        snapshot_source_error,
+        snapshot_present,
+    ) = _capture_retained_ledger_snapshot(path)
+    if not snapshot_present:
         return summary
-    except OSError as exc:
-        summary["ledger_status"] = "READ_ERROR"
-        summary["ledger_source_error"] = f"read_error:{type(exc).__name__}"
-        return summary
+    summary["ledger_malformed_line_count"] = malformed_line_count
+    summary["ledger_source_error"] = snapshot_source_error
 
-    valid_rows: list[dict[str, Any]] = []
     probe_net_sum = 0.0
-    blocked_net_sum = 0.0
-    for line_no, raw_line in enumerate(lines, start=1):
-        line = raw_line.strip()
-        if not line:
-            continue
-        try:
-            row = json.loads(line)
-        except json.JSONDecodeError:
-            summary["ledger_malformed_line_count"] += 1
-            summary["ledger_source_error"] = f"malformed_jsonl_line:{line_no}"
-            continue
-        if not isinstance(row, dict):
-            summary["ledger_malformed_line_count"] += 1
-            summary["ledger_source_error"] = f"non_object_jsonl_line:{line_no}"
-            continue
-
-        valid_rows.append(row)
-        summary["ledger_total_rows"] += 1
+    raw_blocked_net_sum = 0.0
+    review: dict[str, Any] | None = None
+    candidate_evidence_read_error: str | None = None
+    for row in snapshot_rows:
+        summary["raw_ledger_total_rows"] += 1
         record_type = str(row.get("record_type") or "").strip()
+        if record_type != "blocked_signal_outcome":
+            summary["ledger_total_rows"] += 1
         summary["latest_record_type"] = record_type or None
         generated_at = row.get("generated_at_utc")
         if generated_at:
@@ -723,13 +873,66 @@ def summarize_cost_gate_learning_lane_ledger(path: Path) -> dict[str, Any]:
                 probe_net_sum += net_bps
         elif record_type == "blocked_signal_outcome":
             net_bps = _float(row.get("realized_net_bps"))
-            summary["blocked_signal_outcome_count"] += 1
+            summary["raw_blocked_signal_outcome_count"] += 1
             if net_bps is not None:
-                blocked_net_sum += net_bps
+                raw_blocked_net_sum += net_bps
                 if net_bps > 0.0:
-                    summary["blocked_signal_positive_outcome_count"] += 1
+                    summary["raw_blocked_signal_positive_outcome_count"] += 1
 
-    if summary["ledger_total_rows"] == 0:
+    if summary["raw_blocked_signal_outcome_count"] > 0:
+        summary["raw_avg_blocked_signal_outcome_net_bps"] = (
+            raw_blocked_net_sum / summary["raw_blocked_signal_outcome_count"]
+        )
+        try:
+            candidate_evidence_rows = project_candidate_evidence_rows(snapshot_rows)
+        except (TypeError, ValueError) as exc:
+            candidate_evidence_read_error = (
+                f"candidate_evidence_read_error:{type(exc).__name__}"
+            )
+            summary["ledger_source_error"] = candidate_evidence_read_error
+        else:
+            review = build_blocked_signal_outcome_review(candidate_evidence_rows)
+            lineage_audit = review.get("learning_candidate_board") or {}
+            summary["raw_invalid_lineage_outcome_row_count"] = int(
+                lineage_audit.get("invalid_lineage_outcome_row_count") or 0
+            )
+            summary["raw_unqualified_lineage_outcome_row_count"] = int(
+                lineage_audit.get("unqualified_lineage_outcome_row_count") or 0
+            )
+            summary["ledger_total_rows"] += int(
+                review.get("outcome_aggregation_input_row_count") or 0
+            )
+            summary["blocked_signal_outcome_count"] = int(
+                review.get("blocked_signal_outcome_count") or 0
+            )
+            summary["blocked_signal_positive_outcome_count"] = int(
+                review.get("blocked_signal_positive_outcome_count") or 0
+            )
+            summary["avg_blocked_signal_outcome_net_bps"] = review.get(
+                "avg_blocked_signal_outcome_net_bps"
+            )
+            summary["blocked_signal_net_positive_pct"] = review.get(
+                "blocked_signal_net_positive_pct"
+            )
+
+    if (
+        summary["ledger_malformed_line_count"] > 0
+        or snapshot_source_error is not None
+        or candidate_evidence_read_error is not None
+    ):
+        summary["ledger_status"] = "LEDGER_EVIDENCE_CORRUPTION"
+    elif (
+        summary["raw_blocked_signal_outcome_count"] > 0
+        and summary["blocked_signal_outcome_count"] == 0
+        and (
+            summary["raw_invalid_lineage_outcome_row_count"] > 0
+            or summary["raw_unqualified_lineage_outcome_row_count"] > 0
+        )
+    ):
+        summary["ledger_status"] = (
+            "BLOCKED_SIGNAL_OUTCOMES_NEED_LINEAGE_REPAIR"
+        )
+    elif summary["ledger_total_rows"] == 0:
         summary["ledger_status"] = (
             "MALFORMED"
             if summary["ledger_malformed_line_count"] > 0
@@ -750,16 +953,11 @@ def summarize_cost_gate_learning_lane_ledger(path: Path) -> dict[str, Any]:
 
     if summary["probe_outcome_count"] > 0:
         summary["avg_probe_outcome_net_bps"] = probe_net_sum / summary["probe_outcome_count"]
-    if summary["blocked_signal_outcome_count"] > 0:
-        summary["avg_blocked_signal_outcome_net_bps"] = (
-            blocked_net_sum / summary["blocked_signal_outcome_count"]
-        )
-        summary["blocked_signal_net_positive_pct"] = (
-            summary["blocked_signal_positive_outcome_count"]
-            / summary["blocked_signal_outcome_count"]
-            * 100.0
-        )
-        review = build_blocked_signal_outcome_review(valid_rows)
+    if review is not None and (
+        int(review.get("outcome_aggregation_input_row_count") or 0) > 0
+        or summary["ledger_status"]
+        == "BLOCKED_SIGNAL_OUTCOMES_NEED_LINEAGE_REPAIR"
+    ):
         summary["blocked_signal_outcome_review"] = review
         summary["blocked_signal_outcome_review_status"] = review.get("status")
         summary["blocked_signal_outcome_review_reason"] = review.get("reason")
@@ -1798,7 +1996,22 @@ def _activation_decision(
             "next_actions": ["verify_cost_gate_learning_lane_cron_is_installed_and_running"],
         }
 
-    if ledger_status in {"MISSING", "EMPTY", "MALFORMED", "READ_ERROR"}:
+    if ledger_status in {
+        "LEDGER_EVIDENCE_CORRUPTION",
+        "MALFORMED",
+        "READ_ERROR",
+    }:
+        return {
+            "status": "LEDGER_EVIDENCE_CORRUPTION_NEEDS_REPAIR",
+            "reason": "learning_lane_ledger_or_candidate_evidence_unreadable",
+            "missing_links": ["valid_candidate_evidence_jsonl_ledger"],
+            "next_actions": [
+                "repair_or_quarantine_malformed_ledger_rows",
+                "rerun_activation_preflight_after_evidence_repair",
+            ],
+        }
+
+    if ledger_status in {"MISSING", "EMPTY"}:
         if loop_status == "RUNNING_NO_LEDGER_ROWS":
             status = "LOOP_RUNNING_NO_LEDGER_ROWS"
             reason = "learning_loop_recent_but_no_probe_ledger_rows"
@@ -1825,6 +2038,20 @@ def _activation_decision(
             "reason": reason,
             "missing_links": missing_links,
             "next_actions": next_actions,
+        }
+
+    if (
+        ledger_status == "BLOCKED_SIGNAL_OUTCOMES_NEED_LINEAGE_REPAIR"
+        or review_status == "NO_QUALIFIED_LINEAGE_BLOCKED_SIGNAL_OUTCOMES"
+    ):
+        return {
+            "status": "BLOCKED_SIGNAL_OUTCOMES_NEED_LINEAGE_REPAIR",
+            "reason": "blocked_signal_outcomes_lack_qualified_candidate_lineage",
+            "missing_links": ["qualified_prospective_candidate_lineage"],
+            "next_actions": [
+                "repair_or_quarantine_invalid_candidate_lineage",
+                "continue_collecting_qualified_candidate_lineage_outcomes",
+            ],
         }
 
     if capture_error_count > 0 and admission_count == 0 and blocked_count == 0:
@@ -2014,7 +2241,15 @@ def build_cost_gate_learning_lane_activation_preflight(
             "silent_drop_risk": str(ledger.get("ledger_status")) in {"MISSING", "EMPTY"},
             "blocked_signal_outcomes_recorded": blocked_count > 0,
             "blocked_signal_profitability_review_available": (
-                bool(ledger.get("blocked_signal_outcome_review_status"))
+                (
+                    bool(ledger.get("blocked_signal_outcome_review_status"))
+                    and _int(
+                        (ledger.get("blocked_signal_outcome_review") or {}).get(
+                            "outcome_aggregation_input_row_count"
+                        )
+                    )
+                    > 0
+                )
                 or loop.get("learning_loop_review_latest_error") is None
             ),
             "reject_materializer_ran": (
