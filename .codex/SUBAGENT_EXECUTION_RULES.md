@@ -1,6 +1,6 @@
 # Codex Sub-Agent Execution Rules
 
-Last updated: 2026-07-11
+Last updated: 2026-07-14
 Registry: `.codex/agent_registry_v1.json`
 
 ## Dispatch record
@@ -36,6 +36,46 @@ The PM-supplied capsule is the starting point, not a ceiling on autonomous sourc
 inspection. Mandatory objective/acceptance/hard-boundary/current-diff facts are
 lossless. If the capsule is incomplete, return `NEEDS_CONTEXT` with the exact
 missing source; do not guess or silently compress it away.
+
+## Dispatch and hosted-CI economics
+
+Do not admit a speculative sub-agent merely to increase apparent coverage. The
+compiler's hard-edge roles remain mandatory, but every optional/adaptive node
+must name the decision it can change and why that expected gain exceeds its
+context, orchestration, and verification cost. Polling unchanged GitHub state,
+duplicating another role's inspection, or asking multiple roles to produce the
+same summary is not a decision-changing node.
+
+Exactly one PM-owned publication lane may update a PR head or request an
+automated review. Other roles return patches/fragments and never race `push`,
+review requests, or CI reruns. Hosted CI is final integration evidence for a
+stable, locally verified head; it is not the edit-debug loop. Before publishing,
+run the closest feasible local form of the failing/final gate and batch all
+known fixes into one head update.
+
+Bind each hosted failure to `head_sha + workflow + job + failing step + failure
+fingerprint`. One failure permits diagnosis and a locally verified repair. A
+second occurrence of the same fingerprint forbids another publication until
+the validation strategy changes, the failure is reproduced locally, or PM
+records why the gate is external-only. Never retry an unchanged head. Request
+at most one current-head automated review; a review result from an older SHA is
+stale. Path-classified jobs and `cancel-in-progress` are mandatory whenever the
+workflow supports them; do not bypass them with manual reruns.
+
+Long-running loops checkpoint locally without publishing each iteration. Every
+iteration begins from an exact clean feature-branch HEAD. Before staging, the
+PM-owned checkpoint lane runs `git_loop_guard.py --phase checkpoint` with the
+work item's allowlist and bounded dirty budget; builders/reviewers never stage.
+After tests, PM stages exact paths, verifies the index, commits, updates the full
+checkpoint SHA, and requires `--phase start` clean PASS before dispatching the
+next row. Unowned/pre-staged/binary/oversized dirty state is a recovery stop, not
+permission to stash, reset, clean, widen scope, or continue accumulating files.
+
+Publication requires `--phase publish`, one non-force feature-branch push, and
+`--phase post-push` exact remote-SHA proof. Merge must bind the reviewed head
+with `--match-head-commit`. Branch/worktree deletion is never automatic and
+occurs only after verified merge plus Mac/origin/Linux source sync under
+`.codex/SYNC.md`.
 
 ## Permission enforcement
 
@@ -109,6 +149,8 @@ referenced.
 - Missing context: add the exact missing context, then retry.
 - API/null failure: one checkpoint-aware relay may resume completed work.
 - Same input/model/shape failure: no bare retry; change capability or split.
+- Same hosted-CI failure fingerprint twice: freeze PR publication and change the
+  local reproduction/validation strategy before any new head.
 - Hard policy/external/operator blocker: stop with owner and unblock condition.
 - Budget review point: split or return UNVERIFIED; never convert to PASS.
 

@@ -66,6 +66,19 @@ Security stays with E3; Bybit/IBKR compatibility stays with BB/IB.
 - A killed/retried Builder resumes from owned diff/checkpoint; it does not redo a
   completed milestone.
 - No per-role report/memory writes. Return one immutable `role_fragment_v1`.
+- One loop worktree binds one attached feature branch and exact checkpoint SHA;
+  source work never starts on `main` or detached HEAD.
+- Every iteration starts clean. Before staging, PM runs the read-only
+  `git_loop_guard.py --phase checkpoint` with the row allowlist. Unowned paths,
+  pre-staged changes, binary diffs, more than 12 files, more than 1500 tracked
+  diff lines, or more than 2 MB untracked stop the loop unless the operator
+  explicitly re-scopes the checkpoint.
+- After local tests, PM alone stages exact paths, checks the index, commits, and
+  requires a clean exact-head `--phase start` PASS before another iteration.
+  Do not auto-stash, reset, clean, switch branches, or absorb unknown files.
+- Local checkpoint commits do not imply push. One final stable publication uses
+  `publish` and `post-push`; merge and Mac/GitHub/Linux source sync follow
+  `.codex/SYNC.md`.
 
 ## Test evidence
 
@@ -104,9 +117,31 @@ wave ledger for admitted nodes, retries, nulls, planned input lower bounds,
 coverage debt, and controller-overhead exclusions. Those counts are structural
 accounting, not actual token/cache/tool/time telemetry.
 
+## Hosted CI and PR publication
+
+- One PM-owned lane is the sole PR-head publisher and automated-review requester.
+  Builders and reviewers return patches/fragments; they do not independently
+  push, rerun, or poll GitHub.
+- Hosted CI is a stable-head integration gate. Reproduce the closest feasible
+  command locally and complete focused plus adjacent/wider regression before
+  the next head update.
+- The workflow classifies changed paths before admitting Rust, macOS, ephemeral
+  PG, or specialized static jobs. A workflow-file change intentionally enables
+  every gate once so the classifier cannot self-approve.
+- A newer head cancels in-flight work for the older head. Never manually rerun
+  an unchanged head merely to seek green.
+- Record each failure as `head_sha/workflow/job/step/fingerprint`. On the second
+  identical fingerprint, freeze publication and change the local validation
+  strategy; do not spend a third hosted run on the same hypothesis.
+- Request one automated review for the stable current head. Review findings from
+  any older SHA are input to diagnosis, not current-head approval.
+- Do not spawn agents to wait on unchanged checks. The one owner uses bounded
+  backoff and reports only a state transition or timeout.
+
 ## Stop conditions
 
 Stop and return owner/unblock condition on hard-boundary conflict, contradictory
 authority classes, missing mandatory context, denied command, unsafe deploy,
 stale runtime proof, broker gate denial, or unowned collateral changes. Budget
-review points trigger split/escalation, never PASS.
+review points and repeated hosted-CI fingerprints trigger split/escalation,
+never PASS or blind publication.
