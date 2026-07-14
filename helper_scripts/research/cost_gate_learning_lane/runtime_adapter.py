@@ -11,7 +11,8 @@ must be wired in the Rust hot path after explicit operator authority exists.
 from __future__ import annotations
 
 import argparse
-from collections.abc import Mapping
+import copy
+from collections.abc import Iterator, Mapping
 import datetime as dt
 from dataclasses import dataclass
 import json
@@ -49,6 +50,14 @@ from cost_gate_learning_lane.proof_exclusion import proof_exclusion_reasons
 
 CANDIDATE_EVENT_CONTEXT_VALID_STATUS = "VALID"
 CANDIDATE_EVENT_CONTEXT_UNQUALIFIED_STATUS = "UNQUALIFIED_CONTEXT_MISSING"
+_CANDIDATE_EVENT_CONTEXT_CONFLICT_STATUS = "INVALID_LINEAGE_CONFLICT"
+_CANDIDATE_EVENT_CONTEXT_MISSING_STATUS = (
+    "INVALID_LINEAGE_EVENT_MISSING_OR_INVALID"
+)
+_CANDIDATE_EVENT_CONTEXT_PAYLOAD_MISSING_STATUS = (
+    "INVALID_LINEAGE_EVENT_CONTEXT_MISSING"
+)
+_CANDIDATE_LINEAGE_CONFLICT_AUDIT_FIELD = "candidate_lineage_conflict_audit"
 
 
 @dataclass(frozen=True)
@@ -212,15 +221,8 @@ def _read_json(path: Path) -> dict[str, Any]:
     return payload
 
 
-def read_jsonl_ledger(path: Path) -> list[dict[str, Any]]:
-    """讀取 retention 窗內的完整 ledger 視圖(輪轉段升冪 + 主檔)。
-
-    P1-10:輪轉後主檔只剩最新段,消費者的 dedup / outcome join 語義需要
-    retention 窗內全量行,故此處跨段讀;成本由 50MB 輪轉 + 14d retention 封頂
-    (修前為無界單檔全量讀)。逐行 streaming 讀,避免整檔 read_text 的雙倍峰值
-    記憶體。
-    """
-    rows: list[dict[str, Any]] = []
+def _iter_jsonl_ledger_rows(path: Path) -> Iterator[dict[str, Any]]:
+    """依 retention 順序解析 JSON object rows，不解讀 candidate lineage。"""
     for file_path in retained_ledger_files(path):
         with file_path.open("r", encoding="utf-8") as fh:
             for line_no, line in enumerate(fh, start=1):
@@ -234,29 +236,185 @@ def read_jsonl_ledger(path: Path) -> list[dict[str, Any]]:
                         f"malformed JSONL ledger at {file_path}:{line_no}"
                     ) from exc
                 if isinstance(row, dict):
-                    summary = row.get("candidate_summary")
-                    summary_has_context = isinstance(summary, Mapping) and (
-                        "candidate_event_context" in summary
-                        or "candidate_event_context_status" in summary
-                    )
-                    if isinstance(row.get("event"), Mapping):
-                        row = dict(row)
-                        row["event"] = validate_ledger_event_candidate_context(row["event"])
-                        if (
-                            "candidate_event_context" in row["event"]
-                            or summary_has_context
-                        ):
-                            row["candidate_summary"] = (
-                                _candidate_summary_with_event_context(
-                                    _dict(summary),
-                                    row["event"],
-                                )
-                            )
-                    elif summary_has_context:
-                        # 為什麼 fail-closed：summary-only VALID/context 無 outer event
-                        # 可供 identity binding，不能把缺失/非 object event 當 legacy。
-                        _candidate_summary_with_event_context(_dict(summary), {})
-                    rows.append(row)
+                    yield row
+
+
+def _preserve_candidate_lineage_conflict_audit(
+    row: dict[str, Any],
+    *,
+    source_summary: Any,
+    source_event: Any,
+) -> None:
+    """保留投影前兩份 source payload；此欄只供 INVALID lineage 審計。"""
+    row[_CANDIDATE_LINEAGE_CONFLICT_AUDIT_FIELD] = {
+        "status": _CANDIDATE_EVENT_CONTEXT_CONFLICT_STATUS,
+        "source_candidate_summary": copy.deepcopy(source_summary),
+        "source_event": copy.deepcopy(source_event),
+    }
+
+
+def _exact_json_value_equal(left: Any, right: Any) -> bool:
+    """遞迴比較 JSON 值與型別，阻擋 bool/int、int/float 與 signed-zero 混淆。"""
+    if isinstance(left, Mapping) and isinstance(right, Mapping):
+        return set(left) == set(right) and all(
+            _exact_json_value_equal(left[key], right[key]) for key in left
+        )
+    if isinstance(left, list) and isinstance(right, list):
+        return len(left) == len(right) and all(
+            _exact_json_value_equal(a, b) for a, b in zip(left, right)
+        )
+    if type(left) is not type(right):
+        return False
+    if type(left) is float and left == right == 0.0:
+        return math.copysign(1.0, left) == math.copysign(1.0, right)
+    return left == right
+
+
+def read_candidate_evidence_jsonl_ledger(path: Path) -> list[dict[str, Any]]:
+    """讀取 candidate-board 的未判定 evidence view。
+
+    live ledger 把 prospective context 寫在 ``event``，而 outcome row 不一定有
+    ``candidate_summary``。此 evidence-only reader 因此把 event context 投影到一份
+    detached summary：嚴格驗證通過的 ``CAPTURE_COMPLETE`` 標為 ``VALID``；驗證
+    不通過的 raw payload 原樣複製並保留非 ``VALID`` capture status，交由 v6 board
+    分到 INVALID audit partition。summary/event 若已有互相衝突的第二份 lineage，
+    evidence view 會標成 INVALID，並在 audit-only 欄位保留投影前的兩份 payload；
+    append-only ledger source 本身也不會被改寫。
+
+    Authority、admission、outcome generation 不得使用此 evidence-only 介面；
+    它們仍必須走下方嚴格的 ``read_jsonl_ledger``。
+    """
+    rows: list[dict[str, Any]] = []
+    for source_row in _iter_jsonl_ledger_rows(path):
+        row = copy.deepcopy(source_row)
+        event_value = row.get("event")
+        if not isinstance(event_value, Mapping):
+            summary_value = row.get("candidate_summary")
+            if isinstance(summary_value, Mapping) and (
+                "candidate_event_context" in summary_value
+                or "candidate_event_context_status" in summary_value
+            ):
+                summary = copy.deepcopy(dict(summary_value))
+                summary["candidate_event_context_status"] = (
+                    _CANDIDATE_EVENT_CONTEXT_MISSING_STATUS
+                )
+                row["candidate_summary"] = summary
+            rows.append(row)
+            continue
+        event = dict(event_value)
+        if "candidate_event_context" not in event:
+            summary_value = row.get("candidate_summary")
+            if isinstance(summary_value, Mapping) and (
+                "candidate_event_context" in summary_value
+                or "candidate_event_context_status" in summary_value
+            ):
+                summary = copy.deepcopy(dict(summary_value))
+                summary["candidate_event_context_status"] = (
+                    _CANDIDATE_EVENT_CONTEXT_PAYLOAD_MISSING_STATUS
+                )
+                row["candidate_summary"] = summary
+            rows.append(row)
+            continue
+
+        summary_value = row.get("candidate_summary")
+        summary = (
+            copy.deepcopy(dict(summary_value))
+            if isinstance(summary_value, Mapping)
+            else {}
+        )
+        raw_context = event["candidate_event_context"]
+        try:
+            validated_event = validate_ledger_event_candidate_context(event)
+        except (TypeError, ValueError):
+            raw_status = (
+                raw_context.get("capture_status")
+                if isinstance(raw_context, Mapping)
+                else None
+            )
+            if not isinstance(raw_status, str) or raw_status == "VALID":
+                raw_status = "INVALID_RAW_CONTEXT"
+            lineage_conflict = bool(
+                "candidate_event_context" in summary
+                and not _exact_json_value_equal(
+                    summary["candidate_event_context"], raw_context
+                )
+            ) or bool(
+                "candidate_event_context_status" in summary
+                and summary["candidate_event_context_status"] != raw_status
+            )
+            if lineage_conflict:
+                _preserve_candidate_lineage_conflict_audit(
+                    row,
+                    source_summary=summary_value,
+                    source_event=event_value,
+                )
+            summary["candidate_event_context"] = copy.deepcopy(raw_context)
+            summary["candidate_event_context_status"] = (
+                _CANDIDATE_EVENT_CONTEXT_CONFLICT_STATUS
+                if lineage_conflict
+                else raw_status
+            )
+            row["candidate_summary"] = summary
+        else:
+            row["event"] = validated_event
+            context = validated_event["candidate_event_context"]
+            lineage_conflict = bool(
+                "candidate_event_context" in summary
+                and not _exact_json_value_equal(
+                    summary["candidate_event_context"], context
+                )
+            ) or bool(
+                "candidate_event_context_status" in summary
+                and summary["candidate_event_context_status"]
+                != CANDIDATE_EVENT_CONTEXT_VALID_STATUS
+            )
+            if lineage_conflict:
+                _preserve_candidate_lineage_conflict_audit(
+                    row,
+                    source_summary=summary_value,
+                    source_event=event_value,
+                )
+                summary["candidate_event_context"] = copy.deepcopy(context)
+                summary["candidate_event_context_status"] = (
+                    _CANDIDATE_EVENT_CONTEXT_CONFLICT_STATUS
+                )
+                row["candidate_summary"] = summary
+            else:
+                row["candidate_summary"] = copy.deepcopy(
+                    _candidate_summary_with_event_context(summary, validated_event)
+                )
+        rows.append(row)
+    return rows
+
+
+def read_jsonl_ledger(path: Path) -> list[dict[str, Any]]:
+    """嚴格讀取 retention 窗內完整 ledger 視圖(輪轉段升冪 + 主檔)。
+
+    P1-10:輪轉後主檔只剩最新段,消費者的 dedup / outcome join 語義需要
+    retention 窗內全量行,故此處跨段讀;成本由 50MB 輪轉 + 14d retention 封頂
+    (修前為無界單檔全量讀)。逐行 streaming 讀,避免整檔 read_text 的雙倍峰值
+    記憶體。
+    """
+    rows: list[dict[str, Any]] = []
+    for row in _iter_jsonl_ledger_rows(path):
+        summary = row.get("candidate_summary")
+        summary_has_context = isinstance(summary, Mapping) and (
+            "candidate_event_context" in summary
+            or "candidate_event_context_status" in summary
+        )
+        if isinstance(row.get("event"), Mapping):
+            row = dict(row)
+            row["event"] = validate_ledger_event_candidate_context(row["event"])
+            if "candidate_event_context" in row["event"] or summary_has_context:
+                row["candidate_summary"] = _candidate_summary_with_event_context(
+                    _dict(summary),
+                    row["event"],
+                )
+        elif summary_has_context:
+            # 為什麼 fail-closed：summary-only VALID/context 無 outer event
+            # 可供 identity binding，不能把缺失/非 object event 當 legacy。
+            _candidate_summary_with_event_context(_dict(summary), {})
+        rows.append(row)
     return rows
 
 
@@ -454,7 +612,9 @@ def _candidate_summary_with_event_context(
     context = validated_event["candidate_event_context"]
     if (
         "candidate_event_context" in normalized_summary
-        and normalized_summary["candidate_event_context"] != context
+        and not _exact_json_value_equal(
+            normalized_summary["candidate_event_context"], context
+        )
     ):
         raise ValueError("CANDIDATE_EVENT_CONTEXT_SUMMARY_CONFLICT")
     if (

@@ -64,7 +64,9 @@ from cost_gate_learning_lane.evidence_stats import (
     one_sided_t_p_value,
     sign_flip_selection_p_value,
 )
-from cost_gate_learning_lane.runtime_adapter import read_jsonl_ledger
+from cost_gate_learning_lane.runtime_adapter import (
+    read_candidate_evidence_jsonl_ledger,
+)
 
 
 # v6:learning_candidate_board 先做 prospective raw/evaluation lineage 三分區，
@@ -1803,7 +1805,7 @@ def main() -> int:
             args.slippage_artifact.read_text(encoding="utf-8")
         )
     scorecard = build_blocked_signal_outcome_review(
-        read_jsonl_ledger(args.ledger),
+        read_candidate_evidence_jsonl_ledger(args.ledger),
         cfg=cfg,
         slippage_quantiles=slippage_payload,
     )
