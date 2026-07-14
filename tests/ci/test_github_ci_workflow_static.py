@@ -88,11 +88,14 @@ def test_ci_workflow_keeps_cheap_guards_unconditional() -> None:
         assert "needs: changes" not in job
 
 
-def test_ci_workflow_runs_git_policy_tests_in_cheap_governance_gate() -> None:
-    governance = _job("development-agent-governance")
+def test_ci_workflow_runs_git_policy_tests_in_unconditional_cheap_gate() -> None:
+    policy = _job("git-workflow-policy")
+    assert "needs: changes" not in policy
+    assert "needs.changes.outputs" not in policy
+    assert "ubuntu-latest" in policy
     for path in (
         "tests/structure/test_git_loop_guard.py",
         "tests/ci/test_classify_ci_changes.py",
         "tests/ci/test_github_ci_workflow_static.py",
     ):
-        assert path in governance
+        assert path in policy

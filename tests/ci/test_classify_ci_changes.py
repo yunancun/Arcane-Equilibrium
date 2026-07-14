@@ -54,6 +54,10 @@ def test_governance_gate_covers_direct_policy_and_adapter_inputs() -> None:
         "helper_scripts/maintenance_scripts/deploy_intent_adapter.py",
         "docs/adr/0050-development-agent-governance.md",
         ".agents/skills/16-root-principles-checklist/SKILL.md",
+        "CONTEXT.md",
+        "docs/governance_dev/SPECIFICATION_REGISTER.md",
+        "docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/"
+        "2026-07-09--scanner_driven_alr/startup_prompt.md",
     ):
         result = classify_paths([path])
         assert result["governance"] is True

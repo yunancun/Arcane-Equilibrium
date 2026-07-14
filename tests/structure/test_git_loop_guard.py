@@ -284,6 +284,8 @@ def test_sync_contract_covers_exact_head_publication_merge_and_three_sides() -> 
         assert "loop_branch" in source
         assert "checkpoint_head" in source
         assert "must not recapture" in source
+    assert "upstream absent or\n  correct" in SYNC
+    assert "upstream is exactly `origin/<branch>`" in SYNC
 
 
 def test_loop_contract_cannot_advance_with_unbounded_dirty_or_unsynced_heads() -> None:
