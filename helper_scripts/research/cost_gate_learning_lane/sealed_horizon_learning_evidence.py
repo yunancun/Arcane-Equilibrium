@@ -414,12 +414,19 @@ def build_sealed_horizon_learning_evidence_packet(
         row for row in outcome_batch.get("blocked_signal_outcomes", [])
         if isinstance(row, dict)
     ]
-    outcome_summary = _net_summary(blocked_outcomes)
+    raw_outcome_summary = _net_summary(blocked_outcomes)
     top = (review.get("top_side_cells") or [{}])[0]
     if not isinstance(top, dict):
         top = {}
-    review_candidate = review.get("status") == (
-        "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT"
+    qualified_outcome_count = int(review.get("blocked_signal_outcome_count") or 0)
+    qualified_materialization_count = int(
+        review.get("outcome_aggregation_input_row_count") or 0
+    )
+    review_candidate = (
+        review.get("status")
+        == "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT"
+        and review.get("top_review_candidate_side_cell_key")
+        == candidate.get("side_cell_key")
     )
     horizon_minutes = _candidate_horizon_minutes(candidate, 60)
 
@@ -446,25 +453,63 @@ def build_sealed_horizon_learning_evidence_packet(
             "probe_proposal": candidate.get("probe_proposal"),
         },
         "materialization": {
-            "input_feature_row_count": feature_row_count,
-            "materialized_record_count": materializer_batch.get(
+            # Legacy consumer keys are authority-bearing and therefore derive
+            # only from strict review aggregation input.  Full producer totals
+            # remain available below under raw_* for audit/diagnostics.
+            "input_feature_row_count": qualified_materialization_count,
+            "materialized_record_count": qualified_materialization_count,
+            "appended_record_count": min(
+                qualified_materialization_count,
+                int(materializer_batch.get("appended_record_count") or 0),
+            ),
+            "decision_counts": (
+                {
+                    "ORDER_AUTHORITY_NOT_GRANTED": (
+                        qualified_materialization_count
+                    )
+                }
+                if qualified_materialization_count
+                else {}
+            ),
+            "all_order_authority_not_granted": (
+                qualified_materialization_count > 0
+            ),
+            "raw_input_feature_row_count": feature_row_count,
+            "raw_materialized_record_count": materializer_batch.get(
                 "materialized_record_count"
             ),
-            "appended_record_count": materializer_batch.get("appended_record_count"),
-            "decision_counts": _decision_counts(records),
-            "all_order_authority_not_granted": (
+            "raw_appended_record_count": materializer_batch.get(
+                "appended_record_count"
+            ),
+            "raw_decision_counts": _decision_counts(records),
+            "raw_all_order_authority_not_granted": (
                 bool(records)
                 and _decision_counts(records) == {"ORDER_AUTHORITY_NOT_GRANTED": len(records)}
             ),
+            "qualified_outcome_row_count": int(
+                review.get("outcome_aggregation_input_row_count") or 0
+            ),
         },
         "outcomes": {
-            "window_count": outcome_batch.get("window_count"),
-            "price_observation_count": outcome_batch.get("price_observation_count"),
-            "blocked_signal_outcome_count": outcome_batch.get(
+            "raw_window_count": outcome_batch.get("window_count"),
+            "raw_price_observation_count": outcome_batch.get(
+                "price_observation_count"
+            ),
+            "raw_blocked_signal_outcome_count": outcome_batch.get(
                 "blocked_signal_outcome_count"
             ),
-            "appended_outcome_count": outcome_batch.get("appended_outcome_count"),
-            **outcome_summary,
+            "raw_appended_outcome_count": outcome_batch.get(
+                "appended_outcome_count"
+            ),
+            **{f"raw_{key}": value for key, value in raw_outcome_summary.items()},
+            "blocked_signal_outcome_count": qualified_outcome_count,
+            "outcome_count": qualified_outcome_count,
+            "avg_net_bps": review.get("avg_blocked_signal_outcome_net_bps"),
+            "avg_gross_bps": top.get("avg_gross_bps"),
+            "net_positive_pct": review.get("blocked_signal_net_positive_pct"),
+            "gross_positive_pct": top.get("gross_positive_pct"),
+            "min_net_bps": top.get("min_net_bps"),
+            "max_net_bps": top.get("max_net_bps"),
         },
         "review": {
             "status": review.get("status"),
@@ -488,10 +533,8 @@ def build_sealed_horizon_learning_evidence_packet(
             "thresholds": review.get("thresholds"),
         },
         "answers": {
-            "sealed_candidate_materialized": bool(records),
-            "blocked_signal_outcomes_recorded": (
-                int(outcome_batch.get("blocked_signal_outcome_count") or 0) > 0
-            ),
+            "sealed_candidate_materialized": qualified_outcome_count > 0,
+            "blocked_signal_outcomes_recorded": qualified_outcome_count > 0,
             "candidate_clears_operator_review_gate": review_candidate,
             "global_cost_gate_lowering_recommended": False,
             "main_cost_gate_adjustment": "NONE",

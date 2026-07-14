@@ -600,6 +600,7 @@ def summarize_cost_gate_learning_lane_ledger(path: Path) -> dict[str, Any]:
         "ledger_path": str(path),
         "ledger_status": "MISSING",
         "ledger_source_error": None,
+        "raw_ledger_total_rows": 0,
         "ledger_total_rows": 0,
         "ledger_malformed_line_count": 0,
         "admission_decision_count": 0,
@@ -614,6 +615,11 @@ def summarize_cost_gate_learning_lane_ledger(path: Path) -> dict[str, Any]:
         "proof_excluded_probe_outcome_count": 0,
         "proof_exclusion_present": False,
         "proof_exclusion_reason_counts": {},
+        "raw_blocked_signal_outcome_count": 0,
+        "raw_blocked_signal_positive_outcome_count": 0,
+        "raw_avg_blocked_signal_outcome_net_bps": None,
+        "raw_invalid_lineage_outcome_row_count": 0,
+        "raw_unqualified_lineage_outcome_row_count": 0,
         "blocked_signal_outcome_count": 0,
         "blocked_signal_positive_outcome_count": 0,
         "latest_record_type": None,
@@ -656,7 +662,8 @@ def summarize_cost_gate_learning_lane_ledger(path: Path) -> dict[str, Any]:
 
     valid_rows: list[dict[str, Any]] = []
     probe_net_sum = 0.0
-    blocked_net_sum = 0.0
+    raw_blocked_net_sum = 0.0
+    review: dict[str, Any] | None = None
     for line_no, raw_line in enumerate(lines, start=1):
         line = raw_line.strip()
         if not line:
@@ -673,8 +680,10 @@ def summarize_cost_gate_learning_lane_ledger(path: Path) -> dict[str, Any]:
             continue
 
         valid_rows.append(row)
-        summary["ledger_total_rows"] += 1
+        summary["raw_ledger_total_rows"] += 1
         record_type = str(row.get("record_type") or "").strip()
+        if record_type != "blocked_signal_outcome":
+            summary["ledger_total_rows"] += 1
         summary["latest_record_type"] = record_type or None
         generated_at = row.get("generated_at_utc")
         if generated_at:
@@ -723,11 +732,39 @@ def summarize_cost_gate_learning_lane_ledger(path: Path) -> dict[str, Any]:
                 probe_net_sum += net_bps
         elif record_type == "blocked_signal_outcome":
             net_bps = _float(row.get("realized_net_bps"))
-            summary["blocked_signal_outcome_count"] += 1
+            summary["raw_blocked_signal_outcome_count"] += 1
             if net_bps is not None:
-                blocked_net_sum += net_bps
+                raw_blocked_net_sum += net_bps
                 if net_bps > 0.0:
-                    summary["blocked_signal_positive_outcome_count"] += 1
+                    summary["raw_blocked_signal_positive_outcome_count"] += 1
+
+    if summary["raw_blocked_signal_outcome_count"] > 0:
+        summary["raw_avg_blocked_signal_outcome_net_bps"] = (
+            raw_blocked_net_sum / summary["raw_blocked_signal_outcome_count"]
+        )
+        review = build_blocked_signal_outcome_review(valid_rows)
+        lineage_audit = review.get("learning_candidate_board") or {}
+        summary["raw_invalid_lineage_outcome_row_count"] = int(
+            lineage_audit.get("invalid_lineage_outcome_row_count") or 0
+        )
+        summary["raw_unqualified_lineage_outcome_row_count"] = int(
+            lineage_audit.get("unqualified_lineage_outcome_row_count") or 0
+        )
+        summary["ledger_total_rows"] += int(
+            review.get("outcome_aggregation_input_row_count") or 0
+        )
+        summary["blocked_signal_outcome_count"] = int(
+            review.get("blocked_signal_outcome_count") or 0
+        )
+        summary["blocked_signal_positive_outcome_count"] = int(
+            review.get("blocked_signal_positive_outcome_count") or 0
+        )
+        summary["avg_blocked_signal_outcome_net_bps"] = review.get(
+            "avg_blocked_signal_outcome_net_bps"
+        )
+        summary["blocked_signal_net_positive_pct"] = review.get(
+            "blocked_signal_net_positive_pct"
+        )
 
     if summary["ledger_total_rows"] == 0:
         summary["ledger_status"] = (
@@ -750,16 +787,9 @@ def summarize_cost_gate_learning_lane_ledger(path: Path) -> dict[str, Any]:
 
     if summary["probe_outcome_count"] > 0:
         summary["avg_probe_outcome_net_bps"] = probe_net_sum / summary["probe_outcome_count"]
-    if summary["blocked_signal_outcome_count"] > 0:
-        summary["avg_blocked_signal_outcome_net_bps"] = (
-            blocked_net_sum / summary["blocked_signal_outcome_count"]
-        )
-        summary["blocked_signal_net_positive_pct"] = (
-            summary["blocked_signal_positive_outcome_count"]
-            / summary["blocked_signal_outcome_count"]
-            * 100.0
-        )
-        review = build_blocked_signal_outcome_review(valid_rows)
+    if review is not None and int(
+        review.get("outcome_aggregation_input_row_count") or 0
+    ) > 0:
         summary["blocked_signal_outcome_review"] = review
         summary["blocked_signal_outcome_review_status"] = review.get("status")
         summary["blocked_signal_outcome_review_reason"] = review.get("reason")
@@ -2014,7 +2044,15 @@ def build_cost_gate_learning_lane_activation_preflight(
             "silent_drop_risk": str(ledger.get("ledger_status")) in {"MISSING", "EMPTY"},
             "blocked_signal_outcomes_recorded": blocked_count > 0,
             "blocked_signal_profitability_review_available": (
-                bool(ledger.get("blocked_signal_outcome_review_status"))
+                (
+                    bool(ledger.get("blocked_signal_outcome_review_status"))
+                    and _int(
+                        (ledger.get("blocked_signal_outcome_review") or {}).get(
+                            "outcome_aggregation_input_row_count"
+                        )
+                    )
+                    > 0
+                )
                 or loop.get("learning_loop_review_latest_error") is None
             ),
             "reject_materializer_ran": (

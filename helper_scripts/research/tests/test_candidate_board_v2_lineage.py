@@ -1254,7 +1254,7 @@ def test_invalid_outcome_stays_qualified_and_censoring_uses_c_plus_u() -> None:
     assert candidate["selection_eligible"] is False
 
 
-def test_default_review_keeps_full_ledger_compatibility_for_unqualified_rows() -> None:
+def test_default_review_quarantines_high_positive_unqualified_rows() -> None:
     legacy = _outcome(
         attempt_id="ctx-default-compat-legacy",
         realized_net_bps=100.0,
@@ -1273,12 +1273,17 @@ def test_default_review_keeps_full_ledger_compatibility_for_unqualified_rows() -
         now_utc=NOW,
     )
 
-    assert review["outcome_aggregation_policy"] == "FULL_LEDGER_COMPATIBILITY"
-    assert review["outcome_aggregation_input_row_count"] == 2
-    assert review["status"] == "NO_DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATE"
-    assert review["blocked_signal_outcome_count"] == 2
-    assert review["side_cell_count"] == 1
-    assert review["top_side_cells"]
+    assert review["require_qualified_lineage"] is True
+    assert (
+        review["outcome_aggregation_policy"]
+        == "CANDIDATE_BOARD_QUALIFIED_EVALUATOR_ROWS"
+    )
+    assert review["outcome_aggregation_input_row_count"] == 0
+    assert review["status"] == "NO_QUALIFIED_LINEAGE_BLOCKED_SIGNAL_OUTCOMES"
+    assert review["blocked_signal_outcome_count"] == 0
+    assert review["side_cell_count"] == 0
+    assert review["review_candidate_side_cell_count"] == 0
+    assert review["top_side_cells"] == []
 
 
 def test_strict_review_keeps_invalid_unqualified_audits_but_aggregates_none() -> None:
@@ -1297,7 +1302,6 @@ def test_strict_review_keeps_invalid_unqualified_audits_but_aggregates_none() ->
     review = build_blocked_signal_outcome_review(
         [invalid, unqualified],
         now_utc=NOW,
-        require_qualified_lineage=True,
     )
 
     assert review["require_qualified_lineage"] is True
@@ -1340,12 +1344,10 @@ def test_strict_review_top_level_is_invariant_to_positive_lineage_attacks() -> N
     baseline = build_blocked_signal_outcome_review(
         [qualified],
         now_utc=NOW,
-        require_qualified_lineage=True,
     )
     attacked = build_blocked_signal_outcome_review(
         [invalid, unqualified, qualified],
         now_utc=NOW,
-        require_qualified_lineage=True,
     )
 
     for field in (
@@ -1385,7 +1387,6 @@ def test_strict_review_reuses_board_duplicate_gate_for_same_event_conflict() -> 
     review = build_blocked_signal_outcome_review(
         [qualified, conflicted],
         now_utc=NOW,
-        require_qualified_lineage=True,
     )
 
     assert review["outcome_aggregation_input_row_count"] == 0
