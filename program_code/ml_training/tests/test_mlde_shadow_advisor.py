@@ -180,6 +180,74 @@ def test_shadow_advisor_fetch_sets_statement_timeout_before_base_query(monkeypat
     assert select_params[0] == ["demo"]
 
 
+def test_shadow_advisor_fetch_uses_psycopg2_safe_pyformat(monkeypatch):
+    rendered_queries = []
+    aggregate_params = None
+
+    class FakeCursor:
+        description = [("engine_mode",)]
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def execute(self, sql, params=None):
+            nonlocal aggregate_params
+            if params is None:
+                return
+
+            placeholder_count = 0
+            offset = 0
+            while (percent_at := sql.find("%", offset)) >= 0:
+                token = sql[percent_at : percent_at + 2]
+                if token == "%%":
+                    offset = percent_at + 2
+                    continue
+                if token == "%s":
+                    placeholder_count += 1
+                    offset = percent_at + 2
+                    continue
+                raise AssertionError(
+                    f"unsafe psycopg2 pyformat token at offset {percent_at}: "
+                    f"{sql[percent_at : percent_at + 8]!r}"
+                )
+
+            assert placeholder_count == len(params)
+            rendered_queries.append(sql % tuple("<param>" for _ in params))
+            if "FROM trading.intents" in sql:
+                aggregate_params = params
+
+        def fetchall(self):
+            return []
+
+    class FakeConn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def cursor(self):
+            return FakeCursor()
+
+    class FakePsycopg2:
+        @staticmethod
+        def connect(dsn, connect_timeout=2):
+            assert dsn == "postgresql://unit-test"
+            assert connect_timeout == 2
+            return FakeConn()
+
+    monkeypatch.setattr(mlde_shadow_advisor, "psycopg2", FakePsycopg2)
+
+    cfg = ShadowAdvisorConfig(statement_timeout_ms=None)
+    assert mlde_shadow_advisor._fetch_aggregate_rows("postgresql://unit-test", cfg) == []
+    assert aggregate_params is not None
+    assert len(aggregate_params) == 4
+    assert len(rendered_queries) == 1
+
+
 def test_shadow_advisor_persist_sets_statement_timeout_before_insert(monkeypatch):
     calls = []
 
