@@ -9,6 +9,9 @@ import os
 from pathlib import Path
 import subprocess
 
+from helper_scripts.research.tests.candidate_lineage_v2_test_support import (
+    attach_candidate_lineage_v2,
+)
 from alpha_discovery_throughput.discovery_loop import build_discovery_plan
 from alpha_discovery_throughput.runtime_runner import collect_cost_gate_learning_lane_arm
 from cost_gate_learning_lane.policy import (
@@ -91,6 +94,9 @@ from cost_gate_learning_lane.runtime_adapter import (
     append_jsonl_ledger,
     summarize_side_cell_runtime_state,
 )
+
+
+LIVE_LINEAGE_AS_OF_UTC_DATE = dt.datetime.now(dt.timezone.utc).date().isoformat()
 
 
 def _scorecard_payload(generated_at: str = "2026-06-21T10:00:00+00:00") -> dict:
@@ -204,6 +210,69 @@ def _scorecard_payload(generated_at: str = "2026-06-21T10:00:00+00:00") -> dict:
             "rows": rows,
         },
     }
+
+
+def _qualified_blocked_outcome_rows(
+    rows: list[dict],
+    *,
+    context_prefix: str,
+    lineage_as_of_utc_date: str | None = None,
+) -> list[dict]:
+    """Upgrade authority-facing fixtures to prospective candidate lineage."""
+    default_ts_ms = int(
+        dt.datetime(2026, 6, 21, 12, tzinfo=dt.timezone.utc).timestamp() * 1_000
+    )
+    blocked_timestamps = [
+        int(row.get("entry_ts_ms") or default_ts_ms + index * 3_600_000)
+        for index, row in enumerate(rows)
+        if row.get("record_type") == "blocked_signal_outcome"
+    ]
+    if not blocked_timestamps:
+        return [dict(row) for row in rows]
+    if lineage_as_of_utc_date is None:
+        as_of_date = (
+            dt.datetime.fromtimestamp(
+                max(blocked_timestamps) / 1_000,
+                tz=dt.timezone.utc,
+            ).date()
+            + dt.timedelta(days=1)
+        )
+    else:
+        as_of_date = dt.date.fromisoformat(lineage_as_of_utc_date)
+    as_of_utc_date = as_of_date.isoformat()
+    explicit_capture_base_ms = int(
+        dt.datetime.combine(
+            as_of_date - dt.timedelta(days=1),
+            dt.time(12),
+            tzinfo=dt.timezone.utc,
+        ).timestamp()
+        * 1_000
+    )
+    qualified: list[dict] = []
+    for index, row in enumerate(rows):
+        if row.get("record_type") != "blocked_signal_outcome":
+            qualified.append(dict(row))
+            continue
+        captured_at_ms = (
+            explicit_capture_base_ms + index * 1_000
+            if lineage_as_of_utc_date is not None
+            else int(row.get("entry_ts_ms") or default_ts_ms + index * 3_600_000)
+        )
+        detached_row = dict(row)
+        detached_row.pop("candidate_summary", None)
+        qualified.append(
+            attach_candidate_lineage_v2(
+                detached_row,
+                context_id=f"{context_prefix}-{index:03d}",
+                captured_at_ms=captured_at_ms,
+                strategy_name=str(row.get("strategy_name") or "ma_crossover"),
+                symbol=str(row.get("symbol") or "ETHUSDT"),
+                side=str(row.get("side") or "Sell"),
+                horizon_minutes=int(row.get("horizon_minutes") or 60),
+                as_of_utc_date=as_of_utc_date,
+            )
+        )
+    return qualified
 
 
 def _sealed_horizon_replay_packet(*, status: str = "SEALED_HORIZON_REPLAY_READY_FOR_OPERATOR_REVIEW") -> dict:
@@ -1946,6 +2015,77 @@ def test_activation_preflight_routes_capture_error_rows_to_writer_config_fix(
     assert "demo_learning_lane_plan_or_writer_config" in preflight["missing_links"]
 
 
+def test_activation_preflight_quarantines_invalid_positive_lineage_from_readiness(
+    tmp_path: Path,
+) -> None:
+    data_dir = tmp_path
+    plan = build_plan_from_payload(
+        _scorecard_payload(),
+        now_utc=dt.datetime(2026, 6, 21, 11, tzinfo=dt.timezone.utc),
+    )
+    lane_dir = data_dir / "cost_gate_learning_lane"
+    lane_dir.mkdir(parents=True)
+    (lane_dir / "demo_learning_lane_plan_latest.json").write_text(
+        json.dumps(plan),
+        encoding="utf-8",
+    )
+    invalid_rows = []
+    for index in range(30):
+        row = attach_candidate_lineage_v2(
+            {
+                "record_type": "blocked_signal_outcome",
+                "realized_net_bps": 10_000.0,
+                "gross_bps": 10_012.0,
+                "cost_bps": 12.0,
+                "cost_model_version": "conservative_v1",
+            },
+            context_id=f"ctx-status-invalid-positive-{index:02d}",
+            as_of_utc_date=LIVE_LINEAGE_AS_OF_UTC_DATE,
+        )
+        row["side_cell_key"] = "ma_crossover|BTCUSDT|Sell"
+        invalid_rows.append(row)
+    capture_error = {
+        "record_type": "probe_capture_error",
+        "generated_at_utc": "2026-06-21T11:02:00+00:00",
+        "attempt_id": "ctx-status-capture-error",
+        "decision": "ADMISSION_NOT_EVALUATED",
+        "allowed_to_submit_order": False,
+        "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+        "capture_error": "candidate evaluation context unavailable",
+        "reason": "runtime_admission_evaluation_failed",
+    }
+    (lane_dir / "probe_ledger.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in [capture_error, *invalid_rows]),
+        encoding="utf-8",
+    )
+
+    preflight = build_cost_gate_learning_lane_activation_preflight(
+        data_dir,
+        now_utc=dt.datetime(2026, 6, 21, 14, 30, tzinfo=dt.timezone.utc),
+    )
+    ledger = preflight["ledger"]
+
+    assert ledger["blocked_signal_outcome_count"] == 0
+    assert ledger["blocked_signal_positive_outcome_count"] == 0
+    assert ledger["avg_blocked_signal_outcome_net_bps"] is None
+    assert ledger["blocked_signal_net_positive_pct"] is None
+    assert ledger["raw_blocked_signal_outcome_count"] == 30
+    assert ledger["raw_blocked_signal_positive_outcome_count"] == 30
+    assert ledger["raw_avg_blocked_signal_outcome_net_bps"] == 10_000.0
+    assert ledger["raw_invalid_lineage_outcome_row_count"] == 30
+    assert ledger["raw_unqualified_lineage_outcome_row_count"] == 0
+    assert ledger["raw_ledger_total_rows"] == 31
+    assert ledger["ledger_total_rows"] == 1
+    assert ledger["ledger_status"] == "CAPTURE_ERRORS_PRESENT"
+    assert ledger["capture_error_count"] == 1
+    assert ledger["blocked_signal_outcome_review"] is None
+    assert ledger["blocked_signal_outcome_review_status"] is None
+    assert preflight["status"] == "CAPTURE_ERRORS_NEED_OPERATOR_FIX"
+    assert preflight["answers"]["blocked_signal_outcomes_recorded"] is False
+    assert preflight["answers"]["blocked_signal_profitability_review_available"] is False
+    assert preflight["answers"]["admission_evaluation_errors_recorded"] is True
+
+
 def test_activation_preflight_surfaces_blocked_outcome_review_candidate(
     tmp_path: Path,
 ):
@@ -1971,7 +2111,7 @@ def test_activation_preflight_surfaces_blocked_outcome_review_candidate(
         )
         for index, net in enumerate([12.5, 11.5, 10.5, 12.0, 11.0] * 6)
     ]
-    ledger_rows = [
+    ledger_rows = _qualified_blocked_outcome_rows([
         {
             "record_type": "blocked_signal_outcome",
             "cost_model_version": "conservative_v1",
@@ -1994,7 +2134,7 @@ def test_activation_preflight_surfaces_blocked_outcome_review_candidate(
         for index, (attempt_id, generated_at, gross, net) in enumerate(
             _blocked_fixture_rows
         )
-    ]
+    ], context_prefix="preflight-review", lineage_as_of_utc_date=LIVE_LINEAGE_AS_OF_UTC_DATE)
     (lane_dir / "probe_ledger.jsonl").write_text(
         "".join(json.dumps(row) + "\n" for row in ledger_rows),
         encoding="utf-8",
@@ -2262,7 +2402,8 @@ def test_alpha_discovery_surfaces_cost_gate_ledger_progress(tmp_path: Path):
         )
         + "\n"
         + json.dumps(
-            {
+            _qualified_blocked_outcome_rows(
+                [{
                 "record_type": "blocked_signal_outcome",
                 "cost_model_version": "conservative_v1",
                 "generated_at_utc": "2026-06-21T12:15:00+00:00",
@@ -2270,7 +2411,10 @@ def test_alpha_discovery_surfaces_cost_gate_ledger_progress(tmp_path: Path):
                 "side_cell_key": "ma_crossover|ETHUSDT|Sell",
                 "source_admission_decision": "ORDER_AUTHORITY_NOT_GRANTED",
                 "realized_net_bps": 12.5,
-            }
+                }],
+                context_prefix="discovery-progress",
+                lineage_as_of_utc_date=LIVE_LINEAGE_AS_OF_UTC_DATE,
+            )[0]
         )
         + "\n",
         encoding="utf-8",
@@ -2378,7 +2522,7 @@ def test_alpha_discovery_routes_positive_blocked_outcome_review_candidate(
         json.dumps(plan),
         encoding="utf-8",
     )
-    ledger_rows = [
+    ledger_rows = _qualified_blocked_outcome_rows([
         {
             "record_type": "probe_admission_decision",
             "generated_at_utc": "2026-06-21T11:02:00+00:00",
@@ -2413,13 +2557,16 @@ def test_alpha_discovery_routes_positive_blocked_outcome_review_candidate(
             }
             for index, net in enumerate([12.5, 11.5, 10.5, 12.0, 11.0] * 6)
         ],
-    ]
+    ], context_prefix="discovery-positive", lineage_as_of_utc_date=LIVE_LINEAGE_AS_OF_UTC_DATE)
     (lane_dir / "probe_ledger.jsonl").write_text(
         "".join(json.dumps(row) + "\n" for row in ledger_rows),
         encoding="utf-8",
     )
     review = build_blocked_signal_outcome_review(
-        ledger_rows,
+        _qualified_blocked_outcome_rows(
+            ledger_rows,
+            context_prefix="discovery-positive-historical-review",
+        ),
         now_utc=dt.datetime(2026, 6, 21, 14, 20, tzinfo=dt.timezone.utc),
     )
     packet = build_false_negative_candidate_packet(
@@ -2504,7 +2651,7 @@ def test_alpha_discovery_blocks_when_blocked_outcome_review_fails_thresholds(
         encoding="utf-8",
     )
     # F1:補 distinct entry_ts(n_eff=3 ≥ min_outcomes,統計面可算;閾值仍不過)。
-    ledger_rows = [
+    ledger_rows = _qualified_blocked_outcome_rows([
         {
             "record_type": "blocked_signal_outcome",
             "cost_model_version": "conservative_v1",
@@ -2541,7 +2688,7 @@ def test_alpha_discovery_blocks_when_blocked_outcome_review_fails_thresholds(
             "entry_ts_ms": 1_781_964_000_000,
             "realized_net_bps": 0.5,
         },
-    ]
+    ], context_prefix="discovery-negative", lineage_as_of_utc_date=LIVE_LINEAGE_AS_OF_UTC_DATE)
     (lane_dir / "probe_ledger.jsonl").write_text(
         "".join(json.dumps(row) + "\n" for row in ledger_rows),
         encoding="utf-8",
@@ -2590,7 +2737,7 @@ def test_alpha_discovery_routes_cost_wall_blocked_outcomes_to_edge_amplification
         json.dumps(plan),
         encoding="utf-8",
     )
-    ledger_rows = [
+    ledger_rows = _qualified_blocked_outcome_rows([
         {
             "record_type": "blocked_signal_outcome",
             "cost_model_version": "conservative_v1",
@@ -2633,7 +2780,7 @@ def test_alpha_discovery_routes_cost_wall_blocked_outcomes_to_edge_amplification
             "cost_bps": 4.0,
             "realized_net_bps": 1.0,
         },
-    ]
+    ], context_prefix="discovery-cost-wall", lineage_as_of_utc_date=LIVE_LINEAGE_AS_OF_UTC_DATE)
     (lane_dir / "probe_ledger.jsonl").write_text(
         "".join(json.dumps(row) + "\n" for row in ledger_rows),
         encoding="utf-8",
@@ -3585,7 +3732,7 @@ def test_outcome_refresh_pg_price_rows_feed_batch_without_duplicate_queries():
 
 def test_blocked_signal_outcome_review_scorecard_is_conservative():
     scorecard = build_blocked_signal_outcome_review(
-        [
+        _qualified_blocked_outcome_rows([
             {
                 "record_type": "blocked_signal_outcome",
                 "cost_model_version": "conservative_v1",
@@ -3631,7 +3778,7 @@ def test_blocked_signal_outcome_review_scorecard_is_conservative():
                 "realized_net_bps": -1.0,
                 "horizon_minutes": 60,
             },
-        ],
+        ], context_prefix="review-conservative"),
         now_utc=dt.datetime(2026, 6, 21, 14, 30, tzinfo=dt.timezone.utc),
         cfg=BlockedOutcomeReviewConfig(
             min_outcomes_per_side_cell=3,
@@ -3685,14 +3832,14 @@ def test_blocked_signal_outcome_review_scorecard_is_conservative():
     assert round(scorecard["max_wrongful_block_score"], 6) == 3.444444
 
     insufficient = build_blocked_signal_outcome_review(
-        [
+        _qualified_blocked_outcome_rows([
             {
                 "record_type": "blocked_signal_outcome",
                 "cost_model_version": "conservative_v1",
                 "side_cell_key": "ma_crossover|ETHUSDT|Sell",
                 "realized_net_bps": 12.5,
             }
-        ],
+            ], context_prefix="review-insufficient", lineage_as_of_utc_date=LIVE_LINEAGE_AS_OF_UTC_DATE),
         cfg=BlockedOutcomeReviewConfig(min_outcomes_per_side_cell=3),
     )
     assert insufficient["status"] == "COLLECT_MORE_BLOCKED_SIGNAL_OUTCOMES"
@@ -3707,7 +3854,7 @@ def test_blocked_signal_outcome_review_scorecard_is_conservative():
 
 def test_blocked_signal_outcome_review_separates_cost_wall_from_no_edge():
     scorecard = build_blocked_signal_outcome_review(
-        [
+        _qualified_blocked_outcome_rows([
             {
                 "record_type": "blocked_signal_outcome",
                 "cost_model_version": "conservative_v1",
@@ -3744,7 +3891,7 @@ def test_blocked_signal_outcome_review_separates_cost_wall_from_no_edge():
                 "cost_bps": 4.0,
                 "realized_net_bps": 1.0,
             },
-        ],
+        ], context_prefix="review-cost-wall", lineage_as_of_utc_date=LIVE_LINEAGE_AS_OF_UTC_DATE),
         cfg=BlockedOutcomeReviewConfig(min_outcomes_per_side_cell=3),
     )
 
@@ -3765,7 +3912,7 @@ def test_blocked_signal_outcome_review_separates_cost_wall_from_no_edge():
 
 def test_false_negative_candidate_packet_ranks_cost_gate_escape_paths():
     scorecard = build_blocked_signal_outcome_review(
-        [
+        _qualified_blocked_outcome_rows([
             {
                 "record_type": "blocked_signal_outcome",
                 "cost_model_version": "conservative_v1",
@@ -3856,7 +4003,7 @@ def test_false_negative_candidate_packet_ranks_cost_gate_escape_paths():
                 "realized_net_bps": 1.0,
                 "horizon_minutes": 60,
             },
-        ],
+        ], context_prefix="review-false-negative"),
         cfg=BlockedOutcomeReviewConfig(
             min_outcomes_per_side_cell=3,
             # F1:n_eff=3 同日 fixture,n_eff/天數欄對齊到不攔(候選/成本牆分流
@@ -3910,7 +4057,7 @@ def test_false_negative_candidate_packet_ranks_cost_gate_escape_paths():
 
 def _false_negative_candidate_packet_fixture() -> dict:
     scorecard = build_blocked_signal_outcome_review(
-        [
+        _qualified_blocked_outcome_rows([
             {
                 "record_type": "blocked_signal_outcome",
                 "cost_model_version": "conservative_v1",
@@ -3956,7 +4103,7 @@ def _false_negative_candidate_packet_fixture() -> dict:
                 "realized_net_bps": 2.0,
                 "horizon_minutes": 60,
             },
-        ],
+        ], context_prefix="false-negative-fixture"),
         cfg=BlockedOutcomeReviewConfig(
             min_outcomes_per_side_cell=3,
             # F1:n_eff=3 同日 fixture,n_eff/天數欄對齊到不攔(候選/成本牆分流

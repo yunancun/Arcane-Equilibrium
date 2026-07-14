@@ -6,10 +6,22 @@ import datetime as dt
 
 import pytest
 
+from alpha_discovery_throughput.profitability_path_scorecard import (
+    build_profitability_path_scorecard,
+)
+from helper_scripts.research.tests.candidate_lineage_v2_test_support import (
+    attach_candidate_lineage_v2,
+)
+from cost_gate_learning_lane.outcome_review import (
+    BlockedOutcomeReviewConfig,
+    build_blocked_signal_outcome_review,
+    build_research_compatibility_blocked_signal_outcome_review_no_authority,
+)
 from cost_gate_learning_lane.runtime_adapter import read_jsonl_ledger
 from cost_gate_learning_lane.sealed_horizon_learning_evidence import (
     SEALED_HORIZON_LEARNING_EVIDENCE_SCHEMA_VERSION,
     SealedHorizonLearningEvidenceConfig,
+    build_sealed_horizon_learning_evidence_packet,
     build_sealed_horizon_learning_evidence_from_rows,
     build_sealed_horizon_reject_feature_sql,
     find_sealed_horizon_candidate,
@@ -172,11 +184,11 @@ def test_sealed_horizon_learning_evidence_records_240m_blocked_outcome(tmp_path)
     )
 
     assert packet["schema_version"] == SEALED_HORIZON_LEARNING_EVIDENCE_SCHEMA_VERSION
-    assert packet["status"] == "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT"
+    assert packet["status"] == "NO_QUALIFIED_LINEAGE_BLOCKED_SIGNAL_OUTCOMES"
     assert packet["answers"] == {
-        "sealed_candidate_materialized": True,
-        "blocked_signal_outcomes_recorded": True,
-        "candidate_clears_operator_review_gate": True,
+        "sealed_candidate_materialized": False,
+        "blocked_signal_outcomes_recorded": False,
+        "candidate_clears_operator_review_gate": False,
         "global_cost_gate_lowering_recommended": False,
         "main_cost_gate_adjustment": "NONE",
         "probe_authority_granted": False,
@@ -184,7 +196,10 @@ def test_sealed_horizon_learning_evidence_records_240m_blocked_outcome(tmp_path)
         "promotion_evidence": False,
     }
     assert materialized["decision_counts"] == {"ORDER_AUTHORITY_NOT_GRANTED": 1}
+    assert packet["materialization"]["raw_materialized_record_count"] == 1
     assert outcome_batch["blocked_signal_outcome_count"] == 1
+    assert packet["outcomes"]["raw_blocked_signal_outcome_count"] == 1
+    assert packet["outcomes"]["blocked_signal_outcome_count"] == 0
     outcome = outcome_batch["blocked_signal_outcomes"][0]
     assert outcome["horizon_minutes"] == 240
     assert outcome["default_horizon_minutes"] == 60
@@ -192,8 +207,201 @@ def test_sealed_horizon_learning_evidence_records_240m_blocked_outcome(tmp_path)
     # P1-2a:舊 4.0 常數的淨值移到 net_bps_optimistic;realized_net_bps 為保守權威淨值
     # (無分位 artifact → toml_tier 30bps fallback → cost≈92.3 → net≈7.7)。
     assert outcome["net_bps_optimistic"] == pytest.approx(96.0)
-    assert review["top_side_cell_key"] == "ma_crossover|BTCUSDT|Sell"
+    assert review["top_side_cell_key"] is None
     assert len(read_jsonl_ledger(ledger)) == 2
+
+
+def test_sealed_packet_quarantines_invalid_positive_lineage_from_outcome_metrics(
+    tmp_path,
+) -> None:
+    plan = _sealed_plan()
+    candidate = find_sealed_horizon_candidate(
+        plan,
+        "ma_crossover|BTCUSDT|Sell",
+    )
+    qualified = attach_candidate_lineage_v2(
+        {
+            "record_type": "blocked_signal_outcome",
+            "realized_net_bps": 10.0,
+            "gross_bps": 22.0,
+            "cost_bps": 12.0,
+            "cost_model_version": "conservative_v1",
+        },
+        context_id="ctx-sealed-qualified",
+        strategy_name="ma_crossover",
+        symbol="BTCUSDT",
+        side="Sell",
+        as_of_utc_date="2026-07-10",
+    )
+    invalid = attach_candidate_lineage_v2(
+        {
+            "record_type": "blocked_signal_outcome",
+            "realized_net_bps": 10_000.0,
+            "gross_bps": 10_012.0,
+            "cost_bps": 12.0,
+            "cost_model_version": "conservative_v1",
+        },
+        context_id="ctx-sealed-invalid-positive",
+        strategy_name="ma_crossover",
+        symbol="BTCUSDT",
+        side="Sell",
+        as_of_utc_date="2026-07-10",
+    )
+    invalid["side_cell_key"] = "ma_crossover|BTCUSDT|Buy"
+    review_cfg = BlockedOutcomeReviewConfig(
+        min_outcomes_per_side_cell=1,
+        min_effective_entries_per_side_cell=1,
+        min_distinct_entry_utc_days=1,
+        max_top_entry_day_share_pct=100.0,
+        min_net_positive_pct=1.0,
+    )
+    baseline_review = build_blocked_signal_outcome_review(
+        [qualified],
+        cfg=review_cfg,
+        now_utc=dt.datetime(2026, 7, 10, 18, tzinfo=dt.timezone.utc),
+    )
+    attacked_review = build_blocked_signal_outcome_review(
+        [qualified, invalid],
+        cfg=review_cfg,
+        now_utc=dt.datetime(2026, 7, 10, 18, tzinfo=dt.timezone.utc),
+    )
+
+    def packet(rows, review):
+        return build_sealed_horizon_learning_evidence_packet(
+            plan=plan,
+            candidate=candidate,
+            feature_row_count=len(rows),
+            materializer_batch={
+                "records": [
+                    {"decision": "ORDER_AUTHORITY_NOT_GRANTED"} for _ in rows
+                ],
+                "materialized_record_count": len(rows),
+                "appended_record_count": 0,
+            },
+            outcome_batch={
+                "blocked_signal_outcomes": rows,
+                "blocked_signal_outcome_count": len(rows),
+                "appended_outcome_count": 0,
+                "window_count": len(rows),
+                "price_observation_count": len(rows),
+                "horizon_minutes": 60,
+            },
+            review=review,
+            ledger_path=tmp_path / "sealed_attack.jsonl",
+            generated_at_utc=dt.datetime(
+                2026, 7, 10, 18, tzinfo=dt.timezone.utc
+            ),
+        )
+
+    baseline = packet([qualified], baseline_review)
+    attacked = packet([qualified, invalid], attacked_review)
+
+    assert attacked["status"] == baseline["status"]
+    assert attacked["review"] == baseline["review"]
+    assert attacked["outcomes"]["blocked_signal_outcome_count"] == 1
+    assert attacked["outcomes"]["outcome_count"] == 1
+    assert attacked["outcomes"]["avg_net_bps"] == 10.0
+    assert attacked["outcomes"]["net_positive_pct"] == 100.0
+    assert attacked["answers"] == baseline["answers"]
+    assert attacked["answers"]["candidate_clears_operator_review_gate"] is True
+    assert attacked["outcomes"]["raw_blocked_signal_outcome_count"] == 2
+    assert attacked["outcomes"]["raw_outcome_count"] == 2
+    assert attacked["outcomes"]["raw_avg_net_bps"] == 5_005.0
+    assert attacked["materialization"]["input_feature_row_count"] == 1
+    assert attacked["materialization"]["materialized_record_count"] == 1
+    assert attacked["materialization"]["decision_counts"] == {
+        "ORDER_AUTHORITY_NOT_GRANTED": 1
+    }
+    assert attacked["materialization"]["all_order_authority_not_granted"] is True
+    assert attacked["materialization"]["raw_materialized_record_count"] == 2
+
+    counterfactual = {
+        "friction_bps": 4.0,
+        "learning_lane_scorecard": {
+            "profit_opportunity_ranking": {"top_side_cells": []},
+            "horizon_stability_scorecard": {
+                "top_side_cells": [
+                    {
+                        "side_cell_key": candidate["side_cell_key"],
+                        "status": "MIXED_HORIZON_RESPONSE",
+                        "candidate_horizons": [240],
+                        "block_confirmed_horizons": [60],
+                        "observed_horizons": [60, 240],
+                        "best_horizon_minutes": 240,
+                    }
+                ]
+            },
+        },
+    }
+    sealed_replay = {
+        "schema_version": "horizon_specific_sealed_replay_packet_v1",
+        "status": "SEALED_HORIZON_REPLAY_READY_FOR_OPERATOR_REVIEW",
+        "selection": {
+            "selected": {
+                "side_cell_key": candidate["side_cell_key"],
+                "best_horizon_minutes": 240,
+                "primary_horizon_minutes": 60,
+            }
+        },
+        "replay_evaluation": {
+            "failed_gate_names": [],
+            "best_horizon": {"horizon_minutes": 240},
+            "primary_horizon": {"horizon_minutes": 60},
+        },
+        "answers": {
+            "sealed_replay_passed": True,
+            "global_cost_gate_lowering_recommended": False,
+            "probe_authority_granted": False,
+            "order_authority_granted": False,
+            "promotion_evidence": False,
+        },
+    }
+    strict_scorecard = build_profitability_path_scorecard(
+        cost_gate_counterfactual=counterfactual,
+        horizon_sealed_replay=sealed_replay,
+        horizon_learning_evidence=attacked,
+        now_utc=dt.datetime(2026, 7, 10, 18, tzinfo=dt.timezone.utc),
+    )
+    strict_path = {
+        row["path_id"]: row for row in strict_scorecard["top_paths"]
+    }[f"horizon_edge_amplification:{candidate['side_cell_key']}"]
+    assert strict_path["status"] == (
+        "SEALED_HORIZON_LEARNING_EVIDENCE_READY_FOR_OPERATOR_REVIEW"
+    )
+    assert strict_path["evidence"]["sealed_learning_input_feature_row_count"] == 1
+    assert strict_path["evidence"]["sealed_learning_materialized_record_count"] == 1
+    assert strict_path["evidence"]["sealed_learning_blocked_signal_outcome_count"] == 1
+    assert strict_path["evidence"]["sealed_learning_avg_net_bps"] == 10.0
+    assert not any(
+        key.startswith("sealed_learning_raw_")
+        for key in strict_path["evidence"]
+    )
+
+    compatibility_review = (
+        build_research_compatibility_blocked_signal_outcome_review_no_authority(
+            [qualified, invalid],
+            cfg=review_cfg,
+            now_utc=dt.datetime(2026, 7, 10, 18, tzinfo=dt.timezone.utc),
+        )
+    )
+    assert compatibility_review["authority_eligible"] is False
+    assert compatibility_review["operator_review_eligible"] is False
+    compatibility_review["side_cell_key"] = candidate["side_cell_key"]
+    compatibility_scorecard = build_profitability_path_scorecard(
+        cost_gate_counterfactual=counterfactual,
+        horizon_sealed_replay=sealed_replay,
+        horizon_learning_evidence=compatibility_review,
+        now_utc=dt.datetime(2026, 7, 10, 18, tzinfo=dt.timezone.utc),
+    )
+    compatibility_path = {
+        row["path_id"]: row for row in compatibility_scorecard["top_paths"]
+    }[f"horizon_edge_amplification:{candidate['side_cell_key']}"]
+    assert compatibility_path["status"] == (
+        "SEALED_HORIZON_REPLAY_READY_FOR_LEARNING_ACCUMULATION"
+    )
+    assert compatibility_path["evidence"][
+        "sealed_learning_operator_review_ready"
+    ] is False
 
 
 def test_non_sealed_candidate_is_rejected() -> None:
