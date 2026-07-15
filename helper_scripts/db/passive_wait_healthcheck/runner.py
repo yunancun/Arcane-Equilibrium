@@ -404,6 +404,14 @@ from .checks_crontab_governance import (  # noqa: F401
     check_92_crontab_matches_repo_render,
     check_93_crontab_replace_has_manifest,
 )
+# [95] OPS F4 logrotate 治理巡檢（2026-07-15）— logrotate runtime conf 漂移事故 follow-up。
+# [95] runtime logrotate conf 整檔 sha256 != repo canonical > 24h = FAIL（治理外漂移偵測;
+# 安裝契約=整檔 cp,位元組平價即契約 machine-check）。純 filesystem（hashlib sha256 +
+# mtime,零 subprocess），跑於 conn.close() 後。
+# 預設 WARN；OPENCLAW_LOGROTATE_GOVERNANCE_REQUIRED=1 升 FAIL。
+from .checks_logrotate_governance import (  # noqa: F401
+    check_95_logrotate_runtime_matches_repo,
+)
 
 
 # Module docstring used by argparse to show the passive-wait healthcheck
@@ -438,6 +446,7 @@ The checks split between DB pipelines + filesystem/observability sentinels:
     [92]                                                  P0-2④ — live crontab render vs repo 正本 render drift (>24h FAIL)
     [93]                                                  P0-2④ — journal crontab REPLACE without matching manifest (governance-bypass detect)
     [94]                                                  冷審計 R2 F-1b — bybit_announcement_sentinel 30min cron heartbeat sentinel (stale > 2h WARN)
+    [95]                                                  OPS F4 — runtime logrotate conf 整檔 sha256 vs repo canonical drift (>24h 升級)
 
 F7 sentinels [22]-[29] added 2026-04-26 by MIT DB audit + E5 engine.log dive:
   [22] trading_pipeline_silent_gap    (DCS active but fills cliff)
@@ -1624,6 +1633,16 @@ def main() -> int:
     results.append(
         ("[94] bybit_announcement_sentinel_cron_fires", s, m)
     )
+
+    # [95] OPS F4 logrotate 治理巡檢（2026-07-15）— logrotate runtime conf 漂移事故
+    # follow-up（runtime 副本漂回只蓋 /tmp 死路徑，var 真 engine.log 輪替自 06-27 空轉、
+    # alpha cron log 裸奔到 4.5GB 才被人工發現）。trade-core runtime conf 整檔 sha256 vs
+    # repo canonical `helper_scripts/logrotate-openclaw.conf` 不一致 > 24h → 升級（安裝
+    # 契約=整檔 cp，位元組平價即契約 machine-check）。純 filesystem 不依賴 runner cur，
+    # 跑於 conn.close() 後（與 [92]-[94] 同性質）。預設 WARN；
+    # OPENCLAW_LOGROTATE_GOVERNANCE_REQUIRED=1 升 FAIL。
+    s, m = check_95_logrotate_runtime_matches_repo()
+    results.append(("[95] logrotate_runtime_matches_repo", s, m))
 
     # NOTE: [30] cost_edge_advisor_status moved INSIDE the cursor block by
     # G3-09 Phase B Wave 1 (2026-04-28). Phase A version was filesystem-only
