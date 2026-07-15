@@ -3,7 +3,10 @@
 
 This script never infers approval from a clean checkout or a PM statement.  It
 binds an immutable intent digest, source HEAD, clean tree, host, expiry, typed
-confirmation, and the exact component script bytes before any effect.
+confirmation, and the exact component script bytes before any effect.  Its
+generic intent-only contract remains producer-independent.  The apply path
+separately admits only ``live_demo``, the identity its current local probe can
+attest.
 """
 
 from __future__ import annotations
@@ -39,6 +42,10 @@ from agent_governance_effects import (  # noqa: E402
     validate_runtime_environment_attestation,
 )
 from agent_governance_schema import schema_subset_errors  # noqa: E402
+from runtime_environment_probe import (  # noqa: E402
+    ATTESTED_TARGET_ENVIRONMENT,
+    probe_runtime_environment,
+)
 
 
 DEPLOY_COMPONENT = REPO_ROOT / "helper_scripts/build_then_restart_atomic.sh"
@@ -138,6 +145,17 @@ def validate_intent(
     return errors
 
 
+def local_probe_target_environment_errors(intent: dict[str, Any]) -> list[str]:
+    """Bind producer capability only when the caller requests apply."""
+
+    if intent.get("target_environment") == ATTESTED_TARGET_ENVIRONMENT:
+        return []
+    return [
+        "target_environment is unsupported by the local runtime probe; "
+        f"expected {ATTESTED_TARGET_ENVIRONMENT}"
+    ]
+
+
 def generated_receipt_result(receipt: Any) -> tuple[int, list[str]]:
     """Return success only for a structurally canonical apply receipt.
 
@@ -156,17 +174,22 @@ def probe_local_runtime_environment(
     expected_source_head: str,
     now: str,
 ) -> tuple[dict[str, Any] | None, list[str]]:
-    """Fail closed until runtime exposes a non-secret, reproducible identity probe.
+    """Run the local no-contact identity probe; caller labels are never facts."""
 
-    Process argv/environment and deployment intent labels are not sufficient to
-    prove the selected endpoint, authorization scope, and effective mode.  The
-    Adapter therefore remains non-executable instead of manufacturing those
-    facts from caller input.
-    """
+    return probe_runtime_environment(
+        phase=phase,
+        expected_host=expected_host,
+        expected_source_head=expected_source_head,
+        now=now,
+    )
 
-    _ = (phase, expected_host, expected_source_head, now)
-    return None, [
-        "RUNTIME_ENVIRONMENT_PROBE_UNAVAILABLE: no trusted local runtime identity probe"
+
+def deploy_recovery_control_blockers() -> list[str]:
+    """Keep apply disabled until rollback and a stable observation window bind."""
+
+    return [
+        "DEPLOY_ROLLBACK_BINDING_UNAVAILABLE",
+        "DEPLOY_STABILITY_OBSERVATION_WINDOW_UNAVAILABLE",
     ]
 
 
@@ -242,12 +265,25 @@ def main(argv: list[str] | None = None) -> int:
                     "status": "INTENT_VALIDATED_APPLY_DISABLED",
                     "intent_id": intent["intent_id"],
                     "apply_executable": False,
-                    "blocked_on": "trusted local runtime identity probe",
+                    "blocked_on": "deploy recovery controls",
                 },
                 ensure_ascii=False,
             )
         )
         return 0
+    probe_target_errors = local_probe_target_environment_errors(intent)
+    if probe_target_errors:
+        print(
+            json.dumps(
+                {
+                    "status": "RUNTIME_ENVIRONMENT_PROBE_TARGET_UNSUPPORTED",
+                    "errors": probe_target_errors,
+                },
+                ensure_ascii=False,
+            ),
+            file=sys.stderr,
+        )
+        return 4
     if os.environ.get("OPENCLAW_DEPLOY_ADAPTER_APPLY") != "1":
         print("apply requires OPENCLAW_DEPLOY_ADAPTER_APPLY=1", file=sys.stderr)
         return 2
@@ -303,6 +339,20 @@ def main(argv: list[str] | None = None) -> int:
         print(
             json.dumps(
                 {"status": "RUNTIME_ENVIRONMENT_ATTESTATION_MISMATCH", "errors": reconciliation_errors},
+                ensure_ascii=False,
+            ),
+            file=sys.stderr,
+        )
+        return 4
+    recovery_blockers = deploy_recovery_control_blockers()
+    if recovery_blockers:
+        print(
+            json.dumps(
+                {
+                    "status": "DEPLOY_RECOVERY_CONTROLS_UNBOUND",
+                    "apply_executable": False,
+                    "errors": recovery_blockers,
+                },
                 ensure_ascii=False,
             ),
             file=sys.stderr,

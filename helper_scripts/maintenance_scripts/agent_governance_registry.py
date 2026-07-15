@@ -238,10 +238,10 @@ def validate_registry(registry: dict[str, Any], root: Path = REPO_ROOT) -> list[
         if adapter_id == "broker_probe_adapter_v1" and adapter.get("status") != "declared_fail_closed_unsupported":
             errors.append("broker_probe_adapter_v1 must remain declared fail-closed until implemented")
         if adapter_id == "deploy_adapter_v1" and adapter.get("status") != (
-            "declared_apply_disabled_until_trusted_runtime_probe"
+            "declared_apply_disabled_until_recovery_controls_bound"
         ):
             errors.append(
-                "deploy_adapter_v1 must remain apply-disabled until a trusted runtime probe exists"
+                "deploy_adapter_v1 must remain apply-disabled until recovery controls are bound"
             )
         paths = list(adapter.get("implementation_paths", [])) + list(adapter.get("component_paths", []))
         if adapter.get("intent_schema_path"):

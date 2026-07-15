@@ -19,6 +19,7 @@ if str(IMPLEMENTATION) not in sys.path:
     sys.path.insert(0, str(IMPLEMENTATION))
 
 import agent_governance_command_capture_v2 as capture_v2  # noqa: E402
+from agent_governance_capture_binding import collect_capture_evidence  # noqa: E402
 from agent_governance_context import capture_repository_baseline  # noqa: E402
 from agent_governance_execution import (  # noqa: E402
     compile_context,
@@ -51,6 +52,31 @@ def _review_context() -> tuple[dict, dict]:
     }
     routed = route_task(facts)
     plan = compile_context("E2", routed["task_facts"])
+    return materialize_context_artifact(plan), routed
+
+
+def _operations_verification_context() -> tuple[dict, dict]:
+    verification_scope = [
+        "helper_scripts/maintenance_scripts/runtime_environment_probe.py"
+    ]
+    facts = {
+        "task_shape": "review",
+        "surfaces": ["operations"],
+        "risk": "medium",
+        "uncertainty": "low",
+        "side_effect_class": "none",
+        "objective": "capture one bounded local runtime identity probe",
+        "scope": verification_scope,
+        "dirty_scope": [],
+        "verification_scope": verification_scope,
+        "acceptance_criteria": ["one exact read-only command receipt"],
+        "hard_stops": ["no runtime mutation"],
+        "baseline": capture_repository_baseline(),
+        "direct_interfaces": ["runtime_environment_probe_v1"],
+        "previous_failure": "no derived read-only path scope",
+    }
+    routed = route_task(facts)
+    plan = compile_context("OPS", routed["task_facts"])
     return materialize_context_artifact(plan), routed
 
 
@@ -132,6 +158,109 @@ def test_native_node_and_dispatch_scope_are_derived_not_caller_asserted() -> Non
     assert "path_scope" not in inspect.signature(
         capture_v2.capture_governed_command
     ).parameters
+
+
+def test_verification_scope_binds_read_only_capture_and_closure_replay() -> None:
+    artifact, routed = _operations_verification_context()
+    task = next(
+        item for item in routed["required_role_nodes"]
+        if item["node_id"] == "ops_preflight"
+    )
+    assert task["path_scope"] == []
+    record = capture_v2.capture_governed_command(
+        native_agent="OPS",
+        node_id="ops_preflight",
+        context_artifact=artifact,
+        argv=["git", "rev-parse", "--is-inside-work-tree"],
+        root=ROOT,
+    )
+    verification_scope = [
+        "helper_scripts/maintenance_scripts/runtime_environment_probe.py"
+    ]
+    assert record["execution_task"]["path_scope"] == []
+    assert record["path_scope"] == verification_scope
+
+    wrapper = {
+        "id": "command:ops-runtime-probe",
+        "scope": "test",
+        "kind": "command_capture_v2",
+        "digest": record["record_digest"],
+        "artifact": record,
+    }
+    captured = collect_capture_evidence(
+        [wrapper],
+        expected_scope=[],
+        expected_verification_scope=verification_scope,
+        expected_source_head=subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, check=True,
+            text=True, capture_output=True,
+        ).stdout.strip(),
+        expected_task_contract_digest=artifact["task_contract_digest"],
+        expected_context_artifact_digest=artifact["artifact_digest"],
+        require_current_repository=False,
+        expected_execution_tasks={"ops_preflight": task},
+    )
+    assert captured["errors"] == []
+
+    forged = collect_capture_evidence(
+        [wrapper],
+        expected_scope=[],
+        expected_verification_scope=["helper_scripts/maintenance_scripts/other.py"],
+        expected_source_head=subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, check=True,
+            text=True, capture_output=True,
+        ).stdout.strip(),
+        expected_task_contract_digest=artifact["task_contract_digest"],
+        expected_context_artifact_digest=artifact["artifact_digest"],
+        require_current_repository=False,
+        expected_execution_tasks={"ops_preflight": task},
+    )
+    assert any("path_scope differs" in error for error in forged["errors"])
+
+
+def test_verification_scope_cannot_enable_writer_or_empty_capture_scope() -> None:
+    writer_facts = {
+        "task_shape": "implementation", "surfaces": ["python"],
+        "risk": "low", "uncertainty": "low", "side_effect_class": "repo_write",
+        "dirty_scope": ["src/owned.py"],
+        "verification_scope": ["src/owned.py"],
+        "task_prompt": "write only the owned source",
+        "objective": "write only the owned source",
+        "scope": ["src/owned.py"],
+        "acceptance_criteria": ["source changed"],
+        "hard_stops": ["no runtime effect"],
+        "baseline": capture_repository_baseline(),
+        "direct_interfaces": ["owned.py"],
+        "previous_failure": "none",
+    }
+    routed = route_task(writer_facts)
+    writer_artifact = materialize_context_artifact(
+        compile_context("E1", routed["task_facts"])
+    )
+    with pytest.raises(PermissionError, match="restricted to read-only"):
+        capture_v2._bound_execution_task(
+            writer_artifact, "E1", "implementation", ROOT
+        )
+
+    scope_less_facts = {
+        "task_shape": "review", "surfaces": ["operations"],
+        "risk": "medium", "uncertainty": "low", "side_effect_class": "none",
+        "dirty_scope": [], "task_prompt": "deny an unscoped runtime review",
+        "objective": "deny an unscoped runtime review", "scope": ["runtime"],
+        "acceptance_criteria": ["fail closed"],
+        "hard_stops": ["no runtime mutation"],
+        "baseline": capture_repository_baseline(),
+        "direct_interfaces": ["runtime_environment_probe_v1"],
+        "previous_failure": "none",
+    }
+    scope_less_route = route_task(scope_less_facts)
+    scope_less_artifact = materialize_context_artifact(
+        compile_context("OPS", scope_less_route["task_facts"])
+    )
+    with pytest.raises(ValueError, match="no non-empty derived path_scope"):
+        capture_v2._bound_execution_task(
+            scope_less_artifact, "OPS", "ops_preflight", ROOT
+        )
 
 
 def test_argv_is_shell_free_and_injection_text_is_literal(

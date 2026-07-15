@@ -102,9 +102,14 @@ or private broker authority. `public_web_read` is distinct read-only evidence
 acquisition: open the public URL and bind citation/capture provenance; tool
 availability is a separate platform fact. Rust/source
 tests run on Mac. Linux `trade-core` cargo is forbidden to delegated roles;
-Linux empirical evidence is an allowlisted read-only probe. Deploy and broker
-contact cannot be inferred from visible runtime paths: deploy apply is presently
-disabled until a trusted local runtime identity probe exists, and development-
+Linux empirical evidence requires a separately governed, allowlisted read-only
+transport/capture. Deploy and broker contact cannot be inferred from visible
+runtime paths. `runtime_environment_probe_v1` now exists as a local-only,
+non-secret, fail-closed source capability, and the Deploy Adapter independently
+reruns and reconciles it; the probe is not remote transport, platform-attested
+runtime evidence, deploy readiness, or effect authority. Deploy apply remains
+disabled before component invocation until exact rollback binding and a stable
+observation-window contract are separately bound and verified. Development-
 agent broker/private external contact has no closure-admissible Adapter. Direct
 `psql` is also denied until a local-socket/read-only-identity Adapter removes
 ambient `psqlrc` and `PG*` routing.

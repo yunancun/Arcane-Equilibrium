@@ -557,6 +557,7 @@ restart_engine() {
     # 啟用狀態可跨 restart_all 持久保存；臨時命令列 override 仍優先。
     local enable_paper
     enable_paper="${OPENCLAW_ENABLE_PAPER:-$(grep '^OPENCLAW_ENABLE_PAPER=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
+    enable_paper="${enable_paper:-0}"
     # W-B Agent Decision Spine runtime rollout mode. Operator env wins for
     # one-shot tests; otherwise persist the runtime choice in the secrets env
     # file so a later plain restart_all keeps the same shadow/canary/primary
@@ -582,12 +583,13 @@ restart_engine() {
     # bybit_rest_client.rs L909），未設 → fail-closed Err。原本 restart_all.sh 從不
     # 傳該 var，導致 engine PID environ 永遠缺 Gate b → C10 etc. 任何 mainnet REST
     # call 立即 blocked。修法：對齊 OPENCLAW_ENABLE_PAPER 模式，operator env 優先，
-    # 否則讀 basic_system_services.env；空/缺 → 留空（engine 仍 fail-closed），
+    # 否則讀 basic_system_services.env；空/缺 → 顯式 0（engine 仍 fail-closed），
     # 不在 shell 寫死 "1" 以保留 fail-closed 預設語意。
     # 為什麼 fail-closed by default：mainnet gate 是 CLAUDE.md §四 五閘之一，shell
     # 預設啟用 → 任何手動 restart_all.sh 都會解閘，違反 survival > profit。
     local allow_mainnet
     allow_mainnet="${OPENCLAW_ALLOW_MAINNET:-$(grep '^OPENCLAW_ALLOW_MAINNET=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
+    allow_mainnet="${allow_mainnet:-0}"
     # Phase 1/3 智能調參旗標（engine 側，default-OFF fail-closed，鏡像 allow_mainnet pattern）：
     # RICH_INPUT = StrategistScheduler 富輸入 tuner（demo；OFF → payload bit-identical）；
     # RISKCONFIG_AGENT_TUNING = claude_teacher RiskConfigDirectiveSink（demo-Arc-only，
@@ -636,12 +638,15 @@ restart_engine() {
     demo_learning_lane_plan="${OPENCLAW_DEMO_LEARNING_LANE_PLAN:-$(grep '^OPENCLAW_DEMO_LEARNING_LANE_PLAN=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
     demo_learning_lane_ledger="${OPENCLAW_DEMO_LEARNING_LANE_LEDGER:-$(grep '^OPENCLAW_DEMO_LEARNING_LANE_LEDGER=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
     bounded_probe_adapter_enabled="${OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED:-$(grep '^OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
+    demo_learning_lane_writer="${demo_learning_lane_writer:-0}"
+    bounded_probe_adapter_enabled="${bounded_probe_adapter_enabled:-0}"
     # OPS-F1 (2026-07-15): engine.log 重導向必須 '>>'(O_APPEND) 非 '>'——缺 O_APPEND
     # 的 fd 被 logrotate copytruncate 截斷後,寫入 offset 不回捲 → NUL 前綴 sparse
     # 檔,表觀 size 立回 ≥1G 致每小時輪替空轉,且 .gz 歸檔開頭全 NUL 毀法證可讀性
     # (6/27 engine.log.1.gz 實錘)。重啟語意不變:上方 rotate_engine_log() 已先 mv
     # 歸檔,'>' 與 '>>' 對新檔行為相同。
-    OPENCLAW_DATA_DIR="$DATA_DIR" OPENCLAW_IPC_SOCKET="$ENGINE_SOCKET" OPENCLAW_CANARY_MODE="${OPENCLAW_CANARY_MODE:-0}" \
+    OPENCLAW_DATA_DIR="$DATA_DIR" OPENCLAW_SECRETS_DIR="$BYBIT_SECRETS_DIR" \
+        OPENCLAW_IPC_SOCKET="$ENGINE_SOCKET" OPENCLAW_CANARY_MODE="${OPENCLAW_CANARY_MODE:-0}" \
         OPENCLAW_DATABASE_URL_FILE="$OPENCLAW_DATABASE_URL_FILE" \
         OPENCLAW_IPC_SECRET_FILE="$OPENCLAW_IPC_SECRET_FILE" \
         OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE="$OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE" \

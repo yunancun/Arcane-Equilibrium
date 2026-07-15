@@ -14,8 +14,11 @@ generated view、typed task contract + hybrid risk-DAG、lossless elastic Contex
 three-tier capture、canonical call-manifest/wave receipts、before/after repo-change proof、
 strict consumption aggregation、Full Audit/
 profit controller、`closure_packet_v1` 驗證、deterministic `project-closure` Report Sink 與
-fail-closed read-only Bash allowlist。Deploy intent/receipt contract 已定義，但 apply 因缺少
-trusted local runtime identity probe 而停用；IBKR/Bybit paths 是 reference surface，
+fail-closed read-only Bash allowlist。Deploy intent/receipt contract 已定義；local-only、
+non-secret、fail-closed runtime identity probe source 已存在並由 Deploy Adapter 獨立重跑/
+reconcile，但它不是 remote transport、platform-attested runtime evidence、deploy readiness
+或 effect authority。Apply 仍在 rollback binding 與 stable observation-window controls 未綁定時，
+於 component invocation 前停用；IBKR/Bybit paths 是 reference surface，
 development-agent broker contact Adapter 尚未實作。這是開發 sub-agent 治理工具，不是 trading runtime
 Agent；不連 broker/PG、不讀 secret、不 deploy/restart、不授權 order/live。正本設計
 見 `docs/agents/development-agent-governance.md` / ADR-0050；回歸測試見
@@ -1680,7 +1683,8 @@ fail-closed，total-miss + partial-miss 同歸此判，絕不誤報 PASS_CAPTURE
 | `maintenance_scripts/agent_governance_projection.py` | 已驗證 `closure_packet_v1` 的 deterministic Markdown projection；不另造 authority。 |
 | `maintenance_scripts/agent_governance_permissions.py` | Governance Module 內部 permission Implementation：repo/runtime path scope、single-command shell policy、safe health curl；direct `psql` 全拒直到 read-only-identity Adapter 完成；由 public CLI 呼叫。 |
 | `maintenance_scripts/agent_governance_schema.py` | Governance Module 共用 stdlib JSON-Schema subset；實際執行 closure、effect receipt 與 typed context-evidence 的 checked-in schema。 |
-| `maintenance_scripts/deploy_intent_adapter.py` | `deployment_intent_v1` seam：驗 exact intent 與 typed safe-runtime contract；目前因沒有 trusted local runtime identity probe，intent-only 回 apply-disabled，`--apply` 會在 component invocation 前 fail closed。 |
+| `maintenance_scripts/runtime_environment_probe.py` | `runtime_environment_probe_v1`：local-only、non-secret、fail-closed runtime identity capture，驗 source HEAD、唯一 process/executable/cwd/start identity、allowlisted environment projection、explicit data/secrets dirs 與 Demo endpoint，輸出 typed blockers 或 `runtime_environment_attestation_v1`。此 source capability 不是 remote transport、platform-attested runtime evidence、deploy readiness 或 effect authority。 |
+| `maintenance_scripts/deploy_intent_adapter.py` | `deployment_intent_v1` seam：驗 exact intent 與 typed safe-runtime contract，獨立重跑 `runtime_environment_probe_v1` 並 reconcile supplied attestation。Intent-only 仍回 apply-disabled；`--apply` 即使 probe reconciliation 通過，也因 rollback binding 與 stable observation-window controls 未綁定而在 component invocation 前 fail closed。 |
 | `maintenance_scripts/prune_dated_files.sh` | 清理過期的 dated 輸出文件 |
 | `maintenance_scripts/regen_doc_inventory.py` | 重生 docs/_indexes/ 內 doc cleanup dry-run JSON（schema v2，含 supersedes_candidate 偵測；TW doc cleanup SOP 用） |
 
