@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
+from pathlib import Path
+
+import cost_gate_learning_lane.bounded_probe_result_review as result_review_module
 
 from cost_gate_learning_lane.bounded_probe_result_review import (
     BOUNDED_PROBE_RESULT_REVIEW_SCHEMA_VERSION,
@@ -13,6 +17,11 @@ from cost_gate_learning_lane.contract import (
     PROBE_ADMISSION_DECISION_RECORD_TYPE,
     PROBE_OUTCOME_RECORD_TYPE,
 )
+from cost_gate_learning_lane.runtime_adapter import (
+    LearningLedgerPartitions,
+    append_jsonl_ledger,
+)
+from tests.test_candidate_lineage_propagation import _capture_blocked_ledger_row
 
 
 NOW = dt.datetime(2026, 6, 22, 13, 0, tzinfo=dt.timezone.utc)
@@ -519,3 +528,113 @@ def test_not_ready_design_cannot_be_used_as_result_review() -> None:
     assert packet["reason"] == "bounded_probe_design_not_ready_for_result_review"
     assert packet["answers"]["operator_review_required"] is True
     assert packet["answers"]["continue_probe_without_operator_review_allowed"] is False
+
+
+def _run_result_review_cli(
+    *,
+    monkeypatch,
+    preflight_path: Path,
+    ledger_path: Path,
+    output_path: Path,
+) -> dict:
+    markdown_path = output_path.with_suffix(".md")
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "bounded_probe_result_review.py",
+            "--preflight-json",
+            str(preflight_path),
+            "--ledger",
+            str(ledger_path),
+            "--output",
+            str(markdown_path),
+            "--json-output",
+            str(output_path),
+        ],
+    )
+    monkeypatch.setattr(result_review_module, "_utc_now", lambda: NOW)
+    assert result_review_module.main() == 0
+    return json.loads(output_path.read_text(encoding="utf-8"))
+
+
+def test_result_review_cli_ignores_exact_capture_blocked_rows(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    preflight_path = tmp_path / "preflight.json"
+    preflight_path.write_text(
+        json.dumps(_preflight(), ensure_ascii=False),
+        encoding="utf-8",
+    )
+    admission = _admission(1)
+    outcome = _fill_backed_outcome(1, 2.0)
+    outcome_only_ledger = tmp_path / "outcome-only.jsonl"
+    mixed_ledger = tmp_path / "mixed.jsonl"
+    append_jsonl_ledger(outcome_only_ledger, admission)
+    append_jsonl_ledger(outcome_only_ledger, outcome)
+    append_jsonl_ledger(mixed_ledger, admission)
+    append_jsonl_ledger(mixed_ledger, outcome)
+    append_jsonl_ledger(mixed_ledger, _capture_blocked_ledger_row())
+
+    outcome_only = _run_result_review_cli(
+        monkeypatch=monkeypatch,
+        preflight_path=preflight_path,
+        ledger_path=outcome_only_ledger,
+        output_path=tmp_path / "outcome-only.json",
+    )
+    mixed = _run_result_review_cli(
+        monkeypatch=monkeypatch,
+        preflight_path=preflight_path,
+        ledger_path=mixed_ledger,
+        output_path=tmp_path / "mixed.json",
+    )
+
+    assert mixed == outcome_only
+    assert mixed["probe_result_summary"]["admitted_probe_attempt_count"] == 1
+
+
+def test_result_review_cli_passes_outcome_partition_not_dedup_partition(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    preflight_path = tmp_path / "preflight.json"
+    preflight_path.write_text(json.dumps(_preflight()), encoding="utf-8")
+    ledger_path = tmp_path / "ledger.jsonl"
+    outcome_rows: list[dict] = []
+    dedup_rows = [{"record_type": "dedup-only-sentinel"}]
+    partitions = LearningLedgerPartitions(
+        outcome_rows=outcome_rows,
+        dedup_rows=dedup_rows,
+        quarantined_capture_blocked_rows=dedup_rows,
+    )
+    observed: dict[str, object] = {}
+    original_builder = result_review_module.build_bounded_demo_probe_result_review
+
+    def _spy_builder(*, preflight, ledger_rows, now_utc=None):
+        observed["ledger_rows"] = ledger_rows
+        return original_builder(
+            preflight=preflight,
+            ledger_rows=ledger_rows,
+            now_utc=now_utc,
+        )
+
+    monkeypatch.setattr(
+        result_review_module,
+        "read_learning_ledger_partitions",
+        lambda _path: partitions,
+    )
+    monkeypatch.setattr(
+        result_review_module,
+        "build_bounded_demo_probe_result_review",
+        _spy_builder,
+    )
+
+    _run_result_review_cli(
+        monkeypatch=monkeypatch,
+        preflight_path=preflight_path,
+        ledger_path=ledger_path,
+        output_path=tmp_path / "review.json",
+    )
+
+    assert observed["ledger_rows"] is outcome_rows
+    assert observed["ledger_rows"] is not dedup_rows
