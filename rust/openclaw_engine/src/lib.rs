@@ -64,7 +64,8 @@ pub mod bounded_probe_near_touch;
 // 常量 + boot_history.jsonl append，讓運行進程的代碼世代可對表部署 HEAD。
 pub mod boot_observability;
 pub mod canary_writer;
-// WP2-B B1：Cost Gate organic reject 的不可變候選 lineage 捕獲；純資料，零權限。
+// WP2-B B1：Cost Gate organic reject 的不可變候選 lineage/source 捕獲；純資料，零權限。
+pub mod candidate_evaluation_source_snapshot;
 pub mod candidate_event_context;
 pub mod claude_teacher;
 pub mod combine_layer;

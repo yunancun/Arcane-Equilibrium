@@ -24,6 +24,9 @@ use crate::bounded_probe_active_order::{
     ActiveBoundedProbeOrderDraft, ActiveBoundedProbeOrderRequest,
 };
 use crate::bounded_probe_near_touch::BoundedProbePlacementDecision;
+use crate::candidate_evaluation_source_snapshot::{
+    validate_candidate_evaluation_source_snapshot, CandidateEvaluationSourceSnapshotV1,
+};
 use crate::demo_learning_lane::{
     evaluate_probe_admission, AdmissionConfig, DemoLearningLanePlan, LedgerRecord, RejectEvent,
 };
@@ -56,6 +59,7 @@ pub(crate) struct WriterMsg {
     pub(crate) placement_decision: Option<BoundedProbePlacementDecision>,
     pub(crate) active_order_request: Option<ActiveBoundedProbeOrderRequest>,
     pub(crate) order_dispatch_tx: Option<tokio::sync::mpsc::UnboundedSender<OrderDispatchRequest>>,
+    pub(crate) candidate_evaluation_source_snapshot: Option<CandidateEvaluationSourceSnapshotV1>,
 }
 
 #[derive(Clone)]
@@ -80,6 +84,25 @@ impl DemoLearningLaneWriterHandle {
 
     pub fn record_reject_event(&self, event: RejectEvent, risk_state: &str, now_ms: u64) {
         self.record_reject_event_with_placement(event, risk_state, now_ms, None);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn record_reject_event_with_source_snapshot(
+        &self,
+        event: RejectEvent,
+        risk_state: &str,
+        now_ms: u64,
+        candidate_evaluation_source_snapshot: CandidateEvaluationSourceSnapshotV1,
+    ) {
+        self.record_reject_event_with_placement_active_request_order_dispatch_and_source_snapshot(
+            event,
+            risk_state,
+            now_ms,
+            None,
+            None,
+            None,
+            Some(candidate_evaluation_source_snapshot),
+        );
     }
 
     pub fn record_reject_event_with_placement(
@@ -125,6 +148,27 @@ impl DemoLearningLaneWriterHandle {
         active_order_request: Option<ActiveBoundedProbeOrderRequest>,
         order_dispatch_tx: Option<tokio::sync::mpsc::UnboundedSender<OrderDispatchRequest>>,
     ) {
+        self.record_reject_event_with_placement_active_request_order_dispatch_and_source_snapshot(
+            event,
+            risk_state,
+            now_ms,
+            placement_decision,
+            active_order_request,
+            order_dispatch_tx,
+            None,
+        );
+    }
+
+    pub(crate) fn record_reject_event_with_placement_active_request_order_dispatch_and_source_snapshot(
+        &self,
+        event: RejectEvent,
+        risk_state: &str,
+        now_ms: u64,
+        placement_decision: Option<BoundedProbePlacementDecision>,
+        active_order_request: Option<ActiveBoundedProbeOrderRequest>,
+        order_dispatch_tx: Option<tokio::sync::mpsc::UnboundedSender<OrderDispatchRequest>>,
+        candidate_evaluation_source_snapshot: Option<CandidateEvaluationSourceSnapshotV1>,
+    ) {
         if let Some(ref tx) = self.tx {
             let msg = WriterMsg {
                 event,
@@ -133,6 +177,7 @@ impl DemoLearningLaneWriterHandle {
                 placement_decision,
                 active_order_request,
                 order_dispatch_tx,
+                candidate_evaluation_source_snapshot,
             };
             match tx.try_send(msg) {
                 Ok(()) => {}
@@ -241,6 +286,36 @@ fn path_override_or_default(value: Option<String>, default_path: PathBuf) -> Pat
     }
 }
 
+fn validated_candidate_evaluation_source_snapshot_for_durable_record(
+    event: &RejectEvent,
+    snapshot: Option<CandidateEvaluationSourceSnapshotV1>,
+) -> Option<CandidateEvaluationSourceSnapshotV1> {
+    let snapshot = snapshot?;
+    let Some(event_context) = event.candidate_event_context.as_ref() else {
+        warn!(
+            reason = "CANDIDATE_EVALUATION_SOURCE_SNAPSHOT_UNBOUND",
+            attempt_id = %attempt_id_for_reject_event(event),
+            snapshot_hash = %snapshot.snapshot_hash,
+            "candidate-evaluation source snapshot has no embedded candidate-event context; omitting evidence sibling / candidate-evaluation source snapshot 缺少內嵌 candidate-event context，省略 evidence sibling"
+        );
+        return None;
+    };
+
+    match validate_candidate_evaluation_source_snapshot(&snapshot, event_context) {
+        Ok(()) => Some(snapshot),
+        Err(validation_errors) => {
+            warn!(
+                reason = "CANDIDATE_EVALUATION_SOURCE_SNAPSHOT_INVALID",
+                attempt_id = %attempt_id_for_reject_event(event),
+                snapshot_hash = %snapshot.snapshot_hash,
+                validation_errors = ?validation_errors,
+                "invalid candidate-evaluation source snapshot omitted from durable record / 無效 candidate-evaluation source snapshot 已從 durable record 省略"
+            );
+            None
+        }
+    }
+}
+
 async fn run_writer(
     mut rx: mpsc::Receiver<WriterMsg>,
     plan_path: PathBuf,
@@ -328,6 +403,7 @@ async fn run_writer(
                     placement_decision,
                     active_order_request,
                     order_dispatch_tx,
+                    candidate_evaluation_source_snapshot,
                 } = msg;
                 let active_order_dispatch_channel_available = order_dispatch_tx.is_some();
                 // P1-10:先做輪轉+重開。①主檔達 50MB 由本 writer 觸發輪轉;
@@ -416,7 +492,15 @@ async fn run_writer(
                 };
                 match admission_build {
                     Ok(Some(result)) => {
-                        match result.record.to_json_string() {
+                        let record = result
+                            .record
+                            .with_candidate_evaluation_source_snapshot(
+                                validated_candidate_evaluation_source_snapshot_for_durable_record(
+                                    &event,
+                                    candidate_evaluation_source_snapshot.clone(),
+                                ),
+                            );
+                        match record.to_json_string() {
                             Ok(json) => {
                                 if let Err(e) = bw.write_all(json.as_bytes()).and_then(|_| bw.write_all(b"\n")) {
                                     warn!(
@@ -483,6 +567,12 @@ async fn run_writer(
                             Utc::now(),
                             &risk_state,
                             &e,
+                        )
+                        .with_candidate_evaluation_source_snapshot(
+                            validated_candidate_evaluation_source_snapshot_for_durable_record(
+                                &event,
+                                candidate_evaluation_source_snapshot.clone(),
+                            ),
                         );
                         match record.to_json_string() {
                             Ok(json) => {
@@ -922,6 +1012,18 @@ mod tests {
     use crate::bounded_probe_near_touch::{
         BoundedProbeAttemptPlacement, BoundedProbePlacementDecision,
     };
+    use crate::candidate_event_context::{
+        capture_candidate_event_context, CandidateEventCaptureInput, CandidateMarketInputsV1,
+    };
+    use crate::candidate_evaluation_source_snapshot::{
+        capture_candidate_evaluation_source_snapshot,
+        validate_candidate_evaluation_source_snapshot, CandidateEvaluationFeatureObservationV1,
+        CandidateEvaluationFeatureSourceV1, CandidateEvaluationPortfolioSourceV1,
+        CandidateEvaluationSourceSnapshotV1, CANDIDATE_EVALUATION_FEATURE_SOURCES_V1,
+        CANDIDATE_EVALUATION_SOURCE_CAPTURE_BLOCKED_STATUS,
+        CANDIDATE_EVALUATION_SOURCE_SNAPSHOT_BOUNDARY,
+        CANDIDATE_EVALUATION_SOURCE_SNAPSHOT_SCHEMA_VERSION,
+    };
     use crate::demo_learning_lane::ELIGIBLE_REJECT_REASON_CODE;
     use crate::demo_learning_lane_ledger::{
         CAPTURE_ERROR_DECISION, CAPTURE_ERROR_LEDGER_RECORD_TYPE,
@@ -1035,6 +1137,162 @@ mod tests {
             signal_id: Some("sig-live_demo-ma_crossover-ETHUSDT-1782041000000".to_string()),
             candidate_event_context: None,
         }
+    }
+
+    fn transport_snapshot() -> CandidateEvaluationSourceSnapshotV1 {
+        CandidateEvaluationSourceSnapshotV1 {
+            schema_version: CANDIDATE_EVALUATION_SOURCE_SNAPSHOT_SCHEMA_VERSION.to_string(),
+            captured_at_ms: 1_782_041_000_000,
+            event_hash: "11".repeat(32),
+            scan: None,
+            decision_features: CandidateEvaluationFeatureSourceV1 {
+                schema_version: "transport_fixture".to_string(),
+                schema_hash: "22".repeat(32),
+                definition_hash: "33".repeat(32),
+                observations: Vec::new(),
+            },
+            portfolio: CandidateEvaluationPortfolioSourceV1 {
+                portfolio_snapshot_hash: None,
+                accepted_demo_equity_usdt: None,
+                positions: Vec::new(),
+                position_count: None,
+                gross_mark_notional_usdt: None,
+                net_mark_notional_usdt: None,
+                empty_position_attestation: false,
+            },
+            capture_status: CANDIDATE_EVALUATION_SOURCE_CAPTURE_BLOCKED_STATUS.to_string(),
+            capture_blockers: vec!["transport_fixture".to_string()],
+            snapshot_hash: "44".repeat(32),
+            boundary: CANDIDATE_EVALUATION_SOURCE_SNAPSHOT_BOUNDARY.to_string(),
+        }
+    }
+
+    fn valid_blocked_transport_pair(
+        suffix: &str,
+    ) -> (RejectEvent, CandidateEvaluationSourceSnapshotV1) {
+        let mut event = reject_event();
+        event.context_id = Some(format!("ctx-live_demo-ETHUSDT-{suffix}"));
+        event.signal_id = Some(format!("sig-live_demo-ma_crossover-ETHUSDT-{suffix}"));
+        let event_context = capture_candidate_event_context(CandidateEventCaptureInput {
+            captured_at_ms: event.ts_ms,
+            strategy_name: event.strategy_name.clone(),
+            runtime_strategy_name: event.strategy_name.clone(),
+            build_git_sha: "a".repeat(40),
+            strategy_params_json: "{}".to_string(),
+            conf_scale: 1.0,
+            symbol: event.symbol.clone(),
+            side: event.side.clone(),
+            horizon_env_value: None,
+            evidence_engine_mode: event.engine_mode.clone(),
+            pipeline_kind: "live".to_string(),
+            endpoint_environment: Some("live_demo".to_string()),
+            context_id: event.context_id.clone(),
+            signal_id: event.signal_id.clone(),
+            scanner_inputs: None,
+            market_inputs: CandidateMarketInputsV1 {
+                observed_at_ms: event.ts_ms,
+                last_price: Some(3_000.0),
+                best_bid: None,
+                best_ask: None,
+                tick_size: None,
+                index_price: None,
+                funding_rate: None,
+                open_interest: None,
+                atr_value: None,
+            },
+            risk_state: "NORMAL".to_string(),
+            governance_profile: "Validation".to_string(),
+            risk_config: Some(serde_json::json!({"fixture": true})),
+            portfolio_snapshot_ref: None,
+            portfolio_snapshot: None,
+        });
+        let decision_features = CandidateEvaluationFeatureSourceV1 {
+            schema_version: crate::edge_predictor::features::FEATURE_SCHEMA_VERSION.to_string(),
+            schema_hash: crate::edge_predictor::features::feature_schema_hash().to_string(),
+            definition_hash: crate::edge_predictor::features::feature_definition_hash().to_string(),
+            observations: crate::edge_predictor::features::FEATURE_NAMES_V1
+                .iter()
+                .zip(CANDIDATE_EVALUATION_FEATURE_SOURCES_V1)
+                .map(|(name, source)| CandidateEvaluationFeatureObservationV1 {
+                    name: (*name).to_string(),
+                    value: None,
+                    raw_present: false,
+                    source: source.to_string(),
+                })
+                .collect(),
+        };
+        let snapshot = capture_candidate_evaluation_source_snapshot(
+            &event_context,
+            None,
+            decision_features,
+            CandidateEvaluationPortfolioSourceV1 {
+                portfolio_snapshot_hash: None,
+                accepted_demo_equity_usdt: None,
+                positions: Vec::new(),
+                position_count: Some(0),
+                gross_mark_notional_usdt: Some(0.0),
+                net_mark_notional_usdt: Some(0.0),
+                empty_position_attestation: true,
+            },
+        );
+        assert_eq!(
+            snapshot.capture_status,
+            CANDIDATE_EVALUATION_SOURCE_CAPTURE_BLOCKED_STATUS
+        );
+        assert!(validate_candidate_evaluation_source_snapshot(&snapshot, &event_context).is_ok());
+        event.candidate_event_context = Some(event_context);
+        (event, snapshot)
+    }
+
+    #[test]
+    fn handle_transports_optional_source_snapshot_as_one_owned_message() {
+        let (handle, mut rx) = DemoLearningLaneWriterHandle::handle_for_test();
+        handle.record_reject_event(reject_event(), "NORMAL", 1_782_041_001_000);
+        let old_msg = rx.try_recv().expect("old handle call should enqueue");
+        assert!(old_msg.candidate_evaluation_source_snapshot.is_none());
+
+        let snapshot = transport_snapshot();
+        handle.record_reject_event_with_source_snapshot(
+            reject_event(),
+            "NORMAL",
+            1_782_041_001_000,
+            snapshot.clone(),
+        );
+        let snapshot_msg = rx
+            .try_recv()
+            .expect("snapshot-aware handle call should enqueue");
+        assert_eq!(
+            snapshot_msg.candidate_evaluation_source_snapshot,
+            Some(snapshot)
+        );
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn full_channel_drops_unique_event_and_source_snapshot_atomically() {
+        let (handle, mut rx) = DemoLearningLaneWriterHandle::handle_for_test();
+        for _ in 0..CHANNEL_CAPACITY {
+            handle.record_reject_event(reject_event(), "NORMAL", 1_782_041_001_000);
+        }
+
+        let unique_context_id = "ctx-unique-dropped-snapshot";
+        let mut unique_event = reject_event();
+        unique_event.context_id = Some(unique_context_id.to_string());
+        handle.record_reject_event_with_source_snapshot(
+            unique_event,
+            "NORMAL",
+            1_782_041_001_000,
+            transport_snapshot(),
+        );
+
+        assert_eq!(handle.total_dropped.load(Ordering::Relaxed), 1);
+        let mut drained = 0;
+        while let Ok(msg) = rx.try_recv() {
+            drained += 1;
+            assert_ne!(msg.event.context_id.as_deref(), Some(unique_context_id));
+            assert!(msg.candidate_evaluation_source_snapshot.is_none());
+        }
+        assert_eq!(drained, CHANNEL_CAPACITY);
     }
 
     #[test]
@@ -1480,13 +1738,29 @@ mod tests {
             cancel.clone(),
         ));
 
+        let (valid_event, valid_snapshot) = valid_blocked_transport_pair("valid-normal");
         tx.send(WriterMsg {
-            event: reject_event(),
+            event: valid_event.clone(),
             risk_state: "NORMAL".to_string(),
             now_ms: 1_782_041_001_000,
             placement_decision: None,
             active_order_request: None,
             order_dispatch_tx: None,
+            candidate_evaluation_source_snapshot: Some(valid_snapshot.clone()),
+        })
+        .await
+        .unwrap();
+        let (invalid_event, mut invalid_snapshot) =
+            valid_blocked_transport_pair("invalid-normal");
+        invalid_snapshot.snapshot_hash.push('0');
+        tx.send(WriterMsg {
+            event: invalid_event.clone(),
+            risk_state: "NORMAL".to_string(),
+            now_ms: 1_782_041_001_000,
+            placement_decision: None,
+            active_order_request: None,
+            order_dispatch_tx: None,
+            candidate_evaluation_source_snapshot: Some(invalid_snapshot),
         })
         .await
         .unwrap();
@@ -1495,16 +1769,39 @@ mod tests {
 
         let content = std::fs::read_to_string(&ledger_path).unwrap();
         let rows = LedgerRecord::from_jsonl_str(&content).unwrap();
-        assert_eq!(rows.len(), 1);
+        assert_eq!(rows.len(), 2);
         assert_eq!(
             rows[0].attempt_id.as_deref(),
-            Some("ctx-live_demo-ETHUSDT-1782041000000")
+            valid_event.context_id.as_deref()
         );
         assert_eq!(
             rows[0].decision.as_deref(),
             Some("ORDER_AUTHORITY_NOT_GRANTED")
         );
         assert_eq!(rows[0].allowed_to_submit_order, Some(false));
+        assert_eq!(
+            rows[0]
+                .event
+                .as_ref()
+                .and_then(|event| event.candidate_evaluation_source_snapshot.as_ref()),
+            Some(&valid_snapshot)
+        );
+        assert_eq!(
+            rows[1].attempt_id.as_deref(),
+            invalid_event.context_id.as_deref()
+        );
+        assert_eq!(
+            rows[1].decision.as_deref(),
+            Some("ORDER_AUTHORITY_NOT_GRANTED")
+        );
+        assert_eq!(rows[1].allowed_to_submit_order, Some(false));
+        assert!(rows[1]
+            .event
+            .as_ref()
+            .and_then(|event| event.candidate_evaluation_source_snapshot.as_ref())
+            .is_none(),
+            "invalid source evidence must be omitted without changing admission"
+        );
     }
 
     #[tokio::test]
@@ -1522,13 +1819,27 @@ mod tests {
             cancel.clone(),
         ));
 
+        let (valid_event, valid_snapshot) = valid_blocked_transport_pair("valid-capture-error");
         tx.send(WriterMsg {
-            event: reject_event(),
+            event: valid_event.clone(),
             risk_state: "NORMAL".to_string(),
             now_ms: 1_782_041_001_000,
             placement_decision: None,
             active_order_request: None,
             order_dispatch_tx: None,
+            candidate_evaluation_source_snapshot: Some(valid_snapshot.clone()),
+        })
+        .await
+        .unwrap();
+        let unbound_event = reject_event();
+        tx.send(WriterMsg {
+            event: unbound_event.clone(),
+            risk_state: "NORMAL".to_string(),
+            now_ms: 1_782_041_001_000,
+            placement_decision: None,
+            active_order_request: None,
+            order_dispatch_tx: None,
+            candidate_evaluation_source_snapshot: Some(transport_snapshot()),
         })
         .await
         .unwrap();
@@ -1537,20 +1848,38 @@ mod tests {
 
         let content = std::fs::read_to_string(&ledger_path).unwrap();
         let rows = LedgerRecord::from_jsonl_str(&content).unwrap();
-        assert_eq!(rows.len(), 1);
+        assert_eq!(rows.len(), 2);
+        for row in &rows {
+            assert_eq!(
+                row.record_type.as_deref(),
+                Some(CAPTURE_ERROR_LEDGER_RECORD_TYPE)
+            );
+            assert_eq!(row.decision.as_deref(), Some(CAPTURE_ERROR_DECISION));
+            assert_eq!(row.allowed_to_submit_order, Some(false));
+            assert_eq!(
+                row.reason.as_deref(),
+                Some("runtime_admission_evaluation_failed")
+            );
+        }
+        assert_eq!(rows[0].attempt_id.as_deref(), valid_event.context_id.as_deref());
         assert_eq!(
-            rows[0].record_type.as_deref(),
-            Some(CAPTURE_ERROR_LEDGER_RECORD_TYPE)
+            rows[0]
+                .event
+                .as_ref()
+                .and_then(|event| event.candidate_evaluation_source_snapshot.as_ref()),
+            Some(&valid_snapshot)
         );
-        assert_eq!(rows[0].decision.as_deref(), Some(CAPTURE_ERROR_DECISION));
         assert_eq!(
-            rows[0].attempt_id.as_deref(),
-            Some("ctx-live_demo-ETHUSDT-1782041000000")
+            rows[1].attempt_id.as_deref(),
+            unbound_event.context_id.as_deref()
         );
-        assert_eq!(rows[0].allowed_to_submit_order, Some(false));
-        assert_eq!(
-            rows[0].reason.as_deref(),
-            Some("runtime_admission_evaluation_failed")
+        assert!(
+            rows[1]
+                .event
+                .as_ref()
+                .and_then(|event| event.candidate_evaluation_source_snapshot.as_ref())
+                .is_none(),
+            "unbound source evidence must be omitted without suppressing the capture-error row"
         );
     }
 
@@ -1562,6 +1891,7 @@ mod tests {
             placement_decision: None,
             active_order_request: None,
             order_dispatch_tx: None,
+            candidate_evaluation_source_snapshot: None,
         }
     }
 
