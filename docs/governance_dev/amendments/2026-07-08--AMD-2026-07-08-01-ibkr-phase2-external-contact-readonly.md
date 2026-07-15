@@ -144,3 +144,15 @@ Provenance: P2 build PM→PA (tech design) → E3 (security review, 0 CRITICAL /
 **Mandatory escalation trigger.** If this owner-only approval mechanism is ever extended to a higher-consequence surface — any paper order-write, `tiny_live_adr_eligibility_v1` discussion, or any capital exposure — it **must** be upgraded to option (B): HMAC-signed via a controlled approve path with parity to `authorization.json` discipline. Option (A) is authorized **only** for the read-only / zero-money gate-seal.
 
 **Open WAIVER-gated follow-ups** (both are hard blockers on any future "P2-seal-wiring" work that makes a production, non-test caller invoke `seal_phase2_artifact`; neither is closed by the P2 producer PR): (1) `IBKR-P2-SEAL-LINEAGE-FIELDS` — add `contact_authorization_amd` + `approval_lineage_hash` to `IbkrPhase2GateArtifactV1` (types crate, via PA→E1→E2→E4) before any production seal caller; (2) `IBKR-P2-TRIANGULATION-CROSSCHECK` — remove the unconditional topology-fingerprint overwrite in the producer and replace it with a real cross-leg equality check when either P5 session-attestation provides an independent account source or seal is wired to production, whichever is earlier. The P2 producer landed as a fail-closed scaffold with **zero runtime effect** (it never seals in production: real slots absent + no approval). No re-approval is required; Operator acknowledgement only.
+
+## Post-Acceptance Clarification #3 — W2 controlled-seal 批准綁定與審計重算配方(2026-07-15,non-substantive — CC-ruled materialization)
+
+Provenance:IBKR loop R2——E2 對抗審 finding(production 批准綁定與本文澄清 #2 (c) 字面漂移)→ CC 出典裁決 `DRIFT-CONFIRMED / NOT-BLOCKER / 追認可`(裁決全文見 `docs/execution_plan/ibkr_live_capability/PROGRESS.md` R2 行所引)。本澄清僅載明 W2 controlled-seal 批准軸的現行綁定與審計配方;不修改 Decision、Static-Guard Boundary Revision、Secret Boundary、Invariants、Sign-off;HMAC 升級觸發器三項一字不動。
+
+1. **綁定目標更新**:W2 production controlled seal(AMD-2026-07-11-01 授權的 Seal/Supersede/Revoke ledger 動作)之批准綁定為 `contract_id == ibkr_phase2_seal_control_v1 ∧ authorization_amd == AMD-2026-07-11-01`。澄清 #2 (c) 的 `adr==ADR-0048 ∧ amd==AMD-2026-07-08-01` 綁定改由 sealed-artifact 層 `IbkrPhase2GateArtifactV1::validate()` 硬 pin 強制(`adr==ADR-0048`、`amd==AMD-2026-06-29-01`、`contact_authorization_amd==AMD-2026-07-08-01`,缺任一即拒 seal)——contact 授權出典(本 AMD)不變,控制授權出典如實指向 07-11-01,兩軸分離。
+2. **審計重算配方入典**:W2 世代的 `approval_lineage_hash` = `sha256(canonical Phase2SealControlApprovalV1 JSON)`;canonical 形態 = 固定 key 序 + `reviewer_roles` 排序(實作 `control_approval_digest`)。
+3. **其餘綁定原樣或更嚴**:批准/inputs 檔精確 `0o400`(嚴於 #2 文字的 0600)、`PM ∧ Operator` 雙角色、≤30 天 freshness、approval digest 全鏈查重防 replay。
+4. **EA3 運維義務**:每次 production apply(Seal/Supersede/Revoke)前,Operator 必須將該次 `phase2_seal_control_approval.json` 精確位元組歸檔留存(owner-only)——審計第一性重算閉合的必要條件(`issued_at_ms` 不落 ledger)。已同步寫入 repo 根 `IBKR_TODO.md` §6 EA3 行。
+5. 適用範圍僅 read-only / zero-money gate-seal;命中 HMAC 三觸發器任一仍強制升級 option (B)。
+
+No re-approval is required; Operator acknowledgement only.(本澄清落地 PR 即為 CC 追認覆核點)
