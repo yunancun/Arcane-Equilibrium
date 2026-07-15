@@ -122,6 +122,10 @@ pub mod ibkr_secret_slot_loader;
 // bin's --apply plus OPENCLAW_IBKR_PHASE2_SEAL_APPLY=1 and owner-only typed inputs. It is not
 // an activation/contact caller; boot, IPC, DB, GUI, and TWS remain outside this module.
 pub mod ibkr_phase2_gate_producer;
+// IBKR W3 TWS wire 層（W3-S1）：B1 §(a) 純 codec 抽此 + FrameReader（滾動窗 framing）+
+// 錯誤分類橋 + timeout 正規化；無 I/O、無 socket、無 FSM。與 B1 同屬 default build 被 DCE 的
+// TWS 連接器面（ibkr_g4_symbol_audit.sh 驗證符號缺席）。
+pub mod ibkr_tws_wire;
 // IBKR B1 只讀 TWS 連接器（ADR-0048 / AMD-2026-07-08-01，G4 首次接觸）：connect handshake
 // + reqCurrentTime 最小首接觸；純 codec + generic driver + 3 層惰性 gate；唯一具體
 // TcpStream::connect 於 `ibkr_g4_contact` feature 後（default build 無 socket、無 caller）。
