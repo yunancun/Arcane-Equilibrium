@@ -29,6 +29,10 @@ hex = { workspace = true }
 lettre = { workspace = true }
 sqlx = { workspace = true }
 chrono = { workspace = true }
+# IBKR W3-S2 排程感知（nightly restart 窗 / 週日重認證窗）：America/New_York 的 DST
+# 由 IANA tz 資料庫解析，禁手寫偏移（設計 §1.4）。chrono-tz 0.10 綁 chrono ^0.4.25，
+# 與 workspace chrono 0.4.44 相容；只在 ibkr_tws_session 排程判定函數消費，其餘面零觸。
+chrono-tz = "0.10"
 uuid = { workspace = true }
 ndarray = { workspace = true }
 async-trait = "0.1"
