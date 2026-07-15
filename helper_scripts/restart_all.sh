@@ -557,6 +557,7 @@ restart_engine() {
     # 啟用狀態可跨 restart_all 持久保存；臨時命令列 override 仍優先。
     local enable_paper
     enable_paper="${OPENCLAW_ENABLE_PAPER:-$(grep '^OPENCLAW_ENABLE_PAPER=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
+    enable_paper="${enable_paper:-0}"
     # W-B Agent Decision Spine runtime rollout mode. Operator env wins for
     # one-shot tests; otherwise persist the runtime choice in the secrets env
     # file so a later plain restart_all keeps the same shadow/canary/primary
@@ -582,12 +583,13 @@ restart_engine() {
     # bybit_rest_client.rs L909），未設 → fail-closed Err。原本 restart_all.sh 從不
     # 傳該 var，導致 engine PID environ 永遠缺 Gate b → C10 etc. 任何 mainnet REST
     # call 立即 blocked。修法：對齊 OPENCLAW_ENABLE_PAPER 模式，operator env 優先，
-    # 否則讀 basic_system_services.env；空/缺 → 留空（engine 仍 fail-closed），
+    # 否則讀 basic_system_services.env；空/缺 → 顯式 0（engine 仍 fail-closed），
     # 不在 shell 寫死 "1" 以保留 fail-closed 預設語意。
     # 為什麼 fail-closed by default：mainnet gate 是 CLAUDE.md §四 五閘之一，shell
     # 預設啟用 → 任何手動 restart_all.sh 都會解閘，違反 survival > profit。
     local allow_mainnet
     allow_mainnet="${OPENCLAW_ALLOW_MAINNET:-$(grep '^OPENCLAW_ALLOW_MAINNET=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
+    allow_mainnet="${allow_mainnet:-0}"
     # Phase 1/3 智能調參旗標（engine 側，default-OFF fail-closed，鏡像 allow_mainnet pattern）：
     # RICH_INPUT = StrategistScheduler 富輸入 tuner（demo；OFF → payload bit-identical）；
     # RISKCONFIG_AGENT_TUNING = claude_teacher RiskConfigDirectiveSink（demo-Arc-only，

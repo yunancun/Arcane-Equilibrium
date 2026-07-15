@@ -17,6 +17,8 @@ PROBE_PATH = (
     ROOT / "helper_scripts" / "maintenance_scripts" / "runtime_environment_probe.py"
 )
 RESTART_ALL_PATH = ROOT / "helper_scripts" / "restart_all.sh"
+MAIN_PIPELINES_PATH = ROOT / "rust" / "openclaw_engine" / "src" / "main_pipelines.rs"
+SYSTEMD_ENGINE_PATH = ROOT / "helper_scripts" / "systemd" / "openclaw-engine.service"
 
 
 def _load_adapter():
@@ -52,6 +54,15 @@ def _safe_probe_fixture(
     (process / "cwd").symlink_to(repo)
     (process / "stat").write_text(
         f"{pid} (openclaw-engine) " + " ".join(["S", *(["0"] * 18), "12345"]),
+        encoding="ascii",
+    )
+    live_task = process / "task" / "4243"
+    live_task.mkdir(parents=True)
+    live_task_comm = live_task / "comm"
+    live_task_comm.write_bytes(b"oc-live-rt\n")
+    live_task_stat = live_task / "stat"
+    live_task_stat.write_text(
+        "4243 (oc-live-rt) " + " ".join(["S", *(["0"] * 18), "23456"]),
         encoding="ascii",
     )
     secrets = tmp_path / "secret-sentinel-path"
@@ -101,6 +112,9 @@ def _safe_probe_fixture(
         "binary": binary,
         "proc_root": proc_root,
         "pid": pid,
+        "live_task": live_task,
+        "live_task_comm": live_task_comm,
+        "live_task_stat": live_task_stat,
         "secrets": secrets,
         "endpoint": endpoint,
         "environ": environ_path,
@@ -122,6 +136,20 @@ def test_local_probe_proves_only_exact_private_live_demo_identity(
     assert attestation is not None
     assert attestation["actual_endpoint_class"] == "bybit_demo"
     assert attestation["allow_mainnet"] is False
+    assert probe.LIVE_SLOT_THREAD_NAME == "oc-live-rt"
+    assert (
+        f'.name("{probe.LIVE_SLOT_THREAD_NAME}".into())'
+        in MAIN_PIPELINES_PATH.read_text(encoding="utf-8")
+    )
+    assert MAIN_PIPELINES_PATH.read_text(encoding="utf-8").count(
+        f'.name("{probe.LIVE_SLOT_THREAD_NAME}".into())'
+    ) == 1
+    assert probe.LIVE_SLOT_THREAD_NAME not in RESTART_ALL_PATH.read_text(
+        encoding="utf-8"
+    )
+    assert probe.LIVE_SLOT_THREAD_NAME not in SYSTEMD_ENGINE_PATH.read_text(
+        encoding="utf-8"
+    )
     assert probe.ATTESTED_TARGET_ENVIRONMENT == "live_demo"
     assert probe.ATTESTED_AUTHORIZATION_SCOPE == "live_demo_only"
     assert attestation["runtime_mode"] == probe.ATTESTED_TARGET_ENVIRONMENT
@@ -138,6 +166,115 @@ def test_local_probe_proves_only_exact_private_live_demo_identity(
         "DATABASE_URL",
     ):
         assert forbidden not in serialized
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_code"),
+    [
+        ("missing", "LIVE_SLOT_NOT_FOUND"),
+        ("lookalike", "LIVE_SLOT_NOT_FOUND"),
+        ("ambiguous", "LIVE_SLOT_AMBIGUOUS"),
+        ("unreadable", "LIVE_SLOT_STATE_UNREADABLE"),
+    ],
+)
+def test_local_probe_does_not_launder_demo_endpoint_into_live_demo_without_slot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+    expected_code: str,
+) -> None:
+    probe, fixture = _safe_probe_fixture(tmp_path, monkeypatch)
+    live_task = fixture["live_task"]
+    assert isinstance(live_task, Path)
+    if mutation == "missing":
+        (live_task / "comm").unlink()
+        (live_task / "stat").unlink()
+        live_task.rmdir()
+    elif mutation == "lookalike":
+        (live_task / "comm").write_bytes(b"oc-live-rt-old\n")
+    elif mutation == "ambiguous":
+        duplicate = live_task.parent / "4244"
+        duplicate.mkdir()
+        (duplicate / "comm").write_bytes(b"oc-live-rt\n")
+        (duplicate / "stat").write_text(
+            "4244 (oc-live-rt) " + " ".join(["S", *(["0"] * 18), "34567"]),
+            encoding="ascii",
+        )
+    else:
+        (live_task / "stat").write_text("malformed", encoding="ascii")
+
+    attestation, blockers = probe.probe_runtime_environment(
+        phase="preflight",
+        expected_host="trade-core-runtime",
+        expected_source_head="a" * 40,
+        now="2026-07-15T10:00:00+00:00",
+    )
+
+    assert attestation is None
+    assert expected_code in blockers
+
+
+@pytest.mark.parametrize(
+    ("final_identity",),
+    [
+        (((4244, "23456"),),),
+        (((4243, "34567"),),),
+    ],
+)
+def test_local_probe_denies_live_slot_identity_drift(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    final_identity: tuple[tuple[int, str], ...],
+) -> None:
+    probe, _fixture = _safe_probe_fixture(tmp_path, monkeypatch)
+    observations = iter(((((4243, "23456"),), []), (final_identity, [])))
+    monkeypatch.setattr(
+        probe, "_live_slot_task_identities", lambda _pid: next(observations)
+    )
+
+    attestation, blockers = probe.probe_runtime_environment(
+        phase="preflight",
+        expected_host="trade-core-runtime",
+        expected_source_head="a" * 40,
+        now="2026-07-15T10:00:00+00:00",
+    )
+
+    assert attestation is None
+    assert "LIVE_SLOT_IDENTITY_DRIFT" in blockers
+
+
+def test_local_probe_keeps_environment_identity_stable_across_slot_instances(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    probe, fixture = _safe_probe_fixture(tmp_path, monkeypatch)
+    first, first_blockers = probe.probe_runtime_environment(
+        phase="preflight",
+        expected_host="trade-core-runtime",
+        expected_source_head="a" * 40,
+        now="2026-07-15T10:00:00+00:00",
+    )
+    assert first_blockers == []
+    assert first is not None
+
+    live_task_stat = fixture["live_task_stat"]
+    assert isinstance(live_task_stat, Path)
+    live_task_stat.write_text(
+        "4243 (oc-live-rt) " + " ".join(["S", *(["0"] * 18), "34567"]),
+        encoding="ascii",
+    )
+    second, second_blockers = probe.probe_runtime_environment(
+        phase="preflight",
+        expected_host="trade-core-runtime",
+        expected_source_head="a" * 40,
+        now="2026-07-15T10:00:00+00:00",
+    )
+    assert second_blockers == []
+    assert second is not None
+
+    assert second["process_identity_digest"] == first["process_identity_digest"]
+    assert second["config_identity_digest"] == first["config_identity_digest"]
+    assert second["environment_identity_digest"] == first["environment_identity_digest"]
+    assert second["attestation_digest"] == first["attestation_digest"]
 
 
 def test_environment_projector_uses_one_exact_allowlist_and_returns_no_stderr(
