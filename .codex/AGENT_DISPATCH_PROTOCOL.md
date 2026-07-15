@@ -20,7 +20,7 @@ Before local work or delegation, bind:
 - risk and required `low|medium|high|unknown` uncertainty; omission fails before routing
 - source/runtime/external evidence being claimed
 - `claim_inputs` for every prior/evidence digest that can affect a verdict
-- current head + dirty scope
+- current head + dirty scope + any optional read-only verification scope
 - expected output and side-effect class
 
 The compiler accepts only its declared fields/surface vocabulary. Unknown fields
@@ -28,6 +28,12 @@ or surfaces fail closed so a typo cannot silently omit a hard gate. Use exact
 `runtime_claim` and `end_to_end_claim` booleans. A `runtime` source surface alone
 loads context; operational surfaces (`service`, `cron`, `pg`, `runtime_effect`,
 `incident_rca`) or a runtime claim activate OPS.
+
+`verification_scope` is an optional canonical, sorted/unique list of literal,
+safe repository-relative paths for read-only command capture and trusted replay.
+It is used only when routed verifier `path_scope` is empty, and before the
+`dirty_scope` fallback. It is not writer ownership, mutation authority, or an ACL, and
+cannot replace writer `dirty_scope` or whole-repository generation checks.
 
 `side_effect_class` is part of the admitted task contract, not a comment. It must
 match the task shape and surfaces (`none`, scoped repo/test/docs write, deploy,
@@ -72,7 +78,8 @@ Hard edges are triggered by facts, not by task labels alone:
 - authority/live/risk/auth: CC + E3, plus E2/E4 when source changes
 - runtime claim or operational change/deploy: OPS preflight; deploy then uses
   PM/operator exact intent -> Deploy Adapter contract -> independent OPS postcheck;
-  current apply remains fail closed without the trusted runtime probe
+  the trusted local probe source exists, but apply remains fail closed before
+  component invocation on unbound rollback and stable observation-window controls
 - Bybit: BB Adapter reviewer; IBKR/TWS/stock_etf_cash: IB Adapter reviewer
 - quant/strategy/portfolio semantics: QC
 - ML/data/schema semantics: MIT; AI-E only when model/orchestration economics matter
@@ -136,8 +143,9 @@ python3 helper_scripts/maintenance_scripts/agent_governance.py capture-command \
   --context-artifact @context.json -- <argv...>
 ```
 
-Identity, routed task and path scope come from the immutable Context; argv is
-not caller shell text. A denial becomes an Adapter intent/blocker. The receipt's
+Identity and routed task come from the immutable Context; when the routed verifier
+scope is empty, path scope uses optional `verification_scope` before `dirty_scope`.
+Argv is not caller shell text. A denial becomes an Adapter intent/blocker. The receipt's
 `repository_policy_only` effect boundary is not OS network/no-contact isolation.
 
 ## Context and consumption
@@ -282,12 +290,15 @@ Without a separately authorized platform-attested PG artifact, the runtime claim
 remains UNVERIFIED.
 
 Current capability limit: `deploy_intent_adapter.py` validates a typed exact-SHA
-intent, but actual apply is disabled because no trusted local probe can reproduce
-endpoint class/mainnet flag/mode/authorization/process identity. It must fail
-before the component script even when `--apply` is requested. Registry broker
-paths are reference surfaces only; Bybit development contact is unsupported and
-IBKR first-contact remains a gated operator/runtime path, not this workflow's
-Adapter.
+intent and independently runs the local-only, non-secret, fail-closed
+`runtime_environment_probe_v1`, reconciling its result with any supplied
+`runtime_environment_attestation_v1`. This source seam is not a platform runtime
+attestation and does not provide remote SSH capture transport. Even after exact
+probe reconciliation, apply remains unconditionally disabled before component
+invocation with unbound rollback-binding and stable observation-window blockers.
+Registry broker paths are reference surfaces only; Bybit development contact is
+unsupported and IBKR first-contact remains a gated operator/runtime path, not
+this workflow's Adapter.
 
 ## Persistence
 

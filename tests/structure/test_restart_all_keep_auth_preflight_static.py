@@ -1,10 +1,13 @@
 import re
 from pathlib import Path
 
+import pytest
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HELPER = REPO_ROOT / "helper_scripts"
 SCRIPT = HELPER / "restart_all.sh"
+SYSTEMD_ENGINE_SERVICE = HELPER / "systemd" / "openclaw-engine.service"
 
 
 def test_keep_auth_warns_when_live_auth_is_absent() -> None:
@@ -138,10 +141,62 @@ def test_demo_learning_lane_writer_and_probe_adapter_env_are_durable_across_plai
         assert f'{env_name}="${{{env_name}:-}}"' not in text
 
     resolve_index = text.index("demo_learning_lane_writer=")
+    writer_default_index = text.index(
+        'demo_learning_lane_writer="${demo_learning_lane_writer:-0}"'
+    )
+    adapter_default_index = text.index(
+        'bounded_probe_adapter_enabled="${bounded_probe_adapter_enabled:-0}"'
+    )
     launch_index = text.index(
         'OPENCLAW_DEMO_LEARNING_LANE_WRITER="${demo_learning_lane_writer}"'
     )
-    assert resolve_index < launch_index
+    assert resolve_index < writer_default_index < launch_index
+    assert resolve_index < adapter_default_index < launch_index
+
+
+def test_engine_launch_exposes_the_resolved_bybit_secrets_directory_path() -> None:
+    """The local probe must see the same non-secret slot root the engine uses."""
+    text = SCRIPT.read_text(encoding="utf-8")
+
+    resolve = 'BYBIT_SECRETS_DIR="${OPENCLAW_SECRETS_DIR:-$SECRETS_ROOT/secret_files/bybit}"'
+    launch = 'OPENCLAW_SECRETS_DIR="$BYBIT_SECRETS_DIR"'
+    assert resolve in text
+    assert launch in text
+    assert text.index(resolve) < text.index(launch)
+
+
+@pytest.mark.parametrize(
+    ("env_name", "shell_name"),
+    [
+        ("OPENCLAW_ENABLE_PAPER", "enable_paper"),
+        ("OPENCLAW_ALLOW_MAINNET", "allow_mainnet"),
+    ],
+)
+def test_engine_launch_normalizes_only_blank_fail_closed_flags(
+    env_name: str, shell_name: str,
+) -> None:
+    text = SCRIPT.read_text(encoding="utf-8")
+    resolve = f'{shell_name}="${{{env_name}:-$(grep '
+    normalize = f'{shell_name}="${{{shell_name}:-0}}"'
+    launch = f'{env_name}="${{{shell_name}}}"'
+
+    assert resolve in text
+    assert normalize in text
+    assert launch in text
+    assert text.index(resolve) < text.index(normalize) < text.index(launch)
+
+
+def test_systemd_engine_exposes_the_same_explicit_bybit_secrets_directory() -> None:
+    text = SYSTEMD_ENGINE_SERVICE.read_text(encoding="utf-8")
+    root = 'Environment="OPENCLAW_SECRETS_ROOT=__OPENCLAW_SECRETS_ROOT__"'
+    bybit_dir = (
+        'Environment="OPENCLAW_SECRETS_DIR='
+        '__OPENCLAW_SECRETS_ROOT__/secret_files/bybit"'
+    )
+
+    assert root in text
+    assert bybit_dir in text
+    assert text.index(root) < text.index(bybit_dir) < text.index("ExecStart=")
 
 
 def test_bybit_demo_connector_mode_env_reaches_api_process() -> None:

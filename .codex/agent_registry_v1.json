@@ -225,9 +225,10 @@
     "deploy_adapter_v1": {
       "authority": "PM/operator approved deployment_intent_v1 only",
       "invariant": "exact-SHA apply is deterministic; OPS preflight and postcheck are independent and read-only",
-      "status": "declared_apply_disabled_until_trusted_runtime_probe",
+      "status": "declared_apply_disabled_until_recovery_controls_bound",
       "implementation_paths": [
         "helper_scripts/maintenance_scripts/deploy_intent_adapter.py",
+        "helper_scripts/maintenance_scripts/runtime_environment_probe.py",
         "helper_scripts/maintenance_scripts/agent_governance_effects.py",
         "helper_scripts/maintenance_scripts/agent_governance_execution_attestation.py"
       ],

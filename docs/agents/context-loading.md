@@ -17,7 +17,7 @@ operating memories before knowing the task.
 The following are lossless and never removed to meet a token target:
 
 - user objective, exact scope, acceptance, hard stops
-- current source head and dirty scope
+- current source head, dirty scope, and any optional read-only verification scope
 - direct Interface/callers affected by a source change
 - relevant Root Principle/Hard Boundary/ADR denial
 - latest blocker/runtime freshness when a current-state claim is made
@@ -29,12 +29,20 @@ summary is not a substitute.
 
 These facts are normalized into one exact `task_contract`: task shape, sorted
 surfaces, risk, runtime/end-to-end claims, `side_effect_class`, objective, scope,
-acceptance, hard stops, source baseline, direct interfaces, and previous failure.
+acceptance, hard stops, source baseline, `dirty_scope`, optional
+`verification_scope`, direct interfaces, and previous failure.
 Any prior/evidence digest that may determine a verdict is also admitted under
 `claim_inputs`; the free-form prompt is not an authority channel for replacing
 it. The canonical task-contract digest follows the Context artifact into every
 role fragment and final closure. A later prompt, fragment, or summary cannot
 silently widen scope, change acceptance/evidence inputs, or switch effect class.
+
+`verification_scope` is an optional canonical, sorted/unique list of literal,
+safe repository-relative paths used only for read-only command-capture generation
+and trusted replay. It is selected only when routed verifier `path_scope` is
+empty, and before the `dirty_scope` fallback. This field is not writer ownership,
+mutation authority, or an ACL, and it never replaces writer `dirty_scope` or
+whole-repository generation checks.
 
 ## Source-of-truth routing
 
@@ -162,8 +170,13 @@ Cargo, Linux, PG, deploy, cron, service, or broker work:
    UNVERIFIED; PG mutation additionally needs an approved migration/deploy
    Adapter.
 6. Restart/deploy/contact is never a command copied from a context document.
-   The deploy contract currently validates exact intent but apply remains
-   disabled until a trusted local runtime identity probe exists. Development-
+   The deploy contract validates exact intent and independently reruns the
+   local-only, non-secret, fail-closed `runtime_environment_probe_v1`, reconciling
+   any supplied `runtime_environment_attestation_v1`. That seam is neither a
+   platform runtime attestation nor remote SSH capture transport. Apply remains
+   unconditionally disabled before component invocation until exact rollback
+   binding and stable observation-window controls are separately implemented and
+   verified. Development-
    agent broker/private/external contact has no closure-admissible Adapter and
    routes to an explicit unsupported-effect blocker; IBKR/Bybit implementation
    paths are reference surfaces, not authorization.
