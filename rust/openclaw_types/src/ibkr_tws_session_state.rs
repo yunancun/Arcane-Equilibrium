@@ -191,9 +191,12 @@ impl IbkrTwsErrorClassV1 {
 }
 
 // ===========================================================================
-// session state/event 骨架（**S1 不接線**;供 W3-S2 FSM;W4 IPC 消費面)
-// TODO(S2):S2 接 FSM 時擴充 payload（halt_reason / server_version / next_valid_id /
-//          backoff attempt…,設計 §1.1)與轉移表（設計 §1.2)。S1 僅立骨架契約,零接線。
+// session state/event 骨架（供 W3 session FSM;W4 IPC 消費面)
+// S2 接線裁定（2026-07-16）:本枚舉維持 **IPC label 最小集**（unit-variant,snake_case 字串穩定)
+//   ——rich payload（halt_reason / server_version / next_valid_id / backoff attempt / 心跳簿記…,
+//   設計 §1.1)落 **engine-private** `openclaw_engine::ibkr_tws_session::SessionState`,經其 `label()`
+//   投影回本枚舉。動機:types 契約改動最小、Copy/serde 字串穩定不破 S1 測試,rich 態不跨 IPC。
+//   轉移表（設計 §1.2)與非法轉移由 engine FSM 實作(`IbkrTwsSessionEventV1` 為其 typed 事件輸出面)。
 // ===========================================================================
 
 /// TWS session FSM 狀態骨架（設計 §1.1;S1 unit-variant 骨架,payload 由 S2 補)。

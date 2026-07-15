@@ -469,3 +469,10 @@ jobs:
         # cargo test 已暖 target/，此處增量重用；stripped/空 symtab 走 fail-closed exit 5。
         working-directory: .
         run: bash helper_scripts/ci/ibkr_g4_symbol_audit.sh
+      - name: Run the IBKR W3-S2 INV-1 permit-stub static guard
+        # CC 約束 #8（設計 §1.5/§10）:斷言 default-build connect 路徑的 permit provider 是具體
+        # EnvelopeRequiredStub（禁 dyn/泛型）、PermitToken 非 Clone·構造子 crate-private、stub 零
+        # env/config/cfg 讀取;內建正控（注入放行 provider/env → 守衛 FAIL）+ inconclusive 非零 exit。
+        # 純源級靜態掃描（無需編譯,ubuntu 1x,零 macOS 10x）;script 自算 repo root,不依賴 cwd。
+        working-directory: .
+        run: python3 tests/structure/test_ibkr_tws_permit_stub_source_static.py
