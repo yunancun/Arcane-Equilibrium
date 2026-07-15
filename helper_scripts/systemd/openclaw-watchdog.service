@@ -56,6 +56,13 @@ EnvironmentFile=__OPENCLAW_SECRETS_ROOT__/environment_files/basic_system_service
 Environment="OPENCLAW_BASE_DIR=__OPENCLAW_BASE_DIR__"
 Environment="OPENCLAW_DATA_DIR=__OPENCLAW_DATA_DIR__"
 Environment="OPENCLAW_SECRETS_ROOT=__OPENCLAW_SECRETS_ROOT__"
+# ENGINE-AUDIT-VISIBILITY（2026-06-15）audit 直寫用的 runtime DSN 檔（restart_all.sh
+# 每次重啟重寫），對齊 openclaw-engine.service 同名 env（WATCHDOG-AUDIT-DSN-1，
+# 2026-07-15：unit 漏鋪此 env → watchdog 重啟成功但 audit 直寫「no DSN buildable」）。
+# 為什麼「不加」ExecStartPre=/usr/bin/test -s 檢此檔：watchdog 是 fail-soft 監控，
+# DSN 檔缺時只跳過 audit 寫入、偵測與重啟功能不受影響，不得因 DSN 缺而拒啟
+# （engine 才是 fail-closed，其 unit 的 -s 前置檢查不在此鏡像）。
+Environment="OPENCLAW_DATABASE_URL_FILE=__OPENCLAW_DATA_DIR__/runtime_secrets/openclaw_database_url"
 Environment="PYTHONUNBUFFERED=1"
 Environment="PYTHONDONTWRITEBYTECODE=1"
 
