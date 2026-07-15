@@ -36,7 +36,7 @@ LOG_DIR="${DATA}/logs"
 LOG="${LOG_DIR}/cost_gate_learning_lane_cron.log"
 STATUS_LOG="${LOG_DIR}/cost_gate_learning_lane.log"
 LOCK_ROOT="${DATA}/locks"
-LOCK_DIR="${LOCK_ROOT}/cost_gate_learning_lane_cron.lock.d"
+LOCK_FILE="${LOCK_ROOT}/cost_gate_learning_lane_cron.lock"
 HEARTBEAT_DIR="${DATA}/cron_heartbeat"
 ALR_CANDIDATE_EVIDENCE_DIR="${ALR_CANDIDATE_EVIDENCE_DIR:-$HOME/.local/share/openclaw/alr-candidate-evidence}"
 ALR_CANDIDATE_EVIDENCE_RETENTION="${ALR_CANDIDATE_EVIDENCE_RETENTION:-128}"
@@ -149,6 +149,8 @@ FALSE_NEGATIVE_OPERATOR_REVIEW_MAX_ARTIFACT_AGE_HOURS="${OPENCLAW_COST_GATE_FALS
 FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_MAX_ARTIFACT_AGE_HOURS="${OPENCLAW_COST_GATE_FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_MAX_ARTIFACT_AGE_HOURS:-24}"
 FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_TOP_LIMIT="${OPENCLAW_COST_GATE_FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_TOP_LIMIT:-16}"
 SHADOW_PLACEMENT_MAX_ARTIFACT_AGE_HOURS="${OPENCLAW_COST_GATE_SHADOW_PLACEMENT_MAX_ARTIFACT_AGE_HOURS:-24}"
+# STALE_LOCK_MIN 語意變更（CRON-STALE-LOCK-FLOCK-1）：由「stale 鎖接手閾值」轉為
+# 「長跑觀測告警閾值」（持鎖超齡只 WARN、絕不接手）；env 名不改，保持部署兼容。
 STALE_LOCK_MIN="${OPENCLAW_COST_GATE_LEARNING_STALE_LOCK_MIN:-30}"
 
 mkdir -p "$LANE_DIR" "$COUNTERFACTUAL_DIR" "$DATA_FLOW_DIR" "$ORDER_TOUCHABILITY_DIR" "$LOG_DIR" "$LOCK_ROOT" "$HEARTBEAT_DIR"
@@ -364,21 +366,20 @@ fi
 
 touch "$HEARTBEAT_DIR/cost_gate_learning_lane.last_fire" 2>/dev/null || true
 
-if [[ -d "$LOCK_DIR" ]] && [[ -n "$(find "$LOCK_DIR" -maxdepth 0 -mmin +"$STALE_LOCK_MIN" 2>/dev/null)" ]]; then
-    echo "[$(ts)] WARN: stale lock (>${STALE_LOCK_MIN}min) cleared: $LOCK_DIR" >> "$LOG"
-    rmdir "$LOCK_DIR" 2>/dev/null || true
-fi
-
-if ! mkdir "$LOCK_DIR" 2>/dev/null; then
-    echo "[$(ts)] SKIP: cost-gate learning lane already running (lock held)" >> "$LOG"
+# 反疊加 flock 鎖（CRON-STALE-LOCK-FLOCK-1）：舊 mkdir-dir 鎖在單輪超過
+# STALE_LOCK_MIN 時「rmdir 清鎖照跑、舊進程不殺」，是 2026-07-15 全機 OOM 風暴
+# 的疊加機之一（trap-rmdir 正是 stale 態來源，SIGKILL 本就攔不到）。flock 由
+# kernel 在持鎖進程死亡時自動放鎖，無 stale 態、無需 trap 清理（原 release_lock
+# 的 rc 保留語意亦不再需要：無 trap 時 exit code 本就自然透傳）；不 kill 接手、
+# 鎖檔常駐不得刪。詳版裁決見 lib MODULE_NOTE。lib 缺失＝fail-safe skip，
+# 鎖不能降級硬跑。
+CRON_FLOCK_LIB="$BASE/helper_scripts/cron/lib/cron_flock.sh"
+if [[ ! -f "$CRON_FLOCK_LIB" ]]; then
+    echo "[$(ts)] ERROR: cron_flock lib missing: $CRON_FLOCK_LIB (fail-safe skip, not running unlocked)" >> "$LOG"
     exit 0
 fi
-release_lock() {
-    local rc=$?
-    rmdir "$LOCK_DIR" 2>/dev/null || true
-    return "$rc"
-}
-trap release_lock EXIT INT TERM
+source "$CRON_FLOCK_LIB"
+acquire_cron_flock "$LOCK_FILE" "$STALE_LOCK_MIN" "$LOG" "cost_gate_learning_lane" || exit 0
 
 SECRETS_ROOT="${OPENCLAW_SECRETS_ROOT:-$HOME/BybitOpenClaw/secrets}"
 ENV_FILE="$SECRETS_ROOT/environment_files/basic_system_services.env"
