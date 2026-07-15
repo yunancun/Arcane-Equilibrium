@@ -3,7 +3,10 @@
 
 This script never infers approval from a clean checkout or a PM statement.  It
 binds an immutable intent digest, source HEAD, clean tree, host, expiry, typed
-confirmation, and the exact component script bytes before any effect.
+confirmation, and the exact component script bytes before any effect.  Its
+generic intent-only contract remains producer-independent.  The apply path
+separately admits only ``live_demo``, the identity its current local probe can
+attest.
 """
 
 from __future__ import annotations
@@ -39,7 +42,10 @@ from agent_governance_effects import (  # noqa: E402
     validate_runtime_environment_attestation,
 )
 from agent_governance_schema import schema_subset_errors  # noqa: E402
-from runtime_environment_probe import probe_runtime_environment  # noqa: E402
+from runtime_environment_probe import (  # noqa: E402
+    ATTESTED_TARGET_ENVIRONMENT,
+    probe_runtime_environment,
+)
 
 
 DEPLOY_COMPONENT = REPO_ROOT / "helper_scripts/build_then_restart_atomic.sh"
@@ -137,6 +143,17 @@ def validate_intent(
     except (TypeError, ValueError):
         errors.append("intent timestamps are invalid")
     return errors
+
+
+def local_probe_target_environment_errors(intent: dict[str, Any]) -> list[str]:
+    """Bind producer capability only when the caller requests apply."""
+
+    if intent.get("target_environment") == ATTESTED_TARGET_ENVIRONMENT:
+        return []
+    return [
+        "target_environment is unsupported by the local runtime probe; "
+        f"expected {ATTESTED_TARGET_ENVIRONMENT}"
+    ]
 
 
 def generated_receipt_result(receipt: Any) -> tuple[int, list[str]]:
@@ -254,6 +271,19 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
         return 0
+    probe_target_errors = local_probe_target_environment_errors(intent)
+    if probe_target_errors:
+        print(
+            json.dumps(
+                {
+                    "status": "RUNTIME_ENVIRONMENT_PROBE_TARGET_UNSUPPORTED",
+                    "errors": probe_target_errors,
+                },
+                ensure_ascii=False,
+            ),
+            file=sys.stderr,
+        )
+        return 4
     if os.environ.get("OPENCLAW_DEPLOY_ADAPTER_APPLY") != "1":
         print("apply requires OPENCLAW_DEPLOY_ADAPTER_APPLY=1", file=sys.stderr)
         return 2

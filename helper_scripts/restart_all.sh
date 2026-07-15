@@ -636,7 +636,10 @@ restart_engine() {
     demo_learning_lane_plan="${OPENCLAW_DEMO_LEARNING_LANE_PLAN:-$(grep '^OPENCLAW_DEMO_LEARNING_LANE_PLAN=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
     demo_learning_lane_ledger="${OPENCLAW_DEMO_LEARNING_LANE_LEDGER:-$(grep '^OPENCLAW_DEMO_LEARNING_LANE_LEDGER=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
     bounded_probe_adapter_enabled="${OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED:-$(grep '^OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
-    OPENCLAW_DATA_DIR="$DATA_DIR" OPENCLAW_IPC_SOCKET="$ENGINE_SOCKET" OPENCLAW_CANARY_MODE="${OPENCLAW_CANARY_MODE:-0}" \
+    demo_learning_lane_writer="${demo_learning_lane_writer:-0}"
+    bounded_probe_adapter_enabled="${bounded_probe_adapter_enabled:-0}"
+    OPENCLAW_DATA_DIR="$DATA_DIR" OPENCLAW_SECRETS_DIR="$BYBIT_SECRETS_DIR" \
+        OPENCLAW_IPC_SOCKET="$ENGINE_SOCKET" OPENCLAW_CANARY_MODE="${OPENCLAW_CANARY_MODE:-0}" \
         OPENCLAW_DATABASE_URL_FILE="$OPENCLAW_DATABASE_URL_FILE" \
         OPENCLAW_IPC_SECRET_FILE="$OPENCLAW_IPC_SECRET_FILE" \
         OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE="$OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE" \
