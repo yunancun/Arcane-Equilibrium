@@ -403,12 +403,15 @@ echo "    engine PID: $ENGINE_PID"
 
 echo "  starting API (4 workers, bind $API_BIND_HOST:8000)..."
 cd program_code/exchange_connectors/bybit_connector/control_api_v1
+# OPS-F1 follow-up (2026-07-15): api.log 同 engine.log 用 '>>'(O_APPEND)——logrotate
+# copytruncate 相容前置(機制見上方 engine 塊注釋);跨重啟累積由 conf api.log
+# stanza(200M×7)兜底。
 OPENCLAW_DATABASE_URL_FILE="$OPENCLAW_DATABASE_URL_FILE" \
 OPENCLAW_IPC_SECRET_FILE="$IPC_SECRET_FILE" \
 OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE="$LIVE_AUTH_SIGNING_KEY_FILE" \
     nohup .venv/bin/python3 .venv/bin/uvicorn app.main:app \
     --host "$API_BIND_HOST" --port 8000 --workers 4 \
-    > "$DATA_DIR/api.log" 2>&1 &
+    >> "$DATA_DIR/api.log" 2>&1 &
 API_PID=$!
 echo "    API PID: $API_PID"
 cd "$REPO_ROOT"
