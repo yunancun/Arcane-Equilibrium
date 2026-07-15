@@ -10,7 +10,11 @@ MODULE_NOTE
   全部單一來源，避免兩條路徑漂移（backstop 靠同一個 dedup_key 才能正確去重補洞）。
 主要函數：
   - resolve_dsn：DSN 解析序 OPENCLAW_DATABASE_URL_FILE → OPENCLAW_DATABASE_URL
-    → POSTGRES_*（與 runtime restart_all.sh 寫的 secret 檔對齊）。
+    → POSTGRES_* → 最後備援由 OPENCLAW_DATA_DIR 推導 runtime_secrets/
+    openclaw_database_url（與 runtime restart_all.sh 寫的 secret 檔對齊）。
+    推導擺最後 = 顯式 env 永遠優先；OPENCLAW_DATA_DIR 未設時絕不猜默認路徑
+    （見 resolve_dsn docstring）。此備援讓 direct write 與 tail-bridge 對
+    unit env 漂移（unit 有 OPENCLAW_DATA_DIR 但沒鋪 DSN 檔 env）免疫。
   - build_dedup_key：由 event_type + 偵測時間戳（epoch float）推導確定性唯一字串。
     direct write 與 bridge 共用，故同一事件兩條路徑算出同一 key → backstop 不重複。
   - map_canary_to_audit：把 watchdog 的 canary 事件名（ENGINE_CRASH/NETWORK_OUTAGE/
@@ -96,6 +100,35 @@ def build_dedup_key(event_type: str, detection_ts: float) -> str:
     return f"{EVENT_SOURCE}|{event_type}|{_ts_to_iso(detection_ts)}"
 
 
+def _derive_dsn_from_data_dir() -> Optional[str]:
+    """第 4 步最後備援：由 OPENCLAW_DATA_DIR 推導 runtime DSN 契約檔並讀取。
+
+    契約檔 = $OPENCLAW_DATA_DIR/runtime_secrets/openclaw_database_url——與
+    restart_all.sh（每次重啟重寫）及 openclaw-engine.service 同一份。此備援讓
+    watchdog 直寫與 tail-bridge 對 unit env 漂移免疫（2026-07-15 事故形：unit
+    必有 OPENCLAW_DATA_DIR 但沒鋪 OPENCLAW_DATABASE_URL_FILE → 三顯式源全空）。
+
+    鐵則：OPENCLAW_DATA_DIR 未設 / 空白時「不得」猜任何默認路徑（尤其
+    /tmp/openclaw——/tmp 任何人可植檔，DSN 推導只信 systemd/caller 顯式給的
+    data dir）。讀失敗 / 檔空 → None（fail-soft 照舊，caller skip 寫入）。
+    """
+    data_dir = os.environ.get("OPENCLAW_DATA_DIR", "").strip()
+    if not data_dir:
+        return None
+    derived = Path(data_dir) / "runtime_secrets" / "openclaw_database_url"
+    try:
+        content = derived.read_text(encoding="utf-8").strip()
+        if content:
+            return content
+    # ValueError 涵蓋 UnicodeDecodeError（非 UTF-8 壞檔），與第 1 分支一致。
+    except (OSError, ValueError) as exc:
+        logger.warning(
+            "audit DSN derived file read failed: %s; give up / 推導 DSN 檔讀取失敗",
+            exc,
+        )
+    return None
+
+
 def resolve_dsn() -> Optional[str]:
     """解析 PG DSN（與 runtime restart_all.sh 寫的 secret 檔對齊）。
 
@@ -104,6 +137,10 @@ def resolve_dsn() -> Optional[str]:
          <data_dir>/runtime_secrets/openclaw_database_url，env 指向它）。
       2. OPENCLAW_DATABASE_URL（直接內嵌 DSN）。
       3. POSTGRES_*（user/password/db/host/port 組裝）。
+      4. 最後備援（WATCHDOG-AUDIT-DSN-1）：OPENCLAW_DATA_DIR 非空時推導
+         $OPENCLAW_DATA_DIR/runtime_secrets/openclaw_database_url（同一契約檔）。
+         為什麼推導擺最後：顯式 env 永遠優先於推導，推導只在 unit env 漂移時
+         兜底；OPENCLAW_DATA_DIR 未設時絕不猜默認路徑（/tmp 任何人可植檔）。
     任一步壞檔 / 缺值都 fail-soft 往下一步；全失敗回 None（caller skip 寫入）。
     """
     dsn_file = os.environ.get("OPENCLAW_DATABASE_URL_FILE")
@@ -112,7 +149,9 @@ def resolve_dsn() -> Optional[str]:
             content = Path(dsn_file).read_text(encoding="utf-8").strip()
             if content:
                 return content
-        except OSError as exc:
+        # ValueError 涵蓋 UnicodeDecodeError（非 UTF-8 壞檔）——read_text 對壞編碼
+        # 拋的不是 OSError，漏接會穿透 fail-soft 承諾（P2-1，2026-07-15）。
+        except (OSError, ValueError) as exc:
             logger.warning(
                 "audit DSN file read failed: %s; fall through / DSN 檔讀取失敗", exc
             )
@@ -127,7 +166,8 @@ def resolve_dsn() -> Optional[str]:
     host = os.environ.get("POSTGRES_HOST", "127.0.0.1")
     port = os.environ.get("POSTGRES_PORT", "5432")
     if not user or not password or not db:
-        return None
+        # 三顯式源全失敗 → 第 4 步推導備援（詳見 _derive_dsn_from_data_dir）。
+        return _derive_dsn_from_data_dir()
     return f"postgresql://redacted@{host}:{port}/{db}"
 
 
