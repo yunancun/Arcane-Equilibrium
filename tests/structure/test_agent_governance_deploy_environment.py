@@ -168,6 +168,122 @@ def test_local_probe_proves_only_exact_private_live_demo_identity(
         assert forbidden not in serialized
 
 
+@pytest.mark.parametrize("representation", ["missing", "blank"])
+def test_local_probe_defaults_absent_or_blank_runtime_booleans_fail_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    representation: str,
+) -> None:
+    probe, fixture = _safe_probe_fixture(tmp_path, monkeypatch)
+    projection = fixture["projection"]
+    assert isinstance(projection, Path)
+    entries = [entry for entry in projection.read_bytes().split(b"\0") if entry]
+    boolean_prefixes = tuple(
+        key.encode("ascii") + b"=" for key in probe.BOOLEAN_KEYS
+    )
+    path_entries = [
+        entry for entry in entries if not entry.startswith(boolean_prefixes)
+    ]
+    explicit_false_entries = [
+        *path_entries,
+        *(f"{key}=0".encode("ascii") for key in probe.BOOLEAN_KEYS),
+    ]
+    projection.write_bytes(b"\0".join(explicit_false_entries) + b"\0")
+    explicit, explicit_blockers = probe.probe_runtime_environment(
+        phase="preflight",
+        expected_host="trade-core-runtime",
+        expected_source_head="a" * 40,
+        now="2026-07-15T10:00:00+00:00",
+    )
+    assert explicit_blockers == []
+    assert explicit is not None
+
+    observed_entries = list(path_entries)
+    if representation == "blank":
+        observed_entries.extend(
+            f"{key}=".encode("ascii") for key in probe.BOOLEAN_KEYS
+        )
+    projection.write_bytes(b"\0".join(observed_entries) + b"\0")
+    observed, observed_blockers = probe.probe_runtime_environment(
+        phase="preflight",
+        expected_host="trade-core-runtime",
+        expected_source_head="a" * 40,
+        now="2026-07-15T10:00:00+00:00",
+    )
+
+    assert observed_blockers == []
+    assert observed is not None
+    assert observed["config_identity_digest"] == explicit["config_identity_digest"]
+    assert observed["environment_identity_digest"] == explicit[
+        "environment_identity_digest"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("key", "original", "runtime_value"),
+    [
+        ("OPENCLAW_DEMO_LEARNING_LANE_WRITER", b"1", b"true"),
+        ("OPENCLAW_DEMO_LEARNING_LANE_WRITER", b"1", b"TRUE"),
+        ("OPENCLAW_DEMO_LEARNING_LANE_WRITER", b"1", b"false"),
+        ("OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED", b"0", b" true "),
+        ("OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED", b"0", b" FALSE "),
+    ],
+)
+def test_local_probe_accepts_the_runtime_boolean_spellings(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    key: str,
+    original: bytes,
+    runtime_value: bytes,
+) -> None:
+    probe, fixture = _safe_probe_fixture(tmp_path, monkeypatch)
+    projection = fixture["projection"]
+    assert isinstance(projection, Path)
+    projection.write_bytes(
+        projection.read_bytes().replace(
+            key.encode("ascii") + b"=" + original,
+            key.encode("ascii") + b"=" + runtime_value,
+        )
+    )
+
+    attestation, blockers = probe.probe_runtime_environment(
+        phase="preflight",
+        expected_host="trade-core-runtime",
+        expected_source_head="a" * 40,
+        now="2026-07-15T10:00:00+00:00",
+    )
+
+    assert blockers == []
+    assert attestation is not None
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        f"{control}{truthy}{control}"
+        for control in ("\x1c", "\x1d", "\x1e", "\x1f")
+        for truthy in ("1", "true")
+    ],
+)
+def test_bounded_probe_boolean_does_not_strip_python_only_c0_separators(
+    value: str,
+) -> None:
+    probe = _load_probe()
+
+    assert probe._strict_boolean(
+        value, "OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED"
+    ) == (False, None)
+
+
+@pytest.mark.parametrize("value", [" true ", "\u0085TRUE\u0085", "\u30001\u3000"])
+def test_bounded_probe_boolean_strips_rust_unicode_whitespace(value: str) -> None:
+    probe = _load_probe()
+
+    assert probe._strict_boolean(
+        value, "OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED"
+    ) == (True, None)
+
+
 @pytest.mark.parametrize(
     ("mutation", "expected_code"),
     [
