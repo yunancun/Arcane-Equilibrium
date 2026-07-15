@@ -24,7 +24,7 @@ from cost_gate_learning_lane.contract import (
     PROBE_OUTCOME_RECORD_TYPE,
 )
 from cost_gate_learning_lane.proof_exclusion import proof_exclusion_reasons
-from cost_gate_learning_lane.runtime_adapter import read_jsonl_ledger
+from cost_gate_learning_lane.runtime_adapter import read_learning_ledger_partitions
 
 # 共用純函數葉節點：以 alias-import 保持函數體內 _dict/_list/_str/_utc_now 引用逐字節不變。
 from cost_gate_learning_lane._lane_common import (
@@ -750,7 +750,7 @@ def main() -> int:
     args = _build_parser().parse_args()
     packet = build_bounded_demo_probe_result_review(
         preflight=_read_json(args.preflight_json),
-        ledger_rows=read_jsonl_ledger(args.ledger),
+        ledger_rows=read_learning_ledger_partitions(args.ledger).outcome_rows,
     )
     markdown = render_markdown(packet)
     if args.output:
