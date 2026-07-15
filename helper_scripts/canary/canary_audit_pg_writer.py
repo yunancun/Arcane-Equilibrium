@@ -322,7 +322,8 @@ def main() -> int:
     if not dsn:
         log.error(
             "no DSN buildable; check OPENCLAW_DATABASE_URL_FILE / "
-            "OPENCLAW_DATABASE_URL / POSTGRES_* env"
+            "OPENCLAW_DATABASE_URL / POSTGRES_* env / "
+            "OPENCLAW_DATA_DIR 推導契約檔 runtime_secrets/openclaw_database_url"
         )
         return 2
     return tail_and_insert(canary_log_path, state_path, dsn)
