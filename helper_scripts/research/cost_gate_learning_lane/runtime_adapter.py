@@ -61,7 +61,18 @@ _CANDIDATE_EVENT_CONTEXT_PAYLOAD_MISSING_STATUS = (
 )
 _CANDIDATE_LINEAGE_CONFLICT_AUDIT_FIELD = "candidate_lineage_conflict_audit"
 _QUARANTINED_CAPTURE_STATUS = "CAPTURE_BLOCKED"
-_QUARANTINED_CAPTURE_BLOCKERS = ("BBO_MISSING_OR_INVALID",)
+_QUARANTINED_CAPTURE_BLOCKER_TUPLES = (
+    ("BBO_MISSING_OR_INVALID",),
+    ("BBO_CROSSED",),
+    ("SCAN_CONTEXT_MISSING_OR_INVALID",),
+    ("SCAN_CONTEXT_MISSING_OR_INVALID", "BBO_MISSING_OR_INVALID"),
+)
+_QUARANTINED_BBO_BLOCKERS = {
+    "BBO_MISSING_OR_INVALID",
+    "BBO_CROSSED",
+}
+_QUARANTINED_SCAN_BLOCKER = "SCAN_CONTEXT_MISSING_OR_INVALID"
+_QUARANTINE_VALIDATION_SCAN_ID = "quarantine-validation-scan-sentinel-v1"
 
 
 @dataclass(frozen=True)
@@ -455,10 +466,53 @@ def _capture_blocked_context(row: Mapping[str, Any]) -> Mapping[str, Any] | None
     return context if context.get("capture_status") == _QUARANTINED_CAPTURE_STATUS else None
 
 
+def _quarantine_validation_scanner_sentinel(
+    *,
+    strategy_name: Any,
+) -> dict[str, Any]:
+    """Build the exact-schema, non-authoritative scanner validation sentinel."""
+    return {
+        "authority_mode": "quarantine_validation_only_no_authority",
+        "legacy_would_block": True,
+        "legacy_block_reason": "scan_context_capture_blocked",
+        "scan_id": _QUARANTINE_VALIDATION_SCAN_ID,
+        "best_strategy": "quarantine_validation_only",
+        "intent_strategy": strategy_name,
+        "market_regime": "unknown",
+        "trend_phase": "unknown",
+        "trend_score": 0.0,
+        "range_score": 0.0,
+        "shock_score": 0.0,
+        "close_alignment": 0.0,
+        "range_position": 0.0,
+        "crowding_score": 0.0,
+        "reversal_risk_score": 0.0,
+        "directional_efficiency": 0.0,
+        "dir_pct": 0.0,
+        "signed_dir_pct": 0.0,
+        "range_pct": 0.0,
+        "fr_bps": 0.0,
+        "f_ma": 0.0,
+        "f_grid": 0.0,
+        "f_bbrv": 0.0,
+        "f_bkout": 0.0,
+        "f_funding_arb": 0.0,
+        "edge_bps": None,
+        "edge_n": 0,
+        "edge_status": "unavailable",
+        "route_mode": "quarantine_validation_only",
+        "market_status": "unavailable",
+        "route_reason": "scan_context_capture_blocked",
+        "opportunity": None,
+        "final_score": 0.0,
+        "raw_score": 0.0,
+    }
+
+
 def _validated_quarantined_capture_blocked_row(
     row: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Validate the one non-authoritative Rust capture failure allowed in dedup.
+    """Validate the exact non-authoritative Rust capture failures allowed in dedup.
 
     ``validate_candidate_event_context`` intentionally rejects every blocked
     capture.  Its validation order still proves exact fields, schema and hash
@@ -492,20 +546,28 @@ def _validated_quarantined_capture_blocked_row(
     if context.get("capture_status") != _QUARANTINED_CAPTURE_STATUS:
         raise ValueError("CAPTURE_BLOCKED_STATUS_INVALID")
     blockers = context.get("capture_blockers")
-    if not isinstance(blockers, list) or tuple(blockers) != _QUARANTINED_CAPTURE_BLOCKERS:
+    blocker_tuple = tuple(blockers) if isinstance(blockers, list) else ()
+    if blocker_tuple not in _QUARANTINED_CAPTURE_BLOCKER_TUPLES:
         raise ValueError("CAPTURE_BLOCKED_BLOCKERS_NOT_ALLOWED")
 
-    # Validate every semantic outside the one declared BBO defect.  This
-    # surrogate never leaves this function: it masks only best_bid/best_ask,
-    # then reuses the existing full CAPTURE_COMPLETE validator for all other
-    # fields.  The original hash-validated blocked row remains untouched.
+    # Validate every semantic outside the explicitly declared capture defects.
+    # This surrogate never leaves this function.  The original hash-validated
+    # blocked row remains untouched and only enters quarantine/dedup views.
     complete_surrogate = copy.deepcopy(dict(context))
     complete_surrogate["capture_status"] = "CAPTURE_COMPLETE"
     complete_surrogate["capture_blockers"] = []
-    market_inputs = complete_surrogate.get("market_inputs")
-    if isinstance(market_inputs, dict):
-        market_inputs["best_bid"] = 1.0
-        market_inputs["best_ask"] = 2.0
+    if any(blocker in _QUARANTINED_BBO_BLOCKERS for blocker in blocker_tuple):
+        market_inputs = complete_surrogate.get("market_inputs")
+        if isinstance(market_inputs, dict):
+            market_inputs["best_bid"] = 1.0
+            market_inputs["best_ask"] = 2.0
+    if _QUARANTINED_SCAN_BLOCKER in blocker_tuple:
+        complete_surrogate["scan_id"] = _QUARANTINE_VALIDATION_SCAN_ID
+        complete_surrogate["scanner_inputs"] = (
+            _quarantine_validation_scanner_sentinel(
+                strategy_name=complete_surrogate.get("strategy_name"),
+            )
+        )
     complete_surrogate["event_hash"] = canonical_sha256(
         {
             key: value
@@ -538,7 +600,7 @@ def _validated_quarantined_capture_blocked_row(
 def read_learning_ledger_partitions(path: Path) -> LearningLedgerPartitions:
     """Read mixed producer rows without granting blocked capture lineage.
 
-    Expected BBO capture failures survive only in ``dedup_rows`` so their
+    Allowlisted capture failures survive only in ``dedup_rows`` so their
     attempt/event identities prevent re-materialization.  Outcome, fill and
     every fully validated COMPLETE row remain in ``outcome_rows``.  All other
     malformed, conflicting or authority-sensitive lineage still fails closed.
