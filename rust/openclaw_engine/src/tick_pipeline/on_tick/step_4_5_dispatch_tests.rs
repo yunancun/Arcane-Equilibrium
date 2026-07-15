@@ -1005,6 +1005,7 @@ fn soak_cost_gate_reject_feeds_probe_writer_channel_while_armed() {
         let candidate_context = msg
             .event
             .candidate_event_context
+            .as_ref()
             .expect("organic Cost Gate reject 必帶 typed candidate_event_context_v1");
         assert_eq!(
             candidate_context.capture_status,
@@ -1030,6 +1031,102 @@ fn soak_cost_gate_reject_feeds_probe_writer_channel_while_armed() {
         let context_json = serde_json::to_value(&candidate_context).unwrap();
         assert!(context_json.get("order_authority").is_none());
         assert!(context_json.get("decision_lease").is_none());
+
+        let source_snapshot = msg
+            .candidate_evaluation_source_snapshot
+            .as_ref()
+            .expect("organic Cost Gate reject 必在同一 writer message 帶 typed source snapshot");
+        assert_eq!(source_snapshot.captured_at_ms, SOAK_TEST_TS_MS);
+        assert_eq!(source_snapshot.event_hash, candidate_context.event_hash);
+        assert_eq!(
+            source_snapshot.capture_status,
+            crate::candidate_evaluation_source_snapshot::CANDIDATE_EVALUATION_SOURCE_CAPTURE_BLOCKED_STATUS,
+            "既有 typed-BLOCKED harness 仍須 durable 捕獲 same-tick source"
+        );
+        assert!(
+            crate::candidate_evaluation_source_snapshot::validate_candidate_evaluation_source_snapshot(
+                source_snapshot,
+                candidate_context,
+            )
+            .is_ok(),
+            "typed BLOCKED capture 也必須 hash/lineage/blocker 自洽"
+        );
+        assert_eq!(
+            source_snapshot
+                .decision_features
+                .observations
+                .iter()
+                .map(|observation| observation.name.as_str())
+                .collect::<Vec<_>>(),
+            crate::edge_predictor::features::FEATURE_NAMES_V1
+        );
+        assert_eq!(
+            source_snapshot
+                .decision_features
+                .observations
+                .iter()
+                .map(|observation| observation.source.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "indicator_snapshot.adx.adx",
+                "indicator_snapshot.bollinger.bandwidth",
+                "tick.atr_value+price_event.last_price",
+                "price_event.funding_rate",
+                "indicator_snapshot.ewma_vol.ewma_vol",
+                "price_event.index_price+price_event.last_price",
+                "price_event.bids5+price_event.asks5",
+                "price_event.bid_price+price_event.ask_price",
+                "order_intent.confluence_score",
+                "order_intent.persistence_elapsed_ms",
+                "order_intent.is_long",
+                "order_intent.qty+price_event.last_price+paper_state.balance",
+                "paper_state.positions.count",
+                "paper_state.positions.same_direction_count",
+                "price_event.ts_ms.utc_hour_sin",
+                "price_event.ts_ms.utc_hour_cos",
+                "price_event.ts_ms.funding_settlement_window",
+            ]
+        );
+        for missing_name in [
+            "funding_rate",
+            "basis_bps",
+            "orderbook_imbalance_top5",
+            "spread_bps",
+            "confluence_score",
+            "persistence_elapsed_ms",
+        ] {
+            let observation = source_snapshot
+                .decision_features
+                .observations
+                .iter()
+                .find(|observation| observation.name == missing_name)
+                .unwrap();
+            assert!(!observation.raw_present, "{missing_name} 原始輸入缺失");
+            assert_eq!(
+                observation.value, None,
+                "{missing_name} 缺失時不得把 feature-builder default 0 誤記成 observed"
+            );
+            assert!(!observation.source.is_empty());
+        }
+        assert!(source_snapshot
+            .decision_features
+            .observations
+            .iter()
+            .filter(|observation| !observation.raw_present)
+            .all(|observation| observation.value.is_none()));
+        assert_eq!(
+            source_snapshot.portfolio.position_count,
+            Some(0),
+            "empty portfolio count 是直接觀測的 0，不是缺失 default"
+        );
+        let source_json = serde_json::to_value(source_snapshot).unwrap();
+        assert!(source_json.get("order_authority").is_none());
+        assert!(source_json.get("decision_lease").is_none());
+        assert!(source_json.get("promotion_authority").is_none());
+        assert!(
+            writer_rx.try_recv().is_err(),
+            "同一 reject 只入隊一則複合 message"
+        );
     });
 }
 
