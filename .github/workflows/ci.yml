@@ -423,3 +423,49 @@ jobs:
             program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_route_static_guard.py \
             program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_static_gui_guard.py \
             program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_surface_coverage_static_guard.py
+
+  # IBKR lane Rust 測試 + G4 symbol audit（W-CI：IBKR-CI-1 / IBKR-CI-2，出典 IBKR_TODO §5）。
+  # 缺口：rust-check-linux 只跑 cargo check，37 個 openclaw_types ibkr_*/stock_etf_*
+  # acceptance 檔與引擎 ibkr_phase2 in-file 測試在 hosted CI 原本零執行覆蓋
+  # （emergency merge 可繞過本地 E4，同 G0.5 當年的 CI drift 病根）。
+  # 範圍鎖五個 scope 而非引擎全測（全測含 40 個 integration-test bin + PG fixture，太重）：
+  #   1) openclaw_types 用 --test glob 按「測試檔」選 target——cargo 的名稱 filter 只匹配
+  #      測試函數路徑（不含檔名），acceptance fn 名多不含 ibkr/stock_etf，用名稱 filter 會空轉；
+  #   2) 引擎側 ibkr 命中面全在 lib in-file 測試（tests/ 目錄零 ibkr 檔；
+  #      ibkr_phase2_seal bin 的 2 個 CLI test fn 名不含 ibkr，任何 target 選擇下
+  #      名稱 filter 都不會執行它們），故 --lib 限縮編譯與全 package filter 的執行集合等價；
+  #      filter 取 ibkr（非 ibkr_phase2）以同時覆蓋 gate producer、secret-slot loader
+  #      與 readonly TWS client 三個模組的 in-file 測試，增量成本≈0（同一 lib harness）。
+  # 成本紀律（2000min/月）：限 pull_request、ubuntu-latest 1x 倍率、零 macOS 10x。
+  rust-ibkr-tests:
+    name: ibkr lane rust tests + g4 symbol audit (linux)
+    needs: changes
+    if: github.event_name == 'pull_request' && (needs.changes.outputs.rust == 'true' || needs.changes.outputs.stock_etf == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run openclaw_types ibkr acceptance tests
+        run: cargo test -p openclaw_types --test 'ibkr_*'
+      - name: Run openclaw_types stock_etf acceptance tests
+        run: cargo test -p openclaw_types --test 'stock_etf_*'
+      - name: Run openclaw_engine ibkr in-file tests
+        run: cargo test -p openclaw_engine --lib ibkr
+      - name: Run openclaw_engine stock_etf IPC in-file tests
+        # 驗收明文含 lane IPC 測試（ipc_server::tests::stock_etf 31 fn；
+        # 名稱 filter ibkr 只命中 3 個，此步以 module 路徑 stock_etf 全收）。
+        run: cargo test -p openclaw_engine --lib stock_etf
+      - name: Run openclaw_engine seal CLI bin tests
+        # ibkr_phase2_seal bin 的 2 個 CLI test fn 名不含 ibkr，唯有按 bin target 才會執行。
+        run: cargo test -p openclaw_engine --bin ibkr_phase2_seal
+      - name: Run the IBKR G4 symbol audit against the default debug build
+        # 斷言效期綁 W3 build-posture 重裁：若重裁採「能力進 default build」方案，
+        # 必須在同一 PR 內把本斷言改版為「connect 路徑必經 envelope 驗證」類負面斷言；
+        # 不得留紅、不得靜默刪除（出典 IBKR_TODO §5 W-CI IBKR-CI-2）。
+        # script 自帶 default debug build（cargo build -p openclaw_engine），前面
+        # cargo test 已暖 target/，此處增量重用；stripped/空 symtab 走 fail-closed exit 5。
+        working-directory: .
+        run: bash helper_scripts/ci/ibkr_g4_symbol_audit.sh
