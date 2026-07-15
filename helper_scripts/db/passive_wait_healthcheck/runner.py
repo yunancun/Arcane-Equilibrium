@@ -1638,7 +1638,10 @@ def main() -> int:
     # follow-up（runtime 副本漂回只蓋 /tmp 死路徑，var 真 engine.log 輪替自 06-27 空轉、
     # alpha cron log 裸奔到 4.5GB 才被人工發現）。trade-core runtime conf 整檔 sha256 vs
     # repo canonical `helper_scripts/logrotate-openclaw.conf` 不一致 > 24h → 升級（安裝
-    # 契約=整檔 cp，位元組平價即契約 machine-check）。純 filesystem 不依賴 runner cur，
+    # 契約=唯一入口 install_logrotate_from_repo.sh 整檔安裝，位元組平價即契約
+    # machine-check；drift 起點=最新 applied:true manifest 的 mtime
+    # （$OPENCLAW_DATA_DIR/logrotate_mutations/），無合規 manifest 的 mismatch=直接
+    # 視為超窗——dry-run 落 applied:false 不刷時鐘）。純 filesystem 不依賴 runner cur，
     # 跑於 conn.close() 後（與 [92]-[94] 同性質）。預設 WARN；
     # OPENCLAW_LOGROTATE_GOVERNANCE_REQUIRED=1 升 FAIL。
     s, m = check_95_logrotate_runtime_matches_repo()
