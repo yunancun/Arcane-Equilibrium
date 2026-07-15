@@ -29,10 +29,17 @@
 //!   - **refuse-ephemeral（finding-3）**：`OPENCLAW_DATA_DIR` 未設 / canonicalize
 //!     落 `/tmp/*` 等易失路徑 → 拒 seal（`EphemeralDataDir`），**絕不**沿
 //!     `halt_audit` 的 `/tmp/openclaw` fallback（治理證據不可寫易失盤）。
-//!   - **approval A-model（6 綁定，缺一即 fail-closed 不注入 Operator）**：見
-//!     `approval_is_valid` + `load_phase2_seal_approval_from_dir`。approval 引的是
-//!     contact-授權 AMD `AMD-2026-07-08-01`，與 artifact shape-AMD
-//!     `AMD-2026-06-29-01` 是兩軸（finding-2）。
+//!   - **production 批准模型（W2，6 綁定，缺一即 fail-closed 零寫）**：現行
+//!     production 批准=`Phase2SealControlApprovalV1`（經
+//!     `phase2_control_approval_is_valid`；綁 `authorization_amd ==
+//!     AMD-2026-07-11-01`、`contract_id == ibkr_phase2_seal_control_v1`、
+//!     `approved_source_commit == BUILD_GIT_SHA`、PM+Operator 雙角色、時窗
+//!     ≤30 天）。ADR-0048 / shape-AMD（06-29-01）/ contact-AMD（07-08-01）三
+//!     綁定下沉到 artifact 層，由 `IbkrPhase2GateArtifactV1::validate()` 硬 pin
+//!     強制；`approval_lineage_hash` = `control_approval_digest`（canonical 固定
+//!     key 序 + roles 排序）。舊 A-model（07-08-01 TOML 批准，`approval_is_valid`
+//!     + `load_phase2_seal_approval_from_dir`）**僅存於 `#[cfg(test)]` 供歷史
+//!     對照**，不再是 production 路徑。
 //!   - **write-once**：`create_new` 唯一 tmp → `sync_all` → `hard_link(tmp,final)`
 //!     （final 已存在 = 拒二次 seal，絕不 rename overwrite）→ 0o400 → fsync 父目錄。
 //!
@@ -95,6 +102,8 @@ const REASON_SOURCE_COMMIT_UNKNOWN: &str = "source_commit_unknown";
 
 /// 易失路徑前綴（refuse-ephemeral）。跨平台涵蓋 Linux `/tmp`、Mac `/private/tmp`
 /// 與 `/var/folders`（tempfile），以及 `/dev/shm`。
+/// E3-F1:`/run` 族(systemd tmpfs;含 `/run/user/<uid>` 與傳統 `/var/run`
+/// symlink、Mac `/private/var/run`)同為 reboot 即蒸發的易失盤,治理證據一律拒寫。
 const EPHEMERAL_PREFIXES: &[&str] = &[
     "/tmp",
     "/private/tmp",
@@ -103,6 +112,9 @@ const EPHEMERAL_PREFIXES: &[&str] = &[
     "/var/folders",
     "/private/var/folders",
     "/dev/shm",
+    "/run",
+    "/var/run",
+    "/private/var/run",
 ];
 
 // ---------------------------------------------------------------------------
@@ -865,6 +877,12 @@ fn resolve_phase2_governance_dir() -> Result<PathBuf, Phase2SealError> {
         return Err(Phase2SealError::EphemeralDataDir);
     }
     let data_dir = PathBuf::from(raw);
+    // E3-F2:相對路徑一律拒。治理目錄依 cwd 解析=同一 env 在不同進程/工作目錄
+    // 指向不同帳本(不可再現、可被 cwd 操縱繞過 ephemeral 前綴比對),與
+    // refuse-ephemeral 同屬「治理證據落點不可信」→ 沿用同一 typed reason。
+    if !data_dir.is_absolute() {
+        return Err(Phase2SealError::EphemeralDataDir);
+    }
     if is_ephemeral_path(&data_dir) {
         return Err(Phase2SealError::EphemeralDataDir);
     }
@@ -1174,7 +1192,11 @@ pub struct Phase2SealEvaluation {
     pub inputs_valid: bool,
     pub approval_present: bool,
     pub approval_valid: bool,
+    /// E2-F1:active 世代存在**且未過期**才 true(authority 真值)。
     pub active_current_build: bool,
+    /// E2-F1:active 世代存在但已過期(expired_needs_supersede 態)——gate 非
+    /// authoritative,operator 需以 Supersede 續期(或 Revoke 終結)。
+    pub active_expired_needs_supersede: bool,
     pub no_contact: bool,
 }
 
@@ -1190,7 +1212,13 @@ pub struct Phase2SealApplyOutcome {
 
 #[derive(Debug, Clone)]
 struct Phase2LineageState {
+    /// replay 得出的 active 世代(**不含 expiry 判定**)。supersede/revoke 的
+    /// predecessor 綁定必須以它為準——即使已過期,續期(Supersede)仍需要它。
     active: Option<Phase2SealedGenerationV1>,
+    /// E2-F1:consume 側唯一 authority 真值——active 存在**且未過期**才 true。
+    /// 過期的 active 世代 → false(gate 非 authoritative,fail-closed),但
+    /// `active` 仍保留以維持帳本可操作性(expired_needs_supersede 態)。
+    active_authoritative: bool,
     tail_hash: Option<String>,
     approval_ids: BTreeSet<String>,
     approval_digests: BTreeSet<String>,
@@ -1490,6 +1518,22 @@ fn phase2_control_approval_is_valid(
             .unwrap_or(matches!(approval.action, Phase2SealControlAction::Seal))
 }
 
+/// E2-F3 anti-placeholder:repo template 的 placeholder 指紋形態=**全同字元
+/// 64-hex**。出典:`rust/openclaw_types/src/ibkr_phase2_runtime.rs` 之
+/// `source_template()`——secret_slot_fingerprint="a"*64、secret account
+/// fp="b"*64、topology account fp="c"*64;
+/// `settings/broker/ibkr_phase2_gate_artifact.template.toml` 的對應欄為空字串
+/// (空串已被 `validate()` 的 is_sha256_hex 拒,無需在此重複)。真 sha256
+/// 出現全同字元的機率可忽略,此形態即「template 原樣抄進 runtime 目錄」的
+/// 指紋,production seal inputs 必拒。
+fn fingerprint_is_template_placeholder(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .as_bytes()
+            .first()
+            .is_some_and(|first| value.bytes().all(|byte| byte == *first))
+}
+
 fn production_inputs_are_valid(inputs: &Phase2SealProductionInputsV1) -> bool {
     inputs.contract_id == W2_INPUTS_CONTRACT_ID
         && inputs.source_version == 1
@@ -1499,8 +1543,23 @@ fn production_inputs_are_valid(inputs: &Phase2SealProductionInputsV1) -> bool {
         && inputs.api_session_topology.validate().accepted
         && inputs.secret_slot_contract.account_fingerprint_hash
             == inputs.api_session_topology.account_fingerprint_hash
+        // E2-F3:template placeholder 指紋(全同字元 64-hex)不得進 production
+        // seal——它們是 shape 樣板,不對應任何真實 slot/topology 指紋。
+        && !fingerprint_is_template_placeholder(&inputs.secret_slot_contract.secret_slot_fingerprint)
+        && !fingerprint_is_template_placeholder(
+            &inputs.secret_slot_contract.account_fingerprint_hash,
+        )
+        && !fingerprint_is_template_placeholder(
+            &inputs.api_session_topology.account_fingerprint_hash,
+        )
 }
 
+/// generation_hash = sha256(清空自身 hash 欄後的整結構 serde JSON)。
+///
+/// **欄位序 load-bearing(E3-F4/E2-F4)**:此 canonical 形態直接取
+/// `Phase2SealedGenerationV1` 的 struct 宣告欄位序(serde 按宣告序序列化)。
+/// 重排/增刪任何欄位=改變 hash 前像 → 既有 0400 帳本全部驗證失敗(等同人為
+/// brick)。任何 shape 變更必須走新 source_version/新 contract,絕不可原地重排。
 fn generation_hash(generation: &Phase2SealedGenerationV1) -> String {
     let mut canonical = generation.clone();
     canonical.generation_hash.clear();
@@ -1530,6 +1589,12 @@ fn control_id(record: &Phase2SealControlRecordV1) -> String {
     )
 }
 
+/// control_hash = sha256(清空自身 hash 欄後的整結構 serde JSON)。
+///
+/// **欄位序 load-bearing(E3-F4/E2-F4)**:canonical 形態=
+/// `Phase2SealControlRecordV1` 的 struct 宣告欄位序。重排/增刪欄位即改變
+/// hash 前像 → 既有 control 鏈(含 previous_control_hash 鏈接)全部失效。
+/// shape 變更必須走新 source_version/新 contract,絕不可原地重排。
 fn control_hash(record: &Phase2SealControlRecordV1) -> String {
     let mut canonical = record.clone();
     canonical.control_hash.clear();
@@ -1613,6 +1678,26 @@ fn load_control_approval_from_dir(
         .map_err(|e| format!("invalid controlled phase2 approval: {e}"))
 }
 
+/// E3-F3:清 errno。`readdir(3)` 以回傳 NULL 同時表示「枚舉完成」與「讀取
+/// 錯誤」,唯一區分手段是 errno;呼叫前不清零,殘留的舊 errno 會令錯誤判定
+/// 不可靠。部署目標僅 Linux/Apple Silicon,兩系皆有對應 thread-local 入口。
+#[cfg(unix)]
+fn clear_errno() {
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    unsafe {
+        *libc::__error() = 0;
+    }
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    unsafe {
+        *libc::__errno_location() = 0;
+    }
+}
+
+/// 安全列舉 dirfd 下的 entry 名。**fail-closed 語義(E3-F3)**:`readdir` 回
+/// NULL 且 errno≠0(如 EBADF/EIO)代表列舉「中途失敗」而非「正常讀完」——
+/// 此時回 `None`,絕不把部分列舉當成完整 ledger 快照(部分快照會令 lineage
+/// 驗證在缺頁的記錄集上誤判)。每次 `readdir` 前先清 errno,避免前一 libc
+/// 呼叫殘留的 errno 造成誤報/漏報。
 #[cfg(unix)]
 fn secure_dir_entry_names(dir: &std::fs::File) -> Option<Vec<String>> {
     use std::os::unix::io::AsRawFd;
@@ -1628,9 +1713,13 @@ fn secure_dir_entry_names(dir: &std::fs::File) -> Option<Vec<String>> {
     }
     let mut names = Vec::new();
     let mut invalid_name = false;
+    let mut read_failed = false;
     loop {
+        clear_errno();
         let entry = unsafe { libc::readdir(raw_dir) };
         if entry.is_null() {
+            // NULL + errno≠0 = 讀取錯誤,非正常終止 → fail-closed。
+            read_failed = std::io::Error::last_os_error().raw_os_error().unwrap_or(0) != 0;
             break;
         }
         let name = match unsafe { std::ffi::CStr::from_ptr((*entry).d_name.as_ptr()) }.to_str() {
@@ -1645,7 +1734,7 @@ fn secure_dir_entry_names(dir: &std::fs::File) -> Option<Vec<String>> {
         }
     }
     unsafe { libc::closedir(raw_dir) };
-    if invalid_name {
+    if invalid_name || read_failed {
         return None;
     }
     names.sort();
@@ -1807,18 +1896,26 @@ fn read_current_build_records<T: for<'de> Deserialize<'de>>(
     Ok(Vec::new())
 }
 
+/// 世代記錄的**結構性**驗證(hash 自洽/檔名路徑綁定/artifact 雙綠/triangulation)。
+///
+/// E2-F1:此處刻意**不做 expiry 檢查**——expiry 只約束「active leaf 的
+/// authority 判定」(見 `evaluate_current_build_lineage_records` 末端)。
+/// 若對帳本內每個世代(含已被 supersede 的祖先、已 revoke 的世代)套 expiry,
+/// 任一祖先過期即整鏈 Err → summary 翻 false 且 seal/supersede/revoke 全被擋
+/// → ledger 永久死鎖,打穿 ADR-0048「Re-attestation uses Supersede」。
+/// 歷史世代只需結構完整;`valid_until_ms` 僅驗非零(shape),過期與否由
+/// replay 完成後對 active 世代單獨判定。
 fn sealed_generation_is_valid(
     generation: &Phase2SealedGenerationV1,
     gov_dir: &Path,
     expected_build_sha: &str,
-    now: u64,
 ) -> bool {
     generation.contract_id == W2_CONTROL_CONTRACT_ID
         && generation.source_version == 1
         && openclaw_types::is_sha256_hex(&generation.generation_id)
         && openclaw_types::is_sha256_hex(&generation.approval_id)
         && openclaw_types::is_sha256_hex(&generation.approval_digest)
-        && generation.valid_until_ms > now
+        && generation.valid_until_ms > 0
         && generation.generation_hash == generation_hash(generation)
         && generation.artifact.artifact_id == generation.generation_id
         && generation.artifact.source_commit == expected_build_sha
@@ -1911,6 +2008,7 @@ fn load_current_build_lineage(
         let _ = (gov_dir, expected_build_sha, now);
         Ok(Phase2LineageState {
             active: None,
+            active_authoritative: false,
             tail_hash: None,
             approval_ids: BTreeSet::new(),
             approval_digests: BTreeSet::new(),
@@ -1928,6 +2026,7 @@ fn evaluate_current_build_lineage_records(
     if generations.is_empty() && controls.is_empty() {
         return Ok(Phase2LineageState {
             active: None,
+            active_authoritative: false,
             tail_hash: None,
             approval_ids: BTreeSet::new(),
             approval_digests: BTreeSet::new(),
@@ -1939,7 +2038,9 @@ fn evaluate_current_build_lineage_records(
 
     let mut generation_by_id = BTreeMap::new();
     for generation in generations {
-        if !sealed_generation_is_valid(&generation, gov_dir, expected_build_sha, now)
+        // E2-F1:此處只做結構驗證(不含 expiry)——歷史/被 supersede/被 revoke
+        // 的世代過期不得毀掉整條 lineage 的可載入性。
+        if !sealed_generation_is_valid(&generation, gov_dir, expected_build_sha)
             || generation_by_id
                 .insert(generation.generation_id.clone(), generation)
                 .is_some()
@@ -2016,6 +2117,9 @@ fn evaluate_current_build_lineage_records(
                 {
                     return Err("genesis seal unexpectedly has predecessor".to_string());
                 }
+                if !generation_matches_control_binding(target, control) {
+                    return Err("generation/control approval binding mismatch".to_string());
+                }
                 active = Some(target.clone());
             }
             Phase2SealControlAction::Supersede => {
@@ -2028,6 +2132,9 @@ fn evaluate_current_build_lineage_records(
                         != Some(previous.artifact.raw_artifact_hash.as_str())
                 {
                     return Err("supersession predecessor mismatch".to_string());
+                }
+                if !generation_matches_control_binding(target, control) {
+                    return Err("generation/control approval binding mismatch".to_string());
                 }
                 active = Some(target.clone());
             }
@@ -2049,12 +2156,38 @@ fn evaluate_current_build_lineage_records(
             _ => return Err("invalid immutable control action order".to_string()),
         }
     }
+    // E2-F1:expiry 只在 replay 完成後、只對 active leaf 判定 authority。
+    // 過期的 active 世代保留在 `active`(供 supersede/revoke 做 predecessor
+    // 綁定=expired_needs_supersede 態),但 `active_authoritative=false` →
+    // consume 側(`phase2_immutable_pass_artifact_present` 及 summary)一律呈
+    // false/inactive,fail-closed 語義不變;帳本可操作性不受任何世代過期影響。
+    let active_authoritative = active
+        .as_ref()
+        .map(|generation| generation.valid_until_ms > now)
+        .unwrap_or(false);
     Ok(Phase2LineageState {
         active,
+        active_authoritative,
         tail_hash: Some(leaves[0].clone()),
         approval_ids,
         approval_digests,
     })
+}
+
+/// E2-F9 reader 交叉檢查:generation 與其配對 control 必須同源——
+/// `approval_id`/`approval_digest`/`valid_until_ms` 三欄等值,且 artifact 自記
+/// 的 `supersedes_artifact_id` 必須等於 control 的 `predecessor_artifact_id`。
+/// 否則兩份各自 hash 自洽的 0400 記錄可由**不同 approval** 拼裝成混鏈
+/// (writer 雖同源寫入,reader 不能只信 writer 紀律)。僅適用 Seal/Supersede
+/// arm;Revoke 的 target 是被撤的舊世代,其 approval 欄位本就屬於舊 approval。
+fn generation_matches_control_binding(
+    generation: &Phase2SealedGenerationV1,
+    control: &Phase2SealControlRecordV1,
+) -> bool {
+    generation.approval_id == control.approval_id
+        && generation.approval_digest == control.approval_digest
+        && generation.valid_until_ms == control.valid_until_ms
+        && generation.artifact.supersedes_artifact_id == control.predecessor_artifact_id
 }
 
 fn evaluate_controlled_phase2_for_dir(
@@ -2088,9 +2221,15 @@ fn evaluate_controlled_phase2_for_dir(
         .map(|value| phase2_control_approval_is_valid(value, now, expected_build_sha))
         .unwrap_or(false);
     let lineage = load_current_build_lineage(gov_dir, expected_build_sha, now);
+    // E2-F1:authority=active 且未過期;expired_needs_supersede=active 存在但
+    // 已過期(帳本可操作、gate 不放行)。
     let active_current_build = lineage
         .as_ref()
-        .map(|state| state.active.is_some())
+        .map(|state| state.active_authoritative)
+        .unwrap_or(false);
+    let active_expired_needs_supersede = lineage
+        .as_ref()
+        .map(|state| state.active.is_some() && !state.active_authoritative)
         .unwrap_or(false);
     if !source_commit_is_known(expected_build_sha) {
         blockers.push(REASON_SOURCE_COMMIT_UNKNOWN.to_string());
@@ -2126,6 +2265,7 @@ fn evaluate_controlled_phase2_for_dir(
         approval_present,
         approval_valid,
         active_current_build,
+        active_expired_needs_supersede,
         no_contact: true,
     }
 }
@@ -2147,6 +2287,7 @@ pub fn phase2_seal_dry_run() -> Phase2SealEvaluation {
                 approval_present: false,
                 approval_valid: false,
                 active_current_build: false,
+                active_expired_needs_supersede: false,
                 no_contact: true,
             }
         }
@@ -2601,7 +2742,6 @@ fn recoverable_orphan_generation_from_phase2(
     approval: &Phase2SealControlApprovalV1,
     approval_digest: &str,
     predecessor: Option<&Phase2SealedGenerationV1>,
-    now: u64,
 ) -> Result<Option<Phase2SealedGenerationV1>, String> {
     let generations: Vec<Phase2SealedGenerationV1> = read_current_build_records_from_phase2(
         phase2_fd,
@@ -2632,7 +2772,10 @@ fn recoverable_orphan_generation_from_phase2(
     let orphan = orphans.pop().expect("length checked");
     let expected_id =
         controlled_generation_id(source_commit, approval, approval_digest, predecessor);
-    if !sealed_generation_is_valid(&orphan, gov_dir, source_commit, now)
+    // E2-F1:結構驗證不含 expiry;orphan 的 valid_until 被下方
+    // `orphan.valid_until_ms != approval.expires_at_ms` 綁死在「當前有效
+    // approval 的過期時點」上,故被收養的 orphan 必然未過期。
+    if !sealed_generation_is_valid(&orphan, gov_dir, source_commit)
         || orphan.generation_id != expected_id
         || orphan.approval_id != approval.approval_id
         || orphan.approval_digest != approval_digest
@@ -2748,7 +2891,23 @@ where
                 lineage
             }
             Err(reason) => {
-                if !matches!(approval.action, Phase2SealControlAction::Seal)
+                // E2 驗證點 5:lineage Err 時唯一可恢復的形態=「創世 seal 已
+                // 寫入 generation、control 尚未落盤」的中斷——此時 controls
+                // 分支必然為空。controls 非空而 lineage 仍 Err = 帳本本體損壞
+                // (fork/竄改/亂序);若仍放行 orphan 收養,會在空 lineage 假設
+                // 下寫入第二個 control root,永久 brick 帳本 → fail-closed,
+                // 原因原樣回傳,零寫。controls 分支本身讀不動也視為非空(拒)。
+                let controls_branch_is_empty =
+                    read_current_build_records_from_phase2::<Phase2SealControlRecordV1>(
+                        &lock.parent,
+                        CONTROLS_DIRNAME,
+                        source_commit,
+                        control_filename_is_valid,
+                    )
+                    .map(|records| records.is_empty())
+                    .unwrap_or(false);
+                if !controls_branch_is_empty
+                    || !matches!(approval.action, Phase2SealControlAction::Seal)
                     || recoverable_orphan_generation_from_phase2(
                         &lock.parent,
                         gov_dir,
@@ -2756,7 +2915,6 @@ where
                         approval,
                         &approval_digest,
                         None,
-                        now,
                     )?
                     .is_none()
                 {
@@ -2764,6 +2922,7 @@ where
                 }
                 Phase2LineageState {
                     active: None,
+                    active_authoritative: false,
                     tail_hash: None,
                     approval_ids: BTreeSet::new(),
                     approval_digests: BTreeSet::new(),
@@ -2822,7 +2981,6 @@ where
                 approval,
                 &approval_digest,
                 predecessor,
-                now,
             )? {
                 Some(orphan) => orphan,
                 None => {
@@ -2946,8 +3104,37 @@ pub fn phase2_apply_seal_if_explicitly_requested(
             }
         }
     };
-    let inputs = load_control_inputs_from_dir(&gov_dir).ok().flatten();
-    let approval = load_control_approval_from_dir(&gov_dir).ok().flatten();
+    // E2-F4 診斷分流:load 的 Err(檔案存在但 JSON 壞)≠ Ok(None)(檔案缺席)。
+    // 舊 `.ok().flatten()` 把兩者混為 missing → operator 佈了壞檔會被誤導成
+    // 「還沒佈檔」。rejected → blocked+原因;missing → pending。
+    // (檔案存在但 owner/mode/symlink 不安全時 secure reader 回 None,仍歸
+    // missing——不洩漏拒讀原因是 W1 consumer 既定語義,此處不改。)
+    let inputs = match load_control_inputs_from_dir(&gov_dir) {
+        Ok(value) => value,
+        Err(reason) => {
+            return Phase2SealApplyOutcome {
+                status: "blocked".to_string(),
+                blockers: vec![reason],
+                action: None,
+                no_contact: true,
+                wrote_generation: false,
+                wrote_control: false,
+            }
+        }
+    };
+    let approval = match load_control_approval_from_dir(&gov_dir) {
+        Ok(value) => value,
+        Err(reason) => {
+            return Phase2SealApplyOutcome {
+                status: "blocked".to_string(),
+                blockers: vec![reason],
+                action: None,
+                no_contact: true,
+                wrote_generation: false,
+                wrote_control: false,
+            }
+        }
+    };
     let Some(approval) = approval else {
         return Phase2SealApplyOutcome {
             status: "external_verification_pending".to_string(),
@@ -2987,6 +3174,9 @@ pub fn phase2_gate_producer_summary() -> serde_json::Value {
     serde_json::json!({
         "producer_status": evaluation.status,
         "immutable_pass_artifact_present": evaluation.active_current_build,
+        // E2-F1:active 世代存在但過期 → 非 authoritative;operator 以
+        // Supersede 續期(帳本不死鎖,ADR-0048 re-attestation 語義)。
+        "active_expired_needs_supersede": evaluation.active_expired_needs_supersede,
         "blockers": evaluation.blockers,
         "inputs_present": evaluation.inputs_present,
         "inputs_valid": evaluation.inputs_valid,
@@ -3007,8 +3197,10 @@ pub(crate) fn phase2_immutable_pass_artifact_present() -> bool {
         Ok(path) => path,
         Err(_) => return false,
     };
+    // E2-F1:consume 側取 authority 真值(active 且未過期);過期的 active 呈
+    // false/inactive(fail-closed),但不影響帳本側 supersede/revoke 可操作性。
     load_current_build_lineage(&gov_dir, BUILD_GIT_SHA, now_ms())
-        .map(|state| state.active.is_some())
+        .map(|state| state.active_authoritative)
         .unwrap_or(false)
 }
 
@@ -3076,7 +3268,12 @@ mod tests {
     }
 
     fn controlled_inputs() -> Phase2SealProductionInputsV1 {
-        let secret = valid_secret();
+        let mut secret = valid_secret();
+        // E2-F3 anti-placeholder:production inputs 不得沿用 template 全同字元
+        // 指紋("a"*64/"b"*64/"c"*64)。fixture 改用真實形態的非 placeholder
+        // 64-hex(內容任意、僅形態真實,絕非任何真憑證材料)。
+        secret.secret_slot_fingerprint = sha256_hex(b"w2-test-secret-slot-fingerprint");
+        secret.account_fingerprint_hash = sha256_hex(b"w2-test-account-fingerprint");
         Phase2SealProductionInputsV1 {
             contract_id: W2_INPUTS_CONTRACT_ID.to_string(),
             source_version: 1,
@@ -4485,5 +4682,390 @@ mod tests {
         .is_err());
         assert!(!gov.join(GENERATIONS_DIRNAME).exists());
         assert!(!gov.join(CONTROLS_DIRNAME).exists());
+    }
+
+    /// FIX-1(E2-F1)紅→綠:staggered expiry 不得 brick 帳本。
+    /// seal(expiry T1)→ supersede(expiry T2>T1);now∈(T1,T2) 時:
+    /// ① lineage load 必須 OK(修前:被 supersede 的祖先 gen1 已過期 → 整鏈 Err);
+    /// ② active 世代(gen2)未過期 → gate authority 成立;
+    /// ③ now>T2:active 過期 → gate 非 authoritative(consume 側 false),
+    ///    但 lineage 照常可 load、supersede 照常可執行(ADR-0048 re-attestation
+    ///    via Supersede 不死鎖)。
+    #[test]
+    fn w2_staggered_expiry_keeps_ledger_operable_and_authority_follows_active_leaf() {
+        let tmp = tempfile::tempdir().unwrap();
+        let gov = make_gov_chain(tmp.path());
+        let sha = fake_sha();
+        let inputs = controlled_inputs();
+
+        let t1 = FIXED_NOW + 1_000;
+        let t2 = FIXED_NOW + 100_000;
+
+        let mut seal = controlled_approval('b', Phase2SealControlAction::Seal, &sha, None);
+        seal.expires_at_ms = t1;
+        apply_controlled_phase2_for_dir(&gov, Some(&inputs), &seal, &sha, FIXED_NOW)
+            .expect("genesis seal with early expiry");
+        let gen1 = load_current_build_lineage(&gov, &sha, FIXED_NOW)
+            .unwrap()
+            .active
+            .expect("active gen1");
+
+        let mut supersede =
+            controlled_approval('c', Phase2SealControlAction::Supersede, &sha, Some(&gen1));
+        supersede.expires_at_ms = t2;
+        apply_controlled_phase2_for_dir(&gov, Some(&inputs), &supersede, &sha, FIXED_NOW + 1)
+            .expect("supersede with later expiry");
+
+        // ① now ∈ (T1,T2):祖先 gen1 已過期,但 lineage 必須照常 load。
+        let mid = t1 + 500;
+        let state = load_current_build_lineage(&gov, &sha, mid)
+            .expect("expired superseded ancestor must not brick lineage load");
+        let gen2 = state.active.clone().expect("gen2 must stay active at mid");
+        assert_ne!(gen2.generation_id, gen1.generation_id);
+        // ② active 未過期 → consume 側 authority 成立。
+        assert!(
+            evaluate_controlled_phase2_for_dir(&gov, &sha, mid).active_current_build,
+            "unexpired active leaf must remain authoritative despite expired ancestor"
+        );
+
+        // ③ now > T2:active 過期 → 非 authoritative,但可 load、可 supersede。
+        let late = t2 + 500;
+        let state_late = load_current_build_lineage(&gov, &sha, late)
+            .expect("expired active leaf must not brick lineage load");
+        assert!(
+            state_late.active.is_some(),
+            "expired active generation must remain replayable for supersede predecessor binding"
+        );
+        let eval_late = evaluate_controlled_phase2_for_dir(&gov, &sha, late);
+        assert!(
+            !eval_late.active_current_build,
+            "expired active leaf must not be consumed as authoritative (fail-closed)"
+        );
+
+        // 續期 supersede 仍可執行(operator 唯一合法解鎖路徑)。
+        let mut renew =
+            controlled_approval('e', Phase2SealControlAction::Supersede, &sha, Some(&gen2));
+        renew.issued_at_ms = late - 1000;
+        renew.expires_at_ms = late + 3_600_000;
+        let renewed = apply_controlled_phase2_for_dir(&gov, Some(&inputs), &renew, &sha, late)
+            .expect("supersede of an expired active leaf must remain executable");
+        assert_eq!(renewed.status, "applied_no_contact");
+        assert!(
+            evaluate_controlled_phase2_for_dir(&gov, &sha, late).active_current_build,
+            "renewed generation must restore authority"
+        );
+    }
+
+    /// FIX-1(E2 驗證點 5)釘死:lineage Err(controls 非空,如 fork)時,即使
+    /// 存在一個恰好匹配新 Seal approval 的 orphan generation,apply 也必須拒絕
+    /// 且零寫——否則會以空 lineage 假設鑄造第二個 control root,永久 brick 帳本。
+    #[test]
+    fn w2_apply_rejects_seal_recovery_when_lineage_err_with_nonempty_controls() {
+        let tmp = tempfile::tempdir().unwrap();
+        let gov = make_gov_chain(tmp.path());
+        let sha = fake_sha();
+        let inputs = controlled_inputs();
+
+        let seal = controlled_approval('f', Phase2SealControlAction::Seal, &sha, None);
+        apply_controlled_phase2_for_dir(&gov, Some(&inputs), &seal, &sha, FIXED_NOW)
+            .expect("genesis seal");
+        let state = load_current_build_lineage(&gov, &sha, FIXED_NOW).unwrap();
+        let active = state.active.clone().unwrap();
+
+        // 製造 fork:兩筆結構自洽的 control 掛同一 previous_control_hash。
+        // 注意:approval_id 契約是 64-hex,fixture 字元必須取自 [0-9a-f],
+        // 否則 control 會先敗在 is_sha256_hex(結構無效)而非 fork 檢查。
+        let controls_dir = gov.join(CONTROLS_DIRNAME).join(&sha);
+        let controls_fd = fs::File::open(&controls_dir).unwrap();
+        for approval_char in ['7', '8'] {
+            let branch_approval = controlled_approval(
+                approval_char,
+                Phase2SealControlAction::Revoke,
+                &sha,
+                Some(&active),
+            );
+            let branch = build_control_record(
+                &branch_approval,
+                &control_approval_digest(&branch_approval),
+                &active,
+                Some(&active),
+                state.tail_hash.clone(),
+                &sha,
+                FIXED_NOW + 1,
+            );
+            write_immutable_json(
+                &controls_fd,
+                &format!("{}.control.json", branch.control_id),
+                &branch,
+            )
+            .unwrap();
+        }
+        assert!(
+            load_current_build_lineage(&gov, &sha, FIXED_NOW + 2).is_err(),
+            "fixture must brick lineage load via forked controls"
+        );
+
+        // 手工放一個匹配「新 Seal approval」的 orphan generation(模擬攻擊者/
+        // 誤操作為 Err 帳本鋪好可收養的孤兒)。
+        let reseal = controlled_approval('9', Phase2SealControlAction::Seal, &sha, None);
+        let digest = control_approval_digest(&reseal);
+        let orphan =
+            build_controlled_generation(&gov, &inputs, &reseal, &digest, None, &sha, FIXED_NOW + 3)
+                .expect("orphan generation fixture");
+        let generations_dir = gov.join(GENERATIONS_DIRNAME).join(&sha);
+        let generations_fd = fs::File::open(&generations_dir).unwrap();
+        write_immutable_json(
+            &generations_fd,
+            &format!("{}.sealed.json", orphan.generation_id),
+            &orphan,
+        )
+        .unwrap();
+
+        let controls_before = fs::read_dir(&controls_dir).unwrap().count();
+        apply_controlled_phase2_for_dir(&gov, Some(&inputs), &reseal, &sha, FIXED_NOW + 4)
+            .expect_err("lineage Err with non-empty controls must reject seal recovery");
+        let controls_after = fs::read_dir(&controls_dir).unwrap().count();
+        assert_eq!(
+            controls_before, controls_after,
+            "零寫:損壞帳本上不得追加任何 control 記錄(否則鑄造第二 root)"
+        );
+    }
+
+    /// FIX-2(E3-F1):`/run` 族 tmpfs 前綴必須被 refuse-ephemeral 拒絕。
+    #[test]
+    fn f3_run_prefixed_data_dir_refused() {
+        let _g = crate::test_env_lock::guard();
+        let prev = std::env::var("OPENCLAW_DATA_DIR").ok();
+        for candidate in [
+            "/run/user/1000/x",
+            "/var/run/openclaw",
+            "/private/var/run/openclaw",
+        ] {
+            std::env::set_var("OPENCLAW_DATA_DIR", candidate);
+            assert!(
+                matches!(
+                    resolve_phase2_governance_dir(),
+                    Err(Phase2SealError::EphemeralDataDir)
+                ),
+                "tmpfs-backed data dir must be refused: {candidate}"
+            );
+        }
+        match prev {
+            Some(v) => std::env::set_var("OPENCLAW_DATA_DIR", v),
+            None => std::env::remove_var("OPENCLAW_DATA_DIR"),
+        }
+    }
+
+    /// FIX-3(E3-F2):相對路徑 DATA_DIR 必拒(cwd 依賴=治理目錄不可再現)。
+    #[test]
+    fn f3_relative_data_dir_refused() {
+        let _g = crate::test_env_lock::guard();
+        let prev = std::env::var("OPENCLAW_DATA_DIR").ok();
+        for candidate in ["data", "./x", "x/governance"] {
+            std::env::set_var("OPENCLAW_DATA_DIR", candidate);
+            assert!(
+                matches!(
+                    resolve_phase2_governance_dir(),
+                    Err(Phase2SealError::EphemeralDataDir)
+                ),
+                "relative data dir must be refused: {candidate}"
+            );
+        }
+        match prev {
+            Some(v) => std::env::set_var("OPENCLAW_DATA_DIR", v),
+            None => std::env::remove_var("OPENCLAW_DATA_DIR"),
+        }
+    }
+
+    /// FIX-5(E2-F3)anti-placeholder:repo template 的全同字元 64-hex 指紋
+    /// (source_template 的 "a"*64/"b"*64/"c"*64)不得被當作 production seal
+    /// inputs 接受——那代表 operator 把 template 原樣抄進了 runtime 目錄。
+    #[test]
+    fn w2_production_inputs_reject_template_placeholder_fingerprints() {
+        // template 原樣值(secret fp="a"*64、account fp="b"*64、topology 對齊)必拒。
+        let secret = valid_secret();
+        let template_inputs = Phase2SealProductionInputsV1 {
+            contract_id: W2_INPUTS_CONTRACT_ID.to_string(),
+            source_version: 1,
+            policy_bundle: valid_bundle(),
+            api_allowlist: valid_allowlist(),
+            secret_slot_contract: secret.clone(),
+            api_session_topology: matched_topology(&secret),
+        };
+        assert!(
+            !production_inputs_are_valid(&template_inputs),
+            "template placeholder fingerprints must be rejected as production inputs"
+        );
+        // 對照:非 placeholder 的真實形態 64-hex 必過(其餘 leg 不變)。
+        assert!(
+            production_inputs_are_valid(&controlled_inputs()),
+            "non-placeholder fingerprints must remain accepted"
+        );
+    }
+
+    /// FIX-6(E2-F8)雙閘負測試:cli=true 但 env 缺席/非 literal "1"(含空白、
+    /// 換行、"true")→ status=blocked 且零寫。釘死 env 閘不做 trim/寬鬆解析。
+    #[test]
+    fn w2_apply_env_gate_rejects_missing_and_non_literal_values() {
+        let _g = crate::test_env_lock::guard();
+        let old = std::env::var("OPENCLAW_IBKR_PHASE2_SEAL_APPLY").ok();
+
+        std::env::remove_var("OPENCLAW_IBKR_PHASE2_SEAL_APPLY");
+        let missing = phase2_apply_seal_if_explicitly_requested(true);
+        assert_eq!(missing.status, "blocked");
+        assert!(missing
+            .blockers
+            .contains(&"OPENCLAW_IBKR_PHASE2_SEAL_APPLY=1_required".to_string()));
+        assert!(!missing.wrote_generation && !missing.wrote_control);
+
+        for non_literal in ["true", " 1", "1\n", "1 ", "01", ""] {
+            std::env::set_var("OPENCLAW_IBKR_PHASE2_SEAL_APPLY", non_literal);
+            let outcome = phase2_apply_seal_if_explicitly_requested(true);
+            assert_eq!(
+                outcome.status, "blocked",
+                "non-literal env value must block: {non_literal:?}"
+            );
+            assert!(
+                !outcome.wrote_generation && !outcome.wrote_control,
+                "non-literal env value must write nothing: {non_literal:?}"
+            );
+        }
+
+        match old {
+            Some(value) => std::env::set_var("OPENCLAW_IBKR_PHASE2_SEAL_APPLY", value),
+            None => std::env::remove_var("OPENCLAW_IBKR_PHASE2_SEAL_APPLY"),
+        }
+    }
+
+    /// FIX-7(E2-F9):generation 與其配對 control 的 approval 綁定
+    /// (approval_id/approval_digest/valid_until_ms)必須等值,否則兩份各自
+    /// hash 自洽的 0400 記錄可由不同 approval 拼裝(混鏈)。
+    #[test]
+    fn w2_lineage_rejects_generation_control_approval_binding_mismatch() {
+        let tmp = tempfile::tempdir().unwrap();
+        let gov = make_gov_chain(tmp.path());
+        let sha = fake_sha();
+        let inputs = controlled_inputs();
+        // approval_id 契約=64-hex,fixture 字元必須取自 [0-9a-f]。
+        let approval = controlled_approval('1', Phase2SealControlAction::Seal, &sha, None);
+        let digest = control_approval_digest(&approval);
+        let generation =
+            build_controlled_generation(&gov, &inputs, &approval, &digest, None, &sha, FIXED_NOW)
+                .expect("build genesis generation");
+        let control =
+            build_control_record(&approval, &digest, &generation, None, None, &sha, FIXED_NOW);
+        // 對照組:一致 → Ok(active)。
+        assert!(evaluate_current_build_lineage_records(
+            &gov,
+            &sha,
+            FIXED_NOW,
+            vec![generation.clone()],
+            vec![control.clone()],
+        )
+        .expect("consistent pair must replay")
+        .active
+        .is_some());
+
+        // generation 的 approval_id 換成另一合法 64-hex(重算 generation_hash
+        // 保持結構自洽)→ 與 control 綁定不等 → 必 Err。
+        let mut tampered = generation.clone();
+        tampered.approval_id = "9".repeat(64);
+        tampered.generation_hash = generation_hash(&tampered);
+        assert!(
+            evaluate_current_build_lineage_records(
+                &gov,
+                &sha,
+                FIXED_NOW,
+                vec![tampered],
+                vec![control.clone()],
+            )
+            .is_err(),
+            "generation/control approval_id mismatch must be rejected"
+        );
+
+        // valid_until_ms 漂移(結構自洽)同樣必 Err。
+        let mut drifted = generation.clone();
+        drifted.valid_until_ms += 1;
+        drifted.generation_hash = generation_hash(&drifted);
+        assert!(
+            evaluate_current_build_lineage_records(
+                &gov,
+                &sha,
+                FIXED_NOW,
+                vec![drifted],
+                vec![control],
+            )
+            .is_err(),
+            "generation/control valid_until_ms mismatch must be rejected"
+        );
+    }
+
+    /// FIX-7(E2-F9):artifact 自記的 supersedes_artifact_id 必須等於配對
+    /// control 的 predecessor_artifact_id,否則 supersession 語義可被拼裝偽造。
+    #[test]
+    fn w2_lineage_rejects_supersession_binding_mismatch_between_artifact_and_control() {
+        let tmp = tempfile::tempdir().unwrap();
+        let gov = make_gov_chain(tmp.path());
+        let sha = fake_sha();
+        let inputs = controlled_inputs();
+
+        // approval_id 契約=64-hex,fixture 字元必須取自 [0-9a-f]。
+        let seal_approval = controlled_approval('2', Phase2SealControlAction::Seal, &sha, None);
+        let seal_digest = control_approval_digest(&seal_approval);
+        let gen_a = build_controlled_generation(
+            &gov,
+            &inputs,
+            &seal_approval,
+            &seal_digest,
+            None,
+            &sha,
+            FIXED_NOW,
+        )
+        .expect("build genesis generation");
+        let control_a = build_control_record(
+            &seal_approval,
+            &seal_digest,
+            &gen_a,
+            None,
+            None,
+            &sha,
+            FIXED_NOW,
+        );
+
+        let sup_approval =
+            controlled_approval('3', Phase2SealControlAction::Supersede, &sha, Some(&gen_a));
+        let sup_digest = control_approval_digest(&sup_approval);
+        // 故意以 predecessor=None 構造世代 → artifact.supersedes_artifact_id=None,
+        // 但 control 卻聲明 predecessor=gen_a → 綁定不等,必 Err。
+        let gen_b = build_controlled_generation(
+            &gov,
+            &inputs,
+            &sup_approval,
+            &sup_digest,
+            None,
+            &sha,
+            FIXED_NOW + 1,
+        )
+        .expect("build successor generation without supersedes binding");
+        let control_b = build_control_record(
+            &sup_approval,
+            &sup_digest,
+            &gen_b,
+            Some(&gen_a),
+            Some(control_a.control_hash.clone()),
+            &sha,
+            FIXED_NOW + 1,
+        );
+        assert!(
+            evaluate_current_build_lineage_records(
+                &gov,
+                &sha,
+                FIXED_NOW + 1,
+                vec![gen_a, gen_b],
+                vec![control_a, control_b],
+            )
+            .is_err(),
+            "artifact supersedes/control predecessor mismatch must be rejected"
+        );
     }
 }
