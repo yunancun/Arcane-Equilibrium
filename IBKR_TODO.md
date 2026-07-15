@@ -387,5 +387,6 @@ W3 ─┬─ W4 ───────┤
 ## 10. 維護規則
 
 - 本文件由 PM 維護;每個 W 收口時更新 §4.4 差距表與 §5 該節狀態行(一行,含 SHA);EA 階段推進時更新 §6 表。
+- **自主推進 loop(2026-07-15 起)**:協議正本 `docs/agents/ibkr-live-capability-loop.md`(R-N 迭代:同步門→選工→派工→質量門→一輪一 PR→三端收斂→記帳→自排;接棒協議=狀態 100% 落 repo),帳本 `docs/execution_plan/ibkr_live_capability/PROGRESS.md`。loop 只推 W2-W11+W-CI 的 no-contact 工程;EA 跑道仍全 Operator-gated。
 - 措辭紀律:任何更新不得把 source 就緒寫成 broker 授權(AMD-07-11 §Required source-of-truth updates 對所有摘要文件的要求)。
-- 撞版防護:multi-session 環境,更新走 `git commit --only IBKR_TODO.md`,推前 fetch。
+- 撞版防護:multi-session 環境,更新走 `git commit --only IBKR_TODO.md`,推前 fetch;main 禁直推,走 feature branch → exact-head PR → merge。
