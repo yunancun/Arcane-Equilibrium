@@ -850,6 +850,11 @@ restart_api() {
     openai_api_key="$(resolve_provider_secret_env OPENAI_API_KEY openai openai_api_key)"
     deepseek_api_key="$(resolve_provider_secret_env DEEPSEEK_API_KEY deepseek deepseek_api_key)"
 
+    # OPS-F1 follow-up (2026-07-15): api.log 同 engine.log 用 '>>'(O_APPEND)——
+    # logrotate copytruncate 相容前置(機制見上方 engine 塊注釋);本腳本不歸檔
+    # api.log,跨重啟累積屬預期,由 conf api.log stanza(200M×7)兜底。2026-07-14 起
+    # API 常態由 user unit openclaw-trading-api.service 管(stdout→journald 不寫本檔),
+    # 此 nohup 路徑為 fallback,latent 修復仍必要。
     OPENCLAW_BASE_DIR="$base_dir" \
         OPENCLAW_DATA_DIR="$DATA_DIR" \
         OPENCLAW_IPC_SOCKET="$ENGINE_SOCKET" \
@@ -873,7 +878,7 @@ restart_api() {
         DEEPSEEK_API_KEY="${deepseek_api_key}" \
         nohup "$API_VENV/bin/python3" "$API_VENV/bin/uvicorn" app.main:app \
         --host "$API_BIND_HOST" --port 8000 --workers "$WORKERS" \
-        > "$DATA_DIR/api.log" 2>&1 &
+        >> "$DATA_DIR/api.log" 2>&1 &
     echo "    PID: $!"
     cd - > /dev/null
 }
