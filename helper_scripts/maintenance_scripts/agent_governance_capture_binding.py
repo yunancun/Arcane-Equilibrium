@@ -64,6 +64,7 @@ def collect_capture_evidence(
     evidence_items: Any,
     *,
     expected_scope: list[str],
+    expected_verification_scope: list[str] | None = None,
     expected_source_head: str,
     expected_task_contract_digest: str,
     expected_context_artifact_digest: str,
@@ -188,7 +189,11 @@ def collect_capture_evidence(
                 ]
                 path_scope: list[str] = []
             else:
-                path_scope = expected_task.get("path_scope") or expected_scope
+                path_scope = (
+                    expected_task.get("path_scope")
+                    or expected_verification_scope
+                    or expected_scope
+                )
                 record_errors = validate_governed_command_capture(
                     artifact,
                     expected_context_artifact_digest=expected_context_artifact_digest,

@@ -274,7 +274,11 @@ def _bound_execution_task(
         raise PermissionError("native agent does not own the routed execution task")
     if task["node_class"] != "verification" or task["permission"] != "read_only":
         raise PermissionError("capture-command is restricted to read-only verification tasks")
-    path_scope = task["path_scope"] or task_contract.get("dirty_scope", [])
+    path_scope = (
+        task["path_scope"]
+        or task_contract.get("verification_scope", [])
+        or task_contract.get("dirty_scope", [])
+    )
     if not isinstance(path_scope, list) or not path_scope:
         raise ValueError("routed command capture has no non-empty derived path_scope")
     return task, task_contract, sorted(path_scope)

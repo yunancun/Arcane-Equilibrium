@@ -253,9 +253,13 @@ def test_registry_is_single_valid_interface_and_views_are_current(tmp_path: Path
     adapters = registry["effect_adapters"]
     assert adapters["deploy_adapter_v1"]["implementation_paths"] == [
         "helper_scripts/maintenance_scripts/deploy_intent_adapter.py",
+        "helper_scripts/maintenance_scripts/runtime_environment_probe.py",
         "helper_scripts/maintenance_scripts/agent_governance_effects.py",
         "helper_scripts/maintenance_scripts/agent_governance_execution_attestation.py",
     ]
+    assert adapters["deploy_adapter_v1"]["status"] == (
+        "declared_apply_disabled_until_recovery_controls_bound"
+    )
     assert adapters["deploy_adapter_v1"]["component_paths"] == [
         "helper_scripts/build_then_restart_atomic.sh"
     ]

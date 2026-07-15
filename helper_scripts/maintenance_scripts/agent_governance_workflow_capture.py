@@ -24,6 +24,9 @@ def collect_bound_workflow_capture(
     captured = collect_capture_evidence(
         packet.get("evidence", []),
         expected_scope=dispatch.get("task_facts", {}).get("dirty_scope", []),
+        expected_verification_scope=dispatch.get("task_facts", {}).get(
+            "verification_scope", []
+        ),
         expected_source_head=packet.get("baseline", {}).get("source_head", ""),
         expected_task_contract_digest=context.get("task_contract_digest", ""),
         expected_context_artifact_digest=context.get("artifact_digest", ""),
@@ -63,6 +66,7 @@ def collect_closure_captures(
     return collect_capture_evidence(
         packet.get("evidence", []),
         expected_scope=task_contract.get("dirty_scope", []),
+        expected_verification_scope=task_contract.get("verification_scope", []),
         expected_source_head=str(baseline.get("source_head", "")),
         expected_task_contract_digest=str(task_contract_digest or ""),
         expected_context_artifact_digest=str(context.get("artifact_digest", "")),

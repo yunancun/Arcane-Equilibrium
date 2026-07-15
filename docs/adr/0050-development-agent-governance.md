@@ -67,7 +67,8 @@ Write task shape 在 routing 即 deterministic derive repo/docs/test side-effect
 implicit `none` 跑完整輪後才由 Closure 發現 mutation。
 
 Compiler 另把 task/surface/risk、runtime/E2E claim、`side_effect_class`、objective/scope/
-acceptance/hard stops、source baseline、direct interfaces、previous failure 與 verdict-relevant
+acceptance/hard stops、source baseline、`dirty_scope`、可選 `verification_scope`、direct
+interfaces、previous failure 與 verdict-relevant
 `claim_inputs` 固化成 canonical
 `task_contract`。Digest 同時綁 Context artifact、每個 role fragment 與 closure；closure 在
 adjudication 時重驗 exact bytes、producer/freshness/baseline/budget authority，不能靠後來 prompt
@@ -76,6 +77,16 @@ closure-grade Adapter 的 `private_external_contact`/broker effect 形成 mandat
 unsupported node；`public_web_read` 則是要求 opened URL + citation/capture provenance
 的 read-only evidence class，平台工具 availability 與 authority 分開判斷。純 deploy
 不虛構 source builder；只有 source-plus-deploy 才走 builder/review/regression。
+
+`verification_scope` 決定為 optional canonical、sorted/unique、literal safe repo-relative
+path list，只可作 read-only command-capture generation 與 trusted replay boundary。Scope
+只在 routed verifier `path_scope` 為空時採 `verification_scope`，再 fallback 到
+`dirty_scope`；它不是
+writer ownership、mutation authority 或 ACL，且不取代 writer `dirty_scope` 或 whole-repo
+generation checks。因 `task_contract` 採 exact-field 驗證，本欄位是刻意的 current-generation
+migration：Python routing/context validation、command capture、Closure capture binding/replay、
+workflow capture callers，以及三個由 `CONTEXT_ADMISSION_V1` fragment 生成的 saved-workflow
+consumer 必須同代更新；舊 generation 缺欄位不得被靜默接受。
 
 每次 saved-workflow call 都產 canonical `workflow_call_record_v1`，綁 task/context/node/role/
 schema/result/retry、exact native identity/class/permission、DAG requires/topological wave 與
@@ -177,12 +188,13 @@ Costs/risks:
 - Direct `psql` 即使看似 SELECT 也停用，直到 local-socket/read-only-identity Adapter 排除
   ambient `psqlrc`/`PG*` routing；PG claim 否則需另有 attested artifact 或保持 UNVERIFIED。
 - Deploy contract 需 immutable `deployment_intent_v1` 綁 source HEAD/clean tree/host/TTL/
-  typed confirm/component digest、safe runtime identity 與不同 OPS pre/post evidence。目前
-  repository 沒有 trusted local runtime identity probe，故 intent validation 可用但 apply
-  必須在 component invocation 前 fail closed；只有補齊可重現 probe 後，才可能以
-  canonical-integrity `effect_adapter_result_v1` + platform/external attestation + 唯一
-  verified marker 形成 closure proof。底層 build/restart 腳本
-  本身不是授權。
+  typed confirm/component digest、safe runtime identity 與不同 OPS pre/post evidence。
+  Repository 現已有 local-only、non-secret、fail-closed `runtime_environment_probe_v1`
+  source seam；Deploy Adapter 獨立重跑並 exact reconcile supplied
+  `runtime_environment_attestation_v1`。這不是 platform runtime attestation，也不提供 remote
+  SSH capture transport。即使 probe reconciliation 通過，apply 仍在 exact rollback binding
+  與 stable observation-window controls 分別實作、驗證前，於 component invocation 前
+  unconditionally fail closed。底層 build/restart 腳本本身不是授權。
 - `broker_probe_adapter_v1` 目前是 `declared_fail_closed_unsupported` seam。IBKR runtime paths
   是 gated operator reference，Bybit 沒有 development-agent contact entrypoint；兩者都不是
   本 Module 可執行的 broker Adapter。

@@ -8,7 +8,7 @@ import json
 import re
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from agent_governance_registry import REPO_ROOT, load_registry
@@ -66,6 +66,7 @@ CONTRACT_FIELDS = {
     "hard_stops",
     "baseline",
     "dirty_scope",
+    "verification_scope",
     "direct_interfaces",
     "previous_failure",
     "focus",
@@ -207,7 +208,7 @@ def _expected_facts_errors(
         if field not in expected or contract.get(field) != expected.get(field):
             errors.append(f"task contract does not match expected task facts field {field}")
     optional_projection = {
-        "direct_interfaces", "dirty_scope", "previous_failure", "focus",
+        "direct_interfaces", "dirty_scope", "verification_scope", "previous_failure", "focus",
         "claim_inputs", "runtime_claim", "end_to_end_claim"
     }
     for field in optional_projection & set(expected):
@@ -241,6 +242,31 @@ def _expected_facts_errors(
             errors.append(
                 "task contract does not match expected task facts field side_effect_class"
             )
+    return errors
+
+
+def _verification_scope_errors(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return ["task contract verification_scope is not a sorted unique list"]
+    if any(not isinstance(item, str) for item in value):
+        return ["task contract verification_scope contains a non-string"]
+    if value != sorted(set(value)):
+        return ["task contract verification_scope is not a sorted unique list"]
+    errors: list[str] = []
+    for item in value:
+        path = PurePosixPath(item)
+        if (
+            not item
+            or item == "."
+            or item.startswith(("/", "~", "-", "!", ":"))
+            or ".." in path.parts
+            or path.as_posix() != item
+            or any(
+                character in item
+                for character in ("\0", "\n", "\r", "\\", "*", "?", "[")
+            )
+        ):
+            errors.append("task contract verification_scope contains an unsafe path")
     return errors
 
 
@@ -380,6 +406,7 @@ def validate_context_artifact(
     if not isinstance(contract, dict) or set(contract) != CONTRACT_FIELDS:
         errors.append("task contract fields are not exact")
         return result
+    errors.extend(_verification_scope_errors(contract.get("verification_scope")))
     contract_digest = _digest(_canonical(contract).encode("utf-8"))
     if contract_digest != plan.get("task_contract_digest"):
         errors.append("plan task_contract_digest does not match task contract")

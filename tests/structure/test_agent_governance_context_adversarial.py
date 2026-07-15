@@ -175,6 +175,64 @@ def test_write_shapes_derive_effect_class_and_read_only_none_is_explicit() -> No
         )
 
 
+def test_verification_scope_is_canonical_read_only_context_not_writer_ownership() -> None:
+    base = {
+        "task_shape": "review",
+        "surfaces": ["operations"],
+        "risk": "medium",
+        "uncertainty": "low",
+        "side_effect_class": "none",
+        "dirty_scope": [],
+        "task_prompt": "capture one bounded read-only runtime probe",
+    }
+    first = route_task(
+        {
+            **base,
+            "verification_scope": [
+                "helper_scripts/maintenance_scripts/runtime_environment_probe.py",
+                "helper_scripts/maintenance_scripts/runtime_environment_probe.py",
+            ],
+        }
+    )
+    assert first["task_facts"]["dirty_scope"] == []
+    assert first["task_facts"]["verification_scope"] == [
+        "helper_scripts/maintenance_scripts/runtime_environment_probe.py"
+    ]
+    second = route_task(
+        {**base, "verification_scope": ["helper_scripts/maintenance_scripts/x.py"]}
+    )
+    assert task_contract_digest(first["task_facts"]) != task_contract_digest(
+        second["task_facts"]
+    )
+
+    for unsafe in (
+        "",
+        "/tmp/probe.py",
+        "~/probe.py",
+        "../probe.py",
+        "helper_scripts/../probe.py",
+        ":(glob)**/*.py",
+        "*.py",
+        "-n",
+    ):
+        with pytest.raises(ValueError, match="verification_scope"):
+            route_task({**base, "verification_scope": [unsafe]})
+    for invalid in ("probe.py", ["probe.py", 7], None):
+        with pytest.raises(ValueError, match="verification_scope"):
+            route_task({**base, "verification_scope": invalid})
+
+    with pytest.raises(ValueError, match="repo_write.*dirty_scope"):
+        route_task(
+            {
+                **base,
+                "task_shape": "implementation",
+                "surfaces": ["python"],
+                "side_effect_class": "repo_write",
+                "verification_scope": ["src/implementation.py"],
+            }
+        )
+
+
 def test_uncertainty_is_contract_bound_and_escalates_coverage() -> None:
     base = {
         "task_shape": "review",
