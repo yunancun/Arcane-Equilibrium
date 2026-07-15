@@ -372,6 +372,9 @@ pub struct LedgerEventRef {
     pub signal_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub candidate_event_context: Option<crate::candidate_event_context::CandidateEventContextV1>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub candidate_evaluation_source_snapshot:
+        Option<crate::candidate_evaluation_source_snapshot::CandidateEvaluationSourceSnapshotV1>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
