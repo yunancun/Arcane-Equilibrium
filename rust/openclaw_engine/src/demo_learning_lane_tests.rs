@@ -1,5 +1,10 @@
+use crate::candidate_event_context::{canonical_sha256, CandidateEventContextV1};
+use crate::candidate_evaluation_source_snapshot::*;
 use crate::demo_learning_lane::*;
 use crate::demo_learning_lane_ledger::*;
+use crate::edge_predictor::features::{
+    feature_definition_hash, feature_schema_hash, FEATURE_NAMES_V1, FEATURE_SCHEMA_VERSION,
+};
 use chrono::{TimeZone, Utc};
 
 const NOW_MS: u64 = 1_782_040_200_000;
@@ -92,6 +97,46 @@ fn selected_event() -> RejectEvent {
         signal_id: Some("sig-demo-ma_crossover-ETHUSDT-1782040200000".to_string()),
         candidate_event_context: None,
     }
+}
+
+fn rehash_source_snapshot_event_hash(context: &mut CandidateEventContextV1) {
+    let mut event_without_hash =
+        serde_json::to_value(&context).expect("candidate event context serializes");
+    event_without_hash
+        .as_object_mut()
+        .expect("candidate event context is an object")
+        .remove("event_hash");
+    context.event_hash = canonical_sha256(&event_without_hash);
+}
+
+fn rehash_source_snapshot_event_context(context: &mut CandidateEventContextV1) {
+    let portfolio = context
+        .portfolio_snapshot
+        .as_ref()
+        .expect("shared valid context has a portfolio snapshot");
+    context.portfolio_snapshot_hash = Some(canonical_sha256(
+        &serde_json::to_value(portfolio).expect("portfolio snapshot serializes"),
+    ));
+    rehash_source_snapshot_event_hash(context);
+}
+
+fn source_snapshot_bound_event_context() -> CandidateEventContextV1 {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../tests/fixtures/candidate_event_context_v1/canonical_fixture.json"
+    ))
+    .expect("shared candidate event fixture parses");
+    let mut context: CandidateEventContextV1 =
+        serde_json::from_value(fixture["valid_candidate_event_context"].clone())
+            .expect("shared valid context matches the Rust typed contract");
+    let portfolio = context
+        .portfolio_snapshot
+        .as_mut()
+        .expect("shared valid context has a portfolio snapshot");
+    portfolio.position_count = 2;
+    portfolio.gross_mark_notional_usdt = 2_000.0;
+    portfolio.net_mark_notional_usdt = -1_000.0;
+    rehash_source_snapshot_event_context(&mut context);
+    context
 }
 
 #[test]
@@ -191,6 +236,9 @@ fn candidate_event_context_is_optional_and_old_ledger_json_stays_compatible() {
     let json = record.to_json_string().unwrap();
     let value: serde_json::Value = serde_json::from_str(&json).unwrap();
     assert!(value["event"].get("candidate_event_context").is_none());
+    assert!(value["event"]
+        .get("candidate_evaluation_source_snapshot")
+        .is_none());
 
     let old_row = r#"{"record_type":"probe_admission_decision","event":{"strategy_name":"ma_crossover","symbol":"ETHUSDT","side":"Sell","ts_ms":1782040200000}}"#;
     let parsed = LedgerRecord::from_jsonl_str(old_row).unwrap();
@@ -200,6 +248,776 @@ fn candidate_event_context_is_optional_and_old_ledger_json_stays_compatible() {
         .expect("old event remains readable")
         .candidate_event_context
         .is_none());
+    assert!(parsed[0]
+        .event
+        .as_ref()
+        .expect("old event remains readable")
+        .candidate_evaluation_source_snapshot
+        .is_none());
+
+    let observation = |name: &str, value: f64, source: &str| {
+        CandidateEvaluationFeatureObservationV1 {
+            name: name.to_string(),
+            value: Some(value),
+            raw_present: true,
+            source: source.to_string(),
+        }
+    };
+    let event_context = source_snapshot_bound_event_context();
+    let source_snapshot = capture_candidate_evaluation_source_snapshot(
+        &event_context,
+        Some(CandidateEvaluationScanSourceV1 {
+            scan_id: event_context
+                .scan_id
+                .clone()
+                .expect("valid event context has scan identity"),
+            scan_ts_ms: event_context.captured_at_ms,
+            symbol: event_context.symbol.clone(),
+            sector: Some("layer_1".to_string()),
+            turnover_24h: Some(1_500_000_000.0),
+            beta_proxy: Some(0.85),
+            beta_proxy_status: CandidateEvaluationBetaProxyStatusV1::Observed,
+        }),
+        CandidateEvaluationFeatureSourceV1 {
+            schema_version: FEATURE_SCHEMA_VERSION.to_string(),
+            schema_hash: feature_schema_hash().to_string(),
+            definition_hash: feature_definition_hash().to_string(),
+            observations: vec![
+                observation("adx_1h", 30.0, "indicator_snapshot.adx.adx"),
+                observation(
+                    "bb_width_pct",
+                    2.0,
+                    "indicator_snapshot.bollinger.bandwidth",
+                ),
+                observation(
+                    "atr_pct",
+                    1.2,
+                    "tick.atr_value+price_event.last_price",
+                ),
+                observation("funding_rate", 0.0004, "price_event.funding_rate"),
+                observation(
+                    "realized_vol_1h",
+                    1.5,
+                    "indicator_snapshot.ewma_vol.ewma_vol",
+                ),
+                observation(
+                    "basis_bps",
+                    0.5,
+                    "price_event.index_price+price_event.last_price",
+                ),
+                observation(
+                    "orderbook_imbalance_top5",
+                    0.1,
+                    "price_event.bids5+price_event.asks5",
+                ),
+                observation(
+                    "spread_bps",
+                    1.0,
+                    "price_event.bid_price+price_event.ask_price",
+                ),
+                observation("confluence_score", 42.0, "order_intent.confluence_score"),
+                observation(
+                    "persistence_elapsed_ms",
+                    30_000.0,
+                    "order_intent.persistence_elapsed_ms",
+                ),
+                observation("side", -1.0, "order_intent.is_long"),
+                observation(
+                    "notional_pct_of_bal",
+                    5.0,
+                    "order_intent.qty+price_event.last_price+paper_state.balance",
+                ),
+                observation(
+                    "concurrent_positions",
+                    2.0,
+                    "paper_state.positions.count",
+                ),
+                observation(
+                    "same_direction_cnt",
+                    1.0,
+                    "paper_state.positions.same_direction_count",
+                ),
+                observation("tod_sin", 0.5, "price_event.ts_ms.utc_hour_sin"),
+                observation(
+                    "tod_cos",
+                    -0.866025403784,
+                    "price_event.ts_ms.utc_hour_cos",
+                ),
+                observation(
+                    "is_funding_settlement_window",
+                    0.0,
+                    "price_event.ts_ms.funding_settlement_window",
+                ),
+            ],
+        },
+        CandidateEvaluationPortfolioSourceV1 {
+            portfolio_snapshot_hash: event_context.portfolio_snapshot_hash.clone(),
+            accepted_demo_equity_usdt: event_context
+                .portfolio_snapshot
+                .as_ref()
+                .and_then(|portfolio| portfolio.accepted_demo_equity_usdt),
+            positions: vec![
+                CandidateEvaluationPositionV1 {
+                    symbol: "BTCUSDT".to_string(),
+                    side: "Long".to_string(),
+                    quantity: Some(0.01),
+                    mark_source: "latest_price".to_string(),
+                    mark_price: Some(50_000.0),
+                    mark_notional_usdt: Some(500.0),
+                    owner_strategy: "ma_crossover".to_string(),
+                    entry_context_id: "ctx-demo-ma_crossover-BTCUSDT-1782040100000"
+                        .to_string(),
+                },
+                CandidateEvaluationPositionV1 {
+                    symbol: "ETHUSDT".to_string(),
+                    side: "Short".to_string(),
+                    quantity: Some(0.5),
+                    mark_source: "latest_price".to_string(),
+                    mark_price: Some(3_000.0),
+                    mark_notional_usdt: Some(1_500.0),
+                    owner_strategy: "bb_reversion".to_string(),
+                    entry_context_id: "ctx-demo-bb_reversion-ETHUSDT-1782040150000"
+                        .to_string(),
+                },
+            ],
+            position_count: Some(2),
+            gross_mark_notional_usdt: Some(2_000.0),
+            net_mark_notional_usdt: Some(-1_000.0),
+            empty_position_attestation: false,
+        },
+    );
+    assert_eq!(
+        source_snapshot.capture_status,
+        CANDIDATE_EVALUATION_SOURCE_CAPTURE_COMPLETE_STATUS
+    );
+    assert!(source_snapshot.capture_blockers.is_empty());
+    assert!(validate_candidate_evaluation_source_snapshot(&source_snapshot, &event_context).is_ok());
+
+    let mut event_hash_mutation = source_snapshot.clone();
+    event_hash_mutation.event_hash.push('0');
+    assert!(validate_candidate_evaluation_source_snapshot(&event_hash_mutation, &event_context)
+        .is_err());
+    let mut captured_at_mutation = source_snapshot.clone();
+    captured_at_mutation.captured_at_ms += 1;
+    assert!(validate_candidate_evaluation_source_snapshot(&captured_at_mutation, &event_context)
+        .is_err());
+    let mut snapshot_hash_mutation = source_snapshot.clone();
+    snapshot_hash_mutation.snapshot_hash.push('0');
+    assert!(validate_candidate_evaluation_source_snapshot(&snapshot_hash_mutation, &event_context)
+        .is_err());
+
+    let capture_with_scan = |scan| {
+        capture_candidate_evaluation_source_snapshot(
+            &event_context,
+            scan,
+            source_snapshot.decision_features.clone(),
+            source_snapshot.portfolio.clone(),
+        )
+    };
+    let assert_scan_blocked = |snapshot: &CandidateEvaluationSourceSnapshotV1,
+                               expected: &[&str]| {
+        assert_eq!(
+            snapshot.capture_status,
+            CANDIDATE_EVALUATION_SOURCE_CAPTURE_BLOCKED_STATUS
+        );
+        assert_eq!(
+            snapshot.capture_blockers,
+            expected
+                .iter()
+                .map(|blocker| (*blocker).to_string())
+                .collect::<Vec<_>>()
+        );
+        assert!(validate_candidate_evaluation_source_snapshot(snapshot, &event_context).is_ok());
+    };
+
+    let missing_scan = capture_with_scan(None);
+    assert_scan_blocked(&missing_scan, &["SCAN_SOURCE_MISSING"]);
+
+    let mut mismatched_id = source_snapshot.scan.clone().unwrap();
+    mismatched_id.scan_id.push_str("-other");
+    assert_scan_blocked(
+        &capture_with_scan(Some(mismatched_id)),
+        &["SCAN_ID_MISMATCH"],
+    );
+
+    let mut mismatched_symbol = source_snapshot.scan.clone().unwrap();
+    mismatched_symbol.symbol = "ETHUSDT".to_string();
+    assert_scan_blocked(
+        &capture_with_scan(Some(mismatched_symbol)),
+        &["SCAN_SYMBOL_MISMATCH"],
+    );
+
+    let mut zero_timestamp = source_snapshot.scan.clone().unwrap();
+    zero_timestamp.scan_ts_ms = 0;
+    assert_scan_blocked(
+        &capture_with_scan(Some(zero_timestamp)),
+        &["SCAN_TIMESTAMP_INVALID"],
+    );
+
+    let mut future_timestamp = source_snapshot.scan.clone().unwrap();
+    future_timestamp.scan_ts_ms = event_context.captured_at_ms + 1;
+    let future_capture = capture_with_scan(Some(future_timestamp));
+    assert_scan_blocked(&future_capture, &["SCAN_TIMESTAMP_AFTER_CAPTURE"]);
+    let mut stale_hash_mutation = future_capture;
+    stale_hash_mutation.scan.as_mut().unwrap().scan_ts_ms -= 1;
+    assert!(
+        validate_candidate_evaluation_source_snapshot(&stale_hash_mutation, &event_context)
+            .is_err()
+    );
+
+    let mut missing_sector = source_snapshot.scan.clone().unwrap();
+    missing_sector.sector = None;
+    assert_scan_blocked(
+        &capture_with_scan(Some(missing_sector)),
+        &["SCAN_SECTOR_MISSING_OR_INVALID"],
+    );
+
+    let mut missing_turnover = source_snapshot.scan.clone().unwrap();
+    missing_turnover.turnover_24h = None;
+    assert_scan_blocked(
+        &capture_with_scan(Some(missing_turnover)),
+        &["SCAN_TURNOVER_MISSING_OR_INVALID"],
+    );
+
+    let mut invalid_beta = source_snapshot.scan.clone().unwrap();
+    invalid_beta.beta_proxy = Some(f64::NAN);
+    assert_scan_blocked(
+        &capture_with_scan(Some(invalid_beta)),
+        &["SCAN_BETA_PROXY_INVALID"],
+    );
+    let normalized_beta = capture_with_scan(Some({
+        let mut scan = source_snapshot.scan.clone().unwrap();
+        scan.beta_proxy = Some(f64::INFINITY);
+        scan
+    }));
+    assert_eq!(normalized_beta.scan.as_ref().unwrap().beta_proxy, None);
+    assert_eq!(
+        normalized_beta.scan.as_ref().unwrap().beta_proxy_status,
+        CandidateEvaluationBetaProxyStatusV1::Invalid
+    );
+    assert_eq!(normalized_beta.snapshot_hash.len(), 64);
+    assert!(serde_json::to_string(&normalized_beta).is_ok());
+
+    for boundary_beta in [-0.5, 3.0] {
+        let boundary_capture = capture_with_scan(Some({
+            let mut scan = source_snapshot.scan.clone().unwrap();
+            scan.beta_proxy = Some(boundary_beta);
+            scan
+        }));
+        assert_eq!(
+            boundary_capture.capture_status,
+            CANDIDATE_EVALUATION_SOURCE_CAPTURE_COMPLETE_STATUS,
+            "observed beta boundary {boundary_beta} is inclusive"
+        );
+        assert!(
+            validate_candidate_evaluation_source_snapshot(&boundary_capture, &event_context)
+                .is_ok()
+        );
+    }
+
+    for out_of_range_beta in [-0.500_000_1, 3.000_000_1] {
+        let out_of_range_capture = capture_with_scan(Some({
+            let mut scan = source_snapshot.scan.clone().unwrap();
+            scan.beta_proxy = Some(out_of_range_beta);
+            scan
+        }));
+        assert_scan_blocked(
+            &out_of_range_capture,
+            &["SCAN_BETA_PROXY_OUT_OF_RANGE"],
+        );
+        let captured_scan = out_of_range_capture.scan.as_ref().unwrap();
+        assert_eq!(
+            captured_scan.beta_proxy,
+            Some(out_of_range_beta),
+            "finite out-of-domain beta remains durable forensic evidence"
+        );
+        assert_eq!(
+            captured_scan.beta_proxy_status,
+            CandidateEvaluationBetaProxyStatusV1::Observed
+        );
+    }
+
+    let mut absent_beta = source_snapshot.scan.clone().unwrap();
+    absent_beta.beta_proxy = None;
+    absent_beta.beta_proxy_status = CandidateEvaluationBetaProxyStatusV1::UnavailableBtcMove;
+    let absent_beta_capture = capture_with_scan(Some(absent_beta));
+    assert_eq!(
+        absent_beta_capture.capture_status,
+        CANDIDATE_EVALUATION_SOURCE_CAPTURE_COMPLETE_STATUS
+    );
+    assert!(validate_candidate_evaluation_source_snapshot(&absent_beta_capture, &event_context)
+        .is_ok());
+
+    let mut event_without_scan_id = event_context.clone();
+    event_without_scan_id.scan_id = None;
+    rehash_source_snapshot_event_context(&mut event_without_scan_id);
+    let missing_bound_scan_id = capture_candidate_evaluation_source_snapshot(
+        &event_without_scan_id,
+        source_snapshot.scan.clone(),
+        source_snapshot.decision_features.clone(),
+        source_snapshot.portfolio.clone(),
+    );
+    assert_eq!(
+        missing_bound_scan_id.capture_blockers,
+        vec!["BOUND_SCAN_ID_MISSING"]
+    );
+    assert!(validate_candidate_evaluation_source_snapshot(
+        &missing_bound_scan_id,
+        &event_without_scan_id
+    )
+    .is_ok());
+
+    assert_eq!(
+        source_snapshot
+            .decision_features
+            .observations
+            .iter()
+            .map(|observation| observation.name.as_str())
+            .collect::<Vec<_>>(),
+        FEATURE_NAMES_V1
+    );
+    let expected_sources = [
+        "indicator_snapshot.adx.adx",
+        "indicator_snapshot.bollinger.bandwidth",
+        "tick.atr_value+price_event.last_price",
+        "price_event.funding_rate",
+        "indicator_snapshot.ewma_vol.ewma_vol",
+        "price_event.index_price+price_event.last_price",
+        "price_event.bids5+price_event.asks5",
+        "price_event.bid_price+price_event.ask_price",
+        "order_intent.confluence_score",
+        "order_intent.persistence_elapsed_ms",
+        "order_intent.is_long",
+        "order_intent.qty+price_event.last_price+paper_state.balance",
+        "paper_state.positions.count",
+        "paper_state.positions.same_direction_count",
+        "price_event.ts_ms.utc_hour_sin",
+        "price_event.ts_ms.utc_hour_cos",
+        "price_event.ts_ms.funding_settlement_window",
+    ];
+    assert_eq!(
+        source_snapshot
+            .decision_features
+            .observations
+            .iter()
+            .map(|observation| observation.source.as_str())
+            .collect::<Vec<_>>(),
+        expected_sources
+    );
+    let capture_with_features = |decision_features| {
+        capture_candidate_evaluation_source_snapshot(
+            &event_context,
+            source_snapshot.scan.clone(),
+            decision_features,
+            source_snapshot.portfolio.clone(),
+        )
+    };
+    let assert_feature_blocked = |snapshot: &CandidateEvaluationSourceSnapshotV1,
+                                  expected: &[&str]| {
+        assert_eq!(
+            snapshot.capture_status,
+            CANDIDATE_EVALUATION_SOURCE_CAPTURE_BLOCKED_STATUS
+        );
+        assert_eq!(
+            snapshot.capture_blockers,
+            expected
+                .iter()
+                .map(|blocker| (*blocker).to_string())
+                .collect::<Vec<_>>()
+        );
+        assert!(validate_candidate_evaluation_source_snapshot(snapshot, &event_context).is_ok());
+    };
+
+    let mut wrong_feature_version = source_snapshot.decision_features.clone();
+    wrong_feature_version.schema_version = "v2".to_string();
+    assert_feature_blocked(
+        &capture_with_features(wrong_feature_version),
+        &["FEATURE_SCHEMA_VERSION_INVALID"],
+    );
+
+    let mut wrong_schema_hash = source_snapshot.decision_features.clone();
+    wrong_schema_hash.schema_hash.push('0');
+    assert_feature_blocked(
+        &capture_with_features(wrong_schema_hash),
+        &["FEATURE_SCHEMA_HASH_MISMATCH"],
+    );
+
+    let mut wrong_definition_hash = source_snapshot.decision_features.clone();
+    wrong_definition_hash.definition_hash.push('0');
+    assert_feature_blocked(
+        &capture_with_features(wrong_definition_hash),
+        &["FEATURE_DEFINITION_HASH_MISMATCH"],
+    );
+
+    let mut missing_observation = source_snapshot.decision_features.clone();
+    missing_observation.observations.pop();
+    assert_feature_blocked(
+        &capture_with_features(missing_observation),
+        &["FEATURE_OBSERVATION_COUNT_INVALID"],
+    );
+
+    let mut wrong_order = source_snapshot.decision_features.clone();
+    wrong_order.observations.swap(0, 1);
+    assert_feature_blocked(
+        &capture_with_features(wrong_order),
+        &[
+            "FEATURE_OBSERVATION_ORDER_INVALID",
+            "FEATURE_SOURCE_MISMATCH:adx_1h",
+            "FEATURE_SOURCE_MISMATCH:bb_width_pct",
+        ],
+    );
+
+    let mut wrong_name = source_snapshot.decision_features.clone();
+    wrong_name.observations[0].name = "adx_renamed".to_string();
+    assert_feature_blocked(
+        &capture_with_features(wrong_name),
+        &["FEATURE_OBSERVATION_ORDER_INVALID"],
+    );
+
+    let mut missing_presence = source_snapshot.decision_features.clone();
+    missing_presence.observations[0].raw_present = false;
+    let missing_presence_capture = capture_with_features(missing_presence);
+    assert_feature_blocked(
+        &missing_presence_capture,
+        &["FEATURE_RAW_SOURCE_MISSING:adx_1h"],
+    );
+    let mut stale_presence_hash = missing_presence_capture;
+    stale_presence_hash.decision_features.observations[0].raw_present = true;
+    assert!(
+        validate_candidate_evaluation_source_snapshot(&stale_presence_hash, &event_context)
+            .is_err()
+    );
+
+    let mut missing_value = source_snapshot.decision_features.clone();
+    missing_value.observations[0].value = None;
+    assert_feature_blocked(
+        &capture_with_features(missing_value),
+        &["FEATURE_RAW_SOURCE_MISSING:adx_1h"],
+    );
+
+    let mut nonfinite_value = source_snapshot.decision_features.clone();
+    nonfinite_value.observations[0].value = Some(f64::NEG_INFINITY);
+    let normalized_feature = capture_with_features(nonfinite_value);
+    assert_feature_blocked(
+        &normalized_feature,
+        &["FEATURE_RAW_SOURCE_MISSING:adx_1h"],
+    );
+    assert_eq!(
+        normalized_feature.decision_features.observations[0].value,
+        None
+    );
+    assert_eq!(normalized_feature.snapshot_hash.len(), 64);
+    assert!(serde_json::to_string(&normalized_feature).is_ok());
+
+    let mut value_when_missing = source_snapshot.decision_features.clone();
+    value_when_missing.observations[0].raw_present = false;
+    value_when_missing.observations[0].value = Some(30.0);
+    let normalized_missing = capture_with_features(value_when_missing);
+    assert_feature_blocked(
+        &normalized_missing,
+        &["FEATURE_RAW_SOURCE_MISSING:adx_1h"],
+    );
+    assert_eq!(
+        normalized_missing.decision_features.observations[0].value,
+        None
+    );
+
+    let mut out_of_range = source_snapshot.decision_features.clone();
+    out_of_range.observations[0].value = Some(101.0);
+    assert_feature_blocked(
+        &capture_with_features(out_of_range),
+        &["FEATURE_VALUE_OUT_OF_RANGE:adx_1h"],
+    );
+
+    let mut missing_source = source_snapshot.decision_features.clone();
+    missing_source.observations[0].source = " ".to_string();
+    assert_feature_blocked(
+        &capture_with_features(missing_source),
+        &["FEATURE_SOURCE_MISSING_OR_INVALID"],
+    );
+
+    let mut arbitrary_source = source_snapshot.decision_features.clone();
+    arbitrary_source.observations[0].source = "arbitrary.nonempty".to_string();
+    assert_feature_blocked(
+        &capture_with_features(arbitrary_source),
+        &["FEATURE_SOURCE_MISMATCH:adx_1h"],
+    );
+
+    let mut swapped_sources = source_snapshot.decision_features.clone();
+    let first_source = swapped_sources.observations[0].source.clone();
+    swapped_sources.observations[0].source = swapped_sources.observations[1].source.clone();
+    swapped_sources.observations[1].source = first_source;
+    assert_feature_blocked(
+        &capture_with_features(swapped_sources),
+        &[
+            "FEATURE_SOURCE_MISMATCH:adx_1h",
+            "FEATURE_SOURCE_MISMATCH:bb_width_pct",
+        ],
+    );
+
+    let capture_with_portfolio = |portfolio| {
+        capture_candidate_evaluation_source_snapshot(
+            &event_context,
+            source_snapshot.scan.clone(),
+            source_snapshot.decision_features.clone(),
+            portfolio,
+        )
+    };
+    let assert_portfolio_blocked = |snapshot: &CandidateEvaluationSourceSnapshotV1,
+                                    expected: &[&str]| {
+        assert_eq!(
+            snapshot.capture_status,
+            CANDIDATE_EVALUATION_SOURCE_CAPTURE_BLOCKED_STATUS
+        );
+        assert_eq!(
+            snapshot.capture_blockers,
+            expected
+                .iter()
+                .map(|blocker| (*blocker).to_string())
+                .collect::<Vec<_>>()
+        );
+        assert!(validate_candidate_evaluation_source_snapshot(snapshot, &event_context).is_ok());
+    };
+
+    let mut shuffled = source_snapshot.portfolio.clone();
+    shuffled.positions.reverse();
+    let canonicalized_shuffle = capture_with_portfolio(shuffled);
+    assert_eq!(
+        canonicalized_shuffle.portfolio.positions,
+        source_snapshot.portfolio.positions
+    );
+    assert_eq!(canonicalized_shuffle.snapshot_hash, source_snapshot.snapshot_hash);
+
+    let mut stale_position_order = source_snapshot.clone();
+    stale_position_order.portfolio.positions.swap(0, 1);
+    assert!(
+        validate_candidate_evaluation_source_snapshot(&stale_position_order, &event_context)
+            .is_err()
+    );
+
+    let mut duplicate_symbol = source_snapshot.portfolio.clone();
+    duplicate_symbol.positions[1].symbol = "BTCUSDT".to_string();
+    assert_portfolio_blocked(
+        &capture_with_portfolio(duplicate_symbol),
+        &["POSITION_SYMBOL_ORDER_OR_DUPLICATE_INVALID"],
+    );
+
+    let mut invalid_symbol = source_snapshot.portfolio.clone();
+    invalid_symbol.positions[0].symbol = " btcusdt ".to_string();
+    assert_portfolio_blocked(
+        &capture_with_portfolio(invalid_symbol),
+        &["POSITION_SYMBOL_MISSING_OR_INVALID"],
+    );
+
+    let mut invalid_side = source_snapshot.portfolio.clone();
+    invalid_side.positions[0].side = "Buy".to_string();
+    assert_portfolio_blocked(
+        &capture_with_portfolio(invalid_side),
+        &["POSITION_SIDE_INVALID"],
+    );
+
+    let mut nonfinite_quantity = source_snapshot.portfolio.clone();
+    nonfinite_quantity.positions[0].quantity = Some(f64::NAN);
+    let normalized_quantity = capture_with_portfolio(nonfinite_quantity);
+    assert_portfolio_blocked(
+        &normalized_quantity,
+        &["POSITION_QUANTITY_MISSING_OR_INVALID"],
+    );
+    assert_eq!(normalized_quantity.portfolio.positions[0].quantity, None);
+    assert_eq!(normalized_quantity.snapshot_hash.len(), 64);
+    assert!(serde_json::to_string(&normalized_quantity).is_ok());
+
+    let mut invalid_mark_source = source_snapshot.portfolio.clone();
+    invalid_mark_source.positions[0].mark_source = "current_price".to_string();
+    assert_portfolio_blocked(
+        &capture_with_portfolio(invalid_mark_source),
+        &["POSITION_MARK_SOURCE_INVALID"],
+    );
+
+    let mut missing_mark_price = source_snapshot.portfolio.clone();
+    missing_mark_price.positions[0].mark_price = None;
+    assert_portfolio_blocked(
+        &capture_with_portfolio(missing_mark_price),
+        &["POSITION_MARK_PRICE_MISSING_OR_INVALID"],
+    );
+
+    let mut mismatched_mark_notional = source_snapshot.portfolio.clone();
+    mismatched_mark_notional.positions[0].mark_notional_usdt = Some(501.0);
+    assert_portfolio_blocked(
+        &capture_with_portfolio(mismatched_mark_notional),
+        &["POSITION_MARK_NOTIONAL_RECONCILIATION_MISMATCH"],
+    );
+
+    let mut missing_owner = source_snapshot.portfolio.clone();
+    missing_owner.positions[0].owner_strategy = " ".to_string();
+    assert_portfolio_blocked(
+        &capture_with_portfolio(missing_owner),
+        &["POSITION_OWNER_STRATEGY_MISSING_OR_INVALID"],
+    );
+
+    let mut missing_entry_context = source_snapshot.portfolio.clone();
+    missing_entry_context.positions[0].entry_context_id.clear();
+    assert_portfolio_blocked(
+        &capture_with_portfolio(missing_entry_context),
+        &["POSITION_ENTRY_CONTEXT_ID_MISSING_OR_INVALID"],
+    );
+
+    let mut wrong_source_hash = source_snapshot.portfolio.clone();
+    wrong_source_hash
+        .portfolio_snapshot_hash
+        .as_mut()
+        .unwrap()
+        .push('0');
+    assert_portfolio_blocked(
+        &capture_with_portfolio(wrong_source_hash),
+        &["PORTFOLIO_SNAPSHOT_HASH_MISSING_OR_MISMATCH"],
+    );
+
+    let mut wrong_equity = source_snapshot.portfolio.clone();
+    wrong_equity.accepted_demo_equity_usdt = Some(10_001.0);
+    assert_portfolio_blocked(
+        &capture_with_portfolio(wrong_equity),
+        &["PORTFOLIO_EQUITY_MISMATCH"],
+    );
+
+    let mut wrong_count = source_snapshot.portfolio.clone();
+    wrong_count.position_count = Some(3);
+    assert_portfolio_blocked(
+        &capture_with_portfolio(wrong_count),
+        &["PORTFOLIO_POSITION_COUNT_MISSING_OR_MISMATCH"],
+    );
+
+    let mut wrong_gross = source_snapshot.portfolio.clone();
+    wrong_gross.gross_mark_notional_usdt = Some(2_001.0);
+    assert_portfolio_blocked(
+        &capture_with_portfolio(wrong_gross),
+        &["PORTFOLIO_GROSS_MARK_NOTIONAL_MISSING_OR_MISMATCH"],
+    );
+
+    let mut wrong_net = source_snapshot.portfolio.clone();
+    wrong_net.net_mark_notional_usdt = Some(-999.0);
+    assert_portfolio_blocked(
+        &capture_with_portfolio(wrong_net),
+        &["PORTFOLIO_NET_MARK_NOTIONAL_MISSING_OR_MISMATCH"],
+    );
+
+    let mut invalid_bound_hash_context = event_context.clone();
+    invalid_bound_hash_context
+        .portfolio_snapshot_hash
+        .as_mut()
+        .unwrap()
+        .push('0');
+    rehash_source_snapshot_event_hash(&mut invalid_bound_hash_context);
+    let invalid_bound_hash_capture = capture_candidate_evaluation_source_snapshot(
+        &invalid_bound_hash_context,
+        source_snapshot.scan.clone(),
+        source_snapshot.decision_features.clone(),
+        source_snapshot.portfolio.clone(),
+    );
+    assert!(invalid_bound_hash_capture
+        .capture_blockers
+        .contains(&"BOUND_PORTFOLIO_SNAPSHOT_HASH_INVALID".to_string()));
+
+    let mut empty_context = event_context.clone();
+    let empty_bound = empty_context.portfolio_snapshot.as_mut().unwrap();
+    empty_bound.position_count = 0;
+    empty_bound.gross_mark_notional_usdt = 0.0;
+    empty_bound.net_mark_notional_usdt = 0.0;
+    rehash_source_snapshot_event_context(&mut empty_context);
+    let empty_portfolio = CandidateEvaluationPortfolioSourceV1 {
+        portfolio_snapshot_hash: empty_context.portfolio_snapshot_hash.clone(),
+        accepted_demo_equity_usdt: empty_context
+            .portfolio_snapshot
+            .as_ref()
+            .and_then(|portfolio| portfolio.accepted_demo_equity_usdt),
+        positions: Vec::new(),
+        position_count: Some(0),
+        gross_mark_notional_usdt: Some(0.0),
+        net_mark_notional_usdt: Some(0.0),
+        empty_position_attestation: true,
+    };
+    let empty_capture = capture_candidate_evaluation_source_snapshot(
+        &empty_context,
+        source_snapshot.scan.clone(),
+        source_snapshot.decision_features.clone(),
+        empty_portfolio.clone(),
+    );
+    assert_eq!(
+        empty_capture.capture_status,
+        CANDIDATE_EVALUATION_SOURCE_CAPTURE_COMPLETE_STATUS
+    );
+    assert!(validate_candidate_evaluation_source_snapshot(&empty_capture, &empty_context).is_ok());
+
+    let mut false_empty_attestation = empty_portfolio;
+    false_empty_attestation.empty_position_attestation = false;
+    let invalid_empty_capture = capture_candidate_evaluation_source_snapshot(
+        &empty_context,
+        source_snapshot.scan.clone(),
+        source_snapshot.decision_features.clone(),
+        false_empty_attestation,
+    );
+    assert_eq!(
+        invalid_empty_capture.capture_blockers,
+        vec!["EMPTY_POSITION_ATTESTATION_INVALID"]
+    );
+
+    let mut false_nonempty_attestation = source_snapshot.portfolio.clone();
+    false_nonempty_attestation.empty_position_attestation = true;
+    assert_portfolio_blocked(
+        &capture_with_portfolio(false_nonempty_attestation),
+        &["EMPTY_POSITION_ATTESTATION_INVALID"],
+    );
+    let serialized_snapshot = serde_json::to_string(&source_snapshot).unwrap();
+    let source_symbol = &event_context.symbol;
+    let source_side = &event_context.side;
+    let source_ts_ms = event_context.captured_at_ms;
+    let row_with_source_snapshot = format!(
+        r#"{{"record_type":"probe_admission_decision","event":{{"strategy_name":"ma_crossover","symbol":"{source_symbol}","side":"{source_side}","ts_ms":{source_ts_ms},"candidate_evaluation_source_snapshot":{serialized_snapshot}}}}}"#
+    );
+    let parsed = LedgerRecord::from_jsonl_str(&row_with_source_snapshot).unwrap();
+    let retained = parsed[0]
+        .event
+        .as_ref()
+        .and_then(|event| event.candidate_evaluation_source_snapshot.as_ref())
+        .expect("typed source snapshot sibling remains present");
+    assert_eq!(
+        retained, &source_snapshot,
+        "retained-ledger public parsing must preserve a present typed source snapshot sibling",
+    );
+    assert_eq!(serde_json::to_string(retained).unwrap(), serialized_snapshot);
+
+    let snapshot_admission = build_admission_ledger_record(&decision, &event, generated_at)
+        .with_candidate_evaluation_source_snapshot(Some(source_snapshot.clone()));
+    let admission_json = snapshot_admission.to_json_string().unwrap();
+    assert_eq!(admission_json.lines().count(), 1);
+    let admission_rows = LedgerRecord::from_jsonl_str(&admission_json).unwrap();
+    assert_eq!(admission_rows.len(), 1);
+    assert_eq!(
+        admission_rows[0]
+            .event
+            .as_ref()
+            .and_then(|event| event.candidate_evaluation_source_snapshot.as_ref()),
+        Some(&source_snapshot)
+    );
+
+    let snapshot_capture_error = build_capture_error_ledger_record(
+        &event,
+        generated_at,
+        "NORMAL",
+        "transport fixture capture error",
+    )
+    .with_candidate_evaluation_source_snapshot(Some(source_snapshot.clone()));
+    let capture_error_json = snapshot_capture_error.to_json_string().unwrap();
+    assert_eq!(capture_error_json.lines().count(), 1);
+    let capture_error_rows = LedgerRecord::from_jsonl_str(&capture_error_json).unwrap();
+    assert_eq!(capture_error_rows.len(), 1);
+    assert_eq!(
+        capture_error_rows[0]
+            .event
+            .as_ref()
+            .and_then(|event| event.candidate_evaluation_source_snapshot.as_ref()),
+        Some(&source_snapshot)
+    );
 }
 
 #[test]

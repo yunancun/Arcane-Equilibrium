@@ -394,40 +394,17 @@ fn candidate_scanner_inputs_for_reject(
 }
 
 /// 以 symbol 排序後才累加 mark notional，避免 HashMap 迭代順序污染 hash。
-fn candidate_mark_notionals_from_rows(mut rows: Vec<(String, bool, f64)>) -> (f64, f64) {
-    rows.sort_by(|left, right| left.0.cmp(&right.0));
-    let mut gross = 0.0;
-    let mut net = 0.0;
-    for (_, is_long, mark_notional) in rows {
-        gross += mark_notional.abs();
-        net += if is_long {
-            mark_notional
-        } else {
-            -mark_notional
-        };
-    }
-    (gross, net)
+#[cfg(test)]
+fn candidate_mark_notionals_from_rows(rows: Vec<(String, bool, f64)>) -> (f64, f64) {
+    crate::candidate_evaluation_source_snapshot::canonical_candidate_mark_notionals_from_rows(rows)
 }
 
 fn candidate_portfolio_mark_notionals_for_reject(
     paper_state: &crate::paper_state::PaperState,
 ) -> (f64, f64) {
-    let rows = paper_state
-        .positions()
-        .into_iter()
-        .map(|position| {
-            let mark_price = paper_state
-                .latest_price(&position.symbol)
-                .filter(|price| price.is_finite() && *price > 0.0)
-                .unwrap_or(position.entry_price);
-            (
-                position.symbol.clone(),
-                position.is_long,
-                position.qty * mark_price,
-            )
-        })
-        .collect();
-    candidate_mark_notionals_from_rows(rows)
+    crate::candidate_evaluation_source_snapshot::candidate_portfolio_mark_notionals_from_runtime(
+        paper_state,
+    )
 }
 
 fn candidate_endpoint_environment(
@@ -786,14 +763,19 @@ impl TickPipeline {
                                 active_universe_block_reason = Some(reason);
                             }
                         }
-                        let mut scanner_ctx: Option<IntentScannerContext> =
-                            self.symbol_registry.as_ref().and_then(|reg| {
+                        let (mut scanner_ctx, candidate_evaluation_scan_source): (
+                            Option<IntentScannerContext>,
+                            Option<crate::candidate_evaluation_source_snapshot::CandidateEvaluationScanSourceV1>,
+                        ) = self
+                            .symbol_registry
+                            .as_ref()
+                            .and_then(|reg| {
                                 let scan = reg.last_scan()?;
                                 let candidate =
                                     scan.candidates.iter().find(|c| c.symbol == intent.symbol)?;
                                 let strategy_judgment =
                                     candidate.strategy_judgments.get(intent.strategy.as_str());
-                                Some(IntentScannerContext {
+                                let scanner_context = IntentScannerContext {
                                     authority_mode: scanner_authority_mode,
                                     legacy_would_block: false,
                                     legacy_block_reason: None,
@@ -848,8 +830,33 @@ impl TickPipeline {
                                     raw_score: strategy_judgment
                                         .map(|j| j.fitness_score)
                                         .unwrap_or(candidate.raw_score),
-                                })
-                            });
+                                };
+                                let (beta_proxy, beta_proxy_status) = match candidate.beta_proxy {
+                                    Some(value) if value.is_finite() => (
+                                        Some(value),
+                                        crate::candidate_evaluation_source_snapshot::CandidateEvaluationBetaProxyStatusV1::Observed,
+                                    ),
+                                    None => (
+                                        None,
+                                        crate::candidate_evaluation_source_snapshot::CandidateEvaluationBetaProxyStatusV1::UnavailableBtcMove,
+                                    ),
+                                    Some(_) => (
+                                        None,
+                                        crate::candidate_evaluation_source_snapshot::CandidateEvaluationBetaProxyStatusV1::Invalid,
+                                    ),
+                                };
+                                let scan_source = crate::candidate_evaluation_source_snapshot::CandidateEvaluationScanSourceV1 {
+                                    scan_id: scan.scan_id.clone(),
+                                    scan_ts_ms: scan.scan_ts_ms,
+                                    symbol: candidate.symbol.clone(),
+                                    sector: Some(candidate.sector.clone()),
+                                    turnover_24h: Some(candidate.turnover_24h),
+                                    beta_proxy,
+                                    beta_proxy_status,
+                                };
+                                Some((scanner_context, scan_source))
+                            })
+                            .unzip();
                         let scanner_legacy_block_reason = scanner_legacy_new_open_block_reason(
                             &intent.strategy,
                             scanner_ctx.as_ref(),
@@ -1399,6 +1406,7 @@ impl TickPipeline {
                                         &context_id,
                                         &signal_id,
                                     );
+                                let mut candidate_evaluation_source_snapshot = None;
                                 if let Some(reject_event) = learning_reject_event.as_mut() {
                                     let accepted_demo_equity_usdt =
                                         self.intent_processor.accepted_demo_equity_usdt();
@@ -1487,6 +1495,30 @@ impl TickPipeline {
                                             },
                                         ),
                                     );
+                                    if let Some(event_context) =
+                                        reject_event.candidate_event_context.as_ref()
+                                    {
+                                        let feature_source = crate::candidate_evaluation_source_snapshot::build_candidate_evaluation_feature_source_from_runtime(
+                                            &features,
+                                            intent,
+                                            event,
+                                            indicators,
+                                            atr_value,
+                                            &self.paper_state,
+                                        );
+                                        let portfolio_source = crate::candidate_evaluation_source_snapshot::build_candidate_evaluation_portfolio_source_from_runtime(
+                                            event_context,
+                                            &self.paper_state,
+                                        );
+                                        candidate_evaluation_source_snapshot = Some(
+                                            crate::candidate_evaluation_source_snapshot::capture_candidate_evaluation_source_snapshot(
+                                                event_context,
+                                                candidate_evaluation_scan_source.clone(),
+                                                feature_source,
+                                                portfolio_source,
+                                            ),
+                                        );
+                                    }
                                 }
                                 strategy.on_rejection(intent, reason);
                                 let mq = gate.verdict_info.as_ref().and_then(|vi| vi.modified_qty);
@@ -1546,13 +1578,14 @@ impl TickPipeline {
                                             self.intent_processor.accepted_demo_equity_usdt(),
                                         );
                                     self.demo_learning_lane_writer
-                                        .record_reject_event_with_placement_active_request_and_order_dispatch(
+                                        .record_reject_event_with_placement_active_request_order_dispatch_and_source_snapshot(
                                             reject_event,
                                             risk_state,
                                             event.ts_ms,
                                             Some(placement_decision),
                                             active_order_request,
                                             self.order_dispatch_tx.clone(),
+                                            candidate_evaluation_source_snapshot,
                                         );
                                 }
 

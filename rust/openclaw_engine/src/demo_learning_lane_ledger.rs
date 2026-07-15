@@ -37,6 +37,9 @@ pub struct AdmissionLedgerEvent {
     pub signal_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub candidate_event_context: Option<crate::candidate_event_context::CandidateEventContextV1>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub candidate_evaluation_source_snapshot:
+        Option<crate::candidate_evaluation_source_snapshot::CandidateEvaluationSourceSnapshotV1>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -60,6 +63,16 @@ impl AdmissionLedgerRecord {
     pub fn to_json_string(&self) -> Result<String, serde_json::Error> {
         serde_json::to_string(self)
     }
+
+    pub(crate) fn with_candidate_evaluation_source_snapshot(
+        mut self,
+        snapshot: Option<
+            crate::candidate_evaluation_source_snapshot::CandidateEvaluationSourceSnapshotV1,
+        >,
+    ) -> Self {
+        self.event.candidate_evaluation_source_snapshot = snapshot;
+        self
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -81,6 +94,16 @@ pub struct CaptureErrorLedgerRecord {
 impl CaptureErrorLedgerRecord {
     pub fn to_json_string(&self) -> Result<String, serde_json::Error> {
         serde_json::to_string(self)
+    }
+
+    pub(crate) fn with_candidate_evaluation_source_snapshot(
+        mut self,
+        snapshot: Option<
+            crate::candidate_evaluation_source_snapshot::CandidateEvaluationSourceSnapshotV1,
+        >,
+    ) -> Self {
+        self.event.candidate_evaluation_source_snapshot = snapshot;
+        self
     }
 }
 
@@ -194,6 +217,7 @@ fn build_admission_ledger_event(event: &RejectEvent) -> AdmissionLedgerEvent {
         context_id: non_empty(&event.context_id),
         signal_id: non_empty(&event.signal_id),
         candidate_event_context: event.candidate_event_context.clone(),
+        candidate_evaluation_source_snapshot: None,
     }
 }
 
