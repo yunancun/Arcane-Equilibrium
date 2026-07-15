@@ -32,6 +32,8 @@ from cost_gate_learning_lane.contract import (
     OUTCOME_ADAPTER_SCHEMA_VERSION,
 )
 from cost_gate_learning_lane.candidate_evaluation_context import (
+    CandidateEvaluationContextError,
+    canonical_sha256,
     validate_candidate_event_context,
 )
 from cost_gate_learning_lane.ledger_rotation import (
@@ -58,6 +60,8 @@ _CANDIDATE_EVENT_CONTEXT_PAYLOAD_MISSING_STATUS = (
     "INVALID_LINEAGE_EVENT_CONTEXT_MISSING"
 )
 _CANDIDATE_LINEAGE_CONFLICT_AUDIT_FIELD = "candidate_lineage_conflict_audit"
+_QUARANTINED_CAPTURE_STATUS = "CAPTURE_BLOCKED"
+_QUARANTINED_CAPTURE_BLOCKERS = ("BBO_MISSING_OR_INVALID",)
 
 
 @dataclass(frozen=True)
@@ -72,6 +76,15 @@ class RuntimeAdmissionConfig:
     # P2-7 起 net_positive_pct 腿已從禁用規則刪除;此欄仍供 review/報表消費,不再 gate 禁用。
     min_outcome_net_positive_pct: float = 50.0
     min_avg_net_bps: float = 0.0
+
+
+@dataclass(frozen=True)
+class LearningLedgerPartitions:
+    """Purpose-specific retained-ledger views for materialization and outcomes."""
+
+    outcome_rows: list[dict[str, Any]]
+    dedup_rows: list[dict[str, Any]]
+    quarantined_capture_blocked_rows: list[dict[str, Any]]
 
 
 def _utc_now() -> dt.datetime:
@@ -155,6 +168,16 @@ def validate_ledger_event_candidate_context(
     context = validate_candidate_event_context(
         validated_event["candidate_event_context"]
     )
+    _validate_candidate_context_outer_bindings(validated_event, context)
+    validated_event["candidate_event_context"] = context
+    return validated_event
+
+
+def _validate_candidate_context_outer_bindings(
+    event: Mapping[str, Any],
+    context: Mapping[str, Any],
+) -> None:
+    """Bind a hash-validated context to its immutable outer event identity."""
     bindings = (
         ("strategy_name", "strategy_name"),
         ("symbol", "symbol"),
@@ -165,10 +188,10 @@ def validate_ledger_event_candidate_context(
         ("ts_ms", "captured_at_ms"),
     )
     for outer_field, context_field in bindings:
-        outer_value = validated_event.get(outer_field)
+        outer_value = event.get(outer_field)
         context_value = context[context_field]
         if (
-            outer_field not in validated_event
+            outer_field not in event
             or type(outer_value) is not type(context_value)
             or outer_value != context_value
         ):
@@ -176,8 +199,6 @@ def validate_ledger_event_candidate_context(
                 "CANDIDATE_EVENT_CONTEXT_OUTER_BINDING_MISMATCH:"
                 f"{outer_field}"
             )
-    validated_event["candidate_event_context"] = context
-    return validated_event
 
 
 def side_cell_key(strategy_name: Any, symbol: Any, side: Any) -> str:
@@ -395,6 +416,152 @@ def read_candidate_evidence_jsonl_ledger(path: Path) -> list[dict[str, Any]]:
     return project_candidate_evidence_rows(_iter_jsonl_ledger_rows(path))
 
 
+def _strict_ledger_row(row: Mapping[str, Any]) -> dict[str, Any]:
+    """Apply the generic authority-sensitive lineage validation to one row."""
+    validated_row = dict(row)
+    summary = validated_row.get("candidate_summary")
+    summary_has_context = isinstance(summary, Mapping) and (
+        "candidate_event_context" in summary
+        or "candidate_event_context_status" in summary
+    )
+    if isinstance(validated_row.get("event"), Mapping):
+        validated_row["event"] = validate_ledger_event_candidate_context(
+            validated_row["event"]
+        )
+        if (
+            "candidate_event_context" in validated_row["event"]
+            or summary_has_context
+        ):
+            validated_row["candidate_summary"] = (
+                _candidate_summary_with_event_context(
+                    _dict(summary),
+                    validated_row["event"],
+                )
+            )
+    elif summary_has_context:
+        # 為什麼 fail-closed：summary-only VALID/context 無 outer event
+        # 可供 identity binding，不能把缺失/非 object event 當 legacy。
+        _candidate_summary_with_event_context(_dict(summary), {})
+    return validated_row
+
+
+def _capture_blocked_context(row: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    event = row.get("event")
+    if not isinstance(event, Mapping):
+        return None
+    context = event.get("candidate_event_context")
+    if not isinstance(context, Mapping):
+        return None
+    return context if context.get("capture_status") == _QUARANTINED_CAPTURE_STATUS else None
+
+
+def _validated_quarantined_capture_blocked_row(
+    row: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Validate the one non-authoritative Rust capture failure allowed in dedup.
+
+    ``validate_candidate_event_context`` intentionally rejects every blocked
+    capture.  Its validation order still proves exact fields, schema and hash
+    before raising ``EVENT_CONTEXT_CAPTURE_INCOMPLETE``; only that exact failure
+    is eligible for the narrower checks below.
+    """
+    validated_row = copy.deepcopy(dict(row))
+    if validated_row.get("record_type") != "probe_admission_decision":
+        raise ValueError("CAPTURE_BLOCKED_RECORD_TYPE_INVALID")
+    decision = _row_decision(validated_row)
+    if not decision:
+        raise ValueError("CAPTURE_BLOCKED_DECISION_MISSING")
+    if decision == ADMIT_DECISION:
+        raise ValueError("CAPTURE_BLOCKED_ADMIT_CONTRADICTION")
+    if validated_row.get("allowed_to_submit_order") is not False:
+        raise ValueError("CAPTURE_BLOCKED_ORDER_PERMISSION_INVALID")
+
+    event = validated_row.get("event")
+    if not isinstance(event, Mapping):
+        raise ValueError("CAPTURE_BLOCKED_EVENT_INVALID")
+    context = event.get("candidate_event_context")
+    if not isinstance(context, Mapping):
+        raise ValueError("CAPTURE_BLOCKED_CONTEXT_INVALID")
+    try:
+        validate_candidate_event_context(context)
+    except CandidateEvaluationContextError as exc:
+        if str(exc) != "EVENT_CONTEXT_CAPTURE_INCOMPLETE":
+            raise
+    else:
+        raise ValueError("CAPTURE_BLOCKED_STATUS_MISSING")
+    if context.get("capture_status") != _QUARANTINED_CAPTURE_STATUS:
+        raise ValueError("CAPTURE_BLOCKED_STATUS_INVALID")
+    blockers = context.get("capture_blockers")
+    if not isinstance(blockers, list) or tuple(blockers) != _QUARANTINED_CAPTURE_BLOCKERS:
+        raise ValueError("CAPTURE_BLOCKED_BLOCKERS_NOT_ALLOWED")
+
+    # Validate every semantic outside the one declared BBO defect.  This
+    # surrogate never leaves this function: it masks only best_bid/best_ask,
+    # then reuses the existing full CAPTURE_COMPLETE validator for all other
+    # fields.  The original hash-validated blocked row remains untouched.
+    complete_surrogate = copy.deepcopy(dict(context))
+    complete_surrogate["capture_status"] = "CAPTURE_COMPLETE"
+    complete_surrogate["capture_blockers"] = []
+    market_inputs = complete_surrogate.get("market_inputs")
+    if isinstance(market_inputs, dict):
+        market_inputs["best_bid"] = 1.0
+        market_inputs["best_ask"] = 2.0
+    complete_surrogate["event_hash"] = canonical_sha256(
+        {
+            key: value
+            for key, value in complete_surrogate.items()
+            if key != "event_hash"
+        }
+    )
+    validate_candidate_event_context(complete_surrogate)
+    _validate_candidate_context_outer_bindings(event, context)
+
+    summary = validated_row.get("candidate_summary")
+    if isinstance(summary, Mapping):
+        if (
+            "candidate_event_context" in summary
+            and not _exact_json_value_equal(
+                summary["candidate_event_context"],
+                context,
+            )
+        ):
+            raise ValueError("CANDIDATE_EVENT_CONTEXT_SUMMARY_CONFLICT")
+        if (
+            "candidate_event_context_status" in summary
+            and summary["candidate_event_context_status"]
+            != _QUARANTINED_CAPTURE_STATUS
+        ):
+            raise ValueError("CANDIDATE_EVENT_CONTEXT_SUMMARY_CONFLICT")
+    return validated_row
+
+
+def read_learning_ledger_partitions(path: Path) -> LearningLedgerPartitions:
+    """Read mixed producer rows without granting blocked capture lineage.
+
+    Expected BBO capture failures survive only in ``dedup_rows`` so their
+    attempt/event identities prevent re-materialization.  Outcome, fill and
+    every fully validated COMPLETE row remain in ``outcome_rows``.  All other
+    malformed, conflicting or authority-sensitive lineage still fails closed.
+    """
+    outcome_rows: list[dict[str, Any]] = []
+    dedup_rows: list[dict[str, Any]] = []
+    quarantined: list[dict[str, Any]] = []
+    for raw_row in _iter_jsonl_ledger_rows(path):
+        if _capture_blocked_context(raw_row) is not None:
+            row = _validated_quarantined_capture_blocked_row(raw_row)
+            quarantined.append(row)
+            dedup_rows.append(row)
+            continue
+        row = _strict_ledger_row(raw_row)
+        outcome_rows.append(row)
+        dedup_rows.append(row)
+    return LearningLedgerPartitions(
+        outcome_rows=outcome_rows,
+        dedup_rows=dedup_rows,
+        quarantined_capture_blocked_rows=quarantined,
+    )
+
+
 def read_jsonl_ledger(path: Path) -> list[dict[str, Any]]:
     """嚴格讀取 retention 窗內完整 ledger 視圖(輪轉段升冪 + 主檔)。
 
@@ -403,27 +570,7 @@ def read_jsonl_ledger(path: Path) -> list[dict[str, Any]]:
     (修前為無界單檔全量讀)。逐行 streaming 讀,避免整檔 read_text 的雙倍峰值
     記憶體。
     """
-    rows: list[dict[str, Any]] = []
-    for row in _iter_jsonl_ledger_rows(path):
-        summary = row.get("candidate_summary")
-        summary_has_context = isinstance(summary, Mapping) and (
-            "candidate_event_context" in summary
-            or "candidate_event_context_status" in summary
-        )
-        if isinstance(row.get("event"), Mapping):
-            row = dict(row)
-            row["event"] = validate_ledger_event_candidate_context(row["event"])
-            if "candidate_event_context" in row["event"] or summary_has_context:
-                row["candidate_summary"] = _candidate_summary_with_event_context(
-                    _dict(summary),
-                    row["event"],
-                )
-        elif summary_has_context:
-            # 為什麼 fail-closed：summary-only VALID/context 無 outer event
-            # 可供 identity binding，不能把缺失/非 object event 當 legacy。
-            _candidate_summary_with_event_context(_dict(summary), {})
-        rows.append(row)
-    return rows
+    return [_strict_ledger_row(row) for row in _iter_jsonl_ledger_rows(path)]
 
 
 def append_jsonl_ledger(path: Path, row: dict[str, Any]) -> None:

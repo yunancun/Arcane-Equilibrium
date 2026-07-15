@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import datetime as dt
 from dataclasses import dataclass
 import json
@@ -391,6 +392,9 @@ def _build_markout_outcome_records(
             "horizon_minutes": horizon_minutes,
             "default_horizon_minutes": cfg.horizon_minutes,
             "outcome_source": outcome_source,
+            # 保留已由 retained-ledger reader 驗證的 source event。只攜帶 summary
+            # 會在下一輪 reread 失去 outer identity binding 而 fail closed。
+            "event": copy.deepcopy(event),
             "candidate_summary": row.get("candidate_summary") or {},
             "promotion_evidence": False,
             "boundary": boundary,

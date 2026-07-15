@@ -16,6 +16,12 @@ from pathlib import Path
 
 import pytest
 
+from cost_gate_learning_lane.candidate_evaluation_context import canonical_sha256
+from cost_gate_learning_lane.contract import ADMIT_DECISION
+from cost_gate_learning_lane.outcome_refresh import (
+    OutcomeRefreshSelection,
+    refresh_cost_gate_outcomes_from_price_rows,
+)
 from cost_gate_learning_lane.outcome_writer import (
     ProbeOutcomeConfig,
     build_blocked_signal_outcome_records,
@@ -33,6 +39,7 @@ from cost_gate_learning_lane.runtime_adapter import (
     append_jsonl_ledger,
     build_ledger_record,
     evaluate_probe_admission,
+    read_learning_ledger_partitions,
     read_jsonl_ledger,
 )
 
@@ -98,6 +105,29 @@ def _minimal_valid_plan(event: dict) -> dict:
             }
         ],
     }
+
+
+def _capture_blocked_ledger_row() -> dict:
+    event = _candidate_context_reject_event()
+    decision = evaluate_probe_admission(
+        _minimal_valid_plan(event),
+        event,
+        now_utc=_event_now(event),
+        adapter_enabled=False,
+    )
+    row = json.loads(json.dumps(build_ledger_record(decision)))
+    row["attempt_id"] = "blocked-capture-attempt"
+    row["decision"] = "ADAPTER_DISABLED"
+    row["allowed_to_submit_order"] = False
+    row.pop("candidate_summary", None)
+    context = row["event"]["candidate_event_context"]
+    context["capture_status"] = "CAPTURE_BLOCKED"
+    context["capture_blockers"] = ["BBO_MISSING_OR_INVALID"]
+    context["market_inputs"]["best_bid"] = None
+    context["event_hash"] = canonical_sha256(
+        {key: value for key, value in context.items() if key != "event_hash"}
+    )
+    return row
 
 
 @pytest.mark.parametrize(
@@ -180,6 +210,200 @@ def test_candidate_context_round_trips_into_blocked_outcome_without_enrichment(
     assert summary["candidate_event_context"]["event_hash"] == expected_context["event_hash"]
     assert "candidate_evaluation_context" not in summary
     assert "candidate_learning_context_projection" not in summary
+
+
+def test_outcome_refresh_quarantines_expected_capture_blocked_context(
+    tmp_path: Path,
+) -> None:
+    complete_event = _candidate_context_reject_event()
+    decision = evaluate_probe_admission(
+        _minimal_valid_plan(complete_event),
+        complete_event,
+        now_utc=_event_now(complete_event),
+        adapter_enabled=False,
+    )
+    complete_row = build_ledger_record(decision)
+    blocked_row = _capture_blocked_ledger_row()
+
+    ledger_path = tmp_path / "mixed-capture-ledger.jsonl"
+    append_jsonl_ledger(ledger_path, complete_row)
+    append_jsonl_ledger(ledger_path, blocked_row)
+    event_ts_ms = complete_event["ts_ms"]
+    price_rows = [
+        {"symbol": "BTCUSDT", "ts_ms": event_ts_ms, "close": 2_500.0},
+        {
+            "symbol": "BTCUSDT",
+            "ts_ms": event_ts_ms + 60 * 60_000,
+            "close": 2_510.0,
+        },
+    ]
+    now = dt.datetime.fromtimestamp(
+        (event_ts_ms + 61 * 60_000) / 1000,
+        tz=dt.timezone.utc,
+    )
+
+    batch = refresh_cost_gate_outcomes_from_price_rows(
+        ledger_path,
+        price_rows,
+        now_utc=now,
+        selection=OutcomeRefreshSelection(record_blocked_outcomes=True),
+        outcome_cfg=ProbeOutcomeConfig(horizon_minutes=60, cost_bps=4.0),
+        append_ledger=True,
+    )
+
+    assert batch["blocked_signal_outcome_count"] == 1
+    assert batch["outcomes"][0]["attempt_id"] == complete_row["attempt_id"]
+    assert batch["outcomes"][0]["event"] == complete_row["event"]
+    rerun = refresh_cost_gate_outcomes_from_price_rows(
+        ledger_path,
+        price_rows,
+        now_utc=now,
+        selection=OutcomeRefreshSelection(record_blocked_outcomes=True),
+        outcome_cfg=ProbeOutcomeConfig(horizon_minutes=60, cost_bps=4.0),
+        append_ledger=False,
+    )
+    assert rerun["outcome_count"] == 0
+
+
+def test_partitioned_reader_keeps_capture_blocked_only_for_dedup(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "capture-blocked.jsonl"
+    blocked_row = _capture_blocked_ledger_row()
+    existing_outcome = {
+        "record_type": "blocked_signal_outcome",
+        "attempt_id": "existing-outcome",
+    }
+    existing_fill = {
+        "record_type": "probe_fill",
+        "attempt_id": "existing-fill",
+        "fill_id": "fill-1",
+    }
+    append_jsonl_ledger(path, blocked_row)
+    append_jsonl_ledger(path, existing_outcome)
+    append_jsonl_ledger(path, existing_fill)
+
+    with pytest.raises(ValueError, match="EVENT_CONTEXT_CAPTURE_INCOMPLETE"):
+        read_jsonl_ledger(path)
+    partitions = read_learning_ledger_partitions(path)
+
+    assert partitions.outcome_rows == [existing_outcome, existing_fill]
+    assert partitions.dedup_rows == [blocked_row, existing_outcome, existing_fill]
+    assert partitions.quarantined_capture_blocked_rows == [blocked_row]
+    batch = build_materialized_reject_ledger_batch(
+        _minimal_valid_plan(_candidate_context_reject_event()),
+        [
+            {
+                **_candidate_context_reject_event(),
+                "_materializer_source": "explicit_source_rows",
+            }
+        ],
+        existing_ledger_rows=partitions.outcome_rows,
+        dedup_ledger_rows=partitions.dedup_rows,
+        now_utc=_event_now(blocked_row["event"]),
+    )
+    assert batch["materialized_record_count"] == 0
+    assert batch["skipped_existing_event_key_count"] == 1
+
+
+@pytest.mark.parametrize(
+    ("mutation", "error"),
+    [
+        ("unknown_blocker", "CAPTURE_BLOCKED_BLOCKERS_NOT_ALLOWED"),
+        ("empty_blockers", "CAPTURE_BLOCKED_BLOCKERS_NOT_ALLOWED"),
+        ("admit", "CAPTURE_BLOCKED_ADMIT_CONTRADICTION"),
+        ("hash", "EVENT_CONTEXT_HASH_MISMATCH"),
+        ("schema", "EVENT_CONTEXT_SCHEMA_INVALID"),
+        ("outer_binding", "CANDIDATE_EVENT_CONTEXT_OUTER_BINDING_MISMATCH"),
+        ("summary_conflict", "CANDIDATE_EVENT_CONTEXT_SUMMARY_CONFLICT"),
+        ("invalid_complete", "EVENT_CONTEXT_CAPTURE_BLOCKED"),
+    ],
+)
+def test_partitioned_reader_keeps_noneligible_context_fail_closed(
+    tmp_path: Path,
+    mutation: str,
+    error: str,
+) -> None:
+    row = _capture_blocked_ledger_row()
+    context = row["event"]["candidate_event_context"]
+    if mutation == "unknown_blocker":
+        context["capture_blockers"] = ["BBO_CROSSED"]
+    elif mutation == "empty_blockers":
+        context["capture_blockers"] = []
+    elif mutation == "admit":
+        row["decision"] = ADMIT_DECISION
+    elif mutation == "hash":
+        context["event_hash"] = "0" * 64
+    elif mutation == "schema":
+        context["schema_version"] = "candidate_event_context_v2"
+    elif mutation == "outer_binding":
+        row["event"]["symbol"] = "ETHUSDT"
+    elif mutation == "summary_conflict":
+        row["candidate_summary"] = {
+            "candidate_event_context_status": "VALID",
+        }
+    else:
+        context["capture_status"] = "CAPTURE_COMPLETE"
+    if mutation in {"unknown_blocker", "empty_blockers", "schema", "invalid_complete"}:
+        context["event_hash"] = canonical_sha256(
+            {key: value for key, value in context.items() if key != "event_hash"}
+        )
+    path = tmp_path / f"{mutation}.jsonl"
+    append_jsonl_ledger(path, row)
+
+    with pytest.raises(ValueError, match=error):
+        read_learning_ledger_partitions(path)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "error"),
+    [
+        ("empty_strategy", "STRATEGY_NAME_INVALID"),
+        ("invalid_strategy_sha", "STRATEGY_VERSION_INVALID"),
+        ("zero_captured_at", "CAPTURED_AT_INVALID"),
+        ("lowercase_symbol", "SYMBOL_INVALID"),
+        ("invalid_side", "SIDE_INVALID"),
+    ],
+)
+def test_partitioned_reader_rejects_invalid_non_bbo_capture_semantics(
+    tmp_path: Path,
+    mutation: str,
+    error: str,
+) -> None:
+    row = _capture_blocked_ledger_row()
+    event = row["event"]
+    context = event["candidate_event_context"]
+    if mutation == "empty_strategy":
+        event["strategy_name"] = ""
+        context["strategy_name"] = ""
+    elif mutation == "invalid_strategy_sha":
+        context["strategy_version"] = "invalid"
+        context["build_git_sha"] = "invalid"
+    elif mutation == "zero_captured_at":
+        event["ts_ms"] = 0
+        context["captured_at_ms"] = 0
+    elif mutation == "lowercase_symbol":
+        event["symbol"] = "btcusdt"
+        context["symbol"] = "btcusdt"
+    else:
+        event["side"] = "Long"
+        context["side"] = "Long"
+    context["event_hash"] = canonical_sha256(
+        {key: value for key, value in context.items() if key != "event_hash"}
+    )
+    path = tmp_path / f"invalid-{mutation}.jsonl"
+    append_jsonl_ledger(path, row)
+
+    with pytest.raises(ValueError, match=error):
+        read_learning_ledger_partitions(path)
+
+
+def test_partitioned_reader_rejects_malformed_jsonl(tmp_path: Path) -> None:
+    path = tmp_path / "malformed.jsonl"
+    path.write_text('{"record_type":', encoding="utf-8")
+
+    with pytest.raises(ValueError, match="malformed JSONL ledger"):
+        read_learning_ledger_partitions(path)
 
 
 def test_legacy_contextless_event_keeps_original_ledger_shape(tmp_path: Path) -> None:
