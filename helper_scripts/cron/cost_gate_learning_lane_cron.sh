@@ -381,6 +381,16 @@ fi
 source "$CRON_FLOCK_LIB"
 acquire_cron_flock "$LOCK_FILE" "$STALE_LOCK_MIN" "$LOG" "cost_gate_learning_lane" || exit 0
 
+# 取到鎖＝本實例要跑重活：自標 OOM victim（oom_score_adj 往正、默認 800），使
+# 記憶體耗盡時 kernel 優先殺本 cron hog（probe_ledger 全量物化實測 79–85GB）、
+# 而非繼承 DefaultOOMScoreAdjust=200 的交易引擎/watchdog（2026-07-15 引擎因
+# adj=200 被連坐殺）。fail-soft：非 Linux/不可寫皆無害跳過；lib 缺失不擋跑（少一層
+# 保護≠不能跑，與 flock 的 fail-safe-skip 刻意不同）。分數跨 fork+exec 繼承 → 下面
+# spawn 的 python 子孫全是 victim。詳見 lib MODULE_NOTE；env
+# OPENCLAW_CRON_OOM_VICTIM_SCORE 可調。
+OOM_VICTIM_LIB="$BASE/helper_scripts/cron/lib/cron_oom_victim.sh"
+[[ -f "$OOM_VICTIM_LIB" ]] && source "$OOM_VICTIM_LIB" && mark_cron_oom_victim || true
+
 SECRETS_ROOT="${OPENCLAW_SECRETS_ROOT:-$HOME/BybitOpenClaw/secrets}"
 ENV_FILE="$SECRETS_ROOT/environment_files/basic_system_services.env"
 if [[ -f "$ENV_FILE" ]]; then

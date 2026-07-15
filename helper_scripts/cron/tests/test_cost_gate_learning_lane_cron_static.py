@@ -235,6 +235,21 @@ def test_wrapper_readonly_pg_and_artifact_only_status() -> None:
     assert src.rstrip().endswith("exit 0")
 
 
+def test_wrapper_marks_cron_oom_victim_after_lock() -> None:
+    # CRON-OOM-VICTIM-1：取到鎖的重活實例自標 OOM victim（oom_score_adj 往正、
+    # 默認 800），使 OOM 時 kernel 優先殺 cron hog（probe_ledger 全量物化實測
+    # 79–85GB）、而非繼承 DefaultOOMScoreAdjust=200 的交易引擎/watchdog（2026-07-15
+    # 引擎因 adj=200 被連坐殺）。與 flock 互補、全 fail-soft、lib 缺失不擋跑。
+    src = _src(WRAPPER)
+    assert "cron_oom_victim.sh" in src
+    assert (
+        '[[ -f "$OOM_VICTIM_LIB" ]] && source "$OOM_VICTIM_LIB" && mark_cron_oom_victim || true'
+        in src
+    )
+    # 放在取鎖之後：只有真正取到鎖、要跑重活的實例才需標 victim。
+    assert src.index("acquire_cron_flock") < src.index("mark_cron_oom_victim")
+
+
 def test_wrapper_fail_soft_defaults_match_learning_lane_review_policy() -> None:
     src = _src(WRAPPER)
     assert 'PG_TIMEFRAME="${OPENCLAW_COST_GATE_LEARNING_PG_TIMEFRAME:-1m}"' in src
