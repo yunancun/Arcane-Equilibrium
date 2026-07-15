@@ -41,7 +41,10 @@ from cost_gate_learning_lane.price_observations import (
     validate_pg_timeframe,
     validate_price_observation_config,
 )
-from cost_gate_learning_lane.runtime_adapter import append_jsonl_ledger, read_jsonl_ledger
+from cost_gate_learning_lane.runtime_adapter import (
+    append_jsonl_ledger,
+    read_learning_ledger_partitions,
+)
 
 
 OUTCOME_REFRESH_RECORD_TYPE = "cost_gate_outcome_refresh_batch"
@@ -218,7 +221,7 @@ def refresh_cost_gate_outcomes_from_price_rows(
     append_ledger: bool = False,
 ) -> dict[str, Any]:
     """Build a refresh batch from in-memory price rows and optionally append it."""
-    ledger_rows = read_jsonl_ledger(ledger_path)
+    ledger_rows = read_learning_ledger_partitions(ledger_path).outcome_rows
     batch = build_cost_gate_outcome_refresh_batch(
         ledger_rows,
         price_rows,
@@ -285,7 +288,7 @@ def main() -> int:
     )
     validate_outcome_config(outcome_cfg)
 
-    ledger_rows = read_jsonl_ledger(args.ledger)
+    ledger_rows = read_learning_ledger_partitions(args.ledger).outcome_rows
     if args.source_pg:
         price_rows = build_price_rows_from_pg_for_refresh(
             ledger_rows,
