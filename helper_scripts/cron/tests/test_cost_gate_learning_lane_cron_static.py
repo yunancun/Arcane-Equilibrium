@@ -36,7 +36,19 @@ def test_wrapper_readonly_pg_and_artifact_only_status() -> None:
     assert "basic_system_services.env" in src
     assert "POSTGRES_PASSWORD" in src
     assert 'PGOPTIONS="-c default_transaction_read_only=on"' in src
-    assert "cost_gate_learning_lane_cron.lock.d" in src
+    # CRON-STALE-LOCK-FLOCK-1：mkdir-dir 鎖＋「stale 超時 rmdir 清鎖照跑」已廢止
+    #（2026-07-15 OOM 疊加機），改共用 flock 正本：鎖檔常駐、超齡只 WARN 絕不接手。
+    assert 'LOCK_FILE="${LOCK_ROOT}/cost_gate_learning_lane_cron.lock"' in src
+    assert "cost_gate_learning_lane_cron.lock.d" not in src
+    assert "cron_flock.sh" in src
+    assert (
+        'acquire_cron_flock "$LOCK_FILE" "$STALE_LOCK_MIN" "$LOG" "cost_gate_learning_lane" || exit 0'
+        in src
+    )
+    assert 'rmdir "' not in src
+    assert 'mkdir "$LOCK' not in src
+    assert "release_lock()" not in src
+    assert "trap release_lock" not in src
     assert "cost_gate_learning_lane.last_fire" in src
     assert "cost_gate_learning_lane_cron.log" in src
     assert "cost_gate_learning_lane.log" in src

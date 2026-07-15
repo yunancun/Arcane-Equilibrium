@@ -11,7 +11,7 @@ DATA="${OPENCLAW_DATA_DIR:-/tmp/openclaw}"
 LOG_DIR="${DATA}/logs"
 LOG="${LOG_DIR}/alpha_discovery_throughput_cron.log"
 LOCK_ROOT="${DATA}/locks"
-LOCK_DIR="${LOCK_ROOT}/alpha_discovery_throughput_cron.lock.d"
+LOCK_FILE="${LOCK_ROOT}/alpha_discovery_throughput_cron.lock"
 HEARTBEAT_DIR="${DATA}/cron_heartbeat"
 
 mkdir -p "$LOG_DIR" "$LOCK_ROOT" "$HEARTBEAT_DIR"
@@ -33,19 +33,20 @@ else
 fi
 EXPECTED_SOURCE_HEAD="$(resolve_effective_expected_head "$BASE" "$DATA" "alpha_discovery_throughput" "$EXPECTED_SOURCE_HEAD")"
 
-if [[ -d "$LOCK_DIR" ]] && [[ -n "$(find "$LOCK_DIR" -maxdepth 0 -mmin +20 2>/dev/null)" ]]; then
-    echo "[$(ts)] WARN: stale lock (>20min) cleared: $LOCK_DIR" >> "$LOG"
-    rmdir "$LOCK_DIR" 2>/dev/null || true
-fi
-
-if ! mkdir "$LOCK_DIR" 2>/dev/null; then
-    echo "[$(ts)] SKIP: alpha discovery throughput already running (lock held)" >> "$LOG"
+# 反疊加 flock 鎖（CRON-STALE-LOCK-FLOCK-1）：舊 mkdir-dir 鎖在單輪超過 20min 時
+# 「rmdir 清鎖照跑、舊進程不殺」——每個 */15 週期淨疊一個 20-25GB python，直到
+# kernel OOM 連環殺（2026-07-15 全機 OOM 風暴主放大器；trap-rmdir 正是 stale 態
+# 來源，SIGKILL 本就攔不到）。flock 由 kernel 在持鎖進程死亡時自動放鎖，無 stale
+# 態、無需 trap 清理；不 kill 接手（PID 重用誤殺＋長任務 livelock）、鎖檔常駐
+# 不得刪。詳版裁決見 lib MODULE_NOTE。lib 缺失＝fail-safe skip（不學 SG_LIB 的
+# passthrough——鎖不能降級硬跑）。
+CRON_FLOCK_LIB="$BASE/helper_scripts/cron/lib/cron_flock.sh"
+if [[ ! -f "$CRON_FLOCK_LIB" ]]; then
+    echo "[$(ts)] ERROR: cron_flock lib missing: $CRON_FLOCK_LIB (fail-safe skip, not running unlocked)" >> "$LOG"
     exit 0
 fi
-release_lock() {
-    rmdir "$LOCK_DIR" 2>/dev/null || true
-}
-trap release_lock EXIT INT TERM
+source "$CRON_FLOCK_LIB"
+acquire_cron_flock "$LOCK_FILE" 20 "$LOG" "alpha_discovery_throughput" || exit 0
 
 touch "$HEARTBEAT_DIR/alpha_discovery_throughput.last_fire"
 
