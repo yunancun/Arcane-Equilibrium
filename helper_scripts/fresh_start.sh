@@ -275,9 +275,13 @@ if [ -d "$DATA_DIR" ]; then
     for f in "$DATA_DIR"/paper_state.json "$DATA_DIR"/demo_state.json "$DATA_DIR"/live_state.json; do
         [ -f "$f" ] && mv "$f" "$ARCHIVE_ROOT/state_files/" 2>/dev/null || true
     done
+    # engine.log 必須在 spawn 前 mv 歸檔:watchdog classify_engine_failure 依賴
+    # 「重啟後 active log 是新檔」invariant(殘留舊尾行會誤導崩潰分類),歸檔
+    # 同時保留死亡日誌供事後分析(2026-04-14 事故教訓;OPS-F1 2026-07-15)。
     for f in "$DATA_DIR"/engine_results.jsonl "$DATA_DIR"/paper_audit.jsonl \
              "$DATA_DIR"/demo_audit.jsonl "$DATA_DIR"/canary_events.jsonl \
-             "$DATA_DIR"/watchdog.log "$DATA_DIR"/watchdog_state.json; do
+             "$DATA_DIR"/watchdog.log "$DATA_DIR"/watchdog_state.json \
+             "$DATA_DIR"/engine.log; do
         [ -f "$f" ] && mv "$f" "$ARCHIVE_ROOT/canary/" 2>/dev/null || true
     done
     [ -d "$DATA_DIR/fallback" ] && mv "$DATA_DIR/fallback" "$ARCHIVE_ROOT/" 2>/dev/null || true
@@ -349,12 +353,17 @@ echo "  starting Rust engine..."
 # 灰度逐-tick 捕捉預設關閉，避免 engine_results.jsonl ~300GB/天 NVMe 寫入；
 # 需對賬或 replay 時按需以 `OPENCLAW_CANARY_MODE=1 ./fresh_start.sh ...` 啟動單次捕捉
 # （見 canary_comparator.py / replay_runner.py 工作流）。
+# OPS-F1 (2026-07-15): engine.log 必須 '>>'(O_APPEND) 非 '>'——缺 O_APPEND 的 fd
+# 被 logrotate copytruncate 截斷後寫入 offset 不回捲 → NUL 前綴 sparse 檔+輪替
+# 空轉(機制詳見 restart_all.sh 引擎啟動行注釋)。上一輪 engine.log 已在 Step 4
+# 歸檔進 $ARCHIVE_ROOT/canary/,spawn 時檔案必不存在,run 中大小由 logrotate
+# 1G size cap 兜底。
 OPENCLAW_DATA_DIR="$DATA_DIR" \
 OPENCLAW_CANARY_MODE="${OPENCLAW_CANARY_MODE:-0}" \
 OPENCLAW_DATABASE_URL_FILE="$OPENCLAW_DATABASE_URL_FILE" \
 OPENCLAW_IPC_SECRET_FILE="$IPC_SECRET_FILE" \
 OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE="$LIVE_AUTH_SIGNING_KEY_FILE" \
-    nohup "$BIN" > "$DATA_DIR/engine.log" 2>&1 &
+    nohup "$BIN" >> "$DATA_DIR/engine.log" 2>&1 &
 ENGINE_PID=$!
 echo "    engine PID: $ENGINE_PID"
 

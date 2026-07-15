@@ -636,6 +636,11 @@ restart_engine() {
     demo_learning_lane_plan="${OPENCLAW_DEMO_LEARNING_LANE_PLAN:-$(grep '^OPENCLAW_DEMO_LEARNING_LANE_PLAN=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
     demo_learning_lane_ledger="${OPENCLAW_DEMO_LEARNING_LANE_LEDGER:-$(grep '^OPENCLAW_DEMO_LEARNING_LANE_LEDGER=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
     bounded_probe_adapter_enabled="${OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED:-$(grep '^OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
+    # OPS-F1 (2026-07-15): engine.log 重導向必須 '>>'(O_APPEND) 非 '>'——缺 O_APPEND
+    # 的 fd 被 logrotate copytruncate 截斷後,寫入 offset 不回捲 → NUL 前綴 sparse
+    # 檔,表觀 size 立回 ≥1G 致每小時輪替空轉,且 .gz 歸檔開頭全 NUL 毀法證可讀性
+    # (6/27 engine.log.1.gz 實錘)。重啟語意不變:上方 rotate_engine_log() 已先 mv
+    # 歸檔,'>' 與 '>>' 對新檔行為相同。
     OPENCLAW_DATA_DIR="$DATA_DIR" OPENCLAW_IPC_SOCKET="$ENGINE_SOCKET" OPENCLAW_CANARY_MODE="${OPENCLAW_CANARY_MODE:-0}" \
         OPENCLAW_DATABASE_URL_FILE="$OPENCLAW_DATABASE_URL_FILE" \
         OPENCLAW_IPC_SECRET_FILE="$OPENCLAW_IPC_SECRET_FILE" \
@@ -663,7 +668,7 @@ restart_engine() {
         OPENCLAW_STRATEGIST_RICH_INPUT="${strategist_rich_input}" \
         OPENCLAW_RISKCONFIG_AGENT_TUNING_ENABLED="${riskconfig_agent_tuning}" \
         OPENCLAW_FLASH_DIP_PILOT_ENABLED="${flash_dip_pilot_enabled}" \
-        nohup rust/target/release/openclaw-engine > "$DATA_DIR/engine.log" 2>&1 0<&- 200<&- &
+        nohup rust/target/release/openclaw-engine >> "$DATA_DIR/engine.log" 2>&1 0<&- 200<&- &
     echo "    PID: $!"
 }
 
