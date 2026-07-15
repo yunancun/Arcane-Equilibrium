@@ -107,7 +107,10 @@ def _minimal_valid_plan(event: dict) -> dict:
     }
 
 
-def _capture_blocked_ledger_row() -> dict:
+def _capture_blocked_ledger_row(
+    *,
+    blockers: list[str] | None = None,
+) -> dict:
     event = _candidate_context_reject_event()
     decision = evaluate_probe_admission(
         _minimal_valid_plan(event),
@@ -122,8 +125,19 @@ def _capture_blocked_ledger_row() -> dict:
     row.pop("candidate_summary", None)
     context = row["event"]["candidate_event_context"]
     context["capture_status"] = "CAPTURE_BLOCKED"
-    context["capture_blockers"] = ["BBO_MISSING_OR_INVALID"]
-    context["market_inputs"]["best_bid"] = None
+    context["capture_blockers"] = list(
+        blockers
+        if blockers is not None
+        else ["BBO_MISSING_OR_INVALID"]
+    )
+    if "BBO_MISSING_OR_INVALID" in context["capture_blockers"]:
+        context["market_inputs"]["best_bid"] = None
+    elif "BBO_CROSSED" in context["capture_blockers"]:
+        context["market_inputs"]["best_bid"] = 2.0
+        context["market_inputs"]["best_ask"] = 1.0
+    if "SCAN_CONTEXT_MISSING_OR_INVALID" in context["capture_blockers"]:
+        context["scan_id"] = None
+        context["scanner_inputs"] = None
     context["event_hash"] = canonical_sha256(
         {key: value for key, value in context.items() if key != "event_hash"}
     )
@@ -307,10 +321,42 @@ def test_partitioned_reader_keeps_capture_blocked_only_for_dedup(
 
 
 @pytest.mark.parametrize(
+    "blockers",
+    [
+        ["BBO_MISSING_OR_INVALID"],
+        ["BBO_CROSSED"],
+        ["SCAN_CONTEXT_MISSING_OR_INVALID"],
+        ["SCAN_CONTEXT_MISSING_OR_INVALID", "BBO_MISSING_OR_INVALID"],
+    ],
+)
+def test_partitioned_reader_quarantines_only_exact_live_blocker_shapes(
+    tmp_path: Path,
+    blockers: list[str],
+) -> None:
+    path = tmp_path / "exact-live-capture-blocker.jsonl"
+    blocked_row = _capture_blocked_ledger_row(blockers=blockers)
+    original_row = json.loads(json.dumps(blocked_row))
+    append_jsonl_ledger(path, blocked_row)
+
+    with pytest.raises(ValueError, match="EVENT_CONTEXT_CAPTURE_INCOMPLETE"):
+        read_jsonl_ledger(path)
+    partitions = read_learning_ledger_partitions(path)
+
+    assert blocked_row == original_row
+    assert partitions.outcome_rows == []
+    assert partitions.dedup_rows == [original_row]
+    assert partitions.quarantined_capture_blocked_rows == [original_row]
+
+
+@pytest.mark.parametrize(
     ("mutation", "error"),
     [
         ("unknown_blocker", "CAPTURE_BLOCKED_BLOCKERS_NOT_ALLOWED"),
         ("empty_blockers", "CAPTURE_BLOCKED_BLOCKERS_NOT_ALLOWED"),
+        ("duplicate_blocker", "CAPTURE_BLOCKED_BLOCKERS_NOT_ALLOWED"),
+        ("reordered_blockers", "CAPTURE_BLOCKED_BLOCKERS_NOT_ALLOWED"),
+        ("extra_blocker", "CAPTURE_BLOCKED_BLOCKERS_NOT_ALLOWED"),
+        ("mixed_blockers", "CAPTURE_BLOCKED_BLOCKERS_NOT_ALLOWED"),
         ("admit", "CAPTURE_BLOCKED_ADMIT_CONTRADICTION"),
         ("hash", "EVENT_CONTEXT_HASH_MISMATCH"),
         ("schema", "EVENT_CONTEXT_SCHEMA_INVALID"),
@@ -327,9 +373,30 @@ def test_partitioned_reader_keeps_noneligible_context_fail_closed(
     row = _capture_blocked_ledger_row()
     context = row["event"]["candidate_event_context"]
     if mutation == "unknown_blocker":
-        context["capture_blockers"] = ["BBO_CROSSED"]
+        context["capture_blockers"] = ["UNKNOWN_CAPTURE_FAILURE"]
     elif mutation == "empty_blockers":
         context["capture_blockers"] = []
+    elif mutation == "duplicate_blocker":
+        context["capture_blockers"] = [
+            "BBO_MISSING_OR_INVALID",
+            "BBO_MISSING_OR_INVALID",
+        ]
+    elif mutation == "reordered_blockers":
+        context["capture_blockers"] = [
+            "BBO_MISSING_OR_INVALID",
+            "SCAN_CONTEXT_MISSING_OR_INVALID",
+        ]
+    elif mutation == "extra_blocker":
+        context["capture_blockers"] = [
+            "SCAN_CONTEXT_MISSING_OR_INVALID",
+            "BBO_MISSING_OR_INVALID",
+            "UNKNOWN_CAPTURE_FAILURE",
+        ]
+    elif mutation == "mixed_blockers":
+        context["capture_blockers"] = [
+            "SCAN_CONTEXT_MISSING_OR_INVALID",
+            "BBO_CROSSED",
+        ]
     elif mutation == "admit":
         row["decision"] = ADMIT_DECISION
     elif mutation == "hash":
@@ -344,10 +411,64 @@ def test_partitioned_reader_keeps_noneligible_context_fail_closed(
         }
     else:
         context["capture_status"] = "CAPTURE_COMPLETE"
-    if mutation in {"unknown_blocker", "empty_blockers", "schema", "invalid_complete"}:
+    if mutation in {
+        "unknown_blocker",
+        "empty_blockers",
+        "duplicate_blocker",
+        "reordered_blockers",
+        "extra_blocker",
+        "mixed_blockers",
+        "schema",
+        "invalid_complete",
+    }:
         context["event_hash"] = canonical_sha256(
             {key: value for key, value in context.items() if key != "event_hash"}
         )
+    path = tmp_path / f"{mutation}.jsonl"
+    append_jsonl_ledger(path, row)
+
+    with pytest.raises(ValueError, match=error):
+        read_learning_ledger_partitions(path)
+
+
+@pytest.mark.parametrize(
+    ("blockers", "mutation", "error"),
+    [
+        (
+            ["BBO_MISSING_OR_INVALID"],
+            "undeclared_scan",
+            "SCAN_ID_INVALID",
+        ),
+        (
+            ["SCAN_CONTEXT_MISSING_OR_INVALID"],
+            "undeclared_bbo",
+            "MARKET_INPUTS_INVALID",
+        ),
+        (
+            ["BBO_CROSSED"],
+            "undeclared_market_field",
+            "MARKET_INPUTS_INVALID",
+        ),
+    ],
+)
+def test_partitioned_reader_masks_only_declared_capture_sections(
+    tmp_path: Path,
+    blockers: list[str],
+    mutation: str,
+    error: str,
+) -> None:
+    row = _capture_blocked_ledger_row(blockers=blockers)
+    context = row["event"]["candidate_event_context"]
+    if mutation == "undeclared_scan":
+        context["scan_id"] = None
+        context["scanner_inputs"] = None
+    elif mutation == "undeclared_bbo":
+        context["market_inputs"]["best_bid"] = None
+    else:
+        context["market_inputs"]["last_price"] = None
+    context["event_hash"] = canonical_sha256(
+        {key: value for key, value in context.items() if key != "event_hash"}
+    )
     path = tmp_path / f"{mutation}.jsonl"
     append_jsonl_ledger(path, row)
 
