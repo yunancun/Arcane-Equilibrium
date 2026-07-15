@@ -249,6 +249,13 @@ from .checks_crontab_governance import (  # noqa: F401
     check_92_crontab_matches_repo_render,
     check_93_crontab_replace_has_manifest,
 )
+# [95] OPS F4 logrotate 治理巡檢（2026-07-15）— logrotate runtime conf 漂移事故 follow-up。
+# runtime logrotate conf 整檔 sha256 != repo canonical > 24h = FAIL（安裝契約=整檔 cp,
+# 位元組平價即契約 machine-check）。
+# 預設 WARN；OPENCLAW_LOGROTATE_GOVERNANCE_REQUIRED=1 升 FAIL。
+from .checks_logrotate_governance import (  # noqa: F401
+    check_95_logrotate_runtime_matches_repo,
+)
 
 __all__ = [
     "main",
@@ -365,4 +372,6 @@ __all__ = [
     "check_93_crontab_replace_has_manifest",
     # [94] 冷審計 R2 F-1b（2026-07-05）bybit_announcement_sentinel cron heartbeat.
     "check_94_bybit_announcement_sentinel_cron_fires",
+    # [95] OPS F4 logrotate 治理巡檢（2026-07-15）— logrotate runtime conf 漂移事故 follow-up.
+    "check_95_logrotate_runtime_matches_repo",
 ]
