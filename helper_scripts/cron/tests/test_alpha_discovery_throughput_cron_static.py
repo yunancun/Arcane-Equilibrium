@@ -458,3 +458,18 @@ def test_wrapper_uses_shared_flock_anti_stacking_lock() -> None:
     assert 'mkdir "$LOCK' not in src
     assert "release_lock()" not in src
     assert "trap release_lock" not in src
+
+
+def test_wrapper_marks_cron_oom_victim_after_lock() -> None:
+    # CRON-OOM-VICTIM-1：取到鎖的重活實例自標 OOM victim（oom_score_adj 往正、
+    # 默認 800），使 OOM 時 kernel 優先殺 cron hog、而非繼承 DefaultOOMScoreAdjust=200
+    # 的交易引擎/watchdog（2026-07-15 引擎因 adj=200 被連坐殺）。與 flock 互補、
+    # 全 fail-soft、lib 缺失不擋跑（少一層保護≠不能跑）。
+    src = _src()
+    assert "cron_oom_victim.sh" in src
+    assert (
+        '[[ -f "$OOM_VICTIM_LIB" ]] && source "$OOM_VICTIM_LIB" && mark_cron_oom_victim || true'
+        in src
+    )
+    # 放在取鎖之後：只有真正取到鎖、要跑重活的實例才需標 victim。
+    assert src.index("acquire_cron_flock") < src.index("mark_cron_oom_victim")
