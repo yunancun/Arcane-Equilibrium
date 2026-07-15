@@ -16,6 +16,7 @@ ADAPTER_PATH = (
 PROBE_PATH = (
     ROOT / "helper_scripts" / "maintenance_scripts" / "runtime_environment_probe.py"
 )
+RESTART_ALL_PATH = ROOT / "helper_scripts" / "restart_all.sh"
 
 
 def _load_adapter():
@@ -121,8 +122,13 @@ def test_local_probe_proves_only_exact_private_live_demo_identity(
     assert attestation is not None
     assert attestation["actual_endpoint_class"] == "bybit_demo"
     assert attestation["allow_mainnet"] is False
-    assert attestation["runtime_mode"] == "live_demo"
-    assert attestation["authorization_scope"] == "live_demo_only"
+    assert probe.ATTESTED_TARGET_ENVIRONMENT == "live_demo"
+    assert probe.ATTESTED_AUTHORIZATION_SCOPE == "live_demo_only"
+    assert attestation["runtime_mode"] == probe.ATTESTED_TARGET_ENVIRONMENT
+    assert (
+        attestation["authorization_scope"]
+        == probe.ATTESTED_AUTHORIZATION_SCOPE
+    )
     serialized = json.dumps(attestation, sort_keys=True)
     for forbidden in (
         "credential-sentinel-must-not-leak",
@@ -374,13 +380,15 @@ def test_local_probe_rereads_endpoint_and_denies_mid_probe_mainnet_drift(
     assert "MAINNET_ENDPOINT_FORBIDDEN" in blockers
 
 
-def _intent(environment_identity: str) -> dict:
+def _intent(
+    environment_identity: str, *, target_environment: str = "demo",
+) -> dict:
     head = "a" * 40
     return {
         "schema_version": "deployment_intent_v1",
         "intent_id": "deploy-env-0001",
         "target_host": "trade-core-runtime",
-        "target_environment": "demo",
+        "target_environment": target_environment,
         "expected_source_head": head,
         "expected_deploy_script_sha256": "sha256:" + "b" * 64,
         "expected_runtime_environment_identity_digest": environment_identity,
@@ -394,6 +402,90 @@ def _intent(environment_identity: str) -> dict:
             "no risk/cost-gate/decision-lease bypass",
         ],
     }
+
+
+def test_deploy_adapter_accepts_only_the_environment_its_real_probe_attests(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    probe, _fixture = _safe_probe_fixture(tmp_path, monkeypatch)
+    attestation, blockers = probe.probe_runtime_environment(
+        phase="preflight",
+        expected_host="trade-core-runtime",
+        expected_source_head="a" * 40,
+        now="2026-07-15T10:00:00+00:00",
+    )
+    assert blockers == []
+    assert attestation is not None
+
+    adapter = _load_adapter()
+    live_demo_intent = _intent(
+        attestation["environment_identity_digest"],
+        target_environment="live_demo",
+    )
+    assert adapter.reconcile_runtime_attestations(
+        attestation,
+        attestation,
+        live_demo_intent,
+        phase="preflight",
+        now="2026-07-15T10:01:00+00:00",
+    ) == []
+    common_validation = {
+        "supplied_intent_digest": "sha256:" + "e" * 64,
+        "actual_intent_digest": "sha256:" + "e" * 64,
+        "actual_source_head": "a" * 40,
+        "tree_clean": True,
+        "actual_host": "trade-core-runtime",
+        "deploy_script_digest": "sha256:" + "b" * 64,
+        "now": "2026-07-11T10:15:00Z",
+    }
+    assert adapter.validate_intent(live_demo_intent, **common_validation) == []
+    assert adapter.local_probe_target_environment_errors(live_demo_intent) == []
+
+    for unsupported in ("demo", "research_runtime"):
+        unsupported_intent = _intent(
+            attestation["environment_identity_digest"],
+            target_environment=unsupported,
+        )
+        assert adapter.validate_intent(
+            unsupported_intent, **common_validation
+        ) == []
+        assert adapter.local_probe_target_environment_errors(
+            unsupported_intent
+        ) == [
+            "target_environment is unsupported by the local runtime probe; "
+            "expected live_demo"
+        ]
+        assert adapter.reconcile_runtime_attestations(
+            attestation,
+            attestation,
+            unsupported_intent,
+            phase="preflight",
+            now="2026-07-15T10:01:00+00:00",
+        )
+
+
+def test_restart_launcher_exposes_the_probe_required_explicit_environment() -> None:
+    text = RESTART_ALL_PATH.read_text(encoding="utf-8")
+    secrets_resolve = (
+        'BYBIT_SECRETS_DIR="${OPENCLAW_SECRETS_DIR:-'
+        '$SECRETS_ROOT/secret_files/bybit}"'
+    )
+    secrets_launch = 'OPENCLAW_SECRETS_DIR="$BYBIT_SECRETS_DIR"'
+    assert secrets_resolve in text
+    assert secrets_launch in text
+    assert text.index(secrets_resolve) < text.index(secrets_launch) < text.index(
+        "nohup rust/target/release/openclaw-engine"
+    )
+
+    for env_name, shell_name in (
+        ("OPENCLAW_DEMO_LEARNING_LANE_WRITER", "demo_learning_lane_writer"),
+        ("OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED", "bounded_probe_adapter_enabled"),
+    ):
+        resolve_index = text.index(f'{shell_name}="${{{env_name}:-')
+        normalization = f'{shell_name}="${{{shell_name}:-0}}"'
+        launch_index = text.index(f'{env_name}="${{{shell_name}}}"')
+        assert normalization in text
+        assert resolve_index < text.index(normalization) < launch_index
 
 
 def test_demo_label_cannot_authorize_a_mainnet_runtime_attestation() -> None:
@@ -423,7 +515,7 @@ def test_demo_label_cannot_authorize_a_mainnet_runtime_attestation() -> None:
     assert any("mainnet" in error or "safe runtime" in error for error in errors)
 
 
-def test_safe_demo_attestation_is_fresh_self_hashed_and_intent_bound() -> None:
+def test_generic_demo_attestation_remains_valid_for_intent_only_contract() -> None:
     adapter = _load_adapter()
     attestation = adapter.build_runtime_environment_attestation(
         phase="preflight",
@@ -458,6 +550,50 @@ def test_safe_demo_attestation_is_fresh_self_hashed_and_intent_bound() -> None:
     ) == []
 
 
+def test_apply_rejects_environment_the_local_probe_cannot_attest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys,
+) -> None:
+    adapter = _load_adapter()
+    now = datetime.now(timezone.utc)
+    intent = _intent("sha256:" + "c" * 64, target_environment="demo")
+    intent["approved_at"] = (now - timedelta(minutes=2)).isoformat()
+    intent["expires_at"] = (now + timedelta(hours=1)).isoformat()
+    intent["expected_deploy_script_sha256"] = adapter.sha256_bytes(
+        adapter.DEPLOY_COMPONENT.read_bytes()
+    )
+    intent_path = tmp_path / "intent.json"
+    intent_bytes = json.dumps(intent, sort_keys=True, separators=(",", ":")).encode()
+    intent_path.write_bytes(intent_bytes)
+    monkeypatch.setattr(
+        adapter,
+        "git_text",
+        lambda *args: "a" * 40 if args == ("rev-parse", "HEAD") else "",
+    )
+    monkeypatch.setattr(adapter.socket, "gethostname", lambda: "trade-core-runtime")
+    monkeypatch.setenv("OPENCLAW_DEPLOY_ADAPTER_APPLY", "1")
+
+    exit_code = adapter.main(
+        [
+            "--intent",
+            str(intent_path),
+            "--intent-sha256",
+            adapter.sha256_bytes(intent_bytes),
+            "--apply",
+        ]
+    )
+
+    output = capsys.readouterr()
+    assert exit_code == 4
+    blocked = json.loads(output.err)
+    assert blocked == {
+        "status": "RUNTIME_ENVIRONMENT_PROBE_TARGET_UNSUPPORTED",
+        "errors": [
+            "target_environment is unsupported by the local runtime probe; "
+            "expected live_demo"
+        ],
+    }
+
+
 def test_actual_apply_stays_disabled_after_probe_until_recovery_controls_are_bound(
     tmp_path: Path, monkeypatch, capsys,
 ) -> None:
@@ -471,13 +607,16 @@ def test_actual_apply_stays_disabled_after_probe_until_recovery_controls_are_bou
         config_identity_digest="sha256:" + "c" * 64,
         actual_endpoint_class="bybit_demo",
         allow_mainnet=False,
-        runtime_mode="demo",
-        authorization_scope="demo_only",
+        runtime_mode="live_demo",
+        authorization_scope="live_demo_only",
         process_identity_digest="sha256:" + "d" * 64,
         observed_at=observed.isoformat(),
         expires_at=(now + timedelta(minutes=10)).isoformat(),
     )
-    intent = _intent(attestation["environment_identity_digest"])
+    intent = _intent(
+        attestation["environment_identity_digest"],
+        target_environment="live_demo",
+    )
     intent["approved_at"] = (now - timedelta(minutes=2)).isoformat()
     intent["expires_at"] = (now + timedelta(hours=1)).isoformat()
     intent["expected_deploy_script_sha256"] = adapter.sha256_bytes(

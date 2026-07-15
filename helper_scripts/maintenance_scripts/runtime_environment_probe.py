@@ -3,7 +3,8 @@
 
 The probe reads a fixed allowlist from the current engine process and local
 filesystem.  It never opens a network socket, contacts a broker, mutates a
-service, or serializes raw process environment and secret paths.
+service, or serializes raw process environment and secret paths.  This producer
+attests only the active Live slot configured for Bybit Demo (``live_demo``).
 """
 
 from __future__ import annotations
@@ -33,6 +34,8 @@ ENGINE_NAME = "openclaw-engine"
 MAX_ENVIRONMENT_BYTES = 1024 * 1024
 MAX_ENDPOINT_BYTES = 32
 ATTESTATION_TTL = timedelta(minutes=5)
+ATTESTED_TARGET_ENVIRONMENT = "live_demo"
+ATTESTED_AUTHORIZATION_SCOPE = "live_demo_only"
 GIT_EXECUTABLE = "/usr/bin/git"
 PGREP_EXECUTABLE = "/usr/bin/pgrep"
 ENVIRONMENT_PROJECTOR = "/usr/bin/grep"
@@ -404,8 +407,8 @@ def probe_runtime_environment(
         config_identity_digest=_sha256_bytes(_canonical_bytes(config_projection)),
         actual_endpoint_class=endpoint_class,
         allow_mainnet=False,
-        runtime_mode="live_demo",
-        authorization_scope="live_demo_only",
+        runtime_mode=ATTESTED_TARGET_ENVIRONMENT,
+        authorization_scope=ATTESTED_AUTHORIZATION_SCOPE,
         process_identity_digest=process_facts["process_identity_digest"],
         observed_at=observed.isoformat(),
         expires_at=expires.isoformat(),
