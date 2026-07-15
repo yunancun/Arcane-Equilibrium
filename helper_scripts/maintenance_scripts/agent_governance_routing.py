@@ -21,7 +21,7 @@ TASK_FACT_FIELDS = {
     "objective", "scope", "acceptance_criteria", "hard_stops", "baseline",
     "direct_interfaces", "previous_failure", "evidence_state", "expected_output",
     "side_effect_class", "uncertainty", "dirty_scope", "operator_risk_acceptance",
-    "focus", "claim_inputs",
+    "verification_scope", "focus", "claim_inputs",
     "task_prompt", "task_prompt_digest",
 }
 SOURCE_REVIEW_SURFACES = {"python", "rust", "gui", "ml_data", "implementation", "runtime"}
@@ -52,7 +52,7 @@ ROUTED_WORK_NODES = {
 TASK_CONTRACT_FIELDS = (
     "task_shape", "surfaces", "risk", "runtime_claim", "end_to_end_claim",
     "uncertainty", "side_effect_class", "objective", "scope", "acceptance_criteria", "hard_stops",
-    "baseline", "dirty_scope", "direct_interfaces", "previous_failure", "focus",
+    "baseline", "dirty_scope", "verification_scope", "direct_interfaces", "previous_failure", "focus",
     "claim_inputs", "task_prompt", "task_prompt_digest",
 )
 def _sha256_bytes(value: bytes) -> str:
@@ -86,6 +86,25 @@ def _frontend_path(path: str) -> bool:
     return suffix in {".js", ".mjs"} and (
         "static" in parts or "assets" in parts
     ) and "control_api_v1" in parts
+
+
+def _safe_verification_path(value: str) -> str | None:
+    """Return one literal repo-relative verification path, never a git pathspec."""
+
+    relative = value.strip()
+    path = PurePosixPath(relative)
+    if (
+        not relative
+        or relative in {"."}
+        or relative.startswith(("/", "~", "-", "!", ":"))
+        or ".." in path.parts
+        or any(character in relative for character in ("\0", "\n", "\r", "\\", "*", "?", "["))
+    ):
+        return None
+    normalized = path.as_posix()
+    if normalized in {"", "."} or normalized.startswith("../"):
+        return None
+    return normalized
 
 
 def _required_role_projection(
@@ -318,6 +337,23 @@ def _normalize_task_facts(task_facts: dict[str, Any]) -> dict[str, Any]:
         raise ValueError(
             f"side_effect_class={effect} requires a non-empty dirty_scope"
         )
+    supplied_verification_scope = normalized.get("verification_scope", [])
+    if not isinstance(supplied_verification_scope, list) or any(
+        not isinstance(item, str) or not item.strip()
+        for item in supplied_verification_scope
+    ):
+        raise ValueError(
+            "task facts verification_scope must be a list of non-empty strings"
+        )
+    safe_verification_scope: set[str] = set()
+    for item in supplied_verification_scope:
+        relative = _safe_verification_path(item)
+        if relative is None:
+            raise ValueError(
+                "task facts verification_scope must contain literal safe repo-relative paths"
+            )
+        safe_verification_scope.add(relative)
+    normalized["verification_scope"] = sorted(safe_verification_scope)
     focus = normalized.get("focus", "")
     if not isinstance(focus, str):
         raise ValueError("task facts focus must be a string")

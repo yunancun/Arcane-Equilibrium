@@ -39,6 +39,7 @@ from agent_governance_effects import (  # noqa: E402
     validate_runtime_environment_attestation,
 )
 from agent_governance_schema import schema_subset_errors  # noqa: E402
+from runtime_environment_probe import probe_runtime_environment  # noqa: E402
 
 
 DEPLOY_COMPONENT = REPO_ROOT / "helper_scripts/build_then_restart_atomic.sh"
@@ -156,17 +157,22 @@ def probe_local_runtime_environment(
     expected_source_head: str,
     now: str,
 ) -> tuple[dict[str, Any] | None, list[str]]:
-    """Fail closed until runtime exposes a non-secret, reproducible identity probe.
+    """Run the local no-contact identity probe; caller labels are never facts."""
 
-    Process argv/environment and deployment intent labels are not sufficient to
-    prove the selected endpoint, authorization scope, and effective mode.  The
-    Adapter therefore remains non-executable instead of manufacturing those
-    facts from caller input.
-    """
+    return probe_runtime_environment(
+        phase=phase,
+        expected_host=expected_host,
+        expected_source_head=expected_source_head,
+        now=now,
+    )
 
-    _ = (phase, expected_host, expected_source_head, now)
-    return None, [
-        "RUNTIME_ENVIRONMENT_PROBE_UNAVAILABLE: no trusted local runtime identity probe"
+
+def deploy_recovery_control_blockers() -> list[str]:
+    """Keep apply disabled until rollback and a stable observation window bind."""
+
+    return [
+        "DEPLOY_ROLLBACK_BINDING_UNAVAILABLE",
+        "DEPLOY_STABILITY_OBSERVATION_WINDOW_UNAVAILABLE",
     ]
 
 
@@ -242,7 +248,7 @@ def main(argv: list[str] | None = None) -> int:
                     "status": "INTENT_VALIDATED_APPLY_DISABLED",
                     "intent_id": intent["intent_id"],
                     "apply_executable": False,
-                    "blocked_on": "trusted local runtime identity probe",
+                    "blocked_on": "deploy recovery controls",
                 },
                 ensure_ascii=False,
             )
@@ -303,6 +309,20 @@ def main(argv: list[str] | None = None) -> int:
         print(
             json.dumps(
                 {"status": "RUNTIME_ENVIRONMENT_ATTESTATION_MISMATCH", "errors": reconciliation_errors},
+                ensure_ascii=False,
+            ),
+            file=sys.stderr,
+        )
+        return 4
+    recovery_blockers = deploy_recovery_control_blockers()
+    if recovery_blockers:
+        print(
+            json.dumps(
+                {
+                    "status": "DEPLOY_RECOVERY_CONTROLS_UNBOUND",
+                    "apply_executable": False,
+                    "errors": recovery_blockers,
+                },
                 ensure_ascii=False,
             ),
             file=sys.stderr,

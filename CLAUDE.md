@@ -267,9 +267,14 @@ Unless the operator explicitly overrides this:
   runtime mutation, or invoke private broker effects. Their Bash calls use the
   Registry command allowlist.
 - OPS performs preflight/rollback/postcheck/RCA only. The Deploy Adapter can
-  validate an exact PM/operator-approved intent and environment contract, but
-  actual apply is disabled until a trusted reproducible runtime probe exists;
-  it cannot currently support a successful effect closure. BB and IB review
+  validate an exact PM/operator-approved intent and environment contract.
+  `runtime_environment_probe_v1` now exists as a local-only, non-secret,
+  fail-closed source capability, and the Adapter independently reruns and
+  reconciles it. The probe is not remote transport, platform-attested runtime
+  evidence, deploy readiness, or effect authority. Actual apply remains
+  disabled before component invocation until exact rollback binding and a
+  stable observation-window contract are separately bound and verified; the
+  Adapter cannot currently support a successful effect closure. BB and IB review
   venue policy only. Development-agent broker contact/private effects have no
   closure-admissible Adapter and therefore route to an unsupported-effect blocker.
 - Completion uses one `closure_packet_v1`; work status, gate verdict, and

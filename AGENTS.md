@@ -57,6 +57,7 @@ Every delegated task declares:
 - Codex runtime type
 - owned scope
 - task shape, risk, and explicit `low|medium|high|unknown` uncertainty
+- task-owned `dirty_scope` and any optional read-only `verification_scope`
 - expected fragment/patch
 - acceptance and hard stops
 - exact `claim_inputs` for any prior/evidence digest that may affect a verdict
@@ -80,6 +81,13 @@ Every PM-added adaptive node is recorded in closure
 reason, plus sorted predecessor `requires`, node-owned `path_scope`, and whether
 its result binds a top-level role fragment or a typed nested payload. Once
 admitted it is mandatory; PM cannot omit it, rewrite its edge, or hide dissent.
+
+`verification_scope` is an optional canonical, sorted/unique list of literal,
+safe repository-relative paths. A read-only verifier command capture uses it
+only when routed node `path_scope` is empty, and before falling back to
+`dirty_scope`. It is only a capture-generation and trusted-replay boundary; it
+never grants writer ownership, mutation authority, or ACL permission, and it
+does not replace writer `dirty_scope` or whole-repository generation checks.
 
 ## Permission and effects
 
@@ -110,8 +118,13 @@ Effectful operation intents are separated from review, but current Adapter
 readiness is fail-closed:
 
 - deploy: OPS preflight -> PM/operator-approved exact intent -> Deploy Adapter
-  intent/environment validation. Actual apply remains disabled until a trusted,
-  reproducible local runtime probe exists; no apply/postcheck PASS may be claimed.
+  intent/environment validation. `runtime_environment_probe_v1` now provides a
+  local-only, non-secret, fail-closed source seam; the Deploy Adapter reruns it
+  independently and reconciles any supplied `runtime_environment_attestation_v1`.
+  It is neither a platform runtime attestation nor remote SSH capture transport.
+  Actual apply remains unconditionally disabled before component invocation until
+  exact rollback binding and stable observation-window controls are separately
+  implemented and verified; no apply/postcheck PASS may be claimed.
 - broker probe/contact: BB and IB are review-only. No development-agent broker
   contact Adapter currently emits a closure-admissible receipt, so Bybit/IBKR
   private effects route to an explicit unsupported-effect blocker. The existing
