@@ -6,7 +6,7 @@ MODULE_NOTE
   fail-soft write 路徑的單元測試。涵蓋：
     1. event→(event_type, severity) 映射正確（每事件類）
     2. dedup_key 確定性 + 跨路徑同形（同 ts → 同 key；direct write 與 bridge 一致）
-    3. DSN 解析序（FILE → URL → POSTGRES_*）
+    3. DSN 解析序（FILE → URL → POSTGRES_* → OPENCLAW_DATA_DIR 推導備援）
     4. INSERT shape（欄位 / NOT EXISTS dedup 子查 / 不含 created_at）
     5. direct write fail-soft：DB 失敗（無 DSN / psycopg2 缺 / connect 拋）絕不拋
     6. watchdog _emit_audit_event_best_effort：crash/outage/recovered 三類映射正確
@@ -80,16 +80,18 @@ class TestDedupKey(unittest.TestCase):
 
 
 class TestResolveDsn(unittest.TestCase):
-    """DSN 解析序：FILE → URL → POSTGRES_*。"""
+    """DSN 解析序：FILE → URL → POSTGRES_* → OPENCLAW_DATA_DIR 推導備援
+    （第 4 分支專測見 TestResolveDsnDataDirFallback）。"""
 
     def setUp(self):
-        # 清掉所有相關 env，逐項測試。
+        # 清掉所有相關 env，逐項測試。OPENCLAW_DATA_DIR 也清：第 4 分支推導
+        # 上線後，跑測試的機器若設了它（且契約檔在）會污染 unbuildable 斷言。
         self._saved = {
             k: os.environ.pop(k, None)
             for k in (
                 "OPENCLAW_DATABASE_URL_FILE", "OPENCLAW_DATABASE_URL",
                 "POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB",
-                "POSTGRES_HOST", "POSTGRES_PORT",
+                "POSTGRES_HOST", "POSTGRES_PORT", "OPENCLAW_DATA_DIR",
             )
         }
 
@@ -122,6 +124,102 @@ class TestResolveDsn(unittest.TestCase):
 
     def test_none_when_unbuildable(self):
         self.assertIsNone(C.resolve_dsn())
+
+
+class TestResolveDsnDataDirFallback(unittest.TestCase):
+    """第 4 分支（WATCHDOG-AUDIT-DSN-1）：三顯式源全失敗後由 OPENCLAW_DATA_DIR
+    推導 runtime_secrets/openclaw_database_url；顯式 env 永遠優先；DATA_DIR 未設
+    絕不猜默認路徑。"""
+
+    def setUp(self):
+        # 清掉所有相關 env（含 OPENCLAW_DATA_DIR），逐項測試。
+        self._saved = {
+            k: os.environ.pop(k, None)
+            for k in (
+                "OPENCLAW_DATABASE_URL_FILE", "OPENCLAW_DATABASE_URL",
+                "POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB",
+                "POSTGRES_HOST", "POSTGRES_PORT", "OPENCLAW_DATA_DIR",
+            )
+        }
+
+    def tearDown(self):
+        for k, v in self._saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+    def _write_contract_file(self, data_dir: Path, content: str) -> Path:
+        # 契約路徑 = <data_dir>/runtime_secrets/openclaw_database_url
+        # （與 restart_all.sh / engine unit 同一契約）。
+        secret_dir = data_dir / "runtime_secrets"
+        secret_dir.mkdir(parents=True, exist_ok=True)
+        p = secret_dir / "openclaw_database_url"
+        p.write_text(content)
+        return p
+
+    def test_derived_from_data_dir_when_all_explicit_missing(self):
+        # (a) 三顯式源全缺 + DATA_DIR 契約檔有 DSN → 回檔內容（strip 換行）。
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            self._write_contract_file(Path(td), "postgresql://from/derived\n")
+            with mock.patch.dict(os.environ, {"OPENCLAW_DATA_DIR": td}):
+                self.assertEqual(C.resolve_dsn(), "postgresql://from/derived")
+
+    def test_explicit_file_env_wins_over_derivation(self):
+        # (b) OPENCLAW_DATABASE_URL_FILE 顯式設時優先於推導。
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            self._write_contract_file(Path(td), "postgresql://from/derived\n")
+            explicit = Path(td) / "explicit_dsn"
+            explicit.write_text("postgresql://from/explicit-file\n")
+            with mock.patch.dict(os.environ, {
+                "OPENCLAW_DATA_DIR": td,
+                "OPENCLAW_DATABASE_URL_FILE": str(explicit),
+            }):
+                self.assertEqual(C.resolve_dsn(), "postgresql://from/explicit-file")
+
+    def test_no_data_dir_returns_none_never_guesses_default(self):
+        # (c) OPENCLAW_DATA_DIR 未設 → None，且「零檔案讀取嘗試」。
+        # 鐵則咬合（P2-2）：把模組 namespace 的 Path.read_text 換成必炸探針——
+        # 若實作猜任何默認路徑（如 /tmp/openclaw），必經 read_text → AssertionError
+        # 非 OSError/ValueError、穿透 fail-soft → 測試必紅；不依賴跑測試機器上
+        # 是否恰好存在 /tmp/openclaw 契約檔。
+        with mock.patch.object(
+            C.Path,
+            "read_text",
+            side_effect=AssertionError("不得嘗試任何檔案讀取（默認路徑猜測）"),
+        ) as read_probe:
+            self.assertIsNone(C.resolve_dsn())
+        self.assertEqual(read_probe.call_count, 0)
+
+    def test_data_dir_set_but_contract_file_missing_returns_none(self):
+        # (d) DATA_DIR 設但契約檔不存在 → None（fail-soft）。
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            with mock.patch.dict(os.environ, {"OPENCLAW_DATA_DIR": td}):
+                self.assertIsNone(C.resolve_dsn())
+
+    def test_blank_contract_file_returns_none(self):
+        # (e) 契約檔存在但空白（只有 whitespace）→ None。
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            self._write_contract_file(Path(td), "   \n")
+            with mock.patch.dict(os.environ, {"OPENCLAW_DATA_DIR": td}):
+                self.assertIsNone(C.resolve_dsn())
+
+    def test_partial_postgres_env_falls_through_to_derivation(self):
+        # (P2-5) POSTGRES_* 部分設定（僅 USER，缺 PASSWORD/DB）＝顯式源「部分失敗」
+        # → 仍落到第 4 步推導。釘住語意：推導的觸發條件是「三顯式源皆組不出 DSN」，
+        # 不是「顯式 env 全空」。
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            self._write_contract_file(Path(td), "postgresql://from/derived\n")
+            with mock.patch.dict(os.environ, {
+                "OPENCLAW_DATA_DIR": td,
+                "POSTGRES_USER": "only-user",
+            }):
+                self.assertEqual(C.resolve_dsn(), "postgresql://from/derived")
 
 
 class TestInsertShape(unittest.TestCase):
