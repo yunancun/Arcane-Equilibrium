@@ -5,4 +5,4 @@
 
 | R | 日期 | 切片 | PR / merge SHA | 測試證據 | verdict | 殘項/教訓 |
 |---|---|---|---|---|---|---|
-| R0 | 2026-07-15 | loop 基建:協議正本 + 本帳本 + TODO v808 對位(W2 收口證據行 + W-CI 新行 + Links)+ IBKR_TODO §10 接線 + CHANGELOG v808 敘事 | (本 PR,號碼合入後補) | docs-only;無代碼/runtime 變更 | LANDED | R1=W2 收口波(PA 設計文檔補簽→E2/E3 審→E4 Mac+Linux cargo→行遷移)+ W-CI 實作同輪派;R2 起 W3(session manager + fake-TWS harness) |
+| R0 | 2026-07-15 | loop 基建:協議正本 + 本帳本 + TODO v808 對位(W2 收口證據行 + W-CI 新行 + Links)+ IBKR_TODO §10 接線 + CHANGELOG v808 敘事 | PR #18(merge SHA 見 git) | docs-only;無代碼/runtime 變更 | LANDED | R1=W2 收口波(PA 設計文檔補簽→E2/E3 審→E4 Mac+Linux cargo→行遷移)+ W-CI 實作同輪派;R2 起 W3(session manager + fake-TWS harness) |
