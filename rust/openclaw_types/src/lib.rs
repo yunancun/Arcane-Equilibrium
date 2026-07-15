@@ -15,6 +15,7 @@ pub mod ibkr_phase2_artifact;
 pub mod ibkr_phase2_gate;
 pub mod ibkr_phase2_policies;
 pub mod ibkr_phase2_runtime;
+pub mod ibkr_tws_session_state;
 pub mod intent;
 pub mod price;
 pub mod risk;
@@ -92,6 +93,10 @@ pub use ibkr_phase2_runtime::{
     IbkrGatewayProcessMode, IbkrSecretSlotContractBlocker, IbkrSecretSlotContractV1,
     IbkrSecretSlotContractVerdict, IbkrSecretSlotPosture, IBKR_API_SESSION_TOPOLOGY_CONTRACT_ID,
     IBKR_SECRET_SLOT_CONTRACT_ID,
+};
+pub use ibkr_tws_session_state::{
+    IbkrTwsErrorClassV1, IbkrTwsSessionEventV1, IbkrTwsSessionStateV1, IB_INFO_CODE_FLOOR,
+    PINNED_MIN_SERVER_VERSION,
 };
 pub use intent::{DataQualityLevel, OrderIntent, RiskVerdict, TradeIntent};
 pub use price::{Kline, KlineBar, PriceEvent, PriceEventKind, OHLCV};
