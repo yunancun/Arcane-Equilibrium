@@ -36,6 +36,9 @@ from cost_gate_learning_lane.candidate_evaluation_context import (
     canonical_sha256,
     validate_candidate_event_context,
 )
+from cost_gate_learning_lane.candidate_evaluation_producer import (
+    partition_candidate_evaluation_outcomes,
+)
 from cost_gate_learning_lane.ledger_rotation import (
     maybe_rotate_ledger,
     retained_ledger_files,
@@ -1343,26 +1346,60 @@ def main() -> int:
             max_entry_delay_ms=args.max_entry_delay_ms,
         )
         price_rows = read_price_observations(args.price_observations)
-        outcome_rows = (
-            build_probe_outcome_records(ledger, price_rows, cfg=outcome_cfg)
+        preflight_now = dt.datetime.now(dt.timezone.utc)
+        raw_probe_outcomes = (
+            build_probe_outcome_records(
+                ledger,
+                price_rows,
+                now_utc=preflight_now,
+                cfg=outcome_cfg,
+            )
             if args.record_outcomes
             else []
         )
-        blocked_outcome_rows = (
-            build_blocked_signal_outcome_records(ledger, price_rows, cfg=outcome_cfg)
+        raw_blocked_outcomes = (
+            build_blocked_signal_outcome_records(
+                ledger,
+                price_rows,
+                now_utc=preflight_now,
+                cfg=outcome_cfg,
+            )
             if args.record_blocked_outcomes
             else []
         )
-        for row in outcome_rows + blocked_outcome_rows:
+        preflight = partition_candidate_evaluation_outcomes(
+            raw_probe_outcomes + raw_blocked_outcomes,
+            source_provider=None,
+            now_utc=preflight_now,
+        )
+        appendable_outcome_rows = preflight["outcomes"]
+        probe_outcome_rows = preflight["probe_outcomes"]
+        blocked_outcome_rows = preflight["blocked_signal_outcomes"]
+        appended_outcome_count = 0
+        for row in appendable_outcome_rows:
             append_jsonl_ledger(args.ledger, row)
+            appended_outcome_count += 1
         payload = {
             # batch 包裹 outcome 面 record → 用 outcome 面版本,與 base_row 一致。
             "schema_version": OUTCOME_ADAPTER_SCHEMA_VERSION,
             "record_type": "probe_outcome_batch",
-            "outcome_count": len(outcome_rows),
+            "generated_at_utc": preflight_now.isoformat(),
+            # Backward compatibility: ``outcomes`` has always meant probe
+            # outcomes here; the union is appendable-only telemetry below.
+            "outcome_count": len(probe_outcome_rows),
+            "probe_outcome_count": len(probe_outcome_rows),
             "blocked_signal_outcome_count": len(blocked_outcome_rows),
-            "outcomes": outcome_rows,
+            "appendable_outcome_count": len(appendable_outcome_rows),
+            "outcomes": probe_outcome_rows,
+            "probe_outcomes": probe_outcome_rows,
             "blocked_signal_outcomes": blocked_outcome_rows,
+            "appended_outcome_count": appended_outcome_count,
+            **{
+                key: value
+                for key, value in preflight.items()
+                if key
+                not in {"outcomes", "probe_outcomes", "blocked_signal_outcomes"}
+            },
             "boundary": "artifact-only; no PG, Bybit, order, config, risk, auth, or runtime mutation",
         }
         if args.output:
