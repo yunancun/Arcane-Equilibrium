@@ -40,7 +40,7 @@ from cost_gate_learning_lane.runtime_adapter import (  # noqa: E402
     build_ledger_record,
     evaluate_probe_admission,
     normalize_reject_reason_code,
-    read_jsonl_ledger,
+    read_learning_ledger_partitions,
     side_cell_key,
     validate_ledger_event_candidate_context,
 )
@@ -388,6 +388,7 @@ def build_materialized_reject_ledger_batch(
     feature_rows: list[dict[str, Any]],
     *,
     existing_ledger_rows: list[dict[str, Any]] | None = None,
+    dedup_ledger_rows: list[dict[str, Any]] | None = None,
     now_utc: dt.datetime | None = None,
     admission_cfg: RuntimeAdmissionConfig | None = None,
     risk_state: str = "NORMAL",
@@ -395,8 +396,11 @@ def build_materialized_reject_ledger_batch(
     """Build idempotent admission-ledger rows from recorded reject features."""
     now = (now_utc or _utc_now()).astimezone(dt.timezone.utc)
     existing = existing_ledger_rows or []
-    seen_attempt_ids = _ledger_attempt_ids(existing)
-    seen_event_keys = _ledger_event_equivalence_keys(existing)
+    dedup_existing = (
+        dedup_ledger_rows if dedup_ledger_rows is not None else existing
+    )
+    seen_attempt_ids = _ledger_attempt_ids(dedup_existing)
+    seen_event_keys = _ledger_event_equivalence_keys(dedup_existing)
     materialized: list[dict[str, Any]] = []
     skipped_existing = 0
     skipped_existing_event_key = 0
@@ -623,7 +627,8 @@ def main() -> int:
         min_avg_net_bps=args.min_avg_net_bps,
     )
     plan = _read_json(args.plan)
-    existing = read_jsonl_ledger(args.ledger)
+    partitions = read_learning_ledger_partitions(args.ledger)
+    existing = partitions.outcome_rows
 
     source_rows_count = 0
     pg_rows_count: int | None = None
@@ -659,6 +664,7 @@ def main() -> int:
         plan,
         feature_rows,
         existing_ledger_rows=existing,
+        dedup_ledger_rows=partitions.dedup_rows,
         admission_cfg=admission_cfg,
         risk_state=args.risk_state,
     )

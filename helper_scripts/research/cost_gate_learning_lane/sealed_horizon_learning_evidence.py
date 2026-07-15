@@ -56,7 +56,7 @@ from cost_gate_learning_lane.reject_materializer import (  # noqa: E402
 )
 from cost_gate_learning_lane.runtime_adapter import (  # noqa: E402
     RuntimeAdmissionConfig,
-    read_jsonl_ledger,
+    read_learning_ledger_partitions,
 )
 
 
@@ -641,7 +641,8 @@ def build_sealed_horizon_learning_evidence_from_rows(
         side_cell_key,
         default_horizon_minutes=cfg.default_horizon_minutes,
     )
-    existing_rows = read_jsonl_ledger(ledger_path)
+    partitions = read_learning_ledger_partitions(ledger_path)
+    existing_rows = partitions.outcome_rows
     admission_cfg = RuntimeAdmissionConfig(
         max_plan_age_hours=cfg.max_plan_age_hours,
         min_failed_outcomes_to_disable=cfg.min_failed_outcomes_to_disable,
@@ -652,6 +653,7 @@ def build_sealed_horizon_learning_evidence_from_rows(
         plan,
         feature_rows,
         existing_ledger_rows=existing_rows,
+        dedup_ledger_rows=partitions.dedup_rows,
         admission_cfg=admission_cfg,
         now_utc=now,
     )
@@ -763,7 +765,8 @@ def _run_from_args(args: argparse.Namespace) -> dict[str, Any]:
     if args.source_rows_output:
         _write_jsonl(args.source_rows_output, feature_rows)
 
-    existing_rows = read_jsonl_ledger(args.ledger)
+    partitions = read_learning_ledger_partitions(args.ledger)
+    existing_rows = partitions.outcome_rows
     admission_cfg = RuntimeAdmissionConfig(
         max_plan_age_hours=cfg.max_plan_age_hours,
         min_failed_outcomes_to_disable=cfg.min_failed_outcomes_to_disable,
@@ -774,6 +777,7 @@ def _run_from_args(args: argparse.Namespace) -> dict[str, Any]:
         plan,
         feature_rows,
         existing_ledger_rows=existing_rows,
+        dedup_ledger_rows=partitions.dedup_rows,
         admission_cfg=admission_cfg,
     )
     if args.append_ledger:
