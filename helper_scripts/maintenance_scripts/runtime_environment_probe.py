@@ -52,6 +52,12 @@ BOOLEAN_KEYS = (
 )
 PATH_KEYS = ("OPENCLAW_DATA_DIR", "OPENCLAW_SECRETS_DIR")
 ALLOWED_ENVIRONMENT_KEYS = frozenset((*BOOLEAN_KEYS, *PATH_KEYS))
+REQUIRED_ENVIRONMENT_KEYS = frozenset(PATH_KEYS)
+RUST_UNICODE_WHITESPACE = (
+    "\u0009\u000a\u000b\u000c\u000d\u0020\u0085\u00a0\u1680"
+    "\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a"
+    "\u2028\u2029\u202f\u205f\u3000"
+)
 ENVIRONMENT_PROJECTION_PATTERN = (
     "^(" + "|".join(sorted(ALLOWED_ENVIRONMENT_KEYS)) + ")="
 )
@@ -157,13 +163,42 @@ def _read_allowlisted_environment(pid: int) -> tuple[dict[str, str], list[str]]:
             selected[key] = value_bytes.decode("utf-8")
         except UnicodeDecodeError:
             blockers.append(f"PROCESS_ENV_VALUE_INVALID:{key}")
-    for key in sorted(ALLOWED_ENVIRONMENT_KEYS):
+    # Every observed runtime treats an absent/blank switch as disabled.  Fold
+    # that shared fail-closed behavior to one canonical representation while
+    # keeping the explicit data/secrets identities mandatory.
+    for key in BOOLEAN_KEYS:
+        if not selected.get(key):
+            selected[key] = "0"
+    for key in sorted(REQUIRED_ENVIRONMENT_KEYS):
         if key not in selected or not selected[key]:
             blockers.append(f"PROCESS_ENV_REQUIRED_MISSING:{key}")
     return selected, blockers
 
 
+def _rust_ascii_case_insensitive_true(value: str) -> bool:
+    try:
+        return value.encode("ascii").lower() == b"true"
+    except UnicodeEncodeError:
+        return False
+
+
 def _strict_boolean(value: str, key: str) -> tuple[bool | None, str | None]:
+    # These two switches deliberately follow their Rust consumers rather than
+    # a probe-only spelling contract.  The writer accepts exact 1/true
+    # (case-insensitive); the bounded adapter additionally trims whitespace.
+    # Every other spelling is disabled by those consumers.
+    if key == "OPENCLAW_DEMO_LEARNING_LANE_WRITER":
+        return value == "1" or _rust_ascii_case_insensitive_true(value), None
+    if key == "OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED":
+        # Python strip() also removes C0 U+001C..U+001F, while Rust trim()
+        # follows only Unicode White_Space.  Use the exact Rust set so the
+        # probe cannot enable a value that the runtime treats as disabled.
+        normalized = value.strip(RUST_UNICODE_WHITESPACE)
+        return (
+            normalized == "1"
+            or _rust_ascii_case_insensitive_true(normalized),
+            None,
+        )
     if value == "0":
         return False, None
     if value == "1":
