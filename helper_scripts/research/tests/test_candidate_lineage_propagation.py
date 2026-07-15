@@ -39,6 +39,7 @@ from cost_gate_learning_lane.runtime_adapter import (
     append_jsonl_ledger,
     build_ledger_record,
     evaluate_probe_admission,
+    main as runtime_adapter_main,
     read_learning_ledger_partitions,
     read_jsonl_ledger,
 )
@@ -226,6 +227,253 @@ def test_candidate_context_round_trips_into_blocked_outcome_without_enrichment(
     assert "candidate_learning_context_projection" not in summary
 
 
+def test_runtime_adapter_blocked_outcome_cli_cannot_bypass_preappend_defer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    event = _candidate_context_reject_event()
+    decision = evaluate_probe_admission(
+        _minimal_valid_plan(event),
+        event,
+        now_utc=_event_now(event),
+        adapter_enabled=False,
+    )
+    ledger_path = tmp_path / "runtime-adapter-ledger.jsonl"
+    append_jsonl_ledger(ledger_path, build_ledger_record(decision))
+    before_bytes = ledger_path.read_bytes()
+    prices_path = tmp_path / "prices.json"
+    prices_path.write_text(
+        json.dumps(
+            [
+                {"symbol": "BTCUSDT", "ts_ms": event["ts_ms"], "close": 2_500.0},
+                {
+                    "symbol": "BTCUSDT",
+                    "ts_ms": event["ts_ms"] + 60 * 60_000,
+                    "close": 2_510.0,
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+    output_path = tmp_path / "runtime-adapter-output.json"
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "runtime_adapter.py",
+            "--ledger",
+            str(ledger_path),
+            "--price-observations",
+            str(prices_path),
+            "--record-blocked-outcomes",
+            "--output",
+            str(output_path),
+        ],
+    )
+
+    assert runtime_adapter_main() == 0
+
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert payload["generated_outcome_count"] == 1
+    assert payload["candidate_evaluation_eligible_count"] == 1
+    assert payload["candidate_evaluation_preflight_attached_count"] == 0
+    assert payload["candidate_evaluation_deferred_count"] == 1
+    assert payload["candidate_evaluation_not_applicable_count"] == 0
+    assert payload["candidate_evaluation_batch_deferred"] is True
+    assert payload["outcome_count"] == 0
+    assert payload["probe_outcome_count"] == 0
+    assert payload["blocked_signal_outcome_count"] == 0
+    assert payload["appended_outcome_count"] == 0
+    assert payload["outcomes"] == []
+    assert payload["probe_outcomes"] == []
+    assert payload["blocked_signal_outcomes"] == []
+    assert ledger_path.read_bytes() == before_bytes
+
+
+def test_runtime_adapter_historical_blocked_outcome_keeps_probe_compatibility(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    event = _candidate_context_reject_event()
+    event.pop("candidate_event_context")
+    decision = evaluate_probe_admission(
+        _minimal_valid_plan(event),
+        event,
+        now_utc=_event_now(event),
+        adapter_enabled=False,
+    )
+    ledger_path = tmp_path / "runtime-adapter-historical-ledger.jsonl"
+    append_jsonl_ledger(ledger_path, build_ledger_record(decision))
+    prices_path = tmp_path / "historical-prices.json"
+    prices_path.write_text(
+        json.dumps(
+            [
+                {"symbol": "BTCUSDT", "ts_ms": event["ts_ms"], "close": 2_500.0},
+                {
+                    "symbol": "BTCUSDT",
+                    "ts_ms": event["ts_ms"] + 60 * 60_000,
+                    "close": 2_510.0,
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+    output_path = tmp_path / "runtime-adapter-historical-output.json"
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "runtime_adapter.py",
+            "--ledger",
+            str(ledger_path),
+            "--price-observations",
+            str(prices_path),
+            "--record-blocked-outcomes",
+            "--output",
+            str(output_path),
+        ],
+    )
+
+    assert runtime_adapter_main() == 0
+
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert payload["generated_outcome_count"] == 1
+    assert payload["candidate_evaluation_eligible_count"] == 0
+    assert payload["candidate_evaluation_deferred_count"] == 0
+    assert payload["candidate_evaluation_not_applicable_count"] == 1
+    assert payload["candidate_evaluation_batch_deferred"] is False
+    assert payload["outcome_count"] == 0
+    assert payload["outcomes"] == []
+    assert payload["probe_outcome_count"] == 0
+    assert payload["probe_outcomes"] == []
+    assert payload["blocked_signal_outcome_count"] == 1
+    assert len(payload["blocked_signal_outcomes"]) == 1
+    assert payload["appendable_outcome_count"] == 1
+    assert payload["appended_outcome_count"] == 1
+    assert len(read_jsonl_ledger(ledger_path)) == 2
+
+
+def test_runtime_adapter_contradictory_probe_subtype_defers_without_append(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    event = _candidate_context_reject_event()
+    decision = evaluate_probe_admission(
+        _minimal_valid_plan(event),
+        event,
+        now_utc=_event_now(event),
+        adapter_enabled=False,
+    )
+    contradictory = build_ledger_record(decision)
+    contradictory["decision"] = ADMIT_DECISION
+    assert contradictory["allowed_to_submit_order"] is False
+    ledger_path = tmp_path / "runtime-adapter-contradictory-probe-ledger.jsonl"
+    append_jsonl_ledger(ledger_path, contradictory)
+    before_bytes = ledger_path.read_bytes()
+    prices_path = tmp_path / "contradictory-probe-prices.json"
+    prices_path.write_text(
+        json.dumps(
+            [
+                {"symbol": "BTCUSDT", "ts_ms": event["ts_ms"], "close": 2_500.0},
+                {
+                    "symbol": "BTCUSDT",
+                    "ts_ms": event["ts_ms"] + 60 * 60_000,
+                    "close": 2_510.0,
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+    output_path = tmp_path / "runtime-adapter-contradictory-probe-output.json"
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "runtime_adapter.py",
+            "--ledger",
+            str(ledger_path),
+            "--price-observations",
+            str(prices_path),
+            "--record-outcomes",
+            "--output",
+            str(output_path),
+        ],
+    )
+
+    assert runtime_adapter_main() == 0
+
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert payload["generated_outcome_count"] == 1
+    assert payload["candidate_evaluation_eligible_count"] == 1
+    assert payload["candidate_evaluation_preflight_attached_count"] == 0
+    assert payload["candidate_evaluation_deferred_count"] == 1
+    assert payload["candidate_evaluation_not_applicable_count"] == 0
+    assert payload["candidate_evaluation_batch_deferred"] is True
+    assert payload["outcome_count"] == 0
+    assert payload["probe_outcome_count"] == 0
+    assert payload["blocked_signal_outcome_count"] == 0
+    assert payload["appendable_outcome_count"] == 0
+    assert payload["appended_outcome_count"] == 0
+    assert payload["outcomes"] == []
+    assert payload["probe_outcomes"] == []
+    assert payload["blocked_signal_outcomes"] == []
+    assert ledger_path.read_bytes() == before_bytes
+
+
+@pytest.mark.parametrize("record_type", ["probe_outcome", "unexpected_outcome"])
+def test_runtime_adapter_invalid_generated_outcome_defers_without_append(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    record_type: str,
+) -> None:
+    event = _candidate_context_reject_event()
+    decision = evaluate_probe_admission(
+        _minimal_valid_plan(event),
+        event,
+        now_utc=_event_now(event),
+        adapter_enabled=False,
+    )
+    ledger_path = tmp_path / "runtime-adapter-missing-subtype-ledger.jsonl"
+    append_jsonl_ledger(ledger_path, build_ledger_record(decision))
+    before_bytes = ledger_path.read_bytes()
+    prices_path = tmp_path / "missing-subtype-prices.json"
+    prices_path.write_text("[]\n", encoding="utf-8")
+    output_path = tmp_path / "runtime-adapter-missing-subtype-output.json"
+    invalid_generated_outcome = {
+        "record_type": record_type,
+        "attempt_id": "runtime-missing-all-subtype-fields",
+    }
+    monkeypatch.setattr(
+        "cost_gate_learning_lane.runtime_adapter.build_probe_outcome_records",
+        lambda *_args, **_kwargs: [invalid_generated_outcome],
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "runtime_adapter.py",
+            "--ledger",
+            str(ledger_path),
+            "--price-observations",
+            str(prices_path),
+            "--record-outcomes",
+            "--output",
+            str(output_path),
+        ],
+    )
+
+    assert runtime_adapter_main() == 0
+
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert payload["generated_outcome_count"] == 1
+    assert payload["candidate_evaluation_eligible_count"] == 1
+    assert payload["candidate_evaluation_deferred_count"] == 1
+    assert payload["candidate_evaluation_not_applicable_count"] == 0
+    assert payload["candidate_evaluation_batch_deferred"] is True
+    assert payload["appendable_outcome_count"] == 0
+    assert payload["appended_outcome_count"] == 0
+    assert payload["outcomes"] == []
+    assert payload["probe_outcomes"] == []
+    assert payload["blocked_signal_outcomes"] == []
+    assert ledger_path.read_bytes() == before_bytes
+
+
 def test_outcome_refresh_quarantines_expected_capture_blocked_context(
     tmp_path: Path,
 ) -> None:
@@ -242,6 +490,7 @@ def test_outcome_refresh_quarantines_expected_capture_blocked_context(
     ledger_path = tmp_path / "mixed-capture-ledger.jsonl"
     append_jsonl_ledger(ledger_path, complete_row)
     append_jsonl_ledger(ledger_path, blocked_row)
+    before_bytes = ledger_path.read_bytes()
     event_ts_ms = complete_event["ts_ms"]
     price_rows = [
         {"symbol": "BTCUSDT", "ts_ms": event_ts_ms, "close": 2_500.0},
@@ -265,9 +514,15 @@ def test_outcome_refresh_quarantines_expected_capture_blocked_context(
         append_ledger=True,
     )
 
-    assert batch["blocked_signal_outcome_count"] == 1
-    assert batch["outcomes"][0]["attempt_id"] == complete_row["attempt_id"]
-    assert batch["outcomes"][0]["event"] == complete_row["event"]
+    assert batch["generated_outcome_count"] == 1
+    assert batch["candidate_evaluation_eligible_count"] == 1
+    assert batch["candidate_evaluation_deferred_count"] == 1
+    assert batch["candidate_evaluation_batch_deferred"] is True
+    assert batch["blocked_signal_outcome_count"] == 0
+    assert batch["outcome_count"] == 0
+    assert batch["appended_outcome_count"] == 0
+    assert batch["outcomes"] == []
+    assert ledger_path.read_bytes() == before_bytes
     rerun = refresh_cost_gate_outcomes_from_price_rows(
         ledger_path,
         price_rows,
@@ -276,6 +531,8 @@ def test_outcome_refresh_quarantines_expected_capture_blocked_context(
         outcome_cfg=ProbeOutcomeConfig(horizon_minutes=60, cost_bps=4.0),
         append_ledger=False,
     )
+    assert rerun["generated_outcome_count"] == 1
+    assert rerun["candidate_evaluation_deferred_count"] == 1
     assert rerun["outcome_count"] == 0
 
 
