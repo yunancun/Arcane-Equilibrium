@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
+from pathlib import Path
+
+import cost_gate_learning_lane.bounded_probe_execution_realism_review as realism_review_module
 
 from cost_gate_learning_lane.bounded_probe_execution_realism_review import (
     BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_SCHEMA_VERSION,
@@ -14,6 +18,11 @@ from cost_gate_learning_lane.contract import (
     BLOCKED_SIGNAL_OUTCOME_RECORD_TYPE,
     PROBE_OUTCOME_RECORD_TYPE,
 )
+from cost_gate_learning_lane.runtime_adapter import (
+    LearningLedgerPartitions,
+    append_jsonl_ledger,
+)
+from tests.test_candidate_lineage_propagation import _capture_blocked_ledger_row
 
 
 NOW = dt.datetime(2026, 6, 22, 14, 0, tzinfo=dt.timezone.utc)
@@ -233,3 +242,131 @@ def test_no_under_capture_result_review_is_noop() -> None:
     assert packet["status"] == "NO_EXECUTION_REALISM_GAP_TO_REVIEW"
     assert packet["execution_gap_hypotheses"] == []
     assert packet["next_actions"] == ["continue_standard_bounded_probe_result_review_path"]
+
+
+def _run_realism_review_cli(
+    *,
+    monkeypatch,
+    result_review_path: Path,
+    ledger_path: Path,
+    output_path: Path,
+) -> dict:
+    markdown_path = output_path.with_suffix(".md")
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "bounded_probe_execution_realism_review.py",
+            "--result-review-json",
+            str(result_review_path),
+            "--ledger",
+            str(ledger_path),
+            "--output",
+            str(markdown_path),
+            "--json-output",
+            str(output_path),
+        ],
+    )
+    monkeypatch.setattr(realism_review_module, "_utc_now", lambda: NOW)
+    assert realism_review_module.main() == 0
+    return json.loads(output_path.read_text(encoding="utf-8"))
+
+
+def test_execution_realism_cli_ignores_exact_capture_blocked_rows(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    outcome_rows = [
+        _outcome(
+            PROBE_OUTCOME_RECORD_TYPE,
+            i,
+            net_bps=float(i),
+            gross_bps=float(i + 4),
+            cost_bps=4.0,
+        )
+        for i in range(1, 4)
+    ] + [
+        _outcome(
+            BLOCKED_SIGNAL_OUTCOME_RECORD_TYPE,
+            i,
+            net_bps=3.0,
+            gross_bps=7.0,
+            cost_bps=4.0,
+        )
+        for i in range(1, 4)
+    ]
+    result_review_path = tmp_path / "result-review.json"
+    result_review_path.write_text(
+        json.dumps(_result_review(outcome_rows), ensure_ascii=False),
+        encoding="utf-8",
+    )
+    outcome_only_ledger = tmp_path / "outcome-only.jsonl"
+    mixed_ledger = tmp_path / "mixed.jsonl"
+    for row in outcome_rows:
+        append_jsonl_ledger(outcome_only_ledger, row)
+        append_jsonl_ledger(mixed_ledger, row)
+    append_jsonl_ledger(mixed_ledger, _capture_blocked_ledger_row())
+
+    outcome_only = _run_realism_review_cli(
+        monkeypatch=monkeypatch,
+        result_review_path=result_review_path,
+        ledger_path=outcome_only_ledger,
+        output_path=tmp_path / "outcome-only.json",
+    )
+    mixed = _run_realism_review_cli(
+        monkeypatch=monkeypatch,
+        result_review_path=result_review_path,
+        ledger_path=mixed_ledger,
+        output_path=tmp_path / "mixed.json",
+    )
+
+    assert mixed == outcome_only
+
+
+def test_execution_realism_cli_passes_outcome_partition_not_dedup_partition(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    result_review_path = tmp_path / "result-review.json"
+    result_review_path.write_text(
+        json.dumps(_result_review([]), ensure_ascii=False),
+        encoding="utf-8",
+    )
+    ledger_path = tmp_path / "ledger.jsonl"
+    outcome_rows: list[dict] = []
+    dedup_rows = [{"record_type": "dedup-only-sentinel"}]
+    partitions = LearningLedgerPartitions(
+        outcome_rows=outcome_rows,
+        dedup_rows=dedup_rows,
+        quarantined_capture_blocked_rows=dedup_rows,
+    )
+    observed: dict[str, object] = {}
+    original_builder = realism_review_module.build_bounded_probe_execution_realism_review
+
+    def _spy_builder(*, result_review, ledger_rows, now_utc=None):
+        observed["ledger_rows"] = ledger_rows
+        return original_builder(
+            result_review=result_review,
+            ledger_rows=ledger_rows,
+            now_utc=now_utc,
+        )
+
+    monkeypatch.setattr(
+        realism_review_module,
+        "read_learning_ledger_partitions",
+        lambda _path: partitions,
+    )
+    monkeypatch.setattr(
+        realism_review_module,
+        "build_bounded_probe_execution_realism_review",
+        _spy_builder,
+    )
+
+    _run_realism_review_cli(
+        monkeypatch=monkeypatch,
+        result_review_path=result_review_path,
+        ledger_path=ledger_path,
+        output_path=tmp_path / "review.json",
+    )
+
+    assert observed["ledger_rows"] is outcome_rows
+    assert observed["ledger_rows"] is not dedup_rows
