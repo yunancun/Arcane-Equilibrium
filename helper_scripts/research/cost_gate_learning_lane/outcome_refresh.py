@@ -10,6 +10,7 @@ It never writes PG, calls Bybit, submits orders, or mutates runtime config.
 from __future__ import annotations
 
 import argparse
+import copy
 import datetime as dt
 from dataclasses import dataclass
 import json
@@ -25,6 +26,11 @@ for _path in (str(RESEARCH_ROOT), str(ROOT)):
         sys.path.insert(0, _path)
 
 from cost_gate_learning_lane.contract import OUTCOME_ADAPTER_SCHEMA_VERSION
+from cost_gate_learning_lane.candidate_evaluation_producer import (
+    CandidateEvaluationSourceProvider,
+    outcome_subtype_semantics_valid,
+    partition_candidate_evaluation_outcomes,
+)
 from cost_gate_learning_lane.outcome_writer import (
     ProbeOutcomeConfig,
     build_blocked_signal_outcome_records,
@@ -49,6 +55,16 @@ from cost_gate_learning_lane.runtime_adapter import (
 
 OUTCOME_REFRESH_RECORD_TYPE = "cost_gate_outcome_refresh_batch"
 OUTCOME_REFRESH_SCHEMA_VERSION = "cost_gate_demo_learning_lane_outcome_refresh_v1"
+_CANDIDATE_EVALUATION_PREFLIGHT_FIELDS = {
+    "generated_outcome_count",
+    "candidate_evaluation_eligible_count",
+    "candidate_evaluation_preflight_attached_count",
+    "candidate_evaluation_deferred_count",
+    "candidate_evaluation_not_applicable_count",
+    "candidate_evaluation_defer_reason_counts",
+    "candidate_evaluation_batch_deferred",
+    "deferred_outcome_count",
+}
 
 
 @dataclass(frozen=True)
@@ -96,6 +112,9 @@ def build_cost_gate_outcome_refresh_batch(
     selection: OutcomeRefreshSelection | None = None,
     outcome_cfg: ProbeOutcomeConfig | None = None,
     price_source: str,
+    candidate_evaluation_source_provider: (
+        CandidateEvaluationSourceProvider | None
+    ) = None,
 ) -> dict[str, Any]:
     """Build missing outcome rows from a ledger plus price rows."""
     selection = selection or OutcomeRefreshSelection(record_blocked_outcomes=True)
@@ -128,7 +147,14 @@ def build_cost_gate_outcome_refresh_batch(
         if selection.record_blocked_outcomes
         else []
     )
-    outcome_rows = probe_outcomes + blocked_outcomes
+    preflight = partition_candidate_evaluation_outcomes(
+        probe_outcomes + blocked_outcomes,
+        source_provider=candidate_evaluation_source_provider,
+        now_utc=generated_at,
+    )
+    outcome_rows = preflight["outcomes"]
+    probe_outcomes = preflight["probe_outcomes"]
+    blocked_outcomes = preflight["blocked_signal_outcomes"]
 
     return {
         "schema_version": OUTCOME_REFRESH_SCHEMA_VERSION,
@@ -156,6 +182,12 @@ def build_cost_gate_outcome_refresh_batch(
         "append_requested": False,
         "appended_to_ledger": False,
         "appended_outcome_count": 0,
+        **{
+            key: value
+            for key, value in preflight.items()
+            if key
+            not in {"outcomes", "probe_outcomes", "blocked_signal_outcomes"}
+        },
         "boundary": (
             "outcome refresh artifact only; PG source is read-only SELECT-only; "
             "no PG write, Bybit call, order, config, risk, auth, or runtime mutation"
@@ -166,17 +198,188 @@ def build_cost_gate_outcome_refresh_batch(
 def append_refresh_outcomes_to_ledger(ledger_path: Path, batch: dict[str, Any]) -> int:
     """Append built outcome rows from a refresh batch to the JSONL ledger."""
     rows = batch.get("outcomes")
-    if not isinstance(rows, list):
+    if (
+        not isinstance(rows, list)
+        or not _candidate_evaluation_preflight_valid(batch, rows)
+    ):
+        _refuse_refresh_append(batch)
+        return 0
+    try:
+        rows_to_append = copy.deepcopy(rows)
+        for row in rows_to_append:
+            json.dumps(
+                row,
+                ensure_ascii=False,
+                sort_keys=True,
+                allow_nan=False,
+            )
+    except Exception:
+        _refuse_refresh_append(batch)
         return 0
     appended = 0
-    for row in rows:
-        if isinstance(row, dict):
-            append_jsonl_ledger(ledger_path, row)
-            appended += 1
+    for row in rows_to_append:
+        append_jsonl_ledger(ledger_path, row)
+        appended += 1
     batch["append_requested"] = True
     batch["appended_to_ledger"] = appended > 0
     batch["appended_outcome_count"] = appended
     return appended
+
+
+def _candidate_evaluation_preflight_valid(
+    batch: dict[str, Any],
+    rows: list[Any],
+) -> bool:
+    required_shape_fields = {
+        "generated_at_utc",
+        "outcome_count",
+        "probe_outcome_count",
+        "blocked_signal_outcome_count",
+        "probe_outcomes",
+        "blocked_signal_outcomes",
+    }
+    if (
+        not _CANDIDATE_EVALUATION_PREFLIGHT_FIELDS <= set(batch)
+        or not required_shape_fields <= set(batch)
+        or not all(isinstance(row, dict) for row in rows)
+        or not all(outcome_subtype_semantics_valid(row) for row in rows)
+        or not isinstance(batch["probe_outcomes"], list)
+        or not isinstance(batch["blocked_signal_outcomes"], list)
+    ):
+        return False
+    count_fields = (
+        "generated_outcome_count",
+        "candidate_evaluation_eligible_count",
+        "candidate_evaluation_preflight_attached_count",
+        "candidate_evaluation_deferred_count",
+        "candidate_evaluation_not_applicable_count",
+        "deferred_outcome_count",
+    )
+    if any(
+        isinstance(batch.get(field), bool)
+        or not isinstance(batch.get(field), int)
+        or batch[field] < 0
+        for field in count_fields
+    ):
+        return False
+    generated = batch["generated_outcome_count"]
+    eligible = batch["candidate_evaluation_eligible_count"]
+    attached = batch["candidate_evaluation_preflight_attached_count"]
+    deferred = batch["candidate_evaluation_deferred_count"]
+    not_applicable = batch["candidate_evaluation_not_applicable_count"]
+    reason_counts = batch["candidate_evaluation_defer_reason_counts"]
+    batch_deferred = batch["candidate_evaluation_batch_deferred"]
+    if (
+        not isinstance(reason_counts, dict)
+        or not all(
+            isinstance(reason, str)
+            and reason
+            and isinstance(count, int)
+            and not isinstance(count, bool)
+            and count > 0
+            for reason, count in reason_counts.items()
+        )
+        or not isinstance(batch_deferred, bool)
+    ):
+        return False
+    arithmetic_valid = bool(
+        generated == eligible + not_applicable
+        and eligible == attached + deferred
+        and sum(reason_counts.values()) == deferred
+        and batch["deferred_outcome_count"] == deferred
+        and batch_deferred is (deferred > 0)
+        and (not batch_deferred or not rows)
+        and (batch_deferred or len(rows) == generated)
+    )
+    if not arithmetic_valid or batch_deferred:
+        return False
+
+    subtype_lists = (
+        batch["probe_outcomes"],
+        batch["blocked_signal_outcomes"],
+    )
+    shape_counts = (
+        ("outcome_count", rows),
+        ("probe_outcome_count", subtype_lists[0]),
+        ("blocked_signal_outcome_count", subtype_lists[1]),
+    )
+    if any(
+        isinstance(batch.get(field), bool)
+        or not isinstance(batch.get(field), int)
+        or batch[field] != len(values)
+        for field, values in shape_counts
+    ):
+        return False
+
+    generated_at = _parse_aware_utc(batch["generated_at_utc"])
+    if generated_at is None:
+        return False
+    semantic_now = min(_utc_now(), generated_at)
+    try:
+        semantic = partition_candidate_evaluation_outcomes(
+            rows,
+            source_provider=None,
+            now_utc=semantic_now,
+        )
+    except Exception:
+        return False
+    if any(
+        not _exact_value_equal(semantic[field], batch[field])
+        for field in _CANDIDATE_EVALUATION_PREFLIGHT_FIELDS
+    ):
+        return False
+    return bool(
+        _exact_value_equal(semantic["outcomes"], rows)
+        and _exact_value_equal(
+            semantic["probe_outcomes"],
+            batch["probe_outcomes"],
+        )
+        and _exact_value_equal(
+            semantic["blocked_signal_outcomes"],
+            batch["blocked_signal_outcomes"],
+        )
+        and _exact_value_equal(
+            rows,
+            batch["probe_outcomes"] + batch["blocked_signal_outcomes"],
+        )
+    )
+
+
+def _parse_aware_utc(value: Any) -> dt.datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return None
+    return parsed.astimezone(dt.timezone.utc)
+
+
+def _exact_value_equal(left: Any, right: Any) -> bool:
+    if isinstance(left, dict) and isinstance(right, dict):
+        return set(left) == set(right) and all(
+            _exact_value_equal(left[key], right[key]) for key in left
+        )
+    if isinstance(left, list) and isinstance(right, list):
+        return len(left) == len(right) and all(
+            _exact_value_equal(left_item, right_item)
+            for left_item, right_item in zip(left, right)
+        )
+    return type(left) is type(right) and left == right
+
+
+def _refuse_refresh_append(batch: dict[str, Any]) -> None:
+    batch["append_requested"] = True
+    batch["appended_to_ledger"] = False
+    batch["appended_outcome_count"] = 0
+    for field in ("outcomes", "probe_outcomes", "blocked_signal_outcomes"):
+        if field in batch:
+            batch[field] = []
+    for field in ("outcome_count", "probe_outcome_count", "blocked_signal_outcome_count"):
+        if field in batch:
+            batch[field] = 0
 
 
 def build_price_rows_from_pg_for_refresh(
@@ -219,6 +422,9 @@ def refresh_cost_gate_outcomes_from_price_rows(
     outcome_cfg: ProbeOutcomeConfig | None = None,
     price_source: str = "local_price_file",
     append_ledger: bool = False,
+    candidate_evaluation_source_provider: (
+        CandidateEvaluationSourceProvider | None
+    ) = None,
 ) -> dict[str, Any]:
     """Build a refresh batch from in-memory price rows and optionally append it."""
     ledger_rows = read_learning_ledger_partitions(ledger_path).outcome_rows
@@ -229,6 +435,7 @@ def refresh_cost_gate_outcomes_from_price_rows(
         selection=selection,
         outcome_cfg=outcome_cfg,
         price_source=price_source,
+        candidate_evaluation_source_provider=candidate_evaluation_source_provider,
     )
     if append_ledger:
         append_refresh_outcomes_to_ledger(ledger_path, batch)
