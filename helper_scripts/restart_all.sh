@@ -640,6 +640,11 @@ restart_engine() {
     bounded_probe_adapter_enabled="${OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED:-$(grep '^OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
     demo_learning_lane_writer="${demo_learning_lane_writer:-0}"
     bounded_probe_adapter_enabled="${bounded_probe_adapter_enabled:-0}"
+    # OPS-F1 (2026-07-15): engine.log 重導向必須 '>>'(O_APPEND) 非 '>'——缺 O_APPEND
+    # 的 fd 被 logrotate copytruncate 截斷後,寫入 offset 不回捲 → NUL 前綴 sparse
+    # 檔,表觀 size 立回 ≥1G 致每小時輪替空轉,且 .gz 歸檔開頭全 NUL 毀法證可讀性
+    # (6/27 engine.log.1.gz 實錘)。重啟語意不變:上方 rotate_engine_log() 已先 mv
+    # 歸檔,'>' 與 '>>' 對新檔行為相同。
     OPENCLAW_DATA_DIR="$DATA_DIR" OPENCLAW_SECRETS_DIR="$BYBIT_SECRETS_DIR" \
         OPENCLAW_IPC_SOCKET="$ENGINE_SOCKET" OPENCLAW_CANARY_MODE="${OPENCLAW_CANARY_MODE:-0}" \
         OPENCLAW_DATABASE_URL_FILE="$OPENCLAW_DATABASE_URL_FILE" \
@@ -668,7 +673,7 @@ restart_engine() {
         OPENCLAW_STRATEGIST_RICH_INPUT="${strategist_rich_input}" \
         OPENCLAW_RISKCONFIG_AGENT_TUNING_ENABLED="${riskconfig_agent_tuning}" \
         OPENCLAW_FLASH_DIP_PILOT_ENABLED="${flash_dip_pilot_enabled}" \
-        nohup rust/target/release/openclaw-engine > "$DATA_DIR/engine.log" 2>&1 0<&- 200<&- &
+        nohup rust/target/release/openclaw-engine >> "$DATA_DIR/engine.log" 2>&1 0<&- 200<&- &
     echo "    PID: $!"
 }
 
@@ -850,6 +855,11 @@ restart_api() {
     openai_api_key="$(resolve_provider_secret_env OPENAI_API_KEY openai openai_api_key)"
     deepseek_api_key="$(resolve_provider_secret_env DEEPSEEK_API_KEY deepseek deepseek_api_key)"
 
+    # OPS-F1 follow-up (2026-07-15): api.log 同 engine.log 用 '>>'(O_APPEND)——
+    # logrotate copytruncate 相容前置(機制見上方 engine 塊注釋);本腳本不歸檔
+    # api.log,跨重啟累積屬預期,由 conf api.log stanza(200M×7)兜底。2026-07-14 起
+    # API 常態由 user unit openclaw-trading-api.service 管(stdout→journald 不寫本檔),
+    # 此 nohup 路徑為 fallback,latent 修復仍必要。
     OPENCLAW_BASE_DIR="$base_dir" \
         OPENCLAW_DATA_DIR="$DATA_DIR" \
         OPENCLAW_IPC_SOCKET="$ENGINE_SOCKET" \
@@ -873,7 +883,7 @@ restart_api() {
         DEEPSEEK_API_KEY="${deepseek_api_key}" \
         nohup "$API_VENV/bin/python3" "$API_VENV/bin/uvicorn" app.main:app \
         --host "$API_BIND_HOST" --port 8000 --workers "$WORKERS" \
-        > "$DATA_DIR/api.log" 2>&1 &
+        >> "$DATA_DIR/api.log" 2>&1 &
     echo "    PID: $!"
     cd - > /dev/null
 }
