@@ -31,8 +31,11 @@ from agent_governance_effects import build_runtime_environment_attestation  # no
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PROC_ROOT = Path("/proc")
 ENGINE_NAME = "openclaw-engine"
+LIVE_SLOT_THREAD_NAME = "oc-live-rt"
 MAX_ENVIRONMENT_BYTES = 1024 * 1024
 MAX_ENDPOINT_BYTES = 32
+MAX_THREAD_NAME_BYTES = 64
+MAX_PROCESS_TASKS = 4096
 ATTESTATION_TTL = timedelta(minutes=5)
 ATTESTED_TARGET_ENVIRONMENT = "live_demo"
 ATTESTED_AUTHORIZATION_SCOPE = "live_demo_only"
@@ -215,10 +218,8 @@ def _endpoint_identity(secrets_root: Path) -> tuple[str | None, str | None, str 
     return "bybit_demo", _sha256_bytes(raw), None
 
 
-def _process_start_ticks(pid: int) -> str:
-    raw = (PROC_ROOT / str(pid) / "stat").read_text(
-        encoding="ascii", errors="strict"
-    )
+def _start_ticks(stat_path: Path) -> str:
+    raw = stat_path.read_text(encoding="ascii", errors="strict")
     tail = raw.rsplit(") ", 1)
     if len(tail) != 2:
         raise ValueError("process stat is invalid")
@@ -226,6 +227,53 @@ def _process_start_ticks(pid: int) -> str:
     if len(fields) <= 19 or not fields[19].isdigit() or int(fields[19]) <= 0:
         raise ValueError("process start ticks are invalid")
     return fields[19]
+
+
+def _process_start_ticks(pid: int) -> str:
+    return _start_ticks(PROC_ROOT / str(pid) / "stat")
+
+
+def _live_slot_task_identities(
+    pid: int,
+) -> tuple[tuple[tuple[int, str], ...], list[str]]:
+    """Prove the Rust Live PipelineSlot's event-consumer thread is active."""
+
+    task_root = PROC_ROOT / str(pid) / "task"
+    try:
+        tasks = list(task_root.iterdir())
+    except OSError:
+        return (), ["LIVE_SLOT_STATE_UNREADABLE"]
+    if len(tasks) > MAX_PROCESS_TASKS:
+        return (), ["LIVE_SLOT_STATE_UNREADABLE"]
+
+    matches: list[tuple[int, str]] = []
+    for task in tasks:
+        task_id = task.name
+        if not task_id.isascii() or not task_id.isdigit() or int(task_id) <= 0:
+            return (), ["LIVE_SLOT_STATE_UNREADABLE"]
+        try:
+            with (task / "comm").open("rb") as handle:
+                raw = handle.read(MAX_THREAD_NAME_BYTES + 1)
+        except OSError:
+            return (), ["LIVE_SLOT_STATE_UNREADABLE"]
+        if len(raw) > MAX_THREAD_NAME_BYTES:
+            return (), ["LIVE_SLOT_STATE_UNREADABLE"]
+        if raw in {
+            LIVE_SLOT_THREAD_NAME.encode("ascii"),
+            (LIVE_SLOT_THREAD_NAME + "\n").encode("ascii"),
+        }:
+            try:
+                task_start_ticks = _start_ticks(task / "stat")
+            except (OSError, UnicodeError, ValueError):
+                return (), ["LIVE_SLOT_STATE_UNREADABLE"]
+            matches.append((int(task_id), task_start_ticks))
+
+    live_tasks = tuple(sorted(matches))
+    if not live_tasks:
+        return (), ["LIVE_SLOT_NOT_FOUND"]
+    if len(live_tasks) != 1:
+        return live_tasks, ["LIVE_SLOT_AMBIGUOUS"]
+    return live_tasks, []
 
 
 def _process_identity(pid: int) -> tuple[dict[str, Any], list[str]]:
@@ -304,6 +352,8 @@ def probe_runtime_environment(
     pid = pids[0]
     process_facts, process_blockers = _process_identity(pid)
     blockers.extend(process_blockers)
+    live_slot_identities, live_slot_blockers = _live_slot_task_identities(pid)
+    blockers.extend(live_slot_blockers)
     selected, environment_blockers = _read_allowlisted_environment(pid)
     blockers.extend(environment_blockers)
     booleans: dict[str, bool] = {}
@@ -339,20 +389,6 @@ def probe_runtime_environment(
         if blocker:
             blockers.append(blocker)
 
-    try:
-        pids_after = _engine_pids()
-        current_link = os.readlink(PROC_ROOT / str(pid) / "exe")
-        current_start_ticks = _process_start_ticks(pid)
-        current_digest = _sha256_file(PROC_ROOT / str(pid) / "exe")
-        if (
-            pids_after != [pid]
-            or current_link != process_facts.get("exe_link")
-            or current_start_ticks != process_facts.get("process_start_ticks")
-            or current_digest != process_facts.get("process_identity_digest")
-        ):
-            blockers.append("PROCESS_IDENTITY_RACE")
-    except (OSError, UnicodeError, ValueError):
-        blockers.append("PROCESS_IDENTITY_RACE")
     if secrets_dir is not None:
         endpoint_class_after, endpoint_digest_after, endpoint_blocker = (
             _endpoint_identity(secrets_dir)
@@ -375,6 +411,30 @@ def probe_runtime_environment(
             blockers.append("SOURCE_TREE_DRIFT")
     except (OSError, subprocess.CalledProcessError):
         blockers.append("SOURCE_REPOSITORY_DRIFT_UNREADABLE")
+    live_slot_identities_after, live_slot_blockers_after = (
+        _live_slot_task_identities(pid)
+    )
+    blockers.extend(live_slot_blockers_after)
+    if (
+        not live_slot_blockers
+        and not live_slot_blockers_after
+        and live_slot_identities_after != live_slot_identities
+    ):
+        blockers.append("LIVE_SLOT_IDENTITY_DRIFT")
+    try:
+        pids_after = _engine_pids()
+        current_link = os.readlink(PROC_ROOT / str(pid) / "exe")
+        current_start_ticks = _process_start_ticks(pid)
+        current_digest = _sha256_file(PROC_ROOT / str(pid) / "exe")
+        if (
+            pids_after != [pid]
+            or current_link != process_facts.get("exe_link")
+            or current_start_ticks != process_facts.get("process_start_ticks")
+            or current_digest != process_facts.get("process_identity_digest")
+        ):
+            blockers.append("PROCESS_IDENTITY_RACE")
+    except (OSError, UnicodeError, ValueError):
+        blockers.append("PROCESS_IDENTITY_RACE")
     blockers = sorted(set(blockers))
     if blockers:
         return None, blockers
@@ -393,6 +453,15 @@ def probe_runtime_environment(
             "OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED"
         ],
         "canary_mode": booleans["OPENCLAW_CANARY_MODE"],
+        # This is bounded Rust-owned thread-presence evidence, not a
+        # linearizable PipelineSlot lease: auth teardown empties the slot
+        # before the outer OS thread's asynchronous join completes.  The
+        # exact TID/start-ticks pair is double-read above to reject in-probe
+        # replacement, but must not enter the stable configuration identity;
+        # a legitimate restart creates a new thread while preserving the
+        # deployment intent's environment identity.  Deploy/effect remains
+        # separately fail-closed behind recovery-control blockers.
+        "live_slot_thread_present": True,
         "data_dir_identity_digest": _sha256_bytes(str(data_dir).encode("utf-8")),
         "secrets_dir_identity_digest": _sha256_bytes(
             str(secrets_dir).encode("utf-8")
