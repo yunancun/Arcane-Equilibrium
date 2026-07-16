@@ -15,6 +15,9 @@ from helper_scripts.research.tests.candidate_lineage_v2_test_support import (
 )
 from cost_gate_learning_lane import runtime_adapter as runtime_adapter_module
 from cost_gate_learning_lane import status as status_module
+from cost_gate_learning_lane import outcome_refresh as outcome_refresh_module
+from cost_gate_learning_lane import outcome_review as outcome_review_module
+from cost_gate_learning_lane import reject_materializer as reject_materializer_module
 from alpha_discovery_throughput.discovery_loop import build_discovery_plan
 from alpha_discovery_throughput.runtime_runner import collect_cost_gate_learning_lane_arm
 from cost_gate_learning_lane.policy import (
@@ -2225,6 +2228,187 @@ def test_status_uses_candidate_evidence_projection_for_event_only_and_conflict(
         "NO_QUALIFIED_LINEAGE_BLOCKED_SIGNAL_OUTCOMES"
     )
     assert summary["blocked_signal_top_review_side_cell_key"] is None
+
+
+def test_large_retained_ledger_uses_bounded_streaming_projection(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    ledger_path = tmp_path / "probe_ledger.jsonl"
+    rows = [
+        {
+            "record_type": "probe_admission_decision",
+            "generated_at_utc": "2026-07-14T01:00:00+00:00",
+            "attempt_id": "stream-admission",
+            "decision": "ORDER_AUTHORITY_NOT_GRANTED",
+            "allowed_to_submit_order": False,
+        },
+        {
+            "record_type": "blocked_signal_outcome",
+            "generated_at_utc": "2026-07-14T02:00:00+00:00",
+            "attempt_id": "stream-unqualified",
+            "side_cell_key": "ma_crossover|BTCUSDT|Sell",
+            "strategy_name": "ma_crossover",
+            "symbol": "BTCUSDT",
+            "side": "Sell",
+            "horizon_minutes": 60,
+            "realized_net_bps": 10.0,
+        },
+    ]
+    ledger_path.write_text(
+        "".join(json.dumps(row) + "\n" for row in rows),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(status_module, "MAX_IN_MEMORY_LEDGER_SNAPSHOT_BYTES", 1)
+
+    def unbounded_snapshot_must_not_run(_path: Path):
+        raise AssertionError("large retained ledger must not be materialized")
+
+    monkeypatch.setattr(
+        status_module,
+        "_capture_retained_ledger_snapshot",
+        unbounded_snapshot_must_not_run,
+    )
+
+    summary = status_module.summarize_cost_gate_learning_lane_ledger(ledger_path)
+
+    assert summary["ledger_snapshot_mode"] == "STREAMING_PREFIX_V1"
+    assert summary["ledger_projection_complete"] is True
+    assert summary["raw_ledger_total_rows"] == 2
+    assert summary["ledger_total_rows"] == 1
+    assert summary["admission_decision_count"] == 1
+    assert summary["raw_blocked_signal_outcome_count"] == 1
+    assert summary["raw_unqualified_lineage_outcome_row_count"] == 1
+    assert summary["raw_invalid_lineage_outcome_row_count"] == 0
+    assert summary["qualified_lineage_outcome_row_count"] == 0
+    assert summary["blocked_signal_outcome_count"] == 0
+    assert summary["blocked_signal_outcome_review_status"] == (
+        "NO_QUALIFIED_LINEAGE_BLOCKED_SIGNAL_OUTCOMES"
+    )
+    assert summary["ledger_status"] == (
+        "BLOCKED_SIGNAL_OUTCOMES_NEED_LINEAGE_REPAIR"
+    )
+
+
+def test_large_retained_ledger_blocks_outcome_refresh_before_materialization(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    ledger_path = tmp_path / "probe_ledger.jsonl"
+    ledger_path.write_text("{}\n", encoding="utf-8")
+    output_path = tmp_path / "refresh.json"
+    monkeypatch.setattr(
+        outcome_refresh_module,
+        "MAX_IN_MEMORY_RETAINED_LEDGER_BYTES",
+        1,
+    )
+    monkeypatch.setattr(
+        outcome_refresh_module,
+        "read_learning_ledger_partitions",
+        lambda _path: (_ for _ in ()).throw(
+            AssertionError("large retained ledger must not be materialized")
+        ),
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "outcome_refresh.py",
+            "--ledger",
+            str(ledger_path),
+            "--source-prices",
+            str(tmp_path / "unused.jsonl"),
+            "--record-blocked-outcomes",
+            "--output",
+            str(output_path),
+        ],
+    )
+
+    assert outcome_refresh_module.main() == 75
+    diagnostic = json.loads(capsys.readouterr().err)
+    assert diagnostic["status"] == "RETAINED_LEDGER_STREAMING_PROJECTION_REQUIRED"
+    assert diagnostic["retained_ledger_bytes"] == 3
+    assert not output_path.exists()
+
+
+def test_large_retained_ledger_blocks_reject_materializer_before_materialization(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    ledger_path = tmp_path / "probe_ledger.jsonl"
+    ledger_path.write_text("{}\n", encoding="utf-8")
+    output_path = tmp_path / "materializer.json"
+    monkeypatch.setattr(
+        reject_materializer_module,
+        "MAX_IN_MEMORY_RETAINED_LEDGER_BYTES",
+        1,
+    )
+    monkeypatch.setattr(
+        reject_materializer_module,
+        "read_learning_ledger_partitions",
+        lambda _path: (_ for _ in ()).throw(
+            AssertionError("large retained ledger must not be materialized")
+        ),
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "reject_materializer.py",
+            "--plan",
+            str(tmp_path / "unused-plan.json"),
+            "--ledger",
+            str(ledger_path),
+            "--source-rows",
+            str(tmp_path / "unused-rows.jsonl"),
+            "--output",
+            str(output_path),
+        ],
+    )
+
+    assert reject_materializer_module.main() == 75
+    diagnostic = json.loads(capsys.readouterr().err)
+    assert diagnostic["status"] == "RETAINED_LEDGER_STREAMING_PROJECTION_REQUIRED"
+    assert diagnostic["retained_ledger_bytes"] == 3
+    assert not output_path.exists()
+
+
+def test_large_retained_ledger_blocks_outcome_review_before_materialization(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    ledger_path = tmp_path / "probe_ledger.jsonl"
+    ledger_path.write_text("{}\n", encoding="utf-8")
+    output_path = tmp_path / "review.json"
+    monkeypatch.setattr(
+        outcome_review_module,
+        "MAX_IN_MEMORY_RETAINED_LEDGER_BYTES",
+        1,
+    )
+    monkeypatch.setattr(
+        outcome_review_module,
+        "read_candidate_evidence_jsonl_ledger",
+        lambda _path: (_ for _ in ()).throw(
+            AssertionError("large retained ledger must not be materialized")
+        ),
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "outcome_review.py",
+            "--ledger",
+            str(ledger_path),
+            "--output",
+            str(output_path),
+        ],
+    )
+
+    assert outcome_review_module.main() == 75
+    diagnostic = json.loads(capsys.readouterr().err)
+    assert diagnostic["status"] == "RETAINED_LEDGER_STREAMING_PROJECTION_REQUIRED"
+    assert diagnostic["retained_ledger_bytes"] == 3
+    assert not output_path.exists()
 
 
 def test_activation_preflight_routes_invalid_only_outcomes_to_lineage_repair(
