@@ -937,6 +937,12 @@ impl TwsSessionManager {
         self.fsm.ipc_state()
     }
 
+    /// 連續重連嘗試計數（W4 health IPC 投影用;Ready 成功歸零,每入 transient Backoff +1）。
+    /// 純讀取,委派 FSM;production inactive 恆撞 EnvelopeRequired 停 Disconnected → 恆 0。
+    pub(crate) fn reconnect_attempt(&self) -> u32 {
+        self.fsm.reconnect_attempt()
+    }
+
     /// 嘗試連線:**每次都重新 `permit.check()`**（禁緩存;INV-1 轉移表「Backoff→Connecting 每次重驗」）。
     /// production 恆 `Err(EnvelopeRequired)` → FSM 停 `Disconnected(EnvelopeRequired)`。
     pub(crate) fn attempt_connect(&mut self, now_ms: u64) -> Vec<IbkrTwsSessionEventV1> {

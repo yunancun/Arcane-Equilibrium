@@ -112,7 +112,7 @@ W2-W11 的全部 DoD 都封頂在 `source-ready` + `runtime-active(inactive post
 | production seal caller(Seal/Supersede/Revoke) | **核心已 source-landed**(ledger+CLI+47 測試);殘項=收口審核 | W2 |
 | IBKR Rust 測試/G4 symbol audit 進 CI | 缺(rust job 只 `cargo check`) | W-CI |
 | TWS transport/session manager(可恢復) | **DONE(2026-07-16,S1-S4)**:wire 抽檔 + 六態 FSM(退避/心跳/排程感知 DST)+ INV-1 permit stub + pacing governor(單一出口/有界排隊)+ fake-TWS dev-crate + 端到端 driver;211 engine 測試 | W3 ✅ |
-| connection-health IPC/route + normalizer lockstep | 16 個 status method 在,**無 connection-health method**;normalizer 全負空間態 | W4 |
+| connection-health IPC/route + normalizer lockstep | **DONE(2026-07-16,W4-1)**:`get_connection_health` IPC+FastAPI route+`IbkrConnectionHealthReportV1`+normalizer 三層 lockstep+fail-closed 四道+driver-absence audit 入 CI | W4 ✅ |
 | account/positions/open orders/executions/commissions + session attestation | attestation 僅型別;typed row 契約與 fetch 全缺(只有 probe KIND + digest envelope) | W5 |
 | contract details/market data/calendar/entitlement | 契約型別在(identity/provenance);fetch/訂閱/entitlement 邏輯全缺 | W6 |
 | order lifecycle(preview/place/cancel/replace/fills/reconcile) | paper lifecycle 契約 source-only,零執行路徑 | W7 |
@@ -187,7 +187,9 @@ W2-W11 的全部 DoD 都封頂在 `source-ready` + `runtime-active(inactive post
 
 ---
 
-### W4 — P4 connection-health IPC/route + normalizer lockstep
+### W4 — P4 connection-health IPC/route + normalizer lockstep ✅ **DONE 2026-07-16(loop R7,W4-1)**
+
+**收口紀錄**:W4-1 lockstep 單 PR——`IbkrConnectionHealthReportV1` + Rust emitter(ephemeral manager 撞 permit → `external_verification_pending`,零 socket)+ `get_connection_health` IPC + FastAPI GET route + normalizer 三層 lockstep + fail-closed 四道 + driver-absence audit 入 CI。五腿:E2 APPROVE/E3 PASS(授權面無繞過)/IB PASS/E4 全綠/QA ACCEPT。GUI 面 defer W9(採 PA 建議,避免二次觸碰玄衡 shell)。**W5 blocking 移交(見 W5 節)**:Layer 3 lineage-present 分支窮舉性遠弱於 Layer 2 + parity 缺 operational-欄⊆guard superset 斷言,seal lineage 前必修。**pre-existing 治理債**:handler cap(HEAD 826>800)+ runtime-material-reader 3 紅守衛不在 CI(drift),W4 +5→831 加劇非引入(E2/E3/QA 三方驗屍),由 `task_2dbb7f53` 拆 handler + 接 CI。
 
 **目標**:把 session 健康狀態沿 Rust IPC → FastAPI → GUI 唯讀鏈路端到端接通,同步演進 Python normalizer 的負空間 attestation。
 
@@ -203,6 +205,11 @@ W2-W11 的全部 DoD 都封頂在 `source-ready` + `runtime-active(inactive post
 ### W5 — account/positions/open orders/executions/commissions + session attestation
 
 **目標**:唯讀帳戶面全量 + 會話 attestation 生產者,把「這是哪個帳戶、是不是 paper、資料新不新鮮」變成 typed、可審計的事實。
+
+**W4 移交(seal lineage 前 blocking,否則 fail-closed 退化——E3-F1/F2 + E2-F3,2026-07-16)**:
+- **normalizer Layer 3 窮舉補齊**:W4 的 lineage-present 分支只查 session_active/fingerprint/state 一致性,**遺漏** pacing 活動計數、`entitlement_state`、`report_status`、`reconnect_attempt`、`halt_reason`、attestation-populated。W5 一旦 seal attestation+gate 使 Layer 3 可達,這些遺漏欄即成 fail-open 面——必須對每欄補 per-field lineage-bound 不變量並納入同款精確有序 tripwire(維持 lockstep)。
+- **parity superset 斷言**:現 cross-surface parity 只鎖 guard⊆contract、fixture⊇contract,**未鎖 operational-欄⊆guard**——未來 emitter 加 operational 欄而 normalizer 忘 guard,三測仍綠。W5 前加「非 telemetry 的 struct bool/state 欄必屬某 guard 集」斷言(telemetry allowlist=`main_tokens_available`),漂移即紅。
+- entitlement enum 二元→三元見 W6;farm-connectivity 欄 + WeeklyReauth 出典見 W8。
 
 **範圍 in**:
 1. `reqAccountSummary`(net liq、cash、settled cash、buying power 等白名單 tag)、`reqPositions`、`reqOpenOrders`/`reqAllOpenOrders`、`reqExecutions` + commissionReport 流的 typed 消化(全部掛 session manager 的請求路由)。
