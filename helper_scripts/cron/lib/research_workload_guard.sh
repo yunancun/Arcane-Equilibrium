@@ -28,6 +28,11 @@ research_guard_prepare_private_dirs() {
     done
 }
 
+research_guard_prepare_flock_file() {
+    (( $# == 1 )) || return 64
+    _research_guard_prepare_private_file "$1"
+}
+
 _research_guard_json_state() {
     local status="$1"
     local reason="${2:-}"

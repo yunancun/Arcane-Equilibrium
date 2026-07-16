@@ -56,41 +56,20 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use openclaw_types::{
     IBKR_LIVE_GATEWAY_PORT, IBKR_LIVE_TWS_PORT, IBKR_PAPER_GATEWAY_DEFAULT_PORT, IBKR_PHASE2_ADR,
-    IBKR_PHASE2_CONTACT_AMD,
+    IBKR_PHASE2_CONTACT_AMD, IB_INFO_CODE_FLOOR,
 };
 
 use crate::boot_observability::BUILD_GIT_SHA;
+// W3-S1:純 codec §(a) 已抽至 `ibkr_tws_wire`（本檔改就地消費,語義零變;codec 自此有兩個
+// 消費者=B1 driver + W3 session manager)。glob 匯入 codec 原語 / CodecError / HandshakeAck /
+// 版本 + msgId 常量,令 driver 與既有 26 測試（`use super::*`)零改仍解析。
+use crate::ibkr_tws_wire::*;
 
 // ---------------------------------------------------------------------------
-// 常量
+// 常量（W3-S1 後:codec 域常量=MAX_FRAME_LEN / HANDSHAKE_PREFIX / CLIENT_{MIN,MAX}_VERSION /
+// msgId 常量已遷至 `ibkr_tws_wire`;`IB_INFO_CODE_FLOOR`（≥2100 地板)遷至 openclaw_types
+// 單處維護。本檔僅留 driver / gate / guard 域常量)
 // ---------------------------------------------------------------------------
-
-/// 任何分配前的 frame 上界（≤64KB）。untrusted wire 的 length 欄先比此界，再分配。
-const MAX_FRAME_LEN: usize = 64 * 1024;
-
-/// TWS v100+ 握手前綴（4-byte，unframed；之後才是 4-byte BE length + payload 的 frame）。
-const HANDSHAKE_PREFIX: &[u8] = b"API\0";
-
-/// 客戶端支援的 API 版本區間（handshake payload `v{min}..{max}`）。
-const CLIENT_MIN_VERSION: i32 = 100;
-const CLIENT_MAX_VERSION: i32 = 176;
-
-/// TWS msgId（wire 協議常量）。
-const START_API_MSG_ID: &str = "71";
-const START_API_VERSION: &str = "2";
-const REQ_CURRENT_TIME_MSG_ID: &str = "49";
-const REQ_CURRENT_TIME_VERSION: &str = "1";
-const CURRENT_TIME_MSG_ID: i64 = 49;
-const MANAGED_ACCOUNTS_MSG_ID: i64 = 15;
-const NEXT_VALID_ID_MSG_ID: i64 = 9;
-/// ERR_MSG（server 於 START_API 後必推的連線狀態通知）。
-const ERR_MSG_MSG_ID: i64 = 4;
-/// IB 連線狀態 info/warning code 下界：**code ≥ 2100** = 純資訊/警告 connectivity 通知
-/// （2104 market-data farm OK / 2106 HMDS farm OK / 2158 sec-def farm OK / 2107 / 2103…），
-/// 握手期必然出現且非錯誤 → drain 續讀；**code < 2100** = 真錯誤（如 502/504 未連線）→
-/// fail-closed。真實 IB Gateway 在 CURRENT_TIME(49) 之前推這些通知，故 drain 迴圈必須容忍，
-/// 否則嚴格 allowlist 會令真 G4 握手必失敗（E2 RETURN #1）。
-const IB_INFO_CODE_FLOOR: i64 = 2100;
 
 /// G4 只讀探針的固定 client_id（read-only；不下單，故 master-client 語義無關）。
 const G4_READONLY_CLIENT_ID: i32 = 0;
@@ -118,225 +97,16 @@ const MAX_READ_FRAMES: usize = 32;
 const MAX_TOTAL_READ_BYTES: usize = 256 * 1024;
 
 // ===========================================================================
-// (a) 純 codec（無 I/O）
+// (a) 純 codec — **已抽至 `crate::ibkr_tws_wire`**（W3-S1;語義零變）
+// ---------------------------------------------------------------------------
+// `CodecError` / `HandshakeAck` / `encode_frame` / `try_decode_frame` /
+// `encode_fields` / `decode_fields` / `encode_handshake_prefix` /
+// `encode_start_api` / `encode_req_current_time` / `frame_msg_id` /
+// `decode_server_handshake_ack` / `decode_current_time` / `decode_error_code` /
+// `managed_accounts_all_paper` 及 codec 域常量現由檔首 `use crate::ibkr_tws_wire::*`
+// 就地匯入。動機:B1 檔逼近 2000 行拆檔守衛,且 codec 自此有兩個消費者（B1 G4 探針 +
+// W3 session manager),deletion test 過。下方 driver / guards / G4 gate 原樣凍結。
 // ===========================================================================
-
-/// codec 錯誤（全 typed；解析 untrusted wire 一律回此，絕不 panic / 捏值）。
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum CodecError {
-    /// 欄位缺終止 `\0`（frame slice 尾有殘位元）——非「需更多位元組」（那是 `Ok(None)`）。
-    #[error("frame field truncated (unterminated field in frame slice)")]
-    Truncated,
-    #[error("malformed frame: {0}")]
-    Malformed(&'static str),
-    /// msgId 不在 allowlist（handshake ack + 49 + 15 + 9）。
-    #[error("unexpected msg id: {got}")]
-    UnexpectedMsgId { got: i64 },
-    /// 應為數字的欄位非數字（禁 `unwrap_or(0)` 捏造）。
-    #[error("non-numeric field: {0}")]
-    NonNumericField(&'static str),
-    /// length 欄為 0（合法 TWS 訊息至少含 msgId 欄，故 0 長 = 損壞）。
-    #[error("empty frame (zero length prefix)")]
-    EmptyFrame,
-    /// length 欄超過 `MAX_FRAME_LEN`（分配前即拒，杜絕 OOM）。
-    #[error("frame too large (length prefix exceeds MAX_FRAME_LEN)")]
-    FrameTooLarge,
-}
-
-/// server 首個握手回應（serverVersion + connectionTime，兩個 `\0`-終止欄）。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct HandshakeAck {
-    pub server_version: i32,
-    pub connection_time: String,
-}
-
-/// encode 一個 framed 訊息：4-byte **big-endian u32** length + payload。
-fn encode_frame(payload: &[u8]) -> Vec<u8> {
-    let len = payload.len() as u32;
-    let mut out = Vec::with_capacity(4 + payload.len());
-    out.extend_from_slice(&len.to_be_bytes());
-    out.extend_from_slice(payload);
-    out
-}
-
-/// try-decode 一個 framed 訊息。`Ok(None)`=需更多位元組（尚未成 frame）；
-/// `Ok(Some((consumed, payload)))`=成功（consumed = 4 + len）。
-///
-/// 硬化：length 讀 **u32 BE**（無負值可能）；`len==0` → `EmptyFrame`；
-/// `len > MAX_FRAME_LEN` → `FrameTooLarge`（**任何分配前**即拒）；`with_capacity` 亦
-/// clamp 至 `MAX_FRAME_LEN`。
-fn try_decode_frame(buf: &[u8]) -> Result<Option<(usize, Vec<u8>)>, CodecError> {
-    if buf.len() < 4 {
-        return Ok(None);
-    }
-    let len = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]) as usize;
-    if len == 0 {
-        return Err(CodecError::EmptyFrame);
-    }
-    if len > MAX_FRAME_LEN {
-        return Err(CodecError::FrameTooLarge);
-    }
-    let total = 4 + len;
-    if buf.len() < total {
-        return Ok(None);
-    }
-    // 分配前 len 已 <= MAX_FRAME_LEN；capacity 再 clamp 一次作縱深防禦。
-    let mut payload = Vec::with_capacity(len.min(MAX_FRAME_LEN));
-    payload.extend_from_slice(&buf[4..total]);
-    Ok(Some((total, payload)))
-}
-
-/// encode `\0`-終止欄位序列（每欄尾附一個 `\0`；TWS wire 為 null-terminated 欄，非分隔）。
-fn encode_fields(fields: &[&str]) -> Vec<u8> {
-    let mut out = Vec::new();
-    for f in fields {
-        out.extend_from_slice(f.as_bytes());
-        out.push(0);
-    }
-    out
-}
-
-/// decode `\0`-終止欄位。**嚴限 frame slice 內**：掃描 `\0` 切欄，任一欄非 ASCII → `Malformed`；
-/// 末欄缺終止（尾有殘位元）→ `Truncated`。無越界索引、無 panic。
-fn decode_fields(payload: &[u8]) -> Result<Vec<String>, CodecError> {
-    let mut fields = Vec::new();
-    let mut start = 0usize;
-    for (i, &b) in payload.iter().enumerate() {
-        if b == 0 {
-            let raw = &payload[start..i];
-            if !raw.is_ascii() {
-                return Err(CodecError::Malformed("non-ascii field"));
-            }
-            let s = std::str::from_utf8(raw).map_err(|_| CodecError::Malformed("non-utf8 field"))?;
-            fields.push(s.to_string());
-            start = i + 1;
-        }
-    }
-    // 末位元後仍有殘位元 = 有欄未被 `\0` 終止 → fail-closed（不吞、不猜）。
-    if start != payload.len() {
-        return Err(CodecError::Truncated);
-    }
-    Ok(fields)
-}
-
-/// encode v100+ 握手前綴：`b"API\0"` + framed `v{min}..{max}`（**版本字串為 raw payload，
-/// 不 null-terminate**——與一般 msgId 訊息的 null-terminated 欄不同）。
-fn encode_handshake_prefix(min: i32, max: i32) -> Vec<u8> {
-    let version = format!("v{min}..{max}");
-    let mut out = Vec::with_capacity(HANDSHAKE_PREFIX.len() + 4 + version.len());
-    out.extend_from_slice(HANDSHAKE_PREFIX);
-    out.extend_from_slice(&encode_frame(version.as_bytes()));
-    out
-}
-
-/// encode START_API：framed `["71","2",client_id,""]`（末欄 optionalCapabilities="" ）。
-fn encode_start_api(client_id: i32) -> Vec<u8> {
-    let cid = client_id.to_string();
-    encode_frame(&encode_fields(&[
-        START_API_MSG_ID,
-        START_API_VERSION,
-        &cid,
-        "",
-    ]))
-}
-
-/// encode reqCurrentTime：framed `["49","1"]`。
-fn encode_req_current_time() -> Vec<u8> {
-    encode_frame(&encode_fields(&[
-        REQ_CURRENT_TIME_MSG_ID,
-        REQ_CURRENT_TIME_VERSION,
-    ]))
-}
-
-/// 取一個已 decode frame 的 msgId（fields[0]）；空欄列 / 非數字 → typed err。
-fn frame_msg_id(payload: &[u8]) -> Result<i64, CodecError> {
-    let fields = decode_fields(payload)?;
-    let first = fields
-        .first()
-        .ok_or(CodecError::Malformed("empty field list"))?;
-    first
-        .parse::<i64>()
-        .map_err(|_| CodecError::NonNumericField("msg_id"))
-}
-
-/// decode server 握手 ACK：需 ≥2 欄；server_version 非數字 → `NonNumericField`（不捏 0）。
-fn decode_server_handshake_ack(payload: &[u8]) -> Result<HandshakeAck, CodecError> {
-    let fields = decode_fields(payload)?;
-    if fields.len() < 2 {
-        return Err(CodecError::Malformed("handshake ack needs >=2 fields"));
-    }
-    let server_version = fields[0]
-        .parse::<i32>()
-        .map_err(|_| CodecError::NonNumericField("server_version"))?;
-    Ok(HandshakeAck {
-        server_version,
-        connection_time: fields[1].clone(),
-    })
-}
-
-/// decode CURRENT_TIME（`["49","1",epoch]`）→ epoch 秒（i64）。msgId≠49 → `UnexpectedMsgId`；
-/// epoch 非數字 → `NonNumericField`（不捏 0）。
-fn decode_current_time(payload: &[u8]) -> Result<i64, CodecError> {
-    let fields = decode_fields(payload)?;
-    if fields.len() < 3 {
-        return Err(CodecError::Malformed("current_time needs >=3 fields"));
-    }
-    let msg_id = fields[0]
-        .parse::<i64>()
-        .map_err(|_| CodecError::NonNumericField("msg_id"))?;
-    if msg_id != CURRENT_TIME_MSG_ID {
-        return Err(CodecError::UnexpectedMsgId { got: msg_id });
-    }
-    fields[2]
-        .parse::<i64>()
-        .map_err(|_| CodecError::NonNumericField("current_time_epoch"))
-}
-
-/// decode ERR_MSG（msgId 4）的 error code。IB v100+ ERR_MSG 欄序：
-/// `[msgId, version, reqId, errorCode, errorMsg, ...]`——errorCode 在 index 3。需 ≥4 欄；
-/// 少於 4 欄或 code 非數字 → typed err（不捏值、不 panic）。
-///
-/// 為什麼只取 code：連線通知的 errorMsg 是通用 farm 名稱（非帳號），但驅動判定只需 code；
-/// 只回 numeric code 令 fail-closed 判據與 telemetry 皆零明文逃逸。
-fn decode_error_code(payload: &[u8]) -> Result<i64, CodecError> {
-    let fields = decode_fields(payload)?;
-    if fields.len() < 4 {
-        return Err(CodecError::Malformed("err_msg needs >=4 fields"));
-    }
-    fields[3]
-        .parse::<i64>()
-        .map_err(|_| CodecError::NonNumericField("error_code"))
-}
-
-/// decode MANAGED_ACCOUNTS（msgId 15）並做 **paper 前綴實檢**。IB 欄序：
-/// `[msgId, version, accountsCsv]`——fields[2] 為單欄逗號分隔帳號列表（與 fixture
-/// `"15\0 1\0 DU1234567\0"` 一致）。按逗號切 token，每個 token 必須 `DU` 開頭
-/// （IB paper 帳號固定前綴）；空列表 → `Malformed`（gateway 必回至少一個帳號，
-/// 空 = 損壞或偽造，fail-closed）。
-///
-/// 為什麼只回 boolean（prefix-only inspect then drop）：實檢只需「是否全 DU」，
-/// 明文帳號不 bind 具名變量、不 log、不 serialize、不進錯誤訊息——`fields` 於
-/// fn 結束即整體 drop，維持 drop 側保守性。
-fn managed_accounts_all_paper(payload: &[u8]) -> Result<bool, CodecError> {
-    let fields = decode_fields(payload)?;
-    let msg_id = fields
-        .first()
-        .ok_or(CodecError::Malformed("empty field list"))?
-        .parse::<i64>()
-        .map_err(|_| CodecError::NonNumericField("msg_id"))?;
-    if msg_id != MANAGED_ACCOUNTS_MSG_ID {
-        return Err(CodecError::UnexpectedMsgId { got: msg_id });
-    }
-    if fields.len() < 3 {
-        return Err(CodecError::Malformed("managed_accounts needs >=3 fields"));
-    }
-    // 空帳號欄 = 空列表 → Malformed（不以空欄當「已驗證」）。
-    if fields[2].is_empty() {
-        return Err(CodecError::Malformed("managed_accounts empty account list"));
-    }
-    // 逐 token 前綴實檢：任一空 token 或非 `DU` 開頭 → false（呼叫端 fail-closed）。
-    Ok(fields[2].split(',').all(|t| t.starts_with("DU")))
-}
 
 // ===========================================================================
 // (b) generic driver（pub(crate)，不自持 socket）

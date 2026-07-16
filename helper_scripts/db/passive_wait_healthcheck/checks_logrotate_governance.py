@@ -8,24 +8,31 @@ MODULE_NOTE:
     補進 passive_wait_healthcheck（OPS 審查 finding F4:repo 全域零 logrotate
     drift 防線,本哨兵即補此缺口）:
       [95] trade-core runtime logrotate conf 整檔 sha256 vs repo canonical
-      整檔 sha256 —— 不一致 > 24h = FAIL（預設 WARN）。
+      整檔 sha256 —— 不一致 > 24h（距上次合規安裝,drift 起點=最新 applied:true
+      manifest 的 mtime;無合規 manifest 的 mismatch=直接視為超窗）= FAIL
+      （預設 WARN）。
   主要函數:check_95_logrotate_runtime_matches_repo。
   依賴:helper_scripts/logrotate-openclaw.conf（repo canonical,檔頭載安裝契約）、
     Path.home()/"logrotate-openclaw.conf"（trade-core runtime 副本;
-    $OPENCLAW_LOGROTATE_RUNTIME_CONF 可覆寫）、$OPENCLAW_BASE_DIR（repo root）。
+    $OPENCLAW_LOGROTATE_RUNTIME_CONF 可覆寫）、$OPENCLAW_BASE_DIR（repo root）、
+    $OPENCLAW_DATA_DIR/logrotate_mutations/（唯一安裝入口
+    helper_scripts/cron/install_logrotate_from_repo.sh 落的兩段式 manifest;
+    本哨兵只認 applied:true 者為合規安裝,drift 起點=其最新 mtime）。
   硬邊界:純觀測 read-only,不寫 runtime、不 cp、不自動修復;失敗只上報
-    （修復動作=operator 依 canonical 檔頭安裝契約手動 cp）。任何 OSError 都
-    fail-soft 成訊息,不上拋。
+    （修復動作=operator 跑唯一安裝入口
+    `bash helper_scripts/cron/install_logrotate_from_repo.sh --apply`）。任何
+    OSError / 壞 JSON 都 fail-soft 成訊息或跳過,不上拋。
     為什麼整檔 sha256 而非 active 行比對（[92] 口徑）:canonical 檔頭安裝契約
-    明定「先改 canonical 過 review,再整檔 cp 到 runtime 路徑;禁只改 runtime
-    副本」,合規安裝的唯一動作=整檔 cp,故整檔位元組平價就是契約本身的
+    明定「先改 canonical 過 review,再經唯一安裝入口整檔落到 runtime 路徑;禁只改
+    runtime 副本」,合規安裝的唯一動作=整檔安裝,故整檔位元組平價就是契約本身的
     machine-check;檔頭註釋（載事故教訓/路徑理由）同屬契約面,漂移即治理信號。
-  已知限制:drift 時長以檔案 mtime 為 proxy 的內生限制——反覆手改 runtime 副本
-    會不斷刷新 24h 容忍窗,REQUIRED=1 的升級承諾對「持續竄改者」不成立;一次性
-    漂移後擱置 > 24h(本事故形態)則正確升級。偵測面不受影響:mismatch 每輪都
-    上報 WARN 且訊息含兩側短 hash,永不靜默。未來 mtime(時鐘偏移/竄改)另有
-    保守 guard 直接視為超窗,不受此限制影響。根治方向=仿 [92] 落安裝
-    receipt/manifest 供 drift 起點查證(follow-up,非本檔範圍)。
+  已知限制:首版以檔案 mtime max() 為 drift proxy 的「反覆手改 runtime 副本可
+    不斷刷新 24h 容忍窗」漏洞,已由 manifest proxy 收口——drift 起點改讀最新
+    applied:true manifest 的 mtime（嚴格對齊 [92] 的 manifest 口徑）:dry-run 只落
+    applied:false,不刷時鐘;刪光 manifest = 無合規安裝紀錄,mismatch 直接視為
+    超 24h 窗（fail-closed）;手改 runtime 副本不再影響 drift 時鐘。殘餘面=偽造
+    applied:true manifest 屬主動欺詐,超出治理哨兵威脅模型（與 [92] 同界）。
+    未來 manifest mtime（時鐘偏移/竄改）另有保守 guard 直接視為超窗。
 
   ID 說明:[95] 取當前最高 [94](bybit_announcement_sentinel) 之後的自由 slot,
     沿用 codebase [58]→[68] 重定址慣例。
@@ -34,32 +41,43 @@ MODULE_NOTE:
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import time
 from pathlib import Path
 
 
 # 環境:OPENCLAW_LOGROTATE_GOVERNANCE_REQUIRED=1 才啟 fail-closed;預設 WARN,避免
-# 首日部署 / runtime 尚未首次 cp 安裝時誤 FAIL 阻擋（與 [92] crontab 治理 REQUIRED 對齊）。
+# 首日部署 / runtime 尚未首次安裝時誤 FAIL 阻擋（與 [92] crontab 治理 REQUIRED 對齊）。
 _REQUIRED_ENV = "OPENCLAW_LOGROTATE_GOVERNANCE_REQUIRED"
 _TRUE_VALUES = {"1", "true", "yes", "on", "required"}
 
 # runtime conf 路徑覆寫;預設 Path.home()/"logrotate-openclaw.conf"。生產代碼禁硬編
-# /home/ncyu:Path.home() 在 trade-core 天然解析到 crontab Tier 0 整點行
+# 機器 home 絕對路徑:Path.home() 在 trade-core 天然解析到 crontab Tier 0 整點行
 # `0 * * * * /usr/sbin/logrotate -s .../logrotate-openclaw.state .../logrotate-openclaw.conf`
 # 引用的同一路徑。
 _RUNTIME_CONF_ENV = "OPENCLAW_LOGROTATE_RUNTIME_CONF"
 
-# [95] drift 容忍窗:不一致 < 24h 只 WARN（可能正在對齊 / canonical 剛過 review 更新,
-# cp 尚未跟上）;> 24h 才升級（與 [92] 24h 窗語意對齊）。
+# [95] drift 容忍窗:不一致 < 24h 只 WARN（合規安裝剛落地,可能 canonical 又前進 /
+# 正在對齊）;> 24h 才升級（與 [92] 24h 窗語意對齊）。
 _DRIFT_FAIL_SECONDS = 24 * 3600
 
 # sha256 塊大小:固定 1 MiB 迴圈餵 hashlib,恆定記憶體（理由見 _sha256_of docstring）。
 _SHA256_CHUNK_BYTES = 1024 * 1024
 
-# 未來 mtime 容忍:proxy 超出 now + 60s 即視為異常（本地 FS 不應有未來 mtime;時鐘
-# 偏移主機 cp / touch -t 竄改情境）,走保守超窗路徑。60s 吸收 NTP 級抖動。
+# 未來 mtime 容忍:manifest mtime 超出 now + 60s 即視為異常（本地 FS 不應有未來
+# mtime;時鐘偏移主機寫入 / touch -t 竄改情境）,走保守超窗路徑。60s 吸收 NTP 級抖動。
 _FUTURE_MTIME_TOLERANCE_SECONDS = 60.0
+
+# 修復提示:唯一安裝入口（裸 cp/手編=治理外行為,不落 applied:true manifest,
+# 本哨兵不視為合規安裝）。
+_INSTALL_HINT = "bash helper_scripts/cron/install_logrotate_from_repo.sh --apply"
+
+# manifest 尺寸上限:正常 manifest ~600B;超過 1 MiB 直接跳過不解析——env 誤指 /
+# symlink 指向巨檔時 read_text() 整檔進記憶體是 MemoryError 非 OSError,會崩整條
+# runner lane（與 _sha256_of 塊讀防 4.5GB log 同一事故理由）。fail-soft 契約必須真實:
+# runner 呼叫點在 try/finally 之外,任何上拋=整個 runner 斷電。
+_MANIFEST_MAX_BYTES = 1024 * 1024
 
 
 def _required_mode() -> bool:
@@ -75,6 +93,10 @@ def _repo_root() -> Path:
     if base:
         return Path(base)
     return Path.home() / "BybitOpenClaw" / "srv"
+
+
+def _data_dir() -> Path:
+    return Path(os.environ.get("OPENCLAW_DATA_DIR", "/tmp/openclaw").strip())
 
 
 def _runtime_conf_path() -> Path:
@@ -104,29 +126,48 @@ def _sha256_of(path: Path) -> str | None:
     return digest.hexdigest()
 
 
-def _drift_proxy_mtime(runtime: Path, canonical: Path) -> float | None:
-    """drift 起點 proxy = max(mtime(runtime), mtime(canonical));任一 stat 失敗回 None。
+def _newest_applied_manifest_mtime() -> float | None:
+    """最新一個 applied:true 的 logrotate_mutations/<UTC>Z/manifest.json mtime;無則 None。
 
-    為什麼用兩檔 mtime 取 max 近似「drift 已持續多久」:兩側任一近期被動過都代表
-    對齊流程可能正在進行 —— runtime 剛被 cp（operator 正在安裝）或 canonical 剛過
-    review 更新（cp 尚未跟上,屬安裝契約預期中的短暫窗）;取 max 即「最後一次任一側
-    變動」距今的時長,久於 24h 才視為漂移固化。logrotate 安裝契約=人工整檔 cp、無
-    治理入口 manifest 可查（對照 [92] 以 manifest mtime 近似上次合規安裝時間）,
-    檔案 mtime 是唯一可得 proxy。stat 失敗（sha 讀後檔案被移走等 race）→ None,
-    呼叫端保守視為超窗。
+    為什麼只認 applied:true（兩段式 manifest 的第二段,唯一安裝入口 post-verify
+    通過後才改寫）:dry-run / 中途被守衛拒絕的 manifest 停在 applied:false,不代表
+    runtime 曾被合規安裝,不得刷新 drift 時鐘——否則「跑 dry-run 續命」會複刻首版
+    file-mtime proxy 的手改刷新漏洞。`is True` 嚴格判定:字串 "false"/"true"、
+    數字 1 等 truthy 變體一律不算合規（JSON 布林才是安裝入口的契約輸出）。
+    逐檔 fail-soft:超尺寸（>1 MiB,防巨檔/symlink MemoryError）、讀不到、壞 JSON、
+    深巢 JSON（RecursionError）、非 dict 頂層（null/list/字串,.get 會 AttributeError）
+    一律跳過——壞檔不掩蓋其他合規紀錄,也不上拋崩 lane（runner 呼叫點無 per-check
+    try 包裹,fail-soft 契約必須真實）。
     """
-    try:
-        return max(runtime.stat().st_mtime, canonical.stat().st_mtime)
-    except OSError:
+    mut_root = _data_dir() / "logrotate_mutations"
+    if not mut_root.is_dir():
         return None
+    newest = None
+    for manifest in mut_root.glob("*/manifest.json"):
+        try:
+            st = manifest.stat()
+            if st.st_size > _MANIFEST_MAX_BYTES:
+                continue
+            data = json.loads(manifest.read_text(encoding="utf-8"))
+        except (OSError, ValueError, RecursionError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        if data.get("applied") is not True:
+            continue
+        if newest is None or st.st_mtime > newest:
+            newest = st.st_mtime
+    return newest
 
 
 def check_95_logrotate_runtime_matches_repo(now: float | None = None) -> tuple[str, str]:
     """[95] runtime logrotate conf 整檔 sha256 == repo canonical;不一致 > 24h → 升級。
 
     為什麼整檔 sha256 而非 active 行比對（[92] 口徑）:canonical 檔頭安裝契約明定
-    合規安裝的唯一動作=整檔 cp,位元組平價即契約的 machine-check;檔頭註釋（載
-    事故教訓/路徑理由）同屬契約面,漂移即治理信號。
+    合規安裝的唯一動作=經唯一安裝入口整檔落地,位元組平價即契約的 machine-check;
+    檔頭註釋（載事故教訓/路徑理由）同屬契約面,漂移即治理信號。drift 起點=最新
+    applied:true manifest mtime（≈ 上次合規安裝時間,與 [92] manifest 口徑嚴格
+    對齊）;無合規 manifest 的 mismatch 直接視為超 24h 窗。
     """
     now_ts = time.time() if now is None else now
     sev = _fail_severity()
@@ -143,43 +184,45 @@ def check_95_logrotate_runtime_matches_repo(now: float | None = None) -> tuple[s
         return (
             sev,
             f"{base}; runtime conf 缺失或不可讀: {runtime} — 每小時 logrotate cron 將無 conf"
-            f" 可用=整機零輪替;修復: cp {canonical} {runtime}",
+            f" 可用=整機零輪替;修復: {_INSTALL_HINT}",
         )
 
     if runtime_sha == canonical_sha:
         return ("PASS", f"{base}; runtime == canonical (sha256 {canonical_sha[:12]})")
 
-    # 不一致:看已持續多久（proxy 語意見 _drift_proxy_mtime docstring）。
-    proxy = _drift_proxy_mtime(runtime, canonical)
-    if proxy is None:
+    # 不一致:drift 起點=最新合規安裝 manifest（語意見 _newest_applied_manifest_mtime）。
+    newest = _newest_applied_manifest_mtime()
+    if newest is None:
         return (
             sev,
-            f"{base}; runtime != canonical 且 mtime 不可讀 — drift 保守視為超 24h 窗"
+            f"{base}; runtime != canonical 且無合規安裝 manifest（治理入口從未 --apply）"
+            f" — drift 視為超 24h 窗"
             f"（runtime {runtime_sha[:12]} / canonical {canonical_sha[:12]}）;"
-            f"修復: cp {canonical} {runtime}",
+            f"修復: {_INSTALL_HINT}",
         )
     # 未來 mtime 保守 guard:本地 FS 不應有未來 mtime（容忍 60s 抖動）。時鐘偏移主機
-    # cp / touch -t 竄改會讓 age=max(0, 負)=0 永久落在容忍窗、壓制升級（E2 P1 反例）,
-    # 故一律走保守超窗路徑升 sev。
-    if proxy > now_ts + _FUTURE_MTIME_TOLERANCE_SECONDS:
+    # 寫 manifest / touch -t 竄改會讓 age=max(0, 負)=0 永久落在容忍窗、壓制升級
+    # （E2 P1 反例同型）,故一律走保守超窗路徑升 sev。
+    if newest > now_ts + _FUTURE_MTIME_TOLERANCE_SECONDS:
         return (
             sev,
-            f"{base}; runtime != canonical 且 mtime 在未來,疑時鐘偏移或竄改——保守視為超窗"
+            f"{base}; runtime != canonical 且最新合規 manifest mtime 在未來,疑時鐘偏移或"
+            f"竄改——保守視為超窗"
             f"（runtime {runtime_sha[:12]} / canonical {canonical_sha[:12]}）;"
-            f"修復: cp {canonical} {runtime}",
+            f"修復: {_INSTALL_HINT}",
         )
-    age = max(0.0, now_ts - proxy)
+    age = max(0.0, now_ts - newest)
     if age > _DRIFT_FAIL_SECONDS:
         return (
             sev,
-            f"{base}; runtime != canonical 已 {age / 3600:.1f}h (> 24h) — "
+            f"{base}; runtime != canonical 已 {age / 3600:.1f}h (> 24h,距上次合規安裝) — "
             f"runtime {runtime_sha[:12]} / canonical {canonical_sha[:12]};"
-            f"修復: cp {canonical} {runtime}",
+            f"修復: {_INSTALL_HINT}",
         )
     return (
         "WARN",
-        f"{base}; runtime != canonical {age / 3600:.1f}h (< 24h 容忍窗) — 可能正在對齊"
-        f"（runtime 剛 cp / canonical 剛更新）",
+        f"{base}; runtime != canonical {age / 3600:.1f}h (< 24h 容忍窗,剛有合規安裝) — "
+        f"可能 canonical 又前進 / 正在對齊",
     )
 
 
