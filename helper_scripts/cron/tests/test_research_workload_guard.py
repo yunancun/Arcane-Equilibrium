@@ -1139,6 +1139,12 @@ def test_default_off_tracking_scope_is_unbounded_and_fork_closed() -> None:
     assert '            "$@" &' not in src
 
 
+def test_scope_launch_uses_synchronous_scope_without_incompatible_wait_flag() -> None:
+    src = GUARD.read_text(encoding="utf-8")
+    assert "systemd-run --user --scope --collect --quiet" in src
+    assert "systemd-run --user --scope --wait" not in src
+
+
 def test_async_scope_launch_defers_signal_until_child_pid_is_bound() -> None:
     src = GUARD.read_text(encoding="utf-8")
     pending = src.index('RESEARCH_GUARD_LAUNCH_STATE="pending"')
