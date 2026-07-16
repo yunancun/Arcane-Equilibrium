@@ -2602,8 +2602,8 @@ def test_outcome_refresh_projection_batches_mature_backlog_oldest_first(
     assert projection.pending_attempt_count == 4
     assert projection.mature_pending_attempt_count == 4
     assert projection.selected_attempt_count == 2
-    assert projection.mature_backlog_remaining_count == 2
-    assert projection.pending_backlog_remaining_count == 2
+    assert projection.mature_backlog_remaining_count == 4
+    assert projection.pending_backlog_remaining_count == 4
     assert projection.retained_ledger_scan_complete is True
     assert projection.pending_universe_fully_processed is False
 
@@ -2644,8 +2644,8 @@ def test_outcome_refresh_projection_collapses_exact_admission_duplicates(
     assert projection.pending_attempt_count == 1
     assert projection.selected_attempt_count == 1
     assert projection.duplicate_admission_row_count == 3
-    assert projection.pending_backlog_remaining_count == 0
-    assert projection.pending_universe_fully_processed is True
+    assert projection.pending_backlog_remaining_count == 1
+    assert projection.pending_universe_fully_processed is False
 
 
 def test_outcome_refresh_projection_conflicts_distinct_effective_fallback_timestamps(
@@ -2787,7 +2787,7 @@ def test_outcome_refresh_projection_quarantines_outcome_identity_conflicts(
     assert projection.duplicate_admission_row_count == 1
     assert projection.pending_attempt_count == 4
     assert projection.selected_attempt_count == 1
-    assert projection.pending_backlog_remaining_count == 3
+    assert projection.pending_backlog_remaining_count == 4
     assert projection.pending_universe_fully_processed is False
 
     blocked_only = read_outcome_refresh_ledger_projection(
@@ -2800,7 +2800,7 @@ def test_outcome_refresh_projection_quarantines_outcome_identity_conflicts(
     assert [row["attempt_id"] for row in blocked_only.rows] == ["safe"]
     assert blocked_only.conflict_attempt_count == 2
     assert blocked_only.pending_attempt_count == 3
-    assert blocked_only.pending_backlog_remaining_count == 2
+    assert blocked_only.pending_backlog_remaining_count == 3
     assert blocked_only.pending_universe_fully_processed is False
 
 
@@ -2930,7 +2930,7 @@ def test_outcome_refresh_projection_includes_only_deduped_selected_probe_fills(
     ]
     assert projection.relevant_fill_count == 1
     assert projection.projected_row_count == 2
-    assert projection.mature_backlog_remaining_count == 1
+    assert projection.mature_backlog_remaining_count == 2
 
     blocked_only = read_outcome_refresh_ledger_projection(
         ledger,
@@ -3034,7 +3034,171 @@ def test_outcome_refresh_projection_successive_batches_advance_without_duplicate
     assert second_ids == ["blocked-2", "blocked-3"]
     assert set(first_ids).isdisjoint(second_ids)
     assert second.completed_attempt_count == 2
-    assert second.pending_backlog_remaining_count == 0
+    assert second.pending_backlog_remaining_count == 2
+
+
+def _build_two_selected_outcome_refresh(
+    tmp_path: Path,
+) -> tuple[
+    Path,
+    outcome_refresh_module.OutcomeRefreshLedgerProjection,
+    dict,
+]:
+    ledger = tmp_path / "probe_ledger.jsonl"
+    event_ts = 1_784_116_800_000
+    _write_jsonl_bytes(
+        ledger,
+        [
+            _admission_row(
+                "blocked-a",
+                "ORDER_AUTHORITY_NOT_GRANTED",
+                "ETHUSDT",
+                "Sell",
+                event_ts,
+            ),
+            _admission_row(
+                "blocked-b",
+                "ORDER_AUTHORITY_NOT_GRANTED",
+                "ETHUSDT",
+                "Sell",
+                event_ts,
+            ),
+        ],
+    )
+    selection = OutcomeRefreshSelection(record_blocked_outcomes=True)
+    now = dt.datetime(2026, 7, 16, 13, tzinfo=dt.timezone.utc)
+    projection = read_outcome_refresh_ledger_projection(
+        ledger,
+        selection=selection,
+        now_utc=now,
+        outcome_cfg=ProbeOutcomeConfig(horizon_minutes=60),
+        batch_limit=2,
+    )
+    batch = build_cost_gate_outcome_refresh_batch(
+        projection.rows,
+        [
+            {"symbol": "ETHUSDT", "ts_ms": event_ts, "close": 2000.0},
+            {
+                "symbol": "ETHUSDT",
+                "ts_ms": event_ts + 3_600_000,
+                "close": 1990.0,
+            },
+        ],
+        now_utc=now,
+        selection=selection,
+        outcome_cfg=ProbeOutcomeConfig(horizon_minutes=60),
+        price_source="test",
+    )
+    return ledger, projection, batch
+
+
+@pytest.mark.parametrize(
+    "key_case",
+    ["invalid", "duplicate", "outside_selected_set"],
+)
+def test_outcome_refresh_append_rejects_nonunique_or_unselected_keys(
+    tmp_path: Path,
+    key_case: str,
+) -> None:
+    ledger, projection, batch = _build_two_selected_outcome_refresh(tmp_path)
+    first = copy.deepcopy(batch["outcomes"][0])
+    second = copy.deepcopy(batch["outcomes"][1])
+    if key_case == "invalid":
+        second["attempt_id"] = None
+    elif key_case == "duplicate":
+        second = copy.deepcopy(first)
+    else:
+        second["attempt_id"] = "not-selected"
+    batch["outcomes"] = [first, second]
+    batch["blocked_signal_outcomes"] = copy.deepcopy(batch["outcomes"])
+    before_bytes = ledger.read_bytes()
+
+    appended = outcome_refresh_module.append_refresh_outcomes_to_ledger(
+        ledger,
+        batch,
+        projection=projection,
+    )
+
+    assert appended == 0
+    assert batch["append_requested"] is True
+    assert batch["appended_to_ledger"] is False
+    assert batch["appended_outcome_count"] == 0
+    assert batch["selected_attempt_count"] == 2
+    assert batch["selected_terminalized_attempt_count"] == 0
+    assert batch["selected_unterminalized_attempt_count"] == 2
+    assert batch["mature_backlog_remaining_count"] == 2
+    assert batch["pending_backlog_remaining_count"] == 2
+    assert batch["pending_universe_fully_processed"] is False
+    assert ledger.read_bytes() == before_bytes
+
+
+def test_outcome_refresh_append_accepts_unique_selected_keys(
+    tmp_path: Path,
+) -> None:
+    ledger, projection, batch = _build_two_selected_outcome_refresh(tmp_path)
+
+    appended = outcome_refresh_module.append_refresh_outcomes_to_ledger(
+        ledger,
+        batch,
+        projection=projection,
+    )
+
+    assert appended == 2
+    assert batch["appended_outcome_count"] == 2
+    assert batch["selected_attempt_count"] == 2
+    assert batch["selected_terminalized_attempt_count"] == 2
+    assert batch["selected_unterminalized_attempt_count"] == 0
+    assert batch["mature_backlog_remaining_count"] == 0
+    assert batch["pending_backlog_remaining_count"] == 0
+    assert batch["pending_universe_fully_processed"] is True
+    assert len(read_jsonl_ledger(ledger)) == 4
+
+
+def test_outcome_refresh_partial_append_exception_accounts_only_success(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    ledger, projection, batch = _build_two_selected_outcome_refresh(tmp_path)
+    first_attempt_id = batch["outcomes"][0]["attempt_id"]
+    append_jsonl = outcome_refresh_module.append_jsonl_ledger
+    calls = 0
+
+    def fail_after_one(path: Path, row: dict) -> None:
+        nonlocal calls
+        calls += 1
+        if calls > 1:
+            raise RuntimeError("injected append failure after one success")
+        append_jsonl(path, row)
+
+    monkeypatch.setattr(
+        outcome_refresh_module,
+        "append_jsonl_ledger",
+        fail_after_one,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="injected append failure after one success",
+    ):
+        outcome_refresh_module.append_refresh_outcomes_to_ledger(
+            ledger,
+            batch,
+            projection=projection,
+        )
+
+    rows = read_jsonl_ledger(ledger)
+    assert calls == 2
+    assert len(rows) == 3
+    assert rows[-1]["attempt_id"] == first_attempt_id
+    assert batch["append_requested"] is True
+    assert batch["appended_to_ledger"] is True
+    assert batch["appended_outcome_count"] == 1
+    assert batch["selected_attempt_count"] == 2
+    assert batch["selected_terminalized_attempt_count"] == 1
+    assert batch["selected_unterminalized_attempt_count"] == 1
+    assert batch["mature_backlog_remaining_count"] == 1
+    assert batch["pending_backlog_remaining_count"] == 1
+    assert batch["pending_universe_fully_processed"] is False
 
 
 def test_outcome_review_streaming_projection_matches_full_ledger_semantics(
@@ -5159,8 +5323,10 @@ def test_outcome_refresh_dry_run_append_and_idempotent_blocked_signal_rows(
     assert dry_run["pending_attempt_count"] == 1
     assert dry_run["mature_pending_attempt_count"] == 1
     assert dry_run["selected_attempt_count"] == 1
-    assert dry_run["mature_backlog_remaining_count"] == 0
-    assert dry_run["pending_backlog_remaining_count"] == 0
+    assert dry_run["selected_terminalized_attempt_count"] == 0
+    assert dry_run["selected_unterminalized_attempt_count"] == 1
+    assert dry_run["mature_backlog_remaining_count"] == 1
+    assert dry_run["pending_backlog_remaining_count"] == 1
     assert dry_run["completed_attempt_count"] == 0
     assert dry_run["duplicate_admission_row_count"] == 0
     assert dry_run["conflict_attempt_count"] == 0
@@ -5171,7 +5337,7 @@ def test_outcome_refresh_dry_run_append_and_idempotent_blocked_signal_rows(
     assert dry_run["projected_bytes"] > 0
     assert dry_run["batch_limit"] == 10_000
     assert dry_run["retained_ledger_scan_complete"] is True
-    assert dry_run["pending_universe_fully_processed"] is True
+    assert dry_run["pending_universe_fully_processed"] is False
     assert len(read_jsonl_ledger(ledger_path)) == 1
 
     appended = refresh_cost_gate_outcomes_from_price_rows(
@@ -5187,6 +5353,11 @@ def test_outcome_refresh_dry_run_append_and_idempotent_blocked_signal_rows(
     assert appended["append_requested"] is True
     assert appended["appended_to_ledger"] is True
     assert appended["appended_outcome_count"] == 1
+    assert appended["selected_terminalized_attempt_count"] == 1
+    assert appended["selected_unterminalized_attempt_count"] == 0
+    assert appended["mature_backlog_remaining_count"] == 0
+    assert appended["pending_backlog_remaining_count"] == 0
+    assert appended["pending_universe_fully_processed"] is True
     assert len(rows) == 2
     assert rows[1]["record_type"] == "blocked_signal_outcome"
     assert rows[1]["promotion_evidence"] is False
@@ -5204,7 +5375,45 @@ def test_outcome_refresh_dry_run_append_and_idempotent_blocked_signal_rows(
     assert rerun["window_count"] == 0
     assert rerun["outcome_count"] == 0
     assert rerun["appended_outcome_count"] == 0
+    assert rerun["selected_terminalized_attempt_count"] == 0
+    assert rerun["selected_unterminalized_attempt_count"] == 0
+    assert rerun["pending_backlog_remaining_count"] == 0
+    assert rerun["pending_universe_fully_processed"] is True
     assert len(read_jsonl_ledger(ledger_path)) == 2
+
+
+def test_outcome_refresh_missing_price_keeps_selected_attempt_pending(
+    tmp_path: Path,
+) -> None:
+    ledger_path = tmp_path / "probe_ledger.jsonl"
+    not_granted = evaluate_probe_admission(
+        _runtime_plan(),
+        _selected_reject_event(),
+        now_utc=dt.datetime(2026, 6, 21, 11, 10, tzinfo=dt.timezone.utc),
+        adapter_enabled=True,
+    )
+    append_jsonl_ledger(ledger_path, build_ledger_record(not_granted))
+
+    batch = refresh_cost_gate_outcomes_from_price_rows(
+        ledger_path,
+        [],
+        now_utc=dt.datetime(2026, 6, 21, 11, 30, tzinfo=dt.timezone.utc),
+        selection=OutcomeRefreshSelection(record_blocked_outcomes=True),
+        outcome_cfg=ProbeOutcomeConfig(horizon_minutes=60, cost_bps=4.0),
+        append_ledger=True,
+    )
+
+    assert batch["window_count"] == 1
+    assert batch["price_observation_count"] == 0
+    assert batch["outcome_count"] == 0
+    assert batch["appended_outcome_count"] == 0
+    assert batch["selected_attempt_count"] == 1
+    assert batch["selected_terminalized_attempt_count"] == 0
+    assert batch["selected_unterminalized_attempt_count"] == 1
+    assert batch["mature_backlog_remaining_count"] == 1
+    assert batch["pending_backlog_remaining_count"] == 1
+    assert batch["pending_universe_fully_processed"] is False
+    assert len(read_jsonl_ledger(ledger_path)) == 1
 
 
 def test_outcome_refresh_pg_price_rows_feed_batch_without_duplicate_queries():
