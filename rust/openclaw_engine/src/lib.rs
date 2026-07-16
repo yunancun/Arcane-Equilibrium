@@ -138,6 +138,12 @@ pub mod ibkr_tws_session;
 // 單一出口證明（mint 模塊私有）令出站送出編譯期必經 governor。S2 心跳出站經此接線。純同步、
 // 注入時鐘、無 socket。與 B1/wire/session 同屬 default build 被 DCE 的 TWS 連接器面。
 pub mod ibkr_tws_pacing;
+// IBKR W3 TWS session driver（W3-S4）：端到端讀迴圈——承 B1 driver 範式,把 wire(S1)+FSM(S2)+
+// pacing(S3) 用注入 TransportFactory（fake=tokio duplex / W8=TCP）串成 permit→connect→握手→Ready→
+// 心跳（過 governor 單一出口 send_framed）→ 故障→重連對賬。production 恆撞 EnvelopeRequiredStub 停
+// Disconnected（INV-1;granting provider 僅測試域）。零真 socket、零 production caller（W4 IPC 才接）→
+// 與 B1/wire/session/pacing 同屬 default build 被 DCE 的 TWS 連接器面（g4 + fake 缺席審計驗證）。
+pub mod ibkr_tws_driver;
 // IBKR B1 只讀 TWS 連接器（ADR-0048 / AMD-2026-07-08-01，G4 首次接觸）：connect handshake
 // + reqCurrentTime 最小首接觸；純 codec + generic driver + 3 層惰性 gate；唯一具體
 // TcpStream::connect 於 `ibkr_g4_contact` feature 後（default build 無 socket、無 caller）。
