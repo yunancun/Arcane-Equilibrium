@@ -8,6 +8,9 @@
 pub mod agent;
 pub mod asset_venue;
 pub mod cognitive;
+pub mod ibkr_account_summary_row;
+pub mod ibkr_commissions_row;
+pub mod ibkr_executions_row;
 pub mod ibkr_feature_flag_secret_auth;
 pub mod ibkr_non_bybit_api_allowlist;
 pub mod ibkr_paper_lifecycle;
@@ -15,6 +18,7 @@ pub mod ibkr_phase2_artifact;
 pub mod ibkr_phase2_gate;
 pub mod ibkr_phase2_policies;
 pub mod ibkr_phase2_runtime;
+pub mod ibkr_positions_row;
 pub mod ibkr_tws_connection_health;
 pub mod ibkr_tws_session_state;
 pub mod intent;
@@ -50,6 +54,20 @@ pub mod stock_etf_tiny_live_eligibility;
 pub use agent::{AgentMessage, AgentRole, MessageType};
 pub use asset_venue::{AssetClass, Venue, VenueParseError};
 pub use cognitive::{CognitiveParams, DreamInsight, RegretSummary, SkippedOpportunity};
+pub use ibkr_account_summary_row::{
+    is_nonnegative_decimal_string, is_positive_decimal_string, is_signed_decimal_string,
+    IbkrAccountSummaryRowBlocker, IbkrAccountSummaryRowV1, IbkrAccountSummaryRowVerdict,
+    IbkrAccountSummaryTagV1, IBKR_ACCOUNT_SUMMARY_ROW_CONTRACT_ID,
+    IBKR_ACCOUNT_SUMMARY_WIRE_TAG_WHITELIST,
+};
+pub use ibkr_commissions_row::{
+    IbkrCommissionsRowBlocker, IbkrCommissionsRowV1, IbkrCommissionsRowVerdict,
+    IBKR_COMMISSIONS_ROW_CONTRACT_ID,
+};
+pub use ibkr_executions_row::{
+    IbkrExecutionSideV1, IbkrExecutionsRowBlocker, IbkrExecutionsRowV1, IbkrExecutionsRowVerdict,
+    IBKR_EXECUTIONS_ROW_CONTRACT_ID,
+};
 pub use ibkr_feature_flag_secret_auth::{
     evaluate_feature_flag_secret_auth_matrix, FeatureFlagSecretAuthBlocker,
     FeatureFlagSecretAuthMatrixV1, FeatureFlagSecretAuthVerdict, StockEtfAuthorizationEnvelopeV1,
@@ -94,6 +112,10 @@ pub use ibkr_phase2_runtime::{
     IbkrGatewayProcessMode, IbkrSecretSlotContractBlocker, IbkrSecretSlotContractV1,
     IbkrSecretSlotContractVerdict, IbkrSecretSlotPosture, IBKR_API_SESSION_TOPOLOGY_CONTRACT_ID,
     IBKR_SECRET_SLOT_CONTRACT_ID,
+};
+pub use ibkr_positions_row::{
+    IbkrPositionsRowBlocker, IbkrPositionsRowV1, IbkrPositionsRowVerdict, IbkrSecTypeV1,
+    IBKR_POSITIONS_ROW_CONTRACT_ID,
 };
 pub use ibkr_tws_connection_health::{
     IbkrConnectionHealthBlocker, IbkrConnectionHealthEntitlementStateV1,
