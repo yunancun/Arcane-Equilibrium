@@ -29,3 +29,4 @@ TradeBot 的**首個非-Bybit 資產類**——美股/ETF via Interactive Broker
 - **2026-07-09**:P1 loader `3217e94b4`/P2 gate producer `b89c7b2d8`/B1 readonly client `aedca2291` 全 landed + 引擎 rebuild 部署(`26401fbb`)——上文「P1 next/Linux cargo 待跑」失效。
 - **2026-07-11(AMD-2026-07-11-01 Accepted)**:「live/tiny-live 永久 DENIED、不建 live gate、任何 order-write(含 paper)禁」**僅在活化維度存續**;capability development 全授權(readonly/paper/shadow/tiny-live/live 全模式 no-contact 開發)。任何真實接觸(含 readonly)需 Rust 驗證 `ibkr_activation_envelope_v1`+authenticated Operator 活化紀錄;margin/short/options/cfd/transfer 永久 denied 不變。AMD-2026-07-09-01(GUI 憑證寫路徑)acceptance 前廢止。
 - **2026-07-15~16(W2-W4+W-CI 收口)**:normalizer「任何真值=violation」已演進為三層 lockstep(W4);G4 一次性批准語義被 EA3(envelope+活化紀錄)吸收;工程正本=repo 根 `IBKR_TODO.md`(v2)+loop `docs/agents/ibkr-live-capability-loop.md`(v2)+帳本 PROGRESS.md,本檔僅史料。
+- **2026-07-16(R8 追記)**:Operator 裁 **D2=採用**(W5+W8a+W9a 齊備即開 EA1-EA4 唯讀跑道,每步仍逐一活化)+ **AMD-07-08-01 澄清 #3 acknowledged**(EA3 前置清項)。
