@@ -8,7 +8,7 @@ name: ci
 # - path-filter：push 事件由 changes job 用 event.before...sha 精確 diff 分類
 #   （不再 --all），純 docs/governance 合併不再觸發整棵 Rust 重建；schedule 仍 --all。
 # - Rust target/ 快取：rust-check-linux / rust-check-macos / schema-contract /
-#   rust-ibkr-tests 四個編譯密集 job 掛 Swatinem/rust-cache@v2（workspace 根 = rust/）。
+#   rust-ibkr-tests 四個編譯密集 job 掛 Swatinem/rust-cache@v2（full SHA pin；workspace 根 = rust/）。
 #   alr-fit-verifier 刻意不快取——它靠「乾淨 offline target」做 locked-online↔
 #   clean-offline 對賬，快取會破壞其 hermetic 語義。
 on:
@@ -40,7 +40,7 @@ jobs:
       schema: ${{ steps.classify.outputs.schema }}
       stock_etf: ${{ steps.classify.outputs.stock_etf }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
       - name: Classify the exact diff
@@ -75,7 +75,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
       - name: Check locked migration checksums
@@ -92,7 +92,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Check Agent Spine stable_id literal duplication
         run: bash helper_scripts/ci/check_stable_id_duplication.sh
 
@@ -104,9 +104,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.12'
       - name: Install focused test dependency
@@ -130,9 +130,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.12'
       - name: Install focused test dependency
@@ -159,9 +159,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.12'
       - name: Install focused test dependency
@@ -196,12 +196,12 @@ jobs:
       run:
         working-directory: rust
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Install target
         run: rustup target add x86_64-unknown-linux-gnu
       - name: Cache Rust build artifacts
         # workspace 根 = rust/（Cargo.lock 所在），非成員 crate openclaw_engine。
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: rust
       - name: Cargo check
@@ -221,12 +221,12 @@ jobs:
       run:
         working-directory: rust
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Install target
         run: rustup target add aarch64-apple-darwin
       - name: Cache Rust build artifacts
         # macOS 10x runner，快取效益最高；共用 rust/target。
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: rust
       - name: Test isolated ALR fit verifier
@@ -269,11 +269,11 @@ jobs:
           --health-timeout 3s
           --health-retries 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Cache Rust build artifacts
         # 本 job 反覆編譯 openclaw_engine 測試二進位（V157/V159/V160 baseline +
         # schema_contract_test），是最耗時的 Rust 編譯 job，快取效益最大。
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: rust
       - name: Install psql + psycopg2
@@ -447,9 +447,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.12'
       - name: Install pytest
@@ -514,11 +514,11 @@ jobs:
       run:
         working-directory: rust
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Cache Rust build artifacts
         # 反覆 cargo test openclaw_types + openclaw_engine（--lib/--bin）並暖 target/
         # 供後續 g4 / fake-tws symbol audit 重用，35min timeout 的重編譯 job，快取效益大。
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: rust
       - name: Run openclaw_types ibkr acceptance tests

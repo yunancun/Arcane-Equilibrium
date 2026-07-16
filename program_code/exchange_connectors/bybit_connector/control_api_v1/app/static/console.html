@@ -281,10 +281,6 @@
       <div class="mc-label">Control API</div>
       <div class="mc-val" id="s-api">--</div>
     </div>
-    <div class="mc mc--md">
-      <div class="mc-label">OpenClaw Gateway</div>
-      <div class="mc-val" id="s-oc">--</div>
-    </div>
     <!-- 引擎狀態燈：Rust openclaw_engine 是交易/風控/執行唯一權威，宕機時所有下單
          與風控路徑失效。原本 engine_alive 只在 System tab 一張卡，跨 tab 時看不到；
          此處掛在側欄常駐區，任何 tab 都能看到引擎存活狀態（只讀，不改任何 live 授權/gate）。 -->
@@ -821,7 +817,6 @@ async function api(path) {
   } catch(e) { return null; }
 }
 
-const OC = window.location.origin + '/openclaw';
 const SIDEBAR_REFRESH_MS = 30000;
 let _sidebarRefreshInFlight = false;
 
@@ -1032,19 +1027,6 @@ async function refreshSidebar() {
         d.data.today_tokens.toLocaleString() + ' tokens | 30d: ' + ocBalance(d.data.total_cost_30d, 2);
     }
   } catch(e) {}
-
-  // OpenClaw
-  try {
-    const r = await fetch(OC + '/health', {
-      credentials: 'same-origin'  // HttpOnly cookie sent automatically / 自動發送 HttpOnly cookie
-    });
-    const h = await r.json();
-    document.getElementById('s-oc').textContent = h.ok ? 'Online' : 'Down';
-    document.getElementById('s-oc').className = 'mc-val ' + (h.ok ? 'green' : 'red');
-  } catch(e) {
-    document.getElementById('s-oc').textContent = 'Offline';
-    document.getElementById('s-oc').className = 'mc-val red';
-  }
 
   // Rust 引擎存活燈：只讀 /api/v1/openclaw/status 的 runtime.engine_alive（同 System tab
   // loadEngineAlive 的權威來源）。三態 fail-closed：true=綠在線 / false=紅離線 /

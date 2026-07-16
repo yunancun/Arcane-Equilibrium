@@ -38,8 +38,6 @@
   .btn:hover{background:var(--accent);color:var(--bg-app)}
   .btn:disabled{opacity:0.5;cursor:not-allowed}
   .error{color:var(--red);font-size:12px;margin-top:12px;display:none}
-  .links{margin-top:20px;font-size:11px;color:var(--dim)}
-  .links a{color:var(--accent);text-decoration:none}
 </style>
 </head>
 <body>
@@ -62,16 +60,8 @@
     <button type="submit" class="btn" id="loginBtn">Login</button>
   </form>
   <div class="error" id="error"></div>
-  <div class="links">
-    <!-- Use dynamic origin to avoid hardcoded Tailscale URL / 使用動態 origin 避免硬编码 Tailscale URL -->
-    <a id="gw-link" href="#" target="_blank">OpenClaw Gateway</a>
-  </div>
 </div>
 <script>
-// Set gateway link dynamically using current origin to avoid hardcoded Tailscale URL
-// 使用當前 origin 動態設置網關链接，避免硬编码 Tailscale URL
-document.getElementById('gw-link').href = window.location.origin + '/openclaw';
-
 // Password visibility toggle / 密码顯示切换
 document.getElementById('pwToggle').addEventListener('click', function() {
   const pw = document.getElementById('password');
