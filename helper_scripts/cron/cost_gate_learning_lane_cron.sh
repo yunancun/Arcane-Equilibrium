@@ -151,7 +151,10 @@ FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_TOP_LIMIT="${OPENCLAW_COST_GATE_FALS
 SHADOW_PLACEMENT_MAX_ARTIFACT_AGE_HOURS="${OPENCLAW_COST_GATE_SHADOW_PLACEMENT_MAX_ARTIFACT_AGE_HOURS:-24}"
 STALE_LOCK_MIN="${OPENCLAW_COST_GATE_LEARNING_STALE_LOCK_MIN:-30}"
 
-mkdir -p "$LANE_DIR" "$COUNTERFACTUAL_DIR" "$DATA_FLOW_DIR" "$ORDER_TOUCHABILITY_DIR" "$LOG_DIR" "$LOCK_ROOT" "$HEARTBEAT_DIR"
+source "$BASE/helper_scripts/cron/lib/research_workload_guard.sh"
+research_guard_prepare_private_dirs \
+    "$LANE_DIR" "$COUNTERFACTUAL_DIR" "$DATA_FLOW_DIR" \
+    "$ORDER_TOUCHABILITY_DIR" "$LOG_DIR" "$LOCK_ROOT" "$HEARTBEAT_DIR" || exit 0
 
 ts() { date -u '+%Y-%m-%d %H:%M:%S'; }
 
@@ -362,23 +365,40 @@ if [[ -z "$PYBIN" ]]; then
     fi
 fi
 
-touch "$HEARTBEAT_DIR/cost_gate_learning_lane.last_fire" 2>/dev/null || true
-
-if [[ -d "$LOCK_DIR" ]] && [[ -n "$(find "$LOCK_DIR" -maxdepth 0 -mmin +"$STALE_LOCK_MIN" 2>/dev/null)" ]]; then
-    echo "[$(ts)] WARN: stale lock (>${STALE_LOCK_MIN}min) cleared: $LOCK_DIR" >> "$LOG"
-    rmdir "$LOCK_DIR" 2>/dev/null || true
-fi
-
-if ! mkdir "$LOCK_DIR" 2>/dev/null; then
-    echo "[$(ts)] SKIP: cost-gate learning lane already running (lock held)" >> "$LOG"
+ACTUAL_SOURCE_HEAD="$(git -C "$BASE" rev-parse HEAD 2>/dev/null || true)"
+if [[ ! "$ACTUAL_SOURCE_HEAD" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "[$(ts)] ERROR: cost-gate learning source head is unavailable" >> "$LOG"
     exit 0
 fi
-release_lock() {
-    local rc=$?
-    rmdir "$LOCK_DIR" 2>/dev/null || true
-    return "$rc"
+guard_rc=0
+research_guard_acquire --lane cost \
+    --lock-dir "$LOCK_DIR" \
+    --source-head "$ACTUAL_SOURCE_HEAD" \
+    --heartbeat-file "$HEARTBEAT_DIR/cost_gate_learning_lane.last_fire" || guard_rc=$?
+if (( guard_rc != 0 )); then
+    echo "[$(ts)] SKIP: cost-gate learning lane lock unavailable rc=${guard_rc}" >> "$LOG"
+    exit 0
+fi
+trap research_guard_release EXIT
+trap 'research_guard_abort_signal INT 130' INT
+trap 'research_guard_abort_signal TERM 143' TERM
+
+run_cost_stage() {
+    research_guard_run_stage \
+        --lane cost \
+        --memory-max-bytes 12884901888 \
+        --tasks-max 32 \
+        -- "$@"
 }
-trap release_lock EXIT INT TERM
+
+run_cost_publication_stage() {
+    research_guard_run_stage \
+        --lane cost \
+        --memory-max-bytes 12884901888 \
+        --tasks-max 32 \
+        --preserve-completion-manifest-on-failure \
+        -- "$@"
+}
 
 SECRETS_ROOT="${OPENCLAW_SECRETS_ROOT:-$HOME/BybitOpenClaw/secrets}"
 ENV_FILE="$SECRETS_ROOT/environment_files/basic_system_services.env"
@@ -752,12 +772,12 @@ if [[ "$REFRESH_SCORECARD" == "1" ]]; then
         cd "$BASE"
         export PYTHONPATH="$BASE${PYTHONPATH:+:$PYTHONPATH}"
         export PYTHONDONTWRITEBYTECODE=1
-        "$PYBIN" "${SCORECARD_ARGS[@]}"
+        run_cost_stage "$PYBIN" "${SCORECARD_ARGS[@]}"
     ) >> "$LOG" 2>&1 || scorecard_rc=$?
-    if [[ -f "$SCORECARD_JSON_OUT" ]]; then
+    if [[ "$scorecard_rc" == "0" && -f "$SCORECARD_JSON_OUT" ]]; then
         cp "$SCORECARD_JSON_OUT" "$SCORECARD_JSON"
     fi
-    if [[ -f "$SCORECARD_MD_OUT" ]]; then
+    if [[ "$scorecard_rc" == "0" && -f "$SCORECARD_MD_OUT" ]]; then
         cp "$SCORECARD_MD_OUT" "$SCORECARD_MD"
     fi
 else
@@ -770,12 +790,12 @@ if [[ "$REFRESH_DATA_FLOW_MONITOR" == "1" ]]; then
         cd "$BASE"
         export PYTHONPATH="$BASE${PYTHONPATH:+:$PYTHONPATH}"
         export PYTHONDONTWRITEBYTECODE=1
-        "$PYBIN" "${DATA_FLOW_ARGS[@]}"
+        run_cost_stage "$PYBIN" "${DATA_FLOW_ARGS[@]}"
     ) >> "$LOG" 2>&1 || data_flow_monitor_rc=$?
-    if [[ -f "$DATA_FLOW_JSON_OUT" ]]; then
+    if [[ "$data_flow_monitor_rc" == "0" && -f "$DATA_FLOW_JSON_OUT" ]]; then
         cp "$DATA_FLOW_JSON_OUT" "$DATA_FLOW_JSON"
     fi
-    if [[ -f "$DATA_FLOW_MD_OUT" ]]; then
+    if [[ "$data_flow_monitor_rc" == "0" && -f "$DATA_FLOW_MD_OUT" ]]; then
         cp "$DATA_FLOW_MD_OUT" "$DATA_FLOW_MD"
     fi
 else
@@ -788,9 +808,9 @@ if [[ "$REFRESH_PLAN" == "1" ]]; then
         cd "$BASE"
         export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
         export PYTHONDONTWRITEBYTECODE=1
-        "$PYBIN" "${PLAN_ARGS[@]}"
+        run_cost_stage "$PYBIN" "${PLAN_ARGS[@]}"
     ) >> "$LOG" 2>&1 || plan_rc=$?
-    if [[ -f "$PLAN_OUT" ]]; then
+    if [[ "$plan_rc" == "0" && -f "$PLAN_OUT" ]]; then
         cp "$PLAN_OUT" "$PLAN_JSON"
     fi
 else
@@ -820,7 +840,7 @@ if [[ "$REFRESH_SOAK_PLAN" == "1" ]]; then
             cd "$BASE"
             export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
             export PYTHONDONTWRITEBYTECODE=1
-            "$PYBIN" "${SOAK_PLAN_ARGS[@]}"
+            run_cost_stage "$PYBIN" "${SOAK_PLAN_ARGS[@]}"
         ) >> "$LOG" 2>&1 || soak_plan_rematerializer_rc=$?
     else
         soak_plan_rematerializer_skip_reason="soak_plan_json_missing"
@@ -892,9 +912,9 @@ else
         cd "$BASE"
         export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
         export PYTHONDONTWRITEBYTECODE=1
-        "$PYBIN" "${HISTORICAL_REVIEW_ARGS[@]}"
+        run_cost_stage "$PYBIN" "${HISTORICAL_REVIEW_ARGS[@]}"
     ) >> "$LOG" 2>&1 || historical_review_rc=$?
-    if [[ -f "$HISTORICAL_REVIEW_OUT" ]]; then
+    if [[ "$historical_review_rc" == "0" && -f "$HISTORICAL_REVIEW_OUT" ]]; then
         cp "$HISTORICAL_REVIEW_OUT" "$HISTORICAL_REVIEW_LATEST"
     fi
 
@@ -903,9 +923,9 @@ else
             cd "$BASE"
             export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
             export PYTHONDONTWRITEBYTECODE=1
-            "$PYBIN" "${MATERIALIZER_ARGS[@]}"
+            run_cost_stage "$PYBIN" "${MATERIALIZER_ARGS[@]}"
         ) >> "$LOG" 2>&1 || materializer_rc=$?
-        if [[ -f "$MATERIALIZER_OUT" ]]; then
+        if [[ "$materializer_rc" == "0" && -f "$MATERIALIZER_OUT" ]]; then
             cp "$MATERIALIZER_OUT" "$MATERIALIZER_LATEST"
         fi
     else
@@ -916,9 +936,9 @@ else
         cd "$BASE"
         export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
         export PYTHONDONTWRITEBYTECODE=1
-        "$PYBIN" "${REFRESH_ARGS[@]}"
+        run_cost_stage "$PYBIN" "${REFRESH_ARGS[@]}"
     ) >> "$LOG" 2>&1 || refresh_rc=$?
-    if [[ -f "$REFRESH_OUT" ]]; then
+    if [[ "$refresh_rc" == "0" && -f "$REFRESH_OUT" ]]; then
         cp "$REFRESH_OUT" "$REFRESH_LATEST"
     fi
 
@@ -926,30 +946,23 @@ else
         cd "$BASE"
         export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
         export PYTHONDONTWRITEBYTECODE=1
-        "$PYBIN" "${REVIEW_ARGS[@]}"
+        run_cost_stage "$PYBIN" "${REVIEW_ARGS[@]}"
     ) >> "$LOG" 2>&1 || review_rc=$?
     if [[ "$review_rc" == "0" && -f "$REVIEW_OUT" ]]; then
-        (
-            cd "$BASE"
-            export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
-            export PYTHONDONTWRITEBYTECODE=1
-            "$PYBIN" "${CANDIDATE_BOARD_PUBLISH_ARGS[@]}"
-        ) >> "$LOG" 2>&1 || candidate_board_publish_rc=$?
-        if [[ "$candidate_board_publish_rc" != "0" ]]; then
-            candidate_board_publish_status="FAILED"
-            candidate_board_publish_skip_reason="publisher_nonzero"
-            echo "[$(ts)] ERROR: ALR candidate board publish failed rc=${candidate_board_publish_rc}; consumer rendezvous remains fail-closed" >> "$LOG"
-        else
-            candidate_board_publish_status="PUBLISHED_OR_ALREADY_PUBLISHED"
-        fi
+        candidate_board_publish_status="DEFERRED_PENDING_RUN_COMPLETION"
+        candidate_board_publish_skip_reason=""
     else
         candidate_board_publish_rc=1
         candidate_board_publish_status="SKIPPED"
         candidate_board_publish_skip_reason="outcome_review_incomplete"
         echo "[$(ts)] ERROR: ALR candidate board not published because outcome review was incomplete rc=${review_rc}" >> "$LOG"
     fi
-    if [[ -f "$REVIEW_OUT" ]]; then
+    if [[ "$review_rc" == "0" && -f "$REVIEW_OUT" ]]; then
         cp "$REVIEW_OUT" "$REVIEW_LATEST"
+    fi
+    if [[ "$review_rc" != "0" ]]; then
+        echo "[$(ts)] ERROR: downstream learning stages aborted because bounded outcome review was incomplete rc=${review_rc}" >> "$LOG"
+        exit 0
     fi
 
     if [[ "$REFRESH_FALSE_NEGATIVE_CANDIDATE_PACKET" == "1" ]]; then
@@ -957,9 +970,9 @@ else
             cd "$BASE"
             export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
             export PYTHONDONTWRITEBYTECODE=1
-            "$PYBIN" "${FALSE_NEGATIVE_CANDIDATE_PACKET_ARGS[@]}"
+            run_cost_stage "$PYBIN" "${FALSE_NEGATIVE_CANDIDATE_PACKET_ARGS[@]}"
         ) >> "$LOG" 2>&1 || false_negative_candidate_packet_rc=$?
-        if [[ -f "$FALSE_NEGATIVE_CANDIDATE_PACKET_OUT" ]]; then
+        if [[ "$false_negative_candidate_packet_rc" == "0" && -f "$FALSE_NEGATIVE_CANDIDATE_PACKET_OUT" ]]; then
             cp "$FALSE_NEGATIVE_CANDIDATE_PACKET_OUT" "$FALSE_NEGATIVE_CANDIDATE_PACKET_LATEST"
             if [[ -f "$FALSE_NEGATIVE_CANDIDATE_PACKET_MD_OUT" ]]; then
                 cp "$FALSE_NEGATIVE_CANDIDATE_PACKET_MD_OUT" "$FALSE_NEGATIVE_CANDIDATE_PACKET_MD_LATEST"
@@ -987,9 +1000,9 @@ else
             cd "$BASE"
             export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
             export PYTHONDONTWRITEBYTECODE=1
-            "$PYBIN" "${FALSE_NEGATIVE_OPERATOR_REVIEW_ARGS[@]}"
+            run_cost_stage "$PYBIN" "${FALSE_NEGATIVE_OPERATOR_REVIEW_ARGS[@]}"
         ) >> "$LOG" 2>&1 || false_negative_operator_review_rc=$?
-        if [[ -f "$FALSE_NEGATIVE_OPERATOR_REVIEW_OUT" ]]; then
+        if [[ "$false_negative_operator_review_rc" == "0" && -f "$FALSE_NEGATIVE_OPERATOR_REVIEW_OUT" ]]; then
             cp "$FALSE_NEGATIVE_OPERATOR_REVIEW_OUT" "$FALSE_NEGATIVE_OPERATOR_REVIEW_LATEST"
             if [[ -f "$FALSE_NEGATIVE_OPERATOR_REVIEW_MD_OUT" ]]; then
                 cp "$FALSE_NEGATIVE_OPERATOR_REVIEW_MD_OUT" "$FALSE_NEGATIVE_OPERATOR_REVIEW_MD_LATEST"
@@ -1016,9 +1029,9 @@ else
             cd "$BASE"
             export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
             export PYTHONDONTWRITEBYTECODE=1
-            "$PYBIN" "${LEARNING_SSOT_DECISION_ARGS[@]}"
+            run_cost_stage "$PYBIN" "${LEARNING_SSOT_DECISION_ARGS[@]}"
         ) >> "$LOG" 2>&1 || learning_ssot_decision_rc=$?
-        if [[ -f "$LEARNING_SSOT_DECISION_OUT" ]]; then
+        if [[ "$learning_ssot_decision_rc" == "0" && -f "$LEARNING_SSOT_DECISION_OUT" ]]; then
             cp "$LEARNING_SSOT_DECISION_OUT" "$LEARNING_SSOT_DECISION_LATEST"
             if [[ -f "$LEARNING_SSOT_DECISION_MD_OUT" ]]; then
                 cp "$LEARNING_SSOT_DECISION_MD_OUT" "$LEARNING_SSOT_DECISION_MD_LATEST"
@@ -1059,9 +1072,9 @@ PY
             cd "$BASE"
             export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
             export PYTHONDONTWRITEBYTECODE=1
-            "$PYBIN" "${AUTONOMOUS_PARAMETER_PROPOSAL_ARGS[@]}"
+            run_cost_stage "$PYBIN" "${AUTONOMOUS_PARAMETER_PROPOSAL_ARGS[@]}"
         ) >> "$LOG" 2>&1 || autonomous_parameter_proposal_rc=$?
-        if [[ -f "$AUTONOMOUS_PARAMETER_PROPOSAL_OUT" ]]; then
+        if [[ "$autonomous_parameter_proposal_rc" == "0" && -f "$AUTONOMOUS_PARAMETER_PROPOSAL_OUT" ]]; then
             cp "$AUTONOMOUS_PARAMETER_PROPOSAL_OUT" "$AUTONOMOUS_PARAMETER_PROPOSAL_LATEST"
             if [[ -f "$AUTONOMOUS_PARAMETER_PROPOSAL_MD_OUT" ]]; then
                 cp "$AUTONOMOUS_PARAMETER_PROPOSAL_MD_OUT" "$AUTONOMOUS_PARAMETER_PROPOSAL_MD_LATEST"
@@ -1083,7 +1096,7 @@ PY
             cd "$BASE"
             export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
             export PYTHONDONTWRITEBYTECODE=1
-            "$PYBIN" -m cost_gate_learning_lane.false_negative_bounded_probe_preflight \
+            run_cost_stage "$PYBIN" -m cost_gate_learning_lane.false_negative_bounded_probe_preflight \
                 --autonomous-parameter-proposal-json "$AUTONOMOUS_PARAMETER_PROPOSAL_OUT" \
                 --false-negative-operator-review-json "$FALSE_NEGATIVE_OPERATOR_REVIEW_OUT" \
                 --max-artifact-age-hours "$FALSE_NEGATIVE_OPERATOR_REVIEW_MAX_ARTIFACT_AGE_HOURS" \
@@ -1091,7 +1104,7 @@ PY
                 --output "$FALSE_NEGATIVE_BOUNDED_PREFLIGHT_MD_OUT" \
                 "${FALSE_NEGATIVE_BOUNDED_PREFLIGHT_EXTRA_ARGS[@]}"
         ) >> "$LOG" 2>&1 || false_negative_bounded_preflight_rc=$?
-        if [[ -f "$FALSE_NEGATIVE_BOUNDED_PREFLIGHT_OUT" ]]; then
+        if [[ "$false_negative_bounded_preflight_rc" == "0" && -f "$FALSE_NEGATIVE_BOUNDED_PREFLIGHT_OUT" ]]; then
             cp "$FALSE_NEGATIVE_BOUNDED_PREFLIGHT_OUT" "$FALSE_NEGATIVE_BOUNDED_PREFLIGHT_LATEST"
             if [[ -f "$FALSE_NEGATIVE_BOUNDED_PREFLIGHT_MD_OUT" ]]; then
                 cp "$FALSE_NEGATIVE_BOUNDED_PREFLIGHT_MD_OUT" "$FALSE_NEGATIVE_BOUNDED_PREFLIGHT_MD_LATEST"
@@ -1108,15 +1121,15 @@ PY
                 cd "$BASE"
                 export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
                 export PYTHONDONTWRITEBYTECODE=1
-                "$PYBIN" "${SEALED_LEARNING_EVIDENCE_ARGS[@]}"
+                run_cost_stage "$PYBIN" "${SEALED_LEARNING_EVIDENCE_ARGS[@]}"
             ) >> "$LOG" 2>&1 || sealed_horizon_learning_evidence_rc=$?
-            if [[ -f "$SEALED_LEARNING_EVIDENCE_OUT" ]]; then
+            if [[ "$sealed_horizon_learning_evidence_rc" == "0" && -f "$SEALED_LEARNING_EVIDENCE_OUT" ]]; then
                 cp "$SEALED_LEARNING_EVIDENCE_OUT" "$SEALED_LEARNING_EVIDENCE_JSON"
             fi
-            if [[ -f "$SEALED_LEARNING_EVIDENCE_REVIEW_OUT" ]]; then
+            if [[ "$sealed_horizon_learning_evidence_rc" == "0" && -f "$SEALED_LEARNING_EVIDENCE_REVIEW_OUT" ]]; then
                 cp "$SEALED_LEARNING_EVIDENCE_REVIEW_OUT" "$SEALED_LEARNING_EVIDENCE_REVIEW_LATEST"
             fi
-            if [[ -f "$SEALED_LEARNING_EVIDENCE_SOURCE_ROWS_OUT" ]]; then
+            if [[ "$sealed_horizon_learning_evidence_rc" == "0" && -f "$SEALED_LEARNING_EVIDENCE_SOURCE_ROWS_OUT" ]]; then
                 cp "$SEALED_LEARNING_EVIDENCE_SOURCE_ROWS_OUT" "$SEALED_LEARNING_EVIDENCE_SOURCE_ROWS_LATEST"
             fi
         else
@@ -1133,9 +1146,9 @@ PY
             cd "$BASE"
             export PYTHONPATH="$BASE${PYTHONPATH:+:$PYTHONPATH}"
             export PYTHONDONTWRITEBYTECODE=1
-            "$PYBIN" "${ORDER_TOUCHABILITY_ARGS[@]}"
+            run_cost_stage "$PYBIN" "${ORDER_TOUCHABILITY_ARGS[@]}"
         ) >> "$LOG" 2>&1 || order_touchability_audit_rc=$?
-        if [[ -f "$ORDER_TOUCHABILITY_JSON_OUT" ]]; then
+        if [[ "$order_touchability_audit_rc" == "0" && -f "$ORDER_TOUCHABILITY_JSON_OUT" ]]; then
             cp "$ORDER_TOUCHABILITY_JSON_OUT" "$ORDER_TOUCHABILITY_JSON"
             if [[ -f "$ORDER_TOUCHABILITY_MD_OUT" ]]; then
                 cp "$ORDER_TOUCHABILITY_MD_OUT" "$ORDER_TOUCHABILITY_MD"
@@ -1151,9 +1164,9 @@ PY
             cd "$BASE"
             export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
             export PYTHONDONTWRITEBYTECODE=1
-            "$PYBIN" "${BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_ARGS[@]}"
+            run_cost_stage "$PYBIN" "${BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_ARGS[@]}"
         ) >> "$LOG" 2>&1 || bounded_probe_touchability_preflight_rc=$?
-        if [[ -f "$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT" ]]; then
+        if [[ "$bounded_probe_touchability_preflight_rc" == "0" && -f "$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT" ]]; then
             cp "$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT" "$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_LATEST"
             if [[ -f "$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_MD_OUT" ]]; then
                 cp "$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_MD_OUT" "$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_MD_LATEST"
@@ -1169,9 +1182,9 @@ PY
             cd "$BASE"
             export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
             export PYTHONDONTWRITEBYTECODE=1
-            "$PYBIN" "${BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_ARGS[@]}"
+            run_cost_stage "$PYBIN" "${BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_ARGS[@]}"
         ) >> "$LOG" 2>&1 || bounded_probe_placement_repair_plan_rc=$?
-        if [[ -f "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT" ]]; then
+        if [[ "$bounded_probe_placement_repair_plan_rc" == "0" && -f "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT" ]]; then
             cp "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT" "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_LATEST"
             if [[ -f "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_MD_OUT" ]]; then
                 cp "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_MD_OUT" "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_MD_LATEST"
@@ -1187,9 +1200,9 @@ PY
             cd "$BASE"
             export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
             export PYTHONDONTWRITEBYTECODE=1
-            "$PYBIN" "${BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_ARGS[@]}"
+            run_cost_stage "$PYBIN" "${BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_ARGS[@]}"
         ) >> "$LOG" 2>&1 || bounded_probe_authority_patch_readiness_rc=$?
-        if [[ -f "$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT" ]]; then
+        if [[ "$bounded_probe_authority_patch_readiness_rc" == "0" && -f "$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT" ]]; then
             cp "$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT" "$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_LATEST"
             if [[ -f "$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_MD_OUT" ]]; then
                 cp "$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_MD_OUT" "$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_MD_LATEST"
@@ -1205,9 +1218,9 @@ PY
             cd "$BASE"
             export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
             export PYTHONDONTWRITEBYTECODE=1
-            "$PYBIN" "${BOUNDED_PROBE_OPERATOR_AUTHORIZATION_ARGS[@]}"
+            run_cost_stage "$PYBIN" "${BOUNDED_PROBE_OPERATOR_AUTHORIZATION_ARGS[@]}"
         ) >> "$LOG" 2>&1 || bounded_probe_operator_authorization_rc=$?
-        if [[ -f "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT" ]]; then
+        if [[ "$bounded_probe_operator_authorization_rc" == "0" && -f "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT" ]]; then
             cp "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT" "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_LATEST"
             if [[ -f "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_MD_OUT" ]]; then
                 cp "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_MD_OUT" "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_MD_LATEST"
@@ -1223,9 +1236,9 @@ PY
             cd "$BASE"
             export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
             export PYTHONDONTWRITEBYTECODE=1
-            "$PYBIN" "${FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_ARGS[@]}"
+            run_cost_stage "$PYBIN" "${FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_ARGS[@]}"
         ) >> "$LOG" 2>&1 || false_negative_candidate_friction_scorecard_rc=$?
-        if [[ -f "$FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_OUT" ]]; then
+        if [[ "$false_negative_candidate_friction_scorecard_rc" == "0" && -f "$FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_OUT" ]]; then
             cp "$FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_OUT" "$FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_LATEST"
             if [[ -f "$FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_MD_OUT" ]]; then
                 cp "$FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_MD_OUT" "$FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_MD_LATEST"
@@ -1241,9 +1254,9 @@ PY
             cd "$BASE"
             export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
             export PYTHONDONTWRITEBYTECODE=1
-            "$PYBIN" "${BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_ARGS[@]}"
+            run_cost_stage "$PYBIN" "${BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_ARGS[@]}"
         ) >> "$LOG" 2>&1 || bounded_probe_shadow_placement_impact_rc=$?
-        if [[ -f "$BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_OUT" ]]; then
+        if [[ "$bounded_probe_shadow_placement_impact_rc" == "0" && -f "$BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_OUT" ]]; then
             cp "$BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_OUT" "$BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_LATEST"
             if [[ -f "$BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_MD_OUT" ]]; then
                 cp "$BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_MD_OUT" "$BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_MD_LATEST"
@@ -1260,9 +1273,9 @@ PY
                 cd "$BASE"
                 export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
                 export PYTHONDONTWRITEBYTECODE=1
-                "$PYBIN" "${BOUNDED_PROBE_RESULT_REVIEW_ARGS[@]}"
+                run_cost_stage "$PYBIN" "${BOUNDED_PROBE_RESULT_REVIEW_ARGS[@]}"
             ) >> "$LOG" 2>&1 || bounded_probe_result_review_rc=$?
-            if [[ -f "$BOUNDED_PROBE_RESULT_REVIEW_OUT" ]]; then
+            if [[ "$bounded_probe_result_review_rc" == "0" && -f "$BOUNDED_PROBE_RESULT_REVIEW_OUT" ]]; then
                 cp "$BOUNDED_PROBE_RESULT_REVIEW_OUT" "$BOUNDED_PROBE_RESULT_REVIEW_LATEST"
                 if [[ -f "$BOUNDED_PROBE_RESULT_REVIEW_MD_OUT" ]]; then
                     cp "$BOUNDED_PROBE_RESULT_REVIEW_MD_OUT" "$BOUNDED_PROBE_RESULT_REVIEW_MD_LATEST"
@@ -1283,9 +1296,9 @@ PY
                 cd "$BASE"
                 export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
                 export PYTHONDONTWRITEBYTECODE=1
-                "$PYBIN" "${BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_ARGS[@]}"
+                run_cost_stage "$PYBIN" "${BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_ARGS[@]}"
             ) >> "$LOG" 2>&1 || bounded_probe_execution_realism_review_rc=$?
-            if [[ -f "$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_OUT" ]]; then
+            if [[ "$bounded_probe_execution_realism_review_rc" == "0" && -f "$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_OUT" ]]; then
                 cp "$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_OUT" "$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_LATEST"
                 if [[ -f "$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_MD_OUT" ]]; then
                     cp "$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_MD_OUT" "$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_MD_LATEST"
@@ -1307,16 +1320,62 @@ if [[ "$REFRESH_DECISION_PACKET" == "1" ]]; then
         cd "$BASE"
         export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
         export PYTHONDONTWRITEBYTECODE=1
-        "$PYBIN" "${DECISION_PACKET_ARGS[@]}"
+        run_cost_stage "$PYBIN" "${DECISION_PACKET_ARGS[@]}"
     ) >> "$LOG" 2>&1 || decision_packet_rc=$?
-    if [[ -f "$DECISION_PACKET_JSON_OUT" ]]; then
+    if [[ "$decision_packet_rc" == "0" && -f "$DECISION_PACKET_JSON_OUT" ]]; then
         cp "$DECISION_PACKET_JSON_OUT" "$DECISION_PACKET_JSON"
     fi
-    if [[ -f "$DECISION_PACKET_MD_OUT" ]]; then
+    if [[ "$decision_packet_rc" == "0" && -f "$DECISION_PACKET_MD_OUT" ]]; then
         cp "$DECISION_PACKET_MD_OUT" "$DECISION_PACKET_MD"
     fi
 else
     echo "[$(ts)] SKIP: profit-learning decision packet refresh disabled by OPENCLAW_COST_GATE_REFRESH_DECISION_PACKET=0" >> "$LOG"
+fi
+
+# Commit the run manifest before the immutable candidate becomes consumer
+# visible. The manifest binds REVIEW_OUT's digest; the publisher validates and
+# copies those exact bytes. A kill before publish exposes no new candidate, and
+# a kill after its atomic link can only expose a candidate whose COMPLETE
+# manifest was already durable.
+guard_complete_args=()
+if [[ "$review_rc" == "0" && "$candidate_board_publish_status" == "DEFERRED_PENDING_RUN_COMPLETION" && -f "$REVIEW_OUT" ]]; then
+    guard_complete_args+=(--completion-path "$REVIEW_OUT")
+fi
+guard_complete_rc=0
+if (( ${#guard_complete_args[@]} > 0 )); then
+    research_guard_complete "${guard_complete_args[@]}" || guard_complete_rc=$?
+else
+    guard_complete_rc=75
+    research_guard_incomplete "review_incomplete" "$guard_complete_rc" || true
+fi
+if (( guard_complete_rc != 0 )); then
+    echo "[$(ts)] ERROR: cost-gate completion manifest failed rc=${guard_complete_rc}" >> "$LOG"
+fi
+
+# Candidate rendezvous is the final heavy consumer-visible mutation in the run.
+if [[ "$candidate_board_publish_status" == "DEFERRED_PENDING_RUN_COMPLETION" ]]; then
+    guard_state_status="$(_research_guard_state_status 2>/dev/null || true)"
+    if [[ "$guard_complete_rc" == "0" && "$guard_state_status" == "COMPLETE" && "$review_rc" == "0" && -f "$REVIEW_OUT" ]]; then
+        (
+            cd "$BASE"
+            export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
+            export PYTHONDONTWRITEBYTECODE=1
+            run_cost_publication_stage "$PYBIN" "${CANDIDATE_BOARD_PUBLISH_ARGS[@]}"
+        ) >> "$LOG" 2>&1 || candidate_board_publish_rc=$?
+        if [[ "$candidate_board_publish_rc" == "0" ]]; then
+            candidate_board_publish_status="PUBLISHED_OR_ALREADY_PUBLISHED"
+            candidate_board_publish_skip_reason=""
+        else
+            candidate_board_publish_status="FAILED"
+            candidate_board_publish_skip_reason="publisher_nonzero"
+            echo "[$(ts)] ERROR: ALR candidate board publish failed rc=${candidate_board_publish_rc}; consumer rendezvous remains fail-closed" >> "$LOG"
+        fi
+    else
+        candidate_board_publish_rc=75
+        candidate_board_publish_status="SKIPPED"
+        candidate_board_publish_skip_reason="run_incomplete"
+        echo "[$(ts)] ERROR: ALR candidate board not published because run state=${guard_state_status:-unknown}" >> "$LOG"
+    fi
 fi
 
 export FALSE_NEGATIVE_CANDIDATE_PACKET_OUT="$FALSE_NEGATIVE_CANDIDATE_PACKET_OUT"

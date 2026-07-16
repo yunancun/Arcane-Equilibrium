@@ -32,7 +32,9 @@ MAX_ALIGN_LAG="${OPENCLAW_POLYMARKET_LEADLAG_MAX_ALIGN_LAG_MINUTES:-10}"
 PRICE_TIMEFRAME="${OPENCLAW_POLYMARKET_LEADLAG_PRICE_TIMEFRAME:-1m}"
 STALE_LOCK_MIN="${OPENCLAW_POLYMARKET_LEADLAG_STALE_LOCK_MIN:-50}"
 
-mkdir -p "$LOG_DIR" "$LOCK_ROOT" "$HEARTBEAT_DIR" "$ARTIFACT_DIR"
+source "$BASE/helper_scripts/cron/lib/research_workload_guard.sh"
+research_guard_prepare_private_dirs \
+    "$LOG_DIR" "$LOCK_ROOT" "$HEARTBEAT_DIR" "$ARTIFACT_DIR" || exit 0
 
 ts() { date -u '+%Y-%m-%d %H:%M:%S'; }
 
@@ -91,23 +93,23 @@ if [[ -z "$PYBIN" ]]; then
     fi
 fi
 
-touch "$HEARTBEAT_DIR/polymarket_leadlag_ic.last_fire" 2>/dev/null || true
-
-if [[ -d "$LOCK_DIR" ]] && [[ -n "$(find "$LOCK_DIR" -maxdepth 0 -mmin +"$STALE_LOCK_MIN" 2>/dev/null)" ]]; then
-    echo "[$(ts)] WARN: stale lock (>${STALE_LOCK_MIN}min) cleared: $LOCK_DIR" >> "$LOG"
-    rmdir "$LOCK_DIR" 2>/dev/null || true
-fi
-
-if ! mkdir "$LOCK_DIR" 2>/dev/null; then
-    echo "[$(ts)] SKIP: Polymarket lead-lag IC already running (lock held)" >> "$LOG"
+ACTUAL_SOURCE_HEAD="$(git -C "$BASE" rev-parse HEAD 2>/dev/null || true)"
+if [[ ! "$ACTUAL_SOURCE_HEAD" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "[$(ts)] ERROR: Polymarket lead-lag source head is unavailable" >> "$LOG"
     exit 0
 fi
-release_lock() {
-    local rc=$?
-    rmdir "$LOCK_DIR" 2>/dev/null || true
-    return "$rc"
-}
-trap release_lock EXIT INT TERM
+guard_rc=0
+research_guard_acquire --lane polymarket \
+    --lock-dir "$LOCK_DIR" \
+    --source-head "$ACTUAL_SOURCE_HEAD" \
+    --heartbeat-file "$HEARTBEAT_DIR/polymarket_leadlag_ic.last_fire" || guard_rc=$?
+if (( guard_rc != 0 )); then
+    echo "[$(ts)] SKIP: Polymarket lead-lag lock unavailable rc=${guard_rc}" >> "$LOG"
+    exit 0
+fi
+trap research_guard_release EXIT
+trap 'research_guard_abort_signal INT 130' INT
+trap 'research_guard_abort_signal TERM 143' TERM
 
 SECRETS_ROOT="${OPENCLAW_SECRETS_ROOT:-$HOME/BybitOpenClaw/secrets}"
 ENV_FILE="$SECRETS_ROOT/environment_files/basic_system_services.env"
@@ -150,7 +152,6 @@ ARGS=(
     --price-timeframe "$PRICE_TIMEFRAME"
     --polymarket-mirror-root "$POLYMARKET_AXIS_MIRROR_ROOT"
     --out "$OUT"
-    --write-latest
 )
 
 echo "[$(ts)] === Polymarket lead-lag IC start query_set=${QUERY_SET} mode=${MODE} symbols=${SYMBOLS} min_points=${MIN_POINTS} ===" >> "$LOG"
@@ -159,7 +160,11 @@ rc=0
     cd "$BASE"
     export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
     export PYTHONDONTWRITEBYTECODE=1
-    "$PYBIN" "${ARGS[@]}"
+    research_guard_run_stage \
+        --lane polymarket \
+        --memory-max-bytes 6442450944 \
+        --tasks-max 32 \
+        -- "$PYBIN" "${ARGS[@]}"
 ) >> "$LOG" 2>&1 || rc=$?
 
 history_rc=0
@@ -169,13 +174,40 @@ if [[ "$rc" -eq 0 ]]; then
         cd "$BASE"
         export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
         export PYTHONDONTWRITEBYTECODE=1
-        "$PYBIN" -m polymarket_leadlag.replay_history \
-            --report-dir "$ARTIFACT_DIR" \
-            --out-dir "$HISTORY_DIR"
+        research_guard_run_stage \
+            --lane polymarket \
+            --memory-max-bytes 6442450944 \
+            --tasks-max 32 \
+            -- "$PYBIN" -m polymarket_leadlag.replay_history \
+                --report-dir "$ARTIFACT_DIR" \
+                --out-dir "$HISTORY_DIR"
     2>>"$LOG") || history_rc=$?
     if [[ "$history_rc" -ne 0 ]]; then
         echo "[$(ts)] WARN: replay history accumulator failed rc=${history_rc}" >> "$LOG"
     fi
+fi
+
+if [[ "$rc" == "0" && "$history_rc" == "0" && -f "$OUT" ]]; then
+    complete_rc=0
+    research_guard_complete \
+        --completion-path "$OUT" || complete_rc=$?
+    if (( complete_rc != 0 )); then
+        rc="$complete_rc"
+        echo "[$(ts)] ERROR: Polymarket completion manifest failed rc=${complete_rc}" >> "$LOG"
+    elif ! research_guard_publish_latest "$OUT" "$LATEST"; then
+        rc=74
+        research_guard_incomplete "latest_publish_failed" "$rc" || true
+        echo "[$(ts)] ERROR: Polymarket latest publish failed rc=${rc}" >> "$LOG"
+    fi
+else
+    incomplete_rc="$rc"
+    if [[ "$incomplete_rc" == "0" ]]; then
+        incomplete_rc="$history_rc"
+    fi
+    if [[ "$incomplete_rc" == "0" ]]; then
+        incomplete_rc=66
+    fi
+    research_guard_incomplete "harness_or_history_incomplete" "$incomplete_rc" || true
 fi
 
 STATUS_JSON=$(LEADLAG_OUT="$OUT" LEADLAG_LATEST="$LATEST" LEADLAG_RC="$rc" LEADLAG_HISTORY_RC="$history_rc" LEADLAG_HISTORY_STATUS_JSON="$HISTORY_STATUS_JSON" "$PYBIN" - <<'PY' 2>>"$LOG" || true
