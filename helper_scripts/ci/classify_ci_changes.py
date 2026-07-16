@@ -31,6 +31,7 @@ _GIT_WORKFLOW_FILES = {
     "helper_scripts/maintenance_scripts/git_loop_guard.py",
     "tests/ci/test_classify_ci_changes.py",
     "tests/ci/test_github_ci_workflow_static.py",
+    "tests/ci/test_ci_workflow_ibkr_job_static.py",
     "tests/structure/test_git_loop_guard.py",
     "docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/"
     "2026-07-09--scanner_driven_alr/loop_contract.md",
@@ -119,6 +120,9 @@ def classify_paths(paths: Iterable[str], *, force_all: bool = False) -> dict[str
         # 純 rust / 純 structure-test 的 PR 過去不觸發本 gate → hosted CI 連 job 都被
         # skip（G0.5 當年 CI drift 病根）。此處補齊 rust handler/tests、openclaw_types
         # 的 ibkr_/stock_etf_ 型別檔、以及 tests/structure 的 stock_etf/ibkr 守衛前綴。
+        # W5-S0（R8 審計洞①）:補 helper_scripts/ci/ibkr_ 前綴——三個 nm 審計腳本
+        # （g4 symbol / fake-tws absence / driver absence）自身被改的 PR 過去不觸發
+        # rust-ibkr-tests,掏空審計可靜默 merge。
         if _matches(
             path,
             prefixes=(
@@ -129,6 +133,7 @@ def classify_paths(paths: Iterable[str], *, force_all: bool = False) -> dict[str
                 "rust/openclaw_engine/src/ipc_server/tests/stock_etf",
                 "rust/openclaw_types/src/ibkr_",
                 "rust/openclaw_types/src/stock_etf_",
+                "helper_scripts/ci/ibkr_",
             ),
         ):
             result["stock_etf"] = True
