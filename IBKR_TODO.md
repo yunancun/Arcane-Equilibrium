@@ -14,7 +14,7 @@
 - **最終驗證終態(活化側)**:`IBKR_FULL_LIVE_READY_VERIFIED`——Operator 單獨授權的 live session + 活化後,由 IB/E3/OPS/QA 出具 health/account/market/lifecycle/money-boundary 實證。
 - **現況一句話(2026-07-16 R8 校準)**:治理全解鎖(AMD-2026-07-11-01 Accepted);**W0/W1/W2(DONE_SOURCE_SECURED_HARDENED,PR#28)/W-CI(DONE_LANDED_FIRST_GREEN,PR#21)/W3(DONE_SOURCE_SECURED,S1-S4,PR#32/#33/#35/#38)/W4(DONE_SOURCE_SECURED,W4-1,PR#40)全收口且經 R8 對抗審計 CONFIRMED**;型別契約陣 34 modules/37 acceptance 檔;**W5 為下一包(S0 blocking 前綴必修)**,W6-W11 QUEUED。runtime 側教科書式 dormant(07-16 復核):lane 旗標全 false、IB Gateway 未安裝、零 ibkr secret slot、production 從未 seal——**從未發生任何真實接觸**。
 - **路徑一句話**:剩 W5→W11 七包(+W8a/W9a carve)把引擎從「session/health 骨架」補成「全生命週期 live-capable 但 default-inactive」;之後 EA1→EA8 活化跑道(全 Operator-gated)按 readonly→paper→evidence clock→tiny-live→live 逐級點火。W8a/W9a 為純 no-contact 開發(AMD-07-11 授權內),先行落地使 EA1-EA3 在 Operator 就緒時零等待點火;EA 時序決策(D2)不因此預決。
-- **最大 wall-clock 項**:paper/shadow evidence clock(ADR-0048 預期 6-8 週)——工程全部完工也繞不開這段證據窗;故 ①W5 收口後即帶 W8a/W9a,使唯讀跑道(EA1-EA4,7-14 天 soak,**若 Operator 採 D2**)可與 W6/W7 開發平行,②**W7+W8 收口後**盡早申請 EA5 開 paper 窗(硬前置 = W7+W8 全綠 + option B 落地),與 W9-W11 的非授權面平行推進(見 §5.5/§6)。
+- **最大 wall-clock 項**:paper/shadow evidence clock(ADR-0048 預期 6-8 週)——工程全部完工也繞不開這段證據窗;故 ①W5 收口後即帶 W8a/W9a,唯讀跑道(EA1-EA4,7-14 天 soak;**D2 已裁採用 2026-07-16**)與 W6/W7 開發平行,②**W7+W8 收口後**盡早申請 EA5 開 paper 窗(硬前置 = W7+W8 全綠 + option B 落地),與 W9-W11 的非授權面平行推進(見 §5.5/§6)。
 
 ## 1. 終態定義:什麼叫 live-ready
 
@@ -60,7 +60,7 @@ W2-W11 的全部 DoD 都封頂在 `source-ready` + `runtime-active(inactive post
 | AMD-2026-07-08-01 Phase 2 readonly 外接 + static-guard 唯一修訂 | Accepted(部分被 07-11 壓倒) | 文件 §Sign-off |
 | AMD-2026-07-09-01 GUI 憑證寫路徑 | **廢止(acceptance 前 superseded)** | AMD-07-11 §Supersession |
 | G0.5 `stock-etf-static-guards` CI job | 綠 | AMD-07-08 前置,已 wired |
-| P2 seal 批准模型 | option A(owner-only 檔案 + 6 bindings)僅限 read-only zero-money seal;**任何 paper order-write / `tiny_live_adr_eligibility_v1` 討論 / 資本暴露面必須升級 option B(HMAC,與 authorization.json 同紀律)**(觸發器三項照抄原文);**澄清 #3(2026-07-15,CC 裁)**:控制批准綁定=`ibkr_phase2_seal_control_v1 ∧ authorization_amd==AMD-2026-07-11-01`,ADR/AMD 出典由 artifact 層硬 pin;EA3 每次 apply 前歸檔該次批准檔精確位元組 | AMD-07-08 澄清 #2/#3 |
+| P2 seal 批准模型 | option A(owner-only 檔案 + 6 bindings)僅限 read-only zero-money seal;**任何 paper order-write / `tiny_live_adr_eligibility_v1` 討論 / 資本暴露面必須升級 option B(HMAC,與 authorization.json 同紀律)**(觸發器三項照抄原文);**澄清 #3(2026-07-15,CC 裁)**:控制批准綁定=`ibkr_phase2_seal_control_v1 ∧ authorization_amd==AMD-2026-07-11-01`,ADR/AMD 出典由 artifact 層硬 pin;EA3 每次 apply 前歸檔該次批准檔精確位元組;**澄清 #3 Operator acknowledged 2026-07-16** | AMD-07-08 澄清 #2/#3 |
 | P2 waiver-gated 硬阻塞票 T1(seal-lineage-fields)/T2(triangulation-crosscheck) | **CLOSED** | `58d0e9749` + `0bafe2f9e` |
 | Phase2 seal 生命週期(Seal genesis→Supersede→Revoke terminal per build SHA;pre-write guard 防 reseal-after-revoke brick) | source-landed + 回歸測試 | `324fb87a8` `7902efe71`,ADR-0048 §Phase 2 |
 | W1 sealed-artifact production consume 硬化(euid 0400、inode-bound traversal、anti-relocation、FIFO-safe open) | DONE_SOURCE_SECURED | TODO W1 行;`c082bc569` |
@@ -308,7 +308,7 @@ W2-W11 的全部 DoD 都封頂在 `source-ready` + `runtime-active(inactive post
 ### W8a — readonly-scope activation envelope 最小切片(D2 carve;2026-07-16 R8 入 §5 排程)
 
 **目標**:`ibkr_activation_envelope_v1` struct + 驗證器的 **readonly-scope 最小實體**:全綁定驗證(§2 活化鐵律清單)、nonce 原子消費、issued-at/expiry、revocation epoch、kill-switch epoch;**order verb 一律結構性拒**(readonly scope 外全拒);拒絕矩陣標準與 W8 完全同級,CC/E3/IB 審不減。
-**定位紀律**:純 no-contact 開發,在 AMD-07-11 development 授權內,**不預決 D2**(是否提前點火 EA1-EA4 仍是 Operator 活化時序決策);W8 全包落地時**吸收**本切片(共用同一驗證代碼路徑,禁兩套語義漂移——同 W2「caller 與 consume 共路徑」原則)。落地本切片的唯一目的=讓 EA1-EA3 在 Operator 就緒時零工程等待。
+**定位紀律**:純 no-contact 開發,在 AMD-07-11 development 授權內;**D2 已裁採用(2026-07-16)**——本切片收口即為 EA1-EA3 點火前置之一,活化仍逐步 Operator-gated;W8 全包落地時**吸收**本切片(共用同一驗證代碼路徑,禁兩套語義漂移——同 W2「caller 與 consume 共路徑」原則)。落地本切片的唯一目的=讓 EA1-EA3 在 Operator 就緒時零工程等待。
 **範圍 out**:paper/tiny-live/live scope、option B HMAC(歸 W7/W8)、GUI 顯示(W9)。
 **DoD**:`source-ready`;拒絕矩陣逐綁定 + nonce 併發競態 + 「readonly envelope + 任何 order verb → 拒」+「seal 在位無 envelope → 拒」;permit audit-scope 四聯斷言隨本切片首次擴到 driver 面(承 W3 移交 E3-F1)。
 **依賴**:源碼依賴=W3;排程閘=TODO 行 Dispatch after W5(理由=先收 W5-S0 CI 守衛鏈+避免與 W5 engine 面撞工,非源碼依賴)。**規模**:M。**與 W9a 可並行**(檔案面/reviewer 集不相交)。
@@ -385,7 +385,7 @@ W5(S0∥S1→S2→S3→S4)─┬─ W8a ∥ W9a(carve;與 W6 平行)
 | R30 | **W11** 對抗性全域 rescan → 終態宣告 | gap matrix 只許外部殘項 |
 
 - **工期估計(R8 修訂)**:剩餘 ~22 輪;實證 cadence R3-R7=5 輪/2 天(峰值),持續性折算 1.5-2 輪/天 ⇒ **工程側 live-ready ≈ 2.5-4 個有效工程週**(原 v1 估 6-10 週,W2-W4 已消化+cadence 實證上修)。主要變異源:reviewer/E4 帶寬、agent 配額死亡、operator 決策窗(D1/D2)、CI spending;**XL 包(W7/W9)每輪切片吞吐未經同規模實證,輪數或膨脹**。
-- **EA 疊加時間軸(若採 D2;各週標記按樂觀端 ~2 輪/天,悲觀端順延 ×1.6)**:W5+W8a+W9a 齊(≈第 1-1.5 週末)→ EA1-EA3 可點火(全 Operator 動作);EA4 readonly soak 7-14 天與 W6/W7 開發平行;W7+W8+option B 齊(≈第 3 週)→ 申請 EA5 開 paper 窗 → evidence clock 6-8 週起跑;工程終態宣告(W11)與 clock 平行,tiny-live(EA7)最早 ≈ clock 開窗後 6-8 週(受 OPEN-GOV-1/D7 保守讀法約束)。
+- **EA 疊加時間軸(D2 已採用 2026-07-16;各週標記按樂觀端 ~2 輪/天,悲觀端順延 ×1.6)**:W5+W8a+W9a 齊(≈第 1-1.5 週末)→ EA1-EA3 點火(全 Operator 動作,屆時逐步活化);EA4 readonly soak 7-14 天與 W6/W7 開發平行;W7+W8+option B 齊(≈第 3 週)→ 申請 EA5 開 paper 窗 → evidence clock 6-8 週起跑;工程終態宣告(W11)與 clock 平行,tiny-live(EA7)最早 ≈ clock 開窗後 6-8 週(受 OPEN-GOV-1/D7 保守讀法約束)。
 - **TODO 對位注記**:現行並行面=W5-S0∥W5-S1、W8a∥W9a、carve∥W6;凡鬆於 TODO.md 行前置者派工前先更新 TODO 對應行;W8a/W9a 已補 TODO 行(v816)。TODO.md 是 dispatch 唯一正本。
 
 ## 6. 外部活化跑道 EA1→EA8(全 Operator-gated;本節是設計不是授權)
@@ -396,14 +396,14 @@ W5(S0∥S1→S2→S3→S4)─┬─ W8a ∥ W9a(carve;與 W6 平行)
 |---|---|---|---|
 | **EA1 憑證 custody** | Operator 手動放置 readonly/paper 憑證入 `<secrets-root>/external/ibkr/{readonly,paper}/`(loader 只驗 fingerprint;live slot 此時**必須仍缺席**) | 放置 + 確認 slot 指紋 | slot fingerprint 記錄 |
 | **EA2 Gateway paper 起立** | enable W9 交付的 systemd unit(paper 4002、loopback、read-only API 設定);watchdog/nightly restart 演練(Gateway 現況未安裝——安裝與 unit 預備歸 W9,EA2 只做 enable+登入) | 批准 enable + IBKR 帳號側 paper 登入(2FA 適用性按 IBKR 現行政策,EA1 時由 IB 現勘) | OPS runbook 執行證據 |
-| **EA3 G4 首次接觸(readonly)** | 前置:**AMD-07-08-01 澄清 #3 Operator acknowledgement(尚待,PROGRESS R2)**;production seal(W2 路徑,option A 批准檔;**每次 apply 前歸檔該次批准檔精確位元組——AMD-07-08-01 澄清 #3 第 4 點,審計重算閉合必要條件**)→ readonly envelope + 活化紀錄 → 首次 **health/serverTime** 真讀(嚴格對齊 AMD-07-08 G4 讀集;accountSummary 等歸 EA4 逐項納入) | **一次性顯式批准**(AMD-07-08 G4 語義)+ 活化紀錄 | QA runtime 證據;`session-ready` 達成 |
+| **EA3 G4 首次接觸(readonly)** | 前置:AMD-07-08-01 澄清 #3 Operator acknowledgement **已落(2026-07-16)**;production seal(W2 路徑,option A 批准檔;**每次 apply 前歸檔該次批准檔精確位元組——AMD-07-08-01 澄清 #3 第 4 點,審計重算閉合必要條件**)→ readonly envelope + 活化紀錄 → 首次 **health/serverTime** 真讀(嚴格對齊 AMD-07-08 G4 讀集;accountSummary 等歸 EA4 逐項納入) | **一次性顯式批准**(AMD-07-08 G4 語義)+ 活化紀錄 | QA runtime 證據;`session-ready` 達成 |
 | **EA4 readonly soak + entitlement 確認** | 7-14 天唯讀穩定窗:session FSM/重連/nightly restart 實測;accountSummary/positions 等唯讀集按 envelope scope 逐項納入;delayed 行情實態;三角指紋長期一致。**重連活化紀律**:每次 reconnect(含 nightly restart 後)需新 envelope + 活化紀錄——soak 期預設 Operator 每日活化;如欲設計 scoped 排程性重連授權(單活化綁定預告重啟窗),屬 AMD-07-11 字面外,先開 OPEN-GOV-2 由 CC 裁決,未裁前按每日活化執行 | 讀 soak 報告 + 每日(或裁決後按窗)活化 | `entitlement-ready`;W3 協議假設校準 |
 | **EA5 paper effect 活化** | 開窗前置:**W7+W8 全綠 + option B 落地** + PIT universe / strategy hypothesis / market-data provenance / reference-data **四契約 accepted + 全 hash 凍結(D5 已裁)**;然後 paper envelope(option B HMAC 紀律)→ 首批 paper 訂單生命週期真跑 + 對賬 → 開 `stock_etf_evidence_clock_v1`(6-8 週 paper/shadow 窗) | paper 活化紀錄 + evidence clock 開窗批准 | `effect-authorized`+`evidence-producing`(paper) |
 | **EA6 證據與研究收斂** | scorecard/benchmark/cost 重建與證據收斂(QC/MIT 鏈);`tiny_live_adr_eligibility_v1` 討論閘評估(預註冊已在 EA5 前完成,此處不再改假設) | 讀 QC/MIT verdict | scorecard verdict artifact |
 | **EA7 tiny-live** | live 憑證 slot 創建(此時才允許,單獨批准;出典:AMD-07-11 活化紀錄路徑——ADR-0048 Denied Paths 的 live-slot 行僅於有效 tiny-live/live 活化 lineage 下被壓倒,healthcheck 放行語義見 W9-5)+ live Gateway(4001)+ tiny-live envelope(顯式限時、exact scope、極小 notional caps)+ 首單~soak | **live 資金 + tiny-live 活化紀錄**(逐窗;是否另需新 ADR/AMD 見 OPEN-GOV-1 第二問,未裁前按需要執行) | money-boundary 證據 |
 | **EA8 live ramp → VERIFIED** | 額度階梯逐級放大(每級新活化);IB/E3/OPS/QA 聯合 attested 證據包 → `IBKR_FULL_LIVE_READY_VERIFIED` | 每級活化 + 終態確認 | 終態證據包 |
 
-**平行化建議(R8 修訂,以本段為準)**:W8a/W9a 兩個 carve 件已入 §5 排程(R14/R15)——**開發面不需等 D2**(純 no-contact,AMD-07-11 授權內);D2 只裁「EA1-EA4 是否提前點火」,時點=W5+W8a+W9a 齊備時。**EA1-EA3 前置 = W3-W5 + W8a + W9a**;W8a/W9a 未齊則 EA1-EA3 前置回落完整 W8/W9。EA 各步 W 前置總表:EA5 = W7+W8 全綠 + option B(建議含 W9);EA7+ = W7-W11 全綠。
+**平行化建議(R8 修訂,以本段為準)**:W8a/W9a 兩個 carve 件已入 §5 排程(R14/R15);**D2 已裁採用(2026-07-16,Operator)**——W5+W8a+W9a 齊備即開 EA1-EA4,每步仍逐一活化。**EA1-EA3 前置 = W3-W5 + W8a + W9a**;W8a/W9a 未齊則 EA1-EA3 前置回落完整 W8/W9。EA 各步 W 前置總表:EA5 = W7+W8 全綠 + option B(建議含 W9);EA7+ = W7-W11 全綠。
 
 ## 7. 橫切工程紀律
 
@@ -436,7 +436,7 @@ W5(S0∥S1→S2→S3→S4)─┬─ W8a ∥ W9a(carve;與 W6 平行)
 | # | 決策 | 時點 | 預設建議 |
 |---|---|---|---|
 | D1 | DB migration 授權(evidence DDL → V###) | W9 前 | 批;Linux dry-run+double-apply 證據隨附 |
-| D2 | 唯讀跑道提前並行(EA1-EA4 提前點火) | W5+W8a+W9a 齊備時(≈R15 後,在即) | **建議採用**——W8a/W9a 開發已入 §5 排程(R14/R15,不需 D2);D2 只裁 EA 點火時序。採用=校準真實 session 假設+壓縮總 wall-clock;EA1-EA4 每步仍逐一 Operator 活化 |
+| D2 | 唯讀跑道提前並行(EA1-EA4 提前點火) | **已裁:採用(2026-07-16,Operator)** | W5+W8a+W9a 齊備即開 EA1-EA4,與 W6/W7 平行;**每步仍逐一 Operator 活化**(EA1 憑證/EA2 Gateway 登入/EA3 一次性批准/EA4 soak 每日活化);EA4 負擔重時可開 OPEN-GOV-2 裁排程性重連授權;D3(專用 paper username)於 EA1 前一併定,建議拆 |
 | D3 | paper/live 專用 IBKR username 拆分 | EA1 前 | 建議拆(避免互踢) |
 | D4 | 行情 entitlement 購買(realtime US equities) | EA4 後 | 先 delayed 跑證據窗,按 QC 需求再買;**購買時必須同時裁決 live↔paper 行情共享拓撲**(共享後兩側互斥取用,見 W6 風險) |
 | D5 | 策略假設家族與 universe(低/中換手、日/週頻,USD 股/ETF) | EA5 前(QC 研究軌可先行) | QC 預註冊提案後裁 |
