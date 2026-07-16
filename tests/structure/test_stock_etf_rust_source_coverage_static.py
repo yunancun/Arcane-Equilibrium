@@ -15,10 +15,13 @@ TEST_SOURCE_PATTERNS = (
 
 def _stock_etf_ibkr_rust_sources() -> list[Path]:
     files = []
+    # 用 repo-relative 路徑判斷(勿用絕對路徑子串:checkout 路徑含 "ibkr"/"stock_etf"
+    # 時——如 worktree 目錄名——絕對路徑匹配會誤掃全 crate)。
     files.extend(
         path
         for path in TYPE_SOURCE_ROOT.rglob("*.rs")
-        if "ibkr" in path.as_posix() or "stock_etf" in path.as_posix()
+        if "ibkr" in path.relative_to(ROOT).as_posix()
+        or "stock_etf" in path.relative_to(ROOT).as_posix()
     )
     # handler root 的 stock_etf 前綴檔（stock_etf.rs 與抽出的 sibling
     # stock_etf_risk_policy.rs——fail-closed denied fallback 的家，不得逃出守衛掃描面）。
