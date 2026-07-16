@@ -6,6 +6,17 @@
 > 它不是 active dispatch queue；當前 blocker、owner、gate、runtime evidence 一律讀根目錄 `TODO.md`。
 > 新增重要文檔時優先更新本索引或 `initiative_index.md`，不要把長表重新塞回 `docs/README.md`。
 
+### 2026-07-15/16 IBKR full live-capability 工程總綱與自主 loop
+
+| 文件 | 内容 |
+|------|------|
+| `IBKR_TODO.md`(repo 根) | `stock_etf_cash` 到 live-ready 工程設計總綱 v2(2026-07-16 R8 校準):W2-W11+W8a/W9a 詳設、§5.5 剩餘日誌安排、EA1-EA8 活化跑道;非授權文件。 |
+| `agents/ibkr-live-capability-loop.md` | R-N 自主推進協議正本 v2:file-surface manifest 並行程序、固定記帳 checklist、CI 節流、反空轉硬規則、接棒死亡三分類。 |
+| `execution_plan/ibkr_live_capability/PROGRESS.md` | append-only 輪帳本(R0-R8;R8=全盤校準審計輪)。 |
+| `execution_plan/ibkr_live_capability/2026-07-15--w2_seal_caller_authority_design.md` | W2 seal caller authority 設計檔(R1 補簽)。 |
+| `execution_plan/ibkr_live_capability/2026-07-15--w3_session_manager_design.md` | W3 TWS session manager 設計檔(R3;CC build-posture B′+IB U1-U6 現勘)。 |
+| `execution_plan/ibkr_live_capability/2026-07-16--w4_connection_health_ipc_design.md` | W4 connection-health IPC + normalizer lockstep 設計檔(R7)。 |
+
 ### 2026-07-12 GUI E1a 歷史交付報告
 
 | 文件 | 内容 |

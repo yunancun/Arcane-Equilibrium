@@ -366,6 +366,12 @@ def test_missing_source_defers_without_summary_change_or_append(tmp_path) -> Non
     assert batch["outcomes"] == []
     assert batch["outcome_count"] == 0
     assert batch["appended_outcome_count"] == 0
+    assert batch["selected_attempt_count"] == 1
+    assert batch["selected_terminalized_attempt_count"] == 0
+    assert batch["selected_unterminalized_attempt_count"] == 1
+    assert batch["mature_backlog_remaining_count"] == 1
+    assert batch["pending_backlog_remaining_count"] == 1
+    assert batch["pending_universe_fully_processed"] is False
     assert ledger_path.read_bytes() == before_bytes
     assert len(read_jsonl_ledger(ledger_path)) == 1
 

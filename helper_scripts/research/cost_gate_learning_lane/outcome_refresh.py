@@ -99,6 +99,7 @@ class OutcomeRefreshLedgerProjection:
     pending_attempt_count: int
     mature_pending_attempt_count: int
     selected_attempt_count: int
+    selected_attempt_keys: tuple[tuple[str, str], ...]
     mature_backlog_remaining_count: int
     pending_backlog_remaining_count: int
     completed_attempt_count: int
@@ -584,6 +585,7 @@ def read_outcome_refresh_ledger_projection(
                     "SELECT COUNT(*) FROM selected_admissions"
                 ).fetchone()[0]
             )
+            selected_attempt_keys: list[tuple[str, str]] = []
             projected_rows: list[dict[str, Any]] = []
             projected_bytes = 0
 
@@ -605,7 +607,7 @@ def read_outcome_refresh_ledger_projection(
             conn.execute(
                 "CREATE TEMP TABLE selected_fill_links (link_id TEXT PRIMARY KEY)"
             )
-            for target_record_type, _attempt_id, raw_payload in conn.execute(
+            for target_record_type, attempt_id, raw_payload in conn.execute(
                 """
                 SELECT target_record_type, attempt_id, payload
                 FROM selected_admissions
@@ -616,6 +618,9 @@ def read_outcome_refresh_ledger_projection(
                     attempt_id
                 """
             ):
+                selected_attempt_keys.append(
+                    (str(target_record_type), str(attempt_id))
+                )
                 payload = bytes(raw_payload)
                 row = json.loads(payload.decode("utf-8"))
                 append_payload(payload)
@@ -641,17 +646,14 @@ def read_outcome_refresh_ledger_projection(
                 append_payload(bytes(payload))
                 relevant_fill_count += 1
 
-            mature_backlog_remaining_count = (
-                mature_pending_attempt_count - selected_attempt_count
-            )
-            pending_backlog_remaining_count = (
-                pending_attempt_count - selected_attempt_count
-            )
+            mature_backlog_remaining_count = mature_pending_attempt_count
+            pending_backlog_remaining_count = pending_attempt_count
             return OutcomeRefreshLedgerProjection(
                 rows=projected_rows,
                 pending_attempt_count=pending_attempt_count,
                 mature_pending_attempt_count=mature_pending_attempt_count,
                 selected_attempt_count=selected_attempt_count,
+                selected_attempt_keys=tuple(selected_attempt_keys),
                 mature_backlog_remaining_count=mature_backlog_remaining_count,
                 pending_backlog_remaining_count=pending_backlog_remaining_count,
                 completed_attempt_count=completed_attempt_count,
@@ -795,7 +797,12 @@ def build_cost_gate_outcome_refresh_batch(
     }
 
 
-def append_refresh_outcomes_to_ledger(ledger_path: Path, batch: dict[str, Any]) -> int:
+def append_refresh_outcomes_to_ledger(
+    ledger_path: Path,
+    batch: dict[str, Any],
+    *,
+    projection: OutcomeRefreshLedgerProjection | None = None,
+) -> int:
     """Append built outcome rows from a refresh batch to the JSONL ledger."""
     rows = batch.get("outcomes")
     if (
@@ -803,6 +810,8 @@ def append_refresh_outcomes_to_ledger(ledger_path: Path, batch: dict[str, Any]) 
         or not _candidate_evaluation_preflight_valid(batch, rows)
     ):
         _refuse_refresh_append(batch)
+        if projection is not None:
+            _attach_projection_accounting(batch, projection)
         return 0
     try:
         rows_to_append = copy.deepcopy(rows)
@@ -815,34 +824,120 @@ def append_refresh_outcomes_to_ledger(ledger_path: Path, batch: dict[str, Any]) 
             )
     except Exception:
         _refuse_refresh_append(batch)
+        if projection is not None:
+            _attach_projection_accounting(batch, projection)
         return 0
+    if projection is None:
+        outcome_attempt_keys = [
+            _outcome_attempt_key(row) for row in rows_to_append
+        ]
+    else:
+        projection_bound_keys = _projection_bound_outcome_attempt_keys(
+            rows_to_append,
+            projection,
+        )
+        if projection_bound_keys is None:
+            _refuse_refresh_append(batch)
+            _attach_projection_accounting(batch, projection)
+            return 0
+        outcome_attempt_keys = projection_bound_keys
     appended = 0
-    for row in rows_to_append:
-        append_jsonl_ledger(ledger_path, row)
-        appended += 1
-    batch["append_requested"] = True
-    batch["appended_to_ledger"] = appended > 0
-    batch["appended_outcome_count"] = appended
+    appended_attempt_keys: set[tuple[str, str]] = set()
+    try:
+        for row, attempt_key in zip(rows_to_append, outcome_attempt_keys):
+            append_jsonl_ledger(ledger_path, row)
+            appended += 1
+            if attempt_key is not None:
+                appended_attempt_keys.add(attempt_key)
+    finally:
+        batch["append_requested"] = True
+        batch["appended_to_ledger"] = appended > 0
+        batch["appended_outcome_count"] = appended
+        if projection is not None:
+            _attach_projection_accounting(
+                batch,
+                projection,
+                appended_attempt_keys=appended_attempt_keys,
+            )
     return appended
+
+
+def _outcome_attempt_key(row: dict[str, Any]) -> tuple[str, str] | None:
+    raw_record_type = row.get("record_type")
+    raw_attempt_id = row.get("attempt_id")
+    if not isinstance(raw_record_type, str) or not isinstance(raw_attempt_id, str):
+        return None
+    record_type = raw_record_type.strip()
+    attempt_id = raw_attempt_id.strip()
+    if (
+        record_type not in {"blocked_signal_outcome", "probe_outcome"}
+        or not attempt_id
+    ):
+        return None
+    return record_type, attempt_id
+
+
+def _projection_bound_outcome_attempt_keys(
+    rows: list[dict[str, Any]],
+    projection: OutcomeRefreshLedgerProjection,
+) -> list[tuple[str, str]] | None:
+    selected_attempt_keys = set(projection.selected_attempt_keys)
+    if (
+        len(selected_attempt_keys) != len(projection.selected_attempt_keys)
+        or len(selected_attempt_keys) != projection.selected_attempt_count
+    ):
+        return None
+    outcome_attempt_keys: list[tuple[str, str]] = []
+    seen_attempt_keys: set[tuple[str, str]] = set()
+    for row in rows:
+        attempt_key = _outcome_attempt_key(row)
+        if (
+            attempt_key is None
+            or attempt_key not in selected_attempt_keys
+            or attempt_key in seen_attempt_keys
+        ):
+            return None
+        seen_attempt_keys.add(attempt_key)
+        outcome_attempt_keys.append(attempt_key)
+    return outcome_attempt_keys
 
 
 def _attach_projection_accounting(
     batch: dict[str, Any],
     projection: OutcomeRefreshLedgerProjection,
+    *,
+    appended_attempt_keys: set[tuple[str, str]] | None = None,
 ) -> None:
+    selected_attempt_keys = set(projection.selected_attempt_keys)
+    terminalized_attempt_keys = selected_attempt_keys.intersection(
+        appended_attempt_keys or set()
+    )
+    selected_terminalized_attempt_count = len(terminalized_attempt_keys)
+    selected_unterminalized_attempt_count = (
+        len(selected_attempt_keys) - selected_terminalized_attempt_count
+    )
+    mature_backlog_remaining_count = (
+        projection.mature_pending_attempt_count
+        - selected_terminalized_attempt_count
+    )
+    pending_backlog_remaining_count = (
+        projection.pending_attempt_count - selected_terminalized_attempt_count
+    )
     batch.update(
         {
             "pending_attempt_count": projection.pending_attempt_count,
             "mature_pending_attempt_count": (
                 projection.mature_pending_attempt_count
             ),
-            "selected_attempt_count": projection.selected_attempt_count,
-            "mature_backlog_remaining_count": (
-                projection.mature_backlog_remaining_count
+            "selected_attempt_count": len(selected_attempt_keys),
+            "selected_terminalized_attempt_count": (
+                selected_terminalized_attempt_count
             ),
-            "pending_backlog_remaining_count": (
-                projection.pending_backlog_remaining_count
+            "selected_unterminalized_attempt_count": (
+                selected_unterminalized_attempt_count
             ),
+            "mature_backlog_remaining_count": mature_backlog_remaining_count,
+            "pending_backlog_remaining_count": pending_backlog_remaining_count,
             "completed_attempt_count": projection.completed_attempt_count,
             "duplicate_admission_row_count": (
                 projection.duplicate_admission_row_count
@@ -866,7 +961,8 @@ def _attach_projection_accounting(
                 projection.retained_ledger_scan_complete
             ),
             "pending_universe_fully_processed": (
-                projection.pending_universe_fully_processed
+                pending_backlog_remaining_count == 0
+                and projection.conflict_attempt_count == 0
             ),
         }
     )
@@ -1095,7 +1191,11 @@ def refresh_cost_gate_outcomes_from_price_rows(
     )
     _attach_projection_accounting(batch, projection)
     if append_ledger:
-        append_refresh_outcomes_to_ledger(ledger_path, batch)
+        append_refresh_outcomes_to_ledger(
+            ledger_path,
+            batch,
+            projection=projection,
+        )
     return batch
 
 
@@ -1207,7 +1307,11 @@ def main() -> int:
     if args.source_pg:
         batch["pg_timeframe"] = args.pg_timeframe
     if args.append_ledger:
-        append_refresh_outcomes_to_ledger(args.ledger, batch)
+        append_refresh_outcomes_to_ledger(
+            args.ledger,
+            batch,
+            projection=projection,
+        )
     if args.output:
         _write_json(args.output, batch)
     if args.print_json or not args.output:
