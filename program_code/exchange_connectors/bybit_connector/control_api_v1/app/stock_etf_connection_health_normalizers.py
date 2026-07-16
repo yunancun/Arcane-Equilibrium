@@ -9,9 +9,9 @@ W4 lockstep（AMD-2026-07-08-01 §Runtime Boundary,與 Rust emitter 同 PR）。
   populated operational 值（session/pacing 活動/attestation/entitlement/report_status）→
   violation。與 W3 all-false 檢查逐位元同構。
 - 第 3 層（lineage-bounded,W5+,W4 結構性不可達）：`lineage_present == True` 時 operational
-  值可 populated,但仍**逐欄**受 lineage-bound 不變量約束（W5-S0 窮舉補齊：session 一致性
-  /halt_reason/reconnect_attempt/pacing 活動/entitlement/report_status/attestation 縱深）。
-  W4 下 gate 恆 BLOCKED → 此分支不可達。
+  值可 populated,但仍**逐欄**受 lineage-bound 不變量約束（W5-S0 窮舉補齊：契約枚舉封閉
+  值域/session 一致性/halt_reason/reconnect_attempt/pacing 活動/entitlement/report_status
+  /attestation 縱深）。W4 下 gate 恆 BLOCKED → 此分支不可達。
 
 `lineage_present`（唯一放行閘,全 Rust-emitter 所有）：`= (phase2_gate.status == "PASS") ∧
 (attestation_status ∈ {PAPER_ATTESTED, READONLY_ATTESTED})`——production 未 seal 下結構性為
@@ -69,6 +69,45 @@ _ACTIVE_SESSION_STATES: tuple[str, ...] = ("ready", "degraded")
 # （ready 後計數歸零;disconnected 終態殘留計數 fail-closed 視為 violation）。
 _RECONNECT_LIFECYCLE_STATES: tuple[str, ...] = ("connecting", "handshaking", "backoff")
 
+# 契約枚舉封閉值域（Rust serde snake_case 投影;與 Rust enum 的逐變體 lockstep 由
+# cross-surface parity 測試鎖死,漂移即紅）。∉ 域＝契約外字串——Layer 3 直接 violation
+# （fail-closed;Layer 2 由「≠默認值」檢查天然覆蓋契約外值,無需重複域檢查）。
+# 出典:`rust/openclaw_types/src/ibkr_tws_session_state.rs` IbkrTwsSessionStateV1。
+_SESSION_STATE_DOMAIN: tuple[str, ...] = (
+    "disconnected",
+    "connecting",
+    "handshaking",
+    "ready",
+    "degraded",
+    "backoff",
+)
+# 出典:`rust/openclaw_types/src/ibkr_tws_connection_health.rs` IbkrConnectionHealthHaltReasonV1。
+_HALT_REASON_DOMAIN: tuple[str, ...] = (
+    "not_halted",
+    "initial",
+    "envelope_required",
+    "session_fatal",
+    "weekly_reauth",
+    "reconnect_budget_exhausted",
+    "halted",
+)
+# 出典:同上 IbkrConnectionHealthEntitlementStateV1。
+_ENTITLEMENT_STATE_DOMAIN: tuple[str, ...] = ("pending", "granted", "denied")
+
+# 第 2/3 層讀取的 operational scalar 欄（非 hard-safety、非 pacing-activity）的契約共源
+# 清單——cross-surface parity superset 測試自本模組匯入（同 hard-safety/pacing 兩集慣例,
+# 避免測試側手抄漂移）。
+_OPERATIONAL_SCALAR_FIELDS: tuple[str, ...] = (
+    "session_state",
+    "session_active",
+    "reconnect_attempt",
+    "halt_reason",
+    "attestation_status",
+    "account_fingerprint_is_live",
+    "entitlement_state",
+    "report_status",
+)
+
 
 def _connection_health_lineage_present(
     source: dict[str, Any],
@@ -124,6 +163,16 @@ def _connection_health_lineage_bounded_violations(
     session_active = _as_bool(source.get("session_active"))
     session_state = _as_str(source.get("session_state"), "disconnected")
     halt_reason = _as_str(source.get("halt_reason"), "envelope_required")
+    entitlement_state = _as_str(source.get("entitlement_state"), "pending")
+    # 契約枚舉域檢查（最先執行）：三字串欄僅接受 Rust 契約封閉值域的 snake_case 投影,
+    # 契約外字串＝violation——lineage 具備也不接受自宣告的域外值（fail-closed;域外值
+    # 若放行會被後續綁定檢查誤判且原樣投影到 GUI 輸出）。
+    if session_state not in _SESSION_STATE_DOMAIN:
+        violations.append("session_state_unknown")
+    if halt_reason not in _HALT_REASON_DOMAIN:
+        violations.append("halt_reason_unknown")
+    if entitlement_state not in _ENTITLEMENT_STATE_DOMAIN:
+        violations.append("entitlement_state_unknown")
     # 縱深防禦：本函數不假設 caller 的 lineage 閘——attestation 未 attested 即 violation
     # （caller 分流漂移時本層自足 fail-closed;正常路徑下 lineage_present 已保證 attested）。
     if attestation_status not in _ATTESTED_STATES:
@@ -154,10 +203,7 @@ def _connection_health_lineage_bounded_violations(
             if _as_int(source.get(field)) != 0:
                 violations.append(f"pacing_{field}_without_active_session")
     # entitlement：非默認值（pending）需活躍 attested session 才可派生（W6 才真派生）。
-    if (
-        _as_str(source.get("entitlement_state"), "pending") != "pending"
-        and not session_active
-    ):
+    if entitlement_state != "pending" and not session_active:
         violations.append("entitlement_state_without_active_session")
     # report_status：emitter 唯一可產值＝external_verification_pending（degraded 僅
     # normalizer 側 IPC 降級路徑）——lineage 具備下自宣告其他值仍 fail-closed。
