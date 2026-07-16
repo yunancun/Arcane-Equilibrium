@@ -476,3 +476,18 @@ jobs:
         # 純源級靜態掃描（無需編譯,ubuntu 1x,零 macOS 10x）;script 自算 repo root,不依賴 cwd。
         working-directory: .
         run: python3 tests/structure/test_ibkr_tws_permit_stub_source_static.py
+      - name: Run the IBKR W3-S4 fake-TWS dev-dep-only structure guard
+        # IBKR-CI-3 (a)（CC 約束 ⑤;設計 §4）:掃全 workspace 成員 Cargo.toml,斷言 openclaw_fake_tws
+        # 只出現在 [dev-dependencies]（禁任何 production dep）+ engine 確有 dev-dep + fake 不依賴
+        # engine（engine-independent,避 dev-dep cycle）;內建正控（fake 進 production dep → FAIL）+
+        # inconclusive 非零 exit。純源級靜態掃描（無需編譯,ubuntu 1x）;自算 repo root,不依賴 cwd。
+        working-directory: .
+        run: python3 tests/structure/test_ibkr_fake_tws_devdep_only.py
+      - name: Run the IBKR W3-S4 fake-TWS absence audit against the default debug build
+        # IBKR-CI-3 (b)（CC 約束 ⑤;設計 §4）:Part 1 nm default debug engine artifact 零 fake_tws
+        # 符號（dev-only → default build 不編譯 → 結構性缺席;conclusive gate + fail-closed exit 5,
+        # 仿 g4 audit）;Part 2 源掃 fake crate src 零真實 socket token。前面 cargo test 已暖 target/,
+        # 此處增量重用 default build。正控（IBKR_FAKE_TWS_AUDIT_BIN 指向 fake-linked lib-test bin →
+        # fake 符號命中 → FAIL）已於本地實證有牙。
+        working-directory: .
+        run: bash helper_scripts/ci/ibkr_fake_tws_absence_audit.sh
