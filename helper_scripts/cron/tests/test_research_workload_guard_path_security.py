@@ -133,6 +133,44 @@ def test_wrapper_rejects_untrusted_log_parent_before_any_log_write(
     assert (log_dir / log_name).is_symlink()
 
 
+@pytest.mark.parametrize(
+    ("wrapper_name", "lock_name"),
+    [
+        ("alpha_discovery_throughput_cron.sh", "alpha_discovery_throughput_cron.lock"),
+        ("cost_gate_learning_lane_cron.sh", "cost_gate_learning_lane_cron.lock"),
+    ],
+)
+def test_wrapper_rejects_preseeded_flock_symlink_before_cron_flock_open(
+    tmp_path: Path, wrapper_name: str, lock_name: str
+) -> None:
+    data_dir = tmp_path / "data"
+    lock_dir = data_dir / "locks"
+    lock_dir.mkdir(parents=True)
+    lock_dir.chmod(0o700)
+    victim = tmp_path / "victim.txt"
+    victim.write_text("sentinel\n", encoding="utf-8")
+    (lock_dir / lock_name).symlink_to(victim)
+    wrapper = REPO_ROOT / "helper_scripts/cron" / wrapper_name
+    completed = subprocess.run(
+        ["bash", str(wrapper)],
+        env={
+            **os.environ,
+            "OPENCLAW_BASE_DIR": str(REPO_ROOT),
+            "OPENCLAW_DATA_DIR": str(data_dir),
+            "OPENCLAW_DEMO_ORDER_TO_FILL_GAP_AUDIT_DIR": str(
+                data_dir / "demo_order_to_fill_gap"
+            ),
+        },
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert victim.read_text(encoding="utf-8") == "sentinel\n"
+    assert (lock_dir / lock_name).is_symlink()
+
+
 def test_secure_normal_directory_and_guard_files_are_mode_0600(
     tmp_path: Path,
 ) -> None:

@@ -11,12 +11,14 @@ DATA="${OPENCLAW_DATA_DIR:-/tmp/openclaw}"
 LOG_DIR="${DATA}/logs"
 LOG="${LOG_DIR}/alpha_discovery_throughput_cron.log"
 LOCK_ROOT="${DATA}/locks"
-LOCK_DIR="${LOCK_ROOT}/alpha_discovery_throughput_cron.lock.d"
+LOCK_FILE="${LOCK_ROOT}/alpha_discovery_throughput_cron.lock"
+LOCK_OWNER_DIR="${LOCK_ROOT}/alpha_discovery_throughput_cron.owner"
 HEARTBEAT_DIR="${DATA}/cron_heartbeat"
 
 source "$BASE/helper_scripts/cron/lib/research_workload_guard.sh"
 research_guard_prepare_private_dirs \
     "$LOG_DIR" "$LOCK_ROOT" "$HEARTBEAT_DIR" || exit 0
+research_guard_prepare_flock_file "$LOCK_FILE" || exit 0
 
 ts() { date '+%Y-%m-%d %H:%M:%S'; }
 
@@ -35,6 +37,32 @@ else
 fi
 EXPECTED_SOURCE_HEAD="$(resolve_effective_expected_head "$BASE" "$DATA" "alpha_discovery_throughput" "$EXPECTED_SOURCE_HEAD")"
 
+# 反疊加 flock 鎖（CRON-STALE-LOCK-FLOCK-1）：舊 mkdir-dir 鎖在單輪超過 20min 時
+# 「rmdir 清鎖照跑、舊進程不殺」——每個 */15 週期淨疊一個 20-25GB python，直到
+# kernel OOM 連環殺（2026-07-15 全機 OOM 風暴主放大器；trap-rmdir 正是 stale 態
+# 來源，SIGKILL 本就攔不到）。flock 由 kernel 在持鎖進程死亡時自動放鎖，無 stale
+# 態、無需 trap 清理；不 kill 接手（PID 重用誤殺＋長任務 livelock）、鎖檔常駐
+# 不得刪。詳版裁決見 lib MODULE_NOTE。lib 缺失＝fail-safe skip（不學 SG_LIB 的
+# passthrough——鎖不能降級硬跑）。
+CRON_FLOCK_LIB="$BASE/helper_scripts/cron/lib/cron_flock.sh"
+if [[ ! -f "$CRON_FLOCK_LIB" ]]; then
+    echo "[$(ts)] ERROR: cron_flock lib missing: $CRON_FLOCK_LIB (fail-safe skip, not running unlocked)" >> "$LOG"
+    exit 0
+fi
+source "$CRON_FLOCK_LIB"
+acquire_cron_flock "$LOCK_FILE" 20 "$LOG" "alpha_discovery_throughput" || exit 0
+
+# 取到鎖＝本實例要跑重活：自標 OOM victim（oom_score_adj 往正、默認 800），使
+# 記憶體耗盡時 kernel 優先殺本 cron hog、而非繼承 DefaultOOMScoreAdjust=200 的
+# 交易引擎/watchdog（2026-07-15 引擎因 adj=200 被連坐殺）。fail-soft：非 Linux/
+# 不可寫皆無害跳過；lib 缺失不擋跑（少一層保護≠不能跑，與 flock 的 fail-safe-skip
+# 刻意不同）。分數跨 fork+exec 繼承 → 下面 spawn 的 python 子孫全是 victim。詳見
+# lib MODULE_NOTE；env OPENCLAW_CRON_OOM_VICTIM_SCORE 可調。
+OOM_VICTIM_LIB="$BASE/helper_scripts/cron/lib/cron_oom_victim.sh"
+[[ -f "$OOM_VICTIM_LIB" ]] && source "$OOM_VICTIM_LIB" && mark_cron_oom_victim || true
+
+# The merged kernel flock remains the first anti-stacking fence. The owner
+# guard adds exact PID/token/cgroup recovery and per-stage memory containment.
 ACTUAL_SOURCE_HEAD="$(git -C "$BASE" rev-parse HEAD 2>/dev/null || true)"
 if [[ ! "$ACTUAL_SOURCE_HEAD" =~ ^[0-9a-f]{40}$ ]]; then
     echo "[$(ts)] ERROR: alpha discovery source head is unavailable" >> "$LOG"
@@ -42,7 +70,7 @@ if [[ ! "$ACTUAL_SOURCE_HEAD" =~ ^[0-9a-f]{40}$ ]]; then
 fi
 guard_rc=0
 research_guard_acquire --lane alpha \
-    --lock-dir "$LOCK_DIR" \
+    --lock-dir "$LOCK_OWNER_DIR" \
     --source-head "$ACTUAL_SOURCE_HEAD" \
     --heartbeat-file "$HEARTBEAT_DIR/alpha_discovery_throughput.last_fire" || guard_rc=$?
 if (( guard_rc != 0 )); then

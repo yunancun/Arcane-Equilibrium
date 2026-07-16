@@ -48,7 +48,19 @@ def test_wrapper_readonly_pg_and_artifact_only_status() -> None:
     assert "basic_system_services.env" in src
     assert "POSTGRES_PASSWORD" in src
     assert 'PGOPTIONS="-c default_transaction_read_only=on"' in src
-    assert "cost_gate_learning_lane_cron.lock.d" in src
+    # CRON-STALE-LOCK-FLOCK-1：mkdir-dir 鎖＋「stale 超時 rmdir 清鎖照跑」已廢止
+    #（2026-07-15 OOM 疊加機），改共用 flock 正本：鎖檔常駐、超齡只 WARN 絕不接手。
+    assert 'LOCK_FILE="${LOCK_ROOT}/cost_gate_learning_lane_cron.lock"' in src
+    assert "cost_gate_learning_lane_cron.lock.d" not in src
+    assert "cron_flock.sh" in src
+    assert (
+        'acquire_cron_flock "$LOCK_FILE" "$STALE_LOCK_MIN" "$LOG" "cost_gate_learning_lane" || exit 0'
+        in src
+    )
+    assert 'rmdir "' not in src
+    assert 'mkdir "$LOCK' not in src
+    assert "release_lock()" not in src
+    assert "trap release_lock" not in src
     assert "cost_gate_learning_lane.last_fire" in src
     assert "cost_gate_learning_lane_cron.log" in src
     assert "cost_gate_learning_lane.log" in src
@@ -233,6 +245,21 @@ def test_wrapper_readonly_pg_and_artifact_only_status() -> None:
     assert "PYTHONDONTWRITEBYTECODE=1" in src
     assert "artifact_only_readonly_pg_jsonl_ledger_no_order_no_cost_gate_relaxation" in src
     assert src.rstrip().endswith("exit 0")
+
+
+def test_wrapper_marks_cron_oom_victim_after_lock() -> None:
+    # CRON-OOM-VICTIM-1：取到鎖的重活實例自標 OOM victim（oom_score_adj 往正、
+    # 默認 800），使 OOM 時 kernel 優先殺 cron hog（probe_ledger 全量物化實測
+    # 79–85GB）、而非繼承 DefaultOOMScoreAdjust=200 的交易引擎/watchdog（2026-07-15
+    # 引擎因 adj=200 被連坐殺）。與 flock 互補、全 fail-soft、lib 缺失不擋跑。
+    src = _src(WRAPPER)
+    assert "cron_oom_victim.sh" in src
+    assert (
+        '[[ -f "$OOM_VICTIM_LIB" ]] && source "$OOM_VICTIM_LIB" && mark_cron_oom_victim || true'
+        in src
+    )
+    # 放在取鎖之後：只有真正取到鎖、要跑重活的實例才需標 victim。
+    assert src.index("acquire_cron_flock") < src.index("mark_cron_oom_victim")
 
 
 def test_wrapper_fail_soft_defaults_match_learning_lane_review_policy() -> None:

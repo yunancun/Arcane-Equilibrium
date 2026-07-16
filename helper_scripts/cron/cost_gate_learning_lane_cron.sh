@@ -36,7 +36,8 @@ LOG_DIR="${DATA}/logs"
 LOG="${LOG_DIR}/cost_gate_learning_lane_cron.log"
 STATUS_LOG="${LOG_DIR}/cost_gate_learning_lane.log"
 LOCK_ROOT="${DATA}/locks"
-LOCK_DIR="${LOCK_ROOT}/cost_gate_learning_lane_cron.lock.d"
+LOCK_FILE="${LOCK_ROOT}/cost_gate_learning_lane_cron.lock"
+LOCK_OWNER_DIR="${LOCK_ROOT}/cost_gate_learning_lane_cron.owner"
 HEARTBEAT_DIR="${DATA}/cron_heartbeat"
 ALR_CANDIDATE_EVIDENCE_DIR="${ALR_CANDIDATE_EVIDENCE_DIR:-$HOME/.local/share/openclaw/alr-candidate-evidence}"
 ALR_CANDIDATE_EVIDENCE_RETENTION="${ALR_CANDIDATE_EVIDENCE_RETENTION:-128}"
@@ -149,12 +150,15 @@ FALSE_NEGATIVE_OPERATOR_REVIEW_MAX_ARTIFACT_AGE_HOURS="${OPENCLAW_COST_GATE_FALS
 FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_MAX_ARTIFACT_AGE_HOURS="${OPENCLAW_COST_GATE_FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_MAX_ARTIFACT_AGE_HOURS:-24}"
 FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_TOP_LIMIT="${OPENCLAW_COST_GATE_FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_TOP_LIMIT:-16}"
 SHADOW_PLACEMENT_MAX_ARTIFACT_AGE_HOURS="${OPENCLAW_COST_GATE_SHADOW_PLACEMENT_MAX_ARTIFACT_AGE_HOURS:-24}"
+# STALE_LOCK_MIN 語意變更（CRON-STALE-LOCK-FLOCK-1）：由「stale 鎖接手閾值」轉為
+# 「長跑觀測告警閾值」（持鎖超齡只 WARN、絕不接手）；env 名不改，保持部署兼容。
 STALE_LOCK_MIN="${OPENCLAW_COST_GATE_LEARNING_STALE_LOCK_MIN:-30}"
 
 source "$BASE/helper_scripts/cron/lib/research_workload_guard.sh"
 research_guard_prepare_private_dirs \
     "$LANE_DIR" "$COUNTERFACTUAL_DIR" "$DATA_FLOW_DIR" \
     "$ORDER_TOUCHABILITY_DIR" "$LOG_DIR" "$LOCK_ROOT" "$HEARTBEAT_DIR" || exit 0
+research_guard_prepare_flock_file "$LOCK_FILE" || exit 0
 
 ts() { date -u '+%Y-%m-%d %H:%M:%S'; }
 
@@ -365,6 +369,35 @@ if [[ -z "$PYBIN" ]]; then
     fi
 fi
 
+touch "$HEARTBEAT_DIR/cost_gate_learning_lane.last_fire" 2>/dev/null || true
+
+# 反疊加 flock 鎖（CRON-STALE-LOCK-FLOCK-1）：舊 mkdir-dir 鎖在單輪超過
+# STALE_LOCK_MIN 時「rmdir 清鎖照跑、舊進程不殺」，是 2026-07-15 全機 OOM 風暴
+# 的疊加機之一（trap-rmdir 正是 stale 態來源，SIGKILL 本就攔不到）。flock 由
+# kernel 在持鎖進程死亡時自動放鎖，無 stale 態、無需 trap 清理（原 release_lock
+# 的 rc 保留語意亦不再需要：無 trap 時 exit code 本就自然透傳）；不 kill 接手、
+# 鎖檔常駐不得刪。詳版裁決見 lib MODULE_NOTE。lib 缺失＝fail-safe skip，
+# 鎖不能降級硬跑。
+CRON_FLOCK_LIB="$BASE/helper_scripts/cron/lib/cron_flock.sh"
+if [[ ! -f "$CRON_FLOCK_LIB" ]]; then
+    echo "[$(ts)] ERROR: cron_flock lib missing: $CRON_FLOCK_LIB (fail-safe skip, not running unlocked)" >> "$LOG"
+    exit 0
+fi
+source "$CRON_FLOCK_LIB"
+acquire_cron_flock "$LOCK_FILE" "$STALE_LOCK_MIN" "$LOG" "cost_gate_learning_lane" || exit 0
+
+# 取到鎖＝本實例要跑重活：自標 OOM victim（oom_score_adj 往正、默認 800），使
+# 記憶體耗盡時 kernel 優先殺本 cron hog（probe_ledger 全量物化實測 79–85GB）、
+# 而非繼承 DefaultOOMScoreAdjust=200 的交易引擎/watchdog（2026-07-15 引擎因
+# adj=200 被連坐殺）。fail-soft：非 Linux/不可寫皆無害跳過；lib 缺失不擋跑（少一層
+# 保護≠不能跑，與 flock 的 fail-safe-skip 刻意不同）。分數跨 fork+exec 繼承 → 下面
+# spawn 的 python 子孫全是 victim。詳見 lib MODULE_NOTE；env
+# OPENCLAW_CRON_OOM_VICTIM_SCORE 可調。
+OOM_VICTIM_LIB="$BASE/helper_scripts/cron/lib/cron_oom_victim.sh"
+[[ -f "$OOM_VICTIM_LIB" ]] && source "$OOM_VICTIM_LIB" && mark_cron_oom_victim || true
+
+# The merged kernel flock remains the first anti-stacking fence. The owner
+# guard adds exact PID/token/cgroup recovery and per-stage memory containment.
 ACTUAL_SOURCE_HEAD="$(git -C "$BASE" rev-parse HEAD 2>/dev/null || true)"
 if [[ ! "$ACTUAL_SOURCE_HEAD" =~ ^[0-9a-f]{40}$ ]]; then
     echo "[$(ts)] ERROR: cost-gate learning source head is unavailable" >> "$LOG"
@@ -372,7 +405,7 @@ if [[ ! "$ACTUAL_SOURCE_HEAD" =~ ^[0-9a-f]{40}$ ]]; then
 fi
 guard_rc=0
 research_guard_acquire --lane cost \
-    --lock-dir "$LOCK_DIR" \
+    --lock-dir "$LOCK_OWNER_DIR" \
     --source-head "$ACTUAL_SOURCE_HEAD" \
     --heartbeat-file "$HEARTBEAT_DIR/cost_gate_learning_lane.last_fire" || guard_rc=$?
 if (( guard_rc != 0 )); then

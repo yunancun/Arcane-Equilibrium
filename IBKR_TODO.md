@@ -132,9 +132,11 @@ W2-W11 的全部 DoD 都封頂在 `source-ready` + `runtime-active(inactive post
 
 ---
 
-### W2 — P2 production seal/supersession caller(ACTIVE;核心已落地,殘項=收口)
+### W2 — P2 production seal/supersession caller(**收口+加固完成 2026-07-15**;production seal arming 屬 EA3)
 
 **目標**:讓 Phase-2 external-surface gate 的 sealed PASS artifact 有受控的 production 寫路徑(genesis Seal / Supersede / Revoke),移除「production 永不 seal」的永久阻塞,但**不創造任何接觸**。
+
+**R1+R2 收口紀錄**:四腿(PA 補簽/E2/E3/E4)+ 加固切片 PR#28 `19985f312`(staggered-expiry brick 修復=expiry 只約束 active leaf、/run 族 denylist、相對路徑拒絕、readdir errno fail-closed、anti-placeholder、8 新測試,102/0 雙審過);E2-F2 AMD 綁定漂移由 CC 裁 NOT-BLOCKER→AMD-07-08-01 澄清 #3 入典;殘餘 LOW/NOTE(Revoke 豁免壞 inputs、compile_error target 守衛、expiry 上界、測試加硬三項)入 R3+ 順手清單。
 
 **現狀(2026-07-15 實查,超前於 TODO W2 行的「PA design」標示)**:seal/supersede/revoke 三 action ledger(append-only hash chain、flock+dirfd、replay 驗證、pre-write guard)、`bin/ibkr_phase2_seal.rs`(default dry-run + `--apply`×`OPENCLAW_IBKR_PHASE2_SEAL_APPLY=1` 雙閘)、47 in-file 測試 + 靜態守衛已在 main(`0c90de9c2`→`324fb87a8`→`7902efe71`→`c4b52c2e2` 鏈)。**殘項**:PA caller-authority 設計文檔補簽(誰、在什麼運維窗、以何憑據跑 CLI)、E2/E3 對抗審與 E4 Linux cargo 證據收口、TODO W2 行狀態遷移。
 
@@ -333,7 +335,7 @@ W3 ─┬─ W4 ───────┤
 |---|---|---|---|
 | **EA1 憑證 custody** | Operator 手動放置 readonly/paper 憑證入 `<secrets-root>/external/ibkr/{readonly,paper}/`(loader 只驗 fingerprint;live slot 此時**必須仍缺席**) | 放置 + 確認 slot 指紋 | slot fingerprint 記錄 |
 | **EA2 Gateway paper 起立** | enable W9 交付的 systemd unit(paper 4002、loopback、read-only API 設定);watchdog/nightly restart 演練(Gateway 現況未安裝——安裝與 unit 預備歸 W9,EA2 只做 enable+登入) | 批准 enable + IBKR 帳號側 paper 登入(2FA 適用性按 IBKR 現行政策,EA1 時由 IB 現勘) | OPS runbook 執行證據 |
-| **EA3 G4 首次接觸(readonly)** | production seal(W2 路徑,option A 批准檔)→ readonly envelope + 活化紀錄 → 首次 **health/serverTime** 真讀(嚴格對齊 AMD-07-08 G4 讀集;accountSummary 等歸 EA4 逐項納入) | **一次性顯式批准**(AMD-07-08 G4 語義)+ 活化紀錄 | QA runtime 證據;`session-ready` 達成 |
+| **EA3 G4 首次接觸(readonly)** | production seal(W2 路徑,option A 批准檔;**每次 apply 前歸檔該次批准檔精確位元組——AMD-07-08-01 澄清 #3 第 4 點,審計重算閉合必要條件**)→ readonly envelope + 活化紀錄 → 首次 **health/serverTime** 真讀(嚴格對齊 AMD-07-08 G4 讀集;accountSummary 等歸 EA4 逐項納入) | **一次性顯式批准**(AMD-07-08 G4 語義)+ 活化紀錄 | QA runtime 證據;`session-ready` 達成 |
 | **EA4 readonly soak + entitlement 確認** | 7-14 天唯讀穩定窗:session FSM/重連/nightly restart 實測;accountSummary/positions 等唯讀集按 envelope scope 逐項納入;delayed 行情實態;三角指紋長期一致。**重連活化紀律**:每次 reconnect(含 nightly restart 後)需新 envelope + 活化紀錄——soak 期預設 Operator 每日活化;如欲設計 scoped 排程性重連授權(單活化綁定預告重啟窗),屬 AMD-07-11 字面外,先開 OPEN-GOV-2 由 CC 裁決,未裁前按每日活化執行 | 讀 soak 報告 + 每日(或裁決後按窗)活化 | `entitlement-ready`;W3 協議假設校準 |
 | **EA5 paper effect 活化** | 開窗前置:**W7+W8 全綠 + option B 落地** + PIT universe / strategy hypothesis / market-data provenance / reference-data **四契約 accepted + 全 hash 凍結(D5 已裁)**;然後 paper envelope(option B HMAC 紀律)→ 首批 paper 訂單生命週期真跑 + 對賬 → 開 `stock_etf_evidence_clock_v1`(6-8 週 paper/shadow 窗) | paper 活化紀錄 + evidence clock 開窗批准 | `effect-authorized`+`evidence-producing`(paper) |
 | **EA6 證據與研究收斂** | scorecard/benchmark/cost 重建與證據收斂(QC/MIT 鏈);`tiny_live_adr_eligibility_v1` 討論閘評估(預註冊已在 EA5 前完成,此處不再改假設) | 讀 QC/MIT verdict | scorecard verdict artifact |

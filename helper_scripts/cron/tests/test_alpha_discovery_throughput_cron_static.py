@@ -72,6 +72,15 @@ def _src() -> str:
     return WRAPPER.read_text(encoding="utf-8")
 
 
+def _install_cron_flock_lib(base: Path) -> None:
+    # CRON-STALE-LOCK-FLOCK-1：wrapper 對 cron_flock.sh 是 fail-safe skip 硬依賴
+    #（lib 缺失即 log ERROR + exit 0，不跑任何 stage），故真跑 wrapper 的測試
+    # 必須把正本 lib 注入 fake BASE。
+    lib_dir = base / "helper_scripts" / "cron" / "lib"
+    lib_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy(CRON_DIR / "lib" / "cron_flock.sh", lib_dir / "cron_flock.sh")
+
+
 def _module_command_block(src: str, module: str) -> str:
     start = src.index(f'"$PYBIN" -m {module}')
     end = src.index(") >", start)
@@ -292,11 +301,16 @@ def test_wrapper_skips_bounded_chain_execution_on_selected_side_cell_mismatch(
 ) -> None:
     if shutil.which("bash") is None:
         pytest.skip("bash not available")
+    if shutil.which("flock") is None:
+        # 反疊加鎖硬依賴 flock；缺席機器（如 Mac dev）wrapper 會 fail-safe skip，
+        # 無法真跑 orchestration，改由 Linux runtime/CI 覆蓋。
+        pytest.skip("flock not available")
 
     base = tmp_path / "srv"
     data = tmp_path / "data"
     research_dir = base / "helper_scripts" / "research"
     (research_dir / "alpha_discovery_throughput").mkdir(parents=True)
+    _install_cron_flock_lib(base)
     lane_dir = data / "cost_gate_learning_lane"
     lane_dir.mkdir(parents=True)
     (data / "demo_order_to_fill_gap").mkdir(parents=True)
@@ -417,11 +431,15 @@ def test_runtime_runner_expected_head_wrapper_executes_with_empty_and_demo_env(
 ) -> None:
     if shutil.which("bash") is None:
         pytest.skip("bash not available")
+    if shutil.which("flock") is None:
+        # 同上：反疊加鎖硬依賴 flock，缺席時 wrapper fail-safe skip。
+        pytest.skip("flock not available")
     base = tmp_path / "srv"
     data = tmp_path / "data"
     (base / "helper_scripts" / "research" / "alpha_discovery_throughput").mkdir(
         parents=True
     )
+    _install_cron_flock_lib(base)
     fake_python = tmp_path / "fake_python.sh"
     args_log = tmp_path / "fake_python_args.log"
     fake_python.write_text(
@@ -499,3 +517,36 @@ def test_wrapper_keeps_refresh_artifact_only() -> None:
     assert "authorization.json" not in src
     assert "place_order" not in src
     assert "cancel_order" not in src
+
+
+def test_wrapper_uses_shared_flock_anti_stacking_lock() -> None:
+    # CRON-STALE-LOCK-FLOCK-1：mkdir-dir 鎖＋「stale 超時 rmdir 清鎖照跑」已廢止
+    #（2026-07-15 OOM 疊加機），改共用 flock 正本：鎖檔常駐、超齡只 WARN 絕不接手；
+    # lib 缺失＝fail-safe skip（鎖不能降級硬跑）。
+    src = _src()
+    assert 'LOCK_FILE="${LOCK_ROOT}/alpha_discovery_throughput_cron.lock"' in src
+    assert "alpha_discovery_throughput_cron.lock.d" not in src
+    assert "cron_flock.sh" in src
+    assert (
+        'acquire_cron_flock "$LOCK_FILE" 20 "$LOG" "alpha_discovery_throughput" || exit 0'
+        in src
+    )
+    assert 'rmdir "' not in src
+    assert 'mkdir "$LOCK' not in src
+    assert "release_lock()" not in src
+    assert "trap release_lock" not in src
+
+
+def test_wrapper_marks_cron_oom_victim_after_lock() -> None:
+    # CRON-OOM-VICTIM-1：取到鎖的重活實例自標 OOM victim（oom_score_adj 往正、
+    # 默認 800），使 OOM 時 kernel 優先殺 cron hog、而非繼承 DefaultOOMScoreAdjust=200
+    # 的交易引擎/watchdog（2026-07-15 引擎因 adj=200 被連坐殺）。與 flock 互補、
+    # 全 fail-soft、lib 缺失不擋跑（少一層保護≠不能跑）。
+    src = _src()
+    assert "cron_oom_victim.sh" in src
+    assert (
+        '[[ -f "$OOM_VICTIM_LIB" ]] && source "$OOM_VICTIM_LIB" && mark_cron_oom_victim || true'
+        in src
+    )
+    # 放在取鎖之後：只有真正取到鎖、要跑重活的實例才需標 victim。
+    assert src.index("acquire_cron_flock") < src.index("mark_cron_oom_victim")
