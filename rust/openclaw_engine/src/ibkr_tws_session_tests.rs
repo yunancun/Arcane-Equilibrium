@@ -950,3 +950,84 @@ fn manager_error_frame_no_op_in_terminal_state() {
         }
     ));
 }
+
+// ---------------------------------------------------------------------------
+// F3（S4 收口）:queued-heartbeat 簿記閉環（避免重複心跳/簿記漂移;設計 §1.3/§3）
+// ---------------------------------------------------------------------------
+
+use crate::ibkr_tws_pacing::{OutboundClass, PacingConfig};
+// `PacingDispatch` 定義於本 session 模塊（父模塊,`use super::*` 已帶入,此處顯式列以醒目）。
+use super::PacingDispatch;
+
+/// pacing config:lines=20 → rate=10 msg/s（100ms/token < queue_timeout 500ms;令佇列心跳可在
+/// 逾時前補足 token 放行）,capacity=10 token。
+fn queueable_pacing() -> PacingConfig {
+    PacingConfig {
+        market_data_lines: 20,
+        ..PacingConfig::default()
+    }
+}
+
+/// 於 now 耗盡主 bucket（submit Control 至空;rate=10 → 10 token）,令下個 submit 必被 Queued。
+fn drain_main_bucket(mgr: &mut TwsSessionManager, now_ms: u64) {
+    let gov = mgr.governor_mut();
+    for _ in 0..10 {
+        // Admitted 時 grant 即 drop（by-value）;只為耗 token。
+        let _ = gov.submit(OutboundClass::Control, now_ms);
+    }
+}
+
+#[test]
+fn f3_queued_heartbeat_resolves_marks_sent_no_duplicate() {
+    let mut mgr = TwsSessionManager::new_with_pacing(cfg(), queueable_pacing());
+    drive_manager_to_ready(&mut mgr, 0);
+    // 心跳到期（30s）前先耗盡 bucket → 心跳被 governor Queued（非即時 Admitted）。
+    drain_main_bucket(&mut mgr, 30_000);
+    assert!(matches!(
+        mgr.heartbeat_outbound(30_000),
+        HeartbeatOutbound::Queued(_)
+    ));
+    // **F3 去重不變量**:在途心跳未解決前再呼 → NotDue（不重複提交 → governor 不虛增第二筆佇列項）。
+    assert!(matches!(
+        mgr.heartbeat_outbound(30_000),
+        HeartbeatOutbound::NotDue
+    ));
+    // 100ms 後（<500ms queue_timeout）1 token 補足 → resolve 放行:回填 mark_heartbeat_sent + 回 frame。
+    let dispatches = mgr.resolve_pacing(30_100);
+    assert_eq!(dispatches.len(), 1);
+    match &dispatches[0] {
+        PacingDispatch::HeartbeatReady { frame, .. } => {
+            assert_eq!(*frame, crate::ibkr_tws_wire::encode_req_current_time());
+        }
+        _ => panic!("在途心跳放行應為 HeartbeatReady"),
+    }
+    // **簿記閉環證明**:FSM 已標記已送 → 立即再呼不重送（無簿記漂移 / 無重複心跳）。
+    assert!(matches!(
+        mgr.heartbeat_outbound(30_100),
+        HeartbeatOutbound::NotDue
+    ));
+    // governor 放行計數 = 10 drain(Control) + 1 heartbeat = 11。
+    assert_eq!(mgr.pacing_observation().admitted, 11);
+}
+
+#[test]
+fn f3_queued_heartbeat_timeout_clears_pending_and_retries() {
+    let mut mgr = TwsSessionManager::new_with_pacing(cfg(), queueable_pacing());
+    drive_manager_to_ready(&mut mgr, 0);
+    drain_main_bucket(&mut mgr, 30_000);
+    assert!(matches!(
+        mgr.heartbeat_outbound(30_000),
+        HeartbeatOutbound::Queued(_)
+    ));
+    // 600ms 後（>500ms queue_timeout）resolve → 佇列心跳逾時（FSM **不**標記已送 → 無虛標）。
+    let dispatches = mgr.resolve_pacing(30_600);
+    assert_eq!(dispatches.len(), 1);
+    assert!(matches!(dispatches[0], PacingDispatch::HeartbeatTimedOut));
+    // 在途身分已清 + FSM 仍 due（未標記已送）→ 下輪 heartbeat_outbound 重試並放行（bucket 已補足）。
+    match mgr.heartbeat_outbound(30_600) {
+        HeartbeatOutbound::Sent { frame, .. } => {
+            assert_eq!(frame, crate::ibkr_tws_wire::encode_req_current_time());
+        }
+        _ => panic!("逾時後應重試放行為 Sent（非 Sent = 簿記漂移）"),
+    }
+}
