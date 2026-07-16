@@ -7,6 +7,7 @@ use super::{
 };
 mod core_status_fixtures;
 mod foundation_status_fixtures;
+mod health_status_fixtures;
 mod phase5_status_fixtures;
 mod precontact_fixtures;
 mod request_contracts;
@@ -31,6 +32,7 @@ async fn stock_etf_status_methods_ignore_untrusted_params() {
         "stock_etf.get_launch_status",
         "stock_etf.get_release_packet_status",
         "stock_etf.get_disable_cleanup_status",
+        "stock_etf.get_connection_health",
     ];
     let untrusted_params = serde_json::json!({
         "asset_lane": "crypto_perp",

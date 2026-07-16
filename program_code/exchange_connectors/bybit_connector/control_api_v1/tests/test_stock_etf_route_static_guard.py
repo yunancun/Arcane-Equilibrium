@@ -143,5 +143,5 @@ def test_stock_etf_get_route_handlers_accept_only_response_and_authenticated_act
                 f"{path}:{node.lineno}: {node.name}() actor is not Depends(base.current_actor)"
             )
 
-    assert route_count == 17
+    assert route_count == 18
     assert violations == []

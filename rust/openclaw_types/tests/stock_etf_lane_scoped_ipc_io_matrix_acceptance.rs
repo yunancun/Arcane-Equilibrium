@@ -21,7 +21,7 @@ use openclaw_types::{
 fn accepted_lane_scoped_ipc_command_io_matrix_is_complete_and_ordered() {
     let contract = StockEtfLaneScopedIpcContractV1::accepted_fixture();
 
-    assert_eq!(contract.commands.len(), 20);
+    assert_eq!(contract.commands.len(), 21);
     for command in &contract.commands {
         assert_command_io(command);
     }
@@ -76,7 +76,8 @@ fn assert_command_io(command: &StockEtfLaneScopedIpcCommandV1) {
         | StockEtfLaneScopedIpcMethod::GetScorecardStatus
         | StockEtfLaneScopedIpcMethod::GetLaunchStatus
         | StockEtfLaneScopedIpcMethod::GetReleasePacketStatus
-        | StockEtfLaneScopedIpcMethod::GetDisableCleanupStatus => {
+        | StockEtfLaneScopedIpcMethod::GetDisableCleanupStatus
+        | StockEtfLaneScopedIpcMethod::GetConnectionHealth => {
             assert_gates_eq(command, &[]);
             assert_fields_eq(command, &["asset_lane", "broker", "request_id"]);
         }

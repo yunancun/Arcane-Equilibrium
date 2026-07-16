@@ -157,6 +157,14 @@ pub const STOCK_ETF_GET_DISABLE_CLEANUP_STATUS: IpcMethodSpec = IpcMethodSpec {
     slot: IpcSlotRequirement::None,
 };
 
+/// W4 connection-health 唯讀查詢（readonly=true → token 豁免,不進 LIVE_WRITE_METHODS;
+/// slot=None → 走 lane-scoped fixture dispatch,非全域 slot）。
+pub const STOCK_ETF_GET_CONNECTION_HEALTH: IpcMethodSpec = IpcMethodSpec {
+    name: "stock_etf.get_connection_health",
+    readonly: true,
+    slot: IpcSlotRequirement::None,
+};
+
 pub const STOCK_ETF_PREVIEW_PAPER_ORDER: IpcMethodSpec = IpcMethodSpec {
     name: "stock_etf.preview_paper_order",
     readonly: true,
@@ -220,6 +228,7 @@ pub const IPC_METHOD_REGISTRY: &[IpcMethodSpec] = &[
     STOCK_ETF_GET_LAUNCH_STATUS,
     STOCK_ETF_GET_RELEASE_PACKET_STATUS,
     STOCK_ETF_GET_DISABLE_CLEANUP_STATUS,
+    STOCK_ETF_GET_CONNECTION_HEALTH,
     STOCK_ETF_PREVIEW_PAPER_ORDER,
     STOCK_ETF_SUBMIT_PAPER_ORDER,
     STOCK_ETF_CANCEL_PAPER_ORDER,
@@ -312,6 +321,7 @@ mod tests {
             "stock_etf.get_launch_status",
             "stock_etf.get_release_packet_status",
             "stock_etf.get_disable_cleanup_status",
+            "stock_etf.get_connection_health",
             "stock_etf.preview_paper_order",
             "stock_etf.submit_paper_order",
             "stock_etf.cancel_paper_order",
@@ -352,6 +362,7 @@ mod tests {
             "stock_etf.get_launch_status",
             "stock_etf.get_release_packet_status",
             "stock_etf.get_disable_cleanup_status",
+            "stock_etf.get_connection_health",
             "stock_etf.preview_paper_order",
             "stock_etf.import_paper_fills",
             "stock_etf.evaluate_shadow_signal",

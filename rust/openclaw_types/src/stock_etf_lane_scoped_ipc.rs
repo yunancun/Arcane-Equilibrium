@@ -50,6 +50,7 @@ const REQUIRED_METHODS: &[StockEtfLaneScopedIpcMethod] = &[
     StockEtfLaneScopedIpcMethod::GetLaunchStatus,
     StockEtfLaneScopedIpcMethod::GetReleasePacketStatus,
     StockEtfLaneScopedIpcMethod::GetDisableCleanupStatus,
+    StockEtfLaneScopedIpcMethod::GetConnectionHealth,
     StockEtfLaneScopedIpcMethod::PreviewPaperOrder,
     StockEtfLaneScopedIpcMethod::SubmitPaperOrder,
     StockEtfLaneScopedIpcMethod::CancelPaperOrder,
@@ -454,6 +455,7 @@ pub enum StockEtfLaneScopedIpcMethod {
     GetLaunchStatus,
     GetReleasePacketStatus,
     GetDisableCleanupStatus,
+    GetConnectionHealth,
     PreviewPaperOrder,
     SubmitPaperOrder,
     CancelPaperOrder,
@@ -578,6 +580,16 @@ fn expected_method(method: StockEtfLaneScopedIpcMethod) -> ExpectedMethod {
             required_request_fields: STATUS_FIELDS,
         },
         Method::GetDisableCleanupStatus => ExpectedMethod {
+            operation: Op::HealthRead,
+            authority_scope: Scope::DisplayOnly,
+            effect_capable: false,
+            rust_owned: false,
+            required_gates: &[],
+            required_request_fields: STATUS_FIELDS,
+        },
+        // W4:connection-health 唯讀查詢（DisplayOnly;與其餘 status method 同形——
+        // effect 不可、Rust 不擁 authority、無 gates、STATUS_FIELDS）。
+        Method::GetConnectionHealth => ExpectedMethod {
             operation: Op::HealthRead,
             authority_scope: Scope::DisplayOnly,
             effect_capable: false,
