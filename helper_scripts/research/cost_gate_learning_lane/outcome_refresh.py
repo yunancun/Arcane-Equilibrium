@@ -69,6 +69,8 @@ OUTCOME_REFRESH_SCHEMA_VERSION = "cost_gate_demo_learning_lane_outcome_refresh_v
 RETAINED_LEDGER_SCAN_DEFERRED_EXIT_CODE = 75
 MAX_OUTCOME_REFRESH_PROJECTED_ROWS = 250_000
 MAX_OUTCOME_REFRESH_PROJECTED_BYTES = 512 * 1024 * 1024
+DEFAULT_OUTCOME_REFRESH_BATCH_LIMIT = 10_000
+MAX_OUTCOME_REFRESH_BATCH_LIMIT = 250_000
 _CANDIDATE_EVALUATION_PREFLIGHT_FIELDS = {
     "generated_outcome_count",
     "candidate_evaluation_eligible_count",
@@ -89,6 +91,40 @@ class OutcomeRefreshSelection:
     record_probe_outcomes: bool = False
 
 
+@dataclass(frozen=True)
+class OutcomeRefreshLedgerProjection:
+    """Bounded outcome-refresh working set plus full-scan backlog accounting."""
+
+    rows: list[dict[str, Any]]
+    pending_attempt_count: int
+    mature_pending_attempt_count: int
+    selected_attempt_count: int
+    mature_backlog_remaining_count: int
+    pending_backlog_remaining_count: int
+    completed_attempt_count: int
+    duplicate_admission_row_count: int
+    conflict_attempt_count: int
+    invalid_time_attempt_count: int
+    immature_attempt_count: int
+    relevant_fill_count: int
+    projected_row_count: int
+    projected_bytes: int
+    batch_limit: int
+    retained_ledger_source_row_count: int
+    retained_ledger_source_bytes: int
+    retained_ledger_scan_complete: bool = True
+    pending_universe_fully_processed: bool = False
+
+    def __iter__(self):
+        return iter(self.rows)
+
+    def __len__(self) -> int:
+        return len(self.rows)
+
+    def __getitem__(self, index):
+        return self.rows[index]
+
+
 def _canonical_row_bytes(row: dict[str, Any]) -> bytes:
     return json.dumps(
         row,
@@ -97,6 +133,38 @@ def _canonical_row_bytes(row: dict[str, Any]) -> bytes:
         separators=(",", ":"),
         allow_nan=False,
     ).encode("utf-8")
+
+
+_OUTCOME_SEMANTIC_VOLATILE_KEYS = {
+    "generated_at",
+    "generated_at_ms",
+    "generated_at_utc",
+    "materialized_at",
+    "materialized_at_ms",
+    "materialized_at_utc",
+    "source",
+}
+
+
+def _outcome_semantic_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _outcome_semantic_value(item)
+            for key, item in value.items()
+            if key not in _OUTCOME_SEMANTIC_VOLATILE_KEYS
+        }
+    if isinstance(value, list):
+        return [_outcome_semantic_value(item) for item in value]
+    return value
+
+
+def _outcome_semantic_bytes(row: dict[str, Any]) -> bytes:
+    return _canonical_row_bytes(
+        {
+            "effective_timestamp_ms": outcome_writer_module._row_ts_ms(row),
+            "row": _outcome_semantic_value(row),
+        }
+    )
 
 
 def _compact_fill_evidence_row(row: dict[str, Any]) -> dict[str, Any]:
@@ -125,13 +193,63 @@ def _compact_fill_evidence_row(row: dict[str, Any]) -> dict[str, Any]:
     return compact
 
 
+def _projection_horizon_minutes(
+    row: dict[str, Any],
+    *,
+    default_horizon_minutes: int,
+) -> int | None:
+    return outcome_writer_module._row_outcome_horizon_minutes(
+        row,
+        default_horizon_minutes,
+    )
+
+
+def _fill_link_ids(row: dict[str, Any]) -> set[str]:
+    keys = (
+        "attempt_id",
+        "context_id",
+        "signal_id",
+        "order_link_id",
+        "orderLinkId",
+        "openclaw_order_link_id",
+        "bounded_probe_attempt_id",
+    )
+    sections = (row, row.get("event"), row.get("lineage"))
+    return {
+        str(section.get(key) or "").strip()
+        for section in sections
+        if isinstance(section, dict)
+        for key in keys
+        if str(section.get(key) or "").strip()
+    }
+
+
+def _validate_batch_limit(batch_limit: int) -> None:
+    if (
+        isinstance(batch_limit, bool)
+        or not isinstance(batch_limit, int)
+        or not 1 <= batch_limit <= MAX_OUTCOME_REFRESH_BATCH_LIMIT
+    ):
+        raise ValueError(
+            "--outcome-refresh-batch-limit must be in [1, 250000]"
+        )
+
+
 def read_outcome_refresh_ledger_projection(
     ledger_path: Path,
     *,
     selection: OutcomeRefreshSelection,
-) -> list[dict[str, Any]]:
-    """Project only pending admissions and exact fill links through one scan."""
+    now_utc: dt.datetime | None = None,
+    outcome_cfg: ProbeOutcomeConfig | None = None,
+    batch_limit: int = DEFAULT_OUTCOME_REFRESH_BATCH_LIMIT,
+) -> OutcomeRefreshLedgerProjection:
+    """Scan the retained generation fully and return one bounded mature batch."""
     _validate_selection(selection)
+    outcome_cfg = outcome_cfg or ProbeOutcomeConfig()
+    validate_outcome_config(outcome_cfg)
+    _validate_batch_limit(batch_limit)
+    now = (now_utc or _utc_now()).astimezone(dt.timezone.utc)
+    now_ms = int(now.timestamp() * 1000)
     selected_record_types = set()
     if selection.record_blocked_outcomes:
         selected_record_types.add("blocked_signal_outcome")
@@ -147,20 +265,45 @@ def read_outcome_refresh_ledger_projection(
             conn.executescript(
                 """
                 CREATE TABLE admissions (
-                    seq INTEGER PRIMARY KEY,
                     target_record_type TEXT NOT NULL,
                     attempt_id TEXT NOT NULL,
-                    payload BLOB NOT NULL
-                );
+                    first_seq INTEGER NOT NULL,
+                    event_ts_ms INTEGER NOT NULL,
+                    horizon_minutes INTEGER,
+                    payload BLOB NOT NULL,
+                    duplicate_count INTEGER NOT NULL DEFAULT 0,
+                    conflicted INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (target_record_type, attempt_id)
+                ) WITHOUT ROWID;
+                CREATE TABLE admission_variants (
+                    target_record_type TEXT NOT NULL,
+                    attempt_id TEXT NOT NULL,
+                    semantic_payload BLOB NOT NULL,
+                    PRIMARY KEY (
+                        target_record_type,
+                        attempt_id,
+                        semantic_payload
+                    )
+                ) WITHOUT ROWID;
+                CREATE TABLE attempt_targets (
+                    attempt_id TEXT NOT NULL,
+                    target_record_type TEXT NOT NULL,
+                    PRIMARY KEY (attempt_id, target_record_type)
+                ) WITHOUT ROWID;
                 CREATE TABLE completed (
                     record_type TEXT NOT NULL,
                     attempt_id TEXT NOT NULL,
                     PRIMARY KEY (record_type, attempt_id)
                 ) WITHOUT ROWID;
                 CREATE TABLE fills (
-                    seq INTEGER PRIMARY KEY,
-                    payload BLOB NOT NULL
-                );
+                    payload BLOB PRIMARY KEY,
+                    first_seq INTEGER NOT NULL
+                ) WITHOUT ROWID;
+                CREATE TABLE fill_links (
+                    payload BLOB NOT NULL,
+                    link_id TEXT NOT NULL,
+                    PRIMARY KEY (payload, link_id)
+                ) WITHOUT ROWID;
                 """
             )
             seq = 0
@@ -188,15 +331,11 @@ def read_outcome_refresh_ledger_projection(
                     decision = outcome_writer_module._row_decision(outcome_row)
                     target_record_type = None
                     if (
-                        selection.record_blocked_outcomes
-                        and decision != ADMIT_DECISION
+                        decision != ADMIT_DECISION
                         and outcome_row.get("allowed_to_submit_order") is False
                     ):
                         target_record_type = "blocked_signal_outcome"
-                    elif (
-                        selection.record_probe_outcomes
-                        and decision == ADMIT_DECISION
-                    ):
+                    elif decision == ADMIT_DECISION:
                         target_record_type = "probe_outcome"
                     if target_record_type is not None:
                         attempt_id = (
@@ -205,49 +344,251 @@ def read_outcome_refresh_ledger_projection(
                         )
                         if attempt_id:
                             conn.execute(
-                                "INSERT INTO admissions VALUES (?, ?, ?, ?)",
-                                (
-                                    seq,
-                                    target_record_type,
-                                    attempt_id,
-                                    _canonical_row_bytes(outcome_row),
-                                ),
+                                "INSERT OR IGNORE INTO attempt_targets VALUES (?, ?)",
+                                (attempt_id, target_record_type),
                             )
+                        if (
+                            attempt_id
+                            and target_record_type in selected_record_types
+                        ):
+                            payload = _canonical_row_bytes(outcome_row)
+                            semantic_payload = _outcome_semantic_bytes(
+                                outcome_row
+                            )
+                            existing = conn.execute(
+                                """
+                                SELECT 1
+                                FROM admissions
+                                WHERE target_record_type = ? AND attempt_id = ?
+                                """,
+                                (target_record_type, attempt_id),
+                            ).fetchone()
+                            if existing is None:
+                                conn.execute(
+                                    """
+                                    INSERT INTO admissions (
+                                        target_record_type,
+                                        attempt_id,
+                                        first_seq,
+                                        event_ts_ms,
+                                        horizon_minutes,
+                                        payload
+                                    ) VALUES (?, ?, ?, ?, ?, ?)
+                                    """,
+                                    (
+                                        target_record_type,
+                                        attempt_id,
+                                        seq,
+                                        outcome_writer_module._row_ts_ms(
+                                            outcome_row
+                                        ),
+                                        _projection_horizon_minutes(
+                                            outcome_row,
+                                            default_horizon_minutes=(
+                                                outcome_cfg.horizon_minutes
+                                            ),
+                                        ),
+                                        payload,
+                                    ),
+                                )
+                                conn.execute(
+                                    """
+                                    INSERT INTO admission_variants
+                                    VALUES (?, ?, ?)
+                                    """,
+                                    (
+                                        target_record_type,
+                                        attempt_id,
+                                        semantic_payload,
+                                    ),
+                                )
+                            else:
+                                variant_insert = conn.execute(
+                                    """
+                                    INSERT OR IGNORE INTO admission_variants
+                                    VALUES (?, ?, ?)
+                                    """,
+                                    (
+                                        target_record_type,
+                                        attempt_id,
+                                        semantic_payload,
+                                    ),
+                                )
+                                if variant_insert.rowcount == 0:
+                                    conn.execute(
+                                        """
+                                        UPDATE admissions
+                                        SET duplicate_count = duplicate_count + 1
+                                        WHERE target_record_type = ?
+                                          AND attempt_id = ?
+                                        """,
+                                        (target_record_type, attempt_id),
+                                    )
+                                else:
+                                    conn.execute(
+                                        """
+                                        UPDATE admissions
+                                        SET conflicted = 1
+                                        WHERE target_record_type = ?
+                                          AND attempt_id = ?
+                                        """,
+                                        (target_record_type, attempt_id),
+                                    )
                 if (
                     selection.record_probe_outcomes
                     and outcome_writer_module._row_has_fill_execution_evidence(
                         outcome_row
                     )
                 ):
+                    compact = _compact_fill_evidence_row(outcome_row)
+                    payload = _canonical_row_bytes(compact)
                     conn.execute(
-                        "INSERT INTO fills VALUES (?, ?)",
-                        (
-                            seq,
-                            _canonical_row_bytes(
-                                _compact_fill_evidence_row(outcome_row)
-                            ),
-                        ),
+                        "INSERT OR IGNORE INTO fills VALUES (?, ?)",
+                        (payload, seq),
+                    )
+                    conn.executemany(
+                        "INSERT OR IGNORE INTO fill_links VALUES (?, ?)",
+                        [(payload, link_id) for link_id in _fill_link_ids(compact)],
                     )
 
-            scan_retained_jsonl(ledger_path, consume)
+            scan = scan_retained_jsonl(ledger_path, consume)
             conn.commit()
+            conn.execute(
+                """
+                UPDATE admissions
+                SET conflicted = 1
+                WHERE attempt_id IN (
+                    SELECT attempt_id
+                    FROM attempt_targets
+                    GROUP BY attempt_id
+                    HAVING COUNT(DISTINCT target_record_type) > 1
+                )
+                """
+            )
+            conn.commit()
+            processable = """
+                FROM admissions a
+                WHERE a.conflicted = 0
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM completed c
+                      WHERE c.record_type = a.target_record_type
+                        AND c.attempt_id = a.attempt_id
+                  )
+            """
+            pending_attempt_count = int(
+                conn.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM admissions a
+                    WHERE NOT EXISTS (
+                        SELECT 1
+                        FROM completed c
+                        WHERE c.record_type = a.target_record_type
+                          AND c.attempt_id = a.attempt_id
+                    )
+                    """
+                ).fetchone()[0]
+            )
+            completed_attempt_count = int(
+                conn.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM admissions a
+                    WHERE a.conflicted = 0
+                      AND EXISTS (
+                          SELECT 1
+                          FROM completed c
+                          WHERE c.record_type = a.target_record_type
+                            AND c.attempt_id = a.attempt_id
+                      )
+                    """
+                ).fetchone()[0]
+            )
+            conflict_attempt_count = int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM admissions WHERE conflicted = 1"
+                ).fetchone()[0]
+            )
+            duplicate_admission_row_count = int(
+                conn.execute(
+                    "SELECT COALESCE(SUM(duplicate_count), 0) FROM admissions"
+                ).fetchone()[0]
+            )
+            invalid_time_attempt_count = int(
+                conn.execute(
+                    f"""
+                    SELECT COUNT(*) {processable}
+                      AND (a.event_ts_ms <= 0 OR a.horizon_minutes IS NULL)
+                    """
+                ).fetchone()[0]
+            )
+            immature_attempt_count = int(
+                conn.execute(
+                    f"""
+                    SELECT COUNT(*) {processable}
+                      AND a.event_ts_ms > 0
+                      AND a.horizon_minutes IS NOT NULL
+                      AND a.event_ts_ms + a.horizon_minutes * 60000 > ?
+                    """,
+                    (now_ms,),
+                ).fetchone()[0]
+            )
+            mature_pending_attempt_count = int(
+                conn.execute(
+                    f"""
+                    SELECT COUNT(*) {processable}
+                      AND a.event_ts_ms > 0
+                      AND a.horizon_minutes IS NOT NULL
+                      AND a.event_ts_ms + a.horizon_minutes * 60000 <= ?
+                    """,
+                    (now_ms,),
+                ).fetchone()[0]
+            )
+            conn.execute(
+                """
+                CREATE TEMP TABLE selected_admissions (
+                    target_record_type TEXT NOT NULL,
+                    attempt_id TEXT NOT NULL,
+                    event_ts_ms INTEGER NOT NULL,
+                    first_seq INTEGER NOT NULL,
+                    payload BLOB NOT NULL,
+                    PRIMARY KEY (target_record_type, attempt_id)
+                ) WITHOUT ROWID
+                """
+            )
+            conn.execute(
+                f"""
+                INSERT INTO selected_admissions
+                SELECT
+                    a.target_record_type,
+                    a.attempt_id,
+                    a.event_ts_ms,
+                    a.first_seq,
+                    a.payload
+                {processable}
+                  AND a.event_ts_ms > 0
+                  AND a.horizon_minutes IS NOT NULL
+                  AND a.event_ts_ms + a.horizon_minutes * 60000 <= ?
+                ORDER BY
+                    a.event_ts_ms,
+                    a.first_seq,
+                    a.target_record_type,
+                    a.attempt_id
+                LIMIT ?
+                """,
+                (now_ms, batch_limit),
+            )
+            selected_attempt_count = int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM selected_admissions"
+                ).fetchone()[0]
+            )
             projected_rows: list[dict[str, Any]] = []
             projected_bytes = 0
-            for _seq, payload in conn.execute(
-                """
-                SELECT a.seq, a.payload
-                FROM admissions a
-                WHERE NOT EXISTS (
-                    SELECT 1
-                    FROM completed c
-                    WHERE c.record_type = a.target_record_type
-                      AND c.attempt_id = a.attempt_id
-                )
-                UNION ALL
-                SELECT f.seq, f.payload FROM fills f
-                ORDER BY seq
-                """
-            ):
+
+            def append_payload(payload: bytes) -> None:
+                nonlocal projected_bytes
                 projected_bytes += len(payload)
                 if (
                     len(projected_rows) >= MAX_OUTCOME_REFRESH_PROJECTED_ROWS
@@ -260,7 +601,76 @@ def read_outcome_refresh_ledger_projection(
                 projected_rows.append(
                     json.loads(bytes(payload).decode("utf-8"))
                 )
-            return projected_rows
+
+            conn.execute(
+                "CREATE TEMP TABLE selected_fill_links (link_id TEXT PRIMARY KEY)"
+            )
+            for target_record_type, _attempt_id, raw_payload in conn.execute(
+                """
+                SELECT target_record_type, attempt_id, payload
+                FROM selected_admissions
+                ORDER BY
+                    event_ts_ms,
+                    first_seq,
+                    target_record_type,
+                    attempt_id
+                """
+            ):
+                payload = bytes(raw_payload)
+                row = json.loads(payload.decode("utf-8"))
+                append_payload(payload)
+                if target_record_type == "probe_outcome":
+                    conn.executemany(
+                        "INSERT OR IGNORE INTO selected_fill_links VALUES (?)",
+                        [(link_id,) for link_id in _fill_link_ids(row)],
+                    )
+            relevant_fill_count = 0
+            for (payload,) in conn.execute(
+                """
+                SELECT f.payload
+                FROM fills f
+                WHERE EXISTS (
+                    SELECT 1
+                    FROM fill_links l
+                    JOIN selected_fill_links s ON s.link_id = l.link_id
+                    WHERE l.payload = f.payload
+                )
+                ORDER BY f.first_seq, f.payload
+                """
+            ):
+                append_payload(bytes(payload))
+                relevant_fill_count += 1
+
+            mature_backlog_remaining_count = (
+                mature_pending_attempt_count - selected_attempt_count
+            )
+            pending_backlog_remaining_count = (
+                pending_attempt_count - selected_attempt_count
+            )
+            return OutcomeRefreshLedgerProjection(
+                rows=projected_rows,
+                pending_attempt_count=pending_attempt_count,
+                mature_pending_attempt_count=mature_pending_attempt_count,
+                selected_attempt_count=selected_attempt_count,
+                mature_backlog_remaining_count=mature_backlog_remaining_count,
+                pending_backlog_remaining_count=pending_backlog_remaining_count,
+                completed_attempt_count=completed_attempt_count,
+                duplicate_admission_row_count=duplicate_admission_row_count,
+                conflict_attempt_count=conflict_attempt_count,
+                invalid_time_attempt_count=invalid_time_attempt_count,
+                immature_attempt_count=immature_attempt_count,
+                relevant_fill_count=relevant_fill_count,
+                projected_row_count=len(projected_rows),
+                projected_bytes=projected_bytes,
+                batch_limit=batch_limit,
+                retained_ledger_source_row_count=scan.row_count,
+                retained_ledger_source_bytes=scan.source_bytes,
+                retained_ledger_scan_complete=True,
+                pending_universe_fully_processed=(
+                    pending_backlog_remaining_count == 0
+                    and conflict_attempt_count == 0
+                ),
+            )
         finally:
             conn.close()
 
@@ -414,6 +824,52 @@ def append_refresh_outcomes_to_ledger(ledger_path: Path, batch: dict[str, Any]) 
     batch["appended_to_ledger"] = appended > 0
     batch["appended_outcome_count"] = appended
     return appended
+
+
+def _attach_projection_accounting(
+    batch: dict[str, Any],
+    projection: OutcomeRefreshLedgerProjection,
+) -> None:
+    batch.update(
+        {
+            "pending_attempt_count": projection.pending_attempt_count,
+            "mature_pending_attempt_count": (
+                projection.mature_pending_attempt_count
+            ),
+            "selected_attempt_count": projection.selected_attempt_count,
+            "mature_backlog_remaining_count": (
+                projection.mature_backlog_remaining_count
+            ),
+            "pending_backlog_remaining_count": (
+                projection.pending_backlog_remaining_count
+            ),
+            "completed_attempt_count": projection.completed_attempt_count,
+            "duplicate_admission_row_count": (
+                projection.duplicate_admission_row_count
+            ),
+            "conflict_attempt_count": projection.conflict_attempt_count,
+            "invalid_time_attempt_count": (
+                projection.invalid_time_attempt_count
+            ),
+            "immature_attempt_count": projection.immature_attempt_count,
+            "relevant_fill_count": projection.relevant_fill_count,
+            "projected_row_count": projection.projected_row_count,
+            "projected_bytes": projection.projected_bytes,
+            "batch_limit": projection.batch_limit,
+            "retained_ledger_source_row_count": (
+                projection.retained_ledger_source_row_count
+            ),
+            "retained_ledger_source_bytes": (
+                projection.retained_ledger_source_bytes
+            ),
+            "retained_ledger_scan_complete": (
+                projection.retained_ledger_scan_complete
+            ),
+            "pending_universe_fully_processed": (
+                projection.pending_universe_fully_processed
+            ),
+        }
+    )
 
 
 def _candidate_evaluation_preflight_valid(
@@ -612,25 +1068,32 @@ def refresh_cost_gate_outcomes_from_price_rows(
     outcome_cfg: ProbeOutcomeConfig | None = None,
     price_source: str = "local_price_file",
     append_ledger: bool = False,
+    batch_limit: int = DEFAULT_OUTCOME_REFRESH_BATCH_LIMIT,
     candidate_evaluation_source_provider: (
         CandidateEvaluationSourceProvider | None
     ) = None,
 ) -> dict[str, Any]:
     """Build a refresh batch from in-memory price rows and optionally append it."""
     selection = selection or OutcomeRefreshSelection(record_blocked_outcomes=True)
-    ledger_rows = read_outcome_refresh_ledger_projection(
+    outcome_cfg = outcome_cfg or ProbeOutcomeConfig()
+    fixed_now = (now_utc or _utc_now()).astimezone(dt.timezone.utc)
+    projection = read_outcome_refresh_ledger_projection(
         ledger_path,
         selection=selection,
+        now_utc=fixed_now,
+        outcome_cfg=outcome_cfg,
+        batch_limit=batch_limit,
     )
     batch = build_cost_gate_outcome_refresh_batch(
-        ledger_rows,
+        projection.rows,
         price_rows,
-        now_utc=now_utc,
+        now_utc=fixed_now,
         selection=selection,
         outcome_cfg=outcome_cfg,
         price_source=price_source,
         candidate_evaluation_source_provider=candidate_evaluation_source_provider,
     )
+    _attach_projection_accounting(batch, projection)
     if append_ledger:
         append_refresh_outcomes_to_ledger(ledger_path, batch)
     return batch
@@ -664,6 +1127,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-entry-delay-ms", type=int, default=5 * 60_000)
     parser.add_argument("--pg-timeframe", default="1m")
     parser.add_argument("--pg-statement-timeout-ms", type=int, default=180_000)
+    parser.add_argument(
+        "--outcome-refresh-batch-limit",
+        type=int,
+        default=DEFAULT_OUTCOME_REFRESH_BATCH_LIMIT,
+    )
     parser.add_argument("--print-json", action="store_true")
     return parser
 
@@ -675,10 +1143,27 @@ def main() -> int:
         record_probe_outcomes=args.record_probe_outcomes,
     )
     _validate_selection(selection)
+    fixed_now = _utc_now()
+    slippage_table = None
+    if args.slippage_artifact and args.slippage_artifact.exists():
+        from cost_gate_learning_lane.cost_model import load_slippage_quantiles
+
+        payload = json.loads(args.slippage_artifact.read_text(encoding="utf-8"))
+        slippage_table = load_slippage_quantiles(payload)
+    outcome_cfg = ProbeOutcomeConfig(
+        horizon_minutes=args.horizon_minutes,
+        cost_bps=args.outcome_cost_bps,
+        max_entry_delay_ms=args.max_entry_delay_ms,
+        slippage_table=slippage_table,
+    )
+    validate_outcome_config(outcome_cfg)
     try:
-        ledger_rows = read_outcome_refresh_ledger_projection(
+        projection = read_outcome_refresh_ledger_projection(
             args.ledger,
             selection=selection,
+            now_utc=fixed_now,
+            outcome_cfg=outcome_cfg,
+            batch_limit=args.outcome_refresh_batch_limit,
         )
     except (LedgerScanError, LedgerProjectionLimitError) as exc:
         print(
@@ -693,19 +1178,7 @@ def main() -> int:
             file=sys.stderr,
         )
         return RETAINED_LEDGER_SCAN_DEFERRED_EXIT_CODE
-    slippage_table = None
-    if args.slippage_artifact and args.slippage_artifact.exists():
-        from cost_gate_learning_lane.cost_model import load_slippage_quantiles
-
-        payload = json.loads(args.slippage_artifact.read_text(encoding="utf-8"))
-        slippage_table = load_slippage_quantiles(payload)
-    outcome_cfg = ProbeOutcomeConfig(
-        horizon_minutes=args.horizon_minutes,
-        cost_bps=args.outcome_cost_bps,
-        max_entry_delay_ms=args.max_entry_delay_ms,
-        slippage_table=slippage_table,
-    )
-    validate_outcome_config(outcome_cfg)
+    ledger_rows = projection.rows
 
     if args.source_pg:
         price_rows = build_price_rows_from_pg_for_refresh(
@@ -725,10 +1198,12 @@ def main() -> int:
     batch = build_cost_gate_outcome_refresh_batch(
         ledger_rows,
         price_rows,
+        now_utc=fixed_now,
         selection=selection,
         outcome_cfg=outcome_cfg,
         price_source=price_source,
     )
+    _attach_projection_accounting(batch, projection)
     if args.source_pg:
         batch["pg_timeframe"] = args.pg_timeframe
     if args.append_ledger:
