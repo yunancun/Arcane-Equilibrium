@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import argparse
 import datetime as dt
+import json
+from pathlib import Path
 
 import pytest
 
@@ -18,9 +21,15 @@ from cost_gate_learning_lane.outcome_review import (
     build_research_compatibility_blocked_signal_outcome_review_no_authority,
 )
 from cost_gate_learning_lane.runtime_adapter import read_jsonl_ledger
+from cost_gate_learning_lane import (
+    sealed_horizon_learning_evidence as sealed_horizon_module,
+)
 from cost_gate_learning_lane.sealed_horizon_learning_evidence import (
     SEALED_HORIZON_LEARNING_EVIDENCE_SCHEMA_VERSION,
     SealedHorizonLearningEvidenceConfig,
+    _read_json_or_jsonl_rows,
+    _run_from_args,
+    _write_jsonl,
     build_sealed_horizon_learning_evidence_packet,
     build_sealed_horizon_learning_evidence_from_rows,
     build_sealed_horizon_reject_feature_sql,
@@ -148,6 +157,139 @@ def _eligible_cohort(
             )
         )
     return rows
+
+
+def test_sealed_jsonl_io_does_not_use_whole_file_text_helpers(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    source = tmp_path / "rows.jsonl"
+    output = tmp_path / "output.jsonl"
+    rows = [{"row": index} for index in range(3)]
+    source.write_text(
+        "".join(json.dumps(row) + "\n" for row in rows),
+        encoding="utf-8",
+    )
+
+    def forbid_read_text(*_args, **_kwargs):
+        raise AssertionError("JSONL input must stream instead of read_text")
+
+    monkeypatch.setattr(Path, "read_text", forbid_read_text)
+    assert _read_json_or_jsonl_rows(source) == rows
+
+    def forbid_write_text(*_args, **_kwargs):
+        raise AssertionError("JSONL output must stream instead of write_text")
+
+    monkeypatch.setattr(Path, "write_text", forbid_write_text)
+    _write_jsonl(output, rows)
+    with output.open("r", encoding="utf-8") as handle:
+        assert [json.loads(line) for line in handle] == rows
+
+
+def test_sealed_cli_uses_bounded_projections_and_dry_run_review_overlay(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    plan = _sealed_plan()
+    plan["generated_at_utc"] = dt.datetime.now(dt.timezone.utc).isoformat()
+    plan_path = tmp_path / "plan.json"
+    source_rows = tmp_path / "source_rows.jsonl"
+    source_prices = tmp_path / "source_prices.jsonl"
+    source_rows_output = tmp_path / "source_rows_output.jsonl"
+    ledger = tmp_path / "probe_ledger.jsonl"
+    output = tmp_path / "sealed.json"
+    review_output = tmp_path / "review.json"
+    event_ts = int(
+        dt.datetime(2026, 7, 15, 12, tzinfo=dt.timezone.utc).timestamp()
+        * 1_000
+    )
+    plan_path.write_text(json.dumps(plan), encoding="utf-8")
+    source_rows.write_text(
+        json.dumps(
+            {
+                "ts": "2026-07-15T12:00:00+00:00",
+                "ts_ms": event_ts,
+                "context_id": "ctx-bounded-cli",
+                "engine_mode": "demo",
+                "strategy_name": "ma_crossover",
+                "symbol": "BTCUSDT",
+                "side": "Sell",
+                "reject_reason_code": "cost_gate_js_demo_negative_edge",
+                "last_price": 100.0,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    source_prices.write_text(
+        json.dumps(
+            {
+                "symbol": "BTCUSDT",
+                "ts_ms": event_ts + 240 * 60_000,
+                "close": 99.0,
+                "timeframe": "1m",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    ledger.write_text("", encoding="utf-8")
+
+    def forbid_full_partition_reader(*_args, **_kwargs):
+        raise AssertionError("production sealed CLI must not materialize full ledger")
+
+    monkeypatch.setattr(
+        sealed_horizon_module,
+        "read_learning_ledger_partitions",
+        forbid_full_partition_reader,
+        raising=False,
+    )
+    packet = _run_from_args(
+        argparse.Namespace(
+            plan=plan_path,
+            side_cell_key="ma_crossover|BTCUSDT|Sell",
+            ledger=ledger,
+            source_pg=False,
+            source_rows=source_rows,
+            price_source_pg=False,
+            source_prices=source_prices,
+            output=output,
+            review_output=review_output,
+            source_rows_output=source_rows_output,
+            append_ledger=False,
+            engine_modes=["demo", "live_demo"],
+            lookback_hours=72,
+            limit=500_000,
+            maturity_buffer_minutes=0,
+            horizon_minutes=60,
+            outcome_cost_bps=4.0,
+            max_entry_delay_ms=5 * 60_000,
+            pg_timeframe="1m",
+            pg_statement_timeout_ms=180_000,
+            max_plan_age_hours=48,
+            min_failed_outcomes_to_disable=8,
+            min_outcome_net_positive_pct=50.0,
+            min_avg_net_bps=0.0,
+            min_review_outcomes_per_side_cell=1,
+            min_review_effective_entries_per_side_cell=1,
+            min_review_distinct_entry_utc_days=1,
+            max_review_top_entry_day_share_pct=100.0,
+            min_review_avg_net_bps=0.0,
+            min_review_net_positive_pct=1.0,
+            print_json=False,
+        )
+    )
+
+    assert packet["materialization"]["raw_materialized_record_count"] == 1
+    assert packet["outcomes"]["raw_blocked_signal_outcome_count"] == 1
+    assert review_output.exists()
+    assert (
+        json.loads(review_output.read_text(encoding="utf-8"))[
+            "source_ledger_row_count"
+        ]
+        == 1
+    )
+    assert ledger.read_text(encoding="utf-8") == ""
 
 
 def test_sealed_horizon_reject_sql_filters_exact_mature_side_cell() -> None:

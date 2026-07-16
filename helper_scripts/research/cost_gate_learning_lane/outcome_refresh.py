@@ -10,6 +10,7 @@ It never writes PG, calls Bybit, submits orders, or mutates runtime config.
 from __future__ import annotations
 
 import argparse
+from collections.abc import Collection
 import copy
 import datetime as dt
 from dataclasses import dataclass
@@ -111,6 +112,7 @@ class OutcomeRefreshLedgerProjection:
     projected_row_count: int
     projected_bytes: int
     batch_limit: int
+    requested_side_cell_keys: tuple[str, ...]
     retained_ledger_source_row_count: int
     retained_ledger_source_bytes: int
     retained_ledger_scan_complete: bool = True
@@ -236,6 +238,25 @@ def _validate_batch_limit(batch_limit: int) -> None:
         )
 
 
+def _normalize_side_cell_keys(
+    side_cell_keys: Collection[str] | None,
+) -> tuple[str, ...]:
+    if side_cell_keys is None:
+        return ()
+    if isinstance(side_cell_keys, (str, bytes)):
+        raise ValueError("side_cell_keys must be a collection of non-empty strings")
+    normalized: set[str] = set()
+    for value in side_cell_keys:
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(
+                "side_cell_keys must be a collection of non-empty strings"
+            )
+        normalized.add(value.strip())
+    if not normalized:
+        raise ValueError("side_cell_keys must not be empty when provided")
+    return tuple(sorted(normalized))
+
+
 def read_outcome_refresh_ledger_projection(
     ledger_path: Path,
     *,
@@ -243,12 +264,21 @@ def read_outcome_refresh_ledger_projection(
     now_utc: dt.datetime | None = None,
     outcome_cfg: ProbeOutcomeConfig | None = None,
     batch_limit: int = DEFAULT_OUTCOME_REFRESH_BATCH_LIMIT,
+    side_cell_keys: Collection[str] | None = None,
 ) -> OutcomeRefreshLedgerProjection:
-    """Scan the retained generation fully and return one bounded mature batch."""
+    """Scan the retained generation fully and return one bounded mature batch.
+
+    When ``side_cell_keys`` is provided, only counting and oldest-first
+    selection are scoped.  Admission variants, completed attempt keys,
+    cross-target identities, and fills remain global in the disk-backed
+    projection so a conflicting row outside the requested cell cannot be
+    hidden by the scope.
+    """
     _validate_selection(selection)
     outcome_cfg = outcome_cfg or ProbeOutcomeConfig()
     validate_outcome_config(outcome_cfg)
     _validate_batch_limit(batch_limit)
+    requested_side_cell_keys = _normalize_side_cell_keys(side_cell_keys)
     now = (now_utc or _utc_now()).astimezone(dt.timezone.utc)
     now_ms = int(now.timestamp() * 1000)
     selected_record_types = set()
@@ -290,6 +320,16 @@ def read_outcome_refresh_ledger_projection(
                     attempt_id TEXT NOT NULL,
                     target_record_type TEXT NOT NULL,
                     PRIMARY KEY (attempt_id, target_record_type)
+                ) WITHOUT ROWID;
+                CREATE TABLE admission_side_cells (
+                    target_record_type TEXT NOT NULL,
+                    attempt_id TEXT NOT NULL,
+                    side_cell_key TEXT NOT NULL,
+                    PRIMARY KEY (
+                        target_record_type,
+                        attempt_id,
+                        side_cell_key
+                    )
                 ) WITHOUT ROWID;
                 CREATE TABLE completed (
                     record_type TEXT NOT NULL,
@@ -348,6 +388,23 @@ def read_outcome_refresh_ledger_projection(
                                 "INSERT OR IGNORE INTO attempt_targets VALUES (?, ?)",
                                 (attempt_id, target_record_type),
                             )
+                            row_side_cell_key = (
+                                outcome_writer_module._ledger_side_cell(
+                                    outcome_row
+                                )
+                            )
+                            if row_side_cell_key:
+                                conn.execute(
+                                    """
+                                    INSERT OR IGNORE INTO admission_side_cells
+                                    VALUES (?, ?, ?)
+                                    """,
+                                    (
+                                        target_record_type,
+                                        attempt_id,
+                                        row_side_cell_key,
+                                    ),
+                                )
                         if (
                             attempt_id
                             and target_record_type in selected_record_types
@@ -454,6 +511,32 @@ def read_outcome_refresh_ledger_projection(
 
             scan = scan_retained_jsonl(ledger_path, consume)
             conn.commit()
+            if requested_side_cell_keys:
+                conn.execute(
+                    """
+                    CREATE TEMP TABLE requested_side_cells (
+                        side_cell_key TEXT PRIMARY KEY
+                    )
+                    """
+                )
+                conn.executemany(
+                    "INSERT INTO requested_side_cells VALUES (?)",
+                    [(key,) for key in requested_side_cell_keys],
+                )
+            scope_clause = (
+                """
+                  AND EXISTS (
+                      SELECT 1
+                      FROM admission_side_cells scoped
+                      JOIN requested_side_cells requested
+                        ON requested.side_cell_key = scoped.side_cell_key
+                      WHERE scoped.target_record_type = a.target_record_type
+                        AND scoped.attempt_id = a.attempt_id
+                  )
+                """
+                if requested_side_cell_keys
+                else ""
+            )
             conn.execute(
                 """
                 UPDATE admissions
@@ -476,10 +559,10 @@ def read_outcome_refresh_ledger_projection(
                       WHERE c.record_type = a.target_record_type
                         AND c.attempt_id = a.attempt_id
                   )
-            """
+            """ + scope_clause
             pending_attempt_count = int(
                 conn.execute(
-                    """
+                    f"""
                     SELECT COUNT(*)
                     FROM admissions a
                     WHERE NOT EXISTS (
@@ -488,12 +571,13 @@ def read_outcome_refresh_ledger_projection(
                         WHERE c.record_type = a.target_record_type
                           AND c.attempt_id = a.attempt_id
                     )
+                    {scope_clause}
                     """
                 ).fetchone()[0]
             )
             completed_attempt_count = int(
                 conn.execute(
-                    """
+                    f"""
                     SELECT COUNT(*)
                     FROM admissions a
                     WHERE a.conflicted = 0
@@ -501,19 +585,30 @@ def read_outcome_refresh_ledger_projection(
                           SELECT 1
                           FROM completed c
                           WHERE c.record_type = a.target_record_type
-                            AND c.attempt_id = a.attempt_id
+                          AND c.attempt_id = a.attempt_id
                       )
+                    {scope_clause}
                     """
                 ).fetchone()[0]
             )
             conflict_attempt_count = int(
                 conn.execute(
-                    "SELECT COUNT(*) FROM admissions WHERE conflicted = 1"
+                    f"""
+                    SELECT COUNT(*)
+                    FROM admissions a
+                    WHERE a.conflicted = 1
+                    {scope_clause}
+                    """
                 ).fetchone()[0]
             )
             duplicate_admission_row_count = int(
                 conn.execute(
-                    "SELECT COALESCE(SUM(duplicate_count), 0) FROM admissions"
+                    f"""
+                    SELECT COALESCE(SUM(a.duplicate_count), 0)
+                    FROM admissions a
+                    WHERE 1 = 1
+                    {scope_clause}
+                    """
                 ).fetchone()[0]
             )
             invalid_time_attempt_count = int(
@@ -665,6 +760,7 @@ def read_outcome_refresh_ledger_projection(
                 projected_row_count=len(projected_rows),
                 projected_bytes=projected_bytes,
                 batch_limit=batch_limit,
+                requested_side_cell_keys=requested_side_cell_keys,
                 retained_ledger_source_row_count=scan.row_count,
                 retained_ledger_source_bytes=scan.source_bytes,
                 retained_ledger_scan_complete=True,
@@ -1165,6 +1261,7 @@ def refresh_cost_gate_outcomes_from_price_rows(
     price_source: str = "local_price_file",
     append_ledger: bool = False,
     batch_limit: int = DEFAULT_OUTCOME_REFRESH_BATCH_LIMIT,
+    side_cell_keys: Collection[str] | None = None,
     candidate_evaluation_source_provider: (
         CandidateEvaluationSourceProvider | None
     ) = None,
@@ -1179,6 +1276,7 @@ def refresh_cost_gate_outcomes_from_price_rows(
         now_utc=fixed_now,
         outcome_cfg=outcome_cfg,
         batch_limit=batch_limit,
+        side_cell_keys=side_cell_keys,
     )
     batch = build_cost_gate_outcome_refresh_batch(
         projection.rows,

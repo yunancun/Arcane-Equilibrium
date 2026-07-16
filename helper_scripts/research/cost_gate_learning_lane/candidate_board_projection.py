@@ -8,6 +8,7 @@ the list-backed candidate-board builder.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 import datetime as dt
 from dataclasses import dataclass
 import json
@@ -282,6 +283,7 @@ class CandidateBoardLedgerProjection:
     rows: CandidateBoardSqliteProjection
     source_ledger_row_count: int
     blocked_outcome_row_count: int
+    additional_blocked_outcome_row_count: int
     lineage_exclusion_reason_counts: dict[str, int]
 
     @property
@@ -305,9 +307,11 @@ def read_candidate_board_ledger_projection(
     *,
     max_qualified_cohort_rows: int,
     max_qualified_cohort_bytes: int,
+    additional_rows: Iterable[Mapping[str, Any]] = (),
 ) -> CandidateBoardLedgerProjection:
-    """Scan one retained generation into an exact disk-backed universe."""
+    """Scan one retained generation plus nonpersistent rows into one universe."""
     source_row_count = 0
+    additional_blocked_outcome_row_count = 0
     rows = CandidateBoardSqliteProjection(
         max_qualified_cohort_rows=max_qualified_cohort_rows,
         max_qualified_cohort_bytes=max_qualified_cohort_bytes,
@@ -322,11 +326,20 @@ def read_candidate_board_ledger_projection(
                 rows.add_blocked_row(row)
 
         scan_retained_jsonl(ledger_path, consume)
+        for additional_row in additional_rows:
+            row = project_candidate_evidence_rows((dict(additional_row),))[0]
+            if row.get("record_type") != BLOCKED_SIGNAL_OUTCOME_RECORD_TYPE:
+                continue
+            rows.add_blocked_row(row)
+            additional_blocked_outcome_row_count += 1
         rows.finalize_scan()
         return CandidateBoardLedgerProjection(
             rows=rows,
             source_ledger_row_count=source_row_count,
             blocked_outcome_row_count=rows.raw_blocked_outcome_row_count,
+            additional_blocked_outcome_row_count=(
+                additional_blocked_outcome_row_count
+            ),
             lineage_exclusion_reason_counts={
                 key: rows.lineage_exclusion_reason_counts[key]
                 for key in sorted(rows.lineage_exclusion_reason_counts)

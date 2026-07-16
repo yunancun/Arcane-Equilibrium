@@ -2711,6 +2711,91 @@ def test_outcome_refresh_projection_batches_mature_backlog_oldest_first(
     assert projection.pending_universe_fully_processed is False
 
 
+def test_outcome_refresh_projection_scopes_selection_without_hiding_global_conflicts(
+    tmp_path: Path,
+) -> None:
+    ledger = tmp_path / "probe_ledger.jsonl"
+    event_ts = 1_784_116_800_000
+    target_side_cell = "ma_crossover|BTCUSDT|Sell"
+    target_pending = _admission_row(
+        "target-pending",
+        "ORDER_AUTHORITY_NOT_GRANTED",
+        "BTCUSDT",
+        "Sell",
+        event_ts + 4,
+    )
+    target_completed = _admission_row(
+        "target-completed",
+        "ORDER_AUTHORITY_NOT_GRANTED",
+        "BTCUSDT",
+        "Sell",
+        event_ts + 3,
+    )
+    same_target_outside_first = _admission_row(
+        "same-target-conflict",
+        "ORDER_AUTHORITY_NOT_GRANTED",
+        "ETHUSDT",
+        "Sell",
+        event_ts + 1,
+    )
+    same_target_inside_second = copy.deepcopy(same_target_outside_first)
+    same_target_inside_second["event"]["symbol"] = "BTCUSDT"
+    same_target_inside_second["side_cell_key"] = target_side_cell
+    cross_target_inside = _admission_row(
+        "cross-target-conflict",
+        "ORDER_AUTHORITY_NOT_GRANTED",
+        "BTCUSDT",
+        "Sell",
+        event_ts + 2,
+    )
+    cross_target_outside = _admission_row(
+        "cross-target-conflict",
+        ADMIT_DECISION,
+        "SOLUSDT",
+        "Buy",
+        event_ts + 2,
+    )
+    _write_jsonl_bytes(
+        ledger,
+        [
+            _admission_row(
+                "unrelated-oldest",
+                "ORDER_AUTHORITY_NOT_GRANTED",
+                "ETHUSDT",
+                "Sell",
+                event_ts,
+            ),
+            same_target_outside_first,
+            same_target_inside_second,
+            cross_target_inside,
+            cross_target_outside,
+            target_completed,
+            {
+                "record_type": "blocked_signal_outcome",
+                "attempt_id": "target-completed",
+            },
+            target_pending,
+        ],
+    )
+
+    projection = read_outcome_refresh_ledger_projection(
+        ledger,
+        selection=OutcomeRefreshSelection(record_blocked_outcomes=True),
+        now_utc=dt.datetime(2026, 7, 16, 13, tzinfo=dt.timezone.utc),
+        outcome_cfg=ProbeOutcomeConfig(horizon_minutes=60),
+        batch_limit=10,
+        side_cell_keys={target_side_cell},
+    )
+
+    assert projection.requested_side_cell_keys == (target_side_cell,)
+    assert [row["attempt_id"] for row in projection.rows] == ["target-pending"]
+    assert projection.completed_attempt_count == 1
+    assert projection.conflict_attempt_count == 2
+    assert projection.pending_attempt_count == 3
+    assert projection.mature_pending_attempt_count == 1
+    assert projection.selected_attempt_count == 1
+
+
 def test_outcome_refresh_projection_collapses_exact_admission_duplicates(
     tmp_path: Path,
 ) -> None:
@@ -3138,6 +3223,40 @@ def test_outcome_refresh_projection_successive_batches_advance_without_duplicate
     assert set(first_ids).isdisjoint(second_ids)
     assert second.completed_attempt_count == 2
     assert second.pending_backlog_remaining_count == 2
+
+
+def test_candidate_board_projection_includes_nonpersistent_overlay_rows(
+    tmp_path: Path,
+) -> None:
+    ledger = tmp_path / "probe_ledger.jsonl"
+    persisted = {
+        "record_type": "blocked_signal_outcome",
+        "attempt_id": "persisted",
+        "side_cell_key": "ma_crossover|BTCUSDT|Sell",
+    }
+    overlay = {
+        "record_type": "blocked_signal_outcome",
+        "attempt_id": "overlay",
+        "side_cell_key": "ma_crossover|ETHUSDT|Buy",
+    }
+    _write_jsonl_bytes(ledger, [persisted])
+
+    with read_candidate_board_ledger_projection(
+        ledger,
+        additional_rows=[overlay, {"record_type": "unrelated_audit"}],
+    ) as projection:
+        assert projection.source_ledger_row_count == 1
+        assert projection.blocked_outcome_row_count == 2
+        assert projection.additional_blocked_outcome_row_count == 1
+        review = build_blocked_signal_outcome_review(
+            projection.rows,
+            source_ledger_row_count=projection.source_ledger_row_count,
+        )
+
+    assert review["learning_candidate_board"]["raw_blocked_outcome_row_count"] == 2
+    with read_candidate_board_ledger_projection(ledger) as persisted_only:
+        assert persisted_only.blocked_outcome_row_count == 1
+        assert persisted_only.additional_blocked_outcome_row_count == 0
 
 
 def _build_two_selected_outcome_refresh(
