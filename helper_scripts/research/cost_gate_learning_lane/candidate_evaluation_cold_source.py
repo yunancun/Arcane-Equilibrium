@@ -1,19 +1,18 @@
-"""Typed cold-source resolution and immutable pre-capability terminal evidence.
+"""Typed cold-source resolution for one reviewed legacy build identity.
 
-This module proves only source availability.  It never creates candidate
-evaluation, learning, hidden-OOS, proof, regime, portfolio, or resource
-evidence, and it grants no training, serving, promotion, or order authority.
+This module proves only that one exact, source-controlled legacy build lacks
+the candidate-evaluation source snapshot.  It never creates evaluation,
+learning, hidden-OOS, proof, regime, portfolio, or resource evidence, and it
+grants no training, serving, promotion, order, or runtime authority.
 """
 
 from __future__ import annotations
 
 import copy
-import os
 import re
-import subprocess
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
-from pathlib import Path
+from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any
 
 from cost_gate_learning_lane.candidate_evaluation_context import canonical_sha256
@@ -22,42 +21,172 @@ from cost_gate_learning_lane.candidate_evaluation_context import canonical_sha25
 READY = "READY"
 DEFER = "DEFER"
 PERMANENTLY_UNAVAILABLE = "PERMANENTLY_UNAVAILABLE"
-PRE_CAPABILITY_BUILD = "PRE_CAPABILITY_BUILD"
-
-CANDIDATE_EVALUATION_SOURCE_CAPABILITY_GIT_SHA = (
-    "c58b9904012418b0a50f2ed8ee3e917eccb7394e"
+REVIEWED_LEGACY_BUILD_SOURCE_UNAVAILABLE = (
+    "REVIEWED_LEGACY_BUILD_SOURCE_UNAVAILABLE"
 )
-CANDIDATE_EVALUATION_SOURCE_CAPABILITY_SCHEMA_VERSION = (
+EXACT_BUILD_ATTESTATION = "EXACT_BUILD_ATTESTATION"
+
+CANDIDATE_EVALUATION_SOURCE_SCHEMA_VERSION = (
     "candidate_evaluation_source_snapshot_v1"
 )
+REVIEWED_LEGACY_BUILD_ATTESTATION_SCHEMA_VERSION = (
+    "reviewed_legacy_build_attestation_v1"
+)
+REVIEWED_LEGACY_BUILD_REGISTRY_SCHEMA_VERSION = (
+    "reviewed_legacy_build_attestation_registry_v1"
+)
 CANDIDATE_EVALUATION_SOURCE_UNAVAILABILITY_SCHEMA_VERSION = (
-    "candidate_evaluation_source_unavailability_v1"
+    "candidate_evaluation_source_unavailability_v2"
 )
 CANDIDATE_EVALUATION_SOURCE_UNAVAILABILITY_BOUNDARY = (
-    "source-availability terminal evidence only; no evaluation, learning, "
-    "hidden-OOS, proof, regime, portfolio, resource, training, serving, "
-    "promotion, order, lease, gate, config, broker, or runtime authority"
+    "source-availability terminal evidence only; exact reviewed build identity "
+    "does not create evaluation, label, learning, hidden-OOS, proof, regime, "
+    "portfolio, resource, training, serving, promotion, order, lease, gate, "
+    "config, broker, risk, auth, profit, or runtime authority"
 )
 CANDIDATE_EVALUATION_SOURCE_UNAVAILABILITY_HASH_FIELD = (
     "candidate_evaluation_source_unavailability_hash"
 )
+REVIEWED_LEGACY_BUILD_GIT_SHA = (
+    "0a4d38ee08f93e9cb3a3bae7160f86fe1716297d"
+)
 
 _GIT_SHA = re.compile(r"[0-9a-f]{40}\Z")
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
+_ATTESTATION_FIELDS = {
+    "schema_version",
+    "status",
+    "reason",
+    "verification_method",
+    "build_git_sha",
+    "unavailable_source_schema_version",
+    "boundary",
+    "attestation_id",
+}
+_RESOLVED_ATTESTATION_FIELDS = _ATTESTATION_FIELDS | {
+    "registry_schema_version",
+    "registry_digest",
+}
 _UNAVAILABILITY_FIELDS = {
     "schema_version",
     "status",
     "reason",
+    "verification_method",
     "event_hash",
     "context_id",
     "build_git_sha",
-    "capability_schema_version",
-    "capability_introduced_at_git_sha",
-    "ancestry_relation",
+    "unavailable_source_schema_version",
+    "attestation_schema_version",
+    "attestation_id",
+    "registry_schema_version",
+    "registry_digest",
     "boundary",
     CANDIDATE_EVALUATION_SOURCE_UNAVAILABILITY_HASH_FIELD,
 }
-_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _reviewed_attestation_body() -> dict[str, Any]:
+    return {
+        "schema_version": REVIEWED_LEGACY_BUILD_ATTESTATION_SCHEMA_VERSION,
+        "status": "ACTIVE",
+        "reason": REVIEWED_LEGACY_BUILD_SOURCE_UNAVAILABLE,
+        "verification_method": EXACT_BUILD_ATTESTATION,
+        "build_git_sha": REVIEWED_LEGACY_BUILD_GIT_SHA,
+        "unavailable_source_schema_version": (
+            CANDIDATE_EVALUATION_SOURCE_SCHEMA_VERSION
+        ),
+        "boundary": CANDIDATE_EVALUATION_SOURCE_UNAVAILABILITY_BOUNDARY,
+    }
+
+
+_REVIEWED_ATTESTATION_BODY = _reviewed_attestation_body()
+REVIEWED_LEGACY_BUILD_ATTESTATION_ID = canonical_sha256(
+    _REVIEWED_ATTESTATION_BODY
+)
+_REVIEWED_ATTESTATION = MappingProxyType(
+    {
+        **_REVIEWED_ATTESTATION_BODY,
+        "attestation_id": REVIEWED_LEGACY_BUILD_ATTESTATION_ID,
+    }
+)
+DEFAULT_REVIEWED_LEGACY_BUILD_REGISTRY = MappingProxyType(
+    {
+        REVIEWED_LEGACY_BUILD_GIT_SHA: _REVIEWED_ATTESTATION,
+    }
+)
+
+
+def _copy_mapping(value: Mapping[str, Any]) -> dict[str, Any]:
+    return copy.deepcopy({key: value[key] for key in value})
+
+
+def _validated_registry_projection(
+    registry: Mapping[str, Mapping[str, Any]],
+) -> tuple[dict[str, Any], str] | None:
+    """Validate the closed singleton registry and return its canonical digest."""
+
+    if (
+        not isinstance(registry, Mapping)
+        or set(registry) != {REVIEWED_LEGACY_BUILD_GIT_SHA}
+    ):
+        return None
+    try:
+        raw = registry[REVIEWED_LEGACY_BUILD_GIT_SHA]
+        if not isinstance(raw, Mapping):
+            return None
+        attestation = _copy_mapping(raw)
+    except Exception:
+        return None
+    if set(attestation) != _ATTESTATION_FIELDS:
+        return None
+    expected = {
+        **_reviewed_attestation_body(),
+        "attestation_id": REVIEWED_LEGACY_BUILD_ATTESTATION_ID,
+    }
+    if attestation != expected:
+        return None
+    registry_body = {
+        "schema_version": REVIEWED_LEGACY_BUILD_REGISTRY_SCHEMA_VERSION,
+        "entries": [attestation],
+    }
+    return attestation, canonical_sha256(registry_body)
+
+
+_DEFAULT_REGISTRY_PROJECTION = _validated_registry_projection(
+    DEFAULT_REVIEWED_LEGACY_BUILD_REGISTRY
+)
+if _DEFAULT_REGISTRY_PROJECTION is None:
+    raise RuntimeError("REVIEWED_LEGACY_BUILD_REGISTRY_INVALID")
+REVIEWED_LEGACY_BUILD_REGISTRY_DIGEST = _DEFAULT_REGISTRY_PROJECTION[1]
+
+
+def resolve_reviewed_legacy_build(
+    build_git_sha: Any,
+    *,
+    registry: Mapping[
+        str,
+        Mapping[str, Any],
+    ] = DEFAULT_REVIEWED_LEGACY_BUILD_REGISTRY,
+) -> dict[str, Any] | None:
+    """Resolve one exact reviewed build without repository or command access."""
+
+    if (
+        not isinstance(build_git_sha, str)
+        or _GIT_SHA.fullmatch(build_git_sha) is None
+        or build_git_sha != REVIEWED_LEGACY_BUILD_GIT_SHA
+    ):
+        return None
+    projection = _validated_registry_projection(registry)
+    if projection is None:
+        return None
+    attestation, registry_digest = projection
+    return {
+        **attestation,
+        "registry_schema_version": (
+            REVIEWED_LEGACY_BUILD_REGISTRY_SCHEMA_VERSION
+        ),
+        "registry_digest": registry_digest,
+    }
 
 
 @dataclass(frozen=True)
@@ -83,7 +212,8 @@ class CandidateEvaluationSourceResolution:
             or (
                 self.status == PERMANENTLY_UNAVAILABLE
                 and self.bundle is None
-                and self.reason == PRE_CAPABILITY_BUILD
+                and self.reason
+                == REVIEWED_LEGACY_BUILD_SOURCE_UNAVAILABLE
             )
         )
         if not valid:
@@ -106,87 +236,29 @@ class CandidateEvaluationSourceResolution:
     ) -> "CandidateEvaluationSourceResolution":
         return cls(
             status=PERMANENTLY_UNAVAILABLE,
-            reason=PRE_CAPABILITY_BUILD,
+            reason=REVIEWED_LEGACY_BUILD_SOURCE_UNAVAILABLE,
         )
 
 
-GitRunner = Callable[..., Any]
+ReviewedLegacyBuildRegistry = Mapping[str, Mapping[str, Any]]
 
 
-@dataclass
-class GitAncestryResolver:
-    """Fail-closed strict-ancestor resolver cached by candidate build SHA."""
-
-    repo_root: Path
-    runner: GitRunner = subprocess.run
-    timeout_seconds: float = 5.0
-    _cache: dict[str, bool] = field(default_factory=dict, init=False, repr=False)
-
-    def __post_init__(self) -> None:
-        self.repo_root = Path(self.repo_root).resolve()
-        if (
-            isinstance(self.timeout_seconds, bool)
-            or not isinstance(self.timeout_seconds, (int, float))
-            or self.timeout_seconds <= 0
-        ):
-            raise ValueError("GIT_ANCESTRY_TIMEOUT_INVALID")
-
-    def is_strict_pre_capability(self, build_git_sha: Any) -> bool:
-        if (
-            not isinstance(build_git_sha, str)
-            or _GIT_SHA.fullmatch(build_git_sha) is None
-            or build_git_sha
-            == CANDIDATE_EVALUATION_SOURCE_CAPABILITY_GIT_SHA
-        ):
-            return False
-        if build_git_sha in self._cache:
-            return self._cache[build_git_sha]
-
-        env = os.environ.copy()
-        env["GIT_NO_REPLACE_OBJECTS"] = "1"
-        try:
-            completed = self.runner(
-                [
-                    "git",
-                    "--no-replace-objects",
-                    "-C",
-                    str(self.repo_root),
-                    "merge-base",
-                    "--is-ancestor",
-                    build_git_sha,
-                    CANDIDATE_EVALUATION_SOURCE_CAPABILITY_GIT_SHA,
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-                timeout=self.timeout_seconds,
-                env=env,
-            )
-            result = (
-                isinstance(getattr(completed, "returncode", None), int)
-                and completed.returncode == 0
-            )
-        except (OSError, subprocess.SubprocessError):
-            result = False
-        self._cache[build_git_sha] = result
-        return result
-
-
-DEFAULT_GIT_ANCESTRY_RESOLVER = GitAncestryResolver(_ROOT)
-
-
-def build_pre_capability_source_provider(
-    resolver: GitAncestryResolver = DEFAULT_GIT_ANCESTRY_RESOLVER,
+def build_reviewed_legacy_build_source_provider(
+    registry: ReviewedLegacyBuildRegistry = (
+        DEFAULT_REVIEWED_LEGACY_BUILD_REGISTRY
+    ),
 ) -> Callable[[dict[str, Any], str], CandidateEvaluationSourceResolution]:
-    """Return a partial provider that terminalizes only proven legacy builds."""
+    """Return a provider that terminalizes only the exact reviewed build."""
 
     def provider(
         candidate_event_context: dict[str, Any],
         _as_of_utc_date: str,
     ) -> CandidateEvaluationSourceResolution:
         try:
-            build_git_sha = candidate_event_context.get("build_git_sha")
-            if resolver.is_strict_pre_capability(build_git_sha):
+            if resolve_reviewed_legacy_build(
+                candidate_event_context.get("build_git_sha"),
+                registry=registry,
+            ) is not None:
                 return CandidateEvaluationSourceResolution.permanently_unavailable()
         except Exception:
             pass
@@ -197,8 +269,12 @@ def build_pre_capability_source_provider(
 
 def build_candidate_evaluation_source_unavailability(
     candidate_event_context: Mapping[str, Any],
+    *,
+    registry: ReviewedLegacyBuildRegistry = (
+        DEFAULT_REVIEWED_LEGACY_BUILD_REGISTRY
+    ),
 ) -> dict[str, Any]:
-    """Build deterministic event-bound metadata after ancestry was proven."""
+    """Build deterministic event-bound metadata after exact attestation lookup."""
 
     event_hash = candidate_event_context.get("event_hash")
     context_id = candidate_event_context.get("context_id")
@@ -210,25 +286,34 @@ def build_candidate_evaluation_source_unavailability(
         or not context_id
         or context_id != context_id.strip()
         or not isinstance(build_git_sha, str)
-        or _GIT_SHA.fullmatch(build_git_sha) is None
     ):
         raise ValueError("CANDIDATE_EVALUATION_SOURCE_UNAVAILABILITY_EVENT_INVALID")
+    attestation = resolve_reviewed_legacy_build(
+        build_git_sha,
+        registry=registry,
+    )
+    if (
+        not isinstance(attestation, dict)
+        or set(attestation) != _RESOLVED_ATTESTATION_FIELDS
+    ):
+        raise ValueError("CANDIDATE_EVALUATION_SOURCE_ATTESTATION_NOT_FOUND")
     body = {
         "schema_version": (
             CANDIDATE_EVALUATION_SOURCE_UNAVAILABILITY_SCHEMA_VERSION
         ),
         "status": PERMANENTLY_UNAVAILABLE,
-        "reason": PRE_CAPABILITY_BUILD,
+        "reason": REVIEWED_LEGACY_BUILD_SOURCE_UNAVAILABLE,
+        "verification_method": EXACT_BUILD_ATTESTATION,
         "event_hash": event_hash,
         "context_id": context_id,
         "build_git_sha": build_git_sha,
-        "capability_schema_version": (
-            CANDIDATE_EVALUATION_SOURCE_CAPABILITY_SCHEMA_VERSION
+        "unavailable_source_schema_version": (
+            attestation["unavailable_source_schema_version"]
         ),
-        "capability_introduced_at_git_sha": (
-            CANDIDATE_EVALUATION_SOURCE_CAPABILITY_GIT_SHA
-        ),
-        "ancestry_relation": "STRICT_ANCESTOR_OF_CAPABILITY_INTRO",
+        "attestation_schema_version": attestation["schema_version"],
+        "attestation_id": attestation["attestation_id"],
+        "registry_schema_version": attestation["registry_schema_version"],
+        "registry_digest": attestation["registry_digest"],
         "boundary": CANDIDATE_EVALUATION_SOURCE_UNAVAILABILITY_BOUNDARY,
     }
     return {
@@ -243,13 +328,16 @@ def validate_candidate_evaluation_source_unavailability(
     value: Any,
     *,
     candidate_event_context: Mapping[str, Any],
+    registry: ReviewedLegacyBuildRegistry = (
+        DEFAULT_REVIEWED_LEGACY_BUILD_REGISTRY
+    ),
 ) -> dict[str, Any]:
-    """Validate canonical integrity and exact binding; ancestry is separate."""
+    """Validate marker integrity, event binding, and the active exact registry."""
 
     if not isinstance(value, Mapping):
         raise ValueError("CANDIDATE_EVALUATION_SOURCE_UNAVAILABILITY_INVALID")
     try:
-        source = copy.deepcopy({key: value[key] for key in value})
+        source = _copy_mapping(value)
     except Exception as exc:
         raise ValueError(
             "CANDIDATE_EVALUATION_SOURCE_UNAVAILABILITY_INVALID"
@@ -257,7 +345,8 @@ def validate_candidate_evaluation_source_unavailability(
     if set(source) != _UNAVAILABILITY_FIELDS:
         raise ValueError("CANDIDATE_EVALUATION_SOURCE_UNAVAILABILITY_FIELDS_INVALID")
     expected = build_candidate_evaluation_source_unavailability(
-        candidate_event_context
+        candidate_event_context,
+        registry=registry,
     )
     if source != expected:
         raise ValueError(
@@ -267,18 +356,24 @@ def validate_candidate_evaluation_source_unavailability(
 
 
 __all__ = [
-    "CANDIDATE_EVALUATION_SOURCE_CAPABILITY_GIT_SHA",
-    "CANDIDATE_EVALUATION_SOURCE_CAPABILITY_SCHEMA_VERSION",
+    "CANDIDATE_EVALUATION_SOURCE_SCHEMA_VERSION",
     "CANDIDATE_EVALUATION_SOURCE_UNAVAILABILITY_HASH_FIELD",
     "CANDIDATE_EVALUATION_SOURCE_UNAVAILABILITY_SCHEMA_VERSION",
     "CandidateEvaluationSourceResolution",
-    "DEFAULT_GIT_ANCESTRY_RESOLVER",
+    "DEFAULT_REVIEWED_LEGACY_BUILD_REGISTRY",
     "DEFER",
-    "GitAncestryResolver",
+    "EXACT_BUILD_ATTESTATION",
     "PERMANENTLY_UNAVAILABLE",
-    "PRE_CAPABILITY_BUILD",
     "READY",
+    "REVIEWED_LEGACY_BUILD_ATTESTATION_ID",
+    "REVIEWED_LEGACY_BUILD_ATTESTATION_SCHEMA_VERSION",
+    "REVIEWED_LEGACY_BUILD_GIT_SHA",
+    "REVIEWED_LEGACY_BUILD_REGISTRY_DIGEST",
+    "REVIEWED_LEGACY_BUILD_REGISTRY_SCHEMA_VERSION",
+    "REVIEWED_LEGACY_BUILD_SOURCE_UNAVAILABLE",
+    "ReviewedLegacyBuildRegistry",
     "build_candidate_evaluation_source_unavailability",
-    "build_pre_capability_source_provider",
+    "build_reviewed_legacy_build_source_provider",
+    "resolve_reviewed_legacy_build",
     "validate_candidate_evaluation_source_unavailability",
 ]

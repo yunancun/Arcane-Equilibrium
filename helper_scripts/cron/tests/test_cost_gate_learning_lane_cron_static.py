@@ -282,6 +282,36 @@ def test_pre_capability_source_opt_in_is_exactly_one_hourly_refresh_arg() -> Non
         assert flag not in _src(path), path
 
 
+def test_exact_build_attestation_production_path_has_no_old_git_dependency() -> None:
+    lane_dir = (
+        REPO_ROOT / "helper_scripts/research/cost_gate_learning_lane"
+    )
+    sources = {
+        path.name: _src(path)
+        for path in (
+            lane_dir / "candidate_evaluation_cold_source.py",
+            lane_dir / "candidate_evaluation_producer.py",
+            lane_dir / "outcome_refresh.py",
+        )
+    }
+    combined = "\n".join(sources.values())
+
+    assert "resolve_reviewed_legacy_build" in combined
+    assert "EXACT_BUILD_ATTESTATION" in combined
+    assert "0a4d38ee08f93e9cb3a3bae7160f86fe1716297d" in combined
+    for forbidden in (
+        "GitAncestryResolver",
+        "DEFAULT_GIT_ANCESTRY_RESOLVER",
+        "subprocess",
+        "merge-base",
+        "--is-ancestor",
+        "capability_introduced_at_git_sha",
+        "ancestry_relation",
+        "c58b9904012418b0a50f2ed8ee3e917eccb7394e",
+    ):
+        assert forbidden not in combined
+
+
 def test_wrapper_marks_cron_oom_victim_after_lock() -> None:
     # CRON-OOM-VICTIM-1：取到鎖的重活實例自標 OOM victim（oom_score_adj 往正、
     # 默認 800），使 OOM 時 kernel 優先殺 cron hog（probe_ledger 全量物化實測

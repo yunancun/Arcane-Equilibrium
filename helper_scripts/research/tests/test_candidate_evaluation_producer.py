@@ -9,6 +9,7 @@ import subprocess
 
 import pytest
 
+import cost_gate_learning_lane.candidate_evaluation_cold_source as cold_source_module
 import cost_gate_learning_lane.candidate_evaluation_producer as candidate_producer_module
 import cost_gate_learning_lane.outcome_refresh as outcome_refresh_module
 from helper_scripts.research.tests.candidate_lineage_v2_test_support import (
@@ -24,14 +25,21 @@ from cost_gate_learning_lane.candidate_evaluation_context import (
     canonical_sha256,
 )
 from cost_gate_learning_lane.candidate_evaluation_cold_source import (
-    CANDIDATE_EVALUATION_SOURCE_CAPABILITY_GIT_SHA,
+    CANDIDATE_EVALUATION_SOURCE_SCHEMA_VERSION,
+    DEFAULT_REVIEWED_LEGACY_BUILD_REGISTRY,
     DEFER,
+    EXACT_BUILD_ATTESTATION,
     PERMANENTLY_UNAVAILABLE,
-    PRE_CAPABILITY_BUILD,
     READY,
+    REVIEWED_LEGACY_BUILD_ATTESTATION_ID,
+    REVIEWED_LEGACY_BUILD_ATTESTATION_SCHEMA_VERSION,
+    REVIEWED_LEGACY_BUILD_GIT_SHA,
+    REVIEWED_LEGACY_BUILD_REGISTRY_DIGEST,
+    REVIEWED_LEGACY_BUILD_REGISTRY_SCHEMA_VERSION,
+    REVIEWED_LEGACY_BUILD_SOURCE_UNAVAILABLE,
     CandidateEvaluationSourceResolution,
-    GitAncestryResolver,
-    build_pre_capability_source_provider,
+    build_reviewed_legacy_build_source_provider,
+    resolve_reviewed_legacy_build,
 )
 from cost_gate_learning_lane.candidate_evaluation_producer import (
     ATTACHED,
@@ -280,7 +288,8 @@ def _assert_telemetry_conservation(partition: dict) -> None:
     )
 
 
-_PRE_CAPABILITY_BUILD_GIT_SHA = "0a4d38ee08f93e9cb3a3bae7160f86fe1716297d"
+_PRE_CAPABILITY_BUILD_GIT_SHA = REVIEWED_LEGACY_BUILD_GIT_SHA
+_HISTORICAL_CAPABILITY_GIT_SHA = "c58b9904012418b0a50f2ed8ee3e917eccb7394e"
 _REWRITTEN_CAPABILITY_GIT_SHA = "0c7c6b23954d14b44e6552ccb24a978e40d9cf6e"
 _DESCENDANT_BUILD_GIT_SHA = "94380563f1e3b72875d166fca4f22af6e37f90d9"
 _DIVERGENT_BUILD_GIT_SHA = "f" * 40
@@ -290,41 +299,12 @@ _UNAVAILABILITY_HASH_FIELD = (
 )
 
 
-class _GitRunner:
-    def __init__(self, returncodes: dict[str, int | BaseException]) -> None:
-        self.returncodes = returncodes
-        self.calls: list[tuple[list[str], dict]] = []
-
-    def __call__(self, argv: list[str], **kwargs):
-        self.calls.append((list(argv), dict(kwargs)))
-        response = self.returncodes.get(argv[-2], 1)
-        if isinstance(response, BaseException):
-            raise response
-        return subprocess.CompletedProcess(argv, response)
-
-
-def _resolver(
-    tmp_path,
-    *,
-    returncodes: dict[str, int | BaseException] | None = None,
-) -> tuple[GitAncestryResolver, _GitRunner]:
-    runner = _GitRunner(
-        returncodes
-        or {
-            _PRE_CAPABILITY_BUILD_GIT_SHA: 0,
-            _DESCENDANT_BUILD_GIT_SHA: 1,
-            _DIVERGENT_BUILD_GIT_SHA: 1,
-            _UNKNOWN_BUILD_GIT_SHA: 128,
-        }
-    )
-    return (
-        GitAncestryResolver(
-            repo_root=tmp_path,
-            runner=runner,
-            timeout_seconds=1.25,
-        ),
-        runner,
-    )
+def _registry_copy() -> dict[str, dict]:
+    return {
+        build_git_sha: dict(attestation)
+        for build_git_sha, attestation
+        in DEFAULT_REVIEWED_LEGACY_BUILD_REGISTRY.items()
+    }
 
 
 def _rehash_unavailability(marker: dict) -> None:
@@ -337,91 +317,104 @@ def _rehash_unavailability(marker: dict) -> None:
     )
 
 
-def test_git_ancestry_resolver_is_strict_shell_free_suppressed_and_cached(
-    tmp_path,
+def test_reviewed_legacy_build_resolution_is_exact_and_git_free(
+    monkeypatch,
 ) -> None:
-    resolver, runner = _resolver(tmp_path)
+    def forbidden_subprocess(*_args, **_kwargs):
+        raise AssertionError("exact-build attestation must not use subprocess")
 
-    assert resolver.is_strict_pre_capability(
-        _PRE_CAPABILITY_BUILD_GIT_SHA
-    ) is True
-    assert resolver.is_strict_pre_capability(
-        _PRE_CAPABILITY_BUILD_GIT_SHA
-    ) is True
-    assert len(runner.calls) == 1
-    argv, kwargs = runner.calls[0]
-    assert argv == [
-        "git",
-        "--no-replace-objects",
-        "-C",
-        str(tmp_path),
-        "merge-base",
-        "--is-ancestor",
-        _PRE_CAPABILITY_BUILD_GIT_SHA,
-        CANDIDATE_EVALUATION_SOURCE_CAPABILITY_GIT_SHA,
-    ]
-    assert kwargs["stdout"] == subprocess.DEVNULL
-    assert kwargs["stderr"] == subprocess.DEVNULL
-    assert kwargs["timeout"] == 1.25
-    assert kwargs.get("shell", False) is False
-    assert kwargs["check"] is False
-    assert kwargs["env"]["GIT_NO_REPLACE_OBJECTS"] == "1"
-
-    assert resolver.is_strict_pre_capability(
-        CANDIDATE_EVALUATION_SOURCE_CAPABILITY_GIT_SHA
-    ) is False
-    assert resolver.is_strict_pre_capability(
-        _DESCENDANT_BUILD_GIT_SHA
-    ) is False
-    assert resolver.is_strict_pre_capability(
-        _DIVERGENT_BUILD_GIT_SHA
-    ) is False
-    assert resolver.is_strict_pre_capability(
-        _UNKNOWN_BUILD_GIT_SHA
-    ) is False
-    assert resolver.is_strict_pre_capability("not-a-git-sha") is False
-    assert len(runner.calls) == 4
-
-
-def test_git_ancestry_resolver_timeout_or_error_fails_closed(tmp_path) -> None:
-    timeout = subprocess.TimeoutExpired(["git"], timeout=1.25)
-    resolver, runner = _resolver(
-        tmp_path,
-        returncodes={_PRE_CAPABILITY_BUILD_GIT_SHA: timeout},
+    monkeypatch.setattr(subprocess, "run", forbidden_subprocess)
+    resolve = getattr(
+        cold_source_module,
+        "resolve_reviewed_legacy_build",
+        None,
     )
 
-    assert resolver.is_strict_pre_capability(
-        _PRE_CAPABILITY_BUILD_GIT_SHA
-    ) is False
-    assert len(runner.calls) == 1
+    assert callable(resolve)
+    attestation = resolve(_PRE_CAPABILITY_BUILD_GIT_SHA)
+    assert attestation["verification_method"] == "EXACT_BUILD_ATTESTATION"
+    assert attestation["build_git_sha"] == _PRE_CAPABILITY_BUILD_GIT_SHA
+    for build_git_sha in (
+        _PRE_CAPABILITY_BUILD_GIT_SHA.upper(),
+        _PRE_CAPABILITY_BUILD_GIT_SHA[:-1],
+        _PRE_CAPABILITY_BUILD_GIT_SHA[:-1] + "e",
+        _HISTORICAL_CAPABILITY_GIT_SHA,
+        _REWRITTEN_CAPABILITY_GIT_SHA,
+        _DESCENDANT_BUILD_GIT_SHA,
+        _UNKNOWN_BUILD_GIT_SHA,
+        None,
+    ):
+        assert resolve(build_git_sha) is None
+
+    _event, _event_time, now, _admission, raw_outcome = _raw_valid_outcome(
+        "ctx-cold-exact-attestation-no-command",
+        strategy_version=_PRE_CAPABILITY_BUILD_GIT_SHA,
+    )
+    terminal = attach_candidate_evaluation_to_outcome(
+        raw_outcome,
+        source_provider=build_reviewed_legacy_build_source_provider(),
+        now_utc=now,
+    )
+    replay = attach_candidate_evaluation_to_outcome(
+        terminal["outcome"],
+        now_utc=now,
+    )
+    assert terminal["status"] == PERMANENTLY_UNAVAILABLE
+    assert replay == terminal
 
 
-def test_pre_capability_typed_resolution_is_terminal_idempotent_and_unfabricated(
-    tmp_path,
+def test_reviewed_legacy_registry_missing_revoked_or_tampered_fails_closed() -> None:
+    assert resolve_reviewed_legacy_build(
+        _PRE_CAPABILITY_BUILD_GIT_SHA,
+        registry={},
+    ) is None
+    revoked = _registry_copy()
+    revoked[_PRE_CAPABILITY_BUILD_GIT_SHA]["status"] = "REVOKED"
+    tampered = _registry_copy()
+    tampered[_PRE_CAPABILITY_BUILD_GIT_SHA]["attestation_id"] = "0" * 64
+    widened = _registry_copy()
+    widened[_UNKNOWN_BUILD_GIT_SHA] = dict(
+        widened[_PRE_CAPABILITY_BUILD_GIT_SHA]
+    )
+
+    assert resolve_reviewed_legacy_build(
+        _PRE_CAPABILITY_BUILD_GIT_SHA,
+        registry=revoked,
+    ) is None
+    assert resolve_reviewed_legacy_build(
+        _PRE_CAPABILITY_BUILD_GIT_SHA,
+        registry=tampered,
+    ) is None
+    assert resolve_reviewed_legacy_build(
+        _PRE_CAPABILITY_BUILD_GIT_SHA,
+        registry=widened,
+    ) is None
+
+
+def test_reviewed_legacy_typed_resolution_is_terminal_idempotent_and_unfabricated(
 ) -> None:
     _event, _event_time, now, _admission, raw_outcome = _raw_valid_outcome(
         "ctx-cold-pre-capability-terminal",
         strategy_version=_PRE_CAPABILITY_BUILD_GIT_SHA,
     )
-    resolver, runner = _resolver(tmp_path)
-    provider = build_pre_capability_source_provider(resolver)
+    provider = build_reviewed_legacy_build_source_provider()
 
     absent = attach_candidate_evaluation_to_outcome(
         raw_outcome,
-        ancestry_resolver=resolver,
         now_utc=now,
     )
     terminal = attach_candidate_evaluation_to_outcome(
         raw_outcome,
         source_provider=provider,
-        ancestry_resolver=resolver,
         now_utc=now,
     )
 
     assert absent["status"] == DEFER_COLD_EVALUATION_SOURCE_INCOMPLETE
     assert terminal["status"] == PERMANENTLY_UNAVAILABLE
     assert terminal["defer_reason"] is None
-    assert terminal["unavailability_reason"] == PRE_CAPABILITY_BUILD
+    assert terminal["unavailability_reason"] == (
+        REVIEWED_LEGACY_BUILD_SOURCE_UNAVAILABLE
+    )
     summary = terminal["outcome"]["candidate_summary"]
     assert summary["candidate_evaluation_source_status"] == (
         PERMANENTLY_UNAVAILABLE
@@ -430,21 +423,33 @@ def test_pre_capability_typed_resolution_is_terminal_idempotent_and_unfabricated
     assert marker["event_hash"] == summary["candidate_event_context"]["event_hash"]
     assert marker["context_id"] == summary["candidate_event_context"]["context_id"]
     assert marker["build_git_sha"] == _PRE_CAPABILITY_BUILD_GIT_SHA
-    assert marker["capability_introduced_at_git_sha"] == (
-        CANDIDATE_EVALUATION_SOURCE_CAPABILITY_GIT_SHA
+    assert marker["verification_method"] == EXACT_BUILD_ATTESTATION
+    assert marker["unavailable_source_schema_version"] == (
+        CANDIDATE_EVALUATION_SOURCE_SCHEMA_VERSION
     )
-    assert marker["reason"] == PRE_CAPABILITY_BUILD
+    assert marker["attestation_schema_version"] == (
+        REVIEWED_LEGACY_BUILD_ATTESTATION_SCHEMA_VERSION
+    )
+    assert marker["attestation_id"] == REVIEWED_LEGACY_BUILD_ATTESTATION_ID
+    assert marker["registry_schema_version"] == (
+        REVIEWED_LEGACY_BUILD_REGISTRY_SCHEMA_VERSION
+    )
+    assert marker["registry_digest"] == REVIEWED_LEGACY_BUILD_REGISTRY_DIGEST
+    assert marker["reason"] == REVIEWED_LEGACY_BUILD_SOURCE_UNAVAILABLE
     assert marker["status"] == PERMANENTLY_UNAVAILABLE
     assert set(marker) == {
         "schema_version",
         "status",
         "reason",
+        "verification_method",
         "event_hash",
         "context_id",
         "build_git_sha",
-        "capability_schema_version",
-        "capability_introduced_at_git_sha",
-        "ancestry_relation",
+        "unavailable_source_schema_version",
+        "attestation_schema_version",
+        "attestation_id",
+        "registry_schema_version",
+        "registry_digest",
         "boundary",
         _UNAVAILABILITY_HASH_FIELD,
     }
@@ -462,12 +467,10 @@ def test_pre_capability_typed_resolution_is_terminal_idempotent_and_unfabricated
 
     replay = attach_candidate_evaluation_to_outcome(
         terminal["outcome"],
-        ancestry_resolver=resolver,
         now_utc=now,
     )
     partition = partition_candidate_evaluation_outcomes(
         [terminal["outcome"]],
-        ancestry_resolver=resolver,
         now_utc=now,
     )
     assert replay == terminal
@@ -476,12 +479,19 @@ def test_pre_capability_typed_resolution_is_terminal_idempotent_and_unfabricated
     assert partition["candidate_evaluation_not_applicable_count"] == 1
     assert partition["candidate_evaluation_deferred_count"] == 0
     assert partition["candidate_evaluation_batch_deferred"] is False
-    assert len(runner.calls) == 1
+
+    revoked = _registry_copy()
+    revoked[_PRE_CAPABILITY_BUILD_GIT_SHA]["status"] = "REVOKED"
+    revoked_replay = attach_candidate_evaluation_to_outcome(
+        terminal["outcome"],
+        source_unavailability_registry=revoked,
+        now_utc=now,
+    )
+    assert revoked_replay["status"] == DEFER_COLD_EVALUATION_SOURCE_INCOMPLETE
 
 
-def test_pre_capability_marker_revalidates_through_existing_append_guard(
+def test_reviewed_legacy_marker_revalidates_through_existing_append_guard(
     tmp_path,
-    monkeypatch,
 ) -> None:
     event = _raw_valid_reject_event(
         "ctx-cold-pre-capability-append",
@@ -501,12 +511,6 @@ def test_pre_capability_marker_revalidates_through_existing_append_guard(
     )
     ledger_path = tmp_path / "pre-capability-append-ledger.jsonl"
     append_jsonl_ledger(ledger_path, admission)
-    resolver, runner = _resolver(tmp_path)
-    monkeypatch.setattr(
-        candidate_producer_module,
-        "_DEFAULT_ANCESTRY_RESOLVER",
-        resolver,
-    )
     now = dt.datetime.combine(
         event_time.date() + dt.timedelta(days=1),
         dt.time(0, 1),
@@ -521,7 +525,7 @@ def test_pre_capability_marker_revalidates_through_existing_append_guard(
         outcome_cfg=ProbeOutcomeConfig(horizon_minutes=60, cost_bps=4.0),
         append_ledger=True,
         candidate_evaluation_source_provider=(
-            build_pre_capability_source_provider(resolver)
+            build_reviewed_legacy_build_source_provider()
         ),
     )
 
@@ -535,7 +539,6 @@ def test_pre_capability_marker_revalidates_through_existing_append_guard(
     assert rows[-1]["candidate_summary"][
         "candidate_evaluation_source_status"
     ] == PERMANENTLY_UNAVAILABLE
-    assert len(runner.calls) == 1
 
 
 def _run_outcome_refresh_cli(
@@ -618,23 +621,10 @@ def test_outcome_refresh_cli_defaults_to_defer_without_pre_capability_opt_in(
     assert after_bytes == before_bytes
 
 
-def test_outcome_refresh_cli_opt_in_terminalizes_and_append_reuses_cache(
+def test_outcome_refresh_cli_opt_in_terminalizes_and_replays_exact_registry(
     tmp_path,
     monkeypatch,
 ) -> None:
-    resolver, runner = _resolver(tmp_path)
-    monkeypatch.setattr(
-        outcome_refresh_module,
-        "DEFAULT_GIT_ANCESTRY_RESOLVER",
-        resolver,
-        raising=False,
-    )
-    monkeypatch.setattr(
-        candidate_producer_module,
-        "_DEFAULT_ANCESTRY_RESOLVER",
-        resolver,
-    )
-
     batch, before_bytes, after_bytes = _run_outcome_refresh_cli(
         tmp_path,
         monkeypatch,
@@ -651,17 +641,14 @@ def test_outcome_refresh_cli_opt_in_terminalizes_and_append_reuses_cache(
         "candidate_evaluation_source_unavailability"
     ]
     assert marker["build_git_sha"] == _PRE_CAPABILITY_BUILD_GIT_SHA
-    assert marker["capability_introduced_at_git_sha"] == (
-        CANDIDATE_EVALUATION_SOURCE_CAPABILITY_GIT_SHA
-    )
+    assert marker["verification_method"] == EXACT_BUILD_ATTESTATION
+    assert marker["attestation_id"] == REVIEWED_LEGACY_BUILD_ATTESTATION_ID
     assert after_bytes.startswith(before_bytes)
     assert after_bytes != before_bytes
-    assert len(runner.calls) == 1
 
 
 def test_pre_capability_provider_mixed_old_and_unknown_is_atomic(
     tmp_path,
-    monkeypatch,
 ) -> None:
     old_event = _raw_valid_reject_event(
         "ctx-cold-mixed-old-lineage",
@@ -689,18 +676,6 @@ def test_pre_capability_provider_mixed_old_and_unknown_is_atomic(
             ),
         )
     before_bytes = ledger_path.read_bytes()
-    resolver, runner = _resolver(
-        tmp_path,
-        returncodes={
-            _PRE_CAPABILITY_BUILD_GIT_SHA: 0,
-            _UNKNOWN_BUILD_GIT_SHA: 128,
-        },
-    )
-    monkeypatch.setattr(
-        candidate_producer_module,
-        "_DEFAULT_ANCESTRY_RESOLVER",
-        resolver,
-    )
     now = dt.datetime.combine(
         event_time.date() + dt.timedelta(days=1),
         dt.time(0, 1),
@@ -715,7 +690,7 @@ def test_pre_capability_provider_mixed_old_and_unknown_is_atomic(
         outcome_cfg=ProbeOutcomeConfig(horizon_minutes=60, cost_bps=4.0),
         append_ledger=True,
         candidate_evaluation_source_provider=(
-            build_pre_capability_source_provider(resolver)
+            build_reviewed_legacy_build_source_provider()
         ),
     )
 
@@ -727,40 +702,60 @@ def test_pre_capability_provider_mixed_old_and_unknown_is_atomic(
     assert batch["outcomes"] == []
     assert batch["appended_outcome_count"] == 0
     assert ledger_path.read_bytes() == before_bytes
-    assert len(runner.calls) == 2
+
+
+def test_exact_attestation_plus_context_missing_rows_remains_appendable() -> None:
+    _event, _event_time, now, _admission, exact = _raw_valid_outcome(
+        "ctx-cold-exact-plus-context-missing",
+        strategy_version=_PRE_CAPABILITY_BUILD_GIT_SHA,
+    )
+    context_missing = copy.deepcopy(exact)
+    context_missing["attempt_id"] = "context-missing-not-applicable"
+    context_missing["candidate_summary"] = {
+        "candidate_event_context_status": "UNQUALIFIED_CONTEXT_MISSING"
+    }
+    context_missing["event"].pop("candidate_event_context")
+
+    partition = partition_candidate_evaluation_outcomes(
+        [exact, context_missing],
+        source_provider=build_reviewed_legacy_build_source_provider(),
+        now_utc=now,
+    )
+
+    _assert_telemetry_conservation(partition)
+    assert partition["generated_outcome_count"] == 2
+    assert partition["candidate_evaluation_eligible_count"] == 0
+    assert partition["candidate_evaluation_deferred_count"] == 0
+    assert partition["candidate_evaluation_not_applicable_count"] == 2
+    assert partition["candidate_evaluation_batch_deferred"] is False
+    assert len(partition["outcomes"]) == 2
 
 
 @pytest.mark.parametrize(
-    ("build_git_sha", "returncode"),
+    "build_git_sha",
     [
-        (CANDIDATE_EVALUATION_SOURCE_CAPABILITY_GIT_SHA, 0),
-        (_REWRITTEN_CAPABILITY_GIT_SHA, 1),
-        (_DESCENDANT_BUILD_GIT_SHA, 1),
-        (_DIVERGENT_BUILD_GIT_SHA, 1),
-        (_UNKNOWN_BUILD_GIT_SHA, 128),
+        _HISTORICAL_CAPABILITY_GIT_SHA,
+        _REWRITTEN_CAPABILITY_GIT_SHA,
+        _DESCENDANT_BUILD_GIT_SHA,
+        _DIVERGENT_BUILD_GIT_SHA,
+        _UNKNOWN_BUILD_GIT_SHA,
+        _PRE_CAPABILITY_BUILD_GIT_SHA[:-1] + "e",
     ],
 )
-def test_non_strict_ancestor_builds_remain_deferred(
-    tmp_path,
+def test_non_attested_build_identities_remain_deferred(
     build_git_sha: str,
-    returncode: int,
 ) -> None:
     _event, _event_time, now, _admission, raw_outcome = _raw_valid_outcome(
         f"ctx-cold-not-pre-capability-{build_git_sha[:8]}",
         strategy_version=build_git_sha,
     )
-    resolver, _runner = _resolver(
-        tmp_path,
-        returncodes={build_git_sha: returncode},
-    )
-    resolution = build_pre_capability_source_provider(resolver)(
+    resolution = build_reviewed_legacy_build_source_provider()(
         raw_outcome["candidate_summary"]["candidate_event_context"],
         "2026-07-10",
     )
     partition = partition_candidate_evaluation_outcomes(
         [raw_outcome],
-        source_provider=build_pre_capability_source_provider(resolver),
-        ancestry_resolver=resolver,
+        source_provider=build_reviewed_legacy_build_source_provider(),
         now_utc=now,
     )
 
@@ -772,12 +767,10 @@ def test_non_strict_ancestor_builds_remain_deferred(
 
 
 def test_typed_ready_and_defer_preserve_existing_provider_semantics(
-    tmp_path,
 ) -> None:
     _event, event_time, now, _admission, raw_outcome = _raw_valid_outcome(
         "ctx-cold-typed-ready-defer"
     )
-    resolver, _runner = _resolver(tmp_path)
     ready = partition_candidate_evaluation_outcomes(
         [raw_outcome],
         source_provider=lambda _event, _as_of: (
@@ -785,7 +778,6 @@ def test_typed_ready_and_defer_preserve_existing_provider_semantics(
                 _complete_source_bundle(event_time.date())
             )
         ),
-        ancestry_resolver=resolver,
         now_utc=now,
     )
     deferred = partition_candidate_evaluation_outcomes(
@@ -793,7 +785,6 @@ def test_typed_ready_and_defer_preserve_existing_provider_semantics(
         source_provider=lambda _event, _as_of: (
             CandidateEvaluationSourceResolution.defer()
         ),
-        ancestry_resolver=resolver,
         now_utc=now,
     )
 
@@ -809,7 +800,6 @@ def test_typed_ready_and_defer_preserve_existing_provider_semantics(
 
 
 def test_permanent_marker_tampering_grafting_or_evaluation_coexistence_defers(
-    tmp_path,
 ) -> None:
     _event, _event_time, now, _admission, first = _raw_valid_outcome(
         "ctx-cold-permanent-tamper-first",
@@ -819,12 +809,10 @@ def test_permanent_marker_tampering_grafting_or_evaluation_coexistence_defers(
         "ctx-cold-permanent-tamper-second",
         strategy_version=_PRE_CAPABILITY_BUILD_GIT_SHA,
     )
-    resolver, _runner = _resolver(tmp_path)
-    provider = build_pre_capability_source_provider(resolver)
+    provider = build_reviewed_legacy_build_source_provider()
     terminal = attach_candidate_evaluation_to_outcome(
         first,
         source_provider=provider,
-        ancestry_resolver=resolver,
         now_utc=now,
     )["outcome"]
 
@@ -833,12 +821,19 @@ def test_permanent_marker_tampering_grafting_or_evaluation_coexistence_defers(
         "candidate_evaluation_source_unavailability"
     ][_UNAVAILABILITY_HASH_FIELD] = "0" * 64
 
-    wrong_capability = copy.deepcopy(terminal)
-    wrong_marker = wrong_capability["candidate_summary"][
+    wrong_attestation = copy.deepcopy(terminal)
+    wrong_marker = wrong_attestation["candidate_summary"][
         "candidate_evaluation_source_unavailability"
     ]
-    wrong_marker["capability_introduced_at_git_sha"] = "f" * 40
+    wrong_marker["attestation_id"] = "f" * 64
     _rehash_unavailability(wrong_marker)
+
+    wrong_registry = copy.deepcopy(terminal)
+    wrong_registry_marker = wrong_registry["candidate_summary"][
+        "candidate_evaluation_source_unavailability"
+    ]
+    wrong_registry_marker["registry_digest"] = "f" * 64
+    _rehash_unavailability(wrong_registry_marker)
 
     grafted = copy.deepcopy(second)
     grafted["candidate_summary"][
@@ -859,18 +854,17 @@ def test_permanent_marker_tampering_grafting_or_evaluation_coexistence_defers(
 
     for row in (
         stale_hash,
-        wrong_capability,
+        wrong_attestation,
+        wrong_registry,
         grafted,
         evaluation_coexistence,
     ):
         result = attach_candidate_evaluation_to_outcome(
             row,
-            ancestry_resolver=resolver,
             now_utc=now,
         )
         partition = partition_candidate_evaluation_outcomes(
             [row],
-            ancestry_resolver=resolver,
             now_utc=now,
         )
         assert result["status"] == DEFER_COLD_EVALUATION_SOURCE_INCOMPLETE
@@ -878,19 +872,15 @@ def test_permanent_marker_tampering_grafting_or_evaluation_coexistence_defers(
         assert partition["outcomes"] == []
 
 
-def test_permanent_lineage_conflicts_defer_but_identical_duplicates_survive(
-    tmp_path,
-) -> None:
+def test_permanent_lineage_conflicts_defer_but_identical_duplicates_survive() -> None:
     _event, event_time, now, _admission, raw_outcome = _raw_valid_outcome(
         "ctx-cold-permanent-conflict",
         strategy_version=_PRE_CAPABILITY_BUILD_GIT_SHA,
     )
-    resolver, _runner = _resolver(tmp_path)
-    permanent_provider = build_pre_capability_source_provider(resolver)
+    permanent_provider = build_reviewed_legacy_build_source_provider()
     identical = partition_candidate_evaluation_outcomes(
         [raw_outcome, copy.deepcopy(raw_outcome)],
         source_provider=permanent_provider,
-        ancestry_resolver=resolver,
         now_utc=now,
     )
     provider_call_count = 0
@@ -907,7 +897,6 @@ def test_permanent_lineage_conflicts_defer_but_identical_duplicates_survive(
     mixed_kind = partition_candidate_evaluation_outcomes(
         [raw_outcome, copy.deepcopy(raw_outcome)],
         source_provider=mixed_provider,
-        ancestry_resolver=resolver,
         now_utc=now,
     )
     conflicting_event = copy.deepcopy(raw_outcome)
@@ -922,7 +911,6 @@ def test_permanent_lineage_conflicts_defer_but_identical_duplicates_survive(
     different_event_hash = partition_candidate_evaluation_outcomes(
         [raw_outcome, conflicting_event],
         source_provider=permanent_provider,
-        ancestry_resolver=resolver,
         now_utc=now,
     )
 
@@ -934,9 +922,7 @@ def test_permanent_lineage_conflicts_defer_but_identical_duplicates_survive(
     assert different_event_hash["outcomes"] == []
 
 
-def test_permanent_plus_deferred_row_preserves_all_or_nothing_batch(
-    tmp_path,
-) -> None:
+def test_permanent_plus_deferred_row_preserves_all_or_nothing_batch() -> None:
     first = _raw_valid_outcome(
         "ctx-cold-permanent-batch",
         strategy_version=_PRE_CAPABILITY_BUILD_GIT_SHA,
@@ -945,8 +931,6 @@ def test_permanent_plus_deferred_row_preserves_all_or_nothing_batch(
         "ctx-cold-deferred-batch",
         strategy_version=_PRE_CAPABILITY_BUILD_GIT_SHA,
     )
-    resolver, _runner = _resolver(tmp_path)
-
     def selective_provider(event: dict, _as_of: str):
         if event["context_id"] == "ctx-cold-permanent-batch":
             return CandidateEvaluationSourceResolution.permanently_unavailable()
@@ -955,7 +939,6 @@ def test_permanent_plus_deferred_row_preserves_all_or_nothing_batch(
     partition = partition_candidate_evaluation_outcomes(
         [first, second],
         source_provider=selective_provider,
-        ancestry_resolver=resolver,
         now_utc=now,
     )
 
