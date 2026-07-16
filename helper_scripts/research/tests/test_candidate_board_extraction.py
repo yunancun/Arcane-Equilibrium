@@ -243,6 +243,29 @@ assert outcome_review.build_learning_candidate_board is candidate_board.build_le
     assert completed.returncode == 0, completed.stderr
 
 
+def test_projection_and_contract_import_order_has_no_outcome_review_cycle() -> None:
+    research_root = Path(__file__).resolve().parents[1]
+    script = f"""
+import sys
+sys.path.insert(0, {str(research_root)!r})
+import cost_gate_learning_lane.candidate_board_projection as projection
+assert 'cost_gate_learning_lane.outcome_review' not in sys.modules
+import cost_gate_learning_lane.outcome_review_contract as contract
+assert 'cost_gate_learning_lane.outcome_review' not in sys.modules
+import cost_gate_learning_lane.outcome_review as outcome_review
+assert outcome_review.BlockedOutcomeReviewConfig is contract.BlockedOutcomeReviewConfig
+assert outcome_review.validate_blocked_outcome_review_config is contract.validate_blocked_outcome_review_config
+assert outcome_review.CandidateBoardSqliteProjection is projection.CandidateBoardSqliteProjection
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+
 def test_candidate_board_validation_contract_is_extracted_behind_compatible_facade() -> None:
     validation = importlib.import_module(
         "cost_gate_learning_lane.candidate_board_validation"
@@ -260,6 +283,154 @@ def test_candidate_board_validation_contract_is_extracted_behind_compatible_faca
         line.startswith("def _validate_") or line.startswith("def validate_learning_")
         for line in source_lines
     )
+
+
+def test_projection_and_review_contract_are_extracted_behind_line_caps() -> None:
+    projection = importlib.import_module(
+        "cost_gate_learning_lane.candidate_board_projection"
+    )
+    contract = importlib.import_module(
+        "cost_gate_learning_lane.outcome_review_contract"
+    )
+
+    assert outcome_review.BlockedOutcomeReviewConfig is (
+        contract.BlockedOutcomeReviewConfig
+    )
+    assert outcome_review.validate_blocked_outcome_review_config is (
+        contract.validate_blocked_outcome_review_config
+    )
+    assert outcome_review.BLOCKED_OUTCOME_REVIEW_SCHEMA_VERSION is (
+        contract.BLOCKED_OUTCOME_REVIEW_SCHEMA_VERSION
+    )
+    assert outcome_review.BLOCKED_OUTCOME_REVIEW_RECORD_TYPE is (
+        contract.BLOCKED_OUTCOME_REVIEW_RECORD_TYPE
+    )
+    assert hasattr(projection, "build_learning_candidate_board_from_projection")
+    assert (
+        len(
+            Path(outcome_review.__file__)
+            .read_text(encoding="utf-8")
+            .splitlines()
+        )
+        < 2_000
+    )
+    assert (
+        len(
+            Path(candidate_board.__file__)
+            .read_text(encoding="utf-8")
+            .splitlines()
+        )
+        < 1_500
+    )
+
+
+def test_research_contract_reexport_and_output_are_byte_identical() -> None:
+    contract = importlib.import_module(
+        "cost_gate_learning_lane.outcome_review_contract"
+    )
+    assert outcome_review.project_research_compatibility_review_no_authority is (
+        contract.project_research_compatibility_review_no_authority
+    )
+    rows = [_legacy_row()]
+    now = dt.datetime.combine(
+        AS_OF_DATE,
+        dt.time(12),
+        tzinfo=dt.timezone.utc,
+    )
+    raw_review = outcome_review._build_blocked_signal_outcome_review_core(
+        rows,
+        now_utc=now,
+        qualified_lineage_only=False,
+    )
+    expected = contract.project_research_compatibility_review_no_authority(
+        raw_review
+    )
+    actual = (
+        outcome_review
+        .build_research_compatibility_blocked_signal_outcome_review_no_authority(
+            rows,
+            now_utc=now,
+        )
+    )
+
+    assert actual == expected
+    assert _canonical_bytes(actual) == _canonical_bytes(expected)
+
+
+def test_projection_builder_uses_injected_evaluator_and_matches_list_path(
+    tmp_path: Path,
+) -> None:
+    projection_module = importlib.import_module(
+        "cost_gate_learning_lane.candidate_board_projection"
+    )
+    runtime_adapter = importlib.import_module(
+        "cost_gate_learning_lane.runtime_adapter"
+    )
+    row = _typed_row(
+        attempt_id="projection-injected-evaluator",
+        entry_ts_ms=int(
+            dt.datetime(2026, 7, 1, tzinfo=dt.timezone.utc).timestamp() * 1000
+        ),
+        realized_net_bps=1.0,
+        regime_label="neutral|low_vol|liquid",
+    )
+    context = json.loads(
+        json.dumps(row["candidate_summary"]["candidate_event_context"])
+    )
+    row["event"] = {
+        "strategy_name": context["strategy_name"],
+        "symbol": context["symbol"],
+        "side": context["side"],
+        "context_id": context["context_id"],
+        "signal_id": context["signal_id"],
+        "engine_mode": context["evidence_engine_mode"],
+        "ts_ms": context["captured_at_ms"],
+        "candidate_event_context": context,
+    }
+    ledger = tmp_path / "projection-builder.jsonl"
+    ledger.write_text(json.dumps(row) + "\n", encoding="utf-8")
+    projected_rows = runtime_adapter.project_candidate_evidence_rows([row])
+    cfg = outcome_review.BlockedOutcomeReviewConfig()
+    expected = candidate_board.build_learning_candidate_board(
+        projected_rows,
+        cfg=cfg,
+        overlay={},
+        edge_estimates={},
+        expected_slippage=None,
+        as_of_date=AS_OF_DATE,
+        cohort_evaluator=outcome_review._evaluate_candidate_cohort,
+    )
+    calls: list[tuple[str, int]] = []
+
+    def evaluator(side_cell_key, rows, **kwargs):
+        calls.append((side_cell_key, len(rows)))
+        return outcome_review._evaluate_candidate_cohort(
+            side_cell_key,
+            rows,
+            **kwargs,
+        )
+
+    with projection_module.read_candidate_board_ledger_projection(
+        ledger,
+        max_qualified_cohort_rows=250_000,
+        max_qualified_cohort_bytes=512 * 1024 * 1024,
+    ) as projection:
+        eligible_sink: dict[str, list[dict[str, object]]] = {}
+        actual = projection_module.build_learning_candidate_board_from_projection(
+            projection.rows,
+            cfg=cfg,
+            overlay={},
+            edge_estimates={},
+            expected_slippage=None,
+            as_of_date=AS_OF_DATE,
+            cohort_evaluator=evaluator,
+            eligible_evaluator_rows_by_cohort_sink=eligible_sink,
+        )
+
+    assert actual == expected
+    assert _canonical_bytes(actual) == _canonical_bytes(expected)
+    assert calls == [("strat|BTCUSDT|Buy", 1)]
+    assert eligible_sink == {}
 
 
 def test_candidate_board_fake_cohort_evaluator_contract_is_strict() -> None:
