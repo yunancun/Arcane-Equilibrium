@@ -24,6 +24,17 @@ from cost_gate_learning_lane.candidate_evaluation_context import (
     validate_candidate_event_context,
     validate_candidate_evaluation_context,
 )
+from cost_gate_learning_lane.candidate_evaluation_cold_source import (
+    DEFAULT_GIT_ANCESTRY_RESOLVER,
+    DEFER,
+    PERMANENTLY_UNAVAILABLE,
+    PRE_CAPABILITY_BUILD,
+    READY,
+    CandidateEvaluationSourceResolution,
+    GitAncestryResolver,
+    build_candidate_evaluation_source_unavailability,
+    validate_candidate_evaluation_source_unavailability,
+)
 
 
 ATTACHED = "ATTACHED"
@@ -31,6 +42,7 @@ DEFER_COLD_EVALUATION_SOURCE_INCOMPLETE = (
     "DEFER_COLD_EVALUATION_SOURCE_INCOMPLETE"
 )
 NOT_APPLICABLE = "NOT_APPLICABLE"
+_DEFAULT_ANCESTRY_RESOLVER = DEFAULT_GIT_ANCESTRY_RESOLVER
 
 _SOURCE_BUNDLE_FIELDS = {
     "evidence_regime_label",
@@ -64,6 +76,10 @@ _EVALUATION_CLAIM_FIELDS = {
     "candidate_evaluation_context_status",
     "candidate_learning_context_projection",
 }
+_SOURCE_UNAVAILABILITY_FIELDS = {
+    "candidate_evaluation_source_status",
+    "candidate_evaluation_source_unavailability",
+}
 _SAFE_FAMILY_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\Z")
 _SAFE_GAP_CODE = re.compile(r"[A-Z][A-Z0-9_]{0,127}\Z")
 _SENSITIVE_TOKEN_MARKERS = (
@@ -92,7 +108,8 @@ _SQL_TOKEN_PREFIXES = (
 )
 
 CandidateEvaluationSourceProvider = Callable[
-    [dict[str, Any], str], Mapping[str, Any] | None
+    [dict[str, Any], str],
+    Mapping[str, Any] | CandidateEvaluationSourceResolution | None,
 ]
 
 
@@ -100,15 +117,17 @@ def attach_candidate_evaluation_to_outcome(
     outcome: Mapping[str, Any],
     *,
     source_provider: CandidateEvaluationSourceProvider | None = None,
+    ancestry_resolver: GitAncestryResolver | None = None,
     now_utc: dt.datetime | None = None,
 ) -> dict[str, Any]:
-    """Return one detached ATTACHED, DEFER, or NOT_APPLICABLE result.
+    """Return one detached ATTACHED, DEFER, PERMANENT, or N/A result.
 
     ``source_provider`` is an explicit validation seam, not proof that its
     caller is authoritative.  Production callers intentionally pass ``None``
     until a separately governed cold-source provider exists; current/board
     state must never be wired here as an implicit source.
     """
+    resolver = ancestry_resolver or _DEFAULT_ANCESTRY_RESOLVER
     try:
         row = copy.deepcopy(dict(outcome))
     except Exception:
@@ -135,6 +154,7 @@ def attach_candidate_evaluation_to_outcome(
         else:
             summary = {}
         claim_fields = _EVALUATION_CLAIM_FIELDS & set(summary)
+        unavailability_fields = _SOURCE_UNAVAILABILITY_FIELDS & set(summary)
     except Exception:
         return _result(DEFER_COLD_EVALUATION_SOURCE_INCOMPLETE, {})
 
@@ -142,7 +162,7 @@ def attach_candidate_evaluation_to_outcome(
         event = _validated_bound_candidate_event(
             row,
             summary,
-            evaluation_claimed=bool(claim_fields),
+            evaluation_claimed=bool(claim_fields or unavailability_fields),
         )
     except Exception:
         return _result(DEFER_COLD_EVALUATION_SOURCE_INCOMPLETE, row)
@@ -167,6 +187,27 @@ def attach_candidate_evaluation_to_outcome(
             return _result(DEFER_COLD_EVALUATION_SOURCE_INCOMPLETE, row)
 
         present_evaluation_fields = _EVALUATION_FIELDS & set(summary)
+        present_unavailability_fields = (
+            _SOURCE_UNAVAILABILITY_FIELDS & set(summary)
+        )
+        if present_evaluation_fields and present_unavailability_fields:
+            return _result(DEFER_COLD_EVALUATION_SOURCE_INCOMPLETE, row)
+        if present_unavailability_fields:
+            if present_unavailability_fields != _SOURCE_UNAVAILABILITY_FIELDS:
+                return _result(DEFER_COLD_EVALUATION_SOURCE_INCOMPLETE, row)
+            if (
+                summary["candidate_evaluation_source_status"]
+                != PERMANENTLY_UNAVAILABLE
+            ):
+                return _result(DEFER_COLD_EVALUATION_SOURCE_INCOMPLETE, row)
+            validate_candidate_evaluation_source_unavailability(
+                summary["candidate_evaluation_source_unavailability"],
+                candidate_event_context=event,
+            )
+            if not resolver.is_strict_pre_capability(event["build_git_sha"]):
+                return _result(DEFER_COLD_EVALUATION_SOURCE_INCOMPLETE, row)
+            return _result(PERMANENTLY_UNAVAILABLE, row)
+
         if present_evaluation_fields:
             if present_evaluation_fields != _EVALUATION_FIELDS:
                 return _result(DEFER_COLD_EVALUATION_SOURCE_INCOMPLETE, row)
@@ -190,6 +231,29 @@ def attach_candidate_evaluation_to_outcome(
             return _result(DEFER_COLD_EVALUATION_SOURCE_INCOMPLETE, row)
 
         source = source_provider(copy.deepcopy(event), as_of_utc_date)
+        if isinstance(source, CandidateEvaluationSourceResolution):
+            if source.status == DEFER:
+                return _result(DEFER_COLD_EVALUATION_SOURCE_INCOMPLETE, row)
+            if source.status == PERMANENTLY_UNAVAILABLE:
+                if not resolver.is_strict_pre_capability(
+                    event["build_git_sha"]
+                ):
+                    return _result(
+                        DEFER_COLD_EVALUATION_SOURCE_INCOMPLETE,
+                        row,
+                    )
+                terminal_summary = copy.deepcopy(summary)
+                terminal_summary["candidate_evaluation_source_status"] = (
+                    PERMANENTLY_UNAVAILABLE
+                )
+                terminal_summary[
+                    "candidate_evaluation_source_unavailability"
+                ] = build_candidate_evaluation_source_unavailability(event)
+                row["candidate_summary"] = terminal_summary
+                return _result(PERMANENTLY_UNAVAILABLE, row)
+            if source.status != READY:
+                return _result(DEFER_COLD_EVALUATION_SOURCE_INCOMPLETE, row)
+            source = source.bundle
         if not isinstance(source, Mapping) or set(source) != _SOURCE_BUNDLE_FIELDS:
             return _result(DEFER_COLD_EVALUATION_SOURCE_INCOMPLETE, row)
         hidden_oos_state = source.get("hidden_oos_state")
@@ -220,6 +284,7 @@ def partition_candidate_evaluation_outcomes(
     outcomes: Sequence[Mapping[str, Any]],
     *,
     source_provider: CandidateEvaluationSourceProvider | None = None,
+    ancestry_resolver: GitAncestryResolver | None = None,
     now_utc: dt.datetime,
 ) -> dict[str, Any]:
     """Preflight the whole batch and expose appendable rows only if none defer."""
@@ -245,6 +310,7 @@ def partition_candidate_evaluation_outcomes(
             attach_candidate_evaluation_to_outcome(
                 row,
                 source_provider=source_provider,
+                ancestry_resolver=ancestry_resolver,
                 now_utc=now_utc,
             )
         )
@@ -254,8 +320,11 @@ def partition_candidate_evaluation_outcomes(
         result["status"] == DEFER_COLD_EVALUATION_SOURCE_INCOMPLETE
         for result in results
     )
+    # Backward-compatible aggregate: both contextless history and a truthful
+    # permanent source terminal are appendable without evaluation enrichment.
     not_applicable_count = sum(
-        result["status"] == NOT_APPLICABLE for result in results
+        result["status"] in {NOT_APPLICABLE, PERMANENTLY_UNAVAILABLE}
+        for result in results
     )
     eligible_count = attached_count + deferred_count
     batch_deferred = deferred_count > 0
@@ -317,6 +386,11 @@ def _result(status: str, outcome: dict[str, Any]) -> dict[str, Any]:
         "defer_reason": (
             DEFER_COLD_EVALUATION_SOURCE_INCOMPLETE
             if status == DEFER_COLD_EVALUATION_SOURCE_INCOMPLETE
+            else None
+        ),
+        "unavailability_reason": (
+            PRE_CAPABILITY_BUILD
+            if status == PERMANENTLY_UNAVAILABLE
             else None
         ),
         "outcome": outcome,
@@ -459,24 +533,34 @@ def _defer_mixed_generation_conflicts(
     original_outcomes: Sequence[Mapping[str, Any]],
 ) -> None:
     identity_event_hashes: dict[tuple[str, str], set[str]] = {}
-    event_evaluation_hashes: dict[str, set[str]] = {}
-    attached_lineage: dict[int, tuple[tuple[str, str], str, str]] = {}
+    event_terminal_hashes: dict[str, set[tuple[str, str]]] = {}
+    resolved_lineage: dict[
+        int,
+        tuple[tuple[str, str], str, tuple[str, str]],
+    ] = {}
     for index, result in enumerate(results):
-        if result["status"] != ATTACHED:
+        if result["status"] not in {ATTACHED, PERMANENTLY_UNAVAILABLE}:
             continue
         try:
             row = result["outcome"]
             summary = row["candidate_summary"]
             event = summary["candidate_event_context"]
-            evaluation = summary["candidate_evaluation_context"]
             identity_key = (row["attempt_id"], event["context_id"])
             event_hash = event["event_hash"]
-            evaluation_hash = evaluation["candidate_evaluation_context_hash"]
+            if result["status"] == ATTACHED:
+                terminal_hash = summary["candidate_evaluation_context"][
+                    "candidate_evaluation_context_hash"
+                ]
+            else:
+                terminal_hash = summary[
+                    "candidate_evaluation_source_unavailability"
+                ]["candidate_evaluation_source_unavailability_hash"]
+            terminal_identity = (result["status"], terminal_hash)
             if not all(
                 isinstance(value, str) and value
-                for value in (*identity_key, event_hash, evaluation_hash)
+                for value in (*identity_key, event_hash, terminal_hash)
             ):
-                raise ValueError("ATTACHED_LINEAGE_IDENTITY_INVALID")
+                raise ValueError("RESOLVED_LINEAGE_IDENTITY_INVALID")
         except Exception:
             try:
                 original = copy.deepcopy(dict(original_outcomes[index]))
@@ -488,14 +572,24 @@ def _defer_mixed_generation_conflicts(
             )
             continue
         identity_event_hashes.setdefault(identity_key, set()).add(event_hash)
-        event_evaluation_hashes.setdefault(event_hash, set()).add(evaluation_hash)
-        attached_lineage[index] = (identity_key, event_hash, evaluation_hash)
+        event_terminal_hashes.setdefault(event_hash, set()).add(
+            terminal_identity
+        )
+        resolved_lineage[index] = (
+            identity_key,
+            event_hash,
+            terminal_identity,
+        )
 
     conflicted = {
         index
-        for index, (identity_key, event_hash, _evaluation_hash) in attached_lineage.items()
+        for index, (
+            identity_key,
+            event_hash,
+            _terminal_identity,
+        ) in resolved_lineage.items()
         if len(identity_event_hashes[identity_key]) > 1
-        or len(event_evaluation_hashes[event_hash]) > 1
+        or len(event_terminal_hashes[event_hash]) > 1
     }
     for index in conflicted:
         try:
@@ -513,6 +607,7 @@ __all__ = [
     "CandidateEvaluationSourceProvider",
     "DEFER_COLD_EVALUATION_SOURCE_INCOMPLETE",
     "NOT_APPLICABLE",
+    "PERMANENTLY_UNAVAILABLE",
     "attach_candidate_evaluation_to_outcome",
     "outcome_subtype_semantics_valid",
     "partition_candidate_evaluation_outcomes",
