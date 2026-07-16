@@ -20,7 +20,9 @@ def _stock_etf_ibkr_rust_sources() -> list[Path]:
         for path in TYPE_SOURCE_ROOT.rglob("*.rs")
         if "ibkr" in path.as_posix() or "stock_etf" in path.as_posix()
     )
-    files.append(ENGINE_HANDLER_ROOT / "stock_etf.rs")
+    # handler root 的 stock_etf 前綴檔（stock_etf.rs 與抽出的 sibling
+    # stock_etf_risk_policy.rs——fail-closed denied fallback 的家，不得逃出守衛掃描面）。
+    files.extend(ENGINE_HANDLER_ROOT.glob("stock_etf*.rs"))
     files.extend((ENGINE_HANDLER_ROOT / "stock_etf").rglob("*.rs"))
     return sorted(set(path for path in files if path.exists()))
 

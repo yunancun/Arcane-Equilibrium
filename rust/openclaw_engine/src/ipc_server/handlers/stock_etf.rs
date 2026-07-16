@@ -16,8 +16,7 @@ use openclaw_types::{
     StockEtfPaperFillImportRequestV1, StockEtfPaperOrderRequestEnvelopeV1,
     StockEtfPaperShadowReconciliationV1, StockEtfPhase0ContractPacketManifestV1,
     StockEtfPitUniverseV1, StockEtfReferenceDataSourcesV1, StockEtfReleasePacketV1,
-    StockEtfRiskPolicySourceConfigV1, StockEtfRiskPolicyV1, StockEtfScorecardDerivationV1,
-    StockEtfScorecardInputBundleV1,
+    StockEtfRiskPolicyV1, StockEtfScorecardDerivationV1, StockEtfScorecardInputBundleV1,
     StockEtfScorecardVerdictV1, StockEtfShadowSignalRequestV1, StockEtfStrategyHypothesisV1,
     StockMarketDataProvenanceV1, StockShadowFillModelV1, TinyLiveAdrEligibilityV1,
     BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID, BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID,
@@ -37,7 +36,6 @@ use openclaw_types::{
     STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID, STOCK_ETF_TINY_LIVE_ADR_ELIGIBILITY_CONTRACT_ID,
     STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID, STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
 };
-use std::sync::OnceLock;
 
 mod health_summary;
 mod precontact;
@@ -55,6 +53,9 @@ use status_summaries::{
     release_packet_status_summary, scorecard_status_summary, shadow_status_summary,
     universe_status_summary,
 };
+// risk-policy loader 已抽至 sibling 模組（handler 本體不再持有檔案系統/路徑類
+// runtime material 讀取）；此處跨 sibling 取用進程級快取與 denied 回退。
+use super::stock_etf_risk_policy::{denied_stock_etf_risk_policy_fallback, stock_etf_risk_policy};
 
 pub(in crate::ipc_server) fn handle_stock_etf_ipc(
     id: serde_json::Value,
@@ -394,90 +395,29 @@ fn data_foundation_status_summary(phase2: serde_json::Value) -> serde_json::Valu
     })
 }
 
-/// stock_etf 風控 TOML 的進程級快取（load-once）。
-///
-/// 為什麼 OnceLock<Result<..>>：source-of-record 只需 boot 後載入一次；失敗也
-/// 快取為 Err 以維持 fail-closed（呼叫端回退 denied fallback + 標 reason）。
-static STOCK_ETF_RISK_POLICY: OnceLock<Result<StockEtfRiskPolicyV1, String>> = OnceLock::new();
-
-/// 純載入器：從指定 dir 讀取並解析 risk_config_stock_etf_paper.toml，轉為
-/// StockEtfRiskPolicyV1（顯示面 source-of-record）。
-///
-/// 為什麼收 dir 參數而非讀 env：把「路徑解析」與「load+parse+from_source_config
-/// glue」拆開，讓測試能以真實 repo TOML 直接驗證 caps 確實被載入，繞過進程級
-/// OnceLock 與 OPENCLAW_RISK_CONFIG_DIR 全域狀態（避免與同 binary 的 startup
-/// 測試搶 env 造成 order-fragile）。
-///
-/// 為什麼回 Err 而非捏值：檔案缺失或解析失敗時**不得**捏造寬鬆 caps；呼叫端
-/// 必回退 denied fallback 並標 reason（fail-closed）。
-pub(in crate::ipc_server) fn load_stock_etf_risk_policy_from_dir(
-    dir: &std::path::Path,
-) -> Result<StockEtfRiskPolicyV1, String> {
-    let path = dir.join("risk_config_stock_etf_paper.toml");
-    let raw = std::fs::read_to_string(&path)
-        .map_err(|e| format!("read {} failed: {e}", path.display()))?;
-    let source: StockEtfRiskPolicySourceConfigV1 =
-        toml::from_str(&raw).map_err(|e| format!("parse {} failed: {e}", path.display()))?;
-    Ok(StockEtfRiskPolicyV1::from_source_config(&source))
-}
-
-/// 解析 settings-dir 後委派 pure loader（進程級 OnceLock 的載入來源）。
-///
-/// 路徑解析沿用 startup::load_unified_configs 同一套 settings-dir 約定（優先
-/// OPENCLAW_RISK_CONFIG_DIR，否則相對 settings/risk_control_rules），不硬編碼
-/// 平台路徑，維持跨平台可攜。
-fn load_stock_etf_risk_policy() -> Result<StockEtfRiskPolicyV1, String> {
-    use std::path::PathBuf;
-    let base = std::env::var("OPENCLAW_RISK_CONFIG_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("settings/risk_control_rules"));
-    load_stock_etf_risk_policy_from_dir(&base)
-}
-
-/// 進程級快取存取（load-once）；返回 &'static Result 供呼叫端 clone。
-/// 首次載入失敗時 warn 一次（OnceLock 保證只發生一次，避免每次 IPC 洗版）。
-fn stock_etf_risk_policy() -> &'static Result<StockEtfRiskPolicyV1, String> {
-    STOCK_ETF_RISK_POLICY.get_or_init(|| {
-        let loaded = load_stock_etf_risk_policy();
-        if let Err(e) = &loaded {
-            tracing::warn!(
-                error = %e,
-                "stock_etf risk policy load failed; using denied fallback / 顯示面回退 denied"
-            );
-        }
-        loaded
-    })
-}
-
-/// fail-closed 顯示回退：TOML 載入失敗時使用的 denied policy。
-///
-/// 為什麼不用裸 default()：default() 的 allow_* 皆為 true（雖 validate() 仍判為
-/// blocker），GUI 直接顯示會誤導成「允許保證金/做空」。此處顯式全 false，確保
-/// 載入失敗時顯示面**不**出現任何寬鬆 cap/flag（NEVER fabricate permissive caps）。
-fn denied_stock_etf_risk_policy_fallback() -> StockEtfRiskPolicyV1 {
-    StockEtfRiskPolicyV1 {
-        asset_lane: AssetLane::StockEtfCash,
-        broker: Broker::Ibkr,
-        environment: BrokerEnvironment::Paper,
-        enabled: false,
-        shadow_only: true,
-        allow_margin: false,
-        allow_short: false,
-        allow_options: false,
-        allow_cfd: false,
-        allow_transfer: false,
-        allow_live: false,
-        bybit_live_execution_unchanged: true,
-        ..StockEtfRiskPolicyV1::default()
-    }
-}
-
+/// 薄包裝（handler dispatch 入口）：以進程級 OnceLock 快取的載入結果渲染
+/// policy_status。純顯示，不 enable 任何下單路徑（lane 仍 enabled=false /
+/// shadow_only=true）。
 fn policy_status_summary(phase2: serde_json::Value) -> serde_json::Value {
+    policy_status_summary_from_result(phase2, stock_etf_risk_policy())
+}
+
+/// 純渲染子：把「risk policy 載入結果」渲染成 policy_status IPC 顯示投影。
+///
+/// 為什麼收 &Result 參數而非讀 OnceLock：讓 fixture 能以注入方式（pure loader
+/// 回 Err 或直接構造 Err）確定性驗證 denied fallback 渲染，繞過進程級 OnceLock
+/// 初始化順序與 OPENCLAW_RISK_CONFIG_DIR 全域狀態，比原走 IPC/OnceLock 的測試
+/// 更確定（原測試自承 env-set 常為 no-op）。
+///
+/// fail-closed：載入/解析為 Err 時回退 denied fallback，並在輸出帶
+/// risk_config_load_error（非 null），讓消費端可區分「檔案問題」與「刻意 dormant」。
+pub(in crate::ipc_server) fn policy_status_summary_from_result(
+    phase2: serde_json::Value,
+    result: &Result<StockEtfRiskPolicyV1, String>,
+) -> serde_json::Value {
     // win ②：顯示的 caps 必須等於真正的 source-of-record
-    // （risk_config_stock_etf_paper.toml），而非 default() 的 0；此路徑純顯示，
-    // 不 enable 任何下單路徑（lane 仍 enabled=false / shadow_only=true）。
-    // fail-closed：載入/解析失敗回退 denied fallback，並在輸出帶 risk_config_load_error。
-    let (risk_policy, risk_config_load_error) = match stock_etf_risk_policy() {
+    // （risk_config_stock_etf_paper.toml），而非 default() 的 0。
+    let (risk_policy, risk_config_load_error) = match result {
         Ok(policy) => (policy.clone(), None),
         Err(e) => (denied_stock_etf_risk_policy_fallback(), Some(e.clone())),
     };
@@ -828,4 +768,12 @@ fn authorization_status_summary(
         "order_routed": false,
         "bybit_ipc_reused": false,
     })
+}
+
+/// 測試用 phase2 precontact 投影再導出：讓 policy_status fixture 以注入方式呼叫純
+/// 渲染子時，取得與 handler dispatch 入口一致的 phase2 值，不必走完整 IPC dispatch
+/// 與進程級 OnceLock。非測試建置無消費端，故 cfg(test) 限定。
+#[cfg(test)]
+pub(in crate::ipc_server) fn stock_etf_phase2_precontact_summary_for_test() -> serde_json::Value {
+    phase2_precontact_summary()
 }
