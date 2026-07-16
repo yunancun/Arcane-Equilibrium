@@ -34,6 +34,7 @@ FORBIDDEN_IPC_METHOD_STRINGS = {
 ALLOWED_STOCK_ETF_STATUS_IPC_METHODS = {
     "stock_etf.get_account_status",
     "stock_etf.get_authorization_status",
+    "stock_etf.get_connection_health",
     "stock_etf.get_data_foundation_status",
     "stock_etf.get_disable_cleanup_status",
     "stock_etf.get_evidence_status",
