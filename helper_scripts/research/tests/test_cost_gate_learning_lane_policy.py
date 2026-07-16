@@ -9,10 +9,15 @@ import math
 import os
 from pathlib import Path
 import subprocess
+import tempfile
+
+import pytest
 
 from helper_scripts.research.tests.candidate_lineage_v2_test_support import (
     attach_candidate_lineage_v2,
+    build_candidate_event_context_v1,
 )
+from cost_gate_learning_lane import ledger_streaming as ledger_streaming_module
 from cost_gate_learning_lane import runtime_adapter as runtime_adapter_module
 from cost_gate_learning_lane import status as status_module
 from cost_gate_learning_lane import outcome_refresh as outcome_refresh_module
@@ -42,11 +47,13 @@ from cost_gate_learning_lane.outcome_refresh import (
     OutcomeRefreshSelection,
     build_cost_gate_outcome_refresh_batch,
     build_price_rows_from_pg_for_refresh,
+    read_outcome_refresh_ledger_projection,
     refresh_cost_gate_outcomes_from_price_rows,
 )
 from cost_gate_learning_lane.outcome_review import (
     BlockedOutcomeReviewConfig,
     build_blocked_signal_outcome_review,
+    read_candidate_board_ledger_projection,
 )
 from cost_gate_learning_lane.false_negative_candidate_packet import (
     build_false_negative_candidate_packet,
@@ -87,6 +94,7 @@ from cost_gate_learning_lane.reject_materializer import (
     build_cost_gate_reject_feature_sql,
     build_materialized_reject_ledger_batch,
     pipeline_snapshot_recent_intents_to_feature_rows,
+    read_reject_materializer_ledger_projection,
     reject_feature_row_to_event,
 )
 from cost_gate_learning_lane.runtime_adapter import (
@@ -96,13 +104,118 @@ from cost_gate_learning_lane.runtime_adapter import (
     build_ledger_record,
     evaluate_probe_admission,
     normalize_reject_reason_code,
+    read_candidate_evidence_jsonl_ledger,
     read_jsonl_ledger,
+    read_learning_ledger_partitions,
     append_jsonl_ledger,
     summarize_side_cell_runtime_state,
+)
+from cost_gate_learning_lane.candidate_evaluation_context import canonical_sha256
+from cost_gate_learning_lane.ledger_streaming import (
+    LedgerScanError,
+    scan_retained_jsonl,
 )
 
 
 LIVE_LINEAGE_AS_OF_UTC_DATE = dt.datetime.now(dt.timezone.utc).date().isoformat()
+
+
+def _write_jsonl_bytes(path: Path, rows: list[object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(
+        b"".join(
+            json.dumps(row, sort_keys=True).encode("utf-8") + b"\n"
+            for row in rows
+        )
+    )
+
+
+def _admission_row(
+    attempt_id: str, decision: str, symbol: str, side: str, ts_ms: int
+) -> dict:
+    return {
+        "record_type": "probe_admission_decision",
+        "attempt_id": attempt_id,
+        "decision": decision,
+        "allowed_to_submit_order": decision == ADMIT_DECISION,
+        "side_cell_key": f"ma_crossover|{symbol}|{side}",
+        "event": {
+            "strategy_name": "ma_crossover", "symbol": symbol, "side": side,
+            "ts_ms": ts_ms, "context_id": attempt_id,
+        },
+        "candidate_summary": {},
+    }
+
+
+@pytest.mark.parametrize(
+    ("mutation", "error"),
+    [
+        ("append", None), ("rotate", None),
+        ("replace", "PATH_REPLACED"), ("shrink", "SHORT_READ"),
+    ],
+)
+def test_retained_ledger_scanner_handles_post_admission_generation_changes(
+    tmp_path: Path, mutation: str, error: str | None,
+) -> None:
+    ledger = tmp_path / "probe_ledger.jsonl"
+    _write_jsonl_bytes(ledger, [{"attempt_id": "admitted"}])
+    rows: list[dict] = []
+
+    def mutate(_sources: object) -> None:
+        if mutation == "append":
+            with ledger.open("ab") as stream:
+                stream.write(b'{"attempt_id":"later"}\n')
+            return
+        if mutation == "shrink":
+            ledger.write_bytes(b"")
+            return
+        target = tmp_path / (
+            "probe_ledger.20260716T000000Z.jsonl"
+            if mutation == "rotate" else "orphan.jsonl"
+        )
+        ledger.rename(target)
+        _write_jsonl_bytes(ledger, [{"attempt_id": "new-active"}])
+
+    if error:
+        with pytest.raises(LedgerScanError, match=error):
+            scan_retained_jsonl(ledger, rows.append, on_admitted=mutate)
+    else:
+        scan_retained_jsonl(ledger, rows.append, on_admitted=mutate)
+        assert [row["attempt_id"] for row in rows] == ["admitted"]
+
+
+@pytest.mark.parametrize(
+    ("payload", "error_code", "max_line", "symlink"),
+    [
+        (b'{"attempt_id":1}\nnot-json\n', "MALFORMED_JSON", None, False),
+        (b'{"attempt_id":1}\n[]\n', "NON_OBJECT_ROW", None, False),
+        (b'{"bad":"' + bytes([0xFF]) + b'"}\n', "INVALID_UTF8", None, False),
+        (b'{"attempt_id":1}', "PARTIAL_LINE", None, False),
+        (b'{"payload":"123456789"}\n', "LINE_OVERSIZED", 8, False),
+        (b"", "SOURCE_NOT_REGULAR", None, True),
+    ],
+)
+def test_retained_ledger_scanner_aborts_on_invalid_complete_universe(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    payload: bytes,
+    error_code: str,
+    max_line: int | None,
+    symlink: bool,
+) -> None:
+    ledger = tmp_path / "probe_ledger.jsonl"
+    if symlink:
+        target = tmp_path / "target.jsonl"
+        target.write_bytes(b"{}\n")
+        ledger.symlink_to(target)
+    else:
+        ledger.write_bytes(payload)
+    monkeypatch.setattr(
+        ledger_streaming_module, "MAX_LEDGER_JSONL_LINE_BYTES",
+        max_line or ledger_streaming_module.MAX_LEDGER_JSONL_LINE_BYTES,
+    )
+    with pytest.raises(LedgerScanError, match=error_code):
+        scan_retained_jsonl(ledger, lambda _row: None, chunk_bytes=4)
 
 
 def _scorecard_payload(generated_at: str = "2026-06-21T10:00:00+00:00") -> dict:
@@ -2024,6 +2137,60 @@ def test_activation_preflight_routes_admission_only_ledger_to_outcome_refresh(
     ]
 
 
+def test_activation_decision_distinguishes_deferred_review_projection_from_admission_only(
+) -> None:
+    common = {
+        "source": {"source_ready": True},
+        "plan": {"plan_status": "READY"},
+        "loop": {"learning_loop_status": "RUNNING"},
+    }
+    projection_required = status_module._activation_decision(
+        **common,
+        ledger={
+            "ledger_status": "QUALIFIED_LINEAGE_REVIEW_PROJECTION_REQUIRED",
+            "blocked_signal_outcome_review_status": (
+                "QUALIFIED_LINEAGE_REVIEW_PROJECTION_REQUIRED"
+            ),
+            "admission_decision_count": 1,
+            "blocked_signal_outcome_count": 0,
+            "probe_outcome_count": 0,
+        },
+    )
+
+    assert projection_required == {
+        "status": "QUALIFIED_LINEAGE_REVIEW_PROJECTION_REQUIRED",
+        "reason": (
+            "qualified_blocked_signal_outcomes_require_review_and_"
+            "candidate_board_projection"
+        ),
+        "missing_links": [
+            "completed_blocked_signal_outcome_review_and_candidate_board_projection"
+        ],
+        "next_actions": [
+            "run_cost_gate_outcome_review_for_candidate_board_projection"
+        ],
+    }
+
+    admission_only = status_module._activation_decision(
+        **common,
+        ledger={
+            "ledger_status": "ADMISSION_ROWS_PRESENT",
+            "admission_decision_count": 1,
+            "blocked_signal_outcome_count": 0,
+            "probe_outcome_count": 0,
+        },
+    )
+
+    assert admission_only == {
+        "status": "ADMISSION_ONLY_NEEDS_OUTCOME_REFRESH",
+        "reason": "rejects_recorded_but_blocked_signal_outcomes_missing",
+        "missing_links": ["blocked_signal_outcome_rows"],
+        "next_actions": [
+            "run_cost_gate_outcome_refresh_for_blocked_signal_outcomes"
+        ],
+    }
+
+
 def test_activation_preflight_routes_capture_error_rows_to_writer_config_fix(
     tmp_path: Path,
 ):
@@ -2290,109 +2457,13 @@ def test_large_retained_ledger_uses_bounded_streaming_projection(
     )
 
 
-def test_large_retained_ledger_blocks_outcome_refresh_before_materialization(
+def test_outcome_review_cli_emits_complete_empty_candidate_board(
     tmp_path: Path,
     monkeypatch,
-    capsys,
-) -> None:
-    ledger_path = tmp_path / "probe_ledger.jsonl"
-    ledger_path.write_text("{}\n", encoding="utf-8")
-    output_path = tmp_path / "refresh.json"
-    monkeypatch.setattr(
-        outcome_refresh_module,
-        "MAX_IN_MEMORY_RETAINED_LEDGER_BYTES",
-        1,
-    )
-    monkeypatch.setattr(
-        outcome_refresh_module,
-        "read_learning_ledger_partitions",
-        lambda _path: (_ for _ in ()).throw(
-            AssertionError("large retained ledger must not be materialized")
-        ),
-    )
-    monkeypatch.setattr(
-        "sys.argv",
-        [
-            "outcome_refresh.py",
-            "--ledger",
-            str(ledger_path),
-            "--source-prices",
-            str(tmp_path / "unused.jsonl"),
-            "--record-blocked-outcomes",
-            "--output",
-            str(output_path),
-        ],
-    )
-
-    assert outcome_refresh_module.main() == 75
-    diagnostic = json.loads(capsys.readouterr().err)
-    assert diagnostic["status"] == "RETAINED_LEDGER_STREAMING_PROJECTION_REQUIRED"
-    assert diagnostic["retained_ledger_bytes"] == 3
-    assert not output_path.exists()
-
-
-def test_large_retained_ledger_blocks_reject_materializer_before_materialization(
-    tmp_path: Path,
-    monkeypatch,
-    capsys,
-) -> None:
-    ledger_path = tmp_path / "probe_ledger.jsonl"
-    ledger_path.write_text("{}\n", encoding="utf-8")
-    output_path = tmp_path / "materializer.json"
-    monkeypatch.setattr(
-        reject_materializer_module,
-        "MAX_IN_MEMORY_RETAINED_LEDGER_BYTES",
-        1,
-    )
-    monkeypatch.setattr(
-        reject_materializer_module,
-        "read_learning_ledger_partitions",
-        lambda _path: (_ for _ in ()).throw(
-            AssertionError("large retained ledger must not be materialized")
-        ),
-    )
-    monkeypatch.setattr(
-        "sys.argv",
-        [
-            "reject_materializer.py",
-            "--plan",
-            str(tmp_path / "unused-plan.json"),
-            "--ledger",
-            str(ledger_path),
-            "--source-rows",
-            str(tmp_path / "unused-rows.jsonl"),
-            "--output",
-            str(output_path),
-        ],
-    )
-
-    assert reject_materializer_module.main() == 75
-    diagnostic = json.loads(capsys.readouterr().err)
-    assert diagnostic["status"] == "RETAINED_LEDGER_STREAMING_PROJECTION_REQUIRED"
-    assert diagnostic["retained_ledger_bytes"] == 3
-    assert not output_path.exists()
-
-
-def test_large_retained_ledger_blocks_outcome_review_before_materialization(
-    tmp_path: Path,
-    monkeypatch,
-    capsys,
 ) -> None:
     ledger_path = tmp_path / "probe_ledger.jsonl"
     ledger_path.write_text("{}\n", encoding="utf-8")
     output_path = tmp_path / "review.json"
-    monkeypatch.setattr(
-        outcome_review_module,
-        "MAX_IN_MEMORY_RETAINED_LEDGER_BYTES",
-        1,
-    )
-    monkeypatch.setattr(
-        outcome_review_module,
-        "read_candidate_evidence_jsonl_ledger",
-        lambda _path: (_ for _ in ()).throw(
-            AssertionError("large retained ledger must not be materialized")
-        ),
-    )
     monkeypatch.setattr(
         "sys.argv",
         [
@@ -2404,11 +2475,290 @@ def test_large_retained_ledger_blocks_outcome_review_before_materialization(
         ],
     )
 
-    assert outcome_review_module.main() == 75
+    assert outcome_review_module.main() == 0
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    board = payload["learning_candidate_board"]
+    assert payload["candidate_board_generation_state"] == "COMPLETE"
+    assert payload["ledger_scan_status"] == "COMPLETE"
+    assert board["candidate_universe_complete"] is True
+    assert board["candidate_rows"] == []
+
+
+@pytest.mark.parametrize(
+    ("fill_alias", "section"),
+    [(alias, section) for alias in ("orderLinkId", "openclaw_order_link_id")
+     for section in (None, "event", "lineage")],
+)
+def test_outcome_refresh_streaming_projection_matches_full_ledger_semantics(
+    tmp_path: Path, fill_alias: str, section: str | None,
+) -> None:
+    ledger = tmp_path / "probe_ledger.jsonl"
+    event_ts = 1_784_116_800_000
+    fill = {"record_type": "execution_fill", "fill_id": "fill-probe-pending"}
+    (fill if section is None else fill.setdefault(section, {}))[
+        fill_alias
+    ] = "probe-pending"
+    rows = [
+        _admission_row(
+            "blocked-pending", "ORDER_AUTHORITY_NOT_GRANTED",
+            "ETHUSDT", "Sell", event_ts,
+        ),
+        _admission_row(
+            "probe-pending", ADMIT_DECISION, "BTCUSDT", "Buy", event_ts,
+        ),
+        fill,
+        _admission_row(
+            "blocked-done", "ORDER_AUTHORITY_NOT_GRANTED",
+            "SOLUSDT", "Sell", event_ts,
+        ),
+        {
+            "record_type": "blocked_signal_outcome",
+            "attempt_id": "blocked-done",
+            "side_cell_key": "ma_crossover|SOLUSDT|Sell",
+        },
+        {"record_type": "unrelated_audit", "payload": "ignored"},
+    ]
+    _write_jsonl_bytes(ledger, rows)
+    selection = OutcomeRefreshSelection(
+        record_blocked_outcomes=True,
+        record_probe_outcomes=True,
+    )
+    cfg = ProbeOutcomeConfig(horizon_minutes=60, cost_bps=4.0)
+    now = dt.datetime(2026, 7, 16, 13, tzinfo=dt.timezone.utc)
+    price_rows = [
+        {"symbol": "ETHUSDT", "ts_ms": event_ts, "close": 2000.0},
+        {"symbol": "ETHUSDT", "ts_ms": event_ts + 3_600_000, "close": 1990.0},
+        {"symbol": "BTCUSDT", "ts_ms": event_ts, "close": 100_000.0},
+        {"symbol": "BTCUSDT", "ts_ms": event_ts + 3_600_000, "close": 101_000.0},
+    ]
+
+    full_rows = read_learning_ledger_partitions(ledger).outcome_rows
+    streamed_rows = read_outcome_refresh_ledger_projection(
+        ledger,
+        selection=selection,
+    )
+    full = build_cost_gate_outcome_refresh_batch(
+        full_rows,
+        price_rows,
+        now_utc=now,
+        selection=selection,
+        outcome_cfg=cfg,
+        price_source="test",
+    )
+    streamed = build_cost_gate_outcome_refresh_batch(
+        streamed_rows,
+        price_rows,
+        now_utc=now,
+        selection=selection,
+        outcome_cfg=cfg,
+        price_source="test",
+    )
+
+    assert streamed == full
+    probe = next(
+        row for row in streamed["outcomes"] if row["record_type"] == "probe_outcome"
+    )
+    assert probe["fill_reconciliation"] == "filled"
+    assert all(row["attempt_id"] != "blocked-done" for row in streamed["outcomes"])
+
+
+def test_outcome_review_streaming_projection_matches_full_ledger_semantics(
+    tmp_path: Path,
+) -> None:
+    ledger = tmp_path / "probe_ledger.jsonl"
+    now = dt.datetime(2026, 7, 10, 18, tzinfo=dt.timezone.utc)
+    captured_base = int(
+        dt.datetime(2026, 7, 9, 12, tzinfo=dt.timezone.utc).timestamp() * 1000
+    )
+    outcomes = [
+        attach_candidate_lineage_v2(
+            {
+                "record_type": "blocked_signal_outcome",
+                "attempt_id": f"ctx-stream-review-{index}",
+                "side_cell_key": "ma_crossover|BTCUSDT|Buy",
+                "strategy_name": "ma_crossover",
+                "symbol": "BTCUSDT",
+                "side": "Buy",
+                "horizon_minutes": 60,
+                "entry_ts_ms": captured_base + index * 3_600_000,
+                "gross_bps": 20.0 + index,
+                "cost_bps": 12.0,
+                "realized_net_bps": 8.0 + index,
+                "cost_model_version": "conservative_v1",
+            },
+            context_id=f"ctx-stream-review-{index}",
+            captured_at_ms=captured_base + index * 3_600_000,
+            as_of_utc_date="2026-07-10",
+        )
+        for index in range(3)
+    ]
+    _write_jsonl_bytes(
+        ledger,
+        [{"record_type": "unrelated_audit"}] + outcomes,
+    )
+
+    full_rows = read_candidate_evidence_jsonl_ledger(ledger)
+    projection = read_candidate_board_ledger_projection(ledger)
+    full = build_blocked_signal_outcome_review(full_rows, now_utc=now)
+    streamed = build_blocked_signal_outcome_review(
+        projection.rows,
+        now_utc=now,
+        source_ledger_row_count=projection.source_ledger_row_count,
+    )
+
+    assert projection.blocked_outcome_row_count == 3
+    assert streamed == full
+
+
+def test_reject_materializer_streaming_projection_preserves_capture_blocked_dedup(
+    tmp_path: Path,
+) -> None:
+    ledger = tmp_path / "probe_ledger.jsonl"
+    context = build_candidate_event_context_v1(
+        context_id="ctx-capture-blocked-dedup",
+        captured_at_ms=1_782_037_200_000,
+        strategy_name="ma_crossover",
+        symbol="ETHUSDT",
+        side="Sell",
+        evidence_engine_mode="live_demo",
+    )
+    context["capture_status"] = "CAPTURE_BLOCKED"
+    context["capture_blockers"] = ["BBO_MISSING_OR_INVALID"]
+    context["event_hash"] = canonical_sha256(
+        {key: value for key, value in context.items() if key != "event_hash"}
+    )
+    blocked_row = {
+        "record_type": "probe_admission_decision",
+        "attempt_id": context["context_id"],
+        "decision": "ORDER_AUTHORITY_NOT_GRANTED",
+        "allowed_to_submit_order": False,
+        "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+        "event": {
+            "strategy_name": context["strategy_name"],
+            "symbol": context["symbol"],
+            "side": context["side"],
+            "context_id": context["context_id"],
+            "signal_id": context["signal_id"],
+            "engine_mode": context["evidence_engine_mode"],
+            "ts_ms": context["captured_at_ms"],
+            "candidate_event_context": context,
+        },
+    }
+    _write_jsonl_bytes(ledger, [blocked_row, {"record_type": "unrelated_audit"}])
+    feature_rows = [
+        {
+            "strategy_name": context["strategy_name"],
+            "symbol": context["symbol"],
+            "side": context["side"],
+            "context_id": context["context_id"],
+            "signal_id": context["signal_id"],
+            "engine_mode": context["evidence_engine_mode"],
+            "ts_ms": context["captured_at_ms"],
+            "reject_reason_code": "cost_gate_js_demo_negative_edge",
+            "_materializer_source": "explicit_source_rows",
+        },
+        {
+            "ts_ms": 1_782_037_201_000,
+            "context_id": "ctx-new-streamed-materializer",
+            "engine_mode": "live_demo",
+            "strategy_name": "ma_crossover",
+            "symbol": "ETHUSDT",
+            "side": "Sell",
+            "reject_reason_code": "cost_gate_js_demo_negative_edge",
+            "_materializer_source": "explicit_source_rows",
+        },
+    ]
+    plan = _runtime_plan()
+    now = dt.datetime(2026, 6, 21, 11, 10, tzinfo=dt.timezone.utc)
+
+    full_partitions = read_learning_ledger_partitions(ledger)
+    projection = read_reject_materializer_ledger_projection(
+        ledger,
+        plan=plan,
+        feature_rows=feature_rows,
+    )
+    full = build_materialized_reject_ledger_batch(
+        plan,
+        feature_rows,
+        existing_ledger_rows=full_partitions.outcome_rows,
+        dedup_ledger_rows=full_partitions.dedup_rows,
+        now_utc=now,
+    )
+    streamed = build_materialized_reject_ledger_batch(
+        plan,
+        feature_rows,
+        existing_ledger_rows=projection.runtime_rows,
+        existing_attempt_ids=projection.existing_attempt_ids,
+        existing_event_keys=projection.existing_event_keys,
+        now_utc=now,
+    )
+
+    assert projection.quarantined_dedup_match_count >= 1
+    assert projection.runtime_rows == []
+    assert streamed == full
+    assert streamed["skipped_existing_attempt_count"] == 1
+    assert streamed["materialized_record_count"] == 1
+
+
+@pytest.mark.parametrize(
+    "consumer",
+    ["review", "review_cap", "refresh", "materializer"],
+)
+def test_corrupt_scan_defers_and_preserves_previous_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    consumer: str,
+) -> None:
+    ledger = tmp_path / "probe_ledger.jsonl"
+    ledger.write_bytes(
+        b'{"record_type":"blocked_signal_outcome"}\n'
+        if consumer == "review_cap"
+        else b"not-json\n"
+    )
+    output = tmp_path / f"{consumer}_latest.json"
+    output.write_text("last-known-good\n", encoding="utf-8")
+    temp_root = tmp_path / "temp"
+    temp_root.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(temp_root))
+    if consumer in {"review", "review_cap"}:
+        main = outcome_review_module.main
+        argv = ["outcome_review.py", "--ledger", str(ledger)]
+        if consumer == "review_cap":
+            monkeypatch.setattr(
+                outcome_review_module,
+                "MAX_STREAMED_CANDIDATE_EVIDENCE_ROWS",
+                0,
+            )
+    elif consumer == "refresh":
+        prices = tmp_path / "prices.json"
+        prices.write_text("[]\n", encoding="utf-8")
+        main = outcome_refresh_module.main
+        argv = [
+            "outcome_refresh.py", "--ledger", str(ledger),
+            "--source-prices", str(prices), "--record-blocked-outcomes",
+        ]
+    else:
+        plan, rows = tmp_path / "plan.json", tmp_path / "rows.jsonl"
+        plan.write_text(json.dumps(_runtime_plan()), encoding="utf-8")
+        _write_jsonl_bytes(rows, [_selected_reject_event()])
+        main = reject_materializer_module.main
+        argv = [
+            "reject_materializer.py",
+            "--plan", str(plan), "--ledger", str(ledger), "--source-rows", str(rows),
+        ]
+    monkeypatch.setattr("sys.argv", [*argv, "--output", str(output)])
+    assert main() == 75
     diagnostic = json.loads(capsys.readouterr().err)
-    assert diagnostic["status"] == "RETAINED_LEDGER_STREAMING_PROJECTION_REQUIRED"
-    assert diagnostic["retained_ledger_bytes"] == 3
-    assert not output_path.exists()
+    assert diagnostic["status"] == "RETAINED_LEDGER_SCAN_DEFERRED"
+    expected = (
+        "CANDIDATE_BOARD_PROJECTION_LIMIT_REACHED"
+        if consumer == "review_cap"
+        else "RETAINED_LEDGER_MALFORMED_JSON"
+    )
+    assert expected in diagnostic["reason"]
+    assert output.read_text(encoding="utf-8") == "last-known-good\n"
+    assert list(temp_root.iterdir()) == []
 
 
 def test_activation_preflight_routes_invalid_only_outcomes_to_lineage_repair(
@@ -2598,13 +2948,13 @@ def test_activation_preflight_prioritizes_malformed_evidence_repair(
     )
     ledger = preflight["ledger"]
 
-    assert ledger["raw_ledger_total_rows"] == 2
+    assert ledger["raw_ledger_total_rows"] == 0
     assert ledger["ledger_malformed_line_count"] == 1
-    assert ledger["admission_decision_count"] == 1
-    assert ledger["raw_blocked_signal_outcome_count"] == 1
+    assert ledger["admission_decision_count"] == 0
+    assert ledger["raw_blocked_signal_outcome_count"] == 0
     assert ledger["ledger_status"] == "LEDGER_EVIDENCE_CORRUPTION"
-    assert ledger["ledger_source_error"] == (
-        "malformed_jsonl_line:probe_ledger.jsonl:2"
+    assert ledger["ledger_source_error"].endswith(
+        f"RETAINED_LEDGER_MALFORMED_JSON:{ledger_path}:2"
     )
     assert preflight["status"] == "LEDGER_EVIDENCE_CORRUPTION_NEEDS_REPAIR"
     assert preflight["reason"] == (
@@ -2756,27 +3106,28 @@ def test_status_retries_rotation_between_identity_capture_and_active_open(
         "SOLUSDT", "Buy", 1_783_995_600_000, 20.0,
     )
     ledger_path.write_text(json.dumps(old_active) + "\n", encoding="utf-8")
-    original_path_open = Path.open
+    original_os_open = ledger_streaming_module.os.open
     active_binary_open_count = 0
     rotated = False
 
-    def rotate_once_on_active_binary_open(self, *args, **kwargs):
+    def rotate_once_on_active_binary_open(path, flags, mode=0o777):
         nonlocal active_binary_open_count, rotated
-        mode = args[0] if args else kwargs.get("mode", "r")
-        if self == ledger_path and mode == "rb":
+        if Path(path) == ledger_path:
             active_binary_open_count += 1
             if not rotated:
                 rotated = True
                 ledger_path.replace(rotated_active_path)
-                with original_path_open(
-                    ledger_path,
-                    "w",
+                ledger_path.write_text(
+                    json.dumps(new_active) + "\n",
                     encoding="utf-8",
-                ) as handle:
-                    handle.write(json.dumps(new_active) + "\n")
-        return original_path_open(self, *args, **kwargs)
+                )
+        return original_os_open(path, flags, mode)
 
-    monkeypatch.setattr(Path, "open", rotate_once_on_active_binary_open)
+    monkeypatch.setattr(
+        ledger_streaming_module.os,
+        "open",
+        rotate_once_on_active_binary_open,
+    )
 
     summary = status_module.summarize_cost_gate_learning_lane_ledger(ledger_path)
 
@@ -2810,13 +3161,12 @@ def test_status_fails_closed_after_three_unstable_rotation_attempts(
                     "attempt_id": f"ctx-perpetual-rotation-{attempt + 1}"}) + "\n"
         for attempt in range(3)
     ]
-    original_path_open = Path.open
+    original_os_open = ledger_streaming_module.os.open
     active_binary_open_count = 0
 
-    def rotate_on_every_active_binary_open(self, *args, **kwargs):
+    def rotate_on_every_active_binary_open(path, flags, mode=0o777):
         nonlocal active_binary_open_count
-        mode = args[0] if args else kwargs.get("mode", "r")
-        if self == ledger_path and mode == "rb":
+        if Path(path) == ledger_path:
             active_binary_open_count += 1
             segment_path = ledger_path.with_name(
                 "probe_ledger."
@@ -2824,22 +3174,24 @@ def test_status_fails_closed_after_three_unstable_rotation_attempts(
                 f"_{active_binary_open_count}.jsonl"
             )
             ledger_path.replace(segment_path)
-            with original_path_open(
-                ledger_path,
-                "w",
+            ledger_path.write_text(
+                replacement_payloads[active_binary_open_count - 1],
                 encoding="utf-8",
-            ) as handle:
-                handle.write(replacement_payloads[active_binary_open_count - 1])
-        return original_path_open(self, *args, **kwargs)
+            )
+        return original_os_open(path, flags, mode)
 
-    monkeypatch.setattr(Path, "open", rotate_on_every_active_binary_open)
+    monkeypatch.setattr(
+        ledger_streaming_module.os,
+        "open",
+        rotate_on_every_active_binary_open,
+    )
 
     summary = status_module.summarize_cost_gate_learning_lane_ledger(ledger_path)
 
     assert active_binary_open_count == 3
     assert summary["ledger_status"] == "LEDGER_EVIDENCE_CORRUPTION"
-    assert summary["ledger_source_error"] == (
-        "retained_ledger_generation_unstable_after_3_attempts"
+    assert "AFTER_3_ATTEMPTS" in (
+        summary["ledger_source_error"] or ""
     )
     assert summary["raw_ledger_total_rows"] == 0
     assert summary["ledger_total_rows"] == 0

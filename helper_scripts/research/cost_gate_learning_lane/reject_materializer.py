@@ -34,24 +34,28 @@ from cost_gate_learning_lane.contract import (  # noqa: E402
     PROBE_ADMISSION_DECISION_RECORD_TYPE,
 )
 from cost_gate_learning_lane.runtime_adapter import (  # noqa: E402
+    ADMIT_DECISION,
     CANDIDATE_EVENT_CONTEXT_UNQUALIFIED_STATUS,
     RuntimeAdmissionConfig,
     append_jsonl_ledger,
     build_ledger_record,
     evaluate_probe_admission,
     normalize_reject_reason_code,
-    read_learning_ledger_partitions,
+    project_learning_ledger_row,
     side_cell_key,
     validate_ledger_event_candidate_context,
 )
-from cost_gate_learning_lane.ledger_rotation import (  # noqa: E402
-    MAX_IN_MEMORY_RETAINED_LEDGER_BYTES,
-    retained_ledger_total_bytes,
+from cost_gate_learning_lane.ledger_streaming import (  # noqa: E402
+    LedgerProjectionLimitError,
+    LedgerScanError,
+    scan_retained_jsonl,
 )
 
 
 REJECT_MATERIALIZER_SCHEMA_VERSION = "cost_gate_reject_materializer_v1"
-RETAINED_LEDGER_STREAMING_PROJECTION_REQUIRED_EXIT_CODE = 75
+RETAINED_LEDGER_SCAN_DEFERRED_EXIT_CODE = 75
+MAX_REJECT_RUNTIME_PROJECTED_ROWS = 250_000
+MAX_REJECT_RUNTIME_PROJECTED_BYTES = 512 * 1024 * 1024
 VALID_ENGINE_MODES = {"paper", "demo", "live_demo", "live"}
 
 
@@ -64,6 +68,16 @@ class RejectMaterializerConfig:
     limit: int = 10_000
     eligible_negative_edge_only: bool = True
     statement_timeout_ms: int = 180_000
+
+
+@dataclass(frozen=True)
+class RejectLedgerProjection:
+    """Exact dedup targets plus bounded runtime rows for selected plan cells."""
+
+    runtime_rows: list[dict[str, Any]]
+    existing_attempt_ids: set[str]
+    existing_event_keys: set[str]
+    quarantined_dedup_match_count: int
 
 
 def _utc_now() -> dt.datetime:
@@ -388,12 +402,108 @@ def _decision_counts(records: list[dict[str, Any]]) -> dict[str, int]:
     return counts
 
 
+def _feature_attempt_id(event: dict[str, Any]) -> str:
+    for key in ("context_id", "signal_id"):
+        value = _str(event.get(key))
+        if value:
+            return value
+    return f"{side_cell_key(event.get('strategy_name'), event.get('symbol'), event.get('side'))}|{_int(event.get('ts_ms'))}"
+
+
+def read_reject_materializer_ledger_projection(
+    ledger_path: Path,
+    *,
+    plan: dict[str, Any],
+    feature_rows: list[dict[str, Any]],
+) -> RejectLedgerProjection:
+    """Scan once and retain only exact materializer state."""
+    target_attempt_ids: set[str] = set()
+    target_event_keys: set[str] = set()
+    for feature_row in feature_rows:
+        event = reject_feature_row_to_event(feature_row)
+        target_attempt_ids.add(_feature_attempt_id(event))
+        event_key = _event_equivalence_key(event)
+        if event_key:
+            target_event_keys.add(event_key)
+    target_side_cells = {
+        _str(candidate.get("side_cell_key"))
+        for candidate in plan.get("probe_candidates") or []
+        if isinstance(candidate, dict) and _str(candidate.get("side_cell_key"))
+    }
+    runtime_rows: list[dict[str, Any]] = []
+    runtime_bytes = 0
+    existing_attempt_ids: set[str] = set()
+    existing_event_keys: set[str] = set()
+    quarantined_matches = 0
+
+    def consume(raw_row: dict[str, Any]) -> None:
+        nonlocal runtime_bytes, quarantined_matches
+        outcome_row, dedup_row, quarantined = project_learning_ledger_row(raw_row)
+        dedup_matched = False
+        attempt_id = _str(dedup_row.get("attempt_id"))
+        if attempt_id and attempt_id in target_attempt_ids:
+            existing_attempt_ids.add(attempt_id)
+            dedup_matched = True
+        event_key = _event_equivalence_key(dedup_row)
+        if event_key and event_key in target_event_keys:
+            existing_event_keys.add(event_key)
+            dedup_matched = True
+        if quarantined and dedup_matched:
+            quarantined_matches += 1
+        if quarantined or outcome_row is None:
+            return
+        key = _str(outcome_row.get("side_cell_key")) or side_cell_key(
+            _dict(outcome_row.get("event")).get("strategy_name")
+            or _dict(outcome_row.get("event")).get("strategy"),
+            _dict(outcome_row.get("event")).get("symbol"),
+            _dict(outcome_row.get("event")).get("side"),
+        )
+        if key not in target_side_cells:
+            return
+        record_type = _str(outcome_row.get("record_type"))
+        row_decision = _str(outcome_row.get("decision")) or _str(
+            _dict(outcome_row.get("admission_decision")).get("decision")
+        )
+        if not (
+            row_decision == ADMIT_DECISION
+            or record_type in {"probe_outcome", "side_cell_disabled"}
+        ):
+            return
+        encoded = json.dumps(
+            outcome_row,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+        runtime_bytes += len(encoded)
+        if (
+            len(runtime_rows) >= MAX_REJECT_RUNTIME_PROJECTED_ROWS
+            or runtime_bytes > MAX_REJECT_RUNTIME_PROJECTED_BYTES
+        ):
+            raise LedgerProjectionLimitError(
+                "REJECT_RUNTIME_PROJECTION_LIMIT_REACHED",
+                path=ledger_path,
+            )
+        runtime_rows.append(outcome_row)
+
+    scan_retained_jsonl(ledger_path, consume)
+    return RejectLedgerProjection(
+        runtime_rows=runtime_rows,
+        existing_attempt_ids=existing_attempt_ids,
+        existing_event_keys=existing_event_keys,
+        quarantined_dedup_match_count=quarantined_matches,
+    )
+
+
 def build_materialized_reject_ledger_batch(
     plan: dict[str, Any],
     feature_rows: list[dict[str, Any]],
     *,
     existing_ledger_rows: list[dict[str, Any]] | None = None,
     dedup_ledger_rows: list[dict[str, Any]] | None = None,
+    existing_attempt_ids: set[str] | None = None,
+    existing_event_keys: set[str] | None = None,
     now_utc: dt.datetime | None = None,
     admission_cfg: RuntimeAdmissionConfig | None = None,
     risk_state: str = "NORMAL",
@@ -404,8 +514,16 @@ def build_materialized_reject_ledger_batch(
     dedup_existing = (
         dedup_ledger_rows if dedup_ledger_rows is not None else existing
     )
-    seen_attempt_ids = _ledger_attempt_ids(dedup_existing)
-    seen_event_keys = _ledger_event_equivalence_keys(dedup_existing)
+    seen_attempt_ids = (
+        set(existing_attempt_ids)
+        if existing_attempt_ids is not None
+        else _ledger_attempt_ids(dedup_existing)
+    )
+    seen_event_keys = (
+        set(existing_event_keys)
+        if existing_event_keys is not None
+        else _ledger_event_equivalence_keys(dedup_existing)
+    )
     materialized: list[dict[str, Any]] = []
     skipped_existing = 0
     skipped_existing_event_key = 0
@@ -617,23 +735,6 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = _build_parser().parse_args()
-    retained_bytes = retained_ledger_total_bytes(args.ledger)
-    if retained_bytes > MAX_IN_MEMORY_RETAINED_LEDGER_BYTES:
-        print(
-            json.dumps(
-                {
-                    "status": "RETAINED_LEDGER_STREAMING_PROJECTION_REQUIRED",
-                    "ledger_path": str(args.ledger),
-                    "retained_ledger_bytes": retained_bytes,
-                    "max_in_memory_retained_ledger_bytes": (
-                        MAX_IN_MEMORY_RETAINED_LEDGER_BYTES
-                    ),
-                },
-                sort_keys=True,
-            ),
-            file=sys.stderr,
-        )
-        return RETAINED_LEDGER_STREAMING_PROJECTION_REQUIRED_EXIT_CODE
     cfg = RejectMaterializerConfig(
         engine_modes=tuple(args.engine_modes or ("demo", "live_demo")),
         lookback_hours=args.lookback_hours,
@@ -649,8 +750,6 @@ def main() -> int:
         min_avg_net_bps=args.min_avg_net_bps,
     )
     plan = _read_json(args.plan)
-    partitions = read_learning_ledger_partitions(args.ledger)
-    existing = partitions.outcome_rows
 
     source_rows_count = 0
     pg_rows_count: int | None = None
@@ -682,11 +781,32 @@ def main() -> int:
         )
         feature_rows = feature_rows + snapshot_rows
 
+    try:
+        projection = read_reject_materializer_ledger_projection(
+            args.ledger,
+            plan=plan,
+            feature_rows=feature_rows,
+        )
+    except (LedgerScanError, LedgerProjectionLimitError) as exc:
+        print(
+            json.dumps(
+                {
+                    "status": "RETAINED_LEDGER_SCAN_DEFERRED",
+                    "ledger_path": str(args.ledger),
+                    "reason": str(exc),
+                },
+                sort_keys=True,
+            ),
+            file=sys.stderr,
+        )
+        return RETAINED_LEDGER_SCAN_DEFERRED_EXIT_CODE
+
     batch = build_materialized_reject_ledger_batch(
         plan,
         feature_rows,
-        existing_ledger_rows=existing,
-        dedup_ledger_rows=partitions.dedup_rows,
+        existing_ledger_rows=projection.runtime_rows,
+        existing_attempt_ids=projection.existing_attempt_ids,
+        existing_event_keys=projection.existing_event_keys,
         admission_cfg=admission_cfg,
         risk_state=args.risk_state,
     )

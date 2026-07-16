@@ -15,7 +15,6 @@ import datetime as dt
 import json
 import math
 import os
-import stat
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -36,13 +35,13 @@ from cost_gate_learning_lane.ledger_rotation import (
     MAX_IN_MEMORY_RETAINED_LEDGER_BYTES,
     retained_ledger_files,
 )
+from cost_gate_learning_lane.ledger_streaming import (
+    LedgerScanError,
+    scan_retained_jsonl,
+)
 
 
 MAX_IN_MEMORY_LEDGER_SNAPSHOT_BYTES = MAX_IN_MEMORY_RETAINED_LEDGER_BYTES
-STREAMING_LEDGER_CHUNK_BYTES = 1024 * 1024
-MAX_STREAMING_LEDGER_LINE_BYTES = 16 * 1024 * 1024
-
-
 DEFAULT_COST_GATE_LEARNING_LOOP_MAX_AGE_SECONDS = 3 * 60 * 60
 DEFAULT_PLAN_MAX_AGE_SECONDS = 36 * 60 * 60
 ACTIVATION_PREFLIGHT_SCHEMA_VERSION = (
@@ -647,80 +646,6 @@ def _streaming_prefix_rows(
         "qualified_lineage_outcome_row_count": 0,
         "lineage_exclusion_reason_counts": {},
     }
-    opened: list[tuple[Path, Any, int, int, int]] = []
-    admitted_names: tuple[str, ...] = ()
-    for _attempt in range(3):
-        for _source, handle, _dev, _ino, _size in opened:
-            handle.close()
-        opened = []
-        sources, _total_bytes, inventory_error = _retained_ledger_inventory(path)
-        if inventory_error is not None:
-            projection["ledger_source_error"] = inventory_error
-            return None, projection
-        if not sources:
-            projection["ledger_projection_complete"] = True
-            return [], projection
-        admitted_names = tuple(str(source) for source in sources)
-        drifted = False
-        try:
-            for source in sources:
-                before = source.stat(follow_symlinks=False)
-                if not stat.S_ISREG(before.st_mode):
-                    raise OSError("retained ledger source is not regular")
-                flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(
-                    os, "O_NOFOLLOW", 0
-                )
-                fd = os.open(source, flags)
-                handle = os.fdopen(fd, "rb", closefd=True)
-                after = os.fstat(handle.fileno())
-                if (
-                    before.st_dev != after.st_dev
-                    or before.st_ino != after.st_ino
-                    or before.st_size != after.st_size
-                    or not stat.S_ISREG(after.st_mode)
-                ):
-                    handle.close()
-                    drifted = True
-                    break
-                opened.append(
-                    (source, handle, after.st_dev, after.st_ino, after.st_size)
-                )
-        except FileNotFoundError:
-            drifted = True
-        except OSError as exc:
-            for _source, handle, _dev, _ino, _size in opened:
-                handle.close()
-            projection["ledger_source_error"] = (
-                f"read_error:{type(exc).__name__}"
-            )
-            return None, projection
-        if drifted:
-            continue
-        current_sources, _current_bytes, current_error = _retained_ledger_inventory(path)
-        if current_error is not None:
-            for _source, handle, _dev, _ino, _size in opened:
-                handle.close()
-            opened = []
-            projection["ledger_source_error"] = current_error
-            return None, projection
-        current_names = tuple(str(source) for source in current_sources)
-        if current_names != admitted_names:
-            continue
-        break
-    else:
-        projection["ledger_source_error"] = (
-            "retained_ledger_generation_unstable_after_3_attempts"
-        )
-        return None, projection
-
-    if not opened:
-        projection["ledger_source_error"] = (
-            "retained_ledger_generation_unstable_after_3_attempts"
-        )
-        return None, projection
-
-    projection["ledger_projection_source_file_count"] = len(opened)
-    projection["ledger_projection_source_bytes"] = sum(item[4] for item in opened)
     projection_rows: list[dict[str, Any]] = []
     malformed_line_count = 0
     source_error: str | None = None
@@ -832,8 +757,10 @@ def _streaming_prefix_rows(
                 partition = str(lineage["partition"])
                 reason = str(lineage["reason"])
         except (TypeError, ValueError) as exc:
-            source_error = f"candidate_evidence_read_error:{type(exc).__name__}"
-            return
+            raise LedgerScanError(
+                f"CANDIDATE_EVIDENCE_READ_{type(exc).__name__.upper()}",
+                path=path,
+            ) from exc
         if partition == "QUALIFIED":
             projection["qualified_lineage_outcome_row_count"] = int(
                 projection.get("qualified_lineage_outcome_row_count") or 0
@@ -849,53 +776,27 @@ def _streaming_prefix_rows(
             ) + 1
             reasons[reason] = reasons.get(reason, 0) + 1
 
+    def admitted(sources: tuple[Any, ...]) -> None:
+        projection["ledger_projection_source_file_count"] = len(sources)
+        projection["ledger_projection_source_bytes"] = sum(
+            source.admitted_prefix_size for source in sources
+        )
+
     try:
-        for source, handle, expected_dev, expected_ino, expected_size in opened:
-            remaining = expected_size
-            buffer = b""
-            while remaining > 0:
-                chunk = handle.read(min(STREAMING_LEDGER_CHUNK_BYTES, remaining))
-                if not chunk:
-                    source_error = f"short_read:{source.name}"
-                    break
-                remaining -= len(chunk)
-                buffer += chunk
-                if len(buffer) > MAX_STREAMING_LEDGER_LINE_BYTES and b"\n" not in buffer:
-                    source_error = f"ledger_line_too_large:{source.name}"
-                    break
-                lines = buffer.split(b"\n")
-                buffer = lines.pop()
-                for raw_line in lines:
-                    line = raw_line.strip()
-                    if not line:
-                        continue
-                    try:
-                        row = json.loads(line)
-                    except (UnicodeDecodeError, json.JSONDecodeError):
-                        malformed_line_count += 1
-                        continue
-                    if not isinstance(row, dict):
-                        malformed_line_count += 1
-                        continue
-                    consume(row)
-                if source_error is not None:
-                    break
-            if source_error is not None:
-                break
-            if buffer.strip():
-                source_error = f"partial_jsonl_prefix:{source.name}"
-                break
-            after = os.fstat(handle.fileno())
-            if (
-                after.st_dev != expected_dev
-                or after.st_ino != expected_ino
-                or after.st_size < expected_size
-            ):
-                source_error = f"retained_ledger_prefix_changed:{source.name}"
-                break
-    finally:
-        for _source, handle, _dev, _ino, _size in opened:
-            handle.close()
+        scan_retained_jsonl(path, consume, on_admitted=admitted)
+    except LedgerScanError as exc:
+        source_error = str(exc)
+        if any(
+            code in exc.code
+            for code in (
+                "MALFORMED_JSON",
+                "NON_OBJECT_ROW",
+                "INVALID_UTF8",
+                "PARTIAL_LINE",
+                "LINE_OVERSIZED",
+            )
+        ):
+            malformed_line_count = 1
 
     projection["ledger_malformed_line_count"] = malformed_line_count
     projection["ledger_source_error"] = source_error
@@ -956,151 +857,19 @@ def _finalize_ledger_summary(summary: dict[str, Any]) -> dict[str, Any]:
 def _capture_retained_ledger_snapshot(
     path: Path,
 ) -> tuple[tuple[dict[str, Any], ...], int, str | None, bool]:
-    """Capture one generation-stable retained+active ledger snapshot.
-
-    The tuple is the sole parsed-row generation consumed by both raw status
-    audit and candidate-evidence projection.  Malformed/non-object lines stay
-    out of the row tuple but are preserved as corruption audit.  Enumeration,
-    opened-fd identity, pre/post-read metadata, and post-read enumeration must
-    match exactly; transient rotation/append drift retries at most three times.
-    """
-
-    def enumerate_generation() -> tuple[
-        tuple[str, int, int, int, int, int, int], ...
-    ]:
-        identities: list[tuple[str, int, int, int, int, int, int]] = []
-        for position, source_path in enumerate(retained_ledger_files(path)):
-            stat_result = source_path.stat()
-            identities.append(
-                (
-                    str(source_path),
-                    position,
-                    stat_result.st_dev,
-                    stat_result.st_ino,
-                    stat_result.st_size,
-                    stat_result.st_mtime_ns,
-                    stat_result.st_ctime_ns,
-                )
-            )
-        return tuple(identities)
-
-    def fd_identity(
-        source_path: str,
-        position: int,
-        stat_result: os.stat_result,
-    ) -> tuple[str, int, int, int, int, int, int]:
-        return (
-            source_path,
-            position,
-            stat_result.st_dev,
-            stat_result.st_ino,
-            stat_result.st_size,
-            stat_result.st_mtime_ns,
-            stat_result.st_ctime_ns,
-        )
-
-    stable_sources: tuple[tuple[str, bytes], ...] | None = None
-    stable_generation: tuple[
-        tuple[str, int, int, int, int, int, int], ...
-    ] = ()
-    for _attempt in range(3):
-        try:
-            initial_generation = enumerate_generation()
-        except FileNotFoundError:
-            continue
-        except OSError as exc:
-            return (), 0, f"read_error:{type(exc).__name__}", True
-
-        captured_sources: list[tuple[str, bytes]] = []
-        generation_drifted = False
-        for expected_identity in initial_generation:
-            source_path_text, position, *_ = expected_identity
-            source_path = Path(source_path_text)
-            try:
-                with source_path.open("rb") as handle:
-                    opened_identity = fd_identity(
-                        source_path_text,
-                        position,
-                        os.fstat(handle.fileno()),
-                    )
-                    if opened_identity != expected_identity:
-                        generation_drifted = True
-                        break
-                    captured_bytes = handle.read()
-                    post_read_identity = fd_identity(
-                        source_path_text,
-                        position,
-                        os.fstat(handle.fileno()),
-                    )
-            except FileNotFoundError:
-                generation_drifted = True
-                break
-            except OSError as exc:
-                return (
-                    (),
-                    0,
-                    f"read_error:{source_path.name}:{type(exc).__name__}",
-                    True,
-                )
-            if (
-                post_read_identity != expected_identity
-                or len(captured_bytes) != expected_identity[4]
-            ):
-                generation_drifted = True
-                break
-            captured_sources.append((source_path_text, captured_bytes))
-        if generation_drifted:
-            continue
-
-        try:
-            post_read_generation = enumerate_generation()
-        except FileNotFoundError:
-            continue
-        except OSError as exc:
-            return (), 0, f"read_error:{type(exc).__name__}", True
-        if post_read_generation != initial_generation:
-            continue
-        stable_generation = initial_generation
-        stable_sources = tuple(captured_sources)
-        break
-
-    if stable_sources is None:
-        return (
-            (),
-            0,
-            "retained_ledger_generation_unstable_after_3_attempts",
-            True,
-        )
-    if not stable_generation:
-        return (), 0, None, False
-
+    """Compatibility snapshot backed by the shared exact-prefix scanner."""
     rows: list[dict[str, Any]] = []
-    malformed_line_count = 0
-    source_error: str | None = None
-    for source_path_text, captured_bytes in stable_sources:
-        source_path = Path(source_path_text)
-        try:
-            captured_text = captured_bytes.decode("utf-8")
-        except UnicodeDecodeError:
-            malformed_line_count += 1
-            source_error = f"invalid_utf8:{source_path.name}"
-            continue
-        for line_no, raw_line in enumerate(captured_text.splitlines(), start=1):
-            line = raw_line.strip()
-            if not line:
-                continue
-            try:
-                row = json.loads(line)
-            except json.JSONDecodeError:
-                malformed_line_count += 1
-                source_error = f"malformed_jsonl_line:{source_path.name}:{line_no}"
-                continue
-            if not isinstance(row, dict):
-                malformed_line_count += 1
-                source_error = f"non_object_jsonl_line:{source_path.name}:{line_no}"
-                continue
-            rows.append(row)
-    return tuple(rows), malformed_line_count, source_error, True
+    source_present = False
+
+    def admitted(sources: tuple[Any, ...]) -> None:
+        nonlocal source_present
+        source_present = bool(sources)
+
+    try:
+        scan_retained_jsonl(path, rows.append, on_admitted=admitted)
+    except LedgerScanError as exc:
+        return (), 1, str(exc), True
+    return tuple(rows), 0, None, source_present
 
 
 def summarize_cost_gate_learning_lane_ledger(path: Path) -> dict[str, Any]:
@@ -2417,6 +2186,24 @@ def _activation_decision(
             "missing_links": ["candidate_matched_fill_fee_slippage_lineage"],
             "next_actions": [
                 "repair_or_quarantine_proof_excluded_fill_lineage_before_any_cost_gate_or_promotion_review"
+            ],
+        }
+
+    if (
+        ledger_status == "QUALIFIED_LINEAGE_REVIEW_PROJECTION_REQUIRED"
+        or review_status == "QUALIFIED_LINEAGE_REVIEW_PROJECTION_REQUIRED"
+    ):
+        return {
+            "status": "QUALIFIED_LINEAGE_REVIEW_PROJECTION_REQUIRED",
+            "reason": (
+                "qualified_blocked_signal_outcomes_require_review_and_"
+                "candidate_board_projection"
+            ),
+            "missing_links": [
+                "completed_blocked_signal_outcome_review_and_candidate_board_projection"
+            ],
+            "next_actions": [
+                "run_cost_gate_outcome_review_for_candidate_board_projection"
             ],
         }
 

@@ -891,6 +891,7 @@ review_rc=0
 candidate_board_publish_rc=0
 candidate_board_publish_status="PENDING"
 candidate_board_publish_skip_reason=""
+review_completion_state=""
 false_negative_candidate_packet_rc=0
 false_negative_operator_review_rc=0
 learning_ssot_decision_rc=0
@@ -981,6 +982,33 @@ else
         export PYTHONDONTWRITEBYTECODE=1
         run_cost_stage "$PYBIN" "${REVIEW_ARGS[@]}"
     ) >> "$LOG" 2>&1 || review_rc=$?
+    if [[ "$review_rc" == "0" && -f "$REVIEW_OUT" ]]; then
+        review_completion_state="$("$PYBIN" - "$REVIEW_OUT" <<'PY' 2>/dev/null || true
+import json
+import sys
+from pathlib import Path
+
+try:
+    payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+    print("INVALID")
+    raise SystemExit(0)
+board = payload.get("learning_candidate_board") if isinstance(payload, dict) else None
+complete = bool(
+    payload.get("candidate_board_generation_state") == "COMPLETE"
+    and payload.get("ledger_scan_status") == "COMPLETE"
+    and isinstance(board, dict)
+    and board.get("candidate_universe_complete") is True
+    and isinstance(board.get("candidate_rows"), list)
+)
+print("COMPLETE" if complete else "INCOMPLETE")
+PY
+)"
+        if [[ "$review_completion_state" != "COMPLETE" ]]; then
+            review_rc=75
+            echo "[$(ts)] ERROR: outcome review lacked explicit COMPLETE candidate universe; preserving existing latest and consumer board" >> "$LOG"
+        fi
+    fi
     if [[ "$review_rc" == "0" && -f "$REVIEW_OUT" ]]; then
         candidate_board_publish_status="DEFERRED_PENDING_RUN_COMPLETION"
         candidate_board_publish_skip_reason=""
@@ -1371,7 +1399,7 @@ fi
 # a kill after its atomic link can only expose a candidate whose COMPLETE
 # manifest was already durable.
 guard_complete_args=()
-if [[ "$review_rc" == "0" && "$candidate_board_publish_status" == "DEFERRED_PENDING_RUN_COMPLETION" && -f "$REVIEW_OUT" ]]; then
+if [[ "$review_rc" == "0" && "$review_completion_state" == "COMPLETE" && "$candidate_board_publish_status" == "DEFERRED_PENDING_RUN_COMPLETION" && -f "$REVIEW_OUT" ]]; then
     guard_complete_args+=(--completion-path "$REVIEW_OUT")
 fi
 guard_complete_rc=0
@@ -1388,7 +1416,7 @@ fi
 # Candidate rendezvous is the final heavy consumer-visible mutation in the run.
 if [[ "$candidate_board_publish_status" == "DEFERRED_PENDING_RUN_COMPLETION" ]]; then
     guard_state_status="$(_research_guard_state_status 2>/dev/null || true)"
-    if [[ "$guard_complete_rc" == "0" && "$guard_state_status" == "COMPLETE" && "$review_rc" == "0" && -f "$REVIEW_OUT" ]]; then
+    if [[ "$guard_complete_rc" == "0" && "$guard_state_status" == "COMPLETE" && "$review_completion_state" == "COMPLETE" && "$review_rc" == "0" && -f "$REVIEW_OUT" ]]; then
         (
             cd "$BASE"
             export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
