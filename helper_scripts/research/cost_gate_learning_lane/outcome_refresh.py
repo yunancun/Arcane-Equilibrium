@@ -37,6 +37,10 @@ from cost_gate_learning_lane.candidate_evaluation_producer import (
     outcome_subtype_semantics_valid,
     partition_candidate_evaluation_outcomes,
 )
+from cost_gate_learning_lane.candidate_evaluation_cold_source import (
+    DEFAULT_GIT_ANCESTRY_RESOLVER,
+    build_pre_capability_source_provider,
+)
 from cost_gate_learning_lane.outcome_writer import (
     ProbeOutcomeConfig,
     build_blocked_signal_outcome_records,
@@ -1330,6 +1334,10 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=DEFAULT_OUTCOME_REFRESH_BATCH_LIMIT,
     )
+    parser.add_argument(
+        "--enable-pre-capability-candidate-evaluation-source",
+        action="store_true",
+    )
     parser.add_argument("--print-json", action="store_true")
     return parser
 
@@ -1393,6 +1401,11 @@ def main() -> int:
         price_rows = read_source_price_rows(args.source_prices)
         price_source = "local_price_file"
 
+    candidate_evaluation_source_provider = (
+        build_pre_capability_source_provider(DEFAULT_GIT_ANCESTRY_RESOLVER)
+        if args.enable_pre_capability_candidate_evaluation_source
+        else None
+    )
     batch = build_cost_gate_outcome_refresh_batch(
         ledger_rows,
         price_rows,
@@ -1400,6 +1413,9 @@ def main() -> int:
         selection=selection,
         outcome_cfg=outcome_cfg,
         price_source=price_source,
+        candidate_evaluation_source_provider=(
+            candidate_evaluation_source_provider
+        ),
     )
     _attach_projection_accounting(batch, projection)
     if args.source_pg:

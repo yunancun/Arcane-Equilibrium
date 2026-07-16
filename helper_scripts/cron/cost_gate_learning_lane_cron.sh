@@ -624,6 +624,7 @@ REFRESH_ARGS=(
     --max-entry-delay-ms "$MAX_ENTRY_DELAY_MS"
     --pg-timeframe "$PG_TIMEFRAME"
     --pg-statement-timeout-ms "$PG_STATEMENT_TIMEOUT_MS"
+    --enable-pre-capability-candidate-evaluation-source
     --output "$REFRESH_OUT"
 )
 if [[ "$APPEND_OUTCOMES" == "1" ]]; then

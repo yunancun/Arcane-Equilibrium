@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 CRON_DIR = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 WRAPPER = CRON_DIR / "cost_gate_learning_lane_cron.sh"
 INSTALLER = CRON_DIR / "install_cost_gate_learning_lane_cron.sh"
 
@@ -256,6 +257,29 @@ def test_wrapper_readonly_pg_and_artifact_only_status() -> None:
     assert "PYTHONDONTWRITEBYTECODE=1" in src
     assert "artifact_only_readonly_pg_jsonl_ledger_no_order_no_cost_gate_relaxation" in src
     assert src.rstrip().endswith("exit 0")
+
+
+def test_pre_capability_source_opt_in_is_exactly_one_hourly_refresh_arg() -> None:
+    flag = "--enable-pre-capability-candidate-evaluation-source"
+    src = _src(WRAPPER)
+    refresh_start = src.index("REFRESH_ARGS=(")
+    refresh_end = src.index(
+        '\n)\nif [[ "$APPEND_OUTCOMES" == "1" ]]',
+        refresh_start,
+    )
+
+    assert src.count(flag) == 1
+    assert flag in src[refresh_start:refresh_end]
+    for path in (
+        REPO_ROOT / "helper_scripts/research/cost_gate_learning_lane"
+    ).glob("*.py"):
+        if path.name == "outcome_refresh.py":
+            continue
+        assert flag not in _src(path), path
+    for path in CRON_DIR.glob("*.sh"):
+        if path == WRAPPER:
+            continue
+        assert flag not in _src(path), path
 
 
 def test_wrapper_marks_cron_oom_victim_after_lock() -> None:

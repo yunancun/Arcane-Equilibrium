@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import datetime as dt
+import json
 import subprocess
 
 import pytest
@@ -280,6 +281,7 @@ def _assert_telemetry_conservation(partition: dict) -> None:
 
 
 _PRE_CAPABILITY_BUILD_GIT_SHA = "0a4d38ee08f93e9cb3a3bae7160f86fe1716297d"
+_REWRITTEN_CAPABILITY_GIT_SHA = "0c7c6b23954d14b44e6552ccb24a978e40d9cf6e"
 _DESCENDANT_BUILD_GIT_SHA = "94380563f1e3b72875d166fca4f22af6e37f90d9"
 _DIVERGENT_BUILD_GIT_SHA = "f" * 40
 _UNKNOWN_BUILD_GIT_SHA = "e" * 40
@@ -536,10 +538,203 @@ def test_pre_capability_marker_revalidates_through_existing_append_guard(
     assert len(runner.calls) == 1
 
 
+def _run_outcome_refresh_cli(
+    tmp_path,
+    monkeypatch,
+    *,
+    context_id: str,
+    enable_pre_capability_source: bool,
+) -> tuple[dict, bytes, bytes]:
+    event = _raw_valid_reject_event(
+        context_id,
+        strategy_version=_PRE_CAPABILITY_BUILD_GIT_SHA,
+    )
+    event_time = dt.datetime.fromtimestamp(
+        event["ts_ms"] / 1_000,
+        tz=dt.timezone.utc,
+    )
+    admission = build_ledger_record(
+        evaluate_probe_admission(
+            _minimal_plan(event),
+            event,
+            now_utc=event_time,
+            adapter_enabled=False,
+        )
+    )
+    ledger_path = tmp_path / f"{context_id}-ledger.jsonl"
+    prices_path = tmp_path / f"{context_id}-prices.json"
+    output_path = tmp_path / f"{context_id}-refresh.json"
+    append_jsonl_ledger(ledger_path, admission)
+    before_bytes = ledger_path.read_bytes()
+    prices_path.write_text(
+        json.dumps(_price_rows(event), sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    now = dt.datetime.combine(
+        event_time.date() + dt.timedelta(days=1),
+        dt.time(0, 1),
+        tzinfo=dt.timezone.utc,
+    )
+    argv = [
+        "outcome_refresh.py",
+        "--ledger",
+        str(ledger_path),
+        "--source-prices",
+        str(prices_path),
+        "--record-blocked-outcomes",
+        "--append-ledger",
+        "--output",
+        str(output_path),
+    ]
+    if enable_pre_capability_source:
+        argv.append("--enable-pre-capability-candidate-evaluation-source")
+    monkeypatch.setattr(outcome_refresh_module, "_utc_now", lambda: now)
+    monkeypatch.setattr("sys.argv", argv)
+
+    assert outcome_refresh_module.main() == 0
+    return (
+        json.loads(output_path.read_text(encoding="utf-8")),
+        before_bytes,
+        ledger_path.read_bytes(),
+    )
+
+
+def test_outcome_refresh_cli_defaults_to_defer_without_pre_capability_opt_in(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    batch, before_bytes, after_bytes = _run_outcome_refresh_cli(
+        tmp_path,
+        monkeypatch,
+        context_id="ctx-cold-cli-default-defer",
+        enable_pre_capability_source=False,
+    )
+
+    assert batch["candidate_evaluation_deferred_count"] == 1
+    assert batch["candidate_evaluation_not_applicable_count"] == 0
+    assert batch["candidate_evaluation_batch_deferred"] is True
+    assert batch["outcomes"] == []
+    assert batch["appended_outcome_count"] == 0
+    assert after_bytes == before_bytes
+
+
+def test_outcome_refresh_cli_opt_in_terminalizes_and_append_reuses_cache(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    resolver, runner = _resolver(tmp_path)
+    monkeypatch.setattr(
+        outcome_refresh_module,
+        "DEFAULT_GIT_ANCESTRY_RESOLVER",
+        resolver,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        candidate_producer_module,
+        "_DEFAULT_ANCESTRY_RESOLVER",
+        resolver,
+    )
+
+    batch, before_bytes, after_bytes = _run_outcome_refresh_cli(
+        tmp_path,
+        monkeypatch,
+        context_id="ctx-cold-cli-opt-in-terminal",
+        enable_pre_capability_source=True,
+    )
+
+    assert batch["candidate_evaluation_deferred_count"] == 0
+    assert batch["candidate_evaluation_not_applicable_count"] == 1
+    assert batch["candidate_evaluation_batch_deferred"] is False
+    assert batch["outcome_count"] == 1
+    assert batch["appended_outcome_count"] == 1
+    marker = batch["outcomes"][0]["candidate_summary"][
+        "candidate_evaluation_source_unavailability"
+    ]
+    assert marker["build_git_sha"] == _PRE_CAPABILITY_BUILD_GIT_SHA
+    assert marker["capability_introduced_at_git_sha"] == (
+        CANDIDATE_EVALUATION_SOURCE_CAPABILITY_GIT_SHA
+    )
+    assert after_bytes.startswith(before_bytes)
+    assert after_bytes != before_bytes
+    assert len(runner.calls) == 1
+
+
+def test_pre_capability_provider_mixed_old_and_unknown_is_atomic(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    old_event = _raw_valid_reject_event(
+        "ctx-cold-mixed-old-lineage",
+        strategy_version=_PRE_CAPABILITY_BUILD_GIT_SHA,
+    )
+    unknown_event = _raw_valid_reject_event(
+        "ctx-cold-mixed-unknown-lineage",
+        strategy_version=_UNKNOWN_BUILD_GIT_SHA,
+    )
+    event_time = dt.datetime.fromtimestamp(
+        old_event["ts_ms"] / 1_000,
+        tz=dt.timezone.utc,
+    )
+    ledger_path = tmp_path / "mixed-old-unknown-ledger.jsonl"
+    for event in (old_event, unknown_event):
+        append_jsonl_ledger(
+            ledger_path,
+            build_ledger_record(
+                evaluate_probe_admission(
+                    _minimal_plan(event),
+                    event,
+                    now_utc=event_time,
+                    adapter_enabled=False,
+                )
+            ),
+        )
+    before_bytes = ledger_path.read_bytes()
+    resolver, runner = _resolver(
+        tmp_path,
+        returncodes={
+            _PRE_CAPABILITY_BUILD_GIT_SHA: 0,
+            _UNKNOWN_BUILD_GIT_SHA: 128,
+        },
+    )
+    monkeypatch.setattr(
+        candidate_producer_module,
+        "_DEFAULT_ANCESTRY_RESOLVER",
+        resolver,
+    )
+    now = dt.datetime.combine(
+        event_time.date() + dt.timedelta(days=1),
+        dt.time(0, 1),
+        tzinfo=dt.timezone.utc,
+    )
+
+    batch = refresh_cost_gate_outcomes_from_price_rows(
+        ledger_path,
+        _price_rows(old_event),
+        now_utc=now,
+        selection=OutcomeRefreshSelection(record_blocked_outcomes=True),
+        outcome_cfg=ProbeOutcomeConfig(horizon_minutes=60, cost_bps=4.0),
+        append_ledger=True,
+        candidate_evaluation_source_provider=(
+            build_pre_capability_source_provider(resolver)
+        ),
+    )
+
+    assert batch["generated_outcome_count"] == 2
+    assert batch["candidate_evaluation_eligible_count"] == 1
+    assert batch["candidate_evaluation_deferred_count"] == 1
+    assert batch["candidate_evaluation_not_applicable_count"] == 1
+    assert batch["candidate_evaluation_batch_deferred"] is True
+    assert batch["outcomes"] == []
+    assert batch["appended_outcome_count"] == 0
+    assert ledger_path.read_bytes() == before_bytes
+    assert len(runner.calls) == 2
+
+
 @pytest.mark.parametrize(
     ("build_git_sha", "returncode"),
     [
         (CANDIDATE_EVALUATION_SOURCE_CAPABILITY_GIT_SHA, 0),
+        (_REWRITTEN_CAPABILITY_GIT_SHA, 1),
         (_DESCENDANT_BUILD_GIT_SHA, 1),
         (_DIVERGENT_BUILD_GIT_SHA, 1),
         (_UNKNOWN_BUILD_GIT_SHA, 128),
