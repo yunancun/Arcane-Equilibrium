@@ -25,6 +25,7 @@ from cost_gate_learning_lane import runtime_adapter as runtime_adapter_module
 from cost_gate_learning_lane.outcome_review import (
     build_blocked_signal_outcome_review,
     build_research_compatibility_blocked_signal_outcome_review_no_authority,
+    read_candidate_board_ledger_projection,
 )
 from cost_gate_learning_lane.candidate_board_validation import (
     validate_learning_candidate_board_v2,
@@ -72,6 +73,24 @@ def _qualified(
         as_of_utc_date=NOW.date().isoformat(),
         **kwargs,
     )
+
+
+def _ledger_source_row(row: dict[str, object]) -> dict[str, object]:
+    source = copy.deepcopy(row)
+    context = copy.deepcopy(
+        source["candidate_summary"]["candidate_event_context"]
+    )
+    source["event"] = {
+        "strategy_name": context["strategy_name"],
+        "symbol": context["symbol"],
+        "side": context["side"],
+        "context_id": context["context_id"],
+        "signal_id": context["signal_id"],
+        "engine_mode": context["evidence_engine_mode"],
+        "ts_ms": context["captured_at_ms"],
+        "candidate_event_context": context,
+    }
+    return source
 
 
 def _board(rows: list[dict[str, object]]) -> dict[str, object]:
@@ -1326,6 +1345,100 @@ def test_multi_cohort_unqualified_attribution_can_exceed_unique_conflict_count()
         assert candidate["qualified_evaluator_input_count"] == 0
         assert candidate["conflicting_event_hash_row_count"] == 2
         assert candidate["duplicate_event_hash_cohort_conflict_row_count"] == 2
+
+
+def test_disk_projection_matches_list_duplicate_addressability(
+    tmp_path,
+) -> None:
+    first = _qualified(context_id="ctx-disk-projection-addressability")
+    second = _qualified(
+        context_id="ctx-disk-projection-addressability",
+        stable_projection_overrides={
+            "portfolio": {"beta_to_portfolio": "0.75"},
+            "context_hashes": {"portfolio": "7" * 64},
+        },
+    )
+    raw_only = copy.deepcopy(first)
+    for field in (
+        "candidate_evaluation_context",
+        "candidate_evaluation_context_status",
+        "candidate_learning_context_projection",
+    ):
+        raw_only["candidate_summary"].pop(field)
+    invalid_family = copy.deepcopy(first)
+    invalid_family["candidate_summary"]["candidate_evaluation_context"][
+        "identity"
+    ]["symbol"] = "ETHUSDT"
+    source_rows = [
+        _ledger_source_row(row)
+        for row in (raw_only, second, invalid_family, first)
+    ]
+    projected_rows = runtime_adapter_module.project_candidate_evidence_rows(
+        source_rows
+    )
+    expected = build_blocked_signal_outcome_review(
+        projected_rows,
+        now_utc=NOW,
+        source_ledger_row_count=len(source_rows),
+    )
+    ledger = tmp_path / "projection-parity.jsonl"
+    ledger.write_text(
+        "".join(json.dumps(row) + "\n" for row in source_rows),
+        encoding="utf-8",
+    )
+
+    with read_candidate_board_ledger_projection(ledger) as projection:
+        actual = build_blocked_signal_outcome_review(
+            projection.rows,
+            now_utc=NOW,
+            source_ledger_row_count=projection.source_ledger_row_count,
+        )
+
+    assert actual == expected
+    board = actual["learning_candidate_board"]
+    assert board["raw_blocked_outcome_row_count"] == 4
+    assert board["qualified_lineage_outcome_row_count"] == 2
+    assert board["unqualified_lineage_outcome_row_count"] == 1
+    assert board["invalid_lineage_outcome_row_count"] == 1
+    assert board["conflicting_duplicate_event_hash_row_count"] == 4
+    assert board["conflicting_duplicate_event_hash_attribution_row_count"] == 6
+
+
+def test_disk_projection_preserves_current_exact_invalid_seed(
+    tmp_path,
+) -> None:
+    invalid_exact = _qualified(
+        context_id="ctx-disk-projection-current-exact"
+    )
+    invalid_exact["side_cell_key"] = "ma_crossover|BTCUSDT|Sell"
+    source_rows = [_ledger_source_row(invalid_exact)]
+    projected_rows = runtime_adapter_module.project_candidate_evidence_rows(
+        source_rows
+    )
+    expected = build_blocked_signal_outcome_review(
+        projected_rows,
+        now_utc=NOW,
+        source_ledger_row_count=1,
+    )
+    ledger = tmp_path / "current-exact-seed.jsonl"
+    ledger.write_text(json.dumps(source_rows[0]) + "\n", encoding="utf-8")
+
+    with read_candidate_board_ledger_projection(ledger) as projection:
+        actual = build_blocked_signal_outcome_review(
+            projection.rows,
+            now_utc=NOW,
+            source_ledger_row_count=projection.source_ledger_row_count,
+        )
+
+    assert actual == expected
+    board = actual["learning_candidate_board"]
+    assert board["qualified_lineage_outcome_row_count"] == 0
+    assert board["invalid_exact_cohort_row_count"] == 1
+    assert len(board["candidate_rows"]) == 1
+    assert (
+        board["candidate_rows"][0]["invalid_lineage_exact_cohort_row_count"]
+        == 1
+    )
 
 
 def test_addressable_invalid_copy_participates_in_event_hash_conflict_gate() -> None:
