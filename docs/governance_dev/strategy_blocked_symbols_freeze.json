@@ -48,5 +48,5 @@
       "freeze_basis": "Existing MA per-strategy blocklist including P1-EDGE-1 LABUSDT. No additional MA block is allowed without the policy evidence above."
     }
   },
-  "counterfactual_report": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-09--p2_audit_verify_5_blocked_symbols_freeze.md"
+  "counterfactual_report": "docs/CCAgentWorkSpace/PM/workspace/reports/archive/2026-05-09--p2_audit_verify_5_blocked_symbols_freeze.md"
 }
