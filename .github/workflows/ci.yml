@@ -16,6 +16,10 @@ on:
     branches:
       - main
   pull_request:
+    # R9 教訓搭車(W5-S2 順手):默認 types 不含 ready_for_review——draft-gated job
+    # (rust-check-macos 掛 draft==false)在 undraft 時不會自動補跑;顯式列 types 使
+    # undraft 觸發新一輪 CI。
+    types: [opened, synchronize, reopened, ready_for_review]
   schedule:
     - cron: '0 3 * * 1'  # 每週一 03:00 UTC（北京 11:00）
 
