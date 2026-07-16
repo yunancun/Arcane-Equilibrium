@@ -74,6 +74,21 @@ def test_stock_etf_gate_covers_ibkr_and_rust_lane_sources() -> None:
         assert classify_paths([path])["stock_etf"] is True, path
 
 
+def test_stock_etf_gate_covers_ibkr_ci_audit_scripts() -> None:
+    # W5-S0(R8 審計洞①):三個 nm 審計腳本自身被改的 PR 必須觸發 rust-ibkr-tests
+    # (只點亮 stock_etf,不誤點其他 gate)——否則掏空審計可靜默 merge。
+    for path in (
+        "helper_scripts/ci/ibkr_g4_symbol_audit.sh",
+        "helper_scripts/ci/ibkr_fake_tws_absence_audit.sh",
+        "helper_scripts/ci/ibkr_driver_absence_audit.sh",
+    ):
+        result = classify_paths([path])
+        assert result["stock_etf"] is True, path
+        assert all(
+            enabled is False for gate, enabled in result.items() if gate != "stock_etf"
+        ), path
+
+
 def test_governance_gate_covers_direct_policy_and_adapter_inputs() -> None:
     for path in (
         "helper_scripts/maintenance_scripts/deploy_intent_adapter.py",

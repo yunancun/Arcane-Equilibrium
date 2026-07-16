@@ -116,7 +116,8 @@ jobs:
           python3 -m pytest -q \
             tests/structure/test_git_loop_guard.py \
             tests/ci/test_classify_ci_changes.py \
-            tests/ci/test_github_ci_workflow_static.py
+            tests/ci/test_github_ci_workflow_static.py \
+            tests/ci/test_ci_workflow_ibkr_job_static.py
 
   # Development-agent governance and the V158/V159 migration source contracts use
   # stdlib + focused pytest only. Keep them on the Linux 1x runner so static
@@ -208,9 +209,12 @@ jobs:
 
   rust-check-macos:
     name: rust check (aarch64-apple-darwin)
-    # macOS 10x 計費倍率：push 事件跳過，僅 PR / schedule 觸發
+    # macOS 10x 計費倍率：push 事件跳過，僅 PR / schedule 觸發。
+    # W5-S0 ⑤（loop v2 S4 draft 閘）：draft PR 不燒 macOS 10x，ready-for-review 才跑；
+    # schedule 事件無 pull_request payload（draft 表達式為空 ≠ false），必須以
+    # event_name 守衛疊加，否則週一 macOS smoke 會被一併關掉。
     needs: changes
-    if: github.event_name != 'push' && needs.changes.outputs.rust == 'true'
+    if: github.event_name != 'push' && needs.changes.outputs.rust == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     runs-on: macos-latest
     timeout-minutes: 20
     defaults:
@@ -450,7 +454,9 @@ jobs:
           python-version: '3.12'
       - name: Install pytest
         # pytest-asyncio 供 repo 根 pytest.ini 的 asyncio_mode=strict（否則發 unknown-ini 警告）。
-        run: pip install pytest pytest-asyncio
+        # fastapi/httpx/slowapi 供 W4 connection-health lockstep 套件（route fixtures 走
+        # FastAPI TestClient + app.main_legacy 的 slowapi Limiter）——最小集已本地空 venv 實證。
+        run: pip install pytest pytest-asyncio fastapi httpx slowapi
       - name: Run stock_etf static-guard tests
         run: |
           python -m pytest -q \
@@ -466,6 +472,24 @@ jobs:
           python -m pytest -q \
             tests/structure/test_stock_etf_*.py \
             tests/structure/test_ibkr_*.py
+      - name: Run W4 connection-health lockstep / parity / tripwire tests
+        # W5-S0 ③(c)（R8 審計洞③）：W4 lockstep 套件（routes 三層/tripwire + cross-surface
+        # parity/superset）入 hosted CI——單改 Rust emitter 的 PR 由 stock_etf gate 觸發本
+        # job，破 lockstep 即紅。**執行計數證明**（R1 教訓：字面 filter 空轉）：先
+        # --collect-only 斷言收集數 ≥ 10（2026-07-16 落地時為 15），空轉即紅；pytest 對
+        # 空集合 exit 5 為第二道兜底。
+        run: |
+          set -euo pipefail
+          suite="program_code/exchange_connectors/bybit_connector/control_api_v1/tests"
+          collected=$(python -m pytest -q --collect-only \
+            "$suite"/test_stock_etf_connection_health_routes.py \
+            "$suite"/test_stock_etf_connection_health_cross_surface_parity.py \
+            | grep -c '::')
+          echo "connection-health collected tests: $collected"
+          test "$collected" -ge 10
+          python -m pytest -q \
+            "$suite"/test_stock_etf_connection_health_routes.py \
+            "$suite"/test_stock_etf_connection_health_cross_surface_parity.py
 
   # IBKR lane Rust 測試 + G4 symbol audit（W-CI：IBKR-CI-1 / IBKR-CI-2，出典 IBKR_TODO §5）。
   # 缺口：rust-check-linux 只跑 cargo check，37 個 openclaw_types ibkr_*/stock_etf_*
@@ -510,6 +534,10 @@ jobs:
       - name: Run openclaw_engine seal CLI bin tests
         # ibkr_phase2_seal bin 的 2 個 CLI test fn 名不含 ibkr，唯有按 bin target 才會執行。
         run: cargo test -p openclaw_engine --bin ibkr_phase2_seal
+      - name: Run openclaw_fake_tws unit tests
+        # W5-S0 ④：fake crate 9 個 unit test 原不在任何 CI scope（dev-dep-only crate，
+        # engine 的 --lib/--bin target 不會帶入）；按 package 直跑補上。
+        run: cargo test -p openclaw_fake_tws
       - name: Run the IBKR G4 symbol audit against the default debug build
         # 斷言效期綁 W3 build-posture 重裁：若重裁採「能力進 default build」方案，
         # 必須在同一 PR 內把本斷言改版為「connect 路徑必經 envelope 驗證」類負面斷言；

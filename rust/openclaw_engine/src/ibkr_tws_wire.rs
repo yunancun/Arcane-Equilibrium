@@ -20,15 +20,22 @@
 //! 硬邊界：
 //!   - **無 socket**:本檔零 `TcpStream::connect`（S1 CC 約束;TCP factory 是 S2+ 的
 //!     `ibkr_transport_tcp` feature 事)。`with_timeout` 只包既有 future,不自建 I/O。
-//!   - **DCE 姿態繼承 B1**:整個 IBKR TWS 連接器面在 default build **零 production caller →
-//!     被 linker DCE**(這正是 `helper_scripts/ci/ibkr_g4_symbol_audit.sh` nm 驗證的安全屬性)。
-//!     故本模塊如 B1(line 49)一律 `#![allow(dead_code)]`——非「藏 orphan」:codec 有 B1
-//!     driver + 26 測試真消費,`FrameReader`/`TimeoutPolicy`/分類器有本檔測試消費 + 標
-//!     `TODO(S2)` 的 session driver 未來消費;module 在 default build dead 是**設計使然**。
+//!   - **DCE 姿態（W4 起更新;W5-S0 comment-only 修正）**:W3 時代「整面零 production
+//!     caller → 全面 DCE」已過時——W4 health emitter
+//!     （`ipc_server/handlers/stock_etf/health_summary.rs`）是 `TwsSessionManager` 的首個
+//!     production caller,session/pacing 面已移出 DCE;本 wire 面經 manager 消費的部分可
+//!     隨之鏈入。現行安全屬性=**真 I/O 消費者缺席**:`ibkr_tws_driver`
+//!     （driver/factory/send_framed）在 default build 仍零 production caller → 被 DCE
+//!     （`helper_scripts/ci/ibkr_driver_absence_audit.sh` nm 雙斷言:session 符號 present +
+//!     driver 符號 absent;`ibkr_g4_symbol_audit.sh` 續驗 B1 G4 接觸面缺席）。本模塊
+//!     `#![allow(dead_code)]` 保留——非「藏 orphan」:codec 有 B1 driver + 26 測試真消費,
+//!     `FrameReader`/`TimeoutPolicy`/分類器有本檔測試消費;僅測試消費的面在 default build
+//!     dead 是設計使然。
 //!   - Bybit crypto_perp 不變;無 DB migration;無新契約入 IPC/DB。
 
-// 繼承 B1 的 intentional-DCE 姿態(見 MODULE_NOTE):整個 TWS 連接器面在 default build
-// 無 production caller,由 linker DCE(g4 symbol audit 驗證)。與 B1 line 49 對稱。
+// intentional-DCE 姿態(見 MODULE_NOTE;W4 起僅指真 I/O 面):W4 health emitter 已把
+// session/pacing 接進 production,wire 面部分符號可經 manager 鏈入;driver(真 I/O
+// 消費者)仍零 production caller,由 driver-absence audit nm 驗證。與 B1 line 49 對稱。
 #![allow(dead_code)]
 
 use std::collections::VecDeque;
