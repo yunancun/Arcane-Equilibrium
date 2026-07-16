@@ -12,7 +12,7 @@ MODULE_NOTE:
 
 from __future__ import annotations
 
-RUNNER_VERSION = "polymarket_leadlag.v0.15"
+RUNNER_VERSION = "polymarket_leadlag.v0.16"
 REPORT_SCHEMA_VERSION = "polymarket.leadlag_report.v0.15"
 CANDIDATE_REPLAY_SCHEMA_VERSION = "polymarket.leadlag_candidate_replay.v0.1"
 CANDIDATE_REPLAY_SUMMARY_SCHEMA_VERSION = "polymarket.leadlag_candidate_replay_summary.v0.1"

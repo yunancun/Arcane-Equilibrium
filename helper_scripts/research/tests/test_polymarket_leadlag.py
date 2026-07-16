@@ -798,6 +798,133 @@ def test_snapshot_loader_recovers_history_from_mirror_without_duplicate_runs(tmp
     assert meta["duplicate_mirror_run_dirs_skipped"] == 1
 
 
+def test_snapshot_projection_streams_distinct_runs_and_matches_legacy(tmp_path, monkeypatch):
+    volatile = tmp_path / "volatile"
+    mirror = tmp_path / "mirror"
+    start = dt.datetime(2026, 6, 20, 0, 0, tzinfo=dt.timezone.utc)
+    first = _write_run(mirror, "hourly-topn-z", start.isoformat(), [{
+        "market_id": "m1",
+        "question": "Will Bitcoin reach $90000 in June?",
+        "event_title": "Bitcoin price target",
+        "discovery_queries": ["kw:bitcoin price"],
+        "outcome_prices": [0.40, 0.60],
+    }])
+    second = _write_run(
+        volatile,
+        "hourly-topn-a",
+        (start + dt.timedelta(minutes=15)).isoformat(),
+        [{
+            "market_id": "m1",
+            "question": "Will Bitcoin reach $90000 in June?",
+            "event_title": "Bitcoin price target",
+            "discovery_queries": ["kw:bitcoin price"],
+            "outcome_prices": [0.45, 0.55],
+        }],
+    )
+    duplicate = _write_run(
+        mirror,
+        "hourly-topn-a",
+        (start + dt.timedelta(minutes=15)).isoformat(),
+        [{
+            "market_id": "m1",
+            "question": "Will Bitcoin reach $90000 in June?",
+            "event_title": "Bitcoin price target",
+            "discovery_queries": ["kw:bitcoin price"],
+            "outcome_prices": [0.99, 0.01],
+        }],
+    )
+
+    legacy_rows, _legacy_snapshot_meta = harness.load_snapshot_rows_with_mirrors(
+        volatile,
+        mirror_roots=(mirror,),
+        query_set_version="v2",
+        mode="hourly-topn",
+    )
+    legacy_deltas, legacy_delta_meta = harness.build_market_deltas(
+        legacy_rows,
+        allowed_symbols={"BTCUSDT"},
+    )
+    legacy_features = harness.aggregate_features(
+        legacy_deltas,
+        include_source_splits=True,
+    )
+
+    real_read_jsonl = harness._read_jsonl
+    reads: list[Path] = []
+
+    def recording_read_jsonl(path: Path):
+        path = Path(path)
+        reads.append(path)
+        if path == duplicate / "snapshots.jsonl":
+            raise AssertionError("duplicate mirror run must be skipped before row loading")
+        return real_read_jsonl(path)
+
+    monkeypatch.setattr(harness, "_read_jsonl", recording_read_jsonl)
+    projection, meta = harness.load_snapshot_projection_with_mirrors(
+        volatile,
+        mirror_roots=(mirror,),
+        query_set_version="v2",
+        mode="hourly-topn",
+        allowed_symbols={"BTCUSDT"},
+    )
+
+    assert reads == [first / "snapshots.jsonl", second / "snapshots.jsonl"]
+    assert projection["features"] == legacy_features
+    assert projection["delta_meta"] == legacy_delta_meta
+    assert projection["snapshot_rows"] == len(legacy_rows) == 2
+    assert projection["snapshot_distinct_timestamps"] == 2
+    assert projection["delta_rows"] == len(legacy_deltas) == 1
+    assert projection["bucket_delta_counts"] == {BUCKET_PRICE_TARGET: 1}
+    assert meta["distinct_run_dirs"] == 2
+    assert meta["duplicate_mirror_run_dirs_skipped"] == 1
+
+
+def test_runtime_harness_uses_bounded_projection_not_legacy_materializers(
+    tmp_path,
+    monkeypatch,
+):
+    root = tmp_path / "pm"
+    start = dt.datetime(2026, 6, 20, 0, 0, tzinfo=dt.timezone.utc)
+    for i, prob in enumerate((0.40, 0.45, 0.43)):
+        _write_run(root, f"hourly-topn-{i}", (start + dt.timedelta(minutes=15 * i)).isoformat(), [{
+            "market_id": "m1",
+            "question": "Will Bitcoin reach $90000 in June?",
+            "event_title": "Bitcoin price target",
+            "discovery_queries": ["kw:bitcoin price"],
+            "outcome_prices": [prob, 1 - prob],
+        }])
+    prices = tmp_path / "prices.jsonl"
+    with prices.open("w", encoding="utf-8") as fh:
+        for row in _price_rows("BTCUSDT", start, [100.0, 101.0, 102.0, 103.0]):
+            fh.write(json.dumps(row))
+            fh.write("\n")
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("runtime path must not materialize the retained snapshot/delta ledger")
+
+    monkeypatch.setattr(harness, "load_snapshot_rows_with_mirrors", forbidden)
+    monkeypatch.setattr(harness, "build_market_deltas", forbidden)
+    monkeypatch.setattr(harness, "aggregate_features", forbidden)
+    out = tmp_path / "report.json"
+    args = harness._build_arg_parser().parse_args([
+        "--polymarket-root", str(root),
+        "--price-jsonl", str(prices),
+        "--symbols", "BTCUSDT",
+        "--horizons-minutes", "15",
+        "--max-align-lag-minutes", "1",
+        "--out", str(out),
+    ])
+
+    result = harness.run(args)
+
+    report = result["report"]
+    assert out.exists()
+    assert report["counts"]["snapshot_rows"] == 3
+    assert report["counts"]["snapshot_distinct_timestamps"] == 3
+    assert report["counts"]["delta_rows"] == 2
+    assert report["counts"]["bucket_delta_counts"] == {BUCKET_PRICE_TARGET: 2}
+
+
 def test_candidate_replay_builds_explicit_paper_pnl_evidence():
     start = dt.datetime(2026, 6, 20, 0, 0, tzinfo=dt.timezone.utc)
     joined = []
