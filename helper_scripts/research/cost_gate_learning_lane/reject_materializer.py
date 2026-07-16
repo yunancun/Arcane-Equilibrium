@@ -44,9 +44,14 @@ from cost_gate_learning_lane.runtime_adapter import (  # noqa: E402
     side_cell_key,
     validate_ledger_event_candidate_context,
 )
+from cost_gate_learning_lane.ledger_rotation import (  # noqa: E402
+    MAX_IN_MEMORY_RETAINED_LEDGER_BYTES,
+    retained_ledger_total_bytes,
+)
 
 
 REJECT_MATERIALIZER_SCHEMA_VERSION = "cost_gate_reject_materializer_v1"
+RETAINED_LEDGER_STREAMING_PROJECTION_REQUIRED_EXIT_CODE = 75
 VALID_ENGINE_MODES = {"paper", "demo", "live_demo", "live"}
 
 
@@ -612,6 +617,23 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = _build_parser().parse_args()
+    retained_bytes = retained_ledger_total_bytes(args.ledger)
+    if retained_bytes > MAX_IN_MEMORY_RETAINED_LEDGER_BYTES:
+        print(
+            json.dumps(
+                {
+                    "status": "RETAINED_LEDGER_STREAMING_PROJECTION_REQUIRED",
+                    "ledger_path": str(args.ledger),
+                    "retained_ledger_bytes": retained_bytes,
+                    "max_in_memory_retained_ledger_bytes": (
+                        MAX_IN_MEMORY_RETAINED_LEDGER_BYTES
+                    ),
+                },
+                sort_keys=True,
+            ),
+            file=sys.stderr,
+        )
+        return RETAINED_LEDGER_STREAMING_PROJECTION_REQUIRED_EXIT_CODE
     cfg = RejectMaterializerConfig(
         engine_modes=tuple(args.engine_modes or ("demo", "live_demo")),
         lookback_hours=args.lookback_hours,
