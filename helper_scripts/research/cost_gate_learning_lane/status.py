@@ -2189,6 +2189,24 @@ def _activation_decision(
             ],
         }
 
+    if (
+        ledger_status == "QUALIFIED_LINEAGE_REVIEW_PROJECTION_REQUIRED"
+        or review_status == "QUALIFIED_LINEAGE_REVIEW_PROJECTION_REQUIRED"
+    ):
+        return {
+            "status": "QUALIFIED_LINEAGE_REVIEW_PROJECTION_REQUIRED",
+            "reason": (
+                "qualified_blocked_signal_outcomes_require_review_and_"
+                "candidate_board_projection"
+            ),
+            "missing_links": [
+                "completed_blocked_signal_outcome_review_and_candidate_board_projection"
+            ],
+            "next_actions": [
+                "run_cost_gate_outcome_review_for_candidate_board_projection"
+            ],
+        }
+
     if admission_count > 0 and blocked_count == 0 and probe_outcome_count == 0:
         if loop_status == "NOT_SEEN":
             status = "ADMISSION_ROWS_NEED_REFRESH_LOOP"

@@ -2137,6 +2137,60 @@ def test_activation_preflight_routes_admission_only_ledger_to_outcome_refresh(
     ]
 
 
+def test_activation_decision_distinguishes_deferred_review_projection_from_admission_only(
+) -> None:
+    common = {
+        "source": {"source_ready": True},
+        "plan": {"plan_status": "READY"},
+        "loop": {"learning_loop_status": "RUNNING"},
+    }
+    projection_required = status_module._activation_decision(
+        **common,
+        ledger={
+            "ledger_status": "QUALIFIED_LINEAGE_REVIEW_PROJECTION_REQUIRED",
+            "blocked_signal_outcome_review_status": (
+                "QUALIFIED_LINEAGE_REVIEW_PROJECTION_REQUIRED"
+            ),
+            "admission_decision_count": 1,
+            "blocked_signal_outcome_count": 0,
+            "probe_outcome_count": 0,
+        },
+    )
+
+    assert projection_required == {
+        "status": "QUALIFIED_LINEAGE_REVIEW_PROJECTION_REQUIRED",
+        "reason": (
+            "qualified_blocked_signal_outcomes_require_review_and_"
+            "candidate_board_projection"
+        ),
+        "missing_links": [
+            "completed_blocked_signal_outcome_review_and_candidate_board_projection"
+        ],
+        "next_actions": [
+            "run_cost_gate_outcome_review_for_candidate_board_projection"
+        ],
+    }
+
+    admission_only = status_module._activation_decision(
+        **common,
+        ledger={
+            "ledger_status": "ADMISSION_ROWS_PRESENT",
+            "admission_decision_count": 1,
+            "blocked_signal_outcome_count": 0,
+            "probe_outcome_count": 0,
+        },
+    )
+
+    assert admission_only == {
+        "status": "ADMISSION_ONLY_NEEDS_OUTCOME_REFRESH",
+        "reason": "rejects_recorded_but_blocked_signal_outcomes_missing",
+        "missing_links": ["blocked_signal_outcome_rows"],
+        "next_actions": [
+            "run_cost_gate_outcome_refresh_for_blocked_signal_outcomes"
+        ],
+    }
+
+
 def test_activation_preflight_routes_capture_error_rows_to_writer_config_fix(
     tmp_path: Path,
 ):
