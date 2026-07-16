@@ -131,6 +131,13 @@ pub mod ibkr_tws_wire;
 // 掛點（EnvelopeRequiredStub 恆拒,W8 前無放行）。無 socket、無 async;純同步狀態機（注入時鐘/RNG）。
 // 與 B1/wire 同屬 default build 被 DCE 的 TWS 連接器面（0 production caller;W4 IPC 才接消費者）。
 pub mod ibkr_tws_session;
+// IBKR W3 TWS pacing governor（W3-S3）：所有出站 framed 訊息的單一出口——主 msg-rate token
+// bucket（rate = market_data_lines ÷ 2）+ 獨立 historical bucket（IB 現勘四規則）+ subscription
+// lines 併發配額 + 有界排隊裁決（bounded FIFO,溢出/逾時即拒,禁無界排隊=OOM 教訓、禁 silent
+// drop;order-verb 超限直拒不排隊）+ IB error-100 三次違規斷 session strike 計數。OutboundGrant
+// 單一出口證明（mint 模塊私有）令出站送出編譯期必經 governor。S2 心跳出站經此接線。純同步、
+// 注入時鐘、無 socket。與 B1/wire/session 同屬 default build 被 DCE 的 TWS 連接器面。
+pub mod ibkr_tws_pacing;
 // IBKR B1 只讀 TWS 連接器（ADR-0048 / AMD-2026-07-08-01，G4 首次接觸）：connect handshake
 // + reqCurrentTime 最小首接觸；純 codec + generic driver + 3 層惰性 gate；唯一具體
 // TcpStream::connect 於 `ibkr_g4_contact` feature 後（default build 無 socket、無 caller）。

@@ -6,8 +6,8 @@ use super::*;
 use chrono::TimeZone;
 
 use openclaw_types::ibkr_tws_session_state::{
-    IB_ERR_COULD_NOT_CONNECT_TWS, IB_ERR_DUPLICATE_CLIENT_ID, IB_ERR_MKT_DATA_FARM_LOST,
-    IB_ERR_TWS_SERVER_CONNECTIVITY_BROKEN,
+    IB_ERR_COULD_NOT_CONNECT_TWS, IB_ERR_DUPLICATE_CLIENT_ID, IB_ERR_MAX_MESSAGE_RATE,
+    IB_ERR_MKT_DATA_FARM_LOST, IB_ERR_TWS_SERVER_CONNECTIVITY_BROKEN,
 };
 
 // ---------------------------------------------------------------------------
@@ -845,4 +845,108 @@ fn ipc_label_projection_matches_state() {
     assert_eq!(fsm.ipc_state(), IbkrTwsSessionStateV1::Degraded);
     fsm.on_io_drop(3000, Duration::from_secs(1));
     assert_eq!(fsm.ipc_state(), IbkrTwsSessionStateV1::Backoff);
+}
+
+// ---------------------------------------------------------------------------
+// S3:pacing governor 接線（心跳單一出口 + error-100 三次違規斷 session;設計 §1.3/§3）
+// ---------------------------------------------------------------------------
+
+/// 驅動 manager 內部 FSM 至 Ready（測試專屬:直接操作私有 `fsm`——production stub 恆拒無法連線,
+/// 唯測試域可驅 Ready 以驗心跳/pacing 接線）。子模塊對父結構私有欄的合法存取。
+fn drive_manager_to_ready(mgr: &mut TwsSessionManager, now_ms: u64) {
+    mgr.fsm.on_permit_granted(PermitToken::mint(), now_ms);
+    mgr.fsm.on_transport_established(now_ms);
+    mgr.fsm.on_handshake_result(happy_outcome(), now_ms);
+    assert!(matches!(mgr.state(), SessionState::Ready(_)));
+}
+
+#[test]
+fn manager_heartbeat_routes_through_governor_single_exit() {
+    let mut mgr = TwsSessionManager::new(cfg());
+    drive_manager_to_ready(&mut mgr, 0);
+    // 未到期（interval 30s;due=30000）→ NotDue。
+    assert!(matches!(
+        mgr.heartbeat_outbound(0),
+        HeartbeatOutbound::NotDue
+    ));
+    // 到期 → **經 governor** 放行 → Sent（frame=reqCurrentTime bytes + 單一出口 grant）。
+    match mgr.heartbeat_outbound(30_000) {
+        HeartbeatOutbound::Sent { frame, grant: _ } => {
+            assert_eq!(frame, crate::ibkr_tws_wire::encode_req_current_time());
+        }
+        _ => panic!("到期心跳應經 governor 放行為 Sent"),
+    }
+    // governor 記一次放行 → 證明心跳確過單一出口（非旁路;設計 §1.3「1/30s 不豁免」）。
+    assert_eq!(mgr.pacing_observation().admitted, 1);
+    // FSM 已標記已送（awaiting reply）→ 立即再呼不重送。
+    assert!(matches!(
+        mgr.heartbeat_outbound(30_000),
+        HeartbeatOutbound::NotDue
+    ));
+}
+
+#[test]
+fn manager_pacing_error_three_strikes_drops_session() {
+    let mut mgr = TwsSessionManager::new(cfg());
+    drive_manager_to_ready(&mut mgr, 0);
+    // 前兩次 error-100 記 strike,不斷 session。
+    assert!(mgr
+        .on_error_frame(IB_ERR_MAX_MESSAGE_RATE, IbkrTwsErrorClassV1::Pacing, 1)
+        .is_empty());
+    assert!(matches!(mgr.state(), SessionState::Ready(_)));
+    assert!(mgr
+        .on_error_frame(IB_ERR_MAX_MESSAGE_RATE, IbkrTwsErrorClassV1::Pacing, 2)
+        .is_empty());
+    assert!(matches!(mgr.state(), SessionState::Ready(_)));
+    // 第三次 → 斷 session（SessionFatal(GatewayError(100))）。
+    mgr.on_error_frame(IB_ERR_MAX_MESSAGE_RATE, IbkrTwsErrorClassV1::Pacing, 3);
+    assert!(matches!(
+        mgr.state(),
+        SessionState::Disconnected {
+            reason: HaltReason::SessionFatal(FatalCause::GatewayError(code))
+        } if *code == IB_ERR_MAX_MESSAGE_RATE
+    ));
+    assert_eq!(mgr.pacing_observation().ib_pacing_strikes, 3);
+}
+
+#[test]
+fn manager_error_frame_non_pacing_delegates_to_fsm() {
+    let mut mgr = TwsSessionManager::new(cfg());
+    drive_manager_to_ready(&mut mgr, 0);
+    // 非 pacing（502 未連線,SessionFatal）→ 委派 FSM → 斷 session。
+    mgr.on_error_frame(
+        IB_ERR_COULD_NOT_CONNECT_TWS,
+        IbkrTwsErrorClassV1::SessionFatal,
+        1,
+    );
+    assert!(matches!(
+        mgr.state(),
+        SessionState::Disconnected {
+            reason: HaltReason::SessionFatal(FatalCause::GatewayError(_))
+        }
+    ));
+    // pacing strike 未被觸（非 pacing 不吃 strike;職責分離）。
+    assert_eq!(mgr.pacing_observation().ib_pacing_strikes, 0);
+}
+
+#[test]
+fn manager_error_frame_no_op_in_terminal_state() {
+    // E2-F2:session 已 drop（終態）後 driver 又送 batched error-100 → no-op:strike 不虛增、
+    // 狀態不變、無 FSM 非法轉移 debug_assert 副作用（終態自守衛置於 strike 記錄之前）。
+    let mut mgr = TwsSessionManager::new(cfg());
+    mgr.halt(); // → Disconnected(Halted) 終態
+    assert_eq!(mgr.pacing_observation().ib_pacing_strikes, 0);
+    for t in 1..=5 {
+        let ev = mgr.on_error_frame(IB_ERR_MAX_MESSAGE_RATE, IbkrTwsErrorClassV1::Pacing, t);
+        assert!(ev.is_empty(), "終態 on_error_frame 應 no-op");
+    }
+    // strike 未虛增（守衛在記錄之前）。
+    assert_eq!(mgr.pacing_observation().ib_pacing_strikes, 0);
+    // 狀態不變（仍終態 Halted）。
+    assert!(matches!(
+        mgr.state(),
+        SessionState::Disconnected {
+            reason: HaltReason::Halted
+        }
+    ));
 }
