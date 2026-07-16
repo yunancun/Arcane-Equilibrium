@@ -1,0 +1,19 @@
+# IBKR W3-S4 fake-TWS harness（dev-only 交付物;設計 §4）。
+# **engine-independent**:本 crate 不依賴 openclaw_engine（避免 dev-dep cycle 下的重複編譯單元
+# 不 unify 陷阱——engine 的 --lib in-file 測試與 fake-linked engine 是不同編譯單元,fake 若實作
+# engine trait 於 in-file 測試無法 unify）。fake 只提供場景 DSL + tokio duplex spawn + 自有 wire
+# codec（server 側模擬 IB wire,獨立於 engine codec）;engine 側以 test-only adapter 實作
+# TransportFactory 包裝 fake 的 duplex。純 in-process duplex,**零真 socket 型別**（見 lib.rs 硬邊界
+# + helper_scripts/ci/ibkr_fake_tws_absence_audit.sh）。
+# 落位 = engine 的 [dev-dependencies]（IBKR-CI-3 structure 守衛斷言只在 dev-dep）;default
+# `cargo build` 不編譯本 crate → 引擎 artifact 零 fake_tws 符號（nm 缺席審計驗證）。
+[package]
+name = "openclaw_fake_tws"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+# 僅 tokio（in-process duplex + 測試 runtime）;不引 openclaw_engine（見上）。
+tokio = { workspace = true }

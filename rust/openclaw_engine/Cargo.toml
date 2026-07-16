@@ -74,6 +74,11 @@ chrono = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"
+# IBKR W3-S4 fake-TWS harness（設計 §4）：純 in-process tokio duplex 模擬 IB Gateway server 側,供
+# ibkr_tws_driver 端到端測試 + W4-W7/W10 復用。**只在 dev-dependencies**（IBKR-CI-3 structure 守衛
+# 斷言絕不進 production dep）→ default `cargo build` 不編譯 → 引擎 artifact 零 fake_tws 符號（nm
+# 缺席審計驗證）。engine-independent（fake 不依賴本 engine;engine 側以 test-only adapter 包裝其 duplex）。
+openclaw_fake_tws = { path = "../openclaw_fake_tws" }
 # Sprint 1A-ζ Track B — M3 spike test 改採 observe_at 注入 std::time::Instant
 # (per spec §AC-5.1 mock time hook 設計 + dispatch §2.7 反模式邊界), 不需要
 # tokio::time::pause / advance mock clock。tokio test-util 已從 dev-dep 移除

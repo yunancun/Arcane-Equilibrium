@@ -9,6 +9,9 @@ members = [
     "openclaw_types",
     "openclaw_core",
     "openclaw_engine",
+    # IBKR W3-S4 fake-TWS harness（dev-only;engine 的 [dev-dependencies] 引用,絕不 production dep——
+    # IBKR-CI-3 structure 守衛斷言）。純 in-process duplex,零真 socket。
+    "openclaw_fake_tws",
 ]
 resolver = "2"
 

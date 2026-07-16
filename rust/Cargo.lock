@@ -1441,6 +1441,7 @@ dependencies = [
  "libc",
  "ndarray 0.16.1",
  "openclaw_core",
+ "openclaw_fake_tws",
  "openclaw_types",
  "ort",
  "parking_lot",
@@ -1463,6 +1464,13 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+]
+
+[[package]]
+name = "openclaw_fake_tws"
+version = "0.1.0"
+dependencies = [
+ "tokio",
 ]
 
 [[package]]
