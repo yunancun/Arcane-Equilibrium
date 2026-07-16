@@ -25,14 +25,15 @@ from cost_gate_learning_lane.candidate_evaluation_context import (
     validate_candidate_evaluation_context,
 )
 from cost_gate_learning_lane.candidate_evaluation_cold_source import (
-    DEFAULT_GIT_ANCESTRY_RESOLVER,
+    DEFAULT_REVIEWED_LEGACY_BUILD_REGISTRY,
     DEFER,
     PERMANENTLY_UNAVAILABLE,
-    PRE_CAPABILITY_BUILD,
     READY,
+    REVIEWED_LEGACY_BUILD_SOURCE_UNAVAILABLE,
     CandidateEvaluationSourceResolution,
-    GitAncestryResolver,
+    ReviewedLegacyBuildRegistry,
     build_candidate_evaluation_source_unavailability,
+    resolve_reviewed_legacy_build,
     validate_candidate_evaluation_source_unavailability,
 )
 
@@ -42,7 +43,9 @@ DEFER_COLD_EVALUATION_SOURCE_INCOMPLETE = (
     "DEFER_COLD_EVALUATION_SOURCE_INCOMPLETE"
 )
 NOT_APPLICABLE = "NOT_APPLICABLE"
-_DEFAULT_ANCESTRY_RESOLVER = DEFAULT_GIT_ANCESTRY_RESOLVER
+_DEFAULT_SOURCE_UNAVAILABILITY_REGISTRY = (
+    DEFAULT_REVIEWED_LEGACY_BUILD_REGISTRY
+)
 
 _SOURCE_BUNDLE_FIELDS = {
     "evidence_regime_label",
@@ -117,7 +120,7 @@ def attach_candidate_evaluation_to_outcome(
     outcome: Mapping[str, Any],
     *,
     source_provider: CandidateEvaluationSourceProvider | None = None,
-    ancestry_resolver: GitAncestryResolver | None = None,
+    source_unavailability_registry: ReviewedLegacyBuildRegistry | None = None,
     now_utc: dt.datetime | None = None,
 ) -> dict[str, Any]:
     """Return one detached ATTACHED, DEFER, PERMANENT, or N/A result.
@@ -127,7 +130,11 @@ def attach_candidate_evaluation_to_outcome(
     until a separately governed cold-source provider exists; current/board
     state must never be wired here as an implicit source.
     """
-    resolver = ancestry_resolver or _DEFAULT_ANCESTRY_RESOLVER
+    registry = (
+        _DEFAULT_SOURCE_UNAVAILABILITY_REGISTRY
+        if source_unavailability_registry is None
+        else source_unavailability_registry
+    )
     try:
         row = copy.deepcopy(dict(outcome))
     except Exception:
@@ -203,9 +210,8 @@ def attach_candidate_evaluation_to_outcome(
             validate_candidate_evaluation_source_unavailability(
                 summary["candidate_evaluation_source_unavailability"],
                 candidate_event_context=event,
+                registry=registry,
             )
-            if not resolver.is_strict_pre_capability(event["build_git_sha"]):
-                return _result(DEFER_COLD_EVALUATION_SOURCE_INCOMPLETE, row)
             return _result(PERMANENTLY_UNAVAILABLE, row)
 
         if present_evaluation_fields:
@@ -235,9 +241,10 @@ def attach_candidate_evaluation_to_outcome(
             if source.status == DEFER:
                 return _result(DEFER_COLD_EVALUATION_SOURCE_INCOMPLETE, row)
             if source.status == PERMANENTLY_UNAVAILABLE:
-                if not resolver.is_strict_pre_capability(
-                    event["build_git_sha"]
-                ):
+                if resolve_reviewed_legacy_build(
+                    event["build_git_sha"],
+                    registry=registry,
+                ) is None:
                     return _result(
                         DEFER_COLD_EVALUATION_SOURCE_INCOMPLETE,
                         row,
@@ -248,7 +255,10 @@ def attach_candidate_evaluation_to_outcome(
                 )
                 terminal_summary[
                     "candidate_evaluation_source_unavailability"
-                ] = build_candidate_evaluation_source_unavailability(event)
+                ] = build_candidate_evaluation_source_unavailability(
+                    event,
+                    registry=registry,
+                )
                 row["candidate_summary"] = terminal_summary
                 return _result(PERMANENTLY_UNAVAILABLE, row)
             if source.status != READY:
@@ -284,7 +294,7 @@ def partition_candidate_evaluation_outcomes(
     outcomes: Sequence[Mapping[str, Any]],
     *,
     source_provider: CandidateEvaluationSourceProvider | None = None,
-    ancestry_resolver: GitAncestryResolver | None = None,
+    source_unavailability_registry: ReviewedLegacyBuildRegistry | None = None,
     now_utc: dt.datetime,
 ) -> dict[str, Any]:
     """Preflight the whole batch and expose appendable rows only if none defer."""
@@ -310,7 +320,9 @@ def partition_candidate_evaluation_outcomes(
             attach_candidate_evaluation_to_outcome(
                 row,
                 source_provider=source_provider,
-                ancestry_resolver=ancestry_resolver,
+                source_unavailability_registry=(
+                    source_unavailability_registry
+                ),
                 now_utc=now_utc,
             )
         )
@@ -389,7 +401,7 @@ def _result(status: str, outcome: dict[str, Any]) -> dict[str, Any]:
             else None
         ),
         "unavailability_reason": (
-            PRE_CAPABILITY_BUILD
+            REVIEWED_LEGACY_BUILD_SOURCE_UNAVAILABLE
             if status == PERMANENTLY_UNAVAILABLE
             else None
         ),
