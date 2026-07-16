@@ -1,6 +1,7 @@
 # IBKR_TODO — `stock_etf_cash` 到 live-ready 工程總綱
 
-**版本** v1 | **日期** 2026-07-15 | **正本** repo 根目錄 `IBKR_TODO.md`(main 分支;外層 `~/Projects/TradeBot/IBKR_TODO.md` 為鏡像副本,以 main 為準)
+**版本** v2 | **日期** 2026-07-16 | **正本** repo 根目錄 `IBKR_TODO.md`(main 分支;外層 `~/Projects/TradeBot/IBKR_TODO.md` 為鏡像副本,以 main 為準)
+**v2 校準 lineage**:2026-07-16 R8 全盤校準——對 W2/W-CI/W3/W4 完成件做 8 鏡頭對抗審計(workflow `wf_c316991f`):W2/W3/W4 逐項 **CONFIRMED_AS_CLAIMED**(INV-1 二元 HOLDS:production 域唯一 `impl ConnectPermitProvider`=`EnvelopeRequiredStub`、`PermitToken::mint` production 呼叫點=0),全測試鏈本地複現全綠(engine ibkr 211/types 74+287/stock_etf 34/seal 2/fake 9/Python 201);§0/§4 重釘 @ `808144aff`;審計揭 CI 守衛鏈 3 MEDIUM 殘洞(§4.5)歸 W5-S0(R9)收口。
 **性質**:工程設計總綱(engineering arrangement)。**本文件不是授權文件**——任何真實 broker 接觸/資料/訂單效果仍由 AMD-2026-07-11-01 定義的 `ibkr_activation_envelope_v1` + Operator 活化紀錄單獨把關。
 **與 TODO.md 的關係**:`TODO.md` 是 active dispatch queue 唯一正本(W0-W11 行狀態以它為準);本文件是 W 包的工程設計展開 + 活化跑道設計,派工時兩者並讀。W 狀態變更只改 TODO.md,設計變更才改本文件。
 **評審 lineage**:IB(explorer)對抗審 2026-07-15 verdict `APPROVE_WITH_FIXES`,F1(BLOCKER)-F17 全數採納入文;外部政策事實 8 條經官方文件現勘裁定(pacing=lines÷2、週日強制重認證、行情共享互斥等),UNVERIFIED 項(GFV 執行機制、paper 2FA 適用性)已標注為 PA/IB 設計期硬前置。
@@ -11,9 +12,9 @@
 
 - **目標終態(工程側)**:`IBKR_FULL_LIVE_CAPABILITY_COMPLETE_EXTERNAL_ACTIVATION_PENDING`——所有 no-contact 源碼、production wiring、測試、GUI、inactive 部署、恢復、文檔、三端同步、gap matrix 全 PASS,只剩人工憑證/session/活化與真實回執未決。這就是本文件說的 **live-ready**。
 - **最終驗證終態(活化側)**:`IBKR_FULL_LIVE_READY_VERIFIED`——Operator 單獨授權的 live session + 活化後,由 IB/E3/OPS/QA 出具 health/account/market/lifecycle/money-boundary 實證。
-- **現況一句話**:治理全解鎖(AMD-2026-07-11-01 Accepted,full live-capability development 授權);型別契約陣近乎齊裝(32 modules/37 acceptance 檔)、P0-P2+B1+W1 多輪硬化、**W2 seal ledger 核心其實已 source-landed(TODO 行滯後,殘項=收口)**;W3-W11 QUEUED。runtime 側教科書式 dormant:lane 旗標全 false、IB Gateway 未安裝、零 ibkr secret slot、production 從未 seal、引擎 log 零 ibkr 蹤跡——**從未發生任何真實接觸**。
-- **路徑一句話**:W2→W11 十個工作包把引擎從「唯讀骨架」建成「全生命週期 live-capable 但 default-inactive」;之後 EA1→EA8 活化跑道(全 Operator-gated)按 readonly→paper→evidence clock→tiny-live→live 逐級點火。
-- **最大 wall-clock 項**:paper/shadow evidence clock(ADR-0048 預期 6-8 週)——工程全部完工也繞不開這段證據窗;建議 **W7+W8 收口後**盡早申請 EA5 開 paper 窗(硬前置 = W7+W8 全綠 + option B 落地),與 W9-W11 的非授權面(GUI/觀測/文檔)平行推進(見 §6)。
+- **現況一句話(2026-07-16 R8 校準)**:治理全解鎖(AMD-2026-07-11-01 Accepted);**W0/W1/W2(DONE_SOURCE_SECURED_HARDENED,PR#28)/W-CI(DONE_LANDED_FIRST_GREEN,PR#21)/W3(DONE_SOURCE_SECURED,S1-S4,PR#32/#33/#35/#38)/W4(DONE_SOURCE_SECURED,W4-1,PR#40)全收口且經 R8 對抗審計 CONFIRMED**;型別契約陣 34 modules/37 acceptance 檔;**W5 為下一包(S0 blocking 前綴必修)**,W6-W11 QUEUED。runtime 側教科書式 dormant(07-16 復核):lane 旗標全 false、IB Gateway 未安裝、零 ibkr secret slot、production 從未 seal——**從未發生任何真實接觸**。
+- **路徑一句話**:剩 W5→W11 七包(+W8a/W9a carve)把引擎從「session/health 骨架」補成「全生命週期 live-capable 但 default-inactive」;之後 EA1→EA8 活化跑道(全 Operator-gated)按 readonly→paper→evidence clock→tiny-live→live 逐級點火。W8a/W9a 為純 no-contact 開發(AMD-07-11 授權內),先行落地使 EA1-EA3 在 Operator 就緒時零等待點火;EA 時序決策(D2)不因此預決。
+- **最大 wall-clock 項**:paper/shadow evidence clock(ADR-0048 預期 6-8 週)——工程全部完工也繞不開這段證據窗;故 ①W5 收口後即帶 W8a/W9a,使唯讀跑道(EA1-EA4,7-14 天 soak,**若 Operator 採 D2**)可與 W6/W7 開發平行,②**W7+W8 收口後**盡早申請 EA5 開 paper 窗(硬前置 = W7+W8 全綠 + option B 落地),與 W9-W11 的非授權面平行推進(見 §5.5/§6)。
 
 ## 1. 終態定義:什麼叫 live-ready
 
@@ -49,7 +50,7 @@ AMD-2026-07-11-01 只允許三種終態(引自 §Required implementation and evi
 
 W2-W11 的全部 DoD 都封頂在 `source-ready` + `runtime-active(inactive posture)`;`session-ready` 起全部屬於 EA 跑道。
 
-## 4. As-built 現狀盤點(2026-07-15,main @ `0770bd138`)
+## 4. As-built 現狀盤點(2026-07-16 R8 校準,main @ `808144aff`)
 
 ### 4.1 治理/gate 現狀
 
@@ -59,67 +60,81 @@ W2-W11 的全部 DoD 都封頂在 `source-ready` + `runtime-active(inactive post
 | AMD-2026-07-08-01 Phase 2 readonly 外接 + static-guard 唯一修訂 | Accepted(部分被 07-11 壓倒) | 文件 §Sign-off |
 | AMD-2026-07-09-01 GUI 憑證寫路徑 | **廢止(acceptance 前 superseded)** | AMD-07-11 §Supersession |
 | G0.5 `stock-etf-static-guards` CI job | 綠 | AMD-07-08 前置,已 wired |
-| P2 seal 批准模型 | option A(owner-only 檔案 + 6 bindings)僅限 read-only zero-money seal;**任何 paper order-write / `tiny_live_adr_eligibility_v1` 討論 / 資本暴露面必須升級 option B(HMAC,與 authorization.json 同紀律)**(觸發器三項照抄原文) | AMD-07-08 澄清 #2 |
+| P2 seal 批准模型 | option A(owner-only 檔案 + 6 bindings)僅限 read-only zero-money seal;**任何 paper order-write / `tiny_live_adr_eligibility_v1` 討論 / 資本暴露面必須升級 option B(HMAC,與 authorization.json 同紀律)**(觸發器三項照抄原文);**澄清 #3(2026-07-15,CC 裁)**:控制批准綁定=`ibkr_phase2_seal_control_v1 ∧ authorization_amd==AMD-2026-07-11-01`,ADR/AMD 出典由 artifact 層硬 pin;EA3 每次 apply 前歸檔該次批准檔精確位元組 | AMD-07-08 澄清 #2/#3 |
 | P2 waiver-gated 硬阻塞票 T1(seal-lineage-fields)/T2(triangulation-crosscheck) | **CLOSED** | `58d0e9749` + `0bafe2f9e` |
 | Phase2 seal 生命週期(Seal genesis→Supersede→Revoke terminal per build SHA;pre-write guard 防 reseal-after-revoke brick) | source-landed + 回歸測試 | `324fb87a8` `7902efe71`,ADR-0048 §Phase 2 |
 | W1 sealed-artifact production consume 硬化(euid 0400、inode-bound traversal、anti-relocation、FIFO-safe open) | DONE_SOURCE_SECURED | TODO W1 行;`c082bc569` |
 | managedAccounts prefix-only paper attestation(seam#2,fail-closed) | source-landed | `c4b52c2e2`;W5 有 2026-07-12 驗收附註:`account_fingerprint_is_live` 必須 managedAccounts 實檢派生,禁聲明自填 |
 
-### 4.2 代碼現狀(引擎/Python/GUI/DB;2026-07-15 盤點 @ main `0770bd138`)
+### 4.2 代碼現狀(引擎/Python/GUI/DB;2026-07-16 盤點 @ main `808144aff`)
 
-**Rust 契約層 `rust/openclaw_types/`**:32 個 ibkr/stock_etf module(~14k 行)+ 37 個 acceptance 測試檔(~16.8k 行)——phase2 gate/artifact/policies/runtime、feature-flag secret-auth matrix、非-Bybit API allowlist(9 read action)、readonly probe request(9 probe KIND)、probe result import envelope、paper lifecycle 狀態機契約、lane/capability registry、lane-scoped IPC、risk policy、scorecard 三件套、instrument identity/PIT universe/reference data/strategy hypothesis/phase3 evidence/DDL 鏡射/audit events/disable-cleanup runbook/tiny-live eligibility/gui lane contract/release packet/phase0 manifest。**named-contract 陣的型別層基本齊裝**;`IbkrSessionAttestationV1` 型別已定義但 runtime 產生器未落地(歸 W5)。
+**Rust 契約層 `rust/openclaw_types/`**:34 個 ibkr/stock_etf module(W3/W4 新增 `ibkr_tws_session_state.rs`/`ibkr_tws_connection_health.rs`)+ 37 個 acceptance 測試檔(~16.8k 行)——phase2 gate/artifact/policies/runtime、feature-flag secret-auth matrix、非-Bybit API allowlist(9 read action)、readonly probe request(9 probe KIND)、probe result import envelope、paper lifecycle 狀態機契約、lane/capability registry、lane-scoped IPC、risk policy、scorecard 三件套、instrument identity/PIT universe/reference data/strategy hypothesis/phase3 evidence/DDL 鏡射/audit events/disable-cleanup runbook/tiny-live eligibility/gui lane contract/release packet/phase0 manifest。**named-contract 陣的型別層基本齊裝**;`IbkrSessionAttestationV1` 型別已定義但 runtime 產生器未落地(歸 W5)。
 
 **Rust 引擎層 `rust/openclaw_engine/src/`**:
 
 | 模組 | 量級 | 狀態 |
 |---|---|---|
-| `ibkr_phase2_gate_producer.rs` | ~4.5k 行 | P2 producer + **W2 seal/supersede/revoke ledger 全鏈**(append-only hash chain、flock+dirfd、ledger replay 驗證、reseal-after-revoke pre-write guard)+ 47 in-file 測試 |
+| `ibkr_phase2_gate_producer.rs` | ~5.1k 行 | P2 producer + **W2 seal/supersede/revoke ledger 全鏈**(append-only hash chain、flock+dirfd、ledger replay 驗證、reseal-after-revoke pre-write guard)+ **R2 加固**(expiry 只約束 active leaf、/run 族 denylist、相對路徑拒絕、readdir errno fail-closed、anti-placeholder)+ 55 in-file 測試(47+8,R8 實數) |
+| `ibkr_tws_wire.rs` + `ibkr_tws_session.rs` + `ibkr_tws_pacing.rs` | ~2.4k 行 | **W3**:framing/版本協商/`IbErrorClass`+六態 FSM(退避 jitter/心跳/chrono-tz 排程感知)+INV-1 permit stub(恆拒)+pacing governor(lines÷2 bucket/historical 四規則/有界排隊/`OutboundGrant` module-private 單一出口) |
+| `ibkr_tws_driver.rs` | ~0.7k 行 | W3-S4 端到端泛型 driver(`SessionDriver<P: ConnectPermitProvider, F>`);production 整面 DCE,`ibkr_driver_absence_audit.sh` nm 斷言在 CI 把關 |
+| `rust/openclaw_fake_tws/` | dev-crate | W3-S4 fake-TWS(15 場景+故障注入);dev-dependency only,production 零 fake 符號(nm audit 入 CI) |
 | `ibkr_readonly_tws_client.rs` | ~1.4k 行 | B1:純 codec + 泛型 driver(handshake+`reqCurrentTime`)+ `assert_loopback_paper_endpoint`(硬編 `127.0.0.1:4002`,4001/7496 硬拒)+ `g4_operator_triggered_first_contact`(唯一 `TcpStream::connect`,`ibkr_g4_contact` feature-gate;**default build 零 socket 符號**);26 測試(tokio duplex synthetic frames) |
 | `ibkr_secret_slot_loader.rs` | ~0.8k 行 | P1 fingerprint-only loader;**scaffold(檔級 `allow(dead_code)`,無 production 讀者;TODO(P5) 接 attestation/healthcheck)**;18 測試 |
-| `ipc_server/handlers/stock_etf.rs` + summaries | ~2.4k 行 | 16 個 `stock_etf.get_*` 唯讀 IPC method(零 mutate verb)+ ~3.1k 行 fixtures |
+| `ipc_server/handlers/stock_etf.rs`(779 行,PR#42 拆檔後<800)+ `stock_etf/` 子目錄(health_summary/precontact/summaries) | ~3k 行 | **17** 個 `stock_etf.get_*` 唯讀 IPC method(W4 +`get_connection_health`;零 mutate verb)+ fixtures |
 | `bin/ibkr_phase2_seal.rs` | 111 行 | W2 seal CLI:default dry-run;`--apply` + `OPENCLAW_IBKR_PHASE2_SEAL_APPLY=1` 雙閘 |
 | `bin/ibkr_g4_first_contact.rs` | 53 行 | G4 CLI 薄殼(`required-features=ibkr_g4_contact` + `OPENCLAW_IBKR_G4_CONTACT_APPLY=1`,default dry-run) |
 
-**Python/FastAPI**:16 條 `/api/v1/stock-etf/*` **全 GET 唯讀** route(lane/phase0/readiness/data-foundation/policy/authorization/account/evidence/universe/shadow/paper/reconciliation/scorecard/launch/release-packet/disable-cleanup)+ 18 個 normalizer 檔(~6.6k 行,負空間 attestation 態);`broker_connectors/ibkr_connector/` 維持 inert no-network placeholder;47 個 `tests/structure/` 靜態守衛(no-write AST、route guard、live-port reject、cross-surface parity、拆檔守衛、authority artifact 覆蓋)。
+**Python/FastAPI**:17 條 `/api/v1/stock-etf/*` **全 GET 唯讀** route(W4 +`/connection-health`;lane/phase0/readiness/data-foundation/policy/authorization/account/evidence/universe/shadow/paper/reconciliation/scorecard/launch/release-packet/disable-cleanup)+ 17 個 normalizer 檔(負空間 attestation 態;W4 起 connection-health 面演進為三層 lockstep);`broker_connectors/ibkr_connector/` 維持 inert no-network placeholder;52 個 `tests/structure/` 靜態守衛(no-write AST、route guard、live-port reject、cross-surface parity、permit-stub INV-1、fake dev-dep-only、拆檔守衛、authority artifact 覆蓋)。
 
 **GUI**:`tab-stock-etf.*` 容器 + 10 個子視圖(readiness/auth-account/data-policy/evidence-paper/reconciliation/scorecard-launch/release-packet/disable-cleanup/phase0/fallbacks),已隨 GUI 大改遷入原生 view(13/19 之一)——**唯讀顯示面已相當完整,等真值接通(Phase 4 gate)**。
 
 **DB**:DDL source-only(387 行 SQL,13 表:`broker.instruments/instrument_listings/market_sessions/corporate_actions/fx_rates/account_cash_ledger/paper_orders/paper_fills/commissions`、`research.stock_shadow_signals/stock_shadow_fills/stock_etf_scorecard`、`audit.asset_lane_events`)+ 型別鏡射;`sql/migrations/` 零 stock_etf migration。
 
-**確認缺席(對應 §4.4)**:`ibkr_activation_envelope_v1` struct/impl(代碼中僅字串 placeholder)、S3/S5 typed row payload(僅 probe KIND + digest envelope)、persistent session manager/reconnect loop、fake-TWS server、entitlement 邏輯、runtime attestation/audit 產生器、憑證寫路徑(隨 AMD-07-09-01 廢止,零代碼,**維持缺席**)。
+**確認缺席(對應 §4.4)**:`ibkr_activation_envelope_v1` struct/impl(代碼中僅字串 placeholder;歸 W8a/W8)、S3/S5 typed row payload(僅 probe KIND + digest envelope;歸 W5)、entitlement 邏輯(W6)、runtime attestation/audit 產生器(W5/W8)、憑證寫路徑(隨 AMD-07-09-01 廢止,零代碼,**維持缺席**)。~~persistent session manager/fake-TWS server~~ 已由 W3 交付。
 
-**CI 缺口(立即可修,見 §5 W-CI)**:①37 個 openclaw_types acceptance + 引擎 in-file/IPC 測試未在 CI 執行(rust job 僅 `cargo check`);②`helper_scripts/ci/ibkr_g4_symbol_audit.sh`(default build 零 G4 socket 符號的 nm 斷言)未接入 `ci.yml`。
+**CI 現狀(W-CI 已收口 2026-07-15,PR#21 `48872c4fa`)**:`rust-ibkr-tests` job(五 scope=types 74+287/engine ibkr/stock_etf/seal bin/g4 audit,warm ~7-8m)+ W3/W4 追加 permit-stub、fake dev-dep-only、fake 缺席 nm、driver-absence 四守衛入 CI;結構守衛+classifier 擴 6 prefix 接 hosted CI(PR#42 `275c76c59`)。**R8 審計揭 3 MEDIUM 殘洞(歸 W5-S0/R9,詳 §4.5)**:①三個 `helper_scripts/ci/ibkr_*.sh` 審計腳本自身路徑不在 changes classifier(只改腳本的 PR 靜默 skip 本 job);②`rust-ibkr-tests` job 未被無條件 workflow static test 釘住(整 job 可被刪而靜默過);③W4 lockstep/parity pytest 套件不在 hosted CI(單改 Rust emitter 的 PR 可破 lockstep 而 CI 全綠)。
 
-### 4.3 Runtime 現狀(trade-core,2026-07-15 16:12 CEST 只讀探測)
+### 4.3 Runtime 現狀(trade-core,2026-07-16 ~18:50 CEST 只讀復核;前次 07-15 16:12)
 
 | 項 | 實測 |
 |---|---|
-| 引擎 | PID 700258,build `0a4d38ee0`(2026-07-14T23:07Z,p0-runtime-write-fence),**落後 main 12 commits**;今日 14:51 watchdog 自動拉起(該時點 uptime 僅 ~1h20m) |
+| Linux repo | `808144aff` 與 main 完全同步(clean tree) |
+| 引擎 | PID 1084557(07-16 07:40 CEST 起,uptime ~11h);binary 2026-07-15 01:10 build(reflog 推定 `0a4d38ee0`,啟動 banner 已被小時級 log 輪替沖掉=間接推定)——**落後 main 為觀測值非缺陷,W10 inactive deploy 窗收斂** |
 | IB Gateway/TWS | **未安裝、未運行**;4001/4002/7496/7497 零 listener;`~/Jts` 不存在 |
-| IBKR secrets | `OPENCLAW_SECRETS_ROOT` 未設(shell 與引擎 env 皆無);secrets 樹零 ibkr slot → P1 loader dormant 如設計 |
-| lane 旗標(runtime TOML) | `stock_etf_lane_enabled=false`、`ibkr_readonly_enabled=false`、connector/external_contact/paper_order/live_order 全 false;port 候選 4002 loopback-only、live ports denied |
-| external-surface gate | `status="BLOCKED"` 零值 scaffold;`<DATA_DIR>/governance/ibkr_phase2/` 不存在 = **production 從未 seal**(fail-closed 成立) |
-| 引擎 log | 零 ibkr/tws/stock_etf 蹤跡(純 dormant) |
-| rollback 錨 | `binary_backups/openclaw-engine.pre-ibkr-deploy`、`.26401fbb…20260711`、`deploy_backups/…pre-p0-recovery.20260714` 在位 |
-| 周邊發現(非 IBKR 範疇,另行處置) | 引擎無 durable systemd unit(既有欠賬);`openclaw-alr-shadow.service` crash loop(`source_head_mismatch`,ALR V151-V157 鏈已知未決);watchdog `audit write skipped: no DSN buildable`;`alpha_discovery_throughput_cron.log` 單檔 4.5GB |
+| IBKR secrets | secrets 樹零 ibkr slot → P1 loader dormant 如設計 |
+| lane 旗標(runtime TOML) | `risk_config_stock_etf_paper.toml` `enabled=false` 實測;connector/external_contact/paper_order/live_order 全 false;port 候選 4002 loopback-only、live ports denied |
+| external-surface gate | `<DATA_DIR>/governance/ibkr_phase2/` 不存在 = **production 從未 seal**(fail-closed 成立) |
+| systemd user units | `openclaw-trading-api`+`openclaw-watchdog` enabled+active、linger=yes;`openclaw-gateway` disabled;引擎自身 durable unit 仍欠(歸 W9-4) |
+| rollback 錨 | `binary_backups/openclaw-engine.pre-ibkr-deploy` 等三錨在位(07-15 觀測) |
+| 周邊發現(非 IBKR 範疇) | 07-15 快照:watchdog DSN/logrotate/cron OOM 疊加機均已 source-landed(PR#22/#24/#27/#30/#31),runtime apply 見 TODO 對應行;07-16 增:uvicorn journal 見 judge_edge Timeout 8s 反覆、PG collation 警告(均另行處置) |
 
-結論:runtime 側 IBKR 是**教科書式 dormant**——代碼在、旗標全關、無 slot、無 Gateway、無 seal、零接觸痕跡;W10 inactive deploy 之前不需要任何 runtime 動作。
+結論:runtime 側 IBKR 是**教科書式 dormant**(07-16 全項復核通過)——代碼在、旗標全關、無 slot、無 Gateway、無 seal、零接觸痕跡;W10 inactive deploy 之前不需要任何 runtime 動作。
 
-### 4.4 差距總覽(對照 W3-W11 主題)
+### 4.4 差距總覽(對照 W2-W11 主題;R8 校準)
 
 | 能力 | 現狀 | 歸屬 W |
 |---|---|---|
-| production seal caller(Seal/Supersede/Revoke) | **核心已 source-landed**(ledger+CLI+47 測試);殘項=收口審核 | W2 |
-| IBKR Rust 測試/G4 symbol audit 進 CI | 缺(rust job 只 `cargo check`) | W-CI |
+| production seal caller(Seal/Supersede/Revoke) | **DONE(2026-07-15,R1+R2)**:收口四腿+加固 PR#28 `19985f312`(55 測試);production seal arming 屬 EA3 | W2 ✅ |
+| IBKR Rust 測試/G4 symbol audit 進 CI | **DONE(2026-07-15,PR#21 `48872c4fa`)**:`rust-ibkr-tests` 首綠;W3/W4 +4 守衛、結構守衛接 CI(PR#42);殘 3 MEDIUM 洞→W5-S0(§4.5) | W-CI ✅ |
 | TWS transport/session manager(可恢復) | **DONE(2026-07-16,S1-S4)**:wire 抽檔 + 六態 FSM(退避/心跳/排程感知 DST)+ INV-1 permit stub + pacing governor(單一出口/有界排隊)+ fake-TWS dev-crate + 端到端 driver;211 engine 測試 | W3 ✅ |
 | connection-health IPC/route + normalizer lockstep | **DONE(2026-07-16,W4-1)**:`get_connection_health` IPC+FastAPI route+`IbkrConnectionHealthReportV1`+normalizer 三層 lockstep+fail-closed 四道+driver-absence audit 入 CI | W4 ✅ |
 | account/positions/open orders/executions/commissions + session attestation | attestation 僅型別;typed row 契約與 fetch 全缺(只有 probe KIND + digest envelope) | W5 |
 | contract details/market data/calendar/entitlement | 契約型別在(identity/provenance);fetch/訂閱/entitlement 邏輯全缺 | W6 |
 | order lifecycle(preview/place/cancel/replace/fills/reconcile) | paper lifecycle 契約 source-only,零執行路徑 | W7 |
 | activation envelope/風控 authority/kill switch/audit 接線 | envelope 僅字串 placeholder,**無 struct/impl**;kill-switch/audit 契約在、runtime 產生器缺 | W8 |
-| DB migration/FastAPI 全面/GUI Phase 4/服務配置/觀測/回滾 | DDL source-only 零 migration;FastAPI 16 唯讀 route 在;GUI 10 子視圖唯讀在(等真值);Gateway unit/observability/rollback runbook 演練缺 | W9 |
-| fake-TWS E2E + inactive Linux deploy + QA | 缺;runtime binary 現落後 main 12 commits(W10 部署一併收) | W10 |
+| DB migration/FastAPI 全面/GUI Phase 4/服務配置/觀測/回滾 | DDL source-only 零 migration;FastAPI 17 唯讀 route 在;GUI 10 子視圖唯讀在(等真值);Gateway unit/observability/rollback runbook 演練缺 | W9 |
+| readonly-scope envelope 最小切片(D2 carve) | 缺(envelope 僅字串 placeholder) | W8a |
+| Gateway 安裝/unit 預備(D2 carve) | 缺(Gateway 未安裝,unit 不存在) | W9a |
+| fake-TWS E2E + inactive Linux deploy + QA | 缺;runtime binary 落後 main(07-16 觀測 87 commits rev-list 全計/35 first-parent,持續擴大;觀測值非缺陷,W10 部署一併收) | W10 |
 | 對抗性全域 gap rescan | 缺 | W11 |
+
+### 4.5 R8 校準審計紀錄(2026-07-16)
+
+8 鏡頭對抗審計(W2/W3/W4 源碼逐項核實、全測試鏈本地複跑、CI 姿態、文檔漂移 26 條、移交帳本 33 項、loop 協議批判、runtime 復核):
+- **完成件裁決**:W2/W3/W4 全部 `CONFIRMED_AS_CLAIMED`,零紅測試,計數逐項吻合;INV-1 二元 HOLDS(production 無任何 permit 放行路徑);fake crate dev-dep-only 成立;W2 R2 殘餘六項確認仍 open(維持 R-順手)。
+- **CI 守衛鏈 3 MEDIUM(→ W5-S0/R9 必修)**:①classifier 缺 `helper_scripts/ci/ibkr_*.sh`(三審計腳本自身的 PR 不觸發 `rust-ibkr-tests`,掏空審計可靜默 merge);②`rust-ibkr-tests` job 無機器釘鎖(workflow static test 未斷言 job 存在+五審計步,同 PR#42 修過的 guard-drift 病根);③W4 lockstep/parity/tripwire pytest 不在 hosted CI(單側改 emitter 可破 lockstep 而 CI 綠)。
+- **LOW/NOTE(→ R9+ 順手)**:seal-control 守衛掃描面(order_manager.rs 等)⊄ classifier 觸發面;push-main cancel-in-progress × 精確 diff 的低頻覆蓋窗(記帳為 known posture 或 per-sha concurrency);`rust-ibkr-tests` 加一行 `cargo test -p openclaw_fake_tws`(9 unit tests 現不在 CI);W3 wire/session/pacing MODULE_NOTE「全面 DCE」表述已被 W4 production caller 過時;fake 場景實數 15 非 14(歷史敘事不改,以此行為準)。
+- **memory 抄錄漂移**:rust-cache 實為**四** job 非「三」(84b5a3d90 commit body 明文)。
 
 ## 5. 工程階段設計 W2→W11
 
@@ -132,15 +147,15 @@ W2-W11 的全部 DoD 都封頂在 `source-ready` + `runtime-active(inactive post
 
 ---
 
-### W2 — P2 production seal/supersession caller(**收口+加固完成 2026-07-15**;production seal arming 屬 EA3)
+### W2 — P2 production seal/supersession caller ✅ **DONE_SOURCE_SECURED_HARDENED 2026-07-15**(production seal arming 屬 EA3)
 
 **目標**:讓 Phase-2 external-surface gate 的 sealed PASS artifact 有受控的 production 寫路徑(genesis Seal / Supersede / Revoke),移除「production 永不 seal」的永久阻塞,但**不創造任何接觸**。
 
 **R1+R2 收口紀錄**:四腿(PA 補簽/E2/E3/E4)+ 加固切片 PR#28 `19985f312`(staggered-expiry brick 修復=expiry 只約束 active leaf、/run 族 denylist、相對路徑拒絕、readdir errno fail-closed、anti-placeholder、8 新測試,102/0 雙審過);E2-F2 AMD 綁定漂移由 CC 裁 NOT-BLOCKER→AMD-07-08-01 澄清 #3 入典;殘餘 LOW/NOTE(Revoke 豁免壞 inputs、compile_error target 守衛、expiry 上界、測試加硬三項)入 R3+ 順手清單。
 
-**現狀(2026-07-15 實查,超前於 TODO W2 行的「PA design」標示)**:seal/supersede/revoke 三 action ledger(append-only hash chain、flock+dirfd、replay 驗證、pre-write guard)、`bin/ibkr_phase2_seal.rs`(default dry-run + `--apply`×`OPENCLAW_IBKR_PHASE2_SEAL_APPLY=1` 雙閘)、47 in-file 測試 + 靜態守衛已在 main(`0c90de9c2`→`324fb87a8`→`7902efe71`→`c4b52c2e2` 鏈)。**殘項**:PA caller-authority 設計文檔補簽(誰、在什麼運維窗、以何憑據跑 CLI)、E2/E3 對抗審與 E4 Linux cargo 證據收口、TODO W2 行狀態遷移。
+**現狀(R8 校準)**:seal/supersede/revoke 三 action ledger(append-only hash chain、flock+dirfd、replay 驗證、pre-write guard)、`bin/ibkr_phase2_seal.rs`(default dry-run + `--apply`×`OPENCLAW_IBKR_PHASE2_SEAL_APPLY=1` 雙閘)、55 in-file 測試 + 靜態守衛在 main;設計檔 `docs/execution_plan/ibkr_live_capability/2026-07-15--w2_seal_caller_authority_design.md`(R1 補簽)。**殘項(blocking):無(2026-07-15 全收口;R8 審計 CONFIRMED)**——殘餘 LOW/NOTE 六項入 R-順手清單(Revoke 豁免壞 inputs/compile_error 守衛/expiry 遠期上界/F-4/5/6 測試加硬/dry-run 診斷 UX;R8 確認全部仍 open、apply 側診斷分流已在 PR#28 落地)。
 
-**範圍 in**:caller authority 模型(誰、何時、以什麼介面觸發 seal:建議 engine 專用子命令或 operator-run helper,禁 GUI/FastAPI 觸發);option A 批准檔 6-binding 驗證(owner-only 0600 + 0700 祖先鏈 + symlink-reject;`source_commit==BUILD_GIT_SHA`;`adr==ADR-0048 ∧ amd==AMD-2026-07-08-01`;expiry/freshness;lineage 進 artifact hash;永不自注入 Operator);write-once/supersession/revocation lineage 語義落到 caller;default-inactive fail-closed;fake-only 測試。
+**範圍 in**:caller authority 模型(誰、何時、以什麼介面觸發 seal:建議 engine 專用子命令或 operator-run helper,禁 GUI/FastAPI 觸發);option A 批准檔 6-binding 驗證(owner-only 0600 + 0700 祖先鏈 + symlink-reject;`source_commit==BUILD_GIT_SHA`;`adr==ADR-0048 ∧ amd==AMD-2026-07-08-01`(此為原始設計範圍;**已被澄清 #3 取代**,現行控制批准綁定見 §4.1);expiry/freshness;lineage 進 artifact hash;永不自注入 Operator);write-once/supersession/revocation lineage 語義落到 caller;default-inactive fail-closed;fake-only 測試。
 **範圍 out**:任何 socket/接觸;live 憑證;GUI 面。
 
 **設計要點**:
@@ -155,11 +170,10 @@ W2-W11 的全部 DoD 都封頂在 `source-ready` + `runtime-active(inactive post
 
 ---
 
-### W-CI — CI 接線雜項(wave 1 隨行;S)
+### W-CI — CI 接線雜項 ✅ **DONE_LANDED_FIRST_GREEN 2026-07-15(PR#21 `48872c4fa`)**
 
-- **IBKR-CI-1**:把 37 個 `openclaw_types` acceptance 檔 + 引擎 in-file/IPC 測試接進 `ci.yml`(獨立 job 或併現有 rust job;macOS 2000min/月成本政策不變,Linux 為主)。目前 rust job 只 `cargo check`,IBKR 測試只在本地/E4 跑——emergency merge 可繞過,同 G0.5 當年的 CI drift 病根。
-- **IBKR-CI-2**:`helper_scripts/ci/ibkr_g4_symbol_audit.sh` 接入 `ci.yml`(default build 零 G4 socket 符號的機器斷言,守 AMD-07-08 static-guard 邊界)。**有效期注記**:此斷言效力至 W3 build-posture 重裁;若重裁採「能力進 default build」方案,同 PR 內把斷言改版為「connect 路徑必經 envelope 驗證」類負面斷言——不得留紅、不得靜默刪除。
-- Role:E1→E2→E4;無治理面。**DoD**:兩 job PR 觸發綠;假陽性率驗證(對照歷史 SHA)。
+**收口紀錄**:IBKR-CI-1(`rust-ibkr-tests` job,五 scope=types 74+287/engine ibkr/stock_etf/seal bin,首綠 7m35s)+ IBKR-CI-2(g4 symbol audit 入 CI)落地;質量鏈 E1→E2 REJECT(F1 IPC 缺)→修復→E2 APPROVE(31+2 溯源閉合)。W3/W4 追加 permit-stub/fake dev-dep-only/fake 缺席 nm/driver-absence 四守衛;結構守衛+classifier 擴 prefix 接 hosted CI(PR#42 `275c76c59`)。build-posture 已裁 B′(2026-07-16 R3):g4 零符號斷言 W3-W7 保綠,W8 落 production TCP factory 時同 PR 改四聯斷言,不得留紅、不得靜默刪除。
+**殘項(R8 審計定界,→ W5-S0/R9)**:classifier 補 `helper_scripts/ci/ibkr_*.sh` 三腳本;workflow static test 釘 `rust-ibkr-tests` job 存在+五審計步;W4 lockstep/parity pytest 入 `stock-etf-static-guards`;順手=`cargo test -p openclaw_fake_tws` 一行、seal-control 守衛掃描面 classifier 對齊、三 audit 正控腿 CI-inline。
 
 ---
 
@@ -189,7 +203,7 @@ W2-W11 的全部 DoD 都封頂在 `source-ready` + `runtime-active(inactive post
 
 ### W4 — P4 connection-health IPC/route + normalizer lockstep ✅ **DONE 2026-07-16(loop R7,W4-1)**
 
-**收口紀錄**:W4-1 lockstep 單 PR——`IbkrConnectionHealthReportV1` + Rust emitter(ephemeral manager 撞 permit → `external_verification_pending`,零 socket)+ `get_connection_health` IPC + FastAPI GET route + normalizer 三層 lockstep + fail-closed 四道 + driver-absence audit 入 CI。五腿:E2 APPROVE/E3 PASS(授權面無繞過)/IB PASS/E4 全綠/QA ACCEPT。GUI 面 defer W9(採 PA 建議,避免二次觸碰玄衡 shell)。**W5 blocking 移交(見 W5 節)**:Layer 3 lineage-present 分支窮舉性遠弱於 Layer 2 + parity 缺 operational-欄⊆guard superset 斷言,seal lineage 前必修。**pre-existing 治理債**:handler cap(HEAD 826>800)+ runtime-material-reader 3 紅守衛不在 CI(drift),W4 +5→831 加劇非引入(E2/E3/QA 三方驗屍),由 `task_2dbb7f53` 拆 handler + 接 CI。
+**收口紀錄**:W4-1 lockstep 單 PR——`IbkrConnectionHealthReportV1` + Rust emitter(ephemeral manager 撞 permit → `external_verification_pending`,零 socket)+ `get_connection_health` IPC + FastAPI GET route + normalizer 三層 lockstep + fail-closed 四道 + driver-absence audit 入 CI。五腿:E2 APPROVE/E3 PASS(授權面無繞過)/IB PASS/E4 全綠/QA ACCEPT。GUI 面 defer W9(採 PA 建議,避免二次觸碰玄衡 shell)。**W5 blocking 移交(見 W5 節)**:Layer 3 lineage-present 分支窮舉性遠弱於 Layer 2 + parity 缺 operational-欄⊆guard superset 斷言,seal lineage 前必修。**pre-existing 治理債**:handler cap(HEAD 826>800)+ runtime-material-reader 3 紅守衛不在 CI(drift),W4 +5→831 加劇非引入(E2/E3/QA 三方驗屍)——**已解(PR#42 `275c76c59`,2026-07-16:`stock_etf.rs` 826→779<800、結構守衛接 CI、classifier 擴 6 prefix;task_2dbb7f53 closed)**。
 
 **目標**:把 session 健康狀態沿 Rust IPC → FastAPI → GUI 唯讀鏈路端到端接通,同步演進 Python normalizer 的負空間 attestation。
 
@@ -210,6 +224,13 @@ W2-W11 的全部 DoD 都封頂在 `source-ready` + `runtime-active(inactive post
 - **normalizer Layer 3 窮舉補齊**:W4 的 lineage-present 分支只查 session_active/fingerprint/state 一致性,**遺漏** pacing 活動計數、`entitlement_state`、`report_status`、`reconnect_attempt`、`halt_reason`、attestation-populated。W5 一旦 seal attestation+gate 使 Layer 3 可達,這些遺漏欄即成 fail-open 面——必須對每欄補 per-field lineage-bound 不變量並納入同款精確有序 tripwire(維持 lockstep)。
 - **parity superset 斷言**:現 cross-surface parity 只鎖 guard⊆contract、fixture⊇contract,**未鎖 operational-欄⊆guard**——未來 emitter 加 operational 欄而 normalizer 忘 guard,三測仍綠。W5 前加「非 telemetry 的 struct bool/state 欄必屬某 guard 集」斷言(telemetry allowlist=`main_tokens_available`),漂移即紅。
 - entitlement enum 二元→三元見 W6;farm-connectivity 欄 + WeeklyReauth 出典見 W8。
+
+**切片計劃(2026-07-16 R8 定稿;S0 為 blocking 前綴,S0∥S1 為指名合格並行對)**:
+- **W5-S0 fail-closed 硬化 + CI 守衛鏈收口(R9;E3 加審)**:①normalizer Layer 3 窮舉補齊(pacing 活動計數/`entitlement_state`/`report_status`/`reconnect_attempt`/`halt_reason`/attestation-populated 逐欄 per-field lineage-bound 不變量+同款精確有序 tripwire);②parity 加 operational-欄⊆guard superset 斷言(telemetry allowlist=`main_tokens_available`);③CI 守衛鏈三洞(§4.5:classifier 補 ibkr_*.sh/static test 釘 job/lockstep+parity pytest 入 hosted CI);④順手:fake crate 測試行、W3 MODULE_NOTE 過時注釋(comment-only);⑤`ci.yml` `rust-check-macos` 掛 `github.event.pull_request.draft == false` 條件(loop v2 S4 draft 閘的落地載體)。檔案面=Python/tests/ci + engine .rs 注釋檔(comment-only),零 Rust 語義變更。
+- **W5-S1 typed row contracts(可與 S0 並行——檔案面不相交:S1=`openclaw_types` 新檔+acceptance)**:positions-row/executions-row/commissions-row/account-summary-row 契約。
+- **W5-S2 account/positions 消化**(engine,騎 session manager 請求路由;快照 staleness 標記)。
+- **W5-S3 open orders/executions/commissionReport 消化**(斷線 resync 語義)。
+- **W5-S4 attestation producer + 指紋三角測量 + 收口**(managedAccounts 實檢派生、DU* 白名單、未知前綴 fail-closed 當 live 拒;三腿指紋全鏈真值)。
 
 **範圍 in**:
 1. `reqAccountSummary`(net liq、cash、settled cash、buying power 等白名單 tag)、`reqPositions`、`reqOpenOrders`/`reqAllOpenOrders`、`reqExecutions` + commissionReport 流的 typed 消化(全部掛 session manager 的請求路由)。
@@ -239,7 +260,7 @@ W2-W11 的全部 DoD 都封頂在 `source-ready` + `runtime-active(inactive post
 **範圍 out**:歷史 K 線回補管線(進 W9 evidence/DB 或後續研究軌);entitlement 購買;Client Portal Web API(永禁)。
 
 **DoD**:`source-ready`;fake-TWS 覆蓋 delayed/realtime/無權限三態 + 訂閱線路耗盡 + DST 邊界;provenance 雜湊可重建。
-**依賴**:W3(W5 的 attestation 供 provenance 綁定)。**規模**:L。
+**依賴**:源碼依賴=W3(provenance 綁定 attestation 部分待 W5);排程閘=TODO 行 Dispatch after W5。**規模**:L。
 **風險**:paper 帳戶行情權限鏡像 live 訂閱(Client Portal **opt-in 共享**,且共享後 **live 與 paper 兩側不能同時取用**該行情——IB 2026-07-15 現勘)、免費檔常為 delayed——v1 delayed-only 姿態天然繞開互斥;**scorecard/成本重建必須顯式標 delayed,禁把 delayed 當 realtime 證據**(QC 審查點);D4 購買 realtime 時必須同時裁決共享拓撲(engine 專用取數 vs operator 觀察面讓位)。
 
 ---
@@ -270,7 +291,7 @@ W2-W11 的全部 DoD 都封頂在 `source-ready` + `runtime-active(inactive post
 **範圍 in**:
 1. **`ibkr_activation_envelope_v1` 驗證器**:全綁定驗證(§2 活化鐵律清單);nonce 原子消費(首次允許接觸前消費,replay/重複消費/stale issue/expiry/revoked epoch/kill-switch epoch 不符全拒);reconnect/scope 變更強制新活化;envelope 有效 ≠ 免除憑證/entitlement/market-hours/safety checks。
    - **W3 移交:reactivation 一致性**——W8 接 reactivation 時,無論 fresh-manager 或 in-place `reset_for_reactivation`,**必須**重置/重建 pacing governor(strike+bucket+queue+lines)並加「reactivation 後無 strike 殘留」測試(否則兩耦合態只重置其一→誤斷,E1/E2 R5 標)。
-   - **W3 移交:permit audit-scope 擴張(E3-F1,W4/W8 blocking 前置)**——S2 permit-stub 靜態守衛現 file-scoped 於 `ibkr_tws_session.rs`;W3-S4 引入 `ibkr_tws_driver.rs` 的泛型 permit connect 路徑(`SessionDriver<P: ConnectPermitProvider, F>`)。W8 落 production TCP factory + W4 落 production driver caller 後,四聯 audit(唯一 connect 位點/connect 前必經 permit 且 `PermitToken` move 消費/fake 缺席/**provider 型別唯一性**)**必須涵蓋 `ibkr_tws_driver.rs` 及任何新 connect-path 檔**,斷言全 production 域唯一 `impl ConnectPermitProvider`=`EnvelopeRequiredStub`、`PermitToken::mint()` 全域零 production 呼叫點。**W4 wiring PR 前 blocking 複核**(E3 2026-07-16 裁;當前 driver 整面 DCE 不可利用,故屬 W4/W8 tripwire 非本包阻擋)。
+   - **W3 移交:permit audit-scope 擴張(E3-F1,W4/W8 blocking 前置)**——S2 permit-stub 靜態守衛現 file-scoped 於 `ibkr_tws_session.rs`;W3-S4 引入 `ibkr_tws_driver.rs` 的泛型 permit connect 路徑(`SessionDriver<P: ConnectPermitProvider, F>`)。W8 落 production TCP factory + W4 落 production driver caller 後,四聯 audit(唯一 connect 位點/connect 前必經 permit 且 `PermitToken` move 消費/fake 缺席/**provider 型別唯一性**)**必須涵蓋 `ibkr_tws_driver.rs` 及任何新 connect-path 檔**,斷言全 production 域唯一 `impl ConnectPermitProvider`=`EnvelopeRequiredStub`、`PermitToken::mint()` 全域零 production 呼叫點。W4 wiring 複核已於 R7 完成(driver-absence audit 入 CI);**四聯 audit 首階段擴張隨 W8a 落地(承 E3-F1),W8 落 production TCP factory 時做第二階段擴張並吸收**。
 2. **Operator 活化紀錄(authenticated)**:Rust-owned 驗證——issuer identity + verification key 或 immutable approval hash、envelope payload digest、nonce、account/session/build scope 綁定;實作與 W7 的 option B(HMAC/簽名)合一設計,達到 authorization.json 紀律 parity;Python/FastAPI/GUI 只能 request/display 活化流程,**不得創建/更改/轉發原始授權材料或代 attest**。
 3. **風控接線**:`stock_etf_risk_policy_v1` machine-check;`risk_config_stock_etf_paper.toml` + live 變體 config 分離(readonly/paper/shadow/tiny-live/live 五態 config 可重現,live-capable build ≠ active build);notional/order/position 上限、Guardian、Decision Lease、global Cost Gate lineage 進 envelope 綁定;**global Cost Gate 不得因本 lane 降低**。
 4. **kill switch**:kill-switch epoch 全域檢查點(transport 層 + order 層雙掛);`stock_etf_kill_switch_and_disable_cleanup_runbook_v1` machine-check(disable flags、collector stop、GUI disabled 姿態、live-secret 缺席、forward-only 保留、append-only audit)。
@@ -284,6 +305,23 @@ W2-W11 的全部 DoD 都封頂在 `source-ready` + `runtime-active(inactive post
 
 ---
 
+### W8a — readonly-scope activation envelope 最小切片(D2 carve;2026-07-16 R8 入 §5 排程)
+
+**目標**:`ibkr_activation_envelope_v1` struct + 驗證器的 **readonly-scope 最小實體**:全綁定驗證(§2 活化鐵律清單)、nonce 原子消費、issued-at/expiry、revocation epoch、kill-switch epoch;**order verb 一律結構性拒**(readonly scope 外全拒);拒絕矩陣標準與 W8 完全同級,CC/E3/IB 審不減。
+**定位紀律**:純 no-contact 開發,在 AMD-07-11 development 授權內,**不預決 D2**(是否提前點火 EA1-EA4 仍是 Operator 活化時序決策);W8 全包落地時**吸收**本切片(共用同一驗證代碼路徑,禁兩套語義漂移——同 W2「caller 與 consume 共路徑」原則)。落地本切片的唯一目的=讓 EA1-EA3 在 Operator 就緒時零工程等待。
+**範圍 out**:paper/tiny-live/live scope、option B HMAC(歸 W7/W8)、GUI 顯示(W9)。
+**DoD**:`source-ready`;拒絕矩陣逐綁定 + nonce 併發競態 + 「readonly envelope + 任何 order verb → 拒」+「seal 在位無 envelope → 拒」;permit audit-scope 四聯斷言隨本切片首次擴到 driver 面(承 W3 移交 E3-F1)。
+**依賴**:源碼依賴=W3;排程閘=TODO 行 Dispatch after W5(理由=先收 W5-S0 CI 守衛鏈+避免與 W5 engine 面撞工,非源碼依賴)。**規模**:M。**與 W9a 可並行**(檔案面/reviewer 集不相交)。
+
+### W9a — IB Gateway 安裝/systemd unit 預備(D2 carve)
+
+**目標**:Gateway 安裝腳本 + systemd unit 檔(default **disabled/masked**)+ headless 預備(nightly restart 窗、watchdog 掛點、log rotation 配置)。**接觸語義定界**:「接觸」=AMD-07-11 語義的 broker API/session/資料/訂單效果;installer 從 IBKR 官方來源下載屬**供應鏈動作**,僅限 operator 批准窗內、官方 URL+checksum 釘定(pin-by-reference,承 DOC-06 RM-4)。**執行者**:operator 親手,或 OPS agent 於批准窗內代跑(批准紀錄+before/after 快照按 RM-1 落檔)。**安裝不產生任何接觸**(從不啟動、從不登入,enable 屬 EA2)。
+**範圍 out**:enable/登入/任何 socket;live Gateway(4001)配置(EA7)。
+**DoD**:腳本+unit source-ready;若 operator 開窗執行安裝:OPS preflight/postcheck 證據(unit masked、零 listener、零 ~/Jts 進程);**dormant 簽名遷移**:安裝後「~/Jts 不存在」失效,新簽名=~/Jts 存在但零進程+unit masked+4001/4002/7496/7497 零 listener(§4.3 快照同步加日期注記)。
+**依賴**:源碼依賴=無;排程閘=TODO 行 Dispatch after W5;安裝執行需 operator 開窗。**規模**:S-M。Role:PM→E1→E2→E3/OPS/IB→PM(E3=供應鏈/unit 權限面)。
+
+---
+
 ### W9 — DB/evidence、FastAPI、GUI、service config、observability、rollback
 
 **目標**:把能力包進完整的運維外殼:資料落地、全面唯讀 API、GUI Phase 4、服務配置、觀測、回滾。
@@ -292,7 +330,7 @@ W2-W11 的全部 DoD 都封頂在 `source-ready` + `runtime-active(inactive post
 1. **DB**:`stock_etf_db_evidence_ddl_v1` 從 source-only 走到 V### migration——**單獨 migration 授權是 Operator/PM 決策點(§9)**;Linux PG dry-run + double-apply 強制;Guard A/B/C 控制;paper/shadow 分離、audit-event 存儲、自然鍵。
 2. **FastAPI**:唯讀面補全(health/account/positions/orders/executions/market/entitlement/activation-status);方法分區 + allowlist gate 維持;非 GET 僅開放**單一具名**受限 method(activation-request/display 專用,**不接收、不轉發任何授權材料**),同 PR 顯式修訂 GET-only 靜態守衛白名單並引 AMD-07-11 request/display 條款為據(修訂模式參照已廢止 AMD-07-09-01 invariant 9 的單方法例外寫法);其餘面 GET-only 守衛與回歸測試原樣保留,E3 專審。
 3. **GUI Phase 4**:10 個唯讀子視圖已在(§4.2),W9 重點不是蓋新面板而是**真值接通**:`gui_lane_contract_v1` artifact(GET-only、client state untrusted、route/cache/auth 負測試、stale-cache 跨 lane 拒絕、crypto Decision Lease/risk 回歸)+ 新增 entitlement 狀態與活化流程展示(display-only);**騎現行玄衡 shell(tokens.css 雙主題),遵 gui-style-guide,sign-off 必跑 node --check**;GUI 數字禁 fake(`present && accepted` 才渲染,承 AMD-07-08 的 $0.00 誠實缺陷修復精神)。
-4. **Service config**:IB Gateway 安裝 + systemd unit + headless 自動化預備(**安裝本身不產生接觸,可在 W9 完成;unit default disabled/masked,enable 屬 EA2**;nightly restart 窗、watchdog、log rotation);engine env 持久化(`OPENCLAW_DATA_DIR` home 路徑;durable systemd unit 既有欠賬一併收);bind host 安全預設(Tailscale IPv4 否則 loopback,禁 0.0.0.0)。
+4. **Service config**:(2026-07-16 R8 注:Gateway 安裝/unit 預備已 carve 至 **W9a**,本項承接其交付並收殘面)engine env 持久化(`OPENCLAW_DATA_DIR` home 路徑;durable systemd unit 既有欠賬一併收);bind host 安全預設(Tailscale IPv4 否則 loopback,禁 0.0.0.0);W9a 已交付面此處僅整合驗收。
 5. **Observability**:session FSM 狀態、pacing 預算、attestation/entitlement 狀態、訂單生命週期計數、對賬差異、kill-switch epoch——落 DB 告警 sink + healthcheck 整合(**live-slot 出現且無有效 tiny-live/live 活化 lineage → healthcheck fail-closed(typed blocker)**;唯一放行條件 = W8 定義的 Rust 驗證現行 tiny-live/live 活化紀錄 epoch,EA7 引用此語義)。
 6. **Rollback**:binary 備份 + config 回滾 + disable/cleanup runbook 演練腳本(machine-check 承 W8)。
 
@@ -323,20 +361,32 @@ W2-W11 的全部 DoD 都封頂在 `source-ready` + `runtime-active(inactive post
 
 ---
 
-**依賴圖與建議波次**(reviewer 帶寬允許時的最大並行):
+### 5.5 剩餘工程日誌安排(R8 定稿;live-ready 為止)
 
 ```
-W2 ──────────────┐
-W3 ─┬─ W4 ───────┤
-    ├─ W5 ─┬─────┤
-    └─ W6 ─┴─ W7 ── W8 ── W9 ── W10 ── W11
+[✅W2 ✅W-CI ✅W3 ✅W4]
+W5(S0∥S1→S2→S3→S4)─┬─ W8a ∥ W9a(carve;與 W6 平行)
+                     ├─ W6(S1→S2→S3)
+                     └────→ W7(PA 切片→S1..S4)── W8 ── W9 ── W10 ── W11
 ```
-- 波次 1:W2 收口 + W-CI + W3(並行)
-- 波次 2:W4 + W5 + W6(騎 W3;三包可並行,共享 fake-TWS harness)
-- 波次 3:W7(獨佔窗,效果面全量 review)
-- 波次 4:W8 → 波次 5:W9 → 波次 6:W10 → W11
-- 規模合計:M+L+SM+L+L+XL+L+XL+M+M ≈ **6-10 個有效工程週**(多 agent 波次;reviewer/E4 帶寬是主要變異源)。
-- **TODO 對位注記**:本節並行建議凡鬆於 TODO.md 行前置者(W2∥W3、W4∥W5∥W6),派工前先按既有流程更新 TODO 對應行;W-CI-1/2 在 TODO 尚無行,需先補行才可派(TODO.md 是 dispatch 唯一正本)。
+
+| 輪 | 切片 | 並行注記 |
+|---|---|---|
+| R8 | 本次校準(docs)+ loop v2 | docs-only |
+| R9 | **W5-S0** fail-closed 硬化 + CI 守衛鏈收口 | 可 ∥ R10(檔案面不相交,loop v2 manifest 程序把關) |
+| R10 | **W5-S1** typed row contracts | 同上 |
+| R11-R13 | **W5-S2/S3/S4** → W5 收口 | 序列(同 engine 面) |
+| R14/R15 | **W8a ∥ W9a**(carve) | 檔案面+reviewer 集全不相交,首選並行對;與 R16+ W6 亦可交錯 |
+| R16-R18 | **W6-S1/S2/S3**(contract details+PIT/行情+entitlement 三態/日曆 DST)→ W6 收口 | S1 含 W3 移交 F1 historical ordering |
+| R19-R22 | **W7**(PA 切片計劃→前置契約/狀態機/cash 約束/對賬)→ W7 收口 | XL 獨佔窗;T+1/GFV 需 IB 現勘前置;option B 觸發 |
+| R23-R25 | **W8**(envelope 全量 承 W8a/option B 活化紀錄/風控/kill switch/audit)→ W8 收口 | 含 W3 移交 reactivation 重置+四聯 permit audit **第二階段擴張**(TCP factory 面;首階段已隨 W8a) |
+| R26-R28 | **W9**(DB migration D1 裁決/FastAPI/GUI Phase 4/service/observability/rollback)→ W9 收口 | XL;GUI 面承 W4 defer |
+| R29 | **W10** Mac 全量+fake-TWS E2E+Linux inactive deploy+QA+三端 | operator 開 deploy 窗 |
+| R30 | **W11** 對抗性全域 rescan → 終態宣告 | gap matrix 只許外部殘項 |
+
+- **工期估計(R8 修訂)**:剩餘 ~22 輪;實證 cadence R3-R7=5 輪/2 天(峰值),持續性折算 1.5-2 輪/天 ⇒ **工程側 live-ready ≈ 2.5-4 個有效工程週**(原 v1 估 6-10 週,W2-W4 已消化+cadence 實證上修)。主要變異源:reviewer/E4 帶寬、agent 配額死亡、operator 決策窗(D1/D2)、CI spending;**XL 包(W7/W9)每輪切片吞吐未經同規模實證,輪數或膨脹**。
+- **EA 疊加時間軸(若採 D2;各週標記按樂觀端 ~2 輪/天,悲觀端順延 ×1.6)**:W5+W8a+W9a 齊(≈第 1-1.5 週末)→ EA1-EA3 可點火(全 Operator 動作);EA4 readonly soak 7-14 天與 W6/W7 開發平行;W7+W8+option B 齊(≈第 3 週)→ 申請 EA5 開 paper 窗 → evidence clock 6-8 週起跑;工程終態宣告(W11)與 clock 平行,tiny-live(EA7)最早 ≈ clock 開窗後 6-8 週(受 OPEN-GOV-1/D7 保守讀法約束)。
+- **TODO 對位注記**:現行並行面=W5-S0∥W5-S1、W8a∥W9a、carve∥W6;凡鬆於 TODO.md 行前置者派工前先更新 TODO 對應行;W8a/W9a 已補 TODO 行(v816)。TODO.md 是 dispatch 唯一正本。
 
 ## 6. 外部活化跑道 EA1→EA8(全 Operator-gated;本節是設計不是授權)
 
@@ -346,14 +396,14 @@ W3 ─┬─ W4 ───────┤
 |---|---|---|---|
 | **EA1 憑證 custody** | Operator 手動放置 readonly/paper 憑證入 `<secrets-root>/external/ibkr/{readonly,paper}/`(loader 只驗 fingerprint;live slot 此時**必須仍缺席**) | 放置 + 確認 slot 指紋 | slot fingerprint 記錄 |
 | **EA2 Gateway paper 起立** | enable W9 交付的 systemd unit(paper 4002、loopback、read-only API 設定);watchdog/nightly restart 演練(Gateway 現況未安裝——安裝與 unit 預備歸 W9,EA2 只做 enable+登入) | 批准 enable + IBKR 帳號側 paper 登入(2FA 適用性按 IBKR 現行政策,EA1 時由 IB 現勘) | OPS runbook 執行證據 |
-| **EA3 G4 首次接觸(readonly)** | production seal(W2 路徑,option A 批准檔;**每次 apply 前歸檔該次批准檔精確位元組——AMD-07-08-01 澄清 #3 第 4 點,審計重算閉合必要條件**)→ readonly envelope + 活化紀錄 → 首次 **health/serverTime** 真讀(嚴格對齊 AMD-07-08 G4 讀集;accountSummary 等歸 EA4 逐項納入) | **一次性顯式批准**(AMD-07-08 G4 語義)+ 活化紀錄 | QA runtime 證據;`session-ready` 達成 |
+| **EA3 G4 首次接觸(readonly)** | 前置:**AMD-07-08-01 澄清 #3 Operator acknowledgement(尚待,PROGRESS R2)**;production seal(W2 路徑,option A 批准檔;**每次 apply 前歸檔該次批准檔精確位元組——AMD-07-08-01 澄清 #3 第 4 點,審計重算閉合必要條件**)→ readonly envelope + 活化紀錄 → 首次 **health/serverTime** 真讀(嚴格對齊 AMD-07-08 G4 讀集;accountSummary 等歸 EA4 逐項納入) | **一次性顯式批准**(AMD-07-08 G4 語義)+ 活化紀錄 | QA runtime 證據;`session-ready` 達成 |
 | **EA4 readonly soak + entitlement 確認** | 7-14 天唯讀穩定窗:session FSM/重連/nightly restart 實測;accountSummary/positions 等唯讀集按 envelope scope 逐項納入;delayed 行情實態;三角指紋長期一致。**重連活化紀律**:每次 reconnect(含 nightly restart 後)需新 envelope + 活化紀錄——soak 期預設 Operator 每日活化;如欲設計 scoped 排程性重連授權(單活化綁定預告重啟窗),屬 AMD-07-11 字面外,先開 OPEN-GOV-2 由 CC 裁決,未裁前按每日活化執行 | 讀 soak 報告 + 每日(或裁決後按窗)活化 | `entitlement-ready`;W3 協議假設校準 |
 | **EA5 paper effect 活化** | 開窗前置:**W7+W8 全綠 + option B 落地** + PIT universe / strategy hypothesis / market-data provenance / reference-data **四契約 accepted + 全 hash 凍結(D5 已裁)**;然後 paper envelope(option B HMAC 紀律)→ 首批 paper 訂單生命週期真跑 + 對賬 → 開 `stock_etf_evidence_clock_v1`(6-8 週 paper/shadow 窗) | paper 活化紀錄 + evidence clock 開窗批准 | `effect-authorized`+`evidence-producing`(paper) |
 | **EA6 證據與研究收斂** | scorecard/benchmark/cost 重建與證據收斂(QC/MIT 鏈);`tiny_live_adr_eligibility_v1` 討論閘評估(預註冊已在 EA5 前完成,此處不再改假設) | 讀 QC/MIT verdict | scorecard verdict artifact |
 | **EA7 tiny-live** | live 憑證 slot 創建(此時才允許,單獨批准;出典:AMD-07-11 活化紀錄路徑——ADR-0048 Denied Paths 的 live-slot 行僅於有效 tiny-live/live 活化 lineage 下被壓倒,healthcheck 放行語義見 W9-5)+ live Gateway(4001)+ tiny-live envelope(顯式限時、exact scope、極小 notional caps)+ 首單~soak | **live 資金 + tiny-live 活化紀錄**(逐窗;是否另需新 ADR/AMD 見 OPEN-GOV-1 第二問,未裁前按需要執行) | money-boundary 證據 |
 | **EA8 live ramp → VERIFIED** | 額度階梯逐級放大(每級新活化);IB/E3/OPS/QA 聯合 attested 證據包 → `IBKR_FULL_LIVE_READY_VERIFIED` | 每級活化 + 終態確認 | 終態證據包 |
 
-**平行化建議(修訂版,以本段為準)**:若 Operator 採 D2(唯讀跑道提前),必須先 carve 兩個顯式提前件——**W8a** = readonly-scope `ibkr_activation_envelope_v1` 驗證器最小切片(nonce/expiry/revocation/kill-switch epoch 全綁定,拒絕矩陣同 W8 標準,CC/E3/IB 審不減);**W9a** = Gateway 安裝 + systemd unit 預備(masked)。**EA1-EA3 前置 = W3-W5 + W8a + W9a**;不做 carve 則 EA1-EA3 前置維持完整 W8/W9。EA 各步 W 前置總表:EA5 = W7+W8 全綠 + option B(建議含 W9);EA7+ = W7-W11 全綠。此為進度槓桿,是否採用由 Operator 定(§9 D2)。
+**平行化建議(R8 修訂,以本段為準)**:W8a/W9a 兩個 carve 件已入 §5 排程(R14/R15)——**開發面不需等 D2**(純 no-contact,AMD-07-11 授權內);D2 只裁「EA1-EA4 是否提前點火」,時點=W5+W8a+W9a 齊備時。**EA1-EA3 前置 = W3-W5 + W8a + W9a**;W8a/W9a 未齊則 EA1-EA3 前置回落完整 W8/W9。EA 各步 W 前置總表:EA5 = W7+W8 全綠 + option B(建議含 W9);EA7+ = W7-W11 全綠。
 
 ## 7. 橫切工程紀律
 
@@ -386,7 +436,7 @@ W3 ─┬─ W4 ───────┤
 | # | 決策 | 時點 | 預設建議 |
 |---|---|---|---|
 | D1 | DB migration 授權(evidence DDL → V###) | W9 前 | 批;Linux dry-run+double-apply 證據隨附 |
-| D2 | 唯讀跑道提前並行(EA1-EA4 提前) | W5 收口 | **建議採用,但硬前置 = 先 carve W8a(readonly envelope 最小切片)+ W9a(Gateway 安裝/unit 預備)**,見 §6 平行化建議——校準真實 session 假設,壓縮總 wall-clock |
+| D2 | 唯讀跑道提前並行(EA1-EA4 提前點火) | W5+W8a+W9a 齊備時(≈R15 後,在即) | **建議採用**——W8a/W9a 開發已入 §5 排程(R14/R15,不需 D2);D2 只裁 EA 點火時序。採用=校準真實 session 假設+壓縮總 wall-clock;EA1-EA4 每步仍逐一 Operator 活化 |
 | D3 | paper/live 專用 IBKR username 拆分 | EA1 前 | 建議拆(避免互踢) |
 | D4 | 行情 entitlement 購買(realtime US equities) | EA4 後 | 先 delayed 跑證據窗,按 QC 需求再買;**購買時必須同時裁決 live↔paper 行情共享拓撲**(共享後兩側互斥取用,見 W6 風險) |
 | D5 | 策略假設家族與 universe(低/中換手、日/週頻,USD 股/ETF) | EA5 前(QC 研究軌可先行) | QC 預註冊提案後裁 |
@@ -399,7 +449,7 @@ W3 ─┬─ W4 ───────┤
 
 ## 10. 維護規則
 
-- 本文件由 PM 維護;每個 W 收口時更新 §4.4 差距表與 §5 該節狀態行(一行,含 SHA);EA 階段推進時更新 §6 表。
-- **自主推進 loop(2026-07-15 起)**:協議正本 `docs/agents/ibkr-live-capability-loop.md`(R-N 迭代:同步門→選工→派工→質量門→一輪一 PR→三端收斂→記帳→自排;接棒協議=狀態 100% 落 repo),帳本 `docs/execution_plan/ibkr_live_capability/PROGRESS.md`。loop 只推 W2-W11+W-CI 的 no-contact 工程;EA 跑道仍全 Operator-gated。
+- 本文件由 PM 維護;**每 W 收口時的固定回寫清單(loop v2 S6 checklist,與代碼同 PR)**:§5 該 W 節狀態行(一行,含 SHA)+ §4.4 對應行 + **§0 現況一句話** + 被本輪推翻的任何舊行(§4.2/§4.3 快照段不回寫,只加日期注記);EA 階段推進時更新 §6 表。教訓:v1 只刷「本輪行」導致 §0/§4.4 凍結在 07-15 而 §5 局部已 DONE 的段內自相矛盾(R8 校準修復)。
+- **自主推進 loop(v2,2026-07-16 起)**:協議正本 `docs/agents/ibkr-live-capability-loop.md`(R-N 迭代:同步門→選工(file-surface manifest 並行程序)→派工→質量門→一輪一 PR→三端收斂→固定記帳 checklist→自排;反空轉硬規則+接棒死亡分類),帳本 `docs/execution_plan/ibkr_live_capability/PROGRESS.md`。loop 只推 W5-W11+W8a/W9a 的 no-contact 工程;EA 跑道仍全 Operator-gated。
 - 措辭紀律:任何更新不得把 source 就緒寫成 broker 授權(AMD-07-11 §Required source-of-truth updates 對所有摘要文件的要求)。
 - 撞版防護:multi-session 環境,更新走 `git commit --only IBKR_TODO.md`,推前 fetch;main 禁直推,走 feature branch → exact-head PR → merge。
