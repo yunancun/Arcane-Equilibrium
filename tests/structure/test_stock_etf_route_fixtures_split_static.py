@@ -35,6 +35,7 @@ EXPECTED_EXPORTS = {
     "_valid_account_status",
     "_valid_api_allowlist",
     "_valid_authorization_status",
+    "_valid_connection_health",
     "_valid_data_foundation_status",
     "_valid_disable_cleanup_status",
     "_valid_evidence_status",

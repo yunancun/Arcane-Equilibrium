@@ -39,9 +39,11 @@ use openclaw_types::{
 };
 use std::sync::OnceLock;
 
+mod health_summary;
 mod precontact;
 mod request_summaries;
 mod status_summaries;
+use health_summary::connection_health_summary;
 use precontact::{connector_skeleton_summary, phase2_precontact_summary};
 use request_summaries::{
     fill_import_request_summary, operation_for_method_and_params, paper_request_envelope_summary,
@@ -141,6 +143,9 @@ pub(in crate::ipc_server) fn handle_stock_etf_ipc(
         }
         "stock_etf.get_disable_cleanup_status" => {
             JsonRpcResponse::success(id, disable_cleanup_status_summary(phase2))
+        }
+        "stock_etf.get_connection_health" => {
+            JsonRpcResponse::success(id, connection_health_summary(phase2))
         }
         _ => {
             let operation = match operation_for_method_and_params(method, params) {

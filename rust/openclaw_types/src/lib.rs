@@ -15,6 +15,7 @@ pub mod ibkr_phase2_artifact;
 pub mod ibkr_phase2_gate;
 pub mod ibkr_phase2_policies;
 pub mod ibkr_phase2_runtime;
+pub mod ibkr_tws_connection_health;
 pub mod ibkr_tws_session_state;
 pub mod intent;
 pub mod price;
@@ -93,6 +94,12 @@ pub use ibkr_phase2_runtime::{
     IbkrGatewayProcessMode, IbkrSecretSlotContractBlocker, IbkrSecretSlotContractV1,
     IbkrSecretSlotContractVerdict, IbkrSecretSlotPosture, IBKR_API_SESSION_TOPOLOGY_CONTRACT_ID,
     IBKR_SECRET_SLOT_CONTRACT_ID,
+};
+pub use ibkr_tws_connection_health::{
+    IbkrConnectionHealthBlocker, IbkrConnectionHealthEntitlementStateV1,
+    IbkrConnectionHealthHaltReasonV1, IbkrConnectionHealthReportStatus,
+    IbkrConnectionHealthReportV1, IbkrConnectionHealthVerdict,
+    IBKR_CONNECTION_HEALTH_REPORT_CONTRACT_ID,
 };
 pub use ibkr_tws_session_state::{
     IbkrTwsErrorClassV1, IbkrTwsSessionEventV1, IbkrTwsSessionStateV1, IB_INFO_CODE_FLOOR,
