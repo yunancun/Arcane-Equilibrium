@@ -54,12 +54,12 @@ pub mod ai_service_client;
 pub mod backfill;
 // Sprint 1B Earn first stake B3（2026-05-23）：Flexible Saving only / 5 endpoint
 // 走共用 BybitRestClient（HMAC + rate limit + retCode 觀測）。
+pub mod bounded_probe_active_order;
+pub mod bounded_probe_near_touch;
 pub mod bybit_earn_client;
 pub mod bybit_private_ws;
 pub mod bybit_private_ws_status_writer;
 pub mod bybit_rest_client;
-pub mod bounded_probe_active_order;
-pub mod bounded_probe_near_touch;
 // P0-1c boot/build SHA 可觀測面（2026-07-04）：build.rs 嵌入的 git SHA/build 時間
 // 常量 + boot_history.jsonl append，讓運行進程的代碼世代可對表部署 HEAD。
 pub mod boot_observability;
@@ -86,12 +86,12 @@ pub mod demo_learning_lane_ledger;
 pub mod demo_learning_lane_rotation;
 // 2026-07-02 soak dispatch-edge containment §1.2:envelope 生命週期閘
 // (30s TTL 緩存 + last_good 硬上界),step_4_5_dispatch withhold 判定用。
-pub mod demo_learning_lane_soak_gate;
-pub mod demo_learning_lane_writer;
 #[cfg(test)]
 mod demo_learning_lane_hot_path_tests;
+pub mod demo_learning_lane_soak_gate;
 #[cfg(test)]
 mod demo_learning_lane_tests;
+pub mod demo_learning_lane_writer;
 pub mod drawdown_revoke;
 pub mod dynamic_risk_sizer;
 pub mod edge_estimates;
@@ -144,6 +144,12 @@ pub mod ibkr_tws_pacing;
 // Disconnected（INV-1;granting provider 僅測試域）。零真 socket、零 production caller（W4 IPC 才接）→
 // 與 B1/wire/session/pacing 同屬 default build 被 DCE 的 TWS 連接器面（g4 + fake 缺席審計驗證）。
 pub mod ibkr_tws_driver;
+// IBKR W5-S2 account/positions 消化層：reqAccountSummary/reqPositions 訂閱生命週期狀態機 +
+// 入站行消化（W5-S1 typed row 契約,先契約後消化禁裸 map）+ typed staleness。G1 version 門控
+//（position v<3 拒/serverVersion<101 blocker）、G2 哨兵 config 守衛、G3 單訂閱結構性不變量。
+// 出站經 pacing 單一出口（OutboundClass::AccountData）。純同步、注入時鐘、零 socket——與
+// wire/session/pacing/driver 同屬 default build 被 DCE 的 TWS 連接器面（B′ 姿態,g4 audit 保綠）。
+pub mod ibkr_tws_account_data;
 // IBKR B1 只讀 TWS 連接器（ADR-0048 / AMD-2026-07-08-01，G4 首次接觸）：connect handshake
 // + reqCurrentTime 最小首接觸；純 codec + generic driver + 3 層惰性 gate；唯一具體
 // TcpStream::connect 於 `ibkr_g4_contact` feature 後（default build 無 socket、無 caller）。
@@ -196,9 +202,9 @@ pub mod scanner;
 pub mod secret_env;
 // P0-LG-3 Wave 2.4.A T4：supervised-live 不可變稽核軌跡 writer（V104 supervised_live_audit）。
 // T1 後續另加 `pub mod supervised_live_sm;`（SM 核心），兩者檔案零 overlap。
-pub mod supervised_live_audit_writer;
 pub mod strategies;
 pub mod strategist_scheduler;
+pub mod supervised_live_audit_writer;
 // LG-3 Wave 2.4.A T1（2026-05-30）：supervised-live 7-state 狀態機核心。
 // supervised-live session 的 control-plane meta state（SoT #1）+ 30s 5-SoT 對賬
 // reconciler。純狀態機，不下單、不繞 5-gate live 邊界、不繞 Decision Lease；

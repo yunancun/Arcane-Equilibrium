@@ -623,6 +623,145 @@ async fn reconnect_after_io_drop_backoff_then_reconnects() {
 }
 
 // ===========================================================================
+// W5-S2:account/positions 消化端到端（訂閱 pump 經 governor 單一出口 + 入站消化 + 斷線失效）
+// ===========================================================================
+
+#[tokio::test]
+async fn w5_account_data_end_to_end_digests_and_marks_disconnect() {
+    use crate::ibkr_tws_account_data::SnapshotStaleness;
+    use openclaw_types::IbkrAccountSummaryTagV1;
+
+    let (mut driver, handle) = fake_driver(scenarios::account_data_session(ACCOUNT_SUMMARY_REQ_ID));
+    driver.enable_account_data_subscriptions();
+    let mut clock = TestClock::at(1_000);
+    // 全 cycle:Ready → 首 serve tick 送訂閱(經 governor AccountData 類)→ 消化全量+End+增量
+    // → 腳本盡 EOF → IoDropped。
+    assert_eq!(
+        driver.run_connect_cycle(&mut clock).await,
+        CycleOutcome::Served(ServeEnd::IoDropped)
+    );
+    // 出站證明:reqAccountSummary(OUT 62,group=All+9 tag)與 reqPositions(OUT 61)真被送出
+    //（皆過 send_framed=grant 消費,單一出口編譯期強制)。
+    let frames = handle.received_message_frames().await;
+    let ids: Vec<String> = frames.iter().map(|f| frame_fields(f)[0].clone()).collect();
+    assert!(
+        ids.contains(&"62".to_string()),
+        "應送 reqAccountSummary(62): {ids:?}"
+    );
+    assert!(
+        ids.contains(&"61".to_string()),
+        "應送 reqPositions(61): {ids:?}"
+    );
+    let req_summary = frames
+        .iter()
+        .map(|f| frame_fields(f))
+        .find(|f| f[0] == "62")
+        .unwrap();
+    assert_eq!(req_summary[3], "All", "group 必為 All");
+    assert_eq!(
+        req_summary[4].split(',').count(),
+        9,
+        "tags=白名單 9 值單欄逗號"
+    );
+    // 消化證明:summary 2 tag(增量覆蓋 BuyingPower=48000)+ 1 倉位。
+    let digest = driver.account_data();
+    assert_eq!(digest.summary_rows().count(), 2);
+    let bp = digest
+        .summary_rows()
+        .find(|r| r.tag == IbkrAccountSummaryTagV1::BuyingPower)
+        .unwrap();
+    assert_eq!(bp.value_decimal, "48000", "節拍增量應覆蓋首回全量值");
+    let pos = digest.positions_rows().next().unwrap();
+    assert_eq!((pos.con_id, pos.position_decimal.as_str()), (756733, "100"));
+    // 斷線失效:serve 結束(EOF)→ 快照標 DisconnectedStale(重連需重訂閱)。
+    assert_eq!(
+        digest.summary_staleness(0),
+        SnapshotStaleness::DisconnectedStale
+    );
+    assert_eq!(
+        digest.positions_staleness(0),
+        SnapshotStaleness::DisconnectedStale
+    );
+}
+
+#[tokio::test]
+async fn w5_off_whitelist_tag_invalidates_snapshot_but_session_survives() {
+    use crate::ibkr_tws_account_data::SnapshotStaleness;
+
+    // 表外 tag → 契約 UnknownDenied blocker:快照 Invalidated,session 不因此斷(EOF 才斷)。
+    let (mut driver, _h) = fake_driver(scenarios::account_summary_off_whitelist_tag(
+        ACCOUNT_SUMMARY_REQ_ID,
+    ));
+    driver.enable_account_data_subscriptions();
+    let mut clock = TestClock::at(1_000);
+    assert_eq!(
+        driver.run_connect_cycle(&mut clock).await,
+        CycleOutcome::Served(ServeEnd::IoDropped),
+        "表外 tag 是資料層 reject,非 wire 損壞——session 應活到腳本 EOF"
+    );
+    // 斷線標記只覆蓋活躍相位;Invalidated 保留(毒化事實不被斷線沖淡)。
+    assert_eq!(
+        driver.account_data().summary_staleness(0),
+        SnapshotStaleness::Invalidated
+    );
+    assert_eq!(driver.account_data().summary_rows().count(), 0);
+}
+
+#[tokio::test]
+async fn w5_position_version_too_old_rejected_session_survives() {
+    // G1:v2 position 行(無 avgCost)→ typed 拒不捏值;positionEnd 仍消化(訂閱 Live 空快照)。
+    let (mut driver, _h) = fake_driver(scenarios::position_version_too_old());
+    driver.enable_account_data_subscriptions();
+    let mut clock = TestClock::at(1_000);
+    assert_eq!(
+        driver.run_connect_cycle(&mut clock).await,
+        CycleOutcome::Served(ServeEnd::IoDropped)
+    );
+    assert_eq!(
+        driver.account_data().positions_rows().count(),
+        0,
+        "v<3 行不得以 avgCost=0 捏值併入"
+    );
+}
+
+#[tokio::test]
+async fn w5_malformed_summary_frame_fail_closed_disconnects() {
+    // reqId 非數字 → WireMalformed → driver 既有紀律 fail-closed 斷線(Backoff)。
+    let (mut driver, _h) =
+        fake_driver(scenarios::account_summary_malformed(ACCOUNT_SUMMARY_REQ_ID));
+    driver.enable_account_data_subscriptions();
+    let mut clock = TestClock::at(1_000);
+    assert_eq!(
+        driver.run_connect_cycle(&mut clock).await,
+        CycleOutcome::Served(ServeEnd::IoDropped)
+    );
+    assert!(matches!(driver.state(), SessionState::Backoff { .. }));
+}
+
+#[tokio::test]
+async fn w5_pump_disabled_by_default_no_subscription_sent() {
+    // 默認 off:不開 pump → 不送 61/62;入站 account 資料因未訂而收=typed 拒,不併入。
+    let (mut driver, handle) = fake_driver(scenarios::account_data_session(ACCOUNT_SUMMARY_REQ_ID));
+    let mut clock = TestClock::at(1_000);
+    assert_eq!(
+        driver.run_connect_cycle(&mut clock).await,
+        CycleOutcome::Served(ServeEnd::IoDropped)
+    );
+    let frames = handle.received_message_frames().await;
+    let ids: Vec<String> = frames.iter().map(|f| frame_fields(f)[0].clone()).collect();
+    assert!(
+        !ids.contains(&"62".to_string()),
+        "pump off 不得送 reqAccountSummary"
+    );
+    assert!(
+        !ids.contains(&"61".to_string()),
+        "pump off 不得送 reqPositions"
+    );
+    assert_eq!(driver.account_data().summary_rows().count(), 0);
+    assert_eq!(driver.account_data().positions_rows().count(), 0);
+}
+
+// ===========================================================================
 // 終態:結構性終態後 cycle no-op（Terminal;factory 不被觸）
 // ===========================================================================
 
