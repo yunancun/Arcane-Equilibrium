@@ -25,14 +25,18 @@
 //!     order-verb 超限**直拒不排隊**（訂單延遲=語義謊言,重試權還呼叫端）。禁無界排隊、禁 silent drop。
 //!   - **單一出口不變量**：`OutboundGrant::mint` 模塊私有 → ibkr_tws_pacing 外無法構造 grant →
 //!     出站送出編譯期必經 governor。
-//!   - **DCE 姿態繼承 B1/wire/session**：整個 TWS 連接器面在 default build 零 production caller →
-//!     被 linker DCE（g4 nm 審計驗證）。故本模塊 `#![allow(dead_code)]`——**非「藏 orphan」**:
-//!     每 item 有本檔測試 caller + S2 心跳 caller;W4 IPC / W6 訂閱表 / S4 transport 才接的面明標
-//!     `TODO(W4)`/`TODO(W6)`/`TODO(S4)`。module 在 default build dead 是設計使然。
+//!   - **DCE 姿態（W4 起更新;W5-S0 comment-only 修正）**：W3 時代「整面零 production caller →
+//!     被 linker DCE」已過時——W4 health emitter 經 `TwsSessionManager::pacing_observation()`
+//!     消費本模塊,pacing 面**已隨 session 移出 DCE**（`ibkr_driver_absence_audit.sh` Part A
+//!     正向斷言 session 符號 present;真 transport 面 `ibkr_tws_driver` 仍 production-DCE,
+//!     同 audit Part B）。`#![allow(dead_code)]` 保留——非「藏 orphan」:W6 訂閱表 / S4
+//!     transport 才接的面明標 `TODO(W6)`/`TODO(S4)`,僅測試消費的 item 在 default build
+//!     dead 是設計使然。
 //!   - Bybit crypto_perp 不變;無 DB migration;不擴 types 契約。
 
-// 繼承 B1/wire/session 的 intentional-DCE 姿態（見 MODULE_NOTE）：整個 TWS 連接器面在 default
-// build 無 production caller,由 linker DCE（g4 symbol audit 驗證）。與 session line 38 對稱。
+// intentional-DCE 姿態已於 W4 更新（見 MODULE_NOTE）：pacing 面經 health emitter →
+// TwsSessionManager 有 production caller、隨 session 移出 DCE;allow 僅為 W6/S4 才接的
+// 測試專屬 item 保留。與 session 檔頭對稱。
 #![allow(dead_code)]
 
 use std::collections::VecDeque;

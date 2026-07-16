@@ -25,16 +25,19 @@
 //!     move 進 connect 單次消費（不可 Clone/緩存）;production 唯一 provider = `EnvelopeRequiredStub`
 //!     恆 `Err(EnvelopeRequired)`,**無任何 env/config/cfg 開關可翻放行**。FSM 自動重連全路徑只在
 //!     fake 測試域走通;production 每次 Backoff→Connecting 都撞 EnvelopeRequired 停在 Disconnected。
-//!   - **DCE 姿態繼承 B1/wire**：整個 IBKR TWS 連接器面在 default build **零 production caller →
-//!     被 linker DCE**（W4 IPC 接線後才有真消費者;S3 pacing / S4 fake-TWS 為後續切片）。故本模塊如
-//!     `ibkr_tws_wire`（line 32）一律 `#![allow(dead_code)]`——**非「藏 orphan」**:FSM/permit/退避/
-//!     排程/manager 全有本檔測試 caller,S3/S4 才接的面（transport factory 注入、pacing 出口）明標
-//!     `TODO(S3)`/`TODO(S4)`;module 在 default build dead 是設計使然。
+//!   - **DCE 姿態（W4 起更新;W5-S0 comment-only 修正）**：W3 時代「整面零 production caller →
+//!     被 linker DCE」已過時——W4 health emitter
+//!     （`ipc_server/handlers/stock_etf/health_summary.rs`）構 ephemeral inactive
+//!     `TwsSessionManager`（讀 ipc_state/pacing_observation/reconnect_attempt/state）,本模塊
+//!     **已有 production caller、移出 DCE**（`ibkr_driver_absence_audit.sh` Part A 正向斷言
+//!     session 符號 present）。真 transport 面（`ibkr_tws_driver`）仍 production-DCE（同
+//!     audit Part B 負向斷言）。`#![allow(dead_code)]` 保留——非「藏 orphan」:僅測試消費的
+//!     面（transport factory 注入等）在 default build dead 是設計使然。
 //!   - Bybit crypto_perp 不變;無 DB migration;不擴 types 契約（IPC label 維持 S1 最小集,rich
 //!     payload 落本檔 engine-private `SessionState`,經 `label()` 投影回 `IbkrTwsSessionStateV1`）。
 
-// 繼承 B1/wire 的 intentional-DCE 姿態（見 MODULE_NOTE）：整個 TWS 連接器面在 default build
-// 無 production caller,由 linker DCE。與 `ibkr_tws_wire` line 32 對稱。
+// intentional-DCE 姿態已於 W4 更新（見 MODULE_NOTE）：本模塊經 health emitter 有 production
+// caller、移出 DCE;allow 僅為測試專屬面（transport factory 注入等 S4/W8 才接的 item）保留。
 #![allow(dead_code)]
 
 use std::time::Duration;
