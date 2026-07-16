@@ -51,10 +51,15 @@ from cost_gate_learning_lane.runtime_adapter import (
     append_jsonl_ledger,
     read_learning_ledger_partitions,
 )
+from cost_gate_learning_lane.ledger_rotation import (
+    MAX_IN_MEMORY_RETAINED_LEDGER_BYTES,
+    retained_ledger_total_bytes,
+)
 
 
 OUTCOME_REFRESH_RECORD_TYPE = "cost_gate_outcome_refresh_batch"
 OUTCOME_REFRESH_SCHEMA_VERSION = "cost_gate_demo_learning_lane_outcome_refresh_v1"
+RETAINED_LEDGER_STREAMING_PROJECTION_REQUIRED_EXIT_CODE = 75
 _CANDIDATE_EVALUATION_PREFLIGHT_FIELDS = {
     "generated_outcome_count",
     "candidate_evaluation_eligible_count",
@@ -481,6 +486,23 @@ def main() -> int:
         record_probe_outcomes=args.record_probe_outcomes,
     )
     _validate_selection(selection)
+    retained_bytes = retained_ledger_total_bytes(args.ledger)
+    if retained_bytes > MAX_IN_MEMORY_RETAINED_LEDGER_BYTES:
+        print(
+            json.dumps(
+                {
+                    "status": "RETAINED_LEDGER_STREAMING_PROJECTION_REQUIRED",
+                    "ledger_path": str(args.ledger),
+                    "retained_ledger_bytes": retained_bytes,
+                    "max_in_memory_retained_ledger_bytes": (
+                        MAX_IN_MEMORY_RETAINED_LEDGER_BYTES
+                    ),
+                },
+                sort_keys=True,
+            ),
+            file=sys.stderr,
+        )
+        return RETAINED_LEDGER_STREAMING_PROJECTION_REQUIRED_EXIT_CODE
     slippage_table = None
     if args.slippage_artifact and args.slippage_artifact.exists():
         from cost_gate_learning_lane.cost_model import load_slippage_quantiles

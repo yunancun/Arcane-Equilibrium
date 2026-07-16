@@ -67,6 +67,10 @@ from cost_gate_learning_lane.evidence_stats import (
 from cost_gate_learning_lane.runtime_adapter import (
     read_candidate_evidence_jsonl_ledger,
 )
+from cost_gate_learning_lane.ledger_rotation import (
+    MAX_IN_MEMORY_RETAINED_LEDGER_BYTES,
+    retained_ledger_total_bytes,
+)
 
 
 # v6:learning_candidate_board 先做 prospective raw/evaluation lineage 三分區，
@@ -77,6 +81,7 @@ BLOCKED_OUTCOME_REVIEW_SCHEMA_VERSION = (
     "cost_gate_demo_learning_lane_blocked_outcome_review_v6"
 )
 BLOCKED_OUTCOME_REVIEW_RECORD_TYPE = "blocked_signal_outcome_review"
+RETAINED_LEDGER_STREAMING_PROJECTION_REQUIRED_EXIT_CODE = 75
 RESEARCH_COMPATIBILITY_BLOCKED_OUTCOME_REVIEW_SCHEMA_VERSION = (
     "cost_gate_blocked_outcome_research_compatibility_no_authority_v1"
 )
@@ -1994,6 +1999,23 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = _build_parser().parse_args()
+    retained_bytes = retained_ledger_total_bytes(args.ledger)
+    if retained_bytes > MAX_IN_MEMORY_RETAINED_LEDGER_BYTES:
+        print(
+            json.dumps(
+                {
+                    "status": "RETAINED_LEDGER_STREAMING_PROJECTION_REQUIRED",
+                    "ledger_path": str(args.ledger),
+                    "retained_ledger_bytes": retained_bytes,
+                    "max_in_memory_retained_ledger_bytes": (
+                        MAX_IN_MEMORY_RETAINED_LEDGER_BYTES
+                    ),
+                },
+                sort_keys=True,
+            ),
+            file=sys.stderr,
+        )
+        return RETAINED_LEDGER_STREAMING_PROJECTION_REQUIRED_EXIT_CODE
     cfg = BlockedOutcomeReviewConfig(
         min_outcomes_per_side_cell=args.min_outcomes_per_side_cell,
         min_effective_entries_per_side_cell=args.min_effective_entries_per_side_cell,

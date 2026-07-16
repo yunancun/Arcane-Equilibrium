@@ -15,10 +15,15 @@ import datetime as dt
 import json
 import math
 import os
+import stat
 import subprocess
 from pathlib import Path
 from typing import Any
 
+from cost_gate_learning_lane.candidate_board import (
+    _candidate_source_contract_valid,
+    _classify_lineage,
+)
 from cost_gate_learning_lane.historical_review import (
     build_historical_scorecard_review_from_file,
 )
@@ -27,7 +32,15 @@ from cost_gate_learning_lane.proof_exclusion import proof_exclusion_reasons
 from cost_gate_learning_lane.runtime_adapter import (
     project_candidate_evidence_rows,
 )
-from cost_gate_learning_lane.ledger_rotation import retained_ledger_files
+from cost_gate_learning_lane.ledger_rotation import (
+    MAX_IN_MEMORY_RETAINED_LEDGER_BYTES,
+    retained_ledger_files,
+)
+
+
+MAX_IN_MEMORY_LEDGER_SNAPSHOT_BYTES = MAX_IN_MEMORY_RETAINED_LEDGER_BYTES
+STREAMING_LEDGER_CHUNK_BYTES = 1024 * 1024
+MAX_STREAMING_LEDGER_LINE_BYTES = 16 * 1024 * 1024
 
 
 DEFAULT_COST_GATE_LEARNING_LOOP_MAX_AGE_SECONDS = 3 * 60 * 60
@@ -599,6 +612,347 @@ def _file_mtime_age(path: Path, *, now_utc: dt.datetime) -> tuple[bool, str | No
     return True, mtime.isoformat(), max(0.0, (now_utc - mtime).total_seconds())
 
 
+def _retained_ledger_inventory(
+    path: Path,
+) -> tuple[tuple[Path, ...], int, str | None]:
+    try:
+        sources = tuple(retained_ledger_files(path))
+        total_bytes = sum(source.stat().st_size for source in sources)
+    except FileNotFoundError:
+        return (), 0, None
+    except OSError as exc:
+        return (), 0, f"read_error:{type(exc).__name__}"
+    return sources, total_bytes, None
+
+
+def _streaming_prefix_rows(
+    path: Path,
+) -> tuple[list[dict[str, Any]] | None, dict[str, Any]]:
+    """Return no retained rows while accumulating a bounded prefix projection.
+
+    Every retained path is opened with ``O_NOFOLLOW`` before any payload bytes
+    are read.  The opened inode and size define the immutable prefix consumed
+    by this scan; concurrent append bytes are intentionally deferred to the
+    next scan.  Rotation during admission changes the retained path/inode view
+    and is retried at most three times.  Only one JSON object is resident at a
+    time, so a multi-gigabyte retained view cannot become a multi-million-row
+    Python heap.
+    """
+
+    projection: dict[str, Any] = {
+        "ledger_snapshot_mode": "STREAMING_PREFIX_V1",
+        "ledger_projection_complete": False,
+        "ledger_projection_source_file_count": 0,
+        "ledger_projection_source_bytes": 0,
+        "qualified_lineage_outcome_row_count": 0,
+        "lineage_exclusion_reason_counts": {},
+    }
+    opened: list[tuple[Path, Any, int, int, int]] = []
+    admitted_names: tuple[str, ...] = ()
+    for _attempt in range(3):
+        for _source, handle, _dev, _ino, _size in opened:
+            handle.close()
+        opened = []
+        sources, _total_bytes, inventory_error = _retained_ledger_inventory(path)
+        if inventory_error is not None:
+            projection["ledger_source_error"] = inventory_error
+            return None, projection
+        if not sources:
+            projection["ledger_projection_complete"] = True
+            return [], projection
+        admitted_names = tuple(str(source) for source in sources)
+        drifted = False
+        try:
+            for source in sources:
+                before = source.stat(follow_symlinks=False)
+                if not stat.S_ISREG(before.st_mode):
+                    raise OSError("retained ledger source is not regular")
+                flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(
+                    os, "O_NOFOLLOW", 0
+                )
+                fd = os.open(source, flags)
+                handle = os.fdopen(fd, "rb", closefd=True)
+                after = os.fstat(handle.fileno())
+                if (
+                    before.st_dev != after.st_dev
+                    or before.st_ino != after.st_ino
+                    or before.st_size != after.st_size
+                    or not stat.S_ISREG(after.st_mode)
+                ):
+                    handle.close()
+                    drifted = True
+                    break
+                opened.append(
+                    (source, handle, after.st_dev, after.st_ino, after.st_size)
+                )
+        except FileNotFoundError:
+            drifted = True
+        except OSError as exc:
+            for _source, handle, _dev, _ino, _size in opened:
+                handle.close()
+            projection["ledger_source_error"] = (
+                f"read_error:{type(exc).__name__}"
+            )
+            return None, projection
+        if drifted:
+            continue
+        current_sources, _current_bytes, current_error = _retained_ledger_inventory(path)
+        if current_error is not None:
+            for _source, handle, _dev, _ino, _size in opened:
+                handle.close()
+            opened = []
+            projection["ledger_source_error"] = current_error
+            return None, projection
+        current_names = tuple(str(source) for source in current_sources)
+        if current_names != admitted_names:
+            continue
+        break
+    else:
+        projection["ledger_source_error"] = (
+            "retained_ledger_generation_unstable_after_3_attempts"
+        )
+        return None, projection
+
+    if not opened:
+        projection["ledger_source_error"] = (
+            "retained_ledger_generation_unstable_after_3_attempts"
+        )
+        return None, projection
+
+    projection["ledger_projection_source_file_count"] = len(opened)
+    projection["ledger_projection_source_bytes"] = sum(item[4] for item in opened)
+    projection_rows: list[dict[str, Any]] = []
+    malformed_line_count = 0
+    source_error: str | None = None
+    reasons: dict[str, int] = projection["lineage_exclusion_reason_counts"]
+    probe_net_sum = 0.0
+    raw_blocked_net_sum = 0.0
+
+    def consume(row: dict[str, Any]) -> None:
+        nonlocal probe_net_sum, raw_blocked_net_sum, source_error
+        projection["raw_ledger_total_rows"] = int(
+            projection.get("raw_ledger_total_rows") or 0
+        ) + 1
+        record_type = str(row.get("record_type") or "").strip()
+        if record_type != "blocked_signal_outcome":
+            projection["ledger_total_rows"] = int(
+                projection.get("ledger_total_rows") or 0
+            ) + 1
+        projection["latest_record_type"] = record_type or None
+        if row.get("generated_at_utc"):
+            projection["latest_generated_at_utc"] = row["generated_at_utc"]
+        if row.get("side_cell_key"):
+            projection["latest_side_cell_key"] = row["side_cell_key"]
+        if record_type == "probe_admission_decision":
+            decision = str(row.get("decision") or "").strip()
+            projection["admission_decision_count"] = int(
+                projection.get("admission_decision_count") or 0
+            ) + 1
+            projection["captured_reject_count"] = int(
+                projection.get("captured_reject_count") or 0
+            ) + 1
+            projection["latest_admission_decision"] = decision or None
+            if decision == "ADMIT_DEMO_LEARNING_PROBE":
+                projection["admit_decision_count"] = int(
+                    projection.get("admit_decision_count") or 0
+                ) + 1
+            if decision == "ORDER_AUTHORITY_NOT_GRANTED":
+                projection["order_authority_not_granted_count"] = int(
+                    projection.get("order_authority_not_granted_count") or 0
+                ) + 1
+            if row.get("allowed_to_submit_order") is True:
+                projection["allowed_to_submit_order_count"] = int(
+                    projection.get("allowed_to_submit_order_count") or 0
+                ) + 1
+            return
+        if record_type == "probe_capture_error":
+            projection["capture_error_count"] = int(
+                projection.get("capture_error_count") or 0
+            ) + 1
+            projection["captured_reject_count"] = int(
+                projection.get("captured_reject_count") or 0
+            ) + 1
+            projection["latest_admission_decision"] = (
+                str(row.get("decision") or "").strip() or None
+            )
+            projection["latest_capture_error"] = (
+                row.get("capture_error")
+                or row.get("reason")
+                or "runtime_admission_evaluation_failed"
+            )
+            return
+        if record_type == "probe_outcome":
+            projection["raw_probe_outcome_count"] = int(
+                projection.get("raw_probe_outcome_count") or 0
+            ) + 1
+            net_bps = _float(row.get("realized_net_bps"))
+            exclusion = proof_exclusion_reasons(row)
+            if net_bps is None:
+                exclusion = [*exclusion, "realized_net_bps_missing"]
+            if exclusion:
+                projection["proof_excluded_probe_outcome_count"] = int(
+                    projection.get("proof_excluded_probe_outcome_count") or 0
+                ) + 1
+                projection["proof_exclusion_present"] = True
+                counts = projection.setdefault("proof_exclusion_reason_counts", {})
+                for reason in exclusion:
+                    counts[reason] = counts.get(reason, 0) + 1
+                return
+            projection["probe_outcome_count"] = int(
+                projection.get("probe_outcome_count") or 0
+            ) + 1
+            projection["proof_eligible_probe_outcome_count"] = int(
+                projection.get("proof_eligible_probe_outcome_count") or 0
+            ) + 1
+            probe_net_sum += float(net_bps)
+            return
+        if record_type != "blocked_signal_outcome":
+            return
+
+        projection["raw_blocked_signal_outcome_count"] = int(
+            projection.get("raw_blocked_signal_outcome_count") or 0
+        ) + 1
+        net_bps = _float(row.get("realized_net_bps"))
+        if net_bps is not None:
+            raw_blocked_net_sum += net_bps
+            if net_bps > 0.0:
+                projection["raw_blocked_signal_positive_outcome_count"] = int(
+                    projection.get("raw_blocked_signal_positive_outcome_count") or 0
+                ) + 1
+        try:
+            projected = project_candidate_evidence_rows((row,))[0]
+            lineage = _classify_lineage(projected)
+            if (
+                lineage["partition"] == "QUALIFIED"
+                and not _candidate_source_contract_valid(lineage)
+            ):
+                partition = "INVALID"
+                reason = "INVALID_LINEAGE_EXACT_COHORT"
+            else:
+                partition = str(lineage["partition"])
+                reason = str(lineage["reason"])
+        except (TypeError, ValueError) as exc:
+            source_error = f"candidate_evidence_read_error:{type(exc).__name__}"
+            return
+        if partition == "QUALIFIED":
+            projection["qualified_lineage_outcome_row_count"] = int(
+                projection.get("qualified_lineage_outcome_row_count") or 0
+            ) + 1
+        elif partition == "UNQUALIFIED":
+            projection["raw_unqualified_lineage_outcome_row_count"] = int(
+                projection.get("raw_unqualified_lineage_outcome_row_count") or 0
+            ) + 1
+            reasons[reason] = reasons.get(reason, 0) + 1
+        else:
+            projection["raw_invalid_lineage_outcome_row_count"] = int(
+                projection.get("raw_invalid_lineage_outcome_row_count") or 0
+            ) + 1
+            reasons[reason] = reasons.get(reason, 0) + 1
+
+    try:
+        for source, handle, expected_dev, expected_ino, expected_size in opened:
+            remaining = expected_size
+            buffer = b""
+            while remaining > 0:
+                chunk = handle.read(min(STREAMING_LEDGER_CHUNK_BYTES, remaining))
+                if not chunk:
+                    source_error = f"short_read:{source.name}"
+                    break
+                remaining -= len(chunk)
+                buffer += chunk
+                if len(buffer) > MAX_STREAMING_LEDGER_LINE_BYTES and b"\n" not in buffer:
+                    source_error = f"ledger_line_too_large:{source.name}"
+                    break
+                lines = buffer.split(b"\n")
+                buffer = lines.pop()
+                for raw_line in lines:
+                    line = raw_line.strip()
+                    if not line:
+                        continue
+                    try:
+                        row = json.loads(line)
+                    except (UnicodeDecodeError, json.JSONDecodeError):
+                        malformed_line_count += 1
+                        continue
+                    if not isinstance(row, dict):
+                        malformed_line_count += 1
+                        continue
+                    consume(row)
+                if source_error is not None:
+                    break
+            if source_error is not None:
+                break
+            if buffer.strip():
+                source_error = f"partial_jsonl_prefix:{source.name}"
+                break
+            after = os.fstat(handle.fileno())
+            if (
+                after.st_dev != expected_dev
+                or after.st_ino != expected_ino
+                or after.st_size < expected_size
+            ):
+                source_error = f"retained_ledger_prefix_changed:{source.name}"
+                break
+    finally:
+        for _source, handle, _dev, _ino, _size in opened:
+            handle.close()
+
+    projection["ledger_malformed_line_count"] = malformed_line_count
+    projection["ledger_source_error"] = source_error
+    raw_blocked_count = int(projection.get("raw_blocked_signal_outcome_count") or 0)
+    if raw_blocked_count:
+        projection["raw_avg_blocked_signal_outcome_net_bps"] = (
+            raw_blocked_net_sum / raw_blocked_count
+        )
+    probe_count = int(projection.get("probe_outcome_count") or 0)
+    if probe_count:
+        projection["avg_probe_outcome_net_bps"] = probe_net_sum / probe_count
+    qualified_count = int(projection.get("qualified_lineage_outcome_row_count") or 0)
+    projection["blocked_signal_outcome_review_status"] = (
+        "NO_QUALIFIED_LINEAGE_BLOCKED_SIGNAL_OUTCOMES"
+        if qualified_count == 0
+        else "QUALIFIED_LINEAGE_REVIEW_PROJECTION_REQUIRED"
+    )
+    projection["qualified_lineage_review_deferred"] = qualified_count > 0
+    projection["ledger_projection_complete"] = source_error is None
+    return projection_rows, projection
+
+
+def _finalize_ledger_summary(summary: dict[str, Any]) -> dict[str, Any]:
+    if summary["ledger_malformed_line_count"] > 0 or summary.get(
+        "ledger_source_error"
+    ) is not None:
+        summary["ledger_status"] = "LEDGER_EVIDENCE_CORRUPTION"
+    elif summary.get("qualified_lineage_review_deferred") is True:
+        summary["ledger_status"] = "QUALIFIED_LINEAGE_REVIEW_PROJECTION_REQUIRED"
+    elif (
+        summary["raw_blocked_signal_outcome_count"] > 0
+        and summary["blocked_signal_outcome_count"] == 0
+        and (
+            summary["raw_invalid_lineage_outcome_row_count"] > 0
+            or summary["raw_unqualified_lineage_outcome_row_count"] > 0
+        )
+    ):
+        summary["ledger_status"] = "BLOCKED_SIGNAL_OUTCOMES_NEED_LINEAGE_REPAIR"
+    elif summary["ledger_total_rows"] == 0:
+        summary["ledger_status"] = (
+            "MALFORMED" if summary["ledger_malformed_line_count"] > 0 else "EMPTY"
+        )
+    elif summary["blocked_signal_outcome_count"] > 0:
+        summary["ledger_status"] = "BLOCKED_SIGNAL_OUTCOMES_PRESENT"
+    elif summary["probe_outcome_count"] > 0:
+        summary["ledger_status"] = "PROBE_OUTCOMES_PRESENT"
+    elif summary["raw_probe_outcome_count"] > 0:
+        summary["ledger_status"] = "PROBE_OUTCOMES_PROOF_EXCLUDED"
+    elif summary["admission_decision_count"] > 0:
+        summary["ledger_status"] = "ADMISSION_ROWS_PRESENT"
+    elif summary["capture_error_count"] > 0:
+        summary["ledger_status"] = "CAPTURE_ERRORS_PRESENT"
+    else:
+        summary["ledger_status"] = "OTHER_ROWS_PRESENT"
+    return summary
+
+
 def _capture_retained_ledger_snapshot(
     path: Path,
 ) -> tuple[tuple[dict[str, Any], ...], int, str | None, bool]:
@@ -804,7 +1158,28 @@ def summarize_cost_gate_learning_lane_ledger(path: Path) -> dict[str, Any]:
         "blocked_signal_review_edge_amplification_required_side_cell_count": 0,
         "blocked_signal_review_diagnosis_counts": {},
         "blocked_signal_review_cost_gate_escape_recommendation_counts": {},
+        "ledger_snapshot_mode": "IN_MEMORY_GENERATION_STABLE",
+        "ledger_projection_complete": True,
+        "ledger_projection_source_file_count": 0,
+        "ledger_projection_source_bytes": 0,
+        "qualified_lineage_outcome_row_count": 0,
+        "qualified_lineage_review_deferred": False,
+        "lineage_exclusion_reason_counts": {},
     }
+    sources, retained_bytes, inventory_error = _retained_ledger_inventory(path)
+    if inventory_error is not None:
+        summary["ledger_source_error"] = inventory_error
+        summary["ledger_projection_complete"] = False
+        return _finalize_ledger_summary(summary)
+    if not sources:
+        return summary
+    summary["ledger_projection_source_file_count"] = len(sources)
+    summary["ledger_projection_source_bytes"] = retained_bytes
+    if retained_bytes > MAX_IN_MEMORY_LEDGER_SNAPSHOT_BYTES:
+        _rows, projection = _streaming_prefix_rows(path)
+        summary.update(projection)
+        return _finalize_ledger_summary(summary)
+
     (
         snapshot_rows,
         malformed_line_count,
@@ -915,41 +1290,7 @@ def summarize_cost_gate_learning_lane_ledger(path: Path) -> dict[str, Any]:
                 "blocked_signal_net_positive_pct"
             )
 
-    if (
-        summary["ledger_malformed_line_count"] > 0
-        or snapshot_source_error is not None
-        or candidate_evidence_read_error is not None
-    ):
-        summary["ledger_status"] = "LEDGER_EVIDENCE_CORRUPTION"
-    elif (
-        summary["raw_blocked_signal_outcome_count"] > 0
-        and summary["blocked_signal_outcome_count"] == 0
-        and (
-            summary["raw_invalid_lineage_outcome_row_count"] > 0
-            or summary["raw_unqualified_lineage_outcome_row_count"] > 0
-        )
-    ):
-        summary["ledger_status"] = (
-            "BLOCKED_SIGNAL_OUTCOMES_NEED_LINEAGE_REPAIR"
-        )
-    elif summary["ledger_total_rows"] == 0:
-        summary["ledger_status"] = (
-            "MALFORMED"
-            if summary["ledger_malformed_line_count"] > 0
-            else "EMPTY"
-        )
-    elif summary["blocked_signal_outcome_count"] > 0:
-        summary["ledger_status"] = "BLOCKED_SIGNAL_OUTCOMES_PRESENT"
-    elif summary["probe_outcome_count"] > 0:
-        summary["ledger_status"] = "PROBE_OUTCOMES_PRESENT"
-    elif summary["raw_probe_outcome_count"] > 0:
-        summary["ledger_status"] = "PROBE_OUTCOMES_PROOF_EXCLUDED"
-    elif summary["admission_decision_count"] > 0:
-        summary["ledger_status"] = "ADMISSION_ROWS_PRESENT"
-    elif summary["capture_error_count"] > 0:
-        summary["ledger_status"] = "CAPTURE_ERRORS_PRESENT"
-    else:
-        summary["ledger_status"] = "OTHER_ROWS_PRESENT"
+    _finalize_ledger_summary(summary)
 
     if summary["probe_outcome_count"] > 0:
         summary["avg_probe_outcome_net_bps"] = probe_net_sum / summary["probe_outcome_count"]

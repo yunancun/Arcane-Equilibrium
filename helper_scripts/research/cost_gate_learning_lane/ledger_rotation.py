@@ -32,6 +32,7 @@ from typing import Any, Iterator
 # 測試經 monkeypatch 模組常量注入小閾值;生產側不提供 env 旋鈕(避免假參數)。
 ROTATE_THRESHOLD_BYTES = 50 * 1024 * 1024
 RETENTION_DAYS = 14
+MAX_IN_MEMORY_RETAINED_LEDGER_BYTES = 128 * 1024 * 1024
 
 _TS_FORMAT = "%Y%m%dT%H%M%SZ"
 _JSONL_SUFFIX = ".jsonl"
@@ -106,6 +107,12 @@ def retained_ledger_files(
     if ledger_path.exists():
         out.append(ledger_path)
     return out
+
+
+def retained_ledger_total_bytes(ledger_path: Path) -> int:
+    """Return bytes in the current retention view without reading payloads."""
+
+    return sum(path.stat().st_size for path in retained_ledger_files(ledger_path))
 
 
 def _rotation_lock_path(ledger_path: Path) -> Path:
