@@ -52,6 +52,63 @@ def _valid_api_allowlist() -> dict[str, Any]:
     }
 
 
+def _valid_connection_health() -> dict[str, Any]:
+    """鏡像 Rust W4 connection-health emitter 的 inactive 誠實輸出（cross-surface parity 錨）。
+
+    任何欄名/值漂移由 parity 測試 + normalizer 負空間鎖死。main_tokens_available=50 為滿桶
+    telemetry（rate=lines/2=50);其餘 operational/activity 恆零、attestation 恆 BLOCKED。
+    """
+    return {
+        "phase": "phase2_connection_health_source_fixture",
+        "asset_lane": "stock_etf_cash",
+        "broker": "ibkr",
+        "environment": "paper_readonly",
+        "connection_health_status_state": "external_verification_pending",
+        "contract_id": "ibkr_connection_health_report_v1",
+        "source_version": 1,
+        "report_status": "external_verification_pending",
+        "session_state": "disconnected",
+        "halt_reason": "envelope_required",
+        "session_active": False,
+        "reconnect_attempt": 0,
+        "main_tokens_available": 50,
+        "queue_depth": 0,
+        "lines_in_use": 0,
+        "ib_pacing_strikes": 0,
+        "admitted": 0,
+        "rejected_order_verb": 0,
+        "rejected_queue_full": 0,
+        "rejected_timeout": 0,
+        "rejected_historical": 0,
+        "rejected_lines": 0,
+        "attestation_status": "BLOCKED",
+        "account_fingerprint_is_live": False,
+        "entitlement_state": "pending",
+        "pending_reason": "external_verification_pending",
+        "ibkr_contact_performed": False,
+        "secret_slot_touched": False,
+        "gateway_socket_open": False,
+        "order_routed": False,
+        "bybit_ipc_reused": False,
+        "ibkr_live_enabled": False,
+        "db_apply_performed": False,
+        "phase2": {
+            "external_surface_gate": {
+                "status": "BLOCKED",
+                "ibkr_contact_allowed": False,
+                "blockers": ["status_not_pass"],
+                "ibkr_call_performed": False,
+            },
+            "api_allowlist": _valid_api_allowlist(),
+            "immutable_pass_artifact_present": False,
+            "first_ibkr_contact_allowed": False,
+            "connector_enabled": False,
+            "secret_slot_touched": False,
+            "order_routed": False,
+        },
+    }
+
+
 def _valid_phase0_status() -> dict[str, Any]:
     return {
         "phase": "phase0_contract_packet_status_source_fixture",

@@ -20,6 +20,7 @@ from .stock_etf_status_normalizers import (
     _NO_STORE_HEADERS,
     _normalize_account_status,
     _normalize_authorization_status,
+    _normalize_connection_health,
     _normalize_data_foundation_status,
     _normalize_disable_cleanup_status,
     _normalize_evidence_status,
@@ -60,6 +61,7 @@ _SCORECARD_STATUS_METHOD = "stock_etf.get_scorecard_status"
 _LAUNCH_STATUS_METHOD = "stock_etf.get_launch_status"
 _RELEASE_PACKET_STATUS_METHOD = "stock_etf.get_release_packet_status"
 _DISABLE_CLEANUP_STATUS_METHOD = "stock_etf.get_disable_cleanup_status"
+_CONNECTION_HEALTH_METHOD = "stock_etf.get_connection_health"
 
 
 def _apply_no_store_headers(response: Response) -> None:
@@ -382,6 +384,28 @@ async def get_stock_etf_disable_cleanup_status(
         "data": _normalize_disable_cleanup_status(raw, reason),
         "is_simulated": False,
         "data_category": "stock_etf_disable_cleanup_status",
+    }
+
+
+@stock_etf_router.get("/connection-health")
+async def get_stock_etf_connection_health(
+    response: Response,
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+) -> dict[str, Any]:
+    """Read-only Stock/ETF IBKR TWS connection-health surface for the GUI.
+
+    W4 薄 relay：Python 不解讀、不加 authority——所有裁決在 Rust emitter + normalizer
+    負空間三層。inactive 引擎回 external_verification_pending 形態（非 fake-success）。
+    """
+    del actor
+    _apply_no_store_headers(response)
+    ipc = await _get_ipc()
+    raw, reason = await _query_stock_etf_status(ipc, _CONNECTION_HEALTH_METHOD)
+    return {
+        "ok": True,
+        "data": _normalize_connection_health(raw, reason),
+        "is_simulated": False,
+        "data_category": "stock_etf_connection_health",
     }
 
 

@@ -9,8 +9,14 @@ STOCK_ETF_SPLIT_DIR = HANDLER_ROOT / "stock_etf"
 REQUEST_SUMMARIES = STOCK_ETF_SPLIT_DIR / "request_summaries.rs"
 STATUS_SUMMARIES = STOCK_ETF_SPLIT_DIR / "status_summaries.rs"
 PRECONTACT = STOCK_ETF_SPLIT_DIR / "precontact.rs"
+HEALTH_SUMMARY = STOCK_ETF_SPLIT_DIR / "health_summary.rs"
 MAX_LINES = 800
-EXPECTED_MODULES = {"precontact.rs", "request_summaries.rs", "status_summaries.rs"}
+EXPECTED_MODULES = {
+    "precontact.rs",
+    "request_summaries.rs",
+    "status_summaries.rs",
+    "health_summary.rs",
+}
 FORBIDDEN_RUNTIME_MATERIAL_TOKENS = (
     "std::env",
     "env::var",
@@ -127,6 +133,7 @@ def test_stock_etf_ipc_handler_files_stay_below_governance_cap() -> None:
     assert "mod request_summaries;" in parent
     assert "mod status_summaries;" in parent
     assert "mod precontact;" in parent
+    assert "mod health_summary;" in parent
     assert set(modules) == EXPECTED_MODULES
     assert _loc(STOCK_ETF_HANDLER) <= MAX_LINES
     assert all(loc <= MAX_LINES for loc in modules.values())
@@ -149,6 +156,30 @@ def test_stock_etf_ipc_handler_files_have_no_runtime_material_readers() -> None:
                 violations.append(f"{path}: contains forbidden runtime material token {token!r}")
 
     assert violations == []
+
+
+def test_stock_etf_health_summary_builder_is_in_child_module() -> None:
+    parent = STOCK_ETF_HANDLER.read_text(encoding="utf-8")
+    child = HEALTH_SUMMARY.read_text(encoding="utf-8")
+
+    # W4 emitter 住子模組;parent 只保留 mod 宣告 + dispatch 分支。
+    assert re.search(re.escape("pub(super) fn connection_health_summary("), child)
+    assert not re.search(
+        rf"^{re.escape('fn connection_health_summary(')}", parent, re.MULTILINE
+    )
+
+    # emitter 的 production caller 只到 TwsSessionManager（session/pacing 首個 caller）;
+    # driver（SessionDriver/TransportFactory/send_framed）不得被引用（維持 production-DCE）。
+    assert "TwsSessionManager" in child
+    for driver_symbol in ("SessionDriver", "TransportFactory", "send_framed", "ibkr_tws_driver"):
+        assert driver_symbol not in child, (
+            f"W4 health emitter must not reference driver symbol {driver_symbol!r}"
+        )
+
+    for token in FORBIDDEN_RUNTIME_MATERIAL_TOKENS:
+        assert token not in child, f"health_summary.rs contains forbidden token {token!r}"
+    for token in FORBIDDEN_RUNTIME_SIDE_EFFECT_TOKENS:
+        assert token not in child, f"health_summary.rs contains forbidden side-effect token {token!r}"
 
 
 def test_stock_etf_ipc_handler_files_do_not_import_or_call_bybit_runtime_paths() -> None:

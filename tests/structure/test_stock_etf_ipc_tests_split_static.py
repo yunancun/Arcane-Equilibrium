@@ -13,6 +13,7 @@ MAX_LINES = 800
 EXPECTED_MODULES = {
     "core_status_fixtures.rs",
     "foundation_status_fixtures.rs",
+    "health_status_fixtures.rs",
     "phase5_status_fixtures.rs",
     "precontact_fixtures.rs",
     "request_contracts.rs",
