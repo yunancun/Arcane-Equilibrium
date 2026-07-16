@@ -82,6 +82,8 @@ srv/
 ├── CLAUDE.md                      ← ★ Claude 操作記憶（人格 / 邊界 / 工作流）
 ├── .codex/MEMORY.md               ← ★ Codex 操作記憶（Codex-specific rules）
 ├── TODO.md                        ← ★ Active dispatch queue（實時工作狀態）
+├── IBKR_TODO.md                   ← ★ IBKR stock/ETF live-capability 工程總綱（W0-W11 + EA 活化跑道；活化另由 AMD-2026-07-11-01 把關）
+├── memory/                        ← ★ Claude 跨-session 記憶（MEMORY.md 索引 + topic 檔；Mac ~/.claude 經 symlink 指向此處）
 ├── CONTEXT.md                     ← ★ 领域词汇表（domain glossary，2026-05-06 引入）
 ├── docs/
 │   ├── adr/                       ← ★ 架构决策记录系列（目前至 ADR 0050；精确清单见 docs/_indexes）
@@ -108,6 +110,7 @@ srv/
 │   ├── ai_agents/                 ← H1-H5 AI 治理层（冷路径 5-Agent host）
 │   ├── learning_engine/           ← 学习管线（Observation→Lesson→Hypothesis→Experiment→Verdict）
 │   ├── ml_training/               ← ML/DL 训练（Teacher-Student + LightGBM + Optuna）
+│   ├── broker_connectors/         ← IBKR source-only skeleton（display-only，ADR-0048；非 runtime connector）
 │   └── market_data_processor/     ← 市场数据清洗 / 加工
 │   ↳ 旧 governance/ · risk_control（H0）· trade_executor（Decision Lease）已迁移至 Rust
 │     （openclaw_core: governance_core.rs · h0_gate.rs · sm/risk_gov.rs），Python 目录已删除
@@ -115,8 +118,8 @@ srv/
 │   ├── monitoring_services/       ← 仅保留 PostgreSQL 初始交易 schema（bootstrap 相容）
 │   └── trading_services/          ← PostgreSQL
 ├── rust/                          ← ★ Rust 交易引擎（交易 / 风控 / 策略配置 / 执行权威）
-│   ├── Cargo.toml                 ← Workspace: 3 crates
-│   ├── openclaw_types/            ← 10 shared types + serde (36 tests)
+│   ├── Cargo.toml                 ← Workspace: 5 crates（另含 openclaw_alr_fit_verifier 隔離驗證器、openclaw_fake_tws dev-only harness）
+│   ├── openclaw_types/            ← shared types + serde 契約（含 ibkr_*/stock_etf_* 型別陣；精确测试数以 CI 为准）
 │   ├── openclaw_core/             ← 18 modules: SM/indicators/signals/risk/m4_miner（core 模組測試，精确数以 cargo workspace CI 为准；backtest/portfolio 为 reserved-library，未接 API；7 legacy 模块 per ADR-0015 已退役）
 │   ├── openclaw_engine/           ← 60+ modules: tick pipeline/strategies/paper state/canary/news/earn（engine 模組測試，精确数以 cargo workspace CI 为准）
 │   └── schemas/                   ← Golden JSON schema (10 types)
@@ -129,6 +132,8 @@ srv/
 │   ├── cron_observer_cycle.sh     ← Observer 自动化
 │   ├── cron_daily_report.sh       ← 日报 → Telegram（UTC 0:00）
 │   ├── canary/                    ← 灰度验证 + watchdog
+│   ├── cron/lib/                  ← ★ cron 共用正本：flock 反叠加锁 + OOM-victim 自标（2026-07-15/16 OOM 风暴修复；新 cron 必须接入）
+│   ├── research/                  ← $0 只读研究管线（cost_gate_learning_lane 等；无 order authority）
 │   ├── db/audit/                  ← 排程 audit 脚本（2026-05-09 3C 7d、2026-05-16 funding_arb 14d）
 │   ├── db/fresh_start_reset.py    ← DB 经验数据清理（保留市场/模型）
 │   └── maintenance_scripts/       ← 清理 / 检查脚本
@@ -156,7 +161,7 @@ srv/
 
 详见 `CLAUDE.md` §二 Root Principles。
 
-**优先级序**：账户生存 > 风控治理 > 系统健康 > 审计可追溯 > 人类终审 > 真实 Net PnL > 自主能力进化
+**终极目标**：持续真实 Net PnL（长周期复利）。风控 = 损失削减，是 Net PnL 的组成部分而非对立面。**护栏排序（按所防损失的不可逆性，是达成目标的手段而非并列目标）**：账户生存 > 风控治理 > 系统健康 > 审计可追溯 > 人类终审 > 自主能力进化；fail-closed 硬边界不因任何短期 PnL 论证而放松（详见 `CLAUDE.md` §二 Ultimate objective 段）
 
 **实施准则**：认知调制 ≠ 能力限制 — Agent 压力下更审慎的方式是提高决策门槛，不是关闭能力。虚拟稀缺性被明确否决。
 
@@ -225,6 +230,7 @@ README 只保留入口级摘要；完整硬边界以 `CLAUDE.md` §四为准。
 - `execution_authority` 在 Rust 侧仅是 P0/P1 denylist 字符串常量，不是真实授权逻辑。
 - LiveDemo 走 live-grade 控制流；demo endpoint 不放宽 authorization、TTL 或 risk gate。
 - Decision Lease 路径 A retrofit 已落地；`OPENCLAW_LEASE_ROUTER_GATE_ENABLED=1` 仅代表 shadow/evidence 线路已启用，不授予真实 live、order authority、Stage 3/4 或 proposal/mobile 放权。
+- IBKR `stock_etf_cash` 仅有 live-capable **开发**授权（AMD-2026-07-11-01），默认 inactive：任何真实 broker 接触（含 readonly）需 Rust 验证的限时 `ibkr_activation_envelope_v1` + authenticated Operator 活化纪录（nonce 原子消费）；margin/short/options/CFD/transfer/account-write 永久 denied；credential/session 永不 auto-activate；Python/GUI 永不成为 IBKR order/risk/activation authority。
 - 禁止手写 `authorization.json`、绕过 Operator auth、自动切 live、伪造 AI/交易活动，或在 Bybit `retCode != 0` 后重试成交路径。
 
 ---
@@ -235,8 +241,12 @@ README 只保留入口级摘要；完整硬边界以 `CLAUDE.md` §四为准。
 
 ```bash
 # API 服务器（Linux: systemd，开机自启；macOS: launchd 可迁移）
-systemctl --user status openclaw-trading-api    # 端口 8000
-systemctl --user status openclaw-watchdog       # 引擎存活监控 + 自动重启
+systemctl --user status openclaw-trading-api      # 端口 8000（runtime 手管 user unit，2026-07-14 起接管；不在 repo systemd/ 内）
+systemctl --user status openclaw-watchdog         # 引擎存活监控 + 自动重启
+systemctl --user status openclaw-listing-collector # 上市探针 collector
+
+# 注意：Rust engine 无独立 unit——裸进程活在 watchdog cgroup 内（restart watchdog 会连坐引擎）；
+# repo helper_scripts/systemd/ 内的 engine unit 为未安装模板。
 
 # Paper runtime is Archive/diagnostic only; do not start it for canary evidence.
 ```
@@ -303,12 +313,13 @@ done
 |------|------|
 | `cron_daily_report.sh` | 每日 UTC 0:00 采集 Paper 指标 + Telegram 推送。 |
 | `cron_observer_cycle.sh` | 每 5 分钟 Observer 循环 + runtime snapshot 桥接。 |
+| `cron/lib/cron_flock.sh` + `cron/lib/cron_oom_victim.sh` | ★ 全 cron 共用正本：flock 反叠加锁（stale-lock 叠加机根治）+ OOM victim 自标（hog `oom_score_adj=800` >> 引擎 200）。新增 cron 必须取锁后接入两者。 |
 
 ### 快速对照：选哪个重启？
 
 ```
 改了代码需部署              → restart_all.sh --rebuild --keep-auth
-LG-5 W3 FUP-1 启动 reviewer → restart_all.sh --keep-auth（纯 Python 改动，不需 rebuild）
+纯 Python/API 改动            → restart_all.sh --api-only（不需 rebuild、不动引擎）
 只想清交易所持仓             → clean_restart.sh --yes
 开发告一段落要清 PnL/胜率    → fresh_start.sh --yes
 临时停机 debug              → stop_all.sh
@@ -329,7 +340,12 @@ LG-5 W3 FUP-1 启动 reviewer → restart_all.sh --keep-auth（纯 Python 改动
 | QC 量化审查 | `docs/CCAgentWorkSpace/QC/workspace/reports/` |
 | 工作日志 | `docs/worklogs/` |
 | 变更历史 | `docs/CLAUDE_CHANGELOG.md` |
+| IBKR 工程總綱 / loop 协议 / 帐本 | `IBKR_TODO.md`（根目录） / `docs/agents/ibkr-live-capability-loop.md` / `docs/execution_plan/ibkr_live_capability/PROGRESS.md` |
+| profit-first 自主 loop | `docs/agents/profit-first-autonomy-loop.md` + `docs/agents/profit-first-fast-demo-promotion-loop.md` |
+| 主题证据导航（历史 initiative 索引） | `docs/_indexes/initiative_index.md` |
+| Claude 跨-session 记忆索引 | `memory/MEMORY.md` |
+| GUI 改版设计正本 | `docs/execution_plan/gui_redesign/GUI-DESIGN-WORKING-DOC.md` |
 | 治理文件（SPEC 源） | Cowork `01_source_documents/` + `docs/governance_dev/SPECIFICATION_REGISTER.md` |
 | Phase 2/3 执行记录 | `docs/archive/2026-07-09--governance_dev_phase_history/phase2_execution/` / `phase3_integration/` |
 
-GitHub: [yunancun/BybitOpenClaw](https://github.com/yunancun/BybitOpenClaw)
+GitHub: [yunancun/Arcane-Equilibrium](https://github.com/yunancun/Arcane-Equilibrium)（旧仓名 BybitOpenClaw 已弃用；Linux runtime 本地路径仍为 `~/BybitOpenClaw/srv`）
