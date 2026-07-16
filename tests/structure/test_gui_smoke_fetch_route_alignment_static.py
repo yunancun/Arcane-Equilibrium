@@ -219,21 +219,11 @@ def _extract_routes(app_dir: Path) -> tuple[set[tuple[str, str]], dict, list]:
 
 
 AUTHORITATIVE_ROUTES, _ROUTE_DIAG, _UNRESOLVED = _extract_routes(APP_DIR)
-# catch-all prefix 路由(§5 ⑧:/openclaw/{path:path});normalized 末段為 /{}
-_PREFIX_MATCH_BASES = {
-    (m, p[: -len("/{}")]) for (m, p) in AUTHORITATIVE_ROUTES if p.endswith("/{}")
-}
 
 
 def route_matches(method: str, path: str) -> bool:
-    """path+method 相容:exact,或 /openclaw catch-all prefix-match(§5 ⑧)。"""
-    if (method, path) in AUTHORITATIVE_ROUTES:
-        return True
-    for (m, base) in _PREFIX_MATCH_BASES:
-        # 僅對已知 catch-all(/openclaw)採 prefix,避免一般 {} param 誤放寬對齊。
-        if m == method and base == "/openclaw" and (path == base or path.startswith(base + "/")):
-            return True
-    return False
+    """path+method 必須精確對齊 authoritative route。"""
+    return (method, path) in AUTHORITATIVE_ROUTES
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -720,7 +710,7 @@ def test_route_extractor_is_substantive() -> None:
     for known in [
         ("GET", "/api/v1/paper/session/status"),
         ("POST", "/api/v1/live/positions/{}/close"),
-        ("GET", "/openclaw/{}"),
+        ("GET", "/api/v1/openclaw/status"),
     ]:
         assert known in AUTHORITATIVE_ROUTES, f"真樹已知路由缺失(抽取疑漏):{known}"
 
