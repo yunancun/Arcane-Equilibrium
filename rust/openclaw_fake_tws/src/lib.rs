@@ -138,6 +138,97 @@ pub fn custom_frame(fields: &[&str]) -> FakeFrame {
     FakeFrame(encode_frame(&encode_fields(fields)))
 }
 
+// ---- W5-S2 account/positions builders（IN 空間 61-64;IB pinned 欄位序）----
+
+/// accountSummary 行（IN 63;欄序 `[63, version, reqId, account, tag, value, currency]`）。
+pub fn account_summary(
+    req_id: i64,
+    account: &str,
+    tag: &str,
+    value: &str,
+    currency: &str,
+) -> FakeFrame {
+    FakeFrame(encode_frame(&encode_fields(&[
+        "63",
+        "1",
+        &req_id.to_string(),
+        account,
+        tag,
+        value,
+        currency,
+    ])))
+}
+
+/// accountSummaryEnd（IN 64;`[64, version, reqId]`）——首回全量完成標記。
+pub fn account_summary_end(req_id: i64) -> FakeFrame {
+    FakeFrame(encode_frame(&encode_fields(&[
+        "64",
+        "1",
+        &req_id.to_string(),
+    ])))
+}
+
+/// position 行（IN 61;version 3 固定 16 欄:`[61, 3, account, conId, symbol, secType,
+/// lastTradeDateOrContractMonth, strike, right, multiplier, exchange, currency, localSymbol,
+/// tradingClass, position, avgCost]`——STK 行的 expiry/strike/right/multiplier 佔位欄仍在
+/// wire,以空/零值承載）。
+#[allow(clippy::too_many_arguments)]
+pub fn position_row(
+    account: &str,
+    con_id: i64,
+    symbol: &str,
+    sec_type: &str,
+    exchange: &str,
+    currency: &str,
+    position: &str,
+    avg_cost: &str,
+) -> FakeFrame {
+    FakeFrame(encode_frame(&encode_fields(&[
+        "61",
+        "3",
+        account,
+        &con_id.to_string(),
+        symbol,
+        sec_type,
+        "",
+        "0",
+        "",
+        "",
+        exchange,
+        currency,
+        symbol,
+        symbol,
+        position,
+        avg_cost,
+    ])))
+}
+
+/// version<3 的 position 行（15 欄,無 avgCost;G1 負場景:消化端必須 typed 拒,禁捏值）。
+pub fn position_row_v2_no_avg_cost(account: &str, con_id: i64, symbol: &str) -> FakeFrame {
+    FakeFrame(encode_frame(&encode_fields(&[
+        "61",
+        "2",
+        account,
+        &con_id.to_string(),
+        symbol,
+        "STK",
+        "",
+        "0",
+        "",
+        "",
+        "ARCA",
+        "USD",
+        symbol,
+        symbol,
+        "100",
+    ])))
+}
+
+/// positionEnd（IN 62;`[62, version]`）——首回全量完成標記。
+pub fn position_end() -> FakeFrame {
+    FakeFrame(encode_frame(&encode_fields(&["62", "1"])))
+}
+
 // ===========================================================================
 // (c) 場景 DSL + runner
 // ===========================================================================
@@ -448,6 +539,105 @@ pub mod scenarios {
             FakeStep::SilentDrop,
         ])
     }
+
+    // ---- W5-S2 account/positions 場景 ----
+
+    /// **W5-S2 happy account-data session**:握手到 Ready 後推 summary 全量（2 tag）→ End →
+    /// positions 全量（1 倉）→ positionEnd → summary 節拍增量（變動 tag 覆蓋）→ 腳本盡 EOF。
+    /// `req_id` 由消化端對齊（engine 側固定 reqId）。fake 為腳本化 push——不等 driver 的
+    /// req 訊息即推（driver 首 serve tick 先送訂閱再讀,時序天然成立）。
+    pub fn account_data_session(req_id: i64) -> Scenario {
+        let mut frames = happy_handshake_frames();
+        frames.push(account_summary(
+            req_id,
+            "DU1234567",
+            "NetLiquidation",
+            "100000.25",
+            "USD",
+        ));
+        frames.push(account_summary(
+            req_id,
+            "DU1234567",
+            "BuyingPower",
+            "50000",
+            "USD",
+        ));
+        frames.push(account_summary_end(req_id));
+        frames.push(position_row(
+            "DU1234567",
+            756733,
+            "SPY",
+            "STK",
+            "ARCA",
+            "USD",
+            "100",
+            "412.35",
+        ));
+        frames.push(position_end());
+        // 節拍增量:變動 tag 覆蓋(IB 每 3 分鐘僅推變動 tag)。
+        frames.push(account_summary(
+            req_id,
+            "DU1234567",
+            "BuyingPower",
+            "48000",
+            "USD",
+        ));
+        Scenario::new(vec![FakeStep::Send(frames)])
+    }
+
+    /// **W5-S2 負場景:表外 tag**:End 前推白名單外 tag（"Cushion"）→ 消化端走契約
+    /// `UnknownDenied` blocker 路徑（快照 Invalidated,session 不斷、不 panic）。
+    pub fn account_summary_off_whitelist_tag(req_id: i64) -> Scenario {
+        let mut frames = happy_handshake_frames();
+        frames.push(account_summary(
+            req_id,
+            "DU1234567",
+            "Cushion",
+            "0.5",
+            "USD",
+        ));
+        Scenario::new(vec![FakeStep::Send(frames)])
+    }
+
+    /// **W5-S2 負場景:G1 version<3 position 行**（無 avgCost 欄）→ 消化端 typed 拒
+    /// （禁 ibapi 式默認 avgCost=0 捏值）,session 不斷。
+    pub fn position_version_too_old() -> Scenario {
+        let mut frames = happy_handshake_frames();
+        frames.push(position_row_v2_no_avg_cost("DU1234567", 756733, "SPY"));
+        frames.push(position_end());
+        Scenario::new(vec![FakeStep::Send(frames)])
+    }
+
+    /// **W5-S2 負場景:壞欄位 summary 行**（reqId 非數字）→ wire 損壞,消化端
+    /// `WireMalformed` → driver fail-closed 斷線。
+    pub fn account_summary_malformed(_req_id: i64) -> Scenario {
+        let mut frames = happy_handshake_frames();
+        frames.push(custom_frame(&[
+            "63",
+            "1",
+            "abc",
+            "DU1234567",
+            "NetLiquidation",
+            "1",
+            "USD",
+        ]));
+        Scenario::new(vec![FakeStep::Send(frames)])
+    }
+
+    /// **W5-S2 cancel 對稱場景**:summary 全量 → End 後腳本盡 EOF(消化端 cancel 出站由
+    /// driver 測試側驅動;fake 只驗收到 cancel frame)。
+    pub fn account_summary_then_idle(req_id: i64) -> Scenario {
+        let mut frames = happy_handshake_frames();
+        frames.push(account_summary(
+            req_id,
+            "DU1234567",
+            "NetLiquidation",
+            "100000.25",
+            "USD",
+        ));
+        frames.push(account_summary_end(req_id));
+        Scenario::new(vec![FakeStep::Send(frames)])
+    }
 }
 
 // ===========================================================================
@@ -559,6 +749,48 @@ mod tests {
         let _ = scenarios::non_paper_session();
         let _ = scenarios::serve_unknown_msg_id();
         let _ = scenarios::silent_after_handshake();
+        // W5-S2 account/positions 場景。
+        let _ = scenarios::account_data_session(9001);
+        let _ = scenarios::account_summary_off_whitelist_tag(9001);
+        let _ = scenarios::position_version_too_old();
+        let _ = scenarios::account_summary_malformed(9001);
+        let _ = scenarios::account_summary_then_idle(9001);
+    }
+
+    #[test]
+    fn w5_account_data_builders_produce_pinned_field_order() {
+        // IN 63 accountSummary = [63, 1, reqId, account, tag, value, currency]。
+        assert_eq!(
+            frame_fields(
+                &decode_all_frames(&account_summary(7, "DU1", "NetLiquidation", "1.5", "USD").0)[0]
+            ),
+            vec!["63", "1", "7", "DU1", "NetLiquidation", "1.5", "USD"]
+        );
+        // IN 64 accountSummaryEnd = [64, 1, reqId]。
+        assert_eq!(
+            frame_fields(&decode_all_frames(&account_summary_end(7).0)[0]),
+            vec!["64", "1", "7"]
+        );
+        // IN 61 position v3 = 16 欄(佔位欄按位在 wire)。
+        let f = frame_fields(
+            &decode_all_frames(
+                &position_row("DU1", 756733, "SPY", "STK", "ARCA", "USD", "100", "412.35").0,
+            )[0],
+        );
+        assert_eq!(f.len(), 16);
+        assert_eq!(&f[..2], &["61", "3"]);
+        assert_eq!(f[14], "100");
+        assert_eq!(f[15], "412.35");
+        // v2 負場景 = 15 欄(無 avgCost)。
+        let f =
+            frame_fields(&decode_all_frames(&position_row_v2_no_avg_cost("DU1", 1, "SPY").0)[0]);
+        assert_eq!(f.len(), 15);
+        assert_eq!(&f[..2], &["61", "2"]);
+        // IN 62 positionEnd = [62, 1]。
+        assert_eq!(
+            frame_fields(&decode_all_frames(&position_end().0)[0]),
+            vec!["62", "1"]
+        );
     }
 
     // ---- 零 socket 源守衛（本 crate 源碼絕不含真實網路連線型別;in-crate 第一道防線）----
