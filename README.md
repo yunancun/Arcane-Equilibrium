@@ -19,6 +19,12 @@ Agentic trading governance system — 自主扫描 650+ 交易对，智能部署
 
 > 2026-07-16 安全面收敛：外部 OpenClaw Gateway、其代理/服务入口，以及
 > Grafana 容器、仪表盘与数据写入链路均已退役并移除；它们不再是部署或访问端点。
+>
+> **同日深夜 main 历史经 `git-filter-repo` 全量重写（secret purge）**：三凭证已
+> revoke/rotate 并从全部可写分支/标签清除（attest：PR#55）。**2026-07-16 23:46 之前
+> 记录在任何文档/memory/报告中的 commit SHA 均属旧史**，请以 PR 编号/日期/subject 在
+> 新史定位（`git log --grep`）；旧史本地备份 ref `pre-rewrite-main-20260716`（Mac+Linux，
+> 永不 push）。
 
 ### OpenClaw Control Console 核心 Tab
 
