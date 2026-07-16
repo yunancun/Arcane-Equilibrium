@@ -712,6 +712,27 @@ def test_publishes_byte_identical_private_stamped_snapshot_only(tmp_path: Path) 
     assert not (destination / "blocked_outcome_review_latest.json").exists()
 
 
+def test_complete_empty_board_rotates_stale_nonempty_consumer_state(
+    tmp_path: Path,
+) -> None:
+    destination = tmp_path / "rendezvous"
+    older = tmp_path / "blocked_outcome_review_20260710T120000Z.json"
+    newer = tmp_path / "blocked_outcome_review_20260710T130000Z.json"
+    _write_nonempty_review(older)
+    _write_review(newer, generated_at_utc="2026-07-10T13:00:00Z")
+    now = datetime(2026, 7, 10, 14, tzinfo=timezone.utc)
+    publish_candidate_board(older, destination, retention_limit=2, now_utc=now)
+    result = publish_candidate_board(
+        newer, destination, retention_limit=1, now_utc=now,
+    )
+    assert result["status"] == "PUBLISHED"
+    retained = list(destination.glob("blocked_outcome_review_*.json"))
+    assert retained == [destination / newer.name]
+    payload = json.loads(retained[0].read_text(encoding="utf-8"))
+    assert payload["learning_candidate_board"]["candidate_rows"] == []
+    assert payload["learning_candidate_board"]["candidate_universe_complete"] is True
+
+
 def test_secure_read_rejects_ctime_only_identity_change(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

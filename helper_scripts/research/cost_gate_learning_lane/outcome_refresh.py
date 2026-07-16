@@ -15,7 +15,9 @@ import datetime as dt
 from dataclasses import dataclass
 import json
 from pathlib import Path
+import sqlite3
 import sys
+import tempfile
 from typing import Any
 
 
@@ -25,7 +27,10 @@ for _path in (str(RESEARCH_ROOT), str(ROOT)):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-from cost_gate_learning_lane.contract import OUTCOME_ADAPTER_SCHEMA_VERSION
+from cost_gate_learning_lane.contract import (
+    ADMIT_DECISION,
+    OUTCOME_ADAPTER_SCHEMA_VERSION,
+)
 from cost_gate_learning_lane.candidate_evaluation_producer import (
     CandidateEvaluationSourceProvider,
     outcome_subtype_semantics_valid,
@@ -37,6 +42,7 @@ from cost_gate_learning_lane.outcome_writer import (
     build_probe_outcome_records,
     validate_outcome_config,
 )
+from cost_gate_learning_lane import outcome_writer as outcome_writer_module
 from cost_gate_learning_lane.price_observations import (
     PriceObservationBuildConfig,
     build_price_observations_from_rows,
@@ -49,17 +55,20 @@ from cost_gate_learning_lane.price_observations import (
 )
 from cost_gate_learning_lane.runtime_adapter import (
     append_jsonl_ledger,
-    read_learning_ledger_partitions,
+    project_learning_ledger_row,
 )
-from cost_gate_learning_lane.ledger_rotation import (
-    MAX_IN_MEMORY_RETAINED_LEDGER_BYTES,
-    retained_ledger_total_bytes,
+from cost_gate_learning_lane.ledger_streaming import (
+    LedgerProjectionLimitError,
+    LedgerScanError,
+    scan_retained_jsonl,
 )
 
 
 OUTCOME_REFRESH_RECORD_TYPE = "cost_gate_outcome_refresh_batch"
 OUTCOME_REFRESH_SCHEMA_VERSION = "cost_gate_demo_learning_lane_outcome_refresh_v1"
-RETAINED_LEDGER_STREAMING_PROJECTION_REQUIRED_EXIT_CODE = 75
+RETAINED_LEDGER_SCAN_DEFERRED_EXIT_CODE = 75
+MAX_OUTCOME_REFRESH_PROJECTED_ROWS = 250_000
+MAX_OUTCOME_REFRESH_PROJECTED_BYTES = 512 * 1024 * 1024
 _CANDIDATE_EVALUATION_PREFLIGHT_FIELDS = {
     "generated_outcome_count",
     "candidate_evaluation_eligible_count",
@@ -78,6 +87,182 @@ class OutcomeRefreshSelection:
 
     record_blocked_outcomes: bool = False
     record_probe_outcomes: bool = False
+
+
+def _canonical_row_bytes(row: dict[str, Any]) -> bytes:
+    return json.dumps(
+        row,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+
+
+def _compact_fill_evidence_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Keep only fields consumed by outcome_writer fill reconciliation."""
+    keys = {
+        "fill_id",
+        "exec_id",
+        "execution_id",
+        "attempt_id",
+        "context_id",
+        "signal_id",
+        "order_link_id",
+        "orderLinkId",
+        "openclaw_order_link_id",
+        "client_order_id",
+        "order_id",
+        "bounded_probe_attempt_id",
+    }
+    compact = {key: row[key] for key in keys if key in row}
+    for section_name in ("event", "lineage"):
+        section = row.get(section_name)
+        if isinstance(section, dict):
+            projected = {key: section[key] for key in keys if key in section}
+            if projected:
+                compact[section_name] = projected
+    return compact
+
+
+def read_outcome_refresh_ledger_projection(
+    ledger_path: Path,
+    *,
+    selection: OutcomeRefreshSelection,
+) -> list[dict[str, Any]]:
+    """Project only pending admissions and exact fill links through one scan."""
+    _validate_selection(selection)
+    selected_record_types = set()
+    if selection.record_blocked_outcomes:
+        selected_record_types.add("blocked_signal_outcome")
+    if selection.record_probe_outcomes:
+        selected_record_types.add("probe_outcome")
+
+    with tempfile.TemporaryDirectory(prefix="cost-gate-outcome-refresh-") as temp_dir:
+        db_path = Path(temp_dir) / "projection.sqlite3"
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("PRAGMA journal_mode=OFF")
+            conn.execute("PRAGMA synchronous=OFF")
+            conn.executescript(
+                """
+                CREATE TABLE admissions (
+                    seq INTEGER PRIMARY KEY,
+                    target_record_type TEXT NOT NULL,
+                    attempt_id TEXT NOT NULL,
+                    payload BLOB NOT NULL
+                );
+                CREATE TABLE completed (
+                    record_type TEXT NOT NULL,
+                    attempt_id TEXT NOT NULL,
+                    PRIMARY KEY (record_type, attempt_id)
+                ) WITHOUT ROWID;
+                CREATE TABLE fills (
+                    seq INTEGER PRIMARY KEY,
+                    payload BLOB NOT NULL
+                );
+                """
+            )
+            seq = 0
+
+            def consume(raw_row: dict[str, Any]) -> None:
+                nonlocal seq
+                seq += 1
+                outcome_row, _dedup_row, quarantined = (
+                    project_learning_ledger_row(raw_row)
+                )
+                if quarantined or outcome_row is None:
+                    return
+                record_type = str(outcome_row.get("record_type") or "").strip()
+                if record_type in selected_record_types:
+                    attempt_id = (
+                        str(outcome_row.get("attempt_id") or "").strip()
+                        or outcome_writer_module._attempt_id(outcome_row)
+                    )
+                    if attempt_id:
+                        conn.execute(
+                            "INSERT OR IGNORE INTO completed VALUES (?, ?)",
+                            (record_type, attempt_id),
+                        )
+                if record_type == "probe_admission_decision":
+                    decision = outcome_writer_module._row_decision(outcome_row)
+                    target_record_type = None
+                    if (
+                        selection.record_blocked_outcomes
+                        and decision != ADMIT_DECISION
+                        and outcome_row.get("allowed_to_submit_order") is False
+                    ):
+                        target_record_type = "blocked_signal_outcome"
+                    elif (
+                        selection.record_probe_outcomes
+                        and decision == ADMIT_DECISION
+                    ):
+                        target_record_type = "probe_outcome"
+                    if target_record_type is not None:
+                        attempt_id = (
+                            str(outcome_row.get("attempt_id") or "").strip()
+                            or outcome_writer_module._attempt_id(outcome_row)
+                        )
+                        if attempt_id:
+                            conn.execute(
+                                "INSERT INTO admissions VALUES (?, ?, ?, ?)",
+                                (
+                                    seq,
+                                    target_record_type,
+                                    attempt_id,
+                                    _canonical_row_bytes(outcome_row),
+                                ),
+                            )
+                if (
+                    selection.record_probe_outcomes
+                    and outcome_writer_module._row_has_fill_execution_evidence(
+                        outcome_row
+                    )
+                ):
+                    conn.execute(
+                        "INSERT INTO fills VALUES (?, ?)",
+                        (
+                            seq,
+                            _canonical_row_bytes(
+                                _compact_fill_evidence_row(outcome_row)
+                            ),
+                        ),
+                    )
+
+            scan_retained_jsonl(ledger_path, consume)
+            conn.commit()
+            projected_rows: list[dict[str, Any]] = []
+            projected_bytes = 0
+            for _seq, payload in conn.execute(
+                """
+                SELECT a.seq, a.payload
+                FROM admissions a
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM completed c
+                    WHERE c.record_type = a.target_record_type
+                      AND c.attempt_id = a.attempt_id
+                )
+                UNION ALL
+                SELECT f.seq, f.payload FROM fills f
+                ORDER BY seq
+                """
+            ):
+                projected_bytes += len(payload)
+                if (
+                    len(projected_rows) >= MAX_OUTCOME_REFRESH_PROJECTED_ROWS
+                    or projected_bytes > MAX_OUTCOME_REFRESH_PROJECTED_BYTES
+                ):
+                    raise LedgerProjectionLimitError(
+                        "OUTCOME_REFRESH_PROJECTION_LIMIT_REACHED",
+                        path=ledger_path,
+                    )
+                projected_rows.append(
+                    json.loads(bytes(payload).decode("utf-8"))
+                )
+            return projected_rows
+        finally:
+            conn.close()
 
 
 def _utc_now() -> dt.datetime:
@@ -432,7 +617,11 @@ def refresh_cost_gate_outcomes_from_price_rows(
     ) = None,
 ) -> dict[str, Any]:
     """Build a refresh batch from in-memory price rows and optionally append it."""
-    ledger_rows = read_learning_ledger_partitions(ledger_path).outcome_rows
+    selection = selection or OutcomeRefreshSelection(record_blocked_outcomes=True)
+    ledger_rows = read_outcome_refresh_ledger_projection(
+        ledger_path,
+        selection=selection,
+    )
     batch = build_cost_gate_outcome_refresh_batch(
         ledger_rows,
         price_rows,
@@ -486,23 +675,24 @@ def main() -> int:
         record_probe_outcomes=args.record_probe_outcomes,
     )
     _validate_selection(selection)
-    retained_bytes = retained_ledger_total_bytes(args.ledger)
-    if retained_bytes > MAX_IN_MEMORY_RETAINED_LEDGER_BYTES:
+    try:
+        ledger_rows = read_outcome_refresh_ledger_projection(
+            args.ledger,
+            selection=selection,
+        )
+    except (LedgerScanError, LedgerProjectionLimitError) as exc:
         print(
             json.dumps(
                 {
-                    "status": "RETAINED_LEDGER_STREAMING_PROJECTION_REQUIRED",
+                    "status": "RETAINED_LEDGER_SCAN_DEFERRED",
                     "ledger_path": str(args.ledger),
-                    "retained_ledger_bytes": retained_bytes,
-                    "max_in_memory_retained_ledger_bytes": (
-                        MAX_IN_MEMORY_RETAINED_LEDGER_BYTES
-                    ),
+                    "reason": str(exc),
                 },
                 sort_keys=True,
             ),
             file=sys.stderr,
         )
-        return RETAINED_LEDGER_STREAMING_PROJECTION_REQUIRED_EXIT_CODE
+        return RETAINED_LEDGER_SCAN_DEFERRED_EXIT_CODE
     slippage_table = None
     if args.slippage_artifact and args.slippage_artifact.exists():
         from cost_gate_learning_lane.cost_model import load_slippage_quantiles
@@ -517,7 +707,6 @@ def main() -> int:
     )
     validate_outcome_config(outcome_cfg)
 
-    ledger_rows = read_learning_ledger_partitions(args.ledger).outcome_rows
     if args.source_pg:
         price_rows = build_price_rows_from_pg_for_refresh(
             ledger_rows,
