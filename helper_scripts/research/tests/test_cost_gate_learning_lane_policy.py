@@ -2648,6 +2648,38 @@ def test_outcome_refresh_projection_collapses_exact_admission_duplicates(
     assert projection.pending_universe_fully_processed is True
 
 
+def test_outcome_refresh_projection_conflicts_distinct_effective_fallback_timestamps(
+    tmp_path: Path,
+) -> None:
+    ledger = tmp_path / "probe_ledger.jsonl"
+    first = _admission_row(
+        "blocked-fallback-time",
+        "ORDER_AUTHORITY_NOT_GRANTED",
+        "ETHUSDT",
+        "Sell",
+        1_784_116_800_000,
+    )
+    del first["event"]["ts_ms"]
+    first["generated_at_ms"] = 1_784_116_800_000
+    second = copy.deepcopy(first)
+    second["generated_at_ms"] = 1_784_116_800_001
+    _write_jsonl_bytes(ledger, [first, second])
+
+    projection = read_outcome_refresh_ledger_projection(
+        ledger,
+        selection=OutcomeRefreshSelection(record_blocked_outcomes=True),
+        now_utc=dt.datetime(2026, 7, 16, 13, tzinfo=dt.timezone.utc),
+        outcome_cfg=ProbeOutcomeConfig(horizon_minutes=60),
+        batch_limit=2,
+    )
+
+    assert projection.rows == []
+    assert projection.conflict_attempt_count == 1
+    assert projection.duplicate_admission_row_count == 0
+    assert projection.pending_backlog_remaining_count == 1
+    assert projection.pending_universe_fully_processed is False
+
+
 def test_outcome_refresh_projection_completed_attempts_do_not_consume_batch(
     tmp_path: Path,
 ) -> None:
