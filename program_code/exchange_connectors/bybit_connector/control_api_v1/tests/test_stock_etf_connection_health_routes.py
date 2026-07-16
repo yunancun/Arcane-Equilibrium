@@ -22,6 +22,12 @@ from stock_etf_route_fixtures import (
     stock_etf_router,
 )
 
+# 第 3 層被測函數（直呼測縱深防禦分支——route 正常路徑下 lineage 閘已保證 attested,
+# 該分支 route 不可達,唯直呼可證其自足 fail-closed）。
+from app.stock_etf_connection_health_normalizers import (  # noqa: E402
+    _connection_health_lineage_bounded_violations,
+)
+
 # gate=BLOCKED + 全 operational 真值注入下的**精確、有序** contract_violations（tripwire）。
 # 第 1 層（hard-safety,無條件）在前;第 2 層（negative-space,lineage 缺席）在後。
 EXPECTED_CONNECTION_HEALTH_CONTRACT_VIOLATIONS = [
@@ -51,6 +57,36 @@ EXPECTED_CONNECTION_HEALTH_CONTRACT_VIOLATIONS = [
     "account_fingerprint_is_live",
     "entitlement_state_populated",
     "report_status_populated",
+]
+
+# gate=PASS + attestation attested（lineage_present == True,進第 3 層）+ 全 hard-safety
+# 真值 + 每個第 3 層可觸不變量同時破壞下的**精確、有序** contract_violations（W5-S0
+# lineage-bounded tripwire,與 all-false tripwire 同款鎖 lockstep）。
+EXPECTED_CONNECTION_HEALTH_LINEAGE_BOUNDED_CONTRACT_VIOLATIONS = [
+    # ── 第 1 層 hard-safety（不受 lineage 影響）──
+    "ibkr_contact_performed",
+    "secret_slot_touched",
+    "order_routed",
+    "bybit_ipc_reused",
+    "ibkr_live_enabled",
+    "gateway_socket_open",
+    "db_apply_performed",
+    # ── 第 3 層 lineage-bounded（lineage_present == True;W5-S0 窮舉）──
+    "account_fingerprint_is_live",
+    "session_state_activity_inconsistent",
+    "halt_reason_populated_without_disconnect",
+    "reconnect_attempt_outside_reconnect_lifecycle",
+    "pacing_queue_depth_without_active_session",
+    "pacing_lines_in_use_without_active_session",
+    "pacing_ib_pacing_strikes_without_active_session",
+    "pacing_admitted_without_active_session",
+    "pacing_rejected_order_verb_without_active_session",
+    "pacing_rejected_queue_full_without_active_session",
+    "pacing_rejected_timeout_without_active_session",
+    "pacing_rejected_historical_without_active_session",
+    "pacing_rejected_lines_without_active_session",
+    "entitlement_state_without_active_session",
+    "report_status_not_emitter_produced",
 ]
 
 
@@ -210,6 +246,130 @@ def test_stock_etf_connection_health_all_false_regression_blocks_injected_truths
     assert data["gateway_socket_open"] is False
     assert data["ibkr_contact_performed"] is False
     assert data["ibkr_live_enabled"] is False
+
+
+def test_stock_etf_connection_health_lineage_bounded_tripwire_stays_exact() -> None:
+    """W5-S0 第 3 層 tripwire：gate=PASS + attestation attested（lineage 具備,進第 3 層）
+    下,強注每個第 3 層可觸的不變量破壞 + 全 hard-safety 真值 → 精確、有序全列
+    contract_violations。任何未來鬆動第 1/3 層即轉紅（與 all-false tripwire lockstep）。"""
+    payload = _valid_connection_health()
+    payload["phase2"]["external_surface_gate"]["status"] = "PASS"
+    payload["attestation_status"] = "PAPER_ATTESTED"
+    # 第 1 層 hard-safety 全注 true。
+    payload["ibkr_contact_performed"] = True
+    payload["secret_slot_touched"] = True
+    payload["order_routed"] = True
+    payload["bybit_ipc_reused"] = True
+    payload["ibkr_live_enabled"] = True
+    payload["gateway_socket_open"] = True
+    payload["db_apply_performed"] = True
+    # 第 3 層：live 指紋硬否決 + session_active/state 不一致 + halt_reason 綁定破壞。
+    payload["account_fingerprint_is_live"] = True
+    payload["session_active"] = False
+    payload["session_state"] = "ready"
+    payload["halt_reason"] = "halted"
+    # reconnect_attempt 非零但 state 不在 reconnect 生命週期（ready）。
+    payload["reconnect_attempt"] = 5
+    # pacing 活動計數全非零但 session 非活躍。
+    payload["queue_depth"] = 3
+    payload["lines_in_use"] = 2
+    payload["ib_pacing_strikes"] = 1
+    payload["admitted"] = 9
+    payload["rejected_order_verb"] = 1
+    payload["rejected_queue_full"] = 1
+    payload["rejected_timeout"] = 1
+    payload["rejected_historical"] = 1
+    payload["rejected_lines"] = 1
+    # entitlement 非默認值但 session 非活躍;report_status 自宣告非 emitter 可產值。
+    payload["entitlement_state"] = "granted"
+    payload["report_status"] = "degraded"
+    # telemetry 極大值——仍不得入 violation。
+    payload["main_tokens_available"] = 999_999
+
+    fake_ipc = AsyncMock()
+    fake_ipc.call = AsyncMock(return_value=payload)
+    client = _make_client_with_ipc(fake_ipc)
+    try:
+        data = client.get("/api/v1/stock-etf/connection-health").json()["data"]
+    finally:
+        client._stock_etf_patcher.stop()  # type: ignore[attr-defined]
+
+    assert data["lineage_present"] is True
+    assert data["connection_health_state"] == "contract_violation_blocked"
+    violations = data["contract_violations"]
+    assert violations == EXPECTED_CONNECTION_HEALTH_LINEAGE_BOUNDED_CONTRACT_VIOLATIONS
+    # telemetry 不入 violation（無任何 main_tokens 相關項）。
+    assert not any("main_tokens" in item for item in violations)
+    # 輸出安全束仍恆 false（NEVER echo injected truths）。
+    assert data["session_active"] is False
+    assert data["gateway_socket_open"] is False
+    assert data["account_fingerprint_is_live"] is False
+
+
+def test_stock_etf_connection_health_lineage_present_active_session_is_clean() -> None:
+    """第 3 層負控：lineage 具備 + 各欄綁定**全部成立**的 W5 目標形態（active attested
+    session + pacing 活動 + halt_reason=not_halted）→ 零 violation。證窮舉不變量不會
+    過度封殺合法 W5 payload（fail-closed 但非 fail-always）。"""
+    payload = _valid_connection_health()
+    payload["phase2"]["external_surface_gate"]["status"] = "PASS"
+    payload["attestation_status"] = "PAPER_ATTESTED"
+    payload["session_state"] = "ready"
+    payload["session_active"] = True
+    payload["halt_reason"] = "not_halted"
+    payload["reconnect_attempt"] = 0
+    payload["queue_depth"] = 2
+    payload["admitted"] = 7
+    payload["entitlement_state"] = "granted"
+
+    fake_ipc = AsyncMock()
+    fake_ipc.call = AsyncMock(return_value=payload)
+    client = _make_client_with_ipc(fake_ipc)
+    try:
+        data = client.get("/api/v1/stock-etf/connection-health").json()["data"]
+    finally:
+        client._stock_etf_patcher.stop()  # type: ignore[attr-defined]
+
+    assert data["lineage_present"] is True
+    assert data["contract_violations"] == []
+    assert data["connection_health_state"] == "external_verification_pending"
+    # 布林「宣稱」輸出仍恆 clamp false（thin relay NEVER echo）。
+    assert data["session_active"] is False
+    assert data["account_fingerprint_is_live"] is False
+
+
+def test_stock_etf_connection_health_layer3_is_self_contained_fail_closed() -> None:
+    """縱深防禦（直呼;route 正常路徑不可達）：第 3 層函數不依賴 caller 的 lineage 閘——
+    attestation 未 attested 時自足標 violation（caller 分流未來漂移仍 fail-closed）。"""
+    violations: list[str] = []
+    _connection_health_lineage_bounded_violations(
+        {
+            "attestation_status": "BLOCKED",
+            "session_active": True,
+            "session_state": "ready",
+            "halt_reason": "not_halted",
+        },
+        violations,
+    )
+    assert violations == [
+        "attestation_status_not_attested_under_lineage",
+        "session_active_without_attestation",
+    ]
+
+
+def test_stock_etf_connection_health_layer3_disconnected_requires_halt_reason() -> None:
+    """第 3 層 halt_reason 綁定反向：disconnected 態自宣告 `not_halted`（Rust 契約:
+    not_halted = 非 disconnected 態）→ violation（直呼,精確全列）。"""
+    violations: list[str] = []
+    _connection_health_lineage_bounded_violations(
+        {
+            "attestation_status": "PAPER_ATTESTED",
+            "session_active": False,
+            "session_state": "disconnected",
+            "halt_reason": "not_halted",
+        },
+        violations,
+    )
+    assert violations == ["halt_reason_missing_for_disconnected"]
 
 
 def test_stock_etf_connection_health_forged_gate_pass_still_hard_safety_blocks() -> None:
