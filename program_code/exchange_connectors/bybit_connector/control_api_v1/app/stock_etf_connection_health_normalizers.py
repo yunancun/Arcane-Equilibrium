@@ -1,0 +1,228 @@
+"""Connection-health status normalizer for the Stock/ETF display-only surface.
+
+W4 lockstep（AMD-2026-07-08-01 §Runtime Boundary,與 Rust emitter 同 PR）。負空間三層
+判定,依序執行、前層永不可被後層鬆動：
+
+- 第 1 層（hard-safety,無條件）：contact/secret/socket/order/live/db_apply 若為 true →
+  **恆 violation**,不受任何 lineage 影響（EA-gated,非 W4/W5 可解禁）。最先執行。
+- 第 2 層（negative-space default,lineage 缺席）：`lineage_present == False` 時,每一個
+  populated operational 值（session/pacing 活動/attestation/entitlement/report_status）→
+  violation。與 W3 all-false 檢查逐位元同構。
+- 第 3 層（lineage-bounded,W5+,W4 結構性不可達）：`lineage_present == True` 時 operational
+  值可 populated,但仍逐值受 lineage-bound 不變量約束。W4 下 gate 恆 BLOCKED → 此分支不可達。
+
+`lineage_present`（唯一放行閘,全 Rust-emitter 所有）：`= (phase2_gate.status == "PASS") ∧
+(attestation_status ∈ {PAPER_ATTESTED, READONLY_ATTESTED})`——production 未 seal 下結構性為
+False。Python **只做一致性檢查,不計算 lineage、不接受 client state、不加 authority**。
+
+**pacing `main_tokens_available` 是 telemetry 非 liveness 訊號**：inactive governor 為滿桶
+（初始桶量,非零屬誠實基線）——**不列入負空間 violation**。負空間鎖定 pacing 活動計數。
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from .stock_etf_status_common import (
+    _DENIED_OPERATIONS,
+    _as_bool,
+    _as_dict,
+    _as_int,
+    _as_list,
+    _as_str,
+    _phase2_fail_closed,
+)
+
+# 第 1 層 hard-safety 欄（health 報告的負空間安全束 + db_apply;恆校驗,不受 lineage 影響）。
+# 注：health 束用 `ibkr_contact_performed`（非 account 的 `ibkr_call_performed`）。
+_HEALTH_HARD_SAFETY_FIELDS: tuple[str, ...] = (
+    "ibkr_contact_performed",
+    "secret_slot_touched",
+    "order_routed",
+    "bybit_ipc_reused",
+    "ibkr_live_enabled",
+    "gateway_socket_open",
+    "db_apply_performed",
+)
+
+# pacing 活動計數（第 2 層負空間校驗;**不含** main_tokens_available——telemetry 非 liveness）。
+_HEALTH_PACING_ACTIVITY_FIELDS: tuple[str, ...] = (
+    "queue_depth",
+    "lines_in_use",
+    "ib_pacing_strikes",
+    "admitted",
+    "rejected_order_verb",
+    "rejected_queue_full",
+    "rejected_timeout",
+    "rejected_historical",
+    "rejected_lines",
+)
+
+_ATTESTED_STATES: tuple[str, ...] = ("PAPER_ATTESTED", "READONLY_ATTESTED")
+
+
+def _connection_health_lineage_present(
+    source: dict[str, Any],
+    phase2_gate_status: str,
+) -> bool:
+    """唯一放行閘：phase2 gate PASS ∧ attestation 已 attested（全 Rust-emitter 所有）。
+    W4 下 gate 恆 BLOCKED → 恆 False（第 3 層結構性不可達）。"""
+    attestation_status = _as_str(source.get("attestation_status"), "BLOCKED")
+    return phase2_gate_status == "PASS" and attestation_status in _ATTESTED_STATES
+
+
+def _connection_health_negative_space_violations(
+    source: dict[str, Any],
+    violations: list[str],
+) -> None:
+    """第 2 層：lineage 缺席時,每一個 populated operational 值 → violation。"""
+    # session 束（disconnected / envelope_required / 非 active / reconnect 0 才乾淨）。
+    if _as_str(source.get("session_state"), "disconnected") != "disconnected":
+        violations.append("session_state_populated")
+    if _as_bool(source.get("session_active")):
+        violations.append("session_active")
+    if _as_int(source.get("reconnect_attempt")) != 0:
+        violations.append("reconnect_attempt_present")
+    if _as_str(source.get("halt_reason"), "envelope_required") != "envelope_required":
+        violations.append("halt_reason_not_envelope_required")
+    # pacing 活動計數（main_tokens_available 不校驗——telemetry）。
+    for field in _HEALTH_PACING_ACTIVITY_FIELDS:
+        if _as_int(source.get(field)) != 0:
+            violations.append(f"pacing_{field}_present")
+    # attestation / entitlement / report_status 束。
+    if _as_str(source.get("attestation_status"), "BLOCKED") != "BLOCKED":
+        violations.append("attestation_status_populated")
+    if _as_bool(source.get("account_fingerprint_is_live")):
+        violations.append("account_fingerprint_is_live")
+    if _as_str(source.get("entitlement_state"), "pending") != "pending":
+        violations.append("entitlement_state_populated")
+    if (
+        _as_str(source.get("report_status"), "external_verification_pending")
+        != "external_verification_pending"
+    ):
+        violations.append("report_status_populated")
+
+
+def _connection_health_lineage_bounded_violations(
+    source: dict[str, Any],
+    violations: list[str],
+) -> None:
+    """第 3 層（W5+,W4 結構性不可達）：lineage 具備下,operational 值可 populated,但仍受
+    lineage-bound 不變量約束——active session 需 paper/readonly attested 且非 live 帳戶指紋;
+    session_state 與 session_active 一致。W4 下 gate 恆 BLOCKED → 本函數永不被呼叫（覆蓋率
+    /斷言雙鎖）。live 帳戶指紋為硬否決（即使 lineage 具備仍拒）。"""
+    attestation_status = _as_str(source.get("attestation_status"), "BLOCKED")
+    session_active = _as_bool(source.get("session_active"))
+    session_state = _as_str(source.get("session_state"), "disconnected")
+    if session_active and attestation_status not in _ATTESTED_STATES:
+        violations.append("session_active_without_attestation")
+    if _as_bool(source.get("account_fingerprint_is_live")):
+        violations.append("account_fingerprint_is_live")
+    # session_state 與 session_active 一致性（active ⟺ ready/degraded）。
+    active_states = {"ready", "degraded"}
+    if session_active != (session_state in active_states):
+        violations.append("session_state_activity_inconsistent")
+
+
+def _connection_health_contract_violations(
+    source: dict[str, Any],
+    lineage_present: bool,
+    reason: str | None,
+) -> list[str]:
+    """三層負空間判定（依序;前層不可被後層鬆動）。"""
+    # 第 1 層：hard-safety,無條件,在任何 lineage 分支之前。
+    violations = [
+        field for field in _HEALTH_HARD_SAFETY_FIELDS if _as_bool(source.get(field))
+    ]
+    if reason is not None:
+        return violations
+    # 第 2/3 層依 lineage 分流。
+    if not lineage_present:
+        _connection_health_negative_space_violations(source, violations)
+    else:
+        _connection_health_lineage_bounded_violations(source, violations)
+    return violations
+
+
+def _normalize_connection_health(raw: Any, reason: str | None) -> dict[str, Any]:
+    source = _as_dict(raw)
+    phase2 = _as_dict(source.get("phase2")) or _phase2_fail_closed()
+    external_surface_gate = _as_dict(phase2.get("external_surface_gate"))
+    phase2_gate_status = _as_str(external_surface_gate.get("status"), "BLOCKED")
+    # lineage_present：唯一放行閘（W4 恆 False）。Python 只讀 Rust-emitter payload,不計算。
+    lineage_present = _connection_health_lineage_present(source, phase2_gate_status)
+
+    contract_violations = _connection_health_contract_violations(
+        source,
+        lineage_present,
+        reason,
+    )
+    blockers = [
+        str(item) for item in _as_list(external_surface_gate.get("blockers"))
+    ]
+    if reason is not None and reason not in blockers:
+        blockers.append(reason)
+
+    status_state = "external_verification_pending"
+    if contract_violations:
+        status_state = "contract_violation_blocked"
+    elif reason is not None:
+        status_state = "degraded"
+
+    return {
+        "api_version": "v1",
+        "asset_lane": "stock_etf_cash",
+        "broker": "ibkr",
+        "environment": "paper_readonly",
+        "gui_authority": "display_only",
+        "connection_health_state": status_state,
+        "phase": _as_str(
+            source.get("phase"), "phase2_connection_health_source_fixture"
+        ),
+        "report_status": _as_str(
+            source.get("report_status"), "external_verification_pending"
+        ),
+        # session 束：資訊性 string/int display-only 投影(engine 為 SoT);但 `session_active`
+        # 是 negative-space 布林「宣稱」——**輸出恆 clamp False**(thin relay NEVER echo 危險
+        # true;GUI 以 contract_violations 為權威訊號)。
+        "session_state": _as_str(source.get("session_state"), "disconnected"),
+        "halt_reason": _as_str(source.get("halt_reason"), "envelope_required"),
+        "session_active": False,
+        "reconnect_attempt": _as_int(source.get("reconnect_attempt")),
+        # pacing 束（main_tokens_available＝telemetry;活動計數 display-only）。
+        "main_tokens_available": _as_int(source.get("main_tokens_available")),
+        "queue_depth": _as_int(source.get("queue_depth")),
+        "lines_in_use": _as_int(source.get("lines_in_use")),
+        "ib_pacing_strikes": _as_int(source.get("ib_pacing_strikes")),
+        "admitted": _as_int(source.get("admitted")),
+        "rejected_order_verb": _as_int(source.get("rejected_order_verb")),
+        "rejected_queue_full": _as_int(source.get("rejected_queue_full")),
+        "rejected_timeout": _as_int(source.get("rejected_timeout")),
+        "rejected_historical": _as_int(source.get("rejected_historical")),
+        "rejected_lines": _as_int(source.get("rejected_lines")),
+        # attestation / entitlement 束：資訊性 string 投影;但 `account_fingerprint_is_live`
+        # 是 negative-space 布林「宣稱」(live 帳戶)——**輸出恆 clamp False**(NEVER echo 危險 true)。
+        "attestation_status": _as_str(source.get("attestation_status"), "BLOCKED"),
+        "account_fingerprint_is_live": False,
+        "entitlement_state": _as_str(source.get("entitlement_state"), "pending"),
+        "pending_reason": _as_str(source.get("pending_reason"), ""),
+        # lineage 觀測（第 4 道機器證明：W4 恆 False → 第 3 層不可達）。
+        "lineage_present": lineage_present,
+        "phase2": phase2,
+        "phase2_gate_status": phase2_gate_status,
+        "phase2_gate_blockers": blockers,
+        "allowed_gui_actions": ["refresh_connection_health"],
+        "denied_operations": list(_DENIED_OPERATIONS),
+        # 負空間安全束（輸出恆 false;NEVER echo true——contract_violations 才是權威訊號）。
+        "ibkr_live_enabled": False,
+        "ibkr_contact_performed": False,
+        "secret_slot_touched": False,
+        "gateway_socket_open": False,
+        "order_routed": False,
+        "bybit_ipc_reused": False,
+        "db_apply_performed": False,
+        "stock_live_disabled": True,
+        "contract_violations": contract_violations,
+        "degraded": reason is not None or bool(contract_violations),
+        "reason": reason,
+    }

@@ -18,6 +18,7 @@ REQUIRED_METHOD_VARIANTS = {
     "GetLaunchStatus",
     "GetReleasePacketStatus",
     "GetDisableCleanupStatus",
+    "GetConnectionHealth",
     "PreviewPaperOrder",
     "SubmitPaperOrder",
     "CancelPaperOrder",
@@ -167,7 +168,7 @@ def test_stock_etf_lane_scoped_ipc_source_keeps_method_matrix() -> None:
     assert "const REQUIRED_METHODS" in source
     assert "pub enum StockEtfLaneScopedIpcMethod" in source
     assert "fn expected_method(" in source
-    assert len(REQUIRED_METHOD_VARIANTS) == 20
+    assert len(REQUIRED_METHOD_VARIANTS) == 21
     for variant in REQUIRED_METHOD_VARIANTS:
         assert f"StockEtfLaneScopedIpcMethod::{variant}" in required_methods
         assert f"Method::{variant}" in source

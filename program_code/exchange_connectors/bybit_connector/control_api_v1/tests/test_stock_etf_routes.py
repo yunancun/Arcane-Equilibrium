@@ -73,6 +73,7 @@ def test_stock_etf_openapi_exposes_stock_etf_get_only(client_fail_closed: TestCl
     assert stock_paths == {
         "/api/v1/stock-etf/account-status": {"get"},
         "/api/v1/stock-etf/authorization-status": {"get"},
+        "/api/v1/stock-etf/connection-health": {"get"},
         "/api/v1/stock-etf/data-foundation-status": {"get"},
         "/api/v1/stock-etf/disable-cleanup-status": {"get"},
         "/api/v1/stock-etf/evidence-status": {"get"},
@@ -90,6 +91,14 @@ def test_stock_etf_openapi_exposes_stock_etf_get_only(client_fail_closed: TestCl
     }
 
 
+# W4-1 connection-health 是**後端鏈**(IPC+route+normalizer)路由;其 GUI lane-contract
+# 註冊 + GUI 顯示欄擴充**刻意 defer 至 W9**（設計 §4「health 顯示欄擴充建議併入 W9」,
+# 避免與進行中 gui_redesign 玄衡 shell 排程二次觸碰）。故 GUI-lane-contract 模板 parity
+# 於此排除該 route——其 GET-only / no-store / no-client-state 安全姿態仍由本檔另兩個 openapi
+# 守衛（exposes_stock_etf_get_only + exposes_no_client_state_inputs）全覆蓋,零安全缺口。
+_W9_DEFERRED_GUI_LANE_ENDPOINTS = {"/api/v1/stock-etf/connection-health"}
+
+
 def test_stock_etf_openapi_paths_match_gui_lane_contract_template(
     client_fail_closed: TestClient,
 ) -> None:
@@ -100,6 +109,7 @@ def test_stock_etf_openapi_paths_match_gui_lane_contract_template(
         if path.startswith("/api/v1/stock-etf")
         and path != "/api/v1/stock-etf"
         and set(methods) == {"get"}
+        and path not in _W9_DEFERRED_GUI_LANE_ENDPOINTS
     }
     template_source = (
         SRV_ROOT / "settings" / "broker" / "stock_etf_gui_lane_contract.template.toml"
@@ -133,7 +143,7 @@ def test_stock_etf_openapi_exposes_no_client_state_inputs(
                 continue
             violations.append(f"{path}: exposes client-state parameter {parameter!r}")
 
-    assert checked_paths == 16
+    assert checked_paths == 17
     assert violations == []
 
 

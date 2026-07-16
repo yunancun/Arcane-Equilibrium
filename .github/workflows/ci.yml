@@ -536,7 +536,15 @@ jobs:
         # IBKR-CI-3 (b)（CC 約束 ⑤;設計 §4）:Part 1 nm default debug engine artifact 零 fake_tws
         # 符號（dev-only → default build 不編譯 → 結構性缺席;conclusive gate + fail-closed exit 5,
         # 仿 g4 audit）;Part 2 源掃 fake crate src 零真實 socket token。前面 cargo test 已暖 target/,
-        # 此處增量重用 default build。正控（IBKR_FAKE_TWS_AUDIT_BIN 指向 fake-linked lib-test bin →
+        # 此處增量重用 default build。正控（IBKR_FAKE_TWS_AUDIT_BIN 指向 engine lib-test bin →
         # fake 符號命中 → FAIL）已於本地實證有牙。
         working-directory: .
         run: bash helper_scripts/ci/ibkr_fake_tws_absence_audit.sh
+      - name: Run the IBKR W4 driver-absence audit against the default debug build
+        # W4-1（設計 §5;E2-F1）:health 查詢是 session/pacing 的首個 production caller,但 driver
+        # (`ibkr_tws_driver`)仍 production-DCE。Part A 斷言 session 符號 present（W4 已 wire）、
+        # Part B nm default debug engine artifact 零 `ibkr_tws_driver` 符號（send_framed 真消費者
+        # 屬 W8 TCP factory,W4 前 driver 不得有 production caller）;conclusive gate + fail-closed
+        # exit 5,仿 g4。正控（指 fake-linked lib-test bin → driver 符號命中 → FAIL）已本地實證有牙。
+        working-directory: .
+        run: bash helper_scripts/ci/ibkr_driver_absence_audit.sh

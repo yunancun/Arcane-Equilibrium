@@ -54,6 +54,7 @@ fn default_lane_scoped_ipc_contract_blocks_all_authority() {
             Blocker::CommandMissing,
             Blocker::CommandMissing,
             Blocker::CommandMissing,
+            Blocker::CommandMissing,
         ]
     );
 }
@@ -82,7 +83,7 @@ fn accepted_fixture_pins_stock_etf_method_matrix_without_runtime_authority() {
     assert!(!contract.ibkr_contact_performed);
     assert!(!contract.connector_runtime_started);
     assert!(!contract.secret_content_serialized);
-    assert_eq!(contract.commands.len(), 20);
+    assert_eq!(contract.commands.len(), 21);
 
     let phase0_status = contract
         .commands
@@ -235,6 +236,20 @@ fn accepted_fixture_pins_stock_etf_method_matrix_without_runtime_authority() {
     );
     assert!(!disable_cleanup_status.effect_capable);
     assert!(!disable_cleanup_status.rust_owned);
+
+    // W4:connection-health 唯讀查詢——DisplayOnly、effect 不可、Rust 不擁 authority。
+    let connection_health = contract
+        .commands
+        .iter()
+        .find(|command| command.method == StockEtfLaneScopedIpcMethod::GetConnectionHealth)
+        .expect("connection-health method exists");
+    assert_eq!(connection_health.operation, BrokerOperation::HealthRead);
+    assert_eq!(
+        connection_health.authority_scope,
+        AuthorityScope::DisplayOnly
+    );
+    assert!(!connection_health.effect_capable);
+    assert!(!connection_health.rust_owned);
 
     let shadow = contract
         .commands
