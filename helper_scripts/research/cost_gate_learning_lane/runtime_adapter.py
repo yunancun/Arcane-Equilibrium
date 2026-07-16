@@ -41,8 +41,8 @@ from cost_gate_learning_lane.candidate_evaluation_producer import (
 )
 from cost_gate_learning_lane.ledger_rotation import (
     maybe_rotate_ledger,
-    retained_ledger_files,
 )
+from cost_gate_learning_lane.ledger_streaming import scan_retained_jsonl
 from cost_gate_learning_lane.outcome_writer import (
     ProbeOutcomeConfig,
     build_blocked_signal_outcome_records,
@@ -257,21 +257,10 @@ def _read_json(path: Path) -> dict[str, Any]:
 
 
 def _iter_jsonl_ledger_rows(path: Path) -> Iterator[dict[str, Any]]:
-    """依 retention 順序解析 JSON object rows，不解讀 candidate lineage。"""
-    for file_path in retained_ledger_files(path):
-        with file_path.open("r", encoding="utf-8") as fh:
-            for line_no, line in enumerate(fh, start=1):
-                stripped = line.strip()
-                if not stripped:
-                    continue
-                try:
-                    row = json.loads(stripped)
-                except json.JSONDecodeError as exc:
-                    raise ValueError(
-                        f"malformed JSONL ledger at {file_path}:{line_no}"
-                    ) from exc
-                if isinstance(row, dict):
-                    yield row
+    """Compatibility iterator over the shared generation-stable scanner."""
+    rows: list[dict[str, Any]] = []
+    scan_retained_jsonl(path, rows.append)
+    yield from rows
 
 
 def _preserve_candidate_lineage_conflict_audit(
@@ -611,20 +600,38 @@ def read_learning_ledger_partitions(path: Path) -> LearningLedgerPartitions:
     outcome_rows: list[dict[str, Any]] = []
     dedup_rows: list[dict[str, Any]] = []
     quarantined: list[dict[str, Any]] = []
-    for raw_row in _iter_jsonl_ledger_rows(path):
-        if _capture_blocked_context(raw_row) is not None:
-            row = _validated_quarantined_capture_blocked_row(raw_row)
-            quarantined.append(row)
-            dedup_rows.append(row)
-            continue
-        row = _strict_ledger_row(raw_row)
-        outcome_rows.append(row)
-        dedup_rows.append(row)
+    def consume(raw_row: dict[str, Any]) -> None:
+        outcome_row, dedup_row, is_quarantined = project_learning_ledger_row(
+            raw_row
+        )
+        dedup_rows.append(dedup_row)
+        if is_quarantined:
+            quarantined.append(dedup_row)
+        elif outcome_row is not None:
+            outcome_rows.append(outcome_row)
+
+    scan_retained_jsonl(path, consume)
     return LearningLedgerPartitions(
         outcome_rows=outcome_rows,
         dedup_rows=dedup_rows,
         quarantined_capture_blocked_rows=quarantined,
     )
+
+
+def project_learning_ledger_row(
+    raw_row: Mapping[str, Any],
+) -> tuple[dict[str, Any] | None, dict[str, Any], bool]:
+    """Validate one mixed ledger row before any consumer record-type filter.
+
+    CAPTURE_BLOCKED rows remain exact dedup-only evidence.  Every other row
+    takes the strict authority-sensitive path and is returned in both outcome
+    and dedup views.
+    """
+    if _capture_blocked_context(raw_row) is not None:
+        row = _validated_quarantined_capture_blocked_row(raw_row)
+        return None, row, True
+    row = _strict_ledger_row(raw_row)
+    return row, row, False
 
 
 def read_jsonl_ledger(path: Path) -> list[dict[str, Any]]:
