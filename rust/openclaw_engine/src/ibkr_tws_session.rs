@@ -41,10 +41,17 @@ use std::time::Duration;
 
 use chrono::{DateTime, Datelike, Timelike, Utc, Weekday};
 
-use openclaw_types::ibkr_tws_session_state::IB_ERR_DUPLICATE_CLIENT_ID;
+use openclaw_types::ibkr_tws_session_state::{IB_ERR_DUPLICATE_CLIENT_ID, IB_ERR_MAX_MESSAGE_RATE};
 use openclaw_types::{
     IbkrTwsErrorClassV1, IbkrTwsSessionEventV1, IbkrTwsSessionStateV1, PINNED_MIN_SERVER_VERSION,
 };
+
+// S3:pacing governor（單一出口）+ 心跳出站接線。
+use crate::ibkr_tws_pacing::{
+    OutboundClass, OutboundGrant, PacingConfig, PacingGovernor, PacingObservation, PacingReject,
+    QueueResolution, QueueTicket, StrikeVerdict, SubmitOutcome,
+};
+use crate::ibkr_tws_wire::encode_req_current_time;
 
 // ===========================================================================
 // (a) config（全 config 化;設計 §1.3;參數禁假功能——每項必真實被讀取、生效、可觀測）
@@ -612,7 +619,10 @@ impl SessionFsm {
             IbkrTwsErrorClassV1::Transient => vec![],
             // per-request（W6 訂閱表消費）/ ≥2100 info 地板:不進 FSM。
             IbkrTwsErrorClassV1::Entitlement | IbkrTwsErrorClassV1::Info => vec![],
-            // TODO(S3):pacing governor（error 100 三次違規斷 session）;S2 governor 未接,不轉移。
+            // S3 已接:error 100（Pacing）的三次違規斷 session 由 **manager 層** governor strike
+            // 計數處理（`TwsSessionManager::on_error_frame` 攔截 Pacing → `record_ib_pacing_violation`
+            // → 達門檻呼 `on_pacing_session_drop`）。FSM 直呼此分支保留為**防禦性 no-op**（strike
+            // 狀態屬 governor,不在純 FSM 內;直呼不轉移）。
             IbkrTwsErrorClassV1::Pacing => vec![],
             // session 級致命:326=拒新連線 typed;其餘 code<2100 → GatewayError。
             IbkrTwsErrorClassV1::SessionFatal
@@ -660,6 +670,25 @@ impl SessionFsm {
             reason: HaltReason::SessionFatal(FatalCause::DuplicateClientIdRejected),
         };
         vec![IbkrTwsSessionEventV1::DuplicateClientIdRejected]
+    }
+
+    /// IB error-100 pacing 三次違規 → session-fatal（設計 §3;現勘:IB 三次違規斷 session）。
+    /// 由 manager 於 governor `StrikeVerdict::SessionMustDrop` 時呼叫。斷因=`GatewayError(100)`
+    /// （沿 code<2100 fatal 慣例;state halt_reason 承載,無專屬 IPC 事件——同其他 GatewayError）。
+    /// 合法起態=`Ready`/`Degraded`。
+    pub(crate) fn on_pacing_session_drop(&mut self, _now_ms: u64) -> Vec<IbkrTwsSessionEventV1> {
+        if !matches!(
+            self.state,
+            SessionState::Ready(_) | SessionState::Degraded(_)
+        ) {
+            return self.illegal();
+        }
+        let cause = FatalCause::GatewayError(IB_ERR_MAX_MESSAGE_RATE);
+        let events = fatal_events(cause);
+        self.state = SessionState::Disconnected {
+            reason: HaltReason::SessionFatal(cause),
+        };
+        events
     }
 
     // ---- 心跳簿記 ----
@@ -870,6 +899,10 @@ pub(crate) struct TwsSessionManager {
     permit: EnvelopeRequiredStub,
     rng: EntropyJitterRng,
     config: TwsSessionConfig,
+    /// S3:pacing governor（**所有出站 framed 訊息單一出口**;設計 §3）。心跳出站經此;
+    /// error-100 三次違規斷 session 的 strike 計數亦居此。pacing config 目前用 default
+    /// （同 S2 `TwsSessionConfig` 未接 engine TOML 的先例;engine config plumbing 待 W4）。
+    governor: PacingGovernor,
 }
 
 impl TwsSessionManager {
@@ -879,6 +912,7 @@ impl TwsSessionManager {
             permit: EnvelopeRequiredStub,
             rng: EntropyJitterRng::new(),
             config,
+            governor: PacingGovernor::new(PacingConfig::default(), 0),
         }
     }
 
@@ -919,6 +953,81 @@ impl TwsSessionManager {
             &mut self.rng,
         )
     }
+
+    // ---- S3:心跳出站經 governor（單一出口不變量;設計 §1.3/§3）----
+
+    /// 心跳出站:**必經 pacing governor**（1/30s 不豁免,保單一出口不變量;設計 §1.3）。到期且
+    /// governor 放行 → 標記 FSM 已送 + 回 framed `reqCurrentTime` bytes + `OutboundGrant`（S4
+    /// transport `send_framed(grant, frame)` 消費 → 送出編譯期必經 governor）。**TODO(S4)**:真
+    /// socket 寫由 driver 消費 grant;S3 產出出站意圖,不開 socket。
+    pub(crate) fn heartbeat_outbound(&mut self, now_ms: u64) -> HeartbeatOutbound {
+        if !self.fsm.heartbeat_send_due(now_ms) {
+            return HeartbeatOutbound::NotDue;
+        }
+        match self.governor.submit(OutboundClass::Heartbeat, now_ms) {
+            SubmitOutcome::Admitted(grant) => {
+                self.fsm.mark_heartbeat_sent(now_ms);
+                HeartbeatOutbound::Sent {
+                    grant,
+                    frame: encode_req_current_time(),
+                }
+            }
+            SubmitOutcome::Queued(ticket) => HeartbeatOutbound::Queued(ticket),
+            SubmitOutcome::Rejected(reject) => HeartbeatOutbound::Rejected(reject),
+        }
+    }
+
+    /// 活 session 收到 ERR_MSG 的**單一入口**（S4 driver 呼叫）:Pacing（error 100）攔截至
+    /// governor strike 計數——達門檻（三次違規）→ 驅 FSM 至 `SessionFatal(GatewayError(100))`;
+    /// 其餘 class 委派 `SessionFsm::on_error_frame`（既有語義）。
+    pub(crate) fn on_error_frame(
+        &mut self,
+        code: i64,
+        class: IbkrTwsErrorClassV1,
+        now_ms: u64,
+    ) -> Vec<IbkrTwsSessionEventV1> {
+        // 硬化 terminal 前置（E2-F2,對稱 `attempt_connect`）:session 已 drop（SessionFatal/
+        // WeeklyReauth/Exhausted/Halted 終態）後,driver 若又送 batched error frame(含 error-100),
+        // 不得副作用地虛增 strike 或觸 FSM 非法轉移 debug_assert——直接 no-op。**置於
+        // `record_ib_pacing_violation` strike 記錄之前**。
+        if self.fsm.is_terminal() {
+            return vec![];
+        }
+        if matches!(class, IbkrTwsErrorClassV1::Pacing) {
+            return match self.governor.record_ib_pacing_violation() {
+                StrikeVerdict::SessionMustDrop => self.fsm.on_pacing_session_drop(now_ms),
+                StrikeVerdict::Recorded { .. } => vec![],
+            };
+        }
+        self.fsm.on_error_frame(code, class, now_ms)
+    }
+
+    /// driver 迴圈推進時鐘後排空 governor 佇列（逾時拒 + FIFO 放行）。**TODO(S4)**:driver 每
+    /// tick 呼叫並分派解決（Admitted→送、TimedOut→回拒呼叫端）。
+    pub(crate) fn poll_pacing(&mut self, now_ms: u64) -> Vec<QueueResolution> {
+        self.governor.poll(now_ms)
+    }
+
+    /// pacing 觀測快照（tokens/queue depth/reject/strike;export 給 W4 health IPC 的形態）。
+    /// **TODO(W4)**:IPC 接線於 W4。
+    pub(crate) fn pacing_observation(&self) -> PacingObservation {
+        self.governor.observe()
+    }
+}
+
+/// 心跳出站裁決（`heartbeat_outbound` 回傳;單一出口:出站 frame 必攜 governor 鑄的 grant）。
+pub(crate) enum HeartbeatOutbound {
+    /// 無需送（未到期 / 非 Ready-Degraded / 在途等待中）。
+    NotDue,
+    /// governor 放行:framed `reqCurrentTime` bytes + 單一出口 `grant`;FSM 已標記已送。
+    Sent {
+        grant: OutboundGrant,
+        frame: Vec<u8>,
+    },
+    /// governor 有界排隊（心跳極罕見觸此;driver 後續 `poll_pacing` 取解決）。
+    Queued(QueueTicket),
+    /// governor 拒（罕見;typed `PacingReject`,非 silent drop）。
+    Rejected(PacingReject),
 }
 
 #[cfg(test)]
