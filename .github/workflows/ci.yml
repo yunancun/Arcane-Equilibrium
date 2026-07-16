@@ -1,9 +1,16 @@
 name: ci
 
-# 觸發策略（2026-05-09 成本優化）：
+# 觸發策略（2026-05-09 成本優化；2026-07-16 續優化）：
 # - push to main：只跑 Linux check（macOS 10x 計費倍率太貴）
 # - pull_request：Linux + macOS 雙平台
 # - schedule：每週一跑 macOS smoke，確保 aarch64-apple-darwin target 仍編得過
+# 2026-07-16 成本收斂（「非必要，不 CI」）：
+# - path-filter：push 事件由 changes job 用 event.before...sha 精確 diff 分類
+#   （不再 --all），純 docs/governance 合併不再觸發整棵 Rust 重建；schedule 仍 --all。
+# - Rust target/ 快取：rust-check-linux / rust-check-macos / schema-contract /
+#   rust-ibkr-tests 四個編譯密集 job 掛 Swatinem/rust-cache@v2（workspace 根 = rust/）。
+#   alr-fit-verifier 刻意不快取——它靠「乾淨 offline target」做 locked-online↔
+#   clean-offline 對賬，快取會破壞其 hermetic 語義。
 on:
   push:
     branches:
@@ -36,14 +43,26 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Classify the exact PR diff
+      - name: Classify the exact diff
         id: classify
         shell: bash
         run: |
           set -euo pipefail
+          # pull_request：精確 base...head diff。
+          # push to main：用 event.before...sha 精確 diff，純 docs/governance 合併
+          #   不再觸發整棵 Rust 重建；首推/force-push 使 before 為全零或不可解時，
+          #   退回 --all 保守全開（git cat-file 守衛）。
+          # schedule（每週 macOS smoke）：落到 else 恆 --all，那正是排程的目的。
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             git diff --name-only -z \
               "${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}" \
+              | python3 helper_scripts/ci/classify_ci_changes.py \
+                  --null --github-output "$GITHUB_OUTPUT"
+          elif [[ "${{ github.event_name }}" == "push" \
+                  && "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]] \
+               && git cat-file -e "${{ github.event.before }}^{commit}" 2>/dev/null; then
+            git diff --name-only -z \
+              "${{ github.event.before }}...${{ github.sha }}" \
               | python3 helper_scripts/ci/classify_ci_changes.py \
                   --null --github-output "$GITHUB_OUTPUT"
           else
@@ -179,6 +198,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install target
         run: rustup target add x86_64-unknown-linux-gnu
+      - name: Cache Rust build artifacts
+        # workspace 根 = rust/（Cargo.lock 所在），非成員 crate openclaw_engine。
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
       - name: Cargo check
         run: cargo check --target x86_64-unknown-linux-gnu --release -p openclaw_engine --bin openclaw-engine
 
@@ -196,6 +220,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install target
         run: rustup target add aarch64-apple-darwin
+      - name: Cache Rust build artifacts
+        # macOS 10x runner，快取效益最高；共用 rust/target。
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
       - name: Test isolated ALR fit verifier
         run: cargo test --locked -p openclaw_alr_fit_verifier
       - name: Cargo check
@@ -237,6 +266,12 @@ jobs:
           --health-retries 5
     steps:
       - uses: actions/checkout@v4
+      - name: Cache Rust build artifacts
+        # 本 job 反覆編譯 openclaw_engine 測試二進位（V157/V159/V160 baseline +
+        # schema_contract_test），是最耗時的 Rust 編譯 job，快取效益最大。
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
       - name: Install psql + psycopg2
         # psql 用於建 timescaledb extension；psycopg2 供 audit_migrations.py 反射。
         run: |
@@ -423,6 +458,14 @@ jobs:
             program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_route_static_guard.py \
             program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_static_gui_guard.py \
             program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_surface_coverage_static_guard.py
+      - name: Run stock_etf / ibkr structure static-guard tests
+        # tests/structure 的 rust source-static 守衛（handler/tests split cap、無 runtime
+        # material 讀取、rust source coverage、ibkr phase2 gate 與 TWS session-state 契約）。
+        # glob 由 shell 展開，pytest 收多檔；純 stdlib（ast/re/pathlib），無重依賴。
+        run: |
+          python -m pytest -q \
+            tests/structure/test_stock_etf_*.py \
+            tests/structure/test_ibkr_*.py
 
   # IBKR lane Rust 測試 + G4 symbol audit（W-CI：IBKR-CI-1 / IBKR-CI-2，出典 IBKR_TODO §5）。
   # 缺口：rust-check-linux 只跑 cargo check，37 個 openclaw_types ibkr_*/stock_etf_*
@@ -448,6 +491,12 @@ jobs:
         working-directory: rust
     steps:
       - uses: actions/checkout@v4
+      - name: Cache Rust build artifacts
+        # 反覆 cargo test openclaw_types + openclaw_engine（--lib/--bin）並暖 target/
+        # 供後續 g4 / fake-tws symbol audit 重用，35min timeout 的重編譯 job，快取效益大。
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
       - name: Run openclaw_types ibkr acceptance tests
         run: cargo test -p openclaw_types --test 'ibkr_*'
       - name: Run openclaw_types stock_etf acceptance tests

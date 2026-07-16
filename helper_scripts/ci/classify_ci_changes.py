@@ -115,8 +115,21 @@ def classify_paths(paths: Iterable[str], *, force_all: bool = False) -> dict[str
         ):
             result["schema"] = True
 
-        if path.startswith(
-            "program_code/exchange_connectors/bybit_connector/control_api_v1/"
+        # stock_etf gate 觸發面（含 IBKR lane）：除既有 control_api Python 邊界外，
+        # 純 rust / 純 structure-test 的 PR 過去不觸發本 gate → hosted CI 連 job 都被
+        # skip（G0.5 當年 CI drift 病根）。此處補齊 rust handler/tests、openclaw_types
+        # 的 ibkr_/stock_etf_ 型別檔、以及 tests/structure 的 stock_etf/ibkr 守衛前綴。
+        if _matches(
+            path,
+            prefixes=(
+                "program_code/exchange_connectors/bybit_connector/control_api_v1/",
+                "tests/structure/test_stock_etf_",
+                "tests/structure/test_ibkr_",
+                "rust/openclaw_engine/src/ipc_server/handlers/stock_etf",
+                "rust/openclaw_engine/src/ipc_server/tests/stock_etf",
+                "rust/openclaw_types/src/ibkr_",
+                "rust/openclaw_types/src/stock_etf_",
+            ),
         ):
             result["stock_etf"] = True
 

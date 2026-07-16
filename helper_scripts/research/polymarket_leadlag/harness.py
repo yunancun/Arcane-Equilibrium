@@ -27,6 +27,7 @@ import math
 import os
 import re
 import socket
+import stat
 import subprocess
 import sys
 from collections import Counter, defaultdict
@@ -374,6 +375,389 @@ def load_snapshot_rows_with_mirrors(
         "mirrors": mirror_meta,
         "skipped": primary_meta.get("skipped", {}),
     }
+
+
+def _index_snapshot_run_descriptors(
+    root: Path,
+    *,
+    query_set_version: str,
+    mode: str,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Index matching run files without loading their retained JSONL rows."""
+    root = Path(root)
+    skipped: Counter[str] = Counter()
+    descriptors: list[dict[str, Any]] = []
+    meta: dict[str, Any] = {
+        "root": str(root),
+        "run_dirs": 0,
+        "skipped": {},
+    }
+    if not root.exists():
+        meta["skipped"] = {"root_missing": 1}
+        return descriptors, meta
+    for run_dir in sorted(p for p in root.iterdir() if p.is_dir()):
+        manifest_path = run_dir / "manifest.json"
+        snapshots_path = run_dir / "snapshots.jsonl"
+        if not manifest_path.exists() or not snapshots_path.exists():
+            skipped["missing_manifest_or_snapshots"] += 1
+            continue
+        try:
+            manifest = _read_json(manifest_path)
+        except (OSError, ValueError, json.JSONDecodeError):
+            skipped["bad_manifest"] += 1
+            continue
+        if manifest.get("lane") != "snapshot" or not manifest.get("point_in_time", False):
+            skipped["not_snapshot_lane"] += 1
+            continue
+        if str(manifest.get("mode") or "") != mode:
+            skipped["mode_mismatch"] += 1
+            continue
+        if str(manifest.get("query_set_version") or "") != query_set_version:
+            skipped["query_set_mismatch"] += 1
+            continue
+        descriptors.append({
+            "run_id": str(manifest.get("run_id") or run_dir.name),
+            "run_dir": run_dir,
+            "snapshots_path": snapshots_path,
+            "meta": meta,
+        })
+    meta["skipped"] = dict(skipped)
+    return descriptors, meta
+
+
+def _scan_snapshot_run_range(descriptor: dict[str, Any]) -> bool:
+    """Validate one run and capture its sort range without retaining its rows."""
+    path = Path(descriptor["snapshots_path"])
+    run_id = str(descriptor["run_id"])
+    min_key: tuple[str, str, str] | None = None
+    max_key: tuple[str, str, str] | None = None
+    row_count = 0
+    try:
+        before = path.stat(follow_symlinks=False)
+        if not stat.S_ISREG(before.st_mode):
+            raise OSError("snapshots path is not a regular file")
+        with path.open(encoding="utf-8") as handle:
+            for line_no, line in enumerate(handle, start=1):
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                try:
+                    payload = json.loads(stripped)
+                except json.JSONDecodeError as exc:
+                    raise ValueError(f"invalid_jsonl:{path}:{line_no}:{exc}") from exc
+                if not isinstance(payload, dict):
+                    continue
+                key = (
+                    str(payload.get("snapshot_ts_utc") or ""),
+                    run_id,
+                    str(payload.get("market_id") or ""),
+                )
+                min_key = key if min_key is None or key < min_key else min_key
+                max_key = key if max_key is None or key > max_key else max_key
+                row_count += 1
+        after = path.stat(follow_symlinks=False)
+        if (
+            before.st_dev,
+            before.st_ino,
+            before.st_size,
+            before.st_mtime_ns,
+        ) != (
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+            after.st_mtime_ns,
+        ):
+            raise OSError("snapshots file changed during range scan")
+    except (OSError, ValueError):
+        skipped = Counter(descriptor["meta"].get("skipped", {}))
+        skipped["bad_snapshots"] += 1
+        descriptor["meta"]["skipped"] = dict(skipped)
+        return False
+    descriptor["identity"] = (
+        after.st_dev,
+        after.st_ino,
+        after.st_size,
+        after.st_mtime_ns,
+    )
+    descriptor["min_key"] = min_key or ("", run_id, "")
+    descriptor["max_key"] = max_key or ("", run_id, "")
+    descriptor["row_count"] = row_count
+    descriptor["meta"]["run_dirs"] = int(descriptor["meta"].get("run_dirs", 0)) + 1
+    return True
+
+
+def _iter_indexed_snapshot_rows(
+    descriptors: list[dict[str, Any]],
+) -> Iterable[dict[str, Any]]:
+    """Yield one validated run at a time; retained memory is bounded by one run."""
+    previous_max: tuple[str, str, str] | None = None
+    for descriptor in sorted(descriptors, key=lambda item: item["min_key"]):
+        if previous_max is not None and descriptor["min_key"] < previous_max:
+            raise ValueError("overlapping_snapshot_run_ranges")
+        previous_max = descriptor["max_key"]
+        path = Path(descriptor["snapshots_path"])
+        before = path.stat(follow_symlinks=False)
+        identity = (
+            before.st_dev,
+            before.st_ino,
+            before.st_size,
+            before.st_mtime_ns,
+        )
+        if identity != descriptor["identity"] or not stat.S_ISREG(before.st_mode):
+            raise ValueError(f"snapshot_identity_changed:{path}")
+        run_rows = _read_jsonl(path)
+        after = path.stat(follow_symlinks=False)
+        after_identity = (
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+            after.st_mtime_ns,
+        )
+        if after_identity != descriptor["identity"]:
+            raise ValueError(f"snapshot_identity_changed:{path}")
+        run_id = str(descriptor["run_id"])
+        run_dir = str(descriptor["run_dir"])
+        for row in run_rows:
+            row["_run_id"] = run_id
+            row["_run_dir"] = run_dir
+        run_rows.sort(key=lambda row: (
+            str(row.get("snapshot_ts_utc") or ""),
+            run_id,
+            str(row.get("market_id") or ""),
+        ))
+        yield from run_rows
+
+
+def _project_market_features(
+    rows: Iterable[dict[str, Any]],
+    *,
+    allowed_symbols: set[str],
+) -> dict[str, Any]:
+    """Project retained rows directly into bounded series and feature state."""
+    previous_by_series: dict[tuple[str, str], dict[str, Any]] = {}
+    grouped: dict[tuple[int, str, str, str, str], dict[str, Any]] = {}
+    market_ids_with_rows: set[str] = set()
+    series_with_rows: set[tuple[str, str]] = set()
+    skipped: Counter[str] = Counter()
+    symbol_source_counts: Counter[str] = Counter()
+    unmapped_bucket_counts: Counter[str] = Counter()
+    unmapped_query_counts: Counter[str] = Counter()
+    unmapped_examples: list[dict[str, Any]] = []
+    bucket_delta_counts: Counter[str] = Counter()
+    snapshot_timestamps: set[str] = set()
+    snapshot_rows = 0
+    delta_rows = 0
+    first_snapshot_ts_ms: int | None = None
+    last_snapshot_ts_ms: int | None = None
+
+    def add_group(
+        *,
+        ts_ms: int,
+        bucket: str,
+        symbol: str,
+        bucket_view: str,
+        source_key: str,
+        symbol_source: str,
+        market_id: str,
+        delta: float,
+        base_bucket: str,
+    ) -> None:
+        key = (ts_ms, bucket, symbol, bucket_view, source_key)
+        state = grouped.setdefault(key, {
+            "count": 0,
+            "sum": 0.0,
+            "sum_abs": 0.0,
+            "source_breakdown": Counter(),
+            "base_buckets": set(),
+            "market_ids": set(),
+        })
+        state["count"] += 1
+        state["sum"] += delta
+        state["sum_abs"] += abs(delta)
+        state["source_breakdown"][symbol_source] += 1
+        state["base_buckets"].add(base_bucket)
+        state["market_ids"].add(market_id)
+
+    for row in rows:
+        snapshot_rows += 1
+        raw_ts = str(row.get("snapshot_ts_utc") or "")
+        if raw_ts:
+            snapshot_timestamps.add(raw_ts)
+        market_id = str(row.get("market_id") or "").strip()
+        ts = _parse_dt(row.get("snapshot_ts_utc"))
+        prob = yes_probability(row)
+        if not market_id:
+            skipped["missing_market_id"] += 1
+            continue
+        if ts is None:
+            skipped["bad_snapshot_ts"] += 1
+            continue
+        ts_ms = _dt_to_ms(ts)
+        first_snapshot_ts_ms = ts_ms if first_snapshot_ts_ms is None else min(
+            first_snapshot_ts_ms, ts_ms
+        )
+        last_snapshot_ts_ms = ts_ms if last_snapshot_ts_ms is None else max(
+            last_snapshot_ts_ms, ts_ms
+        )
+        if prob is None:
+            skipped["bad_probability"] += 1
+            continue
+        bucket = classify_bucket(row)
+        symbol_mappings = infer_symbol_mappings(row, allowed_symbols)
+        if not symbol_mappings:
+            skipped["unmapped_symbol"] += 1
+            unmapped_bucket_counts[bucket] += 1
+            for query in row.get("discovery_queries") or ["<no_query>"]:
+                unmapped_query_counts[str(query)] += 1
+            if len(unmapped_examples) < 8:
+                unmapped_examples.append({
+                    "bucket": bucket,
+                    "question": row.get("question"),
+                    "event_title": row.get("event_title"),
+                    "market_slug": row.get("market_slug"),
+                    "event_slug": row.get("event_slug"),
+                    "discovery_queries": list(row.get("discovery_queries") or []),
+                })
+            continue
+        for symbol, symbol_source in symbol_mappings:
+            series_key = (market_id, symbol)
+            symbol_source_counts[symbol_source] += 1
+            market_ids_with_rows.add(market_id)
+            series_with_rows.add(series_key)
+            previous = previous_by_series.get(series_key)
+            if previous is not None and ts_ms > int(previous["snapshot_ts_ms"]):
+                delta = prob - float(previous["prob_yes"])
+                delta_rows += 1
+                bucket_delta_counts[bucket] += 1
+                add_group(
+                    ts_ms=ts_ms,
+                    bucket=bucket,
+                    symbol=symbol,
+                    bucket_view="aggregate",
+                    source_key="aggregate",
+                    symbol_source=symbol_source,
+                    market_id=market_id,
+                    delta=delta,
+                    base_bucket=bucket,
+                )
+                if bucket == BUCKET_EVENT_REG:
+                    split_bucket = _event_reg_source_split_bucket(symbol_source)
+                    if split_bucket:
+                        add_group(
+                            ts_ms=ts_ms,
+                            bucket=split_bucket,
+                            symbol=symbol,
+                            bucket_view="source_split",
+                            source_key=symbol_source,
+                            symbol_source=symbol_source,
+                            market_id=market_id,
+                            delta=delta,
+                            base_bucket=bucket,
+                        )
+            previous_by_series[series_key] = {
+                "snapshot_ts_ms": ts_ms,
+                "prob_yes": prob,
+            }
+
+    features: list[dict[str, Any]] = []
+    for (ts_ms, bucket, symbol, bucket_view, source_key), state in sorted(grouped.items()):
+        source_breakdown = Counter(state["source_breakdown"])
+        base_buckets = sorted(state["base_buckets"])
+        aggregate_source = (
+            next(iter(source_breakdown))
+            if bucket_view == "aggregate" and len(source_breakdown) == 1
+            else source_key
+        )
+        count = int(state["count"])
+        features.append({
+            "snapshot_ts_ms": ts_ms,
+            "snapshot_ts_utc": _ms_to_iso(ts_ms),
+            "bucket": bucket,
+            "base_bucket": base_buckets[0] if len(base_buckets) == 1 else "mixed",
+            "bucket_view": bucket_view,
+            "symbol": symbol,
+            "symbol_source": aggregate_source,
+            "symbol_source_breakdown": dict(source_breakdown),
+            "n_markets": count,
+            "mean_delta_prob_yes": float(state["sum"]) / count,
+            "mean_abs_delta_prob_yes": float(state["sum_abs"]) / count,
+            "market_ids": sorted(state["market_ids"]),
+        })
+
+    return {
+        "snapshot_rows": snapshot_rows,
+        "snapshot_distinct_timestamps": len(snapshot_timestamps),
+        "first_snapshot_ts_ms": first_snapshot_ts_ms,
+        "last_snapshot_ts_ms": last_snapshot_ts_ms,
+        "delta_rows": delta_rows,
+        "bucket_delta_counts": dict(bucket_delta_counts),
+        "features": features,
+        "delta_meta": {
+            "markets_with_rows": len(market_ids_with_rows),
+            "market_symbol_series_with_rows": len(series_with_rows),
+            "delta_rows": delta_rows,
+            "symbol_source_counts": dict(symbol_source_counts),
+            "unmapped_symbol_diagnostics": {
+                "bucket_counts": dict(unmapped_bucket_counts),
+                "top_queries": dict(unmapped_query_counts.most_common(12)),
+                "examples": unmapped_examples,
+            },
+            "skipped": dict(skipped),
+        },
+    }
+
+
+def load_snapshot_projection_with_mirrors(
+    root: Path,
+    *,
+    mirror_roots: tuple[Path, ...] = (),
+    query_set_version: str,
+    mode: str,
+    allowed_symbols: set[str],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Stream unique retained runs into the exact feature projection used by runtime."""
+    primary, primary_meta = _index_snapshot_run_descriptors(
+        root,
+        query_set_version=query_set_version,
+        mode=mode,
+    )
+    selected: dict[str, dict[str, Any]] = {
+        str(item["run_id"]): item for item in primary
+    }
+    mirror_meta: list[dict[str, Any]] = []
+    duplicate_mirror_run_dirs_skipped = 0
+    for mirror_root in mirror_roots:
+        descriptors, meta = _index_snapshot_run_descriptors(
+            mirror_root,
+            query_set_version=query_set_version,
+            mode=mode,
+        )
+        mirror_meta.append(meta)
+        for descriptor in descriptors:
+            run_id = str(descriptor["run_id"])
+            if run_id in selected:
+                duplicate_mirror_run_dirs_skipped += 1
+                continue
+            selected[run_id] = descriptor
+
+    valid = [item for item in selected.values() if _scan_snapshot_run_range(item)]
+    projection = _project_market_features(
+        _iter_indexed_snapshot_rows(valid),
+        allowed_symbols=allowed_symbols,
+    )
+    meta = {
+        "root": str(Path(root)),
+        "primary_root": str(Path(root)),
+        "mirror_roots": [str(Path(path)) for path in mirror_roots],
+        "run_dirs": len(valid),
+        "distinct_run_dirs": len(valid),
+        "duplicate_mirror_run_dirs_skipped": duplicate_mirror_run_dirs_skipped,
+        "primary": primary_meta,
+        "mirrors": mirror_meta,
+        "skipped": primary_meta.get("skipped", {}),
+        "projection_loader": "bounded_run_projection_v1",
+    }
+    return projection, meta
 
 
 def build_market_deltas(
@@ -1557,11 +1941,27 @@ def build_report(
     price_source: str,
     history_reports: list[dict[str, Any]] | None = None,
     candidate_replay_round_trip_cost_bps: float = candidate_replay.DEFAULT_ROUND_TRIP_COST_BPS,
+    snapshot_projection: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     created_at_utc = dt.datetime.now(dt.timezone.utc).isoformat()
     allowed_symbols = set(symbols)
-    deltas, delta_meta = build_market_deltas(snapshot_rows, allowed_symbols=allowed_symbols)
-    features = aggregate_features(deltas, include_source_splits=True)
+    if snapshot_projection is None:
+        ordered_rows = sorted(snapshot_rows, key=lambda row: (
+            str(row.get("snapshot_ts_utc") or ""),
+            str(row.get("_run_id") or ""),
+            str(row.get("market_id") or ""),
+        ))
+        snapshot_projection = _project_market_features(
+            ordered_rows,
+            allowed_symbols=allowed_symbols,
+        )
+    features = list(snapshot_projection["features"])
+    delta_meta = dict(snapshot_projection["delta_meta"])
+    snapshot_row_count = int(snapshot_projection["snapshot_rows"])
+    snapshot_distinct_timestamps = int(
+        snapshot_projection["snapshot_distinct_timestamps"]
+    )
+    delta_row_count = int(snapshot_projection["delta_rows"])
     joined = join_forward_returns(
         features, price_rows,
         horizons_minutes=horizons_minutes,
@@ -1574,7 +1974,7 @@ def build_report(
     )
     ic_results = compute_ic(joined)
     price_feedback_summary = _price_feedback_summary(ic_results)
-    bucket_counts = Counter(row["bucket"] for row in deltas)
+    bucket_counts = Counter(snapshot_projection["bucket_delta_counts"])
     feature_bucket_counts = Counter(row["bucket"] for row in features)
     feature_bucket_view_counts = Counter(
         str(row.get("bucket_view") or "unknown") for row in features
@@ -1614,7 +2014,7 @@ def build_report(
         round_trip_cost_bps=candidate_replay_round_trip_cost_bps,
     )
 
-    if not snapshot_rows:
+    if snapshot_row_count == 0:
         status = STATUS_NO_SNAPSHOT_ROWS
         reason = "no Polymarket snapshot rows matched query_set/mode"
     elif not price_rows:
@@ -1673,12 +2073,10 @@ def build_report(
             "promotion_boundary": "research_context_only_not_signal_or_promotion_proof",
         },
         "counts": {
-            "snapshot_rows": len(snapshot_rows),
-            "snapshot_distinct_timestamps": len({
-                r.get("snapshot_ts_utc") for r in snapshot_rows if r.get("snapshot_ts_utc")
-            }),
+            "snapshot_rows": snapshot_row_count,
+            "snapshot_distinct_timestamps": snapshot_distinct_timestamps,
             "snapshot_meta": snapshot_meta,
-            "delta_rows": len(deltas),
+            "delta_rows": delta_row_count,
             "feature_points": len(features),
             "joined_rows": len(joined),
             "price_rows": len(price_rows),
@@ -1829,36 +2227,33 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     root = Path(args.polymarket_root) if args.polymarket_root else _data_root() / "polymarket_axis_runs"
     out_path = Path(args.out) if args.out else default_out_path()
     history_reports = load_recent_report_history(out_path.parent)
+    horizons = tuple(int(x) for x in args.horizons_minutes)
+    symbols = tuple(str(x) for x in args.symbols)
     mirror_raw = str(args.polymarket_mirror_root or "").strip()
     mirror_roots = tuple(
         Path(part)
         for part in mirror_raw.split(os.pathsep)
         if part.strip()
     )
-    snapshot_rows, snapshot_meta = load_snapshot_rows_with_mirrors(
+    snapshot_projection, snapshot_meta = load_snapshot_projection_with_mirrors(
         root, query_set_version=args.query_set, mode=args.mode,
         mirror_roots=mirror_roots,
+        allowed_symbols=set(symbols),
     )
-    horizons = tuple(int(x) for x in args.horizons_minutes)
-    symbols = tuple(str(x) for x in args.symbols)
 
     price_source = "fixture"
     if args.price_jsonl:
         price_rows = load_price_points_jsonl(Path(args.price_jsonl))
     else:
         price_source = f"pg:market.klines:{args.price_timeframe}"
-        parsed_ts = [
-            _parse_dt(row.get("snapshot_ts_utc"))
-            for row in snapshot_rows
-            if row.get("snapshot_ts_utc")
-        ]
-        ts_vals = [_dt_to_ms(x) for x in parsed_ts if x is not None]
-        if ts_vals:
+        first_ts_ms = snapshot_projection.get("first_snapshot_ts_ms")
+        last_ts_ms = snapshot_projection.get("last_snapshot_ts_ms")
+        if first_ts_ms is not None and last_ts_ms is not None:
             pad_ms = (max(horizons) + args.max_align_lag_minutes + 5) * 60 * 1000
             price_rows = load_price_points_pg(
                 symbols=list(symbols),
-                start_ms=min(ts_vals) - pad_ms,
-                end_ms=max(ts_vals) + pad_ms,
+                start_ms=int(first_ts_ms) - pad_ms,
+                end_ms=int(last_ts_ms) + pad_ms,
                 timeframe=args.price_timeframe,
                 dsn=args.dsn,
             )
@@ -1866,7 +2261,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             price_rows = []
 
     report = build_report(
-        snapshot_rows=snapshot_rows,
+        snapshot_rows=[],
         snapshot_meta=snapshot_meta,
         price_rows=price_rows,
         query_set_version=args.query_set,
@@ -1881,6 +2276,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         price_source=price_source,
         history_reports=history_reports,
         candidate_replay_round_trip_cost_bps=args.candidate_replay_round_trip_cost_bps,
+        snapshot_projection=snapshot_projection,
     )
     write_report(report, out_path, repo_root=_repo_root())
     if args.write_latest:
