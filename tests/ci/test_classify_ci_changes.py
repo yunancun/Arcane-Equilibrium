@@ -49,6 +49,31 @@ def test_categories_are_narrow_but_cover_their_own_contracts() -> None:
     }
 
 
+def test_stock_etf_gate_covers_ibkr_and_rust_lane_sources() -> None:
+    # 純 structure-test 前綴：只點亮 stock_etf gate（不誤點 rust/governance/schema），
+    # 讓純 rust/純 structure-test 的 PR 也能觸發 hosted CI 的 stock_etf 靜態守衛 job。
+    for path in (
+        "tests/structure/test_stock_etf_ipc_handler_split_static.py",
+        "tests/structure/test_ibkr_tws_session_state_source_static.py",
+    ):
+        result = classify_paths([path])
+        assert result["stock_etf"] is True, path
+        assert all(
+            enabled is False for gate, enabled in result.items() if gate != "stock_etf"
+        ), path
+
+    # rust lane 來源前綴：點亮 stock_etf（同時本就會點亮 rust / schema）。
+    for path in (
+        "rust/openclaw_engine/src/ipc_server/handlers/stock_etf_risk_policy.rs",
+        "rust/openclaw_engine/src/ipc_server/handlers/stock_etf.rs",
+        "rust/openclaw_engine/src/ipc_server/tests/stock_etf/"
+        "foundation_status_fixtures.rs",
+        "rust/openclaw_types/src/ibkr_tws_session_state.rs",
+        "rust/openclaw_types/src/stock_etf_paper_order_request/fixtures.rs",
+    ):
+        assert classify_paths([path])["stock_etf"] is True, path
+
+
 def test_governance_gate_covers_direct_policy_and_adapter_inputs() -> None:
     for path in (
         "helper_scripts/maintenance_scripts/deploy_intent_adapter.py",

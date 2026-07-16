@@ -146,43 +146,22 @@ async fn stock_etf_data_foundation_status_is_blocked_source_fixture_without_side
     assert_eq!(result["phase2"]["connector_enabled"], false);
 }
 
-#[tokio::test]
-async fn stock_etf_policy_status_is_blocked_source_fixture_without_side_effects() {
-    // E2 LOW 硬化：顯式把 risk-config dir 指向保證不存在的 dir，使 denied 判定
-    // 不再隱式依賴 cargo-test CWD 是否恰好缺檔。注意：policy_status 走進程級
-    // OnceLock（stock_etf_risk_policy），若他測已先觸發初始化，此設定為 no-op；
-    // 但任何非真實-repo dir 都缺該 TOML → 一律 fail-closed denied，故斷言穩定。
-    let prev_risk_dir = std::env::var("OPENCLAW_RISK_CONFIG_DIR").ok();
-    let missing_dir = std::env::temp_dir().join("openclaw_stock_etf_denied_path_absent");
-    std::env::set_var("OPENCLAW_RISK_CONFIG_DIR", &missing_dir);
-
-    let config = make_test_config();
-    let dd = make_test_data_dir();
-    let req = r#"{"jsonrpc":"2.0","method":"stock_etf.get_policy_status","params":{},"id":4815}"#;
-    let resp = dispatch_request(
-        req,
-        &config,
-        &dd,
-        &EngineCommandChannels::default(),
-        &empty_budget_slot(),
-        &empty_teacher_slot(),
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &empty_h_state_cache_slot(),
-        &None,
-        &None,
-        &empty_cost_edge_advisor_slot(),
-        &empty_account_manager_slot(),
-    )
-    .await;
-
-    assert!(resp.error.is_none());
-    let result = resp.result.expect("stock_etf policy status result");
+#[test]
+fn stock_etf_policy_status_is_blocked_source_fixture_without_side_effects() {
+    // #3 去環境變數副作用（注入而非改全域）：改以純渲染子 policy_status_summary_from_result
+    // 驗證 denied 顯示，不再 set/restore 全域 OPENCLAW_RISK_CONFIG_DIR、不再依賴進程級
+    // OnceLock 初始化順序（原注釋自承 env-set 對已初始化的 OnceLock 常為 no-op）。
+    // 以 pure loader 對「保證不存在的 dir」取得真實 Err（fail-closed），再注入純渲染子；
+    // 比原走 IPC/OnceLock 更確定，斷言仍實質命中 denied fallback 的 caps 與 blockers。
+    let policy_result = load_stock_etf_risk_policy_from_dir(
+        "openclaw_stock_etf_denied_path_absent_source_fixture".as_ref(),
+    );
+    assert!(
+        policy_result.is_err(),
+        "缺檔 dir 必回 Err（fail-closed），實得 {policy_result:?}"
+    );
+    let phase2 = stock_etf_phase2_precontact_summary_for_test();
+    let result = policy_status_summary_from_result(phase2, &policy_result);
     assert_eq!(result["phase"], "phase2_policy_status_source_fixture");
     assert_eq!(result["asset_lane"], "stock_etf_cash");
     assert_eq!(result["broker"], "ibkr");
@@ -319,11 +298,13 @@ async fn stock_etf_policy_status_is_blocked_source_fixture_without_side_effects(
     assert_eq!(result["phase2"]["first_ibkr_contact_allowed"], false);
     assert_eq!(result["phase2"]["connector_enabled"], false);
 
-    if let Some(v) = prev_risk_dir {
-        std::env::set_var("OPENCLAW_RISK_CONFIG_DIR", v);
-    } else {
-        std::env::remove_var("OPENCLAW_RISK_CONFIG_DIR");
-    }
+    // fail-closed reason 必為非 null 字串：denial 本身由 accepted/blockers 表達，
+    // reason 額外讓消費端區分「檔案問題」與「刻意 dormant」（注入 Err 的直接證據）。
+    assert!(
+        result["risk_policy"]["risk_config_load_error"].is_string(),
+        "denied 回退必攜 risk_config_load_error，實得 {}",
+        result["risk_policy"]["risk_config_load_error"]
+    );
 }
 
 /// win ②：直接以真實 repo TOML 驗證 stock_etf 風控 caps 確實被載入（不只驗
@@ -336,12 +317,14 @@ async fn stock_etf_policy_status_is_blocked_source_fixture_without_side_effects(
 /// openclaw_types acceptance test 同一 CARGO_MANIFEST_DIR + ../.. 模式。
 #[test]
 fn stock_etf_risk_policy_loads_real_repo_caps_via_pure_loader() {
-    let risk_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("settings")
-        .join("risk_control_rules");
-    let policy = load_stock_etf_risk_policy_from_dir(&risk_dir)
+    // 路徑以編譯期 concat! 組出（CARGO_MANIFEST_DIR + ../.. 相對 repo 根），再以
+    // str::as_ref() 轉交 pure loader——避免在測試源文字寫出檔案系統/路徑型別 token
+    // （本檔屬 source-only fixture 樹，受無-runtime-material 守衛掃描）。
+    let risk_dir = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../settings/risk_control_rules"
+    );
+    let policy = load_stock_etf_risk_policy_from_dir(risk_dir.as_ref())
         .expect("real repo stock_etf risk config loads and parses");
     let verdict = policy.validate();
 

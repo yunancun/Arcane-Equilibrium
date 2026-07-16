@@ -458,6 +458,14 @@ jobs:
             program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_route_static_guard.py \
             program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_static_gui_guard.py \
             program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_surface_coverage_static_guard.py
+      - name: Run stock_etf / ibkr structure static-guard tests
+        # tests/structure 的 rust source-static 守衛（handler/tests split cap、無 runtime
+        # material 讀取、rust source coverage、ibkr phase2 gate 與 TWS session-state 契約）。
+        # glob 由 shell 展開，pytest 收多檔；純 stdlib（ast/re/pathlib），無重依賴。
+        run: |
+          python -m pytest -q \
+            tests/structure/test_stock_etf_*.py \
+            tests/structure/test_ibkr_*.py
 
   # IBKR lane Rust 測試 + G4 symbol audit（W-CI：IBKR-CI-1 / IBKR-CI-2，出典 IBKR_TODO §5）。
   # 缺口：rust-check-linux 只跑 cargo check，37 個 openclaw_types ibkr_*/stock_etf_*
