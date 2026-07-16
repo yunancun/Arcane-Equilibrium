@@ -67,6 +67,18 @@ fn main_bucket_starts_full_allows_full_burst() {
 }
 
 #[test]
+fn control_class_routes_through_main_bucket() {
+    // S4:握手 control（START_API / 初次 reqCurrentTime）與 Heartbeat/MarketData 同走主 bucket
+    // （單一出口不變量:所有 framed 訊息含握手 control 過 governor,回 Admitted 帶單一出口 grant）。
+    let mut g = gov(PacingConfig::default());
+    assert!(
+        is_admitted(&g.submit(OutboundClass::Control, 0)),
+        "Control（握手出站）滿桶應即時放行且鑄 grant"
+    );
+    assert_eq!(g.observe().admitted, 1, "Control 放行計入單一出口");
+}
+
+#[test]
 fn main_bucket_refills_over_time() {
     // rate=10 → 每 100ms 補 1 token（100ms < queue_timeout 500ms,避開逾時邊界）。
     let mut g = gov(mid_cfg());

@@ -111,7 +111,7 @@ W2-W11 的全部 DoD 都封頂在 `source-ready` + `runtime-active(inactive post
 |---|---|---|
 | production seal caller(Seal/Supersede/Revoke) | **核心已 source-landed**(ledger+CLI+47 測試);殘項=收口審核 | W2 |
 | IBKR Rust 測試/G4 symbol audit 進 CI | 缺(rust job 只 `cargo check`) | W-CI |
-| TWS transport/session manager(可恢復) | 只有 B1 一次性 handshake+`reqCurrentTime` probe;無 session FSM/reconnect/health loop;無 fake-TWS server(僅 duplex synthetic frames) | W3 |
+| TWS transport/session manager(可恢復) | **DONE(2026-07-16,S1-S4)**:wire 抽檔 + 六態 FSM(退避/心跳/排程感知 DST)+ INV-1 permit stub + pacing governor(單一出口/有界排隊)+ fake-TWS dev-crate + 端到端 driver;211 engine 測試 | W3 ✅ |
 | connection-health IPC/route + normalizer lockstep | 16 個 status method 在,**無 connection-health method**;normalizer 全負空間態 | W4 |
 | account/positions/open orders/executions/commissions + session attestation | attestation 僅型別;typed row 契約與 fetch 全缺(只有 probe KIND + digest envelope) | W5 |
 | contract details/market data/calendar/entitlement | 契約型別在(identity/provenance);fetch/訂閱/entitlement 邏輯全缺 | W6 |
@@ -163,9 +163,11 @@ W2-W11 的全部 DoD 都封頂在 `source-ready` + `runtime-active(inactive post
 
 ---
 
-### W3 — TWS transport/session manager(可恢復)
+### W3 — TWS transport/session manager(可恢復)✅ **DONE 2026-07-16(loop R3-R6,S1-S4)**
 
-**目標**:把 B1(handshake + `reqCurrentTime`)擴成生產級、可恢復的 TWS 傳輸/會話層——之後 W4-W7 的一切都騎在它上面。
+**收口紀錄**:S1 wire 抽檔+`IbErrorClass`(PR#32)· S2 六態 FSM+INV-1 permit stub(PR#33)· S3 pacing governor 單一出口+有界排隊(PR#35)· S4 fake-TWS dev-crate+端到端 driver(PR 見 PROGRESS R6)。211 engine 測試;CC 裁 build-posture=B′(TCP 留 `ibkr_transport_tcp` feature,g4 零符號 audit W3-W7 保綠);IB U1-U6 官方現勘入碼(U4/U5 不可證留 config);三機器守衛(permit-stub INV-1/fake dev-dep-only/fake 缺席 nm 審計)入 CI。**殘項移交**:F1 historical 預算 ordering→W6;queued-heartbeat+單一出口牙齒 send_framed 真消費者→W4;W8 reactivation 須重置 governor strike/bucket;**E3-F1 permit 守衛範圍須隨 driver connect-path 擴(見 W8 audit-scope 條)**。
+
+**目標(原始)**:把 B1(handshake + `reqCurrentTime`)擴成生產級、可恢復的 TWS 傳輸/會話層——之後 W4-W7 的一切都騎在它上面。
 
 **範圍 in**:
 1. **Session FSM**:`Disconnected → Connecting → Handshaking → Ready(serverVersion, managedAccounts, nextValidId) → Degraded → Backoff`;斷線指數退避 + jitter;心跳(`reqCurrentTime` 週期);nightly restart 窗與 weekly logoff 的會話過期偵測(fail-closed 進 Backoff,不無限重試)。
@@ -260,6 +262,8 @@ W2-W11 的全部 DoD 都封頂在 `source-ready` + `runtime-active(inactive post
 
 **範圍 in**:
 1. **`ibkr_activation_envelope_v1` 驗證器**:全綁定驗證(§2 活化鐵律清單);nonce 原子消費(首次允許接觸前消費,replay/重複消費/stale issue/expiry/revoked epoch/kill-switch epoch 不符全拒);reconnect/scope 變更強制新活化;envelope 有效 ≠ 免除憑證/entitlement/market-hours/safety checks。
+   - **W3 移交:reactivation 一致性**——W8 接 reactivation 時,無論 fresh-manager 或 in-place `reset_for_reactivation`,**必須**重置/重建 pacing governor(strike+bucket+queue+lines)並加「reactivation 後無 strike 殘留」測試(否則兩耦合態只重置其一→誤斷,E1/E2 R5 標)。
+   - **W3 移交:permit audit-scope 擴張(E3-F1,W4/W8 blocking 前置)**——S2 permit-stub 靜態守衛現 file-scoped 於 `ibkr_tws_session.rs`;W3-S4 引入 `ibkr_tws_driver.rs` 的泛型 permit connect 路徑(`SessionDriver<P: ConnectPermitProvider, F>`)。W8 落 production TCP factory + W4 落 production driver caller 後,四聯 audit(唯一 connect 位點/connect 前必經 permit 且 `PermitToken` move 消費/fake 缺席/**provider 型別唯一性**)**必須涵蓋 `ibkr_tws_driver.rs` 及任何新 connect-path 檔**,斷言全 production 域唯一 `impl ConnectPermitProvider`=`EnvelopeRequiredStub`、`PermitToken::mint()` 全域零 production 呼叫點。**W4 wiring PR 前 blocking 複核**(E3 2026-07-16 裁;當前 driver 整面 DCE 不可利用,故屬 W4/W8 tripwire 非本包阻擋)。
 2. **Operator 活化紀錄(authenticated)**:Rust-owned 驗證——issuer identity + verification key 或 immutable approval hash、envelope payload digest、nonce、account/session/build scope 綁定;實作與 W7 的 option B(HMAC/簽名)合一設計,達到 authorization.json 紀律 parity;Python/FastAPI/GUI 只能 request/display 活化流程,**不得創建/更改/轉發原始授權材料或代 attest**。
 3. **風控接線**:`stock_etf_risk_policy_v1` machine-check;`risk_config_stock_etf_paper.toml` + live 變體 config 分離(readonly/paper/shadow/tiny-live/live 五態 config 可重現,live-capable build ≠ active build);notional/order/position 上限、Guardian、Decision Lease、global Cost Gate lineage 進 envelope 綁定;**global Cost Gate 不得因本 lane 降低**。
 4. **kill switch**:kill-switch epoch 全域檢查點(transport 層 + order 層雙掛);`stock_etf_kill_switch_and_disable_cleanup_runbook_v1` machine-check(disable flags、collector stop、GUI disabled 姿態、live-secret 缺席、forward-only 保留、append-only audit)。

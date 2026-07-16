@@ -450,7 +450,7 @@ impl PacingGovernor {
     /// 解決）。FIFO 公平:佇列非空時新項一律入佇列(不搶排在前之項)。
     pub(crate) fn submit(&mut self, class: OutboundClass, now_ms: u64) -> SubmitOutcome {
         match class {
-            OutboundClass::Heartbeat | OutboundClass::MarketData => {
+            OutboundClass::Heartbeat | OutboundClass::MarketData | OutboundClass::Control => {
                 self.admit_or_queue(now_ms, false)
             }
             // order-verb:超限直拒不排隊(訂單延遲=語義謊言)。
@@ -578,6 +578,10 @@ impl PacingGovernor {
 pub(crate) enum OutboundClass {
     /// 心跳 reqCurrentTime（1/30s;不豁免但幾乎不觸限;主 bucket,可排隊）。S2 心跳出站消費。
     Heartbeat,
+    /// 握手控制訊息（START_API / 初次 reqCurrentTime;主 bucket,可排隊）。S4 driver 握手出站消費——
+    /// **單一出口不變量**要求所有 API 訊息（含握手 control）過 governor（`API\0`+版本協商為連線
+    /// preamble,pre-session 直寫、非 pacing-subject,不在此列;見 driver `send_framed` 咬合證明）。
+    Control,
     /// 一般 msg-rate 出站（market data 訂閱請求等;主 bucket,可排隊）。**TODO(W6)** 真消費者。
     MarketData,
     /// 歷史資料請求（主 bucket + 獨立 historical 四規則;可排隊）。**TODO(W6)** 真消費者。

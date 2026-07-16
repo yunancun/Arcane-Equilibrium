@@ -903,16 +903,29 @@ pub(crate) struct TwsSessionManager {
     /// error-100 三次違規斷 session 的 strike 計數亦居此。pacing config 目前用 default
     /// （同 S2 `TwsSessionConfig` 未接 engine TOML 的先例;engine config plumbing 待 W4）。
     governor: PacingGovernor,
+    /// **F3（S4 收口）**:在途心跳的 governor 佇列 ticket id（`Some` = 一則心跳已入佇列等放行,
+    /// `mark_heartbeat_sent` 尚未回填）。closure:`heartbeat_outbound` 在此非 `None` 時不再提交
+    /// （避免重複心跳）;`resolve_pacing` 於該 ticket 放行時回填 `mark_heartbeat_sent` 並清此欄
+    /// （逾時則清欄令下輪重試,FSM 未虛標已送 → 無簿記漂移）。心跳 1/30s ≪ queue_timeout,故最多
+    /// 一則在途,單一 `Option` 足矣（W6 多出站型別入佇列時擴為 ticket→intent 表）。
+    pending_heartbeat_ticket: Option<u64>,
 }
 
 impl TwsSessionManager {
     pub(crate) fn new(config: TwsSessionConfig) -> Self {
+        Self::new_with_pacing(config, PacingConfig::default())
+    }
+
+    /// 顯式注入 pacing config 的建構子（供 S4 F3 佇列閉環測試:小 bucket 令心跳可被 Queued;
+    /// W4 engine config plumbing 後成為真接線口）。
+    pub(crate) fn new_with_pacing(config: TwsSessionConfig, pacing: PacingConfig) -> Self {
         Self {
             fsm: SessionFsm::new(config.clone()),
             permit: EnvelopeRequiredStub,
             rng: EntropyJitterRng::new(),
             config,
-            governor: PacingGovernor::new(PacingConfig::default(), 0),
+            governor: PacingGovernor::new(pacing, 0),
+            pending_heartbeat_ticket: None,
         }
     }
 
@@ -961,6 +974,11 @@ impl TwsSessionManager {
     /// transport `send_framed(grant, frame)` 消費 → 送出編譯期必經 governor）。**TODO(S4)**:真
     /// socket 寫由 driver 消費 grant;S3 產出出站意圖,不開 socket。
     pub(crate) fn heartbeat_outbound(&mut self, now_ms: u64) -> HeartbeatOutbound {
+        // F3（S4 收口）:已有在途心跳（入 governor 佇列等放行）未解決前不再提交——否則
+        // `heartbeat_send_due` 仍為真（尚未 `mark_heartbeat_sent`）會重複提交同一心跳 → 簿記漂移。
+        if self.pending_heartbeat_ticket.is_some() {
+            return HeartbeatOutbound::NotDue;
+        }
         if !self.fsm.heartbeat_send_due(now_ms) {
             return HeartbeatOutbound::NotDue;
         }
@@ -972,9 +990,86 @@ impl TwsSessionManager {
                     frame: encode_req_current_time(),
                 }
             }
-            SubmitOutcome::Queued(ticket) => HeartbeatOutbound::Queued(ticket),
+            SubmitOutcome::Queued(ticket) => {
+                // F3:記在途心跳身分（ticket id）;`resolve_pacing` 放行時據此回填 mark_heartbeat_sent。
+                self.pending_heartbeat_ticket = Some(ticket.id());
+                HeartbeatOutbound::Queued(ticket)
+            }
             SubmitOutcome::Rejected(reject) => HeartbeatOutbound::Rejected(reject),
         }
+    }
+
+    /// **F3（S4 收口）簿記閉環**:driver 每 tick 排空 governor 佇列。對每個解決:
+    ///   - 在途心跳 ticket 放行（`Admitted`）→ **回填 `mark_heartbeat_sent`**（避免重複心跳）+
+    ///     回 `HeartbeatReady{grant, frame}` 供 driver `send_framed(grant, frame)` 送出;清在途身分。
+    ///   - 在途心跳 ticket 逾時（`TimedOut`）→ 清在途身分,FSM **不**標記已送（下輪 `heartbeat_outbound`
+    ///     重試）→ 無簿記漂移。
+    ///   - 非心跳 ticket（W6+ 真消費;W3 期不預期）→ `OtherResolved`（grant 未攜 frame,drop）。
+    pub(crate) fn resolve_pacing(&mut self, now_ms: u64) -> Vec<PacingDispatch> {
+        let mut out = Vec::new();
+        for res in self.governor.poll(now_ms) {
+            match res {
+                QueueResolution::Admitted { ticket, grant } => {
+                    if Some(ticket.id()) == self.pending_heartbeat_ticket {
+                        self.pending_heartbeat_ticket = None;
+                        self.fsm.mark_heartbeat_sent(now_ms);
+                        out.push(PacingDispatch::HeartbeatReady {
+                            grant,
+                            frame: encode_req_current_time(),
+                        });
+                    } else {
+                        // 非心跳出站解決:W3 不預期;grant 未使用即 drop（by-value,無旁路送出）。
+                        out.push(PacingDispatch::OtherResolved {
+                            ticket_id: ticket.id(),
+                            admitted: true,
+                        });
+                    }
+                }
+                QueueResolution::TimedOut { ticket } => {
+                    if Some(ticket.id()) == self.pending_heartbeat_ticket {
+                        self.pending_heartbeat_ticket = None;
+                        out.push(PacingDispatch::HeartbeatTimedOut);
+                    } else {
+                        out.push(PacingDispatch::OtherResolved {
+                            ticket_id: ticket.id(),
+                            admitted: false,
+                        });
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// **S4 driver 專用**:pure FSM 轉移的可變存取（connect/handshake/io 邊界——`on_permit_granted`
+    /// /`on_transport_established`/`on_handshake_result`/`on_io_drop`… 等無 governor 耦合的轉移）。
+    /// governor 耦合操作（心跳/error-frame/pacing）仍走 manager 的 `heartbeat_outbound`/`on_error_frame`
+    /// /`resolve_pacing`（strike 計數與終態守衛不得旁路）。**注**:driver 的 connect 用其**注入 permit**
+    /// （production=stub 恆拒 / test=granting provider）,本 manager 的具體 `permit` 欄仍是 INV-1 靜態
+    /// 守衛錨點 + W8 TCP 組合的 permit;二者 production 皆 `EnvelopeRequiredStub`,冗餘為刻意（設計 §10）。
+    pub(crate) fn fsm_mut(&mut self) -> &mut SessionFsm {
+        &mut self.fsm
+    }
+
+    /// 是否結構性終態（driver 每 connect-cycle 前置閘;終態永不自動重連,見 `SessionFsm::is_terminal`）。
+    pub(crate) fn is_terminal(&self) -> bool {
+        self.fsm.is_terminal()
+    }
+
+    /// **S4 driver 握手 control 出站**（單一出口:START_API / 初次 reqCurrentTime 亦過 governor）。
+    /// 滿桶時即時放行回 grant;若被 Queued/Rejected（握手期幾乎不可能——連線初桶滿）→ 回 `None`,
+    /// driver 視為 handshake transient（fail-closed 進 Backoff,不半握手）。
+    pub(crate) fn control_grant(&mut self, now_ms: u64) -> Option<OutboundGrant> {
+        match self.governor.submit(OutboundClass::Control, now_ms) {
+            SubmitOutcome::Admitted(grant) => Some(grant),
+            SubmitOutcome::Queued(_) | SubmitOutcome::Rejected(_) => None,
+        }
+    }
+
+    /// **S4 F3 佇列閉環測試專用**:直接存取 governor（令測試可預先耗盡 token 逼心跳 Queued）。
+    #[cfg(test)]
+    pub(crate) fn governor_mut(&mut self) -> &mut PacingGovernor {
+        &mut self.governor
     }
 
     /// 活 session 收到 ERR_MSG 的**單一入口**（S4 driver 呼叫）:Pacing（error 100）攔截至
@@ -1024,10 +1119,27 @@ pub(crate) enum HeartbeatOutbound {
         grant: OutboundGrant,
         frame: Vec<u8>,
     },
-    /// governor 有界排隊（心跳極罕見觸此;driver 後續 `poll_pacing` 取解決）。
+    /// governor 有界排隊（心跳極罕見觸此;driver 後續 `resolve_pacing` 取解決,F3）。
     Queued(QueueTicket),
     /// governor 拒（罕見;typed `PacingReject`,非 silent drop）。
     Rejected(PacingReject),
+}
+
+/// **F3（S4 收口）**:`resolve_pacing` 每 tick 排空 governor 佇列的分派結果（driver 消費）。
+pub(crate) enum PacingDispatch {
+    /// 在途心跳佇列後放行:FSM 已回填 `mark_heartbeat_sent`;driver 以 `send_framed(grant, frame)`
+    /// 送出（單一出口:frame 必攜 governor 鑄的 grant）。
+    HeartbeatReady {
+        grant: OutboundGrant,
+        frame: Vec<u8>,
+    },
+    /// 在途心跳佇列逾時:FSM 未標記已送（下輪 `heartbeat_outbound` 重試）;driver 記 telemetry。
+    HeartbeatTimedOut,
+    /// 非心跳佇列項解決（W6+ 真消費;W3 期不預期出現;grant 已 drop 或僅 telemetry）。
+    OtherResolved {
+        ticket_id: u64,
+        admitted: bool,
+    },
 }
 
 #[cfg(test)]
