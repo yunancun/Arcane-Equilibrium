@@ -24,25 +24,20 @@ if str(_control_api_app.parent) not in sys.path:
     sys.path.insert(0, str(_control_api_app.parent))
 
 from app.stock_etf_connection_health_normalizers import (  # noqa: E402
+    _ENTITLEMENT_STATE_DOMAIN,
+    _HALT_REASON_DOMAIN,
     _HEALTH_HARD_SAFETY_FIELDS,
     _HEALTH_PACING_ACTIVITY_FIELDS,
+    _OPERATIONAL_SCALAR_FIELDS,
+    _SESSION_STATE_DOMAIN,
 )
 
 SRV_ROOT = Path(__file__).resolve().parents[5]
 RUST_CONTRACT = (
     SRV_ROOT / "rust/openclaw_types/src/ibkr_tws_connection_health.rs"
 )
-
-# normalizer 第 2 層讀取的 operational scalar 欄（非 hard-safety、非 pacing-activity）。
-_OPERATIONAL_SCALAR_FIELDS = (
-    "session_state",
-    "session_active",
-    "reconnect_attempt",
-    "halt_reason",
-    "attestation_status",
-    "account_fingerprint_is_live",
-    "entitlement_state",
-    "report_status",
+RUST_SESSION_STATE_CONTRACT = (
+    SRV_ROOT / "rust/openclaw_types/src/ibkr_tws_session_state.rs"
 )
 
 # telemetry allowlist：**唯一**豁免 guard 的 operational 型欄（inactive governor 滿桶為
@@ -50,8 +45,14 @@ _OPERATIONAL_SCALAR_FIELDS = (
 _TELEMETRY_ALLOWLIST = frozenset({"main_tokens_available"})
 
 # 契約 metadata 欄（識別/版本/資訊字串,非 operational 真值）——不需負空間 guard。
-# 型別衛生由 superset 測試斷言（bool 型欄**永不得**入此集）。
-_CONTRACT_METADATA_FIELDS = frozenset({"contract_id", "source_version", "pending_reason"})
+# 逐欄 pin 現值型別（E3 NOTE-3）:任何型別漂移（尤其改成 bool/枚舉）即紅,防「操作真值
+# 改名/改型藏進 metadata 豁免」。
+_CONTRACT_METADATA_FIELD_TYPES = {
+    "contract_id": "String",
+    "source_version": "u32",
+    "pending_reason": "String",
+}
+_CONTRACT_METADATA_FIELDS = frozenset(_CONTRACT_METADATA_FIELD_TYPES)
 
 
 def _rust_struct_fields_with_types() -> dict[str, str]:
@@ -70,8 +71,38 @@ def _rust_struct_fields_with_types() -> dict[str, str]:
                 end = index
                 break
     body = source[brace:end]
+    # 抽取面防逃逸（E2 MUT-B）：regex 只匹配 `pub <name>`,`pub(crate)`/`pub(super)`
+    # 欄位會靜默逃出 superset 掃描面——契約 struct 禁受限可見度欄位,出現即紅。
+    assert "pub(" not in body, (
+        "IbkrConnectionHealthReportV1 不得含 pub(crate)/pub(super) 欄位"
+        "（會逃出 parity 抽取面）"
+    )
     return dict(
         re.findall(r"pub\s+([a-z_][a-z0-9_]*)\s*:\s*([A-Za-z0-9_:<>]+)", body)
+    )
+
+
+def _rust_enum_variants_snake_case(source_path: Path, enum_name: str) -> tuple[str, ...]:
+    """自 Rust 契約檔抽出 `pub enum <enum_name>` 的變體名並轉 serde snake_case 投影
+    （兩契約 enum 均標 `#[serde(rename_all = "snake_case")]`）。"""
+    source = source_path.read_text(encoding="utf-8")
+    start = source.index(f"pub enum {enum_name}")
+    brace = source.index("{", start)
+    depth = 0
+    end = brace
+    for index in range(brace, len(source)):
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+            if depth == 0:
+                end = index
+                break
+    body = source[brace:end]
+    variants = re.findall(r"^\s{4}([A-Z][A-Za-z0-9]*),$", body, flags=re.MULTILINE)
+    assert variants, f"enum {enum_name} 變體抽取為空（抽取面失效,fail-closed）"
+    return tuple(
+        re.sub(r"(?<!^)(?=[A-Z])", "_", variant).lower() for variant in variants
     )
 
 
@@ -134,9 +165,32 @@ def test_non_telemetry_struct_fields_must_belong_to_a_guard_set() -> None:
     assert _TELEMETRY_ALLOWLIST <= struct_fields
     assert _CONTRACT_METADATA_FIELDS <= struct_fields
     assert _TELEMETRY_ALLOWLIST.isdisjoint(_CONTRACT_METADATA_FIELDS)
-    # metadata 集型別衛生：不得收容 bool 欄（防「操作真值改名藏進 metadata」）。
-    for name in _CONTRACT_METADATA_FIELDS:
-        assert fields[name] != "bool", f"metadata allowlist 不得收容 bool 欄: {name}"
+    # metadata 集型別衛生（E3 NOTE-3）：逐欄 pin 現值型別——改型（尤其 bool/枚舉）即紅。
+    for name, expected_type in _CONTRACT_METADATA_FIELD_TYPES.items():
+        assert fields[name] == expected_type, (
+            f"metadata 欄 {name} 型別漂移: {fields[name]}（pin={expected_type}）"
+        )
+
+
+def test_normalizer_enum_domains_match_rust_contract_variants() -> None:
+    """契約枚舉域 lockstep（E2 MEDIUM-2 / E3 NOTE-1 閉合件）：normalizer 三個封閉值域
+    tuple 必須與 Rust enum 變體的 serde snake_case 投影**逐一相等**——Rust 側加/刪/改名
+    變體而 Python 域未同步 → 本測試紅（防域清單手抄漂移成 fail-always 或 fail-open）。"""
+    assert _SESSION_STATE_DOMAIN == _rust_enum_variants_snake_case(
+        RUST_SESSION_STATE_CONTRACT, "IbkrTwsSessionStateV1"
+    )
+    assert _HALT_REASON_DOMAIN == _rust_enum_variants_snake_case(
+        RUST_CONTRACT, "IbkrConnectionHealthHaltReasonV1"
+    )
+    assert _ENTITLEMENT_STATE_DOMAIN == _rust_enum_variants_snake_case(
+        RUST_CONTRACT, "IbkrConnectionHealthEntitlementStateV1"
+    )
+    # 域欄位對應的 struct 型別衛生：三欄在契約 struct 內確為對應 enum 型（防欄改型後
+    # 域檢查失去對象）。
+    fields = _rust_struct_fields_with_types()
+    assert fields["session_state"] == "IbkrTwsSessionStateV1"
+    assert fields["halt_reason"] == "IbkrConnectionHealthHaltReasonV1"
+    assert fields["entitlement_state"] == "IbkrConnectionHealthEntitlementStateV1"
 
 
 def test_emitter_fixture_through_route_is_clean_inactive_baseline() -> None:

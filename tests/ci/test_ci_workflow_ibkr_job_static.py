@@ -20,12 +20,21 @@ WORKFLOW = (
 ).read_text(encoding="utf-8")
 
 
+def _strip_comment_lines(text: str) -> str:
+    """剝除純注釋行（YAML `#` 與 run block 內 shell `#`;E2 LOW-2）——防注釋文字使
+    「命令存在」斷言空洞化（步驟被刪但注釋殘留仍綠）。只剝整行注釋,不動行內內容。"""
+    return "\n".join(
+        line for line in text.splitlines() if not line.lstrip().startswith("#")
+    )
+
+
 def _job(name: str) -> str:
     marker = f"\n  {name}:\n"
     assert marker in WORKFLOW, f"ci.yml 缺 job: {name}"
     body = WORKFLOW.split(marker, 1)[1]
     next_job = re.search(r"\n  [a-z0-9][a-z0-9-]*:\n", body)
-    return body if next_job is None else body[: next_job.start()]
+    scoped = body if next_job is None else body[: next_job.start()]
+    return _strip_comment_lines(scoped)
 
 
 def test_rust_ibkr_tests_job_exists_and_is_gated_on_rust_or_stock_etf() -> None:
@@ -70,9 +79,19 @@ def test_stock_etf_guards_job_runs_w4_connection_health_lockstep_suite() -> None
     # W5-S0 ③(c)(R8 審計洞③):W4 lockstep/parity/tripwire pytest 必在 hosted CI——
     # 單改 Rust emitter 的 PR 由 stock_etf gate 觸發本 job,破 lockstep 即紅。
     job = _job("stock-etf-static-guards")
-    assert "test_stock_etf_connection_health_" in job
+    # 逐檔字面釘鎖(E2 MEDIUM-1:共享前綴斷言一次可被「移除單檔」繞過)——兩檔各須
+    # 出現 ≥2 次(collect-count 段 + 實跑段各一)。
+    for suite_file in (
+        "test_stock_etf_connection_health_routes.py",
+        "test_stock_etf_connection_health_cross_surface_parity.py",
+    ):
+        assert job.count(suite_file) >= 2, (
+            f"stock-etf-static-guards 缺 lockstep 套件檔（需 collect+run 兩段）: "
+            f"{suite_file}"
+        )
     # 執行計數證明接線(R1 教訓:字面 filter 空轉——收集數必須被斷言非零)。
     assert "--collect-only" in job
+    assert 'test "$collected" -ge' in job
 
 
 def test_this_static_guard_is_wired_into_unconditional_policy_job() -> None:

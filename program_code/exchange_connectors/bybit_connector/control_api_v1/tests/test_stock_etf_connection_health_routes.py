@@ -337,6 +337,77 @@ def test_stock_etf_connection_health_lineage_present_active_session_is_clean() -
     assert data["account_fingerprint_is_live"] is False
 
 
+def test_stock_etf_connection_health_unknown_session_state_is_violation() -> None:
+    """契約枚舉域 tripwire（E2 MEDIUM-2）：lineage 具備下,session_state 為契約外字串
+    （非 Rust IbkrTwsSessionStateV1 snake_case 投影）→ 精確全列 violation。修前實證:
+    域外字串 0 violation 且原樣投影 GUI 輸出。"""
+    payload = _valid_connection_health()
+    payload["phase2"]["external_surface_gate"]["status"] = "PASS"
+    payload["attestation_status"] = "PAPER_ATTESTED"
+    payload["session_state"] = "totally_bogus_state"
+    # halt_reason=not_halted 隔離域檢查（避免同時觸發 halt⟺state 綁定,保持單欄精確）。
+    payload["halt_reason"] = "not_halted"
+
+    fake_ipc = AsyncMock()
+    fake_ipc.call = AsyncMock(return_value=payload)
+    client = _make_client_with_ipc(fake_ipc)
+    try:
+        data = client.get("/api/v1/stock-etf/connection-health").json()["data"]
+    finally:
+        client._stock_etf_patcher.stop()  # type: ignore[attr-defined]
+
+    assert data["lineage_present"] is True
+    assert data["connection_health_state"] == "contract_violation_blocked"
+    assert data["contract_violations"] == ["session_state_unknown"]
+
+
+def test_stock_etf_connection_health_unknown_halt_reason_is_violation() -> None:
+    """契約枚舉域 tripwire（E2 MEDIUM-2）：lineage 具備下,halt_reason 為契約外字串
+    （非 IbkrConnectionHealthHaltReasonV1 snake_case 投影）→ 精確全列 violation。
+    state=disconnected 隔離域檢查（disconnected 分支僅在 halt==not_halted 時觸發綁定）。"""
+    payload = _valid_connection_health()
+    payload["phase2"]["external_surface_gate"]["status"] = "PASS"
+    payload["attestation_status"] = "PAPER_ATTESTED"
+    payload["halt_reason"] = "totally_bogus_halt"
+
+    fake_ipc = AsyncMock()
+    fake_ipc.call = AsyncMock(return_value=payload)
+    client = _make_client_with_ipc(fake_ipc)
+    try:
+        data = client.get("/api/v1/stock-etf/connection-health").json()["data"]
+    finally:
+        client._stock_etf_patcher.stop()  # type: ignore[attr-defined]
+
+    assert data["lineage_present"] is True
+    assert data["connection_health_state"] == "contract_violation_blocked"
+    assert data["contract_violations"] == ["halt_reason_unknown"]
+
+
+def test_stock_etf_connection_health_unknown_entitlement_state_is_violation() -> None:
+    """契約枚舉域 tripwire（E2 MEDIUM-2）：lineage 具備下,entitlement_state 為契約外
+    字串（非 IbkrConnectionHealthEntitlementStateV1 snake_case 投影）→ 精確全列
+    violation。active attested session 隔離域檢查（避免同時觸發 without_active_session）。"""
+    payload = _valid_connection_health()
+    payload["phase2"]["external_surface_gate"]["status"] = "PASS"
+    payload["attestation_status"] = "PAPER_ATTESTED"
+    payload["session_state"] = "ready"
+    payload["session_active"] = True
+    payload["halt_reason"] = "not_halted"
+    payload["entitlement_state"] = "totally_bogus_entitlement"
+
+    fake_ipc = AsyncMock()
+    fake_ipc.call = AsyncMock(return_value=payload)
+    client = _make_client_with_ipc(fake_ipc)
+    try:
+        data = client.get("/api/v1/stock-etf/connection-health").json()["data"]
+    finally:
+        client._stock_etf_patcher.stop()  # type: ignore[attr-defined]
+
+    assert data["lineage_present"] is True
+    assert data["connection_health_state"] == "contract_violation_blocked"
+    assert data["contract_violations"] == ["entitlement_state_unknown"]
+
+
 def test_stock_etf_connection_health_layer3_is_self_contained_fail_closed() -> None:
     """縱深防禦（直呼;route 正常路徑不可達）：第 3 層函數不依賴 caller 的 lineage 閘——
     attestation 未 attested 時自足標 violation（caller 分流未來漂移仍 fail-closed）。"""
