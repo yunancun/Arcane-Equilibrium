@@ -11,7 +11,7 @@ The formal project and product name after the 2026-05-06 soft rename. "玄衡" n
 _Avoid_: using OpenClaw Bybit as the total project name in new docs.
 
 **OpenClaw**:
-The retained service-family name for the control-plane surface: OpenClaw Control Console, OpenClaw Gateway, OpenClaw API aggregation routes, and related communication/proposal relay services.
+The retained name for the OpenClaw Control Console, authenticated local `/api/v1/openclaw/*` read-only control/monitoring routes, Rust `openclaw_engine`, and existing runtime identifiers. The external OpenClaw Gateway was retired and removed on 2026-07-16.
 _Avoid_: treating OpenClaw as the total project brand, Rust engine name target, or trading brain.
 
 **Bybit**:
@@ -251,12 +251,12 @@ The unified human-governance entry surface for observation, mode switching, appr
 _Avoid_: GUI, dashboard, admin panel (these are *implementations* of the Control Plane).
 
 **OpenClaw Control Console**:
-The canonical GUI implementation of the Control Plane: the existing FastAPI console at `trade-core:8000/console`. It is the only operator trading GUI. It may show OpenClaw Gateway status and proposals, but it remains a TradeBot/FastAPI surface backed by existing auth and governance.
-_Avoid_: treating the external OpenClaw dashboard as the canonical trading console.
+The canonical GUI implementation of the Control Plane: the existing FastAPI console at `trade-core:8000/console`. It is the only operator trading GUI and exposes authenticated local system, governance, and 5-Agent read-only views.
+_Avoid_: inventing a second trading console or restoring a retired external dashboard.
 
-**OpenClaw Gateway**:
-External self-hosted agent gateway used for Telegram/WebChat/mobile/operator communication, multi-channel alerting, supervisor briefs, cloud escalation, and proposal/approval relay into TradeBot APIs. It is not the trading conductor, not the hot path, and not a second GUI.
-_Avoid_: OpenClaw engine, OpenClaw trading brain, OpenClaw GUI.
+**OpenClaw Gateway (retired)**:
+Historical external self-hosted communication/relay component. Its service, reverse proxy, remote-access endpoint, and GUI integration were removed on 2026-07-16 and are not part of the deployable architecture.
+_Avoid_: describing it as active, restoring it from archived instructions, or confusing it with `openclaw_engine` and the local Control API.
 
 **LG-X**:
 The Live Gate foundation specification family aligned to the historical
@@ -266,9 +266,9 @@ Operational prerequisites such as HTTPS, credential rotation, legal/geography,
 and first-day runbooks are tracked separately as OPS-X.
 _Avoid_: treating LG-X as a single runtime gate.
 
-**Gateway Agent**:
-An LLM/session hosted through OpenClaw Gateway for operator interaction, brief generation, diagnosis, or proposal creation. Gateway Agents may read bounded state packets and create proposals; they may not hold Bybit credentials or call trading write APIs.
-_Avoid_: confusing Gateway Agents with the local 5-Agent runtime.
+**Gateway Agent (historical)**:
+An LLM/session formerly hosted through the retired external OpenClaw Gateway. It is not an active runtime role. The retained local 5-Agent runtime remains inside TradeBot and follows its existing governance boundaries.
+_Avoid_: presenting Gateway Agents as deployed or confusing them with the local 5-Agent runtime.
 
 **Data Plane / Perception** (EX-07):
 The external-data ingestion layer that tags every inflow with source, freshness, cognitive level, and quality dimensions; un-tagged inference may not enter the decision chain.
@@ -308,12 +308,12 @@ The forbidden anti-pattern of letting GUI labels / front-end state / report aggr
 The single human supervisor (cloud@ncyu.me). Sets only global stop-loss / take-profit, batches confirmations, drives strategy evolution; everything else is Agent autonomy within P0/P1 hard bounds.
 
 **Conductor** (local runtime role):
-The local coordination role for Scout / Strategist / Guardian / Analyst / Executor. It is NOT a sixth Agent and is NOT the external OpenClaw Gateway. It coordinates local runtime agent lifecycle and arbitration inside the TradeBot stack.
-_Avoid_: OpenClaw Gateway, master agent.
+The local coordination role for Scout / Strategist / Guardian / Analyst / Executor. It is NOT a sixth Agent and is unrelated to the retired external OpenClaw Gateway. It coordinates local runtime agent lifecycle and arbitration inside the TradeBot stack.
+_Avoid_: the retired Gateway, master agent.
 
 **Local 5-Agent runtime**:
-Scout / Strategist / Guardian / Analyst / Executor running inside TradeBot's FastAPI + Postgres + Rust-engine-adjacent stack. This is the trading cognition layer; it remains independent from external OpenClaw Gateway availability.
-_Avoid_: moving these Agents into OpenClaw Gateway unless a future ADR explicitly reverses the 2026-05-06 decision.
+Scout / Strategist / Guardian / Analyst / Executor running inside TradeBot's FastAPI + PostgreSQL + Rust-engine-adjacent stack. This is the retained trading cognition layer and has no dependency on the retired external Gateway.
+_Avoid_: moving these Agents into an external Gateway unless a future ADR explicitly authorizes and re-establishes that surface.
 
 **Agent Decision Spine**:
 The typed, durable lineage chain for trade-relevant decisions:
@@ -670,5 +670,5 @@ trusted reproducible local runtime probe exists, preserving maker/checker truth.
 - **5-Agent runtime set (Scout / Strategist / Guardian / Analyst / Executor) vs development role presets (PM / FA / PA / CC / E1 / E2 / OPS / IB …)** — different vocabularies. The 5-Agent set is a runtime trading construct (DOC-01); development names are generated capability presets under the Development-Agent Governance Module. Neither Conductor nor a development preset is a sixth trading Agent.
 - **`OPENCLAW_BASE_DIR` vs `OPENCLAW_SRV_ROOT`** — `SRV_ROOT` is a legacy alias; new code must use `OPENCLAW_BASE_DIR`. They do not fall back to each other; Mac dev must export both to the same value.
 - **"Agent" overloaded** — can mean the 5 runtime trading Agents (Strategist etc.), the 20 generated development capability presets (E1, FA, PM, OPS, IB…), or a generic LLM agent. Always qualify: "Strategist Agent," "E1 sub-agent," "LLM agent." Never bare "Agent" in new prose.
-- **OpenClaw Gateway vs OpenClaw Control Console** — Gateway is the external communication/session layer; Control Console is the existing FastAPI GUI. There is no second trading GUI.
+- **Retired OpenClaw Gateway vs OpenClaw Control Console** — the external Gateway was removed on 2026-07-16; the Control Console remains the existing FastAPI GUI and the only trading console.
 - **MessageBus vs Agent Decision Spine** — MessageBus is legacy/advisory local routing; the authoritative spine is typed persisted objects plus Decision Lease and Rust enforcement.

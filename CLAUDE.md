@@ -37,9 +37,10 @@ when stable shape or architecture matters, and history only on demand.
   local agent host; it must not become the trading truth layer.
 - Canonical GUI: existing FastAPI OpenClaw Control Console at
   `http://trade-core:8000/console`.
-- External OpenClaw Gateway is communication / mobile / supervisor /
-  proposal relay only. It is not a trading conductor, not the local 5-Agent
-  runtime, and not a second GUI.
+- The external OpenClaw Gateway, reverse proxy, and GUI/service integration were
+  retired and removed on 2026-07-16. They are not an active communication or
+  deployment surface. The authenticated local `/api/v1/openclaw/*` read-only
+  control/monitoring routes and the local 5-Agent runtime remain.
 
 ## 二、Root Principles
 

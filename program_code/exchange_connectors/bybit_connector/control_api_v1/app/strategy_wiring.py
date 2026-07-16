@@ -17,7 +17,7 @@ MODULE_NOTE (中文):
   - 策略预注册
   - PipelineBridge 创建 + 所有 DI 接线
   - PaperLiveGate
-  - AI Consultation / Telegram / Grafana / DemoSync
+  - AI Consultation / Telegram / DemoSync
   - MarketScanner + AutoDeployer + ScoutWorker
   - Scout routes 接线 / E1 自动观察写入器
   - 后台行情流自动启动
@@ -39,7 +39,7 @@ MODULE_NOTE (English):
   - Strategy pre-registration
   - PipelineBridge creation + all DI wiring
   - PaperLiveGate
-  - AI Consultation / Telegram / Grafana / DemoSync
+  - AI Consultation / Telegram / DemoSync
   - MarketScanner + AutoDeployer + ScoutWorker
   - Scout routes wiring / E1 Auto-Observation Writer
   - Auto-start market feed
@@ -626,25 +626,6 @@ try:
         logger.info("Telegram alerter enabled / Telegram 告警已啟用")
 except ImportError:
     TELEGRAM = None
-
-# ── Grafana Data Writer (writes trading data to PostgreSQL for dashboards) ──
-# Grafana 数据写入器（将交易数据写入 PostgreSQL 供仪表盘使用）
-try:
-    from .grafana_data_writer import GrafanaDataWriter
-    GRAFANA_WRITER = GrafanaDataWriter(
-        paper_engine=PAPER_ENGINE,
-        kline_manager=KLINE_MANAGER,
-        signal_engine=SIGNAL_ENGINE,
-        orchestrator=ORCHESTRATOR,
-        pipeline_bridge=None,
-    )
-    if GRAFANA_WRITER.start():
-        logger.info("Grafana data writer started (leader worker) / Grafana 数据写入器已啟動（leader worker）")
-    else:
-        logger.info("Grafana data writer skipped (non-leader worker) / Grafana 数据写入器跳過（非 leader worker）")
-except Exception as e:
-    GRAFANA_WRITER = None
-    logger.info("Grafana data writer not available: %s / Grafana 写入器不可用: %s", e, e)
 
 # DEAD-PY-2: Demo connector wiring removed. DEMO_CONNECTOR = None.
 # Demo 連接器接線已移除。Demo 帳戶數據讀取改用 httpx BybitClient。

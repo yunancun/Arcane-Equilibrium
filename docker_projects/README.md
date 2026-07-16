@@ -10,8 +10,8 @@ Main subfolder overview:
 - basic_system_services：基础服务，例如 PostgreSQL、Redis、向量数据库等。
 - basic_system_services: core services such as PostgreSQL, Redis, and vector databases.
 
-- monitoring_services：监控服务，例如 Grafana、Prometheus、Loki 和告警服务。
-- monitoring_services: monitoring services such as Grafana, Prometheus, Loki, and alerting tools.
+- monitoring_services：Grafana stack 已于 2026-07-16 移除；此目录僅保留 PostgreSQL 初始交易 schema，供 bootstrap / migration 相容流程使用。
+- monitoring_services: the Grafana stack was removed on 2026-07-16; this directory retains only the initial PostgreSQL trading schema required by bootstrap and migration compatibility flows.
 
 - market_data_services：行情抓取、新闻抓取和情报数据处理相关服务。
 - market_data_services: services for market data collection, news collection, and intelligence processing.

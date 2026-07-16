@@ -1,31 +1,31 @@
 ---
 name: Remote Access Configuration
-description: Tailscale remote access setup for Trading GUI and OpenClaw Gateway (2026-03-27)
+description: Current Trading GUI remote-access boundary after Gateway retirement (updated 2026-07-16)
 type: reference
 ---
 
-## Remote Access Configuration (2026-03-27)
+## Remote Access Configuration
 
 ### Trading GUI
-- URL: `http://trade-core:8000`
-- Bind: `0.0.0.0:8000` (systemd user service)
+- Service: authenticated FastAPI OpenClaw Control Console on port `8000`
+- Bind: concrete tailnet IPv4 when explicitly selected, otherwise loopback
 - Config: `~/.config/systemd/user/openclaw-trading-api.service`
-- No HTTPS needed (Tailscale WireGuard encrypts)
+- Remote access must use the current Trading API bind/reverse-proxy policy; never
+  expose it on `0.0.0.0` or `::`.
+- The retained `/api/v1/openclaw/*` routes are local, authenticated, and
+  read-only control/monitoring surfaces.
 
-### OpenClaw Gateway
-- URL: `https://trade-core.tail358794.ts.net`
-- Bind: loopback + `--tailscale serve` (auto HTTPS)
-- Config: `~/.config/systemd/user/openclaw-gateway.service`
-- Token: `<REDACTED>`
-- Key flags: `--port 18789 --token <REDACTED> --tailscale serve`
-- `~/.openclaw/openclaw.json`: `bind=loopback`, allowedOrigins includes HTTPS domain
+### Retired surfaces (2026-07-16)
 
-### Device Pairing
-- MacBook Pro auto-paired in `~/.openclaw/devices/paired.json`
-- No password needed, token auth only
+- The external OpenClaw Gateway, its system service, remote endpoint, proxy, and
+  device-pairing path were retired and removed.
+- The Grafana container, dashboards, data writer, and remote monitoring endpoint
+  were retired and removed.
+- Archived setup instructions are historical evidence only and must not be used
+  to recreate either surface without a new accepted security/architecture
+  decision.
 
-### Key Files (NOT in git)
-- `~/.config/systemd/user/openclaw-trading-api.service`
-- `~/.config/systemd/user/openclaw-gateway.service`
-- `~/.openclaw/openclaw.json`
-- `~/.openclaw/devices/paired.json`
+### Active secret boundary
+
+- Control API credentials belong only in protected runtime secret storage and
+  must never be committed or copied into documentation.

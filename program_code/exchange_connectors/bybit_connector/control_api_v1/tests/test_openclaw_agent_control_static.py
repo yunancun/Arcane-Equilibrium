@@ -36,7 +36,6 @@ def test_tab_agents_mounts_openclaw_control_surface() -> None:
     section = _openclaw_section(html)
     assert 'id="openclaw-control-status-chip"' in section
     assert 'id="openclaw-authority-panel"' in section
-    assert 'id="openclaw-gateway-panel"' in section
     assert 'id="openclaw-topology-panel"' in section
     assert 'id="openclaw-blockers-panel"' in section
     assert "/static/js/openclaw-agent-control.js?v=" in html

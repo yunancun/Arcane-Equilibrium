@@ -3,7 +3,7 @@ from __future__ import annotations
 """
 MODULE_NOTE (中文):
   System / Health legacy 路由（E5-P0-5 拆分自 legacy_routes.py）。
-  包含 14 條只讀路由：
+  包含 13 條只讀路由：
     GET /api/v1/system/overview           — 系統總覽
     GET /api/v1/system/chapter-status     — 章節狀態
     GET /api/v1/system/control-plane      — 控制平面
@@ -13,7 +13,6 @@ MODULE_NOTE (中文):
     GET /api/v1/system/business/daily     — 當日經營指標
     GET /api/v1/system/business/summary   — 完整經營與收益摘要
     GET /api/v1/system/health             — 健康遙測（需 auth，完整 snapshot）
-    GET /api/v1/system/grafana-health     — Grafana 健康代理
     GET /api/v1/system/audit-summary      — 審計摘要
     GET /api/v1/system/source-context     — 資料源上下文
     GET /api/v1/health/db                 — PostgreSQL 連接池健康檢查
@@ -24,9 +23,9 @@ MODULE_NOTE (中文):
 
 MODULE_NOTE (English):
   System / Health read-only legacy routes (split out of legacy_routes.py in E5-P0-5).
-  Contains 14 routes covering system overview, chapter status, control plane,
+  Contains 13 routes covering system overview, chapter status, control plane,
   capability matrix, product families, business metrics, health telemetry,
-  FX proxy, Grafana proxy, audit summary, source context, and DB pool health probe.
+  FX proxy, audit summary, source context, and DB pool health probe.
 
   ★ Monkey-patch safety: all patched symbols resolved via `_base.xxx(...)` at
     request time. No module-level capture of STORE/envelope_response/get_latest_snapshot.
@@ -262,34 +261,6 @@ def register_system_legacy_routes(app) -> None:
             action_result="success",
             data=snapshot["health_telemetry"],
         )
-
-    @app.get(
-        f"{settings.api_prefix}/system/grafana-health",
-        include_in_schema=False,
-    )
-    async def grafana_health_proxy(actor=Depends(_base.current_actor)):
-        """
-        Proxy Grafana health check to avoid browser CORS block.
-        代理 Grafana 健康檢查，避免瀏覽器 CORS 攔截。
-        """
-        import asyncio
-
-        try:
-            def _check():
-                import json
-                import urllib.request
-                with urllib.request.urlopen(
-                    "http://localhost:3000/api/health", timeout=3
-                ) as resp:
-                    return json.loads(resp.read().decode())
-
-            data = await asyncio.to_thread(_check)
-            return {
-                "action_result": "success",
-                "data": {"ok": True, "version": data.get("version", "?")},
-            }
-        except Exception:
-            return {"action_result": "success", "data": {"ok": False}}
 
     @app.get(
         f"{settings.api_prefix}/health/db",

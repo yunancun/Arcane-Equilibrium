@@ -22,7 +22,6 @@ PLISTS=(
   "com.openclaw.engine.plist"
   "com.openclaw.engine-watchdog.plist"
   "com.openclaw.trading-api.plist"
-  "com.openclaw.gateway.plist"
 )
 
 DB_URL_FILE="$OPENCLAW_SECRETS_ROOT/environment_files/openclaw_database_url"

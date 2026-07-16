@@ -294,8 +294,8 @@ def test_static_high_risk_posts_use_scope_gates() -> None:
     assert 'base.require_scope_and_operator(actor, "ml:write")' in ml
 
 
-def test_static_proxy_and_secret_surfaces_are_locked_down() -> None:
-    """Pin Batch B proxy header and script secret-surface regressions."""
+def test_retired_gateway_proxy_and_script_secret_surfaces_are_locked_down() -> None:
+    """Keep the retired external Gateway absent and pin script secret handling."""
     repo_root = Path(_control_api_dir).parents[3]
     app_main = (Path(_control_api_dir) / "app" / "main.py").read_text(encoding="utf-8")
     restart_all = (repo_root / "helper_scripts" / "restart_all.sh").read_text(encoding="utf-8")
@@ -304,10 +304,11 @@ def test_static_proxy_and_secret_surfaces_are_locked_down() -> None:
     deploy_v017 = (repo_root / "helper_scripts" / "db" / "deploy_V017.sh").read_text(encoding="utf-8")
     deploy_v018 = (repo_root / "helper_scripts" / "db" / "deploy_V018.sh").read_text(encoding="utf-8")
     cron = (repo_root / "helper_scripts" / "cron_daily_report.sh").read_text(encoding="utf-8")
-    grafana_compose = (repo_root / "docker_projects" / "monitoring_services" / "docker-compose.yml").read_text(encoding="utf-8")
+    grafana_compose = repo_root / "docker_projects" / "monitoring_services" / "docker-compose.yml"
 
-    assert '"authorization"' not in app_main.partition("allowed_headers = {")[2].partition("}")[0]
-    assert '"cookie"' not in app_main.partition("allowed_headers = {")[2].partition("}")[0]
+    assert '/openclaw/{path:path}' not in app_main
+    assert "OPENCLAW_GATEWAY_HOST" not in app_main
+    assert "openclaw_proxy" not in app_main
     assert "OPENCLAW_DATABASE_URL_FILE" in restart_all
     assert "OPENCLAW_IPC_SECRET_FILE" in restart_all
     assert 'OPENCLAW_IPC_SECRET="${' not in restart_all
@@ -316,4 +317,4 @@ def test_static_proxy_and_secret_surfaces_are_locked_down() -> None:
     assert 'psql "$DSN"' not in deploy_v017
     assert 'psql "$DSN"' not in deploy_v018
     assert "bot${BOT_TOKEN}" not in cron
-    assert "${GRAFANA_BIND_ADDR:-127.0.0.1}" in grafana_compose
+    assert not grafana_compose.exists()
