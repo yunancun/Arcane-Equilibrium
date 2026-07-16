@@ -9,7 +9,9 @@ W4 lockstep（AMD-2026-07-08-01 §Runtime Boundary,與 Rust emitter 同 PR）。
   populated operational 值（session/pacing 活動/attestation/entitlement/report_status）→
   violation。與 W3 all-false 檢查逐位元同構。
 - 第 3 層（lineage-bounded,W5+,W4 結構性不可達）：`lineage_present == True` 時 operational
-  值可 populated,但仍逐值受 lineage-bound 不變量約束。W4 下 gate 恆 BLOCKED → 此分支不可達。
+  值可 populated,但仍**逐欄**受 lineage-bound 不變量約束（W5-S0 窮舉補齊：session 一致性
+  /halt_reason/reconnect_attempt/pacing 活動/entitlement/report_status/attestation 縱深）。
+  W4 下 gate 恆 BLOCKED → 此分支不可達。
 
 `lineage_present`（唯一放行閘,全 Rust-emitter 所有）：`= (phase2_gate.status == "PASS") ∧
 (attestation_status ∈ {PAPER_ATTESTED, READONLY_ATTESTED})`——production 未 seal 下結構性為
@@ -60,6 +62,13 @@ _HEALTH_PACING_ACTIVITY_FIELDS: tuple[str, ...] = (
 
 _ATTESTED_STATES: tuple[str, ...] = ("PAPER_ATTESTED", "READONLY_ATTESTED")
 
+# 第 3 層：session 活躍態（session_active ⟺ session_state ∈ 此集;Rust FSM 契約投影）。
+_ACTIVE_SESSION_STATES: tuple[str, ...] = ("ready", "degraded")
+
+# 第 3 層：reconnect 生命週期態——`reconnect_attempt` 非零僅在此集內合法
+# （ready 後計數歸零;disconnected 終態殘留計數 fail-closed 視為 violation）。
+_RECONNECT_LIFECYCLE_STATES: tuple[str, ...] = ("connecting", "handshaking", "backoff")
+
 
 def _connection_health_lineage_present(
     source: dict[str, Any],
@@ -107,21 +116,56 @@ def _connection_health_lineage_bounded_violations(
     source: dict[str, Any],
     violations: list[str],
 ) -> None:
-    """第 3 層（W5+,W4 結構性不可達）：lineage 具備下,operational 值可 populated,但仍受
-    lineage-bound 不變量約束——active session 需 paper/readonly attested 且非 live 帳戶指紋;
-    session_state 與 session_active 一致。W4 下 gate 恆 BLOCKED → 本函數永不被呼叫（覆蓋率
-    /斷言雙鎖）。live 帳戶指紋為硬否決（即使 lineage 具備仍拒）。"""
+    """第 3 層（W5+,W4 結構性不可達）：lineage 具備下,operational 值可 populated,但仍**逐欄**
+    受 lineage-bound 不變量約束（W5-S0 窮舉補齊;綁定不成立即 violation,fail-closed）。W4 下
+    gate 恆 BLOCKED → 本函數永不被呼叫（覆蓋率/斷言雙鎖）。live 帳戶指紋為硬否決（即使
+    lineage 具備仍拒）。"""
     attestation_status = _as_str(source.get("attestation_status"), "BLOCKED")
     session_active = _as_bool(source.get("session_active"))
     session_state = _as_str(source.get("session_state"), "disconnected")
+    halt_reason = _as_str(source.get("halt_reason"), "envelope_required")
+    # 縱深防禦：本函數不假設 caller 的 lineage 閘——attestation 未 attested 即 violation
+    # （caller 分流漂移時本層自足 fail-closed;正常路徑下 lineage_present 已保證 attested）。
+    if attestation_status not in _ATTESTED_STATES:
+        violations.append("attestation_status_not_attested_under_lineage")
     if session_active and attestation_status not in _ATTESTED_STATES:
         violations.append("session_active_without_attestation")
     if _as_bool(source.get("account_fingerprint_is_live")):
         violations.append("account_fingerprint_is_live")
     # session_state 與 session_active 一致性（active ⟺ ready/degraded）。
-    active_states = {"ready", "degraded"}
-    if session_active != (session_state in active_states):
+    if session_active != (session_state in _ACTIVE_SESSION_STATES):
         violations.append("session_state_activity_inconsistent")
+    # halt_reason ⟺ session_state 綁定（Rust 契約：`not_halted` = 非 disconnected 態）。
+    if session_state == "disconnected":
+        if halt_reason == "not_halted":
+            violations.append("halt_reason_missing_for_disconnected")
+    elif halt_reason != "not_halted":
+        violations.append("halt_reason_populated_without_disconnect")
+    # reconnect_attempt 非零僅在 reconnect 生命週期態內合法。
+    if (
+        _as_int(source.get("reconnect_attempt")) != 0
+        and session_state not in _RECONNECT_LIFECYCLE_STATES
+    ):
+        violations.append("reconnect_attempt_outside_reconnect_lifecycle")
+    # pacing 活動計數：只可能源於活躍 attested session;無活躍 session 而有活動＝violation
+    # （main_tokens_available 仍為 telemetry,不校驗）。
+    if not session_active:
+        for field in _HEALTH_PACING_ACTIVITY_FIELDS:
+            if _as_int(source.get(field)) != 0:
+                violations.append(f"pacing_{field}_without_active_session")
+    # entitlement：非默認值（pending）需活躍 attested session 才可派生（W6 才真派生）。
+    if (
+        _as_str(source.get("entitlement_state"), "pending") != "pending"
+        and not session_active
+    ):
+        violations.append("entitlement_state_without_active_session")
+    # report_status：emitter 唯一可產值＝external_verification_pending（degraded 僅
+    # normalizer 側 IPC 降級路徑）——lineage 具備下自宣告其他值仍 fail-closed。
+    if (
+        _as_str(source.get("report_status"), "external_verification_pending")
+        != "external_verification_pending"
+    ):
+        violations.append("report_status_not_emitter_produced")
 
 
 def _connection_health_contract_violations(

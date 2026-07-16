@@ -45,9 +45,17 @@ _OPERATIONAL_SCALAR_FIELDS = (
     "report_status",
 )
 
+# telemetry allowlist：**唯一**豁免 guard 的 operational 型欄（inactive governor 滿桶為
+# 誠實基線,非 liveness 訊號——見 normalizer 模組註解）。擴充此集＝有意識的審查決策。
+_TELEMETRY_ALLOWLIST = frozenset({"main_tokens_available"})
 
-def _rust_struct_field_names() -> set[str]:
-    """自 Rust `IbkrConnectionHealthReportV1` struct 抽出 `pub <name>:` 欄名。"""
+# 契約 metadata 欄（識別/版本/資訊字串,非 operational 真值）——不需負空間 guard。
+# 型別衛生由 superset 測試斷言（bool 型欄**永不得**入此集）。
+_CONTRACT_METADATA_FIELDS = frozenset({"contract_id", "source_version", "pending_reason"})
+
+
+def _rust_struct_fields_with_types() -> dict[str, str]:
+    """自 Rust `IbkrConnectionHealthReportV1` struct 抽出 `pub <name>: <type>` 欄名→型別。"""
     source = RUST_CONTRACT.read_text(encoding="utf-8")
     start = source.index("pub struct IbkrConnectionHealthReportV1")
     brace = source.index("{", start)
@@ -62,7 +70,14 @@ def _rust_struct_field_names() -> set[str]:
                 end = index
                 break
     body = source[brace:end]
-    return set(re.findall(r"pub\s+([a-z_][a-z0-9_]*)\s*:", body))
+    return dict(
+        re.findall(r"pub\s+([a-z_][a-z0-9_]*)\s*:\s*([A-Za-z0-9_:<>]+)", body)
+    )
+
+
+def _rust_struct_field_names() -> set[str]:
+    """自 Rust `IbkrConnectionHealthReportV1` struct 抽出 `pub <name>:` 欄名。"""
+    return set(_rust_struct_fields_with_types())
 
 
 def test_rust_emitter_fields_are_all_carried_by_python_fixture() -> None:
@@ -90,6 +105,38 @@ def test_normalizer_guarded_fields_are_subset_of_emitter_contract() -> None:
     assert "main_tokens_available" in struct_fields
     assert "main_tokens_available" not in _HEALTH_PACING_ACTIVITY_FIELDS
     assert "main_tokens_available" not in _HEALTH_HARD_SAFETY_FIELDS
+
+
+def test_non_telemetry_struct_fields_must_belong_to_a_guard_set() -> None:
+    """superset 斷言（W5-S0）：契約 struct 的每一欄——除 telemetry allowlist 與契約
+    metadata——**必屬**某 normalizer guard 集。未來 emitter 加 operational 欄而 normalizer
+    忘 guard → 本測試即紅（parity 既有方向鎖 guard⊆contract,此為反向 contract⊆guard）。"""
+    fields = _rust_struct_fields_with_types()
+    guarded = (
+        set(_HEALTH_HARD_SAFETY_FIELDS)
+        | set(_HEALTH_PACING_ACTIVITY_FIELDS)
+        | set(_OPERATIONAL_SCALAR_FIELDS)
+    )
+    for name, rust_type in fields.items():
+        # bool 型欄零豁免（任何布林都是信任/活動「宣稱」,必 guard）。
+        if rust_type == "bool":
+            assert name in guarded, f"契約 bool 欄未被 normalizer guard: {name}"
+            continue
+        if name in _TELEMETRY_ALLOWLIST or name in _CONTRACT_METADATA_FIELDS:
+            continue
+        assert name in guarded, (
+            f"契約 operational 欄未被 normalizer guard（也不在 telemetry/metadata "
+            f"allowlist）: {name}: {rust_type}"
+        )
+
+    # allowlist 衛生：豁免欄必真實存在於契約（防 stale allowlist 假豁免）且互斥。
+    struct_fields = set(fields)
+    assert _TELEMETRY_ALLOWLIST <= struct_fields
+    assert _CONTRACT_METADATA_FIELDS <= struct_fields
+    assert _TELEMETRY_ALLOWLIST.isdisjoint(_CONTRACT_METADATA_FIELDS)
+    # metadata 集型別衛生：不得收容 bool 欄（防「操作真值改名藏進 metadata」）。
+    for name in _CONTRACT_METADATA_FIELDS:
+        assert fields[name] != "bool", f"metadata allowlist 不得收容 bool 欄: {name}"
 
 
 def test_emitter_fixture_through_route_is_clean_inactive_baseline() -> None:
