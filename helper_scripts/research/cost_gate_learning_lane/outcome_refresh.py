@@ -38,8 +38,8 @@ from cost_gate_learning_lane.candidate_evaluation_producer import (
     partition_candidate_evaluation_outcomes,
 )
 from cost_gate_learning_lane.candidate_evaluation_cold_source import (
-    DEFAULT_GIT_ANCESTRY_RESOLVER,
-    build_pre_capability_source_provider,
+    DEFAULT_REVIEWED_LEGACY_BUILD_REGISTRY,
+    build_reviewed_legacy_build_source_provider,
 )
 from cost_gate_learning_lane.outcome_writer import (
     ProbeOutcomeConfig,
@@ -1402,7 +1402,9 @@ def main() -> int:
         price_source = "local_price_file"
 
     candidate_evaluation_source_provider = (
-        build_pre_capability_source_provider(DEFAULT_GIT_ANCESTRY_RESOLVER)
+        build_reviewed_legacy_build_source_provider(
+            DEFAULT_REVIEWED_LEGACY_BUILD_REGISTRY
+        )
         if args.enable_pre_capability_candidate_evaluation_source
         else None
     )
