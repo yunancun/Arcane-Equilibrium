@@ -92,7 +92,7 @@ W2-W11 的全部 DoD 都封頂在 `source-ready` + `runtime-active(inactive post
 
 **確認缺席(對應 §4.4)**:`ibkr_activation_envelope_v1` struct/impl(代碼中僅字串 placeholder;歸 W8a/W8)、S3/S5 typed row payload(僅 probe KIND + digest envelope;歸 W5)、entitlement 邏輯(W6)、runtime attestation/audit 產生器(W5/W8)、憑證寫路徑(隨 AMD-07-09-01 廢止,零代碼,**維持缺席**)。~~persistent session manager/fake-TWS server~~ 已由 W3 交付。
 
-**CI 現狀(W-CI 已收口 2026-07-15,PR#21 `48872c4fa`)**:`rust-ibkr-tests` job(五 scope=types 74+287/engine ibkr/stock_etf/seal bin/g4 audit,warm ~7-8m)+ W3/W4 追加 permit-stub、fake dev-dep-only、fake 缺席 nm、driver-absence 四守衛入 CI;結構守衛+classifier 擴 6 prefix 接 hosted CI(PR#42 `275c76c59`)。**R8 審計揭 3 MEDIUM 殘洞(歸 W5-S0/R9,詳 §4.5)**:①三個 `helper_scripts/ci/ibkr_*.sh` 審計腳本自身路徑不在 changes classifier(只改腳本的 PR 靜默 skip 本 job);②`rust-ibkr-tests` job 未被無條件 workflow static test 釘住(整 job 可被刪而靜默過);③W4 lockstep/parity pytest 套件不在 hosted CI(單改 Rust emitter 的 PR 可破 lockstep 而 CI 全綠)。
+**CI 現狀(W-CI 已收口 2026-07-15,PR#21 `48872c4fa`)**:`rust-ibkr-tests` job(五 scope=types 74+287/engine ibkr/stock_etf/seal bin/g4 audit,warm ~7-8m)+ W3/W4 追加 permit-stub、fake dev-dep-only、fake 缺席 nm、driver-absence 四守衛入 CI;結構守衛+classifier 擴 6 prefix 接 hosted CI(PR#42 `275c76c59`)。**R8 審計揭 3 MEDIUM 殘洞(歸 W5-S0/R9,詳 §4.5)**:①三個 `helper_scripts/ci/ibkr_*.sh` 審計腳本自身路徑不在 changes classifier(只改腳本的 PR 靜默 skip 本 job);②`rust-ibkr-tests` job 未被無條件 workflow static test 釘住(整 job 可被刪而靜默過);③W4 lockstep/parity pytest 套件不在 hosted CI(單改 Rust emitter 的 PR 可破 lockstep 而 CI 全綠)。(更新 2026-07-16:三洞已於 R9 PR#48 全數收口——classifier 補前綴、`tests/ci/test_ci_workflow_ibkr_job_static.py` 無條件釘鎖全鏈、兩 connection_health 套件入 hosted CI 帶 collect≥10 執行計數閘;另 +fake_tws 測試行、rust-check-macos draft 閘。)
 
 ### 4.3 Runtime 現狀(trade-core,2026-07-16 ~18:50 CEST 只讀復核;前次 07-15 16:12)
 
@@ -115,10 +115,10 @@ W2-W11 的全部 DoD 都封頂在 `source-ready` + `runtime-active(inactive post
 | 能力 | 現狀 | 歸屬 W |
 |---|---|---|
 | production seal caller(Seal/Supersede/Revoke) | **DONE(2026-07-15,R1+R2)**:收口四腿+加固 PR#28 `19985f312`(55 測試);production seal arming 屬 EA3 | W2 ✅ |
-| IBKR Rust 測試/G4 symbol audit 進 CI | **DONE(2026-07-15,PR#21 `48872c4fa`)**:`rust-ibkr-tests` 首綠;W3/W4 +4 守衛、結構守衛接 CI(PR#42);殘 3 MEDIUM 洞→W5-S0(§4.5) | W-CI ✅ |
+| IBKR Rust 測試/G4 symbol audit 進 CI | **DONE(2026-07-15,PR#21 `48872c4fa`)**:`rust-ibkr-tests` 首綠;W3/W4 +4 守衛、結構守衛接 CI(PR#42);殘 3 MEDIUM 洞→W5-S0(§4.5)(已閉 2026-07-16 R9,PR#48) | W-CI ✅ |
 | TWS transport/session manager(可恢復) | **DONE(2026-07-16,S1-S4)**:wire 抽檔 + 六態 FSM(退避/心跳/排程感知 DST)+ INV-1 permit stub + pacing governor(單一出口/有界排隊)+ fake-TWS dev-crate + 端到端 driver;211 engine 測試 | W3 ✅ |
 | connection-health IPC/route + normalizer lockstep | **DONE(2026-07-16,W4-1)**:`get_connection_health` IPC+FastAPI route+`IbkrConnectionHealthReportV1`+normalizer 三層 lockstep+fail-closed 四道+driver-absence audit 入 CI | W4 ✅ |
-| account/positions/open orders/executions/commissions + session attestation | attestation 僅型別;typed row 契約與 fetch 全缺(只有 probe KIND + digest envelope) | W5 |
+| account/positions/open orders/executions/commissions + session attestation | attestation 僅型別;~~typed row 契約缺~~(S1 已補 2026-07-16 R10:四 row contracts source-landed);fetch/消化與 attestation producer 仍缺(S2-S4) | W5 |
 | contract details/market data/calendar/entitlement | 契約型別在(identity/provenance);fetch/訂閱/entitlement 邏輯全缺 | W6 |
 | order lifecycle(preview/place/cancel/replace/fills/reconcile) | paper lifecycle 契約 source-only,零執行路徑 | W7 |
 | activation envelope/風控 authority/kill switch/audit 接線 | envelope 僅字串 placeholder,**無 struct/impl**;kill-switch/audit 契約在、runtime 產生器缺 | W8 |
@@ -132,7 +132,7 @@ W2-W11 的全部 DoD 都封頂在 `source-ready` + `runtime-active(inactive post
 
 8 鏡頭對抗審計(W2/W3/W4 源碼逐項核實、全測試鏈本地複跑、CI 姿態、文檔漂移 26 條、移交帳本 33 項、loop 協議批判、runtime 復核):
 - **完成件裁決**:W2/W3/W4 全部 `CONFIRMED_AS_CLAIMED`,零紅測試,計數逐項吻合;INV-1 二元 HOLDS(production 無任何 permit 放行路徑);fake crate dev-dep-only 成立;W2 R2 殘餘六項確認仍 open(維持 R-順手)。
-- **CI 守衛鏈 3 MEDIUM(→ W5-S0/R9 必修)**:①classifier 缺 `helper_scripts/ci/ibkr_*.sh`(三審計腳本自身的 PR 不觸發 `rust-ibkr-tests`,掏空審計可靜默 merge);②`rust-ibkr-tests` job 無機器釘鎖(workflow static test 未斷言 job 存在+五審計步,同 PR#42 修過的 guard-drift 病根);③W4 lockstep/parity/tripwire pytest 不在 hosted CI(單側改 emitter 可破 lockstep 而 CI 綠)。
+- **CI 守衛鏈 3 MEDIUM(→ W5-S0/R9 必修)**:①classifier 缺 `helper_scripts/ci/ibkr_*.sh`(三審計腳本自身的 PR 不觸發 `rust-ibkr-tests`,掏空審計可靜默 merge);②`rust-ibkr-tests` job 無機器釘鎖(workflow static test 未斷言 job 存在+五審計步,同 PR#42 修過的 guard-drift 病根);③W4 lockstep/parity/tripwire pytest 不在 hosted CI(單側改 emitter 可破 lockstep 而 CI 綠)。**(2026-07-16 R9 已全數收口,PR#48;LOW/NOTE 中 fake crate 測試行、MODULE_NOTE 過時注釋亦同輪清)**
 - **LOW/NOTE(→ R9+ 順手)**:seal-control 守衛掃描面(order_manager.rs 等)⊄ classifier 觸發面;push-main cancel-in-progress × 精確 diff 的低頻覆蓋窗(記帳為 known posture 或 per-sha concurrency);`rust-ibkr-tests` 加一行 `cargo test -p openclaw_fake_tws`(9 unit tests 現不在 CI);W3 wire/session/pacing MODULE_NOTE「全面 DCE」表述已被 W4 production caller 過時;fake 場景實數 15 非 14(歷史敘事不改,以此行為準)。
 - **memory 抄錄漂移**:rust-cache 實為**四** job 非「三」(84b5a3d90 commit body 明文)。
 
@@ -217,6 +217,8 @@ W2-W11 的全部 DoD 都封頂在 `source-ready` + `runtime-active(inactive post
 ---
 
 ### W5 — account/positions/open orders/executions/commissions + session attestation
+
+**進度(2026-07-16 loop R9∥R10)**:**S0+S1 DONE(source-landed)**——S0=PR#48(head `b7925fdb6`):Layer 3 per-field 窮舉+三枚舉封閉域+parity 反向 superset+enum 共源 lockstep+CI 守衛鏈三洞收口(E2 APPROVE_WITH_NOTES;E3 PASS,W4 移交 E3-F1/F2 雙 CLOSED);S1=PR#49(head `728752a7f`):四 typed row contracts+四配對守衛檔+coverage 守衛 rel-path 修(E2 APPROVE_WITH_NOTES;IB 現勘 9 項全 CONFIRMED)。**S2 前置注意**:AvailableFunds/ExcessLiquidity 符號不對稱入 IB 現勘清單;emitter 側 reconnect_budget_exhausted 終態形態會被 Layer3 攔。**S3 前置 blocking**:max-double 哨兵→None 映射、exec_time 格式×TWS timezone 配置聯 pin(IB 2026-07-16,官方出典見 PROGRESS R10)。
 
 **目標**:唯讀帳戶面全量 + 會話 attestation 生產者,把「這是哪個帳戶、是不是 paper、資料新不新鮮」變成 typed、可審計的事實。
 
