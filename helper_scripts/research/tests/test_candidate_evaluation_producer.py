@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import copy
 import datetime as dt
+import subprocess
 
 import pytest
 
+import cost_gate_learning_lane.candidate_evaluation_producer as candidate_producer_module
 import cost_gate_learning_lane.outcome_refresh as outcome_refresh_module
 from helper_scripts.research.tests.candidate_lineage_v2_test_support import (
     build_candidate_event_context_v1,
@@ -19,6 +21,16 @@ from cost_gate_learning_lane.candidate_evaluation_context import (
     attach_candidate_evaluation_context,
     build_candidate_evaluation_context,
     canonical_sha256,
+)
+from cost_gate_learning_lane.candidate_evaluation_cold_source import (
+    CANDIDATE_EVALUATION_SOURCE_CAPABILITY_GIT_SHA,
+    DEFER,
+    PERMANENTLY_UNAVAILABLE,
+    PRE_CAPABILITY_BUILD,
+    READY,
+    CandidateEvaluationSourceResolution,
+    GitAncestryResolver,
+    build_pre_capability_source_provider,
 )
 from cost_gate_learning_lane.candidate_evaluation_producer import (
     ATTACHED,
@@ -51,14 +63,20 @@ from cost_gate_learning_lane.runtime_adapter import (
 def _raw_valid_reject_event(
     context_id: str = "ctx-cold-evaluation-producer-001",
     captured_at_utc: dt.datetime | None = None,
+    strategy_version: str | None = None,
 ) -> dict:
     captured_at_utc = captured_at_utc or dt.datetime(
         2026, 7, 9, 12, tzinfo=dt.timezone.utc
     )
+    context_kwargs = {
+        "context_id": context_id,
+        "captured_at_ms": int(captured_at_utc.timestamp() * 1_000),
+        "evidence_engine_mode": "live_demo",
+    }
+    if strategy_version is not None:
+        context_kwargs["strategy_version"] = strategy_version
     context = build_candidate_event_context_v1(
-        context_id=context_id,
-        captured_at_ms=int(captured_at_utc.timestamp() * 1_000),
-        evidence_engine_mode="live_demo",
+        **context_kwargs,
     )
     return {
         "strategy_name": context["strategy_name"],
@@ -211,8 +229,13 @@ def _probe_subtype_fields() -> dict:
 def _raw_valid_outcome(
     context_id: str = "ctx-cold-evaluation-raw-outcome",
     captured_at_utc: dt.datetime | None = None,
+    strategy_version: str | None = None,
 ) -> tuple[dict, dt.datetime, dt.datetime, dict, dict]:
-    event = _raw_valid_reject_event(context_id, captured_at_utc)
+    event = _raw_valid_reject_event(
+        context_id,
+        captured_at_utc,
+        strategy_version,
+    )
     event_time = dt.datetime.fromtimestamp(
         event["ts_ms"] / 1_000,
         tz=dt.timezone.utc,
@@ -254,6 +277,498 @@ def _assert_telemetry_conservation(partition: dict) -> None:
     assert partition["candidate_evaluation_batch_deferred"] is (
         partition["candidate_evaluation_deferred_count"] > 0
     )
+
+
+_PRE_CAPABILITY_BUILD_GIT_SHA = "0a4d38ee08f93e9cb3a3bae7160f86fe1716297d"
+_DESCENDANT_BUILD_GIT_SHA = "94380563f1e3b72875d166fca4f22af6e37f90d9"
+_DIVERGENT_BUILD_GIT_SHA = "f" * 40
+_UNKNOWN_BUILD_GIT_SHA = "e" * 40
+_UNAVAILABILITY_HASH_FIELD = (
+    "candidate_evaluation_source_unavailability_hash"
+)
+
+
+class _GitRunner:
+    def __init__(self, returncodes: dict[str, int | BaseException]) -> None:
+        self.returncodes = returncodes
+        self.calls: list[tuple[list[str], dict]] = []
+
+    def __call__(self, argv: list[str], **kwargs):
+        self.calls.append((list(argv), dict(kwargs)))
+        response = self.returncodes.get(argv[-2], 1)
+        if isinstance(response, BaseException):
+            raise response
+        return subprocess.CompletedProcess(argv, response)
+
+
+def _resolver(
+    tmp_path,
+    *,
+    returncodes: dict[str, int | BaseException] | None = None,
+) -> tuple[GitAncestryResolver, _GitRunner]:
+    runner = _GitRunner(
+        returncodes
+        or {
+            _PRE_CAPABILITY_BUILD_GIT_SHA: 0,
+            _DESCENDANT_BUILD_GIT_SHA: 1,
+            _DIVERGENT_BUILD_GIT_SHA: 1,
+            _UNKNOWN_BUILD_GIT_SHA: 128,
+        }
+    )
+    return (
+        GitAncestryResolver(
+            repo_root=tmp_path,
+            runner=runner,
+            timeout_seconds=1.25,
+        ),
+        runner,
+    )
+
+
+def _rehash_unavailability(marker: dict) -> None:
+    marker[_UNAVAILABILITY_HASH_FIELD] = canonical_sha256(
+        {
+            key: value
+            for key, value in marker.items()
+            if key != _UNAVAILABILITY_HASH_FIELD
+        }
+    )
+
+
+def test_git_ancestry_resolver_is_strict_shell_free_suppressed_and_cached(
+    tmp_path,
+) -> None:
+    resolver, runner = _resolver(tmp_path)
+
+    assert resolver.is_strict_pre_capability(
+        _PRE_CAPABILITY_BUILD_GIT_SHA
+    ) is True
+    assert resolver.is_strict_pre_capability(
+        _PRE_CAPABILITY_BUILD_GIT_SHA
+    ) is True
+    assert len(runner.calls) == 1
+    argv, kwargs = runner.calls[0]
+    assert argv == [
+        "git",
+        "--no-replace-objects",
+        "-C",
+        str(tmp_path),
+        "merge-base",
+        "--is-ancestor",
+        _PRE_CAPABILITY_BUILD_GIT_SHA,
+        CANDIDATE_EVALUATION_SOURCE_CAPABILITY_GIT_SHA,
+    ]
+    assert kwargs["stdout"] == subprocess.DEVNULL
+    assert kwargs["stderr"] == subprocess.DEVNULL
+    assert kwargs["timeout"] == 1.25
+    assert kwargs.get("shell", False) is False
+    assert kwargs["check"] is False
+    assert kwargs["env"]["GIT_NO_REPLACE_OBJECTS"] == "1"
+
+    assert resolver.is_strict_pre_capability(
+        CANDIDATE_EVALUATION_SOURCE_CAPABILITY_GIT_SHA
+    ) is False
+    assert resolver.is_strict_pre_capability(
+        _DESCENDANT_BUILD_GIT_SHA
+    ) is False
+    assert resolver.is_strict_pre_capability(
+        _DIVERGENT_BUILD_GIT_SHA
+    ) is False
+    assert resolver.is_strict_pre_capability(
+        _UNKNOWN_BUILD_GIT_SHA
+    ) is False
+    assert resolver.is_strict_pre_capability("not-a-git-sha") is False
+    assert len(runner.calls) == 4
+
+
+def test_git_ancestry_resolver_timeout_or_error_fails_closed(tmp_path) -> None:
+    timeout = subprocess.TimeoutExpired(["git"], timeout=1.25)
+    resolver, runner = _resolver(
+        tmp_path,
+        returncodes={_PRE_CAPABILITY_BUILD_GIT_SHA: timeout},
+    )
+
+    assert resolver.is_strict_pre_capability(
+        _PRE_CAPABILITY_BUILD_GIT_SHA
+    ) is False
+    assert len(runner.calls) == 1
+
+
+def test_pre_capability_typed_resolution_is_terminal_idempotent_and_unfabricated(
+    tmp_path,
+) -> None:
+    _event, _event_time, now, _admission, raw_outcome = _raw_valid_outcome(
+        "ctx-cold-pre-capability-terminal",
+        strategy_version=_PRE_CAPABILITY_BUILD_GIT_SHA,
+    )
+    resolver, runner = _resolver(tmp_path)
+    provider = build_pre_capability_source_provider(resolver)
+
+    absent = attach_candidate_evaluation_to_outcome(
+        raw_outcome,
+        ancestry_resolver=resolver,
+        now_utc=now,
+    )
+    terminal = attach_candidate_evaluation_to_outcome(
+        raw_outcome,
+        source_provider=provider,
+        ancestry_resolver=resolver,
+        now_utc=now,
+    )
+
+    assert absent["status"] == DEFER_COLD_EVALUATION_SOURCE_INCOMPLETE
+    assert terminal["status"] == PERMANENTLY_UNAVAILABLE
+    assert terminal["defer_reason"] is None
+    assert terminal["unavailability_reason"] == PRE_CAPABILITY_BUILD
+    summary = terminal["outcome"]["candidate_summary"]
+    assert summary["candidate_evaluation_source_status"] == (
+        PERMANENTLY_UNAVAILABLE
+    )
+    marker = summary["candidate_evaluation_source_unavailability"]
+    assert marker["event_hash"] == summary["candidate_event_context"]["event_hash"]
+    assert marker["context_id"] == summary["candidate_event_context"]["context_id"]
+    assert marker["build_git_sha"] == _PRE_CAPABILITY_BUILD_GIT_SHA
+    assert marker["capability_introduced_at_git_sha"] == (
+        CANDIDATE_EVALUATION_SOURCE_CAPABILITY_GIT_SHA
+    )
+    assert marker["reason"] == PRE_CAPABILITY_BUILD
+    assert marker["status"] == PERMANENTLY_UNAVAILABLE
+    assert set(marker) == {
+        "schema_version",
+        "status",
+        "reason",
+        "event_hash",
+        "context_id",
+        "build_git_sha",
+        "capability_schema_version",
+        "capability_introduced_at_git_sha",
+        "ancestry_relation",
+        "boundary",
+        _UNAVAILABILITY_HASH_FIELD,
+    }
+    for forbidden in (
+        "candidate_evaluation_context",
+        "candidate_learning_context",
+        "hidden_oos_state",
+        "proof",
+        "regime_entry_counts",
+        "portfolio",
+        "resource",
+    ):
+        assert forbidden not in summary
+        assert forbidden not in marker
+
+    replay = attach_candidate_evaluation_to_outcome(
+        terminal["outcome"],
+        ancestry_resolver=resolver,
+        now_utc=now,
+    )
+    partition = partition_candidate_evaluation_outcomes(
+        [terminal["outcome"]],
+        ancestry_resolver=resolver,
+        now_utc=now,
+    )
+    assert replay == terminal
+    assert partition["outcomes"] == [terminal["outcome"]]
+    assert partition["candidate_evaluation_eligible_count"] == 0
+    assert partition["candidate_evaluation_not_applicable_count"] == 1
+    assert partition["candidate_evaluation_deferred_count"] == 0
+    assert partition["candidate_evaluation_batch_deferred"] is False
+    assert len(runner.calls) == 1
+
+
+def test_pre_capability_marker_revalidates_through_existing_append_guard(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    event = _raw_valid_reject_event(
+        "ctx-cold-pre-capability-append",
+        strategy_version=_PRE_CAPABILITY_BUILD_GIT_SHA,
+    )
+    event_time = dt.datetime.fromtimestamp(
+        event["ts_ms"] / 1_000,
+        tz=dt.timezone.utc,
+    )
+    admission = build_ledger_record(
+        evaluate_probe_admission(
+            _minimal_plan(event),
+            event,
+            now_utc=event_time,
+            adapter_enabled=False,
+        )
+    )
+    ledger_path = tmp_path / "pre-capability-append-ledger.jsonl"
+    append_jsonl_ledger(ledger_path, admission)
+    resolver, runner = _resolver(tmp_path)
+    monkeypatch.setattr(
+        candidate_producer_module,
+        "_DEFAULT_ANCESTRY_RESOLVER",
+        resolver,
+    )
+    now = dt.datetime.combine(
+        event_time.date() + dt.timedelta(days=1),
+        dt.time(0, 1),
+        tzinfo=dt.timezone.utc,
+    )
+
+    batch = refresh_cost_gate_outcomes_from_price_rows(
+        ledger_path,
+        _price_rows(event),
+        now_utc=now,
+        selection=OutcomeRefreshSelection(record_blocked_outcomes=True),
+        outcome_cfg=ProbeOutcomeConfig(horizon_minutes=60, cost_bps=4.0),
+        append_ledger=True,
+        candidate_evaluation_source_provider=(
+            build_pre_capability_source_provider(resolver)
+        ),
+    )
+
+    assert batch["candidate_evaluation_deferred_count"] == 0
+    assert batch["candidate_evaluation_not_applicable_count"] == 1
+    assert batch["candidate_evaluation_batch_deferred"] is False
+    assert batch["outcome_count"] == 1
+    assert batch["appended_outcome_count"] == 1
+    rows = read_jsonl_ledger(ledger_path)
+    assert len(rows) == 2
+    assert rows[-1]["candidate_summary"][
+        "candidate_evaluation_source_status"
+    ] == PERMANENTLY_UNAVAILABLE
+    assert len(runner.calls) == 1
+
+
+@pytest.mark.parametrize(
+    ("build_git_sha", "returncode"),
+    [
+        (CANDIDATE_EVALUATION_SOURCE_CAPABILITY_GIT_SHA, 0),
+        (_DESCENDANT_BUILD_GIT_SHA, 1),
+        (_DIVERGENT_BUILD_GIT_SHA, 1),
+        (_UNKNOWN_BUILD_GIT_SHA, 128),
+    ],
+)
+def test_non_strict_ancestor_builds_remain_deferred(
+    tmp_path,
+    build_git_sha: str,
+    returncode: int,
+) -> None:
+    _event, _event_time, now, _admission, raw_outcome = _raw_valid_outcome(
+        f"ctx-cold-not-pre-capability-{build_git_sha[:8]}",
+        strategy_version=build_git_sha,
+    )
+    resolver, _runner = _resolver(
+        tmp_path,
+        returncodes={build_git_sha: returncode},
+    )
+    resolution = build_pre_capability_source_provider(resolver)(
+        raw_outcome["candidate_summary"]["candidate_event_context"],
+        "2026-07-10",
+    )
+    partition = partition_candidate_evaluation_outcomes(
+        [raw_outcome],
+        source_provider=build_pre_capability_source_provider(resolver),
+        ancestry_resolver=resolver,
+        now_utc=now,
+    )
+
+    assert resolution.status == DEFER
+    assert resolution.bundle is None
+    assert resolution.reason is None
+    assert partition["candidate_evaluation_deferred_count"] == 1
+    assert partition["outcomes"] == []
+
+
+def test_typed_ready_and_defer_preserve_existing_provider_semantics(
+    tmp_path,
+) -> None:
+    _event, event_time, now, _admission, raw_outcome = _raw_valid_outcome(
+        "ctx-cold-typed-ready-defer"
+    )
+    resolver, _runner = _resolver(tmp_path)
+    ready = partition_candidate_evaluation_outcomes(
+        [raw_outcome],
+        source_provider=lambda _event, _as_of: (
+            CandidateEvaluationSourceResolution.ready(
+                _complete_source_bundle(event_time.date())
+            )
+        ),
+        ancestry_resolver=resolver,
+        now_utc=now,
+    )
+    deferred = partition_candidate_evaluation_outcomes(
+        [raw_outcome],
+        source_provider=lambda _event, _as_of: (
+            CandidateEvaluationSourceResolution.defer()
+        ),
+        ancestry_resolver=resolver,
+        now_utc=now,
+    )
+
+    assert ready["candidate_evaluation_preflight_attached_count"] == 1
+    assert ready["candidate_evaluation_deferred_count"] == 0
+    assert len(ready["outcomes"]) == 1
+    assert deferred["candidate_evaluation_preflight_attached_count"] == 0
+    assert deferred["candidate_evaluation_deferred_count"] == 1
+    assert deferred["outcomes"] == []
+    assert CandidateEvaluationSourceResolution.ready(
+        _complete_source_bundle(event_time.date())
+    ).status == READY
+
+
+def test_permanent_marker_tampering_grafting_or_evaluation_coexistence_defers(
+    tmp_path,
+) -> None:
+    _event, _event_time, now, _admission, first = _raw_valid_outcome(
+        "ctx-cold-permanent-tamper-first",
+        strategy_version=_PRE_CAPABILITY_BUILD_GIT_SHA,
+    )
+    _event, _event_time, _now, _admission, second = _raw_valid_outcome(
+        "ctx-cold-permanent-tamper-second",
+        strategy_version=_PRE_CAPABILITY_BUILD_GIT_SHA,
+    )
+    resolver, _runner = _resolver(tmp_path)
+    provider = build_pre_capability_source_provider(resolver)
+    terminal = attach_candidate_evaluation_to_outcome(
+        first,
+        source_provider=provider,
+        ancestry_resolver=resolver,
+        now_utc=now,
+    )["outcome"]
+
+    stale_hash = copy.deepcopy(terminal)
+    stale_hash["candidate_summary"][
+        "candidate_evaluation_source_unavailability"
+    ][_UNAVAILABILITY_HASH_FIELD] = "0" * 64
+
+    wrong_capability = copy.deepcopy(terminal)
+    wrong_marker = wrong_capability["candidate_summary"][
+        "candidate_evaluation_source_unavailability"
+    ]
+    wrong_marker["capability_introduced_at_git_sha"] = "f" * 40
+    _rehash_unavailability(wrong_marker)
+
+    grafted = copy.deepcopy(second)
+    grafted["candidate_summary"][
+        "candidate_evaluation_source_status"
+    ] = PERMANENTLY_UNAVAILABLE
+    grafted["candidate_summary"][
+        "candidate_evaluation_source_unavailability"
+    ] = copy.deepcopy(
+        terminal["candidate_summary"][
+            "candidate_evaluation_source_unavailability"
+        ]
+    )
+
+    evaluation_coexistence = copy.deepcopy(terminal)
+    evaluation_coexistence["candidate_summary"][
+        "candidate_evaluation_context_status"
+    ] = "VALID"
+
+    for row in (
+        stale_hash,
+        wrong_capability,
+        grafted,
+        evaluation_coexistence,
+    ):
+        result = attach_candidate_evaluation_to_outcome(
+            row,
+            ancestry_resolver=resolver,
+            now_utc=now,
+        )
+        partition = partition_candidate_evaluation_outcomes(
+            [row],
+            ancestry_resolver=resolver,
+            now_utc=now,
+        )
+        assert result["status"] == DEFER_COLD_EVALUATION_SOURCE_INCOMPLETE
+        assert partition["candidate_evaluation_deferred_count"] == 1
+        assert partition["outcomes"] == []
+
+
+def test_permanent_lineage_conflicts_defer_but_identical_duplicates_survive(
+    tmp_path,
+) -> None:
+    _event, event_time, now, _admission, raw_outcome = _raw_valid_outcome(
+        "ctx-cold-permanent-conflict",
+        strategy_version=_PRE_CAPABILITY_BUILD_GIT_SHA,
+    )
+    resolver, _runner = _resolver(tmp_path)
+    permanent_provider = build_pre_capability_source_provider(resolver)
+    identical = partition_candidate_evaluation_outcomes(
+        [raw_outcome, copy.deepcopy(raw_outcome)],
+        source_provider=permanent_provider,
+        ancestry_resolver=resolver,
+        now_utc=now,
+    )
+    provider_call_count = 0
+
+    def mixed_provider(_event: dict, _as_of: str):
+        nonlocal provider_call_count
+        provider_call_count += 1
+        if provider_call_count == 1:
+            return CandidateEvaluationSourceResolution.permanently_unavailable()
+        return CandidateEvaluationSourceResolution.ready(
+            _complete_source_bundle(event_time.date())
+        )
+
+    mixed_kind = partition_candidate_evaluation_outcomes(
+        [raw_outcome, copy.deepcopy(raw_outcome)],
+        source_provider=mixed_provider,
+        ancestry_resolver=resolver,
+        now_utc=now,
+    )
+    conflicting_event = copy.deepcopy(raw_outcome)
+    context = conflicting_event["candidate_summary"]["candidate_event_context"]
+    context["market_inputs"]["last_price"] = 2_500.05
+    context["event_hash"] = canonical_sha256(
+        {key: value for key, value in context.items() if key != "event_hash"}
+    )
+    conflicting_event["event"]["candidate_event_context"] = copy.deepcopy(
+        context
+    )
+    different_event_hash = partition_candidate_evaluation_outcomes(
+        [raw_outcome, conflicting_event],
+        source_provider=permanent_provider,
+        ancestry_resolver=resolver,
+        now_utc=now,
+    )
+
+    assert len(identical["outcomes"]) == 2
+    assert identical["candidate_evaluation_deferred_count"] == 0
+    assert mixed_kind["candidate_evaluation_deferred_count"] == 2
+    assert mixed_kind["outcomes"] == []
+    assert different_event_hash["candidate_evaluation_deferred_count"] == 2
+    assert different_event_hash["outcomes"] == []
+
+
+def test_permanent_plus_deferred_row_preserves_all_or_nothing_batch(
+    tmp_path,
+) -> None:
+    first = _raw_valid_outcome(
+        "ctx-cold-permanent-batch",
+        strategy_version=_PRE_CAPABILITY_BUILD_GIT_SHA,
+    )[4]
+    _event, _event_time, now, _admission, second = _raw_valid_outcome(
+        "ctx-cold-deferred-batch",
+        strategy_version=_PRE_CAPABILITY_BUILD_GIT_SHA,
+    )
+    resolver, _runner = _resolver(tmp_path)
+
+    def selective_provider(event: dict, _as_of: str):
+        if event["context_id"] == "ctx-cold-permanent-batch":
+            return CandidateEvaluationSourceResolution.permanently_unavailable()
+        return CandidateEvaluationSourceResolution.defer()
+
+    partition = partition_candidate_evaluation_outcomes(
+        [first, second],
+        source_provider=selective_provider,
+        ancestry_resolver=resolver,
+        now_utc=now,
+    )
+
+    _assert_telemetry_conservation(partition)
+    assert partition["candidate_evaluation_deferred_count"] == 1
+    assert partition["candidate_evaluation_not_applicable_count"] == 1
+    assert partition["candidate_evaluation_batch_deferred"] is True
+    assert partition["outcomes"] == []
 
 
 def test_complete_explicit_source_attaches_and_reaches_strict_board(tmp_path) -> None:
