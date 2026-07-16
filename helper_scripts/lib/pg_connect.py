@@ -127,4 +127,5 @@ def connect_report_pg(
             "SET statement_timeout = %s",
             (int(os.environ.get(statement_timeout_env, str(statement_timeout_ms_default))),),
         )
+    conn.commit()
     return conn
