@@ -5,7 +5,7 @@ Agentic trading governance system — 自主扫描 650+ 交易对，智能部署
 
 **软更名口径（2026-05-06）**：
 - 正式项目名：**玄衡 · Arcane Equilibrium**。
-- **OpenClaw** 保留为控制平面 / Gateway / Console / 通信服务族名称。
+- **OpenClaw** 保留为 Control Console、本地 API、Rust engine 与既有运行面标识；外部 OpenClaw Gateway 已于 2026-07-16 退役并移除。
 - **Bybit** 仍是目前唯一 active live execution 交易所 adapter / connector；Binance 仅 market-data-only（ADR-0033/0040）。AMD-2026-07-11-01 已授权开发 IBKR `stock_etf_cash` readonly / paper / shadow / tiny-live / live **capability**（production caller、TWS/Gateway、Rust authority、IPC、GUI、inactive deploy），但默认 inactive，绝不等于 broker login、API/socket contact 或下单授权。真实 contact/effect 必须有 Rust 验证的、限时且 commit/account/session-bound `ibkr_activation_envelope_v1`；credential/session 本身永不 auto-activate。IBKR margin / short / options / CFD / transfer / account-management write 与 Python authority 仍禁止。
 - 短期不改 `openclaw_engine`、`OPENCLAW_*`、`/tmp/openclaw`、GitHub 仓库名、Linux runtime 路径等运行面名称。
 
@@ -16,8 +16,9 @@ Agentic trading governance system — 自主扫描 650+ 交易对，智能部署
 | 地址 | 功能 |
 |------|------|
 | **[http://trade-core:8000](http://trade-core:8000)** | **OpenClaw Control Console**（唯一 canonical GUI；登录后进入现有 FastAPI 控制台） |
-| [http://trade-core:3000](http://trade-core:3000) | Grafana 运营监控仪表盘 |
-| [https://trade-core.tail358794.ts.net](https://trade-core.tail358794.ts.net) | OpenClaw Gateway / Tailscale HTTPS 入口（通信与远程入口，不是第二套交易 GUI） |
+
+> 2026-07-16 安全面收敛：外部 OpenClaw Gateway、其代理/服务入口，以及
+> Grafana 容器、仪表盘与数据写入链路均已退役并移除；它们不再是部署或访问端点。
 
 ### OpenClaw Control Console 核心 Tab
 
@@ -37,8 +38,8 @@ Agentic trading governance system — 自主扫描 650+ 交易对，智能部署
 | `governance` | GovernanceHub、授权、Decision Lease、对账 |
 | `ai` | Layer2Engine、本地/云模型、成本追踪 |
 | `learning` | Learning Cockpit、promotion evidence、ML/feature 状态 |
-| `agents` | 本地 5-Agent 只读状态 / proposal relay 入口 |
-| `monitoring` | Grafana 与系统健康 |
+| `agents` | 本地 5-Agent 只读状态与治理记录 |
+| `monitoring` | 内建系统健康、运行状态与非 Grafana 监控 |
 | `development` | 開發與維護工具入口 |
 | `settings` | 参数、环境、维护操作 |
 
@@ -94,7 +95,6 @@ srv/
 │   │           │   ├── multi_agent_framework.py ← ScoutAgent + MessageBus + Conductor
 │   │           │   ├── ollama_client.py         ← Ollama HTTP 客户端（L1 本地推理）
 │   │           │   ├── bybit_demo_connector.py  ← 工具函数（round_price/qty，无交易逻辑）
-│   │           │   ├── grafana_data_writer.py   ← Grafana 数据写入
 │   │           │   ├── telegram_alerter.py      ← Telegram 告警
 │   │           │   └── static/                  ← GUI (login + OpenClaw Control Console tabs)
 │   │           └── tests/
@@ -106,7 +106,7 @@ srv/
 │   ↳ 旧 governance/ · risk_control（H0）· trade_executor（Decision Lease）已迁移至 Rust
 │     （openclaw_core: governance_core.rs · h0_gate.rs · sm/risk_gov.rs），Python 目录已删除
 ├── docker_projects/
-│   ├── monitoring_services/       ← Grafana + 5 仪表盘
+│   ├── monitoring_services/       ← 仅保留 PostgreSQL 初始交易 schema（bootstrap 相容）
 │   └── trading_services/          ← PostgreSQL
 ├── rust/                          ← ★ Rust 交易引擎（交易 / 风控 / 策略配置 / 执行权威）
 │   ├── Cargo.toml                 ← Workspace: 3 crates
@@ -165,7 +165,7 @@ srv/
 [SM-02 决策租约]   9 状态 · TTL 自动到期 · AI→Lease→复核→执行
                   路径 A retrofit 已 land；router gate flag 当前仅是 shadow/evidence 语义
 [EX-04 对账引擎]   5 类结果（MATCH/MISMATCH/MISSING）· 触发风控升级（Rust event_consumer 直写 DB）
-[EX-06 多Agent]    Local Conductor + Scout/Strategist/Guardian/Analyst/Executor；OpenClaw Gateway 仅外围通信/提案
+[EX-06 多Agent]    Local Conductor + Scout/Strategist/Guardian/Analyst/Executor；不依赖已退役的外部 Gateway
 [EX-05 学习]       L1→L5 五级门控 · 逐级解锁能力 · L5 需 Operator 审批
 [EX-07 感知面]     FACT/INFERENCE/HYPOTHESIS 认知标记 · 新鲜度追踪
 [DOC-07 审计]      append-only JSONL · 不可修改不可删除 · 自动轮转
@@ -181,21 +181,33 @@ srv/
 
 ## OpenClaw 服务族集成
 
-OpenClaw 现在是玄衡项目内的控制平面服务族名称，不再作为总项目名使用。
+OpenClaw 现在是玄衡项目内既有 Control Console、本地 API、Rust engine 与
+运行面标识，不再作为总项目名使用。
 
-> 2026-05-06 定位：现有 FastAPI console 是唯一 OpenClaw Control Console；外部 OpenClaw Gateway 是通信、移动端、上级汇总、proposal/approval relay，不是交易 conductor，也不是第二套 GUI。
+> 2026-07-16 安全决策：外部 OpenClaw Gateway、`/openclaw/*` 反向代理及其
+> 服务/GUI 集成已退役并移除。既有 FastAPI console 仍是唯一 OpenClaw
+> Control Console。
 
-当前目标架构：OpenClaw Gateway → `/api/v1/openclaw/*` 聚合/提案/审批 API → 本地 5-Agent + GovernanceHub + Postgres → Rust `openclaw_engine`。OpenClaw 不持有 Bybit key、不直接下单、不直接改 live TOML；所有交易影响动作仍通过 Operator approval、Decision Lease 和 Rust execution authority。
+当前保留架构：受认证的 FastAPI Control Console → 本地只读
+`/api/v1/openclaw/*` 控制/监控 API → 本地 5-Agent + GovernanceHub +
+PostgreSQL → Rust `openclaw_engine`。Python GUI 与本地 Agent 不持有 Bybit
+key、不直接下单、不直接改 live TOML；所有交易影响动作仍通过 Operator
+approval、Decision Lease 和 Rust execution authority。
 
-设计与计划：
+以下 2026-05-06 文件仅保留为历史设计记录，不定义当前可部署 Gateway：
 
 - `docs/architecture/2026-05-06--openclaw_control_plane_repositioning.md`
 - `docs/execution_plan/2026-05-06--openclaw_gateway_development_plan.md`
 - `docs/execution_plan/2026-05-06--gui_openclaw_control_console_plan.md`
 
-旧的「OpenClaw Gateway → Scout + MessageBus → PipelineBridge」只保留为历史/legacy advisory trace，不得作为后续 Agent Decision Spine 的权威路径。
+旧 Gateway relay 与「Scout + MessageBus → PipelineBridge」只保留为
+historical/legacy advisory trace，不得作为部署说明或后续 Agent Decision
+Spine 的权威路径。
 
-外部工具策略以 `CLAUDE.md` External Tools + `docs/agents/issue-tracker.md` 為準（**GitHub Issues active**；Linear historical/passive；Notion frozen；Slack/Coupler/MotherDuck declined）。OpenClaw channel / Telegram / WebChat 只作为 operator 通信入口，不等同于开放 Slack/Coupler/MotherDuck 等工作流集成。
+外部工具策略以 `CLAUDE.md` External Tools + `docs/agents/issue-tracker.md`
+為準（**GitHub Issues active**；Linear historical/passive；Notion frozen；
+Slack/Coupler/MotherDuck declined）。Telegram 等独立通知通道不属于已退役
+Gateway，也不等同于开放其他工作流集成。
 
 ---
 
@@ -218,14 +230,12 @@ README 只保留入口级摘要；完整硬边界以 `CLAUDE.md` §四为准。
 ```bash
 # API 服务器（Linux: systemd，开机自启；macOS: launchd 可迁移）
 systemctl --user status openclaw-trading-api    # 端口 8000
-systemctl --user status openclaw-gateway        # OpenClaw + Tailscale HTTPS
 systemctl --user status openclaw-watchdog       # 引擎存活监控 + 自动重启
-
-# Grafana
-cd docker_projects/monitoring_services && docker compose up -d   # 端口 3000
 
 # Paper runtime is Archive/diagnostic only; do not start it for canary evidence.
 ```
+
+外部 Gateway 与 Grafana stack 已于 2026-07-16 移除，不存在对应启动命令。
 
 ### Mac dev-only 模式（开发环境，不参与交易）
 

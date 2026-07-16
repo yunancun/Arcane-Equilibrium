@@ -40,21 +40,15 @@ def test_dapi_007_scheduled_restart_route_is_disabled() -> None:
 
 
 def test_multi_worker_leader_locks_are_present() -> None:
-    """Evolution/reconciler/grafana background jobs must enforce single leader worker."""
+    """Evolution and reconciler background jobs must enforce single leader worker."""
     evo = _read(
         "program_code/exchange_connectors/bybit_connector/control_api_v1/app/evolution_auto_scheduler.py"
     )
     reconciler = _read(
         "program_code/exchange_connectors/bybit_connector/control_api_v1/app/paper_trading_wiring.py"
     )
-    grafana = _read(
-        "program_code/exchange_connectors/bybit_connector/control_api_v1/app/grafana_data_writer.py"
-    )
     main = _read(
         "program_code/exchange_connectors/bybit_connector/control_api_v1/app/main.py"
-    )
-    wiring = _read(
-        "program_code/exchange_connectors/bybit_connector/control_api_v1/app/strategy_wiring.py"
     )
 
     assert "fcntl.flock" in evo
@@ -65,12 +59,7 @@ def test_multi_worker_leader_locks_are_present() -> None:
     assert "_acquire_reconciler_alert_lock" in reconciler
     assert "reconciler_alert_monitor.leader.lock" in reconciler
 
-    assert "grafana_writer.leader.lock" in grafana
-    assert "def start(self) -> bool" in grafana
-    assert "if not _acquire_leader_lock():" in grafana
-
     assert "EvolutionScheduler skipped (non-leader worker)" in main
-    assert "Grafana data writer skipped (non-leader worker)" in wiring
 
 
 def test_sw_004_experiment_expiry_is_persisted() -> None:

@@ -340,8 +340,6 @@ app.add_middleware(CSRFMiddleware)
 #     'unsafe-inline' needed for script/style because GUI HTML uses inline <script>/<style>
 #   - https://unpkg.com 用于 trading.html 的 TradingView 图表库
 #     https://unpkg.com needed for TradingView charting library in trading.html
-#   - http://trade-core:3000 用于 tab-monitoring.html 的 Grafana iframe
-#     http://trade-core:3000 needed for Grafana iframe in tab-monitoring.html
 #   - data: 用于 img-src（内联图片，如 base64 编码的图标）
 #     data: for img-src (inline images such as base64-encoded icons)
 @app.middleware("http")
@@ -365,7 +363,7 @@ async def security_headers_middleware(request: Request, call_next):
         "style-src 'self' 'unsafe-inline'; "
         "img-src 'self' data:; "
         "connect-src 'self'; "
-        "frame-src 'self' http://trade-core:3000; "
+        "frame-src 'self'; "
         "frame-ancestors 'self'"
     )
     # Keep Report-Only aligned with the current legacy GUI allowance. The app
@@ -378,7 +376,7 @@ async def security_headers_middleware(request: Request, call_next):
         "style-src 'self' 'unsafe-inline'; "
         "img-src 'self' data:; "
         "connect-src 'self'; "
-        "frame-src 'self' http://trade-core:3000; "
+        "frame-src 'self'; "
         "frame-ancestors 'self'; "
         "report-uri /api/v1/csp/report"
     )

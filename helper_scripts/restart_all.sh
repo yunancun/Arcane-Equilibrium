@@ -888,14 +888,6 @@ restart_api() {
     cd - > /dev/null
 }
 
-ensure_docker_network() {
-    # Ensure Grafana can reach PG (different Docker networks by default)
-    # 確保 Grafana 能訪問 PG（默認在不同 Docker 網絡）
-    if docker inspect trading_postgres >/dev/null 2>&1 && docker inspect trading_grafana >/dev/null 2>&1; then
-        docker network connect basic_system_services_default trading_postgres 2>/dev/null || true
-    fi
-}
-
 report_build_deploy_drift() {
     # ── OPS 部署漂移偵測（Item 11；DETECTION-ONLY，永不自動 rebuild/restart） ──
     # 為什麼：2026-07-03 冷審計 P0-1「重啟未 rebuild / 半部署」盲區——checkout 的
@@ -972,7 +964,6 @@ PY
 }
 
 wait_and_verify() {
-    ensure_docker_network
     echo ">>> Waiting 10s for startup..."
     sleep 10
     echo "=== Engine ==="
