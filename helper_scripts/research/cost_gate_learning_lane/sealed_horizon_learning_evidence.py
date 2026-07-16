@@ -34,14 +34,17 @@ for _path in (str(RESEARCH_ROOT), str(ROOT)):
         sys.path.insert(0, _path)
 
 from cost_gate_learning_lane.outcome_refresh import (  # noqa: E402
+    MAX_OUTCOME_REFRESH_BATCH_LIMIT,
     OutcomeRefreshSelection,
     append_refresh_outcomes_to_ledger,
     build_cost_gate_outcome_refresh_batch,
     build_price_rows_from_pg_for_refresh,
+    read_outcome_refresh_ledger_projection,
 )
 from cost_gate_learning_lane.outcome_review import (  # noqa: E402
     BlockedOutcomeReviewConfig,
     build_blocked_signal_outcome_review,
+    read_candidate_board_ledger_projection,
 )
 from cost_gate_learning_lane.outcome_writer import ProbeOutcomeConfig  # noqa: E402
 from cost_gate_learning_lane.price_observations import (  # noqa: E402
@@ -53,10 +56,10 @@ from cost_gate_learning_lane.reject_materializer import (  # noqa: E402
     append_materialized_records_to_ledger,
     build_materialized_reject_ledger_batch,
     connect_readonly_reject_materializer_pg,
+    read_reject_materializer_ledger_projection,
 )
 from cost_gate_learning_lane.runtime_adapter import (  # noqa: E402
     RuntimeAdmissionConfig,
-    read_learning_ledger_partitions,
 )
 
 
@@ -136,16 +139,19 @@ def _read_json_or_jsonl_rows(path: Path) -> list[dict[str, Any]]:
         raise FileNotFoundError(path)
     if path.suffix == ".jsonl":
         rows: list[dict[str, Any]] = []
-        for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-            stripped = line.strip()
-            if not stripped:
-                continue
-            try:
-                payload = json.loads(stripped)
-            except json.JSONDecodeError as exc:
-                raise ValueError(f"malformed JSONL row at {path}:{line_no}") from exc
-            if isinstance(payload, dict):
-                rows.append(payload)
+        with path.open("r", encoding="utf-8") as handle:
+            for line_no, line in enumerate(handle, start=1):
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                try:
+                    payload = json.loads(stripped)
+                except json.JSONDecodeError as exc:
+                    raise ValueError(
+                        f"malformed JSONL row at {path}:{line_no}"
+                    ) from exc
+                if isinstance(payload, dict):
+                    rows.append(payload)
         return rows
     payload = json.loads(path.read_text(encoding="utf-8"))
     if isinstance(payload, list):
@@ -168,13 +174,17 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
 
 def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        "".join(
-            json.dumps(row, ensure_ascii=False, sort_keys=True, default=str) + "\n"
-            for row in rows
-        ),
-        encoding="utf-8",
-    )
+    with path.open("w", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(
+                json.dumps(
+                    row,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    default=str,
+                )
+                + "\n"
+            )
 
 
 def _sha256_file(path: Path | None) -> str | None:
@@ -632,7 +642,7 @@ def build_sealed_horizon_learning_evidence_from_rows(
     append_ledger: bool = False,
     now_utc: dt.datetime | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
-    """Build the full evidence chain from in-memory rows."""
+    """Build the full evidence chain from bounded retained-ledger projections."""
     cfg = cfg or SealedHorizonLearningEvidenceConfig()
     validate_sealed_horizon_evidence_config(cfg)
     now = (now_utc or _utc_now()).astimezone(dt.timezone.utc)
@@ -641,8 +651,11 @@ def build_sealed_horizon_learning_evidence_from_rows(
         side_cell_key,
         default_horizon_minutes=cfg.default_horizon_minutes,
     )
-    partitions = read_learning_ledger_partitions(ledger_path)
-    existing_rows = partitions.outcome_rows
+    materializer_projection = read_reject_materializer_ledger_projection(
+        ledger_path,
+        plan=plan,
+        feature_rows=feature_rows,
+    )
     admission_cfg = RuntimeAdmissionConfig(
         max_plan_age_hours=cfg.max_plan_age_hours,
         min_failed_outcomes_to_disable=cfg.min_failed_outcomes_to_disable,
@@ -652,8 +665,9 @@ def build_sealed_horizon_learning_evidence_from_rows(
     materializer_batch = build_materialized_reject_ledger_batch(
         plan,
         feature_rows,
-        existing_ledger_rows=existing_rows,
-        dedup_ledger_rows=partitions.dedup_rows,
+        existing_ledger_rows=materializer_projection.runtime_rows,
+        existing_attempt_ids=materializer_projection.existing_attempt_ids,
+        existing_event_keys=materializer_projection.existing_event_keys,
         admission_cfg=admission_cfg,
         now_utc=now,
     )
@@ -662,13 +676,23 @@ def build_sealed_horizon_learning_evidence_from_rows(
     materialized_rows = [
         row for row in materializer_batch.get("records", []) if isinstance(row, dict)
     ]
-    ledger_for_outcomes = existing_rows + materialized_rows
     selection = OutcomeRefreshSelection(record_blocked_outcomes=True)
     outcome_cfg = ProbeOutcomeConfig(
         horizon_minutes=cfg.default_horizon_minutes,
         cost_bps=cfg.outcome_cost_bps,
         max_entry_delay_ms=cfg.max_entry_delay_ms,
     )
+    outcome_projection = read_outcome_refresh_ledger_projection(
+        ledger_path,
+        selection=selection,
+        now_utc=now,
+        outcome_cfg=outcome_cfg,
+        batch_limit=min(cfg.limit, MAX_OUTCOME_REFRESH_BATCH_LIMIT),
+        side_cell_keys={side_cell_key},
+    )
+    ledger_for_outcomes = list(outcome_projection.rows)
+    if not append_ledger:
+        ledger_for_outcomes.extend(materialized_rows)
     outcome_batch = build_cost_gate_outcome_refresh_batch(
         ledger_for_outcomes,
         price_rows,
@@ -677,8 +701,13 @@ def build_sealed_horizon_learning_evidence_from_rows(
         outcome_cfg=outcome_cfg,
         price_source="local_price_rows",
     )
+    appended_outcome_count = 0
     if append_ledger:
-        append_refresh_outcomes_to_ledger(ledger_path, outcome_batch)
+        appended_outcome_count = append_refresh_outcomes_to_ledger(
+            ledger_path,
+            outcome_batch,
+            projection=outcome_projection,
+        )
     outcome_rows = [
         row for row in outcome_batch.get("outcomes", []) if isinstance(row, dict)
     ]
@@ -692,11 +721,20 @@ def build_sealed_horizon_learning_evidence_from_rows(
         min_avg_net_bps=cfg.min_review_avg_net_bps,
         min_net_positive_pct=cfg.min_review_net_positive_pct,
     )
-    review = build_blocked_signal_outcome_review(
-        ledger_for_outcomes + outcome_rows,
-        now_utc=now,
-        cfg=review_cfg,
-    )
+    additional_review_rows = outcome_rows[appended_outcome_count:]
+    with read_candidate_board_ledger_projection(
+        ledger_path,
+        additional_rows=additional_review_rows,
+    ) as review_projection:
+        review = build_blocked_signal_outcome_review(
+            review_projection.rows,
+            now_utc=now,
+            cfg=review_cfg,
+            source_ledger_row_count=(
+                review_projection.source_ledger_row_count
+                + len(additional_review_rows)
+            ),
+        )
     packet = build_sealed_horizon_learning_evidence_packet(
         plan=plan,
         candidate=candidate,
@@ -765,8 +803,12 @@ def _run_from_args(args: argparse.Namespace) -> dict[str, Any]:
     if args.source_rows_output:
         _write_jsonl(args.source_rows_output, feature_rows)
 
-    partitions = read_learning_ledger_partitions(args.ledger)
-    existing_rows = partitions.outcome_rows
+    fixed_now = _utc_now()
+    materializer_projection = read_reject_materializer_ledger_projection(
+        args.ledger,
+        plan=plan,
+        feature_rows=feature_rows,
+    )
     admission_cfg = RuntimeAdmissionConfig(
         max_plan_age_hours=cfg.max_plan_age_hours,
         min_failed_outcomes_to_disable=cfg.min_failed_outcomes_to_disable,
@@ -776,22 +818,34 @@ def _run_from_args(args: argparse.Namespace) -> dict[str, Any]:
     materializer_batch = build_materialized_reject_ledger_batch(
         plan,
         feature_rows,
-        existing_ledger_rows=existing_rows,
-        dedup_ledger_rows=partitions.dedup_rows,
+        existing_ledger_rows=materializer_projection.runtime_rows,
+        existing_attempt_ids=materializer_projection.existing_attempt_ids,
+        existing_event_keys=materializer_projection.existing_event_keys,
         admission_cfg=admission_cfg,
+        now_utc=fixed_now,
     )
     if args.append_ledger:
         append_materialized_records_to_ledger(args.ledger, materializer_batch)
     materialized_rows = [
         row for row in materializer_batch.get("records", []) if isinstance(row, dict)
     ]
-    ledger_for_outcomes = existing_rows + materialized_rows
     selection = OutcomeRefreshSelection(record_blocked_outcomes=True)
     outcome_cfg = ProbeOutcomeConfig(
         horizon_minutes=cfg.default_horizon_minutes,
         cost_bps=cfg.outcome_cost_bps,
         max_entry_delay_ms=cfg.max_entry_delay_ms,
     )
+    outcome_projection = read_outcome_refresh_ledger_projection(
+        args.ledger,
+        selection=selection,
+        now_utc=fixed_now,
+        outcome_cfg=outcome_cfg,
+        batch_limit=min(cfg.limit, MAX_OUTCOME_REFRESH_BATCH_LIMIT),
+        side_cell_keys={_str(candidate.get("side_cell_key"))},
+    )
+    ledger_for_outcomes = list(outcome_projection.rows)
+    if not args.append_ledger:
+        ledger_for_outcomes.extend(materialized_rows)
     if args.price_source_pg:
         price_rows = build_price_rows_from_pg_for_refresh(
             ledger_for_outcomes,
@@ -810,14 +864,20 @@ def _run_from_args(args: argparse.Namespace) -> dict[str, Any]:
     outcome_batch = build_cost_gate_outcome_refresh_batch(
         ledger_for_outcomes,
         price_rows,
+        now_utc=fixed_now,
         selection=selection,
         outcome_cfg=outcome_cfg,
         price_source=price_source,
     )
     if args.price_source_pg:
         outcome_batch["pg_timeframe"] = cfg.pg_timeframe
+    appended_outcome_count = 0
     if args.append_ledger:
-        append_refresh_outcomes_to_ledger(args.ledger, outcome_batch)
+        appended_outcome_count = append_refresh_outcomes_to_ledger(
+            args.ledger,
+            outcome_batch,
+            projection=outcome_projection,
+        )
     outcome_rows = [
         row for row in outcome_batch.get("outcomes", []) if isinstance(row, dict)
     ]
@@ -831,10 +891,20 @@ def _run_from_args(args: argparse.Namespace) -> dict[str, Any]:
         min_avg_net_bps=cfg.min_review_avg_net_bps,
         min_net_positive_pct=cfg.min_review_net_positive_pct,
     )
-    review = build_blocked_signal_outcome_review(
-        ledger_for_outcomes + outcome_rows,
-        cfg=review_cfg,
-    )
+    additional_review_rows = outcome_rows[appended_outcome_count:]
+    with read_candidate_board_ledger_projection(
+        args.ledger,
+        additional_rows=additional_review_rows,
+    ) as review_projection:
+        review = build_blocked_signal_outcome_review(
+            review_projection.rows,
+            now_utc=fixed_now,
+            cfg=review_cfg,
+            source_ledger_row_count=(
+                review_projection.source_ledger_row_count
+                + len(additional_review_rows)
+            ),
+        )
     if args.review_output:
         _write_json(args.review_output, review)
     packet = build_sealed_horizon_learning_evidence_packet(

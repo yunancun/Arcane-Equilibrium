@@ -28,6 +28,7 @@ docs/research/2026-07-10--counterfactual_rerun_preregistration.md):
 from __future__ import annotations
 
 import argparse
+from collections.abc import Iterable, Mapping
 import copy
 import datetime as dt
 import hashlib
@@ -124,12 +125,15 @@ _SLIPPAGE_BOUNDARY = (
 
 def read_candidate_board_ledger_projection(
     ledger_path: Path,
+    *,
+    additional_rows: Iterable[Mapping[str, Any]] = (),
 ) -> CandidateBoardLedgerProjection:
     """Compatibility facade whose mutable caps remain monkeypatchable."""
     return _read_candidate_board_ledger_projection(
         ledger_path,
         max_qualified_cohort_rows=MAX_STREAMED_CANDIDATE_EVIDENCE_ROWS,
         max_qualified_cohort_bytes=MAX_STREAMED_CANDIDATE_EVIDENCE_BYTES,
+        additional_rows=additional_rows,
     )
 
 
