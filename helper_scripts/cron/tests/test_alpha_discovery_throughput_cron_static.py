@@ -12,6 +12,60 @@ import pytest
 
 CRON_DIR = Path(__file__).resolve().parents[1]
 WRAPPER = CRON_DIR / "alpha_discovery_throughput_cron.sh"
+GUARD = CRON_DIR / "lib" / "research_workload_guard.sh"
+GUARD_FS = CRON_DIR / "lib" / "research_workload_guard_fs.py"
+
+
+def _install_guard_and_fake_lock_identity(
+    base: Path, tmp_path: Path, env: dict[str, str]
+) -> dict[str, str]:
+    guard_dest = base / "helper_scripts" / "cron" / "lib" / GUARD.name
+    guard_dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(GUARD, guard_dest)
+    shutil.copy2(GUARD_FS, guard_dest.with_name(GUARD_FS.name))
+    fake_bin = tmp_path / "guard-bin"
+    fake_bin.mkdir(exist_ok=True)
+    (fake_bin / "flock").write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    (fake_bin / "git").write_text(
+        "#!/usr/bin/env bash\nprintf '%s\\n' 0123456789abcdef0123456789abcdef01234567\n",
+        encoding="utf-8",
+    )
+    (fake_bin / "systemctl").write_text(
+        """#!/usr/bin/env bash
+args="$*"
+case "$args" in
+  *"ControlGroup"*)
+    unit=""
+    for arg in "$@"; do [[ "$arg" == *.scope ]] && unit="$arg"; done
+    [[ -n "$unit" ]] || exit 1
+    printf '/app.slice/%s\n' "$unit"
+    ;;
+  *"is-active"*) exit 3 ;;
+  *" kill "*) exit 0 ;;
+  *"MemoryMax"*) printf 'infinity\n' ;;
+  *"MemorySwapMax"*) printf 'infinity\n' ;;
+  *"TasksMax"*) printf 'infinity\n' ;;
+  *" Slice "*) printf 'app.slice\n' ;;
+  *) exit 1 ;;
+esac
+""",
+        encoding="utf-8",
+    )
+    (fake_bin / "systemd-run").write_text(
+        "#!/usr/bin/env bash\n"
+        "while (( $# )); do [[ \"$1\" == \"--\" ]] && { shift; break; }; shift; done\n"
+        "exec \"$@\"\n",
+        encoding="utf-8",
+    )
+    (fake_bin / "grep").write_text(
+        "#!/usr/bin/env bash\n"
+        "[[ \"$*\" == *\"/proc/self/cgroup\"* ]] && exit 0\n"
+        "exec /usr/bin/grep \"$@\"\n",
+        encoding="utf-8",
+    )
+    for name in ("flock", "git", "systemctl", "systemd-run", "grep"):
+        (fake_bin / name).chmod(0o755)
+    return {**env, "PATH": f"{fake_bin}:{env['PATH']}"}
 
 
 def _src() -> str:
@@ -45,6 +99,17 @@ def test_bash_syntax_ok() -> None:
         pytest.skip("bash not available")
     proc = subprocess.run(["bash", "-n", str(WRAPPER)], capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr
+
+
+def test_wrapper_uses_guard_for_lock_and_high_memory_runner() -> None:
+    src = _src()
+    assert 'source "$BASE/helper_scripts/cron/lib/research_workload_guard.sh"' in src
+    assert "research_guard_acquire --lane alpha" in src
+    assert "research_guard_run_stage" in src
+    assert "--memory-max-bytes 12884901888" in src
+    assert "research_guard_complete" in src
+    assert 'find "$LOCK_DIR"' not in src
+    assert 'rmdir "$LOCK_DIR"' not in src
 
 
 def test_wrapper_refreshes_activation_packet_before_alpha_runner() -> None:
@@ -283,6 +348,7 @@ def test_wrapper_skips_bounded_chain_execution_on_selected_side_cell_mismatch(
             "FAKE_PY_ARGS_LOG": str(args_log),
         }
     )
+    env = _install_guard_and_fake_lock_identity(base, tmp_path, env)
     proc = subprocess.run(["bash", str(WRAPPER)], env=env, capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr
 
@@ -333,8 +399,8 @@ def test_mm_motif_amplification_refresh_uses_canonical_history_artifact() -> Non
         '--fillsim-history-json "$DATA/research/fillsim/fillsim_history_scorecard.json"'
         in block
     )
-    assert '--json-output "$MM_MOTIF_AMPLIFICATION_JSON"' in block
-    assert '--output "$MM_MOTIF_AMPLIFICATION_MD"' in block
+    assert '--json-output "$MM_MOTIF_AMPLIFICATION_JSON_STAGE"' in block
+    assert '--output "$MM_MOTIF_AMPLIFICATION_MD_STAGE"' in block
     assert redirection == (
         ') > "$MM_MOTIF_AMPLIFICATION_STDOUT" 2>> "$LOG" || '
         "mm_motif_amplification_rc=$?"
@@ -347,7 +413,7 @@ def test_mm_motif_amplification_refresh_uses_canonical_history_artifact() -> Non
 
 def test_runtime_runner_receives_expected_head_from_cron_contract() -> None:
     src = _src()
-    runtime_start = src.index('"$PYBIN" -m alpha_discovery_throughput.runtime_runner')
+    runtime_start = src.index("ALPHA_RUNTIME_ARGS=(")
     expected_head_start = src.index("EXPECTED_SOURCE_HEAD=")
     assert expected_head_start < runtime_start
     assert (
@@ -357,7 +423,7 @@ def test_runtime_runner_receives_expected_head_from_cron_contract() -> None:
         in src
     )
     assert '--expected-head "$EXPECTED_SOURCE_HEAD"' in src
-    assert src.index('--expected-head "$EXPECTED_SOURCE_HEAD"') > runtime_start
+    assert src.index('ALPHA_RUNTIME_ARGS+=(--expected-head "$EXPECTED_SOURCE_HEAD")') > runtime_start
 
 
 def test_runtime_runner_expected_head_wrapper_executes_with_empty_and_demo_env(
@@ -378,7 +444,17 @@ def test_runtime_runner_expected_head_wrapper_executes_with_empty_and_demo_env(
     args_log = tmp_path / "fake_python_args.log"
     fake_python.write_text(
         "#!/usr/bin/env bash\n"
-        "printf '%s\\n' \"$*\" >> \"$FAKE_PY_ARGS_LOG\"\n",
+        "printf '%s\\n' \"$*\" >> \"$FAKE_PY_ARGS_LOG\"\n"
+        "while (( $# )); do\n"
+        "  case \"$1\" in\n"
+        "    --json-output|--output)\n"
+        "      mkdir -p \"$(dirname \"$2\")\"\n"
+        "      printf '{}\\n' > \"$2\"\n"
+        "      shift 2\n"
+        "      ;;\n"
+        "    *) shift ;;\n"
+        "  esac\n"
+        "done\n",
         encoding="utf-8",
     )
     fake_python.chmod(0o755)
@@ -395,6 +471,7 @@ def test_runtime_runner_expected_head_wrapper_executes_with_empty_and_demo_env(
                 "OPENCLAW_ALPHA_REFRESH_BOUNDED_PROBE_REVIEW_CHAIN": "0",
             }
         )
+        env = _install_guard_and_fake_lock_identity(base, tmp_path, env)
         for name in (
             "OPENCLAW_EXPECTED_SOURCE_HEAD",
             "OPENCLAW_COST_GATE_LEARNING_EXPECTED_HEAD",

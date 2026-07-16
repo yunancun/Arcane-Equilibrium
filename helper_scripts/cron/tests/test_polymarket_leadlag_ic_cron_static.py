@@ -25,6 +25,29 @@ def test_bash_syntax_ok(script):
     assert proc.returncode == 0, proc.stderr
 
 
+def test_wrapper_uses_guard_and_publishes_latest_after_history() -> None:
+    src = _src(WRAPPER)
+    assert 'source "$BASE/helper_scripts/cron/lib/research_workload_guard.sh"' in src
+    assert "research_guard_acquire --lane polymarket" in src
+    assert "research_guard_run_stage" in src
+    assert src.count("research_guard_run_stage") >= 2
+    assert "--memory-max-bytes 6442450944" in src
+    assert "research_guard_complete" in src
+    assert "--write-latest" not in src
+    assert 'research_guard_publish_latest "$OUT" "$LATEST"' in src
+    assert src.index("-m polymarket_leadlag.harness") < src.index(
+        "-m polymarket_leadlag.replay_history"
+    )
+    assert src.index("-m polymarket_leadlag.replay_history") < src.index(
+        "research_guard_complete"
+    )
+    assert src.index("research_guard_complete") < src.index(
+        'research_guard_publish_latest "$OUT" "$LATEST"'
+    )
+    assert 'find "$LOCK_DIR"' not in src
+    assert 'rmdir "$LOCK_DIR"' not in src
+
+
 @pytest.mark.parametrize("script", [WRAPPER, INSTALLER], ids=["wrapper", "installer"])
 def test_scripts_executable_and_strict_mode(script):
     assert script.stat().st_mode & 0o111, f"{script.name} not executable"
@@ -82,7 +105,7 @@ def test_wrapper_invokes_harness_with_fail_closed_defaults():
     assert "-m polymarket_leadlag.harness" in src
     assert "--query-set" in src
     assert "--mode" in src
-    assert "--write-latest" in src
+    assert "--write-latest" not in src
     assert "--price-timeframe" in src
 
 
