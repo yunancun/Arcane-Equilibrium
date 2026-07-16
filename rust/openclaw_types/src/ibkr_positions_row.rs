@@ -189,8 +189,8 @@ impl IbkrPositionsRowV1 {
 }
 
 /// 規範化 symbol 檢查（沿 paper-order 契約同款規則:非空、≤24、無前後空白、
-/// 僅大寫字母/數字/`.`/`-`）。
-fn is_normalized_symbol(symbol: &str) -> bool {
+/// 僅大寫字母/數字/`.`/`-`;W5-S1 row 家族共用,executions-row 亦消費）。
+pub fn is_normalized_symbol(symbol: &str) -> bool {
     let trimmed = symbol.trim();
     !trimmed.is_empty()
         && trimmed.len() <= 24

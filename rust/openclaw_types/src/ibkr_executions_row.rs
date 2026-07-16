@@ -16,10 +16,16 @@
 //! **時間欄保真**：`exec_time` 承 wire 原字串（非空);其格式/時區慣例不在本契約 pin
 //! （UNVERIFIED 不升格為斷言）,解析歸 W5-S3 消化層帶現勘出典落地。數量/價格一律定點
 //! 字串,禁 f64。
+//!
+//! **instrument identity 束**：execDetails wire 回報同時攜帶 Contract 物件——本契約
+//! 承其 con_id/symbol/sec_type/currency 四欄,沿 positions-row 同款 STK-only secType
+//! 白名單與 symbol 規範化（margin/options/cfd 的型別層投影拒;E2 F2 補齊）。
 
 use serde::{Deserialize, Serialize};
 
 use crate::ibkr_account_summary_row::is_positive_decimal_string;
+use crate::ibkr_positions_row::{is_normalized_symbol, IbkrSecTypeV1};
+use crate::stock_etf_instrument_identity::StockEtfCurrency;
 use crate::stock_etf_lane::{AssetLane, Broker};
 
 /// 契約 id（消化層 / cross-surface parity 對齊）。
@@ -78,6 +84,15 @@ pub struct IbkrExecutionsRowV1 {
     pub account_id: String,
     /// 成交唯一鍵（非空;與 commissions-row 的關聯鍵）。
     pub exec_id: String,
+    // ---- instrument identity 束（execDetails wire 的 Contract 物件投影）----
+    /// IBKR contract id（con_id;正整數）。
+    pub con_id: i64,
+    /// 標的代碼（非空;規範化規則同 positions-row）。
+    pub symbol: String,
+    /// secType 白名單（STK-only,同 positions-row;`UnknownDenied` 即 blocker）。
+    pub sec_type: IbkrSecTypeV1,
+    /// 幣別（lane 白名單=USD）。
+    pub currency: StockEtfCurrency,
     /// client 側訂單 id（wire 原值承載;取值域不變量由 W5-S3 現勘後 pin,見模組註解）。
     pub order_id: i64,
     /// 跨 session 穩定訂單 id（wire 原值承載;同上不鑄 UNVERIFIED 不變量）。
@@ -109,6 +124,10 @@ impl Default for IbkrExecutionsRowV1 {
             broker: Broker::Bybit,
             account_id: String::new(),
             exec_id: String::new(),
+            con_id: 0,
+            symbol: String::new(),
+            sec_type: IbkrSecTypeV1::UnknownDenied,
+            currency: StockEtfCurrency::UnknownDenied,
             order_id: 0,
             perm_id: 0,
             exec_time: String::new(),
@@ -133,6 +152,10 @@ impl IbkrExecutionsRowV1 {
             broker: Broker::Ibkr,
             account_id: "DU0000001".to_string(),
             exec_id: "0000e0d5.0001.01".to_string(),
+            con_id: 756733,
+            symbol: "SPY".to_string(),
+            sec_type: IbkrSecTypeV1::Stk,
+            currency: StockEtfCurrency::Usd,
             order_id: 7,
             perm_id: 1_000_001,
             exec_time: "fixture_exec_time".to_string(),
@@ -166,6 +189,19 @@ impl IbkrExecutionsRowV1 {
         }
         if self.exec_id.trim().is_empty() {
             blockers.push(B::ExecIdMissing);
+        }
+        // instrument identity 束（沿 positions-row 同款 fail-closed 白名單）。
+        if self.con_id <= 0 {
+            blockers.push(B::ConIdInvalid);
+        }
+        if !is_normalized_symbol(&self.symbol) {
+            blockers.push(B::SymbolInvalid);
+        }
+        if self.sec_type == IbkrSecTypeV1::UnknownDenied {
+            blockers.push(B::SecTypeUnknownDenied);
+        }
+        if self.currency != StockEtfCurrency::Usd {
+            blockers.push(B::CurrencyDenied);
         }
         if self.exec_time.trim().is_empty() {
             blockers.push(B::ExecTimeMissing);
@@ -219,6 +255,10 @@ pub enum IbkrExecutionsRowBlocker {
     WrongBroker,
     AccountIdMissing,
     ExecIdMissing,
+    ConIdInvalid,
+    SymbolInvalid,
+    SecTypeUnknownDenied,
+    CurrencyDenied,
     ExecTimeMissing,
     SideUnknownDenied,
     SharesDecimalInvalid,

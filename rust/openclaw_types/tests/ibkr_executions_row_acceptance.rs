@@ -5,7 +5,7 @@
 
 use openclaw_types::{
     AssetLane, Broker, IbkrExecutionSideV1, IbkrExecutionsRowBlocker, IbkrExecutionsRowV1,
-    IBKR_EXECUTIONS_ROW_CONTRACT_ID,
+    IbkrSecTypeV1, StockEtfCurrency, IBKR_EXECUTIONS_ROW_CONTRACT_ID,
 };
 
 #[test]
@@ -21,6 +21,10 @@ fn default_row_is_fail_closed() {
         B::WrongBroker,
         B::AccountIdMissing,
         B::ExecIdMissing,
+        B::ConIdInvalid,
+        B::SymbolInvalid,
+        B::SecTypeUnknownDenied,
+        B::CurrencyDenied,
         B::ExecTimeMissing,
         B::SideUnknownDenied,
         B::SharesDecimalInvalid,
@@ -48,8 +52,47 @@ fn accepted_fixture_validates() {
     assert_eq!(row.asset_lane, AssetLane::StockEtfCash);
     assert_eq!(row.broker, Broker::Ibkr);
     assert_eq!(row.side, IbkrExecutionSideV1::Bought);
+    // instrument identity 束(F2):同 positions-row 白名單姿態。
+    assert!(row.con_id > 0);
+    assert_eq!(row.sec_type, IbkrSecTypeV1::Stk);
+    assert_eq!(row.currency, StockEtfCurrency::Usd);
     assert!(!row.order_routed);
     assert!(!row.secret_content_serialized);
+}
+
+#[test]
+fn instrument_identity_bundle_is_fail_closed() {
+    use IbkrExecutionsRowBlocker as B;
+
+    // 表外 secType(margin/options/cfd 家族的型別層投影)→ 拒。
+    let unknown_sec = IbkrExecutionsRowV1 {
+        sec_type: IbkrSecTypeV1::classify_wire_sec_type("OPT"),
+        ..IbkrExecutionsRowV1::accepted_fixture()
+    };
+    let verdict = unknown_sec.validate();
+    assert!(!verdict.accepted);
+    assert_eq!(verdict.blockers, vec![B::SecTypeUnknownDenied]);
+
+    // con_id/symbol/currency 逐欄拒。
+    let broken = IbkrExecutionsRowV1 {
+        con_id: 0,
+        symbol: "spy lower".to_string(),
+        currency: StockEtfCurrency::UnknownDenied,
+        ..IbkrExecutionsRowV1::accepted_fixture()
+    };
+    let verdict = broken.validate();
+    assert!(!verdict.accepted);
+    for expected in [B::ConIdInvalid, B::SymbolInvalid, B::CurrencyDenied] {
+        assert!(verdict.blockers.contains(&expected), "缺 {expected:?}");
+    }
+
+    // 白名單 secType round-trip:wire "STK" → Stk → wire "STK"(F4 反向)。
+    let stk = IbkrSecTypeV1::classify_wire_sec_type("STK");
+    assert_eq!(stk, IbkrSecTypeV1::Stk);
+    assert_eq!(
+        IbkrSecTypeV1::classify_wire_sec_type(stk.as_wire_sec_type().unwrap()),
+        stk
+    );
 }
 
 #[test]
@@ -78,6 +121,11 @@ fn wire_side_whitelist_round_trips_and_unknown_is_denied() {
         IbkrExecutionSideV1::default(),
         IbkrExecutionSideV1::UnknownDenied
     );
+    // F4 反向斷言:每個非 UnknownDenied 變體 classify(as_wire) 恆等回自身。
+    for side in [IbkrExecutionSideV1::Bought, IbkrExecutionSideV1::Sold] {
+        let wire = side.as_wire_side().expect("非 Unknown 變體必有 wire 對應");
+        assert_eq!(IbkrExecutionSideV1::classify_wire_side(wire), side);
+    }
 }
 
 #[test]
@@ -191,6 +239,8 @@ fn serde_roundtrip_snake_case_stable() {
     let json = serde_json::to_value(&row).unwrap();
     assert_eq!(json["contract_id"], "ibkr_executions_row_v1");
     assert_eq!(json["side"], "bought");
+    assert_eq!(json["sec_type"], "stk");
+    assert_eq!(json["currency"], "usd");
     // 數量/價格為字串保真,非 JSON number。
     assert!(json["shares_decimal"].is_string());
     assert!(json["price_decimal"].is_string());
