@@ -14,7 +14,9 @@ LOCK_ROOT="${DATA}/locks"
 LOCK_DIR="${LOCK_ROOT}/alpha_discovery_throughput_cron.lock.d"
 HEARTBEAT_DIR="${DATA}/cron_heartbeat"
 
-mkdir -p "$LOG_DIR" "$LOCK_ROOT" "$HEARTBEAT_DIR"
+source "$BASE/helper_scripts/cron/lib/research_workload_guard.sh"
+research_guard_prepare_private_dirs \
+    "$LOG_DIR" "$LOCK_ROOT" "$HEARTBEAT_DIR" || exit 0
 
 ts() { date '+%Y-%m-%d %H:%M:%S'; }
 
@@ -33,21 +35,31 @@ else
 fi
 EXPECTED_SOURCE_HEAD="$(resolve_effective_expected_head "$BASE" "$DATA" "alpha_discovery_throughput" "$EXPECTED_SOURCE_HEAD")"
 
-if [[ -d "$LOCK_DIR" ]] && [[ -n "$(find "$LOCK_DIR" -maxdepth 0 -mmin +20 2>/dev/null)" ]]; then
-    echo "[$(ts)] WARN: stale lock (>20min) cleared: $LOCK_DIR" >> "$LOG"
-    rmdir "$LOCK_DIR" 2>/dev/null || true
-fi
-
-if ! mkdir "$LOCK_DIR" 2>/dev/null; then
-    echo "[$(ts)] SKIP: alpha discovery throughput already running (lock held)" >> "$LOG"
+ACTUAL_SOURCE_HEAD="$(git -C "$BASE" rev-parse HEAD 2>/dev/null || true)"
+if [[ ! "$ACTUAL_SOURCE_HEAD" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "[$(ts)] ERROR: alpha discovery source head is unavailable" >> "$LOG"
     exit 0
 fi
-release_lock() {
-    rmdir "$LOCK_DIR" 2>/dev/null || true
-}
-trap release_lock EXIT INT TERM
+guard_rc=0
+research_guard_acquire --lane alpha \
+    --lock-dir "$LOCK_DIR" \
+    --source-head "$ACTUAL_SOURCE_HEAD" \
+    --heartbeat-file "$HEARTBEAT_DIR/alpha_discovery_throughput.last_fire" || guard_rc=$?
+if (( guard_rc != 0 )); then
+    echo "[$(ts)] SKIP: alpha discovery throughput lock unavailable rc=${guard_rc}" >> "$LOG"
+    exit 0
+fi
+trap research_guard_release EXIT
+trap 'research_guard_abort_signal INT 130' INT
+trap 'research_guard_abort_signal TERM 143' TERM
 
-touch "$HEARTBEAT_DIR/alpha_discovery_throughput.last_fire"
+run_alpha_stage() {
+    research_guard_run_stage \
+        --lane alpha \
+        --memory-max-bytes 12884901888 \
+        --tasks-max 32 \
+        -- "$@"
+}
 
 if [[ ! -d "$BASE/helper_scripts/research/alpha_discovery_throughput" ]]; then
     echo "[$(ts)] ERROR: alpha_discovery_throughput package not found under BASE=$BASE" >> "$LOG"
@@ -69,7 +81,7 @@ PACKET_DIR="$DATA/demo_learning_stack_activation_packet"
 if [[ -f "$PACKET_SCRIPT" ]]; then
     mkdir -p "$PACKET_DIR"
     packet_rc=0
-    "$PYBIN" "$PACKET_SCRIPT" \
+    run_alpha_stage "$PYBIN" "$PACKET_SCRIPT" \
         --data-dir "$DATA" \
         --repo-root "$BASE" \
         --python-bin "$PYBIN" \
@@ -84,7 +96,7 @@ DRY_RUN_DIR="$DATA/demo_learning_stack_dry_run_review"
 if [[ -f "$DRY_RUN_SCRIPT" ]]; then
     mkdir -p "$DRY_RUN_DIR"
     dry_run_rc=0
-    "$PYBIN" "$DRY_RUN_SCRIPT" \
+    run_alpha_stage "$PYBIN" "$DRY_RUN_SCRIPT" \
         --data-dir "$DATA" \
         --repo-root "$BASE" \
         --python-bin "$PYBIN" \
@@ -97,11 +109,17 @@ fi
 PROFITABILITY_DIR="$DATA/alpha_discovery_throughput"
 PROFITABILITY_JSON="$PROFITABILITY_DIR/profitability_path_scorecard_latest.json"
 PROFITABILITY_MD="$PROFITABILITY_DIR/profitability_path_scorecard_latest.md"
+PROFITABILITY_JSON_STAGE="$PROFITABILITY_DIR/.profitability_path_scorecard_${RESEARCH_GUARD_TOKEN}.tmp.json"
+PROFITABILITY_MD_STAGE="$PROFITABILITY_DIR/.profitability_path_scorecard_${RESEARCH_GUARD_TOKEN}.tmp.md"
 MM_CURRENT_FEE_CONFIRMATION_JSON="$PROFITABILITY_DIR/mm_current_fee_confirmation_latest.json"
 MM_CURRENT_FEE_CONFIRMATION_MD="$PROFITABILITY_DIR/mm_current_fee_confirmation_latest.md"
+MM_CURRENT_FEE_CONFIRMATION_JSON_STAGE="$PROFITABILITY_DIR/.mm_current_fee_confirmation_${RESEARCH_GUARD_TOKEN}.tmp.json"
+MM_CURRENT_FEE_CONFIRMATION_MD_STAGE="$PROFITABILITY_DIR/.mm_current_fee_confirmation_${RESEARCH_GUARD_TOKEN}.tmp.md"
 MM_CURRENT_FEE_CONFIRMATION_STDOUT="$PROFITABILITY_DIR/mm_current_fee_confirmation_stdout.json"
 MM_MOTIF_AMPLIFICATION_JSON="$PROFITABILITY_DIR/mm_motif_amplification_latest.json"
 MM_MOTIF_AMPLIFICATION_MD="$PROFITABILITY_DIR/mm_motif_amplification_latest.md"
+MM_MOTIF_AMPLIFICATION_JSON_STAGE="$PROFITABILITY_DIR/.mm_motif_amplification_${RESEARCH_GUARD_TOKEN}.tmp.json"
+MM_MOTIF_AMPLIFICATION_MD_STAGE="$PROFITABILITY_DIR/.mm_motif_amplification_${RESEARCH_GUARD_TOKEN}.tmp.md"
 MM_MOTIF_AMPLIFICATION_STDOUT="$PROFITABILITY_DIR/mm_motif_amplification_stdout.json"
 mkdir -p "$PROFITABILITY_DIR"
 PROFITABILITY_ARGS=()
@@ -181,6 +199,8 @@ HORIZON_LEARNING_EVIDENCE_JSON="$(canonical_or_latest_matching_path \
 SEALED_OPERATOR_REVIEW_DIR="$DATA/cost_gate_learning_lane"
 SEALED_OPERATOR_REVIEW_JSON="$SEALED_OPERATOR_REVIEW_DIR/sealed_horizon_operator_review_latest.json"
 SEALED_OPERATOR_REVIEW_MD="$SEALED_OPERATOR_REVIEW_DIR/sealed_horizon_operator_review_latest.md"
+SEALED_OPERATOR_REVIEW_JSON_STAGE="$SEALED_OPERATOR_REVIEW_DIR/.sealed_horizon_operator_review_${RESEARCH_GUARD_TOKEN}.tmp.json"
+SEALED_OPERATOR_REVIEW_MD_STAGE="$SEALED_OPERATOR_REVIEW_DIR/.sealed_horizon_operator_review_${RESEARCH_GUARD_TOKEN}.tmp.md"
 SEALED_OPERATOR_REVIEW_STDOUT="$SEALED_OPERATOR_REVIEW_DIR/sealed_horizon_operator_review_stdout.json"
 SEALED_OPERATOR_REVIEW_MAX_ARTIFACT_AGE_HOURS="${OPENCLAW_COST_GATE_SEALED_OPERATOR_REVIEW_MAX_ARTIFACT_AGE_HOURS:-24}"
 SEALED_PREFLIGHT_SCRIPT="$BASE/helper_scripts/cron/sealed_horizon_probe_preflight_cron.sh"
@@ -254,8 +274,8 @@ if [[ -n "$HORIZON_LEARNING_EVIDENCE_JSON" && -f "$HORIZON_LEARNING_EVIDENCE_JSO
         --sealed-horizon-learning-evidence-json "$HORIZON_LEARNING_EVIDENCE_JSON"
         --decision defer
         --max-artifact-age-hours "$SEALED_OPERATOR_REVIEW_MAX_ARTIFACT_AGE_HOURS"
-        --json-output "$SEALED_OPERATOR_REVIEW_JSON"
-        --output "$SEALED_OPERATOR_REVIEW_MD"
+        --json-output "$SEALED_OPERATOR_REVIEW_JSON_STAGE"
+        --output "$SEALED_OPERATOR_REVIEW_MD_STAGE"
     )
     if [[ -f "$DATA/cost_gate_learning_lane/sealed_horizon_probe_preflight_latest.json" ]]; then
         SEALED_OPERATOR_REVIEW_ARGS+=(
@@ -264,8 +284,18 @@ if [[ -n "$HORIZON_LEARNING_EVIDENCE_JSON" && -f "$HORIZON_LEARNING_EVIDENCE_JSO
     fi
     (
         cd "$BASE/helper_scripts/research"
-        "$PYBIN" "${SEALED_OPERATOR_REVIEW_ARGS[@]}"
+        run_alpha_stage "$PYBIN" "${SEALED_OPERATOR_REVIEW_ARGS[@]}"
     ) > "$SEALED_OPERATOR_REVIEW_STDOUT" 2>> "$LOG" || sealed_operator_review_rc=$?
+    if [[ "$sealed_operator_review_rc" == "0" ]]; then
+        research_guard_publish_json_pair \
+            "$SEALED_OPERATOR_REVIEW_JSON_STAGE" "$SEALED_OPERATOR_REVIEW_JSON" \
+            "$SEALED_OPERATOR_REVIEW_MD_STAGE" "$SEALED_OPERATOR_REVIEW_MD" || sealed_operator_review_rc=$?
+        if [[ "$sealed_operator_review_rc" != "0" ]]; then
+            research_guard_incomplete "sealed_operator_review_publish_failed" "$sealed_operator_review_rc" || true
+        fi
+    else
+        rm -f "$SEALED_OPERATOR_REVIEW_JSON_STAGE" "$SEALED_OPERATOR_REVIEW_MD_STAGE"
+    fi
     echo "[$(ts)] sealed_horizon_operator_review_refresh rc=${sealed_operator_review_rc}" >> "$LOG"
 else
     echo "[$(ts)] SKIP: sealed horizon operator review refresh missing learning evidence" >> "$LOG"
@@ -273,11 +303,11 @@ fi
 sealed_preflight_rc=0
 if [[ -x "$SEALED_PREFLIGHT_SCRIPT" && -n "$HORIZON_LEARNING_EVIDENCE_JSON" && -f "$HORIZON_LEARNING_EVIDENCE_JSON" ]]; then
     (
-        cd "$BASE"
-        OPENCLAW_SEALED_HORIZON_LEARNING_EVIDENCE_JSON="$HORIZON_LEARNING_EVIDENCE_JSON" \
-        OPENCLAW_SEALED_HORIZON_OPERATOR_REVIEW_JSON="$SEALED_OPERATOR_REVIEW_JSON" \
-        OPENCLAW_SEALED_HORIZON_DECISION_PACKET_JSON="$DATA/cost_gate_learning_lane/profit_learning_decision_packet_latest.json" \
-        "$SEALED_PREFLIGHT_SCRIPT"
+            cd "$BASE"
+            OPENCLAW_SEALED_HORIZON_LEARNING_EVIDENCE_JSON="$HORIZON_LEARNING_EVIDENCE_JSON" \
+            OPENCLAW_SEALED_HORIZON_OPERATOR_REVIEW_JSON="$SEALED_OPERATOR_REVIEW_JSON" \
+            OPENCLAW_SEALED_HORIZON_DECISION_PACKET_JSON="$DATA/cost_gate_learning_lane/profit_learning_decision_packet_latest.json" \
+            run_alpha_stage "$SEALED_PREFLIGHT_SCRIPT"
     ) >> "$LOG" 2>&1 || sealed_preflight_rc=$?
     echo "[$(ts)] sealed_horizon_probe_preflight_refresh rc=${sealed_preflight_rc}" >> "$LOG"
 else
@@ -295,7 +325,7 @@ if [[ "$REFRESH_BOUNDED_REVIEW_CHAIN" == "1" ]]; then
         mkdir -p "$BOUNDED_REVIEW_CHAIN_DIR"
         (
             cd "$BASE/helper_scripts/research"
-            "$PYBIN" -m cost_gate_learning_lane.bounded_probe_touchability_preflight \
+            run_alpha_stage "$PYBIN" -m cost_gate_learning_lane.bounded_probe_touchability_preflight \
                 --preflight-json "$BOUNDED_PROBE_PREFLIGHT_JSON" \
                 --order-to-fill-gap-json "$ORDER_TOUCHABILITY_JSON" \
                 --max-artifact-age-hours "$BOUNDED_REVIEW_MAX_ARTIFACT_AGE_HOURS" \
@@ -304,7 +334,7 @@ if [[ "$REFRESH_BOUNDED_REVIEW_CHAIN" == "1" ]]; then
                 --json-output "$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT" \
                 --output "$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_MD_OUT"
         ) > "$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_STDOUT" 2>> "$LOG" || bounded_probe_touchability_preflight_rc=$?
-        if [[ -f "$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT" ]]; then
+        if [[ "$bounded_probe_touchability_preflight_rc" == "0" && -f "$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT" ]]; then
             cp "$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT" "$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_LATEST"
             if [[ -f "$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_MD_OUT" ]]; then
                 cp "$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_MD_OUT" "$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_MD_LATEST"
@@ -312,17 +342,17 @@ if [[ "$REFRESH_BOUNDED_REVIEW_CHAIN" == "1" ]]; then
         fi
         echo "[$(ts)] bounded_probe_touchability_preflight_refresh rc=${bounded_probe_touchability_preflight_rc}" >> "$LOG"
 
-        if [[ -f "$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT" ]]; then
+        if [[ "$bounded_probe_touchability_preflight_rc" == "0" && -f "$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT" ]]; then
             (
                 cd "$BASE/helper_scripts/research"
-                "$PYBIN" -m cost_gate_learning_lane.bounded_probe_placement_repair_plan \
+                run_alpha_stage "$PYBIN" -m cost_gate_learning_lane.bounded_probe_placement_repair_plan \
                     --touchability-preflight-json "$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT" \
                     --max-artifact-age-hours "$BOUNDED_REVIEW_MAX_ARTIFACT_AGE_HOURS" \
                     --max-fresh-bbo-age-ms "$PLACEMENT_REPAIR_MAX_FRESH_BBO_AGE_MS" \
                     --json-output "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT" \
                     --output "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_MD_OUT"
             ) > "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_STDOUT" 2>> "$LOG" || bounded_probe_placement_repair_plan_rc=$?
-            if [[ -f "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT" ]]; then
+            if [[ "$bounded_probe_placement_repair_plan_rc" == "0" && -f "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT" ]]; then
                 cp "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT" "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_LATEST"
                 if [[ -f "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_MD_OUT" ]]; then
                     cp "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_MD_OUT" "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_MD_LATEST"
@@ -333,17 +363,17 @@ if [[ "$REFRESH_BOUNDED_REVIEW_CHAIN" == "1" ]]; then
             echo "[$(ts)] SKIP: bounded probe placement repair plan missing touchability preflight output" >> "$LOG"
         fi
 
-        if [[ -f "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT" ]]; then
+        if [[ "$bounded_probe_placement_repair_plan_rc" == "0" && -f "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT" ]]; then
             (
                 cd "$BASE/helper_scripts/research"
-                "$PYBIN" -m cost_gate_learning_lane.bounded_probe_authority_patch_readiness \
+                run_alpha_stage "$PYBIN" -m cost_gate_learning_lane.bounded_probe_authority_patch_readiness \
                     --placement-repair-plan-json "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT" \
                     --repo-root "$BASE" \
                     --max-artifact-age-hours "$BOUNDED_REVIEW_MAX_ARTIFACT_AGE_HOURS" \
                     --json-output "$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT" \
                     --output "$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_MD_OUT"
             ) > "$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_STDOUT" 2>> "$LOG" || bounded_probe_authority_patch_readiness_rc=$?
-            if [[ -f "$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT" ]]; then
+            if [[ "$bounded_probe_authority_patch_readiness_rc" == "0" && -f "$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT" ]]; then
                 cp "$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT" "$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_LATEST"
                 if [[ -f "$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_MD_OUT" ]]; then
                     cp "$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_MD_OUT" "$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_MD_LATEST"
@@ -368,9 +398,9 @@ if [[ "$REFRESH_BOUNDED_REVIEW_CHAIN" == "1" ]]; then
                         --standing-demo-authorization-json "$STANDING_DEMO_AUTHORIZATION_JSON"
                     )
                 fi
-                "$PYBIN" "${bounded_probe_operator_authorization_args[@]}"
+                run_alpha_stage "$PYBIN" "${bounded_probe_operator_authorization_args[@]}"
             ) > "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_STDOUT" 2>> "$LOG" || bounded_probe_operator_authorization_rc=$?
-            if [[ -f "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT" ]]; then
+            if [[ "$bounded_probe_operator_authorization_rc" == "0" && -f "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT" ]]; then
                 cp "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT" "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_LATEST"
                 if [[ -f "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_MD_OUT" ]]; then
                     cp "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_MD_OUT" "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_MD_LATEST"
@@ -380,7 +410,7 @@ if [[ "$REFRESH_BOUNDED_REVIEW_CHAIN" == "1" ]]; then
 
             (
                 cd "$BASE/helper_scripts/research"
-                "$PYBIN" -m cost_gate_learning_lane.bounded_probe_shadow_placement_impact \
+                run_alpha_stage "$PYBIN" -m cost_gate_learning_lane.bounded_probe_shadow_placement_impact \
                     --order-to-fill-gap-json "$ORDER_TOUCHABILITY_JSON" \
                     --placement-repair-plan-json "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT" \
                     --authority-patch-readiness-json "$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT" \
@@ -388,7 +418,7 @@ if [[ "$REFRESH_BOUNDED_REVIEW_CHAIN" == "1" ]]; then
                     --json-output "$BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_OUT" \
                     --output "$BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_MD_OUT"
             ) > "$BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_STDOUT" 2>> "$LOG" || bounded_probe_shadow_placement_impact_rc=$?
-            if [[ -f "$BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_OUT" ]]; then
+            if [[ "$bounded_probe_shadow_placement_impact_rc" == "0" && -f "$BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_OUT" ]]; then
                 cp "$BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_OUT" "$BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_LATEST"
                 if [[ -f "$BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_MD_OUT" ]]; then
                     cp "$BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_MD_OUT" "$BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_MD_LATEST"
@@ -419,11 +449,21 @@ mm_current_fee_confirmation_rc=0
 if (( ${#MM_CURRENT_FEE_CONFIRMATION_ARGS[@]} > 0 )); then
     (
         cd "$BASE/helper_scripts/research"
-        "$PYBIN" -m alpha_discovery_throughput.mm_current_fee_confirmation \
+        run_alpha_stage "$PYBIN" -m alpha_discovery_throughput.mm_current_fee_confirmation \
             "${MM_CURRENT_FEE_CONFIRMATION_ARGS[@]}" \
-            --json-output "$MM_CURRENT_FEE_CONFIRMATION_JSON" \
-            --output "$MM_CURRENT_FEE_CONFIRMATION_MD"
+            --json-output "$MM_CURRENT_FEE_CONFIRMATION_JSON_STAGE" \
+            --output "$MM_CURRENT_FEE_CONFIRMATION_MD_STAGE"
     ) > "$MM_CURRENT_FEE_CONFIRMATION_STDOUT" 2>> "$LOG" || mm_current_fee_confirmation_rc=$?
+    if [[ "$mm_current_fee_confirmation_rc" == "0" ]]; then
+        research_guard_publish_json_pair \
+            "$MM_CURRENT_FEE_CONFIRMATION_JSON_STAGE" "$MM_CURRENT_FEE_CONFIRMATION_JSON" \
+            "$MM_CURRENT_FEE_CONFIRMATION_MD_STAGE" "$MM_CURRENT_FEE_CONFIRMATION_MD" || mm_current_fee_confirmation_rc=$?
+        if [[ "$mm_current_fee_confirmation_rc" != "0" ]]; then
+            research_guard_incomplete "current_fee_publish_failed" "$mm_current_fee_confirmation_rc" || true
+        fi
+    else
+        rm -f "$MM_CURRENT_FEE_CONFIRMATION_JSON_STAGE" "$MM_CURRENT_FEE_CONFIRMATION_MD_STAGE"
+    fi
     echo "[$(ts)] mm_current_fee_confirmation_refresh rc=${mm_current_fee_confirmation_rc}" >> "$LOG"
 else
     echo "[$(ts)] SKIP: mm current-fee confirmation refresh missing fillsim inputs" >> "$LOG"
@@ -432,11 +472,21 @@ mm_motif_amplification_rc=0
 if [[ -f "$DATA/research/fillsim/fillsim_history_scorecard.json" ]]; then
     (
         cd "$BASE/helper_scripts/research"
-        "$PYBIN" -m alpha_discovery_throughput.mm_motif_amplification \
+        run_alpha_stage "$PYBIN" -m alpha_discovery_throughput.mm_motif_amplification \
             --fillsim-history-json "$DATA/research/fillsim/fillsim_history_scorecard.json" \
-            --json-output "$MM_MOTIF_AMPLIFICATION_JSON" \
-            --output "$MM_MOTIF_AMPLIFICATION_MD"
+            --json-output "$MM_MOTIF_AMPLIFICATION_JSON_STAGE" \
+            --output "$MM_MOTIF_AMPLIFICATION_MD_STAGE"
     ) > "$MM_MOTIF_AMPLIFICATION_STDOUT" 2>> "$LOG" || mm_motif_amplification_rc=$?
+    if [[ "$mm_motif_amplification_rc" == "0" ]]; then
+        research_guard_publish_json_pair \
+            "$MM_MOTIF_AMPLIFICATION_JSON_STAGE" "$MM_MOTIF_AMPLIFICATION_JSON" \
+            "$MM_MOTIF_AMPLIFICATION_MD_STAGE" "$MM_MOTIF_AMPLIFICATION_MD" || mm_motif_amplification_rc=$?
+        if [[ "$mm_motif_amplification_rc" != "0" ]]; then
+            research_guard_incomplete "motif_publish_failed" "$mm_motif_amplification_rc" || true
+        fi
+    else
+        rm -f "$MM_MOTIF_AMPLIFICATION_JSON_STAGE" "$MM_MOTIF_AMPLIFICATION_MD_STAGE"
+    fi
     echo "[$(ts)] mm_motif_amplification_refresh rc=${mm_motif_amplification_rc}" >> "$LOG"
 else
     echo "[$(ts)] SKIP: mm motif amplification refresh missing fillsim history scorecard" >> "$LOG"
@@ -468,33 +518,50 @@ profitability_rc=0
 (
     cd "$BASE/helper_scripts/research"
     if (( ${#PROFITABILITY_ARGS[@]} > 0 )); then
-        "$PYBIN" -m alpha_discovery_throughput.profitability_path_scorecard \
+        run_alpha_stage "$PYBIN" -m alpha_discovery_throughput.profitability_path_scorecard \
             "${PROFITABILITY_ARGS[@]}" \
-            --json-output "$PROFITABILITY_JSON" \
-            --output "$PROFITABILITY_MD"
+            --json-output "$PROFITABILITY_JSON_STAGE" \
+            --output "$PROFITABILITY_MD_STAGE"
     else
-        "$PYBIN" -m alpha_discovery_throughput.profitability_path_scorecard \
-            --json-output "$PROFITABILITY_JSON" \
-            --output "$PROFITABILITY_MD"
+        run_alpha_stage "$PYBIN" -m alpha_discovery_throughput.profitability_path_scorecard \
+            --json-output "$PROFITABILITY_JSON_STAGE" \
+            --output "$PROFITABILITY_MD_STAGE"
     fi
 ) > "$PROFITABILITY_DIR/profitability_path_scorecard_stdout.json" 2>> "$LOG" || profitability_rc=$?
+if [[ "$profitability_rc" == "0" ]]; then
+    research_guard_publish_json_pair \
+        "$PROFITABILITY_JSON_STAGE" "$PROFITABILITY_JSON" \
+        "$PROFITABILITY_MD_STAGE" "$PROFITABILITY_MD" || profitability_rc=$?
+    if [[ "$profitability_rc" != "0" ]]; then
+        research_guard_incomplete "profitability_publish_failed" "$profitability_rc" || true
+    fi
+else
+    rm -f "$PROFITABILITY_JSON_STAGE" "$PROFITABILITY_MD_STAGE"
+fi
 echo "[$(ts)] profitability_path_scorecard_refresh rc=${profitability_rc}" >> "$LOG"
 rc=0
+ALPHA_RUNTIME_ARGS=(
+    -m alpha_discovery_throughput.runtime_runner
+    --data-dir "$DATA"
+    --repo-root "$BASE"
+)
+if [[ -n "$EXPECTED_SOURCE_HEAD" ]]; then
+    ALPHA_RUNTIME_ARGS+=(--expected-head "$EXPECTED_SOURCE_HEAD")
+fi
+ALPHA_RUNTIME_ARGS+=(--print-json)
 (
     cd "$BASE/helper_scripts/research"
-    if [[ -n "$EXPECTED_SOURCE_HEAD" ]]; then
-        "$PYBIN" -m alpha_discovery_throughput.runtime_runner \
-            --data-dir "$DATA" \
-            --repo-root "$BASE" \
-            --expected-head "$EXPECTED_SOURCE_HEAD" \
-            --print-json
-    else
-        "$PYBIN" -m alpha_discovery_throughput.runtime_runner \
-            --data-dir "$DATA" \
-            --repo-root "$BASE" \
-            --print-json
-    fi
+    run_alpha_stage "$PYBIN" "${ALPHA_RUNTIME_ARGS[@]}"
 ) >> "$LOG" 2>&1 || rc=$?
+if [[ "$rc" == "0" ]]; then
+    complete_rc=0
+    research_guard_complete \
+        --completion-path "$DATA/alpha_discovery_throughput/alpha_discovery_latest.json" || complete_rc=$?
+    if (( complete_rc != 0 )); then
+        rc="$complete_rc"
+        echo "[$(ts)] ERROR: alpha discovery completion manifest failed rc=${complete_rc}" >> "$LOG"
+    fi
+fi
 echo "[$(ts)] === alpha_discovery_throughput end rc=${rc} ===" >> "$LOG"
 
 exit 0

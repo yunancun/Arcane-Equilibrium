@@ -25,6 +25,18 @@ def test_bash_syntax_ok(script: Path) -> None:
     assert proc.returncode == 0, proc.stderr
 
 
+def test_wrapper_uses_guard_for_lock_and_outcome_review() -> None:
+    src = _src(WRAPPER)
+    assert 'source "$BASE/helper_scripts/cron/lib/research_workload_guard.sh"' in src
+    assert "research_guard_acquire --lane cost" in src
+    assert "research_guard_run_stage" in src
+    assert "--memory-max-bytes 12884901888" in src
+    assert "research_guard_complete" in src
+    assert 'if [[ "$review_rc" == "0" && -f "$REVIEW_OUT" ]]; then' in src
+    assert 'find "$LOCK_DIR"' not in src
+    assert 'rmdir "$LOCK_DIR"' not in src
+
+
 @pytest.mark.parametrize("script", [WRAPPER, INSTALLER], ids=["wrapper", "installer"])
 def test_scripts_executable_and_strict_mode(script: Path) -> None:
     assert script.stat().st_mode & 0o111, f"{script.name} not executable"
@@ -570,7 +582,12 @@ def test_wrapper_atomically_publishes_candidate_board_to_service_rendezvous() ->
     review_index = src.index('"$PYBIN" "${REVIEW_ARGS[@]}"')
     publish_index = src.index('"$PYBIN" "${CANDIDATE_BOARD_PUBLISH_ARGS[@]}"')
     latest_index = src.index('cp "$REVIEW_OUT" "$REVIEW_LATEST"')
-    assert review_index < publish_index < latest_index
+    decision_index = src.index('"$PYBIN" "${DECISION_PACKET_ARGS[@]}"')
+    complete_index = src.index('research_guard_complete "${guard_complete_args[@]}"')
+    assert review_index < latest_index < decision_index < complete_index < publish_index
+    assert 'candidate_board_publish_status="DEFERRED_PENDING_RUN_COMPLETION"' in src
+    assert 'guard_state_status="$(_research_guard_state_status' in src
+    assert 'if [[ "$guard_complete_rc" == "0" && "$guard_state_status" == "COMPLETE"' in src
     assert 'cp "$REVIEW_OUT" "$ALR_CANDIDATE_EVIDENCE_DIR/' not in src
     assert "blocked_outcome_review_latest.json" not in src[
         src.index("CANDIDATE_BOARD_PUBLISH_ARGS=(") : publish_index
@@ -578,6 +595,7 @@ def test_wrapper_atomically_publishes_candidate_board_to_service_rendezvous() ->
     assert 'candidate_board_publish_status="PUBLISHED_OR_ALREADY_PUBLISHED"' in src
     assert 'candidate_board_publish_status="FAILED"' in src
     assert 'candidate_board_publish_status="SKIPPED"' in src
+    assert 'candidate_board_publish_skip_reason="run_incomplete"' in src
     assert 'candidate_board_publish_skip_reason="preinstall_refresh_only"' in src
     assert '"candidate_board_publish_rc": int(os.environ["CANDIDATE_BOARD_PUBLISH_RC"])' in src
     assert '"candidate_board_publish_status": os.environ["CANDIDATE_BOARD_PUBLISH_STATUS"]' in src
