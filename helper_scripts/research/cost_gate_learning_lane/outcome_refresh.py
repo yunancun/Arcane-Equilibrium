@@ -159,7 +159,12 @@ def _outcome_semantic_value(value: Any) -> Any:
 
 
 def _outcome_semantic_bytes(row: dict[str, Any]) -> bytes:
-    return _canonical_row_bytes(_outcome_semantic_value(row))
+    return _canonical_row_bytes(
+        {
+            "effective_timestamp_ms": outcome_writer_module._row_ts_ms(row),
+            "row": _outcome_semantic_value(row),
+        }
+    )
 
 
 def _compact_fill_evidence_row(row: dict[str, Any]) -> dict[str, Any]:
