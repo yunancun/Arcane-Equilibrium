@@ -663,7 +663,7 @@ _research_guard_scope_entry "$@"'
         trap '_research_guard_defer_signal TERM 143' TERM
         (
             (( scrub_environment == 0 )) || _research_guard_scrub_environment
-            systemd-run --user --scope --wait --collect --quiet \
+            systemd-run --user --scope --collect --quiet \
                 --unit="$RESEARCH_GUARD_SCOPE_UNIT" \
                 --slice="$scope_slice" \
                 --property="MemoryMax=${scope_memory}" \
