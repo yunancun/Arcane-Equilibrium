@@ -2562,6 +2562,449 @@ def test_outcome_refresh_streaming_projection_matches_full_ledger_semantics(
     assert all(row["attempt_id"] != "blocked-done" for row in streamed["outcomes"])
 
 
+def test_outcome_refresh_projection_batches_mature_backlog_oldest_first(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        outcome_refresh_module,
+        "MAX_OUTCOME_REFRESH_PROJECTED_ROWS",
+        2,
+    )
+    ledger = tmp_path / "probe_ledger.jsonl"
+    event_ts = 1_784_116_800_000
+    _write_jsonl_bytes(
+        ledger,
+        [
+            _admission_row(
+                f"blocked-{index}",
+                "ORDER_AUTHORITY_NOT_GRANTED",
+                "ETHUSDT",
+                "Sell",
+                event_ts + index,
+            )
+            for index in range(4)
+        ],
+    )
+
+    projection = read_outcome_refresh_ledger_projection(
+        ledger,
+        selection=OutcomeRefreshSelection(record_blocked_outcomes=True),
+        now_utc=dt.datetime(2026, 7, 16, 13, tzinfo=dt.timezone.utc),
+        outcome_cfg=ProbeOutcomeConfig(horizon_minutes=60),
+        batch_limit=2,
+    )
+
+    assert [row["attempt_id"] for row in projection.rows] == [
+        "blocked-0",
+        "blocked-1",
+    ]
+    assert projection.pending_attempt_count == 4
+    assert projection.mature_pending_attempt_count == 4
+    assert projection.selected_attempt_count == 2
+    assert projection.mature_backlog_remaining_count == 2
+    assert projection.pending_backlog_remaining_count == 2
+    assert projection.retained_ledger_scan_complete is True
+    assert projection.pending_universe_fully_processed is False
+
+
+def test_outcome_refresh_projection_collapses_exact_admission_duplicates(
+    tmp_path: Path,
+) -> None:
+    ledger = tmp_path / "probe_ledger.jsonl"
+    row = _admission_row(
+        "blocked-duplicate",
+        "ORDER_AUTHORITY_NOT_GRANTED",
+        "ETHUSDT",
+        "Sell",
+        1_784_116_800_000,
+    )
+    generated_at_variant = copy.deepcopy(row)
+    generated_at_variant["generated_at_utc"] = "2026-07-16T12:00:00+00:00"
+    materialized_variant = copy.deepcopy(row)
+    materialized_variant["materialized_at_ms"] = 1_784_120_400_000
+    source_variant = copy.deepcopy(row)
+    source_variant["source"] = "equivalent_materializer"
+    _write_jsonl_bytes(
+        ledger,
+        [row, generated_at_variant, materialized_variant, source_variant],
+    )
+
+    projection = read_outcome_refresh_ledger_projection(
+        ledger,
+        selection=OutcomeRefreshSelection(record_blocked_outcomes=True),
+        now_utc=dt.datetime(2026, 7, 16, 13, tzinfo=dt.timezone.utc),
+        outcome_cfg=ProbeOutcomeConfig(horizon_minutes=60),
+        batch_limit=2,
+    )
+
+    assert [item["attempt_id"] for item in projection.rows] == [
+        "blocked-duplicate"
+    ]
+    assert projection.pending_attempt_count == 1
+    assert projection.selected_attempt_count == 1
+    assert projection.duplicate_admission_row_count == 3
+    assert projection.pending_backlog_remaining_count == 0
+    assert projection.pending_universe_fully_processed is True
+
+
+def test_outcome_refresh_projection_completed_attempts_do_not_consume_batch(
+    tmp_path: Path,
+) -> None:
+    ledger = tmp_path / "probe_ledger.jsonl"
+    event_ts = 1_784_116_800_000
+    admissions = [
+        _admission_row(
+            f"blocked-{index}",
+            "ORDER_AUTHORITY_NOT_GRANTED",
+            "ETHUSDT",
+            "Sell",
+            event_ts + index,
+        )
+        for index in range(3)
+    ]
+    _write_jsonl_bytes(
+        ledger,
+        admissions
+        + [
+            {
+                "record_type": "blocked_signal_outcome",
+                "attempt_id": "blocked-0",
+            },
+            {
+                "record_type": "blocked_signal_outcome",
+                "attempt_id": "blocked-1",
+            },
+        ],
+    )
+
+    projection = read_outcome_refresh_ledger_projection(
+        ledger,
+        selection=OutcomeRefreshSelection(record_blocked_outcomes=True),
+        now_utc=dt.datetime(2026, 7, 16, 13, tzinfo=dt.timezone.utc),
+        outcome_cfg=ProbeOutcomeConfig(horizon_minutes=60),
+        batch_limit=2,
+    )
+
+    assert [row["attempt_id"] for row in projection.rows] == ["blocked-2"]
+    assert projection.completed_attempt_count == 2
+    assert projection.pending_attempt_count == 1
+    assert projection.selected_attempt_count == 1
+
+
+def test_outcome_refresh_projection_quarantines_outcome_identity_conflicts(
+    tmp_path: Path,
+) -> None:
+    ledger = tmp_path / "probe_ledger.jsonl"
+    event_ts = 1_784_116_800_000
+    same_target_a = _admission_row(
+        "same-target",
+        "ORDER_AUTHORITY_NOT_GRANTED",
+        "ETHUSDT",
+        "Sell",
+        event_ts,
+    )
+    same_target_b = copy.deepcopy(same_target_a)
+    same_target_b["event"]["symbol"] = "BTCUSDT"
+    cross_target_blocked = _admission_row(
+        "cross-target",
+        "ORDER_AUTHORITY_NOT_GRANTED",
+        "SOLUSDT",
+        "Sell",
+        event_ts + 1,
+    )
+    cross_target_probe = _admission_row(
+        "cross-target",
+        ADMIT_DECISION,
+        "SOLUSDT",
+        "Buy",
+        event_ts + 2,
+    )
+    safe = _admission_row(
+        "safe",
+        "ORDER_AUTHORITY_NOT_GRANTED",
+        "ETHUSDT",
+        "Sell",
+        event_ts + 3,
+    )
+    _write_jsonl_bytes(
+        ledger,
+        [
+            same_target_a,
+            same_target_b,
+            same_target_b,
+            cross_target_blocked,
+            cross_target_probe,
+            safe,
+        ],
+    )
+
+    projection = read_outcome_refresh_ledger_projection(
+        ledger,
+        selection=OutcomeRefreshSelection(
+            record_blocked_outcomes=True,
+            record_probe_outcomes=True,
+        ),
+        now_utc=dt.datetime(2026, 7, 16, 13, tzinfo=dt.timezone.utc),
+        outcome_cfg=ProbeOutcomeConfig(horizon_minutes=60),
+        batch_limit=10,
+    )
+
+    assert [row["attempt_id"] for row in projection.rows] == ["safe"]
+    assert projection.conflict_attempt_count == 3
+    assert projection.duplicate_admission_row_count == 1
+    assert projection.pending_attempt_count == 4
+    assert projection.selected_attempt_count == 1
+    assert projection.pending_backlog_remaining_count == 3
+    assert projection.pending_universe_fully_processed is False
+
+    blocked_only = read_outcome_refresh_ledger_projection(
+        ledger,
+        selection=OutcomeRefreshSelection(record_blocked_outcomes=True),
+        now_utc=dt.datetime(2026, 7, 16, 13, tzinfo=dt.timezone.utc),
+        outcome_cfg=ProbeOutcomeConfig(horizon_minutes=60),
+        batch_limit=10,
+    )
+    assert [row["attempt_id"] for row in blocked_only.rows] == ["safe"]
+    assert blocked_only.conflict_attempt_count == 2
+    assert blocked_only.pending_attempt_count == 3
+    assert blocked_only.pending_backlog_remaining_count == 2
+    assert blocked_only.pending_universe_fully_processed is False
+
+
+def test_outcome_refresh_projection_invalid_and_immature_do_not_starve_mature(
+    tmp_path: Path,
+) -> None:
+    ledger = tmp_path / "probe_ledger.jsonl"
+    now = dt.datetime(2026, 7, 16, 13, tzinfo=dt.timezone.utc)
+    now_ms = int(now.timestamp() * 1000)
+    _write_jsonl_bytes(
+        ledger,
+        [
+            _admission_row(
+                "invalid-time",
+                "ORDER_AUTHORITY_NOT_GRANTED",
+                "ETHUSDT",
+                "Sell",
+                0,
+            ),
+            _admission_row(
+                "immature",
+                "ORDER_AUTHORITY_NOT_GRANTED",
+                "ETHUSDT",
+                "Sell",
+                now_ms - 30 * 60_000,
+            ),
+            _admission_row(
+                "mature-oldest",
+                "ORDER_AUTHORITY_NOT_GRANTED",
+                "ETHUSDT",
+                "Sell",
+                now_ms - 3 * 3_600_000,
+            ),
+            _admission_row(
+                "mature-next",
+                "ORDER_AUTHORITY_NOT_GRANTED",
+                "ETHUSDT",
+                "Sell",
+                now_ms - 2 * 3_600_000,
+            ),
+        ],
+    )
+
+    projection = read_outcome_refresh_ledger_projection(
+        ledger,
+        selection=OutcomeRefreshSelection(record_blocked_outcomes=True),
+        now_utc=now,
+        outcome_cfg=ProbeOutcomeConfig(horizon_minutes=60),
+        batch_limit=2,
+    )
+
+    assert [row["attempt_id"] for row in projection.rows] == [
+        "mature-oldest",
+        "mature-next",
+    ]
+    assert projection.invalid_time_attempt_count == 1
+    assert projection.immature_attempt_count == 1
+    assert projection.mature_pending_attempt_count == 2
+    assert projection.selected_attempt_count == 2
+
+
+def test_outcome_refresh_projection_includes_only_deduped_selected_probe_fills(
+    tmp_path: Path,
+) -> None:
+    ledger = tmp_path / "probe_ledger.jsonl"
+    event_ts = 1_784_116_800_000
+    fill_selected = {
+        "record_type": "execution_fill",
+        "fill_id": "fill-selected",
+        "attempt_id": "probe-selected",
+    }
+    _write_jsonl_bytes(
+        ledger,
+        [
+            _admission_row(
+                "probe-selected",
+                ADMIT_DECISION,
+                "BTCUSDT",
+                "Buy",
+                event_ts,
+            ),
+            _admission_row(
+                "probe-backlog",
+                ADMIT_DECISION,
+                "ETHUSDT",
+                "Buy",
+                event_ts + 1,
+            ),
+            _admission_row(
+                "blocked-selected",
+                "ORDER_AUTHORITY_NOT_GRANTED",
+                "SOLUSDT",
+                "Sell",
+                event_ts + 2,
+            ),
+            fill_selected,
+            fill_selected,
+            {
+                "record_type": "execution_fill",
+                "fill_id": "fill-backlog",
+                "attempt_id": "probe-backlog",
+            },
+            {
+                "record_type": "execution_fill",
+                "fill_id": "fill-unrelated",
+                "attempt_id": "probe-unrelated",
+            },
+            {
+                "record_type": "execution_fill",
+                "fill_id": "fill-blocked",
+                "attempt_id": "blocked-selected",
+            },
+        ],
+    )
+
+    projection = read_outcome_refresh_ledger_projection(
+        ledger,
+        selection=OutcomeRefreshSelection(record_probe_outcomes=True),
+        now_utc=dt.datetime(2026, 7, 16, 13, tzinfo=dt.timezone.utc),
+        outcome_cfg=ProbeOutcomeConfig(horizon_minutes=60),
+        batch_limit=1,
+    )
+
+    assert [row.get("attempt_id") for row in projection.rows] == [
+        "probe-selected",
+        "probe-selected",
+    ]
+    assert projection.relevant_fill_count == 1
+    assert projection.projected_row_count == 2
+    assert projection.mature_backlog_remaining_count == 1
+
+    blocked_only = read_outcome_refresh_ledger_projection(
+        ledger,
+        selection=OutcomeRefreshSelection(record_blocked_outcomes=True),
+        now_utc=dt.datetime(2026, 7, 16, 13, tzinfo=dt.timezone.utc),
+        outcome_cfg=ProbeOutcomeConfig(horizon_minutes=60),
+        batch_limit=1,
+    )
+    assert [row.get("attempt_id") for row in blocked_only.rows] == [
+        "blocked-selected"
+    ]
+    assert blocked_only.relevant_fill_count == 0
+    assert blocked_only.projected_row_count == 1
+
+
+def test_outcome_refresh_projection_never_truncates_selected_attempt_evidence(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        outcome_refresh_module,
+        "MAX_OUTCOME_REFRESH_PROJECTED_ROWS",
+        2,
+    )
+    ledger = tmp_path / "probe_ledger.jsonl"
+    _write_jsonl_bytes(
+        ledger,
+        [
+            _admission_row(
+                "probe-selected",
+                ADMIT_DECISION,
+                "BTCUSDT",
+                "Buy",
+                1_784_116_800_000,
+            ),
+            {
+                "record_type": "execution_fill",
+                "fill_id": "fill-a",
+                "attempt_id": "probe-selected",
+            },
+            {
+                "record_type": "execution_fill",
+                "fill_id": "fill-b",
+                "attempt_id": "probe-selected",
+            },
+        ],
+    )
+
+    with pytest.raises(
+        outcome_refresh_module.LedgerProjectionLimitError,
+        match="OUTCOME_REFRESH_PROJECTION_LIMIT_REACHED",
+    ):
+        read_outcome_refresh_ledger_projection(
+            ledger,
+            selection=OutcomeRefreshSelection(record_probe_outcomes=True),
+            now_utc=dt.datetime(2026, 7, 16, 13, tzinfo=dt.timezone.utc),
+            outcome_cfg=ProbeOutcomeConfig(horizon_minutes=60),
+            batch_limit=1,
+        )
+
+
+def test_outcome_refresh_projection_successive_batches_advance_without_duplicates(
+    tmp_path: Path,
+) -> None:
+    ledger = tmp_path / "probe_ledger.jsonl"
+    event_ts = 1_784_116_800_000
+    _write_jsonl_bytes(
+        ledger,
+        [
+            _admission_row(
+                f"blocked-{index}",
+                "ORDER_AUTHORITY_NOT_GRANTED",
+                "ETHUSDT",
+                "Sell",
+                event_ts + index,
+            )
+            for index in range(4)
+        ],
+    )
+    kwargs = {
+        "selection": OutcomeRefreshSelection(record_blocked_outcomes=True),
+        "now_utc": dt.datetime(2026, 7, 16, 13, tzinfo=dt.timezone.utc),
+        "outcome_cfg": ProbeOutcomeConfig(horizon_minutes=60),
+        "batch_limit": 2,
+    }
+
+    first = read_outcome_refresh_ledger_projection(ledger, **kwargs)
+    first_ids = [row["attempt_id"] for row in first.rows]
+    for attempt_id in first_ids:
+        append_jsonl_ledger(
+            ledger,
+            {
+                "record_type": "blocked_signal_outcome",
+                "attempt_id": attempt_id,
+            },
+        )
+    second = read_outcome_refresh_ledger_projection(ledger, **kwargs)
+    second_ids = [row["attempt_id"] for row in second.rows]
+
+    assert first_ids == ["blocked-0", "blocked-1"]
+    assert second_ids == ["blocked-2", "blocked-3"]
+    assert set(first_ids).isdisjoint(second_ids)
+    assert second.completed_attempt_count == 2
+    assert second.pending_backlog_remaining_count == 0
+
+
 def test_outcome_review_streaming_projection_matches_full_ledger_semantics(
     tmp_path: Path,
 ) -> None:
@@ -4681,6 +5124,22 @@ def test_outcome_refresh_dry_run_append_and_idempotent_blocked_signal_rows(
     assert dry_run["appended_to_ledger"] is False
     assert dry_run["blocked_signal_outcome_count"] == 1
     assert dry_run["outcome_count"] == 1
+    assert dry_run["pending_attempt_count"] == 1
+    assert dry_run["mature_pending_attempt_count"] == 1
+    assert dry_run["selected_attempt_count"] == 1
+    assert dry_run["mature_backlog_remaining_count"] == 0
+    assert dry_run["pending_backlog_remaining_count"] == 0
+    assert dry_run["completed_attempt_count"] == 0
+    assert dry_run["duplicate_admission_row_count"] == 0
+    assert dry_run["conflict_attempt_count"] == 0
+    assert dry_run["invalid_time_attempt_count"] == 0
+    assert dry_run["immature_attempt_count"] == 0
+    assert dry_run["relevant_fill_count"] == 0
+    assert dry_run["projected_row_count"] == 1
+    assert dry_run["projected_bytes"] > 0
+    assert dry_run["batch_limit"] == 10_000
+    assert dry_run["retained_ledger_scan_complete"] is True
+    assert dry_run["pending_universe_fully_processed"] is True
     assert len(read_jsonl_ledger(ledger_path)) == 1
 
     appended = refresh_cost_gate_outcomes_from_price_rows(
