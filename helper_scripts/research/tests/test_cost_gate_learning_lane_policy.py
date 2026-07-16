@@ -18,6 +18,9 @@ from helper_scripts.research.tests.candidate_lineage_v2_test_support import (
     build_candidate_event_context_v1,
 )
 from cost_gate_learning_lane import ledger_streaming as ledger_streaming_module
+from cost_gate_learning_lane import (
+    candidate_board_projection as candidate_board_projection_module,
+)
 from cost_gate_learning_lane import runtime_adapter as runtime_adapter_module
 from cost_gate_learning_lane import status as status_module
 from cost_gate_learning_lane import outcome_refresh as outcome_refresh_module
@@ -2484,6 +2487,106 @@ def test_outcome_review_cli_emits_complete_empty_candidate_board(
     assert board["candidate_rows"] == []
 
 
+def test_outcome_review_cli_does_not_materialize_unqualified_universe(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    ledger_path = tmp_path / "probe_ledger.jsonl"
+    _write_jsonl_bytes(
+        ledger_path,
+        [
+            {
+                "record_type": "blocked_signal_outcome",
+                "attempt_id": f"unqualified-{index}",
+                "side_cell_key": "ma_crossover|BTCUSDT|Buy",
+                "strategy_name": "ma_crossover",
+                "symbol": "BTCUSDT",
+                "side": "Buy",
+                "horizon_minutes": 60,
+                "realized_net_bps": float(index),
+            }
+            for index in range(3)
+        ],
+    )
+    output_path = tmp_path / "review.json"
+    monkeypatch.setattr(
+        outcome_review_module,
+        "MAX_STREAMED_CANDIDATE_EVIDENCE_ROWS",
+        2,
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "outcome_review.py",
+            "--ledger",
+            str(ledger_path),
+            "--output",
+            str(output_path),
+        ],
+    )
+
+    assert outcome_review_module.main() == 0
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    board = payload["learning_candidate_board"]
+    assert board["candidate_universe_complete"] is True
+    assert board["raw_blocked_outcome_row_count"] == 3
+    assert board["qualified_lineage_outcome_row_count"] == 0
+    assert board["unqualified_lineage_outcome_row_count"] == 3
+    assert board["candidate_rows"] == []
+
+
+def test_candidate_board_projection_closes_deterministically(
+    tmp_path: Path,
+) -> None:
+    ledger_path = tmp_path / "probe_ledger.jsonl"
+    ledger_path.write_text("{}\n", encoding="utf-8")
+
+    projection = read_candidate_board_ledger_projection(ledger_path)
+    assert projection.closed is False
+    projection.close()
+    projection.close()
+    assert projection.closed is True
+
+    with read_candidate_board_ledger_projection(ledger_path) as managed:
+        assert managed.closed is False
+    assert managed.closed is True
+
+
+def test_candidate_board_projection_scans_retained_generation_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ledger_path = tmp_path / "probe_ledger.jsonl"
+    _write_jsonl_bytes(
+        ledger_path,
+        [
+            {"record_type": "unrelated_audit"},
+            {
+                "record_type": "blocked_signal_outcome",
+                "attempt_id": "one-scan-unqualified",
+            },
+        ],
+    )
+    original_scan = candidate_board_projection_module.scan_retained_jsonl
+    scan_count = 0
+
+    def counted_scan(path: Path, consume):
+        nonlocal scan_count
+        scan_count += 1
+        return original_scan(path, consume)
+
+    monkeypatch.setattr(
+        candidate_board_projection_module,
+        "scan_retained_jsonl",
+        counted_scan,
+    )
+
+    with read_candidate_board_ledger_projection(ledger_path) as projection:
+        assert projection.source_ledger_row_count == 2
+        assert projection.blocked_outcome_row_count == 1
+    assert scan_count == 1
+
+
 @pytest.mark.parametrize(
     ("fill_alias", "section"),
     [(alias, section) for alias in ("orderLinkId", "openclaw_order_link_id")
@@ -3067,22 +3170,39 @@ def test_outcome_review_streaming_projection_matches_full_ledger_semantics(
         )
         for index in range(3)
     ]
+    for outcome in outcomes:
+        context = copy.deepcopy(
+            outcome["candidate_summary"]["candidate_event_context"]
+        )
+        outcome["event"] = {
+            "strategy_name": context["strategy_name"],
+            "symbol": context["symbol"],
+            "side": context["side"],
+            "context_id": context["context_id"],
+            "signal_id": context["signal_id"],
+            "engine_mode": context["evidence_engine_mode"],
+            "ts_ms": context["captured_at_ms"],
+            "candidate_event_context": context,
+        }
     _write_jsonl_bytes(
         ledger,
         [{"record_type": "unrelated_audit"}] + outcomes,
     )
 
     full_rows = read_candidate_evidence_jsonl_ledger(ledger)
-    projection = read_candidate_board_ledger_projection(ledger)
     full = build_blocked_signal_outcome_review(full_rows, now_utc=now)
-    streamed = build_blocked_signal_outcome_review(
-        projection.rows,
-        now_utc=now,
-        source_ledger_row_count=projection.source_ledger_row_count,
-    )
+    with read_candidate_board_ledger_projection(ledger) as projection:
+        streamed = build_blocked_signal_outcome_review(
+            projection.rows,
+            now_utc=now,
+            source_ledger_row_count=projection.source_ledger_row_count,
+        )
 
     assert projection.blocked_outcome_row_count == 3
     assert streamed == full
+    board = streamed["learning_candidate_board"]
+    assert board["qualified_lineage_outcome_row_count"] == 3
+    assert board["candidate_rows"][0]["qualified_evaluator_input_count"] == 3
 
 
 def test_reject_materializer_streaming_projection_preserves_capture_blocked_dedup(
@@ -3186,11 +3306,42 @@ def test_corrupt_scan_defers_and_preserves_previous_output(
     consumer: str,
 ) -> None:
     ledger = tmp_path / "probe_ledger.jsonl"
-    ledger.write_bytes(
-        b'{"record_type":"blocked_signal_outcome"}\n'
-        if consumer == "review_cap"
-        else b"not-json\n"
-    )
+    if consumer == "review_cap":
+        capped = attach_candidate_lineage_v2(
+            {
+                "record_type": "blocked_signal_outcome",
+                "attempt_id": "ctx-review-qualified-cap",
+                "side_cell_key": "ma_crossover|BTCUSDT|Buy",
+                "strategy_name": "ma_crossover",
+                "symbol": "BTCUSDT",
+                "side": "Buy",
+                "horizon_minutes": 60,
+                "entry_ts_ms": 1_783_598_400_000,
+                "gross_bps": 20.0,
+                "cost_bps": 12.0,
+                "realized_net_bps": 8.0,
+                "cost_model_version": "conservative_v1",
+            },
+            context_id="ctx-review-qualified-cap",
+            captured_at_ms=1_783_598_400_000,
+            as_of_utc_date="2026-07-10",
+        )
+        capped_context = copy.deepcopy(
+            capped["candidate_summary"]["candidate_event_context"]
+        )
+        capped["event"] = {
+            "strategy_name": capped_context["strategy_name"],
+            "symbol": capped_context["symbol"],
+            "side": capped_context["side"],
+            "context_id": capped_context["context_id"],
+            "signal_id": capped_context["signal_id"],
+            "engine_mode": capped_context["evidence_engine_mode"],
+            "ts_ms": capped_context["captured_at_ms"],
+            "candidate_event_context": capped_context,
+        }
+        _write_jsonl_bytes(ledger, [capped])
+    else:
+        ledger.write_bytes(b"not-json\n")
     output = tmp_path / f"{consumer}_latest.json"
     output.write_text("last-known-good\n", encoding="utf-8")
     temp_root = tmp_path / "temp"
@@ -3227,7 +3378,7 @@ def test_corrupt_scan_defers_and_preserves_previous_output(
     diagnostic = json.loads(capsys.readouterr().err)
     assert diagnostic["status"] == "RETAINED_LEDGER_SCAN_DEFERRED"
     expected = (
-        "CANDIDATE_BOARD_PROJECTION_LIMIT_REACHED"
+        "CANDIDATE_BOARD_QUALIFIED_COHORT_MATERIALIZATION_LIMIT_REACHED"
         if consumer == "review_cap"
         else "RETAINED_LEDGER_MALFORMED_JSON"
     )

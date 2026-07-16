@@ -30,13 +30,11 @@ from __future__ import annotations
 import argparse
 import copy
 import datetime as dt
-from dataclasses import dataclass
 import hashlib
 import json
 import math
 from pathlib import Path
 import sys
-import tempfile
 from typing import Any
 
 
@@ -50,10 +48,15 @@ from cost_gate_learning_lane.contract import BLOCKED_SIGNAL_OUTCOME_RECORD_TYPE
 from cost_gate_learning_lane.candidate_board import (
     ARBITER_INPUT_SCHEMA_VERSION,
     LEARNING_CANDIDATE_BOARD_SCHEMA_VERSION,
-    _candidate_source_contract_valid,
-    _classify_lineage,
     build_learning_candidate_board,
     candidate_learning_context as _candidate_learning_context,
+)
+from cost_gate_learning_lane.candidate_board_projection import (
+    CandidateBoardLedgerProjection,
+    CandidateBoardQualifiedCohortMaterializationError,
+    CandidateBoardSqliteProjection,
+    build_learning_candidate_board_from_projection,
+    read_candidate_board_ledger_projection as _read_candidate_board_ledger_projection,
 )
 from cost_gate_learning_lane.cost_model import (
     FEE_FLOOR_BPS,
@@ -70,34 +73,21 @@ from cost_gate_learning_lane.evidence_stats import (
 from cost_gate_learning_lane.ledger_streaming import (
     LedgerProjectionLimitError,
     LedgerScanError,
-    scan_retained_jsonl,
 )
-from cost_gate_learning_lane.runtime_adapter import project_candidate_evidence_rows
+from cost_gate_learning_lane.outcome_review_contract import (
+    BLOCKED_OUTCOME_REVIEW_RECORD_TYPE,
+    BLOCKED_OUTCOME_REVIEW_SCHEMA_VERSION,
+    RESEARCH_COMPATIBILITY_BLOCKED_OUTCOME_REVIEW_RECORD_TYPE,
+    RESEARCH_COMPATIBILITY_BLOCKED_OUTCOME_REVIEW_SCHEMA_VERSION,
+    BlockedOutcomeReviewConfig,
+    project_research_compatibility_review_no_authority,
+    validate_blocked_outcome_review_config,
+)
 
 
-# v6:learning_candidate_board 先做 prospective raw/evaluation lineage 三分區，
-# 再以 qualified subset 計算統計；另加 event_hash 衝突 quarantine 及 selection/audit
-# 雜湊分面。升版使 v5 的 legacy candidate_learning_context board 在 consumer ingress
-# fail-closed，不能被誤認為可供 autonomous learning 的 lineage-complete 證據。
-BLOCKED_OUTCOME_REVIEW_SCHEMA_VERSION = (
-    "cost_gate_demo_learning_lane_blocked_outcome_review_v6"
-)
-BLOCKED_OUTCOME_REVIEW_RECORD_TYPE = "blocked_signal_outcome_review"
 RETAINED_LEDGER_SCAN_DEFERRED_EXIT_CODE = 75
 MAX_STREAMED_CANDIDATE_EVIDENCE_ROWS = 250_000
 MAX_STREAMED_CANDIDATE_EVIDENCE_BYTES = 512 * 1024 * 1024
-RESEARCH_COMPATIBILITY_BLOCKED_OUTCOME_REVIEW_SCHEMA_VERSION = (
-    "cost_gate_blocked_outcome_research_compatibility_no_authority_v1"
-)
-RESEARCH_COMPATIBILITY_BLOCKED_OUTCOME_REVIEW_RECORD_TYPE = (
-    "blocked_signal_outcome_research_compatibility_no_authority"
-)
-_RESEARCH_COMPATIBILITY_NO_AUTHORITY_BOUNDARY = (
-    "research-only compatibility statistics; not v6 production evidence; "
-    "not authority eligible; not operator-review eligible; not promotion "
-    "evidence; no PG, Bybit, order, config, risk, auth, runtime mutation, "
-    "or main Cost Gate lowering"
-)
 
 # 樂觀成本 fallback 常數(舊 legacy row 的 gross−4.0 對照軌),與 outcome_writer
 # 的 cfg.cost_bps 歷史默認一致。
@@ -132,104 +122,15 @@ _SLIPPAGE_BOUNDARY = (
 )
 
 
-@dataclass(frozen=True)
-class BlockedOutcomeReviewConfig:
-    """Fail-closed thresholds for blocked-signal review candidates."""
-
-    # F1:min_outcomes_per_side_cell 自 v4 起量測 distinct-entry 有效觀測數
-    # (n_eff),不再量測 raw row 數 — 無重複時兩者相等,行為不變。
-    min_outcomes_per_side_cell: int = 3
-    min_avg_net_bps: float = 0.0
-    min_net_positive_pct: float = 60.0
-    # P2-8:候選面 BH-FDR 目標 false discovery rate;headline sign-flip 抽樣次數。
-    fdr_q: float = 0.10
-    sign_flip_b: int = 1000
-    # F1:distinct-entry n_eff 候選門檻(eligibility 硬 floor)。30 = QC 預註冊
-    # 判準 §3 E1 凍結值(docs/research/2026-07-10--counterfactual_rerun_
-    # preregistration.md:厚尾下 t 近似的最低可信樣本;n<30 的 t p-value 無意義)。
-    # 低於此值的 cell 統計可算(exploration 排序)但不得成 review candidate。
-    min_effective_entries_per_side_cell: int = 30
-    # 預註冊 §3 E2:入選 entry 覆蓋的 distinct UTC 日數下限。5 = 凍結值(F1 的
-    # 根本形態是單日 episode regime-bet;day-cluster 推斷 df=G−1,G<5 不可用)。
-    min_distinct_entry_utc_days: int = 5
-    # 預註冊 §3 E3:單一 UTC 日佔入選 entry 比例上限。50% = 凍結值(防「名義
-    # 多天、實質單日主導」繞過 E2)。
-    max_top_entry_day_share_pct: float = 50.0
-
-
-@dataclass(frozen=True)
-class CandidateBoardLedgerProjection:
-    """Bounded blocked-outcome spool produced by one physical ledger scan."""
-
-    rows: list[dict[str, Any]]
-    source_ledger_row_count: int
-    blocked_outcome_row_count: int
-    lineage_exclusion_reason_counts: dict[str, int]
-
-
 def read_candidate_board_ledger_projection(
     ledger_path: Path,
 ) -> CandidateBoardLedgerProjection:
-    """Spool only candidate-board evidence and reject incomplete universes."""
-    source_row_count = 0
-    blocked_row_count = 0
-    projected_bytes = 0
-    exclusion_reasons: dict[str, int] = {}
-    with tempfile.TemporaryDirectory(prefix="cost-gate-candidate-board-") as temp_dir:
-        spool_path = Path(temp_dir) / "blocked-evidence.jsonl"
-        with spool_path.open("wb") as spool:
-
-            def consume(raw_row: dict[str, Any]) -> None:
-                nonlocal source_row_count, blocked_row_count, projected_bytes
-                source_row_count += 1
-                row = project_candidate_evidence_rows((raw_row,))[0]
-                if row.get("record_type") != BLOCKED_SIGNAL_OUTCOME_RECORD_TYPE:
-                    return
-                lineage = _classify_lineage(row)
-                if (
-                    lineage["partition"] == "QUALIFIED"
-                    and not _candidate_source_contract_valid(lineage)
-                ):
-                    lineage = {
-                        **lineage,
-                        "partition": "INVALID",
-                        "reason": "INVALID_LINEAGE_EXACT_COHORT",
-                    }
-                if lineage["partition"] != "QUALIFIED":
-                    reason = str(lineage["reason"])
-                    exclusion_reasons[reason] = exclusion_reasons.get(reason, 0) + 1
-                encoded = json.dumps(
-                    row,
-                    ensure_ascii=True,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                    allow_nan=False,
-                ).encode("utf-8")
-                projected_bytes += len(encoded) + 1
-                if (
-                    blocked_row_count >= MAX_STREAMED_CANDIDATE_EVIDENCE_ROWS
-                    or projected_bytes > MAX_STREAMED_CANDIDATE_EVIDENCE_BYTES
-                ):
-                    raise LedgerProjectionLimitError(
-                        "CANDIDATE_BOARD_PROJECTION_LIMIT_REACHED",
-                        path=ledger_path,
-                    )
-                spool.write(encoded + b"\n")
-                blocked_row_count += 1
-
-            scan_retained_jsonl(ledger_path, consume)
-            spool.flush()
-
-        with spool_path.open("rb") as spool:
-            rows = [json.loads(raw_line) for raw_line in spool]
-        return CandidateBoardLedgerProjection(
-            rows=rows,
-            source_ledger_row_count=source_row_count,
-            blocked_outcome_row_count=blocked_row_count,
-            lineage_exclusion_reason_counts={
-                key: exclusion_reasons[key] for key in sorted(exclusion_reasons)
-            },
-        )
+    """Compatibility facade whose mutable caps remain monkeypatchable."""
+    return _read_candidate_board_ledger_projection(
+        ledger_path,
+        max_qualified_cohort_rows=MAX_STREAMED_CANDIDATE_EVIDENCE_ROWS,
+        max_qualified_cohort_bytes=MAX_STREAMED_CANDIDATE_EVIDENCE_BYTES,
+    )
 
 
 def _utc_now() -> dt.datetime:
@@ -248,28 +149,6 @@ def _float(value: Any) -> float | None:
 
 def _str(value: Any) -> str:
     return str(value or "").strip()
-
-
-def validate_blocked_outcome_review_config(cfg: BlockedOutcomeReviewConfig) -> None:
-    if cfg.min_outcomes_per_side_cell < 1 or cfg.min_outcomes_per_side_cell > 1_000:
-        raise ValueError("--min-outcomes-per-side-cell must be in [1, 1000]")
-    if (
-        cfg.min_effective_entries_per_side_cell < 1
-        or cfg.min_effective_entries_per_side_cell > 1_000
-    ):
-        raise ValueError("--min-effective-entries-per-side-cell must be in [1, 1000]")
-    if cfg.min_distinct_entry_utc_days < 1 or cfg.min_distinct_entry_utc_days > 365:
-        raise ValueError("--min-distinct-entry-utc-days must be in [1, 365]")
-    if not (0.0 < cfg.max_top_entry_day_share_pct <= 100.0):
-        raise ValueError("--max-top-entry-day-share-pct must be in (0, 100]")
-    if cfg.min_avg_net_bps < -10_000.0 or cfg.min_avg_net_bps > 10_000.0:
-        raise ValueError("--min-avg-net-bps must be in [-10000, 10000]")
-    if cfg.min_net_positive_pct < 0.0 or cfg.min_net_positive_pct > 100.0:
-        raise ValueError("--min-net-positive-pct must be in [0, 100]")
-    if not (0.0 < cfg.fdr_q < 1.0):
-        raise ValueError("--fdr-q must be in (0, 1)")
-    if cfg.sign_flip_b < 1 or cfg.sign_flip_b > 100_000:
-        raise ValueError("--sign-flip-b must be in [1, 100000]")
 
 
 def _row_sort_ts(row: dict[str, Any]) -> str:
@@ -1431,7 +1310,7 @@ def _evaluate_candidate_cohort(
 
 
 def _build_learning_candidate_board(
-    ledger_rows: list[dict[str, Any]],
+    ledger_rows: list[dict[str, Any]] | CandidateBoardSqliteProjection,
     *,
     cfg: BlockedOutcomeReviewConfig,
     overlay: dict[str, dict[str, Any]],
@@ -1444,7 +1323,12 @@ def _build_learning_candidate_board(
     eligible_rows_by_cohort: dict[str, list[dict[str, Any]]] | None = (
         {} if qualified_rows_sink is not None else None
     )
-    board = build_learning_candidate_board(
+    builder = (
+        build_learning_candidate_board_from_projection
+        if isinstance(ledger_rows, CandidateBoardSqliteProjection)
+        else build_learning_candidate_board
+    )
+    board = builder(
         ledger_rows,
         cfg=cfg,
         overlay=overlay,
@@ -1461,7 +1345,7 @@ def _build_learning_candidate_board(
 
 
 def _build_blocked_signal_outcome_review_core(
-    ledger_rows: list[dict[str, Any]],
+    ledger_rows: list[dict[str, Any]] | CandidateBoardSqliteProjection,
     *,
     now_utc: dt.datetime | None = None,
     cfg: BlockedOutcomeReviewConfig | None = None,
@@ -1496,6 +1380,13 @@ def _build_blocked_signal_outcome_review_core(
         as_of_date=generated_at.date(),
         qualified_rows_sink=qualified_rows if qualified_lineage_only else None,
     )
+    if not qualified_lineage_only and isinstance(
+        ledger_rows,
+        CandidateBoardSqliteProjection,
+    ):
+        raise ValueError(
+            "disk-backed candidate projection is production-review only"
+        )
     aggregation_rows = qualified_rows if qualified_lineage_only else ledger_rows
 
     grouped: dict[str, list[dict[str, Any]]] = {}
@@ -1894,7 +1785,7 @@ def _build_blocked_signal_outcome_review_core(
 
 
 def build_blocked_signal_outcome_review(
-    ledger_rows: list[dict[str, Any]],
+    ledger_rows: list[dict[str, Any]] | CandidateBoardSqliteProjection,
     *,
     now_utc: dt.datetime | None = None,
     cfg: BlockedOutcomeReviewConfig | None = None,
@@ -1940,119 +1831,7 @@ def build_research_compatibility_blocked_signal_outcome_review_no_authority(
         slippage_quantiles=slippage_quantiles,
         qualified_lineage_only=False,
     )
-
-    legacy_status = review["status"]
-    legacy_reason = review["reason"]
-    legacy_next_trigger = review["next_trigger"]
-    legacy_candidate_count = int(review.get("review_candidate_side_cell_count") or 0)
-    legacy_top_candidate_fields = {
-        key: review.get(key)
-        for key in tuple(review)
-        if key.startswith("top_review_candidate_")
-    }
-
-    sanitized_cells: list[dict[str, Any]] = []
-    for source_cell in review.get("top_side_cells") or []:
-        cell = copy.deepcopy(source_cell)
-        cell["research_only_legacy_status"] = cell.get("status")
-        cell["research_only_legacy_review_candidate"] = bool(
-            cell.get("review_candidate")
-        )
-        if cell["research_only_legacy_review_candidate"]:
-            cell["status"] = "RESEARCH_COMPATIBILITY_CANDIDATE_NO_AUTHORITY"
-        cell["review_candidate"] = False
-        cell["bounded_demo_probe_review_rank"] = None
-        cell["authority_eligible"] = False
-        cell["operator_review_eligible"] = False
-        cell["promotion_evidence"] = False
-        sanitized_cells.append(cell)
-
-    candidate_board = review.pop("learning_candidate_board", {}) or {}
-    qualified_lineage_outcome_row_count = int(
-        candidate_board.get("qualified_lineage_outcome_row_count") or 0
-    )
-    invalid_lineage_outcome_row_count = int(
-        candidate_board.get("invalid_lineage_outcome_row_count") or 0
-    )
-    unqualified_lineage_outcome_row_count = int(
-        candidate_board.get("unqualified_lineage_outcome_row_count") or 0
-    )
-    # This full-rank surface is production strict authority evidence.  The
-    # research compatibility facade removes it rather than exposing unsanitized
-    # review-candidate rows under a no-authority schema.
-    review.pop("strict_side_cell_reviews_by_key", None)
-    review.update(
-        {
-            "schema_version": (
-                RESEARCH_COMPATIBILITY_BLOCKED_OUTCOME_REVIEW_SCHEMA_VERSION
-            ),
-            "record_type": (
-                RESEARCH_COMPATIBILITY_BLOCKED_OUTCOME_REVIEW_RECORD_TYPE
-            ),
-            "status": (
-                "RESEARCH_COMPATIBILITY_METRICS_AVAILABLE_NO_AUTHORITY"
-                if review.get("blocked_signal_outcome_count")
-                else "RESEARCH_COMPATIBILITY_NO_OUTCOMES_NO_AUTHORITY"
-            ),
-            "reason": "legacy_rows_evaluated_for_research_statistics_only",
-            "next_trigger": (
-                "add_valid_prospective_candidate_lineage_for_production_review"
-            ),
-            "require_qualified_lineage": False,
-            "outcome_aggregation_policy": (
-                "FULL_LEDGER_RESEARCH_COMPATIBILITY_NO_AUTHORITY"
-            ),
-            "authority_eligible": False,
-            "operator_review_eligible": False,
-            "promotion_evidence": False,
-            "review_candidate_side_cell_count": 0,
-            "top_side_cells": sanitized_cells,
-            "top_side_cell_status": (
-                sanitized_cells[0].get("status") if sanitized_cells else None
-            ),
-            "top_review_candidate_side_cell_key": None,
-            "top_review_candidate_learning_diagnosis": None,
-            "top_review_candidate_cost_gate_escape_recommendation": None,
-            "top_review_candidate_wrongful_block_score": None,
-            "top_review_candidate_net_cost_cushion_bps": None,
-            "research_only_legacy_status": legacy_status,
-            "research_only_legacy_reason": legacy_reason,
-            "research_only_legacy_next_trigger": legacy_next_trigger,
-            "research_only_legacy_review_candidate_side_cell_count": (
-                legacy_candidate_count
-            ),
-            "research_only_legacy_top_review_candidate_fields": (
-                legacy_top_candidate_fields
-            ),
-            "candidate_lineage_audit": {
-                "source_schema_version": candidate_board.get("schema_version"),
-                "status": candidate_board.get("status"),
-                "count_unit": "outcome_rows",
-                "qualified_lineage_outcome_row_count": (
-                    qualified_lineage_outcome_row_count
-                ),
-                "invalid_lineage_outcome_row_count": (
-                    invalid_lineage_outcome_row_count
-                ),
-                "unqualified_lineage_outcome_row_count": (
-                    unqualified_lineage_outcome_row_count
-                ),
-                # Compatibility aliases retained exactly, despite their older
-                # candidate-oriented names.
-                "qualified_candidate_count": qualified_lineage_outcome_row_count,
-                "invalid_lineage_count": invalid_lineage_outcome_row_count,
-                "unqualified_lineage_count": unqualified_lineage_outcome_row_count,
-            },
-            "boundary": _RESEARCH_COMPATIBILITY_NO_AUTHORITY_BOUNDARY,
-        }
-    )
-    headline = review.get("headline_selection")
-    if isinstance(headline, dict):
-        headline["research_only_legacy_headline_edge_language_allowed"] = bool(
-            headline.get("headline_edge_language_allowed")
-        )
-        headline["headline_edge_language_allowed"] = False
-    return review
+    return project_research_compatibility_review_no_authority(review)
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -2087,21 +1866,6 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = _build_parser().parse_args()
-    try:
-        ledger_projection = read_candidate_board_ledger_projection(args.ledger)
-    except (LedgerScanError, LedgerProjectionLimitError) as exc:
-        print(
-            json.dumps(
-                {
-                    "status": "RETAINED_LEDGER_SCAN_DEFERRED",
-                    "ledger_path": str(args.ledger),
-                    "reason": str(exc),
-                },
-                sort_keys=True,
-            ),
-            file=sys.stderr,
-        )
-        return RETAINED_LEDGER_SCAN_DEFERRED_EXIT_CODE
     cfg = BlockedOutcomeReviewConfig(
         min_outcomes_per_side_cell=args.min_outcomes_per_side_cell,
         min_effective_entries_per_side_cell=args.min_effective_entries_per_side_cell,
@@ -2118,15 +1882,34 @@ def main() -> int:
         slippage_payload = json.loads(
             args.slippage_artifact.read_text(encoding="utf-8")
         )
-    scorecard = build_blocked_signal_outcome_review(
-        ledger_projection.rows,
-        cfg=cfg,
-        slippage_quantiles=slippage_payload,
-        source_ledger_row_count=ledger_projection.source_ledger_row_count,
-    )
-    scorecard["ledger_projection_lineage_exclusion_reason_counts"] = (
-        ledger_projection.lineage_exclusion_reason_counts
-    )
+    try:
+        with read_candidate_board_ledger_projection(args.ledger) as projection:
+            scorecard = build_blocked_signal_outcome_review(
+                projection.rows,
+                cfg=cfg,
+                slippage_quantiles=slippage_payload,
+                source_ledger_row_count=projection.source_ledger_row_count,
+            )
+            scorecard["ledger_projection_lineage_exclusion_reason_counts"] = (
+                projection.lineage_exclusion_reason_counts
+            )
+    except (
+        CandidateBoardQualifiedCohortMaterializationError,
+        LedgerScanError,
+        LedgerProjectionLimitError,
+    ) as exc:
+        print(
+            json.dumps(
+                {
+                    "status": "RETAINED_LEDGER_SCAN_DEFERRED",
+                    "ledger_path": str(args.ledger),
+                    "reason": str(exc),
+                },
+                sort_keys=True,
+            ),
+            file=sys.stderr,
+        )
+        return RETAINED_LEDGER_SCAN_DEFERRED_EXIT_CODE
     if args.output:
         _write_json(args.output, scorecard)
     if args.print_json or not args.output:
