@@ -36,6 +36,7 @@ import json
 import math
 from pathlib import Path
 import sys
+import tempfile
 from typing import Any
 
 
@@ -49,6 +50,8 @@ from cost_gate_learning_lane.contract import BLOCKED_SIGNAL_OUTCOME_RECORD_TYPE
 from cost_gate_learning_lane.candidate_board import (
     ARBITER_INPUT_SCHEMA_VERSION,
     LEARNING_CANDIDATE_BOARD_SCHEMA_VERSION,
+    _candidate_source_contract_valid,
+    _classify_lineage,
     build_learning_candidate_board,
     candidate_learning_context as _candidate_learning_context,
 )
@@ -64,13 +67,12 @@ from cost_gate_learning_lane.evidence_stats import (
     one_sided_t_p_value,
     sign_flip_selection_p_value,
 )
-from cost_gate_learning_lane.runtime_adapter import (
-    read_candidate_evidence_jsonl_ledger,
+from cost_gate_learning_lane.ledger_streaming import (
+    LedgerProjectionLimitError,
+    LedgerScanError,
+    scan_retained_jsonl,
 )
-from cost_gate_learning_lane.ledger_rotation import (
-    MAX_IN_MEMORY_RETAINED_LEDGER_BYTES,
-    retained_ledger_total_bytes,
-)
+from cost_gate_learning_lane.runtime_adapter import project_candidate_evidence_rows
 
 
 # v6:learning_candidate_board 先做 prospective raw/evaluation lineage 三分區，
@@ -81,7 +83,9 @@ BLOCKED_OUTCOME_REVIEW_SCHEMA_VERSION = (
     "cost_gate_demo_learning_lane_blocked_outcome_review_v6"
 )
 BLOCKED_OUTCOME_REVIEW_RECORD_TYPE = "blocked_signal_outcome_review"
-RETAINED_LEDGER_STREAMING_PROJECTION_REQUIRED_EXIT_CODE = 75
+RETAINED_LEDGER_SCAN_DEFERRED_EXIT_CODE = 75
+MAX_STREAMED_CANDIDATE_EVIDENCE_ROWS = 250_000
+MAX_STREAMED_CANDIDATE_EVIDENCE_BYTES = 512 * 1024 * 1024
 RESEARCH_COMPATIBILITY_BLOCKED_OUTCOME_REVIEW_SCHEMA_VERSION = (
     "cost_gate_blocked_outcome_research_compatibility_no_authority_v1"
 )
@@ -151,6 +155,81 @@ class BlockedOutcomeReviewConfig:
     # 預註冊 §3 E3:單一 UTC 日佔入選 entry 比例上限。50% = 凍結值(防「名義
     # 多天、實質單日主導」繞過 E2)。
     max_top_entry_day_share_pct: float = 50.0
+
+
+@dataclass(frozen=True)
+class CandidateBoardLedgerProjection:
+    """Bounded blocked-outcome spool produced by one physical ledger scan."""
+
+    rows: list[dict[str, Any]]
+    source_ledger_row_count: int
+    blocked_outcome_row_count: int
+    lineage_exclusion_reason_counts: dict[str, int]
+
+
+def read_candidate_board_ledger_projection(
+    ledger_path: Path,
+) -> CandidateBoardLedgerProjection:
+    """Spool only candidate-board evidence and reject incomplete universes."""
+    source_row_count = 0
+    blocked_row_count = 0
+    projected_bytes = 0
+    exclusion_reasons: dict[str, int] = {}
+    with tempfile.TemporaryDirectory(prefix="cost-gate-candidate-board-") as temp_dir:
+        spool_path = Path(temp_dir) / "blocked-evidence.jsonl"
+        with spool_path.open("wb") as spool:
+
+            def consume(raw_row: dict[str, Any]) -> None:
+                nonlocal source_row_count, blocked_row_count, projected_bytes
+                source_row_count += 1
+                row = project_candidate_evidence_rows((raw_row,))[0]
+                if row.get("record_type") != BLOCKED_SIGNAL_OUTCOME_RECORD_TYPE:
+                    return
+                lineage = _classify_lineage(row)
+                if (
+                    lineage["partition"] == "QUALIFIED"
+                    and not _candidate_source_contract_valid(lineage)
+                ):
+                    lineage = {
+                        **lineage,
+                        "partition": "INVALID",
+                        "reason": "INVALID_LINEAGE_EXACT_COHORT",
+                    }
+                if lineage["partition"] != "QUALIFIED":
+                    reason = str(lineage["reason"])
+                    exclusion_reasons[reason] = exclusion_reasons.get(reason, 0) + 1
+                encoded = json.dumps(
+                    row,
+                    ensure_ascii=True,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                ).encode("utf-8")
+                projected_bytes += len(encoded) + 1
+                if (
+                    blocked_row_count >= MAX_STREAMED_CANDIDATE_EVIDENCE_ROWS
+                    or projected_bytes > MAX_STREAMED_CANDIDATE_EVIDENCE_BYTES
+                ):
+                    raise LedgerProjectionLimitError(
+                        "CANDIDATE_BOARD_PROJECTION_LIMIT_REACHED",
+                        path=ledger_path,
+                    )
+                spool.write(encoded + b"\n")
+                blocked_row_count += 1
+
+            scan_retained_jsonl(ledger_path, consume)
+            spool.flush()
+
+        with spool_path.open("rb") as spool:
+            rows = [json.loads(raw_line) for raw_line in spool]
+        return CandidateBoardLedgerProjection(
+            rows=rows,
+            source_ledger_row_count=source_row_count,
+            blocked_outcome_row_count=blocked_row_count,
+            lineage_exclusion_reason_counts={
+                key: exclusion_reasons[key] for key in sorted(exclusion_reasons)
+            },
+        )
 
 
 def _utc_now() -> dt.datetime:
@@ -1390,6 +1469,7 @@ def _build_blocked_signal_outcome_review_core(
     edge_estimates: dict[str, dict[str, Any]] | None = None,
     slippage_quantiles: dict[str, Any] | None = None,
     qualified_lineage_only: bool,
+    source_ledger_row_count: int | None = None,
 ) -> dict[str, Any]:
     """Shared statistical core for strict and research-only review facades.
 
@@ -1657,7 +1737,11 @@ def _build_blocked_signal_outcome_review_core(
             if qualified_lineage_only
             else "FULL_LEDGER_RESEARCH_COMPATIBILITY_NO_AUTHORITY"
         ),
-        "source_ledger_row_count": len(ledger_rows),
+        "source_ledger_row_count": (
+            len(ledger_rows)
+            if source_ledger_row_count is None
+            else source_ledger_row_count
+        ),
         "outcome_aggregation_input_row_count": len(aggregation_rows),
         "side_cell_count": len(side_cells),
         "review_candidate_side_cell_count": candidate_count,
@@ -1796,6 +1880,8 @@ def _build_blocked_signal_outcome_review_core(
         "strict_side_cell_reviews_by_key": strict_side_cell_reviews_by_key,
         "top_side_cells": side_cells[:16],
         "learning_candidate_board": learning_candidate_board,
+        "candidate_board_generation_state": "COMPLETE",
+        "ledger_scan_status": "COMPLETE",
         "promotion_evidence": False,
         "order_authority": "NOT_GRANTED",
         "main_cost_gate_adjustment": "NONE",
@@ -1815,6 +1901,7 @@ def build_blocked_signal_outcome_review(
     overlay: dict[str, dict[str, Any]] | None = None,
     edge_estimates: dict[str, dict[str, Any]] | None = None,
     slippage_quantiles: dict[str, Any] | None = None,
+    source_ledger_row_count: int | None = None,
 ) -> dict[str, Any]:
     """Build the production v6 review from qualified prospective lineage only."""
     return _build_blocked_signal_outcome_review_core(
@@ -1825,6 +1912,7 @@ def build_blocked_signal_outcome_review(
         edge_estimates=edge_estimates,
         slippage_quantiles=slippage_quantiles,
         qualified_lineage_only=True,
+        source_ledger_row_count=source_ledger_row_count,
     )
 
 
@@ -1999,23 +2087,21 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = _build_parser().parse_args()
-    retained_bytes = retained_ledger_total_bytes(args.ledger)
-    if retained_bytes > MAX_IN_MEMORY_RETAINED_LEDGER_BYTES:
+    try:
+        ledger_projection = read_candidate_board_ledger_projection(args.ledger)
+    except (LedgerScanError, LedgerProjectionLimitError) as exc:
         print(
             json.dumps(
                 {
-                    "status": "RETAINED_LEDGER_STREAMING_PROJECTION_REQUIRED",
+                    "status": "RETAINED_LEDGER_SCAN_DEFERRED",
                     "ledger_path": str(args.ledger),
-                    "retained_ledger_bytes": retained_bytes,
-                    "max_in_memory_retained_ledger_bytes": (
-                        MAX_IN_MEMORY_RETAINED_LEDGER_BYTES
-                    ),
+                    "reason": str(exc),
                 },
                 sort_keys=True,
             ),
             file=sys.stderr,
         )
-        return RETAINED_LEDGER_STREAMING_PROJECTION_REQUIRED_EXIT_CODE
+        return RETAINED_LEDGER_SCAN_DEFERRED_EXIT_CODE
     cfg = BlockedOutcomeReviewConfig(
         min_outcomes_per_side_cell=args.min_outcomes_per_side_cell,
         min_effective_entries_per_side_cell=args.min_effective_entries_per_side_cell,
@@ -2033,9 +2119,13 @@ def main() -> int:
             args.slippage_artifact.read_text(encoding="utf-8")
         )
     scorecard = build_blocked_signal_outcome_review(
-        read_candidate_evidence_jsonl_ledger(args.ledger),
+        ledger_projection.rows,
         cfg=cfg,
         slippage_quantiles=slippage_payload,
+        source_ledger_row_count=ledger_projection.source_ledger_row_count,
+    )
+    scorecard["ledger_projection_lineage_exclusion_reason_counts"] = (
+        ledger_projection.lineage_exclusion_reason_counts
     )
     if args.output:
         _write_json(args.output, scorecard)

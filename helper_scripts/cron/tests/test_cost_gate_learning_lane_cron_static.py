@@ -37,6 +37,17 @@ def test_wrapper_uses_guard_for_lock_and_outcome_review() -> None:
     assert 'rmdir "$LOCK_DIR"' not in src
 
 
+def test_candidate_board_publication_requires_explicit_complete_review() -> None:
+    src = _src(WRAPPER)
+    assert all(token in src for token in (
+        'payload.get("candidate_board_generation_state") == "COMPLETE"',
+        'payload.get("ledger_scan_status") == "COMPLETE"',
+        'board.get("candidate_universe_complete") is True',
+        'review_completion_state" == "COMPLETE"',
+        "preserving existing latest and consumer board",
+    ))
+
+
 @pytest.mark.parametrize("script", [WRAPPER, INSTALLER], ids=["wrapper", "installer"])
 def test_scripts_executable_and_strict_mode(script: Path) -> None:
     assert script.stat().st_mode & 0o111, f"{script.name} not executable"
