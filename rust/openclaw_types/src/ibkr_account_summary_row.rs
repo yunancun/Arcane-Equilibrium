@@ -11,8 +11,15 @@
 //! 由 IB 現勘腿覆核逐字串**（loop §2:UNVERIFIED 不升格為斷言——本白名單只做「認得才收」,
 //! 不對表外 tag 賦予任何語義）。
 //!
-//! **money 保真紀律**：`value_decimal` 用定點十進位**字串**承載(禁 f64 裸承 money);
-//! 簽名允許（NetLiquidation/AccruedCash 等帳戶值可為負）。
+//! **money 保真紀律**：`value_decimal` 用定點十進位**字串**承載(禁 f64 裸承 money)。
+//!
+//! **per-tag 符號紀律（E2 F3;cash 帳戶結構性定界,逐 tag 見枚舉注釋）**：
+//! - **可負（簽名保真）**：NetLiquidation / TotalCashValue / SettledCash / AccruedCash /
+//!   ExcessLiquidity / EquityWithLoanValue——帳戶淨值/現金/應計項在虧損、費用、利息下
+//!   可為負,拒負即失真。
+//! - **結構性非負（負值=blocker）**：GrossPositionValue（定義=持倉市值絕對值總和）/
+//!   BuyingPower（購買力下界 0）/ AvailableFunds（cash 帳戶結構性非負）——負值只可能
+//!   來自消化層錯誤,fail-closed 拒。
 //!
 //! **時間戳/序列語義**：IBKR wire 的 accountSummary 回報行**不自帶** per-row 時間戳——
 //! `captured_at_ms`/`snapshot_seq` 為**消化層 client 側**捕捉時鐘與快照單調序列（快照 vs
@@ -44,23 +51,24 @@ pub const IBKR_ACCOUNT_SUMMARY_WIRE_TAG_WHITELIST: [&str; 9] = [
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum IbkrAccountSummaryTagV1 {
-    /// 淨清算價值（"NetLiquidation"）。
+    /// 淨清算價值（"NetLiquidation";符號紀律=**可負**,深度虧損下淨值可為負）。
     NetLiquidation,
-    /// 現金總值（"TotalCashValue"）。
+    /// 現金總值（"TotalCashValue";符號紀律=**可負**,費用/借方餘額可致負）。
     TotalCashValue,
-    /// 已結算現金（"SettledCash"）。
+    /// 已結算現金（"SettledCash";符號紀律=**可負**,同上保真承載）。
     SettledCash,
-    /// 購買力（"BuyingPower"）。
+    /// 購買力（"BuyingPower";符號紀律=**結構性非負**,下界 0——負值=blocker）。
     BuyingPower,
-    /// 可用資金（"AvailableFunds"）。
+    /// 可用資金（"AvailableFunds";符號紀律=**結構性非負**,cash 帳戶下——負值=blocker）。
     AvailableFunds,
-    /// 超額流動性（"ExcessLiquidity"）。
+    /// 超額流動性（"ExcessLiquidity";符號紀律=**可負**,margin 語義下可為負,保真承載）。
     ExcessLiquidity,
-    /// 總持倉市值（"GrossPositionValue"）。
+    /// 總持倉市值（"GrossPositionValue";符號紀律=**結構性非負**,定義=絕對值總和——
+    /// 負值=blocker）。
     GrossPositionValue,
-    /// 應計現金（"AccruedCash";可為負）。
+    /// 應計現金（"AccruedCash";符號紀律=**可負**,應計利息/股息可為負）。
     AccruedCash,
-    /// 含貸款權益（"EquityWithLoanValue"）。
+    /// 含貸款權益（"EquityWithLoanValue";符號紀律=**可負**,同 NetLiquidation 保真）。
     EquityWithLoanValue,
     /// 契約 default / 現勘表外 wire tag 的 fail-closed 分類（`validate()` 必拒）。
     UnknownDenied,
@@ -88,6 +96,18 @@ impl IbkrAccountSummaryTagV1 {
             "EquityWithLoanValue" => Self::EquityWithLoanValue,
             _ => Self::UnknownDenied,
         }
+    }
+
+    /// per-tag 符號紀律表（模組註解定界）:`true`=結構性非負,負值即 blocker;
+    /// `false`=簽名保真承載。`UnknownDenied` 取 `true`（fail-closed;其 tag blocker 先行）。
+    pub fn is_structurally_non_negative(&self) -> bool {
+        matches!(
+            self,
+            Self::GrossPositionValue
+                | Self::BuyingPower
+                | Self::AvailableFunds
+                | Self::UnknownDenied
+        )
     }
 
     /// 白名單枚舉 → wire tag 字串（`UnknownDenied` 無 wire 對應 → `None`;round-trip 測試面）。
@@ -235,6 +255,9 @@ impl IbkrAccountSummaryRowV1 {
         }
         if !is_signed_decimal_string(&self.value_decimal) {
             blockers.push(B::ValueDecimalInvalid);
+        } else if self.tag.is_structurally_non_negative() && self.value_decimal.starts_with('-') {
+            // per-tag 符號紀律:結構性非負 tag 帶負值=消化層錯誤,fail-closed 拒。
+            blockers.push(B::NegativeValueForNonNegativeTag);
         }
         if self.currency != StockEtfCurrency::Usd {
             blockers.push(B::CurrencyDenied);
@@ -283,6 +306,7 @@ pub enum IbkrAccountSummaryRowBlocker {
     AccountIdMissing,
     TagUnknownDenied,
     ValueDecimalInvalid,
+    NegativeValueForNonNegativeTag,
     CurrencyDenied,
     CapturedAtMissing,
     SnapshotSeqMissing,

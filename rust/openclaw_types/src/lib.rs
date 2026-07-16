@@ -114,8 +114,8 @@ pub use ibkr_phase2_runtime::{
     IBKR_SECRET_SLOT_CONTRACT_ID,
 };
 pub use ibkr_positions_row::{
-    IbkrPositionsRowBlocker, IbkrPositionsRowV1, IbkrPositionsRowVerdict, IbkrSecTypeV1,
-    IBKR_POSITIONS_ROW_CONTRACT_ID,
+    is_normalized_symbol, IbkrPositionsRowBlocker, IbkrPositionsRowV1, IbkrPositionsRowVerdict,
+    IbkrSecTypeV1, IBKR_POSITIONS_ROW_CONTRACT_ID,
 };
 pub use ibkr_tws_connection_health::{
     IbkrConnectionHealthBlocker, IbkrConnectionHealthEntitlementStateV1,

@@ -91,6 +91,107 @@ fn wire_tag_whitelist_round_trips_and_unknown_is_denied() {
 }
 
 #[test]
+fn every_non_unknown_variant_wire_tag_is_in_whitelist_const() {
+    use IbkrAccountSummaryTagV1 as Tag;
+
+    // F4 反向斷言:每個非 UnknownDenied 枚舉變體的 wire tag ∈ WHITELIST const,
+    // 且 classify(as_wire) 恆等回自身——枚舉與 const 表雙向鎖死,單側漂移即紅。
+    let all_non_unknown = [
+        Tag::NetLiquidation,
+        Tag::TotalCashValue,
+        Tag::SettledCash,
+        Tag::BuyingPower,
+        Tag::AvailableFunds,
+        Tag::ExcessLiquidity,
+        Tag::GrossPositionValue,
+        Tag::AccruedCash,
+        Tag::EquityWithLoanValue,
+    ];
+    for tag in all_non_unknown {
+        let wire = tag.as_wire_tag().expect("非 Unknown 變體必有 wire 對應");
+        assert!(
+            IBKR_ACCOUNT_SUMMARY_WIRE_TAG_WHITELIST.contains(&wire),
+            "變體 {tag:?} 的 wire tag {wire:?} 不在 WHITELIST const"
+        );
+        assert_eq!(IbkrAccountSummaryTagV1::classify_wire_tag(wire), tag);
+    }
+    // 基數鎖:const 表長度 = 非 Unknown 變體數(白名單無孤兒/無缺席)。
+    assert_eq!(
+        IBKR_ACCOUNT_SUMMARY_WIRE_TAG_WHITELIST.len(),
+        all_non_unknown.len()
+    );
+}
+
+#[test]
+fn per_tag_sign_discipline_partitions_whitelist() {
+    use IbkrAccountSummaryTagV1 as Tag;
+
+    // F3 符號紀律表:結構性非負三 tag + fail-closed 的 UnknownDenied。
+    for tag in [
+        Tag::GrossPositionValue,
+        Tag::BuyingPower,
+        Tag::AvailableFunds,
+        Tag::UnknownDenied,
+    ] {
+        assert!(tag.is_structurally_non_negative(), "{tag:?} 應為結構性非負");
+    }
+    // 可負(簽名保真)六 tag。
+    for tag in [
+        Tag::NetLiquidation,
+        Tag::TotalCashValue,
+        Tag::SettledCash,
+        Tag::AccruedCash,
+        Tag::ExcessLiquidity,
+        Tag::EquityWithLoanValue,
+    ] {
+        assert!(!tag.is_structurally_non_negative(), "{tag:?} 應可負保真");
+    }
+}
+
+#[test]
+fn negative_value_on_structurally_non_negative_tag_is_rejected() {
+    use IbkrAccountSummaryTagV1 as Tag;
+
+    // 結構性非負 tag 帶負值 → 專屬 blocker(消化層錯誤,fail-closed)。
+    for tag in [
+        Tag::GrossPositionValue,
+        Tag::BuyingPower,
+        Tag::AvailableFunds,
+    ] {
+        let row = IbkrAccountSummaryRowV1 {
+            tag,
+            value_decimal: "-0.01".to_string(),
+            ..IbkrAccountSummaryRowV1::accepted_fixture()
+        };
+        let verdict = row.validate();
+        assert!(!verdict.accepted, "{tag:?} 負值應被拒");
+        assert_eq!(
+            verdict.blockers,
+            vec![IbkrAccountSummaryRowBlocker::NegativeValueForNonNegativeTag]
+        );
+    }
+    // 同 tag 零值/正值合法(邊界:紀律只拒負,不拒零)。
+    for value in ["0", "12500.00"] {
+        let row = IbkrAccountSummaryRowV1 {
+            tag: Tag::BuyingPower,
+            value_decimal: value.to_string(),
+            ..IbkrAccountSummaryRowV1::accepted_fixture()
+        };
+        assert!(row.validate().accepted, "BuyingPower {value:?} 應合法");
+    }
+    // 非法 decimal 優先報 ValueDecimalInvalid,不重複報符號紀律 blocker。
+    let malformed = IbkrAccountSummaryRowV1 {
+        tag: Tag::BuyingPower,
+        value_decimal: "-1e5".to_string(),
+        ..IbkrAccountSummaryRowV1::accepted_fixture()
+    };
+    assert_eq!(
+        malformed.validate().blockers,
+        vec![IbkrAccountSummaryRowBlocker::ValueDecimalInvalid]
+    );
+}
+
+#[test]
 fn unknown_tag_row_is_rejected() {
     let row = IbkrAccountSummaryRowV1 {
         tag: IbkrAccountSummaryTagV1::UnknownDenied,

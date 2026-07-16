@@ -73,6 +73,13 @@ fn sec_type_whitelist_is_stk_only_and_fail_closed() {
     }
     assert_eq!(IbkrSecTypeV1::UnknownDenied.as_wire_sec_type(), None);
     assert_eq!(IbkrSecTypeV1::default(), IbkrSecTypeV1::UnknownDenied);
+    // F4 反向斷言:每個非 UnknownDenied 變體 classify(as_wire) 恆等回自身。
+    for sec in [IbkrSecTypeV1::Stk] {
+        let wire = sec
+            .as_wire_sec_type()
+            .expect("非 Unknown 變體必有 wire 對應");
+        assert_eq!(IbkrSecTypeV1::classify_wire_sec_type(wire), sec);
+    }
 }
 
 #[test]
