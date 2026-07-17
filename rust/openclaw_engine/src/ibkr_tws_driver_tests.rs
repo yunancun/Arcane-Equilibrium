@@ -1673,9 +1673,10 @@ fn spy_market_data_request() -> MarketDataRequest {
     }
 }
 
-/// enable_market_data 的單訂閱期望集（identity/calendar hash=64 hex 占位）。
-fn one_market_data_sub(req: MarketDataRequest) -> Vec<(i64, MarketDataRequest, String, String)> {
-    vec![(MARKET_DATA_REQ_ID, req, "a".repeat(64), "b".repeat(64))]
+/// enable_market_data 的單訂閱期望集（W6-S4:溯源錨由 driver 對 conId 的 identity row 現算,
+/// caller 不再供 hash）。
+fn one_market_data_sub(req: MarketDataRequest) -> Vec<(i64, MarketDataRequest)> {
+    vec![(MARKET_DATA_REQ_ID, req)]
 }
 
 #[tokio::test]
@@ -1810,4 +1811,166 @@ async fn w6s3_malformed_tick_fail_closed_disconnect() {
         driver.last_disconnect_cause(),
         Some(ServeDisconnectCause::MarketDataWireMalformed(_))
     ));
+}
+
+// ===========================================================================
+// W6-S4 provenance calendar_hash 真綁定（+ dead helper 收口 + reqId 守衛）
+// ===========================================================================
+
+#[tokio::test]
+async fn w6s4_calendar_hash_bound_from_identity_row() {
+    use openclaw_types::is_sha256_hex;
+    // contract details（產可解析 liquidHours 的 identity row）+ market data 同 session。
+    let (mut driver, _h) = fake_driver(scenarios::market_data_with_contract_details_session(
+        CONTRACT_DETAILS_REQ_ID,
+        MARKET_DATA_REQ_ID,
+    ));
+    driver.enable_contract_details(spy_contract_query());
+    driver.enable_market_data(one_market_data_sub(spy_market_data_request()), false);
+    let mut clock = TestClock::at(1_000);
+    assert_eq!(
+        driver.run_connect_cycle(&mut clock).await,
+        CycleOutcome::Served(ServeEnd::IoDropped)
+    );
+    // 期望值=對該 conId 的 identity row 跑 parse_trading_calendar(RTH)+compute_calendar_hash。
+    let row = driver
+        .contract_data()
+        .identity_row(756733)
+        .expect("應有 identity row")
+        .clone();
+    let expected_cal = compute_calendar_hash(
+        &parse_trading_calendar(&row, IbkrCalendarHoursKindV1::Rth)
+            .expect("RTH liquidHours 可解析"),
+    );
+    let prov = driver.market_data().provenance(MARKET_DATA_REQ_ID).unwrap();
+    assert_eq!(
+        prov.calendar_hash, expected_cal,
+        "provenance calendar_hash 綁真值（非佔位/非捏值）"
+    );
+    assert!(is_sha256_hex(&prov.calendar_hash));
+    assert_eq!(
+        prov.instrument_identity_hash, row.identity_hash,
+        "identity_hash 亦綁真 row（非 caller 佔位）"
+    );
+    // 全溯源錨綁定 → provenance 過契約（注入寬 now）。
+    assert!(
+        prov.validate(10_000).accepted,
+        "溯源錨齊全 → provenance 契約 accepted"
+    );
+}
+
+#[tokio::test]
+async fn w6s4_no_identity_row_calendar_unbound_fail_closed() {
+    // market data 開但未取 contract details → 該 conId 無 identity row → calendar 未綁（fail-closed）。
+    let (mut driver, _h) =
+        fake_driver(scenarios::market_data_streaming_session(MARKET_DATA_REQ_ID));
+    driver.enable_market_data(one_market_data_sub(spy_market_data_request()), false);
+    let mut clock = TestClock::at(1_000);
+    assert_eq!(
+        driver.run_connect_cycle(&mut clock).await,
+        CycleOutcome::Served(ServeEnd::IoDropped)
+    );
+    let prov = driver.market_data().provenance(MARKET_DATA_REQ_ID).unwrap();
+    // 未綁哨兵（絕不捏 hash）→ typed CalendarUnbound blocker,provenance fail-closed。
+    assert_eq!(prov.calendar_hash, IBKR_CALENDAR_HASH_UNBOUND_SENTINEL);
+    let v = prov.validate(10_000);
+    assert!(!v.accepted);
+    assert!(v
+        .blockers
+        .contains(&openclaw_types::IbkrMarketDataProvenanceBlocker::CalendarUnbound));
+    // entitlement 仍誠實=Entitled（未綁 calendar 不掩蓋 entitlement 事實）。
+    assert_eq!(
+        prov.entitlement_state,
+        openclaw_types::IbkrMarketDataEntitlementStateV1::Entitled
+    );
+}
+
+#[tokio::test]
+async fn w6s4_identity_row_present_but_calendar_unparseable_unbound() {
+    use openclaw_types::is_sha256_hex;
+    // identity row 到達（tz 原字串保真=非白名單 Europe/London,身分契約只驗非空 → 通過）,
+    // 但 parse_trading_calendar 拒（非 US lane 白名單 tz）→ provenance calendar 未綁,fail-closed。
+    let (mut driver, _h) = fake_driver(scenarios::market_data_bad_calendar_row_session(
+        CONTRACT_DETAILS_REQ_ID,
+        MARKET_DATA_REQ_ID,
+    ));
+    driver.enable_contract_details(spy_contract_query());
+    driver.enable_market_data(one_market_data_sub(spy_market_data_request()), false);
+    let mut clock = TestClock::at(1_000);
+    assert_eq!(
+        driver.run_connect_cycle(&mut clock).await,
+        CycleOutcome::Served(ServeEnd::IoDropped)
+    );
+    let row_tz = driver
+        .contract_data()
+        .identity_row(756733)
+        .expect("identity row 消化成功")
+        .time_zone_id
+        .clone();
+    assert_eq!(row_tz, "Europe/London");
+    let (_cap_rejects, parse_failed) = driver.calendar_binding_audit();
+    assert!(parse_failed >= 1, "calendar 解析失敗計數落帳（telemetry）");
+    let prov = driver.market_data().provenance(MARKET_DATA_REQ_ID).unwrap();
+    assert_eq!(
+        prov.calendar_hash, IBKR_CALENDAR_HASH_UNBOUND_SENTINEL,
+        "解析失敗 → 未綁哨兵,絕不捏 hash"
+    );
+    // identity_hash 仍綁真值（row 在,只是日曆不可解）——區分「row 缺」與「日曆不可解」。
+    assert!(is_sha256_hex(&prov.instrument_identity_hash));
+}
+
+#[tokio::test]
+async fn w6s4_session_scope_reqid_neg1_does_not_halt_subscription() {
+    // E2-N1:訂閱 Entitled 後收 reqId=-1 的 session-scope entitlement 錯誤碼（10197）→ `rid > 0`
+    // 守衛令其不進 per-reqId FSM,活躍訂閱不被誤 halt。
+    let (mut driver, _h) = fake_driver(scenarios::market_data_session_scope_error_after_sub(
+        MARKET_DATA_REQ_ID,
+    ));
+    driver.enable_market_data(one_market_data_sub(spy_market_data_request()), false);
+    let mut clock = TestClock::at(1_000);
+    assert_eq!(
+        driver.run_connect_cycle(&mut clock).await,
+        CycleOutcome::Served(ServeEnd::IoDropped)
+    );
+    let digest = driver.market_data();
+    // -1 未被路由至 per-reqId competing FSM（對比 w6s3_competing_session_10197 的 reqId 匹配版=1）。
+    assert_eq!(
+        digest.audit().entitlement_competing_session,
+        0,
+        "session-scope reqId=-1 不誤路由至訂閱 entitlement FSM"
+    );
+    // entitlement 事實不被 -1 錯誤污染（仍 Entitled）。
+    assert_eq!(
+        digest
+            .provenance(MARKET_DATA_REQ_ID)
+            .unwrap()
+            .entitlement_state,
+        openclaw_types::IbkrMarketDataEntitlementStateV1::Entitled
+    );
+}
+
+#[tokio::test]
+async fn w6s4_unknown_entitlement_code_still_halts_per_req() {
+    // IB-B′ 收口回歸:pre-filter 助手移除後,表外 code（9999）帶對應 reqId 仍達
+    // `on_entitlement_error` 的 Unknown → Halt 臂（fail-closed 不弱化）。
+    let (mut driver, _h) = fake_driver(scenarios::market_data_unknown_entitlement_code(
+        MARKET_DATA_REQ_ID,
+    ));
+    driver.enable_market_data(one_market_data_sub(spy_market_data_request()), false);
+    let mut clock = TestClock::at(1_000);
+    assert_eq!(
+        driver.run_connect_cycle(&mut clock).await,
+        CycleOutcome::Served(ServeEnd::IoDropped)
+    );
+    let digest = driver.market_data();
+    assert_eq!(
+        digest.audit().entitlement_unknown_code_halts,
+        1,
+        "表外 code 仍 halt（fail-closed 保留）"
+    );
+    assert_eq!(
+        digest.quote_staleness(MARKET_DATA_REQ_ID, 1_000),
+        Some(SnapshotStaleness::Invalidated),
+        "unknown code halt=終態"
+    );
 }

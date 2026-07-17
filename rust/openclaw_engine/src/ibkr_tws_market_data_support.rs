@@ -234,13 +234,11 @@ pub(crate) fn classify_entitlement_error(
     }
 }
 
-/// 一個 entitlement 錯誤碼是否為本 digest 消費的行情 entitlement 碼（否則非本面事,不路由）。
-pub(crate) fn is_market_data_entitlement_code(code: i64) -> bool {
-    !matches!(
-        classify_entitlement_error(code, false),
-        EntitlementErrorOutcome::Unknown
-    ) || code == IB_ERR_MKT_DATA_NOT_SUBSCRIBED
-}
+// IB-B′（R20）收口:`is_market_data_entitlement_code` pre-filter 助手已移除。理由——把它接為
+// pre-filter（僅已知 entitlement 碼進 FSM）會令表外 code 繞過 `on_entitlement_error` 的
+// `Unknown → Halted` 臂,弱化 fail-closed（違反「unknown code→halt 保留」硬邊界);而 driver
+// 對「reqId 對應活躍訂閱」的 ERR_MSG 一律入 FSM（表外 code→Unknown→Halt=保守 fail-closed)已是
+// 更強姿態,故本助手接線後恆冗餘 → 移除。halt-on-unknown 由 driver e2e 回歸測試釘住。
 
 // ===========================================================================
 // (c) tick 值紀律（保真 + no-data 抑制）+ provenance_hash 鑄造

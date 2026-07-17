@@ -9,6 +9,8 @@ MAX_LINES = 800
 # W6-S3 溯源契約層:契約 id + entitlement 三態 + adjustment marker 封閉枚舉。
 REQUIRED_CONTRACT_TOKENS = {
     'pub const IBKR_MARKET_DATA_PROVENANCE_CONTRACT_ID: &str = "stock_market_data_provenance_v1";',
+    # W6-S4:calendar 未綁哨兵（fail-closed typed 態,絕不捏 hash 冒充已綁）。
+    'pub const IBKR_CALENDAR_HASH_UNBOUND_SENTINEL: &str = "calendar_unbound";',
 }
 REQUIRED_TYPE_TOKENS = {
     "pub enum IbkrMarketDataEntitlementStateV1",
@@ -37,6 +39,7 @@ REQUIRED_BLOCKER_VARIANTS = {
     "WindowOutOfOrder",
     "InstrumentIdentityHashInvalid",
     "CalendarHashInvalid",
+    "CalendarUnbound",
     "ProvenanceHashInvalid",
     "OrderRouted",
     "SecretContentSerialized",
@@ -47,6 +50,8 @@ REQUIRED_SEMANTIC_TOKENS = {
     "is_sha256_hex(&self.instrument_identity_hash)",
     "is_sha256_hex(&self.calendar_hash)",
     "is_sha256_hex(&self.provenance_hash)",
+    # W6-S4:未綁哨兵分支先於形狀檢查（typed fail-closed,不捏 hash）。
+    "self.calendar_hash == IBKR_CALENDAR_HASH_UNBOUND_SENTINEL",
     "self.last_tick_at_ms < self.first_tick_at_ms",
     "self.entitlement_state.as_wire()",
 }
