@@ -224,6 +224,14 @@ pub mod ibkr_tws_order_lifecycle;
 // （T+1/GFV/LULD/RTH/order-type 待 IB 现勘,引擎不硬編）。純函數、注入時鐘 + config、零 socket/async/
 // send（不觸 transport,INV-ORDER/INV-1 恆 HOLD）。default build DCE（真接線=S4 IPC submit handler）。
 pub mod ibkr_cash_account_constraints;
+// IBKR W7-S3 三向對賬引擎（P0 核心;Bybit 幻影倉根因防線）：broker 真值（reqOpenOrders+
+// reqExecutions,W5-S3 唯讀 builder）× intent journal（S1）× 本地態三向對賬。無序 join tolerant
+// （idempotency_key 優先 / order-id fallback / 孤兒 fail-closed 禁丟棄=P0-C）;差異 fail-closed;
+// reduce-only 幻影防線經 S1 單一 mutator（P0-A）;unknown-terminal → ManualReview + 凍結 symbol
+// （P0-B）;E2-LOW-2 結算台帳 disjoint 不變量（承 S2 carry）。純函數、注入時鐘、零 socket/async/
+// send（不觸 transport,INV-ORDER/INV-1 恆 HOLD;一切遷移唯經 S1 mutator）。default build DCE
+// （真接線=S4 IPC reconcile 迴路）。
+pub mod ibkr_order_reconciliation;
 // IBKR B1 只讀 TWS 連接器（ADR-0048 / AMD-2026-07-08-01，G4 首次接觸）：connect handshake
 // + reqCurrentTime 最小首接觸；純 codec + generic driver + 3 層惰性 gate；唯一具體
 // TcpStream::connect 於 `ibkr_g4_contact` feature 後（default build 無 socket、無 caller）。
