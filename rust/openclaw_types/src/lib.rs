@@ -15,6 +15,7 @@ pub mod ibkr_executions_row;
 pub mod ibkr_feature_flag_secret_auth;
 pub mod ibkr_instrument_identity_row;
 pub mod ibkr_market_data_provenance;
+pub mod ibkr_trading_calendar;
 pub mod ibkr_non_bybit_api_allowlist;
 pub mod ibkr_quote_row;
 pub mod ibkr_paper_lifecycle;
@@ -92,6 +93,11 @@ pub use ibkr_market_data_provenance::{
     IbkrMarketDataEntitlementStateV1, IbkrMarketDataProvenanceBlocker, IbkrMarketDataProvenanceV1,
     IbkrMarketDataProvenanceVerdict, IbkrPriceAdjustmentV1,
     IBKR_MARKET_DATA_PROVENANCE_CONTRACT_ID,
+};
+pub use ibkr_trading_calendar::{
+    IbkrCalendarHoursKindV1, IbkrCalendarSessionKindV1, IbkrTradingCalendarBlocker,
+    IbkrTradingCalendarSessionV1, IbkrTradingCalendarV1, IbkrTradingCalendarVerdict,
+    CALENDAR_TZ_UNKNOWN_DENIED_SENTINEL, IBKR_TRADING_CALENDAR_CONTRACT_ID,
 };
 pub use ibkr_non_bybit_api_allowlist::{
     classify_non_bybit_api_action, required_non_bybit_api_actions, NonBybitApiAction,
