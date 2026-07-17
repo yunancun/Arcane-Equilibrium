@@ -1309,6 +1309,294 @@ async fn w6s0_floor_blocked_memory_resets_each_generation() {
     );
 }
 
+// ===========================================================================
+// W6-S1:contract details 消化端到端（查詢 pump 經 governor 單一出口 + identity 契約 +
+// typed-ignore + 毒化世代重評）
+// ===========================================================================
+
+/// W6-S1 e2e 測試共用查詢（全限定 STK:symbol+SMART;與 fake 場景 SPY 行對齊）。
+fn spy_contract_query() -> ContractDetailsQuery {
+    ContractDetailsQuery {
+        con_id: None,
+        symbol: "SPY".to_string(),
+        exchange: "SMART".to_string(),
+        primary_exchange: "ARCA".to_string(),
+    }
+}
+
+#[tokio::test]
+async fn w6s1_contract_details_end_to_end_digests_and_marks_disconnect() {
+    use openclaw_types::{is_sha256_hex, IbkrStockTypeV1};
+
+    let (mut driver, handle) = fake_driver(scenarios::contract_details_session(
+        CONTRACT_DETAILS_REQ_ID,
+    ));
+    driver.enable_contract_details(spy_contract_query());
+    let mut clock = TestClock::at(1_000);
+    // 全 cycle:Ready → 首 serve tick 送查詢(經 governor AccountData 主桶)→ 消化行+End
+    // → 腳本盡 EOF → IoDropped。
+    assert_eq!(
+        driver.run_connect_cycle(&mut clock).await,
+        CycleOutcome::Served(ServeEnd::IoDropped)
+    );
+    // 出站證明:reqContractDetails(OUT 9,v8 全限定 STK/USD/includeExpired=0)真被送出
+    //（過 send_framed=grant 消費,單一出口編譯期強制)。
+    let frames = handle.received_message_frames().await;
+    let req = frames
+        .iter()
+        .map(|f| frame_fields(f))
+        .find(|f| f[0] == "9")
+        .expect("應送 reqContractDetails(9)");
+    assert_eq!(&req[..3], &["9", "8", "9003"], "v8 + 固定 reqId");
+    assert_eq!(req[5], "STK");
+    assert_eq!(req[12], "USD");
+    assert_eq!(req[15], "0", "includeExpired 恆 false");
+    // 消化證明:1 筆 identity 行,契約全欄 + identity_hash 可重建形。
+    let digest = driver.contract_data();
+    let (_, mut rows) = digest.identity_rows(0);
+    let row = rows.next().expect("應有 1 行");
+    assert_eq!(row.con_id, 756733);
+    assert_eq!(row.stock_type, IbkrStockTypeV1::Etf);
+    assert_eq!(row.primary_exchange, "ARCA");
+    assert!(is_sha256_hex(&row.identity_hash));
+    assert!(rows.next().is_none());
+    // 斷線失效:serve 結束(EOF)→ 快照標 DisconnectedStale(重連需 re-begin)。
+    assert_eq!(
+        digest.identity_staleness(0),
+        SnapshotStaleness::DisconnectedStale
+    );
+}
+
+#[tokio::test]
+async fn w6s1_pump_disabled_by_default_no_request_sent() {
+    // 默認 off:未綁定查詢 → 不送 OUT 9;入站 contract 資料因未請而收=typed 拒,不併入。
+    let (mut driver, handle) = fake_driver(scenarios::contract_details_session(
+        CONTRACT_DETAILS_REQ_ID,
+    ));
+    let mut clock = TestClock::at(1_000);
+    assert_eq!(
+        driver.run_connect_cycle(&mut clock).await,
+        CycleOutcome::Served(ServeEnd::IoDropped)
+    );
+    let frames = handle.received_message_frames().await;
+    let ids: Vec<String> = frames.iter().map(|f| frame_fields(f)[0].clone()).collect();
+    assert!(
+        !ids.contains(&"9".to_string()),
+        "pump off 不得送 reqContractDetails"
+    );
+    assert_eq!(driver.contract_data().identity_rows(0).1.count(), 0);
+    assert_eq!(driver.contract_data().audit().no_active_request_rejects, 2);
+}
+
+#[tokio::test]
+async fn w6s1_version_unpinned_poisons_but_session_survives() {
+    // IN 10 version=7(≠8 pin)→ 佈局權威失效:毒化+audit,session 不斷(EOF 才斷)。
+    let (mut driver, _h) = fake_driver(scenarios::contract_details_version_unpinned(
+        CONTRACT_DETAILS_REQ_ID,
+    ));
+    driver.enable_contract_details(spy_contract_query());
+    let mut clock = TestClock::at(1_000);
+    assert_eq!(
+        driver.run_connect_cycle(&mut clock).await,
+        CycleOutcome::Served(ServeEnd::IoDropped)
+    );
+    assert_eq!(
+        driver.contract_data().identity_staleness(0),
+        SnapshotStaleness::Invalidated,
+        "毒化保留(不被斷線沖淡)"
+    );
+    assert_eq!(driver.contract_data().identity_rows(0).1.count(), 0);
+    assert_eq!(
+        driver.contract_data().audit().message_version_unpinned_rejects,
+        1
+    );
+    assert_eq!(
+        driver.contract_data().audit().message_version_last_got,
+        Some(7)
+    );
+}
+
+#[tokio::test]
+async fn w6s1_denied_identity_rows_poison_with_exact_blockers() {
+    use openclaw_types::IbkrInstrumentIdentityRowBlocker as B;
+
+    // 表外 secType / 非 USD / 未知 venue 三族:各自恰觸對應契約 blocker → 毒化,
+    // session 存活到腳本 EOF。
+    for (sec_type, currency, primary_exchange, expected) in [
+        ("FUT", "USD", "ARCA", B::SecTypeUnknownDenied),
+        ("STK", "EUR", "ARCA", B::CurrencyDenied),
+        ("STK", "USD", "LSE", B::PrimaryExchangeVenueDenied),
+    ] {
+        let (mut driver, _h) = fake_driver(scenarios::contract_details_denied_row(
+            CONTRACT_DETAILS_REQ_ID,
+            sec_type,
+            currency,
+            primary_exchange,
+        ));
+        driver.enable_contract_details(spy_contract_query());
+        let mut clock = TestClock::at(1_000);
+        assert_eq!(
+            driver.run_connect_cycle(&mut clock).await,
+            CycleOutcome::Served(ServeEnd::IoDropped),
+            "契約 blocker 是資料層 reject,非 wire 損壞——session 應活到腳本 EOF"
+        );
+        assert_eq!(
+            driver.contract_data().identity_staleness(0),
+            SnapshotStaleness::Invalidated
+        );
+        assert_eq!(driver.contract_data().identity_rows(0).1.count(), 0);
+        assert_eq!(
+            driver.contract_data().audit().identity_row_last_blockers,
+            vec![expected],
+            "({sec_type},{currency},{primary_exchange}) 應恰觸 {expected:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn w6s1_bond_contract_data_typed_ignored_session_survives() {
+    // IN 18 先到:typed-ignore 記帳丟棄(不 unknown-fail 不斷線),其後 good 行照常消化。
+    let (mut driver, _h) = fake_driver(scenarios::contract_details_bond_then_good(
+        CONTRACT_DETAILS_REQ_ID,
+    ));
+    driver.enable_contract_details(spy_contract_query());
+    let mut clock = TestClock::at(1_000);
+    assert_eq!(
+        driver.run_connect_cycle(&mut clock).await,
+        CycleOutcome::Served(ServeEnd::IoDropped)
+    );
+    assert_eq!(driver.contract_data().audit().bond_contract_data_ignored, 1);
+    assert_eq!(
+        driver.contract_data().identity_rows(0).1.count(),
+        1,
+        "bond typed-ignore 不得影響 good 行消化"
+    );
+    // 斷線前因非 UnknownMsgId(18 已入白名單走 typed-ignore,非 fail-closed 斷線)。
+    assert_eq!(
+        driver.last_disconnect_cause(),
+        Some(&ServeDisconnectCause::ServerEof)
+    );
+}
+
+#[tokio::test]
+async fn w6s1_absurd_sec_id_count_poisons_session_survives() {
+    let (mut driver, _h) = fake_driver(scenarios::contract_details_absurd_sec_id_count(
+        CONTRACT_DETAILS_REQ_ID,
+    ));
+    driver.enable_contract_details(spy_contract_query());
+    let mut clock = TestClock::at(1_000);
+    assert_eq!(
+        driver.run_connect_cycle(&mut clock).await,
+        CycleOutcome::Served(ServeEnd::IoDropped)
+    );
+    assert_eq!(
+        driver.contract_data().identity_staleness(0),
+        SnapshotStaleness::Invalidated
+    );
+    assert_eq!(driver.contract_data().audit().sec_id_list_absurd_rejects, 1);
+    assert_eq!(
+        driver.contract_data().audit().sec_id_list_last_got,
+        Some(9999)
+    );
+}
+
+#[tokio::test]
+async fn w6s1_sv_gate_151_blocks_and_152_accepts() {
+    use openclaw_types::IbkrInstrumentIdentityRowBlocker as B;
+    use openclaw_types::IbkrStockTypeV1;
+
+    // sv=151:stockType 欄缺席——per-field 表按位少消費(非 WireMalformed 斷線),但 lane
+    // 的 ETF|COMMON 判別義務不可未知即過 → 契約拒+毒化。
+    let (mut driver, _h) = fake_driver(scenarios::contract_details_sv_gate_session(
+        CONTRACT_DETAILS_REQ_ID,
+        151,
+    ));
+    driver.enable_contract_details(spy_contract_query());
+    let mut clock = TestClock::at(1_000);
+    assert_eq!(
+        driver.run_connect_cycle(&mut clock).await,
+        CycleOutcome::Served(ServeEnd::IoDropped),
+        "sv=151 是契約拒非 wire 損壞——session 應活到腳本 EOF"
+    );
+    assert_eq!(
+        driver.contract_data().identity_staleness(0),
+        SnapshotStaleness::Invalidated
+    );
+    assert_eq!(
+        driver.contract_data().audit().identity_row_last_blockers,
+        vec![B::StockTypeUnknownDenied]
+    );
+    // sv=152:同邏輯行帶 stockType → 接受(門控表端到端對照)。
+    let (mut driver, _h) = fake_driver(scenarios::contract_details_sv_gate_session(
+        CONTRACT_DETAILS_REQ_ID,
+        152,
+    ));
+    driver.enable_contract_details(spy_contract_query());
+    let mut clock = TestClock::at(1_000);
+    assert_eq!(
+        driver.run_connect_cycle(&mut clock).await,
+        CycleOutcome::Served(ServeEnd::IoDropped)
+    );
+    let (_, mut rows) = driver.contract_data().identity_rows(0);
+    assert_eq!(
+        rows.next().map(|r| r.stock_type),
+        Some(IbkrStockTypeV1::Etf)
+    );
+}
+
+#[tokio::test]
+async fn w6s1_poisoned_face_recovers_after_reconnect_new_generation() {
+    // 恢復政策端到端:毒化(cycle1 撕 pin)→ 斷線 → 重連(世代推進重評)→ pump re-begin
+    // 成功(cycle2 happy 場景消化)——毒化=世代內終態,非永久鎖死(沿 W6-S0 慣例)。
+    let mut scns = VecDeque::new();
+    scns.push_back(scenarios::contract_details_version_unpinned(
+        CONTRACT_DETAILS_REQ_ID,
+    ));
+    scns.push_back(scenarios::contract_details_session(CONTRACT_DETAILS_REQ_ID));
+    let mut driver = SessionDriver::new(
+        GrantingProvider,
+        ScriptedTransport { scenarios: scns },
+        driver_config(),
+        timeouts(),
+        reader_limits(),
+    );
+    driver.enable_contract_details(spy_contract_query());
+    let mut clock = TestClock::at(0);
+    assert_eq!(
+        driver.run_connect_cycle(&mut clock).await,
+        CycleOutcome::Served(ServeEnd::IoDropped)
+    );
+    assert_eq!(
+        driver.contract_data().identity_staleness(0),
+        SnapshotStaleness::Invalidated
+    );
+    assert_eq!(driver.contract_data().identity_rows(0).1.count(), 0);
+    // 退避到期 → cycle2:世代推進(handshake 成功)重評 → pump 自動 re-begin → 消化成功。
+    let (entered, delay_ms) = match driver.state() {
+        SessionState::Backoff {
+            entered_at_ms,
+            next_delay,
+            ..
+        } => (*entered_at_ms, next_delay.as_millis() as u64),
+        s => panic!("expected Backoff, got {s:?}"),
+    };
+    clock.set(entered + delay_ms + 1);
+    assert_eq!(
+        driver.run_connect_cycle(&mut clock).await,
+        CycleOutcome::Served(ServeEnd::IoDropped)
+    );
+    assert_eq!(
+        driver.contract_data().identity_rows(0).1.count(),
+        1,
+        "新世代 re-begin 必須成功消化 happy 場景"
+    );
+    assert_eq!(
+        driver.contract_data().identity_staleness(0),
+        SnapshotStaleness::DisconnectedStale,
+        "cycle2 結束=斷線失效,非毒化"
+    );
+}
+
 #[tokio::test]
 async fn w6s0_disconnect_cause_is_typed_not_static_note() {
     // CC lineage 斷點 4:斷線「為什麼」typed 落帳,不再只剩注釋。

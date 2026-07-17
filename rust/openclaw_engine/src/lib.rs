@@ -159,6 +159,16 @@ pub mod ibkr_tws_account_data;
 // 主桶）;**絕不含下單/改單/撤單 builder**。純同步、注入時鐘、零 socket——與
 // wire/session/pacing/driver 同屬 default build 被 DCE 的 TWS 連接器面（B′ 姿態,g4 audit 保綠）。
 pub mod ibkr_tws_order_exec_data;
+// IBKR W6-S1 contract details 消化層：reqContractDetails 全限定 STK 查詢（v8 builder;模糊
+// 查詢=伺服端遞增 hold 面,結構性不送）→ IN 10 decode（message-version 硬 pin ==8 +
+// per-field sv 門控表 + secIdList bounded skip + longName unicode-escape 最小實作）→ W6-S1
+// instrument identity row 契約（identity_hash sha256 於此鑄造,preimage 單一定義點在 types）
+// → IN 52 End 界定快照;IN 18 bondContractData typed-ignore 記帳丟棄。請求 timeout typed 化
+//（expire_overdue 非懸掛）+ 單槽六態 staleness/世代重評/cap/audit（沿 W6-S0 慣例）。出站經
+// pacing 單一出口（OutboundClass::AccountData 主桶);零行情面（reqMktData/regulatorySnapshot
+// 歸 W6-S3 紅線)。純同步、注入時鐘、零 socket——與 wire/session/pacing/driver 同屬 default
+// build 被 DCE 的 TWS 連接器面（B′ 姿態,g4 audit 保綠）。
+pub mod ibkr_tws_contract_data;
 // IBKR W5-S4 session attestation producer：把 managedAccounts 實檢（DU* 白名單;
 // `account_fingerprint_is_live` 禁聲明自填,唯一鑄造點=wire `managed_accounts_inspect`）+
 // session 事實收斂為 typed `IbkrSessionAttestationV1`;契約 validate 全綠才產 attested 態,

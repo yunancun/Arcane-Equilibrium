@@ -389,6 +389,131 @@ pub fn open_order_end() -> FakeFrame {
     FakeFrame(encode_frame(&encode_fields(&["53", "1"])))
 }
 
+// ---- W6-S1 contract details builders（IN 10/52/18;IB pinned 欄位序,message-version 恆
+// "8",尾段欄按 server_version 門控出現/缺席——fake 為「另一方」server,獨立按表編碼）----
+
+/// contractData（IN 10）完整欄序（含 msgId/version/reqId 前導）。head 1-29 + secIdList
+/// （count=1 + 一對 ISIN）+ 門控尾段（110/121/122/126/134/152 按 `server_version`）。
+/// 回 `Vec<String>` 供場景就地變異（version 撕 pin / 荒謬 count 等;count 欄恆於
+/// index 32——head 29 欄 + 3 前導）。
+#[allow(clippy::too_many_arguments)]
+pub fn contract_details_fields(
+    req_id: i64,
+    server_version: i32,
+    con_id: i64,
+    symbol: &str,
+    sec_type: &str,
+    currency: &str,
+    primary_exchange: &str,
+    stock_type: &str,
+) -> Vec<String> {
+    let mut f: Vec<String> = vec![
+        "10".into(),
+        "8".into(),
+        req_id.to_string(),
+        symbol.into(),           // 1 symbol
+        sec_type.into(),         // 2 secType
+        "".into(),               // 3 lastTradeDateOrContractMonth
+        "0".into(),              // 4 strike
+        "".into(),               // 5 right
+        "SMART".into(),          // 6 exchange
+        currency.into(),         // 7 currency
+        symbol.into(),           // 8 localSymbol
+        symbol.into(),           // 9 marketName
+        symbol.into(),           // 10 tradingClass
+        con_id.to_string(),      // 11 conId
+        "0.01".into(),           // 12 minTick
+    ];
+    if server_version >= 110 {
+        f.push("100".into()); // 13 mdSizeMultiplier
+    }
+    f.extend([
+        "".into(),                            // 14 multiplier
+        "LMT,MKT".into(),                     // 15 orderTypes
+        "SMART,ARCA".into(),                  // 16 validExchanges
+        "1".into(),                           // 17 priceMagnifier
+        "0".into(),                           // 18 underConId
+        "SPDR S&P 500 ETF TRUST".into(),      // 19 longName
+        primary_exchange.into(),              // 20 primaryExchange
+        "".into(),                            // 21 contractMonth
+        "Funds".into(),                       // 22 industry
+        "".into(),                            // 23 category
+        "".into(),                            // 24 subcategory
+        "US/Eastern".into(),                  // 25 timeZoneId
+        "20260102:0400-20260102:2000".into(), // 26 tradingHours
+        "20260102:0930-20260102:1600".into(), // 27 liquidHours
+        "".into(),                            // 28 evRule
+        "0".into(),                           // 29 evMultiplier
+        // 30 secIdList:count=1 + 一對 (tag,value)
+        "1".into(),
+        "ISIN".into(),
+        "US78462F1030".into(),
+    ]);
+    if server_version >= 121 {
+        f.push("1".into()); // 31 aggGroup
+    }
+    if server_version >= 122 {
+        f.push("".into()); // 32 underSymbol
+        f.push("".into()); // 33 underSecType
+    }
+    if server_version >= 126 {
+        f.push("26,26".into()); // 34 marketRuleIds
+    }
+    if server_version >= 134 {
+        f.push("".into()); // 35 realExpirationDate
+    }
+    if server_version >= 152 {
+        f.push(stock_type.into()); // 36 stockType
+    }
+    f
+}
+
+/// contractData 行（IN 10;`contract_details_fields` 的 framed 形）。
+#[allow(clippy::too_many_arguments)]
+pub fn contract_details_row(
+    req_id: i64,
+    server_version: i32,
+    con_id: i64,
+    symbol: &str,
+    sec_type: &str,
+    currency: &str,
+    primary_exchange: &str,
+    stock_type: &str,
+) -> FakeFrame {
+    let fields = contract_details_fields(
+        req_id,
+        server_version,
+        con_id,
+        symbol,
+        sec_type,
+        currency,
+        primary_exchange,
+        stock_type,
+    );
+    let refs: Vec<&str> = fields.iter().map(String::as_str).collect();
+    FakeFrame(encode_frame(&encode_fields(&refs)))
+}
+
+/// contractDataEnd（IN 52;嚴格 3 欄 `[52, version, reqId]`）——快照收批標記。
+pub fn contract_details_end(req_id: i64) -> FakeFrame {
+    FakeFrame(encode_frame(&encode_fields(&[
+        "52",
+        "1",
+        &req_id.to_string(),
+    ])))
+}
+
+/// bondContractData（IN 18;cash lane 消化端 typed-ignore——欄內容任意,只驗 msgId 身分）。
+pub fn bond_contract_details(req_id: i64) -> FakeFrame {
+    FakeFrame(encode_frame(&encode_fields(&[
+        "18",
+        "6",
+        &req_id.to_string(),
+        "GOVT-BOND",
+        "junk-tail",
+    ])))
+}
+
 // ===========================================================================
 // (c) 場景 DSL + runner
 // ===========================================================================
@@ -559,8 +684,14 @@ pub mod scenarios {
     /// 預設 paper 握手序列（ACK v176 + managedAccounts DU + nextValidId + 兩則 farm-OK info +
     /// currentTime）——driver 應到 Ready。
     pub fn happy_handshake_frames() -> Vec<FakeFrame> {
+        handshake_frames_with_server_version(176)
+    }
+
+    /// 參數化 serverVersion 的 paper 握手序列（W6-S1 per-field sv 門控場景用:151 vs 152
+    /// 等 band 內對照;其餘與 happy 同形）。
+    pub fn handshake_frames_with_server_version(server_version: i32) -> Vec<FakeFrame> {
         vec![
-            handshake_ack(176, "20260716 09:30:00 EST"),
+            handshake_ack(server_version, "20260716 09:30:00 EST"),
             managed_accounts("DU1234567"),
             next_valid_id(42),
             err_msg(2104, "Market data farm connection is OK:usfarm"),
@@ -940,6 +1071,97 @@ pub mod scenarios {
         Scenario::new(vec![FakeStep::Send(frames)])
     }
 
+    // ---- W6-S1 contract details 場景 ----
+
+    /// **W6-S1 happy contract-details session**:握手(sv 176)到 Ready 後推 1 筆 ETF
+    /// contractData 行(sv 176 shape=157 pinned 佈局,無尾溢)→ End → 腳本盡 EOF。
+    /// fake 為腳本化 push——不等 driver 的 req 訊息即推(driver 首 serve tick 先送查詢
+    /// 再讀,時序天然成立,沿 W5-S2 慣例)。
+    pub fn contract_details_session(req_id: i64) -> Scenario {
+        let mut frames = happy_handshake_frames();
+        frames.push(contract_details_row(
+            req_id, 176, 756733, "SPY", "STK", "USD", "ARCA", "ETF",
+        ));
+        frames.push(contract_details_end(req_id));
+        Scenario::new(vec![FakeStep::Send(frames)])
+    }
+
+    /// **W6-S1 sv 門控場景**:握手 ACK 用注入 serverVersion,行按同 sv 表編碼——151(stockType
+    /// 缺席)vs 152(在)對照消化端 per-field 表與 fail-closed 裁決。
+    pub fn contract_details_sv_gate_session(req_id: i64, server_version: i32) -> Scenario {
+        let mut frames = handshake_frames_with_server_version(server_version);
+        frames.push(contract_details_row(
+            req_id,
+            server_version,
+            756733,
+            "SPY",
+            "STK",
+            "USD",
+            "ARCA",
+            "ETF",
+        ));
+        frames.push(contract_details_end(req_id));
+        Scenario::new(vec![FakeStep::Send(frames)])
+    }
+
+    /// **W6-S1 負場景:message-version 撕 pin**——IN 10 version 欄改 "7"（≠8）→ 消化端
+    /// typed fail-closed(毒化非猜讀),session 不斷。
+    pub fn contract_details_version_unpinned(req_id: i64) -> Scenario {
+        let mut frames = happy_handshake_frames();
+        let mut fields =
+            contract_details_fields(req_id, 176, 756733, "SPY", "STK", "USD", "ARCA", "ETF");
+        fields[1] = "7".to_string();
+        let refs: Vec<&str> = fields.iter().map(String::as_str).collect();
+        frames.push(custom_frame(&refs));
+        Scenario::new(vec![FakeStep::Send(frames)])
+    }
+
+    /// **W6-S1 負場景:表外身分行**——sec_type/currency/primary_exchange 注入劣化值
+    /// (FUT/EUR/LSE 等)→ 消化端契約 blocker 毒化,session 不斷。
+    pub fn contract_details_denied_row(
+        req_id: i64,
+        sec_type: &str,
+        currency: &str,
+        primary_exchange: &str,
+    ) -> Scenario {
+        let mut frames = happy_handshake_frames();
+        frames.push(contract_details_row(
+            req_id,
+            176,
+            756733,
+            "SPY",
+            sec_type,
+            currency,
+            primary_exchange,
+            "ETF",
+        ));
+        Scenario::new(vec![FakeStep::Send(frames)])
+    }
+
+    /// **W6-S1 負場景:secIdList 荒謬 count**——count 欄(index 32=3 前導+29 head)改
+    /// "9999" → 消化端 bounded-count guard typed 拒+毒化(untrusted 長度不作盲走游標依據)。
+    pub fn contract_details_absurd_sec_id_count(req_id: i64) -> Scenario {
+        let mut frames = happy_handshake_frames();
+        let mut fields =
+            contract_details_fields(req_id, 176, 756733, "SPY", "STK", "USD", "ARCA", "ETF");
+        fields[32] = "9999".to_string();
+        let refs: Vec<&str> = fields.iter().map(String::as_str).collect();
+        frames.push(custom_frame(&refs));
+        Scenario::new(vec![FakeStep::Send(frames)])
+    }
+
+    /// **W6-S1 typed-ignore 場景**:bondContractData(IN 18)先到 → 消化端記帳丟棄(不
+    /// unknown-fail),其後 good 行+End 正常消化——session 全程存活到腳本 EOF。
+    pub fn contract_details_bond_then_good(req_id: i64) -> Scenario {
+        let mut frames = happy_handshake_frames();
+        frames.push(bond_contract_details(req_id));
+        frames.push(contract_details_row(
+            req_id, 176, 756733, "SPY", "STK", "USD", "ARCA", "ETF",
+        ));
+        frames.push(contract_details_end(req_id));
+        Scenario::new(vec![FakeStep::Send(frames)])
+    }
+
     /// **W5-S3 負場景:ceiling 佈局窗**——happy 握手 sv=176(>157 pinned),exec 行帶 1 個
     /// 尾部多欄 → 消化端 `PinnedLayoutOverflow` frame 拒收+audit(禁猜讀),session 存活。
     pub fn execution_ceiling_overflow_session(req_id: i64) -> Scenario {
@@ -1090,6 +1312,47 @@ mod tests {
         // W5-S4 session attestation 場景。
         let _ = scenarios::mixed_paper_live_session();
         let _ = scenarios::missing_managed_accounts();
+        // W6-S1 contract details 場景。
+        let _ = scenarios::contract_details_session(9003);
+        let _ = scenarios::contract_details_sv_gate_session(9003, 151);
+        let _ = scenarios::contract_details_version_unpinned(9003);
+        let _ = scenarios::contract_details_denied_row(9003, "FUT", "USD", "ARCA");
+        let _ = scenarios::contract_details_absurd_sec_id_count(9003);
+        let _ = scenarios::contract_details_bond_then_good(9003);
+    }
+
+    #[test]
+    fn w6_contract_details_builders_produce_pinned_field_order() {
+        // IN 10 sv=176(≥152 全門控欄在):3 前導 + 29 head + 3 secIdList(count=1+一對)
+        // + 6 門控尾 = 41 欄;message-version 恆 "8";count 欄於 index 32。
+        let f = frame_fields(
+            &decode_all_frames(
+                &contract_details_row(9003, 176, 756733, "SPY", "STK", "USD", "ARCA", "ETF").0,
+            )[0],
+        );
+        assert_eq!(f.len(), 41);
+        assert_eq!(&f[..3], &["10", "8", "9003"]);
+        assert_eq!(f[3], "SPY", "symbol 於 idx 3");
+        assert_eq!(f[13], "756733", "conId 於 idx 13");
+        assert_eq!(f[22], "ARCA", "primaryExchange 於 idx 22");
+        assert_eq!(f[32], "1", "secIdList count 於 idx 32");
+        assert_eq!(f[40], "ETF", "stockType 於尾欄(sv≥152)");
+        // sv=151:stockType 缺席 → 40 欄(per-field 門控表的 server 側對照)。
+        let f = frame_fields(
+            &decode_all_frames(
+                &contract_details_row(9003, 151, 756733, "SPY", "STK", "USD", "ARCA", "ETF").0,
+            )[0],
+        );
+        assert_eq!(f.len(), 40);
+        assert_ne!(f[39], "ETF", "sv<152 不得帶 stockType 欄");
+        // IN 52 contractDataEnd = 嚴格 3 欄。
+        assert_eq!(
+            frame_fields(&decode_all_frames(&contract_details_end(9003).0)[0]),
+            vec!["52", "1", "9003"]
+        );
+        // IN 18 bondContractData msgId 身分。
+        let f = frame_fields(&decode_all_frames(&bond_contract_details(9003).0)[0]);
+        assert_eq!(f[0], "18");
     }
 
     #[test]
