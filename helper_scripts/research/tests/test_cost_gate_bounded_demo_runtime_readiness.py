@@ -398,9 +398,12 @@ def test_stdout_and_json_output_permanently_omit_api_key_derivatives(
     for serialized in serialized_outputs:
         packet = json.loads(serialized)
         api_key = packet["checks"]["demo_api_slot"]["api_key"]
+        api_secret = packet["checks"]["demo_api_slot"]["api_secret"]
         assert forbidden_fields.isdisjoint(api_key)
         assert api_key["present"] is True
         assert api_key["nonempty"] is True
+        assert api_key["secret_bytes_read"] is False
+        assert api_secret["secret_bytes_read"] is False
         assert EXPECTED_KEY not in serialized
         assert EXPECTED_KEY[:6] not in serialized
         assert EXPECTED_KEY[-4:] not in serialized

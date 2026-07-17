@@ -138,6 +138,8 @@ _CUTOVER_PREFLIGHT_SCHEMA_VERSION = "bounded_demo_credential_mode_cutover_prefli
 _CUTOVER_PREFLIGHT_READY_STATUS = "BOUNDED_DEMO_CREDENTIAL_MODE_CUTOVER_PREFLIGHT_READY_NO_MUTATION"
 _CUTOVER_PREFLIGHT_MAX_BYTES = 1024 * 1024
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_SAFE_CUTOVER_COMPONENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+_CUTOVER_PREFLIGHT_FILENAME = "cutover_preflight.json"
 _ENV_TRUTHY = frozenset({"1", "true", "yes", "on", "enabled"})
 _ENV_FALSEY = frozenset({"0", "false", "no", "off", "disabled"})
 _MIGRATION_FILE_RE = re.compile(r"^V(?P<version>\d{3})__(?P<name>.+)\.sql$")
@@ -703,20 +705,32 @@ def _cutover_preflight_location(
             ).expanduser()
         )
     )
-    supplied = Path(raw_path).expanduser()
-    if ".." in supplied.parts:
+    supplied_text = os.fspath(raw_path).strip()
+    if not supplied_text or "\x00" in supplied_text or supplied_text.startswith("~"):
         raise ValueError("cutover preflight path contains parent traversal")
-    candidate = supplied if supplied.is_absolute() else trusted_root / supplied
-    lexical = Path(os.path.abspath(candidate))
-    if supplied.suffix.casefold() != ".json":
-        raise ValueError("cutover preflight path is outside policy")
-    try:
-        relative = lexical.relative_to(trusted_root)
-    except ValueError as exc:
-        raise ValueError("cutover preflight path is outside policy") from exc
+    if ".." in Path(supplied_text).parts:
+        raise ValueError("cutover preflight path contains parent traversal")
+    normalized = os.path.normpath(supplied_text)
+    trusted_root_text = os.path.normpath(os.fspath(trusted_root))
+    if os.path.isabs(normalized):
+        try:
+            if os.path.commonpath((trusted_root_text, normalized)) != trusted_root_text:
+                raise ValueError("cutover preflight path is outside policy")
+        except ValueError as exc:
+            raise ValueError("cutover preflight path is outside policy") from exc
+        relative_text = os.path.relpath(normalized, trusted_root_text)
+    else:
+        relative_text = normalized
+    relative = Path(relative_text)
     if not relative.parts or any(part in {"", ".", ".."} for part in relative.parts):
         raise ValueError("cutover preflight path is outside policy")
-    return trusted_root, relative.parts, lexical
+    if any(not _SAFE_CUTOVER_COMPONENT_RE.fullmatch(part) for part in relative.parts):
+        raise ValueError("cutover preflight path is outside policy")
+    if relative.parts[-1] != _CUTOVER_PREFLIGHT_FILENAME:
+        raise ValueError("cutover preflight path is outside policy")
+    safe_parts = (*relative.parts[:-1], _CUTOVER_PREFLIGHT_FILENAME)
+    lexical = trusted_root.joinpath(*safe_parts)
+    return trusted_root, safe_parts, lexical
 
 
 def _require_owner_controlled_application_stat(
