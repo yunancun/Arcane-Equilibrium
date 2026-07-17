@@ -28,7 +28,8 @@
 #
 #   三層縱深防禦（本 script 為第三層）：
 #     L1 編譯期   ：Cargo `ibkr_g4_contact` feature gate + 0-caller DCE（**主保證**）
-#     L2 runtime  ：g4_operator_triggered_first_contact 內 env/sealed/approval/host 閘
+#     L2 runtime  ：g4_operator_triggered_first_contact 內 env/sealed/approval/host/
+#                   envelope（EA3 活化閘,nonce 原子消費,R16）五閘
 #     L3 binary 層：nm grep default **debug** `openclaw-engine` artifact（本 script）
 #
 #   正控（E4 驗 script 有牙）：對 unstripped g4 bin（`cargo build --features ibkr_g4_contact`

@@ -566,12 +566,18 @@ fn phase2_first_contact_gate_ok() -> bool {
 // ===========================================================================
 
 /// G4 gate posture（read-only；供 G4 bin dry-run 打印，無 socket）。
+/// R16:增兩個 EA3 姿態位——**只報 artifact 在位性**（owner-only 載入成功;不 parse
+/// 契約、不 validate、不消費 nonce——真裁決=Gate 5 活化時刻,dry-run 絕不預演,
+/// deny 不燒 nonce 語義不變）;刻意**不入 `gate_ok`**（gate_ok 維持 seal+approval
+/// 語義,避免 dry-run 誤導「envelope 在位=會放行」）。
 #[cfg(feature = "ibkr_g4_contact")]
 #[derive(Debug, Clone)]
 pub struct G4GateStatus {
     pub apply_env_set: bool,
     pub sealed_artifact_present: bool,
     pub contact_approval_valid: bool,
+    pub envelope_artifact_present: bool,
+    pub epochs_artifact_present: bool,
     pub gate_ok: bool,
 }
 
@@ -583,10 +589,20 @@ pub fn g4_first_contact_gate_status() -> G4GateStatus {
     let sealed_artifact_present =
         crate::ibkr_phase2_gate_producer::phase2_immutable_pass_artifact_present();
     let contact_approval_valid = g4_contact_approval_present();
+    // EA3 artifact 在位性(owner-only 紀律通過且檔在位;Err/缺 gov dir 一律 false)。
+    let gov_dir = resolve_g4_governance_dir();
+    let artifact_present = |filename: &str| -> bool {
+        gov_dir
+            .as_deref()
+            .map(|d| matches!(load_owner_only_artifact_text(d, filename), Ok(Some(_))))
+            .unwrap_or(false)
+    };
     G4GateStatus {
         apply_env_set,
         sealed_artifact_present,
         contact_approval_valid,
+        envelope_artifact_present: artifact_present(ACTIVATION_ENVELOPE_FILENAME),
+        epochs_artifact_present: artifact_present(ACTIVATION_CURRENT_EPOCHS_FILENAME),
         gate_ok: sealed_artifact_present && contact_approval_valid,
     }
 }
@@ -1730,6 +1746,47 @@ expires_at_ms = 1800003600000
             other => panic!("expected ActivationRejected, got {other:?}"),
         }
         assert!(!ledger.is_consumed(&fixture.activation_nonce));
+    }
+
+    // ---- (d)+(e) feature-gated entry 行為測試（無 socket;env-mutating 共用鎖）----
+    // 封「Gate 4 與 Gate 5 之間插 early-return」的控制流繞過窗:entry 必須以 typed
+    // gate 錯誤(非 Io/Timeout=接觸痕跡)在任何 socket syscall 之前結束。
+
+    /// Gate 1:APPLY unset → `ContactNotApplied`,零接觸零 nonce。
+    #[cfg(all(unix, feature = "ibkr_g4_contact"))]
+    #[tokio::test]
+    async fn g4_entry_denies_when_apply_env_unset() {
+        let _guard = crate::test_env_lock::guard();
+        std::env::remove_var("OPENCLAW_IBKR_G4_CONTACT_APPLY");
+
+        let err = g4_operator_triggered_first_contact().await.unwrap_err();
+        assert!(matches!(err, TwsClientError::ContactNotApplied), "{err:?}");
+    }
+
+    /// Gate 2+3 先於 Gate 5 與 socket:APPLY=1 + 合法 G4 approval 在位但 seal 缺席
+    /// （tempdir 下 `phase2_immutable_pass_artifact_present()` 因 refuse-ephemeral
+    /// **結構性恆 false**——「全 gate 就緒 + envelope 缺 → ActivationRejected」的
+    /// entry 級全鏈形式在 unit-test 域不可達,Gate 5 語義由 (e) gate-level 測試 +
+    /// 守衛鏈序斷言覆蓋）→ typed `GateBlocked`。若有人在 gate 鏈中插入繞過
+    /// early-return 直達 connect,本測試會看到 Io/Timeout(無 gateway 在聽)而非
+    /// GateBlocked → 必紅。
+    #[cfg(all(unix, feature = "ibkr_g4_contact"))]
+    #[tokio::test]
+    async fn g4_entry_blocks_typed_before_any_socket_when_seal_absent() {
+        let _guard = crate::test_env_lock::guard();
+        let tmp = tempfile::tempdir().unwrap();
+        let gov = make_gov_chain(tmp.path());
+        write_approval_file(&gov, 0o600);
+        std::env::set_var("OPENCLAW_IBKR_G4_CONTACT_APPLY", "1");
+        std::env::set_var("OPENCLAW_DATA_DIR", tmp.path());
+
+        let err = g4_operator_triggered_first_contact().await.unwrap_err();
+
+        std::env::remove_var("OPENCLAW_IBKR_G4_CONTACT_APPLY");
+        std::env::remove_var("OPENCLAW_DATA_DIR");
+
+        // typed gate 拒(非 Io/Timeout):證明錯誤先於任何 connect 嘗試。
+        assert!(matches!(err, TwsClientError::GateBlocked), "{err:?}");
     }
 
     // ---- 源級守衛：本檔絕不含下單 / HTTP / Bybit 符號 ----
