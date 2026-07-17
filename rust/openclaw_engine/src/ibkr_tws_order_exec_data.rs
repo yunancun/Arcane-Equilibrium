@@ -188,7 +188,8 @@ pub(crate) enum OrderExecDataReject {
     #[error("server version {server_version} below order/exec floor {floor}")]
     ServerVersionBelowFloor { server_version: i32, floor: i32 },
     /// 未 begin 任何請求（無 serverVersion context / 槽非活躍）卻收到資料/End——未訂而收=
-    /// 協議意外,fail-closed 拒併入（沿 W5-S2 `NoActiveSubscription` 語義）。
+    /// 協議意外,fail-closed 拒併入（沿 W5-S2 `NoActiveSubscription` 語義;audit
+    /// `no_active_context_rejects` 計數,丟棄可觀測——E2 F2）。
     #[error("order/exec frame without active digest context")]
     NoActiveContext,
     /// End 的 reqId 與活躍 executions 快照不符（串流錯配,fail-closed 不轉相位）。
@@ -399,8 +400,12 @@ pub(crate) struct OrderExecAudit {
     pub order_status_unknown_denied: u64,
     /// openOrder head 之後整體丟棄的 tail 欄位數（descope 觀測;66 步全欄 decode defer）。
     pub open_order_tail_fields_discarded: u64,
-    /// ceiling 佈局窗拒收 frame 數（sv>157 尾端未讀欄;10.x band 補證信號）。
+    /// ceiling 佈局窗拒收 frame 數（sv>157 尾端未讀欄;10.x band 補證信號。僅活躍窗口計——
+    /// 未開消化窗口不做副作用,該類拒收歸 `no_active_context_rejects`,E2 F4）。
     pub pinned_layout_overflow_rejects: u64,
+    /// 未開消化 context 承接拒的 frame 數（未 begin/毒化/斷線失效窗口的入站丟棄可觀測——
+    /// 含 pump-off 下 client 綁定推送與毒化後 unsolicited;E2 F2/E3 MED-01-S3 (a)）。
+    pub no_active_context_rejects: u64,
 }
 
 /// 單槽生命週期相位（同構 W5-S2 `SubPhase`——該型別為模塊私有,此處同名同義複刻,
@@ -553,15 +558,14 @@ impl OrderExecDataDigest {
 
     // ---- 入站消化（payload = 已 unframe 的欄位序,含 msgId 欄）----
 
-    /// 定長平面訊息的欄數裁決（DIVERGENT-1 ceiling 語義集中點）:
+    /// 定長平面訊息的 **wire 形狀**欄數裁決（訂閱狀態裁決**前**;N1 紀律:wire 損壞先裁）:
     ///   - 欄數 < exact → `WireMalformed`（佈局只增不減,缺欄=損壞）;
-    ///   - 欄數 > exact 且 sv>157 → `PinnedLayoutOverflow`+audit（band 內佈局成長,拒收該
-    ///     frame 不斷線）;
     ///   - 欄數 > exact 且 sv≤157（或 context 未綁）→ `WireMalformed`（pinned 佈局下多欄=
-    ///     wire 意外,沿 W5-S2 F2 精確欄長紀律;context 未綁時保守取斷線側）。
-    fn exact_len_verdict(
-        &mut self,
-        msg_id: i64,
+    ///     wire 意外,沿 W5-S2 F2 精確欄長紀律;context 未綁時保守取斷線側）;
+    ///   - 欄數 > exact 且 sv>157 → `Ok` 透傳:band 內佈局成長**非 wire 損壞**,其拒收+audit
+    ///     歸 `overflow_verdict`（訂閱狀態裁決**後**——未開消化窗口不做 audit 副作用,E2 F4）。
+    fn malformed_len_verdict(
+        &self,
         got: usize,
         exact: usize,
         malformed_note: &'static str,
@@ -573,10 +577,7 @@ impl OrderExecDataDigest {
         }
         if got > exact {
             match self.server_version {
-                Some(sv) if sv > self.config.max_pinned_server_version => {
-                    self.audit.pinned_layout_overflow_rejects += 1;
-                    return Err(OrderExecDataReject::PinnedLayoutOverflow { msg_id });
-                }
+                Some(sv) if sv > self.config.max_pinned_server_version => {}
                 _ => {
                     return Err(OrderExecDataReject::WireMalformed(CodecError::Malformed(
                         malformed_note,
@@ -585,6 +586,29 @@ impl OrderExecDataDigest {
             }
         }
         Ok(())
+    }
+
+    /// **DIVERGENT-1 ceiling** 拒收（訂閱狀態裁決**後**,E2 F4）:欄數 > exact——此時必為
+    /// sv>157 band（`malformed_len_verdict` 已濾掉 pinned 域多欄）→ 該 frame 拒收+audit
+    /// （禁猜讀;10.x band 佈局 UNVERIFIED,補證歸 operator follow-up）。
+    fn overflow_verdict(
+        &mut self,
+        msg_id: i64,
+        got: usize,
+        exact: usize,
+    ) -> Result<(), OrderExecDataReject> {
+        if got > exact {
+            self.audit.pinned_layout_overflow_rejects += 1;
+            return Err(OrderExecDataReject::PinnedLayoutOverflow { msg_id });
+        }
+        Ok(())
+    }
+
+    /// 未開消化 context 承接拒的收斂點（E2 F2）:audit 計數（unsolicited 丟棄可觀測）後回
+    /// typed reject——不 panic、不 crash,呼叫端資料層分流續 serve。
+    fn reject_no_active_context(&mut self) -> OrderExecDataReject {
+        self.audit.no_active_context_rejects += 1;
+        OrderExecDataReject::NoActiveContext
     }
 
     /// IN 11 execDetails 行（sv≥136 無前導 version 欄;IB 現勘欄位序,31 定長平面欄）:
@@ -607,8 +631,7 @@ impl OrderExecDataDigest {
             )));
         }
         expect_msg_id(&fields[0], IN_EXECUTION_DATA_MSG_ID)?;
-        self.exact_len_verdict(
-            IN_EXECUTION_DATA_MSG_ID,
+        self.malformed_len_verdict(
             fields.len(),
             EXECUTION_DATA_EXACT_FIELDS,
             "execution data needs exactly 31 fields (sv<=157 layout)",
@@ -619,8 +642,13 @@ impl OrderExecDataDigest {
         let con_id = parse_i64(&fields[3], "exec_con_id")?;
         let perm_id = parse_i64(&fields[21], "exec_perm_id")?;
         if !self.exec_phase.is_active() {
-            return Err(OrderExecDataReject::NoActiveContext);
+            return Err(self.reject_no_active_context());
         }
+        self.overflow_verdict(
+            IN_EXECUTION_DATA_MSG_ID,
+            fields.len(),
+            EXECUTION_DATA_EXACT_FIELDS,
+        )?;
         // exec_time grammar 白名單（移交 blocking #2）:白名單外 → row 級拒收+audit,原字串
         // 記 audit 可重放;不毒化（PM 裁決粒度=row,見 reject 型注釋）。
         let exec_time = &fields[15];
@@ -692,16 +720,20 @@ impl OrderExecDataDigest {
             )));
         }
         expect_msg_id(&fields[0], IN_EXECUTION_DATA_END_MSG_ID)?;
-        self.exact_len_verdict(
-            IN_EXECUTION_DATA_END_MSG_ID,
+        self.malformed_len_verdict(
             fields.len(),
             EXECUTION_DATA_END_EXACT_FIELDS,
             "execution end needs exactly 3 fields",
         )?;
         let req_id = parse_i64(&fields[2], "exec_end_req_id")?;
         if !self.exec_phase.is_active() {
-            return Err(OrderExecDataReject::NoActiveContext);
+            return Err(self.reject_no_active_context());
         }
+        self.overflow_verdict(
+            IN_EXECUTION_DATA_END_MSG_ID,
+            fields.len(),
+            EXECUTION_DATA_END_EXACT_FIELDS,
+        )?;
         if self.exec_req_id != Some(req_id) {
             return Err(OrderExecDataReject::UnexpectedReqId { got: req_id });
         }
@@ -726,8 +758,7 @@ impl OrderExecDataDigest {
             )));
         }
         expect_msg_id(&fields[0], IN_COMMISSION_REPORT_MSG_ID)?;
-        self.exact_len_verdict(
-            IN_COMMISSION_REPORT_MSG_ID,
+        self.malformed_len_verdict(
             fields.len(),
             COMMISSION_REPORT_EXACT_FIELDS,
             "commission report needs exactly 8 fields",
@@ -735,8 +766,13 @@ impl OrderExecDataDigest {
         // version 欄 wire 形狀先裁（恆在,非數字=損壞）。
         let _version = parse_i64(&fields[1], "commission_version")?;
         if !self.exec_phase.is_active() {
-            return Err(OrderExecDataReject::NoActiveContext);
+            return Err(self.reject_no_active_context());
         }
+        self.overflow_verdict(
+            IN_COMMISSION_REPORT_MSG_ID,
+            fields.len(),
+            COMMISSION_REPORT_EXACT_FIELDS,
+        )?;
         let realized_pnl_decimal = self.classify_realized_pnl(&fields[5]);
         let row = IbkrCommissionsRowV1 {
             contract_id: IBKR_COMMISSIONS_ROW_CONTRACT_ID.to_string(),
@@ -787,8 +823,7 @@ impl OrderExecDataDigest {
             )));
         }
         expect_msg_id(&fields[0], IN_ORDER_STATUS_MSG_ID)?;
-        self.exact_len_verdict(
-            IN_ORDER_STATUS_MSG_ID,
+        self.malformed_len_verdict(
             fields.len(),
             ORDER_STATUS_EXACT_FIELDS,
             "order status needs exactly 12 fields (sv<=157 layout)",
@@ -798,8 +833,13 @@ impl OrderExecDataDigest {
         let parent_id = parse_i64(&fields[7], "order_status_parent_id")?;
         let client_id = parse_i64(&fields[9], "order_status_client_id")?;
         if !self.orders_phase.is_active() {
-            return Err(OrderExecDataReject::NoActiveContext);
+            return Err(self.reject_no_active_context());
         }
+        self.overflow_verdict(
+            IN_ORDER_STATUS_MSG_ID,
+            fields.len(),
+            ORDER_STATUS_EXACT_FIELDS,
+        )?;
         let status = IbkrOrderStatusV1::classify_wire_status(&fields[2]);
         if status == IbkrOrderStatusV1::UnknownDenied {
             // 表外 status（含 ApiPending）:audit 計數 + open-orders 面毒化——無法建模的狀態
@@ -877,7 +917,7 @@ impl OrderExecDataDigest {
         let client_id = parse_i64(&fields[24], "open_order_client_id")?;
         let perm_id = parse_i64(&fields[25], "open_order_perm_id")?;
         if !self.orders_phase.is_active() {
-            return Err(OrderExecDataReject::NoActiveContext);
+            return Err(self.reject_no_active_context());
         }
         // Contract 佔位欄按位消費（idx 5=lastTradeDateOrContractMonth / 6=strike / 7=right /
         // 8=multiplier / 11=localSymbol / 12=tradingClass）:讀位即棄,不 bind 語義。
@@ -960,15 +1000,19 @@ impl OrderExecDataDigest {
             )));
         }
         expect_msg_id(&fields[0], IN_OPEN_ORDER_END_MSG_ID)?;
-        self.exact_len_verdict(
-            IN_OPEN_ORDER_END_MSG_ID,
+        self.malformed_len_verdict(
             fields.len(),
             OPEN_ORDER_END_EXACT_FIELDS,
             "open order end needs exactly 2 fields",
         )?;
         if !self.orders_phase.is_active() {
-            return Err(OrderExecDataReject::NoActiveContext);
+            return Err(self.reject_no_active_context());
         }
+        self.overflow_verdict(
+            IN_OPEN_ORDER_END_MSG_ID,
+            fields.len(),
+            OPEN_ORDER_END_EXACT_FIELDS,
+        )?;
         self.orders_phase = SubPhase::Live;
         self.orders_last_update_ms = now_ms;
         Ok(())
