@@ -4,7 +4,10 @@ import datetime as dt
 import json
 from pathlib import Path
 
+import pytest
+
 import cost_gate_learning_lane.bounded_probe_result_review as result_review_module
+from cost_gate_learning_lane import ledger_rotation
 
 from cost_gate_learning_lane.bounded_probe_result_review import (
     BOUNDED_PROBE_RESULT_REVIEW_SCHEMA_VERSION,
@@ -17,8 +20,8 @@ from cost_gate_learning_lane.contract import (
     PROBE_ADMISSION_DECISION_RECORD_TYPE,
     PROBE_OUTCOME_RECORD_TYPE,
 )
+from cost_gate_learning_lane.ledger_rotation import maybe_rotate_ledger
 from cost_gate_learning_lane.runtime_adapter import (
-    LearningLedgerPartitions,
     append_jsonl_ledger,
 )
 from tests.test_candidate_lineage_propagation import _capture_blocked_ledger_row
@@ -530,6 +533,89 @@ def test_not_ready_design_cannot_be_used_as_result_review() -> None:
     assert packet["answers"]["continue_probe_without_operator_review_allowed"] is False
 
 
+@pytest.mark.parametrize(
+    ("failure_kind", "expected_status"),
+    [
+        ("design-not-ready", "PREFLIGHT_DESIGN_NOT_USABLE"),
+        ("side-cell-missing", "PREFLIGHT_DESIGN_NOT_USABLE"),
+        ("horizon-missing", "PREFLIGHT_DESIGN_NOT_USABLE"),
+        ("horizon-zero", "PREFLIGHT_DESIGN_NOT_USABLE"),
+        ("horizon-negative", "PREFLIGHT_DESIGN_NOT_USABLE"),
+        ("authority-violation", "AUTHORITY_BOUNDARY_VIOLATION"),
+    ],
+)
+def test_result_review_cli_does_not_touch_ledger_when_preflight_is_unusable(
+    tmp_path: Path,
+    monkeypatch,
+    failure_kind: str,
+    expected_status: str,
+) -> None:
+    preflight = _preflight()
+    if failure_kind == "design-not-ready":
+        preflight["bounded_demo_probe_design"]["status"] = (
+            "NOT_READY_FOR_OPERATOR_PROBE_REVIEW"
+        )
+    elif failure_kind == "side-cell-missing":
+        preflight["side_cell_key"] = None
+        preflight["bounded_demo_probe_design"]["candidate"]["side_cell_key"] = None
+    elif failure_kind == "horizon-missing":
+        preflight.pop("outcome_horizon_minutes")
+        preflight["bounded_demo_probe_design"]["candidate"].pop(
+            "outcome_horizon_minutes"
+        )
+    elif failure_kind == "horizon-zero":
+        preflight["outcome_horizon_minutes"] = 0
+        preflight["bounded_demo_probe_design"]["candidate"][
+            "outcome_horizon_minutes"
+        ] = 0
+    elif failure_kind == "horizon-negative":
+        preflight["outcome_horizon_minutes"] = -1
+        preflight["bounded_demo_probe_design"]["candidate"][
+            "outcome_horizon_minutes"
+        ] = -1
+    else:
+        preflight["answers"]["probe_authority_granted"] = True
+    preflight_path = tmp_path / "preflight.json"
+    preflight_path.write_text(
+        json.dumps(preflight),
+        encoding="utf-8",
+    )
+
+    def _unexpected_ledger_scan(*_args, **_kwargs):
+        raise AssertionError("unusable preflight must short-circuit before ledger scan")
+
+    monkeypatch.setattr(
+        result_review_module,
+        "scan_retained_jsonl",
+        _unexpected_ledger_scan,
+    )
+
+    packet = _run_result_review_cli(
+        monkeypatch=monkeypatch,
+        preflight_path=preflight_path,
+        ledger_path=tmp_path / "does-not-exist.jsonl",
+        output_path=tmp_path / "review.json",
+    )
+
+    assert packet["status"] == expected_status
+    assert packet["answers"]["probe_authority_granted"] is False
+    assert packet["answers"]["order_authority_granted"] is False
+    assert packet["answers"]["promotion_evidence"] is False
+    assert packet["ledger_observation"] == {
+        "schema_version": "bounded_demo_probe_result_review_ledger_observation_v1",
+        "status": "SKIPPED_PRECONDITION",
+        "reason": "preflight_authority_or_design_not_usable",
+        "scan_performed": False,
+        "retained_ledger_scan_complete": False,
+        "target_scope_counts_known": False,
+        "stale_snapshot_reused": False,
+        "truncated": False,
+    }
+    assert packet["probe_result_summary"]["admitted_probe_attempt_count"] is None
+    assert packet["probe_result_summary"]["completed_probe_outcome_count"] is None
+    assert packet["evidence_quality"]["matched_control_outcome_count"] is None
+
+
 def _run_result_review_cli(
     *,
     monkeypatch,
@@ -593,20 +679,27 @@ def test_result_review_cli_ignores_exact_capture_blocked_rows(
     assert mixed["probe_result_summary"]["admitted_probe_attempt_count"] == 1
 
 
-def test_result_review_cli_passes_outcome_partition_not_dedup_partition(
+def test_result_review_cli_retains_only_target_rows_from_large_irrelevant_stream(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
     preflight_path = tmp_path / "preflight.json"
     preflight_path.write_text(json.dumps(_preflight()), encoding="utf-8")
     ledger_path = tmp_path / "ledger.jsonl"
-    outcome_rows: list[dict] = []
-    dedup_rows = [{"record_type": "dedup-only-sentinel"}]
-    partitions = LearningLedgerPartitions(
-        outcome_rows=outcome_rows,
-        dedup_rows=dedup_rows,
-        quarantined_capture_blocked_rows=dedup_rows,
-    )
+    target_rows = [_admission(1), _fill_backed_outcome(1, 2.0), _control(1, 1.0)]
+    append_jsonl_ledger(ledger_path, target_rows[0])
+    for index in range(1_000):
+        append_jsonl_ledger(
+            ledger_path,
+            _outcome(
+                index + 10,
+                50.0,
+                side_cell_key=f"irrelevant|SYMBOL{index}|Buy",
+            ),
+        )
+    append_jsonl_ledger(ledger_path, target_rows[1])
+    append_jsonl_ledger(ledger_path, target_rows[2])
+
     observed: dict[str, object] = {}
     original_builder = result_review_module.build_bounded_demo_probe_result_review
 
@@ -620,21 +713,227 @@ def test_result_review_cli_passes_outcome_partition_not_dedup_partition(
 
     monkeypatch.setattr(
         result_review_module,
-        "read_learning_ledger_partitions",
-        lambda _path: partitions,
-    )
-    monkeypatch.setattr(
-        result_review_module,
         "build_bounded_demo_probe_result_review",
         _spy_builder,
     )
 
-    _run_result_review_cli(
+    packet = _run_result_review_cli(
         monkeypatch=monkeypatch,
         preflight_path=preflight_path,
         ledger_path=ledger_path,
         output_path=tmp_path / "review.json",
     )
 
-    assert observed["ledger_rows"] is outcome_rows
-    assert observed["ledger_rows"] is not dedup_rows
+    assert sorted(
+        json.dumps(row, sort_keys=True) for row in observed["ledger_rows"]
+    ) == sorted(json.dumps(row, sort_keys=True) for row in target_rows)
+    assert packet["ledger_observation"]["status"] == "COMPLETE"
+    assert packet["ledger_observation"]["retained_ledger_scan_complete"] is True
+    assert packet["ledger_observation"]["target_scope_counts_known"] is True
+    assert packet["ledger_observation"]["stale_snapshot_reused"] is False
+    assert packet["ledger_observation"]["truncated"] is False
+    assert packet["probe_result_summary"]["admitted_probe_attempt_count"] == 1
+    assert packet["probe_result_summary"]["completed_probe_outcome_count"] == 1
+    assert packet["evidence_quality"]["matched_control_outcome_count"] == 1
+
+
+@pytest.mark.parametrize(
+    "row_side_cell_key",
+    [SIDE_CELL, "irrelevant|ETHUSDT|Buy"],
+    ids=["target-row", "irrelevant-row"],
+)
+def test_result_review_cli_strictly_rejects_authority_sensitive_invalid_rows(
+    tmp_path: Path,
+    monkeypatch,
+    row_side_cell_key: str,
+) -> None:
+    preflight_path = tmp_path / "preflight.json"
+    preflight_path.write_text(json.dumps(_preflight()), encoding="utf-8")
+    ledger_path = tmp_path / "ledger.jsonl"
+    invalid = _capture_blocked_ledger_row()
+    invalid["side_cell_key"] = row_side_cell_key
+    invalid["event"]["candidate_event_context"]["event_hash"] = "0" * 64
+    append_jsonl_ledger(ledger_path, invalid)
+
+    with pytest.raises(ValueError, match="EVENT_CONTEXT_HASH_MISMATCH"):
+        _run_result_review_cli(
+            monkeypatch=monkeypatch,
+            preflight_path=preflight_path,
+            ledger_path=ledger_path,
+            output_path=tmp_path / "review.json",
+        )
+
+
+def test_result_review_cli_rejects_malformed_irrelevant_row_before_filtering(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    preflight_path = tmp_path / "preflight.json"
+    preflight_path.write_text(json.dumps(_preflight()), encoding="utf-8")
+    ledger_path = tmp_path / "ledger.jsonl"
+    append_jsonl_ledger(ledger_path, _fill_backed_outcome(1, 2.0))
+    with ledger_path.open("a", encoding="utf-8") as fh:
+        fh.write('{"side_cell_key":"irrelevant|ETHUSDT|Buy",\n')
+    output_path = tmp_path / "review.json"
+
+    with pytest.raises(ValueError, match="RETAINED_LEDGER_MALFORMED_JSON"):
+        _run_result_review_cli(
+            monkeypatch=monkeypatch,
+            preflight_path=preflight_path,
+            ledger_path=ledger_path,
+            output_path=output_path,
+        )
+    assert not output_path.exists()
+
+
+def test_result_review_cli_spans_rotated_segments_with_exact_latest_duplicates(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(ledger_rotation, "_utc_now", lambda: NOW)
+    preflight_path = tmp_path / "preflight.json"
+    preflight_path.write_text(json.dumps(_preflight()), encoding="utf-8")
+    ledger_path = tmp_path / "probe_ledger.jsonl"
+
+    append_jsonl_ledger(ledger_path, _admission(1))
+    append_jsonl_ledger(ledger_path, _outcome(1, -50.0))
+    append_jsonl_ledger(ledger_path, _outcome(2, 1.0))
+    append_jsonl_ledger(ledger_path, _control(1, -10.0))
+    rotation = maybe_rotate_ledger(
+        ledger_path,
+        threshold_bytes=1,
+        now_utc=NOW - dt.timedelta(minutes=1),
+    )
+    assert rotation["rotated"] is True
+
+    newer_outcome = _outcome(1, 4.0)
+    newer_outcome["generated_at_utc"] = "2026-06-22T12:59:00+00:00"
+    equal_timestamp_later_segment_outcome = _outcome(2, 3.0)
+    newer_control = _control(1, 2.0)
+    newer_control["generated_at_utc"] = "2026-06-22T11:59:00+00:00"
+    append_jsonl_ledger(ledger_path, _admission(1))
+    append_jsonl_ledger(ledger_path, newer_outcome)
+    append_jsonl_ledger(ledger_path, equal_timestamp_later_segment_outcome)
+    append_jsonl_ledger(ledger_path, newer_control)
+
+    observed: dict[str, object] = {}
+    original_builder = result_review_module.build_bounded_demo_probe_result_review
+
+    def _spy_builder(*, preflight, ledger_rows, now_utc=None):
+        observed["ledger_rows"] = ledger_rows
+        return original_builder(
+            preflight=preflight,
+            ledger_rows=ledger_rows,
+            now_utc=now_utc,
+        )
+
+    monkeypatch.setattr(
+        result_review_module,
+        "build_bounded_demo_probe_result_review",
+        _spy_builder,
+    )
+
+    packet = _run_result_review_cli(
+        monkeypatch=monkeypatch,
+        preflight_path=preflight_path,
+        ledger_path=ledger_path,
+        output_path=tmp_path / "review.json",
+    )
+
+    assert packet["ledger_observation"]["status"] == "COMPLETE"
+    assert packet["probe_result_summary"]["admitted_probe_attempt_count"] == 1
+    assert packet["probe_result_summary"]["completed_probe_outcome_count"] == 2
+    assert packet["probe_result_summary"]["avg_realized_net_bps"] == 3.5
+    assert packet["evidence_quality"]["matched_control_outcome_count"] == 1
+    assert packet["evidence_quality"]["matched_control_avg_net_bps"] == 2.0
+    assert len(observed["ledger_rows"]) == 4
+
+
+@pytest.mark.parametrize(
+    ("limit_kind", "expected_code"),
+    [
+        ("unique-entries", "RESULT_REVIEW_PROJECTED_UNIQUE_ENTRIES_EXCEEDED"),
+        ("json-bytes", "RESULT_REVIEW_PROJECTED_JSON_BYTES_EXCEEDED"),
+    ],
+)
+def test_result_review_projection_limits_emit_rc0_noncomplete_unknown_artifact(
+    tmp_path: Path,
+    monkeypatch,
+    limit_kind: str,
+    expected_code: str,
+) -> None:
+    preflight_path = tmp_path / "preflight.json"
+    preflight_path.write_text(json.dumps(_preflight()), encoding="utf-8")
+    ledger_path = tmp_path / "ledger.jsonl"
+    if limit_kind == "unique-entries":
+        monkeypatch.setattr(
+            result_review_module,
+            "MAX_RESULT_REVIEW_PROJECTED_UNIQUE_ENTRIES",
+            1,
+            raising=False,
+        )
+        monkeypatch.setattr(
+            result_review_module,
+            "MAX_RESULT_REVIEW_PROJECTED_JSON_BYTES",
+            1_000_000,
+            raising=False,
+        )
+        append_jsonl_ledger(ledger_path, _admission(1))
+        append_jsonl_ledger(ledger_path, _admission(2))
+    else:
+        monkeypatch.setattr(
+            result_review_module,
+            "MAX_RESULT_REVIEW_PROJECTED_UNIQUE_ENTRIES",
+            100,
+            raising=False,
+        )
+        monkeypatch.setattr(
+            result_review_module,
+            "MAX_RESULT_REVIEW_PROJECTED_JSON_BYTES",
+            128,
+            raising=False,
+        )
+        append_jsonl_ledger(
+            ledger_path,
+            _outcome(1, 2.0, oversized_target_payload="x" * 4_096),
+        )
+
+    observed: dict[str, object] = {}
+    original_builder = result_review_module.build_bounded_demo_probe_result_review
+
+    def _spy_builder(*, preflight, ledger_rows, now_utc=None):
+        observed["ledger_rows"] = ledger_rows
+        return original_builder(
+            preflight=preflight,
+            ledger_rows=ledger_rows,
+            now_utc=now_utc,
+        )
+
+    monkeypatch.setattr(
+        result_review_module,
+        "build_bounded_demo_probe_result_review",
+        _spy_builder,
+    )
+    packet = _run_result_review_cli(
+        monkeypatch=monkeypatch,
+        preflight_path=preflight_path,
+        ledger_path=ledger_path,
+        output_path=tmp_path / "review.json",
+    )
+
+    assert observed["ledger_rows"] == []
+    assert packet["status"] == "PROJECTION_LIMIT_EXCEEDED"
+    assert packet["ledger_observation"]["status"] == "PROJECTION_LIMIT_EXCEEDED"
+    assert packet["ledger_observation"]["projection_limit_code"] == expected_code
+    assert packet["ledger_observation"]["scan_performed"] is True
+    assert packet["ledger_observation"]["retained_ledger_scan_complete"] is False
+    assert packet["ledger_observation"]["target_scope_counts_known"] is False
+    assert packet["ledger_observation"]["truncated"] is True
+    assert packet["ledger_observation"]["stale_snapshot_reused"] is False
+    assert packet["probe_result_summary"]["completed_probe_outcome_count"] is None
+    assert packet["evidence_quality"]["matched_control_outcome_count"] is None
+    assert packet["answers"]["operator_review_required"] is True
+    assert packet["answers"]["continue_probe_without_operator_review_allowed"] is False
+    assert packet["answers"]["probe_authority_granted"] is False
+    assert packet["answers"]["order_authority_granted"] is False
+    assert packet["answers"]["promotion_evidence"] is False
