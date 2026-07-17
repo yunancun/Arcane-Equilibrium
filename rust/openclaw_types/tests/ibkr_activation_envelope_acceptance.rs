@@ -273,6 +273,14 @@ fn rejects_nonce_missing_and_malformed() {
     assert_rejects(e, B::ActivationNonceInvalid);
 }
 
+#[test]
+fn rejects_uppercase_hex_in_sha256_family() {
+    // E2-F3:64-hex 家族大寫負例(代表性一個)——hex 檢查是小寫規範,大寫必拒。
+    let mut e = fixture();
+    e.activation_nonce = "E".repeat(64);
+    assert_rejects(e, B::ActivationNonceInvalid);
+}
+
 // ---------------------------------------------------------------------------
 // 時窗面:缺/未來簽發/倒置/超長/過期
 // ---------------------------------------------------------------------------
