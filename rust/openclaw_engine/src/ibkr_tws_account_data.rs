@@ -450,6 +450,16 @@ impl AccountDataDigest {
         }
         expect_msg_id(&fields[0], IN_POSITION_DATA_MSG_ID)?;
         let version = parse_i64(&fields[1], "position_version")?;
+        // **N1（W5-S3 E2 對齊）**:wire 形狀裁決先於訂閱狀態——v≥3 欄序固定 16 欄,多/少皆
+        // wire 意外 → `WireMalformed`（按位消費不容錯位）。此裁決**不得**被未訂閱窗口的
+        // `NoActiveSubscription` 遮蔽:version 欄非數字在未訂閱窗口已走 WireMalformed 斷線,
+        // 欄數錯同屬 wire 損壞,靜默吞掉=同一損壞兩種裁決的不一致。v<3 的欄數形狀不 pin
+        //（G1 於訂閱狀態裁決後拒收,見下）。
+        if version >= 3 && fields.len() != 16 {
+            return Err(AccountDataReject::WireMalformed(CodecError::Malformed(
+                "position v3 needs exactly 16 fields",
+            )));
+        }
         // 未訂而收先裁（置於 version 門控前:不得對未訂閱的槽做毒化副作用）。
         if !self.positions_phase.is_active() {
             return Err(AccountDataReject::NoActiveSubscription);
@@ -463,12 +473,6 @@ impl AccountDataDigest {
         if version < 3 {
             self.positions_phase = SubPhase::Invalidated;
             return Err(AccountDataReject::PositionVersionTooOld { version });
-        }
-        // version==3 欄序固定 16 欄;多/少皆 wire 意外 → fail-closed（按位消費不容錯位）。
-        if fields.len() != 16 {
-            return Err(AccountDataReject::WireMalformed(CodecError::Malformed(
-                "position v3 needs exactly 16 fields",
-            )));
         }
         // 佔位欄按位消費（idx 6=lastTradeDateOrContractMonth / 7=strike / 8=right /
         // 9=multiplier / 12=localSymbol / 13=tradingClass）:讀位即棄,不 bind 語義。

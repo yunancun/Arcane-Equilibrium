@@ -556,6 +556,27 @@ fn position_v3_field_count_mismatch_is_wire_malformed() {
         d.on_position_frame(&payload, T0).unwrap_err(),
         AccountDataReject::WireMalformed(_)
     ));
+    // **N1(W5-S3)負測試**:未訂閱窗口收 v3 欄數錯 frame → 同為 WireMalformed(斷線側),
+    // 不得走 NoActiveSubscription 靜默——與 version 欄非數字在未訂閱窗口斷線的紀律一致。
+    let mut idle = digest();
+    assert!(matches!(
+        idle.on_position_frame(&payload, T0).unwrap_err(),
+        AccountDataReject::WireMalformed(_)
+    ));
+    // 多欄(17)於未訂閱窗口亦同。
+    let extra = encode_fields(&[
+        "61", "3", "DU1", "756733", "SPY", "STK", "", "0", "", "", "ARCA", "USD", "SPY", "SPY",
+        "100", "412.35", "surplus",
+    ]);
+    assert!(matches!(
+        idle.on_position_frame(&extra, T0).unwrap_err(),
+        AccountDataReject::WireMalformed(_)
+    ));
+    assert_eq!(
+        idle.positions_staleness(T0),
+        SnapshotStaleness::NotSubscribed,
+        "N1 裁決不得對未訂閱槽做毒化副作用"
+    );
 }
 
 #[test]
