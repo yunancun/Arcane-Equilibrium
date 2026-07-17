@@ -1,8 +1,125 @@
 //! W7-S3 三向對賬引擎 **_support**：E2-LOW-2 結算台帳 disjoint 不變量（承 S2 carry）+ 定點 decimal
-//! 輔助。自主檔（檔案行數治理:主 `ibkr_order_reconciliation.rs` 拆出本節）。純函數,注入日期,
+//! 輔助 + **broker-status → 本地態解讀**純函數（`broker_target`/`broker_terminal_target`/
+//! `broker_conflicts_with_terminal`/`terminal_fill_qty_diverges`/`fill_from`/`has_positive_fill`）。
+//! 自主檔（檔案行數治理:主 `ibkr_order_reconciliation.rs` 拆出本節）。純函數,注入日期/時鐘,
 //! 零 socket/async/send。
 
+use openclaw_types::IbkrPaperOrderLifecycleState;
+
+use super::BrokerOrderTruth;
 use crate::ibkr_cash_account_constraints::CashTranche;
+use crate::ibkr_tws_order_exec_data::IbkrOrderStatusV1;
+use crate::ibkr_tws_order_lifecycle::FillDelta;
+
+// ===========================================================================
+// broker-status → 本地態解讀 + fill/量對賏（純函數;主模塊 reconcile 迴路消費）
+// ===========================================================================
+
+/// broker order 的目標本地態 + 可選 fill（活躍前推用;白名單外 / 無 status → `None`=無法證明)。
+pub(crate) fn broker_target(
+    order: &BrokerOrderTruth,
+) -> Option<(IbkrPaperOrderLifecycleState, Option<FillDelta>)> {
+    use IbkrOrderStatusV1 as S;
+    use IbkrPaperOrderLifecycleState as St;
+    let status = order.status?;
+    let fill = fill_from(order);
+    match status {
+        S::Filled => Some((St::Filled, fill)),
+        S::Submitted | S::PreSubmitted => {
+            // 有部分成交 → PartiallyFilled;否則 broker 已受理 → BrokerAcknowledged。
+            match &fill {
+                Some(_) if has_positive_fill(order) => Some((St::PartiallyFilled, fill)),
+                _ => Some((St::BrokerAcknowledged, None)),
+            }
+        }
+        S::PendingSubmit => Some((St::BrokerSubmitRequested, None)),
+        S::PendingCancel => Some((St::CancelRequested, None)),
+        S::Cancelled | S::ApiCancelled => Some((St::Cancelled, None)),
+        S::Inactive => Some((St::Inactive, None)),
+        S::UnknownDenied => None,
+    }
+}
+
+/// broker terminal-with-evidence 目標（StateUnknown 出口用;僅終態且帶 broker 佐證方回)。
+pub(crate) fn broker_terminal_target(
+    order: &BrokerOrderTruth,
+) -> Option<(IbkrPaperOrderLifecycleState, Option<FillDelta>)> {
+    use IbkrOrderStatusV1 as S;
+    use IbkrPaperOrderLifecycleState as St;
+    match order.status? {
+        S::Filled => Some((St::Filled, fill_from(order))),
+        S::Cancelled | S::ApiCancelled => Some((St::Cancelled, None)),
+        S::Inactive => Some((St::Inactive, None)),
+        _ => None,
+    }
+}
+
+/// broker 是否與本地終態衝突（幻影偵測:本地已 Cancelled/Rejected/Inactive 但 broker 顯示 Filled
+/// 或有正成交 → 衝突;本地 Filled × broker Filled 時**再比成交量**=MED-1 終態量分歧偵測)。
+/// `local_cum`=本地累積成交量(MED-1 用)。
+pub(crate) fn broker_conflicts_with_terminal(
+    local: IbkrPaperOrderLifecycleState,
+    local_cum: Option<&str>,
+    order: &BrokerOrderTruth,
+) -> bool {
+    use IbkrOrderStatusV1 as S;
+    use IbkrPaperOrderLifecycleState as St;
+    match order.status {
+        // 本地 Filled × broker Filled:量對賏（**不**再僅比 status enum;MED-1)。本地非 Filled × broker
+        // Filled:狀態即衝突。
+        Some(S::Filled) => {
+            if local != St::Filled {
+                true
+            } else {
+                terminal_fill_qty_diverges(local_cum, order)
+            }
+        }
+        Some(S::Submitted)
+        | Some(S::PreSubmitted)
+        | Some(S::PendingSubmit)
+        | Some(S::PendingCancel) => {
+            // broker 仍顯示活躍/工作中,但本地已終態 → 衝突（除非本地 Inactive 且無正成交)。
+            has_positive_fill(order) || local != St::Inactive
+        }
+        _ => false,
+    }
+}
+
+/// **MED-1 終態成交量分歧**:本地累積成交量 vs broker filled 量對賏（定點精確比;不可解 / broker 有量
+/// 本地無 → **fail-closed** 視為分歧)。broker 無 filled 量佐證 → 不以量判(false;交由 status 邏輯)。
+pub(crate) fn terminal_fill_qty_diverges(
+    local_cum: Option<&str>,
+    order: &BrokerOrderTruth,
+) -> bool {
+    match (local_cum, order.filled_decimal.as_deref()) {
+        (Some(l), Some(b)) => !matches!(fixed_decimals_equal(l, b), Some(true)),
+        // broker 顯示成交量、本地無累積 → 無法證明相等 → fail-closed 分歧。
+        (None, Some(_)) => true,
+        // broker 無 filled 量佐證 → 不以量判。
+        (_, None) => false,
+    }
+}
+
+/// 由 broker order 的 filled/remaining 構 fill delta（缺任一 → `None`,不捏值)。
+fn fill_from(order: &BrokerOrderTruth) -> Option<FillDelta> {
+    match (&order.filled_decimal, &order.remaining_decimal) {
+        (Some(f), Some(r)) => Some(FillDelta {
+            cumulative_filled_decimal: f.clone(),
+            remaining_decimal: r.clone(),
+        }),
+        _ => None,
+    }
+}
+
+/// broker 是否有正累積成交（filled > 0;方向判別,非記帳)。
+fn has_positive_fill(order: &BrokerOrderTruth) -> bool {
+    order
+        .filled_decimal
+        .as_deref()
+        .and_then(|s| s.parse::<f64>().ok())
+        .map(|v| v > 0.0)
+        .unwrap_or(false)
+}
 
 /// 結算台帳對賬結果（E2-LOW-2）:已成熟 tranche 滾入 settled_cash,並**移出** unsettled(disjoint)。
 /// （`CashTranche` 僅派生 `PartialEq`——承 S2 契約,本型別亦不派生 `Eq`。）
@@ -160,4 +277,10 @@ fn fmt_fixed_i128(v: i128) -> String {
 
 fn is_valid_yyyymmdd(raw: &str) -> bool {
     raw.len() == 8 && raw.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// 兩 decimal 字串是否**數值相等**（定點精確比;`"100"`==`"100.0"`==`"100.000"`）。任一不可解 →
+/// `None`（呼叫端 fail-closed:不可解不得當作相等）。MED-1 終態量對賏用。
+pub(crate) fn fixed_decimals_equal(a: &str, b: &str) -> Option<bool> {
+    Some(parse_fixed_i128(a)? == parse_fixed_i128(b)?)
 }

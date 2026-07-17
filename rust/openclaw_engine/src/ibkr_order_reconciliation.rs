@@ -5,14 +5,10 @@
 //!   對 **broker 真值 × intent journal × 本地態** 做無序 join tolerant 的三向對賬。
 //!   **純函數 / 注入時鐘 / 零 socket / 零 async / 零 send**;不觸 transport seam（INV-ORDER/INV-1
 //!   恆 HOLD）,一切 lifecycle 遷移**唯經 S1 單一 mutator**（本模塊不另闢寫入路徑=幻影倉教訓）。
-//! 主要區段：
-//!   - (a) config / broker 真值視圖（`BrokerTruthView`;由 W5-S3 digest 或測試直建）。
-//!   - (b) typed 對賬裁決（`IntentReconOutcome`）+ 告警（`ReconciliationAlert`）+ 報告
-//!     （`ReconciliationReport`;含 **凍結 symbol 集**）。
-//!   - (c) `reconcile`：三向 join（**idempotency_key 優先**,order-id fallback,歧義/孤兒 fail-closed）
-//!     → 逐意圖對賬（經 S1 mutator resync / reduce-only 阻擋 / StateUnknown 漏斗 / ManualReview 凍結）。
-//!   - (d) `reconcile_settlement_ledger`：**E2-LOW-2 disjoint 不變量**（已成熟 tranche 滾入 settled
-//!     即移出 unsettled,禁同時計數;defense-in-depth 承 S2 carry）。
+//! 主要區段：(a) broker 真值視圖 `BrokerTruthView`;(b) typed 裁決 `IntentReconOutcome` + 告警 + 報告
+//!   `ReconciliationReport`（含凍結集）;(c) `OrderReconciler::reconcile` 三向 join → 逐意圖對賬（經 S1
+//!   mutator resync / reduce-only 阻擋 / StateUnknown 漏斗 / ManualReview 凍結;持久 sticky 凍結）;
+//!   (d) `reconcile_settlement_ledger` E2-LOW-2 disjoint 不變量（拆 _support）。
 //! 三向 join 法（設計 §3 P0-C;**禁按 pending 匹配失敗丟棄**）：
 //!   1. **idempotency_key（drift-immune 首選）**：broker `orderRef`==本地 `idempotency_key` → 權威 join
 //!      （重連後 broker order-id 漂移不影響）。
@@ -23,8 +19,13 @@
 //!   - **唯一 mutator**：所有本地態遷移經 `OrderLifecycleDriver::apply_lifecycle_event`;本模塊零第二
 //!     寫入路徑。遷移合法性以 types `is_transition_allowed`/`is_operation_transition_allowed` 為真源。
 //!   - **差異 fail-closed**：不能證明一致的差異一律凍結/ManualReview,不樂觀假設本地對。
-//!   - **P0-A reduce-only**：broker fill 經 mutator 應用,reduce-only 違反（幻影再開倉 remaining↑）即拒
-//!     + 凍結,態/記帳不變。
+//!   - **持久凍結（F1/F2;sticky-until-adjudication）**：凍結存 `OrderReconciler` 持久 store,跨 pass 不
+//!     自動解凍;意圖處 `ManualReviewRequired` 每 pass 無條件從 driver 持久態重推凍結;stale pass 亦
+//!     回帶 sticky 集(fail-closed)。解凍**唯經**顯式 `adjudicate_unfreeze`。
+//!   - **P0-A reduce-only（F2 持久化）**：reduce-only 違反（幻影再開倉 remaining↑ / cancel 後 late-fill）
+//!     即拒不套用幻影量（cum/rem 記帳恆不變）→ 升 `ManualReviewRequired` + 持久凍結。
+//!   - **MED-1 終態量對賏**：本地 Filled × broker Filled 時**再比成交量**（非僅 status enum）,量分歧=真
+//!     幻影 → 凍結 + Divergence 告警（Filled 型別終態無出邊,凍結為其 manual-review 執行手段）。
 //!   - **P0-B unknown-terminal**：StateUnknown 無 terminal-with-evidence → ManualReview + 凍結 symbol +
 //!     告警（reconciler/人工裁決前不再對該 symbol 發 order verb）。
 //!   - **零效果**：不產 order 出線 bytes、不鑄 effect permit、不開 socket。default build DCE（真接線=
@@ -120,13 +121,15 @@ pub(crate) enum IntentReconOutcome {
         from: IbkrPaperOrderLifecycleState,
         to: IbkrPaperOrderLifecycleState,
     },
-    /// **P0-A**：broker fill 無法證明減倉安全（幻影再開倉 remaining↑ / cancel 後 late-fill）→ mutator
-    /// 拒 → 凍結 symbol,態/記帳不變。
+    /// **P0-A（F2 持久化）**：broker fill 無法證明減倉安全（幻影再開倉 remaining↑ / cancel 後 late-fill）
+    /// → mutator 拒不套用幻影量（記帳=cum/rem 不變）→ 升 `ManualReviewRequired` + **持久凍結** symbol
+    /// （sticky-until-adjudication;跨 pass 不自動解凍)。
     ReduceOnlyBlocked {
         idempotency_key: String,
         symbol: String,
     },
-    /// 差異無法以合法遷移對齊（含歧義 join / 本地終態與 broker 衝突）→ 升 ManualReview + 凍結。
+    /// 差異無法以合法遷移對齊（含歧義 join / 本地終態與 broker 衝突 / 終態成交量分歧 MED-1）→ 升
+    /// ManualReview（若型別可遷）+ 凍結。
     DivergedFrozen {
         idempotency_key: String,
         symbol: String,
@@ -134,6 +137,13 @@ pub(crate) enum IntentReconOutcome {
     },
     /// **P0-B**：StateUnknown 無 terminal-with-evidence → 升 ManualReview + 凍結 symbol + 告警。
     UnknownTerminalFrozen {
+        idempotency_key: String,
+        symbol: String,
+    },
+    /// **F1 持久凍結態重推**：意圖已處 `ManualReviewRequired`（前次 pass 落地的持久標記）→ 本 pass
+    /// 無條件從 driver 持久態重推凍結（sticky-until-adjudication;不因 broker 當前不顯衝突自動解凍;
+    /// 不重複告警=噪音控制)。
+    FrozenPendingAdjudication {
         idempotency_key: String,
         symbol: String,
     },
@@ -187,7 +197,8 @@ impl ReconciliationReport {
         self.frozen_symbols.contains(symbol)
     }
 
-    /// 凍結 symbol + 記錄告警（去重:BTreeSet 天然去重 symbol;告警逐筆保留）。
+    /// 凍結 symbol + 記錄告警（去重:BTreeSet 天然去重 symbol;告警逐筆保留）。**新鮮**凍結（本 pass
+    /// 觀測到的 discrepancy）走此路。
     fn freeze(
         &mut self,
         symbol: &str,
@@ -203,11 +214,61 @@ impl ReconciliationReport {
             detail,
         });
     }
+
+    /// 持久態重推凍結（**不**發告警——sticky re-derive 每 pass 觸發,發告警=噪音)。F1:意圖處
+    /// `ManualReviewRequired` 時無條件重推,即便 reconciler 記憶體 sticky 集因重啟丟失,亦能從 driver
+    /// 持久態重建凍結。
+    fn refreeze_symbol(&mut self, symbol: &str) {
+        self.frozen_symbols.insert(symbol.to_string());
+    }
 }
 
 // ===========================================================================
-// (c) 三向對賬主入口
+// (c) 三向對賬引擎（持久凍結 store;sticky-until-adjudication）
 // ===========================================================================
+
+/// 三向對賏引擎。**持久凍結 store**(`frozen_symbols`)跨 `reconcile` pass 存活——F1/F2 修:凍結
+/// sticky-until-adjudication,不因某 pass broker 不再顯衝突自動解凍;解凍**唯經顯式裁決 API**
+/// `adjudicate_unfreeze`(勿自動)。並非 driver 的一部分(對賬凍結是 reconciler 的職責,與 order
+/// lifecycle 寫入路徑分離);但持久**態**標記(`ManualReviewRequired`)存 driver journal,故每 pass
+/// 亦從 driver 態無條件重推凍結(reconciler 重啟亦可重建)。純同步、注入時鐘。
+pub(crate) struct OrderReconciler {
+    /// 持久凍結 symbol 集(sticky;每 pass seed 進 report,唯 `adjudicate_unfreeze` 移除)。
+    frozen_symbols: BTreeSet<String>,
+}
+
+impl Default for OrderReconciler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl OrderReconciler {
+    pub(crate) fn new() -> Self {
+        Self {
+            frozen_symbols: BTreeSet::new(),
+        }
+    }
+
+    /// 持久凍結查詢入口(order-emit 面下單前必查;S4 閘)。**fail-closed**:sticky 集含前次凍結,
+    /// stale pass 亦不漏(query 直查持久集,不依賴當前 pass)。
+    pub(crate) fn is_symbol_frozen(&self, symbol: &str) -> bool {
+        self.frozen_symbols.contains(symbol)
+    }
+
+    /// 持久凍結集唯讀檢視。
+    pub(crate) fn frozen_symbols(&self) -> &BTreeSet<String> {
+        &self.frozen_symbols
+    }
+
+    /// **顯式裁決解凍 API**(唯一解凍入口;**勿自動**——CC F1)。從持久 store 移除 symbol,回其先前
+    /// 是否凍結。注意:凍結若**錨定**仍處 `ManualReviewRequired` 的意圖(driver 持久態),下一 pass 會
+    /// 由持久態重推凍結——真正解除需 operator 於 S4/out-of-band 解決該意圖(型別強制 MRR 為終態,
+    /// 引擎不自造出邊);本 API 對孤兒/瞬態凍結即時生效。
+    pub(crate) fn adjudicate_unfreeze(&mut self, symbol: &str) -> bool {
+        self.frozen_symbols.remove(symbol)
+    }
+}
 
 /// 意圖輕量快照（避免對賬迴路中 driver 借用衝突:先快照 public 欄,再經 mutator 遷移）。
 struct IntentSnapshot {
@@ -216,26 +277,49 @@ struct IntentSnapshot {
     order_id: i64,
     broker_order_id: Option<i64>,
     operation: BrokerOperation,
+    /// 本地累積成交量（記帳定點字串;MED-1 終態量對賏用;`None`=尚無 fill）。
+    cumulative_filled_decimal: Option<String>,
 }
 
-/// **三向對賬主入口**：broker 真值 × intent journal（S1 driver）× 本地態。無序 join tolerant;差異
-/// fail-closed;一切遷移經 S1 **單一 mutator**。`local_symbols`=idempotency_key→symbol 本地綁定
-/// （intent record 無 symbol 欄,由 order-emit 面維護;缺席時以 broker symbol 或 `UNRESOLVED:` 令牌
-/// 凍結 + 告警,絕不靜默放行）。回不可變報告（含凍結集）。
-pub(crate) fn reconcile(
+impl OrderReconciler {
+    /// **三向對賬主入口**：broker 真值 × intent journal（S1 driver）× 本地態。無序 join tolerant;
+    /// 差異 fail-closed;一切遷移經 S1 **單一 mutator**。`local_symbols`=idempotency_key→symbol 本地
+    /// 綁定（intent record 無 symbol 欄,由 order-emit 面維護;缺席時以 broker symbol 或 `UNRESOLVED:`
+    /// 令牌凍結 + 告警,絕不靜默放行）。回本 pass 報告（含**持久 sticky 凍結集**;seed 自 store,
+    /// 新凍結 union 寫回 store)。
+    pub(crate) fn reconcile(
+        &mut self,
+        driver: &mut OrderLifecycleDriver,
+        broker: &BrokerTruthView,
+        local_symbols: &BTreeMap<String, String>,
+        now_ms: u64,
+    ) -> ReconciliationReport {
+        let mut report = ReconciliationReport::default();
+        // ── sticky seed：本 pass 起始即帶入所有持久凍結 symbol（跨 pass 不丟;F1）──
+        report.frozen_symbols = self.frozen_symbols.clone();
+
+        // ── staleness 閘：兩面皆 Fresh 方對賬（非 Fresh=延後,不對陳舊/毒化快照下結論,不誤凍）。
+        //    **fail-closed**:延後仍回帶 sticky 凍結集(前次已凍 symbol 於 stale pass 不漏凍)──
+        if !broker.both_fresh() {
+            report.skipped_stale = true;
+            return report;
+        }
+
+        let report = reconcile_fresh(driver, broker, local_symbols, now_ms, report);
+        // ── 新凍結 union 寫回持久 store（只增不減;解凍唯經 adjudicate_unfreeze）──
+        self.frozen_symbols = report.frozen_symbols.clone();
+        report
+    }
+}
+
+/// Fresh 快照下的對賬主體（seed 已於 caller 帶入 sticky 凍結集）。純函數,不持 reconciler 態。
+fn reconcile_fresh(
     driver: &mut OrderLifecycleDriver,
     broker: &BrokerTruthView,
     local_symbols: &BTreeMap<String, String>,
     now_ms: u64,
+    mut report: ReconciliationReport,
 ) -> ReconciliationReport {
-    let mut report = ReconciliationReport::default();
-
-    // ── staleness 閘：兩面皆 Fresh 方對賬（非 Fresh=延後,不對陳舊/毒化快照下結論,不誤凍）──
-    if !broker.both_fresh() {
-        report.skipped_stale = true;
-        return report;
-    }
-
     // ── 意圖快照 + order-id 索引（drift-prone fallback 用）──
     let snapshots: Vec<IntentSnapshot> = driver
         .intents()
@@ -245,6 +329,7 @@ pub(crate) fn reconcile(
             order_id: r.order_id,
             broker_order_id: r.broker_order_id,
             operation: r.operation,
+            cumulative_filled_decimal: r.cumulative_filled_decimal.clone(),
         })
         .collect();
     let intent_keys: BTreeSet<String> = snapshots
@@ -422,9 +507,20 @@ fn reconcile_intent(
 ) -> IntentReconOutcome {
     use IbkrPaperOrderLifecycleState as St;
 
+    // ── F1 持久凍結態重推:意圖已處 `ManualReviewRequired`（前次 pass 落地的持久標記,型別強制其為
+    //    終態無出邊）→ **無條件**從 driver 持久態重推凍結（sticky-until-adjudication;不因 broker 當前
+    //    不顯衝突自動解凍;不重複告警=噪音控制)。──
+    if snap.state == St::ManualReviewRequired {
+        report.refreeze_symbol(symbol);
+        return IntentReconOutcome::FrozenPendingAdjudication {
+            idempotency_key: snap.idempotency_key.clone(),
+            symbol: symbol.to_string(),
+        };
+    }
+
     // ── StateUnknown:P0-B 出口窄——需 terminal-with-evidence 才離開,否則 ManualReview + 凍結 ──
     if snap.state == St::StateUnknown {
-        if let Some((target, fill)) = matched.and_then(broker_terminal_target) {
+        if let Some((target, fill)) = matched.and_then(support::broker_terminal_target) {
             if apply_transition(driver, &snap.idempotency_key, target, fill, now_ms).is_ok() {
                 return IntentReconOutcome::Resynced {
                     idempotency_key: snap.idempotency_key.clone(),
@@ -446,23 +542,35 @@ fn reconcile_intent(
         };
     }
 
-    // ── 本地終態:broker 若顯示衝突（幻影 late-fill / re-open,經 order status 或無序 execution)
-    //    → 分歧凍結（P0-A 防線;終態不可再遷,態/記帳恆不變)。本地 Filled 有成交=一致不算衝突。──
+    // ── 本地終態:broker 若顯示衝突（幻影 late-fill / re-open,經 order status 或無序 execution,或
+    //    **MED-1 終態成交量分歧**)→ 分歧凍結（P0-A 防線;終態不可再遷,態/記帳恆不變;Filled 為型別終態
+    //    無出邊,凍結=其 manual-review 執行手段)。──
     if snap.state.is_terminal() {
-        let order_conflict = matched.is_some_and(|o| broker_conflicts_with_terminal(snap.state, o));
+        let cum = snap.cumulative_filled_decimal.as_deref();
+        let order_conflict =
+            matched.is_some_and(|o| support::broker_conflicts_with_terminal(snap.state, cum, o));
+        // MED-1:本地 Filled × broker Filled 但**成交量**不等 = 真幻影(broker 多成交,不依賴當前
+        // reqExecutions 窗)。
+        let qty_divergence = snap.state == St::Filled
+            && matched.is_some_and(|o| support::terminal_fill_qty_diverges(cum, o));
         // 非 Filled 終態卻有 broker 成交 = 幻影 late-fill（如 cancel 後成交到達)。
         let exec_conflict = snap.state != St::Filled && has_broker_execution;
         if order_conflict || exec_conflict {
+            let detail = if qty_divergence {
+                "terminal fill quantity divergence vs broker"
+            } else {
+                "broker shows activity on locally-terminal order"
+            };
             report.freeze(
                 symbol,
                 ReconciliationAlertKind::Divergence,
                 Some(snap.idempotency_key.clone()),
-                "broker shows activity on locally-terminal order",
+                detail,
             );
             return IntentReconOutcome::DivergedFrozen {
                 idempotency_key: snap.idempotency_key.clone(),
                 symbol: symbol.to_string(),
-                detail: "broker shows activity on locally-terminal order",
+                detail,
             };
         }
         return IntentReconOutcome::Consistent {
@@ -478,7 +586,7 @@ fn reconcile_intent(
         return funnel_via_state_unknown(driver, snap, None, symbol, now_ms, report);
     };
 
-    let Some((target, fill)) = broker_target(order) else {
+    let Some((target, fill)) = support::broker_target(order) else {
         // broker status 白名單外 / 缺 status → 無法證明 → 保守漏斗。
         return funnel_via_state_unknown(driver, snap, matched, symbol, now_ms, report);
     };
@@ -499,12 +607,16 @@ fn reconcile_intent(
             to: target,
         },
         Err(true) => {
-            // reduce-only 違反（幻影再開倉 remaining↑ / cancel 後 late-fill）→ 凍結,態不變。
+            // reduce-only 違反（幻影再開倉 remaining↑ / cancel 後 late-fill）：mutator 已拒不套用幻影量
+            // （記帳=cum/rem 恆不變)。**F2 持久化**:升 `ManualReviewRequired`（經 StateUnknown 漏斗,
+            // fill=None,幻影量永不入帳)+ 持久凍結 symbol,跨 pass 不自動解凍——幻影防線持久性對齊
+            // unknown-terminal 軌。
+            escalate_manual_review(driver, snap, now_ms);
             report.freeze(
                 symbol,
                 ReconciliationAlertKind::ReduceOnlyViolation,
                 Some(snap.idempotency_key.clone()),
-                "reduce-only violation on broker fill",
+                "reduce-only violation on broker fill (frozen pending adjudication)",
             );
             IntentReconOutcome::ReduceOnlyBlocked {
                 idempotency_key: snap.idempotency_key.clone(),
@@ -554,7 +666,7 @@ fn funnel_via_state_unknown(
     }
 
     // 有 terminal-with-evidence → resync 至終態。
-    if let Some((target, fill)) = matched.and_then(broker_terminal_target) {
+    if let Some((target, fill)) = matched.and_then(support::broker_terminal_target) {
         if apply_transition(driver, &snap.idempotency_key, target, fill, now_ms).is_ok() {
             return IntentReconOutcome::Resynced {
                 idempotency_key: snap.idempotency_key.clone(),
@@ -670,95 +782,19 @@ fn legal_paper_op_for(
         .find(|op| is_operation_transition_allowed(*op, from, to))
 }
 
-/// broker order 的目標本地態 + 可選 fill（活躍前推用;白名單外 / 無 status → `None`=無法證明)。
-fn broker_target(
-    order: &BrokerOrderTruth,
-) -> Option<(IbkrPaperOrderLifecycleState, Option<FillDelta>)> {
-    use IbkrOrderStatusV1 as S;
-    use IbkrPaperOrderLifecycleState as St;
-    let status = order.status?;
-    let fill = fill_from(order);
-    match status {
-        S::Filled => Some((St::Filled, fill)),
-        S::Submitted | S::PreSubmitted => {
-            // 有部分成交 → PartiallyFilled;否則 broker 已受理 → BrokerAcknowledged。
-            match &fill {
-                Some(_) if has_positive_fill(order) => Some((St::PartiallyFilled, fill)),
-                _ => Some((St::BrokerAcknowledged, None)),
-            }
-        }
-        S::PendingSubmit => Some((St::BrokerSubmitRequested, None)),
-        S::PendingCancel => Some((St::CancelRequested, None)),
-        S::Cancelled | S::ApiCancelled => Some((St::Cancelled, None)),
-        S::Inactive => Some((St::Inactive, None)),
-        S::UnknownDenied => None,
-    }
-}
-
-/// broker terminal-with-evidence 目標（StateUnknown 出口用;僅終態且帶 broker 佐證方回)。
-fn broker_terminal_target(
-    order: &BrokerOrderTruth,
-) -> Option<(IbkrPaperOrderLifecycleState, Option<FillDelta>)> {
-    use IbkrOrderStatusV1 as S;
-    use IbkrPaperOrderLifecycleState as St;
-    match order.status? {
-        S::Filled => Some((St::Filled, fill_from(order))),
-        S::Cancelled | S::ApiCancelled => Some((St::Cancelled, None)),
-        S::Inactive => Some((St::Inactive, None)),
-        _ => None,
-    }
-}
-
-/// broker 是否與本地終態衝突（幻影偵測:本地已 Cancelled/Rejected/Inactive 但 broker 顯示 Filled
-/// 或有正成交 → 衝突;本地 Filled 且 broker Filled=一致不衝突)。
-fn broker_conflicts_with_terminal(
-    local: IbkrPaperOrderLifecycleState,
-    order: &BrokerOrderTruth,
-) -> bool {
-    use IbkrOrderStatusV1 as S;
-    use IbkrPaperOrderLifecycleState as St;
-    match order.status {
-        Some(S::Filled) => local != St::Filled,
-        Some(S::Submitted)
-        | Some(S::PreSubmitted)
-        | Some(S::PendingSubmit)
-        | Some(S::PendingCancel) => {
-            // broker 仍顯示活躍/工作中,但本地已終態 → 衝突（除非本地 Inactive 且無正成交)。
-            has_positive_fill(order) || local != St::Inactive
-        }
-        _ => false,
-    }
-}
-
-/// 由 broker order 的 filled/remaining 構 fill delta（缺任一 → `None`,不捏值)。
-fn fill_from(order: &BrokerOrderTruth) -> Option<FillDelta> {
-    match (&order.filled_decimal, &order.remaining_decimal) {
-        (Some(f), Some(r)) => Some(FillDelta {
-            cumulative_filled_decimal: f.clone(),
-            remaining_decimal: r.clone(),
-        }),
-        _ => None,
-    }
-}
-
-/// broker 是否有正累積成交（filled > 0;方向判別,非記帳)。
-fn has_positive_fill(order: &BrokerOrderTruth) -> bool {
-    order
-        .filled_decimal
-        .as_deref()
-        .and_then(|s| s.parse::<f64>().ok())
-        .map(|v| v > 0.0)
-        .unwrap_or(false)
-}
-
-// (d) E2-LOW-2 結算台帳 disjoint 不變量 + 定點 decimal 輔助：拆分至 _support（檔案行數治理）。
+// (d) _support 拆分（檔案行數治理）：broker-status 解讀 + E2-LOW-2 結算台帳 + 定點 decimal。
 #[path = "ibkr_order_reconciliation_support.rs"]
 mod support;
-// 結算台帳 API 的 S3 對外面（真消費者=S4 IPC reconcile 迴路;繼承本模塊 intentional-DCE 姿態,
-// default build 尚無非測試 caller）。
+// 結算台帳 API 的 S3 對外面（真消費者=S4 IPC reconcile 迴路;繼承 intentional-DCE,default 無非測試 caller）。
 #[allow(unused_imports)]
 pub(crate) use support::{reconcile_settlement_ledger, LedgerReconcileError, SettlementLedger};
 
 #[cfg(test)]
+#[path = "ibkr_order_reconciliation_test_helpers.rs"]
+mod test_helpers;
+#[cfg(test)]
 #[path = "ibkr_order_reconciliation_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "ibkr_order_reconciliation_tests_more.rs"]
+mod tests_more;
