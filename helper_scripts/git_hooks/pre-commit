@@ -1,21 +1,20 @@
 #!/usr/bin/env bash
-# pre-commit — secret-scan gate（P2-OPS-2-GITLEAKS）
+# pre-commit — deterministic repo-native hygiene gate + optional gitleaks
 #
 # MODULE_NOTE
-# 模塊用途：在 commit 前用 gitleaks 掃 staged diff，攔截 API key / HMAC /
-#   credential 等敏感資訊進入版控。canonical 版本存在版控的
+# 模塊用途：commit 前先無條件掃完整 staged tree，攔截 database artifact /
+#   magic、private key、credential DSN、provider/JWT shaped secret；再以
+#   gitleaks 補掃 staged diff。canonical 版本存在版控的
 #   helper_scripts/git_hooks/pre-commit，由 install_git_hooks.sh 複製進
 #   .git/hooks/pre-commit（.git/hooks/ 本身不入版控）。
 # 主要邏輯：
-#   1. gitleaks 在 PATH → 跑 `gitleaks protect --staged --redact`；
-#      有 finding → exit 1 擋 commit（對 secret fail-closed）。
-#   2. gitleaks 不在 PATH → 印中文 WARN + SKIP 提示 → exit 0 放行。
-# 依賴：gitleaks（單一 static Go binary，無 Python 依賴；符合 Root Principle 14）。
+#   1. repo-native stdlib gate 恆跑 `--staged`；finding=1 / operational error=2。
+#   2. native gate 綠後，gitleaks 在 PATH 才補跑 `protect --staged --redact`。
+#   3. gitleaks 不在 PATH → 明示 WARN，但不得跳過 repo-native gate。
+# 依賴：git + Python 3 標準庫；gitleaks 是可選補強。
 # 硬邊界：
-#   - 缺工具時 warn-and-pass（exit 0），不因缺工具卡死所有人的 commit。
-#     理由：pre-commit hook 本可 `git commit --no-verify` 繞過，真正的 gate
-#     是「有人跑 installer 把 hook 裝起來」；硬擋缺工具只會逼大家 --no-verify，
-#     反而失去掃描覆蓋。掃到真 secret 才是 fail-closed 的點（exit 1）。
+#   - git/repo/Python/native gate 任一不可用都 exit 2；不能把缺工具當 PASS。
+#   - gitleaks 缺席只影響第二層補掃，不影響 repo-native deterministic gate。
 #   - 不在此 hook 內安裝 / 更新 gitleaks（交由 operator 手動）。
 #   - config 走版控的 helper_scripts/git_hooks/.gitleaks.toml（含 test fixture allowlist）。
 
@@ -30,17 +29,29 @@ if [[ -n "$REPO_ROOT" && -f "$REPO_ROOT/helper_scripts/git_hooks/.gitleaks.toml"
     GITLEAKS_CONFIG="$REPO_ROOT/helper_scripts/git_hooks/.gitleaks.toml"
 fi
 
-# ----- gitleaks 缺席 → warn-and-pass（exit 0）-----
-if command -v python3 >/dev/null 2>&1 && [[ -n "$REPO_ROOT" ]]; then
-    echo "[pre-commit] applied migration checksum guard 掃描 staged diff..." >&2
-    python3 "$REPO_ROOT/helper_scripts/db/check_applied_migration_checksums.py" --staged
-elif [[ -n "$REPO_ROOT" ]]; then
-    echo "[pre-commit][WARN] python3 未安裝；applied migration checksum guard SKIPPED。" >&2
+# ----- repo-native gate 恆跑；不可用/執行錯誤 fail closed -----
+if [[ -z "$REPO_ROOT" ]] || ! command -v python3 >/dev/null 2>&1; then
+    echo "[pre-commit][FAIL] repo-native public repository hygiene gate failed closed。" >&2
+    exit 2
 fi
 
-# ----- gitleaks 缺席 → warn-and-pass（exit 0）-----
+echo "[pre-commit] repo-native public repository hygiene gate 掃描完整 staged tree..." >&2
+set +e
+python3 "$REPO_ROOT/helper_scripts/maintenance_scripts/public_repo_security_gate.py" --repo-root "$REPO_ROOT" --staged
+NATIVE_GATE_RC=$?
+set -e
+if [[ $NATIVE_GATE_RC -ne 0 ]]; then
+    echo "[pre-commit][FAIL] repo-native public repository hygiene gate failed closed。" >&2
+    exit "$NATIVE_GATE_RC"
+fi
+echo "[pre-commit][OK] repo-native public repository hygiene gate 通過。" >&2
+
+echo "[pre-commit] applied migration checksum guard 掃描 staged diff..." >&2
+python3 "$REPO_ROOT/helper_scripts/db/check_applied_migration_checksums.py" --staged
+
+# ----- gitleaks 是 native gate 後的可選補強 -----
 if ! command -v gitleaks >/dev/null 2>&1; then
-    echo "[pre-commit][WARN] gitleaks 未安裝；secret 掃描 SKIPPED（本次 commit 不做 secret gate）。" >&2
+    echo "[pre-commit][WARN] gitleaks 未安裝；第二層補掃 SKIPPED（repo-native gate 已通過）。" >&2
     echo "[pre-commit][WARN] 安裝方式：brew install gitleaks  或  https://github.com/gitleaks/gitleaks" >&2
     echo "[pre-commit][WARN] 安裝後此 hook 會自動對 staged diff 做 secret 掃描。" >&2
     exit 0

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# install_git_hooks.sh — 把版控內的 git hook 裝進 .git/hooks/（P2-OPS-2-GITLEAKS）
+# install_git_hooks.sh — 安裝 repo-native hygiene + optional gitleaks hook
 #
 # MODULE_NOTE
 # 模塊用途：把 helper_scripts/git_hooks/pre-commit 複製進本 repo 的
@@ -7,7 +7,7 @@
 #   hook 放版控、用本 installer 落地。鏡像 helper_scripts/systemd/install_*.sh
 #   與 helper_scripts/cron/install_*.sh 的風格（set -euo pipefail / [install][OK|FAIL|WARN]
 #   前綴 / refuse 無聲覆蓋 / 退出碼分級）。
-# 依賴：git（用 rev-parse 定位 repo，不硬編碼路徑）；cp / chmod。
+# 依賴：git + Python 3（native gate）；cp / chmod；gitleaks 為可選補強。
 # 硬邊界：
 #   - 只動本 repo 的 .git/hooks/pre-commit；不裝 gitleaks 本體、不改其他檔。
 #   - 既有 .git/hooks/pre-commit 非本 repo 管理版本時，refuse 無聲覆蓋：
@@ -109,9 +109,9 @@ chmod +x "$DEST_HOOK"
 echo "[install][OK] 已安裝 pre-commit secret-scan hook → $DEST_HOOK"
 echo ""
 if command -v gitleaks >/dev/null 2>&1; then
-    echo "[install][OK] 偵測到 gitleaks（$(command -v gitleaks)）；commit 時會掃 staged diff。"
+    echo "[install][OK] repo-native gate 恆跑；gitleaks（$(command -v gitleaks)）會補掃 staged diff。"
 else
-    echo "[install][WARN] gitleaks 未安裝；hook 已就位但 commit 時會 SKIP 掃描並印 WARN。" >&2
+    echo "[install][WARN] gitleaks 未安裝；repo-native gate 仍會掃完整 staged tree，僅第二層補掃 SKIP。" >&2
     echo "[install][WARN] 安裝：brew install gitleaks  或  https://github.com/gitleaks/gitleaks" >&2
 fi
 echo ""
