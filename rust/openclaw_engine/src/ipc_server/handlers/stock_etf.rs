@@ -645,16 +645,30 @@ pub(in crate::ipc_server) fn policy_status_summary_from_result(
     })
 }
 
+/// W6-S0（E2-R13-F1 re-scope,三角測量第三腿）:auth-matrix producer 的 session_attestation
+/// 腿接 attestation producer 真值。production 域引擎 inactive、無 wire 實檢事實 →
+/// `blocked_session_attestation()` 恆 Blocked/無指紋——matrix 腿呈**誠實 absent/blocked 態**
+/// （同 W4 health emitter 代碼路徑,非手搓 default、不捏值）;attested 態只能經 driver wire
+/// 實檢派生（fixture 域行為測試見 `foundation_status_fixtures`）。三腿指紋一致性
+/// （secret-slot 契約腿/attestation 腿/authorization envelope 腿）由
+/// `FeatureFlagSecretAuthMatrixV1::validate_operation` 的 mismatch blocker 收口。
+pub(in crate::ipc_server) fn production_feature_flag_secret_auth_matrix(
+    flags: StockEtfFeatureFlags,
+) -> FeatureFlagSecretAuthMatrixV1 {
+    FeatureFlagSecretAuthMatrixV1 {
+        flags,
+        session_attestation: crate::ibkr_tws_session_attestation::blocked_session_attestation(),
+        gui_lane_state_override_denied: true,
+        server_rust_matrix_authoritative: true,
+        ..FeatureFlagSecretAuthMatrixV1::default()
+    }
+}
+
 fn authorization_status_summary(
     phase2: serde_json::Value,
     flags: StockEtfFeatureFlags,
 ) -> serde_json::Value {
-    let matrix = FeatureFlagSecretAuthMatrixV1 {
-        flags,
-        gui_lane_state_override_denied: true,
-        server_rust_matrix_authoritative: true,
-        ..FeatureFlagSecretAuthMatrixV1::default()
-    };
+    let matrix = production_feature_flag_secret_auth_matrix(flags);
     let request = BrokerCapabilityRequest::stock_etf_ibkr_paper(
         InstrumentKind::Stock,
         BrokerOperation::PaperOrderSubmit,
