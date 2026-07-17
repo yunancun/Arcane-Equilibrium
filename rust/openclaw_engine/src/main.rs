@@ -53,6 +53,7 @@ mod main_fanout;
 mod main_health_emitters;
 mod main_instruments;
 mod main_pipelines;
+mod main_runtime_profile;
 mod main_scanner_init;
 mod main_shutdown;
 mod main_watchdog;
@@ -306,6 +307,37 @@ fn main() {
         info!("replay mode activated / 回放模式已啟用");
         run_replay_mode(replay_args);
         return;
+    }
+
+    // Resolve the persisted runtime authority profile before the existing Full
+    // boot path touches restart/auth state, configuration, or any pipeline.
+    // Missing is the only state that may continue into the legacy boot path.
+    let profile_data_dir =
+        std::env::var("OPENCLAW_DATA_DIR").unwrap_or_else(|_| "/tmp/openclaw".into());
+    match main_runtime_profile::resolve_runtime_profile_request(
+        std::path::Path::new(&profile_data_dir),
+        openclaw_engine::boot_observability::BUILD_GIT_SHA,
+    ) {
+        main_runtime_profile::RuntimeProfileRequestResolution::Absent => {}
+        main_runtime_profile::RuntimeProfileRequestResolution::ValidPublicOnly(request) => {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .thread_name("oc-public-only")
+                .build()
+                .expect("failed to build public-only tokio runtime");
+            if let Err(error) = runtime.block_on(main_runtime_profile::run_public_only_profile(
+                std::path::Path::new(&profile_data_dir),
+                request,
+            )) {
+                error!(error = %error, "public-only runtime profile failed");
+                std::process::exit(1);
+            }
+            return;
+        }
+        main_runtime_profile::RuntimeProfileRequestResolution::PresentInvalid(error) => {
+            error!(error = %error, "runtime profile request is present but invalid");
+            std::process::exit(1);
+        }
     }
 
     // ------------------------------------------------------------------

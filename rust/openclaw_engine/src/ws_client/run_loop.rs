@@ -41,6 +41,16 @@ pub(super) const BACKOFF_POLICY: BackoffConfig = BackoffConfig::ws_public_defaul
 /// 每次 subscribe 調用最大主題數（Bybit 限制 = 10）
 pub(super) const SUBSCRIBE_BATCH_SIZE: usize = 10;
 
+pub(super) const PUBLIC_MARKET_DATA_ONLY_ENDPOINT: &str = "wss://stream.bybit.com/v5/public/linear";
+pub(super) const PUBLIC_MARKET_DATA_ONLY_TOPICS: [&str; 4] = [
+    "kline.1.BTCUSDT",
+    "publicTrade.BTCUSDT",
+    "kline.1.ETHUSDT",
+    "publicTrade.ETHUSDT",
+];
+pub(super) const PUBLIC_MARKET_DATA_ONLY_HEARTBEAT: Duration = Duration::from_secs(20);
+pub(super) const PUBLIC_MARKET_DATA_ONLY_RECONNECT_BASE_MS: u64 = 3_000;
+
 impl WsClient {
     /// Run the WebSocket client loop with auto-reconnect.
     /// Consumes self so that the run loop can mutate subscriptions for reconnect replay.

@@ -37,6 +37,7 @@ use tokio_util::sync::CancellationToken;
 mod connection;
 mod dispatch;
 mod parsers;
+pub mod public_only;
 mod run_loop;
 pub mod stats;
 
