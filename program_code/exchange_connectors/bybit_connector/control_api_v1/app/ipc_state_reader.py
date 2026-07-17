@@ -46,6 +46,16 @@ _VALID_SNAPSHOT_FILENAMES = frozenset(
 )
 
 
+def _require_owner_controlled(metadata: os.stat_result, label: str) -> None:
+    get_effective_uid = getattr(os, "geteuid", None)
+    if get_effective_uid is None:
+        raise OSError("effective uid is unavailable")
+    if metadata.st_uid != int(get_effective_uid()):
+        raise PermissionError(f"{label} must be owned by the effective uid")
+    if metadata.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+        raise PermissionError(f"{label} must not be group/other writable")
+
+
 class RustSnapshotReader:
     """
     Thread-safe cached reader for Rust engine pipeline snapshots.
@@ -118,6 +128,10 @@ class RustSnapshotReader:
                 next_fd = os.open(component, flags, dir_fd=current_fd)
                 os.close(current_fd)
                 current_fd = next_fd
+            root_metadata = os.fstat(current_fd)
+            if not stat.S_ISDIR(root_metadata.st_mode):
+                raise OSError("snapshot data root is not a directory")
+            _require_owner_controlled(root_metadata, "snapshot data root")
             result_fd = current_fd
             current_fd = -1
             return result_fd
@@ -147,6 +161,7 @@ class RustSnapshotReader:
             before = os.fstat(fd)
             if not stat.S_ISREG(before.st_mode):
                 raise OSError("snapshot is not a regular file")
+            _require_owner_controlled(before, "snapshot file")
             if before.st_size < 0 or before.st_size > _MAX_SNAPSHOT_BYTES:
                 raise OSError("snapshot exceeds size bound")
 
@@ -165,16 +180,21 @@ class RustSnapshotReader:
                 raise OSError("snapshot exceeds size bound")
 
             after = os.fstat(fd)
+            _require_owner_controlled(after, "snapshot file")
             if (
                 before.st_dev,
                 before.st_ino,
                 before.st_size,
                 before.st_mtime_ns,
+                before.st_mode,
+                before.st_uid,
             ) != (
                 after.st_dev,
                 after.st_ino,
                 after.st_size,
                 after.st_mtime_ns,
+                after.st_mode,
+                after.st_uid,
             ):
                 raise OSError("snapshot changed during read")
             data = json.loads(b"".join(chunks))

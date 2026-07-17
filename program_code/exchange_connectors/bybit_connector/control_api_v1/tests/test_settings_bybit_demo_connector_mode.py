@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import stat
 import sys
 from pathlib import Path
 
@@ -186,6 +187,82 @@ def test_bybit_demo_connector_mode_accepts_relative_preflight_below_trusted_root
 
     assert resp.status_code == 200
     assert resp.json()["cutover_preflight"]["sha256"] == preflight_sha
+
+
+def test_bybit_demo_connector_mode_rejects_group_writable_preflight_root(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    client, env_file = _client(tmp_path, monkeypatch)
+    env_file.parent.mkdir(parents=True)
+    env_file.write_text("BYBIT_MODE=read_only\n", encoding="utf-8")
+    preflight_path, preflight_sha = _write_preflight(
+        tmp_path / "cutover_preflight.json",
+        env_file=env_file,
+    )
+    tmp_path.chmod(0o770)
+
+    resp = client.post(
+        "/api/v1/settings/bybit-demo-connector-mode",
+        json=_post_body(preflight_path, preflight_sha),
+    )
+
+    assert resp.status_code == 400
+    assert "BYBIT_MODE=read_only" in env_file.read_text(encoding="utf-8")
+
+
+def test_bybit_demo_connector_mode_rejects_group_writable_preflight_file(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    client, env_file = _client(tmp_path, monkeypatch)
+    env_file.parent.mkdir(parents=True)
+    env_file.write_text("BYBIT_MODE=read_only\n", encoding="utf-8")
+    preflight_path, preflight_sha = _write_preflight(
+        tmp_path / "cutover_preflight.json",
+        env_file=env_file,
+    )
+    preflight_path.chmod(0o660)
+
+    resp = client.post(
+        "/api/v1/settings/bybit-demo-connector-mode",
+        json=_post_body(preflight_path, preflight_sha),
+    )
+
+    assert resp.status_code == 400
+    assert "BYBIT_MODE=read_only" in env_file.read_text(encoding="utf-8")
+
+
+def test_bybit_demo_connector_mode_rejects_foreign_owned_preflight_file(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    client, env_file = _client(tmp_path, monkeypatch)
+    env_file.parent.mkdir(parents=True)
+    env_file.write_text("BYBIT_MODE=read_only\n", encoding="utf-8")
+    preflight_path, preflight_sha = _write_preflight(
+        tmp_path / "cutover_preflight.json",
+        env_file=env_file,
+    )
+    real_fstat = settings_routes.os.fstat
+
+    def foreign_file_owner(fd):
+        metadata = real_fstat(fd)
+        if stat.S_ISREG(metadata.st_mode):
+            values = list(metadata)
+            values[4] = os.geteuid() + 1
+            return os.stat_result(values)
+        return metadata
+
+    monkeypatch.setattr(settings_routes.os, "fstat", foreign_file_owner)
+
+    resp = client.post(
+        "/api/v1/settings/bybit-demo-connector-mode",
+        json=_post_body(preflight_path, preflight_sha),
+    )
+
+    assert resp.status_code == 400
+    assert "BYBIT_MODE=read_only" in env_file.read_text(encoding="utf-8")
 
 
 def test_bybit_demo_connector_mode_rejects_wrong_preflight_sha(
