@@ -563,6 +563,15 @@ jobs:
         # 純源級靜態掃描（無需編譯,ubuntu 1x,零 macOS 10x）;script 自算 repo root,不依賴 cwd。
         working-directory: .
         run: python3 tests/structure/test_ibkr_tws_permit_stub_source_static.py
+      - name: Run the IBKR W7-S4a INV-ORDER effect-permit / option-B static guard
+        # CC-B1/B4（設計 §1.4/§4）:斷言 S4a option B 放行臂落地後 production 恆拒不變量維持——
+        # 恆拒 stub 唯一（零 env/config/cfg;禁 Ok/mint）、OrderEffectPermit::mint( 全 production 域恰
+        # 一呼叫點（check_effect_contact Ok 臂）、check_effect_contact 零 production caller（放行臂 DCE）、
+        # effect activation 不複用 Bybit slot/不 import live_authorization（禁擴鐵律）;內建正控
+        # （注入第二 impl/mint 呼叫/caller/Bybit slot 複用 → 守衛 FAIL）+ inconclusive 非零 exit。
+        # 純源級靜態掃描（無需編譯,ubuntu 1x,零 macOS 10x）;script 自算 repo root,不依賴 cwd。
+        working-directory: .
+        run: python3 tests/structure/test_ibkr_effect_permit_stub_source_static.py
       - name: Run the IBKR W3-S4 fake-TWS dev-dep-only structure guard
         # IBKR-CI-3 (a)（CC 約束 ⑤;設計 §4）:掃全 workspace 成員 Cargo.toml,斷言 openclaw_fake_tws
         # 只出現在 [dev-dependencies]（禁任何 production dep）+ engine 確有 dev-dep + fake 不依賴

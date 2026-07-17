@@ -200,10 +200,17 @@ pub mod ibkr_tws_session_attestation;
 // 仍零 caller/DCE）;不 impl ConnectPermitProvider、不觸 PermitToken——INV-1 不受影響;
 // W8 全包以本驗證器替換 permit trait 位並吸收（共路徑,禁兩套語義漂移）。
 pub mod ibkr_activation_envelope_check;
+// IBKR W7-S4a option B HMAC effect-activation 簽名層（新軸;設計 §4）：HMAC-SHA256 簽名 leg 疊在
+// paper-scope activation envelope shape 之上（canonical payload + compute_signature + constant-time
+// 比對 + typed EffectAuthError）+ 金鑰 custody（新 secret slot，缺席 fail-closed，非 Bybit slot）。
+// **禁擴鐵律**:W2 seal 軸 + Bybit auth 軸皆不複用/擴充到本軸;本模塊不 import live_authorization。
+// dormant:S4a 零 production caller（真 provider 接線=EA5/W8）→ final-binary DCE。
+pub mod ibkr_effect_activation;
 // IBKR W7-S0 order-verb transport-gating 骨架（恆拒地基，設計 §1 INV-ORDER）：在 pacing 單一出口
 // （OutboundGrant，W3-S3）之上為 order-verb 出站增第二把型別鎖——`OrderFrame` newtype（bytes 私有，
 // 唯 send_order_framed 可取，型別上非通用 frame）+ production 不可鑄的 `OrderEffectPermit`
-// （mint 為 #[cfg(test)]，production 恆無 permit）+ 恆拒 provider `EffectEnvelopeRequiredStub`
+// （mint W7-S4a 起 pub(crate)，唯一 production 呼叫點=check_effect_contact Ok 臂，該函數零 production
+// caller → DCE → production 恆無 permit）+ 恆拒 provider `EffectEnvelopeRequiredStub`
 // （對應 connect 面 EnvelopeRequiredStub，但兩線獨立）+ `broker_capability_registry_v1` machine-check
 // （消費既有 types 契約，ADR 硬序閘）。**S0 = 恆拒地基，放行臂 S4、encoder S1**：不含任何 order
 // encoder、不送任何 order 訊息、無放行臂。INV-ORDER 二元證明:permit production 零鑄造 + 0 production

@@ -6,10 +6,14 @@
 # 四條機器守衛（default-build 源級,無需編譯;fail-closed exit code）:
 #   G1 send_order_framed 是 order frame 唯一出站位點:`OrderFrame` bytes 無 pub 逃逸——欄位私有 +
 #      無 pub byte accessor + `into_bytes` 模塊私有 + 恰一 `fn send_order_framed`（收 OrderEffectPermit）。
-#   G2 `OrderEffectPermit::mint` production 域零鑄造點（僅 cfg(test)）:`fn mint` 掛 `#[cfg(test)]` +
-#      production（非 test）源零 `mint(` 呼叫點 + OrderEffectPermit 非 Clone/非 Copy + pub(crate)。
+#   G2 `OrderEffectPermit::mint` production 域唯一鑄造點（W7-S4a 放行臂落地後改版）:`mint` 為
+#      `pub(crate)`（非 cfg(test)）+ production 源 `OrderEffectPermit::mint(` **恰一呼叫點**,且在
+#      `ibkr_activation_envelope_check.rs`（=`check_effect_contact` Ok 臂,§1.3）+ OrderEffectPermit
+#      非 Clone/非 Copy + pub(crate)。與 test_ibkr_effect_permit_stub_source_static.py 雙證。
 #   G3 default-build DCE（seam 0 production caller）:seam 型別/函數符號於**模塊自身以外**的 production
-#      源零引用（0 caller → default artifact DCE,沿 driver/g4 audit 家族;放行臂/encoder/IPC 皆 S1-S4）。
+#      源零引用——**例外**:`OrderEffectPermit` 於 envelope-check 出現（mint 呼叫）合法,但
+#      `check_effect_contact` 本身 production **零 caller**（放行臂 DCE）→ seam 仍 DCE。其餘 seam
+#      符號（encoder/WireBytes/send_order_framed/stub/…）仍須零 production 引用（S1-S4 接線前）。
 #   G4 readonly-scope + order verb → 拒:envelope-check `readonly_operation_blocker` 把 order verb
 #      家族（paper submit/cancel/replace + live/margin/options/transfer）結構性映射為
 #      `OrderVerbStructurallyDenied`（order-effect 面在 readonly envelope 下結構性拒）。
@@ -133,7 +137,7 @@ def check_g1(module_src: str) -> tuple[list[str], list[str]]:
     return v, inc
 
 
-# ── G2 OrderEffectPermit::mint production 零鑄造（僅 cfg(test)）─────────────────
+# ── G2 OrderEffectPermit::mint production 唯一鑄造點（W7-S4a:check_effect_contact Ok 臂）──────
 def check_g2(module_src: str, prod_sources: dict[str, str]) -> tuple[list[str], list[str]]:
     v: list[str] = []
     inc: list[str] = []
@@ -142,12 +146,9 @@ def check_g2(module_src: str, prod_sources: dict[str, str]) -> tuple[list[str], 
         inc.append(f"G2 stub guard markers {STUB_BEGIN}/{STUB_END} absent")
         return v, inc
 
-    # (a) `fn mint` 掛 `#[cfg(test)]`（緊鄰前一屬性）。
-    m = re.search(r"(#\[cfg\(test\)\]\s*)?\bpub\(crate\)\s+fn\s+mint\s*\(", region)
-    if m is None:
+    # (a) `mint` 為 `pub(crate) fn mint`（W7-S4a 起非 cfg(test);供 check_effect_contact Ok 臂鑄造）。
+    if not re.search(r"\bpub\(crate\)\s+fn\s+mint\s*\(", region):
         v.append("G2(a) OrderEffectPermit::mint (pub(crate) fn mint) absent from stub region")
-    elif m.group(1) is None:
-        v.append("G2(a) OrderEffectPermit::mint is NOT gated by #[cfg(test)] (production could mint)")
 
     # (b) OrderEffectPermit 非 Clone / 非 Copy + pub(crate)（非 pub）。
     if not re.search(r"\bpub\(crate\)\s+struct\s+OrderEffectPermit\b", region):
@@ -159,33 +160,65 @@ def check_g2(module_src: str, prod_sources: dict[str, str]) -> tuple[list[str], 
             if "Clone" in d or "Copy" in d:
                 v.append("G2(b) OrderEffectPermit derives Clone/Copy (must be single-use)")
 
-    # (c) production（非 test）源零 `OrderEffectPermit::mint(` / `Self::mint(` 呼叫點。
-    # 範圍鎖 order-effect permit 的 mint（`bare mint(` 會誤命中 pacing/live_authz 等其他型別）。
+    # (c) production 源 `OrderEffectPermit::mint(` **恰一呼叫點**,且在 envelope-check
+    # （check_effect_contact Ok 臂,§1.3 唯一鑄造點）。`Self::mint(` 於模塊自身零呼叫。
+    mint_call_sites: list[str] = []
     for rel, src in prod_sources.items():
         c = _strip_line_comments(src)
-        if re.search(r"\bOrderEffectPermit::mint\s*\(", c):
-            v.append(f"G2(c) OrderEffectPermit::mint call site in production source: {rel}")
-        # 模塊自身:`Self::mint(` 亦指 OrderEffectPermit::mint（cfg(test) 定義以外零呼叫）。
+        mint_call_sites.extend([rel] * len(re.findall(r"\bOrderEffectPermit::mint\s*\(", c)))
         if rel == MODULE_REL and re.search(r"\bSelf::mint\s*\(", c):
             v.append(f"G2(c) Self::mint call site in seam module production code: {rel}")
+    if mint_call_sites != [ENVELOPE_CHECK_REL]:
+        v.append(
+            "G2(c) OrderEffectPermit::mint( production call site must be exactly one in "
+            f"{ENVELOPE_CHECK_REL} (check_effect_contact Ok arm), found {mint_call_sites}"
+        )
     return v, inc
 
 
-# ── G3 default-build DCE（seam 0 production caller,module 自身除外）────────────
+# ── G3 default-build DCE（seam 0 production caller,module 自身除外;S4a 例外見下）──────
+# W7-S4a 例外:`OrderEffectPermit` 於 envelope-check 出現（check_effect_contact Ok 臂鑄造）合法,
+# 但放行臂本身 production 零 caller → seam 仍 DCE。允許此一 (rel, sym) 組合,其餘照舊零引用。
+G3_ALLOWED_REFS = {ENVELOPE_CHECK_REL: {"OrderEffectPermit"}}
+
+
 def check_g3(prod_sources: dict[str, str]) -> tuple[list[str], list[str]]:
     v: list[str] = []
     inc: list[str] = []
     if MODULE_REL not in prod_sources:
         inc.append(f"G3 seam module absent: {MODULE_REL}")
         return v, inc
+    if ENVELOPE_CHECK_REL not in prod_sources:
+        inc.append(f"G3 envelope-check absent: {ENVELOPE_CHECK_REL}")
+        return v, inc
     for rel, src in prod_sources.items():
         if rel == MODULE_REL:
             continue
         c = _strip_line_comments(src)
+        allowed = G3_ALLOWED_REFS.get(rel, set())
         for sym in SEAM_SYMBOLS:
+            if sym in allowed:
+                continue
             if re.search(rf"\b{re.escape(sym)}\b", c):
                 v.append(f"G3 seam symbol `{sym}` referenced in production source {rel} "
                          f"(S0 must have 0 production caller → default-build DCE)")
+
+    # W7-S4a 放行臂 DCE 前提:`check_effect_contact` production **零 caller**（只出現其 `fn` 定義）。
+    # 若有任何呼叫點 → 放行臂被拉出 DCE → OrderEffectPermit::mint 的 seam 也隨之出線 → FAIL。
+    total = 0
+    defs = 0
+    for _rel, src in prod_sources.items():
+        c = _strip_line_comments(src)
+        total += len(re.findall(r"\bcheck_effect_contact\s*\(", c))
+        defs += len(re.findall(r"\bfn\s+check_effect_contact\s*\(", c))
+    if defs != 1:
+        inc.append(f"G3 expected exactly one `fn check_effect_contact` definition, found {defs}")
+        return v, inc
+    if total - defs != 0:
+        v.append(
+            "G3 check_effect_contact has production call site(s) beyond its definition "
+            f"({total - defs}) — release arm must stay DCE (zero production caller)"
+        )
     return v, inc
 
 
@@ -325,15 +358,15 @@ def _mutations(module_src: str, envelope_src: str, prod_sources: dict[str, str])
         ),
         envelope_src, prod_sources,
     ))
-    # M3（G2）:mint 去掉 #[cfg(test)]（production 可鑄 permit）。
-    muts.append((
-        "M3 production mint (cfg(test) removed)",
-        module_src.replace(
-            "    #[cfg(test)]\n    pub(crate) fn mint()",
-            "    pub(crate) fn mint()",
-        ),
-        envelope_src, prod_sources,
-    ))
+    # M3（G3）:注入 check_effect_contact production caller（放行臂被拉出 DCE → seam 出線）。
+    inj3 = dict(prod_sources)
+    tgt3 = "rust/openclaw_engine/src/ibkr_tws_driver.rs"
+    if tgt3 in inj3:
+        inj3[tgt3] = inj3[tgt3] + (
+            "\nfn m3_call() { let _ = check_effect_contact("
+            "None, todo!(), todo!(), todo!(), todo!()); }\n"
+        )
+    muts.append(("M3 check_effect_contact production caller (release arm un-DCE)", module_src, envelope_src, inj3))
     # M4（G2）:OrderEffectPermit 派生 Clone（可復用授權）。
     muts.append((
         "M4 OrderEffectPermit derives Clone",

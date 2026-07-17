@@ -33,14 +33,23 @@ pub const IBKR_ACTIVATION_ENVELOPE_CONTRACT_ID: &str = "ibkr_activation_envelope
 /// 超過一日的 readonly envelope 即非 time-bounded,結構性拒）。
 pub const IBKR_ACTIVATION_WINDOW_MAX_MS: u64 = 24 * 60 * 60 * 1000;
 
-/// operation scope 白名單枚舉（**readonly 單值**;W8a 範圍紀律）。
-/// paper/tiny_live/live/shadow 等表外 scope 一律 `UnknownDenied`——不是「未來擴充位」,
-/// 是 fail-closed 分類:W8 全包引入其他 scope 時擴充白名單並吸收本切片。
+/// operation scope 白名單枚舉（**readonly + paper 雙值**;W8a→W7-S4 擴充後）。
+/// tiny_live/live/shadow 等表外 scope 一律 `UnknownDenied`——不是「未來擴充位」,是
+/// fail-closed 分類:W8 全包引入其他 scope 時再擴白名單並吸收本切片。
+///
+/// **W7-S4a 擴充（effect 面）**:新增 `Paper` scope——paper order-write effect 授權面的
+/// scope 綁定。**production 恆拒不變量不受影響**:Paper scope 的 shape 校驗
+/// （`validate_paper_effect`）+ engine `check_effect_contact` 放行臂在 production **不可達**
+/// （無真簽名 envelope provider/無金鑰）;唯一鑄造點 = `check_effect_contact` `Ok` 臂,
+/// 其 production 零 caller → DCE。Paper scope 只讓「effect 授權機器」存在且經測試,不落活化。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum IbkrActivationOperationScopeV1 {
     /// 唯讀接觸（account/positions/market-data 讀面;零 order verb）。
     Readonly,
+    /// paper order-write effect 授權面（W7-S4a;paper submit/cancel/replace）。
+    /// **仍非活化**:envelope 存在 ≠ 活化,真簽名/金鑰/放行是 EA5 Operator-gated。
+    Paper,
     /// 契約 default / 白名單外 scope 的 fail-closed 分類（`validate()` 必拒）。
     UnknownDenied,
 }
@@ -53,11 +62,12 @@ impl Default for IbkrActivationOperationScopeV1 {
 }
 
 impl IbkrActivationOperationScopeV1 {
-    /// scope 字串 → 白名單枚舉（**精確匹配**;表外一律 `UnknownDenied`,含 paper/
-    /// tiny_live/live——該三值歸 W8,本切片不承認）。
+    /// scope 字串 → 白名單枚舉（**精確匹配**;表外一律 `UnknownDenied`,含 tiny_live/
+    /// live——該值歸 W8,本切片不承認）。W7-S4a 起承認 `"paper"`（effect 面）。
     pub fn classify_scope(raw: &str) -> Self {
         match raw {
             "readonly" => Self::Readonly,
+            "paper" => Self::Paper,
             _ => Self::UnknownDenied,
         }
     }
@@ -65,6 +75,7 @@ impl IbkrActivationOperationScopeV1 {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Readonly => "readonly",
+            Self::Paper => "paper",
             Self::UnknownDenied => "unknown_denied",
         }
     }
@@ -191,12 +202,100 @@ impl IbkrActivationEnvelopeV1 {
         }
     }
 
-    /// envelope 校驗（零副作用;注入 `now_ms`,無牆鐘）。fail-closed:任一綁定欄缺/壞/
-    /// 過期即拒。**先寫拒絕路徑**:本函數只累積 blocker,不存在任何提前放行分支。
+    /// **W7-S4a paper-scope effect envelope 代表 fixture**（`validate_paper_effect` 基線;
+    /// 時刻為固定 epoch ms 常量,測試以注入 `now_ms` 相對取值——無牆鐘依賴,非 time-bomb）。
+    /// 與 `readonly_fixture` 差異僅 scope-specific 面:environment=`Paper`、scope=`Paper`、
+    /// order/position 額度=正定點、每日 order 數 ≥1。**仍非活化**（簽名/金鑰/放行 EA5-gated）。
+    pub fn paper_effect_fixture() -> Self {
+        Self {
+            environment: BrokerEnvironment::Paper,
+            operation_scope: IbkrActivationOperationScopeV1::Paper,
+            max_order_notional_usd_decimal: "1000".to_string(),
+            max_position_notional_usd_decimal: "5000".to_string(),
+            max_orders_per_day: 10,
+            ..Self::readonly_fixture()
+        }
+    }
+
+    /// readonly-scope envelope 校驗（零副作用;注入 `now_ms`,無牆鐘）。fail-closed:任一
+    /// 綁定欄缺/壞/過期即拒。**先寫拒絕路徑**:本函數只累積 blocker,不存在任何提前放行分支。
+    ///
+    /// **語意不變（W7-S4a 重構）**:scope-independent 綁定欄檢查抽入
+    /// `push_scope_independent_blockers`（readonly 與 paper 共用同一校驗真源,禁語義漂移）;
+    /// readonly-specific 面（environment==ReadOnly / scope==Readonly / limits 恆零）留在本函數。
+    /// 對 readonly-scope 輸入的 blocker 集與重構前**完全一致**（`.contains()`/`.accepted` 語意保真）。
     pub fn validate(&self, now_ms: u64) -> IbkrActivationEnvelopeVerdict {
         use IbkrActivationEnvelopeBlocker as B;
 
         let mut blockers = Vec::new();
+        self.push_scope_independent_blockers(now_ms, &mut blockers);
+
+        // ── readonly-specific 面（environment 白名單=ReadOnly 單值;scope==Readonly;order 面零額度）──
+        if self.environment != BrokerEnvironment::ReadOnly {
+            blockers.push(B::EnvironmentNotReadonly);
+        }
+        if self.operation_scope != IbkrActivationOperationScopeV1::Readonly {
+            blockers.push(B::OperationScopeDenied);
+        }
+        // readonly scope 的 limits 恆零:非 `"0"` / 非 0 即拒（order 面在額度層也無路）。
+        if self.max_order_notional_usd_decimal != "0" {
+            blockers.push(B::OrderNotionalLimitNotZero);
+        }
+        if self.max_position_notional_usd_decimal != "0" {
+            blockers.push(B::PositionNotionalLimitNotZero);
+        }
+        if self.max_orders_per_day != 0 {
+            blockers.push(B::OrdersPerDayLimitNotZero);
+        }
+
+        IbkrActivationEnvelopeVerdict::new(blockers)
+    }
+
+    /// **W7-S4a paper-scope effect envelope 校驗**（零副作用;注入 `now_ms`,無牆鐘）。
+    /// 與 `validate()` 共用 `push_scope_independent_blockers`（單一校驗真源;禁兩套語義漂移）,
+    /// 差異僅 scope-specific 面:environment==`Paper`、scope==`Paper`、order 額度須為正定點
+    /// （effect 面需真額度;**現值綁定比對歸 W8/EA5,本切片僅 shape 驗證**）。
+    ///
+    /// **不變量**:本函數只 shape-驗證,回 accepted 僅代表 paper envelope 型別/綁定/時窗合格;
+    /// **活化裁決在 engine `check_effect_contact`**（seal≠活化 + posture 綁定 + option B HMAC 簽名
+    /// + nonce 原子消費 + 唯一鑄造點）。envelope 存在 ≠ 活化。
+    pub fn validate_paper_effect(&self, now_ms: u64) -> IbkrActivationEnvelopeVerdict {
+        use IbkrActivationEnvelopeBlocker as B;
+
+        let mut blockers = Vec::new();
+        self.push_scope_independent_blockers(now_ms, &mut blockers);
+
+        // ── paper-specific 面（environment==Paper;scope==Paper;order 額度正定點 shape）──
+        if self.environment != BrokerEnvironment::Paper {
+            blockers.push(B::PaperEnvironmentMismatch);
+        }
+        if self.operation_scope != IbkrActivationOperationScopeV1::Paper {
+            blockers.push(B::OperationScopeDenied);
+        }
+        // paper effect: order/position 額度須為正定點字串（shape;禁 f64;值綁定歸 W8/EA5）。
+        if !crate::is_positive_decimal_string(&self.max_order_notional_usd_decimal) {
+            blockers.push(B::PaperOrderNotionalLimitInvalid);
+        }
+        if !crate::is_positive_decimal_string(&self.max_position_notional_usd_decimal) {
+            blockers.push(B::PaperPositionNotionalLimitInvalid);
+        }
+        if self.max_orders_per_day == 0 {
+            blockers.push(B::PaperOrdersPerDayLimitInvalid);
+        }
+
+        IbkrActivationEnvelopeVerdict::new(blockers)
+    }
+
+    /// scope-independent 綁定欄檢查（readonly 與 paper 共用;§2 活化鐵律的 scope 無關面）。
+    /// 涵蓋 contract_id/source_version/lane/broker/build-SHA/三指紋+risk hash/三 lineage/
+    /// operator/nonce/issued-at/window/expiry/負空間束——**不含** environment/scope/limits
+    /// （scope-specific,由各 `validate*` 自持）。
+    fn push_scope_independent_blockers(
+        &self,
+        now_ms: u64,
+        blockers: &mut Vec<IbkrActivationEnvelopeBlocker>,
+    ) {
+        use IbkrActivationEnvelopeBlocker as B;
 
         if self.contract_id != IBKR_ACTIVATION_ENVELOPE_CONTRACT_ID {
             blockers.push(B::ContractIdMismatch);
@@ -210,13 +309,6 @@ impl IbkrActivationEnvelopeV1 {
         if self.broker != Broker::Ibkr {
             blockers.push(B::WrongBroker);
         }
-        // 本切片 environment 白名單 = ReadOnly 單值（paper/shadow 歸 W8,live 永拒）。
-        if self.environment != BrokerEnvironment::ReadOnly {
-            blockers.push(B::EnvironmentNotReadonly);
-        }
-        if self.operation_scope != IbkrActivationOperationScopeV1::Readonly {
-            blockers.push(B::OperationScopeDenied);
-        }
         if !is_git_sha40_hex(&self.build_git_sha) {
             blockers.push(B::BuildGitShaInvalid);
         }
@@ -228,16 +320,6 @@ impl IbkrActivationEnvelopeV1 {
         }
         if !is_sha256_hex(&self.risk_config_hash) {
             blockers.push(B::RiskConfigHashInvalid);
-        }
-        // readonly scope 的 limits 恆零:非 `"0"` / 非 0 即拒（order 面在額度層也無路）。
-        if self.max_order_notional_usd_decimal != "0" {
-            blockers.push(B::OrderNotionalLimitNotZero);
-        }
-        if self.max_position_notional_usd_decimal != "0" {
-            blockers.push(B::PositionNotionalLimitNotZero);
-        }
-        if self.max_orders_per_day != 0 {
-            blockers.push(B::OrdersPerDayLimitNotZero);
         }
         if !is_sha256_hex(&self.cost_gate_lineage) {
             blockers.push(B::CostGateLineageInvalid);
@@ -274,8 +356,6 @@ impl IbkrActivationEnvelopeV1 {
         if self.secret_content_serialized {
             blockers.push(B::SecretContentSerialized);
         }
-
-        IbkrActivationEnvelopeVerdict::new(blockers)
     }
 }
 
@@ -313,6 +393,15 @@ pub enum IbkrActivationEnvelopeBlocker {
     OrderNotionalLimitNotZero,
     PositionNotionalLimitNotZero,
     OrdersPerDayLimitNotZero,
+    // ---- W7-S4a paper-scope effect envelope 專屬拒因（additive;readonly 面不觸發）----
+    /// paper-scope envelope 的 environment 非 `Paper`。
+    PaperEnvironmentMismatch,
+    /// paper-scope envelope 的單筆 order notional 上限非正定點字串（shape）。
+    PaperOrderNotionalLimitInvalid,
+    /// paper-scope envelope 的總 position notional 上限非正定點字串（shape）。
+    PaperPositionNotionalLimitInvalid,
+    /// paper-scope envelope 的每日 order 數上限為 0（effect 面須 ≥1）。
+    PaperOrdersPerDayLimitInvalid,
     CostGateLineageInvalid,
     GuardianLineageInvalid,
     DecisionLeaseLineageInvalid,

@@ -24,16 +24,19 @@
 //!   `BrokerOperation`/`AuthorityScope`）。
 //! 硬邊界：
 //!   - **INV-ORDER（本模塊最高不變量）**：production build 零路徑可使 order-verb 訊息出
-//!     transport 層。二元證明:①`OrderEffectPermit` production 零鑄造點（`mint` 為 `#[cfg(test)]`,
-//!     production 無構造子）→ `send_order_framed` production 不可達;②本模塊 0 production caller →
+//!     transport 層。二元證明:①`OrderEffectPermit::mint`（W7-S4a 起 `pub(crate)`）**唯一 production
+//!     呼叫點 = `check_effect_contact` `Ok` 臂**,而 `check_effect_contact` S4a 零 production caller →
+//!     mint 呼叫 + `send_order_framed` 一併 production 不可達;②本模塊 0 production caller →
 //!     **final-binary DCE**（`target/release/openclaw-engine` 零 seam 符號 AND 零 seam strings,
 //!     含 `EffectDenied` literal 缺席）。**rlib 級非 DCE 證據**——rlib 保留 rmeta,`strings
 //!     libopenclaw_engine*.rlib` 仍命中 seam 名;有效 DCE 證據唯 final binary（nm + strings 雙查）。
-//!     沿 driver/g4 audit 家族。兩證獨立。
-//!   - **S0 = 恆拒地基,放行臂 S4;encoder S1**：本輪不含任何 order encoder、不送任何 order 訊息、
-//!     無放行臂。`EffectEnvelopeRequiredStub::check` 恆 `Err(EffectDenied::EnvelopeRequired)`,
-//!     無任何開關可翻放行。W7-S4 才落 HMAC option B 放行臂（`check_effect_contact`,鑄
-//!     `OrderEffectPermit`;唯一 production 鑄造點）。
+//!     沿 driver/g4 audit 家族。兩證獨立。源級機器證明:mint 單呼叫點 + 唯一 stub provider +
+//!     check_effect_contact 零 caller,見 `tests/structure/test_ibkr_effect_permit_stub_source_static.py`。
+//!   - **恆拒地基;放行臂 = `check_effect_contact`（W7-S4a 落於 `ibkr_activation_envelope_check`）**：
+//!     本模塊的 `EffectEnvelopeRequiredStub::check` 恆 `Err(EffectDenied::EnvelopeRequired)`,無任何
+//!     開關可翻放行——它是 production **唯一** `EffectPermitProvider`,永不鑄 permit。option B HMAC
+//!     放行臂在 `check_effect_contact`（鑄 `OrderEffectPermit`;§1.3 唯一鑄造點）,但其 production 零
+//!     caller → 放行臂 production 不可達。真活化=EA5 Operator-gated。
 //!   - **兩線獨立（INV-1 不受影響）**：本模塊**不** impl `ConnectPermitProvider`、**不**觸碰
 //!     `PermitToken`;connect permit 線（`EnvelopeRequiredStub` 恆拒）不受本模塊影響。
 //!   - margin/short/options/cfd/transfer/account-write 永久 denied（capability gate 結構性拒）。
@@ -90,24 +93,31 @@ impl OrderFrame {
 // 【CI 靜態守衛掃描邊界】本區塊（BEGIN..END）內:
 //   - production effect provider = 具體型別 `EffectEnvelopeRequiredStub`（禁 dyn/泛型 permit 參數）;
 //   - `EffectEnvelopeRequiredStub::check` 恆 `Err(EnvelopeRequired)`,**零 env / config / cfg 讀取**
-//     （無任何開關可翻放行——S4 才以真 HMAC option B 驗證器落放行臂）;
-//   - `OrderEffectPermit` 非 Clone / 非 Copy,構造子 `mint` 為 **`#[cfg(test)]`**（本輪唯一鑄造點=
-//     測試域;production **無** `mint` 符號 → 恆無 permit → `send_order_framed` production 不可達）。
+//     （無任何開關可翻放行——真 HMAC option B 放行臂在 `check_effect_contact`,非本 stub）;
+//   - `OrderEffectPermit` 非 Clone / 非 Copy,構造子 `mint` 為 **`pub(crate)`（W7-S4a 起移出
+//     `#[cfg(test)]`）**——但 INV-ORDER 二元仍成立:mint **唯一 production 呼叫點 =
+//     `check_effect_contact` `Ok` 臂**（`ibkr_activation_envelope_check`）,而 `check_effect_contact`
+//     S4a **零 production caller** → mint 呼叫 + check_effect_contact 一併 **final-binary DCE**;
+//     production 仍恆無 permit → `send_order_framed` production 不可達。機器證明見
+//     `tests/structure/test_ibkr_effect_permit_stub_source_static.py`（唯一 impl + mint 單呼叫點 +
+//     check_effect_contact 零 caller）。
 // ---------------------------------------------------------------------------
 
 /// INV-ORDER order-effect permit:order-verb send 授權的**單次消費證明**。**非 Clone / 非 Copy**——
 /// move 進 `send_order_framed` 後即消費,結構上禁止「舊 envelope 靜默復用 order 授權」。
-/// 構造只能經 `mint`,而 S0 `mint` 為 `#[cfg(test)]` → **production 無任何構造路徑**（放行臂 S4
-/// 才把 `mint` 移出 test 域,由 `check_effect_contact` `Ok` 臂鑄造）。
+/// 構造只能經 `mint`（`pub(crate)`,crate 外不可鑄）;**唯一 production 呼叫點 =
+/// `check_effect_contact` `Ok` 臂**（§1.3 唯一鑄造點）,而該函數 S4a 零 production caller → DCE →
+/// production 恆無 permit（INV-ORDER 二元）。真金鑰/真簽名 envelope = EA5 Operator-gated。
 pub(crate) struct OrderEffectPermit {
     /// 私有零大小封印:令 `OrderEffectPermit { .. }` literal 在模塊外不可構造。
     _seal: (),
 }
 
 impl OrderEffectPermit {
-    /// **唯一鑄造點（S0 = `#[cfg(test)]` 測試域）**。production 恆無此符號 → 恆無 permit →
-    /// INV-ORDER 二元成立。S4 放行臂落地時移除 `#[cfg(test)]`,由 HMAC option B 裁決 `Ok` 臂呼叫。
-    #[cfg(test)]
+    /// **唯一鑄造點（§1.3）**。W7-S4a 起為 `pub(crate)`（供 `check_effect_contact` `Ok` 臂鑄造）,
+    /// 但唯一 production 呼叫點在 `check_effect_contact`,其零 production caller → mint 呼叫 DCE →
+    /// production 恆無 permit。test 域另可鑄（transport 骨架單元測試）。**禁**在 production 新增
+    /// 任何第二呼叫點（機器證明守衛會 FAIL）。
     pub(crate) fn mint() -> Self {
         Self { _seal: () }
     }

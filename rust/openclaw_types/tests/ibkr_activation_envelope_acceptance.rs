@@ -150,19 +150,22 @@ fn rejects_unknown_denied_operation_scope() {
 }
 
 #[test]
-fn scope_whitelist_is_readonly_single_value_and_fail_closed() {
+fn scope_whitelist_recognizes_readonly_and_paper_and_fail_closed() {
     use IbkrActivationOperationScopeV1 as Scope;
 
     assert_eq!(Scope::classify_scope("readonly"), Scope::Readonly);
-    // 表外值(含 W8 才承認的 paper/tiny_live/live)一律 UnknownDenied。
+    // W7-S4a:paper effect scope 承認（精確匹配）。
+    assert_eq!(Scope::classify_scope("paper"), Scope::Paper);
+    // 表外值(含 W8 才承認的 tiny_live/live)一律 UnknownDenied。
     for raw in [
-        "paper",
         "tiny_live",
         "live",
         "shadow",
         "READONLY",
         "read_only",
         "readonly ",
+        "PAPER",
+        "paper ",
         "",
     ] {
         assert_eq!(
@@ -173,7 +176,97 @@ fn scope_whitelist_is_readonly_single_value_and_fail_closed() {
     }
     assert_eq!(Scope::default(), Scope::UnknownDenied);
     assert_eq!(Scope::Readonly.as_str(), "readonly");
+    assert_eq!(Scope::Paper.as_str(), "paper");
     assert_eq!(Scope::UnknownDenied.as_str(), "unknown_denied");
+}
+
+// ---------------------------------------------------------------------------
+// W7-S4a paper-scope effect envelope 校驗（validate_paper_effect;與 readonly 共用
+// scope-independent 核心,差異僅 environment/scope/limits）
+// ---------------------------------------------------------------------------
+
+#[test]
+fn paper_effect_fixture_validates_in_window() {
+    let envelope = IbkrActivationEnvelopeV1::paper_effect_fixture();
+    let verdict = envelope.validate_paper_effect(NOW_IN_WINDOW_MS);
+    assert!(
+        verdict.accepted,
+        "unexpected paper-effect blockers: {:?}",
+        verdict.blockers
+    );
+    assert_eq!(envelope.environment, BrokerEnvironment::Paper);
+    assert_eq!(
+        envelope.operation_scope,
+        IbkrActivationOperationScopeV1::Paper
+    );
+    // paper fixture 走 readonly 校驗必拒（scope/environment/limits 不合 readonly）——證兩路徑不混。
+    assert!(!envelope.validate(NOW_IN_WINDOW_MS).accepted);
+}
+
+#[test]
+fn paper_effect_rejects_non_paper_environment_and_scope() {
+    let mut e = IbkrActivationEnvelopeV1::paper_effect_fixture();
+    e.environment = BrokerEnvironment::ReadOnly;
+    let verdict = e.validate_paper_effect(NOW_IN_WINDOW_MS);
+    assert!(!verdict.accepted);
+    assert!(verdict.blockers.contains(&B::PaperEnvironmentMismatch));
+
+    let mut e = IbkrActivationEnvelopeV1::paper_effect_fixture();
+    e.operation_scope = IbkrActivationOperationScopeV1::Readonly;
+    let verdict = e.validate_paper_effect(NOW_IN_WINDOW_MS);
+    assert!(!verdict.accepted);
+    assert!(verdict.blockers.contains(&B::OperationScopeDenied));
+}
+
+#[test]
+fn paper_effect_rejects_non_positive_limits() {
+    for (mutate, blocker) in [
+        (
+            (|e: &mut IbkrActivationEnvelopeV1| e.max_order_notional_usd_decimal = "0".into())
+                as fn(&mut IbkrActivationEnvelopeV1),
+            B::PaperOrderNotionalLimitInvalid,
+        ),
+        (
+            |e: &mut IbkrActivationEnvelopeV1| e.max_order_notional_usd_decimal = String::new(),
+            B::PaperOrderNotionalLimitInvalid,
+        ),
+        (
+            |e: &mut IbkrActivationEnvelopeV1| e.max_position_notional_usd_decimal = "-1".into(),
+            B::PaperPositionNotionalLimitInvalid,
+        ),
+        (
+            |e: &mut IbkrActivationEnvelopeV1| e.max_orders_per_day = 0,
+            B::PaperOrdersPerDayLimitInvalid,
+        ),
+    ] {
+        let mut e = IbkrActivationEnvelopeV1::paper_effect_fixture();
+        mutate(&mut e);
+        let verdict = e.validate_paper_effect(NOW_IN_WINDOW_MS);
+        assert!(!verdict.accepted, "expected rejection for {blocker:?}");
+        assert!(
+            verdict.blockers.contains(&blocker),
+            "expected {blocker:?}, got {:?}",
+            verdict.blockers
+        );
+    }
+}
+
+#[test]
+fn paper_effect_shares_scope_independent_core_with_readonly() {
+    // scope-independent 綁定欄壞掉時,paper 與 readonly 兩路徑必同時拒同一 blocker（單一校驗真源）。
+    let mut e = IbkrActivationEnvelopeV1::paper_effect_fixture();
+    e.activation_nonce = "not-a-nonce".to_string();
+    assert!(e
+        .validate_paper_effect(NOW_IN_WINDOW_MS)
+        .blockers
+        .contains(&B::ActivationNonceInvalid));
+
+    let mut r = fixture();
+    r.activation_nonce = "not-a-nonce".to_string();
+    assert!(r
+        .validate(NOW_IN_WINDOW_MS)
+        .blockers
+        .contains(&B::ActivationNonceInvalid));
 }
 
 #[test]

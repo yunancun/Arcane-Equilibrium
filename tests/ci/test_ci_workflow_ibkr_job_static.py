@@ -63,11 +63,12 @@ def test_rust_ibkr_tests_job_keeps_all_cargo_test_scopes() -> None:
 
 def test_rust_ibkr_tests_job_keeps_all_five_audit_steps() -> None:
     job = _job("rust-ibkr-tests")
-    # 五審計步(g4 symbol / permit-stub / fake dev-dep-only / fake 缺席 nm /
-    # driver 缺席 nm)——任一被刪即紅。
+    # 六審計步(g4 symbol / INV-1 permit-stub / W7-S4a INV-ORDER effect-permit /
+    # fake dev-dep-only / fake 缺席 nm / driver 缺席 nm)——任一被刪即紅。
     for command in (
         "bash helper_scripts/ci/ibkr_g4_symbol_audit.sh",
         "python3 tests/structure/test_ibkr_tws_permit_stub_source_static.py",
+        "python3 tests/structure/test_ibkr_effect_permit_stub_source_static.py",
         "python3 tests/structure/test_ibkr_fake_tws_devdep_only.py",
         "bash helper_scripts/ci/ibkr_fake_tws_absence_audit.sh",
         "bash helper_scripts/ci/ibkr_driver_absence_audit.sh",

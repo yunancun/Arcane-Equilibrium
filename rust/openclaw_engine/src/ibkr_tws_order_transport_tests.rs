@@ -3,7 +3,9 @@
 //! 覆蓋:①`EffectEnvelopeRequiredStub` 恆拒（production 唯一 provider）;②test 域鑄 permit →
 //! `send_order_framed` 取出 order bytes（唯一出站位點,型別上需 permit）;③capability gate
 //! accept（accepted_fixture）;④capability gate deny（paper verb 破口 / denied verb 放行破口）。
-//! **INV-ORDER**:production 無 `OrderEffectPermit::mint`（本檔 cfg(test) 才可鑄）→ 恆無 permit。
+//! **INV-ORDER**:`OrderEffectPermit::mint`（W7-S4a 起 `pub(crate)`）唯一 production 呼叫點 =
+//! `check_effect_contact` `Ok` 臂,而該函數 S4a 零 production caller → mint 呼叫 DCE → production
+//! 恆無 permit。本檔（test 域）另可鑄以驗 transport 骨架。源級守衛見結構測試。
 
 use super::*;
 use openclaw_types::StockEtfBrokerCapabilityEntryV1;
