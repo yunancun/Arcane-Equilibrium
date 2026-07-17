@@ -110,7 +110,7 @@ fn begun(sv: i32) -> ContractDataDigest {
 
 #[test]
 fn builder_produces_pinned_v8_field_order() {
-    let frame = encode_req_contract_details(REQ_ID, &spy_query());
+    let frame = encode_req_contract_details(REQ_ID, &spy_query()).unwrap();
     // unframe(4-byte len prefix)後解欄。
     let fields = decode_fields(&frame[4..]).unwrap();
     assert_eq!(
@@ -128,7 +128,8 @@ fn builder_produces_pinned_v8_field_order() {
         exchange: String::new(),
         primary_exchange: String::new(),
     };
-    let fields = decode_fields(&encode_req_contract_details(REQ_ID, &q)[4..]).unwrap();
+    let frame = encode_req_contract_details(REQ_ID, &q).unwrap();
+    let fields = decode_fields(&frame[4..]).unwrap();
     assert_eq!(fields[3], "756733");
 }
 
@@ -592,4 +593,33 @@ fn identity_hash_is_pit_rebuildable_across_captures() {
         .clone();
     assert_eq!(h1, h2, "同 instrument 跨捕捉 identity_hash 必須可重建一致");
     assert!(is_sha256_hex(&h1));
+}
+
+/// **E2-F1 出站注入面**:conId 直查路徑的 caller 自由欄含 NUL → begin 回 typed
+/// `WireMalformed(OutboundFieldInvalid)`,**digest 相位不動**（未誤標 SnapshotIncomplete）,
+/// 絕不送出被注入 frame（conId>0 繞過 symbol 規範化,builder 校驗兜底）。
+#[test]
+fn begin_rejects_outbound_field_injection_before_state_transition() {
+    use crate::ibkr_tws_wire::CodecError;
+    let mut d = ContractDataDigest::new(ContractDataConfig::default());
+    let poisoned = ContractDetailsQuery {
+        con_id: Some(756733),
+        symbol: "SPY".to_string(),
+        exchange: "SMART\u{0}INJECT".to_string(),
+        primary_exchange: "ARCA".to_string(),
+    };
+    let err = d
+        .begin_contract_details(157, REQ_ID, &poisoned, NOW)
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        ContractDataReject::WireMalformed(CodecError::OutboundFieldInvalid("embedded NUL"))
+    ));
+    // 相位未污染:仍 NotSubscribed(Idle) → 下 tick 以乾淨查詢可正常 re-begin。
+    assert!(matches!(
+        d.identity_staleness(NOW),
+        SnapshotStaleness::NotSubscribed
+    ));
+    d.begin_contract_details(157, REQ_ID, &spy_query(), NOW)
+        .expect("乾淨查詢 re-begin 成功");
 }

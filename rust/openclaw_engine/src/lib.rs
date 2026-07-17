@@ -169,6 +169,15 @@ pub mod ibkr_tws_order_exec_data;
 // 歸 W6-S3 紅線)。純同步、注入時鐘、零 socket——與 wire/session/pacing/driver 同屬 default
 // build 被 DCE 的 TWS 連接器面（B′ 姿態,g4 audit 保綠）。
 pub mod ibkr_tws_contract_data;
+// IBKR W6-S3 market data lane 消化層：reqMktData/cancelMktData/reqMarketDataType builder
+//（STK-only；**regulatorySnapshot 資金效果封死**=builder 級常量 false,每次 0.01 USD 且
+// paper 亦計費,結構上非 caller 可控;snapshot⊥genericTickList）→ IN tick 家族 decode
+//（TICK_PRICE 合成去重/TICK_SIZE 嚴格 5 欄/per-reqId entitlement FSM/delayed provenance
+// 標記）→ W6-S3 quote row 契約 + snapshot 11s 終態 timeout + lines semaphore（訂閱數配額,
+// 與 W3 rate bucket 分軸）。出站經 pacing 單一出口（OutboundClass::MarketData）;**絕不含
+// 下單/改單/撤單 builder**。純同步、注入時鐘、零 socket——與 wire/session/pacing/driver
+// 同屬 default build 被 DCE 的 TWS 連接器面（B′ 姿態,g4 audit 保綠）。
+pub mod ibkr_tws_market_data;
 // IBKR W5-S4 session attestation producer：把 managedAccounts 實檢（DU* 白名單;
 // `account_fingerprint_is_live` 禁聲明自填,唯一鑄造點=wire `managed_accounts_inspect`）+
 // session 事實收斂為 typed `IbkrSessionAttestationV1`;契約 validate 全綠才產 attested 態,

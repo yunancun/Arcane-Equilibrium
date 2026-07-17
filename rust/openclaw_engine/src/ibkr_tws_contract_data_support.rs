@@ -15,7 +15,7 @@ use sha2::{Digest, Sha256};
 use openclaw_types::{is_normalized_symbol, IbkrInstrumentIdentityRowV1};
 
 use crate::ibkr_tws_account_data::SnapshotStaleness;
-use crate::ibkr_tws_wire::{encode_fields, encode_frame, CodecError};
+use crate::ibkr_tws_wire::{encode_fields_checked, encode_frame, CodecError};
 
 use super::{ContractDataReject, SubPhase};
 
@@ -62,10 +62,18 @@ impl ContractDetailsQuery {
 /// multiplier, exchange, primaryExchange, currency, localSymbol, tradingClass,
 /// includeExpired, secIdType, secId]`——STK 全限定:secType 恆 `"STK"`、currency 恆
 /// `"USD"`、includeExpired 恆 `"0"`（false）、期權/期貨欄恆空（strike 按 ibapi 送 `"0"`）。
-pub(crate) fn encode_req_contract_details(req_id: i64, query: &ContractDetailsQuery) -> Vec<u8> {
+///
+/// **E2-F1**:caller 供給欄（symbol/exchange/primaryExchange）經 `encode_fields_checked`——
+/// 內嵌 NUL / 非 ASCII → typed `CodecError::OutboundFieldInvalid`,絕不送出被注入的 frame
+/// （`is_fully_qualified` 的 symbol 規範化只覆 conId=None 路徑,conId 直查路徑的自由欄由此
+/// builder 校驗兜底）。
+pub(crate) fn encode_req_contract_details(
+    req_id: i64,
+    query: &ContractDetailsQuery,
+) -> Result<Vec<u8>, CodecError> {
     let rid = req_id.to_string();
     let cid = query.con_id.unwrap_or(0).to_string();
-    encode_frame(&encode_fields(&[
+    Ok(encode_frame(&encode_fields_checked(&[
         OUT_REQ_CONTRACT_DATA_MSG_ID,
         CONTRACT_DATA_OUT_VERSION,
         &rid,
@@ -84,7 +92,7 @@ pub(crate) fn encode_req_contract_details(req_id: i64, query: &ContractDetailsQu
         "0", // includeExpired=false（lane 只承現行上市 instrument）
         "",  // secIdType
         "",  // secId
-    ]))
+    ])?))
 }
 
 // ===========================================================================
