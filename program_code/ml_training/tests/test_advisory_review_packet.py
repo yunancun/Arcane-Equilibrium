@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 
@@ -11,6 +13,50 @@ from ml_training.advisory_review_packet import (
     stable_sha256_json,
     validate_advisory_review_packet,
 )
+
+
+@dataclass(frozen=True)
+class _DataclassGrant:
+    database_write_allowed: bool
+
+
+class _ToListGrant:
+    def tolist(self):
+        return {"database_write_allowed": True}
+
+
+class _ItemGrant:
+    def item(self):
+        return {"database_write_allowed": True}
+
+
+class _CountingToList:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def tolist(self):
+        self.calls += 1
+        return {"observation": "bounded"}
+
+
+class _UnknownContainer:
+    pass
+
+
+class _SelfToList:
+    def tolist(self):
+        return self
+
+
+class _LookupFailure:
+    @property
+    def tolist(self):
+        raise RuntimeError("lookup failed")
+
+
+class _CallFailure:
+    def tolist(self):
+        raise RuntimeError("call failed")
 
 
 def test_stable_sha256_json_is_key_order_invariant():
@@ -150,3 +196,209 @@ def test_validate_requires_at_least_one_sha256_input_hash():
     packet["input_hashes"] = {"x": "not-a-sha"}
     with pytest.raises(ValueError):
         validate_advisory_review_packet(packet)
+
+
+def test_hash_rejects_oversized_mapping_key_before_authority_scan() -> None:
+    packet = build_advisory_review_packet(
+        capability_id="unit",
+        input_payloads={"x": {"ok": True}},
+    )
+    packet["nested"] = {"databaseWriteAllowed" * 64: False}
+
+    with pytest.raises(ValueError, match="mapping key exceeds maximum length"):
+        compute_advisory_review_packet_hash(packet)
+
+
+def test_hash_rejects_excessive_mapping_nesting_depth() -> None:
+    packet = build_advisory_review_packet(
+        capability_id="unit",
+        input_payloads={"x": {"ok": True}},
+    )
+    nested: dict[str, object] = {"leaf": False}
+    for _ in range(33):
+        nested = {"nested": nested}
+    packet["nested"] = nested
+
+    with pytest.raises(ValueError, match="nesting depth exceeds maximum"):
+        compute_advisory_review_packet_hash(packet)
+
+
+def test_validate_depth_guard_runs_before_canonical_hash_serialization() -> None:
+    packet = build_advisory_review_packet(
+        capability_id="unit",
+        input_payloads={"x": {"ok": True}},
+    )
+    nested: dict[str, object] = {"leaf": False}
+    for _ in range(1000):
+        nested = {"nested": nested}
+    packet["nested"] = nested
+
+    with pytest.raises(ValueError, match="nesting depth exceeds maximum"):
+        validate_advisory_review_packet(packet)
+
+
+@pytest.mark.parametrize(
+    "camel_case_key",
+    (
+        "databaseWriteAllowed",
+        "databaseHTTPWriteAllowed",
+        "APIProviderCallPerformed",
+    ),
+)
+def test_validate_rejects_bounded_camel_case_authority_keys(
+    camel_case_key: str,
+) -> None:
+    packet = build_advisory_review_packet(
+        capability_id="unit",
+        input_payloads={"x": {"ok": True}},
+    )
+    packet["nested"] = {camel_case_key: True}
+    packet["advisory_review_packet_hash"] = compute_advisory_review_packet_hash(packet)
+
+    with pytest.raises(ValueError, match="forbidden"):
+        validate_advisory_review_packet(packet)
+
+
+def test_validate_rejects_truthy_authority_grant_hidden_in_tuple() -> None:
+    packet = build_advisory_review_packet(
+        capability_id="unit",
+        input_payloads={"x": {"ok": True}},
+    )
+    packet["nested"] = ({"database_write_allowed": True},)
+    packet["advisory_review_packet_hash"] = compute_advisory_review_packet_hash(packet)
+
+    with pytest.raises(ValueError, match="forbidden"):
+        validate_advisory_review_packet(packet)
+
+
+@pytest.mark.parametrize(
+    "hidden_grant",
+    (
+        {_DataclassGrant(True)},
+        frozenset({_DataclassGrant(True)}),
+        _DataclassGrant(True),
+        _ToListGrant(),
+        _ItemGrant(),
+    ),
+    ids=("set", "frozenset", "dataclass", "tolist", "item"),
+)
+def test_validate_rejects_truthy_authority_grant_in_supported_wrappers(
+    hidden_grant,
+) -> None:
+    packet = build_advisory_review_packet(
+        capability_id="unit",
+        input_payloads={"x": {"ok": True}},
+    )
+    packet["nested"] = hidden_grant
+    packet["advisory_review_packet_hash"] = compute_advisory_review_packet_hash(packet)
+
+    with pytest.raises(ValueError, match="forbidden"):
+        validate_advisory_review_packet(packet)
+
+
+def test_supported_values_normalize_to_deterministic_plain_json() -> None:
+    wrapped = {
+        "path": Path("/tmp/bounded"),
+        "tuple": (3, 2, 1),
+        "set": {3, 1, 2},
+        "frozenset": frozenset({"b", "a"}),
+        "dataclass": _DataclassGrant(False),
+    }
+    plain = {
+        "path": "/tmp/bounded",
+        "tuple": [3, 2, 1],
+        "set": [1, 2, 3],
+        "frozenset": ["a", "b"],
+        "dataclass": {"database_write_allowed": False},
+    }
+
+    assert stable_sha256_json(wrapped) == stable_sha256_json(plain)
+
+
+def test_set_and_frozenset_hashes_are_iteration_order_independent() -> None:
+    expected = stable_sha256_json({"values": [1, 2, 3]})
+
+    assert stable_sha256_json({"values": {3, 1, 2}}) == expected
+    assert stable_sha256_json({"values": frozenset({2, 3, 1})}) == expected
+
+
+def test_validate_normalizes_once_for_authority_scan_and_hash() -> None:
+    expected = build_advisory_review_packet(
+        capability_id="unit",
+        input_payloads={"x": {"ok": True}},
+    )
+    expected["nested"] = {"observation": "bounded"}
+    expected["advisory_review_packet_hash"] = compute_advisory_review_packet_hash(
+        expected
+    )
+    wrapper = _CountingToList()
+    packet = dict(expected)
+    packet["nested"] = wrapper
+
+    assert validate_advisory_review_packet(packet) is True
+    assert wrapper.calls == 1
+
+
+def test_build_hash_normalizes_each_untrusted_input_once() -> None:
+    wrapper = _CountingToList()
+
+    build_advisory_review_packet(
+        capability_id="unit",
+        input_payloads={"x": wrapper},
+    )
+
+    assert wrapper.calls == 1
+
+
+def test_compute_hash_normalizes_each_untrusted_packet_value_once() -> None:
+    packet = build_advisory_review_packet(
+        capability_id="unit",
+        input_payloads={"x": {"ok": True}},
+    )
+    wrapper = _CountingToList()
+    packet["nested"] = wrapper
+
+    compute_advisory_review_packet_hash(packet)
+
+    assert wrapper.calls == 1
+
+
+@pytest.mark.parametrize("value", (float("nan"), float("inf"), float("-inf")))
+def test_stable_hash_rejects_non_finite_values(value: float) -> None:
+    with pytest.raises(ValueError, match="non-finite"):
+        stable_sha256_json({"value": value})
+
+
+def test_stable_hash_rejects_cycles() -> None:
+    cyclic: list[object] = []
+    cyclic.append(cyclic)
+
+    with pytest.raises(ValueError, match="cyclic"):
+        stable_sha256_json(cyclic)
+
+
+def test_stable_hash_rejects_converter_returning_self_as_cycle() -> None:
+    with pytest.raises(ValueError, match="cyclic"):
+        stable_sha256_json(_SelfToList())
+
+
+@pytest.mark.parametrize(
+    ("value", "message"),
+    (
+        (_LookupFailure(), "conversion lookup failed"),
+        (_CallFailure(), "tolist conversion failed"),
+    ),
+)
+def test_stable_hash_fails_closed_on_converter_errors(value, message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        stable_sha256_json(value)
+
+
+def test_stable_hash_rejects_non_string_mapping_keys() -> None:
+    with pytest.raises(ValueError, match="mapping keys must be strings"):
+        stable_sha256_json({1: "not-plain-json"})
+
+
+def test_stable_hash_rejects_unknown_containers() -> None:
+    with pytest.raises(ValueError, match="unsupported value type"):
+        stable_sha256_json(_UnknownContainer())

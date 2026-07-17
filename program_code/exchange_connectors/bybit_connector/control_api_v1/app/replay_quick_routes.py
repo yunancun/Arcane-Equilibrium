@@ -38,6 +38,7 @@ from pydantic import BaseModel, Field, validator
 
 from . import main_legacy as base
 from .auth import require_scope_and_operator
+from .error_sanitize import log_safe_exception
 from .ipc_dispatch import one_shot_ipc_call
 from .replay_prepare_policy import ReplayPreparePolicy, ReplayPrepareRejection
 
@@ -634,12 +635,12 @@ async def post_replay_quick_prepare(
             strategy_params = None
             risk_overrides = None
     except Exception as exc:  # noqa: BLE001
-        logger.warning("quick replay prepare failed: %s", exc)
+        log_safe_exception(logger, "replay_quick_prepare", exc, level=logging.WARNING)
         raise HTTPException(
             status_code=503,
             detail={
                 "reason_codes": ["replay_quick_prepare_failed"],
-                "message": str(exc),
+                "message": "Quick replay preparation failed",
             },
         ) from exc
 
@@ -712,8 +713,17 @@ async def post_replay_full_chain_prepare(
         try:
             scanner_snapshot = await _fetch_current_scanner_snapshot()
         except Exception as exc:  # noqa: BLE001
-            scanner_warning = f"scanner_snapshot_unavailable:{exc}"
-            scanner_snapshot = {"status": "unavailable", "reason": str(exc)}
+            log_safe_exception(
+                logger,
+                "replay_scanner_snapshot",
+                exc,
+                level=logging.WARNING,
+            )
+            scanner_warning = "scanner_snapshot_unavailable"
+            scanner_snapshot = {
+                "status": "unavailable",
+                "reason": "scanner_snapshot_unavailable",
+            }
 
     symbols, warnings = _resolve_full_chain_symbols(
         body=body,
@@ -752,12 +762,17 @@ async def post_replay_full_chain_prepare(
             strategy_params = None
             risk_overrides = None
     except Exception as exc:  # noqa: BLE001
-        logger.warning("full-chain replay prepare failed: %s", exc)
+        log_safe_exception(
+            logger,
+            "replay_full_chain_prepare",
+            exc,
+            level=logging.WARNING,
+        )
         raise HTTPException(
             status_code=503,
             detail={
                 "reason_codes": ["replay_full_chain_prepare_failed"],
-                "message": str(exc),
+                "message": "Full-chain replay preparation failed",
             },
         ) from exc
 

@@ -223,15 +223,6 @@ def _default_secrets_dir() -> Path:
     return Path.home() / "BybitOpenClaw" / "secrets" / "secret_files" / "bybit"
 
 
-def _mask_api_key(value: str | None) -> str | None:
-    text = _str(value)
-    if not text:
-        return None
-    if len(text) <= 8:
-        return f"{text[:2]}...{text[-2:]}"
-    return f"{text[:6]}...{text[-4:]}"
-
-
 def _read_text_secret(path: Path) -> tuple[str | None, str | None]:
     try:
         return path.read_text(encoding="utf-8").strip(), None
@@ -295,25 +286,20 @@ def _api_key_summary(
     expected_prefix: str | None,
     require_expected_match: bool,
     redact_secret_derivatives: bool = False,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], bool | None]:
     if redact_secret_derivatives:
         summary = _presence_summary_without_reading(path)
-        return {
-            **summary,
-            "masked_value": None,
-            "length": None,
-            "sha256_12": None,
-            "expected_key_check_provided": bool(
-                _str(expected_sha256) or _str(expected_prefix)
-            ),
-            "expected_sha256_match": None,
-            "expected_prefix_match": None,
-            "expected_prefix_len": None,
-            "expected_prefix_sha256_12": None,
-            "expected_key_matches_observed": None,
-            "expected_key_match_required": require_expected_match,
-            "secret_derivatives_redacted": True,
-        }
+        return (
+            {
+                **summary,
+                "expected_key_check_provided": bool(
+                    _str(expected_sha256) or _str(expected_prefix)
+                ),
+                "expected_key_match_required": require_expected_match,
+                "secret_derivatives_redacted": True,
+            },
+            None,
+        )
 
     value, error = _read_text_secret(path)
     value_hash = (
@@ -323,11 +309,6 @@ def _api_key_summary(
     )
     expected_sha = _str(expected_sha256).lower() or None
     expected_prefix_text = _str(expected_prefix) or None
-    expected_prefix_hash = (
-        _sha256_text(expected_prefix_text)[:12]
-        if expected_prefix_text and not redact_secret_derivatives
-        else None
-    )
     sha_match = (
         value_hash == expected_sha
         if value_hash and expected_sha and len(expected_sha) == 64
@@ -346,33 +327,20 @@ def _api_key_summary(
     if sha_match is None and prefix_match is None:
         expected_match = None
 
-    return {
-        "path": str(path),
-        "present": value is not None,
-        "read_error": error,
-        "nonempty": bool(value),
-        "mode_octal": _mode_octal(path) if value is not None else None,
-        "masked_value": None if redact_secret_derivatives else _mask_api_key(value),
-        "length": None if redact_secret_derivatives else (len(value) if value else None),
-        "sha256_12": (
-            None
-            if redact_secret_derivatives
-            else (value_hash[:12] if value_hash else None)
-        ),
-        "expected_key_check_provided": bool(expected_sha or expected_prefix_text),
-        "expected_sha256_match": sha_match,
-        "expected_prefix_match": prefix_match,
-        "expected_prefix_len": (
-            None
-            if redact_secret_derivatives
-            else (len(expected_prefix_text) if expected_prefix_text else None)
-        ),
-        "expected_prefix_sha256_12": expected_prefix_hash,
-        "expected_key_matches_observed": expected_match,
-        "expected_key_match_required": require_expected_match,
-        "secret_derivatives_redacted": False,
-        "secret_bytes_read": value is not None,
-    }
+    return (
+        {
+            "path": str(path),
+            "present": value is not None,
+            "read_error": error,
+            "nonempty": bool(value),
+            "mode_octal": _mode_octal(path) if value is not None else None,
+            "expected_key_check_provided": bool(expected_sha or expected_prefix_text),
+            "expected_key_match_required": require_expected_match,
+            "secret_derivatives_redacted": True,
+            "secret_bytes_read": value is not None,
+        },
+        expected_match,
+    )
 
 
 def _demo_slot_check(
@@ -385,7 +353,7 @@ def _demo_slot_check(
     redact_secret_derivatives: bool = False,
 ) -> dict[str, Any]:
     slot_dir = secrets_dir / slot
-    api_key = _api_key_summary(
+    api_key, expected_key_matches_observed = _api_key_summary(
         path=slot_dir / "api_key",
         expected_sha256=expected_sha256,
         expected_prefix=expected_prefix,
@@ -406,21 +374,19 @@ def _demo_slot_check(
     if endpoint != "demo":
         blockers.append("demo_endpoint_not_demo")
     advisory_reasons: list[str] = []
-    if api_key["expected_key_matches_observed"] is False:
-        advisory_reasons.append("demo_api_key_expected_value_mismatch")
     if (
         redact_secret_derivatives
         and api_key["expected_key_check_provided"]
-        and api_key["expected_key_matches_observed"] is None
+        and expected_key_matches_observed is None
     ):
         advisory_reasons.append("demo_api_key_expected_value_redacted")
-    if api_key["expected_key_matches_observed"] is False and require_expected_match:
+    if expected_key_matches_observed is False and require_expected_match:
         blockers.append("demo_api_key_expected_value_mismatch")
     if (
         redact_secret_derivatives
         and require_expected_match
         and api_key["expected_key_check_provided"]
-        and api_key["expected_key_matches_observed"] is None
+        and expected_key_matches_observed is None
     ):
         blockers.append("demo_api_key_expected_value_redacted")
     ready = not blockers
@@ -801,7 +767,7 @@ def _answers(
         "bounded_demo_runtime_readiness_inspected": True,
         "bounded_demo_final_window_prerequisites_ready": final_window_ready,
         "expected_demo_api_key_match_required": require_expected_demo_api_key_match,
-        "secret_derivatives_redacted": redact_secret_derivatives,
+        "secret_derivatives_redacted": True,
         "order_capable_action_allowed_by_this_packet": False,
         "decision_lease_acquire_performed": False,
         "runtime_mutation_performed": False,

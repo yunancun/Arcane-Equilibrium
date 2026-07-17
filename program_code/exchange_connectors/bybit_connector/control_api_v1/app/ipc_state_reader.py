@@ -17,10 +17,13 @@ from __future__ import annotations
 import json
 import logging
 import os
+import stat
 import threading
 import time
 from pathlib import Path
 from typing import Any, Optional
+
+from .error_sanitize import log_safe_exception
 
 logger = logging.getLogger(__name__)
 
@@ -32,8 +35,15 @@ _CACHE_TTL_SECONDS = 2.0
 # 快照過期閾值 — 超過此時間的數據視為過期
 _STALENESS_THRESHOLD_SECONDS = 60.0
 
+# A snapshot is operational state, not an unbounded artifact transport.
+_MAX_SNAPSHOT_BYTES = 4 * 1024 * 1024
+
 # Valid engine names / 有效引擎名稱
 _VALID_ENGINES = frozenset({"paper", "demo", "live"})
+_VALID_SNAPSHOT_FILENAMES = frozenset(
+    {"pipeline_snapshot.json"}
+    | {f"pipeline_snapshot_{engine}.json" for engine in _VALID_ENGINES}
+)
 
 
 class RustSnapshotReader:
@@ -55,6 +65,7 @@ class RustSnapshotReader:
         self._data_dir = data_dir or os.environ.get(
             "OPENCLAW_DATA_DIR", "/tmp/openclaw"
         )
+        self._data_root = Path(self._data_dir).expanduser().resolve(strict=False)
         self._lock = threading.Lock()
         # Primary (compat) cache / 主（兼容）緩存
         self._cache: Optional[dict[str, Any]] = None
@@ -64,15 +75,115 @@ class RustSnapshotReader:
         self._engine_caches: dict[str, dict[str, Any]] = {}
         self._engine_cache_ts: dict[str, float] = {}
         self._engine_file_ages: dict[str, float] = {}
+        self._engine_snapshot_missing: dict[str, bool] = {}
 
     @property
     def snapshot_path(self) -> Path:
         """Path to the primary (compat) pipeline snapshot file / 主（兼容）管線快照文件路徑"""
-        return Path(self._data_dir) / "pipeline_snapshot.json"
+        return self._snapshot_path("pipeline_snapshot.json")
+
+    def _snapshot_path(self, filename: str) -> Path:
+        if filename not in _VALID_SNAPSHOT_FILENAMES:
+            raise ValueError("unsupported snapshot filename")
+        candidate = Path(os.path.abspath(self._data_root / filename))
+        if not candidate.is_relative_to(self._data_root):
+            raise ValueError("snapshot path escapes data directory")
+        return candidate
 
     def _engine_snapshot_path(self, engine: str) -> Path:
         """Path to per-engine snapshot file / 每引擎快照文件路徑"""
-        return Path(self._data_dir) / f"pipeline_snapshot_{engine}.json"
+        if engine not in _VALID_ENGINES:
+            raise ValueError("unsupported snapshot engine")
+        return self._snapshot_path(f"pipeline_snapshot_{engine}.json")
+
+    def _open_data_root_fd(self) -> int:
+        """Open every data-root component without following replacement symlinks."""
+        no_follow = getattr(os, "O_NOFOLLOW", None)
+        directory = getattr(os, "O_DIRECTORY", None)
+        if no_follow is None or directory is None:
+            raise OSError("safe snapshot directory flags unavailable")
+        flags = os.O_RDONLY | directory | no_follow
+        root = self._data_root
+        if not root.is_absolute() or not root.anchor:
+            raise ValueError("snapshot data root must be absolute")
+
+        current_fd = -1
+        try:
+            current_fd = os.open(root.anchor, flags)
+            for component in root.parts[1:]:
+                if component in {"", ".", ".."}:
+                    raise ValueError("invalid snapshot root component")
+                next_fd = os.open(component, flags, dir_fd=current_fd)
+                os.close(current_fd)
+                current_fd = next_fd
+            result_fd = current_fd
+            current_fd = -1
+            return result_fd
+        finally:
+            if current_fd >= 0:
+                os.close(current_fd)
+
+    def _read_snapshot_file(self, path: Path) -> tuple[dict[str, Any], float]:
+        """Read one bounded regular snapshot and its mtime through one fd."""
+        no_follow = getattr(os, "O_NOFOLLOW", None)
+        nonblock = getattr(os, "O_NONBLOCK", None)
+        directory = getattr(os, "O_DIRECTORY", None)
+        if no_follow is None or nonblock is None or directory is None:
+            raise OSError("safe snapshot open flags unavailable")
+        if path.parent != self._data_root or path.name not in _VALID_SNAPSHOT_FILENAMES:
+            raise ValueError("snapshot path is outside the allowlist")
+
+        root_fd = -1
+        fd = -1
+        try:
+            root_fd = self._open_data_root_fd()
+            fd = os.open(
+                path.name,
+                os.O_RDONLY | no_follow | nonblock,
+                dir_fd=root_fd,
+            )
+            before = os.fstat(fd)
+            if not stat.S_ISREG(before.st_mode):
+                raise OSError("snapshot is not a regular file")
+            if before.st_size < 0 or before.st_size > _MAX_SNAPSHOT_BYTES:
+                raise OSError("snapshot exceeds size bound")
+
+            chunks: list[bytes] = []
+            total = 0
+            while total <= _MAX_SNAPSHOT_BYTES:
+                chunk = os.read(
+                    fd,
+                    min(64 * 1024, _MAX_SNAPSHOT_BYTES + 1 - total),
+                )
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                total += len(chunk)
+            if total > _MAX_SNAPSHOT_BYTES:
+                raise OSError("snapshot exceeds size bound")
+
+            after = os.fstat(fd)
+            if (
+                before.st_dev,
+                before.st_ino,
+                before.st_size,
+                before.st_mtime_ns,
+            ) != (
+                after.st_dev,
+                after.st_ino,
+                after.st_size,
+                after.st_mtime_ns,
+            ):
+                raise OSError("snapshot changed during read")
+            data = json.loads(b"".join(chunks))
+            if not isinstance(data, dict):
+                raise ValueError("snapshot JSON must be an object")
+            return data, after.st_mtime
+        finally:
+            if fd >= 0:
+                os.close(fd)
+            if root_fd >= 0:
+                os.close(root_fd)
 
     def _refresh_cache(self) -> Optional[dict[str, Any]]:
         """
@@ -83,12 +194,10 @@ class RustSnapshotReader:
         if self._cache is not None and (now - self._cache_ts) < _CACHE_TTL_SECONDS:
             return self._cache
 
-        path = self.snapshot_path
         try:
-            mtime = path.stat().st_mtime
+            path = self.snapshot_path
+            data, mtime = self._read_snapshot_file(path)
             self._cache_file_age = time.time() - mtime
-            raw = path.read_text(encoding="utf-8")
-            data = json.loads(raw)
             self._cache = data
             self._cache_ts = now
             return data
@@ -100,11 +209,13 @@ class RustSnapshotReader:
                 path,
             )
             return None
-        except (json.JSONDecodeError, OSError) as exc:
+        except (json.JSONDecodeError, OSError, UnicodeError, ValueError) as exc:
             self._cache_file_age = 999999.0
-            logger.warning(
-                "RustSnapshotReader: failed to read snapshot: %s / 讀取快照失敗：%s",
-                exc, exc,
+            log_safe_exception(
+                logger,
+                "rust_primary_snapshot_read",
+                exc,
+                level=logging.WARNING,
             )
             return None
 
@@ -118,20 +229,27 @@ class RustSnapshotReader:
         if engine in self._engine_caches and (now - cached_ts) < _CACHE_TTL_SECONDS:
             return self._engine_caches[engine]
 
-        path = self._engine_snapshot_path(engine)
         try:
-            mtime = path.stat().st_mtime
+            path = self._engine_snapshot_path(engine)
+            data, mtime = self._read_snapshot_file(path)
             self._engine_file_ages[engine] = time.time() - mtime
-            raw = path.read_text(encoding="utf-8")
-            data = json.loads(raw)
             self._engine_caches[engine] = data
             self._engine_cache_ts[engine] = now
+            self._engine_snapshot_missing[engine] = False
             return data
         except FileNotFoundError:
             self._engine_file_ages[engine] = 999999.0
+            self._engine_snapshot_missing[engine] = True
             return None
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, OSError, UnicodeError, ValueError) as exc:
             self._engine_file_ages[engine] = 999999.0
+            self._engine_snapshot_missing[engine] = False
+            log_safe_exception(
+                logger,
+                "rust_engine_snapshot_read",
+                exc,
+                level=logging.WARNING,
+            )
             return None
 
     def is_available(self) -> bool:
@@ -150,6 +268,8 @@ class RustSnapshotReader:
         Check if a specific engine's snapshot is available and fresh (3E-5).
         檢查特定引擎的快照是否可用且未過期。
         """
+        if engine not in _VALID_ENGINES:
+            return False
         with self._lock:
             data = self._refresh_engine_cache(engine)
         if data is None:
@@ -184,10 +304,14 @@ class RustSnapshotReader:
         file not found and engine matches primary pipeline kind.
         獲取每引擎管線快照。若每引擎文件未找到且引擎匹配主管線 kind，回退到主快照。
         """
+        if engine not in _VALID_ENGINES:
+            return None
         with self._lock:
             snap = self._refresh_engine_cache(engine)
             if snap is not None:
                 return snap
+            if not self._engine_snapshot_missing.get(engine, False):
+                return None
             # Fallback: primary snapshot if its trading_mode matches requested engine
             # 回退：若主快照的 trading_mode 匹配請求的引擎
             primary = self._refresh_cache()

@@ -43,6 +43,7 @@ from . import provider_client
 from . import provider_keys_store
 from . import provider_model_catalog
 from . import provider_pricing_catalog
+from .error_sanitize import log_safe_exception
 from .layer2_cost_tracker import Layer2CostTracker
 from .layer2_engine import Layer2Engine
 # ARCH-RC1 1C-3-F: Layer 2's paper-side path now goes through the Rust engine
@@ -53,6 +54,23 @@ from .layer2_engine import Layer2Engine
 from .shadow_decision_builder import ShadowDecisionConsumer
 
 logger = logging.getLogger(__name__)
+
+
+def _public_provider_model_catalog(catalog: dict[str, Any]) -> dict[str, Any]:
+    """Preserve catalog shape without forwarding provider exception text."""
+    providers: dict[str, Any] = {}
+    for provider, entry in (catalog.get("providers") or {}).items():
+        refresh_error = entry.get("refresh_error")
+        if refresh_error:
+            logger.warning(
+                "operation=provider_model_catalog provider=%s backend_error=true",
+                provider,
+            )
+        providers[provider] = {
+            **entry,
+            "refresh_error": "model_catalog_refresh_failed" if refresh_error else "",
+        }
+    return {**catalog, "providers": providers}
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Router & Shared State / 路由与共享状态
@@ -90,7 +108,7 @@ def _build_shadow_consumer() -> ShadowDecisionConsumer | None:
         client = factory()
         return ShadowDecisionConsumer(client=client)
     except Exception as exc:
-        logger.warning("ShadowDecisionConsumer wiring skipped: %s", exc)
+        log_safe_exception(logger, "shadow_decision_consumer_wiring", exc, level=logging.WARNING)
         return None
 
 
@@ -553,7 +571,7 @@ async def get_ollama_status() -> dict[str, Any]:
             # Non-fatal: connectivity confirmed but model list unavailable
             # 非致命：連通性 OK 但模型清單不可取
             # P2-WP05-FUP-1：client 看 stable code，例外明細只進 log。
-            logger.warning("ollama model list fetch failed: %s", exc)
+            log_safe_exception(logger, "ollama_model_list_fetch", exc, level=logging.WARNING)
             result["models"] = []
             result["model_list_error"] = "ollama_model_list_unavailable"
     return _layer2_response(result)
@@ -594,21 +612,23 @@ async def update_config(
                 result = provider_keys_store.save_key(provider, str(key))
                 provider_results.append(result)
             except ValueError as exc:
-                # WP-05 Real Fix
-                from .error_sanitize import sanitize_exc_str  # noqa: PLC0415
+                log_safe_exception(
+                    logger,
+                    "provider_key_validation",
+                    exc,
+                    level=logging.WARNING,
+                )
                 provider_errors.append({
                     "provider": provider,
                     "reason_code": "validation_failed",
-                    "detail": sanitize_exc_str(exc, "Validation failed"),
+                    "detail": "Provider key validation failed",
                 })
             except Exception as exc:
-                # WP-05 Real Fix
-                logger.exception("provider_keys save failed: provider=%s", provider)
-                from .error_sanitize import sanitize_exc_str  # noqa: PLC0415
+                log_safe_exception(logger, "provider_key_save", exc)
                 provider_errors.append({
                     "provider": provider,
                     "reason_code": "io_error",
-                    "detail": sanitize_exc_str(exc, "I/O error"),
+                    "detail": "Provider key storage failed",
                 })
 
     # ── 沒有任何寫入動作 ─────────────────────────────────────────────
@@ -669,7 +689,8 @@ async def get_providers_models(
     回 GUI Engine Settings 用的 provider model catalog。
     只打 models/list 類只讀 endpoint；結果做 TTL cache，force_refresh=true 可手動刷新。
     """
-    return _layer2_response(provider_model_catalog.get_model_catalog(force_refresh=force_refresh))
+    catalog = provider_model_catalog.get_model_catalog(force_refresh=force_refresh)
+    return _layer2_response(_public_provider_model_catalog(catalog))
 
 
 @layer2_router.delete("/providers/{provider}")
@@ -689,12 +710,13 @@ async def delete_provider_key(
     try:
         result = provider_keys_store.delete_key(provider)
     except Exception as exc:
-        # WP-05 Real Fix
-        logger.exception("provider_keys delete failed: provider=%s", provider)
-        from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
+        log_safe_exception(logger, "provider_key_delete", exc)
         raise HTTPException(
             status_code=500,
-            detail=sanitize_exc_for_detail(exc, "internal_error"),
+            detail={
+                "reason_codes": ["internal_error"],
+                "detail": "Internal server error",
+            },
         )
     return _layer2_response({
         **result,
@@ -740,8 +762,17 @@ def get_registry_capabilities(
     try:
         reg = load_capability_registry()
     except L2RegistryLoadError as exc:
+        log_safe_exception(
+            logger,
+            "l2_registry_load",
+            exc,
+            level=logging.WARNING,
+        )
         return _layer2_response(
-            {"error": "registry_load_rejected", "detail": str(exc)},
+            {
+                "error": "registry_load_rejected",
+                "detail": "Capability registry unavailable",
+            },
             action_result="blocked",
             reason_codes=["l2_registry_load_rejected"],
         )
@@ -769,9 +800,18 @@ async def reload_registry(
     try:
         reg = load_capability_registry()  # 先驗載入成功（壞 config 直接 reject，不換）
     except L2RegistryLoadError as exc:
+        log_safe_exception(
+            logger,
+            "l2_registry_reload",
+            exc,
+            level=logging.WARNING,
+        )
         raise HTTPException(
             status_code=400,
-            detail={"reason_codes": ["l2_registry_load_rejected"], "detail": str(exc)},
+            detail={
+                "reason_codes": ["l2_registry_load_rejected"],
+                "detail": "Capability registry unavailable",
+            },
         )
     orch = _get_orchestrator()
     orch.reload_registry()

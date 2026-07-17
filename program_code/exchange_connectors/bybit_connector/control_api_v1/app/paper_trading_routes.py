@@ -38,6 +38,7 @@ from .paper_trading_ai_cost_routes import (  # noqa: F401
     get_ai_cost,
 )
 from .paper_trading_response import paper_response as _paper_response
+from .error_sanitize import log_safe_exception
 # ARCH-RC1 1C-3-F: paper_trading_engine.py retired. DEFAULT_INITIAL_BALANCE_USDT
 # inlined here (the only consumer in this module). ShadowDecisionConsumer kept
 # as a type hint for the SHADOW_CONSUMER global re-exported from wiring.
@@ -46,6 +47,13 @@ DEFAULT_INITIAL_BALANCE_USDT = 10_000.0
 from .shadow_decision_builder import ShadowDecisionConsumer
 from .paper_trading_metrics import compute_full_metrics
 from .trading_true_metrics import build_performance_metrics, fetch_db_true_metrics
+
+
+def _public_db_true_metrics(payload: dict[str, Any]) -> dict[str, Any]:
+    if payload.get("available") or not payload.get("reason"):
+        return payload
+    logger.warning("operation=paper_db_true_metrics backend_error=true")
+    return {**payload, "reason": "metrics_unavailable"}
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Singletons — re-exported from paper_trading_wiring.py (TD-03 split)
@@ -296,9 +304,9 @@ def _get_demo_summary() -> dict:
             "unrealised_pnl": wallet.get("total_unrealised_pnl", 0),
             "position_count": len(open_positions),
         }
-    except Exception as e:
+    except Exception as exc:
         # P2-WP05-FUP-1：client 看 stable code，例外明細只進 log。
-        logger.debug("Demo summary failed: %s", e)
+        log_safe_exception(logger, "paper_demo_summary", exc, level=logging.DEBUG)
         return {"available": False, "error": "demo_summary_failed"}
 
 
@@ -327,13 +335,13 @@ async def post_session_start(
             "balance": rust_state.get("balance", 0),
             "session": {"session_state": "active", "session_id": "rust_engine"},
         })
-    except Exception as e:
+    except Exception as exc:
         # WP-05 Real Fix
-        logger.exception("IPC resume_paper failed")
+        log_safe_exception(logger, "paper_session_start", exc)
         from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
         raise HTTPException(
             status_code=502,
-            detail=sanitize_exc_for_detail(e, "ipc_error"),
+            detail=sanitize_exc_for_detail(exc, "ipc_error"),
         )
 
 
@@ -373,8 +381,8 @@ async def post_session_reauth(
         })
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error("Error in session reauth: %s", e, exc_info=True)
+    except Exception as exc:
+        log_safe_exception(logger, "paper_session_reauthorization", exc)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -392,13 +400,13 @@ async def post_session_pause(
             "ipc_result": result,
             "session": {"session_state": "paused", "session_id": "rust_engine"},
         })
-    except Exception as e:
+    except Exception as exc:
         # WP-05 Real Fix
-        logger.exception("IPC pause_paper failed")
+        log_safe_exception(logger, "paper_session_pause", exc)
         from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
         raise HTTPException(
             status_code=502,
-            detail=sanitize_exc_for_detail(e, "ipc_error"),
+            detail=sanitize_exc_for_detail(exc, "ipc_error"),
         )
 
 
@@ -419,13 +427,13 @@ async def post_session_resume(
             "ipc_result": result,
             "session": {"session_state": "active", "session_id": "rust_engine"},
         })
-    except Exception as e:
+    except Exception as exc:
         # WP-05 Real Fix
-        logger.exception("IPC resume_paper failed")
+        log_safe_exception(logger, "paper_session_resume", exc)
         from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
         raise HTTPException(
             status_code=502,
-            detail=sanitize_exc_for_detail(e, "ipc_error"),
+            detail=sanitize_exc_for_detail(exc, "ipc_error"),
         )
 
 
@@ -518,14 +526,14 @@ async def post_session_stop(
         # 先暫停策略派發、再平倉、再確認。
         try:
             pause_result = await _ipc_command("pause_paper", {"engine": "paper"})
-        except Exception as e:
-            errors.append(f"paper_pause: {e}")
-            logger.error("IPC pause_paper (paper) failed: %s", e)
+        except Exception as exc:
+            errors.append("paper_pause_failed")
+            log_safe_exception(logger, "paper_session_stop_pause", exc)
         try:
             close_result = await _ipc_command("close_all_positions", {"engine": "paper"})
-        except Exception as e:
-            errors.append(f"paper_close: {e}")
-            logger.error("IPC close_all_positions (paper) failed: %s", e)
+        except Exception as exc:
+            errors.append("paper_close_failed")
+            log_safe_exception(logger, "paper_session_stop_close", exc)
         verify_result = await _verify_paper_state_clean("paper")
         if not verify_result.get("clean") and not verify_result.get("skipped"):
             errors.append(
@@ -585,13 +593,18 @@ async def post_session_stop_all(
         # 先雙引擎暫停，避免後續流程中產生新單。
         try:
             pause_result = await _ipc_command("pause_paper", {"engine": "paper"})
-        except Exception as e:
-            errors.append(f"paper_pause: {e}")
-            logger.error("IPC pause_paper (paper) failed: %s", e)
+        except Exception as exc:
+            errors.append("paper_pause_failed")
+            log_safe_exception(logger, "dual_session_stop_paper_pause", exc)
         try:
             await _ipc_command("pause_paper", {"engine": "demo"})
-        except Exception as e:
-            logger.info("IPC pause_paper (demo) skipped or failed: %s", e)
+        except Exception as exc:
+            log_safe_exception(
+                logger,
+                "dual_session_stop_demo_pause",
+                exc,
+                level=logging.INFO,
+            )
         # ── Phase 1: Demo cancel-all (REST settleCoin=USDT, single call covers
         # entire account regardless of strategy symbol set). Paper has no
         # Bybit orders so this branch is demo-only.
@@ -599,9 +612,14 @@ async def post_session_stop_all(
         try:
             from .strategy_ai_routes import _sweep_demo_orphan_orders  # noqa: PLC0415
             demo_cancel_orders = await _sweep_demo_orphan_orders(errors)
-        except Exception as e:
+        except Exception as exc:
             # P2-WP05-FUP-1：client 看 stable code，例外明細只進 log。
-            logger.info("Demo cancel-all skipped (non-fatal): %s", e)
+            log_safe_exception(
+                logger,
+                "dual_session_stop_demo_cancel",
+                exc,
+                level=logging.INFO,
+            )
             demo_cancel_orders = {
                 "skipped": True,
                 "reason": "demo_cancel_all_failed",
@@ -610,21 +628,31 @@ async def post_session_stop_all(
         # 第二步：雙引擎平倉。
         try:
             close_result = await _ipc_command("close_all_positions", {"engine": "paper"})
-        except Exception as e:
-            errors.append(f"paper_close: {e}")
-            logger.error("IPC close_all_positions (paper) failed: %s", e)
+        except Exception as exc:
+            errors.append("paper_close_failed")
+            log_safe_exception(logger, "dual_session_stop_paper_close", exc)
         try:
             demo_close_result = await _ipc_command("close_all_positions", {"engine": "demo"})
-        except Exception as e:
-            logger.info("IPC close_all_positions (demo) skipped or failed: %s", e)
+        except Exception as exc:
+            log_safe_exception(
+                logger,
+                "dual_session_stop_demo_close",
+                exc,
+                level=logging.INFO,
+            )
         # ── Phase 3: Demo orphan position sweep (positions on exchange not in paper_state).
         # 第三步：Demo 孤兒倉位清掃。
         try:
             from .strategy_ai_routes import _sweep_demo_orphan_positions  # noqa: PLC0415
             orphan_result = await _sweep_demo_orphan_positions(errors)
             demo_close_result = {**demo_close_result, "orphan_sweep": orphan_result}
-        except Exception as e:
-            logger.info("Orphan sweep skipped (non-fatal): %s", e)
+        except Exception as exc:
+            log_safe_exception(
+                logger,
+                "dual_session_stop_orphan_sweep",
+                exc,
+                level=logging.INFO,
+            )
         # ── Phase 4: Verify both engines fully clean.
         # Paper: poll paper_state snapshot until positions=0.
         # Demo: poll Bybit REST until positions=0 AND orders=0.
@@ -642,9 +670,14 @@ async def post_session_stop_all(
                     f"demo_verify_residual: positions={demo_verify.get('residual_positions')} "
                     f"orders={demo_verify.get('residual_orders')}"
                 )
-        except Exception as e:
+        except Exception as exc:
             # P2-WP05-FUP-1：client 看 stable code，例外明細只進 log。
-            logger.info("Demo verify skipped (non-fatal): %s", e)
+            log_safe_exception(
+                logger,
+                "dual_session_stop_demo_verify",
+                exc,
+                level=logging.INFO,
+            )
             demo_verify = {"skipped": True, "reason": "demo_verify_failed"}
     else:
         close_result = demo_close_result = pause_result = {"skipped": True, "reason": "engine_offline"}
@@ -878,13 +911,13 @@ async def post_close_all_positions(
             "close_result": result,
             "errors": [f"ipc_close_all: {result_error}"] if result_error else None,
         })
-    except Exception as e:
+    except Exception as exc:
         # WP-05 Real Fix
-        logger.exception("IPC close_all_positions (paper) failed")
+        log_safe_exception(logger, "paper_close_all_positions", exc)
         from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
         raise HTTPException(
             status_code=502,
-            detail=sanitize_exc_for_detail(e, "ipc_error"),
+            detail=sanitize_exc_for_detail(exc, "ipc_error"),
         )
 
 
@@ -903,13 +936,13 @@ async def post_close_position(
     try:
         result = await _ipc_command("close_position", {"symbol": symbol.upper(), "engine": "paper"})
         return _paper_response({"symbol": symbol.upper(), "closed": True, "source": "rust_engine", "ipc": result})
-    except Exception as e:
+    except Exception as exc:
         # WP-05 Real Fix
-        logger.exception("IPC close_position failed for %s", symbol)
+        log_safe_exception(logger, "paper_close_position", exc)
         from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
         raise HTTPException(
             status_code=502,
-            detail=sanitize_exc_for_detail(e, "ipc_error"),
+            detail=sanitize_exc_for_detail(exc, "ipc_error"),
         )
 
 
@@ -975,8 +1008,8 @@ def get_fills(
                 "next_offset": safe_offset + len(fills) if has_more else None,
                 "source": "pg_trading_fills",
             })
-        except Exception as e:
-            logger.warning("PG fills query failed, falling back to Rust snapshot: %s", e)
+        except Exception as exc:
+            log_safe_exception(logger, "paper_fills_pg_query", exc, level=logging.WARNING)
         finally:
             try:
                 db_pool.put_conn(conn)
@@ -1253,11 +1286,11 @@ def get_metrics(
     # 3E-ARCH: explicit engine="paper" / 必須明確指定 paper 引擎
     rust_state = rust.get_paper_state(engine="paper") if rust.is_engine_available("paper") else None
     if rust_state is None:
-        db_metrics = fetch_db_true_metrics(
+        db_metrics = _public_db_true_metrics(fetch_db_true_metrics(
             ["paper"],
             edge_engine_modes=["paper"],
             window_days=7,
-        )
+        ))
         return _paper_response({
             "available": False,
             "source": "rust_engine",
@@ -1309,7 +1342,9 @@ def get_metrics(
     # 確保 total_fills 在頂層可用（向後兼容）
     full["total_fills"] = stats.get("total_fills", 0)
     full["total_stops"] = stats.get("total_stops", 0)
-    db_metrics = fetch_db_true_metrics(["paper"], edge_engine_modes=["paper"], window_days=7)
+    db_metrics = _public_db_true_metrics(
+        fetch_db_true_metrics(["paper"], edge_engine_modes=["paper"], window_days=7)
+    )
     full["db_true_metrics"] = db_metrics
     total_ai_cost = _fetch_total_ai_cost_30d_safe()
     if total_ai_cost is not None:
@@ -1331,8 +1366,8 @@ def _fetch_total_ai_cost_30d_safe() -> float | None:
         from .paper_trading_ai_cost_routes import fetch_total_ai_cost_30d
 
         return fetch_total_ai_cost_30d()
-    except Exception:
-        logger.debug("AI cost lookup failed for paper metrics", exc_info=True)
+    except Exception as exc:
+        log_safe_exception(logger, "paper_ai_cost_lookup", exc, level=logging.DEBUG)
         return None
 
 
@@ -1361,7 +1396,7 @@ def get_paper_config(
             cfg = tomllib.loads(raw)
             return _paper_response({"config": cfg})
     except Exception as exc:
-        logger.warning("Failed to read paper config: %s", exc)
+        log_safe_exception(logger, "paper_config_read", exc, level=logging.WARNING)
     return _paper_response({"config": {"initial_balance_usdt": 10000.0}})
 
 
@@ -1395,7 +1430,7 @@ async def post_paper_config(
             lines.append(f"initial_balance_usdt = {initial_balance}\n")
         _PAPER_CONFIG_PATH.write_text("".join(lines), encoding="utf-8")
     except OSError as exc:
-        logger.error("Failed to write paper config: %s", exc)
+        log_safe_exception(logger, "paper_config_write", exc)
         raise HTTPException(status_code=500, detail="Failed to persist config")
 
     return _paper_response({

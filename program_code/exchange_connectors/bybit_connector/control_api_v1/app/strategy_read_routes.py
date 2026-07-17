@@ -8,6 +8,7 @@ from fastapi import Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 
 from . import main_legacy as base
+from .error_sanitize import log_safe_exception
 from .ipc_state_reader import get_rust_reader
 from .prelive_edge_gate_trends import fetch_prelive_edge_gate_trends
 from .rust_scanner_reader import (
@@ -49,16 +50,19 @@ async def get_prelive_edge_gates(
     回傳 pre-live gate [33]/[38]/[40] 的只讀趨勢資料。
     """
     try:
-        return _envelope(fetch_prelive_edge_gate_trends(window_days=window_days))
-    except Exception:  # noqa: BLE001
+        payload = fetch_prelive_edge_gate_trends(window_days=window_days)
+        if payload.get("error"):
+            payload = {**payload, "error": "trend_data_unavailable"}
+        return _envelope(payload)
+    except Exception as exc:  # noqa: BLE001
         # E3-S2-P2-1: do NOT leak `type(exc).__name__: {exc}` to the JSON
         # envelope — psycopg2 errors expose schema/column/table names to
-        # authenticated callers and feed reconnaissance. Full stack trace stays
-        # in server log via logger.exception; client receives generic reason.
+        # authenticated callers and feed reconnaissance. Server logs retain an
+        # opaque error id plus exception type; client receives a generic reason.
         # E3-S2-P2-1：不把 exception class + message 漏到 JSON envelope —
-        # psycopg2 錯誤會洩漏 schema/column/table 名給已認證調用者；完整
-        # stack trace 仍在 server log（logger.exception），client 只見 generic reason。
-        logger.exception("Error in get_prelive_edge_gates / get_prelive_edge_gates 異常")
+        # psycopg2 錯誤會洩漏 schema/column/table 名給已認證調用者；server log
+        # 僅保留 opaque error id 與 exception type，client 只見 generic reason。
+        log_safe_exception(logger, "prelive_edge_gates_route", exc)
         return _envelope(
             {
                 "available": False,
@@ -67,7 +71,7 @@ async def get_prelive_edge_gates(
                 "gates": {},
                 "readiness": {"ready": False, "status": "not_ready", "items": []},
                 "strategy_status": [],
-                "error": "internal_error",
+                "error": "trend_data_unavailable",
             }
         )
 
@@ -116,8 +120,8 @@ async def get_klines(
             "current_bar": current.to_dict() if current else None,
             "count": len(klines),
         })
-    except Exception:
-        logger.exception("Error in get_klines / get_klines 异常")
+    except Exception as exc:
+        log_safe_exception(logger, "strategy_klines_read", exc)
         raise HTTPException(status_code=500, detail="Internal error / 内部错误")
 
 
@@ -161,8 +165,8 @@ async def get_indicators(
             "indicators": indicators,
             "indicator_count": len(indicators),
         })
-    except Exception:
-        logger.exception("Error in get_indicators / get_indicators 异常")
+    except Exception as exc:
+        log_safe_exception(logger, "strategy_indicators_read", exc)
         raise HTTPException(status_code=500, detail="Internal error / 内部错误")
 
 
@@ -206,8 +210,8 @@ async def get_signals(
             "count": len(signals),
             "filter_symbol": filter_sym,
         })
-    except Exception:
-        logger.exception("Error in get_signals / get_signals 异常")
+    except Exception as exc:
+        log_safe_exception(logger, "strategy_signals_read", exc)
         raise HTTPException(status_code=500, detail="Internal error / 内部错误")
 
 
@@ -251,8 +255,8 @@ async def get_signal_summary(
         # Fallback to Python SignalEngine / 降級到 Python 信號引擎
         summary = SIGNAL_ENGINE.get_signal_summary(sym)
         return _envelope(summary)
-    except Exception:
-        logger.exception("Error in get_signal_summary / get_signal_summary 异常")
+    except Exception as exc:
+        log_safe_exception(logger, "strategy_signal_summary_read", exc)
         raise HTTPException(status_code=500, detail="Internal error / 内部错误")
 
 
@@ -283,8 +287,8 @@ async def list_strategies(
             "strategies": statuses,
             "count": len(statuses),
         })
-    except Exception:
-        logger.exception("Error in list_strategies / list_strategies 异常")
+    except Exception as exc:
+        log_safe_exception(logger, "strategy_list_read", exc)
         raise HTTPException(status_code=500, detail="Internal error / 内部错误")
 
 
@@ -319,8 +323,8 @@ async def get_dynamic_risk_status(
             out["engine"] = engine
             out["available"] = True
             return _envelope(out)
-    except Exception as e:
-        logger.warning("get_dynamic_risk_status IPC error engine=%s: %s", engine, e)
+    except Exception as exc:
+        log_safe_exception(logger, "strategy_dynamic_risk_status", exc, level=logging.WARNING)
     # Fallback — sizer not reachable (engine down, pre-boot, or Python-only tests).
     # 回退 — 引擎不可達時回 stub 形狀。
     if AUTO_DEPLOYER is None:
@@ -361,8 +365,8 @@ async def get_strategy_status(
         return _envelope(status)
     except HTTPException:
         raise
-    except Exception:
-        logger.exception("Error in get_strategy_status / get_strategy_status 异常")
+    except Exception as exc:
+        log_safe_exception(logger, "strategy_status_read", exc)
         raise HTTPException(status_code=500, detail="Internal error / 内部错误")
 
 
@@ -396,8 +400,8 @@ async def get_intents(
             "intents": history,
             "count": len(history),
         })
-    except Exception:
-        logger.exception("Error in get_intents / get_intents 异常")
+    except Exception as exc:
+        log_safe_exception(logger, "strategy_intents_read", exc)
         raise HTTPException(status_code=500, detail="Internal error / 内部错误")
 
 
@@ -421,8 +425,8 @@ async def get_orchestrator_status(
                 py_status["strategy_source"] = "rust_engine"
                 return _envelope(py_status)
         return _envelope(ORCHESTRATOR.get_status())
-    except Exception:
-        logger.exception("Error in get_orchestrator_status / get_orchestrator_status 异常")
+    except Exception as exc:
+        log_safe_exception(logger, "strategy_orchestrator_status", exc)
         raise HTTPException(status_code=500, detail="Internal error / 内部错误")
 
 
@@ -497,10 +501,10 @@ async def get_scanner_opportunities(actor: base.AuthenticatedActor = Depends(bas
             "stats": stats,
             "source": "rust_scanner",
         })
-    except Exception as e:
+    except Exception as exc:
         # IPC unavailable — degrade to empty opportunities list, preserve envelope.
         # IPC 不可用，降級為空機會列表，保留 envelope 結構。
-        logger.warning("scanner/opportunities IPC failed: %s", e)
+        log_safe_exception(logger, "strategy_scanner_opportunities", exc, level=logging.WARNING)
         return _envelope({
             "opportunities": [],
             "stats": {},
@@ -662,15 +666,13 @@ async def get_recent_fills_from_pg(
             if f["ts"]:
                 f["ts"] = f["ts"].isoformat()
         return _envelope({"fills": fills, "count": len(fills), "source": "pg_trading_fills"})
-    except Exception as e:
-        # WP-05 Real Fix
-        logger.exception("PG fills query failed")
-        from .error_sanitize import sanitize_exc_str  # noqa: PLC0415
+    except Exception as exc:
+        log_safe_exception(logger, "strategy_recent_fills_query", exc)
         return JSONResponse(
             status_code=503,
             content={
                 "error": "database_unavailable",
-                "detail": sanitize_exc_str(e, "Database error"),
+                "detail": "Database unavailable",
                 "fills": [],
             },
         )
@@ -713,15 +715,13 @@ async def get_recent_signals_from_pg(
             if s["ts"]:
                 s["ts"] = s["ts"].isoformat()
         return _envelope({"signals": signals, "count": len(signals), "source": "pg_trading_signals"})
-    except Exception as e:
-        # WP-05 Real Fix
-        logger.exception("PG signals query failed")
-        from .error_sanitize import sanitize_exc_str  # noqa: PLC0415
+    except Exception as exc:
+        log_safe_exception(logger, "strategy_recent_signals_query", exc)
         return JSONResponse(
             status_code=503,
             content={
                 "error": "database_unavailable",
-                "detail": sanitize_exc_str(e, "Database error"),
+                "detail": "Database unavailable",
                 "signals": [],
             },
         )
@@ -759,15 +759,13 @@ async def get_latest_features_from_pg(
         cols = ["symbol", "timeframe", "updated_ts_ms", "feature_vector", "feature_version"]
         features = [dict(zip(cols, row)) for row in rows]
         return _envelope({"features": features, "count": len(features), "source": "pg_features_online"})
-    except Exception as e:
-        # WP-05 Real Fix
-        logger.exception("PG features query failed")
-        from .error_sanitize import sanitize_exc_str  # noqa: PLC0415
+    except Exception as exc:
+        log_safe_exception(logger, "strategy_latest_features_query", exc)
         return JSONResponse(
             status_code=503,
             content={
                 "error": "database_unavailable",
-                "detail": sanitize_exc_str(e, "Database error"),
+                "detail": "Database unavailable",
                 "features": [],
             },
         )
