@@ -92,7 +92,9 @@ class TestSnapshotNotAvailable(unittest.TestCase):
     """Tests when the snapshot file does not exist / 快照文件不存在時的測試"""
 
     def setUp(self):
-        self._tmpdir = tempfile.TemporaryDirectory()
+        self._tmpdir = tempfile.TemporaryDirectory(
+            dir=os.path.realpath(tempfile.gettempdir())
+        )
         self.reader = RustSnapshotReader(data_dir=self._tmpdir.name)
 
     def tearDown(self):
@@ -122,7 +124,9 @@ class TestSnapshotAvailable(unittest.TestCase):
     """Tests when a valid snapshot file exists / 有效快照文件存在時的測試"""
 
     def setUp(self):
-        self._tmpdir = tempfile.TemporaryDirectory()
+        self._tmpdir = tempfile.TemporaryDirectory(
+            dir=os.path.realpath(tempfile.gettempdir())
+        )
         _write_snapshot(self._tmpdir.name, SAMPLE_SNAPSHOT)
         self.reader = RustSnapshotReader(data_dir=self._tmpdir.name)
 
@@ -196,7 +200,9 @@ class TestCacheBehavior(unittest.TestCase):
     """Tests for internal caching and TTL logic / 內部緩存和 TTL 邏輯的測試"""
 
     def setUp(self):
-        self._tmpdir = tempfile.TemporaryDirectory()
+        self._tmpdir = tempfile.TemporaryDirectory(
+            dir=os.path.realpath(tempfile.gettempdir())
+        )
         self.reader = RustSnapshotReader(data_dir=self._tmpdir.name)
 
     def tearDown(self):
@@ -266,7 +272,9 @@ class TestErrorHandling(unittest.TestCase):
     """Tests for graceful degradation on bad data / 數據異常時優雅降級的測試"""
 
     def setUp(self):
-        self._tmpdir = tempfile.TemporaryDirectory()
+        self._tmpdir = tempfile.TemporaryDirectory(
+            dir=os.path.realpath(tempfile.gettempdir())
+        )
         self.reader = RustSnapshotReader(data_dir=self._tmpdir.name)
 
     def tearDown(self):
@@ -340,6 +348,23 @@ class TestErrorHandling(unittest.TestCase):
         with open(outside_path, "w", encoding="utf-8") as f:
             json.dump(SAMPLE_SNAPSHOT, f)
         os.symlink(outside_path, os.path.join(data_dir, "pipeline_snapshot.json"))
+        reader = RustSnapshotReader(data_dir=data_dir)
+
+        result = reader.get_snapshot()
+
+        self.assertIsNone(result)
+
+    def test_preexisting_snapshot_root_symlink_cannot_redirect_primary_read(self):
+        data_dir = os.path.join(self._tmpdir.name, "data")
+        outside_dir = os.path.join(self._tmpdir.name, "outside-data")
+        os.makedirs(outside_dir)
+        with open(
+            os.path.join(outside_dir, "pipeline_snapshot.json"),
+            "w",
+            encoding="utf-8",
+        ) as f:
+            json.dump({**SAMPLE_SNAPSHOT, "source": "external-root"}, f)
+        os.symlink(outside_dir, data_dir, target_is_directory=True)
         reader = RustSnapshotReader(data_dir=data_dir)
 
         result = reader.get_snapshot()
@@ -504,7 +529,9 @@ class TestPerEngineRouting(unittest.TestCase):
     LIVE_SENTINEL_BALANCE = 33333.33
 
     def setUp(self):
-        self._tmpdir = tempfile.TemporaryDirectory()
+        self._tmpdir = tempfile.TemporaryDirectory(
+            dir=os.path.realpath(tempfile.gettempdir())
+        )
         # Compat file written by Live engine (is_primary=true) — what the bug saw
         # Compat 檔由 Live 引擎寫入（is_primary=true）— 即 bug 觀察到的狀況
         live_data = {

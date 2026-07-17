@@ -694,14 +694,21 @@ def _cutover_preflight_location(
 ) -> tuple[Path, tuple[str, ...], Path]:
     """Return the trusted root, relative components, and lexical candidate."""
     trusted_root = Path(
-        os.environ.get("OPENCLAW_CUTOVER_PREFLIGHT_ROOT", "/tmp/openclaw")
-    ).expanduser().resolve(strict=True)
+        os.path.abspath(
+            Path(
+                os.environ.get(
+                    "OPENCLAW_CUTOVER_PREFLIGHT_ROOT",
+                    "/tmp/openclaw",
+                )
+            ).expanduser()
+        )
+    )
     supplied = Path(raw_path).expanduser()
     if ".." in supplied.parts:
         raise ValueError("cutover preflight path contains parent traversal")
     candidate = supplied if supplied.is_absolute() else trusted_root / supplied
     lexical = Path(os.path.abspath(candidate))
-    if not trusted_root.is_dir() or supplied.suffix.casefold() != ".json":
+    if supplied.suffix.casefold() != ".json":
         raise ValueError("cutover preflight path is outside policy")
     try:
         relative = lexical.relative_to(trusted_root)
@@ -724,8 +731,17 @@ def _open_cutover_preflight_fd(path: Path) -> int:
     directory_flags = os.O_RDONLY | directory | no_follow
     opened_directories: list[int] = []
     try:
-        parent_fd = os.open(trusted_root, directory_flags)
+        if not trusted_root.is_absolute() or not trusted_root.anchor:
+            raise OSError("trusted cutover root is not absolute")
+        parent_fd = os.open(trusted_root.anchor, directory_flags)
         opened_directories.append(parent_fd)
+        for component in trusted_root.parts[1:]:
+            parent_fd = os.open(
+                component,
+                directory_flags,
+                dir_fd=parent_fd,
+            )
+            opened_directories.append(parent_fd)
         for component in parts[:-1]:
             parent_fd = os.open(
                 component,
