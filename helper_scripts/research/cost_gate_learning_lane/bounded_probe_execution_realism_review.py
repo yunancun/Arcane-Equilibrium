@@ -21,8 +21,12 @@ from cost_gate_learning_lane.contract import (
     BLOCKED_SIGNAL_OUTCOME_RECORD_TYPE,
     PROBE_OUTCOME_RECORD_TYPE,
 )
+from cost_gate_learning_lane.ledger_streaming import (
+    LedgerProjectionLimitError,
+    scan_retained_jsonl,
+)
 from cost_gate_learning_lane.proof_exclusion import proof_exclusion_reasons
-from cost_gate_learning_lane.runtime_adapter import read_learning_ledger_partitions
+from cost_gate_learning_lane.runtime_adapter import project_learning_ledger_row
 
 # 共用純函數葉節點：以 alias-import 保持函數體內 _dict/_list/_str/_utc_now 引用逐字節不變。
 from cost_gate_learning_lane._lane_common import (
@@ -41,6 +45,22 @@ BOUNDARY = (
     "query/write, Bybit call, order, config, risk, auth, runtime mutation, "
     "Cost Gate lowering, probe authority, order authority, or promotion proof"
 )
+_RESULT_REVIEW_SCHEMA_VERSION = "bounded_demo_probe_result_review_v1"
+_RESULT_REVIEW_LEDGER_OBSERVATION_SCHEMA_VERSION = (
+    "bounded_demo_probe_result_review_ledger_observation_v1"
+)
+_EXECUTION_REALISM_SOURCE_STATUSES = {
+    "FIRST_REVIEW_PASSED_OPERATOR_REVIEW_REQUIRED",
+    "LEARNING_REVIEW_CANDIDATE_OPERATOR_REVIEW_REQUIRED",
+}
+_EXECUTION_REALISM_QUALITY_STATUS = (
+    "PROBE_UNDERPERFORMS_MATCHED_CONTROL_EXECUTION_GAP"
+)
+_LEDGER_SCAN_COMPLETE = "COMPLETE"
+_LEDGER_SCAN_SKIPPED_PRECONDITION = "SKIPPED_PRECONDITION"
+_LEDGER_SCAN_PROJECTION_LIMIT_EXCEEDED = "PROJECTION_LIMIT_EXCEEDED"
+MAX_EXECUTION_REALISM_PROJECTED_UNIQUE_ENTRIES = 50_000
+MAX_EXECUTION_REALISM_PROJECTED_JSON_BYTES = 64 * 1024 * 1024
 
 
 def _int(value: Any, default: int = 0) -> int:
@@ -179,6 +199,120 @@ def _authority_preserved(result_review: dict[str, Any]) -> bool:
         if source.get("main_cost_gate_adjustment") not in (None, "", "NONE"):
             return False
     return True
+
+
+def _result_review_ledger_precondition(
+    result_review: dict[str, Any],
+) -> tuple[bool, str]:
+    answers = _dict(result_review.get("answers"))
+    quality = _dict(result_review.get("evidence_quality"))
+    candidate = _dict(result_review.get("candidate"))
+    observation = _dict(result_review.get("ledger_observation"))
+    if not _authority_preserved(result_review) or answers.get(
+        "authority_boundary_preserved"
+    ) is not True:
+        return False, "source_result_review_authority_boundary_not_preserved"
+    if result_review.get("schema_version") != _RESULT_REVIEW_SCHEMA_VERSION:
+        return False, "source_result_review_schema_invalid"
+    if (
+        observation.get("schema_version")
+        != _RESULT_REVIEW_LEDGER_OBSERVATION_SCHEMA_VERSION
+        or observation.get("status") != _LEDGER_SCAN_COMPLETE
+        or observation.get("scan_performed") is not True
+        or observation.get("retained_ledger_scan_complete") is not True
+        or observation.get("target_scope_counts_known") is not True
+        or observation.get("stale_snapshot_reused") is not False
+        or observation.get("truncated") is not False
+    ):
+        return False, "source_result_review_ledger_observation_not_complete"
+    if _str(result_review.get("status")) not in _EXECUTION_REALISM_SOURCE_STATUSES:
+        return False, "source_result_review_status_not_execution_realism_reviewable"
+    if _str(quality.get("status")) != _EXECUTION_REALISM_QUALITY_STATUS:
+        return False, "source_result_review_quality_has_no_execution_realism_gap"
+    if quality.get("execution_realism_gap") is not True:
+        return False, "source_result_review_execution_realism_gap_not_confirmed"
+    if quality.get("matched_control_present") is not True:
+        return False, "source_result_review_matched_control_not_present"
+    if answers.get("execution_realism_gap") is not True:
+        return False, "source_result_review_answer_has_no_execution_realism_gap"
+    if not _str(result_review.get("side_cell_key")):
+        return False, "source_result_review_side_cell_missing"
+    if _int(candidate.get("outcome_horizon_minutes")) <= 0:
+        return False, "source_result_review_horizon_invalid"
+    return True, "source_result_review_execution_realism_precondition_complete"
+
+
+def _read_execution_realism_ledger_rows(
+    path: Path,
+    *,
+    result_review: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Strictly scan retained rows while retaining exact diagnosis inputs."""
+    candidate = _dict(result_review.get("candidate"))
+    side_cell_key = _str(result_review.get("side_cell_key"))
+    horizon_minutes = candidate.get("outcome_horizon_minutes")
+    latest: dict[tuple[str, str], dict[str, Any]] = {}
+    retained_json_bytes: dict[tuple[str, str], int] = {}
+    projected_json_bytes = 0
+
+    def consume(raw_row: dict[str, Any]) -> None:
+        nonlocal projected_json_bytes
+        outcome_row, _, is_quarantined = project_learning_ledger_row(raw_row)
+        if is_quarantined or outcome_row is None:
+            return
+        if _str(outcome_row.get("side_cell_key")) != side_cell_key:
+            return
+        if _str(outcome_row.get("record_type")) not in {
+            PROBE_OUTCOME_RECORD_TYPE,
+            BLOCKED_SIGNAL_OUTCOME_RECORD_TYPE,
+        }:
+            return
+        if not _horizon_matches(outcome_row, horizon_minutes):
+            return
+        if _float(outcome_row.get("realized_net_bps")) is None:
+            return
+        if proof_exclusion_reasons(outcome_row):
+            return
+        attempt_id = _str(outcome_row.get("attempt_id"))
+        if not attempt_id:
+            return
+        key = (_str(outcome_row.get("record_type")), attempt_id)
+        prior = latest.get(key)
+        if prior is not None and _generated_sort_key(
+            outcome_row
+        ) < _generated_sort_key(prior):
+            return
+        row_json_bytes = len(
+            json.dumps(
+                outcome_row,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+        )
+        next_unique_entries = len(latest) + (0 if prior is not None else 1)
+        if next_unique_entries > MAX_EXECUTION_REALISM_PROJECTED_UNIQUE_ENTRIES:
+            raise LedgerProjectionLimitError(
+                "EXECUTION_REALISM_PROJECTED_UNIQUE_ENTRIES_EXCEEDED",
+                path=path,
+            )
+        next_json_bytes = (
+            projected_json_bytes
+            - retained_json_bytes.get(key, 0)
+            + row_json_bytes
+        )
+        if next_json_bytes > MAX_EXECUTION_REALISM_PROJECTED_JSON_BYTES:
+            raise LedgerProjectionLimitError(
+                "EXECUTION_REALISM_PROJECTED_JSON_BYTES_EXCEEDED",
+                path=path,
+            )
+        latest[key] = outcome_row
+        retained_json_bytes[key] = row_json_bytes
+        projected_json_bytes = next_json_bytes
+
+    scan_retained_jsonl(path, consume)
+    return list(latest.values())
 
 
 def _gap_decomposition(
@@ -404,6 +538,93 @@ def build_bounded_probe_execution_realism_review(
     }
 
 
+def _attach_ledger_observation(
+    packet: dict[str, Any],
+    *,
+    status: str,
+    precondition_reason: str,
+    projection_limit_code: str | None = None,
+) -> dict[str, Any]:
+    if status not in {
+        _LEDGER_SCAN_COMPLETE,
+        _LEDGER_SCAN_SKIPPED_PRECONDITION,
+        _LEDGER_SCAN_PROJECTION_LIMIT_EXCEEDED,
+    }:
+        raise ValueError("unsupported execution-realism ledger observation status")
+    complete = status == _LEDGER_SCAN_COMPLETE
+    projection_limit_exceeded = status == _LEDGER_SCAN_PROJECTION_LIMIT_EXCEEDED
+    packet["ledger_observation"] = {
+        "schema_version": (
+            "bounded_probe_execution_realism_review_ledger_observation_v1"
+        ),
+        "status": status,
+        "reason": (
+            "retained_ledger_generation_scanned_to_eof"
+            if complete
+            else (
+                "retained_target_projection_limit_exceeded"
+                if projection_limit_exceeded
+                else "result_review_precondition_not_satisfied"
+            )
+        ),
+        "precondition_reason": precondition_reason,
+        "scan_performed": complete or projection_limit_exceeded,
+        "retained_ledger_scan_complete": complete,
+        "target_scope_counts_known": complete,
+        "stale_snapshot_reused": False,
+        "truncated": projection_limit_exceeded,
+    }
+    if projection_limit_exceeded:
+        packet["ledger_observation"]["projection_limit_code"] = (
+            projection_limit_code
+        )
+    if complete:
+        return packet
+
+    packet["status"] = (
+        _LEDGER_SCAN_PROJECTION_LIMIT_EXCEEDED
+        if projection_limit_exceeded
+        else "SKIPPED_PRECONDITION"
+    )
+    packet["reason"] = projection_limit_code or precondition_reason
+    for summary_key in (
+        "probe_execution_summary",
+        "matched_control_execution_summary",
+    ):
+        summary = _dict(packet.get(summary_key))
+        for key in (
+            "count",
+            "avg_net_bps",
+            "avg_gross_bps",
+            "avg_cost_bps",
+            "avg_entry_delay_ms",
+            "fill_backed_outcome_count",
+            "proxy_outcome_count",
+            "fill_backed_pct",
+        ):
+            summary[key] = None
+    gap = _dict(packet.get("gap_decomposition"))
+    for key in (
+        "net_capture_gap_bps",
+        "gross_capture_gap_bps",
+        "cost_or_slippage_gap_bps",
+        "entry_delay_gap_ms",
+    ):
+        gap[key] = None
+    packet["execution_gap_hypotheses"] = None
+    answers = _dict(packet.get("answers"))
+    answers["execution_realism_gap_confirmed"] = False
+    answers["fill_backed_probe_execution_available"] = None
+    packet["next_actions"] = [
+        (
+            "reduce_target_projection_cardinality_before_execution_realism_review"
+            if projection_limit_exceeded
+            else "refresh_complete_bounded_probe_result_review_before_execution_realism_review"
+        )
+    ]
+    return packet
+
+
 def render_markdown(packet: dict[str, Any]) -> str:
     gap = _dict(packet.get("gap_decomposition"))
     probe = _dict(packet.get("probe_execution_summary"))
@@ -471,9 +692,35 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = _build_parser().parse_args()
+    result_review = _read_json(args.result_review_json)
+    scan_required, precondition_reason = _result_review_ledger_precondition(
+        result_review
+    )
+    observation_status = _LEDGER_SCAN_SKIPPED_PRECONDITION
+    projection_limit_code: str | None = None
+    ledger_rows: list[dict[str, Any]] = []
+    if scan_required:
+        try:
+            ledger_rows = _read_execution_realism_ledger_rows(
+                args.ledger,
+                result_review=result_review,
+            )
+        except LedgerProjectionLimitError as exc:
+            ledger_rows = []
+            observation_status = _LEDGER_SCAN_PROJECTION_LIMIT_EXCEEDED
+            projection_limit_code = exc.code
+            precondition_reason = "retained_target_projection_limit_exceeded"
+        else:
+            observation_status = _LEDGER_SCAN_COMPLETE
     packet = build_bounded_probe_execution_realism_review(
-        result_review=_read_json(args.result_review_json),
-        ledger_rows=read_learning_ledger_partitions(args.ledger).outcome_rows,
+        result_review=result_review,
+        ledger_rows=ledger_rows,
+    )
+    packet = _attach_ledger_observation(
+        packet,
+        status=observation_status,
+        precondition_reason=precondition_reason,
+        projection_limit_code=projection_limit_code,
     )
     markdown = render_markdown(packet)
     if args.output:
