@@ -1143,10 +1143,7 @@ fn staleness_of(
 }
 
 /// 價格欄分類:空欄=unset → `None`;非空必為簽名定點字串,否則 denied（回欄名供 typed 拒）。
-fn classify_optional_price(
-    raw: &str,
-    field: &'static str,
-) -> Result<Option<String>, &'static str> {
+fn classify_optional_price(raw: &str, field: &'static str) -> Result<Option<String>, &'static str> {
     if raw.is_empty() {
         return Ok(None);
     }
