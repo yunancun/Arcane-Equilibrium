@@ -62,8 +62,8 @@ use crate::ibkr_tws_session_attestation::SessionWireFacts;
 use crate::ibkr_tws_wire::{
     classify_error_frame, classify_msg_id, decode_current_time, decode_error_code, decode_fields,
     decode_server_handshake_ack, encode_handshake_prefix, encode_req_current_time,
-    encode_start_api, frame_msg_id, managed_accounts_inspect, with_timeout, FrameReader,
-    FrameReaderLimits, KnownMsgId, TimeoutOp, TimeoutPolicy,
+    encode_start_api, frame_msg_id, managed_accounts_inspect, with_timeout, CodecError,
+    FrameReader, FrameReaderLimits, KnownMsgId, TimeoutOp, TimeoutPolicy,
 };
 
 /// G4 只讀 / W3 session 探針的固定 client_id（read-only;不下單,master-client 語義無關;同 B1）。
@@ -256,6 +256,29 @@ pub(crate) enum ConnectStep {
     Ready,
 }
 
+/// serve 期斷線前因（typed;W6-S0,CC lineage 斷點 4 收口——「為什麼斷」不得只剩注釋
+/// static note）。keep-last telemetry 語義:每次 fail-closed 斷線覆寫,跨世代保留最後一筆
+/// 供對賬（digest audit 的 `wire_malformed_*` 與此互為印證）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ServeDisconnectCause {
+    /// frame 頭 msgId 不可解析（malformed header）。
+    FrameHeaderMalformed,
+    /// 未知 msgId fail-closed（§2.3:不猜欄位、不跳過）。
+    UnknownMsgId { msg_id: i64 },
+    /// ERR_MSG(4) frame 自身 malformed。
+    ErrorFrameMalformed,
+    /// W5-S2 account/positions 消化判 wire 損壞（CodecError 身分保留）。
+    AccountDataWireMalformed(CodecError),
+    /// W5-S3 order/exec 消化判 wire 損壞（CodecError 身分保留）。
+    OrderExecWireMalformed(CodecError),
+    /// server EOF（write 半關）。
+    ServerEof,
+    /// 讀錯 / codec 滾動窗超限。
+    ReadFailed,
+    /// 出站送出失敗（IO/timeout;心跳/pacing/pump 送出面）。
+    SendFailed,
+}
+
 /// serve loop 結束原因。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ServeEnd {
@@ -311,7 +334,9 @@ pub(crate) struct SessionDriver<P: ConnectPermitProvider, F: TransportFactory> {
     /// 測試域;TODO(W6) IPC 投影面接真開關）。
     subscribe_account_data: bool,
     /// G1 session 級 blocker 記憶:serverVersion 低於 positions 下界 → 本 session 不再重試
-    /// reqPositions（重連/reset 後新 driver 世代重評;避免每 tick 空耗 governor token）。
+    /// reqPositions（避免每 tick 空耗 governor token）。**W6-S0**:世代推進（handshake 成功,
+    /// `connect_and_handshake` Ready 分支）時重置重評——sv 每次握手重新協商,舊世代的 floor
+    /// 記憶不得跨世代生效（修 R11-R14 注釋與行為不符:先前聲稱重評但從未重置）。
     positions_floor_blocked: bool,
     /// **W5-S3**:open orders/executions/commissions 消化器（入站 IN 3/5/11/53/55/59 分派至
     /// 此;斷線由 serve 收尾標記）。
@@ -322,12 +347,17 @@ pub(crate) struct SessionDriver<P: ConnectPermitProvider, F: TransportFactory> {
     /// 接真開關）。
     subscribe_order_exec: bool,
     /// DIVERGENT-1 floor session 級 blocker 記憶（同 positions_floor_blocked 語義:sv 低於
-    /// order/exec 下界 → 本 session 不再重試,新連線世代重評）。
+    /// order/exec 下界 → 本 session 不再重試;W6-S0 起世代推進時真重置重評）。
     order_exec_floor_blocked: bool,
+    /// **W6-S0**:最後一次 serve 期 fail-closed 斷線的 typed 前因（keep-last telemetry;
+    /// 見 `ServeDisconnectCause`）。
+    last_disconnect_cause: Option<ServeDisconnectCause>,
     /// **W5-S4**:最近一次握手的 wire 實檢事實（attestation producer 的唯一 wire 輸入）。
     /// 每個新 connect 世代開始即清（絕不以舊 session 實檢冒充新 session）;paper 未確認
     /// （IN 15 缺席/亂序 → transient）恆 `None` → producer 只可產 Blocked（false-fail 重試,
     /// 絕不以未見當已驗證）;非 paper fatal 亦存實檢紀錄（is_live 語義的可審計拒因）。
+    /// **W6-S0 session 活性綁定**:到過 Ready 的 facts 在 serve 結束（session 死亡）即清
+    /// （見 `serve` 尾與 `session_wire_facts` 注釋）。
     wire_facts: Option<SessionWireFacts>,
 }
 
@@ -375,6 +405,7 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
             order_exec: OrderExecDataDigest::new(OrderExecDataConfig::default()),
             subscribe_order_exec: false,
             order_exec_floor_blocked: false,
+            last_disconnect_cause: None,
             wire_facts: None,
         }
     }
@@ -415,10 +446,18 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
     }
 
     /// **W5-S4** 最近一次握手的 wire 實檢事實唯讀檢視（見 `wire_facts` 欄注釋;attestation
-    /// producer 的唯一 wire 輸入。真消費者=driver 測試域;TODO(W6) IPC 投影面接真消費並
-    /// 綁 session 活性）。
+    /// producer 的唯一 wire 輸入）。**W6-S0 session 活性綁定**（E3 R13-NOTE-01/E2 R13-F2）:
+    /// 到過 Ready 的 facts 在 session 死亡（serve 任一結束路徑）即清——本 accessor 對死會話
+    /// 回 `None`,「死會話 facts 鑄新鮮 attestation」窗結構性關閉;握手 fatal 拒因紀錄
+    /// （ready_at_ms=None,結構上僅能產 Blocked）不經 serve,保留至下一 connect 世代。
     pub(crate) fn session_wire_facts(&self) -> Option<&SessionWireFacts> {
         self.wire_facts.as_ref()
+    }
+
+    /// **W6-S0** 最後一次 serve 期 fail-closed 斷線的 typed 前因唯讀檢視（keep-last
+    /// telemetry;`None`=尚無 serve 期斷線）。
+    pub(crate) fn last_disconnect_cause(&self) -> Option<&ServeDisconnectCause> {
+        self.last_disconnect_cause.as_ref()
     }
 
     /// **測試專用**:可變存取內部 manager（令測試預先耗盡 governor token 逼心跳 Queued,驗 driver
@@ -508,6 +547,13 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
         self.wire_facts = facts;
         match hs {
             Ok(()) => {
+                // W6-S0 恢復政策:世代推進點=handshake 成功。毒化面重評（Invalidated →
+                // DisconnectedStale,pump 據 staleness 閘 re-begin）;floor 記憶重置（sv 每次
+                // 握手重新協商,舊世代 floor 不得跨世代生效——修注釋與行為不符）。
+                self.account_data.on_new_connection_generation();
+                self.order_exec.on_new_connection_generation();
+                self.positions_floor_blocked = false;
+                self.order_exec_floor_blocked = false;
                 // 到 Ready:stream+reader 交棒給 serve。
                 self.stream = Some(stream);
                 self.reader = Some(reader);
@@ -550,7 +596,7 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
                         .await
                         .is_err()
                     {
-                        break self.drop_io(now);
+                        break self.drop_io(now, ServeDisconnectCause::SendFailed);
                     }
                 }
                 HeartbeatOutbound::Queued(_)
@@ -571,19 +617,19 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
                 }
             }
             if io_broke {
-                break self.drop_io(now);
+                break self.drop_io(now, ServeDisconnectCause::SendFailed);
             }
             // 2b. W5-S2:account/positions 訂閱 pump（默認 off;開啟後未訂閱/失效即經
             // governor `AccountData` 類取 grant → send_framed 送訂閱,單一出口不變量）。
             if self.subscribe_account_data
                 && self.pump_account_data(&mut stream, now).await.is_err()
             {
-                break self.drop_io(now);
+                break self.drop_io(now, ServeDisconnectCause::SendFailed);
             }
             // 2c. W5-S3:order/exec 快照 pump（默認 off;同 2b 單一出口不變量,`AccountData`
             // 主桶——IB 現勘:此面 outbound 不受 historical 四規則約束）。
             if self.subscribe_order_exec && self.pump_order_exec(&mut stream, now).await.is_err() {
-                break self.drop_io(now);
+                break self.drop_io(now, ServeDisconnectCause::SendFailed);
             }
             // 3. 心跳回覆逾時 → miss（達 degraded 門檻 → Degraded;達 drop 門檻 → Backoff）。
             if self.manager.fsm_mut().heartbeat_reply_overdue(now) {
@@ -605,8 +651,8 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
             // 4. 讀下一 server frame（靜默 poll tick 非斷線;liveness 靠上方心跳 miss,設計 §1.2）。
             match serve_read_step(&mut stream, &mut reader, now, self.serve_poll).await {
                 ServeRead::Frame(payload) => self.process_serve_frame(&payload, now),
-                ServeRead::Eof => break self.drop_io(now), // server 關 → 斷線
-                ServeRead::Failed => break self.drop_io(now), // 讀錯 / codec 超限 → fail-closed
+                ServeRead::Eof => break self.drop_io(now, ServeDisconnectCause::ServerEof),
+                ServeRead::Failed => break self.drop_io(now, ServeDisconnectCause::ReadFailed),
                 ServeRead::Idle => {} // 靜默 tick,續迴圈（心跳 liveness 於頂部）
             }
         };
@@ -615,6 +661,12 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
         // fail-closed 明示不可信）。
         self.account_data.on_disconnect();
         self.order_exec.on_disconnect();
+        // W6-S0（E3 R13-NOTE-01/E2 R13-F2）:session 死亡即清 wire facts——serve 一切結束
+        // 路徑=連線死亡;到過 Ready 的實檢事實若殘留,attestation producer 可在死會話上鑄
+        // 帶新 `attested_at_ms` 的「新鮮」attested 態。取「清 facts」而非「accessor 判活」:
+        // 握手 fatal 拒因紀錄（ready_at_ms=None,結構上僅能產 Blocked）不經 serve、不受此
+        // 清除,保留其可審計拒因語義至下一 connect 世代（見 `connect_and_handshake` 起點）。
+        self.wire_facts = None;
         drop(stream);
         drop(reader);
         end
@@ -770,19 +822,21 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
         }
     }
 
-    /// IO 斷（EOF / 送失敗 / codec fail-closed）→ transient Backoff。
-    fn drop_io(&mut self, now: u64) -> ServeEnd {
+    /// IO 斷（EOF / 送失敗 / codec fail-closed）→ transient Backoff。W6-S0:typed 前因落帳。
+    fn drop_io(&mut self, now: u64, cause: ServeDisconnectCause) -> ServeEnd {
+        self.last_disconnect_cause = Some(cause);
         let delay = self.manager.next_transient_backoff_delay();
         let _ = self.manager.fsm_mut().on_io_drop(now, delay);
         ServeEnd::IoDropped
     }
 
-    /// 處理一個 serve 期 server frame（§2.3/2.4;未知 msgId / malformed → fail-closed 斷線）。
+    /// 處理一個 serve 期 server frame（§2.3/2.4;未知 msgId / malformed → fail-closed 斷線,
+    /// W6-S0 起帶 typed 前因）。
     fn process_serve_frame(&mut self, payload: &[u8], now: u64) {
         let msg_id = match frame_msg_id(payload) {
             Ok(id) => id,
             Err(_) => {
-                self.fail_closed(now);
+                self.fail_closed(now, ServeDisconnectCause::FrameHeaderMalformed);
                 return;
             }
         };
@@ -796,7 +850,8 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
                 Ok((code, class)) => {
                     let _ = self.manager.on_error_frame(code, class, now);
                 }
-                Err(_) => self.fail_closed(now), // malformed err frame → fail-closed
+                // malformed err frame → fail-closed
+                Err(_) => self.fail_closed(now, ServeDisconnectCause::ErrorFrameMalformed),
             },
             // 15/9:serve 期重現（罕見）→ 容忍忽略（已知 msgId,非未知）。
             Some(KnownMsgId::ManagedAccounts) | Some(KnownMsgId::NextValidId) => {}
@@ -844,34 +899,43 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
                 self.handle_order_exec_result(r, now);
             }
             // 未知 msgId → fail-closed 斷線（§2.3:不猜欄位、不跳過）。
-            None => self.fail_closed(now),
+            None => self.fail_closed(now, ServeDisconnectCause::UnknownMsgId { msg_id }),
         }
     }
 
     /// W5-S2 消化結果分流:`WireMalformed`（欄位缺/非數字/錯位）= wire 損壞 → 既有紀律
-    /// fail-closed 斷線;其餘 typed reject（契約 blocker/哨兵/reqId 錯配/未訂而收）= 資料層
-    /// fail-closed——快照已由 digest 標 `Invalidated`/拒併入,session 續 serve（不 panic）。
+    /// fail-closed 斷線（W6-S0:CodecError 身分入 typed 前因）;其餘 typed reject（契約
+    /// blocker/哨兵/reqId 錯配/未訂而收）= 資料層 fail-closed——快照已由 digest 標
+    /// `Invalidated`/拒併入,**blocker 身分已由 digest `audit_reject` 落帳**（CC lineage
+    /// 斷點 1:此處 `Err(_)=>{}` 不再是零觀測吞沒）,session 續 serve（不 panic）。
     fn handle_account_data_result(&mut self, r: Result<(), AccountDataReject>, now: u64) {
         match r {
             Ok(()) => {}
-            Err(AccountDataReject::WireMalformed(_)) => self.fail_closed(now),
+            Err(AccountDataReject::WireMalformed(c)) => {
+                self.fail_closed(now, ServeDisconnectCause::AccountDataWireMalformed(c));
+            }
             Err(_) => {}
         }
     }
 
-    /// W5-S3 消化結果分流（同 W5-S2 紀律）:`WireMalformed` = wire 損壞 → fail-closed 斷線;
-    /// 其餘 typed reject（契約 blocker/佈局窗/grammar/表外 status/未開消化承接拒）= 資料層
-    /// fail-closed——毒化/audit 已由 digest 落帳,session 續 serve（不 panic）。
+    /// W5-S3 消化結果分流（同 W5-S2 紀律）:`WireMalformed` = wire 損壞 → fail-closed 斷線
+    /// （typed 前因）;其餘 typed reject（契約 blocker/佈局窗/grammar/表外 status/未開消化
+    /// 承接拒）= 資料層 fail-closed——毒化/audit（含 W6-S0 per-face blocker 樣本）已由
+    /// digest 落帳,session 續 serve（不 panic）。
     fn handle_order_exec_result(&mut self, r: Result<(), OrderExecDataReject>, now: u64) {
         match r {
             Ok(()) => {}
-            Err(OrderExecDataReject::WireMalformed(_)) => self.fail_closed(now),
+            Err(OrderExecDataReject::WireMalformed(c)) => {
+                self.fail_closed(now, ServeDisconnectCause::OrderExecWireMalformed(c));
+            }
             Err(_) => {}
         }
     }
 
     /// serve 期 fail-closed 斷線（未知 msgId / malformed）:Ready/Degraded → Backoff。
-    fn fail_closed(&mut self, now: u64) {
+    /// W6-S0:typed 前因落帳（非 serve 態的防禦分支亦記——前因是事實,不依賴 FSM 轉移）。
+    fn fail_closed(&mut self, now: u64, cause: ServeDisconnectCause) {
+        self.last_disconnect_cause = Some(cause);
         if self.in_serve_state() {
             let delay = self.manager.next_transient_backoff_delay();
             let _ = self.manager.fsm_mut().on_io_drop(now, delay);

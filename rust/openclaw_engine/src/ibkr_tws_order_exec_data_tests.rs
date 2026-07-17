@@ -333,7 +333,7 @@ fn executions_snapshot_then_end_then_unsolicited_push() {
         T0,
     )
     .unwrap();
-    let (_, slot) = d.exec_slots().next().unwrap();
+    let (_, slot) = d.exec_slots(T0).1.next().unwrap();
     let row = slot.execution.as_ref().unwrap();
     assert_eq!(
         row.exchange, "ARCA",
@@ -366,7 +366,7 @@ fn executions_snapshot_then_end_then_unsolicited_push() {
         T0 + 20,
     )
     .unwrap();
-    assert_eq!(d.exec_slots().count(), 2);
+    assert_eq!(d.exec_slots(T0).1.count(), 2);
     assert_eq!(d.audit().unsolicited_execution_rows, 1);
     // 同 execId 重複行(快照/推送重疊):後到覆蓋+計數。
     d.on_execution_frame(
@@ -384,7 +384,7 @@ fn executions_snapshot_then_end_then_unsolicited_push() {
         T0 + 30,
     )
     .unwrap();
-    assert_eq!(d.exec_slots().count(), 2, "execId 去重:重複不增槽");
+    assert_eq!(d.exec_slots(T0).1.count(), 2, "execId 去重:重複不增槽");
     assert_eq!(d.audit().duplicate_execution_rows, 1);
 }
 
@@ -441,8 +441,8 @@ fn no_active_context_frames_rejected() {
             .unwrap_err(),
         OrderExecDataReject::NoActiveContext
     );
-    assert_eq!(d.exec_slots().count(), 0);
-    assert_eq!(d.open_orders().count(), 0);
+    assert_eq!(d.exec_slots(T0).1.count(), 0);
+    assert_eq!(d.open_orders(T0).1.count(), 0);
     // **E2 F2**:承接拒逐 frame 計數(unsolicited 丟棄可觀測,非靜默)。
     assert_eq!(d.audit().no_active_context_rejects, 4);
 }
@@ -487,7 +487,7 @@ fn exec_time_grammar_whitelist_row_level_reject_with_audit() {
         Some(bad),
         "原字串記 audit 可重放"
     );
-    assert_eq!(d.exec_slots().count(), 0, "grammar 拒收行不併入");
+    assert_eq!(d.exec_slots(T0).1.count(), 0, "grammar 拒收行不併入");
     assert_eq!(
         d.executions_staleness(T0),
         SnapshotStaleness::SnapshotIncomplete,
@@ -569,11 +569,24 @@ fn execution_row_contract_blockers_poison_surface() {
             .unwrap_err(),
         OrderExecDataReject::NoActiveContext
     );
-    // 毒化後 re-begin 恢復(新快照世代,舊槽清空)。
+    // W6-S0 audit:blocker 身分落帳(count+最後樣本)。
+    assert_eq!(d.audit().execution_row_blocked_rejects, 1);
+    assert!(!d.audit().execution_row_last_blockers.is_empty());
+    // W6-S0 恢復政策:毒化=世代內終態——同世代 re-begin 一律拒。
+    assert_eq!(
+        d.begin_executions(SV_CEILING, REQ_ID + 1).unwrap_err(),
+        OrderExecDataReject::InvalidatedUntilNewGeneration
+    );
+    // 世代推進(新 handshake 成功)重評 → re-begin 恢復(新快照世代,舊槽清空)。
+    d.on_new_connection_generation();
+    assert_eq!(
+        d.executions_staleness(T0),
+        SnapshotStaleness::DisconnectedStale
+    );
     let seq = d.snapshot_seq();
     d.begin_executions(SV_CEILING, REQ_ID + 1).unwrap();
     assert_eq!(d.snapshot_seq(), seq + 1);
-    assert_eq!(d.exec_slots().count(), 0);
+    assert_eq!(d.exec_slots(T0).1.count(), 0);
 }
 
 #[test]
@@ -617,7 +630,7 @@ fn realized_pnl_sentinel_double_test_maps_to_none() {
     )
     .unwrap();
     let pnl_of = |d: &OrderExecDataDigest, id: &str| {
-        d.exec_slots()
+        d.exec_slots(T0).1
             .find(|(k, _)| k.as_str() == id)
             .unwrap()
             .1
@@ -659,7 +672,7 @@ fn either_order_join_and_orphan_ttl_metering() {
     let report = d.join_orphans(T0);
     assert_eq!(report.commissions_awaiting_execution, 1);
     assert_eq!(report.executions_awaiting_commission, 0);
-    assert_eq!(d.completed_executions().count(), 0);
+    assert_eq!(d.completed_executions(T0).1.count(), 0);
     // execution 後到 → join 完整對=typed 完整成交紀錄。
     d.on_execution_frame(
         &execution_payload(
@@ -676,8 +689,8 @@ fn either_order_join_and_orphan_ttl_metering() {
         T0 + 5,
     )
     .unwrap();
-    assert_eq!(d.completed_executions().count(), 1);
-    let (exec, comm) = d.completed_executions().next().unwrap();
+    assert_eq!(d.completed_executions(T0).1.count(), 1);
+    let (exec, comm) = d.completed_executions(T0).1.next().unwrap();
     assert_eq!(exec.exec_id, comm.exec_id);
     assert_eq!(d.join_orphans(T0 + 5), JoinOrphanReport::default());
     // 正序:execution 先到、commission 逾 TTL 未到 → over_ttl 計量(degraded 信號)。
@@ -720,22 +733,22 @@ fn order_status_whitelist_dedup_and_unknown_denied() {
     d.begin_open_orders(SV_CEILING).unwrap();
     d.on_order_status_frame(&order_status_payload(7, "Submitted", "0", "100"), T0)
         .unwrap();
-    assert_eq!(d.order_statuses().count(), 1);
-    let row = d.order_statuses().next().unwrap();
+    assert_eq!(d.order_statuses(T0).1.count(), 1);
+    let row = d.order_statuses(T0).1.next().unwrap();
     assert_eq!(row.status, IbkrOrderStatusV1::Submitted);
     assert_eq!(row.filled_decimal, "0");
     // 官方明言常有重複 → 冪等去重(wire 事實全等:計數後 no-op,captured_at 不更新)。
     d.on_order_status_frame(&order_status_payload(7, "Submitted", "0", "100"), T0 + 5)
         .unwrap();
-    assert_eq!(d.order_statuses().count(), 1);
+    assert_eq!(d.order_statuses(T0).1.count(), 1);
     assert_eq!(d.audit().duplicate_order_status_rows, 1);
-    assert_eq!(d.order_statuses().next().unwrap().captured_at_ms, T0);
+    assert_eq!(d.order_statuses(T0).1.next().unwrap().captured_at_ms, T0);
     // 事實變化(Filled)→ 覆蓋非去重。
     d.on_order_status_frame(&order_status_payload(7, "Filled", "100", "0"), T0 + 9)
         .unwrap();
-    assert_eq!(d.order_statuses().count(), 1);
+    assert_eq!(d.order_statuses(T0).1.count(), 1);
     assert_eq!(
-        d.order_statuses().next().unwrap().status,
+        d.order_statuses(T0).1.next().unwrap().status,
         IbkrOrderStatusV1::Filled
     );
     // 表外 status(ApiPending 屬表外)→ UnknownDenied:audit 計數+毒化,不 crash。
@@ -779,7 +792,7 @@ fn open_order_head_prefix_digest_and_tail_discard() {
     )
     .unwrap();
     assert_eq!(d.audit().open_order_tail_fields_discarded, 3);
-    let row = d.open_orders().next().unwrap();
+    let row = d.open_orders(T0).1.next().unwrap();
     assert_eq!(row.order_id, 7);
     assert_eq!(row.con_id, 756733);
     assert_eq!(row.action, IbkrOrderActionV1::Buy);
@@ -877,8 +890,8 @@ fn disconnect_marks_stale_and_rebegin_resyncs() {
         SnapshotStaleness::DisconnectedStale
     );
     // 行保留供唯讀檢視(staleness 已明示不可信)。
-    assert_eq!(d.exec_slots().count(), 1);
-    assert_eq!(d.open_orders().count(), 1);
+    assert_eq!(d.exec_slots(T0).1.count(), 1);
+    assert_eq!(d.open_orders(T0).1.count(), 1);
     // 斷線後入站 → NoActiveContext(快照/推送不跨連線存活)。
     assert_eq!(
         d.on_execution_frame(
@@ -902,7 +915,7 @@ fn disconnect_marks_stale_and_rebegin_resyncs() {
     let seq = d.snapshot_seq();
     d.begin_executions(SV_CEILING, REQ_ID + 1).unwrap();
     assert_eq!(d.snapshot_seq(), seq + 1);
-    assert_eq!(d.exec_slots().count(), 0);
+    assert_eq!(d.exec_slots(T0).1.count(), 0);
     assert_eq!(
         d.executions_staleness(T0),
         SnapshotStaleness::SnapshotIncomplete
@@ -910,8 +923,8 @@ fn disconnect_marks_stale_and_rebegin_resyncs() {
     let seq = d.snapshot_seq();
     d.begin_all_open_orders(SV_CEILING).unwrap();
     assert_eq!(d.snapshot_seq(), seq + 1);
-    assert_eq!(d.open_orders().count(), 0);
-    assert_eq!(d.order_statuses().count(), 0);
+    assert_eq!(d.open_orders(T0).1.count(), 0);
+    assert_eq!(d.order_statuses(T0).1.count(), 0);
 }
 
 // ===========================================================================

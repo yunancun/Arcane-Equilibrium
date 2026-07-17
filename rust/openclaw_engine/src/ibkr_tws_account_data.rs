@@ -14,6 +14,10 @@
 //!     reqId 錯配——全 typed,不 panic、不捏值、不默認）+ `SnapshotStaleness`。
 //!   - (d) `AccountDataDigest`：summary/positions 雙訂閱狀態機（G3 單訂閱不變量）+ 行存放
 //!     （client 側 `captured_at_ms`/`snapshot_seq` 注入）+ 斷線失效。
+//!   - (e) **W6-S0 硬化**：`AccountDataAudit`（typed reject 身分觀測面,沿 OrderExecAudit
+//!     慣例）;Invalidated 恢復政策=世代內終態、唯 `on_new_connection_generation` 重評;
+//!     快照 map config 化 cap（超界=毒化非驅逐）;行視圖改 staleness 綁定形
+//!     `(SnapshotStaleness, rows)`。
 //! 依賴：`ibkr_tws_wire`（codec/常數）、`openclaw_types`（W5-S1 row 契約 + tag/secType
 //!   白名單）、`std::collections::BTreeMap`。
 //! 硬邊界：
@@ -139,6 +143,15 @@ pub(crate) struct AccountDataConfig {
     /// 精確哨兵位元組 **UNVERIFIABLE** → 不寫死哨兵常數,EA 跑道實測校準此守衛;默認 21 位
     /// 遠超真實帳戶量級、遠低於 2^127-1≈39 位哨兵量級）。
     pub sentinel_integer_digits_guard: usize,
+    /// **快照 map 行數上界（W6-S0,E3 LOW-02 家族）**:summary 快照 map 的 config 化 cap。
+    /// 依據:單 entry 由單 frame 產生（1 frame ≤ `MAX_FRAME_LEN`=64KB）,driver 單 serve
+    /// 迴圈 frame 預算 `SERVE_BUDGET`=100_000 → 無 cap 的理論注入面 ≈ 6.4GB/serve（無界);
+    /// cap=4096 → 面駐留最壞 ≈ 256MB、實際 row 遠小,且真實 lane 量級（9-tag 白名單×帳戶
+    /// 數）在數十內,4096 為 100×+ 裕度。**超界=該面 `Invalidated` 毒化+audit 計數**
+    /// （fail-closed;禁靜默驅逐——驅逐=對消費端的記帳謊言）。
+    pub max_summary_rows: usize,
+    /// positions 快照 map 的 config 化 cap（同上依據;真實倉位量級=數百,4096 為 10×+ 裕度）。
+    pub max_positions_rows: usize,
 }
 
 impl Default for AccountDataConfig {
@@ -149,6 +162,8 @@ impl Default for AccountDataConfig {
             summary_stale_after: Duration::from_secs(390),
             positions_stale_after: Duration::from_secs(390),
             sentinel_integer_digits_guard: 21,
+            max_summary_rows: 4096,
+            max_positions_rows: 4096,
         }
     }
 }
@@ -189,6 +204,15 @@ pub(crate) enum AccountDataReject {
     /// 上 wire 掩蓋（F7,E2）。
     #[error("subscription slot invariant broken (state corrupted)")]
     SubscriptionStateCorrupted,
+    /// **恢復政策（W6-S0,E2-R11-F3/E3 MED-01 家族）**:毒化=同一 connect 世代內終態——
+    /// 世代內 re-begin 一律拒（毒化事實不得被同世代重訂沖淡）;唯 driver 世代推進
+    /// （新 handshake 成功,`on_new_connection_generation`）重評後可 re-begin。
+    #[error("snapshot invalidated; re-begin requires a new connection generation")]
+    InvalidatedUntilNewGeneration,
+    /// **cap 超界（W6-S0,E3 LOW-02 家族）**:快照 map 行數超 config 上界 → 該面毒化+audit
+    /// 計數（fail-closed;禁靜默驅逐=不做記帳謊言）。
+    #[error("snapshot row cap exceeded (face poisoned, no silent eviction)")]
+    SnapshotRowCapExceeded,
     /// wire 形狀損壞（欄位缺/非數字/非 ASCII）——呼叫端按既有紀律 fail-closed 斷線。
     #[error("wire malformed: {0}")]
     WireMalformed(CodecError),
@@ -213,7 +237,8 @@ pub(crate) enum SnapshotStaleness {
     /// 逾新鮮窗無推送的**保守標記**（summary:IB 無變動即無推送;positions:事件驅動無節拍
     /// 保證——值可能只是未變,消費端降信心）。
     Stale { as_of_ms: u64, age_ms: u64 },
-    /// 契約 blocker 毒化:快照不可信（fail-closed;重訂閱才可恢復）。
+    /// 契約 blocker 毒化:快照不可信（fail-closed;同 connect 世代內終態,唯新世代重評後
+    /// 重訂閱可恢復——W6-S0 恢復政策）。
     Invalidated,
     /// 斷線失效:快照標 stale、**重連需重訂閱**（訂閱不跨連線存活,IB 現勘語義）。
     DisconnectedStale,
@@ -228,7 +253,8 @@ enum SubPhase {
     SnapshotIncomplete,
     /// End 已到:summary=節拍推變動;positions=事件驅動增量。
     Live,
-    /// 契約 blocker 毒化（fail-closed;唯重訂閱離開）。
+    /// 契約 blocker 毒化（fail-closed;同 connect 世代內終態,唯世代推進
+    /// `on_new_connection_generation` 重評後離開——W6-S0 恢復政策）。
     Invalidated,
     /// 斷線失效（唯重訂閱離開）。
     DisconnectedStale,
@@ -239,6 +265,39 @@ impl SubPhase {
     fn is_active(self) -> bool {
         matches!(self, SubPhase::SnapshotIncomplete | SubPhase::Live)
     }
+}
+
+/// audit 計數器（W6-S0,對齊 W5-S3 `OrderExecAudit` 慣例:全部單調遞增+`*_last_*` 樣本欄;
+/// driver/W6 IPC 投影唯讀消費）。為什麼需要:driver 對資料層 typed reject 走 `Err(_)=>{}`
+/// 分流續 serve——無 audit 則 blocker 身分零觀測(CC lineage 斷點 1/E3 MED-01-S3 (a))。
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct AccountDataAudit {
+    /// G2 哨兵嫌疑拒數。
+    pub sentinel_suspect_rejects: u64,
+    /// 最後一次哨兵嫌疑拒的原始值字串（EA 校準/重放用,沿 `*_last_raw` 慣例）。
+    pub sentinel_last_raw: Option<String>,
+    /// 未訂而收承接拒數（未訂/毒化/斷線失效窗口的入站丟棄可觀測）。
+    pub no_active_subscription_rejects: u64,
+    /// wire 損壞拒數（呼叫端 fail-closed 斷線;此處留身分供斷線前因對賬）。
+    pub wire_malformed_rejects: u64,
+    /// 最後一次 wire 損壞的 typed 描述（CodecError 顯示串,不含 payload 原文）。
+    pub wire_malformed_last_note: Option<String>,
+    /// 入站 reqId 錯配拒數。
+    pub unexpected_req_id_rejects: u64,
+    /// summary row 契約 blocker 拒數。
+    pub summary_row_blocked_rejects: u64,
+    /// 最後一筆 summary row blocker 列表（per-face 樣本欄）。
+    pub summary_row_last_blockers: Vec<IbkrAccountSummaryRowBlocker>,
+    /// positions row 契約 blocker 拒數。
+    pub positions_row_blocked_rejects: u64,
+    /// 最後一筆 positions row blocker 列表（per-face 樣本欄）。
+    pub positions_row_last_blockers: Vec<IbkrPositionsRowBlocker>,
+    /// G1 position version<3 拒數。
+    pub position_version_too_old_rejects: u64,
+    /// 訂閱槽不變量破裂（F7）拒數。
+    pub subscription_state_corrupted_rejects: u64,
+    /// 快照 map cap 超界毒化數（W6-S0 cap;禁靜默驅逐）。
+    pub row_cap_exceeded_rejects: u64,
 }
 
 // ===========================================================================
@@ -264,6 +323,8 @@ pub(crate) struct AccountDataDigest {
     /// 最新 position 行,鍵=(account_id, con_id)——同倉後到覆蓋（事件驅動增量）。
     positions_rows: BTreeMap<(String, i64), IbkrPositionsRowV1>,
     positions_last_update_ms: u64,
+    /// W6-S0 audit 計數器（typed reject 身分觀測面;見 `AccountDataAudit`）。
+    audit: AccountDataAudit,
 }
 
 impl AccountDataDigest {
@@ -278,17 +339,23 @@ impl AccountDataDigest {
             positions_phase: SubPhase::Idle,
             positions_rows: BTreeMap::new(),
             positions_last_update_ms: 0,
+            audit: AccountDataAudit::default(),
         }
     }
 
     // ---- 出站意圖（訂閱生命週期;送出經 pacing 單一出口,見模塊硬邊界）----
 
     /// 開始 summary 訂閱:回待送 frame。**G3**:活躍中再訂 → typed 拒（結構性單訂閱,不依賴
-    /// server 報錯）。Idle/Invalidated/DisconnectedStale 可（重）訂:清舊快照、遞增 seq。
+    /// server 報錯）。Idle/DisconnectedStale 可（重）訂:清舊快照、遞增 seq。
+    /// **Invalidated=世代內終態**（W6-S0 恢復政策）:唯 `on_new_connection_generation` 重評
+    /// 後可 re-begin——毒化事實不得被同世代重訂沖淡。
     pub(crate) fn begin_account_summary(
         &mut self,
         req_id: i64,
     ) -> Result<Vec<u8>, AccountDataReject> {
+        if self.summary_phase == SubPhase::Invalidated {
+            return Err(AccountDataReject::InvalidatedUntilNewGeneration);
+        }
         if self.summary_phase.is_active() {
             return Err(AccountDataReject::SummaryAlreadyActive);
         }
@@ -306,12 +373,14 @@ impl AccountDataDigest {
             return Err(AccountDataReject::NoActiveSubscription);
         }
         // F7（E2）:活躍卻無 reqId = 不變量破裂——typed 拒 + 毒化,**不得**默認 reqId=0 上
-        // wire（cancel 錯 id 是對 server 的語義謊言;重訂閱=唯一恢復）。
+        // wire（cancel 錯 id 是對 server 的語義謊言;新世代重評=唯一恢復）。
         let req_id = match self.summary_req_id.take() {
             Some(rid) => rid,
             None => {
                 self.summary_phase = SubPhase::Invalidated;
-                return Err(AccountDataReject::SubscriptionStateCorrupted);
+                let e = AccountDataReject::SubscriptionStateCorrupted;
+                self.audit_reject(&e);
+                return Err(e);
             }
         };
         self.summary_phase = SubPhase::Idle;
@@ -321,6 +390,7 @@ impl AccountDataDigest {
 
     /// 開始 positions 訂閱:回待送 frame。**G1**:serverVersion < config 下界 → session 級
     /// blocker（不發、不實作舊解析分支）。**G3**:活躍中再訂 → typed 拒。
+    /// **Invalidated=世代內終態**（W6-S0;同 `begin_account_summary`）。
     pub(crate) fn begin_positions(
         &mut self,
         server_version: i32,
@@ -330,6 +400,9 @@ impl AccountDataDigest {
                 server_version,
                 floor: self.config.min_positions_server_version,
             });
+        }
+        if self.positions_phase == SubPhase::Invalidated {
+            return Err(AccountDataReject::InvalidatedUntilNewGeneration);
         }
         if self.positions_phase.is_active() {
             return Err(AccountDataReject::PositionsAlreadyActive);
@@ -355,7 +428,21 @@ impl AccountDataDigest {
     /// IN 63 accountSummary 行:decode（IB pinned 欄序 `[63, version, reqId, account, tag,
     /// value, currency]`）→ G2 哨兵守衛 → W5-S1 row 契約 `validate()` → 併入快照。
     /// 表外 tag → 契約 `UnknownDenied` blocker 路徑（快照標 `Invalidated`,不 panic）。
+    /// W6-S0:任何 typed reject 過 `audit_reject` 落帳身分（driver `Err(_)=>{}` 分流不再
+    /// 零觀測）。
     pub(crate) fn on_account_summary_frame(
+        &mut self,
+        payload: &[u8],
+        now_ms: u64,
+    ) -> Result<(), AccountDataReject> {
+        let r = self.account_summary_frame_inner(payload, now_ms);
+        if let Err(e) = &r {
+            self.audit_reject(e);
+        }
+        r
+    }
+
+    fn account_summary_frame_inner(
         &mut self,
         payload: &[u8],
         now_ms: u64,
@@ -376,7 +463,10 @@ impl AccountDataDigest {
             return Err(AccountDataReject::UnexpectedReqId { got: req_id });
         }
         // G2:哨兵守衛先於契約校驗（哨兵是「值不可信」而非「格式非法」,獨立 typed 拒）。
+        // 原始值就地記 audit（沿 `*_last_raw` 慣例;count 亦就地——audit_reject 不重複計）。
         if self.sentinel_suspect(&fields[5]) {
+            self.audit.sentinel_suspect_rejects += 1;
+            self.audit.sentinel_last_raw = Some(fields[5].clone());
             self.summary_phase = SubPhase::Invalidated;
             return Err(AccountDataReject::SentinelSuspectValue);
         }
@@ -400,15 +490,35 @@ impl AccountDataDigest {
             self.summary_phase = SubPhase::Invalidated;
             return Err(AccountDataReject::SummaryRowBlocked(verdict.blockers));
         }
+        // W6-S0 cap:新鍵且已達上界 → 毒化+audit（fail-closed;禁靜默驅逐——驅逐哪一行都是
+        // 對消費端的記帳謊言）。既有鍵覆蓋不受 cap 限（不增長）。
+        let key = (row.account_id.clone(), fields[4].clone());
+        if !self.summary_rows.contains_key(&key)
+            && self.summary_rows.len() >= self.config.max_summary_rows
+        {
+            self.summary_phase = SubPhase::Invalidated;
+            return Err(AccountDataReject::SnapshotRowCapExceeded);
+        }
         self.summary_last_update_ms = now_ms;
-        self.summary_rows
-            .insert((row.account_id.clone(), fields[4].clone()), row);
+        self.summary_rows.insert(key, row);
         Ok(())
     }
 
     /// IN 64 accountSummaryEnd（`[64, version, reqId]`）:首回全量完成 → `Live`（其後每 3
     /// 分鐘僅推變動 tag,staleness 轉節拍窗語義）。
     pub(crate) fn on_account_summary_end_frame(
+        &mut self,
+        payload: &[u8],
+        now_ms: u64,
+    ) -> Result<(), AccountDataReject> {
+        let r = self.account_summary_end_frame_inner(payload, now_ms);
+        if let Err(e) = &r {
+            self.audit_reject(e);
+        }
+        r
+    }
+
+    fn account_summary_end_frame_inner(
         &mut self,
         payload: &[u8],
         now_ms: u64,
@@ -438,6 +548,18 @@ impl AccountDataDigest {
     /// tradingClass 佔位欄仍在 wire,按位讀後棄——無 primaryExchange 欄）→ G2 哨兵守衛 →
     /// W5-S1 row 契約 → 併入快照。
     pub(crate) fn on_position_frame(
+        &mut self,
+        payload: &[u8],
+        now_ms: u64,
+    ) -> Result<(), AccountDataReject> {
+        let r = self.position_frame_inner(payload, now_ms);
+        if let Err(e) = &r {
+            self.audit_reject(e);
+        }
+        r
+    }
+
+    fn position_frame_inner(
         &mut self,
         payload: &[u8],
         now_ms: u64,
@@ -478,7 +600,15 @@ impl AccountDataDigest {
         // 9=multiplier / 12=localSymbol / 13=tradingClass）:讀位即棄,不 bind 語義。
         let con_id = parse_i64(&fields[3], "con_id")?;
         // G2:position/avgCost 皆過哨兵守衛（10.x UNSET_DECIMAL 不可證 → config 守衛）。
+        // 原始值就地記 audit（記命中側;兩側皆中取 position 側樣本即可）。
         if self.sentinel_suspect(&fields[14]) || self.sentinel_suspect(&fields[15]) {
+            let raw = if self.sentinel_suspect(&fields[14]) {
+                &fields[14]
+            } else {
+                &fields[15]
+            };
+            self.audit.sentinel_suspect_rejects += 1;
+            self.audit.sentinel_last_raw = Some(raw.clone());
             self.positions_phase = SubPhase::Invalidated;
             return Err(AccountDataReject::SentinelSuspectValue);
         }
@@ -504,15 +634,34 @@ impl AccountDataDigest {
             self.positions_phase = SubPhase::Invalidated;
             return Err(AccountDataReject::PositionsRowBlocked(verdict.blockers));
         }
+        // W6-S0 cap:同 summary 紀律（新鍵且達上界 → 毒化+audit,禁靜默驅逐）。
+        let key = (row.account_id.clone(), con_id);
+        if !self.positions_rows.contains_key(&key)
+            && self.positions_rows.len() >= self.config.max_positions_rows
+        {
+            self.positions_phase = SubPhase::Invalidated;
+            return Err(AccountDataReject::SnapshotRowCapExceeded);
+        }
         self.positions_last_update_ms = now_ms;
-        self.positions_rows
-            .insert((row.account_id.clone(), con_id), row);
+        self.positions_rows.insert(key, row);
         Ok(())
     }
 
     /// IN 62 positionEnd（`[62, version]`）:首回全量完成 → `Live`（其後事件驅動增量,無節拍
     /// 保證——staleness 以 client 時鐘窗保守標記）。
     pub(crate) fn on_position_end_frame(
+        &mut self,
+        payload: &[u8],
+        now_ms: u64,
+    ) -> Result<(), AccountDataReject> {
+        let r = self.position_end_frame_inner(payload, now_ms);
+        if let Err(e) = &r {
+            self.audit_reject(e);
+        }
+        r
+    }
+
+    fn position_end_frame_inner(
         &mut self,
         payload: &[u8],
         now_ms: u64,
@@ -533,16 +682,33 @@ impl AccountDataDigest {
         Ok(())
     }
 
-    // ---- 生命週期:斷線 ----
+    // ---- 生命週期:斷線 / 世代推進 ----
 
     /// 斷線:活躍/已完成快照一律標 `DisconnectedStale`（訂閱不跨連線存活——**重連需重訂閱**,
-    /// IB 現勘語義;行保留供唯讀檢視,staleness 已明示不可信）。Idle/Invalidated 維持原相位。
+    /// IB 現勘語義;行保留供唯讀檢視,staleness 已明示不可信）。Idle/Invalidated 維持原相位
+    /// （毒化事實不被斷線沖淡;毒化面的重評歸 `on_new_connection_generation`）。
     pub(crate) fn on_disconnect(&mut self) {
         if self.summary_phase.is_active() {
             self.summary_phase = SubPhase::DisconnectedStale;
             self.summary_req_id = None;
         }
         if self.positions_phase.is_active() {
+            self.positions_phase = SubPhase::DisconnectedStale;
+        }
+    }
+
+    /// **W6-S0 恢復政策**（E2-R11-F3/E3 MED-01 家族）:driver 世代推進（新 handshake 成功）
+    /// 時重評毒化面——`Invalidated` → `DisconnectedStale`,與既有「斷線→DisconnectedStale→
+    /// 重訂閱」語義合流（pump 的 staleness 閘據此 re-begin）。為什麼不直接轉 `Idle`:毒化
+    /// 世代的行保留供唯讀對賬（staleness 已明示不可信）,re-begin 時 `begin_*` 統一清行+
+    /// 遞增快照世代。其餘相位不動（活躍面由 `on_disconnect` 收口;audit 計數跨世代累積=
+    /// telemetry 語義,不清零）。
+    pub(crate) fn on_new_connection_generation(&mut self) {
+        if self.summary_phase == SubPhase::Invalidated {
+            self.summary_phase = SubPhase::DisconnectedStale;
+            self.summary_req_id = None;
+        }
+        if self.positions_phase == SubPhase::Invalidated {
             self.positions_phase = SubPhase::DisconnectedStale;
         }
     }
@@ -569,14 +735,33 @@ impl AccountDataDigest {
         )
     }
 
-    /// 唯讀檢視:最新 summary 行（BTreeMap=確定序）。
-    pub(crate) fn summary_rows(&self) -> impl Iterator<Item = &IbkrAccountSummaryRowV1> {
-        self.summary_rows.values()
+    /// 唯讀檢視:summary 面 **staleness 綁定視圖**（W6-S0,E2-R11-F4）——rows 只能與其
+    /// staleness 一同取得,使「部分/毒化/斷線快照被當全量消費」**結構性不可能**（消費端
+    /// 必先過 staleness 才拿得到行;BTreeMap=確定序）。
+    pub(crate) fn summary_rows(
+        &self,
+        now_ms: u64,
+    ) -> (
+        SnapshotStaleness,
+        impl Iterator<Item = &IbkrAccountSummaryRowV1>,
+    ) {
+        (self.summary_staleness(now_ms), self.summary_rows.values())
     }
 
-    /// 唯讀檢視:最新 position 行（BTreeMap=確定序）。
-    pub(crate) fn positions_rows(&self) -> impl Iterator<Item = &IbkrPositionsRowV1> {
-        self.positions_rows.values()
+    /// 唯讀檢視:positions 面 staleness 綁定視圖（同 `summary_rows` 紀律）。
+    pub(crate) fn positions_rows(
+        &self,
+        now_ms: u64,
+    ) -> (
+        SnapshotStaleness,
+        impl Iterator<Item = &IbkrPositionsRowV1>,
+    ) {
+        (self.positions_staleness(now_ms), self.positions_rows.values())
+    }
+
+    /// audit 計數器唯讀檢視（W6-S0;typed reject 身分觀測面）。
+    pub(crate) fn audit(&self) -> &AccountDataAudit {
+        &self.audit
     }
 
     /// 當前快照世代序（telemetry;契約 snapshot_seq 注入源）。
@@ -585,6 +770,47 @@ impl AccountDataDigest {
     }
 
     // ---- 內部 ----
+
+    /// W6-S0:入站 typed reject → audit 身分落帳（單調計數+最後樣本;CC lineage 斷點 1 收口
+    /// ——driver 對資料層 reject 走 `Err(_)=>{}` 續 serve,身分由此觀測面承載）。
+    /// 哨兵拒的 count+raw 於拒點就地記錄（raw 不在 reject 變體內）,此處跳過防重複計數;
+    /// begin 域拒（G1/G3/世代政策)由 pump 的 staleness/floor 閘先擋,不屬入站觀測面。
+    fn audit_reject(&mut self, e: &AccountDataReject) {
+        match e {
+            AccountDataReject::SentinelSuspectValue => {}
+            AccountDataReject::NoActiveSubscription => {
+                self.audit.no_active_subscription_rejects += 1;
+            }
+            AccountDataReject::WireMalformed(c) => {
+                self.audit.wire_malformed_rejects += 1;
+                self.audit.wire_malformed_last_note = Some(c.to_string());
+            }
+            AccountDataReject::UnexpectedReqId { .. } => {
+                self.audit.unexpected_req_id_rejects += 1;
+            }
+            AccountDataReject::SummaryRowBlocked(blockers) => {
+                self.audit.summary_row_blocked_rejects += 1;
+                self.audit.summary_row_last_blockers = blockers.clone();
+            }
+            AccountDataReject::PositionsRowBlocked(blockers) => {
+                self.audit.positions_row_blocked_rejects += 1;
+                self.audit.positions_row_last_blockers = blockers.clone();
+            }
+            AccountDataReject::PositionVersionTooOld { .. } => {
+                self.audit.position_version_too_old_rejects += 1;
+            }
+            AccountDataReject::SubscriptionStateCorrupted => {
+                self.audit.subscription_state_corrupted_rejects += 1;
+            }
+            AccountDataReject::SnapshotRowCapExceeded => {
+                self.audit.row_cap_exceeded_rejects += 1;
+            }
+            AccountDataReject::SummaryAlreadyActive
+            | AccountDataReject::PositionsAlreadyActive
+            | AccountDataReject::ServerVersionBelowPositionsFloor { .. }
+            | AccountDataReject::InvalidatedUntilNewGeneration => {}
+        }
+    }
 
     /// **G2** 哨兵守衛:整數位數（小數點前、忽略前導 `-`）≥ config 守衛值 → 哨兵嫌疑。
     /// 只判位數不判格式（格式非法交契約 `validate()` 專責,職責不重疊）。
