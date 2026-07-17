@@ -229,6 +229,166 @@ pub fn position_end() -> FakeFrame {
     FakeFrame(encode_frame(&encode_fields(&["62", "1"])))
 }
 
+// ---- W5-S3 open orders/executions/commissions builders（IN 3/5/11/53/55/59;IB pinned
+// 欄位序,serverVersion≥136/131/145 無前導 version 欄——commissionReport 除外恆帶 version）----
+
+/// execDetails 行（IN 11;31 定長平面欄:`[11, reqId, orderId, Contract(conId..tradingClass
+/// ×11), Execution(execId, time, acctNumber, exchange, side, shares, price, permId, clientId,
+/// liquidation, cumQty, avgPrice, orderRef, evRule, evMultiplier, modelCode, lastLiquidity)]`）。
+/// `contract_exchange` 與 `exec_exchange` 刻意分參:消化端必綁 Execution.exchange（成交所）。
+#[allow(clippy::too_many_arguments)]
+pub fn execution_row(
+    req_id: i64,
+    order_id: i64,
+    con_id: i64,
+    symbol: &str,
+    contract_exchange: &str,
+    exec_exchange: &str,
+    exec_id: &str,
+    exec_time: &str,
+    account: &str,
+    side: &str,
+    shares: &str,
+    price: &str,
+) -> FakeFrame {
+    FakeFrame(encode_frame(&encode_fields(&[
+        "11",
+        &req_id.to_string(),
+        &order_id.to_string(),
+        &con_id.to_string(),
+        symbol,
+        "STK",
+        "",
+        "0",
+        "",
+        "",
+        contract_exchange,
+        "USD",
+        symbol,
+        symbol,
+        exec_id,
+        exec_time,
+        account,
+        exec_exchange,
+        side,
+        shares,
+        price,
+        "1000001",
+        "0",
+        "0",
+        shares,
+        price,
+        "",
+        "",
+        "",
+        "",
+        "1",
+    ])))
+}
+
+/// execDetailsEnd（IN 55;`[55, version, reqId]`）——快照收批標記。
+pub fn execution_end(req_id: i64) -> FakeFrame {
+    FakeFrame(encode_frame(&encode_fields(&[
+        "55",
+        "1",
+        &req_id.to_string(),
+    ])))
+}
+
+/// commissionReport（IN 59;8 定長平面欄 `[59, version, execId, commission, currency,
+/// realizedPNL, yield_, yieldRedemptionDate]`;前導 version 恆在）。`realized_pnl` 可餵
+/// 空欄/精確哨兵/量級哨兵三形態驗消化端哨兵雙判別。
+pub fn commission_report(
+    exec_id: &str,
+    commission: &str,
+    currency: &str,
+    realized_pnl: &str,
+) -> FakeFrame {
+    FakeFrame(encode_frame(&encode_fields(&[
+        "59",
+        "1",
+        exec_id,
+        commission,
+        currency,
+        realized_pnl,
+        "",
+        "",
+    ])))
+}
+
+/// orderStatus（IN 3;12 定長平面欄 `[3, orderId, status, filled, remaining, avgFillPrice,
+/// permId, parentId, lastFillPrice, clientId, whyHeld, mktCapPrice]`）。
+pub fn order_status(order_id: i64, status: &str, filled: &str, remaining: &str) -> FakeFrame {
+    FakeFrame(encode_frame(&encode_fields(&[
+        "3",
+        &order_id.to_string(),
+        status,
+        filled,
+        remaining,
+        "412.35",
+        "1000001",
+        "0",
+        "412.35",
+        "0",
+        "",
+        "412.35",
+    ])))
+}
+
+/// openOrder（IN 5;head 前綴 26 欄 `[5, orderId, Contract(conId..tradingClass ×11), action,
+/// totalQuantity, orderType, lmtPrice, auxPrice, tif, ocaGroup, account, openClose, origin,
+/// orderRef, clientId, permId]` + `tail` 可注入任意尾欄——模擬 66 步全欄尾,消化端
+/// head-prefix 讀到 permId 止、tail 整體丟棄+audit）。
+#[allow(clippy::too_many_arguments)]
+pub fn open_order_head(
+    order_id: i64,
+    con_id: i64,
+    symbol: &str,
+    action: &str,
+    total_quantity: &str,
+    lmt_price: &str,
+    account: &str,
+    tail: &[&str],
+) -> FakeFrame {
+    let oid = order_id.to_string();
+    let cid = con_id.to_string();
+    let mut fields: Vec<&str> = vec![
+        "5",
+        &oid,
+        &cid,
+        symbol,
+        "STK",
+        "",
+        "0",
+        "",
+        "",
+        "ARCA",
+        "USD",
+        symbol,
+        symbol,
+        action,
+        total_quantity,
+        "LMT",
+        lmt_price,
+        "",
+        "DAY",
+        "",
+        account,
+        "O",
+        "0",
+        "",
+        "0",
+        "1000001",
+    ];
+    fields.extend_from_slice(tail);
+    FakeFrame(encode_frame(&encode_fields(&fields)))
+}
+
+/// openOrderEnd（IN 53;`[53, version]`）——快照收批標記。
+pub fn open_order_end() -> FakeFrame {
+    FakeFrame(encode_frame(&encode_fields(&["53", "1"])))
+}
+
 // ===========================================================================
 // (c) 場景 DSL + runner
 // ===========================================================================
@@ -638,6 +798,151 @@ pub mod scenarios {
         frames.push(account_summary_end(req_id));
         Scenario::new(vec![FakeStep::Send(frames)])
     }
+
+    // ---- W5-S3 open orders/executions/commissions 場景 ----
+
+    /// grammar 合法的 exec_time 樣式（UTC 形 `^\d{8}-\d{2}:\d{2}:\d{2}$`;shape-only 驗形,
+    /// 無牆鐘依賴——非當前日期,無日期腐化 time-bomb 面）。
+    pub const EXEC_TIME_FIXTURE: &str = "20200102-13:30:05";
+
+    /// **W5-S3 happy order/exec session**:握手到 Ready 後——exec 快照行 e1 → **亂序**
+    /// commission e2 先到(其 exec 尚未到,孤兒緩存) → execDetailsEnd → unsolicited 推送
+    /// exec e2(reqId=-1) → commission e1 後到(補齊 join) → orderStatus 重複×2(冪等去重)
+    /// → openOrder head(帶 2 尾欄,tail-discard) → openOrderEnd → 腳本盡 EOF。
+    /// e1/e2 兩 exchange 欄異值(SMART vs ARCA/NYSE)驗 Execution.exchange 綁定。
+    pub fn order_exec_session(req_id: i64) -> Scenario {
+        let mut frames = happy_handshake_frames();
+        frames.push(execution_row(
+            req_id,
+            7,
+            756733,
+            "SPY",
+            "SMART",
+            "ARCA",
+            "e1",
+            EXEC_TIME_FIXTURE,
+            "DU1234567",
+            "BOT",
+            "100",
+            "412.35",
+        ));
+        // 亂序:e2 的 commission 先到(execDetails 與 commissionReport 無到達順序保證)。
+        frames.push(commission_report("e2", "1.10", "USD", "0"));
+        frames.push(execution_end(req_id));
+        // unsolicited 推送(reqId=-1 慣稱):e2 的 exec 後到,補齊 join。
+        frames.push(execution_row(
+            -1,
+            8,
+            756733,
+            "SPY",
+            "SMART",
+            "NYSE",
+            "e2",
+            EXEC_TIME_FIXTURE,
+            "DU1234567",
+            "SLD",
+            "50",
+            "413.00",
+        ));
+        frames.push(commission_report("e1", "1.25", "USD", "-3.50"));
+        // orderStatus 重複推送(官方明言常有重複 → 消化端冪等去重)。
+        frames.push(order_status(7, "Filled", "100", "0"));
+        frames.push(order_status(7, "Filled", "100", "0"));
+        // openOrder head + 2 尾欄(66 步全欄尾模擬 → head-prefix 消化,tail 丟棄+audit)。
+        frames.push(open_order_head(
+            9,
+            756733,
+            "SPY",
+            "BUY",
+            "10",
+            "410.00",
+            "DU1234567",
+            &["tail_a", "tail_b"],
+        ));
+        frames.push(open_order_end());
+        Scenario::new(vec![FakeStep::Send(frames)])
+    }
+
+    /// **W5-S3 哨兵三形態場景**:commission realizedPNL=空欄/精確哨兵字串(小寫 e)/量級
+    /// 哨兵(負側)→ 消化端全映 None+audit;`0` 對照恆 Some("0")。
+    pub fn commission_sentinel_session(req_id: i64) -> Scenario {
+        let mut frames = happy_handshake_frames();
+        frames.push(execution_end(req_id));
+        frames.push(commission_report("s1", "1.00", "USD", ""));
+        frames.push(commission_report(
+            "s2",
+            "1.00",
+            "USD",
+            "1.7976931348623157e308",
+        ));
+        frames.push(commission_report(
+            "s3",
+            "1.00",
+            "USD",
+            "-1.7976931348623157E308",
+        ));
+        frames.push(commission_report("s4", "1.00", "USD", "0"));
+        Scenario::new(vec![FakeStep::Send(frames)])
+    }
+
+    /// **W5-S3 負場景:表外 orderStatus**(`ApiPending` 屬表外)→ 消化端 UnknownDenied:
+    /// audit 計數+open-orders 面毒化,session 不斷、不 panic。
+    pub fn order_status_unknown_denied_session() -> Scenario {
+        let mut frames = happy_handshake_frames();
+        frames.push(order_status(7, "ApiPending", "0", "100"));
+        Scenario::new(vec![FakeStep::Send(frames)])
+    }
+
+    /// **W5-S3 負場景:壞欄位 exec 行**(reqId 非數字)→ wire 損壞,消化端 `WireMalformed`
+    /// → driver fail-closed 斷線。
+    pub fn execution_malformed_session() -> Scenario {
+        let mut frames = happy_handshake_frames();
+        let good = execution_row(
+            1,
+            7,
+            756733,
+            "SPY",
+            "SMART",
+            "ARCA",
+            "e1",
+            EXEC_TIME_FIXTURE,
+            "DU1234567",
+            "BOT",
+            "100",
+            "412.35",
+        );
+        // 以合規 frame 重組:reqId 欄替換為非數字(其餘 30 欄形狀不變)。
+        let mut fields = frame_fields(&decode_all_frames(&good.0)[0]);
+        fields[1] = "abc".to_string();
+        let refs: Vec<&str> = fields.iter().map(String::as_str).collect();
+        frames.push(custom_frame(&refs));
+        Scenario::new(vec![FakeStep::Send(frames)])
+    }
+
+    /// **W5-S3 負場景:ceiling 佈局窗**——happy 握手 sv=176(>157 pinned),exec 行帶 1 個
+    /// 尾部多欄 → 消化端 `PinnedLayoutOverflow` frame 拒收+audit(禁猜讀),session 存活。
+    pub fn execution_ceiling_overflow_session(req_id: i64) -> Scenario {
+        let mut frames = happy_handshake_frames();
+        let good = execution_row(
+            req_id,
+            7,
+            756733,
+            "SPY",
+            "SMART",
+            "ARCA",
+            "e1",
+            EXEC_TIME_FIXTURE,
+            "DU1234567",
+            "BOT",
+            "100",
+            "412.35",
+        );
+        let mut fields = frame_fields(&decode_all_frames(&good.0)[0]);
+        fields.push("surplus".to_string());
+        let refs: Vec<&str> = fields.iter().map(String::as_str).collect();
+        frames.push(custom_frame(&refs));
+        Scenario::new(vec![FakeStep::Send(frames)])
+    }
 }
 
 // ===========================================================================
@@ -755,6 +1060,83 @@ mod tests {
         let _ = scenarios::position_version_too_old();
         let _ = scenarios::account_summary_malformed(9001);
         let _ = scenarios::account_summary_then_idle(9001);
+        // W5-S3 open orders/executions/commissions 場景。
+        let _ = scenarios::order_exec_session(9002);
+        let _ = scenarios::commission_sentinel_session(9002);
+        let _ = scenarios::order_status_unknown_denied_session();
+        let _ = scenarios::execution_malformed_session();
+        let _ = scenarios::execution_ceiling_overflow_session(9002);
+    }
+
+    #[test]
+    fn w5_s3_order_exec_builders_produce_pinned_field_order() {
+        // IN 11 execDetails = 31 定長平面欄;Contract.exchange(idx 10)與
+        // Execution.exchange(idx 17)異值分參。
+        let f = frame_fields(
+            &decode_all_frames(
+                &execution_row(
+                    9002,
+                    7,
+                    756733,
+                    "SPY",
+                    "SMART",
+                    "ARCA",
+                    "e1",
+                    scenarios::EXEC_TIME_FIXTURE,
+                    "DU1",
+                    "BOT",
+                    "100",
+                    "412.35",
+                )
+                .0,
+            )[0],
+        );
+        assert_eq!(f.len(), 31);
+        assert_eq!(&f[..3], &["11", "9002", "7"]);
+        assert_eq!(f[10], "SMART", "Contract.exchange 於 idx 10");
+        assert_eq!(f[14], "e1", "Execution.execId 於 idx 14");
+        assert_eq!(f[17], "ARCA", "Execution.exchange(成交所)於 idx 17");
+        assert_eq!(f[18], "BOT");
+        assert_eq!((f[19].as_str(), f[20].as_str()), ("100", "412.35"));
+        assert_eq!(f[21], "1000001", "permId 於 idx 21");
+        // IN 55 execDetailsEnd = [55, 1, reqId]。
+        assert_eq!(
+            frame_fields(&decode_all_frames(&execution_end(9002).0)[0]),
+            vec!["55", "1", "9002"]
+        );
+        // IN 59 commissionReport = 8 欄(前導 version 恆在)。
+        let f = frame_fields(&decode_all_frames(&commission_report("e1", "1.25", "USD", "0").0)[0]);
+        assert_eq!(f, vec!["59", "1", "e1", "1.25", "USD", "0", "", ""]);
+        // IN 3 orderStatus = 12 欄。
+        let f = frame_fields(&decode_all_frames(&order_status(7, "Filled", "100", "0").0)[0]);
+        assert_eq!(f.len(), 12);
+        assert_eq!(&f[..5], &["3", "7", "Filled", "100", "0"]);
+        // IN 5 openOrder = 26 head 欄 + tail 注入。
+        let f = frame_fields(
+            &decode_all_frames(
+                &open_order_head(
+                    9,
+                    756733,
+                    "SPY",
+                    "BUY",
+                    "10",
+                    "410.00",
+                    "DU1",
+                    &["t1", "t2"],
+                )
+                .0,
+            )[0],
+        );
+        assert_eq!(f.len(), 28, "26 head + 2 tail");
+        assert_eq!(&f[..2], &["5", "9"]);
+        assert_eq!(f[13], "BUY", "action 於 idx 13");
+        assert_eq!(f[16], "410.00", "lmtPrice 於 idx 16");
+        assert_eq!(f[25], "1000001", "permId 於 idx 25(head 止點)");
+        // IN 53 openOrderEnd = [53, 1]。
+        assert_eq!(
+            frame_fields(&decode_all_frames(&open_order_end().0)[0]),
+            vec!["53", "1"]
+        );
     }
 
     #[test]

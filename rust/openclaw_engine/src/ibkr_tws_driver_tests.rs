@@ -772,6 +772,225 @@ async fn w5_pump_disabled_by_default_no_subscription_sent() {
 }
 
 // ===========================================================================
+// W5-S3:order/exec 消化端到端（快照 pump 經 governor 單一出口 + join + audit + 斷線失效）
+// ===========================================================================
+
+#[tokio::test]
+async fn w5s3_order_exec_end_to_end_joins_and_marks_disconnect() {
+    use crate::ibkr_tws_account_data::SnapshotStaleness;
+    use crate::ibkr_tws_order_exec_data::IbkrOrderStatusV1;
+
+    let (mut driver, handle) = fake_driver(scenarios::order_exec_session(ORDER_EXEC_REQ_ID));
+    driver.enable_order_exec_subscriptions();
+    let mut clock = TestClock::at(1_000);
+    // 全 cycle:Ready → 首 serve tick 送快照請求(經 governor AccountData 主桶)→ 消化
+    // 快照+End+亂序 commission+unsolicited 推送+重複 orderStatus+openOrder head →
+    // 腳本盡 EOF → IoDropped。
+    assert_eq!(
+        driver.run_connect_cycle(&mut clock).await,
+        CycleOutcome::Served(ServeEnd::IoDropped)
+    );
+    // 出站證明:reqExecutions(OUT 7,空 filter 全量)與 reqOpenOrders(OUT 5)真被送出
+    //（皆過 send_framed=grant 消費,單一出口編譯期強制)。
+    let frames = handle.received_message_frames().await;
+    let sent: Vec<Vec<String>> = frames.iter().map(|f| frame_fields(f)).collect();
+    let req_exec = sent
+        .iter()
+        .find(|f| f[0] == "7")
+        .expect("應送 reqExecutions(7)");
+    assert_eq!(
+        req_exec[..],
+        ["7", "3", "9002", "0", "", "", "", "", "", ""],
+        "空 filter 全量(clientId 官方默認 0)"
+    );
+    assert!(
+        sent.iter().any(|f| f[0] == "5" && f.len() == 2),
+        "應送 reqOpenOrders(5)"
+    );
+    // 消化證明:e1(正序)+e2(commission 先到、exec 走 unsolicited 推送後到)雙雙 join 完整。
+    let digest = driver.order_exec_data();
+    assert_eq!(digest.completed_executions().count(), 2, "兩對全 join 完整");
+    let (e1_exec, e1_comm) = digest
+        .completed_executions()
+        .find(|(e, _)| e.exec_id == "e1")
+        .unwrap();
+    assert_eq!(
+        e1_exec.exchange, "ARCA",
+        "必綁 Execution.exchange 非 Contract.exchange(SMART)"
+    );
+    assert_eq!(e1_comm.realized_pnl_decimal.as_deref(), Some("-3.50"));
+    let (e2_exec, e2_comm) = digest
+        .completed_executions()
+        .find(|(e, _)| e.exec_id == "e2")
+        .unwrap();
+    assert_eq!(e2_exec.exchange, "NYSE");
+    assert_eq!(
+        e2_comm.realized_pnl_decimal.as_deref(),
+        Some("0"),
+        "0=合法損益禁折 None"
+    );
+    assert_eq!(
+        digest.audit().unsolicited_execution_rows,
+        1,
+        "reqId=-1 推送承接+計數"
+    );
+    // orderStatus 冪等去重 + openOrder head-prefix/tail-discard。
+    assert_eq!(digest.order_statuses().count(), 1);
+    assert_eq!(
+        digest.order_statuses().next().unwrap().status,
+        IbkrOrderStatusV1::Filled
+    );
+    assert_eq!(digest.audit().duplicate_order_status_rows, 1);
+    assert_eq!(digest.open_orders().count(), 1);
+    let oo = digest.open_orders().next().unwrap();
+    assert_eq!((oo.order_id, oo.perm_id), (9, 1_000_001));
+    assert_eq!(oo.lmt_price_decimal.as_deref(), Some("410.00"));
+    assert_eq!(digest.audit().open_order_tail_fields_discarded, 2);
+    // 斷線失效:serve 結束(EOF)→ 兩面標 DisconnectedStale(重連需 re-begin resync)。
+    assert_eq!(
+        digest.executions_staleness(0),
+        SnapshotStaleness::DisconnectedStale
+    );
+    assert_eq!(
+        digest.open_orders_staleness(0),
+        SnapshotStaleness::DisconnectedStale
+    );
+}
+
+#[tokio::test]
+async fn w5s3_commission_sentinel_forms_map_to_none_session_survives() {
+    let (mut driver, _h) = fake_driver(scenarios::commission_sentinel_session(ORDER_EXEC_REQ_ID));
+    driver.enable_order_exec_subscriptions();
+    let mut clock = TestClock::at(1_000);
+    assert_eq!(
+        driver.run_connect_cycle(&mut clock).await,
+        CycleOutcome::Served(ServeEnd::IoDropped)
+    );
+    let digest = driver.order_exec_data();
+    // 三哨兵形態(空欄/精確字串小寫 e/量級負側)→ None;s4 "0" → Some("0")。
+    let pnl_of = |id: &str| {
+        digest
+            .exec_slots()
+            .find(|(k, _)| k.as_str() == id)
+            .unwrap()
+            .1
+            .commission
+            .as_ref()
+            .unwrap()
+            .realized_pnl_decimal
+            .clone()
+    };
+    assert_eq!(pnl_of("s1"), None);
+    assert_eq!(pnl_of("s2"), None);
+    assert_eq!(pnl_of("s3"), None);
+    assert_eq!(pnl_of("s4"), Some("0".to_string()));
+    assert_eq!(
+        digest.audit().realized_pnl_sentinel_hits,
+        2,
+        "空欄不計哨兵 audit"
+    );
+}
+
+#[tokio::test]
+async fn w5s3_unknown_order_status_invalidates_session_survives() {
+    use crate::ibkr_tws_account_data::SnapshotStaleness;
+
+    // 表外 status(ApiPending)→ UnknownDenied audit+毒化;資料層 reject,session 活到 EOF。
+    let (mut driver, _h) = fake_driver(scenarios::order_status_unknown_denied_session());
+    driver.enable_order_exec_subscriptions();
+    let mut clock = TestClock::at(1_000);
+    assert_eq!(
+        driver.run_connect_cycle(&mut clock).await,
+        CycleOutcome::Served(ServeEnd::IoDropped)
+    );
+    assert_eq!(
+        driver.order_exec_data().audit().order_status_unknown_denied,
+        1
+    );
+    // 毒化事實不被斷線標記沖淡(沿 W5-S2 紀律)。
+    assert_eq!(
+        driver.order_exec_data().open_orders_staleness(0),
+        SnapshotStaleness::Invalidated
+    );
+    assert_eq!(driver.order_exec_data().order_statuses().count(), 0);
+}
+
+#[tokio::test]
+async fn w5s3_malformed_execution_frame_fail_closed_disconnects() {
+    // reqId 非數字 → WireMalformed → driver 既有紀律 fail-closed 斷線(Backoff)。
+    let (mut driver, _h) = fake_driver(scenarios::execution_malformed_session());
+    driver.enable_order_exec_subscriptions();
+    let mut clock = TestClock::at(1_000);
+    assert_eq!(
+        driver.run_connect_cycle(&mut clock).await,
+        CycleOutcome::Served(ServeEnd::IoDropped)
+    );
+    assert!(matches!(driver.state(), SessionState::Backoff { .. }));
+}
+
+#[tokio::test]
+async fn w5s3_ceiling_overflow_frame_rejected_with_audit_session_survives() {
+    // happy 握手 sv=176(>157 pinned):exec 行帶尾部多欄 → PinnedLayoutOverflow frame
+    // 拒收+audit(禁猜讀),非斷線——session 活到腳本 EOF。
+    let (mut driver, _h) = fake_driver(scenarios::execution_ceiling_overflow_session(
+        ORDER_EXEC_REQ_ID,
+    ));
+    driver.enable_order_exec_subscriptions();
+    let mut clock = TestClock::at(1_000);
+    assert_eq!(
+        driver.run_connect_cycle(&mut clock).await,
+        CycleOutcome::Served(ServeEnd::IoDropped)
+    );
+    assert_eq!(
+        driver
+            .order_exec_data()
+            .audit()
+            .pinned_layout_overflow_rejects,
+        1
+    );
+    assert_eq!(
+        driver.order_exec_data().exec_slots().count(),
+        0,
+        "拒收 frame 不併入"
+    );
+}
+
+#[tokio::test]
+async fn w5s3_pump_disabled_by_default_no_requests_sent() {
+    // 默認 off:不開 pump → 不送 7/5/16;入站 order/exec 資料=未開消化承接拒(NoActiveContext),
+    // 不併入、session 活到 EOF(client 綁定推送不再誤觸斷線)。
+    let (mut driver, handle) = fake_driver(scenarios::order_exec_session(ORDER_EXEC_REQ_ID));
+    let mut clock = TestClock::at(1_000);
+    assert_eq!(
+        driver.run_connect_cycle(&mut clock).await,
+        CycleOutcome::Served(ServeEnd::IoDropped)
+    );
+    let frames = handle.received_message_frames().await;
+    let ids: Vec<String> = frames.iter().map(|f| frame_fields(f)[0].clone()).collect();
+    assert!(
+        !ids.contains(&"7".to_string()),
+        "pump off 不得送 reqExecutions"
+    );
+    assert!(
+        !ids.contains(&"5".to_string()),
+        "pump off 不得送 reqOpenOrders"
+    );
+    assert!(
+        !ids.contains(&"16".to_string()),
+        "pump off 不得送 reqAllOpenOrders"
+    );
+    assert_eq!(driver.order_exec_data().exec_slots().count(), 0);
+    assert_eq!(driver.order_exec_data().open_orders().count(), 0);
+    // **E2 F2**:pump-off 窗口的 9 個 order/exec frame 承接拒逐筆計數——driver 的
+    // `Err(_)=>{}` 資料層分流不再零觀測(audit 經 order_exec_data() 唯讀投影)。
+    assert_eq!(
+        driver.order_exec_data().audit().no_active_context_rejects,
+        9,
+        "場景 9 frame(exec×2+comm×2+End+status×2+openOrder+End)全計"
+    );
+}
+
+// ===========================================================================
 // 終態:結構性終態後 cycle no-op（Terminal;factory 不被觸）
 // ===========================================================================
 
