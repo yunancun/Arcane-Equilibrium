@@ -1,0 +1,93 @@
+# ============================================================================
+# ibkr-gateway.service — IB Gateway user unit 模板(W9a source-ready;
+# default **disabled + masked**,絕不隨安裝 enable)
+# ----------------------------------------------------------------------------
+# MODULE_NOTE
+# 模塊用途:IB Gateway(paper 4002 語義)的 systemd user unit 模板。由
+#   ibkr_gateway_install.sh 於 operator 批准窗內 cp 到
+#   ~/.config/systemd/user/ 並立即 `systemctl --user mask ibkr-gateway`。
+#   本檔存在≠可啟動:mask 使一切 start 路徑結構性失敗。
+#
+# 姿態契約(IBKR_TODO.md §2 活化鐵律 / §5 W9a):
+#   - default disabled + masked;enable/unmask/start/登入全屬 EA2,必須有
+#     Rust 驗證的 authenticated Operator 活化紀錄支撐,unit 檔自身永遠不是
+#     活化授權。憑證/session 存在永不自動活化。
+#   - 端口語義:本 unit 僅承載 paper(4002)語義注釋;live Gateway(4001)
+#     配置屬 EA7,範圍外。TWS 7496/7497 與 4001 同屬 denylist,不得出現在
+#     任何配置面(IB 官方:Gateway live=4001/paper=4002,TWS live=7496/
+#     paper=7497)。API 端口實值由 EA2 的 operator config 決定,本模板不
+#     寫死任何端口。
+#
+# headless 事實申報(IB 現勘 2026-07-17):官方明言 Gateway 無 GUI 的
+#   headless 運行**不受支持**;IBC/Xvfb 均為社群方案。故本模板不預設安裝
+#   IBC、不硬編任何社群工具路徑——ExecStart 指向 operator 於 EA2 窗內建立
+#   的 launcher(顯示方案 Xvfb/xvfb-run/IBC 屬 EA2 operator 決策點),
+#   缺 launcher/env 即 fail-closed 拒啟。常見社群做法供 EA2 參考(僅注釋):
+#     %h/ibc/gatewaystart.sh -inline          (IBC,自帶重登/彈窗處理)
+#     xvfb-run %h/Jts/ibgateway/<ver>/ibgateway (裸 Gateway + 虛擬顯示)
+#
+# watchdog 掛點(EA2 時 operator 配置,現階段全註解):
+#   - WatchdogSec:Gateway/IBC 不發 sd_notify,貿然開啟=systemd 誤殺;
+#     若 EA2 採 wrapper 補 sd_notify(READY=1/WATCHDOG=1)可開(參
+#     openclaw-watchdog.service 同款保守取捨)。
+#   - 外部 watchdog hook:session/health 斷言屬 engine 側 W5 session FSM
+#     與 healthcheck 整合(W9 observability),不由本 unit 承載。
+#
+# 日誌:stdout/stderr → journald(沿 2026-07-14 openclaw-trading-api durable
+#   user unit 慣例);Gateway/IBC 自寫檔案日誌的輪替見同目錄
+#   ibkr-gateway.logrotate.fragment(apply 屬 operator 窗)。
+# ============================================================================
+
+[Unit]
+# 設計正本:repo 根 IBKR_TODO.md §5 W9a(unit 隨 install 腳本 cp,無 sed 佔位,
+# 故不寫 Documentation= file URI——本機 checkout 路徑不可假設)。
+Description=IB Gateway (stock_etf_cash lane; paper-port semantics; default masked)
+After=network-online.target
+Wants=network-online.target
+
+# 啟動風暴保險:短窗連續 fail 即進 failed state 等 operator,不無限 thrash
+# (systemd v245+ StartLimit* 屬 [Unit];放 [Service] 會被忽略)。
+StartLimitBurst=3
+StartLimitIntervalSec=600
+
+[Service]
+Type=simple
+
+# 配置全走 operator 於 EA2 窗內建立的 env 檔(API 端口/顯示方案/JVM 參數等;
+# 本模板不寫死端口——paper=4002 語義由該檔承載,4001/7496/7497 denylist)。
+# 為什麼 fail-closed 前置檢查:env 檔或 launcher 缺=EA2 尚未完成 operator
+# 配置,unit 必須拒啟而非以隱式默認起一個半配置 Gateway。
+ExecStartPre=/usr/bin/test -s %h/.config/ibkr-gateway/ibkr-gateway.env
+ExecStartPre=/usr/bin/test -x %h/.config/ibkr-gateway/gateway-launch.sh
+EnvironmentFile=%h/.config/ibkr-gateway/ibkr-gateway.env
+
+# launcher 由 operator 於 EA2 建立(顯示方案決策點;見頂部 headless 事實申報)。
+# 絕不在此直接寫登入參數;憑證面 Rust-only custody,unit/env 檔不得承載明文。
+ExecStart=%h/.config/ibkr-gateway/gateway-launch.sh
+
+# 重啟策略:on-failure(正常 stop 不復活;crash 復活)。nightly 例行重啟由
+# ibkr-gateway-restart.timer 承載(同 default disabled),不在此用 Restart=always
+# ——always 會讓 operator 手動 stop 也被復活,違反「operator 顯式動作優先」。
+Restart=on-failure
+RestartSec=30
+
+# watchdog 掛點(EA2 operator 配置;開啟前置=wrapper 補 sd_notify,見頂部注釋):
+# WatchdogSec=120
+
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+# journald(SyslogIdentifier 供 journalctl --user -t ibkr-gateway 過濾)。
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ibkr-gateway
+
+# 最小硬化:Gateway 是閉源 Java 桌面程式,過度沙箱(PrivateTmp/ProtectSystem)
+# 對 X/字型/JVM 交互風險高,EA2 實測後再收緊;先鎖權限提升與檔案模式。
+NoNewPrivileges=true
+UMask=0077
+
+[Install]
+# user unit 慣例(對齊 deploy/openclaw-alr-shadow.service.template);
+# enable 屬 EA2——本行存在只為 enable 時有正確錨點,絕非現在 enable。
+WantedBy=default.target

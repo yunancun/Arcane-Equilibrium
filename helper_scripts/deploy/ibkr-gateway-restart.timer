@@ -1,0 +1,27 @@
+# ============================================================================
+# ibkr-gateway-restart.timer — IB Gateway nightly restart 窗(default disabled)
+# ----------------------------------------------------------------------------
+# 模塊用途:IB 伺服器每夜有維護重置窗(約 00:00-01:00 ET),Gateway session
+#   跨窗常見殭屍化;業界慣例=每夜在重置窗後例行重啟 Gateway。本 timer 承載
+#   該 nightly restart 窗,觸發同名 -restart.service(oneshot try-restart,
+#   主 unit 不在跑=no-op,結構性不會拉起 dormant Gateway)。
+# 姿態契約:default **disabled**——安裝腳本只 cp 不 enable;enable 屬 EA2+
+#   operator 動作(屆時 Gateway 才會真的在跑、才有「例行重啟」的對象)。
+# 時刻:OnCalendar 用 UTC 05:35 近似 ET 00:35/01:35(冬/夏令);精確窗對齊
+#   IB 維護時刻表屬 EA2 operator 校準面,本模板值僅為合理預設。
+# ============================================================================
+
+[Unit]
+Description=IB Gateway nightly restart window (default disabled; operator enables at EA2+)
+
+[Timer]
+# UTC 定點(見頂部注釋;EA2 校準)。RandomizedDelaySec 抹平多服務同刻抖動。
+OnCalendar=*-*-* 05:35:00 UTC
+RandomizedDelaySec=300
+# 不補跑錯過的窗(Persistent=true 會在開機/登入時立即補一發 restart,
+# 對交易網關是意外行為;錯過就等下一夜)。
+Persistent=false
+Unit=ibkr-gateway-restart.service
+
+[Install]
+WantedBy=timers.target

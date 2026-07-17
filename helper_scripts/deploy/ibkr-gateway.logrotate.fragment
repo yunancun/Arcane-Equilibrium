@@ -1,0 +1,50 @@
+# ============================================================================
+# ibkr-gateway.logrotate.fragment — IB Gateway 檔案日誌輪替片段(sidecar,
+# 不自動生效)
+# ----------------------------------------------------------------------------
+# 姿態契約:本檔是**片段檔**,不是可安裝正本。apply 屬 operator 批准窗:
+#   ① 把下列 stanza 併入 canonical helper_scripts/logrotate-openclaw.conf
+#     (過 review);
+#   ② 經唯一安裝入口 helper_scripts/cron/install_logrotate_from_repo.sh
+#      --apply 落 runtime(兩段式 manifest,[95] 哨兵只認 applied:true)。
+#   裸 cp / 手編 runtime 副本 = 治理外行為(2026-07-15 drift 事故教訓)。
+# 為什麼現在就備好:W9a 交付面含 log rotation 配置;Gateway 主日誌走
+#   journald(unit StandardOutput=journal),但 Gateway/IBC 自寫的檔案日誌
+#   (launcher.log、ibgateway 版本目錄內 log、IBC logs/)不經 journald,
+#   需 logrotate 兜底。
+# 路徑說明:沿 canonical 慣例保留 trade-core per-host 絕對路徑(logrotate
+#   conf 無 env 展開能力);全部 missingok——安裝前/EA2 前這些路徑不存在
+#   是常態。閾值用 size 非 maxsize(canonical 2026-07-15 教訓:maxsize 在
+#   無 daily/weekly 排程的 conf 退化為默認 1MiB size 基線)。
+# ============================================================================
+
+# IB Gateway launcher 日誌(install4j launcher 追加寫;copytruncate 安全)。
+/home/ncyu/Jts/launcher.log {
+    size 100M
+    rotate 4
+    compress
+    missingok
+    notifempty
+    copytruncate
+}
+
+# Gateway 版本目錄內雜項日誌(Jts 頂層 log/*.log 家族;Gateway 自帶按日檔名
+# 的 api log 不在此——其自帶滾動,重複輪替會撞名)。
+/home/ncyu/Jts/*.log {
+    size 100M
+    rotate 4
+    compress
+    missingok
+    notifempty
+    copytruncate
+}
+
+# IBC(若 EA2 採 IBC 社群方案)日誌目錄;未安裝 IBC 時 missingok 靜默跳過。
+/home/ncyu/ibc/logs/*.txt {
+    size 100M
+    rotate 4
+    compress
+    missingok
+    notifempty
+    copytruncate
+}
