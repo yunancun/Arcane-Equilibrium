@@ -494,6 +494,27 @@ per operator-approved win ② + G0.5 plan：把 dormant `risk_config_stock_etf_p
 
 ---
 
+### §2.10 IBKR EA3 activation nonce ledger — Rust(R16 mini-wiring,2026-07-17)
+
+per IBKR loop R16(PR#66):G4 readonly first-contact entry 消費 `ibkr_activation_envelope_v1` 驗證器,nonce 原子消費帳本以 process-global `OnceLock` 承載。feature `ibkr_g4_contact` gated,default build DCE(g4 symbol audit 實證零符號)。in-memory 易失=已申報語義(重啟=重新活化;durable 消費紀錄歸 W8 吸收 blocking,見 IBKR_TODO/PROGRESS R14/R16)。
+
+| 欄位 | 值 |
+|---|---|
+| name | `g4_activation_nonce_ledger`(module-level `static`,`OnceLock<ActivationNonceLedger>`)|
+| type_signature | `OnceLock<ActivationNonceLedger>`;內部 `Mutex<HashSet<String>>`(已消費 nonce 集,只增不減)|
+| location | `rust/openclaw_engine/src/ibkr_readonly_tws_client.rs`(feature `ibkr_g4_contact` gated;accessor 供 Gate 5 `ea3_envelope_activation_gate`)|
+| owner_lifecycle | lazy 首次 Gate 5 觸發 init;process lifetime;G4 bin 為 one-shot 進程 → 跨調用 replay 防線=envelope expiry(≤24h)+epoch bump(E3 R16 N3 定性)|
+| cross_task_pattern | 單一消費點=`check_readonly_contact`(唯一裁決入口;deny-before-consume;MODULE_NOTE 禁 per-operation 重複呼叫)|
+| lock_primitive | `OnceLock` + 內部 `Mutex`(check+consume 單臨界區原子;鎖中毒 fail-closed 拒)|
+| visibility | module-internal(feature-gated)|
+| caller_chain | producer/consumer 同點:`g4_operator_triggered_first_contact` → Gate 5 → `check_readonly_contact(try_consume)`;production 唯一 caller=`bin/ibkr_g4_first_contact`(required-features 鎖定)|
+| health_monitoring | NO —— EA3 operator-attended one-shot 路徑;audit 事件化歸 W8 |
+| registered_date | 2026-07-17 |
+| governance_authority | AMD-2026-07-11-01 活化鐵律 + IBKR_TODO §2;R16 四腿(E2 APPROVE/E3 加閘收緊 CONFIRMED/IB IB-NOTE-1 CLOSED)|
+| migration_plan | W8 吸收:durable 消費紀錄(blocking)+session-scoped activated 態+lineage 現值比對 |
+
+---
+
 ## §3 Registration Rules
 
 ### §3.1 新登記前必做（PA / E1 / E2 共同）
