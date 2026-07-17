@@ -665,13 +665,14 @@ async fn w5_account_data_end_to_end_digests_and_marks_disconnect() {
     );
     // 消化證明:summary 2 tag(增量覆蓋 BuyingPower=48000)+ 1 倉位。
     let digest = driver.account_data();
-    assert_eq!(digest.summary_rows().count(), 2);
+    assert_eq!(digest.summary_rows(0).1.count(), 2);
     let bp = digest
-        .summary_rows()
+        .summary_rows(0)
+        .1
         .find(|r| r.tag == IbkrAccountSummaryTagV1::BuyingPower)
         .unwrap();
     assert_eq!(bp.value_decimal, "48000", "節拍增量應覆蓋首回全量值");
-    let pos = digest.positions_rows().next().unwrap();
+    let pos = digest.positions_rows(0).1.next().unwrap();
     assert_eq!((pos.con_id, pos.position_decimal.as_str()), (756733, "100"));
     // 斷線失效:serve 結束(EOF)→ 快照標 DisconnectedStale(重連需重訂閱)。
     assert_eq!(
@@ -704,7 +705,7 @@ async fn w5_off_whitelist_tag_invalidates_snapshot_but_session_survives() {
         driver.account_data().summary_staleness(0),
         SnapshotStaleness::Invalidated
     );
-    assert_eq!(driver.account_data().summary_rows().count(), 0);
+    assert_eq!(driver.account_data().summary_rows(0).1.count(), 0);
 }
 
 #[tokio::test]
@@ -722,7 +723,7 @@ async fn w5_position_version_too_old_rejected_session_survives() {
         CycleOutcome::Served(ServeEnd::IoDropped)
     );
     assert_eq!(
-        driver.account_data().positions_rows().count(),
+        driver.account_data().positions_rows(0).1.count(),
         0,
         "v<3 行不得以 avgCost=0 捏值併入"
     );
@@ -767,8 +768,8 @@ async fn w5_pump_disabled_by_default_no_subscription_sent() {
         !ids.contains(&"61".to_string()),
         "pump off 不得送 reqPositions"
     );
-    assert_eq!(driver.account_data().summary_rows().count(), 0);
-    assert_eq!(driver.account_data().positions_rows().count(), 0);
+    assert_eq!(driver.account_data().summary_rows(0).1.count(), 0);
+    assert_eq!(driver.account_data().positions_rows(0).1.count(), 0);
 }
 
 // ===========================================================================
@@ -809,9 +810,14 @@ async fn w5s3_order_exec_end_to_end_joins_and_marks_disconnect() {
     );
     // 消化證明:e1(正序)+e2(commission 先到、exec 走 unsolicited 推送後到)雙雙 join 完整。
     let digest = driver.order_exec_data();
-    assert_eq!(digest.completed_executions().count(), 2, "兩對全 join 完整");
+    assert_eq!(
+        digest.completed_executions(0).1.count(),
+        2,
+        "兩對全 join 完整"
+    );
     let (e1_exec, e1_comm) = digest
-        .completed_executions()
+        .completed_executions(0)
+        .1
         .find(|(e, _)| e.exec_id == "e1")
         .unwrap();
     assert_eq!(
@@ -820,7 +826,8 @@ async fn w5s3_order_exec_end_to_end_joins_and_marks_disconnect() {
     );
     assert_eq!(e1_comm.realized_pnl_decimal.as_deref(), Some("-3.50"));
     let (e2_exec, e2_comm) = digest
-        .completed_executions()
+        .completed_executions(0)
+        .1
         .find(|(e, _)| e.exec_id == "e2")
         .unwrap();
     assert_eq!(e2_exec.exchange, "NYSE");
@@ -835,14 +842,14 @@ async fn w5s3_order_exec_end_to_end_joins_and_marks_disconnect() {
         "reqId=-1 推送承接+計數"
     );
     // orderStatus 冪等去重 + openOrder head-prefix/tail-discard。
-    assert_eq!(digest.order_statuses().count(), 1);
+    assert_eq!(digest.order_statuses(0).1.count(), 1);
     assert_eq!(
-        digest.order_statuses().next().unwrap().status,
+        digest.order_statuses(0).1.next().unwrap().status,
         IbkrOrderStatusV1::Filled
     );
     assert_eq!(digest.audit().duplicate_order_status_rows, 1);
-    assert_eq!(digest.open_orders().count(), 1);
-    let oo = digest.open_orders().next().unwrap();
+    assert_eq!(digest.open_orders(0).1.count(), 1);
+    let oo = digest.open_orders(0).1.next().unwrap();
     assert_eq!((oo.order_id, oo.perm_id), (9, 1_000_001));
     assert_eq!(oo.lmt_price_decimal.as_deref(), Some("410.00"));
     assert_eq!(digest.audit().open_order_tail_fields_discarded, 2);
@@ -870,7 +877,8 @@ async fn w5s3_commission_sentinel_forms_map_to_none_session_survives() {
     // 三哨兵形態(空欄/精確字串小寫 e/量級負側)→ None;s4 "0" → Some("0")。
     let pnl_of = |id: &str| {
         digest
-            .exec_slots()
+            .exec_slots(0)
+            .1
             .find(|(k, _)| k.as_str() == id)
             .unwrap()
             .1
@@ -912,7 +920,7 @@ async fn w5s3_unknown_order_status_invalidates_session_survives() {
         driver.order_exec_data().open_orders_staleness(0),
         SnapshotStaleness::Invalidated
     );
-    assert_eq!(driver.order_exec_data().order_statuses().count(), 0);
+    assert_eq!(driver.order_exec_data().order_statuses(0).1.count(), 0);
 }
 
 #[tokio::test]
@@ -949,7 +957,7 @@ async fn w5s3_ceiling_overflow_frame_rejected_with_audit_session_survives() {
         1
     );
     assert_eq!(
-        driver.order_exec_data().exec_slots().count(),
+        driver.order_exec_data().exec_slots(0).1.count(),
         0,
         "拒收 frame 不併入"
     );
@@ -979,8 +987,8 @@ async fn w5s3_pump_disabled_by_default_no_requests_sent() {
         !ids.contains(&"16".to_string()),
         "pump off 不得送 reqAllOpenOrders"
     );
-    assert_eq!(driver.order_exec_data().exec_slots().count(), 0);
-    assert_eq!(driver.order_exec_data().open_orders().count(), 0);
+    assert_eq!(driver.order_exec_data().exec_slots(0).1.count(), 0);
+    assert_eq!(driver.order_exec_data().open_orders(0).1.count(), 0);
     // **E2 F2**:pump-off 窗口的 9 個 order/exec frame 承接拒逐筆計數——driver 的
     // `Err(_)=>{}` 資料層分流不再零觀測(audit 經 order_exec_data() 唯讀投影)。
     assert_eq!(
@@ -1109,7 +1117,9 @@ async fn w5s4_missing_managed_accounts_false_fails_then_retry_attests() {
     assert!(driver.session_wire_facts().is_none(), "未實檢不得留 facts");
     let att = produce_session_attestation(driver.session_wire_facts(), &attestation_posture(), 10);
     assert_eq!(att.status, IbkrSessionAttestationStatus::Blocked);
-    // 退避到期 → cycle2 重試 happy → Ready+serve → 實檢立 → attested。
+    // 退避到期 → cycle2 重試 happy 握手到 Ready → 實檢立 → attested。
+    // （W6-S0 session 活性綁定後,facts 只在 session 存活期在場——attested 產出必須發生在
+    // Ready 期,故此處走 connect_and_handshake 而非全 cycle;serve 結束即清見下個測試。）
     let (entered, delay_ms) = match driver.state() {
         SessionState::Backoff {
             entered_at_ms,
@@ -1118,10 +1128,10 @@ async fn w5s4_missing_managed_accounts_false_fails_then_retry_attests() {
         } => (*entered_at_ms, next_delay.as_millis() as u64),
         s => panic!("expected Backoff, got {s:?}"),
     };
-    clock.set(entered + delay_ms + 1);
+    let retry_at = entered + delay_ms + 1;
     assert_eq!(
-        driver.run_connect_cycle(&mut clock).await,
-        CycleOutcome::Served(ServeEnd::IoDropped)
+        driver.connect_and_handshake(retry_at).await,
+        ConnectStep::Ready
     );
     let facts = driver.session_wire_facts().expect("重試成功後 facts 在場");
     let now = facts.ready_at_ms.unwrap() + 10;
@@ -1132,7 +1142,8 @@ async fn w5s4_missing_managed_accounts_false_fails_then_retry_attests() {
 
 #[tokio::test]
 async fn w5s4_fingerprint_stable_across_sessions_and_new_generation_clears() {
-    // 同帳戶兩個 session → 同指紋（穩定性）;新 connect 世代（connect 失敗）→ facts 清空。
+    // 同帳戶兩個 session → 同指紋（穩定性）;session 死亡（serve 結束）→ facts 即清
+    // （W6-S0 session 活性綁定）;新 connect 世代（connect 失敗）亦清（不以舊實檢冒充）。
     let mut scns = VecDeque::new();
     scns.push_back(scenarios::happy_session());
     scns.push_back(scenarios::happy_session());
@@ -1144,16 +1155,21 @@ async fn w5s4_fingerprint_stable_across_sessions_and_new_generation_clears() {
         reader_limits(),
     );
     let mut clock = TestClock::at(0);
-    assert_eq!(
-        driver.run_connect_cycle(&mut clock).await,
-        CycleOutcome::Served(ServeEnd::IoDropped)
-    );
+    // session1:握手到 Ready → 指紋於存活期讀取 → serve 至 EOF。
+    assert_eq!(driver.connect_and_handshake(0).await, ConnectStep::Ready);
     let fp1 = driver
         .session_wire_facts()
         .unwrap()
         .inspection
         .fingerprint_hex();
-    // 退避到期後重連場景2。
+    assert_eq!(driver.serve(&mut clock).await, ServeEnd::IoDropped);
+    // W6-S0（E3 R13-NOTE-01/E2 R13-F2）:session 死亡即清 facts——死會話事實不得再鑄
+    // 「新鮮」attestation（facts=None → producer 只可產 Blocked）。
+    assert!(
+        driver.session_wire_facts().is_none(),
+        "serve 結束(session 死亡)必須清 wire facts"
+    );
+    // 退避到期後重連場景2:同帳戶 → 同指紋。
     let (entered, delay_ms) = match driver.state() {
         SessionState::Backoff {
             entered_at_ms,
@@ -1162,10 +1178,11 @@ async fn w5s4_fingerprint_stable_across_sessions_and_new_generation_clears() {
         } => (*entered_at_ms, next_delay.as_millis() as u64),
         s => panic!("expected Backoff, got {s:?}"),
     };
-    clock.set(entered + delay_ms + 1);
+    let retry_at = entered + delay_ms + 1;
+    clock.set(retry_at);
     assert_eq!(
-        driver.run_connect_cycle(&mut clock).await,
-        CycleOutcome::Served(ServeEnd::IoDropped)
+        driver.connect_and_handshake(retry_at).await,
+        ConnectStep::Ready
     );
     let fp2 = driver
         .session_wire_facts()
@@ -1173,6 +1190,7 @@ async fn w5s4_fingerprint_stable_across_sessions_and_new_generation_clears() {
         .inspection
         .fingerprint_hex();
     assert_eq!(fp1, fp2, "同帳戶跨 session 指紋必須穩定");
+    assert_eq!(driver.serve(&mut clock).await, ServeEnd::IoDropped);
     // cycle3:ScriptedTransport 耗盡 → connect refused;新世代先清 facts（不以舊實檢冒充）。
     let (entered, delay_ms) = match driver.state() {
         SessionState::Backoff {
@@ -1211,4 +1229,136 @@ async fn terminal_state_cycle_is_noop() {
         driver.run_connect_cycle(&mut clock).await,
         CycleOutcome::Terminal
     );
+}
+
+// ===========================================================================
+// W6-S0:毒化面世代恢復 / floor 記憶重評 / 斷線前因 typed
+// ===========================================================================
+
+#[tokio::test]
+async fn w6s0_poisoned_face_recovers_after_reconnect_new_generation() {
+    use crate::ibkr_tws_account_data::SnapshotStaleness;
+
+    // 恢復政策端到端:毒化(cycle1 表外 tag)→ 斷線 → 重連(世代推進重評)→ pump re-begin
+    // 成功(cycle2 happy 場景消化)——毒化=世代內終態,非永久鎖死(E3 MED-01-S3 收口)。
+    let mut scns = VecDeque::new();
+    scns.push_back(scenarios::account_summary_off_whitelist_tag(
+        ACCOUNT_SUMMARY_REQ_ID,
+    ));
+    scns.push_back(scenarios::account_data_session(ACCOUNT_SUMMARY_REQ_ID));
+    let mut driver = SessionDriver::new(
+        GrantingProvider,
+        ScriptedTransport { scenarios: scns },
+        driver_config(),
+        timeouts(),
+        reader_limits(),
+    );
+    driver.enable_account_data_subscriptions();
+    let mut clock = TestClock::at(0);
+    assert_eq!(
+        driver.run_connect_cycle(&mut clock).await,
+        CycleOutcome::Served(ServeEnd::IoDropped)
+    );
+    // cycle1 後:毒化保留(不被斷線沖淡),行未併入。
+    assert_eq!(
+        driver.account_data().summary_staleness(0),
+        SnapshotStaleness::Invalidated
+    );
+    assert_eq!(driver.account_data().summary_rows(0).1.count(), 0);
+    // 退避到期 → cycle2:世代推進(handshake 成功)重評 → pump 自動 re-begin → 消化成功。
+    let (entered, delay_ms) = match driver.state() {
+        SessionState::Backoff {
+            entered_at_ms,
+            next_delay,
+            ..
+        } => (*entered_at_ms, next_delay.as_millis() as u64),
+        s => panic!("expected Backoff, got {s:?}"),
+    };
+    clock.set(entered + delay_ms + 1);
+    assert_eq!(
+        driver.run_connect_cycle(&mut clock).await,
+        CycleOutcome::Served(ServeEnd::IoDropped)
+    );
+    assert_eq!(
+        driver.account_data().summary_rows(0).1.count(),
+        2,
+        "新世代 re-begin 必須成功消化 happy 場景"
+    );
+    assert_eq!(
+        driver.account_data().summary_staleness(0),
+        SnapshotStaleness::DisconnectedStale,
+        "cycle2 結束=斷線失效,非毒化"
+    );
+}
+
+#[tokio::test]
+async fn w6s0_floor_blocked_memory_resets_each_generation() {
+    // 修 R11-R14 注釋/行為不符:floor 記憶聲稱「新世代重評」但從未重置——現於 handshake
+    // 成功(世代推進點)真重置(sv 每次握手重新協商)。
+    let (mut driver, _h) = fake_driver(scenarios::happy_session());
+    driver.positions_floor_blocked = true;
+    driver.order_exec_floor_blocked = true;
+    assert_eq!(driver.connect_and_handshake(0).await, ConnectStep::Ready);
+    assert!(
+        !driver.positions_floor_blocked,
+        "世代推進必須重評 positions floor 記憶"
+    );
+    assert!(
+        !driver.order_exec_floor_blocked,
+        "世代推進必須重評 order/exec floor 記憶"
+    );
+}
+
+#[tokio::test]
+async fn w6s0_disconnect_cause_is_typed_not_static_note() {
+    // CC lineage 斷點 4:斷線「為什麼」typed 落帳,不再只剩注釋。
+    // ① account wire 損壞 → AccountDataWireMalformed(CodecError 身分保留)。
+    let (mut driver, _h) =
+        fake_driver(scenarios::account_summary_malformed(ACCOUNT_SUMMARY_REQ_ID));
+    driver.enable_account_data_subscriptions();
+    let mut clock = TestClock::at(1_000);
+    assert_eq!(
+        driver.run_connect_cycle(&mut clock).await,
+        CycleOutcome::Served(ServeEnd::IoDropped)
+    );
+    assert!(matches!(
+        driver.last_disconnect_cause(),
+        Some(ServeDisconnectCause::AccountDataWireMalformed(_))
+    ));
+    // digest audit 與斷線前因互為印證(wire malformed 身分兩面可對賬)。
+    assert_eq!(driver.account_data().audit().wire_malformed_rejects, 1);
+    // ② 未知 msgId → UnknownMsgId{8}。
+    let (mut driver, _h) = fake_driver(scenarios::serve_unknown_msg_id());
+    let mut clock = TestClock::at(0);
+    assert_eq!(
+        driver.run_connect_cycle(&mut clock).await,
+        CycleOutcome::Served(ServeEnd::IoDropped)
+    );
+    assert_eq!(
+        driver.last_disconnect_cause(),
+        Some(&ServeDisconnectCause::UnknownMsgId { msg_id: 8 })
+    );
+    // ③ server EOF → ServerEof(腳本盡=write 半關)。
+    let (mut driver, _h) = fake_driver(scenarios::happy_session());
+    let mut clock = TestClock::at(0);
+    assert_eq!(
+        driver.run_connect_cycle(&mut clock).await,
+        CycleOutcome::Served(ServeEnd::IoDropped)
+    );
+    assert_eq!(
+        driver.last_disconnect_cause(),
+        Some(&ServeDisconnectCause::ServerEof)
+    );
+    // ④ order/exec wire 損壞 → OrderExecWireMalformed。
+    let (mut driver, _h) = fake_driver(scenarios::execution_malformed_session());
+    driver.enable_order_exec_subscriptions();
+    let mut clock = TestClock::at(1_000);
+    assert_eq!(
+        driver.run_connect_cycle(&mut clock).await,
+        CycleOutcome::Served(ServeEnd::IoDropped)
+    );
+    assert!(matches!(
+        driver.last_disconnect_cause(),
+        Some(ServeDisconnectCause::OrderExecWireMalformed(_))
+    ));
 }

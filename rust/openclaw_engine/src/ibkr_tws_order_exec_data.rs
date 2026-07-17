@@ -18,6 +18,10 @@
 //!     表外 status——全 typed,不 panic、不捏值、不默認）。
 //!   - (d) `OrderExecDataDigest`：executions/open-orders 雙槽狀態機（End 界定快照;之後推送
 //!     恆在=Live 相位續收）+ exec↔commission either-order join + audit 計數器 + 斷線失效。
+//!   - (e) **W6-S0 硬化**：audit 擴 per-face blocker 樣本欄（driver `Err(_)=>{}` 分流身分
+//!     可觀測）;Invalidated 恢復政策=世代內終態、唯 `on_new_connection_generation` 重評;
+//!     join/快照 map config 化 cap（超界=毒化非驅逐）;行視圖改 staleness 綁定形
+//!     `(SnapshotStaleness, rows)`。
 //! 依賴：`ibkr_tws_wire`（codec/IN 常數）、`ibkr_tws_account_data`（`SnapshotStaleness`
 //!   六態共用）、`openclaw_types`（W5-S1 executions/commissions row 契約 + secType/symbol
 //!   紀律）、`std::collections::BTreeMap`。
@@ -155,6 +159,17 @@ pub(crate) struct OrderExecDataConfig {
     pub executions_stale_after: Duration,
     /// open orders 新鮮窗（同上事件驅動,無節拍保證）。
     pub open_orders_stale_after: Duration,
+    /// **join 緩存上界（W6-S0,E3 LOW-01-S3/LOW-02 家族）**:exec_slots map 的 config 化
+    /// cap。依據:單 entry 由單 frame 產生（1 frame ≤ `MAX_FRAME_LEN`=64KB）,driver 單
+    /// serve 迴圈 frame 預算 `SERVE_BUDGET`=100_000 → 無 cap 的理論注入面 ≈ 6.4GB/serve
+    /// （無界）;cap=16384 → 面駐留最壞 ≈ 1GB 理論值、實際 row 遠小（<1KB → ~16MB）,且
+    /// 覆蓋整日成交量級（數千）有 4×+ 裕度。**超界=該面 `Invalidated` 毒化+audit 計數**
+    /// （fail-closed;禁靜默驅逐——驅逐任一側都是 join 記帳謊言）。
+    pub max_exec_join_slots: usize,
+    /// open_orders map 的 config 化 cap（同上依據;真實掛單量級=數百,4096 為 10×+ 裕度）。
+    pub max_open_orders: usize,
+    /// order_statuses map 的 config 化 cap（同上依據）。
+    pub max_order_statuses: usize,
 }
 
 impl Default for OrderExecDataConfig {
@@ -166,6 +181,9 @@ impl Default for OrderExecDataConfig {
             join_orphan_ttl: Duration::from_secs(60),
             executions_stale_after: Duration::from_secs(390),
             open_orders_stale_after: Duration::from_secs(390),
+            max_exec_join_slots: 16384,
+            max_open_orders: 4096,
+            max_order_statuses: 4096,
         }
     }
 }
@@ -220,6 +238,15 @@ pub(crate) enum OrderExecDataReject {
     /// openOrder head 欄位違反白名單/紀律（action/secType/幣別/數量…）→ open-orders 面毒化。
     #[error("open order head denied: {field}")]
     OpenOrderHeadDenied { field: &'static str },
+    /// **恢復政策（W6-S0,E3 MED-01-S3/E2-R12-F3 家族）**:毒化=同一 connect 世代內終態——
+    /// 世代內 re-begin 一律拒;唯 driver 世代推進（新 handshake 成功,
+    /// `on_new_connection_generation`）重評後可 re-begin。
+    #[error("digest face invalidated; re-begin requires a new connection generation")]
+    InvalidatedUntilNewGeneration,
+    /// **cap 超界（W6-S0,E3 LOW-01-S3 家族）**:join/快照 map 行數超 config 上界 → 該面
+    /// 毒化+audit 計數（fail-closed;禁靜默驅逐=不做記帳謊言）。`cache` 標明超界面。
+    #[error("cache cap exceeded for {cache} (face poisoned, no silent eviction)")]
+    CacheCapExceeded { cache: &'static str },
     /// wire 形狀損壞（欄位缺/非數字/非 ASCII/錯 msgId）——呼叫端按既有紀律 fail-closed 斷線。
     #[error("wire malformed: {0}")]
     WireMalformed(CodecError),
@@ -406,6 +433,32 @@ pub(crate) struct OrderExecAudit {
     /// 未開消化 context 承接拒的 frame 數（未 begin/毒化/斷線失效窗口的入站丟棄可觀測——
     /// 含 pump-off 下 client 綁定推送與毒化後 unsolicited;E2 F2/E3 MED-01-S3 (a)）。
     pub no_active_context_rejects: u64,
+    // ---- W6-S0 追加（CC lineage 斷點 1:driver `Err(_)=>{}` 分流的 blocker 身分觀測面;
+    // per-face 最後樣本沿 `*_last_*` 慣例）----
+    /// executions row 契約 blocker 拒數。
+    pub execution_row_blocked_rejects: u64,
+    /// 最後一筆 executions row blocker 列表（per-face 樣本欄）。
+    pub execution_row_last_blockers: Vec<IbkrExecutionsRowBlocker>,
+    /// commissions row 契約 blocker 拒數。
+    pub commission_row_blocked_rejects: u64,
+    /// 最後一筆 commissions row blocker 列表（per-face 樣本欄）。
+    pub commission_row_last_blockers: Vec<IbkrCommissionsRowBlocker>,
+    /// orderStatus 本地 decimal 紀律拒數。
+    pub order_status_field_invalid_rejects: u64,
+    /// 最後一次 orderStatus 紀律拒的欄名。
+    pub order_status_field_last: Option<&'static str>,
+    /// openOrder head 白名單/紀律拒數。
+    pub open_order_head_denied_rejects: u64,
+    /// 最後一次 openOrder head 拒的欄名。
+    pub open_order_head_last_field: Option<&'static str>,
+    /// 入站 reqId 錯配拒數（execDetailsEnd 串流錯配）。
+    pub unexpected_req_id_rejects: u64,
+    /// wire 損壞拒數（呼叫端 fail-closed 斷線;此處留身分供斷線前因對賬）。
+    pub wire_malformed_rejects: u64,
+    /// 最後一次 wire 損壞的 typed 描述（CodecError 顯示串,不含 payload 原文）。
+    pub wire_malformed_last_note: Option<String>,
+    /// join/快照 map cap 超界毒化數（W6-S0 cap;禁靜默驅逐）。
+    pub cache_cap_exceeded_rejects: u64,
 }
 
 /// 單槽生命週期相位（同構 W5-S2 `SubPhase`——該型別為模塊私有,此處同名同義複刻,
@@ -417,7 +470,8 @@ enum SubPhase {
     SnapshotIncomplete,
     /// End 已到:executions=推送恆在;open orders=事件驅動推送。
     Live,
-    /// 契約 blocker / 表外分類毒化（fail-closed;唯 re-begin 離開）。
+    /// 契約 blocker / 表外分類毒化（fail-closed;同 connect 世代內終態,唯世代推進
+    /// `on_new_connection_generation` 重評後 re-begin 離開——W6-S0 恢復政策）。
     Invalidated,
     /// 斷線失效（唯 re-begin 離開;快照不跨連線存活）。
     DisconnectedStale,
@@ -504,15 +558,19 @@ impl OrderExecDataDigest {
     }
 
     /// 開始 executions 快照:回待送 reqExecutions frame（空 filter 全量）。floor guard →
-    /// 單槽自限 → 清舊槽、遞增 seq、綁定 sv context。Idle/Invalidated/DisconnectedStale
-    /// 可（重）取——**斷線 resync 語義**:重連後 re-begin 即全量重取,execId 去重吸收與
-    /// 斷線前推送的重疊。
+    /// 單槽自限 → 清舊槽、遞增 seq、綁定 sv context。Idle/DisconnectedStale 可（重）取——
+    /// **斷線 resync 語義**:重連後 re-begin 即全量重取,execId 去重吸收與斷線前推送的
+    /// 重疊。**Invalidated=世代內終態**（W6-S0 恢復政策）:唯 `on_new_connection_generation`
+    /// 重評後可 re-begin——毒化事實不得被同世代重取沖淡。
     pub(crate) fn begin_executions(
         &mut self,
         server_version: i32,
         req_id: i64,
     ) -> Result<Vec<u8>, OrderExecDataReject> {
         self.floor_guard(server_version)?;
+        if self.exec_phase == SubPhase::Invalidated {
+            return Err(OrderExecDataReject::InvalidatedUntilNewGeneration);
+        }
         if self.exec_phase.is_active() {
             return Err(OrderExecDataReject::ExecutionsAlreadyActive);
         }
@@ -543,8 +601,13 @@ impl OrderExecDataDigest {
         Ok(encode_req_all_open_orders())
     }
 
+    /// open-orders 槽 begin 共同前置（floor → 世代政策 → 單槽自限;Invalidated=世代內終態,
+    /// 同 `begin_executions`）。
     fn begin_open_orders_slot(&mut self, server_version: i32) -> Result<(), OrderExecDataReject> {
         self.floor_guard(server_version)?;
+        if self.orders_phase == SubPhase::Invalidated {
+            return Err(OrderExecDataReject::InvalidatedUntilNewGeneration);
+        }
         if self.orders_phase.is_active() {
             return Err(OrderExecDataReject::OpenOrdersAlreadyActive);
         }
@@ -619,7 +682,21 @@ impl OrderExecDataDigest {
     /// 非 Contract.exchange（idx 10）——fixture 以兩欄不同值斷言取後者。中間欄全定長平面,
     /// 按位跳讀安全（liquidation/cumQty/avgPrice/orderRef/evRule/evMultiplier/modelCode/
     /// lastLiquidity 讀位即棄,不 bind 語義）。
+    /// W6-S0:任何 typed reject 過 `audit_reject` 落帳身分（driver `Err(_)=>{}` 分流不再
+    /// 零觀測;六個入站 handler 同構）。
     pub(crate) fn on_execution_frame(
+        &mut self,
+        payload: &[u8],
+        now_ms: u64,
+    ) -> Result<(), OrderExecDataReject> {
+        let r = self.execution_frame_inner(payload, now_ms);
+        if let Err(e) = &r {
+            self.audit_reject(e);
+        }
+        r
+    }
+
+    fn execution_frame_inner(
         &mut self,
         payload: &[u8],
         now_ms: u64,
@@ -691,6 +768,16 @@ impl OrderExecDataDigest {
             self.audit.unsolicited_execution_rows += 1;
         }
         let exec_id = row.exec_id.clone();
+        // W6-S0 cap:新鍵且已達上界 → executions 面毒化+audit（fail-closed;禁靜默驅逐——
+        // 驅逐任一 join 側都是記帳謊言）。既有鍵覆蓋/補側不受 cap 限（不增長）。
+        if !self.exec_slots.contains_key(&exec_id)
+            && self.exec_slots.len() >= self.config.max_exec_join_slots
+        {
+            self.exec_phase = SubPhase::Invalidated;
+            return Err(OrderExecDataReject::CacheCapExceeded {
+                cache: "exec_join_slots",
+            });
+        }
         let slot = self.exec_slots.entry(exec_id).or_insert(ExecJoinSlot {
             execution: None,
             commission: None,
@@ -709,6 +796,18 @@ impl OrderExecDataDigest {
     /// `processExecutionDataEndMsg`）:快照收批 → `Live`（**之後推送恆在**——成交自動推
     /// execDetails+commissionReport,unsolicited 通道續收）。
     pub(crate) fn on_execution_end_frame(
+        &mut self,
+        payload: &[u8],
+        now_ms: u64,
+    ) -> Result<(), OrderExecDataReject> {
+        let r = self.execution_end_frame_inner(payload, now_ms);
+        if let Err(e) = &r {
+            self.audit_reject(e);
+        }
+        r
+    }
+
+    fn execution_end_frame_inner(
         &mut self,
         payload: &[u8],
         now_ms: u64,
@@ -747,6 +846,18 @@ impl OrderExecDataDigest {
     /// （yield_/yieldRedemptionDate 讀位即棄）。realizedPNL 走哨兵雙判別 → `None`（移交
     /// blocking #1）;execId 鍵 either-order join(commission 先到=孤兒緩存,禁丟棄)。
     pub(crate) fn on_commission_frame(
+        &mut self,
+        payload: &[u8],
+        now_ms: u64,
+    ) -> Result<(), OrderExecDataReject> {
+        let r = self.commission_frame_inner(payload, now_ms);
+        if let Err(e) = &r {
+            self.audit_reject(e);
+        }
+        r
+    }
+
+    fn commission_frame_inner(
         &mut self,
         payload: &[u8],
         now_ms: u64,
@@ -793,6 +904,15 @@ impl OrderExecDataDigest {
             return Err(OrderExecDataReject::CommissionRowBlocked(verdict.blockers));
         }
         let exec_id = row.exec_id.clone();
+        // W6-S0 cap:同 execution 側紀律（commission 孤兒側先到亦計入同一 join map）。
+        if !self.exec_slots.contains_key(&exec_id)
+            && self.exec_slots.len() >= self.config.max_exec_join_slots
+        {
+            self.exec_phase = SubPhase::Invalidated;
+            return Err(OrderExecDataReject::CacheCapExceeded {
+                cache: "exec_join_slots",
+            });
+        }
         let slot = self.exec_slots.entry(exec_id).or_insert(ExecJoinSlot {
             execution: None,
             commission: None,
@@ -812,6 +932,18 @@ impl OrderExecDataDigest {
     /// `UnknownDenied` audit+毒化不 crash。官方明言常有重複 → **冪等去重**（wire 事實全等
     /// → 計數後 no-op）。
     pub(crate) fn on_order_status_frame(
+        &mut self,
+        payload: &[u8],
+        now_ms: u64,
+    ) -> Result<(), OrderExecDataReject> {
+        let r = self.order_status_frame_inner(payload, now_ms);
+        if let Err(e) = &r {
+            self.audit_reject(e);
+        }
+        r
+    }
+
+    fn order_status_frame_inner(
         &mut self,
         payload: &[u8],
         now_ms: u64,
@@ -882,6 +1014,15 @@ impl OrderExecDataDigest {
                 return Ok(());
             }
         }
+        // W6-S0 cap:新鍵且已達上界 → open-orders 面毒化+audit（禁靜默驅逐）。
+        if !self.order_statuses.contains_key(&order_id)
+            && self.order_statuses.len() >= self.config.max_order_statuses
+        {
+            self.orders_phase = SubPhase::Invalidated;
+            return Err(OrderExecDataReject::CacheCapExceeded {
+                cache: "order_statuses",
+            });
+        }
         self.order_statuses.insert(order_id, row);
         self.orders_last_update_ms = now_ms;
         Ok(())
@@ -894,6 +1035,18 @@ impl OrderExecDataDigest {
     /// **frame 剩餘欄位整體丟棄+audit 計數**（TWS 訊框帶長度前綴,tail-discard 確定性
     /// 安全);66 步/變長塊全欄 decode 明確 defer。
     pub(crate) fn on_open_order_frame(
+        &mut self,
+        payload: &[u8],
+        now_ms: u64,
+    ) -> Result<(), OrderExecDataReject> {
+        let r = self.open_order_frame_inner(payload, now_ms);
+        if let Err(e) = &r {
+            self.audit_reject(e);
+        }
+        r
+    }
+
+    fn open_order_frame_inner(
         &mut self,
         payload: &[u8],
         now_ms: u64,
@@ -974,6 +1127,16 @@ impl OrderExecDataDigest {
             perm_id,
             captured_at_ms: now_ms,
         };
+        // W6-S0 cap:新鍵且已達上界 → open-orders 面毒化+audit（禁靜默驅逐;tail 丟棄計數
+        // 不落帳——該 frame 整體被拒,半記帳=不一致）。
+        if !self.open_orders.contains_key(&order_id)
+            && self.open_orders.len() >= self.config.max_open_orders
+        {
+            self.orders_phase = SubPhase::Invalidated;
+            return Err(OrderExecDataReject::CacheCapExceeded {
+                cache: "open_orders",
+            });
+        }
         self.audit.open_order_tail_fields_discarded += tail;
         self.open_orders.insert(order_id, row);
         self.orders_last_update_ms = now_ms;
@@ -989,6 +1152,18 @@ impl OrderExecDataDigest {
     /// IN 53 openOrderEnd（`[53, version]`;出典 官方 ibapi 9.81.1 `processOpenOrderEndMsg`）:
     /// 快照收批 → `Live`（其後本 client 綁定推送續收）。
     pub(crate) fn on_open_order_end_frame(
+        &mut self,
+        payload: &[u8],
+        now_ms: u64,
+    ) -> Result<(), OrderExecDataReject> {
+        let r = self.open_order_end_frame_inner(payload, now_ms);
+        if let Err(e) = &r {
+            self.audit_reject(e);
+        }
+        r
+    }
+
+    fn open_order_end_frame_inner(
         &mut self,
         payload: &[u8],
         now_ms: u64,
@@ -1022,13 +1197,29 @@ impl OrderExecDataDigest {
 
     /// 斷線:活躍面一律標 `DisconnectedStale`（快照/推送不跨連線存活——**重連需 re-begin
     /// resync**,execId 去重吸收重疊;行保留供唯讀檢視,staleness 已明示不可信）。
-    /// Idle/Invalidated 維持原相位（毒化事實不被斷線沖淡,沿 W5-S2）。
+    /// Idle/Invalidated 維持原相位（毒化事實不被斷線沖淡,沿 W5-S2;毒化面的重評歸
+    /// `on_new_connection_generation`）。
     pub(crate) fn on_disconnect(&mut self) {
         if self.exec_phase.is_active() {
             self.exec_phase = SubPhase::DisconnectedStale;
             self.exec_req_id = None;
         }
         if self.orders_phase.is_active() {
+            self.orders_phase = SubPhase::DisconnectedStale;
+        }
+    }
+
+    /// **W6-S0 恢復政策**（E3 MED-01-S3/E2-R12-F3 家族;同構 W5-S2
+    /// `AccountDataDigest::on_new_connection_generation`）:driver 世代推進（新 handshake
+    /// 成功）時重評毒化面——`Invalidated` → `DisconnectedStale`,與既有「斷線→
+    /// DisconnectedStale→re-begin resync」語義合流。行保留供唯讀對賬;audit 計數跨世代
+    /// 累積（telemetry 語義,不清零）。
+    pub(crate) fn on_new_connection_generation(&mut self) {
+        if self.exec_phase == SubPhase::Invalidated {
+            self.exec_phase = SubPhase::DisconnectedStale;
+            self.exec_req_id = None;
+        }
+        if self.orders_phase == SubPhase::Invalidated {
             self.orders_phase = SubPhase::DisconnectedStale;
         }
     }
@@ -1055,21 +1246,36 @@ impl OrderExecDataDigest {
         )
     }
 
-    /// 唯讀檢視:全部 join 槽（BTreeMap=確定序;含孤兒側）。
-    pub(crate) fn exec_slots(&self) -> impl Iterator<Item = (&String, &ExecJoinSlot)> {
-        self.exec_slots.iter()
+    /// 唯讀檢視:executions 面 **staleness 綁定視圖**（W6-S0,E2-R11-F4 同構）——join 槽只能
+    /// 與 executions 面 staleness 一同取得,使「部分/毒化/斷線快照被當全量消費」**結構性
+    /// 不可能**（BTreeMap=確定序;含孤兒側）。
+    pub(crate) fn exec_slots(
+        &self,
+        now_ms: u64,
+    ) -> (
+        SnapshotStaleness,
+        impl Iterator<Item = (&String, &ExecJoinSlot)>,
+    ) {
+        (self.executions_staleness(now_ms), self.exec_slots.iter())
     }
 
-    /// 唯讀檢視:join 完整對（execution+commission 齊 = typed 完整成交紀錄）。
+    /// 唯讀檢視:join 完整對（execution+commission 齊 = typed 完整成交紀錄）。staleness
+    /// 綁定=executions 面（R13 NOTE-3:commissions staleness 是 join 視角——同面同窗,
+    /// 投影端據此明示,不另立第二時鐘）。
     pub(crate) fn completed_executions(
         &self,
-    ) -> impl Iterator<Item = (&IbkrExecutionsRowV1, &IbkrCommissionsRowV1)> {
-        self.exec_slots.values().filter_map(|s| {
+        now_ms: u64,
+    ) -> (
+        SnapshotStaleness,
+        impl Iterator<Item = (&IbkrExecutionsRowV1, &IbkrCommissionsRowV1)>,
+    ) {
+        let rows = self.exec_slots.values().filter_map(|s| {
             match (s.execution.as_ref(), s.commission.as_ref()) {
                 (Some(e), Some(c)) => Some((e, c)),
                 _ => None,
             }
-        })
+        });
+        (self.executions_staleness(now_ms), rows)
     }
 
     /// 孤兒計量（觀測;逾 `join_orphan_ttl` 未成對 → over_ttl,degraded 信號,不丟棄）。
@@ -1092,14 +1298,32 @@ impl OrderExecDataDigest {
         report
     }
 
-    /// 唯讀檢視:openOrder head 行（BTreeMap=確定序）。
-    pub(crate) fn open_orders(&self) -> impl Iterator<Item = &IbkrOpenOrderHeadV1> {
-        self.open_orders.values()
+    /// 唯讀檢視:openOrder head 行的 staleness 綁定視圖（open-orders 面;BTreeMap=確定序）。
+    pub(crate) fn open_orders(
+        &self,
+        now_ms: u64,
+    ) -> (
+        SnapshotStaleness,
+        impl Iterator<Item = &IbkrOpenOrderHeadV1>,
+    ) {
+        (
+            self.open_orders_staleness(now_ms),
+            self.open_orders.values(),
+        )
     }
 
-    /// 唯讀檢視:orderStatus 最新快照行。
-    pub(crate) fn order_statuses(&self) -> impl Iterator<Item = &IbkrOrderStatusSnapshotV1> {
-        self.order_statuses.values()
+    /// 唯讀檢視:orderStatus 最新快照行的 staleness 綁定視圖（open-orders 面同窗）。
+    pub(crate) fn order_statuses(
+        &self,
+        now_ms: u64,
+    ) -> (
+        SnapshotStaleness,
+        impl Iterator<Item = &IbkrOrderStatusSnapshotV1>,
+    ) {
+        (
+            self.open_orders_staleness(now_ms),
+            self.order_statuses.values(),
+        )
     }
 
     /// audit 計數器唯讀檢視。
@@ -1113,6 +1337,50 @@ impl OrderExecDataDigest {
     }
 
     // ---- 內部 ----
+
+    /// W6-S0:入站 typed reject → audit 身分落帳（單調計數+最後樣本;CC lineage 斷點 1 收口
+    /// ——driver 對資料層 reject 走 `Err(_)=>{}` 續 serve,身分由此觀測面承載）。
+    /// `CacheCapExceeded` 在**本函數**計數（拒點無就地計數,勿再補第二次）;已在拒點就地
+    /// 計數者（no_active_context/overflow/grammar/unknown_denied）此處跳過防重複;begin 域
+    /// 拒（floor/單槽自限/世代政策）由 pump 的閘先擋,不屬入站觀測面。
+    fn audit_reject(&mut self, e: &OrderExecDataReject) {
+        match e {
+            OrderExecDataReject::WireMalformed(c) => {
+                self.audit.wire_malformed_rejects += 1;
+                self.audit.wire_malformed_last_note = Some(c.to_string());
+            }
+            OrderExecDataReject::ExecutionRowBlocked(blockers) => {
+                self.audit.execution_row_blocked_rejects += 1;
+                self.audit.execution_row_last_blockers = blockers.clone();
+            }
+            OrderExecDataReject::CommissionRowBlocked(blockers) => {
+                self.audit.commission_row_blocked_rejects += 1;
+                self.audit.commission_row_last_blockers = blockers.clone();
+            }
+            OrderExecDataReject::OrderStatusFieldInvalid { field } => {
+                self.audit.order_status_field_invalid_rejects += 1;
+                self.audit.order_status_field_last = Some(field);
+            }
+            OrderExecDataReject::OpenOrderHeadDenied { field } => {
+                self.audit.open_order_head_denied_rejects += 1;
+                self.audit.open_order_head_last_field = Some(field);
+            }
+            OrderExecDataReject::UnexpectedReqId { .. } => {
+                self.audit.unexpected_req_id_rejects += 1;
+            }
+            OrderExecDataReject::CacheCapExceeded { .. } => {
+                self.audit.cache_cap_exceeded_rejects += 1;
+            }
+            OrderExecDataReject::NoActiveContext
+            | OrderExecDataReject::PinnedLayoutOverflow { .. }
+            | OrderExecDataReject::ExecTimeGrammarRejected
+            | OrderExecDataReject::OrderStatusUnknownDenied
+            | OrderExecDataReject::ExecutionsAlreadyActive
+            | OrderExecDataReject::OpenOrdersAlreadyActive
+            | OrderExecDataReject::ServerVersionBelowFloor { .. }
+            | OrderExecDataReject::InvalidatedUntilNewGeneration => {}
+        }
+    }
 
     /// exec_time grammar 白名單:唯一現行白名單項=UTC 形 `^\d{8}-\d{2}:\d{2}:\d{2}$`
     /// （config 可關,關=全拒——fail-closed 真功能）。手寫定長比對,不引 regex 依賴。
