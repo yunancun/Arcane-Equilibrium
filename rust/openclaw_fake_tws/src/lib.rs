@@ -605,6 +605,27 @@ pub mod scenarios {
         ])])
     }
 
+    /// **W5-S4 混合帳戶**:managedAccounts 全 DU 中混入一個 U*（live）→ 白名單實檢
+    /// all_paper=false → driver fatal（NonPaperSession）+ attestation Blocked
+    /// （`account_fingerprint_is_live=true` 語義）。
+    pub fn mixed_paper_live_session() -> Scenario {
+        Scenario::new(vec![FakeStep::Send(vec![
+            handshake_ack(176, "20260716 09:30:00 EST"),
+            managed_accounts("DU1234567,U7654321"),
+        ])])
+    }
+
+    /// **W5-S4 IN 15 缺席**:握手直到 currentTime(49) 全程無 managedAccounts → paper 實檢
+    /// 未立 → driver transient false-fail（重試;絕不以未見當已驗證,attestation 只可產
+    /// Blocked）。與 `reordered_handshake`（15 晚於 49）同族,此為全缺席形。
+    pub fn missing_managed_accounts() -> Scenario {
+        Scenario::new(vec![FakeStep::Send(vec![
+            handshake_ack(176, "20260716 09:30:00 EST"),
+            next_valid_id(42),
+            current_time(1_700_000_000),
+        ])])
+    }
+
     /// 握手期致命 gateway error（502 未連線,<2100）→ driver fatal（GatewayError(502)）。
     pub fn handshake_gateway_error() -> Scenario {
         Scenario::new(vec![FakeStep::Send(vec![
@@ -1066,6 +1087,29 @@ mod tests {
         let _ = scenarios::order_status_unknown_denied_session();
         let _ = scenarios::execution_malformed_session();
         let _ = scenarios::execution_ceiling_overflow_session(9002);
+        // W5-S4 session attestation 場景。
+        let _ = scenarios::mixed_paper_live_session();
+        let _ = scenarios::missing_managed_accounts();
+    }
+
+    #[test]
+    fn w5_s4_attestation_scenarios_compose_expected_frames() {
+        // 混合帳戶場景:managedAccounts csv 原文透傳（DU+U 混合,消化端白名單實檢據此拒）。
+        assert_eq!(
+            managed_accounts("DU1234567,U7654321").0,
+            encode_frame(b"15\x001\x00DU1234567,U7654321\x00")
+        );
+        // IN 15 缺席場景:ack + 9 + 49,全程無 msgId 15 frame。
+        let scn = scenarios::missing_managed_accounts();
+        let frames: Vec<Vec<u8>> = match &scn.steps[0] {
+            FakeStep::Send(fs) => fs.iter().map(|f| f.0.clone()).collect(),
+            _ => panic!("首步應為 Send"),
+        };
+        assert_eq!(frames.len(), 3);
+        for f in &frames[1..] {
+            let fields = frame_fields(&decode_all_frames(f)[0]);
+            assert_ne!(fields[0], "15", "IN 15 缺席場景不得含 managedAccounts");
+        }
     }
 
     #[test]

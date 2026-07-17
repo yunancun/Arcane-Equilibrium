@@ -58,10 +58,11 @@ use crate::ibkr_tws_session::{
     ConnectPermitProvider, FatalCause, HandshakeOutcome, HeartbeatOutbound, PacingDispatch,
     SessionState, TwsSessionConfig, TwsSessionManager,
 };
+use crate::ibkr_tws_session_attestation::SessionWireFacts;
 use crate::ibkr_tws_wire::{
     classify_error_frame, classify_msg_id, decode_current_time, decode_error_code, decode_fields,
     decode_server_handshake_ack, encode_handshake_prefix, encode_req_current_time,
-    encode_start_api, frame_msg_id, managed_accounts_all_paper, with_timeout, FrameReader,
+    encode_start_api, frame_msg_id, managed_accounts_inspect, with_timeout, FrameReader,
     FrameReaderLimits, KnownMsgId, TimeoutOp, TimeoutPolicy,
 };
 
@@ -323,6 +324,11 @@ pub(crate) struct SessionDriver<P: ConnectPermitProvider, F: TransportFactory> {
     /// DIVERGENT-1 floor session 級 blocker 記憶（同 positions_floor_blocked 語義:sv 低於
     /// order/exec 下界 → 本 session 不再重試,新連線世代重評）。
     order_exec_floor_blocked: bool,
+    /// **W5-S4**:最近一次握手的 wire 實檢事實（attestation producer 的唯一 wire 輸入）。
+    /// 每個新 connect 世代開始即清（絕不以舊 session 實檢冒充新 session）;paper 未確認
+    /// （IN 15 缺席/亂序 → transient）恆 `None` → producer 只可產 Blocked（false-fail 重試,
+    /// 絕不以未見當已驗證）;非 paper fatal 亦存實檢紀錄（is_live 語義的可審計拒因）。
+    wire_facts: Option<SessionWireFacts>,
 }
 
 impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
@@ -369,6 +375,7 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
             order_exec: OrderExecDataDigest::new(OrderExecDataConfig::default()),
             subscribe_order_exec: false,
             order_exec_floor_blocked: false,
+            wire_facts: None,
         }
     }
 
@@ -405,6 +412,13 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
     /// reqExecutions/reqOpenOrders。真消費者=driver 測試域;TODO(W6) IPC 投影面接真開關）。
     pub(crate) fn enable_order_exec_subscriptions(&mut self) {
         self.subscribe_order_exec = true;
+    }
+
+    /// **W5-S4** 最近一次握手的 wire 實檢事實唯讀檢視（見 `wire_facts` 欄注釋;attestation
+    /// producer 的唯一 wire 輸入。真消費者=driver 測試域;TODO(W6) IPC 投影面接真消費並
+    /// 綁 session 活性）。
+    pub(crate) fn session_wire_facts(&self) -> Option<&SessionWireFacts> {
+        self.wire_facts.as_ref()
     }
 
     /// **測試專用**:可變存取內部 manager（令測試預先耗盡 governor token 逼心跳 Queued,驗 driver
@@ -448,6 +462,8 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
     /// permit → connect → 握手 → Ready（或 Denied/ConnectFailed/Fatal/Transient）。假設非終態
     /// （`run_connect_cycle` 已前置閘）。
     async fn connect_and_handshake(&mut self, now: u64) -> ConnectStep {
+        // W5-S4:新 connect 世代先清上一 session 的 wire 實檢事實（見 `wire_facts` 欄注釋）。
+        self.wire_facts = None;
         // INV-1:注入 permit 決策。production stub 恆拒 → Disconnected(EnvelopeRequired),factory 不呼叫。
         let token = match self.permit.check() {
             Ok(t) => t,
@@ -467,6 +483,9 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
         };
         let _ = self.manager.fsm_mut().on_transport_established(now); // → Handshaking
         let mut reader = FrameReader::new(self.reader_limits);
+        // W5-S4:握手期收集的 wire 實檢事實（out-param;成功=全欄,非 paper fatal=拒因紀錄,
+        // transient=None）。
+        let mut facts: Option<SessionWireFacts> = None;
         // 握手全程包 handshake_total 總預算（設計 §2.5;逾時 → transient）。
         let hs = match with_timeout(
             TimeoutOp::HandshakeTotal,
@@ -477,6 +496,7 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
                 &mut reader,
                 now,
                 &self.timeouts,
+                &mut facts,
             ),
         )
         .await
@@ -484,6 +504,8 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
             Ok(inner) => inner,
             Err(_) => Err(HandshakeErr::Transient),
         };
+        // 無論裁決一律以本世代收集值覆寫（transient=None → attestation 只可產 Blocked）。
+        self.wire_facts = facts;
         match hs {
             Ok(()) => {
                 // 到 Ready:stream+reader 交棒給 serve。
@@ -869,12 +891,15 @@ enum HandshakeErr {
 /// （control,過 governor → send_framed）→ 讀直到 currentTime(49):15 paper 前綴實檢 / 9 記
 /// next_valid_id / 4 按 code 分流(≥2100 續讀,<2100 fatal) / 49 done。未 paper_confirmed 到 49（亂序）
 /// → transient。**自由函數**（非方法）以避開 driver 泛型 borrow;僅碰 manager fsm/control_grant。
+/// W5-S4:`facts_out` 收集 wire 實檢事實（成功=全欄含 Ready 轉移點時鐘;非 paper fatal=拒因
+/// 紀錄,epoch/ready 缺席;transient 不寫=呼叫端 None）。
 async fn run_handshake_inner<S: AsyncRead + AsyncWrite + Unpin>(
     manager: &mut TwsSessionManager,
     stream: &mut S,
     reader: &mut FrameReader,
     now: u64,
     timeouts: &TimeoutPolicy,
+    facts_out: &mut Option<SessionWireFacts>,
 ) -> Result<(), HandshakeErr> {
     // 1. 寫連線 preamble（`API\0` + 版本協商 frame `v{min}..{max}`;pre-session 單次寫,非
     //    pacing-subject 的 API 訊息 → 直寫,不過 governor;IB 不對 preamble 限速）。
@@ -927,11 +952,12 @@ async fn run_handshake_inner<S: AsyncRead + AsyncWrite + Unpin>(
         None => return Err(HandshakeErr::Transient),
     }
     // 5. 讀直到 currentTime(49)。
-    let mut paper_confirmed = false;
+    // W5-S4:paper 確認由 bool 升級為實檢產物（all_paper=true 才存;fingerprint 隨之入 facts）。
+    let mut paper_inspection = None;
     let mut next_valid_id: i64 = 0;
-    // server_epoch:握手取到的 server-time（證健康首接觸;W3 driver 不 seal/persist,僅消費為到達
-    // Ready 的必要條件——decode 失敗即 transient,見下 CurrentTime 分支）。
-    let _server_epoch = loop {
+    // server_epoch:握手取到的 server-time（證健康首接觸;W5-S4 起入 attestation raw artifact
+    // 作 skew 佐證欄,**不作權威時鐘**——decode 失敗即 transient,見下 CurrentTime 分支）。
+    let server_epoch = loop {
         let payload = match read_next_frame(stream, reader, now, timeouts.io).await {
             Ok(Some(p)) => p,
             Ok(None) => return Err(HandshakeErr::Transient), // EOF before Ready
@@ -946,10 +972,19 @@ async fn run_handshake_inner<S: AsyncRead + AsyncWrite + Unpin>(
                 Ok(epoch) => break epoch,
                 Err(_) => return Err(HandshakeErr::Transient),
             },
-            Some(KnownMsgId::ManagedAccounts) => match managed_accounts_all_paper(&payload) {
-                Ok(true) => paper_confirmed = true,
-                Ok(false) => {
+            Some(KnownMsgId::ManagedAccounts) => match managed_accounts_inspect(&payload) {
+                Ok(insp) if insp.all_paper() => paper_inspection = Some(insp),
+                Ok(insp) => {
                     // 非 paper session → 立即 fatal（絕不對 live session 續讀;B1 紀律）。
+                    // W5-S4:實檢紀錄仍入 facts（is_live 語義的可審計拒因——attestation 據此
+                    // 產帶 `account_fingerprint_is_live=true` 的 Blocked 態;epoch/ready 缺席）。
+                    *facts_out = Some(SessionWireFacts {
+                        inspection: insp,
+                        server_version: ack.server_version,
+                        connection_time_raw: ack.connection_time.clone(),
+                        server_epoch_s: None,
+                        ready_at_ms: None,
+                    });
                     let _ = manager
                         .fsm_mut()
                         .on_handshake_fatal(FatalCause::NonPaperSession, now);
@@ -998,17 +1033,29 @@ async fn run_handshake_inner<S: AsyncRead + AsyncWrite + Unpin>(
             None => return Err(HandshakeErr::Transient),
         }
     };
-    // 到 49 但未見 paper 前綴實檢（亂序）→ fail-closed transient（不以「沒看到」當「已驗證」）。
-    if !paper_confirmed {
-        return Err(HandshakeErr::Transient);
-    }
+    // 到 49 但未見 paper 前綴實檢（IN 15 缺席/亂序）→ fail-closed transient（不以「沒看到」
+    // 當「已驗證」;facts 不寫 → attestation 只可產 Blocked,false-fail 重試）。
+    let inspection = match paper_inspection {
+        Some(i) => i,
+        None => return Err(HandshakeErr::Transient),
+    };
     let outcome = HandshakeOutcome {
         server_version: ack.server_version,
-        connection_time_raw: ack.connection_time,
+        connection_time_raw: ack.connection_time.clone(),
         paper_confirmed: true,
         next_valid_id,
     };
     let _ = manager.fsm_mut().on_handshake_result(outcome, now); // → Ready（budget 歸零）
+
+    // W5-S4:Ready 轉移點才落 facts 全欄（`ready_at_ms` = 本轉移點的 driver 注入時鐘;
+    // gateway_started_at_ms 之源）。
+    *facts_out = Some(SessionWireFacts {
+        inspection,
+        server_version: ack.server_version,
+        connection_time_raw: ack.connection_time,
+        server_epoch_s: Some(server_epoch),
+        ready_at_ms: Some(now),
+    });
     Ok(())
 }
 
