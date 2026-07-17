@@ -166,6 +166,13 @@ pub mod ibkr_tws_order_exec_data;
 // 的 Blocked 投影（不引用 driver → driver-absence audit 邊界不變）;attested 全路徑真消費=
 // W6 IPC 投影。attestation 絕非活化授權（真活化=W8 envelope）。
 pub mod ibkr_tws_session_attestation;
+// IBKR W8a activation envelope 驗證器（readonly-scope 最小切片,AMD-2026-07-11-01 活化
+// 鐵律消費面）：types `ibkr_activation_envelope_v1` shape 校驗 + build SHA/revocation/
+// kill-switch epoch 姿態比對 + readonly order-verb 結構性拒 + seal≠活化 + nonce 原子消費
+//（Mutex 帳本,防 replay）。**只驗不發**（簽發=EA 跑道 Operator 動作）;零 production
+// caller（dormant,同 attestation 姿態）;不 impl ConnectPermitProvider、不觸 PermitToken——
+// INV-1 不受影響;W8 全包以本驗證器替換 permit trait 位並吸收（共路徑,禁兩套語義漂移）。
+pub mod ibkr_activation_envelope_check;
 // IBKR B1 只讀 TWS 連接器（ADR-0048 / AMD-2026-07-08-01，G4 首次接觸）：connect handshake
 // + reqCurrentTime 最小首接觸；純 codec + generic driver + 3 層惰性 gate；唯一具體
 // TcpStream::connect 於 `ibkr_g4_contact` feature 後（default build 無 socket、無 caller）。
