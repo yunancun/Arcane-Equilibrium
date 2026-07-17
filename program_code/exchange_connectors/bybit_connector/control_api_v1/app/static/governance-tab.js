@@ -1426,7 +1426,6 @@ function renderPendingAudit(changes) {
   let html = '<div class="col gap-3">';
   for (const c of changes) {
     const cid = ocEsc(c.change_id || '');
-    const cidJs = ocEsc((c.change_id || '').replace(/'/g, "\\'")); /* B12: JS string escape + HTML attribute escape */
     const statusLabel = _APPROVAL_STATUS_CN[c.approval_status] || c.approval_status || '待批准';
     const statusChip = ocChip(statusLabel, 'warn');
 
@@ -1518,9 +1517,9 @@ function renderPendingAudit(changes) {
 
       html += '<div class="gov-flex gap-2 mt-3">';
       html += '<button class="oc-btn oc-btn-success fs-dense py-2 px-4" '
-        + 'onclick="auditApprove(\'' + cidJs + '\')">✔ 批准</button>';
+        + 'data-audit-action="approve" data-change-id="' + cid + '">✔ 批准</button>';
       html += '<button class="oc-btn oc-btn-danger fs-dense py-2 px-4" '
-        + 'onclick="auditReject(\'' + cidJs + '\')">✖ 拒絕</button>';
+        + 'data-audit-action="reject" data-change-id="' + cid + '">✖ 拒絕</button>';
       html += '</div>';
     }
     html += '<div class="fs-micro t-dim mt-2 o-50">ID: ' + cid
@@ -1529,6 +1528,18 @@ function renderPendingAudit(changes) {
   }
   html += '</div>';
   el.innerHTML = html;
+  el.querySelectorAll('[data-audit-action][data-change-id]').forEach(button => {
+    button.addEventListener('click', () => {
+      const changeId = button.getAttribute('data-change-id') || '';
+      const action = button.getAttribute('data-audit-action');
+      if (action === 'approve') {
+        auditApprove(changeId);
+      } else if (action === 'reject') {
+        auditReject(changeId);
+      }
+      // 未知 action 保持 fail-closed no-op。
+    });
+  });
 }
 
 async function auditApprove(changeId) {

@@ -20,6 +20,7 @@ import json
 import time
 import tempfile
 import unittest
+from unittest import mock
 
 # Path setup — same pattern as other test files in this directory
 # 路徑設置 — 與本目錄其他測試文件相同的模式
@@ -28,7 +29,12 @@ _control_api_dir = os.path.dirname(_test_dir)
 if _control_api_dir not in sys.path:
     sys.path.insert(0, _control_api_dir)
 
-from app.ipc_state_reader import RustSnapshotReader, get_rust_reader, _CACHE_TTL_SECONDS
+from app.ipc_state_reader import (
+    RustSnapshotReader,
+    get_rust_reader,
+    _CACHE_TTL_SECONDS,
+    _MAX_SNAPSHOT_BYTES,
+)
 
 # ---------------------------------------------------------------------------
 # Realistic snapshot fixture matching Rust PipelineSnapshot format
@@ -300,6 +306,168 @@ class TestErrorHandling(unittest.TestCase):
         self.assertIsInstance(snap["latest_prices"], dict)
         self.assertIsInstance(snap["stats"], dict)
         self.assertIsInstance(snap["source"], str)
+
+    def test_engine_name_cannot_escape_snapshot_data_directory(self):
+        data_dir = os.path.join(self._tmpdir.name, "data")
+        outside_dir = os.path.join(self._tmpdir.name, "outside")
+        os.makedirs(os.path.join(data_dir, "pipeline_snapshot_.."))
+        os.makedirs(outside_dir)
+        with open(os.path.join(outside_dir, "snapshot.json"), "w", encoding="utf-8") as f:
+            json.dump(SAMPLE_SNAPSHOT, f)
+        reader = RustSnapshotReader(data_dir=data_dir)
+
+        result = reader.get_engine_snapshot("../../../outside/snapshot")
+
+        self.assertIsNone(result)
+
+    def test_engine_snapshot_symlink_cannot_escape_data_directory(self):
+        data_dir = os.path.join(self._tmpdir.name, "data")
+        outside_path = os.path.join(self._tmpdir.name, "outside.json")
+        os.makedirs(data_dir)
+        with open(outside_path, "w", encoding="utf-8") as f:
+            json.dump(SAMPLE_SNAPSHOT, f)
+        os.symlink(outside_path, os.path.join(data_dir, "pipeline_snapshot_demo.json"))
+        reader = RustSnapshotReader(data_dir=data_dir)
+
+        result = reader.get_engine_snapshot("demo")
+
+        self.assertIsNone(result)
+
+    def test_primary_snapshot_symlink_fails_closed(self):
+        outside_path = os.path.join(self._tmpdir.name, "outside.json")
+        data_dir = os.path.join(self._tmpdir.name, "data")
+        os.makedirs(data_dir)
+        with open(outside_path, "w", encoding="utf-8") as f:
+            json.dump(SAMPLE_SNAPSHOT, f)
+        os.symlink(outside_path, os.path.join(data_dir, "pipeline_snapshot.json"))
+        reader = RustSnapshotReader(data_dir=data_dir)
+
+        result = reader.get_snapshot()
+
+        self.assertIsNone(result)
+
+    def test_replaced_snapshot_root_symlink_cannot_redirect_primary_read(self):
+        data_dir = os.path.join(self._tmpdir.name, "data")
+        original_dir = os.path.join(self._tmpdir.name, "original-data")
+        outside_dir = os.path.join(self._tmpdir.name, "outside-data")
+        os.makedirs(data_dir)
+        os.makedirs(outside_dir)
+        with open(
+            os.path.join(data_dir, "pipeline_snapshot.json"),
+            "w",
+            encoding="utf-8",
+        ) as f:
+            json.dump({**SAMPLE_SNAPSHOT, "source": "original-root"}, f)
+        with open(
+            os.path.join(outside_dir, "pipeline_snapshot.json"),
+            "w",
+            encoding="utf-8",
+        ) as f:
+            json.dump({**SAMPLE_SNAPSHOT, "source": "external-root"}, f)
+        reader = RustSnapshotReader(data_dir=data_dir)
+        os.rename(data_dir, original_dir)
+        os.symlink(outside_dir, data_dir, target_is_directory=True)
+
+        result = reader.get_snapshot()
+
+        self.assertIsNone(result)
+
+    def test_replaced_intermediate_symlink_cannot_redirect_engine_read(self):
+        configured_parent = os.path.join(self._tmpdir.name, "configured")
+        original_parent = os.path.join(self._tmpdir.name, "original-configured")
+        outside_parent = os.path.join(self._tmpdir.name, "outside")
+        data_dir = os.path.join(configured_parent, "data")
+        outside_data_dir = os.path.join(outside_parent, "data")
+        os.makedirs(data_dir)
+        os.makedirs(outside_data_dir)
+        filename = "pipeline_snapshot_demo.json"
+        with open(os.path.join(data_dir, filename), "w", encoding="utf-8") as f:
+            json.dump({**SAMPLE_SNAPSHOT, "source": "original-engine-root"}, f)
+        with open(
+            os.path.join(outside_data_dir, filename),
+            "w",
+            encoding="utf-8",
+        ) as f:
+            json.dump({**SAMPLE_SNAPSHOT, "source": "external-engine-root"}, f)
+        reader = RustSnapshotReader(data_dir=data_dir)
+        os.rename(configured_parent, original_parent)
+        os.symlink(outside_parent, configured_parent, target_is_directory=True)
+
+        result = reader.get_engine_snapshot("demo")
+
+        self.assertIsNone(result)
+
+    def test_snapshot_swap_after_open_keeps_same_fd_bytes_and_mtime(self):
+        data_dir = os.path.join(self._tmpdir.name, "data")
+        os.makedirs(data_dir)
+        primary_path = os.path.join(data_dir, "pipeline_snapshot.json")
+        replacement_path = os.path.join(data_dir, "replacement.json")
+        original = {**SAMPLE_SNAPSHOT, "source": "opened-original"}
+        replacement = {**SAMPLE_SNAPSHOT, "source": "replacement-path"}
+        with open(primary_path, "w", encoding="utf-8") as f:
+            json.dump(original, f)
+        old_time = time.time() - 120
+        os.utime(primary_path, (old_time, old_time))
+        with open(replacement_path, "w", encoding="utf-8") as f:
+            json.dump(replacement, f)
+        reader = RustSnapshotReader(data_dir=data_dir)
+        real_open = os.open
+        open_count = 0
+        def open_then_swap(path, flags, *args, **kwargs):
+            nonlocal open_count
+            fd = real_open(path, flags, *args, **kwargs)
+            if (
+                os.fspath(path) == "pipeline_snapshot.json"
+                and kwargs.get("dir_fd") is not None
+            ):
+                open_count += 1
+                os.replace(replacement_path, primary_path)
+            return fd
+
+        with mock.patch("app.ipc_state_reader.os.open", side_effect=open_then_swap):
+            result = reader.get_snapshot()
+
+        self.assertEqual(open_count, 1)
+        self.assertEqual(result["source"], "opened-original")
+        self.assertGreater(reader._cache_file_age, 60)
+
+    def test_primary_and_engine_fifos_fail_closed_without_blocking(self):
+        for filename, reader_call in (
+            ("pipeline_snapshot.json", lambda reader: reader.get_snapshot()),
+            (
+                "pipeline_snapshot_demo.json",
+                lambda reader: reader.get_engine_snapshot("demo"),
+            ),
+        ):
+            path = os.path.join(self._tmpdir.name, filename)
+            os.mkfifo(path)
+            reader = RustSnapshotReader(data_dir=self._tmpdir.name)
+
+            started = time.monotonic()
+            result = reader_call(reader)
+            elapsed = time.monotonic() - started
+
+            self.assertIsNone(result)
+            self.assertLess(elapsed, 1.0)
+            os.unlink(path)
+
+    def test_primary_and_engine_oversized_snapshots_fail_closed(self):
+        for filename, reader_call in (
+            ("pipeline_snapshot.json", lambda reader: reader.get_snapshot()),
+            (
+                "pipeline_snapshot_demo.json",
+                lambda reader: reader.get_engine_snapshot("demo"),
+            ),
+        ):
+            path = os.path.join(self._tmpdir.name, filename)
+            with open(path, "wb") as f:
+                f.write(b"{" + b"x" * _MAX_SNAPSHOT_BYTES)
+            reader = RustSnapshotReader(data_dir=self._tmpdir.name)
+
+            result = reader_call(reader)
+
+            self.assertIsNone(result)
+            os.unlink(path)
 
 
 # ===========================================================================

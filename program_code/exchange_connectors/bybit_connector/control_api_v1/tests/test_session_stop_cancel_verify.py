@@ -161,7 +161,7 @@ def test_sweep_orphan_orders_handles_cancel_failure():
     result = sar._sweep_orphan_orders(rc, "demo", errors)
     assert result.get("skipped") is True
     assert result.get("reason") == "order_sweep_cancel_all_failed"
-    assert any("bybit 503" in e for e in errors)
+    assert errors == ["order_sweep_demo_failed"]
     assert any("order_sweep_demo" in e for e in errors)
 
 
@@ -378,7 +378,7 @@ async def test_demo_close_all_reports_orphan_sweep_failure(monkeypatch):
     assert data["status"] == "partial_failure"
     assert data["closed_all"] is False
     assert data["partial_failure"] is True
-    assert data["errors"] == ["orphan_BTCUSDT: bybit rejected"]
+    assert data["errors"] == ["demo_operation_failed"]
 
 
 @pytest.mark.asyncio

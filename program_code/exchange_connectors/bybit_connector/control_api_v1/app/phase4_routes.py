@@ -39,6 +39,7 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
 from . import main_legacy as base
+from .error_sanitize import log_safe_exception
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +100,7 @@ async def _query_engine_status() -> dict[str, Any]:
         # 延遲匯入以避免在測試環境硬耦合。
         from .ipc_client import EngineIPCClient  # type: ignore
     except Exception as exc:  # pragma: no cover - import-time guard
-        logger.warning("phase4: IPC client import failed: %s", exc)
+        log_safe_exception(logger, "phase4_ipc_client_import", exc, level=logging.WARNING)
         return _grey_payload(degraded=True, reason="ipc_client_import_failed")
 
     client_factory = getattr(EngineIPCClient, "get_singleton", None)
@@ -115,7 +116,7 @@ async def _query_engine_status() -> dict[str, Any]:
             return _grey_payload(degraded=True, reason="bad_payload_shape")
         return _sanitize(raw)
     except Exception as exc:
-        logger.warning("phase4: IPC get_phase4_status failed: %s", exc)
+        log_safe_exception(logger, "phase4_status_ipc", exc, level=logging.WARNING)
         return _grey_payload(degraded=True, reason=f"ipc_error:{type(exc).__name__}")
 
 
@@ -272,7 +273,7 @@ async def get_phase4_linucb() -> dict[str, Any]:
     try:
         return _fetch_linucb_state_from_pg()
     except Exception as exc:
-        logger.warning("phase4/linucb fail-soft: %s", exc)
+        log_safe_exception(logger, "phase4_linucb_read", exc, level=logging.WARNING)
         return _default_linucb_payload(reason=f"{type(exc).__name__}")
 
 
@@ -402,7 +403,7 @@ async def get_phase4_teacher() -> dict[str, Any]:
     try:
         return _fetch_teacher_state_from_pg()
     except Exception as exc:
-        logger.warning("phase4/teacher fail-soft: %s", exc)
+        log_safe_exception(logger, "phase4_teacher_read", exc, level=logging.WARNING)
         return _default_teacher_payload(reason=f"{type(exc).__name__}")
 
 
@@ -556,7 +557,7 @@ async def get_phase4_news() -> dict[str, Any]:
     try:
         return _fetch_news_state_from_pg()
     except Exception as exc:
-        logger.warning("phase4/news fail-soft: %s", exc)
+        log_safe_exception(logger, "phase4_news_read", exc, level=logging.WARNING)
         return _default_news_payload(reason=f"{type(exc).__name__}")
 
 
@@ -757,7 +758,7 @@ async def get_phase4_dl3() -> dict[str, Any]:
     try:
         return _fetch_dl3_state_from_pg()
     except Exception as exc:
-        logger.warning("phase4/dl3 fail-soft: %s", exc)
+        log_safe_exception(logger, "phase4_dl3_read", exc, level=logging.WARNING)
         return _default_dl3_payload(reason=f"{type(exc).__name__}")
 
 
@@ -815,8 +816,13 @@ def _update_weekly_review(week_iso: str, approved: bool, approved_by: str, decis
                 }
             return {"ok": False, "error": "no_pending_review_for_week"}
     except Exception as exc:
-        logger.warning("phase4/weekly_review update fail-soft: %s", exc)
-        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        log_safe_exception(
+            logger,
+            "phase4_weekly_review_update",
+            exc,
+            level=logging.WARNING,
+        )
+        return {"ok": False, "error": "weekly_review_update_failed"}
     finally:
         db_pool.put_conn(conn)
 
@@ -892,8 +898,13 @@ async def get_latest_weekly_review() -> dict[str, Any]:
                 },
             }
     except Exception as exc:
-        logger.warning("phase4/weekly_review/latest fail-soft: %s", exc)
-        return {"ok": False, "error": f"{type(exc).__name__}: {exc}", "review": None}
+        log_safe_exception(
+            logger,
+            "phase4_weekly_review_latest",
+            exc,
+            level=logging.WARNING,
+        )
+        return {"ok": False, "error": "weekly_review_unavailable", "review": None}
     finally:
         db_pool.put_conn(conn)
 
