@@ -1340,8 +1340,9 @@ impl OrderExecDataDigest {
 
     /// W6-S0:入站 typed reject → audit 身分落帳（單調計數+最後樣本;CC lineage 斷點 1 收口
     /// ——driver 對資料層 reject 走 `Err(_)=>{}` 續 serve,身分由此觀測面承載）。
-    /// 已在拒點就地計數者（no_active_context/overflow/grammar/unknown_denied/cap）此處
-    /// 跳過防重複;begin 域拒（floor/單槽自限/世代政策）由 pump 的閘先擋,不屬入站觀測面。
+    /// `CacheCapExceeded` 在**本函數**計數（拒點無就地計數,勿再補第二次）;已在拒點就地
+    /// 計數者（no_active_context/overflow/grammar/unknown_denied）此處跳過防重複;begin 域
+    /// 拒（floor/單槽自限/世代政策）由 pump 的閘先擋,不屬入站觀測面。
     fn audit_reject(&mut self, e: &OrderExecDataReject) {
         match e {
             OrderExecDataReject::WireMalformed(c) => {
