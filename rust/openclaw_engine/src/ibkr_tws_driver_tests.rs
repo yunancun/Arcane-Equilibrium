@@ -709,7 +709,11 @@ async fn w5_off_whitelist_tag_invalidates_snapshot_but_session_survives() {
 
 #[tokio::test]
 async fn w5_position_version_too_old_rejected_session_survives() {
-    // G1:v2 position 行(無 avgCost)→ typed 拒不捏值;positionEnd 仍消化(訂閱 Live 空快照)。
+    use crate::ibkr_tws_account_data::SnapshotStaleness;
+
+    // G1+F1(E2):v2 position 行(無 avgCost)→ typed 拒不捏值 **且毒化快照**——其後
+    // positionEnd 不得把缺行快照推到 Live/Fresh(W5-S4 attestation/對賬不得見真值假象)。
+    // 資料層 fail-closed:session 存活到腳本 EOF,非 wire 斷線。
     let (mut driver, _h) = fake_driver(scenarios::position_version_too_old());
     driver.enable_account_data_subscriptions();
     let mut clock = TestClock::at(1_000);
@@ -721,6 +725,12 @@ async fn w5_position_version_too_old_rejected_session_survives() {
         driver.account_data().positions_rows().count(),
         0,
         "v<3 行不得以 avgCost=0 捏值併入"
+    );
+    // F1:快照不可用(Invalidated 經 on_disconnect 保留,不被斷線標記沖淡)。
+    assert_eq!(
+        driver.account_data().positions_staleness(0),
+        SnapshotStaleness::Invalidated,
+        "v<3 後 positionEnd 不得推 Live/Fresh——快照必須不可用"
     );
 }
 

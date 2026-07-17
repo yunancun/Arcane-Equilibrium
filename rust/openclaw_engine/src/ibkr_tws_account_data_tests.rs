@@ -443,6 +443,85 @@ fn g1_position_version_below_3_rejected_no_fabricated_avg_cost() {
         AccountDataReject::PositionVersionTooOld { version: 2 }
     );
     assert_eq!(d.positions_rows().count(), 0);
+    // F1(E2):v<3=協議異常必須毒化——否則其後 positionEnd 會把缺行快照推到 Live/Fresh。
+    assert_eq!(d.positions_staleness(T0), SnapshotStaleness::Invalidated);
+    // 毒化後 positionEnd 不得復活快照(非活躍 → typed 拒)。
+    assert_eq!(
+        d.on_position_end_frame(&position_end_payload(), T0 + 1)
+            .unwrap_err(),
+        AccountDataReject::NoActiveSubscription
+    );
+    assert_eq!(
+        d.positions_staleness(T0 + 2),
+        SnapshotStaleness::Invalidated
+    );
+    // 未訂閱槽收 v<3 行 → NoActiveSubscription 先裁,不得毒化 Idle 槽。
+    let mut d = digest();
+    assert_eq!(
+        d.on_position_frame(&payload, T0).unwrap_err(),
+        AccountDataReject::NoActiveSubscription
+    );
+    assert_eq!(d.positions_staleness(T0), SnapshotStaleness::NotSubscribed);
+}
+
+#[test]
+fn f2_extra_wire_fields_are_malformed_exact_length_discipline() {
+    // F2(E2):按位消費不容錯位——summary 行/兩 End 多餘欄=WireMalformed(與 position !=16 同紀律)。
+    // summary 行 8 欄(多 1)。
+    let mut d = digest();
+    d.begin_account_summary(REQ_ID).unwrap();
+    let extra = encode_fields(&[
+        "63",
+        "1",
+        &REQ_ID.to_string(),
+        "DU1",
+        "NetLiquidation",
+        "1",
+        "USD",
+        "surplus",
+    ]);
+    assert!(matches!(
+        d.on_account_summary_frame(&extra, T0).unwrap_err(),
+        AccountDataReject::WireMalformed(_)
+    ));
+    // summaryEnd 4 欄(多 1)。
+    let extra_end = encode_fields(&["64", "1", &REQ_ID.to_string(), "surplus"]);
+    assert!(matches!(
+        d.on_account_summary_end_frame(&extra_end, T0).unwrap_err(),
+        AccountDataReject::WireMalformed(_)
+    ));
+    // positionEnd 3 欄(多 1)。
+    let mut d = digest();
+    d.begin_positions(SERVER_V).unwrap();
+    let extra_pend = encode_fields(&["62", "1", "surplus"]);
+    assert!(matches!(
+        d.on_position_end_frame(&extra_pend, T0).unwrap_err(),
+        AccountDataReject::WireMalformed(_)
+    ));
+    // position 行 17 欄(多 1)既有 !=16 紀律覆蓋,此處對齊驗一次。
+    let mut extra_pos = vec![
+        "61", "3", "DU1", "756733", "SPY", "STK", "", "0", "", "", "ARCA", "USD", "SPY", "SPY",
+        "100", "412.35",
+    ];
+    extra_pos.push("surplus");
+    assert!(matches!(
+        d.on_position_frame(&encode_fields(&extra_pos), T0)
+            .unwrap_err(),
+        AccountDataReject::WireMalformed(_)
+    ));
+}
+
+#[test]
+fn f7_cancel_with_broken_req_id_invariant_is_typed_rejected() {
+    // F7(E2):活躍卻無 reqId=不變量破裂 → typed 拒 + 毒化,不得默認 reqId=0 上 wire。
+    let mut d = digest();
+    d.begin_account_summary(REQ_ID).unwrap();
+    d.summary_req_id = None; // 人為破壞不變量(測試為子模塊,可觸私有欄)
+    assert_eq!(
+        d.cancel_account_summary().unwrap_err(),
+        AccountDataReject::SubscriptionStateCorrupted
+    );
+    assert_eq!(d.summary_staleness(T0), SnapshotStaleness::Invalidated);
 }
 
 #[test]
