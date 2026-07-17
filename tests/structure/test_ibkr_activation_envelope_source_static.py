@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 
@@ -259,28 +260,40 @@ def _g4_entry_region(code: str) -> str:
     return code[idx:]
 
 
+# ea3 gate **呼叫點** pattern:負向後顧排除 `fn ` 定義行前綴——防 code-motion 把
+# `fn ea3_envelope_activation_gate(` 定義(含 entry 內嵌套 fn)重排進 region 充當
+# 呼叫點,令守衛無聲去牙(E2-LOW)。
+_EA3_GATE_CALL = re.compile(r"(?<!fn )ea3_envelope_activation_gate\s*\(")
+
+
+def _ea3_gate_call_idx(region: str) -> int:
+    m = _EA3_GATE_CALL.search(region)
+    return m.start() if m is not None else -1
+
+
 def test_g4_entry_consumes_envelope_gate_before_socket_connect() -> None:
-    # entry 區域內:ea3 gate 呼叫必須存在且先於唯一 TcpStream::connect(活化時刻緊接接觸)。
+    # entry 區域內:ea3 gate **呼叫**(非定義)必須存在且先於唯一 TcpStream::connect
+    # (活化時刻緊接接觸)。
     region = _g4_entry_region(_client_code())
-    gate_idx = region.find("ea3_envelope_activation_gate(")
+    gate_idx = _ea3_gate_call_idx(region)
     connect_idx = region.find("TcpStream::connect")
-    assert gate_idx >= 0, "g4 entry does not consume ea3_envelope_activation_gate"
+    assert gate_idx >= 0, "g4 entry does not call ea3_envelope_activation_gate"
     assert connect_idx >= 0, "g4 entry lost its TcpStream::connect anchor"
     assert gate_idx < connect_idx, "envelope gate must precede any socket contact"
 
 
 def test_g4_entry_keeps_every_preexisting_gate_before_envelope_gate() -> None:
     # 加閘=收緊:env APPLY → seal+approval → structural host/port 全部保留且序在
-    # envelope 閘之前(前置 gate 失敗不燒 nonce)。
+    # envelope 閘(呼叫點,非定義)之前(前置 gate 失敗不燒 nonce)。
     region = _g4_entry_region(_client_code())
     env_idx = region.find('"OPENCLAW_IBKR_G4_CONTACT_APPLY"')
     seal_idx = region.find("phase2_first_contact_gate_ok()")
     endpoint_idx = region.find("assert_loopback_paper_endpoint(")
-    gate_idx = region.find("ea3_envelope_activation_gate(")
+    gate_idx = _ea3_gate_call_idx(region)
     assert env_idx >= 0, "env APPLY gate removed"
     assert seal_idx >= 0, "seal+approval gate removed"
     assert endpoint_idx >= 0, "structural endpoint gate removed"
-    assert gate_idx >= 0, "envelope gate absent"
+    assert gate_idx >= 0, "envelope gate call absent"
     assert env_idx < seal_idx < endpoint_idx < gate_idx, (
         "pre-existing gate chain reordered/weakened relative to envelope gate"
     )
