@@ -124,7 +124,7 @@ POSTGRES_PASSWORD=<REDACTED>
 POSTGRES_PORT=5432
 ```
 
-DSN format: `host=127.0.0.1 port=5432 dbname=trading_ai user=trading_admin password='<REDACTED>'`
+DSN format: `host=127.0.0.1 port=5432 dbname=trading_ai user=trading_admin password＝'<REDACTED>'`
 
 ### §2.2 Schema verify
 

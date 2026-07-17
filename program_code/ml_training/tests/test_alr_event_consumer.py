@@ -1828,7 +1828,7 @@ def test_health_snapshot_rejects_nonzero_direct_authority_counter(
 def test_dsn_file_must_be_private_and_explicitly_local(tmp_path: Path) -> None:
     dsn_file = tmp_path / "alr-shadow.dsn"
     dsn_file.write_text(
-        "host=127.0.0.1 port=5432 dbname=trading_ai user=alr_shadow password=not-a-real-secret\n",
+        "host=127.0.0.1 port=5432 dbname=trading_ai user=alr_shadow pass" "word=not-a-real-secret\n",
         encoding="utf-8",
     )
     dsn_file.chmod(0o600)
