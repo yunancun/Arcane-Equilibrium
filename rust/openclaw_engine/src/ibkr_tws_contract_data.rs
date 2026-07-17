@@ -320,13 +320,18 @@ impl ContractDataDigest {
         if !query.is_fully_qualified() {
             return Err(ContractDataReject::QueryNotFullyQualified);
         }
+        // E2-F1:builder 對 caller 供給欄做 NUL/非 ASCII 校驗**先於任何狀態轉移**——被注入的
+        // 查詢 → typed `WireMalformed(OutboundFieldInvalid)`,digest 相位不動（不誤標訂閱中）,
+        // 絕不送出被注入的 frame;pump 的 `Err(_)=>{}` 兜住,下 tick 以同槽重評（Idle 未污染）。
+        let frame = encode_req_contract_details(req_id, query)
+            .map_err(ContractDataReject::WireMalformed)?;
         self.server_version = Some(server_version);
         self.snapshot_seq += 1;
         self.identity_rows.clear();
         self.phase = SubPhase::SnapshotIncomplete;
         self.req_id = Some(req_id);
         self.request_started_at_ms = now_ms;
-        Ok(encode_req_contract_details(req_id, query))
+        Ok(frame)
     }
 
     /// **請求 timeout typed 化**（非懸掛）:在途請求逾 config 窗無 End → 釋放槽回 Idle +

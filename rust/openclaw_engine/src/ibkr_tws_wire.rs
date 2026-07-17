@@ -139,6 +139,12 @@ pub enum CodecError {
     /// length 欄超過 `MAX_FRAME_LEN`（分配前即拒,杜絕 OOM）。
     #[error("frame too large (length prefix exceeds MAX_FRAME_LEN)")]
     FrameTooLarge,
+    /// **出站欄位注入面 fail-closed**（E2-F1）:builder 的 caller 供給字串含 NUL 或非 ASCII。
+    /// 為什麼硬拒:TWS wire 以 `\0` 終止欄——欄內嵌 NUL 會在 wire 上裂成兩欄=**欄位注入**
+    /// （可偽造後續欄語義）;非 ASCII 於 TWS ASCII 協議下 gateway 行為未定義。builder 級單一
+    /// 校驗點,不猜、不 sanitize（清洗會靜默改變 caller 意圖）。
+    #[error("outbound field invalid ({0})")]
+    OutboundFieldInvalid(&'static str),
 }
 
 /// server 首個握手回應（serverVersion + connectionTime,兩個 `\0`-終止欄）。
@@ -185,6 +191,8 @@ pub(crate) fn try_decode_frame(buf: &[u8]) -> Result<Option<(usize, Vec<u8>)>, C
 }
 
 /// encode `\0`-終止欄位序列（每欄尾附一個 `\0`;TWS wire 為 null-terminated 欄,非分隔）。
+/// **注**:此 raw 形供內部常數欄（msgId/version 等 builder 私有字面量,無注入面）;caller
+/// 供給字串一律走 `encode_fields_checked`（E2-F1）。
 pub(crate) fn encode_fields(fields: &[&str]) -> Vec<u8> {
     let mut out = Vec::new();
     for f in fields {
@@ -192,6 +200,28 @@ pub(crate) fn encode_fields(fields: &[&str]) -> Vec<u8> {
         out.push(0);
     }
     out
+}
+
+/// **E2-F1 出站欄位注入校驗**:拒 NUL（wire 欄位終止符,內嵌=欄位注入面）與非 ASCII
+/// （TWS 為 ASCII 協議,gateway 對非 ASCII 行為未定義）→ typed err。builder 級單一校驗點。
+pub(crate) fn validate_outbound_field(s: &str) -> Result<(), CodecError> {
+    if s.as_bytes().contains(&0) {
+        return Err(CodecError::OutboundFieldInvalid("embedded NUL"));
+    }
+    if !s.is_ascii() {
+        return Err(CodecError::OutboundFieldInvalid("non-ascii"));
+    }
+    Ok(())
+}
+
+/// encode `\0`-終止欄位序列,**但每欄先過 `validate_outbound_field`**（E2-F1;builder 用——
+/// 凡含 caller 供給字串的出站 frame 一律經此,結構性杜絕 NUL 欄位注入 / 非 ASCII）。內部
+/// 常數欄一同過校驗（成本可忽略,保單一編碼路徑;常數必過）。
+pub(crate) fn encode_fields_checked(fields: &[&str]) -> Result<Vec<u8>, CodecError> {
+    for f in fields {
+        validate_outbound_field(f)?;
+    }
+    Ok(encode_fields(fields))
 }
 
 /// decode `\0`-終止欄位。**嚴限 frame slice 內**：掃描 `\0` 切欄,任一欄非 ASCII → `Malformed`;
@@ -745,6 +775,32 @@ mod tests {
             err,
             FrameReaderError::Codec(CodecError::EmptyFrame)
         ));
+    }
+
+    // ---- (a) E2-F1 出站欄位注入校驗 ----
+
+    #[test]
+    fn encode_fields_checked_accepts_plain_ascii() {
+        // 正常 ASCII 欄透傳,位元組與 raw 形一致（校驗僅拒,不改寫）。
+        let checked = encode_fields_checked(&["1", "SMART", "SPY"]).unwrap();
+        assert_eq!(checked, encode_fields(&["1", "SMART", "SPY"]));
+    }
+
+    #[test]
+    fn encode_fields_checked_rejects_embedded_nul_injection() {
+        // 內嵌 NUL 會在 wire 上裂成兩欄=欄位注入 → fail-closed typed err（不 sanitize）。
+        let err = encode_fields_checked(&["1", "SMART\0X", "SPY"]).unwrap_err();
+        assert!(matches!(
+            err,
+            CodecError::OutboundFieldInvalid("embedded NUL")
+        ));
+    }
+
+    #[test]
+    fn encode_fields_checked_rejects_non_ascii() {
+        // 非 ASCII 於 TWS ASCII 協議下 gateway 行為未定義 → fail-closed。
+        let err = encode_fields_checked(&["1", "SPÜ", "SPY"]).unwrap_err();
+        assert!(matches!(err, CodecError::OutboundFieldInvalid("non-ascii")));
     }
 
     // ---- (c) msgId 白名單 + 錯誤分類橋 ----
