@@ -9,6 +9,7 @@ pub mod agent;
 pub mod asset_venue;
 pub mod cognitive;
 pub mod ibkr_account_summary_row;
+pub mod ibkr_activation_envelope;
 pub mod ibkr_commissions_row;
 pub mod ibkr_executions_row;
 pub mod ibkr_feature_flag_secret_auth;
@@ -59,6 +60,11 @@ pub use ibkr_account_summary_row::{
     IbkrAccountSummaryRowBlocker, IbkrAccountSummaryRowV1, IbkrAccountSummaryRowVerdict,
     IbkrAccountSummaryTagV1, IBKR_ACCOUNT_SUMMARY_ROW_CONTRACT_ID,
     IBKR_ACCOUNT_SUMMARY_WIRE_TAG_WHITELIST,
+};
+pub use ibkr_activation_envelope::{
+    IbkrActivationEnvelopeBlocker, IbkrActivationEnvelopeV1, IbkrActivationEnvelopeVerdict,
+    IbkrActivationOperationScopeV1, IBKR_ACTIVATION_ENVELOPE_CONTRACT_ID,
+    IBKR_ACTIVATION_WINDOW_MAX_MS,
 };
 pub use ibkr_commissions_row::{
     IbkrCommissionsRowBlocker, IbkrCommissionsRowV1, IbkrCommissionsRowVerdict,

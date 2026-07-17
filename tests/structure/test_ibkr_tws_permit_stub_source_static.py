@@ -239,6 +239,187 @@ def positive_control(full_source: str) -> list[str]:
     return escaped
 
 
+# ═════════════════════════════════════════════════════════════════════════════
+# E3-F1 permit audit-scope 四聯擴張（W8a 首階段;IBKR_TODO §7 W3 移交項）
+#   掃描面從 file-scoped(ibkr_tws_session.rs) 擴到全 production 域 + driver +
+#   W8a envelope 驗證器。W8 落 production TCP factory 時做第二階段擴張並吸收。
+#
+# 四聯斷言（production 域 = rust/openclaw_engine/src 全部 .rs,排除 *_tests.rs 與
+# */tests/* —— granting provider 只存在於 cfg(test) 掛入的 *_tests.rs 檔）:
+#   ① 唯一 connect 位點:permit-path 檔集(session/driver/envelope-check)內,唯一的
+#      connect 呼叫 = driver 的 `self.factory.connect()`（恰一處);三檔零
+#      `TcpStream`（真 socket factory 是 W8 事,落地時本段第二階段擴張）。
+#   ② connect 前必經 permit 且 `PermitToken` move 消費:driver `connect_and_handshake`
+#      內 `self.permit.check()` 必在 `self.factory.connect()` 之前;token 以
+#      `on_permit_granted(token` move 進 FSM(單次消費)。
+#   ③ fake 缺席:production 域零 `GrantingProvider`。
+#   ④ provider 型別唯一性:production 域唯一 `impl ConnectPermitProvider` =
+#      session 檔的 `EnvelopeRequiredStub`;`PermitToken::mint(` 全域零 production
+#      呼叫點;W8a envelope 驗證器(只驗不發)零 permit 面型別觸碰。
+#   正控:注入第二 impl / mint 呼叫 / 第二 connect 位點 / TcpStream / 移除 permit
+#   check → 守衛必 FAIL（證明有牙）。
+#
+# 範圍注記:`ibkr_readonly_tws_client.rs`(G4 B1 客戶端)與 `ai_service_client.rs`
+# 的 connect 是**獨立受審面**（ibkr_g4_symbol_audit.sh / 各自 gate),不屬 permit
+# connect 路徑,不入 ① 檔集;④ 的全域 impl/mint 掃描仍覆蓋之。
+# ═════════════════════════════════════════════════════════════════════════════
+
+ENGINE_SRC = ROOT / "rust/openclaw_engine/src"
+SESSION_REL = "rust/openclaw_engine/src/ibkr_tws_session.rs"
+DRIVER_REL = "rust/openclaw_engine/src/ibkr_tws_driver.rs"
+ENVELOPE_CHECK_REL = "rust/openclaw_engine/src/ibkr_activation_envelope_check.rs"
+PERMIT_PATH_RELS = (SESSION_REL, DRIVER_REL, ENVELOPE_CHECK_REL)
+
+
+def _production_engine_sources() -> dict[str, str]:
+    """production 域源集:engine src 全部 .rs,排除 `*_tests.rs` 與 `*/tests/*`
+    （兩者皆 cfg(test) 專屬——granting provider 的合法棲地）。"""
+    sources: dict[str, str] = {}
+    for path in sorted(ENGINE_SRC.rglob("*.rs")):
+        rel = path.relative_to(ROOT).as_posix()
+        if path.name.endswith("_tests.rs") or "/tests/" in rel:
+            continue
+        sources[rel] = path.read_text(encoding="utf-8", errors="ignore")
+    return sources
+
+
+def run_audit4(sources: dict[str, str]) -> tuple[list[str], list[str]]:
+    """四聯 audit(純函數;正控可對 mutated 源集重跑)。回 (violations, inconclusive)。"""
+    violations: list[str] = []
+    inconclusive: list[str] = []
+
+    for rel in PERMIT_PATH_RELS:
+        if rel not in sources:
+            inconclusive.append(f"permit-path source absent: {rel}")
+    if inconclusive:
+        return violations, inconclusive
+
+    code = {rel: _strip_line_comments(text) for rel, text in sources.items()}
+
+    # ④ provider 型別唯一性(全 production 域)。
+    impls: list[tuple[str, str]] = []
+    for rel, c in code.items():
+        for m in re.finditer(r"\bimpl\s+ConnectPermitProvider\s+for\s+(\w+)", c):
+            impls.append((rel, m.group(1)))
+    if not impls:
+        inconclusive.append("no production impl ConnectPermitProvider found (anchor absent)")
+        return violations, inconclusive
+    if impls != [(SESSION_REL, "EnvelopeRequiredStub")]:
+        violations.append(
+            "(4) production ConnectPermitProvider impl set is not exactly "
+            f"{{EnvelopeRequiredStub @ session}}: {impls}"
+        )
+
+    # ④b `PermitToken::mint(` 全域零 production 呼叫點(定義行是 `fn mint`,不匹配此型)。
+    for rel, c in code.items():
+        if re.search(r"PermitToken::mint\s*\(", c):
+            violations.append(f"(4) PermitToken::mint call site in production source: {rel}")
+
+    # ③ fake 缺席:granting provider 只可存在於 cfg(test) 測試檔。
+    for rel, c in code.items():
+        if "GrantingProvider" in c:
+            violations.append(f"(3) GrantingProvider present in production source: {rel}")
+
+    # ① 唯一 connect 位點(permit-path 檔集)。
+    driver_code = code[DRIVER_REL]
+    factory_connect = len(re.findall(r"\.factory\s*\.\s*connect\s*\(", driver_code))
+    if factory_connect != 1:
+        violations.append(
+            f"(1) driver must have exactly one factory.connect() call site, found {factory_connect}"
+        )
+    dot_connect = len(re.findall(r"\.connect\s*\(", driver_code))
+    if dot_connect != factory_connect:
+        violations.append(
+            "(1) driver has connect call site(s) outside the single factory.connect() "
+            f"(total {dot_connect})"
+        )
+    for rel in (SESSION_REL, ENVELOPE_CHECK_REL):
+        if re.search(r"\.connect\s*\(", code[rel]):
+            violations.append(f"(1) forbidden connect call site outside driver: {rel}")
+    for rel in PERMIT_PATH_RELS:
+        if "TcpStream" in code[rel]:
+            violations.append(f"(1) TcpStream in permit-path source (W8 TCP factory not landed): {rel}")
+
+    # ② connect 前必經 permit + token move 消費。
+    permit_idx = driver_code.find("self.permit.check()")
+    connect_idx = driver_code.find("self.factory.connect()")
+    if permit_idx < 0:
+        violations.append("(2) driver permit gate `self.permit.check()` absent")
+    if connect_idx < 0:
+        violations.append("(2) driver `self.factory.connect()` absent")
+    if permit_idx >= 0 and connect_idx >= 0 and permit_idx > connect_idx:
+        violations.append("(2) factory.connect() precedes permit.check() (permit not a pre-gate)")
+    if "on_permit_granted(token" not in driver_code:
+        violations.append("(2) PermitToken move-consumption `on_permit_granted(token` absent")
+
+    # ④c W8a envelope 驗證器隔離:只驗不發,W8 前不得觸碰 permit 面型別。
+    for tok in ("ConnectPermitProvider", "PermitToken"):
+        if tok in code[ENVELOPE_CHECK_REL]:
+            violations.append(f"(4) envelope check touches permit surface `{tok}` before W8")
+
+    return violations, inconclusive
+
+
+def _audit4_mutations(sources: dict[str, str]) -> list[tuple[str, dict[str, str]]]:
+    """正控 mutation 集;每個都應觸發 ≥1 violation。"""
+    muts: list[tuple[str, dict[str, str]]] = []
+
+    def mutated(rel: str, transform) -> dict[str, str]:
+        out = dict(sources)
+        out[rel] = transform(out[rel])
+        return out
+
+    # Q1:driver 注入第二個 production impl(型別唯一性破口)。
+    muts.append((
+        "Q1 second production impl in driver",
+        mutated(DRIVER_REL, lambda s: s + "\nimpl ConnectPermitProvider for OpenSesame {}\n"),
+    ))
+    # Q2:driver 注入 PermitToken::mint() 呼叫點(自鑄 token)。
+    muts.append((
+        "Q2 PermitToken::mint call in driver",
+        mutated(DRIVER_REL, lambda s: s + "\nfn q2_forge() { let _t = PermitToken::mint(); }\n"),
+    ))
+    # Q3:production 域出現 GrantingProvider(fake 逃逸)。
+    muts.append((
+        "Q3 GrantingProvider leaked into production",
+        mutated(DRIVER_REL, lambda s: s + "\nstruct GrantingProvider;\n"),
+    ))
+    # Q4:driver 注入第二個 connect 位點(唯一位點破口)。
+    muts.append((
+        "Q4 second factory.connect site in driver",
+        mutated(DRIVER_REL, lambda s: s + "\n// q4\nfn q4(&mut self) { let _ = self.factory.connect(); }\n"),
+    ))
+    # Q5:移除 permit 前置閘(connect 不再必經 permit)。
+    muts.append((
+        "Q5 permit gate removed from driver",
+        mutated(DRIVER_REL, lambda s: s.replace("self.permit.check()", "self.permit_gate_removed()")),
+    ))
+    # Q6:envelope 驗證器注入真 socket。
+    muts.append((
+        "Q6 TcpStream in envelope check",
+        mutated(ENVELOPE_CHECK_REL, lambda s: s + "\nfn q6() { let _ = TcpStream::connect(\"127.0.0.1:4001\"); }\n"),
+    ))
+    # Q7:envelope 驗證器提前接 permit trait 位(W8 前禁)。
+    muts.append((
+        "Q7 envelope check impls ConnectPermitProvider",
+        mutated(ENVELOPE_CHECK_REL, lambda s: s + "\nimpl ConnectPermitProvider for ActivationNonceLedger {}\n"),
+    ))
+    return muts
+
+
+def audit4_positive_control(sources: dict[str, str]) -> list[str]:
+    """回未被四聯守衛攔下的 mutation label(應為空;非空=守衛無牙)。"""
+    escaped: list[str] = []
+    for label, mutated_sources in _audit4_mutations(sources):
+        if mutated_sources == sources:
+            escaped.append(f"{label} (mutation was a no-op — anchor text drift)")
+            continue
+        v, _inc = run_audit4(mutated_sources)
+        if not v:
+            escaped.append(f"{label} (audit4 did not FAIL on injected violation)")
+    return escaped
+
+
 # ── 主入口（standalone;fail-closed exit code）────────────────────────────────
 def main() -> int:
     if not SESSION.exists():
@@ -263,7 +444,25 @@ def main() -> int:
             print(f"[permit-stub-audit] FAIL: {v}", file=sys.stderr)
         return 1
 
+    # E3-F1 四聯擴張(W8a 首階段):production 域 + driver + envelope-check。
+    sources = _production_engine_sources()
+    v4, inc4 = run_audit4(sources)
+    if inc4:
+        for r in inc4:
+            print(f"[permit-audit4] INCONCLUSIVE: {r}", file=sys.stderr)
+        return 5
+    escaped4 = audit4_positive_control(sources)
+    if escaped4:
+        for e in escaped4:
+            print(f"[permit-audit4] TOOTHLESS: positive control escaped: {e}", file=sys.stderr)
+        return 6
+    if v4:
+        for v in v4:
+            print(f"[permit-audit4] FAIL: {v}", file=sys.stderr)
+        return 1
+
     print("[permit-stub-audit] PASS: INV-1 permit stub guard (a-e) satisfied; positive controls have teeth")
+    print("[permit-audit4] PASS: E3-F1 four-point audit (1-4) satisfied across production scope; positive controls have teeth")
     return 0
 
 
@@ -279,6 +478,17 @@ def test_permit_stub_positive_controls_have_teeth() -> None:
     assert SESSION.exists(), f"source absent: {SESSION}"
     escaped = positive_control(SESSION.read_text(encoding="utf-8"))
     assert not escaped, f"positive controls escaped (guard toothless): {escaped}"
+
+
+def test_permit_audit4_production_scope_has_zero_violations() -> None:
+    violations, inconclusive = run_audit4(_production_engine_sources())
+    assert not inconclusive, f"inconclusive: {inconclusive}"
+    assert not violations, f"violations: {violations}"
+
+
+def test_permit_audit4_positive_controls_have_teeth() -> None:
+    escaped = audit4_positive_control(_production_engine_sources())
+    assert not escaped, f"audit4 positive controls escaped (toothless): {escaped}"
 
 
 if __name__ == "__main__":
