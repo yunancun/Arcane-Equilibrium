@@ -101,6 +101,15 @@ pub(crate) const IN_OPEN_ORDER_END_MSG_ID: i64 = 53;
 pub(crate) const IN_EXECUTION_DATA_END_MSG_ID: i64 = 55;
 /// IN 59:commissionReport（與 execDetails 無到達順序保證,消化端 execId either-order join）。
 pub(crate) const IN_COMMISSION_REPORT_MSG_ID: i64 = 59;
+// W6-S1 contract details **入站（IN）空間** msg ID。IB 現勘（2026-07-17,官方 ibapi
+// 9.81.1.post1）:OUT REQ_CONTRACT_DATA=9 與 IN NEXT_VALID_ID=9 撞值——OUT 空間常數居
+// `ibkr_tws_contract_data`;命名帶 `IN_`/`OUT_` 方向以免撞值誤用（沿 W5-S2/S3 慣例）。
+/// IN 10:contractData（contractDetails 回報行;**自帶 message-version 欄,消化端硬 pin ==8**）。
+pub(crate) const IN_CONTRACT_DATA_MSG_ID: i64 = 10;
+/// IN 18:bondContractData（cash lane **typed-ignore**:記帳丟棄,不消化、不 unknown-fail）。
+pub(crate) const IN_BOND_CONTRACT_DATA_MSG_ID: i64 = 18;
+/// IN 52:contractDataEnd（嚴格 3 欄 `[msgId, version, reqId]`;快照收批標記）。
+pub(crate) const IN_CONTRACT_DATA_END_MSG_ID: i64 = 52;
 
 // 注:`IB_INFO_CODE_FLOOR`（≥2100 info 地板)單處維護於 openclaw_types crate;B1 driver
 // 直接自 openclaw_types import（避免兩份 2100 常數漂移)。本 wire 檔的錯誤分類走 types
@@ -539,6 +548,12 @@ pub(crate) enum KnownMsgId {
     ExecutionDataEnd,
     /// IN 59:commissionReport。
     CommissionReport,
+    /// IN 10:contractData（W6-S1;OUT 空間 9=reqContractDetails 與 IN 9 撞值,見常數注釋）。
+    ContractData,
+    /// IN 18:bondContractData（W6-S1;cash lane typed-ignore,消化端記帳丟棄）。
+    BondContractData,
+    /// IN 52:contractDataEnd。
+    ContractDataEnd,
 }
 
 /// codec 層 msgId 白名單判定（**入站空間**）:已知 → `Some`;**未知 → `None`（fail-closed,
@@ -559,6 +574,9 @@ pub(crate) fn classify_msg_id(id: i64) -> Option<KnownMsgId> {
         IN_OPEN_ORDER_END_MSG_ID => Some(KnownMsgId::OpenOrderEnd),
         IN_EXECUTION_DATA_END_MSG_ID => Some(KnownMsgId::ExecutionDataEnd),
         IN_COMMISSION_REPORT_MSG_ID => Some(KnownMsgId::CommissionReport),
+        IN_CONTRACT_DATA_MSG_ID => Some(KnownMsgId::ContractData),
+        IN_BOND_CONTRACT_DATA_MSG_ID => Some(KnownMsgId::BondContractData),
+        IN_CONTRACT_DATA_END_MSG_ID => Some(KnownMsgId::ContractDataEnd),
         _ => None,
     }
 }
@@ -749,6 +767,10 @@ mod tests {
         assert_eq!(classify_msg_id(53), Some(KnownMsgId::OpenOrderEnd));
         assert_eq!(classify_msg_id(55), Some(KnownMsgId::ExecutionDataEnd));
         assert_eq!(classify_msg_id(59), Some(KnownMsgId::CommissionReport));
+        // W6-S1:入站 contract details 三 msgId（OUT 9 與 IN 9 撞值不混用）。
+        assert_eq!(classify_msg_id(10), Some(KnownMsgId::ContractData));
+        assert_eq!(classify_msg_id(18), Some(KnownMsgId::BondContractData));
+        assert_eq!(classify_msg_id(52), Some(KnownMsgId::ContractDataEnd));
         // 未知 msgId → None（fail-closed,呼叫端斷線)。
         assert_eq!(classify_msg_id(8), None);
         assert_eq!(classify_msg_id(54), None);

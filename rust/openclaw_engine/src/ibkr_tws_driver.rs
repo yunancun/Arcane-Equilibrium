@@ -50,6 +50,9 @@ use openclaw_types::{IB_INFO_CODE_FLOOR, PINNED_MIN_SERVER_VERSION};
 use crate::ibkr_tws_account_data::{
     AccountDataConfig, AccountDataDigest, AccountDataReject, SnapshotStaleness,
 };
+use crate::ibkr_tws_contract_data::{
+    ContractDataConfig, ContractDataDigest, ContractDataReject, ContractDetailsQuery,
+};
 use crate::ibkr_tws_order_exec_data::{
     OrderExecDataConfig, OrderExecDataDigest, OrderExecDataReject,
 };
@@ -85,6 +88,10 @@ pub(crate) const ACCOUNT_SUMMARY_REQ_ID: i64 = 9001;
 /// W5-S3 executions 快照的固定 reqId（單槽自限,固定 id 無碰撞面;與 9001 錯開——fake 場景
 /// 以此值對齊;通用 request-id 分配器仍歸 W6+ 請求路由）。
 pub(crate) const ORDER_EXEC_REQ_ID: i64 = 9002;
+
+/// W6-S1 contract details 快照的固定 reqId（單槽自限;與 9001/9002 錯開——fake 場景以此值
+/// 對齊;通用 request-id 分配器仍歸 W6+ 請求路由）。
+pub(crate) const CONTRACT_DETAILS_REQ_ID: i64 = 9003;
 
 // ===========================================================================
 // (a) transport 抽象（注入 stream 來源;fake=duplex,W8=TCP factory）
@@ -271,6 +278,8 @@ pub(crate) enum ServeDisconnectCause {
     AccountDataWireMalformed(CodecError),
     /// W5-S3 order/exec 消化判 wire 損壞（CodecError 身分保留）。
     OrderExecWireMalformed(CodecError),
+    /// W6-S1 contract details 消化判 wire 損壞（CodecError 身分保留）。
+    ContractDataWireMalformed(CodecError),
     /// server EOF（write 半關）。
     ServerEof,
     /// 讀錯 / codec 滾動窗超限。
@@ -349,6 +358,15 @@ pub(crate) struct SessionDriver<P: ConnectPermitProvider, F: TransportFactory> {
     /// DIVERGENT-1 floor session 級 blocker 記憶（同 positions_floor_blocked 語義:sv 低於
     /// order/exec 下界 → 本 session 不再重試;W6-S0 起世代推進時真重置重評）。
     order_exec_floor_blocked: bool,
+    /// **W6-S1**:contract details 消化器（入站 IN 10/52/18 分派至此;斷線由 serve 收尾標記）。
+    contract_data: ContractDataDigest,
+    /// W6-S1 查詢 pump 開關（默認 **None**=off;`enable_contract_details(query)` 綁定全限定
+    /// 查詢後 serve 期自動經 governor `AccountData` 主桶送 reqContractDetails。真消費者=
+    /// driver 測試域;TODO(W6) IPC 投影面接真開關）。
+    contract_details_query: Option<ContractDetailsQuery>,
+    /// contract data floor session 級 blocker 記憶（同 order_exec_floor_blocked 語義;
+    /// 世代推進時真重置重評）。
+    contract_data_floor_blocked: bool,
     /// **W6-S0**:最後一次 serve 期 fail-closed 斷線的 typed 前因（keep-last telemetry;
     /// 見 `ServeDisconnectCause`）。
     last_disconnect_cause: Option<ServeDisconnectCause>,
@@ -405,6 +423,9 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
             order_exec: OrderExecDataDigest::new(OrderExecDataConfig::default()),
             subscribe_order_exec: false,
             order_exec_floor_blocked: false,
+            contract_data: ContractDataDigest::new(ContractDataConfig::default()),
+            contract_details_query: None,
+            contract_data_floor_blocked: false,
             last_disconnect_cause: None,
             wire_facts: None,
         }
@@ -443,6 +464,18 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
     /// reqExecutions/reqOpenOrders。真消費者=driver 測試域;TODO(W6) IPC 投影面接真開關）。
     pub(crate) fn enable_order_exec_subscriptions(&mut self) {
         self.subscribe_order_exec = true;
+    }
+
+    /// **W6-S1** contract details 消化器唯讀檢視（typed staleness 綁定視圖 + audit 計數）。
+    pub(crate) fn contract_data(&self) -> &ContractDataDigest {
+        &self.contract_data
+    }
+
+    /// **W6-S1** 綁定全限定查詢並開啟 pump（默認 off;serve 期經 governor `AccountData`
+    /// 主桶自動送 reqContractDetails——contract details 非 historical 面,走主桶,IB 現勘
+    /// pinned。真消費者=driver 測試域;TODO(W6) IPC 投影面接真開關+查詢佇列）。
+    pub(crate) fn enable_contract_details(&mut self, query: ContractDetailsQuery) {
+        self.contract_details_query = Some(query);
     }
 
     /// **W5-S4** 最近一次握手的 wire 實檢事實唯讀檢視（見 `wire_facts` 欄注釋;attestation
@@ -552,8 +585,10 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
                 // 握手重新協商,舊世代 floor 不得跨世代生效——修注釋與行為不符）。
                 self.account_data.on_new_connection_generation();
                 self.order_exec.on_new_connection_generation();
+                self.contract_data.on_new_connection_generation();
                 self.positions_floor_blocked = false;
                 self.order_exec_floor_blocked = false;
+                self.contract_data_floor_blocked = false;
                 // 到 Ready:stream+reader 交棒給 serve。
                 self.stream = Some(stream);
                 self.reader = Some(reader);
@@ -631,6 +666,13 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
             if self.subscribe_order_exec && self.pump_order_exec(&mut stream, now).await.is_err() {
                 break self.drop_io(now, ServeDisconnectCause::SendFailed);
             }
+            // 2d. W6-S1:contract details 查詢 pump（默認 off;同 2b/2c 單一出口不變量,
+            // `AccountData` 主桶——contract details 非 historical 面,IB 現勘 pinned）。
+            if self.contract_details_query.is_some()
+                && self.pump_contract_data(&mut stream, now).await.is_err()
+            {
+                break self.drop_io(now, ServeDisconnectCause::SendFailed);
+            }
             // 3. 心跳回覆逾時 → miss（達 degraded 門檻 → Degraded;達 drop 門檻 → Backoff）。
             if self.manager.fsm_mut().heartbeat_reply_overdue(now) {
                 let would_drop = self.manager.fsm_mut().heartbeat_miss_would_drop();
@@ -661,6 +703,7 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
         // fail-closed 明示不可信）。
         self.account_data.on_disconnect();
         self.order_exec.on_disconnect();
+        self.contract_data.on_disconnect();
         // W6-S0（E3 R13-NOTE-01/E2 R13-F2）:session 死亡即清 wire facts——serve 一切結束
         // 路徑=連線死亡;到過 Ready 的實檢事實若殘留,attestation producer 可在死會話上鑄
         // 帶新 `attested_at_ms` 的「新鮮」attested 態。取「清 facts」而非「accessor 判活」:
@@ -807,6 +850,60 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
         Ok(())
     }
 
+    /// W6-S1 查詢 pump:未取/斷線失效/逾時釋放的 identity 面 → 取 governor grant
+    /// （`AccountData` 主桶,單一出口）→ digest 轉移相位 → `send_framed` 送出。grant 先於
+    /// begin（沿 2b/2c:begin 成功即送出,無「已標在途但未送」的簿記謊言）;grant 不足本
+    /// tick 跳過（無副作用,下 tick 重試）。`Err(())` = IO 斷,呼叫端 fail-closed。
+    async fn pump_contract_data<S: AsyncWrite + Unpin>(
+        &mut self,
+        stream: &mut S,
+        now: u64,
+    ) -> Result<(), ()> {
+        // 請求 timeout typed 化:在途請求逾窗 → digest 釋放槽+audit（非懸掛;重取節奏由
+        // 下方 staleness 閘 + governor 單一出口約束）。
+        let _ = self.contract_data.expire_overdue(now);
+        if self.contract_data_floor_blocked {
+            return Ok(());
+        }
+        let query = match &self.contract_details_query {
+            Some(q) => q.clone(),
+            None => return Ok(()),
+        };
+        if matches!(
+            self.contract_data.identity_staleness(now),
+            SnapshotStaleness::NotSubscribed | SnapshotStaleness::DisconnectedStale
+        ) {
+            let server_version = match self.manager.state() {
+                SessionState::Ready(rs) | SessionState::Degraded(rs) => rs.server_version,
+                _ => return Ok(()),
+            };
+            if let Some(grant) = self.manager.account_data_grant(now) {
+                match self.contract_data.begin_contract_details(
+                    server_version,
+                    CONTRACT_DETAILS_REQ_ID,
+                    &query,
+                    now,
+                ) {
+                    Ok(frame) => {
+                        if send_framed(stream, grant, &frame, self.timeouts.io)
+                            .await
+                            .is_err()
+                        {
+                            return Err(());
+                        }
+                    }
+                    Err(ContractDataReject::ServerVersionBelowFloor { .. }) => {
+                        // floor session 級 blocker:記憶後不再空耗 token 重試（新連線世代重評）。
+                        self.contract_data_floor_blocked = true;
+                    }
+                    // staleness 閘下其餘 begin 拒不可達;防禦性 no-op（grant 隨 scope drop）。
+                    Err(_) => {}
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn in_serve_state(&self) -> bool {
         matches!(
             self.manager.state(),
@@ -898,6 +995,20 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
                 let r = self.order_exec.on_open_order_end_frame(payload, now);
                 self.handle_order_exec_result(r, now);
             }
+            // W6-S1:IN 10/52/18 contract details → 消化器（wire 損壞才斷線,資料層 reject
+            // 續 serve——IN 18 bondContractData 為 typed-ignore 記帳丟棄）。
+            Some(KnownMsgId::ContractData) => {
+                let r = self.contract_data.on_contract_data_frame(payload, now);
+                self.handle_contract_data_result(r, now);
+            }
+            Some(KnownMsgId::ContractDataEnd) => {
+                let r = self.contract_data.on_contract_data_end_frame(payload, now);
+                self.handle_contract_data_result(r, now);
+            }
+            Some(KnownMsgId::BondContractData) => {
+                let r = self.contract_data.on_bond_contract_data_frame(payload);
+                self.handle_contract_data_result(r, now);
+            }
             // 未知 msgId → fail-closed 斷線（§2.3:不猜欄位、不跳過）。
             None => self.fail_closed(now, ServeDisconnectCause::UnknownMsgId { msg_id }),
         }
@@ -927,6 +1038,20 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
             Ok(()) => {}
             Err(OrderExecDataReject::WireMalformed(c)) => {
                 self.fail_closed(now, ServeDisconnectCause::OrderExecWireMalformed(c));
+            }
+            Err(_) => {}
+        }
+    }
+
+    /// W6-S1 消化結果分流（同 W5-S2/S3 紀律）:`WireMalformed` = wire 損壞 → fail-closed
+    /// 斷線（typed 前因）;其餘 typed reject（契約 blocker/撕 pin/荒謬 count/佈局窗/未請
+    /// 而收）= 資料層 fail-closed——毒化/audit 身分已由 digest 落帳,session 續 serve
+    /// （不 panic;IN 18 typed-ignore 走 Ok 路徑,僅記帳）。
+    fn handle_contract_data_result(&mut self, r: Result<(), ContractDataReject>, now: u64) {
+        match r {
+            Ok(()) => {}
+            Err(ContractDataReject::WireMalformed(c)) => {
+                self.fail_closed(now, ServeDisconnectCause::ContractDataWireMalformed(c));
             }
             Err(_) => {}
         }
@@ -1081,8 +1206,8 @@ async fn run_handshake_inner<S: AsyncRead + AsyncWrite + Unpin>(
                 }
                 Err(_) => return Err(HandshakeErr::Transient),
             },
-            // W5-S2/S3:握手期不預期 account/positions/order/exec 資料（未訂而收=亂序/協議
-            // 意外）→ fail-closed transient（不猜、不 fail-open;可重試）。
+            // W5-S2/S3/W6-S1:握手期不預期 account/positions/order/exec/contract 資料
+            // （未訂而收=亂序/協議意外）→ fail-closed transient（不猜、不 fail-open;可重試）。
             Some(KnownMsgId::AccountSummary)
             | Some(KnownMsgId::AccountSummaryEnd)
             | Some(KnownMsgId::PositionData)
@@ -1092,7 +1217,10 @@ async fn run_handshake_inner<S: AsyncRead + AsyncWrite + Unpin>(
             | Some(KnownMsgId::ExecutionData)
             | Some(KnownMsgId::OpenOrderEnd)
             | Some(KnownMsgId::ExecutionDataEnd)
-            | Some(KnownMsgId::CommissionReport) => return Err(HandshakeErr::Transient),
+            | Some(KnownMsgId::CommissionReport)
+            | Some(KnownMsgId::ContractData)
+            | Some(KnownMsgId::BondContractData)
+            | Some(KnownMsgId::ContractDataEnd) => return Err(HandshakeErr::Transient),
             // 未知 msgId 於握手 → fail-closed transient（不猜欄位;可重試,不 fail-open）。
             None => return Err(HandshakeErr::Transient),
         }

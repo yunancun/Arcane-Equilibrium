@@ -103,7 +103,7 @@ impl IbkrStockTypeV1 {
 }
 
 /// `reqContractDetails` 單行 typed 契約（W6-S1 消化層的唯一合法承載;禁裸 map）。
-/// conId 為主鍵;欄序/出典見消化層（IB 現勘 2026-07-17,官方 ibapi 9.81.1.post1 sdist）。
+/// conId 為主鍵;欄序/出典見消化層（IB 現勘 2026-07-17,官方 TWS API 9.81.1.post1 sdist）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IbkrInstrumentIdentityRowV1 {
     pub contract_id: String,
