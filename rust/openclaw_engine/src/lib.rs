@@ -217,6 +217,13 @@ pub mod ibkr_tws_order_transport;
 // idempotency_key 非漂移的 order-id）+ ApiPending transient-pending 有界 timeout 分流 + 重啟
 // recovery（未終態 → MarkStateUnknown）。純同步、注入時鐘、零 socket / 零 async / 零下單出線。
 pub mod ibkr_tws_order_lifecycle;
+// IBKR W7-S2 cash 約束引擎（deterministic pre-submit gate）：跑在 Rust authority accept 之後、
+// order frame build 之前的最後一道 cash-correctness 閘。窮舉七道 gate（settled-funds T+1 台帳 /
+// GFV free-riding / no-short 硬邊界 / RTH-only / order-type 白名單 LMT/MKT×DAY / fractional 拒 /
+// LULD-halt pre-trade filter）;任一不確定即 fail-closed 拒。官方數值全歸 `CashAccountRules` 注入
+// （T+1/GFV/LULD/RTH/order-type 待 IB 现勘,引擎不硬編）。純函數、注入時鐘 + config、零 socket/async/
+// send（不觸 transport,INV-ORDER/INV-1 恆 HOLD）。default build DCE（真接線=S4 IPC submit handler）。
+pub mod ibkr_cash_account_constraints;
 // IBKR B1 只讀 TWS 連接器（ADR-0048 / AMD-2026-07-08-01，G4 首次接觸）：connect handshake
 // + reqCurrentTime 最小首接觸；純 codec + generic driver + 3 層惰性 gate；唯一具體
 // TcpStream::connect 於 `ibkr_g4_contact` feature 後（default build 無 socket、無 caller）。
