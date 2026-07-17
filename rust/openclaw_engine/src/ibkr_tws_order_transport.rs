@@ -26,7 +26,10 @@
 //!   - **INV-ORDER（本模塊最高不變量）**：production build 零路徑可使 order-verb 訊息出
 //!     transport 層。二元證明:①`OrderEffectPermit` production 零鑄造點（`mint` 為 `#[cfg(test)]`,
 //!     production 無構造子）→ `send_order_framed` production 不可達;②本模塊 0 production caller →
-//!     default build DCE（沿 driver/g4 audit 家族）。兩證獨立。
+//!     **final-binary DCE**（`target/release/openclaw-engine` 零 seam 符號 AND 零 seam strings,
+//!     含 `EffectDenied` literal 缺席）。**rlib 級非 DCE 證據**——rlib 保留 rmeta,`strings
+//!     libopenclaw_engine*.rlib` 仍命中 seam 名;有效 DCE 證據唯 final binary（nm + strings 雙查）。
+//!     沿 driver/g4 audit 家族。兩證獨立。
 //!   - **S0 = 恆拒地基,放行臂 S4;encoder S1**：本輪不含任何 order encoder、不送任何 order 訊息、
 //!     無放行臂。`EffectEnvelopeRequiredStub::check` 恆 `Err(EffectDenied::EnvelopeRequired)`,
 //!     無任何開關可翻放行。W7-S4 才落 HMAC option B 放行臂（`check_effect_contact`,鑄
@@ -37,7 +40,8 @@
 //!   - Bybit crypto_perp 不變;無 DB migration;不擴 IPC（IPC 接線=S4）。
 
 // dormant 姿態：本模塊 W7-S0 落地時 **0 production caller**（放行臂/encoder/IPC 接線皆 S1-S4）,
-// default build 因 0 caller 被 DCE（同 driver/session pre-W4 姿態）。allow(dead_code) 必須保留;
+// final binary 因 0 caller 被 DCE（rlib 保留 rmeta 非 DCE 證據;證據唯 final-binary nm+strings。
+// 同 driver/session pre-W4 姿態）。allow(dead_code) 必須保留;
 // S4 接 `check_effect_contact` production 放行臂 + IPC handler 時移出。
 #![allow(dead_code)]
 

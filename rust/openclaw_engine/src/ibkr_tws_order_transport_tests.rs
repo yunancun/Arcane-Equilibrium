@@ -74,7 +74,11 @@ fn capability_gate_denies_when_paper_verb_scope_tampered() {
             entry.authority_scope = AuthorityScope::ReadOnly;
         }
     }
-    assert!(order_effect_capability_gate(&registry).is_err());
+    // pin 具體變體:scope mismatch 先被 types validate() 攔 → RegistryContractInvalid（第一道）。
+    assert!(matches!(
+        order_effect_capability_gate(&registry),
+        Err(OrderEffectCapabilityDenial::RegistryContractInvalid(_))
+    ));
 }
 
 #[test]
