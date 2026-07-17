@@ -874,7 +874,10 @@ def main(argv: list[str] | None = None) -> int:
         expected_demo_api_key_sha256=args.expected_demo_api_key_sha256,
         expected_demo_api_key_prefix=args.expected_demo_api_key_prefix,
         require_expected_demo_api_key_match=args.require_expected_demo_api_key_match,
-        redact_secret_derivatives=args.redact_secret_derivatives,
+        # CLI/file output is a permanent public boundary.  Do not let an
+        # operator flag re-enable reads of key/secret bytes on a path that is
+        # serialized to stdout or disk.
+        redact_secret_derivatives=True,
         engine_environ_file=args.engine_environ_file,
         require_engine_env=args.require_engine_env,
     )

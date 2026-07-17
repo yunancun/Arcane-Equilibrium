@@ -46,6 +46,29 @@ _VALID_SNAPSHOT_FILENAMES = frozenset(
 )
 
 
+def _trusted_snapshot_filename(filename: str) -> str:
+    """Break taint flow by returning only one closed-set literal."""
+    if filename == "pipeline_snapshot.json":
+        return "pipeline_snapshot.json"
+    if filename == "pipeline_snapshot_paper.json":
+        return "pipeline_snapshot_paper.json"
+    if filename == "pipeline_snapshot_demo.json":
+        return "pipeline_snapshot_demo.json"
+    if filename == "pipeline_snapshot_live.json":
+        return "pipeline_snapshot_live.json"
+    raise ValueError("unsupported snapshot filename")
+
+
+def _trusted_engine_snapshot_filename(engine: str) -> str:
+    if engine == "paper":
+        return "pipeline_snapshot_paper.json"
+    if engine == "demo":
+        return "pipeline_snapshot_demo.json"
+    if engine == "live":
+        return "pipeline_snapshot_live.json"
+    raise ValueError("unsupported snapshot engine")
+
+
 def _require_owner_controlled(metadata: os.stat_result, label: str) -> None:
     get_effective_uid = getattr(os, "geteuid", None)
     if get_effective_uid is None:
@@ -95,18 +118,15 @@ class RustSnapshotReader:
         return self._snapshot_path("pipeline_snapshot.json")
 
     def _snapshot_path(self, filename: str) -> Path:
-        if filename not in _VALID_SNAPSHOT_FILENAMES:
-            raise ValueError("unsupported snapshot filename")
-        candidate = Path(os.path.abspath(self._data_root / filename))
+        safe_filename = _trusted_snapshot_filename(filename)
+        candidate = Path(os.path.abspath(self._data_root / safe_filename))
         if not candidate.is_relative_to(self._data_root):
             raise ValueError("snapshot path escapes data directory")
         return candidate
 
     def _engine_snapshot_path(self, engine: str) -> Path:
         """Path to per-engine snapshot file / 每引擎快照文件路徑"""
-        if engine not in _VALID_ENGINES:
-            raise ValueError("unsupported snapshot engine")
-        return self._snapshot_path(f"pipeline_snapshot_{engine}.json")
+        return self._snapshot_path(_trusted_engine_snapshot_filename(engine))
 
     def _open_data_root_fd(self) -> int:
         """Open every data-root component without following replacement symlinks."""
@@ -139,22 +159,21 @@ class RustSnapshotReader:
             if current_fd >= 0:
                 os.close(current_fd)
 
-    def _read_snapshot_file(self, path: Path) -> tuple[dict[str, Any], float]:
+    def _read_snapshot_file(self, filename: str) -> tuple[dict[str, Any], float]:
         """Read one bounded regular snapshot and its mtime through one fd."""
         no_follow = getattr(os, "O_NOFOLLOW", None)
         nonblock = getattr(os, "O_NONBLOCK", None)
         directory = getattr(os, "O_DIRECTORY", None)
         if no_follow is None or nonblock is None or directory is None:
             raise OSError("safe snapshot open flags unavailable")
-        if path.parent != self._data_root or path.name not in _VALID_SNAPSHOT_FILENAMES:
-            raise ValueError("snapshot path is outside the allowlist")
+        safe_filename = _trusted_snapshot_filename(filename)
 
         root_fd = -1
         fd = -1
         try:
             root_fd = self._open_data_root_fd()
             fd = os.open(
-                path.name,
+                safe_filename,
                 os.O_RDONLY | no_follow | nonblock,
                 dir_fd=root_fd,
             )
@@ -217,8 +236,9 @@ class RustSnapshotReader:
             return self._cache
 
         try:
-            path = self.snapshot_path
-            data, mtime = self._read_snapshot_file(path)
+            filename = "pipeline_snapshot.json"
+            path = self._snapshot_path(filename)
+            data, mtime = self._read_snapshot_file(filename)
             self._cache_file_age = time.time() - mtime
             self._cache = data
             self._cache_ts = now
@@ -252,8 +272,9 @@ class RustSnapshotReader:
             return self._engine_caches[engine]
 
         try:
-            path = self._engine_snapshot_path(engine)
-            data, mtime = self._read_snapshot_file(path)
+            filename = _trusted_engine_snapshot_filename(engine)
+            path = self._snapshot_path(filename)
+            data, mtime = self._read_snapshot_file(filename)
             self._engine_file_ages[engine] = time.time() - mtime
             self._engine_caches[engine] = data
             self._engine_cache_ts[engine] = now
