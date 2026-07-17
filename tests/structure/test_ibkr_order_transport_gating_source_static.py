@@ -196,7 +196,9 @@ def check_g4(envelope_src: str) -> tuple[list[str], list[str]]:
         return v, inc
     body = m.group(1)
     # 只抓緊鄰 deny `=>` 之前的 `Op::...` 鏈（非整段 body,否則 readonly 白名單的 Op 會誤入）。
-    deny = re.search(r"((?:\s*\|?\s*Op::\w+)+)\s*=>\s*Some\(\s*B::OrderVerbStructurallyDenied\s*\)", body)
+    # 分隔管線設為必需(每次重複前綴 `\s*\|\s*`),消除 `(\s*\|?\s*…)+` 對空白的歧義切分
+    # →避免 catastrophic backtracking(CodeQL py/redos);行為等價:仍抓緊鄰 deny `=>` 前的 `Op::…` 鏈。
+    deny = re.search(r"\|?\s*(Op::\w+(?:\s*\|\s*Op::\w+)*)\s*=>\s*Some\(\s*B::OrderVerbStructurallyDenied\s*\)", body)
     if deny is None:
         inc.append("G4 anchor absent: OrderVerbStructurallyDenied deny arm")
         return v, inc
