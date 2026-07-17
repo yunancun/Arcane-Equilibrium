@@ -14,7 +14,9 @@ pub mod ibkr_commissions_row;
 pub mod ibkr_executions_row;
 pub mod ibkr_feature_flag_secret_auth;
 pub mod ibkr_instrument_identity_row;
+pub mod ibkr_market_data_provenance;
 pub mod ibkr_non_bybit_api_allowlist;
+pub mod ibkr_quote_row;
 pub mod ibkr_paper_lifecycle;
 pub mod ibkr_phase2_artifact;
 pub mod ibkr_phase2_gate;
@@ -86,6 +88,11 @@ pub use ibkr_instrument_identity_row::{
     IbkrInstrumentIdentityRowVerdict, IbkrStockTypeV1, IBKR_INSTRUMENT_IDENTITY_ROW_CONTRACT_ID,
     IBKR_INSTRUMENT_PRIMARY_EXCHANGE_WHITELIST,
 };
+pub use ibkr_market_data_provenance::{
+    IbkrMarketDataEntitlementStateV1, IbkrMarketDataProvenanceBlocker, IbkrMarketDataProvenanceV1,
+    IbkrMarketDataProvenanceVerdict, IbkrPriceAdjustmentV1,
+    IBKR_MARKET_DATA_PROVENANCE_CONTRACT_ID,
+};
 pub use ibkr_non_bybit_api_allowlist::{
     classify_non_bybit_api_action, required_non_bybit_api_actions, NonBybitApiAction,
     NonBybitApiAllowlistBlocker, NonBybitApiAllowlistDecision, NonBybitApiAllowlistV1,
@@ -129,6 +136,10 @@ pub use ibkr_phase2_runtime::{
 pub use ibkr_positions_row::{
     is_normalized_symbol, IbkrPositionsRowBlocker, IbkrPositionsRowV1, IbkrPositionsRowVerdict,
     IbkrSecTypeV1, IBKR_POSITIONS_ROW_CONTRACT_ID,
+};
+pub use ibkr_quote_row::{
+    IbkrQuoteFieldV1, IbkrQuoteRowBlocker, IbkrQuoteRowV1, IbkrQuoteRowVerdict,
+    IbkrTickEntitlementV1, IbkrTickTypeV1, IbkrTickValueKind, IBKR_QUOTE_ROW_CONTRACT_ID,
 };
 pub use ibkr_tws_connection_health::{
     IbkrConnectionHealthBlocker, IbkrConnectionHealthEntitlementStateV1,
