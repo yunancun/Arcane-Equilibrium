@@ -178,6 +178,13 @@ pub mod ibkr_tws_contract_data;
 // 下單/改單/撤單 builder**。純同步、注入時鐘、零 socket——與 wire/session/pacing/driver
 // 同屬 default build 被 DCE 的 TWS 連接器面（B′ 姿態,g4 audit 保綠）。
 pub mod ibkr_tws_market_data;
+// IBKR W6-S2 trading calendar 解析器：消化 W6-S1 identity row 的 tradingHours/liquidHours/
+// timeZoneId 原字串 → typed `IbkrTradingCalendarV1`(有序 session + 規範化 IANA tz +
+// calendar_hash)。雙 grammar(TWS ≤969 舊 / 970+ 新)+ legacy→IANA 白名單映射(未知 fail-
+// closed 拒)+ DST-aware 絕對時刻(chrono-tz 依 IANA tz 解,禁手寫偏移;跨午夜解次日)。
+// `compute_calendar_hash` 導出供 W6-S3 provenance calendar_hash 綁真值(driver 接線 = S4)。
+// 純函數、零 socket、零 I/O、零下單、零 wire——壞格式/未知 tz/亂序=typed blocker 不 panic。
+pub mod ibkr_trading_calendar;
 // IBKR W5-S4 session attestation producer：把 managedAccounts 實檢（DU* 白名單;
 // `account_fingerprint_is_live` 禁聲明自填,唯一鑄造點=wire `managed_accounts_inspect`）+
 // session 事實收斂為 typed `IbkrSessionAttestationV1`;契約 validate 全綠才產 attested 態,

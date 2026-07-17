@@ -362,17 +362,29 @@ mod tests {
 
     #[test]
     fn accepted_fixture_validates() {
-        assert!(IbkrTradingCalendarV1::accepted_fixture().validate().accepted);
+        assert!(
+            IbkrTradingCalendarV1::accepted_fixture()
+                .validate()
+                .accepted
+        );
     }
 
     #[test]
     fn default_is_fail_closed() {
         let v = IbkrTradingCalendarV1::default().validate();
         assert!(!v.accepted);
-        assert!(v.blockers.contains(&IbkrTradingCalendarBlocker::ContractIdMismatch));
-        assert!(v.blockers.contains(&IbkrTradingCalendarBlocker::EmptyCalendar));
-        assert!(v.blockers.contains(&IbkrTradingCalendarBlocker::TimeZoneIdMissing));
-        assert!(v.blockers.contains(&IbkrTradingCalendarBlocker::CalendarHashInvalid));
+        assert!(v
+            .blockers
+            .contains(&IbkrTradingCalendarBlocker::ContractIdMismatch));
+        assert!(v
+            .blockers
+            .contains(&IbkrTradingCalendarBlocker::EmptyCalendar));
+        assert!(v
+            .blockers
+            .contains(&IbkrTradingCalendarBlocker::TimeZoneIdMissing));
+        assert!(v
+            .blockers
+            .contains(&IbkrTradingCalendarBlocker::CalendarHashInvalid));
     }
 
     #[test]
