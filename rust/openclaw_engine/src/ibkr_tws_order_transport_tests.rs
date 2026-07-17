@@ -29,8 +29,9 @@ fn send_order_framed_requires_permit_and_yields_order_bytes() {
     let frame = OrderFrame::from_order_bytes(vec![0x01, 0x02, 0x03]);
     // grant 唯 governor 放行時鑄——test 用 pacing governor 取一枚真 grant。
     let grant = mint_test_grant();
-    let bytes = send_order_framed(grant, permit, frame);
-    assert_eq!(bytes, vec![0x01, 0x02, 0x03]);
+    // W7-S1:send_order_framed 回 sealed WireBytes（NOTE-1 (a) 型別屏障;非裸 Vec<u8>）→ test 域 view。
+    let wire = send_order_framed(grant, permit, frame);
+    assert_eq!(wire.view(), &[0x01, 0x02, 0x03]);
 }
 
 /// test 輔助:向真 pacing governor 取一枚 `OutboundGrant`（不偽造 grant 構造子）。
@@ -111,7 +112,145 @@ fn order_frame_bytes_only_flow_through_send_order_framed() {
     // 建構 entry 借用以確認型別可見（結構性:OrderFrame 無 pub bytes accessor）。
     let _entry_type_check: Option<StockEtfBrokerCapabilityEntryV1> = None;
     let frame = OrderFrame::from_order_bytes(vec![0xAA]);
-    // 唯一取出路徑:mint permit + grant + send_order_framed。
-    let bytes = send_order_framed(mint_test_grant(), OrderEffectPermit::mint(), frame);
-    assert_eq!(bytes, vec![0xAA]);
+    // 唯一取出路徑:mint permit + grant + send_order_framed → sealed WireBytes。
+    let wire = send_order_framed(mint_test_grant(), OrderEffectPermit::mint(), frame);
+    assert_eq!(wire.view(), &[0xAA]);
+}
+
+// ── (e) place/cancel encoder + §1.5 encode ceiling guard ─────────────────────
+
+/// 骨架 placeOrder 請求 fixture（sv∈[145,157] band;whatIf=false 常態）。
+fn sample_place_request() -> PlaceOrderWireRequest {
+    PlaceOrderWireRequest {
+        order_id: 42,
+        symbol: "AAPL".to_string(),
+        sec_type: "STK".to_string(),
+        exchange: "SMART".to_string(),
+        currency: "USD".to_string(),
+        action: "BUY".to_string(),
+        total_quantity_decimal: "10".to_string(),
+        order_type: "LMT".to_string(),
+        lmt_price_decimal: "150.25".to_string(),
+        aux_price_decimal: String::new(),
+        time_in_force: "DAY".to_string(),
+        account: "DU111111".to_string(),
+        transmit: true,
+        outside_rth: false,
+        cash_qty_decimal: String::new(),
+        what_if: false,
+    }
+}
+
+/// decode framed bytes → 欄位字串序（測試斷言用;4-byte 長度前綴後為 payload,沿 wire codec 慣例）。
+fn decode_frame_fields(framed: &[u8]) -> Vec<String> {
+    use crate::ibkr_tws_wire::decode_fields;
+    decode_fields(&framed[4..]).expect("decode fields")
+}
+
+/// 斷言 encoder 回特定 typed reject（OrderFrame 刻意 sealed 非 Debug/PartialEq → 不比較 Ok 臂）。
+fn assert_encode_reject(res: Result<OrderFrame, OrderEncodeReject>, expected: OrderEncodeReject) {
+    match res {
+        Ok(_) => panic!("expected encode reject, got Ok(OrderFrame)"),
+        Err(e) => assert_eq!(e, expected),
+    }
+}
+
+#[test]
+fn place_order_encoder_skeleton_bytes() {
+    let frame = encode_place_order(&sample_place_request(), 157).expect("encode place");
+    // OrderFrame bytes 唯經 send_order_framed 出線 → 以 mint 取出後 decode 斷言骨架欄。
+    let wire = send_order_framed(mint_test_grant(), OrderEffectPermit::mint(), frame);
+    let fields = decode_frame_fields(wire.view());
+    assert_eq!(fields[0], "3", "msg id = PLACE_ORDER");
+    assert_eq!(fields[1], "42", "order id");
+    assert_eq!(fields[2], "AAPL");
+    assert_eq!(fields[6], "BUY", "action 承載欄");
+    assert_eq!(fields[7], "10", "totalQuantity 承載欄");
+    assert_eq!(fields[8], "LMT", "orderType 承載欄");
+    assert_eq!(fields[9], "150.25", "lmtPrice");
+    assert_eq!(*fields.last().unwrap(), "", "末欄 usePriceMgmtAlgo unset");
+}
+
+#[test]
+fn place_order_encoder_carries_whatif_flag() {
+    let mut req = sample_place_request();
+    req.what_if = true;
+    let frame = encode_place_order(&req, 150).expect("encode whatif");
+    let wire = send_order_framed(mint_test_grant(), OrderEffectPermit::mint(), frame);
+    let fields = decode_frame_fields(wire.view());
+    // whatIf flag 承載於骨架末段（usePriceMgmtAlgo 之前一欄）。
+    assert_eq!(fields[fields.len() - 2], "1", "whatIf flag=1");
+}
+
+#[test]
+fn cancel_order_encoder_skeleton_bytes() {
+    let frame = encode_cancel_order(42, 157).expect("encode cancel");
+    let wire = send_order_framed(mint_test_grant(), OrderEffectPermit::mint(), frame);
+    let fields = decode_frame_fields(wire.view());
+    // ≤157 band = [4, VERSION=1, orderId]，無 manualOrderCancelTime。
+    assert_eq!(
+        fields,
+        vec!["4".to_string(), "1".to_string(), "42".to_string()]
+    );
+}
+
+#[test]
+fn encode_ceiling_guard_refuses_above_157() {
+    // §1.5 INV-ORDER-ENCODE:sv>157 一律拒產出（禁佈局猜送）。
+    assert_encode_reject(
+        encode_place_order(&sample_place_request(), 158),
+        OrderEncodeReject::ServerVersionAboveCeiling {
+            server_version: 158,
+            ceiling: 157,
+        },
+    );
+    assert_encode_reject(
+        encode_cancel_order(42, 176),
+        OrderEncodeReject::ServerVersionAboveCeiling {
+            server_version: 176,
+            ceiling: 157,
+        },
+    );
+}
+
+#[test]
+fn encode_floor_guard_refuses_below_145() {
+    assert_encode_reject(
+        encode_place_order(&sample_place_request(), 144),
+        OrderEncodeReject::ServerVersionBelowFloor {
+            server_version: 144,
+            floor: 145,
+        },
+    );
+}
+
+#[test]
+fn encode_boundary_145_and_157_ok() {
+    assert!(encode_place_order(&sample_place_request(), 145).is_ok());
+    assert!(encode_place_order(&sample_place_request(), 157).is_ok());
+    assert!(encode_cancel_order(1, 145).is_ok());
+}
+
+#[test]
+fn place_order_encoder_rejects_malformed_fields() {
+    let mut req = sample_place_request();
+    req.total_quantity_decimal = "0".to_string(); // 非正 → 拒（is_positive_decimal_string）。
+    assert_encode_reject(
+        encode_place_order(&req, 150),
+        OrderEncodeReject::FieldInvalid {
+            field: "total_quantity",
+        },
+    );
+    let mut req2 = sample_place_request();
+    req2.account = "  ".to_string();
+    assert_encode_reject(
+        encode_place_order(&req2, 150),
+        OrderEncodeReject::FieldInvalid { field: "account" },
+    );
+    let mut req3 = sample_place_request();
+    req3.lmt_price_decimal = "abc".to_string();
+    assert_encode_reject(
+        encode_place_order(&req3, 150),
+        OrderEncodeReject::FieldInvalid { field: "lmt_price" },
+    );
 }

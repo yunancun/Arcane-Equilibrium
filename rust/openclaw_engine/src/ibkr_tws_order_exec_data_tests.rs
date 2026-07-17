@@ -1208,3 +1208,95 @@ fn w6s0_open_orders_and_order_statuses_caps_poison_face() {
     assert_eq!(d.open_orders(T0 + 1).1.count(), 1, "禁靜默驅逐");
     assert_eq!(d.audit().cache_cap_exceeded_rejects, 1);
 }
+
+// ── W7-S1 openOrder whatIf OrderState tail decode（§2.2.2）────────────────────
+
+/// whatIf OrderState 尾 fixture（15 欄:status/9 margin/3 commission/currency/warning）。
+const WHATIF_TAIL: &[&str] = &[
+    "PreSubmitted", // status
+    "1000.00",      // initMarginBefore
+    "900.00",       // maintMarginBefore
+    "5000.00",      // equityWithLoanBefore
+    "50.00",        // initMarginChange
+    "40.00",        // maintMarginChange
+    "0.00",         // equityWithLoanChange
+    "1050.00",      // initMarginAfter
+    "940.00",       // maintMarginAfter
+    "5000.00",      // equityWithLoanAfter
+    "1.00",         // commission
+    "1.00",         // minCommission
+    "1.00",         // maxCommission
+    "USD",          // commissionCurrency
+    "",             // warningText
+];
+
+#[test]
+fn whatif_tail_decode_pinned_band_ok() {
+    let payload = open_order_payload(7, "BUY", "412.00", WHATIF_TAIL);
+    let cfg = OrderExecDataConfig::default();
+    let preview = decode_open_order_whatif_tail(&payload, SV_PINNED, &cfg).expect("decode tail");
+    assert_eq!(preview.status, IbkrOrderStatusV1::PreSubmitted);
+    assert_eq!(
+        preview.init_margin_after_decimal.as_deref(),
+        Some("1050.00")
+    );
+    assert_eq!(preview.commission_decimal.as_deref(), Some("1.00"));
+    assert_eq!(preview.commission_currency, "USD");
+    assert_eq!(preview.warning_text, "");
+}
+
+#[test]
+fn whatif_tail_margin_sentinel_maps_to_none() {
+    // 空欄 + f64::MAX 哨兵 → None（unset;沿 realizedPNL 哨兵紀律）。
+    let mut tail: Vec<&str> = WHATIF_TAIL.to_vec();
+    tail[7] = ""; // initMarginAfter 空欄
+    tail[10] = "1.7976931348623157E308"; // commission 哨兵
+    let payload = open_order_payload(7, "BUY", "412.00", &tail);
+    let cfg = OrderExecDataConfig::default();
+    let preview = decode_open_order_whatif_tail(&payload, SV_PINNED, &cfg).unwrap();
+    assert_eq!(preview.init_margin_after_decimal, None);
+    assert_eq!(preview.commission_decimal, None);
+}
+
+#[test]
+fn whatif_tail_refuses_above_ceiling() {
+    // §11 BLOCK-ORDER-BAND-3:sv>157 whatIf 尾 UNVERIFIED → 拒解不猜。
+    let payload = open_order_payload(7, "BUY", "412.00", WHATIF_TAIL);
+    let cfg = OrderExecDataConfig::default();
+    assert_eq!(
+        decode_open_order_whatif_tail(&payload, SV_CEILING, &cfg).unwrap_err(),
+        OrderExecDataReject::PinnedLayoutOverflow {
+            msg_id: IN_OPEN_ORDER_MSG_ID
+        }
+    );
+}
+
+#[test]
+fn whatif_tail_rejects_short_frame_and_bad_decimal_and_status() {
+    let cfg = OrderExecDataConfig::default();
+    // 缺 OrderState 尾（head-only）→ WireMalformed。
+    let head_only = open_order_payload(7, "BUY", "412.00", &[]);
+    assert!(matches!(
+        decode_open_order_whatif_tail(&head_only, SV_PINNED, &cfg).unwrap_err(),
+        OrderExecDataReject::WireMalformed(_)
+    ));
+    // 非法 margin decimal → WhatIfPreviewFieldInvalid。
+    let mut bad = WHATIF_TAIL.to_vec();
+    bad[1] = "not_a_number";
+    let payload = open_order_payload(7, "BUY", "412.00", &bad);
+    assert_eq!(
+        decode_open_order_whatif_tail(&payload, SV_PINNED, &cfg).unwrap_err(),
+        OrderExecDataReject::WhatIfPreviewFieldInvalid {
+            field: "init_margin_before"
+        }
+    );
+    // 表外 status → OrderStatusUnknownDenied（含 ApiPending 亦落此——orderStatus 面白名單;
+    // 但 lifecycle 的 ApiPending 態分流在 lifecycle driver,見該模塊）。
+    let mut unk = WHATIF_TAIL.to_vec();
+    unk[0] = "ApiPending";
+    let payload = open_order_payload(7, "BUY", "412.00", &unk);
+    assert_eq!(
+        decode_open_order_whatif_tail(&payload, SV_PINNED, &cfg).unwrap_err(),
+        OrderExecDataReject::OrderStatusUnknownDenied
+    );
+}

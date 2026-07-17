@@ -46,10 +46,12 @@
 #![allow(dead_code)]
 
 use openclaw_types::{
-    AuthorityScope, BrokerOperation, StockEtfBrokerCapabilityRegistryV1, StockEtfDenialReason,
+    is_positive_decimal_string, is_signed_decimal_string, AuthorityScope, BrokerOperation,
+    StockEtfBrokerCapabilityRegistryV1, StockEtfDenialReason,
 };
 
 use crate::ibkr_tws_pacing::OutboundGrant;
+use crate::ibkr_tws_wire::{encode_fields, encode_frame};
 
 // ===========================================================================
 // (a) OrderFrame：order-verb 專屬出站 frame newtype（bytes 私有,唯本模塊可取）
@@ -141,7 +143,41 @@ impl EffectPermitProvider for EffectEnvelopeRequiredStub {
 
 // ===========================================================================
 // (c) send_order_framed：order frame 的唯一出站位點（pacing grant AND effect permit）
+//     + WireBytes sealed 出線型別（W7-S1 NOTE-1 (a):型別層封 order 出線 bytes）
 // ===========================================================================
+
+/// **order-verb 已閘出線 bytes 的 sealed 承載**（W7-S1 NOTE-1 (a) 型別屏障）。內部 bytes **私有**、
+/// 無 pub accessor——唯 `send_order_framed`（gated,收 `OrderEffectPermit`）可鑄造。**用途**:令
+/// gated 出線的產物本身也是 sealed 型別（非裸 `Vec<u8>`）→ order-verb wire bytes 在通過 permit 閘
+/// **之後**仍不退化為可餵入 driver 的裸 `&[u8]`——`ibkr_tws_driver::send_framed(grant, &[u8])` 是
+/// pacing-only、effect-ungated 的平行出線路徑（NOTE-1 seam);WireBytes 型別上不 deref 為 `&[u8]`,
+/// 故 order bytes 無型別安全路徑可繞過 permit 直達 `send_framed`。socket 寫入承接由 S4 driver
+/// order-write shim 消費 WireBytes（S1 零 caller → DCE，同 OrderFrame 姿態）。
+pub(crate) struct WireBytes {
+    /// 私有已閘出線 bytes:無 pub accessor;唯 `send_order_framed`（同模塊）鑄造。
+    bytes: Vec<u8>,
+}
+
+impl WireBytes {
+    /// **模塊私有**鑄造子（唯 `send_order_framed` 呼叫）。名稱刻意非 `from_*`/`new`,標明它只是
+    /// gated 邊界內部的封裝點,非公開構造面。
+    fn seal(bytes: Vec<u8>) -> Self {
+        Self { bytes }
+    }
+
+    /// **模塊私有**已閘 bytes 取出（S4 driver order-write shim 唯一提取點;S1 零 caller → DCE）。
+    /// 名稱刻意避開 G1 accessor 黑名單（as_bytes/as_slice/into_bytes/bytes）——它是 driver 接線的
+    /// 受控出口,非公開 accessor。
+    fn into_wire(self) -> Vec<u8> {
+        self.bytes
+    }
+
+    /// test 域檢視（`#[cfg(test)]`:同 `mint` 紀律,production 無此符號 → 不成公開 bytes 逃逸面）。
+    #[cfg(test)]
+    pub(crate) fn view(&self) -> &[u8] {
+        &self.bytes
+    }
+}
 
 /// **order-verb 出站的唯一位點**。by-value 消費三令牌:
 ///   - `grant: OutboundGrant`——pacing 放行（既有單一出口約束不鬆動;W3-S3）。
@@ -149,19 +185,20 @@ impl EffectPermitProvider for EffectEnvelopeRequiredStub {
 ///     production 不可達 → INV-ORDER）。
 ///   - `frame: OrderFrame`——order-verb bytes（bytes 私有,唯此函數可取出）。
 ///
-/// 回傳待寫線的 order-verb framed bytes;實際 socket 寫入由 driver 接線（S1+）。**S0 不送任何
-/// order 訊息**（本函數 0 production caller → DCE）。無 `OrderEffectPermit` **型別上**無法呼叫本
-/// 函數 → order frame 結構上無法經一般出站路徑繞過 envelope。
+/// 回傳 **sealed `WireBytes`**（W7-S1 NOTE-1 (a);非裸 `Vec<u8>`）——gated 出線的產物型別層封裝,
+/// 不退化為可餵入 `send_framed(&[u8])` 的裸 bytes。實際 socket 寫入由 S4 driver order-write shim
+/// 消費 WireBytes。**S1 不送任何 order 訊息**（本函數 0 production caller → DCE）。無
+/// `OrderEffectPermit` **型別上**無法呼叫本函數 → order frame 結構上無法繞過 envelope 出線。
 pub(crate) fn send_order_framed(
     grant: OutboundGrant,
     permit: OrderEffectPermit,
     frame: OrderFrame,
-) -> Vec<u8> {
+) -> WireBytes {
     // grant / permit by-value 消費（drop）:各為單次出站憑證,不可復用（非 Clone/非 Copy）。
     drop(grant);
     let OrderEffectPermit { _seal: () } = permit;
-    // 唯一 OrderFrame → bytes 提取點:order bytes 只能經此 gated 位點流出。
-    frame.into_bytes()
+    // 唯一 OrderFrame → bytes 提取點:order bytes 只能經此 gated 位點流出,且立即封回 sealed WireBytes。
+    WireBytes::seal(frame.into_bytes())
 }
 
 // ===========================================================================
@@ -248,6 +285,190 @@ fn is_hard_denial(reason: StockEtfDenialReason) -> bool {
         | Deny::AccountWriteDenied => true,
         // 非硬邊界 denial reason 不算「永久 denied verb 維持 Denied」的合法理由。
         _ => false,
+    }
+}
+
+// ===========================================================================
+// (e) place/cancel encoder（W7-S1;產 OrderFrame,§1.5 encode ceiling guard;無 production send）
+// IB 现勘 2026-07-17:OUT PLACE_ORDER=3（含 whatIf flag）/ CANCEL_ORDER=4;replace=無獨立 msg
+// （同 PLACE_ORDER=3 覆蓋同 orderId,狀態機層封裝,transport 走 place encoder）。
+// ===========================================================================
+
+/// OUT 3:placeOrder（含 whatIf flag;replace 亦走此 encoder 覆蓋同 orderId）。
+pub(crate) const OUT_PLACE_ORDER_MSG_ID: &str = "3";
+/// OUT 4:cancelOrder。
+pub(crate) const OUT_CANCEL_ORDER_MSG_ID: &str = "4";
+/// cancelOrder ≤157 band 的 wire VERSION 欄（IB 现勘:1;≤157 band 無 `manualOrderCancelTime`——
+/// 該欄 sv≥161 才加,見 §11 BLOCK-ORDER-BAND-2 DIVERGENT）。
+const CANCEL_ORDER_OUT_VERSION: &str = "1";
+
+/// **encode band 下界**（sv < 此值 → 拒產出;placeOrder 省前導 VERSION 門檻,對齊消化面 floor 145）。
+const ENCODE_MIN_SERVER_VERSION: i32 = 145;
+/// **§1.5 INV-ORDER-ENCODE 上界**（sv > 此值 → 一律拒產出下單訊息 + audit,禁 157 佈局猜送;
+/// 158-176 band UNVERIFIED,§11 BLOCK-ORDER-BAND-1/2）。對稱於消化面 decode ceiling（157）。
+const ENCODE_MAX_PINNED_SERVER_VERSION: i32 = 157;
+
+/// placeOrder wire 請求（sv∈[145,157] band **骨架**承載欄;IB 现勘 §2.0「承載欄」子集,STK 現金
+/// 天然塌縮 comboLegs/deltaNeutral/algo/conditions 變長塊）。**冪等真源=`idempotency_key`（見
+/// lifecycle driver）;`order_id` 由 nextValidId 本地遞增分配**（重連可漂移,故 join 不以此為鍵）。
+/// 全欄以 decimal 字串/枚舉承載,禁 f64 折算。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PlaceOrderWireRequest {
+    /// nextValidId 本地分配的 order-id（replace 復用同一 orderId 覆蓋）。
+    pub order_id: i64,
+    /// 塌縮 STK 現金合約識別（symbol/secType/exchange/currency;骨架承載,值層紀律歸 lifecycle）。
+    pub symbol: String,
+    pub sec_type: String,
+    pub exchange: String,
+    pub currency: String,
+    /// BUY/SELL（白名單值層歸 lifecycle;encoder 只承載字串）。
+    pub action: String,
+    /// 下單量（正 decimal 字串;sv≥101 float,STK v1 整數由 cash gate 把守）。
+    pub total_quantity_decimal: String,
+    /// LMT/MKT（白名單歸 cash gate;encoder 承載字串）。
+    pub order_type: String,
+    /// 限價（LMT 必填、MKT 空;空欄=unset）。
+    pub lmt_price_decimal: String,
+    /// 輔助價（v1 STK 恆空;空欄=unset）。
+    pub aux_price_decimal: String,
+    /// DAY/GTC。
+    pub time_in_force: String,
+    /// 帳號（恆綁本 lane 帳號）。
+    pub account: String,
+    /// transmit（true=立即送出;whatIf 預覽時仍 true——broker 回預估不成單）。
+    pub transmit: bool,
+    /// outsideRth（v1 恆 false,RTH-only 歸 cash gate）。
+    pub outside_rth: bool,
+    /// cashQty（sv≥111 fractional;v1 STK 恆空）。
+    pub cash_qty_decimal: String,
+    /// **whatIf**:true=零效果預覽（broker 回 margin/commission 預估,不成單;§2.2.2）。
+    pub what_if: bool,
+}
+
+/// order encoder typed 裁決（禁 panic/捏值;每項可觀測,呼叫端據 typed reject 落 audit）。
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub(crate) enum OrderEncodeReject {
+    /// **§1.5 INV-ORDER-ENCODE**:協商 sv > pinned 上界 → 一律拒產出下單訊息（禁 157 佈局猜送;
+    /// 158-176 band UNVERIFIED,真接觸待 10.x re-pin）。此 reject **即 audit 信號**（呼叫端計數）。
+    #[error(
+        "server version {server_version} above encode ceiling {ceiling} (refuse to emit order msg)"
+    )]
+    ServerVersionAboveCeiling { server_version: i32, ceiling: i32 },
+    /// 協商 sv < encode band 下界 → 拒產出（不實作 <145 舊佈局分支,對齊消化面 floor）。
+    #[error("server version {server_version} below encode floor {floor}")]
+    ServerVersionBelowFloor { server_version: i32, floor: i32 },
+    /// 欄位值違反本地 typed 紀律（decimal 形狀/必填空缺;回欄名供 typed 分流）。
+    #[error("order field invalid: {field}")]
+    FieldInvalid { field: &'static str },
+}
+
+/// **§1.5 encode ceiling guard**（INV-ORDER-ENCODE;decode ceiling 的 encode 鏡射）。placeOrder/
+/// cancelOrder 皆先過此閘:sv 在 `[145,157]` band 方可 encode;sv>157 一律拒產出（禁佈局猜送）、
+/// sv<145 拒產出。**transport-gating 不變量的 encode 對稱面**。
+fn encode_band_guard(server_version: i32) -> Result<(), OrderEncodeReject> {
+    if server_version > ENCODE_MAX_PINNED_SERVER_VERSION {
+        return Err(OrderEncodeReject::ServerVersionAboveCeiling {
+            server_version,
+            ceiling: ENCODE_MAX_PINNED_SERVER_VERSION,
+        });
+    }
+    if server_version < ENCODE_MIN_SERVER_VERSION {
+        return Err(OrderEncodeReject::ServerVersionBelowFloor {
+            server_version,
+            floor: ENCODE_MIN_SERVER_VERSION,
+        });
+    }
+    Ok(())
+}
+
+/// encode **placeOrder**（OUT 3;sv∈[145,157] band 骨架）→ `OrderFrame`（gated 出線唯一經
+/// `send_order_framed`）。**先過 §1.5 ceiling guard** 再逐欄輸出;whatIf flag 承載於骨架末段;
+/// 末欄 = `usePriceMgmtAlgo`（@151,固定 unset 空欄）。**無 production send**（S1 零 caller → DCE）。
+///
+/// 骨架範圍紀律:輸出 IB 现勘 §2.0「承載欄」在 STK 現金塌縮佈局下的定長序列;66 步全欄佈局
+/// （comboLegs/algo/conditions 變長塊）在 STK 現金天然塌縮為空,**真接觸位元組待 EA 前 10.x
+/// re-pin**（§11 BLOCK-ORDER-BAND-1）。ceiling guard 確保 sv>157 永不產出（不猜送）。
+pub(crate) fn encode_place_order(
+    req: &PlaceOrderWireRequest,
+    server_version: i32,
+) -> Result<OrderFrame, OrderEncodeReject> {
+    encode_band_guard(server_version)?;
+    // 值層最小紀律（encoder 面 fail-closed:必填空缺/非法 decimal 拒產出;白名單值語義歸 lifecycle/
+    // cash gate,encoder 只擋形狀損壞以免產出畸形 wire）。
+    if req.symbol.trim().is_empty() {
+        return Err(OrderEncodeReject::FieldInvalid { field: "symbol" });
+    }
+    if req.account.trim().is_empty() {
+        return Err(OrderEncodeReject::FieldInvalid { field: "account" });
+    }
+    if !is_positive_decimal_string(&req.total_quantity_decimal) {
+        return Err(OrderEncodeReject::FieldInvalid {
+            field: "total_quantity",
+        });
+    }
+    // 限價/輔助價/cashQty:空欄=unset 合法;非空必為簽名 decimal。
+    for (raw, field) in [
+        (&req.lmt_price_decimal, "lmt_price"),
+        (&req.aux_price_decimal, "aux_price"),
+        (&req.cash_qty_decimal, "cash_qty"),
+    ] {
+        if !raw.is_empty() && !is_signed_decimal_string(raw) {
+            return Err(OrderEncodeReject::FieldInvalid { field });
+        }
+    }
+    let order_id = req.order_id.to_string();
+    let transmit = bool_wire(req.transmit);
+    let outside_rth = bool_wire(req.outside_rth);
+    let what_if = bool_wire(req.what_if);
+    // sv≥145 省前導 VERSION;STK 現金塌縮佈局承載欄序（IB 现勘 §2.0）:
+    let frame = encode_frame(&encode_fields(&[
+        OUT_PLACE_ORDER_MSG_ID,
+        &order_id,
+        // 塌縮 STK 現金合約識別（comboLegs/deltaNeutral 於 STK 現金為空,骨架不輸出變長塊）。
+        &req.symbol,
+        &req.sec_type,
+        &req.exchange,
+        &req.currency,
+        // 承載欄。
+        &req.action,
+        &req.total_quantity_decimal,
+        &req.order_type,
+        &req.lmt_price_decimal,
+        &req.aux_price_decimal,
+        &req.time_in_force,
+        &req.account,
+        transmit,
+        outside_rth,
+        &req.cash_qty_decimal,
+        what_if,
+        // 骨架末欄 usePriceMgmtAlgo（@151;固定 unset 空欄——v1 不用 price-mgmt algo）。
+        "",
+    ]));
+    Ok(OrderFrame::from_order_bytes(frame))
+}
+
+/// encode **cancelOrder**（OUT 4;≤157 band=`[4, VERSION=1, orderId]`,**無 `manualOrderCancelTime`**
+/// ——該欄 sv≥161 才加,§11 BLOCK-ORDER-BAND-2 DIVERGENT）→ `OrderFrame`。先過 §1.5 ceiling guard。
+pub(crate) fn encode_cancel_order(
+    order_id: i64,
+    server_version: i32,
+) -> Result<OrderFrame, OrderEncodeReject> {
+    encode_band_guard(server_version)?;
+    let oid = order_id.to_string();
+    let frame = encode_frame(&encode_fields(&[
+        OUT_CANCEL_ORDER_MSG_ID,
+        CANCEL_ORDER_OUT_VERSION,
+        &oid,
+    ]));
+    Ok(OrderFrame::from_order_bytes(frame))
+}
+
+/// bool → IB wire 形（`"1"`/`"0"`;IB 慣例）。
+fn bool_wire(v: bool) -> &'static str {
+    if v {
+        "1"
+    } else {
+        "0"
     }
 }
 

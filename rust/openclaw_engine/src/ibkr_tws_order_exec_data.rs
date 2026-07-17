@@ -238,6 +238,10 @@ pub(crate) enum OrderExecDataReject {
     /// openOrder head 欄位違反白名單/紀律（action/secType/幣別/數量…）→ open-orders 面毒化。
     #[error("open order head denied: {field}")]
     OpenOrderHeadDenied { field: &'static str },
+    /// **W7-S1 whatIf preview tail（§2.2.2）**:OrderState 尾欄違反本地 typed 紀律（margin/
+    /// commission decimal 形狀等）→ 該次 preview 拒（standalone 解碼,不入 digest inbound 毒化面）。
+    #[error("whatIf preview tail field invalid: {field}")]
+    WhatIfPreviewFieldInvalid { field: &'static str },
     /// **恢復政策（W6-S0,E3 MED-01-S3/E2-R12-F3 家族）**:毒化=同一 connect 世代內終態——
     /// 世代內 re-begin 一律拒;唯 driver 世代推進（新 handshake 成功,
     /// `on_new_connection_generation`）重評後可 re-begin。
@@ -376,6 +380,33 @@ pub(crate) struct IbkrOpenOrderHeadV1 {
     pub captured_at_ms: u64,
 }
 
+/// **W7-S1 whatIf preview 的 OrderState 尾（§2.2.2;R18 head-prefix 衝突 seam 之解）**。IB 现勘:
+/// whatIf 的 OrderState 尾在 `OPEN_ORDER=5` 訊息**尾端**（head-prefix 消化讀不到）;此為 preview
+/// 功能前置。margin/commission 估值以 sentinel 雙判別 → `None`（沿 realizedPNL 哨兵紀律,`1.79…E308`
+/// / 空欄 = unset）;其餘簽名 decimal 字串保真。**受 §11 BLOCK-ORDER-BAND-3 約束**:sv>157 whatIf 尾
+/// 佈局 UNVERIFIED → 拒解（骨架限 sv∈[145,157]）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct IbkrWhatIfPreviewV1 {
+    /// OrderState.status（白名單枚舉;表外 → 拒解）。
+    pub status: IbkrOrderStatusV1,
+    pub init_margin_before_decimal: Option<String>,
+    pub maint_margin_before_decimal: Option<String>,
+    pub equity_with_loan_before_decimal: Option<String>,
+    pub init_margin_change_decimal: Option<String>,
+    pub maint_margin_change_decimal: Option<String>,
+    pub equity_with_loan_change_decimal: Option<String>,
+    pub init_margin_after_decimal: Option<String>,
+    pub maint_margin_after_decimal: Option<String>,
+    pub equity_with_loan_after_decimal: Option<String>,
+    pub commission_decimal: Option<String>,
+    pub min_commission_decimal: Option<String>,
+    pub max_commission_decimal: Option<String>,
+    /// commissionCurrency 原字串保真（空=unset;preview 承載,幣別紀律歸消費端）。
+    pub commission_currency: String,
+    /// warningText 原字串保真（可空;IB whatIf 常帶保證金警語）。
+    pub warning_text: String,
+}
+
 /// exec↔commission either-order join 槽（execId 鍵;兩側先到皆緩存,join 完整對=typed
 /// 完整成交紀錄）。
 #[derive(Debug, Clone)]
@@ -495,6 +526,11 @@ const EXECUTION_DATA_END_EXACT_FIELDS: usize = 3;
 const OPEN_ORDER_END_EXACT_FIELDS: usize = 2;
 /// OPEN_ORDER head 前綴欄數（msgId..permId;其後 tail 整體丟棄）。
 const OPEN_ORDER_HEAD_MIN_FIELDS: usize = 26;
+/// **W7-S1**:whatIf OrderState 尾在 `OPEN_ORDER=5` 訊息尾端的定長塊欄數（sv∈[145,157] band 骨架;
+/// 順序=status/initMargin(before/change/after)/maintMargin(同)/equityWithLoan(同)/commission/
+/// minCommission/maxCommission/commissionCurrency/warningText,自尾反向索引讀）。10.x band 增長
+/// UNVERIFIED（§11 BLOCK-ORDER-BAND-3）→ 骨架限 sv≤157。
+const ORDER_STATE_WHATIF_TAIL_FIELDS: usize = 15;
 
 /// realizedPNL 精確哨兵字串（f64::MAX 的官方十進位形;比對大小寫不敏感於 `E`）。
 const REALIZED_PNL_SENTINEL_EXACT: &str = "1.7976931348623157E308";
@@ -1378,6 +1414,8 @@ impl OrderExecDataDigest {
             | OrderExecDataReject::ExecutionsAlreadyActive
             | OrderExecDataReject::OpenOrdersAlreadyActive
             | OrderExecDataReject::ServerVersionBelowFloor { .. }
+            // WhatIfPreviewFieldInvalid 由 standalone preview 解碼回傳,不經 digest inbound audit 面。
+            | OrderExecDataReject::WhatIfPreviewFieldInvalid { .. }
             | OrderExecDataReject::InvalidatedUntilNewGeneration => {}
         }
     }
@@ -1463,6 +1501,99 @@ fn classify_optional_price(raw: &str, field: &'static str) -> Result<Option<Stri
         return Err(field);
     }
     Ok(Some(raw.to_string()))
+}
+
+/// **W7-S1 openOrder whatIf tail decode（§2.2.2;preview 功能前置,standalone 解碼——不改
+/// `on_open_order_frame` head 消化路徑,W5-S3 行為不變）**。IB 现勘:whatIf 的 OrderState 尾在
+/// `OPEN_ORDER=5` 訊息尾端,head-prefix 讀不到 → 自訊框尾反向索引讀定長 OrderState 塊。
+///
+/// 守衛（fail-closed,禁猜讀）:
+///   - msgId 必 `OPEN_ORDER=5`;
+///   - **sv>`max_pinned`（157）→ `PinnedLayoutOverflow`**（§11 BLOCK-ORDER-BAND-3:whatIf 尾 10.x
+///     增長 UNVERIFIED,拒解不猜）;sv<floor → `ServerVersionBelowFloor`;
+///   - 欄數 < head(26)+tail(15) → `WireMalformed`（無足夠 OrderState 尾）;
+///   - status 表外 → `OrderStatusUnknownDenied`;margin/commission 非法 decimal → `WhatIfPreviewFieldInvalid`。
+///
+/// margin/commission 以 sentinel 雙判別 → `None`（沿 realizedPNL 哨兵:空欄 / `1.79…E308` / |v|≥1e308
+/// = unset）。**config 提供 floor/ceiling**（與消化面同兩界,單一真源）。
+pub(crate) fn decode_open_order_whatif_tail(
+    payload: &[u8],
+    server_version: i32,
+    config: &OrderExecDataConfig,
+) -> Result<IbkrWhatIfPreviewV1, OrderExecDataReject> {
+    let fields = decode_fields(payload).map_err(OrderExecDataReject::WireMalformed)?;
+    if fields.is_empty() {
+        return Err(OrderExecDataReject::WireMalformed(CodecError::Malformed(
+            "empty open order frame",
+        )));
+    }
+    expect_msg_id(&fields[0], IN_OPEN_ORDER_MSG_ID)?;
+    // band 兩界（§1.5 對稱面 + §11 BLOCK-ORDER-BAND-3;sv>157 whatIf 尾 UNVERIFIED → 拒解不猜）。
+    if server_version < config.min_server_version_floor {
+        return Err(OrderExecDataReject::ServerVersionBelowFloor {
+            server_version,
+            floor: config.min_server_version_floor,
+        });
+    }
+    if server_version > config.max_pinned_server_version {
+        return Err(OrderExecDataReject::PinnedLayoutOverflow {
+            msg_id: IN_OPEN_ORDER_MSG_ID,
+        });
+    }
+    if fields.len() < OPEN_ORDER_HEAD_MIN_FIELDS + ORDER_STATE_WHATIF_TAIL_FIELDS {
+        return Err(OrderExecDataReject::WireMalformed(CodecError::Malformed(
+            "open order lacks whatIf OrderState tail (need head+15)",
+        )));
+    }
+    // 自訊框尾反向索引 OrderState 定長塊（tail[0]=status … tail[14]=warningText）。
+    let base = fields.len() - ORDER_STATE_WHATIF_TAIL_FIELDS;
+    let t = |i: usize| &fields[base + i];
+    let status = IbkrOrderStatusV1::classify_wire_status(t(0));
+    if status == IbkrOrderStatusV1::UnknownDenied {
+        return Err(OrderExecDataReject::OrderStatusUnknownDenied);
+    }
+    let est = |i: usize, field: &'static str| -> Result<Option<String>, OrderExecDataReject> {
+        classify_preview_estimate(t(i))
+            .map_err(|_| OrderExecDataReject::WhatIfPreviewFieldInvalid { field })
+    };
+    Ok(IbkrWhatIfPreviewV1 {
+        status,
+        init_margin_before_decimal: est(1, "init_margin_before")?,
+        maint_margin_before_decimal: est(2, "maint_margin_before")?,
+        equity_with_loan_before_decimal: est(3, "equity_with_loan_before")?,
+        init_margin_change_decimal: est(4, "init_margin_change")?,
+        maint_margin_change_decimal: est(5, "maint_margin_change")?,
+        equity_with_loan_change_decimal: est(6, "equity_with_loan_change")?,
+        init_margin_after_decimal: est(7, "init_margin_after")?,
+        maint_margin_after_decimal: est(8, "maint_margin_after")?,
+        equity_with_loan_after_decimal: est(9, "equity_with_loan_after")?,
+        commission_decimal: est(10, "commission")?,
+        min_commission_decimal: est(11, "min_commission")?,
+        max_commission_decimal: est(12, "max_commission")?,
+        commission_currency: t(13).clone(),
+        warning_text: t(14).clone(),
+    })
+}
+
+/// whatIf preview margin/commission 估值分類（sentinel 雙判別 → `Option`;沿 realizedPNL 哨兵紀律）:
+///   ①空欄 → `None`;②精確 `1.79…E308`（E 大小寫不敏感）或 |v|≥1e308 → `None`;③簽名 decimal → `Some`;
+///   ④其餘 → `Err`（非法形狀,呼叫端映射 `WhatIfPreviewFieldInvalid`）。
+fn classify_preview_estimate(raw: &str) -> Result<Option<String>, ()> {
+    if raw.is_empty() {
+        return Ok(None);
+    }
+    let sentinel = raw.eq_ignore_ascii_case(REALIZED_PNL_SENTINEL_EXACT)
+        || raw
+            .parse::<f64>()
+            .map(|v| v.abs() >= REALIZED_PNL_SENTINEL_MAGNITUDE)
+            .unwrap_or(false);
+    if sentinel {
+        return Ok(None);
+    }
+    if is_signed_decimal_string(raw) {
+        return Ok(Some(raw.to_string()));
+    }
+    Err(())
 }
 
 /// wire 幣別 → lane 白名單（USD 精確匹配;表外 → `UnknownDenied`,契約/本地紀律拒。
