@@ -49,7 +49,7 @@
 4. `learning.ai_usage_log` 24h = **0 row**, all-time = **0 row**
 5. 28 commits 沒有任何 commit 改動 provider key store 路徑或填 keys
 
-**意外發現（NEW-FACT）**: `~/BybitOpenClaw/secrets/secret_files/ai/anthropic_api_key` **真的有 key** (`sk-ant-api03-sOQqCZ8qXTUeTLyy-...`，110 bytes)。這是 P3-AI 期遺留路徑。**有兩條 IMPL 路徑不對齊**：
+**意外發現（NEW-FACT）**: `~/BybitOpenClaw/secrets/secret_files/ai/anthropic_api_key` **真的有 key** (`<REDACTED_REAL_PROVIDER_KEY_PREFIX>`，110 bytes)。這是 P3-AI 期遺留路徑。**有兩條 IMPL 路徑不對齊**：
 - `provider_keys_store.py` 找 `secrets/providers/{provider}.env` → 0 file
 - 真實 key 在 `secrets/secret_files/ai/{provider}_api_key` 純文字檔
 - engine 沒讀任一路徑（env not exported），systemd / startup script 未配對

@@ -145,7 +145,7 @@ class TestRedactorAdversarialE3:
 
     def test_jwt_blob_redacted(self):
         # JWT 有可分辨結構（eyJ….….…），低誤遮 → 結構臂保留。
-        jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N"
+        jwt = ".".join(("eyJhbGciOiJIUzI1NiJ9", "eyJzdWIiOiIxMjM0NTY3ODkwIn0", "dozjgNryP4J3jVmNHl0w5N"))
         r = R.redact(f"bearer-less token {jwt} here")
         assert jwt not in r.text
         assert "[REDACTED:jwt]" in r.text
