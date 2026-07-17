@@ -218,7 +218,7 @@ W2-W11 的全部 DoD 都封頂在 `source-ready` + `runtime-active(inactive post
 
 ### W5 — account/positions/open orders/executions/commissions + session attestation
 
-**進度(2026-07-16 loop R9∥R10)**:**S0+S1 DONE(source-landed)**——S0=PR#48(head `b7925fdb6`):Layer 3 per-field 窮舉+三枚舉封閉域+parity 反向 superset+enum 共源 lockstep+CI 守衛鏈三洞收口(E2 APPROVE_WITH_NOTES;E3 PASS,W4 移交 E3-F1/F2 雙 CLOSED);S1=PR#49(head `728752a7f`):四 typed row contracts+四配對守衛檔+coverage 守衛 rel-path 修(E2 APPROVE_WITH_NOTES;IB 現勘 9 項全 CONFIRMED)。**S2 前置注意**:AvailableFunds/ExcessLiquidity 符號不對稱入 IB 現勘清單;emitter 側 reconnect_budget_exhausted 終態形態會被 Layer3 攔。**S3 前置 blocking**:max-double 哨兵→None 映射、exec_time 格式×TWS timezone 配置聯 pin(IB 2026-07-16,官方出典見 PROGRESS R10)。
+**進度(2026-07-17 loop R11)**:**S0+S1+S2 DONE(source-landed)**——S2=PR#57(head `d7d1cec10`):`ibkr_tws_account_data.rs` 消化模組(四 outbound builder/IN 61-64 decode/訂閱狀態機/typed 六態 staleness/G1-G4 fail-closed)+AvailableFunds 契約翻轉(IB DIVERGENT:=EWL−InitMargin 恒先轉負)+fake-TWS 場景+ci.yml ready_for_review types。**W6 IPC 投影前必修**:Invalidated 恢復政策+staleness 綁定視圖+reject telemetry(E2 F3-F5/E3 MED-01);**EA 哨兵校準清單**:exchange 空欄(F9)/G2 哨兵 21 位/3 分鐘節拍。原 R9∥R10 進度:**S0+S1 DONE(source-landed)**——S0=PR#48(head `b7925fdb6`):Layer 3 per-field 窮舉+三枚舉封閉域+parity 反向 superset+enum 共源 lockstep+CI 守衛鏈三洞收口(E2 APPROVE_WITH_NOTES;E3 PASS,W4 移交 E3-F1/F2 雙 CLOSED);S1=PR#49(head `728752a7f`):四 typed row contracts+四配對守衛檔+coverage 守衛 rel-path 修(E2 APPROVE_WITH_NOTES;IB 現勘 9 項全 CONFIRMED)。**S2 前置注意**:AvailableFunds/ExcessLiquidity 符號不對稱入 IB 現勘清單;emitter 側 reconnect_budget_exhausted 終態形態會被 Layer3 攔。**S3 前置 blocking**:max-double 哨兵→None 映射、exec_time 格式×TWS timezone 配置聯 pin(IB 2026-07-16,官方出典見 PROGRESS R10)。
 
 **目標**:唯讀帳戶面全量 + 會話 attestation 生產者,把「這是哪個帳戶、是不是 paper、資料新不新鮮」變成 typed、可審計的事實。
 
