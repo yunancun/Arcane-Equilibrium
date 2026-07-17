@@ -13,6 +13,7 @@ pub mod ibkr_activation_envelope;
 pub mod ibkr_commissions_row;
 pub mod ibkr_executions_row;
 pub mod ibkr_feature_flag_secret_auth;
+pub mod ibkr_instrument_identity_row;
 pub mod ibkr_non_bybit_api_allowlist;
 pub mod ibkr_paper_lifecycle;
 pub mod ibkr_phase2_artifact;
@@ -78,6 +79,12 @@ pub use ibkr_feature_flag_secret_auth::{
     evaluate_feature_flag_secret_auth_matrix, FeatureFlagSecretAuthBlocker,
     FeatureFlagSecretAuthMatrixV1, FeatureFlagSecretAuthVerdict, StockEtfAuthorizationEnvelopeV1,
     FEATURE_FLAG_SECRET_AUTH_MATRIX_CONTRACT_ID,
+};
+pub use ibkr_instrument_identity_row::{
+    is_whitelisted_instrument_exchange, is_whitelisted_primary_exchange,
+    IbkrInstrumentIdentityRowBlocker, IbkrInstrumentIdentityRowV1,
+    IbkrInstrumentIdentityRowVerdict, IbkrStockTypeV1, IBKR_INSTRUMENT_IDENTITY_ROW_CONTRACT_ID,
+    IBKR_INSTRUMENT_PRIMARY_EXCHANGE_WHITELIST,
 };
 pub use ibkr_non_bybit_api_allowlist::{
     classify_non_bybit_api_action, required_non_bybit_api_actions, NonBybitApiAction,
