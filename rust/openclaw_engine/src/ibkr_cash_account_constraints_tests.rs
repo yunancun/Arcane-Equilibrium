@@ -101,7 +101,7 @@ fn base_account() -> CashAccountState {
         account_id: "DU111".to_string(),
         settled_cash_decimal: "100000".to_string(),
         unsettled_tranches: Vec::new(),
-        unsettled_buys: BTreeMap::new(),
+        unsettled_funded_buys: BTreeMap::new(),
         long_positions: long,
         staleness: SnapshotStaleness::Fresh { as_of_ms: 1 },
     }
@@ -196,7 +196,8 @@ fn buy_matured_tranche_counted() {
 }
 
 #[test]
-fn buy_market_order_uses_reference_price() {
+fn buy_market_order_uses_buffered_reference_price() {
+    // MKT 成本 = qty × ref × (1 + 100bps) = 10 × 150 × 1.01 = 1515（保守上浮,修 MED-1 fail-open)。
     let intent = CashOrderIntent {
         order_type: Some(StockEtfPaperOrderType::Market),
         limit_price_decimal: String::new(),
@@ -211,7 +212,30 @@ fn buy_market_order_uses_reference_price() {
         now_rth(),
     )
     .unwrap();
-    assert_eq!(ok.estimated_cost_decimal, "1500");
+    assert_eq!(ok.estimated_cost_decimal, "1515");
+    assert_eq!(ok.settled_funds_remaining_decimal, "98485");
+}
+
+#[test]
+fn buy_market_buffer_causes_fail_closed_over_settled() {
+    // settled=1500:無 buffer 剛好夠(10×150=1500),有 buffer(cost 1515)→ 保守拒(fail-closed)。
+    let mut acct = base_account();
+    acct.settled_cash_decimal = "1500".to_string();
+    let intent = CashOrderIntent {
+        order_type: Some(StockEtfPaperOrderType::Market),
+        limit_price_decimal: String::new(),
+        market: fresh_market("150"),
+        ..base_buy()
+    };
+    let err = evaluate(&intent, &acct, &rules(), &full_calendar(), now_rth()).unwrap_err();
+    assert!(matches!(
+        err,
+        CashConstraintViolation::SettledFundsInsufficient { .. }
+    ));
+    // 同單、buffer=0 → 無上浮(cost 1500 ≤ 1500)→ 放行(證 buffer 為 fail-closed 的 load-bearing 差異)。
+    let mut r = rules();
+    r.marketable_buffer_bps = 0;
+    assert!(evaluate(&intent, &acct, &r, &full_calendar(), now_rth()).is_ok());
 }
 
 #[test]
@@ -227,14 +251,14 @@ fn buy_settlement_uncomputable_when_no_future_trading_day() {
 // ===========================================================================
 
 #[test]
-fn sell_gfv_violation_before_settlement() {
+fn sell_unsettled_funded_before_funding_settles_denied() {
     let mut acct = base_account();
-    // AAPL 有未結算買入(結算 03-12 > 今日) → 結算前賣出 = free-riding。
-    acct.unsettled_buys.insert(
+    // AAPL 有以未結算資金支付的買入(資金結算 03-12 > 今日) → 資金結算前賣出 = free-riding(真 GFV)。
+    acct.unsettled_funded_buys.insert(
         "AAPL".to_string(),
-        UnsettledBuyLot {
+        UnsettledFundedBuyLot {
             quantity_decimal: "50".to_string(),
-            settlement_date: "20260312".to_string(),
+            funding_settlement_date: "20260312".to_string(),
         },
     );
     let err = evaluate(&base_sell(), &acct, &rules(), &full_calendar(), now_rth()).unwrap_err();
@@ -245,16 +269,25 @@ fn sell_gfv_violation_before_settlement() {
 }
 
 #[test]
-fn sell_ok_when_buy_already_settled() {
+fn sell_ok_when_funding_already_settled() {
     let mut acct = base_account();
-    // 未結算買入已成熟(結算 03-10 ≤ 今日) → 非 free-riding。
-    acct.unsettled_buys.insert(
+    // 支付資金已結算(結算 03-10 ≤ 今日) → 非 free-riding。
+    acct.unsettled_funded_buys.insert(
         "AAPL".to_string(),
-        UnsettledBuyLot {
+        UnsettledFundedBuyLot {
             quantity_decimal: "50".to_string(),
-            settlement_date: "20260310".to_string(),
+            funding_settlement_date: "20260310".to_string(),
         },
     );
+    let ok = evaluate(&base_sell(), &acct, &rules(), &full_calendar(), now_rth()).unwrap();
+    assert_eq!(ok.side, StockEtfOrderSide::Sell);
+}
+
+#[test]
+fn sell_settled_funded_before_t1_not_misfired() {
+    // E2 LOW-1 修:以 settled cash 全額買入的持倉(不入 unsettled_funded_buys),T+1 結算前的正當賣出
+    // **不應被 GFV 誤殺**(官方明文不算 GFV)。unsettled_funded_buys 空 → 放行。
+    let acct = base_account(); // unsettled_funded_buys 空
     let ok = evaluate(&base_sell(), &acct, &rules(), &full_calendar(), now_rth()).unwrap();
     assert_eq!(ok.side, StockEtfOrderSide::Sell);
 }
@@ -493,11 +526,64 @@ fn luld_limit_state_denied() {
 }
 
 #[test]
-fn luld_band_breach_on_price_deviation() {
-    // LMT 200 vs 參考 150,偏離 33% > 帶寬 5%。
+fn luld_band_breach_on_marketable_limit_deviation() {
+    // marketable BUY LMT 200 ≥ 參考 150(會即時觸市),偏離 33% > 帶寬 5% → fat-finger sanity 拒。
     let mut intent = base_buy();
     intent.limit_price_decimal = "200".to_string();
     intent.market = fresh_market("150");
+    let err = evaluate(
+        &intent,
+        &base_account(),
+        &rules(),
+        &full_calendar(),
+        now_rth(),
+    )
+    .unwrap_err();
+    assert_eq!(err, CashConstraintViolation::LuldBandBreach);
+}
+
+#[test]
+fn dip_buy_resting_limit_far_below_market_not_luld() {
+    // E2 NOTE-1 修:遠低於現價的 dip-buy 限價單(BUY LMT 100 < ref 150,非 marketable)**非 LULD 事件**,
+    // 本地 band **不得誤殺**。成本 10×100=1000 ≤ 100000 → 放行。
+    let mut intent = base_buy();
+    intent.limit_price_decimal = "100".to_string();
+    intent.market = fresh_market("150");
+    let ok = evaluate(
+        &intent,
+        &base_account(),
+        &rules(),
+        &full_calendar(),
+        now_rth(),
+    )
+    .unwrap();
+    assert_eq!(ok.estimated_cost_decimal, "1000");
+}
+
+#[test]
+fn sell_resting_limit_far_above_market_not_luld() {
+    // 賣出掛單遠高於現價(SELL LMT 300 > ref 150,非 marketable)非 LULD → 不誤殺;no-short 50≤100 → 放行。
+    let mut intent = base_sell();
+    intent.limit_price_decimal = "300".to_string();
+    intent.market = fresh_market("150");
+    let ok = evaluate(
+        &intent,
+        &base_account(),
+        &rules(),
+        &full_calendar(),
+        now_rth(),
+    )
+    .unwrap();
+    assert_eq!(ok.side, StockEtfOrderSide::Sell);
+}
+
+#[test]
+fn luld_venue_limit_state_is_authoritative_even_for_resting_limit() {
+    // venue flag 權威:即便 resting limit(100 < ref 150,本地 band 不套),場方 limit-state 仍恆拒。
+    let mut intent = base_buy();
+    intent.limit_price_decimal = "100".to_string();
+    intent.market = fresh_market("150");
+    intent.market.luld_limit_state = true;
     let err = evaluate(
         &intent,
         &base_account(),

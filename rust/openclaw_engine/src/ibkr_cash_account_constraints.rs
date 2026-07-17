@@ -11,7 +11,7 @@
 //!     （避 R6/R8/R11 憑記憶寫死未證官方政策)。
 //!   - (b) 輸入視圖：`CashOrderIntent`（gate 相關欄的精簡投影,消費 openclaw_types 既有枚舉,禁重造）、
 //!     `MarketPreTradeState`（halt/LULD/參考價）、`CashAccountState`（settled/unsettled 台帳 + 每 symbol
-//!     未結算買入 + long positions + W5 `SnapshotStaleness`)、`CashTranche`/`UnsettledBuyLot`。
+//!     unsettled-funded 買入 + long positions + W5 `SnapshotStaleness`)、`CashTranche`/`UnsettledFundedBuyLot`。
 //!   - (c) typed 裁決：`CashConstraintApproved`（放行 + 計算事實）/ `CashConstraintViolation`（窮舉拒因）。
 //!   - (d) `evaluate` + 各 gate 純函數。
 //!   - (e) 精確定點 decimal 比較（無 decimal crate → i128 scaled 10^-9;過精度 / 溢位 → fail-closed）
@@ -66,11 +66,18 @@ pub(crate) struct CashAccountRules {
     pub allow_moc_loc: bool,
     /// fractional opt-in（v1=false;非整數 qty 拒)。官方 cashQty（sv≥111）支援但列後續 opt-in。
     pub allow_fractional: bool,
-    /// **LULD 帶寬百分比**（*illustrative*;**待 IB 现勘**)——訂單有效價偏離參考價超此比例 → 拒
-    /// （`luld_filter_enabled=true` 時生效)。0.05 = ±5%。真帶寬（分層 / 依價位 / 依時段）歸 IB 现勘。
+    /// **marketable BUY 資金 buffer（basis points）**——MKT 買入無價格上限,pre-submit 以參考價估成本會
+    /// 低估（實際成交可 > ref)→ 對 **MKT** 成本**保守上浮** `ref×(1+bps/10000)`,使閘 fail-closed（寧保守
+    /// 拒不樂觀放行)。*illustrative* default;**真值待 IB/EA 现勘**（官方 Available-for-Trading 以即時可用
+    /// 資金檢查,MKT 以估價保留)。**純 LMT 不套用**——限價即成本上界(見 `gate_buy_settled_funds`)。
+    pub marketable_buffer_bps: u32,
+    /// **LULD 帶寬百分比**（*approximate-only 保守 sanity,非官方 tier 帶寬*;**待 IB 现勘**)。官方 LULD
+    /// 為 tiered（Tier1/2 × 價位分層 × 時段加倍 × 5-min-avg 參考)——單一 f64 **無法承載**,**權威態以 venue
+    /// flag `MarketPreTradeState.luld_limit_state`/`halted` 為準**;本欄僅作 marketable 語境的 fat-finger
+    /// sanity（見 `gate_luld_halt`,不對 resting limit 定價偏離誤判)。0.05 = ±5%。
     pub luld_band_percent: f64,
     /// 是否啟用 LULD 帶寬 pre-trade filter。啟用但市場資料缺（參考價不可解)→ fail-closed 拒
-    /// （`LuldStateUnavailable`;不確定不放行)。
+    /// （`LuldStateUnavailable`;不確定不放行)。venue flag（halt/limit-state)不受此旗影響,恆權威。
     pub luld_filter_enabled: bool,
     /// RTH-only 強制（v1=true;outsideRth 永久關,承 gate #4)。false 時跳過 RTH 閘（僅 config,非 v1 姿態)。
     pub rth_only: bool,
@@ -84,7 +91,8 @@ impl CashAccountRules {
             allow_gtc: false,
             allow_moc_loc: false,
             allow_fractional: false,
-            luld_band_percent: 0.05, // ±5%;待 IB 现勘
+            marketable_buffer_bps: 100, // MKT 成本 +1%;illustrative,待 IB/EA 现勘
+            luld_band_percent: 0.05,    // ±5% approximate sanity;待 IB 现勘
             luld_filter_enabled: true,
             rth_only: true,
         }
@@ -141,13 +149,17 @@ pub(crate) struct CashTranche {
     pub settlement_date: String,
 }
 
-/// 某 symbol 的未結算買入紀錄（GFV/free-riding:未結算買入後、結算前賣出 = violation)。
+/// 某 symbol 的 **unsettled-funded 買入**紀錄（GFV/free-riding 正解:官方 GFV = 以**未結算資金**支付的
+/// 買入,在**該資金結算前**賣出 = violation;若買入當下已有足額 settled funds 支付即**不構成 GFV**)。
+/// 故 GFV 綁「買入的**資金來源** tranche 未結算」而非「買入本身 T+1 未到」——避免誤殺以 settled cash 全額
+/// 買入、T+1 結算前的**正當**賣出(官方明文不算 GFV)。**S2 買入閘只放行 settled-funded 買入 → 此 map 於
+/// S2 世界恆空**,本閘為對 S3 ledger 的 defense-in-depth(下單前硬拒方向保留,CONFIRMED-conservative)。
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct UnsettledBuyLot {
-    /// 未結算買入量（decimal;記帳承載)。
+pub(crate) struct UnsettledFundedBuyLot {
+    /// 以未結算資金支付的買入量（decimal;記帳承載)。
     pub quantity_decimal: String,
-    /// 該買入的結算日"YYYYMMDD"（`> 今日` = 仍未結算)。
-    pub settlement_date: String,
+    /// **支付該買入的未結算資金 tranche 的結算日**"YYYYMMDD"（`> 今日` = 資金仍未結算 → 此前賣出=GFV)。
+    pub funding_settlement_date: String,
 }
 
 /// cash-account 快照狀態（**承 W5 帳戶面**:settled/unsettled 現金 + positions + 新鮮度)。
@@ -158,8 +170,9 @@ pub(crate) struct CashAccountState {
     pub settled_cash_decimal: String,
     /// 未結算 tranche（賣出所得待清算,各帶結算日;結算日 ≤ 今日者於 gate 併回可用資金)。
     pub unsettled_tranches: Vec<CashTranche>,
-    /// 每 symbol 未結算買入追蹤（GFV gate;鍵=symbol)。
-    pub unsettled_buys: BTreeMap<String, UnsettledBuyLot>,
+    /// 每 symbol **unsettled-funded 買入**追蹤（GFV gate;鍵=symbol;語義=以未結算資金支付的買入,見
+    /// `UnsettledFundedBuyLot`)。**S2 世界恆空**(買入閘只放行 settled-funded),為 S3 ledger 的 defense。
+    pub unsettled_funded_buys: BTreeMap<String, UnsettledFundedBuyLot>,
     /// 既有 long positions（W5 positions;no-short gate:sell qty ≤ 此量;鍵=symbol,值=qty decimal)。
     pub long_positions: BTreeMap<String, String>,
     /// 快照新鮮度（**承 W5 `SnapshotStaleness`**;非 `Fresh` → fail-closed 拒,不對陳舊 / 毒化快照下單)。
@@ -214,8 +227,11 @@ pub(crate) enum CashConstraintViolation {
     SettlementDateUncomputable,
 
     // ---- gate #2 GFV / free-riding----
-    /// 未結算買入後、結算前賣出 = free-riding（good-faith violation)。
-    #[error("good-faith / free-riding violation: unsettled buy for {symbol} not yet settled")]
+    /// 以未結算資金支付的買入,在該資金結算前賣出 = free-riding（good-faith violation;官方 GFV 正解——
+    /// 買入當下若已 settled-funded 即不構成)。
+    #[error(
+        "good-faith / free-riding violation: unsettled-funded buy for {symbol} not yet settled"
+    )]
     GfvFreeRidingViolation { symbol: String },
 
     // ---- gate #3 no-short（硬邊界)----
@@ -316,7 +332,7 @@ pub(crate) fn evaluate(
     }
 
     // ── gate #7 LULD / halt pre-trade filter ──
-    gate_luld_halt(intent, order_type, rules)?;
+    gate_luld_halt(intent, side, order_type, rules)?;
 
     // ── 側別 gate ──
     match side {
@@ -383,21 +399,28 @@ fn gate_rth(calendar: &IbkrTradingCalendarV1, now_ms: u64) -> Result<(), CashCon
     }
 }
 
-/// gate #7:LULD / halt pre-trade filter。halt → 拒;場方 LULD limit 態 → 拒;帶寬 filter 啟用則需
-/// 市場資料可信 + 參考價可解,並檢有效價（LMT=限價,MKT=參考價)是否偏離參考價超 `luld_band_percent`。
-/// **帶寬數值歸 rules 注入**（IB 现勘);f64 僅作偏離門檻判別（非記帳,同 S1 dir-guard 紀律)。
+/// gate #7:LULD / halt pre-trade filter。
+/// **權威態 = venue flag**:`halted` → `TradingHalted`;`luld_limit_state`（場方自算 tier 帶寬觸限/暫停)
+/// → `LuldBandBreach`（官方 LULD 為 tiered,交易所權威,恆先判)。
+/// **本地 `luld_band_percent` = approximate-only 保守 sanity**(非官方帶寬):**僅套用於 marketable 語境**
+/// （執行價≈市場價:MKT,或 marketable LMT——買入 limit≥ref / 賣出 limit≤ref)。**resting limit（遠離現價,
+/// 如 dip-buy)不以定價偏離誤判 LULD**（LULD 是市場價觸帶事件,非你的限價位置)——修 E2 NOTE-1 誤殺。
+/// f64 僅作偏離門檻判別（非記帳,同 S1 dir-guard 紀律)。
 fn gate_luld_halt(
     intent: &CashOrderIntent,
+    side: StockEtfOrderSide,
     order_type: StockEtfPaperOrderType,
     rules: &CashAccountRules,
 ) -> Result<(), CashConstraintViolation> {
     let m = &intent.market;
+    // ── venue-flag 權威（恆判,不受 luld_filter_enabled 影響)──
     if m.halted {
         return Err(CashConstraintViolation::TradingHalted);
     }
     if m.luld_limit_state {
         return Err(CashConstraintViolation::LuldBandBreach);
     }
+    // ── 本地 approximate band sanity（可 config 關;僅 marketable 語境)──
     if !rules.luld_filter_enabled {
         return Ok(());
     }
@@ -410,25 +433,36 @@ fn gate_luld_halt(
     if reference <= 0 {
         return Err(CashConstraintViolation::LuldStateUnavailable);
     }
-    // 有效價:LMT=限價（缺 → fail-closed);MKT=參考價（市價單以參考價為近似,帶寬中心與價相同 → 恆在帶內,
-    // 由 halt/limit 態 + 資料可信度承載)。
-    let effective = match order_type {
+    // 只對 marketable 語境(執行價≈市場)套 band sanity;純 resting limit(遠離現價)不誤判。
+    let limit = match order_type {
+        StockEtfPaperOrderType::Market => {
+            // MKT 執行價≈參考價,無 limit 定價偏離可查;venue flag 已權威承載 → 放行。
+            return Ok(());
+        }
         StockEtfPaperOrderType::Limit => parse_fixed(&intent.limit_price_decimal).ok_or(
             CashConstraintViolation::MalformedDecimal {
                 field: "limit_price",
             },
         )?,
-        StockEtfPaperOrderType::Market => reference,
     };
-    if effective <= 0 {
+    if limit <= 0 {
         return Err(CashConstraintViolation::MalformedDecimal {
             field: "limit_price",
         });
     }
-    // 帶寬門檻（f64 threshold-only;非記帳)。|effective − reference| / reference > band → 拒。
+    // marketable 判定:買入 limit≥ref(會即時觸市) / 賣出 limit≤ref。非 marketable(resting)→ 不套 band。
+    let marketable = match side {
+        StockEtfOrderSide::Buy => limit >= reference,
+        StockEtfOrderSide::Sell => limit <= reference,
+        StockEtfOrderSide::Unknown => return Ok(()),
+    };
+    if !marketable {
+        return Ok(());
+    }
+    // marketable LMT 的 fat-finger sanity:limit 偏離參考價超 band → 拒（approximate;venue flag 為權威)。
     let ref_f = reference as f64;
-    let eff_f = effective as f64;
-    let deviation = ((eff_f - ref_f) / ref_f).abs();
+    let limit_f = limit as f64;
+    let deviation = ((limit_f - ref_f) / ref_f).abs();
     if deviation > rules.luld_band_percent {
         return Err(CashConstraintViolation::LuldBandBreach);
     }
@@ -479,17 +513,28 @@ fn gate_buy_settled_funds(
         }
     }
 
-    // 有效價:LMT=限價(必填);MKT=參考價(必填,承 gate #7 已驗但此處獨立解以 fail-closed)。
+    // 有效價(成本上界):**LMT=限價**——限價即成本上界(你永不付高於限價),故**不套 buffer**(marketable
+    // LMT 亦然:limit 已是付款上限)。**MKT=參考價 × (1 + marketable_buffer_bps/10000)**——MKT 無價格上限,
+    // pre-submit 以 ref 估會低估(實際成交可 > ref),**保守上浮使閘 fail-closed**(修 MED-1 唯一 fail-open;
+    // buffer 值 illustrative 待 IB/EA 现勘)。上浮取**向上取整**(保守高估成本,寧拒不樂觀放行)。
     let price = match order_type {
         StockEtfPaperOrderType::Limit => parse_fixed(&intent.limit_price_decimal).ok_or(
             CashConstraintViolation::MalformedDecimal {
                 field: "limit_price",
             },
         )?,
-        StockEtfPaperOrderType::Market => parse_fixed(&intent.market.reference_price_decimal)
-            .ok_or(CashConstraintViolation::MalformedDecimal {
-                field: "reference_price",
-            })?,
+        StockEtfPaperOrderType::Market => {
+            let reference = parse_fixed(&intent.market.reference_price_decimal).ok_or(
+                CashConstraintViolation::MalformedDecimal {
+                    field: "reference_price",
+                },
+            )?;
+            marketable_buffered_price(reference, rules.marketable_buffer_bps).ok_or(
+                CashConstraintViolation::MalformedDecimal {
+                    field: "reference_price",
+                },
+            )?
+        }
     };
     if price <= 0 {
         return Err(CashConstraintViolation::MalformedDecimal {
@@ -558,16 +603,17 @@ fn gate_sell_no_short_gfv(
         });
     }
 
-    // gate #2 GFV:該 symbol 有未結算買入且結算日 > 今日 → free-riding。
+    // gate #2 GFV:該 symbol 有 **unsettled-funded 買入**且**其資金 tranche 結算日 > 今日** → free-riding。
+    // 綁「資金來源未結算」而非「買入 T+1 未到」→ 以 settled cash 全額買入、T+1 前的正當賣出**不誤殺**。
     let today =
         venue_today(calendar, now_ms).ok_or(CashConstraintViolation::SettlementDateUncomputable)?;
-    if let Some(lot) = cash_state.unsettled_buys.get(&intent.symbol) {
-        if !is_valid_yyyymmdd(&lot.settlement_date) {
+    if let Some(lot) = cash_state.unsettled_funded_buys.get(&intent.symbol) {
+        if !is_valid_yyyymmdd(&lot.funding_settlement_date) {
             return Err(CashConstraintViolation::MalformedDecimal {
-                field: "unsettled_buy_settlement_date",
+                field: "funding_settlement_date",
             });
         }
-        if lot.settlement_date.as_str() > today.as_str() {
+        if lot.funding_settlement_date.as_str() > today.as_str() {
             return Err(CashConstraintViolation::GfvFreeRidingViolation {
                 symbol: intent.symbol.clone(),
             });
@@ -640,6 +686,17 @@ fn parse_fixed(raw: &str) -> Option<i128> {
     frac_val = frac_val.checked_mul(10i128.checked_pow(pad)?)?;
     let total = int_val.checked_mul(FIXED_SCALE)?.checked_add(frac_val)?;
     Some(if neg { -total } else { total })
+}
+
+/// marketable BUY(MKT)成本上界:`reference × (1 + bps/10000)`,**向上取整**(保守高估成本 → 閘
+/// fail-closed;修 MED-1 MKT fail-open)。定點整數算術(無 f64 記帳);溢位 → `None`。`bps=0` → 原價。
+fn marketable_buffered_price(reference: i128, bps: u32) -> Option<i128> {
+    if bps == 0 {
+        return Some(reference);
+    }
+    let numer = reference.checked_mul(10_000i128.checked_add(bps as i128)?)?;
+    // 向上取整除以 10000(保守:寧高估成本)。reference 於本 lane 恆正(呼叫端已驗 >0)。
+    Some((numer + 9_999) / 10_000)
 }
 
 /// i128 定點 → decimal 字串（觀測 / 回報用;去尾零,整數不帶小數點)。
