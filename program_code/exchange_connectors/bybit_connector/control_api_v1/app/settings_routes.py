@@ -43,13 +43,15 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from . import alert_config as _alert_cfg
+from .error_sanitize import log_safe_exception
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +107,12 @@ _SLOT_STORAGE_PATH: dict[str, str] = {
     "live_demo": "live",
     "live": "live",
 }
+_SECRET_FILENAMES: frozenset[str] = frozenset(
+    {"api_key", "api_secret", "bybit_endpoint"}
+)
+_SECRET_DIR_MODE = stat.S_IRWXU
+_SECRET_FILE_MODE = stat.S_IRUSR | stat.S_IWUSR
+_SECRET_FILE_MAX_BYTES = 64 * 1024
 
 # Validation endpoint — low-permission read-only query, sufficient to verify auth
 # 驗證端點 — 低權限只讀查詢，足以驗證 key 有效性
@@ -128,7 +136,10 @@ _BYBIT_CONNECTOR_WRITE_ENABLED_ENV_KEY = "BYBIT_CONNECTOR_WRITE_ENABLED"
 _BYBIT_DEMO_CONNECTOR_MODE_CONFIRM = "enable_demo_connector_mode:bounded_demo_probe:demo_only"
 _CUTOVER_PREFLIGHT_SCHEMA_VERSION = "bounded_demo_credential_mode_cutover_preflight_v1"
 _CUTOVER_PREFLIGHT_READY_STATUS = "BOUNDED_DEMO_CREDENTIAL_MODE_CUTOVER_PREFLIGHT_READY_NO_MUTATION"
+_CUTOVER_PREFLIGHT_MAX_BYTES = 1024 * 1024
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_SAFE_CUTOVER_COMPONENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+_CUTOVER_PREFLIGHT_FILENAME = "cutover_preflight.json"
 _ENV_TRUTHY = frozenset({"1", "true", "yes", "on", "enabled"})
 _ENV_FALSEY = frozenset({"0", "false", "no", "off", "disabled"})
 _MIGRATION_FILE_RE = re.compile(r"^V(?P<version>\d{3})__(?P<name>.+)\.sql$")
@@ -160,6 +171,137 @@ _DOC_CLUSTER_PATHS = (
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
+def _secrets_root() -> Path:
+    base_env = os.environ.get("OPENCLAW_SECRETS_DIR")
+    if base_env:
+        configured = Path(base_env).expanduser()
+    else:
+        configured = (
+        Path.home()
+        / "BybitOpenClaw"
+        / "secrets"
+        / "secret_files"
+        / "bybit"
+        )
+    return Path(os.path.abspath(configured))
+
+
+def _reject_secret_symlink(path: Path) -> None:
+    if path.is_symlink():
+        raise ValueError("secret path must not be a symlink")
+
+
+def _secret_directory_open_flags() -> int:
+    no_follow = getattr(os, "O_NOFOLLOW", None)
+    directory = getattr(os, "O_DIRECTORY", None)
+    if no_follow is None or directory is None:
+        raise OSError("required safe-open flags are unavailable")
+    return os.O_RDONLY | no_follow | directory
+
+
+def _effective_uid() -> int:
+    get_effective_uid = getattr(os, "geteuid", None)
+    if get_effective_uid is None:
+        raise OSError("effective uid is unavailable")
+    return int(get_effective_uid())
+
+
+def _require_private_secret_directory_fd(fd: int) -> None:
+    directory_stat = os.fstat(fd)
+    if (
+        not stat.S_ISDIR(directory_stat.st_mode)
+        or stat.S_IMODE(directory_stat.st_mode) != _SECRET_DIR_MODE
+        or directory_stat.st_uid != _effective_uid()
+    ):
+        raise PermissionError("secret directory must be owned by euid with mode 0700")
+
+
+def _require_private_secret_file_stat(file_stat: os.stat_result) -> None:
+    if (
+        not stat.S_ISREG(file_stat.st_mode)
+        or stat.S_IMODE(file_stat.st_mode) != _SECRET_FILE_MODE
+        or file_stat.st_uid != _effective_uid()
+    ):
+        raise PermissionError("secret file must be owned by euid with mode 0600")
+
+
+def _open_absolute_directory(path: Path, *, create_missing: bool) -> int:
+    """Open an absolute directory chain without following any component symlink."""
+    absolute = Path(os.path.abspath(path))
+    if not absolute.is_absolute() or not absolute.anchor:
+        raise ValueError("secret root must be absolute")
+    flags = _secret_directory_open_flags()
+    current_fd = -1
+    try:
+        current_fd = os.open(absolute.anchor, flags)
+        for component in absolute.parts[1:]:
+            if component in {"", ".", ".."}:
+                raise ValueError("invalid secret directory component")
+            try:
+                next_fd = os.open(component, flags, dir_fd=current_fd)
+            except FileNotFoundError:
+                if not create_missing:
+                    raise
+                try:
+                    os.mkdir(component, _SECRET_DIR_MODE, dir_fd=current_fd)
+                except FileExistsError:
+                    pass
+                next_fd = os.open(component, flags, dir_fd=current_fd)
+            os.close(current_fd)
+            current_fd = next_fd
+        result_fd = current_fd
+        current_fd = -1
+        return result_fd
+    finally:
+        if current_fd >= 0:
+            os.close(current_fd)
+
+
+def _open_secret_root_fd(*, create: bool) -> int:
+    fd = _open_absolute_directory(_secrets_root(), create_missing=create)
+    try:
+        _require_private_secret_directory_fd(fd)
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def _open_secret_slot_fd(slot: str, *, create: bool) -> int:
+    if slot not in ALLOWED_SLOTS:
+        raise ValueError("unsupported secret slot")
+    root_fd = _open_secret_root_fd(create=create)
+    slot_fd = -1
+    try:
+        storage_slot = _SLOT_STORAGE_PATH[slot]
+        try:
+            slot_fd = os.open(
+                storage_slot,
+                _secret_directory_open_flags(),
+                dir_fd=root_fd,
+            )
+        except FileNotFoundError:
+            if not create:
+                raise
+            try:
+                os.mkdir(storage_slot, _SECRET_DIR_MODE, dir_fd=root_fd)
+            except FileExistsError:
+                pass
+            slot_fd = os.open(
+                storage_slot,
+                _secret_directory_open_flags(),
+                dir_fd=root_fd,
+            )
+        _require_private_secret_directory_fd(slot_fd)
+        result_fd = slot_fd
+        slot_fd = -1
+        return result_fd
+    finally:
+        if slot_fd >= 0:
+            os.close(slot_fd)
+        os.close(root_fd)
+
+
 def _secrets_slot_dir(slot: str) -> Path:
     """
     Return the directory path for a given key slot.
@@ -171,11 +313,26 @@ def _secrets_slot_dir(slot: str) -> Path:
     """
     # Resolve virtual slots (e.g. live_demo → live) to physical storage path
     # 虛擬槽位（如 live_demo）映射到物理存儲路徑（live）
-    storage_slot = _SLOT_STORAGE_PATH.get(slot, slot)
-    base_env = os.environ.get("OPENCLAW_SECRETS_DIR")
-    if base_env:
-        return Path(base_env) / storage_slot
-    return Path.home() / "BybitOpenClaw" / "secrets" / "secret_files" / "bybit" / storage_slot
+    if slot not in ALLOWED_SLOTS:
+        raise ValueError("unsupported secret slot")
+    root = _secrets_root()
+    _reject_secret_symlink(root)
+    candidate = Path(os.path.abspath(root / _SLOT_STORAGE_PATH[slot]))
+    if not candidate.is_relative_to(root):
+        raise ValueError("secret slot escapes configured root")
+    _reject_secret_symlink(candidate)
+    return candidate
+
+
+def _secret_file_path(slot: str, filename: str) -> Path:
+    if filename not in _SECRET_FILENAMES:
+        raise ValueError("unsupported secret filename")
+    root = _secrets_root()
+    candidate = Path(os.path.abspath(_secrets_slot_dir(slot) / filename))
+    if not candidate.is_relative_to(root):
+        raise ValueError("secret file escapes configured root")
+    _reject_secret_symlink(candidate)
+    return candidate
 
 
 def _mask_key(key: str) -> str:
@@ -199,15 +356,101 @@ def _read_key_file(slot: str, filename: str) -> str:
     Returns empty string if the file does not exist or is empty.
     文件不存在或為空時返回空字符串。
     """
-    path = _secrets_slot_dir(slot) / filename
     try:
-        content = path.read_text(encoding="utf-8").strip()
-        return content
-    except (FileNotFoundError, PermissionError, OSError):
+        raw = _read_key_file_bytes(slot, filename)
+        return raw.decode("utf-8").strip() if raw is not None else ""
+    except (FileNotFoundError, PermissionError, OSError, UnicodeError, ValueError):
         return ""
 
 
-def _write_key_file(slot: str, filename: str, content: str) -> None:
+def _read_key_file_bytes(slot: str, filename: str) -> bytes | None:
+    """Return one bounded regular secret file exactly, or ``None`` if absent."""
+    if filename not in _SECRET_FILENAMES:
+        raise ValueError("unsupported secret filename")
+    slot_fd = -1
+    fd = -1
+    try:
+        slot_fd = _open_secret_slot_fd(slot, create=False)
+        no_follow = getattr(os, "O_NOFOLLOW", None)
+        nonblock = getattr(os, "O_NONBLOCK", None)
+        if no_follow is None or nonblock is None:
+            raise OSError("required safe-open flags are unavailable")
+        fd = os.open(
+            filename,
+            os.O_RDONLY | no_follow | nonblock,
+            dir_fd=slot_fd,
+        )
+        before = os.fstat(fd)
+        _require_private_secret_file_stat(before)
+        if before.st_size < 0 or before.st_size > _SECRET_FILE_MAX_BYTES:
+            raise ValueError("secret target exceeds size bound")
+        chunks: list[bytes] = []
+        remaining = before.st_size
+        while remaining:
+            chunk = os.read(fd, min(remaining, 64 * 1024))
+            if not chunk:
+                raise OSError("secret target changed during read")
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        if os.read(fd, 1):
+            raise OSError("secret target changed during read")
+        after = os.fstat(fd)
+        if (
+            before.st_dev,
+            before.st_ino,
+            before.st_size,
+            before.st_mtime_ns,
+            before.st_mode,
+            before.st_uid,
+        ) != (
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+            after.st_mtime_ns,
+            after.st_mode,
+            after.st_uid,
+        ):
+            raise OSError("secret target changed during read")
+        return b"".join(chunks)
+    except FileNotFoundError:
+        return None
+    finally:
+        if fd >= 0:
+            os.close(fd)
+        if slot_fd >= 0:
+            os.close(slot_fd)
+
+
+def _secret_file_mtime(slot: str, filename: str) -> float | None:
+    """Read trusted secret-file metadata through the same descriptor boundary."""
+    if filename not in _SECRET_FILENAMES:
+        raise ValueError("unsupported secret filename")
+    slot_fd = -1
+    fd = -1
+    try:
+        slot_fd = _open_secret_slot_fd(slot, create=False)
+        no_follow = getattr(os, "O_NOFOLLOW", None)
+        nonblock = getattr(os, "O_NONBLOCK", None)
+        if no_follow is None or nonblock is None:
+            raise OSError("required safe-open flags are unavailable")
+        fd = os.open(
+            filename,
+            os.O_RDONLY | no_follow | nonblock,
+            dir_fd=slot_fd,
+        )
+        file_stat = os.fstat(fd)
+        _require_private_secret_file_stat(file_stat)
+        return float(file_stat.st_mtime)
+    except FileNotFoundError:
+        return None
+    finally:
+        if fd >= 0:
+            os.close(fd)
+        if slot_fd >= 0:
+            os.close(slot_fd)
+
+
+def _write_key_file(slot: str, filename: str, content: str | bytes) -> None:
     """
     Write content to a secret file and enforce chmod 600 permissions.
     寫入 secret 文件並強制設置 chmod 600 權限。
@@ -215,20 +458,132 @@ def _write_key_file(slot: str, filename: str, content: str) -> None:
     Creates the directory tree with restrictive permissions if missing.
     目錄不存在時以嚴格權限創建。
     """
-    slot_dir = _secrets_slot_dir(slot)
-    slot_dir.mkdir(parents=True, exist_ok=True)
-    # Ensure directory itself is only owner-accessible (700)
-    # 確保目錄僅 owner 可訪問（700）
+    if filename not in _SECRET_FILENAMES:
+        raise ValueError("unsupported secret filename")
+    raw_content = (
+        content.strip().encode("utf-8")
+        if isinstance(content, str)
+        else bytes(content)
+    )
+    if len(raw_content) > _SECRET_FILE_MAX_BYTES:
+        raise ValueError("secret content exceeds size bound")
+    slot_fd = _open_secret_slot_fd(slot, create=True)
+    fd = -1
+    temp_name: str | None = None
     try:
-        os.chmod(slot_dir, stat.S_IRWXU)
-    except OSError:
-        pass  # Best-effort; might fail on some FS / 盡力而為，部分文件系統可能失敗
+        try:
+            existing_stat = os.stat(filename, dir_fd=slot_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            existing_stat = None
+        if existing_stat is not None:
+            _require_private_secret_file_stat(existing_stat)
 
-    path = slot_dir / filename
-    path.write_text(content.strip(), encoding="utf-8")
-    # Enforce 600 — owner read/write only, no group/other access
-    # 強制 600 — 僅 owner 可讀寫，group/other 無權限
-    os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+        no_follow = getattr(os, "O_NOFOLLOW", None)
+        if no_follow is None:
+            raise OSError("required safe-open flags are unavailable")
+        for _attempt in range(32):
+            candidate = f".{filename}.{uuid.uuid4().hex}.tmp"
+            try:
+                fd = os.open(
+                    candidate,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL | no_follow,
+                    _SECRET_FILE_MODE,
+                    dir_fd=slot_fd,
+                )
+            except FileExistsError:
+                continue
+            temp_name = candidate
+            break
+        if fd < 0 or temp_name is None:
+            raise FileExistsError("could not allocate secret temporary file")
+
+        os.fchmod(fd, _SECRET_FILE_MODE)
+        _require_private_secret_file_stat(os.fstat(fd))
+        view = memoryview(raw_content)
+        while view:
+            written = os.write(fd, view)
+            if written <= 0:
+                raise OSError("short secret write")
+            view = view[written:]
+        os.fsync(fd)
+        os.close(fd)
+        fd = -1
+
+        os.replace(
+            temp_name,
+            filename,
+            src_dir_fd=slot_fd,
+            dst_dir_fd=slot_fd,
+        )
+        temp_name = None
+        final_stat = os.stat(filename, dir_fd=slot_fd, follow_symlinks=False)
+        _require_private_secret_file_stat(final_stat)
+        os.fsync(slot_fd)
+    finally:
+        if fd >= 0:
+            os.close(fd)
+        if temp_name is not None:
+            try:
+                os.unlink(temp_name, dir_fd=slot_fd)
+            except FileNotFoundError:
+                pass
+        os.close(slot_fd)
+
+
+def _remove_key_file(slot: str, filename: str) -> None:
+    """Remove a regular owned secret file and durably record the directory entry."""
+    if filename not in _SECRET_FILENAMES:
+        raise ValueError("unsupported secret filename")
+    try:
+        slot_fd = _open_secret_slot_fd(slot, create=False)
+    except FileNotFoundError:
+        return
+    try:
+        try:
+            target_stat = os.stat(filename, dir_fd=slot_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return
+        _require_private_secret_file_stat(target_stat)
+        os.unlink(filename, dir_fd=slot_fd)
+        os.fsync(slot_fd)
+    finally:
+        os.close(slot_fd)
+
+
+def _write_credential_bundle(slot: str, values: Mapping[str, str]) -> None:
+    """Persist the three-file credential bundle with same-process rollback.
+
+    Every old file is snapshotted before the first replacement.  If a write or
+    post-write check raises in this process, all three paths are restored to
+    their prior bytes (or removed when previously absent).  This is deliberately
+    not described as power-loss atomicity: a filesystem has no multi-file
+    transaction here, so sudden process/host loss can still expose a mixed tuple.
+    """
+    filenames = ("api_key", "api_secret", "bybit_endpoint")
+    if set(values) != set(filenames):
+        raise ValueError("credential bundle must contain exactly three files")
+    old_values = {name: _read_key_file_bytes(slot, name) for name in filenames}
+    try:
+        for name in filenames:
+            _write_key_file(slot, name, values[name])
+    except (OSError, PermissionError, ValueError) as write_error:
+        rollback_errors: list[BaseException] = []
+        for name in reversed(filenames):
+            try:
+                old_value = old_values[name]
+                if old_value is None:
+                    _remove_key_file(slot, name)
+                else:
+                    _write_key_file(slot, name, old_value)
+            except (OSError, PermissionError, ValueError) as rollback_error:
+                rollback_errors.append(rollback_error)
+        if rollback_errors:
+            logger.critical(
+                "operation=credential_bundle_rollback status=failed error_count=%d",
+                len(rollback_errors),
+            )
+            raise OSError("credential bundle rollback failed") from write_error
+        raise
 
 
 def _coerce_env_bool(raw: str | None, *, default: bool = False) -> bool:
@@ -336,25 +691,179 @@ def _write_env_file_value(path: Path, key: str, value: str) -> None:
     os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
 
 
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as fh:
-        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+def _cutover_preflight_location(
+    raw_path: str | Path,
+) -> tuple[Path, tuple[str, ...], Path]:
+    """Return the trusted root, relative components, and lexical candidate."""
+    trusted_root = Path(
+        os.path.abspath(
+            Path(
+                os.environ.get(
+                    "OPENCLAW_CUTOVER_PREFLIGHT_ROOT",
+                    "/tmp/openclaw",
+                )
+            ).expanduser()
+        )
+    )
+    supplied_text = os.fspath(raw_path).strip()
+    if not supplied_text or "\x00" in supplied_text or supplied_text.startswith("~"):
+        raise ValueError("cutover preflight path contains parent traversal")
+    if ".." in Path(supplied_text).parts:
+        raise ValueError("cutover preflight path contains parent traversal")
+    normalized = os.path.normpath(supplied_text)
+    trusted_root_text = os.path.normpath(os.fspath(trusted_root))
+    if os.path.isabs(normalized):
+        try:
+            if os.path.commonpath((trusted_root_text, normalized)) != trusted_root_text:
+                raise ValueError("cutover preflight path is outside policy")
+        except ValueError as exc:
+            raise ValueError("cutover preflight path is outside policy") from exc
+        relative_text = os.path.relpath(normalized, trusted_root_text)
+    else:
+        relative_text = normalized
+    relative = Path(relative_text)
+    if not relative.parts or any(part in {"", ".", ".."} for part in relative.parts):
+        raise ValueError("cutover preflight path is outside policy")
+    if any(not _SAFE_CUTOVER_COMPONENT_RE.fullmatch(part) for part in relative.parts):
+        raise ValueError("cutover preflight path is outside policy")
+    if relative.parts[-1] != _CUTOVER_PREFLIGHT_FILENAME:
+        raise ValueError("cutover preflight path is outside policy")
+    safe_parts = (*relative.parts[:-1], _CUTOVER_PREFLIGHT_FILENAME)
+    lexical = trusted_root.joinpath(*safe_parts)
+    return trusted_root, safe_parts, lexical
 
 
-def _read_json_object(path: Path) -> dict[str, Any]:
+def _require_owner_controlled_application_stat(
+    metadata: os.stat_result,
+    label: str,
+) -> None:
+    if metadata.st_uid != _effective_uid():
+        raise PermissionError(f"{label} must be owned by the effective uid")
+    if metadata.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+        raise PermissionError(f"{label} must not be group/other writable")
+
+
+def _open_cutover_preflight_fd(path: Path) -> int:
+    """Open one final file beneath a trusted directory descriptor."""
+    no_follow = getattr(os, "O_NOFOLLOW", None)
+    nonblock = getattr(os, "O_NONBLOCK", None)
+    directory = getattr(os, "O_DIRECTORY", None)
+    if no_follow is None or nonblock is None or directory is None:
+        raise OSError("required safe-open flags are unavailable")
+
+    trusted_root, parts, _lexical = _cutover_preflight_location(path)
+    directory_flags = os.O_RDONLY | directory | no_follow
+    opened_directories: list[int] = []
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not trusted_root.is_absolute() or not trusted_root.anchor:
+            raise OSError("trusted cutover root is not absolute")
+        parent_fd = os.open(trusted_root.anchor, directory_flags)
+        opened_directories.append(parent_fd)
+        for component in trusted_root.parts[1:]:
+            parent_fd = os.open(
+                component,
+                directory_flags,
+                dir_fd=parent_fd,
+            )
+            opened_directories.append(parent_fd)
+        root_metadata = os.fstat(parent_fd)
+        if not stat.S_ISDIR(root_metadata.st_mode):
+            raise OSError("trusted cutover root is not a directory")
+        _require_owner_controlled_application_stat(
+            root_metadata,
+            "trusted cutover root",
+        )
+        for component in parts[:-1]:
+            parent_fd = os.open(
+                component,
+                directory_flags,
+                dir_fd=parent_fd,
+            )
+            opened_directories.append(parent_fd)
+            nested_metadata = os.fstat(parent_fd)
+            if not stat.S_ISDIR(nested_metadata.st_mode):
+                raise OSError("cutover directory is not a directory")
+            _require_owner_controlled_application_stat(
+                nested_metadata,
+                "cutover directory",
+            )
+        return os.open(
+            parts[-1],
+            os.O_RDONLY | no_follow | nonblock,
+            dir_fd=parent_fd,
+        )
+    finally:
+        for directory_fd in reversed(opened_directories):
+            os.close(directory_fd)
+
+
+def _read_cutover_preflight_object(path: Path) -> tuple[dict[str, Any], str]:
+    """Read, hash, and parse one bounded regular file through one safe fd."""
+
+    fd = -1
+    try:
+        fd = _open_cutover_preflight_fd(path)
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode):
+            raise OSError("cutover preflight is not a regular file")
+        _require_owner_controlled_application_stat(
+            before,
+            "cutover preflight",
+        )
+        if before.st_size < 0 or before.st_size > _CUTOVER_PREFLIGHT_MAX_BYTES:
+            raise OSError("cutover preflight exceeds size bound")
+
+        chunks: list[bytes] = []
+        total = 0
+        while total <= _CUTOVER_PREFLIGHT_MAX_BYTES:
+            chunk = os.read(
+                fd,
+                min(64 * 1024, _CUTOVER_PREFLIGHT_MAX_BYTES + 1 - total),
+            )
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+        if total > _CUTOVER_PREFLIGHT_MAX_BYTES:
+            raise OSError("cutover preflight exceeds size bound")
+
+        after = os.fstat(fd)
+        _require_owner_controlled_application_stat(
+            after,
+            "cutover preflight",
+        )
+        if (
+            before.st_dev,
+            before.st_ino,
+            before.st_size,
+            before.st_mtime_ns,
+            before.st_mode,
+            before.st_uid,
+        ) != (
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+            after.st_mtime_ns,
+            after.st_mode,
+            after.st_uid,
+        ):
+            raise OSError("cutover preflight changed during read")
+        raw = b"".join(chunks)
+        payload = json.loads(raw)
     except FileNotFoundError:
         raise HTTPException(status_code=400, detail="Cutover preflight JSON not found")
-    except (json.JSONDecodeError, OSError) as exc:
-        logger.warning("Invalid cutover preflight JSON %s: %s", path, exc)
+    except (json.JSONDecodeError, UnicodeError) as exc:
+        log_safe_exception(logger, "cutover_preflight_json_read", exc, level=logging.WARNING)
         raise HTTPException(status_code=400, detail="Invalid cutover preflight JSON")
+    except (OSError, ValueError) as exc:
+        log_safe_exception(logger, "cutover_preflight_file_read", exc, level=logging.WARNING)
+        raise HTTPException(status_code=400, detail="Unable to read cutover preflight JSON")
+    finally:
+        if fd >= 0:
+            os.close(fd)
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="Cutover preflight JSON must be an object")
-    return payload
+    return payload, hashlib.sha256(raw).hexdigest()
 
 
 def _require_preflight_false_answers(answers: dict[str, Any]) -> None:
@@ -404,6 +913,14 @@ def _credential_blockers_from_cutover_preflight(payload: dict[str, Any]) -> list
     ]
 
 
+def _resolve_cutover_preflight_path(raw_path: str) -> Path:
+    try:
+        _trusted_root, _parts, lexical = _cutover_preflight_location(raw_path)
+    except (OSError, RuntimeError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid cutover preflight path")
+    return lexical
+
+
 def _validate_demo_connector_cutover_preflight(
     *,
     preflight_path: Path,
@@ -414,17 +931,10 @@ def _validate_demo_connector_cutover_preflight(
     if not _SHA256_RE.fullmatch(expected_sha256):
         raise HTTPException(status_code=400, detail="Invalid preflight sha256")
 
-    try:
-        actual_sha256 = _sha256_file(preflight_path)
-    except FileNotFoundError:
-        raise HTTPException(status_code=400, detail="Cutover preflight JSON not found")
-    except OSError as exc:
-        logger.warning("Unable to read cutover preflight JSON %s: %s", preflight_path, exc)
-        raise HTTPException(status_code=400, detail="Unable to read cutover preflight JSON")
+    payload, actual_sha256 = _read_cutover_preflight_object(preflight_path)
     if not hmac_lib.compare_digest(actual_sha256, expected_sha256):
         raise HTTPException(status_code=400, detail="Cutover preflight sha256 mismatch")
 
-    payload = _read_json_object(preflight_path)
     schema_version = payload.get("schema_version") or payload.get("schema")
     if schema_version != _CUTOVER_PREFLIGHT_SCHEMA_VERSION:
         raise HTTPException(status_code=400, detail="Unsupported cutover preflight schema")
@@ -1114,9 +1624,9 @@ def _validate_bybit_credentials(api_key: str, api_secret: str, slot: str) -> tup
 
     # Basic format sanity checks / 基礎格式校驗
     if not api_key or len(api_key) < 8:
-        return False, "API key too short or empty"
+        return False, "invalid_credentials"
     if not api_secret or len(api_secret) < 8:
-        return False, "API secret too short or empty"
+        return False, "invalid_credentials"
 
     base_url = _BYBIT_BASE_URL.get(slot, _BYBIT_BASE_URL["live"])
     timestamp = int(time.time() * 1000)
@@ -1140,21 +1650,27 @@ def _validate_bybit_credentials(api_key: str, api_secret: str, slot: str) -> tup
     except urllib.error.HTTPError as exc:
         try:
             body = json.loads(exc.read().decode("utf-8"))
-        except Exception:
-            return False, f"HTTP {exc.code}: {exc.reason}"
+        except Exception as parse_exc:
+            log_safe_exception(logger, "bybit_credential_http_response_parse", parse_exc)
+            return False, "validation_unavailable"
     except urllib.error.URLError as exc:
-        return False, f"Network error: {exc.reason}"
+        log_safe_exception(logger, "bybit_credential_network_request", exc)
+        return False, "validation_unavailable"
     except Exception as exc:
-        return False, f"Unexpected error: {type(exc).__name__}: {exc}"
+        log_safe_exception(logger, "bybit_credential_validation", exc)
+        return False, "validation_unavailable"
+
+    if not isinstance(body, dict):
+        logger.error("operation=bybit_credential_response_shape error=invalid_object")
+        return False, "validation_unavailable"
 
     ret_code = body.get("retCode", -1)
-    ret_msg = body.get("retMsg", "unknown")
 
     if ret_code == 0:
         return True, ""
     # retCode 10003 = invalid API key, 10004 = invalid signature, etc.
     # retCode 10003 = 無效 API key，10004 = 無效簽名，等
-    return False, f"Bybit retCode={ret_code}: {ret_msg}"
+    return False, "invalid_credentials"
 
 
 def _validation_status_from_error(error: str) -> str:
@@ -1162,9 +1678,17 @@ def _validation_status_from_error(error: str) -> str:
     Classify validation failures for UI severity.
     將驗證失敗分類為 UI 嚴重程度。
     """
-    if error.startswith(("Network error:", "Unexpected error:")):
+    if error == "validation_unavailable":
         return "validation_unavailable"
     return "invalid"
+
+
+def _public_validation_error(error: str) -> tuple[str, str]:
+    """Map internal validation categories to stable, non-sensitive client text."""
+    status = _validation_status_from_error(error)
+    if status == "validation_unavailable":
+        return status, "Credential validation unavailable"
+    return status, "Credential validation failed"
 
 
 def _api_key_validation_state(
@@ -1200,11 +1724,11 @@ def _api_key_validation_state(
             "validation_error": "",
         }
 
-    safe_err = (err_msg or "Validation failed")[:200]
+    validation_status, public_error = _public_validation_error(err_msg)
     return {
         "validated": False,
-        "validation_status": _validation_status_from_error(safe_err),
-        "validation_error": safe_err,
+        "validation_status": validation_status,
+        "validation_error": public_error,
     }
 
 
@@ -1363,11 +1887,10 @@ async def get_api_key_status(
     # Compute last_modified from the key file mtime / 從文件 mtime 獲取最後修改時間
     last_modified: str | None = None
     try:
-        path = _secrets_slot_dir(slot) / "api_key"
-        if path.exists():
-            mtime = path.stat().st_mtime
+        mtime = _secret_file_mtime(slot, "api_key")
+        if mtime is not None:
             last_modified = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(mtime))
-    except OSError:
+    except (OSError, PermissionError, ValueError):
         pass
 
     validation_state = _api_key_validation_state(
@@ -1452,18 +1975,16 @@ async def save_api_key(
         is_valid, err_msg = _validate_bybit_credentials(api_key, api_secret, slot)
 
         if not is_valid:
-            # SEC-F04: Truncate err_msg to prevent potential info leakage from Bybit API responses.
-            # SEC-F04：截斷 err_msg 防止 Bybit API 回應洩漏敏感信息。
-            safe_err = (err_msg or "")[:200]
+            validation_status, public_error = _public_validation_error(err_msg)
             logger.warning(
-                "Bybit key validation failed for slot '%s': %s (actor: %s)",
-                slot, safe_err, getattr(actor, "actor_id", "?"),
+                "operation=bybit_key_validation slot=%s validation_status=%s actor=%s",
+                slot, validation_status, getattr(actor, "actor_id", "?"),
             )
             return {
                 "saved": False,
                 "validated": False,
                 "key_hint": "",
-                "error": safe_err,
+                "error": public_error,
             }
 
         # Write to secrets directory / 寫入 secrets 目錄
@@ -1473,19 +1994,22 @@ async def save_api_key(
         # live_demo 槽 → demo 伺服器；live 槽 → 主網；demo 槽 → demo（參考用）。
         _SLOT_ENDPOINT: dict[str, str] = {"demo": "demo", "live_demo": "demo", "live": "mainnet"}
         try:
-            _write_key_file(slot, "api_key", api_key)
-            _write_key_file(slot, "api_secret", api_secret)
-            _write_key_file(slot, "bybit_endpoint", _SLOT_ENDPOINT.get(slot, "mainnet"))
-        except (OSError, PermissionError) as exc:
-            # Log full detail server-side; return generic message to client (no path leakage)
-            # 服務器端記錄完整細節；返回通用錯誤消息，不向客戶端洩漏文件路徑
-            logger.error("Failed to write API key for slot '%s': %s", slot, exc)
+            _write_credential_bundle(
+                slot,
+                {
+                    "api_key": api_key,
+                    "api_secret": api_secret,
+                    "bybit_endpoint": _SLOT_ENDPOINT.get(slot, "mainnet"),
+                },
+            )
+        except (OSError, PermissionError, ValueError) as exc:
+            log_safe_exception(logger, "api_key_persist", exc)
             raise HTTPException(status_code=500, detail="Failed to persist API key. Check server logs.")
 
         key_hint = _mask_key(api_key)
         logger.info(
-            "API key saved for slot '%s', hint=%s (actor: %s)",
-            slot, key_hint, getattr(actor, "actor_id", "?"),
+            "API key saved for slot '%s' (actor: %s)",
+            slot, getattr(actor, "actor_id", "?"),
         )
 
         return {
@@ -1528,7 +2052,7 @@ async def save_paper_engine_setting(
     try:
         _write_env_file_value(_paper_engine_env_file(), _PAPER_ENGINE_ENV_KEY, value)
     except (OSError, PermissionError, ValueError) as exc:
-        logger.error("Failed to persist paper engine setting: %s", exc)
+        log_safe_exception(logger, "paper_engine_setting_persist", exc)
         raise HTTPException(status_code=500, detail="Failed to persist Paper engine setting")
 
     payload = _paper_engine_setting_payload()
@@ -1576,7 +2100,7 @@ async def save_bybit_demo_connector_mode(
 
     env_file = _trading_services_env_file()
     preflight = _validate_demo_connector_cutover_preflight(
-        preflight_path=Path(body.cutover_preflight_json).expanduser(),
+        preflight_path=_resolve_cutover_preflight_path(body.cutover_preflight_json),
         expected_sha256=body.cutover_preflight_sha256,
         target_env_file=env_file,
     )
@@ -1585,7 +2109,7 @@ async def save_bybit_demo_connector_mode(
         _write_env_file_value(env_file, _BYBIT_MODE_ENV_KEY, "demo")
         _write_env_file_value(env_file, _BYBIT_CONNECTOR_WRITE_ENABLED_ENV_KEY, "true")
     except (OSError, PermissionError, ValueError) as exc:
-        logger.error("Failed to persist Bybit Demo connector mode: %s", exc)
+        log_safe_exception(logger, "bybit_demo_connector_mode_persist", exc)
         raise HTTPException(status_code=500, detail="Failed to persist Bybit Demo connector mode")
 
     payload = _bybit_demo_connector_mode_payload()
@@ -1666,7 +2190,7 @@ async def save_development_mode_setting(
             value,
         )
     except (OSError, PermissionError, ValueError) as exc:
-        logger.error("Failed to persist development support setting: %s", exc)
+        log_safe_exception(logger, "development_support_setting_persist", exc)
         raise HTTPException(status_code=500, detail="Failed to persist development support setting")
 
     payload = _development_support_mode_payload()
@@ -1774,7 +2298,7 @@ async def save_alert_config_endpoint(
     try:
         _alert_cfg.save_alert_config(data_dir, new_cfg)
     except (OSError, PermissionError) as exc:
-        logger.error("Failed to persist alert config: %s", exc)
+        log_safe_exception(logger, "alert_config_persist", exc)
         raise HTTPException(status_code=500, detail="Failed to persist alert config")
 
     logger.info(

@@ -103,6 +103,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, validator
 
 from . import json_fast as json
+from .error_sanitize import log_safe_exception
 from .governance_routes import _get_auth_actor, _require_operator_role, _sanitize_log
 # F7：原本 _ipc_call_strict() 內部 lazy import，移到 module top 對齊 FastAPI 慣例。
 # 為什麼上移：lazy import 在 stake hot path 每次 strict-call 都會走一次
@@ -381,7 +382,7 @@ def _global_mode_is_live_reserved() -> bool:
         return mode == "live_reserved"
     except Exception as exc:
         # fail-soft 但 log；不阻路徑（caller 端會拒絕）
-        logger.warning("earn: live_reserved gate read failed: %s", exc)
+        log_safe_exception(logger, "earn_live_reserved_gate_read", exc, level=logging.WARNING)
         return False
 
 
@@ -485,13 +486,13 @@ def _read_stage_0r_harness() -> dict[str, Any]:
             reverse=True,
         )
     except Exception as exc:
-        logger.warning("earn: Stage 0R glob failed: %s", exc)
+        log_safe_exception(logger, "earn_stage_0r_glob", exc, level=logging.WARNING)
         return {
             "status": "PENDING",
             "json_path": None,
             "last_run_ts": None,
             "eligible_for_first_stake": None,
-            "fail_reasons": [f"glob_error: {exc}"],
+            "fail_reasons": ["stage_0r_glob_failed"],
         }
 
     if not candidates:
@@ -510,13 +511,13 @@ def _read_stage_0r_harness() -> dict[str, Any]:
         with latest_path.open("rb") as fh:
             payload = json.loads(fh.read())
     except Exception as exc:
-        logger.warning("earn: Stage 0R JSON read failed (%s): %s", latest_path, exc)
+        log_safe_exception(logger, "earn_stage_0r_read", exc, level=logging.WARNING)
         return {
             "status": "PENDING",
             "json_path": str(latest_path),
             "last_run_ts": None,
             "eligible_for_first_stake": None,
-            "fail_reasons": [f"read_error: {exc}"],
+            "fail_reasons": ["stage_0r_read_failed"],
         }
 
     last_run_ts = datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat()
@@ -604,8 +605,8 @@ def _check_gate_b_signed_authorization() -> dict[str, Any]:
         # 走 governance_hub status 探測 — fail-soft
         return {"status": "PASS", "reason": None}
     except Exception as exc:
-        logger.warning("earn: gate_b authorization check failed: %s", exc)
-        return {"status": "FAIL", "reason": f"authz_read_error: {exc}"}
+        log_safe_exception(logger, "earn_authorization_check", exc, level=logging.WARNING)
+        return {"status": "FAIL", "reason": "authorization_read_failed"}
 
 
 def _check_gate_c_mainnet_env() -> dict[str, Any]:
@@ -648,8 +649,8 @@ def _check_gate_d_bybit_secret_slot() -> dict[str, Any]:
             return {"status": "FAIL", "reason": "BYBIT_API_KEY slot empty"}
         return {"status": "PASS", "reason": None}
     except Exception as exc:
-        logger.warning("earn: gate_d secret slot check failed: %s", exc)
-        return {"status": "FAIL", "reason": f"secret_slot_error: {exc}"}
+        log_safe_exception(logger, "earn_secret_slot_check", exc, level=logging.WARNING)
+        return {"status": "FAIL", "reason": "secret_slot_check_failed"}
 
 
 async def _check_gate_e_intent_processor_wired() -> dict[str, Any]:
@@ -670,8 +671,8 @@ async def _check_gate_e_intent_processor_wired() -> dict[str, Any]:
         # 注入；Wave D 接 engine_capabilities IPC 變嚴。
         return {"status": "PASS", "reason": None}
     except Exception as exc:
-        logger.warning("earn: gate_e IPC capability check failed: %s", exc)
-        return {"status": "FAIL", "reason": f"ipc_capability_error: {exc}"}
+        log_safe_exception(logger, "earn_ipc_capability_check", exc, level=logging.WARNING)
+        return {"status": "FAIL", "reason": "ipc_capability_check_failed"}
 
 
 # ─── IPC 呼叫包裝（GET fail-soft / POST fail-closed）─────────────────────────
@@ -693,11 +694,8 @@ async def _ipc_call_soft(method: str, params: dict[str, Any]) -> tuple[dict[str,
         result = await client.call(method, params=params)
         return (result, None)
     except Exception as exc:
-        # 為什麼用 repr：method-not-found 通常 raise EngineDisconnectedError
-        # 或 JSON-RPC error；不暴露完整 stack trace 給 GUI 避 schema 漏。
-        reason = f"ipc_call_error: {type(exc).__name__}"
-        logger.warning("earn: IPC %s soft-call failed: %s", method, exc)
-        return (None, reason)
+        log_safe_exception(logger, "earn_ipc_soft_call", exc, level=logging.WARNING)
+        return (None, "ipc_call_failed")
 
 
 async def _ipc_call_strict(method: str, params: dict[str, Any], timeout: float | None = None) -> dict[str, Any]:
@@ -718,13 +716,13 @@ async def _ipc_call_strict(method: str, params: dict[str, Any], timeout: float |
     except HTTPException:
         raise
     except EngineTimeoutError as exc:
-        logger.warning("earn: IPC %s timeout: %s", method, exc)
+        log_safe_exception(logger, "earn_ipc_timeout", exc, level=logging.WARNING)
         raise HTTPException(
             status_code=504,
             detail={"reason_codes": ["ipc_timeout"], "method": method},
         ) from exc
     except EngineDisconnectedError as exc:
-        logger.warning("earn: IPC %s disconnected: %s", method, exc)
+        log_safe_exception(logger, "earn_ipc_disconnected", exc, level=logging.WARNING)
         raise HTTPException(
             status_code=503,
             detail={"reason_codes": ["ipc_disconnected"], "method": method},
@@ -733,7 +731,7 @@ async def _ipc_call_strict(method: str, params: dict[str, Any], timeout: float |
         # 為什麼 generic catch：JSON-RPC 端可能拋 method-not-found / 任何
         # serialization error；統一映射 500 不洩 backend internals
         # （per handoff_routes line 617-620 既有教訓）。
-        logger.warning("earn: IPC %s strict-call failed: %s", method, exc)
+        log_safe_exception(logger, "earn_ipc_strict_call", exc, level=logging.WARNING)
         raise HTTPException(
             status_code=500,
             detail={"reason_codes": ["ipc_call_failed"], "method": method},
@@ -962,7 +960,7 @@ def _query_earn_records_pg(
         from . import db_pool  # noqa: PLC0415
         conn = db_pool.get_conn()
     except Exception as exc:
-        logger.warning("earn: records PG pool unavailable: %s", exc)
+        log_safe_exception(logger, "earn_records_pg_pool", exc, level=logging.WARNING)
         return ([], None)
 
     rows: list[dict[str, Any]] = []
@@ -1040,7 +1038,7 @@ def _query_earn_records_pg(
                 }
             )
     except Exception as exc:
-        logger.warning("earn: records PG query failed: %s", exc)
+        log_safe_exception(logger, "earn_records_pg_query", exc, level=logging.WARNING)
         total = None
     finally:
         try:

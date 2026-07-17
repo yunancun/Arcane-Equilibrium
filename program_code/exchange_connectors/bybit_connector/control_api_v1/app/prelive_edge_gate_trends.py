@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .db_pool import get_pg_conn
+from .error_sanitize import log_safe_exception
 
 logger = logging.getLogger(__name__)
 
@@ -259,12 +260,13 @@ FROM entry_fills
         current_row = cur.fetchone()
     except Exception as exc:  # noqa: BLE001
         _rollback_cursor(cur)
+        log_safe_exception(logger, "prelive_maker_fill_trend_query", exc)
         gate.update(
             {
                 "available": False,
                 "status": "unknown",
-                "summary": f"maker fill trend query failed: {type(exc).__name__}: {exc}",
-                "diagnostics": [str(exc)],
+                "summary": "maker_fill_trend_unavailable",
+                "diagnostics": ["maker_fill_trend_unavailable"],
             }
         )
         return gate
@@ -512,12 +514,13 @@ ORDER BY engine_mode
         re_rows = cur.fetchall() or []
     except Exception as exc:  # noqa: BLE001
         _rollback_cursor(cur)
+        log_safe_exception(logger, "prelive_grid_lifecycle_trend_query", exc)
         gate.update(
             {
                 "available": False,
                 "status": "unknown",
-                "summary": f"grid lifecycle trend query failed: {type(exc).__name__}: {exc}",
-                "diagnostics": [str(exc)],
+                "summary": "grid_lifecycle_trend_unavailable",
+                "diagnostics": ["grid_lifecycle_trend_unavailable"],
             }
         )
         return gate
@@ -693,12 +696,13 @@ def _fetch_realized_edge_gate(
         exists = cur.fetchone()
     except Exception as exc:  # noqa: BLE001
         _rollback_cursor(cur)
+        log_safe_exception(logger, "prelive_edge_training_view_check", exc)
         gate.update(
             {
                 "available": False,
                 "status": "unknown",
-                "summary": f"edge training view existence check failed: {exc}",
-                "diagnostics": [str(exc)],
+                "summary": "edge_training_view_unavailable",
+                "diagnostics": ["edge_training_view_unavailable"],
             }
         )
         return gate
@@ -773,12 +777,13 @@ LIMIT 6
         bad_rows = cur.fetchall() or []
     except Exception as exc:  # noqa: BLE001
         _rollback_cursor(cur)
+        log_safe_exception(logger, "prelive_realized_edge_trend_query", exc)
         gate.update(
             {
                 "available": False,
                 "status": "unknown",
-                "summary": f"realized edge trend query failed: {type(exc).__name__}: {exc}",
-                "diagnostics": [str(exc)],
+                "summary": "realized_edge_trend_unavailable",
+                "diagnostics": ["realized_edge_trend_unavailable"],
             }
         )
         return gate
@@ -879,7 +884,7 @@ def _fetch_strategy_status(
         cur.execute("SELECT to_regclass('learning.mlde_edge_training_rows') IS NOT NULL")
         exists = cur.fetchone()
     except Exception as exc:  # noqa: BLE001
-        logger.warning("strategy edge status existence check failed: %s", exc)
+        log_safe_exception(logger, "prelive_strategy_edge_view_check", exc)
         return [
             {
                 "strategy_name": name,
@@ -934,12 +939,12 @@ ORDER BY strategy_name
         rows = cur.fetchall() or []
     except Exception as exc:  # noqa: BLE001
         _rollback_cursor(cur)
-        logger.warning("strategy edge status query failed: %s", exc)
+        log_safe_exception(logger, "prelive_strategy_edge_status_query", exc)
         return [
             {
                 "strategy_name": name,
                 "status": "unknown",
-                "summary": f"strategy edge query failed: {type(exc).__name__}",
+                "summary": "strategy_edge_query_unavailable",
                 "rows_24h": 0,
                 "rows_window": 0,
             }
@@ -1235,5 +1240,5 @@ def fetch_prelive_edge_gate_trends(window_days: int = 7) -> dict[str, Any]:
                 ),
             }
     except Exception as exc:  # noqa: BLE001
-        logger.warning("pre-live edge gate trend fetch failed: %s", exc, exc_info=True)
-        return _degraded_payload(bounded_days, f"trend fetch failed: {type(exc).__name__}: {exc}")
+        log_safe_exception(logger, "prelive_edge_gate_trend_fetch", exc)
+        return _degraded_payload(bounded_days, "trend_data_unavailable")

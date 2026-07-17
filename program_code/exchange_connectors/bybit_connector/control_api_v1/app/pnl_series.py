@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from . import db_pool
+from .error_sanitize import log_safe_exception
 
 logger = logging.getLogger(__name__)
 _STATEMENT_TIMEOUT_MS = int(os.getenv("OPENCLAW_GUI_PNL_SERIES_STATEMENT_TIMEOUT_MS", "1500"))
@@ -64,8 +65,8 @@ def fetch_pnl_series(
             funding_buckets = _fetch_funding_buckets(cur, modes, range_sec, bucket)
         return _build_series(modes, key, range_sec, bucket, fill_buckets, funding_buckets)
     except Exception as exc:  # noqa: BLE001 - GUI metrics must fail soft
-        logger.warning("PnL series query failed for %s: %s", modes, exc)
-        return _empty_series(key, range_sec, bucket, f"{type(exc).__name__}: {exc}")
+        log_safe_exception(logger, "pnl_series_query", exc)
+        return _empty_series(key, range_sec, bucket, "pnl_series_unavailable")
     finally:
         if conn is not None:
             db_pool.put_conn(conn)

@@ -6,18 +6,18 @@ catch `HTTPException` / `RequestValidationError`（FastAPI 順位），所以舊
 
   - `sanitize_exc_for_detail(exc, reason_code)`：回傳穩定的 dict response detail
     （包 `reason_codes` + safe message）。
-  - `sanitize_exc_str(exc, fallback)`：回傳純字串（給 `JSONResponse content`
-    legacy 路徑用，如 `{"detail": str(e)}` 的 503 fallback）。
+  - `sanitize_exc_str(exc, fallback)`：回傳純字串，供 legacy JSONResponse
+    error fallback 路徑使用。
 
-`OPENCLAW_DEBUG=1` 時保留 truncated 原始訊息（≤200 chars，type-name + 截斷 str）
-供 dev 排查；production（default）只回穩定的 user-facing 訊息。
+所有環境都只回穩定的 user-facing 訊息；診斷資訊透過 opaque error id 與
+exception type 寫入 server log，不記錄 exception message 或 traceback。
 """
 
 from __future__ import annotations
 
-import os
-
-_DEBUG = os.getenv("OPENCLAW_DEBUG", "").strip() == "1"
+import logging
+import secrets
+from typing import Any
 
 # Reason code → user-facing message 字典（穩定不洩漏內部細節）
 # 新增 reason code 必同步更新此表 + WP-05 sign-off report。
@@ -44,8 +44,7 @@ def sanitize_exc_for_detail(
 
     Returns:
         {"reason_codes": [reason_code], "detail": "<safe message>"}
-        - production: detail = 對應 reason_code 的 user-facing message
-        - OPENCLAW_DEBUG=1: detail 額外加 truncated exc class name + str(exc)[:200]
+        detail = 對應 reason_code 的 user-facing message
 
     若 `reason_code` 不在字典：fallback 用 "internal_error" 對應訊息。
     """
@@ -53,12 +52,6 @@ def sanitize_exc_for_detail(
         reason_code,
         _REASON_CODE_MESSAGES["internal_error"],
     )
-    if _DEBUG:
-        exc_repr = f"{type(exc).__name__}: {str(exc)[:200]}"
-        return {
-            "reason_codes": [reason_code],
-            "detail": f"{safe_msg} ({exc_repr})",
-        }
     return {"reason_codes": [reason_code], "detail": safe_msg}
 
 
@@ -66,17 +59,34 @@ def sanitize_exc_str(
     exc: BaseException,
     fallback: str = "Internal server error",
 ) -> str:
-    """純字串版本，給 `JSONResponse(content={"detail": str(...)})` legacy 路徑用。
+    """純字串版本，供 legacy JSONResponse error fallback 路徑使用。
 
-    production: 回傳 `fallback`（caller 自定義 user-facing 短訊息）。
-    OPENCLAW_DEBUG=1: 額外附 truncated exc class name + str(exc)[:200]。
+    回傳 `fallback`（caller 自定義 user-facing 短訊息）。
     """
-    if _DEBUG:
-        return f"{fallback} ({type(exc).__name__}: {str(exc)[:200]})"
     return fallback
+
+
+def log_safe_exception(
+    logger: Any,
+    operation: str,
+    exc: BaseException,
+    *,
+    level: int = logging.ERROR,
+) -> str:
+    """Log an opaque correlation id and exception type without message or trace."""
+    error_id = f"err_{secrets.token_hex(8)}"
+    logger.log(
+        level,
+        "operation=%s error_id=%s exception_type=%s",
+        operation,
+        error_id,
+        type(exc).__name__,
+    )
+    return error_id
 
 
 __all__ = [
     "sanitize_exc_for_detail",
     "sanitize_exc_str",
+    "log_safe_exception",
 ]

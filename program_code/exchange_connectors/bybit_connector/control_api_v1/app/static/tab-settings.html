@@ -1821,7 +1821,8 @@ let _ocAlertTestCooldownIv = null;
 function _alertStartTestCooldown(seconds) {
   const btn = document.getElementById('alert-test-btn');
   if (!btn) return;
-  const original = btn.getAttribute('data-orig-label') || btn.innerHTML;
+  // 標籤在整個冷卻週期都只作純文字處理，還原 DOM 文字時絕不重新解讀為 HTML。
+  const original = btn.getAttribute('data-orig-label') || btn.textContent || '';
   btn.setAttribute('data-orig-label', original);
   btn.disabled = true;
   if (_ocAlertTestCooldownIv) clearInterval(_ocAlertTestCooldownIv);
@@ -1832,7 +1833,7 @@ function _alertStartTestCooldown(seconds) {
       clearInterval(_ocAlertTestCooldownIv);
       _ocAlertTestCooldownIv = null;
       btn.disabled = false;
-      btn.innerHTML = original;
+      btn.textContent = original;
       return;
     }
     // 純數字 + 固定模板，無外部資料；textContent 安全。

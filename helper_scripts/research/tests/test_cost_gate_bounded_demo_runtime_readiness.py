@@ -4,6 +4,8 @@ import datetime as dt
 import json
 from pathlib import Path
 
+import pytest
+
 from cost_gate_learning_lane import bounded_demo_runtime_readiness as mod
 
 
@@ -132,7 +134,7 @@ def _build(tmp_path: Path, **overrides) -> dict:
     )
 
 
-def test_expected_key_mismatch_is_advisory_unless_strict_and_read_only_mode_blocks(
+def test_expected_key_mismatch_is_not_serialized_unless_strict_blocker_is_required(
     tmp_path: Path,
 ) -> None:
     packet = _build(
@@ -146,12 +148,12 @@ def test_expected_key_mismatch_is_advisory_unless_strict_and_read_only_mode_bloc
 
     assert packet["status"] == mod.BLOCKED_BY_CONNECTOR_MODE_STATUS
     assert packet["profit_first_state_transition"] == "BLOCKED_BY_RUNTIME"
-    assert (
-        packet["checks"]["demo_api_slot"]["api_key"]["expected_key_matches_observed"]
-        is False
-    )
+    api_key = packet["checks"]["demo_api_slot"]["api_key"]
+    assert "expected_key_matches_observed" not in api_key
+    assert "expected_sha256_match" not in api_key
+    assert "expected_prefix_match" not in api_key
     assert packet["checks"]["demo_api_slot"]["ready"] is True
-    assert "demo_api_key_expected_value_mismatch" in packet["checks"][
+    assert "demo_api_key_expected_value_mismatch" not in packet["checks"][
         "demo_api_slot"
     ]["advisory_reasons"]
     assert "demo_api_slot:demo_api_key_expected_value_mismatch" not in packet[
@@ -172,10 +174,9 @@ def test_strict_expected_key_mismatch_blocks_credentials(tmp_path: Path) -> None
     )
 
     assert packet["status"] == mod.BLOCKED_BY_CREDENTIALS_STATUS
-    assert (
-        packet["checks"]["demo_api_slot"]["api_key"]["expected_key_matches_observed"]
-        is False
-    )
+    assert "expected_key_matches_observed" not in packet["checks"][
+        "demo_api_slot"
+    ]["api_key"]
     assert packet["checks"]["demo_api_slot"]["api_key"][
         "expected_key_match_required"
     ] is True
@@ -192,9 +193,9 @@ def test_blocks_on_connector_mode_after_credentials_match(tmp_path: Path) -> Non
     )
 
     assert packet["status"] == mod.BLOCKED_BY_CONNECTOR_MODE_STATUS
-    assert (
-        packet["checks"]["demo_api_slot"]["api_key"]["expected_sha256_match"] is True
-    )
+    assert "expected_sha256_match" not in packet["checks"]["demo_api_slot"][
+        "api_key"
+    ]
     assert packet["checks"]["connector_mode"]["write_enabled"] is False
     assert packet["answers"]["order_capable_action_allowed_by_this_packet"] is False
 
@@ -214,14 +215,14 @@ def test_redacted_secret_derivative_mode_omits_api_key_derived_fields(
     assert api_key["present"] is True
     assert api_key["nonempty"] is True
     assert api_key["mode_octal"] is not None
-    assert api_key["masked_value"] is None
-    assert api_key["length"] is None
-    assert api_key["sha256_12"] is None
-    assert api_key["expected_sha256_match"] is None
-    assert api_key["expected_prefix_match"] is None
-    assert api_key["expected_prefix_len"] is None
-    assert api_key["expected_prefix_sha256_12"] is None
-    assert api_key["expected_key_matches_observed"] is None
+    assert "masked_value" not in api_key
+    assert "length" not in api_key
+    assert "sha256_12" not in api_key
+    assert "expected_sha256_match" not in api_key
+    assert "expected_prefix_match" not in api_key
+    assert "expected_prefix_len" not in api_key
+    assert "expected_prefix_sha256_12" not in api_key
+    assert "expected_key_matches_observed" not in api_key
     assert api_key["secret_derivatives_redacted"] is True
     assert api_key["secret_bytes_read"] is False
     assert packet["checks"]["demo_api_slot"]["api_secret"]["secret_bytes_read"] is False
@@ -257,9 +258,9 @@ def test_redacted_secret_derivative_mode_blocks_strict_expected_key_match(
     assert packet["checks"]["demo_api_slot"]["api_key"][
         "expected_key_match_required"
     ] is True
-    assert packet["checks"]["demo_api_slot"]["api_key"][
-        "expected_key_matches_observed"
-    ] is None
+    assert "expected_key_matches_observed" not in packet["checks"][
+        "demo_api_slot"
+    ]["api_key"]
     assert packet["checks"]["demo_api_slot"]["api_key"]["secret_bytes_read"] is False
     assert packet["checks"]["demo_api_slot"]["api_secret"][
         "secret_bytes_read"
@@ -351,3 +352,121 @@ def test_output_omits_secret_value_and_secret_hash(tmp_path: Path) -> None:
     assert mod._sha256_text(SECRET)[:12] not in text
     assert packet["checks"]["demo_api_slot"]["api_secret"]["value_omitted"] is True
     assert "api_secret" in packet["checks"]["demo_api_slot"]
+
+
+def test_json_output_permanently_omits_api_key_derivatives_and_stdout_is_empty(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    paths = _fixture(tmp_path)
+    output_path = tmp_path / "runtime-readiness.json"
+
+    result = mod.main(
+        [
+            "--secrets-dir",
+            str(paths["secrets_dir"]),
+            "--connector-env-file",
+            str(paths["connector_env"]),
+            "--plan-json",
+            str(paths["plan"]),
+            "--standing-auth-json",
+            str(paths["auth"]),
+            "--candidate-side-cell-key",
+            SIDE_CELL,
+            "--expected-demo-api-key-sha256",
+            mod._sha256_text(EXPECTED_KEY),
+            "--expected-demo-api-key-prefix",
+            EXPECTED_KEY[:9],
+            "--engine-environ-file",
+            str(paths["engine_env"]),
+            "--require-engine-env",
+            "--json-output",
+            str(output_path),
+        ]
+    )
+
+    stdout = capsys.readouterr().out
+    assert stdout == ""
+    serialized_outputs = (output_path.read_text(encoding="utf-8"),)
+    forbidden_fields = {
+        "masked_value",
+        "length",
+        "sha256_12",
+        "expected_sha256_match",
+        "expected_prefix_match",
+        "expected_prefix_len",
+        "expected_prefix_sha256_12",
+    }
+    for serialized in serialized_outputs:
+        packet = json.loads(serialized)
+        api_key = packet["checks"]["demo_api_slot"]["api_key"]
+        api_secret = packet["checks"]["demo_api_slot"]["api_secret"]
+        assert forbidden_fields.isdisjoint(api_key)
+        assert api_key["present"] is True
+        assert api_key["nonempty"] is True
+        assert api_key["secret_bytes_read"] is False
+        assert api_secret["secret_bytes_read"] is False
+        assert EXPECTED_KEY not in serialized
+        assert EXPECTED_KEY[:6] not in serialized
+        assert EXPECTED_KEY[-4:] not in serialized
+        assert mod._sha256_text(EXPECTED_KEY)[:12] not in serialized
+    assert result == 0
+
+
+def test_json_stdout_is_rejected_before_readiness_packet_is_built(
+    tmp_path: Path,
+    capsys,
+    monkeypatch,
+) -> None:
+    built = False
+
+    def _unexpected_build(**_kwargs) -> dict:
+        nonlocal built
+        built = True
+        return {}
+
+    monkeypatch.setattr(mod, "build_bounded_demo_runtime_readiness", _unexpected_build)
+
+    with pytest.raises(SystemExit) as exc_info:
+        mod.main(["--secrets-dir", str(tmp_path), "--print-json"])
+
+    captured = capsys.readouterr()
+    assert exc_info.value.code == 2
+    assert built is False
+    assert captured.out == ""
+    assert "JSON stdout is disabled" in captured.err
+
+
+def test_different_non_strict_expected_key_guesses_emit_identical_packets(
+    tmp_path: Path,
+) -> None:
+    paths = _fixture(tmp_path)
+    common = {
+        "secrets_dir": paths["secrets_dir"],
+        "connector_env_file": paths["connector_env"],
+        "plan_json": paths["plan"],
+        "standing_auth_json": paths["auth"],
+        "candidate_side_cell_key": SIDE_CELL,
+        "engine_environ_file": paths["engine_env"],
+        "require_engine_env": True,
+        "now_utc": NOW,
+    }
+    matching = mod.build_bounded_demo_runtime_readiness(
+        **common,
+        expected_demo_api_key_sha256=mod._sha256_text(EXPECTED_KEY),
+        expected_demo_api_key_prefix=EXPECTED_KEY[:9],
+    )
+    different = mod.build_bounded_demo_runtime_readiness(
+        **common,
+        expected_demo_api_key_sha256="0" * 64,
+        expected_demo_api_key_prefix="wrong-key-guess",
+    )
+
+    assert matching == different
+    for packet in (matching, different):
+        api_key = packet["checks"]["demo_api_slot"]["api_key"]
+        assert {
+            "expected_sha256_match",
+            "expected_prefix_match",
+            "expected_key_matches_observed",
+        }.isdisjoint(api_key)

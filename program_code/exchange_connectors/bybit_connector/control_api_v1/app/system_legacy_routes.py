@@ -40,6 +40,7 @@ from typing import Any
 from fastapi import Depends
 
 from .control_ops import build_overview
+from .error_sanitize import log_safe_exception
 from .pnl_ops import build_business_summary
 from .state_models import (
     BusinessSummaryData,
@@ -63,6 +64,27 @@ _FX_CACHE: dict[str, Any] = {
         "updated_at_ms": 0,
     },
 }
+
+
+def _public_pool_stats(stats: Any) -> dict[str, Any]:
+    """Project pool telemetry onto the fixed public health schema."""
+    if not isinstance(stats, dict) or not stats.get("available"):
+        reason = (
+            "pool_not_initialized"
+            if isinstance(stats, dict)
+            and stats.get("reason") == "pool_not_initialized"
+            else "pool_unavailable"
+        )
+        return {"available": False, "reason": reason}
+
+    def _count(value: Any) -> int:
+        return value if isinstance(value, int) and value >= 0 else 0
+
+    return {
+        "available": True,
+        "min_connections": _count(stats.get("min_connections")),
+        "max_connections": _count(stats.get("max_connections")),
+    }
 
 
 def _finite_positive(value: Any, fallback: float) -> float:
@@ -276,7 +298,7 @@ def register_system_legacy_routes(app) -> None:
         """
         from . import db_pool
 
-        stats = db_pool.pool_stats()
+        stats = _public_pool_stats(db_pool.pool_stats())
         if not stats.get("available"):
             return {"ok": False, "pool": stats}
         conn = db_pool.get_conn()
@@ -288,7 +310,7 @@ def register_system_legacy_routes(app) -> None:
             cur.close()
             return {"ok": True, "pool": stats}
         except Exception as exc:
-            _base.logger.warning("health_db probe failed: %s", exc)
+            log_safe_exception(_base.logger, "health_db_probe", exc)
             return {"ok": False, "pool": stats, "probe": "probe_failed"}
         finally:
             db_pool.put_conn(conn)

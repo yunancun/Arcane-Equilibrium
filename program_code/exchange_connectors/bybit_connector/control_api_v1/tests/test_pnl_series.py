@@ -110,6 +110,24 @@ async def test_demo_pnl_series_route_uses_demo_mode(monkeypatch) -> None:
     assert out["data"]["range"] == "7d"
 
 
+@pytest.mark.asyncio
+async def test_demo_pnl_series_route_hides_backend_reason(monkeypatch) -> None:
+    from app import pnl_series
+    from app import strategy_ai_routes
+
+    canary = "trace-canary /srv/private.py SELECT secret FROM credentials"
+
+    def fake_fetch(modes, *, range_key="24h", bucket_sec=None):
+        return {"available": False, "reason": canary, "points": []}
+
+    monkeypatch.setattr(pnl_series, "fetch_pnl_series", fake_fetch)
+
+    out = await strategy_ai_routes.get_demo_pnl_series(actor=None)
+
+    assert out["data"]["reason"] == "pnl_series_unavailable"
+    assert canary not in str(out)
+
+
 def test_live_pnl_series_route_uses_endpoint_specific_db_mode(monkeypatch) -> None:
     from app import live_session_account_routes as routes
     from app import live_session_routes as core
