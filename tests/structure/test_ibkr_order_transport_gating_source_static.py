@@ -43,7 +43,8 @@ ENVELOPE_CHECK = ROOT / ENVELOPE_CHECK_REL
 STUB_BEGIN = "EFFECT-STUB-GUARD-BEGIN"
 STUB_END = "EFFECT-STUB-GUARD-END"
 
-# seam 符號（G3 掃 production 域引用;module 自身除外）。
+# seam 符號（G3 掃 production 域引用;module 自身除外）。W7-S1 追加:WireBytes（NOTE-1 (a) sealed
+# 出線型別）+ place/cancel encoder（產 OrderFrame,S1 零 production caller → DCE;S4 接線移出）。
 SEAM_SYMBOLS = (
     "OrderFrame",
     "OrderEffectPermit",
@@ -51,6 +52,9 @@ SEAM_SYMBOLS = (
     "EffectPermitProvider",
     "send_order_framed",
     "order_effect_capability_gate",
+    "WireBytes",
+    "encode_place_order",
+    "encode_cancel_order",
 )
 
 # order verb 家族（G4 必全數落 OrderVerbStructurallyDenied 拒臂）。
@@ -210,6 +214,68 @@ def check_g4(envelope_src: str) -> tuple[list[str], list[str]]:
     return v, inc
 
 
+# ── G5 NOTE-1 (a) 型別屏障:order-verb wire bytes 唯經 gated send_order_framed 出線 ──────
+#    （承 W7-S1 NOTE-1 擇 (a):send_order_framed 回 sealed WireBytes 取代裸 Vec<u8>;order-verb
+#     encoder 產物是 sealed OrderFrame。型別層阻斷 order bytes 直達 effect-ungated 的
+#     `ibkr_tws_driver::send_framed(&[u8])`（NOTE-1 平行出線 seam）。）
+def check_g5(module_src: str) -> tuple[list[str], list[str]]:
+    v: list[str] = []
+    inc: list[str] = []
+    code = _strip_line_comments(module_src)
+
+    if not re.search(r"\bstruct\s+WireBytes\b", code):
+        inc.append("G5 anchor absent: struct WireBytes (NOTE-1 (a) sealed out type)")
+        return v, inc
+
+    # (a) send_order_framed 回 sealed WireBytes（非裸 Vec<u8>）——gated 出線產物本身 sealed。
+    m = re.search(r"\bfn\s+send_order_framed\s*\(.*?\)\s*->\s*([A-Za-z0-9_<>]+)", code, re.S)
+    if m is None:
+        v.append("G5(a) send_order_framed signature not found")
+    elif m.group(1).strip() != "WireBytes":
+        v.append(f"G5(a) send_order_framed must return sealed WireBytes, got `{m.group(1).strip()}` (raw bytes escape gated boundary)")
+
+    # (b) WireBytes pub(crate) 且無 pub byte accessor（bytes 私有;into_wire 模塊私有）。
+    if not re.search(r"\bpub\(crate\)\s+struct\s+WireBytes\b", code):
+        v.append("G5(b) WireBytes struct is not pub(crate) (over-exposed or absent)")
+    if re.search(r"\bpub(\(crate\))?\s+bytes\s*:", code):
+        # 注:此 regex 亦覆蓋 OrderFrame.bytes（G1 已管）,WireBytes.bytes 同紀律必私有。
+        pass  # 由 G1(a) 已斷言 bytes 私有;此處不重複計數。
+    for acc in ("as_bytes", "as_slice", "into_bytes", "bytes", "into_wire"):
+        # into_wire 是 WireBytes 的模塊私有提取點:不得 pub（否則裸 bytes 逃逸）。
+        if re.search(rf"\bpub(\(crate\))?\s+fn\s+{acc}\b", code):
+            v.append(f"G5(b) WireBytes/OrderFrame exposes pub byte accessor `{acc}` (bytes must not escape gated boundary)")
+
+    # (c) order-verb encoder 產物是 sealed OrderFrame（非裸 Vec<u8>）——encoder 輸出即受 INV-ORDER。
+    for enc in ("encode_place_order", "encode_cancel_order"):
+        me = re.search(rf"\bfn\s+{enc}\s*\(.*?\)\s*->\s*([^{{]+)\{{", code, re.S)
+        if me is None:
+            v.append(f"G5(c) encoder `{enc}` signature not found")
+        elif "OrderFrame" not in me.group(1):
+            v.append(f"G5(c) encoder `{enc}` must yield OrderFrame (order bytes must be sealed, not raw)")
+
+    # (d) E3-N2/E2-NOTE-6:禁 leak-trait impl 使 sealed 型別 coerce 繞封（未來加 `impl Deref<
+    # Target=[u8]>` 可 `&wire` coerce 成 `&[u8]` 餵 send_framed 而 G5(a-c) 仍綠）。黑名單對
+    # WireBytes/OrderFrame 的 Deref/DerefMut/AsRef/AsMut/Borrow/BorrowMut/Index/Into 及
+    # `From<WireBytes|OrderFrame> for Vec<u8>/[u8]`。
+    leak_traits = ("Deref", "DerefMut", "AsRef", "AsMut", "Borrow", "BorrowMut", "Index")
+    for sealed in ("WireBytes", "OrderFrame"):
+        for tr in leak_traits:
+            if re.search(rf"\bimpl\b[^\n]*\b{tr}\b[^\n]*\bfor\s+{sealed}\b", code):
+                v.append(f"G5(d) leak-trait `impl {tr} for {sealed}` (byte coercion escapes seal)")
+        # From<Sealed> for Vec<u8>/[u8]（into-bytes 逃逸面）。
+        if re.search(rf"\bimpl\b[^\n]*\bFrom\s*<\s*{sealed}\s*>\s*for\s+(Vec\s*<\s*u8|&?\s*\[\s*u8)", code):
+            v.append(f"G5(d) `impl From<{sealed}> for [u8]/Vec<u8>` (into-bytes escape)")
+
+    # (e) WireBytes::view（test-only bytes 檢視）必保持 #[cfg(test)]（production 不成 bytes 逃逸面;
+    # 同 mint 紀律）。抓 `fn view` 前是否緊鄰 #[cfg(test)]。
+    mv = re.search(r"(#\[cfg\(test\)\]\s*)?\bpub\(crate\)\s+fn\s+view\s*\(", code)
+    if mv is None:
+        inc.append("G5(e) anchor absent: WireBytes::view accessor")
+    elif mv.group(1) is None:
+        v.append("G5(e) WireBytes::view is NOT gated by #[cfg(test)] (production bytes escape)")
+    return v, inc
+
+
 def _extract_stub_region(module_src: str) -> str | None:
     b = module_src.find(STUB_BEGIN)
     e = module_src.find(STUB_END)
@@ -227,6 +293,7 @@ def run_checks(module_src: str, envelope_src: str, prod_sources: dict[str, str])
         (check_g2, (module_src, prod_sources)),
         (check_g3, (prod_sources,)),
         (check_g4, (envelope_src,)),
+        (check_g5, (module_src,)),
     ):
         v, inc = fn(*args)  # type: ignore[operator]
         violations += v
@@ -295,6 +362,51 @@ def _mutations(module_src: str, envelope_src: str, prod_sources: dict[str, str])
         ),
         prod_sources,
     ))
+    # M7（G5a）:send_order_framed 回裸 Vec<u8>（gated 出線退化為可餵 send_framed 的裸 bytes）。
+    muts.append((
+        "M7 send_order_framed returns raw Vec<u8>",
+        module_src.replace(
+            "    frame: OrderFrame,\n) -> WireBytes {",
+            "    frame: OrderFrame,\n) -> Vec<u8> {",
+        ),
+        envelope_src, prod_sources,
+    ))
+    # M8（G5b）:WireBytes 加 pub byte accessor（裸 bytes 逃逸 gated 邊界）。
+    muts.append((
+        "M8 pub accessor on WireBytes",
+        module_src.replace(
+            "    fn into_wire(self) -> Vec<u8> {",
+            "    pub(crate) fn as_bytes(&self) -> &[u8] { &self.bytes }\n    fn into_wire(self) -> Vec<u8> {",
+        ),
+        envelope_src, prod_sources,
+    ))
+    # M9（G5c）:encode_place_order 回裸 Vec<u8>（order bytes 不再 sealed 於 OrderFrame）。
+    muts.append((
+        "M9 encode_place_order yields raw Vec<u8>",
+        module_src.replace(
+            "pub(crate) fn encode_place_order(\n    req: &PlaceOrderWireRequest,\n    server_version: i32,\n) -> Result<OrderFrame, OrderEncodeReject> {",
+            "pub(crate) fn encode_place_order(\n    req: &PlaceOrderWireRequest,\n    server_version: i32,\n) -> Result<Vec<u8>, OrderEncodeReject> {",
+        ),
+        envelope_src, prod_sources,
+    ))
+    # M10（G5d）:加 `impl Deref<Target=[u8]> for WireBytes`（byte coercion 繞封）。
+    muts.append((
+        "M10 impl Deref for WireBytes",
+        module_src.replace(
+            "impl WireBytes {",
+            "impl std::ops::Deref for WireBytes { type Target = [u8]; fn deref(&self) -> &[u8] { &self.bytes } }\nimpl WireBytes {",
+        ),
+        envelope_src, prod_sources,
+    ))
+    # M11（G5e）:WireBytes::view 去掉 #[cfg(test)]（production bytes 逃逸）。
+    muts.append((
+        "M11 WireBytes::view un-cfg(test)",
+        module_src.replace(
+            "    #[cfg(test)]\n    pub(crate) fn view(&self)",
+            "    pub(crate) fn view(&self)",
+        ),
+        envelope_src, prod_sources,
+    ))
     return muts
 
 
@@ -336,7 +448,7 @@ def main() -> int:
         for vv in violations:
             print(f"[order-transport-audit] FAIL: {vv}", file=sys.stderr)
         return 1
-    print("[order-transport-audit] PASS: INV-ORDER G1-G4 satisfied; positive controls have teeth")
+    print("[order-transport-audit] PASS: INV-ORDER G1-G5 satisfied; positive controls have teeth")
     return 0
 
 
@@ -366,6 +478,13 @@ def test_g4_readonly_envelope_order_verb_structurally_denied() -> None:
     v, inc = check_g4(ENVELOPE_CHECK.read_text(encoding="utf-8"))
     assert not inc, f"inconclusive: {inc}"
     assert not v, f"G4 violations: {v}"
+
+
+def test_g5_note1_sealed_wire_bytes_type_barrier() -> None:
+    assert MODULE.exists(), f"source absent: {MODULE}"
+    v, inc = check_g5(MODULE.read_text(encoding="utf-8"))
+    assert not inc, f"inconclusive: {inc}"
+    assert not v, f"G5 violations: {v}"
 
 
 def test_positive_controls_have_teeth() -> None:

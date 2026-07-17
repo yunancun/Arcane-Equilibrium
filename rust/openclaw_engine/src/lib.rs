@@ -210,6 +210,13 @@ pub mod ibkr_activation_envelope_check;
 // caller → default build DCE（沿 driver/g4 audit 家族）;不 impl ConnectPermitProvider、不觸 PermitToken
 // → INV-1 不受影響。純同步、零 socket、零下單。
 pub mod ibkr_tws_order_transport;
+// IBKR W7-S1 訂單生命週期 runtime driver + append-only intent journal（不送出）：14-態狀態機
+// 消費 openclaw_types 遷移矩陣（is_transition_allowed / is_operation_transition_allowed），單一
+// mutator `apply_lifecycle_event`（Bybit 幻影倉教訓:絕無第二狀態寫入路徑;fill/cancel 共用、
+// reduce-only fail-closed）+ hash-chain 意圖日誌 + nextValidId 管理（本地遞增,冪等真源=
+// idempotency_key 非漂移的 order-id）+ ApiPending transient-pending 有界 timeout 分流 + 重啟
+// recovery（未終態 → MarkStateUnknown）。純同步、注入時鐘、零 socket / 零 async / 零下單出線。
+pub mod ibkr_tws_order_lifecycle;
 // IBKR B1 只讀 TWS 連接器（ADR-0048 / AMD-2026-07-08-01，G4 首次接觸）：connect handshake
 // + reqCurrentTime 最小首接觸；純 codec + generic driver + 3 層惰性 gate；唯一具體
 // TcpStream::connect 於 `ibkr_g4_contact` feature 後（default build 無 socket、無 caller）。

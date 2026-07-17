@@ -29,8 +29,9 @@ fn send_order_framed_requires_permit_and_yields_order_bytes() {
     let frame = OrderFrame::from_order_bytes(vec![0x01, 0x02, 0x03]);
     // grant 唯 governor 放行時鑄——test 用 pacing governor 取一枚真 grant。
     let grant = mint_test_grant();
-    let bytes = send_order_framed(grant, permit, frame);
-    assert_eq!(bytes, vec![0x01, 0x02, 0x03]);
+    // W7-S1:send_order_framed 回 sealed WireBytes（NOTE-1 (a) 型別屏障;非裸 Vec<u8>）→ test 域 view。
+    let wire = send_order_framed(grant, permit, frame);
+    assert_eq!(wire.view(), &[0x01, 0x02, 0x03]);
 }
 
 /// test 輔助:向真 pacing governor 取一枚 `OutboundGrant`（不偽造 grant 構造子）。
@@ -111,7 +112,423 @@ fn order_frame_bytes_only_flow_through_send_order_framed() {
     // 建構 entry 借用以確認型別可見（結構性:OrderFrame 無 pub bytes accessor）。
     let _entry_type_check: Option<StockEtfBrokerCapabilityEntryV1> = None;
     let frame = OrderFrame::from_order_bytes(vec![0xAA]);
-    // 唯一取出路徑:mint permit + grant + send_order_framed。
-    let bytes = send_order_framed(mint_test_grant(), OrderEffectPermit::mint(), frame);
-    assert_eq!(bytes, vec![0xAA]);
+    // 唯一取出路徑:mint permit + grant + send_order_framed → sealed WireBytes。
+    let wire = send_order_framed(mint_test_grant(), OrderEffectPermit::mint(), frame);
+    assert_eq!(wire.view(), &[0xAA]);
+}
+
+// ── (e) place/cancel encoder + §1.5 encode ceiling guard ─────────────────────
+
+/// 骨架 placeOrder 請求 fixture（sv∈[145,157] band;whatIf=false 常態）。
+fn sample_place_request() -> PlaceOrderWireRequest {
+    PlaceOrderWireRequest {
+        order_id: 42,
+        symbol: "AAPL".to_string(),
+        sec_type: "STK".to_string(),
+        exchange: "SMART".to_string(),
+        currency: "USD".to_string(),
+        action: "BUY".to_string(),
+        total_quantity_decimal: "10".to_string(),
+        order_type: "LMT".to_string(),
+        lmt_price_decimal: "150.25".to_string(),
+        aux_price_decimal: String::new(),
+        time_in_force: "DAY".to_string(),
+        account: "DU111111".to_string(),
+        transmit: true,
+        outside_rth: false,
+        cash_qty_decimal: String::new(),
+        what_if: false,
+    }
+}
+
+/// decode framed bytes → 欄位字串序（測試斷言用;4-byte 長度前綴後為 payload,沿 wire codec 慣例）。
+fn decode_frame_fields(framed: &[u8]) -> Vec<String> {
+    use crate::ibkr_tws_wire::decode_fields;
+    decode_fields(&framed[4..]).expect("decode fields")
+}
+
+/// 斷言 encoder 回特定 typed reject（OrderFrame 刻意 sealed 非 Debug/PartialEq → 不比較 Ok 臂）。
+fn assert_encode_reject(res: Result<OrderFrame, OrderEncodeReject>, expected: OrderEncodeReject) {
+    match res {
+        Ok(_) => panic!("expected encode reject, got Ok(OrderFrame)"),
+        Err(e) => assert_eq!(e, expected),
+    }
+}
+
+// ── byte-golden round-trip（golden 由 pinned ibapi 9.81.1 `client.py placeOrder` 逐位捕捉;
+//    canonical STK LMT DAY order,orderId=42/AAPL/SMART/USD/BUY/10/150.25/DU111111,
+//    transmit=true/outsideRth=false/whatIf=false/cashQty unset。禁人審替代——golden 即官方 wire）──
+
+/// sv=145 golden（108 欄;無 discretionaryUpToLimitPrice / usePriceMgmtAlgo）。
+const GOLDEN_145: &[&str] = &[
+    "3",
+    "42",
+    "0",
+    "AAPL",
+    "STK",
+    "",
+    "0.0",
+    "",
+    "",
+    "SMART",
+    "",
+    "USD",
+    "",
+    "",
+    "",
+    "",
+    "BUY",
+    "10",
+    "LMT",
+    "150.25",
+    "",
+    "DAY",
+    "",
+    "DU111111",
+    "",
+    "0",
+    "",
+    "1",
+    "0",
+    "0",
+    "0",
+    "0",
+    "0",
+    "0",
+    "0",
+    "",
+    "0",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "0",
+    "",
+    "-1",
+    "0",
+    "",
+    "",
+    "0",
+    "",
+    "",
+    "1",
+    "1",
+    "",
+    "0",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "0",
+    "",
+    "",
+    "",
+    "",
+    "0",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "0",
+    "",
+    "",
+    "0",
+    "0",
+    "",
+    "",
+    "0",
+    "",
+    "0",
+    "0",
+    "0",
+    "0",
+    "",
+    "1.7976931348623157e+308",
+    "1.7976931348623157e+308",
+    "1.7976931348623157e+308",
+    "1.7976931348623157e+308",
+    "1.7976931348623157e+308",
+    "0",
+    "",
+    "",
+    "",
+    "1.7976931348623157e+308",
+    "",
+    "",
+    "",
+    "",
+    "0",
+    "0",
+];
+/// sv=151 golden（110 欄;+discretionaryUpToLimitPrice(148) +usePriceMgmtAlgo(151)）。
+const GOLDEN_151: &[&str] = &[
+    "3",
+    "42",
+    "0",
+    "AAPL",
+    "STK",
+    "",
+    "0.0",
+    "",
+    "",
+    "SMART",
+    "",
+    "USD",
+    "",
+    "",
+    "",
+    "",
+    "BUY",
+    "10",
+    "LMT",
+    "150.25",
+    "",
+    "DAY",
+    "",
+    "DU111111",
+    "",
+    "0",
+    "",
+    "1",
+    "0",
+    "0",
+    "0",
+    "0",
+    "0",
+    "0",
+    "0",
+    "",
+    "0",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "0",
+    "",
+    "-1",
+    "0",
+    "",
+    "",
+    "0",
+    "",
+    "",
+    "1",
+    "1",
+    "",
+    "0",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "0",
+    "",
+    "",
+    "",
+    "",
+    "0",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "0",
+    "",
+    "",
+    "0",
+    "0",
+    "",
+    "",
+    "0",
+    "",
+    "0",
+    "0",
+    "0",
+    "0",
+    "",
+    "1.7976931348623157e+308",
+    "1.7976931348623157e+308",
+    "1.7976931348623157e+308",
+    "1.7976931348623157e+308",
+    "1.7976931348623157e+308",
+    "0",
+    "",
+    "",
+    "",
+    "1.7976931348623157e+308",
+    "",
+    "",
+    "",
+    "",
+    "0",
+    "0",
+    "0",
+    "",
+];
+
+fn encoded_fields(req: &PlaceOrderWireRequest, sv: i32) -> Vec<String> {
+    let frame = encode_place_order(req, sv).expect("encode place");
+    let wire = send_order_framed(mint_test_grant(), OrderEffectPermit::mint(), frame);
+    decode_frame_fields(wire.view())
+}
+
+#[test]
+fn place_order_byte_exact_vs_pinned_ibapi_145_151_157() {
+    // sv=145：無兩 sv-gated 末欄。
+    assert_eq!(encoded_fields(&sample_place_request(), 145), GOLDEN_145);
+    // sv=151 與 sv=157：band 內佈局同（usePriceMgmtAlgo≥151;二者間無新增 placeOrder 欄）。
+    assert_eq!(encoded_fields(&sample_place_request(), 151), GOLDEN_151);
+    assert_eq!(encoded_fields(&sample_place_request(), 157), GOLDEN_151);
+    // sv=148：僅 +discretionaryUpToLimitPrice（109 欄;無 usePriceMgmtAlgo）。
+    let f148 = encoded_fields(&sample_place_request(), 148);
+    assert_eq!(f148.len(), 109);
+    assert_eq!(&f148[..108], GOLDEN_145);
+    assert_eq!(f148[108], "0", "discretionaryUpToLimitPrice @148");
+}
+
+#[test]
+fn place_order_caller_field_positions_and_whatif() {
+    // whatIf flag 位於 pinned idx 85（cashQty 之前;非訊息末尾）。
+    let mut req = sample_place_request();
+    req.what_if = true;
+    let f = encoded_fields(&req, 157);
+    assert_eq!(f[85], "1", "whatIf @85");
+    assert_eq!(
+        f[101], "1.7976931348623157e+308",
+        "cashQty unset 哨兵 @101 未受 whatIf 影響"
+    );
+    // transmit @27 / outsideRth @33。
+    let mut req2 = sample_place_request();
+    req2.transmit = false;
+    req2.outside_rth = true;
+    let f2 = encoded_fields(&req2, 157);
+    assert_eq!(f2[27], "0", "transmit @27");
+    assert_eq!(f2[33], "1", "outsideRth @33");
+}
+
+#[test]
+fn place_order_mkt_empties_lmt_and_cashqty_uses_unset_sentinel() {
+    // MKT 單:lmtPrice 空欄(handle_empty);cashQty 未設 → UNSET_DOUBLE 哨兵(plain make_field,非空欄)。
+    let mut req = sample_place_request();
+    req.order_type = "MKT".to_string();
+    req.lmt_price_decimal = String::new();
+    let f = encoded_fields(&req, 157);
+    assert_eq!(f[18], "MKT", "orderType");
+    assert_eq!(f[19], "", "MKT lmtPrice 空欄(handle_empty)");
+    assert_eq!(
+        f[101], "1.7976931348623157e+308",
+        "cashQty 未設 → UNSET 哨兵(非空欄;DIVERGENT-1 修正:非 handle_empty)"
+    );
+    // caller 設 cashQty → 透傳 decimal。
+    let mut req2 = sample_place_request();
+    req2.cash_qty_decimal = "3.5".to_string();
+    assert_eq!(encoded_fields(&req2, 157)[101], "3.5");
+}
+
+#[test]
+fn place_order_rejects_embedded_nul_field() {
+    // E3-N1/E2-F1:caller 字串內嵌 NUL → encode_fields_checked 拒(wire 注入防護)。
+    let mut req = sample_place_request();
+    req.symbol = "AA\0PL".to_string();
+    assert_encode_reject(
+        encode_place_order(&req, 157),
+        OrderEncodeReject::WireFieldRejected("embedded NUL"),
+    );
+    let mut req2 = sample_place_request();
+    req2.account = "DUéÉ".to_string(); // 非 ASCII
+    assert_encode_reject(
+        encode_place_order(&req2, 157),
+        OrderEncodeReject::WireFieldRejected("non-ascii"),
+    );
+}
+
+#[test]
+fn cancel_order_encoder_skeleton_bytes() {
+    let frame = encode_cancel_order(42, 157).expect("encode cancel");
+    let wire = send_order_framed(mint_test_grant(), OrderEffectPermit::mint(), frame);
+    let fields = decode_frame_fields(wire.view());
+    // ≤157 band = [4, VERSION=1, orderId]，無 manualOrderCancelTime。
+    assert_eq!(
+        fields,
+        vec!["4".to_string(), "1".to_string(), "42".to_string()]
+    );
+}
+
+#[test]
+fn encode_ceiling_guard_refuses_above_157() {
+    // §1.5 INV-ORDER-ENCODE:sv>157 一律拒產出（禁佈局猜送）。
+    assert_encode_reject(
+        encode_place_order(&sample_place_request(), 158),
+        OrderEncodeReject::ServerVersionAboveCeiling {
+            server_version: 158,
+            ceiling: 157,
+        },
+    );
+    assert_encode_reject(
+        encode_cancel_order(42, 176),
+        OrderEncodeReject::ServerVersionAboveCeiling {
+            server_version: 176,
+            ceiling: 157,
+        },
+    );
+}
+
+#[test]
+fn encode_floor_guard_refuses_below_145() {
+    assert_encode_reject(
+        encode_place_order(&sample_place_request(), 144),
+        OrderEncodeReject::ServerVersionBelowFloor {
+            server_version: 144,
+            floor: 145,
+        },
+    );
+}
+
+#[test]
+fn encode_boundary_145_and_157_ok() {
+    assert!(encode_place_order(&sample_place_request(), 145).is_ok());
+    assert!(encode_place_order(&sample_place_request(), 157).is_ok());
+    assert!(encode_cancel_order(1, 145).is_ok());
+}
+
+#[test]
+fn place_order_encoder_rejects_malformed_fields() {
+    let mut req = sample_place_request();
+    req.total_quantity_decimal = "0".to_string(); // 非正 → 拒（is_positive_decimal_string）。
+    assert_encode_reject(
+        encode_place_order(&req, 150),
+        OrderEncodeReject::FieldInvalid {
+            field: "total_quantity",
+        },
+    );
+    let mut req2 = sample_place_request();
+    req2.account = "  ".to_string();
+    assert_encode_reject(
+        encode_place_order(&req2, 150),
+        OrderEncodeReject::FieldInvalid { field: "account" },
+    );
+    let mut req3 = sample_place_request();
+    req3.lmt_price_decimal = "abc".to_string();
+    assert_encode_reject(
+        encode_place_order(&req3, 150),
+        OrderEncodeReject::FieldInvalid { field: "lmt_price" },
+    );
 }

@@ -1208,3 +1208,101 @@ fn w6s0_open_orders_and_order_statuses_caps_poison_face() {
     assert_eq!(d.open_orders(T0 + 1).1.count(), 1, "禁靜默驅逐");
     assert_eq!(d.audit().cache_cap_exceeded_rejects, 1);
 }
+
+// ── W7-S1 openOrder whatIf OrderState tail decode（§2.2.2）────────────────────
+
+/// whatIf OrderState 尾 fixture（15 欄:status/9 margin/3 commission/currency/warning）。
+const WHATIF_TAIL: &[&str] = &[
+    "PreSubmitted", // status
+    "1000.00",      // initMarginBefore
+    "900.00",       // maintMarginBefore
+    "5000.00",      // equityWithLoanBefore
+    "50.00",        // initMarginChange
+    "40.00",        // maintMarginChange
+    "0.00",         // equityWithLoanChange
+    "1050.00",      // initMarginAfter
+    "940.00",       // maintMarginAfter
+    "5000.00",      // equityWithLoanAfter
+    "1.00",         // commission
+    "1.00",         // minCommission
+    "1.00",         // maxCommission
+    "USD",          // commissionCurrency
+    "",             // warningText
+];
+
+fn whatif_block() -> Vec<String> {
+    WHATIF_TAIL.iter().map(|s| s.to_string()).collect()
+}
+
+#[test]
+fn whatif_frame_preview_is_blocked_fail_closed() {
+    // IB DIVERGENT-2:OrderState 深埋 mid-message（decodeWhatIfInfoAndCommission 後仍約 19 欄）
+    // → frame 面 preview **一律 blocked**,絕不回結構錯誤 margin（band 內、band 外皆然）。
+    let payload = open_order_payload(7, "BUY", "412.00", WHATIF_TAIL);
+    let cfg = OrderExecDataConfig::default();
+    assert_eq!(
+        decode_open_order_whatif_tail(&payload, SV_PINNED, &cfg).unwrap_err(),
+        OrderExecDataReject::PreviewDecodeBlockedPendingFullSequence
+    );
+    // sv 越界仍先由 band 守衛攔（ceiling 拒解;fail-closed 一致）。
+    assert_eq!(
+        decode_open_order_whatif_tail(&payload, SV_CEILING, &cfg).unwrap_err(),
+        OrderExecDataReject::PinnedLayoutOverflow {
+            msg_id: IN_OPEN_ORDER_MSG_ID
+        }
+    );
+    // sv<floor 亦拒。
+    assert!(matches!(
+        decode_open_order_whatif_tail(&payload, 144, &cfg).unwrap_err(),
+        OrderExecDataReject::ServerVersionBelowFloor { .. }
+    ));
+}
+
+#[test]
+fn whatif_order_state_block_content_confirmed_ok() {
+    // OrderState 塊**內容/序** CONFIRMED（定位待全序列解碼;此為內容單元,非 frame 面接線）。
+    let preview = decode_whatif_order_state_block(&whatif_block()).expect("decode block");
+    assert_eq!(preview.status, IbkrOrderStatusV1::PreSubmitted);
+    assert_eq!(
+        preview.init_margin_after_decimal.as_deref(),
+        Some("1050.00")
+    );
+    assert_eq!(preview.commission_decimal.as_deref(), Some("1.00"));
+    assert_eq!(preview.commission_currency, "USD");
+    assert_eq!(preview.warning_text, "");
+}
+
+#[test]
+fn whatif_order_state_block_sentinel_maps_to_none() {
+    let mut b = whatif_block();
+    b[7] = String::new(); // initMarginAfter 空欄
+    b[10] = "1.7976931348623157E308".to_string(); // commission 哨兵
+    let preview = decode_whatif_order_state_block(&b).unwrap();
+    assert_eq!(preview.init_margin_after_decimal, None);
+    assert_eq!(preview.commission_decimal, None);
+}
+
+#[test]
+fn whatif_order_state_block_rejects_bad_len_decimal_status() {
+    // 非 15 欄 → WireMalformed。
+    assert!(matches!(
+        decode_whatif_order_state_block(&whatif_block()[..14]).unwrap_err(),
+        OrderExecDataReject::WireMalformed(_)
+    ));
+    // 非法 margin decimal → WhatIfPreviewFieldInvalid。
+    let mut bad = whatif_block();
+    bad[1] = "not_a_number".to_string();
+    assert_eq!(
+        decode_whatif_order_state_block(&bad).unwrap_err(),
+        OrderExecDataReject::WhatIfPreviewFieldInvalid {
+            field: "init_margin_before"
+        }
+    );
+    // 表外 status → OrderStatusUnknownDenied。
+    let mut unk = whatif_block();
+    unk[0] = "ApiPending".to_string();
+    assert_eq!(
+        decode_whatif_order_state_block(&unk).unwrap_err(),
+        OrderExecDataReject::OrderStatusUnknownDenied
+    );
+}
