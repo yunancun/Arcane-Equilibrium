@@ -1,0 +1,53 @@
+# Exact historical generic-api-key false positives reviewed during the 2026-07-17
+# public-history rewrite. Each match captured only eight characters and was an
+# inert test fixture, hash prefix, idempotency key, or prose token. Provider-
+# specific findings and future fingerprints remain unsuppressed.
+00597e235f38f84abd38c2fd16c370c15d592bbf:docs/CCAgentWorkSpace/Operator/2026-07-01--noorder_refresh_e3_blocked_by_source_drift_b945.md:generic-api-key:40
+00597e235f38f84abd38c2fd16c370c15d592bbf:docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-01--noorder_refresh_e3_blocked_by_source_drift_b945.md:generic-api-key:40
+0af3a5f8fc36cbd113030419abed3e99b3b82da9:docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-27--downstream_bounded_auth_admission_refresh_blocked.md:generic-api-key:20
+0af3a5f8fc36cbd113030419abed3e99b3b82da9:docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-27--downstream_bounded_auth_admission_refresh_blocked.md:generic-api-key:57
+12d0a1591869ba60599c4f49d662e726e7583263:docs/CCAgentWorkSpace/QA/workspace/reports/2026-05-04--ref20_sprint_a_r3_smoke_e2e.md:generic-api-key:1380
+17a28f431a16bdec4f0aa0fe616c08fdf7417efa:docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-01--noorder_refresh_blocked_by_loss_control_6b0e.md:generic-api-key:45
+2294bf3db11e4001fb027eef3d1292600f0f5cd2:docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-27--same_lineage_downstream_refresh_done.md:generic-api-key:45
+2294bf3db11e4001fb027eef3d1292600f0f5cd2:docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-27--same_lineage_downstream_refresh_done.md:generic-api-key:71
+2352259db7f59ca8ea53bd37c970622f13449c66:.claude/skills/ibkr-policy-compliance/SKILL.md:generic-api-key:12
+37d2ceab0c0af2664976c3e34ad4392e3011c2d6:docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-27--gui_risk_cap_runtime_cache_reconcile.md:generic-api-key:84
+37d2ceab0c0af2664976c3e34ad4392e3011c2d6:docs/CLAUDE_CHANGELOG.md:generic-api-key:12
+3a2d23fd493f47722c2504e10cb493df923e430c:program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_live_trust_routes_secret_split.py:generic-api-key:80
+3a2d23fd493f47722c2504e10cb493df923e430c:program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_ops1_csrf_middleware.py:generic-api-key:108
+3b8f58e17a0e71330323791fd5b77292f55d2b62:helper_scripts/canary/test_watchdog_alert.py:generic-api-key:506
+3b8f58e17a0e71330323791fd5b77292f55d2b62:helper_scripts/canary/test_watchdog_alert.py:generic-api-key:512
+456e86367974810a3a16e0511f8e61bb61494923:docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-01--noorder_refresh_bb_blocked_by_source_drift_ad456.md:generic-api-key:47
+513b3f64ef21119a5c1be4d095111e69ae203cb5:docs/CCAgentWorkSpace/Operator/2026-07-01--noorder_refresh_ready_invalidated_before_request_3947.md:generic-api-key:36
+513b3f64ef21119a5c1be4d095111e69ae203cb5:docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-01--noorder_refresh_ready_invalidated_before_request_3947.md:generic-api-key:36
+66918b7601a5a5698dec62d3c10aa8934e0c77f8:docs/CCAgentWorkSpace/Operator/2026-07-01--noorder_refresh_ready_blocked_by_source_drift_2f01.md:generic-api-key:37
+66918b7601a5a5698dec62d3c10aa8934e0c77f8:docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-01--noorder_refresh_ready_blocked_by_source_drift_2f01.md:generic-api-key:37
+66ba91964a5f9c4d224805cb07be1422fe84ede7:docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_near_buy_order_capable_gate_blocked_by_soak_plan.md:generic-api-key:33
+66ba91964a5f9c4d224805cb07be1422fe84ede7:docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_near_buy_order_capable_gate_blocked_by_soak_plan.md:generic-api-key:34
+687320902f6940108a34c988a055ef49317b05c1:program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_l2_d3_ledger.py:generic-api-key:68
+687320902f6940108a34c988a055ef49317b05c1:program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_l2_d3_ledger.py:generic-api-key:78
+687320902f6940108a34c988a055ef49317b05c1:program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_l2_d3_ledger.py:generic-api-key:126
+687320902f6940108a34c988a055ef49317b05c1:program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_l2_d3_ledger.py:generic-api-key:383
+687320902f6940108a34c988a055ef49317b05c1:program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_l2_d3_ledger.py:generic-api-key:398
+687320902f6940108a34c988a055ef49317b05c1:program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_l2_d3_ledger.py:generic-api-key:500
+687320902f6940108a34c988a055ef49317b05c1:program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_l2_d3_ledger.py:generic-api-key:510
+687320902f6940108a34c988a055ef49317b05c1:program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_l2_d3_ledger.py:generic-api-key:542
+7536195517d3e58b32af9e8f94500679ec131e99:docs/CCAgentWorkSpace/QA/workspace/reports/2026-05-04--ref20_sprint_a_r3_smoke_e2e.md:generic-api-key:735
+7536195517d3e58b32af9e8f94500679ec131e99:docs/CCAgentWorkSpace/QA/workspace/reports/2026-05-04--ref20_sprint_a_r3_smoke_e2e.md:generic-api-key:1026
+7536195517d3e58b32af9e8f94500679ec131e99:docs/CCAgentWorkSpace/QA/workspace/reports/2026-05-04--ref20_sprint_a_r3_smoke_e2e.md:generic-api-key:1054
+777c58d7afeccfb0539c0a538681c79d82d70f4c:rust/openclaw_engine/tests/sprint2_track_d_api_latency.rs:generic-api-key:259
+790b0a6ff98df287905b648c19ea1d9b48b74283:program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_earn_routes.py:generic-api-key:137
+7e450564f79b8244532f6201ad8aa7024ef128d5:docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-30--bounded_demo_connector_mode_operator_cutover_runtime_hygiene.md:generic-api-key:57
+8f1730dfa9aada2e6a711d01710da2d61f33d677:docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-07--standing_demo_loss_control_authorization_blocked_by_engine_env.md:generic-api-key:64
+9ff59dba7819bd94d364ddc3cdb01832021e1505:program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_demo_connector_coverage.py:generic-api-key:38
+aa625ee95050134beb798b29907cfaff114ddb4a:docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-07--bounded_demo_ai_ml_learning_test_exact_scope_request.json:generic-api-key:35
+be3c67976a4ed0b3fecb40c0ac2c111bc76fa340:docs/CCAgentWorkSpace/Operator/2026-07-01--noorder_refresh_request_invalidated_before_e3bb_70e.md:generic-api-key:38
+be3c67976a4ed0b3fecb40c0ac2c111bc76fa340:docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-01--noorder_refresh_request_invalidated_before_e3bb_70e.md:generic-api-key:38
+d04570c71c989e46787a96aa1b96aa0b1c456737:docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-27--standing_demo_false_negative_preflight_plumbing_source.md:generic-api-key:47
+d6688a3d296ff1dc2c6c32f92e8b6ea8bb00d3d5:program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_ipc_client_hmac_ts_unit.py:generic-api-key:170
+d8778aa9be9a066314e51a782ffa08faad5f6e9c:docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-01--noorder_refresh_request_invalidated_before_e3bb_8e7.md:generic-api-key:38
+e1309604e5f7c698e5705d04311f0a20fe586526:docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-30--execution_envelope_plan_freshness_review.md:generic-api-key:23
+e8cd6a294cab420e081c08fb81738612eb340477:docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-05--ref20_sprint_a_r3_round6_task_dag.md:generic-api-key:297
+e8cd6a294cab420e081c08fb81738612eb340477:docs/CCAgentWorkSpace/QA/workspace/reports/2026-05-04--ref20_sprint_a_r3_smoke_e2e.md:generic-api-key:498
+e8cd6a294cab420e081c08fb81738612eb340477:program_code/exchange_connectors/bybit_connector/control_api_v1/tests/replay/test_route_helpers_real_hmac_sign.py:generic-api-key:66
+fc0a78c22a8613fb1deb4caffb6bdb406cde9e6b:docs/CCAgentWorkSpace/Operator/2026-06-27--standing_demo_current_candidate_downstream_alignment_apply.md:generic-api-key:25
