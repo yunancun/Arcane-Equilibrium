@@ -39,7 +39,9 @@ fn execution_payload(
     let rid = req_id.to_string();
     let oid = order_id.to_string();
     encode_fields(&[
-        "11", &rid, &oid, // msgId, reqId, orderId
+        "11",
+        &rid,
+        &oid, // msgId, reqId, orderId
         // Contract: conId, symbol, secType, lastTradeDateOrContractMonth, strike, right,
         // multiplier, exchange, currency, localSymbol, tradingClass
         "756733",
@@ -91,8 +93,7 @@ fn commission_payload(exec_id: &str, commission: &str, currency: &str, pnl: &str
 fn order_status_payload(order_id: i64, status: &str, filled: &str, remaining: &str) -> Vec<u8> {
     let oid = order_id.to_string();
     encode_fields(&[
-        "3", &oid, status, filled, remaining, "412.35", "1000001", "0", "412.35", "0", "",
-        "412.35",
+        "3", &oid, status, filled, remaining, "412.35", "1000001", "0", "412.35", "0", "", "412.35",
     ])
 }
 
@@ -100,13 +101,36 @@ fn order_status_payload(order_id: i64, status: &str, filled: &str, remaining: &s
 fn open_order_payload(order_id: i64, action: &str, lmt: &str, tail: &[&str]) -> Vec<u8> {
     let oid = order_id.to_string();
     let mut fields: Vec<&str> = vec![
-        "5", &oid, // msgId, orderId
+        "5",
+        &oid, // msgId, orderId
         // Contract: conId, symbol, secType, lastTradeDateOrContractMonth, strike, right,
         // multiplier, exchange, currency, localSymbol, tradingClass
-        "756733", "SPY", "STK", "", "0", "", "", "ARCA", "USD", "SPY", "SPY",
+        "756733",
+        "SPY",
+        "STK",
+        "",
+        "0",
+        "",
+        "",
+        "ARCA",
+        "USD",
+        "SPY",
+        "SPY",
         // action, totalQuantity, orderType, lmtPrice, auxPrice, tif, ocaGroup, account,
         // openClose, origin, orderRef, clientId, permId
-        action, "100", "LMT", lmt, "", "DAY", "", "DU1234567", "O", "0", "", "0", "1000001",
+        action,
+        "100",
+        "LMT",
+        lmt,
+        "",
+        "DAY",
+        "",
+        "DU1234567",
+        "O",
+        "0",
+        "",
+        "0",
+        "1000001",
     ];
     fields.extend_from_slice(tail);
     encode_fields(&fields)
