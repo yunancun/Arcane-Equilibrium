@@ -22,11 +22,14 @@
 //!   - **readonly scope 的 order verb 結構性拒**：任何 order verb（paper submit/cancel/
 //!     replace、live submit、margin/short、options/cfd、transfer/account write）在
 //!     readonly envelope 下**無條件**拒——不看 limits、不看 epoch、不看簽發者。
-//!   - **INV-1 不受影響（dormant/DCE 姿態,同 attestation 模組）**：本模塊零 production
-//!     caller（驗證器存在 ≠ 有 caller）;**不** impl `ConnectPermitProvider`、**不**觸碰
-//!     `PermitToken`——production connect 路徑仍恆撞 `EnvelopeRequiredStub`。W8 全包以本
-//!     驗證器替換該 trait 位並吸收本切片（**共用同一驗證代碼路徑,禁兩套語義漂移**——同
-//!     W2「caller 與 consume 共路徑」原則）;在此之前 production 域零活化路徑不變。
+//!   - **INV-1 不受影響（R16 起部分解除 dormant）**：R16 mini-wiring 使
+//!     `ibkr_readonly_tws_client` 的 G4 entry（feature `ibkr_g4_contact` gated）成為
+//!     `check_readonly_contact` 首個 production caller——G4 readonly socket 線與 driver
+//!     permit 線是兩條獨立受審面;本模塊仍**不** impl `ConnectPermitProvider`、**不**觸碰
+//!     `PermitToken`——production connect（driver permit）路徑仍恆撞
+//!     `EnvelopeRequiredStub`,default build（feature off）本模塊依舊零 caller/DCE。W8 全包
+//!     以本驗證器替換該 trait 位並吸收本切片（**共用同一驗證代碼路徑,禁兩套語義漂移**——
+//!     同 W2「caller 與 consume 共路徑」原則）。
 //!   - **reconnect / scope 變更 = 重新活化**：nonce 單次消費使一份 envelope 至多支撐一次
 //!     接觸授權;斷線重連或 scope 變更必須換新 envelope（新 nonce）,無「續用舊授權」路徑。
 //!   - **移交契約（E2-F1）**：本入口=**活化時刻**裁決;per-operation 續用語義歸 W8 的
@@ -34,8 +37,10 @@
 //!     （第二次呼叫必 `NonceAlreadyConsumed`）。
 //!   - Bybit crypto_perp 不變;無 DB migration;不擴 IPC。
 
-// dormant 姿態（同 ibkr_tws_session_attestation）:W8a 期本模塊零 production caller,
-// 全部消費者在測試域;W8 接真 ConnectPermitProvider 位時移出。
+// dormant 姿態（R16 部分解除）:`check_readonly_contact`/`ActivationCheckPosture`/
+// `ActivationNonceLedger` 已有 production caller（G4 entry,feature `ibkr_g4_contact`
+// gated）;default build（feature off）該 caller 不編譯 → 本模塊仍整體無 caller,
+// allow(dead_code) 必須保留;W8 接真 ConnectPermitProvider 位時移出。
 #![allow(dead_code)]
 
 use std::collections::HashSet;

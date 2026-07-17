@@ -169,9 +169,10 @@ pub mod ibkr_tws_session_attestation;
 // IBKR W8a activation envelope 驗證器（readonly-scope 最小切片,AMD-2026-07-11-01 活化
 // 鐵律消費面）：types `ibkr_activation_envelope_v1` shape 校驗 + build SHA/revocation/
 // kill-switch epoch 姿態比對 + readonly order-verb 結構性拒 + seal≠活化 + nonce 原子消費
-//（Mutex 帳本,防 replay）。**只驗不發**（簽發=EA 跑道 Operator 動作）;零 production
-// caller（dormant,同 attestation 姿態）;不 impl ConnectPermitProvider、不觸 PermitToken——
-// INV-1 不受影響;W8 全包以本驗證器替換 permit trait 位並吸收（共路徑,禁兩套語義漂移）。
+//（Mutex 帳本,防 replay）。**只驗不發**（簽發=EA 跑道 Operator 動作）;R16 起首個
+// production caller = G4 readonly entry（feature `ibkr_g4_contact` gated;default build
+// 仍零 caller/DCE）;不 impl ConnectPermitProvider、不觸 PermitToken——INV-1 不受影響;
+// W8 全包以本驗證器替換 permit trait 位並吸收（共路徑,禁兩套語義漂移）。
 pub mod ibkr_activation_envelope_check;
 // IBKR B1 只讀 TWS 連接器（ADR-0048 / AMD-2026-07-08-01，G4 首次接觸）：connect handshake
 // + reqCurrentTime 最小首接觸；純 codec + generic driver + 3 層惰性 gate；唯一具體

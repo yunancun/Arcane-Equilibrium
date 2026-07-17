@@ -8,8 +8,9 @@
 //! 硬邊界：**無 production caller**——main.rs / boot 絕不 invoke 本 bin；`required-features
 //!   = ["ibkr_g4_contact"]` 使 default `cargo build` 完全不編譯它（socket 符號不入引擎
 //!   artifact）。真 connect 的 fail-closed gate 由 `g4_operator_triggered_first_contact`
-//!   內部強制（env APPLY → sealed re-verify → G4 approval → structural host/port），本 bin
-//!   只是薄殼觸發器 + dry-run 揭露面。
+//!   內部強制（env APPLY → sealed re-verify → G4 approval → structural host/port →
+//!   EA3 activation envelope 閘 Gate 5:nonce 原子消費,R16），本 bin 只是薄殼觸發器 +
+//!   dry-run 揭露面（EA3 兩姿態位只報 artifact 在位性,不 validate、不消費 nonce）。
 //! Owner: PA（設計）+ E3（安全鎖定）+ E1（實作）。
 
 #![cfg(feature = "ibkr_g4_contact")]
@@ -25,10 +26,13 @@ async fn main() -> ExitCode {
     // dry-run 揭露面：不接觸 socket，只讀 gate posture。
     let status = tws::g4_first_contact_gate_status();
     println!(
-        "[ibkr_g4_first_contact] gate: apply_env={} sealed_present={} approval_valid={} gate_ok={}",
+        "[ibkr_g4_first_contact] gate: apply_env={} sealed_present={} approval_valid={} \
+         envelope_present={} epochs_present={} gate_ok={}",
         status.apply_env_set,
         status.sealed_artifact_present,
         status.contact_approval_valid,
+        status.envelope_artifact_present,
+        status.epochs_artifact_present,
         status.gate_ok,
     );
 
@@ -38,7 +42,8 @@ async fn main() -> ExitCode {
     }
 
     // --contact：真 connect。fail-closed gate 由 g4_operator_triggered_first_contact 內部
-    // 強制（env APPLY==1 → sealed re-verify → G4 approval → structural host/port → connect）。
+    // 強制（env APPLY==1 → sealed re-verify → G4 approval → structural host/port →
+    // EA3 envelope 閘(Gate 5,nonce 原子消費) → connect）。
     match tws::g4_operator_triggered_first_contact().await {
         Ok(probe) => {
             println!("[ibkr_g4_first_contact] G4 FIRST CONTACT OK: {probe:?}");
