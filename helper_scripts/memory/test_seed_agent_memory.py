@@ -32,6 +32,8 @@ import seed_agent_memory as mod  # noqa: E402
 # （跨平台紅線 grep 防誤中，per memory feedback_cross_platform）。
 _FAKE_USER_PATH = "/" + "Users" + "/someone/.ssh/cfg"
 _FAKE_HOME_PATH = "/" + "home" + "/tester/x.env"
+_FAKE_POSTGRES_DSN = "postgres" + "://" + "service" + ":" + "pw" + "@dbhost:5432/trading_ai"
+_FAKE_POSTGRESQL_DSN = "postgres" + "ql://" + "service" + ":" + "pw" + "@h/db"
 
 _SAMPLE_MD = """# Memory Index
 
@@ -47,11 +49,13 @@ _SAMPLE_MD = """# Memory Index
 - [洩漏樣本](feedback_leak.md) — 內含 api_key 字樣應被攔
 - [路徑樣本](project_path_leak.md) — 提到 {fake_path} 應被攔
 - [簽名樣本](feedback_sign_leak.md) — hmac 與 signing_key 輪換筆記應被攔
-- [DSN 樣本](project_dsn_leak.md) — 連線串 postgres://redacted@h/db 應被攔
+- [DSN 樣本](project_dsn_leak.md) — 連線串 {fake_dsn} 應被攔
 
 ## External tool authority
 - [外部工具權威](feedback_external_tool_authority.md) — 整節排除
-""".replace("{fake_path}", _FAKE_USER_PATH)
+""".replace("{fake_path}", _FAKE_USER_PATH).replace(
+    "{fake_dsn}", _FAKE_POSTGRES_DSN
+)
 
 
 # ─────────────────────────── B 源解析 ───────────────────────────
@@ -153,8 +157,8 @@ class TestRecordIdAndSensitive:
             "private_key in slot 2",
             "X-BAPI-SIGN header mismatch",
             "x-bapi-sign 大小寫不敏感",
-            "dsn=postgres://redacted@dbhost:5432/trading_ai",
-            "dsn=postgresql://redacted@h/db",
+            f"dsn={_FAKE_POSTGRES_DSN}",
+            f"dsn={_FAKE_POSTGRESQL_DSN}",
         ],
     )
     def test_sensitive_hits(self, text):

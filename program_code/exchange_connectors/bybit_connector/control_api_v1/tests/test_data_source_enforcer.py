@@ -29,6 +29,11 @@ from app.perception_data_plane import (
 )
 
 
+def _bybit_https_url_with_port(port: int) -> str:
+    """Build hostile non-default-port fixtures without a credential-shaped literal."""
+    return f"https://api.bybit.com:{port}/v5/market/tickers"
+
+
 # ─────────────────────────────────────────────
 # 1. DataSourceTag Tests
 # ─────────────────────────────────────────────
@@ -178,6 +183,23 @@ class TestDataSourceClassifier:
         level, confidence, reason = result
         assert level == CognitiveLevel.FACT
 
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://api.bybit.com.evil.invalid/v5/market/tickers",
+            "https://api.bybit.com@evil.invalid/v5/market/tickers",
+            "https://evil.invalid/?next=https://api.bybit.com/v5/market/tickers",
+            "http://api.bybit.com/v5/market/tickers",
+            _bybit_https_url_with_port(8443),
+            "wss://api.bybit.com/v5/public/spot",
+            "https://stream.bybit.com/v5/public/spot",
+        ],
+    )
+    def test_bybit_fact_classification_requires_exact_official_origin(self, url):
+        result = DataSourceClassifier.classify_by_url_pattern(url)
+
+        assert result is None or result[0] != CognitiveLevel.FACT
+
     def test_classify_perplexity_url(self):
         """Perplexity URL → INFERENCE."""
         result = DataSourceClassifier.classify_by_url_pattern(
@@ -243,6 +265,62 @@ class TestDataSourceEnforcerBasic:
         # Verify stored
         stored_tag = enforcer.get_tag("response_001")
         assert stored_tag == tag
+
+    @pytest.mark.parametrize(
+        ("source_type", "url"),
+        [
+            (
+                DataSourceType.EXCHANGE_REST,
+                "https://api.bybit.com.evil.invalid/v5/market/tickers",
+            ),
+            (
+                DataSourceType.EXCHANGE_REST,
+                "https://api.bybit.com@evil.invalid/v5/market/tickers",
+            ),
+            (
+                DataSourceType.EXCHANGE_REST,
+                "http://api.bybit.com/v5/market/tickers",
+            ),
+            (
+                DataSourceType.EXCHANGE_REST,
+                _bybit_https_url_with_port(8443),
+            ),
+            (
+                DataSourceType.EXCHANGE_REST,
+                _bybit_https_url_with_port(0),
+            ),
+            (
+                DataSourceType.EXCHANGE_WS,
+                "https://api.bybit.com/v5/market/tickers",
+            ),
+            (
+                DataSourceType.EXCHANGE_REST,
+                "wss://stream.bybit.com/v5/public/spot",
+            ),
+            (
+                DataSourceType.EXCHANGE_REST,
+                "https://unrecognized.invalid/exchange-feed",
+            ),
+        ],
+    )
+    def test_nonempty_unrecognized_or_mismatched_url_cannot_be_elevated_to_fact(
+        self,
+        source_type,
+        url,
+    ):
+        enforcer = DataSourceEnforcer()
+
+        tag = enforcer.validate_and_tag(
+            data_id="hostile_source",
+            source_type=source_type,
+            source_url_or_api=url,
+            cognitive_level=CognitiveLevel.FACT,
+            confidence=0.99,
+        )
+
+        assert tag.cognitive_level == CognitiveLevel.INFERENCE
+        assert tag.confidence <= 0.50
+        assert "conservative" in tag.tag_reason.lower()
 
     def test_validate_and_tag_with_override(self):
         """Provide explicit cognitive_level override."""

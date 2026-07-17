@@ -57,7 +57,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from app.auth import AuthenticatedActor  # noqa: E402
 from app.main_legacy import current_actor  # noqa: E402
-from app.replay_routes import replay_router  # noqa: E402
+from app.replay_routes import _safe_signature_fail_mode, replay_router  # noqa: E402
 from replay import manifest_signer as _ms  # noqa: E402
 
 
@@ -105,6 +105,27 @@ def _write_secrets_file(tmp_secrets_dir: Path, env_label: str, key_hex: str) -> 
     key_path.write_text(key_hex + "\n", encoding="ascii")
     os.chmod(key_path, 0o600)
     return key_path
+
+
+@pytest.mark.parametrize(
+    "allowed_mode",
+    ["key_missing", "key_expired", "signature_mismatch", "manifest_hash_mismatch"],
+)
+def test_signature_fail_mode_returns_canonical_constant(allowed_mode: str) -> None:
+    """Validated fail modes must not return the exception-derived string object."""
+    exception_derived = bytearray(allowed_mode, "ascii").decode("ascii")
+    assert exception_derived == allowed_mode
+
+    result = _safe_signature_fail_mode(ValueError(exception_derived))
+
+    assert result == allowed_mode
+    assert result is not exception_derived
+
+
+def test_signature_fail_mode_redacts_unknown_exception_text() -> None:
+    marker = "signature_mismatch:private-key-material"
+
+    assert _safe_signature_fail_mode(ValueError(marker)) == "verification_failed"
 
 
 # ─── Case 1: dev profile + TEST_KEY env still works ───────────────────

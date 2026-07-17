@@ -19,6 +19,8 @@ import os
 from contextlib import contextmanager
 from typing import Optional
 
+from .error_sanitize import log_safe_exception
+
 logger = logging.getLogger(__name__)
 
 
@@ -90,8 +92,8 @@ def _init_pool():
         logger.info("PG pool initialized (min=%d, max=%d) / PG 連接池已初始化", _POOL_MIN, _POOL_MAX)
     except ImportError:
         logger.debug("psycopg2 not installed — DB pool disabled / psycopg2 未安裝")
-    except Exception as e:
-        logger.warning("PG pool init failed: %s — fallback to per-request / PG 連接池初始化失敗，回退到每請求連接", e)
+    except Exception as exc:
+        log_safe_exception(logger, "db_pool_init", exc, level=logging.WARNING)
 
 
 def get_conn():
@@ -107,8 +109,8 @@ def get_conn():
         return None
     try:
         return _pool.getconn()
-    except Exception as e:
-        logger.debug("Pool getconn failed: %s", e)
+    except Exception as exc:
+        log_safe_exception(logger, "db_pool_get_connection", exc, level=logging.DEBUG)
         return None
 
 
@@ -128,7 +130,7 @@ def put_conn(conn) -> None:
         conn.rollback()
     except Exception as exc:
         close_conn = True
-        logger.warning("PG pooled connection rollback failed; discarding connection: %s", exc)
+        log_safe_exception(logger, "db_pool_connection_rollback", exc, level=logging.WARNING)
     try:
         _pool.putconn(conn, close=close_conn)
     except TypeError:
@@ -137,10 +139,10 @@ def put_conn(conn) -> None:
             if close_conn and hasattr(conn, "close"):
                 conn.close()
             _pool.putconn(conn)
-        except Exception:
-            logger.debug("Pool putconn failed after rollback handling", exc_info=True)
-    except Exception:
-        logger.debug("Pool putconn failed after rollback handling", exc_info=True)
+        except Exception as exc:
+            log_safe_exception(logger, "db_pool_put_connection_fallback", exc, level=logging.DEBUG)
+    except Exception as exc:
+        log_safe_exception(logger, "db_pool_put_connection", exc, level=logging.DEBUG)
 
 
 @contextmanager
@@ -175,5 +177,6 @@ def pool_stats() -> dict:
             "min_connections": _POOL_MIN,
             "max_connections": _POOL_MAX,
         }
-    except Exception as e:
-        return {"available": False, "reason": str(e)}
+    except Exception as exc:
+        log_safe_exception(logger, "db_pool_stats", exc)
+        return {"available": False, "reason": "pool_unavailable"}

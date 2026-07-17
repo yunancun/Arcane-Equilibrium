@@ -178,6 +178,11 @@ def _valid_account_status() -> dict[str, Any]:
             "as_of_ms": 0,
             "source_report_hash_present": False,
         },
+        # account_status 的 session 腿在 Rust(`account_status_summary`)仍取 raw
+        # `IbkrSessionAttestationV1::default()`:contract_id/source_version 為 ""/0(R17
+        # 只誠實化 authorization_status 腿,此處不同步)。blockers 鏡射 `validate(0)` 對
+        # default 的完整裁決(含 contract/version mismatch 兩項);鍵集嚴格鏡射該投影
+        # (無 data_tier/entitlements/gateway_started_at_ms 等鍵——那些欄位不在此 wire)。
         "session_attestation": {
             "expected_contract_id": "ibkr_session_attestation_v1",
             "contract_id": "",
@@ -188,6 +193,22 @@ def _valid_account_status() -> dict[str, Any]:
                 "contract_id_mismatch",
                 "source_version_mismatch",
                 "status_blocked",
+                "host_not_loopback",
+                "port_not_paper_gateway_default",
+                "missing_account_fingerprint",
+                "missing_process_identity",
+                "unknown_or_live_gateway_mode",
+                "missing_secret_slot_fingerprint",
+                "secret_slot_mode_denied",
+                "live_secret_present_or_unknown",
+                "missing_api_server_version",
+                "missing_data_tier",
+                "missing_data_entitlements_fingerprint",
+                "market_data_entitlement_purchase_not_denied",
+                "missing_gateway_startup_time",
+                "missing_raw_artifact_hash",
+                "invalid_attestation_window",
+                "stale_attestation",
             ],
             "account_fingerprint_present": False,
             "account_fingerprint_is_live": False,
@@ -202,10 +223,6 @@ def _valid_account_status() -> dict[str, Any]:
             "live_secret_absent_or_empty": False,
             "env_var_credential_fallback_used": False,
             "api_server_version_present": False,
-            "data_tier": "unknown",
-            "entitlements_fingerprint_present": False,
-            "market_data_entitlement_purchase_denied": False,
-            "gateway_started_at_ms": 0,
             "attested_at_ms": 0,
             "expires_at_ms": 0,
             "raw_artifact_hash_present": False,

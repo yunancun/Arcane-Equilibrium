@@ -96,16 +96,27 @@ function safeRedirectTarget(value) {
   if (!value.startsWith('/') || value.startsWith('//') || value.includes('\\')) {
     return '';
   }
-  let path = value;
+  let target;
   try {
-    path = new URL(value, window.location.origin).pathname;
+    target = new URL(value, window.location.origin);
   } catch (_) {
     return '';
   }
-  if (path === '/login' || path.startsWith('/static/')) {
-    return '/';
+
+  // 跳轉目標只由可信常量重建；即使解析完成也不直接回傳呼叫方 URL，避免未來解析器邊界案例重新形成 open redirect。
+  if (target.origin !== window.location.origin) return '';
+  switch (target.pathname) {
+    case '/': return '/';
+    case '/gui': return '/gui';
+    case '/console': return '/console';
+    case '/console/legacy': return '/console/legacy';
+    case '/trading':
+      if (target.searchParams.get('embed') === '1') return '/trading?embed=1';
+      return '/trading';
+    case '/login':
+    default:
+      return '/';
   }
-  return value;
 }
 
 function loginRedirectTarget() {

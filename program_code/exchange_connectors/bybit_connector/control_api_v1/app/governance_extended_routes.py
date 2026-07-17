@@ -22,6 +22,7 @@ from fastapi import Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from . import governance_routes as _gov
+from .error_sanitize import log_safe_exception
 from .governance_routes import (
     GovernanceResponse,
     PaperLiveGateEvaluateRequest,
@@ -86,7 +87,7 @@ def approve_audit_change(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Error approving audit change %s: %s", change_id, e)
+        log_safe_exception(logger, "governance_audit_change_approve", e)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -124,7 +125,7 @@ def reject_audit_change(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Error rejecting audit change %s: %s", change_id, e)
+        log_safe_exception(logger, "governance_audit_change_reject", e)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -169,7 +170,7 @@ def dismiss_all_pending(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Error dismissing all pending: %s", e)
+        log_safe_exception(logger, "governance_audit_pending_dismiss", e)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -234,7 +235,7 @@ def get_active_leases(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Error getting leases: %s", e)
+        log_safe_exception(logger, "governance_leases_read", e)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -278,7 +279,7 @@ def get_governance_events(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Error retrieving governance events: %s", e)
+        log_safe_exception(logger, "governance_events_read", e)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -302,14 +303,20 @@ def get_learning_tier_status(
 
     try:
         tier_status = hub.get_learning_tier_status()
+        if tier_status.get("error"):
+            logger.warning("operation=learning_tier_status backend_error=true")
+            tier_status = {
+                "available": False,
+                "error": "learning_tier_status_unavailable",
+            }
         return GovernanceResponse.success(
             data=tier_status,
             message="learning_tier_status_retrieved"
         )
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error("Error retrieving learning tier status: %s", e)
+    except Exception as exc:
+        log_safe_exception(logger, "learning_tier_status", exc)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -355,7 +362,7 @@ def promote_learning_tier(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Error promoting learning tier: %s", e)
+        log_safe_exception(logger, "learning_tier_promote", e)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -432,7 +439,7 @@ def governance_health_check(
 
         return GovernanceResponse.success(data=health, message="health_check")
     except Exception as e:
-        logger.error("Error in health check: %s", e)
+        log_safe_exception(logger, "governance_health_check", e)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -459,7 +466,7 @@ def get_paper_live_gate_status(
         status_info = raw_status.to_dict() if raw_status is not None and hasattr(raw_status, 'to_dict') else {"status": "not_evaluated"}
         return GovernanceResponse.success(data=status_info, message="paper_live_gate_status")
     except Exception as e:
-        logger.error("Error getting PaperLiveGate status: %s", e)
+        log_safe_exception(logger, "paper_live_gate_status", e)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -526,7 +533,12 @@ def evaluate_paper_live_gate(
                     auto_approve=True,
                 )
             except Exception as e:
-                logger.warning("Failed to record PaperLiveGate evaluation to ChangeAuditLog: %s", e)
+                log_safe_exception(
+                    logger,
+                    "paper_live_gate_evaluation_audit",
+                    e,
+                    level=logging.WARNING,
+                )
 
         return GovernanceResponse.success(
             data=result_dict,
@@ -535,7 +547,7 @@ def evaluate_paper_live_gate(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Error evaluating PaperLiveGate: %s", e)
+        log_safe_exception(logger, "paper_live_gate_evaluate", e)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -594,6 +606,6 @@ def get_h0_gate_status(
         }
     except HTTPException:
         raise
-    except Exception:
-        logger.error("Error getting H0Gate status", exc_info=True)
+    except Exception as exc:
+        log_safe_exception(logger, "h0_gate_status", exc)
         raise HTTPException(status_code=500, detail="Internal server error")

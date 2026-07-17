@@ -21,6 +21,7 @@ from typing import Any
 from fastapi import Depends, HTTPException, Query
 
 from . import main_legacy as base
+from .error_sanitize import log_safe_exception
 from .closed_pnl_pagination import (
     _CLOSED_PNL_ALL_HISTORY_DAYS,
     _CLOSED_PNL_MAX_WINDOW_MS,
@@ -56,6 +57,30 @@ _CLOSED_PNL_DEGRADED_SEC = 5 * 60
 _CLOSED_PNL_BYBIT_FAILURES: list[float] = []
 _CLOSED_PNL_FAILURE_LOCK = RLock()
 _GUI_READ_STATEMENT_TIMEOUT_MS = int(os.getenv("OPENCLAW_GUI_READ_STATEMENT_TIMEOUT_MS", "1500"))
+
+
+_PUBLIC_DEMO_ERROR_CODES = {
+    "engine_offline",
+    "ipc_close_all_failed",
+    "orphan_sweep_query_failed",
+    "orphan_close_failed",
+    "order_sweep_query_demo_failed",
+    "order_sweep_demo_failed",
+    "demo_pause_failed",
+    "demo_close_failed",
+}
+
+
+def _public_demo_errors(errors: list[str]) -> list[str] | None:
+    """Return only stable error codes from the Demo close/stop pipeline."""
+    public: list[str] = []
+    for raw in errors:
+        value = str(raw or "")
+        if value in _PUBLIC_DEMO_ERROR_CODES or value.startswith("demo_verify_residual:"):
+            public.append(value)
+        else:
+            public.append("demo_operation_failed")
+    return public or None
 
 
 def _demo_fast_balance_snapshot_unavailable(reason: str) -> dict[str, Any]:
@@ -155,9 +180,9 @@ def _get_rust_client():
         _BYBIT_CLIENT_AVAILABLE = True
         logger.info("BybitClient initialized (httpx) / BybitClient 已初始化（httpx）")
         return _BYBIT_CLIENT
-    except Exception as e:
+    except Exception as exc:
         _BYBIT_CLIENT_AVAILABLE = False
-        logger.warning(f"BybitClient unavailable: {e}")
+        log_safe_exception(logger, "demo_bybit_client_init", exc, level=logging.WARNING)
         return None
 
 
@@ -187,8 +212,8 @@ async def get_ai_consultation_status(
             "ai_consultation_enabled": ORCHESTRATOR._ai_consultation_enabled,
             "analysis_result": result,
         })
-    except Exception:
-        logger.exception("AI status check error / AI 状态检查异常")
+    except Exception as exc:
+        log_safe_exception(logger, "ai_consultation_status", exc)
         raise HTTPException(status_code=500, detail="Internal error / 内部错误")
 
 
@@ -254,8 +279,8 @@ async def get_demo_balance(
             demo_state = reader.get_paper_state(engine="demo") or {}
             if demo_state:
                 return _envelope(_paper_state_balance_payload(demo_state))
-        except Exception:
-            logger.debug("Demo fast balance snapshot unavailable", exc_info=True)
+        except Exception as exc:
+            log_safe_exception(logger, "demo_fast_balance_snapshot", exc, level=logging.DEBUG)
         return _envelope(_demo_fast_balance_snapshot_unavailable(
             "Demo Rust paper_state snapshot unavailable; fast balance does not "
             "fall back to Bybit wallet REST"
@@ -269,7 +294,7 @@ async def get_demo_balance(
         wallet = await asyncio.to_thread(rc.refresh_balance)
     except Exception as exc:
         # WP-05 Real Fix
-        logger.exception("Bybit balance fetch failed")
+        log_safe_exception(logger, "demo_bybit_balance_fetch", exc)
         from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
         raise HTTPException(
             status_code=502,
@@ -496,8 +521,8 @@ def _attach_owner_strategy(positions: list, engine: str) -> list:
                     p["frozen_reason"] = "dust_below_min_notional"
                     p["min_notional"] = min_notional
                     p["est_notional"] = est_notional
-            except Exception:
-                logger.exception("unmapped dust enrichment failed for symbol=%s", sym)
+            except Exception as exc:
+                log_safe_exception(logger, "demo_unmapped_dust_enrichment", exc)
             continue
         p["owner_strategy"] = owner
         # Only synthetic owners get dust-status enrichment; real strategy names stay lean.
@@ -517,14 +542,10 @@ def _attach_owner_strategy(positions: list, engine: str) -> list:
             p["frozen_reason"] = _dust_status(owner, est_notional, min_notional)
             p["min_notional"] = min_notional
             p["est_notional"] = est_notional
-        except Exception:
+        except Exception as exc:
             # Fail-soft — leave whatever was attached so far; do not break endpoint.
             # Fail-soft — 保留已附加欄位，不中斷 endpoint。
-            logger.exception(
-                "owner_strategy dust enrichment failed for symbol=%s owner=%s",
-                sym,
-                owner,
-            )
+            log_safe_exception(logger, "demo_owner_dust_enrichment", exc)
     return positions
 
 
@@ -546,8 +567,8 @@ async def get_demo_positions(
                     "list": positions,
                     "count": len(positions),
                 })
-        except Exception:
-            logger.debug("Demo fast positions snapshot unavailable", exc_info=True)
+        except Exception as exc:
+            log_safe_exception(logger, "demo_fast_positions_snapshot", exc, level=logging.DEBUG)
 
     rc = _get_rust_client()
     if rc is None:
@@ -560,7 +581,7 @@ async def get_demo_positions(
         return _envelope({"source": "rust_engine", "list": positions, "count": len(positions)})
     except Exception as exc:
         # WP-05 Real Fix
-        logger.exception("Bybit positions fetch failed")
+        log_safe_exception(logger, "demo_bybit_positions_fetch", exc)
         from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
         raise HTTPException(
             status_code=502,
@@ -601,7 +622,7 @@ async def get_demo_orders(
         })
     except Exception as exc:
         # WP-05 Real Fix
-        logger.exception("Bybit orders fetch failed")
+        log_safe_exception(logger, "demo_bybit_orders_fetch", exc)
         from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
         raise HTTPException(
             status_code=502,
@@ -648,7 +669,7 @@ async def post_demo_close_position(
                         hint_qty = size
                     break
         except Exception as exc:
-            logger.warning("demo close: position hint lookup failed for %s: %s", sym, exc)
+            log_safe_exception(logger, "demo_position_close_hint_lookup", exc, level=logging.WARNING)
 
     # If no position found anywhere (neither paper nor exchange), bail early.
     # 紙盤和交易所都沒有這個倉位，直接返回 404。
@@ -669,7 +690,7 @@ async def post_demo_close_position(
         result = await _ipc_command("close_position", ipc_params)
     except Exception as exc:
         # WP-05 Real Fix
-        logger.exception("IPC close_position failed for %s", sym)
+        log_safe_exception(logger, "demo_position_close_ipc", exc)
         from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
         raise HTTPException(
             status_code=502,
@@ -712,8 +733,8 @@ async def post_demo_close_all_positions(
     except Exception as exc:
         # P2-WP05-FUP-1：client-facing error 用 stable reason_code，
         # 例外明細只進 log。
-        logger.error("IPC close_all_positions failed: %s", exc)
-        errors.append(f"ipc_close_all: {exc}")
+        log_safe_exception(logger, "demo_close_all_positions", exc)
+        errors.append("ipc_close_all_failed")
         result = {"error": "ipc_close_all_failed"}
     # Orphan sweep: close exchange positions not tracked in paper_state.
     # IPC close_all only iterates paper_state — orphan positions (e.g. opened
@@ -741,7 +762,7 @@ async def post_demo_close_all_positions(
         "partial_failure": partial_failure,
         "close_result": result,
         "orphan_sweep": orphan_result,
-        "errors": errors if errors else None,
+        "errors": _public_demo_errors(errors),
     })
 
 
@@ -790,8 +811,8 @@ async def _sweep_demo_orphan_positions(errors: list[str]) -> dict:
         positions = await asyncio.to_thread(rc.get_positions, "linear") or []
     except Exception as exc:
         # P2-WP05-FUP-1：client 返 stable reason_code，例外只進 log。
-        logger.warning("Orphan sweep: get_positions failed: %s", exc)
-        errors.append(f"orphan_sweep_query: {exc}")
+        log_safe_exception(logger, "demo_orphan_position_query", exc)
+        errors.append("orphan_sweep_query_failed")
         return {"skipped": True, "reason": "orphan_sweep_query_failed"}
 
     open_positions = [p for p in positions if float(p.get("size") or p.get("qty") or 0) > 0]
@@ -819,8 +840,8 @@ async def _sweep_demo_orphan_positions(errors: list[str]) -> dict:
                 sym, size, ipc_params["is_long"],
             )
         except Exception as exc:
-            logger.warning("Orphan sweep: close_position %s failed: %s", sym, exc)
-            errors.append(f"orphan_{sym}: {exc}")
+            log_safe_exception(logger, "demo_orphan_position_close", exc)
+            errors.append("orphan_close_failed")
 
     return {"swept": swept, "found": len(open_positions)}
 
@@ -859,14 +880,14 @@ def _sweep_orphan_orders(rc: Any, env_label: str, errors: list[str]) -> dict:
     except Exception as exc:
         # Query failure is non-fatal — still attempt the cancel-all call.
         # 查詢失敗不致命 — 仍嘗試 cancel-all。
-        logger.warning("%s order sweep: get_active_orders failed: %s", env_label, exc)
-        errors.append(f"order_sweep_query_{env_label}: {exc}")
+        log_safe_exception(logger, f"{env_label}_orphan_order_query", exc)
+        errors.append(f"order_sweep_query_{env_label}_failed")
     try:
         cancelled = rc.cancel_all_orders("linear", settle_coin="USDT")
     except Exception as exc:
         # P2-WP05-FUP-1：client 看 stable code，例外明細只進 log。
-        logger.warning("%s order sweep: cancel-all failed: %s", env_label, exc)
-        errors.append(f"order_sweep_{env_label}: {exc}")
+        log_safe_exception(logger, f"{env_label}_orphan_order_cancel", exc)
+        errors.append(f"order_sweep_{env_label}_failed")
         return {
             "skipped": True,
             "reason": "order_sweep_cancel_all_failed",
@@ -951,9 +972,7 @@ async def _verify_account_clean(
             positions = await asyncio.to_thread(rc.get_positions, "linear") or []
             orders = await asyncio.to_thread(rc.get_active_orders, "linear") or []
         except Exception as exc:
-            logger.warning(
-                "%s verify poll attempt %d exception: %s", env_label, attempt, exc,
-            )
+            log_safe_exception(logger, f"{env_label}_account_clean_verify", exc)
             await asyncio.sleep(interval)
             continue
         last_positions = [
@@ -1012,7 +1031,7 @@ async def post_demo_session_start(
     try:
         result = await _ipc_command("resume_paper", {"engine": "demo"})
     except Exception as exc:
-        logger.warning("IPC resume_paper (demo) failed (may already be running): %s", exc)
+        log_safe_exception(logger, "demo_session_start_resume", exc, level=logging.WARNING)
         result = {}
     return _envelope({
         "message": "Demo engine started / Demo 引擎已啟動",
@@ -1035,7 +1054,7 @@ async def post_demo_session_pause(
         result = await _ipc_command("pause_paper", {"engine": "demo"})
     except Exception as exc:
         # WP-05 Real Fix
-        logger.exception("IPC pause (demo) failed")
+        log_safe_exception(logger, "demo_session_pause_ipc", exc)
         from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
         raise HTTPException(
             status_code=502,
@@ -1064,7 +1083,7 @@ async def post_demo_session_resume(
         result = await _ipc_command("resume_paper", {"engine": "demo"})
     except Exception as exc:
         # WP-05 Real Fix
-        logger.exception("IPC resume (demo) failed")
+        log_safe_exception(logger, "demo_session_resume_ipc", exc)
         from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
         raise HTTPException(
             status_code=502,
@@ -1106,8 +1125,8 @@ async def post_demo_session_stop(
         try:
             pause_result = await _ipc_command("pause_paper", {"engine": "demo"})
         except Exception as e:
-            errors.append(f"demo_pause: {e}")
-            logger.error("IPC pause_paper (demo) failed: %s", e)
+            errors.append("demo_pause_failed")
+            log_safe_exception(logger, "demo_session_pause", e)
         # Phase 1 — Cancel all pending orders (limits / TP / SL / conditional)
         # via REST settleCoin scope BEFORE close_all to avoid TP/SL triggering
         # during the close-position window.
@@ -1118,8 +1137,8 @@ async def post_demo_session_stop(
         try:
             close_result = await _ipc_command("close_all_positions", {"engine": "demo"})
         except Exception as e:
-            errors.append(f"demo_close: {e}")
-            logger.error("IPC close_all_positions (demo) failed: %s", e)
+            errors.append("demo_close_failed")
+            log_safe_exception(logger, "demo_session_close_positions", e)
         # Phase 3 — Orphan position sweep: positions that exist on Bybit but
         # not in paper_state (e.g. opened externally) are caught here.
         # 第三步：孤兒倉位清掃，平掉交易所有但 paper_state 沒有的倉位。
@@ -1156,7 +1175,7 @@ async def post_demo_session_stop(
         "orphan_sweep": orphan_result,
         "demo_pause": pause_result,
         "verify": verify_result,
-        "errors": errors if errors else None,
+        "errors": _public_demo_errors(errors),
         "session": {"session_state": "stopped"},
     })
 
@@ -1255,8 +1274,8 @@ async def get_demo_fills(
                 "next_offset": offset + len(fills) if has_more else None,
                 "source": "pg_trading_fills",
             })
-        except Exception as e:
-            logger.warning("PG demo fills query failed, falling back to Bybit API: %s", e)
+        except Exception as exc:
+            log_safe_exception(logger, "demo_fills_pg_query", exc, level=logging.WARNING)
         finally:
             try:
                 db_pool.put_conn(conn)
@@ -1287,7 +1306,7 @@ async def get_demo_fills(
         })
     except Exception as exc:
         # WP-05 Real Fix
-        logger.exception("Bybit fills fetch failed")
+        log_safe_exception(logger, "demo_bybit_fills_fetch", exc)
         from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
         raise HTTPException(
             status_code=502,
@@ -1494,7 +1513,7 @@ async def get_demo_closed_pnl(
             payload.update(failure_state)
             return _envelope(payload)
         except Exception as pg_exc:
-            logger.exception("Bybit closed-pnl and PG fallback both failed")
+            log_safe_exception(logger, "demo_closed_pnl_pg_fallback", pg_exc)
             from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
             raise HTTPException(
                 status_code=502,
@@ -1515,7 +1534,14 @@ async def get_demo_pnl_series(
 
     from .pnl_series import fetch_pnl_series  # noqa: PLC0415
 
-    return _envelope(fetch_pnl_series(["demo"], range_key=range_key, bucket_sec=bucket_sec))
+    payload = fetch_pnl_series(["demo"], range_key=range_key, bucket_sec=bucket_sec)
+    if not payload.get("available") and payload.get("reason") not in {
+        "no_engine_modes",
+        "pg_unavailable",
+        "pnl_series_unavailable",
+    }:
+        payload = {**payload, "reason": "pnl_series_unavailable"}
+    return _envelope(payload)
 
 
 @phase2_router.get("/demo/metrics")
@@ -1548,8 +1574,8 @@ async def get_demo_metrics(
                     full = compute_full_metrics({**rust_state, "fills": fills}, engine_mode="demo")
                 else:
                     full = _demo_snapshot_metrics_payload()
-    except Exception:
-        logger.debug("Demo rust metrics fallback unavailable", exc_info=True)
+    except Exception as exc:
+        log_safe_exception(logger, "demo_rust_metrics_fallback", exc, level=logging.DEBUG)
 
     db_metrics = fetch_db_true_metrics(["demo"], edge_engine_modes=["demo"], window_days=7)
     total_ai_cost = _fetch_total_ai_cost_30d_safe()
@@ -1576,6 +1602,6 @@ def _fetch_total_ai_cost_30d_safe() -> float | None:
         from .paper_trading_ai_cost_routes import fetch_total_ai_cost_30d
 
         return fetch_total_ai_cost_30d()
-    except Exception:
-        logger.debug("AI cost lookup failed for demo metrics", exc_info=True)
+    except Exception as exc:
+        log_safe_exception(logger, "demo_ai_cost_lookup", exc, level=logging.DEBUG)
         return None

@@ -273,7 +273,8 @@ def test_dsn_builds_from_discrete_env(monkeypatch):
     monkeypatch.setenv("POSTGRES_HOST", "10.0.0.5")
     monkeypatch.setenv("POSTGRES_PORT", "6543")
     monkeypatch.setenv("POSTGRES_DB", "trade")
-    assert PG.resolve_report_dsn() == "postgresql://redacted@10.0.0.5:6543/trade"
+    expected = "postgresql://" + "svc" + ":" + "pw" + "@10.0.0.5:6543/trade"
+    assert PG.resolve_report_dsn() == expected
 
 
 def test_dsn_host_port_defaults(monkeypatch):
@@ -283,7 +284,8 @@ def test_dsn_host_port_defaults(monkeypatch):
     monkeypatch.setenv("POSTGRES_USER", "u")
     monkeypatch.setenv("POSTGRES_PASSWORD", "p")
     monkeypatch.setenv("POSTGRES_DB", "d")
-    assert PG.resolve_report_dsn() == "postgresql://redacted@127.0.0.1:5432/d"
+    expected = "postgresql://" + "u" + ":" + "p" + "@127.0.0.1:5432/d"
+    assert PG.resolve_report_dsn() == expected
 
 
 def test_dsn_loads_missing_password_from_secrets_env(monkeypatch, tmp_path):
@@ -311,7 +313,10 @@ def test_dsn_loads_missing_password_from_secrets_env(monkeypatch, tmp_path):
     monkeypatch.setenv("POSTGRES_USER", "u")
     monkeypatch.setenv("POSTGRES_DB", "d")
 
-    assert PG.resolve_report_dsn() == "postgresql://redacted@127.0.0.1:5432/d"
+    expected = (
+        "postgresql://" + "u" + ":" + "secret=pw" + "@127.0.0.1:5432/d"
+    )
+    assert PG.resolve_report_dsn() == expected
     assert "POSTGRES_HOST" not in os.environ
 
 
@@ -329,4 +334,5 @@ def test_dsn_does_not_override_existing_password(monkeypatch, tmp_path):
     monkeypatch.setenv("POSTGRES_PASSWORD", "env_pw")
     monkeypatch.setenv("POSTGRES_DB", "d")
 
-    assert PG.resolve_report_dsn() == "postgresql://redacted@127.0.0.1:5432/d"
+    expected = "postgresql://" + "u" + ":" + "env_pw" + "@127.0.0.1:5432/d"
+    assert PG.resolve_report_dsn() == expected

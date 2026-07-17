@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import os
 import sys
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -397,6 +397,29 @@ def test_phase4_weekly_review_latest_route_fail_soft(_mock_pool, client: TestCli
     body = resp.json()
     assert body["ok"] is False
     assert body["review"] is None
+
+
+def test_phase4_weekly_review_exception_is_opaque_to_client_and_logs(
+    client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    canary = "trace-canary /srv/private.py SELECT secret FROM credentials"
+    conn = MagicMock()
+    cursor = conn.cursor.return_value.__enter__.return_value
+    cursor.execute.side_effect = RuntimeError(canary)
+
+    with patch("app.db_pool.get_conn", return_value=conn):
+        resp = client.get("/api/v1/phase4/weekly_review/latest")
+
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "ok": False,
+        "error": "weekly_review_unavailable",
+        "review": None,
+    }
+    assert canary not in resp.text
+    assert canary not in caplog.text
+    assert "operation=phase4_weekly_review_latest" in caplog.text
+    assert "exception_type=RuntimeError" in caplog.text
 
 
 def test_phase4_weekly_review_approve_negative_week_iso_validates(client: TestClient) -> None:

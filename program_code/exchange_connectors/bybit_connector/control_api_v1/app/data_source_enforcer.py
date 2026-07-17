@@ -28,6 +28,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
+from urllib.parse import urlsplit
 
 from .perception_data_plane import (
     CognitiveLevel,
@@ -173,44 +174,141 @@ class DataSourceClassifier:
 
         This allows fine-grained classification beyond source_type.
         """
-        url_lower = url.lower()
+        local_indicator_prefix = "local_indicator://"
+        if (
+            isinstance(url, str)
+            and url.startswith(local_indicator_prefix)
+            and url.removeprefix(local_indicator_prefix)
+            and url == url.strip()
+        ):
+            return (
+                CognitiveLevel.FACT,
+                0.95,
+                "Local indicator source = FACT",
+            )
+        try:
+            parsed = urlsplit(url)
+            scheme = parsed.scheme.lower()
+            hostname = (parsed.hostname or "").lower()
+            port = parsed.port
+        except (TypeError, ValueError):
+            return None
+
+        # URL userinfo 容易混淆實際 authority，也可能把憑證帶進 audit reason。
+        if not hostname or parsed.username is not None or parsed.password is not None:
+            return None
 
         # Bybit official API
-        if "api.bybit.com" in url_lower or "stream.bybit.com" in url_lower:
+        bybit_origin = (scheme, hostname, 443 if port is None else port)
+        if bybit_origin in {
+            ("https", "api.bybit.com", 443),
+            ("wss", "stream.bybit.com", 443),
+        }:
             return (
                 CognitiveLevel.FACT,
                 0.99,
-                f"Official Bybit API ({url}) = FACT",
+                f"Official Bybit API ({scheme}://{hostname}) = FACT",
             )
 
+        default_web_port = {"http": 80, "https": 443}.get(scheme)
+        if default_web_port is None or port not in {None, default_web_port}:
+            return None
+
+        def is_domain(domain: str) -> bool:
+            return hostname == domain or hostname.endswith(f".{domain}")
+
         # Perplexity
-        if "perplexity" in url_lower:
+        if is_domain("perplexity.com"):
             return (
                 CognitiveLevel.INFERENCE,
                 0.75,
-                f"Perplexity search ({url}) = INFERENCE",
+                f"Perplexity search ({scheme}://{hostname}) = INFERENCE",
             )
 
         # DuckDuckGo, Google, other public search
-        if any(x in url_lower for x in ["duckduckgo", "google", "bing"]):
+        if any(
+            is_domain(domain)
+            for domain in ("duckduckgo.com", "google.com", "bing.com")
+        ):
             return (
                 CognitiveLevel.INFERENCE,
                 0.65,
-                f"Public search engine ({url}) = INFERENCE",
+                f"Public search engine ({scheme}://{hostname}) = INFERENCE",
             )
 
         # News sites (conservative: inference)
-        if any(x in url_lower for x in [
-            "news", "reuters", "bloomberg", "cnn", "bbc"
-        ]):
+        if any(
+            is_domain(domain)
+            for domain in (
+                "reuters.com",
+                "bloomberg.com",
+                "cnn.com",
+                "bbc.com",
+                "bbc.co.uk",
+            )
+        ):
             return (
                 CognitiveLevel.INFERENCE,
                 0.60,
-                f"News source ({url}) = INFERENCE",
+                f"News source ({scheme}://{hostname}) = INFERENCE",
             )
 
         # No specific pattern matched
         return None
+
+    @staticmethod
+    def url_matches_declared_source_type(
+        source_type: DataSourceType,
+        url: str,
+    ) -> bool:
+        """Return whether a recognized URL belongs to its declared source type."""
+        local_indicator_prefix = "local_indicator://"
+        if (
+            isinstance(url, str)
+            and url.startswith(local_indicator_prefix)
+            and url.removeprefix(local_indicator_prefix)
+            and url == url.strip()
+        ):
+            return source_type == DataSourceType.LOCAL_INDICATOR
+        try:
+            parsed = urlsplit(url)
+            scheme = parsed.scheme.lower()
+            hostname = (parsed.hostname or "").lower()
+            port = parsed.port
+        except (TypeError, ValueError):
+            return False
+        if not hostname or parsed.username is not None or parsed.password is not None:
+            return False
+
+        origin = (scheme, hostname, 443 if port is None else port)
+        if origin == ("https", "api.bybit.com", 443):
+            return source_type == DataSourceType.EXCHANGE_REST
+        if origin == ("wss", "stream.bybit.com", 443):
+            return source_type == DataSourceType.EXCHANGE_WS
+        default_web_port = {"http": 80, "https": 443}.get(scheme)
+        if default_web_port is None or port not in {None, default_web_port}:
+            return False
+
+        def is_domain(domain: str) -> bool:
+            return hostname == domain or hostname.endswith(f".{domain}")
+
+        if is_domain("perplexity.com"):
+            return source_type == DataSourceType.SEARCH_PERPLEXITY
+        if any(
+            is_domain(domain)
+            for domain in (
+                "duckduckgo.com",
+                "google.com",
+                "bing.com",
+                "reuters.com",
+                "bloomberg.com",
+                "cnn.com",
+                "bbc.com",
+                "bbc.co.uk",
+            )
+        ):
+            return source_type == DataSourceType.SEARCH_WEB
+        return False
 
 
 # ─────────────────────────────────────────────
@@ -295,23 +393,48 @@ class DataSourceEnforcer:
         if fetched_at_ms is None:
             fetched_at_ms = int(time.time() * 1000)
 
-        # Determine cognitive level and confidence
-        if cognitive_level is None or confidence is None:
-            # Try URL-pattern classification first
-            url_result = DataSourceClassifier.classify_by_url_pattern(source_url_or_api)
-            if url_result:
-                classified_level, classified_confidence, reason = url_result
-            else:
-                # Fall back to source_type classification
-                classified_level, classified_confidence, reason = (
-                    DataSourceClassifier.classify_by_type(source_type)
-                )
+        # A nonempty URL is a trust claim. It may contribute FACT only when both
+        # the URL and its declared source type agree at this sink.
+        type_result = DataSourceClassifier.classify_by_type(source_type)
+        url_result = (
+            DataSourceClassifier.classify_by_url_pattern(source_url_or_api)
+            if source_url_or_api
+            else None
+        )
+        url_matches_type = bool(
+            source_url_or_api
+            and url_result is not None
+            and DataSourceClassifier.url_matches_declared_source_type(
+                source_type,
+                source_url_or_api,
+            )
+        )
+        if not source_url_or_api:
+            classified_level, classified_confidence, reason = type_result
+            fact_elevation_allowed = True
+        elif url_result is None:
+            classified_level = CognitiveLevel.INFERENCE
+            classified_confidence = 0.50
+            reason = "Unrecognized nonempty source URL → conservative INFERENCE"
+            fact_elevation_allowed = False
+        elif not url_matches_type:
+            classified_level = CognitiveLevel.INFERENCE
+            classified_confidence = 0.50
+            reason = "URL and declared source type mismatch → conservative INFERENCE"
+            fact_elevation_allowed = False
+        else:
+            classified_level, classified_confidence, reason = url_result
+            fact_elevation_allowed = classified_level == CognitiveLevel.FACT
 
-            # Use provided overrides if given, otherwise use classified values
+        if cognitive_level == CognitiveLevel.FACT and not fact_elevation_allowed:
+            cognitive_level = CognitiveLevel.INFERENCE
+            confidence = min(
+                confidence if confidence is not None else classified_confidence,
+                classified_confidence,
+            )
+        else:
             cognitive_level = cognitive_level or classified_level
             confidence = confidence if confidence is not None else classified_confidence
-        else:
-            reason = "Explicitly provided by caller"
 
         # Create tag
         tag = DataSourceTag(
@@ -428,7 +551,12 @@ class DataSourceEnforcer:
         else:
             source_type = DataSourceType.EXCHANGE_REST
 
-        source_url = f"https://api.bybit.com{endpoint}" if not endpoint.startswith("http") else endpoint
+        if endpoint.startswith(("http://", "https://", "ws://", "wss://")):
+            source_url = endpoint
+        elif source_type == DataSourceType.EXCHANGE_WS:
+            source_url = f"wss://stream.bybit.com{endpoint}"
+        else:
+            source_url = f"https://api.bybit.com{endpoint}"
 
         tag = self.validate_and_tag(
             data_id=data_id,

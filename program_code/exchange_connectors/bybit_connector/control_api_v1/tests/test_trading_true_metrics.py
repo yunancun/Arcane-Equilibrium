@@ -15,6 +15,7 @@ _CONTROL_API_DIR = os.path.dirname(_TEST_DIR)
 if _CONTROL_API_DIR not in sys.path:
     sys.path.insert(0, _CONTROL_API_DIR)
 
+from app import trading_true_metrics as trading_true_metrics_module  # noqa: E402
 from app.trading_true_metrics import build_performance_metrics  # noqa: E402
 
 
@@ -24,6 +25,22 @@ def _metric(metrics: list[dict[str, Any]], key: str) -> dict[str, Any]:
     依 key 取出單個 metric，讓斷言保持精簡。
     """
     return next(m for m in metrics if m["key"] == key)
+
+
+def test_fetch_db_true_metrics_does_not_return_backend_exception_text(monkeypatch) -> None:
+    """Fail-soft metrics must not expose database exception details to API callers."""
+    marker = "password=never-return-this"
+
+    def fail_get_conn():
+        raise RuntimeError(marker)
+
+    monkeypatch.setattr(trading_true_metrics_module.db_pool, "get_conn", fail_get_conn)
+
+    payload = trading_true_metrics_module.fetch_db_true_metrics(["paper"])
+
+    assert payload["available"] is False
+    assert payload["reason"] == "query_failed"
+    assert marker not in repr(payload)
 
 
 def test_build_performance_metrics_prefers_mlde_edge_quality() -> None:

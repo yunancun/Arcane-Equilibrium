@@ -74,8 +74,11 @@ def fetch_db_true_metrics(
         payload["performance_metrics"] = build_performance_metrics(payload)
         return payload
     except Exception as exc:  # noqa: BLE001 - metrics must fail soft
-        logger.warning("DB true metrics failed for %s: %s", modes, exc)
-        return _empty(window_days, f"{type(exc).__name__}: {exc}")
+        logger.warning(
+            "operation=db_true_metrics query_failed=true error_type=%s",
+            type(exc).__name__,
+        )
+        return _empty(window_days, "query_failed")
     finally:
         if conn is not None:
             db_pool.put_conn(conn)

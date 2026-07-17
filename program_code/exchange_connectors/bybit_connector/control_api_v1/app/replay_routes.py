@@ -53,6 +53,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from . import main_legacy as base
 from .auth import require_scope_and_operator
 from .db_pool import get_pg_conn
+from .error_sanitize import log_safe_exception
 
 # Replay helpers + security guards — relative-package first (production),
 # absolute fallback (test layout via conftest.py PROJECT_ROOT injection).
@@ -104,6 +105,18 @@ _build_default_manifest_payload = _rh.build_default_manifest_payload
 _compute_replay_health_state = _rh.compute_replay_health_state
 
 logger = logging.getLogger(__name__)
+
+def _safe_signature_fail_mode(exc: ValueError) -> str:
+    untrusted_mode = str(exc)
+    if untrusted_mode == "key_missing":
+        return "key_missing"
+    if untrusted_mode == "key_expired":
+        return "key_expired"
+    if untrusted_mode == "signature_mismatch":
+        return "signature_mismatch"
+    if untrusted_mode == "manifest_hash_mismatch":
+        return "manifest_hash_mismatch"
+    return "verification_failed"
 
 
 # Track C P0-2 boot guard: live profile + TEST_KEY env both set ⇒ FAIL-CLOSED.
@@ -641,7 +654,7 @@ async def post_replay_cancel(
             except ProcessLookupError:
                 logger.info("cancel_run: pid=%d already exited; DB only", _pid)
             except (PermissionError, OSError) as exc:
-                logger.warning("cancel_run: os.kill(pid=%d) failed: %s; DB only", _pid, exc)
+                log_safe_exception(logger, "replay_cancel_process_signal", exc, level=logging.WARNING)
 
         _emit_audit_stub(
             event_type="replay_run_cancelled",
@@ -902,11 +915,17 @@ async def post_manifest_verify(
     try:
         canonical_bytes = base64.b64decode(body.canonical_bytes_b64, validate=True)
     except (ValueError, TypeError) as exc:
+        log_safe_exception(
+            logger,
+            "replay_manifest_base64_decode",
+            exc,
+            level=logging.WARNING,
+        )
         raise HTTPException(
             status_code=400,
             detail={
                 "reason_codes": ["replay_invalid_b64"],
-                "message": f"canonical_bytes_b64 not valid base64: {type(exc).__name__}",
+                "message": "canonical_bytes_b64 is not valid base64",
             },
         )
 
@@ -986,7 +1005,13 @@ async def post_manifest_verify(
                                  "wiring_status": wiring_status})
     except ValueError as exc:
         # ManifestSigner.verify raises ValueError(SignatureFailMode.X.value).
-        fail_mode = str(exc)
+        log_safe_exception(
+            logger,
+            "replay_manifest_verify",
+            exc,
+            level=logging.WARNING,
+        )
+        fail_mode = _safe_signature_fail_mode(exc)
         _emit_audit_stub(
             event_type="replay_manifest_verify_attempted",
             actor_id=actor_id, experiment_id=None,

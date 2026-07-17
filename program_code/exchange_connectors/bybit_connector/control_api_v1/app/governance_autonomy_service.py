@@ -42,11 +42,11 @@ from .autonomy_totp import (
     autonomy_totp_backend_configured,
     verify_autonomy_totp,
 )
+from .error_sanitize import log_safe_exception
 from .governance_routes import (
     GovernanceResponse,
     _get_auth_actor,
     _require_operator_auth,
-    _sanitize_log,
     governance_router,
 )
 
@@ -281,8 +281,14 @@ def _build_autonomy_state_payload() -> tuple[dict[str, Any], str | None]:
             )
             latest = _row_to_dict(cur, cur.fetchone()) or None
         except Exception as exc:  # noqa: BLE001 - status endpoint must degrade
-            base["reason"] = f"pg_error:{type(exc).__name__}"
-            base["error"] = _sanitize_log(exc, max_len=200)
+            log_safe_exception(
+                logger,
+                "autonomy_state_query",
+                exc,
+                level=logging.WARNING,
+            )
+            base["reason"] = "pg_error"
+            base["error"] = "autonomy_state_unavailable"
             return base, base["reason"]
 
     level = str(row.get("current_level") or "CONSERVATIVE").upper()
@@ -441,7 +447,8 @@ def _record_autonomy_switch_attempt(
                 conn.rollback()
             except Exception:
                 pass
-            return False, f"pg_error:{type(exc).__name__}"
+            log_safe_exception(logger, "autonomy_switch_audit_write", exc)
+            return False, "pg_error"
 
 
 def _perform_autonomy_switch(
@@ -551,7 +558,8 @@ def _perform_autonomy_switch(
                 conn.rollback()
             except Exception:
                 pass
-            return None, f"pg_error:{type(exc).__name__}"
+            log_safe_exception(logger, "autonomy_switch_transaction", exc)
+            return None, "pg_error"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
