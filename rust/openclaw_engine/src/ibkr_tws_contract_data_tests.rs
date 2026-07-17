@@ -3,6 +3,7 @@
 
 use super::*;
 
+use crate::ibkr_tws_wire::encode_fields;
 use openclaw_types::is_sha256_hex;
 
 /// 測試固定 reqId（與 driver `CONTRACT_DETAILS_REQ_ID` 同值域,本檔獨立常數不跨檔耦合）。
