@@ -991,6 +991,209 @@ async fn w5s3_pump_disabled_by_default_no_requests_sent() {
 }
 
 // ===========================================================================
+// W5-S4:session attestation（wire 實檢派生 → producer;禁聲明自填）
+// ===========================================================================
+
+/// W5-S4 paper 姿態 fixture（對齊契約可過 validate 的 posture 值;validity=1h,相對時鐘）。
+fn attestation_posture() -> crate::ibkr_tws_session_attestation::SessionAttestationPosture {
+    use openclaw_types::{
+        BrokerEnvironment, IbkrGatewayMode, IbkrSecretSlotMode, IbkrSessionDataTier,
+        IBKR_PAPER_GATEWAY_DEFAULT_PORT,
+    };
+    crate::ibkr_tws_session_attestation::SessionAttestationPosture {
+        host: "127.0.0.1".to_string(),
+        port: IBKR_PAPER_GATEWAY_DEFAULT_PORT,
+        process_identity: "test:ibgateway-paper".to_string(),
+        environment: BrokerEnvironment::Paper,
+        gateway_mode: IbkrGatewayMode::Paper,
+        secret_slot_fingerprint: "a".repeat(64),
+        secret_slot_mode: IbkrSecretSlotMode::Paper,
+        secret_world_readable: false,
+        live_secret_absent_or_empty: true,
+        env_var_credential_fallback_used: false,
+        data_tier: IbkrSessionDataTier::Delayed,
+        entitlements_fingerprint: "c".repeat(64),
+        market_data_entitlement_purchase_denied: true,
+        validity: Duration::from_secs(3600),
+    }
+}
+
+#[tokio::test]
+async fn w5s4_happy_all_du_session_produces_attested() {
+    use crate::ibkr_tws_session_attestation::produce_session_attestation;
+    use openclaw_types::{IbkrSessionAttestationBlocker, IbkrSessionAttestationStatus};
+
+    // 全 DU 單帳戶握手到 Ready → wire 實檢事實在場（fingerprint 由 decode 邊界實檢派生）。
+    let (mut driver, _h) = fake_driver(scenarios::happy_session());
+    let step = driver.connect_and_handshake(1_000).await;
+    assert_eq!(step, ConnectStep::Ready);
+    let facts = driver.session_wire_facts().expect("Ready 後 facts 必在場");
+    assert!(facts.inspection.all_paper());
+    // 跨腿契約:與 secret-slot 腿同算法（DU1234567=happy 場景帳戶）。
+    assert_eq!(
+        facts.inspection.fingerprint_hex(),
+        crate::ibkr_secret_slot_loader::ibkr_account_fingerprint_hash("DU1234567")
+    );
+    assert_eq!(facts.ready_at_ms, Some(1_000), "Ready 轉移點的注入時鐘");
+    assert_eq!(facts.server_epoch_s, Some(1_700_000_000), "IN 49 佐證欄");
+    // producer:validate 全綠 → attested;raw artifact hash 真值非零。
+    let att = produce_session_attestation(Some(facts), &attestation_posture(), 2_000);
+    assert_eq!(att.status, IbkrSessionAttestationStatus::PaperAttested);
+    assert!(!att.account_fingerprint_is_live);
+    let v = att.validate(2_000);
+    assert!(v.attestation_accepted, "blockers: {:?}", v.blockers);
+    assert_eq!(att.gateway_started_at_ms, 1_000);
+    assert_eq!(att.raw_artifact_hash.len(), 64);
+    assert_ne!(att.raw_artifact_hash, "0".repeat(64));
+    // 過期:時鐘推過 expires → 契約 StaleAttestation blocker（時效綁定）。
+    assert!(att
+        .validate(att.expires_at_ms)
+        .blockers
+        .contains(&IbkrSessionAttestationBlocker::StaleAttestation));
+}
+
+#[tokio::test]
+async fn w5s4_mixed_live_account_session_fatal_and_blocked() {
+    use crate::ibkr_tws_session_attestation::produce_session_attestation;
+    use openclaw_types::{IbkrSessionAttestationBlocker, IbkrSessionAttestationStatus};
+
+    // 全 DU 混入一個 U* → 白名單實檢 fail-closed:session-fatal（NonPaperSession 既有路徑）。
+    let (mut driver, _h) = fake_driver(scenarios::mixed_paper_live_session());
+    let mut clock = TestClock::at(1_000);
+    assert_eq!(
+        driver.run_connect_cycle(&mut clock).await,
+        CycleOutcome::HandshakeFatal
+    );
+    assert!(matches!(
+        driver.state(),
+        SessionState::Disconnected {
+            reason: HaltReason::SessionFatal(FatalCause::NonPaperSession)
+        }
+    ));
+    // 實檢紀錄在場（可審計拒因）:is_live 由實檢派生為 true → attestation 只可產 Blocked。
+    let facts = driver
+        .session_wire_facts()
+        .expect("非 paper 拒因紀錄應在場");
+    assert!(!facts.inspection.all_paper());
+    let att = produce_session_attestation(Some(facts), &attestation_posture(), 2_000);
+    assert_eq!(att.status, IbkrSessionAttestationStatus::Blocked);
+    assert!(att.account_fingerprint_is_live);
+    assert!(att
+        .validate(2_000)
+        .blockers
+        .contains(&IbkrSessionAttestationBlocker::LiveAccountFingerprint));
+}
+
+#[tokio::test]
+async fn w5s4_missing_managed_accounts_false_fails_then_retry_attests() {
+    use crate::ibkr_tws_session_attestation::produce_session_attestation;
+    use openclaw_types::IbkrSessionAttestationStatus;
+
+    // 場景1=IN 15 全程缺席直到 49;場景2=happy（重試目標）。
+    let mut scns = VecDeque::new();
+    scns.push_back(scenarios::missing_managed_accounts());
+    scns.push_back(scenarios::happy_session());
+    let mut driver = SessionDriver::new(
+        GrantingProvider,
+        ScriptedTransport { scenarios: scns },
+        driver_config(),
+        timeouts(),
+        reader_limits(),
+    );
+    let mut clock = TestClock::at(0);
+    // cycle1:未見 15 到 49 → transient false-fail（非 fatal;絕不以未見當已驗證）。
+    assert_eq!(
+        driver.run_connect_cycle(&mut clock).await,
+        CycleOutcome::HandshakeTransient
+    );
+    assert!(driver.session_wire_facts().is_none(), "未實檢不得留 facts");
+    let att = produce_session_attestation(driver.session_wire_facts(), &attestation_posture(), 10);
+    assert_eq!(att.status, IbkrSessionAttestationStatus::Blocked);
+    // 退避到期 → cycle2 重試 happy → Ready+serve → 實檢立 → attested。
+    let (entered, delay_ms) = match driver.state() {
+        SessionState::Backoff {
+            entered_at_ms,
+            next_delay,
+            ..
+        } => (*entered_at_ms, next_delay.as_millis() as u64),
+        s => panic!("expected Backoff, got {s:?}"),
+    };
+    clock.set(entered + delay_ms + 1);
+    assert_eq!(
+        driver.run_connect_cycle(&mut clock).await,
+        CycleOutcome::Served(ServeEnd::IoDropped)
+    );
+    let facts = driver.session_wire_facts().expect("重試成功後 facts 在場");
+    let now = facts.ready_at_ms.unwrap() + 10;
+    let att = produce_session_attestation(Some(facts), &attestation_posture(), now);
+    assert_eq!(att.status, IbkrSessionAttestationStatus::PaperAttested);
+    assert!(att.validate(now).attestation_accepted);
+}
+
+#[tokio::test]
+async fn w5s4_fingerprint_stable_across_sessions_and_new_generation_clears() {
+    // 同帳戶兩個 session → 同指紋（穩定性）;新 connect 世代（connect 失敗）→ facts 清空。
+    let mut scns = VecDeque::new();
+    scns.push_back(scenarios::happy_session());
+    scns.push_back(scenarios::happy_session());
+    let mut driver = SessionDriver::new(
+        GrantingProvider,
+        ScriptedTransport { scenarios: scns },
+        driver_config(),
+        timeouts(),
+        reader_limits(),
+    );
+    let mut clock = TestClock::at(0);
+    assert_eq!(
+        driver.run_connect_cycle(&mut clock).await,
+        CycleOutcome::Served(ServeEnd::IoDropped)
+    );
+    let fp1 = driver
+        .session_wire_facts()
+        .unwrap()
+        .inspection
+        .fingerprint_hex();
+    // 退避到期後重連場景2。
+    let (entered, delay_ms) = match driver.state() {
+        SessionState::Backoff {
+            entered_at_ms,
+            next_delay,
+            ..
+        } => (*entered_at_ms, next_delay.as_millis() as u64),
+        s => panic!("expected Backoff, got {s:?}"),
+    };
+    clock.set(entered + delay_ms + 1);
+    assert_eq!(
+        driver.run_connect_cycle(&mut clock).await,
+        CycleOutcome::Served(ServeEnd::IoDropped)
+    );
+    let fp2 = driver
+        .session_wire_facts()
+        .unwrap()
+        .inspection
+        .fingerprint_hex();
+    assert_eq!(fp1, fp2, "同帳戶跨 session 指紋必須穩定");
+    // cycle3:ScriptedTransport 耗盡 → connect refused;新世代先清 facts（不以舊實檢冒充）。
+    let (entered, delay_ms) = match driver.state() {
+        SessionState::Backoff {
+            entered_at_ms,
+            next_delay,
+            ..
+        } => (*entered_at_ms, next_delay.as_millis() as u64),
+        s => panic!("expected Backoff, got {s:?}"),
+    };
+    clock.set(entered + delay_ms + 1);
+    assert_eq!(
+        driver.run_connect_cycle(&mut clock).await,
+        CycleOutcome::ConnectFailed
+    );
+    assert!(
+        driver.session_wire_facts().is_none(),
+        "新 connect 世代必須清舊 session 實檢"
+    );
+}
+
+// ===========================================================================
 // 終態:結構性終態後 cycle no-op（Terminal;factory 不被觸）
 // ===========================================================================
 

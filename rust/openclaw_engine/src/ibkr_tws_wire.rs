@@ -7,7 +7,9 @@
 //!   - (a) 純 codec（自 B1 §(a) 抽,語義**零變**):`encode_frame` / `try_decode_frame` /
 //!     `encode_fields` / `decode_fields` / `encode_handshake_prefix` / `encode_start_api` /
 //!     `encode_req_current_time` / `frame_msg_id` / `decode_server_handshake_ack` /
-//!     `decode_current_time` / `decode_error_code` / `managed_accounts_all_paper`。
+//!     `decode_current_time` / `decode_error_code` / `managed_accounts_all_paper`
+//!     （W5-S4 起為 `managed_accounts_inspect` 薄殼:實檢升級為 all_paper + 帳戶指紋,
+//!     `ManagedAccountsInspection` 是 attestation is_live 語義的唯一鑄造點）。
 //!   - (b) `FrameReader`:streaming length-prefixed framing + **滾動窗預算**
 //!     （`max_frames_per_window`/`max_bytes_per_window`,注入時鐘;長連線防惡意灌流。B1
 //!     one-shot `ReadBudget` 是 G4 探針語義,此為 S2 長連線用)。
@@ -41,6 +43,8 @@
 use std::collections::VecDeque;
 use std::future::Future;
 use std::time::Duration;
+
+use sha2::{Digest, Sha256};
 
 use openclaw_types::IbkrTwsErrorClassV1;
 
@@ -294,16 +298,49 @@ pub(crate) fn decode_error_code(payload: &[u8]) -> Result<i64, CodecError> {
         .map_err(|_| CodecError::NonNumericField("error_code"))
 }
 
-/// decode MANAGED_ACCOUNTS（msgId 15）並做 **paper 前綴實檢**。IB 欄序：
+/// managedAccounts(15) 的**單次實檢產物**（W5-S4;inspect-then-drop 邊界的唯一出口）。
+/// 欄位私有、唯一鑄造點=`managed_accounts_inspect`（decode 邊界內實檢後明文即 drop）——
+/// attestation 的 `account_fingerprint_is_live` 語義只能由本型別派生,結構上禁「聲明自填」
+/// （operator acceptance 2026-07-12）。Clone 不弱化來源性：任何實例的血統仍回溯到一次真
+/// decode。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ManagedAccountsInspection {
+    all_paper: bool,
+    fingerprint: [u8; 32],
+}
+
+impl ManagedAccountsInspection {
+    /// 是否全部帳號過 `DU` 前綴白名單（false = 按 live 語義 fail-closed）。
+    pub(crate) fn all_paper(&self) -> bool {
+        self.all_paper
+    }
+
+    /// 帳戶指紋（sha256 → 64 lowercase hex;算法見 `managed_accounts_inspect` 注釋）。
+    pub(crate) fn fingerprint_hex(&self) -> String {
+        hex::encode(self.fingerprint)
+    }
+}
+
+/// decode MANAGED_ACCOUNTS（msgId 15）並做 **paper 前綴實檢 + 帳戶指紋**。IB 欄序：
 /// `[msgId, version, accountsCsv]`——fields[2] 為單欄逗號分隔帳號列表（與 fixture
-/// `"15\0 1\0 DU1234567\0"` 一致）。按逗號切 token,每個 token 必須 `DU` 開頭
-/// （IB paper 帳號固定前綴）;空列表 → `Malformed`（gateway 必回至少一個帳號,
+/// `"15\0 1\0 DU1234567\0"` 一致）;空列表 → `Malformed`（gateway 必回至少一個帳號,
 /// 空 = 損壞或偽造,fail-closed）。
 ///
-/// 為什麼只回 boolean（prefix-only inspect then drop）：實檢只需「是否全 DU」,
-/// 明文帳號不 bind 具名變量、不 log、不 serialize、不進錯誤訊息——`fields` 於
-/// fn 結束即整體 drop,維持 drop 側保守性。
-pub(crate) fn managed_accounts_all_paper(payload: &[u8]) -> Result<bool, CodecError> {
+/// 前綴白名單（IB 背書保守形）：token 必須**原文** `DU` 開頭（無 trim/大小寫寬放——寬放
+/// 只可能把 live 誤判 paper;任何非嚴格 DU token 含空 token 一律當 live 拒）。禁鑄 DF/DI
+/// 常數（官方無出典）。
+///
+/// 指紋：token 逐一 trim+ASCII 大寫正規化（**對齊 secret-slot 腿
+/// `ibkr_secret_slot_loader::ibkr_account_fingerprint_hash` 的正規化**——單帳戶時兩腿
+/// sha256 逐位一致,是指紋三角測量的跨腿契約）→ ASCII 升序排序（多帳戶決定性）→ 逗號
+/// 重組 → sha256。
+///
+/// inspect-then-drop 紀律（沿既有 `managed_accounts_all_paper`）：明文帳號只在 decode
+/// 邊界內短暫 tokenize,不 log、不 serialize、不進錯誤訊息;`fields` 與正規化中間量於
+/// fn 結束即整體 drop,只導出 boolean + hash。
+pub(crate) fn managed_accounts_inspect(
+    payload: &[u8],
+) -> Result<ManagedAccountsInspection, CodecError> {
     let fields = decode_fields(payload)?;
     let msg_id = fields
         .first()
@@ -320,8 +357,27 @@ pub(crate) fn managed_accounts_all_paper(payload: &[u8]) -> Result<bool, CodecEr
     if fields[2].is_empty() {
         return Err(CodecError::Malformed("managed_accounts empty account list"));
     }
-    // 逐 token 前綴實檢：任一空 token 或非 `DU` 開頭 → false（呼叫端 fail-closed）。
-    Ok(fields[2].split(',').all(|t| t.starts_with("DU")))
+    // 逐 token 原文前綴實檢：任一空 token 或非 `DU` 開頭 → false（呼叫端 fail-closed）。
+    let all_paper = fields[2].split(',').all(|t| t.starts_with("DU"));
+    // 指紋正規化中間量（僅存活於本 fn,結束即 drop）。
+    let mut normalized: Vec<String> = fields[2]
+        .split(',')
+        .map(|t| t.trim().to_ascii_uppercase())
+        .collect();
+    normalized.sort();
+    let mut hasher = Sha256::new();
+    hasher.update(normalized.join(",").as_bytes());
+    let fingerprint: [u8; 32] = hasher.finalize().into();
+    Ok(ManagedAccountsInspection {
+        all_paper,
+        fingerprint,
+    })
+}
+
+/// boolean 形（B1 G4 探針既有呼叫面;W5-S4 起為 `managed_accounts_inspect` 的薄殼——單一
+/// 實檢真源,語義零變;指紋隨 inspection 於本 fn 結束即 drop）。
+pub(crate) fn managed_accounts_all_paper(payload: &[u8]) -> Result<bool, CodecError> {
+    Ok(managed_accounts_inspect(payload)?.all_paper())
 }
 
 // ===========================================================================
@@ -744,6 +800,70 @@ mod tests {
         assert!(matches!(
             classify_error_frame(&f),
             Err(CodecError::Malformed(_))
+        ));
+    }
+
+    // ---- (a) W5-S4 managed_accounts_inspect（前綴實檢 + 帳戶指紋）----
+
+    #[test]
+    fn managed_accounts_inspect_all_du_paper_and_cross_leg_fingerprint() {
+        let payload = encode_fields(&["15", "1", "DU1234567"]);
+        let insp = managed_accounts_inspect(&payload).unwrap();
+        assert!(insp.all_paper());
+        // 跨腿契約：單帳戶指紋必須與 secret-slot 腿 `ibkr_account_fingerprint_hash`
+        // （trim+ASCII 大寫 → sha256）逐位一致（指紋三角測量的對齊前提）。
+        assert_eq!(
+            insp.fingerprint_hex(),
+            crate::ibkr_secret_slot_loader::ibkr_account_fingerprint_hash("DU1234567")
+        );
+        // 薄殼 boolean 形與 inspect 同源同值。
+        assert_eq!(managed_accounts_all_paper(&payload), Ok(true));
+    }
+
+    #[test]
+    fn managed_accounts_inspect_non_du_token_is_live_semantics() {
+        // 混入 U*（live）→ all_paper=false;指紋仍計算（Blocked attestation 的可審計拒因）。
+        let insp =
+            managed_accounts_inspect(&encode_fields(&["15", "1", "DU1234567,U7654321"])).unwrap();
+        assert!(!insp.all_paper());
+        assert_eq!(insp.fingerprint_hex().len(), 64);
+        // 空 token / 表外前綴 / 小寫 du（無大小寫寬放）一律非 paper（白名單非黑名單）。
+        for csv in ["DU1,", "DF1234567", "DI1234567", "du1234567"] {
+            let insp = managed_accounts_inspect(&encode_fields(&["15", "1", csv])).unwrap();
+            assert!(!insp.all_paper(), "csv={csv} 應按 live 語義拒");
+        }
+    }
+
+    #[test]
+    fn managed_accounts_inspect_fingerprint_stable_and_order_insensitive() {
+        let a = managed_accounts_inspect(&encode_fields(&["15", "1", "DU1,DU2"])).unwrap();
+        let b = managed_accounts_inspect(&encode_fields(&["15", "1", "DU1,DU2"])).unwrap();
+        // 同 payload 同 hash（穩定性）。
+        assert_eq!(a.fingerprint_hex(), b.fingerprint_hex());
+        // token 排序決定性：CSV 順序不同 → 同指紋。
+        let c = managed_accounts_inspect(&encode_fields(&["15", "1", "DU2,DU1"])).unwrap();
+        assert_eq!(a.fingerprint_hex(), c.fingerprint_hex());
+        // 不同帳戶 → 不同指紋。
+        let d = managed_accounts_inspect(&encode_fields(&["15", "1", "DU3"])).unwrap();
+        assert_ne!(a.fingerprint_hex(), d.fingerprint_hex());
+    }
+
+    #[test]
+    fn managed_accounts_inspect_malformed_fail_closed() {
+        // 空帳號列表 → Malformed（不以空欄當已驗證）。
+        assert!(matches!(
+            managed_accounts_inspect(&encode_fields(&["15", "1", ""])),
+            Err(CodecError::Malformed(_))
+        ));
+        // 欄數不足 → Malformed。
+        assert!(matches!(
+            managed_accounts_inspect(&encode_fields(&["15", "1"])),
+            Err(CodecError::Malformed(_))
+        ));
+        // msgId 錯 → UnexpectedMsgId。
+        assert!(matches!(
+            managed_accounts_inspect(&encode_fields(&["49", "1", "DU1"])),
+            Err(CodecError::UnexpectedMsgId { got: 49 })
         ));
     }
 

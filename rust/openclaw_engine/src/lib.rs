@@ -159,6 +159,13 @@ pub mod ibkr_tws_account_data;
 // 主桶）;**絕不含下單/改單/撤單 builder**。純同步、注入時鐘、零 socket——與
 // wire/session/pacing/driver 同屬 default build 被 DCE 的 TWS 連接器面（B′ 姿態,g4 audit 保綠）。
 pub mod ibkr_tws_order_exec_data;
+// IBKR W5-S4 session attestation producer：把 managedAccounts 實檢（DU* 白名單;
+// `account_fingerprint_is_live` 禁聲明自填,唯一鑄造點=wire `managed_accounts_inspect`）+
+// session 事實收斂為 typed `IbkrSessionAttestationV1`;契約 validate 全綠才產 attested 態,
+// facts 缺席只可產 Blocked。純函數、注入時鐘、零 socket;production caller=W4 health emitter
+// 的 Blocked 投影（不引用 driver → driver-absence audit 邊界不變）;attested 全路徑真消費=
+// W6 IPC 投影。attestation 絕非活化授權（真活化=W8 envelope）。
+pub mod ibkr_tws_session_attestation;
 // IBKR B1 只讀 TWS 連接器（ADR-0048 / AMD-2026-07-08-01，G4 首次接觸）：connect handshake
 // + reqCurrentTime 最小首接觸；純 codec + generic driver + 3 層惰性 gate；唯一具體
 // TcpStream::connect 於 `ibkr_g4_contact` feature 後（default build 無 socket、無 caller）。
