@@ -106,20 +106,16 @@ _compute_replay_health_state = _rh.compute_replay_health_state
 
 logger = logging.getLogger(__name__)
 
-_SAFE_SIGNATURE_FAIL_MODES = frozenset(
-    {
-        "key_missing",
-        "key_expired",
-        "signature_mismatch",
-        "manifest_hash_mismatch",
-    }
-)
-
-
 def _safe_signature_fail_mode(exc: ValueError) -> str:
-    fail_mode = str(exc)
-    if fail_mode in _SAFE_SIGNATURE_FAIL_MODES:
-        return fail_mode
+    untrusted_mode = str(exc)
+    if untrusted_mode == "key_missing":
+        return "key_missing"
+    if untrusted_mode == "key_expired":
+        return "key_expired"
+    if untrusted_mode == "signature_mismatch":
+        return "signature_mismatch"
+    if untrusted_mode == "manifest_hash_mismatch":
+        return "manifest_hash_mismatch"
     return "verification_failed"
 
 
