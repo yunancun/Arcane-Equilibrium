@@ -1,0 +1,187 @@
+name: public repository hygiene
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: '0 3 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  public-repository-hygiene:
+    name: public repository hygiene gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fetch exact PR trees without actions
+        if: github.event_name == 'pull_request_target'
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+          BASE_REPOSITORY_FULL_NAME: ${{ github.repository }}
+          HEAD_REPOSITORY_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
+          TRUSTED_REPOSITORY_URL: ${{ github.server_url }}/${{ github.repository }}.git
+          UNTRUSTED_REPOSITORY_URL: ${{ github.server_url }}/${{ github.event.pull_request.head.repo.full_name }}.git
+          TRUSTED_BASE_ROOT: ${{ github.workspace }}/.trusted-public-repo-security-base
+          UNTRUSTED_HEAD_ROOT: ${{ github.workspace }}/.untrusted-public-repo-head
+          EMPTY_GIT_TEMPLATE: ${{ runner.temp }}/public-repo-empty-git-template
+          GIT_CONFIG_NOSYSTEM: '1'
+          GIT_CONFIG_GLOBAL: /dev/null
+          GIT_TERMINAL_PROMPT: '0'
+          GIT_ASKPASS: /bin/false
+          SSH_ASKPASS: /bin/false
+        run: |
+          set -euo pipefail
+          umask 077
+          unset GITHUB_TOKEN GH_TOKEN SSH_AUTH_SOCK
+          if [[ ! "$BASE_REPOSITORY_FULL_NAME" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ \
+                || ! "$HEAD_REPOSITORY_FULL_NAME" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+            exit 1
+          fi
+          test "$TRUSTED_REPOSITORY_URL" = "${GITHUB_SERVER_URL%/}/${BASE_REPOSITORY_FULL_NAME}.git"
+          test "$UNTRUSTED_REPOSITORY_URL" = "${GITHUB_SERVER_URL%/}/${HEAD_REPOSITORY_FULL_NAME}.git"
+          test ! -e "$TRUSTED_BASE_ROOT"
+          test ! -e "$UNTRUSTED_HEAD_ROOT"
+          test ! -e "$EMPTY_GIT_TEMPLATE"
+          mkdir -m 0700 "$EMPTY_GIT_TEMPLATE"
+          safe_git() {
+            env -u GITHUB_TOKEN -u GH_TOKEN -u SSH_AUTH_SOCK git \
+              -c core.hooksPath=/dev/null \
+              -c credential.helper= \
+              -c http.extraHeader= \
+              -c submodule.recurse=false \
+              -c filter.lfs.required=false \
+              -c filter.lfs.smudge= \
+              -c filter.lfs.process= \
+              -c protocol.file.allow=never \
+              -c protocol.ext.allow=never \
+              -c protocol.git.allow=never \
+              -c protocol.ssh.allow=never \
+              -c fetch.fsckObjects=true \
+              "$@"
+          }
+          safe_git init --quiet --template="$EMPTY_GIT_TEMPLATE" "$TRUSTED_BASE_ROOT"
+          safe_git -C "$TRUSTED_BASE_ROOT" fetch \
+            --quiet --no-tags --no-write-fetch-head --depth=1 \
+            "$TRUSTED_REPOSITORY_URL" "$BASE_SHA"
+          safe_git -C "$TRUSTED_BASE_ROOT" checkout --quiet --detach "$BASE_SHA"
+          test "$(safe_git -C "$TRUSTED_BASE_ROOT" rev-parse --verify HEAD)" = "$BASE_SHA"
+
+          safe_git init --quiet --template="$EMPTY_GIT_TEMPLATE" "$UNTRUSTED_HEAD_ROOT"
+          safe_git -C "$UNTRUSTED_HEAD_ROOT" fetch \
+            --quiet --no-tags --no-write-fetch-head \
+            "$UNTRUSTED_REPOSITORY_URL" "$HEAD_SHA"
+          if ! safe_git -C "$UNTRUSTED_HEAD_ROOT" cat-file -e "${BASE_SHA}^{commit}"; then
+            safe_git -C "$UNTRUSTED_HEAD_ROOT" fetch \
+              --quiet --no-tags --no-write-fetch-head \
+              "$TRUSTED_REPOSITORY_URL" "$BASE_SHA"
+          fi
+          safe_git -C "$UNTRUSTED_HEAD_ROOT" checkout --quiet --detach "$HEAD_SHA"
+          test "$(safe_git -C "$UNTRUSTED_HEAD_ROOT" rev-parse --verify HEAD)" = "$HEAD_SHA"
+          safe_git -C "$UNTRUSTED_HEAD_ROOT" cat-file -e "${BASE_SHA}^{commit}"
+      - name: Scan exact PR head with trusted base policy
+        if: github.event_name == 'pull_request_target'
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          TRUSTED_BASE_ROOT: ${{ github.workspace }}/.trusted-public-repo-security-base
+          UNTRUSTED_HEAD_ROOT: ${{ github.workspace }}/.untrusted-public-repo-head
+        run: |
+          set -euo pipefail
+          test "$(git -C "$TRUSTED_BASE_ROOT" rev-parse HEAD)" = "$BASE_SHA"
+          test "$(git -C "$UNTRUSTED_HEAD_ROOT" rev-parse HEAD)" = "$HEAD_SHA"
+          git -C "$UNTRUSTED_HEAD_ROOT" cat-file -e "${BASE_SHA}^{commit}"
+          test -f "$TRUSTED_BASE_ROOT/helper_scripts/maintenance_scripts/public_repo_security_gate.py"
+          test -f "$TRUSTED_BASE_ROOT/.github/public-repo-security-allowlist.json"
+          python3 "$TRUSTED_BASE_ROOT/helper_scripts/maintenance_scripts/public_repo_security_gate.py" \
+            --repo-root "$UNTRUSTED_HEAD_ROOT" \
+            --allowlist-file "$TRUSTED_BASE_ROOT/.github/public-repo-security-allowlist.json" \
+            --tree "$HEAD_SHA" \
+            --range "$BASE_SHA..$HEAD_SHA"
+      - name: Fetch exact current tree without actions
+        if: github.event_name != 'pull_request_target'
+        shell: bash
+        env:
+          CURRENT_ROOT: ${{ github.workspace }}/.current-public-repo
+          CURRENT_SHA: ${{ github.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+          EVENT_NAME: ${{ github.event_name }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+          BASE_REPOSITORY_FULL_NAME: ${{ github.repository }}
+          TRUSTED_REPOSITORY_URL: ${{ github.server_url }}/${{ github.repository }}.git
+          EMPTY_GIT_TEMPLATE: ${{ runner.temp }}/public-repo-empty-git-template
+          GIT_CONFIG_NOSYSTEM: '1'
+          GIT_CONFIG_GLOBAL: /dev/null
+          GIT_TERMINAL_PROMPT: '0'
+          GIT_ASKPASS: /bin/false
+          SSH_ASKPASS: /bin/false
+        run: |
+          set -euo pipefail
+          umask 077
+          unset GITHUB_TOKEN GH_TOKEN SSH_AUTH_SOCK
+          if [[ ! "$BASE_REPOSITORY_FULL_NAME" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+            exit 1
+          fi
+          test "$TRUSTED_REPOSITORY_URL" = "${GITHUB_SERVER_URL%/}/${BASE_REPOSITORY_FULL_NAME}.git"
+          test ! -e "$CURRENT_ROOT"
+          test ! -e "$EMPTY_GIT_TEMPLATE"
+          mkdir -m 0700 "$EMPTY_GIT_TEMPLATE"
+          safe_git() {
+            env -u GITHUB_TOKEN -u GH_TOKEN -u SSH_AUTH_SOCK git \
+              -c core.hooksPath=/dev/null \
+              -c credential.helper= \
+              -c http.extraHeader= \
+              -c submodule.recurse=false \
+              -c filter.lfs.required=false \
+              -c filter.lfs.smudge= \
+              -c filter.lfs.process= \
+              -c protocol.file.allow=never \
+              -c protocol.ext.allow=never \
+              -c protocol.git.allow=never \
+              -c protocol.ssh.allow=never \
+              -c fetch.fsckObjects=true \
+              "$@"
+          }
+          safe_git init --quiet --template="$EMPTY_GIT_TEMPLATE" "$CURRENT_ROOT"
+          safe_git -C "$CURRENT_ROOT" fetch \
+            --quiet --no-tags --no-write-fetch-head \
+            "$TRUSTED_REPOSITORY_URL" "$CURRENT_SHA"
+          if [[ "$EVENT_NAME" == "push" \
+                && "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ]] \
+             && ! safe_git -C "$CURRENT_ROOT" cat-file -e "${BEFORE_SHA}^{commit}"; then
+            safe_git -C "$CURRENT_ROOT" fetch \
+              --quiet --no-tags --no-write-fetch-head \
+              "$TRUSTED_REPOSITORY_URL" "$BEFORE_SHA"
+          fi
+          safe_git -C "$CURRENT_ROOT" checkout --quiet --detach "$CURRENT_SHA"
+          test "$(safe_git -C "$CURRENT_ROOT" rev-parse --verify HEAD)" = "$CURRENT_SHA"
+      - name: Scan current tree for push or schedule
+        if: github.event_name != 'pull_request_target'
+        shell: bash
+        env:
+          CURRENT_ROOT: ${{ github.workspace }}/.current-public-repo
+          CURRENT_SHA: ${{ github.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          test "$(git -C "$CURRENT_ROOT" rev-parse HEAD)" = "$CURRENT_SHA"
+          scan_args=(
+            --repo-root "$CURRENT_ROOT"
+            --allowlist-file "$CURRENT_ROOT/.github/public-repo-security-allowlist.json"
+            --tree "$CURRENT_SHA"
+          )
+          if [[ "$EVENT_NAME" == "push" \
+                && "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ]]; then
+            scan_args+=(--range "$BEFORE_SHA..$CURRENT_SHA")
+          fi
+          python3 "$CURRENT_ROOT/helper_scripts/maintenance_scripts/public_repo_security_gate.py" \
+            "${scan_args[@]}"
