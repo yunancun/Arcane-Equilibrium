@@ -12,7 +12,7 @@
 
 - **目標終態(工程側)**:`IBKR_FULL_LIVE_CAPABILITY_COMPLETE_EXTERNAL_ACTIVATION_PENDING`——所有 no-contact 源碼、production wiring、測試、GUI、inactive 部署、恢復、文檔、三端同步、gap matrix 全 PASS,只剩人工憑證/session/活化與真實回執未決。這就是本文件說的 **live-ready**。
 - **最終驗證終態(活化側)**:`IBKR_FULL_LIVE_READY_VERIFIED`——Operator 單獨授權的 live session + 活化後,由 IB/E3/OPS/QA 出具 health/account/market/lifecycle/money-boundary 實證。
-- **現況一句話(2026-07-16 R8 校準)**:治理全解鎖(AMD-2026-07-11-01 Accepted);**W0/W1/W2(DONE_SOURCE_SECURED_HARDENED,PR#28)/W-CI(DONE_LANDED_FIRST_GREEN,PR#21)/W3(DONE_SOURCE_SECURED,S1-S4,PR#32/#33/#35/#38)/W4(DONE_SOURCE_SECURED,W4-1,PR#40)全收口且經 R8 對抗審計 CONFIRMED**;型別契約陣 34 modules/37 acceptance 檔;**W5(S0-S4)已於 2026-07-17 loop R9-R13 全包收口 DONE_SOURCE_SECURED**(PR#48/#49/#57/#60/#61;收口四腿 E2/E3/QA/CC 全過,INV-1 HOLDS;三腿指紋三角測量第三腿顯式 re-scope→W6 必修同票);**W8a∥W9a 為下一對(D2 已採用:兩者+W5 齊備即通知 operator 開 EA1-EA3)**,W6-W11 QUEUED。runtime 側教科書式 dormant(07-16 復核):lane 旗標全 false、IB Gateway 未安裝、零 ibkr secret slot、production 從未 seal——**從未發生任何真實接觸**。
+- **現況一句話(2026-07-16 R8 校準)**:治理全解鎖(AMD-2026-07-11-01 Accepted);**W0/W1/W2(DONE_SOURCE_SECURED_HARDENED,PR#28)/W-CI(DONE_LANDED_FIRST_GREEN,PR#21)/W3(DONE_SOURCE_SECURED,S1-S4,PR#32/#33/#35/#38)/W4(DONE_SOURCE_SECURED,W4-1,PR#40)全收口且經 R8 對抗審計 CONFIRMED**;型別契約陣 34 modules/37 acceptance 檔;**W5(S0-S4)已於 2026-07-17 loop R9-R13 全包收口 DONE_SOURCE_SECURED**(PR#48/#49/#57/#60/#61;收口四腿 E2/E3/QA/CC 全過,INV-1 HOLDS;三腿指紋三角測量第三腿顯式 re-scope→W6 必修同票);**W8a+W9a 已於 2026-07-17 loop R14∥R15 收口 DONE_SOURCE_SECURED**(PR#63/#62;E3-F1 首階段 CLOSED、TOFU pin 供應鏈紀律、四腿全過)——**D2 觸發:EA1(憑證+D3 username)/EA2(Gateway 安裝窗)已可開,operator 已獲通知;EA3 待 R16 mini-wiring(G4 entry 消費 envelope 驗證器,IB-NOTE-1)**;W6-W11 QUEUED(W6 為下一開發包)。runtime 側教科書式 dormant(07-16 復核):lane 旗標全 false、IB Gateway 未安裝、零 ibkr secret slot、production 從未 seal——**從未發生任何真實接觸**。
 - **路徑一句話**:剩 W5→W11 七包(+W8a/W9a carve)把引擎從「session/health 骨架」補成「全生命週期 live-capable 但 default-inactive」;之後 EA1→EA8 活化跑道(全 Operator-gated)按 readonly→paper→evidence clock→tiny-live→live 逐級點火。W8a/W9a 為純 no-contact 開發(AMD-07-11 授權內),先行落地使 EA1-EA3 在 Operator 就緒時零等待點火;EA 時序決策(D2)不因此預決。
 - **最大 wall-clock 項**:paper/shadow evidence clock(ADR-0048 預期 6-8 週)——工程全部完工也繞不開這段證據窗;故 ①W5 收口後即帶 W8a/W9a,唯讀跑道(EA1-EA4,7-14 天 soak;**D2 已裁採用 2026-07-16**)與 W6/W7 開發平行,②**W7+W8 收口後**盡早申請 EA5 開 paper 窗(硬前置 = W7+W8 全綠 + option B 落地),與 W9-W11 的非授權面平行推進(見 §5.5/§6)。
 
@@ -123,8 +123,8 @@ W2-W11 的全部 DoD 都封頂在 `source-ready` + `runtime-active(inactive post
 | order lifecycle(preview/place/cancel/replace/fills/reconcile) | paper lifecycle 契約 source-only,零執行路徑 | W7 |
 | activation envelope/風控 authority/kill switch/audit 接線 | envelope 僅字串 placeholder,**無 struct/impl**;kill-switch/audit 契約在、runtime 產生器缺 | W8 |
 | DB migration/FastAPI 全面/GUI Phase 4/服務配置/觀測/回滾 | DDL source-only 零 migration;FastAPI 17 唯讀 route 在;GUI 10 子視圖唯讀在(等真值);Gateway unit/observability/rollback runbook 演練缺 | W9 |
-| readonly-scope envelope 最小切片(D2 carve) | 缺(envelope 僅字串 placeholder) | W8a |
-| Gateway 安裝/unit 預備(D2 carve) | 缺(Gateway 未安裝,unit 不存在) | W9a |
+| readonly-scope envelope 最小切片(D2 carve) | ~~缺~~ **全補(2026-07-17 R14:契約+驗證器+四聯 audit source-landed)** | W8a ✅ |
+| Gateway 安裝/unit 預備(D2 carve) | ~~缺~~ **腳本+unit source-ready(2026-07-17 R15);安裝執行待 operator 窗** | W9a ✅ |
 | fake-TWS E2E + inactive Linux deploy + QA | 缺;runtime binary 落後 main(07-16 觀測 87 commits rev-list 全計/35 first-parent,持續擴大;觀測值非缺陷,W10 部署一併收) | W10 |
 | 對抗性全域 gap rescan | 缺 | W11 |
 
