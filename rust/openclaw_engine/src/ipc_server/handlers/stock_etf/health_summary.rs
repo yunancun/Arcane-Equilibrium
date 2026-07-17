@@ -14,11 +14,12 @@
 
 use openclaw_types::{
     AssetLane, Broker, IbkrConnectionHealthEntitlementStateV1, IbkrConnectionHealthHaltReasonV1,
-    IbkrConnectionHealthReportStatus, IbkrConnectionHealthReportV1, IbkrSessionAttestationStatus,
-    IbkrTwsSessionStateV1, IBKR_CONNECTION_HEALTH_REPORT_CONTRACT_ID,
+    IbkrConnectionHealthReportStatus, IbkrConnectionHealthReportV1, IbkrTwsSessionStateV1,
+    IBKR_CONNECTION_HEALTH_REPORT_CONTRACT_ID,
 };
 
 use crate::ibkr_tws_session::{HaltReason, SessionState, TwsSessionConfig, TwsSessionManager};
+use crate::ibkr_tws_session_attestation::blocked_session_attestation;
 
 /// W4 connection-health IPC 出口（dispatch `stock_etf.get_connection_health` 呼叫）。
 /// 構 ephemeral inactive manager 撞 permit 一次,投影 FSM/pacing 態 + 附 phase2 束
@@ -74,6 +75,10 @@ fn inactive_connection_health_report() -> IbkrConnectionHealthReportV1 {
         SessionState::Disconnected { reason } => project_halt_reason(*reason),
         _ => IbkrConnectionHealthHaltReasonV1::NotHalted,
     };
+    // W5-S4:attestation 欄由 producer 真值餵（同一代碼路徑,非硬編聲明）。inactive 引擎
+    // 無 wire 實檢事實 → producer 只可產 Blocked 態（is_live=false=「未實檢」而非「已證
+    // 非 live」）;欄值與 W4 相同 → Python normalizer lockstep/parity 面零漂移。
+    let attestation = blocked_session_attestation();
 
     IbkrConnectionHealthReportV1 {
         contract_id: IBKR_CONNECTION_HEALTH_REPORT_CONTRACT_ID.to_string(),
@@ -92,9 +97,10 @@ fn inactive_connection_health_report() -> IbkrConnectionHealthReportV1 {
         rejected_timeout: observation.rejected_timeout,
         rejected_historical: observation.rejected_historical,
         rejected_lines: observation.rejected_lines,
-        // attestation / entitlement：W5+/W6 才真派生;W4 恆 blocked / pending / 非 live。
-        attestation_status: IbkrSessionAttestationStatus::Blocked,
-        account_fingerprint_is_live: false,
+        // attestation：W5-S4 起由 producer 真值餵（inactive → Blocked/false;見上注釋）;
+        // entitlement：W6 才真派生,恆 pending。
+        attestation_status: attestation.status,
+        account_fingerprint_is_live: attestation.account_fingerprint_is_live,
         entitlement_state: IbkrConnectionHealthEntitlementStateV1::Pending,
         pending_reason: "external_verification_pending".to_string(),
         // 負空間安全束：恆 false（inactive 引擎零接觸/零 socket/零 secret/零 order）。
