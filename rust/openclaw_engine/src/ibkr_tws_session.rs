@@ -1075,6 +1075,17 @@ impl TwsSessionManager {
         }
     }
 
+    /// **W5-S2 account/positions 出站 grant**（單一出口:reqAccountSummary/reqPositions/
+    /// cancel×2 皆過 governor `AccountData` 類——IB 現勘:此四訊息不受 historical 四規則
+    /// 約束,走主 bucket 可排隊）。滿桶即時放行回 grant;Queued/Rejected → `None`,呼叫端
+    /// 本 tick 跳過、下 tick 重試（訂閱請求非時效敏感,無簿記副作用可安全重試）。
+    pub(crate) fn account_data_grant(&mut self, now_ms: u64) -> Option<OutboundGrant> {
+        match self.governor.submit(OutboundClass::AccountData, now_ms) {
+            SubmitOutcome::Admitted(grant) => Some(grant),
+            SubmitOutcome::Queued(_) | SubmitOutcome::Rejected(_) => None,
+        }
+    }
+
     /// **S4 F3 佇列閉環測試專用**:直接存取 governor（令測試可預先耗盡 token 逼心跳 Queued）。
     #[cfg(test)]
     pub(crate) fn governor_mut(&mut self) -> &mut PacingGovernor {
@@ -1145,10 +1156,7 @@ pub(crate) enum PacingDispatch {
     /// 在途心跳佇列逾時:FSM 未標記已送（下輪 `heartbeat_outbound` 重試）;driver 記 telemetry。
     HeartbeatTimedOut,
     /// 非心跳佇列項解決（W6+ 真消費;W3 期不預期出現;grant 已 drop 或僅 telemetry）。
-    OtherResolved {
-        ticket_id: u64,
-        admitted: bool,
-    },
+    OtherResolved { ticket_id: u64, admitted: bool },
 }
 
 #[cfg(test)]

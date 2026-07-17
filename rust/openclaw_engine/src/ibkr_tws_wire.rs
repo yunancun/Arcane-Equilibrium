@@ -69,6 +69,18 @@ pub(crate) const MANAGED_ACCOUNTS_MSG_ID: i64 = 15;
 pub(crate) const NEXT_VALID_ID_MSG_ID: i64 = 9;
 /// ERR_MSG（server 於 START_API 後必推的連線狀態通知）。
 pub(crate) const ERR_MSG_MSG_ID: i64 = 4;
+// W5-S2 account/positions **入站（IN）空間** msg ID。IB 現勘（2026-07-17,官方 ibapi
+// 9.81.1.post1）:out/in 是兩個獨立編號空間,61-64 撞號——OUT 空間的 reqPositions=61 /
+// reqAccountSummary=62 / cancelAccountSummary=63 / cancelPositions=64 常數居
+// `ibkr_tws_account_data`;命名顯式帶 `IN_`/`OUT_` 方向以免撞號誤用。
+/// IN 61:position 資料行。
+pub(crate) const IN_POSITION_DATA_MSG_ID: i64 = 61;
+/// IN 62:positionEnd（全量快照完成標記）。
+pub(crate) const IN_POSITION_END_MSG_ID: i64 = 62;
+/// IN 63:accountSummary 資料行。
+pub(crate) const IN_ACCOUNT_SUMMARY_MSG_ID: i64 = 63;
+/// IN 64:accountSummaryEnd（全量快照完成標記）。
+pub(crate) const IN_ACCOUNT_SUMMARY_END_MSG_ID: i64 = 64;
 
 // 注:`IB_INFO_CODE_FLOOR`（≥2100 info 地板)單處維護於 openclaw_types crate;B1 driver
 // 直接自 openclaw_types import（避免兩份 2100 常數漂移)。本 wire 檔的錯誤分類走 types
@@ -164,7 +176,8 @@ pub(crate) fn decode_fields(payload: &[u8]) -> Result<Vec<String>, CodecError> {
             if !raw.is_ascii() {
                 return Err(CodecError::Malformed("non-ascii field"));
             }
-            let s = std::str::from_utf8(raw).map_err(|_| CodecError::Malformed("non-utf8 field"))?;
+            let s =
+                std::str::from_utf8(raw).map_err(|_| CodecError::Malformed("non-utf8 field"))?;
             fields.push(s.to_string());
             start = i + 1;
         }
@@ -423,7 +436,7 @@ impl FrameReader {
 // TODO(S2):production 消費者 = W3-S2 session driver。S1 僅立 + 測試。
 // ===========================================================================
 
-/// W3 期已知 msgId 白名單分類（ACK 為握手首 frame 無 msgId,不在此列)。
+/// 已知 msgId 白名單分類（ACK 為握手首 frame 無 msgId,不在此列;W5-S2 擴入站 61-64)。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum KnownMsgId {
     /// 4:ERR_MSG（連線狀態通知,按 code 分類)。
@@ -434,16 +447,28 @@ pub(crate) enum KnownMsgId {
     ManagedAccounts,
     /// 49:currentTime。
     CurrentTime,
+    /// IN 61:position 資料行（W5-S2;OUT 空間 61=reqPositions,兩空間撞號,見常數注釋)。
+    PositionData,
+    /// IN 62:positionEnd。
+    PositionEnd,
+    /// IN 63:accountSummary 資料行。
+    AccountSummary,
+    /// IN 64:accountSummaryEnd。
+    AccountSummaryEnd,
 }
 
-/// codec 層 msgId 白名單判定:已知 → `Some`;**未知 → `None`（fail-closed,呼叫端斷線,
-/// 不猜欄位、不跳過)**。W4-W7 擴白名單時逐 msgId 加分支 + 測試,禁「默認略過」。
+/// codec 層 msgId 白名單判定（**入站空間**）:已知 → `Some`;**未知 → `None`（fail-closed,
+/// 呼叫端斷線,不猜欄位、不跳過)**。W6-W7 擴白名單時逐 msgId 加分支 + 測試,禁「默認略過」。
 pub(crate) fn classify_msg_id(id: i64) -> Option<KnownMsgId> {
     match id {
         ERR_MSG_MSG_ID => Some(KnownMsgId::ErrMsg),
         NEXT_VALID_ID_MSG_ID => Some(KnownMsgId::NextValidId),
         MANAGED_ACCOUNTS_MSG_ID => Some(KnownMsgId::ManagedAccounts),
         CURRENT_TIME_MSG_ID => Some(KnownMsgId::CurrentTime),
+        IN_POSITION_DATA_MSG_ID => Some(KnownMsgId::PositionData),
+        IN_POSITION_END_MSG_ID => Some(KnownMsgId::PositionEnd),
+        IN_ACCOUNT_SUMMARY_MSG_ID => Some(KnownMsgId::AccountSummary),
+        IN_ACCOUNT_SUMMARY_END_MSG_ID => Some(KnownMsgId::AccountSummaryEnd),
         _ => None,
     }
 }
@@ -608,7 +633,10 @@ mod tests {
         let mut r = FrameReader::new(limits(1000, 100, 1_000_000));
         r.push_bytes(&[0, 0, 0, 0], 0).unwrap();
         let err = r.next_frame(0).unwrap_err();
-        assert!(matches!(err, FrameReaderError::Codec(CodecError::EmptyFrame)));
+        assert!(matches!(
+            err,
+            FrameReaderError::Codec(CodecError::EmptyFrame)
+        ));
     }
 
     // ---- (c) msgId 白名單 + 錯誤分類橋 ----
@@ -619,8 +647,15 @@ mod tests {
         assert_eq!(classify_msg_id(9), Some(KnownMsgId::NextValidId));
         assert_eq!(classify_msg_id(15), Some(KnownMsgId::ManagedAccounts));
         assert_eq!(classify_msg_id(49), Some(KnownMsgId::CurrentTime));
+        // W5-S2:入站 account/positions 四 msgId（IN 空間;與 OUT 空間 61-64 撞號不混用）。
+        assert_eq!(classify_msg_id(61), Some(KnownMsgId::PositionData));
+        assert_eq!(classify_msg_id(62), Some(KnownMsgId::PositionEnd));
+        assert_eq!(classify_msg_id(63), Some(KnownMsgId::AccountSummary));
+        assert_eq!(classify_msg_id(64), Some(KnownMsgId::AccountSummaryEnd));
         // 未知 msgId → None（fail-closed,呼叫端斷線)。
         assert_eq!(classify_msg_id(8), None);
+        assert_eq!(classify_msg_id(60), None);
+        assert_eq!(classify_msg_id(65), None);
         assert_eq!(classify_msg_id(71), None);
     }
 

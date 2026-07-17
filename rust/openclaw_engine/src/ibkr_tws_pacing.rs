@@ -454,9 +454,10 @@ impl PacingGovernor {
     /// 解決）。FIFO 公平:佇列非空時新項一律入佇列(不搶排在前之項)。
     pub(crate) fn submit(&mut self, class: OutboundClass, now_ms: u64) -> SubmitOutcome {
         match class {
-            OutboundClass::Heartbeat | OutboundClass::MarketData | OutboundClass::Control => {
-                self.admit_or_queue(now_ms, false)
-            }
+            OutboundClass::Heartbeat
+            | OutboundClass::MarketData
+            | OutboundClass::Control
+            | OutboundClass::AccountData => self.admit_or_queue(now_ms, false),
             // order-verb:超限直拒不排隊(訂單延遲=語義謊言)。
             OutboundClass::OrderVerb => self.admit_or_queue(now_ms, true),
             OutboundClass::Historical(req) => {
@@ -588,6 +589,13 @@ pub(crate) enum OutboundClass {
     Control,
     /// 一般 msg-rate 出站（market data 訂閱請求等;主 bucket,可排隊）。**TODO(W6)** 真消費者。
     MarketData,
+    /// account/positions 訂閱與取消（W5-S2:reqAccountSummary/reqPositions/cancel×2）。
+    /// IB 現勘（2026-07-17）:此四訊息**不受** historical 四規則約束 → 主 bucket、可排隊。
+    /// 為什麼獨立類別而非復用 Control/MarketData:Control=握手控制、MarketData=行情訂閱,
+    /// 語義皆錯配;獨立類別令未來 per-class 預算/telemetry 分流不需重命名。禁用
+    /// `Historical(..)`（該類承載四規則,對 account 面是語義謊言）。W5-S2 消費者=account
+    /// data 消化層的訂閱出站。
+    AccountData,
     /// 歷史資料請求（主 bucket + 獨立 historical 四規則;可排隊）。**TODO(W6)** 真消費者。
     Historical(HistoricalRequest),
     /// order-verb（W7;主 bucket,超限直拒不排隊）。**TODO(W7)** 真消費者。

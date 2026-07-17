@@ -47,6 +47,9 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use openclaw_types::ibkr_tws_session_state::IB_ERR_DUPLICATE_CLIENT_ID;
 use openclaw_types::{IB_INFO_CODE_FLOOR, PINNED_MIN_SERVER_VERSION};
 
+use crate::ibkr_tws_account_data::{
+    AccountDataConfig, AccountDataDigest, AccountDataReject, SnapshotStaleness,
+};
 use crate::ibkr_tws_pacing::{OutboundGrant, PacingConfig};
 use crate::ibkr_tws_session::{
     ConnectPermitProvider, FatalCause, HandshakeOutcome, HeartbeatOutbound, PacingDispatch,
@@ -70,6 +73,10 @@ const SERVE_BUDGET: u32 = 100_000;
 /// 心跳 miss 非讀逾時,設計 §1.2）。production 用短間隔即可（成本低;每間隔喚醒一次查心跳）;測試以
 /// `tokio::time::pause`(start_paused) 令 poll 即時推進。
 const DEFAULT_SERVE_POLL: Duration = Duration::from_secs(1);
+
+/// W5-S2 account summary 訂閱的固定 reqId（request-id 分配器歸 W5-S3+ 請求路由;summary 為
+/// 全域單訂閱（G3 自限 1 份）,固定 id 無碰撞面——fake 場景以此值對齊）。
+pub(crate) const ACCOUNT_SUMMARY_REQ_ID: i64 = 9001;
 
 // ===========================================================================
 // (a) transport 抽象（注入 stream 來源;fake=duplex,W8=TCP factory）
@@ -289,6 +296,15 @@ pub(crate) struct SessionDriver<P: ConnectPermitProvider, F: TransportFactory> {
     /// 當前連線 stream + reader（connect_and_handshake 到 Ready 時填,serve 取用後 drop;重連取新）。
     stream: Option<F::Stream>,
     reader: Option<FrameReader>,
+    /// **W5-S2**:account/positions 消化器（入站 IN 61-64 分派至此;斷線由 serve 收尾標記）。
+    account_data: AccountDataDigest,
+    /// W5-S2 訂閱 pump 開關（默認 **off**;`enable_account_data_subscriptions` 開啟後 serve
+    /// 期自動經 governor `AccountData` 類送 reqAccountSummary/reqPositions。真消費者=driver
+    /// 測試域;TODO(W6) IPC 投影面接真開關）。
+    subscribe_account_data: bool,
+    /// G1 session 級 blocker 記憶:serverVersion 低於 positions 下界 → 本 session 不再重試
+    /// reqPositions（重連/reset 後新 driver 世代重評;避免每 tick 空耗 governor token）。
+    positions_floor_blocked: bool,
 }
 
 impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
@@ -329,6 +345,9 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
             observed_degraded: false,
             stream: None,
             reader: None,
+            account_data: AccountDataDigest::new(AccountDataConfig::default()),
+            subscribe_account_data: false,
+            positions_floor_blocked: false,
         }
     }
 
@@ -343,6 +362,17 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
     /// serve 期是否曾抵達 Degraded（見欄位）。
     pub(crate) fn observed_degraded(&self) -> bool {
         self.observed_degraded
+    }
+
+    /// **W5-S2** account/positions 消化器唯讀檢視（typed staleness + 最新行）。
+    pub(crate) fn account_data(&self) -> &AccountDataDigest {
+        &self.account_data
+    }
+
+    /// **W5-S2** 開啟訂閱 pump（默認 off;serve 期經 governor `AccountData` 類自動訂閱。
+    /// 真消費者=driver 測試域;TODO(W6) IPC 投影面接真開關）。
+    pub(crate) fn enable_account_data_subscriptions(&mut self) {
+        self.subscribe_account_data = true;
     }
 
     /// **測試專用**:可變存取內部 manager（令測試預先耗盡 governor token 逼心跳 Queued,驗 driver
@@ -489,6 +519,13 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
             if io_broke {
                 break self.drop_io(now);
             }
+            // 2b. W5-S2:account/positions 訂閱 pump（默認 off;開啟後未訂閱/失效即經
+            // governor `AccountData` 類取 grant → send_framed 送訂閱,單一出口不變量）。
+            if self.subscribe_account_data
+                && self.pump_account_data(&mut stream, now).await.is_err()
+            {
+                break self.drop_io(now);
+            }
             // 3. 心跳回覆逾時 → miss（達 degraded 門檻 → Degraded;達 drop 門檻 → Backoff）。
             if self.manager.fsm_mut().heartbeat_reply_overdue(now) {
                 let would_drop = self.manager.fsm_mut().heartbeat_miss_would_drop();
@@ -514,9 +551,76 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
                 ServeRead::Idle => {} // 靜默 tick,續迴圈（心跳 liveness 於頂部）
             }
         };
+        // W5-S2:serve 任何結束路徑（EOF/IO/fatal/心跳 drop/budget）= 連線失效 → 快照標
+        // `DisconnectedStale`（訂閱不跨連線存活,重連需重訂閱;fail-closed 明示不可信）。
+        self.account_data.on_disconnect();
         drop(stream);
         drop(reader);
         end
+    }
+
+    /// W5-S2 訂閱 pump:未訂閱/斷線失效的資料面 → 取 governor grant（`AccountData` 類,
+    /// 單一出口）→ digest 轉移訂閱狀態 → `send_framed` 送出。grant 先於 begin:begin 成功
+    /// 即送出,無「已標訂閱但未送」的簿記謊言;grant 不足本 tick 跳過（無副作用,下 tick 重試）。
+    /// `Err(())` = IO 斷,呼叫端 fail-closed。
+    async fn pump_account_data<S: AsyncWrite + Unpin>(
+        &mut self,
+        stream: &mut S,
+        now: u64,
+    ) -> Result<(), ()> {
+        // summary(G3 單訂閱:staleness 閘保證 begin 不撞 AlreadyActive)。
+        if matches!(
+            self.account_data.summary_staleness(now),
+            SnapshotStaleness::NotSubscribed | SnapshotStaleness::DisconnectedStale
+        ) {
+            if let Some(grant) = self.manager.account_data_grant(now) {
+                match self
+                    .account_data
+                    .begin_account_summary(ACCOUNT_SUMMARY_REQ_ID)
+                {
+                    Ok(frame) => {
+                        if send_framed(stream, grant, &frame, self.timeouts.io)
+                            .await
+                            .is_err()
+                        {
+                            return Err(());
+                        }
+                    }
+                    // staleness 閘下不可達;防禦性 no-op（grant 隨 scope drop）。
+                    Err(_) => {}
+                }
+            }
+        }
+        // positions(G1:serverVersion 低於下界 → session 級 blocker,本 session 不再重試)。
+        if !self.positions_floor_blocked
+            && matches!(
+                self.account_data.positions_staleness(now),
+                SnapshotStaleness::NotSubscribed | SnapshotStaleness::DisconnectedStale
+            )
+        {
+            let server_version = match self.manager.state() {
+                SessionState::Ready(rs) | SessionState::Degraded(rs) => rs.server_version,
+                _ => return Ok(()),
+            };
+            if let Some(grant) = self.manager.account_data_grant(now) {
+                match self.account_data.begin_positions(server_version) {
+                    Ok(frame) => {
+                        if send_framed(stream, grant, &frame, self.timeouts.io)
+                            .await
+                            .is_err()
+                        {
+                            return Err(());
+                        }
+                    }
+                    Err(AccountDataReject::ServerVersionBelowPositionsFloor { .. }) => {
+                        // G1 session 級 blocker:記憶後不再空耗 token 重試（新連線世代重評）。
+                        self.positions_floor_blocked = true;
+                    }
+                    Err(_) => {}
+                }
+            }
+        }
+        Ok(())
     }
 
     fn in_serve_state(&self) -> bool {
@@ -564,8 +668,36 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
             },
             // 15/9:serve 期重現（罕見）→ 容忍忽略（已知 msgId,非未知）。
             Some(KnownMsgId::ManagedAccounts) | Some(KnownMsgId::NextValidId) => {}
+            // W5-S2:IN 61-64 account/positions → 消化器（wire 損壞才斷線,資料層 reject 續 serve）。
+            Some(KnownMsgId::AccountSummary) => {
+                let r = self.account_data.on_account_summary_frame(payload, now);
+                self.handle_account_data_result(r, now);
+            }
+            Some(KnownMsgId::AccountSummaryEnd) => {
+                let r = self.account_data.on_account_summary_end_frame(payload, now);
+                self.handle_account_data_result(r, now);
+            }
+            Some(KnownMsgId::PositionData) => {
+                let r = self.account_data.on_position_frame(payload, now);
+                self.handle_account_data_result(r, now);
+            }
+            Some(KnownMsgId::PositionEnd) => {
+                let r = self.account_data.on_position_end_frame(payload, now);
+                self.handle_account_data_result(r, now);
+            }
             // 未知 msgId → fail-closed 斷線（§2.3:不猜欄位、不跳過）。
             None => self.fail_closed(now),
+        }
+    }
+
+    /// W5-S2 消化結果分流:`WireMalformed`（欄位缺/非數字/錯位）= wire 損壞 → 既有紀律
+    /// fail-closed 斷線;其餘 typed reject（契約 blocker/哨兵/reqId 錯配/未訂而收）= 資料層
+    /// fail-closed——快照已由 digest 標 `Invalidated`/拒併入,session 續 serve（不 panic）。
+    fn handle_account_data_result(&mut self, r: Result<(), AccountDataReject>, now: u64) {
+        match r {
+            Ok(()) => {}
+            Err(AccountDataReject::WireMalformed(_)) => self.fail_closed(now),
+            Err(_) => {}
         }
     }
 
@@ -703,6 +835,12 @@ async fn run_handshake_inner<S: AsyncRead + AsyncWrite + Unpin>(
                 }
                 Err(_) => return Err(HandshakeErr::Transient),
             },
+            // W5-S2:握手期不預期 account/positions 資料（未訂而收=亂序/協議意外）→
+            // fail-closed transient（不猜、不 fail-open;可重試）。
+            Some(KnownMsgId::AccountSummary)
+            | Some(KnownMsgId::AccountSummaryEnd)
+            | Some(KnownMsgId::PositionData)
+            | Some(KnownMsgId::PositionEnd) => return Err(HandshakeErr::Transient),
             // 未知 msgId 於握手 → fail-closed transient（不猜欄位;可重試,不 fail-open）。
             None => return Err(HandshakeErr::Transient),
         }
