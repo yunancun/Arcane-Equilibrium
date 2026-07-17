@@ -1358,6 +1358,71 @@ pub mod scenarios {
         ]));
         Scenario::new(vec![FakeStep::Send(frames)])
     }
+
+    // ---- W6-S4 provenance calendar 綁定場景 ----
+
+    /// **W6-S4 happy calendar 綁定**:contract details（`cd_req_id`,產可解析 liquidHours 的
+    /// identity row）+ market data（`md_req_id`）同 session——driver 對該 conId 的 row 跑
+    /// `parse_trading_calendar`+`compute_calendar_hash`,把真值 calendar_hash 綁進 provenance。
+    /// contract details 先於 market data tick,令 identity row 到達後 pump rebind 補綁溯源錨。
+    pub fn market_data_with_contract_details_session(cd_req_id: i64, md_req_id: i64) -> Scenario {
+        let mut frames = happy_handshake_frames();
+        frames.push(contract_details_row(
+            cd_req_id, 176, 756733, "SPY", "STK", "USD", "ARCA", "ETF",
+        ));
+        frames.push(contract_details_end(cd_req_id));
+        frames.push(market_data_type(md_req_id, 1)); // live → Entitled
+        frames.push(tick_price(md_req_id, 1, "512.34", 100, 0)); // BID
+        frames.push(tick_size(md_req_id, 0, 200)); // BID_SIZE
+        frames.push(tick_price(md_req_id, 2, "512.36", 150, 0)); // ASK
+        Scenario::new(vec![FakeStep::Send(frames)])
+    }
+
+    /// **W6-S4 calendar 解析失敗 fail-closed**:identity row 到達（通過身分契約）但 timeZoneId
+    /// 非白名單（`Europe/London` 非 US 股市 lane 白名單）→ `parse_trading_calendar` 拒 →
+    /// provenance calendar 標未綁哨兵（絕不捏 hash）。row 身分本身有效（tz 原字串保真,身分契約
+    /// 只驗非空）,故 identity row 消化成功、calendar 綁定失敗——精確打中「row 在但日曆不可解」臂。
+    pub fn market_data_bad_calendar_row_session(cd_req_id: i64, md_req_id: i64) -> Scenario {
+        let mut frames = happy_handshake_frames();
+        let mut fields =
+            contract_details_fields(cd_req_id, 176, 756733, "SPY", "STK", "USD", "ARCA", "ETF");
+        // timeZoneId 唯一出現處=US/Eastern（head 欄 25）→ 覆為非白名單 tz。
+        for f in fields.iter_mut() {
+            if f == "US/Eastern" {
+                *f = "Europe/London".to_string();
+            }
+        }
+        let refs: Vec<&str> = fields.iter().map(String::as_str).collect();
+        frames.push(custom_frame(&refs));
+        frames.push(contract_details_end(cd_req_id));
+        frames.push(market_data_type(md_req_id, 1));
+        frames.push(tick_price(md_req_id, 1, "512.34", 100, 0)); // BID
+        Scenario::new(vec![FakeStep::Send(frames)])
+    }
+
+    /// **W6-S4/Task2 未知 entitlement code 仍 halt**（IB-B′ 收口回歸）:訂閱後收表外 code
+    /// （9999,非 entitlement 表）帶對應 reqId → `on_entitlement_error` 的 `Unknown → Halt` 臂
+    /// 生效（fail-closed 不弱化;pre-filter 助手已移除故此路徑仍達）。
+    pub fn market_data_unknown_entitlement_code(req_id: i64) -> Scenario {
+        let mut frames = happy_handshake_frames();
+        frames.push(market_data_type(req_id, 1)); // 先建 Entitled 訂閱
+        frames.push(err_msg_req(req_id, 9999, "some non-entitlement error"));
+        Scenario::new(vec![FakeStep::Send(frames)])
+    }
+
+    /// **W6-S4/Task3 session-scope reqId=-1 不誤路由**（E2-N1）:訂閱 Entitled 後,收 reqId=-1
+    /// 的 session-scope entitlement 錯誤碼（10197）→ `rid > 0` 守衛令其不進 per-reqId FSM,
+    /// 活躍訂閱不被誤 halt。
+    pub fn market_data_session_scope_error_after_sub(req_id: i64) -> Scenario {
+        let mut frames = happy_handshake_frames();
+        frames.push(market_data_type(req_id, 1)); // Entitled
+        frames.push(tick_price(req_id, 1, "512.34", 100, 0)); // BID（窗成形）
+        frames.push(err_msg(
+            10197,
+            "No market data during competing live session",
+        )); // reqId=-1
+        Scenario::new(vec![FakeStep::Send(frames)])
+    }
 }
 
 // ===========================================================================

@@ -39,13 +39,19 @@
 // default build 無 production caller,由 linker DCE（g4 symbol audit + fake 缺席審計驗證）。
 #![allow(dead_code)]
 
+use std::collections::BTreeMap;
 use std::future::Future;
 use std::time::Duration;
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use openclaw_types::ibkr_tws_session_state::IB_ERR_DUPLICATE_CLIENT_ID;
-use openclaw_types::{IB_INFO_CODE_FLOOR, PINNED_MIN_SERVER_VERSION};
+use openclaw_types::{
+    IbkrCalendarHoursKindV1, IBKR_CALENDAR_HASH_UNBOUND_SENTINEL, IB_INFO_CODE_FLOOR,
+    PINNED_MIN_SERVER_VERSION,
+};
+
+use crate::ibkr_trading_calendar::{compute_calendar_hash, parse_trading_calendar};
 
 use crate::ibkr_tws_account_data::{
     AccountDataConfig, AccountDataDigest, AccountDataReject, SnapshotStaleness,
@@ -95,6 +101,11 @@ pub(crate) const ORDER_EXEC_REQ_ID: i64 = 9002;
 /// W6-S1 contract details 快照的固定 reqId（單槽自限;與 9001/9002 錯開——fake 場景以此值
 /// 對齊;通用 request-id 分配器仍歸 W6+ 請求路由）。
 pub(crate) const CONTRACT_DETAILS_REQ_ID: i64 = 9003;
+
+/// **W6-S4 calendar_hash 緩存上界**（conId → sha256 映射的有界注入面,沿 R17 cap 慣例;真實
+/// lane 量級=數百 instrument,4096 為 10×+ 裕度。超界=不再緩存+audit,fail-closed 不驅逐——
+/// 退回每 tick 現算,語義不變）。
+const CALENDAR_HASH_CACHE_CAP: usize = 4096;
 
 // ===========================================================================
 // (a) transport 抽象（注入 stream 來源;fake=duplex,W8=TCP factory）
@@ -376,9 +387,20 @@ pub(crate) struct SessionDriver<P: ConnectPermitProvider, F: TransportFactory> {
     /// serve 收尾標記）。
     market_data: MarketDataDigest,
     /// W6-S3 訂閱 pump 期望集（默認空=off;`enable_market_data` 綁定後 serve 期經 governor
-    /// 主桶自動送 reqMktData。元素=(reqId, request, instrument_identity_hash, calendar_hash);
-    /// 真消費者=driver 測試域;TODO(W6) IPC 投影面接真開關+請求路由）。
-    market_data_requests: Vec<(i64, MarketDataRequest, String, String)>,
+    /// 主桶自動送 reqMktData。元素=(reqId, request)——**W6-S4 起 provenance 溯源錨
+    /// (identity/calendar hash) 不再由 caller 供給,改由 driver 對該 conId 的 W6-S1 identity
+    /// row 現算**（見 `resolve_provenance_anchors`）。真消費者=driver 測試域;TODO IPC 投影面
+    /// 接真開關+請求路由）。
+    market_data_requests: Vec<(i64, MarketDataRequest)>,
+    /// **W6-S4 calendar_hash 緩存**（conId → sha256;identity row 到達後首次解析即緩存,沿 R17
+    /// 有界慣例——避免每 serve tick 重跑 `parse_trading_calendar`）。cap 超界=不再緩存+audit
+    /// 計數（fail-closed 不驅逐;真實 lane 量級數百 instrument,cap 為裕度）。世代推進時清空
+    /// （identity rows 隨新世代重取,舊 calendar 綁定不得跨世代冒充）。
+    calendar_hash_cache: BTreeMap<i64, String>,
+    /// calendar 緩存 cap 超界計數（telemetry;超界=退回每 tick 現算,語義不變只失緩存效益）。
+    calendar_cache_cap_rejects: u64,
+    /// identity row 存在但 calendar 解析失敗計數（telemetry;→ provenance 標未綁,fail-closed）。
+    calendar_parse_failed_count: u64,
     /// W6-S3 delayed-only opt-in:true=訂閱前先送 reqMarketDataType(3)（send-before-subscribe;
     /// IB 現勘:降級是每 session 顯式 opt-in）。
     market_data_delayed_mode: bool,
@@ -447,6 +469,9 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
             contract_data_floor_blocked: false,
             market_data: MarketDataDigest::new(MarketDataConfig::default()),
             market_data_requests: Vec::new(),
+            calendar_hash_cache: BTreeMap::new(),
+            calendar_cache_cap_rejects: 0,
+            calendar_parse_failed_count: 0,
             market_data_delayed_mode: false,
             market_data_type_sent: false,
             market_data_floor_blocked: false,
@@ -508,17 +533,27 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
         &self.market_data
     }
 
-    /// **W6-S3** 綁定訂閱期望集並開啟 pump（默認 off;serve 期經 governor 主桶自動送
+    /// **W6-S3/S4** 綁定訂閱期望集並開啟 pump（默認 off;serve 期經 governor 主桶自動送
     /// reqMktData——market data 非 historical 面,走主桶。`delayed_mode`=true 則訂閱前先送
-    /// reqMarketDataType(3)（send-before-subscribe）。元素=(reqId, request, identity_hash,
-    /// calendar_hash)。真消費者=driver 測試域;TODO(W6) IPC 投影面接真開關）。
+    /// reqMarketDataType(3)（send-before-subscribe）。元素=(reqId, request);**W6-S4 起
+    /// provenance 溯源錨由 driver 對該 conId 的 identity row 現算,不再由 caller 供給 hash**。
+    /// 真消費者=driver 測試域;TODO IPC 投影面接真開關）。
     pub(crate) fn enable_market_data(
         &mut self,
-        requests: Vec<(i64, MarketDataRequest, String, String)>,
+        requests: Vec<(i64, MarketDataRequest)>,
         delayed_mode: bool,
     ) {
         self.market_data_requests = requests;
         self.market_data_delayed_mode = delayed_mode;
+    }
+
+    /// **W6-S4 telemetry**:calendar 綁定緩存的觀測面（cap 超界 / identity row 存在但日曆解析
+    /// 失敗 的計數;IPC 投影/測試唯讀消費）。
+    pub(crate) fn calendar_binding_audit(&self) -> (u64, u64) {
+        (
+            self.calendar_cache_cap_rejects,
+            self.calendar_parse_failed_count,
+        )
     }
 
     /// **W5-S4** 最近一次握手的 wire 實檢事實唯讀檢視（見 `wire_facts` 欄注釋;attestation
@@ -636,6 +671,9 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
                 self.market_data_floor_blocked = false;
                 // delayed opt-in 不跨連線存活 → 世代重置,新 session 須重送 reqMarketDataType(3)。
                 self.market_data_type_sent = false;
+                // W6-S4:calendar 綁定緩存不跨世代——新世代 identity rows 重取,舊 calendar_hash
+                // 不得冒充新世代綁定（identity 逐日刷新;跨世代 conId 可能重編）。
+                self.calendar_hash_cache.clear();
                 // 到 Ready:stream+reader 交棒給 serve。
                 self.stream = Some(stream);
                 self.reader = Some(reader);
@@ -997,46 +1035,94 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
         }
         // 逐期望集訂閱（clone 避開 borrow 衝突;期望集固定小量）。
         let requests = self.market_data_requests.clone();
-        for (req_id, req, identity_hash, calendar_hash) in requests {
-            // 已 halt / 活躍 / snapshot 完成的 reqId 由 digest begin 自身 typed 拒兜住;此處只
-            // 對「未訂/斷線失效」的面重訂（staleness 閘,避免每 tick 空耗 governor token)。
-            let needs_begin = match self.market_data.quote_staleness(req_id, now) {
-                None => true, // 尚無此 reqId 訂閱
-                Some(SnapshotStaleness::DisconnectedStale) => true,
-                Some(_) => false,
-            };
-            if !needs_begin {
-                continue;
-            }
-            if let Some(grant) = self.manager.account_data_grant(now) {
-                match self.market_data.begin_subscription(
-                    &req,
-                    req_id,
-                    server_version,
-                    identity_hash,
-                    calendar_hash,
-                    now,
-                ) {
-                    Ok(frame) => {
-                        if send_framed(stream, grant, &frame, self.timeouts.io)
-                            .await
-                            .is_err()
-                        {
-                            return Err(());
+        for (req_id, req) in requests {
+            // W6-S4:溯源錨由該 conId 的 W6-S1 identity row 現算——row 缺/日曆解析失敗 → 未綁
+            //（fail-closed,絕不捏值;provenance validate 兜底標未綁）。
+            let (identity_hash, calendar_hash) = self.resolve_provenance_anchors(req.con_id);
+            // 已 halt / 活躍 / snapshot 完成的 reqId 由 digest begin 自身 typed 拒兜住;此處對
+            //「未訂/斷線失效」重訂,對「活躍」則嘗試補綁 begin 時尚未到達的溯源錨（rebind）。
+            match self.market_data.quote_staleness(req_id, now) {
+                None | Some(SnapshotStaleness::DisconnectedStale) => {
+                    if let Some(grant) = self.manager.account_data_grant(now) {
+                        match self.market_data.begin_subscription(
+                            &req,
+                            req_id,
+                            server_version,
+                            identity_hash,
+                            calendar_hash,
+                            now,
+                        ) {
+                            Ok(frame) => {
+                                if send_framed(stream, grant, &frame, self.timeouts.io)
+                                    .await
+                                    .is_err()
+                                {
+                                    return Err(());
+                                }
+                            }
+                            Err(MarketDataReject::ServerVersionBelowFloor { .. }) => {
+                                // floor session 級 blocker:記憶後不再空耗 token 重試（新世代重評）。
+                                self.market_data_floor_blocked = true;
+                                return Ok(());
+                            }
+                            // lines 耗盡 / 已活躍 / halt / 被注入 frame:本 tick 跳過（grant 隨
+                            // scope drop;lines 耗盡的 cancel-before-resubscribe 由 W6+ 路由層決策）。
+                            Err(_) => {}
                         }
                     }
-                    Err(MarketDataReject::ServerVersionBelowFloor { .. }) => {
-                        // floor session 級 blocker:記憶後不再空耗 token 重試（新連線世代重評）。
-                        self.market_data_floor_blocked = true;
-                        return Ok(());
-                    }
-                    // lines 耗盡 / 已活躍 / halt / 被注入 frame:本 tick 跳過（grant 隨 scope
-                    // drop;lines 耗盡的 cancel-before-resubscribe 由 W6+ 路由層決策）。
-                    Err(_) => {}
+                }
+                Some(_) => {
+                    // 活躍訂閱:begin 當時 identity row 若未到,provenance calendar 標未綁——row
+                    // 到達即補綁（bind-once;新錨仍未綁則 no-op）。
+                    self.market_data.rebind_provenance_anchors_if_unbound(
+                        req_id,
+                        identity_hash,
+                        calendar_hash,
+                    );
                 }
             }
         }
         Ok(())
+    }
+
+    /// **W6-S4 provenance 溯源錨解析**:對 conId 取 W6-S1 identity row → `identity_hash` 真值 +
+    /// 對其 `liquid_hours`（RTH,IBKR_TODO §5-W6 範圍 in 4 = RTH-only v1）跑
+    /// `parse_trading_calendar`+`compute_calendar_hash` 得 `calendar_hash` 真值。
+    /// **fail-closed**:row 缺 → identity_hash 空 + calendar 未綁哨兵;row 在但日曆解析失敗
+    ///（壞 grammar / 未知 tz / 亂序）→ identity_hash 真值 + calendar 未綁哨兵——**絕不捏 hash、
+    /// 絕不以 shape-only 佔位冒充真值**（provenance `validate()` 收斂 `CalendarUnbound`）。
+    /// calendar_hash 首次算即緩存（R17 有界慣例;cap 超界=退回現算+audit,語義不變）。
+    fn resolve_provenance_anchors(&mut self, con_id: i64) -> (String, String) {
+        // 先 clone row（釋放 contract_data 的 immutable borrow,下方要 mutable 借 cache）。
+        let row = match self.contract_data.identity_row(con_id) {
+            Some(r) => r.clone(),
+            None => {
+                return (
+                    String::new(),
+                    IBKR_CALENDAR_HASH_UNBOUND_SENTINEL.to_string(),
+                );
+            }
+        };
+        let identity_hash = row.identity_hash.clone();
+        if let Some(h) = self.calendar_hash_cache.get(&con_id) {
+            return (identity_hash, h.clone());
+        }
+        let calendar_hash = match parse_trading_calendar(&row, IbkrCalendarHoursKindV1::Rth) {
+            Ok(cal) => {
+                let h = compute_calendar_hash(&cal);
+                if self.calendar_hash_cache.len() < CALENDAR_HASH_CACHE_CAP {
+                    self.calendar_hash_cache.insert(con_id, h.clone());
+                } else {
+                    self.calendar_cache_cap_rejects += 1;
+                }
+                h
+            }
+            Err(_) => {
+                self.calendar_parse_failed_count += 1;
+                IBKR_CALENDAR_HASH_UNBOUND_SENTINEL.to_string()
+            }
+        };
+        (identity_hash, calendar_hash)
     }
 
     fn in_serve_state(&self) -> bool {
@@ -1086,7 +1172,11 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
                     let _ = self.manager.on_error_frame(code, class, now);
                     if let Ok(fields) = decode_fields(payload) {
                         if let Some(rid) = fields.get(2).and_then(|s| s.parse::<i64>().ok()) {
-                            if self.market_data.contains_subscription(rid) {
+                            // E2-N1:session-scope ERR_MSG 攜 reqId=-1;market-data 訂閱 reqId 恆正
+                            //（enable_market_data 分配正 id,begin 有 debug_assert 釘住）——`rid > 0`
+                            // 守衛令 -1（及任何非正 caller-contract 違反值）結構上不與訂閱撞,不誤
+                            // 路由至 entitlement FSM（session 層對 -1 本就 no-op,不重複消費）。
+                            if rid > 0 && self.market_data.contains_subscription(rid) {
                                 self.market_data.on_entitlement_error(rid, code);
                             }
                         }

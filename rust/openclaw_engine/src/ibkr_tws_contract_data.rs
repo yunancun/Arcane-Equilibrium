@@ -670,6 +670,14 @@ impl ContractDataDigest {
         (self.identity_staleness(now_ms), self.identity_rows.values())
     }
 
+    /// **W6-S4**:依 conId 取 identity row 唯讀檢視（provenance calendar 綁定的真值來源——
+    /// driver market data 訂閱時對此 row 的 tradingHours/liquidHours 跑 `parse_trading_calendar`
+    /// 產 calendar_hash）。row 缺（尚未 begin/尚未回報/毒化清空）→ `None`,driver 據此 fail-closed
+    /// 標未綁（絕不捏值）。不隨 staleness 過濾:row 內容=PIT 身份事實,行情訂閱另有自身 staleness。
+    pub(crate) fn identity_row(&self, con_id: i64) -> Option<&IbkrInstrumentIdentityRowV1> {
+        self.identity_rows.get(&con_id)
+    }
+
     /// audit 計數器唯讀檢視。
     pub(crate) fn audit(&self) -> &ContractDataAudit {
         &self.audit

@@ -39,8 +39,8 @@ use std::time::Duration;
 
 use openclaw_types::{
     IbkrMarketDataProvenanceV1, IbkrPriceAdjustmentV1, IbkrQuoteRowV1, IbkrTickEntitlementV1,
-    IbkrTickTypeV1, IbkrTickValueKind, IBKR_MARKET_DATA_PROVENANCE_CONTRACT_ID,
-    IBKR_QUOTE_ROW_CONTRACT_ID,
+    IbkrTickTypeV1, IbkrTickValueKind, IBKR_CALENDAR_HASH_UNBOUND_SENTINEL,
+    IBKR_MARKET_DATA_PROVENANCE_CONTRACT_ID, IBKR_QUOTE_ROW_CONTRACT_ID,
 };
 
 use crate::ibkr_tws_account_data::SnapshotStaleness;
@@ -180,8 +180,11 @@ impl MarketDataDigest {
 
     /// 開始一個 L1 tick 訂閱:回待送 v11 reqMktData frame。floor guard → 單一 reqId 自限 →
     /// halt 記憶 → lines count quota → 綁定 sv/hash context。
-    /// `instrument_identity_hash`（W6-S1）/`calendar_hash`（W6-S2）由上游供給,provenance
-    /// 溯源錨（本切片 shape 承載,語義綁定歸 S1/S2）。
+    /// **W6-S4 溯源錨綁真值**:`instrument_identity_hash`（W6-S1）/`calendar_hash`（W6-S2 由
+    /// driver 對該 conId 的 identity row 跑 `parse_trading_calendar`+`compute_calendar_hash`
+    /// 產出真值）由 driver 供給。begin 當下該 conId 的 identity row 若尚未到達（contract details
+    /// 與 market data 為獨立請求 lane,回報有先後）,driver 傳未綁哨兵/空——provenance mint 誠實
+    /// 標未綁（fail-closed,絕不捏值）,待 row 到達由 `rebind_provenance_anchors_if_unbound` 補綁。
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn begin_subscription(
         &mut self,
@@ -192,6 +195,13 @@ impl MarketDataDigest {
         calendar_hash: String,
         now_ms: u64,
     ) -> Result<Vec<u8>, MarketDataReject> {
+        // E2-N1 caller-contract:market-data 訂閱 reqId 恆正（enable_market_data 分配正 id）——
+        // session-scope ERR_MSG 攜 reqId=-1,恆正令 -1 結構上不與任何訂閱撞（見 driver
+        // entitlement 路由的 `rid > 0` 守衛）。違反=分配器 bug,debug 期即炸。
+        debug_assert!(
+            req_id > 0,
+            "market data reqId must be positive (session-scope reqId=-1 must not collide)"
+        );
         if server_version < self.config.min_server_version_floor {
             return Err(MarketDataReject::ServerVersionBelowFloor {
                 server_version,
@@ -258,6 +268,36 @@ impl MarketDataDigest {
                 Some(encode_cancel_mkt_data(req_id))
             }
             _ => None,
+        }
+    }
+
+    /// **W6-S4 provenance 錨補綁**:begin 訂閱時該 conId 的 W6-S1 identity row 可能尚未到達
+    ///（contract details 與 market data 為獨立請求 lane,同 serve tick 併發送出,回報有先後）——
+    /// 此時 provenance 溯源錨標未綁。driver 於 identity row 到達後以本方法補綁**尚未綁定**的
+    /// 活躍訂閱。兩錨獨立補綁（row 在但日曆不可解時,identity_hash 可綁而 calendar 仍未綁）:
+    /// - `instrument_identity_hash`:begin 時 row 未到=空;row 到達即補真值。
+    /// - `calendar_hash`:begin 時=未綁哨兵;日曆解析成功即補真值,失敗仍留哨兵。
+    /// 皆 bind-once（已綁定者不動,避免 PIT 溯源錨漂移;仍未綁則不動,絕不以未綁覆真值、不捏值）。
+    pub(crate) fn rebind_provenance_anchors_if_unbound(
+        &mut self,
+        req_id: i64,
+        instrument_identity_hash: String,
+        calendar_hash: String,
+    ) {
+        if let Some(sub) = self.subs.get_mut(&req_id) {
+            if !sub.phase.occupies_line() {
+                return;
+            }
+            // identity_hash:空=未綁 → row 到達的真值補綁（已綁不動）。
+            if sub.instrument_identity_hash.is_empty() && !instrument_identity_hash.is_empty() {
+                sub.instrument_identity_hash = instrument_identity_hash;
+            }
+            // calendar_hash:哨兵=未綁 → 真值補綁（仍為哨兵則不動,不以未綁覆未綁）。
+            if sub.calendar_hash == IBKR_CALENDAR_HASH_UNBOUND_SENTINEL
+                && calendar_hash != IBKR_CALENDAR_HASH_UNBOUND_SENTINEL
+            {
+                sub.calendar_hash = calendar_hash;
+            }
         }
     }
 

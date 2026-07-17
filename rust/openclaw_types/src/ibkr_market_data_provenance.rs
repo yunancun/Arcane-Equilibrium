@@ -31,6 +31,15 @@ use crate::stock_etf_lane::{AssetLane, Broker};
 /// 契約 id（消化層 / cross-surface parity 對齊）。
 pub const IBKR_MARKET_DATA_PROVENANCE_CONTRACT_ID: &str = "stock_market_data_provenance_v1";
 
+/// **W6-S4 calendar 未綁哨兵**：market data provenance mint 時,若該 conId 尚無 W6-S1
+/// identity row,或其 tradingHours/liquidHours 無法解析為交易日曆,消化層以此哨兵填
+/// `calendar_hash`——`validate()` 收斂為 `CalendarUnbound` blocker（fail-closed,不 accepted）。
+///
+/// 為什麼要 typed 未綁態而非捏值:calendar_hash 是溯源錨,未綁時**絕不捏 hash、絕不以
+/// shape-only 佔位冒充真值**（那會令下游把未經日曆綁定的 quote 當可信）——未綁就誠實標未綁。
+/// 本哨兵刻意非 sha256 形狀,與真 hash / 「hash 形狀損壞」在 `validate()` 分支上結構性區隔。
+pub const IBKR_CALENDAR_HASH_UNBOUND_SENTINEL: &str = "calendar_unbound";
+
 /// market-data entitlement 三態（+ fail-closed 未知）。錯誤碼 FSM（354/10167/10197…）的
 /// 收斂終態:`None`=halt、`Delayed`=降級檔、`Entitled`=realtime。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -259,7 +268,12 @@ impl IbkrMarketDataProvenanceV1 {
         if !is_sha256_hex(&self.instrument_identity_hash) {
             blockers.push(B::InstrumentIdentityHashInvalid);
         }
-        if !is_sha256_hex(&self.calendar_hash) {
+        // W6-S4:calendar 未綁（conId 尚無 identity row / 日曆解析失敗）以哨兵承載 → typed
+        // `CalendarUnbound`（fail-closed）;與「hash 形狀損壞」（`CalendarHashInvalid`）分支區隔——
+        // 消化層絕不捏 hash 冒充已綁。
+        if self.calendar_hash == IBKR_CALENDAR_HASH_UNBOUND_SENTINEL {
+            blockers.push(B::CalendarUnbound);
+        } else if !is_sha256_hex(&self.calendar_hash) {
             blockers.push(B::CalendarHashInvalid);
         }
         if !is_sha256_hex(&self.provenance_hash) {
@@ -311,6 +325,9 @@ pub enum IbkrMarketDataProvenanceBlocker {
     WindowOutOfOrder,
     InstrumentIdentityHashInvalid,
     CalendarHashInvalid,
+    /// W6-S4:calendar 未綁（哨兵承載;conId 尚無 identity row / 日曆解析失敗）——fail-closed
+    /// 未綁態,與 `CalendarHashInvalid`（形狀損壞）語義區隔。
+    CalendarUnbound,
     ProvenanceHashInvalid,
     OrderRouted,
     SecretContentSerialized,
@@ -379,6 +396,21 @@ mod tests {
             .validate(NOW)
             .blockers
             .contains(&IbkrMarketDataProvenanceBlocker::LastTickInFuture));
+    }
+
+    #[test]
+    fn calendar_unbound_sentinel_is_typed_fail_closed() {
+        // W6-S4:未綁哨兵 → `CalendarUnbound`（非 `CalendarHashInvalid`）,fail-closed 不 accepted。
+        let mut r = IbkrMarketDataProvenanceV1::accepted_fixture();
+        r.calendar_hash = IBKR_CALENDAR_HASH_UNBOUND_SENTINEL.to_string();
+        let v = r.validate(NOW);
+        assert!(!v.accepted);
+        assert!(v
+            .blockers
+            .contains(&IbkrMarketDataProvenanceBlocker::CalendarUnbound));
+        assert!(!v
+            .blockers
+            .contains(&IbkrMarketDataProvenanceBlocker::CalendarHashInvalid));
     }
 
     #[test]
