@@ -81,6 +81,22 @@ pub(crate) const IN_POSITION_END_MSG_ID: i64 = 62;
 pub(crate) const IN_ACCOUNT_SUMMARY_MSG_ID: i64 = 63;
 /// IN 64:accountSummaryEnd（全量快照完成標記）。
 pub(crate) const IN_ACCOUNT_SUMMARY_END_MSG_ID: i64 = 64;
+// W5-S3 open orders/executions/commissions **入站（IN）空間** msg ID。IB 現勘（2026-07-17,
+// 官方 ibapi 9.81.1.post1）:IN 5(OPEN_ORDER)與 OUT 5(reqOpenOrders)撞值——OUT 空間的
+// reqOpenOrders=5 / reqExecutions=7 / reqAllOpenOrders=16 常數居 `ibkr_tws_order_exec_data`;
+// 命名帶 `IN_`/`OUT_` 方向以免撞值誤用（沿 W5-S2 61-64 慣例）。
+/// IN 3:orderStatus（推送;官方明言常有重複,消化端冪等去重）。
+pub(crate) const IN_ORDER_STATUS_MSG_ID: i64 = 3;
+/// IN 5:openOrder（head-prefix 最小消化;與 OUT 5 撞值,見上注）。
+pub(crate) const IN_OPEN_ORDER_MSG_ID: i64 = 5;
+/// IN 11:execDetails（成交資料行;快照+之後推送恆在）。
+pub(crate) const IN_EXECUTION_DATA_MSG_ID: i64 = 11;
+/// IN 53:openOrderEnd（快照收批標記）。
+pub(crate) const IN_OPEN_ORDER_END_MSG_ID: i64 = 53;
+/// IN 55:execDetailsEnd（快照收批標記）。
+pub(crate) const IN_EXECUTION_DATA_END_MSG_ID: i64 = 55;
+/// IN 59:commissionReport（與 execDetails 無到達順序保證,消化端 execId either-order join）。
+pub(crate) const IN_COMMISSION_REPORT_MSG_ID: i64 = 59;
 
 // 注:`IB_INFO_CODE_FLOOR`（≥2100 info 地板)單處維護於 openclaw_types crate;B1 driver
 // 直接自 openclaw_types import（避免兩份 2100 常數漂移)。本 wire 檔的錯誤分類走 types
@@ -455,6 +471,18 @@ pub(crate) enum KnownMsgId {
     AccountSummary,
     /// IN 64:accountSummaryEnd。
     AccountSummaryEnd,
+    /// IN 3:orderStatus（W5-S3;推送,消化端冪等去重）。
+    OrderStatus,
+    /// IN 5:openOrder（W5-S3;OUT 空間 5=reqOpenOrders,兩空間撞值,見常數注釋）。
+    OpenOrder,
+    /// IN 11:execDetails。
+    ExecutionData,
+    /// IN 53:openOrderEnd。
+    OpenOrderEnd,
+    /// IN 55:execDetailsEnd。
+    ExecutionDataEnd,
+    /// IN 59:commissionReport。
+    CommissionReport,
 }
 
 /// codec 層 msgId 白名單判定（**入站空間**）:已知 → `Some`;**未知 → `None`（fail-closed,
@@ -469,6 +497,12 @@ pub(crate) fn classify_msg_id(id: i64) -> Option<KnownMsgId> {
         IN_POSITION_END_MSG_ID => Some(KnownMsgId::PositionEnd),
         IN_ACCOUNT_SUMMARY_MSG_ID => Some(KnownMsgId::AccountSummary),
         IN_ACCOUNT_SUMMARY_END_MSG_ID => Some(KnownMsgId::AccountSummaryEnd),
+        IN_ORDER_STATUS_MSG_ID => Some(KnownMsgId::OrderStatus),
+        IN_OPEN_ORDER_MSG_ID => Some(KnownMsgId::OpenOrder),
+        IN_EXECUTION_DATA_MSG_ID => Some(KnownMsgId::ExecutionData),
+        IN_OPEN_ORDER_END_MSG_ID => Some(KnownMsgId::OpenOrderEnd),
+        IN_EXECUTION_DATA_END_MSG_ID => Some(KnownMsgId::ExecutionDataEnd),
+        IN_COMMISSION_REPORT_MSG_ID => Some(KnownMsgId::CommissionReport),
         _ => None,
     }
 }
@@ -652,8 +686,16 @@ mod tests {
         assert_eq!(classify_msg_id(62), Some(KnownMsgId::PositionEnd));
         assert_eq!(classify_msg_id(63), Some(KnownMsgId::AccountSummary));
         assert_eq!(classify_msg_id(64), Some(KnownMsgId::AccountSummaryEnd));
+        // W5-S3:入站 order/exec 六 msgId（IN 5 與 OUT 5 撞值不混用）。
+        assert_eq!(classify_msg_id(3), Some(KnownMsgId::OrderStatus));
+        assert_eq!(classify_msg_id(5), Some(KnownMsgId::OpenOrder));
+        assert_eq!(classify_msg_id(11), Some(KnownMsgId::ExecutionData));
+        assert_eq!(classify_msg_id(53), Some(KnownMsgId::OpenOrderEnd));
+        assert_eq!(classify_msg_id(55), Some(KnownMsgId::ExecutionDataEnd));
+        assert_eq!(classify_msg_id(59), Some(KnownMsgId::CommissionReport));
         // 未知 msgId → None（fail-closed,呼叫端斷線)。
         assert_eq!(classify_msg_id(8), None);
+        assert_eq!(classify_msg_id(54), None);
         assert_eq!(classify_msg_id(60), None);
         assert_eq!(classify_msg_id(65), None);
         assert_eq!(classify_msg_id(71), None);

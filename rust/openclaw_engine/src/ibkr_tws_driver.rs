@@ -50,6 +50,9 @@ use openclaw_types::{IB_INFO_CODE_FLOOR, PINNED_MIN_SERVER_VERSION};
 use crate::ibkr_tws_account_data::{
     AccountDataConfig, AccountDataDigest, AccountDataReject, SnapshotStaleness,
 };
+use crate::ibkr_tws_order_exec_data::{
+    OrderExecDataConfig, OrderExecDataDigest, OrderExecDataReject,
+};
 use crate::ibkr_tws_pacing::{OutboundGrant, PacingConfig};
 use crate::ibkr_tws_session::{
     ConnectPermitProvider, FatalCause, HandshakeOutcome, HeartbeatOutbound, PacingDispatch,
@@ -74,9 +77,13 @@ const SERVE_BUDGET: u32 = 100_000;
 /// `tokio::time::pause`(start_paused) 令 poll 即時推進。
 const DEFAULT_SERVE_POLL: Duration = Duration::from_secs(1);
 
-/// W5-S2 account summary 訂閱的固定 reqId（request-id 分配器歸 W5-S3+ 請求路由;summary 為
+/// W5-S2 account summary 訂閱的固定 reqId（request-id 分配器歸 W6+ 請求路由;summary 為
 /// 全域單訂閱（G3 自限 1 份）,固定 id 無碰撞面——fake 場景以此值對齊）。
 pub(crate) const ACCOUNT_SUMMARY_REQ_ID: i64 = 9001;
+
+/// W5-S3 executions 快照的固定 reqId（單槽自限,固定 id 無碰撞面;與 9001 錯開——fake 場景
+/// 以此值對齊;通用 request-id 分配器仍歸 W6+ 請求路由）。
+pub(crate) const ORDER_EXEC_REQ_ID: i64 = 9002;
 
 // ===========================================================================
 // (a) transport 抽象（注入 stream 來源;fake=duplex,W8=TCP factory）
@@ -305,6 +312,17 @@ pub(crate) struct SessionDriver<P: ConnectPermitProvider, F: TransportFactory> {
     /// G1 session 級 blocker 記憶:serverVersion 低於 positions 下界 → 本 session 不再重試
     /// reqPositions（重連/reset 後新 driver 世代重評;避免每 tick 空耗 governor token）。
     positions_floor_blocked: bool,
+    /// **W5-S3**:open orders/executions/commissions 消化器（入站 IN 3/5/11/53/55/59 分派至
+    /// 此;斷線由 serve 收尾標記）。
+    order_exec: OrderExecDataDigest,
+    /// W5-S3 快照 pump 開關（默認 **off**;`enable_order_exec_subscriptions` 開啟後 serve
+    /// 期自動經 governor `AccountData` 主桶送 reqExecutions/reqOpenOrders——IB 現勘:此面
+    /// outbound 不受 historical 四規則約束。真消費者=driver 測試域;TODO(W6) IPC 投影面
+    /// 接真開關）。
+    subscribe_order_exec: bool,
+    /// DIVERGENT-1 floor session 級 blocker 記憶（同 positions_floor_blocked 語義:sv 低於
+    /// order/exec 下界 → 本 session 不再重試,新連線世代重評）。
+    order_exec_floor_blocked: bool,
 }
 
 impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
@@ -348,6 +366,9 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
             account_data: AccountDataDigest::new(AccountDataConfig::default()),
             subscribe_account_data: false,
             positions_floor_blocked: false,
+            order_exec: OrderExecDataDigest::new(OrderExecDataConfig::default()),
+            subscribe_order_exec: false,
+            order_exec_floor_blocked: false,
         }
     }
 
@@ -373,6 +394,17 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
     /// 真消費者=driver 測試域;TODO(W6) IPC 投影面接真開關）。
     pub(crate) fn enable_account_data_subscriptions(&mut self) {
         self.subscribe_account_data = true;
+    }
+
+    /// **W5-S3** order/exec 消化器唯讀檢視（typed staleness + join 槽 + audit 計數）。
+    pub(crate) fn order_exec_data(&self) -> &OrderExecDataDigest {
+        &self.order_exec
+    }
+
+    /// **W5-S3** 開啟快照 pump（默認 off;serve 期經 governor `AccountData` 主桶自動送
+    /// reqExecutions/reqOpenOrders。真消費者=driver 測試域;TODO(W6) IPC 投影面接真開關）。
+    pub(crate) fn enable_order_exec_subscriptions(&mut self) {
+        self.subscribe_order_exec = true;
     }
 
     /// **測試專用**:可變存取內部 manager（令測試預先耗盡 governor token 逼心跳 Queued,驗 driver
@@ -526,6 +558,11 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
             {
                 break self.drop_io(now);
             }
+            // 2c. W5-S3:order/exec 快照 pump（默認 off;同 2b 單一出口不變量,`AccountData`
+            // 主桶——IB 現勘:此面 outbound 不受 historical 四規則約束）。
+            if self.subscribe_order_exec && self.pump_order_exec(&mut stream, now).await.is_err() {
+                break self.drop_io(now);
+            }
             // 3. 心跳回覆逾時 → miss（達 degraded 門檻 → Degraded;達 drop 門檻 → Backoff）。
             if self.manager.fsm_mut().heartbeat_reply_overdue(now) {
                 let would_drop = self.manager.fsm_mut().heartbeat_miss_would_drop();
@@ -551,9 +588,11 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
                 ServeRead::Idle => {} // 靜默 tick,續迴圈（心跳 liveness 於頂部）
             }
         };
-        // W5-S2:serve 任何結束路徑（EOF/IO/fatal/心跳 drop/budget）= 連線失效 → 快照標
-        // `DisconnectedStale`（訂閱不跨連線存活,重連需重訂閱;fail-closed 明示不可信）。
+        // W5-S2/S3:serve 任何結束路徑（EOF/IO/fatal/心跳 drop/budget）= 連線失效 → 快照標
+        // `DisconnectedStale`（訂閱/推送不跨連線存活,重連需重訂閱/re-begin resync;
+        // fail-closed 明示不可信）。
         self.account_data.on_disconnect();
+        self.order_exec.on_disconnect();
         drop(stream);
         drop(reader);
         end
@@ -615,6 +654,77 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
                     Err(AccountDataReject::ServerVersionBelowPositionsFloor { .. }) => {
                         // G1 session 級 blocker:記憶後不再空耗 token 重試（新連線世代重評）。
                         self.positions_floor_blocked = true;
+                    }
+                    Err(_) => {}
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// W5-S3 快照 pump:未取/斷線失效的 order/exec 面 → 取 governor grant（`AccountData`
+    /// 主桶,單一出口）→ digest 轉移相位 → `send_framed` 送出。grant 先於 begin（沿 2b:
+    /// begin 成功即送出,無「已標在途但未送」的簿記謊言）;grant 不足本 tick 跳過（無副作用,
+    /// 下 tick 重試）。`Err(())` = IO 斷,呼叫端 fail-closed。
+    async fn pump_order_exec<S: AsyncWrite + Unpin>(
+        &mut self,
+        stream: &mut S,
+        now: u64,
+    ) -> Result<(), ()> {
+        if self.order_exec_floor_blocked {
+            return Ok(());
+        }
+        let server_version = match self.manager.state() {
+            SessionState::Ready(rs) | SessionState::Degraded(rs) => rs.server_version,
+            _ => return Ok(()),
+        };
+        // executions 快照(單槽自限:staleness 閘保證 begin 不撞 AlreadyActive)。
+        if matches!(
+            self.order_exec.executions_staleness(now),
+            SnapshotStaleness::NotSubscribed | SnapshotStaleness::DisconnectedStale
+        ) {
+            if let Some(grant) = self.manager.account_data_grant(now) {
+                match self
+                    .order_exec
+                    .begin_executions(server_version, ORDER_EXEC_REQ_ID)
+                {
+                    Ok(frame) => {
+                        if send_framed(stream, grant, &frame, self.timeouts.io)
+                            .await
+                            .is_err()
+                        {
+                            return Err(());
+                        }
+                    }
+                    Err(OrderExecDataReject::ServerVersionBelowFloor { .. }) => {
+                        // DIVERGENT-1 floor session 級 blocker:記憶後不再空耗 token 重試
+                        //（整面拒開,open orders 亦不送;新連線世代重評）。
+                        self.order_exec_floor_blocked = true;
+                        return Ok(());
+                    }
+                    // staleness 閘下不可達;防禦性 no-op（grant 隨 scope drop）。
+                    Err(_) => {}
+                }
+            }
+        }
+        // open orders 快照（本 clientId 綁定形 reqOpenOrders;全量形 reqAllOpenOrders 由
+        // W6+ IPC 投影面按對賬需求選用,builder 已備）。
+        if matches!(
+            self.order_exec.open_orders_staleness(now),
+            SnapshotStaleness::NotSubscribed | SnapshotStaleness::DisconnectedStale
+        ) {
+            if let Some(grant) = self.manager.account_data_grant(now) {
+                match self.order_exec.begin_open_orders(server_version) {
+                    Ok(frame) => {
+                        if send_framed(stream, grant, &frame, self.timeouts.io)
+                            .await
+                            .is_err()
+                        {
+                            return Err(());
+                        }
+                    }
+                    Err(OrderExecDataReject::ServerVersionBelowFloor { .. }) => {
+                        self.order_exec_floor_blocked = true;
                     }
                     Err(_) => {}
                 }
@@ -685,6 +795,32 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
                 let r = self.account_data.on_position_end_frame(payload, now);
                 self.handle_account_data_result(r, now);
             }
+            // W5-S3:IN 3/5/11/53/55/59 order/exec → 消化器（wire 損壞才斷線,資料層 reject
+            // 續 serve——含 pump-off 下 client 綁定推送的 NoActiveContext 承接拒）。
+            Some(KnownMsgId::ExecutionData) => {
+                let r = self.order_exec.on_execution_frame(payload, now);
+                self.handle_order_exec_result(r, now);
+            }
+            Some(KnownMsgId::ExecutionDataEnd) => {
+                let r = self.order_exec.on_execution_end_frame(payload, now);
+                self.handle_order_exec_result(r, now);
+            }
+            Some(KnownMsgId::CommissionReport) => {
+                let r = self.order_exec.on_commission_frame(payload, now);
+                self.handle_order_exec_result(r, now);
+            }
+            Some(KnownMsgId::OrderStatus) => {
+                let r = self.order_exec.on_order_status_frame(payload, now);
+                self.handle_order_exec_result(r, now);
+            }
+            Some(KnownMsgId::OpenOrder) => {
+                let r = self.order_exec.on_open_order_frame(payload, now);
+                self.handle_order_exec_result(r, now);
+            }
+            Some(KnownMsgId::OpenOrderEnd) => {
+                let r = self.order_exec.on_open_order_end_frame(payload, now);
+                self.handle_order_exec_result(r, now);
+            }
             // 未知 msgId → fail-closed 斷線（§2.3:不猜欄位、不跳過）。
             None => self.fail_closed(now),
         }
@@ -697,6 +833,17 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
         match r {
             Ok(()) => {}
             Err(AccountDataReject::WireMalformed(_)) => self.fail_closed(now),
+            Err(_) => {}
+        }
+    }
+
+    /// W5-S3 消化結果分流（同 W5-S2 紀律）:`WireMalformed` = wire 損壞 → fail-closed 斷線;
+    /// 其餘 typed reject（契約 blocker/佈局窗/grammar/表外 status/未開消化承接拒）= 資料層
+    /// fail-closed——毒化/audit 已由 digest 落帳,session 續 serve（不 panic）。
+    fn handle_order_exec_result(&mut self, r: Result<(), OrderExecDataReject>, now: u64) {
+        match r {
+            Ok(()) => {}
+            Err(OrderExecDataReject::WireMalformed(_)) => self.fail_closed(now),
             Err(_) => {}
         }
     }
@@ -835,12 +982,18 @@ async fn run_handshake_inner<S: AsyncRead + AsyncWrite + Unpin>(
                 }
                 Err(_) => return Err(HandshakeErr::Transient),
             },
-            // W5-S2:握手期不預期 account/positions 資料（未訂而收=亂序/協議意外）→
-            // fail-closed transient（不猜、不 fail-open;可重試）。
+            // W5-S2/S3:握手期不預期 account/positions/order/exec 資料（未訂而收=亂序/協議
+            // 意外）→ fail-closed transient（不猜、不 fail-open;可重試）。
             Some(KnownMsgId::AccountSummary)
             | Some(KnownMsgId::AccountSummaryEnd)
             | Some(KnownMsgId::PositionData)
-            | Some(KnownMsgId::PositionEnd) => return Err(HandshakeErr::Transient),
+            | Some(KnownMsgId::PositionEnd)
+            | Some(KnownMsgId::OrderStatus)
+            | Some(KnownMsgId::OpenOrder)
+            | Some(KnownMsgId::ExecutionData)
+            | Some(KnownMsgId::OpenOrderEnd)
+            | Some(KnownMsgId::ExecutionDataEnd)
+            | Some(KnownMsgId::CommissionReport) => return Err(HandshakeErr::Transient),
             // 未知 msgId 於握手 → fail-closed transient（不猜欄位;可重試,不 fail-open）。
             None => return Err(HandshakeErr::Transient),
         }

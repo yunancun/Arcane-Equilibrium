@@ -150,6 +150,15 @@ pub mod ibkr_tws_driver;
 // 出站經 pacing 單一出口（OutboundClass::AccountData）。純同步、注入時鐘、零 socket——與
 // wire/session/pacing/driver 同屬 default build 被 DCE 的 TWS 連接器面（B′ 姿態,g4 audit 保綠）。
 pub mod ibkr_tws_account_data;
+// IBKR W5-S3 open orders/executions/commissions 消化層：reqExecutions/reqOpenOrders/
+// reqAllOpenOrders 唯讀對賬快照+推送恆在通道（End 界定;unsolicited reqId 承接計數禁丟棄）+
+// W5-S1 executions/commissions row 契約消化 + exec↔commission execId either-order join（孤兒
+// TTL 計量）+ orderStatus/openOrder head-prefix 最小 typed 快照（冪等去重/tail-discard audit）。
+// DIVERGENT-1 floor/ceiling serverVersion 佈局窗、realizedPNL 哨兵→None 雙判別、exec_time
+// grammar 白名單全 config 化 fail-closed。出站經 pacing 單一出口（OutboundClass::AccountData
+// 主桶）;**絕不含下單/改單/撤單 builder**。純同步、注入時鐘、零 socket——與
+// wire/session/pacing/driver 同屬 default build 被 DCE 的 TWS 連接器面（B′ 姿態,g4 audit 保綠）。
+pub mod ibkr_tws_order_exec_data;
 // IBKR B1 只讀 TWS 連接器（ADR-0048 / AMD-2026-07-08-01，G4 首次接觸）：connect handshake
 // + reqCurrentTime 最小首接觸；純 codec + generic driver + 3 層惰性 gate；唯一具體
 // TcpStream::connect 於 `ibkr_g4_contact` feature 後（default build 無 socket、無 caller）。
