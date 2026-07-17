@@ -630,7 +630,8 @@ fn realized_pnl_sentinel_double_test_maps_to_none() {
     )
     .unwrap();
     let pnl_of = |d: &OrderExecDataDigest, id: &str| {
-        d.exec_slots(T0).1
+        d.exec_slots(T0)
+            .1
             .find(|(k, _)| k.as_str() == id)
             .unwrap()
             .1
@@ -980,4 +981,230 @@ fn wire_malformed_frames_are_typed() {
         .unwrap_err(),
         OrderExecDataReject::WireMalformed(_)
     ));
+}
+
+// ===========================================================================
+// (l) W6-S0:恢復政策(世代內終態) / staleness 綁定視圖 / audit 樣本欄 / cap
+// ===========================================================================
+
+#[test]
+fn w6s0_invalidated_open_orders_face_is_terminal_within_generation() {
+    // open-orders 面毒化(表外 status)→ 同世代 re-begin 拒(兩形共同);斷線不沖淡;
+    // 世代推進後恢復。
+    let mut d = digest();
+    d.begin_open_orders(SV_CEILING).unwrap();
+    let _ = d.on_order_status_frame(&order_status_payload(7, "ApiPending", "0", "100"), T0);
+    assert_eq!(d.open_orders_staleness(T0), SnapshotStaleness::Invalidated);
+    assert_eq!(
+        d.begin_open_orders(SV_CEILING).unwrap_err(),
+        OrderExecDataReject::InvalidatedUntilNewGeneration
+    );
+    assert_eq!(
+        d.begin_all_open_orders(SV_CEILING).unwrap_err(),
+        OrderExecDataReject::InvalidatedUntilNewGeneration
+    );
+    d.on_disconnect();
+    assert_eq!(d.open_orders_staleness(T0), SnapshotStaleness::Invalidated);
+    assert_eq!(
+        d.begin_open_orders(SV_CEILING).unwrap_err(),
+        OrderExecDataReject::InvalidatedUntilNewGeneration
+    );
+    // 世代推進 → DisconnectedStale → re-begin 成功。
+    d.on_new_connection_generation();
+    assert_eq!(
+        d.open_orders_staleness(T0),
+        SnapshotStaleness::DisconnectedStale
+    );
+    d.begin_open_orders(SV_CEILING).unwrap();
+    assert_eq!(
+        d.open_orders_staleness(T0),
+        SnapshotStaleness::SnapshotIncomplete
+    );
+}
+
+#[test]
+fn w6s0_staleness_bound_views_expose_face_staleness() {
+    // 綁定視圖:四個視圖各與其面 staleness 恆等(單一真源投影;部分快照必先見弱態)。
+    let mut d = digest();
+    d.begin_executions(SV_CEILING, REQ_ID).unwrap();
+    d.on_execution_frame(
+        &execution_payload(
+            REQ_ID,
+            7,
+            "e1",
+            EXEC_TIME_OK,
+            "SMART",
+            "ARCA",
+            "BOT",
+            "100",
+            "412.35",
+        ),
+        T0,
+    )
+    .unwrap();
+    // End 前:槽已有行,視圖同步標 SnapshotIncomplete。
+    let (staleness, slots) = d.exec_slots(T0);
+    assert_eq!(staleness, SnapshotStaleness::SnapshotIncomplete);
+    assert_eq!(slots.count(), 1);
+    assert_eq!(d.completed_executions(T0).0, d.executions_staleness(T0));
+    assert_eq!(d.open_orders(T0).0, d.open_orders_staleness(T0));
+    assert_eq!(d.order_statuses(T0).0, d.open_orders_staleness(T0));
+}
+
+#[test]
+fn w6s0_audit_records_per_face_blocker_samples() {
+    // commissions 契約 blocker → per-face 樣本欄。
+    let mut d = digest();
+    d.begin_executions(SV_CEILING, REQ_ID).unwrap();
+    let _ = d.on_commission_frame(&commission_payload("e1", "1.25", "EUR", "0"), T0);
+    assert_eq!(d.audit().commission_row_blocked_rejects, 1);
+    assert!(d
+        .audit()
+        .commission_row_last_blockers
+        .contains(&IbkrCommissionsRowBlocker::CurrencyDenied));
+    // orderStatus decimal 紀律拒 → 欄名樣本。
+    let mut d = digest();
+    d.begin_open_orders(SV_CEILING).unwrap();
+    let _ = d.on_order_status_frame(&order_status_payload(7, "Submitted", "1e5", "100"), T0);
+    assert_eq!(d.audit().order_status_field_invalid_rejects, 1);
+    assert_eq!(d.audit().order_status_field_last, Some("filled"));
+    // openOrder head 拒 → 欄名樣本。
+    let mut d = digest();
+    d.begin_open_orders(SV_CEILING).unwrap();
+    let _ = d.on_open_order_frame(&open_order_payload(7, "SSHORT", "412.00", &[]), T0);
+    assert_eq!(d.audit().open_order_head_denied_rejects, 1);
+    assert_eq!(d.audit().open_order_head_last_field, Some("action"));
+    // End reqId 錯配 → unexpected_req_id_rejects;wire 損壞 → 計數+typed note。
+    let mut d = digest();
+    d.begin_executions(SV_CEILING, REQ_ID).unwrap();
+    let _ = d.on_execution_end_frame(&execution_end_payload(REQ_ID + 9), T0);
+    assert_eq!(d.audit().unexpected_req_id_rejects, 1);
+    let _ = d.on_execution_end_frame(&encode_fields(&["55", "1"]), T0);
+    assert_eq!(d.audit().wire_malformed_rejects, 1);
+    assert!(d.audit().wire_malformed_last_note.is_some());
+}
+
+#[test]
+fn w6s0_exec_join_slot_cap_poisons_face_no_silent_eviction() {
+    // cap=1:第二個新 execId(不論 execution/commission 側先到)→ CacheCapExceeded+毒化;
+    // 既有鍵補側/覆蓋不受 cap 限(join 不增長)。
+    let mut d = OrderExecDataDigest::new(OrderExecDataConfig {
+        max_exec_join_slots: 1,
+        ..OrderExecDataConfig::default()
+    });
+    d.begin_executions(SV_CEILING, REQ_ID).unwrap();
+    d.on_execution_frame(
+        &execution_payload(
+            REQ_ID,
+            7,
+            "e1",
+            EXEC_TIME_OK,
+            "SMART",
+            "ARCA",
+            "BOT",
+            "100",
+            "412.35",
+        ),
+        T0,
+    )
+    .unwrap();
+    // 同 execId commission 補側:cap 邊界上仍允許(join 完整化非注入)。
+    d.on_commission_frame(&commission_payload("e1", "1.25", "USD", "0"), T0 + 1)
+        .unwrap();
+    // 新 execId 超界(commission 孤兒側)→ 毒化非驅逐。
+    assert_eq!(
+        d.on_commission_frame(&commission_payload("e2", "1.25", "USD", "0"), T0 + 2)
+            .unwrap_err(),
+        OrderExecDataReject::CacheCapExceeded {
+            cache: "exec_join_slots"
+        }
+    );
+    assert_eq!(d.exec_slots(T0 + 2).0, SnapshotStaleness::Invalidated);
+    assert_eq!(d.exec_slots(T0 + 2).1.count(), 1, "禁靜默驅逐:舊槽保留");
+    assert_eq!(d.audit().cache_cap_exceeded_rejects, 1);
+    // execution 側新 execId 超界同紀律。
+    let mut d = OrderExecDataDigest::new(OrderExecDataConfig {
+        max_exec_join_slots: 1,
+        ..OrderExecDataConfig::default()
+    });
+    d.begin_executions(SV_CEILING, REQ_ID).unwrap();
+    d.on_execution_frame(
+        &execution_payload(
+            REQ_ID,
+            7,
+            "e1",
+            EXEC_TIME_OK,
+            "SMART",
+            "ARCA",
+            "BOT",
+            "100",
+            "412.35",
+        ),
+        T0,
+    )
+    .unwrap();
+    assert_eq!(
+        d.on_execution_frame(
+            &execution_payload(
+                REQ_ID,
+                8,
+                "e2",
+                EXEC_TIME_OK,
+                "SMART",
+                "NYSE",
+                "BOT",
+                "50",
+                "411.00",
+            ),
+            T0 + 1,
+        )
+        .unwrap_err(),
+        OrderExecDataReject::CacheCapExceeded {
+            cache: "exec_join_slots"
+        }
+    );
+    assert_eq!(d.audit().cache_cap_exceeded_rejects, 1);
+}
+
+#[test]
+fn w6s0_open_orders_and_order_statuses_caps_poison_face() {
+    // order_statuses cap=1:第二個新 orderId → 毒化;冪等去重/同鍵更新不受 cap 限。
+    let mut d = OrderExecDataDigest::new(OrderExecDataConfig {
+        max_order_statuses: 1,
+        ..OrderExecDataConfig::default()
+    });
+    d.begin_open_orders(SV_CEILING).unwrap();
+    d.on_order_status_frame(&order_status_payload(7, "Submitted", "0", "100"), T0)
+        .unwrap();
+    // 同鍵事實更新:允許(不增長)。
+    d.on_order_status_frame(&order_status_payload(7, "Filled", "100", "0"), T0 + 1)
+        .unwrap();
+    assert_eq!(
+        d.on_order_status_frame(&order_status_payload(8, "Submitted", "0", "100"), T0 + 2)
+            .unwrap_err(),
+        OrderExecDataReject::CacheCapExceeded {
+            cache: "order_statuses"
+        }
+    );
+    assert_eq!(d.order_statuses(T0 + 2).0, SnapshotStaleness::Invalidated);
+    assert_eq!(d.order_statuses(T0 + 2).1.count(), 1, "禁靜默驅逐");
+    assert_eq!(d.audit().cache_cap_exceeded_rejects, 1);
+    // open_orders cap=1:第二個新 orderId → 毒化。
+    let mut d = OrderExecDataDigest::new(OrderExecDataConfig {
+        max_open_orders: 1,
+        ..OrderExecDataConfig::default()
+    });
+    d.begin_open_orders(SV_CEILING).unwrap();
+    d.on_open_order_frame(&open_order_payload(7, "BUY", "412.00", &[]), T0)
+        .unwrap();
+    assert_eq!(
+        d.on_open_order_frame(&open_order_payload(8, "BUY", "411.00", &[]), T0 + 1)
+            .unwrap_err(),
+        OrderExecDataReject::CacheCapExceeded {
+            cache: "open_orders"
+        }
+    );
+    assert_eq!(d.open_orders(T0 + 1).0, SnapshotStaleness::Invalidated);
+    assert_eq!(d.open_orders(T0 + 1).1.count(), 1, "禁靜默驅逐");
+    assert_eq!(d.audit().cache_cap_exceeded_rejects, 1);
 }

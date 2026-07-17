@@ -94,11 +94,7 @@ pub(in crate::ipc_server) async fn handle_query_fee_source(
 /// AccountManager slot 未注入時的標準 payload；`status="uninitialized"` 字串
 /// 穩定供 Python 分支。fee_source 一律 fallback `cold_default` — 因為 slot 未
 /// 注入意味著本進程沒任何真實 fee runtime，與「從未 refresh」語意一致。
-fn uninitialized_response(
-    id: serde_json::Value,
-    symbol: &str,
-    note: &str,
-) -> JsonRpcResponse {
+fn uninitialized_response(id: serde_json::Value, symbol: &str, note: &str) -> JsonRpcResponse {
     JsonRpcResponse::success(
         id,
         serde_json::json!({
@@ -151,12 +147,8 @@ mod tests {
     async fn query_missing_symbol_returns_invalid_params_shape() {
         // params 沒 symbol → invalid_params；不 raise error；fee_source fallback。
         let slot = empty_slot();
-        let resp = handle_query_fee_source(
-            serde_json::json!(2),
-            &serde_json::json!({}),
-            &slot,
-        )
-        .await;
+        let resp =
+            handle_query_fee_source(serde_json::json!(2), &serde_json::json!({}), &slot).await;
         assert!(resp.error.is_none());
         let r = resp.result.expect("result");
         assert_eq!(r["status"], "invalid_params");

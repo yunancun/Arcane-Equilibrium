@@ -752,11 +752,11 @@ impl AccountDataDigest {
     pub(crate) fn positions_rows(
         &self,
         now_ms: u64,
-    ) -> (
-        SnapshotStaleness,
-        impl Iterator<Item = &IbkrPositionsRowV1>,
-    ) {
-        (self.positions_staleness(now_ms), self.positions_rows.values())
+    ) -> (SnapshotStaleness, impl Iterator<Item = &IbkrPositionsRowV1>) {
+        (
+            self.positions_staleness(now_ms),
+            self.positions_rows.values(),
+        )
     }
 
     /// audit 計數器唯讀檢視（W6-S0;typed reject 身分觀測面）。

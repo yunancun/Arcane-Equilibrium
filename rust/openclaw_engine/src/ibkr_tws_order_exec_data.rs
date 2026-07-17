@@ -1306,7 +1306,10 @@ impl OrderExecDataDigest {
         SnapshotStaleness,
         impl Iterator<Item = &IbkrOpenOrderHeadV1>,
     ) {
-        (self.open_orders_staleness(now_ms), self.open_orders.values())
+        (
+            self.open_orders_staleness(now_ms),
+            self.open_orders.values(),
+        )
     }
 
     /// 唯讀檢視:orderStatus 最新快照行的 staleness 綁定視圖（open-orders 面同窗）。
