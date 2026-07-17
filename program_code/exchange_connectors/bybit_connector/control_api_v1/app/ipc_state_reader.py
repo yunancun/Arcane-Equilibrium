@@ -65,7 +65,9 @@ class RustSnapshotReader:
         self._data_dir = data_dir or os.environ.get(
             "OPENCLAW_DATA_DIR", "/tmp/openclaw"
         )
-        self._data_root = Path(self._data_dir).expanduser().resolve(strict=False)
+        self._data_root = Path(
+            os.path.abspath(Path(self._data_dir).expanduser())
+        )
         self._lock = threading.Lock()
         # Primary (compat) cache / 主（兼容）緩存
         self._cache: Optional[dict[str, Any]] = None
