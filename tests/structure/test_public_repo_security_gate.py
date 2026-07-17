@@ -184,9 +184,11 @@ def test_same_line_multi_match_emits_one_fingerprint(tmp_path: Path) -> None:
     repo = _init_repo(tmp_path)
     first_password = "k7"
     second_password = "m9"
+    postgres_scheme = "postgres" + "ql"
+    mysql_scheme = "my" + "sql"
     payload = (
-        f"primary=postgresql://redacted@db.example.invalid/app "
-        f"fallback=mysql://redacted@db.example.invalid/app\n"
+        f"primary={postgres_scheme}://service:{first_password}@db.example.invalid/app "
+        f"fallback={mysql_scheme}://service:{second_password}@db.example.invalid/app\n"
     )
     (repo / "settings.toml").write_text(payload, encoding="utf-8")
     _commit_all(repo, "add two same-line credential dsns")
@@ -205,11 +207,14 @@ def test_same_line_multi_match_emits_one_fingerprint(tmp_path: Path) -> None:
 def test_distinct_lines_rules_and_paths_keep_distinct_findings(tmp_path: Path) -> None:
     repo = _init_repo(tmp_path)
     token = "AK" + "IA" + "Q7W9E2R4T6Y8U1I3"
+    postgres_scheme = "postgres" + "ql"
+    mysql_scheme = "my" + "sql"
+    redis_scheme = "re" + "dis"
     payload = (
-        "primary=postgresql://redacted@db.example.invalid/app "
-        "fallback=mysql://redacted@db.example.invalid/app "
+        f"primary={postgres_scheme}://service:k7@db.example.invalid/app "
+        f"fallback={mysql_scheme}://service:m9@db.example.invalid/app "
         f"token={token}\n"
-        "secondary=redis://redacted@cache.example.invalid/0\n"
+        f"secondary={redis_scheme}://service:p3@cache.example.invalid/0\n"
     )
     (repo / "settings-a.toml").write_text(payload, encoding="utf-8")
     (repo / "settings-b.toml").write_text(payload, encoding="utf-8")
@@ -384,13 +389,14 @@ def test_commit_range_keeps_distinct_blob_fingerprints_for_same_path_and_line(
     base = _commit_all(repo, "base")
     first_password = "k7"
     second_password = "m9"
+    scheme = "postgres" + "ql"
     (repo / "settings.toml").write_text(
-        f"dsn=postgresql://redacted@db.example.invalid/app\n",
+        f"dsn={scheme}://service:{first_password}@db.example.invalid/app\n",
         encoding="utf-8",
     )
     _commit_all(repo, "add first dsn blob")
     (repo / "settings.toml").write_text(
-        f"dsn=postgresql://redacted@db.example.invalid/app\n",
+        f"dsn={scheme}://service:{second_password}@db.example.invalid/app\n",
         encoding="utf-8",
     )
     _commit_all(repo, "replace with second dsn blob")
@@ -525,9 +531,11 @@ def test_one_exact_allowlist_entry_consumes_same_line_multi_match(
     tmp_path: Path,
 ) -> None:
     repo = _init_repo(tmp_path)
+    postgres_scheme = "postgres" + "ql"
+    mysql_scheme = "my" + "sql"
     payload = (
-        "primary=postgresql://redacted@db.example.invalid/app "
-        "fallback=mysql://redacted@db.example.invalid/app\n"
+        f"primary={postgres_scheme}://service:k7@db.example.invalid/app "
+        f"fallback={mysql_scheme}://service:m9@db.example.invalid/app\n"
     )
     (repo / "settings.toml").write_text(payload, encoding="utf-8")
     _commit_all(repo, "add same-line duplicate-fingerprint dsns")
