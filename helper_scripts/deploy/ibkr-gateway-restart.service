@@ -6,9 +6,10 @@
 #   「正在跑」時重啟——Gateway masked/stopped(現階段常態)時為 no-op 成功,
 #   結構性不可能把 dormant Gateway 拉起來;restart 會無條件啟動,違反
 #   default-inactive 姿態。
-# 姿態契約:本 unit 隨安裝腳本 cp 落 ~/.config/systemd/user/ 但 timer 保持
-#   default disabled——nightly restart 窗屬 EA2+ operator 校準面
-#   (IBKR_TODO.md §5 W9a)。
+# 姿態契約:本 unit 隨安裝腳本 cp 落 data 層
+#   ${XDG_DATA_HOME:-~/.local/share}/systemd/user/(兩層佈局見
+#   ibkr-gateway.service 頭注),但 timer 保持 default disabled——nightly
+#   restart 窗屬 EA2+ operator 校準面(IBKR_TODO.md §5 W9a)。
 # ============================================================================
 
 [Unit]

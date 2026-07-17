@@ -18,18 +18,10 @@
 #   無 daily/weekly 排程的 conf 退化為默認 1MiB size 基線)。
 # ============================================================================
 
-# IB Gateway launcher 日誌(install4j launcher 追加寫;copytruncate 安全)。
-/home/ncyu/Jts/launcher.log {
-    size 100M
-    rotate 4
-    compress
-    missingok
-    notifempty
-    copytruncate
-}
-
-# Gateway 版本目錄內雜項日誌(Jts 頂層 log/*.log 家族;Gateway 自帶按日檔名
-# 的 api log 不在此——其自帶滾動,重複輪替會撞名)。
+# Jts 頂層日誌家族(含 install4j launcher.log——已被本 glob 覆蓋,**勿另立
+# launcher.log 專屬 stanza**:logrotate 同一路徑被兩 stanza 蓋到=duplicate
+# log entry 錯誤,OPS-B2)。Gateway 自帶按日檔名的 api log 不在此——其自帶
+# 滾動,重複輪替會撞名。
 /home/ncyu/Jts/*.log {
     size 100M
     rotate 4
