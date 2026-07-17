@@ -1230,11 +1230,38 @@ const WHATIF_TAIL: &[&str] = &[
     "",             // warningText
 ];
 
+fn whatif_block() -> Vec<String> {
+    WHATIF_TAIL.iter().map(|s| s.to_string()).collect()
+}
+
 #[test]
-fn whatif_tail_decode_pinned_band_ok() {
+fn whatif_frame_preview_is_blocked_fail_closed() {
+    // IB DIVERGENT-2:OrderState 深埋 mid-message（decodeWhatIfInfoAndCommission 後仍約 19 欄）
+    // → frame 面 preview **一律 blocked**,絕不回結構錯誤 margin（band 內、band 外皆然）。
     let payload = open_order_payload(7, "BUY", "412.00", WHATIF_TAIL);
     let cfg = OrderExecDataConfig::default();
-    let preview = decode_open_order_whatif_tail(&payload, SV_PINNED, &cfg).expect("decode tail");
+    assert_eq!(
+        decode_open_order_whatif_tail(&payload, SV_PINNED, &cfg).unwrap_err(),
+        OrderExecDataReject::PreviewDecodeBlockedPendingFullSequence
+    );
+    // sv 越界仍先由 band 守衛攔（ceiling 拒解;fail-closed 一致）。
+    assert_eq!(
+        decode_open_order_whatif_tail(&payload, SV_CEILING, &cfg).unwrap_err(),
+        OrderExecDataReject::PinnedLayoutOverflow {
+            msg_id: IN_OPEN_ORDER_MSG_ID
+        }
+    );
+    // sv<floor 亦拒。
+    assert!(matches!(
+        decode_open_order_whatif_tail(&payload, 144, &cfg).unwrap_err(),
+        OrderExecDataReject::ServerVersionBelowFloor { .. }
+    ));
+}
+
+#[test]
+fn whatif_order_state_block_content_confirmed_ok() {
+    // OrderState 塊**內容/序** CONFIRMED（定位待全序列解碼;此為內容單元,非 frame 面接線）。
+    let preview = decode_whatif_order_state_block(&whatif_block()).expect("decode block");
     assert_eq!(preview.status, IbkrOrderStatusV1::PreSubmitted);
     assert_eq!(
         preview.init_margin_after_decimal.as_deref(),
@@ -1246,57 +1273,36 @@ fn whatif_tail_decode_pinned_band_ok() {
 }
 
 #[test]
-fn whatif_tail_margin_sentinel_maps_to_none() {
-    // 空欄 + f64::MAX 哨兵 → None（unset;沿 realizedPNL 哨兵紀律）。
-    let mut tail: Vec<&str> = WHATIF_TAIL.to_vec();
-    tail[7] = ""; // initMarginAfter 空欄
-    tail[10] = "1.7976931348623157E308"; // commission 哨兵
-    let payload = open_order_payload(7, "BUY", "412.00", &tail);
-    let cfg = OrderExecDataConfig::default();
-    let preview = decode_open_order_whatif_tail(&payload, SV_PINNED, &cfg).unwrap();
+fn whatif_order_state_block_sentinel_maps_to_none() {
+    let mut b = whatif_block();
+    b[7] = String::new(); // initMarginAfter 空欄
+    b[10] = "1.7976931348623157E308".to_string(); // commission 哨兵
+    let preview = decode_whatif_order_state_block(&b).unwrap();
     assert_eq!(preview.init_margin_after_decimal, None);
     assert_eq!(preview.commission_decimal, None);
 }
 
 #[test]
-fn whatif_tail_refuses_above_ceiling() {
-    // §11 BLOCK-ORDER-BAND-3:sv>157 whatIf 尾 UNVERIFIED → 拒解不猜。
-    let payload = open_order_payload(7, "BUY", "412.00", WHATIF_TAIL);
-    let cfg = OrderExecDataConfig::default();
-    assert_eq!(
-        decode_open_order_whatif_tail(&payload, SV_CEILING, &cfg).unwrap_err(),
-        OrderExecDataReject::PinnedLayoutOverflow {
-            msg_id: IN_OPEN_ORDER_MSG_ID
-        }
-    );
-}
-
-#[test]
-fn whatif_tail_rejects_short_frame_and_bad_decimal_and_status() {
-    let cfg = OrderExecDataConfig::default();
-    // 缺 OrderState 尾（head-only）→ WireMalformed。
-    let head_only = open_order_payload(7, "BUY", "412.00", &[]);
+fn whatif_order_state_block_rejects_bad_len_decimal_status() {
+    // 非 15 欄 → WireMalformed。
     assert!(matches!(
-        decode_open_order_whatif_tail(&head_only, SV_PINNED, &cfg).unwrap_err(),
+        decode_whatif_order_state_block(&whatif_block()[..14]).unwrap_err(),
         OrderExecDataReject::WireMalformed(_)
     ));
     // 非法 margin decimal → WhatIfPreviewFieldInvalid。
-    let mut bad = WHATIF_TAIL.to_vec();
-    bad[1] = "not_a_number";
-    let payload = open_order_payload(7, "BUY", "412.00", &bad);
+    let mut bad = whatif_block();
+    bad[1] = "not_a_number".to_string();
     assert_eq!(
-        decode_open_order_whatif_tail(&payload, SV_PINNED, &cfg).unwrap_err(),
+        decode_whatif_order_state_block(&bad).unwrap_err(),
         OrderExecDataReject::WhatIfPreviewFieldInvalid {
             field: "init_margin_before"
         }
     );
-    // 表外 status → OrderStatusUnknownDenied（含 ApiPending 亦落此——orderStatus 面白名單;
-    // 但 lifecycle 的 ApiPending 態分流在 lifecycle driver,見該模塊）。
-    let mut unk = WHATIF_TAIL.to_vec();
-    unk[0] = "ApiPending";
-    let payload = open_order_payload(7, "BUY", "412.00", &unk);
+    // 表外 status → OrderStatusUnknownDenied。
+    let mut unk = whatif_block();
+    unk[0] = "ApiPending".to_string();
     assert_eq!(
-        decode_open_order_whatif_tail(&payload, SV_PINNED, &cfg).unwrap_err(),
+        decode_whatif_order_state_block(&unk).unwrap_err(),
         OrderExecDataReject::OrderStatusUnknownDenied
     );
 }

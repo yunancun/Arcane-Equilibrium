@@ -252,6 +252,27 @@ def check_g5(module_src: str) -> tuple[list[str], list[str]]:
             v.append(f"G5(c) encoder `{enc}` signature not found")
         elif "OrderFrame" not in me.group(1):
             v.append(f"G5(c) encoder `{enc}` must yield OrderFrame (order bytes must be sealed, not raw)")
+
+    # (d) E3-N2/E2-NOTE-6:禁 leak-trait impl 使 sealed 型別 coerce 繞封（未來加 `impl Deref<
+    # Target=[u8]>` 可 `&wire` coerce 成 `&[u8]` 餵 send_framed 而 G5(a-c) 仍綠）。黑名單對
+    # WireBytes/OrderFrame 的 Deref/DerefMut/AsRef/AsMut/Borrow/BorrowMut/Index/Into 及
+    # `From<WireBytes|OrderFrame> for Vec<u8>/[u8]`。
+    leak_traits = ("Deref", "DerefMut", "AsRef", "AsMut", "Borrow", "BorrowMut", "Index")
+    for sealed in ("WireBytes", "OrderFrame"):
+        for tr in leak_traits:
+            if re.search(rf"\bimpl\b[^\n]*\b{tr}\b[^\n]*\bfor\s+{sealed}\b", code):
+                v.append(f"G5(d) leak-trait `impl {tr} for {sealed}` (byte coercion escapes seal)")
+        # From<Sealed> for Vec<u8>/[u8]（into-bytes 逃逸面）。
+        if re.search(rf"\bimpl\b[^\n]*\bFrom\s*<\s*{sealed}\s*>\s*for\s+(Vec\s*<\s*u8|&?\s*\[\s*u8)", code):
+            v.append(f"G5(d) `impl From<{sealed}> for [u8]/Vec<u8>` (into-bytes escape)")
+
+    # (e) WireBytes::view（test-only bytes 檢視）必保持 #[cfg(test)]（production 不成 bytes 逃逸面;
+    # 同 mint 紀律）。抓 `fn view` 前是否緊鄰 #[cfg(test)]。
+    mv = re.search(r"(#\[cfg\(test\)\]\s*)?\bpub\(crate\)\s+fn\s+view\s*\(", code)
+    if mv is None:
+        inc.append("G5(e) anchor absent: WireBytes::view accessor")
+    elif mv.group(1) is None:
+        v.append("G5(e) WireBytes::view is NOT gated by #[cfg(test)] (production bytes escape)")
     return v, inc
 
 
@@ -365,6 +386,24 @@ def _mutations(module_src: str, envelope_src: str, prod_sources: dict[str, str])
         module_src.replace(
             "pub(crate) fn encode_place_order(\n    req: &PlaceOrderWireRequest,\n    server_version: i32,\n) -> Result<OrderFrame, OrderEncodeReject> {",
             "pub(crate) fn encode_place_order(\n    req: &PlaceOrderWireRequest,\n    server_version: i32,\n) -> Result<Vec<u8>, OrderEncodeReject> {",
+        ),
+        envelope_src, prod_sources,
+    ))
+    # M10（G5d）:加 `impl Deref<Target=[u8]> for WireBytes`（byte coercion 繞封）。
+    muts.append((
+        "M10 impl Deref for WireBytes",
+        module_src.replace(
+            "impl WireBytes {",
+            "impl std::ops::Deref for WireBytes { type Target = [u8]; fn deref(&self) -> &[u8] { &self.bytes } }\nimpl WireBytes {",
+        ),
+        envelope_src, prod_sources,
+    ))
+    # M11（G5e）:WireBytes::view 去掉 #[cfg(test)]（production bytes 逃逸）。
+    muts.append((
+        "M11 WireBytes::view un-cfg(test)",
+        module_src.replace(
+            "    #[cfg(test)]\n    pub(crate) fn view(&self)",
+            "    pub(crate) fn view(&self)",
         ),
         envelope_src, prod_sources,
     ))

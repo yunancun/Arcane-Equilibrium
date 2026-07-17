@@ -511,3 +511,104 @@ fn journal_hash_chain_detects_tamper() {
         assert_eq!(w[1].previous_event_hash, w[0].event_hash);
     }
 }
+
+// ── E4-GAP-1:P0 phantom race 直測（CancelRequested/Cancelled 後 late-fill）────
+
+/// 驅到 CancelRequested（acked → cancel-requested）。
+fn to_cancel_requested(d: &mut OrderLifecycleDriver) {
+    to_submit_requested(d);
+    d.apply_lifecycle_event(transition(
+        IbkrPaperOrderLifecycleState::BrokerAcknowledged,
+        BrokerOperation::PaperOrderSubmit,
+        Some(9),
+        None,
+        T0 + 3,
+    ))
+    .unwrap();
+    d.apply_lifecycle_event(transition(
+        IbkrPaperOrderLifecycleState::CancelRequested,
+        BrokerOperation::PaperOrderCancel,
+        None,
+        None,
+        T0 + 4,
+    ))
+    .unwrap();
+}
+
+#[test]
+fn phantom_late_fill_after_cancel_requested_rejected_as_invalid_transition() {
+    // Bybit 幻影倉形:cancel 在途時到達 late-fill（remaining 遞增再開倉嫌疑）。單一 mutator 先過
+    // is_transition_allowed → CancelRequested→PartiallyFilled 非法 → **InvalidTransition**
+    //（非 ReduceOnlyViolation;矩陣先攔,reduce-only 是 acked/partial 內的第二道)。態/記帳不變。
+    let mut d = driver();
+    to_cancel_requested(&mut d);
+    let err = d
+        .apply_lifecycle_event(transition(
+            IbkrPaperOrderLifecycleState::PartiallyFilled,
+            BrokerOperation::PaperOrderFillImport,
+            None,
+            Some(FillDelta {
+                cumulative_filled_decimal: "1".to_string(),
+                remaining_decimal: "9".to_string(),
+            }),
+            T0 + 5,
+        ))
+        .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            LifecycleReject::InvalidTransition {
+                from: IbkrPaperOrderLifecycleState::CancelRequested,
+                to: IbkrPaperOrderLifecycleState::PartiallyFilled,
+            }
+        ),
+        "late-fill after cancel = InvalidTransition (matrix), got {err:?}"
+    );
+    let r = d.intent_by_idempotency_key(IDEM).unwrap();
+    assert_eq!(
+        r.state,
+        IbkrPaperOrderLifecycleState::CancelRequested,
+        "態不變"
+    );
+    assert_eq!(r.cumulative_filled_decimal, None, "記帳不被 late-fill 污染");
+    assert_eq!(r.remaining_decimal, None);
+    assert_eq!(d.audit().reduce_only_violations, 0, "非 reduce-only 路徑");
+}
+
+#[test]
+fn terminal_cancelled_rejects_late_fill() {
+    // 終態 Cancelled 後 late-fill → InvalidTransition（終態不可再遷;types 矩陣）。
+    let mut d = driver();
+    to_cancel_requested(&mut d);
+    d.apply_lifecycle_event(transition(
+        IbkrPaperOrderLifecycleState::Cancelled,
+        BrokerOperation::PaperOrderCancel,
+        None,
+        None,
+        T0 + 5,
+    ))
+    .unwrap();
+    let err = d
+        .apply_lifecycle_event(transition(
+            IbkrPaperOrderLifecycleState::PartiallyFilled,
+            BrokerOperation::PaperOrderFillImport,
+            None,
+            Some(FillDelta {
+                cumulative_filled_decimal: "1".to_string(),
+                remaining_decimal: "9".to_string(),
+            }),
+            T0 + 6,
+        ))
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        LifecycleReject::InvalidTransition {
+            from: IbkrPaperOrderLifecycleState::Cancelled,
+            ..
+        }
+    ));
+    assert_eq!(
+        d.intent_by_idempotency_key(IDEM).unwrap().state,
+        IbkrPaperOrderLifecycleState::Cancelled
+    );
+}

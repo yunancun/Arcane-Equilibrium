@@ -238,10 +238,17 @@ pub(crate) enum OrderExecDataReject {
     /// openOrder head 欄位違反白名單/紀律（action/secType/幣別/數量…）→ open-orders 面毒化。
     #[error("open order head denied: {field}")]
     OpenOrderHeadDenied { field: &'static str },
-    /// **W7-S1 whatIf preview tail（§2.2.2）**:OrderState 尾欄違反本地 typed 紀律（margin/
-    /// commission decimal 形狀等）→ 該次 preview 拒（standalone 解碼,不入 digest inbound 毒化面）。
-    #[error("whatIf preview tail field invalid: {field}")]
+    /// **W7-S1 whatIf preview OrderState 塊欄違反本地 typed 紀律（margin/commission decimal 形狀）**
+    /// →該塊解碼拒（standalone,不入 digest inbound 毒化面）。
+    #[error("whatIf order state block field invalid: {field}")]
     WhatIfPreviewFieldInvalid { field: &'static str },
+    /// **W7-S1 IB DIVERGENT-2 fail-closed（§2.2.2 修訂）**:whatIf 的 OrderState 資訊在
+    /// `OPEN_ORDER=5` 訊息**中段**（`decodeWhatIfInfoAndCommission` 之後仍有 VolRandomizeFlags/
+    /// PegToBench/Conditions/AdjustedOrderParams/softDollarTier/cashQty…約 19 欄）——**非訊息尾**,
+    /// 前後皆變長塊,無定長正/反索引可達;唯全序列解碼(=W5-S3 descope 之因)。本片不實作全序列
+    /// 解碼(EA3-gated + 部分 10.x-sensitive) → **preview 一律 blocked,絕不回結構錯誤的 margin**。
+    #[error("whatIf preview blocked: OrderState is mid-message, requires full-sequence decode")]
+    PreviewDecodeBlockedPendingFullSequence,
     /// **恢復政策（W6-S0,E3 MED-01-S3/E2-R12-F3 家族）**:毒化=同一 connect 世代內終態——
     /// 世代內 re-begin 一律拒;唯 driver 世代推進（新 handshake 成功,
     /// `on_new_connection_generation`）重評後可 re-begin。
@@ -380,11 +387,11 @@ pub(crate) struct IbkrOpenOrderHeadV1 {
     pub captured_at_ms: u64,
 }
 
-/// **W7-S1 whatIf preview 的 OrderState 尾（§2.2.2;R18 head-prefix 衝突 seam 之解）**。IB 现勘:
-/// whatIf 的 OrderState 尾在 `OPEN_ORDER=5` 訊息**尾端**（head-prefix 消化讀不到）;此為 preview
-/// 功能前置。margin/commission 估值以 sentinel 雙判別 → `None`（沿 realizedPNL 哨兵紀律,`1.79…E308`
-/// / 空欄 = unset）;其餘簽名 decimal 字串保真。**受 §11 BLOCK-ORDER-BAND-3 約束**:sv>157 whatIf 尾
-/// 佈局 UNVERIFIED → 拒解（骨架限 sv∈[145,157]）。
+/// **W7-S1 whatIf preview 的 OrderState 塊（§2.2.2;R18 head-prefix 衝突 seam）**。IB 现勘
+/// （DIVERGENT-2）:whatIf 的 OrderState 在 `OPEN_ORDER=5` 訊息**中段**（非尾端;`decodeWhatIfInfo`
+/// 後仍約 19 欄）→ frame 面 preview fail-closed（見 `decode_open_order_whatif_tail`）。此 typed 承載
+/// 供**內容/序** CONFIRMED 單元 `decode_whatif_order_state_block`。margin/commission 以 sentinel
+/// 雙判別 → `None`（沿 realizedPNL 哨兵,`1.79…E308` / 空欄 = unset）;其餘簽名 decimal 字串保真。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct IbkrWhatIfPreviewV1 {
     /// OrderState.status（白名單枚舉;表外 → 拒解）。
@@ -526,10 +533,12 @@ const EXECUTION_DATA_END_EXACT_FIELDS: usize = 3;
 const OPEN_ORDER_END_EXACT_FIELDS: usize = 2;
 /// OPEN_ORDER head 前綴欄數（msgId..permId;其後 tail 整體丟棄）。
 const OPEN_ORDER_HEAD_MIN_FIELDS: usize = 26;
-/// **W7-S1**:whatIf OrderState 尾在 `OPEN_ORDER=5` 訊息尾端的定長塊欄數（sv∈[145,157] band 骨架;
-/// 順序=status/initMargin(before/change/after)/maintMargin(同)/equityWithLoan(同)/commission/
-/// minCommission/maxCommission/commissionCurrency/warningText,自尾反向索引讀）。10.x band 增長
-/// UNVERIFIED（§11 BLOCK-ORDER-BAND-3）→ 骨架限 sv≤157。
+/// **W7-S1**:whatIf OrderState **塊**欄數（順序 CONFIRMED,逐位對照 `orderdecoder.py`
+/// `decodeOrderStatus`+`decodeWhatIfInfoAndCommission`:status/initMargin(before/change/after)/
+/// maintMargin(同)/equityWithLoan(同)/commission/minCommission/maxCommission/commissionCurrency/
+/// warningText）。**注（IB DIVERGENT-2）**:此塊在 `OPEN_ORDER=5` **中段**非訊息尾,無定長索引
+/// 可達 → frame 面 preview fail-closed（見 `decode_open_order_whatif_tail`）;本 const 僅供**內容
+/// /序**單元 `decode_whatif_order_state_block`。
 const ORDER_STATE_WHATIF_TAIL_FIELDS: usize = 15;
 
 /// realizedPNL 精確哨兵字串（f64::MAX 的官方十進位形;比對大小寫不敏感於 `E`）。
@@ -1414,8 +1423,9 @@ impl OrderExecDataDigest {
             | OrderExecDataReject::ExecutionsAlreadyActive
             | OrderExecDataReject::OpenOrdersAlreadyActive
             | OrderExecDataReject::ServerVersionBelowFloor { .. }
-            // WhatIfPreviewFieldInvalid 由 standalone preview 解碼回傳,不經 digest inbound audit 面。
+            // whatIf preview standalone 解碼回傳,不經 digest inbound audit 面。
             | OrderExecDataReject::WhatIfPreviewFieldInvalid { .. }
+            | OrderExecDataReject::PreviewDecodeBlockedPendingFullSequence
             | OrderExecDataReject::InvalidatedUntilNewGeneration => {}
         }
     }
@@ -1503,19 +1513,18 @@ fn classify_optional_price(raw: &str, field: &'static str) -> Result<Option<Stri
     Ok(Some(raw.to_string()))
 }
 
-/// **W7-S1 openOrder whatIf tail decode（§2.2.2;preview 功能前置,standalone 解碼——不改
-/// `on_open_order_frame` head 消化路徑,W5-S3 行為不變）**。IB 现勘:whatIf 的 OrderState 尾在
-/// `OPEN_ORDER=5` 訊息尾端,head-prefix 讀不到 → 自訊框尾反向索引讀定長 OrderState 塊。
+/// **W7-S1 openOrder whatIf preview decode（§2.2.2;IB DIVERGENT-2 fail-closed 修訂）**。
 ///
-/// 守衛（fail-closed,禁猜讀）:
-///   - msgId 必 `OPEN_ORDER=5`;
-///   - **sv>`max_pinned`（157）→ `PinnedLayoutOverflow`**（§11 BLOCK-ORDER-BAND-3:whatIf 尾 10.x
-///     增長 UNVERIFIED,拒解不猜）;sv<floor → `ServerVersionBelowFloor`;
-///   - 欄數 < head(26)+tail(15) → `WireMalformed`（無足夠 OrderState 尾）;
-///   - status 表外 → `OrderStatusUnknownDenied`;margin/commission 非法 decimal → `WhatIfPreviewFieldInvalid`。
+/// **結構事實（逐位對照 pinned ibapi 9.81.1 `decoder.py processOpenOrder`@201-205 +
+/// `orderdecoder.py`）**:`decodeWhatIfInfoAndCommission`（OrderState margin/commission/warningText）
+/// 之後**仍有** VolRandomizeFlags→PegToBench→Conditions→AdjustedOrderParams→…→softDollarTier→
+/// cashQty→dontUseAutoPriceForHedge→isOmsContainers→discretionaryUpToLimitPrice→…（約 19 欄）。
+/// 故 OrderState **非訊息尾**,前後皆變長塊,**無定長正/反索引可達**（=W5-S3 openOrder head-prefix
+/// descope 之因）。反向索引 `len-15` 會把訊息尾欄誤讀為 OrderState → **靜默錯誤 margin/commission**。
 ///
-/// margin/commission 以 sentinel 雙判別 → `None`（沿 realizedPNL 哨兵:空欄 / `1.79…E308` / |v|≥1e308
-/// = unset）。**config 提供 floor/ceiling**（與消化面同兩界,單一真源）。
+/// **本片不實作全序列解碼**（EA3-gated + 部分 10.x-sensitive,§11 BLOCK-ORDER-BAND-5）→ 守衛後
+/// **一律 `PreviewDecodeBlockedPendingFullSequence`**,絕不回結構錯誤的 margin。OrderState 塊**內容
+/// /序**已 CONFIRMED（見 `decode_whatif_order_state_block` 單測）,唯**定位**待全序列解碼。
 pub(crate) fn decode_open_order_whatif_tail(
     payload: &[u8],
     server_version: i32,
@@ -1528,7 +1537,7 @@ pub(crate) fn decode_open_order_whatif_tail(
         )));
     }
     expect_msg_id(&fields[0], IN_OPEN_ORDER_MSG_ID)?;
-    // band 兩界（§1.5 對稱面 + §11 BLOCK-ORDER-BAND-3;sv>157 whatIf 尾 UNVERIFIED → 拒解不猜）。
+    // band 兩界（§1.5 對稱面 + §11 BLOCK-ORDER-BAND-3/5;sv>157 UNVERIFIED → 拒解不猜）。
     if server_version < config.min_server_version_floor {
         return Err(OrderExecDataReject::ServerVersionBelowFloor {
             server_version,
@@ -1540,20 +1549,30 @@ pub(crate) fn decode_open_order_whatif_tail(
             msg_id: IN_OPEN_ORDER_MSG_ID,
         });
     }
-    if fields.len() < OPEN_ORDER_HEAD_MIN_FIELDS + ORDER_STATE_WHATIF_TAIL_FIELDS {
+    // **fail-closed（IB DIVERGENT-2）**:OrderState 深埋 mid-message,無定長索引可達 → 拒解,絕不
+    // 回結構錯誤 margin。preview 真接觸待全序列解碼（S3/EA;§11 BLOCK-ORDER-BAND-5 blocked-until）。
+    Err(OrderExecDataReject::PreviewDecodeBlockedPendingFullSequence)
+}
+
+/// **whatIf OrderState 塊內容/序解碼（CONFIRMED wire 事實;定位待全序列解碼——非 frame 面接線）**。
+/// 給定**恰 15 欄**的 OrderState 塊（status/9 margin/3 commission/currency/warningText,順序逐位
+/// 對照 `orderdecoder.py decodeWhatIfInfoAndCommission`@324-343 + `decodeOrderStatus`@321）,回
+/// typed preview。此為內容/序的 CONFIRMED 單元;**不**由 `decode_open_order_whatif_tail` frame 面
+/// 呼叫（定位 mid-message,見該函數 DIVERGENT-2 註）。margin/commission 以 sentinel 雙判別 → `None`。
+pub(crate) fn decode_whatif_order_state_block(
+    block: &[String],
+) -> Result<IbkrWhatIfPreviewV1, OrderExecDataReject> {
+    if block.len() != ORDER_STATE_WHATIF_TAIL_FIELDS {
         return Err(OrderExecDataReject::WireMalformed(CodecError::Malformed(
-            "open order lacks whatIf OrderState tail (need head+15)",
+            "whatIf OrderState block needs exactly 15 fields",
         )));
     }
-    // 自訊框尾反向索引 OrderState 定長塊（tail[0]=status … tail[14]=warningText）。
-    let base = fields.len() - ORDER_STATE_WHATIF_TAIL_FIELDS;
-    let t = |i: usize| &fields[base + i];
-    let status = IbkrOrderStatusV1::classify_wire_status(t(0));
+    let status = IbkrOrderStatusV1::classify_wire_status(&block[0]);
     if status == IbkrOrderStatusV1::UnknownDenied {
         return Err(OrderExecDataReject::OrderStatusUnknownDenied);
     }
     let est = |i: usize, field: &'static str| -> Result<Option<String>, OrderExecDataReject> {
-        classify_preview_estimate(t(i))
+        classify_preview_estimate(&block[i])
             .map_err(|_| OrderExecDataReject::WhatIfPreviewFieldInvalid { field })
     };
     Ok(IbkrWhatIfPreviewV1 {
@@ -1570,8 +1589,8 @@ pub(crate) fn decode_open_order_whatif_tail(
         commission_decimal: est(10, "commission")?,
         min_commission_decimal: est(11, "min_commission")?,
         max_commission_decimal: est(12, "max_commission")?,
-        commission_currency: t(13).clone(),
-        warning_text: t(14).clone(),
+        commission_currency: block[13].clone(),
+        warning_text: block[14].clone(),
     })
 }
 

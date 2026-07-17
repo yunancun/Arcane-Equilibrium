@@ -51,7 +51,7 @@ use openclaw_types::{
 };
 
 use crate::ibkr_tws_pacing::OutboundGrant;
-use crate::ibkr_tws_wire::{encode_fields, encode_frame};
+use crate::ibkr_tws_wire::{encode_fields, encode_fields_checked, encode_frame, CodecError};
 
 // ===========================================================================
 // (a) OrderFrame：order-verb 專屬出站 frame newtype（bytes 私有,唯本模塊可取）
@@ -305,8 +305,21 @@ const CANCEL_ORDER_OUT_VERSION: &str = "1";
 /// **encode band 下界**（sv < 此值 → 拒產出;placeOrder 省前導 VERSION 門檻,對齊消化面 floor 145）。
 const ENCODE_MIN_SERVER_VERSION: i32 = 145;
 /// **§1.5 INV-ORDER-ENCODE 上界**（sv > 此值 → 一律拒產出下單訊息 + audit,禁 157 佈局猜送;
-/// 158-176 band UNVERIFIED,§11 BLOCK-ORDER-BAND-1/2）。對稱於消化面 decode ceiling（157）。
+/// 158-176 band UNVERIFIED,§11 BLOCK-ORDER-BAND-1/4）。對稱於消化面 decode ceiling（157）。
 const ENCODE_MAX_PINNED_SERVER_VERSION: i32 = 157;
+
+/// band 內 sv-gated 欄門檻（逐位對照 pinned ibapi 9.81.1 `client.py placeOrder` + `server_versions.py`;
+/// [145,157] 內僅此二欄 sv-gated,其餘門檻皆 <145 恆送或 >157 不在 band）。
+/// `MIN_SERVER_VER_D_PEG_ORDERS`=148:`discretionaryUpToLimitPrice`（bool,default "0"）。
+const MIN_SV_D_PEG_ORDERS: i32 = 148;
+/// `MIN_SERVER_VER_PRICE_MGMT_ALGO`=151:`usePriceMgmtAlgo`（handle_empty;default UNSET_INTEGER → ""）。
+const MIN_SV_PRICE_MGMT_ALGO: i32 = 151;
+
+/// `make_field(UNSET_DOUBLE)` 的 encode 側 wire 形（Python `str(sys.float_info.max)`;pinned ibapi
+/// `cashQty`/PEGGED 尾等以 **plain make_field**（非 handle_empty）送 UNSET_DOUBLE → 此字面量,非空欄）。
+/// **注**:與消化面 realizedPNL 哨兵 `1.7976931348623157E308`（TWS 回送形,大寫 E 無 +）**不同串**——
+/// 此為 client 出站形（小寫 e、+308）,逐位對照 ibapi make_field 輸出,勿混用。
+const UNSET_DOUBLE_WIRE: &str = "1.7976931348623157e+308";
 
 /// placeOrder wire 請求（sv∈[145,157] band **骨架**承載欄;IB 现勘 §2.0「承載欄」子集,STK 現金
 /// 天然塌縮 comboLegs/deltaNeutral/algo/conditions 變長塊）。**冪等真源=`idempotency_key`（見
@@ -360,6 +373,10 @@ pub(crate) enum OrderEncodeReject {
     /// 欄位值違反本地 typed 紀律（decimal 形狀/必填空缺;回欄名供 typed 分流）。
     #[error("order field invalid: {field}")]
     FieldInvalid { field: &'static str },
+    /// **E3-N1/E2-F1 出站注入防護**:caller 字串欄含內嵌 NUL / 非 ASCII（`encode_fields_checked`
+    /// 拒——placeOrder 定長位置編碼下,內嵌 NUL 會多切欄位終止符 → wire desync/注入）。
+    #[error("outbound order field rejected: {0}")]
+    WireFieldRejected(&'static str),
 }
 
 /// **§1.5 encode ceiling guard**（INV-ORDER-ENCODE;decode ceiling 的 encode 鏡射）。placeOrder/
@@ -381,20 +398,24 @@ fn encode_band_guard(server_version: i32) -> Result<(), OrderEncodeReject> {
     Ok(())
 }
 
-/// encode **placeOrder**（OUT 3;sv∈[145,157] band 骨架）→ `OrderFrame`（gated 出線唯一經
-/// `send_order_framed`）。**先過 §1.5 ceiling guard** 再逐欄輸出;whatIf flag 承載於骨架末段;
-/// 末欄 = `usePriceMgmtAlgo`（@151,固定 unset 空欄）。**無 production send**（S1 零 caller → DCE）。
+/// encode **placeOrder**（OUT 3;sv∈[145,157] band,**byte-exact vs pinned ibapi 9.81.1
+/// `client.py placeOrder`@896-1426**）→ `OrderFrame`（gated 出線唯一經 `send_order_framed`）。
+/// **先過 §1.5 ceiling guard** 再逐位輸出**完整** ≤157 定長標量欄序（STK 現金 LMT/MKT×DAY 白名單）。
 ///
-/// 骨架範圍紀律:輸出 IB 现勘 §2.0「承載欄」在 STK 現金塌縮佈局下的定長序列;66 步全欄佈局
-/// （comboLegs/algo/conditions 變長塊）在 STK 現金天然塌縮為空,**真接觸位元組待 EA 前 10.x
-/// re-pin**（§11 BLOCK-ORDER-BAND-1）。ceiling guard 確保 sv>157 永不產出（不猜送）。
+/// **忠實紀律（IB DIVERGENT-1 重導,逐位對照 client.py）**:sv≥145 省前導 VERSION（ORDER_CONTAINER
+/// =145);contract 段完整（conId/symbol/secType/lastTradeDate/strike/right/multiplier/exchange/
+/// primaryExchange/currency/localSymbol/tradingClass/secIdType/secId);order 段完整（含 ~70 個
+/// mandatory 標量欄:extended/shortSale/oca/volatility/scale/hedge/pta/deltaNeutralFlag/algo…）;
+/// STK(非 BAG)天然**省 comboLegs count 欄**;非 PEG BENCH 仍送 `conditions count=0` + adjustedOrder
+/// 7 欄（PEGGED_TO_BENCHMARK=102<145 恆送）;**whatIf@位（cashQty 之前）**;`cashQty` 以 plain
+/// make_field 送 UNSET_DOUBLE 哨兵(**非 handle_empty**);sv-gated:`discretionaryUpToLimitPrice`
+/// (≥148)、`usePriceMgmtAlgo`(≥151) 條件末附。**無 production send**（S1 零 caller → DCE）。
 pub(crate) fn encode_place_order(
     req: &PlaceOrderWireRequest,
     server_version: i32,
 ) -> Result<OrderFrame, OrderEncodeReject> {
     encode_band_guard(server_version)?;
-    // 值層最小紀律（encoder 面 fail-closed:必填空缺/非法 decimal 拒產出;白名單值語義歸 lifecycle/
-    // cash gate,encoder 只擋形狀損壞以免產出畸形 wire）。
+    // 值層最小紀律（fail-closed:必填空缺/非法 decimal 拒產出;白名單值語義歸 lifecycle/cash gate）。
     if req.symbol.trim().is_empty() {
         return Err(OrderEncodeReject::FieldInvalid { field: "symbol" });
     }
@@ -406,7 +427,8 @@ pub(crate) fn encode_place_order(
             field: "total_quantity",
         });
     }
-    // 限價/輔助價/cashQty:空欄=unset 合法;非空必為簽名 decimal。
+    // lmt/aux 為 make_field_handle_empty 欄:空=unset 合法（送空欄）;非空必簽名 decimal。
+    // cashQty 為 **plain make_field** 欄:空=unset → 送 UNSET_DOUBLE 哨兵(非空欄);非空必簽名 decimal。
     for (raw, field) in [
         (&req.lmt_price_decimal, "lmt_price"),
         (&req.aux_price_decimal, "aux_price"),
@@ -420,31 +442,148 @@ pub(crate) fn encode_place_order(
     let transmit = bool_wire(req.transmit);
     let outside_rth = bool_wire(req.outside_rth);
     let what_if = bool_wire(req.what_if);
-    // sv≥145 省前導 VERSION;STK 現金塌縮佈局承載欄序（IB 现勘 §2.0）:
-    let frame = encode_frame(&encode_fields(&[
-        OUT_PLACE_ORDER_MSG_ID,
-        &order_id,
-        // 塌縮 STK 現金合約識別（comboLegs/deltaNeutral 於 STK 現金為空,骨架不輸出變長塊）。
-        &req.symbol,
-        &req.sec_type,
-        &req.exchange,
-        &req.currency,
-        // 承載欄。
-        &req.action,
-        &req.total_quantity_decimal,
-        &req.order_type,
-        &req.lmt_price_decimal,
-        &req.aux_price_decimal,
-        &req.time_in_force,
-        &req.account,
-        transmit,
-        outside_rth,
-        &req.cash_qty_decimal,
-        what_if,
-        // 骨架末欄 usePriceMgmtAlgo（@151;固定 unset 空欄——v1 不用 price-mgmt algo）。
-        "",
-    ]));
-    Ok(OrderFrame::from_order_bytes(frame))
+    // cashQty:empty → UNSET_DOUBLE 哨兵（plain make_field 語義）;非空 → decimal 透傳。
+    let cash_qty: &str = if req.cash_qty_decimal.is_empty() {
+        UNSET_DOUBLE_WIRE
+    } else {
+        &req.cash_qty_decimal
+    };
+
+    // ── 逐位重導 client.py placeOrder ≤157 STK 現金定長欄序（U=UNSET_DOUBLE 哨兵,S=make_field_handle_empty 空）──
+    let mut flds: Vec<&str> = vec![
+        OUT_PLACE_ORDER_MSG_ID, // @1100 PLACE_ORDER（sv≥145 無 VERSION 前綴,@1102-1103）
+        &order_id,              // @1105
+        // contract 段（@1108-1125;PLACE_ORDER_CONID=46/TRADING_CLASS=68/SEC_ID_TYPE=45 皆 <145 恆送）
+        "0",           // conId（@1109;新單 default 0）
+        &req.symbol,   // @1110
+        &req.sec_type, // @1111
+        "",            // lastTradeDateOrContractMonth @1112
+        "0.0",         // strike @1113（float 0.0 default）
+        "",            // right @1114
+        "",            // multiplier @1115
+        &req.exchange, // @1116
+        "",            // primaryExchange @1117
+        &req.currency, // @1118
+        "",            // localSymbol @1119
+        "",            // tradingClass @1121
+        "",            // secIdType @1124
+        "",            // secId @1125
+        // main order 段（@1128-1145）
+        &req.action,                 // @1128
+        &req.total_quantity_decimal, // @1131（FRACTIONAL_POSITIONS=101<145;decimal 透傳）
+        &req.order_type,             // @1135
+        &req.lmt_price_decimal,      // @1140 handle_empty
+        &req.aux_price_decimal,      // @1145 handle_empty
+        // extended order 段（@1148-1161）
+        &req.time_in_force, // tif @1148
+        "",                 // ocaGroup @1149
+        &req.account,       // account @1150
+        "",                 // openClose @1151
+        "0",                // origin @1152
+        "",                 // orderRef @1153
+        transmit,           // transmit @1154
+        "0",                // parentId @1155
+        "0",                // blockOrder @1156
+        "0",                // sweepToFill @1157
+        "0",                // displaySize @1158
+        "0",                // triggerMethod @1159
+        outside_rth,        // outsideRth @1160
+        "0",                // hidden @1161
+        // STK(非 BAG):省 comboLegs/orderComboLegs/smartComboRouting 塊（@1164/1181/1189 皆 gated on BAG）
+        // sharesAllocation + 財顧/折扣段（@1210-1219）
+        "",  // sharesAllocation @1210（deprecated 空）
+        "0", // discretionaryAmt @1212
+        "",  // goodAfterTime @1213
+        "",  // goodTillDate @1214
+        "",  // faGroup @1216
+        "",  // faMethod @1217
+        "",  // faPercentage @1218
+        "",  // faProfile @1219
+        "",  // modelCode @1222（MODELS_SUPPORT=103<145）
+        // 機構空賣段（@1225-1228）
+        "0",  // shortSaleSlot @1225
+        "",   // designatedLocation @1226
+        "-1", // exemptCode @1228（SSHORTX_OLD=51<145;default -1）
+        // srv v19+ 段（@1234-1260）
+        "0", // ocaType @1234
+        "",  // rule80A @1239
+        "",  // settlingFirm @1240
+        "0", // allOrNone @1241
+        "",  // minQty @1242 handle_empty
+        "",  // percentOffset @1243 handle_empty
+        "1", // eTradeOnly @1244（default True）
+        "1", // firmQuoteOnly @1245（default True）
+        "",  // nbboPriceCap @1246 handle_empty
+        "0", // auctionStrategy @1247
+        "",  // startingPrice @1248 handle_empty
+        "",  // stockRefPrice @1249 handle_empty
+        "",  // delta @1250 handle_empty
+        "",  // stockRangeLower @1251 handle_empty
+        "",  // stockRangeUpper @1252 handle_empty
+        "0", // overridePercentageConstraints @1254
+        // volatility 段（@1257-1260;deltaNeutralOrderType 空 → 省 DELTA_NEUTRAL_CONID/OPEN_CLOSE 塊）
+        "",  // volatility @1257 handle_empty
+        "",  // volatilityType @1258 handle_empty
+        "",  // deltaNeutralOrderType @1259
+        "",  // deltaNeutralAuxPrice @1260 handle_empty
+        "0", // continuousUpdate @1274
+        "",  // referencePriceType @1275 handle_empty
+        "",  // trailStopPrice @1276 handle_empty
+        "",  // trailingPercent @1279 handle_empty（TRAILING_PERCENT=62<145）
+        // SCALE 段（@1283-1307;scalePriceIncrement UNSET → 省 SCALE_ORDERS3 adjust 塊）
+        "",      // scaleInitLevelSize @1283 handle_empty
+        "",      // scaleSubsLevelSize @1284 handle_empty
+        "",      // scalePriceIncrement @1290 handle_empty
+        "",      // scaleTable @1305
+        "",      // activeStartTime @1306
+        "",      // activeStopTime @1307
+        "",      // hedgeType @1311（空 → 省 hedgeParam）
+        "0",     // optOutSmartRouting @1316
+        "",      // clearingAccount @1319（PTA_ORDERS=39<145）
+        "",      // clearingIntent @1320
+        "0",     // notHeld @1323（NOT_HELD=44<145）
+        "0",     // deltaNeutralContract flag @1332（None → False）
+        "",      // algoStrategy @1335（空 → 省 algoParams）
+        "",      // algoId @1345（ALGO_ID=71<145）
+        what_if, // whatIf @1347
+        "",      // miscOptionsStr @1355（LINKING=70<145）
+        "0",     // solicited @1358（ORDER_SOLICITED=73<145）
+        "0",     // randomizeSize @1361（RANDOMIZE=76<145）
+        "0",     // randomizePrice @1362
+        // PEGGED_TO_BENCHMARK=102<145 恆送:非 PEG BENCH → 省 pegged 5 欄,仍送 conditions count + adjusted 7 欄
+        "0",               // len(conditions) @1372
+        "",                // adjustedOrderType @1382
+        UNSET_DOUBLE_WIRE, // triggerPrice @1383（plain make_field UNSET_DOUBLE）
+        UNSET_DOUBLE_WIRE, // lmtPriceOffset @1384
+        UNSET_DOUBLE_WIRE, // adjustedStopPrice @1385
+        UNSET_DOUBLE_WIRE, // adjustedStopLimitPrice @1386
+        UNSET_DOUBLE_WIRE, // adjustedTrailingAmount @1387
+        "0",               // adjustableTrailingUnit @1388
+        "",                // extOperator @1391（EXT_OPERATOR=105<145）
+        "",                // softDollarTier.name @1394（SOFT_DOLLAR_TIER=106<145）
+        "",                // softDollarTier.val @1395
+        cash_qty,          // cashQty @1398（CASH_QTY=111<145;plain make_field UNSET_DOUBLE 哨兵）
+        "",                // mifid2DecisionMaker @1401（DECISION_MAKER=138<145）
+        "",                // mifid2DecisionAlgo @1402
+        "",                // mifid2ExecutionTrader @1405（MIFID_EXECUTION=139<145）
+        "",                // mifid2ExecutionAlgo @1406
+        "0",               // dontUseAutoPriceForHedge @1409（AUTO_PRICE_FOR_HEDGE=141<145）
+        "0",               // isOmsContainer @1412（ORDER_CONTAINER=145 → sv≥145 恆送）
+    ];
+    // sv-gated band 內二欄（逐位對照 @1414-1418）。
+    if server_version >= MIN_SV_D_PEG_ORDERS {
+        flds.push("0"); // discretionaryUpToLimitPrice @1415（D_PEG_ORDERS=148）
+    }
+    if server_version >= MIN_SV_PRICE_MGMT_ALGO {
+        flds.push(""); // usePriceMgmtAlgo @1418（PRICE_MGMT_ALGO=151;None → UNSET_INTEGER → handle_empty ""）
+    }
+
+    // E3-N1/E2-F1:含 caller 字串出站一律 encode_fields_checked（拒內嵌 NUL / 非 ASCII）。
+    let payload = encode_fields_checked(&flds).map_err(|e| match e {
+        CodecError::OutboundFieldInvalid(note) => OrderEncodeReject::WireFieldRejected(note),
+        _ => OrderEncodeReject::WireFieldRejected("outbound field invalid"),
+    })?;
+    Ok(OrderFrame::from_order_bytes(encode_frame(&payload)))
 }
 
 /// encode **cancelOrder**（OUT 4;≤157 band=`[4, VERSION=1, orderId]`,**無 `manualOrderCancelTime`**
