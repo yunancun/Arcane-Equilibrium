@@ -981,6 +981,13 @@ async fn w5s3_pump_disabled_by_default_no_requests_sent() {
     );
     assert_eq!(driver.order_exec_data().exec_slots().count(), 0);
     assert_eq!(driver.order_exec_data().open_orders().count(), 0);
+    // **E2 F2**:pump-off 窗口的 9 個 order/exec frame 承接拒逐筆計數——driver 的
+    // `Err(_)=>{}` 資料層分流不再零觀測(audit 經 order_exec_data() 唯讀投影)。
+    assert_eq!(
+        driver.order_exec_data().audit().no_active_context_rejects,
+        9,
+        "場景 9 frame(exec×2+comm×2+End+status×2+openOrder+End)全計"
+    );
 }
 
 // ===========================================================================

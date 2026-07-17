@@ -247,6 +247,23 @@ fn ceiling_extra_trailing_fields_rejected_with_audit_above_157() {
         OrderExecDataReject::PinnedLayoutOverflow { msg_id: 59 }
     );
     assert_eq!(d.audit().pinned_layout_overflow_rejects, 2);
+    // **E2 F4**:overflow 拒收+audit 只在活躍窗口——斷線失效後同 frame → NoActiveContext
+    //（計入 no_active_context_rejects),overflow 計數不動(未開消化窗口不做副作用)。
+    d.on_disconnect();
+    assert_eq!(
+        d.on_execution_frame(&payload, T0).unwrap_err(),
+        OrderExecDataReject::NoActiveContext
+    );
+    assert_eq!(
+        d.audit().pinned_layout_overflow_rejects,
+        2,
+        "非活躍窗口不計 overflow"
+    );
+    assert_eq!(
+        d.audit().no_active_context_rejects,
+        1,
+        "承接拒改計 no_active_context"
+    );
 }
 
 #[test]
@@ -426,6 +443,8 @@ fn no_active_context_frames_rejected() {
     );
     assert_eq!(d.exec_slots().count(), 0);
     assert_eq!(d.open_orders().count(), 0);
+    // **E2 F2**:承接拒逐 frame 計數(unsolicited 丟棄可觀測,非靜默)。
+    assert_eq!(d.audit().no_active_context_rejects, 4);
 }
 
 #[test]
