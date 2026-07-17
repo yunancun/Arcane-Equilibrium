@@ -50,9 +50,16 @@ pub(in crate::ipc_server) use earn::handle_process_earn_intent;
 pub(in crate::ipc_server) use fee_source::handle_query_fee_source;
 pub(in crate::ipc_server) use governance::{
     // SM Option-2 收斂 step (i)（2026-06-02）：治理 lease + 唯讀投影 IPC handler。
-    handle_acquire_lease, handle_force_governor_looser, handle_force_governor_tighter,
-    handle_get_lease, handle_get_risk_state, handle_get_status, handle_is_authorized,
-    handle_list_leases, handle_release_lease, handle_set_system_mode_broadcast,
+    handle_acquire_lease,
+    handle_force_governor_looser,
+    handle_force_governor_tighter,
+    handle_get_lease,
+    handle_get_risk_state,
+    handle_get_status,
+    handle_is_authorized,
+    handle_list_leases,
+    handle_release_lease,
+    handle_set_system_mode_broadcast,
 };
 pub(in crate::ipc_server) use h_state::{
     handle_get_h_state_status, handle_invalidate_h_state, handle_query_h_state_full,
@@ -72,7 +79,8 @@ pub(in crate::ipc_server) use stock_etf::handle_stock_etf_ipc;
 // 非測試建置無此消費端，故 cfg(test) 限定以免 unused re-export 警告。
 #[cfg(test)]
 pub(in crate::ipc_server) use stock_etf::{
-    policy_status_summary_from_result, stock_etf_phase2_precontact_summary_for_test,
+    policy_status_summary_from_result, production_feature_flag_secret_auth_matrix,
+    stock_etf_phase2_precontact_summary_for_test,
 };
 #[cfg(test)]
 pub(in crate::ipc_server) use stock_etf_risk_policy::load_stock_etf_risk_policy_from_dir;
