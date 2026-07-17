@@ -117,16 +117,26 @@ def test_connector_and_route_session_attestation_safety_shape_match() -> None:
             "/api/v1/stock-etf/account-status",
             _valid_account_status,
         ),
-        _route_session_attestation(
-            "/api/v1/stock-etf/authorization-status",
-            _valid_authorization_status,
-        ),
     ]
 
     for payload in payloads:
         assert _canonical_session_attestation(payload) == (
             SESSION_ATTESTATION_SECURITY_BASELINE
         )
+
+    # W6-S0(R17)後 authorization_status 的 session 腿=attestation producer 真值
+    # (`blocked_session_attestation()`):契約身分立正(contract_id/source_version=1),
+    # 與其餘三個 surface 的 raw-default 身分("" / 0)在 identity 兩欄分道;安全形
+    # (BLOCKED/無指紋/attestation 不接受)仍必須跨 surface 一致。
+    authorization_payload = _route_session_attestation(
+        "/api/v1/stock-etf/authorization-status",
+        _valid_authorization_status,
+    )
+    assert _canonical_session_attestation(authorization_payload) == {
+        **SESSION_ATTESTATION_SECURITY_BASELINE,
+        "contract_id": IBKR_SESSION_ATTESTATION_CONTRACT_ID,
+        "source_version": 1,
+    }
 
 
 def test_fail_closed_routes_preserve_session_attestation_safety_shape(
