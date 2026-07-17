@@ -4,6 +4,8 @@ import datetime as dt
 import json
 from pathlib import Path
 
+import pytest
+
 from cost_gate_learning_lane import bounded_demo_runtime_readiness as mod
 
 
@@ -352,7 +354,7 @@ def test_output_omits_secret_value_and_secret_hash(tmp_path: Path) -> None:
     assert "api_secret" in packet["checks"]["demo_api_slot"]
 
 
-def test_stdout_and_json_output_permanently_omit_api_key_derivatives(
+def test_json_output_permanently_omits_api_key_derivatives_and_stdout_is_empty(
     tmp_path: Path,
     capsys,
 ) -> None:
@@ -380,12 +382,12 @@ def test_stdout_and_json_output_permanently_omit_api_key_derivatives(
             "--require-engine-env",
             "--json-output",
             str(output_path),
-            "--print-json",
         ]
     )
 
     stdout = capsys.readouterr().out
-    serialized_outputs = (stdout, output_path.read_text(encoding="utf-8"))
+    assert stdout == ""
+    serialized_outputs = (output_path.read_text(encoding="utf-8"),)
     forbidden_fields = {
         "masked_value",
         "length",
@@ -409,6 +411,30 @@ def test_stdout_and_json_output_permanently_omit_api_key_derivatives(
         assert EXPECTED_KEY[-4:] not in serialized
         assert mod._sha256_text(EXPECTED_KEY)[:12] not in serialized
     assert result == 0
+
+
+def test_json_stdout_is_rejected_before_readiness_packet_is_built(
+    tmp_path: Path,
+    capsys,
+    monkeypatch,
+) -> None:
+    built = False
+
+    def _unexpected_build(**_kwargs) -> dict:
+        nonlocal built
+        built = True
+        return {}
+
+    monkeypatch.setattr(mod, "build_bounded_demo_runtime_readiness", _unexpected_build)
+
+    with pytest.raises(SystemExit) as exc_info:
+        mod.main(["--secrets-dir", str(tmp_path), "--print-json"])
+
+    captured = capsys.readouterr()
+    assert exc_info.value.code == 2
+    assert built is False
+    assert captured.out == ""
+    assert "JSON stdout is disabled" in captured.err
 
 
 def test_different_non_strict_expected_key_guesses_emit_identical_packets(

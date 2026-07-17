@@ -858,12 +858,19 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--engine-environ-file", type=Path)
     parser.add_argument("--require-engine-env", action="store_true")
     parser.add_argument("--json-output", type=Path)
-    parser.add_argument("--print-json", action="store_true")
+    parser.add_argument(
+        "--print-json",
+        action="store_true",
+        help="Deprecated and rejected: readiness JSON must be written to --json-output.",
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = _build_parser().parse_args(argv)
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+    if args.print_json or not args.json_output:
+        parser.error("--json-output is required; JSON stdout is disabled")
     packet = build_bounded_demo_runtime_readiness(
         secrets_dir=args.secrets_dir,
         slot=args.slot,
@@ -881,10 +888,7 @@ def main(argv: list[str] | None = None) -> int:
         engine_environ_file=args.engine_environ_file,
         require_engine_env=args.require_engine_env,
     )
-    if args.json_output:
-        _write_json(args.json_output, packet)
-    if args.print_json or not args.json_output:
-        print(json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True))
+    _write_json(args.json_output, packet)
     return 0
 
 
