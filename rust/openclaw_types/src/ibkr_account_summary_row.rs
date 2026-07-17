@@ -13,13 +13,16 @@
 //!
 //! **money 保真紀律**：`value_decimal` 用定點十進位**字串**承載(禁 f64 裸承 money)。
 //!
-//! **per-tag 符號紀律（E2 F3;cash 帳戶結構性定界,逐 tag 見枚舉注釋）**：
+//! **per-tag 符號紀律（E2 F3;cash 帳戶結構性定界,逐 tag 見枚舉注釋;W5-S2 依 IB 現勘
+//! 更正 AvailableFunds 錯向 pin,IB DIVERGENT #5）**：
 //! - **可負（簽名保真）**：NetLiquidation / TotalCashValue / SettledCash / AccruedCash /
-//!   ExcessLiquidity / EquityWithLoanValue——帳戶淨值/現金/應計項在虧損、費用、利息下
-//!   可為負,拒負即失真。
+//!   ExcessLiquidity / EquityWithLoanValue / AvailableFunds——帳戶淨值/現金/應計項在
+//!   虧損、費用、利息下可為負,拒負即失真。AvailableFunds 官方定義=
+//!   EquityWithLoanValue − InitialMarginReq,恒 ≤ ExcessLiquidity（=EWL − MaintMarginReq,
+//!   因 Initial ≥ Maint）→ ExcessLiquidity 既已定為可負,AvailableFunds **必然先於它轉負**,
+//!   pin 非負即自相矛盾（出典:ibkrguides available-for-trading;R10 pin 錯向,W5-S2 更正）。
 //! - **結構性非負（負值=blocker）**：GrossPositionValue（定義=持倉市值絕對值總和）/
-//!   BuyingPower（購買力下界 0）/ AvailableFunds（cash 帳戶結構性非負）——負值只可能
-//!   來自消化層錯誤,fail-closed 拒。
+//!   BuyingPower（購買力下界 0）——負值只可能來自消化層錯誤,fail-closed 拒。
 //!
 //! **時間戳/序列語義**：IBKR wire 的 accountSummary 回報行**不自帶** per-row 時間戳——
 //! `captured_at_ms`/`snapshot_seq` 為**消化層 client 側**捕捉時鐘與快照單調序列（快照 vs
@@ -59,7 +62,9 @@ pub enum IbkrAccountSummaryTagV1 {
     SettledCash,
     /// 購買力（"BuyingPower";符號紀律=**結構性非負**,下界 0——負值=blocker）。
     BuyingPower,
-    /// 可用資金（"AvailableFunds";符號紀律=**結構性非負**,cash 帳戶下——負值=blocker）。
+    /// 可用資金（"AvailableFunds"=EWL−InitialMarginReq;符號紀律=**可負**,恒先於
+    /// ExcessLiquidity 轉負,拒負即失真——出典 ibkrguides available-for-trading;
+    /// R10 誤 pin 非負,W5-S2 依 IB 現勘更正,IB DIVERGENT #5）。
     AvailableFunds,
     /// 超額流動性（"ExcessLiquidity";符號紀律=**可負**,margin 語義下可為負,保真承載）。
     ExcessLiquidity,
@@ -100,13 +105,12 @@ impl IbkrAccountSummaryTagV1 {
 
     /// per-tag 符號紀律表（模組註解定界）:`true`=結構性非負,負值即 blocker;
     /// `false`=簽名保真承載。`UnknownDenied` 取 `true`（fail-closed;其 tag blocker 先行）。
+    /// 注:AvailableFunds 不在此列——官方定義下恒 ≤ ExcessLiquidity（可負）,見模組註解
+    /// （W5-S2 更正,IB DIVERGENT #5）。
     pub fn is_structurally_non_negative(&self) -> bool {
         matches!(
             self,
-            Self::GrossPositionValue
-                | Self::BuyingPower
-                | Self::AvailableFunds
-                | Self::UnknownDenied
+            Self::GrossPositionValue | Self::BuyingPower | Self::UnknownDenied
         )
     }
 

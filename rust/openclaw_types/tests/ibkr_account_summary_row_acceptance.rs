@@ -126,16 +126,17 @@ fn every_non_unknown_variant_wire_tag_is_in_whitelist_const() {
 fn per_tag_sign_discipline_partitions_whitelist() {
     use IbkrAccountSummaryTagV1 as Tag;
 
-    // F3 符號紀律表:結構性非負三 tag + fail-closed 的 UnknownDenied。
+    // F3 符號紀律表:結構性非負二 tag + fail-closed 的 UnknownDenied
+    // （W5-S2 更正:AvailableFunds 移出非負列,IB DIVERGENT #5）。
     for tag in [
         Tag::GrossPositionValue,
         Tag::BuyingPower,
-        Tag::AvailableFunds,
         Tag::UnknownDenied,
     ] {
         assert!(tag.is_structurally_non_negative(), "{tag:?} 應為結構性非負");
     }
-    // 可負(簽名保真)六 tag。
+    // 可負(簽名保真)七 tag:AvailableFunds=EWL−InitialMargin 恒 ≤ ExcessLiquidity,
+    // 必先於它轉負（出典 ibkrguides available-for-trading）。
     for tag in [
         Tag::NetLiquidation,
         Tag::TotalCashValue,
@@ -143,6 +144,7 @@ fn per_tag_sign_discipline_partitions_whitelist() {
         Tag::AccruedCash,
         Tag::ExcessLiquidity,
         Tag::EquityWithLoanValue,
+        Tag::AvailableFunds,
     ] {
         assert!(!tag.is_structurally_non_negative(), "{tag:?} 應可負保真");
     }
@@ -153,11 +155,8 @@ fn negative_value_on_structurally_non_negative_tag_is_rejected() {
     use IbkrAccountSummaryTagV1 as Tag;
 
     // 結構性非負 tag 帶負值 → 專屬 blocker(消化層錯誤,fail-closed)。
-    for tag in [
-        Tag::GrossPositionValue,
-        Tag::BuyingPower,
-        Tag::AvailableFunds,
-    ] {
+    // W5-S2 更正:AvailableFunds 不在此列(可負保真,見下方接納斷言)。
+    for tag in [Tag::GrossPositionValue, Tag::BuyingPower] {
         let row = IbkrAccountSummaryRowV1 {
             tag,
             value_decimal: "-0.01".to_string(),
@@ -227,13 +226,20 @@ fn signed_decimal_helper_accepts_fixed_point_and_rejects_float_noise() {
 
 #[test]
 fn negative_account_value_is_honest_and_accepted() {
-    // AccruedCash 等帳戶值可為負——簽名保真,不拒。
-    let row = IbkrAccountSummaryRowV1 {
-        tag: IbkrAccountSummaryTagV1::AccruedCash,
-        value_decimal: "-12.75".to_string(),
-        ..IbkrAccountSummaryRowV1::accepted_fixture()
-    };
-    assert!(row.validate().accepted);
+    // AccruedCash / AvailableFunds 等帳戶值可為負——簽名保真,不拒。
+    // AvailableFunds=EWL−InitialMargin 恒先於 ExcessLiquidity 轉負（W5-S2 更正,
+    // IB DIVERGENT #5;出典 ibkrguides available-for-trading）——負值=合法承載。
+    for tag in [
+        IbkrAccountSummaryTagV1::AccruedCash,
+        IbkrAccountSummaryTagV1::AvailableFunds,
+    ] {
+        let row = IbkrAccountSummaryRowV1 {
+            tag,
+            value_decimal: "-12.75".to_string(),
+            ..IbkrAccountSummaryRowV1::accepted_fixture()
+        };
+        assert!(row.validate().accepted, "{tag:?} 負值應為合法簽名承載");
+    }
 }
 
 #[test]
