@@ -17,9 +17,11 @@ from datetime import datetime, timezone
 from decimal import Decimal
 import json
 import math
+import os
 from pathlib import Path
 import sys
 from typing import Any
+import uuid
 
 ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
@@ -34,6 +36,19 @@ BOUNDARY = (
     "read-only PG SELECT; no Bybit call, order, config, risk, auth, runtime, "
     "schema, Cost Gate, probe, or promotion mutation"
 )
+STATEMENT_TIMEOUT_SQLSTATE = "57014"
+STATEMENT_TIMEOUT_MESSAGE_PRIMARY = "canceling statement due to statement timeout"
+
+
+def _is_statement_timeout(exc: BaseException) -> bool:
+    if getattr(exc, "pgcode", None) != STATEMENT_TIMEOUT_SQLSTATE:
+        return False
+    diag = getattr(exc, "diag", None)
+    message_primary = getattr(diag, "message_primary", None)
+    if not isinstance(message_primary, str):
+        return False
+    normalized = " ".join(message_primary.split()).casefold()
+    return normalized == STATEMENT_TIMEOUT_MESSAGE_PRIMARY
 
 
 @dataclass(frozen=True)
@@ -577,6 +592,86 @@ def build_payload(
     }
 
 
+def build_timeout_audit_payload(
+    *,
+    cfg: AuditConfig,
+    generated: str | None = None,
+) -> dict[str, Any]:
+    """Build a non-authoritative artifact for one incomplete read-only query."""
+
+    generated = generated or datetime.now(timezone.utc).isoformat(timespec="seconds")
+    observation = {
+        "status": "PARTIAL_QUERY_INCOMPLETE",
+        "query_complete": False,
+        "requested_queries": ["order_touchability"],
+        "completed_queries": [],
+        "failed_queries": ["order_touchability"],
+        "stale_snapshot_reused": False,
+    }
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "generated_at_utc": generated,
+        "engine_modes": list(cfg.engine_modes),
+        "lookback_hours": cfg.lookback_hours,
+        "touch_window_minutes": cfg.touch_window_minutes,
+        "placement_window_seconds": cfg.placement_window_seconds,
+        "deep_gap_bps": cfg.deep_gap_bps,
+        "query_complete": False,
+        "stale_snapshot_reused": False,
+        "observation": observation,
+        "summary": {
+            "status": "READONLY_QUERY_TIMEOUT",
+            "reason": (
+                "the read-only order touchability query reached the PostgreSQL "
+                "statement timeout"
+            ),
+            "next_action": (
+                "retry_readonly_order_touchability_audit_on_next_natural_cycle_"
+                "without_blocking_independent_candidate_board"
+            ),
+            "observation_status": "PARTIAL_QUERY_INCOMPLETE",
+            "query_complete": False,
+            "stale_snapshot_reused": False,
+            "counts": {
+                "reviewed_orders": None,
+                "fill_rows": None,
+                "post_only_orders": None,
+                "orders_price_missing": None,
+                "effective_limit_prices_inferred": None,
+                "bbo_touched_no_fill_orders": None,
+                "deep_passive_no_touch_orders": None,
+                "no_touch_orders": None,
+                "no_bbo_coverage_orders": None,
+            },
+            "status_counts": {},
+            "answers": {
+                "partial_observation": True,
+                "query_complete": False,
+                "stale_snapshot_reused": False,
+                "orders_present": None,
+                "fills_present": None,
+                "bbo_touched_without_fill": None,
+                "passive_limits_too_deep": None,
+                "orders_price_missing": None,
+                "effective_prices_inferred_from_intents": None,
+                "global_cost_gate_lowering_recommended": False,
+                "candidate_selection_authority_granted": False,
+                "cost_gate_change_authority_granted": False,
+                "risk_change_authority_granted": False,
+                "order_authority_granted": False,
+                "probe_authority_granted": False,
+                "proof_authority_granted": False,
+                "serving_authority_granted": False,
+                "promotion_authority_granted": False,
+                "latest_authority_granted": False,
+                "promotion_evidence": False,
+            },
+        },
+        "orders": [],
+        "boundary": BOUNDARY,
+    }
+
+
 def render_markdown(payload: dict[str, Any]) -> str:
     summary = payload["summary"]
     lines = [
@@ -590,12 +685,24 @@ def render_markdown(payload: dict[str, Any]) -> str:
         f"- Reason: {summary.get('reason')}",
         f"- Next action: `{summary.get('next_action')}`",
         f"- Boundary: {payload.get('boundary')}",
-        "",
-        "## Counts",
-        "",
-        "| metric | value |",
-        "|---|---:|",
     ]
+    observation = payload.get("observation")
+    if isinstance(observation, dict):
+        lines.extend(
+            [
+                f"- Query complete: `{observation.get('query_complete')}`",
+                f"- Stale snapshot reused: `{observation.get('stale_snapshot_reused')}`",
+            ]
+        )
+    lines.extend(
+        [
+            "",
+            "## Counts",
+            "",
+            "| metric | value |",
+            "|---|---:|",
+        ]
+    )
     for key, value in (summary.get("counts") or {}).items():
         lines.append(f"| {key} | {value} |")
     lines.extend(
@@ -641,6 +748,31 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _write_text_atomic(path: Path, text: str) -> None:
+    """Atomically replace ``path`` from a unique temporary beside it."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(
+        f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+    )
+    try:
+        with temporary.open("x", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        directory_fd = os.open(
+            path.parent,
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+        )
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def main() -> int:
     args = parse_args()
     cfg = AuditConfig(
@@ -652,29 +784,38 @@ def main() -> int:
         deep_gap_bps=args.deep_gap_bps,
     )
     validate_config(cfg)
+    generated = datetime.now(timezone.utc).isoformat(timespec="seconds")
     conn = connect_report_pg(
         "demo_order_to_fill_gap_audit",
         statement_timeout_ms_default=180_000,
     )
+    query_timed_out = False
     try:
         conn.rollback()
         conn.set_session(readonly=True, autocommit=True)
-        rows = fetch_order_rows(conn, cfg)
+        try:
+            rows = fetch_order_rows(conn, cfg)
+        except Exception as exc:
+            if not _is_statement_timeout(exc):
+                raise
+            rows = []
+            query_timed_out = True
     finally:
         conn.close()
 
-    payload = build_payload(cfg=cfg, rows=rows)
+    if query_timed_out:
+        payload = build_timeout_audit_payload(cfg=cfg, generated=generated)
+    else:
+        payload = build_payload(cfg=cfg, rows=rows, generated=generated)
     markdown = render_markdown(payload)
     if args.output:
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(markdown, encoding="utf-8")
+        _write_text_atomic(args.output, markdown)
     else:
         print(markdown, end="")
     if args.json_output:
-        args.json_output.parent.mkdir(parents=True, exist_ok=True)
-        args.json_output.write_text(
+        _write_text_atomic(
+            args.json_output,
             json.dumps(payload, indent=2, sort_keys=True, default=_json_default) + "\n",
-            encoding="utf-8",
         )
     return 0
 
