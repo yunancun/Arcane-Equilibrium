@@ -101,8 +101,8 @@ pub struct IbkrActivationEnvelopeV1 {
     pub max_position_notional_usd_decimal: String,
     /// 每日 order 數上限（readonly 恆 0）。
     pub max_orders_per_day: u32,
-    /// global Cost Gate lineage 指紋（sha256 hex;Cost Gate 不得因本 lane 降低——
-    /// lineage 綁定令「換一套 Cost Gate」即 envelope 失效）。
+    /// global Cost Gate lineage 指紋（sha256 hex;Cost Gate 不得因本 lane 降低）。
+    /// 本欄承載指紋;**現值綁定比對歸 W8 落實**,本切片僅 shape 驗證（CC-NOTE-3）。
     pub cost_gate_lineage: String,
     /// Guardian lineage 指紋（sha256 hex）。
     pub guardian_lineage: String,

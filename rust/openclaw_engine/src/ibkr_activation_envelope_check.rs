@@ -29,6 +29,9 @@
 //!     W2「caller 與 consume 共路徑」原則）;在此之前 production 域零活化路徑不變。
 //!   - **reconnect / scope 變更 = 重新活化**：nonce 單次消費使一份 envelope 至多支撐一次
 //!     接觸授權;斷線重連或 scope 變更必須換新 envelope（新 nonce）,無「續用舊授權」路徑。
+//!   - **移交契約（E2-F1）**：本入口=**活化時刻**裁決;per-operation 續用語義歸 W8 的
+//!     session-scoped activated 態,**禁以重複呼叫本入口實作 per-operation 檢查**
+//!     （第二次呼叫必 `NonceAlreadyConsumed`）。
 //!   - Bybit crypto_perp 不變;無 DB migration;不擴 IPC。
 
 // dormant 姿態（同 ibkr_tws_session_attestation）:W8a 期本模塊零 production caller,
@@ -66,6 +69,8 @@ pub(crate) struct ActivationCheckPosture {
 /// activation nonce 消費帳本。**原子消費**:`try_consume` 在單一 Mutex 臨界區內完成
 /// 「查已消費 + 記消費」——併發下同 nonce 恰一個呼叫者取得消費權,其餘必拒（防 replay）。
 /// 帳本只增不減:W8a 無任何清除/重置路徑（envelope 過期不歸還 nonce——一次性語義）。
+/// **in-memory 易失（CC-NOTE-1）**:引擎重啟即遺忘已消費 nonce（重啟=重新活化語義,
+/// 舊 envelope 仍受 expiry/epoch 綁定約束）;durable 消費紀錄歸 W8 吸收 blocking。
 pub(crate) struct ActivationNonceLedger {
     consumed: Mutex<HashSet<String>>,
 }
