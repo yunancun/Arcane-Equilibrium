@@ -12,11 +12,16 @@ No PG writes, no Bybit calls, no orders, no risk/config/auth/runtime mutation.
 from __future__ import annotations
 
 import argparse
+from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 import sys
+from types import MappingProxyType
 from typing import Any
+import uuid
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -33,6 +38,64 @@ BOUNDARY = (
     "read-only PG SELECT via demo_order_stall_audit; no Bybit call, order, "
     "config, risk, auth, runtime, schema, or Cost Gate mutation"
 )
+STATEMENT_TIMEOUT_SQLSTATE = "57014"
+STATEMENT_TIMEOUT_MESSAGE_PRIMARY = "canceling statement due to statement timeout"
+
+
+def _freeze_payload(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return MappingProxyType(
+            {str(key): _freeze_payload(item) for key, item in value.items()}
+        )
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze_payload(item) for item in value)
+    return value
+
+
+def _thaw_payload(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {str(key): _thaw_payload(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_thaw_payload(item) for item in value]
+    return value
+
+
+@dataclass(frozen=True)
+class WindowFetchObservation:
+    """Immutable result of the requested per-window read-only queries."""
+
+    requested_windows: tuple[int, ...]
+    completed_payloads: tuple[Mapping[str, Any], ...]
+    failed_windows: tuple[int, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "requested_windows", tuple(self.requested_windows))
+        object.__setattr__(self, "failed_windows", tuple(self.failed_windows))
+        object.__setattr__(
+            self,
+            "completed_payloads",
+            tuple(_freeze_payload(payload) for payload in self.completed_payloads),
+        )
+
+    @property
+    def query_complete(self) -> bool:
+        return not self.failed_windows and (
+            len(self.completed_payloads) == len(self.requested_windows)
+        )
+
+    def mutable_completed_payloads(self) -> list[dict[str, Any]]:
+        return [_thaw_payload(payload) for payload in self.completed_payloads]
+
+
+def _is_statement_timeout(exc: BaseException) -> bool:
+    if getattr(exc, "pgcode", None) != STATEMENT_TIMEOUT_SQLSTATE:
+        return False
+    diag = getattr(exc, "diag", None)
+    message_primary = getattr(diag, "message_primary", None)
+    if not isinstance(message_primary, str):
+        return False
+    normalized = " ".join(message_primary.split()).casefold()
+    return normalized == STATEMENT_TIMEOUT_MESSAGE_PRIMARY
 
 
 def _as_int(value: Any) -> int:
@@ -243,6 +306,76 @@ def build_monitor_payload(
     }
 
 
+def build_timeout_monitor_payload(
+    *,
+    engine_modes: tuple[str, ...],
+    observation: WindowFetchObservation,
+    generated: str | None = None,
+) -> dict[str, Any]:
+    """Build a non-authoritative artifact without summarizing incomplete data."""
+
+    if observation.query_complete or not observation.failed_windows:
+        raise ValueError("timeout payload requires an incomplete failed observation")
+    generated = generated or datetime.now(timezone.utc).isoformat(timespec="seconds")
+    completed_payloads = observation.mutable_completed_payloads()
+    completed_windows = [
+        payload.get("lookback_hours") for payload in completed_payloads
+    ]
+    requested_windows = list(observation.requested_windows)
+    failed_windows = list(observation.failed_windows)
+    accounted = set(completed_windows) | set(failed_windows)
+    not_attempted_windows = [
+        hours for hours in requested_windows if hours not in accounted
+    ]
+    observation_payload = {
+        "status": "PARTIAL_QUERY_INCOMPLETE",
+        "query_complete": False,
+        "requested_windows": requested_windows,
+        "completed_windows": completed_windows,
+        "failed_windows": failed_windows,
+        "not_attempted_windows": not_attempted_windows,
+        "stale_snapshot_reused": False,
+    }
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "generated_at_utc": generated,
+        "engine_modes": list(engine_modes),
+        "observation": observation_payload,
+        "summary": {
+            "status": "READONLY_QUERY_TIMEOUT",
+            "reason": (
+                "a requested read-only monitor window reached the PostgreSQL "
+                "statement timeout"
+            ),
+            "next_action": (
+                "retry_readonly_monitor_on_next_natural_cycle_without_blocking_"
+                "independent_candidate_board"
+            ),
+            "observation_status": "PARTIAL_QUERY_INCOMPLETE",
+            "query_complete": False,
+            "requested_windows": requested_windows,
+            "completed_windows": completed_windows,
+            "failed_windows": failed_windows,
+            "answers": {
+                "partial_observation": True,
+                "query_complete": False,
+                "stale_snapshot_reused": False,
+                "global_cost_gate_lowering_recommended": False,
+                "candidate_selection_authority_granted": False,
+                "cost_gate_change_authority_granted": False,
+                "risk_change_authority_granted": False,
+                "order_authority_granted": False,
+                "proof_authority_granted": False,
+                "serving_authority_granted": False,
+                "promotion_authority_granted": False,
+                "latest_authority_granted": False,
+            },
+        },
+        "windows": [compact_window(payload) for payload in completed_payloads],
+        "boundary": BOUNDARY,
+    }
+
+
 def render_markdown(payload: dict[str, Any]) -> str:
     summary = payload["summary"]
     lines = [
@@ -254,12 +387,34 @@ def render_markdown(payload: dict[str, Any]) -> str:
         f"- Reason: {summary.get('reason')}",
         f"- Next action: `{summary.get('next_action')}`",
         "- Boundary: read-only PG SELECT; no Bybit/order/config/risk/auth/runtime mutation.",
-        "",
-        "## Window Summary",
-        "",
-        "| lookback_h | status | data | freshness | decisions | risk | intents | orders | fills | top risk |",
-        "|---:|---|---|---|---:|---:|---:|---:|---:|---|",
     ]
+    observation = payload.get("observation")
+    if isinstance(observation, dict):
+        lines.extend(
+            [
+                f"- Observation: `{observation.get('status')}`",
+                f"- Query complete: `{observation.get('query_complete')}`",
+                "- Requested windows: `"
+                + ",".join(str(item) for item in observation.get("requested_windows") or [])
+                + "`",
+                "- Completed windows: `"
+                + ",".join(str(item) for item in observation.get("completed_windows") or [])
+                + "`",
+                "- Failed windows: `"
+                + ",".join(str(item) for item in observation.get("failed_windows") or [])
+                + "`",
+                f"- Stale snapshot reused: `{observation.get('stale_snapshot_reused')}`",
+            ]
+        )
+    lines.extend(
+        [
+            "",
+            "## Window Summary",
+            "",
+            "| lookback_h | status | data | freshness | decisions | risk | intents | orders | fills | top risk |",
+            "|---:|---|---|---|---:|---:|---:|---:|---:|---|",
+        ]
+    )
     for window in payload.get("windows") or []:
         counts = window.get("counts") or {}
         top_reason = ""
@@ -295,7 +450,7 @@ def fetch_window_payloads(
     windows: list[int],
     top_limit: int,
     generated: str,
-) -> list[dict[str, Any]]:
+) -> WindowFetchObservation:
     payloads = []
     for hours in windows:
         cfg = order_stall.AuditConfig(
@@ -303,6 +458,16 @@ def fetch_window_payloads(
             lookback_hours=hours,
             top_limit=top_limit,
         )
+        try:
+            audit = order_stall.fetch_audit(conn, cfg)
+        except Exception as exc:
+            if not _is_statement_timeout(exc):
+                raise
+            return WindowFetchObservation(
+                requested_windows=tuple(windows),
+                completed_payloads=tuple(payloads),
+                failed_windows=(hours,),
+            )
         (
             counts,
             risk_reasons,
@@ -310,7 +475,7 @@ def fetch_window_payloads(
             lineage,
             context_payload_scope,
             pre_gate_drilldown,
-        ) = order_stall.fetch_audit(conn, cfg)
+        ) = audit
         payloads.append(
             order_stall.build_json_payload(
                 cfg,
@@ -323,7 +488,10 @@ def fetch_window_payloads(
                 generated=generated,
             )
         )
-    return payloads
+    return WindowFetchObservation(
+        requested_windows=tuple(windows),
+        completed_payloads=tuple(payloads),
+    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -334,6 +502,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path)
     parser.add_argument("--json-output", type=Path)
     return parser.parse_args()
+
+
+def _write_text_atomic(path: Path, text: str) -> None:
+    """Atomically replace ``path`` from a unique temporary in the same directory."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(
+        f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+    )
+    try:
+        with temporary.open("x", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def main() -> int:
@@ -348,7 +533,7 @@ def main() -> int:
     try:
         conn.rollback()
         conn.set_session(readonly=True, autocommit=True)
-        window_payloads = fetch_window_payloads(
+        observation = fetch_window_payloads(
             conn,
             engine_modes=engine_modes,
             windows=windows,
@@ -358,23 +543,28 @@ def main() -> int:
     finally:
         conn.close()
 
-    payload = build_monitor_payload(
-        engine_modes=engine_modes,
-        windows=window_payloads,
-        generated=generated,
-    )
+    if observation.query_complete:
+        payload = build_monitor_payload(
+            engine_modes=engine_modes,
+            windows=observation.mutable_completed_payloads(),
+            generated=generated,
+        )
+    else:
+        payload = build_timeout_monitor_payload(
+            engine_modes=engine_modes,
+            observation=observation,
+            generated=generated,
+        )
     markdown = render_markdown(payload)
     if args.output:
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(markdown, encoding="utf-8")
+        _write_text_atomic(args.output, markdown)
     else:
         print(markdown, end="")
     if args.json_output:
-        args.json_output.parent.mkdir(parents=True, exist_ok=True)
-        args.json_output.write_text(
+        _write_text_atomic(
+            args.json_output,
             json.dumps(payload, indent=2, sort_keys=True, default=order_stall._json_default)
             + "\n",
-            encoding="utf-8",
         )
     return 0
 
