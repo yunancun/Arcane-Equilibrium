@@ -719,6 +719,16 @@ def _cutover_preflight_location(
     return trusted_root, relative.parts, lexical
 
 
+def _require_owner_controlled_application_stat(
+    metadata: os.stat_result,
+    label: str,
+) -> None:
+    if metadata.st_uid != _effective_uid():
+        raise PermissionError(f"{label} must be owned by the effective uid")
+    if metadata.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+        raise PermissionError(f"{label} must not be group/other writable")
+
+
 def _open_cutover_preflight_fd(path: Path) -> int:
     """Open one final file beneath a trusted directory descriptor."""
     no_follow = getattr(os, "O_NOFOLLOW", None)
@@ -742,6 +752,13 @@ def _open_cutover_preflight_fd(path: Path) -> int:
                 dir_fd=parent_fd,
             )
             opened_directories.append(parent_fd)
+        root_metadata = os.fstat(parent_fd)
+        if not stat.S_ISDIR(root_metadata.st_mode):
+            raise OSError("trusted cutover root is not a directory")
+        _require_owner_controlled_application_stat(
+            root_metadata,
+            "trusted cutover root",
+        )
         for component in parts[:-1]:
             parent_fd = os.open(
                 component,
@@ -749,6 +766,13 @@ def _open_cutover_preflight_fd(path: Path) -> int:
                 dir_fd=parent_fd,
             )
             opened_directories.append(parent_fd)
+            nested_metadata = os.fstat(parent_fd)
+            if not stat.S_ISDIR(nested_metadata.st_mode):
+                raise OSError("cutover directory is not a directory")
+            _require_owner_controlled_application_stat(
+                nested_metadata,
+                "cutover directory",
+            )
         return os.open(
             parts[-1],
             os.O_RDONLY | no_follow | nonblock,
@@ -768,6 +792,10 @@ def _read_cutover_preflight_object(path: Path) -> tuple[dict[str, Any], str]:
         before = os.fstat(fd)
         if not stat.S_ISREG(before.st_mode):
             raise OSError("cutover preflight is not a regular file")
+        _require_owner_controlled_application_stat(
+            before,
+            "cutover preflight",
+        )
         if before.st_size < 0 or before.st_size > _CUTOVER_PREFLIGHT_MAX_BYTES:
             raise OSError("cutover preflight exceeds size bound")
 
@@ -786,16 +814,24 @@ def _read_cutover_preflight_object(path: Path) -> tuple[dict[str, Any], str]:
             raise OSError("cutover preflight exceeds size bound")
 
         after = os.fstat(fd)
+        _require_owner_controlled_application_stat(
+            after,
+            "cutover preflight",
+        )
         if (
             before.st_dev,
             before.st_ino,
             before.st_size,
             before.st_mtime_ns,
+            before.st_mode,
+            before.st_uid,
         ) != (
             after.st_dev,
             after.st_ino,
             after.st_size,
             after.st_mtime_ns,
+            after.st_mode,
+            after.st_uid,
         ):
             raise OSError("cutover preflight changed during read")
         raw = b"".join(chunks)

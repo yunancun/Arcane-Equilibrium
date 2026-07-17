@@ -17,6 +17,7 @@ Test categories / 測試分類:
 import sys
 import os
 import json
+import stat
 import time
 import tempfile
 import unittest
@@ -314,6 +315,51 @@ class TestErrorHandling(unittest.TestCase):
         self.assertIsInstance(snap["latest_prices"], dict)
         self.assertIsInstance(snap["stats"], dict)
         self.assertIsInstance(snap["source"], str)
+
+    def test_group_writable_snapshot_root_fails_closed(self):
+        data_dir = os.path.join(self._tmpdir.name, "data")
+        os.makedirs(data_dir)
+        _write_snapshot(data_dir, SAMPLE_SNAPSHOT)
+        os.chmod(data_dir, 0o775)
+        reader = RustSnapshotReader(data_dir=data_dir)
+
+        result = reader.get_snapshot()
+
+        self.assertIsNone(result)
+
+    def test_group_writable_snapshot_file_fails_closed(self):
+        data_dir = os.path.join(self._tmpdir.name, "data")
+        os.makedirs(data_dir)
+        path = _write_snapshot(data_dir, SAMPLE_SNAPSHOT)
+        os.chmod(path, 0o664)
+        reader = RustSnapshotReader(data_dir=data_dir)
+
+        result = reader.get_snapshot()
+
+        self.assertIsNone(result)
+
+    def test_foreign_owned_snapshot_file_fails_closed(self):
+        data_dir = os.path.join(self._tmpdir.name, "data")
+        os.makedirs(data_dir)
+        _write_snapshot(data_dir, SAMPLE_SNAPSHOT)
+        reader = RustSnapshotReader(data_dir=data_dir)
+        real_fstat = os.fstat
+
+        def foreign_file_owner(fd):
+            metadata = real_fstat(fd)
+            if stat.S_ISREG(metadata.st_mode):
+                values = list(metadata)
+                values[4] = os.geteuid() + 1
+                return os.stat_result(values)
+            return metadata
+
+        with mock.patch(
+            "app.ipc_state_reader.os.fstat",
+            side_effect=foreign_file_owner,
+        ):
+            result = reader.get_snapshot()
+
+        self.assertIsNone(result)
 
     def test_engine_name_cannot_escape_snapshot_data_directory(self):
         data_dir = os.path.join(self._tmpdir.name, "data")
