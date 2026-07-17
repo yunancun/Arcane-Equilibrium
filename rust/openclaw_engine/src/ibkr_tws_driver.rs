@@ -53,6 +53,9 @@ use crate::ibkr_tws_account_data::{
 use crate::ibkr_tws_contract_data::{
     ContractDataConfig, ContractDataDigest, ContractDataReject, ContractDetailsQuery,
 };
+use crate::ibkr_tws_market_data::{
+    MarketDataConfig, MarketDataDigest, MarketDataReject, MarketDataRequest,
+};
 use crate::ibkr_tws_order_exec_data::{
     OrderExecDataConfig, OrderExecDataDigest, OrderExecDataReject,
 };
@@ -280,6 +283,8 @@ pub(crate) enum ServeDisconnectCause {
     OrderExecWireMalformed(CodecError),
     /// W6-S1 contract details 消化判 wire 損壞（CodecError 身分保留）。
     ContractDataWireMalformed(CodecError),
+    /// W6-S3 market data (L1 tick) 消化判 wire 損壞（CodecError 身分保留）。
+    MarketDataWireMalformed(CodecError),
     /// server EOF（write 半關）。
     ServerEof,
     /// 讀錯 / codec 滾動窗超限。
@@ -367,6 +372,20 @@ pub(crate) struct SessionDriver<P: ConnectPermitProvider, F: TransportFactory> {
     /// contract data floor session 級 blocker 記憶（同 order_exec_floor_blocked 語義;
     /// 世代推進時真重置重評）。
     contract_data_floor_blocked: bool,
+    /// **W6-S3**:market data (L1 tick) 消化器（入站 IN 1/2/45/46/57/58/81 分派至此;斷線由
+    /// serve 收尾標記）。
+    market_data: MarketDataDigest,
+    /// W6-S3 訂閱 pump 期望集（默認空=off;`enable_market_data` 綁定後 serve 期經 governor
+    /// 主桶自動送 reqMktData。元素=(reqId, request, instrument_identity_hash, calendar_hash);
+    /// 真消費者=driver 測試域;TODO(W6) IPC 投影面接真開關+請求路由）。
+    market_data_requests: Vec<(i64, MarketDataRequest, String, String)>,
+    /// W6-S3 delayed-only opt-in:true=訂閱前先送 reqMarketDataType(3)（send-before-subscribe;
+    /// IB 現勘:降級是每 session 顯式 opt-in）。
+    market_data_delayed_mode: bool,
+    /// W6-S3 delayed-mode 是否已送（send-before-subscribe 一次性;世代重置）。
+    market_data_type_sent: bool,
+    /// market data floor session 級 blocker 記憶（同 contract_data_floor_blocked;世代重置）。
+    market_data_floor_blocked: bool,
     /// **W6-S0**:最後一次 serve 期 fail-closed 斷線的 typed 前因（keep-last telemetry;
     /// 見 `ServeDisconnectCause`）。
     last_disconnect_cause: Option<ServeDisconnectCause>,
@@ -426,6 +445,11 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
             contract_data: ContractDataDigest::new(ContractDataConfig::default()),
             contract_details_query: None,
             contract_data_floor_blocked: false,
+            market_data: MarketDataDigest::new(MarketDataConfig::default()),
+            market_data_requests: Vec::new(),
+            market_data_delayed_mode: false,
+            market_data_type_sent: false,
+            market_data_floor_blocked: false,
             last_disconnect_cause: None,
             wire_facts: None,
         }
@@ -476,6 +500,25 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
     /// pinned。真消費者=driver 測試域;TODO(W6) IPC 投影面接真開關+查詢佇列）。
     pub(crate) fn enable_contract_details(&mut self, query: ContractDetailsQuery) {
         self.contract_details_query = Some(query);
+    }
+
+    /// **W6-S3** market data (L1 tick) 消化器唯讀檢視（訂閱表 staleness 綁定視圖 + provenance
+    /// + audit 計數）。
+    pub(crate) fn market_data(&self) -> &MarketDataDigest {
+        &self.market_data
+    }
+
+    /// **W6-S3** 綁定訂閱期望集並開啟 pump（默認 off;serve 期經 governor 主桶自動送
+    /// reqMktData——market data 非 historical 面,走主桶。`delayed_mode`=true 則訂閱前先送
+    /// reqMarketDataType(3)（send-before-subscribe）。元素=(reqId, request, identity_hash,
+    /// calendar_hash)。真消費者=driver 測試域;TODO(W6) IPC 投影面接真開關）。
+    pub(crate) fn enable_market_data(
+        &mut self,
+        requests: Vec<(i64, MarketDataRequest, String, String)>,
+        delayed_mode: bool,
+    ) {
+        self.market_data_requests = requests;
+        self.market_data_delayed_mode = delayed_mode;
     }
 
     /// **W5-S4** 最近一次握手的 wire 實檢事實唯讀檢視（見 `wire_facts` 欄注釋;attestation
@@ -586,9 +629,13 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
                 self.account_data.on_new_connection_generation();
                 self.order_exec.on_new_connection_generation();
                 self.contract_data.on_new_connection_generation();
+                self.market_data.on_new_connection_generation();
                 self.positions_floor_blocked = false;
                 self.order_exec_floor_blocked = false;
                 self.contract_data_floor_blocked = false;
+                self.market_data_floor_blocked = false;
+                // delayed opt-in 不跨連線存活 → 世代重置,新 session 須重送 reqMarketDataType(3)。
+                self.market_data_type_sent = false;
                 // 到 Ready:stream+reader 交棒給 serve。
                 self.stream = Some(stream);
                 self.reader = Some(reader);
@@ -673,6 +720,14 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
             {
                 break self.drop_io(now, ServeDisconnectCause::SendFailed);
             }
+            // 2e. W6-S3:market data (L1 tick) 訂閱 pump（默認 off;同 2b/2c/2d 單一出口不變量,
+            // `AccountData` 主桶——market data 非 historical 面。delayed-mode 先送
+            // reqMarketDataType(3) 再訂閱）。
+            if !self.market_data_requests.is_empty()
+                && self.pump_market_data(&mut stream, now).await.is_err()
+            {
+                break self.drop_io(now, ServeDisconnectCause::SendFailed);
+            }
             // 3. 心跳回覆逾時 → miss（達 degraded 門檻 → Degraded;達 drop 門檻 → Backoff）。
             if self.manager.fsm_mut().heartbeat_reply_overdue(now) {
                 let would_drop = self.manager.fsm_mut().heartbeat_miss_would_drop();
@@ -704,6 +759,7 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
         self.account_data.on_disconnect();
         self.order_exec.on_disconnect();
         self.contract_data.on_disconnect();
+        self.market_data.on_disconnect();
         // W6-S0（E3 R13-NOTE-01/E2 R13-F2）:session 死亡即清 wire facts——serve 一切結束
         // 路徑=連線死亡;到過 Ready 的實檢事實若殘留,attestation producer 可在死會話上鑄
         // 帶新 `attested_at_ms` 的「新鮮」attested 態。取「清 facts」而非「accessor 判活」:
@@ -904,6 +960,85 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
         Ok(())
     }
 
+    /// W6-S3 訂閱 pump:snapshot 終態 timeout 收尾 → delayed-mode send-before-subscribe →
+    /// 逐期望集訂閱（未訂/斷線失效即取 governor grant → digest begin → `send_framed`）。
+    /// grant 先於 begin（沿 2b/2c/2d;begin 成功即送,無「已標訂閱但未送」的簿記謊言）;
+    /// grant 不足本 tick 跳過（無副作用,下 tick 重試）。`Err(())` = IO 斷,呼叫端 fail-closed。
+    async fn pump_market_data<S: AsyncWrite + Unpin>(
+        &mut self,
+        stream: &mut S,
+        now: u64,
+    ) -> Result<(), ()> {
+        // snapshot 終態 typed 化:逾窗無 END → digest 標 Complete 釋放 line（非懸掛）。
+        let _ = self.market_data.expire_overdue(now);
+        if self.market_data_floor_blocked {
+            return Ok(());
+        }
+        let server_version = match self.manager.state() {
+            SessionState::Ready(rs) | SessionState::Degraded(rs) => rs.server_version,
+            _ => return Ok(()),
+        };
+        // delayed-only send-before-subscribe:訂閱前先送 reqMarketDataType(3)（一次性;世代
+        // 重置。IB 現勘:降級是每 session 顯式 opt-in,非自動)。
+        if self.market_data_delayed_mode && !self.market_data_type_sent {
+            if let Some(grant) = self.manager.account_data_grant(now) {
+                let frame = self.market_data.request_delayed_mode();
+                if send_framed(stream, grant, &frame, self.timeouts.io)
+                    .await
+                    .is_err()
+                {
+                    return Err(());
+                }
+                self.market_data_type_sent = true;
+            } else {
+                // grant 不足:延到下 tick 再送 type3,訂閱亦不先行（send-before-subscribe 序）。
+                return Ok(());
+            }
+        }
+        // 逐期望集訂閱（clone 避開 borrow 衝突;期望集固定小量）。
+        let requests = self.market_data_requests.clone();
+        for (req_id, req, identity_hash, calendar_hash) in requests {
+            // 已 halt / 活躍 / snapshot 完成的 reqId 由 digest begin 自身 typed 拒兜住;此處只
+            // 對「未訂/斷線失效」的面重訂（staleness 閘,避免每 tick 空耗 governor token)。
+            let needs_begin = match self.market_data.quote_staleness(req_id, now) {
+                None => true, // 尚無此 reqId 訂閱
+                Some(SnapshotStaleness::DisconnectedStale) => true,
+                Some(_) => false,
+            };
+            if !needs_begin {
+                continue;
+            }
+            if let Some(grant) = self.manager.account_data_grant(now) {
+                match self.market_data.begin_subscription(
+                    &req,
+                    req_id,
+                    server_version,
+                    identity_hash,
+                    calendar_hash,
+                    now,
+                ) {
+                    Ok(frame) => {
+                        if send_framed(stream, grant, &frame, self.timeouts.io)
+                            .await
+                            .is_err()
+                        {
+                            return Err(());
+                        }
+                    }
+                    Err(MarketDataReject::ServerVersionBelowFloor { .. }) => {
+                        // floor session 級 blocker:記憶後不再空耗 token 重試（新連線世代重評）。
+                        self.market_data_floor_blocked = true;
+                        return Ok(());
+                    }
+                    // lines 耗盡 / 已活躍 / halt / 被注入 frame:本 tick 跳過（grant 隨 scope
+                    // drop;lines 耗盡的 cancel-before-resubscribe 由 W6+ 路由層決策）。
+                    Err(_) => {}
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn in_serve_state(&self) -> bool {
         matches!(
             self.manager.state(),
@@ -943,9 +1078,19 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
                 let _ = self.manager.fsm_mut().on_heartbeat_reply(now);
             }
             // 4:ERR_MSG → 分類 → manager（pacing 三振 / N2 farm-blip transient / session-fatal）。
+            // **W6-S3**:若 error frame 的 reqId 對應一個 market data 訂閱,額外路由至
+            // per-reqId entitlement FSM（354/10167/10197… → digest 消費;session 級 reqId=-1
+            // 不對應任何訂閱,不路由——Entitlement/Info class 於 session 層本就 no-op）。
             Some(KnownMsgId::ErrMsg) => match classify_error_frame(payload) {
                 Ok((code, class)) => {
                     let _ = self.manager.on_error_frame(code, class, now);
+                    if let Ok(fields) = decode_fields(payload) {
+                        if let Some(rid) = fields.get(2).and_then(|s| s.parse::<i64>().ok()) {
+                            if self.market_data.contains_subscription(rid) {
+                                self.market_data.on_entitlement_error(rid, code);
+                            }
+                        }
+                    }
                 }
                 // malformed err frame → fail-closed
                 Err(_) => self.fail_closed(now, ServeDisconnectCause::ErrorFrameMalformed),
@@ -1009,6 +1154,36 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
                 let r = self.contract_data.on_bond_contract_data_frame(payload);
                 self.handle_contract_data_result(r, now);
             }
+            // W6-S3:IN 1/2/45/46/57/58/81 market data (L1 tick) → 消化器（wire 損壞才斷線,
+            // 資料層 reject 續 serve——generic/string/reqParams 為 typed-ignore 記帳丟棄）。
+            Some(KnownMsgId::TickPrice) => {
+                let r = self.market_data.on_tick_price_frame(payload, now);
+                self.handle_market_data_result(r, now);
+            }
+            Some(KnownMsgId::TickSize) => {
+                let r = self.market_data.on_tick_size_frame(payload, now);
+                self.handle_market_data_result(r, now);
+            }
+            Some(KnownMsgId::TickGeneric) => {
+                let r = self.market_data.on_tick_generic_frame(payload);
+                self.handle_market_data_result(r, now);
+            }
+            Some(KnownMsgId::TickString) => {
+                let r = self.market_data.on_tick_string_frame(payload);
+                self.handle_market_data_result(r, now);
+            }
+            Some(KnownMsgId::TickSnapshotEnd) => {
+                let r = self.market_data.on_tick_snapshot_end_frame(payload);
+                self.handle_market_data_result(r, now);
+            }
+            Some(KnownMsgId::MarketDataType) => {
+                let r = self.market_data.on_market_data_type_frame(payload);
+                self.handle_market_data_result(r, now);
+            }
+            Some(KnownMsgId::TickReqParams) => {
+                let r = self.market_data.on_tick_req_params_frame(payload);
+                self.handle_market_data_result(r, now);
+            }
             // 未知 msgId → fail-closed 斷線（§2.3:不猜欄位、不跳過）。
             None => self.fail_closed(now, ServeDisconnectCause::UnknownMsgId { msg_id }),
         }
@@ -1052,6 +1227,20 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
             Ok(()) => {}
             Err(ContractDataReject::WireMalformed(c)) => {
                 self.fail_closed(now, ServeDisconnectCause::ContractDataWireMalformed(c));
+            }
+            Err(_) => {}
+        }
+    }
+
+    /// W6-S3 消化結果分流（同 W5-S2/S3/W6-S1 紀律）:`WireMalformed` = wire 損壞 → fail-closed
+    /// 斷線（typed 前因）;其餘 typed reject（lines 耗盡/未訂而收/契約 blocker/entitlement
+    /// halt）= 資料層 fail-closed——抑制/audit 身分已由 digest 落帳,session 續 serve
+    /// （不 panic;generic/string/reqParams typed-ignore 走 Ok 路徑,僅記帳）。
+    fn handle_market_data_result(&mut self, r: Result<(), MarketDataReject>, now: u64) {
+        match r {
+            Ok(()) => {}
+            Err(MarketDataReject::WireMalformed(c)) => {
+                self.fail_closed(now, ServeDisconnectCause::MarketDataWireMalformed(c));
             }
             Err(_) => {}
         }
@@ -1220,7 +1409,14 @@ async fn run_handshake_inner<S: AsyncRead + AsyncWrite + Unpin>(
             | Some(KnownMsgId::CommissionReport)
             | Some(KnownMsgId::ContractData)
             | Some(KnownMsgId::BondContractData)
-            | Some(KnownMsgId::ContractDataEnd) => return Err(HandshakeErr::Transient),
+            | Some(KnownMsgId::ContractDataEnd)
+            | Some(KnownMsgId::TickPrice)
+            | Some(KnownMsgId::TickSize)
+            | Some(KnownMsgId::TickGeneric)
+            | Some(KnownMsgId::TickString)
+            | Some(KnownMsgId::TickSnapshotEnd)
+            | Some(KnownMsgId::MarketDataType)
+            | Some(KnownMsgId::TickReqParams) => return Err(HandshakeErr::Transient),
             // 未知 msgId 於握手 → fail-closed transient（不猜欄位;可重試,不 fail-open）。
             None => return Err(HandshakeErr::Transient),
         }

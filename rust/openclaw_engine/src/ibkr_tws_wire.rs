@@ -110,6 +110,26 @@ pub(crate) const IN_CONTRACT_DATA_MSG_ID: i64 = 10;
 pub(crate) const IN_BOND_CONTRACT_DATA_MSG_ID: i64 = 18;
 /// IN 52:contractDataEnd（嚴格 3 欄 `[msgId, version, reqId]`;快照收批標記）。
 pub(crate) const IN_CONTRACT_DATA_END_MSG_ID: i64 = 52;
+// W6-S3 market data (L1 tick) **入站（IN）空間** msg ID。IB 現勘（2026-07-17,官方 ibapi
+// 9.81.1.post1）:IN 1(TICK_PRICE)/IN 2(TICK_SIZE)與 OUT 1(reqMktData)/OUT 2(cancelMktData)
+// 撞值——OUT 空間常數居 `ibkr_tws_market_data_support`;命名帶 `IN_`/`OUT_` 方向以免撞值
+// 誤用（沿 W5-S2/S3/W6-S1 慣例;driver serve 走 IN 空間）。
+/// IN 1:tickPrice（`[1, version, reqId, tickType, price, size, attrMask]`;內嵌 size=
+/// client 合成 tickSize,消化端單源去重）。
+pub(crate) const IN_TICK_PRICE_MSG_ID: i64 = 1;
+/// IN 2:tickSize（**嚴格 5 欄** `[2, version, reqId, tickType, size]`;signature 訊息）。
+pub(crate) const IN_TICK_SIZE_MSG_ID: i64 = 2;
+/// IN 45:tickGeneric（L1 lane typed-ignore;halted/option 等非報價 tick）。
+pub(crate) const IN_TICK_GENERIC_MSG_ID: i64 = 45;
+/// IN 46:tickString（L1 lane typed-ignore;last-timestamp 等字串 tick）。
+pub(crate) const IN_TICK_STRING_MSG_ID: i64 = 46;
+/// IN 57:tickSnapshotEnd（`[57, version, reqId]`;snapshot 收批,IB 11s 後送並自動取消）。
+pub(crate) const IN_TICK_SNAPSHOT_END_MSG_ID: i64 = 57;
+/// IN 58:marketDataType（`[58, version, reqId, marketDataType]`;**per-reqId 綁定非全局**）。
+pub(crate) const IN_MARKET_DATA_TYPE_MSG_ID: i64 = 58;
+/// IN 81:tickReqParams（**無 version 欄** `[81, tickerId, minTick, bboExchange,
+/// snapshotPermissions]`;IB 現勘 pinned）。
+pub(crate) const IN_TICK_REQ_PARAMS_MSG_ID: i64 = 81;
 
 // 注:`IB_INFO_CODE_FLOOR`（≥2100 info 地板)單處維護於 openclaw_types crate;B1 driver
 // 直接自 openclaw_types import（避免兩份 2100 常數漂移)。本 wire 檔的錯誤分類走 types
@@ -584,6 +604,20 @@ pub(crate) enum KnownMsgId {
     BondContractData,
     /// IN 52:contractDataEnd。
     ContractDataEnd,
+    /// IN 1:tickPrice（W6-S3;OUT 空間 1=reqMktData 與 IN 1 撞值,見常數注釋）。
+    TickPrice,
+    /// IN 2:tickSize（OUT 空間 2=cancelMktData 與 IN 2 撞值）。
+    TickSize,
+    /// IN 45:tickGeneric（L1 lane typed-ignore）。
+    TickGeneric,
+    /// IN 46:tickString（L1 lane typed-ignore）。
+    TickString,
+    /// IN 57:tickSnapshotEnd。
+    TickSnapshotEnd,
+    /// IN 58:marketDataType（per-reqId entitlement 綁定）。
+    MarketDataType,
+    /// IN 81:tickReqParams（無 version 欄）。
+    TickReqParams,
 }
 
 /// codec 層 msgId 白名單判定（**入站空間**）:已知 → `Some`;**未知 → `None`（fail-closed,
@@ -607,6 +641,13 @@ pub(crate) fn classify_msg_id(id: i64) -> Option<KnownMsgId> {
         IN_CONTRACT_DATA_MSG_ID => Some(KnownMsgId::ContractData),
         IN_BOND_CONTRACT_DATA_MSG_ID => Some(KnownMsgId::BondContractData),
         IN_CONTRACT_DATA_END_MSG_ID => Some(KnownMsgId::ContractDataEnd),
+        IN_TICK_PRICE_MSG_ID => Some(KnownMsgId::TickPrice),
+        IN_TICK_SIZE_MSG_ID => Some(KnownMsgId::TickSize),
+        IN_TICK_GENERIC_MSG_ID => Some(KnownMsgId::TickGeneric),
+        IN_TICK_STRING_MSG_ID => Some(KnownMsgId::TickString),
+        IN_TICK_SNAPSHOT_END_MSG_ID => Some(KnownMsgId::TickSnapshotEnd),
+        IN_MARKET_DATA_TYPE_MSG_ID => Some(KnownMsgId::MarketDataType),
+        IN_TICK_REQ_PARAMS_MSG_ID => Some(KnownMsgId::TickReqParams),
         _ => None,
     }
 }
@@ -827,12 +868,22 @@ mod tests {
         assert_eq!(classify_msg_id(10), Some(KnownMsgId::ContractData));
         assert_eq!(classify_msg_id(18), Some(KnownMsgId::BondContractData));
         assert_eq!(classify_msg_id(52), Some(KnownMsgId::ContractDataEnd));
+        // W6-S3:入站 market data 七 msgId（IN 1/2 與 OUT 1/2 撞值不混用;driver serve 走 IN 空間）。
+        assert_eq!(classify_msg_id(1), Some(KnownMsgId::TickPrice));
+        assert_eq!(classify_msg_id(2), Some(KnownMsgId::TickSize));
+        assert_eq!(classify_msg_id(45), Some(KnownMsgId::TickGeneric));
+        assert_eq!(classify_msg_id(46), Some(KnownMsgId::TickString));
+        assert_eq!(classify_msg_id(57), Some(KnownMsgId::TickSnapshotEnd));
+        assert_eq!(classify_msg_id(58), Some(KnownMsgId::MarketDataType));
+        assert_eq!(classify_msg_id(81), Some(KnownMsgId::TickReqParams));
         // 未知 msgId → None（fail-closed,呼叫端斷線)。
         assert_eq!(classify_msg_id(8), None);
         assert_eq!(classify_msg_id(54), None);
         assert_eq!(classify_msg_id(60), None);
         assert_eq!(classify_msg_id(65), None);
         assert_eq!(classify_msg_id(71), None);
+        assert_eq!(classify_msg_id(80), None);
+        assert_eq!(classify_msg_id(82), None);
     }
 
     #[test]
