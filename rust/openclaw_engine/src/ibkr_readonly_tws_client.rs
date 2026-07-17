@@ -15,9 +15,15 @@
 //!     paper port 4002 only；4001 / 7496 硬拒），無 config 拓寬面。
 //!   - (d) gated G4 entry：`g4_operator_triggered_first_contact`
 //!     （`#[cfg(feature="ibkr_g4_contact")]`，唯一具體 `TcpStream::connect`）。
-//! 依賴：`tokio`（io traits + net + time）、`openclaw_types`（port / AMD / ADR 常量）、
-//!   `boot_observability::BUILD_GIT_SHA`（G4 approval anti-replay）、`sha2` 不需要（帳號
-//!   採 drop 策略）、`toml` / `serde`（G4 approval 讀取）。
+//!   - (e) EA3 envelope 活化閘：`ea3_envelope_activation_gate`（R16 mini-wiring;
+//!     IB-NOTE-1）——G4 entry 於全部既有 gate 之後、唯一 socket 接觸之前消費 W8a
+//!     驗證器 `check_readonly_contact`（nonce 原子消費）;envelope + 當前兩 epoch 均為
+//!     owner-only 治理 artifact（非 0o400/0o600 拒,沿 seal 慣例）。
+//! 依賴：`tokio`（io traits + net + time）、`openclaw_types`（port / AMD / ADR 常量 +
+//!   `IbkrActivationEnvelopeV1` / `BrokerOperation`）、`boot_observability::BUILD_GIT_SHA`
+//!   （G4 approval anti-replay + envelope build 綁定）、`sha2` 不需要（帳號採 drop 策略）、
+//!   `toml` / `serde`（G4 approval / epoch 現值讀取）、`serde_json`（envelope artifact）、
+//!   `ibkr_activation_envelope_check`（W8a 活化裁決唯一入口）。
 //! 硬邊界（絕不鬆動）：
 //!   - **只讀**：源級不存在任何下單 / 撤單 / 改單方法（single write entry §1）；
 //!     不接 IPC / dispatch / normalizer（P4）；不 auto-run；無 production caller。
@@ -37,7 +43,11 @@
 //!     9 ignored + 4 ERR_MSG 按 code 分流 / 其餘 UnexpectedMsgId）。
 //!   - **惰性 G4 gate（任何 socket syscall 之前）**：env `OPENCLAW_IBKR_G4_CONTACT_APPLY==
 //!     "1"` literal → `phase2_immutable_pass_artifact_present()`（真磁盤 re-verify，直接調
-//!     producer）→ G4 approval 6 綁定 valid → structural host/port → 才 connect。
+//!     producer）→ G4 approval 6 綁定 valid → structural host/port → **EA3 activation
+//!     envelope 閘（R16;活化鐵律 §2）**：owner-only 載入 envelope + 當前兩 epoch →
+//!     `check_readonly_contact`（build SHA/epoch 綁定比對 + nonce 原子消費;非 accepted
+//!     = typed reject）→ 才 connect。**加閘只收緊,任何既有 gate 全保留**;envelope 閘放
+//!     最後一道=任何前置 gate 失敗都不燒 nonce（拒絕不燒授權）。
 //!   - Bybit crypto_perp 不變；無 DB migration；不動 Python no-write / no-SDK 守衛。
 //!
 //! 字段映射（FA 裁：無新契約）：driver 回 engine-private `TwsHealthProbeResult`
@@ -55,11 +65,16 @@ use serde::Deserialize;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use openclaw_types::{
-    IBKR_LIVE_GATEWAY_PORT, IBKR_LIVE_TWS_PORT, IBKR_PAPER_GATEWAY_DEFAULT_PORT, IBKR_PHASE2_ADR,
-    IBKR_PHASE2_CONTACT_AMD, IB_INFO_CODE_FLOOR,
+    BrokerOperation, IbkrActivationEnvelopeV1, IBKR_LIVE_GATEWAY_PORT, IBKR_LIVE_TWS_PORT,
+    IBKR_PAPER_GATEWAY_DEFAULT_PORT, IBKR_PHASE2_ADR, IBKR_PHASE2_CONTACT_AMD, IB_INFO_CODE_FLOOR,
 };
 
 use crate::boot_observability::BUILD_GIT_SHA;
+// R16 EA3 mini-wiring:W8a 活化裁決唯一入口 + 姿態/帳本型別（IB-NOTE-1;本檔為其
+// 首個 production 消費面,feature-gated——default build 仍零 caller/DCE）。
+use crate::ibkr_activation_envelope_check::{
+    check_readonly_contact, ActivationCheckPosture, ActivationNonceLedger,
+};
 // W3-S1:純 codec §(a) 已抽至 `ibkr_tws_wire`（本檔改就地消費,語義零變;codec 自此有兩個
 // 消費者=B1 driver + W3 session manager)。glob 匯入 codec 原語 / CodecError / HandshakeAck /
 // 版本 + msgId 常量,令 driver 與既有 26 測試（`use super::*`)零改仍解析。
@@ -146,6 +161,15 @@ pub enum TwsClientError {
     /// sealed pass artifact 或 G4 approval 缺席 / 無效（fail-closed）。
     #[error("g4 first-contact gate blocked (sealed artifact or contact approval missing/invalid)")]
     GateBlocked,
+    /// EA3 activation artifact 載入失敗（壞 JSON/TOML、symlink、權限過寬、非本人所有、
+    /// envelope 在位而 epoch 現值缺席等）。為什麼 typed 不 panic:授權面任何不可證狀態
+    /// 都必須是可觀測的拒絕,而非進程崩潰。envelope **檔缺席**不走此變體——交由驗證器
+    /// 產 `EnvelopeAbsent`（保住 seal≠活化機器證明路徑）。
+    #[error("ea3 activation artifact unavailable: {0}")]
+    EnvelopeUnavailable(String),
+    /// EA3 活化裁決非 accepted（blocker 全列於 Debug 投影;deny path 不燒 nonce）。
+    #[error("ea3 activation rejected: {blockers}")]
+    ActivationRejected { blockers: String },
 }
 
 /// 探針結果（engine-private；**非治理契約**，無 validate、不跨 IPC / DB）。僅 G4 bin
@@ -570,10 +594,14 @@ pub fn g4_first_contact_gate_status() -> G4GateStatus {
 /// **唯一** 具體 `tokio::net::TcpStream::connect`。runtime-gate 順序（全在任何 socket
 /// syscall 之前）：env `OPENCLAW_IBKR_G4_CONTACT_APPLY=="1"` literal（unset → dry-run 不
 /// 接觸）→ `phase2_immutable_pass_artifact_present()`（真磁盤 re-verify）→ G4 approval 6
-/// 綁定 valid → structural host/port const → 才 connect。
+/// 綁定 valid → structural host/port const → **EA3 activation envelope 閘**
+/// （`ea3_envelope_activation_gate`,nonce 原子消費——R16 起真接觸必經 Rust 驗證的
+/// envelope,活化鐵律 §2）→ 才 connect。
 ///
 /// G4 為 one-shot：connect → handshake → 1×currentTime → close（stream drop）。無
-/// production caller（僅 G4 bin 於 operator 顯式 `--contact` + env 觸發）。
+/// production caller（僅 G4 bin 於 operator 顯式 `--contact` + env 觸發）。**單次入口
+/// 呼叫=活化時刻**（驗證器移交契約）:同進程二次呼叫必 `NonceAlreadyConsumed`;
+/// reconnect/scope 變更=換新 envelope（新 nonce）。
 #[cfg(feature = "ibkr_g4_contact")]
 pub async fn g4_operator_triggered_first_contact() -> Result<TwsHealthProbeResult, TwsClientError> {
     // Gate 1：env APPLY literal "1"——在任何 socket syscall 之前。
@@ -586,6 +614,23 @@ pub async fn g4_operator_triggered_first_contact() -> Result<TwsHealthProbeResul
     }
     // Gate 4：structural host/port const（literal 127.0.0.1:4002；live port 硬拒）。
     assert_loopback_paper_endpoint(ALLOWED_HOST, PAPER_PORT)?;
+
+    // Gate 5（R16 EA3 mini-wiring;IB-NOTE-1）：activation envelope 消費。刻意放在全部
+    // 既有 gate 之後、connect 之前:任何前置 gate 失敗都不燒 nonce,通過本閘即為
+    // 「活化時刻」,緊接唯一 socket 接觸。G4 首讀嚴格對齊 health/serverTime 讀集 →
+    // operation verb 固定 `HealthRead`;seal 在位事實直取唯一 production seal 消費點
+    // （驗證器 MODULE_NOTE 移交契約,禁第二套 seal 讀取語義）。
+    let gov_dir = resolve_g4_governance_dir().ok_or_else(|| {
+        TwsClientError::EnvelopeUnavailable("OPENCLAW_DATA_DIR unset/empty".to_string())
+    })?;
+    ea3_envelope_activation_gate(
+        &gov_dir,
+        BrokerOperation::HealthRead,
+        BUILD_GIT_SHA,
+        crate::ibkr_phase2_gate_producer::phase2_immutable_pass_artifact_present(),
+        now_ms(),
+        g4_activation_nonce_ledger(),
+    )?;
 
     // 才 connect（唯一具體 TcpStream::connect）。
     let addr = format!("{ALLOWED_HOST}:{PAPER_PORT}");
@@ -602,6 +647,183 @@ pub async fn g4_operator_triggered_first_contact() -> Result<TwsHealthProbeResul
 
     let cfg = TwsProbeConfig::g4_default();
     drive_handshake_and_current_time(stream, &cfg).await
+}
+
+// ===========================================================================
+// (e) EA3 envelope 活化閘（R16 mini-wiring;IB-NOTE-1;活化鐵律 §2 的 G4 消費面）
+// ===========================================================================
+
+/// envelope artifact 檔名（owner-only;與 G4 approval 同治理目錄
+/// `<OPENCLAW_DATA_DIR>/governance/ibkr_phase2`——**config/固定路徑,非 env-var 憑證
+/// fallback 語義**:envelope 非憑證但同紀律,路徑來源與 G4 approval 完全同級,由 EA3
+/// authenticated Operator 活化紀錄提供本檔）。
+const ACTIVATION_ENVELOPE_FILENAME: &str = "ibkr_activation_envelope_v1.json";
+
+/// 當前兩 epoch（revocation/kill-switch）現值檔名。engine 目前無 runtime epoch 來源
+/// （W8 前）→ 過渡採 G4 approval 同級 config 注入;EA3 活化紀錄與 envelope 同批提供
+/// 本檔,operator 撤銷/kill = bump 檔內 epoch 使既發 envelope 綁定失配即拒。
+const ACTIVATION_CURRENT_EPOCHS_FILENAME: &str = "ibkr_activation_current_epochs.toml";
+
+/// 當前 epoch 現值（TOML deser）。**只承載現值**,絕不從 envelope 自帶值推導——
+/// 「envelope 綁定值 vs 現值」比對若同源即恆等,撤銷機制形同虛設。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub(crate) struct ActivationCurrentEpochs {
+    pub revocation_epoch: u64,
+    pub kill_switch_epoch: u64,
+}
+
+/// owner-only 治理 artifact 讀取（EA3 面共用;沿 seal/approval 慣例）。
+/// 缺檔 → `Ok(None)`;symlink / 非 regular file / 模式非 {0o400,0o600} / 非本人所有 /
+/// 祖先鏈非 0o700 → `Err`（fail-closed）。為什麼收 0o400:sealed artifact 慣例為
+/// write-once 0o400,EA3 活化紀錄歸檔後可比照鎖唯讀。
+#[cfg(unix)]
+fn load_owner_only_artifact_text(gov_dir: &Path, filename: &str) -> Result<Option<String>, String> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+    let path = gov_dir.join(filename);
+    let meta = match std::fs::symlink_metadata(&path) {
+        Ok(m) => m,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(format!("ea3 artifact stat {} failed: {e}", path.display())),
+    };
+    // 綁定：檔本身不得為 symlink（lstat 不跟隨）。
+    if meta.file_type().is_symlink() {
+        return Err(format!(
+            "ea3 artifact is symlink (denied): {}",
+            path.display()
+        ));
+    }
+    if !meta.is_file() {
+        return Err(format!(
+            "ea3 artifact is not a regular file: {}",
+            path.display()
+        ));
+    }
+    let mode = meta.permissions().mode() & 0o777;
+    if mode != 0o600 && mode != 0o400 {
+        return Err(format!(
+            "ea3 artifact not owner-only 0o400/0o600: {} mode={mode:#o}",
+            path.display()
+        ));
+    }
+    let euid = unsafe { libc::geteuid() } as u32;
+    if meta.uid() as u32 != euid {
+        return Err(format!(
+            "ea3 artifact not owned by euid: {}",
+            path.display()
+        ));
+    }
+    // 綁定：0o700 祖先鏈（與 G4 approval 共用同一檢查）。
+    g4_check_dir_pair_owner_only(gov_dir)?;
+
+    std::fs::read_to_string(&path)
+        .map(Some)
+        .map_err(|e| format!("read ea3 artifact {} failed: {e}", path.display()))
+}
+
+/// 非 unix：無法驗權限 / owner → 結構性 fail-closed 視為缺檔（部署目標皆 unix）。
+#[cfg(not(unix))]
+fn load_owner_only_artifact_text(gov_dir: &Path, filename: &str) -> Result<Option<String>, String> {
+    let _ = (gov_dir, filename);
+    Ok(None)
+}
+
+/// envelope artifact 載入（serde_json → `IbkrActivationEnvelopeV1`）。缺檔 → `Ok(None)`
+/// （交由驗證器產 `EnvelopeAbsent`）;壞 JSON / 權限違規 → `Err`。
+fn load_activation_envelope_from_dir(
+    gov_dir: &Path,
+) -> Result<Option<IbkrActivationEnvelopeV1>, String> {
+    let raw = match load_owner_only_artifact_text(gov_dir, ACTIVATION_ENVELOPE_FILENAME)? {
+        Some(raw) => raw,
+        None => return Ok(None),
+    };
+    serde_json::from_str::<IbkrActivationEnvelopeV1>(&raw)
+        .map(Some)
+        .map_err(|e| format!("parse ea3 envelope {ACTIVATION_ENVELOPE_FILENAME} failed: {e}"))
+}
+
+/// 當前兩 epoch 現值載入（toml）。缺檔 → `Ok(None)`（是否致拒由 gate 依 envelope 在位
+/// 與否決定）;壞 TOML / 權限違規 → `Err`。
+fn load_activation_current_epochs_from_dir(
+    gov_dir: &Path,
+) -> Result<Option<ActivationCurrentEpochs>, String> {
+    let raw = match load_owner_only_artifact_text(gov_dir, ACTIVATION_CURRENT_EPOCHS_FILENAME)? {
+        Some(raw) => raw,
+        None => return Ok(None),
+    };
+    toml::from_str::<ActivationCurrentEpochs>(&raw)
+        .map(Some)
+        .map_err(|e| format!("parse ea3 epochs {ACTIVATION_CURRENT_EPOCHS_FILENAME} failed: {e}"))
+}
+
+/// **EA3 envelope 活化閘**:G4 entry 在既有 gate 鏈之後、任何 socket 接觸之前的最後
+/// 一道授權裁決（活化鐵律 §2:真接觸必經 Rust 驗證 envelope + 原子燒 nonce）。
+///
+/// 流程（先寫拒絕路徑）:
+/// 1. owner-only 載 envelope（權限/壞 JSON → `EnvelopeUnavailable`;**缺檔=None 續走**,
+///    交由驗證器產 `EnvelopeAbsent`——保住「seal 在位而 envelope 缺席 →
+///    `SealIsNotActivationAuthority`」機器證明路徑）。
+/// 2. owner-only 載當前兩 epoch 現值;envelope 在位而現值缺 → 無從比對 = fail-closed
+///    `EnvelopeUnavailable`（絕不以 envelope 自帶綁定值充當現值）。兩者皆缺時取 0 佔位
+///    ——驗證器 envelope-absent 分支提前拒,佔位值不參與任何放行判定。
+/// 3. 構造 `ActivationCheckPosture` → `check_readonly_contact`（shape/綁定/時窗/verb
+///    白名單全過才原子消費 nonce）;非 accepted → `ActivationRejected`（deny 不燒 nonce）。
+///
+/// `phase2_seal_present` 由呼叫端供給且**只能**取自
+/// `phase2_immutable_pass_artifact_present()`（驗證器 MODULE_NOTE 移交契約——本函數
+/// 不自讀 seal,禁第二套 seal 讀取語義;參數化同時使測試無需 env/seal fixture）。
+fn ea3_envelope_activation_gate(
+    gov_dir: &Path,
+    operation: BrokerOperation,
+    current_build_git_sha: &str,
+    phase2_seal_present: bool,
+    now_ms_value: u64,
+    ledger: &ActivationNonceLedger,
+) -> Result<(), TwsClientError> {
+    let envelope =
+        load_activation_envelope_from_dir(gov_dir).map_err(TwsClientError::EnvelopeUnavailable)?;
+    let epochs = load_activation_current_epochs_from_dir(gov_dir)
+        .map_err(TwsClientError::EnvelopeUnavailable)?;
+
+    let (current_revocation_epoch, current_kill_switch_epoch) = match (&envelope, &epochs) {
+        (_, Some(e)) => (e.revocation_epoch, e.kill_switch_epoch),
+        // envelope 在位而 epoch 現值缺席:無從證明未被撤銷/kill → fail-closed 拒。
+        (Some(_), None) => {
+            return Err(TwsClientError::EnvelopeUnavailable(format!(
+                "current epochs artifact absent ({ACTIVATION_CURRENT_EPOCHS_FILENAME}); \
+                 cannot prove envelope not revoked/killed"
+            )));
+        }
+        // 兩者皆缺:0 佔位——驗證器於 envelope-absent 分支提前拒,佔位值不被讀取比對。
+        (None, None) => (0, 0),
+    };
+
+    let posture = ActivationCheckPosture {
+        now_ms: now_ms_value,
+        current_build_git_sha: current_build_git_sha.to_string(),
+        current_revocation_epoch,
+        current_kill_switch_epoch,
+        phase2_seal_present,
+    };
+    let verdict = check_readonly_contact(envelope.as_ref(), operation, &posture, ledger);
+    if !verdict.activation_accepted {
+        return Err(TwsClientError::ActivationRejected {
+            blockers: format!("{:?}", verdict.blockers),
+        });
+    }
+    Ok(())
+}
+
+/// process-global activation nonce 帳本（僅 gated G4 entry 消費;default build 不編譯）。
+///
+/// 為什麼 process-global:驗證器移交契約規定「單次入口呼叫=活化時刻」——若每次呼叫
+/// 建新帳本,同進程二次呼叫將繞過 `NonceAlreadyConsumed`,replay 防護即失效。in-memory
+/// 易失（CC-NOTE-1）:進程重啟遺忘已消費 nonce（重啟=重新活化語義,舊 envelope 仍受
+/// expiry/epoch 綁定約束）;durable 消費紀錄歸 W8 吸收。
+#[cfg(feature = "ibkr_g4_contact")]
+fn g4_activation_nonce_ledger() -> &'static ActivationNonceLedger {
+    static LEDGER: std::sync::OnceLock<ActivationNonceLedger> = std::sync::OnceLock::new();
+    LEDGER.get_or_init(ActivationNonceLedger::new)
 }
 
 // ===========================================================================
@@ -1162,6 +1384,352 @@ expires_at_ms = 1800003600000
         assert!(!phase2_first_contact_gate_ok());
 
         std::env::remove_var("OPENCLAW_DATA_DIR");
+    }
+
+    // ---- (e) EA3 envelope 活化閘（gov_dir 注入,零 env 依賴;權限面 #[cfg(unix)]）----
+
+    /// fixture 有效窗內的注入時刻（issued + 10min;同驗證器測試——固定 epoch ms 常量
+    /// 相對取值,非牆鐘/非 time-bomb）。
+    const EA3_NOW_IN_WINDOW_MS: u64 = 1_772_232_600_000;
+
+    /// 與 `readonly_fixture` build 綁定相符的注入 build SHA（fixture 域,非真 SHA）。
+    fn ea3_fixture_sha() -> String {
+        "f".repeat(40)
+    }
+
+    #[cfg(unix)]
+    fn write_ea3_envelope_file(dir: &Path, envelope: &IbkrActivationEnvelopeV1, mode: u32) {
+        use std::os::unix::fs::PermissionsExt;
+        let path = dir.join(ACTIVATION_ENVELOPE_FILENAME);
+        std::fs::write(&path, serde_json::to_string(envelope).unwrap()).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).unwrap();
+    }
+
+    #[cfg(unix)]
+    fn write_ea3_epochs_file(dir: &Path, revocation: u64, kill: u64, mode: u32) {
+        use std::os::unix::fs::PermissionsExt;
+        let path = dir.join(ACTIVATION_CURRENT_EPOCHS_FILENAME);
+        let toml = format!("revocation_epoch = {revocation}\nkill_switch_epoch = {kill}\n");
+        std::fs::write(&path, toml).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).unwrap();
+    }
+
+    /// 全鏈 accept + 同 ledger 二次消費必拒（replay;移交契約:單次入口=活化時刻）。
+    #[cfg(unix)]
+    #[test]
+    fn ea3_gate_accepts_fixture_envelope_then_denies_replay() {
+        let tmp = tempfile::tempdir().unwrap();
+        let gov = make_gov_chain(tmp.path());
+        write_ea3_envelope_file(&gov, &IbkrActivationEnvelopeV1::readonly_fixture(), 0o600);
+        write_ea3_epochs_file(&gov, 1, 1, 0o600);
+        let ledger = ActivationNonceLedger::new();
+
+        let first = ea3_envelope_activation_gate(
+            &gov,
+            BrokerOperation::HealthRead,
+            &ea3_fixture_sha(),
+            false,
+            EA3_NOW_IN_WINDOW_MS,
+            &ledger,
+        );
+        assert!(first.is_ok(), "expected accept, got {first:?}");
+
+        // 同進程二次呼叫 = replay → NonceAlreadyConsumed。
+        let replay = ea3_envelope_activation_gate(
+            &gov,
+            BrokerOperation::HealthRead,
+            &ea3_fixture_sha(),
+            false,
+            EA3_NOW_IN_WINDOW_MS,
+            &ledger,
+        )
+        .unwrap_err();
+        match replay {
+            TwsClientError::ActivationRejected { blockers } => {
+                assert!(blockers.contains("NonceAlreadyConsumed"), "{blockers}");
+            }
+            other => panic!("expected ActivationRejected, got {other:?}"),
+        }
+    }
+
+    /// sealed artifact 慣例的 0o400 唯讀模式同為合法 owner-only。
+    #[cfg(unix)]
+    #[test]
+    fn ea3_gate_accepts_readonly_0400_artifacts() {
+        let tmp = tempfile::tempdir().unwrap();
+        let gov = make_gov_chain(tmp.path());
+        write_ea3_envelope_file(&gov, &IbkrActivationEnvelopeV1::readonly_fixture(), 0o400);
+        write_ea3_epochs_file(&gov, 1, 1, 0o400);
+        let ledger = ActivationNonceLedger::new();
+
+        let verdict = ea3_envelope_activation_gate(
+            &gov,
+            BrokerOperation::HealthRead,
+            &ea3_fixture_sha(),
+            false,
+            EA3_NOW_IN_WINDOW_MS,
+            &ledger,
+        );
+        assert!(verdict.is_ok(), "expected accept, got {verdict:?}");
+    }
+
+    /// envelope 缺席 → 驗證器 `EnvelopeAbsent` 路徑（seal 缺席時單一拒因;typed 不 panic）。
+    #[cfg(unix)]
+    #[test]
+    fn ea3_gate_denies_absent_envelope() {
+        let tmp = tempfile::tempdir().unwrap();
+        let gov = make_gov_chain(tmp.path());
+        let ledger = ActivationNonceLedger::new();
+
+        let err = ea3_envelope_activation_gate(
+            &gov,
+            BrokerOperation::HealthRead,
+            &ea3_fixture_sha(),
+            false,
+            EA3_NOW_IN_WINDOW_MS,
+            &ledger,
+        )
+        .unwrap_err();
+        match err {
+            TwsClientError::ActivationRejected { blockers } => {
+                assert!(blockers.contains("EnvelopeAbsent"), "{blockers}");
+            }
+            other => panic!("expected ActivationRejected, got {other:?}"),
+        }
+    }
+
+    /// seal 在位而 envelope 缺席 → `SealIsNotActivationAuthority`（seal≠活化機器證明
+    /// 全鏈保真;seal 在位事實為注入參數,來源紀律由 entry 呼叫端持有）。
+    #[cfg(unix)]
+    #[test]
+    fn ea3_gate_denies_seal_without_envelope() {
+        let tmp = tempfile::tempdir().unwrap();
+        let gov = make_gov_chain(tmp.path());
+        let ledger = ActivationNonceLedger::new();
+
+        let err = ea3_envelope_activation_gate(
+            &gov,
+            BrokerOperation::HealthRead,
+            &ea3_fixture_sha(),
+            true,
+            EA3_NOW_IN_WINDOW_MS,
+            &ledger,
+        )
+        .unwrap_err();
+        match err {
+            TwsClientError::ActivationRejected { blockers } => {
+                assert!(blockers.contains("EnvelopeAbsent"), "{blockers}");
+                assert!(
+                    blockers.contains("SealIsNotActivationAuthority"),
+                    "{blockers}"
+                );
+            }
+            other => panic!("expected ActivationRejected, got {other:?}"),
+        }
+    }
+
+    /// 壞 JSON → `EnvelopeUnavailable`（typed,不 panic,不 fall-through 到 absent 語義）。
+    #[cfg(unix)]
+    #[test]
+    fn ea3_gate_denies_malformed_envelope_json() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let gov = make_gov_chain(tmp.path());
+        let path = gov.join(ACTIVATION_ENVELOPE_FILENAME);
+        std::fs::write(&path, "{ not json").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        write_ea3_epochs_file(&gov, 1, 1, 0o600);
+        let ledger = ActivationNonceLedger::new();
+
+        let err = ea3_envelope_activation_gate(
+            &gov,
+            BrokerOperation::HealthRead,
+            &ea3_fixture_sha(),
+            false,
+            EA3_NOW_IN_WINDOW_MS,
+            &ledger,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, TwsClientError::EnvelopeUnavailable(_)),
+            "{err:?}"
+        );
+        // 壞 artifact 絕不燒 nonce。
+        let fixture = IbkrActivationEnvelopeV1::readonly_fixture();
+        assert!(!ledger.is_consumed(&fixture.activation_nonce));
+    }
+
+    /// 權限過寬（0o644）→ `EnvelopeUnavailable`（owner-only 紀律,沿 seal 慣例）。
+    #[cfg(unix)]
+    #[test]
+    fn ea3_gate_denies_wide_permission_envelope() {
+        let tmp = tempfile::tempdir().unwrap();
+        let gov = make_gov_chain(tmp.path());
+        write_ea3_envelope_file(&gov, &IbkrActivationEnvelopeV1::readonly_fixture(), 0o644);
+        write_ea3_epochs_file(&gov, 1, 1, 0o600);
+        let ledger = ActivationNonceLedger::new();
+
+        let err = ea3_envelope_activation_gate(
+            &gov,
+            BrokerOperation::HealthRead,
+            &ea3_fixture_sha(),
+            false,
+            EA3_NOW_IN_WINDOW_MS,
+            &ledger,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, TwsClientError::EnvelopeUnavailable(_)),
+            "{err:?}"
+        );
+    }
+
+    /// envelope symlink → `EnvelopeUnavailable`（lstat 不跟隨）。
+    #[cfg(unix)]
+    #[test]
+    fn ea3_gate_denies_symlink_envelope() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let gov = make_gov_chain(tmp.path());
+        let target = tmp.path().join("real_envelope.json");
+        std::fs::write(
+            &target,
+            serde_json::to_string(&IbkrActivationEnvelopeV1::readonly_fixture()).unwrap(),
+        )
+        .unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o600)).unwrap();
+        std::os::unix::fs::symlink(&target, gov.join(ACTIVATION_ENVELOPE_FILENAME)).unwrap();
+        write_ea3_epochs_file(&gov, 1, 1, 0o600);
+        let ledger = ActivationNonceLedger::new();
+
+        let err = ea3_envelope_activation_gate(
+            &gov,
+            BrokerOperation::HealthRead,
+            &ea3_fixture_sha(),
+            false,
+            EA3_NOW_IN_WINDOW_MS,
+            &ledger,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, TwsClientError::EnvelopeUnavailable(_)),
+            "{err:?}"
+        );
+    }
+
+    /// envelope 在位而 epoch 現值缺席 → fail-closed 拒（無從證明未被撤銷/kill）。
+    #[cfg(unix)]
+    #[test]
+    fn ea3_gate_denies_missing_epochs_when_envelope_present() {
+        let tmp = tempfile::tempdir().unwrap();
+        let gov = make_gov_chain(tmp.path());
+        write_ea3_envelope_file(&gov, &IbkrActivationEnvelopeV1::readonly_fixture(), 0o600);
+        let ledger = ActivationNonceLedger::new();
+
+        let err = ea3_envelope_activation_gate(
+            &gov,
+            BrokerOperation::HealthRead,
+            &ea3_fixture_sha(),
+            false,
+            EA3_NOW_IN_WINDOW_MS,
+            &ledger,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, TwsClientError::EnvelopeUnavailable(_)),
+            "{err:?}"
+        );
+        let fixture = IbkrActivationEnvelopeV1::readonly_fixture();
+        assert!(!ledger.is_consumed(&fixture.activation_nonce));
+    }
+
+    /// 現值 epoch 被 bump（撤銷語義）→ 綁定失配拒且不燒 nonce。
+    #[cfg(unix)]
+    #[test]
+    fn ea3_gate_denies_epoch_mismatch_without_burning_nonce() {
+        let tmp = tempfile::tempdir().unwrap();
+        let gov = make_gov_chain(tmp.path());
+        let fixture = IbkrActivationEnvelopeV1::readonly_fixture();
+        write_ea3_envelope_file(&gov, &fixture, 0o600);
+        write_ea3_epochs_file(&gov, 2, 1, 0o600); // revocation 已 bump（envelope 綁 1）。
+        let ledger = ActivationNonceLedger::new();
+
+        let err = ea3_envelope_activation_gate(
+            &gov,
+            BrokerOperation::HealthRead,
+            &ea3_fixture_sha(),
+            false,
+            EA3_NOW_IN_WINDOW_MS,
+            &ledger,
+        )
+        .unwrap_err();
+        match err {
+            TwsClientError::ActivationRejected { blockers } => {
+                assert!(blockers.contains("RevocationEpochMismatch"), "{blockers}");
+            }
+            other => panic!("expected ActivationRejected, got {other:?}"),
+        }
+        assert!(!ledger.is_consumed(&fixture.activation_nonce));
+    }
+
+    /// 現 binary build SHA 與 envelope 綁定不符 → 拒（envelope 綁死精確 build）。
+    #[cfg(unix)]
+    #[test]
+    fn ea3_gate_denies_build_sha_mismatch() {
+        let tmp = tempfile::tempdir().unwrap();
+        let gov = make_gov_chain(tmp.path());
+        write_ea3_envelope_file(&gov, &IbkrActivationEnvelopeV1::readonly_fixture(), 0o600);
+        write_ea3_epochs_file(&gov, 1, 1, 0o600);
+        let ledger = ActivationNonceLedger::new();
+
+        let err = ea3_envelope_activation_gate(
+            &gov,
+            BrokerOperation::HealthRead,
+            &"0".repeat(40),
+            false,
+            EA3_NOW_IN_WINDOW_MS,
+            &ledger,
+        )
+        .unwrap_err();
+        match err {
+            TwsClientError::ActivationRejected { blockers } => {
+                assert!(blockers.contains("BuildGitShaMismatch"), "{blockers}");
+            }
+            other => panic!("expected ActivationRejected, got {other:?}"),
+        }
+    }
+
+    /// readonly envelope + order verb → 結構性拒全鏈保真（G4 entry 固定 HealthRead,
+    /// 本測試證明閘本身對 verb 白名單忠實轉發驗證器裁決）。
+    #[cfg(unix)]
+    #[test]
+    fn ea3_gate_denies_order_verb_structurally() {
+        let tmp = tempfile::tempdir().unwrap();
+        let gov = make_gov_chain(tmp.path());
+        let fixture = IbkrActivationEnvelopeV1::readonly_fixture();
+        write_ea3_envelope_file(&gov, &fixture, 0o600);
+        write_ea3_epochs_file(&gov, 1, 1, 0o600);
+        let ledger = ActivationNonceLedger::new();
+
+        let err = ea3_envelope_activation_gate(
+            &gov,
+            BrokerOperation::PaperOrderSubmit,
+            &ea3_fixture_sha(),
+            false,
+            EA3_NOW_IN_WINDOW_MS,
+            &ledger,
+        )
+        .unwrap_err();
+        match err {
+            TwsClientError::ActivationRejected { blockers } => {
+                assert!(
+                    blockers.contains("OrderVerbStructurallyDenied"),
+                    "{blockers}"
+                );
+            }
+            other => panic!("expected ActivationRejected, got {other:?}"),
+        }
+        assert!(!ledger.is_consumed(&fixture.activation_nonce));
     }
 
     // ---- 源級守衛：本檔絕不含下單 / HTTP / Bybit 符號 ----
