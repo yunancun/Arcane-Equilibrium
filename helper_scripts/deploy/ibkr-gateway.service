@@ -4,9 +4,14 @@
 # ----------------------------------------------------------------------------
 # MODULE_NOTE
 # 模塊用途:IB Gateway(paper 4002 語義)的 systemd user unit 模板。由
-#   ibkr_gateway_install.sh 於 operator 批准窗內 cp 到
-#   ~/.config/systemd/user/ 並立即 `systemctl --user mask ibkr-gateway`。
-#   本檔存在≠可啟動:mask 使一切 start 路徑結構性失敗。
+#   ibkr_gateway_install.sh 於 operator 批准窗內以**兩層佈局**安裝:真檔
+#   cp 到 data 層 ${XDG_DATA_HOME:-~/.local/share}/systemd/user/(查找優先
+#   序較低),隨即 `systemctl --user mask ibkr-gateway` 在 config 層
+#   ~/.config/systemd/user/ 落 /dev/null symlink(優先序較高,蓋過 data 層)。
+#   兩層分離使重跑安裝的 cp 與 mask 結構性不相撞;EA2 unmask 移除 config 層
+#   鏈後,本檔以 disabled 姿態浮現。本檔存在≠可啟動:mask 使一切 start 路徑
+#   結構性失敗;**禁 mask --force**(會把既有檔換成 /dev/null 鏈,unmask 後
+#   unit 蒸發)。
 #
 # 姿態契約(IBKR_TODO.md §2 活化鐵律 / §5 W9a):
 #   - default disabled + masked;enable/unmask/start/登入全屬 EA2,必須有
