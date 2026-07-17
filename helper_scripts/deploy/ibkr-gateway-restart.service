@@ -1,0 +1,22 @@
+# ============================================================================
+# ibkr-gateway-restart.service — IB Gateway nightly restart 執行腿(oneshot)
+# ----------------------------------------------------------------------------
+# 模塊用途:被 ibkr-gateway-restart.timer 觸發,對 ibkr-gateway.service 做
+#   try-restart。為什麼 try-restart 而非 restart:try-restart 只在 unit
+#   「正在跑」時重啟——Gateway masked/stopped(現階段常態)時為 no-op 成功,
+#   結構性不可能把 dormant Gateway 拉起來;restart 會無條件啟動,違反
+#   default-inactive 姿態。
+# 姿態契約:本 unit 隨安裝腳本 cp 落 data 層
+#   ${XDG_DATA_HOME:-~/.local/share}/systemd/user/(兩層佈局見
+#   ibkr-gateway.service 頭注),但 timer 保持 default disabled——nightly
+#   restart 窗屬 EA2+ operator 校準面(IBKR_TODO.md §5 W9a)。
+# ============================================================================
+
+[Unit]
+Description=IB Gateway nightly restart helper (oneshot; try-restart only)
+# 只在主 unit 存在時有意義;無硬依賴(主 unit masked 時本腿照樣 no-op 成功)。
+
+[Service]
+Type=oneshot
+# systemctl 絕對路徑:user unit 環境 PATH 不可假設。
+ExecStart=/usr/bin/systemctl --user try-restart ibkr-gateway.service
