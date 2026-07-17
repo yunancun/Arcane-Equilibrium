@@ -1328,9 +1328,8 @@ fn spy_contract_query() -> ContractDetailsQuery {
 async fn w6s1_contract_details_end_to_end_digests_and_marks_disconnect() {
     use openclaw_types::{is_sha256_hex, IbkrStockTypeV1};
 
-    let (mut driver, handle) = fake_driver(scenarios::contract_details_session(
-        CONTRACT_DETAILS_REQ_ID,
-    ));
+    let (mut driver, handle) =
+        fake_driver(scenarios::contract_details_session(CONTRACT_DETAILS_REQ_ID));
     driver.enable_contract_details(spy_contract_query());
     let mut clock = TestClock::at(1_000);
     // 全 cycle:Ready → 首 serve tick 送查詢(經 governor AccountData 主桶)→ 消化行+End
@@ -1370,9 +1369,8 @@ async fn w6s1_contract_details_end_to_end_digests_and_marks_disconnect() {
 #[tokio::test]
 async fn w6s1_pump_disabled_by_default_no_request_sent() {
     // 默認 off:未綁定查詢 → 不送 OUT 9;入站 contract 資料因未請而收=typed 拒,不併入。
-    let (mut driver, handle) = fake_driver(scenarios::contract_details_session(
-        CONTRACT_DETAILS_REQ_ID,
-    ));
+    let (mut driver, handle) =
+        fake_driver(scenarios::contract_details_session(CONTRACT_DETAILS_REQ_ID));
     let mut clock = TestClock::at(1_000);
     assert_eq!(
         driver.run_connect_cycle(&mut clock).await,
@@ -1407,7 +1405,10 @@ async fn w6s1_version_unpinned_poisons_but_session_survives() {
     );
     assert_eq!(driver.contract_data().identity_rows(0).1.count(), 0);
     assert_eq!(
-        driver.contract_data().audit().message_version_unpinned_rejects,
+        driver
+            .contract_data()
+            .audit()
+            .message_version_unpinned_rejects,
         1
     );
     assert_eq!(
@@ -1648,5 +1649,165 @@ async fn w6s0_disconnect_cause_is_typed_not_static_note() {
     assert!(matches!(
         driver.last_disconnect_cause(),
         Some(ServeDisconnectCause::OrderExecWireMalformed(_))
+    ));
+}
+
+// ===========================================================================
+// W6-S3 market data (L1 tick) 端到端消化 + entitlement FSM
+// ===========================================================================
+
+/// W6-S3 e2e 測試的固定 reqId（與 9001/9002/9003 錯開;通用 request-id 分配器歸 W6+）。
+const MARKET_DATA_REQ_ID: i64 = 9004;
+
+/// 全限定 SPY streaming 行情請求（e2e 測試用）。
+fn spy_market_data_request() -> MarketDataRequest {
+    MarketDataRequest {
+        con_id: 756733,
+        symbol: "SPY".to_string(),
+        exchange: "SMART".to_string(),
+        primary_exchange: "ARCA".to_string(),
+        local_symbol: "SPY".to_string(),
+        trading_class: "SPY".to_string(),
+        generic_tick_list: String::new(),
+        snapshot: false,
+    }
+}
+
+/// enable_market_data 的單訂閱期望集（identity/calendar hash=64 hex 占位）。
+fn one_market_data_sub(req: MarketDataRequest) -> Vec<(i64, MarketDataRequest, String, String)> {
+    vec![(MARKET_DATA_REQ_ID, req, "a".repeat(64), "b".repeat(64))]
+}
+
+#[tokio::test]
+async fn w6s3_market_data_end_to_end_digests_and_marks_disconnect() {
+    let (mut driver, handle) =
+        fake_driver(scenarios::market_data_streaming_session(MARKET_DATA_REQ_ID));
+    driver.enable_market_data(one_market_data_sub(spy_market_data_request()), false);
+    let mut clock = TestClock::at(1_000);
+    // 全 cycle:Ready → 首 serve tick 送 reqMktData(經 governor 主桶)→ 消化 marketDataType +
+    // 三 tick + tickReqParams(typed-ignore)→ 腳本盡 EOF → IoDropped。
+    assert_eq!(
+        driver.run_connect_cycle(&mut clock).await,
+        CycleOutcome::Served(ServeEnd::IoDropped)
+    );
+    // 出站證明:reqMktData(OUT 1,v11 STK/USD,regulatorySnapshot 恆 "0")真被送出。
+    let frames = handle.received_message_frames().await;
+    let req = frames
+        .iter()
+        .map(|f| frame_fields(f))
+        .find(|f| f[0] == "1")
+        .expect("應送 reqMktData(1)");
+    assert_eq!(&req[..3], &["1", "11", "9004"], "v11 + 固定 reqId");
+    assert_eq!(req[5], "STK");
+    assert_eq!(req[12], "USD");
+    assert_eq!(req[18], "0", "regulatorySnapshot 資金紅線恆 false");
+    // 消化證明:BID price + BID size + ASK price 各一（BID price 內嵌 size 抑制,BID size
+    // 唯認 TICK_SIZE(2)=單源記帳)。
+    let digest = driver.market_data();
+    assert_eq!(digest.audit().ticks_applied, 3);
+    assert_eq!(digest.audit().synth_size_suppressed, 2);
+    assert_eq!(digest.audit().tick_req_params_ignored, 1);
+    let prov = digest.provenance(MARKET_DATA_REQ_ID).unwrap();
+    assert_eq!(
+        prov.entitlement_state,
+        openclaw_types::IbkrMarketDataEntitlementStateV1::Entitled
+    );
+    let (staleness, rows) = digest.quotes(MARKET_DATA_REQ_ID, 1_000).unwrap();
+    assert_eq!(rows.count(), 3);
+    // 斷線失效:serve 結束(EOF)→ 訂閱標 DisconnectedStale(重連需重訂閱)。
+    assert_eq!(staleness, SnapshotStaleness::DisconnectedStale);
+}
+
+#[tokio::test]
+async fn w6s3_delayed_mode_sends_type3_before_subscribe() {
+    let (mut driver, handle) =
+        fake_driver(scenarios::market_data_delayed_session(MARKET_DATA_REQ_ID));
+    driver.enable_market_data(one_market_data_sub(spy_market_data_request()), true);
+    let mut clock = TestClock::at(1_000);
+    assert_eq!(
+        driver.run_connect_cycle(&mut clock).await,
+        CycleOutcome::Served(ServeEnd::IoDropped)
+    );
+    // send-before-subscribe 序:reqMarketDataType(59) 先於 reqMktData(1)。
+    let frames = handle.received_message_frames().await;
+    let ids: Vec<String> = frames.iter().map(|f| frame_fields(f)[0].clone()).collect();
+    let type_pos = ids
+        .iter()
+        .position(|s| s == "59")
+        .expect("應送 reqMarketDataType(59)");
+    let mkt_pos = ids
+        .iter()
+        .position(|s| s == "1")
+        .expect("應送 reqMktData(1)");
+    assert!(type_pos < mkt_pos, "reqMarketDataType 必先於 reqMktData");
+    // delayed tick(66)→ entitlement Delayed;quote row 標 Delayed（S3a 契約守）。
+    let digest = driver.market_data();
+    let prov = digest.provenance(MARKET_DATA_REQ_ID).unwrap();
+    assert_eq!(
+        prov.entitlement_state,
+        openclaw_types::IbkrMarketDataEntitlementStateV1::Delayed
+    );
+}
+
+#[tokio::test]
+async fn w6s3_no_entitlement_354_halts_per_req_session_survives() {
+    let (mut driver, _h) = fake_driver(scenarios::market_data_no_entitlement_354(
+        MARKET_DATA_REQ_ID,
+    ));
+    driver.enable_market_data(one_market_data_sub(spy_market_data_request()), false);
+    let mut clock = TestClock::at(1_000);
+    // 354 → per-reqId None halt;session 不斷(EOF 才 IoDropped)。
+    assert_eq!(
+        driver.run_connect_cycle(&mut clock).await,
+        CycleOutcome::Served(ServeEnd::IoDropped)
+    );
+    let digest = driver.market_data();
+    assert_eq!(digest.audit().entitlement_none_rejects, 1);
+    assert_eq!(
+        digest
+            .provenance(MARKET_DATA_REQ_ID)
+            .unwrap()
+            .entitlement_state,
+        openclaw_types::IbkrMarketDataEntitlementStateV1::None
+    );
+    // halt=終態不佔 line → 斷線不覆蓋（維持 Invalidated;354 是 entitlement 終態非 transport)。
+    assert_eq!(
+        digest.quote_staleness(MARKET_DATA_REQ_ID, 1_000),
+        Some(SnapshotStaleness::Invalidated),
+        "halt 終態不佔 line,斷線不覆蓋為 DisconnectedStale"
+    );
+}
+
+#[tokio::test]
+async fn w6s3_competing_session_10197_typed_halt() {
+    let (mut driver, _h) =
+        fake_driver(scenarios::market_data_competing_session(MARKET_DATA_REQ_ID));
+    driver.enable_market_data(one_market_data_sub(spy_market_data_request()), false);
+    let mut clock = TestClock::at(1_000);
+    assert_eq!(
+        driver.run_connect_cycle(&mut clock).await,
+        CycleOutcome::Served(ServeEnd::IoDropped)
+    );
+    assert_eq!(
+        driver.market_data().audit().entitlement_competing_session,
+        1
+    );
+}
+
+#[tokio::test]
+async fn w6s3_malformed_tick_fail_closed_disconnect() {
+    let (mut driver, _h) = fake_driver(scenarios::market_data_malformed_tick_size(
+        MARKET_DATA_REQ_ID,
+    ));
+    driver.enable_market_data(one_market_data_sub(spy_market_data_request()), false);
+    let mut clock = TestClock::at(1_000);
+    assert_eq!(
+        driver.run_connect_cycle(&mut clock).await,
+        CycleOutcome::Served(ServeEnd::IoDropped)
+    );
+    // 壞欄位 tickSize → MarketDataWireMalformed typed 前因。
+    assert!(matches!(
+        driver.last_disconnect_cause(),
+        Some(ServeDisconnectCause::MarketDataWireMalformed(_))
     ));
 }

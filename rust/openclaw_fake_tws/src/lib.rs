@@ -133,6 +133,18 @@ pub fn err_msg(code: i64, text: &str) -> FakeFrame {
     ])))
 }
 
+/// ERR_MSG **帶指定 reqId**（W6-S3 per-reqId entitlement 錯誤碼場景;欄序 [msgId, version,
+/// reqId, errorCode, errorMsg]——reqId≠-1 令 driver 路由至對應訂閱的 entitlement FSM）。
+pub fn err_msg_req(req_id: i64, code: i64, text: &str) -> FakeFrame {
+    FakeFrame(encode_frame(&encode_fields(&[
+        "4",
+        "2",
+        &req_id.to_string(),
+        &code.to_string(),
+        text,
+    ])))
+}
+
 /// 任意欄位 frame（版本不符 / 未知 msgId / 亂序 等自訂場景）。
 pub fn custom_frame(fields: &[&str]) -> FakeFrame {
     FakeFrame(encode_frame(&encode_fields(fields)))
@@ -411,18 +423,18 @@ pub fn contract_details_fields(
         "10".into(),
         "8".into(),
         req_id.to_string(),
-        symbol.into(),           // 1 symbol
-        sec_type.into(),         // 2 secType
-        "".into(),               // 3 lastTradeDateOrContractMonth
-        "0".into(),              // 4 strike
-        "".into(),               // 5 right
-        "SMART".into(),          // 6 exchange
-        currency.into(),         // 7 currency
-        symbol.into(),           // 8 localSymbol
-        symbol.into(),           // 9 marketName
-        symbol.into(),           // 10 tradingClass
-        con_id.to_string(),      // 11 conId
-        "0.01".into(),           // 12 minTick
+        symbol.into(),      // 1 symbol
+        sec_type.into(),    // 2 secType
+        "".into(),          // 3 lastTradeDateOrContractMonth
+        "0".into(),         // 4 strike
+        "".into(),          // 5 right
+        "SMART".into(),     // 6 exchange
+        currency.into(),    // 7 currency
+        symbol.into(),      // 8 localSymbol
+        symbol.into(),      // 9 marketName
+        symbol.into(),      // 10 tradingClass
+        con_id.to_string(), // 11 conId
+        "0.01".into(),      // 12 minTick
     ];
     if server_version >= 110 {
         f.push("100".into()); // 13 mdSizeMultiplier
@@ -511,6 +523,98 @@ pub fn bond_contract_details(req_id: i64) -> FakeFrame {
         &req_id.to_string(),
         "GOVT-BOND",
         "junk-tail",
+    ])))
+}
+
+// ---- W6-S3 market data (L1 tick) builders（IN 1/2/45/46/57/58/81;IB pinned 欄位序——fake
+// 為「另一方」server,獨立按表編碼）----
+
+/// tickPrice（IN 1;`[1, version, reqId, tickType, price, size, attrMask]`,嚴格 7 欄;內嵌
+/// size=client 合成 tickSize,消化端單源去重）。
+pub fn tick_price(
+    req_id: i64,
+    tick_type: i64,
+    price: &str,
+    size: i64,
+    attr_mask: i64,
+) -> FakeFrame {
+    FakeFrame(encode_frame(&encode_fields(&[
+        "1",
+        "6",
+        &req_id.to_string(),
+        &tick_type.to_string(),
+        price,
+        &size.to_string(),
+        &attr_mask.to_string(),
+    ])))
+}
+
+/// tickSize（IN 2;**嚴格 5 欄** `[2, version, reqId, tickType, size]`;signature 訊息）。
+pub fn tick_size(req_id: i64, tick_type: i64, size: i64) -> FakeFrame {
+    FakeFrame(encode_frame(&encode_fields(&[
+        "2",
+        "6",
+        &req_id.to_string(),
+        &tick_type.to_string(),
+        &size.to_string(),
+    ])))
+}
+
+/// tickGeneric（IN 45;`[45, version, reqId, tickType, value]`;L1 lane typed-ignore）。
+pub fn tick_generic(req_id: i64, tick_type: i64, value: &str) -> FakeFrame {
+    FakeFrame(encode_frame(&encode_fields(&[
+        "45",
+        "6",
+        &req_id.to_string(),
+        &tick_type.to_string(),
+        value,
+    ])))
+}
+
+/// tickString（IN 46;`[46, version, reqId, tickType, value]`;L1 lane typed-ignore）。
+pub fn tick_string(req_id: i64, tick_type: i64, value: &str) -> FakeFrame {
+    FakeFrame(encode_frame(&encode_fields(&[
+        "46",
+        "6",
+        &req_id.to_string(),
+        &tick_type.to_string(),
+        value,
+    ])))
+}
+
+/// tickSnapshotEnd（IN 57;`[57, version, reqId]`;snapshot 收批標記）。
+pub fn tick_snapshot_end(req_id: i64) -> FakeFrame {
+    FakeFrame(encode_frame(&encode_fields(&[
+        "57",
+        "1",
+        &req_id.to_string(),
+    ])))
+}
+
+/// marketDataType（IN 58;`[58, version, reqId, marketDataType]`;per-reqId entitlement 綁定）。
+pub fn market_data_type(req_id: i64, market_data_type_val: i64) -> FakeFrame {
+    FakeFrame(encode_frame(&encode_fields(&[
+        "58",
+        "1",
+        &req_id.to_string(),
+        &market_data_type_val.to_string(),
+    ])))
+}
+
+/// tickReqParams（IN 81;**無 version 欄** `[81, tickerId, minTick, bboExchange,
+/// snapshotPermissions]`;IB 現勘 pinned）。
+pub fn tick_req_params(
+    req_id: i64,
+    min_tick: &str,
+    bbo_exchange: &str,
+    permissions: i64,
+) -> FakeFrame {
+    FakeFrame(encode_frame(&encode_fields(&[
+        "81",
+        &req_id.to_string(),
+        min_tick,
+        bbo_exchange,
+        &permissions.to_string(),
     ])))
 }
 
@@ -1186,6 +1290,74 @@ pub mod scenarios {
         frames.push(custom_frame(&refs));
         Scenario::new(vec![FakeStep::Send(frames)])
     }
+
+    // ---- W6-S3 market data (L1 tick) 場景 ----
+
+    /// **W6-S3 happy streaming session**:握手到 Ready 後——marketDataType(1=live) 綁 Entitled
+    /// → BID price + BID size + ASK price → tickReqParams（typed-ignore）→ 腳本盡 EOF。fake 為
+    /// 腳本化 push（driver 首 serve tick 先送 reqMktData 再讀,時序天然成立,沿 W5-S2 慣例)。
+    pub fn market_data_streaming_session(req_id: i64) -> Scenario {
+        let mut frames = happy_handshake_frames();
+        frames.push(market_data_type(req_id, 1));
+        frames.push(tick_price(req_id, 1, "512.34", 100, 0)); // BID
+        frames.push(tick_size(req_id, 0, 200)); // BID_SIZE
+        frames.push(tick_price(req_id, 2, "512.36", 150, 0)); // ASK
+        frames.push(tick_req_params(req_id, "0.01", "ARCA", 3));
+        Scenario::new(vec![FakeStep::Send(frames)])
+    }
+
+    /// **W6-S3 delayed session**:marketDataType(3=delayed) 綁 Delayed + delayed BID tick(66)
+    /// → 消化端 quote row entitlement=Delayed（S3a 契約守）。
+    pub fn market_data_delayed_session(req_id: i64) -> Scenario {
+        let mut frames = happy_handshake_frames();
+        frames.push(market_data_type(req_id, 3));
+        frames.push(tick_price(req_id, 66, "1.23", 5, 0)); // DELAYED_BID
+        Scenario::new(vec![FakeStep::Send(frames)])
+    }
+
+    /// **W6-S3 snapshot session**:snapshot BID price → TICK_SNAPSHOT_END（收批,IB 自動取消）。
+    pub fn market_data_snapshot_session(req_id: i64) -> Scenario {
+        let mut frames = happy_handshake_frames();
+        frames.push(tick_price(req_id, 1, "512.34", 100, 0));
+        frames.push(tick_snapshot_end(req_id));
+        Scenario::new(vec![FakeStep::Send(frames)])
+    }
+
+    /// **W6-S3 無權限 354**:err 354（reqId 對應訂閱)→ 消化端 per-reqId None halt,session 不斷。
+    pub fn market_data_no_entitlement_354(req_id: i64) -> Scenario {
+        let mut frames = happy_handshake_frames();
+        frames.push(err_msg_req(
+            req_id,
+            354,
+            "Requested market data is not subscribed",
+        ));
+        Scenario::new(vec![FakeStep::Send(frames)])
+    }
+
+    /// **W6-S3 competing live session 10197**:typed halt（禁重試),session 不斷。
+    pub fn market_data_competing_session(req_id: i64) -> Scenario {
+        let mut frames = happy_handshake_frames();
+        frames.push(err_msg_req(
+            req_id,
+            10197,
+            "No market data during competing live session",
+        ));
+        Scenario::new(vec![FakeStep::Send(frames)])
+    }
+
+    /// **W6-S3 壞欄位 tickSize**（6 欄,多一欄）→ 消化端 `WireMalformed` → driver fail-closed 斷線。
+    pub fn market_data_malformed_tick_size(req_id: i64) -> Scenario {
+        let mut frames = happy_handshake_frames();
+        frames.push(custom_frame(&[
+            "2",
+            "6",
+            &req_id.to_string(),
+            "0",
+            "100",
+            "surplus",
+        ]));
+        Scenario::new(vec![FakeStep::Send(frames)])
+    }
 }
 
 // ===========================================================================
@@ -1319,6 +1491,52 @@ mod tests {
         let _ = scenarios::contract_details_denied_row(9003, "FUT", "USD", "ARCA");
         let _ = scenarios::contract_details_absurd_sec_id_count(9003);
         let _ = scenarios::contract_details_bond_then_good(9003);
+        // W6-S3 market data 場景。
+        let _ = scenarios::market_data_streaming_session(9004);
+        let _ = scenarios::market_data_delayed_session(9004);
+        let _ = scenarios::market_data_snapshot_session(9004);
+        let _ = scenarios::market_data_no_entitlement_354(9004);
+        let _ = scenarios::market_data_competing_session(9004);
+        let _ = scenarios::market_data_malformed_tick_size(9004);
+    }
+
+    #[test]
+    fn w6_market_data_builders_produce_pinned_field_order() {
+        // IN 1 tickPrice = 嚴格 7 欄 [1, version, reqId, tickType, price, size, attrMask]。
+        let f = frame_fields(&decode_all_frames(&tick_price(9004, 1, "512.34", 100, 0).0)[0]);
+        assert_eq!(f, vec!["1", "6", "9004", "1", "512.34", "100", "0"]);
+        // IN 2 tickSize = 嚴格 5 欄 [2, version, reqId, tickType, size]。
+        let f = frame_fields(&decode_all_frames(&tick_size(9004, 0, 200).0)[0]);
+        assert_eq!(f, vec!["2", "6", "9004", "0", "200"]);
+        // IN 45/46 tickGeneric/tickString = 5 欄。
+        assert_eq!(
+            frame_fields(&decode_all_frames(&tick_generic(9004, 49, "0").0)[0]).len(),
+            5
+        );
+        assert_eq!(
+            frame_fields(&decode_all_frames(&tick_string(9004, 45, "ts").0)[0]).len(),
+            5
+        );
+        // IN 57 tickSnapshotEnd = [57, version, reqId]。
+        assert_eq!(
+            frame_fields(&decode_all_frames(&tick_snapshot_end(9004).0)[0]),
+            vec!["57", "1", "9004"]
+        );
+        // IN 58 marketDataType = [58, version, reqId, marketDataType]。
+        assert_eq!(
+            frame_fields(&decode_all_frames(&market_data_type(9004, 3).0)[0]),
+            vec!["58", "1", "9004", "3"]
+        );
+        // IN 81 tickReqParams = **無 version 欄** 5 欄 [81, tickerId, minTick, bbo, permissions]。
+        assert_eq!(
+            frame_fields(&decode_all_frames(&tick_req_params(9004, "0.01", "ARCA", 3).0)[0]),
+            vec!["81", "9004", "0.01", "ARCA", "3"]
+        );
+        // ERR_MSG 帶 reqId（entitlement 路由）。
+        assert_eq!(
+            frame_fields(&decode_all_frames(&err_msg_req(9004, 354, "x").0)[0]),
+            vec!["4", "2", "9004", "354", "x"]
+        );
     }
 
     #[test]
