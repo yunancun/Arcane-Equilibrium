@@ -185,6 +185,10 @@ pub(crate) enum AccountDataReject {
     /// 無活躍訂閱卻收到資料/End（未訂而收=協議意外,fail-closed 拒併入）。
     #[error("account data frame without active subscription")]
     NoActiveSubscription,
+    /// 訂閱槽內部不變量破裂（活躍卻無 reqId 等）——typed 拒,**不得**以默認值（reqId=0）
+    /// 上 wire 掩蓋（F7,E2）。
+    #[error("subscription slot invariant broken (state corrupted)")]
+    SubscriptionStateCorrupted,
     /// wire 形狀損壞（欄位缺/非數字/非 ASCII）——呼叫端按既有紀律 fail-closed 斷線。
     #[error("wire malformed: {0}")]
     WireMalformed(CodecError),
@@ -301,7 +305,15 @@ impl AccountDataDigest {
         if !self.summary_phase.is_active() {
             return Err(AccountDataReject::NoActiveSubscription);
         }
-        let req_id = self.summary_req_id.take().unwrap_or_default();
+        // F7（E2）:活躍卻無 reqId = 不變量破裂——typed 拒 + 毒化,**不得**默認 reqId=0 上
+        // wire（cancel 錯 id 是對 server 的語義謊言;重訂閱=唯一恢復）。
+        let req_id = match self.summary_req_id.take() {
+            Some(rid) => rid,
+            None => {
+                self.summary_phase = SubPhase::Invalidated;
+                return Err(AccountDataReject::SubscriptionStateCorrupted);
+            }
+        };
         self.summary_phase = SubPhase::Idle;
         self.summary_rows.clear();
         Ok(encode_cancel_account_summary(req_id))
@@ -349,9 +361,10 @@ impl AccountDataDigest {
         now_ms: u64,
     ) -> Result<(), AccountDataReject> {
         let fields = decode_fields(payload).map_err(AccountDataReject::WireMalformed)?;
-        if fields.len() < 7 {
+        // F2（E2）:精確 7 欄——按位消費不容錯位,多餘欄=wire 意外（與 position !=16 同紀律）。
+        if fields.len() != 7 {
             return Err(AccountDataReject::WireMalformed(CodecError::Malformed(
-                "account summary needs >=7 fields",
+                "account summary needs exactly 7 fields",
             )));
         }
         expect_msg_id(&fields[0], IN_ACCOUNT_SUMMARY_MSG_ID)?;
@@ -401,9 +414,10 @@ impl AccountDataDigest {
         now_ms: u64,
     ) -> Result<(), AccountDataReject> {
         let fields = decode_fields(payload).map_err(AccountDataReject::WireMalformed)?;
-        if fields.len() < 3 {
+        // F2（E2）:精確 3 欄（按位消費不容錯位,同 position !=16 紀律）。
+        if fields.len() != 3 {
             return Err(AccountDataReject::WireMalformed(CodecError::Malformed(
-                "account summary end needs >=3 fields",
+                "account summary end needs exactly 3 fields",
             )));
         }
         expect_msg_id(&fields[0], IN_ACCOUNT_SUMMARY_END_MSG_ID)?;
@@ -436,8 +450,18 @@ impl AccountDataDigest {
         }
         expect_msg_id(&fields[0], IN_POSITION_DATA_MSG_ID)?;
         let version = parse_i64(&fields[1], "position_version")?;
+        // 未訂而收先裁（置於 version 門控前:不得對未訂閱的槽做毒化副作用）。
+        if !self.positions_phase.is_active() {
+            return Err(AccountDataReject::NoActiveSubscription);
+        }
         // G1:version<3 無 avgCost 欄——拒收,不學 ibapi 默認 0 捏值（fail-closed）。
+        // **F1（E2）**:G1 floor=101 下 server 聲明 v<3 = 協議異常——若僅拒行不毒化,
+        // 其後 positionEnd 會把「缺行的不完整快照」推到 Live/Fresh,W5-S4 attestation/
+        // 對賬將把它當真值。取「毒化 `Invalidated`」而非斷線:與契約 blocker 同為
+        // **資料層** fail-closed（session 存活、快照不可用、重訂閱=唯一恢復）,不把
+        // 資料層異常升格為 transport 事件,與 driver「WireMalformed 才斷線」分流一致。
         if version < 3 {
+            self.positions_phase = SubPhase::Invalidated;
             return Err(AccountDataReject::PositionVersionTooOld { version });
         }
         // version==3 欄序固定 16 欄;多/少皆 wire 意外 → fail-closed（按位消費不容錯位）。
@@ -445,9 +469,6 @@ impl AccountDataDigest {
             return Err(AccountDataReject::WireMalformed(CodecError::Malformed(
                 "position v3 needs exactly 16 fields",
             )));
-        }
-        if !self.positions_phase.is_active() {
-            return Err(AccountDataReject::NoActiveSubscription);
         }
         // 佔位欄按位消費（idx 6=lastTradeDateOrContractMonth / 7=strike / 8=right /
         // 9=multiplier / 12=localSymbol / 13=tradingClass）:讀位即棄,不 bind 語義。
@@ -493,9 +514,10 @@ impl AccountDataDigest {
         now_ms: u64,
     ) -> Result<(), AccountDataReject> {
         let fields = decode_fields(payload).map_err(AccountDataReject::WireMalformed)?;
-        if fields.len() < 2 {
+        // F2（E2）:精確 2 欄（按位消費不容錯位,同 position !=16 紀律）。
+        if fields.len() != 2 {
             return Err(AccountDataReject::WireMalformed(CodecError::Malformed(
-                "position end needs >=2 fields",
+                "position end needs exactly 2 fields",
             )));
         }
         expect_msg_id(&fields[0], IN_POSITION_END_MSG_ID)?;
