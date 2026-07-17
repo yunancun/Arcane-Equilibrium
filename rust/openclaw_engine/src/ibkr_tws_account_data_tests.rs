@@ -129,16 +129,17 @@ fn summary_full_snapshot_then_end_then_delta() {
         d.summary_staleness(T0 + 3),
         SnapshotStaleness::Fresh { as_of_ms: T0 + 2 }
     );
-    assert_eq!(d.summary_rows().count(), 2);
+    assert_eq!(d.summary_rows(T0).1.count(), 2);
     // 節拍增量:同 tag 後到覆蓋(IB 每 3 分鐘僅推變動 tag)。
     d.on_account_summary_frame(
         &summary_payload(REQ_ID, "DU1234567", "BuyingPower", "48000", "USD"),
         T0 + 180_000,
     )
     .unwrap();
-    assert_eq!(d.summary_rows().count(), 2, "同 tag 覆蓋非追加");
+    assert_eq!(d.summary_rows(T0).1.count(), 2, "同 tag 覆蓋非追加");
     let bp = d
-        .summary_rows()
+        .summary_rows(T0)
+        .1
         .find(|r| r.tag == IbkrAccountSummaryTagV1::BuyingPower)
         .unwrap();
     assert_eq!(bp.value_decimal, "48000");
@@ -223,7 +224,7 @@ fn cancel_summary_clears_snapshot_and_requires_active() {
     let fields = decode_fields(&frame[4..]).unwrap();
     assert_eq!(fields, vec!["63", "1", &REQ_ID.to_string()]);
     assert_eq!(d.summary_staleness(T0), SnapshotStaleness::NotSubscribed);
-    assert_eq!(d.summary_rows().count(), 0, "cancel 後不留半新鮮殘影");
+    assert_eq!(d.summary_rows(T0).1.count(), 0, "cancel 後不留半新鮮殘影");
     // cancel 後可重訂(新快照世代)。
     let seq_before = d.snapshot_seq();
     d.begin_account_summary(REQ_ID + 1).unwrap();
@@ -275,7 +276,7 @@ fn summary_req_id_mismatch_and_unsubscribed_frames_rejected() {
             .unwrap_err(),
         AccountDataReject::UnexpectedReqId { got: REQ_ID + 5 }
     );
-    assert_eq!(d.summary_rows().count(), 0);
+    assert_eq!(d.summary_rows(T0).1.count(), 0);
 }
 
 // ===========================================================================
@@ -297,8 +298,24 @@ fn off_whitelist_tag_takes_unknown_denied_blocker_path() {
         e => panic!("應為 SummaryRowBlocked,得 {e:?}"),
     }
     assert_eq!(d.summary_staleness(T0), SnapshotStaleness::Invalidated);
-    assert_eq!(d.summary_rows().count(), 0, "blocker 行不併入");
-    // Invalidated 後可重訂恢復(新快照世代)。
+    assert_eq!(d.summary_rows(T0).1.count(), 0, "blocker 行不併入");
+    // W6-S0 audit:blocker 身分落帳(count+最後樣本)。
+    assert_eq!(d.audit().summary_row_blocked_rejects, 1);
+    assert!(d
+        .audit()
+        .summary_row_last_blockers
+        .contains(&IbkrAccountSummaryRowBlocker::TagUnknownDenied));
+    // W6-S0 恢復政策:毒化=世代內終態——同世代重訂一律拒。
+    assert_eq!(
+        d.begin_account_summary(REQ_ID + 1).unwrap_err(),
+        AccountDataReject::InvalidatedUntilNewGeneration
+    );
+    // 世代推進(新 handshake 成功)重評 → DisconnectedStale → 可重訂恢復(新快照世代)。
+    d.on_new_connection_generation();
+    assert_eq!(
+        d.summary_staleness(T0),
+        SnapshotStaleness::DisconnectedStale
+    );
     d.begin_account_summary(REQ_ID + 1).unwrap();
     assert_eq!(
         d.summary_staleness(T0),
@@ -340,7 +357,7 @@ fn negative_available_funds_is_accepted_after_divergent_5_fix() {
         T0,
     )
     .unwrap();
-    assert_eq!(d.summary_rows().count(), 1);
+    assert_eq!(d.summary_rows(T0).1.count(), 1);
 }
 
 #[test]
@@ -405,7 +422,7 @@ fn positions_full_snapshot_then_end() {
         d.positions_staleness(T0 + 6),
         SnapshotStaleness::Fresh { as_of_ms: T0 + 5 }
     );
-    let row = d.positions_rows().next().unwrap();
+    let row = d.positions_rows(T0).1.next().unwrap();
     assert_eq!(row.con_id, 756733);
     assert_eq!(row.symbol, "SPY");
     assert_eq!(row.position_decimal, "100");
@@ -425,8 +442,11 @@ fn positions_full_snapshot_then_end() {
         T0 + 100,
     )
     .unwrap();
-    assert_eq!(d.positions_rows().count(), 1);
-    assert_eq!(d.positions_rows().next().unwrap().position_decimal, "50");
+    assert_eq!(d.positions_rows(T0).1.count(), 1);
+    assert_eq!(
+        d.positions_rows(T0).1.next().unwrap().position_decimal,
+        "50"
+    );
 }
 
 #[test]
@@ -442,7 +462,7 @@ fn g1_position_version_below_3_rejected_no_fabricated_avg_cost() {
         d.on_position_frame(&payload, T0).unwrap_err(),
         AccountDataReject::PositionVersionTooOld { version: 2 }
     );
-    assert_eq!(d.positions_rows().count(), 0);
+    assert_eq!(d.positions_rows(T0).1.count(), 0);
     // F1(E2):v<3=協議異常必須毒化——否則其後 positionEnd 會把缺行快照推到 Live/Fresh。
     assert_eq!(d.positions_staleness(T0), SnapshotStaleness::Invalidated);
     // 毒化後 positionEnd 不得復活快照(非活躍 → typed 拒)。
@@ -686,7 +706,7 @@ fn disconnect_marks_snapshots_stale_and_requires_resubscribe() {
         SnapshotStaleness::DisconnectedStale
     );
     // 行保留供唯讀檢視(staleness 已明示不可信)。
-    assert!(d.summary_rows().count() > 0);
+    assert!(d.summary_rows(T0).1.count() > 0);
     // 斷線後入站行 → NoActiveSubscription(訂閱不跨連線存活)。
     assert_eq!(
         d.on_account_summary_frame(
@@ -700,9 +720,172 @@ fn disconnect_marks_snapshots_stale_and_requires_resubscribe() {
     let seq = d.snapshot_seq();
     d.begin_account_summary(REQ_ID + 1).unwrap();
     assert_eq!(d.snapshot_seq(), seq + 1);
-    assert_eq!(d.summary_rows().count(), 0);
+    assert_eq!(d.summary_rows(T0).1.count(), 0);
     assert_eq!(
         d.summary_staleness(T0),
         SnapshotStaleness::SnapshotIncomplete
     );
+}
+
+// ===========================================================================
+// (h) W6-S0:恢復政策(世代內終態) / staleness 綁定視圖 / audit / cap
+// ===========================================================================
+
+#[test]
+fn w6s0_invalidated_is_terminal_within_generation_for_positions_face() {
+    // positions 面毒化(short 契約 blocker)→ 同世代 re-begin 拒;斷線不沖淡;世代推進後恢復。
+    let mut d = digest();
+    d.begin_positions(SERVER_V).unwrap();
+    assert!(matches!(
+        d.on_position_frame(
+            &position_payload("DU1", 756733, "SPY", "STK", "ARCA", "USD", "-10", "412.35"),
+            T0
+        )
+        .unwrap_err(),
+        AccountDataReject::PositionsRowBlocked(_)
+    ));
+    assert_eq!(d.positions_staleness(T0), SnapshotStaleness::Invalidated);
+    assert_eq!(
+        d.begin_positions(SERVER_V).unwrap_err(),
+        AccountDataReject::InvalidatedUntilNewGeneration
+    );
+    // 斷線不改毒化相位(毒化事實不被斷線沖淡)——仍拒 re-begin。
+    d.on_disconnect();
+    assert_eq!(d.positions_staleness(T0), SnapshotStaleness::Invalidated);
+    assert_eq!(
+        d.begin_positions(SERVER_V).unwrap_err(),
+        AccountDataReject::InvalidatedUntilNewGeneration
+    );
+    // 世代推進(新 handshake 成功)→ DisconnectedStale → re-begin 成功(新快照世代)。
+    d.on_new_connection_generation();
+    assert_eq!(
+        d.positions_staleness(T0),
+        SnapshotStaleness::DisconnectedStale
+    );
+    d.begin_positions(SERVER_V).unwrap();
+    assert_eq!(
+        d.positions_staleness(T0),
+        SnapshotStaleness::SnapshotIncomplete
+    );
+}
+
+#[test]
+fn w6s0_staleness_bound_views_expose_face_staleness() {
+    // 綁定視圖:rows 必與同刻 staleness 一同取得(部分快照當全量消費結構性不可能)。
+    let mut d = digest();
+    d.begin_account_summary(REQ_ID).unwrap();
+    d.on_account_summary_frame(
+        &summary_payload(REQ_ID, "DU1234567", "NetLiquidation", "100000.25", "USD"),
+        T0,
+    )
+    .unwrap();
+    // End 前:行已在 map,但視圖同步標 SnapshotIncomplete——消費端必先見弱態。
+    let (staleness, rows) = d.summary_rows(T0);
+    assert_eq!(staleness, SnapshotStaleness::SnapshotIncomplete);
+    assert_eq!(rows.count(), 1);
+    d.on_account_summary_end_frame(&summary_end_payload(REQ_ID), T0 + 2)
+        .unwrap();
+    let (staleness, rows) = d.summary_rows(T0 + 3);
+    assert_eq!(staleness, SnapshotStaleness::Fresh { as_of_ms: T0 + 2 });
+    assert_eq!(rows.count(), 1);
+    // 綁定視圖與獨立 staleness 恆等(單一真源投影)。
+    assert_eq!(d.summary_rows(T0 + 3).0, d.summary_staleness(T0 + 3));
+    assert_eq!(d.positions_rows(T0).0, d.positions_staleness(T0));
+}
+
+#[test]
+fn w6s0_audit_records_typed_reject_identities() {
+    // driver `Err(_)=>{}` 分流的身分觀測面:計數+最後樣本落帳。
+    let mut d = digest();
+    // 未訂而收 → no_active_subscription_rejects。
+    let _ = d.on_account_summary_frame(
+        &summary_payload(REQ_ID, "DU1", "NetLiquidation", "1", "USD"),
+        T0,
+    );
+    assert_eq!(d.audit().no_active_subscription_rejects, 1);
+    // reqId 錯配 → unexpected_req_id_rejects。
+    d.begin_account_summary(REQ_ID).unwrap();
+    let _ = d.on_account_summary_frame(
+        &summary_payload(REQ_ID + 5, "DU1", "NetLiquidation", "1", "USD"),
+        T0,
+    );
+    assert_eq!(d.audit().unexpected_req_id_rejects, 1);
+    // wire 損壞 → 計數+typed note(不含 payload 原文)。
+    let _ = d.on_account_summary_frame(&encode_fields(&["63", "1", "9001"]), T0);
+    assert_eq!(d.audit().wire_malformed_rejects, 1);
+    assert!(d.audit().wire_malformed_last_note.is_some());
+    // G2 哨兵 → 計數+原始值樣本(沿 *_last_raw 慣例)。
+    let sentinel = "1".repeat(21);
+    let _ = d.on_account_summary_frame(
+        &summary_payload(REQ_ID, "DU1", "NetLiquidation", &sentinel, "USD"),
+        T0,
+    );
+    assert_eq!(d.audit().sentinel_suspect_rejects, 1);
+    assert_eq!(
+        d.audit().sentinel_last_raw.as_deref(),
+        Some(sentinel.as_str())
+    );
+    // positions 契約 blocker → per-face 樣本欄。
+    let mut d = digest();
+    d.begin_positions(SERVER_V).unwrap();
+    let _ = d.on_position_frame(
+        &position_payload("DU1", 756733, "SPY", "OPT", "ARCA", "USD", "10", "412.35"),
+        T0,
+    );
+    assert_eq!(d.audit().positions_row_blocked_rejects, 1);
+    assert!(!d.audit().positions_row_last_blockers.is_empty());
+}
+
+#[test]
+fn w6s0_snapshot_row_cap_poisons_face_no_silent_eviction() {
+    // cap=1:第二個新鍵 → SnapshotRowCapExceeded+毒化+audit;既有鍵覆蓋不受 cap 限。
+    let mut d = AccountDataDigest::new(AccountDataConfig {
+        max_summary_rows: 1,
+        ..AccountDataConfig::default()
+    });
+    d.begin_account_summary(REQ_ID).unwrap();
+    d.on_account_summary_frame(
+        &summary_payload(REQ_ID, "DU1", "NetLiquidation", "100", "USD"),
+        T0,
+    )
+    .unwrap();
+    // 同鍵覆蓋:cap 邊界上仍允許(不增長=非注入面)。
+    d.on_account_summary_frame(
+        &summary_payload(REQ_ID, "DU1", "NetLiquidation", "101", "USD"),
+        T0 + 1,
+    )
+    .unwrap();
+    // 新鍵超界 → 毒化非驅逐(舊行保留,audit 計數)。
+    assert_eq!(
+        d.on_account_summary_frame(
+            &summary_payload(REQ_ID, "DU1", "BuyingPower", "50", "USD"),
+            T0 + 2
+        )
+        .unwrap_err(),
+        AccountDataReject::SnapshotRowCapExceeded
+    );
+    assert_eq!(d.summary_rows(T0 + 2).0, SnapshotStaleness::Invalidated);
+    assert_eq!(d.summary_rows(T0 + 2).1.count(), 1, "禁靜默驅逐:舊行保留");
+    assert_eq!(d.audit().row_cap_exceeded_rejects, 1);
+    // positions 面同紀律。
+    let mut d = AccountDataDigest::new(AccountDataConfig {
+        max_positions_rows: 1,
+        ..AccountDataConfig::default()
+    });
+    d.begin_positions(SERVER_V).unwrap();
+    d.on_position_frame(
+        &position_payload("DU1", 1, "SPY", "STK", "ARCA", "USD", "10", "1.0"),
+        T0,
+    )
+    .unwrap();
+    assert_eq!(
+        d.on_position_frame(
+            &position_payload("DU1", 2, "QQQ", "STK", "ARCA", "USD", "10", "1.0"),
+            T0
+        )
+        .unwrap_err(),
+        AccountDataReject::SnapshotRowCapExceeded
+    );
+    assert_eq!(d.positions_staleness(T0), SnapshotStaleness::Invalidated);
+    assert_eq!(d.audit().row_cap_exceeded_rejects, 1);
 }

@@ -456,6 +456,13 @@ async fn stock_etf_authorization_status_is_blocked_source_fixture_without_side_e
         session["expected_contract_id"],
         "ibkr_session_attestation_v1"
     );
+    // W6-S0 三角測量第三腿:matrix 腿=attestation producer 真值(blocked 投影)——契約身分
+    // 立正(非空 default 手搓),狀態恆 Blocked、無指紋(誠實 absent,不捏值)。
+    assert_eq!(session["contract_id"], "ibkr_session_attestation_v1");
+    assert_eq!(session["source_version"], 1);
+    assert_eq!(session["status"], "BLOCKED");
+    assert_eq!(session["account_fingerprint_present"], false);
+    assert_eq!(session["secret_slot_fingerprint_present"], false);
     assert_eq!(session["attestation_accepted"], false);
     assert_eq!(session["account_fingerprint_is_live"], false);
 
@@ -464,4 +471,145 @@ async fn stock_etf_authorization_status_is_blocked_source_fixture_without_side_e
     assert_eq!(envelope["expires_at_ms"], 0);
     assert_eq!(result["phase2"]["first_ibkr_contact_allowed"], false);
     assert_eq!(result["phase2"]["connector_enabled"], false);
+}
+
+// ===========================================================================
+// W6-S0:三角測量第三腿(auth-matrix producer 的 session_attestation 腿接真值;
+// E2-R13-F1 re-scope/W5 DoD carve)
+// ===========================================================================
+
+/// production 域:matrix session 腿=attestation producer 真值(恆 Blocked/無指紋),
+/// 且消費端 fail-closed(SessionAttestationRejected)。
+#[test]
+fn w6s0_production_matrix_session_leg_is_attestation_producer_truth() {
+    use openclaw_types::{
+        evaluate_feature_flag_secret_auth_matrix, BrokerCapabilityRequest, BrokerOperation,
+        FeatureFlagSecretAuthBlocker, IbkrSessionAttestationStatus, InstrumentKind,
+        StockEtfFeatureFlags, IBKR_SESSION_ATTESTATION_CONTRACT_ID,
+    };
+
+    let matrix = production_feature_flag_secret_auth_matrix(StockEtfFeatureFlags::default());
+    let leg = &matrix.session_attestation;
+    // 同一 producer 代碼路徑(非手搓 default;與 W4 health emitter 同源真值)。
+    assert_eq!(
+        *leg,
+        crate::ibkr_tws_session_attestation::blocked_session_attestation()
+    );
+    assert_eq!(leg.contract_id, IBKR_SESSION_ATTESTATION_CONTRACT_ID);
+    assert_eq!(leg.source_version, 1);
+    assert_eq!(leg.status, IbkrSessionAttestationStatus::Blocked);
+    // production 域=引擎 inactive、無 wire 實檢事實 → 無指紋(誠實 absent,不捏值)。
+    assert!(leg.account_fingerprint.is_empty());
+    assert!(leg.secret_slot_fingerprint.is_empty());
+    assert!(!leg.account_fingerprint_is_live);
+    // 消費端 fail-closed:Blocked 腿必觸 SessionAttestationRejected,request 不放行。
+    let request = BrokerCapabilityRequest::stock_etf_ibkr_paper(
+        InstrumentKind::Stock,
+        BrokerOperation::PaperOrderSubmit,
+    );
+    let verdict = evaluate_feature_flag_secret_auth_matrix(&matrix, request, 0);
+    assert!(!verdict.allowed);
+    assert!(verdict
+        .blockers
+        .contains(&FeatureFlagSecretAuthBlocker::SessionAttestationRejected));
+}
+
+/// fixture 域三腿可構造:三腿(secret-slot 契約/attestation/authorization envelope)指紋
+/// 一致 → PASS;任一腿指紋不一致 → fail-closed mismatch blocker。起點=production producer
+/// 輸出(證明 production 腿參與同一 fail-closed 鏈,attested 態只能經三腿一致才放行)。
+#[test]
+fn w6s0_three_leg_fingerprint_triangulation_mismatch_blocks() {
+    use openclaw_types::{
+        evaluate_feature_flag_secret_auth_matrix, BrokerCapabilityRequest, BrokerOperation,
+        FeatureFlagSecretAuthBlocker, IbkrApiSessionTopologyV1, IbkrExternalSurfaceGateV1,
+        IbkrPhase2GateArtifactV1, IbkrPhase2PolicyBundleV1, IbkrSecretSlotContractV1,
+        IbkrSessionAttestationV1, InstrumentKind, StockEtfAuthorizationEnvelopeV1,
+        StockEtfFeatureFlags, FEATURE_FLAG_SECRET_AUTH_MATRIX_CONTRACT_ID,
+        IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID,
+    };
+
+    // 相對注入時鐘(非牆鐘;now < expires 即可)。
+    const NOW_MS: u64 = 1_000_000;
+    const EXPIRES_AT_MS: u64 = 2_000_000;
+
+    // 三腿一致 fixture(沿 types acceptance `accepted_matrix` 構型;secret 腿=source_template,
+    // artifact topology 與 session 兩腿由 secret 腿派生同指紋)。
+    let secret = IbkrSecretSlotContractV1::source_template();
+    let policy_flags = IbkrPhase2PolicyBundleV1::source_template().gate_prerequisite_flags();
+    let gate = IbkrExternalSurfaceGateV1 {
+        redaction_suite_passed: policy_flags.redaction_suite_passed,
+        rate_limit_policy_present: policy_flags.rate_limit_policy_present,
+        audit_event_policy_present: policy_flags.audit_event_policy_present,
+        paper_attestation_contract_present: policy_flags.paper_attestation_contract_present,
+        python_no_write_guard_present: policy_flags.python_no_write_guard_present,
+        ..IbkrExternalSurfaceGateV1::passing_fixture()
+    };
+    let mut topology = IbkrApiSessionTopologyV1::source_template();
+    topology.account_fingerprint_hash = secret.account_fingerprint_hash.clone();
+    let artifact = IbkrPhase2GateArtifactV1 {
+        contract_id: IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID.to_string(),
+        source_version: 1,
+        artifact_id: "phase2_ibkr_external_surface_gate_v1_w6s0_fixture".to_string(),
+        source_commit: "0123456789abcdef".to_string(),
+        created_at_ms: NOW_MS,
+        immutable_storage_path:
+            "docs/execution_plan/specs/phase2_ibkr_external_surface_gate_v1.w6s0.fixture.json"
+                .to_string(),
+        reviewer_roles: vec!["PM".to_string(), "Operator".to_string()],
+        sealed: true,
+        gate,
+        policy_flags,
+        secret_slot_contract: secret.clone(),
+        api_session_topology: topology,
+        raw_artifact_hash: "e".repeat(64),
+        redacted_summary_hash: "f".repeat(64),
+        approval_lineage_hash: "e".repeat(64),
+        ..IbkrPhase2GateArtifactV1::default()
+    };
+    let session = IbkrSessionAttestationV1 {
+        account_fingerprint: secret.account_fingerprint_hash.clone(),
+        secret_slot_fingerprint: secret.secret_slot_fingerprint.clone(),
+        raw_artifact_hash: "e".repeat(64),
+        ..IbkrSessionAttestationV1::paper_fixture()
+    };
+    // 起點=production producer 輸出,再升級各腿為一致 fixture(fixture 域構造)。
+    let mut matrix = production_feature_flag_secret_auth_matrix(StockEtfFeatureFlags {
+        stock_etf_lane_enabled: true,
+        ibkr_readonly_enabled: true,
+        ibkr_paper_enabled: true,
+        stock_etf_shadow_only: false,
+        ..StockEtfFeatureFlags::default()
+    });
+    matrix.contract_id = FEATURE_FLAG_SECRET_AUTH_MATRIX_CONTRACT_ID.to_string();
+    matrix.source_version = 1;
+    matrix.phase2_gate_artifact = artifact;
+    matrix.session_attestation = session;
+    matrix.secret_slot_contract = secret;
+    matrix.authorization_envelope = StockEtfAuthorizationEnvelopeV1::paper_fixture(EXPIRES_AT_MS);
+
+    let request = BrokerCapabilityRequest::stock_etf_ibkr_paper(
+        InstrumentKind::Stock,
+        BrokerOperation::PaperOrderSubmit,
+    );
+    // 一致 → PASS(fixture 域;production 域因 blocked 腿永達不到此態)。
+    let verdict = evaluate_feature_flag_secret_auth_matrix(&matrix, request, NOW_MS);
+    assert!(verdict.allowed, "blockers: {:?}", verdict.blockers);
+
+    // attestation 腿 secret-slot 指紋不一致 → SecretSlotFingerprintMismatch(fail-closed)。
+    let mut m = matrix.clone();
+    m.session_attestation.secret_slot_fingerprint = "9".repeat(64);
+    let verdict = evaluate_feature_flag_secret_auth_matrix(&m, request, NOW_MS);
+    assert!(!verdict.allowed);
+    assert!(verdict
+        .blockers
+        .contains(&FeatureFlagSecretAuthBlocker::SecretSlotFingerprintMismatch));
+
+    // attestation 腿帳戶指紋不一致 → AccountFingerprintMismatch(fail-closed)。
+    let mut m = matrix.clone();
+    m.session_attestation.account_fingerprint = "9".repeat(64);
+    let verdict = evaluate_feature_flag_secret_auth_matrix(&m, request, NOW_MS);
+    assert!(!verdict.allowed);
+    assert!(verdict
+        .blockers
+        .contains(&FeatureFlagSecretAuthBlocker::AccountFingerprintMismatch));
 }
