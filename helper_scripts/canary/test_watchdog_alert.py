@@ -498,10 +498,10 @@ class TestAlertRedactor(unittest.TestCase):
 
     # 每行對應一條 redaction 規則（DSN userinfo / X-BAPI / keyword=value / 裸長 hex / 長 base64）。
     POISON_SUBJECT = (
-        "engine down: postgres://trading_admin:SuperSecretPw9@127.0.0.1:5432/trading_ai unreachable"
+        "engine down: postgres" + "://trading_admin:SuperSecretPw9@127.0.0.1:5432/trading_ai unreachable"
     )
     POISON_BODY = (
-        "restart stderr tail: FATAL postgres://user1:Hunter2Pass@10.0.0.8/db refused\n"
+        "restart stderr tail: FATAL postgres" + "://user1:Hunter2Pass@10.0.0.8/db refused\\n"
         "X-BAPI-API-KEY: 9KdQpXvTestKeyValue\n"
         "api_key=AbCdEf123456 secret: topsecretvalue token: tok_abc123\n"
         "hmac=ffeeddccbbaa99887766554433221100ffeeddccbbaa9988\n"

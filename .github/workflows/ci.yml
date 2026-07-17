@@ -119,6 +119,8 @@ jobs:
         run: |
           python3 -m pytest -q \
             tests/structure/test_git_loop_guard.py \
+            tests/structure/test_public_repo_security_gate.py \
+            tests/structure/test_public_repo_security_policy.py \
             tests/ci/test_classify_ci_changes.py \
             tests/ci/test_github_ci_workflow_static.py \
             tests/ci/test_ci_workflow_ibkr_job_static.py

@@ -1,0 +1,3 @@
+# Solo-owner integrity marker. The ruleset must not require this review until a
+# second verified human reviewer exists; doing so would deadlock the repository.
+* @yunancun
