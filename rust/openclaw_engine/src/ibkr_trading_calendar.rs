@@ -28,8 +28,9 @@ use openclaw_types::{
 ///
 /// 為什麼白名單而非任意 chrono-tz passthrough:IB 的 timeZoneId 值域是 legacy 名(非保證
 /// IANA;官方列 `US/Eastern`/`EST`/…,class ref 甚至給 `EST`)——本 lane v1 只承 US 股市時區,
-/// 未知一律 fail-closed 拒(不靜默默認 `America/New_York`)。已是 IANA 的映射目標名亦收進表以
-/// 支援 passthrough。擴充須 IB 現勘 / EA 校準,禁順手加值。
+/// 未知一律 fail-closed 拒(不靜默默認 `America/New_York`)。映射目標名(America/New_York·
+/// Chicago·Denver·Los_Angeles)亦自映射收進表——本表=**4-entry 有界 IANA 白名單**,非任意
+/// chrono-tz passthrough。擴充須 IB 現勘 / EA 校準,禁順手加值。
 pub fn legacy_tz_to_iana(raw: &str) -> Option<&'static str> {
     match raw {
         "US/Eastern" | "EST5EDT" | "EST" | "EDT" | "America/New_York" => Some("America/New_York"),
@@ -280,7 +281,9 @@ fn local_ms(tz: &Tz, date: NaiveDate, hm: (u32, u32)) -> Option<u64> {
     let naive = date.and_hms_opt(hm.0, hm.1, 0)?;
     let dt = match tz.from_local_datetime(&naive) {
         chrono::LocalResult::Single(dt) => dt,
-        // fold 歧義(秋退重複時刻):取較早(earliest)為保守錨。
+        // fold 歧義(秋退重複時刻):取 earliest=DST 側(如 America/New_York 秋退取 EDT)。
+        // 本 lane RTH/tradingHours 窗(最早 0400)不觸及 01:00-01:59 fold 窗,實務 unreachable;
+        // 此臂僅為確定性選擇避免 panic(對 open 時刻 earliest 非「較保守」,勿如此宣稱)。
         chrono::LocalResult::Ambiguous(a, _) => a,
         // DST gap(春進不存在時刻)。
         chrono::LocalResult::None => return None,

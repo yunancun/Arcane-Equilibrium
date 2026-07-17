@@ -128,6 +128,27 @@ fn dst_fall_back_boundary() {
     );
 }
 
+#[test]
+fn dst_gap_open_time_rejected() {
+    // 2026 春進 = 3/8:02:00→03:00,02:00-02:59 本地時刻不存在。開市 02:30 落 DST gap →
+    // `local_ms` 回 None → SessionTimeInvalid(鎖死 `LocalResult::None` 臂)。
+    let err = parse_rth("US/Eastern", "20260308:0230-1600").unwrap_err();
+    assert!(err.contains(&IbkrTradingCalendarBlocker::SessionTimeInvalid));
+}
+
+#[test]
+fn dst_fold_open_takes_earliest_edt() {
+    // 2026 秋退 = 11/1:02:00→01:00,01:00-01:59 重複(ambiguous)。開市 01:30 落 fold →
+    // `local_ms` 取 earliest=EDT(-4) → 05:30 UTC(鎖死 `LocalResult::Ambiguous` 臂;
+    // 收市 1600 於 EST(-5) 側 → 21:00 UTC,窗有序 → Ok)。
+    let c = parse_rth("US/Eastern", "20261101:0130-1600").expect("fold-open parses");
+    assert_eq!(c.sessions.len(), 1);
+    assert_eq!(
+        c.sessions[0].open_ms % MS_PER_DAY,
+        5 * 3_600_000 + 30 * 60_000
+    );
+}
+
 // ---------------------------------------------------------------------------
 // fail-closed 拒絕矩陣
 // ---------------------------------------------------------------------------
