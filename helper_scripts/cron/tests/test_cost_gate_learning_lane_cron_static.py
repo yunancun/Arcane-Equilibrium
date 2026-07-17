@@ -49,6 +49,30 @@ def test_candidate_board_publication_requires_explicit_complete_review() -> None
     ))
 
 
+def test_order_touchability_stage_can_finish_before_complete_board_publication() -> None:
+    src = _src(WRAPPER)
+    order_stage = src.index(
+        'run_cost_stage "$PYBIN" "${ORDER_TOUCHABILITY_ARGS[@]}"'
+    )
+    guard_complete = src.index(
+        'research_guard_complete "${guard_complete_args[@]}"'
+    )
+    board_publication = src.index(
+        'run_cost_publication_stage "$PYBIN" "${CANDIDATE_BOARD_PUBLISH_ARGS[@]}"'
+    )
+    completion_gate = src[
+        src.index("guard_complete_args=()") : src.index("guard_complete_rc=0")
+    ]
+
+    assert order_stage < guard_complete < board_publication
+    assert (
+        'if [[ "$order_touchability_audit_rc" == "0" '
+        '&& -f "$ORDER_TOUCHABILITY_JSON_OUT" ]]; then'
+    ) in src
+    assert "order_touchability" not in completion_gate
+    assert 'review_completion_state" == "COMPLETE"' in completion_gate
+
+
 @pytest.mark.parametrize("script", [WRAPPER, INSTALLER], ids=["wrapper", "installer"])
 def test_scripts_executable_and_strict_mode(script: Path) -> None:
     assert script.stat().st_mode & 0o111, f"{script.name} not executable"

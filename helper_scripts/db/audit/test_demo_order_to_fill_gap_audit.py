@@ -1,15 +1,27 @@
 from __future__ import annotations
 
+import datetime as dt
+import json
+from pathlib import Path
+import stat
+import sys
+from types import SimpleNamespace
+
 import pytest
 
+from helper_scripts.db.audit import demo_order_to_fill_gap_audit as audit
 from helper_scripts.db.audit.demo_order_to_fill_gap_audit import (
     AuditConfig,
     build_order_touchability_sql,
     build_payload,
+    build_timeout_audit_payload,
     classify_order,
     render_markdown,
     summarize_orders,
     validate_config,
+)
+from helper_scripts.research.cost_gate_learning_lane.bounded_probe_touchability_preflight import (
+    build_bounded_demo_probe_touchability_preflight,
 )
 
 
@@ -180,3 +192,259 @@ def test_summary_prioritizes_touched_no_fill_over_deep_no_touch() -> None:
 
     assert summary["status"] == "BBO_TOUCHED_NO_FILL_RECONCILE_REQUIRED"
     assert summary["counts"]["bbo_touched_no_fill_orders"] == 1
+
+
+def test_main_statement_timeout_writes_non_authoritative_partial_artifacts(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    class StatementTimeout(RuntimeError):
+        pgcode = "57014"
+        diag = SimpleNamespace(
+            message_primary="canceling statement due to statement timeout"
+        )
+
+    class Connection:
+        closed = False
+
+        def rollback(self) -> None:
+            pass
+
+        def set_session(self, **_kwargs: object) -> None:
+            pass
+
+        def close(self) -> None:
+            self.closed = True
+
+    connection = Connection()
+    json_output = tmp_path / "order-gap.json"
+    markdown_output = tmp_path / "order-gap.md"
+
+    def raise_timeout(*_args: object, **_kwargs: object) -> list[dict[str, object]]:
+        raise StatementTimeout("query text and connection details must not leak")
+
+    monkeypatch.setattr(audit, "connect_report_pg", lambda *_args, **_kwargs: connection)
+    monkeypatch.setattr(audit, "fetch_order_rows", raise_timeout)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "demo_order_to_fill_gap_audit.py",
+            "--engine-mode",
+            "demo",
+            "--engine-mode",
+            "live_demo",
+            "--output",
+            str(markdown_output),
+            "--json-output",
+            str(json_output),
+        ],
+    )
+
+    assert audit.main() == 0
+    assert connection.closed is True
+
+    payload = json.loads(json_output.read_text(encoding="utf-8"))
+    assert payload["schema_version"] == "demo_order_to_fill_gap_audit_v1"
+    assert payload["query_complete"] is False
+    assert payload["stale_snapshot_reused"] is False
+    assert payload["summary"]["status"] == "READONLY_QUERY_TIMEOUT"
+    assert payload["summary"]["query_complete"] is False
+    assert payload["summary"]["stale_snapshot_reused"] is False
+    assert payload["observation"] == {
+        "status": "PARTIAL_QUERY_INCOMPLETE",
+        "query_complete": False,
+        "requested_queries": ["order_touchability"],
+        "completed_queries": [],
+        "failed_queries": ["order_touchability"],
+        "stale_snapshot_reused": False,
+    }
+    assert payload["orders"] == []
+    answers = payload["summary"]["answers"]
+    assert answers["partial_observation"] is True
+    assert answers["query_complete"] is False
+    assert answers["stale_snapshot_reused"] is False
+    assert all(
+        answers[key] is False
+        for key in (
+            "global_cost_gate_lowering_recommended",
+            "candidate_selection_authority_granted",
+            "cost_gate_change_authority_granted",
+            "risk_change_authority_granted",
+            "order_authority_granted",
+            "probe_authority_granted",
+            "proof_authority_granted",
+            "serving_authority_granted",
+            "promotion_authority_granted",
+            "latest_authority_granted",
+            "promotion_evidence",
+        )
+    )
+    markdown = markdown_output.read_text(encoding="utf-8")
+    assert "READONLY_QUERY_TIMEOUT" in markdown
+    assert "Query complete: `False`" in markdown
+    assert "Stale snapshot reused: `False`" in markdown
+    assert "query text and connection details" not in json_output.read_text(
+        encoding="utf-8"
+    )
+    assert list(tmp_path.glob(".*.tmp")) == []
+
+
+def test_atomic_writer_fsyncs_file_and_parent_directory(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    synced_kinds: list[str] = []
+    real_fsync = audit.os.fsync
+
+    def record_fsync(fd: int) -> None:
+        mode = audit.os.fstat(fd).st_mode
+        synced_kinds.append("directory" if stat.S_ISDIR(mode) else "file")
+        real_fsync(fd)
+
+    monkeypatch.setattr(audit.os, "fsync", record_fsync)
+
+    target = tmp_path / "nested" / "artifact.json"
+    audit._write_text_atomic(target, "{}\n")
+
+    assert target.read_text(encoding="utf-8") == "{}\n"
+    assert synced_kinds == ["file", "directory"]
+
+
+def test_main_reraises_non_statement_timeout_without_publishing_artifacts(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    class NonTimeout(RuntimeError):
+        pgcode = "40001"
+        diag = SimpleNamespace(
+            message_primary="canceling statement due to statement timeout"
+        )
+
+    class Connection:
+        closed = False
+
+        def rollback(self) -> None:
+            pass
+
+        def set_session(self, **_kwargs: object) -> None:
+            pass
+
+        def close(self) -> None:
+            self.closed = True
+
+    connection = Connection()
+    json_output = tmp_path / "must-not-exist.json"
+    markdown_output = tmp_path / "must-not-exist.md"
+    error = NonTimeout("serialization failure")
+
+    def raise_non_timeout(
+        *_args: object, **_kwargs: object
+    ) -> list[dict[str, object]]:
+        raise error
+
+    monkeypatch.setattr(audit, "connect_report_pg", lambda *_args, **_kwargs: connection)
+    monkeypatch.setattr(audit, "fetch_order_rows", raise_non_timeout)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "demo_order_to_fill_gap_audit.py",
+            "--output",
+            str(markdown_output),
+            "--json-output",
+            str(json_output),
+        ],
+    )
+
+    with pytest.raises(NonTimeout) as caught:
+        audit.main()
+
+    assert caught.value is error
+    assert connection.closed is True
+    assert json_output.exists() is False
+    assert markdown_output.exists() is False
+
+
+@pytest.mark.parametrize(
+    ("pgcode", "message_primary", "expected"),
+    (
+        (
+            "57014",
+            "  CANCELING statement due to statement   timeout  ",
+            True,
+        ),
+        ("57014", "canceling statement due to user request", False),
+        ("08006", "canceling statement due to statement timeout", False),
+        (None, "canceling statement due to statement timeout", False),
+    ),
+)
+def test_statement_timeout_detection_requires_sqlstate_and_primary_message(
+    pgcode: str | None,
+    message_primary: str,
+    expected: bool,
+) -> None:
+    class PgFailure(RuntimeError):
+        pass
+
+    failure = PgFailure("details are not classifier input")
+    failure.pgcode = pgcode
+    failure.diag = SimpleNamespace(message_primary=message_primary)
+
+    assert audit._is_statement_timeout(failure) is expected
+
+
+def test_timeout_artifact_keeps_touchability_consumer_fail_closed() -> None:
+    generated = "2026-07-17T04:00:00+00:00"
+    timeout_audit = build_timeout_audit_payload(
+        cfg=AuditConfig(engine_modes=("demo", "live_demo")),
+        generated=generated,
+    )
+    preflight = {
+        "schema_version": "sealed_horizon_bounded_demo_probe_preflight_v1",
+        "generated_at_utc": generated,
+        "status": "READY_FOR_SEPARATE_OPERATOR_AUTHORIZATION",
+        "side_cell_key": "ma_crossover|BTCUSDT|Sell",
+        "outcome_horizon_minutes": 240,
+        "answers": {
+            "probe_authority_granted": False,
+            "order_authority_granted": False,
+            "promotion_evidence": False,
+        },
+        "bounded_demo_probe_design": {
+            "schema_version": "bounded_demo_probe_design_v1",
+            "status": "OPERATOR_REVIEW_READY_FOR_BOUNDED_DEMO_PROBE_DESIGN",
+            "candidate": {
+                "side_cell_key": "ma_crossover|BTCUSDT|Sell",
+                "strategy_name": "ma_crossover",
+                "symbol": "BTCUSDT",
+                "side": "Sell",
+                "outcome_horizon_minutes": 240,
+            },
+            "suggested_initial_probe_limits": {
+                "active": False,
+                "requires_separate_operator_authorization": True,
+            },
+            "authority_boundary": {
+                "global_cost_gate_lowering_recommended": False,
+                "main_cost_gate_adjustment": "NONE",
+                "probe_authority_granted": False,
+                "order_authority_granted": False,
+                "promotion_evidence": False,
+            },
+        },
+    }
+
+    packet = build_bounded_demo_probe_touchability_preflight(
+        preflight=preflight,
+        order_to_fill_gap_audit=timeout_audit,
+        now_utc=dt.datetime(2026, 7, 17, 4, 1, tzinfo=dt.timezone.utc),
+    )
+
+    assert packet["status"] == "TOUCHABILITY_REVIEW_REQUIRED"
+    assert packet["order_touchability"]["status"] == "READONLY_QUERY_TIMEOUT"
+    assert packet["answers"]["ready_for_operator_touchability_review"] is False
+    assert packet["answers"]["probe_authority_granted"] is False
+    assert packet["answers"]["order_authority_granted"] is False
+    assert packet["answers"]["promotion_evidence"] is False
+    assert packet["placement_requirements"]["active"] is False
