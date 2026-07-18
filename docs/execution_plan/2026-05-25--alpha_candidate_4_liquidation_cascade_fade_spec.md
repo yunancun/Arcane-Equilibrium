@@ -11,7 +11,7 @@
 >
 > `liquidation_cascade_fade` 未通过验证，非当前 build 目标：
 > - 执行可达性 reject：`docs/audits/2026-05-31--p0_edge_cost_wall_investigation.md`（"A2 liquidation cascade fade"：maker-fill 49% < 50%、R:R < 1、avg_net −2.45 bps）。
-> - 统计 NO-GO（2026-06-03）：280 事件全 |t| < 1.3，信号被 down-beta regime 伪装（memory `project_2026_06_03_blocked_signal_and_cascade_fade_nogo`）。
+> - 统计 NO-GO（2026-06-03）：cascade fade 与 blocked-signal 双线同根因 down-beta 伪装 alpha（280 事件全 |t| < 1.3）。in-repo RCA 记录见 `docs/archive/2026-04-25--ae_inventory_consolidated.md`「2026-06-10 校準」段；亦见 memory `project_2026_06_03_blocked_signal_and_cascade_fade_nogo`。
 >
 > 本 spec 仅保留设计 lineage；revive 须新证据 + `TODO.md` gate。本文档中的「IMPL-ready」措辞已失效。
 

@@ -5,6 +5,8 @@
 > 本文件由 `docs/README.md` 長索引機械遷出，用於保存近期與歷史文檔入口。
 > 它不是 active dispatch queue；當前 blocker、owner、gate、runtime evidence 一律讀根目錄 `TODO.md`。
 > 新增重要文檔時優先更新本索引或 `initiative_index.md`，不要把長表重新塞回 `docs/README.md`。
+>
+> **Freshness（2026-07-18 審計注）**：本索引按主題分段增量維護，無單一 as-of；最新段約 2026-07-16，可能滯後於 `TODO.md` 與最新 commit。判斷時效以 `git log` + `TODO.md` 為準，勿以本索引缺席反推文檔不存在。
 
 ### 2026-07-15/16 IBKR full live-capability 工程總綱與自主 loop
 
@@ -1232,7 +1234,6 @@
 |------|------|
 | `2026-04-01--symbol_category_mapping_design.md` | Symbol→Category 映射策略決策：方案 B 運行時映射（短期）+ 方案 A SymbolCategoryRegistry 批量填充（長期），雙層架構設計 |
 | `2026-03-17--工程一审修改建议报告_终稿.md` | Revision 2 工程一审修改建议报告（md 终稿） |
-| `2026-03-17--工程一审修改建议报告_终稿.txt` | Revision 2 工程一审修改建议报告（txt 终稿） |
 | `2026-03-20--关于h和i部分的核心设计讨论.txt` | H-I 核心设计讨论（AI 成本均衡 / 本地计算 / 延迟框架 / 设备容错） |
 | **治理源文件（.docx，Operator 原始治理规格）** | |
 | `DOC-NAV_...治理文件导航_V3.docx` | 治理文件导航 V3（13 份文件总入口） |

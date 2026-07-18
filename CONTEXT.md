@@ -4,6 +4,8 @@ Arcane Equilibrium is a Rust-core, Python-bridge agentic trading governance syst
 
 This `CONTEXT.md` is the project's domain glossary. Every architectural suggestion, ADR, refactor, or review should use these terms exactly — don't substitute "service," "component," "module" (in the generic sense), or "API" when one of these names applies. Generic programming concepts (timeout, retry, lock, queue) are deliberately omitted — only Arcane Equilibrium / OpenClaw-specific terms belong here.
 
+> **as-of 2026-07-18**（术语表，增量维护；术语随架构演进而更新，运行态与当前主线状态一律见 `TODO.md`。本 as-of 标记于 2026-07-18 文档审计补入）。
+
 ## Product naming
 
 **玄衡 · Arcane Equilibrium**:

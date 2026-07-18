@@ -1,7 +1,7 @@
 # 本地智能調參下單 Agent 系統 — Master Implementation Spec
 
 - **Author:** PA · **Date:** 2026-06-17 · **Base commit:** `0cf086c1`
-- **Status:** ⚠️ DORMANT（记于 2026-07-18 文档审计）— 原文 "design (read-only) → pending adversarial review (E3+CC+E2) → phased build+deploy"；本 spec 不在当前 `TODO.md` active queue 或任何 `initiative_index`，非 pending-build。当前 autonomy 方向 = profit-first 自主 loop（2026-07-08+）。恢复须 PM 确认 + `TODO.md` gate。（注：本 spec 已将 live RiskConfig 变更设为「人工促升闸、永不自動套用 live」，见下 §决策 2；此非 live 安全隐患，仅 dormancy 标注。）
+- **Status:** ✅ DEPLOYED / DONE（2026-06-18；更正于 2026-07-18 文档审计）— 原文 "design (read-only) → pending adversarial review (E3+CC+E2) → phased build+deploy" 已过时。本 spec **已实现并部署**：智能调参 Agent 全 4 phase + 2 policy + RegimeMult 于 2026-06-18 部署到 demo runtime 并验证（migrations V141-V145；见 `docs/worklogs/2026-06-18--session-intelligent-param-agent-build-and-edge-cost-wall-investigation.md` 与 `docs/CLAUDE_CHANGELOG.md` v162）。同期 edge cost-wall investigation 结论「edge 在成本之下」→ 策略因 0 validated edge / 空 allowlist **正确 inert**。live RiskConfig 路径设为「人工促升闸、永不自動套用 live」且未激活（AUTH-1 gated，非安全隐患）。active 状态以 `TODO.md` 为准。
 - **Driver:** operator 要求「完整的、本地具備智能、能透過 ML/DB/學習經驗/市場信號智能調整參數的下單 Agent 系統」
 
 ## Operator 決策（已鎖定）

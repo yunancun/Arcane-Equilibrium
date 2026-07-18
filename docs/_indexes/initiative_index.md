@@ -4,6 +4,8 @@
 >
 > 本索引用来帮助 agent 找到正确证据入口，不是 active queue。当前工作状态、
 > owner、gate、runtime evidence 和 next action 仍以根目录 `TODO.md` 为准。
+>
+> **Freshness（2026-07-18 审计注）**：本索引无单一 as-of，按 initiative 增量维护；判断时效以 `TODO.md` + `git log` 为准。
 
 ## Active Routing
 
