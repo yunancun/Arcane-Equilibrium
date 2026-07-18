@@ -107,12 +107,20 @@ transport/capture. Deploy and broker contact cannot be inferred from visible
 runtime paths. `runtime_environment_probe_v1` now exists as a local-only,
 non-secret, fail-closed source capability, and the Deploy Adapter independently
 reruns and reconciles it; the probe is not remote transport, platform-attested
-runtime evidence, deploy readiness, or effect authority. Deploy apply remains
+runtime evidence, deploy readiness, or effect authority. Generic deploy apply remains
 disabled before component invocation until exact rollback binding and a stable
 observation-window contract are separately bound and verified. Development-
 agent broker/private external contact has no closure-admissible Adapter. Direct
 `psql` is also denied until a local-socket/read-only-identity Adapter removes
 ambient `psqlrc` and `PG*` routing.
+
+The purpose-built `p0b_alr_rollforward_adapter_v1` is separately admitted and
+does not broaden those permissions. Only PM may trigger its exact stage/cutover
+intent; delegated reviewers remain read-only. Every phase binds a fresh route,
+materialized Context, phase-runtime artifact, current dynamic source head, and
+PA/E3/OPS evidence. The Adapter cannot finalize cutover before observer-v2 PASS;
+closure PASS additionally requires a later independent OPS postcheck bound to the
+final effect receipt. No role receives broker/order/live authority.
 
 ## Independence
 

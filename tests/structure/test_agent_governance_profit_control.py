@@ -1599,7 +1599,7 @@ const parallel = async jobs => Promise.all(jobs.map(job => job()));
         "estimated_tokens_per_evidence": 20_000,
         "estimated_tokens_per_probe": 24_000,
         "estimated_tokens_for_map": 30_000,
-        "planned_input_tokens": 294_000,
+        "planned_input_tokens": 294_216,
         "planned_unique_nodes": 10,
         "planned_call_attempts": 12,
     }

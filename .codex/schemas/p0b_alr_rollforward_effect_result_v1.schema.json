@@ -1,0 +1,688 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/p0b_alr_rollforward_effect_result_v1.schema.json",
+  "title": "p0b_alr_rollforward_effect_result_v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "adapter_id", "phase", "effect_status", "intent_id",
+    "intent_digest", "task_contract_digest", "context_artifact_digest",
+    "claim_bindings", "approved_by", "approved_at", "intent_expires_at",
+    "typed_confirm", "hard_stops", "source_head", "origin_main_head",
+    "tree_clean", "target_host", "target_environment", "target_user_unit",
+    "pre_runtime_identity_digest", "post_runtime_identity_digest",
+    "component_result_digest", "started_at", "completed_at",
+    "evidence_expires_at", "phase_result", "failure_reason", "receipt_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "p0b_alr_rollforward_effect_result_v1"},
+    "adapter_id": {"const": "p0b_alr_rollforward_adapter_v1"},
+    "phase": {"enum": ["stage", "cutover"]},
+    "effect_status": {
+      "enum": [
+        "PHASE1_STAGED_UNINTERRUPTED_PASS",
+        "PHASE2_APPLIED_POSTCHECK_PASS",
+        "FAILED"
+      ]
+    },
+    "intent_id": {"type": "string", "minLength": 8},
+    "intent_digest": {"$ref": "#/$defs/digest"},
+    "task_contract_digest": {"$ref": "#/$defs/digest"},
+    "context_artifact_digest": {"$ref": "#/$defs/digest"},
+    "claim_bindings": {"$ref": "#/$defs/claimBindings"},
+    "approved_by": {"type": "string", "minLength": 1},
+    "approved_at": {"$ref": "#/$defs/timestamp"},
+    "intent_expires_at": {"$ref": "#/$defs/timestamp"},
+    "typed_confirm": {"type": "string", "minLength": 1},
+    "hard_stops": {
+      "type": "array", "minItems": 9, "maxItems": 9,
+      "uniqueItems": true, "items": {"type": "string", "minLength": 1}
+    },
+    "source_head": {"$ref": "#/$defs/head"},
+    "origin_main_head": {"$ref": "#/$defs/head"},
+    "tree_clean": {"const": true},
+    "target_host": {"const": "trade-core"},
+    "target_environment": {"const": "trade_core_alr"},
+    "target_user_unit": {"const": "openclaw-alr-shadow.service"},
+    "pre_runtime_identity_digest": {"$ref": "#/$defs/digest"},
+    "post_runtime_identity_digest": {"$ref": "#/$defs/digest"},
+    "component_result_digest": {"$ref": "#/$defs/digest"},
+    "started_at": {"$ref": "#/$defs/timestamp"},
+    "completed_at": {"$ref": "#/$defs/timestamp"},
+    "evidence_expires_at": {"$ref": "#/$defs/timestamp"},
+    "phase_result": {
+      "oneOf": [
+        {"$ref": "#/$defs/stageResult"},
+        {"$ref": "#/$defs/cutoverResult"},
+        {"type": "null"}
+      ]
+    },
+    "failure_reason": {"type": ["string", "null"]},
+    "receipt_digest": {"$ref": "#/$defs/digest"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"phase": {"const": "stage"}}},
+      "then": {"properties": {"claim_bindings": {"$ref": "#/$defs/stageClaimBindings"}}},
+      "else": {"properties": {"claim_bindings": {"$ref": "#/$defs/cutoverClaimBindings"}}}
+    }
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "claimBindings": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "p0b_effect_adapter_selection": {"$ref": "#/$defs/digest"},
+        "p0b_adapter_source": {"$ref": "#/$defs/digest"},
+        "p0b_adapter_tests": {"$ref": "#/$defs/digest"},
+        "p0b_base_adapter_source": {"$ref": "#/$defs/digest"},
+        "p0b_generation_apply_source": {"$ref": "#/$defs/digest"},
+        "p0b_phase_runtime_bindings": {"$ref": "#/$defs/digest"},
+        "p0b_runtime_source_binding": {"$ref": "#/$defs/digest"},
+        "p0b_runtime_protected_binding": {"$ref": "#/$defs/digest"},
+        "p0b_runtime_paths_binding": {"$ref": "#/$defs/digest"},
+        "p0b_runtime_inventories_binding": {"$ref": "#/$defs/digest"},
+        "p0b_runtime_lineage_binding": {"$ref": "#/$defs/digest"},
+        "p0b_observer_source": {"$ref": "#/$defs/digest"},
+        "p0b_observer_tests": {"$ref": "#/$defs/digest"},
+        "p0b_observer_dependency_source": {"$ref": "#/$defs/digest"},
+        "p0b_private_bundle_stager_source": {"$ref": "#/$defs/digest"},
+        "p0b_private_bundle_stager_tests": {"$ref": "#/$defs/digest"},
+        "p0b_private_bundle_source_manifest": {"$ref": "#/$defs/digest"},
+        "p0b_private_bundle_destination_absent_attestation": {"$ref": "#/$defs/digest"},
+        "p0b_phase1_task_contract": {"$ref": "#/$defs/digest"},
+        "p0b_phase1_route": {"$ref": "#/$defs/digest"},
+        "p0b_phase1_context_artifact": {"$ref": "#/$defs/digest"},
+        "p0b_phase1_intent": {"$ref": "#/$defs/digest"},
+        "p0b_phase1_receipt": {"$ref": "#/$defs/digest"},
+        "p0b_phase1_closure": {"$ref": "#/$defs/digest"},
+        "p0b_sealed_lineage_bundle": {"$ref": "#/$defs/digest"},
+        "p0b_private_bundle_receipt": {"$ref": "#/$defs/digest"},
+        "p0b_private_bundle_destination": {"$ref": "#/$defs/digest"},
+        "p0b_target_source_attestation": {"$ref": "#/$defs/digest"},
+        "p0b_completion_inventory": {"$ref": "#/$defs/digest"},
+        "p0b_producer_inventory": {"$ref": "#/$defs/digest"},
+        "p0b_live_inventory": {"$ref": "#/$defs/digest"},
+        "p0b_protected_runtime_baseline": {"$ref": "#/$defs/digest"},
+        "p0b_p0a_completed_board_input": {"$ref": "#/$defs/digest"},
+        "p0b_staged_candidate_board": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "stageClaimBindings": {
+      "allOf": [
+        {"$ref": "#/$defs/claimBindings"},
+        {"required": [
+          "p0b_effect_adapter_selection", "p0b_adapter_source",
+          "p0b_adapter_tests", "p0b_base_adapter_source",
+          "p0b_generation_apply_source", "p0b_phase_runtime_bindings",
+          "p0b_runtime_source_binding", "p0b_runtime_protected_binding",
+          "p0b_runtime_paths_binding", "p0b_runtime_inventories_binding",
+          "p0b_runtime_lineage_binding",
+          "p0b_private_bundle_stager_source",
+          "p0b_private_bundle_stager_tests", "p0b_private_bundle_source_manifest",
+          "p0b_private_bundle_destination_absent_attestation",
+          "p0b_target_source_attestation", "p0b_completion_inventory",
+          "p0b_producer_inventory", "p0b_live_inventory",
+          "p0b_protected_runtime_baseline", "p0b_p0a_completed_board_input"
+        ]}
+      ]
+    },
+    "cutoverClaimBindings": {
+      "allOf": [
+        {"$ref": "#/$defs/claimBindings"},
+        {"required": [
+          "p0b_effect_adapter_selection", "p0b_adapter_source",
+          "p0b_adapter_tests", "p0b_base_adapter_source",
+          "p0b_generation_apply_source", "p0b_phase_runtime_bindings",
+          "p0b_runtime_source_binding", "p0b_runtime_protected_binding",
+          "p0b_runtime_paths_binding", "p0b_runtime_inventories_binding",
+          "p0b_runtime_lineage_binding",
+          "p0b_observer_source",
+          "p0b_observer_tests", "p0b_observer_dependency_source",
+          "p0b_phase1_task_contract", "p0b_phase1_route",
+          "p0b_phase1_context_artifact", "p0b_phase1_intent",
+          "p0b_phase1_receipt", "p0b_phase1_closure",
+          "p0b_sealed_lineage_bundle", "p0b_private_bundle_receipt",
+          "p0b_private_bundle_destination", "p0b_target_source_attestation",
+          "p0b_completion_inventory", "p0b_producer_inventory",
+          "p0b_live_inventory", "p0b_protected_runtime_baseline",
+          "p0b_staged_candidate_board"
+        ]}
+      ]
+    },
+    "stageResult": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "schema_version", "service_uninterrupted", "same_runtime_identity",
+        "lineage_bundle_digest", "lineage_manifest_digest",
+        "sealed_inventory_digest", "completion_inventory_digest",
+        "producer_inventory_digest", "live_inventory_digest",
+        "candidate_board_digest", "staging_destination_digest", "private_bundle"
+      ],
+      "properties": {
+        "schema_version": {"const": "p0b_alr_stage_result_v1"},
+        "service_uninterrupted": {"const": true},
+        "same_runtime_identity": {"const": true},
+        "lineage_bundle_digest": {"$ref": "#/$defs/digest"},
+        "lineage_manifest_digest": {"$ref": "#/$defs/digest"},
+        "sealed_inventory_digest": {"$ref": "#/$defs/digest"},
+        "completion_inventory_digest": {"$ref": "#/$defs/digest"},
+        "producer_inventory_digest": {"$ref": "#/$defs/digest"},
+        "live_inventory_digest": {"$ref": "#/$defs/digest"},
+        "candidate_board_digest": {"$ref": "#/$defs/digest"},
+        "staging_destination_digest": {"$ref": "#/$defs/digest"},
+        "private_bundle": {"$ref": "#/$defs/privateBundleResult"}
+      }
+    },
+    "privateBundleResult": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "schema_version", "source_digest", "test_digest", "source_manifest_digest",
+        "destination_absent_attestation_digest", "staging_receipt_digest",
+        "destination_digest", "staged", "no_network", "no_package_install",
+        "credentials_read", "completed_at"
+      ],
+      "properties": {
+        "schema_version": {"const": "p0b_private_bundle_stage_result_v1"},
+        "source_digest": {"$ref": "#/$defs/digest"},
+        "test_digest": {"$ref": "#/$defs/digest"},
+        "source_manifest_digest": {"$ref": "#/$defs/digest"},
+        "destination_absent_attestation_digest": {"$ref": "#/$defs/digest"},
+        "staging_receipt_digest": {"$ref": "#/$defs/digest"},
+        "destination_digest": {"$ref": "#/$defs/digest"},
+        "staged": {"const": true},
+        "no_network": {"const": true},
+        "no_package_install": {"const": true},
+        "credentials_read": {"const": false},
+        "completed_at": {"$ref": "#/$defs/timestamp"}
+      }
+    },
+    "cutoverResult": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "schema_version", "phase1_effect_receipt_digest",
+        "phase1_closure_digest", "sealed_lineage_bundle_digest",
+        "private_bundle_receipt_digest", "private_bundle_destination_digest",
+        "provisional_cutover", "provisional_cutover_digest", "service", "observer"
+      ],
+      "properties": {
+        "schema_version": {"const": "p0b_alr_cutover_result_v1"},
+        "phase1_effect_receipt_digest": {"$ref": "#/$defs/digest"},
+        "phase1_closure_digest": {"$ref": "#/$defs/digest"},
+        "sealed_lineage_bundle_digest": {"$ref": "#/$defs/digest"},
+        "private_bundle_receipt_digest": {"$ref": "#/$defs/digest"},
+        "private_bundle_destination_digest": {"$ref": "#/$defs/digest"},
+        "provisional_cutover": {"$ref": "#/$defs/provisionalCutover"},
+        "provisional_cutover_digest": {"$ref": "#/$defs/digest"},
+        "service": {"$ref": "#/$defs/serviceResult"},
+        "observer": {"$ref": "#/$defs/observerResult"}
+      }
+    },
+    "provisionalCutover": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "schema_version", "status", "target_head", "phase1_receipt",
+        "cutover_authorization", "cutover_authorization_digest", "live_board",
+        "unit", "pin", "private_deps_receipt", "private_deps_destination",
+        "private_deps_manifest_sha256", "active_identity", "generation_fence",
+        "observer_input_contract_sha256"
+      ],
+      "properties": {
+        "schema_version": {"const": "p0b_alr_current_head_rollforward_provisional_cutover_v1"},
+        "status": {"const": "PHASE2_PROVISIONAL_CUTOVER_READY"},
+        "target_head": {"$ref": "#/$defs/head"},
+        "phase1_receipt": {"$ref": "#/$defs/artifactBinding"},
+        "cutover_authorization": {
+          "allOf": [
+            {"$ref": "#/$defs/runtimeAuthorization"},
+            {"properties": {"phase": {"const": "cutover"}}}
+          ]
+        },
+        "cutover_authorization_digest": {"$ref": "#/$defs/digest"},
+        "live_board": {"$ref": "#/$defs/artifactBinding"},
+        "unit": {"$ref": "#/$defs/artifactBinding"},
+        "pin": {"$ref": "#/$defs/artifactBinding"},
+        "private_deps_receipt": {"$ref": "#/$defs/artifactBinding"},
+        "private_deps_destination": {
+          "const": "/home/ncyu/BybitOpenClaw/var/openclaw/p0b-observer-deps"
+        },
+        "private_deps_manifest_sha256": {"$ref": "#/$defs/rawSha256"},
+        "active_identity": {"$ref": "#/$defs/activeIdentity"},
+        "generation_fence": {"$ref": "#/$defs/generationFence"},
+        "observer_input_contract_sha256": {"$ref": "#/$defs/rawSha256"}
+      }
+    },
+    "runtimeAuthorization": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "schema_version", "adapter_id", "phase", "intent_id", "intent_digest",
+        "task_contract_digest", "context_artifact_digest", "governance_bindings",
+        "claim_bindings", "expected_source_head", "expected_origin_main_head",
+        "expected_old_runtime_source_head", "expected_old_pin_digest",
+        "expected_source_tree_digest", "expected_pin_consumer_inventory_digest",
+        "expected_runtime_identity_digest", "target_host", "target_environment",
+        "target_user_unit", "require_clean_tree", "require_fresh_origin_main",
+        "phase1_effect_receipt_digest", "phase1_closure_digest",
+        "sealed_lineage_bundle_digest", "private_bundle_destination",
+        "observer_requirement", "approved_by", "approved_at", "expires_at",
+        "typed_confirm", "hard_stops", "authorization_digest"
+      ],
+      "properties": {
+        "schema_version": {"const": "p0b_alr_runtime_authorization_v1"},
+        "adapter_id": {"const": "p0b_alr_rollforward_adapter_v1"},
+        "phase": {"enum": ["stage", "cutover"]},
+        "intent_id": {"type": "string", "minLength": 8},
+        "intent_digest": {"$ref": "#/$defs/digest"},
+        "task_contract_digest": {"$ref": "#/$defs/digest"},
+        "context_artifact_digest": {"$ref": "#/$defs/digest"},
+        "governance_bindings": {"$ref": "#/$defs/authorizationGovernanceBindings"},
+        "claim_bindings": {"$ref": "#/$defs/claimBindings"},
+        "expected_source_head": {"$ref": "#/$defs/head"},
+        "expected_origin_main_head": {"$ref": "#/$defs/head"},
+        "expected_old_runtime_source_head": {"$ref": "#/$defs/head"},
+        "expected_old_pin_digest": {"$ref": "#/$defs/digest"},
+        "expected_source_tree_digest": {"$ref": "#/$defs/digest"},
+        "expected_pin_consumer_inventory_digest": {"$ref": "#/$defs/digest"},
+        "expected_runtime_identity_digest": {"$ref": "#/$defs/digest"},
+        "target_host": {"const": "trade-core"},
+        "target_environment": {"const": "trade_core_alr"},
+        "target_user_unit": {"const": "openclaw-alr-shadow.service"},
+        "require_clean_tree": {"const": true},
+        "require_fresh_origin_main": {"const": true},
+        "phase1_effect_receipt_digest": {
+          "anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]
+        },
+        "phase1_closure_digest": {
+          "anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]
+        },
+        "sealed_lineage_bundle_digest": {
+          "anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]
+        },
+        "private_bundle_destination": {
+          "const": "/home/ncyu/BybitOpenClaw/var/openclaw/p0b-observer-deps"
+        },
+        "observer_requirement": {"enum": ["NOT_APPLICABLE", "REQUIRED_PASS"]},
+        "approved_by": {"type": "string", "minLength": 1},
+        "approved_at": {"$ref": "#/$defs/timestamp"},
+        "expires_at": {"$ref": "#/$defs/timestamp"},
+        "typed_confirm": {"type": "string", "minLength": 1},
+        "hard_stops": {
+          "type": "array", "minItems": 9, "maxItems": 9,
+          "uniqueItems": true, "items": {"type": "string", "minLength": 1}
+        },
+        "authorization_digest": {"$ref": "#/$defs/digest"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"phase": {"const": "stage"}}},
+          "then": {
+            "properties": {
+              "claim_bindings": {"$ref": "#/$defs/stageClaimBindings"},
+              "phase1_effect_receipt_digest": {"type": "null"},
+              "phase1_closure_digest": {"type": "null"},
+              "sealed_lineage_bundle_digest": {"type": "null"},
+              "observer_requirement": {"const": "NOT_APPLICABLE"}
+            }
+          },
+          "else": {
+            "properties": {
+              "claim_bindings": {"$ref": "#/$defs/cutoverClaimBindings"},
+              "phase1_effect_receipt_digest": {"$ref": "#/$defs/digest"},
+              "phase1_closure_digest": {"$ref": "#/$defs/digest"},
+              "sealed_lineage_bundle_digest": {"$ref": "#/$defs/digest"},
+              "observer_requirement": {"const": "REQUIRED_PASS"}
+            }
+          }
+        }
+      ]
+    },
+    "authorizationGovernanceBindings": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "compiled_route_schema", "compiled_route_digest", "route_dag_digest",
+        "context_artifact_schema", "pm_context_artifact_digest",
+        "pa_context_artifact_digest", "e3_context_artifact_digest",
+        "ops_preflight_context_artifact_digest", "pa_role_fragment_digest",
+        "pa_command_capture_digest", "e3_role_fragment_digest",
+        "e3_command_capture_digest", "ops_preflight_role_fragment_digest",
+        "ops_preflight_command_capture_digest", "ops_preflight_attestation_digest",
+        "ops_preflight_observed_at", "ops_preflight_expires_at",
+        "pm_approval_artifact_digest", "phase_runtime_bindings_artifact_digest",
+        "phase_runtime_bindings_path", "authorization_path",
+        "authorized_argv_digest", "protected_baseline_digest"
+      ],
+      "properties": {
+        "compiled_route_schema": {"const": "hybrid_execution_dag_v1"},
+        "compiled_route_digest": {"$ref": "#/$defs/digest"},
+        "route_dag_digest": {"$ref": "#/$defs/digest"},
+        "context_artifact_schema": {"const": "context_artifact_v1"},
+        "pm_context_artifact_digest": {"$ref": "#/$defs/digest"},
+        "pa_context_artifact_digest": {"$ref": "#/$defs/digest"},
+        "e3_context_artifact_digest": {"$ref": "#/$defs/digest"},
+        "ops_preflight_context_artifact_digest": {"$ref": "#/$defs/digest"},
+        "pa_role_fragment_digest": {"$ref": "#/$defs/digest"},
+        "pa_command_capture_digest": {"$ref": "#/$defs/digest"},
+        "e3_role_fragment_digest": {"$ref": "#/$defs/digest"},
+        "e3_command_capture_digest": {"$ref": "#/$defs/digest"},
+        "ops_preflight_role_fragment_digest": {"$ref": "#/$defs/digest"},
+        "ops_preflight_command_capture_digest": {"$ref": "#/$defs/digest"},
+        "ops_preflight_attestation_digest": {"$ref": "#/$defs/digest"},
+        "ops_preflight_observed_at": {"$ref": "#/$defs/timestamp"},
+        "ops_preflight_expires_at": {"$ref": "#/$defs/timestamp"},
+        "pm_approval_artifact_digest": {"$ref": "#/$defs/digest"},
+        "phase_runtime_bindings_artifact_digest": {"$ref": "#/$defs/digest"},
+        "phase_runtime_bindings_path": {"type": "string", "pattern": "^/"},
+        "authorization_path": {"type": "string", "pattern": "^/"},
+        "authorized_argv_digest": {"$ref": "#/$defs/digest"},
+        "protected_baseline_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "rawSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "artifactBinding": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"type": "string", "pattern": "^/"},
+        "sha256": {"$ref": "#/$defs/rawSha256"}
+      }
+    },
+    "activeIdentity": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "MainPID", "ProcessStartTicks", "InvocationID",
+        "ExecMainStartTimestampMonotonic", "NRestarts", "ALRSourceHead"
+      ],
+      "properties": {
+        "MainPID": {"type": "string", "pattern": "^[1-9][0-9]*$"},
+        "ProcessStartTicks": {"type": "string", "pattern": "^[1-9][0-9]*$"},
+        "InvocationID": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+        "ExecMainStartTimestampMonotonic": {"type": "string", "pattern": "^[1-9][0-9]*$"},
+        "NRestarts": {"const": "0"},
+        "ALRSourceHead": {"$ref": "#/$defs/head"}
+      }
+    },
+    "generationFence": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "completion_inventory_sha256", "producer_inventory_sha256",
+        "ledger_post_inventory_sha256", "lane_effective_config_sha256"
+      ],
+      "properties": {
+        "completion_inventory_sha256": {"$ref": "#/$defs/digest"},
+        "producer_inventory_sha256": {"$ref": "#/$defs/digest"},
+        "ledger_post_inventory_sha256": {"$ref": "#/$defs/digest"},
+        "lane_effective_config_sha256": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "serviceResult": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "schema_version", "old_invocation_digest", "new_invocation_digest",
+        "source_head", "unit_digest", "pin_digest", "nrestarts", "active"
+      ],
+      "properties": {
+        "schema_version": {"const": "p0b_alr_service_cutover_result_v1"},
+        "old_invocation_digest": {"$ref": "#/$defs/digest"},
+        "new_invocation_digest": {"$ref": "#/$defs/digest"},
+        "source_head": {"$ref": "#/$defs/head"},
+        "unit_digest": {"$ref": "#/$defs/digest"},
+        "pin_digest": {"$ref": "#/$defs/digest"},
+        "nrestarts": {"const": 0},
+        "active": {"const": true}
+      }
+    },
+    "observerResult": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "schema_version", "status", "reason_codes", "observed_at_utc",
+        "target_head", "observer_not_before_utc", "input", "lineage",
+        "runtime_and_cycles", "startup_reconciliation", "private_dependencies",
+        "database", "claims", "boundaries"
+      ],
+      "properties": {
+        "schema_version": {"const": "p0b_alr_current_head_two_cycle_observer_v2"},
+        "status": {"const": "OBSERVER_V2_EXACT_POSTCHECK_PASS"},
+        "reason_codes": {"type": "array", "maxItems": 0},
+        "observed_at_utc": {"$ref": "#/$defs/utcTimestamp"},
+        "target_head": {"$ref": "#/$defs/head"},
+        "observer_not_before_utc": {"$ref": "#/$defs/utcTimestamp"},
+        "input": {"$ref": "#/$defs/observerInputResult"},
+        "lineage": {"$ref": "#/$defs/observerLineage"},
+        "runtime_and_cycles": {"$ref": "#/$defs/observerRuntimeAndCycles"},
+        "startup_reconciliation": {"$ref": "#/$defs/observerStartupReconciliation"},
+        "private_dependencies": {"$ref": "#/$defs/observerPrivateDependencies"},
+        "database": {"$ref": "#/$defs/observerDatabase"},
+        "claims": {"$ref": "#/$defs/observerClaims"},
+        "boundaries": {"$ref": "#/$defs/observerBoundaries"}
+      }
+    },
+    "utcTimestamp": {
+      "type": "string", "format": "date-time", "pattern": "Z$"
+    },
+    "noAuthority": {
+      "type": "object", "additionalProperties": false,
+      "required": ["order", "probe", "promotion", "runtime"],
+      "properties": {
+        "order": {"const": false}, "probe": {"const": false},
+        "promotion": {"const": false}, "runtime": {"const": false}
+      }
+    },
+    "observerInputIdentity": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "path", "sha256", "dev", "ino", "uid", "gid", "mode", "nlink",
+        "size", "parent_o_excl_creation_required",
+        "parent_o_excl_creation_observed_by_this_process"
+      ],
+      "properties": {
+        "path": {"type": "string", "pattern": "^/"},
+        "sha256": {"$ref": "#/$defs/rawSha256"},
+        "dev": {"type": "integer", "minimum": 0},
+        "ino": {"type": "integer", "minimum": 1},
+        "uid": {"const": 1000}, "gid": {"const": 1000},
+        "mode": {"const": "0600"}, "nlink": {"const": 1},
+        "size": {"type": "integer", "minimum": 1},
+        "parent_o_excl_creation_required": {"const": true},
+        "parent_o_excl_creation_observed_by_this_process": {"const": false}
+      }
+    },
+    "observerInputResult": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "schema_version", "canonical_sha256", "parent_o_excl_creation_required",
+        "parent_o_excl_creation_claimed_by_observer", "identity"
+      ],
+      "properties": {
+        "schema_version": {"const": "p0b_alr_current_head_observer_input_v2"},
+        "canonical_sha256": {"$ref": "#/$defs/rawSha256"},
+        "parent_o_excl_creation_required": {"const": true},
+        "parent_o_excl_creation_claimed_by_observer": {"const": false},
+        "identity": {"$ref": "#/$defs/observerInputIdentity"}
+      }
+    },
+    "observerLineage": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "phase1_receipt_sha256", "stage_authorization_sha256",
+        "stage_authorization_digest", "cutover_authorization_sha256",
+        "cutover_authorization_digest", "observer_source_sha256",
+        "phase1_closure_digest", "sealed_lineage_bundle_digest",
+        "target_source_attestation_digest", "protected_baseline_digest",
+        "provisional_cutover_sha256", "phase2_identity", "live_board_sha256",
+        "private_deps_receipt_sha256", "private_deps_manifest_sha256",
+        "stage_runtime_bindings_sha256", "stage_runtime_bindings_artifact_digest",
+        "cutover_runtime_bindings_sha256", "cutover_runtime_bindings_artifact_digest",
+        "authority"
+      ],
+      "properties": {
+        "phase1_receipt_sha256": {"$ref": "#/$defs/rawSha256"},
+        "stage_authorization_sha256": {"$ref": "#/$defs/rawSha256"},
+        "stage_authorization_digest": {"$ref": "#/$defs/digest"},
+        "cutover_authorization_sha256": {"$ref": "#/$defs/rawSha256"},
+        "cutover_authorization_digest": {"$ref": "#/$defs/digest"},
+        "observer_source_sha256": {"$ref": "#/$defs/rawSha256"},
+        "phase1_closure_digest": {"$ref": "#/$defs/digest"},
+        "sealed_lineage_bundle_digest": {"$ref": "#/$defs/digest"},
+        "target_source_attestation_digest": {"$ref": "#/$defs/digest"},
+        "protected_baseline_digest": {"$ref": "#/$defs/digest"},
+        "provisional_cutover_sha256": {"$ref": "#/$defs/rawSha256"},
+        "phase2_identity": {"$ref": "#/$defs/activeIdentity"},
+        "live_board_sha256": {"$ref": "#/$defs/rawSha256"},
+        "private_deps_receipt_sha256": {"$ref": "#/$defs/rawSha256"},
+        "private_deps_manifest_sha256": {"$ref": "#/$defs/rawSha256"},
+        "stage_runtime_bindings_sha256": {"$ref": "#/$defs/rawSha256"},
+        "stage_runtime_bindings_artifact_digest": {"$ref": "#/$defs/digest"},
+        "cutover_runtime_bindings_sha256": {"$ref": "#/$defs/rawSha256"},
+        "cutover_runtime_bindings_artifact_digest": {"$ref": "#/$defs/digest"},
+        "authority": {"$ref": "#/$defs/noAuthority"}
+      }
+    },
+    "twoStrings": {
+      "type": "array", "minItems": 2, "maxItems": 2, "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "twoRawDigests": {
+      "type": "array", "minItems": 2, "maxItems": 2, "uniqueItems": true,
+      "items": {"$ref": "#/$defs/rawSha256"}
+    },
+    "observerRuntimeAndCycles": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "runtime_identity", "session_id", "session_started_at_utc", "cycle_count",
+        "cycles_distinct", "all_cycles_post_observer_not_before",
+        "lane_success_event_ids", "notification_consumed_event_ids",
+        "decision_artifact_hashes", "health_snapshot_hashes",
+        "pg_readonly_single_transaction_rolled_back", "credential_content_output",
+        "authority"
+      ],
+      "properties": {
+        "runtime_identity": {"$ref": "#/$defs/activeIdentity"},
+        "session_id": {"type": "string", "minLength": 1},
+        "session_started_at_utc": {"$ref": "#/$defs/utcTimestamp"},
+        "cycle_count": {"const": 2},
+        "cycles_distinct": {"const": true},
+        "all_cycles_post_observer_not_before": {"const": true},
+        "lane_success_event_ids": {"$ref": "#/$defs/twoStrings"},
+        "notification_consumed_event_ids": {"$ref": "#/$defs/twoStrings"},
+        "decision_artifact_hashes": {"$ref": "#/$defs/twoRawDigests"},
+        "health_snapshot_hashes": {"$ref": "#/$defs/twoRawDigests"},
+        "pg_readonly_single_transaction_rolled_back": {"const": true},
+        "credential_content_output": {"const": false},
+        "authority": {"$ref": "#/$defs/noAuthority"}
+      }
+    },
+    "consumerSource": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "sha256", "blob_sha1", "ml_training_tree_sha1"],
+      "properties": {
+        "path": {"const": "/home/ncyu/BybitOpenClaw/srv/program_code/ml_training/alr_event_consumer.py"},
+        "sha256": {"$ref": "#/$defs/rawSha256"},
+        "blob_sha1": {"$ref": "#/$defs/head"},
+        "ml_training_tree_sha1": {"$ref": "#/$defs/head"}
+      }
+    },
+    "sourceOrderingInvariants": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "watch_opened_before_session_and_loop",
+        "startup_reconciliation_consumed_before_first_operational_cycle",
+        "first_operational_cycle_before_notification_loop",
+        "notification_wait_only_after_startup_operational_cycle"
+      ],
+      "properties": {
+        "watch_opened_before_session_and_loop": {"const": true},
+        "startup_reconciliation_consumed_before_first_operational_cycle": {"const": true},
+        "first_operational_cycle_before_notification_loop": {"const": true},
+        "notification_wait_only_after_startup_operational_cycle": {"const": true}
+      }
+    },
+    "admittedBoard": {
+      "type": "object", "additionalProperties": false,
+      "required": ["source_content_sha256", "board_hash", "audit_hash", "selection_hash", "candidate_set_hash"],
+      "properties": {
+        "source_content_sha256": {"$ref": "#/$defs/rawSha256"},
+        "board_hash": {"$ref": "#/$defs/rawSha256"},
+        "audit_hash": {"$ref": "#/$defs/rawSha256"},
+        "selection_hash": {"$ref": "#/$defs/rawSha256"},
+        "candidate_set_hash": {"$ref": "#/$defs/rawSha256"}
+      }
+    },
+    "observerStartupReconciliation": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "startup_reconciliation_proof_basis", "pg_explicit_trigger_claimed",
+        "consumer_source", "source_ordering_invariants", "session_id",
+        "session_started_at_utc", "decision_artifact_hash",
+        "decision_created_at_utc", "first_notification_received_event_id",
+        "first_notification_received_at_utc",
+        "decision_strictly_before_first_notification_received", "same_session",
+        "admitted_board", "authority"
+      ],
+      "properties": {
+        "startup_reconciliation_proof_basis": {"const": "SOURCE_ORDER_PLUS_SESSION_TEMPORAL_ATTESTATION"},
+        "pg_explicit_trigger_claimed": {"const": false},
+        "consumer_source": {"$ref": "#/$defs/consumerSource"},
+        "source_ordering_invariants": {"$ref": "#/$defs/sourceOrderingInvariants"},
+        "session_id": {"type": "string", "minLength": 1},
+        "session_started_at_utc": {"$ref": "#/$defs/utcTimestamp"},
+        "decision_artifact_hash": {"$ref": "#/$defs/rawSha256"},
+        "decision_created_at_utc": {"$ref": "#/$defs/utcTimestamp"},
+        "first_notification_received_event_id": {"type": "string", "minLength": 1},
+        "first_notification_received_at_utc": {"$ref": "#/$defs/utcTimestamp"},
+        "decision_strictly_before_first_notification_received": {"const": true},
+        "same_session": {"const": true},
+        "admitted_board": {"$ref": "#/$defs/admittedBoard"},
+        "authority": {"$ref": "#/$defs/noAuthority"}
+      }
+    },
+    "observerPrivateDependencies": {
+      "type": "object", "additionalProperties": false,
+      "required": ["receipt_sha256", "manifest_sha256", "exact_bundle_verified_by_base_before_pg_connect"],
+      "properties": {
+        "receipt_sha256": {"$ref": "#/$defs/rawSha256"},
+        "manifest_sha256": {"$ref": "#/$defs/rawSha256"},
+        "exact_bundle_verified_by_base_before_pg_connect": {"const": true}
+      }
+    },
+    "observerDatabase": {
+      "type": "object", "additionalProperties": false,
+      "required": ["connection_count", "reconnect_performed", "transaction_readonly_repeatable_read", "rolled_back", "tuple_mutation_observed"],
+      "properties": {
+        "connection_count": {"const": 1}, "reconnect_performed": {"const": false},
+        "transaction_readonly_repeatable_read": {"const": true},
+        "rolled_back": {"const": true}, "tuple_mutation_observed": {"const": false}
+      }
+    },
+    "observerClaims": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "startup_reconciliation_observed_by_combined_surfaces",
+        "pg_explicit_trigger_claimed", "two_notification_backed_natural_cycles_observed",
+        "current_fit_claimed", "training_or_model_fit_claimed",
+        "serving_or_promotion_claimed", "trading_or_order_authority_claimed"
+      ],
+      "properties": {
+        "startup_reconciliation_observed_by_combined_surfaces": {"const": true},
+        "pg_explicit_trigger_claimed": {"const": false},
+        "two_notification_backed_natural_cycles_observed": {"const": true},
+        "current_fit_claimed": {"const": false},
+        "training_or_model_fit_claimed": {"const": false},
+        "serving_or_promotion_claimed": {"const": false},
+        "trading_or_order_authority_claimed": {"const": false}
+      }
+    },
+    "observerBoundaries": {
+      "type": "object", "additionalProperties": false,
+      "required": ["service_mutation_performed", "source_mutation_performed", "database_mutation_performed", "broker_contact_performed", "credential_content_output"],
+      "properties": {
+        "service_mutation_performed": {"const": false},
+        "source_mutation_performed": {"const": false},
+        "database_mutation_performed": {"const": false},
+        "broker_contact_performed": {"const": false},
+        "credential_content_output": {"const": false}
+      }
+    }
+  }
+}
