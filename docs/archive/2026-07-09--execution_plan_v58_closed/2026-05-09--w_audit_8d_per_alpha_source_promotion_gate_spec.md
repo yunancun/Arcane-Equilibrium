@@ -1,3 +1,5 @@
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 # W-AUDIT-8d — Per-Alpha-Source Live Promotion Gate（R-4 IMPL Spec）
 
 **Wave 名稱**：W-AUDIT-8d "Per-Alpha-Source Live Promotion Gate"

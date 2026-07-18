@@ -4,6 +4,8 @@ date: 2026-04-22
 status: audit complete — hypothesis identified, TOML change deferred to counterfactual replay
 related: TODO §P1-10 · `docs/worklogs/2026-04-22--counterfactual_replay_audit_spec.md`
 ---
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 
 # P1-10 ma_crossover SL/TP 比率 audit（ATR mult / R:R gate）
 

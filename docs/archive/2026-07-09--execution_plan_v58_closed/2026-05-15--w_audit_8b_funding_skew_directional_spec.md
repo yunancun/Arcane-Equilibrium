@@ -1,3 +1,5 @@
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 # W-AUDIT-8b — A4-A Funding Skew Directional Spec
 
 Date: 2026-05-15（v0.2 base）/ 2026-05-16（v0.3 sensitivity sweep patch）

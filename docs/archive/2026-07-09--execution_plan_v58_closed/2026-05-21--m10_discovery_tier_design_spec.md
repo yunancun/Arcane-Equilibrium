@@ -27,6 +27,8 @@ mirror precedent:
   - srv/docs/execution_plan/2026-05-21--v103_v104_earn_hypotheses_schema_spec.md(14 section structure 範式)
 scope: design / spec only — 不寫 V111.sql 實檔(V111 spec 另寫)、不寫 Rust tier-gate IMPL、不在 Mac 跑 SQL、不改 trading.fills writer、不執行 PG
 ---
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 
 > **REFERENCE / FROZEN AUTONOMY MODULE SPEC**
 >

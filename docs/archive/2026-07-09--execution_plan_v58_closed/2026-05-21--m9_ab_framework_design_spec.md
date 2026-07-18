@@ -21,6 +21,8 @@ amendments:
   - AMD-2026-05-09-03 (Strategist Wide-Adjustment RuntimeMaxEnvelope; ADR-0037 Decision 3 Cluster 3 risk profile variant 必對齊不超範圍)
 scope: M9 A/B framework DESIGN spec only — 不寫 IMPL Rust/Python code; 不違背 ADR-0037 5 Decisions; 不假設 V107 FK type alignment (per Sprint 1A-β M7 caveat V107 final schema UUID vs BIGINT 仍 pending)
 ---
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 
 # M9 A/B Testing Framework — DESIGN Specification (Sprint 1A-γ)
 

@@ -31,6 +31,8 @@ mirror precedent:
   - srv/sql/migrations/templates/schema_guard_template.sql (Guard A/B/C template)
 scope: design / spec only — 不寫 V107.sql 實檔, 不在 Mac 跑 SQL, 不改 Rust/Python M11 replay engine writer, 不執行 PG, 不擴張 M11 module 行為 (PA m11 design spec 已 land 619 行), 不擴張到 V108/V112 schema 細節 (placeholder FK 即可)
 ---
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 
 # V107 M11 Replay Divergence Log Schema Migration Spec
 

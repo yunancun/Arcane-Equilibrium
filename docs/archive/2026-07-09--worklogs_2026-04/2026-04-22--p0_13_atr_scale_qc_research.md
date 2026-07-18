@@ -8,6 +8,8 @@ parent:
   - docs/worklogs/2026-04-22--counterfactual_replay_audit_spec.md（所有閾值參照）
 scope: 只做選型研究 + 推薦；不改 code / TOML / config；不 deploy / commit / push
 ---
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 
 # P0-13 ATR Scale Bug — QC Research
 

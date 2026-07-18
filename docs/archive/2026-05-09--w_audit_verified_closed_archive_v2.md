@@ -1,3 +1,5 @@
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 # 2026-05-09 v2 W-AUDIT-1..7 已 verified-closed 內容歸檔（第二輪）
 
 **歸檔目的**：把第二輪 v2 verification 真 closed 的 finding + 已生效的 W-AUDIT-6 大爆發細節從 active TODO 移出，避免主 TODO 膨脹。

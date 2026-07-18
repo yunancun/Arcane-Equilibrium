@@ -1,3 +1,5 @@
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 # OpenClaw TODO — 工作清單（2026-04-24 FIX-PLAN v2 整合版）
 
 **最後更新**：2026-04-24 16:00 CEST（FIX-PLAN v2 PM 簽核版；整合 10-agent audit + 180-220 findings）  

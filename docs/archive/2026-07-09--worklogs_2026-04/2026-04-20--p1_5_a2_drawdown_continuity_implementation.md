@@ -1,3 +1,5 @@
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 # P1-5 A2 — Cross-Restart Drawdown Continuity · Implementation Worklog
 
 **日期 / Date:** 2026-04-20

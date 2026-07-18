@@ -12,6 +12,8 @@ parent specs:
   - docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-21--v58_dispatch_consolidation.md §CR-7 + §H-11
 scope: design / spec only — 不寫 IMPL code；不假設 V107/V112 schema 細節；不違背 14d × 50% mitigation
 ---
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 
 # M7 Decay Detection + Single Decay Authority + DECAY_ENFORCED Lifecycle Design
 

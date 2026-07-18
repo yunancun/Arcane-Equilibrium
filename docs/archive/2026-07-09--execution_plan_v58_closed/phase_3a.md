@@ -1,3 +1,5 @@
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 # Phase 3a — update_params() 改造 = AGT-1（W9-10，6/05-6/18，10 工作日）
 
 > **LEGACY / REFERENCE**

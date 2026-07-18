@@ -1,3 +1,5 @@
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 # 2026-04-11 Daily Summary — 3E-ARCH 三引擎並行架構 · 多角色審計 · Phase A-G 修復
 
 **測試基線（收盤）**：930 engine lib + 366 core + 18 e2e = **1314 passed** / 0 failed / 0 ignored · Python 2792 + 6 ipc_state_reader regression passed。

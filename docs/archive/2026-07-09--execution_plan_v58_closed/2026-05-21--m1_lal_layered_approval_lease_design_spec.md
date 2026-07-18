@@ -19,6 +19,8 @@ mirror precedent:
   - srv/docs/execution_plan/2026-05-21--v103_v104_earn_hypotheses_schema_spec.md (format reference — TL;DR + Background + Outline + Acceptance + Open Q)
 scope: module DESIGN only — 不寫 V112 DDL（per V112 spec doc 范圍）/ 不寫 IMPL code（E1 Sprint 4 起 IMPL）/ 不假設 V112 schema 細節（placeholder ref）/ 不擴張 M3/M7/M11 module 內部（cross-ref 即可）
 ---
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 
 > **REFERENCE / FROZEN AUTONOMY MODULE SPEC**
 >

@@ -13,6 +13,8 @@ mirror precedent:
   - srv/sql/migrations/V083__fills_entry_context_id_close_check.sql (ALTER ADD COLUMN + NOT VALID CHECK 範式)
 scope: design / spec only — 不寫 V103.sql / V104.sql 實檔，不在 Mac 跑 SQL，不改 Rust/Python writer，不執行 PG
 ---
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 
 # V103 + V104 Earn / Hypothesis / Track Schema Migration Spec
 

@@ -1,3 +1,5 @@
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 # W-AUDIT-8a C1 v2 — Resilient 24h `allLiquidation.BTCUSDT` Isolated WS Proof Plan
 
 **Ticket**: `P1-W-AUDIT-8A-C1-RETRY-PLAN-1`

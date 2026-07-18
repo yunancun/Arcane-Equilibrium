@@ -1,3 +1,5 @@
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 # EA-3 funding_arb SL Gate "P1 Hot-fix" — PA RCA + Recommendation
 
 **Date**: 2026-05-25

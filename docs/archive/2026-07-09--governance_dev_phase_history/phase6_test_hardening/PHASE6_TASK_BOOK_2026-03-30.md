@@ -1,3 +1,5 @@
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 # Phase 6 Task Book — Test Hardening & Bug Fix
 # 第六階段任務書 — 測試強化與 Bug 修復
 

@@ -11,6 +11,8 @@ parent specs:
 mirror precedent: srv/sql/migrations/V083__fills_entry_context_id_close_check.sql
 scope: design / spec only — 不寫 V094.sql 實檔，不改 trading_writer.rs 實際代碼，不在 Mac 跑 V094 SQL，不動 V083 schema，不動 paper_state / resting_orders / spine writer
 ---
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 
 # V094 Close-Maker-First Audit Schema — Hybrid Migration Spec
 

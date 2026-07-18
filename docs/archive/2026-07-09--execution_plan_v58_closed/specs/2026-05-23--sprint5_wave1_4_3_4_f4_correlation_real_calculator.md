@@ -8,6 +8,8 @@ parent_placeholder: rust/openclaw_engine/src/health/domains/risk_envelope_probe_
 risk_grade: 中
 status: SPEC-DRAFT
 ---
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 
 # §1 既有狀態 + 範疇
 
