@@ -7,6 +7,8 @@ PM Sign-off: 本 v2 draft；批准前 cascade 不執行
 Supersedes: `docs/governance_dev/amendments/2026-05-21--AMD-2026-05-21-01-autonomy-vs-human-final-review.md`（v1 protected 6 / opt-in 8 拆分版本，2026-05-21 草擬，未 commit 落地，因設計立場更新而被本 v2 取代）
 Related: ADR-0008 Decision Lease state machine（baseline 不變）/ ADR-0034 Decision Lease Layered Approval LAL（本 AMD 為其 governance 上層；LAL 對齊矩陣需 cascade patch）/ ADR-0040 Multi-Venue Gate Spec（venue change 條款需 cascade patch）/ ADR-0042 M3 Health Monitoring / ADR-0043 M6 Bayesian Reward / ADR-0044 M7 Decay Enforced / ADR-0045 M4 Hypothesis Discovery / ADR-0041 ContextDistiller v4 + AI cost cap / AMD-2026-05-15-01 Canary Rebase Replay Preflight（Stage 0R-4）/ CLAUDE.md §二 16 根原則 + §四 hard boundaries
 
+> ⚠️ **状态口径澄清（记于 2026-07-18 文档审计）**：本文件 Status 写「Proposed-pending-operator-confirm」，而 `SPECIFICATION_REGISTER.md` 列本 amendment 为 **Active**——两者并不矛盾，须区分两层：本 v2 的 **layered-autonomy 治理设计**已确立并被后续引用为现行权威（CC APPROVE A 级，见 memory `project_2026_05_22_layered_autonomy_with_failsafe`）；「pending-confirm / cascade 不執行」指其**下游 cascade 实作**（Wave 5 IMPL）尚未落地、须 operator 促升，非本设计未生效。autonomy 现行姿态以本 v2 + register 为准；任何 live autonomy 激活仍须 operator 明批（Priority #5 protected-scope operator click）。
+
 ---
 
 ## 1. Status

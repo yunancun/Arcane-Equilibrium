@@ -1206,6 +1206,8 @@
 
 ### worklogs/ — 頂層工作日志（2026-04-08+，daily_summary 為當日權威）
 
+> ⚠️ **已歸檔（記於 2026-07-18 文檔審計）**：下列 2026-04 worklogs 已於 2026-07-09 移至 `docs/archive/2026-07-09--worklogs_2026-04/`。此處為歷史入口，實際檔案在該 archive 目錄，非 `worklogs/` 根。
+
 | 文件 | 内容 |
 |------|------|
 | `2026-04-08--daily_summary.md` | ★★★★ 2026-04-08 日匯總：ARCH-RC1 1C-3-D/1C-3-E F-mini/1C-3-F/1C-4 + GUI fake-success Wave 1-2 + P1 Per-Trade Risk wiring |

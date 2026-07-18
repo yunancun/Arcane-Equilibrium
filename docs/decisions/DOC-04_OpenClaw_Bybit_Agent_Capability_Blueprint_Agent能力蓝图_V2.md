@@ -10,6 +10,8 @@ OpenClaw / Bybit AI Agent Trading System
 
 2026-03-29
 
+> ⚠️ **部分过时（记于 2026-07-18 文档审计）**：本 V2 蓝图中「OpenClaw 作为 Conductor」类早期措辞已被 ADR-0013 / ADR-0015 / `docs/architecture/2026-05-06--openclaw_control_plane_repositioning.md` 判为历史并取代；且 external OpenClaw Gateway 已于 2026-07-16 retired 并移除（`CLAUDE.md` §一）。Agent 能力 / 角色 / dispatch 的当前正本见 `.codex/agent_registry_v1.json` + `docs/agents/development-agent-governance.md`。
+
 *Classification: Internal — Governance Document*
 
 ## 2026-05-06 权威澄清 / Authoritative Clarification
