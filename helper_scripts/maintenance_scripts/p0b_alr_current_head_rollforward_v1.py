@@ -1773,17 +1773,18 @@ class Runtime:
         """Bind exact engine identity when present and exact stable absence otherwise."""
 
         try:
-            return self.pin.engine_processes()
+            sealed = self.pin.engine_processes()
         except Exception as exc:
             if str(exc) != "engine_process_topology_mismatch":
                 raise
-        first = self._openclaw_engine_pid_candidates()
-        if first:
+            sealed = []
+        sealed_pids = sorted(int(row["pid"]) for row in sealed)
+        if self._openclaw_engine_pid_candidates() != sealed_pids:
             raise RollforwardError("protected_engine_process_topology_invalid")
         time.sleep(0.05)
-        if self._openclaw_engine_pid_candidates():
+        if self._openclaw_engine_pid_candidates() != sealed_pids:
             raise RollforwardError("protected_engine_process_topology_invalid")
-        return []
+        return sealed
 
     def protected_unit_snapshot(self, name: str) -> dict[str, str]:
         properties = (

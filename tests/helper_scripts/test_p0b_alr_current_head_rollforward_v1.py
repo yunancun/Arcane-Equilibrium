@@ -2027,6 +2027,35 @@ def test_protected_engine_snapshot_accepts_exact_absence_but_rejects_nonempty_mi
         module.Runtime.protected_engine_processes(NonemptyHarness())
 
 
+def test_protected_engine_snapshot_rejects_hidden_second_process() -> None:
+    module = load_module()
+    sealed = [{"pid": 101, "start_ticks": "2300000000000"}]
+
+    class SingleSealedPin:
+        @staticmethod
+        def engine_processes():
+            return sealed
+
+    class ExactSingleHarness:
+        pin = SingleSealedPin()
+
+        @staticmethod
+        def _openclaw_engine_pid_candidates():
+            return [101]
+
+    assert module.Runtime.protected_engine_processes(ExactSingleHarness()) is sealed
+
+    class HiddenSecondHarness(ExactSingleHarness):
+        @staticmethod
+        def _openclaw_engine_pid_candidates():
+            return [101, 202]
+
+    with pytest.raises(
+        module.RollforwardError, match="protected_engine_process_topology_invalid"
+    ):
+        module.Runtime.protected_engine_processes(HiddenSecondHarness())
+
+
 def test_capture_phase1_facts_is_read_only_and_needs_no_approval(monkeypatch, capsys) -> None:
     module = load_module()
     effective_config = module.Runtime.lane_effective_config()
