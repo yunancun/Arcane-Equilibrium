@@ -906,6 +906,7 @@ def _lineage_payloads(config: dict[str, object]) -> dict[str, dict[str, object]]
             "protected_baseline_digest": "sha256:" + "b" * 64,
             "phase_runtime_bindings_artifact_digest": "sha256:" + "c" * 64,
             "phase_runtime_bindings_path": "/evidence/stage-runtime-bindings.json",
+            "authorization_path": "/evidence/stage-authorization.json",
         }
     )
     stage_authorization = {
@@ -1162,6 +1163,7 @@ def _lineage_payloads(config: dict[str, object]) -> dict[str, dict[str, object]]
             ],
             "phase_runtime_bindings_artifact_digest": "sha256:" + "c" * 64,
             "phase_runtime_bindings_path": "/evidence/cutover-runtime-bindings.json",
+            "authorization_path": "/evidence/cutover-authorization.json",
         }
     )
     authorization["claim_bindings"].update(

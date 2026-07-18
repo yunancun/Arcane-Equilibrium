@@ -259,6 +259,7 @@ GOVERNANCE_BINDING_FIELDS = {
     "protected_baseline_digest",
     "phase_runtime_bindings_artifact_digest",
     "phase_runtime_bindings_path",
+    "authorization_path",
 }
 CUTOVER_CLAIM_FIELDS = {
     "p0b_effect_adapter_selection",
@@ -1954,7 +1955,7 @@ def validate_cutover_authorization(
     governance_digest_fields = GOVERNANCE_BINDING_FIELDS - {
         "compiled_route_schema", "context_artifact_schema",
         "ops_preflight_observed_at", "ops_preflight_expires_at",
-        "phase_runtime_bindings_path",
+        "phase_runtime_bindings_path", "authorization_path",
     }
     if any(
         re.fullmatch(r"sha256:[0-9a-f]{64}", str(auth.get(key, ""))) is None
@@ -2018,6 +2019,10 @@ def validate_cutover_authorization(
         or "latest" in Path(
             str(governance.get("phase_runtime_bindings_path", ""))
         ).name.lower()
+        or not Path(str(governance.get("authorization_path", ""))).is_absolute()
+        or "latest" in Path(
+            str(governance.get("authorization_path", ""))
+        ).name.lower()
         or not isinstance(auth.get("approved_by"), str)
         or not auth["approved_by"]
         or auth.get("typed_confirm") != expected_typed
@@ -2069,6 +2074,7 @@ def validate_stage_authorization(
         "ops_preflight_observed_at",
         "ops_preflight_expires_at",
         "phase_runtime_bindings_path",
+        "authorization_path",
     }
     digest_fields = (
         "intent_digest",
@@ -2148,6 +2154,10 @@ def validate_stage_authorization(
         ).is_absolute()
         or "latest" in Path(
             str(governance.get("phase_runtime_bindings_path", ""))
+        ).name.lower()
+        or not Path(str(governance.get("authorization_path", ""))).is_absolute()
+        or "latest" in Path(
+            str(governance.get("authorization_path", ""))
         ).name.lower()
         or not isinstance(auth.get("approved_by"), str)
         or not auth["approved_by"]

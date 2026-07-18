@@ -57,6 +57,7 @@ def runtime_authorization(module, *, phase: str, target_head: str | None = None)
             module.GOVERNANCE_BINDING_FIELDS - {
                 "compiled_route_schema", "context_artifact_schema",
                 "ops_preflight_observed_at", "ops_preflight_expires_at",
+                "phase_runtime_bindings_path", "authorization_path",
             }
         ), 1)
     }
@@ -66,6 +67,7 @@ def runtime_authorization(module, *, phase: str, target_head: str | None = None)
         "ops_preflight_observed_at": "2026-07-17T11:50:00Z",
         "ops_preflight_expires_at": "2026-07-17T12:30:00Z",
         "phase_runtime_bindings_path": "/tmp/phase-runtime-bindings.json",
+        "authorization_path": f"/tmp/{phase}-authorization.json",
     })
     claims = module.STAGE_CLAIM_FIELDS if phase == "stage" else module.CUTOVER_CLAIM_FIELDS
     authorization = {
@@ -405,6 +407,7 @@ def test_main_effect_requires_exact_formal_runtime_path_and_file_self_hash(
         ),
     ]
     authorization = runtime_authorization(module, phase="stage")
+    authorization["governance_bindings"]["authorization_path"] = str(auth_path)
     bindings = phase_runtime_bindings(module, authorization)
     authorization["governance_bindings"]["authorized_argv_digest"] = (
         module.authorized_effect_argv_digest(argv)
@@ -1927,6 +1930,37 @@ def test_target_alr_stability_window_is_at_least_five_seconds(monkeypatch) -> No
     )
     assert result["NRestarts"] == "0"
     assert module.ALR_STABLE_WINDOW_SECONDS in sleeps
+
+
+def test_protected_unit_snapshot_accepts_stable_historical_restart_baseline() -> None:
+    module = load_module()
+    stdout = "\n".join(
+        (
+            "LoadState=loaded",
+            "ActiveState=active",
+            "SubState=running",
+            "MainPID=2168729",
+            "ExecMainStartTimestampMonotonic=2309159552956",
+            "NRestarts=1",
+            "InvocationID=d74a6859241c4f1884bd35e0d08f41bb",
+            "FragmentPath=/home/ncyu/.config/systemd/user/openclaw-watchdog.service",
+            "DropInPaths=",
+            "ControlGroup=/user.slice/openclaw-watchdog.service",
+            "NeedDaemonReload=no",
+        )
+    )
+
+    class Harness:
+        @staticmethod
+        def run(_command):
+            return SimpleNamespace(stdout=stdout)
+
+    snapshot = module.Runtime.protected_unit_snapshot(
+        Harness(), "openclaw-watchdog.service"
+    )
+
+    assert snapshot["NRestarts"] == "1"
+    assert snapshot["InvocationID"] == "d74a6859241c4f1884bd35e0d08f41bb"
 
 
 def test_capture_phase1_facts_is_read_only_and_needs_no_approval(monkeypatch, capsys) -> None:

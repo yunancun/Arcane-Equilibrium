@@ -463,7 +463,7 @@ GOVERNANCE_BINDING_FIELDS = {
     "ops_preflight_observed_at", "ops_preflight_expires_at",
     "pm_approval_artifact_digest", "authorized_argv_digest",
     "protected_baseline_digest", "phase_runtime_bindings_artifact_digest",
-    "phase_runtime_bindings_path",
+    "phase_runtime_bindings_path", "authorization_path",
 }
 STAGE_CLAIM_FIELDS = {
     "p0b_effect_adapter_selection", "p0b_adapter_source", "p0b_adapter_tests",
@@ -575,7 +575,7 @@ def validate_runtime_authorization(
     governance_digests = GOVERNANCE_BINDING_FIELDS - {
         "compiled_route_schema", "context_artifact_schema",
         "ops_preflight_observed_at", "ops_preflight_expires_at",
-        "phase_runtime_bindings_path",
+        "phase_runtime_bindings_path", "authorization_path",
     }
     if (
         any(not _governance_digest(authorization.get(key)) for key in top_digests)
@@ -592,6 +592,8 @@ def validate_runtime_authorization(
         or authorization.get("private_bundle_destination") != str(PRIVATE_BUNDLE_DESTINATION)
         or not Path(str(governance.get("phase_runtime_bindings_path", ""))).is_absolute()
         or "latest" in Path(str(governance.get("phase_runtime_bindings_path", ""))).name.lower()
+        or not Path(str(governance.get("authorization_path", ""))).is_absolute()
+        or "latest" in Path(str(governance.get("authorization_path", ""))).name.lower()
         or not isinstance(authorization.get("approved_by"), str)
         or not authorization["approved_by"]
         or not isinstance(authorization.get("hard_stops"), list)
@@ -1768,7 +1770,9 @@ class Runtime:
             or result.get("SubState") != "running"
             or result.get("NeedDaemonReload") != "no"
             or result.get("DropInPaths") != ""
-            or result.get("NRestarts") != "0"
+            or re.fullmatch(
+                r"(?:0|[1-9][0-9]*)", str(result.get("NRestarts", ""))
+            ) is None
         ):
             raise RollforwardError(f"protected_unit_not_stable:{name}")
         return result
