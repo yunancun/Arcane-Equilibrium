@@ -1932,6 +1932,37 @@ def test_target_alr_stability_window_is_at_least_five_seconds(monkeypatch) -> No
     assert module.ALR_STABLE_WINDOW_SECONDS in sleeps
 
 
+def test_protected_unit_snapshot_accepts_stable_historical_restart_baseline() -> None:
+    module = load_module()
+    stdout = "\n".join(
+        (
+            "LoadState=loaded",
+            "ActiveState=active",
+            "SubState=running",
+            "MainPID=2168729",
+            "ExecMainStartTimestampMonotonic=2309159552956",
+            "NRestarts=1",
+            "InvocationID=d74a6859241c4f1884bd35e0d08f41bb",
+            "FragmentPath=/home/ncyu/.config/systemd/user/openclaw-watchdog.service",
+            "DropInPaths=",
+            "ControlGroup=/user.slice/openclaw-watchdog.service",
+            "NeedDaemonReload=no",
+        )
+    )
+
+    class Harness:
+        @staticmethod
+        def run(_command):
+            return SimpleNamespace(stdout=stdout)
+
+    snapshot = module.Runtime.protected_unit_snapshot(
+        Harness(), "openclaw-watchdog.service"
+    )
+
+    assert snapshot["NRestarts"] == "1"
+    assert snapshot["InvocationID"] == "d74a6859241c4f1884bd35e0d08f41bb"
+
+
 def test_capture_phase1_facts_is_read_only_and_needs_no_approval(monkeypatch, capsys) -> None:
     module = load_module()
     effective_config = module.Runtime.lane_effective_config()
