@@ -78,8 +78,12 @@ Hard edges are triggered by facts, not by task labels alone:
 - authority/live/risk/auth: CC + E3, plus E2/E4 when source changes
 - runtime claim or operational change/deploy: OPS preflight; deploy then uses
   PM/operator exact intent -> Deploy Adapter contract -> independent OPS postcheck;
-  the trusted local probe source exists, but apply remains fail closed before
+  the trusted local probe source exists, but generic apply remains fail closed before
   component invocation on unbound rollback and stable observation-window controls
+- P0-B ALR stage/cutover selects `p0b_alr_rollforward_adapter_v1` only through
+  its exact phase selector and claim inventory. Each phase is a fresh route and
+  materialized Context admission; no generic deploy node or earlier phase approval
+  substitutes for the current PA/E3/OPS evidence and phase-runtime bindings.
 - Bybit: BB Adapter reviewer; IBKR/TWS/stock_etf_cash: IB Adapter reviewer
 - quant/strategy/portfolio semantics: QC
 - ML/data/schema semantics: MIT; AI-E only when model/orchestration economics matter
@@ -289,7 +293,7 @@ socket/read-only-identity Adapter removes ambient `psqlrc` and `PG*` routing.
 Without a separately authorized platform-attested PG artifact, the runtime claim
 remains UNVERIFIED.
 
-Current capability limit: `deploy_intent_adapter.py` validates a typed exact-SHA
+Current generic-deploy capability limit: `deploy_intent_adapter.py` validates a typed exact-SHA
 intent and independently runs the local-only, non-secret, fail-closed
 `runtime_environment_probe_v1`, reconciling its result with any supplied
 `runtime_environment_attestation_v1`. This source seam is not a platform runtime
@@ -299,6 +303,14 @@ invocation with unbound rollback-binding and stable observation-window blockers.
 Registry broker paths are reference surfaces only; Bybit development contact is
 unsupported and IBKR first-contact remains a gated operator/runtime path, not
 this workflow's Adapter.
+
+The sole scoped runtime-effect exception is the registered P0-B ALR rollforward
+Adapter. Stage may seal lineage and private observer dependencies while retaining
+the existing ALR service identity. Cutover may affect only
+`openclaw-alr-shadow.service`, and emits a provisional artifact before observer
+v2. `PHASE2_APPLIED_POSTCHECK_PASS` requires exact observer-v2 PASS; closure PASS
+then requires a later fresh independent OPS postcheck bound to that final receipt.
+It is not generic deploy, broker contact, or trading authority.
 
 ## Persistence
 

@@ -1,0 +1,103 @@
+{
+  "schema_version": "p0b_alr_recovery_apply_receipt_v1",
+  "status": "APPLIED_POSTCHECK_PASS",
+  "returncode": 0,
+  "source_head": "275901baa09656e842f14b11e94c00f9bfe0c380",
+  "transaction_adapter": {
+    "path": "/home/ncyu/BybitOpenClaw/srv/target/codex-context/p0b_alr_recovery_transaction_v2.py",
+    "sha256": "e78186edfd2c7b9c21d6c8a3f54ebc5b712da34dbe8c0f29d3c0e9a48f96c385",
+    "apply_count": 1,
+    "retry_count": 0
+  },
+  "pm_approval": {
+    "path": "/home/ncyu/BybitOpenClaw/srv/target/codex-context/p0b-recovery-pm-approval.json",
+    "sha256": "b82b8d4a3058a32b9bb1d85c8c906b222285a66d4f54aaedd117f4615ea87e98",
+    "approved_at_utc": "2026-07-17T13:39:35Z",
+    "expires_at_utc": "2026-07-17T13:54:35Z",
+    "nonretryable": true
+  },
+  "pin_helper": {
+    "status": "APPLIED_POSTCHECK_PASS",
+    "started_at": "2026-07-17T13:41:01.089139+00:00",
+    "completed_at": "2026-07-17T13:41:01.096052+00:00",
+    "completed_at_semantics": "apply_admission_lower_bound_utc_only"
+  },
+  "alr_after": {
+    "LoadState": "loaded",
+    "ActiveState": "active",
+    "SubState": "running",
+    "MainPID": "1953143",
+    "ProcessStartTicks": "230496795",
+    "InvocationID": "22006ec883284246a8eda9887f21f8e0",
+    "ExecMainStartTimestampMonotonic": "2304967968124",
+    "NRestarts": "0",
+    "ControlGroup": "/user.slice/user-1000.slice/user@1000.service/app.slice/openclaw-alr-shadow.service"
+  },
+  "manager_loaded_after_restart": {
+    "head": "275901baa09656e842f14b11e94c00f9bfe0c380",
+    "active_required": true,
+    "conflicting_generation_environment": [],
+    "need_daemon_reload": "no",
+    "main_pid": "1953143",
+    "process_start_ticks": "230496795",
+    "invocation_id": "22006ec883284246a8eda9887f21f8e0"
+  },
+  "unit_after": {
+    "path": "/home/ncyu/.config/systemd/user/openclaw-alr-shadow.service",
+    "sha256": "526fbcd67ca109668ec7ac7586b99e6b6393e6630bb741df71f4a935a1cc7518",
+    "inode": 59780598,
+    "size": 2152,
+    "mode": "0600"
+  },
+  "generation_pin_after": {
+    "path": "/home/ncyu/BybitOpenClaw/var/openclaw/runtime_generation/expected_source_head.json",
+    "sha256": "74d3b05bc45402d762dfbdfb55844ca3fcf052850ea02d4803cee84ae5aff311",
+    "inode": 61384029,
+    "size": 193,
+    "mode": "0600",
+    "head": "275901baa09656e842f14b11e94c00f9bfe0c380",
+    "derived_at_utc": "2026-07-17T13:41:01Z"
+  },
+  "systemctl_effect_receipts": {
+    "completed_total": 3,
+    "daemon_reload": {
+      "request_count": 1,
+      "effect_count": 1
+    },
+    "reset_failed": {
+      "request_count": 1,
+      "effect_count": 1,
+      "disposition": "RESTART_COUNTER_CLEARED",
+      "nrestarts_before": 5417,
+      "nrestarts_after": 0
+    },
+    "restart": {
+      "request_count": 1,
+      "effect_count": 1,
+      "stable_postcheck_seconds": 10
+    }
+  },
+  "atomic_effect_barrier": {
+    "unit_committed_before_pin": true,
+    "unit_and_pin_under_same_locks": true,
+    "manager_wide_daemon_reload_count": 1,
+    "only_alr_unit_file_changed": true
+  },
+  "boundaries": {
+    "api_service_mutation": false,
+    "watchdog_service_mutation": false,
+    "engine_service_mutation": false,
+    "cron_mutation": false,
+    "authorization_mutation": false,
+    "broker_or_exchange_contact": false,
+    "postgres_mutation": false,
+    "order_or_probe_action": false
+  },
+  "claims": {
+    "full_apply_completion_time_claimed": false,
+    "two_natural_cycles_observed": false,
+    "training_or_model_fit_claimed": false,
+    "serving_or_promotion_claimed": false,
+    "trading_or_order_authority_claimed": false
+  }
+}

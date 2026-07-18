@@ -272,10 +272,16 @@ Unless the operator explicitly overrides this:
   `runtime_environment_probe_v1` now exists as a local-only, non-secret,
   fail-closed source capability, and the Adapter independently reruns and
   reconciles it. The probe is not remote transport, platform-attested runtime
-  evidence, deploy readiness, or effect authority. Actual apply remains
+  evidence, deploy readiness, or effect authority. Generic deploy apply remains
   disabled before component invocation until exact rollback binding and a
   stable observation-window contract are separately bound and verified; the
-  Adapter cannot currently support a successful effect closure. BB and IB review
+  generic Adapter cannot currently support a successful effect closure. The
+  separately registered `p0b_alr_rollforward_adapter_v1` is narrowly limited to
+  independently admitted ALR stage/cutover phases: exact dynamic HEAD/origin,
+  materialized Context, PA/E3/OPS, phase-runtime bindings, uninterrupted stage,
+  provisional cutover and observer-v2 PASS are mandatory for the final effect
+  receipt; closure PASS then requires a later independent postcheck bound to it.
+  It cannot contact a broker, create an order, or widen live authority. BB and IB review
   venue policy only. Development-agent broker contact/private effects have no
   closure-admissible Adapter and therefore route to an unsupported-effect blocker.
 - Completion uses one `closure_packet_v1`; work status, gate verdict, and

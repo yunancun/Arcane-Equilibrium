@@ -238,6 +238,51 @@
       "intent_schema_path": ".codex/schemas/deployment_intent_v1.schema.json",
       "receipt_schema_path": ".codex/schemas/effect_adapter_result_v1.schema.json"
     },
+    "p0b_alr_rollforward_adapter_v1": {
+      "authority": "PM/operator approved p0b_alr_rollforward_intent_v1 selected by exact phase claim inputs and materialized Context only",
+      "invariant": "stage keeps openclaw-alr-shadow.service uninterrupted; cutover is final only after the exact provisional artifact is consumed by observer v2 and OBSERVER_V2_EXACT_POSTCHECK_PASS is bound",
+      "status": "declared_two_phase_apply_gated",
+      "implementation_paths": [
+        "helper_scripts/maintenance_scripts/agent_governance_routing.py",
+        "helper_scripts/maintenance_scripts/agent_governance_effects.py",
+        "helper_scripts/maintenance_scripts/agent_governance_p0b_effects.py",
+        "helper_scripts/maintenance_scripts/agent_governance_p0b_observer.py",
+        "helper_scripts/maintenance_scripts/agent_governance_p0b_phase1_lineage.py",
+        "helper_scripts/maintenance_scripts/agent_governance_p0b_runtime_bindings.py",
+        "helper_scripts/maintenance_scripts/agent_governance_p0b_sources.py"
+      ],
+      "component_paths": [
+        "helper_scripts/maintenance_scripts/p0b_alr_current_head_rollforward_v1.py",
+        "helper_scripts/maintenance_scripts/p0b_generation_pin_apply_current_head_v1.py",
+        "helper_scripts/maintenance_scripts/p0a_generation_pin_apply_v1.py",
+        "helper_scripts/maintenance_scripts/p0b_alr_current_head_two_cycle_observer_v2.py",
+        "helper_scripts/maintenance_scripts/p0b_alr_two_natural_cycle_observer_v1.py",
+        "helper_scripts/maintenance_scripts/p0b_psycopg_private_bundle_stage_v1.py"
+      ],
+      "test_paths": [
+        "tests/helper_scripts/test_p0b_alr_current_head_rollforward_v1.py",
+        "tests/helper_scripts/test_p0b_alr_current_head_two_cycle_observer_v2.py",
+        "tests/helper_scripts/test_p0b_alr_two_natural_cycle_observer_v1.py",
+        "tests/helper_scripts/test_p0b_psycopg_private_bundle_stage_v1.py"
+      ],
+      "intent_schema_path": ".codex/schemas/p0b_alr_rollforward_intent_v1.schema.json",
+      "runtime_bindings_schema_path": ".codex/schemas/phase_runtime_bindings_v1.schema.json",
+      "phase1_closure_schema_path": ".codex/schemas/p0b_alr_phase1_governance_closure_v1.schema.json",
+      "phase1_lineage_schema_path": ".codex/schemas/p0b_alr_phase1_sealed_lineage_bundle_v1.schema.json",
+      "receipt_schema_path": ".codex/schemas/p0b_alr_rollforward_effect_result_v1.schema.json",
+      "phases": {
+        "stage": {
+          "success_status": "PHASE1_STAGED_UNINTERRUPTED_PASS",
+          "service_effect": "uninterrupted",
+          "private_bundle_stage": "required"
+        },
+        "cutover": {
+          "provisional_status": "PHASE2_PROVISIONAL_CUTOVER_READY",
+          "observer_status": "OBSERVER_V2_EXACT_POSTCHECK_PASS",
+          "success_status": "PHASE2_APPLIED_POSTCHECK_PASS"
+        }
+      }
+    },
     "broker_probe_adapter_v1": {
       "authority": "unsupported until a lane-specific intent/result/closure contract is implemented",
       "invariant": "development-agent broker contact/effects fail closed; listed runtime paths are reference surfaces, not an executable Adapter",

@@ -125,6 +125,17 @@ readiness is fail-closed:
   Actual apply remains unconditionally disabled before component invocation until
   exact rollback binding and stable observation-window controls are separately
   implemented and verified; no apply/postcheck PASS may be claimed.
+- P0-B ALR rollforward: this is a separate, purpose-built two-phase Adapter,
+  not an exception to generic deploy. `stage` and `cutover` require independent
+  compiler routes, materialized per-role Context artifacts, PA/E3/OPS evidence,
+  exact dynamic claim inputs, and a hash-bound `phase_runtime_bindings_v1`.
+  Stage keeps only `openclaw-alr-shadow.service` uninterrupted while sealing the
+  lineage/private dependency bundle. Cutover emits
+  `PHASE2_PROVISIONAL_CUTOVER_READY` before its exact observer input; the Adapter
+  may emit `PHASE2_APPLIED_POSTCHECK_PASS` only after
+  `OBSERVER_V2_EXACT_POSTCHECK_PASS`. Closure PASS remains impossible until the
+  later independent OPS postcheck binds that final effect receipt. It grants no
+  broker/order/live authority.
 - broker probe/contact: BB and IB are review-only. No development-agent broker
   contact Adapter currently emits a closure-admissible receipt, so Bybit/IBKR
   private effects route to an explicit unsupported-effect blocker. The existing
