@@ -322,10 +322,11 @@ jobs:
             -c "CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;"
       - name: Prepare V157 baseline for V159 functional probe
         env:
-          # 憑證走 query 參數（?user=&password=）而非 user:pass@ 授權段：兩者對 sqlx
-          # 等價（sqlx 0.8 parse_from_url 支援 user/password query key），但避開
-          # public_repo_security_gate 的 embedded_credential_dsn 規則（只匹配 ://…:…@）。
-          # 用的是 ephemeral CI 容器的非機密憑證，與上方 service env 同值。
+          # 憑證走 query 參數而非授權段：兩者對 sqlx 等價（sqlx 0.8 parse_from_url
+          # 支援 user/password query key）。此 query 參數形是 sanctioned 形——
+          # public_repo_security_gate 的 embedded_credential_dsn 規則現已覆蓋
+          # query/keyword 形，並對此 ephemeral 非機密 CI 容器憑證對（與上方
+          # service env 同值）做 value carve-out。
           OPENCLAW_TEST_PG: postgres://127.0.0.1:5432/alr_v159_functional_ci?user=contract_user&password=contract_pass
           OPENCLAW_V159_PROBE_BASELINE: "1"
         run: >-

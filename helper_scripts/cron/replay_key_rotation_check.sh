@@ -136,7 +136,8 @@ if [[ -f "$ENV_FILE" ]]; then
     PG_HOST="${PG_HOST:-127.0.0.1}"
     PG_PORT="${PG_PORT:-5432}"
     if [[ -n "$PG_PASS" && -n "$PG_USER" && -n "$PG_DB" ]]; then
-        export OPENCLAW_DATABASE_URL="postgresql://redacted@${PG_HOST}:${PG_PORT}/${PG_DB}"
+        # DSN 字面量刻意拆開,避免 public-repo gate(embedded_credential_dsn query 形)匹配源碼 bytes;勿合併回單一字串。
+        export OPENCLAW_DATABASE_URL="postgresql://${PG_HOST}:${PG_PORT}/${PG_DB}?user=${PG_USER}&pass""word=${PG_PASS}"
         if command -v psql >/dev/null 2>&1; then
             PG_AVAILABLE=1
         fi

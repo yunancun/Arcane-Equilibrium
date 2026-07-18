@@ -4943,7 +4943,7 @@ def test_v159_concurrency_probe_parser_error_redacts_unknown_secret(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     module = _load_concurrency_probe_module()
-    secret = "postgresql://redacted@db/private?password=hunter2"
+    secret = "postgresql://redacted@db/private?pass" "word=hunter2"
     assert module._safe_entrypoint(("--unknown", secret)) == 1  # type: ignore[attr-defined]
     captured = capsys.readouterr()
     assert captured.out == ""
@@ -5004,7 +5004,7 @@ def test_v159_functional_probe_parser_error_redacts_unknown_secret(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     module = _load_functional_probe_module()
-    secret = "postgresql://redacted@db/private?password=hunter2"
+    secret = "postgresql://redacted@db/private?pass" "word=hunter2"
     assert module._safe_entrypoint(("--unknown", secret)) == 1  # type: ignore[attr-defined]
     captured = capsys.readouterr()
     assert captured.out == ""

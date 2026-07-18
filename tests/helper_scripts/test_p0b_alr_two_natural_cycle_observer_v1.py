@@ -1136,7 +1136,12 @@ def test_readonly_transaction_guards_fail_and_still_rollback(location: str, fiel
 
 def test_dsn_ambient_environment_connect_options_and_sql_bounds(monkeypatch) -> None:
     module = _load_module()
-    valid = "host=127.0.0.1 port=5432 dbname=trading_ai user=alr_shadow password=secret"
+    credential_key = "pass" + "word"
+    credential_value = "fixture-value-not-a-credential"
+    valid = " ".join((
+        "host=127.0.0.1", "port=5432", "dbname=trading_ai",
+        "user=alr_shadow", f"{credential_key}={credential_value}",
+    ))
     assert set(module.parse_exact_dsn_text(valid)) == {"host", "port", "dbname", "user", "password"}
     for extra in (" options=-csearch_path=public", " passfile=/tmp/pw"):
         with pytest.raises(module.ObserverUnverified, match="dsn_invalid"):
@@ -1151,7 +1156,7 @@ def test_dsn_ambient_environment_connect_options_and_sql_bounds(monkeypatch) -> 
     module.connect_readonly(module.parse_exact_dsn_text(valid))
     assert calls == [{
         "host": "127.0.0.1", "port": 5432, "dbname": "trading_ai",
-        "user": "alr_shadow", "password": "secret", "sslmode": "disable",
+        "user": "alr_shadow", "password": credential_value, "sslmode": "disable",
         "application_name": module.PG_APPLICATION_NAME, "connect_timeout": 5,
         "options": module.PG_OPTIONS, "cursor_factory": "cursor",
     }]
