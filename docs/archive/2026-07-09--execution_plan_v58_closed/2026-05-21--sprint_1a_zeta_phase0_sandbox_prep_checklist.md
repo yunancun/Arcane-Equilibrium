@@ -17,6 +17,8 @@ non-scope:
   - GUI / Console patch（per Q1d operator decision — sandbox 隔絕 Console，0 GUI work）
   - Production DB schema 改動（spike 物理隔絕 production；per Q2 operator decision）
 ---
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 
 # Sprint 1A-ζ Phase 0 — Sandbox + Vault Prep Checklist
 

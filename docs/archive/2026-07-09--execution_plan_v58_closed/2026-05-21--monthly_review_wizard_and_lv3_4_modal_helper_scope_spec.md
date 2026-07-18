@@ -14,6 +14,8 @@ parent specs:
 scope: design scope spec only — 不寫 IMPL HTML/JS/CSS；E1a Wave 1+2 IMPL phase
 verdict: DESIGN APPROVE — A3 16-24 hr Wizard + 8-12 hr modal helper = 24-36 hr Y1 sign-off；E1a IMPL 70-95 hr Y1
 ---
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 
 # Monthly Operator Review Wizard + Lv 3-4 Modal Helper Scope Spec
 

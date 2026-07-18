@@ -1,3 +1,5 @@
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 # 2026-04-21 完成 TODO 批次歸檔
 
 本檔案歸檔 2026-04-21 當日完成的所有 TODO 項，從 `TODO.md` 主文件移出，避免膨脹。詳細 commit 敘述保留於 `docs/CLAUDE_CHANGELOG.md`；本檔僅列「TODO 項 → commit ref → 一句話結論」。

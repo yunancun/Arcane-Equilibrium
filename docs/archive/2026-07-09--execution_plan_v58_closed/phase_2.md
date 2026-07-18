@@ -1,3 +1,5 @@
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 # Phase 2 — 交易鏈 + Scorer + ONNX（W6-9，5/15-6/11，20 工作日含 buffer）
 
 > **LEGACY / REFERENCE**

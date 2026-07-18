@@ -1,3 +1,5 @@
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 # Phase 1 完整工程日志：安全修复 + 全品类风控框架 + 对抗性止损 + AI 注意力税 + 订单类型扩展
 # Phase 1 Complete Engineering Log: Security Fixes + Full-Category Risk Framework + Adversarial Stops + AI Attention Tax + Order Type Expansion
 

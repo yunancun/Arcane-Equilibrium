@@ -1,3 +1,5 @@
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 # OpenClaw / Bybit AI Agent Trading System
 <!-- Git 日志 — 项目入口。主日志见 CLAUDE.md -->
 

@@ -1,3 +1,5 @@
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 # Phase 1 — 市場數據止血 + FeatureCollector + PSI（W4-5，5/01-5/14，10 工作日）
 
 > **LEGACY / REFERENCE**

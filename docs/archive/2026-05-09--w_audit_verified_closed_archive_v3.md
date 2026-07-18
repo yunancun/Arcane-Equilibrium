@@ -1,3 +1,5 @@
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 # 2026-05-09 v3 W-AUDIT-1..7 已 verified-closed + PA Redesign 整合內容歸檔
 
 **歸檔目的**：v3 對抗性核實後真 closed 的 finding + PA fix plan v2 DUAL-TRACK 結構 + 5 commits 真實 cover 細節從 active TODO 移出。

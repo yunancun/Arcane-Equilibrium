@@ -65,7 +65,7 @@ Agentic trading governance system — 自主扫描 650+ 交易对，智能部署
 
 **Context loading**：稳定入口见本 README；当前工作状态见 `TODO.md`；agent 启动路由见 `docs/agents/context-loading.md`；开发 multi-agent 的 trust / dispatch / closure 正本见 `docs/agents/development-agent-governance.md`；TODO 维护标准见 `docs/agents/todo-maintenance.md`。**领域词汇** → `CONTEXT.md`；**架构决策记录** → `docs/adr/`。
 
-**Alpha evidence governance（2026-05-31）**：ADR-0047 / AMD-2026-05-31-01 規定 Alpha-Edge S1-Sx promotion evidence 必須 math-primary。Bull data 可用但必須標籤化；Bybit market API 是 raw state input，不是 prediction oracle；新聞 / X / Reddit 只可作旁證，不能覆蓋 quantitative gate。同日 **v5.9 thesis-shift**（`CHANGELOG.md`）：凍結 v5.8 autonomy 模組 active-IMPL（M7 例外；解凍 gate = 首個 net+ candidate `stage0_ready`），當前主線 = AEG（Alpha-Edge Evidence Program，`TODO.md` §2）。
+**Alpha evidence governance（2026-05-31）**：ADR-0047 / AMD-2026-05-31-01 規定 Alpha-Edge S1-Sx promotion evidence 必須 math-primary。Bull data 可用但必須標籤化；Bybit market API 是 raw state input，不是 prediction oracle；新聞 / X / Reddit 只可作旁證，不能覆蓋 quantitative gate。同日 **v5.9 thesis-shift**（`CHANGELOG.md`）：凍結 v5.8 autonomy 模組 active-IMPL（M7 例外；解凍 gate = 首個 net+ candidate `stage0_ready`），該 thesis-shift 當時將主線轉為 AEG（Alpha-Edge Evidence Program）；**當前 active 主線一律以 `TODO.md` 為準**（README 不鏡像動態狀態；§2 舊指針已過時，現為 Closed No-Repeat Markers）。
 
 **已关闭并归档**：62-finding remediation Batch A-F、STRKUSDT P0 wave、Wave A-H、旧 Wave 1-3 叙事、4-day codex audit closure、REF-20 Sprint A-D 详细叙事 不再是 active mainline。归档：
 - `docs/archive/2026-05-06--{claude_md,todo_completed,readme_stale}_extract.md` ← 本日 R4 sweep

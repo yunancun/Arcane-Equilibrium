@@ -20,6 +20,8 @@ out-of-scope:
   - sqlx checksum 對齊（Sprint 6+ Linux PG empirical dry-run 期驗）
   - Mac → Linux deploy SOP（per `srv/CLAUDE.md` runtime reality；Sprint 6+ phase）
 ---
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 
 # V115 M12 OrderRouter Adaptive Routing Audit Schema Spec (PLACEHOLDER)
 

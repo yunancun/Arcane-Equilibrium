@@ -1,3 +1,5 @@
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 # 2026-04-15 Daily Summary
 
 EDGE-P3-1 Realized Edge Predictor spec v1.0→v1.4 四輪演化 + Stage 0/Phase A/A6 Rust 接線落地（1664 engine lib pass）· ENGINE-HEAL-FUP-2 post-mortem + FIX-PHASE1 offload canary write + FUP-A/B throttle + watchdog systemd 正式化 + 122GB→519MB rotation 首次壓測 · ORPHAN-ADOPT-1 FUP 引擎自殺根因修復 + Phase 2A deterministic adopt 基礎設施 · GUI P&L 可視化 Step 1 三 tab 統一 · Lane A ML-MIT #26 trainer 交接備忘。

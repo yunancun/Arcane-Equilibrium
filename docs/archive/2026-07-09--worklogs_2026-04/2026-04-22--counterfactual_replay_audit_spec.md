@@ -1,3 +1,5 @@
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 # Counterfactual Replay Audit — v2 `ExitConfig` (base / slope / floor) Calibration Spec
 # 反事實回放審計 — v2 `ExitConfig`（base / slope / floor）三參數校準規範
 

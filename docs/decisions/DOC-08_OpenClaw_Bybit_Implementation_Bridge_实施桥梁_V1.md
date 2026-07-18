@@ -4,6 +4,8 @@
 
 # AI 计算架构 / Bybit V5 映射 / 部署规范
 
+> ⚠️ **历史治理设计 · Gateway 前提已过时（记于 2026-07-18 文档审计）**：本 V1 桥梁文档（2026-03 era）中凡将 external OpenClaw Gateway 描述为 active 通信/部署 surface 之处均按历史阅读——external OpenClaw Gateway / reverse proxy / GUI 集成已于 2026-07-16 retired 并移除（`CLAUDE.md` §一、ADR-0013/0015）。现存仅本地 authenticated `/api/v1/openclaw/*` 只读路由 + 本地 5-Agent runtime。当前工程实现映射见 `docs/governance_dev/SPECIFICATION_REGISTER.md` 与各 ADR。
+
 
 ## 0. 文档定位 Document Positioning
 

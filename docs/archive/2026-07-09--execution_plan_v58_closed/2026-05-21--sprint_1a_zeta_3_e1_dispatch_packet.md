@@ -25,6 +25,8 @@ out-of-scope:
   - Sandbox DB 創建（Phase 0 E3 工作）
   - TOTP secret 注入（Phase 0 AI-E 工作）
 ---
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 
 # Sprint 1A-ζ Phase 2 — 3 E1 IMPL Dispatch Packet
 

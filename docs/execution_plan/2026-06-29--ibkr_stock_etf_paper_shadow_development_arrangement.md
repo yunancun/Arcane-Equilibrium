@@ -4,6 +4,8 @@
 狀態：ADR-0048 / AMD / Phase0 named contracts 已 source-materialized；Phase 1-5 source/status/display hardening 進行中；不授權任何非 Bybit 實盤交易
 目標窗口：實作前置 2-4 週；證據收集 6-8 週，從 collector 穩定運行後起算
 
+> ⚠️ **治理框架已被后续 AMD 取代（记于 2026-07-18 文档审计）**：本安排基于 AMD-2026-06-29-01（paper+shadow only、「不授權任何非 Bybit 實盤交易」）。现行治理是 **AMD-2026-07-11-01**——IBKR `stock_etf_cash` lane 已授权按 live-capable **开发**（readonly/paper/shadow/tiny-live/live 全模式），但**仍未激活**、不接触 broker、不产生 order/funds effect，须 Rust-validated activation envelope（见 `CLAUDE.md` §一/§四、ADR-0048）。本文件「paper+shadow 才是终点 / 无非 Bybit live」的框架按历史阅读；当前 IBKR 状态与工程正本见 `IBKR_TODO.md` 与 `initiative_index.md`。
+
 ## 0. PM 結論
 
 本計劃的目標不是把現有 Bybit 策略直接搬到股票市場，也不是立刻打開

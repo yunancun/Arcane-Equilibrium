@@ -19,6 +19,8 @@ mirror precedent:
   - srv/docs/execution_plan/2026-05-21--m11_continuous_counterfactual_replay_design_spec.md（module DESIGN spec 範式）
 scope: module 行為設計 + 整合接口 + AssetClass + Venue enum + 6 trade gate criteria + IMPL phasing；不寫 IMPL code；不寫 V116 full DDL；不違背 ADR-0040 Y3+ defer；不違背 ADR-0006 Bybit-only baseline
 ---
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 
 # M13 Multi-Asset Class / Multi-Venue Capacity — Module DESIGN Specification
 

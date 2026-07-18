@@ -23,6 +23,8 @@ amendments referenced:
   - 無（M5 interface reservation Sprint 1A-δ scope 內無直接 amendment 依賴；Y3+ activation 期才可能新增 AMD）
 scope: M5 ModelClient trait stub DESIGN spec only — Sprint 1A-δ 鎖定 6 method slot + default panic + Y3+ activation 6 條件 + 4 retirement criteria；不寫 IMPL Rust streaming 算法；不寫 drift detection closed-form；不寫 rollback 觸發 closed-form；不寫 Mac PG / Linux PG SQL；不假設 V114 final type；不取代既有 LightGBM / Optuna / 3DL daily-batch baseline
 ---
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 
 # M5 ModelClient Trait — Online Learning Interface Reservation DESIGN（Sprint 1A-δ）
 

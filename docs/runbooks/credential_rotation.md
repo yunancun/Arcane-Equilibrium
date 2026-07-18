@@ -162,7 +162,7 @@ A-6：跟 P-1 同 file。
 #### 5.2.1 P-1 IPC HMAC（180d）
 
 ```bash
-# 1. Notify operator + PM 排程（GovernanceHub event 或 Linear）
+# 1. Notify operator + PM 排程（GovernanceHub event 或 GitHub Issue）
 # 2. Backup old + write new material
 UTC_TS=$(date -u +%Y%m%dT%H%M%SZ)
 sudo cp $OPENCLAW_SECRETS_DIR/environment_files/ipc_secret.txt \
@@ -419,7 +419,7 @@ SELECT 'fingerprint_collision' AS issue, p1.fp
 每次 rotation **必須**走以下 acknowledge cycle，否則 audit chain 殘缺：
 
 1. **Pre-rotation announcement**（≥1h before scheduled）
-   - GovernanceHub event 或 Linear ticket
+   - GovernanceHub event 或 GitHub Issue ticket
    - Notify PM + on-call operator
 2. **Rotation execution**
    - operator 親手跑 §4 / §5 / §6 步驟
@@ -431,7 +431,7 @@ SELECT 'fingerprint_collision' AS issue, p1.fp
    - engine status + API status + healthcheck + Bybit endpoint trust-status
    - **4 條 verify 全綠**才視 rotation completed
 5. **Post-rotation sign-off**
-   - operator 在 Linear ticket / Governance event 留 commit「Rotation completed: class=<X> fp=<NEW_FP_8>」
+   - operator 在 GitHub Issue ticket / Governance event 留 commit「Rotation completed: class=<X> fp=<NEW_FP_8>」
    - 24h 後 PM review audit row + log + verify result → close ticket
 
 > 任何 step 漏跑 = rotation **未完成**；不論 secret 是否已寫盤、engine 是否已 restart。
@@ -595,7 +595,7 @@ ssh trade-core "cd $OPENCLAW_BASE_DIR/rust/openclaw_engine && cargo test --relea
 | **≥1 次 /auth/renew 重簽記錄** | per E1 IMPL §5.4 Observable 表：API access log 或 `learning.live_auth_renewals` ≥ 1 row（soak 期間 operator 走過至少 1 次 renew） | 0 次 → operator 手動 trigger 一次 renew + 等 watcher 5s respawn 再驗 trust-status |
 | **`live_auth_signing_key.txt` 完整性** | `ssh trade-core "ls -la \$HOME/BybitOpenClaw/secrets/environment_files/live_auth_signing_key.txt"` mode 600 + 非零 byte + mtime 在 soak 區間 | mode drift → `sudo chmod 600`；missing → §7.2 rollback path |
 | **engine PID 穩定** | soak 期間 restart 計數無異常飆升 | 不穩 → cutover **BLOCK** |
-| **PM 確認 Sprint 4 first Live ≥ 2026-06-10**（A3 conditional #4） | TODO § / Linear ticket commit | 早於 D+14 安排 Live → 推遲或 cutover 前完成 |
+| **PM 確認 Sprint 4 first Live ≥ 2026-06-10**（A3 conditional #4） | TODO § / GitHub Issue ticket commit | 早於 D+14 安排 Live → 推遲或 cutover 前完成 |
 
 ### 13.2 Operator 外部監控同步（Grafana / journald / log rules）
 

@@ -3,7 +3,7 @@
 **v5.7 dispatch packet preserved + 13 autonomy modules design-at-initial / IMPL phased**
 
 **日期**：2026-05-21
-**Status**：DESIGN COMPLETE — supplements v5.7 dispatch packet; does NOT supersede v5.7 Sprint 1A
+**Status**：⚠️ LEGACY / SUPERSEDED（记于 2026-07-18 文档审计；与下方 FROZEN banner 一致）— 原文 "DESIGN COMPLETE — supplements v5.7 dispatch packet; does NOT supersede v5.7 Sprint 1A"，但 v5.8 的 13-module autonomy thesis 已被 v5.9 thesis-shift 冻结取代，非当前 active queue。当前 active 权威 = `TODO.md`。
 **Foundation**：v5.7 (15 rounds reviewer convergence + 12 CRITICAL prefix DONE 2026-05-21 PM signoff) + reviewer round-16 autonomy gap audit (13 modules) + operator 2026-05-21 directive (reject Claude push-back on M4/M5/M10/M12/M13; ADD ALL 13 modules)
 **Supersedes**: none. v5.7 remains dispatch-of-record for Sprint 1A. v5.8 is **the autonomy track** layered onto v5.7.
 

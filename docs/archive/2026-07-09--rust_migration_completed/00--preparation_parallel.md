@@ -1,3 +1,5 @@
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 # Phase R-00：提前並行準備
 # Rust Migration Parallel Preparation (during Phase 1-3)
 

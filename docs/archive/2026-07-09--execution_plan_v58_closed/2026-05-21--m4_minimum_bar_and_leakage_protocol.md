@@ -16,6 +16,8 @@ related memory:
   - memory/feedback_indicator_lookahead_bias.md (2026-04-24 P1-11 sweep audit 教訓)
 scope: spec only — 不寫 IMPL，不改 V103 SQL；V103 EXTEND ALTER 為 CR-1 v5.7 follow-up 主會話收口
 ---
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 
 # M4 Minimum Bar + Leakage Protocol — v5.8 Self-Supervised Hypothesis Discovery
 

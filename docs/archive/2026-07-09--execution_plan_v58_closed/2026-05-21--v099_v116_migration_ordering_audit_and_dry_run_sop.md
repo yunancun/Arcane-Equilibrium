@@ -41,6 +41,8 @@ out-of-scope:
   - sqlx checksum 同步 IMPL（per-V### IMPL 階段；E1 走 repair_migration_checksum binary）
   - Cross-language 1e-4 fixture harness 真實 fixture path 落地（per H-18；E1 Sprint 1B-8 IMPL）
 ---
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 
 # V099-V116 Migration Ordering Audit + 12 V### Dry-Run SOP
 

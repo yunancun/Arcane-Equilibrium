@@ -1,3 +1,5 @@
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 # 已完成 TODO 歸檔 — 2026-04-16（STRATEGY-CLOSE-TAG-FIX + EDGE-P3-1 Phase B #3 + DEDUP-PY-RUST）
 
 > 自 `TODO.md` 於 2026-04-16 傍晚整理時切出。條目依主題分組，commit 為權威出處。

@@ -1,9 +1,12 @@
 # L2 Advisory Mesh — Execution Plan (E1-ready roadmap)
 
 Date: 2026-06-05
-Status: **E1-READY** — gating endorsed (QC B1 / MIT M1 / MIT M2 = ENDORSE, 0 BLOCKER open).
-        Awaiting operator go to start E1. Docs/design only; this plan authorizes no code,
-        no migration, no DB write, no deploy until the operator opens the gate.
+Status: **⚠️ BUILT / mostly-closed（更新于 2026-07-18 文档审计）** — 原文 "E1-READY — gating endorsed;
+        awaiting operator go to start E1; docs/design only, authorizes no code/migration/DB/deploy"。
+        实际:L2 advisory mesh 已 E1 建成并跑过一次真实 model call(见 `TODO.md`
+        `P1-L2-ADVISORY-MESH-E2E-1` = DONE_WITH_CONCERNS,`l2r:724ac38bc4fc`);当前仅剩
+        lessons-sink fence-parse follow-up,L2 runtime 仍 disabled。本文件为设计 lineage,active
+        状态一律以 `TODO.md` 为准。
 Owner chain: PM -> PA -> E1/E1a -> E2 -> E4 -> QA -> PM (feature chain); QC/MIT/E3 sign-off
         points noted per phase.
 Source design (SSOT): `docs/CCAgentWorkSpace/PA/workspace/reports/2026-06-05--l2-advisory-mesh-design-draft.md`

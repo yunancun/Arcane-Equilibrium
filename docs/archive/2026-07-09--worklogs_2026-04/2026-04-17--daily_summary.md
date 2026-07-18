@@ -1,3 +1,5 @@
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 # 2026-04-17 Daily Summary
 
 P0-10 SCANNER-GATE 死循環收線 + 自適應出場/fast-track 範圍化 + MICRO-PROFIT-FIX-1 全生命週期（RCA→設計→部署→核實）+ P1-8 DUST-EVICTION-GAP-1 E1/E4 + FUP tick-level retriage + P0-6 LiveDemo cost-gate profile 破 cold-start 死鎖。Engine lib 測試從 1342 → **1415 (default) / 1420 (ort)** 全綠 0 fail。

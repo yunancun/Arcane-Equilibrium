@@ -11,6 +11,8 @@ parent specs:
   - srv/docs/adr/0038-m11-continuous-counterfactual-replay-and-liquidations-source.md (CR-14 已 land)
 scope: spec only — 不寫 V107 / V113 SQL 實檔，不改業務代碼
 ---
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 
 # M11 Threshold 統計推導 + M7 Dedup Contract + DECAY_ENFORCED 改名
 

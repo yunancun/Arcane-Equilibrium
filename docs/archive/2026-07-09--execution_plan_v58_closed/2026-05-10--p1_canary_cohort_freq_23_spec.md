@@ -1,3 +1,5 @@
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 # P1-CANARY-COHORT-FREQ-23 — Cohort Frequency Cap + Invariant 23 Spec
 
 **Status**: PA SPEC DRAFT 2026-05-10 ｜ Owner: PA design / E1 IMPL / E2+E4 review

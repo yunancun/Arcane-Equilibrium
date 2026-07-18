@@ -85,6 +85,8 @@ Metadata:
 - redirect_owner: PM
 ```
 
+> **注（2026-07-18 審計）**：上述「舊路徑留 stub」模板適用於**單檔移動**。實際執行的整目錄歸檔（2026-05-28 batch）改為在**新 archive 目錄放 `_README.md`**、舊路徑整體移除、不留逐檔 stub（見下方 Executed Redirects 段的 retention 說明）。整目錄歸檔時按後者，勿依本模板逐檔留 stub。
+
 ## GUI Integration Priority
 
 High-value hot interaction candidates:

@@ -11,6 +11,8 @@ parent specs:
   - srv/docs/adr/0045-m4-hypothesis-discovery-governance.md (M4 governance authority reserved；per R4 C-1 patch)
 scope: design / spec only — 不寫 .sql 實檔；不在 Mac 跑 SQL；不改 Rust/Python writer；不執行 PG
 ---
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 
 # V103 EXTEND for M4 Hypothesis Discovery Columns — Schema Spec
 

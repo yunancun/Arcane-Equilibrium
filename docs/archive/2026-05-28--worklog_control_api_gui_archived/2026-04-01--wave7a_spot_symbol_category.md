@@ -1,3 +1,5 @@
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 # Wave 7a Spot 品類啟用 + 方案 A/B Symbol-Category 映射工程日誌
 # Engineering Log: Wave 7a Spot Category Enablement + Symbol-Category Mapping (Plan A/B)
 # 日期：2026-04-01

@@ -14,6 +14,8 @@ adrs:
 file: srv/sql/migrations/V100__m4_hypothesis_base_table.sql
 loc: 663
 ---
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 
 # V100 M4 Hypothesis Discovery Base Tables — Migration Spec
 

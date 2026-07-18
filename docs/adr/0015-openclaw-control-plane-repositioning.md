@@ -3,6 +3,8 @@
 Date: 2026-05-09
 Status: Accepted
 
+> ⚠️ **PREMISE RETIRED（记于 2026-07-18 文档审计）**：OpenClaw 作为 control-plane / service 命名族仍成立，但本 ADR 描述的**外部 OpenClaw Gateway / API aggregation / 通信 surface** 已于 2026-07-16 retired 并移除（见 `CLAUDE.md` §一）。现存仅本地 `/api/v1/openclaw/*` 只读路由 + 本地 5-Agent runtime。「OpenClaw 非 trading conductor」的规范结论不变；「Gateway 是 active surface」的前提按历史阅读。
+
 ## Context
 
 The project was renamed to `玄衡 · Arcane Equilibrium`, while OpenClaw remains
