@@ -170,14 +170,19 @@ def run_effect_audit(sources: dict[str, str]) -> tuple[list[str], list[str]]:
         )
 
     # (c)/① `OrderEffectPermit::mint(` 全 production 域恰一呼叫點,且在 envelope-check。
+    # 必修-3:regex 容 `::` 前後空白（spaced `OrderEffectPermit :: mint (` 亦計數,防逃逸)。
     mint_call_sites: list[str] = []
     for rel, c in code.items():
-        mint_call_sites.extend([rel] * len(re.findall(r"OrderEffectPermit::mint\s*\(", c)))
+        mint_call_sites.extend([rel] * len(re.findall(r"OrderEffectPermit\s*::\s*mint\s*\(", c)))
     if mint_call_sites != [ENVELOPE_CHECK_REL]:
         violations.append(
             "(c) OrderEffectPermit::mint( production call sites must be exactly one "
             f"in {ENVELOPE_CHECK_REL} (check_effect_contact Ok arm), found {mint_call_sites}"
         )
+    # (c-self)/① 必修-3 自足雙證:seam 模塊自身零 `Self::mint(` 呼叫點（否則繞 OrderEffectPermit::
+    # 前綴自鑄;容 `::` 前後空白）。
+    if re.search(r"\bSelf\s*::\s*mint\s*\(", code[TRANSPORT_REL]):
+        violations.append(f"(c) Self::mint( call site in seam module production code: {TRANSPORT_REL}")
 
     # (e)/③ `check_effect_contact` 全 production 域零 caller（只出現 `fn` 定義）。放行臂不可達 → DCE。
     total_occurrences = 0
@@ -296,6 +301,16 @@ def _effect_audit_mutations(sources: dict[str, str]) -> list[tuple[str, dict[str
     muts.append((
         "Q5 effect activation imports live_authorization",
         mutated(EFFECT_ACT_REL, lambda s: s + "\nuse crate::live_authorization;\n"),
+    ))
+    # Q6（必修-3）:spaced `::` 書寫的第二 mint 呼叫點——放寬 regex 後仍須被計數 → FAIL。
+    muts.append((
+        "Q6 spaced OrderEffectPermit :: mint call in driver",
+        mutated(TRANSPORT_REL, lambda s: s + "\nfn q6_forge() { let _p = OrderEffectPermit :: mint (); }\n"),
+    ))
+    # Q7（必修-3）:seam 模塊內 `Self::mint(` 自鑄（繞 OrderEffectPermit:: 前綴）→ FAIL。
+    muts.append((
+        "Q7 Self::mint self-forge in seam module",
+        mutated(TRANSPORT_REL, lambda s: s + "\nfn q7_forge() { let _p = Self::mint(); }\n"),
     ))
     return muts
 

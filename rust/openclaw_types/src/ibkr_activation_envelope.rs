@@ -220,10 +220,12 @@ impl IbkrActivationEnvelopeV1 {
     /// readonly-scope envelope 校驗（零副作用;注入 `now_ms`,無牆鐘）。fail-closed:任一
     /// 綁定欄缺/壞/過期即拒。**先寫拒絕路徑**:本函數只累積 blocker,不存在任何提前放行分支。
     ///
-    /// **語意不變（W7-S4a 重構）**:scope-independent 綁定欄檢查抽入
+    /// **語意保真（W7-S4a 重構）**:scope-independent 綁定欄檢查抽入
     /// `push_scope_independent_blockers`（readonly 與 paper 共用同一校驗真源,禁語義漂移）;
-    /// readonly-specific 面（environment==ReadOnly / scope==Readonly / limits 恆零）留在本函數。
-    /// 對 readonly-scope 輸入的 blocker 集與重構前**完全一致**（`.contains()`/`.accepted` 語意保真）。
+    /// readonly-specific 面（environment==ReadOnly / scope==Readonly / limits 恆零）移至本函數尾端。
+    /// 對 readonly-scope 輸入:blocker **集 set-identical**（accept/deny 保真）,但因 env/scope/limits
+    /// 檢查移至尾端,多-blocker envelope 的 blocker **vector 順序重排**——所有消費者皆
+    /// `.contains()` / 單元素斷言 / `.accepted`（無 order-dependent 消費者;E2 已驗）,故行為無變。
     pub fn validate(&self, now_ms: u64) -> IbkrActivationEnvelopeVerdict {
         use IbkrActivationEnvelopeBlocker as B;
 

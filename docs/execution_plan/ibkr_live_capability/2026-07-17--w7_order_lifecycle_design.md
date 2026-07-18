@@ -191,6 +191,36 @@ check_effect_contact(envelope, operation, posture, ledger, sig_verifier) -> Effe
   → Ok(OrderEffectPermit::mint())         [唯一鑄造點;§1.3]
 ```
 
+**S4a 實作序修訂(validation-first;R23 review 必修-2)**:實作將 step 4 的結構性 operation×scope 閘
+**短路前置**(readonly+order→`OrderVerbStructurallyDenied` / margin·short·options·cfd·transfer·live→
+`PermanentlyDeniedVerb` / paper+非order→`OperationOutsideEffectScope` / unknown→`EffectScopeDenied`),
+paper+paper-order 方進 step 1(`validate_paper_effect` shape)→ step 2 posture → step 5 HMAC → step 6
+nonce → mint。**簽名/nonce/鑄造前必先 shape 驗證**(canonical payload 非歧義性前提);deny path 不燒
+nonce、不鑄 permit。
+
+**canonical payload 規格(v2;R23 review 必修-1 簽名覆蓋擴欄)**:pipe-separated,**24 欄**,含版本前綴
+(drift guard,v1→v2 舊簽名前向拒)+ §2 活化鐵律綁定面**全欄**——不僅 identity/window/operation 核心,
+亦含 **session_attestation_fingerprint / risk_config_hash / 三額度(max_order·max_position·
+max_orders_per_day) / 三治理 lineage(cost_gate·guardian·decision_lease,CC-B5) / operator_identity**。
+欄序:
+
+```
+version | contract_id | source_version | asset_lane | broker | environment | operation_scope |
+operation | build_git_sha | account_fingerprint | session_attestation_fingerprint | risk_config_hash |
+max_order_notional | max_position_notional | max_orders_per_day | cost_gate_lineage | guardian_lineage |
+decision_lease_lineage | operator_identity | activation_nonce | issued_at_ms | expires_at_ms |
+revocation_epoch | kill_switch_epoch
+```
+
+**為何全欄簽**:build_sha/兩 epoch 既簽名又 posture 比對;上列擴欄在 W8 前**尚無 posture 現值比對**,
+若不簽則除 shape(格式)外零綁定 → 持有效 (envelope,sig) 者可把某綁定欄換成另一**有效格式**值(如換
+一枚合法 sha256 lineage / 調高額度)仍驗過,違「authenticated Operator activation record」+ CC-B5
+lineage bound 硬邊界。**範疇界定**:本片只做**簽名覆蓋(tamper-proofing)**;上列欄的**值綁定 / posture
+現值比對**(對 runtime-authoritative 值)仍**歸 W8**(與簽名軸不同軸),本片不做值強制。**pipe 非歧義性**:
+除 `operator_identity`(shape 僅檢非空)外簽名欄經 shape 檢查為 pipe-free;實作以
+`canonical_effect_payload` 內 `debug_assert!(operator_identity pipe-free)` + `verify()` doc-contract
+(前提=envelope 已 shape-validate)明示不變量,防未來 caller 於未驗/自由格式欄重開跨欄 pipe-injection。
+
 ### 4.3 憲法面(CC 審點,標記)
 
 - **CC-B1 金鑰 custody**:硬邊界要求「Rust-owned, authenticated Operator activation record」+「no env-var credential fallback」。**option B 的 HMAC 金鑰不得複用 Bybit `OPENCLAW_LIVE_AUTH_SIGNING_KEY` env-var 模式作為唯一來源** —— 需 Rust secret-slot custody。CC 審點:金鑰來源、輪替、缺席 fail-closed。

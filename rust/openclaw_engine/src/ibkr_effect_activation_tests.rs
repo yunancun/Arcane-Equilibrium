@@ -19,20 +19,85 @@ fn paper_envelope() -> IbkrActivationEnvelopeV1 {
 fn canonical_payload_has_version_prefix_and_binds_operation() {
     let e = paper_envelope();
     let submit = canonical_effect_payload(&e, BrokerOperation::PaperOrderSubmit);
-    // 版本前綴（drift guard）。
+    // 必修-1:版本前綴 = v2（簽名覆蓋擴欄後 bump;drift guard）。
+    assert_eq!(EFFECT_SIG_PAYLOAD_VERSION, 2);
     assert!(
-        submit.starts_with(&format!("{EFFECT_SIG_PAYLOAD_VERSION}|")),
-        "payload 必以版本前綴起始: {submit}"
+        submit.starts_with("2|"),
+        "payload 必以 v2 版本前綴起始: {submit}"
     );
     // operation verb 入 payload → submit 與 cancel 的 payload 必不同（簽名綁定精確操作面）。
     let cancel = canonical_effect_payload(&e, BrokerOperation::PaperOrderCancel);
     assert_ne!(submit, cancel, "operation verb 未綁定進 payload");
-    // 綁定欄可見（lane/broker/scope/nonce/expiry）。
-    assert!(submit.contains("stock_etf_cash"));
-    assert!(submit.contains("ibkr"));
-    assert!(submit.contains("paper"));
-    assert!(submit.contains(&e.activation_nonce));
+    // 24 欄（23 pipe 分隔）。
+    assert_eq!(
+        submit.split('|').count(),
+        24,
+        "canonical payload v2 應為 24 欄"
+    );
+    // 綁定欄可見（core + 必修-1 擴欄:session/risk/額度/三 lineage/operator）。
+    for needle in [
+        "stock_etf_cash",
+        "ibkr",
+        "paper",
+        e.activation_nonce.as_str(),
+        e.session_attestation_fingerprint.as_str(),
+        e.risk_config_hash.as_str(),
+        e.max_order_notional_usd_decimal.as_str(),
+        e.max_position_notional_usd_decimal.as_str(),
+        e.cost_gate_lineage.as_str(),
+        e.guardian_lineage.as_str(),
+        e.decision_lease_lineage.as_str(),
+        e.operator_identity.as_str(),
+    ] {
+        assert!(
+            submit.contains(needle),
+            "payload 缺綁定欄 {needle:?}: {submit}"
+        );
+    }
     assert!(submit.contains(&e.expires_at_ms.to_string()));
+}
+
+#[test]
+fn verifier_rejects_tamper_of_each_newly_signed_binding_field() {
+    // 必修-1:對每一新簽綁定欄做「簽後竄改為另一有效格式值」→ shape 仍過但重算 payload 變 →
+    // 簽名失效（BadSignature）。證持 (envelope,sig) 者無法竄改任一綁定欄再驗過（tamper-proof）。
+    let e = paper_envelope();
+    let op = BrokerOperation::PaperOrderSubmit;
+    let sig = compute_effect_signature(&e, op, TEST_KEY);
+
+    let mutations: Vec<(&str, fn(&mut IbkrActivationEnvelopeV1))> = vec![
+        ("session_attestation_fingerprint", |e| {
+            e.session_attestation_fingerprint = "9".repeat(64)
+        }),
+        ("risk_config_hash", |e| e.risk_config_hash = "9".repeat(64)),
+        ("max_order_notional", |e| {
+            e.max_order_notional_usd_decimal = "2000".into()
+        }),
+        ("max_position_notional", |e| {
+            e.max_position_notional_usd_decimal = "9999".into()
+        }),
+        ("max_orders_per_day", |e| e.max_orders_per_day = 99),
+        ("cost_gate_lineage", |e| {
+            e.cost_gate_lineage = "9".repeat(64)
+        }),
+        ("guardian_lineage", |e| e.guardian_lineage = "9".repeat(64)),
+        ("decision_lease_lineage", |e| {
+            e.decision_lease_lineage = "9".repeat(64)
+        }),
+        ("operator_identity", |e| {
+            e.operator_identity = "operator:evil".into()
+        }),
+    ];
+    for (name, mutate) in mutations {
+        let mut tampered = paper_envelope();
+        mutate(&mut tampered);
+        let verifier = EffectSignatureVerifier::with_key(Some(TEST_KEY.to_string()), sig.clone());
+        assert_eq!(
+            verifier.verify(&tampered, op),
+            Err(EffectAuthError::BadSignature),
+            "竄改 {name} 後簽名必失效（BadSignature）"
+        );
+    }
 }
 
 #[test]

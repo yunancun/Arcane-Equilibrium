@@ -162,11 +162,12 @@ def check_g2(module_src: str, prod_sources: dict[str, str]) -> tuple[list[str], 
 
     # (c) production 源 `OrderEffectPermit::mint(` **恰一呼叫點**,且在 envelope-check
     # （check_effect_contact Ok 臂,§1.3 唯一鑄造點）。`Self::mint(` 於模塊自身零呼叫。
+    # 必修-3:regex 容 `::` 前後空白（spaced 書寫的呼叫點亦計數,防逃逸）。
     mint_call_sites: list[str] = []
     for rel, src in prod_sources.items():
         c = _strip_line_comments(src)
-        mint_call_sites.extend([rel] * len(re.findall(r"\bOrderEffectPermit::mint\s*\(", c)))
-        if rel == MODULE_REL and re.search(r"\bSelf::mint\s*\(", c):
+        mint_call_sites.extend([rel] * len(re.findall(r"\bOrderEffectPermit\s*::\s*mint\s*\(", c)))
+        if rel == MODULE_REL and re.search(r"\bSelf\s*::\s*mint\s*\(", c):
             v.append(f"G2(c) Self::mint call site in seam module production code: {rel}")
     if mint_call_sites != [ENVELOPE_CHECK_REL]:
         v.append(
@@ -382,6 +383,11 @@ def _mutations(module_src: str, envelope_src: str, prod_sources: dict[str, str])
     if tgt in inj:
         inj[tgt] = inj[tgt] + "\nfn m5_forge() { let _p = OrderEffectPermit::mint(); }\n"
     muts.append(("M5 production mint call + seam ref in driver", module_src, envelope_src, inj))
+    # M5b（G2 必修-3）:spaced `::` mint 呼叫點——放寬 regex 後仍須被計數 → FAIL。
+    inj5b = dict(prod_sources)
+    if tgt in inj5b:
+        inj5b[tgt] = inj5b[tgt] + "\nfn m5b_forge() { let _p = OrderEffectPermit :: mint (); }\n"
+    muts.append(("M5b spaced OrderEffectPermit :: mint call in driver", module_src, envelope_src, inj5b))
     # M6（G4）:把 PaperOrderSubmit 從拒臂挪進 readonly 白名單（None 臂放行 order verb）。
     muts.append((
         "M6 PaperOrderSubmit moved to readonly whitelist",

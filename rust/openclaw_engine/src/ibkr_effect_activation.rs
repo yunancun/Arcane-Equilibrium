@@ -47,7 +47,9 @@ type HmacSha256 = Hmac<Sha256>;
 pub(crate) const EFFECT_SIGNING_KEY_SLOT: &str = "OPENCLAW_IBKR_EFFECT_ACTIVATION_SIGNING_KEY";
 
 /// canonical payload 版本前綴（布局變更時遞增;drift guard——Operator 簽名端必對齊此版本與欄序）。
-pub(crate) const EFFECT_SIG_PAYLOAD_VERSION: u32 = 1;
+/// **v2（W7-S4a review 必修-1）**:簽名覆蓋由 15 欄擴至 §2 活化鐵律綁定面**全欄**（+session
+/// attestation/risk-config hash/三額度/三治理 lineage/operator identity）;v1 舊簽名前向拒。
+pub(crate) const EFFECT_SIG_PAYLOAD_VERSION: u32 = 2;
 
 /// option B 簽名/驗證的 typed 錯誤面（各變體對應不同拒因;fail-closed 先寫拒絕路徑）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -60,17 +62,39 @@ pub(crate) enum EffectAuthError {
     BadSignature,
 }
 
-/// **canonical payload**（pipe-separated;Operator out-of-band 簽名對象）。Rust 與 Operator 簽名端
-/// 必 byte-for-byte 對齊此格式。含**版本前綴**（drift guard）+ 綁定全欄:contract/source/lane/
-/// broker/environment/scope/**operation verb**/build-SHA/account-fingerprint/nonce/issued/expiry/
-/// revocation-epoch/kill-switch-epoch。operation verb 入 payload → 簽名綁定精確操作面（submit 簽名
-/// 不能拿去 cancel）;nonce+expiry+epoch 入 payload → 綁定單次活化窗（防跨窗/replay 重用）。
+/// **canonical payload v2**（pipe-separated;Operator out-of-band 簽名對象）。Rust 與 Operator
+/// 簽名端必 byte-for-byte 對齊此版本與欄序。含**版本前綴**（drift guard）+ §2 活化鐵律綁定面
+/// **全 24 欄**（必修-1 tamper-proofing）:
+///   version / contract_id / source_version / asset_lane / broker / environment / operation_scope /
+///   **operation verb** / build_git_sha / account_fingerprint / **session_attestation_fingerprint** /
+///   **risk_config_hash** / **max_order_notional** / **max_position_notional** / **max_orders_per_day** /
+///   **cost_gate_lineage** / **guardian_lineage** / **decision_lease_lineage** / **operator_identity** /
+///   activation_nonce / issued_at_ms / expires_at_ms / revocation_epoch / kill_switch_epoch。
+/// operation verb → 綁定精確操作面（submit 簽名不能拿去 cancel）;nonce+expiry+epoch → 綁定單次
+/// 活化窗;三 fingerprint/hash + 三 lineage + 三額度 + operator → 持有效 (envelope,sig) 者無法竄改
+/// 任一綁定欄再驗過（CC-B5 lineage bound;authenticated Operator activation record）。
+///
+/// **範疇（必修-1 界定）**:本函數只做**簽名覆蓋**（tamper-proofing）。上列欄的**值綁定 / posture
+/// 現值比對**（risk hash/lineage/session fingerprint 對 runtime-authoritative 值）仍**歸 W8**,本片
+/// 不做值強制（額度可經簽入的 risk_config_hash 或直接簽入額度欄傳遞綁定,值裁決 W8）。
+///
+/// **前提（doc-contract;必修-2）**:呼叫端須先對 envelope 完成 shape validation
+/// （`validate_paper_effect`）——除 `operator_identity`（僅檢非空）外所有簽名欄經 shape 檢查為
+/// **pipe-free**（sha256-hex / git-sha40-hex / 正定點 decimal / enum as_str / u32/u64）。
+/// `operator_identity` 自由格式,理論可含 `|` → 下方 `debug_assert` 明示 pipe-free 不變量,防未來
+/// 新增 caller 於未驗/自由格式欄上呼叫,重開跨欄 pipe-injection。唯一 production caller
+/// `check_effect_contact` 於簽名 step **前**已完成 shape step（validation-first 序）。
 pub(crate) fn canonical_effect_payload(
     envelope: &IbkrActivationEnvelopeV1,
     operation: BrokerOperation,
 ) -> String {
+    debug_assert!(
+        !envelope.operator_identity.contains('|'),
+        "operator_identity must be pipe-free for canonical payload non-ambiguity \
+         (shape-validate envelope before signing/verifying)"
+    );
     format!(
-        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
         EFFECT_SIG_PAYLOAD_VERSION,
         envelope.contract_id,
         envelope.source_version,
@@ -81,6 +105,16 @@ pub(crate) fn canonical_effect_payload(
         operation.as_str(),
         envelope.build_git_sha,
         envelope.account_fingerprint,
+        // 必修-1:§2 活化鐵律綁定面全簽入（tamper-proofing;值綁定/posture 比對仍歸 W8）。
+        envelope.session_attestation_fingerprint,
+        envelope.risk_config_hash,
+        envelope.max_order_notional_usd_decimal,
+        envelope.max_position_notional_usd_decimal,
+        envelope.max_orders_per_day,
+        envelope.cost_gate_lineage,
+        envelope.guardian_lineage,
+        envelope.decision_lease_lineage,
+        envelope.operator_identity,
         envelope.activation_nonce,
         envelope.issued_at_ms,
         envelope.expires_at_ms,
@@ -150,6 +184,13 @@ impl EffectSignatureVerifier {
 
     /// **驗證 leg**:重算 canonical payload 的 HMAC == caller 供給的 opaque 簽名 blob（定時比對）。
     /// fail-closed:金鑰缺席先拒（`SigningKeyMissing`,不做任何比對）;不符回 `BadSignature`。
+    ///
+    /// **前提（doc-contract;必修-2）**:`envelope` 須**已通過 shape validation**
+    /// （`validate_paper_effect`）——本函數**不** re-validate shape;canonical payload 的非歧義性
+    /// （pipe-free 欄集）依賴此前提。唯一 production caller `check_effect_contact` 於 step 6 呼叫本
+    /// 函數**前**已完成 step 3 shape 驗證（validation-first 序）。**新增 caller 不得於未驗 envelope
+    /// 上呼叫**（否則自由格式欄可含 `|` → 重開跨欄 pipe-injection 面）;`canonical_effect_payload`
+    /// 內 `debug_assert!(operator_identity pipe-free)` 於 debug/test 明示並捕獲此不變量違反。
     pub(crate) fn verify(
         &self,
         envelope: &IbkrActivationEnvelopeV1,
