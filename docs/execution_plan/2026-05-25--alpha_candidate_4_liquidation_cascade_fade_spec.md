@@ -4,8 +4,16 @@
 **Author**: PA（W1-A sub-agent task）
 **Source SoT**: dispatch packet `srv/docs/execution_plan/2026-05-25--sprint_2_business_dispatch_packet.md` §2.2 candidate #4 + §2.4 dispatch design
 **Predecessor infrastructure**: BB C6 PROOF PASS (`market.liquidations` 31,473 rows accumulated) + LiquidationPulseAggregator (W-AUDIT-8a C1) + LiquidationPulsePanel (alpha_surface.rs:436) + ADR-0038 §Decision 1 self-hosted PG only
-**Status**: PA SPEC — IMPL-ready 給 W2-B E1 sub-agent
+**Status**: ⚠️ NO-GO / 请勿实作（记于 2026-07-18 文档审计）— 原文 "PA SPEC — IMPL-ready 給 W2-B E1 sub-agent"（见下方 NO-GO banner）。
 **Scope**: Stream A candidate #4 「microstructure liquidation cascade fade」 IMPL-ready specification
+
+> ⚠️ **NO-GO — 请勿实作（记于 2026-07-18 文档审计）**
+>
+> `liquidation_cascade_fade` 未通过验证，非当前 build 目标：
+> - 执行可达性 reject：`docs/audits/2026-05-31--p0_edge_cost_wall_investigation.md`（"A2 liquidation cascade fade"：maker-fill 49% < 50%、R:R < 1、avg_net −2.45 bps）。
+> - 统计 NO-GO（2026-06-03）：280 事件全 |t| < 1.3，信号被 down-beta regime 伪装（memory `project_2026_06_03_blocked_signal_and_cascade_fade_nogo`）。
+>
+> 本 spec 仅保留设计 lineage；revive 须新证据 + `TODO.md` gate。本文档中的「IMPL-ready」措辞已失效。
 
 ---
 

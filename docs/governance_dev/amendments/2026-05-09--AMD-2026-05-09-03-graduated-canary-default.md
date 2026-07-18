@@ -14,6 +14,8 @@
 
 > **2026-05-15 supersession note**: AMD-2026-05-15-01 supersedes this document's Stage 1 paper cohort semantics. `Environment::Paper × 7d` is removed as a promotion stage; Stage 0R Replay Preflight now outputs only `eligible_for_demo_canary=true/false`, and Stage 1 is `Environment::Demo` micro-canary evidence. Historical rationale below is retained for audit context only.
 
+> ⚠️ **ID 冲突提示（记于 2026-07-18 文档审计）**：`AMD-2026-05-09-03` 这个 ID 也被误标在 `2026-05-09--strategist_wide_adjustment_skill.md`（Strategist 参数自由度，主题无关；其规范 ID 应是 ADR-0022）。**本文件才是规范的 AMD-2026-05-09-03**（graduated canary default）。
+
 > **2026-05-23 active redesign note**: AMD-03 is now interpreted as a
 > replay-gated canary framework, not as a paper-engine launch plan. Paper is
 > long-term Archive: retained for historical artifacts, compatibility fixtures,

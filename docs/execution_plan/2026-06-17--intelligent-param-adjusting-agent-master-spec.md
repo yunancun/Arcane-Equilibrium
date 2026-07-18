@@ -1,7 +1,7 @@
 # 本地智能調參下單 Agent 系統 — Master Implementation Spec
 
 - **Author:** PA · **Date:** 2026-06-17 · **Base commit:** `0cf086c1`
-- **Status:** design (read-only) → pending adversarial review (E3+CC+E2) → phased build+deploy
+- **Status:** ⚠️ DORMANT（记于 2026-07-18 文档审计）— 原文 "design (read-only) → pending adversarial review (E3+CC+E2) → phased build+deploy"；本 spec 不在当前 `TODO.md` active queue 或任何 `initiative_index`，非 pending-build。当前 autonomy 方向 = profit-first 自主 loop（2026-07-08+）。恢复须 PM 确认 + `TODO.md` gate。（注：本 spec 已将 live RiskConfig 变更设为「人工促升闸、永不自動套用 live」，见下 §决策 2；此非 live 安全隐患，仅 dormancy 标注。）
 - **Driver:** operator 要求「完整的、本地具備智能、能透過 ML/DB/學習經驗/市場信號智能調整參數的下單 Agent 系統」
 
 ## Operator 決策（已鎖定）
