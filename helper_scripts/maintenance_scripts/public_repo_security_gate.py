@@ -29,6 +29,40 @@ EMBEDDED_CREDENTIAL_DSN = re.compile(
     br"(?i)\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis|amqps?)"
     br"://[^\s:/?#]{1,128}:(?P<password>[^\s/@?#]{1,256})@"
 )
+# 下列變體 pattern 的關鍵 token 以 bytes 串接拆開（同 POSTGRES_DUMP_MAGIC 手法），
+# 避免 gate 掃描含本檔的完整 tree 時，源碼 raw bytes 自身成為可匹配形。
+# 變體一：URI query 參數形——同一 scheme 集，憑證放在 query key 而非授權段；
+# (?:ssl)? 同時涵蓋 ssl 前綴 query key。量詞全部有界、中段非貪婪，維持線性掃描。
+EMBEDDED_CREDENTIAL_DSN_QUERY = re.compile(
+    br"(?i)\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis|amqps?)"
+    br"://[^\s#]{1,512}?[?&](?:ssl)?pass" + br"word=(?P<password>[^&#\s]{1,256})"
+)
+# 變體二/三：libpq keyword conninfo 形——password token 與至少一個錨 keyword
+# token 同行、空白分隔；兩個方向（錨在前 / password token 在前）各一支 pattern。
+# 負回顧擋 `PGPASSWORD`、`FOO_password` 這類前綴 token；值排除逗號/分號，讓
+# Python kwarg（帶逗號）出界；量詞全部有界，避免嵌套量詞回溯。
+_LIBPQ_ANCHOR_TOKEN = br"(?<![A-Za-z0-9_])(?:hostaddr|host|port|dbname|user)=[^\s,;]{1,256}"
+_LIBPQ_PASSWORD_TOKEN = br"(?<![A-Za-z0-9_])pass" + br"word=(?P<password>[^\s,;]{1,256})"
+_LIBPQ_TOKEN_SEPARATOR = br"(?:[ \t]+[A-Za-z0-9_]{1,32}=[^\s,;]{1,256}){0,16}[ \t]+"
+EMBEDDED_CREDENTIAL_DSN_KEYWORD_FORWARD = re.compile(
+    _LIBPQ_ANCHOR_TOKEN + _LIBPQ_TOKEN_SEPARATOR + _LIBPQ_PASSWORD_TOKEN
+)
+EMBEDDED_CREDENTIAL_DSN_KEYWORD_REVERSE = re.compile(
+    _LIBPQ_PASSWORD_TOKEN + _LIBPQ_TOKEN_SEPARATOR + _LIBPQ_ANCHOR_TOKEN
+)
+EMBEDDED_CREDENTIAL_DSN_VARIANTS = (
+    EMBEDDED_CREDENTIAL_DSN_QUERY,
+    EMBEDDED_CREDENTIAL_DSN_KEYWORD_FORWARD,
+    EMBEDDED_CREDENTIAL_DSN_KEYWORD_REVERSE,
+)
+# sanctioned ephemeral CI 憑證對：與 .github/workflows/ci.yml service env 的
+# POSTGRES_USER / POSTGRES_PASSWORD 同值明文，是 CI 容器一次性、非機密憑證。
+# carve-out 語義＝「password 捕獲值 + match 起點同行 user token」的 exact 配對
+# 豁免，非 secrecy 鬆綁；僅適用 query / keyword 兩類新變體，authority 形無
+# carve-out。除此 exact 對外一律 shape-based 拒絕（逐 match 檢查 password 值，
+# 同一行的第二個非 sanctioned DSN 仍拒）。兩常數必須分行，不得相鄰拼成可匹配形。
+SANCTIONED_CI_PASSWORD_VALUE = b"contract_pass"
+SANCTIONED_CI_USER_TOKEN = b"user=contract_user"
 PROVIDER_TOKEN = re.compile(
     br"(?:"
     br"\bgh[pousr]_[A-Za-z0-9]{36,255}\b"
@@ -254,6 +288,18 @@ def _line_number(payload: bytes, offset: int) -> int:
     return payload.count(b"\n", 0, offset) + 1
 
 
+def _is_sanctioned_ci_credential(payload: bytes, match: re.Match[bytes]) -> bool:
+    """僅當 password 捕獲值與 match 起點所在行的 user token 都 exact 命中
+    sanctioned ephemeral CI 憑證對時才豁免；其餘一律維持 shape-based 拒絕。"""
+    if match.group("password") != SANCTIONED_CI_PASSWORD_VALUE:
+        return False
+    line_start = payload.rfind(b"\n", 0, match.start()) + 1
+    line_end = payload.find(b"\n", match.end())
+    if line_end == -1:
+        line_end = len(payload)
+    return SANCTIONED_CI_USER_TOKEN in payload[line_start:line_end]
+
+
 def _load_allowlist(repo_root: Path, allowlist_file: Path) -> list[dict[str, Any]]:
     path = allowlist_file if allowlist_file.is_absolute() else repo_root / allowlist_file
     try:
@@ -381,6 +427,20 @@ def scan_entries(
                         line=_line_number(payload, match.start()),
                     )
                 )
+            # query / keyword 兩類新變體沿用同一 rule 名；每個 match 先過
+            # sanctioned CI 憑證對 carve-out 再 emit（authority 形無 carve-out）。
+            for variant in EMBEDDED_CREDENTIAL_DSN_VARIANTS:
+                for match in variant.finditer(payload):
+                    if _is_sanctioned_ci_credential(payload, match):
+                        continue
+                    findings.append(
+                        _finding(
+                            rule="embedded_credential_dsn",
+                            path=path,
+                            blob_oid=blob_oid,
+                            line=_line_number(payload, match.start()),
+                        )
+                    )
     ordered_findings = sorted(
         findings,
         key=lambda finding: (

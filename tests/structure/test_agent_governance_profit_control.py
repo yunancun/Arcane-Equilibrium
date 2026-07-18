@@ -1587,6 +1587,39 @@ const parallel = async jobs => Promise.all(jobs.map(job => job()));
     assert control["hard_stops"] == ["no runtime or broker effect"]
     assert control["context_artifact_digest"] == context_artifact["artifact_digest"]
     assert control["budget_authority_digest"] == context_artifact["budget_authority_digest"]
+    # planned_input_tokens 是 context prefix 實際位元組的導出量,不是治理釘死值:
+    # 舊字面值 294_000 只在 compiler floor <= estimated_tokens_per_evidence(20k)
+    # 的鉗位區間內恰好恆定;PR #85 的 TODO.md 增長使 floor 越過 20k 後,該值隨
+    # 每次 TODO.md 位元組變動漂移。此處按 utf8_bytes_div4_planned_lower_bound_v1
+    # 以 Python 獨立重算(對照 workflow JS 的 contextPrefixV1 逐位一致),權威上限
+    # 與估算下限仍為字面值釘死,治理閘不放鬆。
+    context_prompt_prefix = (
+        context_artifact["shared_task_context_canonical"]
+        + "\n\n"
+        + context_artifact["role_context_delta_canonical"]
+        + "\n\n"
+        + _canonical({
+            "schema_version": "context_prompt_binding_v1",
+            "artifact_digest": context_artifact["artifact_digest"],
+            "task_contract_digest": context_artifact["task_contract_digest"],
+            "budget_authority_digest": context_artifact["budget_authority_digest"],
+            "shared_task_context_digest": context_artifact["shared_task_context_digest"],
+            "role_context_delta_digest": context_artifact["role_context_delta_digest"],
+        })
+    )
+    context_compiler_floor = max(
+        1, (len(context_prompt_prefix.encode("utf-8")) + 3) // 4
+    )
+    evidence_call_tokens = max(context_compiler_floor, 20_000)
+    probe_call_tokens = max(context_compiler_floor, 24_000)
+    map_call_tokens = max(context_compiler_floor, 30_000)
+    retry_estimate = max(evidence_call_tokens, probe_call_tokens, map_call_tokens)
+    expected_planned_input_tokens = (
+        3 * evidence_call_tokens
+        + map_call_tokens
+        + 2 * retry_estimate
+        + 6 * probe_call_tokens
+    )
     assert control["envelope"] == {
         "accounting_basis": "utf8_bytes_div4_planned_lower_bound_v1",
         "max_context_tokens_per_call": 480_000,
@@ -1599,7 +1632,7 @@ const parallel = async jobs => Promise.all(jobs.map(job => job()));
         "estimated_tokens_per_evidence": 20_000,
         "estimated_tokens_per_probe": 24_000,
         "estimated_tokens_for_map": 30_000,
-        "planned_input_tokens": 294_000,
+        "planned_input_tokens": expected_planned_input_tokens,
         "planned_unique_nodes": 10,
         "planned_call_attempts": 12,
     }

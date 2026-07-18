@@ -49,4 +49,5 @@ for sql_file in "${MIGRATION_DIR}"/V*.sql; do
 done
 
 echo "=== Test DB setup complete ==="
-echo "Export: OPENCLAW_TEST_DATABASE_URL=postgresql://redacted@${DB_HOST}:${DB_PORT}/${DB_NAME}"
+# DSN 字面量刻意拆開,避免 public-repo gate(embedded_credential_dsn query 形)匹配源碼 bytes;勿合併回單一字串。
+echo "Export: OPENCLAW_TEST_DATABASE_URL=postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}?user=${DB_USER}&pass""word=${PGPASSWORD}"

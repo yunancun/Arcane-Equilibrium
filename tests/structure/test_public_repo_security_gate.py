@@ -264,6 +264,235 @@ def test_head_tree_rejects_every_dsn_password_placeholder_value(tmp_path: Path) 
     )
 
 
+def test_head_tree_rejects_query_parameter_dsn_password_without_echoing_it(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path)
+    scheme = "post" + "gres"
+    query_key = "&pass" + "word="
+    password = "".join(("Vq3", "Xt8Lm2", "Rw5"))
+    dsn = f"{scheme}://db.example.invalid:5432/app?user=svc{query_key}{password}"
+    (repo / "settings.toml").write_text(
+        f"mode = 'test'\ndsn = '{dsn}'\n", encoding="utf-8"
+    )
+    _commit_all(repo, "add query parameter credential dsn")
+
+    completed = _run_gate(repo, "--tree", "HEAD")
+
+    assert completed.returncode == 1
+    assert password not in completed.stdout
+    assert password not in completed.stderr
+    findings = _json_lines(completed.stdout)
+    assert [(finding["rule"], finding["line"]) for finding in findings] == [
+        ("embedded_credential_dsn", 2)
+    ]
+
+
+def test_head_tree_rejects_ssl_query_parameter_dsn_password(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path)
+    scheme = "post" + "gres" + "ql"
+    query_key = "?sslpass" + "word="
+    password = "".join(("Jn6", "Pw4Qd9", "Zk2"))
+    dsn = f"{scheme}://db.example.invalid/app{query_key}{password}"
+    (repo / "settings.toml").write_text(f"dsn = '{dsn}'\n", encoding="utf-8")
+    _commit_all(repo, "add ssl query parameter credential dsn")
+
+    completed = _run_gate(repo, "--tree", "HEAD")
+
+    assert completed.returncode == 1
+    assert password not in completed.stdout
+    assert password not in completed.stderr
+    assert [finding["rule"] for finding in _json_lines(completed.stdout)] == [
+        "embedded_credential_dsn"
+    ]
+
+
+def test_head_tree_rejects_libpq_keyword_dsn_password_without_echoing_it(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path)
+    password_key = "pass" + "word="
+    password = "".join(("Fh7", "Sm3Vc6", "Tq9"))
+    conninfo = (
+        f"host=db.example.invalid port=5432 dbname=app user=svc "
+        f"{password_key}{password}"
+    )
+    (repo / "settings.conf").write_text(conninfo + "\n", encoding="utf-8")
+    _commit_all(repo, "add libpq keyword credential conninfo")
+
+    completed = _run_gate(repo, "--tree", "HEAD")
+
+    assert completed.returncode == 1
+    assert password not in completed.stdout
+    assert password not in completed.stderr
+    findings = _json_lines(completed.stdout)
+    assert [(finding["rule"], finding["line"]) for finding in findings] == [
+        ("embedded_credential_dsn", 1)
+    ]
+
+
+def test_head_tree_rejects_password_leading_libpq_keyword_dsn(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path)
+    password_key = "pass" + "word="
+    password = "".join(("Gd5", "Wn8Xb1", "Lr4"))
+    conninfo = f"{password_key}{password} host=db.example.invalid dbname=app"
+    (repo / "settings.conf").write_text(conninfo + "\n", encoding="utf-8")
+    _commit_all(repo, "add password-leading libpq conninfo")
+
+    completed = _run_gate(repo, "--tree", "HEAD")
+
+    assert completed.returncode == 1
+    assert password not in completed.stdout
+    assert password not in completed.stderr
+    assert [finding["rule"] for finding in _json_lines(completed.stdout)] == [
+        "embedded_credential_dsn"
+    ]
+
+
+def test_query_dsn_carveout_requires_paired_sanctioned_user_token(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path)
+    scheme = "post" + "gres"
+    query_key = "?pass" + "word="
+    dsn = f"{scheme}://db.example.invalid:5432/app{query_key}contract_pass"
+    (repo / "settings.toml").write_text(f"dsn = '{dsn}'\n", encoding="utf-8")
+    _commit_all(repo, "add sanctioned password without paired user token")
+
+    completed = _run_gate(repo, "--tree", "HEAD")
+
+    assert completed.returncode == 1
+    assert [finding["rule"] for finding in _json_lines(completed.stdout)] == [
+        "embedded_credential_dsn"
+    ]
+
+
+def test_second_unsanctioned_dsn_on_sanctioned_line_is_still_rejected(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path)
+    scheme = "post" + "gres"
+    query_key = "&pass" + "word="
+    password = "".join(("Yc2", "Kt7Jd5", "Mq8"))
+    sanctioned = (
+        f"{scheme}://127.0.0.1:5432/contract_db"
+        f"?user=contract_user{query_key}contract_pass"
+    )
+    rogue = f"{scheme}://db.example.invalid:5432/app?user=svc{query_key}{password}"
+    (repo / "settings.toml").write_text(
+        f"primary={sanctioned} fallback={rogue}\n", encoding="utf-8"
+    )
+    _commit_all(repo, "add sanctioned pair plus rogue dsn on one line")
+
+    completed = _run_gate(repo, "--tree", "HEAD")
+
+    assert completed.returncode == 1
+    assert password not in completed.stdout
+    assert password not in completed.stderr
+    findings = _json_lines(completed.stdout)
+    assert len(findings) == 1
+    assert findings[0]["rule"] == "embedded_credential_dsn"
+    assert findings[0]["line"] == 1
+
+
+def test_head_tree_rejects_placeholder_passwords_in_query_and_keyword_forms(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path)
+    scheme = "post" + "gres"
+    query_key = "?pass" + "word="
+    keyword_key = "pass" + "word="
+    passwords = ("changeme", "example", "password", "placeholder", "redacted")
+    lines = [
+        f"query_{index}={scheme}://db.example.invalid/app{query_key}{password}"
+        for index, password in enumerate(passwords)
+    ] + [
+        f"host=db.example.invalid user=svc {keyword_key}{password}"
+        for password in passwords
+    ]
+    (repo / "settings.conf").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    _commit_all(repo, "add placeholder passwords in query and keyword forms")
+
+    completed = _run_gate(repo, "--tree", "HEAD")
+
+    assert completed.returncode == 1
+    findings = _json_lines(completed.stdout)
+    assert [finding["rule"] for finding in findings] == [
+        "embedded_credential_dsn"
+    ] * (2 * len(passwords))
+    assert [finding["line"] for finding in findings] == list(
+        range(1, 2 * len(passwords) + 1)
+    )
+
+
+def test_sanctioned_ci_query_credential_pair_scans_clean(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path)
+    scheme = "post" + "gres"
+    query_key = "&pass" + "word="
+    dsn = (
+        f"{scheme}://127.0.0.1:5432/contract_db"
+        f"?user=contract_user{query_key}contract_pass"
+    )
+    (repo / "ci-settings.yml").write_text(
+        f"OPENCLAW_TEST_PG: {dsn}\n", encoding="utf-8"
+    )
+    _commit_all(repo, "add sanctioned ci query credential pair")
+
+    completed = _run_gate(repo, "--tree", "HEAD")
+
+    assert completed.returncode == 0
+    assert completed.stdout == ""
+
+
+def test_sanctioned_ci_keyword_credential_pair_scans_clean(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path)
+    keyword_key = "pass" + "word="
+    (repo / "ci-settings.yml").write_text(
+        "host=127.0.0.1 port=5432 dbname=alr_v159_functional_ci\n"
+        f"user=contract_user {keyword_key}contract_pass\n",
+        encoding="utf-8",
+    )
+    _commit_all(repo, "add sanctioned ci keyword credential pair")
+
+    completed = _run_gate(repo, "--tree", "HEAD")
+
+    assert completed.returncode == 0
+    assert completed.stdout == ""
+
+
+def test_non_database_http_url_password_parameters_stay_clean(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path)
+    query_key = "&pass" + "word="
+    body_key = "&pass" + "word="
+    lines = [
+        f"login: https://ops.example.invalid/reset?username=ops{query_key}Qz7Vt2Mx9Rk4",
+        (
+            "# 或 curl -c cookies.txt -X POST -d 'username=..."
+            f"{body_key}...' http://localhost:8001/api/v1/auth/login"
+        ),
+    ]
+    (repo / "runbook.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    _commit_all(repo, "add http url with password parameters")
+
+    completed = _run_gate(repo, "--tree", "HEAD")
+
+    assert completed.returncode == 0
+    assert completed.stdout == ""
+
+
+def test_python_connect_kwargs_with_commas_stay_clean(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path)
+    keyword_key = "pass" + "word="
+    line = f"conn = connect(host=pg_host, user=pg_user, {keyword_key}pg_secret)\n"
+    (repo / "db_client.py").write_text(line, encoding="utf-8")
+    _commit_all(repo, "add python connect kwargs")
+
+    completed = _run_gate(repo, "--tree", "HEAD")
+
+    assert completed.returncode == 0
+    assert completed.stdout == ""
+
+
 @pytest.mark.parametrize(
     "token",
     [
