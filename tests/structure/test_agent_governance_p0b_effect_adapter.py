@@ -190,6 +190,12 @@ def test_p0b_schemas_are_exact_and_phase_specific() -> None:
     assert runtime_bindings["$defs"]["protectedRuntimeBaseline"][
         "additionalProperties"
     ] is False
+    assert runtime_bindings["$defs"]["protectedSnapshot"]["properties"][
+        "engine"
+    ]["minItems"] == 0
+    assert runtime_bindings["$defs"]["protectedSnapshot"]["properties"][
+        "engine"
+    ]["maxItems"] == 1
     assert runtime_bindings["$defs"]["stagePaths"]["additionalProperties"] is False
     assert runtime_bindings["$defs"]["cutoverPaths"]["additionalProperties"] is False
     assert "minProperties" not in runtime_bindings["$defs"]["hashInventory"]

@@ -267,7 +267,7 @@
             "openclaw-watchdog.service": {"$ref": "#/$defs/unitState"}
           }
         },
-        "engine": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"$ref": "#/$defs/engineRow"}},
+        "engine": {"type": "array", "minItems": 0, "maxItems": 1, "items": {"$ref": "#/$defs/engineRow"}},
         "auth_metadata": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"$ref": "#/$defs/authMetadataRow"}},
         "crontab": {
           "type": "object", "additionalProperties": false,
