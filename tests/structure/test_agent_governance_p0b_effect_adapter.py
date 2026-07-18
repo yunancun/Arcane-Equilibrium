@@ -4,6 +4,7 @@ import hashlib
 import json
 import sys
 from copy import deepcopy
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -23,6 +24,7 @@ from agent_governance_routing import (  # noqa: E402
 import agent_governance_p0b_effects as p0b  # noqa: E402
 import agent_governance_p0b_phase1_lineage as phase1_lineage  # noqa: E402
 import agent_governance_p0b_sources as source_bindings  # noqa: E402
+import p0b_alr_current_head_rollforward_v1 as runtime_core  # noqa: E402
 from agent_governance_p0b_sources import (  # noqa: E402
     component_claim_digests,
     component_claim_paths,
@@ -827,6 +829,19 @@ def test_runtime_authorization_is_exact_canonical_intent_projection(
     generic["authorization_digest"] = p0b.p0b_authorization_digest(generic)
     assert p0b.validate_p0b_runtime_authorization(
         generic, now="2026-07-18T10:05:00Z"
+    )
+
+
+def test_governance_valid_stage_authorization_is_accepted_by_runtime_core(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _route, _contexts, _artifacts, intent = _admission_fixture(monkeypatch)
+    authorization = p0b.build_p0b_runtime_authorization(intent)
+
+    runtime_core.validate_runtime_authorization(
+        authorization,
+        phase="stage",
+        now=datetime(2026, 7, 18, 10, 5, tzinfo=timezone.utc),
     )
 
 
