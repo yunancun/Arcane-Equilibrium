@@ -4,6 +4,8 @@ type: daily-summary
 session_continuity: 接 4/7 斷網 session（已整合原 session_resume_notes 要點）
 scope: ARCH-RC1 1C-3（全部）+ 1C-3-F + 1C-4 wrap + GUI fake-success Wave 1/2 + post-1C-4 cleanup + DEAD-PY-1 plan
 ---
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 
 # 2026-04-08 Daily Summary — ARCH-RC1 1C-3 / 1C-3-F / 1C-4 全量 SHIPPED
 

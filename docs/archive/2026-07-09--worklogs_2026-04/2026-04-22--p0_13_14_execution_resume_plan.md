@@ -8,6 +8,8 @@ parent:
   - docs/worklogs/2026-04-22--p0_14_edge_estimates_miss_rca.md（P0-14 RCA）
   - docs/worklogs/2026-04-22--passive_wait_silent_fail_audit.md（原始 audit）
 ---
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 
 # P0-13 + P0-14 執行計畫
 

@@ -7,6 +7,8 @@
 **索引**: `SPECIFICATION_REGISTER.md` Amendments section
 **TODO 連結**: `W-AUDIT-3` runtime alignment / `P0-EDGE-1` / `P0-LG-3` supervised-live gate
 
+> ⚠️ **ID 冲突提示（记于 2026-07-18 文档审计）**：本文档标题的 `AMD-2026-05-09-03` 与 `2026-05-09--AMD-2026-05-09-03-graduated-canary-default.md`（5-stage graduated canary，主题无关）**撞号**。本 Strategist wide-adjustment skill 的**规范 ID 是 ADR-0022**（见 `docs/adr/0022-strategist-cap-wide-parameter-adjustment-skill.md` 与 `SPECIFICATION_REGISTER.md`）；引用本决定请用 **ADR-0022**，勿用 `AMD-2026-05-09-03`。
+
 ---
 
 ## 1. Decision Summary

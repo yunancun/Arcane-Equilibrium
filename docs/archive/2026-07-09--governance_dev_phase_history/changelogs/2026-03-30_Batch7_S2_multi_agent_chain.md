@@ -1,3 +1,5 @@
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 # Batch 7: 5-Agent 消息鏈啟動 + S2: 預寫 3 Agent 模組
 # Batch 7: 5-Agent Message Chain Activation + S2: Pre-write 3 Agent Modules
 

@@ -178,6 +178,8 @@ does not authorize IBKR contact by itself.
 
 ### Organization Document Specifications (DOC)
 
+> ⚠️ **命名空間注意（記於 2026-07-18 文檔審計）**：本表的 `DOC-01..08` 是 **doctrine→code-module 落地映射**，其 Name 欄（如 DOC-01=Core Risk Doctrine、DOC-04=Agent Learning Evolution、DOC-06=Change Audit Log、DOC-08=Incident Response）**與** `docs/decisions/` 的治理正典文檔標題（DOC-01=Project Constitution、DOC-04=Agent Capability Blueprint、DOC-06=Change Governance、DOC-08=Implementation Bridge 等）**不同**——僅 DOC-05 兩者對齊。引用「DOC-0x／EX-0x」請註明是**治理正典文檔**還是**本落地表**，勿跨表混淆。
+
 | Code | Name | Module(s) | Status | Description |
 |------|------|-----------|--------|-------------|
 | DOC-01 | Core Risk Doctrine | `rust/openclaw_engine/src/position_risk_evaluator.rs`、`risk_checks.rs` | ✅ Active | Hard stop-loss §5.9, position sizing, risk limits。2026-07-04 TW per FA F6 更正：舊 `protective_order_manager.py` 不存在，硬止損/倉位/風控實由 Rust 承載（同 EX-01）|

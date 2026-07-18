@@ -14,6 +14,8 @@ related memory:
   - memory/feedback_working_principles.md（對抗性驗證 + 誠實報告原則）
 scope: DESIGN spec only — 不寫 IMPL code，不修 V103 本檔（V103 EXTEND outline 寫 §10），下游 sub-agent 補完整 ALTER DDL
 ---
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 
 # M4 Hypothesis Discovery — Self-Supervised Pattern Mining DESIGN Spec
 

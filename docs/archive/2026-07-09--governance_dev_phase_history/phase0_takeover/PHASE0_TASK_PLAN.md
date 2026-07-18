@@ -1,3 +1,5 @@
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 # Phase 0 任務計劃 — 接手與現狀研究
 # Phase 0 Task Plan — Takeover & Discovery
 **制定角色：** PM 項目經理

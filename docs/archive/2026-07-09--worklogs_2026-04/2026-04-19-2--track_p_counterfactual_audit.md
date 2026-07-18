@@ -7,6 +7,8 @@ related:
   - docs/worklogs/2026-04-18--dual_track_exit_design.md
   - program_code/audit/counterfactual_exit_audit.py
 ---
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 
 # 目標
 

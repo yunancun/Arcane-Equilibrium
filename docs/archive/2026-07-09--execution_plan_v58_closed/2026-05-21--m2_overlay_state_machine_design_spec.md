@@ -16,6 +16,8 @@ mirror precedent:
   - srv/docs/execution_plan/2026-05-21--m3_health_monitoring_design_spec.md（M3 sister-module 17-section DESIGN spec 範式）
 scope: M2 module 行為 + 5 狀態 finite state machine 行為 + 5 trigger_type semantic + dwell time + flap suppression + cross-module integration contract spec；**不寫 V105 DDL**（V105 spec 主責；已 land），**不寫 IMPL code**（E1 主責 Sprint 5+ ）
 ---
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 
 # M2 Overlay State Machine Module DESIGN Spec
 

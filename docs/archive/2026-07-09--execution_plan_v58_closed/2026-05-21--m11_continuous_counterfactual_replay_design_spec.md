@@ -16,6 +16,8 @@ mirror precedent:
   - srv/docs/execution_plan/2026-05-21--m4_minimum_bar_and_leakage_protocol.md（module 設計 spec 範式）
 scope: module 行為設計 + 整合接口 + acceptance criteria + IMPL phasing；不重複 V107 schema 細節；不重複 ADR-0038 治理邊界
 ---
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 
 # M11 Continuous Counterfactual Replay — Module DESIGN Specification
 

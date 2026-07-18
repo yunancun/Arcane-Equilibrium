@@ -1,3 +1,5 @@
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 # Sprint 1A Dispatch Packet — v5.7 派發 brief（C7+C10+C11+C12 整合）
 
 **日期**：2026-05-21

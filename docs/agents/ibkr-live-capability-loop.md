@@ -25,7 +25,7 @@
 ## 3. Cycle(R-N,一輪 = 一個 coherent 切片 = 一個 PR)
 
 **S0 同步門(不過不開工)**
-a. `git fetch --prune origin`;讀 origin/main head;`gh pr list --repo yunancun/BybitOpenClaw --state open` + `git branch -r | grep agent/ibkr` 查在途工作——撞工(同包已有未合 PR/在途分支)即改選其他包或收割它(見 §6)。
+a. `git fetch --prune origin`;讀 origin/main head;`gh pr list --repo yunancun/Arcane-Equilibrium --state open` + `git branch -r | grep agent/ibkr` 查在途工作——撞工(同包已有未合 PR/在途分支)即改選其他包或收割它(見 §6)。
 b. `ssh trade-core 'cd ~/BybitOpenClaw/srv && git pull --ff-only origin main && git rev-parse --short HEAD'`;記 Linux head。引擎 build_sha 與 main 差距**只觀測、只記帳**(binary 落後屬預期;部署窗只在 W10,operator-gated)。ff-only 失敗 = 三端異常 → 停輪報 operator。
 c. re-read TODO W 行;行狀態與 repo 實況漂移時,漂移修復**搭本輪代碼 PR 便車**(見 S6 checklist),不獨立成輪。
 d. §2 邊界自查 + runtime 側無 IBKR 異動(引擎 log 零 ibkr 蹤跡屬預期)。

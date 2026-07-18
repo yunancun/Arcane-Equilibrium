@@ -1,3 +1,5 @@
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 # TW 雙語註釋審核報告（Phase 3–8）/ Bilingual Comment Audit Report (Phase 3–8)
 
 | 欄位 | 值 |

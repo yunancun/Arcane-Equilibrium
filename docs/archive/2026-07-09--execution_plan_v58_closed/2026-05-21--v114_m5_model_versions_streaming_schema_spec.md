@@ -16,6 +16,8 @@ mirror precedent:
   - srv/docs/execution_plan/2026-05-21--v113_m7_decay_signals_schema_spec.md（V113 placeholder format reference）
 scope: V114 placeholder spec — 不寫 V114.sql, 不在 Mac 跑 SQL, 不執行 PG, 不寫 full DDL, full DDL 在 Y3+ activation 期 land（per ADR-0035 Decision 3 6 條件全 PASS 後）；本 Sprint 1A-δ 只 land placeholder frontmatter + 大綱
 ---
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 
 # V114 — M5 Model Versions Streaming Column EXTEND Schema Migration Spec (PLACEHOLDER)
 

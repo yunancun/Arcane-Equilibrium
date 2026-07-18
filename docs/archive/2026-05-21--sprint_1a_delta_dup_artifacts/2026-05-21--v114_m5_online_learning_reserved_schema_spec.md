@@ -14,6 +14,8 @@ related V###:
   - 既有 `learning.model_versions` 表加 `streaming_enabled BOOL DEFAULT FALSE` column（per ADR-0035 §Decision 2；不在 V114 內，在 Sprint 1A-δ in-flight V### migration）
 scope: reserve frontmatter + 14 section outline only — 不寫 V114.sql 實檔，不執行 PG，不在 Mac 跑 SQL，不寫 full DDL（Y3+ activation 後另開 V114 IMPL spec doc 走 PG empirical dry-run）
 ---
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 
 # V114 M5 Online Learning Reserved Schema Spec — PLACEHOLDER
 

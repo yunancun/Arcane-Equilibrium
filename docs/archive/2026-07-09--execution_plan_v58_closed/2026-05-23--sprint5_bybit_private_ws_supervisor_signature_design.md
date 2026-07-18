@@ -10,6 +10,8 @@ parent:
   - srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-23--sprint_4_first_live_carryover_acceptance.md（Wave B E2 round 1 MEDIUM-2 finding）
 scope: BybitPrivateWs supervisor signature 改造 + main_health_emitters 對應 wire-up + spawn_private_ws_supervisor 橋接 design only；不 IMPL
 ---
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 
 # §1 Context — Wave B E2 round 1 MEDIUM-2 finding
 

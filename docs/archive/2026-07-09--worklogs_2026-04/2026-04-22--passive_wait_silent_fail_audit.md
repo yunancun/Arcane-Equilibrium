@@ -5,6 +5,8 @@ status: P0 critical — 揭露 runtime 退場層 ≥2.5 天空窗期
 trigger: operator push-back「等資料積累阻礙後續施工但後面發現根本沒數據寫進去不能接受」
 related: P1-19 RCA · TRACK-P-V2-SWAP-1 · EXIT-FEATURES-TABLE-1
 ---
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 
 # 被動等待 silent fail 系統性 audit
 

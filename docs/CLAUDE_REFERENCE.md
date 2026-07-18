@@ -5,6 +5,7 @@
 >
 > ⚠️ **STALE SNAPSHOT（自 2026-04-12 未更新）**：本檔為歷史參考快照，當前 authoritative
 > checker / 路徑以 `helper_scripts/SCRIPT_INDEX.md` 與 `TODO.md` 為準；引用前先核實路徑仍存在。
+> 另注（2026-07-18 文檔審計，擴大 banner 範圍）：本檔的**角色啟動矩陣（固定 PM·PA·E1·E2·E4 鏈）與 per-role report / memory 更新規則亦已 SUPERSEDED**——當前 dispatch 為 hybrid risk-DAG，per-role 自動 report/memory 已 retired；正本見 `.codex/agent_registry_v1.json` + `docs/agents/development-agent-governance.md`（`CLAUDE.md` §八）。
 >
 > **2026-04-12 狀態更新**：DEAD-PY-2 已移除所有 Python 交易邏輯（4500 行），
 > Python 層僅剩 API 橋接 + GUI 路由 + 輔助工具。3E-ARCH 三引擎並行完成。

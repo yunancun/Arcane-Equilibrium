@@ -12,6 +12,8 @@ mirror precedent:
   - srv/docs/execution_plan/2026-05-21--v103_v104_earn_hypotheses_schema_spec.md (format reference)
 scope: placeholder spec — 不寫 V113.sql, 不在 Mac 跑 SQL, 不執行 PG, full DDL 在 Sprint 1A-β 補完
 ---
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 
 # V113 M7 Decay Signals Schema Migration Spec (PLACEHOLDER)
 

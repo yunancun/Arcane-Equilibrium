@@ -22,6 +22,8 @@ skill 引用:
   - srv/.claude/skills/feature-engineering-protocol/SKILL.md (leakage 6 維度；本 spec §10.5 對齊)
 scope: M6 Bayesian reward weight tuning module 行為設計 + 算法選擇 + 整合接口 + 5-7 acceptance criteria + IMPL phase split；不寫 V110 DDL（sibling spec 已 land）/ 不寫 IMPL Rust/Python code（Sprint 7+ Advisory 工作）/ 不修 V108/V113 placeholder
 ---
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 
 # M6 Bayesian Reward Weight Tuning Module DESIGN Specification
 

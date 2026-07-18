@@ -15,6 +15,8 @@ file: srv/sql/migrations/V101__track_v3_attribution_column.sql
 loc: ~250 (est.)
 push_back_from_operator: Yes (operator prompt scope = trading.fills only, NOT v3 spec full 12-table)
 ---
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 
 # V101 Track v3 Attribution Column EXTEND — Migration Spec
 

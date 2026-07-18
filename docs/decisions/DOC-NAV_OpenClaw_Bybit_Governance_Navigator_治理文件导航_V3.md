@@ -8,6 +8,8 @@ OpenClaw / Bybit AI Agent Trading System
 
 **Version 3.0  —  2026-03-29**
 
+> ⚠️ **FROZEN INDEX — 部分過時（記於 2026-07-18 文檔審計）**：本導航凍結於 2026-03-29，僅覆蓋 DOC/EX/SM/HIST 治理正典，**未包含** SM-05、全部 50 個 ADR（`docs/adr/`）與 ~34 個 amendments（`docs/governance_dev/amendments/`）。當前**活索引** = `docs/governance_dev/SPECIFICATION_REGISTER.md`（ID→file 映射）+ `docs/_indexes/initiative_index.md`（主題導航）。下文的「Paper→Live gate」等晉級口徑為 pre-Demo-only 舊模型，現行 = Demo-only（AMD-2026-05-15-01）+ 五閘 + Operator（`CLAUDE.md` §四）。按歷史參考閱讀。
+
 *20 Formal Documents  \|  Classification: Internal*
 
 
@@ -62,6 +64,7 @@ The governance document set consists of 20 formal documents organized into four 
 | **SM-02** | Decision Lease SM | V1.1 | 2026-03-26 | Decision Lease lifecycle state machine. No V2 needed. |
 | **SM-03** | OMS SM | V1.1 | 2026-03-26 | Order Management state machine. No V2 needed. |
 | **SM-04** | 運行模式 SM | V1.1 | 2026-03-26 | System run mode state machine. No V2 needed. |
+| **SM-05** | Executor Shadow SM | — | 2026-05-09 | Executor shadow-mode polling state machine. 位於 `docs/governance_dev/amendments/2026-05-09--SM-05_executor_shadow_mode_polling_design.md`（別名 AMD-2026-05-09-01），非在 `decisions/`。（2026-07-18 審計補入） |
 
 
 ## §1.4 歷史文件 / Historical Documents (2 documents, archived)
@@ -145,7 +148,7 @@ When you need to make a change, find it in this table to know which document gov
 | What changes need approval? | **DOC-06 §3** | GREEN/YELLOW/RED routing tables |
 | What data is available? | **EX-07** | Data sources, freshness, access matrix |
 | How does compute work? | **DOC-08 + DOC-02 §3** | L0–L2 tiers, trigger conditions |
-| When can we go live? | **DOC-04 §11 + DOC-06 §4** | Paper→Live gate: 4wk/500/PnL/30%/Sharpe |
+| When can we go live? | **DOC-04 §11 + DOC-06 §4**（⚠️舊口徑） | ~~Paper→Live gate: 4wk/500/PnL/30%/Sharpe~~ 已過時；現行 = Demo-only（AMD-2026-05-15-01，Stage 0R replay preflight 後 Demo micro-canary）+ 五閘 + Operator 明批。見 `CLAUDE.md` §四。 |
 | What are the root rules? | **DOC-01** | 9 root principles + 7 additional articles |
 
 *End of Document — DOC-NAV Governance Document Navigator V3.0 — OpenClaw/Bybit*

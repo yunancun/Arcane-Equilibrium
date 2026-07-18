@@ -13,6 +13,8 @@ mirror precedent:
   - srv/docs/execution_plan/2026-05-21--v113_m7_decay_signals_schema_spec.md（placeholder spec doc 範式）
 scope: placeholder spec doc — Sprint Y3+ venue activation 後補 full DDL（per ADR-0040 §Decision 1 + §Decision 3）
 ---
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 
 # V116 M13 Multi-Venue / AssetClass Reserved Schema Migration Spec (PLACEHOLDER)
 

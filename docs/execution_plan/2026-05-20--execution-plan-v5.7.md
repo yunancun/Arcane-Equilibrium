@@ -3,7 +3,7 @@
 **Self-Trading Lab + Macro/On-Chain Counterfactual + Earn Cash + Dispatch-Safe Engineering**
 
 **日期**：2026-05-20
-**Status**：DISPATCH READY — accepts all reviewer §1-6 corrections from round 15 audit
+**Status**：⚠️ LEGACY / SUPERSEDED（记于 2026-07-18 文档审计；与下方 REFERENCE banner 一致）— 原文 "DISPATCH READY — accepts all reviewer §1-6 corrections from round 15 audit"，但 v5.7 已非 active dispatch（→ v5.8 autonomy track → v5.9 thesis-shift）。当前 active 权威 = `TODO.md`。
 **Supersedes**: v5.6 (engineering precision drift on 6 verified issues)
 **Foundation**：15 rounds reviewer audit converged + reviewer 6/6 technical corrections verified
 

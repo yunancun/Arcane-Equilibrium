@@ -4,7 +4,7 @@
 **Author**: PA（W1-A sub-agent task）
 **Source SoT**: dispatch packet `srv/docs/execution_plan/2026-05-25--sprint_2_business_dispatch_packet.md` §2.2 candidate #1 + §2.4 dispatch design
 **Predecessor lessons**: memory `project_funding_arb_v2_deprecation_path` + `project_g2_funding_arb_monitor` + ADR-0018 V2 dormant verdict（**2026-05-26 Status 升格 Retired closed per AMD-2026-05-26-01**；funding_short_v2 仍 **不繞** AMD-26-01：新 strategy slot 與 V2 不同設計，per §0 TL;DR §3 維度差異）
-**Status**: PA SPEC — IMPL-ready 給 W2-B E1 sub-agent
+**Status**: ⚠️ DORMANT / 非 IMPL-ready（记于 2026-07-18 文档审计）— 原文 "PA SPEC — IMPL-ready 給 W2-B E1 sub-agent"。funding_short_v2 = regime-dormant / learning-only（见上方 Predecessor lessons「Retired closed per AMD-2026-05-26-01」+ 下方 REFERENCE banner），revive 须 future `TODO.md` gate（参见 ADR-0046 funding v3 slot）。非当前 build 目标。
 **Scope**: Stream A candidate #1 「funding short-only > 30% annualized arbitrage」 IMPL-ready specification
 
 > **REFERENCE / SUPERSEDED FUNDING-CAP LESSON**

@@ -4,6 +4,7 @@
   "source_commit": "0e8f2f26",
   "repo_root": "/Users/ncyu/Projects/TradeBot/srv",
   "source": "repo markdown inventory summary generated from working tree; non-deletion router only",
+  "audit_note_2026_07_18": "STALE as of 2026-07-18 audit: counts drifted since generated_at (agents 11 vs listed 7; adr 50 vs 47; references ~65; runbooks 17). Re-run the inventory generator. This JSON is navigation/scale only, never a deletion/orphan authority.",
   "policy": {
     "purpose": "scale and navigation summary; not an orphan-file detector and not a deletion authority",
     "active_state_authority": "TODO.md",

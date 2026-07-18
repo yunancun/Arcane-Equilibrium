@@ -1,3 +1,5 @@
+> ⚠️ 归档历史文档 — 非当前权威。active 状态见 repo 根 `TODO.md`；本文件仅供历史/审计参考。（2026-07-18 审计批量补入）
+
 # 2026-04-22 · BACKFILL-LABELS-STALLED-1 RCA（read-only）
 
 **作者**：sub-agent（PA 派發）· **狀態**：**未驗證假設**（READ-ONLY，禁 psql/改 code/tail log）
