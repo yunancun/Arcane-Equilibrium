@@ -1738,7 +1738,7 @@ class Runtime:
                 name: self.protected_unit_snapshot(name)
                 for name in ("openclaw-trading-api.service", "openclaw-watchdog.service")
             },
-            "engine": self.pin.engine_processes(),
+            "engine": self.protected_engine_processes(),
             "auth_metadata": self.pin.auth_metadata(),
             "crontab": {
                 "sha256": sha256_bytes(crontab_raw.encode()),
@@ -1752,6 +1752,38 @@ class Runtime:
             "policy": metadata(POLICY_PATH, include_hash=True),
             "dsn_metadata": metadata(DSN_PATH, include_hash=False),
         }
+
+    @staticmethod
+    def _openclaw_engine_pid_candidates(
+        proc_root: Path = Path("/proc"),
+    ) -> list[int]:
+        candidates: list[int] = []
+        for proc in proc_root.iterdir():
+            if not proc.name.isdigit():
+                continue
+            try:
+                comm = (proc / "comm").read_text(encoding="utf-8").strip()
+            except OSError:
+                continue
+            if comm == "openclaw-engine":
+                candidates.append(int(proc.name))
+        return sorted(candidates)
+
+    def protected_engine_processes(self) -> list[dict[str, Any]]:
+        """Bind exact engine identity when present and exact stable absence otherwise."""
+
+        try:
+            return self.pin.engine_processes()
+        except Exception as exc:
+            if str(exc) != "engine_process_topology_mismatch":
+                raise
+        first = self._openclaw_engine_pid_candidates()
+        if first:
+            raise RollforwardError("protected_engine_process_topology_invalid")
+        time.sleep(0.05)
+        if self._openclaw_engine_pid_candidates():
+            raise RollforwardError("protected_engine_process_topology_invalid")
+        return []
 
     def protected_unit_snapshot(self, name: str) -> dict[str, str]:
         properties = (

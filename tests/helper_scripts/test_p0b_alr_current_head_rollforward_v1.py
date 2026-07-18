@@ -1294,6 +1294,32 @@ def test_phase1_stages_without_stopping_or_repinning_old_runtime() -> None:
     assert result["sealed_lineage"]["private_deps_destination"] == str(module.PRIVATE_BUNDLE_DESTINATION)
 
 
+def test_phase1_empty_engine_baseline_rejects_zero_to_one_drift() -> None:
+    module = load_module()
+    approved = approval(module, phase=1)
+
+    class EngineDriftRuntime(FakeRuntime):
+        def __init__(self, runtime_module, approval_data):
+            super().__init__(runtime_module, approval_data)
+            self.protected = {"engine": []}
+
+        def stage_lane(self, before):
+            staged = super().stage_lane(before)
+            self.protected = {
+                "engine": [{"pid": 2193188, "start_ticks": "2300000000000"}]
+            }
+            return staged
+
+    runtime = EngineDriftRuntime(module, approved)
+    approved["protected_sha256"] = module.canonical_digest(runtime.protected)
+    result = module.Phase1Transaction(runtime, approved).apply()
+
+    assert result["status"] == "PHASE1_STAGING_FAILED_OLD_ALR_VERIFIED"
+    assert result["old_runtime_verified"] is True
+    assert runtime.running is True
+    assert "effect" not in runtime.events
+
+
 @pytest.mark.parametrize("failure", ["source", "lane", "collision"])
 def test_phase1_admission_failure_has_no_effect(failure) -> None:
     module = load_module()
@@ -1961,6 +1987,44 @@ def test_protected_unit_snapshot_accepts_stable_historical_restart_baseline() ->
 
     assert snapshot["NRestarts"] == "1"
     assert snapshot["InvocationID"] == "d74a6859241c4f1884bd35e0d08f41bb"
+
+
+def test_deleted_executable_engine_is_still_a_nonempty_candidate(tmp_path) -> None:
+    module = load_module()
+    process = tmp_path / "2193188"
+    process.mkdir()
+    (process / "comm").write_text("openclaw-engine\n", encoding="utf-8")
+    (process / "exe").symlink_to("/srv/openclaw-engine (deleted)")
+
+    assert module.Runtime._openclaw_engine_pid_candidates(tmp_path) == [2193188]
+
+
+def test_protected_engine_snapshot_accepts_exact_absence_but_rejects_nonempty_mismatch() -> None:
+    module = load_module()
+
+    class MissingTopologyPin:
+        @staticmethod
+        def engine_processes():
+            raise RuntimeError("engine_process_topology_mismatch")
+
+    class AbsentHarness:
+        pin = MissingTopologyPin()
+
+        @staticmethod
+        def _openclaw_engine_pid_candidates():
+            return []
+
+    assert module.Runtime.protected_engine_processes(AbsentHarness()) == []
+
+    class NonemptyHarness(AbsentHarness):
+        @staticmethod
+        def _openclaw_engine_pid_candidates():
+            return [2193188]
+
+    with pytest.raises(
+        module.RollforwardError, match="protected_engine_process_topology_invalid"
+    ):
+        module.Runtime.protected_engine_processes(NonemptyHarness())
 
 
 def test_capture_phase1_facts_is_read_only_and_needs_no_approval(monkeypatch, capsys) -> None:
