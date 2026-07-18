@@ -57,6 +57,7 @@ def runtime_authorization(module, *, phase: str, target_head: str | None = None)
             module.GOVERNANCE_BINDING_FIELDS - {
                 "compiled_route_schema", "context_artifact_schema",
                 "ops_preflight_observed_at", "ops_preflight_expires_at",
+                "phase_runtime_bindings_path", "authorization_path",
             }
         ), 1)
     }
@@ -66,6 +67,7 @@ def runtime_authorization(module, *, phase: str, target_head: str | None = None)
         "ops_preflight_observed_at": "2026-07-17T11:50:00Z",
         "ops_preflight_expires_at": "2026-07-17T12:30:00Z",
         "phase_runtime_bindings_path": "/tmp/phase-runtime-bindings.json",
+        "authorization_path": f"/tmp/{phase}-authorization.json",
     })
     claims = module.STAGE_CLAIM_FIELDS if phase == "stage" else module.CUTOVER_CLAIM_FIELDS
     authorization = {
@@ -405,6 +407,7 @@ def test_main_effect_requires_exact_formal_runtime_path_and_file_self_hash(
         ),
     ]
     authorization = runtime_authorization(module, phase="stage")
+    authorization["governance_bindings"]["authorization_path"] = str(auth_path)
     bindings = phase_runtime_bindings(module, authorization)
     authorization["governance_bindings"]["authorized_argv_digest"] = (
         module.authorized_effect_argv_digest(argv)
