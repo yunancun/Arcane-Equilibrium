@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "p0b_alr_phase1_sealed_lineage_bundle_v1.schema.json",
+  "title": "P0-B ALR Phase 1 Sealed Governance Lineage Bundle",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "target_head",
+    "intent_id",
+    "intent_digest",
+    "task_contract_digest",
+    "compiled_route_digest",
+    "context_artifact_digest",
+    "stage_authorization",
+    "stage_authorization_digest",
+    "stage_runtime_bindings",
+    "stage_runtime_bindings_artifact_digest",
+    "phase1_effect_receipt",
+    "phase1_effect_receipt_digest",
+    "phase1_closure",
+    "phase1_closure_digest",
+    "private_deps_receipt",
+    "private_deps_destination",
+    "private_deps_manifest_sha256",
+    "staged_board",
+    "bundle_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "p0b_alr_phase1_sealed_lineage_bundle_v1"},
+    "target_head": {"$ref": "#/$defs/head"},
+    "intent_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{7,127}$"},
+    "intent_digest": {"$ref": "#/$defs/digest"},
+    "task_contract_digest": {"$ref": "#/$defs/digest"},
+    "compiled_route_digest": {"$ref": "#/$defs/digest"},
+    "context_artifact_digest": {"$ref": "#/$defs/digest"},
+    "stage_authorization": {"$ref": "#/$defs/artifactBinding"},
+    "stage_authorization_digest": {"$ref": "#/$defs/digest"},
+    "stage_runtime_bindings": {"$ref": "#/$defs/artifactBinding"},
+    "stage_runtime_bindings_artifact_digest": {"$ref": "#/$defs/digest"},
+    "phase1_effect_receipt": {"$ref": "#/$defs/artifactBinding"},
+    "phase1_effect_receipt_digest": {"$ref": "#/$defs/digest"},
+    "phase1_closure": {"$ref": "#/$defs/artifactBinding"},
+    "phase1_closure_digest": {"$ref": "#/$defs/digest"},
+    "private_deps_receipt": {"$ref": "#/$defs/artifactBinding"},
+    "private_deps_destination": {
+      "const": "/home/ncyu/BybitOpenClaw/var/openclaw/p0b-observer-deps"
+    },
+    "private_deps_manifest_sha256": {"$ref": "#/$defs/rawSha256"},
+    "staged_board": {"$ref": "#/$defs/artifactBinding"},
+    "bundle_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "rawSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "absolutePath": {"type": "string", "pattern": "^/"},
+    "artifactBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"$ref": "#/$defs/absolutePath"},
+        "sha256": {"$ref": "#/$defs/rawSha256"}
+      }
+    }
+  }
+}

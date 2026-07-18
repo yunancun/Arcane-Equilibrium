@@ -363,6 +363,20 @@ Effect Adapters：
   `DEPLOY_RECOVERY_CONTROLS_UNBOUND`，因 exact rollback binding 與 stable observation-window
   controls 尚未分別實作和驗證，故在 `build_then_restart_atomic.sh` component invocation 前
   unconditionally fail closed。
+- `p0b_alr_rollforward_adapter_v1` 是獨立的 purpose-built ALR effect seam，不能以
+  `deploy_adapter_v1` receipt、handwritten approval 或 `context_plan_v1` 代替。`stage` 與
+  `cutover` 各自需要新 route、PM materialized `context_artifact_v1`、PA/E3/OPS role fragment
+  與 command capture、fresh OPS attestation、exact claim inventory、dynamic local HEAD = fresh
+  `origin/main`，以及單向 hash-bound `phase_runtime_bindings_v1`。Runtime-bindings artifact
+  是 pre-admission capture，不 backlink authorization/task digest，避免
+  `authorization_digest ↔ artifact_digest` hash cycle；authorization 再綁其 exact path、bytes
+  與 argv。Stage 保持 `openclaw-alr-shadow.service` identity 不變，只封存 target-head lineage、
+  board 與 offline private observer dependencies。Cutover 只可作用該 unit，先輸出
+  `PHASE2_PROVISIONAL_CUTOVER_READY`；observer v2 對 exact input/兩個自然 cycles/durable
+  decision 回 `OBSERVER_V2_EXACT_POSTCHECK_PASS` 後，Adapter 才可形成
+  `PHASE2_APPLIED_POSTCHECK_PASS`；其後 Closure PASS 仍須 independent OPS postcheck 單向綁定
+  該 final effect receipt。此 Adapter 不授權 broker、
+  order、Decision Lease、live/mainnet 或其他 user-manager/service effect。
 - `broker_probe_adapter_v1` 目前只是 Registry 中的
   `declared_fail_closed_unsupported` seam，**不是可執行 Adapter**。IBKR paths 是 gated
   operator/runtime reference surface；Bybit 是 runtime-owned 且沒有 development-agent

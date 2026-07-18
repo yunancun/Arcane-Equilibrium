@@ -693,6 +693,69 @@
         "service_active": {"const": true}
       }
     },
+    "opsP0bPreflight": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "adapter_id", "phase", "intent_id", "intent_digest",
+        "task_contract_digest", "context_artifact_digest", "compiled_route_digest",
+        "source_head", "target_host", "target_user_unit",
+        "runtime_bindings_digest", "protected_baseline_digest", "observed_at",
+        "expires_at", "ready", "operation_digest"
+      ],
+      "properties": {
+        "schema_version": {"const": "ops_p0b_alr_preflight_v1"},
+        "adapter_id": {"const": "p0b_alr_rollforward_adapter_v1"},
+        "phase": {"enum": ["stage", "cutover"]},
+        "intent_id": {"type": "string", "minLength": 8},
+        "intent_digest": {"$ref": "#/$defs/digest"},
+        "task_contract_digest": {"$ref": "#/$defs/digest"},
+        "context_artifact_digest": {"$ref": "#/$defs/digest"},
+        "compiled_route_digest": {"$ref": "#/$defs/digest"},
+        "source_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "target_host": {"const": "trade-core"},
+        "target_user_unit": {"const": "openclaw-alr-shadow.service"},
+        "runtime_bindings_digest": {"$ref": "#/$defs/digest"},
+        "protected_baseline_digest": {"$ref": "#/$defs/digest"},
+        "observed_at": {"$ref": "#/$defs/timestamp"},
+        "expires_at": {"$ref": "#/$defs/timestamp"},
+        "ready": {"const": true},
+        "operation_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "opsP0bPostcheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "adapter_id", "phase", "intent_id", "intent_digest",
+        "task_contract_digest", "context_artifact_digest", "compiled_route_digest",
+        "source_head", "target_host", "target_user_unit", "effect_receipt_digest",
+        "phase_result_digest", "observer_receipt_digest", "observed_at",
+        "expires_at", "verified", "operation_digest"
+      ],
+      "properties": {
+        "schema_version": {"const": "ops_p0b_alr_postcheck_v1"},
+        "adapter_id": {"const": "p0b_alr_rollforward_adapter_v1"},
+        "phase": {"enum": ["stage", "cutover"]},
+        "intent_id": {"type": "string", "minLength": 8},
+        "intent_digest": {"$ref": "#/$defs/digest"},
+        "task_contract_digest": {"$ref": "#/$defs/digest"},
+        "context_artifact_digest": {"$ref": "#/$defs/digest"},
+        "compiled_route_digest": {"$ref": "#/$defs/digest"},
+        "source_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "target_host": {"const": "trade-core"},
+        "target_user_unit": {"const": "openclaw-alr-shadow.service"},
+        "effect_receipt_digest": {"$ref": "#/$defs/digest"},
+        "phase_result_digest": {"$ref": "#/$defs/digest"},
+        "observer_receipt_digest": {
+          "anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]
+        },
+        "observed_at": {"$ref": "#/$defs/timestamp"},
+        "expires_at": {"$ref": "#/$defs/timestamp"},
+        "verified": {"const": true},
+        "operation_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
     "byteCapture": {
       "type": "object",
       "additionalProperties": false,
@@ -1369,7 +1432,12 @@
           "if": {"properties": {"kind": {"const": "ops_preflight_v1"}}},
           "then": {
             "properties": {
-              "operation_receipt": {"$ref": "#/$defs/opsDeployPreflight"}
+              "operation_receipt": {
+                "anyOf": [
+                  {"$ref": "#/$defs/opsDeployPreflight"},
+                  {"$ref": "#/$defs/opsP0bPreflight"}
+                ]
+              }
             }
           }
         },
@@ -1377,7 +1445,12 @@
           "if": {"properties": {"kind": {"const": "ops_postcheck_v1"}}},
           "then": {
             "properties": {
-              "operation_receipt": {"$ref": "#/$defs/opsDeployPostcheck"}
+              "operation_receipt": {
+                "anyOf": [
+                  {"$ref": "#/$defs/opsDeployPostcheck"},
+                  {"$ref": "#/$defs/opsP0bPostcheck"}
+                ]
+              }
             }
           }
         },

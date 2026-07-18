@@ -43,6 +43,13 @@ Builder、Verifier。Claude/Codex/profile 都由 Registry 生成；平台 runtim
 兩者都唯讀。任何 Deploy/broker contact 只有在 closure-admissible deterministic effect
 Adapter 存在時才可能進入 effect；目前 deploy 是 intent-only、broker contact unsupported。
 
+2026-07-18 增補一個 narrow exception：`p0b_alr_rollforward_adapter_v1` 是 ALR 專用、
+兩階段、closure-admissible Effect Adapter，不改變 generic deploy 的 intent-only 狀態。
+`stage`/`cutover` 必須各自重新編譯 route 與 materialized Context，綁 exact PA/E3/OPS、
+dynamic source/origin、phase-runtime capture、typed intent 與 claim inputs。Stage 不停 ALR；
+cutover 只改 `openclaw-alr-shadow.service`，並以 provisional -> observer-v2 exact PASS ->
+independent postcheck 的單向 DAG 收口。它不授予 broker/order/live/mainnet authority。
+
 ### Dispatch
 
 固定 chain 改為 hybrid risk-DAG。Implementation→E2→E4、authority/security、runtime/
@@ -195,6 +202,12 @@ Costs/risks:
   SSH capture transport。即使 probe reconciliation 通過，apply 仍在 exact rollback binding
   與 stable observation-window controls 分別實作、驗證前，於 component invocation 前
   unconditionally fail closed。底層 build/restart 腳本本身不是授權。
+- P0-B ALR 的 purpose-built contract 使用獨立 intent/result schemas 與 exact phase claim
+  sets。Runtime-bindings 是 pre-admission typed artifact；authorization 單向綁 artifact
+  digest/path/argv，artifact 不 backlink authorization 或 task digest，避免不可構造 hash
+  cycle。Final cutover receipt 必須先綁 provisional digest、observer-v2 exact PASS、兩個
+  distinct natural cycles 與 durable decision；其後 Closure PASS 再要求 independent OPS
+  postcheck 綁定該 final receipt。任一環缺失一律 FAIL。
 - `broker_probe_adapter_v1` 目前是 `declared_fail_closed_unsupported` seam。IBKR runtime paths
   是 gated operator reference，Bybit 沒有 development-agent contact entrypoint；兩者都不是
   本 Module 可執行的 broker Adapter。

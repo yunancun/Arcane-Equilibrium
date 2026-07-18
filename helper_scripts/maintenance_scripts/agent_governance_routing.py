@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from pathlib import PurePosixPath
 from typing import Any, Iterable
@@ -45,6 +46,63 @@ BROKER_SURFACES = {"bybit", "ibkr", "tws", "stock_etf_cash", "broker_session"}
 UNSUPPORTED_EFFECT_CLASSES = {
     "broker_probe", "broker_private_effect", "private_external_contact",
 }
+P0B_ADAPTER_ID = "p0b_alr_rollforward_adapter_v1"
+P0B_CLAIM_KEYS_BY_PHASE = {
+    "stage": frozenset({
+        "p0b_effect_adapter_selection",
+        "p0b_adapter_source",
+        "p0b_adapter_tests",
+        "p0b_base_adapter_source",
+        "p0b_generation_apply_source",
+        "p0b_phase_runtime_bindings",
+        "p0b_runtime_source_binding",
+        "p0b_runtime_protected_binding",
+        "p0b_runtime_paths_binding",
+        "p0b_runtime_inventories_binding",
+        "p0b_runtime_lineage_binding",
+        "p0b_private_bundle_stager_source",
+        "p0b_private_bundle_stager_tests",
+        "p0b_private_bundle_source_manifest",
+        "p0b_private_bundle_destination_absent_attestation",
+        "p0b_target_source_attestation",
+        "p0b_completion_inventory",
+        "p0b_producer_inventory",
+        "p0b_live_inventory",
+        "p0b_protected_runtime_baseline",
+        "p0b_p0a_completed_board_input",
+    }),
+    "cutover": frozenset({
+        "p0b_effect_adapter_selection",
+        "p0b_adapter_source",
+        "p0b_adapter_tests",
+        "p0b_base_adapter_source",
+        "p0b_generation_apply_source",
+        "p0b_phase_runtime_bindings",
+        "p0b_runtime_source_binding",
+        "p0b_runtime_protected_binding",
+        "p0b_runtime_paths_binding",
+        "p0b_runtime_inventories_binding",
+        "p0b_runtime_lineage_binding",
+        "p0b_observer_source",
+        "p0b_observer_tests",
+        "p0b_observer_dependency_source",
+        "p0b_phase1_task_contract",
+        "p0b_phase1_route",
+        "p0b_phase1_context_artifact",
+        "p0b_phase1_intent",
+        "p0b_phase1_receipt",
+        "p0b_phase1_closure",
+        "p0b_sealed_lineage_bundle",
+        "p0b_private_bundle_receipt",
+        "p0b_private_bundle_destination",
+        "p0b_target_source_attestation",
+        "p0b_completion_inventory",
+        "p0b_producer_inventory",
+        "p0b_live_inventory",
+        "p0b_protected_runtime_baseline",
+        "p0b_staged_candidate_board",
+    }),
+}
 ROUTED_WORK_NODES = {
     "implementation", "implementation_backend", "implementation_frontend",
     "test_implementation", "docs_update", "docs_projection",
@@ -57,6 +115,45 @@ TASK_CONTRACT_FIELDS = (
 )
 def _sha256_bytes(value: bytes) -> str:
     return "sha256:" + hashlib.sha256(value).hexdigest()
+
+
+def p0b_effect_selection_digest(phase: str) -> str:
+    """Return the only admitted selector digest for one P0-B effect phase."""
+
+    if phase not in P0B_CLAIM_KEYS_BY_PHASE:
+        raise ValueError(f"invalid P0-B effect phase: {phase}")
+    selection = {
+        "adapter_id": P0B_ADAPTER_ID,
+        "phase": phase,
+        "schema_version": "effect_adapter_selection_v1",
+    }
+    return _sha256_bytes(json.dumps(
+        selection, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8"))
+
+
+def _p0b_effect_phase(claim_inputs: dict[str, str]) -> str | None:
+    selector = claim_inputs.get("p0b_effect_adapter_selection")
+    p0b_keys = set().union(*P0B_CLAIM_KEYS_BY_PHASE.values())
+    if selector is None:
+        if set(claim_inputs).intersection(p0b_keys):
+            raise ValueError("P0-B effect claim_inputs require an exact selection digest")
+        return None
+    matching = [
+        phase for phase in P0B_CLAIM_KEYS_BY_PHASE
+        if selector == p0b_effect_selection_digest(phase)
+    ]
+    if len(matching) != 1:
+        raise ValueError("P0-B effect adapter selection digest is invalid")
+    phase = matching[0]
+    expected = P0B_CLAIM_KEYS_BY_PHASE[phase]
+    if set(claim_inputs) != expected:
+        raise ValueError(
+            "P0-B effect selection digest requires exact claim_inputs: "
+            f"missing={sorted(expected - set(claim_inputs))} "
+            f"extra={sorted(set(claim_inputs) - expected)}"
+        )
+    return phase
 
 
 def _documentation_path(path: str) -> bool:
@@ -388,6 +485,18 @@ def route_task(task_facts: dict[str, Any]) -> dict[str, Any]:
     runtime_claim = facts.get("runtime_claim", False)
     end_to_end_claim = facts.get("end_to_end_claim", False)
     effect = facts["side_effect_class"]
+    p0b_phase = _p0b_effect_phase(facts["claim_inputs"])
+    if p0b_phase is not None:
+        if not (
+            effect == "deploy"
+            and facts["runtime_claim"] is True
+            and {"authority", "service", "runtime_effect"}.issubset(surfaces)
+            and risk in {"high", "critical"}
+        ):
+            raise ValueError(
+                "P0-B effect selection requires deploy, runtime_claim=true, "
+                "authority/service/runtime_effect surfaces, and high or critical risk"
+            )
     implementation = shape in SOURCE_WRITE_SHAPES
     full_stack_implementation = bool(
         implementation
@@ -416,6 +525,7 @@ def route_task(task_facts: dict[str, Any]) -> dict[str, Any]:
     def add(
         node_id: str, *, role: str | None = None, kind: str = "role",
         requires: Iterable[str] = (), mandatory: bool = True, reason: str,
+        **metadata: Any,
     ) -> None:
         node = {
             "id": node_id, "kind": kind, "requires": list(requires),
@@ -427,6 +537,7 @@ def route_task(task_facts: dict[str, Any]) -> dict[str, Any]:
                 node.update(native_agent_binding(
                     role, "work" if node_id in ROUTED_WORK_NODES else "verification"
                 ))
+        node.update(metadata)
         nodes.append(node)
 
     add("pm_triage", role="PM", reason="bind task facts, authority classes, acceptance, and scope")
@@ -511,9 +622,25 @@ def route_task(task_facts: dict[str, Any]) -> dict[str, Any]:
         add("ops_preflight", role="OPS", requires=[predecessor, *gates], reason="runtime/deploy preflight hard edge")
         postcheck_requires = ["ops_preflight"]
         if deploy:
-            add("pm_deploy_approval", role="PM", requires=["ops_preflight"], reason="operator/PM authorizes exact intent; not verification")
-            add("deploy_adapter_v1", kind="effect_adapter", requires=["pm_deploy_approval"], reason="only deterministic effectful deployment seam")
-            postcheck_requires = ["deploy_adapter_v1"]
+            if p0b_phase is None:
+                add("pm_deploy_approval", role="PM", requires=["ops_preflight"], reason="operator/PM authorizes exact intent; not verification")
+                add("deploy_adapter_v1", kind="effect_adapter", requires=["pm_deploy_approval"], reason="generic deployment intent-validation seam")
+                postcheck_requires = ["deploy_adapter_v1"]
+            else:
+                approval_id = f"pm_p0b_{p0b_phase}_approval"
+                add(
+                    approval_id, role="PM", requires=["ops_preflight"],
+                    reason=f"operator/PM authorizes the exact P0-B {p0b_phase} intent; not verification",
+                )
+                add(
+                    P0B_ADAPTER_ID, kind="effect_adapter",
+                    requires=[approval_id],
+                    reason=f"purpose-built P0-B {p0b_phase} effect seam",
+                    effect_phase=p0b_phase,
+                    intent_schema_version="p0b_alr_rollforward_intent_v1",
+                    result_schema_version="p0b_alr_rollforward_effect_result_v1",
+                )
+                postcheck_requires = [P0B_ADAPTER_ID]
         add("ops_postcheck", role="OPS", requires=postcheck_requires, reason="independent operational evidence")
         predecessor = "ops_postcheck"
     elif unsupported_effect:

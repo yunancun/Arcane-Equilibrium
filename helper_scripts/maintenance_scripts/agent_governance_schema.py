@@ -52,6 +52,14 @@ def schema_subset_errors(
         ):
             errors.append(f"{path}: does not satisfy anyOf")
             return errors
+    if "oneOf" in schema:
+        matches = sum(
+            not schema_subset_errors(value, option, root_schema, path)
+            for option in schema["oneOf"]
+        )
+        if matches != 1:
+            errors.append(f"{path}: satisfies {matches} oneOf branches, expected one")
+            return errors
     if "not" in schema and not schema_subset_errors(value, schema["not"], root_schema, path):
         errors.append(f"{path}: matches forbidden not-schema")
 
@@ -107,13 +115,36 @@ def schema_subset_errors(
             errors.append(f"{path}: array does not contain a required matching item")
 
     if isinstance(value, dict):
+        if len(value) < int(schema.get("minProperties", 0)):
+            errors.append(f"{path}: object has fewer than minProperties")
+        if "maxProperties" in schema and len(value) > int(schema["maxProperties"]):
+            errors.append(f"{path}: object has more than maxProperties")
         required = set(schema.get("required", []))
         for key in sorted(required - set(value)):
             errors.append(f"{path}: missing required property {key}")
         properties = schema.get("properties", {})
-        if schema.get("additionalProperties") is False:
-            for key in sorted(set(value) - set(properties)):
+        pattern_properties = schema.get("patternProperties", {})
+        compiled_patterns = [
+            (re.compile(str(pattern)), child_schema)
+            for pattern, child_schema in pattern_properties.items()
+        ]
+        for key in sorted(set(value) - set(properties)):
+            matches = [
+                child_schema for pattern, child_schema in compiled_patterns
+                if pattern.search(key)
+            ]
+            if matches:
+                for child_schema in matches:
+                    errors.extend(schema_subset_errors(
+                        value[key], child_schema, root_schema, f"{path}.{key}"
+                    ))
+            elif schema.get("additionalProperties") is False:
                 errors.append(f"{path}: unexpected property {key}")
+            elif isinstance(schema.get("additionalProperties"), dict):
+                errors.extend(schema_subset_errors(
+                    value[key], schema["additionalProperties"], root_schema,
+                    f"{path}.{key}",
+                ))
         for key, child_schema in properties.items():
             if key in value:
                 errors.extend(
