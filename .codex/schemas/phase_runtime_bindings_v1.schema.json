@@ -1,0 +1,484 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/phase_runtime_bindings_v1.schema.json",
+  "title": "phase_runtime_bindings_v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "phase", "intent_id", "target_head", "observed_at",
+    "expires_at", "source_attestation", "protected_runtime_baseline",
+    "phase_paths", "inventories", "lineage", "section_claims", "artifact_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "phase_runtime_bindings_v1"},
+    "phase": {"enum": ["stage", "cutover"]},
+    "intent_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._:-]{7,127}$"},
+    "target_head": {"$ref": "#/$defs/head"},
+    "observed_at": {"$ref": "#/$defs/timestamp"},
+    "expires_at": {"$ref": "#/$defs/timestamp"},
+    "source_attestation": {"$ref": "#/$defs/sourceAttestation"},
+    "protected_runtime_baseline": {"$ref": "#/$defs/protectedRuntimeBaseline"},
+    "phase_paths": {"type": "object"},
+    "inventories": {"$ref": "#/$defs/inventories"},
+    "lineage": {"type": "object"},
+    "section_claims": {"$ref": "#/$defs/sectionClaims"},
+    "artifact_digest": {"$ref": "#/$defs/digest"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"phase": {"const": "stage"}}},
+      "then": {
+        "properties": {
+          "phase_paths": {"$ref": "#/$defs/stagePaths"},
+          "lineage": {"$ref": "#/$defs/stageLineage"}
+        }
+      },
+      "else": {
+        "properties": {
+          "phase_paths": {"$ref": "#/$defs/cutoverPaths"},
+          "lineage": {"$ref": "#/$defs/cutoverLineage"}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "rawSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "absolutePath": {"type": "string", "pattern": "^/"},
+    "artifactBinding": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"$ref": "#/$defs/absolutePath"},
+        "sha256": {"$ref": "#/$defs/rawSha256"}
+      }
+    },
+    "metadata": {
+      "type": "object", "additionalProperties": false,
+      "required": ["dev", "ino", "uid", "gid", "mode", "nlink", "size", "mtime_ns", "ctime_ns"],
+      "properties": {
+        "dev": {"type": "integer", "minimum": 0},
+        "ino": {"type": "integer", "minimum": 1},
+        "uid": {"type": "integer", "minimum": 0},
+        "gid": {"type": "integer", "minimum": 0},
+        "mode": {"type": "integer", "minimum": 0},
+        "nlink": {"type": "integer", "minimum": 1},
+        "size": {"type": "integer", "minimum": 0},
+        "mtime_ns": {"type": "integer", "minimum": 0},
+        "ctime_ns": {"type": "integer", "minimum": 0}
+      }
+    },
+    "metadataWithHash": {
+      "type": "object", "additionalProperties": false,
+      "required": ["dev", "ino", "uid", "gid", "mode", "nlink", "size", "mtime_ns", "ctime_ns", "sha256"],
+      "properties": {
+        "dev": {"type": "integer", "minimum": 0},
+        "ino": {"type": "integer", "minimum": 1},
+        "uid": {"type": "integer", "minimum": 0},
+        "gid": {"type": "integer", "minimum": 0},
+        "mode": {"type": "integer", "minimum": 0},
+        "nlink": {"type": "integer", "minimum": 1},
+        "size": {"type": "integer", "minimum": 0},
+        "mtime_ns": {"type": "integer", "minimum": 0},
+        "ctime_ns": {"type": "integer", "minimum": 0},
+        "sha256": {"$ref": "#/$defs/rawSha256"}
+      }
+    },
+    "sourceAttestation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["source", "execution_tree", "source_tree_digest"],
+      "properties": {
+        "source": {"$ref": "#/$defs/sourceSnapshot"},
+        "execution_tree": {"$ref": "#/$defs/executionTree"},
+        "source_tree_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "sourceSnapshot": {
+      "type": "object", "additionalProperties": false,
+      "required": ["branch", "head", "clean", "origin_main", "remote_origin_main", "uid", "gid"],
+      "properties": {
+        "branch": {"const": "main"},
+        "head": {"$ref": "#/$defs/head"},
+        "clean": {"const": true},
+        "origin_main": {"$ref": "#/$defs/head"},
+        "remote_origin_main": {"$ref": "#/$defs/head"},
+        "uid": {"const": 1000},
+        "gid": {"const": 1000}
+      }
+    },
+    "executionTree": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "git_tree_listing_sha256", "git_tree_entries", "cron_sha256",
+        "publisher_sha256", "generation_pin_helper_sha256"
+      ],
+      "properties": {
+        "git_tree_listing_sha256": {"$ref": "#/$defs/rawSha256"},
+        "git_tree_entries": {"type": "integer", "minimum": 1},
+        "cron_sha256": {"$ref": "#/$defs/rawSha256"},
+        "publisher_sha256": {"$ref": "#/$defs/rawSha256"},
+        "generation_pin_helper_sha256": {"$ref": "#/$defs/rawSha256"}
+      }
+    },
+    "activeIdentity": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "MainPID", "ProcessStartTicks", "InvocationID",
+        "ExecMainStartTimestampMonotonic", "NRestarts", "ALRSourceHead",
+        "ControlGroup"
+      ],
+      "properties": {
+        "MainPID": {"type": "string", "pattern": "^[1-9][0-9]*$"},
+        "ProcessStartTicks": {"type": "string", "pattern": "^[1-9][0-9]*$"},
+        "InvocationID": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+        "ExecMainStartTimestampMonotonic": {"type": "string", "pattern": "^[1-9][0-9]*$"},
+        "NRestarts": {"const": "0"},
+        "ALRSourceHead": {"$ref": "#/$defs/head"},
+        "ControlGroup": {"type": "string", "pattern": "^/"}
+      }
+    },
+    "serviceBaseline": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "unit_sha256", "pin_sha256", "unit_head", "pin_head", "active_identity",
+        "unit_identity", "pin_identity", "unit_lock_identity", "cost_lock_identity",
+        "alpha_lock_identity"
+      ],
+      "properties": {
+        "unit_sha256": {"$ref": "#/$defs/rawSha256"},
+        "pin_sha256": {"$ref": "#/$defs/rawSha256"},
+        "unit_head": {"$ref": "#/$defs/head"},
+        "pin_head": {"$ref": "#/$defs/head"},
+        "active_identity": {"$ref": "#/$defs/activeIdentity"},
+        "unit_identity": {"$ref": "#/$defs/serviceFileIdentity"},
+        "pin_identity": {"$ref": "#/$defs/serviceFileIdentity"},
+        "unit_lock_identity": {"$ref": "#/$defs/lockIdentity"},
+        "cost_lock_identity": {"$ref": "#/$defs/lockIdentity"},
+        "alpha_lock_identity": {"$ref": "#/$defs/lockIdentity"}
+      }
+    },
+    "serviceFileIdentity": {
+      "type": "object", "additionalProperties": false,
+      "required": ["sha256", "dev", "ino", "uid", "gid", "mode", "nlink", "size"],
+      "properties": {
+        "sha256": {"$ref": "#/$defs/rawSha256"},
+        "dev": {"type": "integer", "minimum": 0},
+        "ino": {"type": "integer", "minimum": 1},
+        "uid": {"const": 1000}, "gid": {"const": 1000},
+        "mode": {"type": "integer", "minimum": 0},
+        "nlink": {"const": 1}, "size": {"type": "integer", "minimum": 0}
+      }
+    },
+    "lockIdentity": {
+      "type": "object", "additionalProperties": false,
+      "required": ["dev", "ino", "uid", "gid", "mode", "nlink"],
+      "properties": {
+        "dev": {"type": "integer", "minimum": 0},
+        "ino": {"type": "integer", "minimum": 1},
+        "uid": {"const": 1000}, "gid": {"const": 1000},
+        "mode": {"const": 384}, "nlink": {"const": 1}
+      }
+    },
+    "unitState": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "LoadState", "ActiveState", "SubState", "MainPID",
+        "ExecMainStartTimestampMonotonic", "NRestarts", "InvocationID",
+        "FragmentPath", "DropInPaths", "ControlGroup", "NeedDaemonReload"
+      ],
+      "properties": {
+        "LoadState": {"type": "string"}, "ActiveState": {"type": "string"},
+        "SubState": {"type": "string"}, "MainPID": {"type": "string"},
+        "ExecMainStartTimestampMonotonic": {"type": "string"},
+        "NRestarts": {"type": "string"}, "InvocationID": {"type": "string"},
+        "FragmentPath": {"type": "string"}, "DropInPaths": {"type": "string"},
+        "ControlGroup": {"type": "string"}, "NeedDaemonReload": {"type": "string"}
+      }
+    },
+    "engineRow": {
+      "type": "object", "additionalProperties": false,
+      "required": ["pid", "ppid", "pgid", "start_ticks", "exe", "exe_sha256"],
+      "properties": {
+        "pid": {"type": "integer", "minimum": 1},
+        "ppid": {"type": "integer", "minimum": 0},
+        "pgid": {"type": "integer", "minimum": 1},
+        "start_ticks": {"type": "string", "pattern": "^[1-9][0-9]*$"},
+        "exe": {"$ref": "#/$defs/absolutePath"},
+        "exe_sha256": {"$ref": "#/$defs/rawSha256"}
+      }
+    },
+    "authMetadataRow": {
+      "anyOf": [
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["path", "exists"],
+          "properties": {"path": {"$ref": "#/$defs/absolutePath"}, "exists": {"const": false}}
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["path", "exists", "dev", "ino", "uid", "gid", "mode", "size", "nlink"],
+          "properties": {
+            "path": {"$ref": "#/$defs/absolutePath"}, "exists": {"const": true},
+            "dev": {"type": "integer", "minimum": 0}, "ino": {"type": "integer", "minimum": 1},
+            "uid": {"type": "integer", "minimum": 0}, "gid": {"type": "integer", "minimum": 0},
+            "mode": {"type": "integer", "minimum": 0}, "size": {"type": "integer", "minimum": 0},
+            "nlink": {"type": "integer", "minimum": 1}
+          }
+        }
+      ]
+    },
+    "pinConsumerInventory": {
+      "type": "object", "additionalProperties": false,
+      "required": ["generation_overrides", "cost", "alpha", "active_crontab_sha256"],
+      "properties": {
+        "generation_overrides": {"type": "array", "maxItems": 0},
+        "cost": {"$ref": "#/$defs/singlePinConsumer"},
+        "alpha": {"$ref": "#/$defs/singlePinConsumer"},
+        "active_crontab_sha256": {"$ref": "#/$defs/rawSha256"}
+      }
+    },
+    "singlePinConsumer": {
+      "type": "object", "additionalProperties": false,
+      "required": ["count", "line_sha256"],
+      "properties": {"count": {"const": 1}, "line_sha256": {"$ref": "#/$defs/rawSha256"}}
+    },
+    "userUnit": {
+      "type": "object", "additionalProperties": false,
+      "required": ["fragment", "dropins"],
+      "properties": {
+        "fragment": {"$ref": "#/$defs/metadataWithHash"},
+        "dropins": {"type": "array", "items": {"$ref": "#/$defs/metadataWithHash"}}
+      }
+    },
+    "protectedSnapshot": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "units", "engine", "auth_metadata", "crontab", "global_pin_consumers",
+        "user_unit_inventory", "user_manager_jobs", "policy", "dsn_metadata"
+      ],
+      "properties": {
+        "units": {
+          "type": "object", "additionalProperties": false,
+          "required": ["openclaw-trading-api.service", "openclaw-watchdog.service"],
+          "properties": {
+            "openclaw-trading-api.service": {"$ref": "#/$defs/unitState"},
+            "openclaw-watchdog.service": {"$ref": "#/$defs/unitState"}
+          }
+        },
+        "engine": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"$ref": "#/$defs/engineRow"}},
+        "auth_metadata": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"$ref": "#/$defs/authMetadataRow"}},
+        "crontab": {
+          "type": "object", "additionalProperties": false,
+          "required": ["sha256", "bytes", "generation_overrides"],
+          "properties": {
+            "sha256": {"$ref": "#/$defs/rawSha256"}, "bytes": {"type": "integer", "minimum": 1},
+            "generation_overrides": {"type": "array", "maxItems": 0}
+          }
+        },
+        "global_pin_consumers": {"$ref": "#/$defs/pinConsumerInventory"},
+        "user_unit_inventory": {
+          "type": "object", "additionalProperties": false,
+          "minProperties": 1,
+          "patternProperties": {"^[A-Za-z0-9@_.:-]+\\.service$": {"$ref": "#/$defs/userUnit"}}
+        },
+        "user_manager_jobs": {
+          "type": "object", "additionalProperties": false,
+          "required": ["status", "inventory_sha256"],
+          "properties": {"status": {"const": "NO_QUEUED_JOB"}, "inventory_sha256": {"$ref": "#/$defs/digest"}}
+        },
+        "policy": {"$ref": "#/$defs/metadataWithHash"},
+        "dsn_metadata": {"$ref": "#/$defs/metadata"}
+      }
+    },
+    "runtimeIdentity": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "schema_version", "target_host", "target_user_unit", "source_head",
+        "invocation_id", "main_pid", "main_pid_start_ticks", "control_group",
+        "unit_fragment_path", "unit_file_sha256", "pin_path", "pin_sha256",
+        "cost_pin_lock_path", "alpha_pin_lock_path", "nrestarts", "active_state",
+        "sub_state", "observed_at"
+      ],
+      "properties": {
+        "schema_version": {"const": "p0b_protected_runtime_identity_v1"},
+        "target_host": {"const": "trade-core"},
+        "target_user_unit": {"const": "openclaw-alr-shadow.service"},
+        "source_head": {"$ref": "#/$defs/head"},
+        "invocation_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+        "main_pid": {"type": "string", "pattern": "^[1-9][0-9]*$"},
+        "main_pid_start_ticks": {"type": "string", "pattern": "^[1-9][0-9]*$"},
+        "control_group": {"type": "string", "pattern": "^/"},
+        "unit_fragment_path": {"const": "/home/ncyu/.config/systemd/user/openclaw-alr-shadow.service"},
+        "unit_file_sha256": {"$ref": "#/$defs/rawSha256"},
+        "pin_path": {"const": "/home/ncyu/BybitOpenClaw/var/openclaw/runtime_generation/expected_source_head.json"},
+        "pin_sha256": {"$ref": "#/$defs/rawSha256"},
+        "cost_pin_lock_path": {"const": "/home/ncyu/BybitOpenClaw/var/openclaw/locks/cost_gate_learning_lane_cron.lock"},
+        "alpha_pin_lock_path": {"const": "/home/ncyu/BybitOpenClaw/var/openclaw/locks/alpha_discovery_throughput_cron.lock"},
+        "nrestarts": {"const": 0},
+        "active_state": {"const": "active"},
+        "sub_state": {"const": "running"},
+        "observed_at": {"$ref": "#/$defs/timestamp"}
+      }
+    },
+    "protectedRuntimeBaseline": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "service_baseline", "protected", "protected_digest",
+        "pin_consumer_inventory", "pin_consumer_inventory_digest",
+        "runtime_identity", "runtime_identity_digest"
+      ],
+      "properties": {
+        "service_baseline": {"$ref": "#/$defs/serviceBaseline"},
+        "protected": {"$ref": "#/$defs/protectedSnapshot"},
+        "protected_digest": {"$ref": "#/$defs/digest"},
+        "pin_consumer_inventory": {"$ref": "#/$defs/pinConsumerInventory"},
+        "pin_consumer_inventory_digest": {"$ref": "#/$defs/digest"},
+        "runtime_identity": {"$ref": "#/$defs/runtimeIdentity"},
+        "runtime_identity_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "stagePaths": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "staging_root", "cron_destination", "sealed_destination",
+        "publisher_receipt_path", "private_deps_receipt_path",
+        "private_deps_destination", "phase1_receipt_path", "phase1_closure_path"
+      ],
+      "properties": {
+        "staging_root": {"$ref": "#/$defs/absolutePath"},
+        "cron_destination": {"$ref": "#/$defs/absolutePath"},
+        "sealed_destination": {"$ref": "#/$defs/absolutePath"},
+        "publisher_receipt_path": {"$ref": "#/$defs/absolutePath"},
+        "private_deps_receipt_path": {"$ref": "#/$defs/absolutePath"},
+        "private_deps_destination": {"const": "/home/ncyu/BybitOpenClaw/var/openclaw/p0b-observer-deps"},
+        "phase1_receipt_path": {"$ref": "#/$defs/absolutePath"},
+        "phase1_closure_path": {"$ref": "#/$defs/absolutePath"}
+      }
+    },
+    "cutoverPaths": {
+      "type": "object", "additionalProperties": false,
+      "required": ["phase1_receipt_path", "phase1_closure_path", "live_destination", "provisional_cutover_path", "observer_input_path"],
+      "properties": {
+        "phase1_receipt_path": {"$ref": "#/$defs/absolutePath"},
+        "phase1_closure_path": {"$ref": "#/$defs/absolutePath"},
+        "live_destination": {"const": "/home/ncyu/.local/share/openclaw/alr-candidate-evidence"},
+        "provisional_cutover_path": {"$ref": "#/$defs/absolutePath"},
+        "observer_input_path": {"$ref": "#/$defs/absolutePath"}
+      }
+    },
+    "hashInventory": {
+      "type": "object", "additionalProperties": false,
+      "patternProperties": {"^[^/]+$": {"$ref": "#/$defs/rawSha256"}}
+    },
+    "ledgerEntry": {
+      "type": "object", "additionalProperties": false,
+      "required": ["sha256", "bytes", "lines", "dev", "ino", "uid", "gid", "mode", "nlink"],
+      "properties": {
+        "sha256": {"$ref": "#/$defs/rawSha256"}, "bytes": {"type": "integer", "minimum": 0},
+        "lines": {"type": "integer", "minimum": 0}, "dev": {"type": "integer", "minimum": 0},
+        "ino": {"type": "integer", "minimum": 1}, "uid": {"type": "integer", "minimum": 0},
+        "gid": {"type": "integer", "minimum": 0}, "mode": {"type": "integer", "minimum": 0},
+        "nlink": {"type": "integer", "minimum": 1}
+      }
+    },
+    "laneEffectiveConfig": {
+      "type": "object", "additionalProperties": false,
+      "required": ["ledger_path", "materialize_rejects", "append_materialized_rejects", "append_outcomes", "record_probe_outcomes"],
+      "properties": {
+        "ledger_path": {"const": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/probe_ledger.jsonl"},
+        "materialize_rejects": {"const": true},
+        "append_materialized_rejects": {"const": true},
+        "append_outcomes": {"const": true},
+        "record_probe_outcomes": {"const": false}
+      }
+    },
+    "inventories": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "live_inventory", "live_inventory_digest", "completion_inventory",
+        "completion_inventory_digest", "producer_inventory", "producer_inventory_digest",
+        "ledger_inventory", "ledger_inventory_digest", "lane_effective_config",
+        "lane_effective_config_digest"
+      ],
+      "properties": {
+        "live_inventory": {"$ref": "#/$defs/hashInventory"},
+        "live_inventory_digest": {"$ref": "#/$defs/digest"},
+        "completion_inventory": {"$ref": "#/$defs/hashInventory"},
+        "completion_inventory_digest": {"$ref": "#/$defs/digest"},
+        "producer_inventory": {"$ref": "#/$defs/hashInventory"},
+        "producer_inventory_digest": {"$ref": "#/$defs/digest"},
+        "ledger_inventory": {
+          "type": "object", "additionalProperties": false, "minProperties": 1,
+          "patternProperties": {"^probe_ledger[^/]*\\.jsonl$": {"$ref": "#/$defs/ledgerEntry"}}
+        },
+        "ledger_inventory_digest": {"$ref": "#/$defs/digest"},
+        "lane_effective_config": {"$ref": "#/$defs/laneEffectiveConfig"},
+        "lane_effective_config_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "stageLineage": {
+      "type": "object", "additionalProperties": false,
+      "required": ["p0a_completed_board_input", "private_bundle_destination_absent"],
+      "properties": {
+        "p0a_completed_board_input": {"$ref": "#/$defs/artifactBinding"},
+        "private_bundle_destination_absent": {
+          "type": "object", "additionalProperties": false,
+          "required": ["destination", "absent"],
+          "properties": {
+            "destination": {"const": "/home/ncyu/BybitOpenClaw/var/openclaw/p0b-observer-deps"},
+            "absent": {"const": true}
+          }
+        }
+      }
+    },
+    "cutoverLineage": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "phase1_receipt", "phase1_closure", "sealed_lineage_bundle", "completion",
+        "producer_board", "staged_board", "staging_publisher_receipt", "private_deps_receipt",
+        "token", "max_age_seconds", "proposed_unit_sha256", "private_deps_destination",
+        "private_deps_manifest_sha256", "completion_inventory_digest",
+        "producer_inventory_digest", "ledger_pre_inventory_digest",
+        "ledger_post_inventory_digest", "lane_effective_config_digest"
+      ],
+      "properties": {
+        "phase1_receipt": {"$ref": "#/$defs/artifactBinding"},
+        "phase1_closure": {"$ref": "#/$defs/artifactBinding"},
+        "sealed_lineage_bundle": {"$ref": "#/$defs/artifactBinding"},
+        "completion": {"$ref": "#/$defs/artifactBinding"},
+        "producer_board": {"$ref": "#/$defs/artifactBinding"},
+        "staged_board": {"$ref": "#/$defs/artifactBinding"},
+        "staging_publisher_receipt": {"$ref": "#/$defs/artifactBinding"},
+        "private_deps_receipt": {"$ref": "#/$defs/artifactBinding"},
+        "token": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+        "max_age_seconds": {"type": "integer", "minimum": 1, "maximum": 172800},
+        "proposed_unit_sha256": {"$ref": "#/$defs/rawSha256"},
+        "private_deps_destination": {"const": "/home/ncyu/BybitOpenClaw/var/openclaw/p0b-observer-deps"},
+        "private_deps_manifest_sha256": {"$ref": "#/$defs/rawSha256"},
+        "completion_inventory_digest": {"$ref": "#/$defs/digest"},
+        "producer_inventory_digest": {"$ref": "#/$defs/digest"},
+        "ledger_pre_inventory_digest": {"$ref": "#/$defs/digest"},
+        "ledger_post_inventory_digest": {"$ref": "#/$defs/digest"},
+        "lane_effective_config_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "sectionClaim": {
+      "type": "object", "additionalProperties": false,
+      "required": ["claim", "digest"],
+      "properties": {"claim": {"type": "string"}, "digest": {"$ref": "#/$defs/digest"}}
+    },
+    "sectionClaims": {
+      "type": "object", "additionalProperties": false,
+      "required": ["source_attestation", "protected_runtime_baseline", "phase_paths", "inventories", "lineage"],
+      "properties": {
+        "source_attestation": {"allOf": [{"$ref": "#/$defs/sectionClaim"}, {"properties": {"claim": {"const": "p0b_runtime_source_binding"}}}]},
+        "protected_runtime_baseline": {"allOf": [{"$ref": "#/$defs/sectionClaim"}, {"properties": {"claim": {"const": "p0b_runtime_protected_binding"}}}]},
+        "phase_paths": {"allOf": [{"$ref": "#/$defs/sectionClaim"}, {"properties": {"claim": {"const": "p0b_runtime_paths_binding"}}}]},
+        "inventories": {"allOf": [{"$ref": "#/$defs/sectionClaim"}, {"properties": {"claim": {"const": "p0b_runtime_inventories_binding"}}}]},
+        "lineage": {"allOf": [{"$ref": "#/$defs/sectionClaim"}, {"properties": {"claim": {"const": "p0b_runtime_lineage_binding"}}}]}
+      }
+    }
+  }
+}

@@ -12,6 +12,7 @@ from typing import Any
 
 from agent_governance_schema import schema_subset_errors
 from agent_governance_effect_evidence import deploy_evidence_identity_errors
+import agent_governance_p0b_effects as p0b_effects
 
 
 ADAPTER_ID = "deploy_adapter_v1"
@@ -48,25 +49,17 @@ SAFE_RUNTIME_ENVIRONMENTS = {
     "live_demo": ("bybit_demo", False, "live_demo", "live_demo_only"),
     "research_runtime": ("research_local", False, "research_runtime", "research_read_only"),
 }
-
-
 @lru_cache(maxsize=1)
 def _receipt_schema() -> dict[str, Any]:
     return json.loads(RECEIPT_SCHEMA_PATH.read_text(encoding="utf-8"))
-
-
 @lru_cache(maxsize=1)
 def _runtime_attestation_schema() -> dict[str, Any]:
     return json.loads(RUNTIME_ATTESTATION_SCHEMA_PATH.read_text(encoding="utf-8"))
-
-
 def _parse_time(value: str) -> datetime:
     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     if parsed.tzinfo is None:
         raise ValueError("timezone is required")
     return parsed
-
-
 def _sha256_bytes(value: bytes) -> str:
     return "sha256:" + hashlib.sha256(value).hexdigest()
 
@@ -661,6 +654,10 @@ def validate_effect_evidence(
     """Validate a receipt and every wrapper-to-receipt binding."""
 
     receipt = evidence.get("receipt")
+    if isinstance(receipt, dict) and receipt.get("adapter_id") == p0b_effects.P0B_ADAPTER_ID:
+        return p0b_effects.validate_p0b_effect_evidence(
+            evidence, expected_source_head=expected_source_head
+        )
     errors = validate_effect_receipt(receipt, require_success=True)
     if not isinstance(receipt, dict):
         return errors, None
@@ -699,6 +696,10 @@ def validate_deploy_effect_binding(
         node for node in route.get("nodes", [])
         if node.get("kind") == "effect_adapter" and node.get("mandatory")
     ]
+    if any(node.get("id") == p0b_effects.P0B_ADAPTER_ID for node in effect_nodes):
+        return p0b_effects.validate_p0b_effect_binding(
+            packet, route, fragments_by_node, evidence_by_id, valid_receipts
+        )
     errors: list[str] = []
     routed_adapters = {node["id"] for node in effect_nodes}
     receipt_adapters = {receipt.get("adapter_id") for receipt in valid_receipts.values()}

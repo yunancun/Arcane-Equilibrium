@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "p0b_alr_phase1_governance_closure_v1.schema.json",
+  "title": "P0-B ALR Phase 1 Governance Closure",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "status",
+    "phase",
+    "intent_id",
+    "intent_digest",
+    "task_contract_digest",
+    "compiled_route_digest",
+    "context_artifact_digest",
+    "stage_authorization_digest",
+    "stage_runtime_bindings_artifact_digest",
+    "phase1_effect_receipt_digest",
+    "phase_result_digest",
+    "ops_postcheck",
+    "ops_postcheck_digest",
+    "closed_at_utc",
+    "closure_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "p0b_alr_phase1_governance_closure_v1"},
+    "status": {"const": "PHASE1_GOVERNANCE_CLOSURE_PASS"},
+    "phase": {"const": "stage"},
+    "intent_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{7,127}$"},
+    "intent_digest": {"$ref": "#/$defs/digest"},
+    "task_contract_digest": {"$ref": "#/$defs/digest"},
+    "compiled_route_digest": {"$ref": "#/$defs/digest"},
+    "context_artifact_digest": {"$ref": "#/$defs/digest"},
+    "stage_authorization_digest": {"$ref": "#/$defs/digest"},
+    "stage_runtime_bindings_artifact_digest": {"$ref": "#/$defs/digest"},
+    "phase1_effect_receipt_digest": {"$ref": "#/$defs/digest"},
+    "phase_result_digest": {"$ref": "#/$defs/digest"},
+    "ops_postcheck": {"$ref": "closure_packet_v1.schema.json#/$defs/opsP0bPostcheck"},
+    "ops_postcheck_digest": {"$ref": "#/$defs/digest"},
+    "closed_at_utc": {"type": "string", "format": "date-time"},
+    "closure_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}
