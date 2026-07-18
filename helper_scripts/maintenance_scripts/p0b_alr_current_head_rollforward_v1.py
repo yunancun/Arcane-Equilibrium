@@ -1770,7 +1770,9 @@ class Runtime:
             or result.get("SubState") != "running"
             or result.get("NeedDaemonReload") != "no"
             or result.get("DropInPaths") != ""
-            or result.get("NRestarts") != "0"
+            or re.fullmatch(
+                r"(?:0|[1-9][0-9]*)", str(result.get("NRestarts", ""))
+            ) is None
         ):
             raise RollforwardError(f"protected_unit_not_stable:{name}")
         return result
