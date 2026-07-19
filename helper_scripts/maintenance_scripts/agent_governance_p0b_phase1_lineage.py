@@ -52,7 +52,7 @@ SEALED_LINEAGE_FIELDS = {
     "completion_inventory_sha256", "producer_inventory_sha256",
     "ledger_pre_inventory_sha256", "ledger_post_inventory_sha256",
     "lane_effective_config_sha256", "alr_availability_monitor",
-    "normal_lane_returncode",
+    "normal_lane_returncode", "observer_source_sha256",
 }
 LANE_BOUNDARIES = {
     "broker_contact": False,
@@ -287,6 +287,7 @@ def _validate_private(
 
 def _validate_core_receipt(
     receipt: dict[str, Any], bundle: dict[str, Any], stage_authorization: dict[str, Any],
+    *, expected_observer_source_sha256: str,
 ) -> list[str]:
     errors: list[str] = []
     sealed = receipt.get("sealed_lineage")
@@ -330,6 +331,8 @@ def _validate_core_receipt(
             or sealed.get("private_deps_manifest_sha256")
             != bundle.get("private_deps_manifest_sha256")
             or sealed.get("normal_lane_returncode") != 0
+            or sealed.get("observer_source_sha256")
+            != expected_observer_source_sha256
         ):
             errors.append("P0-B Phase 1 sealed lineage private/lane result mismatch")
     if not isinstance(locks, dict) or set(locks) != {"cost", "alpha", "unit", "publisher"}:
@@ -504,7 +507,14 @@ def validate_cutover_phase1_lineage(
         != bundle.get("stage_runtime_bindings_artifact_digest")
     ):
         errors.append("P0-B Phase 1 authority/runtime lineage is not exact cross-bound")
-    errors.extend(_validate_core_receipt(receipt, bundle, stage_authorization))
+    errors.extend(_validate_core_receipt(
+        receipt,
+        bundle,
+        stage_authorization,
+        expected_observer_source_sha256=str(
+            claims.get("p0b_observer_source", "")
+        ).removeprefix("sha256:"),
+    ))
     errors.extend(_validate_private(
         private_receipt,
         destination=str(bundle.get("private_deps_destination", "")),

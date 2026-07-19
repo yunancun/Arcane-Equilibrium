@@ -400,6 +400,11 @@ def _phase1_lineage_fixture(tmp_path: Path, mutation: str | None = None):
         "lane_effective_config_sha256": "sha256:" + "0" * 64,
         "alr_availability_monitor": {"sample_count": 1},
         "normal_lane_returncode": 0,
+        "observer_source_sha256": (
+            "f" * 64
+            if mutation == "observer_source"
+            else runtime_core.OBSERVER_V2_SHA256
+        ),
     }
     receipt = {
         "schema_version": "p0b_alr_current_head_rollforward_v1",
@@ -513,6 +518,7 @@ def _phase1_lineage_fixture(tmp_path: Path, mutation: str | None = None):
         "p0b_sealed_lineage_bundle": "sha256:" + bundle_binding["sha256"],
         "p0b_private_bundle_receipt": "sha256:" + private_binding["sha256"],
         "p0b_staged_candidate_board": "sha256:" + board_binding["sha256"],
+        "p0b_observer_source": "sha256:" + runtime_core.OBSERVER_V2_SHA256,
     }
     intent = {
         "phase": "cutover",
@@ -539,7 +545,10 @@ def test_cutover_phase1_lineage_accepts_exact_pass_with_natural_candidate(
 
 @pytest.mark.parametrize(
     "mutation",
-    ["arbitrary_receipt", "closure_status", "bundle_target", "authorization", "board_authority"],
+    [
+        "arbitrary_receipt", "closure_status", "bundle_target", "authorization",
+        "board_authority", "observer_source",
+    ],
 )
 def test_cutover_phase1_lineage_rejects_rehashed_illegal_pass_graph(
     tmp_path: Path, mutation: str,
