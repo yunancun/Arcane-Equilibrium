@@ -866,6 +866,167 @@ def test_contained_lane_calls_availability_monitor_while_process_runs(monkeypatc
     assert len(samples) >= 2
 
 
+def test_stage_lane_emits_exact_semantic_lineage_contract(monkeypatch, tmp_path) -> None:
+    module = load_module()
+    staging_root = tmp_path / "staging"
+    completion_dir = tmp_path / "completion"
+    producer_dir = tmp_path / "producer"
+    repo = tmp_path / "repo"
+    for directory in (staging_root, completion_dir, producer_dir, repo):
+        directory.mkdir(mode=0o700)
+        directory.chmod(0o700)
+    monkeypatch.setattr(module, "STAGING_ROOT", staging_root)
+    monkeypatch.setattr(module, "COMPLETION_DIR", completion_dir)
+    monkeypatch.setattr(module, "PRODUCER_DIR", producer_dir)
+    monkeypatch.setattr(module, "REPO", repo)
+    monkeypatch.setattr(module, "LANE_CRON", repo / "cost-lane.sh")
+    monkeypatch.setattr(module, "require_private_directory", lambda _path: {})
+
+    intent_root = staging_root / "p0b-stage-emission-contract"
+    staging = {
+        "cron_destination": str(intent_root / "cron-scratch"),
+        "sealed_destination": str(intent_root / "sealed"),
+        "publisher_receipt_path": str(intent_root / "publisher.json"),
+        "private_deps_receipt_path": str(intent_root / "private.json"),
+        "lane_timeout_seconds": 60,
+    }
+    source = {"head": module.TARGET_HEAD}
+    tree = {"git_tree_listing_sha256": "a" * 64}
+    service = active_identity()
+    service.update({"ActiveState": "active", "SubState": "running"})
+    ledger_pre = ledger_pre_inventory()
+    ledger_post = ledger_post_inventory()
+    runtime = object.__new__(module.Runtime)
+    runtime.approval = {"staging": staging}
+    runtime.ledger = ledger_pre
+
+    def inventory(directory, pattern):
+        return {
+            path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in sorted(directory.glob(pattern))
+        }
+
+    def lane_inventories(*, staging):
+        return {
+            "completion": inventory(completion_dir, "*.completion.json"),
+            "producer": inventory(producer_dir, "blocked_outcome_review_*.json"),
+            "cron_staging": inventory(
+                Path(staging["cron_destination"]), "blocked_outcome_review_*.json"
+            ),
+            "sealed_staging": inventory(
+                Path(staging["sealed_destination"]), "blocked_outcome_review_*.json"
+            ),
+            "live": {},
+        }
+
+    board_name = "blocked_outcome_review_20260717T120000Z.json"
+    board = {
+        "schema_version": "cost_gate_demo_learning_lane_blocked_outcome_review_v6",
+        "candidate_board_generation_state": "COMPLETE",
+        "ledger_scan_status": "COMPLETE",
+        "generated_at_utc": "2026-07-17T12:00:00Z",
+        "order_authority": "NOT_GRANTED",
+        "promotion_evidence": False,
+        "learning_candidate_board": {
+            "schema_version": "cost_gate_learning_candidate_board_v2",
+            "candidate_universe_complete": True,
+            "candidate_rows": [],
+        },
+    }
+    board_raw = json.dumps(board, sort_keys=True, separators=(",", ":")).encode()
+
+    def run_contained(_command, *, cwd, env, timeout, monitor, monitor_interval):
+        del cwd, env, timeout, monitor_interval
+        monitor()
+        producer_path = producer_dir / board_name
+        cron_path = Path(staging["cron_destination"]) / board_name
+        producer_path.write_bytes(board_raw)
+        cron_path.write_bytes(board_raw)
+        completion = {
+            "schema_version": "research_workload_completion_v1",
+            "lane": "cost",
+            "status": "COMPLETE",
+            "source_head": module.TARGET_HEAD,
+            "completion_paths": [str(producer_path)],
+            "sha256_by_path": {
+                str(producer_path): hashlib.sha256(board_raw).hexdigest()
+            },
+            "token": "4" * 32,
+            "ts_utc": "2026-07-17T12:00:01Z",
+        }
+        (completion_dir / "cost-emission-contract.completion.json").write_text(
+            json.dumps(completion, sort_keys=True, separators=(",", ":"))
+        )
+        runtime.ledger = ledger_post
+        monitor()
+        return SimpleNamespace(returncode=0)
+
+    class Publisher:
+        @staticmethod
+        def publish_candidate_board(
+            source_path, destination, *, retention_limit,
+            slippage_artifact_path, max_total_bytes,
+        ):
+            del retention_limit, slippage_artifact_path, max_total_bytes
+            published = destination / source_path.name
+            raw = source_path.read_bytes()
+            published.write_bytes(raw)
+            return {
+                "schema_version": "alr_candidate_board_publish_result_v2",
+                "status": "PUBLISHED",
+                "published_path": str(published),
+                "source_content_sha256": hashlib.sha256(raw).hexdigest(),
+                "latest_alias_written": False,
+            }
+
+    class Pin:
+        @staticmethod
+        def read_regular_bytes(path):
+            raw = path.read_bytes()
+            return raw, {"sha256": hashlib.sha256(raw).hexdigest()}
+
+    runtime.pin = Pin()
+    runtime.source_snapshot = lambda: source
+    runtime.execution_tree_lease = lambda: tree
+    runtime.lane_environment = lambda _staging: {}
+    runtime.now = lambda: datetime(2026, 7, 17, 12, 0, 2, tzinfo=timezone.utc)
+    runtime.alr_availability_probe = lambda _baseline: {"available": True}
+    runtime.run_contained = run_contained
+    runtime.lane_inventories = lane_inventories
+    runtime.ledger_inventory = lambda: runtime.ledger
+    runtime.service_snapshot = lambda *, require_active: service
+    runtime.inventory_digest = module.canonical_digest
+    runtime.lane_effective_config_sha256 = lambda: "sha256:" + "b" * 64
+    runtime.persist_path = lambda path, payload: {
+        "path": str(path),
+        "sha256": hashlib.sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest(),
+        "size": 1,
+    }
+    runtime.stage_private_dependencies = lambda _path: {
+        "private_deps_receipt": {"path": "/tmp/private.json", "sha256": "c" * 64},
+        "private_deps_destination": str(module.PRIVATE_BUNDLE_DESTINATION),
+        "private_deps_manifest_sha256": module.PRIVATE_BUNDLE_MANIFEST_SHA256,
+    }
+    monkeypatch.setattr(module, "load_publisher", lambda: Publisher())
+
+    before = {
+        "source": source,
+        "execution_tree": tree,
+        "service": service,
+        "inventories": {
+            "completion": {}, "producer": {}, "cron_staging": {},
+            "sealed_staging": {}, "live": {},
+        },
+        "ledger_inventory": ledger_pre,
+    }
+    result = module.Runtime.stage_lane(runtime, before)
+
+    assert set(result) == module.PHASE1_SEALED_LINEAGE_FIELDS
+    assert result["observer_source_sha256"] == module.OBSERVER_V2_SHA256
+
+
 def active_identity() -> dict[str, object]:
     return {
         "MainPID": "1953143",

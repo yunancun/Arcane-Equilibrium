@@ -2264,6 +2264,7 @@ class Runtime:
                 },
             },
             "normal_lane_returncode": completed.returncode,
+            "observer_source_sha256": OBSERVER_V2_SHA256,
         }
 
     @staticmethod
