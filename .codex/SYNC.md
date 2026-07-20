@@ -69,8 +69,9 @@ python3 helper_scripts/maintenance_scripts/agent_governance.py writer-lease \
   --task-id "$WRITER_TASK_ID" --owner "$WRITER_OWNER"
 ```
 
-Persist the returned `lease_id` as `WRITER_LEASE_ID`. Never infer it from a
-different task, copy it to another worktree, or ask the read-only guard to
+Keep the returned `lease_id` as local, untracked execution state in
+`WRITER_LEASE_ID`; never commit it to a task packet/report. Never infer it from
+a different task, copy it to another worktree, or ask the read-only guard to
 acquire/steal it. Renew/release requires the same task, owner, and fencing token.
 
 ## 1. Loop bootstrap and resume

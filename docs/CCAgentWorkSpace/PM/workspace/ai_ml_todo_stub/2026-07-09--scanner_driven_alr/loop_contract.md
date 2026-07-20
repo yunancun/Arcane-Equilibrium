@@ -131,7 +131,7 @@ Every `alr_loop_state_packet_v1` must include:
 - `previous_progress_digest`
 - `continuation_decision`
 - `schedule_wakeup`
-- `writer_lease_id`
+- `writer_lease_receipt_digest` (never persist the fencing token in repo)
 - `stop_reason`
 - `owned_files`
 - `verification_commands`
@@ -161,8 +161,8 @@ Every `alr_loop_state_packet_v1` must include:
 | State | Meaning |
 |---|---|
 | `DONE` | Selected queue segment is complete and no required P0 work remains. |
-| `ADVANCED` | One row advanced cleanly; continue to next row. |
-| `ADVANCED_WITH_CONCERNS` | One row advanced with explicit non-blocking concerns; continue only if the next row does not depend on the concern. |
+| `ADVANCED` | One row advanced cleanly; eligible for a continuation decision, not automatic continuation. |
+| `ADVANCED_WITH_CONCERNS` | One row advanced with explicit non-blocking concerns; eligible only when the next ACTIVE row does not depend on the concern and continuation control admits it. |
 | `DEFER_EVIDENCE` | Missing candidate-matched proof/reward/control/repeat/OOS evidence. |
 | `HYPOTHESIS_ONLY` | Target can be ranked for investigation but no edge claim is allowed. |
 | `ROTATED` | Source head, candidate id, input hash, auth/envelope, or referenced artifact drifted. Re-intake source-only state before continuing. |

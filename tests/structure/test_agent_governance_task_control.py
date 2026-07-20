@@ -11,6 +11,7 @@ if str(HELPERS) not in sys.path:
     sys.path.insert(0, str(HELPERS))
 
 from agent_governance_task_control import (  # noqa: E402
+    FileWriterLeaseStore,
     InMemoryWriterLeaseStore,
     WorktreeIdentity,
     acquire_writer_lease,
@@ -88,6 +89,17 @@ def test_operator_loop_continues_only_on_a_real_progress_delta() -> None:
     )
     assert continued["decision"] == "CONTINUE_OPERATOR_LOOP"
     assert continued["schedule_wakeup"] is True
+
+    forged = dict(changed)
+    forged["progress_digest"] = DIGEST_A
+    try:
+        adjudicate_continuation(
+            continuation_mode="operator_loop", previous=previous, current=forged
+        )
+    except ValueError as error:
+        assert "does not match canonical content" in str(error)
+    else:
+        raise AssertionError("forged progress digest was admitted")
 
 
 def test_terminal_status_stops_even_in_operator_loop() -> None:
@@ -174,3 +186,39 @@ def test_writer_lease_rejects_primary_or_dirty_worktree(tmp_path: Path) -> None:
         store, dirty, task_id="task", owner="owner", now=NOW
     )
     assert "CLEAN_WORKTREE_REQUIRED" in rejected_dirty["reasons"]
+
+
+def test_expired_lease_cannot_renew_but_can_be_fenced_by_a_new_task(tmp_path: Path) -> None:
+    store = InMemoryWriterLeaseStore()
+    identity = _identity(tmp_path)
+    first = acquire_writer_lease(
+        store, identity, task_id="old-task", owner="old-owner", ttl_seconds=60, now=NOW
+    )
+    old_id = first["lease"]["lease_id"]
+    expired_renew = renew_writer_lease(
+        store, identity, task_id="old-task", owner="old-owner", lease_id=old_id,
+        now=NOW + timedelta(seconds=61),
+    )
+    assert "WRITER_LEASE_EXPIRED" in expired_renew["reasons"]
+
+    replacement = acquire_writer_lease(
+        store, identity, task_id="new-task", owner="new-owner",
+        now=NOW + timedelta(seconds=61),
+    )
+    assert replacement["status"] == "PASS"
+    assert replacement["lease"]["lease_id"] != old_id
+
+
+def test_filesystem_store_rejects_symlink_state(tmp_path: Path) -> None:
+    common = tmp_path / ".git"
+    common.mkdir()
+    target = tmp_path / "outside.json"
+    target.write_text('{"schema_version":"writer_leases_v1","leases":{}}\n')
+    store = FileWriterLeaseStore(common)
+    store.state_path.symlink_to(target)
+    try:
+        store.read()
+    except ValueError as error:
+        assert "must not be a symlink" in str(error)
+    else:
+        raise AssertionError("symlink writer state was admitted")

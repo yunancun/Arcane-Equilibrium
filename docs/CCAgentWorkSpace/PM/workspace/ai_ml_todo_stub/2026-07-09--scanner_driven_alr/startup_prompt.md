@@ -14,6 +14,13 @@ srv/docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/2026-07-09--scanner_drive
 
 Boundary label: SOURCE_ONLY_OFFLINE_P0_P1.
 
+This pasted Operator request is the explicit loop opt-in. Bind
+continuation_mode=operator_loop in task facts; do not infer loop authority from
+this file on any other task. Before every new turn/wakeup, run the canonical
+continuation decision and continue only on CONTINUE_OPERATOR_LOOP with
+schedule_wakeup=true. Identical semantic progress is BLOCKED_NO_DELTA and stops
+with next_action=null.
+
 This is a Codex source-development loop, not an application runtime loop. It may
 repeat local source/test/report/commit iterations in this Codex session. It must
 not create or modify cron, daemon, launchd, systemd, sidecar, scheduler,
@@ -39,15 +46,19 @@ Before acting:
    either value from the current branch or HEAD. On first boot only, bind an
    attached non-main feature branch and full HEAD once, persist both fields in a
    bootstrap packet, then run `git_loop_guard.py --phase start` with those
-   expected values. Wrong branch/head or any dirty path is
+   expected values and the exact local writer-lease task/owner/fencing token.
+   Acquire the exclusive lease only in the clean attached non-main linked
+   worktree and never commit the fencing token. Wrong/missing/foreign lease,
+   wrong branch/head, or any dirty path is
    `STOP_GIT_START_STATE`; do not stash, reset, clean, or absorb it.
 
 Loop logic:
 1. Reload the persisted ALR state packet and retain its admitted
    `loop_branch`/`checkpoint_head`; the loop must not recapture them from the
    checkout.
-2. Select exactly one work item from queue.md: first ACTIVE row, otherwise first
-   row whose waiting condition is satisfied.
+2. Select exactly one ACTIVE work item from queue.md. WAITING/DEFERRED/CLOSED is
+   never selectable. A newly satisfied named wait becomes work only after PM
+   verifies the delta and creates a fresh ACTIVE admission.
 3. Dispatch the required role chain for that row:
    - boundary: PM -> CC -> FA -> PA -> PM
    - quant/ML/data: PM -> QC -> MIT -> AI-E -> PM
@@ -62,8 +73,11 @@ Loop logic:
 7. Emit alr_work_item_v1, alr_effect_review_v1, alr_loop_state_packet_v1, a PM
    report, and an Operator summary when useful.
 8. Commit each green checkpoint with a subject and body.
-9. Re-read repo state and continue automatically while the state is ADVANCED,
-   ADVANCED_WITH_CONCERNS, or source-only ROTATED with a clear next row.
+9. Re-read repo state, build the canonical semantic progress snapshot, and call
+   `agent_governance.py continuation`. Continue only when state is ADVANCED,
+   ADVANCED_WITH_CONCERNS, or source-only ROTATED with a clear ACTIVE row and
+   the decision is CONTINUE_OPERATOR_LOOP. State labels alone never authorize a
+   new turn.
 
 For P0-AIML-ALR-BOUNDARY-PACKET, the primary target is:
 srv/docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/2026-07-09--scanner_driven_alr/boundary_packet.md
@@ -121,7 +135,8 @@ Stop automatically and report the exact state if:
 - DONE: all P0 rows are implemented, verified, effect-reviewed, state-packeted,
   and committed.
 
-Do not stop after intake if a source-only next row is available. Do not ask for
-a separate continue prompt. Keep looping until DONE or one of the stop states
-above is reached.
+When a source-only ACTIVE row exists, apply the continuation gate; do not ask for
+a separate continue prompt only after that gate returns schedule_wakeup=true.
+Stop at DONE, any listed stop state, finite/no-loop admission, or
+BLOCKED_NO_DELTA. Never convert unchanged state into a new iteration.
 ```

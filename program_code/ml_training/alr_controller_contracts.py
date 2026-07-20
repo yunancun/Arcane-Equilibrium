@@ -302,8 +302,8 @@ def build_alr_work_item(
     work_item_id: str,
     row_id: str,
     title: str,
-    state: str = STATE_READY,
-    status: str = STATUS_READY,
+    state: str = STATE_ACTIVE,
+    status: str = STATUS_ACTIVE,
     blockers: Sequence[str] | None = None,
     concerns: Sequence[str] | None = None,
     boundary_status: str = BOUNDARY_VALIDATED,
@@ -625,11 +625,9 @@ def _item_outcome(item: Mapping[str, Any]) -> tuple[str, tuple[str, ...]]:
     if outcome == OUTCOME_ADVANCED_WITH_CONCERNS:
         return outcome, ("ready_with_accepted_boundary_concerns",)
     if outcome == OUTCOME_ADVANCED:
-        if _queue_value_startswith(item, "WAITING_"):
-            return outcome, ("waiting_conditions_satisfied",)
-        if _queue_value_is(item, STATUS_ACTIVE):
-            return outcome, ("active_without_blockers",)
-        return outcome, ("ready_without_blockers",)
+        return outcome, ("active_without_blockers",)
+    if _queue_value_startswith(item, "WAITING_"):
+        return outcome, ("waiting_requires_pm_readmission",)
     normalized_blockers = _normalized_blockers(item)
     reason = sorted(normalized_blockers)[0] if normalized_blockers else _text(item.get("status"))
     return outcome, (reason or "blocked",)
@@ -658,12 +656,9 @@ def _outcome_from_item(item: Mapping[str, Any], *, boundary_valid: bool) -> str:
         or state == STATE_BLOCKED
     ):
         return OUTCOME_DEFER_EVIDENCE
-    if _queue_value_startswith(item, "WAITING_") and not _waiting_conditions_satisfied(item):
+    if _queue_value_startswith(item, "WAITING_"):
         return OUTCOME_DEFER_EVIDENCE
-    if (
-        (state in {STATE_READY, STATE_ACTIVE} or status in {STATUS_READY, STATUS_ACTIVE})
-        or (_queue_value_startswith(item, "WAITING_") and _waiting_conditions_satisfied(item))
-    ) and not blockers:
+    if state == STATE_ACTIVE and status == STATUS_ACTIVE and not blockers:
         if _text(item.get("boundary_status")) == BOUNDARY_VALIDATED_WITH_CONCERNS:
             return OUTCOME_ADVANCED_WITH_CONCERNS
         return OUTCOME_ADVANCED
@@ -735,24 +730,6 @@ def _queue_value_startswith(item: Mapping[str, Any], prefix: str) -> bool:
 
 def _is_done_row(item: Mapping[str, Any]) -> bool:
     return _queue_value_is(item, STATE_DONE) or _queue_value_is(item, STATE_DONE_WITH_CONCERNS)
-
-
-def _waiting_conditions_satisfied(item: Mapping[str, Any]) -> bool:
-    conditions = item.get("conditions")
-    waiting_conditions = item.get("waiting_conditions")
-    if isinstance(conditions, Mapping):
-        if conditions.get("satisfied") is True:
-            return True
-        items = conditions.get("items")
-        if isinstance(items, Sequence) and not isinstance(items, (str, bytes, bytearray)):
-            return bool(items) and all(
-                isinstance(entry, Mapping) and entry.get("satisfied") is True
-                for entry in items
-            )
-    if isinstance(waiting_conditions, Mapping):
-        if waiting_conditions.get("satisfied") is True:
-            return True
-    return item.get("conditions_satisfied") is True
 
 
 def _authority_violations(value: Any, path: str = "$") -> list[str]:

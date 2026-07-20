@@ -14,6 +14,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import secrets
 import subprocess
 import tempfile
@@ -67,6 +68,10 @@ QUEUE_LANES = {
 NULLABLE_NEXT_ACTION_STATUSES = frozenset(
     {"DONE", "DONE_WITH_CONCERNS", SAME_PROGRESS_TERMINAL}
 )
+PROGRESS_SNAPSHOT_FIELDS = frozenset({
+    "schema_version", "round", "work_status", "source_head", "context_digest",
+    "external_state_digest", "work_digest", "blocker_code", "progress_digest",
+})
 
 
 def _utc_now() -> datetime:
@@ -184,10 +189,11 @@ def progress_snapshot(
             raise ValueError(f"{field} must be sha256:<64 lowercase hex>")
         if any(char not in "0123456789abcdef" for char in value.removeprefix("sha256:")):
             raise ValueError(f"{field} must be sha256:<64 lowercase hex>")
-    if blocker_code is not None and (
-        not isinstance(blocker_code, str) or not blocker_code.strip()
+    if blocker_code is not None and not (
+        isinstance(blocker_code, str)
+        and re.fullmatch(r"[A-Z0-9][A-Z0-9_.:-]{0,127}", blocker_code)
     ):
-        raise ValueError("blocker_code must be null or a non-empty string")
+        raise ValueError("blocker_code must be null or a canonical uppercase code")
     comparison = {
         "work_status": work_status,
         "source_head": source_head,
@@ -204,6 +210,25 @@ def progress_snapshot(
     }
 
 
+def validate_progress_snapshot(snapshot: Any) -> dict[str, Any]:
+    """Recompute an exact progress snapshot before a continuation decision."""
+
+    if not isinstance(snapshot, dict) or set(snapshot) != PROGRESS_SNAPSHOT_FIELDS:
+        raise ValueError("progress snapshot fields are not exact")
+    expected = progress_snapshot(
+        round_number=snapshot["round"],
+        work_status=snapshot["work_status"],
+        source_head=snapshot["source_head"],
+        context_digest=snapshot["context_digest"],
+        external_state_digest=snapshot["external_state_digest"],
+        work_digest=snapshot["work_digest"],
+        blocker_code=snapshot["blocker_code"],
+    )
+    if snapshot != expected:
+        raise ValueError("progress snapshot digest does not match canonical content")
+    return expected
+
+
 def adjudicate_continuation(
     *,
     continuation_mode: str,
@@ -213,13 +238,17 @@ def adjudicate_continuation(
     """Decide whether a controller may schedule another turn."""
 
     policy = compile_task_execution_policy(continuation_mode)
-    current_digest = current.get("progress_digest")
-    if not isinstance(current_digest, str):
-        raise ValueError("current snapshot lacks progress_digest")
+    current = validate_progress_snapshot(current)
+    previous = validate_progress_snapshot(previous) if previous is not None else None
+    current_digest = current["progress_digest"]
+    if previous is not None and current["round"] <= previous["round"]:
+        raise ValueError("current progress round must be newer than previous round")
     if continuation_mode == DEFAULT_CONTINUATION_MODE:
         decision = "STOP_FINITE_TASK"
         terminal_status = current.get("work_status")
-    elif current.get("work_status") in TERMINAL_WORK_STATUSES:
+    elif current.get("work_status") in TERMINAL_WORK_STATUSES or (
+        previous is not None and previous.get("work_status") in TERMINAL_WORK_STATUSES
+    ):
         decision = "STOP_TERMINAL"
         terminal_status = current.get("work_status")
     elif previous is not None and previous.get("progress_digest") == current_digest:
