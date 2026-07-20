@@ -6,7 +6,23 @@
 > 它不是 active dispatch queue；當前 blocker、owner、gate、runtime evidence 一律讀根目錄 `TODO.md`。
 > 新增重要文檔時優先更新本索引或 `initiative_index.md`，不要把長表重新塞回 `docs/README.md`。
 >
-> **Freshness（2026-07-18 審計注）**：本索引按主題分段增量維護，無單一 as-of；最新段約 2026-07-16，可能滯後於 `TODO.md` 與最新 commit。判斷時效以 `git log` + `TODO.md` 為準，勿以本索引缺席反推文檔不存在。
+> **Freshness（2026-07-20 審計注）**：本索引按主題分段增量維護，無單一 as-of；最新增量為 2026-07-20 AI/ML 完成覆蓋複審與交付協議。判斷時效以 `git log` + `TODO.md` 為準，勿以本索引缺席反推文檔不存在。
+
+### 2026-07-20 AI/ML 完成覆蓋複審與 Sprint/Session 交付
+
+| 文件 | 内容 |
+|------|------|
+| `CCAgentWorkSpace/PM/workspace/reports/2026-07-20--ai_ml_completion_coverage_and_delivery_audit.md` | PM landing-level 兩輪對抗複審：V1 TODO 完成仍不足；固化 PG/deploy/runtime/PIT/Scanner/consumer/Demo/G2/DR 缺口，以及 post-draft 發現的 adoption/terminal/scope/TTL/effect-classifier/head-drift 修正；定向冷複驗四面最終全 `ACCEPT`。 |
+| `agents/ai-ml-landing-delivery-protocol.md` | Sprints 0-8 / bounded Sessions / W0-W9 durable multi-agent 交付協議；規定 explicit DAG ownership、builder→E2→E4→semantic recheck、effect independence、停止續作、CI 節流、closure publication、intermediate sync 與 Sprint 8 final 三端同步/無後續 repo write。 |
+| `execution_plan/ai_ml_landing/PROGRESS.md` | Repo-resident AI/ML Session projection ledger：初始 `DESIGNED_NOT_ADOPTED / PROGRAM_ADOPTION_REQUIRED`，列出 46 個 S0.1-S8.6/S8.NC bounded Sessions 的 dependencies、scope instantiation、required effect、receipt、CI/sync policy；immutable attempt/closure record 才是 authoritative outcome，無虛假 completed row。 |
+| `execution_plan/2026-07-19--ai_ml_long_lived_repair_and_landing_plan.md` | 修訂為 `AIML-LONG-LIVED-LANDING-V2`：兩 root umbrella 下新增 LR-1/LR0A-C 與 ML0-ML10，終態按 platform scope + covered decision cells + environment promotion edge 分離；ML9 只產 candidate，S8.6 才可 trading landing，profit/live 另證。 |
+
+### 2026-07-19 AI/ML 真實狀態、長效修復與落地方案
+
+| 文件 | 内容 |
+|------|------|
+| `execution_plan/2026-07-19--ai_ml_long_lived_repair_and_landing_plan.md` | AI/ML 正式兩板塊工程正本；2026-07-20 已修訂為 V2，原 V1 四面 REJECT/rework 歷史保留，當前執行範圍以 2026-07-20 段及 TODO v838 為準。 |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-07-19--ai_ml_true_state_and_engineering_plan.md` | PM 當機真實狀態取證與簽收：`NOT_LANDED_RUNTIME_BROKEN`，區分 source、runtime、data、fit、serving、retention 與 profit，記錄首個合法 dispatch 及禁止面。 |
 
 ### 2026-07-15/16 IBKR full live-capability 工程總綱與自主 loop
 
