@@ -39,6 +39,9 @@ ALR_STARTUP = (
     / "docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/"
     "2026-07-09--scanner_driven_alr/startup_prompt.md"
 ).read_text(encoding="utf-8")
+GUI_LOOP = (ROOT / "docs/execution_plan/gui_redesign/LOOP-DRIVER.md").read_text(
+    encoding="utf-8"
+)
 SPEC = importlib.util.spec_from_file_location("git_loop_guard", SCRIPT)
 guard = importlib.util.module_from_spec(SPEC)
 assert SPEC and SPEC.loader
@@ -305,6 +308,16 @@ def test_feature_guard_requires_valid_lease_and_linked_worktree(tmp_path: Path) 
     )
     assert "WRITER_LEASE_REQUIRED" in missing["reasons"]
 
+    missing_owner = guard.evaluate(
+        repo,
+        phase="start",
+        expected_branch="agent/test-loop",
+        expected_head=head,
+        writer_task_id=lease["writer_task_id"],
+        writer_lease_id=lease["writer_lease_id"],
+    )
+    assert "WRITER_LEASE_REQUIRED" in missing_owner["reasons"]
+
     foreign = guard.evaluate(
         repo,
         phase="start",
@@ -372,6 +385,21 @@ def test_loop_contract_cannot_advance_with_unbounded_dirty_or_unsynced_heads() -
         "three_side_source_sync_status",
     ):
         assert required in ALR_LOOP
+
+
+def test_gui_loop_driver_uses_the_same_finite_execution_gate() -> None:
+    for required in (
+        "第一控制行精確等於",
+        "exact `ACTIVE`",
+        "`IN_PROGRESS` 不得重派",
+        "persisted task-admission fencing",
+        "preceding snapshot",
+        "沒有 ACTIVE",
+        "`BLOCKED_NO_DELTA`",
+        "status、blocker、round/time、caller receipt",
+    ):
+        assert required in GUI_LOOP
+    assert "does not itself grant a\nwakeup" in ALR_LOOP
 
 
 def test_guard_is_read_only_by_construction() -> None:

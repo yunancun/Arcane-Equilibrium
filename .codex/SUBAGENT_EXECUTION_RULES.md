@@ -19,8 +19,8 @@ Its `task_contract_digest` covers normalized task/surface/risk/uncertainty, exac
 task-prompt digest, runtime/E2E claim,
 side-effect class, objective/scope/acceptance/hard stops, source baseline, direct
 interfaces, previous failure, verdict-relevant `claim_inputs`, and the exact
-`continuation_mode` (`finite` by default; `operator_loop` only from an explicit
-Operator request). The returned
+`continuation_mode` (`finite` by default; `operator_loop` only from a standalone
+`/loop` marker in the exact Operator request) and its derived opt-in digest. The returned
 fragment must repeat that exact digest; changing scope, evidence input, or effect
 class requires a new admission.
 
@@ -178,9 +178,11 @@ referenced.
   local reproduction/validation strategy before any new head.
 - Hard policy/external/operator blocker: stop with owner and unblock condition.
 - Budget review point: split or return UNVERIFIED; never convert to PASS.
-- At any turn boundary, `finite` stops. Only an explicit `operator_loop` may ask
-  Task Execution Control to continue; the same semantic progress digest twice
-  terminates as `BLOCKED_NO_DELTA` without a wakeup.
+- At any turn boundary, `finite` stops. Only an exact first `/loop` control line
+  may ask Task Execution Control to continue. Continuation must use the persisted
+  task-admission fencing token; caller-supplied contracts or previous snapshots
+  are not authority. The same task-owned source digest terminates without a
+  wakeup; status, blocker, time, or unrelated repository HEAD drift is not progress.
 
 ## Evidence truth
 

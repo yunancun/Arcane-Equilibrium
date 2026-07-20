@@ -23,7 +23,8 @@ Before local work or delegation, bind:
 - current head + dirty scope + any optional read-only verification scope
 - expected output and side-effect class
 - exact `continuation_mode`; absent means `finite`, and `operator_loop` requires
-  an explicit Operator request rather than inference from state or filenames
+  a first control line exactly equal to `/loop` in the Operator task prompt rather than
+  inference from state, filenames, generated text, or later caller input
 
 The compiler accepts only its declared fields/surface vocabulary. Unknown fields
 or surfaces fail closed so a typo cannot silently omit a hard gate. Use exact
@@ -108,19 +109,28 @@ good only when durable closure quality is unchanged.
 
 Dispatch decides what work is required; it does not imply another turn.
 `finite` is the ordinary task contract and never authorizes `ScheduleWakeup`, a
-continue prompt, or replay of a TODO row. An explicitly requested
-`operator_loop` must pass this decision before each scheduled turn:
+continue prompt, or replay of a TODO row. An explicitly requested task whose
+first control line is exactly `/loop` must acquire one persisted task admission,
+then pass this decision before each scheduled turn:
 
 ```bash
 python3 helper_scripts/maintenance_scripts/agent_governance.py \
   continuation @continuation_bundle.json
 ```
 
-The bundle contains the previous/current canonical progress snapshots. The
-semantic fingerprint excludes round/time noise and unrelated repo drift. Only
+The admission Adapter persists the original normalized task contract, compiled
+control, and preceding snapshot in Git's common directory behind a private fencing
+token. The continuation bundle contains only repo/task/owner/token/work-status;
+it cannot supply a replacement contract, digest, or previous snapshot. At the
+boundary, the Adapter recaptures the admitted `dirty_scope` and uses its exact file
+bytes as the generic progress fingerprint. Lifecycle/blocker labels,
+whole-repository HEAD, caller receipts, round/time noise, and unrelated repo drift
+are not progress. External-only progress needs a separate validated domain Adapter
+or a reviewed task-owned artifact. Only
 `CONTINUE_OPERATOR_LOOP` returns `schedule_wakeup=true`; identical progress
 returns `BLOCKED_NO_DELTA`, while all terminal or finite decisions stop. Queue
-selection consumes only ACTIVE items. WAITING/DEFERRED/CLOSED rows do not become
+selection consumes only exact ACTIVE items; IN_PROGRESS is already claimed and
+cannot be selected again. WAITING/DEFERRED/CLOSED rows do not become
 callable because their waiting condition or wall clock changed; PM must bind a
 named delta and create a fresh ACTIVE admission.
 

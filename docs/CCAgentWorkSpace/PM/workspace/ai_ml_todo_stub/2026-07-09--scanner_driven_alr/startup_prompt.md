@@ -4,6 +4,7 @@ Paste this prompt into a new Codex session from `/Users/ncyu/Projects/TradeBot`
 to start the foreground source-development loop.
 
 ```text
+/loop
 You are Codex in /Users/ncyu/Projects/TradeBot. First read srv/AGENTS.md, then
 treat /Users/ncyu/Projects/TradeBot/srv as the authoritative repo root. Follow
 the mandatory PM boot order in srv/AGENTS.md exactly.
@@ -14,7 +15,8 @@ srv/docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/2026-07-09--scanner_drive
 
 Boundary label: SOURCE_ONLY_OFFLINE_P0_P1.
 
-This pasted Operator request is the explicit loop opt-in. Bind
+The exact first `/loop` control line in this pasted Operator request is the
+explicit loop opt-in. Bind
 continuation_mode=operator_loop in task facts; do not infer loop authority from
 this file on any other task. Before every new turn/wakeup, run the canonical
 continuation decision and continue only on CONTINUE_OPERATOR_LOOP with
@@ -40,22 +42,24 @@ Before acting:
    authorization, previous no-order public GET approval, prior BB exact-scope
    approval, operator-review-ready artifact, or cached exchange credential as
    authorization for ALR P0/P1.
-6. Recover the latest validated persisted ALR state packet before trusting the
-   checkout. On resume, load expected `LOOP_BRANCH` from `loop_branch` and full
-   `CHECKPOINT_HEAD` from `checkpoint_head`; a resumed loop must not recapture
-   either value from the current branch or HEAD. On first boot only, bind an
-   attached non-main feature branch and full HEAD once, persist both fields in a
-   bootstrap packet, then run `git_loop_guard.py --phase start` with those
-   expected values and the exact local writer-lease task/owner/fencing token.
+6. Recover the latest validated persisted production controller receipt before trusting
+   the checkout; never read `loop_branch` or `checkpoint_head` from
+   `alr_loop_state_packet_v1`, which has no such authority fields. This repository
+   currently provides no builder/validator Adapter for that host receipt. If an
+   independently implemented validated receipt is unavailable, stop cross-turn
+   continuation as STOP_DISPATCH_BLOCKED; do not invent a bootstrap packet. If
+   present, load expected `LOOP_BRANCH` and full `CHECKPOINT_HEAD` from it, then
+   run `git_loop_guard.py --phase start` with those expected values and the exact
+   local writer-lease task/owner/fencing token.
    Acquire the exclusive lease only in the clean attached non-main linked
    worktree and never commit the fencing token. Wrong/missing/foreign lease,
    wrong branch/head, or any dirty path is
    `STOP_GIT_START_STATE`; do not stash, reset, clean, or absorb it.
 
 Loop logic:
-1. Reload the persisted ALR state packet and retain its admitted
+1. Reload the validated production controller receipt and retain its admitted
    `loop_branch`/`checkpoint_head`; the loop must not recapture them from the
-   checkout.
+   checkout or the base ALR state packet.
 2. Select exactly one ACTIVE work item from queue.md. WAITING/DEFERRED/CLOSED is
    never selectable. A newly satisfied named wait becomes work only after PM
    verifies the delta and creates a fresh ACTIVE admission.
@@ -73,11 +77,14 @@ Loop logic:
 7. Emit alr_work_item_v1, alr_effect_review_v1, alr_loop_state_packet_v1, a PM
    report, and an Operator summary when useful.
 8. Commit each green checkpoint with a subject and body.
-9. Re-read repo state, build the canonical semantic progress snapshot, and call
-   `agent_governance.py continuation`. Continue only when state is ADVANCED,
+9. Re-read repo state and call `agent_governance.py continuation` only with the
+   original task/owner/persisted-admission fencing token. The store supplies the
+   original contract/control/preceding snapshot and recaptures admitted owned-source
+   bytes. Caller receipts, blocker, time, lifecycle labels, and unrelated repository
+   HEAD drift do not count as progress. Continue
+   only when state is ADVANCED,
    ADVANCED_WITH_CONCERNS, or source-only ROTATED with a clear ACTIVE row and
-   the decision is CONTINUE_OPERATOR_LOOP. State labels alone never authorize a
-   new turn.
+   the decision is CONTINUE_OPERATOR_LOOP.
 
 For P0-AIML-ALR-BOUNDARY-PACKET, the primary target is:
 srv/docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/2026-07-09--scanner_driven_alr/boundary_packet.md

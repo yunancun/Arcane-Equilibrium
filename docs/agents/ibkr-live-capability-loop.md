@@ -1,6 +1,6 @@
 # IBKR Live-Capability Loop(W5→W11 自主推進協議)
 
-本協議只有在 exact Operator request 明示 `/loop`（或同義持續執行），且 route 綁定
+本協議只有在 exact Operator request 第一控制行精確等於 `/loop`，且 route 綁定
 `continuation_mode=operator_loop` 時才 active。普通 IBKR 任務是 `finite`：完成指定
 scope 一次、回報、停止；不得因本檔存在或 queue 尚有 row 就排 wakeup。
 
@@ -67,12 +67,16 @@ f. **CI 全紅判別**:若所有分支 dispatch 失敗且 run 呈 `runner=''/ste
 另:殘項欄禁空泛(「無」或具體 ticket/包名);記「本輪淨增/淨減 blocking 移交數」。
 **並行輪記帳細則**:兩切片並行時,**僅先合入的 PR 帶記帳 commit**(含兩輪的 R-N 行);後合入 PR 不碰 meta-doc(避免 PROGRESS/TODO 撞衝突),其行若有補充由 PM 在 merge 後搭下一輪 PR 便車(此為 §7 規則 1「漂移修復搭便車」的合法形態,same-push 規則對此豁免)。
 
-**S7 排下輪**:只有 S0 已證明 exact Operator opt-in，且
-`agent_governance.py continuation` 對 previous/current semantic progress snapshot 回傳
+**S7 排下輪**:只有 S0 已證明 exact prompt-bound `/loop` opt-in、已取得 persisted
+task-admission fencing token，且 `continuation` 從該 admission 取回原 contract/control/
+preceding snapshot、重新讀 owned bytes 後回傳
 `CONTINUE_OPERATOR_LOOP + schedule_wakeup=true`，session 存活時才可
 ScheduleWakeup(`/loop` 原 prompt 原樣;delay 按下輪型態:剛派 BG 波=長 fallback ≥1200s
-駐留等收、純接續=120-600s)。相同 blocker/source/Context/external/work digest 回傳
+駐留等收、純接續=120-600s)。相同 task-owned-source digest 回傳
 `BLOCKED_NO_DELTA`，必須停、`next_action=null`，不得以新 timestamp/TODO pointer 重開。
+IN_PROGRESS 已被 claim，不得當 ACTIVE 再派；status、blocker、caller receipt 或 unrelated
+repo HEAD 變化不是 progress。External-only delta 必須走 IBKR validated Adapter 或 reviewed
+task-owned artifact。
 撞 Operator 決策、WAITING 或 terminal status 都停；session 將盡時確認 S6 已落 repo 即可
 安全死亡，接棒見 §6。
 

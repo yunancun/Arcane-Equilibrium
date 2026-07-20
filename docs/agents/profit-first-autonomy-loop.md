@@ -5,10 +5,13 @@
 本文件只定義長期工作流。當前 blocker、候選、證據路徑、命令入口讀 `TODO.md` 和其引用；不要把易過期任務塞回本文件。
 
 本文件不是自動 continuation authority。普通任務一律
-`continuation_mode=finite`，完成使用者要求後停止。只有 exact Operator request 明示要跑
-本 loop 時才建立 `operator_loop` task；每輪排下一 turn 前必須通過 Task Execution
-Control。相同 semantic progress digest 立即 `BLOCKED_NO_DELTA`，不得靠新 timestamp、
-TODO pointer、全面重審或虛構 next_action 維持 loop。
+`continuation_mode=finite`，完成使用者要求後停止。只有 exact Operator request 以
+第一控制行精確等於 `/loop` 啟動本 loop 時才建立 prompt-bound `operator_loop`
+task。開始時取得 persisted task-admission fencing token；每輪排下一 turn 前只用該 token
+呼叫 continuation，由 store 取回原 contract/control/preceding snapshot 並重新讀 admitted
+task-owned bytes。相同 source progress digest 立即停止，不得靠新
+timestamp、status、unrelated repo HEAD、TODO pointer、全面重審或虛構 next_action 維持 loop。
+External-only delta 必須走 validated domain Adapter 或 reviewed task-owned artifact。
 
 加速 candidate 進 Demo 驗證時，使用 `docs/agents/profit-first-fast-demo-promotion-loop.md`。該子循環允許部分達標 candidate 在機器檢查通過後進 bounded Demo probe，用真實 Demo order/fill/fee/slippage 補證據，再回到 learning 和 promotion chain；它不放寬本文件的 survival、loss-control、authorization、Rust authority、Decision Lease、auditability、reconstructability 邊界。
 

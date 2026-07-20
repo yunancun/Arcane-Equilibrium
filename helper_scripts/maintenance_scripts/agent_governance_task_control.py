@@ -10,29 +10,38 @@ feature worktree at a time.
 from __future__ import annotations
 
 import argparse
-import fcntl
 import hashlib
 import json
-import os
 import re
-import secrets
-import subprocess
-import tempfile
-from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from typing import Any, Callable, Protocol
+import stat
+from pathlib import Path, PurePosixPath
+from typing import Any
+
+from agent_governance_writer_lease import (
+    DEFAULT_LEASE_TTL_SECONDS,
+    MAX_LEASE_TTL_SECONDS,
+    MIN_LEASE_TTL_SECONDS,
+    FileWriterLeaseStore,
+    InMemoryWriterLeaseStore,
+    WorktreeIdentity,
+    WriterLeaseStore,
+    _git_text,
+    acquire_writer_lease,
+    filesystem_writer_lease_action,
+    inspect_worktree,
+    release_writer_lease,
+    renew_writer_lease,
+    validate_writer_lease,
+)
 
 
 TASK_EXECUTION_SCHEMA_VERSION = "task_execution_control_v1"
-WRITER_LEASE_SCHEMA_VERSION = "writer_leases_v1"
 CONTINUATION_MODES = ("finite", "operator_loop")
 DEFAULT_CONTINUATION_MODE = "finite"
 AUTOMATIC_WAKEUP_MODES = ("operator_loop",)
 SAME_PROGRESS_TERMINAL = "BLOCKED_NO_DELTA"
-DEFAULT_LEASE_TTL_SECONDS = 7200
-MIN_LEASE_TTL_SECONDS = 60
-MAX_LEASE_TTL_SECONDS = 86400
+MAX_TASK_SOURCE_FILES = 4096
+MAX_TASK_SOURCE_BYTES = 64 * 1024 * 1024
 
 EXPECTED_TASK_EXECUTION_CONTROL = {
     "schema_version": TASK_EXECUTION_SCHEMA_VERSION,
@@ -41,6 +50,13 @@ EXPECTED_TASK_EXECUTION_CONTROL = {
     "automatic_wakeup_modes": list(AUTOMATIC_WAKEUP_MODES),
     "same_progress_terminal": SAME_PROGRESS_TERMINAL,
     "operator_loop_requires_explicit_request": True,
+    "operator_loop_request_marker": "/loop",
+    "control_binding": "admitted_task_contract_digest",
+    "continuation_requires_previous": True,
+    "snapshot_producer": "recaptured_task_owned_bytes",
+    "dispatchable_work_statuses": ["ACTIVE"],
+    "semantic_progress_fields": ["task_source_digest"],
+    "non_progress_fields": ["round", "work_status", "source_head", "blocker_code"],
     "writer_lease": {
         "scope": "worktree",
         "requires_linked_feature_worktree": True,
@@ -69,33 +85,34 @@ NULLABLE_NEXT_ACTION_STATUSES = frozenset(
     {"DONE", "DONE_WITH_CONCERNS", SAME_PROGRESS_TERMINAL}
 )
 PROGRESS_SNAPSHOT_FIELDS = frozenset({
-    "schema_version", "round", "work_status", "source_head", "context_digest",
-    "external_state_digest", "work_digest", "blocker_code", "progress_digest",
+    "schema_version", "round", "work_status", "source_head",
+    "task_contract_digest", "task_source_manifest", "task_source_digest",
+    "blocker_code", "progress_digest",
 })
-
-
-def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def _timestamp(value: datetime) -> str:
-    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def _parse_timestamp(value: str) -> datetime:
-    if not isinstance(value, str) or not value.endswith("Z"):
-        raise ValueError("timestamp must be an RFC3339 UTC string ending in Z")
-    parsed = datetime.fromisoformat(value.removesuffix("Z") + "+00:00")
-    if parsed.tzinfo is None:
-        raise ValueError("timestamp must include UTC timezone")
-    return parsed.astimezone(timezone.utc)
+COMPILED_TASK_EXECUTION_CONTROL_FIELDS = frozenset({
+    "schema_version", "continuation_mode", "automatic_wakeup_admitted",
+    "same_progress_terminal", "writer_lease", "task_prompt_digest",
+    "operator_loop_request_digest", "task_contract_digest",
+})
+OPERATOR_LOOP_MARKER = re.compile(
+    r"\A[ \t]*/loop[ \t]*(?:\r?\n|\Z)"
+)
 
 
 def _canonical_digest(value: Any) -> str:
     encoded = json.dumps(
-        value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+        allow_nan=False,
     ).encode("utf-8")
     return "sha256:" + hashlib.sha256(encoded).hexdigest()
+
+
+def task_contract_digest(task_contract: Any) -> str:
+    """Return the canonical digest of one already-normalized task contract."""
+
+    if not isinstance(task_contract, dict):
+        raise ValueError("task_contract must be an object")
+    return _canonical_digest(task_contract)
 
 
 def validate_task_execution_control(contract: Any) -> list[str]:
@@ -109,18 +126,74 @@ def validate_task_execution_control(contract: Any) -> list[str]:
     return []
 
 
-def compile_task_execution_policy(continuation_mode: str) -> dict[str, Any]:
-    """Project the continuation and writer policy into a routed task."""
+def operator_loop_request_digest(task_prompt: str) -> str | None:
+    """Bind loop authority only to a leading Operator ``/loop`` control line."""
 
+    if not OPERATOR_LOOP_MARKER.search(task_prompt):
+        return None
+    return _canonical_digest({
+        "request_marker": "/loop",
+        "task_prompt": task_prompt,
+    })
+
+
+def compile_task_execution_policy(task_contract: dict[str, Any]) -> dict[str, Any]:
+    """Compile continuation authority from one immutable normalized task contract."""
+
+    if not isinstance(task_contract, dict):
+        raise ValueError("task_contract must be an object")
+    continuation_mode = task_contract.get("continuation_mode")
+    task_prompt = task_contract.get("task_prompt")
     if continuation_mode not in CONTINUATION_MODES:
         raise ValueError(f"invalid continuation_mode: {continuation_mode}")
+    if not isinstance(task_prompt, str) or not task_prompt.strip():
+        raise ValueError("task_prompt must be a non-empty string")
+    prompt_digest = "sha256:" + hashlib.sha256(
+        task_prompt.encode("utf-8")
+    ).hexdigest()
+    if task_contract.get("task_prompt_digest") != prompt_digest:
+        raise ValueError("task_contract task_prompt_digest does not match exact bytes")
+    request_digest = operator_loop_request_digest(task_prompt)
+    if continuation_mode == "operator_loop" and request_digest is None:
+        raise ValueError(
+            "operator_loop requires a leading /loop control line in the Operator task_prompt"
+        )
+    expected_request_digest = (
+        request_digest if continuation_mode == "operator_loop" else None
+    )
+    if task_contract.get("operator_loop_request_digest") != expected_request_digest:
+        raise ValueError("task_contract operator loop request binding is invalid")
     return {
         "schema_version": TASK_EXECUTION_SCHEMA_VERSION,
         "continuation_mode": continuation_mode,
         "automatic_wakeup_admitted": continuation_mode in AUTOMATIC_WAKEUP_MODES,
         "same_progress_terminal": SAME_PROGRESS_TERMINAL,
         "writer_lease": dict(EXPECTED_TASK_EXECUTION_CONTROL["writer_lease"]),
+        "task_prompt_digest": prompt_digest,
+        "operator_loop_request_digest": expected_request_digest,
+        "task_contract_digest": task_contract_digest(task_contract),
     }
+
+
+def validate_compiled_task_execution_control(
+    control: Any,
+    *,
+    task_contract: dict[str, Any],
+    admitted_task_contract_digest: str,
+) -> dict[str, Any]:
+    """Recompile from the admitted contract so callers cannot replace authority."""
+
+    if (
+        not isinstance(control, dict)
+        or set(control) != COMPILED_TASK_EXECUTION_CONTROL_FIELDS
+    ):
+        raise ValueError("task_execution_control fields are not exact")
+    expected = compile_task_execution_policy(task_contract)
+    if expected["task_contract_digest"] != admitted_task_contract_digest:
+        raise ValueError("task_contract does not match the admitted task contract digest")
+    if control != expected:
+        raise ValueError("task_execution_control does not match its exact task_prompt")
+    return expected
 
 
 def queue_lane(work_status: str) -> str:
@@ -133,9 +206,10 @@ def queue_lane(work_status: str) -> str:
 
 
 def is_dispatchable(work_status: str) -> bool:
-    """Only active-lane work can be selected for dispatch."""
+    """Only a fresh ACTIVE admission can be selected; IN_PROGRESS is claimed."""
 
-    return queue_lane(work_status) == "active"
+    queue_lane(work_status)
+    return work_status == "ACTIVE"
 
 
 def next_action_may_be_null(work_status: str) -> bool:
@@ -162,84 +236,220 @@ def progress_snapshot(
     *,
     round_number: int,
     work_status: str,
-    source_head: str,
-    context_digest: str,
-    external_state_digest: str,
-    work_digest: str,
+    repo: Path,
+    task_contract: dict[str, Any],
+    admitted_task_contract_digest: str,
     blocker_code: str | None = None,
 ) -> dict[str, Any]:
-    """Build one exact no-progress comparison snapshot."""
+    """Build a snapshot from recaptured task-owned repository bytes only."""
 
-    if not isinstance(round_number, int) or isinstance(round_number, bool) or round_number < 0:
+    if (
+        not isinstance(round_number, int)
+        or isinstance(round_number, bool)
+        or round_number < 0
+    ):
         raise ValueError("round_number must be a non-negative integer")
     allowed_statuses = ACTIVE_PROGRESS_STATUSES | TERMINAL_WORK_STATUSES
     if work_status not in allowed_statuses:
         raise ValueError(f"invalid progress work_status: {work_status}")
-    if not isinstance(source_head, str) or len(source_head) != 40 or any(
-        char not in "0123456789abcdef" for char in source_head
-    ):
-        raise ValueError("source_head must be a lowercase 40-hex commit")
-    digest_fields = {
-        "context_digest": context_digest,
-        "external_state_digest": external_state_digest,
-        "work_digest": work_digest,
-    }
-    for field, value in digest_fields.items():
-        if not isinstance(value, str) or not value.startswith("sha256:") or len(value) != 71:
-            raise ValueError(f"{field} must be sha256:<64 lowercase hex>")
-        if any(char not in "0123456789abcdef" for char in value.removeprefix("sha256:")):
-            raise ValueError(f"{field} must be sha256:<64 lowercase hex>")
+    contract_digest = task_contract_digest(task_contract)
+    if contract_digest != admitted_task_contract_digest:
+        raise ValueError("task_contract does not match the admitted task contract digest")
+    repo = repo.resolve()
+    source_head = _git_text(repo, "rev-parse", "HEAD")
+    if source_head is None or not re.fullmatch(r"[0-9a-f]{40}", source_head):
+        raise ValueError("cannot capture an exact repository source_head")
+    task_source_manifest = capture_task_source_manifest(repo, task_contract)
     if blocker_code is not None and not (
         isinstance(blocker_code, str)
         and re.fullmatch(r"[A-Z0-9][A-Z0-9_.:-]{0,127}", blocker_code)
     ):
         raise ValueError("blocker_code must be null or a canonical uppercase code")
-    comparison = {
-        "work_status": work_status,
-        "source_head": source_head,
-        "context_digest": context_digest,
-        "external_state_digest": external_state_digest,
-        "work_digest": work_digest,
-        "blocker_code": blocker_code,
-    }
+    task_source_digest = _canonical_digest(task_source_manifest)
+    comparison = {"task_source_digest": task_source_digest}
     return {
         "schema_version": "task_progress_snapshot_v1",
         "round": round_number,
-        **comparison,
+        "work_status": work_status,
+        "source_head": source_head,
+        "task_contract_digest": contract_digest,
+        "task_source_manifest": task_source_manifest,
+        "task_source_digest": task_source_digest,
+        "blocker_code": blocker_code,
         "progress_digest": _canonical_digest(comparison),
     }
 
 
+def capture_task_source_manifest(
+    repo: Path, task_contract: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """Capture exact bytes only from the task contract's owned source scope."""
+
+    scope = task_contract.get("dirty_scope", [])
+    if not isinstance(scope, list) or any(not isinstance(item, str) for item in scope):
+        raise ValueError("task_contract dirty_scope must be a string list")
+    repo = repo.resolve()
+    records: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    total_bytes = 0
+    for raw in scope:
+        normalized = raw.strip().removeprefix("./").rstrip("/")
+        path = PurePosixPath(normalized)
+        if (
+            not normalized
+            or normalized == "."
+            or normalized.startswith(("/", "~"))
+            or ".." in path.parts
+            or path.parts[0].casefold() == ".git"
+            or path.as_posix() != normalized
+        ):
+            raise ValueError("task_contract dirty_scope contains an unsafe path")
+        candidate = repo / normalized
+        cursor = repo
+        for part in path.parts:
+            cursor /= part
+            if cursor.is_symlink():
+                raise ValueError("task-owned source scope cannot contain a symlink")
+        try:
+            candidate.resolve(strict=False).relative_to(repo)
+        except ValueError as error:
+            raise ValueError("task-owned source scope escapes the repository") from error
+        if candidate.is_symlink():
+            raise ValueError("task-owned source scope cannot contain a symlink")
+        if not candidate.exists():
+            records.append({"path": normalized, "kind": "absent"})
+            continue
+        candidates = [candidate]
+        if candidate.is_dir():
+            records.append({"path": normalized, "kind": "directory"})
+            candidates = sorted(
+                item for item in candidate.rglob("*") if item.is_file() or item.is_symlink()
+            )
+        for item in candidates:
+            relative = item.relative_to(repo).as_posix()
+            if relative in seen:
+                continue
+            seen.add(relative)
+            if item.is_symlink():
+                raise ValueError("task-owned source scope cannot contain a symlink")
+            try:
+                item.resolve(strict=True).relative_to(repo)
+            except (OSError, ValueError) as error:
+                raise ValueError("task-owned source scope escapes the repository") from error
+            try:
+                item_stat = item.stat(follow_symlinks=False)
+            except OSError as error:
+                raise ValueError("task-owned source file metadata is unavailable") from error
+            if not stat.S_ISREG(item_stat.st_mode):
+                raise ValueError("task-owned source scope must contain regular files only")
+            if len(seen) > MAX_TASK_SOURCE_FILES:
+                raise ValueError("task-owned source scope exceeds the file-count limit")
+            total_bytes += item_stat.st_size
+            if total_bytes > MAX_TASK_SOURCE_BYTES:
+                raise ValueError("task-owned source scope exceeds the byte limit")
+            data = item.read_bytes()
+            if len(data) != item_stat.st_size:
+                raise ValueError("task-owned source file changed while being captured")
+            records.append({
+                "path": relative,
+                "kind": "file",
+                "size": len(data),
+                "content_sha256": hashlib.sha256(data).hexdigest(),
+            })
+    return sorted(records, key=lambda record: (record["path"], record["kind"]))
+
+
+def _validate_task_source_manifest(manifest: Any) -> None:
+    if not isinstance(manifest, list):
+        raise ValueError("task_source_manifest must be a list")
+    paths: list[tuple[str, str]] = []
+    for record in manifest:
+        if not isinstance(record, dict) or set(record) not in (
+            {"path", "kind"},
+            {"path", "kind", "size", "content_sha256"},
+        ):
+            raise ValueError("task_source_manifest record fields are not exact")
+        path, kind = record.get("path"), record.get("kind")
+        if not isinstance(path, str) or kind not in {"absent", "directory", "file"}:
+            raise ValueError("task_source_manifest record is invalid")
+        if kind == "file":
+            if (
+                not isinstance(record.get("size"), int)
+                or isinstance(record.get("size"), bool)
+                or record["size"] < 0
+                or not re.fullmatch(r"[0-9a-f]{64}", str(record.get("content_sha256")))
+            ):
+                raise ValueError("task_source_manifest file record is invalid")
+        elif set(record) != {"path", "kind"}:
+            raise ValueError("task_source_manifest non-file record is invalid")
+        paths.append((path, kind))
+    if paths != sorted(set(paths)):
+        raise ValueError("task_source_manifest must be sorted and unique")
+
+
 def validate_progress_snapshot(snapshot: Any) -> dict[str, Any]:
-    """Recompute an exact progress snapshot before a continuation decision."""
+    """Recompute the task-owned source digest from the embedded manifest."""
 
     if not isinstance(snapshot, dict) or set(snapshot) != PROGRESS_SNAPSHOT_FIELDS:
         raise ValueError("progress snapshot fields are not exact")
-    expected = progress_snapshot(
-        round_number=snapshot["round"],
-        work_status=snapshot["work_status"],
-        source_head=snapshot["source_head"],
-        context_digest=snapshot["context_digest"],
-        external_state_digest=snapshot["external_state_digest"],
-        work_digest=snapshot["work_digest"],
-        blocker_code=snapshot["blocker_code"],
-    )
+    if (
+        not isinstance(snapshot["round"], int)
+        or isinstance(snapshot["round"], bool)
+        or snapshot["round"] < 0
+        or snapshot["work_status"] not in ACTIVE_PROGRESS_STATUSES | TERMINAL_WORK_STATUSES
+        or not re.fullmatch(r"[0-9a-f]{40}", str(snapshot["source_head"]))
+        or not re.fullmatch(
+            r"sha256:[0-9a-f]{64}", str(snapshot["task_contract_digest"])
+        )
+    ):
+        raise ValueError("progress snapshot provenance is invalid")
+    manifest = snapshot["task_source_manifest"]
+    _validate_task_source_manifest(manifest)
+    blocker_code = snapshot["blocker_code"]
+    if blocker_code is not None and not (
+        isinstance(blocker_code, str)
+        and re.fullmatch(r"[A-Z0-9][A-Z0-9_.:-]{0,127}", blocker_code)
+    ):
+        raise ValueError("progress snapshot blocker_code is invalid")
+    task_source_digest = _canonical_digest(manifest)
+    comparison = {"task_source_digest": task_source_digest}
+    expected = {
+        **snapshot,
+        "task_source_digest": task_source_digest,
+        "progress_digest": _canonical_digest(comparison),
+    }
     if snapshot != expected:
         raise ValueError("progress snapshot digest does not match canonical content")
     return expected
 
 
-def adjudicate_continuation(
+def _adjudicate_continuation(
     *,
-    continuation_mode: str,
+    repo: Path,
+    task_contract: dict[str, Any],
+    admitted_task_contract_digest: str,
+    task_execution_control: dict[str, Any],
     current: dict[str, Any],
     previous: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Decide whether a controller may schedule another turn."""
 
-    policy = compile_task_execution_policy(continuation_mode)
+    policy = validate_compiled_task_execution_control(
+        task_execution_control,
+        task_contract=task_contract,
+        admitted_task_contract_digest=admitted_task_contract_digest,
+    )
+    continuation_mode = policy["continuation_mode"]
     current = validate_progress_snapshot(current)
     previous = validate_progress_snapshot(previous) if previous is not None else None
+    if current["task_contract_digest"] != admitted_task_contract_digest or (
+        previous is not None
+        and previous["task_contract_digest"] != admitted_task_contract_digest
+    ):
+        raise ValueError("progress snapshot task contract binding is invalid")
+    recaptured_manifest = capture_task_source_manifest(repo.resolve(), task_contract)
+    if current["task_source_manifest"] != recaptured_manifest:
+        raise ValueError("current progress snapshot does not match task-owned repository bytes")
     current_digest = current["progress_digest"]
     if previous is not None and current["round"] <= previous["round"]:
         raise ValueError("current progress round must be newer than previous round")
@@ -251,6 +461,9 @@ def adjudicate_continuation(
     ):
         decision = "STOP_TERMINAL"
         terminal_status = current.get("work_status")
+    elif previous is None:
+        decision = "STOP_MISSING_PREVIOUS"
+        terminal_status = "NEEDS_CONTEXT"
     elif previous is not None and previous.get("progress_digest") == current_digest:
         decision = SAME_PROGRESS_TERMINAL
         terminal_status = SAME_PROGRESS_TERMINAL
@@ -272,420 +485,9 @@ def adjudicate_continuation(
     }
 
 
-class WriterLeaseStore(Protocol):
-    """Storage Seam for exclusive worktree writer leases."""
-
-    def read(self) -> dict[str, Any]: ...
-
-    def update(self, mutation: Callable[[dict[str, Any]], dict[str, Any]]) -> dict[str, Any]: ...
-
-
-class InMemoryWriterLeaseStore:
-    """Deterministic test Adapter for the writer-lease Seam."""
-
-    def __init__(self) -> None:
-        self._state = {"schema_version": WRITER_LEASE_SCHEMA_VERSION, "leases": {}}
-
-    def read(self) -> dict[str, Any]:
-        return json.loads(json.dumps(self._state))
-
-    def update(self, mutation: Callable[[dict[str, Any]], dict[str, Any]]) -> dict[str, Any]:
-        candidate = mutation(self.read())
-        self._state = json.loads(json.dumps(candidate))
-        return self.read()
-
-
-class FileWriterLeaseStore:
-    """Atomic filesystem Adapter located in Git's common directory."""
-
-    def __init__(self, common_dir: Path) -> None:
-        self.common_dir = common_dir.resolve()
-        self.state_path = self.common_dir / "codex-writer-leases-v1.json"
-        self.lock_path = self.common_dir / "codex-writer-leases-v1.lock"
-
-    def read(self) -> dict[str, Any]:
-        if self.state_path.is_symlink():
-            raise ValueError("writer lease state must not be a symlink")
-        try:
-            raw = json.loads(self.state_path.read_text(encoding="utf-8"))
-        except FileNotFoundError:
-            return {"schema_version": WRITER_LEASE_SCHEMA_VERSION, "leases": {}}
-        except (OSError, json.JSONDecodeError) as error:
-            raise ValueError(f"writer lease state is unreadable: {error}") from error
-        _validate_lease_state(raw)
-        return raw
-
-    def update(self, mutation: Callable[[dict[str, Any]], dict[str, Any]]) -> dict[str, Any]:
-        self.common_dir.mkdir(parents=True, exist_ok=True)
-        if self.lock_path.is_symlink() or self.state_path.is_symlink():
-            raise ValueError("writer lease files must not be symlinks")
-        with self.lock_path.open("a+", encoding="utf-8") as lock_handle:
-            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
-            current = self.read()
-            candidate = mutation(current)
-            _validate_lease_state(candidate)
-            fd, temporary_name = tempfile.mkstemp(
-                prefix="codex-writer-leases-v1.", suffix=".tmp", dir=self.common_dir
-            )
-            temporary_path = Path(temporary_name)
-            try:
-                with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                    json.dump(candidate, handle, ensure_ascii=False, sort_keys=True)
-                    handle.write("\n")
-                    handle.flush()
-                    os.fsync(handle.fileno())
-                os.replace(temporary_path, self.state_path)
-            finally:
-                temporary_path.unlink(missing_ok=True)
-            return json.loads(json.dumps(candidate))
-
-
-def _validate_lease_state(state: Any) -> None:
-    if not isinstance(state, dict) or set(state) != {"schema_version", "leases"}:
-        raise ValueError("writer lease state must contain only schema_version and leases")
-    if state["schema_version"] != WRITER_LEASE_SCHEMA_VERSION:
-        raise ValueError("writer lease state schema_version is invalid")
-    if not isinstance(state["leases"], dict):
-        raise ValueError("writer lease state leases must be an object")
-    required = {
-        "lease_id", "task_id", "owner", "worktree", "branch", "acquired_at", "expires_at"
-    }
-    for worktree, lease in state["leases"].items():
-        if not isinstance(worktree, str) or not isinstance(lease, dict) or set(lease) != required:
-            raise ValueError("writer lease record shape is invalid")
-        if lease["worktree"] != worktree:
-            raise ValueError("writer lease key must match worktree")
-        if any(not isinstance(lease[field], str) or not lease[field] for field in required):
-            raise ValueError("writer lease fields must be non-empty strings")
-        _parse_timestamp(lease["acquired_at"])
-        _parse_timestamp(lease["expires_at"])
-
-
-@dataclass(frozen=True)
-class WorktreeIdentity:
-    worktree: str
-    branch: str | None
-    head: str | None
-    common_dir: Path
-    git_dir: Path
-    dirty: bool
-
-    @property
-    def linked(self) -> bool:
-        return self.git_dir != self.common_dir
-
-
-def _git_text(repo: Path, *args: str) -> str | None:
-    try:
-        result = subprocess.run(
-            ["git", "-C", str(repo), *args],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=20,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    return result.stdout.strip() if result.returncode == 0 else None
-
-
-def inspect_worktree(repo: Path) -> WorktreeIdentity:
-    """Resolve the exact checkout identity without mutating Git."""
-
-    root_text = _git_text(repo, "rev-parse", "--show-toplevel")
-    common_text = _git_text(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
-    git_dir_text = _git_text(repo, "rev-parse", "--path-format=absolute", "--absolute-git-dir")
-    if not root_text or not common_text or not git_dir_text:
-        raise ValueError("repository worktree identity is unavailable")
-    root = Path(root_text).resolve()
-    status = _git_text(root, "status", "--porcelain=v1", "--untracked-files=all")
-    if status is None:
-        raise ValueError("repository dirty state is unavailable")
-    return WorktreeIdentity(
-        worktree=str(root),
-        branch=_git_text(root, "symbolic-ref", "--quiet", "--short", "HEAD"),
-        head=_git_text(root, "rev-parse", "HEAD"),
-        common_dir=Path(common_text).resolve(),
-        git_dir=Path(git_dir_text).resolve(),
-        dirty=bool(status),
-    )
-
-
-def _lease_result(
-    action: str,
-    *,
-    status: str,
-    reasons: list[str],
-    identity: WorktreeIdentity,
-    lease: dict[str, str] | None,
-) -> dict[str, Any]:
-    return {
-        "schema_version": "writer_lease_result_v1",
-        "action": action,
-        "status": status,
-        "reasons": reasons,
-        "worktree": identity.worktree,
-        "branch": identity.branch,
-        "head": identity.head,
-        "linked_worktree": identity.linked,
-        "lease": lease,
-    }
-
-
-def _active_lease(lease: dict[str, str], now: datetime) -> bool:
-    return _parse_timestamp(lease["expires_at"]) > now
-
-
-def _lease_validation_reasons(
-    lease: dict[str, str] | None,
-    identity: WorktreeIdentity,
-    *,
-    task_id: str,
-    lease_id: str,
-    owner: str | None,
-    now: datetime,
-) -> list[str]:
-    if lease is None:
-        return ["WRITER_LEASE_MISSING"]
-    reasons: list[str] = []
-    if not _active_lease(lease, now):
-        reasons.append("WRITER_LEASE_EXPIRED")
-    if lease["task_id"] != task_id:
-        reasons.append("WRITER_LEASE_TASK_MISMATCH")
-    if lease["lease_id"] != lease_id:
-        reasons.append("WRITER_LEASE_ID_MISMATCH")
-    if owner is not None and lease["owner"] != owner:
-        reasons.append("WRITER_LEASE_OWNER_MISMATCH")
-    if lease["branch"] != identity.branch:
-        reasons.append("WRITER_LEASE_BRANCH_MISMATCH")
-    return reasons
-
-
-def acquire_writer_lease(
-    store: WriterLeaseStore,
-    identity: WorktreeIdentity,
-    *,
-    task_id: str,
-    owner: str,
-    ttl_seconds: int = DEFAULT_LEASE_TTL_SECONDS,
-    now: datetime | None = None,
-) -> dict[str, Any]:
-    """Acquire or idempotently renew one exclusive worktree writer lease."""
-
-    current_time = now or _utc_now()
-    reasons: list[str] = []
-    if not task_id.strip() or not owner.strip():
-        reasons.append("TASK_AND_OWNER_REQUIRED")
-    if ttl_seconds < MIN_LEASE_TTL_SECONDS or ttl_seconds > MAX_LEASE_TTL_SECONDS:
-        reasons.append("LEASE_TTL_OUT_OF_RANGE")
-    if not identity.linked:
-        reasons.append("LINKED_WORKTREE_REQUIRED")
-    if identity.branch in {None, "main"}:
-        reasons.append("ATTACHED_FEATURE_BRANCH_REQUIRED")
-    if identity.dirty:
-        reasons.append("CLEAN_WORKTREE_REQUIRED")
-    if reasons:
-        return _lease_result("acquire", status="FAIL", reasons=reasons, identity=identity, lease=None)
-
-    result: dict[str, Any] = {}
-
-    def mutation(state: dict[str, Any]) -> dict[str, Any]:
-        leases = state["leases"]
-        existing = leases.get(identity.worktree)
-        if existing and _active_lease(existing, current_time):
-            if existing["task_id"] != task_id or existing["owner"] != owner:
-                result["collision"] = existing
-                return state
-            lease_id = existing["lease_id"]
-            acquired_at = existing["acquired_at"]
-        else:
-            lease_id = secrets.token_hex(16)
-            acquired_at = _timestamp(current_time)
-        lease = {
-            "lease_id": lease_id,
-            "task_id": task_id,
-            "owner": owner,
-            "worktree": identity.worktree,
-            "branch": identity.branch or "",
-            "acquired_at": acquired_at,
-            "expires_at": _timestamp(current_time + timedelta(seconds=ttl_seconds)),
-        }
-        leases[identity.worktree] = lease
-        result["lease"] = lease
-        return state
-
-    store.update(mutation)
-    if "collision" in result:
-        return _lease_result(
-            "acquire", status="FAIL", reasons=["WORKTREE_WRITER_LEASE_HELD"],
-            identity=identity, lease=None,
-        )
-    return _lease_result(
-        "acquire", status="PASS", reasons=[], identity=identity, lease=result["lease"]
-    )
-
-
-def validate_writer_lease(
-    store: WriterLeaseStore,
-    identity: WorktreeIdentity,
-    *,
-    task_id: str,
-    lease_id: str,
-    owner: str | None = None,
-    now: datetime | None = None,
-) -> dict[str, Any]:
-    """Read-only validation Adapter used by Git loop guards."""
-
-    current_time = now or _utc_now()
-    try:
-        state = store.read()
-    except ValueError:
-        return _lease_result(
-            "validate", status="FAIL", reasons=["WRITER_LEASE_STATE_INVALID"],
-            identity=identity, lease=None,
-        )
-    lease = state["leases"].get(identity.worktree)
-    reasons = _lease_validation_reasons(
-        lease, identity, task_id=task_id, lease_id=lease_id, owner=owner,
-        now=current_time,
-    )
-    return _lease_result(
-        "validate", status="FAIL" if reasons else "PASS", reasons=reasons,
-        identity=identity, lease=lease,
-    )
-
-
-def renew_writer_lease(
-    store: WriterLeaseStore,
-    identity: WorktreeIdentity,
-    *,
-    task_id: str,
-    owner: str,
-    lease_id: str,
-    ttl_seconds: int = DEFAULT_LEASE_TTL_SECONDS,
-    now: datetime | None = None,
-) -> dict[str, Any]:
-    """Renew an exact active writer lease without changing its identity."""
-
-    current_time = now or _utc_now()
-    if ttl_seconds < MIN_LEASE_TTL_SECONDS or ttl_seconds > MAX_LEASE_TTL_SECONDS:
-        return _lease_result(
-            "renew", status="FAIL", reasons=["LEASE_TTL_OUT_OF_RANGE"],
-            identity=identity, lease=None,
-        )
-    result: dict[str, Any] = {}
-
-    def mutation(state: dict[str, Any]) -> dict[str, Any]:
-        lease = state["leases"].get(identity.worktree)
-        reasons = _lease_validation_reasons(
-            lease, identity, task_id=task_id, lease_id=lease_id, owner=owner,
-            now=current_time,
-        )
-        if reasons:
-            result["reasons"] = reasons
-            return state
-        lease["expires_at"] = _timestamp(current_time + timedelta(seconds=ttl_seconds))
-        result["lease"] = lease
-        return state
-
-    store.update(mutation)
-    if result.get("reasons"):
-        return _lease_result(
-            "renew", status="FAIL", reasons=result["reasons"], identity=identity,
-            lease=None,
-        )
-    return _lease_result(
-        "renew", status="PASS", reasons=[], identity=identity, lease=result["lease"]
-    )
-
-
-def release_writer_lease(
-    store: WriterLeaseStore,
-    identity: WorktreeIdentity,
-    *,
-    task_id: str,
-    owner: str,
-    lease_id: str,
-    now: datetime | None = None,
-) -> dict[str, Any]:
-    """Release only the exact task/owner/lease tuple."""
-
-    current_time = now or _utc_now()
-    result: dict[str, Any] = {}
-
-    def mutation(state: dict[str, Any]) -> dict[str, Any]:
-        reasons = _lease_validation_reasons(
-            state["leases"].get(identity.worktree), identity, task_id=task_id,
-            lease_id=lease_id, owner=owner, now=current_time,
-        )
-        if reasons:
-            result["reasons"] = reasons
-            return state
-        del state["leases"][identity.worktree]
-        return state
-
-    store.update(mutation)
-    if result.get("reasons"):
-        return _lease_result(
-            "release", status="FAIL", reasons=result["reasons"], identity=identity,
-            lease=None,
-        )
-    return _lease_result(
-        "release", status="PASS", reasons=[], identity=identity, lease=None
-    )
-
-
-def filesystem_writer_lease_action(
-    *,
-    action: str,
-    repo: Path,
-    task_id: str,
-    owner: str,
-    lease_id: str | None = None,
-    ttl_seconds: int = DEFAULT_LEASE_TTL_SECONDS,
-) -> dict[str, Any]:
-    """Run one explicit production writer-lease action."""
-
-    identity = inspect_worktree(repo)
-    store = FileWriterLeaseStore(identity.common_dir)
-    if action == "acquire":
-        return acquire_writer_lease(
-            store, identity, task_id=task_id, owner=owner, ttl_seconds=ttl_seconds
-        )
-    if not lease_id:
-        return _lease_result(
-            action, status="FAIL", reasons=["WRITER_LEASE_ID_REQUIRED"],
-            identity=identity, lease=None,
-        )
-    if action == "status":
-        return validate_writer_lease(
-            store, identity, task_id=task_id, owner=owner, lease_id=lease_id
-        )
-    if action == "renew":
-        return renew_writer_lease(
-            store, identity, task_id=task_id, owner=owner, lease_id=lease_id,
-            ttl_seconds=ttl_seconds,
-        )
-    if action == "release":
-        return release_writer_lease(
-            store, identity, task_id=task_id, owner=owner, lease_id=lease_id
-        )
-    raise ValueError(f"unsupported writer lease action: {action}")
-
-
-def _json_arg(value: str) -> Any:
-    if value.startswith("@"):
-        return json.loads(Path(value[1:]).read_text(encoding="utf-8"))
-    return json.loads(value)
-
-
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="action", required=True)
-    continuation = subparsers.add_parser("continuation")
-    continuation.add_argument("--mode", choices=CONTINUATION_MODES, required=True)
-    continuation.add_argument("--current", required=True)
-    continuation.add_argument("--previous")
     lease = subparsers.add_parser("writer-lease")
     lease.add_argument("--action", choices=("acquire", "status", "renew", "release"), required=True)
     lease.add_argument("--repo", type=Path, default=Path("."))
@@ -698,17 +500,10 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    if args.action == "continuation":
-        packet = adjudicate_continuation(
-            continuation_mode=args.mode,
-            current=_json_arg(args.current),
-            previous=_json_arg(args.previous) if args.previous else None,
-        )
-    else:
-        packet = filesystem_writer_lease_action(
-            action=args.action, repo=args.repo, task_id=args.task_id,
-            owner=args.owner, lease_id=args.lease_id, ttl_seconds=args.ttl_seconds,
-        )
+    packet = filesystem_writer_lease_action(
+        action=args.action, repo=args.repo, task_id=args.task_id,
+        owner=args.owner, lease_id=args.lease_id, ttl_seconds=args.ttl_seconds,
+    )
     print(json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True))
     return 0 if packet.get("status", "PASS") == "PASS" else 3
 

@@ -153,7 +153,8 @@ scope、acceptance、hard stops、baseline、`dirty_scope`、可選 `verificatio
 direct interfaces、previous failure 與可選
 `evidence_state` 供 Context Interface 使用；verdict-relevant prior/evidence 另由
 `claim_inputs` 以 canonical digest 固定。`continuation_mode` 缺省只正規化為
-`finite`；只有 exact Operator request 明示持續執行才可用 `operator_loop`。
+`finite`；只有 exact Operator request 第一控制行精確等於 `/loop` 才可用
+`operator_loop`，並將 marker 綁入原始 admitted task contract digest。
 `side_effect_class` 必須明示為 `none`、repo/test/
 docs write、deploy、`public_web_read` 或 private external/broker effect 類別，並與 task shape/surface 相容；source/docs/
 test write shape 分別 deterministic derive `repo_write`/`docs_write`/`local_test`，不能默認
@@ -242,17 +243,26 @@ status label。
 ### Task Execution Control Implementation
 
 Task Execution Control 是 Dispatch 與 Closure 共用的內部 Implementation，不是第五套
-public controller/daemon。它有兩個真實 Adapter：Git common-dir 下原子寫入的
-filesystem writer-lease store，以及測試用 in-memory store；`git_loop_guard.py` 是唯讀
-consumer，只驗證既有 lease。
+public controller/daemon。它有 Git common-dir 原子 task-admission store、filesystem
+writer-lease store，以及 writer lease 的測試用 in-memory store；`git_loop_guard.py` 是唯讀
+consumer，只驗證既有 writer lease。
 
 普通 task 的唯一預設是 `finite`，不具排下一 turn 或 `ScheduleWakeup` 的 authority。
-明示 `operator_loop` 在每個 turn boundary 以 canonical progress snapshot 比較 task-owned
-source HEAD、semantic Context、external state、work output 與 blocker；round/timestamp 和
-unrelated whole-repo drift 不算 progress。相同 digest 直接輸出
-`BLOCKED_NO_DELTA + schedule_wakeup=false + next_action=null`。只有 ACTIVE queue lane 可被
-派工；WAITING/DEFERRED/CLOSED 必須先由新 delta 或 Operator reopen 形成新的 ACTIVE
+明示 `operator_loop` 先取得 persisted task admission；其 private fencing token 綁原始
+task contract 與 preceding snapshot，caller 不能替換。每個 turn boundary 都重新讀
+task-owned source scope；generic progress 只比較其實際 bytes。Context/external/work caller
+payload、blocker、lifecycle status、whole-repo HEAD、round/timestamp 和 unrelated drift
+不算 progress。相同 digest 直接輸出
+`BLOCKED_NO_DELTA + schedule_wakeup=false + next_action=null`。只有 exact ACTIVE queue
+item 可被派工，IN_PROGRESS 已被 claim；WAITING/DEFERRED/CLOSED 必須先由新 delta 或
+Operator reopen 形成新的 ACTIVE
 admission。
+
+Canonical snapshot producer 由 persisted normalized task contract 的 `dirty_scope` 讀取
+實際 repository bytes；continuation 從 store 取回原始 control/digest/preceding snapshot。
+任意 caller-supplied contract、previous snapshot、digest、receipt 或新編 loop control 都不是
+有效 delta/authority。External-only delta 必須由獨立 validated Adapter 或 reviewed
+task-owned artifact 落入 admitted scope。
 
 每個 writable task 只持有一個 attached non-main linked-worktree lease，帶 task/owner、
 branch、TTL 與 random fencing token。Acquire 要求 clean worktree；renew/release 在同一

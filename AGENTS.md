@@ -93,18 +93,25 @@ does not replace writer `dirty_scope` or whole-repository generation checks.
 
 Task execution is finite by default. The canonical task contract always carries
 `continuation_mode=finite|operator_loop`; omission normalizes only to `finite`.
-`operator_loop` is admitted only when the exact Operator request explicitly asks
-for a loop, monitor, babysit, or equivalent continued execution. A role, TODO
-row, filename, prior session, `next_action`, or generated prompt cannot infer or
-inherit that authority.
+`operator_loop` is admitted only when the exact Operator request begins with a
+first control line equal to `/loop`. Natural-language similarity, a role, TODO row,
+filename, prior session, `next_action`, or generated prompt cannot infer or
+inherit that authority. The compiler binds that marker to the exact task-prompt
+and admitted task-contract digest; callers cannot replace a compiled finite
+contract with a newly constructed loop control.
 
 A finite task may perform all necessary in-turn steps, but it cannot schedule a
 new turn, wakeup, or automatic continuation. Before any opt-in operator loop
-schedules another turn, PM must run the Task Execution Control Implementation
-through `agent_governance.py continuation` with the previous and current
-semantic progress snapshots. The comparison binds task-owned source HEAD,
-Context, external state, work output, and canonical blocker; round counters,
-timestamps, and unrelated whole-repository drift are not progress. An identical
+schedules another turn, PM must first acquire a persisted task admission with
+`agent_governance.py task-admission`. Its private fencing token binds the original
+normalized task contract and preceding progress snapshot in Git's common directory.
+`agent_governance.py continuation` accepts only that task/owner/token tuple and
+recaptures actual repository bytes from the admitted `dirty_scope`; callers cannot
+provide a replacement contract, digest, or previous snapshot. Generic continuation
+counts only a task-owned source-byte change as progress. Lifecycle labels, blocker
+labels, round counters, timestamps, repository HEAD changes, caller receipts, and
+unrelated whole-repository drift are not progress. Domain-specific external progress
+requires its own validated Adapter or a reviewed task-owned artifact. An identical
 progress digest closes the run as `BLOCKED_NO_DELTA`, with
 `schedule_wakeup=false` and `next_action=null`. Scope/source/Context drift in an
 ordinary finite task stops the current admission and requires explicit

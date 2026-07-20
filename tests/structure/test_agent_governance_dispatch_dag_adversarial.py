@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -21,7 +22,7 @@ from agent_governance_execution_dag import (  # noqa: E402
 )
 from agent_governance_dispatch_validation import validate_dispatch_projection  # noqa: E402
 from agent_governance_registry import load_registry  # noqa: E402
-from agent_governance_routing import route_task  # noqa: E402
+from agent_governance_routing import TASK_CONTRACT_FIELDS, route_task  # noqa: E402
 from agent_governance_schema import schema_subset_errors  # noqa: E402
 from agent_governance_trust import _wave_errors  # noqa: E402
 from agent_governance_workflow_receipts import canonical_digest  # noqa: E402
@@ -56,6 +57,7 @@ def test_query_cannot_bypass_hard_facts_or_opt_into_a_loop() -> None:
         {"runtime_claim": True},
         {"risk": "high"},
         {"continuation_mode": "operator_loop"},
+        {"direct_interfaces": ["auth/session authority"]},
     ):
         try:
             route_task({**base, **override})
@@ -63,6 +65,41 @@ def test_query_cannot_bypass_hard_facts_or_opt_into_a_loop() -> None:
             assert "task_shape query requires" in str(error)
         else:
             raise AssertionError(f"unsafe query facts were admitted: {override}")
+
+
+def test_operator_loop_route_requires_exact_operator_prompt_marker() -> None:
+    base = {
+        "task_shape": "analysis",
+        "surfaces": ["governance"],
+        "risk": "low",
+        "uncertainty": "low",
+        "side_effect_class": "none",
+        "continuation_mode": "operator_loop",
+    }
+    try:
+        route_task({**base, "task_prompt": "answer once and stop; do not loop"})
+    except ValueError as error:
+        assert "leading /loop control line" in str(error)
+    else:
+        raise AssertionError("operator_loop without exact Operator marker was admitted")
+
+    routed = route_task({**base, "task_prompt": "/loop\nmonitor until terminal"})
+    control = routed["task_execution_control"]
+    assert control["automatic_wakeup_admitted"] is True
+    assert control["operator_loop_request_digest"].startswith("sha256:")
+    assert control["task_contract_digest"].startswith("sha256:")
+    contract = {
+        field: routed["task_facts"].get(field) for field in TASK_CONTRACT_FIELDS
+    }
+    assert control["task_contract_digest"] == "sha256:" + hashlib.sha256(
+        json.dumps(
+            contract, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+    ).hexdigest()
+    assert (
+        routed["task_facts"]["operator_loop_request_digest"]
+        == control["operator_loop_request_digest"]
+    )
 
 
 def _implementation_fixture() -> tuple[dict, dict, dict]:

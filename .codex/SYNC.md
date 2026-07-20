@@ -35,8 +35,8 @@ may explain history but cannot authorize a Git effect.
   effect.
 - Ordinary task continuation is `finite`. This Git contract controls authorized
   checkpoints/publication/sync; it does not authorize a new agent turn. Only an
-  exact `operator_loop` task may schedule another turn after the separate
-  no-delta continuation gate passes.
+  exact prompt-bound `/loop` task may schedule another turn only when its persisted
+  admission and preceding-snapshot no-delta gate passes.
 
 ## Read-only guard
 

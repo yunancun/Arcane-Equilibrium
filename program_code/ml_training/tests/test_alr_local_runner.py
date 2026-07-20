@@ -345,8 +345,11 @@ def test_selector_skips_done_rows_and_allows_default_max_steps(tmp_path: Path) -
 
     report = _report(out_dir)
     state = _state_packet(out_dir)
-    assert report["selected_work_item"]["work_item_id"] == "P1-READY"
-    assert state["selected_work_item"]["work_item_id"] == "P1-READY"
+    assert report["selected_work_item"] == {}
+    assert state["selected_work_item"] == {}
+    assert next(
+        item for item in state["work_items"] if item["work_item_id"] == "P1-READY"
+    )["state"] == "DONE"
     _assert_state_matches_report(out_dir, reason_empty=True)
 
 
@@ -372,6 +375,50 @@ def test_all_done_queue_keeps_empty_selection_consistent(tmp_path: Path) -> None
     assert state["selection_reason"] == "queue_empty"
     assert state["decision_reasons"] == ["queue_empty"]
     assert state["outcome"] == "DEFER_EVIDENCE"
+
+
+def test_waiting_row_never_executes_or_mutates_and_later_active_row_is_selected(
+    tmp_path: Path,
+) -> None:
+    waiting = _work_item(
+        work_item_id="P0-WAITING",
+        row_id="todo:P0-WAITING",
+        title="waiting row",
+        state="WAITING_CONTROLLER",
+        status="WAITING_CONTROLLER",
+        conditions_satisfied=True,
+    )
+    waiting["work_item_hash"] = compute_alr_work_item_hash(waiting)
+    waiting_run = tmp_path / "run_waiting_gate"
+    waiting_manifest = _runner_manifest(
+        requested_step="outcome_bridge", work_items=[waiting]
+    )
+
+    assert _run(waiting_manifest, waiting_run, tmp_path) == 0
+    waiting_report = _report(waiting_run)
+    waiting_state = _state_packet(waiting_run)
+    assert not (waiting_run / OUTCOME_BRIDGE_FILENAME).exists()
+    assert waiting_report["selected_work_item"] == {}
+    assert waiting_report["component_status"]["component"] == "selection_gate"
+    assert waiting_report["stop_state"] == "DEFER_EVIDENCE"
+    assert waiting_state["work_items"] == [waiting]
+    assert waiting_state["selection_reason"] == "waiting_requires_pm_readmission"
+
+    active = _work_item(
+        work_item_id="P1-ACTIVE",
+        row_id="todo:P1-ACTIVE",
+        title="active row",
+    )
+    active_run = tmp_path / "run_later_active"
+    active_manifest = _runner_manifest(
+        requested_step="outcome_bridge", work_items=[waiting, active]
+    )
+    assert _run(active_manifest, active_run, tmp_path) == 0
+    assert (active_run / OUTCOME_BRIDGE_FILENAME).exists()
+    active_state = _state_packet(active_run)
+    assert active_state["work_items"][0] == waiting
+    assert active_state["work_items"][1]["work_item_id"] == "P1-ACTIVE"
+    assert active_state["work_items"][1]["state"] == "DEFERRED"
 
 
 def test_auto_selects_next_artifact_from_previous_state(tmp_path: Path) -> None:

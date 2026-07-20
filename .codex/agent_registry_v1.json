@@ -14,6 +14,13 @@
     "automatic_wakeup_modes": ["operator_loop"],
     "same_progress_terminal": "BLOCKED_NO_DELTA",
     "operator_loop_requires_explicit_request": true,
+    "operator_loop_request_marker": "/loop",
+    "control_binding": "admitted_task_contract_digest",
+    "continuation_requires_previous": true,
+    "snapshot_producer": "recaptured_task_owned_bytes",
+    "dispatchable_work_statuses": ["ACTIVE"],
+    "semantic_progress_fields": ["task_source_digest"],
+    "non_progress_fields": ["round", "work_status", "source_head", "blocker_code"],
     "writer_lease": {
       "scope": "worktree",
       "requires_linked_feature_worktree": true,
@@ -26,7 +33,7 @@
     "registry": "load_registry() + render_views(registry) -> generated adapters",
     "context": "compile_context(role, task_facts) -> locally recaptured Registry-selected/derived bytes + immutable task/budget authority; self-hash alone is never provenance",
     "dispatch": "route_task(task_facts) -> hybrid_execution_dag_v1 + digest + deterministic required nodes + finite-default task execution policy",
-    "task_execution": "adjudicate_continuation(progress snapshots) + exclusive linked-worktree writer lease -> deterministic continuation or terminal no-delta closure",
+    "task_execution": "persist prompt-bound contract/control/preceding snapshot behind a task-admission fencing token + recapture task-owned source bytes + exclusive linked-worktree writer lease -> deterministic continuation or terminal no-delta closure",
     "external_evidence": "validate_external_evidence_capture(external_evidence_capture_v1, host verifier) -> typed public-policy/outcome capture; absent out-of-band verifier remains evidence debt",
     "closure": "validate_closure(packet with admitted_role_nodes, trusted-host verifier capability) + project_closure(packet) -> validated closure view; PASS delegated/runtime/outcome/effect/context evidence requires exact out-of-band host attestation",
     "closure_quality_followup": "build_scheduled_closure_quality_followup() + validate_closure_quality_followup() + summarize_closure_quality_followups() -> closure-digest-bound durability ledger; measured values require caller-trusted PLATFORM_OR_EXTERNAL_ATTESTED evidence"

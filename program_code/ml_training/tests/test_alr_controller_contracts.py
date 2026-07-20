@@ -75,6 +75,7 @@ def test_selector_emits_first_unblocked_row_not_later_row() -> None:
 
     assert validation.valid is True
     assert validation.outcome == OUTCOME_ADVANCED
+    assert packet["selector"] == "first_exact_active"
     assert validation.selected_work_item_id == "alr-work-1"
     assert packet["selected_work_item"]["work_item_id"] == "alr-work-1"
 
@@ -104,7 +105,13 @@ def test_waiting_queue_row_requires_explicit_pm_readmission_even_after_delta() -
     validation = validate_alr_loop_state_packet(ready_packet)
     assert validation.valid is True
     assert validation.outcome == OUTCOME_DEFER_EVIDENCE
+    assert ready_packet["selected_work_item"] == {}
+    assert ready_packet["state"] == "EMPTY"
     assert ready_packet["selection_reason"] == "waiting_requires_pm_readmission"
+
+    later_active = _item(2, state="ACTIVE", status="ACTIVE")
+    later_packet = build_alr_loop_state_packet(work_items=[waiting, later_active])
+    assert later_packet["selected_work_item"]["work_item_id"] == "alr-work-2"
 
     waiting.update(state="ACTIVE", status="ACTIVE")
     waiting["work_item_hash"] = compute_alr_work_item_hash(waiting)

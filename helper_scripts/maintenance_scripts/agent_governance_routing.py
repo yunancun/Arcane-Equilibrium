@@ -18,6 +18,7 @@ from agent_governance_task_control import (
     CONTINUATION_MODES,
     DEFAULT_CONTINUATION_MODE,
     compile_task_execution_policy,
+    operator_loop_request_digest,
 )
 from agent_governance_vocabulary import KNOWN_SURFACES, UNCERTAINTY_LEVELS
 
@@ -29,6 +30,7 @@ TASK_FACT_FIELDS = {
     "side_effect_class", "uncertainty", "dirty_scope", "operator_risk_acceptance",
     "verification_scope", "focus", "claim_inputs",
     "task_prompt", "task_prompt_digest", "continuation_mode",
+    "operator_loop_request_digest",
 }
 SOURCE_REVIEW_SURFACES = {"python", "rust", "gui", "ml_data", "implementation", "runtime"}
 OPERATION_SURFACES = {"deploy", "service", "cron", "pg", "operations", "runtime_effect", "incident_rca"}
@@ -120,9 +122,18 @@ TASK_CONTRACT_FIELDS = (
     "uncertainty", "side_effect_class", "objective", "scope", "acceptance_criteria", "hard_stops",
     "baseline", "dirty_scope", "verification_scope", "direct_interfaces", "previous_failure", "focus",
     "claim_inputs", "task_prompt", "task_prompt_digest", "continuation_mode",
+    "operator_loop_request_digest",
 )
+
+
 def _sha256_bytes(value: bytes) -> str:
     return "sha256:" + hashlib.sha256(value).hexdigest()
+
+
+def task_contract_projection(normalized_facts: dict[str, Any]) -> dict[str, Any]:
+    """Return the exact immutable contract projection shared with Context."""
+
+    return {field: normalized_facts.get(field) for field in TASK_CONTRACT_FIELDS}
 
 
 def p0b_effect_selection_digest(phase: str) -> str:
@@ -411,6 +422,9 @@ def _normalize_task_facts(task_facts: dict[str, Any]) -> dict[str, Any]:
             query_errors.append("only narrow documentation/governance surfaces")
         if continuation_mode != DEFAULT_CONTINUATION_MODE:
             query_errors.append("continuation_mode=finite")
+        direct_interfaces = normalized.get("direct_interfaces", [])
+        if not isinstance(direct_interfaces, list) or direct_interfaces:
+            query_errors.append("no direct interfaces")
         if query_errors:
             raise ValueError(
                 "task_shape query requires " + ", ".join(query_errors)
@@ -437,6 +451,22 @@ def _normalize_task_facts(task_facts: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("task facts task_prompt_digest does not match exact prompt bytes")
     normalized["task_prompt"] = task_prompt
     normalized["task_prompt_digest"] = task_prompt_digest
+    request_digest = operator_loop_request_digest(task_prompt)
+    if continuation_mode == "operator_loop" and request_digest is None:
+        raise ValueError(
+            "operator_loop requires a leading /loop control line in the Operator task_prompt"
+        )
+    expected_loop_digest = request_digest if continuation_mode == "operator_loop" else None
+    supplied_loop_digest = task_facts.get("operator_loop_request_digest")
+    if (
+        "operator_loop_request_digest" in task_facts
+        and supplied_loop_digest
+        != expected_loop_digest
+    ):
+        raise ValueError(
+            "task facts operator_loop_request_digest does not match exact task_prompt"
+        )
+    normalized["operator_loop_request_digest"] = expected_loop_digest
     scope = normalized.get("scope")
     if scope is not None and not (
         isinstance(scope, str) and scope.strip()
@@ -715,7 +745,7 @@ def route_task(task_facts: dict[str, Any]) -> dict[str, Any]:
         "schema_version": "hybrid_execution_dag_v1",
         "task_facts": facts,
         "task_execution_control": compile_task_execution_policy(
-            facts["continuation_mode"]
+            task_contract_projection(facts)
         ),
         "risk_state": "UNKNOWN" if unknown_risk else risk.upper(),
         "budget_envelope": (

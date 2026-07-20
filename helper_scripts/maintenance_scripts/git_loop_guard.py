@@ -225,7 +225,7 @@ def evaluate(
             expected_upstream,
         }:
             reasons.append("UPSTREAM_MISMATCH")
-        if not writer_task_id or not writer_lease_id:
+        if not writer_task_id or not writer_owner or not writer_lease_id:
             reasons.append("WRITER_LEASE_REQUIRED")
         else:
             try:

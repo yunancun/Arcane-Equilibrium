@@ -3,8 +3,9 @@
 This loop is for Codex source development. It is not an application runtime loop.
 Boundary label: `SOURCE_ONLY_OFFLINE_P0_P1`.
 
-It is active only when the exact Operator request explicitly selects this loop
-and routing binds `continuation_mode=operator_loop`. Reading this file, finding
+It is active only when the exact Operator request starts with a first control
+line equal to `/loop` and routing binds that exact prompt to
+`continuation_mode=operator_loop`. Reading this file, finding
 an unfinished row, or restoring a prior state packet does not authorize
 continuation. All other ALR tasks are finite one-shot tasks.
 
@@ -20,12 +21,15 @@ continuation. All other ALR tasks are finite one-shot tasks.
 6. Do not inherit current trading P0 candidate context, standing Demo
    authorization, prior no-order approval, prior Bybit public GET approval,
    operator-review-ready artifacts, or cached exchange credentials.
-7. Recover the latest validated persisted state packet before trusting the
-   current checkout. On resume, load `LOOP_BRANCH` from `loop_branch` and full
-   `CHECKPOINT_HEAD` from `checkpoint_head`; a resumed loop must not recapture
-   either value from the current Git branch or HEAD. On first boot only, bind an
-   attached non-`main` feature branch and full HEAD once, then persist those two
-   fields in a bootstrap state packet before dispatching work.
+7. Recover the latest validated **production controller receipt** before
+   trusting the current checkout. This is not `alr_loop_state_packet_v1`, which
+   intentionally has no Git/continuation authority. On resume, load
+   `LOOP_BRANCH` from `loop_branch` and full `CHECKPOINT_HEAD` from
+   `checkpoint_head`; a resumed loop must not recapture either value from the
+   current Git branch or HEAD. This repository currently has no production
+   controller-receipt builder/validator Adapter, so without an independently
+   implemented and validated host receipt, cross-turn continuation stops as
+   `STOP_DISPATCH_BLOCKED`; do not invent a bootstrap packet.
 8. Run `helper_scripts/maintenance_scripts/git_loop_guard.py --phase start`
    with those expected values plus the exact task/owner/writer-lease fencing
    token. Acquire the lease only from the clean attached non-main linked
@@ -36,9 +40,9 @@ continuation. All other ALR tasks are finite one-shot tasks.
 
 Each iteration:
 
-1. Reload the already-admitted persisted ALR state packet and verify its
+1. Reload the validated production controller receipt and verify its
    `loop_branch` and `checkpoint_head` remain the expected identity; the loop
-   must not recapture them from the checkout.
+   must not recapture them from the checkout or the base ALR packet.
 2. Re-read `queue.md`, `boundaries.md`, and `retention_guardian_contract.md`.
 3. Select exactly one row:
    - first `ACTIVE` row;
@@ -68,8 +72,11 @@ Each iteration:
 11. Commit each green checkpoint with subject and body, update the full
     `CHECKPOINT_HEAD`, then rerun `git_loop_guard.py --phase start`; the next row
     cannot begin until the worktree is clean at that exact commit.
-12. Re-read state, build a canonical progress snapshot, and call
-    `agent_governance.py continuation`. Continue only when the state is
+12. Call `continuation` only with the original task/owner/persisted-admission
+    fencing token. The store supplies the original contract/control/preceding
+    snapshot and recaptures the selected row's owned-source bytes; caller receipts,
+    whole-repository HEAD, blocker, time, or lifecycle status are not progress.
+    Continue only when the state is
     `ADVANCED`, `ADVANCED_WITH_CONCERNS`, or a recovered `ROTATED` with a
     source-only ACTIVE row **and** the decision is
     `CONTINUE_OPERATOR_LOOP + schedule_wakeup=true`. Identical semantic progress
@@ -107,9 +114,18 @@ Without publication/merge/sync authority the loop returns
 `STOP_SYNC_AUTH_REQUIRED`, not `DONE`. It must never claim completion while
 commits are only local, the PR is unmerged, or Mac/origin/Linux differ.
 
-## State Packet Minimum Fields
+## Production controller receipt minimum fields
 
-Every `alr_loop_state_packet_v1` must include:
+`alr_loop_state_packet_v1` remains the source-only queue/effect packet emitted
+and validated by `alr_controller_contracts.py`; it does not itself grant a
+wakeup, Git, publication, or sync effect. Every persisted production controller
+receipt must embed or digest-reference that validated packet and additionally
+bind the following orchestration fields. Do not claim those wrapper fields were
+validated merely because the base ALR packet validated:
+
+No repository Adapter currently builds or validates this production wrapper.
+These fields are design requirements, not a claim of implemented receipt
+support; automatic wakeup remains fail-closed until that Adapter exists.
 
 - `schema`
 - `created_at`
