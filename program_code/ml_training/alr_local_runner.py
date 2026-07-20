@@ -16,6 +16,10 @@ from .alr_controller_contracts import (
     ALR_LOOP_STATE_PACKET_SCHEMA_VERSION,
     ALR_WORK_ITEM_SCHEMA_VERSION,
     BOUNDARY_LABEL,
+    OUTCOME_BLOCKED_BOUNDARY,
+    OUTCOME_ROTATED,
+    OUTCOME_STOP_NO_EDGE,
+    OUTCOME_STOP_RETENTION_RISK,
     compute_alr_loop_state_packet_hash,
     compute_alr_work_item_hash,
     select_first_unblocked_alr_row,
@@ -147,7 +151,9 @@ def run_local_runner(manifest: Mapping[str, Any], out_dir: Path | str) -> dict[s
     rotated_reason = _previous_hash_rotation_reason(
         manifest_copy.get("expected_previous_artifact_hashes")
     )
-    selected_work_item = _select_work_item(manifest_copy)
+    selected_work_item, selection_outcome, selection_reasons = _select_work_item(
+        manifest_copy
+    )
     requested_step = _select_step(manifest_copy)
     if rotated_reason:
         requested_step = "state_only"
@@ -164,6 +170,13 @@ def run_local_runner(manifest: Mapping[str, Any], out_dir: Path | str) -> dict[s
             status=STOP_ROTATED,
             stop_state=STOP_ROTATED,
             stop_reason=rotated_reason,
+        )
+    elif selected_work_item is None and requested_step != "state_only":
+        step_result = _StepResult(
+            name="selection_gate",
+            status=selection_outcome,
+            stop_state=_selection_stop_state(selection_outcome),
+            stop_reason=(selection_reasons[0] if selection_reasons else "queue_empty"),
         )
     else:
         step_result = _run_step(requested_step, manifest_copy)
@@ -426,7 +439,7 @@ def _build_state_packet(
         "schema_version": ALR_LOOP_STATE_PACKET_SCHEMA_VERSION,
         "boundary_label": BOUNDARY_LABEL,
         "loop_id": _text(manifest.get("run_id")),
-        "selector": "first_ready_without_blockers",
+        "selector": "first_exact_active",
         "created_at": _text(manifest.get("created_at")),
         "source_head": _text(manifest.get("source_head")),
         "repo_head_before": _text(manifest.get("source_head")),
@@ -476,7 +489,7 @@ def _build_report(
     state_packet: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     selected_ref = _mapping(_mapping(state_packet).get("selected_work_item"))
-    if not selected_ref:
+    if state_packet is None:
         selected_ref = _selected_work_item_ref(selected_work_item)
     report: dict[str, Any] = {
         "schema_version": OUTPUT_SCHEMA_VERSION,
@@ -506,10 +519,24 @@ def _build_report(
     return report
 
 
-def _select_work_item(manifest: Mapping[str, Any]) -> Mapping[str, Any] | None:
-    work_items = [dict(item) for item in manifest.get("work_items", ()) if isinstance(item, Mapping)]
-    selected, _, _ = select_first_unblocked_alr_row(work_items)
-    return selected
+def _select_work_item(
+    manifest: Mapping[str, Any],
+) -> tuple[Mapping[str, Any] | None, str, tuple[str, ...]]:
+    work_items = [
+        dict(item)
+        for item in manifest.get("work_items", ())
+        if isinstance(item, Mapping)
+    ]
+    return select_first_unblocked_alr_row(work_items)
+
+
+def _selection_stop_state(outcome: str) -> str:
+    return {
+        OUTCOME_BLOCKED_BOUNDARY: STOP_BLOCKED_BOUNDARY,
+        OUTCOME_ROTATED: STOP_ROTATED,
+        OUTCOME_STOP_NO_EDGE: STOP_NO_EDGE,
+        OUTCOME_STOP_RETENTION_RISK: STOP_RETENTION_RISK,
+    }.get(outcome, STOP_DEFER_EVIDENCE)
 
 
 def _select_step(manifest: Mapping[str, Any]) -> str:
@@ -541,8 +568,10 @@ def _state_work_items(
 
 
 def _work_item_queue_fields_for_stop(stop_state: str) -> dict[str, Any]:
-    if stop_state in {STOP_ADVANCED, STOP_DONE}:
-        return {"state": "ACTIVE", "status": "READY", "blockers": []}
+    if stop_state == STOP_ADVANCED:
+        return {"state": "ACTIVE", "status": "ACTIVE", "blockers": []}
+    if stop_state == STOP_DONE:
+        return {"state": "DONE", "status": "DONE", "blockers": []}
     if stop_state == STOP_ROTATED:
         return {"state": "ROTATED", "status": "ROTATED", "blockers": ["rotated"]}
     if stop_state == STOP_NO_EDGE:

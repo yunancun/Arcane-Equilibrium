@@ -110,6 +110,19 @@ from agent_governance_workflow_receipts import (  # noqa: E402
     validate_workflow_call_record,
     validate_workflow_wave_record,
 )
+from agent_governance_task_control import (  # noqa: E402
+    filesystem_writer_lease_action,
+    is_dispatchable,
+    next_action_may_be_null,
+    progress_snapshot,
+    queue_lane,
+)
+from agent_governance_task_admission import (  # noqa: E402
+    OperatorRequestVerifier,
+    acquire_task_admission,
+    continue_admitted_task,
+    release_task_admission,
+)
 
 
 __all__ = [
@@ -142,11 +155,16 @@ __all__ = [
     "context_plan_digest",
     "delegated_execution_projection",
     "execution_dag_digest",
+    "filesystem_writer_lease_action",
+    "is_dispatchable",
     "materialize_context_artifact",
     "native_agent_binding",
     "native_agent_contract",
+    "next_action_may_be_null",
     "load_registry",
     "project_closure",
+    "progress_snapshot",
+    "queue_lane",
     "render_all",
     "render_views",
     "resolve_authority_claims",
@@ -188,6 +206,48 @@ def _build_parser() -> argparse.ArgumentParser:
     render.add_argument("--check", action="store_true", help="report drift without writing")
     route = subparsers.add_parser("route", help="compile JSON task facts into a hybrid DAG")
     route.add_argument("task_facts", help="JSON object or @path-to-JSON")
+    continuation = subparsers.add_parser(
+        "continuation", help="adjudicate one finite or explicit operator-loop boundary"
+    )
+    continuation.add_argument(
+        "bundle",
+        help=(
+            "JSON {repo,task_id,owner,admission_id,work_status,blocker_code?} "
+            "or @path"
+        ),
+    )
+    admission = subparsers.add_parser(
+        "task-admission", help="acquire or release one persisted task admission"
+    )
+    admission.add_argument(
+        "--admission-action", choices=("acquire", "release"), required=True
+    )
+    admission.add_argument("--repo", type=Path, default=Path("."))
+    admission.add_argument("--task-id", required=True)
+    admission.add_argument("--owner", required=True)
+    admission.add_argument("--admission-id")
+    admission.add_argument("--task-contract")
+    snapshot = subparsers.add_parser(
+        "progress-snapshot", help="capture canonical task-owned semantic progress"
+    )
+    snapshot.add_argument(
+        "bundle",
+        help=(
+            "JSON {round,work_status,repo,task_contract,"
+            "admitted_task_contract_digest,blocker_code?} or @path"
+        ),
+    )
+    writer_lease = subparsers.add_parser(
+        "writer-lease", help="acquire, inspect, renew, or release a linked-worktree writer lease"
+    )
+    writer_lease.add_argument(
+        "--lease-action", choices=("acquire", "status", "renew", "release"), required=True
+    )
+    writer_lease.add_argument("--repo", type=Path, default=Path("."))
+    writer_lease.add_argument("--task-id", required=True)
+    writer_lease.add_argument("--owner", required=True)
+    writer_lease.add_argument("--lease-id")
+    writer_lease.add_argument("--ttl-seconds", type=int, default=7200)
     context = subparsers.add_parser("context", help="compile a lossless adaptive context plan")
     context.add_argument("--role", required=True)
     context.add_argument("task_facts", help="JSON object or @path-to-JSON")
@@ -226,7 +286,25 @@ def _json_arg(value: str):
     return json.loads(value)
 
 
-def main(argv: list[str] | None = None) -> int:
+def _exact_bundle(
+    bundle: Any, *, required: set[str], optional: set[str] = frozenset()
+) -> dict[str, Any]:
+    if not isinstance(bundle, dict):
+        raise ValueError("command bundle must be an object")
+    fields = set(bundle)
+    if not required.issubset(fields) or not fields.issubset(required | optional):
+        raise ValueError(
+            "command bundle fields are not exact: "
+            f"missing={sorted(required - fields)} extra={sorted(fields - required - optional)}"
+        )
+    return bundle
+
+
+def main(
+    argv: list[str] | None = None,
+    *,
+    operator_request_verifier: OperatorRequestVerifier | None = None,
+) -> int:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     args = _build_parser().parse_args(raw_argv)
     registry = load_registry()
@@ -241,6 +319,98 @@ def main(argv: list[str] | None = None) -> int:
     if args.action == "route":
         print(json.dumps(route_task(_json_arg(args.task_facts)), ensure_ascii=False, indent=2))
         return 0
+    if args.action == "continuation":
+        try:
+            bundle = _exact_bundle(
+                _json_arg(args.bundle),
+                required={
+                    "repo", "task_id", "owner", "admission_id", "work_status",
+                },
+                optional={"blocker_code"},
+            )
+            packet = continue_admitted_task(
+                repo=Path(bundle["repo"]),
+                task_id=bundle["task_id"],
+                owner=bundle["owner"],
+                admission_id=bundle["admission_id"],
+                work_status=bundle["work_status"],
+                blocker_code=bundle.get("blocker_code"),
+            )
+        except (KeyError, TypeError, ValueError) as error:
+            print(json.dumps({"status": "FAIL", "error": str(error)}, ensure_ascii=False))
+            return 2
+        print(json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0 if packet["status"] == "PASS" else 2
+    if args.action == "task-admission":
+        try:
+            if args.admission_action == "acquire":
+                if args.admission_id is not None or args.task_contract is None:
+                    raise ValueError(
+                        "task admission acquire requires --task-contract and no --admission-id"
+                    )
+                packet = acquire_task_admission(
+                    repo=args.repo,
+                    task_id=args.task_id,
+                    owner=args.owner,
+                    task_contract=_json_arg(args.task_contract),
+                    operator_request_verifier=operator_request_verifier,
+                )
+            else:
+                if args.task_contract is not None or not args.admission_id:
+                    raise ValueError(
+                        "task admission release requires --admission-id and no --task-contract"
+                    )
+                packet = release_task_admission(
+                    repo=args.repo,
+                    task_id=args.task_id,
+                    owner=args.owner,
+                    admission_id=args.admission_id,
+                )
+        except (OSError, TypeError, ValueError) as error:
+            print(json.dumps({"status": "FAIL", "error": str(error)}, ensure_ascii=False))
+            return 2
+        print(json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0 if packet["status"] == "PASS" else 2
+    if args.action == "progress-snapshot":
+        try:
+            bundle = _exact_bundle(
+                _json_arg(args.bundle),
+                required={
+                    "round", "work_status", "repo", "task_contract",
+                    "admitted_task_contract_digest",
+                },
+                optional={"blocker_code"},
+            )
+            packet = progress_snapshot(
+                round_number=bundle["round"],
+                work_status=bundle["work_status"],
+                repo=Path(bundle["repo"]),
+                task_contract=bundle["task_contract"],
+                admitted_task_contract_digest=bundle[
+                    "admitted_task_contract_digest"
+                ],
+                blocker_code=bundle.get("blocker_code"),
+            )
+        except (KeyError, TypeError, ValueError) as error:
+            print(json.dumps({"status": "FAIL", "error": str(error)}, ensure_ascii=False))
+            return 2
+        print(json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0
+    if args.action == "writer-lease":
+        try:
+            packet = filesystem_writer_lease_action(
+                action=args.lease_action,
+                repo=args.repo,
+                task_id=args.task_id,
+                owner=args.owner,
+                lease_id=args.lease_id,
+                ttl_seconds=args.ttl_seconds,
+            )
+        except (OSError, TypeError, ValueError) as error:
+            print(json.dumps({"status": "FAIL", "error": str(error)}, ensure_ascii=False))
+            return 2
+        print(json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0 if packet["status"] == "PASS" else 3
     if args.action == "context":
         print(json.dumps(compile_context(args.role, _json_arg(args.task_facts), registry), ensure_ascii=False, indent=2))
         return 0

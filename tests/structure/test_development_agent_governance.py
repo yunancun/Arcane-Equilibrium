@@ -1752,7 +1752,7 @@ def test_closure_packet_separates_work_completion_from_gate_verdict() -> None:
     impossible = deepcopy(failed)
     impossible["work_status"] = "BLOCKED"
     impossible["gate_verdict"] = "PASS"
-    assert "BLOCKED/NEEDS_CONTEXT cannot carry PASS" in governance.validate_closure(
+    assert "blocked or no-delta closure cannot carry PASS" in governance.validate_closure(
         impossible
     )
 
@@ -1915,6 +1915,56 @@ def test_closure_packet_separates_work_completion_from_gate_verdict() -> None:
     schema_invalid_packets.append(negative_consumption)
     for packet in schema_invalid_packets:
         assert governance.validate_closure(packet), packet
+
+
+def test_terminal_closure_does_not_invent_next_work_and_no_delta_never_passes() -> None:
+    governance = _load_module()
+
+    completed = _valid_failed_review_closure()
+    completed["next_action"] = None
+    assert governance.validate_closure(completed) == []
+
+    no_delta = deepcopy(completed)
+    no_delta["work_status"] = "BLOCKED_NO_DELTA"
+    assert governance.validate_closure(no_delta) == []
+
+    false_pass = deepcopy(no_delta)
+    false_pass["gate_verdict"] = "PASS"
+    assert any(
+        "no-delta closure cannot carry PASS" in error
+        for error in governance.validate_closure(false_pass)
+    )
+
+    invented = deepcopy(no_delta)
+    invented["next_action"] = {"owner": "PM", "action": "try the same work again"}
+    assert any(
+        "BLOCKED_NO_DELTA must have next_action=null" in error
+        for error in governance.validate_closure(invented)
+    )
+
+    waiting_without_owner = deepcopy(completed)
+    waiting_without_owner["work_status"] = "BLOCKED"
+    assert any(
+        "require an owned next_action" in error
+        for error in governance.validate_closure(waiting_without_owner)
+    )
+
+
+def test_terminal_role_fragment_may_omit_action_but_blocked_fragment_may_not() -> None:
+    governance = _load_module()
+    packet = _valid_failed_review_closure()
+    fragment = packet["role_fragments"][0]
+    fragment["work_status"] = "DONE_WITH_CONCERNS"
+    fragment["next_action"] = None
+    _refresh_standard_workflow_lineage(governance, packet)
+    assert governance.validate_closure(packet) == []
+
+    fragment["work_status"] = "BLOCKED"
+    _refresh_standard_workflow_lineage(governance, packet)
+    assert any(
+        "BLOCKED/NEEDS_CONTEXT require an owned next_action" in error
+        for error in governance.validate_closure(packet)
+    )
 
 
 def test_full_audit_control_cannot_hide_axis_debt_or_omit_admitted_fragments() -> None:

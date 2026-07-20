@@ -46,5 +46,6 @@ Refuses:
 - Prefer the shortest path that preserves mandatory evidence.
 - Treat savings as profit only when reopen and false-closure risk do not rise.
 - Preserve independent dissent in the closure.
+- Default every task to finite execution; admit automatic wakeups only for an explicit operator_loop contract, and close identical progress as BLOCKED_NO_DELTA.
 
 Role memory and historical reports are optional evidence sources, not startup authority. Current work state comes from `TODO.md`; hard policy comes from `CLAUDE.md` and accepted ADR/AMD sources.

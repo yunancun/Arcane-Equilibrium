@@ -51,7 +51,7 @@
       }
     },
     "work_status": {
-      "enum": ["DONE", "DONE_WITH_CONCERNS", "NEEDS_CONTEXT", "BLOCKED"]
+      "enum": ["DONE", "DONE_WITH_CONCERNS", "NEEDS_CONTEXT", "BLOCKED", "BLOCKED_NO_DELTA"]
     },
     "gate_verdict": {
       "enum": ["PASS", "FAIL", "CONDITIONAL", "NOT_APPLICABLE", "UNVERIFIED"]
@@ -251,13 +251,18 @@
           "evidence_refs": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
           "concerns": {"type": "array", "items": {"type": "string"}},
           "next_action": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["owner", "action"],
-            "properties": {
-              "owner": {"type": "string", "minLength": 1},
-              "action": {"type": "string", "minLength": 1}
-            }
+            "anyOf": [
+              {"type": "null"},
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["owner", "action"],
+                "properties": {
+                  "owner": {"type": "string", "minLength": 1},
+                  "action": {"type": "string", "minLength": 1}
+                }
+              }
+            ]
           },
           "consumption": {
             "type": "object",
@@ -297,7 +302,13 @@
           },
           "payload_kind": {"type": "string", "minLength": 1},
           "payload": {"type": "object"}
-        }
+        },
+        "allOf": [
+          {
+            "if": {"properties": {"work_status": {"enum": ["BLOCKED", "NEEDS_CONTEXT"]}}},
+            "then": {"properties": {"next_action": {"type": "object"}}}
+          }
+        ]
       }
     },
     "checks": {
@@ -445,19 +456,34 @@
       ]
     },
     "next_action": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["owner", "action"],
-      "properties": {
-        "owner": {"type": "string", "minLength": 1},
-        "action": {"type": "string", "minLength": 1}
-      }
+      "anyOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["owner", "action"],
+          "properties": {
+            "owner": {"type": "string", "minLength": 1},
+            "action": {"type": "string", "minLength": 1}
+          }
+        }
+      ]
     }
   },
   "allOf": [
     {
       "if": {"properties": {"work_status": {"enum": ["BLOCKED", "NEEDS_CONTEXT"]}}},
-      "then": {"properties": {"gate_verdict": {"not": {"const": "PASS"}}}}
+      "then": {"properties": {
+        "gate_verdict": {"not": {"const": "PASS"}},
+        "next_action": {"type": "object"}
+      }}
+    },
+    {
+      "if": {"properties": {"work_status": {"const": "BLOCKED_NO_DELTA"}}},
+      "then": {"properties": {
+        "gate_verdict": {"not": {"const": "PASS"}},
+        "next_action": {"type": "null"}
+      }}
     },
     {
       "if": {"properties": {"gate_verdict": {"const": "PASS"}}},

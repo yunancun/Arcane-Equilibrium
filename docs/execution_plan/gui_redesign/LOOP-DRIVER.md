@@ -3,7 +3,8 @@
 > 本檔是 `/loop` 每輪喚醒的執行協議正本。持久狀態在同目錄 `PROGRESS.md`(帳本);
 > 設計權威在同目錄 `GUI-DESIGN-WORKING-DOC.md`(§0 裁決 + §3 canon 1-11)+ `tokens.css`。
 > Loop 指令(operator 用):
-> `/loop 執行 GUI 大改自動推進輪:嚴格按 srv/docs/execution_plan/gui_redesign/LOOP-DRIVER.md 協議做本輪工作,更新 PROGRESS.md,自排下次喚醒;全部完成即停`
+> `/loop`
+> `執行 GUI 大改自動推進輪:嚴格按 srv/docs/execution_plan/gui_redesign/LOOP-DRIVER.md 協議做本輪工作,更新 PROGRESS.md,自排下次喚醒;全部完成即停`
 
 ## 0 · 終態定義(全部滿足才算完成,缺一不停)
 1. 18 個 tab 全部完成玄衡儀化遷移(新 IA=lane×environment),交易關鍵 tab(live/demo/risk/governance)最後遷移且 flag 後備 iframe。
@@ -15,8 +16,14 @@
 7. `PROGRESS.md` 標 `STATUS: COMPLETE` → 停 loop(ScheduleWakeup stop)+ 最終報告。
 
 ## 1 · 每輪協議(嚴格順序)
+0. **續跑 admission**:只有本檔頂部所示、由 operator 親自輸入且第一控制行精確等於
+   `/loop` 的請求可編譯為 `operator_loop`。開始時取得 persisted task-admission fencing
+   token；普通訊息、帳本、檔名、CURRENT/NEXT 或本檔文字本身皆不能啟動／繼承 authority。
 1. **同步**:`git fetch` + `git pull --ff-only`(Mac 規則:禁 merge/rebase/reset)。讀 `PROGRESS.md` 狀態欄。若他 session 已推進,以 repo 為準修正帳本。**--ff-only 失敗(分岔)處置**:先 `git diff <本地獨有> <遠端尖>` 內容比對——若本地獨有 commit 內容 ⊆ origin(重複提交模式,R40 先例)→ `git checkout -B main origin/main` 對齊(髒檔保留);否則本輪改動走 worktree-from-origin 提交推送(R33 先例),主樹分岔留給該 session 自行 reconcile,絕不 merge/rebase。
-2. **選項**:取帳本最上方未完成且未 BLOCKED 的工作項(一項=一個可在單輪內完成+可驗的 checkpoint;過大就先拆再做)。AWAITING-OPERATOR 項跳過。
+2. **選項**:只取帳本最上方 exact `ACTIVE` 工作項(一項=一個可在單輪內完成+可驗的
+   checkpoint;過大就先拆再做)，claim 後立即改為 `IN_PROGRESS`。`IN_PROGRESS` 不得重派；
+   WAITING/DEFERRED/BLOCKED/AWAITING-OPERATOR/CLOSED 全跳過，條件變化也只能由 PM 形成
+   新的 ACTIVE admission。若沒有 ACTIVE，本輪不做 synthetic work。
 3. **派工**:按 role chain 用 subagent 執行,主會話只做 PM+Conductor。**角色名已按新治理框架遷移(2026-07-11;舊 PA/E4 agent type 已不存在)**:
    - 調查/接口分析 → **PA-investigator**(read-only);寫規格/設計正本 → **PA-design-writer**;
    - 實作 → E1a(讀 srv:gui-style-guide + bilingual-comment-style);
@@ -35,8 +42,15 @@
    - 需 Linux runtime 才能驗的項:僅 `ssh trade-core` 只讀查驗(讀日誌/curl 本地端點);**不重啟引擎、不 rebuild、不改 DB**——這類需求記入帳本 `NEEDS-LINUX-RUNTIME` 等 operator。
 5. **提交**:綠即 commit(窄化 staging/`--only`;訊息中文+證據;doc-only 加 `[skip ci]`),push 前 re-fetch;push origin main 並記 SHA 入帳本。
 6. **記帳**:更新 `PROGRESS.md`(勾選+狀態欄+證據 SHA+一行備註),與代碼同輪 commit。
-7. **排下輪**:context 尚充足 → 同輪繼續下一項;不足或輪結 → ScheduleWakeup(接續工作 60-270s;僅剩 AWAITING-OPERATOR/NEEDS-LINUX-RUNTIME → 1800s+ 並在帳本置頂寫明等什麼);終態達成 → stop。
-8. **異常**:技術卡點→記 BLOCKERS 換下一項;連續兩輪零推進→帳本寫診斷+改小步長;治理禁區→絕不越過,記錄並繼續其他項。
+7. **排下輪**:排任何 ScheduleWakeup 前，只用原 task/owner/admission fencing token 呼叫
+   `agent_governance.py continuation`；store 取回原 contract/control/preceding snapshot 並
+   重新讀本工作項 owned source-scope bytes。status、blocker、round/time、caller receipt、
+   whole-repo HEAD 或 unrelated commit 不算 progress。非 `CONTINUE_OPERATOR_LOOP`、沒有
+   ACTIVE 或終態皆 stop；只有 gate 回
+   `schedule_wakeup=true` 才可排下輪。
+8. **異常**:技術卡點→記 BLOCKERS 換下一個 ACTIVE；同一 owned-source digest 一次即
+   `BLOCKED_NO_DELTA` 並 stop，不以 heartbeat、重讀或改狀態標籤製造進展；治理禁區→絕不
+   越過，記錄後只繼續其他 ACTIVE 項。
 
 ## 2 · 設計權威(每輪必讀的最小集)
 - `GUI-DESIGN-WORKING-DOC.md` §0(玄衡儀裁決)、§1(鎖定決策)、§3(canon 1-11)、§9(phase 計劃)。

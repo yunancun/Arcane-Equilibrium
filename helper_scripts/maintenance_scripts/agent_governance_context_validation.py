@@ -14,6 +14,7 @@ from typing import Any
 from agent_governance_registry import REPO_ROOT, load_registry
 from agent_governance_context_specs import trusted_derived_kinds
 from agent_governance_context_projection import materialize_semantic_context
+from agent_governance_task_control import compile_task_execution_policy
 
 
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -73,6 +74,8 @@ CONTRACT_FIELDS = {
     "claim_inputs",
     "task_prompt",
     "task_prompt_digest",
+    "continuation_mode",
+    "operator_loop_request_digest",
 }
 MANDATORY_FIELDS = {
     "objective",
@@ -209,7 +212,8 @@ def _expected_facts_errors(
             errors.append(f"task contract does not match expected task facts field {field}")
     optional_projection = {
         "direct_interfaces", "dirty_scope", "verification_scope", "previous_failure", "focus",
-        "claim_inputs", "runtime_claim", "end_to_end_claim"
+        "claim_inputs", "runtime_claim", "end_to_end_claim", "continuation_mode",
+        "operator_loop_request_digest",
     }
     for field in optional_projection & set(expected):
         if contract.get(field) != expected.get(field):
@@ -416,6 +420,19 @@ def validate_context_artifact(
         str(contract.get("task_prompt", "")).encode("utf-8")
     ):
         errors.append("task prompt digest does not match exact prompt bytes")
+    if contract.get("continuation_mode") not in {"finite", "operator_loop"}:
+        errors.append("task continuation_mode is invalid")
+    else:
+        try:
+            expected_control = compile_task_execution_policy(
+                contract
+            )
+            if contract.get("operator_loop_request_digest") != expected_control.get(
+                "operator_loop_request_digest"
+            ):
+                errors.append("task operator loop request binding is invalid")
+        except ValueError as error:
+            errors.append(f"task continuation authority is invalid: {error}")
     baseline = contract.get("baseline")
     if (
         not isinstance(baseline, dict)

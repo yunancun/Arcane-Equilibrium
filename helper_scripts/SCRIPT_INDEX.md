@@ -1671,7 +1671,9 @@ fail-closed，total-miss + partial-miss 同歸此判，絕不誤報 PASS_CAPTURE
 
 | 腳本 | 用途 |
 |------|------|
-| `maintenance_scripts/agent_governance.py` | Development-Agent Governance Module 的穩定 stdlib facade/CLI：Registry/render、route/context、typed authority、route-bound closure/project、evidence reuse 與 read-only command preflight；不自行 deploy/contact/寫 PG。 |
+| `maintenance_scripts/agent_governance.py` | Development-Agent Governance Module 的穩定 stdlib facade/CLI：Registry/render、route/context、finite/explicit-loop continuation、writer lease、typed authority、route-bound closure/project、evidence reuse 與 read-only command preflight；不自行 deploy/contact/寫 PG。 |
+| `maintenance_scripts/agent_governance_task_control.py` | Dispatch/Closure 共用的 Task Execution Control Implementation：finite 預設、operator-loop no-delta 熔斷、ACTIVE-only queue selector、Git common-dir atomic writer-lease store 與 in-memory test Adapter。 |
+| `maintenance_scripts/git_loop_guard.py` | 唯讀 Git state/lease admission guard；驗 feature start/checkpoint/publish/post-push 與 main ff-only sync，不 acquire/steal lease，也不 stage/commit/fetch/push/merge。 |
 | `maintenance_scripts/agent_governance_registry.py` | Governance Module 內部 Registry/render Implementation；生成 role/profile/skill index 並偵測 ghost view。 |
 | `maintenance_scripts/agent_governance_execution.py` | Dispatch/Context 穩定 Python facade；匯出 task-contract digest、baseline capture、context compile/materialize/validate 與 closure constants。 |
 | `maintenance_scripts/agent_governance_routing.py` | Typed task-fact、`side_effect_class` 與 hybrid DAG compiler；矛盾/未知 facts fail closed，未支援 broker/external effect 形成 mandatory blocker。 |

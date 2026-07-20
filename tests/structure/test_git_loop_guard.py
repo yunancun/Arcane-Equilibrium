@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import importlib.util
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -13,6 +14,14 @@ SCRIPT = (
     / "git_loop_guard.py"
 )
 ROOT = Path(__file__).resolve().parents[2]
+HELPERS = ROOT / "helper_scripts" / "maintenance_scripts"
+if str(HELPERS) not in sys.path:
+    sys.path.insert(0, str(HELPERS))
+from agent_governance_task_control import (  # noqa: E402
+    FileWriterLeaseStore,
+    acquire_writer_lease,
+    inspect_worktree,
+)
 SYNC = (ROOT / ".codex/SYNC.md").read_text(encoding="utf-8")
 SUBAGENT = (ROOT / ".codex/SUBAGENT_EXECUTION_RULES.md").read_text(
     encoding="utf-8"
@@ -30,6 +39,9 @@ ALR_STARTUP = (
     / "docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/"
     "2026-07-09--scanner_driven_alr/startup_prompt.md"
 ).read_text(encoding="utf-8")
+GUI_LOOP = (ROOT / "docs/execution_plan/gui_redesign/LOOP-DRIVER.md").read_text(
+    encoding="utf-8"
+)
 SPEC = importlib.util.spec_from_file_location("git_loop_guard", SCRIPT)
 guard = importlib.util.module_from_spec(SPEC)
 assert SPEC and SPEC.loader
@@ -51,7 +63,7 @@ def _write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def _fixture(tmp_path: Path) -> tuple[Path, Path]:
+def _fixture(tmp_path: Path) -> tuple[Path, Path, Path, dict[str, str]]:
     origin = tmp_path / "origin.git"
     subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
     repo = tmp_path / "repo"
@@ -64,18 +76,33 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path]:
     _git(repo, "remote", "add", "origin", str(origin))
     _git(repo, "push", "-q", "-u", "origin", "main")
     _git(origin, "symbolic-ref", "HEAD", "refs/heads/main")
-    _git(repo, "checkout", "-q", "-b", "agent/test-loop")
-    return repo, origin
+    feature = tmp_path / "feature"
+    _git(repo, "worktree", "add", "-q", "-b", "agent/test-loop", str(feature), "main")
+    identity = inspect_worktree(feature)
+    acquired = acquire_writer_lease(
+        FileWriterLeaseStore(identity.common_dir),
+        identity,
+        task_id="guard-test",
+        owner="pytest",
+    )
+    assert acquired["status"] == "PASS"
+    lease = {
+        "writer_task_id": "guard-test",
+        "writer_owner": "pytest",
+        "writer_lease_id": acquired["lease"]["lease_id"],
+    }
+    return feature, origin, repo, lease
 
 
 def test_start_requires_exact_clean_feature_head(tmp_path: Path) -> None:
-    repo, _ = _fixture(tmp_path)
+    repo, _, _, lease = _fixture(tmp_path)
     head = _git(repo, "rev-parse", "HEAD")
     packet = guard.evaluate(
         repo,
         phase="start",
         expected_branch="agent/test-loop",
         expected_head=head,
+        **lease,
     )
     assert packet["status"] == "PASS"
     assert packet["mutated_local"] is False
@@ -87,6 +114,7 @@ def test_start_requires_exact_clean_feature_head(tmp_path: Path) -> None:
         phase="start",
         expected_branch="agent/test-loop",
         expected_head=head,
+        **lease,
     )
     assert dirty["status"] == "FAIL"
     assert "DIRTY_WORKTREE" in dirty["reasons"]
@@ -95,7 +123,7 @@ def test_start_requires_exact_clean_feature_head(tmp_path: Path) -> None:
 def test_dirty_inventory_failures_block_every_phase(
     tmp_path: Path, monkeypatch
 ) -> None:
-    repo, _ = _fixture(tmp_path)
+    repo, _, _, lease = _fixture(tmp_path)
     head = _git(repo, "rev-parse", "HEAD")
     monkeypatch.setattr(guard, "_nul_paths", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
@@ -110,6 +138,7 @@ def test_dirty_inventory_failures_block_every_phase(
             expected_head=head,
             expected_origin_head=head,
             allow_paths=["owned.txt"],
+            **lease,
         )
         assert packet["status"] == "FAIL"
         assert {
@@ -121,7 +150,7 @@ def test_dirty_inventory_failures_block_every_phase(
 
 
 def test_checkpoint_rejects_unowned_and_oversized_dirty_scope(tmp_path: Path) -> None:
-    repo, _ = _fixture(tmp_path)
+    repo, _, _, lease = _fixture(tmp_path)
     head = _git(repo, "rev-parse", "HEAD")
     _write(repo / "owned.txt", "one\ntwo\n")
     _write(repo / "outside.txt", "not owned\n")
@@ -133,6 +162,7 @@ def test_checkpoint_rejects_unowned_and_oversized_dirty_scope(tmp_path: Path) ->
         allow_paths=["owned.txt"],
         max_dirty_files=1,
         max_diff_lines=1,
+        **lease,
     )
     assert packet["status"] == "FAIL"
     assert "UNOWNED_DIRTY_PATH" in packet["reasons"]
@@ -141,7 +171,7 @@ def test_checkpoint_rejects_unowned_and_oversized_dirty_scope(tmp_path: Path) ->
 
 
 def test_start_rejects_feature_branch_tracking_origin_main(tmp_path: Path) -> None:
-    repo, _ = _fixture(tmp_path)
+    repo, _, _, lease = _fixture(tmp_path)
     head = _git(repo, "rev-parse", "HEAD")
     _git(repo, "branch", "--set-upstream-to=origin/main", "agent/test-loop")
     packet = guard.evaluate(
@@ -149,13 +179,14 @@ def test_start_rejects_feature_branch_tracking_origin_main(tmp_path: Path) -> No
         phase="start",
         expected_branch="agent/test-loop",
         expected_head=head,
+        **lease,
     )
     assert packet["status"] == "FAIL"
     assert "UPSTREAM_MISMATCH" in packet["reasons"]
 
 
 def test_checkpoint_passes_exact_unstaged_allowlist(tmp_path: Path) -> None:
-    repo, _ = _fixture(tmp_path)
+    repo, _, _, lease = _fixture(tmp_path)
     head = _git(repo, "rev-parse", "HEAD")
     _write(repo / "owned.txt", "bounded change\n")
     packet = guard.evaluate(
@@ -164,6 +195,7 @@ def test_checkpoint_passes_exact_unstaged_allowlist(tmp_path: Path) -> None:
         expected_branch="agent/test-loop",
         expected_head=head,
         allow_paths=["owned.txt"],
+        **lease,
     )
     assert packet["status"] == "PASS"
     assert packet["state"]["dirty_paths"] == ["owned.txt"]
@@ -175,12 +207,13 @@ def test_checkpoint_passes_exact_unstaged_allowlist(tmp_path: Path) -> None:
         expected_branch="agent/test-loop",
         expected_head=head,
         allow_paths=["owned.txt"],
+        **lease,
     )
     assert "PREEXISTING_STAGED_CHANGES" in staged["reasons"]
 
 
 def test_publish_and_post_push_bind_remote_branch_head(tmp_path: Path) -> None:
-    repo, _ = _fixture(tmp_path)
+    repo, _, _, lease = _fixture(tmp_path)
     _write(repo / "owned.txt", "feature\n")
     _git(repo, "add", "owned.txt")
     _git(repo, "commit", "-q", "-m", "feature")
@@ -191,6 +224,7 @@ def test_publish_and_post_push_bind_remote_branch_head(tmp_path: Path) -> None:
         phase="publish",
         expected_branch="agent/test-loop",
         expected_head=head,
+        **lease,
     )
     assert publish["status"] == "PASS"
 
@@ -199,6 +233,7 @@ def test_publish_and_post_push_bind_remote_branch_head(tmp_path: Path) -> None:
         phase="post-push",
         expected_branch="agent/test-loop",
         expected_head=head,
+        **lease,
     )
     assert "REMOTE_BRANCH_HEAD_MISMATCH" in before_push["reasons"]
 
@@ -208,6 +243,7 @@ def test_publish_and_post_push_bind_remote_branch_head(tmp_path: Path) -> None:
         phase="post-push",
         expected_branch="agent/test-loop",
         expected_head=head,
+        **lease,
     )
     assert without_upstream["state"]["true_remote_branch_head"] == head
     assert "UPSTREAM_MISMATCH" in without_upstream["reasons"]
@@ -218,13 +254,14 @@ def test_publish_and_post_push_bind_remote_branch_head(tmp_path: Path) -> None:
         phase="post-push",
         expected_branch="agent/test-loop",
         expected_head=head,
+        **lease,
     )
     assert after_push["status"] == "PASS"
     assert after_push["state"]["true_remote_branch_head"] == head
 
 
 def test_main_sync_is_exact_head_and_fast_forward_only(tmp_path: Path) -> None:
-    repo, origin = _fixture(tmp_path)
+    _, origin, repo, _ = _fixture(tmp_path)
     other = tmp_path / "other"
     subprocess.run(["git", "clone", "-q", str(origin), str(other)], check=True)
     _git(other, "config", "user.email", "other@example.invalid")
@@ -235,7 +272,6 @@ def test_main_sync_is_exact_head_and_fast_forward_only(tmp_path: Path) -> None:
     _git(other, "push", "-q", "origin", "main")
     expected = _git(other, "rev-parse", "HEAD")
 
-    _git(repo, "checkout", "-q", "main")
     stale = guard.evaluate(
         repo,
         phase="main-sync",
@@ -259,6 +295,49 @@ def test_main_sync_is_exact_head_and_fast_forward_only(tmp_path: Path) -> None:
     )
     assert done["status"] == "PASS"
     assert done["state"]["head"] == expected
+
+
+def test_feature_guard_requires_valid_lease_and_linked_worktree(tmp_path: Path) -> None:
+    repo, _, primary, lease = _fixture(tmp_path)
+    head = _git(repo, "rev-parse", "HEAD")
+    missing = guard.evaluate(
+        repo,
+        phase="start",
+        expected_branch="agent/test-loop",
+        expected_head=head,
+    )
+    assert "WRITER_LEASE_REQUIRED" in missing["reasons"]
+
+    missing_owner = guard.evaluate(
+        repo,
+        phase="start",
+        expected_branch="agent/test-loop",
+        expected_head=head,
+        writer_task_id=lease["writer_task_id"],
+        writer_lease_id=lease["writer_lease_id"],
+    )
+    assert "WRITER_LEASE_REQUIRED" in missing_owner["reasons"]
+
+    foreign = guard.evaluate(
+        repo,
+        phase="start",
+        expected_branch="agent/test-loop",
+        expected_head=head,
+        **{**lease, "writer_lease_id": "foreign"},
+    )
+    assert "WRITER_LEASE_ID_MISMATCH" in foreign["reasons"]
+
+    _git(primary, "branch", "agent/primary-test")
+    _git(primary, "switch", "-q", "agent/primary-test")
+    primary_head = _git(primary, "rev-parse", "HEAD")
+    primary_packet = guard.evaluate(
+        primary,
+        phase="start",
+        expected_branch="agent/primary-test",
+        expected_head=primary_head,
+        **lease,
+    )
+    assert "LINKED_WORKTREE_REQUIRED" in primary_packet["reasons"]
 
 
 def test_sync_contract_covers_exact_head_publication_merge_and_three_sides() -> None:
@@ -306,6 +385,21 @@ def test_loop_contract_cannot_advance_with_unbounded_dirty_or_unsynced_heads() -
         "three_side_source_sync_status",
     ):
         assert required in ALR_LOOP
+
+
+def test_gui_loop_driver_uses_the_same_finite_execution_gate() -> None:
+    for required in (
+        "第一控制行精確等於",
+        "exact `ACTIVE`",
+        "`IN_PROGRESS` 不得重派",
+        "persisted task-admission fencing",
+        "preceding snapshot",
+        "沒有 ACTIVE",
+        "`BLOCKED_NO_DELTA`",
+        "status、blocker、round/time、caller receipt",
+    ):
+        assert required in GUI_LOOP
+    assert "does not itself grant a\nwakeup" in ALR_LOOP
 
 
 def test_guard_is_read_only_by_construction() -> None:

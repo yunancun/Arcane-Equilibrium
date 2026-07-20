@@ -1,6 +1,6 @@
 # Codex Sub-Agent Execution Rules
 
-Last updated: 2026-07-14
+Last updated: 2026-07-20
 Registry: `.codex/agent_registry_v1.json`
 
 ## Dispatch record
@@ -18,7 +18,9 @@ The bound capsule is a validated `context_artifact_v1`, not a mutable summary.
 Its `task_contract_digest` covers normalized task/surface/risk/uncertainty, exact
 task-prompt digest, runtime/E2E claim,
 side-effect class, objective/scope/acceptance/hard stops, source baseline, direct
-interfaces, previous failure, and verdict-relevant `claim_inputs`. The returned
+interfaces, previous failure, verdict-relevant `claim_inputs`, and the exact
+`continuation_mode` (`finite` by default; `operator_loop` only from a standalone
+`/loop` marker in the exact Operator request) and its derived opt-in digest. The returned
 fragment must repeat that exact digest; changing scope, evidence input, or effect
 class requires a new admission.
 
@@ -70,6 +72,13 @@ After tests, PM stages exact paths, verifies the index, commits, updates the ful
 checkpoint SHA, and requires `--phase start` clean PASS before dispatching the
 next row. Unowned/pre-staged/binary/oversized dirty state is a recovery stop, not
 permission to stash, reset, clean, widen scope, or continue accumulating files.
+
+Writable work starts only after PM acquires one exclusive writer lease for the
+exact linked non-main worktree, task ID, and owner. Every feature-phase guard
+call supplies the lease fencing token; the guard validates but never acquires or
+steals it. A collision means the second writer creates a separate linked
+worktree. The primary/main checkout is never a writer worktree. Read-only roles
+do not acquire a lease and cannot mutate the leased checkout.
 
 Publication requires `--phase publish`, one non-force feature-branch push, and
 `--phase post-push` exact remote-SHA proof. Merge must bind the reviewed head
@@ -142,13 +151,16 @@ Return exactly one `role_fragment_v1` for PM to merge into
   receipt digest
 - work status and gate verdict
 - fact/inference/assumption classification + confidence
-- non-empty summary, evidence references, concerns, and next owner/action
+- non-empty summary, evidence references, and concerns; DONE or
+  DONE_WITH_CONCERNS may use `next_action=null` when no real follow-up exists,
+  while BLOCKED/NEEDS_CONTEXT must name the next owner/action
 - actual measured/partial consumption only with platform/external-attested
   telemetry reference + digest, or an honest unavailable reason with no invented
   metrics; closure-only wave-ledger partials remain structural/planned accounting
 - a lossless role-specific payload containing any check/contact/side-effect facts
 
-`DONE+FAIL` is valid. `BLOCKED/NEEDS_CONTEXT+PASS` is invalid. NO-OP is a
+`DONE+FAIL` is valid. `BLOCKED/NEEDS_CONTEXT+PASS` is invalid. Packet-level
+`BLOCKED_NO_DELTA` is never PASS and always has `next_action=null`. NO-OP is a
 packet disposition (`NO_CHANGE_NEEDED`), not an overloaded fragment status or
 verdict. Packet-level disposition, aggregate checks, side effects, acceptance,
 and skips are set only by PM closure; they are not extra fragment fields.
@@ -166,6 +178,11 @@ referenced.
   local reproduction/validation strategy before any new head.
 - Hard policy/external/operator blocker: stop with owner and unblock condition.
 - Budget review point: split or return UNVERIFIED; never convert to PASS.
+- At any turn boundary, `finite` stops. Only an exact first `/loop` control line
+  may ask Task Execution Control to continue. Continuation must use the persisted
+  task-admission fencing token; caller-supplied contracts or previous snapshots
+  are not authority. The same task-owned source digest terminates without a
+  wakeup; status, blocker, time, or unrelated repository HEAD drift is not progress.
 
 ## Evidence truth
 

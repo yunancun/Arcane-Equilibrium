@@ -168,13 +168,13 @@ def test_local_inventory_context_is_admissible_through_public_artifact_validator
 
 def test_context_required_when_rejects_unknown_surface_typo() -> None:
     registry = deepcopy(load_registry())
-    registry["context_packs"]["runtime"][0]["required_when"]["surfaces_any"].append(
+    registry["context_packs"]["active_state"][0]["required_when"]["surfaces_any"].append(
         "runtiem"
     )
     assert any("unknown surface" in error for error in validate_registry(registry, ROOT))
 
 
-def test_full_profit_and_incident_context_activate_current_todo() -> None:
+def test_full_profit_and_incident_context_activate_bounded_current_todo() -> None:
     for surface in ("full_audit", "profit_diagnosis", "incident_rca"):
         plan = compile_context(
             "PM",
@@ -184,7 +184,11 @@ def test_full_profit_and_incident_context_activate_current_todo() -> None:
                 uncertainty="low",
             ),
         )
-        assert "TODO.md" in {source["source"] for source in plan["sources"]}
+        todo = next(
+            source for source in plan["sources"]
+            if source["source"] == "TODO.md#AI/ML 一分鐘派發看板"
+        )
+        assert todo["planned_tokens"] < todo["full_file_token_estimate"]
 
 
 def test_high_cardinality_interface_inventory_is_bounded_and_spawnable() -> None:

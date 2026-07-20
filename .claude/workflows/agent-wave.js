@@ -12,7 +12,7 @@ export const meta = {
 const CONTEXT_ADMISSION_V1 = Object.freeze({
   artifactFields: Object.freeze(['schema_version', 'artifact_digest', 'task_contract_digest', 'budget_authority_digest', 'budget_authority_canonical', 'canonical_plan', 'shared_task_context_digest', 'shared_task_context_canonical', 'role_context_delta_digest', 'role_context_delta_canonical', 'semantic_input_tokens']),
   planFields: Object.freeze(['schema_version', 'registry_schema_version', 'role', 'role_permission', 'task_contract', 'task_contract_digest', 'mandatory_content', 'omitted_mandatory', 'baseline_errors', 'selected_packs', 'shared_packs', 'role_packs', 'sources', 'unresolved_sources', 'blocking_sources', 'evidence_debt', 'required_for_verdict', 'acquisition_plan', 'budget']),
-  contractFields: Object.freeze(['task_shape', 'surfaces', 'risk', 'runtime_claim', 'end_to_end_claim', 'uncertainty', 'side_effect_class', 'objective', 'scope', 'acceptance_criteria', 'hard_stops', 'baseline', 'dirty_scope', 'verification_scope', 'direct_interfaces', 'previous_failure', 'focus', 'claim_inputs', 'task_prompt', 'task_prompt_digest']),
+  contractFields: Object.freeze(['task_shape', 'surfaces', 'risk', 'runtime_claim', 'end_to_end_claim', 'uncertainty', 'side_effect_class', 'objective', 'scope', 'acceptance_criteria', 'hard_stops', 'baseline', 'dirty_scope', 'verification_scope', 'direct_interfaces', 'previous_failure', 'focus', 'claim_inputs', 'task_prompt', 'task_prompt_digest', 'continuation_mode', 'operator_loop_request_digest']),
   mandatoryFields: Object.freeze(['objective', 'scope', 'acceptance_criteria', 'hard_stops', 'baseline', 'direct_interfaces', 'previous_failure', 'task_prompt', 'task_prompt_digest']),
   budgetFields: Object.freeze(['envelope', 'target_context_tokens', 'quality_reserve_context_tokens', 'accounting_basis', 'max_context_tokens_per_call', 'max_prompt_utf8_bytes_per_call', 'estimated_tokens', 'compiler_estimated_input_tokens', 'action', 'review_required', 'review_rationale', 'mandatory_truncated', 'quality_reserve_reasons', 'authority', 'authority_canonical', 'authority_digest', 'call_allowed', 'claim_pass_eligible', 'pass_allowed']),
   authorityFields: Object.freeze(['schema_version', 'envelope', 'accounting_basis', 'max_context_tokens_per_call', 'max_prompt_utf8_bytes_per_call', 'max_workflow_planned_input_tokens', 'max_unique_nodes', 'max_call_attempts', 'retry_budget']),
@@ -59,11 +59,15 @@ const JUDGMENT_SCHEMA = {
     evidence_refs: { type: 'array', minItems: 1, items: { type: 'string', minLength: 1 } },
     concerns: { type: 'array', items: { type: 'string', minLength: 1 } },
     next_action: {
-      type: 'object', additionalProperties: false, required: ['owner', 'action'],
-      properties: {
-        owner: { type: 'string', minLength: 1 },
-        action: { type: 'string', minLength: 1 },
-      },
+      anyOf: [
+        { type: 'null' },
+        { type: 'object', additionalProperties: false, required: ['owner', 'action'],
+          properties: {
+            owner: { type: 'string', minLength: 1 },
+            action: { type: 'string', minLength: 1 },
+          },
+        },
+      ],
     },
     payload: { type: 'object' },
   },
@@ -563,11 +567,12 @@ const validateJudgment = (value, nodeId) => {
   if (typeof value.summary !== 'string' || !value.summary.trim() || !nonEmptyStrings(value.evidence_refs) || !nonEmptyStrings(value.concerns, true)) {
     throw new Error(`node ${nodeId} returned invalid summary/evidence/concerns`)
   }
-  if (
-    !exactKeys(value.next_action, ['owner', 'action']) ||
-    typeof value.next_action.owner !== 'string' || !value.next_action.owner.trim() ||
-    typeof value.next_action.action !== 'string' || !value.next_action.action.trim()
-  ) {
+  const nullActionAllowed = ['DONE', 'DONE_WITH_CONCERNS'].includes(value.work_status)
+  const validOwnedAction = value.next_action !== null &&
+    exactKeys(value.next_action, ['owner', 'action']) &&
+    typeof value.next_action.owner === 'string' && value.next_action.owner.trim() &&
+    typeof value.next_action.action === 'string' && value.next_action.action.trim()
+  if (!(value.next_action === null ? nullActionAllowed : validOwnedAction)) {
     throw new Error(`node ${nodeId} returned invalid next_action`)
   }
   if (!value.payload || typeof value.payload !== 'object' || Array.isArray(value.payload)) {
@@ -592,7 +597,7 @@ const workflowContract = {
 const workflowContractDigest = await sha256Canonical(workflowContract)
 const dirtyScopeDigests = await Promise.all(contextArtifacts.map(artifact => sha256Canonical(artifact.task_contract.dirty_scope)))
 const focusDigests = await Promise.all(contextArtifacts.map(artifact => sha256Canonical(artifact.task_contract.focus)))
-const CONTRACT = `【Judgment contract】Return exactly these judgment fields and no others: work_status, gate_verdict, classification, confidence, summary, evidence_refs, concerns, next_action, payload. Do not return schema_version, id, node_id, role, task_contract_digest, producer identity, payload_kind, consumption, token/tool counts, or timing. The controller injects all identity, provenance, and consumption fields. Work completion and gate success are separate (DONE+FAIL is valid). Put role-specific detail losslessly in payload; preserve concerns, evidence refs, and next owner/action. Do not write a per-role report or append memory. Missing evidence/context/budget may be NEEDS_CONTEXT/BLOCKED/UNVERIFIED and can never be PASS.`
+const CONTRACT = `【Judgment contract】Return exactly these judgment fields and no others: work_status, gate_verdict, classification, confidence, summary, evidence_refs, concerns, next_action, payload. Do not return schema_version, id, node_id, role, task_contract_digest, producer identity, payload_kind, consumption, token/tool counts, or timing. The controller injects all identity, provenance, and consumption fields. Work completion and gate success are separate (DONE+FAIL is valid). Put role-specific detail losslessly in payload and preserve concerns/evidence refs. Use next_action=null for DONE/DONE_WITH_CONCERNS when no real follow-up exists; never invent work. NEEDS_CONTEXT/BLOCKED must name an owner/action, are never PASS, and do not authorize another turn.`
 const key = task => task.node_id.trim()
 const phaseLabel = (task, phaseName) => phaseName === 'Retry' ? `relay:${key(task)}` : key(task)
 const requested = task => ({

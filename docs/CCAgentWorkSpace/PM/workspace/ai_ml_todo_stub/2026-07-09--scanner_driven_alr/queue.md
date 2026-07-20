@@ -22,7 +22,11 @@ these AI/ML rows.
 
 ## Loop Selection Rule
 
-Select the first row whose status is `ACTIVE`, then the first row whose waiting
-condition is satisfied. Implement one row per iteration, write effect review and
-state packet, make a narrow green checkpoint commit, then re-read this queue and
-continue until P1 rows are done or a stop state fires.
+Select only the first row whose exact queue lane is `ACTIVE`. Never select
+WAITING, DEFERRED, DONE, DONE_WITH_CONCERNS, or a no-repeat marker. When a named
+waiting condition has a newly verified semantic/external delta, PM must first
+create a fresh ACTIVE admission. Implement one row per iteration, write effect
+review and state packet, make a narrow green checkpoint commit, then call the
+canonical continuation gate. Continue only for an explicit operator_loop when
+it returns `CONTINUE_OPERATOR_LOOP`; identical progress closes as
+`BLOCKED_NO_DELTA` and cannot replay the queue.

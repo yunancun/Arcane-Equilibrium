@@ -89,6 +89,53 @@ only when routed node `path_scope` is empty, and before falling back to
 never grants writer ownership, mutation authority, or ACL permission, and it
 does not replace writer `dirty_scope` or whole-repository generation checks.
 
+## Task execution control
+
+Task execution is finite by default. The canonical task contract always carries
+`continuation_mode=finite|operator_loop`; omission normalizes only to `finite`.
+`operator_loop` is admitted only when the exact Operator request begins with a
+first control line equal to `/loop`. Natural-language similarity, a role, TODO row,
+filename, prior session, `next_action`, or generated prompt cannot infer or
+inherit that authority. The compiler binds that marker to the exact task-prompt
+and admitted task-contract digest; callers cannot replace a compiled finite
+contract with a newly constructed loop control. Serialized prompt/digest fields
+are not Operator provenance: generic CLI admission rejects `operator_loop` unless
+the embedding host supplies an out-of-band trusted Operator-request verifier over
+the exact normalized contract.
+
+A finite task may perform all necessary in-turn steps, but it cannot schedule a
+new turn, wakeup, or automatic continuation. Before any opt-in operator loop
+schedules another turn, PM must first acquire a persisted task admission with
+`agent_governance.py task-admission`. Its private fencing token binds the original
+normalized task contract and preceding progress snapshot in Git's common directory.
+`agent_governance.py continuation` accepts only that task/owner/token tuple and
+recaptures actual repository bytes from the admitted `dirty_scope`; callers cannot
+provide a replacement contract, digest, or previous snapshot. Generic continuation
+counts only a task-owned source-byte change as progress. Lifecycle labels, blocker
+labels, round counters, timestamps, repository HEAD changes, caller receipts, and
+unrelated whole-repository drift are not progress. Domain-specific external progress
+requires its own validated Adapter or a reviewed task-owned artifact. An identical
+progress digest closes the run as `BLOCKED_NO_DELTA`, with
+`schedule_wakeup=false` and `next_action=null`. Scope/source/Context drift in an
+ordinary finite task stops the current admission and requires explicit
+re-admission; it never silently creates a loop.
+
+Queue state is separate from role work status. Only the physical `ACTIVE` lane
+is dispatchable. `WAITING`/`DEFERRED` requires a named new delta and PM
+re-admission before returning to ACTIVE; `CLOSED` is never selected. A completed
+Closure may use `next_action=null`; `BLOCKED`/`NEEDS_CONTEXT` must still name the
+owner and unblock condition. Do not manufacture executable work to satisfy a
+schema.
+
+Every writable task uses one exclusive writer lease in one attached, non-main
+linked worktree. Acquire/renew/release it through `agent_governance.py
+writer-lease`; `git_loop_guard.py` only validates the existing task/owner/fencing
+token and never acquires, steals, or repairs a lease. A second writer uses a
+different linked worktree. Read-only query/review paths do not acquire a writer
+lease. Low-risk, low-uncertainty, effect-free `task_shape=query` routes only
+`PM triage -> PM closure`; hard authority/runtime/private-effect facts cannot use
+that narrow path.
+
 ## Permission and effects
 
 Registry permission profiles are binding. Read-only reviewers do not edit,
@@ -151,6 +198,12 @@ One task has one `closure_packet_v1`; `work_status`, `gate_verdict`, and
 `disposition` are separate. `DONE + FAIL` is valid. Missing evidence, stale
 runtime proof, unresolved hard-gate dissent, exhausted budget, or skipped
 coverage cannot become PASS.
+
+`DONE` and `DONE_WITH_CONCERNS` may end with `next_action=null` when no real
+follow-up exists. `BLOCKED`/`NEEDS_CONTEXT` require an owned unblock action.
+`BLOCKED_NO_DELTA` is terminal for the current admission, can never carry PASS,
+and must have `next_action=null`; only a new semantic/external delta or explicit
+Operator reopen can create a new ACTIVE task.
 
 Evidence trust has three explicit tiers:
 
@@ -218,6 +271,8 @@ unsound requested path. Distinguish fact, inference, and assumption.
   checkpoint requires them.
 - A commit uses subject + body; a push report includes branch, SHA, and scope.
 - In a dirty tree, stage only owned files; never revert unrelated changes.
+- Writable feature work requires the exact active linked-worktree writer lease;
+  sharing one checkout between concurrent writers is forbidden.
 - Active state belongs in `TODO.md`; stable architecture in README/CONTEXT/ADR;
   evidence in closure/report/archive; memory only receives new durable lessons.
 

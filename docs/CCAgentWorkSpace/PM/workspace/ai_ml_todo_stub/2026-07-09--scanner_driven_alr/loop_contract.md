@@ -3,6 +3,12 @@
 This loop is for Codex source development. It is not an application runtime loop.
 Boundary label: `SOURCE_ONLY_OFFLINE_P0_P1`.
 
+It is active only when the exact Operator request starts with a first control
+line equal to `/loop` and routing binds that exact prompt to
+`continuation_mode=operator_loop`. Reading this file, finding
+an unfinished row, or restoring a prior state packet does not authorize
+continuation. All other ALR tasks are finite one-shot tasks.
+
 ## Boot
 
 1. Start from `/Users/ncyu/Projects/TradeBot`.
@@ -15,28 +21,34 @@ Boundary label: `SOURCE_ONLY_OFFLINE_P0_P1`.
 6. Do not inherit current trading P0 candidate context, standing Demo
    authorization, prior no-order approval, prior Bybit public GET approval,
    operator-review-ready artifacts, or cached exchange credentials.
-7. Recover the latest validated persisted state packet before trusting the
-   current checkout. On resume, load `LOOP_BRANCH` from `loop_branch` and full
-   `CHECKPOINT_HEAD` from `checkpoint_head`; a resumed loop must not recapture
-   either value from the current Git branch or HEAD. On first boot only, bind an
-   attached non-`main` feature branch and full HEAD once, then persist those two
-   fields in a bootstrap state packet before dispatching work.
+7. Recover the latest validated **production controller receipt** before
+   trusting the current checkout. This is not `alr_loop_state_packet_v1`, which
+   intentionally has no Git/continuation authority. On resume, load
+   `LOOP_BRANCH` from `loop_branch` and full `CHECKPOINT_HEAD` from
+   `checkpoint_head`; a resumed loop must not recapture either value from the
+   current Git branch or HEAD. This repository currently has no production
+   controller-receipt builder/validator Adapter, so without an independently
+   implemented and validated host receipt, cross-turn continuation stops as
+   `STOP_DISPATCH_BLOCKED`; do not invent a bootstrap packet.
 8. Run `helper_scripts/maintenance_scripts/git_loop_guard.py --phase start`
-   with those expected values. A wrong branch/head or dirty worktree stops as
+   with those expected values plus the exact task/owner/writer-lease fencing
+   token. Acquire the lease only from the clean attached non-main linked
+   worktree. A missing/foreign/expired lease, wrong branch/head, or dirty worktree stops as
    `STOP_GIT_START_STATE`; preserve it exactly and do not stash/reset/clean it.
 
 ## Iteration
 
 Each iteration:
 
-1. Reload the already-admitted persisted ALR state packet and verify its
+1. Reload the validated production controller receipt and verify its
    `loop_branch` and `checkpoint_head` remain the expected identity; the loop
-   must not recapture them from the checkout.
+   must not recapture them from the checkout or the base ALR packet.
 2. Re-read `queue.md`, `boundaries.md`, and `retention_guardian_contract.md`.
 3. Select exactly one row:
    - first `ACTIVE` row;
-   - otherwise first row whose waiting condition is satisfied;
-   - otherwise stop with the blocking state.
+   - never select WAITING/DEFERRED/CLOSED directly;
+   - when a named waiting delta is newly verified, PM first creates a fresh
+     ACTIVE admission, otherwise stop with the blocking state.
 4. Dispatch the required chain for the selected row.
 5. If required dispatch tooling or role-chain execution is unavailable, stop as
    `STOP_DISPATCH_BLOCKED`; do not silently substitute single-agent PM/PA work.
@@ -60,9 +72,15 @@ Each iteration:
 11. Commit each green checkpoint with subject and body, update the full
     `CHECKPOINT_HEAD`, then rerun `git_loop_guard.py --phase start`; the next row
     cannot begin until the worktree is clean at that exact commit.
-12. Re-read state and continue while result is `ADVANCED`,
-    `ADVANCED_WITH_CONCERNS`, or a recovered `ROTATED` with a source-only next
-    row.
+12. Call `continuation` only with the original task/owner/persisted-admission
+    fencing token. The store supplies the original contract/control/preceding
+    snapshot and recaptures the selected row's owned-source bytes; caller receipts,
+    whole-repository HEAD, blocker, time, or lifecycle status are not progress.
+    Continue only when the state is
+    `ADVANCED`, `ADVANCED_WITH_CONCERNS`, or a recovered `ROTATED` with a
+    source-only ACTIVE row **and** the decision is
+    `CONTINUE_OPERATOR_LOOP + schedule_wakeup=true`. Identical semantic progress
+    is `BLOCKED_NO_DELTA`, terminal for this admission, with `next_action=null`.
 
 Local checkpoint commits are intentionally not pushed per iteration. This keeps
 hosted CI off the edit loop while bounding crash recovery to at most the current
@@ -96,9 +114,18 @@ Without publication/merge/sync authority the loop returns
 `STOP_SYNC_AUTH_REQUIRED`, not `DONE`. It must never claim completion while
 commits are only local, the PR is unmerged, or Mac/origin/Linux differ.
 
-## State Packet Minimum Fields
+## Production controller receipt minimum fields
 
-Every `alr_loop_state_packet_v1` must include:
+`alr_loop_state_packet_v1` remains the source-only queue/effect packet emitted
+and validated by `alr_controller_contracts.py`; it does not itself grant a
+wakeup, Git, publication, or sync effect. Every persisted production controller
+receipt must embed or digest-reference that validated packet and additionally
+bind the following orchestration fields. Do not claim those wrapper fields were
+validated merely because the base ALR packet validated:
+
+No repository Adapter currently builds or validates this production wrapper.
+These fields are design requirements, not a claim of implemented receipt
+support; automatic wakeup remains fail-closed until that Adapter exists.
 
 - `schema`
 - `created_at`
@@ -115,6 +142,12 @@ Every `alr_loop_state_packet_v1` must include:
 - `state`
 - `next_state`
 - `next_action`
+- `continuation_mode=operator_loop`
+- `progress_digest`
+- `previous_progress_digest`
+- `continuation_decision`
+- `schedule_wakeup`
+- `writer_lease_receipt_digest` (never persist the fencing token in repo)
 - `stop_reason`
 - `owned_files`
 - `verification_commands`
@@ -144,8 +177,8 @@ Every `alr_loop_state_packet_v1` must include:
 | State | Meaning |
 |---|---|
 | `DONE` | Selected queue segment is complete and no required P0 work remains. |
-| `ADVANCED` | One row advanced cleanly; continue to next row. |
-| `ADVANCED_WITH_CONCERNS` | One row advanced with explicit non-blocking concerns; continue only if the next row does not depend on the concern. |
+| `ADVANCED` | One row advanced cleanly; eligible for a continuation decision, not automatic continuation. |
+| `ADVANCED_WITH_CONCERNS` | One row advanced with explicit non-blocking concerns; eligible only when the next ACTIVE row does not depend on the concern and continuation control admits it. |
 | `DEFER_EVIDENCE` | Missing candidate-matched proof/reward/control/repeat/OOS evidence. |
 | `HYPOTHESIS_ONLY` | Target can be ranked for investigation but no edge claim is allowed. |
 | `ROTATED` | Source head, candidate id, input hash, auth/envelope, or referenced artifact drifted. Re-intake source-only state before continuing. |
