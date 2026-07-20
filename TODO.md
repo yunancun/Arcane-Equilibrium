@@ -1,11 +1,101 @@
 # 玄衡 TODO - 活躍派發佇列
 
-**版本** v838 | **日期** 2026-07-20
+**版本** v840 | **日期** 2026-07-20
 **來源／runtime 指針**：v838 publication lane 已把規劃內容與 GitHub `main=96d262450...` 做無損 union，並保留同期 IBKR delta；最終發布 SHA 由 exact-head PR/merge/sync receipt 提供，不在本文自我硬編碼。先前 Linux/runtime 裁決僅屬歷史證據；來源與 runtime 身分重新獨立證實前，不得視為當前事實。詳見 §0 與 `AIML-LONG-LIVED-LANDING-V2`。
 **當前態勢**：`PROGRAM_ADOPTION_REQUIRED`。v838/S0.1 只發布 V2 規劃文件；即使 exact-head PR 合併並完成三端 source sync，也不簽發 `PROGRAM_ADOPTED`。下一個治理工作是 S0.2 接受 serving-authority ADR/AMD，之後只有 S0.3 可完成 program adoption。執行順序仍固定為兩個有界 program：先完成 P0 長效修復，再完成 P1 端到端 ML/AI 落地。完成狀態由 runtime 證據決定，不能由契約或 CI 代替。
 **入口**：正式方案 `docs/execution_plan/2026-07-19--ai_ml_long_lived_repair_and_landing_plan.md`；完成度審核 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-20--ai_ml_completion_coverage_and_delivery_audit.md`；交付協議 `docs/agents/ai-ml-landing-delivery-protocol.md`；長效進度帳本 `docs/execution_plan/ai_ml_landing/PROGRESS.md`；先前真實狀態報告 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-19--ai_ml_true_state_and_engineering_plan.md`；版本日誌 `docs/CLAUDE_CHANGELOG.md`；TODO 規範 `docs/agents/todo-maintenance.md`；v738 歸檔 `docs/archive/2026-07-04--todo_v738_pre_slim_archive.md`。
 
 ---
+
+## AI/ML 一分鐘派發看板
+
+本節只負責回答四件事：**現在做哪個 Sprint、包含哪些 Session、哪些可並行、何時停止**。46 個 Session 的詳細 scope／dependency／role route／receipt／effect／CI 規則以 `docs/execution_plan/ai_ml_landing/PROGRESS.md` 對應 row 為準；穩定執行規則以 `docs/agents/ai-ml-landing-delivery-protocol.md` 為準；當前派發起點以本看板為準。`S0.1` 已由 PR #100 發布，`PROGRESS.md` 仍顯示 `PLANNED` 是待在 S0.2/W0 校正的舊投影，不得因此重做 S0.1。除此項已知差異外，若三者衝突，先停止並修正文件，不得自行猜測。
+
+### 命令解析
+
+| Operator 命令 | Agent 必須執行的範圍 | 停止點 |
+|---|---|---|
+| `開始並完成S<n>`（空格可有可無），例如 `開始並完成S1` | 精確觸發 `AIML-LONG-LIVED-LANDING-V2` 的完整 Sprint n；不是優先級 Pn、不是 IBKR 的 W*-Sn、也不是單一 Session。先核實並完成 hard predecessor，再連續完成目標 Sprint 的全部 Session。 | 只可在目標 Sprint exit、`OPERATOR_STOP_NOW` 或不可自行解除的外部／authority hard blocker 停止；不得因單一 commit、測試、報告或 Session 完成而提前退出。 |
+| `推進 S<n>`，例如 `推進 S1` | `S1` 代表完整 Sprint 1，不是 S1.1。先完成尚未關閉的 hard predecessor，再依本看板執行 S1 全部 Session。 | S1 exit 或不可自行解除的 hard blocker；不得自行進 S2。 |
+| `推進 S<exact-id>`，例如 `推進 S1.3`、`推進 S2.2A` | 只處理該 exact Session；suffix 不得截斷或猜測。 | 該 Session closure；若 dependency 未滿足，只回報 exact blocker，不代做其他 Session。 |
+| `繼續推進` | 從當前 Sprint 最早未關閉 Session 繼續，完成當前 Sprint。 | 當前 Sprint exit 或 hard blocker。 |
+| `持續推進至完成 AI/ML` | 依 S0 → S8 順序逐 Sprint 推進。 | trading/no-candidate terminal、`OPERATOR_STOP_NOW` 或外部 hard blocker。 |
+
+這是一個**有界派發契約，不是無限 loop**。完成單一 Session、寫出報告、測試通過或 CI 綠燈都不等於 Sprint 完成。
+
+### `開始並完成S1` 強制展開
+
+這個 exact phrase 的解析結果固定如下；舊 session 摘要、其他 TODO row 或同名子階段不得覆寫它。
+
+| 欄位 | 強制值 |
+|---|---|
+| Program／目標 | `AIML-LONG-LIVED-LANDING-V2`／完整關閉 Sprint `S1` |
+| 優先級範圍 | 只推進 `P0-AIML-LONG-LIVED-RUNTIME-REPAIR` 的 S1 部分；S1 完成不代表整個 P0 關閉。 |
+| 明確排除 | `P1-AIML-END-TO-END-LANDING`、全部 P2/P3、其他全局 P0/P1、IBKR、交易候選、Demo/order/profit lane，除非它們是 S1 exact effect receipt 的只讀證據來源。 |
+| 必讀上下文順序 | `AGENTS.md` → `.codex/agents/PM.md` → `docs/agents/context-loading.md` → 本看板與 §1 AIML rows → `docs/agents/ai-ml-landing-delivery-protocol.md` §§2-6 → 正式方案 → `docs/execution_plan/ai_ml_landing/PROGRESS.md` current rows／attempts／receipts。 |
+| Intake | PM 先核對 current head、branch、dirty scope、S0 receipts 與 active attempt；以 `agent_governance.py route/context` 編譯每個 Session 的實際 DAG。舊報告只能作線索，不能代替 current source/runtime/effect evidence。 |
+| Hard predecessor | `S0.1` 已發布但 ledger 投影待校正；先以 PR #100/current-head receipt 核實，然後完成尚未關閉的 `S0.2 → S0.3`。無 `PROGRAM_ADOPTED` 不得開始 S1。 |
+| Exact Sessions | 必須完成 `S1.1`、`S1.2`、`S1.3`、`S1.4`、`S1.5`、`S1.6`；每個 Session 都獨立執行 W0-W9 並取得自己的 current-generation closure。 |
+| 固定排程 | `S1.1 ∥ S1.2 → S1.3 ∥ S1.4 → JOIN → S1.5 → S1.6`；`∥` 只有在 W0 證明 path/effect manifest 互斥時成立，否則依序執行。 |
+| 工程原則 | 依 `Observe → 最高影響缺口 → 可運行 vertical slice → source/runtime 驗證 → durable state`；不得以一次性 wrapper、cron、Codex/session 常駐或 source-only PASS 代替長效 runtime 能力。 |
+| S1 exit | 同時具備 current、可驗證的 `effect_seams_ready_receipt_v1`／`EFFECT_SEAMS_READY` 與 `learning_runtime_choice_receipt_v1`，且 S1.1-S1.6 無未解 P0/P1 finding、無 ghost/duplicate attempt、必要 disposable apply/rollback/postcheck 已通過。 |
+| 結束行為 | 寫入各 Session closure 與 S1 summary，列出 source/tests/CI/effect/receipts/blockers；停止在 S1，不執行 S2，只回報下一個 READY pool。 |
+
+任何 Agent 若把 `開始並完成S1` 解讀為「處理所有 P1」、「只完成 S1.1」、「執行 IBKR W*-S1」或「產出一輪報告後停止」，均屬派發錯誤，必須在 W0 fail closed。
+
+### 當前起點
+
+| 項目 | 當前值 |
+|---|---|
+| Program | `AIML-LONG-LIVED-LANDING-V2` |
+| 當前 Sprint | `S0` |
+| 已關閉 Session | `S0.1`（V2 規劃發布；PR #100） |
+| 最早未關閉 Session | `S0.2` |
+| 當前 gate | `PROGRAM_ADOPTION_REQUIRED` |
+| 工程並行上限 | 最多 2 個 path/effect manifest 互斥的 writer Session；不互斥則串行。 |
+| 最終同步 | 只在 S8.4 做 Mac/GitHub/Linux ff-only final sync；中途只在 Linux/runtime evidence 確有需要時做有界 sync。 |
+
+### Sprint／並行／JOIN 總表
+
+符號：`→` 表示 hard dependency；`∥` 表示可同時 READY，但仍受「最多 2 writer 且 manifest 互斥」限制；`JOIN(...)` 表示列出的 Session 全部達到其 receipt 後才可前進。
+
+| Sprint | Session 排程 | 可並行安排 | Sprint exit |
+|---|---|---|---|
+| `S0` 治理採納 | `S0.1`（已發布）→ `S0.2 → S0.3` | 無；metadata/governance 串行。 | `PROGRAM_ADOPTED` |
+| `S1` effect seam／runtime 選型 | READY pool：`S1.1 ∥ S1.2 ∥ S1.4`；`S1.1 + S1.2 → S1.3`；`JOIN(S1.1,S1.2,S1.3,S1.4) → S1.5 → S1.6` | pool 內最多同時 2 個；S1.3 解鎖後立即補位。 | `EFFECT_SEAMS_READY` + `learning_runtime_choice_receipt_v1` |
+| `S2` runtime 修復 | READY pool：`S2.0 ∥ S2.2A ∥ S2.3`；`S2.0 + S1.6 → S2.1`；`JOIN(S2.0,S2.1,S2.2A@SOURCE_READY,S2.3) → S2.4 → S2.5 → S2.2B` | pool 內最多同時 2 個；effect apply `S2.4/S2.5` 串行。 | running attestation + `ingestion_compatibility_receipt_v1` |
+| `S3` controller／Scanner／retention | `S3.1A@SOURCE_READY → S3.1B`；之後 `S3.2 ∥ S3.3`；`S3.2 → S3.2A`；`JOIN(S3.2A,S3.3) → S3.4` | S3.2/S3.3 可並行；S3.2A 解鎖後補位。 | `FOUNDATION_READY`（72h／兩 cycle） |
+| `S4` scope／portfolio／label／PIT | `S4.1 → S4.2 → S4.3 → S4.4` | 同一 `landing_scope_id` 串行，避免 cohort／label／PIT 漂移。 | `pit_dataset_receipt_v1` 或合法 no-candidate branch |
+| `S5` fit／OOS／registry | `S5.1 → S5.2 → S5.3` | 串行；OOS 未通過不得進 registry/shadow。 | registry/shadow receipt 或合法 no-candidate branch |
+| `S6` Rust consumer／Demo integration | `S6.1 → S6.2 → S6.3 → fresh authority → S6.4` | 串行；S6.4 是獨立 effect gate。 | required mechanical Demo receipt；economic receipt 可選 |
+| `S7` G2／DR／soak／candidate | Trading：`S7.1 → S7.2 → S7.3 → S7.4`；No-candidate：`S7.2 → S7.3 → S7.NC` | 只執行已固定 branch；不得同時跑 trading/no-candidate terminal lane。 | `AIML_LANDING_CANDIDATE` 或 no-candidate platform candidate |
+| `S8` 全局收口 | `S8.1 → S8.2 → S8.3 → S8.4`；Trading：`S8.5T → S8.6`；No-candidate：`S8.5NC → S8.NC` | S8.1-S8.4 串行；final branch 二選一。 | trading terminal 或 platform-only no-candidate terminal |
+
+### 每個 Session 的固定 Wave
+
+Agent 接到 Sprint 命令後，對每個 READY Session 依序執行下列 Wave；不得把多個 Session 合併成一個大 closure。
+
+| Wave | 工作 | 完成條件 |
+|---|---|---|
+| `W0 Intake` | 讀本看板與 `PROGRESS.md` exact row；核對 dependency、head、dirty state、scope、effect、CI classifier；建立 attempt/owner。 | exact Session 可安全開始，或留下 typed blocker。 |
+| `W1 Route` | PM 依 row 的 role route 編譯實際 agent DAG 與 context。 | owner、builder、reviewer、effect actor、postcheck actor 清楚且互不冒充。 |
+| `W2 Build` | builder 只修改該 Session owned paths；effect/observation Session 不建立空 branch。 | bounded implementation/effect/observation 完成。 |
+| `W3 Review` | source 先 E2、再 E4；再按事實加入 QC/MIT/AI-E、CC/E3/OPS、BB、QA。 | 無未解 P0/P1；dissent 被保留。 |
+| `W4 Fix` | builder 修正 findings，受影響 reviewer 只複驗新 generation。 | current generation 被接受。 |
+| `W5 Verify` | focused tests、必要 adjacent regression、receipt/schema check、`git diff --check`。 | 驗證可重現。 |
+| `W6 Publish` | 只有 source Session 才 commit/PR/merge；CI 只在 classifier 判定必要時跑。 | reviewed head 與 merge head 一致，或 non-source typed N/A。 |
+| `W7 Effect` | 有 effect 才做 preflight → authority → Adapter → rollback/postcheck；source PASS 不得代替 runtime PASS。 | typed effect receipt 或誠實 blocker。 |
+| `W8 Close` | QA 驗收，PM 寫 Session closure／receipt。 | 該 Session terminal predicate 成立。 |
+| `W9 Advance` | 更新進度投影，釋放 slot，立即選同 Sprint 下一個 READY Session。 | Sprint exit、下一 Session 已啟動，或 hard blocker 已精確落帳。 |
+
+### 防漂移與停止規則
+
+1. 同時最多 2 個 writer Session；只有 owned paths 與 effect manifests 都互斥才可並行。reviewer 可在同一 Session 內並行，不額外算 writer Session。
+2. PM 每次只從 `PROGRESS.md` 選 dependency 已滿足的 READY row；低優先但已 READY 的工作不得越過本 Sprint 的 JOIN。
+3. 一個 Session 關閉後必須自動補位，不能因「本輪有產出」提前結束 Sprint。
+4. 只有三種自然停止：目標 Sprint exit；無其他 READY 工作且遇到不可自行解除的外部／authority blocker；`OPERATOR_STOP_NOW`。
+5. 禁止為了續作而 stash/reset/clean、吸收不明 dirty files、降低 Cost Gate、擴大 runtime/order authority，或把 source／CI 說成 runtime／profit proof。
+6. 最終回報固定列出：完成 Session、仍未完成 Session、並行 slot 使用、tests/CI/effect、blocker、下一個 exact Session。不得只回報 commit 或報告路徑。
 
 ## §0 影響派發的當前事實
 
