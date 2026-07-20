@@ -308,7 +308,7 @@ fake-TWS(`openclaw_fake_tws` dev-crate,15 場景種子)必覆蓋:正常鏈、部
 | **replace = 覆蓋同 orderId(無獨立 msg)** | `OrderFrame` 只 place/cancel 兩 encoder;replace=place-with-existing-orderId 語義封裝 | **S0/S1**(§2.0) |
 | **option B HMAC** | effect activation 簽名 leg;**S4 blocking(EA5 paper 窗硬前置)** | **S4**(§4) |
 
-### 11.2 EA3 前 blocking(order-band 10.x re-pin;D5 同源)
+### 11.2 EA3 前 blocking(order-band 10.x re-pin;D8 同源——07-17 KEEP-176 裁決,R29 校準前曾誤記 D5,正本見 IBKR_TODO §9 D8)
 
 W7 在 **sv∈[145,157] band 開發 encoder(placeOrder/cancelOrder ≤157 佈局 **CONFIRMED-vs-9.81.1**,byte-golden 驗)**;**真接觸待 10.x re-pin + envelope**。以下標為 **EA 前置 blocking**(承 §4.4 gap matrix UNVERIFIED 紀律,IB 定期政策巡檢):
 
