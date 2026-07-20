@@ -171,6 +171,15 @@ referenced.
 
 ## Retry and stop
 
+- Review findings use `review_control_v1` and exactly one classification:
+  `in_scope_blocker`, `regression_blocker`, `out_of_scope_followup`, or
+  `pre_existing`. P0/P1 severity alone never creates work or changes scope.
+- A reviewer gets one initial review plus one exact recheck at most. Both bind
+  the unchanged task contract and a frozen repository generation; the recheck
+  may mention only initial blocker IDs and cannot open new findings.
+- PM freezes edits while a review round is running, batches admitted blocker
+  repairs once, and stops instead of requesting a third round. Non-blocking
+  findings remain visible follow-ups and do not prevent PASS.
 - Missing context: add the exact missing context, then retry.
 - API/null failure: one checkpoint-aware relay may resume completed work.
 - Same input/model/shape failure: no bare retry; change capability or split.

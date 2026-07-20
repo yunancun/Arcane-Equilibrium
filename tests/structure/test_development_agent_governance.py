@@ -1917,6 +1917,64 @@ def test_closure_packet_separates_work_completion_from_gate_verdict() -> None:
         assert governance.validate_closure(packet), packet
 
 
+def test_closure_pass_cannot_hide_a_scope_admitted_review_blocker() -> None:
+    governance = _load_module()
+    packet = _valid_failed_review_closure()
+    packet["gate_verdict"] = "PASS"
+    packet["acceptance"][0]["status"] = "PASS"
+    fragment = packet["role_fragments"][0]
+    fragment.update(gate_verdict="PASS", concerns=[])
+    generation = {
+        field: packet["baseline"][field]
+        for field in (
+            "source_head", "dirty_diff_hash", "untracked_relevant_hash"
+        )
+    }
+    criterion = packet["acceptance"][0]["criterion"]
+    fragment["payload"] = {
+        "review_control": {
+            "schema_version": "review_control_v1",
+            "task_contract_digest": governance.review_task_contract_digest(
+                packet["dispatch"]["task_facts"]
+            ),
+            "non_goals": ["expand beyond the admitted authority review"],
+            "final_generation": generation,
+            "reviewers": [
+                {
+                    "node_id": fragment["node_id"],
+                    "rounds": [
+                        {
+                            "round": 1,
+                            "kind": "initial",
+                            "reviewed_generation": generation,
+                            "findings": [
+                                {
+                                    "id": "hidden-authority-blocker",
+                                    "classification": "in_scope_blocker",
+                                    "severity": "P3",
+                                    "summary": "admitted hard boundary remains open",
+                                    "paths": ["CLAUDE.md"],
+                                    "evidence_refs": ["ev-repository"],
+                                    "acceptance_criterion": criterion,
+                                    "introduced_by_current_diff": False,
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+    }
+    _refresh_standard_workflow_lineage(governance, packet)
+
+    errors = governance.validate_closure(
+        packet,
+        execution_attestation_verifier=_test_execution_attestation_verifier(packet),
+    )
+
+    assert any("typed blockers cannot support PASS" in error for error in errors)
+
+
 def test_terminal_closure_does_not_invent_next_work_and_no_delta_never_passes() -> None:
     governance = _load_module()
 
