@@ -59,11 +59,15 @@ const JUDGMENT_SCHEMA = {
     evidence_refs: { type: 'array', minItems: 1, items: { type: 'string', minLength: 1 } },
     concerns: { type: 'array', items: { type: 'string', minLength: 1 } },
     next_action: {
-      type: 'object', additionalProperties: false, required: ['owner', 'action'],
-      properties: {
-        owner: { type: 'string', minLength: 1 },
-        action: { type: 'string', minLength: 1 },
-      },
+      anyOf: [
+        { type: 'null' },
+        { type: 'object', additionalProperties: false, required: ['owner', 'action'],
+          properties: {
+            owner: { type: 'string', minLength: 1 },
+            action: { type: 'string', minLength: 1 },
+          },
+        },
+      ],
     },
     payload: { type: 'object' },
   },
@@ -563,11 +567,12 @@ const validateJudgment = (value, nodeId) => {
   if (typeof value.summary !== 'string' || !value.summary.trim() || !nonEmptyStrings(value.evidence_refs) || !nonEmptyStrings(value.concerns, true)) {
     throw new Error(`node ${nodeId} returned invalid summary/evidence/concerns`)
   }
-  if (
-    !exactKeys(value.next_action, ['owner', 'action']) ||
-    typeof value.next_action.owner !== 'string' || !value.next_action.owner.trim() ||
-    typeof value.next_action.action !== 'string' || !value.next_action.action.trim()
-  ) {
+  const nullActionAllowed = ['DONE', 'DONE_WITH_CONCERNS'].includes(value.work_status)
+  const validOwnedAction = value.next_action !== null &&
+    exactKeys(value.next_action, ['owner', 'action']) &&
+    typeof value.next_action.owner === 'string' && value.next_action.owner.trim() &&
+    typeof value.next_action.action === 'string' && value.next_action.action.trim()
+  if (!(value.next_action === null ? nullActionAllowed : validOwnedAction)) {
     throw new Error(`node ${nodeId} returned invalid next_action`)
   }
   if (!value.payload || typeof value.payload !== 'object' || Array.isArray(value.payload)) {
@@ -592,7 +597,7 @@ const workflowContract = {
 const workflowContractDigest = await sha256Canonical(workflowContract)
 const dirtyScopeDigests = await Promise.all(contextArtifacts.map(artifact => sha256Canonical(artifact.task_contract.dirty_scope)))
 const focusDigests = await Promise.all(contextArtifacts.map(artifact => sha256Canonical(artifact.task_contract.focus)))
-const CONTRACT = `【Judgment contract】Return exactly these judgment fields and no others: work_status, gate_verdict, classification, confidence, summary, evidence_refs, concerns, next_action, payload. Do not return schema_version, id, node_id, role, task_contract_digest, producer identity, payload_kind, consumption, token/tool counts, or timing. The controller injects all identity, provenance, and consumption fields. Work completion and gate success are separate (DONE+FAIL is valid). Put role-specific detail losslessly in payload; preserve concerns, evidence refs, and next owner/action. Do not write a per-role report or append memory. Missing evidence/context/budget may be NEEDS_CONTEXT/BLOCKED/UNVERIFIED and can never be PASS.`
+const CONTRACT = `【Judgment contract】Return exactly these judgment fields and no others: work_status, gate_verdict, classification, confidence, summary, evidence_refs, concerns, next_action, payload. Do not return schema_version, id, node_id, role, task_contract_digest, producer identity, payload_kind, consumption, token/tool counts, or timing. The controller injects all identity, provenance, and consumption fields. Work completion and gate success are separate (DONE+FAIL is valid). Put role-specific detail losslessly in payload and preserve concerns/evidence refs. Use next_action=null for DONE/DONE_WITH_CONCERNS when no real follow-up exists; never invent work. NEEDS_CONTEXT/BLOCKED must name an owner/action, are never PASS, and do not authorize another turn.`
 const key = task => task.node_id.trim()
 const phaseLabel = (task, phaseName) => phaseName === 'Retry' ? `relay:${key(task)}` : key(task)
 const requested = task => ({

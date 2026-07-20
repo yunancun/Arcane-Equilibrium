@@ -36,6 +36,7 @@ from agent_governance_execution import (
     DIGEST_RE,
     DISPOSITIONS,
     GATE_VERDICTS,
+    ROLE_WORK_STATUSES,
     WORK_STATUSES,
     route_task,
 )
@@ -46,9 +47,9 @@ from agent_governance_repository_changes import validate_repository_change_chain
 from agent_governance_node_permissions import validate_node_scoped_permissions
 from agent_governance_schema import schema_subset_errors as _schema_subset_errors
 from agent_governance_trust import validate_closure_trust
+from agent_governance_task_control import terminal_next_action_errors
 
 CLOSURE_SCHEMA_REL = Path(".codex/schemas/closure_packet_v1.schema.json")
-
 
 def _verification_fragment_truth_errors(
     fragment: dict[str, Any], label: str
@@ -97,8 +98,11 @@ def validate_closure(
     except (TypeError, ValueError):
         adjudicated_at = None
         errors.append("adjudicated_at must be a timezone-aware timestamp")
-    if packet["work_status"] in {"BLOCKED", "NEEDS_CONTEXT"} and packet["gate_verdict"] == "PASS":
-        errors.append("BLOCKED/NEEDS_CONTEXT cannot carry PASS")
+    if packet["work_status"] in {"BLOCKED", "NEEDS_CONTEXT", "BLOCKED_NO_DELTA"} and packet["gate_verdict"] == "PASS":
+        errors.append("blocked or no-delta closure cannot carry PASS")
+    errors.extend(terminal_next_action_errors(
+        packet["work_status"], packet.get("next_action"), label="closure"
+    ))
 
     summary = packet.get("human_summary", {})
     if not summary.get("objective") or not summary.get("scope") or not summary.get("outcome"):
@@ -341,8 +345,12 @@ def validate_closure(
             errors.append(f"role_fragments[{index}] has invalid role")
         elif fragment.get("role") != "PM" and fragment.get("payload_kind") != role_registry[fragment["role"]].get("payload_kind"):
             errors.append(f"role_fragments[{index}] payload_kind does not match Registry")
-        if fragment.get("work_status") not in WORK_STATUSES:
+        if fragment.get("work_status") not in ROLE_WORK_STATUSES:
             errors.append(f"role_fragments[{index}] invalid work_status")
+        errors.extend(terminal_next_action_errors(
+            fragment.get("work_status"), fragment.get("next_action"),
+            label=f"role_fragments[{index}]",
+        ))
         if fragment.get("gate_verdict") not in GATE_VERDICTS:
             errors.append(f"role_fragments[{index}] invalid gate_verdict")
         if fragment.get("classification") not in {"FACT", "INFERENCE", "ASSUMPTION"}:
@@ -787,7 +795,5 @@ def validate_closure(
         verifier=execution_attestation_verifier,
     ))
     return errors
-
-
 def _parse_timestamp(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))

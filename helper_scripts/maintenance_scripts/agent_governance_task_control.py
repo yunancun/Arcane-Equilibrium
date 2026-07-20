@@ -139,6 +139,20 @@ def next_action_may_be_null(work_status: str) -> bool:
     return work_status in NULLABLE_NEXT_ACTION_STATUSES
 
 
+def terminal_next_action_errors(
+    work_status: str, next_action: Any, *, label: str
+) -> list[str]:
+    """Enforce terminal-null versus waiting-owner Closure semantics."""
+
+    if work_status == SAME_PROGRESS_TERMINAL and next_action is not None:
+        return [f"{label} BLOCKED_NO_DELTA must have next_action=null"]
+    if work_status in {"BLOCKED", "NEEDS_CONTEXT"} and not isinstance(
+        next_action, dict
+    ):
+        return [f"{label} BLOCKED/NEEDS_CONTEXT require an owned next_action"]
+    return []
+
+
 def progress_snapshot(
     *,
     round_number: int,
@@ -261,6 +275,8 @@ class FileWriterLeaseStore:
         self.lock_path = self.common_dir / "codex-writer-leases-v1.lock"
 
     def read(self) -> dict[str, Any]:
+        if self.state_path.is_symlink():
+            raise ValueError("writer lease state must not be a symlink")
         try:
             raw = json.loads(self.state_path.read_text(encoding="utf-8"))
         except FileNotFoundError:
@@ -272,6 +288,8 @@ class FileWriterLeaseStore:
 
     def update(self, mutation: Callable[[dict[str, Any]], dict[str, Any]]) -> dict[str, Any]:
         self.common_dir.mkdir(parents=True, exist_ok=True)
+        if self.lock_path.is_symlink() or self.state_path.is_symlink():
+            raise ValueError("writer lease files must not be symlinks")
         with self.lock_path.open("a+", encoding="utf-8") as lock_handle:
             fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
             current = self.read()
@@ -389,6 +407,31 @@ def _active_lease(lease: dict[str, str], now: datetime) -> bool:
     return _parse_timestamp(lease["expires_at"]) > now
 
 
+def _lease_validation_reasons(
+    lease: dict[str, str] | None,
+    identity: WorktreeIdentity,
+    *,
+    task_id: str,
+    lease_id: str,
+    owner: str | None,
+    now: datetime,
+) -> list[str]:
+    if lease is None:
+        return ["WRITER_LEASE_MISSING"]
+    reasons: list[str] = []
+    if not _active_lease(lease, now):
+        reasons.append("WRITER_LEASE_EXPIRED")
+    if lease["task_id"] != task_id:
+        reasons.append("WRITER_LEASE_TASK_MISMATCH")
+    if lease["lease_id"] != lease_id:
+        reasons.append("WRITER_LEASE_ID_MISMATCH")
+    if owner is not None and lease["owner"] != owner:
+        reasons.append("WRITER_LEASE_OWNER_MISMATCH")
+    if lease["branch"] != identity.branch:
+        reasons.append("WRITER_LEASE_BRANCH_MISMATCH")
+    return reasons
+
+
 def acquire_writer_lease(
     store: WriterLeaseStore,
     identity: WorktreeIdentity,
@@ -473,20 +516,10 @@ def validate_writer_lease(
             identity=identity, lease=None,
         )
     lease = state["leases"].get(identity.worktree)
-    reasons: list[str] = []
-    if lease is None:
-        reasons.append("WRITER_LEASE_MISSING")
-    else:
-        if not _active_lease(lease, current_time):
-            reasons.append("WRITER_LEASE_EXPIRED")
-        if lease["task_id"] != task_id:
-            reasons.append("WRITER_LEASE_TASK_MISMATCH")
-        if lease["lease_id"] != lease_id:
-            reasons.append("WRITER_LEASE_ID_MISMATCH")
-        if owner is not None and lease["owner"] != owner:
-            reasons.append("WRITER_LEASE_OWNER_MISMATCH")
-        if lease["branch"] != identity.branch:
-            reasons.append("WRITER_LEASE_BRANCH_MISMATCH")
+    reasons = _lease_validation_reasons(
+        lease, identity, task_id=task_id, lease_id=lease_id, owner=owner,
+        now=current_time,
+    )
     return _lease_result(
         "validate", status="FAIL" if reasons else "PASS", reasons=reasons,
         identity=identity, lease=lease,
@@ -506,25 +539,32 @@ def renew_writer_lease(
     """Renew an exact active writer lease without changing its identity."""
 
     current_time = now or _utc_now()
-    validation = validate_writer_lease(
-        store, identity, task_id=task_id, owner=owner, lease_id=lease_id, now=current_time
-    )
-    if validation["status"] != "PASS":
-        return {**validation, "action": "renew"}
     if ttl_seconds < MIN_LEASE_TTL_SECONDS or ttl_seconds > MAX_LEASE_TTL_SECONDS:
         return _lease_result(
             "renew", status="FAIL", reasons=["LEASE_TTL_OUT_OF_RANGE"],
-            identity=identity, lease=validation["lease"],
+            identity=identity, lease=None,
         )
     result: dict[str, Any] = {}
 
     def mutation(state: dict[str, Any]) -> dict[str, Any]:
-        lease = state["leases"][identity.worktree]
+        lease = state["leases"].get(identity.worktree)
+        reasons = _lease_validation_reasons(
+            lease, identity, task_id=task_id, lease_id=lease_id, owner=owner,
+            now=current_time,
+        )
+        if reasons:
+            result["reasons"] = reasons
+            return state
         lease["expires_at"] = _timestamp(current_time + timedelta(seconds=ttl_seconds))
         result["lease"] = lease
         return state
 
     store.update(mutation)
+    if result.get("reasons"):
+        return _lease_result(
+            "renew", status="FAIL", reasons=result["reasons"], identity=identity,
+            lease=None,
+        )
     return _lease_result(
         "renew", status="PASS", reasons=[], identity=identity, lease=result["lease"]
     )
@@ -541,17 +581,26 @@ def release_writer_lease(
 ) -> dict[str, Any]:
     """Release only the exact task/owner/lease tuple."""
 
-    validation = validate_writer_lease(
-        store, identity, task_id=task_id, owner=owner, lease_id=lease_id, now=now
-    )
-    if validation["status"] != "PASS":
-        return {**validation, "action": "release"}
+    current_time = now or _utc_now()
+    result: dict[str, Any] = {}
 
     def mutation(state: dict[str, Any]) -> dict[str, Any]:
+        reasons = _lease_validation_reasons(
+            state["leases"].get(identity.worktree), identity, task_id=task_id,
+            lease_id=lease_id, owner=owner, now=current_time,
+        )
+        if reasons:
+            result["reasons"] = reasons
+            return state
         del state["leases"][identity.worktree]
         return state
 
     store.update(mutation)
+    if result.get("reasons"):
+        return _lease_result(
+            "release", status="FAIL", reasons=result["reasons"], identity=identity,
+            lease=None,
+        )
     return _lease_result(
         "release", status="PASS", reasons=[], identity=identity, lease=None
     )
