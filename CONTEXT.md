@@ -553,6 +553,22 @@ A task-fact-derived workflow with mandatory safety/evidence edges and advisory
 specialist nodes. It replaces fixed all-role chains while keeping independent
 review/test/runtime/venue/acceptance edges when their surfaces are present.
 
+**Task Execution Control**:
+The internal Development-Agent Governance Implementation shared by Dispatch and
+Closure. `finite` is the default and cannot schedule another turn;
+`operator_loop` requires exact Operator opt-in. It compares semantic progress
+without round/time/unrelated-repo noise, terminates unchanged work as
+`BLOCKED_NO_DELTA`, selects only ACTIVE queue rows, and owns the writer-lease
+Seam. It is not a daemon, runtime scheduler, or fifth public governance
+Interface.
+
+**Development writer lease**:
+An exclusive, expiring, task/owner/branch-bound fencing token for one attached
+non-main linked worktree. The filesystem Adapter stores it atomically under
+Git's common dir; the in-memory Adapter exercises collision/expiry/release.
+`git_loop_guard.py` validates an existing lease without acquiring or stealing
+it. It is unrelated to the trading Decision Lease.
+
 **Elastic context envelope**:
 `target + quality reserve + review_at` planning guidance. It triggers expansion,
 split, or escalation; it never truncates user scope, acceptance, hard stops, or

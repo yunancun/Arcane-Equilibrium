@@ -4,6 +4,12 @@
 
 本文件只定義長期工作流。當前 blocker、候選、證據路徑、命令入口讀 `TODO.md` 和其引用；不要把易過期任務塞回本文件。
 
+本文件不是自動 continuation authority。普通任務一律
+`continuation_mode=finite`，完成使用者要求後停止。只有 exact Operator request 明示要跑
+本 loop 時才建立 `operator_loop` task；每輪排下一 turn 前必須通過 Task Execution
+Control。相同 semantic progress digest 立即 `BLOCKED_NO_DELTA`，不得靠新 timestamp、
+TODO pointer、全面重審或虛構 next_action 維持 loop。
+
 加速 candidate 進 Demo 驗證時，使用 `docs/agents/profit-first-fast-demo-promotion-loop.md`。該子循環允許部分達標 candidate 在機器檢查通過後進 bounded Demo probe，用真實 Demo order/fill/fee/slippage 補證據，再回到 learning 和 promotion chain；它不放寬本文件的 survival、loss-control、authorization、Rust authority、Decision Lease、auditability、reconstructability 邊界。
 
 ## 0. Load
@@ -51,7 +57,7 @@ order-capable action 前必須有 machine-checkable Demo envelope：
 | Learn | 實作 observation -> lesson -> hypothesis -> experiment -> verdict -> proposal pipeline | learning output 直接 grant order/live/risk authority |
 | Deploy | source fix, tests, runtime sync, health check, rollback | secrets in argv/artifacts, silent runtime mutation |
 
-每輪必須產生狀態轉移：`DONE`、`DONE_WITH_CONCERNS`、`BLOCKED_BY_LOSS_CONTROL`、`BLOCKED_BY_RUNTIME`、`NOOP_NO_DELTA`、`ROTATED`。
+每輪必須產生狀態轉移：`DONE`、`DONE_WITH_CONCERNS`、`BLOCKED_BY_LOSS_CONTROL`、`BLOCKED_BY_RUNTIME`、`BLOCKED_NO_DELTA`、`ROTATED`。只有 ACTIVE lane 可進入下一輪；WAITING/DEFERRED/CLOSED 不可被自動 selector 重開。
 
 ## 4. Learning I/O
 
@@ -147,7 +153,9 @@ Profit proof 必須同時具備：
 
 不得把 next action 寫成：全面重審、確認 demo 是否下單、確認 learning 是否在跑、繼續觀察。
 
-同一 non-actionable state 第二次出現後，下一步只能：
+同一 non-actionable semantic state 第二次出現時必須
+`BLOCKED_NO_DELTA + next_action=null + schedule_wakeup=false`。只有真實 delta 後的新
+ACTIVE admission 才可選擇：
 
 - implement/deploy missing plumbing
 - rotate candidate
@@ -179,7 +187,8 @@ ALR strict-default 變更若使 legacy/offline fixture 失敗，先判斷 fixtur
 source scope 不因測試相容性而無界擴張。擴 scope 後仍須本地 wider regression 全綠，
 才可形成下一個 PR head。
 
-長 loop 的 Git 狀態同樣是 gate：每輪必須由 clean feature-branch checkpoint 開始，
+明示的 long loop 之 Git 狀態同樣是 gate：每輪必須由 clean、帶 exclusive writer
+lease 的 linked feature-worktree checkpoint 開始，
 dirty scope 經 `git_loop_guard.py --phase checkpoint` 驗證後才可 stage；綠燈即由
 PM 做窄 commit，再以 exact new HEAD 的 `--phase start` clean PASS 進下一輪。不得把
 多輪改動留成一大包 dirty tree，也不得為了避免 dirty 而每輪 push 觸發 hosted CI。

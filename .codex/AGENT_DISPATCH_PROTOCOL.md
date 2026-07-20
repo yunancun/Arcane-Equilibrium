@@ -1,6 +1,6 @@
 # Codex Agent Dispatch Protocol
 
-Last updated: 2026-07-14
+Last updated: 2026-07-20
 Canonical role Interface: `.codex/agent_registry_v1.json`
 
 ## Purpose
@@ -22,6 +22,8 @@ Before local work or delegation, bind:
 - `claim_inputs` for every prior/evidence digest that can affect a verdict
 - current head + dirty scope + any optional read-only verification scope
 - expected output and side-effect class
+- exact `continuation_mode`; absent means `finite`, and `operator_loop` requires
+  an explicit Operator request rather than inference from state or filenames
 
 The compiler accepts only its declared fields/surface vocabulary. Unknown fields
 or surfaces fail closed so a typo cannot silently omit a hard gate. Use exact
@@ -46,6 +48,11 @@ and broker-private effects produce a mandatory unsupported-effect node; there is
 no development-agent Adapter that can turn them into PASS. Pure `task_shape=deploy`
 routes through OPS/effect governance without inventing E1/E2/E4 source work;
 source-plus-deploy keeps the source builder/review/regression chain.
+
+Low-risk, low-uncertainty, effect-free `task_shape=query` with only narrow
+documentation/governance surfaces routes `pm_triage -> pm_closure`. Query cannot
+carry runtime/E2E claims or `operator_loop`; authority, security, broker,
+private-effect, and other hard facts must use their normal task shape and gates.
 
 Feed those facts to:
 
@@ -96,6 +103,32 @@ Unknown uncertainty does the same; omitted uncertainty is invalid rather than lo
 
 Every omitted role records reason, residual risk, and owner. A shorter route is
 good only when durable closure quality is unchanged.
+
+## Finite execution and continuation
+
+Dispatch decides what work is required; it does not imply another turn.
+`finite` is the ordinary task contract and never authorizes `ScheduleWakeup`, a
+continue prompt, or replay of a TODO row. An explicitly requested
+`operator_loop` must pass this decision before each scheduled turn:
+
+```bash
+python3 helper_scripts/maintenance_scripts/agent_governance.py \
+  continuation @continuation_bundle.json
+```
+
+The bundle contains the previous/current canonical progress snapshots. The
+semantic fingerprint excludes round/time noise and unrelated repo drift. Only
+`CONTINUE_OPERATOR_LOOP` returns `schedule_wakeup=true`; identical progress
+returns `BLOCKED_NO_DELTA`, while all terminal or finite decisions stop. Queue
+selection consumes only ACTIVE items. WAITING/DEFERRED/CLOSED rows do not become
+callable because their waiting condition or wall clock changed; PM must bind a
+named delta and create a fresh ACTIVE admission.
+
+Every writer admission also carries one exclusive linked-worktree lease. The
+lease's random fencing token, task ID, owner, branch, and expiry must validate
+before `git_loop_guard.py` admits start/checkpoint/publish/post-push. The guard is
+read-only; collision, expiry, primary-worktree use, or foreign lease fails
+closed. Read-only verification and PM-only query do not mutate the lease store.
 
 ## Admission and publication economics
 
@@ -275,6 +308,8 @@ Bare same-model retry is forbidden. Response ladder:
 - capability/model mismatch -> select a stronger/different capability
 - task too broad -> split along Interface boundaries
 - hard/external blocker -> return BLOCKED with owner/action
+- identical semantic progress -> return `BLOCKED_NO_DELTA`, no next action, no
+  wakeup
 
 No unchanged retry, no fabricated success, and no PASS when coverage or evidence
 is missing.

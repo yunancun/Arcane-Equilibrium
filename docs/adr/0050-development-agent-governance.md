@@ -29,6 +29,13 @@ trading Agent，也不授予任何 order/Decision Lease authority。
 Context、Dispatch、Closure。機器正本為 `.codex/agent_registry_v1.json`，可執行工具為
 `helper_scripts/maintenance_scripts/agent_governance.py`。
 
+2026-07-20 在同一 Module 內加入 `Task Execution Control` Implementation，供 Dispatch
+與 Closure 共用；它不是第五個 public Interface 或常駐 daemon。此 slice 集中 finite/
+explicit-loop continuation、semantic no-delta fuse、queue selection 與 exclusive writer
+lease。Filesystem 與 in-memory store 是同一 Seam 的兩個真實 Adapter。若刪除它，規則會
+重新散落至 routing、Closure、saved workflow、Git guard 與 TODO selector，複雜度不會
+消失；此 deletion test 證明其 Depth、Leverage 與 Locality。
+
 ### Role model
 
 角色名稱改為四個 execution mode 上的 capability preset：Conductor、Investigator、
@@ -76,7 +83,7 @@ implicit `none` 跑完整輪後才由 Closure 發現 mutation。
 Compiler 另把 task/surface/risk、runtime/E2E claim、`side_effect_class`、objective/scope/
 acceptance/hard stops、source baseline、`dirty_scope`、可選 `verification_scope`、direct
 interfaces、previous failure 與 verdict-relevant
-`claim_inputs` 固化成 canonical
+`claim_inputs`，以及 exact `continuation_mode` 固化成 canonical
 `task_contract`。Digest 同時綁 Context artifact、每個 role fragment 與 closure；closure 在
 adjudication 時重驗 exact bytes、producer/freshness/baseline/budget authority，不能靠後來 prompt
 改 scope、criterion、claim input 或 effect class。Unknown/contradictory effect class fail closed；沒有
@@ -94,6 +101,18 @@ generation checks。因 `task_contract` 採 exact-field 驗證，本欄位是刻
 migration：Python routing/context validation、command capture、Closure capture binding/replay、
 workflow capture callers，以及三個由 `CONTEXT_ADMISSION_V1` fragment 生成的 saved-workflow
 consumer 必須同代更新；舊 generation 缺欄位不得被靜默接受。
+
+`continuation_mode` omission 唯一正規化結果是 `finite`，且 finite 在 turn boundary 永不
+排新 turn。只有 exact Operator request 明示 loop/monitor/babysit 才可設
+`operator_loop`；TODO row、filename、prior session、model text 或 next_action 都不能推斷。
+每次新 turn 前比較不含 round/timestamp/unrelated-repo noise 的 semantic progress digest；
+相同 digest 結案為 `BLOCKED_NO_DELTA`，不得 PASS、wakeup 或 executable next action。
+
+Queue 的 ACTIVE/WAITING/CLOSED lane 與 role work status 分離；只有 ACTIVE 可被 selector
+消費。WAITING/DEFERRED 要有 named delta 並重新 admission，CLOSED 永不 replay。每個
+writable task 另需 Git common-dir atomic store 中一個 attached non-main linked-worktree
+lease，帶 random fencing token/owner/task/branch/TTL；Git guard 僅唯讀驗證，不能 acquire、
+steal 或自動修復。不同 writer 必須使用不同 linked worktree。
 
 每次 saved-workflow call 都產 canonical `workflow_call_record_v1`，綁 task/context/node/role/
 schema/result/retry、exact native identity/class/permission、DAG requires/topological wave 與
@@ -129,6 +148,10 @@ STATUS/VERDICT/report 合併為 `closure_packet_v1`；work status、gate verdict
 required/admitted node IDs、requires、waves 與同一 dag digest；任一 mandatory
 fragment 缺失或 FAIL/UNVERIFIED/CONDITIONAL 均不得 PASS。PM closure 保留 dissent；memory
 只在 closure 後 promote 新 durable lesson。
+
+DONE/DONE_WITH_CONCERNS 沒有真實 follow-up 時允許 `next_action=null`；BLOCKED/
+NEEDS_CONTEXT 仍需 owner/action。`BLOCKED_NO_DELTA` 只存在於 packet-level task closure，
+必須 `next_action=null` 且永遠不能 PASS，避免 schema 迫使 controller 虛構工作。
 
 Route 與 adaptive admission 在 spawn 前綁 `role + native_agent + node_class + permission`；
 PA/E4 writer 與 read-only verifier 是不同 native TOML identity。多 writer repo mutation 以
@@ -177,6 +200,10 @@ debt、PA map/unverified projection 與含 worst-case bounded retry 的 envelope
    entitlement/TWS/live-denial judgment，已是第二個真實 reviewer capability surface；這不
    等於 contact/effect Adapter。
 7. **token hard cap**：拒絕；會 Goodhart 成少讀證據與反覆重工。
+8. **只改 persona/prompt**：拒絕；沒有 executable continuation、queue 或 writer
+   enforcement，下一個 controller 仍可重開同一狀態。
+9. **把所有 drift 都當 progress**：拒絕；artifact timestamps 與 unrelated whole-repo
+   change 會永久製造假 delta。
 
 ## Consequences
 
@@ -243,6 +270,8 @@ Costs/risks:
 - `tests/structure/test_agent_governance_profit_control.py`
 - `tests/structure/test_agent_governance_deploy_environment.py`
 - `tests/structure/test_agent_governance_security_static.py`
+- `tests/structure/test_agent_governance_task_control.py`
+- `tests/structure/test_git_loop_guard.py`
 - `agent_governance.py validate`
 - `agent_governance.py render --check`
 - Node syntax checks for saved workflows

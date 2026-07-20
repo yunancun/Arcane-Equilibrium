@@ -56,6 +56,24 @@ narrative (which TODO does not own, per Scope), grow into a dense unreadable
 wall, and duplicate the structured sections. A masthead that fits in a few
 lines lets the next agent orient in seconds.
 
+## Physical queue lanes
+
+Queue state is not a prose label and is not the same as a role fragment's work
+status. Keep three physically separate tables/sections:
+
+- `ACTIVE`: the only dispatchable lane. A selector may choose only rows here.
+- `WAITING` / `DEFERRED`: non-dispatchable holds with one named external,
+  Operator, evidence, date, or source delta. Satisfying a condition does not
+  auto-run the row; PM verifies the delta and explicitly re-admits it to ACTIVE.
+- `CLOSED`: DONE, no-repeat markers, and `BLOCKED_NO_DELTA`. A selector never
+  scans or replays this lane. Reopening requires a new semantic delta or an
+  explicit Operator request and creates a fresh ACTIVE admission/record.
+
+Do not put ACTIVE, passive waits, and completed history in one selection table.
+Legacy mixed tables may be migrated in bounded reviewed batches; until then,
+selectors must still filter strictly to exact ACTIVE status and must never use
+“first non-DONE” or “waiting condition elapsed” as executable authority.
+
 ## Required shape
 
 Every active item should expose enough information for the next PM or agent to
@@ -64,12 +82,13 @@ act without rereading a full report:
 | Field | Requirement |
 |---|---|
 | ID | Stable task id, never recycled for a different meaning |
-| Status | One of `ACTIVE`, `BLOCKED`, `WAITING`, `DEFERRED`, `DONE`, or an existing emoji-equivalent with the same meaning |
+| Queue lane | Exact `ACTIVE`, `WAITING`/`DEFERRED`, or `CLOSED`; only ACTIVE is dispatchable |
+| Work status | Latest result such as `DONE`, `DONE_WITH_CONCERNS`, `BLOCKED`, `NEEDS_CONTEXT`, or `BLOCKED_NO_DELTA`; it does not itself select a row |
 | Priority | P0/P1/P2/P3 or the section that implies it |
 | Owner path | Hybrid DAG 已觸發的 current owner / verifier / Adapter；不得預填固定全角色 chain |
 | Acceptance | Concrete exit condition, not "looks good" |
 | Latest evidence | Timestamped source, command, report, commit, or healthcheck |
-| Next action | The next executable step or explicit wait condition |
+| Next action | ACTIVE: next executable step. WAITING: named unblock condition. CLOSED/terminal: `null` or `—`; never invent work |
 
 Compact tables are preferred for queues. Short paragraphs are acceptable for
 cross-wave gates when a table would obscure dependency logic.
@@ -97,9 +116,15 @@ Every passive wait must have one of:
 
 Silent waits are not allowed.
 
+The passage of time by itself is not a progress delta. A wait returns to ACTIVE
+only after its named evidence/external state is observed and bound. Rechecking
+the same blocker/source/Context/external-state fingerprint closes the current
+admission as `BLOCKED_NO_DELTA`; it does not schedule another pass.
+
 ## DONE lifecycle
 
-DONE rows can remain in `TODO.md` only while they help immediate handoff. Move
+DONE rows belong in CLOSED and can remain in `TODO.md` only while they help
+immediate handoff. Move
 completed detail to reports/archive once it is no longer operationally useful.
 
 When archiving:
@@ -127,6 +152,7 @@ Any agent modifying `TODO.md` must:
 
 - read this file first
 - preserve active blockers before deleting completed detail
+- never dispatch WAITING/DEFERRED/CLOSED or synthesize next actions for terminal rows
 - avoid adding long narrative unless it is needed for immediate dispatch
 - link reports/archive instead of copying them
 - run a quick self-check: can the next PM identify the next action in under

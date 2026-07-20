@@ -1,5 +1,9 @@
 # IBKR Live-Capability Loop(W5→W11 自主推進協議)
 
+本協議只有在 exact Operator request 明示 `/loop`（或同義持續執行），且 route 綁定
+`continuation_mode=operator_loop` 時才 active。普通 IBKR 任務是 `finite`：完成指定
+scope 一次、回報、停止；不得因本檔存在或 queue 尚有 row 就排 wakeup。
+
 版本 v2(2026-07-16;v1=2026-07-15)。本檔是**穩定協議正本**:當前任務狀態不寫進本檔(讀 `TODO.md` W 行);工程設計細節不寫進本檔(讀 repo 根 `IBKR_TODO.md`)。任何 session(現任或接棒)照本協議即可續跑。**本檔非授權文件**:授權鏈=AMD-2026-07-11-01(development-only)+ ADR-0048(amended);活化(EA1-EA8)全 Operator-gated,loop 永不執行。
 
 **v2 變更(R8 校準,審計實證驅動)**:①S1 並行從「允許」升為「有程序」(file-surface manifest+指名合格對);②S6 固定記帳 checklist 8 項+前輪 SHA 回填(修 v1 記帳漂移根因:只刷本輪行,IBKR_TODO §0/§4.4 凍結);③CI 節流(draft-PR 閘 macOS/記帳併末次 push/禁 skip 最終 head);④§7 反空轉硬規則(三選一/連續兩輪零代碼 halt/findings 一次性定性);⑤工作樹衛生(worktree 清點/命名/WIP 早推/主 checkout 唯讀);⑥§6 接棒升級(死亡三分類 SOP/billing 事故判別)。v1 骨架(一輪一 PR/S0 同步門/E2 對抗門/帳本 append-only/XL 先切片)經 R0-R7 實證保留不動。
@@ -63,7 +67,14 @@ f. **CI 全紅判別**:若所有分支 dispatch 失敗且 run 呈 `runner=''/ste
 另:殘項欄禁空泛(「無」或具體 ticket/包名);記「本輪淨增/淨減 blocking 移交數」。
 **並行輪記帳細則**:兩切片並行時,**僅先合入的 PR 帶記帳 commit**(含兩輪的 R-N 行);後合入 PR 不碰 meta-doc(避免 PROGRESS/TODO 撞衝突),其行若有補充由 PM 在 merge 後搭下一輪 PR 便車(此為 §7 規則 1「漂移修復搭便車」的合法形態,same-push 規則對此豁免)。
 
-**S7 排下輪**:session 存活 → ScheduleWakeup(`/loop` 原 prompt 原樣;delay 按下輪型態:剛派 BG 波=長 fallback ≥1200s 駐留等收、純接續=120-600s、撞 operator 決策全阻=停 loop);session 將盡 → 確認 S6 已落 repo 即可安全死亡,接棒見 §6。
+**S7 排下輪**:只有 S0 已證明 exact Operator opt-in，且
+`agent_governance.py continuation` 對 previous/current semantic progress snapshot 回傳
+`CONTINUE_OPERATOR_LOOP + schedule_wakeup=true`，session 存活時才可
+ScheduleWakeup(`/loop` 原 prompt 原樣;delay 按下輪型態:剛派 BG 波=長 fallback ≥1200s
+駐留等收、純接續=120-600s)。相同 blocker/source/Context/external/work digest 回傳
+`BLOCKED_NO_DELTA`，必須停、`next_action=null`，不得以新 timestamp/TODO pointer 重開。
+撞 Operator 決策、WAITING 或 terminal status 都停；session 將盡時確認 S6 已落 repo 即可
+安全死亡，接棒見 §6。
 
 ## 4. 三端同步鐵律
 
@@ -73,7 +84,10 @@ Mac(worktree 寫碼)→ origin(PR merge 唯一入口)→ Linux(`pull --ff-only` 
 
 - 申報一律用 IBKR_TODO §3 狀態梯度詞彙;source-landed ≠ GUI-wired ≠ runtime-verified,混稱=申報缺陷,E2/QA 應退回。
 - 每包 DoD 以 IBKR_TODO §5 為準;W5/W8 的負測試矩陣(未知前綴按 live 拒、seal≠活化、envelope×port/verb 交叉拒)不可省。
-- Operator 決策點(IBKR_TODO §9 D1-D7、OPEN-GOV-1/2)撞到即:記帳 + 該支線標 WAITING(named operator action)+ 繞行其他可推進包;**全支線阻塞才停 loop**,停前 PushNotification 一句話。
+- Operator 決策點(IBKR_TODO §9 D1-D7、OPEN-GOV-1/2)撞到即:記帳 + 該支線標
+  WAITING(named operator action)。WAITING 不可由 selector 自動取回；只有已驗證的新 delta
+  經 PM 重新 admission 才能回 ACTIVE。若沒有其他 ACTIVE 支線立即停 loop，停前
+  PushNotification 一句話。
 - 成本:hosted CI 遵 2000min/月政策(macOS 最小化,draft 閘見 S4);agent 波規模與包規模對齊,不為快而省 reviewer。新守衛/script 接入 CI 必附**執行計數證明**(R1 教訓:字面 cargo filter 空轉)。
 
 ## 6. 接棒協議(session 死亡安全)
@@ -97,4 +111,5 @@ loop 狀態 100% 落 repo:TODO W 行(狀態)+ PROGRESS(履歷)+ 本檔(協議)+ 
   5. blocking 移交債連續兩輪淨增 → 下一輪強制先償還最老 blocking 項再開新面。
   6. 可推進面只剩不合格切片(湊不出規則 1 的三選一)→ halt 上報,不硬湊維生切片。
 - **異常停**:三端非 ff 分歧無法收斂/同包兩輪 REJECT 無解/全支線撞 operator 決策點/§2 邊界被觸碰/S0f billing 事故。停前必寫帳本(原因+現場+建議)。
-- loop 重啟隨時可由 operator 以 `/loop` + 本檔路徑再拉起。
+- loop 重啟只能由 operator 以 `/loop` + 本檔路徑建立新的 explicit
+  `operator_loop` admission；舊 next_action、wakeup 或 WAITING row 不可自行復活。

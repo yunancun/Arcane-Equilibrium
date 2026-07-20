@@ -1,8 +1,9 @@
 # Git Publication and Three-Side Sync Contract
 
-Last updated: 2026-07-14
+Last updated: 2026-07-20
 
-This is the canonical Git state machine for long-running Codex loops. The three
+This is the canonical Git state machine for finite Codex feature tasks and
+explicitly requested long-running loops. The three
 source sides are Mac, the true GitHub `origin/main`, and the Linux `trade-core`
 checkout. The running engine build is a separate fourth head and must never be
 silently conflated with source sync.
@@ -13,8 +14,9 @@ may explain history but cannot authorize a Git effect.
 
 ## Invariants
 
-- One loop owns one attached feature branch in one worktree. Business/source
-  work never runs directly on `main`.
+- One writable task owns one attached feature branch, one linked worktree, and
+  one exclusive writer lease. Business/source work never runs directly on
+  `main`; concurrent writers never share a checkout.
 - Every iteration begins from an exact clean checkpoint HEAD and ends either at
   another clean commit or at a bounded dirty recovery stop.
 - Only the PM-owned publication lane stages, commits, pushes, requests review,
@@ -31,6 +33,10 @@ may explain history but cannot authorize a Git effect.
 - Runtime rebuild/restart is not source sync. `HALF_DEPLOY_REBUILD_REQUIRED`
   means three-side source sync succeeded but deploy remains a separate governed
   effect.
+- Ordinary task continuation is `finite`. This Git contract controls authorized
+  checkpoints/publication/sync; it does not authorize a new agent turn. Only an
+  exact `operator_loop` task may schedule another turn after the separate
+  no-delta continuation gate passes.
 
 ## Read-only guard
 
@@ -54,6 +60,19 @@ Phases:
 The ceiling is a checkpoint trigger, not permission to widen scope. Raising it
 requires an explicit task/scope decision; a loop cannot self-raise it.
 
+All feature phases also require a previously acquired writer lease. From a
+clean attached non-main linked worktree, PM runs:
+
+```bash
+python3 helper_scripts/maintenance_scripts/agent_governance.py writer-lease \
+  --lease-action acquire --repo . \
+  --task-id "$WRITER_TASK_ID" --owner "$WRITER_OWNER"
+```
+
+Persist the returned `lease_id` as `WRITER_LEASE_ID`. Never infer it from a
+different task, copy it to another worktree, or ask the read-only guard to
+acquire/steal it. Renew/release requires the same task, owner, and fencing token.
+
 ## 1. Loop bootstrap and resume
 
 Expected identity comes from durable loop state, not from whatever checkout is
@@ -73,6 +92,9 @@ python3 helper_scripts/maintenance_scripts/git_loop_guard.py \
   --phase start \
   --expected-branch "$LOOP_BRANCH" \
   --expected-head "$CHECKPOINT_HEAD" \
+  --writer-task-id "$WRITER_TASK_ID" \
+  --writer-owner "$WRITER_OWNER" \
+  --writer-lease-id "$WRITER_LEASE_ID" \
   --human
 ```
 
@@ -89,6 +111,9 @@ python3 helper_scripts/maintenance_scripts/git_loop_guard.py \
   --phase checkpoint \
   --expected-branch "$LOOP_BRANCH" \
   --expected-head "$CHECKPOINT_HEAD" \
+  --writer-task-id "$WRITER_TASK_ID" \
+  --writer-owner "$WRITER_OWNER" \
+  --writer-lease-id "$WRITER_LEASE_ID" \
   --allow-path path/to/owned-file \
   --allow-path path/to/owned-prefix/ \
   --human
@@ -115,10 +140,11 @@ iteration.
 1. From the feature worktree, fetch `origin/main` once.
 2. Integrate current `origin/main` without rewriting already published history.
 3. Rerun affected local regression and update `CHECKPOINT_HEAD`.
-4. Run `git_loop_guard.py --phase publish` with the exact branch/head.
+4. Run `git_loop_guard.py --phase publish` with the exact branch/head and the
+   same task/owner/lease arguments.
 5. Push the feature branch once, without force.
-6. Run `--phase post-push`; its `true_remote_branch_head` must equal the exact
-   checkpoint head.
+6. Run `--phase post-push` with that same lease; its
+   `true_remote_branch_head` must equal the exact checkpoint head.
 7. Request one current-head review and let path-classified CI run once.
 
 Any head change invalidates earlier review/CI. A second identical hosted failure
@@ -213,11 +239,16 @@ Retirement is allowed only after all are true:
 - no active task/agent owns the branch/worktree;
 - the operator explicitly authorizes retirement.
 
+After verified merge and three-side source sync, release the writer lease even
+when branch/worktree retirement is not authorized. Release removes only the
+local execution-control claim; it does not delete or rewrite Git state.
+
 ## Stop states
 
 | State | Meaning |
 |---|---|
 | `STOP_GIT_START_STATE` | Wrong/detached/main branch, head drift, or dirty boot. |
+| `STOP_WRITER_LEASE` | Missing, expired, foreign, colliding, or primary-worktree writer lease. |
 | `STOP_CHECKPOINT_SCOPE` | Dirty path outside allowlist or checkpoint budget exceeded. |
 | `STOP_PUBLISH_PREFLIGHT` | Branch/upstream/origin topology is unsafe or stale. |
 | `STOP_PUSH_VERIFY` | Remote branch SHA does not equal the published checkpoint. |

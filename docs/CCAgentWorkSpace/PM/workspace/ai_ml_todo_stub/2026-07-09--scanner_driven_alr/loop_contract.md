@@ -3,6 +3,11 @@
 This loop is for Codex source development. It is not an application runtime loop.
 Boundary label: `SOURCE_ONLY_OFFLINE_P0_P1`.
 
+It is active only when the exact Operator request explicitly selects this loop
+and routing binds `continuation_mode=operator_loop`. Reading this file, finding
+an unfinished row, or restoring a prior state packet does not authorize
+continuation. All other ALR tasks are finite one-shot tasks.
+
 ## Boot
 
 1. Start from `/Users/ncyu/Projects/TradeBot`.
@@ -22,7 +27,9 @@ Boundary label: `SOURCE_ONLY_OFFLINE_P0_P1`.
    attached non-`main` feature branch and full HEAD once, then persist those two
    fields in a bootstrap state packet before dispatching work.
 8. Run `helper_scripts/maintenance_scripts/git_loop_guard.py --phase start`
-   with those expected values. A wrong branch/head or dirty worktree stops as
+   with those expected values plus the exact task/owner/writer-lease fencing
+   token. Acquire the lease only from the clean attached non-main linked
+   worktree. A missing/foreign/expired lease, wrong branch/head, or dirty worktree stops as
    `STOP_GIT_START_STATE`; preserve it exactly and do not stash/reset/clean it.
 
 ## Iteration
@@ -35,8 +42,9 @@ Each iteration:
 2. Re-read `queue.md`, `boundaries.md`, and `retention_guardian_contract.md`.
 3. Select exactly one row:
    - first `ACTIVE` row;
-   - otherwise first row whose waiting condition is satisfied;
-   - otherwise stop with the blocking state.
+   - never select WAITING/DEFERRED/CLOSED directly;
+   - when a named waiting delta is newly verified, PM first creates a fresh
+     ACTIVE admission, otherwise stop with the blocking state.
 4. Dispatch the required chain for the selected row.
 5. If required dispatch tooling or role-chain execution is unavailable, stop as
    `STOP_DISPATCH_BLOCKED`; do not silently substitute single-agent PM/PA work.
@@ -60,9 +68,12 @@ Each iteration:
 11. Commit each green checkpoint with subject and body, update the full
     `CHECKPOINT_HEAD`, then rerun `git_loop_guard.py --phase start`; the next row
     cannot begin until the worktree is clean at that exact commit.
-12. Re-read state and continue while result is `ADVANCED`,
-    `ADVANCED_WITH_CONCERNS`, or a recovered `ROTATED` with a source-only next
-    row.
+12. Re-read state, build a canonical progress snapshot, and call
+    `agent_governance.py continuation`. Continue only when the state is
+    `ADVANCED`, `ADVANCED_WITH_CONCERNS`, or a recovered `ROTATED` with a
+    source-only ACTIVE row **and** the decision is
+    `CONTINUE_OPERATOR_LOOP + schedule_wakeup=true`. Identical semantic progress
+    is `BLOCKED_NO_DELTA`, terminal for this admission, with `next_action=null`.
 
 Local checkpoint commits are intentionally not pushed per iteration. This keeps
 hosted CI off the edit loop while bounding crash recovery to at most the current
@@ -115,6 +126,12 @@ Every `alr_loop_state_packet_v1` must include:
 - `state`
 - `next_state`
 - `next_action`
+- `continuation_mode=operator_loop`
+- `progress_digest`
+- `previous_progress_digest`
+- `continuation_decision`
+- `schedule_wakeup`
+- `writer_lease_id`
 - `stop_reason`
 - `owned_files`
 - `verification_commands`
