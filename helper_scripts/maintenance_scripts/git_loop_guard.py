@@ -17,6 +17,12 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
+from agent_governance_task_control import (
+    FileWriterLeaseStore,
+    inspect_worktree,
+    validate_writer_lease,
+)
+
 
 SCHEMA_VERSION = "git_loop_guard_v1"
 PHASES = {
@@ -176,6 +182,9 @@ def evaluate(
     expected_branch: str | None = None,
     expected_head: str | None = None,
     expected_origin_head: str | None = None,
+    writer_task_id: str | None = None,
+    writer_lease_id: str | None = None,
+    writer_owner: str | None = None,
     allow_paths: Iterable[str] = (),
     max_dirty_files: int = DEFAULT_MAX_DIRTY_FILES,
     max_diff_lines: int = DEFAULT_MAX_DIFF_LINES,
@@ -216,6 +225,35 @@ def evaluate(
             expected_upstream,
         }:
             reasons.append("UPSTREAM_MISMATCH")
+        if not writer_task_id or not writer_lease_id:
+            reasons.append("WRITER_LEASE_REQUIRED")
+        else:
+            try:
+                identity = inspect_worktree(repo)
+                if not identity.linked:
+                    reasons.append("LINKED_WORKTREE_REQUIRED")
+                lease_result = validate_writer_lease(
+                    FileWriterLeaseStore(identity.common_dir),
+                    identity,
+                    task_id=writer_task_id,
+                    lease_id=writer_lease_id,
+                    owner=writer_owner,
+                )
+                if lease_result["status"] != "PASS":
+                    reasons.extend(lease_result["reasons"])
+                lease = lease_result.get("lease")
+                state["writer_lease"] = (
+                    {
+                        "status": lease_result["status"],
+                        "task_id": lease.get("task_id"),
+                        "owner": lease.get("owner"),
+                        "expires_at": lease.get("expires_at"),
+                    }
+                    if lease
+                    else {"status": lease_result["status"]}
+                )
+            except (OSError, ValueError):
+                reasons.append("WRITER_LEASE_STATE_INVALID")
 
     if phase in {"start", "publish", "post-push", "main-sync", "main-post-sync"} and dirty:
         reasons.append("DIRTY_WORKTREE")
@@ -302,6 +340,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--expected-branch")
     parser.add_argument("--expected-head")
     parser.add_argument("--expected-origin-head")
+    parser.add_argument("--writer-task-id")
+    parser.add_argument("--writer-lease-id")
+    parser.add_argument("--writer-owner")
     parser.add_argument("--allow-path", action="append", default=[])
     parser.add_argument("--max-dirty-files", type=int, default=DEFAULT_MAX_DIRTY_FILES)
     parser.add_argument("--max-diff-lines", type=int, default=DEFAULT_MAX_DIFF_LINES)
@@ -336,6 +377,9 @@ def main(argv: list[str] | None = None) -> int:
         expected_branch=args.expected_branch,
         expected_head=args.expected_head,
         expected_origin_head=args.expected_origin_head,
+        writer_task_id=args.writer_task_id,
+        writer_lease_id=args.writer_lease_id,
+        writer_owner=args.writer_owner,
         allow_paths=args.allow_path,
         max_dirty_files=args.max_dirty_files,
         max_diff_lines=args.max_diff_lines,

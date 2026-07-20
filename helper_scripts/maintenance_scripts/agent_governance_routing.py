@@ -14,6 +14,11 @@ from agent_governance_execution_dag import (
     non_call_controller_node_ids,
 )
 from agent_governance_registry import native_agent_binding
+from agent_governance_task_control import (
+    CONTINUATION_MODES,
+    DEFAULT_CONTINUATION_MODE,
+    compile_task_execution_policy,
+)
 from agent_governance_vocabulary import KNOWN_SURFACES, UNCERTAINTY_LEVELS
 
 
@@ -23,7 +28,7 @@ TASK_FACT_FIELDS = {
     "direct_interfaces", "previous_failure", "evidence_state", "expected_output",
     "side_effect_class", "uncertainty", "dirty_scope", "operator_risk_acceptance",
     "verification_scope", "focus", "claim_inputs",
-    "task_prompt", "task_prompt_digest",
+    "task_prompt", "task_prompt_digest", "continuation_mode",
 }
 SOURCE_REVIEW_SURFACES = {"python", "rust", "gui", "ml_data", "implementation", "runtime"}
 OPERATION_SURFACES = {"deploy", "service", "cron", "pg", "operations", "runtime_effect", "incident_rca"}
@@ -107,11 +112,14 @@ ROUTED_WORK_NODES = {
     "implementation", "implementation_backend", "implementation_frontend",
     "test_implementation", "docs_update", "docs_projection",
 }
+NARROW_QUERY_SURFACES = {
+    "docs", "governance", "index", "registry", "routing", "closure", "comments",
+}
 TASK_CONTRACT_FIELDS = (
     "task_shape", "surfaces", "risk", "runtime_claim", "end_to_end_claim",
     "uncertainty", "side_effect_class", "objective", "scope", "acceptance_criteria", "hard_stops",
     "baseline", "dirty_scope", "verification_scope", "direct_interfaces", "previous_failure", "focus",
-    "claim_inputs", "task_prompt", "task_prompt_digest",
+    "claim_inputs", "task_prompt", "task_prompt_digest", "continuation_mode",
 )
 def _sha256_bytes(value: bytes) -> str:
     return "sha256:" + hashlib.sha256(value).hexdigest()
@@ -289,7 +297,7 @@ def _normalize_task_facts(task_facts: dict[str, Any]) -> dict[str, Any]:
     valid_shapes = {
         "implementation", "feature", "change", "bug", "fix", "refactor", "migration",
         "deploy", "review", "audit", "analysis", "docs", "documentation", "test",
-        "planning", "design", "research",
+        "planning", "design", "research", "query",
     }
     if shape not in valid_shapes:
         raise ValueError(f"task facts task_shape is invalid: {shape or '<missing>'}")
@@ -308,6 +316,14 @@ def _normalize_task_facts(task_facts: dict[str, Any]) -> dict[str, Any]:
         runtime_claim=task_facts.get("runtime_claim", False),
         end_to_end_claim=task_facts.get("end_to_end_claim", False),
     )
+    continuation_mode = task_facts.get(
+        "continuation_mode", DEFAULT_CONTINUATION_MODE
+    )
+    if continuation_mode not in CONTINUATION_MODES:
+        raise ValueError(
+            f"task facts continuation_mode is invalid: {continuation_mode}"
+        )
+    normalized["continuation_mode"] = continuation_mode
     supplied = "side_effect_class" in task_facts
     raw_effect = task_facts.get("side_effect_class")
     if raw_effect is None and not supplied:
@@ -383,6 +399,22 @@ def _normalize_task_facts(task_facts: dict[str, Any]) -> dict[str, Any]:
     if effect == "docs_write" and shape not in {"docs", "documentation"}:
         raise ValueError("side_effect_class=docs_write requires a documentation task shape")
     normalized["side_effect_class"] = effect
+    if shape == "query":
+        query_errors = []
+        if effect != "none":
+            query_errors.append("side_effect_class=none")
+        if risk != "low" or uncertainty != "low":
+            query_errors.append("low risk and low uncertainty")
+        if normalized["runtime_claim"] or normalized["end_to_end_claim"]:
+            query_errors.append("no runtime or end-to-end claim")
+        if normalized_surfaces - NARROW_QUERY_SURFACES:
+            query_errors.append("only narrow documentation/governance surfaces")
+        if continuation_mode != DEFAULT_CONTINUATION_MODE:
+            query_errors.append("continuation_mode=finite")
+        if query_errors:
+            raise ValueError(
+                "task_shape query requires " + ", ".join(query_errors)
+            )
     for field in ("acceptance_criteria", "hard_stops", "direct_interfaces"):
         if field in normalized and (
             not isinstance(normalized[field], list)
@@ -520,6 +552,7 @@ def route_task(task_facts: dict[str, Any]) -> dict[str, Any]:
     operations_needed = deploy or runtime_claim or bool(surfaces & OPERATION_SURFACES)
     unknown_risk = risk not in {"low", "medium", "high", "critical"}
     unknown_uncertainty = uncertainty == "unknown"
+    narrow_query = shape == "query"
     nodes: list[dict[str, Any]] = []
 
     def add(
@@ -542,7 +575,7 @@ def route_task(task_facts: dict[str, Any]) -> dict[str, Any]:
 
     add("pm_triage", role="PM", reason="bind task facts, authority classes, acceptance, and scope")
     predecessor = "pm_triage"
-    design_needed = (
+    design_needed = not narrow_query and (
         shape in {"design", "planning", "analysis", "research", "audit"}
         or deploy or risk in {"high", "critical"}
         or uncertainty in {"high", "unknown"}
@@ -552,7 +585,9 @@ def route_task(task_facts: dict[str, Any]) -> dict[str, Any]:
         add("pa_design", role="PA", requires=[predecessor], reason="cross-interface or high-risk design")
         predecessor = "pa_design"
     docs_change, test_change = shape in {"docs", "documentation"}, shape == "test"
-    if docs_change:
+    if narrow_query:
+        pass
+    elif docs_change:
         add("docs_update", role="TW", requires=[predecessor], reason="task-owned documentation projection")
         add("docs_review", role="R4", requires=["docs_update"], reason="documentation/index integrity hard edge")
         predecessor = "docs_review"
@@ -601,10 +636,12 @@ def route_task(task_facts: dict[str, Any]) -> dict[str, Any]:
         ("ux_review", "A3", surfaces & {"gui", "ux", "accessibility", "visual"}, "operator-visible GUI/UX claim"),
     ]
     for node_id, role, triggered, reason in gate_specs:
+        if narrow_query:
+            continue
         if triggered:
             add(node_id, role=role, requires=[predecessor], reason=reason)
             gates.append(node_id)
-    if surfaces & DOC_SURFACES and not docs_change:
+    if not narrow_query and surfaces & DOC_SURFACES and not docs_change:
         docs_predecessor = predecessor
         if implementation:
             add("docs_projection", role="TW", requires=[predecessor], reason="mixed source/docs task keeps documentation ownership explicit")
@@ -677,6 +714,9 @@ def route_task(task_facts: dict[str, Any]) -> dict[str, Any]:
     result = {
         "schema_version": "hybrid_execution_dag_v1",
         "task_facts": facts,
+        "task_execution_control": compile_task_execution_policy(
+            facts["continuation_mode"]
+        ),
         "risk_state": "UNKNOWN" if unknown_risk else risk.upper(),
         "budget_envelope": (
             "profit_diagnosis"

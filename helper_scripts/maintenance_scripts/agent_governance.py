@@ -110,10 +110,19 @@ from agent_governance_workflow_receipts import (  # noqa: E402
     validate_workflow_call_record,
     validate_workflow_wave_record,
 )
+from agent_governance_task_control import (  # noqa: E402
+    adjudicate_continuation,
+    filesystem_writer_lease_action,
+    is_dispatchable,
+    next_action_may_be_null,
+    progress_snapshot,
+    queue_lane,
+)
 
 
 __all__ = [
     "assess_test_evidence_reuse",
+    "adjudicate_continuation",
     "authority_claim_digest",
     "authorize_command",
     "authorize_native_command",
@@ -142,11 +151,16 @@ __all__ = [
     "context_plan_digest",
     "delegated_execution_projection",
     "execution_dag_digest",
+    "filesystem_writer_lease_action",
+    "is_dispatchable",
     "materialize_context_artifact",
     "native_agent_binding",
     "native_agent_contract",
+    "next_action_may_be_null",
     "load_registry",
     "project_closure",
+    "progress_snapshot",
+    "queue_lane",
     "render_all",
     "render_views",
     "resolve_authority_claims",
@@ -188,6 +202,23 @@ def _build_parser() -> argparse.ArgumentParser:
     render.add_argument("--check", action="store_true", help="report drift without writing")
     route = subparsers.add_parser("route", help="compile JSON task facts into a hybrid DAG")
     route.add_argument("task_facts", help="JSON object or @path-to-JSON")
+    continuation = subparsers.add_parser(
+        "continuation", help="adjudicate one finite or explicit operator-loop boundary"
+    )
+    continuation.add_argument(
+        "bundle", help="JSON {continuation_mode,current,previous?} or @path"
+    )
+    writer_lease = subparsers.add_parser(
+        "writer-lease", help="acquire, inspect, renew, or release a linked-worktree writer lease"
+    )
+    writer_lease.add_argument(
+        "--lease-action", choices=("acquire", "status", "renew", "release"), required=True
+    )
+    writer_lease.add_argument("--repo", type=Path, default=Path("."))
+    writer_lease.add_argument("--task-id", required=True)
+    writer_lease.add_argument("--owner", required=True)
+    writer_lease.add_argument("--lease-id")
+    writer_lease.add_argument("--ttl-seconds", type=int, default=7200)
     context = subparsers.add_parser("context", help="compile a lossless adaptive context plan")
     context.add_argument("--role", required=True)
     context.add_argument("task_facts", help="JSON object or @path-to-JSON")
@@ -241,6 +272,34 @@ def main(argv: list[str] | None = None) -> int:
     if args.action == "route":
         print(json.dumps(route_task(_json_arg(args.task_facts)), ensure_ascii=False, indent=2))
         return 0
+    if args.action == "continuation":
+        bundle = _json_arg(args.bundle)
+        try:
+            packet = adjudicate_continuation(
+                continuation_mode=bundle["continuation_mode"],
+                current=bundle["current"],
+                previous=bundle.get("previous"),
+            )
+        except (KeyError, TypeError, ValueError) as error:
+            print(json.dumps({"status": "FAIL", "error": str(error)}, ensure_ascii=False))
+            return 2
+        print(json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0
+    if args.action == "writer-lease":
+        try:
+            packet = filesystem_writer_lease_action(
+                action=args.lease_action,
+                repo=args.repo,
+                task_id=args.task_id,
+                owner=args.owner,
+                lease_id=args.lease_id,
+                ttl_seconds=args.ttl_seconds,
+            )
+        except (OSError, TypeError, ValueError) as error:
+            print(json.dumps({"status": "FAIL", "error": str(error)}, ensure_ascii=False))
+            return 2
+        print(json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0 if packet["status"] == "PASS" else 3
     if args.action == "context":
         print(json.dumps(compile_context(args.role, _json_arg(args.task_facts), registry), ensure_ascii=False, indent=2))
         return 0

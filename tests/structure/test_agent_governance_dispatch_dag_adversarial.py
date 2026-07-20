@@ -27,6 +27,44 @@ from agent_governance_trust import _wave_errors  # noqa: E402
 from agent_governance_workflow_receipts import canonical_digest  # noqa: E402
 
 
+def test_narrow_query_stays_pm_only_and_finite() -> None:
+    route = route_task({
+        "task_shape": "query",
+        "surfaces": ["governance"],
+        "risk": "low",
+        "uncertainty": "low",
+        "side_effect_class": "none",
+        "task_prompt": "explain the current finite task policy",
+    })
+    assert route["roles"] == ["PM", "PM"]
+    assert [node["id"] for node in route["nodes"]] == ["pm_triage", "pm_closure"]
+    assert route["task_facts"]["continuation_mode"] == "finite"
+    assert route["task_execution_control"]["automatic_wakeup_admitted"] is False
+
+
+def test_query_cannot_bypass_hard_facts_or_opt_into_a_loop() -> None:
+    base = {
+        "task_shape": "query",
+        "surfaces": [],
+        "risk": "low",
+        "uncertainty": "low",
+        "side_effect_class": "none",
+        "task_prompt": "answer a narrow read-only question",
+    }
+    for override in (
+        {"surfaces": ["authority"]},
+        {"runtime_claim": True},
+        {"risk": "high"},
+        {"continuation_mode": "operator_loop"},
+    ):
+        try:
+            route_task({**base, **override})
+        except ValueError as error:
+            assert "task_shape query requires" in str(error)
+        else:
+            raise AssertionError(f"unsafe query facts were admitted: {override}")
+
+
 def _implementation_fixture() -> tuple[dict, dict, dict]:
     facts = {
         "task_shape": "implementation",

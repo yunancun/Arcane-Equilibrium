@@ -73,6 +73,7 @@ CONTRACT_FIELDS = {
     "claim_inputs",
     "task_prompt",
     "task_prompt_digest",
+    "continuation_mode",
 }
 MANDATORY_FIELDS = {
     "objective",
@@ -209,7 +210,7 @@ def _expected_facts_errors(
             errors.append(f"task contract does not match expected task facts field {field}")
     optional_projection = {
         "direct_interfaces", "dirty_scope", "verification_scope", "previous_failure", "focus",
-        "claim_inputs", "runtime_claim", "end_to_end_claim"
+        "claim_inputs", "runtime_claim", "end_to_end_claim", "continuation_mode",
     }
     for field in optional_projection & set(expected):
         if contract.get(field) != expected.get(field):
@@ -416,6 +417,8 @@ def validate_context_artifact(
         str(contract.get("task_prompt", "")).encode("utf-8")
     ):
         errors.append("task prompt digest does not match exact prompt bytes")
+    if contract.get("continuation_mode") not in {"finite", "operator_loop"}:
+        errors.append("task continuation_mode is invalid")
     baseline = contract.get("baseline")
     if (
         not isinstance(baseline, dict)

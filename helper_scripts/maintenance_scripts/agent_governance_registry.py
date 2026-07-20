@@ -7,6 +7,7 @@ from typing import Any, Iterable
 from agent_governance_context_specs import context_source_spec_errors, source_name
 from agent_governance_registry_budget import registry_budget_errors
 from agent_governance_registry_capabilities import registry_capability_errors
+from agent_governance_task_control import validate_task_execution_control
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REGISTRY_REL = Path(".codex/agent_registry_v1.json")
@@ -56,6 +57,7 @@ def validate_registry(registry: dict[str, Any], root: Path = REPO_ROOT) -> list[
         "closure_quality_followup_schema_path",
         "closure_quality_attestation_schema_path",
         "permission_enforcement",
+        "task_execution_control",
         "authority_classes",
         "external_access_classes",
         "permission_profiles",
@@ -103,6 +105,7 @@ def validate_registry(registry: dict[str, Any], root: Path = REPO_ROOT) -> list[
         "platform_tools_may_be_broader": True,
     }:
         errors.append("permission_enforcement must state the repository-preflight, non-sandbox boundary")
+    errors.extend(validate_task_execution_control(registry.get("task_execution_control")))
     expected_external_access = {
         "public_web_read": {"class": "read_only_evidence_acquisition",
             "allowed_sources": "opened_public_urls_only", "requirements": ["opened_content", "citation", "capture_provenance"],
