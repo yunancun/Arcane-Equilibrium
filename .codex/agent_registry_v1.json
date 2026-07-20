@@ -170,14 +170,13 @@
   },
   "context_packs": {
     "core": ["AGENTS.md", "CLAUDE.md#Product Boundary", "CLAUDE.md#Root Principles", "CLAUDE.md#Hard Boundaries"],
-    "active_state": [{"source": "TODO.md", "kind": "repository_source", "required_when": {"surfaces_any": ["operations", "runtime", "deploy", "service", "cron", "pg", "full_audit", "profit_diagnosis", "incident_rca"], "claims_any": ["runtime_claim", "end_to_end_claim"], "uncertainty_any": ["high", "unknown"]}}],
+    "active_state": [{"source": "TODO.md#AI/ML 一分鐘派發看板", "kind": "repository_source", "required_when": {"surfaces_any": ["operations", "runtime", "deploy", "service", "cron", "pg", "full_audit", "profit_diagnosis", "incident_rca"], "claims_any": ["runtime_claim", "end_to_end_claim"], "uncertainty_any": ["high", "unknown"]}}],
     "architecture": [
       {"source": "CONTEXT.md", "kind": "repository_inventory", "paths": ["CONTEXT.md"], "min_matches": 1},
       {"source": "relevant docs/adr/*", "kind": "repository_inventory", "paths": ["docs/adr/*.md"], "min_matches": 1}
     ],
     "source_change": ["current diff", "direct interfaces", "direct callers", "focused acceptance tests"],
     "runtime": [
-      {"source": "TODO.md", "kind": "repository_source", "required_when": {"surfaces_any": ["operations", "runtime", "deploy", "service", "cron", "pg", "full_audit", "profit_diagnosis", "incident_rca"], "claims_any": ["runtime_claim", "end_to_end_claim"], "uncertainty_any": ["high", "unknown"]}},
       "docs/agents/sub-agent-hygiene-sop.md",
       {"source": "runtime observation", "kind": "evidence_artifact", "capture_kind": "runtime_observation", "required_when": {"surfaces_any": ["operations", "runtime", "deploy", "service", "cron", "pg"], "claims_any": ["runtime_claim", "end_to_end_claim"]}},
       {"source": "business outcome observation", "kind": "evidence_artifact", "capture_kind": "runtime_observation", "required_when": {"claims_any": ["end_to_end_claim"]}}
