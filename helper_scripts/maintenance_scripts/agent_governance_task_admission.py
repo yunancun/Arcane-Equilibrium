@@ -13,6 +13,7 @@ import os
 import re
 import secrets
 import tempfile
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Callable
 
@@ -23,6 +24,11 @@ from agent_governance_task_control import (
     validate_progress_snapshot,
 )
 from agent_governance_writer_lease import inspect_worktree
+from agent_governance_routing import (
+    TASK_CONTRACT_FIELDS,
+    _normalize_task_facts,
+    task_contract_projection,
+)
 
 
 TASK_ADMISSION_SCHEMA_VERSION = "task_execution_admissions_v1"
@@ -40,6 +46,7 @@ TASK_ADMISSION_RECORD_FIELDS = {
 TASK_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}")
 OWNER_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:@/-]{0,127}")
 ADMISSION_ID_RE = re.compile(r"[0-9a-f]{32}")
+OperatorRequestVerifier = Callable[[dict[str, Any]], bool]
 
 
 class FileTaskAdmissionStore:
@@ -179,12 +186,29 @@ def _identity_reasons(
     return reasons
 
 
+def _normalized_task_contract(value: Any) -> dict[str, Any]:
+    """Rebuild the exact routing projection before admission persists it."""
+
+    if not isinstance(value, dict) or set(value) != set(TASK_CONTRACT_FIELDS):
+        raise ValueError("task admission requires an exact normalized task contract")
+    normalized = _normalize_task_facts({
+        field: field_value
+        for field, field_value in value.items()
+        if field_value is not None
+    })
+    projected = task_contract_projection(normalized)
+    if projected != value:
+        raise ValueError("task admission contract is not the canonical routing projection")
+    return projected
+
+
 def acquire_task_admission(
     *,
     repo: Path,
     task_id: str,
     owner: str,
     task_contract: dict[str, Any],
+    operator_request_verifier: OperatorRequestVerifier | None = None,
 ) -> dict[str, Any]:
     """Persist the first task contract for one worktree and return its token once."""
 
@@ -195,8 +219,33 @@ def acquire_task_admission(
             reasons=["TASK_ID_AND_OWNER_REQUIRED"],
         )
     identity = inspect_worktree(repo)
+    task_contract = _normalized_task_contract(task_contract)
     control = compile_task_execution_policy(task_contract)
     contract_digest = control["task_contract_digest"]
+    if control["continuation_mode"] == "operator_loop":
+        verification_request = {
+            "schema_version": "operator_loop_admission_request_v1",
+            "task_id": task_id,
+            "owner": owner,
+            "worktree": identity.worktree,
+            "task_contract": deepcopy(task_contract),
+            "task_contract_digest": contract_digest,
+            "task_prompt_digest": control["task_prompt_digest"],
+            "operator_loop_request_digest": control["operator_loop_request_digest"],
+        }
+        try:
+            verified = (
+                operator_request_verifier is not None
+                and operator_request_verifier(verification_request) is True
+            )
+        except Exception:
+            verified = False
+        if not verified:
+            return _result(
+                "acquire",
+                status="FAIL",
+                reasons=["OPERATOR_REQUEST_ATTESTATION_REQUIRED"],
+            )
     baseline = progress_snapshot(
         round_number=0,
         work_status="ACTIVE",

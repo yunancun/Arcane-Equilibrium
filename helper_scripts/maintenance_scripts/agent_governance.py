@@ -118,6 +118,7 @@ from agent_governance_task_control import (  # noqa: E402
     queue_lane,
 )
 from agent_governance_task_admission import (  # noqa: E402
+    OperatorRequestVerifier,
     acquire_task_admission,
     continue_admitted_task,
     release_task_admission,
@@ -299,7 +300,11 @@ def _exact_bundle(
     return bundle
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(
+    argv: list[str] | None = None,
+    *,
+    operator_request_verifier: OperatorRequestVerifier | None = None,
+) -> int:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     args = _build_parser().parse_args(raw_argv)
     registry = load_registry()
@@ -348,6 +353,7 @@ def main(argv: list[str] | None = None) -> int:
                     task_id=args.task_id,
                     owner=args.owner,
                     task_contract=_json_arg(args.task_contract),
+                    operator_request_verifier=operator_request_verifier,
                 )
             else:
                 if args.task_contract is not None or not args.admission_id:

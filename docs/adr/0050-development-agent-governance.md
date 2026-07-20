@@ -107,6 +107,9 @@ consumer 必須同代更新；舊 generation 缺欄位不得被靜默接受。
 `operator_loop`；marker 綁 exact prompt 與 admitted task-contract digest，TODO row、filename、prior session、model
 text 或 next_action 都不能推斷。原 task contract 與 preceding snapshot 由 Git common-dir
 task-admission store 持久化並以 private fencing token 綁定；continuation caller 不能重填。
+serialized prompt/digest 本身不是 Operator provenance；generic CLI 不得核發
+`operator_loop` admission，只有 embedding host 的 out-of-band trusted Operator-request
+verifier 對 exact normalized contract 回傳真實驗證後才可核發。
 每次 boundary 重新讀 `dirty_scope` owned bytes，generic progress digest 只包含其實際內容；
 lifecycle/blocker status、whole-repo HEAD、round/timestamp、caller receipt 與 unrelated-repo
 noise 都不算 progress。External-only delta 必須由獨立 validated domain Adapter 或 reviewed

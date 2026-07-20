@@ -31,6 +31,11 @@ from agent_governance_task_control import (  # noqa: E402
     validate_writer_lease,
 )
 from agent_governance import main as governance_main  # noqa: E402
+from agent_governance_context import capture_repository_baseline  # noqa: E402
+from agent_governance_routing import (  # noqa: E402
+    route_task,
+    task_contract_projection,
+)
 
 
 NOW = datetime(2026, 7, 20, 12, 0, tzinfo=timezone.utc)
@@ -54,6 +59,28 @@ def _contract(mode: str, prompt: str, *, dirty_scope: list[str] | None = None) -
             "tests/structure/test_agent_governance_task_control.py"
         ],
     }
+
+
+def _admission_contract(repo: Path, mode: str, prompt: str) -> dict:
+    routed = route_task({
+        "task_shape": "implementation",
+        "surfaces": ["python"],
+        "risk": "low",
+        "uncertainty": "low",
+        "side_effect_class": "repo_write",
+        "objective": prompt,
+        "scope": ["owned.txt"],
+        "dirty_scope": ["owned.txt"],
+        "verification_scope": ["owned.txt"],
+        "acceptance_criteria": ["owned bytes changed"],
+        "hard_stops": ["no runtime effect"],
+        "baseline": capture_repository_baseline(repo),
+        "direct_interfaces": ["owned.txt"],
+        "previous_failure": "none",
+        "task_prompt": prompt,
+        "continuation_mode": mode,
+    })
+    return task_contract_projection(routed["task_facts"])
 
 
 FINITE_CONTRACT = _contract("finite", "answer this task once and stop")
@@ -312,8 +339,19 @@ def test_governance_cli_uses_persisted_admission_and_previous_snapshot(
     owned.write_text("one\n", encoding="utf-8")
     subprocess.run(["git", "-C", str(repo), "add", "owned.txt"], check=True)
     subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "base"], check=True)
-    finite = _contract("finite", "answer once", dirty_scope=["owned.txt"])
-    loop = _contract("operator_loop", "/loop\ncontinue", dirty_scope=["owned.txt"])
+    finite = _admission_contract(repo, "finite", "answer once")
+    loop = _admission_contract(repo, "operator_loop", "/loop\ncontinue")
+
+    assert governance_main([
+        "task-admission", "--admission-action", "acquire",
+        "--repo", str(repo), "--task-id", "forged", "--owner", "agent",
+        "--task-contract", json.dumps(
+            _contract("operator_loop", "/loop\ncontinue", dirty_scope=["owned.txt"])
+        ),
+    ]) == 2
+    assert "exact normalized task contract" in json.loads(
+        capsys.readouterr().out
+    )["error"]
 
     assert governance_main([
         "task-admission", "--admission-action", "acquire",
@@ -328,9 +366,9 @@ def test_governance_cli_uses_persisted_admission_and_previous_snapshot(
         "--repo", str(repo), "--task-id", "task-b", "--owner", "agent",
         "--task-contract", json.dumps(loop),
     ]) == 2
-    collision = json.loads(capsys.readouterr().out)
-    assert collision["reasons"] == ["WORKTREE_TASK_ADMISSION_HELD"]
-    assert collision["admission_id"] is None
+    unattested = json.loads(capsys.readouterr().out)
+    assert unattested["reasons"] == ["OPERATOR_REQUEST_ATTESTATION_REQUIRED"]
+    assert unattested["admission_id"] is None
 
     forged_bundle = {
         "repo": str(repo),
@@ -362,12 +400,37 @@ def test_governance_cli_uses_persisted_admission_and_previous_snapshot(
     ]) == 0
     capsys.readouterr()
 
-    assert governance_main([
+    loop_args = [
         "task-admission", "--admission-action", "acquire",
         "--repo", str(repo), "--task-id", "task-loop", "--owner", "operator",
         "--task-contract", json.dumps(loop),
-    ]) == 0
+    ]
+    assert governance_main(loop_args) == 2
+    assert json.loads(capsys.readouterr().out)["reasons"] == [
+        "OPERATOR_REQUEST_ATTESTATION_REQUIRED"
+    ]
+    verification_requests = []
+
+    def trusted_operator_request(request: dict) -> bool:
+        verification_requests.append(request)
+        return request["task_contract"] == loop
+
+    assert governance_main(
+        loop_args, operator_request_verifier=trusted_operator_request
+    ) == 0
     loop_id = json.loads(capsys.readouterr().out)["admission_id"]
+    assert verification_requests == [{
+        "schema_version": "operator_loop_admission_request_v1",
+        "task_id": "task-loop",
+        "owner": "operator",
+        "worktree": str(repo.resolve()),
+        "task_contract": loop,
+        "task_contract_digest": compile_task_execution_policy(loop)[
+            "task_contract_digest"
+        ],
+        "task_prompt_digest": loop["task_prompt_digest"],
+        "operator_loop_request_digest": loop["operator_loop_request_digest"],
+    }]
     owned.write_text("two\n", encoding="utf-8")
     loop_bundle = {
         "repo": str(repo),

@@ -98,7 +98,10 @@ first control line equal to `/loop`. Natural-language similarity, a role, TODO r
 filename, prior session, `next_action`, or generated prompt cannot infer or
 inherit that authority. The compiler binds that marker to the exact task-prompt
 and admitted task-contract digest; callers cannot replace a compiled finite
-contract with a newly constructed loop control.
+contract with a newly constructed loop control. Serialized prompt/digest fields
+are not Operator provenance: generic CLI admission rejects `operator_loop` unless
+the embedding host supplies an out-of-band trusted Operator-request verifier over
+the exact normalized contract.
 
 A finite task may perform all necessary in-turn steps, but it cannot schedule a
 new turn, wakeup, or automatic continuation. Before any opt-in operator loop
