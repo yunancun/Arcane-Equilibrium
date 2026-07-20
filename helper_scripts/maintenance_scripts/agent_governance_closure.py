@@ -44,7 +44,9 @@ from agent_governance_full_audit import validate_full_audit_binding
 from agent_governance_observations import validate_observation_evidence
 from agent_governance_profit import validate_profit_diagnosis_binding
 from agent_governance_repository_changes import validate_repository_change_chain
-from agent_governance_review_control import verification_fragment_truth_errors
+from agent_governance_review_control import (
+    capture_review_generation, verification_fragment_truth_errors,
+)
 from agent_governance_node_permissions import validate_node_scoped_permissions
 from agent_governance_schema import schema_subset_errors as _schema_subset_errors
 from agent_governance_trust import validate_closure_trust
@@ -483,6 +485,7 @@ def validate_closure(
             errors.append(f"checks[{index}] non-EXECUTED status cannot carry execution_receipt")
 
     if packet["gate_verdict"] == "PASS":
+        trusted_review_generation = capture_review_generation(REPO_ROOT)
         authority_decision = resolve_authority_claims(
             packet.get("authority_refs", []),
             adjudicated_at=str(packet.get("adjudicated_at", "")),
@@ -561,6 +564,7 @@ def validate_closure(
                     verification_fragment_truth_errors(
                         fragment, f"mandatory verification node {requirement['node_id']}",
                         dispatch.get("task_facts", {}),
+                        expected_generation=trusted_review_generation,
                     )
                 )
 
@@ -586,6 +590,7 @@ def validate_closure(
                     verification_fragment_truth_errors(
                         fragment, f"admitted verification node {node_id}",
                         dispatch.get("task_facts", {}),
+                        expected_generation=trusted_review_generation,
                     )
                 )
 

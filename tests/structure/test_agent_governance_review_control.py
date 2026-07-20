@@ -206,10 +206,24 @@ def test_verification_fragment_cannot_hide_a_typed_blocker() -> None:
     ], non_goal="hide review blockers")
 
     assert verification_fragment_truth_errors(
-        _fragment(control), "independent review", TASK_FACTS
+        _fragment(control), "independent review", TASK_FACTS,
+        expected_generation=GENERATION,
     ) == [
         "independent review typed blockers cannot support PASS: ['hidden-blocker']",
         "independent review concerns do not exactly project typed blocker IDs",
+    ]
+
+
+def test_verification_fragment_must_match_trusted_final_generation() -> None:
+    control = _control([_round(1, GENERATION, [])])
+    trusted_generation = {**GENERATION, "source_head": "9" * 40}
+
+    assert verification_fragment_truth_errors(
+        _fragment(control), "independent review", TASK_FACTS,
+        expected_generation=trusted_generation,
+    ) == [
+        "independent review review control is invalid: review control "
+        "final_generation differs from trusted repository generation"
     ]
 
 
@@ -224,7 +238,8 @@ def test_nonblocking_p0_finding_remains_visible_without_blocking_pass() -> None:
     ], non_goal="promote severity into authority")
 
     assert verification_fragment_truth_errors(
-        _fragment(control), "independent review", TASK_FACTS
+        _fragment(control), "independent review", TASK_FACTS,
+        expected_generation=GENERATION,
     ) == []
     assert adjudicate_review_control(TASK_FACTS, control)[
         "followup_finding_ids"

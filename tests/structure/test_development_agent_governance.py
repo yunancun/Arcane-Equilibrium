@@ -1974,6 +1974,24 @@ def test_closure_pass_cannot_hide_a_scope_admitted_review_blocker() -> None:
 
     assert any("typed blockers cannot support PASS" in error for error in errors)
 
+    forged_generation = deepcopy(packet)
+    review = forged_generation["role_fragments"][0]["payload"]["review_control"]
+    review["final_generation"]["source_head"] = "9" * 40
+    review["reviewers"][0]["rounds"][0]["reviewed_generation"] = deepcopy(
+        review["final_generation"]
+    )
+    review["reviewers"][0]["rounds"][0]["findings"] = []
+    _refresh_standard_workflow_lineage(governance, forged_generation)
+
+    errors = governance.validate_closure(
+        forged_generation,
+        execution_attestation_verifier=_test_execution_attestation_verifier(
+            forged_generation
+        ),
+    )
+
+    assert any("differs from trusted repository generation" in error for error in errors)
+
 
 def test_terminal_closure_does_not_invent_next_work_and_no_delta_never_passes() -> None:
     governance = _load_module()

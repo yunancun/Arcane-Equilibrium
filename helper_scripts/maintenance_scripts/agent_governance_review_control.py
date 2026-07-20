@@ -144,6 +144,7 @@ def adjudicate_review_control(
     control: dict[str, Any],
     *,
     repo: Path | None = None,
+    expected_generation: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Validate one bounded review packet and return the only permitted action."""
 
@@ -165,6 +166,17 @@ def adjudicate_review_control(
     )
     if generation_errors:
         raise ValueError("; ".join(generation_errors))
+    if expected_generation is not None:
+        trusted_errors = _generation_errors(
+            expected_generation, "trusted repository generation"
+        )
+        if trusted_errors:
+            raise ValueError("; ".join(trusted_errors))
+        if control["final_generation"] != expected_generation:
+            raise ValueError(
+                "review control final_generation differs from trusted "
+                "repository generation"
+            )
     if repo is not None:
         try:
             generation = capture_review_generation(repo)
@@ -318,7 +330,8 @@ def adjudicate_review_control(
 
 
 def verification_fragment_truth_errors(
-    fragment: dict[str, Any], label: str, task_facts: dict[str, Any]
+    fragment: dict[str, Any], label: str, task_facts: dict[str, Any], *,
+    expected_generation: dict[str, str],
 ) -> list[str]:
     """Project typed review findings into the closure PASS truth gate."""
 
@@ -335,7 +348,9 @@ def verification_fragment_truth_errors(
             errors.append(f"{label} unresolved concerns cannot support PASS")
         return errors
     try:
-        decision = adjudicate_review_control(task_facts, control)
+        decision = adjudicate_review_control(
+            task_facts, control, expected_generation=expected_generation
+        )
     except (TypeError, ValueError) as error:
         errors.append(f"{label} review control is invalid: {error}")
         return errors
