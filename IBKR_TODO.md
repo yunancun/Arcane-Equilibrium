@@ -1,6 +1,7 @@
 # IBKR_TODO — `stock_etf_cash` 到 live-ready 工程總綱
 
-**版本** v2 | **日期** 2026-07-16 | **正本** repo 根目錄 `IBKR_TODO.md`(main 分支;外層 `~/Projects/TradeBot/IBKR_TODO.md` 為鏡像副本,以 main 為準)
+**版本** v2.1 | **日期** 2026-07-20 | **正本** repo 根目錄 `IBKR_TODO.md`(main 分支;外層 `~/Projects/TradeBot/IBKR_TODO.md` 為鏡像副本,以 main 為準)
+**v2.1 校準 lineage**:2026-07-20 R29 operator 指令校準(比對計劃書與 R9-R27 實況)——補齊 W6 收口/W7 S0-S3 的 S6 回寫欠帳(§4.4/§5 節狀態行/TODO W6 行)、§0 重寫重釘 @ `b486c0718`、§5.5 輪號重排(實績 19 輪/2.5 天)、**07-17 serverVersion 裁決(KEEP 176)因與 §9 D5 撞號改編 D8**(§9 新行,BLOCK-ORDER-BAND-1~5 綁定);R28=W7-S4a in-flight(遠端分支+PR#88 OPEN(WIP),質量鏈未走完,接棒按 loop §6 驗屍續審)。
 **v2 校準 lineage**:2026-07-16 R8 全盤校準——對 W2/W-CI/W3/W4 完成件做 8 鏡頭對抗審計(workflow `wf_c316991f`):W2/W3/W4 逐項 **CONFIRMED_AS_CLAIMED**(INV-1 二元 HOLDS:production 域唯一 `impl ConnectPermitProvider`=`EnvelopeRequiredStub`、`PermitToken::mint` production 呼叫點=0),全測試鏈本地複現全綠(engine ibkr 211/types 74+287/stock_etf 34/seal 2/fake 9/Python 201);§0/§4 重釘 @ `808144aff`;審計揭 CI 守衛鏈 3 MEDIUM 殘洞(§4.5)歸 W5-S0(R9)收口。
 **性質**:工程設計總綱(engineering arrangement)。**本文件不是授權文件**——任何真實 broker 接觸/資料/訂單效果仍由 AMD-2026-07-11-01 定義的 `ibkr_activation_envelope_v1` + Operator 活化紀錄單獨把關。
 **與 TODO.md 的關係**:`TODO.md` 是 active dispatch queue 唯一正本(W0-W11 行狀態以它為準);本文件是 W 包的工程設計展開 + 活化跑道設計,派工時兩者並讀。W 狀態變更只改 TODO.md,設計變更才改本文件。
@@ -12,8 +13,8 @@
 
 - **目標終態(工程側)**:`IBKR_FULL_LIVE_CAPABILITY_COMPLETE_EXTERNAL_ACTIVATION_PENDING`——所有 no-contact 源碼、production wiring、測試、GUI、inactive 部署、恢復、文檔、三端同步、gap matrix 全 PASS,只剩人工憑證/session/活化與真實回執未決。這就是本文件說的 **live-ready**。
 - **最終驗證終態(活化側)**:`IBKR_FULL_LIVE_READY_VERIFIED`——Operator 單獨授權的 live session + 活化後,由 IB/E3/OPS/QA 出具 health/account/market/lifecycle/money-boundary 實證。
-- **現況一句話(2026-07-16 R8 校準)**:治理全解鎖(AMD-2026-07-11-01 Accepted);**W0/W1/W2(DONE_SOURCE_SECURED_HARDENED,PR#28)/W-CI(DONE_LANDED_FIRST_GREEN,PR#21)/W3(DONE_SOURCE_SECURED,S1-S4,PR#32/#33/#35/#38)/W4(DONE_SOURCE_SECURED,W4-1,PR#40)全收口且經 R8 對抗審計 CONFIRMED**;型別契約陣 34 modules/37 acceptance 檔;**W5(S0-S4)已於 2026-07-17 loop R9-R13 全包收口 DONE_SOURCE_SECURED**(PR#48/#49/#57/#60/#61;收口四腿 E2/E3/QA/CC 全過,INV-1 HOLDS;三腿指紋三角測量第三腿顯式 re-scope→W6 必修同票);**W8a+W9a 已於 2026-07-17 loop R14∥R15 收口 DONE_SOURCE_SECURED**(PR#63/#62;E3-F1 首階段 CLOSED、TOFU pin 供應鏈紀律、四腿全過)——**D2 觸發:EA1(憑證+D3 username)/EA2(Gateway 安裝窗)已可開,operator 已獲通知;EA3 mini-wiring 已收口(07-17 R16,PR#66:Gate 5=envelope 驗證+nonce 原子消費於 connect 前;IB-NOTE-1 CLOSED)——**EA1-EA3 全部零工程等待,剩 operator 動作+runbook**(RB-1~RB-5:①TWS/Gateway API 時間設 UTC 模式;②dry-run 先看 G4GateStatus 含 envelope/epochs 姿態位;③envelope JSON+epochs TOML 簽發程序文件待 authoring;④nonce 已燒後 connect 失敗=換新 envelope,成功接觸後歸檔 envelope 檔或 bump epoch 防重啟 replay;⑤澄清 #3 apply 前批准檔位元組歸檔);**W6 進行中:S0(R17 PR#69)+S1(R18 PR#70)+S3a(R19 PR#76:mktData 紅線 E2-F1 注入修+regulatorySnapshot FUNDS-LOCKED+quote/provenance 契約+OUT builders,E2 APPROVE/E3/IB PASS_WITH_NOTES)已收口**;**S3b(R20 PR#77)已收口→W6-S3 mktData lane 完整**;**W6(S0-S4)全收口 DONE_SOURCE_SECURED(R22 PR#79)**;**W7 設計輪 R23 PR#80(INV-ORDER transport-gating)+W7-S0 收口 R24 PR#81(transport-gating 恆拒 stub 地基:OrderFrame newtype+OrderEffectPermit mint cfg(test)+單一 send_order_framed+EffectEnvelopeRequiredStub 恆拒+machine-check+4 structure guard;engine ibkr 414/final-binary DCE 零 seam;E2 APPROVE_WITH_NOTES/E3 PASS INV-ORDER+INV-1 HOLDS/IB PASS/CC PASS A 級)**;**S1 blocking discipline(E2-NOTE-1/E3-NOTE-1):S0 承重=無 encoder+0 caller+DCE 非型別屏障→S1 encoder 落地必強制 order bytes 唯一經 gated send_order_framed(新 G5 守衛禁直達 driver::send_framed,或委 S4 runtime gate);sealed WireBytes+binary DCE 守衛=S1 評估**;**W7-S1 收口 R25 PR#82**(訂單狀態機 driver+intent journal 不送出=14-態+唯一 mutator reduce-only fail-closed+journal+nextValidId+idempotency_key join+ApiPending transient 分流+restart recovery+**NOTE-1 (a) sealed WireBytes** 型別阻斷 order bytes 退化+place/cancel encoder NO send+encode ceiling;engine ibkr 443;初審四腿→**IB 揪 2 CONFIRMED DIVERGENT wire 缺陷**→rework:placeOrder 全欄序重導 byte-golden 對 pinned client.py 升 **CONFIRMED-vs-9.81.1 ≤157**、whatIf tail decode fail-close **PreviewDecodeBlockedPendingFullSequence**(OrderState mid-message 非尾,全序列解碼 EA3-gated)→複審 E2 APPROVE+IB PASS DIVERGENT CLOSED);**新 EA3 前 blocking BLOCK-ORDER-BAND-4(placeOrder 158-176 sv-gated re-pin)/BAND-5(whatIf 全序列解碼 blocked-until),BAND-3 修訂(≤157 定位缺陷+band 增長)**;S3 非阻擋 carry=task_03abee1a;**W7-S2 收口 R26 PR#83**(cash 約束引擎 deterministic pre-submit gate:7 gate settled-funds T+1(SEC 15c6-1(a))/GFV/no-short 硬邊界/RTH/order-type 白名單/fractional/LULD,i128 定點,CashAccountRules 官方數值全 illustrative 待 IB/EA 现勘;engine ibkr 482;初審 E2/IB现勘 PASS 5 gate CONFIRMED→rework 修 3:MKT buffer 補唯一 fail-open+GFV 語義收緊 unsettled_funded 修誤殺+LULD venue-flag 權威本地 approximate-only→複審 E2 APPROVE+IB PASS 2 DIVERGENT CLOSED);**EA 校準 7 項**(§3.3:offset/LULD tier/結算曆等價/MKT buffer 真機制/unsettled-funded 資料源/halt 資料源/GFV 硬拒 vs strike 姿態)=EA-gated;**W7-S3 收口 R27 PR#85**(三向對賏引擎 P0 核心幻影倉防線:broker 真值×intent journal×本地態,idempotency_key join,P0-A/B/C,**持久凍結 store sticky-until-adjudication**+終態量對賏 i128;engine ibkr 511;全 P0 panel E2/E4/IB/CC 揪 2 真 fail-closed 缺陷閉合=凍結非持久自動解凍+終態量分歧漏判;複審 CC PASS/E2 APPROVE);**S4 blocking acceptance carry**=symbol-binding 保真/order-emit 查 frozen store 當閘/orderRef=idempotency_key wire+Execution.orderRef 捕捉/permId fallback tier/ledger 禁加總 exec;下一=R28 W7-S4(option B HMAC+check_effect_contact 放行臂+IPC+fake-TWS 全矩陣+收口,EA5 paper 窗 blocking 前置);**D5 已裁(operator 2026-07-17)=KEEP 176**(不降 157)→W5-S2/S3+W6-S1/S3 pinned decoder(≤157 band)EA3 前必對 10.x band(sv158-176)重現勘+重 pin(license-gated 官方源或 EA 捕捉真 wire,blocking);E2-F1 出站注入面已於 S3a 修**;W7-W11 QUEUED。runtime 側教科書式 dormant(07-16 復核):lane 旗標全 false、IB Gateway 未安裝、零 ibkr secret slot、production 從未 seal——**從未發生任何真實接觸**。
-- **路徑一句話**:剩 W5→W11 七包(+W8a/W9a carve)把引擎從「session/health 骨架」補成「全生命週期 live-capable 但 default-inactive」;之後 EA1→EA8 活化跑道(全 Operator-gated)按 readonly→paper→evidence clock→tiny-live→live 逐級點火。W8a/W9a 為純 no-contact 開發(AMD-07-11 授權內),先行落地使 EA1-EA3 在 Operator 就緒時零等待點火;EA 時序決策(D2)不因此預決。
+- **現況一句話(2026-07-20 R29 校準,main @ `b486c0718`)**:治理全解鎖(AMD-2026-07-11-01);**已收口九包:W0/W1/W2/W-CI/W3/W4(R8 審計 CONFIRMED)+W5(R9-R13,PR#48/#49/#57/#60/#61)+W8a(R14,PR#63)+W9a(R15,PR#62)+EA3 mini-wiring(R16,PR#66)+W6(R17-R22,PR#69/#70/#76/#77/#78/#79)**,歷輪 INV-1(+R24 起 INV-ORDER)全 HOLDS;**W7 進行中 4/5**:S0 transport-gating 恆拒地基(R24 PR#81)+S1 訂單狀態機/intent journal(R25 PR#82,byte-golden vs pinned 9.81.1 ≤157)+S2 cash 約束 7-gate(R26 PR#83)+S3 三向對賬幻影倉防線(R27 PR#85,engine ibkr 511)已收,**S4=option B HMAC+check_effect_contact 放行臂+IPC+fake-TWS 全矩陣+收口(R28 S4a in-flight 待收割+S4b)**,細節與逐輪 findings 見 §5 W7 節+帳本;W8-W11 QUEUED。**EA1-EA3 零工程等待**(operator 動作+RB-1~RB-5 見 §6;RB-3 簽發程序文件待 authoring);**EA3 前 blocking=D8(KEEP 176,§9):BLOCK-ORDER-BAND-1~5——W5-S2/S3+W6-S1/S3+W7-S1 的 pinned 佈局(byte-verified ≤157)須對 10.x band(sv158-176)重現勘+重 pin**;EA5 前 blocking=W7+W8 全綠+option B+S4 acceptance carry+EA 校準 7 項(§5 W7);W8 吸收票=durable nonce/lineage 現值比對/attestation fingerprint 正本/authenticity 申報(§5 W8)。runtime 教科書式 dormant(07-17 復核:4001/4002/7496/7497 零 listener、~/Jts 缺席、零 ibkr slot、零 seal、lane 旗標全 false)——**從未發生任何真實接觸**。
+- **路徑一句話**:剩 W7-S4+W8→W11 四包半把引擎從「全帳戶/行情/訂單狀態機骨架」補成「全生命週期 live-capable 但 default-inactive」;之後 EA1→EA8 活化跑道(全 Operator-gated)按 readonly→paper→evidence clock→tiny-live→live 逐級點火。W8a/W9a 為純 no-contact 開發(AMD-07-11 授權內),先行落地使 EA1-EA3 在 Operator 就緒時零等待點火;EA 時序決策(D2)不因此預決。
 - **最大 wall-clock 項**:paper/shadow evidence clock(ADR-0048 預期 6-8 週)——工程全部完工也繞不開這段證據窗;故 ①W5 收口後即帶 W8a/W9a,唯讀跑道(EA1-EA4,7-14 天 soak;**D2 已裁採用 2026-07-16**)與 W6/W7 開發平行,②**W7+W8 收口後**盡早申請 EA5 開 paper 窗(硬前置 = W7+W8 全綠 + option B 落地),與 W9-W11 的非授權面平行推進(見 §5.5/§6)。
 
 ## 1. 終態定義:什麼叫 live-ready
@@ -119,8 +120,8 @@ W2-W11 的全部 DoD 都封頂在 `source-ready` + `runtime-active(inactive post
 | TWS transport/session manager(可恢復) | **DONE(2026-07-16,S1-S4)**:wire 抽檔 + 六態 FSM(退避/心跳/排程感知 DST)+ INV-1 permit stub + pacing governor(單一出口/有界排隊)+ fake-TWS dev-crate + 端到端 driver;211 engine 測試 | W3 ✅ |
 | connection-health IPC/route + normalizer lockstep | **DONE(2026-07-16,W4-1)**:`get_connection_health` IPC+FastAPI route+`IbkrConnectionHealthReportV1`+normalizer 三層 lockstep+fail-closed 四道+driver-absence audit 入 CI | W4 ✅ |
 | account/positions/open orders/executions/commissions + session attestation | ~~缺口~~ **全補(2026-07-17 R11-R13:S2/S3 消化+S4 attestation producer source-landed)** | W5 ✅ |
-| contract details/market data/calendar/entitlement | 契約型別在(identity/provenance);fetch/訂閱/entitlement 邏輯全缺 | W6 |
-| order lifecycle(preview/place/cancel/replace/fills/reconcile) | paper lifecycle 契約 source-only,零執行路徑 | W7 |
+| contract details/market data/calendar/entitlement | **DONE(2026-07-17,R17-R22)**:S0 必修同票硬化+S1 contract details lane+S3 mktData(delayed-only v1、regulatorySnapshot 源碼封死 FUNDS-LOCKED)+S2 trading calendar(DST gap/fold 鎖死)+S4 provenance calendar_hash 真綁定;三角測量第三腿(W5 carve)閉合 | W6 ✅ |
+| order lifecycle(preview/place/cancel/replace/fills/reconcile) | **S0-S3 landed(2026-07-17~18,R24-R27)**:transport-gating 恆拒(INV-ORDER)+狀態機 driver/intent journal(byte-golden ≤157)+cash 7-gate+三向對賬(P0 幻影倉防線,持久凍結 store);**剩 S4**(option B HMAC+放行臂+IPC+fake-TWS 矩陣+收口;S4a in-flight) | W7 🔄 |
 | activation envelope/風控 authority/kill switch/audit 接線 | envelope 僅字串 placeholder,**無 struct/impl**;kill-switch/audit 契約在、runtime 產生器缺 | W8 |
 | DB migration/FastAPI 全面/GUI Phase 4/服務配置/觀測/回滾 | DDL source-only 零 migration;FastAPI 17 唯讀 route 在;GUI 10 子視圖唯讀在(等真值);Gateway unit/observability/rollback runbook 演練缺 | W9 |
 | readonly-scope envelope 最小切片(D2 carve) | ~~缺~~ **全補(2026-07-17 R14:契約+驗證器+四聯 audit source-landed)** | W8a ✅ |
@@ -249,9 +250,11 @@ W2-W11 的全部 DoD 都封頂在 `source-ready` + `runtime-active(inactive post
 
 ---
 
-### W6 — contract details/market data/calendar/entitlement
+### W6 — contract details/market data/calendar/entitlement ✅ **DONE_SOURCE_SECURED 2026-07-17(loop R17-R22,S0-S4)**
 
-**目標**:工具識別 + 行情 + 交易日曆 + 權限狀態,全部 point-in-time、可雜湊、可審計。
+**收口紀錄(R29 校準補記)**:S0 IPC 投影前必修同票硬化六項(R17 PR#69;E3 四 finding 家族 CLOSED,三角測量第三腿=W5 re-scope carve 閉合)· S1 contract details lane(R18 PR#70;CONTRACT_DATA message-version==8 硬 pin、contractDetails 最小消化裁決 (b) head-prefix+secIdList bounded skip)· S3a mktData 紅線+契約(R19 PR#76;E2-F1 出站注入修、**regulatorySnapshot 源碼封死+機器守衛(0.01 USD paper 也計費=FUNDS-LOCKED)**、quote/provenance 契約+OUT builders)· S3b engine digest(R20 PR#77;mktData lane 完整)· S2 trading calendar(R21 PR#78;tradingHours/liquidHours 雙 grammar、DST gap/fold 臂鎖死測試)· S4 收口(R22 PR#79;provenance calendar_hash 綁真 identity-row calendar+兩 IPC loose ends)。delayed-only v1 語義成立(降級 opt-in)。**殘項移交**:pinned decoder ≤157 band 受 D8(KEEP 176)約束——EA3 前 10.x band 重現勘+重 pin(BLOCK-ORDER-BAND 家族,§9 D8);W3 移交 F1 historical ordering 已於 S3 消化;EA 哨兵校準面見帳本 R18-R22。
+
+**目標(原始)**:工具識別 + 行情 + 交易日曆 + 權限狀態,全部 point-in-time、可雜湊、可審計。
 
 **範圍 in**:
 1. `instrument_identity_contract_v1` 實體化:conid 為主鍵的 PIT 身份(symbol/primary exchange/currency=USD v1/tradability/PRIIPs 標記/fractional policy/calendar/corporate-action 來源雜湊);`reqContractDetails` 消化;拒未知 venue/非 USD/crypto/CFD。
@@ -267,9 +270,11 @@ W2-W11 的全部 DoD 都封頂在 `source-ready` + `runtime-active(inactive post
 
 ---
 
-### W7 — order lifecycle(preview/place/cancel/replace + fills + reconciliation;fake-TWS)
+### W7 — order lifecycle(preview/place/cancel/replace + fills + reconciliation;fake-TWS)🔄 **IN_PROGRESS 4/5(R23 設計+R24-R27 S0-S3 收口;剩 S4)**
 
-**目標**:完整訂單狀態機與對賬,paper/live capable、default-inactive,全部用 fake-TWS 驗證。**本包是效果面核心,also 是 HMAC 升級觸發點。**
+**進度(2026-07-20 R29 校準)**:設計輪 R23 PR#80(INV-ORDER transport-gating 不變量)→ **S0** 恆拒 stub 地基(R24 PR#81:OrderFrame newtype+OrderEffectPermit mint `#[cfg(test)]`+單一 send_order_framed+恆拒 stub+4 structure guard;E2/E3/IB/CC 四腿過,INV-ORDER+INV-1 HOLDS)→ **S1** 訂單狀態機 driver+intent journal 不送出(R25 PR#82:14-態+唯一 mutator reduce-only fail-closed+idempotency_key join+ApiPending transient 分流+sealed WireBytes;**IB 揪 2 CONFIRMED DIVERGENT wire 缺陷 rework 閉合,placeOrder byte-golden vs pinned 9.81.1 ≤157**)→ **S2** cash 約束引擎(R26 PR#83:7-gate settled-funds T+1/GFV/no-short/RTH/白名單/fractional/LULD,i128 定點;官方數值 illustrative,**EA 校準 7 項**=EA-gated)→ **S3** 三向對賬引擎(R27 PR#85:broker 真值×intent journal×本地態,P0-A/B/C,**持久凍結 store sticky-until-adjudication**+終態量對賬 i128;P0 panel 揪 2 真 fail-closed 缺陷閉合)。**S4 blocking acceptance carry**:symbol-binding 保真/order-emit 查持久 frozen store 當閘/orderRef=idempotency_key wire+Execution.orderRef 捕捉/permId fallback tier(orderRef>permId 非零>order-id)/ledger 禁加總 exec shares。**R28 S4a(option B HMAC authority 核心)in-flight:遠端分支 `agent/ibkr-w7-s4a-option-b-hmac`(head `36e829cb1`)+PR#88 OPEN(WIP),R28 記帳 commit 已在支線但質量鏈未走完——接棒按 loop §6 先驗屍(cargo test 實跑)再續審(E2/E3/CC/IB 必須走完),禁憑半成品自報合入;S4b=check_effect_contact 放行臂+IPC preview/submit/cancel/replace+fake-TWS 全矩陣+W7 收口。**
+
+**目標(原始)**:完整訂單狀態機與對賬,paper/live capable、default-inactive,全部用 fake-TWS 驗證。**本包是效果面核心,also 是 HMAC 升級觸發點。**
 
 **範圍 in**:
 1. **前置契約**:`broker_capability_registry_v1` machine-check(effect-capable paper-route 實作前,ADR 硬序);`lane_scoped_ipc_v1` 的 `stock_etf.preview/submit/cancel/replace` 方法矩陣(Rust-owned,Python thin relay,typed denial reasons,與 Bybit paper IPC 顯式分離)。
@@ -363,30 +368,25 @@ W2-W11 的全部 DoD 都封頂在 `source-ready` + `runtime-active(inactive post
 
 ---
 
-### 5.5 剩餘工程日誌安排(R8 定稿;live-ready 為止)
+### 5.5 剩餘工程日誌安排(R29 重排 2026-07-20;live-ready 為止;R8 原表見 git 歷史)
 
 ```
-[✅W2 ✅W-CI ✅W3 ✅W4]
-W5(S0∥S1→S2→S3→S4)─┬─ W8a ∥ W9a(carve;與 W6 平行)
-                     ├─ W6(S1→S2→S3)
-                     └────→ W7(PA 切片→S1..S4)── W8 ── W9 ── W10 ── W11
+[✅W2 ✅W-CI ✅W3 ✅W4 ✅W5 ✅W8a ✅W9a ✅EA3-wiring ✅W6]
+W7(S0-S3 ✅ → S4a in-flight → S4b 收口)── W8 ── W9 ── W10 ── W11
 ```
 
-| 輪 | 切片 | 並行注記 |
+| 輪 | 切片 | 注記 |
 |---|---|---|
-| R8 | 本次校準(docs)+ loop v2 | docs-only |
-| R9 | **W5-S0** fail-closed 硬化 + CI 守衛鏈收口 | 可 ∥ R10(檔案面不相交,loop v2 manifest 程序把關) |
-| R10 | **W5-S1** typed row contracts | 同上 |
-| R11-R13 | **W5-S2/S3/S4** → W5 收口 | 序列(同 engine 面) |
-| R14/R15 | **W8a ∥ W9a**(carve) | 檔案面+reviewer 集全不相交,首選並行對;與 R16+ W6 亦可交錯 |
-| R16-R18 | **W6-S1/S2/S3**(contract details+PIT/行情+entitlement 三態/日曆 DST)→ W6 收口 | S1 含 W3 移交 F1 historical ordering |
-| R19-R22 | **W7**(PA 切片計劃→前置契約/狀態機/cash 約束/對賬)→ W7 收口 | XL 獨佔窗;T+1/GFV 需 IB 現勘前置;option B 觸發 |
-| R23-R25 | **W8**(envelope 全量 承 W8a/option B 活化紀錄/風控/kill switch/audit)→ W8 收口 | 含 W3 移交 reactivation 重置+四聯 permit audit **第二階段擴張**(TCP factory 面;首階段已隨 W8a) |
-| R26-R28 | **W9**(DB migration D1 裁決/FastAPI/GUI Phase 4/service/observability/rollback)→ W9 收口 | XL;GUI 面承 W4 defer |
-| R29 | **W10** Mac 全量+fake-TWS E2E+Linux inactive deploy+QA+三端 | operator 開 deploy 窗 |
-| R30 | **W11** 對抗性全域 rescan → 終態宣告 | gap matrix 只許外部殘項 |
+| R9-R27 | 已消化:W5(R9-R13)/W8a∥W9a(R14/R15)/EA3 mini-wiring(R16,插片)/W6(R17-R22,S0 為必修同票插片)/W7 設計+S0-S3(R23-R27) | 實績 19 輪/約 2.5 天;R8 原排 R16-R18=W6、R19-R22=W7,插片致輪號 +4~6,日曆反而領先 |
+| R28 | **W7-S4a** option B HMAC authority 核心(in-flight 收割) | 接棒驗屍→補全質量鏈→合入;其 R28 帳本行隨其 PR 落帳 |
+| R29 | 本校準輪(docs-only,operator 指令) | §7 白名單輪,不計零代碼計數 |
+| R30± | **W7-S4b**(check_effect_contact 放行臂+IPC 方法矩陣+fake-TWS 全矩陣)→ **W7 收口** | S4 blocking acceptance carry 全清;E3+CC 必審 |
+| R31-R33 | **W8**(envelope 全量 承 W8a/option B 活化紀錄/風控/kill switch/audit)→ W8 收口 | 吸收票全清(durable nonce/lineage 比對/attestation fingerprint/authenticity)+reactivation 重置+permit audit 第二階段(TCP factory 面) |
+| R34-R37 | **W9**(DB migration **D1 裁決**/FastAPI/GUI Phase 4/service/observability/rollback)→ W9 收口 | XL;GUI 面承 W4 defer;D1 撞到即 WAITING+通知 |
+| R38 | **W10** Mac 全量+fake-TWS E2E+Linux inactive deploy+QA+三端 | operator 開 deploy 窗 |
+| R39 | **W11** 對抗性全域 rescan → 終態宣告 | gap matrix 只許外部殘項 |
 
-- **工期估計(R8 修訂)**:剩餘 ~22 輪;實證 cadence R3-R7=5 輪/2 天(峰值),持續性折算 1.5-2 輪/天 ⇒ **工程側 live-ready ≈ 2.5-4 個有效工程週**(原 v1 估 6-10 週,W2-W4 已消化+cadence 實證上修)。主要變異源:reviewer/E4 帶寬、agent 配額死亡、operator 決策窗(D1/D2)、CI spending;**XL 包(W7/W9)每輪切片吞吐未經同規模實證,輪數或膨脹**。
+- **工期估計(R29 修訂)**:剩餘 ~11 輪;實證 cadence R9-R27=19 輪/約 2.5 天(含 XL 切片與全 P0 panel 審)⇒ **工程側 live-ready ≈ 2-5 個有效工程日**(變異源:reviewer/E4 帶寬、agent 配額死亡、operator 決策窗 D1/deploy 窗、CI spending;W8/W9 的 authority/runtime 面審查密度高於均值,輪數或膨脹)。EA 疊加軸不變:**paper/shadow evidence clock(6-8 週)仍是最大 wall-clock 項**,W7+W8+option B 齊備即申請 EA5 開窗。
 - **EA 疊加時間軸(D2 已採用 2026-07-16;各週標記按樂觀端 ~2 輪/天,悲觀端順延 ×1.6)**:W5+W8a+W9a 齊(≈第 1-1.5 週末)→ EA1-EA3 點火(全 Operator 動作,屆時逐步活化);EA4 readonly soak 7-14 天與 W6/W7 開發平行;W7+W8+option B 齊(≈第 3 週)→ 申請 EA5 開 paper 窗 → evidence clock 6-8 週起跑;工程終態宣告(W11)與 clock 平行,tiny-live(EA7)最早 ≈ clock 開窗後 6-8 週(受 OPEN-GOV-1/D7 保守讀法約束)。
 - **TODO 對位注記**:現行並行面=W5-S0∥W5-S1、W8a∥W9a、carve∥W6;凡鬆於 TODO.md 行前置者派工前先更新 TODO 對應行;W8a/W9a 已補 TODO 行(v816)。TODO.md 是 dispatch 唯一正本。
 
@@ -398,9 +398,9 @@ W5(S0∥S1→S2→S3→S4)─┬─ W8a ∥ W9a(carve;與 W6 平行)
 |---|---|---|---|
 | **EA1 憑證 custody** | Operator 手動放置 readonly/paper 憑證入 `<secrets-root>/external/ibkr/{readonly,paper}/`(loader 只驗 fingerprint;live slot 此時**必須仍缺席**) | 放置 + 確認 slot 指紋 | slot fingerprint 記錄 |
 | **EA2 Gateway paper 起立** | enable W9 交付的 systemd unit(paper 4002、loopback、read-only API 設定);watchdog/nightly restart 演練(Gateway 現況未安裝——安裝與 unit 預備歸 W9,EA2 只做 enable+登入) | 批准 enable + IBKR 帳號側 paper 登入(2FA 適用性按 IBKR 現行政策,EA1 時由 IB 現勘) | OPS runbook 執行證據 |
-| **EA3 G4 首次接觸(readonly)** | 前置:AMD-07-08-01 澄清 #3 Operator acknowledgement **已落(2026-07-16)**;production seal(W2 路徑,option A 批准檔;**每次 apply 前歸檔該次批准檔精確位元組——AMD-07-08-01 澄清 #3 第 4 點,審計重算閉合必要條件**)→ readonly envelope + 活化紀錄 → 首次 **health/serverTime** 真讀(嚴格對齊 AMD-07-08 G4 讀集;accountSummary 等歸 EA4 逐項納入) | **一次性顯式批准**(AMD-07-08 G4 語義)+ 活化紀錄 | QA runtime 證據;`session-ready` 達成 |
+| **EA3 G4 首次接觸(readonly)** | 前置:AMD-07-08-01 澄清 #3 Operator acknowledgement **已落(2026-07-16)**;**D8 blocking(R29 校準入表):BLOCK-ORDER-BAND-1~5——W5-S2/S3+W6-S1/S3+W7-S1 的 pinned 佈局(byte-verified ≤157)須對 10.x band(sv158-176)重現勘+重 pin——**EA3 前唯一可完成路徑=license-gated 官方 ibapi 10.x 源導入;EA 窗真 wire 捕捉屬 EA3 活化後的顯式授權校準步(捕捉本身=接觸),不得倒置為 EA3 前置的滿足手段**(見 §9 D8)**;RB-1~RB-5 runbook(RB-3 envelope/epochs 簽發程序文件待 authoring);production seal(W2 路徑,option A 批准檔;**每次 apply 前歸檔該次批准檔精確位元組——AMD-07-08-01 澄清 #3 第 4 點,審計重算閉合必要條件**)→ readonly envelope + 活化紀錄 → 首次 **health/serverTime** 真讀(嚴格對齊 AMD-07-08 G4 讀集;accountSummary 等歸 EA4 逐項納入) | **一次性顯式批准**(AMD-07-08 G4 語義)+ 活化紀錄 | QA runtime 證據;`session-ready` 達成 |
 | **EA4 readonly soak + entitlement 確認** | 7-14 天唯讀穩定窗:session FSM/重連/nightly restart 實測;accountSummary/positions 等唯讀集按 envelope scope 逐項納入;delayed 行情實態;三角指紋長期一致。**重連活化紀律**:每次 reconnect(含 nightly restart 後)需新 envelope + 活化紀錄——soak 期預設 Operator 每日活化;如欲設計 scoped 排程性重連授權(單活化綁定預告重啟窗),屬 AMD-07-11 字面外,先開 OPEN-GOV-2 由 CC 裁決,未裁前按每日活化執行 | 讀 soak 報告 + 每日(或裁決後按窗)活化 | `entitlement-ready`;W3 協議假設校準 |
-| **EA5 paper effect 活化** | 開窗前置:**W7+W8 全綠 + option B 落地** + PIT universe / strategy hypothesis / market-data provenance / reference-data **四契約 accepted + 全 hash 凍結(D5 已裁)**;然後 paper envelope(option B HMAC 紀律)→ 首批 paper 訂單生命週期真跑 + 對賬 → 開 `stock_etf_evidence_clock_v1`(6-8 週 paper/shadow 窗) | paper 活化紀錄 + evidence clock 開窗批准 | `effect-authorized`+`evidence-producing`(paper) |
+| **EA5 paper effect 活化** | 開窗前置:**W7+W8 全綠 + option B 落地** + PIT universe / strategy hypothesis / market-data provenance / reference-data **四契約 accepted + 全 hash 凍結(§9 **D5**=策略 universe 已裁;勿與 D8 serverVersion 裁決混淆)**;然後 paper envelope(option B HMAC 紀律)→ 首批 paper 訂單生命週期真跑 + 對賬 → 開 `stock_etf_evidence_clock_v1`(6-8 週 paper/shadow 窗) | paper 活化紀錄 + evidence clock 開窗批准 | `effect-authorized`+`evidence-producing`(paper) |
 | **EA6 證據與研究收斂** | scorecard/benchmark/cost 重建與證據收斂(QC/MIT 鏈);`tiny_live_adr_eligibility_v1` 討論閘評估(預註冊已在 EA5 前完成,此處不再改假設) | 讀 QC/MIT verdict | scorecard verdict artifact |
 | **EA7 tiny-live** | live 憑證 slot 創建(此時才允許,單獨批准;出典:AMD-07-11 活化紀錄路徑——ADR-0048 Denied Paths 的 live-slot 行僅於有效 tiny-live/live 活化 lineage 下被壓倒,healthcheck 放行語義見 W9-5)+ live Gateway(4001)+ tiny-live envelope(顯式限時、exact scope、極小 notional caps)+ 首單~soak | **live 資金 + tiny-live 活化紀錄**(逐窗;是否另需新 ADR/AMD 見 OPEN-GOV-1 第二問,未裁前按需要執行) | money-boundary 證據 |
 | **EA8 live ramp → VERIFIED** | 額度階梯逐級放大(每級新活化);IB/E3/OPS/QA 聯合 attested 證據包 → `IBKR_FULL_LIVE_READY_VERIFIED` | 每級活化 + 終態確認 | 終態證據包 |
@@ -444,6 +444,7 @@ W5(S0∥S1→S2→S3→S4)─┬─ W8a ∥ W9a(carve;與 W6 平行)
 | D5 | 策略假設家族與 universe(低/中換手、日/週頻,USD 股/ETF) | EA5 前(QC 研究軌可先行) | QC 預註冊提案後裁 |
 | D6 | tiny-live 額度階梯與每級 soak 長度 | EA7 前 | QC/風控提案後裁 |
 | D7 | evidence clock 是否為 tiny-live 硬前置(OPEN-GOV-1,見下) | W11 | 建議維持 6-8 週窗為硬前置 |
+| D8 | serverVersion 協商上限:KEEP 176 vs 降 157 | **已裁:KEEP 176(2026-07-17,Operator)** | 後果=W5-S2/S3、W6-S1/S3、W7-S1 的 pinned wire 佈局(byte-verified ≤157)須於 **EA3 前**對 10.x band(sv158-176)重現勘+重 pin(**BLOCK-ORDER-BAND-1~5**;證據路徑:①license-gated 官方 ibapi 10.x 源導入=**EA3 前唯一可完成路徑**;②EA 窗真 wire 捕捉=**EA3 活化後**於 envelope 顯式授權 scope 內的校準步——捕捉本身即接觸,不得倒置為 EA3 前置滿足手段;完成前受影響 158-176 decode 面按 fail-closed 不得依賴,readonly 首讀集是否受影響由 IB 於 EA3 設計時裁定)。**注**:本裁決於 R25-R27 帳面曾誤記為「D5」,與本表 D5(策略 universe)撞號,R29 校準統一改編 D8;帳本歷史行按 append-only 不改寫,以本行為準 |
 
 **OPEN-GOV-1**(W11 CC 出典裁決,未裁前一律保守讀法):①AMD-2026-07-11-01 把 tiny-live/live 活化條件定義為 envelope + 顯式限時 Operator 活化,未字面重申 ADR-0048 的 `tiny_live_adr_eligibility_v1` 討論閘/證據窗前置;ADR 的 auto-promotion 禁令仍在——「Operator 可直接活化」vs「證據窗仍是硬前置」需裁決(本文件預設後者,D7)。②tiny-live 是否需**新 ADR/AMD**(ADR-0048 Authority Matrix「positive paper/shadow may only open a new ADR discussion」讀法)——未裁前 EA7 按保守讀法需新 ADR/AMD。
 
