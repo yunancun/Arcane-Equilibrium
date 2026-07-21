@@ -177,6 +177,41 @@ repo mutation 必須由每個 admitted writer 各產一份 task/role/node/scope-
 `repository_change_record_v1`，並以 ordered chain 重驗 exact before/after captures；單一
 snapshot/source-change summary 不證 causality。
 
+#### 2026-07-21 amendment: AIML S0.3 trusted-host finalization
+
+Program adoption 是上述 Closure Interface 的高權限特化，不新增第五個 public Interface。
+唯一 production entry point 是：
+
+```text
+python3 helper_scripts/maintenance_scripts/agent_governance.py aiml-trusted-finalize \
+  --packet <closure.json> \
+  --execution-bundle <trusted_execution_bundle_v1.json> \
+  --execution-signature <trusted_execution_bundle_v1.json.sig> \
+  --github-token-fd <inherited-fd>
+```
+
+Secure path inputs 必須 owner-controlled、regular、non-symlink、non-group/world-writable 且
+bounded；GitHub credential 只能由 inherited owner-only FD 消費，不進 argv、artifact 或輸出。
+Production caller 不能替換 time、repo、transport、Git/GitHub verifier、API origin、CA roots 或
+execution trust root。Reviewed root 固定為 `aiml-s03-operator-v1`、fingerprint
+`SHA256:uGJ9veN7PoE6BBgfsSP2aiMndrwgbt7o/7/YfdzNzCQ`、SSHSIG namespace
+`arcane-equilibrium-aiml-s03`；matching private key 不得存在 Linux finalizer host，只在獨立
+Operator host 對 canonical bundle 做 detached signing。
+
+`POST_MERGE_FINALIZATION` 是唯讀 admission 且不得持 writer lease。Complete packet 必須綁
+final merged source、S0.1/S0.2/program receipt、CC / E2 / E3 / E4 / MIT / QA / R4 七個 mandatory
+review fragment 與 authenticated execution bundle。Bundle exact-bind task/Context/DAG/artifact，
+freshness 與 consumption 必須閉合。Source verifier 要求 `merge-base --is-ancestor` 與 exact
+commit/blob manifest，並拒絕 shallow/replace/graft/alternate/promisor/path escape；GitHub verifier
+以 fixed-origin/system-CA/no-proxy/no-redirect live 驗 repository/default ref/reviewed merge lineage/
+effective ruleset/required checks。Self-authored packet 或 cached GitHub JSON 不能替代 external
+verification。
+
+只有 trusted finalizer `PASS` 且輸出 exact receipt digest 才可宣稱 `PROGRAM_ADOPTED`。任一
+signature、source、GitHub、seven-reviewer、freshness 或 exact-consumption mismatch 都 fail closed。
+本 amendment 不授予 ML5/ML6、deploy、broker/order/live、Decision Lease 或交易 effect；
+authority-limits const-false、source-adoption-only 與 four-zero-effects 不變。
+
 ### Evidence reuse
 
 Test evidence 使用 source/diff/untracked/command/test/toolchain/lock/OS/arch/env/config/

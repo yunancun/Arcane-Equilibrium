@@ -287,6 +287,51 @@ validate_closure(packet, execution_attestation_verifier=trusted_host_capability)
 沒有此 capability，只能做離線 shape/integrity/fail-closed 檢查，不能認證 `PASS`；
 packet-local self-digest/receipt 即使全自洽也只屬 structural evidence。
 
+#### AIML S0.3 trusted-host program-adoption finalizer
+
+S0.3 唯一 production 收口介面是：
+
+```text
+python3 helper_scripts/maintenance_scripts/agent_governance.py aiml-trusted-finalize \
+  --packet <closure.json> \
+  --execution-bundle <trusted_execution_bundle_v1.json> \
+  --execution-signature <trusted_execution_bundle_v1.json.sig> \
+  --github-token-fd <inherited-fd>
+```
+
+三個 path input 必須是 finalizer effective user 擁有、不可 group/world write 的 regular
+file；reader 不 follow symlink 且有 size bound。GitHub credential 只可由 inherited owner-only
+regular-file/pipe FD 傳入，不得放進 argv、JSON、repo artifact 或輸出。Production facade 只收
+packet、bundle、detached signature 與 credential bytes；caller 不能注入 clock、repo root、
+Git/GitHub verifier、transport、API origin、CA roots 或 trust key。
+
+Execution bundle 的 reviewed source trust root 固定為 identity
+`aiml-s03-operator-v1`、Ed25519 fingerprint
+`SHA256:uGJ9veN7PoE6BBgfsSP2aiMndrwgbt7o/7/YfdzNzCQ`、SSHSIG namespace
+`arcane-equilibrium-aiml-s03`。Matching private key 永遠不落在 Linux trusted-finalizer host，
+只能在獨立 Operator host 對 canonical bundle bytes 做 out-of-band detached signing；caller
+不得選 key/identity/namespace。Bundle 必須 exact-bind task-contract、Context、DAG 與每一份
+被 Closure 消費的 attested artifact，且通過 issued/expires freshness、canonical ordering 與
+exact-consumption 檢查。
+
+`POST_MERGE_FINALIZATION` 是 read-only admission，禁止持有 writer lease。Packet 必須綁 final
+merged source generation、S0.1/S0.2 receipt、program-adoption receipt、CC / E2 / E3 / E4 / MIT / QA / R4
+七個 mandatory review fragment，以及其完整 authenticated call/wave execution evidence；source
+或 ledger write 階段仍須正常 linked-worktree writer lease，不能沿用 read-only exception。
+
+Source verifier 對 final merge generation 執行 `merge-base --is-ancestor`、exact commit/blob
+manifest 與 bounded object capture，並拒絕 shallow、replace/graft、alternate/promisor 與 path
+escape。GitHub verifier 只連 fixed API origin，使用 system CA、禁 proxy inheritance/redirect，
+並 live 驗 repository identity、default-branch ref、reviewed/merge commits、compare ancestry、
+effective ruleset 與 exact required checks/integration IDs。Packet-local attestation、cached policy
+JSON 或 caller-selected endpoint 都不能替代這條外部驗證。
+
+只有 finalizer 回傳 `status=PASS` 且帶 exact `program_adoption_receipt_digest` 時，該 receipt
+才可代表 `PROGRAM_ADOPTED`；任何 signature/source/GitHub/reviewer/freshness/consumption 錯誤皆
+fail closed 且不得宣稱 adoption。此介面只認證 S0.3 program adoption，不新增 ML5/ML6、runtime
+deploy、broker/order/live、Decision Lease 或任何交易 effect authority；authority limits 與
+four-zero-effects 持續為 const-false。
+
 不再同時維護 STATUS、VERDICT、per-role report、Operator copy 四套 authority。
 `closure_packet_v1` 同時包含人可讀摘要與機器 manifest：
 

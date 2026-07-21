@@ -653,3 +653,26 @@ def test_manifests_bind_trusted_host_module_and_test() -> None:
     }
     assert expected.issubset(PROGRAM_GOVERNANCE_PATHS)
     assert expected.issubset(S0_3_EXACT_OWNED_PATHS)
+
+
+def test_normative_docs_bind_trusted_finalizer_operator_interface() -> None:
+    required_markers = {
+        "aiml-trusted-finalize",
+        "--github-token-fd",
+        host.EXPECTED_EXECUTION_SIGNER_IDENTITY,
+        host.EXPECTED_EXECUTION_SIGNER_FINGERPRINT,
+        host.EXECUTION_SIGNATURE_NAMESPACE,
+        "POST_MERGE_FINALIZATION",
+        "merge-base --is-ancestor",
+        "CC / E2 / E3 / E4 / MIT / QA / R4",
+        "PROGRAM_ADOPTED",
+    }
+    for relative_path in (
+        "docs/agents/development-agent-governance.md",
+        "docs/adr/0050-development-agent-governance.md",
+    ):
+        document = (ROOT / relative_path).read_text(encoding="utf-8")
+        missing = sorted(marker for marker in required_markers if marker not in document)
+        assert not missing, (
+            f"{relative_path} missing trusted-finalizer contract: {missing}"
+        )
