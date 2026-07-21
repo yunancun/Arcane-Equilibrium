@@ -13,9 +13,11 @@ import hashlib
 import hmac
 import os
 import re
+import select
 import stat
 import subprocess
 import tempfile
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -87,6 +89,7 @@ MAX_BUNDLE_TTL = timedelta(minutes=15)
 MAX_BUNDLE_AGE = timedelta(minutes=5)
 MAX_ENTRY_TTL = timedelta(hours=24)
 MAX_CLOCK_SKEW = timedelta(seconds=60)
+SECRET_PIPE_FRAME_TIMEOUT_SECONDS = 2.0
 ALLOWED_EXECUTION_KINDS = frozenset({
     "context_artifact_v1",
     "workflow_wave_record_v1",
@@ -165,11 +168,31 @@ def read_secret_fd(fd: int, *, label: str, max_bytes: int = 16 * 1024) -> bytes:
         if info.st_mode & (stat.S_IRWXG | stat.S_IRWXO):
             raise ValueError(f"{label} file permissions are too broad")
     raw = bytearray()
-    while len(raw) <= max_bytes:
-        chunk = os.read(fd, min(4096, max_bytes + 1 - len(raw)))
-        if not chunk:
-            break
-        raw.extend(chunk)
+    if stat.S_ISFIFO(info.st_mode):
+        deadline = time.monotonic() + SECRET_PIPE_FRAME_TIMEOUT_SECONDS
+        while len(raw) <= max_bytes:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise ValueError(f"{label} pipe is missing a newline frame or EOF")
+            readable, _, _ = select.select([fd], [], [], remaining)
+            if not readable:
+                raise ValueError(f"{label} pipe is missing a newline frame or EOF")
+            chunk = os.read(fd, min(4096, max_bytes + 1 - len(raw)))
+            if not chunk:
+                break
+            raw.extend(chunk)
+            if b"\n" in raw:
+                frame, _, trailing = raw.partition(b"\n")
+                if trailing.strip(b"\r\n"):
+                    raise ValueError(f"{label} pipe contains multiple frames")
+                raw = bytearray(frame.rstrip(b"\r"))
+                break
+    else:
+        while len(raw) <= max_bytes:
+            chunk = os.read(fd, min(4096, max_bytes + 1 - len(raw)))
+            if not chunk:
+                break
+            raw.extend(chunk)
     if len(raw) > max_bytes:
         raise ValueError(f"{label} exceeds size limit")
     secret = bytes(raw).rstrip(b"\r\n")

@@ -6,6 +6,8 @@ import json
 import os
 import subprocess
 import sys
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -954,6 +956,41 @@ def test_cli_rejects_non_object_packet_with_structured_fail(
     assert captured.err == ""
 
 
+def test_secret_pipe_uses_newline_frame_without_waiting_for_eof() -> None:
+    read_fd, write_fd = os.pipe()
+
+    def close_writer_later() -> None:
+        time.sleep(0.4)
+        os.close(write_fd)
+
+    closer = threading.Thread(target=close_writer_later)
+    os.write(write_fd, b"token-value\n")
+    closer.start()
+    started_at = time.monotonic()
+    try:
+        assert host.read_secret_fd(read_fd, label="GitHub credential") == b"token-value"
+        elapsed = time.monotonic() - started_at
+    finally:
+        os.close(read_fd)
+        closer.join(timeout=1)
+
+    assert elapsed < 0.2
+
+
+def test_secret_pipe_fails_closed_when_frame_never_terminates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    read_fd, write_fd = os.pipe()
+    os.write(write_fd, b"unterminated-token")
+    monkeypatch.setattr(host.select, "select", lambda *_args: ([], [], []))
+    try:
+        with pytest.raises(ValueError, match="missing a newline frame or EOF"):
+            host.read_secret_fd(read_fd, label="GitHub credential")
+    finally:
+        os.close(read_fd)
+        os.close(write_fd)
+
+
 def test_production_finalizer_surface_has_no_injectable_trust_capabilities() -> None:
     assert "finalize_program_adoption" not in governance.__all__
     assert not hasattr(governance, "finalize_program_adoption")
@@ -996,6 +1033,7 @@ def test_normative_docs_bind_trusted_finalizer_operator_interface() -> None:
         "POST_MERGE_FINALIZATION",
         "merge-base --is-ancestor",
         "check-runs",
+        "newline-framed",
         "CC / E2 / E3 / E4 / MIT / QA / R4",
         "PROGRAM_ADOPTED",
     }

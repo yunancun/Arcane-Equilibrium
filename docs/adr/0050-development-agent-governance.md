@@ -192,6 +192,8 @@ python3 helper_scripts/maintenance_scripts/agent_governance.py aiml-trusted-fina
 
 Secure path inputs 必須 owner-controlled、regular、non-symlink、non-group/world-writable 且
 bounded；GitHub credential 只能由 inherited owner-only FD 消費，不進 argv、artifact 或輸出。
+Pipe input 採單一 `newline-framed` credential（closed pipe 可由 EOF 結束）；reader 有固定
+deadline，不得等待未關閉 writer 的 EOF。
 Production caller 不能替換 time、repo、transport、Git/GitHub verifier、API origin、CA roots 或
 execution trust root。Reviewed root 固定為 `aiml-s03-operator-v1`、fingerprint
 `SHA256:uGJ9veN7PoE6BBgfsSP2aiMndrwgbt7o/7/YfdzNzCQ`、SSHSIG namespace
