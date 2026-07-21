@@ -122,7 +122,7 @@ logic must use wall-clock time (milliseconds), not tick counts.
 
 ### A0. File Size Prerequisite — Extract & Refactor
 
-**Problem**: grid_trading.rs=1234 lines (>1200 hard limit), ma_crossover.rs=834 lines (>800 warning).
+**Historical problem statement**: grid_trading.rs=1234 lines and ma_crossover.rs=834 lines exceeded the lower limits then in effect. The current reusable rule is a single 2000-line threshold; both recorded sizes are below it, so any split must now be justified by ownership rather than size alone.
 
 **A0-a: Extract grid_helpers.rs from grid_trading.rs**
 Move ~130 lines of pure grid computation helpers (build_linear_levels, build_geometric_levels,

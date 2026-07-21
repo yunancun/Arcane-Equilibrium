@@ -318,7 +318,7 @@
 
 | 文件 | 内容 |
 |------|------|
-| `CCAgentWorkSpace/PM/workspace/reports/2026-06-18--p3_h0gate_file_split.md` | PM source/test checkpoint: closes `P3-H0GATE-FILE-SPLIT` by moving H0Gate tests into `openclaw_core/src/h0_gate/tests.rs`, reducing production `h0_gate.rs` below the 800-line review threshold with behavior preserved。 |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-06-18--p3_h0gate_file_split.md` | PM source/test checkpoint: closes `P3-H0GATE-FILE-SPLIT` by moving H0Gate tests into `openclaw_core/src/h0_gate/tests.rs`, reducing production `h0_gate.rs` with behavior preserved；此為歷史拆分結果，現行可重用的大小治理採唯一 2000 行門檻，不沿用舊制較低警告線。 |
 | `CCAgentWorkSpace/Operator/2026-06-18--p3_h0gate_file_split.md` | Operator mirror: concise result, verification commands, and boundary for the H0Gate file-split checkpoint。 |
 
 ### 2026-06-18 Apple Silicon clippy gate

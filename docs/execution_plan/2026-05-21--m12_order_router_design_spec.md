@@ -632,7 +632,7 @@ OrderRouter 是 Guardian 通過後的 routing decision 層；**不繞 IntentProc
 | 7 | V115 schema reference outline land 在 V115 placeholder spec（separate file）| V115 placeholder spec file exists + frontmatter status `SPEC-PLACEHOLDER` |
 | 8 | 本 spec land 不破 0 既有 Rust hot path（OrderRouter 是 NEW trait；無 existing code 強制 implement）| `cargo build --release` PASS + `cargo test --release --workspace` PASS（既有 test 0 regression）|
 | 9 | 中文注釋為主；無新增 English-only 注釋（per memory `feedback_chinese_only_comments`）| code review；新增注釋默認中文 |
-| 10 | File size < 800 行（per `srv/CLAUDE.md` Code Structure Guardrails）| `wc -l rust/openclaw_engine/src/order_router.rs` < 800 |
+| 10 | File size ≤ 2000 行（per `srv/CLAUDE.md` Code Structure Guardrails；未超過時不得僅因大小阻擋或強拆）| `wc -l rust/openclaw_engine/src/order_router.rs` ≤ 2000 |
 
 **Sprint 6 IMPL 階段補加 acceptance criteria**：
 - `maker_fill_rate_30d` calculation 1e-4 fixture（per V094 既有 maker_fill 計算範式 + 30d window sum semantics）

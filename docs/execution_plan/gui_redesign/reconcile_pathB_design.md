@@ -102,8 +102,8 @@ violates CLAUDE §七. The only thing it saves is one server module — not wort
 
 ### Function signatures & placement (route stays parse→call→format; logic below)
 
-New module `governance_reconcile_snapshots.py` (~90 lines, well under limits; keeps the three
->800-line files from growing):
+New module `governance_reconcile_snapshots.py` (~90 lines, well under the current 2000-line
+threshold; keeps the three larger files from growing for ownership clarity):
 
 ```python
 class DemoSnapshotUnavailable(Exception):
@@ -301,7 +301,7 @@ client-forgeable governance-input surface (trust-boundary improvement).
 | 6 | `static/governance.js` | `govPostReconcile` `:84-113` + badge caller | Trigger-only body (§3); consume `verdict/severity/discrepancies`. `node --check`. |
 | 7 | `tests/structure/test_gui_smoke_fetch_route_alignment_static.py` | `KNOWN_MISMATCH_ALLOWLIST` `:575-580` | Remove M1 line (§8). |
 
-Files >800 lines touched (review attention, all < 2000 cap): `governance_routes.py` (1366),
+Larger files touched (all below the current 2000-line threshold): `governance_routes.py` (1366),
 `governance_hub.py` (1499 — nearest cap; keep the edit minimal/subtractive), `reconciliation_engine.py`
 (948). New logic goes in the NEW module to avoid growing them.
 

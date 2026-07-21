@@ -118,8 +118,8 @@
    16 原則逐條對照 — 特別是 #4(風控) #8(可解釋) #10(誠實)
 2. Bilingual comments — sample 5+ new functions
    雙語注釋 — 抽查 5+ 新函數
-3. File size — 800 line warning / 1200 line hard limit
-   文件大小 — 800 行警告 / 1200 行硬限
+3. File size — one 2000-line threshold; do not block or force a split at or below it
+   文件大小 — 唯一 2000 行門檻；未超過時不得僅因大小阻擋或強制拆分
 4. Workflow compliance — E2+E4 executed for every batch?
    工作鏈合規 — 每批都執行了 E2+E4？
 5. Commit norms — CHANGELOG synced?

@@ -340,7 +340,7 @@ Phase A ──┬─→ Phase B ──┐
 | W-AUDIT-2 security IMPL | 無衝突 | 並行 |
 | W-AUDIT-3 fake-live + Decision Lease | 無衝突，**正交** | 並行；本 wave 不觸碰 Executor / Decision Lease 寫入路徑 |
 | W-AUDIT-4 ML 基座 | **未來併入 R-3 Hypothesis Pipeline**（後續 wave） | 本 wave 不解 W-AUDIT-4；MLDE feature_baselines / outcome backfill 仍走 W-AUDIT-4 既有計劃 |
-| W-AUDIT-5 性能/結構 | 無衝突 | 並行；本 wave 新加 Rust struct + LOC，注意 `tick_pipeline/mod.rs` 已 800+ 行，W-AUDIT-5 須延後或並行 split |
+| W-AUDIT-5 性能/結構 | 無衝突 | 並行；本 wave 新加 Rust struct + LOC，`tick_pipeline/mod.rs` 已屬較大模組但仍須以現行 2000 行門檻判定；若 ownership 邊界成立可延後或並行 split |
 | W-AUDIT-6 策略 + 量化 promotion gate | **重要邊界**：W-AUDIT-6 砍剩 minimum（funding_arb retire + DSR/PBO + Kelly config）後並行 | W-AUDIT-6 不重寫 ma / bb_breakout，留帶寬給 8a |
 | W-AUDIT-7 GUI/AI/Layer2 | 無衝突 | 並行；Layer2 manual + supervisor-only 維持 ADR-0020 |
 | AMD-2026-05-09-03 graduated canary | **真 deploy 前置** | 8a Phase A-D 完成後不能直接進 demo；必走 graduated canary（8a Phase D `--keep-auth` deploy paper → demo → live_demo） |

@@ -100,7 +100,7 @@
 ## P0 驗收(2026-07-11,operator 指令;PM 量化門 + E4-verifier + A3 三方獨立)
 - **裁決:P0 驗收通過(PASS-WITH-FINDINGS,零 sign-off blocker);operator 放行 Phase 1 續跑。**
 - PM 量化門:style= 全站 5 全 legit ✅ / node --check 全綠 ✅ / 檔案全 <2000(tab-live.js 1924、tab-settings.html 1899 逼近 cap,P2 拆分觀察)/ tokens link 22+_dashboard_card fragment 豁免 ✅ / structure 622P+4F=基線身分逐一吻合 ✅ / GUI 子集 53/0+四 guard 7/0+G0.5 25/25 ✅ / 淨行數 35,486<36,337 基線 ✅
-- E4-verifier:**VERIFIED-WITH-GAPS**(證據成立;gap=歷史計數快照不可重放——**引用紀律:回歸引用一律以「4F 失敗者身分基線」為準,不引 passed 絕對數**;`stock_etf.rs`>800 cap 致 2F=IBKR 軸欠帳,建議獨立 ticket 勿長期當 pre-existing 吸收)
+- E4-verifier:**VERIFIED-WITH-GAPS**(證據成立;gap=歷史計數快照不可重放——**引用紀律:回歸引用一律以「4F 失敗者身分基線」為準,不引 passed 絕對數**;`stock_etf.rs` 當時因已退役的較低 cap 致 2F=IBKR 軸欠帳；現行唯一門檻為 2000 行，不得再以該舊制欠帳阻擋)
 - A3:**PASS-WITH-FINDINGS**(報告正本=該輪 agent 回覆;findings 路由如下)
   - **H-1 帛晝 token 級 AA 不達**(muted 3.27-3.72/warn/live/語義疊 α-bg 全 <4.5;玄夜健康)+ **H-2 33 處硬編碼冷調 rgba(13,17,23,α) 面板底**(帛晝下 1.0-2.6 不可讀)→ **P1.3 硬 gate**(見 Phase 1)
   - **M-1 殼層紫同屏矛盾** → **P1.pre-1**(~10 行 console.html 外科 swap:152-165 live tab 紫底線→--live 系/904 mode 色表紫/34 logo 漸層/39 tag-blue/64 .mc 邊框 #21262d→--border-subtle/96-97 rgba(13,17,23)→--bg-sunken;消九成接縫,/gui /trading 容忍至 Phase 3)
@@ -228,7 +228,7 @@
 ## Phase 3 · 收尾
 - [ ] P3.1 刪 iframe 機制+legacy index.html(全部 view 穩定後;flag 灰度期 ≥7 天無回退)
 - [ ] P3.2 死代碼處置:FLAG-DEAD 19 面逐一證據裁決(grep 調用+路由存活),留審計記錄
-- [ ] P3.3 E5 全站體檢:行數對基線淨降、hot path、重複度;800 行超標檔拆分
+- [ ] P3.3 E5 全站體檢:行數對基線淨降、hot path、重複度；僅超過 2000 行才因檔案大小進入強制拆分／例外流程，未超過者按職責與重複度判定
 - [ ] P3.4 中文注釋補全 pass(觸碰過的檔案 MODULE_NOTE+關鍵邏輯)
 
 ## 終驗收(全綠才 COMPLETE)

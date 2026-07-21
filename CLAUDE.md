@@ -233,9 +233,10 @@ Unless the operator explicitly overrides this:
   leak provider-specific HTTP calls into business code.
 - New or modified comments default to Chinese. Existing bilingual blocks are not
   cleaned unless touched; touched bilingual comment blocks should keep Chinese.
-- Files over 800 lines require review attention; 2000 lines is the hard cap
-  unless a documented pre-existing exception applies. Current documented
-  pre-existing exceptions are registered in
+- The repository uses one file-size threshold: files at or below 2000 lines
+  must not be blocked or forced to split solely because of size; files over
+  2000 lines require review unless a documented pre-existing exception
+  applies. Current documented pre-existing exceptions are registered in
   `docs/references/2000_line_exception_registry.md`; splitting hot-path/
   execution-entry files there is E5-plan work, not a convention violation.
 - New mutable singletons must be registered in the singleton table's current
@@ -338,9 +339,10 @@ Unless the operator explicitly overrides this:
 
 ## 九、Code Structure Guardrails
 
-- Files over 800 lines require review attention; 2000 lines is the hard cap
-  unless a documented pre-existing exception applies. Registry:
-  `docs/references/2000_line_exception_registry.md`.
+- The repository uses one file-size threshold: files at or below 2000 lines
+  must not be blocked or forced to split solely because of size; files over
+  2000 lines require review unless a documented pre-existing exception
+  applies. Registry: `docs/references/2000_line_exception_registry.md`.
 - New mutable singletons must be registered in the current singleton authority
   before merge.
 - Route handlers parse -> call -> format; business logic belongs below them.

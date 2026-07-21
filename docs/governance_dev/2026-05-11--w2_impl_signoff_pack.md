@@ -19,7 +19,7 @@
 
 E1 W2-IMPL-5 完成 W2 IMPL v1.2 chain 收尾：
 
-- **新檔 integration test**：`rust/openclaw_engine/tests/btc_lead_lag_panel_fence_integration.rs` (534 LOC, 9/9 test PASS, < 800 警告線)
+- **新檔 integration test**：`rust/openclaw_engine/tests/btc_lead_lag_panel_fence_integration.rs` (534 LOC, 9/9 test PASS，低於現行 2000 行門檻)
 - **新檔 signoff pack**：本文檔（5 sub-task closure summary + 三層 fence × 4 sub-task validation matrix）
 - **0 source code 改動**（per task scope「不直接改 IMPL-1/2/3/4 source code，只新檔 test」）
 - **0 cargo test regression**：2797/2797 lib + 9/9 integration test + 434/434 openclaw_core 全 PASS
@@ -68,7 +68,7 @@ spec v1.2 → v1.3 inline edit：§6.2 Layer 2 從「Python writer paper-only fe
 **Sibling commit**: `a4828e7f` (merged into `1f0354cf` chain commit)
 **Report**: `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-11--w2_impl_4_paper_edge_report.md`
 
-新檔 `srv/sql/queries/w2_btc_alt_lead_lag_counterfactual.sql` (279 LOC, 5 CTE, 純 READ-ONLY) + `srv/helper_scripts/reports/w2_paper_edge_report.py` (1257 LOC) 實作 spec v1.2 §7.1 6 mandatory metric：(1) pooled + per-symbol breakdown (n≥100+t>2.0 gate)；(2) DSR K=95 deflate (mu_0=√(2 ln 95)=3.0179)；(3) PSR(0) Bailey-López de Prado 2012 strict skew/kurt-aware formula（**禁** normal SR z-test，per MIT C-3 BTCUSDT 1m forward-return ex_kurt=7-12 JB normality 必拒）；(4) Alpha decay R²(N=60/120/300) OLS；(5) Block-bootstrap 95% CI (block_size=60min, 1000 iter, deterministic seed=20260512)；(6) Per-cohort counterfactual delta (LONG/SHORT/no-signal 三方向)。Dual-layer σ acceptance + spec §8.1 三檔 step gate verdict (plus15 / plus5_15 / minus5)。3 mock case smoke-test PASS。Python 1257 LOC > 800 警告線（per §九 待 E2 拍板拆 module，當前 single-file operator 一鍵跑簡單）。
+新檔 `srv/sql/queries/w2_btc_alt_lead_lag_counterfactual.sql` (279 LOC, 5 CTE, 純 READ-ONLY) + `srv/helper_scripts/reports/w2_paper_edge_report.py` (1257 LOC) 實作 spec v1.2 §7.1 6 mandatory metric：(1) pooled + per-symbol breakdown (n≥100+t>2.0 gate)；(2) DSR K=95 deflate (mu_0=√(2 ln 95)=3.0179)；(3) PSR(0) Bailey-López de Prado 2012 strict skew/kurt-aware formula（**禁** normal SR z-test，per MIT C-3 BTCUSDT 1m forward-return ex_kurt=7-12 JB normality 必拒）；(4) Alpha decay R²(N=60/120/300) OLS；(5) Block-bootstrap 95% CI (block_size=60min, 1000 iter, deterministic seed=20260512)；(6) Per-cohort counterfactual delta (LONG/SHORT/no-signal 三方向)。Dual-layer σ acceptance + spec §8.1 三檔 step gate verdict (plus15 / plus5_15 / minus5)。3 mock case smoke-test PASS。Python 1257 LOC 曾依當時較低的舊制警告交由 E2 評估拆分；現行低於 2000 行門檻，不得只因檔案大小強制拆分。
 
 ### 2.5 W2-IMPL-5 (三層 Fence Integration Test + Signoff Pack)
 
@@ -105,17 +105,17 @@ Integration test 三層 fence 各對應 1 assert（缺一拒簽 per dispatch §6
 | **IMPL-4 (D+12 archived diagnostic/replay report)** | N/A（offline tool 純讀 panel.btc_lead_lag_panel + trading.fills + market.klines（post W2-IMPL-4 SQL fix `98a9d35f`/`163a5cba`））| ✅ counterfactual SQL 必須視為 archived diagnostic/read-only；不得用 `engine_mode='paper'` 作 promotion gate | ✅ Python evaluator 對 shadow log target `btc_alt_lead_lag_shadow` grep + alignment 不破 Rust 端 SHADOW_LOG_TARGET 字串契約 | ✅ PSR(0) Bailey-LdP 2012 skew/kurt-aware（禁 normal z-test）✅ Block-bootstrap deterministic seed reproducibility ✅ counterfactual SQL 5 CTE 純 READ-ONLY |
 | **IMPL-5 (本 wave)** | ✅ `layer_1_fence_only_paper_mode_reads_btc_lead_lag_slot` 9 種 PipelineKind+env 組合（legacy/replay-compatible read path only） | ✅ `layer_2_fence_archive_policy_diagnostic_only` Archive/diagnostic 子 assert | ✅ `layer_3_fence_panel_none_yields_no_signal_sentinel` + `layer_3_shadow_log_target_locked_to_spec_v1_2` | ✅ 三層 fence × 4 sub-task 對照表（本表）+ pre-existing exception accept rationale（§4）+ top-5 vs top-10 accept（§5）|
 
-**結論**：三層 fence 每層各對應 1 個 explicit assert function（缺一即 cargo test 紅）；4 sub-task × 3 layer fence 結構責任明確；NaN safety + cross-language consistency + file ≤ 800 LOC 三額外 invariant 全 GREEN。
+**結論**：三層 fence 每層各對應 1 個 explicit assert function（缺一即 cargo test 紅）；4 sub-task × 3 layer fence 結構責任明確；NaN safety + cross-language consistency + file ≤ 2000 LOC 三額外 invariant 全 GREEN。
 
 ---
 
 ## 4. Pre-existing Exception Accept Rationale (per §九)
 
-### 4.1 `btc_lead_lag.rs` 1771 LOC > 800 警告線
+### 4.1 `btc_lead_lag.rs` 1771 LOC（曾觸發舊制警告，現行低於 2000 行門檻）
 
 **Per §九 pre-existing baseline exception clause**：
 - (a) **Wave 後 LOC ≤ pre-existing baseline + 5 LOC**：❌ FAIL — IMPL-1 land +518 LOC（從 1253 → 1771）
-- (b) **同時開 P2 ticket 處理 pre-existing > 800 violation**：✅ 建議 — N+2 sprint 拆分 `btc_lead_lag.rs` →
+- (b) **舊制曾建議開 P2 ticket 處理行數警告**：✅ 歷史建議 — N+2 sprint 可按責任邊界拆分 `btc_lead_lag.rs` →
   - `producer.rs`（BtcLeadLagProducer + on_tick + run_loop ~ 700 LOC）
   - `ingest_task.rs`（BtcOrderbookSlot + compute_btc_book_imbalance + spawn_btc_orderbook_ingest_task ~ 250 LOC）
   - `db_writer.rs`（insert_btc_lead_lag_snapshot + snapshot_to_trait_panel ~ 200 LOC）
@@ -124,9 +124,9 @@ Integration test 三層 fence 各對應 1 assert（缺一拒簽 per dispatch §6
 
 **Accept 理由**：W2 spec §4.2 step 6 設計把 producer/aggregator/writer 都耦合在 `btc_lead_lag.rs` 內走同生命週期（PG INSERT 是 60s tick 的副作用，與 producer.on_tick 邏輯緊耦合）；強行拆分 N+2 sprint 對齊 `funding_curve.rs` + `oi_delta.rs` sibling pattern 更合理（W1 sibling 已拆好），而非 W2 sub-task scope 內擴大改動。N+2 sprint 開 P2 ticket `W2-N2-1: btc_lead_lag.rs 拆 producer/ingest/writer 三檔`。
 
-### 4.2 `w2_paper_edge_report.py` 1257 LOC > 800 警告線
+### 4.2 `w2_paper_edge_report.py` 1257 LOC（曾觸發舊制警告，現行低於 2000 行門檻）
 
-**Per §九 governance**：本檔是 IMPL-4 新檔（非 pre-existing），但 §九 hard cap 是 2000，警告線是 800。1257 LOC 觸發警告 + E2 必標記。
+**Per §九 governance**：本檔是 IMPL-4 新檔（非 pre-existing），當時曾按已退役的較低警告線交由 E2 標記；現行唯一門檻是 2000 行，1257 LOC 本身不構成阻擋或強制拆分理由。
 
 **Accept 理由**：
 - 6 mandatory metric 公式 + 3 mock fixture + markdown render + smoke-test + MODULE_NOTE 雙語累積導致；
@@ -138,17 +138,17 @@ Integration test 三層 fence 各對應 1 assert（缺一拒簽 per dispatch §6
 
 ### 4.3 整體文件大小盤點
 
-| File | Pre-existing baseline | After W2 IMPL chain | Hard cap (2000) | Warning (800) | Status |
+| File | Pre-existing baseline | After W2 IMPL chain | Current threshold (2000) | Historical size note | Status |
 |---|---|---|---|---|---|
-| `panel_aggregator/btc_lead_lag.rs` | 1253 | 1771 | ✅ pass | ⚠️ pre-existing > 800 | per §九 exception clause accept |
-| `main.rs` | 1313 | 1395 | ✅ pass | ⚠️ pre-existing > 800 | per §九 exception clause accept (W2-IMPL-1 +82, W2-IMPL-2 額外 +0 不增) |
+| `panel_aggregator/btc_lead_lag.rs` | 1253 | 1771 | ✅ pass | 舊制曾標警告 | 歷史上 per §九 exception clause accept；現行不需例外 |
+| `main.rs` | 1313 | 1395 | ✅ pass | 舊制曾標警告 | 歷史上 per §九 exception clause accept (W2-IMPL-1 +82, W2-IMPL-2 額外 +0 不增)；現行不需例外 |
 | `main_fanout.rs` | 211 | 248 | ✅ pass | ✅ pass | clean |
 | `panel_aggregator/mod.rs` | 640 | 645 | ✅ pass | ✅ pass | clean |
 | `strategies/cross_asset/mod.rs` | 449 | 449 | ✅ pass | ✅ pass | clean (IMPL-2 改 MODULE_NOTE 不增行) |
 | `checks_btc_lead_lag.py` (新檔) | N/A | 321 | ✅ pass | ✅ pass | clean |
 | `test_btc_lead_lag_panel_healthcheck.py` (新檔) | N/A | 273 | ✅ pass | ✅ pass | clean |
 | `w2_btc_alt_lead_lag_counterfactual.sql` (新檔) | N/A | 279 | ✅ pass | ✅ pass | clean |
-| `w2_paper_edge_report.py` (新檔) | N/A | 1257 | ✅ pass | ⚠️ > 800 | per §4.2 accept |
+| `w2_paper_edge_report.py` (新檔) | N/A | 1257 | ✅ pass | 舊制曾標警告 | 歷史上 per §4.2 accept；現行不需例外 |
 | `tests/btc_lead_lag_panel_fence_integration.rs` (新檔) | N/A | 534 | ✅ pass | ✅ pass | clean |
 
 ---
@@ -188,10 +188,10 @@ Integration test 三層 fence 各對應 1 assert（缺一拒簽 per dispatch §6
 | 1 | 三層 fence 各對應 1 assert（漏一拒簽）| `tests/btc_lead_lag_panel_fence_integration.rs:layer_1_*`、`layer_2_*`、`layer_3_*` 三 fence assert function 各 1 個 + 額外 sentinel marker | ✅ |
 | 2 | NaN safe（book_imbalance = NaN 不 panic）| `nan_safe_ingest_task_does_not_panic_on_nan_qty` ingest_task 端到端 3-event chain（NaN qty / empty / valid）不 panic | ✅ |
 | 3 | cross-language consistency（Rust write + Python read byte-equal 對齊）| `cross_language_consistency_nan_in_panel_propagates_to_cond_4_fail` Rust 端 in-memory verify + Linux PG dry-run E4 gate 另外驗 PG round-trip（per `feedback_v_migration_pg_dry_run.md`）| ✅ Rust 端 / E4 gate Linux PG 端待跑 |
-| 4 | file ≤ 800 LOC | `tests/btc_lead_lag_panel_fence_integration.rs` 534 LOC | ✅ |
+| 4 | file ≤ 2000 LOC | `tests/btc_lead_lag_panel_fence_integration.rs` 534 LOC | ✅ |
 | 5 | Signoff pack 5 sub-task each 1 paragraph closure summary | §2.1-§2.5 全 land | ✅ |
 | 6 | 跨 W2 IMPL chain validation matrix（Layer 1+2+3 fence × 4 sub-task）| §3 Validation Matrix | ✅ |
-| 7 | Pre-existing exception (btc_lead_lag.rs 1771 LOC > 800 警告) accept rationale per §九 | §4 Pre-existing Exception Accept Rationale | ✅ |
+| 7 | Historical pre-existing exception (btc_lead_lag.rs 1771 LOC，舊制警告) accept rationale per §九 | §4 Pre-existing Exception Accept Rationale；現行門檻為 2000 | ✅ |
 | 8 | Top-5 vs spec 字面 top-10 PA + MIT acceptance（BTC_BOOK_IMBALANCE_TOP_N 常量）| §5 Top-5 vs Top-10 | ✅ |
 | 9 | D+12 paper edge report 工具 ready, D+12 actual run 留 operator decide | IMPL-4 工具 land；D+12 actual run 不在 IMPL phase scope | ✅ |
 
@@ -203,7 +203,7 @@ Integration test 三層 fence 各對應 1 assert（缺一拒簽 per dispatch §6
 | lookahead bias safe (test 用 mock event stream 帶 shift(1) verification) | Rust 端：`ingest_task → producer.on_tick` chain 自然 shift(1)（WS push 100Hz vs producer read 1/60s = 6000:1，必先寫入後讀）；Python 端：counterfactual SQL `LEAD()` forward 60s/120s/300s strict shift(N) |
 | CC compliance 16 原則 / DOC-08 §12 9 invariant / 硬邊界 5 項：全 0 觸碰確認 | §7 Treaty Compliance |
 | cargo test --lib + --release 全 baseline 不退化 (W2 commit `1f0354cf` 2797 baseline 不退化) | `cargo test --release -p openclaw_engine --lib` → 2797 PASS, 0 failed, 0 ignored (delta +0 over baseline) |
-| file ≤ 800 LOC verify | 534 LOC, < 800 |
+| file ≤ 2000 LOC verify | 534 LOC, < 2000 |
 
 ---
 
@@ -250,8 +250,8 @@ W2 IMPL chain（含本 IMPL-5）**0 觸碰** lease / authorization / audit / rec
 
 ### 7.5 §九 文件大小
 
-- 新檔 `btc_lead_lag_panel_fence_integration.rs` 534 LOC ≪ 800 warning（pass clean）
-- Pre-existing 違規詳 §4.3 表
+- 新檔 `btc_lead_lag_panel_fence_integration.rs` 534 LOC ≪ 2000（pass clean）
+- 舊制曾標記的歷史項詳 §4.3 表；按現行 2000 行門檻均不違規
 
 ### 7.6 注釋規範（2026-05-05 governance：默認中文）
 
@@ -327,7 +327,7 @@ dispatch §3.5 acceptance criteria 9 + §5.1 D+5 → D+12 evidence 收集後跑 
    - 三層 fence assert 各對應 1 個（缺一拒簽）— **預期 PASS**（§3 + integration test 9/9 PASS）
    - lookahead bias safe（shift(1) verification）— **預期 PASS**（Rust 端自然 shift(1) chain）
    - CC compliance 16 / DOC-08 §12 / 硬邊界 5：0 觸碰 — **預期 PASS**（§7 完整）
-   - file ≤ 800 LOC — **預期 PASS**（534 LOC）
+   - file ≤ 2000 LOC — **預期 PASS**（534 LOC）
 
 2. **E4 regression**（per dispatch §3.5 + `feedback_v_migration_pg_dry_run.md`）：
    - cargo test --lib + --release 全 baseline 不退化 — **已驗 PASS**（§8）
