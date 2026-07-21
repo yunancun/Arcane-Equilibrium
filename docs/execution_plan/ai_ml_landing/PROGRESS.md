@@ -3,11 +3,17 @@
 **Program**: `AIML-LONG-LIVED-LANDING-V2`
 **Ledger version**: 2
 **Updated**: 2026-07-21
-**Overall state**: `DESIGNED_NOT_ADOPTED`
-**Next gate**: `S0.3_PROGRAM_ADOPTION_REQUIRED`
-**Canonical boundary**: S0.2 source-policy authority is accepted and bound by
-an immutable receipt. It grants no ML5/ML6 implementation, runtime, build,
-broker/order or Program-adoption authority. Only S0.3 may adopt the Program.
+**Overall state**: `PROGRAM_ADOPTION_REQUIRED`
+**Current source baseline**: `0034a406089fe151daf1979756680be038c8c075`
+(`S0.3=SOURCE_READY`)
+**Next gate**: production trusted-host S0.3 finalizer and
+`program_adoption_receipt_v1`
+**Canonical boundary**: S0.3 source is `SOURCE_READY` at the current baseline,
+but the Program is not `PROGRAM_ADOPTED` or runtime-ready. S1 remains closed
+until the production trusted-host finalizer emits a valid
+`program_adoption_receipt_v1`. S0.2 source-policy authority remains accepted but
+grants no ML5/ML6 implementation, runtime, build, broker/order or Program-
+adoption authority.
 
 ## Ledger Contract
 
@@ -57,7 +63,7 @@ break. No generic scope template can be `DONE`; it must first be instantiated.
 |---:|---|---|---|---|---|---|---|---|---|
 | 0 | S0.1 | Integrate current origin/main, preserve TODO union, publish V2 documents | PROGRAM | none | PM -> PA -> TW -> R4 -> QA -> PM | DONE | `docs/execution_plan/ai_ml_landing/receipts/S0.1-planning-documents-published-v1.json`<br>`sha256:8fc9417f984025deabdc1b83ace95921ccfff1acb26a1b29243fc0a0a5ba79ad` | `NONE` | PR #100 lineage: base `96d26245068cbfbc8d60e73fb8eb82c4109b0d40`, head `35b4d1e4091b7dc34af248f51f512f2d8d51e9b0`, merge `cfb3a4040ffb2974192c53609b72e7afba4a845d`; current clean/aligned Mac, true GitHub and Linux source head `c2f5a2e26e422d56b8ec9b540d7f36bea9a0be54`; merge is an ancestor |
 | 0 | S0.2 | Accept ADR-0049/AMD serving/retraining/rollback/no-broker authority | PROGRAM | S0.1 | PM -> PA -> CC/E3 -> R4 -> QA -> PM | DONE | `docs/execution_plan/ai_ml_landing/receipts/S0.2-serving-authority-receipt-v1.json`<br>`sha256:0115dbd3dc62d84e183aae5a28cbfd252eb45ecee51a652d8a4a155f14dfb41a` | `NONE` | Accepted source-policy commit `f325b4dfdafd1979197c8a9e6450efeaf85e091c`; publication remains deferred until all S0 closes |
-| 0 | S0.3 | Scope/attempt/effect governance, terminal-sink contract and GitHub admin attestation | PROGRAM | S0.1, S0.2 | PM -> PA -> E1 -> E2 -> E4 -> CC/E3/MIT/R4 -> QA -> PM | SOURCE_READY | `program_adoption_receipt_v1` (pending trusted-host) | `EXTERNAL_READONLY_ATTESTATION` | Source + 3-Codex-P1 forge-resistance hardening merged PR #104 (merge `b945fe0f8db6bdf5f93657b3c404025ade4f2de4`, reviewed head `d6dd1f98470ddea7c1941fe572aa6f89071cf09d`); 11-role review PASS. `program_adoption_receipt_v1` requires the enforced closure path — 7 governed reviews authenticated by an out-of-band `execution_attestation_verifier` + `source_manifest_verifier` (git ancestry/blob) + live GitHub ruleset — which the offline Mac CLI cannot supply per the Typed Authority Matrix. Emission is a trusted-host (Linux) step. |
+| 0 | S0.3 | Scope/attempt/effect governance, terminal-sink contract and GitHub admin attestation | PROGRAM | S0.1, S0.2 | PM -> PA -> E1 -> E2 -> E4 -> CC/E3/MIT/R4 -> QA -> PM | SOURCE_READY | `program_adoption_receipt_v1` (pending trusted-host) | `EXTERNAL_READONLY_ATTESTATION` | Current source baseline `0034a406089fe151daf1979756680be038c8c075` is `SOURCE_READY`. Historical landing lineage: PR #104 merge `b945fe0f8db6bdf5f93657b3c404025ade4f2de4`, reviewed head `d6dd1f98470ddea7c1941fe572aa6f89071cf09d`; 11-role review PASS. `program_adoption_receipt_v1` requires the enforced closure path — 7 governed reviews authenticated by an out-of-band `execution_attestation_verifier` + `source_manifest_verifier` (git ancestry/blob) + live GitHub ruleset — which the offline Mac CLI cannot supply per the Typed Authority Matrix. The production trusted-host finalizer/receipt is pending. |
 | 1 | S1.1 | LR0A PG read-only identity Adapter | PROGRAM | PROGRAM_ADOPTED | PM -> PA -> E1 -> E2 -> E4 -> CC/E3/OPS -> QA -> PM | PLANNED | source/disposable `pg_readonly_identity_receipt_v1` | `DISPOSABLE_ONLY` | Migration/ACL CI if touched; no production PG |
 | 1 | S1.2 | LR0B typed effects, governance wiring and terminal WORM sink Adapter | PROGRAM | PROGRAM_ADOPTED | PM -> PA -> E1 -> E2 -> E4 -> CC/E3/OPS -> QA -> PM | PLANNED | effect-contract/governance/sink receipt | `DISPOSABLE_ONLY` | Protected/deploy workflow CI if touched |
 | 1 | S1.3 | Host UID/PG role/auth/socket ACL/secret lifecycle contracts | PROGRAM | S1.1, S1.2 | PM -> PA -> E1 -> E2 -> E4 -> CC/E3/OPS -> QA -> PM | PLANNED | identity/ACL contract receipt | `DISPOSABLE_ONLY` | Disposable PG + migration/ACL CI |
@@ -117,9 +123,11 @@ break. No generic scope template can be `DONE`; it must first be instantiated.
 
 ## S0.3 Trusted-Host Follow-Ups (to reach PROGRAM_ADOPTED)
 
-The S0.3 source is merged and forge-resistant. Minting `program_adoption_receipt_v1`
-is a trusted-host (Linux `trade-core`) step because the offline Mac CLI cannot
-authenticate a closure PASS (Typed Authority Matrix). Required, in order:
+The S0.3 source is `SOURCE_READY` at current baseline
+`0034a406089fe151daf1979756680be038c8c075`. Minting
+`program_adoption_receipt_v1` is a production trusted-host (Linux `trade-core`)
+step because the offline Mac CLI cannot authenticate a closure PASS (Typed
+Authority Matrix). Required, in order:
 
 1. Run the S0.3 finalization closure on a trusted host with all 7 mandatory
    reviewers (E2/E4/CC/E3/MIT/R4/QA) as authenticated PASS fragments (real
