@@ -2,11 +2,11 @@
 
 **Program**: `AIML-LONG-LIVED-LANDING-V2`
 **Ledger version**: 1
-**Updated**: 2026-07-20
+**Updated**: 2026-07-21
 **Overall state**: `DESIGNED_NOT_ADOPTED`
-**Next gate**: `PROGRAM_ADOPTION_REQUIRED`
-**Canonical warning**: this initial ledger exists only in the isolated planning
-worktree until Sprint 0 exact-head review and merge. No row below is completed.
+**Next gate**: `S0.2_SERVING_AUTHORITY_REQUIRED`
+**Canonical boundary**: S0.1 publication lineage is complete, but it grants no
+runtime, build or Program-adoption authority. S0.2 is the next gate.
 
 ## Ledger Contract
 
@@ -54,7 +54,7 @@ break. No generic scope template can be `DONE`; it must first be instantiated.
 
 | Sprint | Session | Work package | Scope template | Dependencies | Required role route template | Status | Completion receipt | Required effect | Sync / CI policy |
 |---:|---|---|---|---|---|---|---|---|---|
-| 0 | S0.1 | Integrate current origin/main, preserve TODO union, publish V2 documents | PROGRAM | none | PM -> PA -> TW -> R4 -> QA -> PM | PLANNED | `planning_documents_published_v1` | `NONE` | Docs local-first; exact-head PR/merge; current branch is behind 7 |
+| 0 | S0.1 | Integrate current origin/main, preserve TODO union, publish V2 documents | PROGRAM | none | PM -> PA -> TW -> R4 -> QA -> PM | DONE | `docs/execution_plan/ai_ml_landing/receipts/S0.1-planning-documents-published-v1.json`<br>`sha256:8fc9417f984025deabdc1b83ace95921ccfff1acb26a1b29243fc0a0a5ba79ad` | `NONE` | PR #100 lineage: base `96d26245068cbfbc8d60e73fb8eb82c4109b0d40`, head `35b4d1e4091b7dc34af248f51f512f2d8d51e9b0`, merge `cfb3a4040ffb2974192c53609b72e7afba4a845d`; current clean/aligned Mac, true GitHub and Linux source head `c2f5a2e26e422d56b8ec9b540d7f36bea9a0be54`; merge is an ancestor |
 | 0 | S0.2 | Accept ADR-0049/AMD serving/retraining/rollback/no-broker authority | PROGRAM | S0.1 | PM -> PA -> CC/E3 -> R4 -> QA -> PM | PLANNED | `serving_authority_receipt_v1` | `NONE` | Docs/governance local-first |
 | 0 | S0.3 | Scope/attempt/effect governance, terminal-sink contract and GitHub admin attestation | PROGRAM | S0.1, S0.2 | PM -> PA -> E1 -> E2 -> E4 -> CC -> QA -> PM | PLANNED | `program_adoption_receipt_v1` | `EXTERNAL_READONLY_ATTESTATION` | CI only for protected workflow changes |
 | 1 | S1.1 | LR0A PG read-only identity Adapter | PROGRAM | PROGRAM_ADOPTED | PM -> PA -> E1 -> E2 -> E4 -> CC/E3/OPS -> QA -> PM | PLANNED | source/disposable `pg_readonly_identity_receipt_v1` | `DISPOSABLE_ONLY` | Migration/ACL CI if touched; no production PG |
@@ -105,6 +105,7 @@ break. No generic scope template can be `DONE`; it must first be instantiated.
 
 | Time | Session | Event | Evidence |
 |---|---|---|---|
+| 2026-07-21 | S0.1 | Exact PR #100 publication and current three-source lineage reconciled; S0.1 is `DONE`. This immutable-lineage receipt grants no runtime, build or Program-adoption authority; S0.2 is next. | `docs/execution_plan/ai_ml_landing/receipts/S0.1-planning-documents-published-v1.json` (`sha256:8fc9417f984025deabdc1b83ace95921ccfff1acb26a1b29243fc0a0a5ba79ad`); current source `c2f5a2e26e422d56b8ec9b540d7f36bea9a0be54` |
 | 2026-07-20 | PROGRAM | Four targeted correction-verification lenses accepted V2 after the no-candidate final-attestation branch was separated from trading attestation. Planning coverage is accepted; no implementation state advanced. | `ACCEPT_V2_FOR_PROGRAM_ADOPTION` |
 | 2026-07-20 | S0.1 | Live read-only remote recheck found planning base `b486c071...` behind GitHub/local `origin/main=96d262450...` by seven commits; `TODO.md` overlaps. Integration is deferred to S0.1 and must preserve the unrelated IBKR delta. | `SOURCE_DRIFT_REQUIRES_CURRENT_HEAD_INTEGRATION` |
 | 2026-07-20 | PROGRAM | Post-draft cold review rejected premature adoption/landing, coarse scope, impossible TTL overlap, effect-classification bypass and final-head drift; templates were reworked. No implementation state advanced. | `REWORKED_AWAITING_FINAL_ADVERSARIAL_ACCEPTANCE` |

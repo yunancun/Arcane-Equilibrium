@@ -1,0 +1,79 @@
+{
+  "authority_boundary": {
+    "build_authority_granted": false,
+    "program_adoption_authority_granted": false,
+    "runtime_authority_granted": false
+  },
+  "canonicalization": "RFC8785_JSON",
+  "digest_algorithm": "sha256",
+  "dispatch_lineage": {
+    "dag_digest": "sha256:8469c8aa966aac9d23eb498cff927d44737c089af7667a7efcfa5505d531afc1",
+    "task_contract_digest": "sha256:2f6b63f4170ad9d64aad2847f31a55a3df84f0b122375484c41032dbb691f302"
+  },
+  "effect_class": "NONE",
+  "program_id": "AIML-LONG-LIVED-LANDING-V2",
+  "publication_lineage": {
+    "base_head": "96d26245068cbfbc8d60e73fb8eb82c4109b0d40",
+    "current_source_alignment": {
+      "aligned": true,
+      "clean": true,
+      "github_true_source_head": "c2f5a2e26e422d56b8ec9b540d7f36bea9a0be54",
+      "linux_trade_core_source_head": "c2f5a2e26e422d56b8ec9b540d7f36bea9a0be54",
+      "mac_source_head": "c2f5a2e26e422d56b8ec9b540d7f36bea9a0be54",
+      "merge_commit_is_current_ancestor": true
+    },
+    "merge_commit": "cfb3a4040ffb2974192c53609b72e7afba4a845d",
+    "merged_at": "2026-07-20T12:48:32Z",
+    "pr_head": "35b4d1e4091b7dc34af248f51f512f2d8d51e9b0",
+    "pull_request": 100
+  },
+  "published_files": [
+    {
+      "git_blob": "061b01b1b7b03dae388c41c883556527a1150894",
+      "path": "TODO.md",
+      "sha256": "b9afb87e37da07a2e9c2bf7ceaf920752e03b5e7f81a0392263e0761d3f38f64"
+    },
+    {
+      "git_blob": "b833d3edc817af33ce9f3c97c6d087f9de659b2f",
+      "path": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-19--ai_ml_true_state_and_engineering_plan.md",
+      "sha256": "5b2ba472be0f2b4bd269d7d783bfa294a3f3d9b2e8b4466b4460e289afa9c9bc"
+    },
+    {
+      "git_blob": "93b598377dbeef20afe44034d1b767b95ceb2443",
+      "path": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-20--ai_ml_completion_coverage_and_delivery_audit.md",
+      "sha256": "72dda50e4c7d877008a7bdebd89fafda770e82f22796656e6946501ba7431e10"
+    },
+    {
+      "git_blob": "227e5d07f3680cae01a6763a0bda0837c3ab59d5",
+      "path": "docs/CLAUDE_CHANGELOG.md",
+      "sha256": "c90dfc1556d5396a8269434b955fb9d9581b0e1d8964571d88c65281a2c4cc4e"
+    },
+    {
+      "git_blob": "0c7413678bb2259bde450e7352fcdea07ad2fcef",
+      "path": "docs/_indexes/document_index.md",
+      "sha256": "2125e383efa46666d648e3357a36e2cd77353cf303bc16fc85a8f93006a71dc0"
+    },
+    {
+      "git_blob": "9c2121815a18bd22f3171a434d09754d6963d5fc",
+      "path": "docs/agents/ai-ml-landing-delivery-protocol.md",
+      "sha256": "62c2337d4cbfe1f632ca3105ba13454f66f760b998c4ca94b098558af9c2370e"
+    },
+    {
+      "git_blob": "20eecccf41783042d8d0068e347cdb448c34a129",
+      "path": "docs/execution_plan/2026-07-19--ai_ml_long_lived_repair_and_landing_plan.md",
+      "sha256": "7d8d023865995864cf2e5dd5cc0d5009d8bcbd2dc7591eead0923ecceeb8c263"
+    },
+    {
+      "git_blob": "cb6a1d12b5a64914cd9087cdd43145c911dd566c",
+      "path": "docs/execution_plan/ai_ml_landing/PROGRESS.md",
+      "sha256": "ce591e5dd9d8511f0cab0940d132a7162844b955d86ea756c92bb16fe6390e51"
+    }
+  ],
+  "receipt_type": "planning_documents_published_v1",
+  "schema_version": 1,
+  "self_digest": "sha256:8fc9417f984025deabdc1b83ace95921ccfff1acb26a1b29243fc0a0a5ba79ad",
+  "self_digest_input": "CANONICAL_JSON_EXCLUDING_SELF_DIGEST",
+  "session_id": "S0.1",
+  "status": "PLANNING_DOCUMENTS_PUBLISHED",
+  "validity_class": "IMMUTABLE_LINEAGE"
+}
