@@ -918,6 +918,42 @@ def test_cli_does_not_accept_a_caller_selected_execution_key() -> None:
     assert args.execution_signature == Path("bundle.json.sig")
 
 
+def test_cli_rejects_non_object_packet_with_structured_fail(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    packet_path = tmp_path / "packet.json"
+    bundle_path = tmp_path / "bundle.json"
+    signature_path = tmp_path / "bundle.sig"
+    packet_path.write_text("[]", encoding="utf-8")
+    bundle_path.write_text("{}", encoding="utf-8")
+    signature_path.write_text("not-a-signature", encoding="ascii")
+    read_fd, write_fd = os.pipe()
+    os.write(write_fd, b"token-value")
+    os.close(write_fd)
+    try:
+        return_code = governance.main([
+            "aiml-trusted-finalize",
+            "--packet", str(packet_path),
+            "--execution-bundle", str(bundle_path),
+            "--execution-signature", str(signature_path),
+            "--github-token-fd", str(read_fd),
+        ])
+    finally:
+        os.close(read_fd)
+
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+    assert return_code == 1
+    assert result == {
+        "schema_version": "aiml_trusted_host_finalization_result_v1",
+        "status": "FAIL",
+        "closure_digest": None,
+        "program_adoption_receipt_digest": None,
+        "errors": ["closure packet must be an object"],
+    }
+    assert captured.err == ""
+
+
 def test_production_finalizer_surface_has_no_injectable_trust_capabilities() -> None:
     assert "finalize_program_adoption" not in governance.__all__
     assert not hasattr(governance, "finalize_program_adoption")

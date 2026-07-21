@@ -359,6 +359,8 @@ class AuthenticatedExecutionEvidenceIndex:
 
 
 def _packet_bindings(packet: Mapping[str, Any]) -> tuple[str, str, str]:
+    if not isinstance(packet, Mapping):
+        raise ValueError("closure packet must be an object")
     dispatch = packet.get("dispatch")
     if not isinstance(dispatch, dict):
         raise ValueError("closure dispatch is absent")
