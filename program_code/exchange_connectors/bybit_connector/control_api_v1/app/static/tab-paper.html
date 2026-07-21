@@ -22,10 +22,10 @@
 <script src="/static/app-paper.js"></script>
 <!-- REF-20 Wave 8 R20-P6-H1/H2/H3/H4: handoff helper (modal + cooldown + recent + idempotency)
      REF-20 Wave 8 R20-P6-H1/H2/H3/H4：候選交接 helper（modal + 冷卻 + 近 5 筆 + 冪等鍵）
-     共拆獨立檔以避免 common.js 突破 1500 行硬上限。載入順序：common (utilities) →
+     共拆獨立檔以聚焦 common.js，並遵守 2000 行上限。載入順序：common (utilities) →
      i18n_zh (string table) → app-paper (sub-tab nav) → handoff_helper (Wave 8 P6 flow)。
-     Loaded as a separate file to avoid pushing common.js past the 1500-line hard
-     cap. Order: common → i18n_zh → app-paper → handoff_helper. -->
+     Loaded separately to keep common.js focused and within the 2000-line limit.
+     Order: common → i18n_zh → app-paper → handoff_helper. -->
 <script src="/static/handoff_helper.js"></script>
 </head>
 <body>

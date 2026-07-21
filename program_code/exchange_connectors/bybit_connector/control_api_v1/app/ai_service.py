@@ -25,11 +25,11 @@ MODULE_NOTE (EN/中):
   - C1-C2 (S7): analyst → AnalystAgent.analyze_trade(), scout → ScoutAgent intel/alerts
   - R-06 remaining / 剩餘: conductor still stub (W23+)
 
-  Split layout (G5-04, 2026-04-24): this file kept thin (≤350 lines) per §九
-  1200-line cap; ``AIService`` lives in ``ai_service_dispatch`` and
+  Split layout (G5-04, 2026-04-24): this facade stays focused and within the
+  current §九 2000-line limit; ``AIService`` lives in ``ai_service_dispatch`` and
   ``AIServiceListener`` in ``ai_service_listener`` — pure structural extraction,
   no behaviour change.
-  G5-04 拆分（2026-04-24）：本檔精簡至 ≤350 行對應 §九 1200 上限；``AIService``
+  G5-04 拆分（2026-04-24）：本 facade 聚焦且遵守現行 §九 2000 行上限；``AIService``
   搬至 ``ai_service_dispatch``、``AIServiceListener`` 搬至 ``ai_service_listener``，
   純結構性拆分，行為不變。
 """

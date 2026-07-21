@@ -4140,7 +4140,7 @@ _CONCURRENCY_OUTPUT_EXPRESSIONS = {
 def _concurrency_probe_source() -> str:
     assert CONCURRENCY_PROBE.exists(), CONCURRENCY_PROBE
     source = CONCURRENCY_PROBE.read_text(encoding="utf-8")
-    assert len(source.splitlines()) < 2000
+    assert len(source.splitlines()) <= 2_000
     return source
 
 
@@ -4213,7 +4213,7 @@ def _concurrency_assert_direct_if_predicate(
 
 def _assert_concurrency_probe_contract(source: str) -> None:
     tree = _concurrency_probe_tree(source)
-    assert len(source.splitlines()) < 2000
+    assert len(source.splitlines()) <= 2_000
     assert "ThreadPoolExecutor" in source
     assert "Barrier" in source and "Event" in source and "Queue" in source
     assert "with ThreadPoolExecutor" not in source

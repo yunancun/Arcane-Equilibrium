@@ -4,7 +4,7 @@
 //! ## 模組佈局（IPC-SERVER-TESTS-SPLIT-1, 2026-04-23）
 //!
 //! 本目錄 (`ipc_server/tests/`) 於 2026-04-23 由單一 1847 行
-//! `ipc_server/tests.rs` 拆出，以遵守 §九 1200 行硬上限（舊檔超出 647 行）。
+//! `ipc_server/tests.rs` 拆出，以聚焦責任並遵守 §九 2000 行硬上限。
 //! 拆分參照 `tick_pipeline/on_tick/` 的 sibling child-module pattern：
 //! `mod.rs` 保留所有共用 fixture helpers（`make_test_config` /
 //! `make_test_data_dir` / `empty_budget_slot` / `empty_teacher_slot` /
@@ -13,8 +13,8 @@
 //! 維持 1860 passed / 0 failed baseline。
 //!
 //! This directory was split from a single 1847-line `ipc_server/tests.rs`
-//! on 2026-04-23 to honour §九's 1200-line hard cap (the old file exceeded
-//! by 647 lines). The split follows the `tick_pipeline/on_tick/` sibling
+//! on 2026-04-23 for focused ownership under §九's 2000-line hard cap.
+//! The split follows the `tick_pipeline/on_tick/` sibling
 //! child-module pattern: `mod.rs` owns the shared fixture helpers
 //! (`make_test_config` / `make_test_data_dir` / `empty_budget_slot` /
 //! `empty_teacher_slot` / `write_test_snapshot`); sibling subfiles access

@@ -2640,7 +2640,14 @@ def test_authoritative_docs_route_to_one_governance_module_without_fixed_budget_
     assert "shared context only paid once" not in combined
     assert "共享 context 只付一次" not in combined
 
-    assert len((ROOT / ".codex/MEMORY.md").read_text(encoding="utf-8").splitlines()) <= 400
+    assert (
+        len(
+            (ROOT / ".codex/MEMORY.md")
+            .read_text(encoding="utf-8")
+            .splitlines()
+        )
+        <= MAX_FILE_LINES
+    )
     root_skill = (ROOT / ".claude/skills/16-root-principles-checklist/SKILL.md").read_text(encoding="utf-8")
     assert "runtime RiskConfig TOML > Rust schema" not in root_skill
     regression = (ROOT / ".claude/skills/regression-testing-protocol/SKILL.md").read_text(encoding="utf-8")

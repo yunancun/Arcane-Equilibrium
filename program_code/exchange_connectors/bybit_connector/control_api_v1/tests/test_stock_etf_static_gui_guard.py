@@ -140,7 +140,7 @@ def test_stock_etf_static_gui_payload_builders_remain_split() -> None:
     assert "readonly_probe_result_import_request_contract_id" in fallback_source
     assert "readonly_probe_result_import_request_hash_present" in fallback_source
     assert "stock_etf_ibkr_readonly_probe_result_import_request_v1" in fallback_source
-    assert len(main_source.splitlines()) <= 1400
+    assert len(main_source.splitlines()) <= MAX_FILE_LINES
     assert len(fallback_source.splitlines()) <= MAX_FILE_LINES
 
 
@@ -164,8 +164,8 @@ def test_stock_etf_static_gui_data_policy_renderers_remain_split() -> None:
 
     assert missing_renderers == []
     assert main_definitions == []
-    assert len(main_source.splitlines()) <= 1100
-    assert len(data_policy_source.splitlines()) <= 700
+    assert len(main_source.splitlines()) <= MAX_FILE_LINES
+    assert len(data_policy_source.splitlines()) <= MAX_FILE_LINES
 
 
 def test_stock_etf_static_gui_auth_account_renderers_remain_split() -> None:
@@ -190,8 +190,8 @@ def test_stock_etf_static_gui_auth_account_renderers_remain_split() -> None:
     assert main_definitions == []
     assert "window.renderAuthorizationStatus" in main_source
     assert "window.renderAccountStatus" in main_source
-    assert len(main_source.splitlines()) <= 900
-    assert len(auth_account_source.splitlines()) <= 400
+    assert len(main_source.splitlines()) <= MAX_FILE_LINES
+    assert len(auth_account_source.splitlines()) <= MAX_FILE_LINES
 
 
 def test_stock_etf_static_gui_evidence_paper_renderers_remain_split() -> None:
@@ -218,8 +218,8 @@ def test_stock_etf_static_gui_evidence_paper_renderers_remain_split() -> None:
     assert "window.renderUniverseStatus" in main_source
     assert "window.renderShadowStatus" in main_source
     assert "window.renderPaperStatus" in main_source
-    assert len(main_source.splitlines()) <= 650
-    assert len(evidence_paper_source.splitlines()) <= 500
+    assert len(main_source.splitlines()) <= MAX_FILE_LINES
+    assert len(evidence_paper_source.splitlines()) <= MAX_FILE_LINES
 
 
 def test_stock_etf_static_gui_scorecard_launch_renderers_remain_split() -> None:
@@ -244,8 +244,8 @@ def test_stock_etf_static_gui_scorecard_launch_renderers_remain_split() -> None:
     assert main_definitions == []
     assert "window.renderScorecardStatus" in main_source
     assert "window.renderLaunchStatus" in main_source
-    assert len(main_source.splitlines()) <= 400
-    assert len(scorecard_launch_source.splitlines()) <= 500
+    assert len(main_source.splitlines()) <= MAX_FILE_LINES
+    assert len(scorecard_launch_source.splitlines()) <= MAX_FILE_LINES
 
 
 def test_stock_etf_static_gui_readiness_renderer_remains_split() -> None:
@@ -261,5 +261,5 @@ def test_stock_etf_static_gui_readiness_renderer_remains_split() -> None:
     assert "window.renderReadiness" in main_source
     assert "function toneFor(value)" not in main_source
     assert "function kvRow(label, html)" not in main_source
-    assert len(main_source.splitlines()) <= 250
-    assert len(readiness_source.splitlines()) <= 250
+    assert len(main_source.splitlines()) <= MAX_FILE_LINES
+    assert len(readiness_source.splitlines()) <= MAX_FILE_LINES

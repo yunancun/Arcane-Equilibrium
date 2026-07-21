@@ -1544,8 +1544,8 @@ fn snapshot_to_input(snap: &IndicatorSnapshot) -> IndicatorInput {
     }
 }
 
-// Types extracted to pipeline_types.rs (RRC-1 E2 fix: 1200-line limit).
-// 類型已提取到 pipeline_types.rs（RRC-1 E2 修復：1200 行限制）。
+// Types extracted to pipeline_types.rs (RRC-1 E2 fix: 2000-line limit).
+// 類型已提取到 pipeline_types.rs（RRC-1 E2 修復：2000 行限制）。
 pub use crate::pipeline_types::{
     CanaryRecord, PipelineSnapshot, PipelineStatus, StrategyInfo, TimestampedFill,
     TimestampedIntent,

@@ -4,13 +4,13 @@
 //! MODULE_NOTE (EN): Fast/slow KAMA crossover with ADX trending filter, Hurst
 //!   regime gating, and multi-timeframe confirmation for reduced false signals.
 //!   Split into child-module files by E5-P2-4c (2026-04-23) to honour CLAUDE.md
-//!   §九 1200-line hard cap. This file retains types (`MaCrossoverParams`,
+//!   §九 2000-line hard cap. This file retains types (`MaCrossoverParams`,
 //!   `MaCrossover`), `impl Default` / `impl StrategyParams` / `impl MaCrossoverParams`
 //!   for the parameter bundle, the struct-internal ctor `MaCrossover::new`, and
 //!   sub-module declarations. Methods live in sibling impl files (`config.rs`,
 //!   `helpers.rs`, `strategy_impl.rs`); tests live in `tests.rs` /
 //!   `tests_a1_a2_maker.rs`. Zero-logic split — public API unchanged.
-//! MODULE_NOTE (中)：E5-P2-4c（2026-04-23）依 §九 1200 行硬上限拆分；本檔保留
+//! MODULE_NOTE (中)：E5-P2-4c（2026-04-23）依 §九 2000 行硬上限拆分；本檔保留
 //!   參數型別與 struct（`MaCrossoverParams` / `MaCrossover`）、`Default` /
 //!   `StrategyParams` / `MaCrossoverParams` 的 impl、以及 `MaCrossover::new` 建構子
 //!   與子模組宣告。方法定義移至 sibling `config.rs` / `helpers.rs` /

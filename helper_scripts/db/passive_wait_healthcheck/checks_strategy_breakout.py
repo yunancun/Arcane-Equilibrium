@@ -1,12 +1,12 @@
 """bb_breakout strategy healthchecks.
 
 MODULE_NOTE (EN): Split from ``checks_strategy.py`` by
-CHECKS-STRATEGY-SUBSPLIT to keep the strategy healthcheck module below the
-1200-line governance threshold while preserving the public import path through
+CHECKS-STRATEGY-SUBSPLIT to keep the strategy healthcheck module focused under the
+2000-line governance threshold while preserving the public import path through
 ``checks_strategy``.
 
 MODULE_NOTE (中): CHECKS-STRATEGY-SUBSPLIT 從 ``checks_strategy.py`` 拆出，
-讓策略 healthcheck 主模組維持 1200 行以下；外部仍可經 ``checks_strategy``
+讓策略 healthcheck 主模組聚焦並遵守 2000 行上限；外部仍可經 ``checks_strategy``
 原路徑 import。
 """
 

@@ -5,7 +5,7 @@ Live Session Account Routes — balance / positions / orders / fills / close han
 實盤 Session 帳戶路由 — 餘額 / 倉位 / 掛單 / 成交 / 平倉處理器
 
 MODULE_NOTE (中文):
-  本檔由 G5-02 從 ``live_session_routes.py`` 拆出（§九 1200 行硬上限）。
+  本檔由 G5-02 從 ``live_session_routes.py`` 拆出，遵守 §九 2000 行上限。
   純結構搬遷 — 0 邏輯變更。所有 handler 行為、路由路徑、Depends 守衛、
   fallback 路徑（DB → Bybit API → engine snapshot）byte-for-byte 一致。
 
@@ -28,7 +28,7 @@ MODULE_NOTE (中文):
     模組屬性；如果 sibling 用 from-import 捕獲早期函數引用，monkeypatch 失效。
 
 MODULE_NOTE (English):
-  Split out of ``live_session_routes.py`` by G5-02 (§九 1200-line hard cap).
+  Split out of ``live_session_routes.py`` by G5-02 (§九 2000-line limit).
   Pure structural move — zero logic changes. Handlers, routes, Depends,
   fallback paths (DB → Bybit API → engine snapshot) are byte-for-byte identical.
 

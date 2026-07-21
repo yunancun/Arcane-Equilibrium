@@ -2,11 +2,10 @@
 //! StrategyOverride —— 每策略風控覆蓋 schema（自 risk_config.rs 抽出）。
 //!
 //! MODULE_NOTE (English):
-//!   G2-03 (2026-04-26) refactor: extracted to a sibling per CLAUDE.md §九 1200-line
-//!   hard cap discipline. risk_config.rs grew past the cap when G2-03's
-//!   `validate_against_limits` impl + 4 new SL/TP override fields landed inline;
-//!   moving the entire StrategyOverride block (struct + Default + impl) here
-//!   keeps the parent file under cap while preserving all behaviour.
+//!   G2-03 (2026-04-26) refactor: extracted to a sibling per CLAUDE.md §九 2000-line
+//!   hard cap discipline. G2-03 added `validate_against_limits` plus four SL/TP
+//!   override fields; moving the complete StrategyOverride block (struct +
+//!   Default + impl) here keeps ownership focused and preserves all behaviour.
 //!
 //!   Visibility note: `default_true()` was previously `pub(super)` in
 //!   risk_config.rs and used by StrategyOverride's `#[serde(default)]`. After
@@ -15,10 +14,9 @@
 //!   (governance / tests / dispatch). No public API change.
 //!
 //! MODULE_NOTE (中文):
-//!   G2-03（2026-04-26）重構：抽至 sibling 守 §九 1200 行硬上限。原 risk_config.rs
-//!   因加入 G2-03 4 個 SL/TP override 欄位 + `validate_against_limits` impl 超限
-//!   17 行，整個 StrategyOverride 區塊（struct + Default + impl）抽出來保持父檔
-//!   在上限內，行為完全不變。
+//!   G2-03（2026-04-26）重構：抽至 sibling 守 §九 2000 行硬上限。原 risk_config.rs
+//!   加入 4 個 SL/TP override 欄位與 `validate_against_limits` 後，將完整
+//!   StrategyOverride 區塊（struct + Default + impl）抽出以聚焦責任；行為不變。
 //!
 //!   可見性：原 `default_true()` 為 `pub(super)`，本檔自帶 private 版本；父模組
 //!   re-export `StrategyOverride` 供下游（governance/tests/dispatch）使用，

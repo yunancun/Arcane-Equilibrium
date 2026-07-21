@@ -1,11 +1,11 @@
 // G5-09: tick_pipeline::tests sibling module aggregator.
-// Original tests.rs (3524 lines, 194% over §九 1200 hard cap) split into 11
+// Original tests.rs (3524 lines, 1524 over the §九 2000 hard cap) split into 11
 // cohesive sibling files; this mod.rs only owns shared test helpers + mod
 // declarations. Pattern follows G5-07 (event_consumer/tests.rs split, commit
 // 913b536) — 0 production file touched, every test fn byte-identical to the
 // pre-split source.
-// G5-09：tick_pipeline::tests 子模組聚合器。原 tests.rs（3524 行，超 §九 1200
-// 硬上限 194%）按主題拆成 11 個 sibling；本 mod.rs 僅持共用 helpers + mod
+// G5-09：tick_pipeline::tests 子模組聚合器。原 tests.rs（3524 行，超 §九 2000
+// 硬上限 1524 行）按主題拆成 11 個 sibling；本 mod.rs 僅持共用 helpers + mod
 // 宣告。樣式承襲 G5-07（event_consumer/tests.rs 拆分，commit 913b536）—
 // production code 零改動，每個 test fn 字節級保留拆前內容。
 

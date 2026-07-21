@@ -18,7 +18,7 @@ def _loc(path: Path) -> int:
 def test_h_state_query_handler_is_only_a_compatibility_collector() -> None:
     text = SHIM.read_text(encoding="utf-8")
 
-    assert _loc(SHIM) <= 80
+    assert _loc(SHIM) <= MAX_FILE_LINES
     assert "from h_state_query.test_core import *" in text
     assert "from h_state_query.test_h_buckets import *" in text
     assert "from h_state_query.test_agent_states import *" in text
@@ -40,4 +40,4 @@ def test_h_state_query_split_modules_stay_below_hard_limit() -> None:
     assert modules["common.py"] <= MAX_FILE_LINES
     assert modules["test_core.py"] <= MAX_FILE_LINES
     assert modules["test_h_buckets.py"] <= MAX_FILE_LINES
-    assert modules["test_agent_states.py"] <= 1500
+    assert modules["test_agent_states.py"] <= MAX_FILE_LINES

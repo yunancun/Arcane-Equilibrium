@@ -1,5 +1,5 @@
-//! FIX-29: Extracted helper methods for on_tick — keeps on_tick.rs under §九 1200-line hard limit.
-//! FIX-29：on_tick 抽出的輔助方法 — 讓 on_tick.rs 保持在 §九 1200 行硬上限以下。
+//! FIX-29: Extracted helper methods for on_tick — keeps on_tick.rs under §九 2000-line hard limit.
+//! FIX-29：on_tick 抽出的輔助方法 — 讓 on_tick.rs 保持在 §九 2000 行硬上限以下。
 
 use super::*;
 use crate::scanner::types::ScannerAuthorityMode;

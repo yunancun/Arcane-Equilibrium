@@ -1,6 +1,6 @@
 # MODULE_NOTE (English):
 #   Live Trust Routes — REST API endpoints for the Earned-Trust TTL ladder.
-#   Separated from live_session_routes.py to keep that file under the 1200-line limit.
+#   Separated from live_session_routes.py to preserve focus under the 2000-line limit.
 #
 #   Endpoints:
 #     GET  /api/v1/live/auth/trust-status  — current tier, metrics, renewal recommendation
@@ -9,7 +9,7 @@
 #
 # MODULE_NOTE (中文):
 #   實盤信任路由 — 贏得信任 TTL 階梯的 REST API 端點。
-#   從 live_session_routes.py 分離以保持該文件在 1200 行限制內。
+#   從 live_session_routes.py 分離，以聚焦責任並遵守 2000 行上限。
 #
 #   端點：
 #     GET  /api/v1/live/auth/trust-status  — 當前 tier、指標、續期建議

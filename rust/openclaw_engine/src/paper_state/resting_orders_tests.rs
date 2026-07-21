@@ -2,14 +2,14 @@
 //! 紙盤掛單隊列測試 — sweep classifier / FIFO / funding drag guard。
 //!
 //! MODULE_NOTE (EN): Extracted from `resting_orders.rs` as Wave 1 G1-03 to
-//!   pull `resting_orders.rs` under CLAUDE.md §九 1200-line hard limit. The
+//!   pull `resting_orders.rs` under CLAUDE.md §九 2000-line hard limit. The
 //!   test body is included back into the parent via
 //!   `#[cfg(test)] #[path = "resting_orders_tests.rs"] mod tests;` at the
 //!   foot of `resting_orders.rs`, so every helper / bias-guard test keeps
 //!   `use super::*;` semantics — no visibility changes required. Bit-
 //!   identical test content vs pre-split (708 asserted LOC).
 //! MODULE_NOTE (中): 從 `resting_orders.rs` 抽出（Wave 1 G1-03），讓父檔進
-//!   §九 1200 行硬上限。測試主體透過父檔底部
+//!   §九 2000 行硬上限。測試主體透過父檔底部
 //!   `#[cfg(test)] #[path = "resting_orders_tests.rs"] mod tests;` 重新
 //!   納入，`use super::*;` 語義不變、可見性無需調整。行為等價（708 行原樣）。
 

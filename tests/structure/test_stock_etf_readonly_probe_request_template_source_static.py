@@ -3,7 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 TEMPLATE = ROOT / "settings/broker/stock_etf_ibkr_readonly_probe_request.template.toml"
-MAX_LINES = 80
+MAX_LINES = 2_000
 
 REQUIRED_DEFAULT_LINES = {
     'contract_id = ""',

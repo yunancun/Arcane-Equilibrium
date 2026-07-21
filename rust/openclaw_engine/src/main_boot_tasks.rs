@@ -4,12 +4,12 @@
 //! （DB 恢復 + AI 驅動參數調諧）。
 //!
 //! MODULE_NOTE (EN): Extracted from `main.rs` (G1-03 Wave 1) to bring the
-//!   orchestration file under §九 1200-line hard limit. Both blocks are
+//!   orchestration file under §九 2000-line hard limit. Both blocks are
 //!   self-contained boot-time wiring: reconciler needs per-engine mirrors +
 //!   the RiskConfig closure; scheduler needs demo_cmd_tx + ai_client +
 //!   db_pool + DB restore of last-applied tuned params.
 //! MODULE_NOTE (中): 從 `main.rs` 抽出（G1-03 Wave 1），為將 main.rs 壓在
-//!   §九 1200 行硬上限下。兩個區塊皆為自足的 boot-time 接線：reconciler 需要
+//!   §九 2000 行硬上限下。兩個區塊皆為自足的 boot-time 接線：reconciler 需要
 //!   per-engine mirror + RiskConfig 閉包；scheduler 需要 demo_cmd_tx + ai_client +
 //!   db_pool + DB 恢復上次 applied tuned params。
 

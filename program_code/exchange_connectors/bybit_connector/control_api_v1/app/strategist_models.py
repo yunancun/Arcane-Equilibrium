@@ -1,13 +1,13 @@
 """
 MODULE_NOTE (中文):
   StrategistAgent 的資料模型與啟發式評估函數。
-  從 strategist_agent.py 拆分而來（§14.1 行數約定：1203→~1010 行）。
+  從 strategist_agent.py 拆分而來（實測 1203→約 1010 行；現行上限 2000）。
   包含：StrategistConfig 配置、EdgeEvaluation 結果、_heuristic_evaluate 回退評估、_parse_sentiment 輔助。
   零副作用：純資料定義 + 純函數，不依賴任何單例或運行時狀態。
 
 MODULE_NOTE (English):
   Data models and heuristic evaluation functions for StrategistAgent.
-  Extracted from strategist_agent.py (§14.1 line limit compliance: 1203→~1010 lines).
+  Extracted from strategist_agent.py (measured 1203→~1010 lines; current limit 2000).
   Contains: StrategistConfig, EdgeEvaluation, _heuristic_evaluate fallback, _parse_sentiment helper.
   Zero side-effects: pure data definitions + pure functions, no singletons or runtime state dependency.
 """

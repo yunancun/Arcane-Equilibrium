@@ -2,17 +2,16 @@
 //! G2-03 每策略 SL/TP runtime 測試（從 risk_checks.rs 抽出）。
 //!
 //! MODULE_NOTE (English):
-//!   G2-03 (2026-04-26) extracted to a sibling test file (parent
-//!   risk_checks.rs was approaching the §九 1200-line cap after the 8
-//!   G2-03 runtime cap tests + helpers landed). Loaded via
+//!   G2-03 (2026-04-26) extracted to a sibling test file so the parent keeps
+//!   focused ownership and headroom under the §九 2000-line cap. Loaded via
 //!   `#[cfg(test)] #[path = ...]` mod inclusion. These tests cover
 //!   defense line B (runtime cap clamps stale overrides at P1 even if
 //!   they survived validate). Defense line A (validate) is tested in
 //!   config/risk_config_per_strategy_tests.rs.
 //!
 //! MODULE_NOTE (中文):
-//!   G2-03（2026-04-26）抽至 sibling 測試檔（parent risk_checks.rs 加入 8 個
-//!   G2-03 runtime tests + helpers 後接近 §九 1200 行上限）。經
+//!   G2-03（2026-04-26）抽至 sibling 測試檔，讓 parent 聚焦並保留 §九 2000
+//!   行上限空間。經
 //!   `#[cfg(test)] #[path]` mod 載入。覆蓋防線 B（runtime cap 即使 stale
 //!   override 漏網仍夾於 P1）；防線 A（validate）測試在
 //!   config/risk_config_per_strategy_tests.rs。

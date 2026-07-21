@@ -2,14 +2,15 @@
 //! Grid Trading 佈局 — 網格層級、健康檢查、再平衡、OU 間距。
 //!
 //! MODULE_NOTE (EN): Split out of `strategies/grid_trading.rs` by GRID-TRADING-MOD-SPLIT-1
-//!   (2026-04-23) to honour CLAUDE.md §九's 1200-line hard cap (pre-split 1729 lines).
+//!   (2026-04-23) for focused ownership under CLAUDE.md §九's 2000-line limit
+//!   (pre-split measured 1729 lines).
 //!   Contains grid-layout concerns: nearest level lookup, bounds-based health
 //!   check (Healthy / OutOfRange / NeedsRebalance), grid rebalance around a
 //!   new anchor price, OU-model optimal step computation, and periodic OU
 //!   spacing refresh. All logic / signatures preserved byte-identical to
 //!   pre-split.
 //! MODULE_NOTE (中)：GRID-TRADING-MOD-SPLIT-1（2026-04-23）由
-//!   `strategies/grid_trading.rs` 拆出以遵守 CLAUDE.md §九 1200 行硬上限
+//!   `strategies/grid_trading.rs` 拆出以遵守 CLAUDE.md §九 2000 行硬上限
 //!   （拆前 1729 行）。本檔包含網格佈局相關：最近層級查找、基於邊界的健康
 //!   檢查（Healthy / OutOfRange / NeedsRebalance）、以新錨定價格為中心的
 //!   再平衡、OU 模型最佳步長計算、以及週期性 OU 間距刷新。所有邏輯 / 簽名

@@ -27,7 +27,7 @@ use tracing::{debug, error, info, warn};
 
 // G1-03 Wave 1 Rust refactor (2026-04-24 fix): extract private-WS supervision
 // (PrivateWsBindings struct + spawn_private_ws_supervisor fn) to sibling
-// private_ws.rs to bring this file under §九 1200-line hard limit.
+// private_ws.rs to bring this file under §九 2000-line hard limit.
 // Subagent A commit 39773e1 added the sibling file but missed deleting the
 // duplicate defs from mod.rs (multi-session stash race) — this fix closes it.
 // G1-03 修正：抽 private_ws 子模組，修 39773e1 遺漏的 mod.rs 刪除步驟。

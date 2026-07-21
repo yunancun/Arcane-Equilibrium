@@ -1154,8 +1154,8 @@ mod tests {
 }
 
 // G2-03 (2026-04-26) per-strategy override runtime tests live in a dedicated
-// sibling test file to keep this file under §九 1200-line cap.
-// G2-03 每策略覆蓋 runtime 測試在獨立 sibling，守 §九 1200 行上限。
+// sibling test file to keep this file under §九 2000-line cap.
+// G2-03 每策略覆蓋 runtime 測試在獨立 sibling，守 §九 2000 行上限。
 #[cfg(test)]
 #[path = "risk_checks_per_strategy_tests.rs"]
 mod g2_03_per_strategy_tests;

@@ -2,7 +2,7 @@
 被動等待管線健康檢查 package。
 
 MODULE_NOTE (EN): Package split from the original 2294-line
-``passive_wait_healthcheck.py`` per CLAUDE.md §九 1200-line hard cap
+``passive_wait_healthcheck.py`` per CLAUDE.md §九 2000-line hard cap
 (G5-FUP-PASSIVE-HEALTH, 2026-04-26). The thin shim
 ``helper_scripts/db/passive_wait_healthcheck.py`` re-exports ``main``
 from ``passive_wait_healthcheck.runner`` so the cron entry path stays
@@ -13,7 +13,7 @@ SQL strings, exit-code semantics, output formatting are byte-identical
 to the pre-split version — no behavior change.
 
 MODULE_NOTE (中): 由原 2294 行 ``passive_wait_healthcheck.py`` 按
-CLAUDE.md §九 1200 行硬上限拆分（G5-FUP-PASSIVE-HEALTH，2026-04-26）。
+CLAUDE.md §九 2000 行硬上限拆分（G5-FUP-PASSIVE-HEALTH，2026-04-26）。
 Thin shim ``passive_wait_healthcheck.py`` 從 ``runner`` 重新匯出 ``main``，
 確保 cron 入口路徑不變。
 公開介面 = ``main`` 與所有 ``check_*`` 函數；SQL / exit code / 輸出格式
@@ -79,9 +79,9 @@ from .checks_derived import (  # noqa: F401
 from .checks_cost_edge import (  # noqa: F401
     # G3-09 Phase A (2026-04-27) → Phase B (2026-04-28) cost_edge_advisor sentinel
     # extracted from checks_derived.py by HIGH-1 fix to keep checks_derived.py
-    # under CLAUDE.md §九 1200-line hard cap.
+    # under CLAUDE.md §九 2000-line hard cap.
     # G3-09 Phase A → Phase B cost_edge_advisor 哨兵；HIGH-1 fix 從 checks_derived
-    # 抽出維持 1200 行硬上限。
+    # 抽出維持 2000 行硬上限。
     check_cost_edge_advisor_status,
 )
 from .checks_execution import (  # noqa: F401

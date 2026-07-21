@@ -73,10 +73,10 @@ logger = logging.getLogger(__name__)
 
 
 # G3-07 (2026-04-26): query_onchain / check_derivatives implementations live
-# in sibling layer2_tools_g3_07.py (extracted to keep this file under §九 1200
-# hard cap). Re-exported here so external imports keep working.
+# in sibling layer2_tools_g3_07.py (extracted for focused ownership under the
+# current §九 2000-line limit). Re-exported here so external imports keep working.
 # G3-07（2026-04-26）：query_onchain / check_derivatives 實作在 sibling
-# layer2_tools_g3_07.py（為遵守 §九 1200 行硬上限抽出）；於此 re-export
+# layer2_tools_g3_07.py（為聚焦責任並遵守 §九 2000 行上限而抽出）；於此 re-export
 # 使外部 import 路徑不變。
 from .layer2_tools_g3_07 import (
     check_derivatives as _g3_07_check_derivatives,
@@ -1150,9 +1150,9 @@ class ToolExecutor:
     # G3-07（2026-04-26）—— query_onchain / check_derivatives 處理器
     #
     # Thin wrappers; real implementation in layer2_tools_g3_07.py sibling
-    # (extracted to keep this file under §九 1200-line hard cap).
-    # 薄包裝；真實實作在 layer2_tools_g3_07.py sibling（為遵守 §九 1200 行
-    # 硬上限抽出）。
+    # (extracted for focused ownership under the current §九 2000-line limit).
+    # 薄包裝；真實實作在 layer2_tools_g3_07.py sibling（為聚焦責任並遵守
+    # §九 2000 行上限而抽出）。
     # ─────────────────────────────────────────────────────────
 
 
@@ -1161,10 +1161,10 @@ class ToolExecutor:
         Thin wrapper — delegate to layer2_tools_g3_07 sibling.
         薄包裝 —— 委派給 layer2_tools_g3_07 sibling。
 
-        Why: §九 1200-line hard cap forces extraction. Sibling owns full
+        Why: the §九 2000-line limit leaves room, while the sibling keeps full
         validation / env-gate / HTTP / parse logic; this wrapper exists only
         to keep ToolExecutor.execute() handler-dict happy (instance method).
-        為什麼：§九 1200 行硬上限強制抽出。Sibling 持有完整的 validate / env-gate
+        為什麼：現行 §九 2000 行上限保留空間；Sibling 持有完整 validate / env-gate
         / HTTP / 解析邏輯；此包裝僅為了讓 ToolExecutor.execute() handler dict
         能找到 instance method。
         """

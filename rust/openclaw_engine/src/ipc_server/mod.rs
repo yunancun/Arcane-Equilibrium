@@ -14,15 +14,15 @@
 //! ## Module layout (G5-FUP-IPC-MOD-SPLIT, 2026-04-26)
 //! ## 模組佈局（G5-FUP-IPC-MOD-SPLIT, 2026-04-26）
 //!
-//! `mod.rs` was 1251 lines (4% over §九 1200 hard cap). Split into siblings
-//! following the `tick_pipeline/` pattern. `mod.rs` now keeps only module
+//! `mod.rs` measured 1251 lines before the split. Siblings preserve focused
+//! ownership and headroom under the §九 2000 hard cap; `mod.rs` now keeps only module
 //! declarations + re-exports so call sites and tests don't need to change.
 //! All hot-path semantics (patch_risk_config deep-merge / EDGE-P1b 8 exit_*
 //! fields incl. exit_stale_peak_ms / update_risk_config) preserved
 //! byte-identical — pure structural extraction, zero production logic diff.
 //!
-//! `mod.rs` 原 1251 行（4% 超 §九 1200 硬上限）。仿 `tick_pipeline/` 模式拆
-//! 成 sibling。`mod.rs` 現只保留模組宣告 + re-export，呼叫端與 test 無須修改。
+//! `mod.rs` 拆分前實測 1251 行；仿 `tick_pipeline/` 模式拆成 sibling，以聚焦
+//! 責任並保留 §九 2000 行上限空間。現只保留模組宣告 + re-export。
 //! 所有 hot-path 語意（patch_risk_config 深合併 / EDGE-P1b 8 個 exit_* 欄位
 //! 含 exit_stale_peak_ms / update_risk_config）byte-identical 保留 —
 //! 純結構抽取、零 production 邏輯 diff。

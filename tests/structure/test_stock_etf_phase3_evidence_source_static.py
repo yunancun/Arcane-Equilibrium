@@ -7,7 +7,7 @@ PHASE3_MARKET_DATA = (
     ROOT / "rust/openclaw_types/src/stock_etf_phase3_evidence/market_data.rs"
 )
 MAX_PARENT_LINES = 2_000
-MAX_MARKET_DATA_LINES = 500
+MAX_MARKET_DATA_LINES = 2_000
 
 PARENT_SURFACE_TOKENS = {
     'STOCK_ETF_COLLECTOR_RUN_CONTRACT_ID: &str = "stock_etf_collector_run_v1"',

@@ -2,11 +2,11 @@
 //! `strategist_scheduler` 的 cycle 計數器狀態。
 //!
 //! MODULE_NOTE (EN): Extracted from parent `mod.rs` by G5-08 to keep the
-//! scheduler module under the §九 1200-line hard cap. The public re-export from
+//! scheduler module under the §九 2000-line hard cap. The public re-export from
 //! `mod.rs` preserves `openclaw_engine::strategist_scheduler::CycleCounters`,
 //! `CycleCountersSnapshot`, and `REJECT_REASONS`.
 //! MODULE_NOTE (中): G5-08 從父 `mod.rs` 抽出，讓 scheduler 主檔回到 §九
-//! 1200 行硬上限以下；`mod.rs` re-export 保持外部路徑不變。
+//! 2000 行硬上限以下；`mod.rs` re-export 保持外部路徑不變。
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

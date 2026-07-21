@@ -20,9 +20,9 @@
 //!   仍空時 fail-soft（回 `{"status":"uninitialized"}`）。
 //!
 //! Split out of `ipc_server/mod.rs` as part of G5-FUP-IPC-MOD-SPLIT (2026-04-26)
-//! to bring the parent file under the §九 1200-line hard cap.
+//! to bring the parent file under the §九 2000-line hard cap.
 //! 於 G5-FUP-IPC-MOD-SPLIT（2026-04-26）從 `ipc_server/mod.rs` 拆出，
-//! 使父檔行數回到 §九 1200 行硬上限以下。
+//! 使父檔行數回到 §九 2000 行硬上限以下。
 
 use crate::ai_budget::BudgetTracker;
 use crate::claude_teacher::ConsumerLoopStatus;

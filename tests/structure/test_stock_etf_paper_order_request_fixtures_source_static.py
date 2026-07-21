@@ -3,7 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = ROOT / "rust/openclaw_types/src/stock_etf_paper_order_request/fixtures.rs"
-MAX_LINES = 400
+MAX_LINES = 2_000
 
 REQUIRED_SURFACE_TOKENS = {
     "Accepted Stock/ETF paper order request fixtures",

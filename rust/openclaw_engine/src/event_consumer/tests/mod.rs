@@ -2,11 +2,11 @@
 //! I-09 + I-22：事件消費者鉗制範圍與 JSON 信封不變量單元測試。
 //!
 //! G5-07 (2026-04-24): Tests were split out of `tests.rs` (1298 lines) into
-//! per-category submodules under `tests/` to respect the §九 1200-line hard cap.
+//! per-category submodules under `tests/` to respect the §九 2000-line hard cap.
 //! Shared helpers (pipeline / writer / indicator / governance setup) stay in this
 //! module root so all submodules can access them via `super::`.
 //! G5-07（2026-04-24）：原 `tests.rs`（1298 行）依類別拆為 `tests/` 下數個子模組以滿足
-//! §九 1200 行硬上限。共用輔助函式（pipeline / writer / indicator / 治理設置）保留在此
+//! §九 2000 行硬上限。共用輔助函式（pipeline / writer / indicator / 治理設置）保留在此
 //! 根模組，子模組透過 `super::` 取用。
 
 // ── Per-category submodules (G5-07 split) ──

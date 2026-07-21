@@ -2,14 +2,14 @@
 //! TickPipeline impl — 建構子 + 基礎 setter/getter。
 //!
 //! MODULE_NOTE (EN): Split out of `tick_pipeline/mod.rs` by TICK-PIPELINE-MOD-SPLIT-1
-//!   (2026-04-22) to honour CLAUDE.md §七's 1200-line hard cap. Contains the
+//!   (2026-04-22) to honour CLAUDE.md §七's 2000-line hard cap. Contains the
 //!   `new` / `with_balance` / `with_kind` constructors, endpoint / registry /
 //!   mode / symbol management, and the injection setters + accessors for
 //!   edge estimates, LinUCB, EdgePredictorStore, shadow-fill tx, decision-/
 //!   shadow-fill-/exit-feature DB channels, price tracker handles, RNG seed,
 //!   and risk store accessor.
 //! MODULE_NOTE (中)：TICK-PIPELINE-MOD-SPLIT-1（2026-04-22）由 `tick_pipeline/mod.rs`
-//!   拆出以遵守 CLAUDE.md §七 1200 行硬上限。本檔包含 `new` / `with_balance` /
+//!   拆出以遵守 CLAUDE.md §七 2000 行硬上限。本檔包含 `new` / `with_balance` /
 //!   `with_kind` 建構子、endpoint / registry / mode / symbol 管理，及 edge
 //!   estimates / LinUCB / EdgePredictorStore / shadow-fill tx / decision- /
 //!   shadow-fill- / exit-feature DB channel / price tracker handle / RNG seed

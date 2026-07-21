@@ -3,7 +3,7 @@
 //! 三管線啟動輔助函數 — Paper / Demo / Live 管線構建 + crash-only 隔離。
 //!
 //! MODULE_NOTE (EN): Extracted from `main.rs` (G1-03 Wave 1) to bring the
-//!   file under §九 1200-line hard limit. Each pipeline spawn (paper/demo/live)
+//!   file under §九 2000-line hard limit. Each pipeline spawn (paper/demo/live)
 //!   was ~120-240 lines of coupled `EventConsumerDeps` construction + spawn
 //!   wrapper. Separating them here preserves identical semantics while letting
 //!   `main.rs` focus on top-level orchestration (config load, channel wiring,
@@ -15,7 +15,7 @@
 //!   live's dedicated OS thread) matching the pre-extraction shape exactly.
 //!
 //! MODULE_NOTE (中): 從 `main.rs` 抽出（G1-03 Wave 1），為將 main.rs 壓在
-//!   §九 1200 行硬上限下。Paper / Demo / Live 三管線 spawn 各自 ~120-240 行
+//!   §九 2000 行硬上限下。Paper / Demo / Live 三管線 spawn 各自 ~120-240 行
 //!   高度耦合的 `EventConsumerDeps` 構建 + spawn 包裝。集中於此檔保留完全相同
 //!   語義，讓 `main.rs` 專注於頂層編排（config 載入、通道接線、關機序列）。
 //!
@@ -819,13 +819,13 @@ pub(crate) fn spawn_live_pipeline(
 // ──────────────────────────────────────────────────────────────────────────
 // LiveSpawnBundle + build_live_pipeline_spawner
 // BLOCKER-1 (E2 round-2, 2026-04-27): extracted from main.rs::async_main
-// to bring main.rs under the 1200-line hard cap (CLAUDE.md §九).
+// to bring main.rs under the 2000-line hard cap (CLAUDE.md §九).
 // The spawner closure captures ~19 Arcs; grouping them in a struct keeps
 // the function signature short (one bundle arg) while retaining the same
 // semantics as the inline closure in main.rs before this refactor.
 //
 // BLOCKER-1（E2 round-2，2026-04-27）：從 main.rs::async_main 抽出，
-// 讓 main.rs 回到 §九 1200 行硬上限以內。spawner closure 捕獲 ~19 個 Arc；
+// 讓 main.rs 回到 §九 2000 行硬上限以內。spawner closure 捕獲 ~19 個 Arc；
 // 打包進 struct 讓 fn 簽名精簡（單一 bundle 參數），語意完全不變。
 // ──────────────────────────────────────────────────────────────────────────
 
@@ -907,7 +907,7 @@ pub(crate) struct LiveSpawnBundle {
 /// regression (LIVE-AUTH-WATCHER-EVENT-CONSUMER-SPAWN, 2026-04-27).
 ///
 /// BLOCKER-1 extraction: this fn was an inline closure in main.rs before
-/// 2026-04-27. Moved here to stay under the §九 1200-line hard cap.
+/// 2026-04-27. Moved here to stay under the §九 2000-line hard cap.
 ///
 /// Live pipeline spawner closure 構造器。
 ///
@@ -921,7 +921,7 @@ pub(crate) struct LiveSpawnBundle {
 ///   * 回傳 OS 線程 `JoinHandle` 供 shutdown 序列 `.join()`。
 ///
 /// BLOCKER-1 抽取：2026-04-27 前為 main.rs 的 inline closure；
-/// 移至此處以符合 §九 1200 行硬上限。
+/// 移至此處以符合 §九 2000 行硬上限。
 pub(crate) fn build_live_pipeline_spawner(
     b: LiveSpawnBundle,
 ) -> crate::live_auth_watcher::LivePipelineSpawner {

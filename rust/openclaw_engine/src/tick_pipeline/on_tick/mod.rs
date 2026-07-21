@@ -4,14 +4,14 @@
 //! ## 模組佈局（ON-TICK-SPLIT-1, 2026-04-21）
 //!
 //! 本目錄 (`tick_pipeline/on_tick/`) 於 2026-04-21 由單一 2071 行
-//! `on_tick.rs` 拆出，以遵守 §七 1200 行硬上限。外部呼叫不變：
+//! `on_tick.rs` 拆出，以遵守 §七 2000 行硬上限。外部呼叫不變：
 //! `TickPipeline::on_tick(event)` 維持同一簽名、同一語意、同一位元輸出；
 //! `pub(crate)` helpers 透過本 `mod.rs` 的 `pub use` re-export 保持向後相容
 //! （callers 仍可走 `crate::tick_pipeline::on_tick::strip_phys_lock_prefix`
 //! 等路徑訪問）。
 //!
 //! This directory was split from a single 2071-line `on_tick.rs` on
-//! 2026-04-21 to honour §七's 1200-line hard cap. External callers are
+//! 2026-04-21 to honour §七's 2000-line hard cap. External callers are
 //! unchanged: `TickPipeline::on_tick(event)` keeps the same signature,
 //! semantics, and byte-for-byte output; `pub(crate)` helpers are re-exported
 //! via `pub use` in this `mod.rs` so callers still reach them as
@@ -79,8 +79,8 @@ mod step_6_risk_checks;
 // 與拆分前一致；每個符號單獨一行以利 diff 審計。
 //
 // HELPERS-CLOSE-TAGS-SPLIT (2026-04-29): `build_close_tags` lives in the
-// sibling `helpers_close_tags.rs` to keep `helpers.rs` ≤ 1411 LOC pre-existing
-// baseline (CLAUDE.md §九 1200 hard cap + "baseline + 5 LOC" exception).
+// sibling `helpers_close_tags.rs`; `helpers.rs` measured 1411 LOC at the split,
+// with the current CLAUDE.md §九 hard cap fixed at an inclusive 2000 lines.
 // Re-exported here so call sites continue to use
 // `crate::tick_pipeline::on_tick::build_close_tags_from_legacy` unchanged.
 // HELPERS-CLOSE-TAGS-SPLIT（2026-04-29）：`build_close_tags` 拆至

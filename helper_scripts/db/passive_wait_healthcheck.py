@@ -3,8 +3,8 @@
 薄殼，將呼叫委派給 ``passive_wait_healthcheck`` package。
 
 Pre-split this file was a 2294-line monolith holding 19 healthchecks
-(G5-FUP-PASSIVE-HEALTH split, 2026-04-26 — 91% over CLAUDE.md §九 1200
-hard cap). Implementation moved to the sibling
+(G5-FUP-PASSIVE-HEALTH split, 2026-04-26 — 294 lines over the current
+CLAUDE.md §九 2000-line hard cap). Implementation moved to the sibling
 ``passive_wait_healthcheck/`` package; this file remains as the cron
 entry point so the path stays identical:
 
@@ -15,7 +15,7 @@ Cron invokes by absolute path, which does not put this file's directory
 on ``sys.path`` — we prepend it before importing the sibling package so
 the existing wrapper scripts work unchanged.
 
-拆分前 2294 行（CLAUDE.md §九 91% 超標）。實作移到同級
+拆分前 2294 行；現行 CLAUDE.md §九上限為 2000 行，差額 294 行。實作移到同級
 ``passive_wait_healthcheck/`` package；本檔留為 CLI 入口維持 cron 路徑。
 """
 from __future__ import annotations

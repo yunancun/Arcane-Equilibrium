@@ -4,7 +4,7 @@
 //! MODULE_NOTE (EN): Hosts the helper that turns an unmatched exchange WS Fill
 //!   into a `TradingMsg::Fill` audit row tagged `unattributed:bybit_auto`. Used
 //!   by `loop_handlers::handle_exchange_event` only — kept separate so the
-//!   `loop_handlers.rs` file stays under the §九 1200-line hard limit and the
+//!   `loop_handlers.rs` file stays under the §九 2000-line hard limit and the
 //!   audit emitter can be unit-tested without dragging the rest of the loop
 //!   handler code into the test surface.
 //!
@@ -41,7 +41,7 @@
 //!
 //! MODULE_NOTE (中): 將未匹配交易所 WS Fill 轉成 `unattributed:bybit_auto`
 //!   標籤的 `TradingMsg::Fill` audit row。`loop_handlers::handle_exchange_event`
-//!   是唯一 caller — 抽出獨立模組以使 `loop_handlers.rs` 維持在 §九 1200 行
+//!   是唯一 caller — 抽出獨立模組以使 `loop_handlers.rs` 維持在 §九 2000 行
 //!   硬上限以下，且 audit emitter 可獨立單測（不需要把整段 loop handler 邏輯
 //!   拖進測試 surface）。
 //!
@@ -74,11 +74,11 @@
 use tracing::warn;
 
 // F4-RETURN Issue 1 (2026-04-26): module split out of loop_handlers.rs to keep
-// loop_handlers under the §九 1200-line hard ceiling. Public surface is
+// loop_handlers under the §九 2000-line hard ceiling. Public surface is
 // re-exported via `loop_handlers` so existing callers (`tests/unattributed_fill_tests.rs`
 // + line 697 of loop_handlers itself) keep their import path.
 // F4-RETURN Issue 1（2026-04-26）：從 loop_handlers.rs 抽出獨立模組，使
-// loop_handlers 維持在 §九 1200 行硬上限以下。對外介面在 loop_handlers
+// loop_handlers 維持在 §九 2000 行硬上限以下。對外介面在 loop_handlers
 // 透過 `pub(super) use` 重出，既有 caller 引用路徑不變。
 
 // ─────────────────────────────────────────────────────────────────────────────

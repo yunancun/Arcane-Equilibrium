@@ -180,13 +180,13 @@ impl TickPipeline {
                 // P2 refactor (2026-04-07): the LinUCB arm selection + news
                 // snapshot read + DecisionContextMsg construction (~140 lines)
                 // were extracted to `decision_context_producer.rs` to keep
-                // tick_pipeline.rs under the §九 1200-line hard limit. The
+                // tick_pipeline.rs under the §九 2000-line hard limit. The
                 // logic is unchanged — see that module's MODULE_NOTE for the
                 // full whitelist + fail-soft contract.
                 // P2 重構（2026-04-07）：LinUCB arm 選擇 + 新聞快照讀取 +
                 // DecisionContextMsg 構造（~140 行）已抽出至
                 // `decision_context_producer.rs`，讓 tick_pipeline.rs 保持
-                // 在 §九 1200 行硬上限以下。邏輯未變動 — 完整白名單與
+                // 在 §九 2000 行硬上限以下。邏輯未變動 — 完整白名單與
                 // fail-soft 合約見該模組 MODULE_NOTE。
                 crate::decision_context_producer::emit_decision_context(
                     tx,

@@ -37,9 +37,9 @@ mod status_report;
 mod tests;
 mod types;
 // F4-RETURN Issue 1 (2026-04-26): split out of loop_handlers.rs to keep that
-// file under §九 1200-line hard ceiling.
+// file under §九 2000-line hard ceiling.
 // F4-RETURN Issue 1（2026-04-26）：從 loop_handlers.rs 抽出，使其維持在
-// §九 1200 行硬上限以下。
+// §九 2000 行硬上限以下。
 mod unattributed_emit;
 
 use types::STATUS_INTERVAL_SECS;

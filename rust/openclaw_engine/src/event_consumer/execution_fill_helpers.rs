@@ -3,9 +3,9 @@
 //!
 //! MODULE_NOTE (EN): Split from ``loop_handlers.rs`` by
 //! STRK-FUP-LOOP-HANDLERS-SPLIT to keep the hot-path handler file below the
-//! 1200-line governance threshold.
+//! 2000-line governance threshold.
 //! MODULE_NOTE (中): STRK-FUP-LOOP-HANDLERS-SPLIT 從 ``loop_handlers.rs``
-//! 拆出，讓 hot-path handler 檔案低於 1200 行治理門檻。
+//! 拆出，讓 hot-path handler 檔案低於 2000 行治理門檻。
 
 pub(super) fn fill_liquidity_role(
     is_maker: bool,

@@ -1,5 +1,5 @@
-//! ARCH-RC1 1C-2-C: unified Config IPC helpers — extracted from handlers.rs (§九 1200-line limit).
-//! 統一 Config IPC 輔助 — 從 handlers.rs 提取（§九 1200 行硬上限）。
+//! ARCH-RC1 1C-2-C: unified Config IPC helpers — extracted from handlers.rs (§九 2000-line limit).
+//! 統一 Config IPC 輔助 — 從 handlers.rs 提取（§九 2000 行硬上限）。
 
 use super::*;
 // G5-FUP-IPC-MOD-SPLIT (2026-04-26): macros (`info!` / `warn!`) cannot be

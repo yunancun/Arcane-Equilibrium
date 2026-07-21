@@ -343,7 +343,7 @@ app.include_router(replay_advisory_router)
 #   GET  /api/v1/replay/handoff/recent    — last N handoff records (footer)
 #
 # Handoff lives in NEW handoff_routes.py (NOT replay_routes.py) because
-# replay_routes.py is at 1498/1500 LOC (CLAUDE.md §九 hard cap = 1500).
+# replay_routes.py measured 1498 LOC at the split; current §九 limit is 2000.
 # Per workplan §4 Wave 8 row, the trio lands handoff_routes.py + V044 SQL +
 # handoff_audit.py.
 #
@@ -351,7 +351,7 @@ app.include_router(replay_advisory_router)
 # (governance_audit_log append-only) acceptance bindings.
 #
 # REF-20 Wave 8 P6 demo handoff 後端安全三件組；handoff_routes.py 為
-# NEW 檔（replay_routes.py 已 1498/1500 §九 1500 硬上限）；
+# NEW 檔（replay_routes.py 拆分時實測 1498 行；現行 §九 上限為 2000）；
 # 兩條路由：POST /handoff（typed-confirmation）+ GET /handoff/recent（footer）。
 from .handoff_routes import handoff_router  # noqa: E402
 app.include_router(handoff_router)

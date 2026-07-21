@@ -2,8 +2,8 @@
 //! 策略師已應用參數持久化 — 從 `strategist_scheduler/mod.rs` 拆出。
 //!
 //! MODULE_NOTE (EN): Extracted from parent `mod.rs` as post-commit FUP to commit
-//!   `f1f7403`, which pushed the file from 1133 → 1342 lines and breached the
-//!   §九 1200-line hard limit by 142 lines. Contents are moved verbatim (method
+//!   `f1f7403`, which pushed the file from 1133 → 1342 lines. The sibling keeps
+//!   ownership focused and preserves §九 2000-line headroom. Contents moved verbatim (method
 //!   `StrategistScheduler::persist_applied_params`, standalone fn
 //!   `load_latest_applied_params`, and the two fail-soft regression tests) with
 //!   zero behaviour change — see sibling-child-module pattern established by
@@ -12,8 +12,8 @@
 //!   (`openclaw_engine::strategist_scheduler::load_latest_applied_params`)
 //!   remain unchanged.
 //! MODULE_NOTE (中): 從父 `mod.rs` 拆出，為 commit `f1f7403` post-commit FUP —
-//!   該 commit 把檔案從 1133 推到 1342 行，超 §九 1200 硬上限 142 行。本檔內
-//!   容原封搬出（method `StrategistScheduler::persist_applied_params`、
+//!   該 commit 把檔案從 1133 推到 1342 行；拆至 sibling 以聚焦責任並保留
+//!   §九 2000 行上限空間。本檔內容原封搬出（method
 //!   standalone fn `load_latest_applied_params`、2 個 fail-soft regression
 //!   tests），零邏輯變動 — 採 commits `585be97` / `3d67a99` 建立的
 //!   sibling-child-module pattern。`mod.rs` 透過

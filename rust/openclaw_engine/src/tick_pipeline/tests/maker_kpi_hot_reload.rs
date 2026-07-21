@@ -246,10 +246,8 @@ funding_drag_threshold = 0.0008
 //      so pre-1B-4.3 persisted queues round-trip (see test T5).
 //   N3 `#[serde(deny_unknown_fields)]` on `MakerKpiConfig` so TOML typos
 //      fail loudly instead of silently falling back to defaults (T3).
-//   N4 Pre-existing file-size caps — acknowledged but NOT addressed here
-//      (separate E5 scope: tick_pipeline/mod.rs, on_tick.rs, tests.rs all
-//      exceed §九 1200-line cap from before this PR; splitting is its own
-//      refactor wave).
+//   N4 File-size policy — current per-file gate is an inclusive 2000 lines;
+//      this focused test change adds no lower local cap or unrelated split.
 //   N5 §九 registry — already fine, no action needed.
 //
 // FUP tests added here (T6–T10):

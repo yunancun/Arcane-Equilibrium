@@ -166,7 +166,7 @@ pub(super) fn dispatch_close_maker_fallback_from_pending(
 }
 
 // F4-RETURN Issue 1 (2026-04-26): F4-1 emitter moved to sibling
-// `unattributed_emit` (§九 1200-line ceiling); re-export preserves caller paths.
+// `unattributed_emit` (§九 2000-line ceiling); re-export preserves caller paths.
 // F4-RETURN Issue 1（2026-04-26）：F4-1 emitter 抽至 sibling 以守 §九 上限。
 #[cfg(test)]
 pub(super) use super::unattributed_emit::{

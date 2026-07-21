@@ -2,14 +2,14 @@
 //! MaCrossover — `Strategy` trait 實作（on_tick + 生命週期鉤子）。
 //!
 //! MODULE_NOTE (EN): Split out of `strategies/ma_crossover.rs` by E5-P2-4c
-//!   (2026-04-23) to honour CLAUDE.md §九 1200-line hard cap. Contains the
+//!   (2026-04-23) to honour CLAUDE.md §九 2000-line hard cap. Contains the
 //!   `impl Strategy for MaCrossover` block: `on_tick` main 4-step loop
 //!   (ADX gate → crossover signal → persistence → confluence), `on_rejection`
 //!   (RC-04 rollback), `on_external_close`, and the JSON param adapters
 //!   (`update_params_json` / `get_params_json` / `param_ranges_json`) plus
 //!   `conf_scale` / `set_conf_scale`.
 //! MODULE_NOTE (中)：E5-P2-4c（2026-04-23）由 `strategies/ma_crossover.rs` 拆出，
-//!   依 §九 1200 行硬上限。本檔含 `impl Strategy for MaCrossover`：`on_tick` 主 4
+//!   依 §九 2000 行硬上限。本檔含 `impl Strategy for MaCrossover`：`on_tick` 主 4
 //!   步流程（ADX 門 → 交叉信號 → 持續性 → 匯流）、`on_rejection`（RC-04 回滾）、
 //!   `on_external_close`，以及 JSON 參數適配器（`update_params_json` /
 //!   `get_params_json` / `param_ranges_json`）加 `conf_scale` / `set_conf_scale`。

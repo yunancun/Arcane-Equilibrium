@@ -2,9 +2,9 @@
 //! 管線快照與狀態類型 — 從 tick_pipeline.rs 提取（RRC-1 E2 修復）。
 //!
 //! MODULE_NOTE (EN): Data types used by IPC consumers, canary records, and status reports.
-//!   Kept separate from tick_pipeline.rs to respect the 1200-line file-size limit.
+//!   Kept separate from tick_pipeline.rs to respect the 2000-line file-size limit.
 //! MODULE_NOTE (中): IPC 消費者、灰度記錄和狀態報告使用的數據類型。
-//!   從 tick_pipeline.rs 分離以遵守 1200 行文件大小限制。
+//!   從 tick_pipeline.rs 分離以遵守 2000 行文件大小限制。
 
 use openclaw_core::indicators::IndicatorSnapshot;
 use openclaw_core::signals::Signal;

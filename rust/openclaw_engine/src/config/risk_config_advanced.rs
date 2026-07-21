@@ -417,9 +417,9 @@ pub struct Experimental {
 
 // ===========================================================================
 // G3-02 / G7-02 / G7-04 Phase A schema sub-structs (relocated from
-// risk_config.rs 2026-04-25 to bring main file back under §九 1200-line cap).
+// risk_config.rs 2026-04-25 to bring main file back under §九 2000-line cap).
 // Behaviour bit-identical — only the file boundary moved.
-// 從 risk_config.rs 搬遷至此（2026-04-25）以滿足 §九 1200 行硬上限。
+// 從 risk_config.rs 搬遷至此（2026-04-25）以滿足 §九 2000 行硬上限。
 // ===========================================================================
 
 // ---------------------------------------------------------------------------
