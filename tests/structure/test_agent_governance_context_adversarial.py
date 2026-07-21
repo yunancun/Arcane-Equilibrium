@@ -470,6 +470,65 @@ def test_reuse_validator_rejects_extra_fields_and_invalid_optional_recheck() -> 
     assert any("fields" in error for error in errors)
 
 
+def test_reuse_validator_rejects_list_execution_facts_without_raising() -> None:
+    facts = _test_facts()
+    execution = build_test_execution_receipt(
+        facts,
+        executor_role="E4",
+        started_at="2026-07-11T10:00:00Z",
+        completed_at="2026-07-11T10:01:00Z",
+        exit_code=0,
+        result="PASS",
+        evidence_digest="sha256:" + "1" * 64,
+        output_digest="sha256:" + "2" * 64,
+    )
+    recheck = build_test_recheck_receipt(
+        execution,
+        reviewer_role="E2",
+        observed_at="2026-07-11T10:30:00Z",
+        result="PASS",
+        evidence_digest="sha256:" + "3" * 64,
+    )
+    receipt = assess_test_evidence_reuse(
+        {
+            "schema_version": "test_evidence_capsule_v2",
+            "status": "PASS",
+            "signature": evidence_signature(facts),
+            "created_at": execution["completed_at"],
+            "expires_at": "2026-07-11T12:00:00Z",
+            "critical": True,
+            "flaky": False,
+            "execution_receipt": execution,
+            "independent_recheck_receipt": recheck,
+        },
+        facts,
+        now="2026-07-11T11:00:00Z",
+    )
+    receipt["execution_receipt"]["facts"] = []
+    receipt["execution_receipt"]["receipt_digest"] = evidence_receipt_digest(
+        receipt["execution_receipt"]
+    )
+    receipt["execution_receipt_digest"] = receipt["execution_receipt"][
+        "receipt_digest"
+    ]
+    receipt["receipt_digest"] = evidence_receipt_digest(receipt)
+    original = deepcopy(receipt)
+
+    errors = validate_test_evidence_reuse_receipt(
+        receipt,
+        check_signature=evidence_signature(facts),
+        evidence_digest=execution["evidence_digest"],
+        reused_from=execution["completed_at"],
+        adjudicated_at="2026-07-11T11:30:00Z",
+    )
+
+    assert receipt == original
+    assert "typed execution receipt lacks signed facts" in errors
+    assert (
+        "typed independent recheck execution facts must be an object" in errors
+    )
+
+
 def test_execution_receipt_validator_binds_expected_facts_and_baseline() -> None:
     facts = _test_facts()
     receipt = build_test_execution_receipt(

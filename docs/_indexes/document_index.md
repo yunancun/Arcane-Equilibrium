@@ -6,7 +6,15 @@
 > 它不是 active dispatch queue；當前 blocker、owner、gate、runtime evidence 一律讀根目錄 `TODO.md`。
 > 新增重要文檔時優先更新本索引或 `initiative_index.md`，不要把長表重新塞回 `docs/README.md`。
 >
-> **Freshness（2026-07-20 審計注）**：本索引按主題分段增量維護，無單一 as-of；最新增量為 2026-07-20 AI/ML 完成覆蓋複審與交付協議。判斷時效以 `git log` + `TODO.md` 為準，勿以本索引缺席反推文檔不存在。
+> **Freshness（2026-07-21 增量）**：本索引按主題分段增量維護，無單一 as-of；最新增量為 2026-07-21 AI/ML S0.2 accepted source-policy authority。判斷時效以 `git log` + `TODO.md` 為準，勿以本索引缺席反推文檔不存在。
+
+### 2026-07-21 AI/ML S0.2 Accepted Advisory-Serving Source Policy
+
+| 文件 | 内容 |
+|------|------|
+| `adr/0051-registry-authorized-advisory-model-serving.md` | **Accepted — S0.2 source-policy authority; no runtime/adoption effect**：定義 future single hash-bound Rust `IntentProcessor + EdgePredictorStore` consumer、monotone `NO_OP/VETO/SIZE_DOWN`、qualification lineage、anti-replay CAS/ACK、risk-reduction non-interference、autonomous-retraining separation、fail-closed rollback 與 permanent no-direct-trading authority。這不是 ML5/ML6 implementation 或 runtime authority。 |
+| `governance_dev/amendments/2026-07-21--AMD-2026-07-21-01-aiml-advisory-serving-authority.md` | **Accepted — S0.2 source-policy authority; no runtime/adoption effect**：逐條綁定 ADR-0049 與 AMD-2026-07-09-02/07-10-02/07-10-03；歷史 bytes 與 ALR/trainer/controller/challenger no-serving/no-promotion 保留。Immutable S0.3 dependency 是 `docs/execution_plan/ai_ml_landing/receipts/S0.2-serving-authority-receipt-v1.json`；S0.3 必須消費該 receipt，不能從 policy status 推論 adoption。S0.2 effect 為 `NONE`，不代表 runtime、Demo、broker/order 或 `PROGRAM_ADOPTED`。 |
+| `adr/0049-scanner-driven-alr-operational-shadow.md` | 當前 Accepted historical authority；pointer 現路由到 Accepted ADR-0051/AMD，但既有 shadow/challenger no-serving/no-promotion 與 direct-trading denial 仍完整有效，只排除對 separate hash-bound Rust consumer 的過寬解讀。 |
 
 ### 2026-07-20 AI/ML 完成覆蓋複審與 Sprint/Session 交付
 

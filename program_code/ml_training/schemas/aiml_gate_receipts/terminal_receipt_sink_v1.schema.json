@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "terminal_receipt_sink_v1.schema.json",
+  "title": "Contract-only external immutable terminal receipt sink",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "sink_id", "status", "authority", "destination_class", "allowed_terminal_receipt_types", "append_intent_schema_version", "append_result_schema_version", "readback_ack_schema_version", "actor_contract", "idempotency_key_fields", "payload_binding_fields", "implementation_owner_session", "implementation_paths", "self_digest"],
+  "properties": {
+    "schema_version": {"const": "terminal_receipt_sink_v1"},
+    "sink_id": {"const": "terminal_receipt_sink_v1"},
+    "status": {"const": "CONTRACT_ONLY"},
+    "authority": {"const": "terminal_candidate_validators_only"},
+    "destination_class": {"const": "EXTERNAL_IMMUTABLE_WORM"},
+    "allowed_terminal_receipt_types": {
+      "const": ["aiml_module_landed_for_trading_receipt_v1", "aiml_platform_no_candidate_receipt_v1"]
+    },
+    "append_intent_schema_version": {"const": "terminal_receipt_append_intent_v1"},
+    "append_result_schema_version": {"const": "terminal_receipt_append_result_v1"},
+    "readback_ack_schema_version": {"const": "terminal_receipt_readback_ack_v1"},
+    "actor_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["append_actor_class", "readback_verifier_class", "same_actor_allowed"],
+      "properties": {
+        "append_actor_class": {"const": "DEDICATED_APPEND_ACTOR"},
+        "readback_verifier_class": {"const": "INDEPENDENT_READBACK_VERIFIER"},
+        "same_actor_allowed": {"const": false}
+      }
+    },
+    "idempotency_key_fields": {
+      "const": ["landing_scope_id", "terminal_state", "terminal_payload_digest"]
+    },
+    "payload_binding_fields": {
+      "const": ["final_source_head", "landing_scope_id", "learning_runtime_digest", "terminal_payload_digest", "terminal_state"]
+    },
+    "implementation_owner_session": {"const": "S1.2"},
+    "implementation_paths": {"type": "array", "maxItems": 0},
+    "self_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}

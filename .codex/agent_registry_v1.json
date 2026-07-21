@@ -91,6 +91,30 @@
     }
   },
   "workflow_contracts": {
+    "aiml_program_adoption_v1": {
+      "schema_version": "aiml_program_adoption_v1",
+      "selector_claim_key": "aiml_program_adoption_selection",
+      "selector_digest": "sha256:81f0779a172aaa743be8deb31be49f33736a8fd775adaebb4798fb77d510338c",
+      "claim_inventory": [
+        "aiml_github_policy_attestation",
+        "aiml_program_adoption_selection",
+        "aiml_program_s0_1_receipt",
+        "aiml_program_s0_2_receipt"
+      ],
+      "sole_issuer_session": "S0.3",
+      "schema_paths": [
+        "program_code/ml_training/schemas/aiml_gate_receipts/aiml_receipt_dependency_graph_v1.schema.json",
+        "program_code/ml_training/schemas/aiml_gate_receipts/aiml_required_effect_classification_v1.schema.json",
+        "program_code/ml_training/schemas/aiml_gate_receipts/github_repository_policy_attestation_v1.schema.json",
+        "program_code/ml_training/schemas/aiml_gate_receipts/landing_scope_v1.schema.json",
+        "program_code/ml_training/schemas/aiml_gate_receipts/program_adoption_receipt_v1.schema.json",
+        "program_code/ml_training/schemas/aiml_gate_receipts/session_attempt_v1.schema.json",
+        "program_code/ml_training/schemas/aiml_gate_receipts/terminal_receipt_sink_v1.schema.json"
+      ],
+      "canonical_validator_path": "program_code/ml_training/aiml_gate_receipt_validator.py",
+      "mandatory_review_roles": ["CC", "E2", "E3", "E4", "MIT", "QA", "R4"],
+      "finalization_validator_node_id": "aiml_program_adoption_validator"
+    },
     "full_audit_v3": {
       "controller_node_id": "ai_economics_review",
       "controller_role": "AI-E",
@@ -333,6 +357,15 @@
       "implementation_paths": [
         "helper_scripts/maintenance_scripts/agent_governance.py"
       ]
+    },
+    "terminal_receipt_sink_v1": {
+      "status": "CONTRACT_ONLY",
+      "owner_session": "S1.2",
+      "authority": "terminal receipt append/readback is unavailable in S0.3",
+      "invariant": "no executable component or append path exists before S1.2",
+      "contract_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/terminal_receipt_sink_v1.schema.json",
+      "implementation_paths": [],
+      "component_paths": []
     }
   },
   "roles": {

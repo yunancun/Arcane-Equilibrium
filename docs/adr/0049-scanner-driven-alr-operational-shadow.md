@@ -86,3 +86,16 @@ effect: it requires a current qualified candidate, fresh SHA-bound E3/BB and
 Operator approval, and same-window Rust/Guardian/Decision-Lease/GUI RiskConfig,
 equity, BBO/instrument/order shape, disaster-protection, audit, and
 reconstruction gates. The Goal itself grants none of that authority.
+
+## 2026-07-21 Accepted Advisory-Serving Authority Pointer
+
+ADR-0051 and AMD-2026-07-21-01 are Accepted S0.2 source-policy authority. They
+supersede only the overbroad interpretation that this actor-specific denial
+permanently forbids a separate hash-bound Rust consumer; this ADR and
+AMD-2026-07-09-02/07-10-02/07-10-03 remain current historical authority for
+ALR, trainer, controller and challenger no-serving/no-promotion, `_latest`,
+broker, order, lease, risk and direct-apply denials. The immutable dependency is
+`docs/execution_plan/ai_ml_landing/receipts/S0.2-serving-authority-receipt-v1.json`;
+S0.3 must consume that exact receipt rather than infer adoption from ADR/AMD
+status. S0.2 has no runtime, deploy, migration, PostgreSQL, broker or order
+effect, implements no ML5/ML6, and cannot claim `PROGRAM_ADOPTED`.

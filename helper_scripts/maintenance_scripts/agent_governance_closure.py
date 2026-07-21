@@ -14,6 +14,7 @@ from agent_governance_authority import (
     validate_authority_claim,
 )
 from agent_governance_consumption import validate_consumption_binding
+from agent_governance_closure_inputs import normalize_closure_packet_inputs
 from agent_governance_workflow_capture import collect_closure_captures
 from agent_governance_capture_binding import CAPTURE_KINDS
 from agent_governance_context_validation import validate_context_artifact
@@ -30,6 +31,10 @@ from agent_governance_execution_attestation import (
     validate_execution_attestations,
 )
 from agent_governance_external_evidence import ExternalEvidenceVerifier
+from agent_governance_aiml_adoption import (
+    PROGRAM_ADOPTION_EVIDENCE_KIND, SourceManifestVerifier,
+    validate_program_adoption_closure_binding,
+)
 from agent_governance_dispatch_validation import validate_dispatch_projection
 from agent_governance_execution import (
     CLOSURE_REQUIRED_FIELDS,
@@ -54,14 +59,15 @@ from agent_governance_task_control import terminal_next_action_errors
 
 CLOSURE_SCHEMA_REL = Path(".codex/schemas/closure_packet_v1.schema.json")
 
+
 def validate_closure(
     packet: dict[str, Any],
     *,
     execution_attestation_verifier: ExecutionAttestationVerifier | None = None,
     external_evidence_verifier: ExternalEvidenceVerifier | None = None,
+    source_manifest_verifier: SourceManifestVerifier | None = None,
 ) -> list[str]:
     """Validate closure_packet_v1 structure and cross-field truth semantics."""
-
     schema = json.loads((REPO_ROOT / CLOSURE_SCHEMA_REL).read_text(encoding="utf-8"))
     errors = _schema_subset_errors(packet, schema, schema)
     missing = CLOSURE_REQUIRED_FIELDS - set(packet)
@@ -71,6 +77,8 @@ def validate_closure(
     unexpected = set(packet) - CLOSURE_REQUIRED_FIELDS
     if unexpected:
         errors.append(f"closure has unexpected fields: {sorted(unexpected)}")
+    packet, input_errors = normalize_closure_packet_inputs(packet)
+    errors.extend(input_errors)
     if packet.get("schema_version") != "closure_packet_v1":
         errors.append("schema_version must be closure_packet_v1")
     if packet.get("work_status") not in WORK_STATUSES:
@@ -93,11 +101,10 @@ def validate_closure(
     errors.extend(terminal_next_action_errors(
         packet["work_status"], packet.get("next_action"), label="closure"
     ))
-
     summary = packet.get("human_summary", {})
     if not summary.get("objective") or not summary.get("scope") or not summary.get("outcome"):
         errors.append("human_summary requires objective, scope, and outcome")
-    baseline = packet.get("baseline", {})
+    baseline = packet["baseline"]
     baseline_fields = {
         "source_head", "dirty_diff_hash", "untracked_relevant_hash",
         "runtime_head", "runtime_observed_at",
@@ -123,8 +130,7 @@ def validate_closure(
                 raise ValueError("timezone missing")
         except (TypeError, ValueError):
             errors.append("baseline runtime_observed_at is invalid")
-
-    dispatch = packet.get("dispatch", {})
+    dispatch = packet["dispatch"]
     expected_route: dict[str, Any] | None = None
     expected_required_nodes: list[dict[str, str]] = []
     task_contract_digest: str | None = None
@@ -136,7 +142,6 @@ def validate_closure(
             errors.append("dispatch required_role_nodes do not match recomputed route")
     except (AttributeError, TypeError, ValueError) as error:
         errors.append(f"dispatch task facts are invalid: {error}")
-
     context_result = validate_context_artifact(
         dispatch.get("context_artifact"),
         now=packet.get("adjudicated_at"),
@@ -185,7 +190,6 @@ def validate_closure(
                     errors.append(
                         f"closure baseline {field} differs from no-change task contract"
                     )
-
     for index, ref in enumerate(packet.get("authority_refs", [])):
         errors.extend(
             f"authority_refs[{index}] {error}"
@@ -195,12 +199,15 @@ def validate_closure(
         )
     if not packet.get("authority_refs"):
         errors.append("authority_refs must not be empty")
-
+    evidence_items = packet["evidence"]
     evidence_by_id: dict[str, dict[str, Any]] = {}
     runtime_evidence: list[dict[str, Any]] = []
     valid_effect_receipts: dict[str, dict[str, Any]] = {}
     valid_observation_artifacts: dict[str, dict[str, Any]] = {}
-    for index, evidence in enumerate(packet.get("evidence", [])):
+    for index, evidence in enumerate(evidence_items):
+        if not isinstance(evidence, dict):
+            errors.append(f"evidence[{index}] must be an object")
+            continue
         evidence_id = evidence.get("id")
         if not evidence_id or evidence_id in evidence_by_id:
             errors.append(f"evidence[{index}] id missing or duplicate")
@@ -226,7 +233,7 @@ def validate_closure(
             receipt_errors, receipt = validate_effect_evidence(
                 evidence,
                 expected_adapter_id=str(evidence.get("source", "")),
-                expected_source_head=str(packet.get("baseline", {}).get("source_head", "")),
+                expected_source_head=str(baseline.get("source_head", "")),
             )
             if receipt_errors:
                 errors.extend(
@@ -240,6 +247,7 @@ def validate_closure(
         if (
             evidence.get("artifact") is not None
             and evidence.get("kind") not in CAPTURE_KINDS
+            and evidence.get("kind") != PROGRAM_ADOPTION_EVIDENCE_KIND
         ):
             admitted_baseline = (dispatch.get("task_facts") or {}).get("baseline")
             if isinstance(admitted_baseline, dict) and set(admitted_baseline) == {
@@ -252,7 +260,7 @@ def validate_closure(
                 }
             artifact_errors, artifact = validate_observation_evidence(
                 evidence,
-                expected_baseline=packet.get("baseline", {}),
+                expected_baseline=baseline,
                 adjudicated_at=str(packet.get("adjudicated_at", "")),
                 task_baseline=admitted_baseline,
             )
@@ -270,12 +278,16 @@ def validate_closure(
             errors.append(
                 f"evidence[{index}] non-OPS evidence cannot carry operation_receipt"
             )
-
+    adoption_errors, valid_adoption_refs = validate_program_adoption_closure_binding(
+        packet, expected_route, task_contract_digest,
+        external_verifier=external_evidence_verifier,
+        source_manifest_verifier=source_manifest_verifier,
+    )
+    errors.extend(adoption_errors)
     captures = collect_closure_captures(
         packet, dispatch, task_contract, task_contract_digest, baseline,
         external_evidence_verifier=external_evidence_verifier,
     )
-
     if not packet.get("acceptance"):
         errors.append("acceptance must not be empty")
     for index, acceptance in enumerate(packet.get("acceptance", [])):
@@ -288,7 +300,6 @@ def validate_closure(
         for ref in refs:
             if ref not in evidence_by_id:
                 errors.append(f"acceptance[{index}] references missing evidence {ref}")
-
     if not packet.get("role_fragments"):
         errors.append("role_fragments must not be empty")
     hard_gate_roles = {"CC", "E3", "QA", "BB", "IB", "OPS"}
@@ -303,9 +314,7 @@ def validate_closure(
     admitted_role_nodes = dispatch_validation["admitted_nodes"]
     admitted_by_node = dispatch_validation["admitted_by_node"]
     writer_scopes = dispatch_validation["writer_scopes"]
-
     errors.extend(validate_node_scoped_permissions(captures, expected_route, admitted_by_node))
-
     if expected_route is not None:
         admitted_roles = {node.get("role") for node in admitted_by_node.values()}
         expected_skips = [
@@ -314,7 +323,6 @@ def validate_closure(
         ]
         if packet.get("skipped_roles") != expected_skips:
             errors.append("closure skipped_roles do not match deterministic route/admissions")
-
     bound_fragment_nodes = {requirement["node_id"] for requirement in expected_required_nodes} | set(admitted_by_node)
     fragment_ids: set[str] = set()
     fragments_by_node: dict[str, dict[str, Any]] = {}
@@ -367,7 +375,6 @@ def validate_closure(
             )
         ):
             errors.append("hard-gate fragment must be PASS or NOT_APPLICABLE for closure PASS")
-
     if "full_audit" in set((expected_route or {}).get("task_facts", {}).get("surfaces", [])):
         controller = fragments_by_node.get("ai_economics_review", {})
         errors.extend(
@@ -396,7 +403,6 @@ def validate_closure(
             external_evidence_verifier=external_evidence_verifier,
         )
     )
-
     check_ids: set[str] = set()
     valid_check_evidence_refs: set[str] = set()
     check_executor_by_evidence: dict[str, str] = {}
@@ -435,7 +441,7 @@ def validate_closure(
                 execution_errors.extend(
                     validate_test_execution_receipt(
                         execution_receipt,
-                        expected_baseline=packet.get("baseline", {}),
+                        expected_baseline=baseline,
                         expected_evidence_digest=evidence_by_id[evidence_ref].get("digest"),
                         require_success=True,
                     )
@@ -466,7 +472,7 @@ def validate_closure(
                 receipt_errors.extend(
                     validate_test_execution_receipt(
                         check["reuse_receipt"].get("execution_receipt"),
-                        expected_baseline=packet.get("baseline", {}),
+                        expected_baseline=baseline,
                         expected_evidence_digest=evidence_by_id.get(evidence_ref, {}).get("digest"),
                         require_success=True,
                     )
@@ -483,7 +489,6 @@ def validate_closure(
             errors.append(f"checks[{index}] non-REUSED status cannot carry reuse_receipt")
         if status != "EXECUTED" and check.get("execution_receipt") is not None:
             errors.append(f"checks[{index}] non-EXECUTED status cannot carry execution_receipt")
-
     if packet["gate_verdict"] == "PASS":
         trusted_review_generation = capture_review_generation(REPO_ROOT)
         authority_decision = resolve_authority_claims(
@@ -501,6 +506,7 @@ def validate_closure(
             | valid_check_evidence_refs
             | set(captures.get("repositories", {}))
             | set(captures.get("commands", {}))
+            | valid_adoption_refs
         )
         valid_runtime_refs = {
             evidence_id for evidence_id, artifact in valid_observation_artifacts.items()
@@ -567,7 +573,6 @@ def validate_closure(
                         expected_generation=trusted_review_generation,
                     )
                 )
-
         for node_id, admission in admitted_by_node.items():
             if admission.get("result_binding") == "nested_payload":
                 continue
@@ -593,7 +598,6 @@ def validate_closure(
                         expected_generation=trusted_review_generation,
                     )
                 )
-
         if expected_route is not None:
             if expected_route.get("task_facts", {}).get("runtime_claim") and (
                 baseline.get("runtime_head") is None
@@ -620,7 +624,6 @@ def validate_closure(
                     errors.append(
                         f"E4 node {requirement['node_id']} test receipt must bind executor_role=E4"
                     )
-
             valid_runtime_refs = {
                 evidence_id for evidence_id, artifact in valid_observation_artifacts.items()
                 if artifact.get("schema_version") == "runtime_observation_receipt_v1"
@@ -664,11 +667,8 @@ def validate_closure(
 
             errors.extend(
                 validate_deploy_effect_binding(
-                    packet,
-                    expected_route,
-                    fragments_by_node,
-                    evidence_by_id,
-                    valid_effect_receipts,
+                    packet, expected_route, fragments_by_node,
+                    evidence_by_id, valid_effect_receipts,
                 )
             )
         if runtime_evidence and any(
@@ -773,8 +773,7 @@ def validate_closure(
                 evidence_by_id=evidence_by_id,
                 context_plan=context_plan,
                 task_contract_digest=task_contract_digest,
-                expected_route=expected_route,
-                fragments_by_node=fragments_by_node,
+                expected_route=expected_route, fragments_by_node=fragments_by_node,
             )
         )
     errors.extend(

@@ -4,6 +4,7 @@ import json
 import re
 from pathlib import Path
 from typing import Any, Iterable
+from agent_governance_aiml_adoption import registry_contract_errors
 from agent_governance_context_specs import context_source_spec_errors, source_name
 from agent_governance_registry_budget import registry_budget_errors
 from agent_governance_registry_capabilities import registry_capability_errors
@@ -234,6 +235,7 @@ def validate_registry(registry: dict[str, Any], root: Path = REPO_ROOT) -> list[
         "probe_axes": ["QC", "BB", "IB", "MIT", "AI-E", "EXT"],
     }:
         errors.append("workflow_contracts.profit_diagnosis_v1 is invalid")
+    errors.extend(registry_contract_errors(registry, root))
 
     for adapter_id, adapter in registry["effect_adapters"].items():
         if not adapter.get("authority") or not adapter.get("invariant"):
@@ -255,7 +257,7 @@ def validate_registry(registry: dict[str, Any], root: Path = REPO_ROOT) -> list[
             if not implementation.get("status"):
                 errors.append(f"{adapter_id}: implementation status is required")
             paths.extend(implementation.get("paths", []))
-        if not paths:
+        if not paths and adapter_id != "terminal_receipt_sink_v1":
             errors.append(f"{adapter_id}: effect Adapter has no implementation path")
         for path in paths:
             if Path(path).is_absolute() or not (root / path).is_file():
