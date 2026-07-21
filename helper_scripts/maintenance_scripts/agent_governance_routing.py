@@ -8,6 +8,7 @@ import re
 from pathlib import PurePosixPath
 from typing import Any, Iterable
 
+from agent_governance_aiml_adoption import aiml_program_adoption_selected, validate_aiml_finalization_facts
 from agent_governance_execution_dag import (
     delegated_execution_projection,
     execution_dag_digest,
@@ -410,21 +411,27 @@ def _normalize_task_facts(task_facts: dict[str, Any]) -> dict[str, Any]:
     if effect == "docs_write" and shape not in {"docs", "documentation"}:
         raise ValueError("side_effect_class=docs_write requires a documentation task shape")
     normalized["side_effect_class"] = effect
+    aiml_program_adoption = aiml_program_adoption_selected(
+        normalized.get("claim_inputs", {})
+    )
+    if aiml_program_adoption:
+        validate_aiml_finalization_facts(normalized)
     if shape == "query":
         query_errors = []
         if effect != "none":
             query_errors.append("side_effect_class=none")
-        if risk != "low" or uncertainty != "low":
-            query_errors.append("low risk and low uncertainty")
         if normalized["runtime_claim"] or normalized["end_to_end_claim"]:
             query_errors.append("no runtime or end-to-end claim")
-        if normalized_surfaces - NARROW_QUERY_SURFACES:
-            query_errors.append("only narrow documentation/governance surfaces")
         if continuation_mode != DEFAULT_CONTINUATION_MODE:
             query_errors.append("continuation_mode=finite")
         direct_interfaces = normalized.get("direct_interfaces", [])
         if not isinstance(direct_interfaces, list) or direct_interfaces:
             query_errors.append("no direct interfaces")
+        if not aiml_program_adoption:
+            if risk != "low" or uncertainty != "low":
+                query_errors.append("low risk and low uncertainty")
+            if normalized_surfaces - NARROW_QUERY_SURFACES:
+                query_errors.append("only narrow documentation/governance surfaces")
         if query_errors:
             raise ValueError(
                 "task_shape query requires " + ", ".join(query_errors)
@@ -547,6 +554,9 @@ def route_task(task_facts: dict[str, Any]) -> dict[str, Any]:
     runtime_claim = facts.get("runtime_claim", False)
     end_to_end_claim = facts.get("end_to_end_claim", False)
     effect = facts["side_effect_class"]
+    aiml_program_adoption = aiml_program_adoption_selected(
+        facts["claim_inputs"]
+    )
     p0b_phase = _p0b_effect_phase(facts["claim_inputs"])
     if p0b_phase is not None:
         if not (
@@ -724,7 +734,21 @@ def route_task(task_facts: dict[str, Any]) -> dict[str, Any]:
     elif gates:
         add("gate_join", kind="join", requires=gates, reason="all independently triggered gates must complete before acceptance or closure")
         predecessor = "gate_join"
-    if end_to_end_claim:
+    if aiml_program_adoption:
+        add(
+            "business_acceptance", role="QA", requires=[predecessor],
+            reason="post-merge AIML Program adoption requires source-only acceptance",
+        )
+        add(
+            "aiml_program_adoption_validator", kind="validator",
+            requires=["business_acceptance"],
+            reason=(
+                "canonical non-call validator checks the typed adoption evidence "
+                "before PM closure"
+            ),
+        )
+        predecessor = "aiml_program_adoption_validator"
+    elif end_to_end_claim:
         add("business_acceptance", role="QA", requires=[predecessor], reason="end-to-end claim hard edge")
         predecessor = "business_acceptance"
     add("pm_closure", role="PM", requires=[predecessor], reason="integrate evidence and dissent without replacing gates")

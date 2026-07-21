@@ -1006,6 +1006,7 @@ def _program_adoption_bundle() -> tuple[dict, dict]:
     governance_paths = (
         ".codex/agent_registry_v1.json",
         "helper_scripts/maintenance_scripts/agent_governance.py",
+        "helper_scripts/maintenance_scripts/agent_governance_aiml_adoption.py",
         "helper_scripts/maintenance_scripts/agent_governance_closure.py",
         "helper_scripts/maintenance_scripts/agent_governance_registry.py",
         "helper_scripts/maintenance_scripts/agent_governance_routing.py",

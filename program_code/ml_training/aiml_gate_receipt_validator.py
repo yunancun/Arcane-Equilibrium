@@ -81,6 +81,7 @@ PROGRAM_SCHEMA_PATHS = tuple(
 PROGRAM_GOVERNANCE_PATHS = (
     ".codex/agent_registry_v1.json",
     "helper_scripts/maintenance_scripts/agent_governance.py",
+    "helper_scripts/maintenance_scripts/agent_governance_aiml_adoption.py",
     "helper_scripts/maintenance_scripts/agent_governance_closure.py",
     "helper_scripts/maintenance_scripts/agent_governance_registry.py",
     "helper_scripts/maintenance_scripts/agent_governance_routing.py",
@@ -141,6 +142,7 @@ S0_3_EXACT_OWNED_PATHS = {
     "docs/execution_plan/2026-07-19--ai_ml_long_lived_repair_and_landing_plan.md",
     "docs/execution_plan/ai_ml_landing/PROGRESS.md",
     "helper_scripts/maintenance_scripts/agent_governance.py",
+    "helper_scripts/maintenance_scripts/agent_governance_aiml_adoption.py",
     "helper_scripts/maintenance_scripts/agent_governance_closure.py",
     "helper_scripts/maintenance_scripts/agent_governance_registry.py",
     "helper_scripts/maintenance_scripts/agent_governance_routing.py",
