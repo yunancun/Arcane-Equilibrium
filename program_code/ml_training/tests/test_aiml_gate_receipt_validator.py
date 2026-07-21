@@ -55,6 +55,19 @@ def test_closure_evidence_validator_is_bound_by_s0_3_source_manifests() -> None:
     assert EVIDENCE_VALIDATOR_PATH in S0_3_EXACT_OWNED_PATHS
 
 
+# S0.3 修改了 agent_governance_execution.py 的 compile_context carve-out，
+# 該檔必須同時被 governance manifest 綁定並列為 S0.3 owned path，否則
+# 採納 receipt 可在不綁定此已變更 governance 檔的情況下通過（E2 P1）。
+EXECUTION_COMPILER_PATH = (
+    "helper_scripts/maintenance_scripts/agent_governance_execution.py"
+)
+
+
+def test_closure_execution_compiler_is_bound_by_s0_3_source_manifests() -> None:
+    assert EXECUTION_COMPILER_PATH in PROGRAM_GOVERNANCE_PATHS
+    assert EXECUTION_COMPILER_PATH in S0_3_EXACT_OWNED_PATHS
+
+
 def _landing_scope() -> dict:
     environment = {
         "environment_id": DIGEST_A,
@@ -1028,6 +1041,7 @@ def _program_adoption_bundle() -> tuple[dict, dict]:
         "helper_scripts/maintenance_scripts/agent_governance_closure.py",
         "helper_scripts/maintenance_scripts/agent_governance_closure_inputs.py",
         "helper_scripts/maintenance_scripts/agent_governance_evidence.py",
+        "helper_scripts/maintenance_scripts/agent_governance_execution.py",
         "helper_scripts/maintenance_scripts/agent_governance_registry.py",
         "helper_scripts/maintenance_scripts/agent_governance_routing.py",
         "helper_scripts/maintenance_scripts/agent_governance_vocabulary.py",
