@@ -9,7 +9,7 @@
 
 ## AI/ML 一分鐘派發看板
 
-本節只負責回答四件事：**現在做哪個 Sprint、包含哪些 Session、哪些可並行、何時停止**。46 個 Session 的詳細 scope／dependency／role route／receipt／effect／CI 規則以 `docs/execution_plan/ai_ml_landing/PROGRESS.md` 對應 row 為準；穩定執行規則以 `docs/agents/ai-ml-landing-delivery-protocol.md` 為準；當前派發起點以本看板為準。`S0.1` 已由 PR #100 發布，`PROGRESS.md` 仍顯示 `PLANNED` 是待在 S0.2/W0 校正的舊投影，不得因此重做 S0.1。除此項已知差異外，若三者衝突，先停止並修正文件，不得自行猜測。
+本節只負責回答四件事：**現在做哪個 Sprint、包含哪些 Session、哪些可並行、何時停止**。46 個 Session 的詳細 scope／dependency／role route／receipt／effect／CI 規則以 `docs/execution_plan/ai_ml_landing/PROGRESS.md` 對應 row 為準；穩定執行規則以 `docs/agents/ai-ml-landing-delivery-protocol.md` 為準；當前派發起點以本看板為準。`S0.1`/`S0.2` 已關閉、`S0.3` source（含 3-Codex-P1 forge-resistance 硬化）已 merge（PR #104 `b945fe0f8`）並在 `PROGRESS.md` 標記 `SOURCE_READY`；`PROGRAM_ADOPTED` 發放需 Linux trusted-host attestation。若三者衝突，先停止並修正文件，不得自行猜測。
 
 ### 命令解析
 
@@ -34,7 +34,7 @@
 | 明確排除 | `P1-AIML-END-TO-END-LANDING`、全部 P2/P3、其他全局 P0/P1、IBKR、交易候選、Demo/order/profit lane，除非它們是 S1 exact effect receipt 的只讀證據來源。 |
 | 必讀上下文順序 | `AGENTS.md` → `.codex/agents/PM.md` → `docs/agents/context-loading.md` → 本看板與 §1 AIML rows → `docs/agents/ai-ml-landing-delivery-protocol.md` §§2-6 → 正式方案 → `docs/execution_plan/ai_ml_landing/PROGRESS.md` current rows／attempts／receipts。 |
 | Intake | PM 先核對 current head、branch、dirty scope、S0 receipts 與 active attempt；以 `agent_governance.py route/context` 編譯每個 Session 的實際 DAG。舊報告只能作線索，不能代替 current source/runtime/effect evidence。 |
-| Hard predecessor | `S0.1` 已發布但 ledger 投影待校正；先以 PR #100/current-head receipt 核實，然後完成尚未關閉的 `S0.2 → S0.3`。無 `PROGRAM_ADOPTED` 不得開始 S1。 |
+| Hard predecessor | `S0.1`/`S0.2` 已關閉、`S0.3` source 已 merge（PR #104）；`PROGRAM_ADOPTED` 發放待 Linux trusted-host execution-attestation。無 `PROGRAM_ADOPTED` 不得開始 S1。 |
 | Exact Sessions | 必須完成 `S1.1`、`S1.2`、`S1.3`、`S1.4`、`S1.5`、`S1.6`；每個 Session 都獨立執行 W0-W9 並取得自己的 current-generation closure。 |
 | 固定排程 | `S1.1 ∥ S1.2 → S1.3 ∥ S1.4 → JOIN → S1.5 → S1.6`；`∥` 只有在 W0 證明 path/effect manifest 互斥時成立，否則依序執行。 |
 | 工程原則 | 依 `Observe → 最高影響缺口 → 可運行 vertical slice → source/runtime 驗證 → durable state`；不得以一次性 wrapper、cron、Codex/session 常駐或 source-only PASS 代替長效 runtime 能力。 |
@@ -49,9 +49,9 @@
 |---|---|
 | Program | `AIML-LONG-LIVED-LANDING-V2` |
 | 當前 Sprint | `S0` |
-| 已關閉 Session | `S0.1`（V2 規劃發布；PR #100） |
-| 最早未關閉 Session | `S0.2` |
-| 當前 gate | `PROGRAM_ADOPTION_REQUIRED` |
+| 已關閉 Session | `S0.1`（V2 規劃發布；PR #100）、`S0.2`（advisory-serving source-policy；ADR-0051/AMD-2026-07-21-01） |
+| 最早未關閉 Session | `S0.3`（source + 3-Codex-P1 forge-resistance 硬化已 merge PR #104 `b945fe0f8`；`SOURCE_READY`。`PROGRAM_ADOPTED` 發放需 Linux trusted-host execution-attestation 認證 7 個 governed review——offline Mac 不可 mint，見 `PROGRESS.md` 的 Trusted-Host Follow-Ups） |
+| 當前 gate | `PROGRAM_ADOPTION_REQUIRED`（S0.3 source ready；adoption 待 trusted-host attestation） |
 | 工程並行上限 | 最多 2 個 path/effect manifest 互斥的 writer Session；不互斥則串行。 |
 | 最終同步 | 只在 S8.4 做 Mac/GitHub/Linux ff-only final sync；中途只在 Linux/runtime evidence 確有需要時做有界 sync。 |
 

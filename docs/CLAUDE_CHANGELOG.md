@@ -1,9 +1,13 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-07-20（TODO v838 AI/ML 主文中文化與 S0.1 發布準備）
+> 最後更新：2026-07-21（AI/ML S0 landing：S0.2 advisory-serving authority + S0.3 adoption-gate source 及 3-Codex-P1 forge-resistance 硬化 merge PR #104；`PROGRAM_ADOPTED` 發放待 trusted-host）
 
 ---
+
+## AI/ML S0 Program-Adoption Gate（2026-07-21）
+
+S0.1（V2 規劃發布 PR #100）、S0.2（`ADR-0051` advisory-serving authority + `AMD-2026-07-21-01`，advisory 單調 `NO_OP|VETO|SIZE_DOWN`、A9 永久禁 broker/order）收口。S0.3 source（7 個 `aiml_gate_receipts` schema、fail-closed validator、Registry/router/closure 整合、`terminal_receipt_sink_v1` contract-only）經 7-role 對抗審核（E2-P1 bind changed governance file + E4-P1×3 lock crown-jewel invariants 修復後複驗全 PASS）。獨立 Codex review 揪出 3 個 P1 forge-resistance 缺口（reviewer binding 自報未綁 authenticated fragment、無 reviewed→merge ancestry、read-only finalization 被迫帶 writer-lease），依 PA 最小相容設計全修（routing 扇入 7 強制 reviewer 重用既有 `validate_execution_attestations`；`SourceManifestVerifier` 強制 `git merge-base --is-ancestor`；`session_attempt_v1` phase-conditional lease），CC/E3/E2 複審 PASS。merge PR #104 `b945fe0f8`。`program_adoption_receipt_v1` 發放為 Linux trusted-host 步驟（offline 不可 authenticate closure PASS），詳見 `docs/execution_plan/ai_ml_landing/PROGRESS.md` Trusted-Host Follow-Ups。
 
 ## Development-Agent Governance
 
