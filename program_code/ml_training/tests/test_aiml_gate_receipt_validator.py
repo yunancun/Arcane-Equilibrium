@@ -1618,3 +1618,332 @@ def test_program_adoption_external_verifier_receives_complete_attestation() -> N
     )
 
     assert "program adoption external GitHub verification failed" not in errors
+
+
+# 以下為 S0.3 採納閘門 fail-closed 不變量的負向回歸鎖。行為已正確，這些測試
+# 只斷言「弱化 schema/邏輯會被擋下」，每例僅變動單一欄位並在必要處重新簽章，
+# 使失敗來自被鎖定的規則而非附帶的 digest 不一致。
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("source_adoption_only", False),
+        ("runtime_authority_granted", True),
+        ("postgres_authority_granted", True),
+        ("deploy_authority_granted", True),
+        ("migration_authority_granted", True),
+        ("broker_authority_granted", True),
+        ("order_authority_granted", True),
+        ("ml5_implementation_authority_granted", True),
+        ("ml6_implementation_authority_granted", True),
+        ("direct_model_authority_granted", True),
+    ],
+)
+def test_program_adoption_rejects_widened_authority_limits(
+    field: str,
+    value: bool,
+) -> None:
+    receipt, artifacts = _program_adoption_bundle()
+    receipt["authority_limits"][field] = value
+    _resign_program_bundle(receipt, artifacts)
+
+    errors = validate_program_adoption_receipt(
+        receipt,
+        artifacts=artifacts,
+        now="2026-07-21T09:30:00Z",
+        external_verifier=lambda _artifact: True,
+        source_manifest_verifier=_accept_source_manifest,
+    )
+
+    assert any(
+        f"authority_limits.{field}" in error and "expected const" in error
+        for error in errors
+    )
+
+
+def test_program_adoption_rejects_short_review_bindings() -> None:
+    receipt, artifacts = _program_adoption_bundle()
+    receipt["review_bindings"] = receipt["review_bindings"][:6]
+    _resign_program_bundle(receipt, artifacts)
+
+    errors = validate_program_adoption_receipt(
+        receipt,
+        artifacts=artifacts,
+        now="2026-07-21T09:30:00Z",
+        external_verifier=lambda _artifact: True,
+        source_manifest_verifier=_accept_source_manifest,
+    )
+
+    assert any(
+        "review_bindings" in error and "shorter than minItems" in error
+        for error in errors
+    )
+
+
+def test_program_adoption_rejects_substituted_review_binding_node() -> None:
+    receipt, artifacts = _program_adoption_bundle()
+    receipt["review_bindings"][0]["node_id"] = "substituted_node"
+    _resign_program_bundle(receipt, artifacts)
+
+    errors = validate_program_adoption_receipt(
+        receipt,
+        artifacts=artifacts,
+        now="2026-07-21T09:30:00Z",
+        external_verifier=lambda _artifact: True,
+        source_manifest_verifier=_accept_source_manifest,
+    )
+
+    assert any(
+        "review bindings are incomplete or substituted" in error
+        for error in errors
+    )
+
+
+def test_program_adoption_rejects_review_binding_role_set_swap() -> None:
+    receipt, artifacts = _program_adoption_bundle()
+    receipt["review_bindings"] = [
+        binding
+        for binding in receipt["review_bindings"]
+        if binding["role"] != "QA"
+    ]
+    receipt["review_bindings"].append({
+        "role": "E2",
+        "node_id": "independent_review_duplicate",
+        "verdict": "PASS",
+        "generation_digest": canonical_digest("E2:independent_review_duplicate"),
+    })
+    _resign_program_bundle(receipt, artifacts)
+
+    assert len(receipt["review_bindings"]) == 7
+    errors = validate_program_adoption_receipt(
+        receipt,
+        artifacts=artifacts,
+        now="2026-07-21T09:30:00Z",
+        external_verifier=lambda _artifact: True,
+        source_manifest_verifier=_accept_source_manifest,
+    )
+
+    assert any(
+        "review bindings are incomplete or substituted" in error
+        for error in errors
+    )
+
+
+@pytest.mark.parametrize(
+    ("edge", "expected_fragment"),
+    [
+        (
+            {
+                "consumer_receipt_id": "S0.1",
+                "dependency_receipt_id": "S0.3",
+                "consumed_at": "2026-07-21T09:30:00Z",
+            },
+            "receipt dependency graph contains a cycle",
+        ),
+        (
+            {
+                "consumer_receipt_id": "S0.1",
+                "dependency_receipt_id": "S0.1",
+                "consumed_at": "2026-07-21T09:30:00Z",
+            },
+            "cannot depend on itself",
+        ),
+        (
+            {
+                "consumer_receipt_id": "S0.3",
+                "dependency_receipt_id": "S9.9",
+                "consumed_at": "2026-07-21T09:30:00Z",
+            },
+            "receipt dependency edge references an unknown receipt",
+        ),
+    ],
+    ids=["cycle", "self_edge", "unknown_receipt"],
+)
+def test_program_adoption_rejects_dependency_graph_edge_integrity_violation(
+    edge: dict,
+    expected_fragment: str,
+) -> None:
+    receipt, artifacts = _program_adoption_bundle()
+    artifacts["dependency_graph"]["edges"].append(deepcopy(edge))
+    _resign_program_bundle(receipt, artifacts)
+
+    errors = validate_program_adoption_receipt(
+        receipt,
+        artifacts=artifacts,
+        now="2026-07-21T09:30:00Z",
+        external_verifier=lambda _artifact: True,
+        source_manifest_verifier=_accept_source_manifest,
+    )
+
+    assert any(expected_fragment in error for error in errors)
+
+
+def test_program_adoption_rejects_dependency_graph_duplicate_receipt_id() -> None:
+    receipt, artifacts = _program_adoption_bundle()
+    graph = artifacts["dependency_graph"]
+    duplicate = deepcopy(
+        next(node for node in graph["receipts"] if node["receipt_id"] == "S0.1")
+    )
+    duplicate["receipt_digest"] = canonical_digest("duplicate-s0-1-node")
+    graph["receipts"].append(duplicate)
+    _resign_program_bundle(receipt, artifacts)
+
+    errors = validate_program_adoption_receipt(
+        receipt,
+        artifacts=artifacts,
+        now="2026-07-21T09:30:00Z",
+        external_verifier=lambda _artifact: True,
+        source_manifest_verifier=_accept_source_manifest,
+    )
+
+    assert any(
+        "receipt dependency graph ids are not unique" in error
+        for error in errors
+    )
+
+
+def test_program_adoption_rejects_dependency_graph_duplicate_receipt_digest() -> None:
+    receipt, artifacts = _program_adoption_bundle()
+    graph = artifacts["dependency_graph"]
+    s0_1_digest = next(
+        node for node in graph["receipts"] if node["receipt_id"] == "S0.1"
+    )["receipt_digest"]
+    next(
+        node
+        for node in graph["receipts"]
+        if node["receipt_id"] == "github-repository-state"
+    )["receipt_digest"] = s0_1_digest
+    _resign_program_bundle(receipt, artifacts)
+
+    errors = validate_program_adoption_receipt(
+        receipt,
+        artifacts=artifacts,
+        now="2026-07-21T09:30:00Z",
+        external_verifier=lambda _artifact: True,
+        source_manifest_verifier=_accept_source_manifest,
+    )
+
+    assert any(
+        "receipt dependency graph digests are not unique" in error
+        for error in errors
+    )
+
+
+def test_program_adoption_rejects_dependency_graph_absent_root() -> None:
+    receipt, artifacts = _program_adoption_bundle()
+    artifacts["dependency_graph"]["root_receipt_id"] = "S9.9"
+    _resign_program_bundle(receipt, artifacts)
+
+    errors = validate_program_adoption_receipt(
+        receipt,
+        artifacts=artifacts,
+        now="2026-07-21T09:30:00Z",
+        external_verifier=lambda _artifact: True,
+        source_manifest_verifier=_accept_source_manifest,
+    )
+
+    assert any(
+        "receipt dependency graph root is absent" in error for error in errors
+    )
+
+
+def test_program_adoption_rejects_dependency_graph_mixed_scopes() -> None:
+    receipt, artifacts = _program_adoption_bundle()
+    graph = artifacts["dependency_graph"]
+    next(
+        node for node in graph["receipts"] if node["receipt_id"] == "S0.1"
+    )["scope_ref"] = {"kind": "LANDING_SCOPE", "landing_scope_id": DIGEST_A}
+    _resign_program_bundle(receipt, artifacts)
+
+    errors = validate_program_adoption_receipt(
+        receipt,
+        artifacts=artifacts,
+        now="2026-07-21T09:30:00Z",
+        external_verifier=lambda _artifact: True,
+        source_manifest_verifier=_accept_source_manifest,
+    )
+
+    assert any(
+        "receipt dependency graph mixes landing scopes" in error
+        for error in errors
+    )
+
+
+def test_program_adoption_rejects_dependency_graph_future_dated_receipt() -> None:
+    receipt, artifacts = _program_adoption_bundle()
+    graph = artifacts["dependency_graph"]
+    next(
+        node for node in graph["receipts"] if node["receipt_id"] == "S0.2"
+    )["observed_at"] = "2026-07-21T09:45:00Z"
+    _resign_program_bundle(receipt, artifacts)
+
+    errors = validate_program_adoption_receipt(
+        receipt,
+        artifacts=artifacts,
+        now="2026-07-21T09:30:00Z",
+        external_verifier=lambda _artifact: True,
+        source_manifest_verifier=_accept_source_manifest,
+    )
+
+    assert any("receipt S0.2 is future-dated" in error for error in errors)
+
+
+def test_program_adoption_rejects_dependency_graph_tampered_self_digest() -> None:
+    receipt, artifacts = _program_adoption_bundle()
+    # 故意不重新簽章:被鎖定的規則正是圖的 self_digest 必須綁定其正規內容。
+    artifacts["dependency_graph"]["self_digest"] = canonical_digest(
+        "dependency-graph-self-digest-tamper"
+    )
+
+    errors = validate_program_adoption_receipt(
+        receipt,
+        artifacts=artifacts,
+        now="2026-07-21T09:30:00Z",
+        external_verifier=lambda _artifact: True,
+        source_manifest_verifier=_accept_source_manifest,
+    )
+
+    assert any(
+        "receipt dependency graph self_digest is invalid" in error
+        for error in errors
+    )
+
+
+def test_program_adoption_rejects_missing_required_receipt_field() -> None:
+    receipt, artifacts = _program_adoption_bundle()
+    # 缺漏必填欄位在 schema 層即短路,因此不需重新簽章。
+    receipt.pop("issued_at")
+
+    errors = validate_program_adoption_receipt(
+        receipt,
+        artifacts=artifacts,
+        now="2026-07-21T09:30:00Z",
+        external_verifier=lambda _artifact: True,
+        source_manifest_verifier=_accept_source_manifest,
+    )
+
+    assert any(
+        "missing required property issued_at" in error for error in errors
+    )
+
+
+def test_program_adoption_rejects_dependency_graph_validity_class_outside_enum() -> None:
+    # program adoption receipt 的 validity_class 是 const,而依賴圖各 receipt 的
+    # validity_class 才是 enum,故 enum 越界的 schema wiring 在此鎖定。
+    receipt, artifacts = _program_adoption_bundle()
+    graph = artifacts["dependency_graph"]
+    next(
+        node for node in graph["receipts"] if node["receipt_id"] == "S0.1"
+    )["validity_class"] = "NOT_A_REAL_VALIDITY_CLASS"
+    _resign_program_bundle(receipt, artifacts)
+
+    errors = validate_program_adoption_receipt(
+        receipt,
+        artifacts=artifacts,
+        now="2026-07-21T09:30:00Z",
+        external_verifier=lambda _artifact: True,
+        source_manifest_verifier=_accept_source_manifest,
+    )
+
+    assert any("value is outside enum" in error for error in errors)
