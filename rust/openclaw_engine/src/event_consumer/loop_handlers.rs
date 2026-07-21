@@ -252,9 +252,9 @@ pub(super) fn handle_kline_seed(
 }
 
 pub(super) use super::loop_exchange::handle_exchange_event;
-// EVENT-CONSUMER-SPLIT-2（2026-07-03）：Arm D/E/F 拆至 sibling 檔（§九 2000 行
-// 治理）。pub(super) re-export 保持 mod.rs 與 event_consumer/tests/* 的
-// `loop_handlers::handle_*` 呼叫路徑不變（鏡像 loop_exchange.rs 先例）。
+// EVENT-CONSUMER-SPLIT-2（2026-07-03）：Arm D/E/F 依職責拆至 sibling 檔；各檔
+// 保留現行 §九 2000 行政策空間。pub(super) re-export 保持 mod.rs 與
+// event_consumer/tests/* 的 `loop_handlers::handle_*` 呼叫路徑不變。
 pub(super) use super::loop_pending_registration::handle_pending_registration;
 pub(super) use super::loop_pipeline_command::handle_pipeline_command;
 pub(super) use super::loop_tick::handle_tick_event;

@@ -13,7 +13,7 @@ from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from tests.structure.file_line_policy import MAX_FILE_LINES
+MAX_FILE_LINES = 2_000
 
 
 ROOT = Path(__file__).resolve().parents[2]

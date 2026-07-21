@@ -3,7 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 NON_BYBIT_ALLOWLIST = ROOT / "rust/openclaw_types/src/ibkr_non_bybit_api_allowlist.rs"
-from tests.structure.file_line_policy import MAX_FILE_LINES as MAX_LINES
+MAX_LINES = 2_000
 
 REQUIRED_TYPE_TOKENS = {
     'NON_BYBIT_API_ALLOWLIST_CONTRACT_ID: &str = "non_bybit_api_allowlist_v1"',

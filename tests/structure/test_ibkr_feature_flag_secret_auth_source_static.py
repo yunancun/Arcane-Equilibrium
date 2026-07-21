@@ -3,7 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 FEATURE_FLAG_SECRET_AUTH = ROOT / "rust/openclaw_types/src/ibkr_feature_flag_secret_auth.rs"
-from tests.structure.file_line_policy import MAX_FILE_LINES as MAX_LINES
+MAX_LINES = 2_000
 
 REQUIRED_IMPORT_TOKENS = {
     "IbkrPhase2GateArtifactV1",

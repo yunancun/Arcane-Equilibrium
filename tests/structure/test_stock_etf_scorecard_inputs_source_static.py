@@ -7,7 +7,7 @@ SCORECARD_COMPONENTS = (
     ROOT / "rust/openclaw_types/src/stock_etf_scorecard_inputs/components.rs"
 )
 SCORECARD_BUNDLE = ROOT / "rust/openclaw_types/src/stock_etf_scorecard_inputs/bundle.rs"
-from tests.structure.file_line_policy import MAX_FILE_LINES as MAX_LINES
+MAX_LINES = 2_000
 
 REQUIRED_CONTRACT_TOKENS = {
     "BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID",

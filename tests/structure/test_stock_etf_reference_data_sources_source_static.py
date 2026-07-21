@@ -3,7 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 REFERENCE_SOURCES = ROOT / "rust/openclaw_types/src/stock_etf_reference_data_sources.rs"
-from tests.structure.file_line_policy import MAX_FILE_LINES as MAX_LINES
+MAX_LINES = 2_000
 
 REQUIRED_TYPE_TOKENS = {
     "STOCK_ETF_REFERENCE_DATA_SOURCES_CONTRACT_ID",

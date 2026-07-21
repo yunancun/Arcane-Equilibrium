@@ -6,7 +6,7 @@ PHASE3_PARENT = ROOT / "rust/openclaw_types/src/stock_etf_phase3_evidence.rs"
 PHASE3_MARKET_DATA = (
     ROOT / "rust/openclaw_types/src/stock_etf_phase3_evidence/market_data.rs"
 )
-from tests.structure.file_line_policy import MAX_FILE_LINES as MAX_PARENT_LINES
+MAX_PARENT_LINES = 2_000
 MAX_MARKET_DATA_LINES = 500
 
 PARENT_SURFACE_TOKENS = {

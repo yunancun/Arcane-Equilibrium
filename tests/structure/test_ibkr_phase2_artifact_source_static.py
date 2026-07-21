@@ -3,7 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 PHASE2_ARTIFACT = ROOT / "rust/openclaw_types/src/ibkr_phase2_artifact.rs"
-from tests.structure.file_line_policy import MAX_FILE_LINES as MAX_LINES
+MAX_LINES = 2_000
 
 REQUIRED_IMPORT_TOKENS = {
     "IbkrExternalSurfaceGateV1",

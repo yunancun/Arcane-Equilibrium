@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import re
 
-from tests.structure.file_line_policy import MAX_FILE_LINES
-
 from stock_etf_static_guard_helpers import (
     CONTROL_API_DIR,
     FORBIDDEN_IPC_METHOD_STRINGS,
@@ -20,6 +18,8 @@ from stock_etf_static_guard_helpers import (
     candidate_stock_etf_static_gui_files,
     stock_etf_gui_lane_template_endpoints,
 )
+
+MAX_FILE_LINES = 2_000
 
 
 def test_stock_etf_static_gui_endpoint_set_matches_gui_lane_contract_template() -> None:

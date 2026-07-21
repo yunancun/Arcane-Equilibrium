@@ -3,7 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 PIT_UNIVERSE = ROOT / "rust/openclaw_types/src/stock_etf_pit_universe.rs"
-from tests.structure.file_line_policy import MAX_FILE_LINES as MAX_LINES
+MAX_LINES = 2_000
 
 REQUIRED_TYPE_TOKENS = {
     'STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID: &str = "stock_etf_pit_universe_contract_v1"',

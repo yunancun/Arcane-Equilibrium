@@ -8,7 +8,7 @@ CALENDAR = ROOT / "rust/openclaw_types/src/ibkr_trading_calendar.rs"
 PARSER = ROOT / "rust/openclaw_engine/src/ibkr_trading_calendar.rs"
 PARSER_TESTS = ROOT / "rust/openclaw_engine/src/ibkr_trading_calendar_tests.rs"
 PROVENANCE = ROOT / "rust/openclaw_types/src/ibkr_market_data_provenance.rs"
-from tests.structure.file_line_policy import MAX_FILE_LINES as MAX_LINES
+MAX_LINES = 2_000
 
 # W6-S2 日曆結果契約層:契約 id + hours-kind/session-kind/blocker 封閉枚舉 + 純函數。
 REQUIRED_CONTRACT_TOKENS = {

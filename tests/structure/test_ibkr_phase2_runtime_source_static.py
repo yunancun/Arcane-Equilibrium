@@ -3,7 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 PHASE2_RUNTIME = ROOT / "rust/openclaw_types/src/ibkr_phase2_runtime.rs"
-from tests.structure.file_line_policy import MAX_FILE_LINES as MAX_LINES
+MAX_LINES = 2_000
 
 REQUIRED_CONSTANT_TOKENS = {
     'IBKR_SECRET_SLOT_CONTRACT_ID: &str = "ibkr_secret_slot_contract_v1"',

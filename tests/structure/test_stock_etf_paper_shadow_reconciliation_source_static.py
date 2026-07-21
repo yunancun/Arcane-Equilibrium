@@ -5,7 +5,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PAPER_SHADOW_RECONCILIATION = (
     ROOT / "rust/openclaw_types/src/stock_etf_paper_shadow_reconciliation.rs"
 )
-from tests.structure.file_line_policy import MAX_FILE_LINES as MAX_LINES
+MAX_LINES = 2_000
 
 REQUIRED_TYPE_TOKENS = {
     "STOCK_ETF_PAPER_SHADOW_RECONCILIATION_CONTRACT_ID",

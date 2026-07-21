@@ -29,7 +29,7 @@
 //!     - cross-language consistency：snapshot.btc_book_imbalance f64::NAN write
 //!       → read byte-equal（in-memory；PG INSERT 真實寫入 Linux E4 dry-run gate
 //!       另外驗，per `feedback_v_migration_pg_dry_run`）
-//!     - file ≤ 800 LOC（CLAUDE.md §九 warning line）
+//!     - file ≤ 2000 LOC（現行 CLAUDE.md §九 review/split policy）
 //!
 //!   **CC 16 原則 / DOC-08 §12 / 硬邊界 5 項 0 觸碰**：本 test 純後驗 + 不動
 //!   trait + 不動 Layer 1/2/3 source code（per task scope「不直接改 IMPL-1/2/3/4

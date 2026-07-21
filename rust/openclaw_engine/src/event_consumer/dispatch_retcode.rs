@@ -1,6 +1,6 @@
 //! Bybit dispatch retcode 分類 + 重試策略機械 — 自 dispatch.rs 拆出
-//! （EVENT-CONSUMER-SPLIT-2，2026-07-03；§九 2000 行治理）。
-//! 純決策邏輯，無 channel 副作用；事件發送 helper（send_*）仍在 dispatch.rs。
+//! （EVENT-CONSUMER-SPLIT-2，2026-07-03）。本檔聚焦純決策邏輯，保留現行
+//! §九 2000 行政策空間，且無 channel 副作用；事件發送 helper（send_*）仍在 dispatch.rs。
 
 use crate::bybit_rest_client::BybitApiError;
 use crate::tick_pipeline::OrderDispatchRequest;

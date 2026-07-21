@@ -1,5 +1,6 @@
 //! Arm D handler — dispatch task 的 pending order 註冊/終態事件，自
-//! loop_handlers.rs 拆出（EVENT-CONSUMER-SPLIT-2，2026-07-03；§九 2000 行治理）。
+//! loop_handlers.rs 依職責拆出（EVENT-CONSUMER-SPLIT-2，2026-07-03）；本檔
+//! 保留現行 §九 2000 行政策空間。
 
 use super::loop_handlers::{dispatch_close_maker_fallback_from_pending, LoopState};
 use super::types::{PendingOrder, PendingOrderEvent};

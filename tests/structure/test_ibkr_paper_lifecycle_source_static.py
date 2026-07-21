@@ -3,7 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 PAPER_LIFECYCLE = ROOT / "rust/openclaw_types/src/ibkr_paper_lifecycle.rs"
-from tests.structure.file_line_policy import MAX_FILE_LINES as MAX_LINES
+MAX_LINES = 2_000
 
 REQUIRED_TYPE_TOKENS = {
     'IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID: &str = "ibkr_paper_order_lifecycle_v1"',

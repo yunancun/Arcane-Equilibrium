@@ -3,7 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 DB_EVIDENCE = ROOT / "rust/openclaw_types/src/stock_etf_db_evidence_ddl.rs"
-from tests.structure.file_line_policy import MAX_FILE_LINES as MAX_LINES
+MAX_LINES = 2_000
 
 REQUIRED_TYPE_TOKENS = {
     "STOCK_ETF_DB_EVIDENCE_DDL_SOURCE_PATH",

@@ -4,7 +4,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 PROVENANCE = ROOT / "rust/openclaw_types/src/ibkr_market_data_provenance.rs"
 QUOTE_ROW = ROOT / "rust/openclaw_types/src/ibkr_quote_row.rs"
-from tests.structure.file_line_policy import MAX_FILE_LINES as MAX_LINES
+MAX_LINES = 2_000
 
 # W6-S3 溯源契約層:契約 id + entitlement 三態 + adjustment marker 封閉枚舉。
 REQUIRED_CONTRACT_TOKENS = {

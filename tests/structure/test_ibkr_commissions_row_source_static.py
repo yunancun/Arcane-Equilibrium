@@ -5,7 +5,7 @@ ROOT = Path(__file__).resolve().parents[2]
 # 直接引用的來源檔字面 rel 路徑（同時滿足 rust-source-coverage 守衛的「測試源文字
 # 含該檔 rel 路徑」判定，並讓本 source-static 治理測試自身有實質斷言價值）。
 COMMISSIONS_ROW = ROOT / "rust/openclaw_types/src/ibkr_commissions_row.rs"
-from tests.structure.file_line_policy import MAX_FILE_LINES as MAX_LINES
+MAX_LINES = 2_000
 
 # W5-S1 行契約層:契約 id + exec_id 關聯鍵 + realizedPnL 缺席語義（Option,禁默認 0）。
 REQUIRED_CONTRACT_TOKENS = {

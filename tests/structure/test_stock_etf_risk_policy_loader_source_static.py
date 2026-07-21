@@ -6,7 +6,7 @@ ROOT = Path(__file__).resolve().parents[2]
 # 的「被測試引用」判定（sibling loader 從此不再逃出結構守衛掃描面）。
 SOURCE_REL_PATH = "rust/openclaw_engine/src/ipc_server/handlers/stock_etf_risk_policy.rs"
 RISK_POLICY_LOADER = ROOT / SOURCE_REL_PATH
-from tests.structure.file_line_policy import MAX_FILE_LINES as MAX_LINES
+MAX_LINES = 2_000
 
 # denied fallback 的 fail-closed 全 false 語義（逐一斷言，防語義退化）：TOML 載入
 # 失敗時顯示面必回退此 policy，絕不出現任何寬鬆 cap/flag。

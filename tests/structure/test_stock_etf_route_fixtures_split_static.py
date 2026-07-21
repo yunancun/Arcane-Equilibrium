@@ -8,7 +8,7 @@ TEST_ROOT = (
 )
 LEGACY_FIXTURE_FILE = TEST_ROOT / "stock_etf_route_fixtures.py"
 FIXTURE_PACKAGE = TEST_ROOT / "stock_etf_route_fixtures"
-from tests.structure.file_line_policy import MAX_FILE_LINES as MAX_LINES
+MAX_LINES = 2_000
 
 
 EXPECTED_MODULES = {
