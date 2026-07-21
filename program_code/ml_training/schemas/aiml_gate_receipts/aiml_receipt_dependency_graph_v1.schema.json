@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aiml_receipt_dependency_graph_v1.schema.json",
+  "title": "AIML receipt validity and dependency graph",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "scope_ref", "root_receipt_id", "generated_at", "receipts", "edges", "self_digest"],
+  "properties": {
+    "schema_version": {"const": "aiml_receipt_dependency_graph_v1"},
+    "scope_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "landing_scope_id"],
+      "properties": {
+        "kind": {"enum": ["PROGRAM", "LANDING_SCOPE"]},
+        "landing_scope_id": {"type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$"}
+      }
+    },
+    "root_receipt_id": {"type": "string", "minLength": 1},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "receipts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["receipt_id", "receipt_schema_version", "receipt_digest", "scope_ref", "validity_class", "state", "observed_at", "valid_from", "expires_at", "effect_at", "consumed_at", "authority_receipt_digest"],
+        "properties": {
+          "receipt_id": {"type": "string", "minLength": 1},
+          "receipt_schema_version": {"type": "string", "minLength": 1},
+          "receipt_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+          "scope_ref": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "landing_scope_id"],
+            "properties": {
+              "kind": {"enum": ["PROGRAM", "LANDING_SCOPE"]},
+              "landing_scope_id": {"type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$"}
+            }
+          },
+          "validity_class": {"enum": ["CURRENT_STATE_TTL", "EFFECT_TIME_AUTHORITY", "IMMUTABLE_CONSUMED_EFFECT", "IMMUTABLE_LINEAGE"]},
+          "state": {"enum": ["ACTIVE", "REVOKED", "COMPROMISED"]},
+          "observed_at": {"type": "string", "format": "date-time"},
+          "valid_from": {"type": ["string", "null"], "format": "date-time"},
+          "expires_at": {"type": ["string", "null"], "format": "date-time"},
+          "effect_at": {"type": ["string", "null"], "format": "date-time"},
+          "consumed_at": {"type": ["string", "null"], "format": "date-time"},
+          "authority_receipt_digest": {"type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$"}
+        }
+      }
+    },
+    "edges": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["consumer_receipt_id", "dependency_receipt_id", "consumed_at"],
+        "properties": {
+          "consumer_receipt_id": {"type": "string", "minLength": 1},
+          "dependency_receipt_id": {"type": "string", "minLength": 1},
+          "consumed_at": {"type": "string", "format": "date-time"}
+        }
+      }
+    },
+    "self_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}

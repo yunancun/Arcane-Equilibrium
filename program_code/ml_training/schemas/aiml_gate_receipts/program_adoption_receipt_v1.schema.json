@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "program_adoption_receipt_v1.schema.json",
+  "title": "Post-merge S0.3 AIML Program adoption receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "adoption_id", "program_id", "terminal_state", "session_id", "scope_ref", "cohort_epoch", "attempt", "attempt_phase", "source_build_attempt_id", "finalization_attempt_id", "dependency_receipts", "document_manifest", "schema_manifest", "governance_manifest", "reviewed_head", "merge_head", "github_policy_attestation_digest", "required_effect_classification_digest", "receipt_dependency_graph_digest", "terminal_sink_contract_digest", "review_bindings", "validator_binding", "authority_limits", "validity_class", "issued_at", "self_digest"],
+  "properties": {
+    "schema_version": {"const": "program_adoption_receipt_v1"},
+    "adoption_id": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "program_id": {"const": "AIML-LONG-LIVED-LANDING-V2"},
+    "terminal_state": {"const": "PROGRAM_ADOPTED"},
+    "session_id": {"const": "S0.3"},
+    "scope_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "landing_scope_id"],
+      "properties": {
+        "kind": {"const": "PROGRAM"},
+        "landing_scope_id": {"type": "null"}
+      }
+    },
+    "cohort_epoch": {"const": "PROGRAM"},
+    "attempt": {"type": "integer", "minimum": 2},
+    "attempt_phase": {"const": "POST_MERGE_FINALIZATION"},
+    "source_build_attempt_id": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "finalization_attempt_id": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "dependency_receipts": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["session_id", "receipt_digest"],
+        "properties": {
+          "session_id": {"enum": ["S0.1", "S0.2"]},
+          "receipt_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+        }
+      }
+    },
+    "document_manifest": {"$ref": "#/$defs/manifest"},
+    "schema_manifest": {"$ref": "#/$defs/manifest"},
+    "governance_manifest": {"$ref": "#/$defs/manifest"},
+    "reviewed_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "merge_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "github_policy_attestation_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "required_effect_classification_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "receipt_dependency_graph_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "terminal_sink_contract_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "review_bindings": {
+      "type": "array",
+      "minItems": 7,
+      "maxItems": 7,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["role", "node_id", "verdict", "generation_digest"],
+        "properties": {
+          "role": {"enum": ["E2", "E4", "CC", "E3", "MIT", "R4", "QA"]},
+          "node_id": {"type": "string", "minLength": 1},
+          "verdict": {"const": "PASS"},
+          "generation_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+        }
+      }
+    },
+    "validator_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["node_id", "kind", "implementation_digest"],
+      "properties": {
+        "node_id": {"const": "aiml_program_adoption_validator"},
+        "kind": {"const": "NON_CALL_VALIDATOR"},
+        "implementation_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      }
+    },
+    "authority_limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_adoption_only", "runtime_authority_granted", "postgres_authority_granted", "deploy_authority_granted", "migration_authority_granted", "broker_authority_granted", "order_authority_granted", "ml5_implementation_authority_granted", "ml6_implementation_authority_granted", "direct_model_authority_granted"],
+      "properties": {
+        "source_adoption_only": {"const": true},
+        "runtime_authority_granted": {"const": false},
+        "postgres_authority_granted": {"const": false},
+        "deploy_authority_granted": {"const": false},
+        "migration_authority_granted": {"const": false},
+        "broker_authority_granted": {"const": false},
+        "order_authority_granted": {"const": false},
+        "ml5_implementation_authority_granted": {"const": false},
+        "ml6_implementation_authority_granted": {"const": false},
+        "direct_model_authority_granted": {"const": false}
+      }
+    },
+    "validity_class": {"const": "IMMUTABLE_CONSUMED_EFFECT"},
+    "issued_at": {"type": "string", "format": "date-time"},
+    "self_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  },
+  "$defs": {
+    "manifest": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "digest"],
+        "properties": {
+          "path": {"type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+"},
+          "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+        }
+      }
+    }
+  }
+}

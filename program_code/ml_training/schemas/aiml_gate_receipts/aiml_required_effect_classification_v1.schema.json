@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aiml_required_effect_classification_v1.schema.json",
+  "title": "Classifier-derived AIML required effects",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "classification_id", "session_attempt_id", "session_id", "attempt_phase", "classified_inputs", "classifier_digest", "required_effects", "classified_at", "self_digest"],
+  "properties": {
+    "schema_version": {"const": "aiml_required_effect_classification_v1"},
+    "classification_id": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "session_attempt_id": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "session_id": {"type": "string", "minLength": 1},
+    "attempt_phase": {"enum": ["SOURCE_BUILD", "POST_MERGE_FINALIZATION"]},
+    "classified_inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["work_package_id", "phase", "side_effect_class", "runtime_claim", "owned_path_manifest", "direct_interfaces"],
+      "properties": {
+        "work_package_id": {"const": "AIML-S0.3-GOVERNANCE-ADOPTION"},
+        "phase": {"enum": ["SOURCE_BUILD", "POST_MERGE_FINALIZATION"]},
+        "side_effect_class": {"enum": ["repo_write", "none"]},
+        "runtime_claim": {"const": false},
+        "owned_path_manifest": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "direct_interfaces": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "classifier_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "required_effects": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["effect_class", "status", "adapter_id", "actor_node_id", "rollback_contract", "independent_postcheck_node_id"],
+        "properties": {
+          "effect_class": {"enum": ["NONE", "EXTERNAL_READONLY_ATTESTATION"]},
+          "status": {"enum": ["NOT_REQUIRED", "DEFERRED_TO_POST_MERGE_FINALIZATION", "REQUIRED_PENDING", "SATISFIED"]},
+          "adapter_id": {"type": "string", "minLength": 1},
+          "actor_node_id": {"type": "string", "minLength": 1},
+          "rollback_contract": {"type": "string", "minLength": 1},
+          "independent_postcheck_node_id": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "classified_at": {"type": "string", "format": "date-time"},
+    "self_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}

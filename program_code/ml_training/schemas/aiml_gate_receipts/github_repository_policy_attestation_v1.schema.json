@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "github_repository_policy_attestation_v1.schema.json",
+  "title": "Effect-time GitHub repository ruleset attestation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "attestation_id", "repository", "reviewed_head", "merge_head", "ruleset", "observer_node_id", "validator_node_id", "observation_method", "evidence_captures", "validity_class", "observed_at", "valid_from", "effect_at", "expires_at", "self_digest"],
+  "properties": {
+    "schema_version": {"const": "github_repository_policy_attestation_v1"},
+    "attestation_id": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository_id", "full_name", "default_branch"],
+      "properties": {
+        "repository_id": {"type": "integer", "minimum": 1},
+        "full_name": {"type": "string", "pattern": "^[^/\\s]+/[^/\\s]+$"},
+        "default_branch": {"type": "string", "minLength": 1}
+      }
+    },
+    "reviewed_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "merge_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "ruleset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ruleset_id", "name", "target", "enforcement", "ref_includes", "ref_excludes", "pull_request_required", "required_approving_review_count", "required_checks", "strict_required_status_checks_policy", "bypass_actors", "current_user_can_bypass", "deletion_allowed", "non_fast_forward_allowed"],
+      "properties": {
+        "ruleset_id": {"type": "integer", "minimum": 1},
+        "name": {"type": "string", "minLength": 1},
+        "target": {"const": "branch"},
+        "enforcement": {"const": "active"},
+        "ref_includes": {"type": "array", "minItems": 1, "uniqueItems": true, "contains": {"const": "~DEFAULT_BRANCH"}, "items": {"type": "string", "minLength": 1}},
+        "ref_excludes": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "pull_request_required": {"const": true},
+        "required_approving_review_count": {"type": "integer", "minimum": 0},
+        "required_checks": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["context", "integration_id"],
+            "properties": {
+              "context": {"type": "string", "minLength": 1},
+              "integration_id": {"type": ["integer", "null"], "minimum": 1}
+            }
+          }
+        },
+        "strict_required_status_checks_policy": {"const": true},
+        "bypass_actors": {"type": "array", "maxItems": 0},
+        "current_user_can_bypass": {"const": "never"},
+        "deletion_allowed": {"const": false},
+        "non_fast_forward_allowed": {"const": false}
+      }
+    },
+    "observer_node_id": {"const": "github_policy_observer"},
+    "validator_node_id": {"const": "aiml_program_adoption_validator"},
+    "observation_method": {"const": "GITHUB_API_READONLY"},
+    "evidence_captures": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["url", "response_digest", "captured_at"],
+        "properties": {
+          "url": {"type": "string", "pattern": "^https://api\\.github\\.com/"},
+          "response_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+          "captured_at": {"type": "string", "format": "date-time"}
+        }
+      }
+    },
+    "validity_class": {"const": "EFFECT_TIME_AUTHORITY"},
+    "observed_at": {"type": "string", "format": "date-time"},
+    "valid_from": {"type": "string", "format": "date-time"},
+    "effect_at": {"type": "string", "format": "date-time"},
+    "expires_at": {"type": "string", "format": "date-time"},
+    "self_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}
