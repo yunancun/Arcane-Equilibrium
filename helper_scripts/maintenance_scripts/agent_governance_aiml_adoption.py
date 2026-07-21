@@ -14,6 +14,7 @@ if str(AIML_GATE_ROOT) not in sys.path:
     sys.path.insert(0, str(AIML_GATE_ROOT))
 
 from aiml_gate_receipt_validator import (  # noqa: E402
+    PROGRAM_REVIEW_NODES,
     SourceManifestVerifier,
     canonical_digest,
     validate_program_adoption_receipt,
@@ -318,6 +319,60 @@ def validate_program_adoption_closure_binding(
     }
     if any(bootstrap.get(key) != value for key, value in expected_bootstrap.items()):
         errors.append("AIML finalization attempt bootstrap differs from closure generation")
+
+    # Finding 1:把 receipt 的 7 個 reviewer 綁定接到已認證的 PASS role_fragment。
+    # fragment 的真實性與 no-blocker 由 validate_closure 的 mandatory-node loop
+    # (verification_fragment_truth_errors)與 validate_execution_attestations 保證,
+    # 此處僅綁定 role/id/gate_verdict 及 review_control.final_generation==review_generation,
+    # 不重覆實作認證。
+    review_bindings = receipt.get("review_bindings") if isinstance(receipt, dict) else None
+    review_generation = (
+        receipt.get("review_generation") if isinstance(receipt, dict) else None
+    )
+    fragments_by_node = {
+        fragment.get("node_id"): fragment
+        for fragment in packet.get("role_fragments", [])
+        if isinstance(fragment, dict)
+    }
+    if not isinstance(review_bindings, list):
+        errors.append("AIML Program adoption receipt review_bindings must be a list")
+    else:
+        for binding in review_bindings:
+            if not isinstance(binding, dict):
+                errors.append("AIML Program adoption review binding must be an object")
+                continue
+            node_id = binding.get("node_id")
+            fragment = fragments_by_node.get(node_id)
+            if not isinstance(fragment, dict):
+                errors.append(
+                    f"AIML Program adoption review binding {node_id} lacks a bound role fragment"
+                )
+                continue
+            if fragment.get("role") != binding.get("role"):
+                errors.append(
+                    f"AIML Program adoption review binding {node_id} role differs from its fragment"
+                )
+            if fragment.get("id") != binding.get("fragment_id"):
+                errors.append(
+                    f"AIML Program adoption review binding {node_id} fragment_id is not bound to a PASS fragment"
+                )
+            if fragment.get("gate_verdict") != "PASS":
+                errors.append(
+                    f"AIML Program adoption review binding {node_id} requires a PASS role fragment"
+                )
+            payload = fragment.get("payload")
+            control = (
+                payload.get("review_control") if isinstance(payload, dict) else None
+            )
+            if not isinstance(control, dict):
+                errors.append(
+                    f"AIML Program adoption review binding {node_id} fragment lacks review_control"
+                )
+            elif control.get("final_generation") != review_generation:
+                errors.append(
+                    f"AIML Program adoption review binding {node_id} review_control generation is not bound to receipt review_generation"
+                )
+
     if packet.get("gate_verdict") == "PASS" and packet.get("side_effects") != {
         "repo_mutation": False,
         "runtime_contact": False,

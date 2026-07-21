@@ -8,7 +8,9 @@ import re
 from pathlib import PurePosixPath
 from typing import Any, Iterable
 
-from agent_governance_aiml_adoption import aiml_program_adoption_selected, validate_aiml_finalization_facts
+from agent_governance_aiml_adoption import (
+    PROGRAM_REVIEW_NODES, aiml_program_adoption_selected, validate_aiml_finalization_facts,
+)
 from agent_governance_execution_dag import (
     delegated_execution_projection,
     execution_dag_digest,
@@ -735,18 +737,15 @@ def route_task(task_facts: dict[str, Any]) -> dict[str, Any]:
         add("gate_join", kind="join", requires=gates, reason="all independently triggered gates must complete before acceptance or closure")
         predecessor = "gate_join"
     if aiml_program_adoption:
-        add(
-            "business_acceptance", role="QA", requires=[predecessor],
-            reason="post-merge AIML Program adoption requires source-only acceptance",
-        )
-        add(
-            "aiml_program_adoption_validator", kind="validator",
-            requires=["business_acceptance"],
-            reason=(
-                "canonical non-call validator checks the typed adoption evidence "
-                "before PM closure"
-            ),
-        )
+        # 合約範圍覆寫 narrow_query 抑制:採納收尾扇出 7 個強制 reviewer(node_id 等同
+        # PROGRAM_REVIEW_NODES 值,mandatory=True 故皆投影為必需 fragment=自動真實性+
+        # producer 認證),再由非呼叫 validator join、pm_closure 收口;僅限本分支。
+        review_roles = ("E2", "E4", "CC", "E3", "MIT", "R4", "QA")
+        review_node_ids = [PROGRAM_REVIEW_NODES[role] for role in review_roles]
+        for role, node_id in zip(review_roles, review_node_ids):
+            add(node_id, role=role, requires=[predecessor], reason="mandatory AIML Program adoption reviewer")
+        add("aiml_program_adoption_validator", kind="validator", requires=review_node_ids,
+            reason="non-call validator checks adoption evidence and reviewer bindings before PM closure")
         predecessor = "aiml_program_adoption_validator"
     elif end_to_end_claim:
         add("business_acceptance", role="QA", requires=[predecessor], reason="end-to-end claim hard edge")

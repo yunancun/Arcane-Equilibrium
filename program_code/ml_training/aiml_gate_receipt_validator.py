@@ -175,6 +175,16 @@ GITHUB_SECRET_LIKE_RE = re.compile(
 )
 
 ExternalAttestationVerifier = Callable[[dict[str, Any]], bool]
+# SourceManifestVerifier 是 caller/host 提供的來源清單驗證能力,簽章為
+# (reviewed_head, merge_head, {path: sha256}) -> bool。回傳 True 是一項強契約,
+# 必須同時成立:
+#   1. reviewed_head 與 merge_head 兩者在 repo 皆存在;
+#   2. `git merge-base --is-ancestor reviewed_head merge_head`(自反:兩者相等亦
+#      通過),即 merge_head 為 reviewed_head 的後代或同一 commit,審過的樹確實被
+#      合入採納樹;
+#   3. 清單中每個 path 於 merge_head 的 blob sha256 與所給 digest 完全相符。
+# 保持回傳 bool 以免簽章變動;祖裔義務由本 docstring 規範並由測試強制。離線 CLI
+# 無此可信主機能力,故無法自證 PASS——此為刻意保留的可信主機委派。
 SourceManifestVerifier = Callable[[str, str, dict[str, str]], bool]
 
 
@@ -565,6 +575,18 @@ def _program_adoption_receipt_errors(receipt: dict[str, Any]) -> list[str]:
         or review_nodes != PROGRAM_REVIEW_NODES
     ):
         errors.append("program adoption review bindings are incomplete or substituted")
+    # 每個 reviewer 綁定一個唯一的 role_fragment id;採納收尾不得讓兩個 reviewer 共用
+    # 同一 fragment 佯裝獨立審查。
+    fragment_ids = [item["fragment_id"] for item in receipt["review_bindings"]]
+    if len(set(fragment_ids)) != len(fragment_ids):
+        errors.append("program adoption review binding fragment ids are not unique")
+    # review_generation 綁定 merge_head 的完整 repo 位元代(source_head==merge_head),
+    # 其 digest 為正規雜湊,採納 fragment 的 final_generation 必須逐一等於它。
+    review_generation = receipt["review_generation"]
+    if receipt["review_generation_digest"] != canonical_digest(review_generation):
+        errors.append("program adoption review generation digest is invalid")
+    if review_generation["source_head"] != receipt["merge_head"]:
+        errors.append("program adoption review generation is not bound to merge_head")
     if receipt["terminal_sink_contract_digest"] != terminal_receipt_sink_contract()[
         "self_digest"
     ]:
@@ -613,6 +635,16 @@ def validate_program_adoption_receipt(
     This is the canonical cross-artifact semantic validator used by governance
     closure.  Registry, routing and closure may select/call it but must not
     duplicate these AIML adoption rules.
+
+    ``source_manifest_verifier`` is mandatory and fail-closed: a missing verifier
+    or any non-``True`` return (including a raised exception) rejects the
+    receipt.  Returning ``True`` is a strengthened obligation — the host must have
+    confirmed that ``reviewed_head`` and ``merge_head`` both exist, that
+    ``git merge-base --is-ancestor reviewed_head merge_head`` holds (reflexive:
+    ``reviewed_head == merge_head`` is accepted as a fast-forward), and that every
+    manifest ``path`` resolves at ``merge_head`` to the exact declared blob
+    ``sha256``.  The reviewed/merge cross-binds below feed the exact heads handed
+    to that obligation; the offline CLI has no such host capability.
     """
 
     errors = [
@@ -653,6 +685,10 @@ def validate_program_adoption_receipt(
             }
             if len(source_manifest) != len(manifest_items):
                 raise ValueError("source manifest paths are not unique")
+            # reviewed_head/merge_head 是下方(reviewed_head==source-build
+            # checkpoint、merge_head==finalization baseline)交叉綁定過的確切 head,
+            # 於此餵給主機祖裔義務:主機須確認 merge_head 為 reviewed_head 的後代
+            # (自反相等亦可),且各 path 於 merge_head 的 blob 與清單 digest 相符。
             source_verified = source_manifest_verifier(
                 receipt["reviewed_head"],
                 receipt["merge_head"],
@@ -726,6 +762,9 @@ def validate_program_adoption_receipt(
         errors.append("program adoption finalization attempt binding is invalid")
     if receipt["attempt"] != final_attempt["attempt"]:
         errors.append("program adoption finalization attempt number binding is invalid")
+    # reviewed_head/merge_head 交叉綁定:分別必須等於 source-build checkpoint 與
+    # finalization baseline。這兩個確切 head 是上方 source_manifest_verifier 祖裔
+    # 義務(merge_head 為 reviewed_head 後代 + blob 相符)的輸入。
     if receipt["reviewed_head"] != source_attempt["source"]["checkpoint_head"]:
         errors.append("program adoption reviewed_head differs from source-build checkpoint")
     if receipt["merge_head"] != final_attempt["source"]["baseline_head"]:
@@ -1096,9 +1135,15 @@ def validate_aiml_artifact(
         if artifact["attempt_key"] != expected_attempt_key:
             errors.append("session attempt_key differs from its canonical row fields")
         bootstrap = artifact["bootstrap_admission"]
+        attempt_phase = artifact["attempt_phase"]
         if bootstrap["baseline_head"] != artifact["source"]["baseline_head"]:
             errors.append("session bootstrap baseline differs from source baseline")
-        if bootstrap["writer_lease_id"] != artifact["lease"]["lease_id"]:
+        # 只有 SOURCE_BUILD 持有 writer lease;此時 lease.lease_id 與
+        # bootstrap.writer_lease_id 必須互綁。POST_MERGE 為唯讀收尾,schema 已禁止
+        # 兩者出現,故此綁定僅在 SOURCE_BUILD 生效。
+        if attempt_phase == "SOURCE_BUILD" and (
+            bootstrap["writer_lease_id"] != artifact["lease"]["lease_id"]
+        ):
             errors.append("session bootstrap writer lease binding is invalid")
         errors.extend(_s0_3_work_package_errors(
             artifact["work_package"],
@@ -1137,27 +1182,52 @@ def validate_aiml_artifact(
         ]
         if len(matching_native_nodes) != 1:
             errors.append("session native admission does not match exactly one DAG node")
-        try:
-            acquired_at = _parse_timestamp(artifact["lease"]["acquired_at"])
-            heartbeat_at = _parse_timestamp(artifact["lease"]["heartbeat_at"])
-            expires_at = _parse_timestamp(artifact["lease"]["expires_at"])
-            if not acquired_at <= heartbeat_at < expires_at:
-                errors.append("session attempt lease timestamps are out of order")
-            if isinstance(now, str):
-                evaluated_at = _parse_timestamp(now)
-            elif isinstance(now, datetime):
-                if now.tzinfo is None:
-                    raise ValueError("now must be timezone-aware")
-                evaluated_at = now
-            else:
-                evaluated_at = datetime.now(timezone.utc)
-            if (
-                evaluated_at >= expires_at
-                and artifact["status"] in {"CLAIMED", "IN_PROGRESS"}
-            ):
-                errors.append("expired session attempt must enter RECOVERY_REQUIRED")
-        except (TypeError, ValueError) as error:
-            errors.append(f"session attempt lease timestamp is invalid: {error}")
+        if attempt_phase == "SOURCE_BUILD":
+            try:
+                acquired_at = _parse_timestamp(artifact["lease"]["acquired_at"])
+                heartbeat_at = _parse_timestamp(artifact["lease"]["heartbeat_at"])
+                expires_at = _parse_timestamp(artifact["lease"]["expires_at"])
+                if not acquired_at <= heartbeat_at < expires_at:
+                    errors.append("session attempt lease timestamps are out of order")
+                if isinstance(now, str):
+                    evaluated_at = _parse_timestamp(now)
+                elif isinstance(now, datetime):
+                    if now.tzinfo is None:
+                        raise ValueError("now must be timezone-aware")
+                    evaluated_at = now
+                else:
+                    evaluated_at = datetime.now(timezone.utc)
+                if (
+                    evaluated_at >= expires_at
+                    and artifact["status"] in {"CLAIMED", "IN_PROGRESS"}
+                ):
+                    errors.append("expired session attempt must enter RECOVERY_REQUIRED")
+            except (TypeError, ValueError) as error:
+                errors.append(f"session attempt lease timestamp is invalid: {error}")
+        elif attempt_phase == "POST_MERGE_FINALIZATION":
+            # 收尾階段不得殘留任何 writer lease;唯讀 admission 必須 read_only=true,
+            # 且 admitted_at <= heartbeat_at(心跳不得早於納入時刻)。schema 已強制
+            # read_only_admission 存在,此處為防禦性複核。
+            if "lease" in artifact:
+                errors.append("post-merge finalization attempt cannot hold a writer lease")
+            if "writer_lease_id" in bootstrap:
+                errors.append(
+                    "post-merge finalization bootstrap cannot hold a writer lease id"
+                )
+            read_only_admission = artifact["read_only_admission"]
+            if read_only_admission["read_only"] is not True:
+                errors.append("post-merge finalization requires a read-only admission")
+            try:
+                admitted_at = _parse_timestamp(read_only_admission["admitted_at"])
+                heartbeat_at = _parse_timestamp(read_only_admission["heartbeat_at"])
+                if not admitted_at <= heartbeat_at:
+                    errors.append(
+                        "post-merge read-only admission timestamps are out of order"
+                    )
+            except (TypeError, ValueError) as error:
+                errors.append(
+                    f"post-merge read-only admission timestamp is invalid: {error}"
+                )
     if schema_version == "aiml_receipt_dependency_graph_v1":
         try:
             errors.extend(_dependency_graph_errors(artifact, now=now))

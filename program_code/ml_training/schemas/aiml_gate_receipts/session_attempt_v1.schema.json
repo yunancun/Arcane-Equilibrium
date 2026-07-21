@@ -4,7 +4,7 @@
   "title": "Durable AIML session attempt admission and lease",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "attempt_id", "session_id", "scope_ref", "cohort_epoch", "attempt", "attempt_key", "attempt_phase", "status", "owner", "lease", "source", "path_manifest", "work_package", "dependency_generations", "bootstrap_admission", "native_admission", "dag_nodes", "semantic_rechecks", "ci_classifier", "effect_classification_digest", "created_at", "self_digest"],
+  "required": ["schema_version", "attempt_id", "session_id", "scope_ref", "cohort_epoch", "attempt", "attempt_key", "attempt_phase", "status", "owner", "source", "path_manifest", "work_package", "dependency_generations", "bootstrap_admission", "native_admission", "dag_nodes", "semantic_rechecks", "ci_classifier", "effect_classification_digest", "created_at", "self_digest"],
   "properties": {
     "schema_version": {"const": "session_attempt_v1"},
     "attempt_id": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
@@ -54,6 +54,17 @@
         "expires_at": {"type": "string", "format": "date-time"}
       }
     },
+    "read_only_admission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["epoch", "admitted_at", "heartbeat_at", "read_only"],
+      "properties": {
+        "epoch": {"type": "integer", "minimum": 1},
+        "admitted_at": {"type": "string", "format": "date-time"},
+        "heartbeat_at": {"type": "string", "format": "date-time"},
+        "read_only": {"const": true}
+      }
+    },
     "source": {
       "type": "object",
       "additionalProperties": false,
@@ -97,7 +108,7 @@
     "bootstrap_admission": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["task_id", "task_contract_digest", "dag_digest", "context_artifact_digest", "baseline_head", "writer_lease_id"],
+      "required": ["task_id", "task_contract_digest", "dag_digest", "context_artifact_digest", "baseline_head"],
       "properties": {
         "task_id": {"const": "AIML-S0-3-GOVERNANCE-V1"},
         "task_contract_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
@@ -151,5 +162,27 @@
     "effect_classification_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
     "created_at": {"type": "string", "format": "date-time"},
     "self_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
-  }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"attempt_phase": {"const": "SOURCE_BUILD"}}},
+      "then": {
+        "required": ["lease"],
+        "not": {"required": ["read_only_admission"]},
+        "properties": {
+          "bootstrap_admission": {"required": ["writer_lease_id"]}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"attempt_phase": {"const": "POST_MERGE_FINALIZATION"}}},
+      "then": {
+        "required": ["read_only_admission"],
+        "not": {"required": ["lease"]},
+        "properties": {
+          "bootstrap_admission": {"not": {"required": ["writer_lease_id"]}}
+        }
+      }
+    }
+  ]
 }

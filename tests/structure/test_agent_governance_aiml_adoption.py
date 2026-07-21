@@ -102,6 +102,73 @@ def _load_generic_governance_test_support():
     return module
 
 
+# Finding 1:採納收尾 DAG 的 7 個強制 reviewer(node_id 等同 PROGRAM_REVIEW_NODES 值)。
+_ADOPTION_REVIEW_NODES = [
+    ("E2", "independent_review"),
+    ("E4", "regression"),
+    ("CC", "constitutional_gate"),
+    ("E3", "security_gate"),
+    ("MIT", "data_ml_review"),
+    ("R4", "docs_integrity_review"),
+    ("QA", "business_acceptance"),
+]
+
+
+def _adoption_review_control(governance, node_id, task_facts, generation):
+    """單一 reviewer、無 blocker 的 review_control,final_generation 綁定可信位元代。"""
+
+    return {
+        "schema_version": "review_control_v1",
+        "task_contract_digest": governance.review_task_contract_digest(task_facts),
+        "non_goals": ["expand beyond the source-only adoption review"],
+        "final_generation": generation,
+        "reviewers": [{
+            "node_id": node_id,
+            "rounds": [{
+                "round": 1,
+                "kind": "initial",
+                "reviewed_generation": generation,
+                "findings": [],
+            }],
+        }],
+    }
+
+
+def _adoption_review_fragment(
+    governance, role, node_id, task_contract_digest, context_digest,
+    evidence_refs, generation, task_facts,
+):
+    return {
+        "schema_version": "role_fragment_v1",
+        "id": f"frag-{node_id}",
+        "node_id": node_id,
+        "role": role,
+        "work_status": "DONE",
+        "gate_verdict": "PASS",
+        "classification": "FACT",
+        "confidence": "high",
+        "summary": f"{role} review of the source-only adoption bundle passed",
+        "task_contract_digest": task_contract_digest,
+        "context_artifact_digest": context_digest,
+        "producer_call_ref": "pending-standard-lineage",
+        "producer_call_receipt_digest": "sha256:" + "0" * 64,
+        "producer_record_kind": "workflow_call_record_v1",
+        "evidence_refs": evidence_refs,
+        "concerns": [],
+        "next_action": None,
+        "consumption": {
+            "measurement_status": "unavailable",
+            "unavailable_reason": "platform telemetry unavailable",
+        },
+        "payload_kind": governance.load_registry()["roles"][role]["payload_kind"],
+        "payload": {
+            "review_control": _adoption_review_control(
+                governance, node_id, task_facts, generation
+            )
+        },
+    }
+
+
 def test_validate_closure_accepts_exact_program_adoption_only_with_trust_callbacks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -115,7 +182,7 @@ def test_validate_closure_accepts_exact_program_adoption_only_with_trust_callbac
     objective = "finalize source-only AIML Program adoption"
     scope = [
         ".codex/agent_registry_v1.json",
-        "program_code/ml_training/schemas/aiml_gate_receipts/",
+        "program_code/ml_training/schemas/aiml_gate_receipts/program_adoption_receipt_v1.schema.json",
     ]
     facts = {
         **_finalization_facts(),
@@ -132,12 +199,22 @@ def test_validate_closure_accepts_exact_program_adoption_only_with_trust_callbac
         ),
     }
     route = governance.route_task(facts)
-    context_plan = governance.compile_context("PM", route["task_facts"])
+    task_facts = route["task_facts"]
+    context_plan = governance.compile_context("PM", task_facts)
     assert context_plan["budget"]["claim_pass_eligible"] is True
     context_artifact = governance.materialize_context_artifact(context_plan)
     task_contract_digest = context_plan["task_contract_digest"]
-    repository_capture = governance.capture_repository(
-        route["task_facts"]["dirty_scope"],
+    context_digest = context_artifact["artifact_digest"]
+    repository_capture = governance.capture_repository(task_facts["dirty_scope"])
+    # E4 regression 需直接 test 證據:一個綁定 role_id=E4/node=regression 的本地
+    # command capture。Finding 2 已在 merge_head blob 驗過測試檔一致,故此重放合法。
+    e4_command = "git rev-parse HEAD"
+    e4_capture = governance.capture_command(
+        role_id="E4",
+        node_id="regression",
+        task_contract_digest=task_contract_digest,
+        command=e4_command,
+        scope=task_facts["dirty_scope"],
     )
     adjudicated_at = (
         datetime.now(timezone.utc) + timedelta(seconds=2)
@@ -147,10 +224,13 @@ def test_validate_closure_accepts_exact_program_adoption_only_with_trust_callbac
         "runtime_head": None,
         "runtime_observed_at": None,
     }
+    # review_generation == 可信 repo 位元代;7 個 reviewer 的 final_generation 與
+    # receipt.review_generation 皆綁定它。
+    review_generation = dict(source_baseline)
     task_specs, projection_errors = governance.delegated_execution_projection(
         route["required_role_nodes"],
         [],
-        excluded_nodes=governance.non_call_controller_node_ids(route["task_facts"]),
+        excluded_nodes=governance.non_call_controller_node_ids(task_facts),
     )
     assert projection_errors == []
     dag_digest = governance.execution_dag_digest(task_specs)
@@ -163,7 +243,7 @@ def test_validate_closure_accepts_exact_program_adoption_only_with_trust_callbac
                 "task_id": "AIML-S0-3-GOVERNANCE-V1",
                 "task_contract_digest": task_contract_digest,
                 "dag_digest": dag_digest,
-                "context_artifact_digest": context_artifact["artifact_digest"],
+                "context_artifact_digest": context_digest,
                 "baseline_head": baseline["source_head"],
             },
         },
@@ -173,9 +253,38 @@ def test_validate_closure_accepts_exact_program_adoption_only_with_trust_callbac
         "terminal_sink_contract": {},
     }
     bundle = {
-        "receipt": {"adoption_id": "program-adoption"},
+        "receipt": {
+            "adoption_id": "program-adoption",
+            "review_generation": review_generation,
+            "review_bindings": [
+                {
+                    "role": role,
+                    "node_id": node_id,
+                    "verdict": "PASS",
+                    "fragment_id": f"frag-{node_id}",
+                }
+                for role, node_id in _ADOPTION_REVIEW_NODES
+            ],
+        },
         "artifacts": artifacts,
     }
+    review_evidence_refs = {
+        node_id: (
+            ["ev-e4-command"]
+            if node_id == "regression"
+            else ["finalization-source-capture", "program-adoption"]
+            if node_id == "business_acceptance"
+            else ["finalization-source-capture"]
+        )
+        for _role, node_id in _ADOPTION_REVIEW_NODES
+    }
+    role_fragments = [
+        _adoption_review_fragment(
+            governance, role, node_id, task_contract_digest, context_digest,
+            review_evidence_refs[node_id], review_generation, task_facts,
+        )
+        for role, node_id in _ADOPTION_REVIEW_NODES
+    ]
     authority_refs = deepcopy(
         support._valid_failed_review_closure()["authority_refs"]
     )
@@ -194,7 +303,7 @@ def test_validate_closure_accepts_exact_program_adoption_only_with_trust_callbac
         "adjudicated_at": adjudicated_at,
         "baseline": baseline,
         "dispatch": {
-            "task_facts": route["task_facts"],
+            "task_facts": task_facts,
             "context_artifact": context_artifact,
             "dag_digest": dag_digest,
             "required_role_nodes": route["required_role_nodes"],
@@ -222,33 +331,24 @@ def test_validate_closure_accepts_exact_program_adoption_only_with_trust_callbac
                 "observed_at": repository_capture["observed_at"],
                 "artifact": repository_capture,
             },
-        ],
-        "role_fragments": [{
-            "schema_version": "role_fragment_v1",
-            "id": "frag-business-acceptance",
-            "node_id": "business_acceptance",
-            "role": "QA",
-            "work_status": "DONE",
-            "gate_verdict": "PASS",
-            "classification": "FACT",
-            "confidence": "high",
-            "summary": "the typed source-only adoption bundle satisfies acceptance",
-            "task_contract_digest": task_contract_digest,
-            "context_artifact_digest": context_artifact["artifact_digest"],
-            "producer_call_ref": "pending-standard-lineage",
-            "producer_call_receipt_digest": "sha256:" + "0" * 64,
-            "producer_record_kind": "workflow_call_record_v1",
-            "evidence_refs": ["finalization-source-capture", "program-adoption"],
-            "concerns": [],
-            "next_action": None,
-            "consumption": {
-                "measurement_status": "unavailable",
-                "unavailable_reason": "platform telemetry unavailable",
+            {
+                "id": "ev-e4-command",
+                "scope": "test",
+                "kind": "command_capture_v1",
+                "digest": e4_capture["record_digest"],
+                "artifact": e4_capture,
             },
-            "payload_kind": "gate_fragment_v1",
-            "payload": {"finding": "source-only adoption criteria passed"},
+        ],
+        "role_fragments": role_fragments,
+        "checks": [{
+            "id": "check-e4-regression",
+            "status": "EXECUTED",
+            "command": e4_command,
+            "signature": e4_capture["record_digest"],
+            "evidence_ref": "ev-e4-command",
+            "command_capture_ref": "ev-e4-command",
+            "executed_at": e4_capture["completed_at"],
         }],
-        "checks": [],
         "side_effects": {
             "repo_mutation": False,
             "runtime_contact": False,
@@ -296,6 +396,20 @@ def test_validate_closure_accepts_exact_program_adoption_only_with_trust_callbac
         external_evidence_verifier=external_verifier,
         source_manifest_verifier=source_verifier,
     ) == []
+
+    # Finding 1 負向 (iv):即便 7 個 review fragment 齊備,若無 out-of-band
+    # execution_attestation_verifier,wave record 無法被認證,validate_closure 經
+    # validate_execution_attestations 失敗關閉。
+    forged_without_attestation = governance.validate_closure(
+        packet,
+        external_evidence_verifier=external_verifier,
+        source_manifest_verifier=source_verifier,
+    )
+    assert any(
+        "lacks out-of-band execution attestation" in error
+        for error in forged_without_attestation
+    )
+
     without_external = governance.validate_closure(
         packet,
         execution_attestation_verifier=execution_verifier,
@@ -309,13 +423,20 @@ def test_validate_closure_accepts_exact_program_adoption_only_with_trust_callbac
     )
     assert without_source == [missing_source]
 
+    # 移除 finalization-source-capture:讀取型 reviewer 失去可直接擷取的證據,採納
+    # receipt(data scope)不能取代 repository/command capture,採納 PASS 失敗關閉。
     adoption_only = deepcopy(packet)
     adoption_only["evidence"] = [
         evidence for evidence in adoption_only["evidence"]
         if evidence["id"] != "finalization-source-capture"
     ]
     adoption_only["acceptance"][0]["evidence_refs"] = ["program-adoption"]
-    adoption_only["role_fragments"][0]["evidence_refs"] = ["program-adoption"]
+    for fragment in adoption_only["role_fragments"]:
+        remaining = [
+            ref for ref in fragment["evidence_refs"]
+            if ref != "finalization-source-capture"
+        ]
+        fragment["evidence_refs"] = remaining or ["program-adoption"]
     support._refresh_standard_workflow_lineage(governance, adoption_only)
     adoption_only_errors = governance.validate_closure(
         adoption_only,
@@ -325,13 +446,14 @@ def test_validate_closure_accepts_exact_program_adoption_only_with_trust_callbac
         external_evidence_verifier=external_verifier,
         source_manifest_verifier=source_verifier,
     )
-    assert adoption_only_errors == [
-        (
-            "role fragment business_acceptance PASS lacks direct captured "
-            "source/test/attested evidence"
-        ),
-        "acceptance[0] source/test PASS requires repository or command capture",
-    ]
+    assert any(
+        "lacks direct captured source/test/attested evidence" in error
+        for error in adoption_only_errors
+    )
+    assert (
+        "acceptance[0] source/test PASS requires repository or command capture"
+        in adoption_only_errors
+    )
 
 
 def _program_adoption_packet() -> tuple[dict[str, object], dict[str, object], str]:
@@ -357,7 +479,40 @@ def _program_adoption_packet() -> tuple[dict[str, object], dict[str, object], st
         "github_attestation": {"self_digest": GITHUB_POLICY_ATTESTATION},
         "terminal_sink_contract": {},
     }
-    bundle = {"receipt": {"adoption_id": "program-adoption"}, "artifacts": artifacts}
+    # Finding 1:7 個 reviewer 綁定與其 PASS role_fragment 的最小化正向樣本,供
+    # validate_program_adoption_closure_binding 的直接綁定測試使用。
+    review_generation = {
+        "source_head": baseline_head,
+        "dirty_diff_hash": "sha256:" + "a" * 64,
+        "untracked_relevant_hash": "sha256:" + "b" * 64,
+    }
+    review_bindings = [
+        {
+            "role": role,
+            "node_id": node_id,
+            "verdict": "PASS",
+            "fragment_id": f"frag-{node_id}",
+        }
+        for role, node_id in aiml_adoption.PROGRAM_REVIEW_NODES.items()
+    ]
+    role_fragments = [
+        {
+            "id": f"frag-{node_id}",
+            "node_id": node_id,
+            "role": role,
+            "gate_verdict": "PASS",
+            "payload": {"review_control": {"final_generation": review_generation}},
+        }
+        for role, node_id in aiml_adoption.PROGRAM_REVIEW_NODES.items()
+    ]
+    bundle = {
+        "receipt": {
+            "adoption_id": "program-adoption",
+            "review_bindings": review_bindings,
+            "review_generation": review_generation,
+        },
+        "artifacts": artifacts,
+    }
     packet = {
         "task_id": "AIML-S0-3-GOVERNANCE-V1",
         "gate_verdict": "PASS",
@@ -368,6 +523,7 @@ def _program_adoption_packet() -> tuple[dict[str, object], dict[str, object], st
             "dag_digest": dag_digest,
             "context_artifact": {"artifact_digest": context_digest},
         },
+        "role_fragments": role_fragments,
         "evidence": [{
             "id": "program-adoption",
             "scope": "data",
@@ -1334,6 +1490,62 @@ def test_program_adoption_closure_binding_passes_both_trust_callbacks(
     }
 
 
+# Finding 1 負向 (i):review_binding.fragment_id 指向不存在的 PASS fragment → 失敗。
+def test_program_adoption_closure_rejects_review_binding_without_matching_fragment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    packet, expected_route, task_contract_digest = _program_adoption_packet()
+    bundle = packet["evidence"][0]["artifact"]
+    bundle["receipt"]["review_bindings"][0]["fragment_id"] = "frag-nonexistent"
+    packet["evidence"][0]["digest"] = _digest(bundle)
+    monkeypatch.setattr(
+        aiml_adoption, "validate_program_adoption_receipt", lambda *a, **k: [],
+    )
+
+    errors, refs = aiml_adoption.validate_program_adoption_closure_binding(
+        packet,
+        expected_route,
+        task_contract_digest,
+        external_verifier=lambda artifact: True,
+        source_manifest_verifier=lambda reviewed, merged, manifest: True,
+    )
+
+    assert any(
+        "fragment_id is not bound to a PASS fragment" in error for error in errors
+    )
+    assert refs == set()
+
+
+# Finding 1 負向 (iii):某 reviewer fragment 的 review_control.final_generation 與
+# receipt.review_generation 不一致 → 失敗。
+def test_program_adoption_closure_rejects_fragment_generation_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    packet, expected_route, task_contract_digest = _program_adoption_packet()
+    packet["role_fragments"][0]["payload"]["review_control"]["final_generation"] = {
+        "source_head": "9" * 40,
+        "dirty_diff_hash": "sha256:" + "9" * 64,
+        "untracked_relevant_hash": "sha256:" + "9" * 64,
+    }
+    monkeypatch.setattr(
+        aiml_adoption, "validate_program_adoption_receipt", lambda *a, **k: [],
+    )
+
+    errors, refs = aiml_adoption.validate_program_adoption_closure_binding(
+        packet,
+        expected_route,
+        task_contract_digest,
+        external_verifier=lambda artifact: True,
+        source_manifest_verifier=lambda reviewed, merged, manifest: True,
+    )
+
+    assert any(
+        "review_control generation is not bound to receipt review_generation" in error
+        for error in errors
+    )
+    assert refs == set()
+
+
 def test_program_adoption_pass_requires_one_bundle(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1689,22 +1901,47 @@ def test_registry_binds_exact_aiml_adoption_contract_and_contract_only_sink() ->
     )
 
 
-def test_exact_aiml_selector_routes_qa_then_non_call_validator_without_effects() -> None:
+def test_exact_aiml_selector_routes_seven_reviewers_then_non_call_validator_without_effects() -> None:
     route = route_task(_finalization_facts())
     nodes = route["nodes"]
     node_ids = [node["id"] for node in nodes]
+    review_node_ids = [
+        "independent_review",
+        "regression",
+        "constitutional_gate",
+        "security_gate",
+        "data_ml_review",
+        "docs_integrity_review",
+        "business_acceptance",
+    ]
 
     assert route["task_facts"]["claim_inputs"] == _claims()
+    # 合約範圍覆寫 narrow_query 抑制:pm_triage → 7 個 reviewer 扇出 → 非呼叫
+    # validator → pm_closure。
     assert node_ids == [
         "pm_triage",
-        "business_acceptance",
+        *review_node_ids,
         "aiml_program_adoption_validator",
         "pm_closure",
     ]
-    validator = nodes[node_ids.index("aiml_program_adoption_validator")]
+    by_id = {node["id"]: node for node in nodes}
+    assert all(by_id[node_id]["requires"] == ["pm_triage"] for node_id in review_node_ids)
+    validator = by_id["aiml_program_adoption_validator"]
     assert validator["kind"] == "validator"
-    assert validator["requires"] == ["business_acceptance"]
+    assert validator["requires"] == review_node_ids
     assert nodes[-1]["requires"] == ["aiml_program_adoption_validator"]
+    # 7 個 reviewer 皆為必需 role 節點(自動真實性+producer 認證);validator 不是。
+    assert [
+        (node["node_id"], node["role"]) for node in route["required_role_nodes"]
+    ] == [
+        ("independent_review", "E2"),
+        ("regression", "E4"),
+        ("constitutional_gate", "CC"),
+        ("security_gate", "E3"),
+        ("data_ml_review", "MIT"),
+        ("docs_integrity_review", "R4"),
+        ("business_acceptance", "QA"),
+    ]
     assert "aiml_program_adoption_validator" not in {
         node["node_id"] for node in route["required_role_nodes"]
     }

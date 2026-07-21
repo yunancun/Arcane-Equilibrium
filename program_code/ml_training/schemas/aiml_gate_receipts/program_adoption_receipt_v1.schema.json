@@ -4,7 +4,7 @@
   "title": "Post-merge S0.3 AIML Program adoption receipt",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "adoption_id", "program_id", "terminal_state", "session_id", "scope_ref", "cohort_epoch", "attempt", "attempt_phase", "source_build_attempt_id", "finalization_attempt_id", "dependency_receipts", "document_manifest", "schema_manifest", "governance_manifest", "reviewed_head", "merge_head", "github_policy_attestation_digest", "required_effect_classification_digest", "receipt_dependency_graph_digest", "terminal_sink_contract_digest", "review_bindings", "validator_binding", "authority_limits", "validity_class", "issued_at", "self_digest"],
+  "required": ["schema_version", "adoption_id", "program_id", "terminal_state", "session_id", "scope_ref", "cohort_epoch", "attempt", "attempt_phase", "source_build_attempt_id", "finalization_attempt_id", "dependency_receipts", "document_manifest", "schema_manifest", "governance_manifest", "reviewed_head", "merge_head", "github_policy_attestation_digest", "required_effect_classification_digest", "receipt_dependency_graph_digest", "terminal_sink_contract_digest", "review_bindings", "review_generation", "review_generation_digest", "validator_binding", "authority_limits", "validity_class", "issued_at", "self_digest"],
   "properties": {
     "schema_version": {"const": "program_adoption_receipt_v1"},
     "adoption_id": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
@@ -57,15 +57,26 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["role", "node_id", "verdict", "generation_digest"],
+        "required": ["role", "node_id", "verdict", "fragment_id"],
         "properties": {
           "role": {"enum": ["E2", "E4", "CC", "E3", "MIT", "R4", "QA"]},
           "node_id": {"type": "string", "minLength": 1},
           "verdict": {"const": "PASS"},
-          "generation_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+          "fragment_id": {"type": "string", "minLength": 1}
         }
       }
     },
+    "review_generation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_head", "dirty_diff_hash", "untracked_relevant_hash"],
+      "properties": {
+        "source_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "dirty_diff_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "untracked_relevant_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      }
+    },
+    "review_generation_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
     "validator_binding": {
       "type": "object",
       "additionalProperties": false,

@@ -753,12 +753,13 @@ def _post_merge_attempt() -> dict:
     attempt["attempt_key"]["attempt"] = 2
     attempt["attempt_phase"] = "POST_MERGE_FINALIZATION"
     attempt["status"] = "IN_PROGRESS"
-    attempt["lease"] = {
-        "lease_id": "lease-s0-3-attempt-2",
+    # POST_MERGE 收尾不再持有 writer lease,改以唯讀 admission 記錄存活心跳。
+    del attempt["lease"]
+    attempt["read_only_admission"] = {
         "epoch": 2,
-        "acquired_at": "2026-07-21T09:00:00Z",
+        "admitted_at": "2026-07-21T09:00:00Z",
         "heartbeat_at": "2026-07-21T09:15:00Z",
-        "expires_at": "2026-07-21T10:00:00Z",
+        "read_only": True,
     }
     attempt["source"]["baseline_head"] = "b" * 40
     attempt["source"]["checkpoint_head"] = "b" * 40
@@ -776,9 +777,7 @@ def _post_merge_attempt() -> dict:
         ],
     }
     attempt["bootstrap_admission"]["baseline_head"] = "b" * 40
-    attempt["bootstrap_admission"]["writer_lease_id"] = (
-        "lease-s0-3-attempt-2"
-    )
+    del attempt["bootstrap_admission"]["writer_lease_id"]
     attempt["native_admission"] = {
         "node_id": "pm_finalization",
         "role": "PM",
@@ -826,6 +825,68 @@ def test_post_merge_classifier_rejects_contact_as_attestation_proof(
             attempt,
             classified_at="2026-07-21T09:00:00Z",
         )
+
+
+# Finding 3:相位條件 lease 不變量鎖。SOURCE_BUILD 持 writer lease 且禁 read_only
+# admission;POST_MERGE 為唯讀收尾,禁任何 writer lease 且必須攜 read_only admission。
+def test_post_merge_attempt_binds_read_only_admission_without_writer_lease() -> None:
+    assert validate_aiml_artifact(
+        _post_merge_attempt(), now="2026-07-21T09:30:00Z"
+    ) == []
+
+
+def test_post_merge_attempt_rejects_residual_writer_lease() -> None:
+    attempt = _post_merge_attempt()
+    attempt["lease"] = {
+        "lease_id": "lease-s0-3-attempt-2",
+        "epoch": 2,
+        "acquired_at": "2026-07-21T09:00:00Z",
+        "heartbeat_at": "2026-07-21T09:15:00Z",
+        "expires_at": "2026-07-21T10:00:00Z",
+    }
+    attempt["self_digest"] = artifact_self_digest(attempt)
+
+    assert any(
+        "matches forbidden not-schema" in error
+        for error in validate_aiml_artifact(attempt, now="2026-07-21T09:30:00Z")
+    )
+
+
+def test_post_merge_attempt_rejects_residual_bootstrap_writer_lease_id() -> None:
+    attempt = _post_merge_attempt()
+    attempt["bootstrap_admission"]["writer_lease_id"] = "lease-s0-3-attempt-2"
+    attempt["self_digest"] = artifact_self_digest(attempt)
+
+    assert any(
+        "$.bootstrap_admission: matches forbidden not-schema" in error
+        for error in validate_aiml_artifact(attempt, now="2026-07-21T09:30:00Z")
+    )
+
+
+def test_post_merge_read_only_admission_rejects_heartbeat_before_admission() -> None:
+    attempt = _post_merge_attempt()
+    attempt["read_only_admission"]["heartbeat_at"] = "2026-07-21T08:59:00Z"
+    attempt["self_digest"] = artifact_self_digest(attempt)
+
+    assert "post-merge read-only admission timestamps are out of order" in (
+        validate_aiml_artifact(attempt, now="2026-07-21T09:30:00Z")
+    )
+
+
+def test_source_build_attempt_rejects_read_only_admission() -> None:
+    attempt = _session_attempt()
+    attempt["read_only_admission"] = {
+        "epoch": 1,
+        "admitted_at": "2026-07-21T08:38:09Z",
+        "heartbeat_at": "2026-07-21T08:38:09Z",
+        "read_only": True,
+    }
+    attempt["self_digest"] = artifact_self_digest(attempt)
+
+    assert any(
+        "matches forbidden not-schema" in error
+        for error in validate_aiml_artifact(attempt, now="2026-07-21T09:00:00Z")
+    )
 
 
 def test_terminal_sink_is_contract_only_until_s1_2_implements_it() -> None:
@@ -1058,6 +1119,13 @@ def _program_adoption_bundle() -> tuple[dict, dict]:
         "QA": "business_acceptance",
         "R4": "docs_integrity_review",
     }
+    # review_generation 綁定 merge_head 的完整 repo 位元代;採納 fragment 的
+    # final_generation 必須逐一等於它。
+    review_generation = {
+        "source_head": final_attempt["source"]["baseline_head"],
+        "dirty_diff_hash": canonical_digest("adoption-review-dirty"),
+        "untracked_relevant_hash": canonical_digest("adoption-review-untracked"),
+    }
 
     receipt = {
         "schema_version": "program_adoption_receipt_v1",
@@ -1103,10 +1171,12 @@ def _program_adoption_bundle() -> tuple[dict, dict]:
                 "role": role,
                 "node_id": node_id,
                 "verdict": "PASS",
-                "generation_digest": canonical_digest(f"{role}:{node_id}"),
+                "fragment_id": f"frag-{node_id}",
             }
             for role, node_id in review_nodes.items()
         ],
+        "review_generation": review_generation,
+        "review_generation_digest": canonical_digest(review_generation),
         "validator_binding": {
             "node_id": "aiml_program_adoption_validator",
             "kind": "NON_CALL_VALIDATOR",
@@ -1190,12 +1260,61 @@ def _resign_program_bundle(receipt: dict, artifacts: dict) -> None:
     receipt["self_digest"] = artifact_self_digest(receipt)
 
 
+def _fast_forward_program_adoption_bundle() -> tuple[dict, dict]:
+    """令 finalization baseline == source checkpoint,形成 reviewed==merge 的 fast-forward。"""
+
+    receipt, artifacts = _program_adoption_bundle()
+    reviewed_head = receipt["reviewed_head"]
+
+    final_attempt = artifacts["finalization_attempt"]
+    final_attempt["source"]["baseline_head"] = reviewed_head
+    final_attempt["source"]["checkpoint_head"] = reviewed_head
+    final_attempt["bootstrap_admission"]["baseline_head"] = reviewed_head
+    final_attempt["self_digest"] = artifact_self_digest(final_attempt)
+
+    github = artifacts["github_attestation"]
+    github["merge_head"] = reviewed_head
+    github["attestation_id"] = github_policy_attestation_identity_digest(github)
+    github["self_digest"] = artifact_self_digest(github)
+
+    graph = artifacts["dependency_graph"]
+    next(
+        node for node in graph["receipts"] if node["receipt_id"] == "github-policy"
+    )["receipt_digest"] = github["self_digest"]
+    next(
+        node for node in graph["receipts"] if node["receipt_id"] == "S0.3"
+    )["authority_receipt_digest"] = github["self_digest"]
+
+    receipt["merge_head"] = reviewed_head
+    receipt["github_policy_attestation_digest"] = github["self_digest"]
+    # review_generation 綁定 merge_head,fast-forward 後同步為 reviewed_head。
+    receipt["review_generation"]["source_head"] = reviewed_head
+    receipt["review_generation_digest"] = canonical_digest(
+        receipt["review_generation"]
+    )
+    _resign_program_bundle(receipt, artifacts)
+    return receipt, artifacts
+
+
+# _accept_source_manifest 模擬 host 對 SourceManifestVerifier 的強契約:回傳 True
+# 代表 merge_head 為 reviewed_head 的後代(自反:兩者相等亦通過)且各 path 的 blob
+# 相符。_SOURCE_ANCESTRY 依 _program_adoption_bundle 的 fixture 建模——reviewed=a*40
+# 被合入 merge=b*40。
+_SOURCE_ANCESTRY = {HEAD_A: {HEAD_A, "b" * 40}}
+
+
+def _merge_head_descends_from_reviewed(reviewed_head: str, merge_head: str) -> bool:
+    if reviewed_head == merge_head:
+        return True
+    return merge_head in _SOURCE_ANCESTRY.get(reviewed_head, set())
+
+
 def _accept_source_manifest(
-    _reviewed_head: str,
-    _merge_head: str,
+    reviewed_head: str,
+    merge_head: str,
     _path_to_digest: dict[str, str],
 ) -> bool:
-    return True
+    return _merge_head_descends_from_reviewed(reviewed_head, merge_head)
 
 
 def test_program_adoption_rejects_unknown_schema_or_extra_field() -> None:
@@ -1375,14 +1494,24 @@ def test_program_adoption_rejects_resigned_head_drift(
 ) -> None:
     receipt, artifacts = _program_adoption_bundle()
     receipt[head_field] = "c" * 40
+    if head_field == "merge_head":
+        # 讓 review_generation 隨 merge_head 一致,隔離 reviewed/merge 交叉綁定檢查,
+        # 避免 review_generation 綁定 merge_head 的檢查提前失敗而遮蔽交叉綁定訊息。
+        receipt["review_generation"]["source_head"] = "c" * 40
+        receipt["review_generation_digest"] = canonical_digest(
+            receipt["review_generation"]
+        )
     _resign_program_bundle(receipt, artifacts)
 
+    # 本例隔離 reviewed/merge 交叉綁定檢查,故用寬鬆(永真)source verifier,避免
+    # 祖裔感知的 _accept_source_manifest 因 head 漂移提前失敗而遮蔽交叉綁定訊息;
+    # 祖裔義務由專屬的 non-descending / fast-forward 測試涵蓋。
     errors = validate_program_adoption_receipt(
         receipt,
         artifacts=artifacts,
         now="2026-07-21T09:30:00Z",
         external_verifier=lambda _artifact: True,
-        source_manifest_verifier=_accept_source_manifest,
+        source_manifest_verifier=lambda _reviewed, _merge, _manifest: True,
     )
 
     assert expected_error in errors
@@ -1572,6 +1701,46 @@ def test_program_adoption_rejects_resigned_correct_path_blob_digest_drift() -> N
     assert not any("self_digest is invalid" in error for error in errors)
 
 
+# Finding 2:祖裔義務。host verifier 回傳 True 必須代表 merge_head 為 reviewed_head
+# 的後代(審過的樹確實被合入採納樹);非後代則採納失敗,自反(fast-forward)通過。
+def test_program_adoption_rejects_merge_head_not_descending_from_reviewed_head() -> None:
+    receipt, artifacts = _program_adoption_bundle()
+
+    def non_descending_ancestry_verifier(
+        reviewed_head: str,
+        merge_head: str,
+        _path_to_digest: dict[str, str],
+    ) -> bool:
+        # 主機建模的祖裔關係中 merge_head 並非 reviewed_head 的後代,強契約不成立。
+        descendants = {reviewed_head: {reviewed_head}}
+        return merge_head in descendants.get(reviewed_head, set())
+
+    errors = validate_program_adoption_receipt(
+        receipt,
+        artifacts=artifacts,
+        now="2026-07-21T09:30:00Z",
+        external_verifier=lambda _artifact: True,
+        source_manifest_verifier=non_descending_ancestry_verifier,
+    )
+
+    assert "program adoption source manifest verification failed" in errors
+    assert not any("adoption_id is invalid" in error for error in errors)
+    assert not any("self_digest is invalid" in error for error in errors)
+
+
+def test_program_adoption_accepts_fast_forward_reviewed_equals_merge_head() -> None:
+    receipt, artifacts = _fast_forward_program_adoption_bundle()
+
+    assert receipt["reviewed_head"] == receipt["merge_head"]
+    assert validate_program_adoption_receipt(
+        receipt,
+        artifacts=artifacts,
+        now="2026-07-21T09:30:00Z",
+        external_verifier=lambda _artifact: True,
+        source_manifest_verifier=_accept_source_manifest,
+    ) == []
+
+
 def test_program_adoption_rejects_absent_or_false_external_github_verifier() -> None:
     receipt, artifacts = _program_adoption_bundle()
 
@@ -1711,7 +1880,7 @@ def test_program_adoption_rejects_review_binding_role_set_swap() -> None:
         "role": "E2",
         "node_id": "independent_review_duplicate",
         "verdict": "PASS",
-        "generation_digest": canonical_digest("E2:independent_review_duplicate"),
+        "fragment_id": "frag-independent_review_duplicate",
     })
     _resign_program_bundle(receipt, artifacts)
 
@@ -1727,6 +1896,64 @@ def test_program_adoption_rejects_review_binding_role_set_swap() -> None:
     assert any(
         "review bindings are incomplete or substituted" in error
         for error in errors
+    )
+
+
+# Finding 1(受 receipt 保護):review_generation 綁定 merge_head 與唯一 fragment_id。
+def test_program_adoption_rejects_review_generation_not_bound_to_merge_head() -> None:
+    receipt, artifacts = _program_adoption_bundle()
+    receipt["review_generation"]["source_head"] = "c" * 40
+    receipt["review_generation_digest"] = canonical_digest(receipt["review_generation"])
+    _resign_program_bundle(receipt, artifacts)
+
+    errors = validate_program_adoption_receipt(
+        receipt,
+        artifacts=artifacts,
+        now="2026-07-21T09:30:00Z",
+        external_verifier=lambda _artifact: True,
+        source_manifest_verifier=_accept_source_manifest,
+    )
+
+    assert any(
+        "review generation is not bound to merge_head" in error for error in errors
+    )
+
+
+def test_program_adoption_rejects_review_generation_digest_drift() -> None:
+    receipt, artifacts = _program_adoption_bundle()
+    receipt["review_generation_digest"] = canonical_digest("review-generation-drift")
+    _resign_program_bundle(receipt, artifacts)
+
+    errors = validate_program_adoption_receipt(
+        receipt,
+        artifacts=artifacts,
+        now="2026-07-21T09:30:00Z",
+        external_verifier=lambda _artifact: True,
+        source_manifest_verifier=_accept_source_manifest,
+    )
+
+    assert any(
+        "review generation digest is invalid" in error for error in errors
+    )
+
+
+def test_program_adoption_rejects_duplicate_review_binding_fragment_ids() -> None:
+    receipt, artifacts = _program_adoption_bundle()
+    receipt["review_bindings"][1]["fragment_id"] = receipt["review_bindings"][0][
+        "fragment_id"
+    ]
+    _resign_program_bundle(receipt, artifacts)
+
+    errors = validate_program_adoption_receipt(
+        receipt,
+        artifacts=artifacts,
+        now="2026-07-21T09:30:00Z",
+        external_verifier=lambda _artifact: True,
+        source_manifest_verifier=_accept_source_manifest,
+    )
+
+    assert any(
+        "review binding fragment ids are not unique" in error for error in errors
     )
 
 
