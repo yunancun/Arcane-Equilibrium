@@ -177,6 +177,52 @@ repo mutation 必須由每個 admitted writer 各產一份 task/role/node/scope-
 `repository_change_record_v1`，並以 ordered chain 重驗 exact before/after captures；單一
 snapshot/source-change summary 不證 causality。
 
+#### 2026-07-21 amendment: AIML S0.3 trusted-host finalization
+
+Program adoption 是上述 Closure Interface 的高權限特化，不新增第五個 public Interface。
+唯一 production entry point 是：
+
+```text
+python3 helper_scripts/maintenance_scripts/agent_governance.py aiml-trusted-finalize \
+  --packet <closure.json> \
+  --execution-bundle <trusted_execution_bundle_v1.json> \
+  --execution-signature <trusted_execution_bundle_v1.json.sig> \
+  --github-token-fd <inherited-fd>
+```
+
+Secure path inputs 必須 owner-controlled、regular、non-symlink、non-group/world-writable 且
+bounded；GitHub credential 只能由 inherited owner-only FD 消費，不進 argv、artifact 或輸出。
+Pipe input 採單一 `newline-framed` credential（closed pipe 可由 EOF 結束）；reader 有固定
+deadline，不得等待未關閉 writer 的 EOF。
+Production caller 不能替換 time、repo、transport、Git/GitHub verifier、API origin、CA roots 或
+execution trust root。Reviewed root 固定為 `aiml-s03-operator-v1`、fingerprint
+`SHA256:uGJ9veN7PoE6BBgfsSP2aiMndrwgbt7o/7/YfdzNzCQ`、SSHSIG namespace
+`arcane-equilibrium-aiml-s03`；matching private key 不得存在 Linux finalizer host，只在獨立
+Operator host 對 canonical bundle 做 detached signing。
+
+`POST_MERGE_FINALIZATION` 是唯讀 admission 且不得持 writer lease。Complete packet 必須綁
+final merged source、S0.1/S0.2/program receipt、CC / E2 / E3 / E4 / MIT / QA / R4 七個 mandatory
+review fragment 與 authenticated execution bundle。Bundle exact-bind task/Context/DAG/artifact，
+freshness 與 consumption 必須閉合。Source verifier 要求 `merge-base --is-ancestor` 與 exact
+commit/blob manifest，並拒絕 shallow/replace/graft/alternate/promisor/path escape；GitHub verifier
+以 fixed-origin/system-CA/no-proxy/no-redirect live 驗 repository/default ref/reviewed merge lineage/
+effective ruleset/required checks。`github_capture_projection_v2` 進一步 exact-bind paginated
+associated PR、merged PR detail、two-parent merge commit 與 paginated
+`check-runs?filter=latest`；PR head/merge/base/repository 必須等於 receipt lineage，每個 ruleset
+required `(context,integration_id)` 必須唯一 completed/success 且在 `merged_at` 前完成。
+Merge commit 的第二個 parent 必須是 exact reviewed head；第一個 parent 只要求為合法且互異的
+base parent，不能把 PR API 的 `base.sha` 誤當成歷史 pre-merge parent。Check Run 的
+`pull_requests` 可為空（exact `head_sha` 是權威綁定）；若非空則必須包含該 exact PR。
+Self-authored packet、merge 後補跑的 checks 或 cached GitHub JSON 不能替代 external verification。
+這組 REST evidence 分別證明 exact merged PR、pre-merge successful checks 與 finalization 當下
+live ruleset；它不宣稱 ruleset 在歷史 merge 時刻從未停用，後者需 platform audit/event
+attestation。
+
+只有 trusted finalizer `PASS` 且輸出 exact receipt digest 才可宣稱 `PROGRAM_ADOPTED`。任一
+signature、source、GitHub、seven-reviewer、freshness 或 exact-consumption mismatch 都 fail closed。
+本 amendment 不授予 ML5/ML6、deploy、broker/order/live、Decision Lease 或交易 effect；
+authority-limits const-false、source-adoption-only 與 four-zero-effects 不變。
+
 ### Evidence reuse
 
 Test evidence 使用 source/diff/untracked/command/test/toolchain/lock/OS/arch/env/config/

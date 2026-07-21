@@ -54,6 +54,12 @@ from agent_governance_effects import build_ops_evidence  # noqa: E402
 from agent_governance_external_evidence import (  # noqa: E402
     validate_external_evidence_capture,
 )
+from agent_governance_aiml_trusted_host import (  # noqa: E402
+    finalize_from_host_inputs,
+    read_secret_fd,
+    read_secure_bytes,
+    read_secure_json,
+)
 from agent_governance_evidence import (  # noqa: E402
     assess_test_evidence_reuse,
     build_test_execution_receipt,
@@ -164,6 +170,7 @@ __all__ = [
     "delegated_execution_projection",
     "execution_dag_digest",
     "filesystem_writer_lease_action",
+    "finalize_from_host_inputs",
     "is_dispatchable",
     "materialize_context_artifact",
     "native_agent_binding",
@@ -271,6 +278,14 @@ def _build_parser() -> argparse.ArgumentParser:
     context.add_argument("task_facts", help="JSON object or @path-to-JSON")
     closure = subparsers.add_parser("closure", help="validate closure_packet_v1 JSON")
     closure.add_argument("packet", help="JSON object or @path-to-JSON")
+    trusted_finalize = subparsers.add_parser(
+        "aiml-trusted-finalize",
+        help="validate a complete S0.3 adoption closure with host-held trust",
+    )
+    trusted_finalize.add_argument("--packet", type=Path, required=True)
+    trusted_finalize.add_argument("--execution-bundle", type=Path, required=True)
+    trusted_finalize.add_argument("--execution-signature", type=Path, required=True)
+    trusted_finalize.add_argument("--github-token-fd", type=int, required=True)
     quality = subparsers.add_parser(
         "closure-quality",
         help="validate externally attested closure_quality_followup_v1 JSON",
@@ -450,6 +465,33 @@ def main(
         errors = validate_closure(_json_arg(args.packet))
         print(json.dumps({"status": "FAIL" if errors else "PASS", "errors": errors}, ensure_ascii=False, indent=2))
         return 1 if errors else 0
+    if args.action == "aiml-trusted-finalize":
+        try:
+            packet = read_secure_json(args.packet)
+            bundle = read_secure_json(args.execution_bundle)
+            execution_signature = read_secure_bytes(
+                args.execution_signature,
+                max_bytes=16 * 1024,
+            )
+            github_token = read_secret_fd(
+                args.github_token_fd, label="GitHub credential"
+            )
+            result = finalize_from_host_inputs(
+                packet,
+                bundle,
+                execution_signature=execution_signature,
+                github_token=github_token,
+            )
+        except (OSError, TypeError, ValueError) as error:
+            result = {
+                "schema_version": "aiml_trusted_host_finalization_result_v1",
+                "status": "FAIL",
+                "closure_digest": None,
+                "program_adoption_receipt_digest": None,
+                "errors": [str(error)],
+            }
+        print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0 if result["status"] == "PASS" else 1
     if args.action == "closure-quality":
         bundle = _json_arg(args.bundle)
         if not isinstance(bundle, dict):
