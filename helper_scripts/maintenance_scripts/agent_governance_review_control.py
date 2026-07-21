@@ -265,13 +265,14 @@ def adjudicate_review_control(
         ):
             errors.append(f"{label} exact recheck requires a new frozen head")
         if len(rounds) == 2:
-            initial_blocker_ids = {
-                finding.get("id")
+            initial_blockers = {
+                finding["id"]: finding["classification"]
                 for finding in rounds[0]["findings"]
                 if isinstance(finding, dict)
                 and finding.get("classification") in BLOCKING_CLASSIFICATIONS
                 and isinstance(finding.get("id"), str)
             }
+            initial_blocker_ids = set(initial_blockers)
             recheck_ids = {
                 finding.get("id")
                 for finding in rounds[1]["findings"]
@@ -281,6 +282,18 @@ def adjudicate_review_control(
             if new_ids:
                 errors.append(
                     f"{label} exact recheck introduced a new finding: {new_ids}"
+                )
+            reclassified = sorted(
+                finding["id"] for finding in rounds[1]["findings"]
+                if isinstance(finding, dict)
+                and finding.get("id") in initial_blockers
+                and finding.get("classification")
+                != initial_blockers[finding["id"]]
+            )
+            if reclassified:
+                errors.append(
+                    f"{label} exact recheck changed blocker classification: "
+                    f"{reclassified}"
                 )
         current = rounds[-1]
         if not isinstance(current, dict) or not isinstance(current.get("findings"), list):

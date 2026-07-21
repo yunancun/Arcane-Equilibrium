@@ -158,6 +158,24 @@ def test_exact_recheck_cannot_hide_an_invalid_initial_blocker() -> None:
         adjudicate_review_control(TASK_FACTS, control)
 
 
+def test_exact_recheck_cannot_reclassify_an_unresolved_blocker() -> None:
+    initial = {**GENERATION, "source_head": "5" * 40}
+    control = _control([
+        _round(1, initial, [
+            _finding("still-open", classification="in_scope_blocker")
+        ]),
+        _round(2, GENERATION, [
+            _finding(
+                "still-open", classification="out_of_scope_followup",
+                criterion=None,
+            )
+        ]),
+    ])
+
+    with pytest.raises(ValueError, match="changed blocker classification"):
+        adjudicate_review_control(TASK_FACTS, control)
+
+
 def test_review_decision_requires_the_clean_frozen_generation(tmp_path: Path) -> None:
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
     subprocess.run(
