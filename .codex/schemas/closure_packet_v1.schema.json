@@ -512,6 +512,33 @@
   "$defs": {
     "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
     "timestamp": {"type": "string", "format": "date-time"},
+    "programAdoptionBundle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["receipt", "artifacts"],
+      "properties": {
+        "receipt": {"type": "object"},
+        "artifacts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "s0_1_receipt", "s0_2_receipt", "source_attempt",
+            "finalization_attempt", "effect_classification", "dependency_graph",
+            "github_attestation", "terminal_sink_contract"
+          ],
+          "properties": {
+            "s0_1_receipt": {"type": "object"},
+            "s0_2_receipt": {"type": "object"},
+            "source_attempt": {"type": "object"},
+            "finalization_attempt": {"type": "object"},
+            "effect_classification": {"type": "object"},
+            "dependency_graph": {"type": "object"},
+            "github_attestation": {"type": "object"},
+            "terminal_sink_contract": {"type": "object"}
+          }
+        }
+      }
+    },
     "testEvidenceReuseReceipt": {
       "type": "object",
       "additionalProperties": false,
@@ -1569,6 +1596,16 @@
             "properties": {
               "scope": {"const": "external"},
               "artifact": {"$ref": "#/$defs/externalEvidenceCapture"}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"kind": {"const": "program_adoption_receipt_v1"}}},
+          "then": {
+            "required": ["artifact"],
+            "properties": {
+              "scope": {"const": "data"},
+              "artifact": {"$ref": "#/$defs/programAdoptionBundle"}
             }
           }
         }

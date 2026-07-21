@@ -272,7 +272,12 @@ def _validate_test_recheck_receipt(
     if not isinstance(execution_receipt, dict):
         errors.append("typed independent recheck lacks original execution")
         return errors
-    facts = execution_receipt.get("facts", {})
+    facts = execution_receipt.get("facts")
+    if not isinstance(facts, dict):
+        errors.append(
+            "typed independent recheck execution facts must be an object"
+        )
+        facts = {}
     bindings = {
         "execution_receipt_digest": execution_receipt.get("receipt_digest"),
         "signature": execution_receipt.get("signature"),

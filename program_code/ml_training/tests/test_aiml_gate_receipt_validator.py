@@ -20,7 +20,9 @@ from aiml_gate_receipt_validator import (  # noqa: E402
     evidence_environment_identity_digest,
     github_policy_attestation_identity_digest,
     landing_scope_identity_digest,
+    PROGRAM_GOVERNANCE_PATHS,
     program_adoption_identity_digest,
+    S0_3_EXACT_OWNED_PATHS,
     S0_DEPENDENCY_DIGESTS,
     session_attempt_identity_digest,
     terminal_receipt_sink_contract,
@@ -35,6 +37,22 @@ DIGEST_C = "sha256:" + "c" * 64
 DIGEST_D = "sha256:" + "d" * 64
 DIGEST_E = "sha256:" + "e" * 64
 HEAD_A = "a" * 40
+NORMALIZER_PATH = (
+    "helper_scripts/maintenance_scripts/agent_governance_closure_inputs.py"
+)
+EVIDENCE_VALIDATOR_PATH = (
+    "helper_scripts/maintenance_scripts/agent_governance_evidence.py"
+)
+
+
+def test_closure_input_normalizer_is_bound_by_s0_3_source_manifests() -> None:
+    assert NORMALIZER_PATH in PROGRAM_GOVERNANCE_PATHS
+    assert NORMALIZER_PATH in S0_3_EXACT_OWNED_PATHS
+
+
+def test_closure_evidence_validator_is_bound_by_s0_3_source_manifests() -> None:
+    assert EVIDENCE_VALIDATOR_PATH in PROGRAM_GOVERNANCE_PATHS
+    assert EVIDENCE_VALIDATOR_PATH in S0_3_EXACT_OWNED_PATHS
 
 
 def _landing_scope() -> dict:
@@ -1008,6 +1026,8 @@ def _program_adoption_bundle() -> tuple[dict, dict]:
         "helper_scripts/maintenance_scripts/agent_governance.py",
         "helper_scripts/maintenance_scripts/agent_governance_aiml_adoption.py",
         "helper_scripts/maintenance_scripts/agent_governance_closure.py",
+        "helper_scripts/maintenance_scripts/agent_governance_closure_inputs.py",
+        "helper_scripts/maintenance_scripts/agent_governance_evidence.py",
         "helper_scripts/maintenance_scripts/agent_governance_registry.py",
         "helper_scripts/maintenance_scripts/agent_governance_routing.py",
         "helper_scripts/maintenance_scripts/agent_governance_vocabulary.py",

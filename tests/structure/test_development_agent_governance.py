@@ -814,6 +814,150 @@ def test_context_compiler_uses_elastic_envelope_without_truncating_mandatory_fac
     assert governance.context_plan_digest(small) == original_digest
 
 
+def test_query_context_preserves_explicit_empty_direct_interfaces() -> None:
+    governance = _load_module()
+    facts = {
+        "task_shape": "query",
+        "surfaces": ["governance"],
+        "risk": "low",
+        "uncertainty": "low",
+        "runtime_claim": False,
+        "end_to_end_claim": False,
+        "side_effect_class": "none",
+        "objective": "answer one effect-free governance query",
+        "scope": ["helper_scripts/maintenance_scripts/agent_governance_execution.py"],
+        "acceptance_criteria": ["the query Context is eligible for a source-only verdict"],
+        "hard_stops": ["do not grant write or runtime authority"],
+        "baseline": governance.capture_repository_baseline(),
+        "direct_interfaces": [],
+        "previous_failure": "an explicit empty query interface list was treated as omitted",
+    }
+    route = governance.route_task(facts)
+
+    plan = governance.compile_context("PM", route["task_facts"])
+
+    assert plan["mandatory_content"]["direct_interfaces"] == []
+    assert "direct_interfaces" not in plan["omitted_mandatory"]
+    assert plan["budget"]["claim_pass_eligible"] is True
+    artifact = governance.materialize_context_artifact(plan)
+    assert governance.validate_context_artifact(
+        artifact, expected_task_facts=route["task_facts"]
+    )["errors"] == []
+
+
+def test_query_context_keeps_missing_direct_interfaces_ineligible() -> None:
+    governance = _load_module()
+    facts = {
+        "task_shape": "query",
+        "surfaces": ["governance"],
+        "risk": "low",
+        "uncertainty": "low",
+        "runtime_claim": False,
+        "end_to_end_claim": False,
+        "side_effect_class": "none",
+        "objective": "answer one effect-free governance query",
+        "scope": ["helper_scripts/maintenance_scripts/agent_governance_execution.py"],
+        "acceptance_criteria": ["the query Context remains fail-closed when incomplete"],
+        "hard_stops": ["do not grant write or runtime authority"],
+        "baseline": governance.capture_repository_baseline(),
+        "previous_failure": "missing mandatory content was accepted",
+    }
+    route = governance.route_task(facts)
+
+    plan = governance.compile_context("PM", route["task_facts"])
+
+    assert "direct_interfaces" not in plan["mandatory_content"]
+    assert "direct_interfaces" in plan["omitted_mandatory"]
+    assert plan["budget"]["call_allowed"] is False
+    assert plan["budget"]["claim_pass_eligible"] is False
+    try:
+        governance.materialize_context_artifact(plan)
+    except ValueError as exc:
+        assert "not call_allowed" in str(exc)
+    else:
+        raise AssertionError("missing query direct_interfaces must not materialize")
+
+
+def test_non_query_context_keeps_empty_direct_interfaces_ineligible() -> None:
+    governance = _load_module()
+    facts = {
+        "task_shape": "review",
+        "surfaces": ["governance"],
+        "risk": "low",
+        "uncertainty": "low",
+        "runtime_claim": False,
+        "end_to_end_claim": False,
+        "side_effect_class": "none",
+        "objective": "review one governance contract",
+        "scope": ["helper_scripts/maintenance_scripts/agent_governance_execution.py"],
+        "acceptance_criteria": ["non-query Context remains explicit about interfaces"],
+        "hard_stops": ["do not grant write or runtime authority"],
+        "baseline": governance.capture_repository_baseline(),
+        "direct_interfaces": [],
+        "previous_failure": "an arbitrary empty interface list was accepted",
+    }
+    route = governance.route_task(facts)
+
+    plan = governance.compile_context("PM", route["task_facts"])
+
+    assert "direct_interfaces" not in plan["mandatory_content"]
+    assert "direct_interfaces" in plan["omitted_mandatory"]
+    assert plan["budget"]["claim_pass_eligible"] is False
+    try:
+        governance.materialize_context_artifact(plan)
+    except ValueError as exc:
+        assert "not call_allowed" in str(exc)
+    else:
+        raise AssertionError("non-query empty direct_interfaces must not materialize")
+
+
+def test_query_context_keeps_other_empty_mandatory_values_ineligible() -> None:
+    governance = _load_module()
+    base_facts = {
+        "task_shape": "query",
+        "surfaces": ["governance"],
+        "risk": "low",
+        "uncertainty": "low",
+        "runtime_claim": False,
+        "end_to_end_claim": False,
+        "side_effect_class": "none",
+        "objective": "answer one effect-free governance query",
+        "scope": ["helper_scripts/maintenance_scripts/agent_governance_execution.py"],
+        "acceptance_criteria": ["all mandatory Context remains explicit"],
+        "hard_stops": ["do not grant write or runtime authority"],
+        "baseline": governance.capture_repository_baseline(),
+        "direct_interfaces": [],
+        "previous_failure": "empty mandatory content was accepted",
+    }
+
+    for field, empty_value in (
+        ("acceptance_criteria", []),
+        ("hard_stops", []),
+        ("baseline", {}),
+        ("previous_failure", ""),
+    ):
+        route = governance.route_task({**base_facts, field: empty_value})
+        plan = governance.compile_context("PM", route["task_facts"])
+
+        assert field not in plan["mandatory_content"]
+        assert field in plan["omitted_mandatory"]
+        assert plan["budget"]["claim_pass_eligible"] is False
+        try:
+            governance.materialize_context_artifact(plan)
+        except ValueError as exc:
+            assert "not call_allowed" in str(exc)
+        else:
+            raise AssertionError(f"empty mandatory {field} must not materialize")
+
+    for field, empty_value in (("objective", ""), ("scope", [])):
+        try:
+            governance.compile_context("PM", {**base_facts, field: empty_value})
+        except ValueError as exc:
+            assert field in str(exc)
+        else:
+            raise AssertionError(f"invalid empty mandatory {field} must fail validation")
+
+
 def test_context_provenance_is_byte_backed_and_rejects_path_substitution(
     tmp_path: Path,
 ) -> None:
@@ -1395,6 +1539,7 @@ def test_closure_schema_binds_role_producers_and_typed_capture_refs() -> None:
         "workflow_wave_record_v1": "workflowWaveRecord",
             "telemetry_record_v1": "telemetryRecord",
             "external_evidence_capture_v1": "externalEvidenceCapture",
+            "program_adoption_receipt_v1": "programAdoptionBundle",
     }
     artifact_refs = {
         clause["if"]["properties"]["kind"].get("const"): clause["then"][

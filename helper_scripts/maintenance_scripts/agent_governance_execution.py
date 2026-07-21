@@ -115,7 +115,14 @@ def compile_context(
     mandatory = {
         field: facts[field]
         for field in MANDATORY_CONTEXT_FIELDS
-        if field in facts and facts[field] not in (None, "", [], {})
+        if field in facts and (
+            facts[field] not in (None, "", [], {})
+            or (
+                field == "direct_interfaces"
+                and facts["task_shape"] == "query"
+                and facts[field] == []
+            )
+        )
     }
     omitted = [field for field in MANDATORY_CONTEXT_FIELDS if field not in mandatory]
     surfaces = set(facts["surfaces"])

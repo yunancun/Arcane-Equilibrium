@@ -3,8 +3,21 @@
 from __future__ import annotations
 
 import re
+import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+
+
+AIML_GATE_ROOT = Path(__file__).resolve().parents[2] / "program_code/ml_training"
+if str(AIML_GATE_ROOT) not in sys.path:
+    sys.path.insert(0, str(AIML_GATE_ROOT))
+
+from aiml_gate_receipt_validator import (  # noqa: E402
+    SourceManifestVerifier,
+    canonical_digest,
+    validate_program_adoption_receipt,
+)
 
 
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -67,6 +80,8 @@ _RESERVED_CLAIM_PREFIXES = (
     "aiml_program_s0_",
     "aiml_github_policy_attestation",
 )
+PROGRAM_ADOPTION_EVIDENCE_KIND = "program_adoption_receipt_v1"
+ExternalVerifier = Callable[[dict[str, Any]], bool]
 
 
 def registry_contract_errors(registry: dict[str, Any], root: Path) -> list[str]:
@@ -162,3 +177,152 @@ def validate_aiml_finalization_facts(facts: dict[str, Any]) -> None:
             "AIML Program adoption selector requires source-only POST_MERGE "
             "finalization facts: " + ", ".join(errors)
         )
+
+
+def validate_program_adoption_closure_binding(
+    packet: dict[str, Any],
+    expected_route: dict[str, Any] | None,
+    task_contract_digest: str | None,
+    *,
+    external_verifier: ExternalVerifier | None,
+    source_manifest_verifier: SourceManifestVerifier | None,
+) -> tuple[list[str], set[str]]:
+    """Validate closure selection/binding; delegate AIML semantics canonically."""
+
+    errors: list[str] = []
+    dispatch = packet.get("dispatch")
+    if not isinstance(dispatch, dict):
+        errors.append("AIML Program adoption closure dispatch must be an object")
+        dispatch = {}
+    task_facts = dispatch.get("task_facts")
+    if not isinstance(task_facts, dict):
+        errors.append("AIML Program adoption closure task_facts must be an object")
+        task_facts = {}
+    try:
+        routed_facts = (expected_route or {}).get("task_facts", {})
+        selected = aiml_program_adoption_selected(
+            routed_facts.get("claim_inputs", {})
+        )
+    except (AttributeError, TypeError, ValueError) as error:
+        selected = False
+        errors.append(f"AIML Program adoption closure selector is invalid: {error}")
+    raw_evidence = packet.get("evidence")
+    if not isinstance(raw_evidence, list):
+        errors.append("AIML Program adoption closure evidence must be a list")
+        raw_evidence = []
+    evidence = []
+    for index, item in enumerate(raw_evidence):
+        if not isinstance(item, dict):
+            errors.append(f"AIML Program adoption evidence[{index}] must be an object")
+        elif item.get("kind") == PROGRAM_ADOPTION_EVIDENCE_KIND:
+            evidence.append(item)
+    if evidence and not selected:
+        errors.append("Program-adoption evidence requires the exact AIML selector")
+    if not selected:
+        return errors, set()
+    if packet.get("gate_verdict") != "PASS":
+        if evidence:
+            errors.append(
+                "AIML Program adoption non-PASS closure cannot carry an evidence bundle"
+            )
+        return errors, set()
+    if len(evidence) > 1:
+        errors.append("AIML Program adoption permits at most one evidence bundle")
+    if len(evidence) != 1:
+        errors.append("AIML Program adoption PASS requires exactly one evidence bundle")
+        return errors, set()
+
+    item = evidence[0]
+    bundle = item.get("artifact")
+    if not isinstance(bundle, dict):
+        return [*errors, "AIML Program adoption evidence bundle must be an object"], set()
+    try:
+        bundle_digest = canonical_digest(bundle)
+    except Exception:
+        errors.append("AIML Program adoption evidence digest calculation failed")
+    else:
+        if item.get("digest") != bundle_digest:
+            errors.append(
+                "AIML Program adoption evidence digest does not bind the complete bundle"
+            )
+    receipt = bundle.get("receipt")
+    artifacts = bundle.get("artifacts")
+    if not isinstance(artifacts, dict):
+        return [*errors, "AIML Program adoption artifact bundle must be an object"], set()
+    try:
+        canonical_errors = validate_program_adoption_receipt(
+            receipt,
+            artifacts=artifacts,
+            now=packet.get("adjudicated_at"),
+            external_verifier=external_verifier,
+            source_manifest_verifier=source_manifest_verifier,
+        )
+    except Exception:
+        errors.append("AIML Program adoption canonical validator failed")
+    else:
+        if not isinstance(canonical_errors, list) or any(
+            not isinstance(error, str) for error in canonical_errors
+        ):
+            errors.append(
+                "AIML Program adoption canonical validator returned invalid errors"
+            )
+        else:
+            errors.extend(canonical_errors)
+
+    claims = task_facts.get("claim_inputs")
+    if not isinstance(claims, dict):
+        errors.append("AIML Program adoption closure claim_inputs must be an object")
+        claims = {}
+    s0_1_receipt = artifacts.get("s0_1_receipt")
+    if not isinstance(s0_1_receipt, dict):
+        errors.append("AIML Program adoption s0_1_receipt must be an object")
+        s0_1_receipt = {}
+    s0_2_receipt = artifacts.get("s0_2_receipt")
+    if not isinstance(s0_2_receipt, dict):
+        errors.append("AIML Program adoption s0_2_receipt must be an object")
+        s0_2_receipt = {}
+    github_attestation = artifacts.get("github_attestation")
+    if not isinstance(github_attestation, dict):
+        errors.append("AIML Program adoption github_attestation must be an object")
+        github_attestation = {}
+    expected_claims = {
+        "aiml_program_s0_1_receipt": s0_1_receipt.get("self_digest"),
+        "aiml_program_s0_2_receipt": s0_2_receipt.get("self_digest"),
+        "aiml_github_policy_attestation": github_attestation.get("self_digest"),
+    }
+    if any(claims.get(key) != value for key, value in expected_claims.items()):
+        errors.append("AIML Program adoption selector claims differ from bundled artifacts")
+
+    final_attempt = artifacts.get("finalization_attempt")
+    if not isinstance(final_attempt, dict):
+        errors.append("AIML Program adoption finalization_attempt must be an object")
+        final_attempt = {}
+    bootstrap = final_attempt.get("bootstrap_admission")
+    if not isinstance(bootstrap, dict):
+        errors.append("AIML Program adoption bootstrap_admission must be an object")
+        bootstrap = {}
+    context_artifact = dispatch.get("context_artifact")
+    if not isinstance(context_artifact, dict):
+        errors.append("AIML Program adoption closure context_artifact must be an object")
+        context_artifact = {}
+    baseline = packet.get("baseline")
+    if not isinstance(baseline, dict):
+        errors.append("AIML Program adoption closure baseline must be an object")
+        baseline = {}
+    expected_bootstrap = {
+        "task_id": packet.get("task_id"),
+        "task_contract_digest": task_contract_digest,
+        "dag_digest": dispatch.get("dag_digest"),
+        "context_artifact_digest": context_artifact.get("artifact_digest"),
+        "baseline_head": baseline.get("source_head"),
+    }
+    if any(bootstrap.get(key) != value for key, value in expected_bootstrap.items()):
+        errors.append("AIML finalization attempt bootstrap differs from closure generation")
+    if packet.get("gate_verdict") == "PASS" and packet.get("side_effects") != {
+        "repo_mutation": False,
+        "runtime_contact": False,
+        "private_external_contact": False,
+        "broker_effect": False,
+    }:
+        errors.append("AIML Program adoption finalization must record four zero effects")
+    return errors, ({str(item.get("id"))} if not errors else set())
