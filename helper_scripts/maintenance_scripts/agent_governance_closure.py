@@ -15,6 +15,7 @@ from agent_governance_authority import (
 )
 from agent_governance_consumption import validate_consumption_binding
 from agent_governance_closure_inputs import normalize_closure_packet_inputs
+from agent_governance_closure_time import resolve_evaluation_time
 from agent_governance_workflow_capture import collect_closure_captures
 from agent_governance_capture_binding import CAPTURE_KINDS
 from agent_governance_context_validation import validate_context_artifact
@@ -66,6 +67,7 @@ def validate_closure(
     execution_attestation_verifier: ExecutionAttestationVerifier | None = None,
     external_evidence_verifier: ExternalEvidenceVerifier | None = None,
     source_manifest_verifier: SourceManifestVerifier | None = None,
+    trusted_evaluated_at: datetime | None = None,
 ) -> list[str]:
     """Validate closure_packet_v1 structure and cross-field truth semantics."""
     schema = json.loads((REPO_ROOT / CLOSURE_SCHEMA_REL).read_text(encoding="utf-8"))
@@ -89,13 +91,10 @@ def validate_closure(
         errors.append("invalid disposition")
     if packet.get("confidence") not in {"high", "med", "low"}:
         errors.append("invalid confidence")
-    try:
-        adjudicated_at = _parse_timestamp(str(packet.get("adjudicated_at", "")))
-        if adjudicated_at.tzinfo is None:
-            raise ValueError("timezone missing")
-    except (TypeError, ValueError):
-        adjudicated_at = None
-        errors.append("adjudicated_at must be a timezone-aware timestamp")
+    evaluation_time, evaluation_timestamp, evaluation_time_errors = (
+        resolve_evaluation_time(packet.get("adjudicated_at"), trusted_evaluated_at)
+    )
+    errors.extend(evaluation_time_errors)
     if packet["work_status"] in {"BLOCKED", "NEEDS_CONTEXT", "BLOCKED_NO_DELTA"} and packet["gate_verdict"] == "PASS":
         errors.append("blocked or no-delta closure cannot carry PASS")
     errors.extend(terminal_next_action_errors(
@@ -144,7 +143,7 @@ def validate_closure(
         errors.append(f"dispatch task facts are invalid: {error}")
     context_result = validate_context_artifact(
         dispatch.get("context_artifact"),
-        now=packet.get("adjudicated_at"),
+        now=evaluation_timestamp,
         expected_task_facts=dispatch.get("task_facts"),
         require_local_provenance=(
             packet.get("gate_verdict") != "PASS"
@@ -194,7 +193,7 @@ def validate_closure(
         errors.extend(
             f"authority_refs[{index}] {error}"
             for error in validate_authority_claim(
-                ref, adjudicated_at=packet.get("adjudicated_at")
+                ref, adjudicated_at=evaluation_timestamp
             )
         )
     if not packet.get("authority_refs"):
@@ -261,7 +260,7 @@ def validate_closure(
             artifact_errors, artifact = validate_observation_evidence(
                 evidence,
                 expected_baseline=baseline,
-                adjudicated_at=str(packet.get("adjudicated_at", "")),
+                adjudicated_at=evaluation_timestamp,
                 task_baseline=admitted_baseline,
             )
             if artifact_errors:
@@ -282,6 +281,7 @@ def validate_closure(
         packet, expected_route, task_contract_digest,
         external_verifier=external_evidence_verifier,
         source_manifest_verifier=source_manifest_verifier,
+        evaluated_at=evaluation_timestamp,
     )
     errors.extend(adoption_errors)
     captures = collect_closure_captures(
@@ -466,7 +466,7 @@ def validate_closure(
                 check_signature=check.get("signature"),
                 evidence_digest=evidence_by_id.get(evidence_ref, {}).get("digest"),
                 reused_from=check.get("reused_from"),
-                adjudicated_at=packet.get("adjudicated_at"),
+                adjudicated_at=evaluation_timestamp,
             )
             if isinstance(check.get("reuse_receipt"), dict):
                 receipt_errors.extend(
@@ -493,7 +493,7 @@ def validate_closure(
         trusted_review_generation = capture_review_generation(REPO_ROOT)
         authority_decision = resolve_authority_claims(
             packet.get("authority_refs", []),
-            adjudicated_at=str(packet.get("adjudicated_at", "")),
+            adjudicated_at=evaluation_timestamp,
         )
         if authority_decision.get("gate_verdict") != "PASS":
             errors.append(
@@ -676,12 +676,12 @@ def validate_closure(
             for evidence in runtime_evidence
         ):
             errors.append("runtime PASS evidence requires host, environment, observed_at, and expiry")
-        if adjudicated_at is not None:
+        if evaluation_time is not None:
             for evidence in runtime_evidence:
                 try:
                     observed = _parse_timestamp(str(evidence["observed_at"]))
                     expiry = _parse_timestamp(str(evidence["expiry"]))
-                    if not observed <= adjudicated_at < expiry:
+                    if not observed <= evaluation_time < expiry:
                         errors.append("runtime PASS evidence is stale at adjudicated_at")
                 except (KeyError, TypeError, ValueError):
                     pass
@@ -789,5 +789,7 @@ def validate_closure(
         verifier=execution_attestation_verifier,
     ))
     return errors
+
+
 def _parse_timestamp(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))

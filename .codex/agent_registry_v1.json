@@ -112,6 +112,9 @@
         "program_code/ml_training/schemas/aiml_gate_receipts/terminal_receipt_sink_v1.schema.json"
       ],
       "canonical_validator_path": "program_code/ml_training/aiml_gate_receipt_validator.py",
+      "trusted_host_finalizer_path": "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_host.py",
+      "execution_signer_fingerprint": "SHA256:uGJ9veN7PoE6BBgfsSP2aiMndrwgbt7o/7/YfdzNzCQ",
+      "github_capture_projection_version": "github_capture_projection_v2",
       "mandatory_review_roles": ["CC", "E2", "E3", "E4", "MIT", "QA", "R4"],
       "finalization_validator_node_id": "aiml_program_adoption_validator"
     },
