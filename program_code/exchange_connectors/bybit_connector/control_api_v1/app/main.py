@@ -10,7 +10,7 @@ MODULE_NOTE (中文):
   所有子路由（Paper Trading / L2 AI / Risk / Strategy / Governance / Scout）的统一注册。
   属于 Control API v1 层，是系统唯一的 HTTP 服务暴露点。
 
-  檔案大小債務（E2 LOW-1，2026-06-10）：本檔已跨 800 行警戒線（CLAUDE §九）。
+  檔案大小政策：本檔須維持在 CLAUDE §九 2000 行 review/split 門檻內。
   split follow-up 候選 = @app.on_event("startup") 的背景任務 wiring（flusher /
   canary / reconciler 等 create_task 排程）抽離為獨立 startup wiring 模組。
   本輪僅記帳不拆（exact-touch 慣例，P5-SM soak fix delta 不擴 scope）。
@@ -149,7 +149,7 @@ app.include_router(paper_router)
 from .layer2_routes import layer2_router  # noqa: E402
 app.include_router(layer2_router)
 
-# ── Layer 2 P4 online-FDR Router（bind-demo + wealth 唯讀；layer2_routes 超 800 行故獨立檔）──
+# ── Layer 2 P4 online-FDR Router（bind-demo + wealth 唯讀；獨立檔保留 2000 行政策空間）──
 from .l2_fdr_routes import fdr_router  # noqa: E402
 app.include_router(fdr_router)
 

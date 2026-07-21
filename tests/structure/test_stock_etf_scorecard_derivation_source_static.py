@@ -3,7 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SCORECARD_DERIVATION = ROOT / "rust/openclaw_types/src/stock_etf_scorecard_derivation.rs"
-MAX_LINES = 800
+from tests.structure.file_line_policy import MAX_FILE_LINES as MAX_LINES
 
 REQUIRED_TYPE_TOKENS = {
     "STOCK_ETF_SCORECARD_DERIVATION_CONTRACT_ID",

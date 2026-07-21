@@ -22,7 +22,7 @@ use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
 // EVENT-CONSUMER-SPLIT-2（2026-07-03）：retcode 分類 + 重試機械拆至 sibling
-// dispatch_retcode.rs（§九 800 行治理）。pub(super) re-export 保持本檔函數體
+// dispatch_retcode.rs（§九 2000 行治理）。pub(super) re-export 保持本檔函數體
 // 與 dispatch_tests.rs 的引用路徑逐字不變（鏡像 loop_exchange.rs 先例）。
 pub(super) use super::dispatch_retcode::{
     close_dispatch_timeout_error, close_dup_is_idempotent_success,

@@ -5,7 +5,7 @@ Governance refs: EX-06 §4 / CLAUDE.md §九 file-size discipline / G3-08 Phase 
 
 MODULE_NOTE (中文):
   本模組是 StrategistAgent 的 sibling，承載 edge 評估與 prompt 構建相關的純函數，
-  從 strategist_agent.py 拆出 6 個方法以維持主檔在 §九 800 行警告線之下。
+  從 strategist_agent.py 拆出 6 個方法以維持主檔在 §九 2000 行警告線之下。
   函數一律接受 ``agent: StrategistAgent`` 作為第一個參數，透過 instance 取得
   ``self`` 等價的 lock / stats / config / 委託物件（H1 / H3 ModelRouter / TruthRegistry /
   CognitiveModulator / cost_tracker）。
@@ -24,7 +24,7 @@ MODULE_NOTE (中文):
 MODULE_NOTE (English):
   StrategistAgent sibling carrying pure helper functions for edge evaluation and
   prompt construction. Extracted 6 methods from strategist_agent.py so the main
-  file stays under the §九 800-line warning threshold. Functions take
+  file stays under the §九 2000-line warning threshold. Functions take
   ``agent: StrategistAgent`` as the first parameter and access lock / stats /
   config / delegates (H1 / H3 ModelRouter / TruthRegistry / CognitiveModulator /
   cost_tracker) via the instance.
@@ -428,11 +428,11 @@ def _ai_evaluate(agent: "StrategistAgent", intel: IntelObject) -> EdgeEvaluation
 # ─────────────────────────────────────────────────────────────────────────────
 # Intent production / TradeIntent 構建與派發
 # G3-08 Phase 4 P3 (2026-04-28) — lift from strategist_agent.py to keep main
-# file under §九 800-line warning. Pure location refactor; behavior preserved
+# file under §九 2000-line warning. Pure location refactor; behavior preserved
 # bit-for-bit (strategy preference weight clamp / shadow log gating /
 # MessageBus dispatch / audit event names + payload / h_state hint).
 # G3-08 Phase 4 P3（2026-04-28）— 從 strategist_agent.py 移出以維持主檔在
-# §九 800 行警告線之下。純位置重構，行為完全保留（策略偏好權重套用 / shadow
+# §九 2000 行警告線之下。純位置重構，行為完全保留（策略偏好權重套用 / shadow
 # 日誌 gating / MessageBus 派發 / 審計事件名 + payload / h_state 提示）。
 # ─────────────────────────────────────────────────────────────────────────────
 

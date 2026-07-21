@@ -22,8 +22,9 @@ MODULE_NOTE (EN):
   helpers (``_collect_h_snapshots`` / ``_collect_agent_snapshots`` /
   ``_safe_snapshot`` / ``_safe_snapshot_self``) were extracted to the
   sibling module ``h_state_collectors.py`` after the Wave E SINGLETON
-  hardening commit ``b579dae`` pushed this file to 859 LOC (above the
-  CLAUDE.md §九 800 LOC warning threshold). They are re-exported below
+  hardening commit ``b579dae`` pushed this file to 859 LOC. The split preserves
+  focused ownership and headroom under the current CLAUDE.md §九 2000 LOC
+  review/split threshold. They are re-exported below
   so all existing test patch sites
   (``from app.h_state_query_handler import _safe_snapshot``, etc.)
   keep working unchanged. The Wave E ``sys.modules.get`` SINGLETON fix
@@ -135,8 +136,9 @@ MODULE_NOTE (中):
   G3-08-FUP-HSQ-SPLIT P2（2026-04-28）：四個 snapshot 收集 helper
   （``_collect_h_snapshots`` / ``_collect_agent_snapshots`` /
   ``_safe_snapshot`` / ``_safe_snapshot_self``）在 Wave E SINGLETON
-  加固 commit ``b579dae`` 將本檔推升到 859 LOC（超過 CLAUDE.md §九
-  800 LOC 警告線）後，已抽到 sibling 模組 ``h_state_collectors.py``。
+  加固 commit ``b579dae`` 將本檔推升到 859 LOC 後，已抽到 sibling 模組
+  ``h_state_collectors.py``，以保留聚焦職責及現行 CLAUDE.md §九 2000 LOC
+  review/split 門檻內的成長空間。
   下方仍 re-export，所有既有 test patch site
   （``from app.h_state_query_handler import _safe_snapshot`` 等）
   無須改動繼續工作。Wave E ``sys.modules.get`` SINGLETON fix 與兩個

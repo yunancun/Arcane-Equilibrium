@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from tests.structure.file_line_policy import MAX_FILE_LINES
+
 
 ROOT = Path(__file__).resolve().parents[2]
 BIN_ROOT = ROOT / "rust/openclaw_engine/src/bin"
@@ -17,7 +19,7 @@ def _loc(path: Path) -> int:
 def test_replay_runner_root_stays_thin_orchestration_entrypoint() -> None:
     text = RUNNER.read_text(encoding="utf-8")
 
-    assert _loc(RUNNER) <= 800
+    assert _loc(RUNNER) <= MAX_FILE_LINES
     assert '#[path = "replay_runner/manifest.rs"]' in text
     assert '#[path = "replay_runner/config.rs"]' in text
     assert '#[path = "replay_runner/calibration.rs"]' in text
@@ -36,7 +38,7 @@ def test_replay_runner_split_modules_stay_below_hard_limit() -> None:
         "manifest.rs",
         "manifest_tests.rs",
     }
-    assert all(loc <= 800 for loc in modules.values())
+    assert all(loc <= MAX_FILE_LINES for loc in modules.values())
 
 
 def test_replay_lib_runner_split_stays_below_governance_cap() -> None:

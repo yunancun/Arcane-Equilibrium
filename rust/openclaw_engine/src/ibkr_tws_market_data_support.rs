@@ -1,5 +1,5 @@
 //! MODULE_NOTE
-//! 模塊用途：`ibkr_tws_market_data` 的 **support 子模塊**（800 行帽拆檔;非獨立面）——
+//! 模塊用途：`ibkr_tws_market_data` 的 **support 子模塊**（2000 行帽拆檔;非獨立面）——
 //!   承載 W6-S3 market data lane 的純 codec/門控常數/entitlement 錯誤碼分類/tick 值紀律/
 //!   provenance 雜湊面:OUT reqMktData v11 / cancelMktData / reqMarketDataType builder（IB
 //!   現勘 pinned;**regulatorySnapshot 資金效果封死**;STK-only;snapshot⊥genericTickList）+
@@ -298,7 +298,7 @@ pub(crate) fn parse_i64(raw: &str, field: &'static str) -> Result<i64, MarketDat
 }
 
 // ===========================================================================
-// (d) 訂閱狀態純資料/枚舉 + staleness 投影（800 行帽:狀態機恆在父模塊,純資料/純函數居此）
+// (d) 訂閱狀態純資料/枚舉 + staleness 投影（2000 行帽:狀態機恆在父模塊,純資料/純函數居此）
 // ===========================================================================
 
 /// snapshot 終態 typed 裁決產物（`expire_overdue` 回傳;非懸掛的證明面）。

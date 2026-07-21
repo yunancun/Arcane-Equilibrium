@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from tests.structure.file_line_policy import MAX_FILE_LINES
+
 
 ROOT = Path(__file__).resolve().parents[2]
 TEST_ROOT = (
@@ -35,7 +37,7 @@ def test_h_state_query_split_modules_stay_below_hard_limit() -> None:
         "test_h_buckets.py",
         "test_agent_states.py",
     }
-    assert modules["common.py"] <= 800
-    assert modules["test_core.py"] <= 800
-    assert modules["test_h_buckets.py"] <= 800
+    assert modules["common.py"] <= MAX_FILE_LINES
+    assert modules["test_core.py"] <= MAX_FILE_LINES
+    assert modules["test_h_buckets.py"] <= MAX_FILE_LINES
     assert modules["test_agent_states.py"] <= 1500

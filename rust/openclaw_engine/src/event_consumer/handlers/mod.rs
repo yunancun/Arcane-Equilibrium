@@ -1,6 +1,6 @@
 //! Event-consumer IPC command dispatch facade. The monolithic `handlers.rs`
 //! was split by domain as part of E5-P1-3 to keep each file under the §九
-//! 800-line warning threshold. This module:
+//! 2000-line warning threshold. This module:
 //!   - defines the public `handle_paper_command` dispatch function
 //!   - re-exports `handle_disable_edge_predictor_all` for the mod.rs
 //!     interception path and `handle_reload_edge_predictor` for tests
@@ -30,7 +30,7 @@ pub(crate) mod edge_predictor;
 mod governance;
 mod lifecycle;
 // FA gap audit G1（2026-05-29）：C4 通知 fail-safe escalate handler + helper 從 risk.rs
-// 純搬移至獨立 module，讓 risk.rs 回 <800 review 門檻（0 邏輯改）。
+// 純搬移至獨立 module，保留現行 2000 行 review/split 門檻內的空間（0 邏輯改）。
 mod notification_failsafe_escalate;
 mod risk;
 mod strategy_params;

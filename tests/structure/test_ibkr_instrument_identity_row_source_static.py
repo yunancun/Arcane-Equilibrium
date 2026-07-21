@@ -5,7 +5,7 @@ ROOT = Path(__file__).resolve().parents[2]
 # 直接引用的來源檔字面 rel 路徑（同時滿足 rust-source-coverage 守衛的「測試源文字
 # 含該檔 rel 路徑」判定，並讓本 source-static 治理測試自身有實質斷言價值）。
 IDENTITY_ROW = ROOT / "rust/openclaw_types/src/ibkr_instrument_identity_row.rs"
-MAX_LINES = 800
+from tests.structure.file_line_policy import MAX_FILE_LINES as MAX_LINES
 
 # W6-S1 行契約層:契約 id + stockType 封閉白名單 + venue 白名單（v1 保守集）。
 REQUIRED_CONTRACT_TOKENS = {

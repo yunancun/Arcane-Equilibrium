@@ -3,7 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 AUDIT_EVENTS = ROOT / "rust/openclaw_types/src/stock_etf_audit_events.rs"
-MAX_LINES = 800
+from tests.structure.file_line_policy import MAX_FILE_LINES as MAX_LINES
 
 REQUIRED_TYPE_TOKENS = {
     "STOCK_ETF_ASSET_LANE_EVENTS_CONTRACT_ID",

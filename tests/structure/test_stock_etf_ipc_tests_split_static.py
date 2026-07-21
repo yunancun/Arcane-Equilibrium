@@ -6,7 +6,7 @@ ROOT = Path(__file__).resolve().parents[2]
 IPC_TEST_ROOT = ROOT / "rust/openclaw_engine/src/ipc_server/tests"
 STOCK_ETF_PARENT = IPC_TEST_ROOT / "stock_etf.rs"
 STOCK_ETF_SPLIT_DIR = IPC_TEST_ROOT / "stock_etf"
-MAX_LINES = 800
+from tests.structure.file_line_policy import MAX_FILE_LINES as MAX_LINES
 # 2026-07-03 同步：Codex 時代 fixture 再拆分（commit e259674fe 從父檔/尾段拆出
 # core_status_fixtures.rs 與 phase5_status_fixtures.rs），本 static 治理測試當時未同步。
 # 已逐一驗證新模組行數皆在 MAX_LINES 內且無 runtime material 讀取。

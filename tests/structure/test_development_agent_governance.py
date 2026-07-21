@@ -13,6 +13,8 @@ from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from tests.structure.file_line_policy import MAX_FILE_LINES
+
 
 ROOT = Path(__file__).resolve().parents[2]
 MODULE_PATH = (
@@ -248,7 +250,7 @@ def test_registry_is_single_valid_interface_and_views_are_current(tmp_path: Path
     ) + [DEPLOY_ADAPTER_PATH]
     assert implementation_files
     for path in implementation_files:
-        assert len(path.read_text(encoding="utf-8").splitlines()) <= 800, path
+        assert len(path.read_text(encoding="utf-8").splitlines()) <= MAX_FILE_LINES, path
 
     adapters = registry["effect_adapters"]
     assert adapters["deploy_adapter_v1"]["implementation_paths"] == [

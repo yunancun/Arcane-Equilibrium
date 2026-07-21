@@ -3,21 +3,20 @@
 //!
 //! ## Split rationale (HELPERS-CLOSE-TAGS-SPLIT, 2026-04-29)
 //!
-//! `helpers.rs` baseline 1411 LOC was already above the 800-line warn line
-//! (CLAUDE.md §九). Adding `build_close_tags` + 4 unit tests in W1-T1 brought
-//! it to 1639 LOC, exceeding the 1200-line hard cap and the §九 pre-existing
-//! "baseline + 5 LOC" exception clause (1416 LOC ceiling). To stay compliant
-//! without altering logic, the W1-T1 helper and its tests live in this
-//! dedicated file. W1-T2 then added the legacy-tag normalizer in the same
+//! `helpers.rs` had a 1411 LOC baseline. Adding `build_close_tags` + 4 unit
+//! tests in W1-T1 would have brought it to 1639 LOC. Both counts fit the current
+//! CLAUDE.md §九 2000-line review/split policy; the W1-T1 helper and its tests
+//! remain in this dedicated file to preserve focused ownership without altering
+//! logic. W1-T2 then added the legacy-tag normalizer in the same
 //! sibling module; the parent `mod.rs` re-exports
 //! `build_close_tags_from_legacy` for close emitters.
 //!
 //! ## 拆檔理由（HELPERS-CLOSE-TAGS-SPLIT，2026-04-29）
 //!
-//! `helpers.rs` baseline 1411 LOC 已逾 800 行警戒線（CLAUDE.md §九）。W1-T1
-//! 加入 `build_close_tags` + 4 unit tests 後達 1639 LOC，越過 1200 行硬上限
-//! 與「baseline + 5 LOC」例外條款上限 1416。為維持合規且 **不改 logic**，將
-//! W1-T1 helper 與其 tests 拆至本 sibling 檔案；W1-T2 後同檔新增 legacy-tag
+//! `helpers.rs` baseline 為 1411 LOC；W1-T1 加入 `build_close_tags` + 4 unit
+//! tests 原會達 1639 LOC。兩者皆在現行 CLAUDE.md §九 2000 行 review/split
+//! 政策內；為維持聚焦職責且 **不改 logic**，W1-T1 helper 與其 tests 仍置於本
+//! sibling 檔案；W1-T2 後同檔新增 legacy-tag
 //! normalizer。父 `mod.rs` 透過 `pub(crate) use` re-export
 //! `build_close_tags_from_legacy` 供 close emitter 呼叫。
 //!

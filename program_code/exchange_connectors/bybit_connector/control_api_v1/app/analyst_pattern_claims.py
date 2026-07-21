@@ -2,7 +2,7 @@
 Analyst Pattern Claims — Pattern claim registration helpers
 ============================================================
 Sibling extracted from ``analyst_agent.py`` (G3-08-FUP-ANALYST-SPLIT P2,
-2026-04-28) to keep ``analyst_agent.py`` under §九 800 LOC warning line.
+2026-04-28) to keep ``analyst_agent.py`` under §九 2000 LOC warning line.
 
 MODULE_NOTE (中文):
   本模組存放 AnalystAgent 用於將模式洞察登記到 TruthSourceRegistry 與

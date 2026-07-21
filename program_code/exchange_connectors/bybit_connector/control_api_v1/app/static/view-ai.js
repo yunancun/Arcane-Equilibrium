@@ -8,10 +8,10 @@
  *   typed-confirm**:除唯讀 Layer2 advisory-mesh 儀表盤外,還承載多項既有 layer2 寫端點——
  *   原生 view **preserve 呼叫(同端點、同 payload),絕不新增寫路徑、絕不改端點/payload**。
  *   殼 router 為穩定宿主,本檔提供 render/pause/resume 為唯一新增擴充點(second-adapter)。
- *   **拆檔**(檔案 <800 硬性;tab-ai 內容極多):本檔=主(狀態列 + 諮詢/推理歷史 + Phase3 儀表盤
+ *   **拆檔**(檔案 <2000 硬性;tab-ai 內容極多):本檔=主(狀態列 + 諮詢/推理歷史 + Phase3 儀表盤
  *   假設實驗/Kelly/策略進化 + trigger 寫 + evolution/run 寫 + 骨架宿主 + 生命週期);成本面拆出
  *   `view-ai-cost.js`(掛 window.OC_AI_COST);供應商 + 引擎設置面拆出 `view-ai-providers.js`
- *   (掛 window.OC_AI_PROVIDERS,承 3 config/DELETE 寫 + typed-confirm)。三檔各 <800,companion
+ *   (掛 window.OC_AI_PROVIDERS,承 3 config/DELETE 寫 + typed-confirm)。三檔各 <2000,companion
  *   缺席時本 view 誠實降級(該面顯提示,主面照常)。
  *   內容逐節守恆(對 legacy tab-ai,零丟失):本檔承 legacy 之
  *     ①AI 推理引擎狀態列(badge + Trigger Session + Refresh);⑨諮詢狀態(enabled/running/queries/last);

@@ -2,7 +2,7 @@
 Analyst Records — Pure dataclasses for AnalystAgent
 ====================================================
 Sibling extracted from ``analyst_agent.py`` (G3-08-FUP-ANALYST-SPLIT P2,
-2026-04-28) to keep ``analyst_agent.py`` under §九 800 LOC warning line.
+2026-04-28) to keep ``analyst_agent.py`` under §九 2000 LOC warning line.
 
 MODULE_NOTE (中文):
   本模組存放 AnalystAgent 使用的純數據結構（dataclasses）：
@@ -18,7 +18,7 @@ MODULE_NOTE (中文):
 
 MODULE_NOTE (English):
   Pure dataclasses for AnalystAgent extracted from ``analyst_agent.py``
-  (G3-08-FUP-ANALYST-SPLIT P2, 2026-04-28) to keep parent under §九 800 LOC
+  (G3-08-FUP-ANALYST-SPLIT P2, 2026-04-28) to keep parent under §九 2000 LOC
   warning line.
 
   Zero behavior change: every dataclass field, default, property and

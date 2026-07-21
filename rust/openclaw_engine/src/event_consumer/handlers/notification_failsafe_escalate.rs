@@ -9,9 +9,9 @@
 //! 硬邊界：transition 是收緊風控（Normal→Defensive），不開新倉不碰授權門控；
 //!   idempotent（watcher claim-before-await + `from < Defensive` guard 雙層）。
 //!
-//! 由 `handlers/risk.rs` 純搬移而來（FA gap audit G1，2026-05-29）：risk.rs 822 行
-//! 超過 800 review 門檻，本 C4 escalate handler + 4 helper（~205 LOC）是推過閾值的新增；
-//! 拆出後 risk.rs 回 <800。**0 邏輯改**，僅機械性搬移 + import 隨遷。
+//! 由 `handlers/risk.rs` 純搬移而來（FA gap audit G1，2026-05-29）：risk.rs 當時達
+//! 822 行；拆出 C4 escalate handler + 4 helper（~205 LOC）保留聚焦職責及現行
+//! 2000 行 review/split 門檻內的空間。**0 邏輯改**，僅機械性搬移 + import 隨遷。
 
 use crate::persistence::DualStateWriter;
 use crate::tick_pipeline::TickPipeline;

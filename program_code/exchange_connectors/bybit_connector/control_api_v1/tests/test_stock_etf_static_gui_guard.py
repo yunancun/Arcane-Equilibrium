@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import re
 
+from tests.structure.file_line_policy import MAX_FILE_LINES
+
 from stock_etf_static_guard_helpers import (
     CONTROL_API_DIR,
     FORBIDDEN_IPC_METHOD_STRINGS,
@@ -139,7 +141,7 @@ def test_stock_etf_static_gui_payload_builders_remain_split() -> None:
     assert "readonly_probe_result_import_request_hash_present" in fallback_source
     assert "stock_etf_ibkr_readonly_probe_result_import_request_v1" in fallback_source
     assert len(main_source.splitlines()) <= 1400
-    assert len(fallback_source.splitlines()) <= 800
+    assert len(fallback_source.splitlines()) <= MAX_FILE_LINES
 
 
 def test_stock_etf_static_gui_data_policy_renderers_remain_split() -> None:

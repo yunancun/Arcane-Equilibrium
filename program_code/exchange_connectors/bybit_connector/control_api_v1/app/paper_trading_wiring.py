@@ -2,7 +2,7 @@
 Paper Trading Wiring — module-level singletons and dependency injection (TD-03 split).
 紙上交易接線 — 模組級單例和依賴注入（TD-03 拆分）。
 
-Split from paper_trading_routes.py to keep routes file under 800-line warning limit.
+Split from paper_trading_routes.py to keep routes file under 2000-line warning limit.
 """
 from __future__ import annotations
 

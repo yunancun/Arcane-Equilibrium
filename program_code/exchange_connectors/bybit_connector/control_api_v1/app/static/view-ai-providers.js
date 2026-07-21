@@ -2,7 +2,7 @@
  * view-ai-providers.js — 玄衡原生 view「AI 狀態」供應商 + 引擎設置面 companion(Phase 2 第 6 遷;含寫 + typed-confirm)
  * ═══════════════════════════════════════════════════════════════════
  * MODULE_NOTE
- * 模塊用途:tab-ai 遷移的**供應商 + 引擎設置面拆檔**(檔案 <800 硬性;主檔 view-ai.js 已承
+ * 模塊用途:tab-ai 遷移的**供應商 + 引擎設置面拆檔**(檔案 <2000 硬性;主檔 view-ai.js 已承
  *   狀態/歷史/Phase3,成本面在 view-ai-cost.js)。本檔不註冊 OC_NATIVE_VIEWS(非獨立 view),
  *   而註冊 window.OC_AI_PROVIDERS = {render, load},由主檔 view-ai.js 於 render/loadAll 驅動
  *   (companion 缺席時主面照常降級)。**本檔承 tab-ai 的 3 config/DELETE 寫 + 1 typed-confirm**。

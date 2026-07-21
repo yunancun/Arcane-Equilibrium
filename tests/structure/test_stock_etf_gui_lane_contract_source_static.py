@@ -3,7 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 GUI_LANE = ROOT / "rust/openclaw_types/src/stock_etf_gui_lane_contract.rs"
-MAX_LINES = 800
+from tests.structure.file_line_policy import MAX_FILE_LINES as MAX_LINES
 
 REQUIRED_TYPE_TOKENS = {
     "STOCK_ETF_GUI_LANE_CONTRACT_ID",

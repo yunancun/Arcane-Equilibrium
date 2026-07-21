@@ -2,14 +2,14 @@
 //! 事件消費者 — 將 WS 的 PriceEvent 送入 TickPipeline 進行紙盤交易。
 //!
 //! MODULE_NOTE (EN): Extracted from main.rs (Phase 1 Day 0-A) to keep main.rs under
-//!   800-line warning limit. Owns TickPipeline lifecycle: creates pipeline, registers
+//!   2000-line warning limit. Owns TickPipeline lifecycle: creates pipeline, registers
 //!   strategies, runs kline bootstrap, then loops receiving PriceEvents.
-//! MODULE_NOTE (中): 從 main.rs 提取（Phase 1 Day 0-A），保持 main.rs 在 800 行警告線下。
+//! MODULE_NOTE (中): 從 main.rs 提取（Phase 1 Day 0-A），保持 main.rs 在 2000 行警告線下。
 //!   擁有 TickPipeline 生命週期：創建管線、註冊策略、執行 K 線引導、然後循環接收 PriceEvent。
 
 mod bootstrap;
 mod dispatch;
-// EVENT-CONSUMER-SPLIT-2（2026-07-03）：dispatch.rs retcode 分類簇拆出（§九 800 行治理）。
+// EVENT-CONSUMER-SPLIT-2（2026-07-03）：dispatch.rs retcode 分類簇拆出（§九 2000 行治理）。
 mod dispatch_retcode;
 mod execution_fill_helpers;
 mod funding_settlement;
@@ -17,7 +17,7 @@ mod governor_cooldown;
 pub mod handlers;
 mod loop_exchange;
 mod loop_handlers;
-// EVENT-CONSUMER-SPLIT-2（2026-07-03）：Arm D/E/F 自 loop_handlers.rs 拆出（§九 800 行治理）。
+// EVENT-CONSUMER-SPLIT-2（2026-07-03）：Arm D/E/F 自 loop_handlers.rs 拆出（§九 2000 行治理）。
 mod loop_pending_registration;
 mod loop_pipeline_command;
 mod loop_tick;

@@ -23,7 +23,7 @@
 //!     + cap 超界毒化非驅逐（全部沿 R17 W6-S0 新慣例）。
 //! 依賴：`ibkr_tws_wire`（codec/IN 常數）、`ibkr_tws_account_data`（`SnapshotStaleness`
 //!   六態共用）、`openclaw_types`（W6-S1 identity row 契約 + secType/symbol 紀律）、
-//!   support 子模塊 `ibkr_tws_contract_data_support.rs`（800 行帽拆檔:OUT builder/全限定
+//!   support 子模塊 `ibkr_tws_contract_data_support.rs`（2000 行帽拆檔:OUT builder/全限定
 //!   查詢/per-field sv 門控表/identity_hash 鑄造/unicode-escape/純 helper）、
 //!   `std::collections::BTreeMap`。
 //! 硬邊界：
@@ -64,7 +64,7 @@ use crate::ibkr_tws_wire::{
     IN_CONTRACT_DATA_MSG_ID,
 };
 
-// support 子模塊（800 行帽拆檔;沿 `_tests` 的 `#[path]` 檔名慣例）:純 codec/查詢/門控表/
+// support 子模塊（2000 行帽拆檔;沿 `_tests` 的 `#[path]` 檔名慣例）:純 codec/查詢/門控表/
 // 雜湊 helper 居彼,狀態機恆在本檔。
 #[path = "ibkr_tws_contract_data_support.rs"]
 mod support;

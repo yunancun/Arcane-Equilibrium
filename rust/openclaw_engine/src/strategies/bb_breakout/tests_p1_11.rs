@@ -6,15 +6,15 @@
 //!     delta application + "missing donchian indicator" fallback.
 //!   - (3) `BbBreakoutProfile::{Conservative, Balanced, Aggressive}` preset
 //!     values + `for_profile(Balanced) == default()` invariant + validate pass.
-//!   Split from `tests.rs` (696 LOC, near 800 soft warn) and `tests_oi.rs`
-//!   (OI scope) to keep each sibling ≤ soft warn and topically coherent.
+//!   Split from `tests.rs` (696 LOC) and `tests_oi.rs` (OI scope) to keep each
+//!   sibling topically coherent and within the 2000-line policy.
 //! MODULE_NOTE (中): 涵蓋 P1-11 軟化 + variant 預設面：
 //!   - (2) `DonchianMode::{Hard, Score, Off}` 語義 + 熱重載 + score delta 套用
 //!     + donchian 指標缺值 fallback。
 //!   - (3) `BbBreakoutProfile::{Conservative, Balanced, Aggressive}` 預設值 +
 //!     `for_profile(Balanced) == default()` 不變量 + validate pass。
-//!   從 `tests.rs`（696 LOC 近 800 soft warn）與 `tests_oi.rs`（OI scope）拆出，
-//!   維持每 sibling ≤ soft warn 且主題一致。
+//!   從 `tests.rs`（696 LOC）與 `tests_oi.rs`（OI scope）拆出，維持每個 sibling
+//!   主題一致且落在 2000 行政策內。
 
 use super::super::{Strategy, StrategyAction, StrategyParams};
 use super::params::{BbBreakoutParams, BbBreakoutProfile, DonchianMode};

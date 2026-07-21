@@ -8,14 +8,14 @@
 //!   strategy), the `StrategyParams` trait, and `load_strategy_params[_from]()`
 //!   TOML loader. The 5 per-strategy `*Params` structs live in
 //!   `strategy_params.rs` and are re-exported here so `crate::strategies::*`
-//!   paths are unchanged. Split from `mod.rs` (cluster C4c) to satisfy §九
-//!   1200-line hard cap + 800-line soft warn.
+//!   paths are unchanged. Split from `mod.rs` (cluster C4c) to satisfy the
+//!   current §九 2000-line review/split policy.
 //! MODULE_NOTE (中): `strategy_params.rs` 的精簡父層，只持有共用部分：`ParamRange`
 //!   描述符、`StrategyParamsConfig` 聚合結構（每策略一 field）、`StrategyParams`
 //!   trait、以及 `load_strategy_params[_from]()` TOML 載入器。5 個策略的
 //!   `*Params` 結構放在 `strategy_params.rs`，此處 re-export 以保持
-//!   `crate::strategies::*` 路徑不變。從 `mod.rs` 切出（cluster C4c），符合 §九
-//!   1200 行硬上限與 800 行軟警告。
+//!   `crate::strategies::*` 路徑不變。從 `mod.rs` 切出（cluster C4c），符合現行
+//!   §九 2000 行 review/split 政策。
 
 use crate::tick_pipeline::PipelineKind;
 use serde::{Deserialize, Serialize};

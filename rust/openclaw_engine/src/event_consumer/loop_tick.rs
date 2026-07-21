@@ -1,5 +1,5 @@
 //! Arm F handler — 主 tick 事件熱路徑，自 loop_handlers.rs 拆出
-//! （EVENT-CONSUMER-SPLIT-2，2026-07-03；§九 800 行治理）。
+//! （EVENT-CONSUMER-SPLIT-2，2026-07-03；§九 2000 行治理）。
 
 use std::collections::HashMap;
 use std::ops::ControlFlow;

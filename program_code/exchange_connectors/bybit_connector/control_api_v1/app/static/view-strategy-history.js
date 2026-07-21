@@ -2,7 +2,7 @@
  * view-strategy-history.js — 玄衡原生 view「策略中心」觀測面 companion(Phase 2 第 8 遷;全唯讀)
  * ═══════════════════════════════════════════════════════════════════
  * MODULE_NOTE
- * 模塊用途:tab-strategy 遷移的**觀測面拆檔**(檔案 <800 硬性;主檔 view-strategy.js 已承
+ * 模塊用途:tab-strategy 遷移的**觀測面拆檔**(檔案 <2000 硬性;主檔 view-strategy.js 已承
  *   狀態/健康/策略列表/3 寫/掃描/编排器详情)。本檔不註冊 OC_NATIVE_VIEWS(非獨立 view),
  *   而註冊 window.OC_STRATEGY_HISTORY = {render, load},由主檔 view-strategy.js 於 render/loadAll 驅動
  *   (companion 缺席時主面照常降級)。**本檔全唯讀:零寫路徑**。

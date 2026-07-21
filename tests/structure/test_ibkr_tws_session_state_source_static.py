@@ -5,7 +5,7 @@ ROOT = Path(__file__).resolve().parents[2]
 # 直接引用的來源檔字面 rel 路徑（同時滿足 rust-source-coverage 守衛的「測試源文字
 # 含該檔 rel 路徑」判定，並讓本 source-static 治理測試自身有實質斷言價值）。
 TWS_SESSION_STATE = ROOT / "rust/openclaw_types/src/ibkr_tws_session_state.rs"
-MAX_LINES = 800
+from tests.structure.file_line_policy import MAX_FILE_LINES as MAX_LINES
 
 # IB 官方現勘 error code 常數 + 客戶端 server-version pin + 連線 info 地板
 # （W3-S1 契約層；出典綁 IB message_codes.html 現勘 2026-07-15）。

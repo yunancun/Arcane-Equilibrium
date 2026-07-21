@@ -3,7 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 PHASE2_GATE = ROOT / "rust/openclaw_types/src/ibkr_phase2_gate.rs"
-MAX_LINES = 800
+from tests.structure.file_line_policy import MAX_FILE_LINES as MAX_LINES
 
 REQUIRED_CONSTANT_TOKENS = {
     'IBKR_PHASE2_ADR: &str = "ADR-0048"',
