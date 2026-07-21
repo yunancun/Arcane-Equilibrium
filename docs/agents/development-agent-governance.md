@@ -323,8 +323,18 @@ Source verifier 對 final merge generation 執行 `merge-base --is-ancestor`、e
 manifest 與 bounded object capture，並拒絕 shallow、replace/graft、alternate/promisor 與 path
 escape。GitHub verifier 只連 fixed API origin，使用 system CA、禁 proxy inheritance/redirect，
 並 live 驗 repository identity、default-branch ref、reviewed/merge commits、compare ancestry、
-effective ruleset 與 exact required checks/integration IDs。Packet-local attestation、cached policy
-JSON 或 caller-selected endpoint 都不能替代這條外部驗證。
+effective ruleset 與 exact required checks/integration IDs。`github_capture_projection_v2` 另須
+分頁擷取 reviewed head 的 associated PR inventory、exact merged PR detail 與
+`check-runs?filter=latest`：唯一匹配 PR 必須由同 repo 的 exact reviewed head 合併到 main，
+`merge_commit_sha` 等於 merge head，merge commit 直接含 reviewed head parent；每個 required
+`(context,integration_id)` 只可有一個 completed/success run，且完成時間不得晚於 PR
+`merged_at`。Packet-local attestation、merge 後補跑的 check、cached policy JSON 或
+caller-selected endpoint 都不能替代這條外部驗證。
+Two-parent merge 的第二個 parent 必須是 exact reviewed head；第一個 parent 必須是合法且互異的
+base parent，但不得綁 PR API 的 `base.sha`。Check Run 的 `pull_requests` 可為空（權威綁定是
+exact `head_sha`）；若非空則必須包含目標 PR。這組 REST evidence 分別證明 exact merged PR、
+合併前 successful checks 與 finalization 當下的 live ruleset，不宣稱 ruleset 在歷史 merge
+時刻連續生效；該宣稱另需 platform audit/event attestation。
 
 只有 finalizer 回傳 `status=PASS` 且帶 exact `program_adoption_receipt_digest` 時，該 receipt
 才可代表 `PROGRAM_ADOPTED`；任何 signature/source/GitHub/reviewer/freshness/consumption 錯誤皆

@@ -18,6 +18,16 @@ from agent_governance_aiml_trusted_common import (
     strict_json_loads,
     utc_now as _utc_now,
 )
+from agent_governance_aiml_trusted_github_pr import (
+    associated_pulls_path,
+    associated_pulls_projection,
+    check_runs_path,
+    check_runs_projection,
+    pull_path,
+    pull_projection,
+    select_merged_pull,
+    verify_merged_pull_gate_outcomes,
+)
 
 
 GITHUB_API_ORIGIN = "https://api.github.com"
@@ -31,7 +41,7 @@ EXPECTED_REPOSITORY_FULL_NAME = "yunancun/Arcane-Equilibrium"
 EXPECTED_DEFAULT_BRANCH = "main"
 EXPECTED_RULESET_ID = 19071223
 EXPECTED_RULESET_NAME = "Protect main after public hardening"
-GITHUB_CAPTURE_PROJECTION_VERSION = "github_capture_projection_v1"
+GITHUB_CAPTURE_PROJECTION_VERSION = "github_capture_projection_v2"
 EXPECTED_REQUIRED_CHECKS = (
     {"context": "Analyze (actions)", "integration_id": 15368},
     {"context": "Analyze (javascript-typescript)", "integration_id": 15368},
@@ -176,6 +186,46 @@ def _github_compare_path(reviewed_head: str, merge_head: str) -> str:
         raise ValueError("GitHub comparison heads are invalid")
     base = f"/repos/{EXPECTED_REPOSITORY_FULL_NAME}/compare"
     return f"{base}/{reviewed_head}...{merge_head}?per_page=1&page=1"
+
+
+def _github_associated_pulls_path(head: str, *, page: int) -> str:
+    return associated_pulls_path(
+        EXPECTED_REPOSITORY_FULL_NAME,
+        head,
+        page=page,
+        page_size=GITHUB_PAGE_SIZE,
+    )
+
+
+def _github_pull_path(number: int) -> str:
+    return pull_path(EXPECTED_REPOSITORY_FULL_NAME, number)
+
+
+def _github_check_runs_path(head: str, *, page: int) -> str:
+    return check_runs_path(
+        EXPECTED_REPOSITORY_FULL_NAME,
+        head,
+        page=page,
+        page_size=GITHUB_PAGE_SIZE,
+    )
+
+
+def _associated_pulls_projection(payload: Any, *, page: int) -> dict[str, Any]:
+    return associated_pulls_projection(
+        payload, page=page, projection_version=GITHUB_CAPTURE_PROJECTION_VERSION
+    )
+
+
+def _pull_projection(payload: Any) -> dict[str, Any]:
+    return pull_projection(
+        payload, projection_version=GITHUB_CAPTURE_PROJECTION_VERSION
+    )
+
+
+def _check_runs_projection(payload: Any, *, page: int) -> dict[str, Any]:
+    return check_runs_projection(
+        payload, page=page, projection_version=GITHUB_CAPTURE_PROJECTION_VERSION
+    )
 
 
 def _repo_projection(payload: Any) -> dict[str, Any]:
@@ -399,13 +449,21 @@ def _effective_rules_projection(payload: Any, *, page: int) -> dict[str, Any]:
 
 
 def _commit_projection(payload: Any, *, requested_head: str) -> dict[str, Any]:
-    if not isinstance(payload, dict):
+    if not isinstance(payload, dict) or not isinstance(payload.get("parents"), list):
         raise ValueError("GitHub commit response is invalid")
+    parent_shas = [
+        item.get("sha") for item in payload["parents"] if isinstance(item, dict)
+    ]
+    if len(parent_shas) != len(payload["parents"]) or any(
+        HEAD_RE.fullmatch(str(value or "")) is None for value in parent_shas
+    ):
+        raise ValueError("GitHub commit parents are invalid")
     return {
         "projection_version": GITHUB_CAPTURE_PROJECTION_VERSION,
         "kind": "commit",
         "requested_head": requested_head,
         "sha": payload.get("sha"),
+        "parent_shas": parent_shas,
     }
 
 
@@ -463,6 +521,32 @@ class GitHubRulesetVerifier:
                 return items, projections
         raise ValueError("GitHub pagination exceeds trusted-host page limit")
 
+    def _fetch_check_pages(
+        self, reviewed_head: str,
+    ) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
+        items: list[dict[str, Any]] = []
+        projections: dict[str, dict[str, Any]] = {}
+        expected_total: int | None = None
+        for page in range(1, MAX_GITHUB_PAGES + 1):
+            path = _github_check_runs_path(reviewed_head, page=page)
+            payload = self._transport.get_json(path, self._token)
+            projection = _check_runs_projection(payload, page=page)
+            if expected_total is None:
+                expected_total = projection["total_count"]
+            elif projection["total_count"] != expected_total:
+                raise ValueError("GitHub check-runs total_count drifted across pages")
+            page_items = projection["items"]
+            items.extend(page_items)
+            projections[GITHUB_API_ORIGIN + path] = projection
+            if len(page_items) < GITHUB_PAGE_SIZE:
+                if len(items) != expected_total:
+                    raise ValueError("GitHub check-runs pagination is incomplete")
+                ids = [item["id"] for item in items]
+                if len(ids) != len(set(ids)):
+                    raise ValueError("GitHub check-runs pages contain duplicate ids")
+                return items, projections
+        raise ValueError("GitHub check-runs pagination exceeds trusted-host limit")
+
     def _verify(self, attestation: dict[str, Any]) -> None:
         if not isinstance(attestation, dict):
             raise ValueError("GitHub attestation is absent")
@@ -511,6 +595,23 @@ class GitHubRulesetVerifier:
         comparison = _compare_projection(
             self._transport.get_json(compare_path, self._token)
         )
+        associated_pulls, pull_inventory_projections = self._fetch_pages(
+            lambda page: _github_associated_pulls_path(reviewed_head, page=page),
+            _associated_pulls_projection,
+        )
+        inventory_pull = select_merged_pull(
+            associated_pulls,
+            reviewed_head=reviewed_head,
+            merge_head=merge_head,
+            repository_id=EXPECTED_REPOSITORY_ID,
+            repository_name=EXPECTED_REPOSITORY_FULL_NAME,
+            default_branch=EXPECTED_DEFAULT_BRANCH,
+        )
+        pull_path_value = _github_pull_path(inventory_pull["number"])
+        pull = _pull_projection(
+            self._transport.get_json(pull_path_value, self._token)
+        )
+        check_runs, check_projections = self._fetch_check_pages(reviewed_head)
 
         expected_repo = {
             "repository_id": EXPECTED_REPOSITORY_ID,
@@ -602,6 +703,20 @@ class GitHubRulesetVerifier:
             or (reviewed_head != merge_head and comparison["ahead_by"] < 1)
         ):
             raise ValueError("live GitHub reviewed/merge ancestry is invalid")
+        merge_projection = commit_projections[
+            GITHUB_API_ORIGIN + _github_commit_path(merge_head)
+        ]
+        verify_merged_pull_gate_outcomes(
+            inventory_pull=inventory_pull,
+            pull=pull,
+            check_runs=check_runs,
+            reviewed_head=reviewed_head,
+            merge_head=merge_head,
+            merge_parent_shas=merge_projection["parent_shas"],
+            required_checks=EXPECTED_REQUIRED_CHECKS,
+            observed_at=observed,
+            now=self._now,
+        )
 
         projections = {
             GITHUB_API_ORIGIN + static_paths["repository"]: repo,
@@ -611,6 +726,9 @@ class GitHubRulesetVerifier:
             GITHUB_API_ORIGIN + static_paths["default_branch_ref"]: ref,
             **commit_projections,
             GITHUB_API_ORIGIN + compare_path: comparison,
+            **pull_inventory_projections,
+            GITHUB_API_ORIGIN + pull_path_value: pull,
+            **check_projections,
         }
         captures = attestation.get("evidence_captures")
         if not isinstance(captures, list) or len(captures) != len(projections):

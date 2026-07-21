@@ -204,8 +204,17 @@ review fragment 與 authenticated execution bundle。Bundle exact-bind task/Cont
 freshness 與 consumption 必須閉合。Source verifier 要求 `merge-base --is-ancestor` 與 exact
 commit/blob manifest，並拒絕 shallow/replace/graft/alternate/promisor/path escape；GitHub verifier
 以 fixed-origin/system-CA/no-proxy/no-redirect live 驗 repository/default ref/reviewed merge lineage/
-effective ruleset/required checks。Self-authored packet 或 cached GitHub JSON 不能替代 external
-verification。
+effective ruleset/required checks。`github_capture_projection_v2` 進一步 exact-bind paginated
+associated PR、merged PR detail、two-parent merge commit 與 paginated
+`check-runs?filter=latest`；PR head/merge/base/repository 必須等於 receipt lineage，每個 ruleset
+required `(context,integration_id)` 必須唯一 completed/success 且在 `merged_at` 前完成。
+Merge commit 的第二個 parent 必須是 exact reviewed head；第一個 parent 只要求為合法且互異的
+base parent，不能把 PR API 的 `base.sha` 誤當成歷史 pre-merge parent。Check Run 的
+`pull_requests` 可為空（exact `head_sha` 是權威綁定）；若非空則必須包含該 exact PR。
+Self-authored packet、merge 後補跑的 checks 或 cached GitHub JSON 不能替代 external verification。
+這組 REST evidence 分別證明 exact merged PR、pre-merge successful checks 與 finalization 當下
+live ruleset；它不宣稱 ruleset 在歷史 merge 時刻從未停用，後者需 platform audit/event
+attestation。
 
 只有 trusted finalizer `PASS` 且輸出 exact receipt digest 才可宣稱 `PROGRAM_ADOPTED`。任一
 signature、source、GitHub、seven-reviewer、freshness 或 exact-consumption mismatch 都 fail closed。

@@ -1916,7 +1916,7 @@ def test_registry_binds_exact_aiml_adoption_contract_and_contract_only_sink(
         "execution_signer_fingerprint": (
             "SHA256:uGJ9veN7PoE6BBgfsSP2aiMndrwgbt7o/7/YfdzNzCQ"
         ),
-        "github_capture_projection_version": "github_capture_projection_v1",
+        "github_capture_projection_version": "github_capture_projection_v2",
         "mandatory_review_roles": ["CC", "E2", "E3", "E4", "MIT", "QA", "R4"],
         "finalization_validator_node_id": "aiml_program_adoption_validator",
     }

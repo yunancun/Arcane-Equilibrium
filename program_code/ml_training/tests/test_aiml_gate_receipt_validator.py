@@ -1103,6 +1103,7 @@ def _program_adoption_bundle() -> tuple[dict, dict]:
         "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_common.py",
         "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_git.py",
         "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_github.py",
+        "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_github_pr.py",
         "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_host.py",
         "helper_scripts/maintenance_scripts/agent_governance_closure.py",
         "helper_scripts/maintenance_scripts/agent_governance_closure_time.py",

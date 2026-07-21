@@ -339,6 +339,10 @@ def _github_payloads(
     inventory_path = host._github_inventory_path(1)
     effective_path = host._github_effective_rules_path(1)
     rules = _github_rules()
+    pull_number = 106
+    merged_at = _timestamp(NOW - timedelta(minutes=2))
+    check_started_at = _timestamp(NOW - timedelta(minutes=4))
+    check_completed_at = _timestamp(NOW - timedelta(minutes=3))
     effective_rules = []
     for rule in rules:
         item = {
@@ -385,8 +389,14 @@ def _github_payloads(
             "ref": "refs/heads/main",
             "object": {"type": "commit", "sha": merge_head},
         },
-        host._github_commit_path(reviewed_head): {"sha": reviewed_head},
-        host._github_commit_path(merge_head): {"sha": merge_head},
+        host._github_commit_path(reviewed_head): {
+            "sha": reviewed_head,
+            "parents": [{"sha": "b" * 40}],
+        },
+        host._github_commit_path(merge_head): {
+            "sha": merge_head,
+            "parents": [{"sha": "e" * 40}, {"sha": reviewed_head}],
+        },
         host._github_compare_path(reviewed_head, merge_head): {
             "status": "identical" if reviewed_head == merge_head else "ahead",
             "ahead_by": 0 if reviewed_head == merge_head else 1,
@@ -394,6 +404,68 @@ def _github_payloads(
             "total_commits": 0 if reviewed_head == merge_head else 1,
             "base_commit": {"sha": reviewed_head},
             "merge_base_commit": {"sha": reviewed_head},
+        },
+        host._github_associated_pulls_path(reviewed_head, page=1): [{
+            "number": pull_number,
+            "state": "closed",
+            "draft": False,
+            "merged_at": merged_at,
+            "merge_commit_sha": merge_head,
+            "head": {
+                "sha": reviewed_head,
+                "repo": {
+                    "id": host.EXPECTED_REPOSITORY_ID,
+                    "full_name": host.EXPECTED_REPOSITORY_FULL_NAME,
+                },
+            },
+            "base": {
+                "ref": host.EXPECTED_DEFAULT_BRANCH,
+                "sha": "e" * 40,
+                "repo": {
+                    "id": host.EXPECTED_REPOSITORY_ID,
+                    "full_name": host.EXPECTED_REPOSITORY_FULL_NAME,
+                },
+            },
+        }],
+        host._github_pull_path(pull_number): {
+            "number": pull_number,
+            "state": "closed",
+            "draft": False,
+            "merged": True,
+            "merged_at": merged_at,
+            "merge_commit_sha": merge_head,
+            "head": {
+                "sha": reviewed_head,
+                "repo": {
+                    "id": host.EXPECTED_REPOSITORY_ID,
+                    "full_name": host.EXPECTED_REPOSITORY_FULL_NAME,
+                },
+            },
+            "base": {
+                "ref": host.EXPECTED_DEFAULT_BRANCH,
+                "sha": "e" * 40,
+                "repo": {
+                    "id": host.EXPECTED_REPOSITORY_ID,
+                    "full_name": host.EXPECTED_REPOSITORY_FULL_NAME,
+                },
+            },
+        },
+        host._github_check_runs_path(reviewed_head, page=1): {
+            "total_count": len(host.EXPECTED_REQUIRED_CHECKS),
+            "check_runs": [
+                {
+                    "id": 1000 + index,
+                    "name": check["context"],
+                    "head_sha": reviewed_head,
+                    "status": "completed",
+                    "conclusion": "success",
+                    "app": {"id": check["integration_id"]},
+                    "started_at": check_started_at,
+                    "completed_at": check_completed_at,
+                    "pull_requests": [{"number": pull_number}],
+                }
+                for index, check in enumerate(host.EXPECTED_REQUIRED_CHECKS)
+            ],
         },
     }
 
@@ -421,6 +493,37 @@ def _github_attestation(payloads: dict[str, object]) -> dict:
     ]
     reviewed_head = next(head for head in commit_heads if head != merge_head)
     compare_path = host._github_compare_path(reviewed_head, merge_head)
+    pull_pages = []
+    for page in range(1, host.MAX_GITHUB_PAGES + 1):
+        path = host._github_associated_pulls_path(reviewed_head, page=page)
+        if path not in payloads:
+            break
+        pull_pages.append((path, host._associated_pulls_projection(
+            payloads[path], page=page
+        )))
+        if len(payloads[path]) < host.GITHUB_PAGE_SIZE:
+            break
+    pull_number = next(
+        (
+            item["number"]
+            for _, projection in pull_pages
+            for item in projection["items"]
+            if item["head_sha"] == reviewed_head
+            and item["merge_commit_sha"] == merge_head
+        ),
+        pull_pages[0][1]["items"][0]["number"],
+    )
+    pull_path = host._github_pull_path(pull_number)
+    check_pages = []
+    for page in range(1, host.MAX_GITHUB_PAGES + 1):
+        path = host._github_check_runs_path(reviewed_head, page=page)
+        if path not in payloads:
+            break
+        check_pages.append((path, host._check_runs_projection(
+            payloads[path], page=page
+        )))
+        if len(payloads[path]["check_runs"]) < host.GITHUB_PAGE_SIZE:
+            break
     observed = _timestamp(NOW - timedelta(minutes=1))
     projections = {
         host.GITHUB_API_ORIGIN + paths["repository"]: repo,
@@ -443,6 +546,17 @@ def _github_attestation(payloads: dict[str, object]) -> dict:
         host.GITHUB_API_ORIGIN + compare_path: host._compare_projection(
             payloads[compare_path]
         ),
+        **{
+            host.GITHUB_API_ORIGIN + path: projection
+            for path, projection in pull_pages
+        },
+        host.GITHUB_API_ORIGIN + pull_path: host._pull_projection(
+            payloads[pull_path]
+        ),
+        **{
+            host.GITHUB_API_ORIGIN + path: projection
+            for path, projection in check_pages
+        },
     }
     return {
         "repository": {
@@ -484,6 +598,9 @@ def test_github_verifier_reobserves_exact_policy_and_default_head() -> None:
         host._github_commit_path("c" * 40),
         host._github_commit_path("d" * 40),
         host._github_compare_path("c" * 40, "d" * 40),
+        host._github_associated_pulls_path("c" * 40, page=1),
+        host._github_pull_path(106),
+        host._github_check_runs_path("c" * 40, page=1),
     ]
 
 
@@ -491,7 +608,12 @@ def test_github_verifier_reobserves_exact_policy_and_default_head() -> None:
     "mutation",
     [
         "bypass", "head", "capture", "unknown", "inventory", "effective",
-        "commit", "ancestry", "parameters",
+        "commit", "ancestry", "parameters", "merge_parent", "pr_unmerged",
+        "pr_substitute", "pr_detail", "check_missing", "check_failed",
+        "check_late", "check_wrong_app", "check_duplicate", "parent_order",
+        "merge_after_observation", "check_total", "check_timestamp",
+        "check_pending", "check_neutral", "pr_wrong_repo", "pr_wrong_base",
+        "check_wrong_head", "check_other_pr", "parent_reflexive",
     ],
 )
 def test_github_verifier_fails_closed_on_policy_or_capture_drift(
@@ -503,6 +625,9 @@ def test_github_verifier_fails_closed_on_policy_or_capture_drift(
     paths = host._github_static_paths()
     ruleset_path = paths["ruleset_detail"]
     ref_path = paths["default_branch_ref"]
+    pulls_path = host._github_associated_pulls_path("c" * 40, page=1)
+    pull_path = host._github_pull_path(106)
+    checks_path = host._github_check_runs_path("c" * 40, page=1)
     if mutation == "bypass":
         live[ruleset_path]["bypass_actors"] = [{"actor_id": 1}]
     elif mutation == "head":
@@ -520,14 +645,182 @@ def test_github_verifier_fails_closed_on_policy_or_capture_drift(
     elif mutation == "ancestry":
         compare_path = host._github_compare_path("c" * 40, "d" * 40)
         live[compare_path]["status"] = "diverged"
-    else:
+    elif mutation == "parameters":
         live[ruleset_path]["rules"][2]["parameters"][
             "required_review_thread_resolution"
         ] = False
+    elif mutation == "merge_parent":
+        live[host._github_commit_path("d" * 40)]["parents"] = [{"sha": "e" * 40}]
+    elif mutation == "parent_order":
+        live[host._github_commit_path("d" * 40)]["parents"].reverse()
+    elif mutation == "parent_reflexive":
+        live[host._github_commit_path("d" * 40)]["parents"][0]["sha"] = "c" * 40
+    elif mutation == "pr_unmerged":
+        live[pulls_path][0]["state"] = "open"
+        live[pulls_path][0]["merged_at"] = None
+    elif mutation == "pr_substitute":
+        live[pulls_path][0]["head"]["sha"] = "a" * 40
+    elif mutation == "pr_detail":
+        live[pull_path]["merge_commit_sha"] = "a" * 40
+    elif mutation == "pr_wrong_repo":
+        live[pulls_path][0]["head"]["repo"]["id"] = 1
+    elif mutation == "pr_wrong_base":
+        live[pulls_path][0]["base"]["ref"] = "not-main"
+    elif mutation == "check_missing":
+        live[checks_path]["check_runs"].pop()
+        live[checks_path]["total_count"] -= 1
+    elif mutation == "check_failed":
+        live[checks_path]["check_runs"][0]["conclusion"] = "failure"
+    elif mutation == "check_late":
+        live[checks_path]["check_runs"][0]["completed_at"] = _timestamp(
+            NOW - timedelta(minutes=1)
+        )
+    elif mutation == "check_wrong_app":
+        live[checks_path]["check_runs"][0]["app"]["id"] = 1
+    elif mutation == "check_wrong_head":
+        live[checks_path]["check_runs"][0]["head_sha"] = "a" * 40
+    elif mutation == "check_other_pr":
+        live[checks_path]["check_runs"][0]["pull_requests"] = [{"number": 1}]
+    elif mutation == "check_duplicate":
+        duplicate = copy.deepcopy(live[checks_path]["check_runs"][0])
+        duplicate["id"] = 9999
+        live[checks_path]["check_runs"].append(duplicate)
+        live[checks_path]["total_count"] += 1
+    elif mutation == "merge_after_observation":
+        timestamp = _timestamp(NOW)
+        live[pulls_path][0]["merged_at"] = timestamp
+        live[pull_path]["merged_at"] = timestamp
+    elif mutation == "check_total":
+        live[checks_path]["total_count"] += 1
+    elif mutation == "check_timestamp":
+        live[checks_path]["check_runs"][0]["completed_at"] = None
+    elif mutation == "check_pending":
+        live[checks_path]["check_runs"][0]["status"] = "in_progress"
+        live[checks_path]["check_runs"][0]["conclusion"] = None
+    elif mutation == "check_neutral":
+        live[checks_path]["check_runs"][0]["conclusion"] = "neutral"
+    gate_mutations = {
+        "merge_parent", "parent_order", "parent_reflexive", "pr_unmerged",
+        "pr_substitute", "pr_detail", "pr_wrong_repo", "pr_wrong_base",
+        "check_missing", "check_failed", "check_late", "check_wrong_app",
+        "check_wrong_head", "check_other_pr", "check_duplicate",
+        "merge_after_observation", "check_total", "check_timestamp",
+        "check_pending", "check_neutral",
+    }
+    if mutation in gate_mutations:
+        # Prove the semantic gate fails even when the packet forges matching
+        # projection digests for the ineligible GitHub responses.
+        attestation = _github_attestation(live)
     verifier = host.GitHubRulesetVerifier(
         b"token-value", now=NOW, transport=FakeGitHubTransport(live)
     )
     assert verifier(attestation) is False
+
+
+def test_github_verifier_paginates_all_check_runs_before_acceptance() -> None:
+    payloads = _github_payloads()
+    first_path = host._github_check_runs_path("c" * 40, page=1)
+    required = payloads[first_path]["check_runs"]
+    irrelevant = [
+        {
+            **copy.deepcopy(required[0]),
+            "id": 2000 + index,
+            "name": f"irrelevant-{index}",
+        }
+        for index in range(host.GITHUB_PAGE_SIZE)
+    ]
+    payloads[first_path] = {
+        "total_count": host.GITHUB_PAGE_SIZE + len(required),
+        "check_runs": irrelevant,
+    }
+    payloads[host._github_check_runs_path("c" * 40, page=2)] = {
+        "total_count": host.GITHUB_PAGE_SIZE + len(required),
+        "check_runs": required,
+    }
+    transport = FakeGitHubTransport(payloads)
+    verifier = host.GitHubRulesetVerifier(
+        b"token-value", now=NOW, transport=transport
+    )
+
+    assert verifier(_github_attestation(payloads)) is True
+    assert host._github_check_runs_path("c" * 40, page=2) in transport.calls
+
+
+@pytest.mark.parametrize("mutation", ["total_drift", "duplicate_id"])
+def test_github_verifier_rejects_forged_check_pagination(
+    mutation: str,
+) -> None:
+    payloads = _github_payloads()
+    first_path = host._github_check_runs_path("c" * 40, page=1)
+    required = payloads[first_path]["check_runs"]
+    irrelevant = [
+        {
+            **copy.deepcopy(required[0]),
+            "id": 2000 + index,
+            "name": f"irrelevant-{index}",
+        }
+        for index in range(host.GITHUB_PAGE_SIZE)
+    ]
+    total = host.GITHUB_PAGE_SIZE + len(required)
+    payloads[first_path] = {"total_count": total, "check_runs": irrelevant}
+    second_path = host._github_check_runs_path("c" * 40, page=2)
+    payloads[second_path] = {"total_count": total, "check_runs": required}
+    if mutation == "total_drift":
+        payloads[second_path]["total_count"] += 1
+    else:
+        payloads[second_path]["check_runs"][0]["id"] = irrelevant[0]["id"]
+    verifier = host.GitHubRulesetVerifier(
+        b"token-value", now=NOW, transport=FakeGitHubTransport(payloads)
+    )
+
+    assert verifier(_github_attestation(payloads)) is False
+
+
+def test_github_verifier_reads_associated_pull_terminal_page() -> None:
+    payloads = _github_payloads()
+    first_path = host._github_associated_pulls_path("c" * 40, page=1)
+    target = payloads[first_path][0]
+    payloads[first_path] = [
+        {
+            **copy.deepcopy(target),
+            "number": 1000 + index,
+            "head": {**copy.deepcopy(target["head"]), "sha": "a" * 40},
+        }
+        for index in range(host.GITHUB_PAGE_SIZE)
+    ]
+    second_path = host._github_associated_pulls_path("c" * 40, page=2)
+    payloads[second_path] = [target]
+    transport = FakeGitHubTransport(payloads)
+    verifier = host.GitHubRulesetVerifier(
+        b"token-value", now=NOW, transport=transport
+    )
+
+    assert verifier(_github_attestation(payloads)) is True
+    assert second_path in transport.calls
+
+
+def test_github_verifier_accepts_empty_check_pr_projection_for_exact_head() -> None:
+    payloads = _github_payloads()
+    checks_path = host._github_check_runs_path("c" * 40, page=1)
+    payloads[checks_path]["check_runs"][0]["pull_requests"] = []
+    verifier = host.GitHubRulesetVerifier(
+        b"token-value", now=NOW, transport=FakeGitHubTransport(payloads)
+    )
+
+    assert verifier(_github_attestation(payloads)) is True
+
+
+def test_github_verifier_does_not_treat_pull_base_sha_as_merge_parent() -> None:
+    payloads = _github_payloads()
+    pulls_path = host._github_associated_pulls_path("c" * 40, page=1)
+    pull_path = host._github_pull_path(106)
+    payloads[pulls_path][0]["base"]["sha"] = "f" * 40
+    payloads[pull_path]["base"]["sha"] = "a" * 40
+    verifier = host.GitHubRulesetVerifier(
+        b"token-value", now=NOW, transport=FakeGitHubTransport(payloads)
+    )
+
+    assert verifier(_github_attestation(payloads)) is True
 
 
 def test_github_verifier_reads_the_terminal_pagination_page() -> None:
@@ -647,6 +940,7 @@ def test_manifests_bind_trusted_host_module_and_test() -> None:
         "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_common.py",
         "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_git.py",
         "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_github.py",
+        "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_github_pr.py",
         "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_host.py",
         "helper_scripts/maintenance_scripts/agent_governance_closure_time.py",
         "tests/structure/test_agent_governance_aiml_trusted_host.py",
@@ -662,8 +956,10 @@ def test_normative_docs_bind_trusted_finalizer_operator_interface() -> None:
         host.EXPECTED_EXECUTION_SIGNER_IDENTITY,
         host.EXPECTED_EXECUTION_SIGNER_FINGERPRINT,
         host.EXECUTION_SIGNATURE_NAMESPACE,
+        "github_capture_projection_v2",
         "POST_MERGE_FINALIZATION",
         "merge-base --is-ancestor",
+        "check-runs",
         "CC / E2 / E3 / E4 / MIT / QA / R4",
         "PROGRAM_ADOPTED",
     }
