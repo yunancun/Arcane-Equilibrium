@@ -156,6 +156,25 @@ obsolete-run cancellation where available. The second identical failure
 fingerprint (`head/workflow/job/step/error family`) is a publication stop, not
 permission for another blind commit-and-push cycle.
 
+## Finding admission and bounded review
+
+PM must adjudicate delegated findings through `review_control_v1` before a
+finding can change acceptance or trigger rework. Each finding is exactly one of
+`in_scope_blocker`, `regression_blocker`, `out_of_scope_followup`, or
+`pre_existing`. Severity is descriptive only: only the first two classifications
+can block, and they must bind an admitted acceptance criterion or a path proven
+to be introduced by the current diff. The other two remain visible follow-up
+evidence and never expand the current task.
+
+Each reviewer receives the immutable task contract, explicit non-goals, and one
+frozen repository generation. PM batches findings before editing. A reviewer
+gets one initial review and at most one exact recheck on a new frozen repository
+generation. The recheck may resolve or retain only blocker IDs from the initial
+review; a new finding, changed task contract, stale generation, or requested
+third round stops the review and requires explicit Operator scope admission.
+Green acceptance evidence closes review; it is not permission for another
+open-ended adversarial pass.
+
 For a multi-iteration loop, PM also owns local checkpoint admission. It binds
 one feature branch and full checkpoint SHA, requires a clean `start` guard at
 every row boundary, runs the allowlisted bounded `checkpoint` guard before

@@ -123,10 +123,17 @@ from agent_governance_task_admission import (  # noqa: E402
     continue_admitted_task,
     release_task_admission,
 )
+from agent_governance_review_control import (  # noqa: E402
+    adjudicate_review_control,
+    capture_review_generation,
+    review_task_contract_digest,
+    verification_fragment_truth_errors,
+)
 
 
 __all__ = [
     "assess_test_evidence_reuse",
+    "adjudicate_review_control",
     "authority_claim_digest",
     "authorize_command",
     "authorize_native_command",
@@ -149,6 +156,7 @@ __all__ = [
     "capture_repository",
     "capture_repository_change",
     "capture_repository_baseline",
+    "capture_review_generation",
     "checkpoint_chain_id",
     "compile_context",
     "closure_quality_followup_digest",
@@ -167,6 +175,7 @@ __all__ = [
     "queue_lane",
     "render_all",
     "render_views",
+    "review_task_contract_digest",
     "resolve_authority_claims",
     "non_call_controller_node_ids",
     "route_task",
@@ -195,6 +204,7 @@ __all__ = [
     "validate_workflow_call_manifest",
     "validate_workflow_call_record",
     "validate_workflow_wave_record",
+    "verification_fragment_truth_errors",
 ]
 
 
@@ -206,6 +216,14 @@ def _build_parser() -> argparse.ArgumentParser:
     render.add_argument("--check", action="store_true", help="report drift without writing")
     route = subparsers.add_parser("route", help="compile JSON task facts into a hybrid DAG")
     route.add_argument("task_facts", help="JSON object or @path-to-JSON")
+    review_control = subparsers.add_parser(
+        "review-control",
+        help="adjudicate one frozen, scope-classified bounded review sequence",
+    )
+    review_control.add_argument(
+        "bundle", help="JSON {task_facts,review_control} or @path-to-JSON"
+    )
+    review_control.add_argument("--repo", type=Path, required=True)
     continuation = subparsers.add_parser(
         "continuation", help="adjudicate one finite or explicit operator-loop boundary"
     )
@@ -318,6 +336,20 @@ def main(
         return 0
     if args.action == "route":
         print(json.dumps(route_task(_json_arg(args.task_facts)), ensure_ascii=False, indent=2))
+        return 0
+    if args.action == "review-control":
+        try:
+            bundle = _exact_bundle(
+                _json_arg(args.bundle),
+                required={"task_facts", "review_control"},
+            )
+            decision = adjudicate_review_control(
+                bundle["task_facts"], bundle["review_control"], repo=args.repo
+            )
+        except (OSError, TypeError, ValueError) as error:
+            print(json.dumps({"status": "FAIL", "error": str(error)}, ensure_ascii=False))
+            return 2
+        print(json.dumps(decision, ensure_ascii=False, indent=2, sort_keys=True))
         return 0
     if args.action == "continuation":
         try:

@@ -529,6 +529,12 @@ coverage holes。改進的是 scheduler，不是砍深度：
 reversal、reopen rate、time-to-evidence、cache validity、retry/rework；不以 raw finding
 count 作主要績效。
 
+一般 delegated review 使用 `review_control_v1` 作 scope admission：finding 必須分類為
+`in_scope_blocker`、`regression_blocker`、`out_of_scope_followup` 或 `pre_existing`，
+severity 不參與 blocker 裁定。每個 reviewer 只允許一次 initial review 與一次針對原
+blocker ID 的 exact recheck；task contract 不變，每輪綁定完整 frozen repository
+generation。新 finding、第三輪或 generation drift 都停止而不自動擴張 task。
+
 ## 8. Profit-diagnosis controller
 
 `profit_diagnosis` 不是自由 fan-out brainstorming。`profit_diagnosis_control_v1` 綁 closure

@@ -80,4 +80,5 @@ def test_error_sanitizer_has_no_debug_bypass() -> None:
 def test_replay_signature_failure_values_are_fixed_allowlist_only() -> None:
     source = (APP / "replay_routes.py").read_text(encoding="utf-8")
     assert "_SAFE_SIGNATURE_FAIL_MODES" in source
+    assert "_SAFE_SIGNATURE_FAIL_MODES.get(untrusted_mode" in source
     assert 'return "verification_failed"' in source
