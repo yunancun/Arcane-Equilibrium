@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import sys
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -62,6 +63,13 @@ AIML_PROGRAM_ADOPTION_CONTRACT = {
     "canonical_validator_path": (
         "program_code/ml_training/aiml_gate_receipt_validator.py"
     ),
+    "trusted_host_finalizer_path": (
+        "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_host.py"
+    ),
+    "execution_signer_fingerprint": (
+        "SHA256:uGJ9veN7PoE6BBgfsSP2aiMndrwgbt7o/7/YfdzNzCQ"
+    ),
+    "github_capture_projection_version": "github_capture_projection_v1",
     "mandatory_review_roles": ["CC", "E2", "E3", "E4", "MIT", "QA", "R4"],
     "finalization_validator_node_id": "aiml_program_adoption_validator",
 }
@@ -93,7 +101,11 @@ def registry_contract_errors(registry: dict[str, Any], root: Path) -> list[str]:
     if adoption != AIML_PROGRAM_ADOPTION_CONTRACT:
         errors.append("workflow_contracts.aiml_program_adoption_v1 is invalid")
     else:
-        for path in [*adoption["schema_paths"], adoption["canonical_validator_path"]]:
+        for path in [
+            *adoption["schema_paths"],
+            adoption["canonical_validator_path"],
+            adoption["trusted_host_finalizer_path"],
+        ]:
             if Path(path).is_absolute() or not (root / path).is_file():
                 errors.append(
                     "workflow_contracts.aiml_program_adoption_v1 references "
@@ -187,6 +199,7 @@ def validate_program_adoption_closure_binding(
     *,
     external_verifier: ExternalVerifier | None,
     source_manifest_verifier: SourceManifestVerifier | None,
+    evaluated_at: str | datetime | None = None,
 ) -> tuple[list[str], set[str]]:
     """Validate closure selection/binding; delegate AIML semantics canonically."""
 
@@ -254,7 +267,7 @@ def validate_program_adoption_closure_binding(
         canonical_errors = validate_program_adoption_receipt(
             receipt,
             artifacts=artifacts,
-            now=packet.get("adjudicated_at"),
+            now=evaluated_at or packet.get("adjudicated_at"),
             external_verifier=external_verifier,
             source_manifest_verifier=source_manifest_verifier,
         )

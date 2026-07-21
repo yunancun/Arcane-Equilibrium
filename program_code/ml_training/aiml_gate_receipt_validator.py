@@ -82,7 +82,12 @@ PROGRAM_GOVERNANCE_PATHS = (
     ".codex/agent_registry_v1.json",
     "helper_scripts/maintenance_scripts/agent_governance.py",
     "helper_scripts/maintenance_scripts/agent_governance_aiml_adoption.py",
+    "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_common.py",
+    "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_git.py",
+    "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_github.py",
+    "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_host.py",
     "helper_scripts/maintenance_scripts/agent_governance_closure.py",
+    "helper_scripts/maintenance_scripts/agent_governance_closure_time.py",
     "helper_scripts/maintenance_scripts/agent_governance_closure_inputs.py",
     "helper_scripts/maintenance_scripts/agent_governance_evidence.py",
     "helper_scripts/maintenance_scripts/agent_governance_execution.py",
@@ -92,6 +97,7 @@ PROGRAM_GOVERNANCE_PATHS = (
     "program_code/ml_training/aiml_gate_receipt_validator.py",
     "program_code/ml_training/tests/test_aiml_gate_receipt_validator.py",
     "tests/structure/test_agent_governance_aiml_adoption.py",
+    "tests/structure/test_agent_governance_aiml_trusted_host.py",
 )
 PROGRAM_REVIEW_NODES = {
     "CC": "constitutional_gate",
@@ -128,6 +134,7 @@ S0_3_DIRECT_INTERFACES_BY_PHASE = {
     ),
     "POST_MERGE_FINALIZATION": (
         "aiml_program_adoption_validator",
+        "aiml_trusted_host_finalizer_v1",
         "github_repository_policy_attestation_v1",
         "program_adoption_receipt_v1",
     ),
@@ -146,7 +153,12 @@ S0_3_EXACT_OWNED_PATHS = {
     "docs/execution_plan/ai_ml_landing/PROGRESS.md",
     "helper_scripts/maintenance_scripts/agent_governance.py",
     "helper_scripts/maintenance_scripts/agent_governance_aiml_adoption.py",
+    "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_common.py",
+    "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_git.py",
+    "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_github.py",
+    "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_host.py",
     "helper_scripts/maintenance_scripts/agent_governance_closure.py",
+    "helper_scripts/maintenance_scripts/agent_governance_closure_time.py",
     "helper_scripts/maintenance_scripts/agent_governance_closure_inputs.py",
     "helper_scripts/maintenance_scripts/agent_governance_evidence.py",
     "helper_scripts/maintenance_scripts/agent_governance_execution.py",
@@ -156,6 +168,7 @@ S0_3_EXACT_OWNED_PATHS = {
     "program_code/ml_training/aiml_gate_receipt_validator.py",
     "program_code/ml_training/tests/test_aiml_gate_receipt_validator.py",
     "tests/structure/test_agent_governance_aiml_adoption.py",
+    "tests/structure/test_agent_governance_aiml_trusted_host.py",
 }
 S0_3_OWNED_PATH_PREFIXES = (
     ".codex/schemas/",

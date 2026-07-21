@@ -562,6 +562,48 @@ def _real_closure_harness(
     return support, governance, packet
 
 
+def test_trusted_host_time_rejects_packet_rollback_and_drives_canonical_now(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    program_packet, _, _ = _program_adoption_packet()
+    support, governance, packet = _real_closure_harness(program_packet)
+    packet_time = datetime.fromisoformat(
+        str(packet["adjudicated_at"]).replace("Z", "+00:00")
+    )
+    host_time = packet_time + timedelta(seconds=30)
+    observed_now: list[object] = []
+
+    def canonical_validator(_receipt: object, **kwargs: object) -> list[str]:
+        observed_now.append(kwargs["now"])
+        return []
+
+    monkeypatch.setattr(
+        aiml_adoption, "validate_program_adoption_receipt", canonical_validator,
+    )
+    verifier = support._test_execution_attestation_verifier(packet)
+    common = {
+        "execution_attestation_verifier": verifier,
+        "external_evidence_verifier": lambda artifact: artifact is not None,
+        "source_manifest_verifier": lambda reviewed, merged, manifest: True,
+        "trusted_evaluated_at": host_time,
+    }
+
+    in_window_errors = governance.validate_closure(packet, **common)
+    assert not any("trusted host evaluation time" in error for error in in_window_errors)
+    assert observed_now[-1] == host_time.isoformat()
+
+    rolled_back = deepcopy(packet)
+    rolled_back["adjudicated_at"] = (
+        host_time - timedelta(minutes=2)
+    ).isoformat().replace("+00:00", "Z")
+    rollback_errors = governance.validate_closure(rolled_back, **common)
+    assert (
+        "packet adjudicated_at is not bound to trusted host evaluation time"
+        in rollback_errors
+    )
+    assert observed_now[-1] == host_time.isoformat()
+
+
 def test_normalize_closure_packet_inputs_is_shallow_indexed_and_non_mutating() -> None:
     authority_a = {"id": "authority-a"}
     authority_b = {"id": "authority-b"}
@@ -1852,7 +1894,9 @@ def test_closure_schema_requires_exact_data_scoped_program_adoption_bundle() -> 
     assert schema_subset_errors(missing_dependency, evidence_schema, schema)
 
 
-def test_registry_binds_exact_aiml_adoption_contract_and_contract_only_sink() -> None:
+def test_registry_binds_exact_aiml_adoption_contract_and_contract_only_sink(
+    tmp_path: Path,
+) -> None:
     registry = load_registry()
     contract = registry["workflow_contracts"]["aiml_program_adoption_v1"]
 
@@ -1866,6 +1910,13 @@ def test_registry_binds_exact_aiml_adoption_contract_and_contract_only_sink() ->
         "canonical_validator_path": (
             "program_code/ml_training/aiml_gate_receipt_validator.py"
         ),
+        "trusted_host_finalizer_path": (
+            "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_host.py"
+        ),
+        "execution_signer_fingerprint": (
+            "SHA256:uGJ9veN7PoE6BBgfsSP2aiMndrwgbt7o/7/YfdzNzCQ"
+        ),
+        "github_capture_projection_version": "github_capture_projection_v1",
         "mandatory_review_roles": ["CC", "E2", "E3", "E4", "MIT", "QA", "R4"],
         "finalization_validator_node_id": "aiml_program_adoption_validator",
     }
@@ -1889,6 +1940,12 @@ def test_registry_binds_exact_aiml_adoption_contract_and_contract_only_sink() ->
     assert any(
         "aiml_program_adoption_v1" in error
         for error in validate_registry(drifted, ROOT)
+    )
+
+    missing_path_errors = aiml_adoption.registry_contract_errors(registry, tmp_path)
+    assert any(
+        contract["trusted_host_finalizer_path"] in error
+        for error in missing_path_errors
     )
 
     executable_sink = deepcopy(registry)

@@ -772,6 +772,7 @@ def _post_merge_attempt() -> dict:
         "owned_path_manifest": [],
         "direct_interfaces": [
             "aiml_program_adoption_validator",
+            "aiml_trusted_host_finalizer_v1",
             "github_repository_policy_attestation_v1",
             "program_adoption_receipt_v1",
         ],
@@ -1099,7 +1100,12 @@ def _program_adoption_bundle() -> tuple[dict, dict]:
         ".codex/agent_registry_v1.json",
         "helper_scripts/maintenance_scripts/agent_governance.py",
         "helper_scripts/maintenance_scripts/agent_governance_aiml_adoption.py",
+        "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_common.py",
+        "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_git.py",
+        "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_github.py",
+        "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_host.py",
         "helper_scripts/maintenance_scripts/agent_governance_closure.py",
+        "helper_scripts/maintenance_scripts/agent_governance_closure_time.py",
         "helper_scripts/maintenance_scripts/agent_governance_closure_inputs.py",
         "helper_scripts/maintenance_scripts/agent_governance_evidence.py",
         "helper_scripts/maintenance_scripts/agent_governance_execution.py",
@@ -1109,6 +1115,7 @@ def _program_adoption_bundle() -> tuple[dict, dict]:
         "program_code/ml_training/aiml_gate_receipt_validator.py",
         "program_code/ml_training/tests/test_aiml_gate_receipt_validator.py",
         "tests/structure/test_agent_governance_aiml_adoption.py",
+        "tests/structure/test_agent_governance_aiml_trusted_host.py",
     )
     review_nodes = {
         "CC": "constitutional_gate",

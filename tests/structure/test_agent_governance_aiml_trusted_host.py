@@ -1,0 +1,655 @@
+from __future__ import annotations
+
+import copy
+import inspect
+import json
+import os
+import subprocess
+import sys
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+import pytest
+
+
+ROOT = Path(__file__).resolve().parents[2]
+HELPERS = ROOT / "helper_scripts" / "maintenance_scripts"
+if str(HELPERS) not in sys.path:
+    sys.path.insert(0, str(HELPERS))
+
+import agent_governance_aiml_trusted_host as host  # noqa: E402
+import agent_governance as governance  # noqa: E402
+import agent_governance_closure as closure  # noqa: E402
+
+
+DIGEST_A = "sha256:" + "a" * 64
+DIGEST_B = "sha256:" + "b" * 64
+DIGEST_C = "sha256:" + "c" * 64
+NOW = datetime(2026, 7, 21, 20, 0, tzinfo=timezone.utc)
+
+
+def _timestamp(value: datetime) -> str:
+    return value.isoformat().replace("+00:00", "Z")
+
+
+def _entry(kind: str, subject: str, artifact: dict) -> dict:
+    return {
+        "kind": kind,
+        "subject_digest": subject,
+        "artifact_digest": host.canonical_digest(artifact),
+        "observed_at": _timestamp(NOW - timedelta(minutes=1)),
+        "expires_at": _timestamp(NOW + timedelta(minutes=5)),
+    }
+
+
+def _bundle(entries: list[dict]) -> dict:
+    return {
+        "schema_version": "trusted_execution_bundle_v1",
+        "signer_identity": host.EXPECTED_EXECUTION_SIGNER_IDENTITY,
+        "signer_fingerprint": host.EXPECTED_EXECUTION_SIGNER_FINGERPRINT,
+        "algorithm": host.EXECUTION_BUNDLE_ALGORITHM,
+        "signature_namespace": host.EXECUTION_SIGNATURE_NAMESPACE,
+        "task_contract_digest": DIGEST_A,
+        "context_artifact_digest": DIGEST_B,
+        "dag_digest": DIGEST_C,
+        "issued_at": _timestamp(NOW - timedelta(minutes=1)),
+        "expires_at": _timestamp(NOW + timedelta(minutes=5)),
+        "entries": entries,
+    }
+
+
+def _generate_signer(root: Path, name: str) -> tuple[Path, str]:
+    private_key = root / name
+    subprocess.run(
+        [
+            host.SSH_KEYGEN_EXECUTABLE,
+            "-q", "-t", "ed25519", "-N", "", "-C", name,
+            "-f", str(private_key),
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    public_key = " ".join(
+        private_key.with_suffix(".pub").read_text(encoding="ascii").split()[:2]
+    )
+    return private_key, public_key
+
+
+def _sign_bundle(bundle: dict, private_key: Path, root: Path) -> bytes:
+    payload_path = root / (host.canonical_digest(bundle).split(":", 1)[1] + ".json")
+    payload_path.write_bytes(host._canonical_bytes(bundle))
+    signature_path = Path(str(payload_path) + ".sig")
+    subprocess.run(
+        [
+            host.SSH_KEYGEN_EXECUTABLE,
+            "-Y", "sign",
+            "-f", str(private_key),
+            "-n", host.EXECUTION_SIGNATURE_NAMESPACE,
+            str(payload_path),
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    return signature_path.read_bytes()
+
+
+@pytest.fixture
+def trusted_signer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[Path, Path]:
+    private_key, public_key = _generate_signer(tmp_path, "trusted_signer")
+    monkeypatch.setattr(host, "TRUSTED_EXECUTION_PUBLIC_KEY", public_key)
+    monkeypatch.setattr(
+        host,
+        "EXPECTED_EXECUTION_SIGNER_FINGERPRINT",
+        host.ssh_public_key_fingerprint(public_key),
+    )
+    return private_key, tmp_path
+
+
+def _index(
+    bundle: dict,
+    signature: bytes,
+) -> host.AuthenticatedExecutionEvidenceIndex:
+    return host.AuthenticatedExecutionEvidenceIndex.from_bundle(
+        bundle,
+        signature=signature,
+        now=NOW,
+        task_contract_digest=DIGEST_A,
+        context_artifact_digest=DIGEST_B,
+        dag_digest=DIGEST_C,
+    )
+
+
+def test_execution_bundle_authenticates_exact_artifact_and_consumption(
+    trusted_signer: tuple[Path, Path],
+) -> None:
+    private_key, root = trusted_signer
+    artifact = {"schema_version": "context_artifact_v1", "value": 1}
+    bundle = _bundle([_entry("context_artifact_v1", DIGEST_B, artifact)])
+    index = _index(bundle, _sign_bundle(bundle, private_key, root))
+
+    assert index.verify("context_artifact_v1", DIGEST_B, artifact) is True
+    assert index.exact_consumption_errors() == []
+    assert index.verify(
+        "context_artifact_v1", DIGEST_B, {**artifact, "value": 2}
+    ) is False
+
+
+def test_source_pinned_public_key_matches_declared_fingerprint() -> None:
+    assert (
+        host.ssh_public_key_fingerprint(host.TRUSTED_EXECUTION_PUBLIC_KEY)
+        == host.EXPECTED_EXECUTION_SIGNER_FINGERPRINT
+    )
+
+
+@pytest.mark.parametrize("mutation", ["signature", "task", "stale", "future"])
+def test_execution_bundle_rejects_forged_or_wrong_generation(
+    mutation: str,
+    trusted_signer: tuple[Path, Path],
+) -> None:
+    private_key, root = trusted_signer
+    artifact = {"schema_version": "context_artifact_v1"}
+    bundle = _bundle([_entry("context_artifact_v1", DIGEST_B, artifact)])
+    if mutation == "signature":
+        signature = b"not-an-ssh-signature"
+    elif mutation == "task":
+        bundle["task_contract_digest"] = DIGEST_C
+        signature = _sign_bundle(bundle, private_key, root)
+    elif mutation == "stale":
+        bundle["issued_at"] = _timestamp(NOW - timedelta(minutes=6))
+        bundle["expires_at"] = _timestamp(NOW + timedelta(minutes=1))
+        signature = _sign_bundle(bundle, private_key, root)
+    else:
+        bundle["issued_at"] = _timestamp(NOW + timedelta(minutes=2))
+        bundle["expires_at"] = _timestamp(NOW + timedelta(minutes=10))
+        signature = _sign_bundle(bundle, private_key, root)
+
+    with pytest.raises(ValueError):
+        _index(bundle, signature)
+
+
+def test_execution_bundle_rejects_duplicate_and_reports_extra_entries(
+    trusted_signer: tuple[Path, Path],
+) -> None:
+    private_key, root = trusted_signer
+    first = {"schema_version": "context_artifact_v1"}
+    duplicate = _entry("context_artifact_v1", DIGEST_B, first)
+    duplicate_bundle = _bundle([duplicate, duplicate])
+    with pytest.raises(ValueError, match="duplicate"):
+        _index(
+            duplicate_bundle,
+            _sign_bundle(duplicate_bundle, private_key, root),
+        )
+
+    second = {"schema_version": "workflow_wave_record_v1"}
+    bundle = _bundle([
+        _entry("context_artifact_v1", DIGEST_B, first),
+        _entry("workflow_wave_record_v1", DIGEST_C, second),
+    ])
+    index = _index(bundle, _sign_bundle(bundle, private_key, root))
+    assert index.verify("context_artifact_v1", DIGEST_B, first)
+    assert index.exact_consumption_errors() == [
+        "trusted execution bundle contains unconsumed entries"
+    ]
+
+
+def test_caller_selected_key_cannot_forge_execution_bundle(
+    trusted_signer: tuple[Path, Path],
+) -> None:
+    _trusted_private, root = trusted_signer
+    rogue_private, _rogue_public = _generate_signer(root, "rogue_signer")
+    artifact = {"schema_version": "context_artifact_v1"}
+    bundle = _bundle([_entry("context_artifact_v1", DIGEST_B, artifact)])
+
+    with pytest.raises(ValueError, match="authentication failed"):
+        _index(bundle, _sign_bundle(bundle, rogue_private, root))
+
+
+def _git(repo: Path, *args: str) -> str:
+    result = subprocess.run(
+        ["git", *args], cwd=repo, text=True, capture_output=True, check=True
+    )
+    return result.stdout.strip()
+
+
+def _repo_with_file(tmp_path: Path) -> tuple[Path, str, str]:
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "config", "user.name", "Test")
+    _git(tmp_path, "config", "user.email", "test@example.invalid")
+    target = tmp_path / "bound.txt"
+    target.write_bytes(b"first\n")
+    _git(tmp_path, "add", "bound.txt")
+    _git(tmp_path, "commit", "-qm", "first")
+    reviewed = _git(tmp_path, "rev-parse", "HEAD")
+    target.write_bytes(b"second\n")
+    _git(tmp_path, "add", "bound.txt")
+    _git(tmp_path, "commit", "-qm", "second")
+    merged = _git(tmp_path, "rev-parse", "HEAD")
+    return tmp_path, reviewed, merged
+
+
+def test_source_verifier_proves_ancestry_and_exact_merge_blob(tmp_path: Path) -> None:
+    repo, reviewed, merged = _repo_with_file(tmp_path)
+    verifier = host.GitSourceManifestVerifier(repo)
+    digest = "sha256:" + __import__("hashlib").sha256(b"second\n").hexdigest()
+
+    assert verifier(reviewed, merged, {"bound.txt": digest}) is True
+    assert verifier(merged, reviewed, {"bound.txt": digest}) is False
+    assert verifier(reviewed, merged, {"bound.txt": DIGEST_A}) is False
+    assert verifier(reviewed, merged, {"../bound.txt": digest}) is False
+    assert verifier(reviewed, merged, {":(glob)bound.txt": digest}) is False
+
+
+def test_source_verifier_rejects_oversized_blob_before_materializing_it(
+    tmp_path: Path,
+) -> None:
+    object_id = "d" * 40
+    calls: list[list[str]] = []
+
+    def runner(argv: list[str]) -> subprocess.CompletedProcess[bytes]:
+        calls.append(argv)
+        if argv == ["rev-parse", "--show-toplevel"]:
+            stdout, returncode = (str(tmp_path) + "\n").encode(), 0
+        elif argv == ["rev-parse", "--is-shallow-repository"]:
+            stdout, returncode = b"false\n", 0
+        elif argv == ["replace", "-l"]:
+            stdout, returncode = b"", 0
+        elif argv[:2] == ["config", "--get-regexp"]:
+            stdout, returncode = b"", 1
+        elif argv[:2] == ["rev-parse", "--git-path"]:
+            stdout, returncode = (str(tmp_path / argv[-1]) + "\n").encode(), 0
+        elif argv[:2] == ["cat-file", "-e"]:
+            stdout, returncode = b"", 0
+        elif argv[:2] == ["merge-base", "--is-ancestor"]:
+            stdout, returncode = b"", 0
+        elif argv[:2] == ["ls-tree", "-z"]:
+            stdout = f"100644 blob {object_id}\tbound.txt\0".encode()
+            returncode = 0
+        elif argv == ["cat-file", "-s", object_id]:
+            stdout, returncode = f"{host.MAX_BLOB_BYTES + 1}\n".encode(), 0
+        elif argv == ["cat-file", "blob", object_id]:
+            pytest.fail("oversized blob was materialized")
+        else:
+            raise AssertionError(f"unexpected Git command: {argv}")
+        return subprocess.CompletedProcess(argv, returncode, stdout, b"")
+
+    verifier = host.GitSourceManifestVerifier(tmp_path, runner=runner)
+    assert verifier("a" * 40, "b" * 40, {"bound.txt": DIGEST_A}) is False
+    assert ["cat-file", "blob", object_id] not in calls
+
+
+def test_source_verifier_rejects_symlink_and_alternate_object_store(
+    tmp_path: Path,
+) -> None:
+    repo, reviewed, _merged = _repo_with_file(tmp_path)
+    (repo / "link").symlink_to("bound.txt")
+    _git(repo, "add", "link")
+    _git(repo, "commit", "-qm", "link")
+    merged = _git(repo, "rev-parse", "HEAD")
+    link_digest = "sha256:" + __import__("hashlib").sha256(b"bound.txt").hexdigest()
+    verifier = host.GitSourceManifestVerifier(repo)
+    assert verifier(reviewed, merged, {"link": link_digest}) is False
+
+    alternates = Path(_git(repo, "rev-parse", "--git-path", "objects/info/alternates"))
+    if not alternates.is_absolute():
+        alternates = repo / alternates
+    alternates.parent.mkdir(parents=True, exist_ok=True)
+    alternates.write_text("/tmp/not-trusted\n", encoding="utf-8")
+    regular_digest = "sha256:" + __import__("hashlib").sha256(b"second\n").hexdigest()
+    assert verifier(reviewed, merged, {"bound.txt": regular_digest}) is False
+
+
+class FakeGitHubTransport:
+    def __init__(self, payloads: dict[str, object]):
+        self.payloads = payloads
+        self.calls: list[str] = []
+
+    def get_json(self, path: str, token: bytes) -> object:
+        assert token == b"token-value"
+        self.calls.append(path)
+        return copy.deepcopy(self.payloads[path])
+
+
+def _github_rules() -> list[dict[str, object]]:
+    return [
+        {"type": "deletion"},
+        {"type": "non_fast_forward"},
+        {
+            "type": "pull_request",
+            "parameters": copy.deepcopy(host.EXPECTED_PULL_REQUEST_PARAMETERS),
+        },
+        {
+            "type": "required_status_checks",
+            "parameters": copy.deepcopy(
+                host.EXPECTED_REQUIRED_STATUS_CHECK_PARAMETERS
+            ),
+        },
+    ]
+
+
+def _github_payloads(
+    reviewed_head: str = "c" * 40,
+    merge_head: str = "d" * 40,
+) -> dict[str, object]:
+    paths = host._github_static_paths()
+    inventory_path = host._github_inventory_path(1)
+    effective_path = host._github_effective_rules_path(1)
+    rules = _github_rules()
+    effective_rules = []
+    for rule in rules:
+        item = {
+            "type": rule["type"],
+            "ruleset_id": host.EXPECTED_RULESET_ID,
+            "ruleset_source_type": "Repository",
+            "ruleset_source": host.EXPECTED_REPOSITORY_FULL_NAME,
+        }
+        if "parameters" in rule:
+            item["parameters"] = copy.deepcopy(rule["parameters"])
+        effective_rules.append(item)
+    return {
+        paths["repository"]: {
+            "id": host.EXPECTED_REPOSITORY_ID,
+            "full_name": host.EXPECTED_REPOSITORY_FULL_NAME,
+            "default_branch": host.EXPECTED_DEFAULT_BRANCH,
+            "archived": False,
+            "disabled": False,
+        },
+        inventory_path: [{
+            "id": host.EXPECTED_RULESET_ID,
+            "name": host.EXPECTED_RULESET_NAME,
+            "target": "branch",
+            "source_type": "Repository",
+            "source": host.EXPECTED_REPOSITORY_FULL_NAME,
+            "enforcement": "active",
+        }],
+        paths["ruleset_detail"]: {
+            "id": host.EXPECTED_RULESET_ID,
+            "name": host.EXPECTED_RULESET_NAME,
+            "target": "branch",
+            "source_type": "Repository",
+            "source": host.EXPECTED_REPOSITORY_FULL_NAME,
+            "enforcement": "active",
+            "bypass_actors": [],
+            "current_user_can_bypass": "never",
+            "conditions": {
+                "ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}
+            },
+            "rules": rules,
+        },
+        effective_path: effective_rules,
+        paths["default_branch_ref"]: {
+            "ref": "refs/heads/main",
+            "object": {"type": "commit", "sha": merge_head},
+        },
+        host._github_commit_path(reviewed_head): {"sha": reviewed_head},
+        host._github_commit_path(merge_head): {"sha": merge_head},
+        host._github_compare_path(reviewed_head, merge_head): {
+            "status": "identical" if reviewed_head == merge_head else "ahead",
+            "ahead_by": 0 if reviewed_head == merge_head else 1,
+            "behind_by": 0,
+            "total_commits": 0 if reviewed_head == merge_head else 1,
+            "base_commit": {"sha": reviewed_head},
+            "merge_base_commit": {"sha": reviewed_head},
+        },
+    }
+
+
+def _github_attestation(payloads: dict[str, object]) -> dict:
+    paths = host._github_static_paths()
+    inventory_path = host._github_inventory_path(1)
+    effective_path = host._github_effective_rules_path(1)
+    repo = host._repo_projection(payloads[paths["repository"]])
+    inventory = host._ruleset_inventory_projection(
+        payloads[inventory_path], page=1
+    )
+    ruleset_projection, ruleset = host._ruleset_projection(
+        payloads[paths["ruleset_detail"]]
+    )
+    effective = host._effective_rules_projection(
+        payloads[effective_path], page=1
+    )
+    ref = host._ref_projection(payloads[paths["default_branch_ref"]])
+    merge_head = str(ref["object_sha"])
+    commit_heads = [
+        path.rsplit("/", 1)[-1]
+        for path in payloads
+        if "/commits/" in path
+    ]
+    reviewed_head = next(head for head in commit_heads if head != merge_head)
+    compare_path = host._github_compare_path(reviewed_head, merge_head)
+    observed = _timestamp(NOW - timedelta(minutes=1))
+    projections = {
+        host.GITHUB_API_ORIGIN + paths["repository"]: repo,
+        host.GITHUB_API_ORIGIN + inventory_path: inventory,
+        host.GITHUB_API_ORIGIN + paths["ruleset_detail"]: ruleset_projection,
+        host.GITHUB_API_ORIGIN + effective_path: effective,
+        host.GITHUB_API_ORIGIN + paths["default_branch_ref"]: ref,
+        host.GITHUB_API_ORIGIN + host._github_commit_path(reviewed_head): (
+            host._commit_projection(
+                payloads[host._github_commit_path(reviewed_head)],
+                requested_head=reviewed_head,
+            )
+        ),
+        host.GITHUB_API_ORIGIN + host._github_commit_path(merge_head): (
+            host._commit_projection(
+                payloads[host._github_commit_path(merge_head)],
+                requested_head=merge_head,
+            )
+        ),
+        host.GITHUB_API_ORIGIN + compare_path: host._compare_projection(
+            payloads[compare_path]
+        ),
+    }
+    return {
+        "repository": {
+            "repository_id": host.EXPECTED_REPOSITORY_ID,
+            "full_name": host.EXPECTED_REPOSITORY_FULL_NAME,
+            "default_branch": host.EXPECTED_DEFAULT_BRANCH,
+        },
+        "reviewed_head": reviewed_head,
+        "merge_head": merge_head,
+        "ruleset": ruleset,
+        "observed_at": observed,
+        "expires_at": _timestamp(NOW + timedelta(minutes=5)),
+        "evidence_captures": [
+            {
+                "url": url,
+                "response_digest": host.canonical_digest(projection),
+                "captured_at": observed,
+            }
+            for url, projection in sorted(projections.items())
+        ],
+    }
+
+
+def test_github_verifier_reobserves_exact_policy_and_default_head() -> None:
+    payloads = _github_payloads()
+    transport = FakeGitHubTransport(payloads)
+    verifier = host.GitHubRulesetVerifier(
+        b"token-value", now=NOW, transport=transport
+    )
+
+    assert verifier(_github_attestation(payloads)) is True
+    paths = host._github_static_paths()
+    assert transport.calls == [
+        paths["repository"],
+        host._github_inventory_path(1),
+        paths["ruleset_detail"],
+        host._github_effective_rules_path(1),
+        paths["default_branch_ref"],
+        host._github_commit_path("c" * 40),
+        host._github_commit_path("d" * 40),
+        host._github_compare_path("c" * 40, "d" * 40),
+    ]
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "bypass", "head", "capture", "unknown", "inventory", "effective",
+        "commit", "ancestry", "parameters",
+    ],
+)
+def test_github_verifier_fails_closed_on_policy_or_capture_drift(
+    mutation: str,
+) -> None:
+    payloads = _github_payloads()
+    attestation = _github_attestation(payloads)
+    live = copy.deepcopy(payloads)
+    paths = host._github_static_paths()
+    ruleset_path = paths["ruleset_detail"]
+    ref_path = paths["default_branch_ref"]
+    if mutation == "bypass":
+        live[ruleset_path]["bypass_actors"] = [{"actor_id": 1}]
+    elif mutation == "head":
+        live[ref_path]["object"]["sha"] = "e" * 40
+    elif mutation == "capture":
+        attestation["evidence_captures"][0]["response_digest"] = DIGEST_A
+    elif mutation == "unknown":
+        live[ruleset_path]["rules"].append({"type": "creation"})
+    elif mutation == "inventory":
+        live[host._github_inventory_path(1)] = []
+    elif mutation == "effective":
+        live[host._github_effective_rules_path(1)].pop()
+    elif mutation == "commit":
+        live[host._github_commit_path("c" * 40)]["sha"] = "e" * 40
+    elif mutation == "ancestry":
+        compare_path = host._github_compare_path("c" * 40, "d" * 40)
+        live[compare_path]["status"] = "diverged"
+    else:
+        live[ruleset_path]["rules"][2]["parameters"][
+            "required_review_thread_resolution"
+        ] = False
+    verifier = host.GitHubRulesetVerifier(
+        b"token-value", now=NOW, transport=FakeGitHubTransport(live)
+    )
+    assert verifier(attestation) is False
+
+
+def test_github_verifier_reads_the_terminal_pagination_page() -> None:
+    payloads = _github_payloads()
+    inventory_path = host._github_inventory_path(1)
+    template = payloads[inventory_path][0]
+    payloads[inventory_path] = [
+        {**template, "id": index + 1, "name": f"ruleset-{index + 1}"}
+        for index in range(host.GITHUB_PAGE_SIZE)
+    ]
+    payloads[host._github_inventory_path(2)] = []
+    transport = FakeGitHubTransport(payloads)
+    verifier = host.GitHubRulesetVerifier(
+        b"token-value", now=NOW, transport=transport
+    )
+
+    assert verifier(_github_attestation(_github_payloads())) is False
+    assert host._github_inventory_path(2) in transport.calls
+
+
+def test_finalizer_calls_canonical_closure_once_and_never_mutates_packet(
+    monkeypatch: pytest.MonkeyPatch,
+    trusted_signer: tuple[Path, Path],
+) -> None:
+    private_key, root = trusted_signer
+    context = {
+        "schema_version": "context_artifact_v1",
+        "artifact_digest": DIGEST_B,
+        "task_contract_digest": DIGEST_A,
+    }
+    packet = {
+        "dispatch": {"context_artifact": context, "dag_digest": DIGEST_C},
+        "evidence": [{
+            "kind": "program_adoption_receipt_v1",
+            "artifact": {"receipt": {"self_digest": DIGEST_A}},
+        }],
+    }
+    original = copy.deepcopy(packet)
+    bundle = _bundle([_entry("context_artifact_v1", DIGEST_B, context)])
+    index = _index(bundle, _sign_bundle(bundle, private_key, root))
+    calls = 0
+
+    def fake_validate(candidate: dict, **kwargs: object) -> list[str]:
+        nonlocal calls
+        calls += 1
+        assert kwargs["execution_attestation_verifier"](
+            "context_artifact_v1", DIGEST_B, candidate["dispatch"]["context_artifact"]
+        )
+        assert callable(kwargs["external_evidence_verifier"])
+        assert callable(kwargs["source_manifest_verifier"])
+        candidate["mutated_only_inside_deepcopy"] = True
+        return []
+
+    monkeypatch.setattr(closure, "validate_closure", fake_validate)
+    result = host._finalize_program_adoption(
+        packet,
+        execution_index=index,
+        github_verifier=host.GitHubRulesetVerifier(
+            b"token-value", now=NOW, transport=FakeGitHubTransport({})
+        ),
+        source_verifier=host.GitSourceManifestVerifier(ROOT),
+        evaluated_at=NOW,
+    )
+
+    assert result["status"] == "PASS"
+    assert result["program_adoption_receipt_digest"] == DIGEST_A
+    assert calls == 1
+    assert packet == original
+
+
+def test_secure_json_reader_rejects_symlink_and_writable_input(tmp_path: Path) -> None:
+    target = tmp_path / "target.json"
+    target.write_text("{}", encoding="utf-8")
+    target.chmod(0o600)
+    link = tmp_path / "link.json"
+    link.symlink_to(target)
+    with pytest.raises(OSError):
+        host.read_secure_json(link)
+
+    target.chmod(0o666)
+    with pytest.raises(ValueError, match="writable"):
+        host.read_secure_json(target)
+
+
+def test_cli_does_not_accept_a_caller_selected_execution_key() -> None:
+    args = governance._build_parser().parse_args([
+        "aiml-trusted-finalize",
+        "--packet", "packet.json",
+        "--execution-bundle", "bundle.json",
+        "--execution-signature", "bundle.json.sig",
+        "--github-token-fd", "3",
+    ])
+
+    assert not hasattr(args, "execution_key_fd")
+    assert args.execution_signature == Path("bundle.json.sig")
+
+
+def test_production_finalizer_surface_has_no_injectable_trust_capabilities() -> None:
+    assert "finalize_program_adoption" not in governance.__all__
+    assert not hasattr(governance, "finalize_program_adoption")
+    assert not hasattr(host, "finalize_program_adoption")
+    assert list(inspect.signature(host.finalize_from_host_inputs).parameters) == [
+        "packet",
+        "bundle",
+        "execution_signature",
+        "github_token",
+    ]
+
+
+def test_manifests_bind_trusted_host_module_and_test() -> None:
+    from aiml_gate_receipt_validator import (  # type: ignore[import-not-found]
+        PROGRAM_GOVERNANCE_PATHS,
+        S0_3_EXACT_OWNED_PATHS,
+    )
+
+    expected = {
+        "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_common.py",
+        "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_git.py",
+        "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_github.py",
+        "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_host.py",
+        "helper_scripts/maintenance_scripts/agent_governance_closure_time.py",
+        "tests/structure/test_agent_governance_aiml_trusted_host.py",
+    }
+    assert expected.issubset(PROGRAM_GOVERNANCE_PATHS)
+    assert expected.issubset(S0_3_EXACT_OWNED_PATHS)
