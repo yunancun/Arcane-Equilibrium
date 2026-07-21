@@ -31,7 +31,7 @@ from agent_governance_aiml_trusted_github_pr import (
 
 
 GITHUB_API_ORIGIN = "https://api.github.com"
-GITHUB_API_VERSION = "2026-03-10"
+GITHUB_API_VERSION = "2022-11-28"
 TRUSTED_CA_BUNDLE_PATHS = (
     Path("/etc/ssl/certs/ca-certificates.crt"),
     Path("/etc/ssl/cert.pem"),
