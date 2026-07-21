@@ -57,7 +57,7 @@ break. No generic scope template can be `DONE`; it must first be instantiated.
 |---:|---|---|---|---|---|---|---|---|---|
 | 0 | S0.1 | Integrate current origin/main, preserve TODO union, publish V2 documents | PROGRAM | none | PM -> PA -> TW -> R4 -> QA -> PM | DONE | `docs/execution_plan/ai_ml_landing/receipts/S0.1-planning-documents-published-v1.json`<br>`sha256:8fc9417f984025deabdc1b83ace95921ccfff1acb26a1b29243fc0a0a5ba79ad` | `NONE` | PR #100 lineage: base `96d26245068cbfbc8d60e73fb8eb82c4109b0d40`, head `35b4d1e4091b7dc34af248f51f512f2d8d51e9b0`, merge `cfb3a4040ffb2974192c53609b72e7afba4a845d`; current clean/aligned Mac, true GitHub and Linux source head `c2f5a2e26e422d56b8ec9b540d7f36bea9a0be54`; merge is an ancestor |
 | 0 | S0.2 | Accept ADR-0049/AMD serving/retraining/rollback/no-broker authority | PROGRAM | S0.1 | PM -> PA -> CC/E3 -> R4 -> QA -> PM | DONE | `docs/execution_plan/ai_ml_landing/receipts/S0.2-serving-authority-receipt-v1.json`<br>`sha256:0115dbd3dc62d84e183aae5a28cbfd252eb45ecee51a652d8a4a155f14dfb41a` | `NONE` | Accepted source-policy commit `f325b4dfdafd1979197c8a9e6450efeaf85e091c`; publication remains deferred until all S0 closes |
-| 0 | S0.3 | Scope/attempt/effect governance, terminal-sink contract and GitHub admin attestation | PROGRAM | S0.1, S0.2 | PM -> PA -> E1 -> E2 -> E4 -> CC -> QA -> PM | READY | `program_adoption_receipt_v1` | `EXTERNAL_READONLY_ATTESTATION` | CI only for protected workflow changes |
+| 0 | S0.3 | Scope/attempt/effect governance, terminal-sink contract and GitHub admin attestation | PROGRAM | S0.1, S0.2 | PM -> PA -> E1 -> E2 -> E4 -> CC/E3/MIT/R4 -> QA -> PM | SOURCE_READY | `program_adoption_receipt_v1` (pending trusted-host) | `EXTERNAL_READONLY_ATTESTATION` | Source + 3-Codex-P1 forge-resistance hardening merged PR #104 (merge `b945fe0f8db6bdf5f93657b3c404025ade4f2de4`, reviewed head `d6dd1f98470ddea7c1941fe572aa6f89071cf09d`); 11-role review PASS. `program_adoption_receipt_v1` requires the enforced closure path — 7 governed reviews authenticated by an out-of-band `execution_attestation_verifier` + `source_manifest_verifier` (git ancestry/blob) + live GitHub ruleset — which the offline Mac CLI cannot supply per the Typed Authority Matrix. Emission is a trusted-host (Linux) step. |
 | 1 | S1.1 | LR0A PG read-only identity Adapter | PROGRAM | PROGRAM_ADOPTED | PM -> PA -> E1 -> E2 -> E4 -> CC/E3/OPS -> QA -> PM | PLANNED | source/disposable `pg_readonly_identity_receipt_v1` | `DISPOSABLE_ONLY` | Migration/ACL CI if touched; no production PG |
 | 1 | S1.2 | LR0B typed effects, governance wiring and terminal WORM sink Adapter | PROGRAM | PROGRAM_ADOPTED | PM -> PA -> E1 -> E2 -> E4 -> CC/E3/OPS -> QA -> PM | PLANNED | effect-contract/governance/sink receipt | `DISPOSABLE_ONLY` | Protected/deploy workflow CI if touched |
 | 1 | S1.3 | Host UID/PG role/auth/socket ACL/secret lifecycle contracts | PROGRAM | S1.1, S1.2 | PM -> PA -> E1 -> E2 -> E4 -> CC/E3/OPS -> QA -> PM | PLANNED | identity/ACL contract receipt | `DISPOSABLE_ONLY` | Disposable PG + migration/ACL CI |
@@ -106,9 +106,48 @@ break. No generic scope template can be `DONE`; it must first be instantiated.
 
 | Time | Session | Event | Evidence |
 |---|---|---|---|
+| 2026-07-21 | S0.3 | Source implemented + merged: scope/attempt/receipt/effect schemas (7), fail-closed `aiml_gate_receipt_validator.py`, Registry/router/closure integration, `terminal_receipt_sink_v1` contract-only (owner S1.2), and a strict GitHub repo-policy attestation contract. `SOURCE_READY`, not `PROGRAM_ADOPTED` — the receipt emission is a separate trusted-host step. | PR #104 merge `b945fe0f8db6bdf5f93657b3c404025ade4f2de4`, reviewed head `d6dd1f98470ddea7c1941fe572aa6f89071cf09d`; 8/8 required GitHub checks green; 7-role review (E2/E4/CC/E3/MIT/R4/QA) all PASS after E2-P1 (bind changed governance file) + E4-P1x3 (lock crown-jewel invariants) fixes were re-verified |
+| 2026-07-21 | S0.3 | Independent Codex PR review found 3 verified P1 forge-resistance gaps on the adoption gate (reviewer bindings self-supplied not tied to authenticated fragments; no reviewed_head->merge_head ancestry proof; writer lease forced on the read-only finalization). All 3 fixed per PA minimum-coherent design and re-verified; the gate is now genuinely forge-resistant and (correctly) requires trusted-host attestation to mint `PROGRAM_ADOPTED`. | Hardening commit `d6dd1f98470ddea7c1941fe572aa6f89071cf09d`; re-review CC/E3/E2 PASS, E4 code-PASS-quality (CONCERNS only on Mac governed-attestation provenance -> Linux follow-up). See coverage debt below |
 | 2026-07-21 | S0.2 | Accepted the advisory-serving source-policy authority after repairing and exactly rechecking three P1 blockers, source-policy QA acceptance, and final R4 cold review. Historical AMD bytes are unchanged. Effect is `NONE`; no ML5/ML6 implementation, runtime or Program adoption is claimed. | `docs/execution_plan/ai_ml_landing/receipts/S0.2-serving-authority-receipt-v1.json` (`sha256:0115dbd3dc62d84e183aae5a28cbfd252eb45ecee51a652d8a4a155f14dfb41a`); accepted head `f325b4dfdafd1979197c8a9e6450efeaf85e091c` |
 | 2026-07-21 | S0.1 | Exact PR #100 publication and current three-source lineage reconciled; S0.1 is `DONE`. This immutable-lineage receipt grants no runtime, build or Program-adoption authority; S0.2 is next. | `docs/execution_plan/ai_ml_landing/receipts/S0.1-planning-documents-published-v1.json` (`sha256:8fc9417f984025deabdc1b83ace95921ccfff1acb26a1b29243fc0a0a5ba79ad`); current source `c2f5a2e26e422d56b8ec9b540d7f36bea9a0be54` |
 | 2026-07-20 | PROGRAM | Four targeted correction-verification lenses accepted V2 after the no-candidate final-attestation branch was separated from trading attestation. Planning coverage is accepted; no implementation state advanced. | `ACCEPT_V2_FOR_PROGRAM_ADOPTION` |
 | 2026-07-20 | S0.1 | Live read-only remote recheck found planning base `b486c071...` behind GitHub/local `origin/main=96d262450...` by seven commits; `TODO.md` overlaps. Integration is deferred to S0.1 and must preserve the unrelated IBKR delta. | `SOURCE_DRIFT_REQUIRES_CURRENT_HEAD_INTEGRATION` |
 | 2026-07-20 | PROGRAM | Post-draft cold review rejected premature adoption/landing, coarse scope, impossible TTL overlap, effect-classification bypass and final-head drift; templates were reworked. No implementation state advanced. | `REWORKED_AWAITING_FINAL_ADVERSARIAL_ACCEPTANCE` |
 | 2026-07-20 | PROGRAM | Initial V2 ledger designed in isolated planning worktree. No implementation, publication, runtime or effect occurred. | `PROGRAM_ADOPTION_REQUIRED` |
+
+## S0.3 Trusted-Host Follow-Ups (to reach PROGRAM_ADOPTED)
+
+The S0.3 source is merged and forge-resistant. Minting `program_adoption_receipt_v1`
+is a trusted-host (Linux `trade-core`) step because the offline Mac CLI cannot
+authenticate a closure PASS (Typed Authority Matrix). Required, in order:
+
+1. Run the S0.3 finalization closure on a trusted host with all 7 mandatory
+   reviewers (E2/E4/CC/E3/MIT/R4/QA) as authenticated PASS fragments (real
+   governed agent executions confirmed by an out-of-band
+   `execution_attestation_verifier`), `review_control.final_generation ==`
+   the recomputed `merge_head` generation.
+2. Supply a `source_manifest_verifier` that proves `git merge-base --is-ancestor
+   reviewed_head merge_head` (reflexive), heads exist, and every manifest blob
+   at `merge_head` matches, plus a live GitHub ruleset `external_verifier`.
+3. Emit `program_adoption_receipt_v1` (authority_limits all-false,
+   `source_adoption_only`), bind merge/reviewed heads + attestation + terminal
+   sink contract, then flip Overall state to `PROGRAM_ADOPTED` and open S1.
+4. E4 governed-attestation provenance: re-run the S0.3 pytest evidence through
+   the `capture-command` wrapper on Linux (the Mac user-site pytest is hidden by
+   the wrapper's HOME isolation; the code/tests are PASS-quality, only the
+   attestation channel is offline-limited).
+
+## Accepted Coverage Debt (S0.3 review, non-blocking)
+
+Deferred P2 hardening from the 7-role review (fail-closed or forward-looking;
+none affect the merged gate's forge-resistance):
+
+- E2 P2: `validate_*` raise instead of return on malformed classification / deep
+  graph (fail-closed in the wired path); `agent_governance_schema.py` not bound
+  in the adoption governance manifest (host under same repo/CI protection).
+- E3 P2: `GITHUB_SECRET_LIKE_RE` prefix-only + attestation-only scan; shared
+  manifest path pattern weaker than `_s0_3_owned_path` (both non-exploitable).
+- MIT P2: `landing_scope_v1` should bind `intent_position_effect_class` before
+  the ML5 serving schema (not in the S0.3 bundle; owner S4/S5).
+- QA P2: keep the receipt review-binding cross-check (now implemented via the
+  enforced closure path in the hardening).
