@@ -1,0 +1,206 @@
+{
+  "authority_projection": {
+    "activation_protocol": "EXACT_EXPECTED_CURRENT_TO_PENDING_CAS_TO_FRESH_MATCHING_RUST_ACK_TO_COMMITTED_ACTIVE",
+    "advisory_actions": [
+      "NO_OP",
+      "VETO",
+      "SIZE_DOWN"
+    ],
+    "consumer": "Rust IntentProcessor + EdgePredictorStore",
+    "direct_trading_authority": false,
+    "qualification_lineage_required": true,
+    "risk_reduction_non_interference": true,
+    "serialized_allow_means": "NO_OP"
+  },
+  "canonicalization": "RFC8785_JSON_EXCLUDING_SELF_DIGEST",
+  "dependency_receipts": [
+    {
+      "file_sha256": "b3bade1ac0e7049f442ea97ca71fda083590ce7417755b162bc855c505519b07",
+      "path": "docs/execution_plan/ai_ml_landing/receipts/S0.1-planning-documents-published-v1.json",
+      "receipt_id": "S0.1-planning-documents-published-v1",
+      "self_digest": "sha256:8fc9417f984025deabdc1b83ace95921ccfff1acb26a1b29243fc0a0a5ba79ad",
+      "status": "PLANNING_DOCUMENTS_PUBLISHED"
+    }
+  ],
+  "effect_boundary": {
+    "broker_effect": false,
+    "deploy_effect": false,
+    "migration_effect": false,
+    "ml5_ml6_implementation": false,
+    "order_effect": false,
+    "postgres_effect": false,
+    "program_adopted": false,
+    "runtime_effect": false,
+    "side_effect_class": "NONE",
+    "source_implementation": false
+  },
+  "issued_at": "2026-07-21T08:33:41Z",
+  "normative_documents": [
+    {
+      "git_blob": "fab3e400776a2de06cca3ead81904bac97f46243",
+      "path": "docs/adr/0049-scanner-driven-alr-operational-shadow.md",
+      "sha256": "f8df5d1860258869a9bd4610c08e114925215480cfa92a956427c6ae5c597717",
+      "status": "ACCEPTED_HISTORICAL_AUTHORITY_WITH_NARROW_POINTER"
+    },
+    {
+      "git_blob": "da2a928afeede0826eea5c8d72f9c0f6b7f67c8f",
+      "path": "docs/adr/0051-registry-authorized-advisory-model-serving.md",
+      "sha256": "7d8780fbc790f61e9ef1fdbd4cc601d12443f38f76d8fe0d08bff5e09748e805",
+      "status": "ACCEPTED_SOURCE_POLICY_NO_RUNTIME_ADOPTION_EFFECT"
+    },
+    {
+      "git_blob": "60da7b161ebe79f2fa54def60901930f88af71e6",
+      "path": "docs/governance_dev/amendments/2026-07-21--AMD-2026-07-21-01-aiml-advisory-serving-authority.md",
+      "sha256": "488db0539c39c8cf35dc5e58322f668442ce50b9969b9096a3267d1279ba1636",
+      "status": "ACCEPTED_SOURCE_POLICY_NO_RUNTIME_ADOPTION_EFFECT"
+    },
+    {
+      "git_blob": "27ef631589e1697838f4bc918a8b8c661d0150ba",
+      "path": "docs/governance_dev/SPECIFICATION_REGISTER.md",
+      "sha256": "23398545237c38774f63412d6691d18b15358634a27210e03381101d566a7cbc",
+      "status": "ACCEPTED_PROJECTION"
+    },
+    {
+      "git_blob": "bce62d91440081846e45dd1d9a034bcc7dd8c477",
+      "path": "docs/_indexes/document_index.md",
+      "sha256": "6adf5c1164eb217e24263b77fbef520f392ea37eaac3cf9194f0276d1ccf4576",
+      "status": "ACCEPTED_PROJECTION"
+    },
+    {
+      "git_blob": "5e5a4295c4879a97d8eb1292921e0affeed44499",
+      "path": "docs/_indexes/initiative_index.md",
+      "sha256": "b600618a01e54f81493817b54d78e9dbe9db516e87ef94a3979ed0dfadcc4e99",
+      "status": "ACCEPTED_STABLE_ROUTING_PROJECTION"
+    }
+  ],
+  "program_id": "AIML-LONG-LIVED-LANDING-V2",
+  "receipt_id": "S0.2-serving-authority-receipt-v1",
+  "receipt_type": "serving_authority_receipt_v1",
+  "review_bindings": {
+    "design": {
+      "dag_digest": "sha256:2908bccae7dba7e1e558b531622725161e7ef1f15bad2de3c25aeb48b9b000b9",
+      "producer_node_id": "pa_design",
+      "task_contract_digest": "sha256:c2fc101064f030b79451760f9a905837fb798357559a3905650675ffe33dd2ad"
+    },
+    "gate_review": {
+      "closed_finding_ids": [
+        "CC-S0.2-P1-RISK-REDUCTION-MODEL-INTERFERENCE",
+        "E3-S0.2-P1-CAS-ACK-REPLAY-DOWNGRADE",
+        "MIT-S0.2-P1-QUALIFICATION-LINEAGE-UNBOUND"
+      ],
+      "context_artifacts": {
+        "constitutional_gate": "sha256:bffda12c37a78e3cd2395a1fa129178f69a47de34cdcf8501247cfd4e23410b3",
+        "data_ml_review": "sha256:b5c61fa028eceaa59f337cba4705bf52dfd01c5dfb8a56fc2ddebe719d28305d",
+        "security_gate": "sha256:d7d9ce44676209d3b853041add6ff9915b242f2798cdecd550c8f3f661f31c4c"
+      },
+      "initial_task_contract_digest": "sha256:b573320a02aafa94185ce6d4532ef2564f24872f68d09739645391a92593306b",
+      "recheck_task_contract_digest": "sha256:f93abd0b31125678d7e5cd0ee9617916210b5d650c4d5b37bef9e802deb98f7b",
+      "review_control_digest": "sha256:2295f30022904282b723ddbbbbed0ac10ec3f77275b68fe83c770c646c1bbfb2",
+      "verdict": "PASS_ALL_INITIAL_BLOCKERS_RESOLVED"
+    },
+    "qa_acceptance": {
+      "capture_record_digests": [
+        "sha256:e8c5eb89fbe5defe92d010d37b12a2c330484058ce71603f1aa13d5562e12c2a",
+        "sha256:0b4dcd126c1a32c57b3a9f38e0b3e45f69ca198f3103795f73ace3412c1bbd67",
+        "sha256:6be0556fe702cafa921b280b40430a3b5eee9cee792d4cb6e9b8ebcdc544aba0",
+        "sha256:2b01927943903617911e8e3b2ff3212224fa4e532bce2236714efd4b01fa76de",
+        "sha256:35fb7acd394510adcfd5828c9ea96276342ab7328366e40fbe12626ec8c6fe10"
+      ],
+      "context_artifact_digest": "sha256:f39c11b4db680dec6ee626e80a9a54c2b190dd6682eb0297fb0b1d0ace0dadb4",
+      "dag_digest": "sha256:0a5a9be0da8cddf5d14df6f2a993dbea800bd43323242350b440496213fae5ea",
+      "node_id": "business_acceptance",
+      "task_contract_digest": "sha256:1ce05c554dd673216fa99f4f083fecef5b73bdf110a33229d077a8e398c4e75d",
+      "verdict": "PASS_SOURCE_POLICY_ONLY"
+    },
+    "r4_final_cold_review": {
+      "capture_record_digests": [
+        "sha256:71f2f85a87ac061239686d7c928e097404b1912b3c7aa72f424782dff53b9858",
+        "sha256:f543b8030db7b60729b0dcc59bab975f49b195432fe7879fea16a0cfd9fd7a58",
+        "sha256:e35705ab0448ef21d9d4b1b08be6565d48eb19b42c207cdca2d3b876b6fefb99",
+        "sha256:184c0aa992da8dec7b3c050502fda55c4df2616e4b9a82e6f9649b3c066576ab",
+        "sha256:9ea715ed869569d71b97231229116a8138215af4623584544c2c4d4e927d539c",
+        "sha256:84cbf38a982f7a3792b8e70aa52831f379bb831c7e570248f9564784cd5faaed",
+        "sha256:7f55e916a47ed54c8c60f8264fb96ccb8af4141fb3c34f9dc36edcc623aa1a61"
+      ],
+      "context_artifact_digest": "sha256:4c841b658f89a620a3971806d84874e038047e4ebf24d6207cda4bb2a5ec667b",
+      "dag_digest": "sha256:8ef98eccf85cb2647439ccbeda5993fd0321c90fe17e013d00adb5ae30aadb2f",
+      "findings": [],
+      "node_id": "docs_integrity_review",
+      "task_contract_digest": "sha256:a7ba402b73bff71847d9a498e6e8e4dcfe79d13377b83f4ec1616d26852915b9",
+      "verdict": "PASS"
+    }
+  },
+  "schema_version": 1,
+  "self_digest": "sha256:0115dbd3dc62d84e183aae5a28cbfd252eb45ecee51a652d8a4a155f14dfb41a",
+  "self_digest_input": "RFC8785_CANONICAL_JSON_EXCLUDING_SELF_DIGEST",
+  "session_id": "S0.2",
+  "source_generation": {
+    "accepted_head": "f325b4dfdafd1979197c8a9e6450efeaf85e091c",
+    "accepted_tree": "f9050bd081227fd320f264e5d0a5ced9294c13ec",
+    "baseline_head": "c38bdccbd73c833008320da070ef2e32d6f83285",
+    "branch": "agent/aiml-s0-2-adoption-v2",
+    "reviewed_generation": {
+      "dirty_diff_hash": "sha256:7cb58b92c1132f661b70368c95323dfb58c6d96fd600204088c4a2791fc5cc6a",
+      "source_head": "c38bdccbd73c833008320da070ef2e32d6f83285",
+      "untracked_relevant_hash": "sha256:0298d039822e1c7a8a648f4527f8f0669f0471c3fb9ab897b37a355ba10ddec9"
+    },
+    "reviewed_bytes_reproduced_in_commit": true
+  },
+  "status": "SERVING_AUTHORITY_ACCEPTED",
+  "supersession_bindings": [
+    {
+      "clauses": [
+        "Decision 3",
+        "Decision 6",
+        "Explicit Non-Goals 2",
+        "Learning, Retention, And Terminal Truth",
+        "Global Qualified Autonomous Learning Shadow V1 Addendum"
+      ],
+      "path": "docs/adr/0049-scanner-driven-alr-operational-shadow.md",
+      "preserved_scope": "scanner evidence, ALR/challenger no-serving/no-promotion, and all direct-trading denials",
+      "superseded_interpretation": "actor-specific denial permanently forbids a separate registry-authorized Rust consumer"
+    },
+    {
+      "accepted_blob": "50c83596b9df86024a0d5c107aae255d7398ebb1",
+      "baseline_blob": "50c83596b9df86024a0d5c107aae255d7398ebb1",
+      "clauses": [
+        "Invariants 3",
+        "Invariants 6",
+        "Prohibitions That Remain 1"
+      ],
+      "path": "docs/governance_dev/amendments/2026-07-09--AMD-2026-07-09-02-alr-operational-shadow.md",
+      "preserved_scope": "ALR no-serving/no-promotion, zero authority counters, and exchange/order/risk denial",
+      "sha256": "b90f31b30efde21e460e1aa707760e4ed401056736a5ad192b819b902de742b4",
+      "superseded_interpretation": "ALR denial also permanently forbids an independent governed consumer"
+    },
+    {
+      "accepted_blob": "e26b59d1e5b49d0a618be81327410575ce060d70",
+      "baseline_blob": "e26b59d1e5b49d0a618be81327410575ce060d70",
+      "clauses": [
+        "Qualified Learning Contract bullet 3",
+        "Hard Boundaries Retained bullet 5",
+        "Hard Boundaries Retained bullet 7"
+      ],
+      "path": "docs/governance_dev/amendments/2026-07-10--AMD-2026-07-10-02-alr-freshness-learning-completion-v3.md",
+      "preserved_scope": "challenger-only retraining, no auto-serving/promotion, and ALR authority maps",
+      "sha256": "de058d7d35991b735473c90fef7fa21d933f5ade313a64ea8091c12fb82b08dc",
+      "superseded_interpretation": "retraining denial also forbids a separate later activation authority"
+    },
+    {
+      "accepted_blob": "bdb6b1739a9a144e16b5d7f489ded34751679032",
+      "baseline_blob": "bdb6b1739a9a144e16b5d7f489ded34751679032",
+      "clauses": [
+        "Qualified completion contract G6",
+        "Qualified completion contract G8",
+        "Qualified completion contract G9",
+        "External-effect gate retained",
+        "No-authority contract"
+      ],
+      "path": "docs/governance_dev/amendments/2026-07-10--AMD-2026-07-10-03-global-qualified-autonomous-learning-shadow-v1.md",
+      "preserved_scope": "challenger-only registry, AI-not-an-order, effect gates, and no direct authority",
+      "sha256": "40a5454fb48719d5f4379fc98ed588ea4ef5ed6738d329089a6468672b6dbd5d",
+      "superseded_interpretation": "no-authority contract also permanently forbids the ADR-0051 independent consumer"
+    }
+  ],
+  "validity_class": "IMMUTABLE_LINEAGE"
+}
