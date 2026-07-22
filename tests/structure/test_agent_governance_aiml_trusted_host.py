@@ -812,6 +812,10 @@ def test_github_verifier_accepts_empty_check_pr_projection_for_exact_head() -> N
     assert verifier(_github_attestation(payloads)) is True
 
 
+def test_github_transport_pins_the_supported_merge_sha_projection_version() -> None:
+    assert host.GITHUB_API_VERSION == "2022-11-28"
+
+
 def test_github_verifier_does_not_treat_pull_base_sha_as_merge_parent() -> None:
     payloads = _github_payloads()
     pulls_path = host._github_associated_pulls_path("c" * 40, page=1)
@@ -1034,6 +1038,7 @@ def test_normative_docs_bind_trusted_finalizer_operator_interface() -> None:
         "merge-base --is-ancestor",
         "check-runs",
         "newline-framed",
+        "2022-11-28",
         "CC / E2 / E3 / E4 / MIT / QA / R4",
         "PROGRAM_ADOPTED",
     }

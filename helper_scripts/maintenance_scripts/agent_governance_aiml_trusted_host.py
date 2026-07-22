@@ -47,6 +47,7 @@ from agent_governance_aiml_trusted_github import (
     EXPECTED_RULESET_ID,
     EXPECTED_RULESET_NAME,
     GITHUB_API_ORIGIN,
+    GITHUB_API_VERSION,
     GITHUB_PAGE_SIZE,
     MAX_GITHUB_PAGES,
     GitHubRulesetVerifier,
