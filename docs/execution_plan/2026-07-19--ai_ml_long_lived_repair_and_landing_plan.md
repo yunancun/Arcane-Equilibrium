@@ -13,6 +13,10 @@
 **Adoption receipt**:
 `docs/execution_plan/ai_ml_landing/receipts/S0.3-program-adoption-receipt-v1.json`
 (`sha256:1a124bcaebb741a69c97e37a828e5b85c9b6499cdf053e8ef62451448878f93b`)
+**Finalization evidence**: producer-signed
+`S0.3-program-adoption-finalization-attestation-v1.json` and signed
+`S0.3-trusted-execution-bundle-v1.json` in the same receipts directory; the
+adopted source trust root verifies both SSHSIG sidecars.
 **Evidence**:
 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-19--ai_ml_true_state_and_engineering_plan.md`
 and

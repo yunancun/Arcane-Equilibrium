@@ -13,6 +13,8 @@
 | 文件 | 内容 |
 |------|------|
 | `execution_plan/ai_ml_landing/receipts/S0.3-program-adoption-receipt-v1.json` | Linux trusted-host 簽發的 S0.3 immutable receipt，digest `sha256:1a124bcaebb741a69c97e37a828e5b85c9b6499cdf053e8ef62451448878f93b`；終態 `PROGRAM_ADOPTED`，reviewed head `1a933fcc28e9f7341e023b5d401c479957c14c5f`、merge head `fed223bebd278c50b0ab3330980e66441a30c9ed`。`source_adoption_only=true`，九個 authority grants 全 false，不是 runtime-ready。 |
+| `execution_plan/ai_ml_landing/receipts/S0.3-program-adoption-finalization-attestation-v1.json` + `.sig` | Producer-signed durable finalizer PASS statement；綁定 receipt bytes/self-digest、closure digest、review/source heads、GitHub policy attestation、execution bundle 與 all-false authority limits。 |
+| `execution_plan/ai_ml_landing/receipts/S0.3-trusted-execution-bundle-v1.json` + `.sig` | Trusted input-execution index 與 SSHSIG；由 adopted source 中固定的 ED25519 public key、fingerprint、identity 和 namespace 驗證，私鑰未入 repo。 |
 | `execution_plan/ai_ml_landing/PROGRESS.md` | Current projection ledger：S0.1/S0.2/S0.3 全部 `DONE`，Program `PROGRAM_ADOPTED`，S1 READY pool 為 `S1.1 ∥ S1.2 ∥ S1.4`；保留 PR #104/#106/#107/#108、7-role review、Linux `275/275` 與 finalizer 證據。 |
 
 ### 2026-07-21 AI/ML S0.2 Accepted Advisory-Serving Source Policy

@@ -1,0 +1,50 @@
+{
+  "attestation_subject": {
+    "program_id": "AIML-LONG-LIVED-LANDING-V2",
+    "session_id": "S0.3",
+    "terminal_state": "PROGRAM_ADOPTED"
+  },
+  "attested_at": "2026-07-22T01:12:00Z",
+  "authority_limits": {
+    "broker_authority_granted": false,
+    "deploy_authority_granted": false,
+    "direct_model_authority_granted": false,
+    "migration_authority_granted": false,
+    "ml5_implementation_authority_granted": false,
+    "ml6_implementation_authority_granted": false,
+    "order_authority_granted": false,
+    "postgres_authority_granted": false,
+    "runtime_authority_granted": false,
+    "source_adoption_only": true
+  },
+  "bound_evidence": {
+    "candidate_review_canonical_digest": "sha256:048f79628a3a5adedee127832ad3a250c23b6538e39b57e496dc7b3c5ac9d738",
+    "closure_packet_canonical_digest": "sha256:27f7b0041a418298ef49943f6f37283b603fce38f48f67f9a825f249f2615c63",
+    "closure_packet_file_sha256": "sha256:34689cfd4ad207b7853971c398493203de9347a8034e2e419414e77e0f8733bb",
+    "context_artifact_digest": "sha256:4716fe6c9f5da126b708fc8e0daf5ea3b7b44585439f258ca74bcdbe767a512b",
+    "github_policy_attestation_digest": "sha256:f6e234c36c9c9c7e56732821d4f7473b4b16b752bba249344318826adda12fee",
+    "program_adoption_receipt_file_sha256": "sha256:e70d4c797f127a8230fe4ed9f9167f50e9ebed1d34f27ad4b74758d917e2d25e",
+    "program_adoption_receipt_self_digest": "sha256:1a124bcaebb741a69c97e37a828e5b85c9b6499cdf053e8ef62451448878f93b",
+    "review_generation_digest": "sha256:5c029f5bea22be43d49e857a77229a4e7270c61c305b9f00146fa8ec7b72f176",
+    "trusted_execution_bundle_canonical_digest": "sha256:14f918fad835455e4855bd7a2047c0f00db3219e82491cd60fe7b5e8a71cadc0",
+    "trusted_execution_bundle_signature_sha256": "sha256:4e5d51631f0b6d08e9ad3385b2e26de0411eae8a56ce5349446037ebc61176b0"
+  },
+  "evidence_trust_tier": "PLATFORM_OR_EXTERNAL_ATTESTED",
+  "finalization_result": {
+    "errors": [],
+    "execution_attestation_verified": true,
+    "github_policy_verified": true,
+    "source_manifest_verified": true,
+    "status": "PASS"
+  },
+  "merge_head": "fed223bebd278c50b0ab3330980e66441a30c9ed",
+  "producer": {
+    "algorithm": "SSH-ED25519",
+    "signature_namespace": "arcane-equilibrium-aiml-s03",
+    "signer_fingerprint": "SHA256:uGJ9veN7PoE6BBgfsSP2aiMndrwgbt7o/7/YfdzNzCQ",
+    "signer_identity": "aiml-s03-operator-v1",
+    "trust_root_source_path": "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_host.py"
+  },
+  "reviewed_head": "1a933fcc28e9f7341e023b5d401c479957c14c5f",
+  "schema_version": "aiml_program_adoption_finalization_attestation_v1"
+}

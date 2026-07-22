@@ -1,7 +1,7 @@
 # 玄衡 TODO - 活躍派發佇列
 
-**版本** v842 | **日期** 2026-07-22
-**來源／runtime 指針**：S0.3 reviewed head `1a933fcc28e9f7341e023b5d401c479957c14c5f` 已由 PR #108 merge 為 adopted source generation `fed223bebd278c50b0ab3330980e66441a30c9ed`。Linux trusted-host finalizer 已簽發 `docs/execution_plan/ai_ml_landing/receipts/S0.3-program-adoption-receipt-v1.json`（`sha256:1a124bcaebb741a69c97e37a828e5b85c9b6499cdf053e8ef62451448878f93b`），Program 為 `PROGRAM_ADOPTED`；此 receipt 明確是 source adoption only，不是 runtime-ready。來源與 runtime 身分仍須獨立證實；詳見 §0 與 `AIML-LONG-LIVED-LANDING-V2`。
+**版本** v843 | **日期** 2026-07-22
+**來源／runtime 指針**：S0.3 reviewed head `1a933fcc28e9f7341e023b5d401c479957c14c5f` 已由 PR #108 merge 為 adopted source generation `fed223bebd278c50b0ab3330980e66441a30c9ed`。Linux trusted-host finalizer 已簽發 `docs/execution_plan/ai_ml_landing/receipts/S0.3-program-adoption-receipt-v1.json`（`sha256:1a124bcaebb741a69c97e37a828e5b85c9b6499cdf053e8ef62451448878f93b`）；其 producer-signed、可獨立重驗的 finalization attestation 與 trusted execution bundle 亦保存在同一 receipts 目錄。Program 為 `PROGRAM_ADOPTED`；此 receipt 明確是 source adoption only，不是 runtime-ready。來源與 runtime 身分仍須獨立證實；詳見 §0 與 `AIML-LONG-LIVED-LANDING-V2`。
 **當前態勢**：`PROGRAM_ADOPTED`。S0.1、S0.2、S0.3 已全部關閉；S0.3 經 PR #106-#108 完成 forge-resistance、live PR projection 與 Linux portability 修復，7-role 對抗審核與 Linux governed E4 `275/275` 通過後由 trusted-host finalizer 簽發 receipt。當前 Sprint 為 S1，READY pool 為 `S1.1 ∥ S1.2 ∥ S1.4`；但 adoption 不授權 runtime、PG、deploy、broker/order、ML5 或 ML6 effect。執行順序仍固定為兩個有界 program：先完成 P0 長效修復，再完成 P1 端到端 ML/AI 落地。完成狀態由 runtime 證據決定，不能由契約或 CI 代替。
 **入口**：正式方案 `docs/execution_plan/2026-07-19--ai_ml_long_lived_repair_and_landing_plan.md`；完成度審核 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-20--ai_ml_completion_coverage_and_delivery_audit.md`；交付協議 `docs/agents/ai-ml-landing-delivery-protocol.md`；長效進度帳本 `docs/execution_plan/ai_ml_landing/PROGRESS.md`；先前真實狀態報告 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-19--ai_ml_true_state_and_engineering_plan.md`；版本日誌 `docs/CLAUDE_CHANGELOG.md`；TODO 規範 `docs/agents/todo-maintenance.md`；v738 歸檔 `docs/archive/2026-07-04--todo_v738_pre_slim_archive.md`。
 
@@ -34,7 +34,7 @@
 | 明確排除 | `P1-AIML-END-TO-END-LANDING`、全部 P2/P3、其他全局 P0/P1、IBKR、交易候選、Demo/order/profit lane，除非它們是 S1 exact effect receipt 的只讀證據來源。 |
 | 必讀上下文順序 | `AGENTS.md` → `.codex/agents/PM.md` → `docs/agents/context-loading.md` → 本看板與 §1 AIML rows → `docs/agents/ai-ml-landing-delivery-protocol.md` §§2-6 → 正式方案 → `docs/execution_plan/ai_ml_landing/PROGRESS.md` current rows／attempts／receipts。 |
 | Intake | PM 先核對 current head、branch、dirty scope、S0 receipts 與 active attempt；以 `agent_governance.py route/context` 編譯每個 Session 的實際 DAG。舊報告只能作線索，不能代替 current source/runtime/effect evidence。 |
-| Hard predecessor | 已滿足：`S0.1`/`S0.2`/`S0.3` 全部關閉；Linux trusted-host receipt `sha256:1a124bcaebb741a69c97e37a828e5b85c9b6499cdf053e8ef62451448878f93b` 已簽發 `PROGRAM_ADOPTED`。 |
+| Hard predecessor | 已滿足：`S0.1`/`S0.2`/`S0.3` 全部關閉；Linux trusted-host receipt `sha256:1a124bcaebb741a69c97e37a828e5b85c9b6499cdf053e8ef62451448878f93b` 已簽發 `PROGRAM_ADOPTED`，producer-signed finalization attestation 與 execution bundle 可由 repo trust root 獨立重驗。 |
 | Exact Sessions | 必須完成 `S1.1`、`S1.2`、`S1.3`、`S1.4`、`S1.5`、`S1.6`；每個 Session 都獨立執行 W0-W9 並取得自己的 current-generation closure。 |
 | 固定排程 | `S1.1 ∥ S1.2 → S1.3 ∥ S1.4 → JOIN → S1.5 → S1.6`；`∥` 只有在 W0 證明 path/effect manifest 互斥時成立，否則依序執行。 |
 | 工程原則 | 依 `Observe → 最高影響缺口 → 可運行 vertical slice → source/runtime 驗證 → durable state`；不得以一次性 wrapper、cron、Codex/session 常駐或 source-only PASS 代替長效 runtime 能力。 |
@@ -49,7 +49,7 @@
 |---|---|
 | Program | `AIML-LONG-LIVED-LANDING-V2` |
 | 當前 Sprint | `S1` |
-| 已關閉 Session | `S0.1`（V2 規劃發布；PR #100）、`S0.2`（advisory-serving source-policy；ADR-0051/AMD-2026-07-21-01）、`S0.3`（PR #104/#106/#107/#108；`PROGRAM_ADOPTED` receipt 已簽發） |
+| 已關閉 Session | `S0.1`（V2 規劃發布；PR #100）、`S0.2`（advisory-serving source-policy；ADR-0051/AMD-2026-07-21-01）、`S0.3`（PR #104/#106/#107/#108；`PROGRAM_ADOPTED` receipt 與 producer-signed finalization evidence 已保存） |
 | 最早未關閉 Session | `S1.1`；當前 READY pool 為 `S1.1 ∥ S1.2 ∥ S1.4`，仍受最多 2 writer 且 manifest 互斥限制。 |
 | 當前 gate | `PROGRAM_ADOPTED`（source adoption only；S1 已開放，runtime/effect authority 仍須逐 Session 取得） |
 | 工程並行上限 | 最多 2 個 path/effect manifest 互斥的 writer Session；不互斥則串行。 |
@@ -212,4 +212,4 @@ ssh trade-core 'crontab -l | awk '\''NF && substr($1,1,1)!="#" {count++} END {pr
 ```
 
 **維護契約**：V2 的執行排程與狀態投影由 `docs/agents/ai-ml-landing-delivery-protocol.md` 與 `docs/execution_plan/ai_ml_landing/PROGRESS.md` 管理；它們不授予 normative/effect authority。權限仍只來自 accepted ADR/AMD、明確 Operator 決定與治理 Adapter。`docs/agents/profit-first-autonomy-loop.md` 與舊 WP4 queue 只作歷史輸入，不再是 active AI/ML 派發。根 TODO 只保留兩個 active umbrella：P0 長效修復與 P1 端到端落地。
-**自檢**：S0.1／S0.2／S0.3 已全部關閉，Linux trusted-host 已簽發 `PROGRAM_ADOPTED` receipt `sha256:1a124bcaebb741a69c97e37a828e5b85c9b6499cdf053e8ef62451448878f93b`，S1 已開放。這仍只是 source adoption：沒有當前候選或已過期 Demo packet 可提供 authority，也不授權直接 `psql`、runtime/PG/deploy/restart/retention/broker/order effect。S0 ledger projection 合併後執行一次三端 exact-head checkpoint；整個 AIML program 的 terminal final sync 仍在 S8.4，S8.5T/S8.5NC 分別證實 runtime，S8.6/S8.NC 寫入唯一 terminal WORM receipt。
+**自檢**：S0.1／S0.2／S0.3 已全部關閉，Linux trusted-host 已簽發 `PROGRAM_ADOPTED` receipt `sha256:1a124bcaebb741a69c97e37a828e5b85c9b6499cdf053e8ef62451448878f93b`；producer-signed finalization attestation、execution bundle 與兩份 SSHSIG 已 repo-resident 並有機械重驗，S1 已開放。這仍只是 source adoption：沒有當前候選或已過期 Demo packet 可提供 authority，也不授權直接 `psql`、runtime/PG/deploy/restart/retention/broker/order effect。S0 ledger projection 合併後執行一次三端 exact-head checkpoint；整個 AIML program 的 terminal final sync 仍在 S8.4，S8.5T/S8.5NC 分別證實 runtime，S8.6/S8.NC 寫入唯一 terminal WORM receipt。
