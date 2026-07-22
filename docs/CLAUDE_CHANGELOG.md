@@ -1,13 +1,19 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-07-21（AI/ML S0 landing：S0.2 advisory-serving authority + S0.3 adoption-gate source 及 3-Codex-P1 forge-resistance 硬化 merge PR #104；`PROGRAM_ADOPTED` 發放待 trusted-host）
+> 最後更新：2026-07-22（AI/ML S0 全部關閉；Linux trusted-host 已簽發 `PROGRAM_ADOPTED`，S1 ready）
 
 ---
 
+## AI/ML S0 Program Adoption（2026-07-22）
+
+S0.3 在 PR #104 初始 source landing 後完成三輪收口：PR #106 修復 adoption manifest、crown-jewel negative tests 與 3 個 forge-resistance P1（authenticated review fragment DAG、reviewed→merge ancestry、read-only finalization phase lease）；PR #107 綁定 live merged-PR API projection；Linux governed E4 首輪再抓到 pytest temporary input mode 與 trusted-host `0600` 契約不一致，PR #108 以兩行 fixture `chmod(0o600)` 修復後 `275/275` 通過。PR #106/#107/#108 merge heads 分別為 `afa7eb2e9`、`0cdd3537e`、`fed223beb`。
+
+最終 reviewed head `1a933fcc28e9f7341e023b5d401c479957c14c5f` 經 E2/E4/CC/E3/MIT/R4/QA exact-generation 對抗複審，無 P0/P1/P2；Linux trusted-host 驗證 authenticated fragments、git ancestry/blob 與 live GitHub ruleset 後，finalizer 以 closure digest `sha256:27f7b0041a418298ef49943f6f37283b603fce38f48f67f9a825f249f2615c63` 簽發 `docs/execution_plan/ai_ml_landing/receipts/S0.3-program-adoption-receipt-v1.json`（`sha256:1a124bcaebb741a69c97e37a828e5b85c9b6499cdf053e8ef62451448878f93b`）。PR #110 current-head Codex review 另抓到 receipt 只有 self-digest、缺少 durable producer authenticity 的 P1；因此補入 producer-signed `S0.3-program-adoption-finalization-attestation-v1.json`、signed `S0.3-trusted-execution-bundle-v1.json` 與兩份 SSHSIG，並新增機械回歸重驗 trust root、receipt/closure/source/GitHub bindings。終態是 `PROGRAM_ADOPTED`、S0 關閉、S1 ready；receipt 為 `source_adoption_only`，九個 authority grant 全為 false，沒有 runtime/PG/migration/deploy/ML5/ML6/broker/order effect。
+
 ## AI/ML S0 Program-Adoption Gate（2026-07-21）
 
-S0.1（V2 規劃發布 PR #100）、S0.2（`ADR-0051` advisory-serving authority + `AMD-2026-07-21-01`，advisory 單調 `NO_OP|VETO|SIZE_DOWN`、A9 永久禁 broker/order）收口。S0.3 source（7 個 `aiml_gate_receipts` schema、fail-closed validator、Registry/router/closure 整合、`terminal_receipt_sink_v1` contract-only）經 7-role 對抗審核（E2-P1 bind changed governance file + E4-P1×3 lock crown-jewel invariants 修復後複驗全 PASS）。獨立 Codex review 揪出 3 個 P1 forge-resistance 缺口（reviewer binding 自報未綁 authenticated fragment、無 reviewed→merge ancestry、read-only finalization 被迫帶 writer-lease），依 PA 最小相容設計全修（routing 扇入 7 強制 reviewer 重用既有 `validate_execution_attestations`；`SourceManifestVerifier` 強制 `git merge-base --is-ancestor`；`session_attempt_v1` phase-conditional lease），CC/E3/E2 複審 PASS。merge PR #104 `b945fe0f8`。`program_adoption_receipt_v1` 發放為 Linux trusted-host 步驟（offline 不可 authenticate closure PASS），詳見 `docs/execution_plan/ai_ml_landing/PROGRESS.md` Trusted-Host Follow-Ups。
+S0.1（V2 規劃發布 PR #100）、S0.2（`ADR-0051` advisory-serving authority + `AMD-2026-07-21-01`，advisory 單調 `NO_OP|VETO|SIZE_DOWN`、A9 永久禁 broker/order）收口。S0.3 source（7 個 `aiml_gate_receipts` schema、fail-closed validator、Registry/router/closure 整合、`terminal_receipt_sink_v1` contract-only）經 7-role 對抗審核（E2-P1 bind changed governance file + E4-P1×3 lock crown-jewel invariants 修復後複驗全 PASS）。獨立 Codex review 揪出 3 個 P1 forge-resistance 缺口（reviewer binding 自報未綁 authenticated fragment、無 reviewed→merge ancestry、read-only finalization 被迫帶 writer-lease），依 PA 最小相容設計全修（routing 扇入 7 強制 reviewer 重用既有 `validate_execution_attestations`；`SourceManifestVerifier` 強制 `git merge-base --is-ancestor`；`session_attempt_v1` phase-conditional lease），CC/E3/E2 複審 PASS。merge PR #104 `b945fe0f8`。截至本段日期，`program_adoption_receipt_v1` 仍待 Linux trusted-host；其後已完成，終態見上方 2026-07-22 記錄。
 
 ## Development-Agent Governance
 

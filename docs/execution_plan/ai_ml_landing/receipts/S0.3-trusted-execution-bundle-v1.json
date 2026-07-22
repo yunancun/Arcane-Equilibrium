@@ -1,0 +1,28 @@
+{
+  "algorithm": "SSH-ED25519",
+  "context_artifact_digest": "sha256:4716fe6c9f5da126b708fc8e0daf5ea3b7b44585439f258ca74bcdbe767a512b",
+  "dag_digest": "sha256:d1b4f38d2978af4aefbe31ce46c1db39705fa7b1c8e2c9b529337d6fda4f57d4",
+  "entries": [
+    {
+      "artifact_digest": "sha256:760cca561941ad1da409f275a12ae4367310a839b4d4271bd2327e86e5357d81",
+      "expires_at": "2026-07-22T00:57:03.235233Z",
+      "kind": "context_artifact_v1",
+      "observed_at": "2026-07-22T00:47:03.235233Z",
+      "subject_digest": "sha256:4716fe6c9f5da126b708fc8e0daf5ea3b7b44585439f258ca74bcdbe767a512b"
+    },
+    {
+      "artifact_digest": "sha256:cf531fdd405813540b4d7f3d214a5ea799ab858778a7aeb53a37300854ef1b43",
+      "expires_at": "2026-07-22T00:57:03.235233Z",
+      "kind": "workflow_wave_record_v1",
+      "observed_at": "2026-07-22T00:47:03.235233Z",
+      "subject_digest": "sha256:a16ee0200ae647a5a3914da3db6a5360d8d40fea52111d3936bdd1c4b91497ab"
+    }
+  ],
+  "expires_at": "2026-07-22T00:57:03.235233Z",
+  "issued_at": "2026-07-22T00:47:03.235233Z",
+  "schema_version": "trusted_execution_bundle_v1",
+  "signature_namespace": "arcane-equilibrium-aiml-s03",
+  "signer_fingerprint": "SHA256:uGJ9veN7PoE6BBgfsSP2aiMndrwgbt7o/7/YfdzNzCQ",
+  "signer_identity": "aiml-s03-operator-v1",
+  "task_contract_digest": "sha256:8c48cb7af8451ae55600a7379b3dd6ae67a67fa2a863943894b9cc24df55a17c"
+}

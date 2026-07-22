@@ -2,15 +2,21 @@
 
 **Plan ID**: `AIML-LONG-LIVED-LANDING-V2`
 **Original date**: 2026-07-19
-**Revised**: 2026-07-20
+**Revised**: 2026-07-22
 **Planning baseline**: `b486c0718d1c26820cdb6308cccf74c686547b22`
-**Current source drift at final document review**: read-only local tracking ref
-`origin/main=96d26245068cbfbc8d60e73fb8eb82c4109b0d40`; this worktree is seven
-commits behind and has an unintegrated `TODO.md` collision surface. Neither ref
-is runtime identity.
+**Adopted source lineage**: reviewed head
+`1a933fcc28e9f7341e023b5d401c479957c14c5f`, merged as
+`fed223bebd278c50b0ab3330980e66441a30c9ed`; neither ref is runtime identity.
 **Owner**: PM
 **Execution mode**: bounded Sessions and Sprints, not an autonomous Codex loop
-**Adoption state**: `DESIGNED_NOT_ADOPTED / PROGRAM_ADOPTION_REQUIRED`
+**Adoption state**: `PROGRAM_ADOPTED` (S0 closed; S1 ready; source adoption only)
+**Adoption receipt**:
+`docs/execution_plan/ai_ml_landing/receipts/S0.3-program-adoption-receipt-v1.json`
+(`sha256:1a124bcaebb741a69c97e37a828e5b85c9b6499cdf053e8ef62451448878f93b`)
+**Finalization evidence**: producer-signed
+`S0.3-program-adoption-finalization-attestation-v1.json` and signed
+`S0.3-trusted-execution-bundle-v1.json` in the same receipts directory; the
+adopted source trust root verifies both SSHSIG sidecars.
 **Evidence**:
 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-19--ai_ml_true_state_and_engineering_plan.md`
 and
@@ -23,9 +29,11 @@ and
 Completing V1 LR0-LR6 and ML0-ML8 would **not** guarantee AI/ML engineering
 landing. V1 correctly rejected source/tests/migrations as runtime proof, but it
 still assumed missing effect capabilities and stopped too early at shadow
-serving. The following omissions are non-bypassable:
+serving. At the 2026-07-20 re-audit, the following omissions were
+non-bypassable:
 
-1. the plan is not yet adopted in canonical `main`;
+1. the plan had not yet been adopted in canonical `main` (closed by S0.3 on
+   2026-07-22; all remaining items continue through S1-S8);
 2. direct `psql` is denied and no approved local-socket/read-only-identity
    adapter currently exists;
 3. generic deploy apply is unconditionally disabled and does not model all AIML
@@ -774,7 +782,8 @@ failure/delivery. This accepts V2 as a complete conditional engineering plan;
 it does not assert that any Session has executed or that an eligible/profitable
 candidate exists.
 
-PM disposition remains planning-only: `ACCEPT_V2_FOR_PROGRAM_ADOPTION`. It does
-not pre-approve a commit, merge, PG query, deploy, restart, credential rotation,
-retention apply, broker contact or order. Canonical adoption is the first
-implementation action after final document review.
+At final document review, PM disposition was planning-only:
+`ACCEPT_V2_FOR_PROGRAM_ADOPTION`. Canonical adoption subsequently completed on
+2026-07-22 through the S0.3 trusted-host receipt. That receipt still does not
+pre-approve a PG query, deploy, restart, credential rotation, retention apply,
+broker contact or order; those remain separately governed S1-S8 effects.
