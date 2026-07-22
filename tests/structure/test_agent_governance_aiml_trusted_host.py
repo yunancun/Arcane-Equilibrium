@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import inspect
 import json
 import os
@@ -1053,3 +1054,57 @@ def test_normative_docs_bind_trusted_finalizer_operator_interface() -> None:
         assert not missing, (
             f"{relative_path} missing trusted-finalizer contract: {missing}"
         )
+
+
+def test_persisted_s03_finalization_evidence_is_independently_verifiable() -> None:
+    from aiml_gate_receipt_validator import (  # type: ignore[import-not-found]
+        artifact_self_digest,
+    )
+
+    evidence_root = ROOT / "docs/execution_plan/ai_ml_landing/receipts"
+    receipt_path = evidence_root / "S0.3-program-adoption-receipt-v1.json"
+    attestation_path = (
+        evidence_root / "S0.3-program-adoption-finalization-attestation-v1.json"
+    )
+    attestation_signature_path = Path(str(attestation_path) + ".sig")
+    bundle_path = evidence_root / "S0.3-trusted-execution-bundle-v1.json"
+    bundle_signature_path = Path(str(bundle_path) + ".sig")
+
+    receipt_bytes = receipt_path.read_bytes()
+    receipt = json.loads(receipt_bytes)
+    attestation_bytes = attestation_path.read_bytes()
+    attestation = json.loads(attestation_bytes)
+    attestation_signature = attestation_signature_path.read_bytes()
+    bundle = json.loads(bundle_path.read_bytes())
+    bundle_signature = bundle_signature_path.read_bytes()
+    bound = attestation["bound_evidence"]
+
+    assert host._verify_execution_signature(bundle, bundle_signature)
+    assert host._verify_ssh_signature(
+        attestation_bytes,
+        attestation_signature,
+        public_key=host.TRUSTED_EXECUTION_PUBLIC_KEY,
+    )
+    assert bound["trusted_execution_bundle_canonical_digest"] == (
+        host.canonical_digest(bundle)
+    )
+    assert bound["trusted_execution_bundle_signature_sha256"] == (
+        "sha256:" + hashlib.sha256(bundle_signature).hexdigest()
+    )
+    assert bound["program_adoption_receipt_file_sha256"] == (
+        "sha256:" + hashlib.sha256(receipt_bytes).hexdigest()
+    )
+    assert bound["program_adoption_receipt_self_digest"] == (
+        artifact_self_digest(receipt)
+    )
+    assert receipt["self_digest"] == bound["program_adoption_receipt_self_digest"]
+    assert attestation["reviewed_head"] == receipt["reviewed_head"]
+    assert attestation["merge_head"] == receipt["merge_head"]
+    assert attestation["authority_limits"] == receipt["authority_limits"]
+    assert attestation["finalization_result"] == {
+        "errors": [],
+        "execution_attestation_verified": True,
+        "github_policy_verified": True,
+        "source_manifest_verified": True,
+        "status": "PASS",
+    }

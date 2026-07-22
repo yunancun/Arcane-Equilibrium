@@ -1,0 +1,276 @@
+{
+  "adoption_id": "sha256:0f232a46df35bedbd14ee3b3450e1eb4948c8f25b1e4b16e45bce513aa8200dc",
+  "attempt": 2,
+  "attempt_phase": "POST_MERGE_FINALIZATION",
+  "authority_limits": {
+    "broker_authority_granted": false,
+    "deploy_authority_granted": false,
+    "direct_model_authority_granted": false,
+    "migration_authority_granted": false,
+    "ml5_implementation_authority_granted": false,
+    "ml6_implementation_authority_granted": false,
+    "order_authority_granted": false,
+    "postgres_authority_granted": false,
+    "runtime_authority_granted": false,
+    "source_adoption_only": true
+  },
+  "cohort_epoch": "PROGRAM",
+  "dependency_receipts": [
+    {
+      "receipt_digest": "sha256:8fc9417f984025deabdc1b83ace95921ccfff1acb26a1b29243fc0a0a5ba79ad",
+      "session_id": "S0.1"
+    },
+    {
+      "receipt_digest": "sha256:0115dbd3dc62d84e183aae5a28cbfd252eb45ecee51a652d8a4a155f14dfb41a",
+      "session_id": "S0.2"
+    }
+  ],
+  "document_manifest": [
+    {
+      "digest": "sha256:af05ddd53623e1e52d9854397761d482bb5b6ce009f904a41e5fda2fd044d1ce",
+      "path": "TODO.md"
+    },
+    {
+      "digest": "sha256:5b2ba472be0f2b4bd269d7d783bfa294a3f3d9b2e8b4466b4460e289afa9c9bc",
+      "path": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-19--ai_ml_true_state_and_engineering_plan.md"
+    },
+    {
+      "digest": "sha256:72dda50e4c7d877008a7bdebd89fafda770e82f22796656e6946501ba7431e10",
+      "path": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-20--ai_ml_completion_coverage_and_delivery_audit.md"
+    },
+    {
+      "digest": "sha256:d8a81e2dd9ef0600af136850519a2aa5b02b2e195943b27814dd0e796494847a",
+      "path": "docs/CLAUDE_CHANGELOG.md"
+    },
+    {
+      "digest": "sha256:6adf5c1164eb217e24263b77fbef520f392ea37eaac3cf9194f0276d1ccf4576",
+      "path": "docs/_indexes/document_index.md"
+    },
+    {
+      "digest": "sha256:b600618a01e54f81493817b54d78e9dbe9db516e87ef94a3979ed0dfadcc4e99",
+      "path": "docs/_indexes/initiative_index.md"
+    },
+    {
+      "digest": "sha256:f8df5d1860258869a9bd4610c08e114925215480cfa92a956427c6ae5c597717",
+      "path": "docs/adr/0049-scanner-driven-alr-operational-shadow.md"
+    },
+    {
+      "digest": "sha256:0fd17647ba1d0670cca7f9fea1526dc4f2acd41bd5f51264a8e649b621d38916",
+      "path": "docs/adr/0050-development-agent-governance.md"
+    },
+    {
+      "digest": "sha256:7d8780fbc790f61e9ef1fdbd4cc601d12443f38f76d8fe0d08bff5e09748e805",
+      "path": "docs/adr/0051-registry-authorized-advisory-model-serving.md"
+    },
+    {
+      "digest": "sha256:62c2337d4cbfe1f632ca3105ba13454f66f760b998c4ca94b098558af9c2370e",
+      "path": "docs/agents/ai-ml-landing-delivery-protocol.md"
+    },
+    {
+      "digest": "sha256:6b3b33f4018ed374552dc94316a985be863984e4abf63aefa4e89a243d17c402",
+      "path": "docs/agents/development-agent-governance.md"
+    },
+    {
+      "digest": "sha256:7d8d023865995864cf2e5dd5cc0d5009d8bcbd2dc7591eead0923ecceeb8c263",
+      "path": "docs/execution_plan/2026-07-19--ai_ml_long_lived_repair_and_landing_plan.md"
+    },
+    {
+      "digest": "sha256:9a151902b8df065ec744c10acd23c1cf5b1aaeb382b5d57b6ad1d65cfb6ab60e",
+      "path": "docs/execution_plan/ai_ml_landing/PROGRESS.md"
+    },
+    {
+      "digest": "sha256:23398545237c38774f63412d6691d18b15358634a27210e03381101d566a7cbc",
+      "path": "docs/governance_dev/SPECIFICATION_REGISTER.md"
+    },
+    {
+      "digest": "sha256:488db0539c39c8cf35dc5e58322f668442ce50b9969b9096a3267d1279ba1636",
+      "path": "docs/governance_dev/amendments/2026-07-21--AMD-2026-07-21-01-aiml-advisory-serving-authority.md"
+    }
+  ],
+  "finalization_attempt_id": "sha256:34e939c60bf10b51a5907e8ed5afe4d261a882a9701c287d26fece594d4408cc",
+  "github_policy_attestation_digest": "sha256:f6e234c36c9c9c7e56732821d4f7473b4b16b752bba249344318826adda12fee",
+  "governance_manifest": [
+    {
+      "digest": "sha256:93297d916019f38eccc7125dd80758e68774d45c3d32f66bea2bf49bee7f1846",
+      "path": ".codex/agent_registry_v1.json"
+    },
+    {
+      "digest": "sha256:de7def45c830f229b137eec021015b33c828117ca18fdf0986da3db31f1c0182",
+      "path": "helper_scripts/maintenance_scripts/agent_governance.py"
+    },
+    {
+      "digest": "sha256:559229d18dd7d7f4dcee8474768f04470908dcb07257bba014c352a303bca22b",
+      "path": "helper_scripts/maintenance_scripts/agent_governance_aiml_adoption.py"
+    },
+    {
+      "digest": "sha256:d2b3bbd0586e966952348ba59209bc25a69487039fbe579a6618f550758ff03a",
+      "path": "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_common.py"
+    },
+    {
+      "digest": "sha256:4275d372de07cec54c2c833a14aeb5d66d01d92292ee4279a769ffe375899016",
+      "path": "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_git.py"
+    },
+    {
+      "digest": "sha256:a54b6961706125c722d9d85c8c4951e47fbfa00355b9e5d42b65de9cf398b46f",
+      "path": "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_github.py"
+    },
+    {
+      "digest": "sha256:7271268cbd5ad44c940150e0eeff48320695c438f536b4a666fd00b6f6b333c9",
+      "path": "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_github_pr.py"
+    },
+    {
+      "digest": "sha256:997a1a443c9d03e40fe9e194d95ce70267ddfc1cd2ba69011574a586d25f8019",
+      "path": "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_host.py"
+    },
+    {
+      "digest": "sha256:f244e9e46f0f6afa7b67c0a1e0c7caa58854b5ea69a746b289ed48ff230138d5",
+      "path": "helper_scripts/maintenance_scripts/agent_governance_closure.py"
+    },
+    {
+      "digest": "sha256:772961f0f1d1e770dafa8cf19749b6b2ba025103b09accfc97e58f000f371b01",
+      "path": "helper_scripts/maintenance_scripts/agent_governance_closure_time.py"
+    },
+    {
+      "digest": "sha256:6c1ebac266ce1fa14a484429b8fb47bcbe5b27186d29ccd21cbe26637803cd08",
+      "path": "helper_scripts/maintenance_scripts/agent_governance_closure_inputs.py"
+    },
+    {
+      "digest": "sha256:74894be4271a609eba6f195d633d75782986a311c27935cf3f77f70b45f0f54b",
+      "path": "helper_scripts/maintenance_scripts/agent_governance_evidence.py"
+    },
+    {
+      "digest": "sha256:f0bde5bccad17aeb386ceaeeea366551c0c046bb552b8add9d0d9f40cb52660a",
+      "path": "helper_scripts/maintenance_scripts/agent_governance_execution.py"
+    },
+    {
+      "digest": "sha256:690aaf340066a9b7088aa0d5880367aefc7b8391d92104cc8de22aef45045e72",
+      "path": "helper_scripts/maintenance_scripts/agent_governance_registry.py"
+    },
+    {
+      "digest": "sha256:e003859c6bb9a382c38efb9aaa6b1b3136c75e0aebd96c0ac7dd76fbcc1d7d62",
+      "path": "helper_scripts/maintenance_scripts/agent_governance_routing.py"
+    },
+    {
+      "digest": "sha256:5a6b4f7f1b94ff93a597bdcbe96765f5cd1669c3c01664a6a288b58c922dcb20",
+      "path": "helper_scripts/maintenance_scripts/agent_governance_vocabulary.py"
+    },
+    {
+      "digest": "sha256:6e7a10c085ca11e4791ffab71f87dae650e30f49ad49eff98904074f364cbd05",
+      "path": "program_code/ml_training/aiml_gate_receipt_validator.py"
+    },
+    {
+      "digest": "sha256:cdcaf9d93c08991231e8c4c2acb99487f6c856ea164a3a8d00b89e75a918fb2c",
+      "path": "program_code/ml_training/tests/test_aiml_gate_receipt_validator.py"
+    },
+    {
+      "digest": "sha256:de178127ed3021fc4a72a606bd99812440433338d7ca33f15d03febd5f6aed50",
+      "path": "tests/structure/test_agent_governance_aiml_adoption.py"
+    },
+    {
+      "digest": "sha256:02bf263678f5854b87c034b2eca672f04fa60e98c1d7154034a4eebb89d828be",
+      "path": "tests/structure/test_agent_governance_aiml_trusted_host.py"
+    }
+  ],
+  "issued_at": "2026-07-22T00:44:13.317296Z",
+  "merge_head": "fed223bebd278c50b0ab3330980e66441a30c9ed",
+  "program_id": "AIML-LONG-LIVED-LANDING-V2",
+  "receipt_dependency_graph_digest": "sha256:fe7f6bb01ebc71bd0377b179e514e30a6828c4e5d29ec1c7e0c8518e808493d0",
+  "required_effect_classification_digest": "sha256:e9c5fa6b3bf9635e415c435ac1468f673c7ff5555bdcab1eb118381b9ad4007e",
+  "review_bindings": [
+    {
+      "fragment_id": "frag-constitutional_gate",
+      "node_id": "constitutional_gate",
+      "role": "CC",
+      "verdict": "PASS"
+    },
+    {
+      "fragment_id": "frag-independent_review",
+      "node_id": "independent_review",
+      "role": "E2",
+      "verdict": "PASS"
+    },
+    {
+      "fragment_id": "frag-security_gate",
+      "node_id": "security_gate",
+      "role": "E3",
+      "verdict": "PASS"
+    },
+    {
+      "fragment_id": "frag-regression",
+      "node_id": "regression",
+      "role": "E4",
+      "verdict": "PASS"
+    },
+    {
+      "fragment_id": "frag-data_ml_review",
+      "node_id": "data_ml_review",
+      "role": "MIT",
+      "verdict": "PASS"
+    },
+    {
+      "fragment_id": "frag-business_acceptance",
+      "node_id": "business_acceptance",
+      "role": "QA",
+      "verdict": "PASS"
+    },
+    {
+      "fragment_id": "frag-docs_integrity_review",
+      "node_id": "docs_integrity_review",
+      "role": "R4",
+      "verdict": "PASS"
+    }
+  ],
+  "review_generation": {
+    "dirty_diff_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "source_head": "fed223bebd278c50b0ab3330980e66441a30c9ed",
+    "untracked_relevant_hash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  "review_generation_digest": "sha256:5c029f5bea22be43d49e857a77229a4e7270c61c305b9f00146fa8ec7b72f176",
+  "reviewed_head": "1a933fcc28e9f7341e023b5d401c479957c14c5f",
+  "schema_manifest": [
+    {
+      "digest": "sha256:9a9ec7828da73cff6441f278d84830e02d12b2cdf34b61df9f608ad811f3b69f",
+      "path": "program_code/ml_training/schemas/aiml_gate_receipts/aiml_receipt_dependency_graph_v1.schema.json"
+    },
+    {
+      "digest": "sha256:c92e4ed21c77286081df15742c37120c543a2b252f6faa63fa858ce6141ceccd",
+      "path": "program_code/ml_training/schemas/aiml_gate_receipts/aiml_required_effect_classification_v1.schema.json"
+    },
+    {
+      "digest": "sha256:f1941496b40cc0a29347ec5f2e068f37c2d1c340ef4fc997e8da8dd463131905",
+      "path": "program_code/ml_training/schemas/aiml_gate_receipts/github_repository_policy_attestation_v1.schema.json"
+    },
+    {
+      "digest": "sha256:b3eeec0f6bd1c4af5bfd6a0d948023aa5d1a5fe11cdb2c6f49904abf58ebebd4",
+      "path": "program_code/ml_training/schemas/aiml_gate_receipts/landing_scope_v1.schema.json"
+    },
+    {
+      "digest": "sha256:29c12946bc7881f301ea52c38de0a4dc8fe3dc5fe24cd2959b4ca424ab9800bb",
+      "path": "program_code/ml_training/schemas/aiml_gate_receipts/program_adoption_receipt_v1.schema.json"
+    },
+    {
+      "digest": "sha256:a8142666afb67938abd53507a724c3dc82f05611ea3b084948227d3c2d360a10",
+      "path": "program_code/ml_training/schemas/aiml_gate_receipts/session_attempt_v1.schema.json"
+    },
+    {
+      "digest": "sha256:7a05c587d9c4f8122cb8b7242dd7cbccf4004866568502c65f5a53843c97058a",
+      "path": "program_code/ml_training/schemas/aiml_gate_receipts/terminal_receipt_sink_v1.schema.json"
+    }
+  ],
+  "schema_version": "program_adoption_receipt_v1",
+  "scope_ref": {
+    "kind": "PROGRAM",
+    "landing_scope_id": null
+  },
+  "self_digest": "sha256:1a124bcaebb741a69c97e37a828e5b85c9b6499cdf053e8ef62451448878f93b",
+  "session_id": "S0.3",
+  "source_build_attempt_id": "sha256:31bb72a275039de155a201c23a2c2b9964fd6bf9b45c551ed61f28948e3ad06d",
+  "terminal_sink_contract_digest": "sha256:9c02cf4bfcf5f97dc455bded87350c9546456d21ef20d0888bd2ef2cde401eb2",
+  "terminal_state": "PROGRAM_ADOPTED",
+  "validator_binding": {
+    "implementation_digest": "sha256:6e7a10c085ca11e4791ffab71f87dae650e30f49ad49eff98904074f364cbd05",
+    "kind": "NON_CALL_VALIDATOR",
+    "node_id": "aiml_program_adoption_validator"
+  },
+  "validity_class": "IMMUTABLE_CONSUMED_EFFECT"
+}
