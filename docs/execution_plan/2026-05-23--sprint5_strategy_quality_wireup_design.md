@@ -971,7 +971,7 @@ Phase A 與 Sprint 5+ §4.2 4 carry-over（BybitPrivateWs supervisor 改造 / Po
 ### 6.5 與 Sprint 5+ §4.3 其他 5 follow-up 並行
 
 - §4.3.2 AC-7 cargo bench m3_emitter_cold_start fixture — file scope `benches/` 新 → 0 conflict
-- §4.3.3 LOC peak 切檔 — 5 file 切；本 spec file `strategy_quality_probe_impl.rs (新)` < 200 LOC，自身不 split
+- §4.3.3 LOC peak 切檔 — 5 file 切；本 spec file `strategy_quality_probe_impl.rs (新)` 工程估算約 200 LOC（non-blocking），現行唯一 file-size acceptance 為 ≤ 2000 LOC（含 2000），不得僅因大小強拆，因此自身不因行數強制 split
 - §4.3.4 F-4 correlation_avg_pairwise real calculator — risk_envelope_probe_impl.rs scope → 0 conflict
 - §4.3.5 Track B PipelineThroughput real wire-up — pipeline_throughput.rs scope → 0 conflict
 - §4.3.6 Track C writer_queue_depth / pool_wait_p95 — database_pool.rs scope → 0 conflict

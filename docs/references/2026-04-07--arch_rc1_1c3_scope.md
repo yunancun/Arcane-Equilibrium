@@ -44,7 +44,9 @@ Reduce `program_code/exchange_connectors/bybit_connector/control_api_v1/app/risk
 
 ---
 
-## 3. Proposed New `RiskViewClient` (≤ 200 lines)
+## 3. Proposed New `RiskViewClient`（現行檔案大小驗收：≤ 2000 行，含 2000）
+
+> 約 200 行是非阻擋設計估算，不是驗收門檻；不得僅因檔案大小強制拆分。
 
 ```python
 class RiskViewClient:
@@ -140,7 +142,7 @@ class RiskViewClient:
 
 ## 7. DoD
 
-- [ ] `risk_manager.py` ≤ 200 lines (or replaced by re-export shim)
+- [ ] `risk_manager.py` 符合現行唯一檔案大小驗收 ≤ 2000 行（含 2000；不得僅因大小強拆），或由 re-export shim 取代；約 200 行僅為非阻擋設計估算，不是 DoD gate
 - [ ] `grep -r "_save_operator_config\|json.dump.*risk" program_code/` returns 0
 - [ ] All Python tests pass (currently 3,348+)
 - [ ] GUI Risk-tab loads + edits forward through IPC + values reflect Rust state

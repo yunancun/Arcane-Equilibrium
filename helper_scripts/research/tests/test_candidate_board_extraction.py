@@ -24,6 +24,7 @@ from cost_gate_learning_lane.slippage_quantile_artifact import (
 
 
 AS_OF_DATE = dt.date(2026, 7, 4)
+MAX_FILE_LINES = 2_000
 
 
 def _legacy_row(*, attempt_id: str = "legacy-1") -> dict[str, object]:
@@ -278,7 +279,7 @@ def test_candidate_board_validation_contract_is_extracted_behind_compatible_faca
         validation.LEARNING_CANDIDATE_BOARD_SCHEMA_VERSION
     )
     source_lines = Path(candidate_board.__file__).read_text(encoding="utf-8").splitlines()
-    assert len(source_lines) < 1_500
+    assert len(source_lines) <= MAX_FILE_LINES
     assert not any(
         line.startswith("def _validate_") or line.startswith("def validate_learning_")
         for line in source_lines
@@ -312,7 +313,7 @@ def test_projection_and_review_contract_are_extracted_behind_line_caps() -> None
             .read_text(encoding="utf-8")
             .splitlines()
         )
-        < 2_000
+        <= MAX_FILE_LINES
     )
     assert (
         len(
@@ -320,7 +321,7 @@ def test_projection_and_review_contract_are_extracted_behind_line_caps() -> None
             .read_text(encoding="utf-8")
             .splitlines()
         )
-        < 1_500
+        <= MAX_FILE_LINES
     )
 
 
