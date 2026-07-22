@@ -210,6 +210,8 @@ effective ruleset/required checks。`github_capture_projection_v2` 進一步 exa
 associated PR、merged PR detail、two-parent merge commit 與 paginated
 `check-runs?filter=latest`；PR head/merge/base/repository 必須等於 receipt lineage，每個 ruleset
 required `(context,integration_id)` 必須唯一 completed/success 且在 `merged_at` 前完成。
+GitHub REST 固定使用仍保留 merged-PR `merge_commit_sha` 投影的 `2022-11-28` API version；
+不得任意前推版本而令 live response 與 reviewed projection contract 分離。
 Merge commit 的第二個 parent 必須是 exact reviewed head；第一個 parent 只要求為合法且互異的
 base parent，不能把 PR API 的 `base.sha` 誤當成歷史 pre-merge parent。Check Run 的
 `pull_requests` 可為空（exact `head_sha` 是權威綁定）；若非空則必須包含該 exact PR。

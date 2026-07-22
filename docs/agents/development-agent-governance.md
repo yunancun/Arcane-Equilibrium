@@ -306,6 +306,8 @@ packet、bundle、detached signature 與 credential bytes；caller 不能注入 
 Git/GitHub verifier、transport、API origin、CA roots 或 trust key。
 Pipe credential 是單一 `newline-framed` frame（closed pipe 仍可用 EOF 結束），且 reader 必須
 在固定 deadline 內完成；保留 write end 不得令 finalizer 無限等待 EOF。
+GitHub transport 固定 `2022-11-28` REST API version，以維持 merged PR 的
+`merge_commit_sha` projection；version drift 必須先經 live-shape compatibility review。
 
 Execution bundle 的 reviewed source trust root 固定為 identity
 `aiml-s03-operator-v1`、Ed25519 fingerprint
