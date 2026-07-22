@@ -3,7 +3,7 @@ REF-20 P2b-T2 route_helpers — replay_routes.py 支援工具。
 
 MODULE_NOTE (EN):
     Wave 4 R20-P2b-T2 split out of replay_routes.py to keep the routes
-    module under the CLAUDE.md §九 1500 LOC hard cap. This module owns:
+    module within the CLAUDE.md §九 inclusive 2000 LOC ceiling. This module owns:
 
       - replay_runner binary path resolution (env override + fallback chain)
       - per-run artifact output directory resolution (cross-platform)
@@ -38,8 +38,8 @@ MODULE_NOTE (EN):
         replay.report_artifacts writes belong to canary_writer.py).
 
 MODULE_NOTE (中):
-    Wave 4 R20-P2b-T2 從 replay_routes.py 抽出，讓 routes 模組保持在
-    CLAUDE.md §九 1500 LOC 硬上限以下。本 module 擁有：
+    Wave 4 R20-P2b-T2 從 replay_routes.py 抽出，讓 routes 模組維持在
+    CLAUDE.md §九 inclusive 2000 LOC 上限（≤ 2000）內。本 module 擁有：
 
       - replay_runner binary 路徑解析（env override + fallback 鏈）
       - per-run artifact 輸出目錄解析（跨平台）

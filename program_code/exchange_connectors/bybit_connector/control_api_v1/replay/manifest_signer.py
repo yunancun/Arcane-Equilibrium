@@ -710,7 +710,7 @@ def resolve_verify_key_source(
 
     REF-20 Sprint A R2-T3 (2026-05-04). Centralizes the precedence
     logic so ``post_manifest_verify`` route handler stays thin
-    (CLAUDE.md §九 1500 LOC cap on ``replay_routes.py``). Behavior:
+    (CLAUDE.md §九 inclusive 2000 LOC ceiling on ``replay_routes.py``). Behavior:
 
       1. ``test_key_hex`` non-empty → return its decoded bytes +
          ``"test_key_path"`` (caller supplies fingerprint).

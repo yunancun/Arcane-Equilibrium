@@ -2,15 +2,15 @@
 
 模組目的 / Module purpose:
     為 ``mlde_demo_applier._fetch_pending`` 提供 forward-compat schema 探測
-    + WHERE-fragment 構造 helper。獨立檔案以避免 ``mlde_demo_applier.py``
-    超出 CLAUDE.md §九 1500 LOC 硬上限（pre-existing baseline 1541 LOC 屬
-    exception clause 範圍，本 task 不擴大檔身）。
+    + WHERE-fragment 構造 helper。獨立檔案使 ``mlde_demo_applier.py`` 維持在
+    CLAUDE.md §九 inclusive 2000 LOC 上限（≤ 2000）內；pre-existing baseline
+    1541 LOC 低於現行上限且不屬例外，本 task 不擴大檔身。
 
     Provide forward-compat schema probe + WHERE-fragment builder for
     ``mlde_demo_applier._fetch_pending``. Split out to keep
-    ``mlde_demo_applier.py`` under the CLAUDE.md §九 1500 LOC hard cap
-    (pre-existing baseline 1541 LOC sits inside the exception clause; this
-    task must not grow the file).
+    ``mlde_demo_applier.py`` within the CLAUDE.md §九 inclusive 2000 LOC
+    ceiling. The pre-existing 1541 LOC baseline is below the current ceiling,
+    is not an exception, and this task must not grow the file.
 
 REF-20 V3 §4.2 P4-S11 contract:
     1. evidence_source_tier IN ('real_outcome', 'calibrated_replay',

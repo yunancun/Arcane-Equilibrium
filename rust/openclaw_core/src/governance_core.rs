@@ -44,8 +44,9 @@
 //! AMD-2026-05-02-01 Track H E-4 round-2 retrofit (E2 verdict HIGH-1, 2026-05-03):
 //! AMD-2026-05-02-01 Track H E-4 第二輪（E2 verdict HIGH-1，2026-05-03）：
 //! - Emit-side types/helpers extracted to `governance_emit` — keeps facade
-//!   under 1500 LOC hard cap; decouples parallel E1 retrofit on this file.
-//! - emit 端類型/輔助抽至 `governance_emit` — 控 LOC 在 1500 hard cap，解耦並行 E1。
+//!   within the inclusive 2000 LOC ceiling; decouples parallel E1 retrofit on this file.
+//! - emit 端類型/輔助抽至 `governance_emit` — 將 LOC 控制在 inclusive 2000 上限
+//!   （≤ 2000）內，解耦並行 E1。
 //! - `engine_mode_tag` per-instance replaces global env-only read; each pipeline
 //!   injects via `set_engine_mode_tag()` (called from
 //!   `pipeline_ctor.rs::set_endpoint_env`). Fallback env var → "unknown".

@@ -4,8 +4,8 @@ REF-20 Sprint A R2 — replay.experiments 註冊表輔助（Wave R2-T1）。
 MODULE_NOTE (EN):
     Sprint A R2-T1 (2026-05-04) extraction. Owns the
     ``POST /api/v1/replay/experiments/register`` business logic so that
-    ``app/replay_routes.py`` can keep its thin route handler under the
-    ``CLAUDE.md §九`` 1500 LOC hard cap. The route handler in
+    ``app/replay_routes.py`` can keep its thin route handler within the
+    ``CLAUDE.md §九`` inclusive 2000 LOC ceiling. The route handler in
     ``replay_routes.py`` only does ``_require_replay_write(actor)`` then
     delegates here via ``asyncio.to_thread``.
 
@@ -50,7 +50,8 @@ MODULE_NOTE (EN):
 MODULE_NOTE (中):
     Sprint A R2-T1（2026-05-04）抽出。擁有 ``POST /api/v1/replay/
     experiments/register`` 業務邏輯，讓 ``app/replay_routes.py`` 的薄
-    route handler 守住 ``CLAUDE.md §九`` 1500 LOC 硬上限。replay_routes
+    route handler 維持在 ``CLAUDE.md §九`` inclusive 2000 LOC 上限
+    （≤ 2000）內。replay_routes
     handler 只跑 ``_require_replay_write(actor)`` 然後透過
     ``asyncio.to_thread`` 委派至此。
 

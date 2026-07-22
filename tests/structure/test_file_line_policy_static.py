@@ -1,4 +1,5 @@
 import ast
+import os
 import re
 from pathlib import Path
 
@@ -23,29 +24,101 @@ INACTIVE_TEST_PATH_COMPONENTS = {
     "target",
     "venv",
 }
-ACTIVE_POLICY_TEXT_ROOTS = (
+ACTIVE_POLICY_DOCUMENT_ROOTS = (
     ROOT / ".agents/skills",
     ROOT / ".claude/skills",
-    ROOT / "tests",
-    ROOT / "rust/openclaw_engine/src",
-    ROOT / "rust/openclaw_engine/tests",
-    ROOT / "program_code/exchange_connectors/bybit_connector/control_api_v1/app",
-    ROOT / "program_code/exchange_connectors/bybit_connector/control_api_v1/tests",
-    ROOT / "program_code/learning_engine",
-    ROOT / "helper_scripts/db/passive_wait_healthcheck",
     ROOT / "docs/execution_plan",
     ROOT / "docs/governance_dev",
     ROOT / "docs/references",
 )
-ACTIVE_POLICY_TEXT_FILES = (
+ACTIVE_POLICY_DOCUMENT_FILES = (
     ROOT / "CLAUDE.md",
     ROOT / "TODO.md",
     ROOT / "IBKR_TODO.md",
     ROOT / "docs/KNOWN_ISSUES.md",
     ROOT / "docs/_indexes/document_index.md",
-    ROOT / "helper_scripts/db/passive_wait_healthcheck.py",
 )
-ACTIVE_POLICY_TEXT_SUFFIXES = {".css", ".html", ".js", ".md", ".py", ".rs"}
+ACTIVE_SOURCE_TEXT_SUFFIXES = {
+    ".bash",
+    ".c",
+    ".cc",
+    ".cfg",
+    ".conf",
+    ".cpp",
+    ".css",
+    ".go",
+    ".h",
+    ".hpp",
+    ".html",
+    ".ini",
+    ".java",
+    ".js",
+    ".json",
+    ".jsx",
+    ".kt",
+    ".kts",
+    ".lua",
+    ".mjs",
+    ".php",
+    ".pl",
+    ".pm",
+    ".properties",
+    ".ps1",
+    ".py",
+    ".rb",
+    ".rs",
+    ".scala",
+    ".sh",
+    ".sql",
+    ".swift",
+    ".toml",
+    ".ts",
+    ".tsx",
+    ".xml",
+    ".yaml",
+    ".yml",
+    ".zsh",
+}
+ACTIVE_POLICY_DOCUMENT_SUFFIXES = ACTIVE_SOURCE_TEXT_SUFFIXES | {".md"}
+ACTIVE_SOURCE_TEXT_NAMES = {
+    "containerfile",
+    "dockerfile",
+    "gemfile",
+    "justfile",
+    "makefile",
+    "procfile",
+    "rakefile",
+}
+INACTIVE_POLICY_TEXT_PATH_COMPONENTS = {
+    ".cache",
+    ".git",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".tox",
+    ".venv",
+    "__pycache__",
+    "archive",
+    "archived",
+    "archives",
+    "dist",
+    "generated",
+    "historical",
+    "history",
+    "htmlcov",
+    "node_modules",
+    "site-packages",
+    "target",
+    "third-party",
+    "third_party",
+    "vendor",
+    "venv",
+}
+INACTIVE_REPO_SOURCE_ROOTS = (
+    ROOT / "docs",
+    ROOT / "memory",
+    ROOT / "sql/migrations",
+)
 CURRENT_FILE_LINE_LIMIT = 2_000
 
 _NUMBERED_FILE_LIMIT_PATTERNS = tuple(
@@ -65,7 +138,9 @@ _NUMBERED_FILE_LIMIT_PATTERNS = tuple(
         r"(?:cap|limit|threshold|warning|budget|上限|門檻|警告線|規則|約定)"
         r"[ \t]*(?:=|:|為|of)?[ \t]*(?P<limit>(?<![\w.])\d[\d_,]*(?![\w.]))",
         # An explicit comparator immediately before a file-line count.
-        r"(?:<=|<|≤)[ \t]*(?P<limit>(?<![\w.])\d[\d_,]*(?![\w.]))[ \t]*(?:\blines?\b|\bloc\b|行)",
+        r"(?:<=|<|≤)[ \t]*"
+        r"(?:(?:`{1,2})?CLAUDE\.md[ \t]+§[七九][ \t]+)?"
+        r"(?P<limit>(?<![\w.])\d[\d_,]*(?![\w.]))[ \t]*(?:\blines?\b|\bloc\b|行)",
         # Natural-language upper bounds immediately before a file-line count.
         r"(?:under|below|within|less[ \t]+than|低於|少於|不超過|上限為)[ \t]*"
         r"(?P<limit>(?<![\w.])\d[\d_,]*(?![\w.]))[ \t]*[- ]?[ \t]*(?:\blines?\b|\bloc\b|行)",
@@ -75,8 +150,8 @@ _NUMBERED_FILE_LIMIT_PATTERNS = tuple(
         r"(?:cap|limit|threshold|warning|budget)",
         # Section-scoped file policy, including compact "§九 N hard cap" prose.
         r"§[七九][^;\n]{0,40}?(?P<limit>(?<![\w.])\d[\d_,]*(?![\w.]))[ \t]*"
-        r"(?:-?[ \t]*(?:\blines?\b|\bloc\b|行))?[ \t]*"
-        r"(?:hard|soft|review/split|governance|治理|硬|軟)?[ \t]*"
+        r"(?:-?[ \t]*(?:\blines?\b|\bloc\b|行))?[ \t`]*"
+        r"(?:hard|soft|review/split|governance|治理|硬|軟)?[ \t`]*"
         r"(?:cap|limit|threshold|warning|budget|上限|門檻|警告線|規則|約定)",
         # Section-scoped policy with the number after the policy token.
         r"§[七九][^;\n]{0,40}?"
@@ -383,17 +458,84 @@ def _active_test_paths() -> list[Path]:
     )
 
 
+def _is_under(path: Path, root: Path) -> bool:
+    return path == root or root in path.parents
+
+
+def _has_inactive_policy_component(path: Path) -> bool:
+    return bool(
+        {part.casefold() for part in path.relative_to(ROOT).parts}
+        & INACTIVE_POLICY_TEXT_PATH_COMPONENTS
+    )
+
+
+def _is_active_source_text_path(path: Path) -> bool:
+    name = path.name.casefold()
+    is_named_source = name in ACTIVE_SOURCE_TEXT_NAMES or any(
+        name.startswith(f"{source_name}.")
+        for source_name in ACTIVE_SOURCE_TEXT_NAMES
+    )
+    return (
+        path.is_file()
+        and not path.is_symlink()
+        and not _has_inactive_policy_component(path)
+        and not any(_is_under(path, root) for root in INACTIVE_REPO_SOURCE_ROOTS)
+        and (
+            path.suffix.casefold() in ACTIVE_SOURCE_TEXT_SUFFIXES
+            or is_named_source
+        )
+    )
+
+
+def _repo_source_text_paths() -> set[Path]:
+    paths: set[Path] = set()
+    for directory, child_directories, filenames in os.walk(
+        ROOT,
+        topdown=True,
+        followlinks=False,
+    ):
+        directory_path = Path(directory)
+        child_directories[:] = [
+            child
+            for child in child_directories
+            if not _has_inactive_policy_component(directory_path / child)
+            and not any(
+                _is_under(directory_path / child, root)
+                for root in INACTIVE_REPO_SOURCE_ROOTS
+            )
+        ]
+        paths.update(
+            path
+            for filename in filenames
+            if _is_active_source_text_path(path := directory_path / filename)
+        )
+    return paths
+
+
+def _is_active_policy_document(path: Path) -> bool:
+    return (
+        path.is_file()
+        and not path.is_symlink()
+        and path.name.casefold() != "memory.md"
+        and path.suffix.casefold() in ACTIVE_POLICY_DOCUMENT_SUFFIXES
+        and not _has_inactive_policy_component(path)
+    )
+
+
 def _active_policy_text_paths() -> list[Path]:
     return sorted(
         {
-            *ACTIVE_POLICY_TEXT_FILES,
+            *_repo_source_text_paths(),
             *(
                 path
-                for root in ACTIVE_POLICY_TEXT_ROOTS
+                for path in ACTIVE_POLICY_DOCUMENT_FILES
+                if _is_active_policy_document(path)
+            ),
+            *(
+                path
+                for root in ACTIVE_POLICY_DOCUMENT_ROOTS
                 for path in root.rglob("*")
-                if path.is_file()
-                and path.suffix.casefold() in ACTIVE_POLICY_TEXT_SUFFIXES
-                and "__pycache__" not in path.parts
+                if _is_active_policy_document(path)
             ),
         }
     )
@@ -454,7 +596,7 @@ def _has_file_gate_context(line_text: str, path: Path) -> bool:
 
 
 def _numbered_file_policy_violations(source: str, path: Path) -> list[str]:
-    violations: list[str] = []
+    violations: list[tuple[int, int]] = []
     seen: set[tuple[int, int]] = set()
     for pattern_index, pattern in enumerate(_NUMBERED_FILE_LIMIT_PATTERNS):
         for match in pattern.finditer(source):
@@ -482,8 +624,11 @@ def _numbered_file_policy_violations(source: str, path: Path) -> list[str]:
             key = (line, limit)
             if key not in seen:
                 seen.add(key)
-                violations.append(f"{path}:{line}:numbered file limit {limit}")
-    return violations
+                violations.append(key)
+    return [
+        f"{path}:{line}:numbered file limit {limit}"
+        for line, limit in sorted(violations)
+    ]
 
 
 def test_current_file_line_policy_is_exactly_2000() -> None:
@@ -543,6 +688,8 @@ def test_text_detector_rejects_section_scoped_lower_file_limits_only() -> None:
             f"// §七 {lower_limit} 行硬上限",
             f"// keep file <= {lower_limit} lines under §九 policy",
             f"// §九 {lower_limit} hard cap",
+            f"// ``CLAUDE.md §九 {lower_limit} LOC`` hard cap",
+            f"// keep this file < CLAUDE.md §九 {lower_limit} LOC",
             f"preview_text(limit={timeout_ms})",
             f"setTimeout(refresh, {timeout_ms})",
             f"MAX_LINE_BYTES = {lower_limit}",
@@ -555,6 +702,8 @@ def test_text_detector_rejects_section_scoped_lower_file_limits_only() -> None:
         f"fixture.rs:2:numbered file limit {lower_limit}",
         f"fixture.rs:3:numbered file limit {lower_limit}",
         f"fixture.rs:4:numbered file limit {lower_limit}",
+        f"fixture.rs:5:numbered file limit {lower_limit}",
+        f"fixture.rs:6:numbered file limit {lower_limit}",
     ]
 
 
@@ -628,6 +777,56 @@ def test_active_policy_text_discovery_includes_only_mutable_docs() -> None:
         for path in paths
         for root in excluded_roots
     )
+
+
+def test_active_policy_text_discovery_covers_repo_source_and_excludes_artifacts() -> None:
+    paths = set(_active_policy_text_paths())
+    required_active_paths = {
+        ROOT
+        / "program_code/exchange_connectors/bybit_connector/control_api_v1/replay/route_helpers.py",
+        ROOT / "program_code/ml_training/mlde_demo_applier_evidence_filter.py",
+        ROOT / "rust/openclaw_core/src/governance_core.rs",
+        ROOT / "helper_scripts/research/cost_gate_learning_lane/candidate_board.py",
+        ROOT / "helper_scripts/mac_bootstrap_db.sh",
+        ROOT / "rust/openclaw_core/Cargo.toml",
+        ROOT / "sql/queries/w2_btc_alt_lead_lag_counterfactual.sql",
+        ROOT
+        / "program_code/exchange_connectors/bybit_connector/control_api_v1/Dockerfile",
+    }
+    inactive_components = {
+        ".cache",
+        ".git",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".tox",
+        ".venv",
+        "__pycache__",
+        "archive",
+        "archived",
+        "archives",
+        "dist",
+        "generated",
+        "historical",
+        "history",
+        "node_modules",
+        "site-packages",
+        "target",
+        "third-party",
+        "third_party",
+        "vendor",
+        "venv",
+    }
+
+    assert required_active_paths <= paths
+    assert len(paths) >= 3_000
+    assert not any(ROOT / "sql/migrations" in path.parents for path in paths)
+    assert not any(path.name.casefold() == "memory.md" for path in paths)
+    assert not any(
+        {part.casefold() for part in path.relative_to(ROOT).parts}
+        & inactive_components
+        for path in paths
+    )
+    assert not any(ROOT / "memory" in path.parents for path in paths)
 
 
 def test_all_active_python_tests_use_the_single_file_line_policy() -> None:
