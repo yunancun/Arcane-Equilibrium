@@ -362,13 +362,18 @@
       ]
     },
     "terminal_receipt_sink_v1": {
-      "status": "CONTRACT_ONLY",
+      "status": "declared_disposable_worm_emulation_implemented",
       "owner_session": "S1.2",
-      "authority": "terminal receipt append/readback is unavailable in S0.3",
-      "invariant": "no executable component or append path exists before S1.2",
+      "authority": "PM/operator approved terminal_receipt_append_intent_v1 for disposable local WORM emulation only; no external WORM destination and no production terminal append",
+      "invariant": "each append commits at most one immutable content-addressed record (chmod 0o444); idempotent dedup never rewrites a committed record; external_worm targets fail closed; readback ACK requires a distinct actor; no route_task node or closure effect binding is injected before S8.6",
       "contract_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/terminal_receipt_sink_v1.schema.json",
-      "implementation_paths": [],
-      "component_paths": []
+      "implementation_paths": [
+        "helper_scripts/maintenance_scripts/agent_governance_terminal_receipt_sink.py"
+      ],
+      "component_paths": [],
+      "intent_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/terminal_receipt_append_intent_v1.schema.json",
+      "receipt_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/terminal_receipt_append_result_v1.schema.json",
+      "readback_ack_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/terminal_receipt_readback_ack_v1.schema.json"
     }
   },
   "roles": {
