@@ -37,6 +37,12 @@ SCHEMA_FILES = {
     "terminal_receipt_readback_ack_v1": "terminal_receipt_readback_ack_v1.schema.json",
     # S1.2(LR0B)七類 component effect 的 sibling 分類 artifact(不動 S0.3 分類)。
     "aiml_component_effect_classification_v1": "aiml_component_effect_classification_v1.schema.json",
+    # S1.5(LR0B)每元件 deploy adapter 的 typed intent/result + 獨立 postcheck attestation
+    # + effect-seams-ready rollup;central-validator 委派給 S1.5 module 的 self-validating 檢查。
+    "component_effect_intent_v1": "component_effect_intent_v1.schema.json",
+    "component_effect_result_v1": "component_effect_result_v1.schema.json",
+    "component_effect_postcheck_attestation_v1": "component_effect_postcheck_attestation_v1.schema.json",
+    "effect_seams_ready_receipt_v1": "effect_seams_ready_receipt_v1.schema.json",
 }
 
 S0_DEPENDENCY_DIGESTS = {
@@ -456,7 +462,7 @@ AIML_COMPONENT_EFFECT_CLASS_MATRIX: dict[str, dict[str, Any]] = {
         ],
         "recovery_contract": "rollback_or_forward_only",
         "adapter_id": "credential_rotation_adapter_v1",
-        "adapter_binding_status": "PENDING_S1_5",
+        "adapter_binding_status": "IMPLEMENTED_DISPOSABLE",
         "actor_node_id": "credential_rotation_actor",
         "independent_postcheck_node_id": "credential_rotation_ops_postcheck",
     },
@@ -467,7 +473,7 @@ AIML_COMPONENT_EFFECT_CLASS_MATRIX: dict[str, dict[str, Any]] = {
         ],
         "recovery_contract": "rollback_or_approved_forward",
         "adapter_id": "pg_role_acl_migration_adapter_v1",
-        "adapter_binding_status": "PENDING_S1_5",
+        "adapter_binding_status": "IMPLEMENTED_DISPOSABLE",
         "actor_node_id": "pg_role_acl_migration_actor",
         "independent_postcheck_node_id": "pg_role_acl_migration_ops_postcheck",
     },
@@ -478,7 +484,7 @@ AIML_COMPONENT_EFFECT_CLASS_MATRIX: dict[str, dict[str, Any]] = {
         ],
         "recovery_contract": "prior_bundle_rollback",
         "adapter_id": "engine_scanner_deploy_adapter_v1",
-        "adapter_binding_status": "PENDING_S1_5",
+        "adapter_binding_status": "IMPLEMENTED_DISPOSABLE",
         "actor_node_id": "engine_scanner_deploy_actor",
         "independent_postcheck_node_id": "engine_scanner_ops_postcheck",
     },
@@ -489,7 +495,7 @@ AIML_COMPONENT_EFFECT_CLASS_MATRIX: dict[str, dict[str, Any]] = {
         ],
         "recovery_contract": "exact_rollback",
         "adapter_id": "learning_runtime_deploy_adapter_v1",
-        "adapter_binding_status": "PENDING_S1_5",
+        "adapter_binding_status": "IMPLEMENTED_DISPOSABLE",
         "actor_node_id": "learning_runtime_deploy_actor",
         "independent_postcheck_node_id": "learning_runtime_ops_postcheck",
     },
@@ -500,7 +506,7 @@ AIML_COMPONENT_EFFECT_CLASS_MATRIX: dict[str, dict[str, Any]] = {
         ],
         "recovery_contract": "drain_rollback",
         "adapter_id": "controller_workers_deploy_adapter_v1",
-        "adapter_binding_status": "PENDING_S1_5",
+        "adapter_binding_status": "IMPLEMENTED_DISPOSABLE",
         "actor_node_id": "controller_workers_deploy_actor",
         "independent_postcheck_node_id": "controller_workers_ops_postcheck",
     },
@@ -511,7 +517,7 @@ AIML_COMPONENT_EFFECT_CLASS_MATRIX: dict[str, dict[str, Any]] = {
         ],
         "recovery_contract": "interruption_recovery_and_postcheck",
         "adapter_id": "retention_apply_adapter_v1",
-        "adapter_binding_status": "PENDING_S1_5",
+        "adapter_binding_status": "IMPLEMENTED_DISPOSABLE",
         "actor_node_id": "retention_apply_actor",
         "independent_postcheck_node_id": "retention_apply_ops_postcheck",
     },
@@ -1608,6 +1614,38 @@ def validate_aiml_artifact(
                         "readback ack independence cannot be verified without its "
                         "paired result"
                     )
+    if schema_version in {
+        "component_effect_intent_v1",
+        "component_effect_result_v1",
+        "component_effect_postcheck_attestation_v1",
+        "effect_seams_ready_receipt_v1",
+    }:
+        # S1.5 每元件 deploy adapter:委派給 disposable module 的 self-validating 結構/整合/
+        # 新鮮度檢查(standalone;跨 intent/result/attestation/rollup 綁定由 module 測試以成對
+        # artifact 驗證)。與 pg_readonly / WORM 分支同樣強制 now:陳舊 artifact 於中央閘 fail-closed。
+        now_text = _now_text(now)
+        if now_text is None:
+            errors.append(
+                "component effect artifact requires now for freshness at the central gate"
+            )
+        else:
+            import agent_governance_component_effects as _component_effects
+            if schema_version == "component_effect_intent_v1":
+                errors.extend(
+                    _component_effects.validate_component_effect_intent(artifact, now=now_text)
+                )
+            elif schema_version == "component_effect_result_v1":
+                errors.extend(
+                    _component_effects.validate_component_effect_result(artifact, now=now_text)
+                )
+            elif schema_version == "component_effect_postcheck_attestation_v1":
+                errors.extend(
+                    _component_effects.validate_postcheck_attestation(artifact, now=now_text)
+                )
+            else:
+                errors.extend(
+                    _component_effects.validate_effect_seams_ready_receipt(artifact, now=now_text)
+                )
     if schema_version == "github_repository_policy_attestation_v1":
         errors.extend(_github_policy_attestation_errors(artifact, now=now))
     if schema_version == "program_adoption_receipt_v1":

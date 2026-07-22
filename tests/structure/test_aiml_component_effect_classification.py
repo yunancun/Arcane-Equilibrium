@@ -36,6 +36,12 @@ FROZEN_S0_3_CLASSIFIER_DIGEST = (
 FROZEN_S0_3_TERMINAL_SINK_CONTRACT_DIGEST = (
     "sha256:9c02cf4bfcf5f97dc455bded87350c9546456d21ef20d0888bd2ef2cde401eb2"
 )
+# S1.5 matrix flip:六個非 WORM 類 PENDING_S1_5 -> IMPLEMENTED_DISPOSABLE 後,矩陣 digest
+# 刻意改變(與 S0.3 classifier digest 是分開的兩個 digest,S0.3 仍 byte-frozen)。此 pin 是
+# 有意更新的迴歸守衛:除了這次 flip,矩陣不得再漂移。
+PINNED_COMPONENT_MATRIX_DIGEST = (
+    "sha256:22d78882a2dace9ceb640b74b2a5dca2f2a8cc05861720f5ab25c5c9ac86c445"
+)
 CLASSIFIED_AT = "2026-07-22T10:00:00Z"
 
 
@@ -80,16 +86,22 @@ def test_seven_classes_each_derive_exact_matrix_fields() -> None:
         }
 
 
-def test_only_worm_sink_is_implemented_the_other_six_are_pending_s1_5() -> None:
+def test_all_seven_classes_are_implemented_disposable_after_s1_5_flip() -> None:
+    # S1.5 matrix flip:六個非 WORM deploy 類的 adapter_binding_status 由 PENDING_S1_5
+    # 翻為 IMPLEMENTED_DISPOSABLE(與 S1.2 對 TERMINAL_RECEIPT_APPEND 的先例一致)。
     statuses = {
         name: row["adapter_binding_status"]
         for name, row in validator.AIML_COMPONENT_EFFECT_CLASS_MATRIX.items()
     }
     assert statuses["TERMINAL_RECEIPT_APPEND"] == "IMPLEMENTED_DISPOSABLE"
-    assert all(
-        status == "PENDING_S1_5"
-        for name, status in statuses.items()
-        if name != "TERMINAL_RECEIPT_APPEND"
+    assert all(status == "IMPLEMENTED_DISPOSABLE" for status in statuses.values())
+    assert "PENDING_S1_5" not in set(statuses.values())
+
+
+def test_component_matrix_digest_pin_reflects_the_s1_5_flip() -> None:
+    # 有意更新的 pin:flip 後矩陣 digest 為此固定值;除本次 flip 外不得再漂移。
+    assert validator.aiml_component_effect_class_matrix_digest() == (
+        PINNED_COMPONENT_MATRIX_DIGEST
     )
 
 

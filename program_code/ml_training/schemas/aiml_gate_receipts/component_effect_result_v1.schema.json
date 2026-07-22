@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "component_effect_result_v1.schema.json",
+  "title": "Per-component disposable apply/rollback result (S1.5 LR0B)",
+  "description": "Canonical self-hashed result of one disposable apply -> stable observation -> rollback lifecycle on a throwaway/local target. APPLIED_ROLLED_BACK_EXACT requires pre_state_digest == post_rollback_digest (exact restoration); NOT_RESTORED_FAILED reports a non-exact rollback fail-closed; ROLLED_BACK_INTERRUPTED left the prior generation active with nothing committed. production_apply_performed / real_service_restart / real_remote_host_mutation are const false. Cross-field crux invariants (exact restoration, target gate) are enforced in the delegated Python validator, not schema if/then.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "intent_id", "intent_digest", "effect_class", "adapter_id", "disposable_target_kind", "target_class", "apply_status", "pre_state_digest", "applied_digest", "post_rollback_digest", "rollback_restored_exact", "apply_actor_node", "observation", "evidence_class", "production_apply_performed", "real_service_restart", "real_remote_host_mutation", "started_at", "completed_at", "evidence_expires_at", "failure_reason", "result_digest"],
+  "properties": {
+    "schema_version": {"const": "component_effect_result_v1"},
+    "intent_id": {"type": "string", "minLength": 8},
+    "intent_digest": {"$ref": "#/$defs/digest"},
+    "effect_class": {"enum": ["ENGINE_SCANNER", "LEARNING_RUNTIME", "CONTROLLER_WORKERS", "RETENTION_APPLY", "PG_ROLE_ACL_MIGRATION", "CREDENTIAL_ROTATION"]},
+    "adapter_id": {"type": "string", "minLength": 1},
+    "disposable_target_kind": {"enum": ["disposable_pg", "temp_dir_artifact", "temp_dir_objects"]},
+    "target_class": {"enum": ["disposable_local", "production"]},
+    "apply_status": {"enum": ["APPLIED_ROLLED_BACK_EXACT", "ROLLED_BACK_INTERRUPTED", "NOT_RESTORED_FAILED", "FAILED"]},
+    "pre_state_digest": {"$ref": "#/$defs/digest"},
+    "applied_digest": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]},
+    "post_rollback_digest": {"$ref": "#/$defs/digest"},
+    "rollback_restored_exact": {"type": "boolean"},
+    "apply_actor_node": {"type": "string", "minLength": 1},
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["applied_observed", "observation_window_stable", "detail_digest", "runtime_witness"],
+      "properties": {
+        "applied_observed": {"type": "boolean"},
+        "observation_window_stable": {"type": "boolean"},
+        "detail_digest": {"$ref": "#/$defs/digest"},
+        "runtime_witness": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "observed_sqlstate"],
+          "properties": {
+            "kind": {"enum": ["live_disposable_pg", "real_filesystem_atomic_swap", "real_object_delete_restore", "structural_contract"]},
+            "observed_sqlstate": {"anyOf": [{"type": "string", "pattern": "^[0-9A-Z]{5}$"}, {"type": "null"}]}
+          }
+        }
+      }
+    },
+    "evidence_class": {"enum": ["LOCAL_REPRODUCIBLE", "STRUCTURAL_ONLY"]},
+    "production_apply_performed": {"const": false},
+    "real_service_restart": {"const": false},
+    "real_remote_host_mutation": {"const": false},
+    "started_at": {"$ref": "#/$defs/timestamp"},
+    "completed_at": {"$ref": "#/$defs/timestamp"},
+    "evidence_expires_at": {"$ref": "#/$defs/timestamp"},
+    "failure_reason": {"anyOf": [{"type": "string", "minLength": 1}, {"type": "null"}]},
+    "result_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "timestamp": {"type": "string", "format": "date-time"}
+  }
+}
