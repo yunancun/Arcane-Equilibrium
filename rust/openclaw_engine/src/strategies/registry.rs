@@ -5,12 +5,12 @@
 //!   instances are constructed. `create_all()` uses defaults; `create_for_engine(kind)`
 //!   loads TOML via `load_strategy_params()`; `create_with_params(&cfg)` is the
 //!   direct-injection path used by tests. Extracted from `strategies/mod.rs`
-//!   (cluster C4c) so the parent module fits §九 1200-line hard cap. Zero logic /
+//!   (cluster C4c) so the parent module fits §九 2000-line hard cap. Zero logic /
 //!   signature changes — every wiring statement is a verbatim move.
 //! MODULE_NOTE (中): 持有 `StrategyFactory`，為所有策略實例的唯一建構點。
 //!   `create_all()` 使用默認值；`create_for_engine(kind)` 經 `load_strategy_params()`
 //!   讀取 TOML；`create_with_params(&cfg)` 為測試用直注參數路徑。
-//!   從 `strategies/mod.rs` 抽出（cluster C4c），讓父模組符合 §九 1200 行硬上限；
+//!   從 `strategies/mod.rs` 抽出（cluster C4c），讓父模組符合 §九 2000 行硬上限；
 //!   零邏輯/簽名變更，每行接線均逐字搬移。
 
 use super::params::{

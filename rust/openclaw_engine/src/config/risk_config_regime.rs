@@ -4,7 +4,7 @@
 //! MODULE_NOTE (EN): G7-03 Phase A schema-only landing. Houses `HurstConfig`,
 //!   the operator-tunable knob block for the Hurst-based regime detector
 //!   (`regime/hurst.rs`). Lives in a sibling file (per CLAUDE.md §九) to keep
-//!   `risk_config_advanced.rs` under the 1200-line hard cap. Re-exported from
+//!   `risk_config_advanced.rs` under the 2000-line hard cap. Re-exported from
 //!   `risk_config.rs` via `#[path = "risk_config_regime.rs"] mod regime_cfg;`
 //!   so callers continue to use `crate::config::HurstConfig`.
 //!   Defaults are dormant: `enabled = false` ensures `regime/hurst.rs`'s
@@ -12,7 +12,7 @@
 //!   is bit-identical to pre-G7-03 runtime. Phase B will flip `enabled = true`
 //!   per environment alongside wiring into the strategy / scanner path.
 //! MODULE_NOTE (中): G7-03 Phase A schema 落地。承載 `HurstConfig`，Hurst regime
-//!   偵測器的 operator 可調 knob 區塊。獨立 sibling 檔，避開 §九 1200 行硬上限。
+//!   偵測器的 operator 可調 knob 區塊。獨立 sibling 檔，避開 §九 2000 行硬上限。
 //!   `risk_config.rs` 透過 `#[path]` 重新匯出，呼叫端 API 不變。
 //!   預設 `enabled=false`，Phase A 完全 no-op；Phase B wire 後 operator 才翻 true。
 

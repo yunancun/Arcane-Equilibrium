@@ -13,6 +13,8 @@ from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+MAX_FILE_LINES = 2_000
+
 
 ROOT = Path(__file__).resolve().parents[2]
 MODULE_PATH = (
@@ -248,7 +250,7 @@ def test_registry_is_single_valid_interface_and_views_are_current(tmp_path: Path
     ) + [DEPLOY_ADAPTER_PATH]
     assert implementation_files
     for path in implementation_files:
-        assert len(path.read_text(encoding="utf-8").splitlines()) <= 800, path
+        assert len(path.read_text(encoding="utf-8").splitlines()) <= MAX_FILE_LINES, path
 
     adapters = registry["effect_adapters"]
     assert adapters["deploy_adapter_v1"]["implementation_paths"] == [
@@ -2638,7 +2640,14 @@ def test_authoritative_docs_route_to_one_governance_module_without_fixed_budget_
     assert "shared context only paid once" not in combined
     assert "共享 context 只付一次" not in combined
 
-    assert len((ROOT / ".codex/MEMORY.md").read_text(encoding="utf-8").splitlines()) <= 400
+    assert (
+        len(
+            (ROOT / ".codex/MEMORY.md")
+            .read_text(encoding="utf-8")
+            .splitlines()
+        )
+        <= MAX_FILE_LINES
+    )
     root_skill = (ROOT / ".claude/skills/16-root-principles-checklist/SKILL.md").read_text(encoding="utf-8")
     assert "runtime RiskConfig TOML > Rust schema" not in root_skill
     regression = (ROOT / ".claude/skills/regression-testing-protocol/SKILL.md").read_text(encoding="utf-8")

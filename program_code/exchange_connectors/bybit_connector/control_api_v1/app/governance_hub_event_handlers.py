@@ -33,8 +33,8 @@ MODULE_NOTE (中):
   語意、錯誤計數與拆分前完全相同，0 行為變更。
 
 Split rationale / 拆分動機：
-  governance_hub.py 於 E5-P1-9 之前為 1052 行，接近 §九 硬上限 1200。
-  抽離純回調工廠與 wiring 後回落到 ~810 行，與 cascades mixin 形成兩層
+  governance_hub.py 於 E5-P1-9 之前為 1052 行；抽離純回調工廠與 wiring 後
+  回落到約 810 行並保留現行 §九 2000 行上限空間，與 cascades mixin 形成兩層
   關注點分離：核心 API + 狀態管理 (governance_hub.py) ←→ Mixin(status,
   cascade) + Mixin(callback wiring)。
 

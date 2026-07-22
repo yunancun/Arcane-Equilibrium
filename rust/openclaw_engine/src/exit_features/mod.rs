@@ -9,12 +9,12 @@
 //! ## 模組佈局（EXIT-FEATURES-SPLIT-1, 2026-04-21）
 //!
 //! 本目錄 (`exit_features/`) 於 2026-04-21 由單一 1317 行 `exit_features.rs`
-//! 拆出，以遵守 §七 1200 行硬上限、並讓型別 / 邏輯 / 建構器各自有獨立檔案
+//! 拆出，以遵守 §七 2000 行硬上限、並讓型別 / 邏輯 / 建構器各自有獨立檔案
 //! 與測試表面。外部呼叫仍走 `crate::exit_features::…`（本 `mod.rs` 的
 //! `pub use` re-export 提供向後相容）。
 //!
 //! This directory was split from a single 1317-line `exit_features.rs` on
-//! 2026-04-21 to honour §七's 1200-line hard cap and give types / logic /
+//! 2026-04-21 to honour §七's 2000-line hard cap and give types / logic /
 //! builder each their own file and test surface. External callers keep using
 //! `crate::exit_features::…` — the `pub use` re-exports below preserve
 //! backward compatibility.

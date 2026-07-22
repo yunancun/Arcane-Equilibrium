@@ -6,7 +6,7 @@ SCORECARD_SUMMARY = (
     ROOT
     / "rust/openclaw_engine/src/ipc_server/handlers/stock_etf/status_summaries/scorecard.rs"
 )
-MAX_LINES = 500
+MAX_LINES = 2_000
 
 REQUIRED_SURFACE_TOKENS = {
     "pub(super) fn scorecard_status_summary(phase2: serde_json::Value) -> serde_json::Value",

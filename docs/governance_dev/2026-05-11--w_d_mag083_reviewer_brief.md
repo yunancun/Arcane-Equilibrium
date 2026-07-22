@@ -286,9 +286,9 @@ PA §F.2 識別：commit `ccf7a4bc` 27 files / +3964 -17 LOC，包含：
 
 | # | 風險 | Owner | Path |
 |---|---|---|---|
-| P2-1 | `tests.rs` 1063 LOC > 800 警告（W-C +361）拆 sibling 仿 G5-09 | E5 | 拆 4-5 sibling（runtime_shadow_lineage / channel_store / contracts / signal_adapter）|
-| P2-2 | `step_4_5_dispatch.rs` 1557 LOC > 800 警告（pre-existing）拆 sibling | E5 | 拆 exchange_path / paper_path / spine_id_compute |
-| P2-3 | `runtime_shadow.rs` 657 LOC trending toward 800；`emit_entry_lineage` 單 fn 接近 IMP 上界 | E5 | 抽 build_transitions helper |
+| P2-1 | `tests.rs` 1063 LOC（W-C +361）曾依舊制較低警告列入拆分評估；現行 2000 行門檻內，僅按責任邊界決定是否拆分 | E5 | 若職責邊界成立，拆 4-5 sibling（runtime_shadow_lineage / channel_store / contracts / signal_adapter）|
+| P2-2 | `step_4_5_dispatch.rs` 1557 LOC（pre-existing）在現行 2000 行門檻內；僅按 hot-path ownership 決定是否拆分 | E5 | 若責任邊界成立，拆 exchange_path / paper_path / spine_id_compute |
+| P2-3 | `runtime_shadow.rs` 657 LOC；`emit_entry_lineage` 單 fn 接近 IMP 上界，但檔案仍有現行 2000 行 headroom | E5 | 抽 build_transitions helper |
 | P2-4（QC §C.4）| [55] WARN 改 deterministic invariant test 取代 ratio threshold | E1-Python + PA | 棄 50% gate；每個 `trading.fills.fill_id` 必對應 1 個 real-fill ER（QC §C 推薦 C 方案）|
 
 ---

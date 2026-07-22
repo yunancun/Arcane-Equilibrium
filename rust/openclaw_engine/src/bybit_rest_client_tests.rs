@@ -1,15 +1,15 @@
 //! Bybit V5 REST client tests — HMAC signing / env credential loading / LIVE-GUARD-1 fail-safes.
 //! Bybit V5 REST 客戶端測試 — HMAC 簽名 / 環境憑證讀取 / LIVE-GUARD-1 失效保護。
 //!
-//! MODULE_NOTE (EN): Extracted from `bybit_rest_client.rs` as Wave 1 G1-03 to
-//!   pull the parent file under CLAUDE.md §九 1200-line hard limit (1725 → ~935).
+//! MODULE_NOTE (EN): Extracted from `bybit_rest_client.rs` as Wave 1 G1-03 for
+//!   focused ownership under CLAUDE.md §九 2000-line limit (1725 → ~935).
 //!   The test body is included back into the parent via
 //!   `#[cfg(test)] #[path = "bybit_rest_client_tests.rs"] mod tests;` at the
 //!   foot of `bybit_rest_client.rs`, so every `BybitRestClient` constructor
 //!   with private fields keeps `use super::*;` semantics — no visibility
 //!   changes required. Bit-identical test content vs pre-split (792 LOC body).
-//! MODULE_NOTE (中): 從 `bybit_rest_client.rs` 抽出（Wave 1 G1-03），讓父檔進
-//!   §九 1200 行硬上限（1725 → ~935）。測試主體透過父檔底部
+//! MODULE_NOTE (中): 從 `bybit_rest_client.rs` 抽出（Wave 1 G1-03），聚焦責任並
+//!   遵守 §九 2000 行硬上限（1725 → ~935）。測試主體透過父檔底部
 //!   `#[cfg(test)] #[path = "bybit_rest_client_tests.rs"] mod tests;` 重新
 //!   納入，`use super::*;` 語義不變、BybitRestClient 私有欄位可見性無需調整。
 //!   行為等價（792 行 body 原樣）。

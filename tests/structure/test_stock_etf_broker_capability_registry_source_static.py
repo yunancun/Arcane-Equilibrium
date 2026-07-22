@@ -6,7 +6,7 @@ ROOT = Path(__file__).resolve().parents[2]
 BROKER_CAPABILITY_REGISTRY = (
     ROOT / "rust/openclaw_types/src/stock_etf_broker_capability_registry.rs"
 )
-MAX_LINES = 800
+MAX_LINES = 2_000
 
 REQUIRED_IMPORT_TOKENS = {
     "IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID",

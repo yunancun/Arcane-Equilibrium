@@ -95,7 +95,7 @@ def check_dust_spiral_noise_in_ef(cur) -> tuple[str, str]:
 
     NOTE：本 fn placed in checks_derived.py per F7 spec assignment（ML hygiene
     is a derived/cross-cutting observability concern, not a direct strategy
-    /engine flow check）；亦為避免再撐爆 checks_strategy 1200 行硬上限。
+    /engine flow check）；亦讓 checks_strategy 聚焦並遵守 2000 行硬上限。
     """
     # Defensive rollback to keep cursor clean across checks.
     # 防禦式 rollback 跨 check 保持 cursor 乾淨。

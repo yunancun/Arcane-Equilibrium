@@ -2,7 +2,7 @@
 //! MaCrossover impl — 信號/intent 輔助函數 + 過濾原語。
 //!
 //! MODULE_NOTE (EN): Split out of `strategies/ma_crossover.rs` by E5-P2-4c
-//!   (2026-04-23) to honour CLAUDE.md §九 1200-line hard cap. Contains the
+//!   (2026-04-23) to honour CLAUDE.md §九 2000-line hard cap. Contains the
 //!   private helpers used by the `Strategy::on_tick` loop: `make_intent` /
 //!   `make_intent_with_qty` (order emission), `regime_allows_entry` (RC-01
 //!   Hurst gate), `update_higher_tf` + `higher_tf_allows_entry` (RC-02 multi-

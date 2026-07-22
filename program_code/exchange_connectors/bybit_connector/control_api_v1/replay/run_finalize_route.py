@@ -4,8 +4,8 @@ REF-20 Sprint A R3-T1 — POST /run/{run_id}/finalize endpoint 邏輯。
 MODULE_NOTE (EN):
     Sprint A R3-T1 (2026-05-04). Owns the
     ``POST /api/v1/replay/run/{run_id}/finalize`` business logic so the
-    thin handler in ``app/replay_routes.py`` keeps under the
-    ``CLAUDE.md §九 1500 LOC`` hard cap.
+    thin handler in ``app/replay_routes.py`` stays within the
+    ``CLAUDE.md §九`` inclusive 2000 LOC ceiling (≤ 2000).
 
     This route persists *post-execution evidence* into PostgreSQL after
     the Rust ``replay_runner`` subprocess has written
@@ -41,8 +41,8 @@ MODULE_NOTE (EN):
 MODULE_NOTE (中):
     Sprint A R3-T1（2026-05-04）。擁有
     ``POST /api/v1/replay/run/{run_id}/finalize`` 業務邏輯，使
-    ``app/replay_routes.py`` 薄 handler 守住
-    ``CLAUDE.md §九 1500 LOC`` 硬上限。
+    ``app/replay_routes.py`` 薄 handler 維持在
+    ``CLAUDE.md §九`` inclusive 2000 LOC 上限（≤ 2000）內。
 
     本 route 在 Rust ``replay_runner`` subprocess 寫
     ``<output_dir>/replay_report.json`` 後，將「執行後證據」持久化到

@@ -5,8 +5,8 @@ _regime_math — regime_controller 內部純數學輔助（RGM-Q2/Q3/Q4）。
 
 MODULE_NOTE (EN):
     Internal-use module hosting CUSUM, Kupiec POF, and PSR(0) math
-    extracted from ``regime_controller.py`` to keep the controller
-    surface within the 1200-LOC hard cap (CLAUDE.md §七 LOC budget).
+    extracted from ``regime_controller.py`` for focused ownership within the
+    2000-LOC hard cap (CLAUDE.md §七 LOC budget).
     Underscore prefix signals "internal — do not import outside the
     learning_engine package". Public surface remains
     ``regime_controller.RegimeController``.
@@ -17,7 +17,7 @@ MODULE_NOTE (EN):
 
 MODULE_NOTE (中):
     內部模組，承載從 regime_controller.py 抽出的 CUSUM / Kupiec POF /
-    PSR(0) 數學，使 controller LOC 維持 1200 硬上限（CLAUDE.md §七）。
+    PSR(0) 數學，使 controller 聚焦並遵守 2000 LOC 上限（CLAUDE.md §七）。
     底線前綴示意「內部用 — 不在 learning_engine 套件外 import」。
     公開 API 仍是 regime_controller.RegimeController。
 

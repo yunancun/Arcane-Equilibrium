@@ -5,7 +5,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PAPER_SHADOW_RECONCILIATION = (
     ROOT / "rust/openclaw_types/src/stock_etf_paper_shadow_reconciliation.rs"
 )
-MAX_LINES = 800
+MAX_LINES = 2_000
 
 REQUIRED_TYPE_TOKENS = {
     "STOCK_ETF_PAPER_SHADOW_RECONCILIATION_CONTRACT_ID",

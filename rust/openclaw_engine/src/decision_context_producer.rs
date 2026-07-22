@@ -1,8 +1,8 @@
 //! P2 refactor (2026-04-07): DecisionContextMsg producer extracted from
-//! tick_pipeline.rs to keep that file under the §九 1200-line hard limit.
+//! tick_pipeline.rs to keep that file under the §九 2000-line hard limit.
 //!
 //! P2 重構（2026-04-07）：將 DecisionContextMsg producer 從 tick_pipeline.rs
-//! 抽出，使該檔保持在 §九 1200 行硬上限以下。
+//! 抽出，使該檔保持在 §九 2000 行硬上限以下。
 //!
 //! MODULE_NOTE (EN): This module owns the read-only side of the
 //!   `learning.decision_context_snapshots` write path. The producer:

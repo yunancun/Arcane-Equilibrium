@@ -2,7 +2,8 @@
 //! Grid Trading 信號引擎 — 每 tick 穿越偵測 + 入場/平倉派發。
 //!
 //! MODULE_NOTE (EN): Split out of `strategies/grid_trading.rs` by GRID-TRADING-MOD-SPLIT-1
-//!   (2026-04-23) to honour CLAUDE.md §九's 1200-line hard cap (pre-split 1729 lines).
+//!   (2026-04-23) for focused ownership under CLAUDE.md §九's 2000-line limit
+//!   (pre-split measured 1729 lines).
 //!   Contains the main `on_tick_impl` dispatch: OU price-history append,
 //!   lazy per-symbol grid init (template-bounds or adaptive ±10%), periodic
 //!   health check + rebalance, OU spacing refresh cadence, EDGE-P1-1 trending
@@ -14,7 +15,7 @@
 //!   when net_inventory would flip. All logic / signatures / ordering of
 //!   mutations preserved byte-identical to pre-split.
 //! MODULE_NOTE (中)：GRID-TRADING-MOD-SPLIT-1（2026-04-23）由
-//!   `strategies/grid_trading.rs` 拆出以遵守 CLAUDE.md §九 1200 行硬上限
+//!   `strategies/grid_trading.rs` 拆出以遵守 CLAUDE.md §九 2000 行硬上限
 //!   （拆前 1729 行）。本檔包含主要的 `on_tick_impl` 派發：OU 價格歷史追加、
 //!   逐幣種延遲初始化網格（模板邊界或自適應 ±10%）、週期健康檢查 + 再平衡、
 //!   OU 間距刷新節奏、EDGE-P1-1 趨勢硬停（ADX > 30 或 Hurst regime = trending）、

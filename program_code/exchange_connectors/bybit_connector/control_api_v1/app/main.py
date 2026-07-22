@@ -10,7 +10,7 @@ MODULE_NOTE (中文):
   所有子路由（Paper Trading / L2 AI / Risk / Strategy / Governance / Scout）的统一注册。
   属于 Control API v1 层，是系统唯一的 HTTP 服务暴露点。
 
-  檔案大小債務（E2 LOW-1，2026-06-10）：本檔已跨 800 行警戒線（CLAUDE §九）。
+  檔案大小政策：本檔須維持在 CLAUDE §九 2000 行 review/split 門檻內。
   split follow-up 候選 = @app.on_event("startup") 的背景任務 wiring（flusher /
   canary / reconciler 等 create_task 排程）抽離為獨立 startup wiring 模組。
   本輪僅記帳不拆（exact-touch 慣例，P5-SM soak fix delta 不擴 scope）。
@@ -149,7 +149,7 @@ app.include_router(paper_router)
 from .layer2_routes import layer2_router  # noqa: E402
 app.include_router(layer2_router)
 
-# ── Layer 2 P4 online-FDR Router（bind-demo + wealth 唯讀；layer2_routes 超 800 行故獨立檔）──
+# ── Layer 2 P4 online-FDR Router（bind-demo + wealth 唯讀；獨立檔保留 2000 行政策空間）──
 from .l2_fdr_routes import fdr_router  # noqa: E402
 app.include_router(fdr_router)
 
@@ -343,7 +343,7 @@ app.include_router(replay_advisory_router)
 #   GET  /api/v1/replay/handoff/recent    — last N handoff records (footer)
 #
 # Handoff lives in NEW handoff_routes.py (NOT replay_routes.py) because
-# replay_routes.py is at 1498/1500 LOC (CLAUDE.md §九 hard cap = 1500).
+# replay_routes.py measured 1498 LOC at the split; current §九 limit is 2000.
 # Per workplan §4 Wave 8 row, the trio lands handoff_routes.py + V044 SQL +
 # handoff_audit.py.
 #
@@ -351,7 +351,7 @@ app.include_router(replay_advisory_router)
 # (governance_audit_log append-only) acceptance bindings.
 #
 # REF-20 Wave 8 P6 demo handoff 後端安全三件組；handoff_routes.py 為
-# NEW 檔（replay_routes.py 已 1498/1500 §九 1500 硬上限）；
+# NEW 檔（replay_routes.py 拆分時實測 1498 行；現行 §九 上限為 2000）；
 # 兩條路由：POST /handoff（typed-confirmation）+ GET /handoff/recent（footer）。
 from .handoff_routes import handoff_router  # noqa: E402
 app.include_router(handoff_router)

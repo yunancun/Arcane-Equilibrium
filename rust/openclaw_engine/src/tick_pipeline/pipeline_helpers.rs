@@ -2,7 +2,7 @@
 //! TickPipeline impl — 平倉 + 退場特徵 + 通道 setter + 雜項。
 //!
 //! MODULE_NOTE (EN): Split out of `tick_pipeline/mod.rs` by TICK-PIPELINE-MOD-SPLIT-1
-//!   (2026-04-22) to honour CLAUDE.md §七's 1200-line hard cap. Contains the
+//!   (2026-04-22) to honour CLAUDE.md §七's 2000-line hard cap. Contains the
 //!   `close_position_at_symbol_market` helper (PNL-FIX-1), the `emit_close_fill`
 //!   DB fill emitter + exit-feature row builder (EXIT-FEATURES-TABLE-1), the
 //!   `should_persist_signal` heartbeat gate and `derive_regime` label helper,
@@ -15,7 +15,7 @@
 //!   `close_position_at_symbol_market`, `emit_close_fill`,
 //!   `should_persist_signal`, `derive_regime`.
 //! MODULE_NOTE (中)：TICK-PIPELINE-MOD-SPLIT-1（2026-04-22）由 `tick_pipeline/mod.rs`
-//!   拆出以遵守 CLAUDE.md §七 1200 行硬上限。本檔包含 `close_position_at_symbol_market`
+//!   拆出以遵守 CLAUDE.md §七 2000 行硬上限。本檔包含 `close_position_at_symbol_market`
 //!   PNL-FIX-1 輔助、`emit_close_fill` DB fill 發射 + exit-feature row 建構（
 //!   EXIT-FEATURES-TABLE-1）、`should_persist_signal` 心跳閘 + `derive_regime`
 //!   標籤、instrument_cache / stop / shadow / market / feature / trading /

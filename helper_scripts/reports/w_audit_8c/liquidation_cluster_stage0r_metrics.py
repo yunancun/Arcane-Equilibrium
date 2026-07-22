@@ -33,7 +33,7 @@ Stage 0R promotion-floor metrics。Stage 0R 是 Stage 1 Demo canary 上線前的
   - 純 math layer：無 DB / 無 file IO / 無 live state 修改。
   - 無 Rust 接觸；無 authorization / lease / paper / mainnet enablement 觸碰。
   - rows 為 read-only 輸入；不寫回不變更 row 結構。
-  - LOC > 800 警告線：本檔目標 ~1200 LOC，原因為純 math 模塊鏡像 8b 1805
+  - 2000 LOC review/split 政策：本檔目標 ~1200 LOC，原因為純 math 模塊鏡像 8b 1805
     LOC 結構 + 8c 三大新加法（cluster-aware n_eff、tier × direction 4-value
     verdict、density-floor sweep 6-D）。已先記下 justification。
 

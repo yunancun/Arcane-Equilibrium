@@ -2,10 +2,10 @@
 //! BB 突破 — OI 合流信號與 on_rejection 回滾回歸測試。
 //!
 //! MODULE_NOTE (EN): EDGE-P2-2 / EDGE-P2-2 FUP coverage. Split from the main
-//!   tests module so neither file exceeds the 800 soft warn. Helpers (`ctx_oi`,
+//!   tests module so neither file exceeds the 2000 soft warn. Helpers (`ctx_oi`,
 //!   `ctx_full_entry`, `state_with_oi`, `make_open_intent`) are local here.
 //! MODULE_NOTE (中): EDGE-P2-2 / EDGE-P2-2 FUP 相關測試。與主測試模組拆分以維持
-//!   每檔 ≤ 800 soft warn；`ctx_oi` / `ctx_full_entry` / `state_with_oi` /
+//!   每檔 ≤ 2000 soft warn；`ctx_oi` / `ctx_full_entry` / `state_with_oi` /
 //!   `make_open_intent` 僅供本檔使用。
 
 use super::super::{Strategy, StrategyAction, StrategyParams};

@@ -543,9 +543,9 @@ def check_pipeline_triangulation(cur, close_fills_24h: int) -> tuple[str, str]:
 # ============================================================================
 # G3-09 Phase A (2026-04-27) → Phase B (2026-04-28) cost_edge_advisor sentinel
 # extracted into sibling ``checks_cost_edge.py`` by HIGH-1 fix (2026-04-28)
-# to keep ``checks_derived.py`` under CLAUDE.md §九 1200-line hard cap.
+# to keep ``checks_derived.py`` focused under CLAUDE.md §九 2000-line hard cap.
 # G3-09 Phase A → Phase B cost_edge_advisor 哨兵已由 HIGH-1 fix（2026-04-28）
-# 抽至 sibling ``checks_cost_edge.py``，維持本檔 CLAUDE.md §九 1200 行硬上限。
+# 抽至 sibling ``checks_cost_edge.py``，維持本檔 CLAUDE.md §九 2000 行硬上限。
 # ============================================================================
 
 

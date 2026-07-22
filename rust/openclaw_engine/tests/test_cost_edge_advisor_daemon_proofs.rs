@@ -1,9 +1,10 @@
 //! G3-09 Phase A daemon integration test — Proofs 1-5 (core liveness + cadence).
 //! G3-09 Phase A daemon 整合測試 — Proof 1-5（核心活性 + cadence）。
 //!
-//! MODULE_NOTE (EN): This file is one of THREE test binaries split out from
-//!   the original `test_cost_edge_advisor_daemon.rs` (1159 LOC > §九 800 warn)
-//!   per E2 spawn-test review LOW-1 recommendation. The other two files are:
+//! MODULE_NOTE (EN): This file is one of THREE focused test binaries split out
+//!   from the original `test_cost_edge_advisor_daemon.rs` (1159 LOC) per the E2
+//!   spawn-test review LOW-1 recommendation. Each binary retains headroom under
+//!   the current §九 2000-line review/split policy. The other two files are:
 //!     * `test_cost_edge_advisor_daemon_dual_safeguard.rs` — RiskConfig flag
 //!       short-circuit (Proof 3b) + sticky `triggered_at_ms` semantics
 //!     * `test_cost_edge_advisor_spawn_decision.rs` — FUP Case A/B/C
@@ -47,8 +48,9 @@
 //!   impossible. Pattern mirrors
 //!   `cost_edge_advisor::tests::env_gate_strict_one_semantics_serialised`.
 //!
-//! MODULE_NOTE (中)：本檔為原 `test_cost_edge_advisor_daemon.rs`（1159 LOC >
-//!   §九 800 警告）per E2 spawn-test review LOW-1 推薦拆出三檔之一，另兩檔：
+//! MODULE_NOTE (中)：原 `test_cost_edge_advisor_daemon.rs` 為 1159 LOC；E2
+//!   spawn-test review LOW-1 建議依職責拆為三個聚焦測試檔，各檔保留現行 §九
+//!   2000 行 review/split 政策空間。本檔為其中之一，另兩檔：
 //!     * `test_cost_edge_advisor_daemon_dual_safeguard.rs` — RiskConfig flag
 //!       short-circuit（Proof 3b）+ sticky `triggered_at_ms` 語意
 //!     * `test_cost_edge_advisor_spawn_decision.rs` — FUP Case A/B/C

@@ -2,14 +2,14 @@
 MODULE_NOTE
 模組目的：LG-5 R-meta gate 純函式 helper（split sibling of
         ``governance_hub_live_candidate_review``）。封裝 R-meta 兩個 evaluator
-        + 兩個閾值常數，讓主檔 LOC < 1500 硬上限（LG5-W3-FUP-2 Fix 2 IMPL-2-consumer
-        實裝後主檔 ~1575；split 後主檔回 ≤ 1500）。
+        + 兩個閾值常數，讓主檔責任聚焦並遵守 2000 LOC 上限
+        （LG5-W3-FUP-2 Fix 2 IMPL-2-consumer 實裝後主檔實測約 1575 行）。
 
 Module purpose: pure-function helpers for the LG-5 R-meta gate (split sibling
                 of governance_hub_live_candidate_review). Houses both R-meta
-                evaluators + their two thresholds so the parent file stays under
-                the 1500 LOC hard cap (Fix 2 IMPL-2-consumer pushed the parent
-                to ~1575; this split returns it to ≤ 1500).
+                evaluators + their two thresholds so the parent stays focused
+                and within the 2000 LOC limit (the parent measured ~1575 lines
+                after Fix 2 IMPL-2-consumer).
 
 Spec source / 規格來源：
     docs/CCAgentWorkSpace/PA/workspace/reports/

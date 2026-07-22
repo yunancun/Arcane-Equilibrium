@@ -1,5 +1,5 @@
 //! MODULE_NOTE
-//! 模塊用途：`ibkr_tws_contract_data` 的 **support 子模塊**（800 行帽拆檔;非獨立面）——
+//! 模塊用途：`ibkr_tws_contract_data` 的 **support 子模塊**（2000 行帽拆檔;非獨立面）——
 //!   承載 W6-S1 contract details 消化層的純 codec/查詢/門控表/雜湊面:OUT v8 builder +
 //!   全限定查詢型、per-field serverVersion 門控表、欄位游標、identity_hash 鑄造、
 //!   longName unicode-escape 最小實作、staleness 投影與 wire 純 helper。

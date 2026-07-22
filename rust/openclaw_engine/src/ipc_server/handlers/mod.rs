@@ -1,5 +1,5 @@
 //! IPC method handler facade — the monolithic `handlers.rs` was split by
-//! domain as part of E5-P1-3 to keep each file under the §九 800-line warning
+//! domain as part of E5-P1-3 to keep each file under the §九 2000-line warning
 //! threshold. This module:
 //!   - declares the domain submodules (`misc`, `budget`, `teacher`,
 //!     `strategy`, `risk`, `dynamic_risk`, `governance`)

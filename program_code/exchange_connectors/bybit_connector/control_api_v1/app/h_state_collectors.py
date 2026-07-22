@@ -6,10 +6,11 @@ G3-08-FUP-HSQ-SPLIT P2 — H 狀態 / Agent 狀態 snapshot 收集器（h_state_
 
 MODULE_NOTE (EN):
   Pure refactor split-out of the snapshot-collection helpers from
-  ``h_state_query_handler.py`` (which had grown to 859 LOC, exceeding the
-  CLAUDE.md §九 800-LOC warning threshold after the Wave E SINGLETON
-  hardening commit ``b579dae`` added the dual ``sys.modules.get`` pattern
-  to both ``_collect_h_snapshots`` and ``_collect_agent_snapshots``).
+  ``h_state_query_handler.py`` (which had grown to 859 LOC after the Wave E
+  SINGLETON hardening commit ``b579dae`` added the dual ``sys.modules.get``
+  pattern to both ``_collect_h_snapshots`` and ``_collect_agent_snapshots``).
+  The split preserves focused ownership and headroom under the current
+  CLAUDE.md §九 2000-LOC review/split threshold.
 
   Sibling pattern mirrors the ``cost_edge_advisor_boot.py`` split (see
   CLAUDE.md §九 ``CostEdgeAdvisorDbSlot`` singleton table entry); the
@@ -47,8 +48,8 @@ MODULE_NOTE (EN):
 MODULE_NOTE (中):
   將原 ``h_state_query_handler.py`` 中的 snapshot 收集 helper 純重構
   抽出（Wave E SINGLETON 加固 commit ``b579dae`` 為兩個 collector 加入
-  雙 ``sys.modules.get`` pattern 後，原檔達 859 LOC 超過 CLAUDE.md §九
-  800 LOC 警告線）。
+  雙 ``sys.modules.get`` pattern 後，原檔達 859 LOC）。拆檔保留聚焦職責，
+  並維持在現行 CLAUDE.md §九 2000 LOC review/split 門檻內的成長空間。
 
   Sibling pattern 鏡 ``cost_edge_advisor_boot.py`` 拆分（見 CLAUDE.md §九
   ``CostEdgeAdvisorDbSlot`` singleton 表條目）；父模組

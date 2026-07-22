@@ -2,14 +2,14 @@
 //! 合約信息緩存測試 — SymbolSpec 取整 + 緩存 / SingleFlight。
 //!
 //! MODULE_NOTE (EN): Extracted from `instrument_info.rs` as Wave 1 G1-03 to
-//!   pull `instrument_info.rs` under CLAUDE.md §九 1200-line hard limit. The
+//!   pull `instrument_info.rs` under CLAUDE.md §九 2000-line hard limit. The
 //!   test body is included back into the parent via
 //!   `#[cfg(test)] #[path = "instrument_info_tests.rs"] mod tests;` at the
 //!   foot of `instrument_info.rs`, so every helper keeps `use super::*;`
 //!   semantics — no visibility changes required. Bit-identical test content
 //!   vs pre-split.
 //! MODULE_NOTE (中): 從 `instrument_info.rs` 抽出（Wave 1 G1-03），讓父檔進
-//!   §九 1200 行硬上限。測試主體透過父檔底部
+//!   §九 2000 行硬上限。測試主體透過父檔底部
 //!   `#[cfg(test)] #[path = "instrument_info_tests.rs"] mod tests;` 重新
 //!   納入，`use super::*;` 語義不變、可見性無需調整。行為等價（原樣）。
 

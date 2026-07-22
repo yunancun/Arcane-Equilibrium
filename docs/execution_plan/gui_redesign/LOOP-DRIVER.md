@@ -11,7 +11,7 @@
 2. 雙主題(玄夜/帛晝)+雙密度全站生效;衡樑/朱印/銘文按 canon 9-11 落地。
 3. 前後端對齊矩陣全綠:每個 view 的 fetch 路徑 ↔ control_api_v1 路由逐條核對(路徑存在+方法對+響應字段被正確消費);寫路徑全部打到 Rust authority,零 Python fake-success。
 4. Bybit 面 read-write 功能核驗;IBKR 面在治理允許範圍內全部落地(見 §3 邊界);本地功能(引擎狀態/風控/審計/學習)讀寫核驗。
-5. 代碼企業級:零 inline `style=` 新增(存量清完)、零裸 hex、tokens 單一正本、檔案 <800 行(硬頂 2000)、死代碼按證據處置、新注釋全中文。
+5. 代碼企業級:零 inline `style=` 新增(存量清完)、零裸 hex、tokens 單一正本、檔案以 2000 行為唯一門檻(≤2000 不得僅因大小阻擋或強拆)、死代碼按證據處置、新注釋全中文。
 6. 終驗收全過:A3 UX 全審 PASS、E3 auth 面掃描 PASS、E4 回歸無退步、node --check 全綠、GUI smoke tests 建立並綠、docs/README 與 manifest 更新。
 7. `PROGRESS.md` 標 `STATUS: COMPLETE` → 停 loop(ScheduleWakeup stop)+ 最終報告。
 

@@ -1,5 +1,5 @@
 """
-ai_service_listener — Unix-socket IPC listener (split from ai_service.py per §九 1200-line cap)
+ai_service_listener — Unix-socket IPC listener (split from ai_service.py; §九 2000-line limit)
 ==============================================================================================
 Governance refs: DOC-04 §G Multi-Agent, Rust Migration R-01
 

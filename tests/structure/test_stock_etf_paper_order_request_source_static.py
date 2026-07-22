@@ -5,7 +5,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PARENT = ROOT / "rust/openclaw_types/src/stock_etf_paper_order_request.rs"
 FIXTURES = ROOT / "rust/openclaw_types/src/stock_etf_paper_order_request/fixtures.rs"
 VALIDATION = ROOT / "rust/openclaw_types/src/stock_etf_paper_order_request/validation.rs"
-MAX_LINES = 800
+MAX_LINES = 2_000
 
 REQUIRED_PARENT_TYPE_TOKENS = {
     'STOCK_ETF_PAPER_ORDER_REQUEST_CONTRACT_ID: &str = "stock_etf_paper_order_request_v1"',

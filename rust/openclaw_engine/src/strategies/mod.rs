@@ -5,13 +5,13 @@
 //!   schema + StrategyFactory live in sibling files (`params.rs`, `registry.rs`).
 //!   Sub-modules: ma_crossover, bb_breakout, bb_reversion, grid_trading, funding_arb,
 //!   confluence (shared scoring/persistence), grid_helpers (extracted grid math).
-//!   Post-split (cluster C4c) this `mod.rs` is ~150 lines, well under §九 1200-line cap.
+//!   Post-split (cluster C4c) this `mod.rs` is ~150 lines, well under §九 2000-line cap.
 //!   Re-exports below preserve every external import path (`crate::strategies::X`).
 //! MODULE_NOTE (中): 定義 Strategy trait + StrategyAction 枚舉；參數 schema 與
 //!   StrategyFactory 移至 sibling 檔案（`params.rs`、`registry.rs`）。
 //!   子模組：ma_crossover、bb_breakout、bb_reversion、grid_trading、funding_arb、
 //!   confluence（共享評分/持續性）、grid_helpers（提取的網格數學）。
-//!   cluster C4c 切分後 `mod.rs` 僅 ~150 行，遠低於 §九 1200 行硬上限。
+//!   cluster C4c 切分後 `mod.rs` 僅 ~150 行，遠低於 §九 2000 行硬上限。
 //!   下方 re-export 保持所有外部匯入路徑（`crate::strategies::X`）零改動。
 
 pub mod bb_breakout;

@@ -3,8 +3,9 @@ cost_edge_advisor 健康檢查（checks_derived 的 sibling）。
 
 MODULE_NOTE (EN): Extracted from ``checks_derived.py`` by G3-09 Phase B
 Wave 1 E2-return-fix (HIGH-1, 2026-04-28). Original placement pushed
-``checks_derived.py`` from 1153 to 1304 LOC, breaching CLAUDE.md §九
-1200-line hard cap. Only the ``check_cost_edge_advisor_status`` function
+``checks_derived.py`` from 1153 to 1304 LOC. The sibling keeps ownership
+focused and preserves headroom under the CLAUDE.md §九 2000-line hard cap.
+Only the ``check_cost_edge_advisor_status`` function
 (lines 877-1197 of the pre-fix ``checks_derived.py``) moved into this
 sibling; ``check_h_state_gateway_freshness`` and the F7 ML-hygiene
 ``check_dust_spiral_noise_in_ef`` stay in ``checks_derived.py`` to keep
@@ -22,7 +23,8 @@ DB query strings, same WARN/FAIL thresholds.
 
 MODULE_NOTE (中): G3-09 Phase B Wave 1 E2 return fix（HIGH-1，2026-04-28）
 從 ``checks_derived.py`` 抽出。原放置使 ``checks_derived.py`` 從 1153 行
-膨脹至 1304 行，破 CLAUDE.md §九 1200 行硬上限。僅
+膨脹至 1304 行；抽至 sibling 以聚焦責任並保留 CLAUDE.md §九 2000 行
+上限空間。僅
 ``check_cost_edge_advisor_status`` 一個函式遷至本 sibling；
 ``check_h_state_gateway_freshness`` 與 F7 ``check_dust_spiral_noise_in_ef``
 保留於 ``checks_derived.py``，避免 scope creep（E1 自決）。

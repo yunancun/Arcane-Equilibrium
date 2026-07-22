@@ -2,7 +2,7 @@
 //! GovernanceEmit — V054 lease_transitions 的 audit emit 基礎元件。
 //!
 //! MODULE_NOTE (EN): Extracted from governance_core.rs to (1) keep the facade
-//!   under the 1500 LOC hard cap; (2) decouple the emit payload + helpers so
+//!   within the inclusive 2000 LOC ceiling; (2) decouple the emit payload + helpers so
 //!   E1 retrofit (release_lease cleanup line + periodic sweeper) and E4
 //!   retrofit (engine_mode_tag wiring) can land independently without
 //!   colliding on governance_core.rs LOC budget; (3) give cross-crate writer
@@ -21,7 +21,7 @@
 //!       gone (audit completeness is best-effort, never blocks hot path).
 //!
 //! MODULE_NOTE (中): 從 governance_core.rs 抽取，目的：(1) 把 facade 控制在
-//!   1500 LOC hard cap 之下；(2) 解耦 emit payload 與 helper，讓 E1 retrofit
+//!   inclusive 2000 LOC 上限（≤ 2000）內；(2) 解耦 emit payload 與 helper，讓 E1 retrofit
 //!   （release_lease cleanup line + periodic sweeper）與 E4 retrofit
 //!   （engine_mode_tag wiring）可獨立 land 不撞 governance_core.rs LOC 預算；
 //!   (3) 給跨 crate writer
@@ -51,8 +51,8 @@ use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
 // Lease facade types — moved here from governance_core.rs round-2 retrofit
-// （E2 verdict HIGH-1，2026-05-03）to keep the facade under 1500 LOC hard cap.
-// 從 governance_core.rs 第二輪 retrofit 搬來，控 facade 在 1500 LOC hard cap。
+// （E2 verdict HIGH-1，2026-05-03）to keep the facade within the inclusive 2000 LOC ceiling.
+// 從 governance_core.rs 第二輪 retrofit 搬來，將 facade 控制在 inclusive 2000 LOC 上限（≤ 2000）內。
 // ---------------------------------------------------------------------------
 
 /// LeaseId — facade-level identifier returned by `acquire_lease()`.

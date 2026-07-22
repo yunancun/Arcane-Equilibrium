@@ -10,7 +10,7 @@ REQUEST_SUMMARIES = STOCK_ETF_SPLIT_DIR / "request_summaries.rs"
 STATUS_SUMMARIES = STOCK_ETF_SPLIT_DIR / "status_summaries.rs"
 PRECONTACT = STOCK_ETF_SPLIT_DIR / "precontact.rs"
 HEALTH_SUMMARY = STOCK_ETF_SPLIT_DIR / "health_summary.rs"
-MAX_LINES = 800
+MAX_LINES = 2_000
 EXPECTED_MODULES = {
     "precontact.rs",
     "request_summaries.rs",

@@ -120,16 +120,16 @@ logic must use wall-clock time (milliseconds), not tick counts.
 
 ## 4. Phase A — Signal Source Tightening (Rust Strategy Layer)
 
-### A0. File Size Prerequisite — Extract & Refactor
+### A0. 依賴／Ownership 前置作業 — Extract & Refactor
 
-**Problem**: grid_trading.rs=1234 lines (>1200 hard limit), ma_crossover.rs=834 lines (>800 warning).
+**歷史問題陳述**：grid_trading.rs=1234 行、ma_crossover.rs=834 行，曾超過當時生效的較低門檻。現行可重用的檔案大小 acceptance 唯一門檻為 `≤ 2000` 行（含 2000）；兩個歷史實測值都低於此門檻，因此任何拆分都必須由 dependency／ownership 證成，不得只因檔案大小。下方 ~1104 行是非阻擋工程估算，不是 acceptance gate。
 
 **A0-a: Extract grid_helpers.rs from grid_trading.rs**
 Move ~130 lines of pure grid computation helpers (build_linear_levels, build_geometric_levels,
 build_levels, nearest_grid_idx, compute_ou_step, rebalance) to `strategies/grid_helpers.rs`.
-Target: grid_trading.rs ≤ 1104 lines. (R3-5: verified only ~130 lines are cleanly extractable
+工程估算：grid_trading.rs ~1104 行（non-blocking）。(R3-5: verified only ~130 lines are cleanly extractable
 as pure functions without &self access, not 200 as originally estimated.)
-This is independent of confluence and must happen first.
+此項獨立於 confluence，且因為必須先建立 helper ownership 與 A0-b 所需的 dependency surface，所以 must happen first；理由不是檔案大小。
 
 **A0-b: Create confluence.rs shared module**
 New file `rust/openclaw_engine/src/strategies/confluence.rs` (~250 lines).

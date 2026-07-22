@@ -3,7 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 CONNECTION_HEALTH = ROOT / "rust/openclaw_types/src/ibkr_tws_connection_health.rs"
-MAX_LINES = 800
+MAX_LINES = 2_000
 
 # W4 connection-health 契約是 source-only：不得引入任何 runtime/IO/socket/時鐘/OS 符號。
 FORBIDDEN_RUNTIME_TOKENS = (

@@ -5,8 +5,8 @@
 //!   sell on up-cross. OU model: optimal spacing = σ·√(2/θ) with floor = 2× round-trip fee.
 //!   Geometric mode: equal ratio gaps (better for crypto). Inventory drift health check.
 //!
-//!   GRID-TRADING-MOD-SPLIT-1 (2026-04-23): pre-split file was 1729 lines
-//!   (over CLAUDE.md §九's 1200-line hard cap). Split into this `mod.rs`
+//!   GRID-TRADING-MOD-SPLIT-1 (2026-04-23): pre-split file measured 1729 lines.
+//!   Split for focused ownership under CLAUDE.md §九's 2000-line hard cap into this `mod.rs`
 //!   (struct + `Strategy` impl thin delegators + free fns + constants +
 //!   `GridHealth` enum) plus six sibling child modules:
 //!     - `params.rs`       — `GridTradingParams` + Default + `StrategyParams` impl
@@ -23,8 +23,8 @@
 //!   OU 模型：最佳間距 = σ·√(2/θ)，地板 = 2× 來回手續費。
 //!   幾何模式：等比間距（更適合加密貨幣）。含庫存漂移健康檢查。
 //!
-//!   GRID-TRADING-MOD-SPLIT-1（2026-04-23）：拆前檔案 1729 行（超過 CLAUDE.md
-//!   §九 1200 行硬上限）。拆為本 `mod.rs`（struct + `Strategy` impl 薄派發 +
+//!   GRID-TRADING-MOD-SPLIT-1（2026-04-23）：拆前檔案實測 1729 行；為聚焦責任
+//!   並遵守 CLAUDE.md §九 2000 行硬上限，拆為本 `mod.rs`（struct + `Strategy` impl 薄派發 +
 //!   自由函式 + 常數 + `GridHealth` enum）加六個 sibling child-module：
 //!     - `params.rs`       — `GridTradingParams` + Default + `StrategyParams` impl
 //!     - `constructors.rs` — `new` / `new_geometric` / `new_adaptive*` + `set_fee_rate` + `update_params` + `get_params`

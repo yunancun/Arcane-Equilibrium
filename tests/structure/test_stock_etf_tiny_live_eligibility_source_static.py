@@ -3,7 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 TINY_LIVE_ELIGIBILITY = ROOT / "rust/openclaw_types/src/stock_etf_tiny_live_eligibility.rs"
-MAX_LINES = 800
+MAX_LINES = 2_000
 
 REQUIRED_TYPE_TOKENS = {
     "STOCK_ETF_TINY_LIVE_ADR_PATH",

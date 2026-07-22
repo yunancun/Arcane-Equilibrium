@@ -823,7 +823,7 @@ criteria gate 的**純邏輯**在 Rust（`promotion_criteria.rs`），**資料 q
 - **降級 / rollback**：(a) flag-OFF = 凍結整個 Phase 3，sink no-op；(b) demo sink 結構上不持 live Arc = live RiskConfig 永遠不被此路徑碰（編譯期不變量，非 runtime 開關）；(c) GovernanceCore session-halt / daily-loss / drawdown veto = stress 時擋全 agent 調參；(d) v1 allowlist 空 = 即使誤開 flag 也 tune nothing；(e) live RiskConfig 促升唯一觸發 = operator Phase-2 confirm（撤 `OPENCLAW_LIVE_PATCH_SECRET` → 全 live patch fail-closed）。
 
 ### §3.9 E1 派發計劃（檔案邊界 + 並行度）
-- **E1-RUST-A（denylist + 遞迴 matcher，純函數，無 IO，可先行）**：新 sibling `applier_riskconfig.rs`（applier.rs 已 1072 行 >800，§九；新 DirectiveType+sink 加上去恐近 2000 cap → 拆 sibling，LOW 注意項已記）。含 `RISKCONFIG_SURVIVAL_DENYLIST` 常數（§3.1 真 dotted-path）+ `riskconfig_patch_leaves` 遞迴 + 判定函數 + 全 §3.3 對抗單測。
+- **E1-RUST-A（denylist + 遞迴 matcher，純函數，無 IO，可先行）**：新 sibling `applier_riskconfig.rs`（applier.rs 已 1072 行，仍低於現行 2000 行門檻；為保留職責邊界與 headroom，將新 DirectiveType+sink 拆到 sibling，LOW 注意項已記）。含 `RISKCONFIG_SURVIVAL_DENYLIST` 常數（§3.1 真 dotted-path）+ `riskconfig_patch_leaves` 遞迴 + 判定函數 + 全 §3.3 對抗單測。
 - **E1-RUST-B（DirectiveType + sink + clamp + wiring）**：parser.rs 加 `DirectiveType::AdjustRiskConfig`（enum + snake_case + ALLOWED_FIELDS 不變，params 仍 free-form）；apply_inner match arm（applier.rs:291）加 `apply_adjust_risk_config`；新 `RiskConfigDirectiveSink::demo(...)` struct（持 demo Arc）；clamp 在 `apply_patch` closure 內（§3.4）；tasks.rs spawn 處 wire（demo Arc，鏡像 :286）+ flag gate。
 - **依賴**：B 依賴 A（matcher 函數）。A 可與 Phase-2 `promotion_criteria.rs`（live 促升 criteria reuse）並行（不同檔）。
 - **E2 重點審查 3 點**：(1) **遞迴 matcher nested-widen**：`{"limits":{"leverage_max":50}}` 與 `{"cascade":{...}}` 必被拒（舊 top-level matcher 會放行 = 命門）；(2) **demo-only-Arc 結構閘**：grep + 型別證 RiskConfigDirectiveSink 欄位不含 `risk_stores.live`，且不調用 `select(engine_str)`（編譯期不可達 live）；(3) **allowlist-default-deny + U5**：未列舉葉 + 無 band 欄一律 default-deny；v1 對任何 RiskConfig patch 回 VetoedByDefaultDeny（證 inert）。
@@ -974,7 +974,6 @@ criteria gate 的**純邏輯**在 Rust（`promotion_criteria.rs`），**資料 q
 ### LOW / 注意
 - DynamicRiskSizer clamp 真碼在 maybe_update :199/:216/:298-306、LCB-UP :280-290（非 spec 引的 :42-99 config docs）。
 - `OPENCLAW_LIVE_PATCH_SECRET` 須 chmod 600 + 與 IPC secret 分離檔（secret_env.rs:25 無權限檢查）。
-- applier.rs 1072 行(>800)；P3 加 DirectiveType+sink 恐近 cap→考慮 sibling `applier_riskconfig.rs`。
+- applier.rs 1072 行（低於現行 2000 行門檻）；P3 加 DirectiveType+sink 時為保留職責邊界與 headroom，可考慮 sibling `applier_riskconfig.rs`。
 - Phase 3 demo sink 須明確 `select("demo")`（engine_routing unknown→paper fallback 會誤落 paper）。
 - **dirty-tree 撞號**：本 session 另一工作刪了 `openclaw_core/src/risk/regime.rs`（RegimeMultipliers 死配置修復）；P3 allowlist 含 `regime.*` 乘數→build 時確認不撞（該修復是 engine config.regime,P3 也是同源,需對齊）。
-

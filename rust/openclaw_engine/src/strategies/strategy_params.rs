@@ -5,13 +5,13 @@
 //!   BbBreakout / GridTrading / FundingArb) that back the per-section TOML config,
 //!   plus their `Default` impls, `build_confluence_config` helpers, and the
 //!   strategy-specific `default_*()` serde factories they reference. Split off
-//!   from `params.rs` (cluster C4c) to keep each sibling under §九 800-line soft
+//!   from `params.rs` (cluster C4c) to keep each sibling under §九 2000-line soft
 //!   warn. Shared types — `ParamRange`, `StrategyParamsConfig`, the TOML loader,
 //!   and the `StrategyParams` trait — remain in `params.rs`.
 //! MODULE_NOTE (中): 持有 5 個 `*Params` 結構（MaCrossover / BbReversion / BbBreakout /
 //!   GridTrading / FundingArb），對應各 section TOML 參數；含其 `Default` 實作、
 //!   `build_confluence_config` helper 與結構專用的 `default_*()` serde 工廠。
-//!   從 `params.rs` 切出（cluster C4c），讓各 sibling 落在 §九 800 行軟警告以下。
+//!   從 `params.rs` 切出（cluster C4c），讓各 sibling 落在 §九 2000 行軟警告以下。
 //!   共用型別（`ParamRange`、`StrategyParamsConfig`、TOML 載入器、`StrategyParams`
 //!   trait）留在 `params.rs`。
 

@@ -1,11 +1,11 @@
 """Reconciler/paper-state divergence healthcheck.
 
 MODULE_NOTE (EN): Split from ``checks_engine.py`` by CHECKS-ENGINE-SUBSPLIT
-to bring the engine healthcheck module back below the 1200-line hard cap. The
+for focused ownership under the 2000-line hard cap. The
 public import path remains available through ``checks_engine`` re-export.
 
 MODULE_NOTE (中): CHECKS-ENGINE-SUBSPLIT 從 ``checks_engine.py`` 拆出，
-讓 engine healthcheck 主模組回到 1200 行硬上限以下；外部仍可經
+讓 engine healthcheck 主模組聚焦並遵守 2000 行硬上限；外部仍可經
 ``checks_engine`` 原路徑 import。
 """
 

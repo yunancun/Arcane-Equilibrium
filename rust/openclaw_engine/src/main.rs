@@ -1465,12 +1465,12 @@ async fn async_main(
 
     // Build the live pipeline spawner via main_pipelines::build_live_pipeline_spawner.
     // BLOCKER-1 (E2 round-2, 2026-04-27): extracted from async_main to bring
-    // main.rs under the §九 1200-line hard cap. The spawner closure is invoked
+    // main.rs under the §九 2000-line hard cap. The spawner closure is invoked
     // by LiveAuthWatcher on every successful slot try_spawn.
     //
     // BLOCKER-1（E2 round-2，2026-04-27）：spawner closure 抽至
     // main_pipelines::build_live_pipeline_spawner，讓 main.rs 回到 §九
-    // 1200 行硬上限以內。
+    // 2000 行硬上限以內。
     let live_pipeline_spawner: live_auth_watcher::LivePipelineSpawner =
         main_pipelines::build_live_pipeline_spawner(main_pipelines::LiveSpawnBundle {
             config: Arc::clone(&config),

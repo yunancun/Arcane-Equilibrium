@@ -15,9 +15,9 @@
 //!        DbPool slot up to 30s → spawn periodic poll daemon).
 //!
 //!   Pure refactor of G3-09 Phase B Wave 1 land — 0 production behavior
-//!   change. Splits to bring `main.rs` under §九 1200-line hard limit
-//!   (1230 → ~1010) and `main_boot_tasks.rs` back near §九 800-line warn
-//!   line (1015 → ~865).
+//!   change. The split kept both files comfortably within the current §九
+//!   2000-line review/split threshold (`main.rs`: 1230 → ~1010;
+//!   `main_boot_tasks.rs`: 1015 → ~865).
 //!
 //! MODULE_NOTE (中): `main_boot_tasks` 的 sibling 模組（**不**放
 //!   `cost_edge_advisor::boot` 以免將啟動期依賴 — ipc_server slot type、
@@ -30,8 +30,8 @@
 //!        DbPool slot → spawn 定期 poll daemon）。
 //!
 //!   純 G3-09 Phase B Wave 1 已落地碼之 location refactor — 0 production
-//!   behavior 變化。為將 `main.rs` 壓在 §九 1200 行硬上限下（1230 → ~1010）+
-//!   讓 `main_boot_tasks.rs` 回到 §九 800 行 warn 線附近（1015 → ~865）。
+//!   behavior 變化。拆檔讓兩者舒適維持在現行 §九 2000 行 review/split 門檻內：
+//!   `main.rs` 1230 → ~1010；`main_boot_tasks.rs` 1015 → ~865。
 
 use openclaw_engine::config::{ConfigStore, RiskConfig};
 use openclaw_engine::cost_edge_advisor::{

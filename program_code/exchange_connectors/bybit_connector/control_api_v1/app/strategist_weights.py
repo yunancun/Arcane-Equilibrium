@@ -5,7 +5,7 @@ Governance refs: EX-06 §4 / CLAUDE.md §九 file-size discipline / G3-08 Phase 
 
 MODULE_NOTE (中文):
   本模組是 StrategistAgent 的 sibling，承載「策略偏好權重」與「外部依賴注入」
-  相關的 6 個方法，從 strategist_agent.py 拆出以維持主檔在 §九 800 行警告線之下。
+  相關的 6 個方法，從 strategist_agent.py 拆出以維持主檔在 §九 2000 行警告線之下。
   函數一律接受 ``agent: StrategistAgent`` 作為第一個參數。
 
   涵蓋方法：
@@ -19,7 +19,7 @@ MODULE_NOTE (中文):
 MODULE_NOTE (English):
   StrategistAgent sibling carrying 6 methods around "strategy preference weights"
   and "external dependency injection". Extracted from strategist_agent.py so the
-  main file stays under the §九 800-line warning threshold.
+  main file stays under the §九 2000-line warning threshold.
   Functions take ``agent: StrategistAgent`` as the first parameter.
 
   Covered methods:

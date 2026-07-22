@@ -144,10 +144,10 @@ def test_case1_all_8_endpoints_use_safe_query_wrapper_or_sanctioned_xact(
             # MUST contain a sync helper `_do_pg_path` / `_do_pg_cancel` OR
             # delegate to the security_guards `execute_replay_cancel_pg_path`
             # helper (Sprint 1 Track C E2 retrofit moved cancel PG body to
-            # sibling module for §九 1500 LOC cap compliance).
+            # sibling module for §九 2000 LOC limit compliance).
             # 必含 _do_pg_path / _do_pg_cancel 同步 helper，或委派
             # security_guards.execute_replay_cancel_pg_path（Sprint 1 Track C
-            # E2 retrofit 為 §九 1500 LOC cap 將 cancel PG body 移 sibling）。
+            # E2 retrofit 為 §九 2000 LOC 上限將 cancel PG body 移 sibling）。
             if not (
                 "_do_pg_path" in body_src
                 or "_do_pg_cancel" in body_src
@@ -418,7 +418,7 @@ def test_audit_helper_returns_clean_summary():
 
     Sprint 1 Track C E2 retrofit moved ``_do_pg_cancel`` body to
     ``replay/security_guards.py::execute_replay_cancel_pg_path`` for
-    §九 1500 LOC cap compliance; ``cur.execute`` hit count in
+    §九 2000 LOC limit compliance; ``cur.execute`` hit count in
     ``replay_routes.py`` dropped from 8 to 5.
 
     Sprint B1 R0-T0 (PA §11.3, 2026-05-05) further moved ``_do_pg_path``

@@ -2,7 +2,7 @@
 //! TickPipeline impl — 配置同步（risk / budget / maker_kpi / news / fee / account）。
 //!
 //! MODULE_NOTE (EN): Split out of `tick_pipeline/mod.rs` by TICK-PIPELINE-MOD-SPLIT-1
-//!   (2026-04-22) to honour CLAUDE.md §七's 1200-line hard cap. Contains the
+//!   (2026-04-22) to honour CLAUDE.md §七's 2000-line hard cap. Contains the
 //!   config-store wiring setters + tick-level hot-reload helpers for
 //!   RiskConfig / BudgetConfig / MakerKpiConfig / NewsContextSnapshot, and
 //!   the fee-rate / AccountManager passthroughs into the IntentProcessor.
@@ -13,7 +13,7 @@
 //!   `current_min_profit_to_close_pct`) were bumped to `pub(super)` for
 //!   cross-module visibility.
 //! MODULE_NOTE (中)：TICK-PIPELINE-MOD-SPLIT-1（2026-04-22）由 `tick_pipeline/mod.rs`
-//!   拆出以遵守 CLAUDE.md §七 1200 行硬上限。本檔包含 RiskConfig / BudgetConfig /
+//!   拆出以遵守 CLAUDE.md §七 2000 行硬上限。本檔包含 RiskConfig / BudgetConfig /
 //!   MakerKpiConfig / NewsContextSnapshot 的 config-store setter + tick-level
 //!   熱重載 helper，以及 fee rate / AccountManager 透傳到 IntentProcessor。
 //!   `apply_risk_snapshot` 保持 private（呼叫者：同檔 `set_risk_store` +

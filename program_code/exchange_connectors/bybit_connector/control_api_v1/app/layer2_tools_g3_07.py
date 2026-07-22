@@ -10,8 +10,8 @@ MODULE_NOTE (中文):
     - check_derivatives    — Bybit V5 衍生品多指標快照（單次往返）
 
   為什麼分檔（不寫進 layer2_tools.py）：
-    - layer2_tools.py 加入 schema + handler 後達 1496 行（> §九 1200 硬上限）。
-    - 抽出 G3-07 區塊到 sibling 後 layer2_tools.py 回到合規行數。
+    - layer2_tools.py 加入 schema + handler 後達 1496 行；抽出 G3-07 區塊
+      讓主檔責任更聚焦，且維持在現行 §九 2000 行上限內。
     - schema entries / handler dict registration 仍留在 layer2_tools.py，
       sibling 只負責「fetch 與解析」純函式 + dataclass↔dict 轉換。
 
@@ -27,9 +27,9 @@ MODULE_NOTE (English):
     - query_onchain       — single on-chain / derivatives metric
     - check_derivatives   — Bybit V5 derivatives multi-metric snapshot (1 round-trip)
 
-  Why split out of layer2_tools.py: that file would exceed §九 1200-line hard
-  cap once schema + handler were added; extracting the G3-07 block keeps both
-  files compliant. Schema entries + handler dict registration remain in
+  Why split out of layer2_tools.py: extracting the G3-07 block keeps ownership
+  focused and both files within the current §九 2000-line limit. Schema entries
+  + handler dict registration remain in
   layer2_tools.py; this sibling only carries fetch / parse pure functions and
   dataclass-to-dict converters.
 

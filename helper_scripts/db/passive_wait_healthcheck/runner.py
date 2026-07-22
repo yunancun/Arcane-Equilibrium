@@ -90,9 +90,9 @@ from .checks_feature_baseline import (
 from .checks_cost_edge import (
     # G3-09 Phase A (2026-04-27) → Phase B (2026-04-28) cost_edge_advisor sentinel
     # — extracted into sibling by HIGH-1 fix (2026-04-28) so checks_derived.py
-    # stays under CLAUDE.md §九 1200-line hard cap.
+    # stays focused under CLAUDE.md §九 2000-line hard cap.
     # G3-09 Phase A → Phase B cost_edge_advisor 哨兵 — HIGH-1 fix 抽至 sibling，
-    # 維持 checks_derived.py 1200 行硬上限。
+    # 維持 checks_derived.py 2000 行硬上限。
     check_cost_edge_advisor_status,
 )
 from .checks_execution import (

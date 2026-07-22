@@ -4,8 +4,8 @@
  * MODULE_NOTE
  * 模塊用途:承接 view-agents.js 主檔(Phase 2 第 5 遷)拆出的 **本地 Agent Monitor 只讀面**——
  *   本地 5-Agent / Rust engine / event-store row proof 的**唯讀總覽**(authority lockdown /
- *   topology / degraded·error state 三面板)。拆檔理由:主檔逼近 800 硬性
- *   上限,openclaw 面自成一塊(獨立 read-only header fetch 契約),拆出使兩檔各 <800 且職責分明。
+ *   topology / degraded·error state 三面板)。拆檔理由:保留現行 2000 行 policy 空間，
+ *   且 openclaw 面自成一塊(獨立 read-only header fetch 契約);兩檔各 <2000 且職責分明。
  *   本檔不註冊 OC_NATIVE_VIEWS(非獨立 view),而註冊 window.OC_AGENTS_OPENCLAW = {render, load},
  *   由主檔於 renderAgentsView 掛鉤(render 建面板骨架進主檔的 .ag-openclaw 宿主)+ loadAll 驅動(load)。
  *   內容逐元素守恆(對 legacy openclaw-agent-control.js,零丟失):

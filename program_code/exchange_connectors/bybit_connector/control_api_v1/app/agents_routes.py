@@ -8,7 +8,7 @@ MODULE_NOTE (EN): MVP backend for "AI 团队工作台" Learning Cockpit sub-sect
   helper composition (``_fetch_*`` SQL readers, ``_build_*_card`` per-role
   builders, ``_compose_summary_zh``) lives in ``agents_routes_helpers.py``
   (E2 round-2 finding M-3 split). The split keeps both files under the §九
-  800-line warning line and lets future C-1 / C-2 endpoints land without
+  2000-line warning line and lets future C-1 / C-2 endpoints land without
   re-breaking it. Endpoints exposed:
 
     GET /api/v1/agents/roster                — aggregated 5-Agent runtime view
@@ -38,7 +38,7 @@ MODULE_NOTE (EN): MVP backend for "AI 团队工作台" Learning Cockpit sub-sect
 MODULE_NOTE (中): Agent 追蹤視圖只讀路由（plan T1 後端 MVP）。本檔僅放
   *route handler*；helper（_fetch_* / _build_*_card / _compose_summary_zh）
   已拆至 ``agents_routes_helpers.py``（E2 round-2 M-3）。兩檔皆保持在
-  §九 800 行警告線下，未來 C-1 / C-2 endpoint 再加也不會破。曝露端點：
+  §九 2000 行警告線下，未來 C-1 / C-2 endpoint 再加也不會破。曝露端點：
 
     GET /api/v1/agents/roster                — 5 個 Agent 聚合視圖
     GET /api/v1/agents/recent_rejects        — 最近 REJECTED 風控裁定（C-1a）

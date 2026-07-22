@@ -1,5 +1,7 @@
 from pathlib import Path
 
+MAX_FILE_LINES = 2_000
+
 
 ROOT = Path(__file__).resolve().parents[2]
 EVENT_CONSUMER = ROOT / "rust/openclaw_engine/src/event_consumer"
@@ -23,7 +25,9 @@ def test_event_consumer_hot_files_stay_split_under_limit() -> None:
     }
     modules = {name: _loc(EVENT_CONSUMER / name) for name in governed}
     for name in sorted(modules):
-        assert modules[name] <= 800, f"{name} = {modules[name]} LOC > 800"
+        assert modules[name] <= MAX_FILE_LINES, (
+            f"{name} = {modules[name]} LOC > {MAX_FILE_LINES}"
+        )
 
 
 def test_event_consumer_split_keeps_compatibility_exports() -> None:

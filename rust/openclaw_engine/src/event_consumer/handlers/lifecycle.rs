@@ -1,11 +1,11 @@
 //! Lifecycle / session-level IPC command handlers (Pause / Resume / Reset /
 //! CloseAll / CloseSymbol / SubmitOrder / SetStrategyActive / SetSystemMode /
 //! AdoptOrphan). Extracted from the legacy `handlers.rs` monolith as part of
-//! E5-P1-3 to keep each domain file under the 800-line warning threshold.
+//! E5-P1-3 to keep each domain file under the 2000-line warning threshold.
 //!
 //! 生命週期 / 會話級 IPC 命令處理器（暫停 / 恢復 / 重置 / 全部平倉 / 單倉平倉 /
 //! 下單 / 策略啟停 / 系統模式 / 孤兒接管）— E5-P1-3 從舊 handlers.rs 拆出，
-//! 保持每個檔案低於 800 行警告線。
+//! 保持每個檔案低於 2000 行警告線。
 //!
 //! MODULE_NOTE (EN): Behaviour is identical to the pre-split code; each free
 //!   function encapsulates exactly one match-arm body from `handle_paper_command`

@@ -9,7 +9,7 @@ ENVELOPE = ROOT / "rust/openclaw_types/src/ibkr_activation_envelope.rs"
 ENVELOPE_CHECK = ROOT / "rust/openclaw_engine/src/ibkr_activation_envelope_check.rs"
 # R16 EA3 mini-wiring:G4 entry 消費驗證器的檔（rust/openclaw_engine/src/ibkr_readonly_tws_client.rs）。
 READONLY_CLIENT = ROOT / "rust/openclaw_engine/src/ibkr_readonly_tws_client.rs"
-MAX_LINES = 800
+MAX_LINES = 2_000
 
 # ── types 契約層:契約 id + readonly 單值白名單 + 24h 窗上限 ────────────────────
 REQUIRED_CONTRACT_TOKENS = {

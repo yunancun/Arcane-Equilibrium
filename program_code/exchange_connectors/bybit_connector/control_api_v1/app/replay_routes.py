@@ -12,7 +12,7 @@ MODULE_NOTE (EN):
     cross-platform clean (CLAUDE.md §七 ★★, no /Users / /home literals).
 
     Sprint 1 Track C E2 retrofit moved P0-2 / P0-4 / P0-5 security helpers to
-    sibling ``replay/security_guards.py`` for §九 1500 LOC cap compliance.
+    sibling ``replay/security_guards.py`` for §九 2000 LOC limit compliance.
 
 MODULE_NOTE (中):
     Wave 4 R20-P2b-T2 + T3 合併交付。8 路由（POST /run + /cancel + /manifest/
@@ -24,7 +24,7 @@ MODULE_NOTE (中):
     跨平台合規（CLAUDE.md §七 ★★，無 /Users / /home literal）。
 
     Sprint 1 Track C E2 retrofit 把 P0-2 / P0-4 / P0-5 安全 helper 移至
-    sibling ``replay/security_guards.py``，符合 §九 1500 LOC cap。
+    sibling ``replay/security_guards.py``，符合 §九 2000 LOC 上限。
 
 CRITICAL — DO NOT add ``from __future__ import annotations`` to this module.
 重要 — 本模組嚴禁加回 ``from __future__ import annotations``。
@@ -189,14 +189,14 @@ _ACTIVE_RUNS_LOCK: asyncio.Lock = asyncio.Lock()
 # Pydantic Models / 請求響應模型
 #
 # Sprint A R1-T3 (2026-05-04) extraction: the 3 request models below were moved
-# to ``replay/replay_models.py`` so this file stays under the §九 1500 LOC cap
+# to ``replay/replay_models.py`` so this file stays within the §九 2000 LOC limit
 # after the ``/api/v1/replay/health`` route lands. Behaviour is byte-identical
 # to the prior inline form; module-level aliases preserve back-compat for
 # ``__all__`` consumers and existing tests.
 #
 # Sprint A R1-T3（2026-05-04）抽出：下方 3 個請求模型已移到
 # ``replay/replay_models.py``，目的是讓本檔在 ``/api/v1/replay/health`` 路由
-# 上線後仍守住 §九 1500 LOC 硬上限。行為與內嵌完全等同；模組級別名保留
+# 上線後仍守住 §九 2000 LOC 上限。行為與內嵌完全等同；模組級別名保留
 # ``__all__`` 消費者與既有測試的向後相容性。
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -278,7 +278,7 @@ _replay_limiter = base.limiter
 
 # Note / 註：binary path / output dir / advisory lock / V045 helpers
 # are imported from replay.route_helpers (Wave 4 R20-P2b-T2 split per
-# CLAUDE.md §九 1500 LOC cap). They are aliased above to keep the
+# CLAUDE.md §九 2000 LOC limit). They are aliased above to keep the
 # private-name convention used in this module.
 
 
@@ -356,7 +356,7 @@ async def _async_safe_pg_select(
 # Routes / 路由
 #
 # Note / 註：subprocess Popen wrapper (_spawn_replay_runner) is imported from
-# replay.route_helpers (Wave 4 R20-P2b-T2 split per CLAUDE.md §九 1500 LOC cap).
+# replay.route_helpers (Wave 4 R20-P2b-T2 split per CLAUDE.md §九 2000 LOC limit).
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
@@ -371,7 +371,7 @@ async def post_experiment_register(
     在 V049 註冊 manifest（R2-T1 薄 handler）。Auth: Operator + ``replay:write``.
     Rate limit: 10/min per-actor (R2 round 2 fix M-2; slowapi 0.1.9 falls
     back to per-IP under current wiring — see ``_replay_rate_limit_key``).
-    Logic: ``replay/experiment_registry.py`` (CLAUDE.md §九 1500 LOC cap).
+    Logic: ``replay/experiment_registry.py`` (CLAUDE.md §九 2000 LOC limit).
     """
     _require_replay_write(actor)
     actor_id = str(actor.actor_id)
@@ -409,7 +409,7 @@ async def post_replay_run(
 
     Auth: Operator + ``replay:write``. Concurrency cap V3 §5: global=1, per-actor=1.
     Rate limit: 10/min per-actor (R2 round 2 fix M-2).
-    Logic: ``replay/run_route.py`` (CLAUDE.md §九 1500 LOC cap; PA §11.3
+    Logic: ``replay/run_route.py`` (CLAUDE.md §九 2000 LOC limit; PA §11.3
     R0-T0 extract). In-memory fallback path stays here because it touches
     module-level state (``_ACTIVE_RUNS`` + ``_ACTIVE_RUNS_LOCK``).
     """
@@ -518,7 +518,7 @@ async def post_run_finalize(
     Finalize 已完成的 replay run：寫 V046 + V050 + UPDATE V045。
 
     REF-20 Sprint A R3-T1 (2026-05-04). Auth: Operator + ``replay:write``.
-    Logic in ``replay/run_finalize_route.py`` (CLAUDE.md §九 1500 LOC cap).
+    Logic in ``replay/run_finalize_route.py`` (CLAUDE.md §九 2000 LOC limit).
     """
     _require_replay_write(actor)
     # REF-20 Sprint A R3 round 2 fix M-2: finalize uses
@@ -559,7 +559,7 @@ async def get_replay_status(
     取得當前呼叫方 actor 的 replay run 狀態（R0-T0 薄 handler）。
 
     Read-only; no scope requirement beyond authentication. Logic in
-    ``replay/status_route.py`` (CLAUDE.md §九 1500 LOC cap; PA §11.3
+    ``replay/status_route.py`` (CLAUDE.md §九 2000 LOC limit; PA §11.3
     R0-T0 extract). In-memory fallback stays here because it touches
     module-level ``_ACTIVE_RUNS`` + ``_ACTIVE_RUNS_LOCK``.
     """
@@ -633,9 +633,9 @@ async def post_replay_cancel(
     _require_replay_write(actor)
     actor_id = str(actor.actor_id)
 
-    # Track C E2 retrofit: PG path body in security_guards (§九 1500 LOC cap);
+    # Track C E2 retrofit: PG path body in security_guards (§九 2000 LOC limit);
     # caller sends SIGTERM after success (xact-external for hermetic test).
-    # Track C E2 retrofit：PG path body 於 security_guards（§九 1500 LOC cap）；
+    # Track C E2 retrofit：PG path body 於 security_guards（§九 2000 LOC 上限）；
     # caller 成功後送 SIGTERM（xact 外，hermetic test 友好）。
     cancelled_dict, pg_err = await asyncio.to_thread(
         _sg.execute_replay_cancel_pg_path,
@@ -756,7 +756,7 @@ async def get_replay_report(
 
     Read-only; authentication required. Logic in
     ``replay/report_route.py`` (R2 round 2 fix H-3 cross-route consistency
-    extraction; CLAUDE.md §九 1500 LOC cap on this file).
+    extraction; CLAUDE.md §九 2000 LOC limit on this file).
 
     Read-only；需認證。Logic 在 ``replay/report_route.py``（R2 round 2
     fix H-3 跨 route 一致性抽出）。
@@ -1039,7 +1039,7 @@ async def get_replay_health(
     plan §6.R1 acceptance "binary resolution + /api/v1/replay/health
     behind the intended auth policy". Auth = ``Depends(base.current_actor)``
     (logged-in only); monitoring infra without write scope can probe.
-    Logic in ``replay/health_route.py`` (CLAUDE.md §九 1500 LOC cap;
+    Logic in ``replay/health_route.py`` (CLAUDE.md §九 2000 LOC limit;
     PA §11.3 R0-T0 extract).
 
     Aggregates four pre-conditions for ``/run`` usability:
@@ -1125,8 +1125,8 @@ async def get_replay_list(
     """List replay experiments visible to the calling actor (R0-T0 thin handler).
     列出呼叫方 actor 可見的 replay experiments（R0-T0 薄 handler）。
 
-    Read-only. Logic in ``replay/list_route.py`` (CLAUDE.md §九 1500 LOC
-    cap; PA §11.3 R0-T0 extract). Queries V045 replay.run_state for
+    Read-only. Logic in ``replay/list_route.py`` (CLAUDE.md §九 2000 LOC
+    limit; PA §11.3 R0-T0 extract). Queries V045 replay.run_state for
     actor's full run history (incl. completed / failed / cancelled).
 
     Read-only。Logic 在 ``replay/list_route.py``（PA §11.3 R0-T0 抽出）。

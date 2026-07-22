@@ -4,15 +4,16 @@ REF-20 Sprint B1 R0-T0 — GET /api/v1/replay/health endpoint 邏輯抽出。
 MODULE_NOTE (EN):
     Sprint B1 R0-T0 (2026-05-05) extraction. Owns the
     ``GET /api/v1/replay/health`` business logic so the thin handler in
-    ``app/replay_routes.py`` keeps under the CLAUDE.md §九 1500 LOC hard
-    cap. PA design report `2026-05-05--ref20_sprint_b_task_dag.md` §11.3
+    ``app/replay_routes.py`` stays within the CLAUDE.md §九 inclusive
+    2000 LOC ceiling. PA design report
+    `2026-05-05--ref20_sprint_b_task_dag.md` §11.3
     requires R0-T0 LOC release before R4 (UI enable) + R5 (real
     decision/risk replay path) IMPL can land.
 
     Why this module exists (PA push back):
       ``replay_routes.py`` reached EXACT 1500 LOC after Sprint A R3 round 6
       hotfix wiring. R4/R5 IMPL adds ~800 LOC. Without R0-T0 thin-handler
-      extraction, Sprint B violates §九 1500 LOC hard cap.
+      extraction, Sprint B would exceed the §九 inclusive 2000 LOC ceiling.
 
     What this module does:
       - ``aggregate_replay_health(*, async_safe_pg_select_fn,
@@ -36,7 +37,8 @@ MODULE_NOTE (EN):
 MODULE_NOTE (中):
     Sprint B1 R0-T0（2026-05-05）抽出。擁有
     ``GET /api/v1/replay/health`` 業務邏輯，使 ``app/replay_routes.py``
-    薄 handler 守住 CLAUDE.md §九 1500 LOC 硬上限。PA design report
+    薄 handler 維持在 CLAUDE.md §九 inclusive 2000 LOC 上限（≤ 2000）內。
+    PA design report
     ``2026-05-05--ref20_sprint_b_task_dag.md`` §11.3 要求 R0-T0 LOC
     釋放後 R4（UI enable）+ R5（real decision/risk replay path）IMPL
     才可進。
@@ -44,7 +46,7 @@ MODULE_NOTE (中):
     本 module 為何存在（PA push back）：
       ``replay_routes.py`` 在 Sprint A R3 round 6 hotfix wiring 後達 EXACT
       1500 LOC。R4/R5 IMPL 加 ~800 LOC。若不做 R0-T0 thin-handler 抽出，
-      Sprint B 將違反 §九 1500 LOC 硬上限。
+      Sprint B 將超過 §九 inclusive 2000 LOC 上限（≤ 2000）。
 
     本 module 做的事：
       - ``aggregate_replay_health(...)`` coroutine 實作 3 步驟。

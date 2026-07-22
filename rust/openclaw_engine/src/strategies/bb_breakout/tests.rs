@@ -1,10 +1,10 @@
 //! BB Breakout core unit tests — entry/exit, params, E5-P2-4 hot-reload, PostOnly.
 //! BB 突破核心單元測試 — 入場/出場、參數、E5-P2-4 熱重載、PostOnly。
 //!
-//! MODULE_NOTE (EN): Split from monolithic `mod tests` to keep each file ≤ 800
+//! MODULE_NOTE (EN): Split from monolithic `mod tests` to keep each file ≤ 2000
 //!   soft warn. OI confluence + rejection rollback tests live in
 //!   `tests_oi.rs`. Helpers (`ctx`, `ctx_ext`) here are local to this module.
-//! MODULE_NOTE (中): 從單檔 `mod tests` 拆出以維持每檔 ≤ 800 soft warn；OI 合流
+//! MODULE_NOTE (中): 從單檔 `mod tests` 拆出以維持每檔 ≤ 2000 soft warn；OI 合流
 //!   與拒絕回滾測試在 `tests_oi.rs`。本檔 `ctx`/`ctx_ext` 助手僅供本模組使用。
 
 use super::super::{Strategy, StrategyAction, StrategyParams};

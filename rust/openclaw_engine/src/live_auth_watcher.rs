@@ -1031,12 +1031,12 @@ impl LiveAuthWatcher {
 // ---------------------------------------------------------------------------
 // Tests / 測試
 // BLOCKER-1 (E2 round-2, 2026-04-27): tests extracted to
-// `live_auth_watcher_tests.rs` to bring this file under the 1200-line
+// `live_auth_watcher_tests.rs` to bring this file under the 2000-line
 // hard cap (CLAUDE.md §九). The #[cfg(test)] module declaration below
 // re-exports the file so `cargo test --bin openclaw-engine` sees all tests.
 //
 // BLOCKER-1（E2 round-2，2026-04-27）：測試抽到 `live_auth_watcher_tests.rs`，
-// 讓本檔回到 1200 行硬上限以內（CLAUDE.md §九）。下方 #[cfg(test)] mod
+// 讓本檔回到 2000 行硬上限以內（CLAUDE.md §九）。下方 #[cfg(test)] mod
 // 宣告讓 `cargo test --bin openclaw-engine` 仍能看到所有測試。
 // ---------------------------------------------------------------------------
 

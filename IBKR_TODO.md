@@ -81,7 +81,7 @@ W2-W11 的全部 DoD 都封頂在 `source-ready` + `runtime-active(inactive post
 | `rust/openclaw_fake_tws/` | dev-crate | W3-S4 fake-TWS(15 場景+故障注入);dev-dependency only,production 零 fake 符號(nm audit 入 CI) |
 | `ibkr_readonly_tws_client.rs` | ~1.4k 行 | B1:純 codec + 泛型 driver(handshake+`reqCurrentTime`)+ `assert_loopback_paper_endpoint`(硬編 `127.0.0.1:4002`,4001/7496 硬拒)+ `g4_operator_triggered_first_contact`(唯一 `TcpStream::connect`,`ibkr_g4_contact` feature-gate;**default build 零 socket 符號**);26 測試(tokio duplex synthetic frames) |
 | `ibkr_secret_slot_loader.rs` | ~0.8k 行 | P1 fingerprint-only loader;**scaffold(檔級 `allow(dead_code)`,無 production 讀者;TODO(P5) 接 attestation/healthcheck)**;18 測試 |
-| `ipc_server/handlers/stock_etf.rs`(779 行,PR#42 拆檔後<800)+ `stock_etf/` 子目錄(health_summary/precontact/summaries) | ~3k 行 | **17** 個 `stock_etf.get_*` 唯讀 IPC method(W4 +`get_connection_health`;零 mutate verb)+ fixtures |
+| `ipc_server/handlers/stock_etf.rs`(779 行,PR#42 拆檔後，低於現行 2000 行門檻)+ `stock_etf/` 子目錄(health_summary/precontact/summaries) | ~3k 行 | **17** 個 `stock_etf.get_*` 唯讀 IPC method(W4 +`get_connection_health`;零 mutate verb)+ fixtures |
 | `bin/ibkr_phase2_seal.rs` | 111 行 | W2 seal CLI:default dry-run;`--apply` + `OPENCLAW_IBKR_PHASE2_SEAL_APPLY=1` 雙閘 |
 | `bin/ibkr_g4_first_contact.rs` | 53 行 | G4 CLI 薄殼(`required-features=ibkr_g4_contact` + `OPENCLAW_IBKR_G4_CONTACT_APPLY=1`,default dry-run) |
 
@@ -204,7 +204,7 @@ W2-W11 的全部 DoD 都封頂在 `source-ready` + `runtime-active(inactive post
 
 ### W4 — P4 connection-health IPC/route + normalizer lockstep ✅ **DONE 2026-07-16(loop R7,W4-1)**
 
-**收口紀錄**:W4-1 lockstep 單 PR——`IbkrConnectionHealthReportV1` + Rust emitter(ephemeral manager 撞 permit → `external_verification_pending`,零 socket)+ `get_connection_health` IPC + FastAPI GET route + normalizer 三層 lockstep + fail-closed 四道 + driver-absence audit 入 CI。五腿:E2 APPROVE/E3 PASS(授權面無繞過)/IB PASS/E4 全綠/QA ACCEPT。GUI 面 defer W9(採 PA 建議,避免二次觸碰玄衡 shell)。**W5 blocking 移交(見 W5 節)**:Layer 3 lineage-present 分支窮舉性遠弱於 Layer 2 + parity 缺 operational-欄⊆guard superset 斷言,seal lineage 前必修。**pre-existing 治理債**:handler cap(HEAD 826>800)+ runtime-material-reader 3 紅守衛不在 CI(drift),W4 +5→831 加劇非引入(E2/E3/QA 三方驗屍)——**已解(PR#42 `275c76c59`,2026-07-16:`stock_etf.rs` 826→779<800、結構守衛接 CI、classifier 擴 6 prefix;task_2dbb7f53 closed)**。
+**收口紀錄**:W4-1 lockstep 單 PR——`IbkrConnectionHealthReportV1` + Rust emitter(ephemeral manager 撞 permit → `external_verification_pending`,零 socket)+ `get_connection_health` IPC + FastAPI GET route + normalizer 三層 lockstep + fail-closed 四道 + driver-absence audit 入 CI。五腿:E2 APPROVE/E3 PASS(授權面無繞過)/IB PASS/E4 全綠/QA ACCEPT。GUI 面 defer W9(採 PA 建議,避免二次觸碰玄衡 shell)。**W5 blocking 移交(見 W5 節)**:Layer 3 lineage-present 分支窮舉性遠弱於 Layer 2 + parity 缺 operational-欄⊆guard superset 斷言,seal lineage 前必修。**pre-existing 治理債**:handler 曾因舊制較低門檻被標記，另有 runtime-material-reader 3 紅守衛不在 CI(drift)，W4 +5→831 加劇非引入(E2/E3/QA 三方驗屍)——**已解(PR#42 `275c76c59`,2026-07-16:`stock_etf.rs` 826→779、結構守衛接 CI 並統一現行 2000 行門檻、classifier 擴 6 prefix;task_2dbb7f53 closed)**。
 
 **目標**:把 session 健康狀態沿 Rust IPC → FastAPI → GUI 唯讀鏈路端到端接通,同步演進 Python normalizer 的負空間 attestation。
 

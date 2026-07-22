@@ -22,7 +22,7 @@ use std::collections::HashMap;
 use crate::exit_features::ExitConfig;
 
 // G1-03 Wave 1 Rust refactor (2026-04-24): advanced sub-configs extracted to
-// risk_config_advanced.rs sibling to bring this file under §九 1200-line limit.
+// risk_config_advanced.rs sibling to bring this file under §九 2000-line limit.
 // G1-03 Wave 1 Rust refactor（2026-04-24）：進階子配置抽至 sibling。
 #[path = "risk_config_advanced.rs"]
 mod advanced;
@@ -34,18 +34,18 @@ pub use advanced::{
 
 // G7-03 (2026-04-24): Hurst + hysteresis regime detector schema lives in its
 // own sibling file (per §九 file-size discipline — `risk_config_advanced.rs`
-// already at ~1198 lines, 2 from the 1200-line cap).
+// measured ~1198 lines at the split, preserving headroom under the 2000-line cap).
 // G7-03：Hurst + hysteresis schema 在獨立 sibling 檔，符合 §九 行數規範。
 #[path = "risk_config_regime.rs"]
 pub mod regime_cfg;
 pub use regime_cfg::HurstConfig;
 
 // G3-09 Phase A (2026-04-27): cost_edge_advisor schema lives in its own
-// sibling file (`risk_config_advanced.rs` at 1297 lines, well over the §九
-// 1200 hard cap; piling more onto it compounds the violation). Pattern
+// sibling file (`risk_config_advanced.rs` measured 1297 lines at the split;
+// focused ownership preserves headroom under the §九 2000 hard cap). Pattern
 // mirrors `risk_config_regime.rs` (HurstConfig sibling).
-// G3-09 Phase A：cost_edge schema 落在獨立 sibling 檔，避免再壓縮已超標
-// 的 advanced 檔；對齊 regime_cfg sibling 拆分模式。
+// G3-09 Phase A：cost_edge schema 落在獨立 sibling 檔，讓 advanced 檔聚焦並
+// 保留現行 2000 行上限空間；對齊 regime_cfg sibling 拆分模式。
 #[path = "risk_config_cost_edge.rs"]
 pub mod cost_edge_cfg;
 pub use cost_edge_cfg::CostEdgeConfig;
@@ -832,10 +832,10 @@ pub struct CategoryOverride {
 //
 // G2-03 (2026-04-26) refactor: StrategyOverride struct + Default + impl
 // extracted to sibling `risk_config_per_strategy.rs` to keep this file under
-// CLAUDE.md §九 1200-line hard cap. `pub use` below preserves public API
+// CLAUDE.md §九 2000-line hard cap. `pub use` below preserves public API
 // path `crate::config::risk_config::StrategyOverride` for all callers.
 //
-// G2-03（2026-04-26）重構：StrategyOverride 抽至 sibling 守 §九 1200 行硬上限；
+// G2-03（2026-04-26）重構：StrategyOverride 抽至 sibling 守 §九 2000 行硬上限；
 // `pub use` 保留 `crate::config::risk_config::StrategyOverride` 公開 API 路徑。
 #[path = "risk_config_per_strategy.rs"]
 mod per_strategy;

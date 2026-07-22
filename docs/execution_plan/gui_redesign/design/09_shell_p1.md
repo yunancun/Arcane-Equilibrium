@@ -42,9 +42,9 @@
 | `static/shell.css` | 殼 chrome 版式 class(grid areas / topbar / rail / statusbar / beam / iframe-host / mode-band)。只消費 tokens.css 語義 var。 | ~350–500 | hex=0 |
 | `static/shell.js` | view-router(hash 路由)+ iframe host 管理 + lane 切換 + theme/density toggle + 衡樑 render(blocked)+ topbar 狀態接線。 | ~450–650 | 0/0/0 |
 
-**拆檔種子(若 shell.js 逼近 800):** 抽 VIEWS 註冊表(純資料)→ `static/shell-views.js`,router 邏輯留 shell.js。
+**拆檔種子(若 shell.js 逼近 2000 或職責邊界已明確):** 抽 VIEWS 註冊表(純資料)→ `static/shell-views.js`,router 邏輯留 shell.js。
 `shell-views.js` 為 second-adapter 的穩定接口(P2 遷移把某 view 的 `iframe:true` 改 `false` + 指向新 render fn,
-不動 router)。三新檔各 <800 硬性;超則先拆再交。
+不動 router)。三新檔各以 ≤2000 為唯一檔案大小門檻；超過時先拆或登記例外再交。
 
 **依賴載入順序(mirror console.html 頭部):** `fetch_with_csrf.js` → `common-formatters.js` →
 `common-mode-badge.js` → `common-modals.js` → `common.js`(提供 `ocAuthCheck`/`withBuildVersion`/`ocEsc` 等)

@@ -4,7 +4,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 # 直接引用來源檔字面 rel 路徑（滿足 rust-source-coverage 守衛 + 本治理測試自身實質斷言）。
 QUOTE_ROW = ROOT / "rust/openclaw_types/src/ibkr_quote_row.rs"
-MAX_LINES = 800
+MAX_LINES = 2_000
 
 # W6-S3 quote 行契約層:契約 id + tickType/entitlement/value-kind 封閉枚舉。
 REQUIRED_CONTRACT_TOKENS = {

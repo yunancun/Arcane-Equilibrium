@@ -2,11 +2,11 @@
 //! BB 突破 runtime 參數熱重載 + 回吐。
 //!
 //! MODULE_NOTE (EN): Inherent `impl BbBreakout` for `update_params` /
-//!   `get_params`. Split from `mod.rs` so the strategy core stays ≤ 800 soft
+//!   `get_params`. Split from `mod.rs` so the strategy core stays ≤ 2000 soft
 //!   warn. Rust allows inherent impl blocks to live across files in the same
 //!   module path; this file compiles into the same `BbBreakout` type.
 //! MODULE_NOTE (中): 提供 `impl BbBreakout` 的 update_params / get_params 熱重載
-//!   與回吐邏輯。從 `mod.rs` 拆出以保持核心 ≤ 800 soft warn；Rust 允許 inherent
+//!   與回吐邏輯。從 `mod.rs` 拆出以保持核心 ≤ 2000 soft warn；Rust 允許 inherent
 //!   impl 跨檔，本檔編譯進同一個 `BbBreakout` 型別。
 
 use super::super::StrategyParams;

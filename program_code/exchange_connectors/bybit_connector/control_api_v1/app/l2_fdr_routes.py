@@ -2,7 +2,8 @@
 MODULE_NOTE
 模塊用途：
   L2 P4 online-FDR 的 debit↔demo binding + wealth 唯讀 route（PA P4 設計 §7）。
-  獨立新檔（layer2_routes.py 已超 800 行 review 線，不再加）。route 薄：parse → call
+  獨立新檔，讓 ``layer2_routes.py`` 與本檔各自保留聚焦職責及現行 2000 行
+  review/split 門檻內的空間。route 薄：parse → call
   （l2_alpha_wealth_store）→ format；業務邏輯在 store / reconciler 層。
 
 主要端點：

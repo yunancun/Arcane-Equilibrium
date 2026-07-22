@@ -4,7 +4,7 @@
 //! registries.
 //!
 //! MODULE_NOTE (EN): Split out of `handlers.rs` in E5-P1-3 to keep per-domain
-//!   files under the §九 800-line warning line. Behaviour is preserved 1:1;
+//!   files under the §九 2000-line warning line. Behaviour is preserved 1:1;
 //!   only the hosting module changed. All fn signatures / visibilities match
 //!   the pre-split originals so `use handlers::*;` in `mod.rs` keeps working.
 //! MODULE_NOTE (中)：E5-P1-3 將 `handlers.rs` 按領域拆分後的「雜項」桶，

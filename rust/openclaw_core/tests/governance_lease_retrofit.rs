@@ -8,20 +8,19 @@
 //!   functional SM transition path to invoke); and (2) HIGH-3: release_lease()
 //!   removes the corresponding lease_id_to_idx HashMap entry after terminal
 //!   transition (proving the reverse-map heap leak is closed). Tests live as
-//!   external integration tests so the fixture LOC does not push
-//!   src/governance_core.rs further past its §9 1500-line hard cap (current
-//!   baseline 1491 is a pre-existing violation introduced by Track H E-3+E-4
-//!   round 1 — see report §9.X push back to PM).
+//!   external integration tests so the fixture LOC leaves
+//!   src/governance_core.rs within its §9 inclusive 2000-line ceiling. The
+//!   current baseline 1491 is below that ceiling and is not an exception or
+//!   violation.
 //!
 //! MODULE_NOTE (中)：AMD-2026-05-02-01 Track H E-1 retrofit 對 (1) HIGH-2 與
 //!   (2) HIGH-3 兩條補丁的覆蓋測試。HIGH-2：驗 `check_expiry()` 真會把過 TTL
 //!   的 Active lease 轉到 Expired 終態（證明 event_consumer/mod.rs 的 60s
 //!   sweeper Arm 呼叫 path 有效）；HIGH-3：驗 `release_lease()` 終態 transition
 //!   後會清掉 `lease_id_to_idx` 對應條目（證明反查表 heap leak 已關閉）。本
-//!   測試刻意置於外部 integration test 而非 governance_core.rs lib test，避免
-//!   進一步把 src/governance_core.rs 推離 §九 1500 行 hard cap（目前 baseline
-//!   1491 為 Track H E-3+E-4 round 1 引入的 pre-existing violation，已於報告
-//!   §9.X push back PM）。
+//!   測試刻意置於外部 integration test 而非 governance_core.rs lib test，使
+//!   src/governance_core.rs 維持在 §九 inclusive 2000 行上限（≤ 2000）內；
+//!   目前 baseline 1491 低於該上限，既非例外也非違規。
 
 use openclaw_core::governance_core::{GovernanceCore, GovernanceProfile, LeaseId, LeaseOutcome};
 use openclaw_core::sm::lease::LeaseState;

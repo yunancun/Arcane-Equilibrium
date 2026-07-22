@@ -9,10 +9,10 @@
  *   authority/capability/gateway/topology/blockers 唯讀展示。**零寫路徑**(0 POST/PUT/PATCH/
  *   DELETE、0 order、0 control 動作)。殼 router 為穩定宿主,本檔提供 render/pause/resume 為唯一
  *   新增擴充點(second-adapter),與前四遷同構。
- *   **拆檔**(檔案 <800 硬性;agents 內容多):本檔=主(Agent 團隊面 + 生命週期 + 骨架宿主);
+ *   **拆檔**(檔案 <2000 硬性;agents 內容多):本檔=主(Agent 團隊面 + 生命週期 + 骨架宿主);
  *   OpenClaw 控制面拆出 `view-agents-openclaw.js`(companion,自帶 read-only header fetch),
  *   由本檔於 window.OC_AGENTS_OPENCLAW 掛鉤驅動(render/load);companion 缺席時本 view 誠實降級
- *   (openclaw 面顯提示,團隊面照常)。兩檔各 <800。
+ *   (openclaw 面顯提示,團隊面照常)。兩檔各 <2000。
  *   內容逐節守恆(對 legacy tab-agents,零丟失):
  *     ①phase/契約列(P5 抽出 read-only never-emit + 4 維 mode:data_tier=mixed / output_policy=
  *       advisory / calibration=unknown / execution_confidence=none——none 為 anti-cognitive-fraud

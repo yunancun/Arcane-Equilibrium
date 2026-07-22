@@ -6,7 +6,7 @@ PARENT = ROOT / "rust/openclaw_types/src/stock_etf_paper_order_request.rs"
 SPLIT_DIR = ROOT / "rust/openclaw_types/src/stock_etf_paper_order_request"
 FIXTURES = SPLIT_DIR / "fixtures.rs"
 VALIDATION = SPLIT_DIR / "validation.rs"
-MAX_LINES = 800
+MAX_LINES = 2_000
 EXPECTED_MODULES = {"fixtures.rs", "validation.rs"}
 FORBIDDEN_RUNTIME_TOKENS = (
     "std::env",

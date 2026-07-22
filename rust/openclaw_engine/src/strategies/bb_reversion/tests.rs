@@ -1,10 +1,10 @@
 //! BB Reversion unit tests (entry/exit/RSI/limit/funding-rate/param ranges).
 //! BB 回歸策略單元測試（入場/出場/RSI/限價/資金費率/參數範圍）。
 //!
-//! MODULE_NOTE (EN): Split from `bb_reversion.rs` (G5-05, §九 1200 line rule).
+//! MODULE_NOTE (EN): Split from `bb_reversion.rs` (G5-05, §九 2000 line rule).
 //!   Pure move — `#[cfg(test)] mod tests` migrated to its own sibling. No
 //!   coverage changes. The parent `mod.rs` re-mounts via `#[cfg(test)] mod tests;`.
-//! MODULE_NOTE (中): 由 `bb_reversion.rs` 拆出（G5-05，§九 1200 行規則）。
+//! MODULE_NOTE (中): 由 `bb_reversion.rs` 拆出（G5-05，§九 2000 行規則）。
 //!   純搬移 — `#[cfg(test)] mod tests` 移至 sibling 檔。覆蓋率不變。
 //!   父層 `mod.rs` 透過 `#[cfg(test)] mod tests;` 重新掛載。
 

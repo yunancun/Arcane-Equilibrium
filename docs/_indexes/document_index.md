@@ -182,7 +182,7 @@
 | `CCAgentWorkSpace/E4/workspace/reports/2026-07-03--soak_dispatch_edge_containment_impl_a_regression.md` | E4 回歸：soak dispatch edge-containment（Impl A）測試矩陣。 |
 | `CCAgentWorkSpace/E4/workspace/reports/2026-07-04--e4_test_matrix_blindspot_audit.md` | E4 測試矩陣盲點審計。 |
 | `governance_dev/amendments/2026-07-04--AMD-2026-07-04-01-doc06-runtime-mutation-record-rule.md` | AMD-2026-07-04-01：DOC-06 Runtime Mutation 紀錄規則泛化（RM-1..RM-4：before/after + manifest + 持久位置 + 移除裁決 + pin-by-reference），泛化 FA F2 crontab 治理規則為 DOC-06 通用條款。 |
-| `references/2000_line_exception_registry.md` | 2000 行硬上限 documented pre-existing exception 正本（冷審計 R2 CC-2）：登記 10 個超標生產檔（路徑+行數+拆分歸屬）；CLAUDE.md §七/§九 指針指向此檔，冷審計據此不再重複觸發 retroactive finding。禁在登記波實際拆檔。 |
+| `references/2000_line_exception_registry.md` | 2000 行硬上限 documented pre-existing exception 正本（冷審計 R2 CC-2）：登記超標生產檔（路徑+行數+拆分歸屬）；CLAUDE.md §七/§九 指針指向此檔，冷審計據此不再重複觸發 retroactive finding。禁在登記波實際拆檔。 |
 
 ### 2026-07-11 IBKR Stock/ETF full live-capability development
 
@@ -327,7 +327,7 @@
 
 | 文件 | 内容 |
 |------|------|
-| `CCAgentWorkSpace/PM/workspace/reports/2026-06-18--p3_h0gate_file_split.md` | PM source/test checkpoint: closes `P3-H0GATE-FILE-SPLIT` by moving H0Gate tests into `openclaw_core/src/h0_gate/tests.rs`, reducing production `h0_gate.rs` below the 800-line review threshold with behavior preserved。 |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-06-18--p3_h0gate_file_split.md` | PM source/test checkpoint: closes `P3-H0GATE-FILE-SPLIT` by moving H0Gate tests into `openclaw_core/src/h0_gate/tests.rs`, reducing production `h0_gate.rs` with behavior preserved；此為歷史拆分結果，現行可重用的大小治理採唯一 2000 行門檻，不沿用舊制較低警告線。 |
 | `CCAgentWorkSpace/Operator/2026-06-18--p3_h0gate_file_split.md` | Operator mirror: concise result, verification commands, and boundary for the H0Gate file-split checkpoint。 |
 
 ### 2026-06-18 Apple Silicon clippy gate

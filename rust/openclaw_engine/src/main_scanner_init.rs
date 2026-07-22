@@ -13,8 +13,8 @@
 //!        spawn a tokio relay task that forwards topic changes to the
 //!        current WsClient sender (rotated on each WS supervisor restart).
 //!
-//!   Pure refactor — 0 production behavior change. Splits to bring `main.rs`
-//!   under §九 1200-line hard cap (1210 → ~1153) per MAIN-RS-PRE-EXISTING-
+//!   Pure refactor — 0 production behavior change. Split for focused ownership
+//!   and §九 2000-line headroom (1210 → ~1153) per MAIN-RS-PRE-EXISTING-
 //!   CLEANUP P2 (E2 PB1 retroactive review of Wave E `cost_edge_advisor_boot`
 //!   split). Sibling-module pattern (NOT `scanner::boot`) keeps the scanner
 //!   library crate free of boot-time tokio spawn deps.
@@ -30,8 +30,8 @@
 //!        task，將 topic 變更轉發到當前 WsClient sender（WS supervisor 每次
 //!        重啟時輪替）。
 //!
-//!   純 location refactor — 0 production behavior 變化。為將 `main.rs` 壓在
-//!   §九 1200 行硬上限以下（1210 → ~1153），執行 MAIN-RS-PRE-EXISTING-
+//!   純 location refactor — 0 production behavior 變化。為聚焦責任並保留
+//!   §九 2000 行上限空間（1210 → ~1153），執行 MAIN-RS-PRE-EXISTING-
 //!   CLEANUP P2（針對 Wave E `cost_edge_advisor_boot` split 的 E2 PB1
 //!   retroactive review）。Sibling 模組 pattern（**不**放 `scanner::boot`）
 //!   讓 scanner library crate 不沾啟動期 tokio spawn 依賴。

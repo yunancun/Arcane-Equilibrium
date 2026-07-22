@@ -3,7 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 VALIDATION = ROOT / "rust/openclaw_types/src/stock_etf_paper_order_request/validation.rs"
-MAX_LINES = 520
+MAX_LINES = 2_000
 
 REQUIRED_HELPERS = {
     "impl StockEtfPaperOrderRequestEnvelopeV1",

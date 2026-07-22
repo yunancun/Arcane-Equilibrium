@@ -5,7 +5,7 @@ Governance refs: EX-06 §4 / CLAUDE.md §九 file-size discipline / G3-08 Phase 
 
 MODULE_NOTE (中文):
   本模組是 StrategistAgent 的 sibling，承載「V2 雙軌快速通道」與「認知調製器整合」
-  相關的 4 個方法，從 strategist_agent.py 拆出以維持主檔在 §九 800 行警告線之下。
+  相關的 4 個方法，從 strategist_agent.py 拆出以維持主檔在 §九 2000 行警告線之下。
   函數一律接受 ``agent: StrategistAgent`` 作為第一個參數。
 
   涵蓋方法：
@@ -21,7 +21,7 @@ MODULE_NOTE (中文):
 MODULE_NOTE (English):
   StrategistAgent sibling carrying 4 methods around "V2 dual-track fast channel"
   and "CognitiveModulator integration". Extracted from strategist_agent.py so
-  the main file stays under the §九 800-line warning threshold.
+  the main file stays under the §九 2000-line warning threshold.
   Functions take ``agent: StrategistAgent`` as the first parameter.
 
   Covered methods:
@@ -329,8 +329,8 @@ def tick_cognitive_modulator(agent: "StrategistAgent") -> None:
 # LOSSES-WIRING trade outcome ingress / 交易結果計數入口
 # G8-01-FUP-LOSSES-WIRING (Wave A `aced662`) — counter feeding tick_cognitive_modulator
 # G3-08 Phase 4 P3 (2026-04-28) — lift body from strategist_agent.py to keep main
-# file under §九 800-line warning. Pure location refactor; behavior bit-identical.
-# G3-08 Phase 4 P3（2026-04-28）— 從 strategist_agent.py 移出以維持主檔 §九 800 行
+# file under §九 2000-line warning. Pure location refactor; behavior bit-identical.
+# G3-08 Phase 4 P3（2026-04-28）— 從 strategist_agent.py 移出以維持主檔 §九 2000 行
 # 警告線之下。純位置重構，行為位元級一致。
 # ─────────────────────────────────────────────────────────────────────────────
 

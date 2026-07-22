@@ -5,8 +5,8 @@ MODULE_NOTE (EN):
     Sprint A R1-T3 (2026-05-04) extraction. The 3 request models below
     used to live inline in ``app/replay_routes.py`` (lines 154-243 of
     that file pre-extraction). They are pulled out here so adding the
-    ``/api/v1/replay/health`` route to ``replay_routes.py`` does not push
-    that file past the ``CLAUDE.md §九 1500 LOC`` hard cap.
+    ``/api/v1/replay/health`` route to ``replay_routes.py`` leaves that file
+    within the ``CLAUDE.md §九`` inclusive 2000 LOC ceiling (≤ 2000).
 
     Behaviour is byte-identical to the inline form: same class names,
     same field shapes, same validators, same docstrings. ``replay_routes``
@@ -16,8 +16,8 @@ MODULE_NOTE (EN):
 MODULE_NOTE (中):
     Sprint A R1-T3（2026-05-04）抽出。下方 3 個請求模型原本內嵌在
     ``app/replay_routes.py``（抽出前該檔 154-243 行）。為了在
-    ``replay_routes.py`` 新增 ``/api/v1/replay/health`` 路由時不破
-    ``CLAUDE.md §九 1500 LOC`` 硬上限而抽出。
+    ``replay_routes.py`` 新增 ``/api/v1/replay/health`` 路由時仍維持在
+    ``CLAUDE.md §九`` inclusive 2000 LOC 上限（≤ 2000）內而抽出。
 
     行為與內嵌完全相同：同 class 名、同 field shape、同 validator、
     同 docstring。``replay_routes`` 把它們以模組級別名重新 import 進來，

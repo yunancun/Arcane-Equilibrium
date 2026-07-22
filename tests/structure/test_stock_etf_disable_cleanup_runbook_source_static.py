@@ -3,7 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 DISABLE_CLEANUP = ROOT / "rust/openclaw_types/src/stock_etf_disable_cleanup_runbook.rs"
-MAX_LINES = 800
+MAX_LINES = 2_000
 
 REQUIRED_TYPE_TOKENS = {
     "STOCK_ETF_DISABLE_CLEANUP_RUNBOOK_ID",

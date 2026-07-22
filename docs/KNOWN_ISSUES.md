@@ -239,13 +239,13 @@
 
 ---
 
-## OPEN — DEBT-2：main.rs 超過 800 行警告線
+## RESOLVED — DEBT-2：main.rs 舊制行數警告
 
 **來源**：2026-04-05 Phase 1+2 累積
 **嚴重性**：LOW
-**問題**：main.rs 因 DB pool + 6 個 writer task spawn + REST poller + quality monitor + drift detector + feature version init 累積至 ~920 行，超過 800 行警告線
+**問題**：main.rs 因 DB pool + 6 個 writer task spawn + REST poller + quality monitor + drift detector + feature version init 累積至 ~920 行，曾觸發已退役的較低行數警告；現行唯一門檻為 2000 行，因此此項不再是檔案大小治理債
 **位置**：`rust/openclaw_engine/src/main.rs`
-**緩解**：提取 DB 初始化邏輯到 `database/init.rs` helper 函數。不阻塞功能。
+**緩解**：若日後因職責邊界需要，可提取 DB 初始化邏輯到 `database/init.rs` helper 函數；不得僅因檔案未超過 2000 行而阻塞或強制拆分。
 
 ---
 
@@ -269,14 +269,14 @@
 
 ---
 
-## OPEN — DEBT-1：legacy_routes.py 1276 行超出 1200 行硬上限
+## RESOLVED — DEBT-1：legacy_routes.py 舊制硬上限已退役
 
 **來源**：重構日誌（2026-04-01）
 **嚴重性**：LOW
-**問題**：文件超出 CLAUDE.md §九 規定的 1200 行硬上限
+**問題**：文件 1276 行曾超出 CLAUDE.md §九 的舊制較低硬上限；現行唯一門檻為 2000 行，因此不再構成檔案大小違規
 **位置**：`app/legacy_routes.py`（1276 行）
-**阻塞**：拆分需改變 `register_legacy_routes(app)` 模式，中等風險
-**備註**：架構技術債，不影響功能
+**阻塞**：無。若按職責邊界拆分，需改變 `register_legacy_routes(app)` 模式且風險中等；不得僅因 1276 行而阻塞或強拆
+**備註**：檔案大小債已隨 2000 行統一門檻解除；其他架構責任若存在需另立證據
 
 ---
 

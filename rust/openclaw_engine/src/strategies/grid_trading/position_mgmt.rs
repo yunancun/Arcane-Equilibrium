@@ -2,7 +2,8 @@
 //! Grid Trading 持倉管理 — 庫存生命週期 + 趨勢自適應冷卻。
 //!
 //! MODULE_NOTE (EN): Split out of `strategies/grid_trading.rs` by GRID-TRADING-MOD-SPLIT-1
-//!   (2026-04-23) to honour CLAUDE.md §九's 1200-line hard cap (pre-split 1729 lines).
+//!   (2026-04-23) for focused ownership under CLAUDE.md §九's 2000-line limit
+//!   (pre-split measured 1729 lines).
 //!   Contains per-symbol position bookkeeping used by the `Strategy` trait
 //!   callbacks: external-close inventory reset (risk-stop path), strategy-emitted
 //!   Close confirm / skip rollback (FIX-C preserves `last_trade_ms` so the 30s
@@ -11,7 +12,7 @@
 //!   (ADX + Hurst → 1x..6x multiplier). All logic / signatures / field
 //!   mutations preserved byte-identical to pre-split.
 //! MODULE_NOTE (中)：GRID-TRADING-MOD-SPLIT-1（2026-04-23）由
-//!   `strategies/grid_trading.rs` 拆出以遵守 CLAUDE.md §九 1200 行硬上限
+//!   `strategies/grid_trading.rs` 拆出以遵守 CLAUDE.md §九 2000 行硬上限
 //!   （拆前 1729 行）。本檔包含 `Strategy` trait callback 使用的逐幣種倉位
 //!   記帳：外部平倉（風控止損路徑）的 net_inventory 重設、策略發出 Close
 //!   的 confirm / skip 回滾（FIX-C 保留 `last_trade_ms` 使 30s reject 退避

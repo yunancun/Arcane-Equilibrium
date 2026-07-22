@@ -2,14 +2,15 @@
 //! Grid Trading 單元測試。
 //!
 //! MODULE_NOTE (EN): Split out of `strategies/grid_trading.rs` by GRID-TRADING-MOD-SPLIT-1
-//!   (2026-04-23) to honour CLAUDE.md §九's 1200-line hard cap (pre-split 1729 lines).
+//!   (2026-04-23) for focused ownership under CLAUDE.md §九's 2000-line limit
+//!   (pre-split measured 1729 lines).
 //!   Contains the 36-case test suite covering grid creation, lazy init, buy/sell
 //!   on cross, Close-on-inventory-reduction lifecycle, close_skipped rollback,
 //!   adaptive + geometric grid behaviours, OU spacing update, health check +
 //!   auto-rebalance, param range / validation, G-SR-1 A3 trend cooldown, and
 //!   EDGE-P2-3 Phase 1a PostOnly maker entry, and grid churn breaker behavior.
 //! MODULE_NOTE (中)：GRID-TRADING-MOD-SPLIT-1（2026-04-23）由
-//!   `strategies/grid_trading.rs` 拆出以遵守 CLAUDE.md §九 1200 行硬上限
+//!   `strategies/grid_trading.rs` 拆出以遵守 CLAUDE.md §九 2000 行硬上限
 //!   （拆前 1729 行）。本檔包含 36 個測試案例，涵蓋網格建構、延遲初始化、
 //!   穿越時買入/賣出、庫存縮減時 Close 生命週期、close_skipped 回滾、自適應
 //!   + 幾何網格行為、OU 間距更新、健康檢查 + 自動再平衡、參數範圍 / 驗證、

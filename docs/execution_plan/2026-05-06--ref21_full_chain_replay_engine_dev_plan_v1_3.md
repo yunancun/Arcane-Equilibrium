@@ -539,10 +539,10 @@ Then:
 
 LOC governance:
 
-- warning line: 800 LOC per source/test file,
-- hard line: 2000 LOC per source/test file,
+- one file-size threshold: 2000 LOC per source/test file,
+- files at or below 2000 LOC must not be blocked or forced to split solely because of size,
 - PM sign-off is required before any patch increases a file above 2000 LOC or
-  adds more than 500 LOC to an already over-warning file,
+  adds more than 500 LOC to a file already over the 2000 LOC threshold,
 - current known exceptions remain tracked in TODO.md (`intent_processor/tests.rs`
   2910 LOC split backlog).
 

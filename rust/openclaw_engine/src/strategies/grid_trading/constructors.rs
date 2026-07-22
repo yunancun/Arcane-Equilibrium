@@ -2,13 +2,14 @@
 //! Grid Trading 建構子 + 參數來回。
 //!
 //! MODULE_NOTE (EN): Split out of `strategies/grid_trading.rs` by GRID-TRADING-MOD-SPLIT-1
-//!   (2026-04-23) to honour CLAUDE.md §九's 1200-line hard cap (pre-split 1729 lines).
+//!   (2026-04-23) for focused ownership under CLAUDE.md §九's 2000-line limit
+//!   (pre-split measured 1729 lines).
 //!   Contains the three `new*` constructors (linear / geometric / adaptive),
 //!   `set_fee_rate`, and the `update_params` / `get_params` round-trip pair.
 //!   All logic / field initialisation / defaults preserved byte-identical to
 //!   pre-split.
 //! MODULE_NOTE (中)：GRID-TRADING-MOD-SPLIT-1（2026-04-23）由
-//!   `strategies/grid_trading.rs` 拆出以遵守 CLAUDE.md §九 1200 行硬上限
+//!   `strategies/grid_trading.rs` 拆出以遵守 CLAUDE.md §九 2000 行硬上限
 //!   （拆前 1729 行）。本檔包含三個 `new*` 建構子（linear / geometric /
 //!   adaptive）、`set_fee_rate`，以及 `update_params` / `get_params` 來回對。
 //!   所有邏輯 / 欄位初始化 / 預設值與拆前逐字節相同。

@@ -78,7 +78,7 @@ GUI Earn governance tab → type-to-confirm $100-200 USDT FlexibleSaving
 | Candidate | 位置 | Pros | Cons | Verdict |
 |---|---|---|---|---|
 | **(A) 新建 `tab-earn.html`** | TABS 陣列加新 entry,group='governance' 或新 'earn' group | 獨立空間;UI 元素全展開不擠;後續 Sprint 5+ Earn 範圍擴張 (multi-product / cross-product / Auto-Allocator) 不需重組 | 16 tab → 17 tab 認知負荷 +6%;Sprint 1B 範圍只 first stake,獨立 tab 顯得「未充滿」;與其他 governance tab 切換摩擦 | **採納** (條件:Sprint 1B 鎖最小 UI;Sprint 5+ 擴展) |
-| (B) `tab-governance.html` 加 Earn section | governance tab 加 `<details>` collapsible 區塊 | 0 新 tab;與 5-gate / Decision Lease 同 tab 上下文連貫 | governance tab 已 1700+ LOC (per `wc -l` 已知);加 Earn ~300+ LOC 觸 800 LOC review attention + 接近 2000 LOC hard cap;認知負荷高 (canary / 5-gate / lease / decision-lease / earn 五個 sub-section);Sprint 5+ Earn 擴張會破 cap | **拒絕** (LOC + cognitive load) |
+| (B) `tab-governance.html` 加 Earn section | governance tab 加 `<details>` collapsible 區塊 | 0 新 tab;與 5-gate / Decision Lease 同 tab 上下文連貫 | governance tab 已 1700+ LOC (per `wc -l` 已知);加 Earn ~300+ LOC 會觸及現行 2000 行門檻;認知負荷高 (canary / 5-gate / lease / decision-lease / earn 五個 sub-section);Sprint 5+ Earn 擴張會破 cap | **拒絕** (LOC + cognitive load) |
 | (C) `tab-live.html` 加 Earn section | live tab 加 Earn balance section | Earn 真實主帳本 (USDT) 與 live trading 同位;operator 視覺一致「真實資金面」 | live tab 已 1500+ LOC + dust / orders / fills / readiness 多元素;加 Earn section 與 trading 元素互相干擾;Earn ≠ trading,語意混淆;不適合 first stake 階段 0 倉位的「空狀態」展示 | **拒絕** (語意 + LOC) |
 
 ### 2.2 採納 (A) 的理由 + Mitigation
@@ -86,7 +86,7 @@ GUI Earn governance tab → type-to-confirm $100-200 USDT FlexibleSaving
 **採納 (A) 新建 `tab-earn.html`**,理由:
 
 1. **語意一致**:Earn 是 asset write event (per earn_governance §1.1),屬「治理對象」非「交易對象」;新 tab 對齊 16 原則 #2 讀寫分離 + GUI tab 各自單一職責
-2. **LOC 健康**:獨立 tab ~500-700 LOC (per §3 元素 scope) 在 800 LOC review attention 之下;不污染既有 1700+ LOC governance tab
+2. **LOC 健康**:獨立 tab ~500-700 LOC (per §3 元素 scope) 遠低於現行 2000 行門檻;不污染既有 1700+ LOC governance tab
 3. **擴展性**:Sprint 5+ 加 stake/redeem/reparam variant + APY tracker + cross-product allocator GUI 不破壞既有 tab;單一 Earn tab 線性增長
 4. **認知負荷**:operator 進 Earn tab 之前已知「我在做 Earn 操作」,不需在 governance tab 內子 section 切換找入口;對齊 ux-checklist 2.1「單頁 ≤ 7 個關注點」
 
@@ -228,7 +228,7 @@ GUI Earn governance tab → type-to-confirm $100-200 USDT FlexibleSaving
 | §3.6 Positions | ~70 |
 | §3.7 Records | ~80 |
 | 共用 styles + i18n | ~80 |
-| **總 tab-earn.html** | **~680 LOC** (< 800 LOC review attention) |
+| **總 tab-earn.html** | **~680 LOC** (低於現行 2000 行門檻) |
 
 ---
 

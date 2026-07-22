@@ -7,7 +7,7 @@
  *   本 view **含 3 寫**(策略 create / pause·stop / delete);skin-only 只換渲染殼,
  *   **絕不新增寫路徑、絕不改端點/payload/confirm 流程**(寫走既有 Rust strategy-config authority)。
  *   殼 router 為穩定宿主,本檔提供 render/pause/resume 為唯一擴充點。
- *   **拆檔**(檔案 <800 硬性;tab-strategy 內容多):本檔=主(狀態列 + 健康彙總 + 策略列表 + 建立表單
+ *   **拆檔**(檔案 <2000 硬性;tab-strategy 內容多):本檔=主(狀態列 + 健康彙總 + 策略列表 + 建立表單
  *     + 3 寫 + 市场掃描 + 活跃交易對 + 编排器/引擎详情);觀測面拆出 `view-strategy-history.js`
  *     (掛 window.OC_STRATEGY_HISTORY,承 近期交易意圖 + 策略师变更歷史,全唯讀)。companion 缺席
  *     時本 view 誠實降級(該區顯提示,主面照常)。

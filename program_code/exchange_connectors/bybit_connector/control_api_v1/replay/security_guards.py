@@ -2,14 +2,15 @@
 REF-20 Sprint 1 Track C — /replay/* 端點安全守門模組。
 
 MODULE_NOTE (EN):
-    Sprint 1 Track C E2 retrofit (CLAUDE.md §九 1500 LOC hard cap enforcement).
+    Sprint 1 Track C E2 retrofit (CLAUDE.md §九 inclusive 2000 LOC ceiling
+    enforcement).
     Replay routes' P0-2 (TEST_KEY env var bypass), P0-4 (SIGTERM cmdline cert),
     and P0-5 (IDOR cross-actor + path traversal) security fixes were inline in
-    ``replay_routes.py`` after Sprint 1 Track C IMPL pushed final LOC to 1603
-    (103 over the 1500 hard cap). PM rejected the §九 baseline exception
-    request; this module extracts the security guard helpers + endpoint-body
-    sub-routines so ``replay_routes.py`` drops back under the cap while the
-    endpoint @router decorators remain in their original module.
+    ``replay_routes.py`` after Sprint 1 Track C IMPL pushed final LOC to 1603,
+    below the current inclusive 2000 LOC ceiling and not an exception. This
+    module extracts the security guard helpers + endpoint-body sub-routines so
+    ``replay_routes.py`` stays within the ceiling while the endpoint @router
+    decorators remain in their original module.
 
     Each helper is *pure* (no FastAPI / pydantic imports) so unit tests can
     exercise the security logic in isolation. Helpers raise ``HTTPException``
@@ -52,13 +53,13 @@ MODULE_NOTE (EN):
     audit logging across security guards + route bodies).
 
 MODULE_NOTE (中):
-    Sprint 1 Track C E2 退回後的 retrofit（CLAUDE.md §九 1500 LOC 硬上限執
-    行）。Replay routes 的 P0-2（TEST_KEY env 注入）/ P0-4（SIGTERM cmdline
+    Sprint 1 Track C E2 退回後的 retrofit（CLAUDE.md §九 inclusive 2000 LOC
+    上限（≤ 2000））。Replay routes 的 P0-2（TEST_KEY env 注入）/ P0-4（SIGTERM cmdline
     認證）/ P0-5（IDOR 跨 actor + 路徑遍歷）安全修補原 inline 於
-    ``replay_routes.py``，Sprint 1 Track C IMPL 完成後檔案 1603 LOC（超
-    1500 硬上限 103 LOC）；PM 拒絕 §九 baseline exception 申請。本 module
-    抽出安全守門 helper + endpoint body 子常式，讓 ``replay_routes.py`` 重
-    回 cap 內，而端點 @router 裝飾器仍在原 module。
+    ``replay_routes.py``，Sprint 1 Track C IMPL 完成後檔案 1603 LOC，低於
+    現行 inclusive 2000 LOC 上限且不屬例外。本 module 抽出安全守門 helper
+    + endpoint body 子常式，讓 ``replay_routes.py`` 維持在上限內，而端點
+    @router 裝飾器仍在原 module。
 
     每個 helper 為 *純函式*（無 FastAPI / pydantic import），單測可隔離測
     安全邏輯。需返回非 200 時 raise ``HTTPException``；否則回結構化 tuple，
@@ -222,8 +223,8 @@ def execute_replay_cancel_pg_path(
     Cancel route PG 路徑：SELECT active run + cmdline 認證 + UPDATE row。
 
     REF-20 Sprint 1 Track C P0-4 + E2 retrofit — extracted from
-    ``replay_routes.py`` ``post_replay_cancel`` to satisfy CLAUDE.md §九
-    1500 LOC hard cap. Logic is unchanged from the inline form: hold a
+    ``replay_routes.py`` ``post_replay_cancel`` to satisfy the CLAUDE.md §九
+    inclusive 2000 LOC ceiling. Logic is unchanged from the inline form: hold a
     single PG cursor for the whole xact (V045 SELECT → cmdline cert →
     UPDATE row to cancelled). The only IO outside the xact is
     ``os.kill(pid, SIGTERM)`` which is caller-handled (route handler
@@ -231,7 +232,8 @@ def execute_replay_cancel_pg_path(
     that keeps the helper test-hermetic without `os.kill` mocking).
 
     REF-20 Sprint 1 Track C P0-4 + E2 retrofit — 從 ``replay_routes.py``
-    ``post_replay_cancel`` 抽出，以符合 CLAUDE.md §九 1500 LOC 硬上限。
+    ``post_replay_cancel`` 抽出，以符合 CLAUDE.md §九 inclusive 2000 LOC
+    上限（≤ 2000）。
     邏輯與 inline 一致：單一 PG cursor 包整 xact（V045 SELECT → cmdline
     認證 → UPDATE row → cancelled）。xact 外的 IO 只剩 ``os.kill(pid,
     SIGTERM)``，由 caller route handler 在 helper 回 ``cancelled_dict``

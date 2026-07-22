@@ -2,9 +2,9 @@
 //! Core types: `ExitFeatures` snapshot + `PhysicalDecision` Track P decision.
 //!
 //! 與 consumer/builder 分檔（EXIT-FEATURES-SPLIT-1，2026-04-21）以控制單檔
-//! 行數 ≤ §七 1200 硬上限；外部呼叫仍走 `crate::exit_features::…` re-export。
+//! 行數 ≤ §七 2000 硬上限；外部呼叫仍走 `crate::exit_features::…` re-export。
 //! Split out from consumers/builder (EXIT-FEATURES-SPLIT-1, 2026-04-21) to
-//! keep each file below §七 1200-line hard cap; external callers still use
+//! keep each file below §七 2000-line hard cap; external callers still use
 //! `crate::exit_features::…` re-exports declared in the parent `mod.rs`.
 
 /// 物理層退場決策特徵快照 / Physical-layer exit decision feature snapshot.

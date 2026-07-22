@@ -99,10 +99,10 @@ from typing import Any, Dict, List, Literal, Optional, Sequence
 
 import numpy as np
 
-# Internal math helpers extracted to keep this file under the 1200-LOC
+# Internal math helpers extracted for focused ownership under the 2000-LOC
 # hard cap (CLAUDE.md §七). Underscore prefix on module path signals
 # "internal — do not import outside learning_engine".
-# 內部數學輔助抽出，使本檔合 1200 LOC 硬上限（CLAUDE.md §七）。
+# 內部數學輔助抽出，使本檔聚焦並遵守 2000 LOC 上限（CLAUDE.md §七）。
 # 模組路徑底線前綴示意「內部 — 不在 learning_engine 外 import」。
 from program_code.learning_engine._regime_math import (
     cusum_statistic as _cusum_statistic,

@@ -2,17 +2,16 @@
 //! StrategyOverride 每策略 SL/TP 覆蓋 schema 測試（G2-03）。
 //!
 //! MODULE_NOTE (English):
-//!   G2-03 (2026-04-26) extracted to a dedicated sibling test file (parent
-//!   `risk_config_tests.rs` was approaching the §九 1200-line cap after the
-//!   12 G2-03 tests landed). Loaded via `#[path]` mod inclusion in
+//!   G2-03 (2026-04-26) extracted to a dedicated sibling test file for focused
+//!   ownership under the §九 2000-line cap. Loaded via `#[path]` mod inclusion in
 //!   `risk_config_tests.rs`. The 12 tests cover defense line A
 //!   (`RiskConfig::validate()` rejection of bad overrides + accepts good ones)
 //!   and the TOML round-trip wire format. Defense line B (runtime cap)
 //!   is tested in `risk_checks.rs` mod tests.
 //!
 //! MODULE_NOTE (中文):
-//!   G2-03（2026-04-26）抽至獨立 sibling 測試檔（parent risk_config_tests.rs
-//!   加入 12 個 G2-03 tests 後接近 §九 1200 行上限）。經 risk_config_tests.rs
+//!   G2-03（2026-04-26）抽至獨立 sibling 測試檔，讓 parent 聚焦並遵守 §九
+//!   2000 行上限。經 risk_config_tests.rs
 //!   `#[path]` mod 載入。12 tests 覆蓋防線 A（validate 拒壞值 + 接好值）+
 //!   TOML round-trip wire format；防線 B（runtime cap）測試在 risk_checks.rs。
 

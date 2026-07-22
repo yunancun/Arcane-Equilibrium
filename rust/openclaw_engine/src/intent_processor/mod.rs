@@ -1453,8 +1453,8 @@ impl IntentProcessor {
 
     // Sprint 1B Earn Wave C：setter + process_earn_intent 於
     // earn_router.rs 內 cross-file impl block 提供，避免 mod.rs 超 2000 LOC hard cap。
-    // 對齊 CLAUDE.md §九「Files over 800 lines require review attention; 2000 lines
-    // is the hard cap」原則：split 到 sibling file 是允許的反模式之一。
+    // 對齊 CLAUDE.md §九「2000 lines is the per-file review/split threshold」原則：
+    // split 到 sibling file 是允許的反模式之一。
 
     /// EDGE-P3-1 A4: Evaluate the predictor gate for an intent. Returns a
     /// `PredictorAction` the caller uses to decide whether to skip/continue/reject.

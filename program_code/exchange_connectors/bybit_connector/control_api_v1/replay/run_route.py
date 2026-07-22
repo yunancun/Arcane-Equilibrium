@@ -4,8 +4,9 @@ REF-20 Sprint B1 R0-T0 — POST /api/v1/replay/run endpoint 邏輯抽出。
 MODULE_NOTE (EN):
     Sprint B1 R0-T0 (2026-05-05) extraction. Owns the
     ``POST /api/v1/replay/run`` business logic so the thin handler in
-    ``app/replay_routes.py`` keeps under the CLAUDE.md §九 1500 LOC hard
-    cap. PA design report `2026-05-05--ref20_sprint_b_task_dag.md` §11.3
+    ``app/replay_routes.py`` stays within the CLAUDE.md §九 inclusive
+    2000 LOC ceiling. PA design report
+    `2026-05-05--ref20_sprint_b_task_dag.md` §11.3
     requires R0-T0 LOC release before R4 + R5 IMPL can land.
 
     Why this module exists (PA push back):
@@ -42,8 +43,8 @@ MODULE_NOTE (EN):
 
 MODULE_NOTE (中):
     Sprint B1 R0-T0（2026-05-05）抽出。擁有 ``POST /api/v1/replay/run``
-    業務邏輯，使 ``app/replay_routes.py`` 薄 handler 守住 CLAUDE.md
-    §九 1500 LOC 硬上限。PA design report ``2026-05-05--ref20_sprint_b
+    業務邏輯，使 ``app/replay_routes.py`` 薄 handler 維持在 CLAUDE.md §九
+    inclusive 2000 LOC 上限（≤ 2000）內。PA design report ``2026-05-05--ref20_sprint_b
     _task_dag.md`` §11.3 要求 R0-T0 LOC 釋放後 R4+R5 IMPL 才可進。
 
     本 module 為何存在（PA push back）：

@@ -4,8 +4,8 @@ REF-20 Sprint A R2 round 2 fix H-3 — /report endpoint 邏輯抽出。
 MODULE_NOTE (EN):
     Sprint A R2 round 2 (2026-05-04) extraction. Owns the
     ``GET /api/v1/replay/report/{experiment_id}`` business logic so the
-    thin handler in ``app/replay_routes.py`` keeps under the CLAUDE.md
-    §九 1500 LOC hard cap.
+    thin handler in ``app/replay_routes.py`` stays within the CLAUDE.md
+    §九 inclusive 2000 LOC ceiling.
 
     Why this module exists (E2 review H-3):
       Round 1 ``/report`` handler used ``uuid.uuid5(NAMESPACE, experiment_id)``
@@ -42,7 +42,8 @@ MODULE_NOTE (EN):
 MODULE_NOTE (中):
     Sprint A R2 round 2（2026-05-04）抽出。擁有
     ``GET /api/v1/replay/report/{experiment_id}`` 業務邏輯，使
-    ``app/replay_routes.py`` 薄 handler 守住 CLAUDE.md §九 1500 LOC 硬上限。
+    ``app/replay_routes.py`` 薄 handler 維持在 CLAUDE.md §九 inclusive
+    2000 LOC 上限（≤ 2000）內。
 
     本 module 為何存在（E2 review H-3）：
       Round 1 ``/report`` handler 用 ``uuid.uuid5(NAMESPACE, experiment_id)``

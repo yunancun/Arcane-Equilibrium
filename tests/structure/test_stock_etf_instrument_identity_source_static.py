@@ -3,7 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 INSTRUMENT_IDENTITY = ROOT / "rust/openclaw_types/src/stock_etf_instrument_identity.rs"
-MAX_LINES = 800
+MAX_LINES = 2_000
 
 REQUIRED_TYPE_TOKENS = {
     'STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID: &str = "instrument_identity_contract_v1"',

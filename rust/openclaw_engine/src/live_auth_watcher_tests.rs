@@ -1,9 +1,9 @@
 // ---------------------------------------------------------------------------
 // MODULE_NOTE
 // 模組目的：live_auth_watcher 的單元測試，從主模組拆出以遵守 CLAUDE.md §九
-//          1200 行硬上限（BLOCKER-1 E2 round-2，2026-04-27）。
+//          2000 行硬上限（BLOCKER-1 E2 round-2，2026-04-27）。
 // Module purpose: unit tests for live_auth_watcher, extracted from the
-//   main module to comply with CLAUDE.md §九 1200-line hard cap
+//   main module to comply with CLAUDE.md §九 2000-line hard cap
 //   (BLOCKER-1, E2 round-2, 2026-04-27).
 //
 // 關聯文件：CLAUDE.md §九 · live_auth_watcher.rs

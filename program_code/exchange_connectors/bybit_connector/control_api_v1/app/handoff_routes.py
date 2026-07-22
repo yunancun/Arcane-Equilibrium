@@ -6,8 +6,9 @@ REF-20 P6 Handoff 路由 — server-side regex + cooldown + idempotency。
 
 MODULE_NOTE (EN):
     Wave 8 R20-P6-S13/S14/S15 (Bounded Demo Handoff backend security trio).
-    Extracted as a NEW file (NOT added to replay_routes.py) because that
-    module is at 1498/1500 LOC (CLAUDE.md §九 hard cap = 1500). Per
+    Extracted as a NEW file (NOT added to replay_routes.py) to keep ownership
+    focused; replay_routes.py measured 1498 LOC at the split and both files
+    follow the current CLAUDE.md §九 2000-LOC limit. Per
     workplan §4 Wave 8 row, the trio lands handoff_routes.py + V044 SQL +
     handoff_audit.py.
 
@@ -43,7 +44,8 @@ MODULE_NOTE (EN):
 
 MODULE_NOTE (中):
     Wave 8 R20-P6-S13/S14/S15（Bounded Demo Handoff 後端安全三劍客）。
-    抽 NEW 檔（不擠 replay_routes.py）— 後者已 1498/1500（§九 1500 硬上限）。
+    抽 NEW 檔以聚焦責任；replay_routes.py 拆分時實測 1498 行，兩檔皆遵守
+    現行 §九 2000 行上限。
     Per workplan §4 Wave 8 row，三件落 handoff_routes.py + V044 SQL +
     handoff_audit.py。
 

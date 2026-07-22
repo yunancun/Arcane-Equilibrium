@@ -1,5 +1,5 @@
-//! Arm E handler — IPC PipelineCommand 派遣，自 loop_handlers.rs 拆出
-//! （EVENT-CONSUMER-SPLIT-2，2026-07-03；§九 800 行治理）。
+//! Arm E handler — IPC PipelineCommand 派遣，自 loop_handlers.rs 依職責拆出
+//! （EVENT-CONSUMER-SPLIT-2，2026-07-03）；本檔保留現行 §九 2000 行政策空間。
 
 use std::sync::Arc;
 

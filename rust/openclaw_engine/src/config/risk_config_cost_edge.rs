@@ -2,8 +2,8 @@
 //! G3-09 Phase A：cost_edge_advisor schema 子配置。
 //!
 //! MODULE_NOTE (EN): Lives in its own sibling under `config/` because
-//!   `risk_config_advanced.rs` is already at ~1297 lines (over §九 1200
-//!   hard cap). Adding more schema there would compound the violation.
+//!   `risk_config_advanced.rs` measured ~1297 lines at the split; focused
+//!   ownership preserves headroom under the §九 2000-line hard cap.
 //!   Pattern mirrors `risk_config_regime.rs` (HurstConfig sibling).
 //!
 //!   Phase A scope (per PA RFC §7.1):
@@ -30,9 +30,9 @@
 //!       value outside is operator config error (e.g. typed `-1000` by
 //!       mistake → would never trigger and silently disable advisor).
 //!
-//! MODULE_NOTE (中)：Cost-edge advisor 的 schema 落在獨立 sibling 檔，
-//!   因為 `risk_config_advanced.rs` 已 1297 行，超過 §九 1200 硬上限；
-//!   對齊 `risk_config_regime.rs`（HurstConfig）的拆檔方式。
+//! MODULE_NOTE (中)：Cost-edge advisor 的 schema 落在獨立 sibling 檔；
+//!   `risk_config_advanced.rs` 拆分時實測 1297 行，獨立職責可保留現行
+//!   §九 2000 行上限空間，並對齊 `risk_config_regime.rs` 的拆檔方式。
 //!
 //!   Phase A 範圍（PA RFC §7.1）：僅 schema + TOML section + validation；
 //!   預設 `enabled=false`（Phase A 全 dormant）、`trigger_threshold=-0.5`

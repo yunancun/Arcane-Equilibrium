@@ -33,8 +33,8 @@ MODULE_NOTE (English):
   6. start submits live authorization request to GovernanceHub (non-blocking audit trail)
 
 REFACTOR_NOTE (G5-02, 2026-04-24):
-  本模組原為 1449 行單檔，超 §九 1200 硬上限。G5-02 將 14 個 endpoint handler
-  拆至 2 個 sibling 純結構搬遷（0 邏輯變更）：
+  本模組原為 1449 行單檔；G5-02 為聚焦責任並保留現行 §九 2000 行上限空間，
+  將 14 個 endpoint handler 拆至 2 個 sibling（0 邏輯變更）：
   - ``live_session_endpoints.py``       — 7 個 session 生命週期 + execution_authority
   - ``live_session_account_routes.py``  — 7 個 account data + close handlers
   本檔保留所有 state / globals / 共用 helpers / LIVE-BOUNDARY-FREEZE helpers /

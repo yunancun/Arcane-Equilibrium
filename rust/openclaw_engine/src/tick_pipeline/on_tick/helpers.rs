@@ -5,14 +5,14 @@
 //! prefix alignment can be unit-tested directly without spinning up the whole
 //! tick pipeline. The wrapper is pure audit / info-log side; business close
 //! path is unchanged. Split out of the monolithic `on_tick.rs` during
-//! ON-TICK-SPLIT-1 (2026-04-21) to honour §七 1200-line hard cap; callers
+//! ON-TICK-SPLIT-1 (2026-04-21) to honour §七 2000-line hard cap; callers
 //! reach these via the `pub use` re-export in the parent `mod.rs` so the
 //! external surface is bit-identical.
 //!
 //! 抽為 `pub(crate)` 自由函式（+ `#[cfg(test)]` 模組）以便 prefix 對齊可直接
 //! 單測，無需啟動整個 tick pipeline。包裝純屬審計 / info log 層，業務平倉
 //! 路徑不變。ON-TICK-SPLIT-1（2026-04-21）從原單檔 `on_tick.rs` 抽出以遵守
-//! §七 1200 行硬上限；外部透過父模組 `mod.rs` 的 `pub use` 訪問，行為 bit-
+//! §七 2000 行硬上限；外部透過父模組 `mod.rs` 的 `pub use` 訪問，行為 bit-
 //! identical。
 
 use tracing::info;

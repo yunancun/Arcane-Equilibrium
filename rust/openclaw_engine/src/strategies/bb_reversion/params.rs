@@ -1,10 +1,10 @@
 //! BB Reversion tunable params + StrategyParams impl + ConfluenceConfig builder.
 //! BB 回歸策略可調參數 + StrategyParams 實作 + ConfluenceConfig 構建器。
 //!
-//! MODULE_NOTE (EN): Split from `bb_reversion.rs` (G5-05, §九 1200 line rule).
+//! MODULE_NOTE (EN): Split from `bb_reversion.rs` (G5-05, §九 2000 line rule).
 //!   Pure move — `BbReversionParams` struct, Default, StrategyParams impl, and
 //!   `build_confluence_config()` helper. No logic changes.
-//! MODULE_NOTE (中): 由 `bb_reversion.rs` 拆出（G5-05，§九 1200 行規則）。
+//! MODULE_NOTE (中): 由 `bb_reversion.rs` 拆出（G5-05，§九 2000 行規則）。
 //!   純搬移 — `BbReversionParams` 結構、Default、StrategyParams 實作與
 //!   `build_confluence_config()` 輔助函式。無邏輯變更。
 

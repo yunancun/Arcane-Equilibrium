@@ -3,10 +3,10 @@
 //!
 //! MODULE_NOTE (EN): Holds `BbBreakoutParams` (Agent/TOML surface) + its
 //!   `Default` + `StrategyParams` impls (ranges + validate). Split out from
-//!   `mod.rs` so the strategy core can stay ≤ 800 soft warn. No runtime state
+//!   `mod.rs` so the strategy core can stay ≤ 2000 soft warn. No runtime state
 //!   lives here — only pure data + pure validation.
 //! MODULE_NOTE (中): 放置 `BbBreakoutParams`（Agent/TOML 對外面）+ `Default` +
-//!   `StrategyParams` 實作（ranges + validate）。從 `mod.rs` 拆出以保持核心 ≤ 800
+//!   `StrategyParams` 實作（ranges + validate）。從 `mod.rs` 拆出以保持核心 ≤ 2000
 //!   soft warn。此檔僅放純資料 + 純驗證，不含 runtime 狀態。
 
 use super::super::confluence::ConfluenceConfig;

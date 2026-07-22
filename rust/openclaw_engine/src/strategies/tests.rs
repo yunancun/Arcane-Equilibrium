@@ -2,11 +2,11 @@
 //! Strategy trait 默認行為 + 工廠 + TOML 載入器回歸測試。
 //!
 //! MODULE_NOTE (EN): All tests originally in `strategies::mod::tests` — moved verbatim
-//!   to this sibling so the parent `mod.rs` stays under §九 1200-line hard cap.
+//!   to this sibling so the parent `mod.rs` stays under §九 2000-line hard cap.
 //!   Kept under `#[cfg(test)]` and `mod tests` inside mod.rs (`#[path]` attribute),
 //!   so test discovery / naming is identical (`strategies::tests::…`).
 //! MODULE_NOTE (中): 原在 `strategies::mod::tests` 的全部測試 — 逐字搬到此 sibling，
-//!   讓父層 `mod.rs` 保持在 §九 1200 行硬上限內。仍透過 `#[cfg(test)] mod tests`
+//!   讓父層 `mod.rs` 保持在 §九 2000 行硬上限內。仍透過 `#[cfg(test)] mod tests`
 //!   + `#[path]` 屬性掛回，測試命名（`strategies::tests::…`）與發現機制完全不變。
 
 use super::*;

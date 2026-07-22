@@ -2,7 +2,7 @@
  * view-ai-cost.js — 玄衡原生 view「AI 狀態」成本面 companion(Phase 2 第 6 遷;拆檔)
  * ═══════════════════════════════════════════════════════════════════
  * MODULE_NOTE
- * 模塊用途:tab-ai 遷移的**成本面拆檔**(檔案 <800 硬性;主檔 view-ai.js 已承狀態/歷史/Phase3)。
+ * 模塊用途:tab-ai 遷移的**成本面拆檔**(檔案 <2000 硬性;主檔 view-ai.js 已承狀態/歷史/Phase3)。
  *   本檔不註冊 OC_NATIVE_VIEWS(非獨立 view),而註冊 window.OC_AI_COST = {render, load},
  *   由主檔 view-ai.js 於 render/loadAll 驅動(companion 缺席時主面照常降級)。**純唯讀,零寫路徑**。
  *   內容逐節守恆(對 legacy tab-ai 成本 4 節,零丟失):

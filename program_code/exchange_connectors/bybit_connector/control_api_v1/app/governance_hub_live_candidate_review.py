@@ -163,7 +163,7 @@ R6_DAILY_NEG_SNAPSHOTS_REQUIRED = 7
 R6_MAKER_FILL_CATASTROPHIC_FLOOR = 0.10
 
 # R-meta constants + evaluators relocated to ``governance_hub_lg5_r_meta`` sibling
-# (Fix 2 IMPL-2-consumer split, keeps parent < 1500 LOC); 4 symbols re-exported.
+# (Fix 2 IMPL-2-consumer split, keeps parent within 2000 LOC); 4 symbols re-exported.
 # R-meta 常數與 evaluator 已 split 至 sibling，re-export 維持 backward-compat。
 from .governance_hub_lg5_r_meta import (  # noqa: F401  (re-export)
     R_META_RATIO_FLOOR, _R_META_MIN_SAMPLE_PER_STRATEGY,

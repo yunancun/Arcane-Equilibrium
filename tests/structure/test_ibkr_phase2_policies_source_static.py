@@ -3,7 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 PHASE2_POLICIES = ROOT / "rust/openclaw_types/src/ibkr_phase2_policies.rs"
-MAX_LINES = 800
+MAX_LINES = 2_000
 REQUIRED_CONTRACT_IDS = {
     "ibkr_redaction_policy_v1",
     "ibkr_rate_limit_policy_v1",

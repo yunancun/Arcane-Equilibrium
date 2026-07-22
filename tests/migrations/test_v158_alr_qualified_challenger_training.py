@@ -438,7 +438,7 @@ def _assert_function_body_contracts(sql: str) -> None:
 def test_v158_is_bounded_forward_only_and_guarded() -> None:
     sql = _sql()
     code = _code(sql)
-    assert len(sql.splitlines()) < 2000
+    assert len(sql.splitlines()) <= 2_000
     assert code.lstrip().startswith("BEGIN;")
     assert "SET LOCAL search_path = pg_catalog, pg_temp" in code
     for guard in ("V158 Guard A", "V158 Guard B", "V158 Guard C"):

@@ -670,10 +670,10 @@ class StrategistAgent(BaseAgent):
     # consecutive_losses input — wired in strategy_wiring.py to
     # AnalystAgent.set_strategist_loss_callback so every IPC-driven trade
     # analysis advances the counter. Body lifted to strategist_cognitive.py in
-    # G3-08 Phase 4 P3 to keep main file under §九 800-line warning.
+    # G3-08 Phase 4 P3 to keep main file under §九 2000-line warning.
     # G8-01-FUP-LOSSES-WIRING：CognitiveModulator consecutive_losses 輸入入口，
     # strategy_wiring.py 接 AnalystAgent.set_strategist_loss_callback。Body 於
-    # G3-08 Phase 4 P3 移至 strategist_cognitive.py（§九 800 行警告線）。
+    # G3-08 Phase 4 P3 移至 strategist_cognitive.py（§九 2000 行警告線）。
     def record_trade_outcome(self, net_pnl: float) -> None: return _sc_record_trade_outcome(self, net_pnl)  # noqa: E704
 
     # ── Audit / 審計 ──

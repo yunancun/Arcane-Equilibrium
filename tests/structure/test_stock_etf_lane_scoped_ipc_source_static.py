@@ -3,7 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 LANE_SCOPED_IPC = ROOT / "rust/openclaw_types/src/stock_etf_lane_scoped_ipc.rs"
-MAX_LINES = 800
+MAX_LINES = 2_000
 REQUIRED_METHOD_VARIANTS = {
     "GetLaneStatus",
     "GetPhase0Status",

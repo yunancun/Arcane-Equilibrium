@@ -128,7 +128,8 @@ except ImportError:  # pragma: no cover - runtime DB path only
     Json = None  # type: ignore[assignment]
 
 # REF-20 P4-S11 evidence-source filter helpers extracted to sibling module
-# to keep this file < CLAUDE.md §九 1500 LOC. / REF-20 P4-S11 抽出 sibling。
+# to keep this file within the CLAUDE.md §九 inclusive 2000 LOC ceiling
+# (≤ 2000). / REF-20 P4-S11 抽出 sibling，使本檔維持在現行上限內。
 from ml_training.mlde_demo_applier_evidence_filter import (  # noqa: E402
     EVIDENCE_SOURCE_TIER_ALLOWLIST,
     fetch_pending_sql_and_params,
