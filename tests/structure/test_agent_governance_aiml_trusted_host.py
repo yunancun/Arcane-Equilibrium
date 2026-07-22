@@ -933,6 +933,8 @@ def test_cli_rejects_non_object_packet_with_structured_fail(
     packet_path.write_text("[]", encoding="utf-8")
     bundle_path.write_text("{}", encoding="utf-8")
     signature_path.write_text("not-a-signature", encoding="ascii")
+    for path in (packet_path, bundle_path, signature_path):
+        path.chmod(0o600)
     read_fd, write_fd = os.pipe()
     os.write(write_fd, b"token-value")
     os.close(write_fd)
