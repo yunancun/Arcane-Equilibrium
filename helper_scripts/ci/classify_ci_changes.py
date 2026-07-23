@@ -87,6 +87,10 @@ def classify_paths(paths: Iterable[str], *, force_all: bool = False) -> dict[str
                 "helper_scripts/maintenance_scripts/",
                 "tests/structure/test_agent_governance_",
                 "tests/structure/test_development_agent_governance.py",
+                # 這些 target-host effect / apply / external-WORM-sink 套件不符 test_agent_governance_*
+                # glob,但覆蓋 maintenance_scripts 治理模組;test-only 變更亦須觸發治理 job(見 ci.yml)。
+                "tests/structure/test_target_host_",
+                "tests/structure/test_terminal_receipt_",
                 "tests/migrations/test_v158_",
                 "tests/migrations/test_v159_",
                 "sql/migrations/V158__",

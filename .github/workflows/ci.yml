@@ -149,9 +149,15 @@ jobs:
           python3 helper_scripts/maintenance_scripts/agent_governance.py render --check
       - name: Run focused development-agent governance tests
         run: |
+          # NOTE: the target-host effect / apply-orchestrator / external-WORM-sink suites do NOT
+          # match the test_agent_governance_* glob, so they must be listed explicitly — otherwise
+          # their closure-binding / process-isolation / WORM-retention coverage never runs in CI.
           python3 -m pytest -q \
             tests/structure/test_development_agent_governance.py \
-            tests/structure/test_agent_governance_*.py
+            tests/structure/test_agent_governance_*.py \
+            tests/structure/test_target_host_effect_adapter.py \
+            tests/structure/test_target_host_apply_orchestrator.py \
+            tests/structure/test_terminal_receipt_external_sink.py
       - name: Run V158/V159 qualified challenger source contracts
         run: |
           python3 -m pytest -q \

@@ -85,15 +85,19 @@ TRUSTED_EXECUTION_PUBLIC_KEY = (
     "ssh-ed25519 "
     "AAAAC3NzaC1lZDI1NTE5AAAAIJophp6Jd52hCchnFxzm4DIS/G7YOsLQGJNHI0vvLb7L"
 )
-# S1 formal-closure Wave A(S1.6B)——NEW S1 target-host 簽章身分/命名空間(domain-separated),
-# 刻意不重指向 S0.3 常量(S0.3 路徑保持 byte-identical)。指紋/公鑰為 operator 輸入的保留佔位(對應
-# 的私鑰刻意不在源碼中,如同 S0.3 的 aiml-trusted-finalize):Wave A 只建源碼機制與驗證/bundle 結構,
-# 真正的 operator SSHSIG 簽署是帶外受信主機步驟。佔位公鑰無法產生真指紋,故只可行使 domain-separation
-# 結構檢查(以 S0.3 命名空間簽的 bundle 於 S1 profile 下因身分不符而先被拒),真 bundle 驗證待 operator 提供。
+# S1 formal-closure 簽章決策(Amendment A1 §6,取代 Wave A 的 operator-placeholder):S1 target-host
+# 收尾**不新增第二套實體私鑰**,沿用 S0.3 既有信任根——公鑰/指紋 == S0.3 的
+# TRUSTED_EXECUTION_PUBLIC_KEY / EXPECTED_EXECUTION_SIGNER_FINGERPRINT(對應私鑰同樣刻意不在源碼/
+# 受信主機中,由 operator 帶外持有)。domain-separation 改由**身分 + 命名空間**達成:S1 用自己的
+# identity(aiml-s1-target-host-operator-v1)與 namespace(arcane-equilibrium-aiml-s1-target-host),
+# 故一張以 S0.3 命名空間簽的 bundle 於 S1 profile 下因 namespace 不符而被拒(反之亦然),而同一把真鑰
+# 以 S1 namespace 簽的 bundle 可通過 S1。這讓 S1 profile 自洽(指紋 == 公鑰指紋),驗證邏輯可離線完整
+# 測試(丟棄式測試鑰 + monkeypatch);真正的 S1 closure bundle SSHSIG 仍是帶外 operator 簽署步驟。
+# S0.3 的 identity/namespace/公鑰/指紋/schema/receipt/既有簽章一律不動(S0.3 路徑 byte-identical)。
 EXPECTED_S1_TARGET_HOST_SIGNER_IDENTITY = "aiml-s1-target-host-operator-v1"
 S1_TARGET_HOST_SIGNATURE_NAMESPACE = "arcane-equilibrium-aiml-s1-target-host"
-EXPECTED_S1_TARGET_HOST_SIGNER_FINGERPRINT = "SHA256:OPERATOR-PROVIDES-S1-TARGET-HOST-FINGERPRINT"
-S1_TRUSTED_TARGET_HOST_PUBLIC_KEY = "ssh-ed25519 AAAA-OPERATOR-PROVIDES-S1-TARGET-HOST-PUBLIC-KEY"
+EXPECTED_S1_TARGET_HOST_SIGNER_FINGERPRINT = EXPECTED_EXECUTION_SIGNER_FINGERPRINT
+S1_TRUSTED_TARGET_HOST_PUBLIC_KEY = TRUSTED_EXECUTION_PUBLIC_KEY
 MAX_SIGNATURE_BYTES = 16 * 1024
 MAX_BUNDLE_TTL = timedelta(minutes=15)
 MAX_BUNDLE_AGE = timedelta(minutes=5)

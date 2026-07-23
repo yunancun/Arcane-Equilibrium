@@ -9,6 +9,7 @@
     "schema_version", "adapter_id", "effect_status", "intent_id",
     "intent_digest", "target_host", "source_head", "applier_node_id",
     "postcheck_verifier_node_id", "choice_receipt_digest", "choice_receipt",
+    "verifier_capture_digest",
     "approved_by", "approved_at", "started_at", "completed_at",
     "intent_expires_at", "evidence_expires_at", "failure_reason", "receipt_digest"
   ],
@@ -24,6 +25,7 @@
     "postcheck_verifier_node_id": {"type": "string", "minLength": 1},
     "choice_receipt_digest": {"$ref": "#/$defs/digest"},
     "choice_receipt": {"type": "object"},
+    "verifier_capture_digest": {"type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$"},
     "approved_by": {"type": "string", "minLength": 1},
     "approved_at": {"$ref": "#/$defs/timestamp"},
     "started_at": {"$ref": "#/$defs/timestamp"},

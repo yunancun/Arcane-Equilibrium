@@ -48,9 +48,12 @@ FROZEN_CLASSIFIER = (
 
 
 def _effect_result(*, include_capture_artifact: bool = True, pg_mode=None) -> dict:
+    # applier 自跑形:independent_postcheck DEFERRED、verifier_capture_digest=None(PROVISIONAL)。
+    # closure 端須先經 distinct 驗證者 attach_distinct_verifier_postcheck 升 BINDING(見 _closure_inputs)。
     choice = th.build_attested_reference_receipt(
         now=OBS, pg_mode=pg_mode or th.PG_MODE_REAL,
         include_capture_artifact=include_capture_artifact,
+        independent_postcheck_attached=False,
     )
     return tfx.build_target_host_effect_result(
         choice_receipt=choice,
@@ -176,28 +179,90 @@ def test_effect_result_positive_and_wrapper_binding() -> None:
     assert receipt is result or receipt == result
 
 
-def _closure_inputs(result: dict, *, verifier_node: str = "s16b_independent_verifier"):
-    evidence = tfx.build_target_host_effect_evidence(result)
+CLEAN_RESIDUE = {"units_gone": True, "cgroup_gone": True, "netns_gone": True, "temp_gone": True}
+
+
+def _verifier_capture(
+    *, node_id: str = "s16b_verifier_capture_node", native_agent: str = "ops-verifier",
+    role_id: str = "OPS",
+) -> dict:
+    """A distinct verifier's own governed ``command_capture_v2`` (self-digest-consistent).
+
+    誠實界線:結構參照(真 trade-core 出口綁的是 OPS ``capture-command`` 對殘留掃描的真 record);此處以
+    ``command_capture_v2._self_digest`` 令 record_digest 自洽,行使 closure 的完整性 + 相異性綁定路徑。
+    """
+
+    import agent_governance_command_capture_v2 as capmod
+
+    record = {
+        "schema_version": "command_capture_v2",
+        "node_id": node_id, "role_id": role_id, "native_agent": native_agent,
+        "residue_sweep_argv": ["systemctl", "--user", "list-units", "--all"],
+    }
+    record["record_digest"] = capmod._self_digest(record)
+    return record
+
+
+def _closure_inputs(
+    result: dict,
+    *,
+    verifier_node: str = "s16b_independent_verifier",
+    ops_verifier_node: str | None = None,
+    capture: dict | None = None,
+    ops_capture_digest_override: str | None = None,
+    residue: dict | None = None,
+    include_capture_ref: bool = True,
+    acceptance_refs: list | None = None,
+):
+    """Build a full target-host closure over the DISTINCT-VERIFIER-UPGRADED effect result.
+
+    先以 ``attach_distinct_verifier_postcheck`` 把 applier 自跑結果升 BINDING(綁 verifier 的相異 capture),
+    再組出 ops_postcheck(綁 verifier capture digest / residue / source_head / host / observed_at)、第三份
+    verifier command_capture_v2 evidence,與同時綁三者的 acceptance。各覆寫參數供負向測試注入缺陷。
+    """
+
+    import agent_governance_target_host_apply as apply_mod
+
+    cap = capture if capture is not None else _verifier_capture()
+    upgraded = apply_mod.attach_distinct_verifier_postcheck(
+        result, verifier_node_id=verifier_node,
+        verifier_capture_digest=cap["record_digest"],
+        residue_observation=CLEAN_RESIDUE, now=NOW,
+    )
+    evidence = tfx.build_target_host_effect_evidence(upgraded)
     receipt_id = evidence["id"]
     ops_post = {
-        "id": "ops_post_1", "scope": "runtime", "source": "ops_postcheck",
-        "status": "PASS", "verifier_node": verifier_node, "evidence_refs": [],
+        "id": "ops_post_1", "scope": "runtime", "source": "ops_postcheck", "status": "PASS",
+        "verifier_node": ops_verifier_node or verifier_node,
+        "verifier_capture_digest": ops_capture_digest_override or cap["record_digest"],
+        "residue_observation": CLEAN_RESIDUE if residue is None else residue,
+        "source_head": upgraded["source_head"], "host": upgraded["target_host"],
+        "observed_at": NOW,
+        "evidence_refs": (["verifier_capture_1"] if include_capture_ref else []),
+    }
+    vcap_evidence = {
+        "id": "verifier_capture_1", "scope": "runtime", "kind": "command_capture_v2",
+        "source": cap.get("native_agent"), "digest": cap["record_digest"], "capture": cap,
     }
     route = {"nodes": [{"id": ADAPTER, "kind": "effect_adapter", "mandatory": True}]}
     fragments = {"ops_postcheck": {"evidence_refs": ["ops_post_1"]}}
-    evidence_by_id = {receipt_id: evidence, "ops_post_1": ops_post}
+    evidence_by_id = {
+        receipt_id: evidence, "ops_post_1": ops_post, "verifier_capture_1": vcap_evidence,
+    }
+    if acceptance_refs is None:
+        acceptance_refs = [receipt_id, "ops_post_1", "verifier_capture_1"]
     packet = {
         "authority_refs": [{
             "class": "claim_evidence",
-            "source": f"target_host_disposable_runtime_probe_intent_v1:{result['intent_id']}",
-            "digest": result["intent_digest"], "expiry": result["intent_expires_at"],
+            "source": f"target_host_disposable_runtime_probe_intent_v1:{upgraded['intent_id']}",
+            "digest": upgraded["intent_digest"], "expiry": upgraded["intent_expires_at"],
             "observed_at": "2026-07-23T12:01:30+00:00",
         }],
-        "acceptance": [{"status": "PASS", "evidence_refs": [receipt_id, "ops_post_1"]}],
+        "acceptance": [{"status": "PASS", "evidence_refs": acceptance_refs}],
         "side_effects": {"runtime_contact": True},
         "disposition": "CHANGED",
     }
-    return packet, route, fragments, evidence_by_id, {receipt_id: result}
+    return packet, route, fragments, evidence_by_id, {receipt_id: upgraded}
 
 
 def test_closure_consumes_dedicated_result_with_intent_binding() -> None:
@@ -219,9 +284,10 @@ def test_closure_rejects_missing_intent_authority() -> None:
 
 
 def test_closure_rejects_applier_equals_verifier() -> None:
+    # ops_postcheck 宣稱的 verifier_node == applier → closure 拒(相異 role/node 是硬性)。
     result = _effect_result()
     packet, route, fragments, evidence_by_id, valid = _closure_inputs(
-        result, verifier_node=result["applier_node_id"]
+        result, ops_verifier_node=result["applier_node_id"]
     )
     errors = tfx.validate_target_host_effect_binding(
         packet, route, fragments, evidence_by_id, valid
@@ -237,6 +303,114 @@ def test_closure_rejects_runtime_contact_false() -> None:
         packet, route, fragments, evidence_by_id, valid
     )
     assert any("runtime_contact=true" in e for e in errors)
+
+
+# --------------------------------------------------------------------------- #
+# P1(Codex): ops_postcheck evidence must be bound to the verifier's own capture
+# --------------------------------------------------------------------------- #
+def test_closure_rejects_empty_postcheck_evidence_refs() -> None:
+    # 空 evidence_refs(不引用任何 verifier command_capture_v2)→ closure 拒。這正是 Codex 指出的
+    # 「空 evidence_refs 也能過閘」漏洞:現在必須綁一份 verifier capture。
+    result = _effect_result()
+    packet, route, fragments, evidence_by_id, valid = _closure_inputs(
+        result, include_capture_ref=False, acceptance_refs=None,
+    )
+    # acceptance 仍列 verifier_capture_1,但 ops_post 不再引用它;binding 應因缺 capture ref 而拒。
+    errors = tfx.validate_target_host_effect_binding(
+        packet, route, fragments, evidence_by_id, valid
+    )
+    assert any("exactly one verifier command_capture_v2" in e for e in errors)
+
+
+def test_closure_rejects_fake_verifier_string_without_capture() -> None:
+    # ops_postcheck 只有 verifier_node 字串、無真 capture evidence(evidence_refs 指向不存在的 id)→ 拒。
+    result = _effect_result()
+    packet, route, fragments, evidence_by_id, valid = _closure_inputs(result)
+    evidence_by_id["ops_post_1"]["evidence_refs"] = ["nonexistent_capture"]
+    errors = tfx.validate_target_host_effect_binding(
+        packet, route, fragments, evidence_by_id, valid
+    )
+    assert any("exactly one verifier command_capture_v2" in e for e in errors)
+
+
+def test_closure_rejects_reused_applier_capture_identity() -> None:
+    # verifier capture 的 capturer 身分與 applier capture 相同(role/node/native_agent 重用)→ 拒。
+    reused = _verifier_capture(node_id="s16b_ops_capture_node", native_agent="e3-ops", role_id="E3")
+    packet, route, fragments, evidence_by_id, valid = _closure_inputs(_effect_result(), capture=reused)
+    errors = tfx.validate_target_host_effect_binding(
+        packet, route, fragments, evidence_by_id, valid
+    )
+    assert any("must differ from the applier capture" in e for e in errors)
+
+
+def test_closure_rejects_capture_digest_mismatch() -> None:
+    # ops_postcheck 攜帶的 verifier_capture_digest 與 effect receipt 結構化欄位不符 → 拒。
+    result = _effect_result()
+    packet, route, fragments, evidence_by_id, valid = _closure_inputs(
+        result, ops_capture_digest_override="sha256:" + "d" * 64,
+    )
+    errors = tfx.validate_target_host_effect_binding(
+        packet, route, fragments, evidence_by_id, valid
+    )
+    assert any("verifier_capture_digest must equal the effect receipt" in e for e in errors)
+
+
+def test_closure_rejects_tampered_verifier_capture_record() -> None:
+    # verifier capture record 被竄改(record_digest 不再自洽)→ 拒。
+    result = _effect_result()
+    packet, route, fragments, evidence_by_id, valid = _closure_inputs(result)
+    evidence_by_id["verifier_capture_1"]["capture"]["native_agent"] = "tampered-agent"
+    errors = tfx.validate_target_host_effect_binding(
+        packet, route, fragments, evidence_by_id, valid
+    )
+    assert any("does not match its canonical self-digest" in e for e in errors)
+
+
+def test_closure_rejects_missing_residue_observation() -> None:
+    # ops_postcheck 缺 residue_observation → 拒(無法證明殘留已清)。
+    result = _effect_result()
+    packet, route, fragments, evidence_by_id, valid = _closure_inputs(result)
+    evidence_by_id["ops_post_1"].pop("residue_observation")
+    errors = tfx.validate_target_host_effect_binding(
+        packet, route, fragments, evidence_by_id, valid
+    )
+    assert any("clean residue_observation" in e for e in errors)
+
+
+def test_closure_rejects_nonzero_residue() -> None:
+    # 殘留非零(某 teardown flag False)→ 拒。
+    result = _effect_result()
+    packet, route, fragments, evidence_by_id, valid = _closure_inputs(
+        result, residue={"units_gone": True, "cgroup_gone": True, "netns_gone": True, "temp_gone": False},
+    )
+    errors = tfx.validate_target_host_effect_binding(
+        packet, route, fragments, evidence_by_id, valid
+    )
+    assert any("clean residue_observation" in e for e in errors)
+
+
+def test_closure_rejects_acceptance_missing_verifier_capture() -> None:
+    # acceptance 只綁 effect receipt + ops_postcheck,未綁第三份 verifier capture → 拒。
+    result = _effect_result()
+    packet, route, fragments, evidence_by_id, valid = _closure_inputs(result)
+    receipt_id = next(iter(valid))
+    packet["acceptance"] = [{"status": "PASS", "evidence_refs": [receipt_id, "ops_post_1"]}]
+    errors = tfx.validate_target_host_effect_binding(
+        packet, route, fragments, evidence_by_id, valid
+    )
+    assert any("must bind the effect receipt + independent ops_postcheck + verifier capture" in e for e in errors)
+
+
+def test_closure_rejects_applier_self_run_result_without_verifier_capture_digest() -> None:
+    # 直接把 applier 自跑結果(vcd=None)塞進 closure valid_receipts → 缺 verifier_capture_digest,拒。
+    result = _effect_result()
+    packet, route, fragments, evidence_by_id, valid = _closure_inputs(result)
+    receipt_id = next(iter(valid))
+    valid[receipt_id] = result  # 換回未升 BINDING 的 applier 自跑結果
+    errors = tfx.validate_target_host_effect_binding(
+        packet, route, fragments, evidence_by_id, valid
+    )
+    assert any("lacks a bound verifier_capture_digest" in e for e in errors)
 
 
 # --------------------------------------------------------------------------- #
