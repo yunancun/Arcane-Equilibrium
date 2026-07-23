@@ -6,6 +6,14 @@ explicitly authenticated loopback identity) can run a fixed catalog/``SELECT``
 allowlist and is denied every write / role-escalation / search-path-hijack
 attempt.  It emits one canonical, self-hashed ``pg_readonly_identity_receipt_v1``.
 
+The S1.1 disposable proof uses the unix socket (peer/trust).  The
+``authenticated_loopback`` endpoint class is fail-closed unless it binds BOTH an
+explicit non-secret ``auth_method`` label and a ``credential_provider`` callable:
+without a bound auth method a loopback is not an explicitly authenticated identity
+(the scrubbed env removes ``PGPASSWORD``/passfile), so the Adapter never advertises
+``authenticated`` without a bound method, and the credential is consumed only at
+connect time and never enters the receipt.
+
 S1.1 is ``DISPOSABLE_ONLY``: production PG is rejected fail-closed, direct
 ``psql`` stays denied (this Adapter uses ``psycopg2`` over the socket and never
 shells out), and no migration/writer is ever created by the Adapter.  The
@@ -25,11 +33,12 @@ import os
 import re
 import shutil
 import tempfile
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from agent_governance_schema import schema_subset_errors
 
@@ -50,6 +59,9 @@ SQLSTATE_RE = re.compile(r"^[0-9A-Z]{5}$")
 
 ENDPOINT_CLASSES = frozenset({"unix_socket_allowlisted", "authenticated_loopback"})
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1"})
+# authenticated_loopback 必須顯式綁定一個「非機密」的認證方式標籤,且由 credential-provider
+# callable 於連線時供密(密鑰永不進 receipt);未綁定即 fail-closed(不得對外宣稱 authenticated)。
+LOOPBACK_AUTH_METHODS = frozenset({"scram-sha-256", "client_cert"})
 TARGET_CLASSES = frozenset({"disposable_local", "production"})
 # S1.1 只接受 disposable_local;production 一律 fail-closed 拒絕。
 S1_TARGET_CLASS = "disposable_local"
@@ -339,6 +351,7 @@ def _normalize_endpoint(
     socket_dir: str | None,
     loopback_host: str | None,
     port: int | None,
+    auth_method: str | None = None,
 ) -> dict[str, Any]:
     # socket-only 或 authenticated loopback,其他 host 形態一律 fail-closed。
     if endpoint_class not in ENDPOINT_CLASSES:
@@ -352,6 +365,9 @@ def _normalize_endpoint(
             raise ValueError("unix socket endpoint requires an absolute socket_dir")
         if loopback_host is not None:
             raise ValueError("unix socket endpoint cannot carry a loopback_host")
+        # socket 走 peer/trust,不帶密碼認證方式;若誤綁 auth_method 即 fail-closed。
+        if auth_method is not None:
+            raise ValueError("unix socket endpoint must not carry an auth_method (peer/trust)")
     else:  # authenticated_loopback
         if loopback_host not in LOOPBACK_HOSTS:
             raise ValueError("loopback endpoint requires host 127.0.0.1 or ::1")
@@ -359,6 +375,13 @@ def _normalize_endpoint(
             raise ValueError("loopback endpoint cannot carry a socket_dir")
         if not isinstance(port, int):
             raise ValueError("loopback endpoint requires an explicit port")
+        # fail-closed:loopback 必須顯式綁定認證方式,否則(無密碼/憑證)不是「明確已認證身分」——
+        # 對 password-auth server 連不上,或 libpq 回退到未宣告的 HOME 預設。未綁定即拒(不可選)。
+        if auth_method not in LOOPBACK_AUTH_METHODS:
+            raise ValueError(
+                "authenticated_loopback requires an explicitly bound auth_method "
+                f"(one of {sorted(LOOPBACK_AUTH_METHODS)}); none bound -> fail-closed"
+            )
     return {
         "endpoint_class": endpoint_class,
         "socket_dir": socket_dir,
@@ -377,12 +400,24 @@ def build_readonly_connection_params(
     loopback_host: str | None = None,
     port: int | None = None,
     base_env: dict[str, str] | None = None,
+    auth_method: str | None = None,
+    credential_provider: Callable[[], str] | None = None,
 ) -> dict[str, Any]:
     """Assemble psycopg2 connect kwargs enforcing socket-only/authenticated loopback.
 
     Pins ``default_transaction_read_only=on`` + ``search_path=pg_catalog`` at the
-    connection and carries the scrubbed clean env.  Any other host form is
-    rejected fail-closed by ``_normalize_endpoint``.
+    connection and carries the scrubbed clean env.  Any other host form is rejected
+    fail-closed by ``_normalize_endpoint``.
+
+    ``authenticated_loopback`` is fail-closed unless it binds BOTH an explicit
+    non-secret ``auth_method`` label AND a ``credential_provider`` callable: the
+    scrubbed env removes ``PGPASSWORD``/passfile, so a loopback with no bound auth
+    method is not an explicitly authenticated identity (unreachable against a
+    password-auth server, or falls back to undeclared HOME defaults).  The provider
+    is invoked here and its secret is placed ONLY into ``connect_kwargs`` (consumed
+    by libpq/psycopg2 at connect time); it never enters the receipt/fingerprint.
+    ``unix_socket_allowlisted`` (the S1.1 disposable proof) uses peer/trust and must
+    not carry an auth method.
     """
 
     if not isinstance(database, str) or not database:
@@ -394,6 +429,7 @@ def build_readonly_connection_params(
         socket_dir=socket_dir,
         loopback_host=loopback_host,
         port=port,
+        auth_method=auth_method,
     )
     clean_env, dropped = scrub_pg_environment(base_env)
     host = socket_dir if endpoint_class == "unix_socket_allowlisted" else loopback_host
@@ -406,11 +442,25 @@ def build_readonly_connection_params(
     }
     if port is not None:
         connect_kwargs["port"] = port
+    if endpoint_class == "authenticated_loopback":
+        # loopback 必須有可供密的 credential-provider callable(auth_method 已於 _normalize_endpoint
+        # 確保綁定);libpq/psycopg2 於連線時消費密鑰,密鑰只進 connect_kwargs(實際連線用),
+        # 永不進 receipt / fingerprint / 其餘回傳 metadata。
+        if not callable(credential_provider):
+            raise ValueError(
+                "authenticated_loopback requires a credential_provider callable "
+                "(the secret is consumed at connect time and never enters the receipt)"
+            )
+        secret = credential_provider()
+        if not isinstance(secret, str) or not secret:
+            raise ValueError("credential_provider must return a non-empty secret string")
+        connect_kwargs["password"] = secret
     return {
         "endpoint_class": endpoint_class,
         "socket_dir": socket_dir,
         "loopback_host": loopback_host,
         "port": port,
+        "auth_method": auth_method,
         "database": database,
         "role": role,
         "endpoint": endpoint,
@@ -549,6 +599,30 @@ def probe_search_path_pinned(cur) -> dict[str, Any]:
     }
 
 
+# run_readonly_probe 於連線期間暫時以 clean env 取代進程全域 os.environ。os.environ 是進程全域;
+# 並行探針各自 save→clear→update→restore 的窗口若交錯,會讓某條連線繼承到另一條的路由 env,或使
+# 進程停在暫時的 clean env。此 module-level lock 序列化整個 clear→connect→restore 窗口。
+_ENV_MUTATION_LOCK = threading.Lock()
+
+
+def _connect_under_clean_env(clean_env: dict[str, str], connect: Callable[[], Any]) -> Any:
+    """在 module-level lock 保護下,暫時以 clean_env 取代 os.environ 並執行 connect()。
+
+    lock 保證同一時間只有一條探針在動進程全域 os.environ(整個 clear→connect→restore 窗口),
+    finally 內一律還原原本環境;並行探針因此不會互相污染路由 env,亦不會把進程留在暫時的 clean env。
+    """
+
+    with _ENV_MUTATION_LOCK:
+        previous_env = dict(os.environ)
+        try:
+            os.environ.clear()
+            os.environ.update(clean_env)
+            return connect()
+        finally:
+            os.environ.clear()
+            os.environ.update(previous_env)
+
+
 def run_readonly_probe(
     conn_params: dict[str, Any],
     *,
@@ -566,15 +640,11 @@ def run_readonly_probe(
 
     clean_env = conn_params["clean_env"]
     connect_kwargs = conn_params["connect_kwargs"]
-    previous_env = dict(os.environ)
-    try:
-        # 連線期間以 clean env 取代 os.environ,確保 libpq 讀不到 ambient PG* 路由。
-        os.environ.clear()
-        os.environ.update(clean_env)
-        connection = psycopg2.connect(**connect_kwargs)
-    finally:
-        os.environ.clear()
-        os.environ.update(previous_env)
+    # 連線期間以 clean env 取代 os.environ,確保 libpq 讀不到 ambient PG* 路由;進程全域 env 窗口
+    # 由 module-level lock 序列化(見 _connect_under_clean_env),避免並行探針的 save/restore 交錯。
+    connection = _connect_under_clean_env(
+        clean_env, lambda: psycopg2.connect(**connect_kwargs)
+    )
 
     try:
         connection.autocommit = True
@@ -738,6 +808,8 @@ def build_pg_readonly_identity_receipt(
         socket_dir=endpoint.get("socket_dir"),
         loopback_host=endpoint.get("loopback_host"),
         port=endpoint.get("port"),
+        # loopback receipt 亦須綁定 auth_method,否則 fail-closed(socket receipt 為 None,不受影響)。
+        auth_method=endpoint.get("auth_method"),
     )
     ambient = _ambient_block(probe_result.ambient_routing_scrubbed)
 

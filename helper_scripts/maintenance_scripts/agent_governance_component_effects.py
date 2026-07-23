@@ -1516,8 +1516,21 @@ def _synthetic_bypass_cases() -> list[dict[str, Any]]:
 def build_admitted_class_entry(
     *, result: dict[str, Any], attestation: dict[str, Any]
 ) -> dict[str, Any]:
-    """Project one class's result + independent postcheck into a rollup entry (by digest)."""
+    """Project one class's REAL result + independent postcheck into a rollup entry.
 
+    綁定真實 evidence(非僅呼叫者投影的 digest):除複核 crux 不變量(pre==post 恰好還原、
+    applied != pre、applier != verifier、restoration_confirmed 綁定 reobserved==post)外,另
+    重算兩者的 canonical digest 必須等於物件自綁值,並跑完整 ``validate_component_effect_result``
+    / ``validate_postcheck_attestation`` 必須零錯。合成投影 / digest-alone(無真實
+    apply/rollback/postcheck 的 result/attestation 物件)於此 build 時即 fail-closed 被拒 ——
+    rollup entry 無法憑 digest 或手工投影湊出。
+    """
+
+    if not isinstance(result, dict) or not isinstance(attestation, dict):
+        raise ComponentEffectError(
+            "rollup entry requires the real component_effect_result_v1 and postcheck "
+            "attestation objects (a synthetic / digests-alone projection is rejected)"
+        )
     if result.get("apply_status") != "APPLIED_ROLLED_BACK_EXACT":
         raise ComponentEffectError("rollup admits only APPLIED_ROLLED_BACK_EXACT results")
     if result.get("rollback_restored_exact") is not True:
@@ -1548,6 +1561,30 @@ def build_admitted_class_entry(
         raise NonExactRollbackError(
             "rollup entry requires the independent verifier's reobserved digest to equal post_rollback_digest"
         )
+    # 綁定真實 evidence(收尾防線):entry 綁入的 result_digest / attestation_digest 必須等於由物件
+    # 重算的 canonical digest(擋捏造 digest 的合成投影),且兩物件必須各自通過完整 validator
+    # (schema / integrity / crux 全數重跑)。任一不符即 fail-closed —— rollup entry 只能由真正建構
+    # 並驗證過的 result+attestation 產生,無法從 digest-alone / 手工投影湊出。
+    if result.get("result_digest") != result_digest(result):
+        raise ComponentEffectError(
+            "rollup entry result_digest is not the canonical digest of the result object "
+            "(a synthetic / digests-alone projection cannot be admitted)"
+        )
+    if attestation.get("attestation_digest") != attestation_digest(attestation):
+        raise ComponentEffectError(
+            "rollup entry attestation_digest is not the canonical digest of the attestation "
+            "object (a synthetic / digests-alone projection cannot be admitted)"
+        )
+    result_errors = validate_component_effect_result(result)
+    if result_errors:
+        raise ComponentEffectError(
+            "rollup entry requires a valid component_effect_result_v1: " + "; ".join(result_errors)
+        )
+    attestation_errors = validate_postcheck_attestation(attestation, result=result)
+    if attestation_errors:
+        raise ComponentEffectError(
+            "rollup entry requires a valid postcheck attestation: " + "; ".join(attestation_errors)
+        )
     return {
         "effect_class": result["effect_class"],
         "adapter_id": result["adapter_id"],
@@ -1570,7 +1607,7 @@ def build_admitted_class_entry(
 def build_effect_seams_ready_receipt(
     *,
     caller: str,
-    admitted_classes: list[dict[str, Any]],
+    class_evidence: list[dict[str, Any]],
     bypass_negatives: list[dict[str, Any]],
     dependency_receipts: dict[str, Any],
     observation_time: str,
@@ -1578,17 +1615,43 @@ def build_effect_seams_ready_receipt(
 ) -> dict[str, Any]:
     """Build the canonical, self-hashed ``effect_seams_ready_receipt_v1`` rollup.
 
-    Unsafe states raise (never emit): a production target, a non-exact rollback, an
-    applier==verifier, a ``production_apply_performed`` claim, a missing bypass
-    kind, ttl out of range, or a secret in any serialized payload.  ``status=PASS``
-    only when all six classes are present + exactly restored + distinct-verified,
-    every §11 bypass kind is REJECTED, and every boundary flag holds.
+    ``class_evidence`` is a list of ``{"result": <component_effect_result_v1>,
+    "attestation": <component_effect_postcheck_attestation_v1>}`` REAL object pairs;
+    every admitted-class entry is produced (and validated) by
+    ``build_admitted_class_entry`` here — a caller cannot hand in a pre-built entry
+    or a digests-alone projection, so the "six valid-looking entries -> PASS"
+    forgery path is closed at build.  Unsafe states raise (never emit): a production
+    target, a non-exact rollback, an applier==verifier, a ``production_apply_performed``
+    claim, a missing bypass kind, ttl out of range, or a secret in any serialized
+    payload.  ``status=PASS`` only when all six classes are present + exactly restored
+    + distinct-verified, every §11 bypass kind is REJECTED, and every boundary flag holds.
     """
 
     if not isinstance(caller, str) or not caller:
         raise ComponentEffectError("caller is required")
     if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, int) or not (1 <= ttl_seconds <= TTL_CEILING_SECONDS):
         raise ComponentEffectError(f"ttl_seconds must be within [1, {TTL_CEILING_SECONDS}]")
+
+    # 每個 admitted class 一律由真實 result+attestation 物件經 build_admitted_class_entry 產生並
+    # 驗證(重算 digest + 完整 validator + crux 複核);呼叫者不得直接遞入手工 entry / digest-alone
+    # 投影。這關閉「六個看似合法的 entry → PASS receipt」的偽造路徑。
+    if not isinstance(class_evidence, list):
+        raise ComponentEffectError("class_evidence must be a list of {result, attestation} pairs")
+    admitted_classes: list[dict[str, Any]] = []
+    for evidence in class_evidence:
+        if (
+            not isinstance(evidence, dict)
+            or "result" not in evidence
+            or "attestation" not in evidence
+        ):
+            raise ComponentEffectError(
+                "each class_evidence item must be a {result, attestation} object pair"
+            )
+        admitted_classes.append(
+            build_admitted_class_entry(
+                result=evidence["result"], attestation=evidence["attestation"]
+            )
+        )
 
     seen_classes: list[str] = []
     for entry in admitted_classes:
@@ -1684,7 +1747,18 @@ def build_effect_seams_ready_receipt(
 
 
 def validate_effect_seams_ready_receipt(receipt: Any, *, now: str | None = None) -> list[str]:
-    """Validate the rollup receipt structure/integrity + every PASS-critical crux."""
+    """Validate the rollup receipt structure/integrity + every PASS-critical crux.
+
+    STRUCTURE-ONLY(刻意):本 validator 只核對 receipt 位元的結構 / 完整性 / 自綁 digest 與各
+    PASS-critical 交叉欄位(pre==post、reobserved==post、applier!=verifier、bypass 齊全)。它
+    不持有(也無法重驗)每類底層的 ``component_effect_result_v1`` /
+    ``component_effect_postcheck_attestation_v1`` 物件 —— 那些真實物件只在 build 時存在。因此一份
+    合法的 rollup 只能經 ``build_effect_seams_ready_receipt`` 以「已綁定且驗證過的真實 result+
+    attestation evidence」產生;一份手工撰寫的 rollup 即使結構 / digest 自洽,也不代表底層
+    apply/rollback/postcheck 真的發生過。消費者(S2.4/S2.5)不得僅憑本結構檢查即信任一份 rollup
+    的 digest,必須重跑 builder 或取得可信主機 attestation(見模組 docstring 的
+    evidence-authenticity 誠實聲明)。
+    """
 
     if not isinstance(receipt, dict):
         return ["effect seams ready receipt must be an object"]
@@ -1834,7 +1908,7 @@ def _reference_receipt(
     bypass passes synthetic cases to avoid a build<->tamper recursion.
     """
 
-    admitted: list[dict[str, Any]] = []
+    class_evidence: list[dict[str, Any]] = []
     for effect_class in DEPLOY_COMPONENT_CLASSES:
         pre = canonical_digest({"reference_pre": effect_class})
         intent = build_component_effect_intent(
@@ -1857,11 +1931,11 @@ def _reference_receipt(
             reobserved_post_rollback_digest=pre, restoration_confirmed=True,
             evidence_class="STRUCTURAL_ONLY", observed_at=now,
         )
-        admitted.append(build_admitted_class_entry(result=result, attestation=attestation))
+        class_evidence.append({"result": result, "attestation": attestation})
     bypass = bypass_negatives if bypass_negatives is not None else build_bypass_negative_cases(now=now)
     return build_effect_seams_ready_receipt(
         caller="component_effect_seams_harness_v1:reference",
-        admitted_classes=admitted, bypass_negatives=bypass,
+        class_evidence=class_evidence, bypass_negatives=bypass,
         dependency_receipts=_reference_dependency_receipts(),
         observation_time=now, ttl_seconds=900,
     )

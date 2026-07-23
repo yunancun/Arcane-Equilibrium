@@ -476,6 +476,61 @@ def test_rollup_entry_rejects_forged_noop_exact_result() -> None:
     assert "applied_digest must be present and differ" in str(excinfo.value)
 
 
+def test_rollup_rejects_synthetic_projection_without_real_evidence() -> None:
+    # FIX(P1):rollup entry 不得由「合成投影 / digest-alone」湊出。手工撰寫一份看似合法的
+    # result/attestation 投影(pre==post、applied!=pre、distinct actor、confirmed、reobserved==post),
+    # 但既非經 builder 產生、digest 亦為捏造 —— build_admitted_class_entry 必 fail-closed;
+    # 且 rollup builder(class_evidence 內每對都經 build_admitted_class_entry)同樣拒。
+    pre = ce.canonical_digest({"synthetic": "pre"})
+    applied = ce.canonical_digest({"synthetic": "applied"})
+    fake_digest = ce.canonical_digest({"fake": "result_digest"})
+    synthetic_result = {
+        "effect_class": "ENGINE_SCANNER",
+        "adapter_id": ce.adapter_id_for("ENGINE_SCANNER"),
+        "disposable_target_kind": ce.disposable_target_kind_for("ENGINE_SCANNER"),
+        "target_class": "disposable_local",
+        "apply_status": "APPLIED_ROLLED_BACK_EXACT",
+        "pre_state_digest": pre,
+        "applied_digest": applied,
+        "post_rollback_digest": pre,
+        "rollback_restored_exact": True,
+        "apply_actor_node": "synthetic_actor",
+        "intent_id": "synthetic-intent",
+        "intent_digest": ce.canonical_digest({"synthetic": "intent"}),
+        "evidence_class": "STRUCTURAL_ONLY",
+        "result_digest": fake_digest,
+    }
+    synthetic_attestation = {
+        "apply_actor_node": "synthetic_actor",
+        "verifier_node": "synthetic_verifier",
+        "result_digest": fake_digest,
+        "reobserved_post_rollback_digest": pre,
+        "restoration_confirmed": True,
+        "attestation_digest": ce.canonical_digest({"fake": "attestation_digest"}),
+    }
+    # 捏造 digest:crux 全數「看似」通過,但 canonical digest 重算不符 → 拒。
+    with pytest.raises(ce.ComponentEffectError):
+        ce.build_admitted_class_entry(result=synthetic_result, attestation=synthetic_attestation)
+    # 即便攻擊者把 digest 補成自洽,合成物件仍缺 schema 欄位 → 完整 validator 仍拒。
+    synthetic_result["result_digest"] = ce.result_digest(synthetic_result)
+    synthetic_attestation["result_digest"] = synthetic_result["result_digest"]
+    synthetic_attestation["attestation_digest"] = ce.attestation_digest(synthetic_attestation)
+    with pytest.raises(ce.ComponentEffectError):
+        ce.build_admitted_class_entry(result=synthetic_result, attestation=synthetic_attestation)
+    # rollup builder 也 fail-closed:六份合成投影湊不出 PASS receipt。
+    with pytest.raises(ce.ComponentEffectError):
+        ce.build_effect_seams_ready_receipt(
+            caller="synthetic-projection-attack",
+            class_evidence=[
+                {"result": deepcopy(synthetic_result), "attestation": deepcopy(synthetic_attestation)}
+                for _ in ce.DEPLOY_COMPONENT_CLASSES
+            ],
+            bypass_negatives=ce.build_bypass_negative_cases(now=NOW),
+            dependency_receipts=ce._reference_dependency_receipts(),
+            observation_time=NOW, ttl_seconds=900,
+        )
+
+
 def test_rollup_validator_rejects_tampered_reobserved_entry() -> None:
     receipt = ce._reference_receipt(NOW)
     forged = deepcopy(receipt)

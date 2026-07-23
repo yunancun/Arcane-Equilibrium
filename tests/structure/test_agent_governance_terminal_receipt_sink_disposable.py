@@ -109,6 +109,22 @@ def test_first_append_commits_one_immutable_record(store_dir) -> None:
     ) == []
 
 
+def test_committed_result_reports_chmod_readonly_not_false_immutability(store_dir) -> None:
+    # FIX(P2 honest relabel):committed result 誠實表述「套上 chmod 0o444 唯讀」,而非冒充
+    # immutable_after_write=true(disposable store 為 owner-owned,owner 可 chmod 回改寫)。
+    intent = _intent()
+    result = _apply(intent, store_dir, offset=0)
+    assert result["append_status"] == "APPENDED"
+    assert result["chmod_readonly_applied"] is True
+    # 舊的過度宣稱欄位不得存在(消費者不得誤把可變本地檔當不可變證據)。
+    assert "immutable_after_write" not in result
+    # 反證 owner 可移除唯讀並改寫 → 證明這不是真不可變(真 WORM 由 S8.6 綁定)。
+    record_path = Path(store_dir) / result["record_locator"]
+    os.chmod(record_path, 0o644)
+    record_path.write_bytes(b"owner-rewrote-the-supposedly-immutable-record")
+    assert record_path.read_bytes() == b"owner-rewrote-the-supposedly-immutable-record"
+
+
 def test_second_append_same_key_is_idempotent_dedup(store_dir) -> None:
     intent = _intent()
     first = _apply(intent, store_dir, offset=0)
@@ -174,7 +190,7 @@ def test_interruption_commits_no_record_and_key_stays_retryable(store_dir) -> No
     interrupted = _apply(intent, store_dir, offset=0, simulate_interruption=True)
     assert interrupted["append_status"] == "ROLLED_BACK_INTERRUPTED"
     assert interrupted["record_locator"] is None
-    assert interrupted["immutable_after_write"] is False
+    assert interrupted["chmod_readonly_applied"] is False
     # 中斷未 commit 任何 record ⇒ records/ 空,idempotency key 仍空缺。
     assert list((Path(store_dir) / "records").iterdir()) == []
     # 同 key 重試:乾淨 append 成功(WORM 從不改寫已 commit 的 record)。

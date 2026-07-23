@@ -490,6 +490,15 @@ def test_forged_oci_build_const_false_flag_fails_schema_and_validator(flag):
     assert spike.validate_runtime_candidate_receipt(forged) != []
 
 
+def test_probe_python_isolated_mode_rejects_relative_interpreter():
+    # FIX(P2):相對直譯器(如 "python")會由 subprocess 走繼承 PATH 查找,不得被回報成
+    # absolute_pinned / system_python_fallback_possible=false。啟動前(isabs 檢查在 subprocess 之前)
+    # 即 fail-closed 拒;因此本測試 hermetic,不會實跑任何子進程。
+    for relative in ("python", "python3", "bin/python3", "./python"):
+        with pytest.raises(RuntimeError, match="absolute"):
+            spike.probe_python_isolated_mode(interpreter=relative)
+
+
 def test_structural_isolation_contract_is_carried_into_receipt():
     # 承 E2 P3 / E4 P3-1:structural_isolation_contract()(不跑子進程,STRUCTURAL_ONLY)須被
     # builder 忠實搬入 isolation_mode 區塊——receipt 的 isolation 主張即對照此真實 contract 檢核。

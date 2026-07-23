@@ -2,15 +2,22 @@
 
 This Adapter is the one concrete component-effect Adapter delivered by S1.2: it
 proves the ``terminal_receipt_sink_v1`` WORM append mechanism against a **local
-content-addressed, immutable-after-commit store** in a throwaway directory, with
-real OS semantics (``os.link`` atomic commit + idempotency dedup, ``chmod 0o444``
-immutable-after-write) and an **independent** readback ACK by a distinct actor.
+content-addressed store** in a throwaway directory, with real OS semantics
+(``os.link`` atomic commit + idempotency dedup, ``chmod 0o444`` read-only) and an
+**independent** readback ACK by a distinct actor.
+
+**Honest immutability posture (never overclaimed).**  The committed record's
+``chmod 0o444`` is disposable **chmod-only emulation**: the store is owner-owned,
+so the owner can ``chmod 0o644`` and rewrite it — this is NOT real WORM.  The
+result therefore reports ``chmod_readonly_applied`` (a true statement about the
+chmod that was applied), never an ``immutable_after_write`` guarantee the
+disposable store cannot enforce.  Real immutability (an actor that CANNOT
+re-permission the record — S3-Object-Lock / append-only bucket) is the
+external-destination binding deferred to S8.6, which consumes this contract.
 
 S1.2 is ``DISPOSABLE_ONLY``: ``target_class`` must be
 ``disposable_local_worm_emulation`` (``external_worm`` is rejected fail-closed),
-no real external WORM destination is contacted, no network I/O happens, and the
-real S3-Object-Lock / append-only bucket binding is deferred to S8.6, which
-consumes this contract.
+no real external WORM destination is contacted, and no network I/O happens.
 
 Stdlib only at import (``os``/``hashlib``/``json``/``uuid``/``tempfile``/
 ``pathlib``/``datetime``/``re``/``functools``) so the central AIML validator can
@@ -87,7 +94,8 @@ APPEND_STATUSES = frozenset(
 # 已 commit(唯一不可變 record)的兩種狀態;其餘兩種不得 commit 任何 record。
 COMMITTED_STATUSES = frozenset({"APPENDED", "IDEMPOTENT_DEDUP"})
 
-# 一次性 record 的 immutable 權限位:committed 後 chmod 0o444。
+# 一次性 record 的唯讀權限位:committed 後 chmod 0o444(disposable 模擬;owner 可 chmod 回改寫,
+# 非真不可變 —— 真 WORM 由 S8.6 外部目的地綁定)。
 IMMUTABLE_RECORD_MODE = 0o444
 # intent 授權窗上限(4 小時)與證據新鮮度窗上限(1 小時,對齊 disposable 證明)。
 INTENT_TTL_CEILING_SECONDS = 4 * 3600
@@ -124,7 +132,7 @@ INTENT_FIELDS = frozenset({
 RESULT_FIELDS = frozenset({
     "schema_version", "sink_id", "intent_id", "intent_digest", "append_status",
     "record_locator", "persisted_payload_digest", "idempotency_key", "append_actor_id",
-    "immutable_after_write", "started_at", "completed_at", "evidence_expires_at",
+    "chmod_readonly_applied", "started_at", "completed_at", "evidence_expires_at",
     "failure_reason", "result_digest",
 })
 READBACK_FIELDS = frozenset({
@@ -377,7 +385,8 @@ def new_disposable_store_dir(*, prefix: str = "aiml_worm_store_") -> str:
 
     Centralizes the "store must not be group/world-readable" property so a caller
     never hands the Adapter a world-readable directory (defense-in-depth); the
-    committed records inside are immutable-after-write ``0o444``.
+    committed records inside are chmod ``0o444`` read-only (owner-removable
+    disposable emulation, NOT real immutability — see module docstring).
     """
 
     # mkdtemp 本身即以 0o700 建立;顯式 chmod 為多一層保險(不信任 umask)。
@@ -403,7 +412,8 @@ def apply_terminal_receipt_append(
     ``os.link`` to ``records/<idempotency_key>.record``.  ``os.link`` raising
     ``FileExistsError`` on an existing key IS the idempotency dedup
     (``IDEMPOTENT_DEDUP``; no duplicate record).  On a fresh commit the record is
-    ``chmod 0o444`` (immutable-after-write) and the tmp is unlinked.  An
+    ``chmod 0o444`` (read-only; owner-removable disposable emulation, NOT real
+    WORM — see module docstring) and the tmp is unlinked.  An
     interrupted apply (``simulate_interruption``) leaves only an orphan tmp and
     commits no record, so the same key stays free and a retry re-appends cleanly.
     Nothing is mocked; no external WORM service is contacted.
@@ -450,8 +460,10 @@ def apply_terminal_receipt_append(
 
     def _result(
         status: str, *, record_locator: str | None, persisted: str | None,
-        immutable: bool, failure: str | None,
+        chmod_readonly: bool, failure: str | None,
     ) -> dict[str, Any]:
+        # chmod_readonly_applied 誠實表述「committed record 有無套上 chmod 0o444 唯讀」,不冒充
+        # 真正不可變(owner 可 chmod 回 0o644 改寫);真 WORM/不可重賦權由 S8.6 外部目的地綁定。
         result: dict[str, Any] = {
             "schema_version": RESULT_SCHEMA_VERSION,
             "sink_id": SINK_ID,
@@ -462,7 +474,7 @@ def apply_terminal_receipt_append(
             "persisted_payload_digest": persisted,
             "idempotency_key": idempotency_key,
             "append_actor_id": append_actor_id,
-            "immutable_after_write": immutable,
+            "chmod_readonly_applied": chmod_readonly,
             "started_at": started,
             "completed_at": completed,
             "evidence_expires_at": _plus_seconds(completed, EVIDENCE_TTL_SECONDS),
@@ -473,23 +485,23 @@ def apply_terminal_receipt_append(
         result["result_digest"] = terminal_receipt_result_digest(result)
         return result
 
-    # WORM record 不可變:序列化前先掃描 payload,任何機密樣態一律 fail-closed,絕不寫入
-    # 任何 record(避免明文機密落入不可變 WORM record;與 receipts 的機密掃描對稱)。
+    # 唯讀 record 前置守衛:序列化前先掃描 payload,任何機密樣態一律 fail-closed,絕不寫入
+    # 任何 record(避免明文機密落入 chmod 0o444 唯讀 record;與 receipts 的機密掃描對稱)。
     if _contains_secret_like(terminal_payload):
         return _result(
-            "FAILED", record_locator=None, persisted=None, immutable=False,
+            "FAILED", record_locator=None, persisted=None, chmod_readonly=False,
             failure="terminal payload carries secret-like content; nothing committed",
         )
     # payload-hash binding:序列化 payload 的 digest 必須等於 intent 綁定的 digest。
     if persisted_digest != payload_binding.get("terminal_payload_digest"):
         return _result(
-            "FAILED", record_locator=None, persisted=None, immutable=False,
+            "FAILED", record_locator=None, persisted=None, chmod_readonly=False,
             failure="terminal payload digest does not match intent payload_binding",
         )
     # append actor 必須等於已核准 intent 的 append_actor_id。
     if append_actor_id != intent.get("append_actor_id"):
         return _result(
-            "FAILED", record_locator=None, persisted=None, immutable=False,
+            "FAILED", record_locator=None, persisted=None, chmod_readonly=False,
             failure="append actor differs from approved intent append_actor_id",
         )
 
@@ -502,7 +514,7 @@ def apply_terminal_receipt_append(
         # 同一 idempotency_key 保持空缺 ⇒ 可重試。WORM 從不「改寫」已 commit 的 record。
         return _result(
             "ROLLED_BACK_INTERRUPTED", record_locator=None, persisted=None,
-            immutable=False,
+            chmod_readonly=False,
             failure="apply interrupted before atomic commit; no record committed",
         )
 
@@ -517,7 +529,7 @@ def apply_terminal_receipt_append(
             # 既有 record 為 symlink(O_NOFOLLOW→ELOOP)或不可讀:不佯稱去重,回結構化 FAILED
             # (與 readback 讀檔失敗的處理對稱;仍 fail-closed,絕不 commit 任何 record)。
             return _result(
-                "FAILED", record_locator=None, persisted=None, immutable=False,
+                "FAILED", record_locator=None, persisted=None, chmod_readonly=False,
                 failure=(
                     "existing idempotency-key record is not a regular readable file "
                     "(symlink / unreadable pre-seed detected); nothing committed"
@@ -528,7 +540,7 @@ def apply_terminal_receipt_append(
         # 等於本次核准的 digest;不符即為內容替換/預植入 ⇒ fail-closed FAILED,不佯稱去重成功。
         if existing_digest != payload_binding.get("terminal_payload_digest"):
             return _result(
-                "FAILED", record_locator=None, persisted=None, immutable=False,
+                "FAILED", record_locator=None, persisted=None, chmod_readonly=False,
                 failure=(
                     "idempotency-key record content does not match the approved payload "
                     "digest (content substitution / pre-seed detected)"
@@ -536,14 +548,14 @@ def apply_terminal_receipt_append(
             )
         return _result(
             "IDEMPOTENT_DEDUP", record_locator=record_rel, persisted=existing_digest,
-            immutable=True, failure=None,
+            chmod_readonly=True, failure=None,
         )
-    # commit 成功:chmod 0o444(immutable-after-write),移除 tmp。
+    # commit 成功:chmod 0o444(唯讀;owner 可 chmod 回改寫,非真不可變),移除 tmp。
     os.chmod(record_path, IMMUTABLE_RECORD_MODE)
     _quiet_unlink(tmp_path)
     return _result(
         "APPENDED", record_locator=record_rel, persisted=persisted_digest,
-        immutable=True, failure=None,
+        chmod_readonly=True, failure=None,
     )
 
 
@@ -610,13 +622,13 @@ def readback_terminal_receipt(
 
 
 def attempt_record_rewrite(record_path: str) -> dict[str, Any]:
-    """Prove-negative helper: try to rewrite a committed 0o444 record.
+    """Prove-negative helper: try a NAIVE rewrite of a committed 0o444 record.
 
     Returns a structured observation ``{attempted, immutable, observed_error}``.
-    A committed record is expected to raise ``PermissionError`` (immutable), so
-    ``immutable`` is ``True`` iff the write was refused.  Used by the disposable
-    proof to record the immutability negative case; never mutates a committed
-    record on success.
+    ``immutable`` is ``True`` iff this direct write was refused (``PermissionError``)
+    — it proves only that the chmod 0o444 blocks a NAIVE append, NOT that the record
+    can never change: the owner can ``chmod 0o644`` first and rewrite (real WORM is
+    deferred to S8.6).  Never mutates a committed record on success.
     """
 
     path = Path(record_path)
@@ -742,10 +754,12 @@ def validate_terminal_receipt_append_result(
 ) -> list[str]:
     """Validate a WORM append result: committed-vs-uncommitted invariants + binding.
 
-    ``APPENDED``/``IDEMPOTENT_DEDUP`` must bind exactly one immutable
-    content-addressed record; ``ROLLED_BACK_INTERRUPTED``/``FAILED`` must claim no
-    record, no persisted digest, ``immutable_after_write=false`` and a
-    ``failure_reason``.  When ``intent`` is supplied it is cross-bound.
+    ``APPENDED``/``IDEMPOTENT_DEDUP`` must bind exactly one content-addressed record
+    with ``chmod_readonly_applied=true`` (disposable chmod 0o444 — owner-removable,
+    NOT real immutability; real WORM is deferred to S8.6);
+    ``ROLLED_BACK_INTERRUPTED``/``FAILED`` must claim no record, no persisted digest,
+    ``chmod_readonly_applied=false`` and a ``failure_reason``.  When ``intent`` is
+    supplied it is cross-bound.
     """
 
     if not isinstance(result, dict):
@@ -765,7 +779,7 @@ def validate_terminal_receipt_append_result(
         errors.append("terminal receipt append result append_status is invalid")
     record_locator = result.get("record_locator")
     persisted = result.get("persisted_payload_digest")
-    immutable = result.get("immutable_after_write")
+    chmod_readonly = result.get("chmod_readonly_applied")
     failure = result.get("failure_reason")
     if status in COMMITTED_STATUSES:
         if not isinstance(record_locator, str) or not RECORD_LOCATOR_RE.fullmatch(
@@ -778,9 +792,11 @@ def validate_terminal_receipt_append_result(
             errors.append(
                 "committed terminal receipt result requires a persisted_payload_digest"
             )
-        if immutable is not True:
+        if chmod_readonly is not True:
+            # 誠實表述:committed record 有套上 chmod 0o444 唯讀(owner-removable,非真不可變)。
             errors.append(
-                "committed terminal receipt result must be immutable_after_write=true"
+                "committed terminal receipt result must be chmod_readonly_applied=true "
+                "(disposable chmod 0o444; real immutability/WORM is deferred to S8.6)"
             )
         if failure is not None:
             errors.append("committed terminal receipt result cannot carry a failure_reason")
@@ -793,9 +809,9 @@ def validate_terminal_receipt_append_result(
             errors.append(
                 f"{status} terminal receipt result cannot claim a persisted payload digest"
             )
-        if immutable is not False:
+        if chmod_readonly is not False:
             errors.append(
-                f"{status} terminal receipt result must be immutable_after_write=false"
+                f"{status} terminal receipt result must be chmod_readonly_applied=false"
             )
         if not isinstance(failure, str) or not failure.strip():
             errors.append(f"{status} terminal receipt result requires a failure_reason")

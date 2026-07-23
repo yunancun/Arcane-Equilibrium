@@ -171,7 +171,7 @@ def _appended_result(intent: dict) -> dict:
         "persisted_payload_digest": worm.terminal_payload_digest(_payload()),
         "idempotency_key": intent["idempotency_key"],
         "append_actor_id": intent["append_actor_id"],
-        "immutable_after_write": True,
+        "chmod_readonly_applied": True,
         "started_at": "2026-07-22T10:00:00Z",
         "completed_at": "2026-07-22T10:00:01Z",
         "evidence_expires_at": "2026-07-22T10:30:01Z",

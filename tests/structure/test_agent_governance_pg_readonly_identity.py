@@ -9,6 +9,7 @@ denial SQLSTATEs are proven separately in the ``_disposable`` module.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
@@ -239,16 +240,71 @@ def test_connection_params_accept_unix_socket():
     assert "PGHOST" not in params["clean_env"]
 
 
-def test_connection_params_accept_authenticated_loopback():
+def test_authenticated_loopback_without_bound_auth_is_rejected():
+    # FIX(P2):authenticated_loopback 未綁定認證方式即 fail-closed —— 不得對外宣稱 authenticated
+    # 卻無任何 password/client-cert/credential-provider(scrub 已移除 PGPASSWORD/passfile)。
+    with pytest.raises(ValueError, match="requires an explicitly bound auth_method"):
+        adapter.build_readonly_connection_params(
+            endpoint_class="authenticated_loopback",
+            database="postgres", role="aiml_ro",
+            loopback_host="127.0.0.1", port=5432,
+        )
+    # 綁定 auth_method 但缺 credential_provider 亦拒(無法真正供密)。
+    with pytest.raises(ValueError, match="credential_provider"):
+        adapter.build_readonly_connection_params(
+            endpoint_class="authenticated_loopback",
+            database="postgres", role="aiml_ro",
+            loopback_host="127.0.0.1", port=5432, auth_method="scram-sha-256",
+        )
+
+
+def test_authenticated_loopback_with_bound_auth_keeps_secret_out_of_receipt():
+    # 綁定 auth_method + credential-provider callable → 可選;密鑰只進 connect_kwargs(連線用),
+    # 不進 auth_method 標籤 / redact fingerprint / 回傳 metadata。
     params = adapter.build_readonly_connection_params(
         endpoint_class="authenticated_loopback",
-        database="postgres",
-        role="aiml_ro",
-        loopback_host="127.0.0.1",
-        port=5432,
+        database="postgres", role="aiml_ro",
+        loopback_host="127.0.0.1", port=5432,
+        auth_method="scram-sha-256",
+        credential_provider=lambda: "loopback-secret-never-in-receipt",
     )
     assert params["connect_kwargs"]["host"] == "127.0.0.1"
     assert params["connect_kwargs"]["port"] == 5432
+    assert params["connect_kwargs"]["password"] == "loopback-secret-never-in-receipt"
+    assert params["auth_method"] == "scram-sha-256"
+    fingerprint = adapter.redact_connection_fingerprint(params)
+    assert "password" not in fingerprint
+    assert "loopback-secret-never-in-receipt" not in json.dumps(fingerprint)
+
+
+def test_env_mutation_window_is_serialized_across_threads():
+    # FIX(P2):_connect_under_clean_env 以 module-level lock 序列化 os.environ 窗口。三條並行
+    # 「探針」各帶不同 marker;critical section 內只應看見自己的 marker(無交錯污染),窗口結束後還原。
+    import threading
+    import time
+
+    baseline_path = os.environ.get("PATH", "")
+    seen: dict[str, str | None] = {}
+
+    def _probe(tag: str) -> None:
+        clean_env = {"AIML_PROBE_MARKER": tag, "PATH": baseline_path}
+
+        def _connect() -> str | None:
+            time.sleep(0.02)  # 拉長 critical section,無 lock 時極易交錯
+            return os.environ.get("AIML_PROBE_MARKER")
+
+        seen[tag] = adapter._connect_under_clean_env(clean_env, _connect)
+
+    threads = [threading.Thread(target=_probe, args=(tag,)) for tag in ("A", "B", "C")]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    # 每條探針在 critical section 內只看到自己的 marker(序列化 → 無交錯污染)。
+    assert seen == {"A": "A", "B": "B", "C": "C"}
+    # 窗口結束後 os.environ 一律還原:無殘留 marker、PATH 未被污染。
+    assert "AIML_PROBE_MARKER" not in os.environ
+    assert os.environ.get("PATH", "") == baseline_path
 
 
 @pytest.mark.parametrize(

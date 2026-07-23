@@ -300,29 +300,35 @@ def test_temp_dir_artifact_and_objects_real_lifecycle(tmp_path):
 # --------------------------------------------------------------------------- #
 def test_full_six_class_rollup_from_real_disposable_evidence(disposable_cluster, tmp_path):
     sock = disposable_cluster["socket_dir"]
-    admitted = []
+    # class_evidence = 真實 (result, attestation) 物件對;rollup builder 於內部逐一經
+    # build_admitted_class_entry 驗證後才收入(呼叫者無法遞入手工 entry / digest-alone 投影)。
+    class_evidence = []
     # 三個 temp_dir_artifact 類 + 一個 temp_dir_objects 類:真實檔案系統轉換。
     for effect_class in ("ENGINE_SCANNER", "LEARNING_RUNTIME", "CONTROLLER_WORKERS"):
         result, attestation = _artifact_result_and_attestation(
             effect_class, tmp_path / effect_class.lower()
         )
-        admitted.append(ce.build_admitted_class_entry(result=result, attestation=attestation))
+        class_evidence.append({"result": result, "attestation": attestation})
     obj_result, obj_attestation = _objects_result_and_attestation(tmp_path / "retention")
-    admitted.append(ce.build_admitted_class_entry(result=obj_result, attestation=obj_attestation))
+    class_evidence.append({"result": obj_result, "attestation": obj_attestation})
     # 兩個 disposable_pg 類:真實叢集轉換。
     role_result, role_attestation = _role_acl_entry(sock)
-    admitted.append(ce.build_admitted_class_entry(result=role_result, attestation=role_attestation))
+    class_evidence.append({"result": role_result, "attestation": role_attestation})
     rot_result, rot_attestation = _rotation_entry(sock)
-    admitted.append(ce.build_admitted_class_entry(result=rot_result, attestation=rot_attestation))
-
-    assert {entry["effect_class"] for entry in admitted} == set(ce.DEPLOY_COMPONENT_CLASSES)
-    assert all(entry["evidence_class"] == "LOCAL_REPRODUCIBLE" for entry in admitted)
+    class_evidence.append({"result": rot_result, "attestation": rot_attestation})
 
     receipt = ce.build_effect_seams_ready_receipt(
-        caller="E1:S1.5:disposable", admitted_classes=admitted,
+        caller="E1:S1.5:disposable", class_evidence=class_evidence,
         bypass_negatives=ce.build_bypass_negative_cases(now=NOW),
         dependency_receipts=ce._reference_dependency_receipts(),
         observation_time=NOW, ttl_seconds=900,
+    )
+    assert {entry["effect_class"] for entry in receipt["admitted_classes"]} == set(
+        ce.DEPLOY_COMPONENT_CLASSES
+    )
+    assert all(
+        entry["evidence_class"] == "LOCAL_REPRODUCIBLE"
+        for entry in receipt["admitted_classes"]
     )
     assert receipt["status"] == "PASS"
     assert receipt["sprint_gate_scope"] == "S1.5_CONTRIBUTION"

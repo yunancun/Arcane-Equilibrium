@@ -438,6 +438,15 @@ def probe_python_isolated_mode(interpreter: str | None = None) -> dict[str, Any]
     interpreter = interpreter or sys.executable
     if not interpreter:
         raise RuntimeError("no python interpreter available for the isolated-mode probe")
+    # fail-closed:直譯器必須是絕對且已解析的可執行路徑,否則 subprocess 會走繼承的 PATH 查找,與
+    # 回報的 launch_interpreter="absolute_pinned" / system_python_fallback_possible=false 相矛盾。
+    # 於啟動前拒絕相對直譯器(如 "python");預設 sys.executable 已是絕對路徑。
+    if not os.path.isabs(interpreter):
+        raise RuntimeError(
+            f"interpreter must be an absolute, resolved executable path (got {interpreter!r}); "
+            "a relative interpreter would resolve via inherited PATH and cannot be reported as "
+            "absolute_pinned"
+        )
 
     marker_dir = tempfile.mkdtemp(prefix="aiml_s14_injected_")
     try:
@@ -479,6 +488,8 @@ def probe_python_isolated_mode(interpreter: str | None = None) -> dict[str, Any]
         "ignores_ambient_env": isolated["injected_present"] is False,
         "system_python_fallback_possible": False,
         "launch_interpreter": "absolute_pinned",
+        # 綁定實際解析的絕對直譯器路徑(即上方 subprocess 真正啟動者),使 absolute_pinned 有據可查。
+        "launch_interpreter_path": interpreter,
         "evidence_class": "LOCAL_REPRODUCIBLE",
     }
 

@@ -102,6 +102,9 @@ def test_launch_interpreter_is_absolute_pinned():
     probe = spike.probe_python_isolated_mode()
     assert probe["launch_interpreter"] == "absolute_pinned"
     assert probe["system_python_fallback_possible"] is False
+    # FIX(P2):absolute_pinned 綁定實際解析的絕對路徑(預設 sys.executable,已是絕對)。
+    assert probe["launch_interpreter_path"] == sys.executable
+    assert os.path.isabs(probe["launch_interpreter_path"])
 
 
 def test_sealed_input_digest_is_reproducible_twice():
