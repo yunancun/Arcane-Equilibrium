@@ -233,7 +233,7 @@ allowlist matrix for each component effect:
 | Learning runtime | selected runtime identity, dependency manifest, mounts/network/socket/secret surface, exact rollback |
 | Controller/workers | unit/slice/cgroup/UID/PG-role set, queue fencing state, start order, drain/rollback |
 | Retention apply | exact tombstone/object set, deleter identity, restore capacity, interruption recovery and postcheck |
-| Terminal receipt append | external immutable/WORM destination, exact terminal payload/hash, dedicated append actor, idempotency key and independent readback ACK |
+| Terminal receipt append | **staged (Amendment A1)**: `S1.2A` external-**capable** source Adapter (S3-compatible Object-Lock contract: destination/retention identity, checksum, version-id, idempotency key, independent-readback contract; fail-closed with no credential channel) vs `S8.6` external binding/**effect** (the real append + independent readback ACK). Terminal state still requires the real external append + independent readback ACK — the split does not downgrade it. |
 
 Each effect requires OPS preflight, PM/operator-approved exact intent, typed
 Adapter execution, a stable observation-window contract and an independent OPS
@@ -787,3 +787,19 @@ At final document review, PM disposition was planning-only:
 2026-07-22 through the S0.3 trusted-host receipt. That receipt still does not
 pre-approve a PG query, deploy, restart, credential rotation, retention apply,
 broker contact or order; those remain separately governed S1-S8 effects.
+
+## Amendment A1 (2026-07-23) — Sprint-1 Formal Governance Closure
+
+Accepted decisions closing S1's `EFFECT_SEAMS_READY` governance wiring (the delivery protocol requires "governance Registry/router/schema/closure wiring, bypass-negative tests and disposable apply/rollback/postcheck, not contract prose alone"). Design + CC/E2 architecture verification: `docs/execution_plan/ai_ml_landing/design/S1-formal-closure-wave-a.md` (§13 authoritative).
+
+1. **Target-host probe becomes a closure-admissible effect seam** (was self-validating/disjoint). Added: a `target_host_probe` `side_effect_class` (forward-only surface rule; risk∈{high,critical}); a `route_task` branch `ops_preflight → pm_target_host_approval → target_host_disposable_runtime_probe_adapter_v1 (effect node) → ops_postcheck` (applier ≠ verifier); the Registry adapter `target_host_disposable_runtime_probe_adapter_v1`; a typed `target_host_disposable_runtime_probe_intent_v1` (probe authorization derives from the admitted intent, NOT a user-set `AIML_TARGET_HOST_PROBE=1`; capture-command env-strip unchanged); a dedicated `target_host_effect_result_v1` (mirrors the P0-B dedicated-result pattern, adapter_id const = the route-node id) carrying/binding the typed `learning_runtime_choice_receipt_target_host_v1`. The choice receipt is now registered in `aiml_gate_receipt_validator.SCHEMA_FILES`; the central offline gate validates STRUCTURE only (`require_target_host_attested=False`, per CLAUDE.md "the standalone CLI cannot authenticate PASS") while the STRICT attested gate lives in the effect/closure lane (`require_target_host_attested=True`, a mandatory bypass-negative). The sealed receipt's `probe_scope.adapter_id` const stays `learning_runtime_deploy_adapter_v1` (the exercised S1.5 deploy adapter) — a distinct notion from the new DAG effect-node adapter.
+
+2. **Additive `aiml_landing_session_attempt_v1`** for S1+ durable attempts (session/attempt/DAG/admission/owned-paths/effect-class/source-head/authority/status + explicit `closure_binding`). It has its OWN sibling validator and rejects `session_id` beginning `"S0."`. The frozen S0.3 `session_attempt_v1.schema.json` and its S0.3-hardcoded validator are untouched.
+
+3. **SSHSIG signed evidence** reuses `agent_governance_aiml_trusted_host._verify_ssh_signature` (no new crypto); a new S1 target-host evidence kind + a parameterized S1 signer profile provide cryptographic domain separation from S0.3 (the S0.3 signer consts/fingerprint and bundle path are byte-identical). The real S1 signer public-key/fingerprint is an **operator-gated** input; the actual trusted-host signing is an out-of-band operator step (like S0.3's `aiml-trusted-finalize`).
+
+4. **WORM staging** split into `S1.2A` (external-capable source Adapter, this sprint) vs `S8.6` (external binding/effect). The S8.6 terminal rule (successful external append + independent readback ACK, stored outside the repo, no post-write) is unchanged; the split only stops S1.2 from implying the external destination is already bound.
+
+5. **Frozen-surface guarantee**: `aiml_effect_classifier_digest()` stays `sha256:1cf8c021b066ceeb364e968add074d263cb28d63db421fdc40620e9904d0ddbc`; `PROGRAM_SCHEMA_PATHS`, `S0_DEPENDENCY_DIGESTS`, the S0.3 sealed schemas/consts, and the nine authority grants (all false) are untouched. `source_adoption_only` holds; no production/runtime/broker/order/live authority is created.
+
+6. **Terminal state**: source-side is landable now; a fully-attested PASS is gated on two operator inputs — the S1 target-host SSHSIG signer key (§3) and the external S3 Object-Lock WORM config (§4). Absent those, the honest terminal is `S1_ENGINEERING_CLOSED_EXTERNAL_WORM_BINDING_PENDING`, never a claim of terminal WORM completion.

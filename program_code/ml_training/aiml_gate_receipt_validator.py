@@ -43,6 +43,13 @@ SCHEMA_FILES = {
     "component_effect_result_v1": "component_effect_result_v1.schema.json",
     "component_effect_postcheck_attestation_v1": "component_effect_postcheck_attestation_v1.schema.json",
     "effect_seams_ready_receipt_v1": "effect_seams_ready_receipt_v1.schema.json",
+    # S1 formal-closure Wave A(S1.6B)——additive:generalized landing attempt row、target-host
+    # 選擇 receipt(中央閘只結構驗)、typed 探針 intent、與專屬 target-host effect result。加這些鍵
+    # 純為 schema 查找,絕不進入 aiml_effect_classifier_digest() 的輸入(見 §7.2),S0.3 分類身分不動。
+    "aiml_landing_session_attempt_v1": "aiml_landing_session_attempt_v1.schema.json",
+    "learning_runtime_choice_receipt_target_host_v1": "learning_runtime_choice_receipt_target_host_v1.schema.json",
+    "target_host_disposable_runtime_probe_intent_v1": "target_host_disposable_runtime_probe_intent_v1.schema.json",
+    "target_host_effect_result_v1": "target_host_effect_result_v1.schema.json",
 }
 
 S0_DEPENDENCY_DIGESTS = {
@@ -392,6 +399,61 @@ def _s0_3_work_package_errors(
         errors.append(
             "AIML work_package direct_interfaces differ from exact phase contract"
         )
+    return errors
+
+
+# S1 formal-closure Wave A:generalized landing attempt 的 sibling work-package 檢查。刻意 NOT
+# 呼叫 _s0_3_work_package_errors——它把 S0.3 const(work_package_id / direct_interfaces / side_effect
+# / runtime_claim=false)全數硬綁。這裡只做結構檢查(sorted/unique owned paths、path⊆manifest、
+# 相位一致、路徑安全)且 side_effect_class/runtime_claim 已被寬鬆化,S0.3 分類身分因此完全不受影響。
+AIML_LANDING_SIDE_EFFECT_CLASSES = {"repo_write", "none", "target_host_probe"}
+
+
+def _aiml_landing_owned_path(path: Any) -> bool:
+    if not isinstance(path, str) or not path or path.startswith("/") or "\\" in path:
+        return False
+    return not any(segment in {"", ".", ".."} for segment in path.split("/"))
+
+
+def _aiml_landing_work_package_errors(
+    work_package: Any,
+    *,
+    attempt_phase: Any,
+    attempt_paths: Any,
+) -> list[str]:
+    if not isinstance(work_package, dict):
+        return ["AIML landing work_package is required"]
+    phase = work_package.get("phase")
+    if phase not in {"SOURCE_BUILD", "POST_MERGE_FINALIZATION"} or phase != attempt_phase:
+        return ["AIML landing work_package phase is invalid"]
+    errors: list[str] = []
+    if not isinstance(work_package.get("work_package_id"), str) or not work_package.get(
+        "work_package_id"
+    ):
+        errors.append("AIML landing work_package_id must be a non-empty string")
+    if work_package.get("side_effect_class") not in AIML_LANDING_SIDE_EFFECT_CLASSES:
+        errors.append("AIML landing work_package side_effect_class is not admitted")
+    if not isinstance(work_package.get("runtime_claim"), bool):
+        errors.append("AIML landing work_package runtime_claim must be boolean")
+    owned_paths = work_package.get("owned_path_manifest")
+    if not isinstance(owned_paths, list):
+        errors.append("AIML landing work_package owned_path_manifest is invalid")
+    else:
+        if owned_paths != sorted(set(owned_paths)):
+            errors.append("AIML landing work_package owned_path_manifest must be sorted and unique")
+        if owned_paths != attempt_paths:
+            errors.append("AIML landing work_package paths differ from attempt path_manifest")
+        if phase == "SOURCE_BUILD" and not owned_paths:
+            errors.append("AIML landing source-build work_package requires owned paths")
+        if phase == "POST_MERGE_FINALIZATION" and owned_paths:
+            errors.append("AIML landing post-merge finalization cannot own source paths")
+        if any(not _aiml_landing_owned_path(path) for path in owned_paths):
+            errors.append("AIML landing work_package contains an unsafe owned path")
+    interfaces = work_package.get("direct_interfaces")
+    if not isinstance(interfaces, list) or not interfaces or any(
+        not isinstance(item, str) or not item for item in interfaces
+    ):
+        errors.append("AIML landing work_package direct_interfaces must be a non-empty string list")
     return errors
 
 
@@ -1491,6 +1553,139 @@ def validate_aiml_artifact(
                 errors.append(
                     f"post-merge read-only admission timestamp is invalid: {error}"
                 )
+    if schema_version == "aiml_landing_session_attempt_v1":
+        # S1 formal-closure Wave A:generalized S1+ attempt。結構鏡射 session_attempt_v1 但
+        # 走 sibling _aiml_landing_work_package_errors(不含 S0.3 const 等式),並新增 classifier-
+        # derived required_effects / actor!=verifier / closure_binding 綁定。§13 C6:session_id 為裸
+        # "S0" 或起始 "S0." 一律拒(鏡射 S0 session 家族全集 {"S0"} ∪ {"S0.*"})——寬鬆的 S1 schema
+        # 不得用來重表任何 S0.x attempt(裸 "S0" 亦不得漏網)。
+        scope_ref = artifact["scope_ref"]
+        if artifact["session_id"] == "S0" or artifact["session_id"].startswith("S0."):
+            errors.append(
+                "aiml_landing_session_attempt_v1 cannot re-express an S0.x session "
+                "(S0.* attempts use the sealed session_attempt_v1 with frozen const pins)"
+            )
+        if (
+            scope_ref["kind"] == "PROGRAM"
+            and scope_ref["landing_scope_id"] is not None
+        ) or (
+            scope_ref["kind"] == "LANDING_SCOPE"
+            and scope_ref["landing_scope_id"] is None
+        ):
+            errors.append("landing session attempt scope_ref kind and landing_scope_id disagree")
+        if artifact["attempt_id"] != session_attempt_identity_digest(artifact):
+            errors.append("landing attempt_id does not bind the exact Session attempt identity")
+        if artifact["self_digest"] != artifact_self_digest(artifact):
+            errors.append("landing session attempt self_digest is invalid")
+        expected_attempt_key = {
+            "session_id": artifact["session_id"],
+            "scope_ref": artifact["scope_ref"],
+            "cohort_epoch": artifact["cohort_epoch"],
+            "attempt": artifact["attempt"],
+        }
+        if artifact["attempt_key"] != expected_attempt_key:
+            errors.append("landing session attempt_key differs from its canonical row fields")
+        bootstrap = artifact["bootstrap_admission"]
+        attempt_phase = artifact["attempt_phase"]
+        if bootstrap["baseline_head"] != artifact["source"]["baseline_head"]:
+            errors.append("landing session bootstrap baseline differs from source baseline")
+        if attempt_phase == "SOURCE_BUILD" and (
+            bootstrap["writer_lease_id"] != artifact["lease"]["lease_id"]
+        ):
+            errors.append("landing session bootstrap writer lease binding is invalid")
+        errors.extend(_aiml_landing_work_package_errors(
+            artifact["work_package"],
+            attempt_phase=artifact["attempt_phase"],
+            attempt_paths=artifact["path_manifest"],
+        ))
+        if artifact["path_manifest"] != sorted(set(artifact["path_manifest"])):
+            errors.append("landing session attempt path_manifest must be sorted and unique")
+        writer_paths = [
+            path
+            for node in artifact["dag_nodes"]
+            for path in node["writer_paths"]
+        ]
+        writer_nodes = [
+            node for node in artifact["dag_nodes"] if node["writer_paths"]
+        ]
+        if len(writer_nodes) > 2:
+            errors.append("landing session attempt admits more than two writer nodes")
+        if any(
+            node["writer_paths"] != sorted(set(node["writer_paths"]))
+            for node in writer_nodes
+        ):
+            errors.append("landing session attempt writer path ownership must be sorted and unique")
+        if len(writer_paths) != len(set(writer_paths)):
+            errors.append("landing session attempt writer path ownership overlaps")
+        if not set(writer_paths).issubset(set(artifact["path_manifest"])):
+            errors.append("landing session attempt writer paths exceed path_manifest")
+        native = artifact["native_admission"]
+        matching_native_nodes = [
+            node
+            for node in artifact["dag_nodes"]
+            if node["node_id"] == native["node_id"]
+            and node["node_class"] == native["node_class"]
+            and node["permission"] == native["permission"]
+        ]
+        if len(matching_native_nodes) != 1:
+            errors.append("landing session native admission does not match exactly one DAG node")
+        if attempt_phase == "SOURCE_BUILD":
+            try:
+                acquired_at = _parse_timestamp(artifact["lease"]["acquired_at"])
+                heartbeat_at = _parse_timestamp(artifact["lease"]["heartbeat_at"])
+                expires_at = _parse_timestamp(artifact["lease"]["expires_at"])
+                if not acquired_at <= heartbeat_at < expires_at:
+                    errors.append("landing session attempt lease timestamps are out of order")
+                if isinstance(now, str):
+                    evaluated_at = _parse_timestamp(now)
+                elif isinstance(now, datetime):
+                    if now.tzinfo is None:
+                        raise ValueError("now must be timezone-aware")
+                    evaluated_at = now
+                else:
+                    evaluated_at = datetime.now(timezone.utc)
+                if (
+                    evaluated_at >= expires_at
+                    and artifact["status"] in {"CLAIMED", "IN_PROGRESS"}
+                ):
+                    errors.append("expired landing session attempt must enter RECOVERY_REQUIRED")
+            except (TypeError, ValueError) as error:
+                errors.append(f"landing session attempt lease timestamp is invalid: {error}")
+        elif attempt_phase == "POST_MERGE_FINALIZATION":
+            if "lease" in artifact:
+                errors.append("landing post-merge finalization attempt cannot hold a writer lease")
+            if "writer_lease_id" in bootstrap:
+                errors.append(
+                    "landing post-merge finalization bootstrap cannot hold a writer lease id"
+                )
+            read_only_admission = artifact["read_only_admission"]
+            if read_only_admission["read_only"] is not True:
+                errors.append("landing post-merge finalization requires a read-only admission")
+        # --- S1 classifier-derived effect binding + explicit closure binding ---
+        adapter_id = artifact["adapter_id"]
+        if artifact["actor_node"] == artifact["independent_postcheck_node"]:
+            errors.append(
+                "landing session attempt actor_node must differ from independent_postcheck_node"
+            )
+        if any(
+            effect.get("adapter_id") != adapter_id
+            for effect in artifact["required_effects"]
+        ):
+            errors.append(
+                "landing session attempt required_effects adapter_id must equal the attempt adapter_id"
+            )
+        closure_binding = artifact["closure_binding"]
+        for digest_field in ("closure_packet_digest", "effect_receipt_digest"):
+            if not re.fullmatch(
+                r"sha256:[0-9a-f]{64}", str(closure_binding.get(digest_field, ""))
+            ):
+                errors.append(
+                    f"landing session attempt closure_binding {digest_field} is not a sha256 digest"
+                )
+        if closure_binding.get("effect_adapter_id") != adapter_id:
+            errors.append(
+                "landing session attempt closure_binding effect_adapter_id must equal the attempt adapter_id"
+            )
     if schema_version == "aiml_receipt_dependency_graph_v1":
         try:
             errors.extend(_dependency_graph_errors(artifact, now=now))
@@ -1646,6 +1841,44 @@ def validate_aiml_artifact(
                 errors.extend(
                     _component_effects.validate_effect_seams_ready_receipt(artifact, now=now_text)
                 )
+    if schema_version == "learning_runtime_choice_receipt_target_host_v1":
+        # S1 formal-closure Wave A(S1.6B):把 target-host 選擇 receipt 加入中央 SCHEMA_FILES 委派
+        # 登記,但中央離線閘只做「結構/整合/新鮮度」驗(require_target_host_attested=False)——CLAUDE.md
+        # 明言 standalone CLI 無法認證 PASS。真「已背書」閘(EMBEDDED governed command_capture_v2)由
+        # closure/trusted-host lane 以 require_target_host_attested=True 執行(見 target-host effect
+        # sibling)。與 pg_readonly / WORM / component-effect 分支同樣強制 now:陳舊 receipt 於中央閘 fail-closed。
+        now_text = _now_text(now)
+        if now_text is None:
+            errors.append(
+                "target-host choice receipt requires now for freshness at the central gate"
+            )
+        else:
+            import agent_governance_target_host_choice as _th_choice
+            errors.extend(_th_choice.validate_target_host_choice_receipt(
+                artifact, now=now_text, require_target_host_attested=False
+            ))
+    if schema_version == "target_host_effect_result_v1":
+        # S1.6B 專屬 effect result(§13 C1):委派給 sibling module,對內嵌 choice receipt 以
+        # require_target_host_attested=True 嚴格驗(§13 C4——這條 lane 的嚴格 attestation 是唯一
+        # 真實執法)。中央閘無 closure baseline,故不傳 expected_source_head(結構+嵌入嚴格驗)。
+        now_text = _now_text(now)
+        if now_text is None:
+            errors.append(
+                "target-host effect result requires now for freshness at the central gate"
+            )
+        else:
+            import agent_governance_target_host_effects as _th_effects
+            errors.extend(_th_effects.validate_target_host_effect_result(
+                artifact, now=now_text
+            ))
+    if schema_version == "target_host_disposable_runtime_probe_intent_v1":
+        # S1.6B typed intent 為離線結構授權(SCHEMA_FILES 委派)。schema 無法比較兩欄位,故此處補上
+        # schema description 已載明的 applier != independent verifier 不變量:applier_node_id 必須不同於
+        # postcheck_node_id。其餘結構(const/pattern/enum/ttl 上限等)由上方 schema_subset_errors 強制。
+        if artifact["applier_node_id"] == artifact["postcheck_node_id"]:
+            errors.append(
+                "target-host probe intent applier_node_id must differ from postcheck_node_id"
+            )
     if schema_version == "github_repository_policy_attestation_v1":
         errors.extend(_github_policy_attestation_errors(artifact, now=now))
     if schema_version == "program_adoption_receipt_v1":

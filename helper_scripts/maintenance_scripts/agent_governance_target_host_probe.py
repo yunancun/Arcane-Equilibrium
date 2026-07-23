@@ -66,12 +66,23 @@ delegated ``cpu memory pids``; target under a production path; any docker /
 system-scope; any prod-PG contact; applier==verifier; cleanup residue; a secret in
 any serialized field; TTL exceeded.
 
-Like S1.1/S1.4/S1.6 this harness SELF-VALIDATES its own receipt and is NOT
-registered into the central AIML closure-validator, the governance registry, the
-route-compiler, permissions, or the vocabulary; S1.6B stays disjoint.  It REUSES
-(read-only imports) S1.5 ``agent_governance_component_effects`` (the atomic
-artifact lifecycle + the live matrix digest; it reuses the already-registered
-``learning_runtime_deploy_adapter_v1`` and adds NO registry adapter) and S1.4
+This harness's on-host executor + choice-receipt LOGIC still SELF-VALIDATES its
+own receipt.  As of AIML S1 formal-closure Wave A the target-host **receipt schema**
+(``learning_runtime_choice_receipt_target_host_v1``) IS now registered in the central
+AIML closure-validator ``SCHEMA_FILES`` for structure-only delegated recognition
+(``require_target_host_attested=False`` at the offline gate — CLAUDE.md: the standalone
+CLI cannot authenticate PASS), and a dedicated
+``target_host_disposable_runtime_probe_adapter_v1`` effect adapter IS now registered
+(route branch + typed intent + dedicated ``target_host_effect_result_v1`` + closure
+binding + SSHSIG S1 profile).  The attested honesty gate (EMBEDDED governed on-host
+``command_capture_v2``) is enforced strictly in the closure/effect lane
+(``require_target_host_attested=True``, see ``agent_governance_target_host_effects``).
+The S1.6 Mac stand-in receipt (``learning_runtime_choice_receipt_v1``) remains
+disjoint/unregistered.  This module REUSES (read-only imports) S1.5
+``agent_governance_component_effects`` (the atomic artifact lifecycle + the live matrix
+digest; the probe still exercises the already-registered
+``learning_runtime_deploy_adapter_v1`` as the ``probe_scope.adapter_id`` underlying
+deploy adapter — a DISTINCT identity from the new effect-node adapter) and S1.4
 ``agent_governance_runtime_candidate_spike`` (the candidate ids, ``hash_bundle_tree``
 and platform base).  It is stdlib-first.
 """

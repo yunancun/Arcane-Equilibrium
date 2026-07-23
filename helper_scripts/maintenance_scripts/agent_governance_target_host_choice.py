@@ -10,6 +10,14 @@ helpers from the probe module (one-way; the probe module re-exports this
 module's public builders/validators so ``th.build_target_host_choice_receipt`` etc.
 keep working for callers importing the probe module).  Mac-testable pure logic —
 no on-host effect here.
+
+AIML S1 formal-closure Wave A: this module is now an ``implementation_path`` of the
+registered ``target_host_disposable_runtime_probe_adapter_v1``, and its
+``validate_target_host_choice_receipt`` is delegated from the central AIML closure-
+validator for the registered ``learning_runtime_choice_receipt_target_host_v1`` schema
+(structure-only, ``require_target_host_attested=False``, at the offline gate).  The
+strict attested gate (``require_target_host_attested=True``) is invoked by the effect
+lane in ``agent_governance_target_host_effects``.
 """
 
 from __future__ import annotations

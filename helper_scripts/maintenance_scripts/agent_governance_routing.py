@@ -41,6 +41,8 @@ DOC_SURFACES = {"docs", "governance", "index", "registry", "routing", "closure",
 SIDE_EFFECT_CLASSES = {
     "none", "repo_write", "local_test", "docs_write", "deploy", "broker_probe",
     "broker_private_effect", "public_web_read", "private_external_contact",
+    # S1 formal-closure Wave A(S1.6B):非 root user-scope 拋棄式 target-host 探針效果類。
+    "target_host_probe",
 }
 SOURCE_WRITE_SHAPES = {
     "implementation", "feature", "change", "bug", "fix", "refactor", "migration",
@@ -57,6 +59,8 @@ UNSUPPORTED_EFFECT_CLASSES = {
     "broker_probe", "broker_private_effect", "private_external_contact",
 }
 P0B_ADAPTER_ID = "p0b_alr_rollforward_adapter_v1"
+# S1 formal-closure Wave A(S1.6B):專屬拋棄式 target-host 探針 effect adapter 的 route-node 身分。
+TARGET_HOST_PROBE_ADAPTER_ID = "target_host_disposable_runtime_probe_adapter_v1"
 P0B_CLAIM_KEYS_BY_PHASE = {
     "stage": frozenset({
         "p0b_effect_adapter_selection",
@@ -412,6 +416,19 @@ def _normalize_task_facts(task_facts: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("side_effect_class=local_test requires task_shape=test")
     if effect == "docs_write" and shape not in {"docs", "documentation"}:
         raise ValueError("side_effect_class=docs_write requires a documentation task shape")
+    # S1 formal-closure Wave A(S1.6B)§13 C3:FORWARD-only 表面一致性——target_host_probe 效果
+    # 必須帶 runtime_effect/service 表面 + runtime_claim=true + 高/critical risk。刻意 NOT 加反向
+    # 「裸 runtime_effect/service 表面即需此類」規則:runtime_effect/service 是共享 OPERATION_SURFACES,
+    # 反向規則會回歸既有 deploy/ops 路由。runtime_claim=true 也讓 operations_needed 自動成立(§13 C5)。
+    if effect == "target_host_probe" and not (
+        normalized_surfaces & {"runtime_effect", "service"}
+        and normalized.get("runtime_claim") is True
+        and risk in {"high", "critical"}
+    ):
+        raise ValueError(
+            "side_effect_class=target_host_probe requires a runtime_effect/service surface, "
+            "runtime_claim=true, and high or critical risk"
+        )
     normalized["side_effect_class"] = effect
     aiml_program_adoption = aiml_program_adoption_selected(
         normalized.get("claim_inputs", {})
@@ -720,6 +737,22 @@ def route_task(task_facts: dict[str, Any]) -> dict[str, Any]:
                     result_schema_version="p0b_alr_rollforward_effect_result_v1",
                 )
                 postcheck_requires = [P0B_ADAPTER_ID]
+        elif effect == "target_host_probe":
+            # S1 formal-closure Wave A(S1.6B):由 side_effect_class 這個乾淨判別子選中拋棄式
+            # target-host 探針 effect seam(不需 claim_inputs 選擇器,效果類本身即無歧義)。
+            # applier(adapter 節點)!= verifier(ops_postcheck)。
+            add(
+                "pm_target_host_approval", role="PM", requires=["ops_preflight"],
+                reason="operator/PM authorizes the exact target-host disposable probe intent; not verification",
+            )
+            add(
+                TARGET_HOST_PROBE_ADAPTER_ID, kind="effect_adapter",
+                requires=["pm_target_host_approval"],
+                reason="purpose-built S1.6B disposable target-host probe effect seam",
+                intent_schema_version="target_host_disposable_runtime_probe_intent_v1",
+                result_schema_version="target_host_effect_result_v1",
+            )
+            postcheck_requires = [TARGET_HOST_PROBE_ADAPTER_ID]
         add("ops_postcheck", role="OPS", requires=postcheck_requires, reason="independent operational evidence")
         predecessor = "ops_postcheck"
     elif unsupported_effect:

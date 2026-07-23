@@ -403,6 +403,21 @@
       "intent_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/component_effect_intent_v1.schema.json",
       "result_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/component_effect_result_v1.schema.json"
     },
+    "target_host_disposable_runtime_probe_adapter_v1": {
+      "status": "declared_disposable_target_host_probe_gated",
+      "owner_session": "S1.6B",
+      "authority": "PM/operator approved target_host_disposable_runtime_probe_intent_v1 for an exact non-root user-scope disposable probe on the bound target host only; no production apply, no real service, no system-scope unit, no OCI socket, prod PG untouched",
+      "invariant": "non-root + user-scope transient units only; applier != independent postcheck verifier; exact rollback + complete teardown with an INDEPENDENT residue sweep are machine-enforced; AIML_TARGET_HOST_PROBE is set only by the admitted-intent execution path (governed capture-command strips it); real operator SSHSIG attestation is the out-of-band trusted-host step; the dedicated target_host_effect_result_v1 embeds and strictly re-validates the typed learning_runtime_choice_receipt_target_host_v1 (require_target_host_attested=True); no closure effect binding is real until the operator SSHSIG-signs the target-host execution bundle",
+      "implementation_paths": [
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_choice.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_effects.py"
+      ],
+      "component_paths": [
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_probe.py"
+      ],
+      "intent_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/target_host_disposable_runtime_probe_intent_v1.schema.json",
+      "result_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/target_host_effect_result_v1.schema.json"
+    },
     "controller_workers_deploy_adapter_v1": {
       "status": "declared_disposable_apply_rollback_postcheck_implemented",
       "owner_session": "S1.5",

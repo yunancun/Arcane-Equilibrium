@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "target_host_effect_result_v1.schema.json",
+  "title": "target_host_effect_result_v1",
+  "description": "Dedicated closure-admissible effect result for the target_host_disposable_runtime_probe_adapter_v1 route node (S1.6B). It is NOT the generic effect_adapter_result_v1 (which pins adapter_id=deploy_adapter_v1 and carries only a scalar receipt_digest and cannot embed a receipt). It mirrors p0b_alr_rollforward_effect_result_v1: additionalProperties:false, adapter_id const == its own route-node id, an EMBEDDED typed learning_runtime_choice_receipt_target_host_v1 bound by choice_receipt_digest == its self_digest, source_head, distinct applier_node_id != postcheck_verifier_node_id, and a self-digest receipt_digest. The embedded choice receipt is fully re-validated with require_target_host_attested=True by the sibling validator (agent_governance_target_host_effects) — a STRUCTURAL_ONLY / bare-digest / non-attested receipt is REJECTED at this effect lane. receipt_digest proves integrity only; a trusted host replays the embedded governed on-host command_capture_v2 to authenticate the target-host exit.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "adapter_id", "effect_status", "intent_id",
+    "intent_digest", "target_host", "source_head", "applier_node_id",
+    "postcheck_verifier_node_id", "choice_receipt_digest", "choice_receipt",
+    "approved_by", "approved_at", "started_at", "completed_at",
+    "intent_expires_at", "evidence_expires_at", "failure_reason", "receipt_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "target_host_effect_result_v1"},
+    "adapter_id": {"const": "target_host_disposable_runtime_probe_adapter_v1"},
+    "effect_status": {"enum": ["TARGET_HOST_DISPOSABLE_PROBE_PASS", "FAILED"]},
+    "intent_id": {"type": "string", "minLength": 8},
+    "intent_digest": {"$ref": "#/$defs/digest"},
+    "target_host": {"type": "string", "minLength": 1},
+    "source_head": {"$ref": "#/$defs/head"},
+    "applier_node_id": {"type": "string", "minLength": 1},
+    "postcheck_verifier_node_id": {"type": "string", "minLength": 1},
+    "choice_receipt_digest": {"$ref": "#/$defs/digest"},
+    "choice_receipt": {"type": "object"},
+    "approved_by": {"type": "string", "minLength": 1},
+    "approved_at": {"$ref": "#/$defs/timestamp"},
+    "started_at": {"$ref": "#/$defs/timestamp"},
+    "completed_at": {"$ref": "#/$defs/timestamp"},
+    "intent_expires_at": {"$ref": "#/$defs/timestamp"},
+    "evidence_expires_at": {"$ref": "#/$defs/timestamp"},
+    "failure_reason": {"type": ["string", "null"]},
+    "receipt_digest": {"$ref": "#/$defs/digest"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"effect_status": {"const": "TARGET_HOST_DISPOSABLE_PROBE_PASS"}}},
+      "then": {
+        "properties": {
+          "failure_reason": {"type": "null"},
+          "choice_receipt": {
+            "properties": {
+              "schema_version": {"const": "learning_runtime_choice_receipt_target_host_v1"},
+              "status": {"const": "PASS"},
+              "evidence_class": {"const": "PLATFORM_OR_EXTERNAL_ATTESTED"}
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {"failure_reason": {"type": "string", "minLength": 1}}
+      }
+    }
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "timestamp": {"type": "string", "format": "date-time"}
+  }
+}

@@ -146,7 +146,11 @@ No ML5/ML6 source, schema, runtime or effect implementation begins before S0.3.
 
 - `S1.1`: LR0A PG read-only identity Adapter.
 - `S1.2`: LR0B typed AIML component effect/rollback/postcheck contracts and the
-  external immutable `terminal_receipt_sink_v1` Adapter.
+  disposable-local `terminal_receipt_sink_v1` Adapter. **Amendment A1**: WORM is
+  staged — `S1.2A` is the external-**capable** source Adapter (S3-compatible
+  Object-Lock contract, fail-closed with no credential channel); `S8.6` remains
+  the external binding/**effect** (real append + independent readback ACK). The
+  staging does not downgrade the S8.6 terminal WORM rule.
 - `S1.3`: host UID/PG role/auth/socket ACL/secret lifecycle provisioning and
   negative tests.
 - `S1.4`: LR0C OCI versus fixed-path runtime spike and single choice.
@@ -154,7 +158,14 @@ No ML5/ML6 source, schema, runtime or effect implementation begins before S0.3.
   independent remote/platform attestation.
 - `S1.6`: typed isolated target-host disposable probes through S1.5, exercising
   start/stop/failure/rollback/cleanup for both candidates, then final
-  single-runtime choice. No production running-runtime claim.
+  single-runtime choice. No production running-runtime claim. **Amendment A1**:
+  the target-host probe is now a closure-admissible effect seam — a
+  `target_host_probe` route class + `target_host_disposable_runtime_probe_adapter_v1`
+  + typed `..._intent_v1` + dedicated `target_host_effect_result_v1` carrying the
+  centrally-registered `learning_runtime_choice_receipt_target_host_v1`. Probe
+  authorization derives from the admitted typed intent (NOT a user-set
+  `AIML_TARGET_HOST_PROBE=1`); the central offline gate is structure-only, the
+  STRICT attested gate is the effect/closure lane; applier ≠ verifier.
 
 S1.1-S1.4 may overlap only where path manifests are disjoint. S1.5 depends on
 their accepted contracts; S1.6 depends on S1.4/S1.5. `EFFECT_SEAMS_READY`
