@@ -1,5 +1,14 @@
 # S1 Formal Closure — Real Target-Host Effect Run Record (Wave C)
 
+> **Superseded (2026-07-23, PR #114 findings fix).** This is the pre-fix Wave C run
+> record. The three Codex findings added a structured `verifier_capture_digest` field
+> to `target_host_effect_result_v1`, which changes `target_host_effect_receipt_digest`,
+> so the `receipt_digest`/`choice`/`attempt` digests pinned below **no longer
+> re-derive**. A fresh run record with the new field + a governed distinct-verifier
+> `command_capture_v2` (now required by the closure) is produced by the S1-closure-fix
+> runtime rerun on branch `agent/aiml-s1-closure-p1p2-fixes`. Treat the digests here as
+> historical.
+
 **Date**: 2026-07-23. **Host**: `trade-core` (Linux, non-root uid=1000). **Branch**:
 `agent/aiml-s1-formal-closure`. **Effect class**:
 `TARGET_HOST_DISPOSABLE_RUNTIME_PROBE`. **Evidence assurance**: real seam verdicts

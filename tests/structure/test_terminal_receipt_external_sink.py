@@ -540,6 +540,22 @@ def test_idempotent_dedup_accepts_equal_existing_retention() -> None:
     assert client.put_calls == 1
 
 
+def test_idempotent_dedup_fails_closed_on_retention_read_error() -> None:
+    # dedup 讀既有物件 retention 時拋錯 ⇒ fail-closed(FAILED),絕不佯稱去重(E4 gap)。
+    class RaisingRetentionS3(FakeObjectLockS3):
+        def get_object_retention(self, *, Bucket, Key, VersionId=None):
+            raise FakeS3ClientError("AccessDenied")
+
+    client = RaisingRetentionS3()
+    intent = _intent()
+    first = _apply(intent, client)
+    assert first["append_status"] == "APPENDED"
+    second = _apply(intent, client)
+    assert second["append_status"] == "FAILED"
+    assert "retention read failed" in (second.get("failure_reason") or "")
+    assert client.put_calls == 1
+
+
 def test_forged_same_actor_positive_ack_is_rejected_by_validator() -> None:
     # 手工偽造:綁定 append actor 卻自稱獨立且 immutability_proven=true、ack=true ⇒ validator 拒。
     client = FakeObjectLockS3()

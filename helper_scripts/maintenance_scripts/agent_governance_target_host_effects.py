@@ -164,9 +164,13 @@ def _validate_verifier_capture_evidence(
     """Validate the third evidence entry: the distinct verifier's own governed command_capture_v2.
 
     要求:(1) evidence.digest == ops_postcheck 引用的 capture digest;(2) 內嵌 record 通過
-    ``validate_governed_command_capture`` 結構/綁定/self-digest 驗證;(3) record_digest == 該 digest;
-    (4) 與 applier 的 on-host capture digest 相異(distinct process + capture);(5) capturer
-    node_id/native_agent 與 applier capture 及 applier 節點相異(distinct role + node)。
+    ``agent_governance_command_capture_v2.validate_governed_command_capture`` 的完整 **offline** 結構/
+    綁定/self-digest 驗(RECORD_FIELDS 完整、``trust_tier==LOCAL_REPRODUCIBLE``、
+    ``effect_enforcement=="repository_policy_only"``、**禁自報 ``host_sandbox_attestation_ref``**、
+    execution-task/node/argv/authorization/generation 一致、``record_digest==self-digest``)——一個內容空殼
+    stub 於此被拒;(3) ``record_digest`` == 該 digest;(4) 與 applier 的 on-host capture digest 相異
+    (distinct process + capture);(5) capturer role/node/native_agent 與 applier capture 及 applier 節點相異。
+    是否**真跑過**(replay 真確性)由受信主機重放認證,非本 offline 閘(CLAUDE.md:離線結構接受非認證)。
     """
 
     errors: list[str] = []
@@ -178,22 +182,13 @@ def _validate_verifier_capture_evidence(
         return errors
     import agent_governance_command_capture_v2 as _cap
 
-    # 結構 + 完整性(offline structural acceptance;真確性由受信主機重放,與 choice.py 對 applier capture
-    # 一致但更嚴——此處額外核 record_digest == canonical self-digest 防竄改):schema_version、
-    # record_digest 為 sha256 且自洽、capturer 三欄(role/node/native_agent≈process)非空。
-    if capture.get("schema_version") != "command_capture_v2":
-        errors.append("verifier command_capture_v2 schema_version is invalid")
-    rec_digest = capture.get("record_digest")
-    if not DIGEST_RE.fullmatch(str(rec_digest or "")):
-        errors.append("verifier command_capture_v2 record_digest must be a sha256 digest")
-    elif rec_digest != _cap._self_digest(capture):
-        errors.append(
-            "verifier command_capture_v2 record_digest does not match its canonical self-digest (tampered)"
-        )
-    for field in ("node_id", "native_agent", "role_id"):
-        if not (isinstance(capture.get(field), str) and capture.get(field)):
-            errors.append(f"verifier command_capture_v2 must carry a non-empty capturer {field}")
-    if str(rec_digest) != str(expected_digest):
+    # 完整 offline governed 驗證(reexecute=False;不觸 fs replay):這是 CLAUDE.md 的 offline 結構接受閘。
+    # 它擋掉 E2 揪出的空殼 stub(缺 RECORD_FIELDS、自報 host_sandbox、trust_tier/effect_enforcement 不符)。
+    errors.extend(
+        f"verifier command_capture_v2 invalid: {error}"
+        for error in _cap.validate_governed_command_capture(capture)
+    )
+    if str(capture.get("record_digest")) != str(expected_digest):
         errors.append("verifier command_capture_v2 record_digest must equal the referenced capture digest")
     if str(expected_digest) == str(applier_capture_digest):
         errors.append(

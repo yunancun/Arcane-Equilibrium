@@ -17,6 +17,17 @@
 governed ``capture-command`` 對 ``AIML_TARGET_HOST_PROBE`` 的 env-strip(allowlist)不受本模組削弱:child
 的授權來自 capsule(pipe)而非 env,故經 capture 走私旗標仍無效。本模組 stdlib-first,parent-side helper
 不 import 探針模組;探針模組僅在子行程 ``_child_main`` 內、通過 capsule 驗證後才延遲載入。
+
+**安全界線(E3 LOW-1,誠實框定)**:``capsule_digest`` 是**傳輸完整性 + 防意外重用**的自洽 checksum(純
+SHA-256,無 HMAC/共享秘密),**不是**對抗偽造的認證邊界。能寫入 child stdin 者必已能以 runtime user 身分
+``python3 -I ...`` spawn 本 child(即已具本機 code-exec),也能直接 ``AIML_TARGET_HOST_PROBE=1 python3 -c
+"...run_target_host_probe(...)"``——故 TTL/nonce/host 綁定只擋「被側錄的合法 capsule 之意外/過期重用」,不擋
+蓄意偽造。真正的邊界有二:(1) OS 層的 exec-as-runtime-user(child 只能以既有使用者權限跑,userns/systemd
+非 root 限制與 ``preflight_target_host`` 的 throwaway_root 生產前綴禁令仍然有效);(2) child 只回傳一個
+``probe_output`` dict——它**無法**鑄出 closure-ADMISSIBLE 的 ``target_host_effect_result_v1``(那需要
+parent 的 typed-intent 驗證 + effect builder/validator)。故直呼 child / 偽造 capsule **得不到**任何呼叫者
+本就沒有的能力,也**產不出**可採信的 admissible 效果證據。若未來把本 child 置於 setuid 或較低信任的 RPC/pipe
+之後,必須改以 per-spawn 秘密(inherited secret FD)綁定 capsule——現況刻意不宣稱該保證。
 """
 
 from __future__ import annotations
@@ -167,6 +178,13 @@ def validate_capsule(
         errors.append("authorization capsule nonce is required")
     if not DIGEST_RE.fullmatch(str(capsule.get("pg_readonly_identity_receipt_digest", ""))):
         errors.append("authorization capsule pg_readonly_identity_receipt_digest must be a sha256 digest")
+    # launcher_argv 若存在必為 list[str](None=交由探針用預設 sleeper)。防「字串被 *展開成單字元」及
+    # 非字串元素流入 systemd-run argv 的 footgun(E3 LOW-1 sub-note);仍非 shell(固定 list、無 shell=True)。
+    launcher_argv = capsule.get("launcher_argv")
+    if launcher_argv is not None and not (
+        isinstance(launcher_argv, list) and all(isinstance(a, str) for a in launcher_argv)
+    ):
+        errors.append("authorization capsule launcher_argv must be null or a list of strings")
     try:
         issued = _parse_time(capsule["issued_at"])
         expires = _parse_time(capsule["expires_at"])
