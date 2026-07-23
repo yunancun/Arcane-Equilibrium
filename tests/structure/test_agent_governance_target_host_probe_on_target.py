@@ -143,3 +143,25 @@ def test_real_network_denial_enforced():
     assert seam["verdict"] == "PASSED_TARGET_HOST", (
         f"expected seccomp egress denial to PASS on trade-core, got {seam['verdict']}: {seam['note']}"
     )
+
+
+@on_target
+def test_real_cgroup_enforcement_observed():
+    # 真 cgroup enforcement:child hog 被 OOM 殺(main 存活保 scope)、fork 觸 pids.max、busy-loop 觸 cpu 節流;
+    # 三計數皆自 scope 自身 cgroup 檔真讀。trade-core 委派 cpu/mem/pids → 期望 PASSED。
+    seam = th.probe_cgroup_isolation_on_host(nonce="cgtest")
+    assert seam["seam_id"] == "cgroup_resource_isolation"
+    assert seam["verdict"] == "PASSED_TARGET_HOST", (
+        f"expected cgroup oom_kill/pids.max/throttled all enforced on trade-core, got {seam['verdict']}: {seam['note']}"
+    )
+
+
+@on_target
+def test_real_native_lib_bundle_origin_with_symbol(tmp_path):
+    # 真 native-lib:現編唯一 soname 的 .so 進 bundle、CDLL、maps 證 bundle 來源、符號真回 42。
+    # trade-core 有 cc/gcc → 期望 PASSED(bwrap 掛載隔離被 AppArmor 擋 → direct_no_sandbox,maps-origin 仍真)。
+    seam = th.probe_native_lib_loading_on_host(bundle_dir=str(tmp_path / "native_bundle"))
+    assert seam["seam_id"] == "native_lib_loading"
+    assert seam["verdict"] == "PASSED_TARGET_HOST", (
+        f"expected compiled unique-soname .so to load from bundle with symbol=42, got {seam['verdict']}: {seam['note']}"
+    )

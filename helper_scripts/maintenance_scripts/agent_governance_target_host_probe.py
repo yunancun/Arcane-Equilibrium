@@ -42,11 +42,13 @@ on Linux:
   (target_host_probe_performed AND every OCI seam PASSED_TARGET_HOST)`` is const
   false on real evidence, so ``final_choice = content_addressed_fixed_path``.  The
   binding is ``BINDING`` only when EVERY fixed-path seam is ``PASSED_TARGET_HOST``;
-  if any is not — today PG-identity is ``DEFERRED_TARGET_HOST`` because
-  ``postgresql-server`` is not installed on trade-core (PLUGGABLE: an ``initdb`` on
-  PATH flips it to the real S1.1 42501 cluster with no code change) — the binding
-  is ``PROVISIONAL_PENDING_LINUX`` and ``pending_seams`` names the exact unmet
-  seam(s), NEVER a forced BINDING PASS.
+  if any is not — e.g. on a host lacking ``initdb`` the PLUGGABLE PG-identity seam
+  stays ``DEFERRED_TARGET_HOST`` — the binding is ``PROVISIONAL_PENDING_LINUX`` and
+  ``pending_seams`` names the exact unmet seam(s), NEVER a forced BINDING PASS.  On
+  trade-core (postgresql-16 installed, 2026-07-23) all 7 fixed-path seams
+  ``PASSED_TARGET_HOST`` — ``independent_postcheck`` is ``DEFERRED`` by design in
+  the applier's own receipt and earns PASS only when a distinct verifier attaches a
+  clean residue sweep, at which point the choice is ``BINDING``.
 
 **Honesty gate.**  ``status=PASS`` REQUIRES ``evidence_class ==
 PLATFORM_OR_EXTERNAL_ATTESTED`` and ``boundary.real_target_host_primitives_
@@ -213,7 +215,7 @@ _SEAM_NOTES = {
         "cpu.stat throttling and pids.events:max (cpu/mem/pids; cpuset/io root-only deferred)"
     ),
     SEAM_NETWORK_DENIAL: "seccomp connect/sendto/sendmsg egress denial: baseline CONNECTED, filtered ENETUNREACH (non-root, kernel-enforced)",
-    SEAM_NATIVE_LIB: "bwrap --ro-bind CDLL of a bundle-staged representative .so; /proc/self/maps resolves it from the content-addressed bundle prefix",
+    SEAM_NATIVE_LIB: "compiled unique-soname .so in the bundle; CDLL resolves it from the content-addressed bundle prefix (/proc/self/maps) with a callable symbol (=42)",
     SEAM_IMMUTABLE_CLOSURE: "content-addressed bundle at a fixed path; atomic pointer swap; digest re-derived across restart",
     SEAM_FAILURE_ROLLBACK_CLEANUP: "systemctl --user kill + restart-from-same-bundle; interrupted apply never swaps; teardown + reset-failed + rmtree",
     SEAM_PG_IDENTITY: "S1.1 disposable initdb cluster on-target: read-only role SET ROLE denied 42501",
@@ -321,7 +323,10 @@ class TargetHostUnavailableError(TargetHostProbeError):
 
     這是「乾淨跳過、絕不造假」的信號:任何 on-host executor 函式在非 target host(無
     systemd-run / 非 linux / 未設 AIML_TARGET_HOST_PROBE=1)被呼叫時 raise 此例外,呼叫端
-    (pytest / OPS capture-command)據此 SKIP,永不合成 kernel 事實冒充真跑。
+    (在授權 target host 上直跑的 pytest)據此 SKIP,永不合成 kernel 事實冒充真跑。
+    注意:governed ``capture-command`` 會 env-strip ``AIML_TARGET_HOST_PROBE``/``XDG_RUNTIME_DIR``,
+    故真 seam 不經 capture-command 佐證(那屬 source/結構層,LOCAL_REPRODUCIBLE);真 seam 的
+    PLATFORM 佐證來自在 trade-core 上直跑 + distinct OPS on-host 觀察(design §3)。
     """
 
 
@@ -445,7 +450,8 @@ def target_host_available() -> bool:
 
     真值需三者齊備:(1) linux;(2) ``systemd-run`` 在 PATH;(3) 顯式旗標
     ``AIML_TARGET_HOST_PROBE=1``。三缺一即 ``False`` → on-host executor 乾淨跳過。這是把
-    「真 kernel 效果」限制在被明確授權的 target-host 執行的閘門(OPS capture-command 設此旗標)。
+    「真 kernel 效果」限制在被明確授權的 target-host 執行的閘門(旗標由授權的 on-target 執行環境
+    設定;governed ``capture-command`` 會剝掉此旗標,故不經它跑真 seam)。
     """
 
     return (
@@ -877,6 +883,9 @@ def probe_network_denial_on_host(*, egress_host: str = "1.1.1.1", egress_port: i
             note = f"no baseline egress on host ({baseline_out!r}); cannot differentiate seccomp denial — DEFERRED"
         elif not seccomp_denied:
             note = f"seccomp filter loaded but egress not denied ({seccomp_last!r}) — DEFERRED"
+        else:
+            # 兜底:任何其他非 PASS 組合(如 FILTER_LOADED 行缺失)不得留成功感 note。
+            note = f"seccomp egress denial not confirmed ({seccomp_lines}) — DEFERRED"
 
     return _seam_record(
         SEAM_NETWORK_DENIAL, verdict,
