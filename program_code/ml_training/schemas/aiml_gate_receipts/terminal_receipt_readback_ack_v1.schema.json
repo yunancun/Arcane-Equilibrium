@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "terminal_receipt_readback_ack_v1.schema.json",
+  "title": "Independent WORM terminal-receipt readback ACK (S1.2 LR0B)",
+  "description": "Canonical self-hashed readback acknowledgement produced by an INDEPENDENT verifier (readback_verifier_id must differ from the append actor, mirroring the frozen contract actor_contract.same_actor_allowed=false). A positive ack (ack=true) requires a distinct verifier, a matching readback_payload_digest, and same_actor_violation=false. The append actor reading its own record must set same_actor_violation=true and refuse to ack. These distinctness rules are enforced in the delegated Python validator.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "sink_id", "intent_id", "result_digest", "readback_verifier_id", "read_record_locator", "readback_payload_digest", "ack", "same_actor_violation", "observed_at", "expires_at", "ack_digest"],
+  "properties": {
+    "schema_version": {"const": "terminal_receipt_readback_ack_v1"},
+    "sink_id": {"const": "terminal_receipt_sink_v1"},
+    "intent_id": {"type": "string", "minLength": 8},
+    "result_digest": {"$ref": "#/$defs/digest"},
+    "readback_verifier_id": {"type": "string", "minLength": 1},
+    "read_record_locator": {"anyOf": [{"type": "string", "minLength": 1}, {"type": "null"}]},
+    "readback_payload_digest": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]},
+    "ack": {"type": "boolean"},
+    "same_actor_violation": {"type": "boolean"},
+    "observed_at": {"$ref": "#/$defs/timestamp"},
+    "expires_at": {"$ref": "#/$defs/timestamp"},
+    "ack_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "timestamp": {"type": "string", "format": "date-time"}
+  }
+}

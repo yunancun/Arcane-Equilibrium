@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "terminal_receipt_append_result_v1.schema.json",
+  "title": "Disposable WORM terminal-receipt append result (S1.2 LR0B)",
+  "description": "Canonical self-hashed result of one apply_terminal_receipt_append against the disposable local WORM-emulation store. APPENDED / IDEMPOTENT_DEDUP commit exactly one content-addressed record with chmod_readonly_applied=true; ROLLED_BACK_INTERRUPTED / FAILED commit no record and leave the idempotency key free for retry. chmod_readonly_applied HONESTLY reports that chmod 0o444 was applied to the committed record; because the disposable store is owner-owned the owner can chmod 0o644 and rewrite, so this is disposable chmod-only emulation, NOT real immutability/WORM. Real immutability (an actor that cannot re-permission the record - S3-Object-Lock / append-only bucket) is the external-destination binding deferred to S8.6. Committed-vs-uncommitted field invariants are enforced in the delegated Python validator.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "sink_id", "intent_id", "intent_digest", "append_status", "record_locator", "persisted_payload_digest", "idempotency_key", "append_actor_id", "chmod_readonly_applied", "started_at", "completed_at", "evidence_expires_at", "failure_reason", "result_digest"],
+  "properties": {
+    "schema_version": {"const": "terminal_receipt_append_result_v1"},
+    "sink_id": {"const": "terminal_receipt_sink_v1"},
+    "intent_id": {"type": "string", "minLength": 8},
+    "intent_digest": {"$ref": "#/$defs/digest"},
+    "append_status": {"enum": ["APPENDED", "IDEMPOTENT_DEDUP", "ROLLED_BACK_INTERRUPTED", "FAILED"]},
+    "record_locator": {"anyOf": [{"type": "string", "minLength": 1}, {"type": "null"}]},
+    "persisted_payload_digest": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]},
+    "idempotency_key": {"$ref": "#/$defs/digest"},
+    "append_actor_id": {"type": "string", "minLength": 1},
+    "chmod_readonly_applied": {"type": "boolean", "description": "True iff chmod 0o444 read-only was applied to the committed record. Disposable chmod-only emulation: owner-removable, NOT real immutability/WORM (real WORM deferred to S8.6). Do not treat true as an immutability guarantee."},
+    "started_at": {"$ref": "#/$defs/timestamp"},
+    "completed_at": {"$ref": "#/$defs/timestamp"},
+    "evidence_expires_at": {"$ref": "#/$defs/timestamp"},
+    "failure_reason": {"anyOf": [{"type": "string", "minLength": 1}, {"type": "null"}]},
+    "result_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "timestamp": {"type": "string", "format": "date-time"}
+  }
+}

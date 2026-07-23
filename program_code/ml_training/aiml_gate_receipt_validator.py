@@ -29,6 +29,20 @@ SCHEMA_FILES = {
     "program_adoption_receipt_v1": "program_adoption_receipt_v1.schema.json",
     "session_attempt_v1": "session_attempt_v1.schema.json",
     "terminal_receipt_sink_v1": "terminal_receipt_sink_v1.schema.json",
+    # S1.1(LR0A)disposable PG 唯讀身分 receipt——central-validator 委派登記。
+    "pg_readonly_identity_receipt_v1": "pg_readonly_identity_receipt_v1.schema.json",
+    # S1.2(LR0B)WORM 終端 sink 的 append intent/result + 獨立 readback ACK。
+    "terminal_receipt_append_intent_v1": "terminal_receipt_append_intent_v1.schema.json",
+    "terminal_receipt_append_result_v1": "terminal_receipt_append_result_v1.schema.json",
+    "terminal_receipt_readback_ack_v1": "terminal_receipt_readback_ack_v1.schema.json",
+    # S1.2(LR0B)七類 component effect 的 sibling 分類 artifact(不動 S0.3 分類)。
+    "aiml_component_effect_classification_v1": "aiml_component_effect_classification_v1.schema.json",
+    # S1.5(LR0B)每元件 deploy adapter 的 typed intent/result + 獨立 postcheck attestation
+    # + effect-seams-ready rollup;central-validator 委派給 S1.5 module 的 self-validating 檢查。
+    "component_effect_intent_v1": "component_effect_intent_v1.schema.json",
+    "component_effect_result_v1": "component_effect_result_v1.schema.json",
+    "component_effect_postcheck_attestation_v1": "component_effect_postcheck_attestation_v1.schema.json",
+    "effect_seams_ready_receipt_v1": "effect_seams_ready_receipt_v1.schema.json",
 }
 
 S0_DEPENDENCY_DIGESTS = {
@@ -427,6 +441,231 @@ def classify_required_effects(
         "self_digest": "sha256:" + "0" * 64,
     }
     classification["classification_id"] = _effect_classification_identity_digest(
+        classification
+    )
+    classification["self_digest"] = artifact_self_digest(classification)
+    return classification
+
+
+# --------------------------------------------------------------------------- #
+# S1.2 (LR0B) 七類 component effect 的宣告式 vocabulary/matrix + sibling 分類器。
+# 這是 plan §LR0B 要求的 typed 七類擁有權/allowlist 矩陣:每類 → 必綁的 exact-intent
+# 欄位 + recovery 契約 + adapter 綁定。新增一類是「資料編輯」,不是新程式碼。此矩陣與其
+# digest 與 S0.3 的 AIML_EFFECT_CLASSIFIER_RULES / aiml_effect_classifier_digest 完全
+# 獨立(sibling),故 S0.3 保持 byte-frozen(見 §0 凍結約束)。
+# --------------------------------------------------------------------------- #
+AIML_COMPONENT_EFFECT_CLASS_MATRIX: dict[str, dict[str, Any]] = {
+    "CREDENTIAL_ROTATION": {
+        "required_intent_fields": [
+            "secret_slot_target", "role_target", "old_fingerprint",
+            "new_fingerprint", "rotation_order", "old_credential_rejection_proof",
+        ],
+        "recovery_contract": "rollback_or_forward_only",
+        "adapter_id": "credential_rotation_adapter_v1",
+        "adapter_binding_status": "IMPLEMENTED_DISPOSABLE",
+        "actor_node_id": "credential_rotation_actor",
+        "independent_postcheck_node_id": "credential_rotation_ops_postcheck",
+    },
+    "PG_ROLE_ACL_MIGRATION": {
+        "required_intent_fields": [
+            "migration_id", "migration_checksum", "role_acl_delta",
+            "pre_state_digest", "transactional_or_double_apply", "recovery",
+        ],
+        "recovery_contract": "rollback_or_approved_forward",
+        "adapter_id": "pg_role_acl_migration_adapter_v1",
+        "adapter_binding_status": "IMPLEMENTED_DISPOSABLE",
+        "actor_node_id": "pg_role_acl_migration_actor",
+        "independent_postcheck_node_id": "pg_role_acl_migration_ops_postcheck",
+    },
+    "ENGINE_SCANNER": {
+        "required_intent_fields": [
+            "binary_digest", "unit", "env_digest", "config_digest",
+            "stop_start_order", "readiness_deadman_checks", "prior_bundle_rollback",
+        ],
+        "recovery_contract": "prior_bundle_rollback",
+        "adapter_id": "engine_scanner_deploy_adapter_v1",
+        "adapter_binding_status": "IMPLEMENTED_DISPOSABLE",
+        "actor_node_id": "engine_scanner_deploy_actor",
+        "independent_postcheck_node_id": "engine_scanner_ops_postcheck",
+    },
+    "LEARNING_RUNTIME": {
+        "required_intent_fields": [
+            "runtime_identity", "dependency_manifest_digest",
+            "mount_network_socket_secret_surface", "exact_rollback",
+        ],
+        "recovery_contract": "exact_rollback",
+        "adapter_id": "learning_runtime_deploy_adapter_v1",
+        "adapter_binding_status": "IMPLEMENTED_DISPOSABLE",
+        "actor_node_id": "learning_runtime_deploy_actor",
+        "independent_postcheck_node_id": "learning_runtime_ops_postcheck",
+    },
+    "CONTROLLER_WORKERS": {
+        "required_intent_fields": [
+            "unit_slice_cgroup_uid_pgrole_set", "queue_fencing_state",
+            "start_order", "drain_rollback",
+        ],
+        "recovery_contract": "drain_rollback",
+        "adapter_id": "controller_workers_deploy_adapter_v1",
+        "adapter_binding_status": "IMPLEMENTED_DISPOSABLE",
+        "actor_node_id": "controller_workers_deploy_actor",
+        "independent_postcheck_node_id": "controller_workers_ops_postcheck",
+    },
+    "RETENTION_APPLY": {
+        "required_intent_fields": [
+            "tombstone_object_set", "deleter_identity", "restore_capacity",
+            "interruption_recovery",
+        ],
+        "recovery_contract": "interruption_recovery_and_postcheck",
+        "adapter_id": "retention_apply_adapter_v1",
+        "adapter_binding_status": "IMPLEMENTED_DISPOSABLE",
+        "actor_node_id": "retention_apply_actor",
+        "independent_postcheck_node_id": "retention_apply_ops_postcheck",
+    },
+    # 唯一在 S1.2 落地並 disposable-proven 的具體 adapter(見 §5)。
+    "TERMINAL_RECEIPT_APPEND": {
+        "required_intent_fields": [
+            "destination_class", "terminal_payload_digest", "final_source_head",
+            "landing_scope_id", "learning_runtime_digest", "terminal_state",
+            "append_actor", "idempotency_key", "independent_readback_ack",
+        ],
+        "recovery_contract": "interruption_retry_same_idempotency_key",
+        "adapter_id": "terminal_receipt_sink_adapter_v1",
+        "adapter_binding_status": "IMPLEMENTED_DISPOSABLE",
+        "actor_node_id": "terminal_receipt_append_actor",
+        "independent_postcheck_node_id": "terminal_receipt_independent_readback_verifier",
+    },
+}
+# 每一類都攜帶的不可調 OPS/PM/獨立性契約旗標:「施加 effect 的 actor 不能是其唯一驗證者」。
+AIML_COMPONENT_EFFECT_CLASS_INVARIANTS = {
+    "requires_ops_preflight": True,
+    "requires_pm_operator_approved_intent": True,
+    "requires_independent_ops_postcheck": True,
+    "applier_is_not_sole_verifier": True,
+}
+
+
+def aiml_component_effect_class_matrix_digest() -> str:
+    """Identify the 7-class component-effect matrix, independent of S0.3.
+
+    Analogue of ``aiml_effect_classifier_digest`` but a **separate** digest so
+    the S0.3 classifier stays byte-frozen.
+    """
+
+    return canonical_digest({
+        "component_effect_class_matrix": AIML_COMPONENT_EFFECT_CLASS_MATRIX,
+        "class_invariants": AIML_COMPONENT_EFFECT_CLASS_INVARIANTS,
+    })
+
+
+def _component_effect_class_identity_digest(classification: dict[str, Any]) -> str:
+    return canonical_digest({
+        key: value
+        for key, value in classification.items()
+        if key not in {"classification_id", "self_digest"}
+    })
+
+
+def _component_effect_surface_tokens() -> frozenset[str]:
+    # 任一 component 的 adapter/actor/postcheck 節點 id 都是「碰到 effectful 面」的標記。
+    tokens: set[str] = set()
+    for row in AIML_COMPONENT_EFFECT_CLASS_MATRIX.values():
+        tokens.add(row["adapter_id"])
+        tokens.add(row["actor_node_id"])
+        tokens.add(row["independent_postcheck_node_id"])
+    return frozenset(tokens)
+
+
+def _component_surfaces_touched(
+    owned_path_manifest: Any, direct_interfaces: Any
+) -> set[str]:
+    tokens = _component_effect_surface_tokens()
+    touched: set[str] = set()
+    for collection in (owned_path_manifest, direct_interfaces):
+        if isinstance(collection, list):
+            for item in collection:
+                if isinstance(item, str) and item in tokens:
+                    touched.add(item)
+    return touched
+
+
+def classify_component_required_effects(
+    work_package: Any, *, classified_at: str
+) -> dict[str, Any]:
+    """Derive a component's required effect from the matrix; block source-only.
+
+    The required ``effect_class`` / ``adapter_id`` / ``actor_node_id`` /
+    ``rollback_contract`` / ``independent_postcheck_node_id`` /
+    ``required_intent_fields`` are looked up in
+    ``AIML_COMPONENT_EFFECT_CLASS_MATRIX``; the caller cannot supply or downgrade
+    them.  This is the enforcement point for "a Session cannot self-declare an
+    effectful component row as source-only" — it **raises** (never emits a
+    ``NONE`` classification) when:
+
+    * ``component_effect_class`` is ``NONE``/omitted/unknown yet the
+      ``owned_path_manifest``/``direct_interfaces`` intersect a component surface;
+    * the declared ``declared_adapter_id`` is not the matrix adapter for the class;
+    * the ``declared_intent_fields`` are not exactly the matrix intent contract.
+    """
+
+    if not isinstance(work_package, dict):
+        raise ValueError("component work_package is required")
+    declared_class = work_package.get("component_effect_class")
+    matrix_row = (
+        AIML_COMPONENT_EFFECT_CLASS_MATRIX.get(str(declared_class))
+        if declared_class is not None
+        else None
+    )
+    if matrix_row is None:
+        # NONE/缺失/未知類:若其 owned paths / direct interfaces 碰到任一 component
+        # 面,即為「effectful 面偽裝成 source-only」的繞過 → fail-closed raise。
+        touched = _component_surfaces_touched(
+            work_package.get("owned_path_manifest"),
+            work_package.get("direct_interfaces"),
+        )
+        if touched:
+            raise ValueError(
+                "component work-package touches effectful component surface(s) "
+                f"{sorted(touched)} but declares component_effect_class="
+                f"{declared_class!r}; an effectful class cannot be source-only"
+            )
+        raise ValueError(
+            f"unsupported component_effect_class: {declared_class!r}"
+        )
+    declared_adapter = work_package.get("declared_adapter_id")
+    if declared_adapter != matrix_row["adapter_id"]:
+        raise ValueError(
+            f"declared_adapter_id {declared_adapter!r} is not the admitted adapter "
+            f"for {declared_class}"
+        )
+    declared_fields = work_package.get("declared_intent_fields")
+    if not isinstance(declared_fields, list) or sorted(declared_fields) != sorted(
+        matrix_row["required_intent_fields"]
+    ):
+        raise ValueError(
+            f"declared_intent_fields do not match the exact {declared_class} "
+            "intent contract"
+        )
+    required_effects = [{
+        "effect_class": declared_class,
+        "status": "REQUIRED_PENDING",
+        "adapter_id": matrix_row["adapter_id"],
+        "actor_node_id": matrix_row["actor_node_id"],
+        "rollback_contract": matrix_row["recovery_contract"],
+        "independent_postcheck_node_id": matrix_row["independent_postcheck_node_id"],
+        "required_intent_fields": list(matrix_row["required_intent_fields"]),
+        "adapter_binding_status": matrix_row["adapter_binding_status"],
+    }]
+    classification: dict[str, Any] = {
+        "schema_version": "aiml_component_effect_classification_v1",
+        "classification_id": "sha256:" + "0" * 64,
+        "component_work_package_id": work_package.get("component_work_package_id"),
+        "classified_inputs": json.loads(json.dumps(work_package)),
+        "classifier_digest": aiml_component_effect_class_matrix_digest(),
+        "required_effects": required_effects,
+        "classified_at": classified_at,
+        "self_digest": "sha256:" + "0" * 64,
+    }
+    classification["classification_id"] = _component_effect_class_identity_digest(
         classification
     )
     classification["self_digest"] = artifact_self_digest(classification)
@@ -1061,6 +1300,15 @@ def _dependency_graph_errors(
     return errors
 
 
+def _now_text(now: str | datetime | None) -> str | None:
+    # 委派給 adapter validator(其 now 契約為 str|None)前,把 now 正規化為字串。
+    if isinstance(now, datetime):
+        return now.isoformat()
+    if isinstance(now, str):
+        return now
+    return None
+
+
 def validate_aiml_artifact(
     artifact: Any, *, now: str | datetime | None = None
 ) -> list[str]:
@@ -1277,6 +1525,127 @@ def validate_aiml_artifact(
             errors.append(
                 "terminal_receipt_sink_v1 must remain the exact S0.3 contract-only declaration"
             )
+    if schema_version == "aiml_component_effect_classification_v1":
+        # sibling 分類 artifact:重算 required_effects 並比對(拒偽造 required_effects
+        # 或不符的 classifier_digest),結構等同 S0.3 分類分支但指向 sibling 分類器。
+        if artifact["classification_id"] != _component_effect_class_identity_digest(
+            artifact
+        ):
+            errors.append("AIML component effect classification_id is invalid")
+        if artifact["self_digest"] != artifact_self_digest(artifact):
+            errors.append("AIML component effect classification self_digest is invalid")
+        if artifact["classifier_digest"] != aiml_component_effect_class_matrix_digest():
+            errors.append("AIML component effect classifier digest is not admitted")
+        if artifact["component_work_package_id"] != artifact["classified_inputs"][
+            "component_work_package_id"
+        ]:
+            errors.append("AIML component classification work-package id is not bound")
+        try:
+            expected = classify_component_required_effects(
+                artifact["classified_inputs"],
+                classified_at=artifact["classified_at"],
+            )
+        except ValueError as error:
+            # NONE-block / adapter-substitution / 缺欄位 → fail-closed。
+            errors.append(f"AIML component effect classification is not admitted: {error}")
+        else:
+            if artifact["required_effects"] != expected["required_effects"]:
+                errors.append(
+                    "AIML component required effects differ from classifier output"
+                )
+    if schema_version == "pg_readonly_identity_receipt_v1":
+        # S1.1 central-validator wiring(CC review note D2):委派給 S1.1 validator 並
+        # 強制傳 now;只接受 disposable-real/attested receipt,結構手搭的 stub 由 S1.1
+        # validator 拒絕(它重算 source/schema sha256、要求 disposable_local、PASS 需真
+        # 25006 等 runtime facts)。
+        now_text = _now_text(now)
+        if now_text is None:
+            errors.append(
+                "pg_readonly identity receipt requires now for freshness at the central gate"
+            )
+        else:
+            import agent_governance_pg_readonly_identity as _pg_readonly
+            errors.extend(
+                _pg_readonly.validate_pg_readonly_identity_receipt(
+                    artifact, now=now_text
+                )
+            )
+    if schema_version in {
+        "terminal_receipt_append_intent_v1",
+        "terminal_receipt_append_result_v1",
+        "terminal_receipt_readback_ack_v1",
+    }:
+        # S1.2 WORM sink:委派給 disposable adapter 的 self-validated 結構/整合/新鮮度
+        # 檢查(standalone;跨 intent/result/ack 綁定由 adapter 測試以成對 artifact 驗證)。
+        # 與 pg_readonly 分支同樣強制 now:陳舊 intent/result/ack 於中央閘 fail-closed。
+        now_text = _now_text(now)
+        if now_text is None:
+            errors.append(
+                "terminal receipt WORM artifact requires now for freshness at the central gate"
+            )
+        else:
+            import agent_governance_terminal_receipt_sink as _worm_sink
+            if schema_version == "terminal_receipt_append_intent_v1":
+                errors.extend(
+                    _worm_sink.validate_terminal_receipt_append_intent(
+                        artifact, now=now_text
+                    )
+                )
+            elif schema_version == "terminal_receipt_append_result_v1":
+                errors.extend(
+                    _worm_sink.validate_terminal_receipt_append_result(
+                        artifact, now=now_text
+                    )
+                )
+            else:
+                errors.extend(
+                    _worm_sink.validate_terminal_receipt_readback_ack(
+                        artifact, now=now_text
+                    )
+                )
+                # P1-A:standalone(未配對 result)的 POSITIVE 獨立讀回 ACK,中央閘無配對
+                # result 可綁定 verifier↔append actor,無法證明其獨立性 → fail-closed 拒絕。
+                # 負向 ACK 或自陳 same_actor_violation=true 仍可 standalone 通過。
+                if (
+                    artifact.get("ack") is True
+                    and artifact.get("same_actor_violation") is False
+                ):
+                    errors.append(
+                        "readback ack independence cannot be verified without its "
+                        "paired result"
+                    )
+    if schema_version in {
+        "component_effect_intent_v1",
+        "component_effect_result_v1",
+        "component_effect_postcheck_attestation_v1",
+        "effect_seams_ready_receipt_v1",
+    }:
+        # S1.5 每元件 deploy adapter:委派給 disposable module 的 self-validating 結構/整合/
+        # 新鮮度檢查(standalone;跨 intent/result/attestation/rollup 綁定由 module 測試以成對
+        # artifact 驗證)。與 pg_readonly / WORM 分支同樣強制 now:陳舊 artifact 於中央閘 fail-closed。
+        now_text = _now_text(now)
+        if now_text is None:
+            errors.append(
+                "component effect artifact requires now for freshness at the central gate"
+            )
+        else:
+            import agent_governance_component_effects as _component_effects
+            if schema_version == "component_effect_intent_v1":
+                errors.extend(
+                    _component_effects.validate_component_effect_intent(artifact, now=now_text)
+                )
+            elif schema_version == "component_effect_result_v1":
+                errors.extend(
+                    _component_effects.validate_component_effect_result(artifact, now=now_text)
+                )
+            elif schema_version == "component_effect_postcheck_attestation_v1":
+                errors.extend(
+                    _component_effects.validate_postcheck_attestation(artifact, now=now_text)
+                )
+            else:
+                errors.extend(
+                    _component_effects.validate_effect_seams_ready_receipt(artifact, now=now_text)
+                )
     if schema_version == "github_repository_policy_attestation_v1":
         errors.extend(_github_policy_attestation_errors(artifact, now=now))
     if schema_version == "program_adoption_receipt_v1":

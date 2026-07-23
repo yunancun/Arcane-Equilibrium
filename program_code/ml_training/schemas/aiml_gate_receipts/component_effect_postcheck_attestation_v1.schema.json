@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "component_effect_postcheck_attestation_v1.schema.json",
+  "title": "Independent distinct-actor postcheck attestation (S1.5 LR0B)",
+  "description": "A distinct verifier_node re-observes the disposable target and independently re-derives the post-rollback state digest (it does not copy the applier's claim). verifier_node must differ from apply_actor_node (applier is not sole verifier); equal is refused. remote_platform_attested is const false: the real remote/platform-attested observation is deferred to S2.5/S1.6. The verifier<->result binding is enforced in the delegated Python validator.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "result_digest", "intent_id", "intent_digest", "effect_class", "adapter_id", "apply_actor_node", "verifier_node", "reobserved_post_rollback_digest", "restoration_confirmed", "applier_is_not_sole_verifier", "remote_platform_attested", "evidence_class", "observed_at", "expires_at", "attestation_digest"],
+  "properties": {
+    "schema_version": {"const": "component_effect_postcheck_attestation_v1"},
+    "result_digest": {"$ref": "#/$defs/digest"},
+    "intent_id": {"type": "string", "minLength": 8},
+    "intent_digest": {"$ref": "#/$defs/digest"},
+    "effect_class": {"enum": ["ENGINE_SCANNER", "LEARNING_RUNTIME", "CONTROLLER_WORKERS", "RETENTION_APPLY", "PG_ROLE_ACL_MIGRATION", "CREDENTIAL_ROTATION"]},
+    "adapter_id": {"type": "string", "minLength": 1},
+    "apply_actor_node": {"type": "string", "minLength": 1},
+    "verifier_node": {"type": "string", "minLength": 1},
+    "reobserved_post_rollback_digest": {"$ref": "#/$defs/digest"},
+    "restoration_confirmed": {"type": "boolean"},
+    "applier_is_not_sole_verifier": {"const": true},
+    "remote_platform_attested": {"const": false},
+    "evidence_class": {"enum": ["LOCAL_REPRODUCIBLE", "STRUCTURAL_ONLY"]},
+    "observed_at": {"$ref": "#/$defs/timestamp"},
+    "expires_at": {"$ref": "#/$defs/timestamp"},
+    "attestation_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "timestamp": {"type": "string", "format": "date-time"}
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aiml_component_effect_classification_v1.schema.json",
+  "title": "Classifier-derived AIML component effect classification (S1.2 LR0B)",
+  "description": "Sibling of aiml_required_effect_classification_v1 for the seven typed component effect classes. required_effects is derived from the validator-resident AIML_COMPONENT_EFFECT_CLASS_MATRIX, never from the caller; a work-package touching an effectful component surface cannot self-declare it as source-only. The frozen S0.3 aiml_required_effect_classification_v1 schema and classifier are NOT mutated by this sibling. required_effects.effect_class permits NONE only so a forged source-only downgrade is representable and rejected by the recompute in validate_aiml_artifact.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "classification_id", "component_work_package_id", "classified_inputs", "classifier_digest", "required_effects", "classified_at", "self_digest"],
+  "properties": {
+    "schema_version": {"const": "aiml_component_effect_classification_v1"},
+    "classification_id": {"$ref": "#/$defs/digest"},
+    "component_work_package_id": {"type": "string", "minLength": 1},
+    "classified_inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["component_work_package_id", "component_effect_class", "declared_adapter_id", "declared_intent_fields", "owned_path_manifest", "direct_interfaces"],
+      "properties": {
+        "component_work_package_id": {"type": "string", "minLength": 1},
+        "component_effect_class": {"enum": ["CREDENTIAL_ROTATION", "PG_ROLE_ACL_MIGRATION", "ENGINE_SCANNER", "LEARNING_RUNTIME", "CONTROLLER_WORKERS", "RETENTION_APPLY", "TERMINAL_RECEIPT_APPEND"]},
+        "declared_adapter_id": {"type": "string", "minLength": 1},
+        "declared_intent_fields": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "owned_path_manifest": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "direct_interfaces": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "classifier_digest": {"$ref": "#/$defs/digest"},
+    "required_effects": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["effect_class", "status", "adapter_id", "actor_node_id", "rollback_contract", "independent_postcheck_node_id", "required_intent_fields", "adapter_binding_status"],
+        "properties": {
+          "effect_class": {"enum": ["NONE", "CREDENTIAL_ROTATION", "PG_ROLE_ACL_MIGRATION", "ENGINE_SCANNER", "LEARNING_RUNTIME", "CONTROLLER_WORKERS", "RETENTION_APPLY", "TERMINAL_RECEIPT_APPEND"]},
+          "status": {"enum": ["REQUIRED_PENDING", "NOT_REQUIRED", "SATISFIED"]},
+          "adapter_id": {"type": "string", "minLength": 1},
+          "actor_node_id": {"type": "string", "minLength": 1},
+          "rollback_contract": {"type": "string", "minLength": 1},
+          "independent_postcheck_node_id": {"type": "string", "minLength": 1},
+          "required_intent_fields": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+          "adapter_binding_status": {"enum": ["IMPLEMENTED_DISPOSABLE", "PENDING_S1_5", "NOT_APPLICABLE"]}
+        }
+      }
+    },
+    "classified_at": {"$ref": "#/$defs/timestamp"},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "timestamp": {"type": "string", "format": "date-time"}
+  }
+}

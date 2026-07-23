@@ -362,13 +362,102 @@
       ]
     },
     "terminal_receipt_sink_v1": {
-      "status": "CONTRACT_ONLY",
+      "status": "declared_disposable_worm_emulation_implemented",
       "owner_session": "S1.2",
-      "authority": "terminal receipt append/readback is unavailable in S0.3",
-      "invariant": "no executable component or append path exists before S1.2",
+      "authority": "PM/operator approved terminal_receipt_append_intent_v1 for disposable local WORM emulation only; no external WORM destination and no production terminal append",
+      "invariant": "each append commits at most one immutable content-addressed record (chmod 0o444); idempotent dedup never rewrites a committed record; external_worm targets fail closed; readback ACK requires a distinct actor; no route_task node or closure effect binding is injected before S8.6",
       "contract_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/terminal_receipt_sink_v1.schema.json",
-      "implementation_paths": [],
-      "component_paths": []
+      "implementation_paths": [
+        "helper_scripts/maintenance_scripts/agent_governance_terminal_receipt_sink.py"
+      ],
+      "component_paths": [],
+      "intent_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/terminal_receipt_append_intent_v1.schema.json",
+      "receipt_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/terminal_receipt_append_result_v1.schema.json",
+      "readback_ack_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/terminal_receipt_readback_ack_v1.schema.json"
+    },
+    "engine_scanner_deploy_adapter_v1": {
+      "status": "declared_disposable_apply_rollback_postcheck_implemented",
+      "owner_session": "S1.5",
+      "authority": "PM/operator approved component_effect_intent_v1 for a disposable_local temp_dir_artifact target only; no production apply, no real service restart, no binary/unit swap on a real host, no remote-host mutation",
+      "invariant": "exact restoration (pre_state_digest == post_rollback_digest) and applier != sole verifier are machine-enforced; prior_bundle_rollback via an atomic content-addressed generation-pointer swap (os.replace) with chmod 0o444 immutable bundles; real systemctl / running attestation is deferred to S1.6/S2.5; no route_task node or closure effect binding is injected before S2.4",
+      "implementation_paths": [
+        "helper_scripts/maintenance_scripts/agent_governance_component_effects.py"
+      ],
+      "component_paths": [
+        "helper_scripts/maintenance_scripts/agent_governance_runtime_candidate_spike.py"
+      ],
+      "intent_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/component_effect_intent_v1.schema.json",
+      "result_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/component_effect_result_v1.schema.json"
+    },
+    "learning_runtime_deploy_adapter_v1": {
+      "status": "declared_disposable_apply_rollback_postcheck_implemented",
+      "owner_session": "S1.5",
+      "authority": "PM/operator approved component_effect_intent_v1 for a disposable_local temp_dir_artifact target only; no production apply, no real runtime start/stop, no native-lib loading, no remote-host mutation",
+      "invariant": "exact restoration and applier != sole verifier are machine-enforced; exact_rollback via an atomic swap of a content-addressed fixed-path bundle pin (S1.4 hash_bundle_tree; no mutable latest alias); real runtime start/stop / cgroup / PG identity is deferred to S1.6/S2.5; no route_task node or closure effect binding is injected before S2.4",
+      "implementation_paths": [
+        "helper_scripts/maintenance_scripts/agent_governance_component_effects.py"
+      ],
+      "component_paths": [
+        "helper_scripts/maintenance_scripts/agent_governance_runtime_candidate_spike.py"
+      ],
+      "intent_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/component_effect_intent_v1.schema.json",
+      "result_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/component_effect_result_v1.schema.json"
+    },
+    "controller_workers_deploy_adapter_v1": {
+      "status": "declared_disposable_apply_rollback_postcheck_implemented",
+      "owner_session": "S1.5",
+      "authority": "PM/operator approved component_effect_intent_v1 for a disposable_local temp_dir_artifact target only; no production apply, no cgroup/slice/UID mutation, no running workers, no remote-host mutation",
+      "invariant": "exact restoration and applier != sole verifier are machine-enforced; drain_rollback via an atomic queue-fence/generation-pointer swap; real cgroup/slice/UID and running workers are deferred to S2.4/S1.6; no route_task node or closure effect binding is injected before S2.4",
+      "implementation_paths": [
+        "helper_scripts/maintenance_scripts/agent_governance_component_effects.py"
+      ],
+      "component_paths": [
+        "helper_scripts/maintenance_scripts/agent_governance_runtime_candidate_spike.py"
+      ],
+      "intent_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/component_effect_intent_v1.schema.json",
+      "result_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/component_effect_result_v1.schema.json"
+    },
+    "retention_apply_adapter_v1": {
+      "status": "declared_disposable_apply_rollback_postcheck_implemented",
+      "owner_session": "S1.5",
+      "authority": "PM/operator approved component_effect_intent_v1 for a disposable_local temp_dir_objects target only; no production object store, no production deleter identity, no remote-host mutation",
+      "invariant": "exact restoration and applier != sole verifier are machine-enforced; interruption_recovery_and_postcheck via a real os.unlink delete of exactly the declared tombstone set and a real copy-back restore (the deleter cannot exceed the tombstone set); real production object store / deleter identity is deferred to S3.3/S2.4; no route_task node or closure effect binding is injected before S2.4",
+      "implementation_paths": [
+        "helper_scripts/maintenance_scripts/agent_governance_component_effects.py"
+      ],
+      "component_paths": [
+        "helper_scripts/maintenance_scripts/agent_governance_runtime_candidate_spike.py"
+      ],
+      "intent_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/component_effect_intent_v1.schema.json",
+      "result_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/component_effect_result_v1.schema.json"
+    },
+    "pg_role_acl_migration_adapter_v1": {
+      "status": "declared_disposable_apply_rollback_postcheck_implemented",
+      "owner_session": "S1.5",
+      "authority": "PM/operator approved component_effect_intent_v1 for a disposable_local disposable_pg target only (a throwaway cluster spawned inside pytest); no production migration, role, ACL or pg_hba mutation; psql stays denied; no remote-host mutation",
+      "invariant": "exact restoration and applier != sole verifier are machine-enforced; rollback_or_approved_forward via a real CREATE ROLE/GRANT apply and REVOKE/DROP ROLE rollback with pre == post catalog-projection digest, a distinct verifier confirming the least-privilege reader is still write-denied 42501; real production migration/role/ACL is deferred to S2.0/S2.4; no route_task node or closure effect binding is injected before S2.4",
+      "implementation_paths": [
+        "helper_scripts/maintenance_scripts/agent_governance_component_effects.py"
+      ],
+      "component_paths": [
+        "helper_scripts/maintenance_scripts/agent_governance_identity_acl_contract.py"
+      ],
+      "intent_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/component_effect_intent_v1.schema.json",
+      "result_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/component_effect_result_v1.schema.json"
+    },
+    "credential_rotation_adapter_v1": {
+      "status": "declared_disposable_apply_rollback_postcheck_implemented",
+      "owner_session": "S1.5",
+      "authority": "PM/operator approved component_effect_intent_v1 for a disposable_local disposable_pg target only (a throwaway cluster spawned inside pytest); no production credential slot or secret-manager mutation; only non-secret slot/generation fingerprints are serialized; no remote-host mutation",
+      "invariant": "exact restoration and applier != sole verifier are machine-enforced; rollback_or_forward_only via a real ALTER ROLE PASSWORD A->B->A with a pre == post credential-generation probe and a distinct verifier confirming the old credential is rejected 28P01 and A reconnects; no plaintext secret is serialized; real production credential slot is deferred to S2.4; no route_task node or closure effect binding is injected before S2.4",
+      "implementation_paths": [
+        "helper_scripts/maintenance_scripts/agent_governance_component_effects.py"
+      ],
+      "component_paths": [
+        "helper_scripts/maintenance_scripts/agent_governance_identity_acl_contract.py"
+      ],
+      "intent_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/component_effect_intent_v1.schema.json",
+      "result_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/component_effect_result_v1.schema.json"
     }
   },
   "roles": {

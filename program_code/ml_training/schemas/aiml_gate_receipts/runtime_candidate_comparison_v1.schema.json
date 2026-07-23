@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/runtime_candidate_comparison_v1.schema.json",
+  "title": "runtime_candidate_comparison_v1",
+  "description": "Preliminary, non-binding offline comparison emitted by runtime_candidate_spike_v1. It binds the two candidate receipts' self_digests and a per-seam A/B verdict matrix. final_choice is const null: S1.4 (LR0C) structurally cannot select a runtime; the real single-runtime choice is S1.6's learning_runtime_choice_receipt_v1.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "harness_id",
+    "candidate_a_digest",
+    "candidate_b_digest",
+    "candidate_status",
+    "seam_matrix",
+    "deferred_to_s1_6",
+    "preliminary_lean",
+    "final_choice",
+    "source_sha256",
+    "schema_sha256",
+    "observation_time",
+    "expires_at",
+    "ttl_seconds",
+    "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "runtime_candidate_comparison_v1"},
+    "harness_id": {"const": "runtime_candidate_spike_v1"},
+    "candidate_a_digest": {"$ref": "#/$defs/digest"},
+    "candidate_b_digest": {"$ref": "#/$defs/digest"},
+    "candidate_status": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["a", "b"],
+      "properties": {
+        "a": {"enum": ["PASS", "FAIL"]},
+        "b": {"enum": ["PASS", "FAIL"]}
+      }
+    },
+    "seam_matrix": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["seam_id", "a_verdict", "b_verdict", "decisive_at"],
+        "properties": {
+          "seam_id": {"type": "string", "minLength": 1},
+          "a_verdict": {"enum": ["OFFLINE_PROVEN", "STRUCTURAL_DESIGN", "DEFERRED_S1_6", "N_A"]},
+          "b_verdict": {"enum": ["OFFLINE_PROVEN", "STRUCTURAL_DESIGN", "DEFERRED_S1_6", "N_A"]},
+          "decisive_at": {"enum": ["S1.4", "LR2", "S1.6"]}
+        }
+      }
+    },
+    "deferred_to_s1_6": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "preliminary_lean": {"anyOf": [{"type": "string", "minLength": 1}, {"type": "null"}]},
+    "final_choice": {"const": null},
+    "source_sha256": {"$ref": "#/$defs/digest"},
+    "schema_sha256": {"$ref": "#/$defs/digest"},
+    "observation_time": {"$ref": "#/$defs/timestamp"},
+    "expires_at": {"$ref": "#/$defs/timestamp"},
+    "ttl_seconds": {"type": "integer", "minimum": 1, "maximum": 3600},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "timestamp": {"type": "string", "format": "date-time"}
+  }
+}

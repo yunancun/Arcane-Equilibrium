@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "component_effect_intent_v1.schema.json",
+  "title": "Per-component deploy-adapter effect intent (S1.5 LR0B)",
+  "description": "PM/operator-approved exact intent for one disposable per-component deploy effect. S1.5 accepts only target_class=disposable_local; production is rejected fail-closed by the delegated Python validator. intent_fields must be exactly the matrix required_intent_fields for the class. The class invariants (ops preflight / approved intent / independent postcheck / applier-is-not-sole-verifier), the rollback binding and the ops-preflight binding are all mandatory; their absence is a bypass-negative. PASS-critical conditionals are enforced in Python, not schema if/then.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "intent_id", "effect_class", "adapter_id", "disposable_target_kind", "target_class", "intent_fields", "class_invariants", "ops_preflight", "rollback_binding", "apply_actor_node", "independent_postcheck_node", "approved_by", "approved_at", "expires_at", "hard_stops", "typed_confirm", "ttl_seconds", "intent_digest"],
+  "properties": {
+    "schema_version": {"const": "component_effect_intent_v1"},
+    "intent_id": {"type": "string", "minLength": 8},
+    "effect_class": {"enum": ["ENGINE_SCANNER", "LEARNING_RUNTIME", "CONTROLLER_WORKERS", "RETENTION_APPLY", "PG_ROLE_ACL_MIGRATION", "CREDENTIAL_ROTATION"]},
+    "adapter_id": {"type": "string", "minLength": 1},
+    "disposable_target_kind": {"enum": ["disposable_pg", "temp_dir_artifact", "temp_dir_objects"]},
+    "target_class": {"enum": ["disposable_local", "production"]},
+    "intent_fields": {"type": "object", "minProperties": 1},
+    "class_invariants": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requires_ops_preflight", "requires_pm_operator_approved_intent", "requires_independent_ops_postcheck", "applier_is_not_sole_verifier"],
+      "properties": {
+        "requires_ops_preflight": {"const": true},
+        "requires_pm_operator_approved_intent": {"const": true},
+        "requires_independent_ops_postcheck": {"const": true},
+        "applier_is_not_sole_verifier": {"const": true}
+      }
+    },
+    "ops_preflight": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["preflight_id", "ready", "observed_at", "expires_at"],
+      "properties": {
+        "preflight_id": {"type": "string", "minLength": 1},
+        "ready": {"const": true},
+        "observed_at": {"$ref": "#/$defs/timestamp"},
+        "expires_at": {"$ref": "#/$defs/timestamp"}
+      }
+    },
+    "rollback_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["recovery_contract", "pre_state_digest"],
+      "properties": {
+        "recovery_contract": {"enum": ["prior_bundle_rollback", "exact_rollback", "drain_rollback", "interruption_recovery_and_postcheck", "rollback_or_approved_forward", "rollback_or_forward_only"]},
+        "pre_state_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "apply_actor_node": {"type": "string", "minLength": 1},
+    "independent_postcheck_node": {"type": "string", "minLength": 1},
+    "approved_by": {"type": "string", "minLength": 1},
+    "approved_at": {"$ref": "#/$defs/timestamp"},
+    "expires_at": {"$ref": "#/$defs/timestamp"},
+    "hard_stops": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "typed_confirm": {"type": "string", "minLength": 1},
+    "ttl_seconds": {"type": "integer", "minimum": 1, "maximum": 3600},
+    "intent_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "timestamp": {"type": "string", "format": "date-time"}
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "terminal_receipt_append_intent_v1.schema.json",
+  "title": "Disposable WORM terminal-receipt append intent (S1.2 LR0B)",
+  "description": "PM/operator-approved intent for one terminal-receipt append into the terminal_receipt_sink_v1 WORM sink. S1.2 accepts only target_class=disposable_local_worm_emulation; external_worm is rejected fail-closed by the delegated Python validator. PASS-critical conditionals (idempotency/typed_confirm/target-gate) are enforced in Python, not schema if/then.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "intent_id", "sink_id", "destination_class", "target_class", "terminal_receipt_type", "payload_binding", "idempotency_key", "append_actor_id", "approved_by", "approved_at", "expires_at", "hard_stops", "typed_confirm", "intent_digest"],
+  "properties": {
+    "schema_version": {"const": "terminal_receipt_append_intent_v1"},
+    "intent_id": {"type": "string", "minLength": 8},
+    "sink_id": {"const": "terminal_receipt_sink_v1"},
+    "destination_class": {"const": "EXTERNAL_IMMUTABLE_WORM"},
+    "target_class": {"enum": ["disposable_local_worm_emulation", "external_worm"]},
+    "terminal_receipt_type": {"enum": ["aiml_module_landed_for_trading_receipt_v1", "aiml_platform_no_candidate_receipt_v1", "disposable_proof_payload_v1"]},
+    "payload_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["final_source_head", "landing_scope_id", "learning_runtime_digest", "terminal_payload_digest", "terminal_state"],
+      "properties": {
+        "final_source_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "landing_scope_id": {"$ref": "#/$defs/digest"},
+        "learning_runtime_digest": {"$ref": "#/$defs/digest"},
+        "terminal_payload_digest": {"$ref": "#/$defs/digest"},
+        "terminal_state": {"enum": ["MODULE_LANDED_FOR_TRADING", "PLATFORM_NO_CANDIDATE", "DISPOSABLE_PROOF"]}
+      }
+    },
+    "idempotency_key": {"$ref": "#/$defs/digest"},
+    "append_actor_id": {"type": "string", "minLength": 1},
+    "approved_by": {"type": "string", "minLength": 1},
+    "approved_at": {"$ref": "#/$defs/timestamp"},
+    "expires_at": {"$ref": "#/$defs/timestamp"},
+    "hard_stops": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "typed_confirm": {"type": "string", "minLength": 1},
+    "intent_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "timestamp": {"type": "string", "format": "date-time"}
+  }
+}
