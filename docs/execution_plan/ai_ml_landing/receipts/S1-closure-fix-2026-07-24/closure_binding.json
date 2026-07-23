@@ -1,8 +1,8 @@
 {
   "applier_node_id": "s1fc_apply_actor",
-  "effect_receipt_digest": "sha256:00e7fedb49cc0b2be2c7edbad5d67033b12b7fa71671f6e43ce48a0fe58a85e6",
+  "effect_receipt_digest": "sha256:6a6056169f273230f920a76c1dd68a38243a90d5f744853025e9607b3bccbd40",
   "evidence_ids": [
-    "effect:target_host_disposable_runtime_probe_adapter_v1:sha256:442468d17cbb4b3f982a57edbd6409498dd2b4f30b8e42f3974b0039a1214af8",
+    "effect:target_host_disposable_runtime_probe_adapter_v1:sha256:3cb1071935404ab4ba1a29f750e513d59c238302ebb341b1971eee3ba8a30f66",
     "ops_post_1",
     "verifier_capture_1"
   ],
@@ -17,7 +17,7 @@
     "acceptance": [
       {
         "evidence_refs": [
-          "effect:target_host_disposable_runtime_probe_adapter_v1:sha256:442468d17cbb4b3f982a57edbd6409498dd2b4f30b8e42f3974b0039a1214af8",
+          "effect:target_host_disposable_runtime_probe_adapter_v1:sha256:3cb1071935404ab4ba1a29f750e513d59c238302ebb341b1971eee3ba8a30f66",
           "ops_post_1",
           "verifier_capture_1"
         ],
@@ -27,10 +27,10 @@
     "authority_refs": [
       {
         "class": "claim_evidence",
-        "digest": "sha256:e1fd7d59815c6325e797638b72b68f62b209bae8b2659eca6e4eca0989b6a35a",
-        "expiry": "2026-07-23T23:07:48.500852+00:00",
-        "observed_at": "2026-07-23T22:52:48.500852+00:00",
-        "source": "target_host_disposable_runtime_probe_intent_v1:sha256:442468d17cbb4b3f982a57edbd6409498dd2b4f30b8e42f3974b0039a1214af8"
+        "digest": "sha256:2314f696bd63f7c4af4e563ba853800371853f58a92c27ee5e8614dae4ffa017",
+        "expiry": "2026-07-23T23:28:48.889730+00:00",
+        "observed_at": "2026-07-23T23:13:48.889730+00:00",
+        "source": "target_host_disposable_runtime_probe_intent_v1:sha256:3cb1071935404ab4ba1a29f750e513d59c238302ebb341b1971eee3ba8a30f66"
       }
     ],
     "disposition": "CHANGED",
@@ -38,7 +38,7 @@
       "runtime_contact": true
     }
   },
-  "postcheck_verifier_node_id": "s1fc_independent_verifier",
+  "postcheck_verifier_node_id": "ops_postcheck",
   "route": {
     "nodes": [
       {
@@ -49,7 +49,7 @@
     ]
   },
   "schema_version": "target_host_closure_binding_v1",
-  "source_head": "7fa7ce05ec77edd6dc6457e199f3415497b95b0c",
+  "source_head": "5705a480a1858e4678b95c59eb98728e834bf6cf",
   "target_host": "trade-core",
-  "verifier_capture_digest": "sha256:ee8d97fbd52a1391212f64f429f30cb76cfbc7aac613e3770bad20739015e8c5"
+  "verifier_capture_digest": "sha256:c76316796a1a445ec4ea4be3301bec3cc045c30318f5ffe023fb3cb711a476b7"
 }

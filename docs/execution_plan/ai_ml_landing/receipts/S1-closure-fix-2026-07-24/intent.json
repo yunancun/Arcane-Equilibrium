@@ -3,10 +3,10 @@
   "candidate_ids": [
     "content_addressed_fixed_path"
   ],
-  "created_at": "2026-07-23T22:52:48.500852+00:00",
+  "created_at": "2026-07-23T23:13:48.889730+00:00",
   "expected_host": "trade-core",
-  "expires_at": "2026-07-23T23:07:48.500852+00:00",
-  "intent_id": "sha256:442468d17cbb4b3f982a57edbd6409498dd2b4f30b8e42f3974b0039a1214af8",
+  "expires_at": "2026-07-23T23:28:48.889730+00:00",
+  "intent_id": "sha256:3cb1071935404ab4ba1a29f750e513d59c238302ebb341b1971eee3ba8a30f66",
   "non_root_uid": true,
   "per_seam_argv": {
     "start_stop": [
@@ -16,7 +16,7 @@
       "import time; time.sleep(30)"
     ]
   },
-  "postcheck_node_id": "s1fc_independent_verifier",
+  "postcheck_node_id": "ops_postcheck",
   "risk": "high",
   "rollback": {
     "atomic_pointer_swap": "swap current->new",
@@ -24,8 +24,8 @@
     "teardown_reset_failed": "systemctl --user reset-failed"
   },
   "schema_version": "target_host_disposable_runtime_probe_intent_v1",
-  "self_digest": "sha256:e1fd7d59815c6325e797638b72b68f62b209bae8b2659eca6e4eca0989b6a35a",
-  "throwaway_root": "/run/user/1000/aiml_s1fc_921652_515af711",
+  "self_digest": "sha256:2314f696bd63f7c4af4e563ba853800371853f58a92c27ee5e8614dae4ffa017",
+  "throwaway_root": "/run/user/1000/aiml_s1fc_929953_005ff173",
   "ttl_seconds": 900,
   "user_scope_only": true
 }

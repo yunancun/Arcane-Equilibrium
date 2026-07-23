@@ -1,7 +1,7 @@
 {
   "adapter_id": "target_host_disposable_runtime_probe_adapter_v1",
   "applier_node_id": "s1fc_apply_actor",
-  "approved_at": "2026-07-23T22:52:48.500852+00:00",
+  "approved_at": "2026-07-23T23:13:48.889730+00:00",
   "approved_by": "operator",
   "choice_receipt": {
     "boundary": {
@@ -16,7 +16,7 @@
       "real_target_host_primitives_invoked": true,
       "user_scope_only": true
     },
-    "caller": "target_host_probe_v1:intent-applier:sha256:442468d17cbb4b3f982a57edbd6409498dd2b4f30b8e42f3974b0039a1214af8",
+    "caller": "target_host_probe_v1:intent-applier:sha256:3cb1071935404ab4ba1a29f750e513d59c238302ebb341b1971eee3ba8a30f66",
     "candidate_probes": [
       {
         "apply_actor_node": "s1fc_apply_actor",
@@ -25,7 +25,7 @@
           "cpuset_io_isolation_root_only_deferred_pm_q4",
           "native_closure_representative_full_sealed_s2_3_pm_q3"
         ],
-        "postcheck_verifier_node": "s1fc_independent_verifier",
+        "postcheck_verifier_node": "ops_postcheck",
         "runtime_identity_kind": "content_addressed_path",
         "seams": [
           {
@@ -35,7 +35,7 @@
             "verdict": "PASSED_TARGET_HOST"
           },
           {
-            "evidence_digest": "sha256:28cd63bcf80cb79c4e3efcc83944e1fb472fb4aa301aa2f008ece3434385674a",
+            "evidence_digest": "sha256:1077ea6cc635b7fc4c751c333ee7074b876631a904acfe27b6a74e2181402296",
             "note": "scope with MemoryMax/MemoryHigh/CPUQuota/TasksMax drove memory.events:oom_kill, cpu.stat throttling and pids.events:max (cpu/mem/pids; cpuset/io root-only deferred)",
             "seam_id": "cgroup_resource_isolation",
             "verdict": "PASSED_TARGET_HOST"
@@ -60,7 +60,7 @@
             "verdict": "PASSED_TARGET_HOST"
           },
           {
-            "evidence_digest": "sha256:00fc975a64d462408dcca18ffce35f87a18a74bfde5244251502ac34564b1165",
+            "evidence_digest": "sha256:3f53103f1d3e59d8055c497efa080a210d621b06aa5de65d2c907dce74b8f021",
             "note": "systemctl --user kill + restart the deployed content-addressed bundle; restarted process resolves (proc cwd) under the rolled-back bundle root; interrupted apply never swaps; teardown + reset-failed + rmtree",
             "seam_id": "failure_rollback_cleanup",
             "verdict": "PASSED_TARGET_HOST"
@@ -72,8 +72,8 @@
             "verdict": "PASSED_TARGET_HOST"
           },
           {
-            "evidence_digest": "sha256:8c1fbcab39867be608fb34f36088cf749da5d2f4905a6aa063bd4cbdb91a89d4",
-            "note": "distinct OPS verifier (verifier != applier) attached a clean on-host residue sweep: units/cgroup/netns/temp all gone | distinct verifier capture digest: sha256:ee8d97fbd52a1391212f64f429f30cb76cfbc7aac613e3770bad20739015e8c5",
+            "evidence_digest": "sha256:544fcd0fad5c7f57381b7321d64c85e98cfb4df100fcfb50a6e4f324d722f654",
+            "note": "distinct OPS verifier (verifier != applier) attached a clean on-host residue sweep: units/cgroup/netns/temp all gone | distinct verifier capture digest: sha256:c76316796a1a445ec4ea4be3301bec3cc045c30318f5ffe023fb3cb711a476b7",
             "seam_id": "independent_postcheck",
             "verdict": "PASSED_TARGET_HOST"
           }
@@ -87,7 +87,7 @@
           "rootful_docker_daemon_only",
           "lr2_no_oci_socket_dbus"
         ],
-        "postcheck_verifier_node": "s1fc_independent_verifier",
+        "postcheck_verifier_node": "ops_postcheck",
         "runtime_identity_kind": "exact_image_id",
         "seams": [
           {
@@ -150,7 +150,7 @@
       "runtime_candidate_receipt_b_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     },
     "evidence_class": "PLATFORM_OR_EXTERNAL_ATTESTED",
-    "expires_at": "2026-07-23T23:07:48.500852+00:00",
+    "expires_at": "2026-07-23T23:28:48.889730+00:00",
     "failure_reason": null,
     "harness_id": "target_host_probe_v1",
     "host_identity": {
@@ -169,7 +169,7 @@
       "passwordless_sudo_present": false,
       "throwaway_root_under_runtime_dir": true
     },
-    "observation_time": "2026-07-23T22:52:48.500852+00:00",
+    "observation_time": "2026-07-23T23:13:48.889730+00:00",
     "platform": {
       "arch": "x86_64",
       "bwrap_available": true,
@@ -204,7 +204,7 @@
       "reason": "OCI is NON_SATISFIABLE_NON_ROOT on trade-core; a distinct OPS verifier attached a clean on-host residue sweep, so every fixed-path seam is PASSED_TARGET_HOST and content_addressed_fixed_path is BINDING.",
       "selection_rule": "oci_only_if_all_seams_pass_else_fixed_path"
     },
-    "self_digest": "sha256:2e8163fc0176468fde72b5888f8647299f6162aa4ab5ad68036eeb1d4c68a951",
+    "self_digest": "sha256:310e2e7a263b4b17bc2471322ea44cc354ba5f3534d29a36434860f674fed47d",
     "source_sha256": "sha256:fcbf76a1e434ad3f94253a60f8fb369947b26ca24b47a7e696bde45c989975a7",
     "status": "PASS",
     "target_class": "target_host",
@@ -226,19 +226,19 @@
       "unselected_production_artifact_present": false
     }
   },
-  "choice_receipt_digest": "sha256:2e8163fc0176468fde72b5888f8647299f6162aa4ab5ad68036eeb1d4c68a951",
-  "completed_at": "2026-07-23T22:52:48.500852+00:00",
+  "choice_receipt_digest": "sha256:310e2e7a263b4b17bc2471322ea44cc354ba5f3534d29a36434860f674fed47d",
+  "completed_at": "2026-07-23T23:13:48.889730+00:00",
   "effect_status": "TARGET_HOST_DISPOSABLE_PROBE_PASS",
-  "evidence_expires_at": "2026-07-23T23:02:48.500852+00:00",
+  "evidence_expires_at": "2026-07-23T23:23:48.889730+00:00",
   "failure_reason": null,
-  "intent_digest": "sha256:e1fd7d59815c6325e797638b72b68f62b209bae8b2659eca6e4eca0989b6a35a",
-  "intent_expires_at": "2026-07-23T23:07:48.500852+00:00",
-  "intent_id": "sha256:442468d17cbb4b3f982a57edbd6409498dd2b4f30b8e42f3974b0039a1214af8",
-  "postcheck_verifier_node_id": "s1fc_independent_verifier",
-  "receipt_digest": "sha256:00e7fedb49cc0b2be2c7edbad5d67033b12b7fa71671f6e43ce48a0fe58a85e6",
+  "intent_digest": "sha256:2314f696bd63f7c4af4e563ba853800371853f58a92c27ee5e8614dae4ffa017",
+  "intent_expires_at": "2026-07-23T23:28:48.889730+00:00",
+  "intent_id": "sha256:3cb1071935404ab4ba1a29f750e513d59c238302ebb341b1971eee3ba8a30f66",
+  "postcheck_verifier_node_id": "ops_postcheck",
+  "receipt_digest": "sha256:6a6056169f273230f920a76c1dd68a38243a90d5f744853025e9607b3bccbd40",
   "schema_version": "target_host_effect_result_v1",
-  "source_head": "7fa7ce05ec77edd6dc6457e199f3415497b95b0c",
-  "started_at": "2026-07-23T22:52:48.500852+00:00",
+  "source_head": "5705a480a1858e4678b95c59eb98728e834bf6cf",
+  "started_at": "2026-07-23T23:13:48.889730+00:00",
   "target_host": "trade-core",
-  "verifier_capture_digest": "sha256:ee8d97fbd52a1391212f64f429f30cb76cfbc7aac613e3770bad20739015e8c5"
+  "verifier_capture_digest": "sha256:c76316796a1a445ec4ea4be3301bec3cc045c30318f5ffe023fb3cb711a476b7"
 }

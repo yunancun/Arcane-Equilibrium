@@ -7,6 +7,6 @@
   },
   "note": "Offline structural acceptance of the real trade-core artifacts (CLAUDE.md: offline is not authentication). A fully-attested closure PASS additionally requires the operator out-of-band SSHSIG over the trusted execution bundle.",
   "schema_version": "target_host_closure_verification_v1",
-  "source_head": "7fa7ce05ec77edd6dc6457e199f3415497b95b0c",
+  "source_head": "5705a480a1858e4678b95c59eb98728e834bf6cf",
   "verified_on": "mac-dev-offline"
 }

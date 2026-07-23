@@ -1,7 +1,7 @@
 # S1 Formal-Closure Fix — Real Target-Host Effect Run Record
 
 **Date**: 2026-07-24 · **Host**: `trade-core` (Linux, non-root uid=1000) ·
-**Source head (H_effect)**: `7fa7ce05ec77edd6dc6457e199f3415497b95b0c` ·
+**Source head (H_effect)**: `5705a480a1858e4678b95c59eb98728e834bf6cf` ·
 **Branch**: `agent/aiml-s1-closure-p1p2-fixes` · **Effect class**:
 `TARGET_HOST_DISPOSABLE_RUNTIME_PROBE`.
 
@@ -23,10 +23,12 @@ runtime `main` checkout was never touched.
    authorization capsule and opened `AIML_TARGET_HOST_PROBE` **only in its own env**,
    ran `run_target_host_probe`, and returned canonical JSON — the parent process
    never held the gate.
-2. A **distinct** OPS verifier (`s1fc_independent_verifier` ≠ applier
-   `s1fc_apply_actor`) ran a real on-host residue sweep (`independent_postcheck_on_host`)
-   and produced a **real governed** `command_capture_v2` via the OPS `capture-command`
-   path.
+2. A **distinct** OPS verifier node `ops_postcheck` (≠ applier `s1fc_apply_actor`)
+   ran a real on-host residue sweep (`independent_postcheck_on_host`) and produced a
+   **real governed** `command_capture_v2` via the OPS `capture-command` path; the
+   closure requires this capture's bound execution `node_id` to equal the declared
+   `ops_postcheck` verifier node (P1 Codex — the capture must be produced by the
+   purported residue verifier, not any non-applier node).
 3. `attach_distinct_verifier_postcheck` upgraded the effect result to **BINDING**,
    carrying the structured `verifier_capture_digest`.
 
@@ -61,7 +63,7 @@ runtime `main` checkout was never touched.
 `closure_verification.json`.
 
 Key digests:
-- effect result `receipt_digest`: `sha256:00e7fedb49cc0b2be2c7edbad5d67033b12b7fa71671f6e43ce48a0fe58a85e6`
+- effect result `receipt_digest`: `sha256:6a6056169f273230f920a76c1dd68a38243a90d5f744853025e9607b3bccbd40`
 - structured `verifier_capture_digest` == the verifier `command_capture_v2` `record_digest`
   (bound three ways: effect result ↔ ops_postcheck ↔ capture — see `closure_binding.json`).
 
@@ -83,7 +85,7 @@ Mac nor `trade-core`; no new key). Precise action:
 - Build a `trusted_execution_bundle_v1` (fresh `issued_at`/`expires_at` within the
   15-minute TTL) with **one entry** of kind `effect_adapter_result_v1`,
   `subject_digest` = `artifact_digest` =
-  `sha256:00e7fedb49cc0b2be2c7edbad5d67033b12b7fa71671f6e43ce48a0fe58a85e6`, under
+  `sha256:6a6056169f273230f920a76c1dd68a38243a90d5f744853025e9607b3bccbd40`, under
   `signer_identity=aiml-s1-target-host-operator-v1`,
   `signature_namespace=arcane-equilibrium-aiml-s1-target-host`,
   `signer_fingerprint=SHA256:uGJ9veN7PoE6BBgfsSP2aiMndrwgbt7o/7/YfdzNzCQ` (the S0.3

@@ -3,9 +3,9 @@
   "binding": "BINDING",
   "effect_status": "TARGET_HOST_DISPOSABLE_PROBE_PASS",
   "expected_host": "trade-core",
-  "observed_at": "2026-07-23T22:52:48.500852+00:00",
+  "observed_at": "2026-07-23T23:13:48.889730+00:00",
   "pg_identity_mode": "content_addressed_fixed_path",
-  "source_head": "7fa7ce05ec77edd6dc6457e199f3415497b95b0c",
-  "verifier_capture_digest": "sha256:ee8d97fbd52a1391212f64f429f30cb76cfbc7aac613e3770bad20739015e8c5",
-  "verifier_node": "s1fc_independent_verifier"
+  "source_head": "5705a480a1858e4678b95c59eb98728e834bf6cf",
+  "verifier_capture_digest": "sha256:c76316796a1a445ec4ea4be3301bec3cc045c30318f5ffe023fb3cb711a476b7",
+  "verifier_node": "ops_postcheck"
 }
