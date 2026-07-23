@@ -15,8 +15,12 @@ on Linux:
   lifecycle; a scope carrying ``-p MemoryMax/MemoryHigh/CPUQuota/TasksMax`` that is
   ACTIVELY driven (OOM alloc, CPU spin, bounded fork) so ``memory.events:oom_kill``
   / ``cpu.stat`` throttling / ``pids.events:max`` are READ from the scope's cgroup
-  dir (enforcement proven, not merely set); ``bwrap --unshare-net`` private-netns
-  egress denial (``ENETUNREACH``/timeout, only ``lo`` in the ns); ``bwrap
+  dir (enforcement proven, not merely set); a seccomp ``SCMP_ACT_ERRNO(ENETUNREACH)``
+  filter on ``connect``/``sendto``/``sendmsg`` (libseccomp via ctypes) whose egress
+  attempt is kernel-denied while a no-filter baseline on the same host/port CONNECTs
+  (differential proof; ``bwrap --unshare-net`` netns is unusable non-root on this
+  host — it needs root-in-userns to bring up ``lo`` but the host denies unprivileged
+  ``uid_map`` root-mapping and lacks ``newuidmap``, so bwrap dies on ``lo``); ``bwrap
   --ro-bind`` native-lib load whose ``/proc/self/maps`` resolves the lib only from
   the bundle; a content-addressed bundle at a fixed path with an atomic pointer
   swap (reusing S1.4 ``hash_bundle_tree`` + S1.5 ``artifact_*``); ``systemctl
@@ -208,7 +212,7 @@ _SEAM_NOTES = {
         "scope with MemoryMax/MemoryHigh/CPUQuota/TasksMax drove memory.events:oom_kill, "
         "cpu.stat throttling and pids.events:max (cpu/mem/pids; cpuset/io root-only deferred)"
     ),
-    SEAM_NETWORK_DENIAL: "bwrap --unshare-net private netns: egress ENETUNREACH/timeout, only lo present",
+    SEAM_NETWORK_DENIAL: "seccomp connect/sendto/sendmsg egress denial: baseline CONNECTED, filtered ENETUNREACH (non-root, kernel-enforced)",
     SEAM_NATIVE_LIB: "bwrap --ro-bind CDLL of a bundle-staged representative .so; /proc/self/maps resolves it from the content-addressed bundle prefix",
     SEAM_IMMUTABLE_CLOSURE: "content-addressed bundle at a fixed path; atomic pointer swap; digest re-derived across restart",
     SEAM_FAILURE_ROLLBACK_CLEANUP: "systemctl --user kill + restart-from-same-bundle; interrupted apply never swaps; teardown + reset-failed + rmtree",
@@ -221,17 +225,10 @@ _INDEPENDENT_DEFERRED_NOTE = (
     "independent_postcheck DEFERRED: the applier alone cannot self-certify independence; pending the distinct "
     "OPS verifier's on-host residue sweep (units/cgroup/netns/temp) via attach_independent_postcheck"
 )
-# native-lib seam 未能證實 bundle 來源時的誠實 note(representativeness-flagged、不計為完整 PASS → PROVISIONAL)。
-_NATIVE_ORIGIN_UNCONFIRMED_NOTE = (
-    "bwrap --ro-bind representative native-lib load ran, but /proc/self/maps did not confirm the bundle-prefix "
-    "origin; honestly target-host-deferred (representativeness-flagged, not counted as a full PASS)"
-)
+# native-lib seam 無編譯器、無法真備 bundle .so 時的誠實 note(representativeness-flagged、不計為完整 PASS)。
 _NATIVE_IMPORT_ONLY_NOTE = (
-    "representative import succeeded in a bwrap ro-bind sandbox, but no bundle .so could be staged to assert the "
+    "representative import succeeded but no bundle .so could be compiled/staged (no compiler) to assert the "
     "maps origin; representativeness-flagged, DEFERRED (does not count as a full PASSED for BINDING)"
-)
-_NATIVE_BWRAP_ABSENT_NOTE = (
-    "bwrap absent on target; native-lib bundle-origin load not exercised; representativeness-flagged, DEFERRED"
 )
 _PG_DEFERRED_NOTE = (
     "postgresql-server not installed on target; PG-identity bound by digest to the S1.1 receipt, "
@@ -652,32 +649,47 @@ def probe_cgroup_isolation_on_host(*, nonce: str, mem_max_bytes: int = 64 * 1024
     _require_target_host()
     _assert_non_root_boundary()
     unit = f"aiml-probeBcg-{nonce}.scope"
-    # workload:先有界 fork 觸 pids.max,再 busy-loop 觸 CPU 節流,最後配置超額觸 OOM。
+    # workload:main 全程存活以保住 scope(否則 scope 隨 main 死即被 systemd 拆除,計數讀不到)。
+    #   1) pids:fork 至 TasksMax 觸 pids.events:max,隨後全數收屍釋放 slot 給 hog;
+    #   2) cpu:busy-loop 觸 cpu.stat throttled_usec;
+    #   3) mem:fork 一個 hog child 撐爆 MemoryMax → cgroup OOM 只殺 child(oom.group=0 + 下方 OOMPolicy=
+    #      continue 使 systemd 不因成員被殺而拆 scope),main 收屍後短暫 linger 讓觀察者讀到 oom_kill。
+    #      (舊版讓 main 自己被 OOM 殺 → scope 隨即拆除、oom_kill 恆讀成 0,即真 bug;此處修正。)
     workload = (
         "import os,sys,time\n"
-        "n=0\n"
+        "kids=[]\n"
         "for _ in range(64):\n"
         "    try:\n"
         "        pid=os.fork()\n"
         "    except OSError:\n"
         "        break\n"
         "    if pid==0:\n"
-        "        time.sleep(2); os._exit(0)\n"
-        "    n+=1\n"
+        "        time.sleep(0.4); os._exit(0)\n"
+        "    kids.append(pid)\n"
+        "for k in kids:\n"
+        "    try:\n"
+        "        os.waitpid(k,0)\n"
+        "    except OSError:\n"
+        "        pass\n"
         "t=time.time()+1.0\n"
         "x=0\n"
         "while time.time()<t:\n"
         "    x+=1\n"
-        "buf=bytearray()\n"
-        "chunk=b'x'*(4*1024*1024)\n"
-        "while True:\n"
-        "    buf+=chunk\n"
+        "pid=os.fork()\n"
+        "if pid==0:\n"
+        "    buf=bytearray()\n"
+        "    chunk=b'x'*(4*1024*1024)\n"
+        "    while True:\n"
+        "        buf+=chunk\n"
+        "    os._exit(0)\n"
+        "os.waitpid(pid,0)\n"
+        "time.sleep(2.5)\n"
     )
     proc = subprocess.Popen(
         [
             "systemd-run", "--user", "--scope", f"--unit={unit}",
             "-p", f"MemoryMax={mem_max_bytes}", "-p", f"MemoryHigh={mem_max_bytes}",
-            "-p", "CPUQuota=20%", "-p", f"TasksMax={tasks_max}",
+            "-p", "CPUQuota=20%", "-p", f"TasksMax={tasks_max}", "-p", "OOMPolicy=continue",
             "--", sys.executable, "-I", "-c", workload,
         ],
         env={"PATH": os.environ.get("PATH", ""), "XDG_RUNTIME_DIR": os.environ.get("XDG_RUNTIME_DIR", "")},
@@ -718,6 +730,15 @@ def probe_cgroup_isolation_on_host(*, nonce: str, mem_max_bytes: int = 64 * 1024
             pass
     enforced = oom_kill > 0 and pids_max > 0 and throttled_usec > 0
     verdict = SEAM_VERDICT_PASSED if enforced else SEAM_VERDICT_DEFERRED
+    note = _SEAM_NOTES[SEAM_CGROUP]
+    if verdict == SEAM_VERDICT_DEFERRED:
+        # DEFERRED 時掛精確的「哪個計數仍為 0」note,不掛成功感 note(誠實,勿誤讀為 PASS)。
+        unmet = [name for name, val in (
+            ("memory.events:oom_kill", oom_kill),
+            ("pids.events:max", pids_max),
+            ("cpu.stat:throttled_usec", throttled_usec),
+        ) if val <= 0]
+        note = f"cgroup enforcement not fully observed; counters still zero: {unmet} — DEFERRED"
     return _seam_record(
         SEAM_CGROUP, verdict,
         {
@@ -727,7 +748,7 @@ def probe_cgroup_isolation_on_host(*, nonce: str, mem_max_bytes: int = 64 * 1024
             "controllers": sorted(REQUIRED_DELEGATED_CONTROLLERS),
             "root_only_deferred": list(DEFERRED_ROOT_ONLY_CONTROLLERS),
         },
-        _SEAM_NOTES[SEAM_CGROUP],
+        note,
     )
 
 
@@ -743,156 +764,274 @@ def _cgroup_keyed_value(path: Path, key: str) -> int:
     return 0
 
 
+# --------------------------------------------------------------------------- #
+# network-denial child sources (differential seccomp egress proof).
+# baseline(無過濾)與 seccomp(connect/sendto/sendmsg 拒絕)兩個子行程對同一 host/port 真跑;
+# 唯一變數是 seccomp filter,把 CONNECTED 翻成 ENETUNREACH。HOST 以 !r 安全內插(repr→帶引號字面量),
+# PORT 先 int() 再內插。兩者皆真讀核心回傳,絕不造假。
+# --------------------------------------------------------------------------- #
+_EGRESS_BASELINE_SRC = (
+    "import socket,sys\n"
+    "try:\n"
+    "    socket.create_connection(({host!r},{port}),timeout=3)\n"
+    "    print('CONNECTED')\n"
+    "except OSError as e:\n"
+    "    print('DENIED:%d' % (e.errno or 0))\n"
+)
+_EGRESS_SECCOMP_DENY_SRC = (
+    "import ctypes,ctypes.util,socket,errno,sys\n"
+    "libname = ctypes.util.find_library('seccomp') or 'libseccomp.so.2'\n"
+    "try:\n"
+    "    lib = ctypes.CDLL(libname, use_errno=True)\n"
+    "except OSError:\n"
+    "    print('NOLIB'); sys.exit(0)\n"
+    "try:\n"
+    "    lib.seccomp_init.restype = ctypes.c_void_p\n"
+    "    lib.seccomp_init.argtypes = [ctypes.c_uint32]\n"
+    "    lib.seccomp_syscall_resolve_name.restype = ctypes.c_int\n"
+    "    lib.seccomp_syscall_resolve_name.argtypes = [ctypes.c_char_p]\n"
+    "    lib.seccomp_rule_add.restype = ctypes.c_int\n"
+    "    lib.seccomp_rule_add.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_int, ctypes.c_uint]\n"
+    "    lib.seccomp_load.restype = ctypes.c_int\n"
+    "    lib.seccomp_load.argtypes = [ctypes.c_void_p]\n"
+    "except AttributeError:\n"
+    "    print('NOSYM'); sys.exit(0)\n"
+    "SCMP_ACT_ALLOW = 0x7fff0000\n"
+    "ctx = lib.seccomp_init(SCMP_ACT_ALLOW)\n"
+    "if not ctx:\n"
+    "    print('INITNULL'); sys.exit(0)\n"
+    "added = 0\n"
+    "for nm in (b'connect', b'sendto', b'sendmsg'):\n"
+    "    nr = lib.seccomp_syscall_resolve_name(nm)\n"
+    "    if nr < 0:\n"
+    "        continue\n"
+    "    if lib.seccomp_rule_add(ctx, 0x00050000 | (errno.ENETUNREACH & 0xffff), nr, 0) == 0:\n"
+    "        added += 1\n"
+    "if added == 0:\n"
+    "    print('NORULE'); sys.exit(0)\n"
+    "if lib.seccomp_load(ctx) != 0:\n"
+    "    print('LOADFAIL'); sys.exit(0)\n"
+    "print('FILTER_LOADED:%d' % added)\n"
+    "try:\n"
+    "    socket.create_connection(({host!r},{port}),timeout=3)\n"
+    "    print('CONNECTED')\n"
+    "except OSError as e:\n"
+    "    print('DENIED:%d' % (e.errno or 0))\n"
+)
+_SECCOMP_FILTER_FAULTS = frozenset({"NOLIB", "NOSYM", "INITNULL", "NORULE", "LOADFAIL"})
+
+
 def probe_network_denial_on_host(*, egress_host: str = "1.1.1.1", egress_port: int = 443) -> dict[str, Any]:
-    """REAL network denial: bwrap private netns, egress must fail, only ``lo`` present."""
+    """REAL egress denial via seccomp (differential proof), fully non-root.
+
+    A child installs a libseccomp ``SCMP_ACT_ERRNO(ENETUNREACH)`` filter on
+    ``connect``/``sendto``/``sendmsg`` and THEN attempts egress → the kernel denies
+    it (``ENETUNREACH``).  A second child on the SAME host/port with NO filter
+    CONNECTs.  The only variable is the seccomp filter, so the CONNECTED→DENIED flip
+    is the proof — no fake, real kernel enforcement, no root, no netns.
+
+    Why not netns:``bwrap --unshare-net`` is unusable non-root on this host — it must
+    be root inside its userns to bring up ``lo``, but the host denies unprivileged
+    ``uid_map`` root-mapping and lacks ``newuidmap``/``newgidmap``, so bwrap treats the
+    ``lo`` bring-up failure as fatal and never runs the child.  seccomp is the real,
+    enforceable, observable, non-root egress-denial mechanism available here.
+
+    PASS(``PASSED_TARGET_HOST``) requires: baseline CONNECTED (host truly has egress,
+    so the denial is meaningful) AND the seccomp filter loaded AND the filtered child
+    DENIED.  Any other outcome (libseccomp/symbol/init/rule/load fault, no baseline
+    egress to differentiate, or a loaded filter that failed to deny) →
+    ``DEFERRED_TARGET_HOST`` with the exact honest reason — never a forced PASS.
+    """
 
     _require_target_host()
     _assert_non_root_boundary()
-    if shutil.which("bwrap") is None:
-        return _seam_record(SEAM_NETWORK_DENIAL, SEAM_VERDICT_DEFERRED, {"bwrap": "absent"}, _SEAM_NOTES[SEAM_NETWORK_DENIAL])
     # #6:egress_port 強制轉 int 再插值,杜絕字串注入類(host 以 !r repr 引號安全)。
     egress_port = int(egress_port)
-    egress_src = (
-        "import socket,sys\n"
-        "try:\n"
-        f"    socket.create_connection(({egress_host!r},{egress_port}),timeout=3)\n"
-        "    print('CONNECTED')\n"
-        "except OSError as e:\n"
-        "    print('DENIED:%d' % (e.errno or 0))\n"
-    )
-    egress = _run(
-        ["bwrap", "--unshare-net", "--ro-bind", "/", "/", "--dev", "/dev", "--", sys.executable, "-I", "-c", egress_src],
+
+    baseline = _run(
+        [sys.executable, "-I", "-c", _EGRESS_BASELINE_SRC.format(host=egress_host, port=egress_port)],
         timeout=20,
     )
-    egress_out = egress.stdout.decode("utf-8", "replace").strip()
-    denied = egress_out.startswith("DENIED")
-    # 只有 lo 在 ns 內:ip -o link 只列出 loopback。
-    iface = _run(
-        ["bwrap", "--unshare-net", "--ro-bind", "/", "/", "--dev", "/dev", "--", "ip", "-o", "link"],
+    baseline_out = baseline.stdout.decode("utf-8", "replace").strip()
+
+    seccomp = _run(
+        [sys.executable, "-I", "-c", _EGRESS_SECCOMP_DENY_SRC.format(host=egress_host, port=egress_port)],
         timeout=20,
     )
-    iface_lines = [ln for ln in iface.stdout.decode("utf-8", "replace").splitlines() if ln.strip()]
-    only_lo = len(iface_lines) >= 1 and all("lo" in ln.split(":", 2)[1] if ":" in ln else False for ln in iface_lines)
-    verdict = SEAM_VERDICT_PASSED if (denied and only_lo) else SEAM_VERDICT_DEFERRED
+    seccomp_lines = [ln.strip() for ln in seccomp.stdout.decode("utf-8", "replace").splitlines() if ln.strip()]
+    seccomp_last = seccomp_lines[-1] if seccomp_lines else ""
+    filter_fault = next((ln for ln in seccomp_lines if ln in _SECCOMP_FILTER_FAULTS), None)
+    filter_loaded = any(ln.startswith("FILTER_LOADED") for ln in seccomp_lines)
+
+    baseline_connected = baseline_out == "CONNECTED"
+    seccomp_denied = seccomp_last.startswith("DENIED")
+    # PASS 僅當:本機基線真有 egress(CONNECTED)、seccomp 過濾真裝上、且過濾把 egress 真拒(DENIED)。
+    passed = baseline_connected and filter_loaded and filter_fault is None and seccomp_denied
+    verdict = SEAM_VERDICT_PASSED if passed else SEAM_VERDICT_DEFERRED
+
+    note = _SEAM_NOTES[SEAM_NETWORK_DENIAL]
+    if verdict == SEAM_VERDICT_DEFERRED:
+        if filter_fault:
+            note = f"seccomp filter not installed ({filter_fault}); egress denial not enforced — DEFERRED"
+        elif not baseline_connected:
+            note = f"no baseline egress on host ({baseline_out!r}); cannot differentiate seccomp denial — DEFERRED"
+        elif not seccomp_denied:
+            note = f"seccomp filter loaded but egress not denied ({seccomp_last!r}) — DEFERRED"
+
     return _seam_record(
         SEAM_NETWORK_DENIAL, verdict,
-        {"egress_result": egress_out, "egress_denied": denied, "only_lo_in_ns": only_lo, "iface_count": len(iface_lines)},
-        _SEAM_NOTES[SEAM_NETWORK_DENIAL],
+        {
+            "mechanism": "seccomp SCMP_ACT_ERRNO(ENETUNREACH) on connect/sendto/sendmsg (libseccomp via ctypes)",
+            "egress_target": f"{egress_host}:{egress_port}",
+            "baseline_egress": baseline_out,
+            "baseline_connected": baseline_connected,
+            "seccomp_filter_loaded": filter_loaded,
+            "seccomp_filter_fault": filter_fault,
+            "seccomp_egress": seccomp_last,
+            "seccomp_denied": seccomp_denied,
+        },
+        note,
     )
 
 
-def _loaded_library_path(soname: str) -> str | None:
-    # 由 /proc/self/maps 取剛以 CDLL 載入的 .so 的完整路徑(find_library 只回 soname,無路徑)。
-    stem = os.path.basename(soname).split(".so", 1)[0] + ".so"
-    try:
-        for line in Path("/proc/self/maps").read_text(encoding="utf-8").splitlines():
-            path = line.split()[-1] if line.split() else ""
-            if path.startswith("/") and ".so" in path and os.path.basename(path).startswith(stem):
-                return path
-    except OSError:
-        return None
-    return None
+_NATIVE_PROBE_SONAME = "libaiml_probe_bundle.so"
 
 
 def _stage_representative_so(bundle_dir: str) -> str | None:
-    """Copy a real, dependency-light system ``.so`` INTO the content-addressed bundle; return its basename.
+    """COMPILE a tiny, unique-``soname`` ``.so`` INTO the content-addressed bundle; return its basename.
 
-    取一個當前行程可解析、依賴少的系統共享物件(``libz``/``libm``/...),複製進 bundle_dir,回傳其 basename。
-    任何一步失敗 → 回 ``None``(呼叫端誠實走 import-only 的 representativeness-flagged DEFERRED,絕不造假)。
+    關鍵:動態連結器以 ``DT_SONAME`` 去重——複製一份「系統既載入的 lib(如 ``libz``)」到 bundle,``CDLL`` 會
+    回既有映射、``/proc/self/maps`` 只見系統路徑而非 bundle,無法證明「從 bundle 載入」(舊版真 bug)。改以
+    ``cc``/``gcc`` 現編一個 **唯一 soname**(``libaiml_probe_bundle.so``)的小 ``.so`` 進 bundle:此 soname 從未被
+    預載,``CDLL(bundle/該.so)`` 必真映射 bundle 內那份,``maps`` 前綴即證 bundle 來源。代表性(PM Q3):符號
+    僅為一個 trivial ``aiml_probe_symbol``,完整 LR2-sealed 原生 closure 屬 S2.3。
+    無編譯器 → 回 ``None``(呼叫端誠實走 import-only 的 representativeness-flagged DEFERRED,絕不造假)。
     """
 
-    try:
-        import ctypes
-        import ctypes.util
-    except Exception:  # noqa: BLE001 — 無 ctypes 即無法真備 .so,誠實回退。
+    compiler = shutil.which("cc") or shutil.which("gcc")
+    if compiler is None:
         return None
-    for name in ("z", "m", "bz2", "lzma", "crypto"):
-        soname = ctypes.util.find_library(name)
-        if not soname:
-            continue
+    try:
+        os.makedirs(bundle_dir, exist_ok=True)
+        src = os.path.join(bundle_dir, "_aiml_probe_src.c")
+        dest = os.path.join(bundle_dir, _NATIVE_PROBE_SONAME)
+        with open(src, "w", encoding="utf-8") as fh:
+            fh.write("int aiml_probe_symbol(void){ return 42; }\n")
+        result = _run(
+            [compiler, "-shared", "-fPIC", f"-Wl,-soname,{_NATIVE_PROBE_SONAME}", "-o", dest, src],
+            timeout=30,
+        )
         try:
-            ctypes.CDLL(soname)  # 載入以便自 maps 取完整路徑
+            os.remove(src)  # bundle 只留 .so(內容定址),不留 .c 原始檔。
         except OSError:
-            continue
-        full = _loaded_library_path(soname)
-        if not full:
-            continue
-        try:
-            os.makedirs(bundle_dir, exist_ok=True)
-            dest = os.path.join(bundle_dir, "representative.so")
-            shutil.copy2(full, dest)
-        except OSError:
+            pass
+        if result.returncode != 0 or not os.path.exists(dest):
             return None
-        return "representative.so"
-    return None
+        return _NATIVE_PROBE_SONAME
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def _parse_load_lines(res: subprocess.CompletedProcess) -> list[str]:
+    return [ln.strip() for ln in res.stdout.decode("utf-8", "replace").splitlines() if ln.strip()]
+
+
+def _run_native_load(load_src: str, *, ro_bundle: str | None) -> tuple[list[str], str, str]:
+    """Run a native-load probe child, PREFERRING a ``bwrap`` ro-bind mount sandbox; fall back to a
+    direct (no-mount-sandbox) run when bwrap cannot set up an unprivileged userns on this host.
+
+    本 host(Ubuntu, ``apparmor_restrict_unprivileged_userns=1``)禁非特權 userns → bwrap 無論 ro-bind 或
+    ``--unshare-*`` 都在 uid_map/lo 階段 fatal,無法跑子行程。故:先試 bwrap(掛載隔離);若其輸出無有效
+    ``LOADED``/``NOLOAD`` 行(= bwrap setup 失敗)→ 直接跑。maps-origin 對「從 bundle 載入」的證明在兩模式皆真
+    (唯一 soname 保證非系統去重);掛載隔離為額外保證,在此 host 因 AppArmor 不可得,誠實記為 direct 模式。
+    回傳 ``(out_lines, sandbox_mode, sandbox_note)``。
+    """
+
+    if shutil.which("bwrap") is not None:
+        binds = ["--ro-bind", ro_bundle, ro_bundle] if ro_bundle else []
+        cmd = [
+            "bwrap", *binds, "--ro-bind", "/usr", "/usr", "--ro-bind", "/lib", "/lib",
+            "--ro-bind-try", "/lib64", "/lib64", "--proc", "/proc", "--dev", "/dev",
+            "--", sys.executable, "-I", "-c", load_src,
+        ]
+        try:
+            lines = _parse_load_lines(_run(cmd, timeout=20))
+            if any(ln in ("LOADED", "NOLOAD") for ln in lines):
+                return lines, "bwrap_ro_bind", "mount-isolated (bwrap ro-bind) sandbox"
+        except (OSError, subprocess.SubprocessError):
+            pass
+    lines = _parse_load_lines(_run([sys.executable, "-I", "-c", load_src], timeout=20))
+    return lines, "direct_no_sandbox", (
+        "bwrap mount-isolation unavailable non-root (AppArmor apparmor_restrict_unprivileged_userns=1); "
+        "direct load — maps-origin proof still real, mount-isolated variant deferred"
+    )
 
 
 def probe_native_lib_loading_on_host(*, bundle_dir: str, representative_import: str = "ctypes") -> dict[str, Any]:
-    """REAL native-lib load: stage a ``.so`` in the bundle, dlopen THAT, assert ``/proc/self/maps`` bundle origin.
+    """REAL native-lib load: compile a unique-``soname`` ``.so`` into the bundle, dlopen THAT, assert
+    ``/proc/self/maps`` bundle origin AND that its symbol is callable.
 
-    複製一個代表性 ``.so`` 進內容定址 bundle,於 bwrap ro-bind 沙箱以 ``ctypes.CDLL(bundle_path)`` 載入「bundle
-    內那份」,再真斷言 ``/proc/self/maps`` 內該 ``.so`` 的解析來源前綴 == bundle。來源證實 → ``PASSED``;未證實 →
-    ``DEFERRED``。若無法真備 ``.so``(``_stage_representative_so`` 回 None),退化為只記「代表性 import 在 bwrap ro-bind
-    沙箱成功」,標 ``representativeness`` 且以 ``DEFERRED`` 呈現——不計為完整 PASS(→ PROVISIONAL),絕不掛「只從 bundle
-    解析」的假 note。代表性(PM Q3):完整 LR2-sealed closure 屬 S2.3。
+    現編一個 **唯一 soname** 的代表性 ``.so`` 進內容定址 bundle(避開動態連結器 soname 去重),以
+    ``ctypes.CDLL(bundle_path)`` 載入「bundle 內那份」,真斷言 ``/proc/self/maps`` 內該 ``.so`` 的解析來源前綴 ==
+    bundle,並真呼叫其符號(``aiml_probe_symbol`` → 42)證明「確實載入且可執行」而非只是路徑字串比對。載入優先在
+    bwrap ro-bind 掛載沙箱內;本 host AppArmor 禁非特權 userns 使 bwrap 不可用 → 誠實退化為直接載入(``sandbox_mode
+    =direct_no_sandbox``),maps-origin 仍真證 bundle 來源。三者(loaded/origin_bundle/symbol=42)皆真 → ``PASSED``;
+    任一未證 → ``DEFERRED``(不掛假 note)。若無法真備 ``.so``(缺編譯器)→ 只記代表性 import、``representativeness``-
+    flagged 且 ``DEFERRED``。代表性(PM Q3):符號僅一個 trivial ``aiml_probe_symbol``,完整 LR2-sealed 原生 closure 屬 S2.3。
     """
 
     _require_target_host()
     _assert_non_root_boundary(bundle_dir)
-    if shutil.which("bwrap") is None:
-        return _seam_record(
-            SEAM_NATIVE_LIB, SEAM_VERDICT_DEFERRED, {"bwrap": "absent"},
-            _NATIVE_BWRAP_ABSENT_NOTE, representativeness=NATIVE_REPRESENTATIVE,
-        )
     staged = _stage_representative_so(bundle_dir)
     if staged is None:
-        # 誠實回退:只跑代表性 import,不宣稱 bundle 來源;representativeness-flagged 且 DEFERRED(不計為完整 PASS)。
+        # 無編譯器:只跑代表性 import(bwrap 優先、否則直接),不宣稱 bundle 來源;representativeness-flagged 且 DEFERRED。
         import_src = (
             "import importlib,sys\n"
             f"m=importlib.import_module({representative_import!r})\n"
             "print('LOADED' if m else 'NOLOAD')\n"
         )
-        result = _run(
-            ["bwrap", "--ro-bind", "/usr", "/usr", "--ro-bind", "/lib", "/lib", "--ro-bind-try", "/lib64", "/lib64",
-             "--proc", "/proc", "--dev", "/dev", "--", sys.executable, "-I", "-c", import_src],
-            timeout=20,
-        )
-        out_lines = result.stdout.decode("utf-8", "replace").splitlines()
-        loaded = bool(out_lines) and out_lines[0].strip() == "LOADED"
+        lines, mode, _snote = _run_native_load(import_src, ro_bundle=None)
+        loaded = bool(lines) and lines[0] == "LOADED"
         return _seam_record(
             SEAM_NATIVE_LIB, SEAM_VERDICT_DEFERRED,
-            {"loaded": loaded, "representative_import": representative_import, "bundle_so_staged": False},
+            {"loaded": loaded, "representative_import": representative_import, "bundle_so_staged": False, "sandbox_mode": mode},
             _NATIVE_IMPORT_ONLY_NOTE, representativeness=NATIVE_REPRESENTATIVE,
         )
     bundle_so = os.path.join(bundle_dir, staged)
-    # 於沙箱以 CDLL 載入 bundle 內那份 .so,並讀 /proc/self/maps 判斷其解析來源是否為 bundle 路徑。
+    # 載入 bundle 內那份 .so,讀 /proc/self/maps 判斷解析來源是否為 bundle 路徑,並真呼叫其符號(回 42)。
     load_src = (
         "import ctypes,sys\n"
         f"p={bundle_so!r}\n"
-        "ok=False\n"
+        "ok=False; sym=None\n"
         "try:\n"
-        "    ctypes.CDLL(p)\n"
+        "    h=ctypes.CDLL(p)\n"
+        "    h.aiml_probe_symbol.restype=ctypes.c_int\n"
+        "    sym=h.aiml_probe_symbol()\n"
         "    ok=True\n"
         "except OSError:\n"
         "    ok=False\n"
         "maps=open('/proc/self/maps').read()\n"
         "print('LOADED' if ok else 'NOLOAD')\n"
         "print('ORIGIN_BUNDLE' if (p in maps) else 'ORIGIN_OTHER')\n"
+        "print('SYM=%s' % (sym,))\n"
     )
-    result = _run(
-        ["bwrap", "--ro-bind", bundle_dir, bundle_dir, "--ro-bind", "/usr", "/usr", "--ro-bind", "/lib", "/lib",
-         "--ro-bind-try", "/lib64", "/lib64", "--proc", "/proc", "--dev", "/dev", "--", sys.executable, "-I", "-c", load_src],
-        timeout=20,
-    )
-    out_lines = result.stdout.decode("utf-8", "replace").splitlines()
-    loaded = bool(out_lines) and out_lines[0].strip() == "LOADED"
-    origin_bundle = len(out_lines) >= 2 and out_lines[1].strip() == "ORIGIN_BUNDLE"
-    # 唯有真載入且 maps 證實 bundle 來源前綴才 PASS;否則誠實 DEFERRED(不掛假 note)。
-    verdict = SEAM_VERDICT_PASSED if (loaded and origin_bundle) else SEAM_VERDICT_DEFERRED
-    note = _SEAM_NOTES[SEAM_NATIVE_LIB] if verdict == SEAM_VERDICT_PASSED else _NATIVE_ORIGIN_UNCONFIRMED_NOTE
+    lines, mode, snote = _run_native_load(load_src, ro_bundle=bundle_dir)
+    loaded = bool(lines) and lines[0] == "LOADED"
+    origin_bundle = len(lines) >= 2 and lines[1] == "ORIGIN_BUNDLE"
+    sym_ok = any(ln == "SYM=42" for ln in lines)
+    # 唯有真載入 + maps 證 bundle 來源 + 符號真回 42 才 PASS;否則誠實 DEFERRED(不掛假 note)。
+    verdict = SEAM_VERDICT_PASSED if (loaded and origin_bundle and sym_ok) else SEAM_VERDICT_DEFERRED
+    if verdict == SEAM_VERDICT_PASSED:
+        note = f"unique-soname .so compiled into bundle; CDLL loaded from bundle path (maps-origin confirmed, symbol=42); {snote}"
+    else:
+        note = (
+            f"native-lib bundle-origin not fully confirmed (loaded={loaded}, origin_bundle={origin_bundle}, "
+            f"symbol_ok={sym_ok}); {snote} — DEFERRED"
+        )
     return _seam_record(
         SEAM_NATIVE_LIB, verdict,
-        {"loaded": loaded, "maps_origin_bundle": origin_bundle, "bundle_so": staged, "bundle_so_staged": True},
+        {"loaded": loaded, "maps_origin_bundle": origin_bundle, "symbol_ok": sym_ok, "bundle_so": staged,
+         "bundle_so_staged": True, "sandbox_mode": mode},
         note, representativeness=NATIVE_REPRESENTATIVE,
     )
 

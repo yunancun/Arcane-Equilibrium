@@ -4,7 +4,8 @@ Gated on ``target_host_available()`` (linux + ``systemd-run`` on PATH +
 ``AIML_TARGET_HOST_PROBE=1``).  On this Mac / any non-target node the whole module
 skips honestly — it never simulates a kernel fact.  On ``trade-core`` it drives the
 REAL non-root user-scope primitives (``systemd-run --user --scope`` lifecycle,
-cgroup cpu/mem/pids enforcement, ``bwrap`` private-netns egress denial + native-lib
+cgroup cpu/mem/pids enforcement, seccomp ``SCMP_ACT_ERRNO(ENETUNREACH)`` egress
+denial (differential vs a no-filter baseline) + ``bwrap`` native-lib
 load, content-addressed bundle atomic swap, kill/restart/teardown + independent
 residue check, pluggable PG-identity) and asserts the end-to-end target-host
 choice receipt is a PLATFORM_OR_EXTERNAL_ATTESTED PASS whose binding is BINDING
@@ -106,7 +107,7 @@ def test_real_probe_emits_attested_receipt(probe_output):
     residue_observation = {
         "units_gone": swept["unit_absent"],
         "cgroup_gone": swept["cgroup_gone"],
-        "netns_gone": True,  # bwrap 私網 netns 於行程退出即消,無殘留。
+        "netns_gone": True,  # network-denial 為 seccomp(行程本地 filter,隨子行程退出即消),無 netns/殘留。
         "temp_gone": swept["temp_gone"],
     }
     bound = th.attach_independent_postcheck(
@@ -136,5 +137,9 @@ def test_real_start_stop_lifecycle_observed():
 def test_real_network_denial_enforced():
     seam = th.probe_network_denial_on_host()
     assert seam["seam_id"] == "network_denial"
-    # 真私網 netns:egress 應被 kernel 拒(ENETUNREACH/timeout)。
-    assert seam["verdict"] == "PASSED_TARGET_HOST"
+    # 差分證明(seccomp):同一 host/port,無過濾 baseline 真連上(證明本機有 egress),
+    # 裝了 connect/sendto/sendmsg 拒絕過濾的子行程真連時被 kernel 拒(ENETUNREACH)。
+    # trade-core 有 libseccomp → 期望 PASSED;若某 host 缺 libseccomp 則誠實 DEFERRED。
+    assert seam["verdict"] == "PASSED_TARGET_HOST", (
+        f"expected seccomp egress denial to PASS on trade-core, got {seam['verdict']}: {seam['note']}"
+    )
