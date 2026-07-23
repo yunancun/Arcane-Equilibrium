@@ -1,0 +1,8 @@
+{
+  "native_agent": "e3-ops",
+  "node_id": "s16b_ops_capture_node",
+  "record_digest": "sha256:22b5a5e5eee3a952080e2b3350f3c3f4398e7d24da7e3bb3604ee926b4477f96",
+  "role_id": "E3",
+  "schema_version": "command_capture_v2",
+  "structural_reference_only": true
+}

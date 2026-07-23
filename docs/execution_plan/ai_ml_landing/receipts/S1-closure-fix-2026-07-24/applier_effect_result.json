@@ -1,0 +1,246 @@
+{
+  "adapter_id": "target_host_disposable_runtime_probe_adapter_v1",
+  "applier_node_id": "s1fc_apply_actor",
+  "approved_at": "2026-07-23T22:52:48.500852+00:00",
+  "approved_by": "operator",
+  "choice_receipt": {
+    "boundary": {
+      "applier_ne_verifier": true,
+      "complete_teardown_verified": true,
+      "no_docker_invoked": true,
+      "no_production_path": true,
+      "no_system_scope": true,
+      "non_root": true,
+      "prod_pg_untouched": true,
+      "production_running_attested": false,
+      "real_target_host_primitives_invoked": true,
+      "user_scope_only": true
+    },
+    "caller": "target_host_probe_v1:intent-applier:sha256:442468d17cbb4b3f982a57edbd6409498dd2b4f30b8e42f3974b0039a1214af8",
+    "candidate_probes": [
+      {
+        "apply_actor_node": "s1fc_apply_actor",
+        "candidate_id": "content_addressed_fixed_path",
+        "caveats": [
+          "cpuset_io_isolation_root_only_deferred_pm_q4",
+          "native_closure_representative_full_sealed_s2_3_pm_q3"
+        ],
+        "postcheck_verifier_node": "s1fc_independent_verifier",
+        "runtime_identity_kind": "content_addressed_path",
+        "seams": [
+          {
+            "evidence_digest": "sha256:ba6cf01b16d73dfc6ab4881bfc03d6d64d21662371942571d8e59d6946c533db",
+            "note": "systemd-run --user --scope lifecycle observed Active->dead, unit present->absent",
+            "seam_id": "start_stop",
+            "verdict": "PASSED_TARGET_HOST"
+          },
+          {
+            "evidence_digest": "sha256:28cd63bcf80cb79c4e3efcc83944e1fb472fb4aa301aa2f008ece3434385674a",
+            "note": "scope with MemoryMax/MemoryHigh/CPUQuota/TasksMax drove memory.events:oom_kill, cpu.stat throttling and pids.events:max (cpu/mem/pids; cpuset/io root-only deferred)",
+            "seam_id": "cgroup_resource_isolation",
+            "verdict": "PASSED_TARGET_HOST"
+          },
+          {
+            "evidence_digest": "sha256:dd5a7578dba7fac39ae8a100ef0dc7a1cc119a61051c9cb24f071ab45bdd462c",
+            "note": "seccomp connect/sendto/sendmsg egress denial: baseline CONNECTED, filtered ENETUNREACH (non-root, kernel-enforced)",
+            "seam_id": "network_denial",
+            "verdict": "PASSED_TARGET_HOST"
+          },
+          {
+            "evidence_digest": "sha256:af324dc7a558d35590d828d24c2d9777b31a36d2495a265042e4b86f95a72a77",
+            "note": "unique-soname .so compiled into bundle; CDLL loaded from bundle path (maps-origin confirmed, symbol=42); bwrap mount-isolation unavailable non-root (AppArmor apparmor_restrict_unprivileged_userns=1); direct load — maps-origin proof still real, mount-isolated variant deferred",
+            "representativeness": "representative_native_lib",
+            "seam_id": "native_lib_loading",
+            "verdict": "PASSED_TARGET_HOST"
+          },
+          {
+            "evidence_digest": "sha256:71ebdf425335f1c6c32972c1c97125afbad7c17ab1aec2d9554d2d672630754b",
+            "note": "content-addressed bundle at a fixed path; atomic pointer swap; digest re-derived across restart",
+            "seam_id": "immutable_closure_persistence",
+            "verdict": "PASSED_TARGET_HOST"
+          },
+          {
+            "evidence_digest": "sha256:00fc975a64d462408dcca18ffce35f87a18a74bfde5244251502ac34564b1165",
+            "note": "systemctl --user kill + restart the deployed content-addressed bundle; restarted process resolves (proc cwd) under the rolled-back bundle root; interrupted apply never swaps; teardown + reset-failed + rmtree",
+            "seam_id": "failure_rollback_cleanup",
+            "verdict": "PASSED_TARGET_HOST"
+          },
+          {
+            "evidence_digest": "sha256:b43a631216820120251d783bd68de91872e74017bc04cad987b24ba3ee194019",
+            "note": "S1.1 disposable initdb cluster on-target: read-only role SET ROLE denied 42501",
+            "seam_id": "pg_identity",
+            "verdict": "PASSED_TARGET_HOST"
+          },
+          {
+            "evidence_digest": "sha256:01afb9bb8d45a0e49d1cbac098f7f987740b27929396e3ef660324cf1b499df5",
+            "note": "independent_postcheck DEFERRED: the applier alone cannot self-certify independence; pending the distinct OPS verifier's on-host residue sweep (units/cgroup/netns/temp) via attach_independent_postcheck",
+            "seam_id": "independent_postcheck",
+            "verdict": "DEFERRED_TARGET_HOST"
+          }
+        ]
+      },
+      {
+        "apply_actor_node": "s1fc_apply_actor",
+        "candidate_id": "exact_image_id_oci",
+        "caveats": [
+          "no_non_root_oci_runtime_on_target",
+          "rootful_docker_daemon_only",
+          "lr2_no_oci_socket_dbus"
+        ],
+        "postcheck_verifier_node": "s1fc_independent_verifier",
+        "runtime_identity_kind": "exact_image_id",
+        "seams": [
+          {
+            "evidence_digest": "sha256:fbcdb8be5961f0b7b3f25173ca9bc1fe45f69f412443d5153afc7af45e6352a4",
+            "note": "no non-root OCI runtime on target (rootful docker only); LR2 forbids the OCI socket surface",
+            "seam_id": "start_stop",
+            "verdict": "NON_SATISFIABLE_NON_ROOT"
+          },
+          {
+            "evidence_digest": "sha256:5460c035f1bbcccd46e8c9dbfee85605115dacd60de23ebfcd74ed8320eadce1",
+            "note": "no non-root OCI runtime on target (rootful docker only); LR2 forbids the OCI socket surface",
+            "seam_id": "cgroup_resource_isolation",
+            "verdict": "NON_SATISFIABLE_NON_ROOT"
+          },
+          {
+            "evidence_digest": "sha256:ba897c8400b6ff939967d1c72c11b349544ff2f781765de6b77c6d0a72a55a80",
+            "note": "no non-root OCI runtime on target (rootful docker only); LR2 forbids the OCI socket surface",
+            "seam_id": "network_denial",
+            "verdict": "NON_SATISFIABLE_NON_ROOT"
+          },
+          {
+            "evidence_digest": "sha256:f7feb5abee578e0caaa5484008e118046e0844d39ed6d84894f909ea9413744b",
+            "note": "no non-root OCI runtime on target (rootful docker only); LR2 forbids the OCI socket surface",
+            "seam_id": "native_lib_loading",
+            "verdict": "NON_SATISFIABLE_NON_ROOT"
+          },
+          {
+            "evidence_digest": "sha256:94ebc7ad3278ce3ddc6aa31ff2a3de83f0a63aea5637da9f580690e1f00a5587",
+            "note": "no non-root OCI runtime on target (rootful docker only); LR2 forbids the OCI socket surface",
+            "seam_id": "immutable_closure_persistence",
+            "verdict": "NON_SATISFIABLE_NON_ROOT"
+          },
+          {
+            "evidence_digest": "sha256:738f956bf4cc3a43c86acd8c1af5e95dec8e2b6a85746703ee70f894e4cc1cad",
+            "note": "no non-root OCI runtime on target (rootful docker only); LR2 forbids the OCI socket surface",
+            "seam_id": "failure_rollback_cleanup",
+            "verdict": "NON_SATISFIABLE_NON_ROOT"
+          },
+          {
+            "evidence_digest": "sha256:9b0ad17c0249822483f890c55d5c218c5e236cd666c00f93f61990687564772c",
+            "note": "no non-root OCI runtime on target (rootful docker only); LR2 forbids the OCI socket surface",
+            "seam_id": "pg_identity",
+            "verdict": "NON_SATISFIABLE_NON_ROOT"
+          },
+          {
+            "evidence_digest": "sha256:7cee80e6cfc0e37686a057c1df00c674ed625f5165850ad51b1f66857ec90f08",
+            "note": "no non-root OCI runtime on target (rootful docker only); LR2 forbids the OCI socket surface",
+            "seam_id": "independent_postcheck",
+            "verdict": "NON_SATISFIABLE_NON_ROOT"
+          }
+        ]
+      }
+    ],
+    "dependency_receipts": {
+      "component_effect_matrix_digest": "sha256:22d78882a2dace9ceb640b74b2a5dca2f2a8cc05861720f5ab25c5c9ac86c445",
+      "effect_seams_ready_receipt_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "pg_readonly_identity_receipt_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "runtime_candidate_comparison_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "runtime_candidate_receipt_a_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "runtime_candidate_receipt_b_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "evidence_class": "PLATFORM_OR_EXTERNAL_ATTESTED",
+    "expires_at": "2026-07-23T23:07:48.500852+00:00",
+    "failure_reason": null,
+    "harness_id": "target_host_probe_v1",
+    "host_identity": {
+      "deferred_root_only_controllers": [
+        "cpuset",
+        "io"
+      ],
+      "delegated_controllers": [
+        "cpu",
+        "memory",
+        "pids"
+      ],
+      "expected_host": "trade-core",
+      "non_root_uid": true,
+      "observed_host": "trade-core",
+      "passwordless_sudo_present": false,
+      "throwaway_root_under_runtime_dir": true
+    },
+    "observation_time": "2026-07-23T22:52:48.500852+00:00",
+    "platform": {
+      "arch": "x86_64",
+      "bwrap_available": true,
+      "non_root_oci_runtime_available": false,
+      "os": "linux",
+      "python_version": "3.12.3",
+      "systemd_run_available": true
+    },
+    "probe_scope": {
+      "adapter_id": "learning_runtime_deploy_adapter_v1",
+      "effect_class": "TARGET_HOST_DISPOSABLE_RUNTIME_PROBE",
+      "pg_identity_mode": "real_initdb_cluster",
+      "target_host_probe_performed": true
+    },
+    "production_running_attested": false,
+    "schema_sha256": "sha256:f62f8e722a1ea4a15586f822b62f5ed4ad8bf5e85ecf49424865f1131220291e",
+    "schema_version": "learning_runtime_choice_receipt_target_host_v1",
+    "secret_scan": {
+      "leaked": false,
+      "patterns_checked": [
+        "auth_scheme_token",
+        "credential_assignment",
+        "github_token",
+        "postgres_dsn_credentials"
+      ]
+    },
+    "selection": {
+      "binding": "PROVISIONAL_PENDING_LINUX",
+      "final_choice": "content_addressed_fixed_path",
+      "oci_selectable": false,
+      "pending_seams": [
+        "independent_postcheck"
+      ],
+      "reason": "OCI is NON_SATISFIABLE_NON_ROOT on trade-core; fixed-path is the choice but PROVISIONAL_PENDING_LINUX because these fixed-path seams are not PASSED_TARGET_HOST: ['independent_postcheck'].",
+      "selection_rule": "oci_only_if_all_seams_pass_else_fixed_path"
+    },
+    "self_digest": "sha256:e8c3deb96af40fadd9ce9bd796454ef071e780262c5da412df5b8c65e93c340e",
+    "source_sha256": "sha256:fcbf76a1e434ad3f94253a60f8fb369947b26ca24b47a7e696bde45c989975a7",
+    "status": "PASS",
+    "target_class": "target_host",
+    "target_host_capture": {
+      "native_agent": "e3-ops",
+      "node_id": "s16b_ops_capture_node",
+      "record_digest": "sha256:22b5a5e5eee3a952080e2b3350f3c3f4398e7d24da7e3bb3604ee926b4477f96",
+      "role_id": "E3",
+      "schema_version": "command_capture_v2",
+      "structural_reference_only": true
+    },
+    "target_host_capture_digest": "sha256:22b5a5e5eee3a952080e2b3350f3c3f4398e7d24da7e3bb3604ee926b4477f96",
+    "ttl_seconds": 900,
+    "unselected_path_removal": {
+      "forecloses_downstream": true,
+      "note": "no non-root OCI runtime exists on trade-core to build/install; LR2/S2.3 seals ONLY the fixed-path runtime, so no downstream session may create an OCI build/install/socket path.",
+      "production_path_removed": true,
+      "unselected_candidate": "exact_image_id_oci",
+      "unselected_production_artifact_present": false
+    }
+  },
+  "choice_receipt_digest": "sha256:e8c3deb96af40fadd9ce9bd796454ef071e780262c5da412df5b8c65e93c340e",
+  "completed_at": "2026-07-23T22:52:48.500852+00:00",
+  "effect_status": "TARGET_HOST_DISPOSABLE_PROBE_PASS",
+  "evidence_expires_at": "2026-07-23T23:02:48.500852+00:00",
+  "failure_reason": null,
+  "intent_digest": "sha256:e1fd7d59815c6325e797638b72b68f62b209bae8b2659eca6e4eca0989b6a35a",
+  "intent_expires_at": "2026-07-23T23:07:48.500852+00:00",
+  "intent_id": "sha256:442468d17cbb4b3f982a57edbd6409498dd2b4f30b8e42f3974b0039a1214af8",
+  "postcheck_verifier_node_id": "s1fc_independent_verifier",
+  "receipt_digest": "sha256:d8b3ac073cae7d7a8a9a243f746d18ec267e3bf534f09e0fd1c34c823478af8c",
+  "schema_version": "target_host_effect_result_v1",
+  "source_head": "7fa7ce05ec77edd6dc6457e199f3415497b95b0c",
+  "started_at": "2026-07-23T22:52:48.500852+00:00",
+  "target_host": "trade-core",
+  "verifier_capture_digest": null
+}

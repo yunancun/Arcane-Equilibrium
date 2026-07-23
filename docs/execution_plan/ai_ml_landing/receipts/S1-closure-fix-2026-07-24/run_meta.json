@@ -1,0 +1,11 @@
+{
+  "applier_node": "s1fc_apply_actor",
+  "binding": "BINDING",
+  "effect_status": "TARGET_HOST_DISPOSABLE_PROBE_PASS",
+  "expected_host": "trade-core",
+  "observed_at": "2026-07-23T22:52:48.500852+00:00",
+  "pg_identity_mode": "content_addressed_fixed_path",
+  "source_head": "7fa7ce05ec77edd6dc6457e199f3415497b95b0c",
+  "verifier_capture_digest": "sha256:ee8d97fbd52a1391212f64f429f30cb76cfbc7aac613e3770bad20739015e8c5",
+  "verifier_node": "s1fc_independent_verifier"
+}
