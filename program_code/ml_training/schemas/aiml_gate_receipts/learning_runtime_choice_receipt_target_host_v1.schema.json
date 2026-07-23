@@ -1,0 +1,283 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/learning_runtime_choice_receipt_target_host_v1.schema.json",
+  "title": "learning_runtime_choice_receipt_target_host_v1",
+  "description": "Canonical self-hashed receipt emitted by target_host_probe_v1 (AIML LR0C, S1.6B). It is the TARGET-HOST variant of learning_runtime_choice_receipt_v1: the choice is re-made on REAL non-root Linux target-host (trade-core) evidence rather than the S1.6 Mac disposable stand-in. For candidate B (content_addressed_fixed_path) each seam is exercised with real non-root user-scope primitives (systemd-run --user --scope lifecycle, cgroup cpu/mem/pids enforcement, bwrap private-netns egress denial, bwrap native-lib load with bundle-only /proc/self/maps origin, content-addressed bundle + atomic pointer swap, kill/restart/teardown with an independent residue check); each carries verdict PASSED_TARGET_HOST or (honestly) DEFERRED_TARGET_HOST. For candidate A (exact_image_id_oci) every seam is NON_SATISFIABLE_NON_ROOT: trade-core has only a rootful docker daemon and LR2 forbids the OCI socket surface. The machine rule oci_selectable == (target_host_probe_performed AND every OCI seam PASSED_TARGET_HOST) runs on real evidence and is const false, so final_choice is content_addressed_fixed_path. binding is BINDING only when EVERY fixed-path seam is PASSED_TARGET_HOST; if any is not (today: PG-identity DEFERRED because postgresql-server is not installed on trade-core) binding is PROVISIONAL_PENDING_LINUX and pending_seams names the exact unmet seams. The applier alone cannot mark the independent_postcheck seam PASSED: run_target_host_probe emits it DEFERRED (a self-run receipt is PROVISIONAL naming independent_postcheck), and only a DISTINCT OPS verifier's attach_independent_postcheck with a real on-host residue observation (units/cgroup/netns/temp all gone) upgrades it to PASSED and re-derives BINDING. HONESTY GATE: status==PASS REQUIRES evidence_class==PLATFORM_OR_EXTERNAL_ATTESTED and boundary.real_target_host_primitives_invoked==true, and require_target_host_attested additionally REQUIRES a bound non-null target_host_capture_digest (the governed on-host command_capture_v2 reference) — a self-reported evidence_class cannot certify the target-host exit. A Mac author cannot self-produce trade-core kernel facts, so a Mac structural synthesis is evidence_class==STRUCTURAL_ONLY and status==FAIL: it exercises the receipt/verdict LOGIC only and can never masquerade as the real target-host exit. The BINDING gate, OCI-non-satisfiable rule, pending_seams match, delegated-controller superset, applier!=verifier, and secret-scan are enforced in the delegated Python validator, not schema if/then. self_digest proves integrity, not authenticity (CLAUDE.md Typed Authority Matrix): a consumer accepting this as the S1-exit MUST re-run the probe on trade-core or obtain the governed on-host capture, and re-fetch the bound S1.1/S1.4/S1.5 dependencies by digest.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "harness_id",
+    "status",
+    "caller",
+    "target_class",
+    "evidence_class",
+    "host_identity",
+    "platform",
+    "probe_scope",
+    "candidate_probes",
+    "selection",
+    "unselected_path_removal",
+    "production_running_attested",
+    "target_host_capture_digest",
+    "dependency_receipts",
+    "boundary",
+    "source_sha256",
+    "schema_sha256",
+    "secret_scan",
+    "observation_time",
+    "expires_at",
+    "ttl_seconds",
+    "failure_reason",
+    "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "learning_runtime_choice_receipt_target_host_v1"},
+    "harness_id": {"const": "target_host_probe_v1"},
+    "status": {"enum": ["PASS", "FAIL"]},
+    "caller": {"type": "string", "minLength": 1},
+    "target_class": {"const": "target_host"},
+    "evidence_class": {"enum": ["PLATFORM_OR_EXTERNAL_ATTESTED", "STRUCTURAL_ONLY"]},
+    "host_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expected_host",
+        "non_root_uid",
+        "passwordless_sudo_present",
+        "delegated_controllers",
+        "deferred_root_only_controllers",
+        "throwaway_root_under_runtime_dir"
+      ],
+      "properties": {
+        "expected_host": {"type": "string", "minLength": 1},
+        "non_root_uid": {"const": true},
+        "passwordless_sudo_present": {"const": false},
+        "delegated_controllers": {
+          "type": "array",
+          "minItems": 3,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "deferred_root_only_controllers": {
+          "type": "array",
+          "items": {"enum": ["cpuset", "io", "hugetlb", "rdma"]}
+        },
+        "throwaway_root_under_runtime_dir": {"const": true}
+      }
+    },
+    "platform": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "os",
+        "arch",
+        "python_version",
+        "systemd_run_available",
+        "bwrap_available",
+        "non_root_oci_runtime_available"
+      ],
+      "properties": {
+        "os": {"enum": ["darwin", "linux"]},
+        "arch": {"type": "string", "minLength": 1},
+        "python_version": {"type": "string", "minLength": 1},
+        "systemd_run_available": {"type": "boolean"},
+        "bwrap_available": {"type": "boolean"},
+        "non_root_oci_runtime_available": {"const": false}
+      }
+    },
+    "probe_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "effect_class",
+        "target_host_probe_performed",
+        "adapter_id",
+        "pg_identity_mode"
+      ],
+      "properties": {
+        "effect_class": {"const": "TARGET_HOST_DISPOSABLE_RUNTIME_PROBE"},
+        "target_host_probe_performed": {"type": "boolean"},
+        "adapter_id": {"const": "learning_runtime_deploy_adapter_v1"},
+        "pg_identity_mode": {"enum": ["deferred_server_absent", "real_initdb_cluster"]}
+      }
+    },
+    "candidate_probes": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "candidate_id",
+          "runtime_identity_kind",
+          "apply_actor_node",
+          "postcheck_verifier_node",
+          "seams",
+          "caveats"
+        ],
+        "properties": {
+          "candidate_id": {"enum": ["exact_image_id_oci", "content_addressed_fixed_path"]},
+          "runtime_identity_kind": {"enum": ["exact_image_id", "content_addressed_path"]},
+          "apply_actor_node": {"type": "string", "minLength": 1},
+          "postcheck_verifier_node": {"type": "string", "minLength": 1},
+          "seams": {
+            "type": "array",
+            "minItems": 8,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["seam_id", "verdict", "evidence_digest", "note"],
+              "properties": {
+                "seam_id": {"type": "string", "minLength": 1},
+                "verdict": {"enum": ["PASSED_TARGET_HOST", "DEFERRED_TARGET_HOST", "NON_SATISFIABLE_NON_ROOT"]},
+                "evidence_digest": {"$ref": "#/$defs/digest"},
+                "note": {"type": "string", "minLength": 1},
+                "representativeness": {"enum": ["representative_native_lib", "lr2_sealed_closure"]}
+              }
+            }
+          },
+          "caveats": {"type": "array", "items": {"type": "string", "minLength": 1}}
+        }
+      }
+    },
+    "selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "final_choice",
+        "selection_rule",
+        "oci_selectable",
+        "binding",
+        "pending_seams",
+        "reason"
+      ],
+      "properties": {
+        "final_choice": {"enum": ["content_addressed_fixed_path", "exact_image_id_oci"]},
+        "selection_rule": {"const": "oci_only_if_all_seams_pass_else_fixed_path"},
+        "oci_selectable": {"const": false},
+        "binding": {"enum": ["BINDING", "PROVISIONAL_PENDING_LINUX"]},
+        "pending_seams": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "reason": {"type": "string", "minLength": 1}
+      }
+    },
+    "unselected_path_removal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "unselected_candidate",
+        "unselected_production_artifact_present",
+        "production_path_removed",
+        "forecloses_downstream",
+        "note"
+      ],
+      "properties": {
+        "unselected_candidate": {"const": "exact_image_id_oci"},
+        "unselected_production_artifact_present": {"const": false},
+        "production_path_removed": {"const": true},
+        "forecloses_downstream": {"const": true},
+        "note": {"type": "string", "minLength": 1}
+      }
+    },
+    "production_running_attested": {"const": false},
+    "target_host_capture_digest": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]},
+    "dependency_receipts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runtime_candidate_receipt_a_digest",
+        "runtime_candidate_receipt_b_digest",
+        "runtime_candidate_comparison_digest",
+        "effect_seams_ready_receipt_digest",
+        "component_effect_matrix_digest",
+        "pg_readonly_identity_receipt_digest"
+      ],
+      "properties": {
+        "runtime_candidate_receipt_a_digest": {"$ref": "#/$defs/digest"},
+        "runtime_candidate_receipt_b_digest": {"$ref": "#/$defs/digest"},
+        "runtime_candidate_comparison_digest": {"$ref": "#/$defs/digest"},
+        "effect_seams_ready_receipt_digest": {"$ref": "#/$defs/digest"},
+        "component_effect_matrix_digest": {"$ref": "#/$defs/digest"},
+        "pg_readonly_identity_receipt_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "non_root",
+        "user_scope_only",
+        "no_docker_invoked",
+        "no_system_scope",
+        "no_production_path",
+        "prod_pg_untouched",
+        "applier_ne_verifier",
+        "production_running_attested",
+        "real_target_host_primitives_invoked",
+        "complete_teardown_verified"
+      ],
+      "properties": {
+        "non_root": {"const": true},
+        "user_scope_only": {"const": true},
+        "no_docker_invoked": {"const": true},
+        "no_system_scope": {"const": true},
+        "no_production_path": {"const": true},
+        "prod_pg_untouched": {"const": true},
+        "applier_ne_verifier": {"const": true},
+        "production_running_attested": {"const": false},
+        "real_target_host_primitives_invoked": {"type": "boolean"},
+        "complete_teardown_verified": {"type": "boolean"}
+      }
+    },
+    "source_sha256": {"$ref": "#/$defs/digest"},
+    "schema_sha256": {"$ref": "#/$defs/digest"},
+    "secret_scan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["patterns_checked", "leaked"],
+      "properties": {
+        "patterns_checked": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+        "leaked": {"const": false}
+      }
+    },
+    "observation_time": {"$ref": "#/$defs/timestamp"},
+    "expires_at": {"$ref": "#/$defs/timestamp"},
+    "ttl_seconds": {"type": "integer", "minimum": 1, "maximum": 3600},
+    "failure_reason": {"anyOf": [{"type": "string", "minLength": 1}, {"type": "null"}]},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "PASS"}}},
+      "then": {
+        "properties": {
+          "evidence_class": {"const": "PLATFORM_OR_EXTERNAL_ATTESTED"},
+          "failure_reason": {"type": "null"},
+          "probe_scope": {
+            "properties": {"target_host_probe_performed": {"const": true}}
+          },
+          "selection": {
+            "properties": {
+              "final_choice": {"const": "content_addressed_fixed_path"},
+              "oci_selectable": {"const": false}
+            }
+          },
+          "boundary": {
+            "properties": {
+              "real_target_host_primitives_invoked": {"const": true},
+              "complete_teardown_verified": {"const": true}
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "failure_reason": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "timestamp": {"type": "string", "format": "date-time"}
+  }
+}
