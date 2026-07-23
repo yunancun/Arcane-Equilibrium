@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "external_worm_append_intent_v1.schema.json",
+  "title": "External-capable WORM terminal-receipt append intent (S1.2A)",
+  "description": "Source-only external-capable append intent for the terminal_receipt_external_worm_sink_v1 Adapter. Wraps a reused terminal_receipt_append_intent_v1 base intent (target_class=external_worm) and binds a NON-SECRET external-destination contract (endpoint/region/bucket/object_lock_mode/retain_until/credential_channel_id). credential_channel_id is only an out-of-band CHANNEL IDENTIFIER (IAM/workload role, short-lived STS, or a named profile/env-channel id the operator configures on the host); NEVER a credential value. No external WORM destination is bound and no real append happens before S8.6. object_lock_mode=COMPLIANCE requires compliance_operator_approved=true. Contract completeness and the COMPLIANCE gate are enforced in the delegated Python validator.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "external_sink_id", "target_class", "destination_class", "append_intent", "destination_contract", "compliance_operator_approved", "external_intent_digest"],
+  "properties": {
+    "schema_version": {"const": "external_worm_append_intent_v1"},
+    "external_sink_id": {"const": "terminal_receipt_external_worm_sink_v1"},
+    "target_class": {"const": "external_worm"},
+    "destination_class": {"const": "EXTERNAL_IMMUTABLE_WORM"},
+    "append_intent": {"type": "object"},
+    "destination_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["endpoint", "region", "bucket", "object_lock_mode", "retain_until", "credential_channel_id"],
+      "properties": {
+        "endpoint": {"type": "string", "minLength": 1},
+        "region": {"type": "string", "minLength": 1},
+        "bucket": {"type": "string", "minLength": 1},
+        "object_lock_mode": {"enum": ["GOVERNANCE", "COMPLIANCE"]},
+        "retain_until": {"type": "string", "format": "date-time"},
+        "credential_channel_id": {"type": "string", "minLength": 1}
+      }
+    },
+    "compliance_operator_approved": {"type": "boolean"},
+    "external_intent_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}

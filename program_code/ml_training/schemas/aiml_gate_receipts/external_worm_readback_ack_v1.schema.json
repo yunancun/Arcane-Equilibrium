@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "external_worm_readback_ack_v1.schema.json",
+  "title": "Independent external WORM terminal-receipt readback ACK (S1.2A)",
+  "description": "Canonical self-hashed readback acknowledgement produced by a DISTINCT verifier (readback_verifier_id must differ from the committed result's append_actor_id). Against the INJECTED S3-compatible client the verifier re-reads the object (get_object/head_object + get_object_retention), asserting checksum_match + version_id_match + retention_match (the retention mode matches AND retain_until is in the FUTURE), and proves immutability NON-DESTRUCTIVELY via object_lock_enabled (get_object_lock_configuration shows the bucket Object-Lock ENABLED). No destructive delete/put_object_retention probe is ever performed (a misconfigured bucket would otherwise DELETE the just-committed record). A positive ack (ack=true) requires a distinct verifier, same_actor_violation=false, and immutability_proven=true (checksum_match AND version_id_match AND retention_match AND object_lock_enabled). The append actor reading its own record must set same_actor_violation=true and refuse to ack. These distinctness/immutability rules are enforced in the delegated Python validator.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "external_sink_id", "intent_id", "result_digest", "readback_verifier_id", "read_record_locator", "read_object_version_id", "readback_checksum_sha256", "readback_retention", "checksum_match", "version_id_match", "retention_match", "object_lock_enabled", "immutability_proven", "ack", "same_actor_violation", "observed_at", "expires_at", "ack_digest"],
+  "properties": {
+    "schema_version": {"const": "external_worm_readback_ack_v1"},
+    "external_sink_id": {"const": "terminal_receipt_external_worm_sink_v1"},
+    "intent_id": {"type": "string", "minLength": 8},
+    "result_digest": {"$ref": "#/$defs/digest"},
+    "readback_verifier_id": {"type": "string", "minLength": 1},
+    "read_record_locator": {"anyOf": [{"type": "string", "minLength": 1}, {"type": "null"}]},
+    "read_object_version_id": {"anyOf": [{"type": "string", "minLength": 1}, {"type": "null"}]},
+    "readback_checksum_sha256": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]},
+    "readback_retention": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["object_lock_mode", "retain_until"],
+          "properties": {
+            "object_lock_mode": {"enum": ["GOVERNANCE", "COMPLIANCE"]},
+            "retain_until": {"type": "string", "format": "date-time"}
+          }
+        },
+        {"type": "null"}
+      ]
+    },
+    "checksum_match": {"type": "boolean"},
+    "version_id_match": {"type": "boolean"},
+    "retention_match": {"type": "boolean"},
+    "object_lock_enabled": {"type": "boolean"},
+    "immutability_proven": {"type": "boolean"},
+    "ack": {"type": "boolean"},
+    "same_actor_violation": {"type": "boolean"},
+    "observed_at": {"$ref": "#/$defs/timestamp"},
+    "expires_at": {"$ref": "#/$defs/timestamp"},
+    "ack_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "timestamp": {"type": "string", "format": "date-time"}
+  }
+}

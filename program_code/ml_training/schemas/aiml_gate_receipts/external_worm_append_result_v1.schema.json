@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "external_worm_append_result_v1.schema.json",
+  "title": "External-capable WORM terminal-receipt append result (S1.2A)",
+  "description": "Canonical self-hashed result of one apply_external_worm_append against an INJECTED S3-compatible Object-Lock client (S1.2A source machinery; the real external append is S8.6). APPENDED / IDEMPOTENT_DEDUP bind exactly one committed Object-Lock object: record_locator (bucket key), object_version_id (S3 VersionId), checksum_sha256 (content sha256) and retention (mode + retain_until). EXTERNAL_VERIFICATION_PENDING is the typed fail-closed result when no client is injected and no external WORM destination is bound before S8.6 (external_verification_pending=true, no committed fields). FAILED commits nothing. credential_channel_id echoes only the NON-SECRET channel identifier; no credential value is ever serialized. Committed-vs-uncommitted field invariants are enforced in the delegated Python validator.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "external_sink_id", "intent_id", "external_intent_digest", "append_status", "record_locator", "object_version_id", "checksum_sha256", "retention", "credential_channel_id", "idempotency_key", "append_actor_id", "started_at", "completed_at", "evidence_expires_at", "external_verification_pending", "failure_reason", "result_digest"],
+  "properties": {
+    "schema_version": {"const": "external_worm_append_result_v1"},
+    "external_sink_id": {"const": "terminal_receipt_external_worm_sink_v1"},
+    "intent_id": {"type": "string", "minLength": 8},
+    "external_intent_digest": {"$ref": "#/$defs/digest"},
+    "append_status": {"enum": ["APPENDED", "IDEMPOTENT_DEDUP", "EXTERNAL_VERIFICATION_PENDING", "FAILED"]},
+    "record_locator": {"anyOf": [{"type": "string", "minLength": 1}, {"type": "null"}]},
+    "object_version_id": {"anyOf": [{"type": "string", "minLength": 1}, {"type": "null"}]},
+    "checksum_sha256": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]},
+    "retention": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["object_lock_mode", "retain_until"],
+          "properties": {
+            "object_lock_mode": {"enum": ["GOVERNANCE", "COMPLIANCE"]},
+            "retain_until": {"type": "string", "format": "date-time"}
+          }
+        },
+        {"type": "null"}
+      ]
+    },
+    "credential_channel_id": {"type": "string", "minLength": 1},
+    "idempotency_key": {"$ref": "#/$defs/digest"},
+    "append_actor_id": {"type": "string", "minLength": 1},
+    "started_at": {"$ref": "#/$defs/timestamp"},
+    "completed_at": {"$ref": "#/$defs/timestamp"},
+    "evidence_expires_at": {"$ref": "#/$defs/timestamp"},
+    "external_verification_pending": {"type": "boolean"},
+    "failure_reason": {"anyOf": [{"type": "string", "minLength": 1}, {"type": "null"}]},
+    "result_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "timestamp": {"type": "string", "format": "date-time"}
+  }
+}
