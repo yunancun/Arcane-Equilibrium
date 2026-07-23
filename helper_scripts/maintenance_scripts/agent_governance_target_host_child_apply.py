@@ -1,4 +1,4 @@
-"""AIML S1 formal-closure: isolated ``python3 -I`` target-host probe child executor (P1 process isolation).
+"""AIML S1 formal-closure: isolated ``python3 -E`` target-host probe child executor (P1 process isolation).
 
 取代 Wave B 的 process-global 授權(舊 ``_run_probe_under_intent_authorization`` 直接改 **parent** 行程的
 ``os.environ["AIML_TARGET_HOST_PROBE"]``,在 ``probe_runner`` 執行期間對整個 parent 行程翻開低階閘——
@@ -43,8 +43,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-# 本檔所在的 maintenance_scripts 目錄(供子行程於 ``python3 -I`` 下顯式加回 sys.path;-I 不繼承
-# PYTHONPATH,故必須以 __file__ 推導而非依賴解譯器自動 prepend)。
+# 本檔所在的 maintenance_scripts 目錄(以 __file__ 推導,於子行程顯式加回 sys.path;-E 忽略 PYTHONPATH,
+# 故不依賴 env 注入路徑,而以受信的 __file__ 目錄為準——belt-and-suspenders,即使解譯器已 prepend 腳本目錄)。
 _MAINTENANCE_DIR = Path(__file__).resolve().parent
 
 CAPSULE_SCHEMA_VERSION = "target_host_probe_authorization_capsule_v1"
@@ -219,16 +219,23 @@ def run_probe_via_child(
     python_executable: str = sys.executable,
     timeout: int = CHILD_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
-    """Spawn ``python3 -I`` on this module, feed the capsule via a one-time stdin pipe, return probe output.
+    """Spawn ``python3 -E`` on this module, feed the capsule via a one-time stdin pipe, return probe output.
 
     子行程以 sanitized allowlist env 啟動:只帶 PATH/LANG/LC_ALL 與(存在時)執行環境所需的 non-secret
     ``XDG_RUNTIME_DIR`` / ``DBUS_SESSION_BUS_ADDRESS``——**絕不**傳 ``AIML_TARGET_HOST_PROBE``(閘由 child
     自行在驗過 capsule 後於自身 env 設定)。子行程於非 target host(如 Mac)乾淨 SKIP → 這裡以
     ``TargetHostUnavailableError`` 傳遞,保留「Mac 上真 runner 直接跳過、絕不 fake」的既有語意。
+
+    直譯器旗標用 ``-E``(忽略 PYTHON* env,含 PYTHONPATH ⇒ 防 env 注入)而非 ``-I``:``-I`` 額外含
+    ``-s``(排除 user site-packages),會使探針的合法 runtime 相依(如 pg_identity seam 需要的
+    user-site ``psycopg2``)無法載入 ⇒ 該 seam 偽 DEFERRED、runtime 選擇由 BINDING 誤降為 PROVISIONAL。
+    安全邊界不變:授權閘/秘密永不經 env 傳入(``env=child_env`` 白名單且不含旗標),PYTHONPATH 注入由
+    ``-E`` 擋掉,capsule 於 child 內驗過才開閘;child 以絕對腳本路徑啟動,``sys.path[0]`` 為受信的
+    maintenance_scripts 目錄(非 cwd),user site 為 runtime user 自有(此威脅模型下非新攻擊面)。
     """
 
     argv = [
-        python_executable, "-I",
+        python_executable, "-E",
         str(_MAINTENANCE_DIR / "agent_governance_target_host_child_apply.py"),
         CHILD_FLAG,
     ]
@@ -271,7 +278,7 @@ def run_probe_via_child(
 
 
 # --------------------------------------------------------------------------- #
-# child entrypoint (runs under python3 -I; the ONLY place the gate is opened)
+# child entrypoint (runs under python3 -E; the ONLY place the gate is opened)
 # --------------------------------------------------------------------------- #
 def _child_emit(payload: dict[str, Any]) -> None:
     sys.stdout.write(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")))

@@ -1,4 +1,4 @@
-"""S1 formal-closure P1: isolated ``python3 -I`` target-host probe child executor.
+"""S1 formal-closure P1: isolated ``python3 -E`` target-host probe child executor.
 
 驗證 P1(Codex)「把 target-host 授權移出 process-global state」修復:授權由一張 intent-derived
 capsule 經一次性 stdin pipe 傳入專屬子行程,子行程自行重驗 capsule 後才於**自身** env 開授權閘;
@@ -61,7 +61,7 @@ def _capsule(*, expected_host: str = ACTUAL_HOST, now: str | None = None, ttl_se
 
 def _run_child(capsule_bytes: bytes) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [sys.executable, "-I", str(CHILD_PATH), child.CHILD_FLAG],
+        [sys.executable, "-E", str(CHILD_PATH), child.CHILD_FLAG],
         input=capsule_bytes, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         env={"PATH": "/usr/bin:/bin"},
     )
@@ -120,7 +120,7 @@ def test_capsule_rejects_malformed_bindings(field, value, needle) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# real child subprocess (python3 -I) fail-closed / never-fake
+# real child subprocess (python3 -E) fail-closed / never-fake
 # --------------------------------------------------------------------------- #
 def test_child_rejects_empty_stdin() -> None:
     proc = _run_child(b"")
@@ -171,7 +171,7 @@ def test_child_accepts_valid_capsule_and_skips_on_non_target_host() -> None:
 
 def test_child_entrypoint_without_flag_is_fail_closed() -> None:
     proc = subprocess.run(
-        [sys.executable, "-I", str(CHILD_PATH)], input=b"", stdout=subprocess.PIPE,
+        [sys.executable, "-E", str(CHILD_PATH)], input=b"", stdout=subprocess.PIPE,
         stderr=subprocess.PIPE, env={"PATH": "/usr/bin:/bin"},
     )
     assert proc.returncode == 2  # 沒有 --probe-child flag → 拒
