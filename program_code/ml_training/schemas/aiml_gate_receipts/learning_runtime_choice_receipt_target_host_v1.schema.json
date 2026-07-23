@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://arcane-equilibrium.local/schemas/learning_runtime_choice_receipt_target_host_v1.schema.json",
   "title": "learning_runtime_choice_receipt_target_host_v1",
-  "description": "Canonical self-hashed receipt emitted by target_host_probe_v1 (AIML LR0C, S1.6B). It is the TARGET-HOST variant of learning_runtime_choice_receipt_v1: the choice is re-made on REAL non-root Linux target-host (trade-core) evidence rather than the S1.6 Mac disposable stand-in. For candidate B (content_addressed_fixed_path) each seam is exercised with real non-root user-scope primitives (systemd-run --user --scope lifecycle, cgroup cpu/mem/pids enforcement, bwrap private-netns egress denial, bwrap native-lib load with bundle-only /proc/self/maps origin, content-addressed bundle + atomic pointer swap, kill/restart/teardown with an independent residue check); each carries verdict PASSED_TARGET_HOST or (honestly) DEFERRED_TARGET_HOST. For candidate A (exact_image_id_oci) every seam is NON_SATISFIABLE_NON_ROOT: trade-core has only a rootful docker daemon and LR2 forbids the OCI socket surface. The machine rule oci_selectable == (target_host_probe_performed AND every OCI seam PASSED_TARGET_HOST) runs on real evidence and is const false, so final_choice is content_addressed_fixed_path. binding is BINDING only when EVERY fixed-path seam is PASSED_TARGET_HOST; if any is not (today: PG-identity DEFERRED because postgresql-server is not installed on trade-core) binding is PROVISIONAL_PENDING_LINUX and pending_seams names the exact unmet seams. The applier alone cannot mark the independent_postcheck seam PASSED: run_target_host_probe emits it DEFERRED (a self-run receipt is PROVISIONAL naming independent_postcheck), and only a DISTINCT OPS verifier's attach_independent_postcheck with a real on-host residue observation (units/cgroup/netns/temp all gone) upgrades it to PASSED and re-derives BINDING. HONESTY GATE: status==PASS REQUIRES evidence_class==PLATFORM_OR_EXTERNAL_ATTESTED and boundary.real_target_host_primitives_invoked==true, and require_target_host_attested additionally REQUIRES a bound non-null target_host_capture_digest (the governed on-host command_capture_v2 reference) — a self-reported evidence_class cannot certify the target-host exit. A Mac author cannot self-produce trade-core kernel facts, so a Mac structural synthesis is evidence_class==STRUCTURAL_ONLY and status==FAIL: it exercises the receipt/verdict LOGIC only and can never masquerade as the real target-host exit. The BINDING gate, OCI-non-satisfiable rule, pending_seams match, delegated-controller superset, applier!=verifier, and secret-scan are enforced in the delegated Python validator, not schema if/then. self_digest proves integrity, not authenticity (CLAUDE.md Typed Authority Matrix): a consumer accepting this as the S1-exit MUST re-run the probe on trade-core or obtain the governed on-host capture, and re-fetch the bound S1.1/S1.4/S1.5 dependencies by digest.",
+  "description": "Canonical self-hashed receipt emitted by target_host_probe_v1 (AIML LR0C, S1.6B). It is the TARGET-HOST variant of learning_runtime_choice_receipt_v1: the choice is re-made on REAL non-root Linux target-host (trade-core) evidence rather than the S1.6 Mac disposable stand-in. For candidate B (content_addressed_fixed_path) each seam is exercised with real non-root user-scope primitives (systemd-run --user --scope lifecycle, cgroup cpu/mem/pids enforcement, bwrap private-netns egress denial, bwrap native-lib load with bundle-only /proc/self/maps origin, content-addressed bundle + atomic pointer swap, kill/restart/teardown with an independent residue check); each carries verdict PASSED_TARGET_HOST or (honestly) DEFERRED_TARGET_HOST. For candidate A (exact_image_id_oci) every seam is NON_SATISFIABLE_NON_ROOT: trade-core has only a rootful docker daemon and LR2 forbids the OCI socket surface. The machine rule oci_selectable == (target_host_probe_performed AND every OCI seam PASSED_TARGET_HOST) runs on real evidence and is const false, so final_choice is content_addressed_fixed_path. binding is BINDING only when EVERY fixed-path seam is PASSED_TARGET_HOST; if any is not (today: PG-identity DEFERRED because postgresql-server is not installed on trade-core) binding is PROVISIONAL_PENDING_LINUX and pending_seams names the exact unmet seams. The applier alone cannot mark the independent_postcheck seam PASSED: run_target_host_probe emits it DEFERRED (a self-run receipt is PROVISIONAL naming independent_postcheck), and only a DISTINCT OPS verifier's attach_independent_postcheck with a real on-host residue observation (units/cgroup/netns/temp all gone) upgrades it to PASSED and re-derives BINDING. host_identity records BOTH expected_host and the REAL observed_host (os.uname().nodename); preflight fail-closes when they differ and the validator rejects observed_host != expected_host, so a non-target box cannot mint a trade-core receipt. HONESTY GATE: status==PASS REQUIRES evidence_class==PLATFORM_OR_EXTERNAL_ATTESTED and boundary.real_target_host_primitives_invoked==true, and require_target_host_attested additionally REQUIRES an EMBEDDED governed on-host command_capture_v2 artifact under target_host_capture (schema_version==command_capture_v2, a non-empty capturer node_id+native_agent, and record_digest == target_host_capture_digest so the digest and artifact cannot be decoupled) — a bare self-reported digest or evidence_class cannot certify the target-host exit. Offline structural acceptance of that artifact is NOT authentication (CLAUDE.md); the embedded artifact is what an out-of-band trusted host replays to authenticate. A Mac author cannot self-produce trade-core kernel facts, so a Mac structural synthesis is evidence_class==STRUCTURAL_ONLY and status==FAIL: it exercises the receipt/verdict LOGIC only and can never masquerade as the real target-host exit. The BINDING gate, OCI-non-satisfiable rule, pending_seams match, delegated-controller superset, applier!=verifier, and secret-scan are enforced in the delegated Python validator, not schema if/then. self_digest proves integrity, not authenticity (CLAUDE.md Typed Authority Matrix): a consumer accepting this as the S1-exit MUST re-run the probe on trade-core or obtain the governed on-host capture, and re-fetch the bound S1.1/S1.4/S1.5 dependencies by digest.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -20,6 +20,7 @@
     "unselected_path_removal",
     "production_running_attested",
     "target_host_capture_digest",
+    "target_host_capture",
     "dependency_receipts",
     "boundary",
     "source_sha256",
@@ -43,6 +44,7 @@
       "additionalProperties": false,
       "required": [
         "expected_host",
+        "observed_host",
         "non_root_uid",
         "passwordless_sudo_present",
         "delegated_controllers",
@@ -51,6 +53,7 @@
       ],
       "properties": {
         "expected_host": {"type": "string", "minLength": 1},
+        "observed_host": {"type": "string", "minLength": 1},
         "non_root_uid": {"const": true},
         "passwordless_sudo_present": {"const": false},
         "delegated_controllers": {
@@ -180,6 +183,22 @@
     },
     "production_running_attested": {"const": false},
     "target_host_capture_digest": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]},
+    "target_host_capture": {
+      "anyOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "required": ["schema_version", "record_digest", "node_id", "native_agent"],
+          "properties": {
+            "schema_version": {"const": "command_capture_v2"},
+            "record_digest": {"$ref": "#/$defs/digest"},
+            "node_id": {"type": "string", "minLength": 1},
+            "native_agent": {"type": "string", "minLength": 1},
+            "role_id": {"type": "string", "minLength": 1}
+          }
+        }
+      ]
+    },
     "dependency_receipts": {
       "type": "object",
       "additionalProperties": false,

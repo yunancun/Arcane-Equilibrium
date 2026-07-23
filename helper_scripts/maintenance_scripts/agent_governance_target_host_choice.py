@@ -84,6 +84,38 @@ from agent_governance_target_host_probe import (
 
 
 # --------------------------------------------------------------------------- #
+# governed on-host capture artifact (embedded command_capture_v2; verifier-bound)
+# --------------------------------------------------------------------------- #
+def _validate_capture_artifact(artifact: Any) -> dict[str, Any] | None:
+    """Structurally validate an embedded governed ``command_capture_v2`` capture artifact (or None).
+
+    要求:dict、``schema_version=="command_capture_v2"``、``record_digest`` 為 sha256、且帶非空 capturer
+    身分(``node_id`` 且 ``native_agent``/``role_id`` 至少一)。這是把「target-host 真出口」的門檻由「任意
+    64-hex 字串」抬到「一個可重放、綁到 capturer 身分的 capture 記錄」。離線僅做結構驗證(**非認證**,
+    CLAUDE.md):真確性由受信主機重放此 artifact 確立;此處只確保 digest 與 artifact 不可解耦。掃過機密後
+    回傳深拷貝以內嵌。``None`` → 回 ``None``(呼叫端可仍內嵌裸 digest,但過不了 require_target_host_attested)。
+    """
+
+    if artifact is None:
+        return None
+    if not isinstance(artifact, dict):
+        raise TargetHostProbeError("target_host_capture_artifact must be a command_capture_v2 record dict or None")
+    if artifact.get("schema_version") != "command_capture_v2":
+        raise TargetHostProbeError("target_host_capture_artifact.schema_version must be command_capture_v2")
+    if not DIGEST_RE.fullmatch(str(artifact.get("record_digest"))):
+        raise TargetHostProbeError("target_host_capture_artifact.record_digest must be a sha256 digest")
+    node_id = artifact.get("node_id")
+    if not isinstance(node_id, str) or not node_id:
+        raise TargetHostProbeError("target_host_capture_artifact must carry a non-empty capturer node_id")
+    native_agent = artifact.get("native_agent")
+    role_id = artifact.get("role_id")
+    if not ((isinstance(native_agent, str) and native_agent) or (isinstance(role_id, str) and role_id)):
+        raise TargetHostProbeError("target_host_capture_artifact must carry a non-empty native_agent/role_id capturer identity")
+    _guard_no_secret(artifact)
+    return copy.deepcopy(artifact)
+
+
+# --------------------------------------------------------------------------- #
 # choice receipt builder (honest-by-construction; unsafe states raise)
 # --------------------------------------------------------------------------- #
 def build_target_host_choice_receipt(
@@ -107,6 +139,7 @@ def build_target_host_choice_receipt(
     observation_time: str,
     ttl_seconds: int,
     target_host_capture_digest: str | None = None,
+    target_host_capture_artifact: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the canonical, self-hashed ``learning_runtime_choice_receipt_target_host_v1``.
 
@@ -142,6 +175,17 @@ def build_target_host_choice_receipt(
     # target_host_capture_digest 為 governed on-host capture(command_capture_v2)參照:None(未綁)或 sha256。
     if target_host_capture_digest is not None and not DIGEST_RE.fullmatch(str(target_host_capture_digest)):
         raise TargetHostProbeError("target_host_capture_digest must be a sha256 digest or None")
+    # #T1:若提供 governed on-host capture ARTIFACT,驗其結構並「派生」digest = artifact.record_digest
+    # (digest 與 artifact 不可解耦),再內嵌 receipt。裸 digest(無 artifact)仍內嵌但過不了 require_target_host_attested。
+    capture_artifact = _validate_capture_artifact(target_host_capture_artifact)
+    if capture_artifact is not None:
+        derived = capture_artifact["record_digest"]
+        if target_host_capture_digest is not None and str(target_host_capture_digest) != str(derived):
+            raise TargetHostProbeError(
+                "target_host_capture_digest must match the embedded command_capture_v2 record_digest "
+                "(digest and artifact cannot be decoupled)"
+            )
+        target_host_capture_digest = derived
     if apply_actor_node == postcheck_verifier_node:
         raise ce.ApplierIsSoleVerifierError("target-host probe applier equals its verifier")
 
@@ -252,6 +296,7 @@ def build_target_host_choice_receipt(
         },
         "production_running_attested": False,
         "target_host_capture_digest": target_host_capture_digest,
+        "target_host_capture": capture_artifact,
         "dependency_receipts": {
             "runtime_candidate_receipt_a_digest": runtime_candidate_receipt_a_digest,
             "runtime_candidate_receipt_b_digest": runtime_candidate_receipt_b_digest,
@@ -405,8 +450,18 @@ def _validate_host_identity(host_identity: Any) -> dict[str, Any]:
     expected_host = host_identity.get("expected_host")
     if not isinstance(expected_host, str) or not expected_host:
         raise FailClosedStop("host_identity.expected_host must be a non-empty string")
+    # #T3:observed_host 是真觀察的 nodename(preflight 已與 expected 綁定);必須存在、非空、且 == expected。
+    observed_host = host_identity.get("observed_host")
+    if not isinstance(observed_host, str) or not observed_host:
+        raise FailClosedStop("host_identity.observed_host must be a non-empty string (the real observed nodename)")
+    if observed_host != expected_host:
+        raise FailClosedStop(
+            f"host_identity.observed_host {observed_host!r} != expected_host {expected_host!r} "
+            "(host spoof) — fail-closed STOP"
+        )
     return {
         "expected_host": expected_host,
+        "observed_host": observed_host,
         "non_root_uid": True,
         "passwordless_sudo_present": False,
         "delegated_controllers": sorted(set(controllers)),
@@ -584,12 +639,33 @@ def validate_target_host_choice_receipt(
                 "target-host choice receipt is not PLATFORM_OR_EXTERNAL_ATTESTED: a structural synthesis "
                 "cannot certify the target-host exit (re-run on trade-core / obtain the on-host capture)"
             )
-        # 真確性不可靠自報 label:必須綁一個非空的 governed on-host command_capture_v2 digest。
-        if not DIGEST_RE.fullmatch(str(receipt.get("target_host_capture_digest") or "")):
+        capture_digest = receipt.get("target_host_capture_digest")
+        # 真確性不可靠自報 label 或裸 digest 字串:必須內嵌一個 verifier-bound 的 governed command_capture_v2
+        # ARTIFACT。離線僅結構接受(**非認證**,CLAUDE.md)——內嵌 artifact 才是受信主機重放認證的對象。
+        if not DIGEST_RE.fullmatch(str(capture_digest or "")):
             errors.append(
                 "target-host choice receipt lacks a bound governed on-host command_capture_v2 digest "
                 "(target_host_capture_digest); a self-reported evidence_class cannot certify the target-host exit"
             )
+        capture = receipt.get("target_host_capture")
+        if not isinstance(capture, dict):
+            errors.append(
+                "target-host choice receipt lacks an embedded governed command_capture_v2 artifact under "
+                "target_host_capture; a bare digest cannot certify the target-host exit (offline structural "
+                "acceptance is not authentication — a trusted host replays the embedded artifact)"
+            )
+        else:
+            if capture.get("schema_version") != "command_capture_v2":
+                errors.append("target_host_capture must be a command_capture_v2 record (schema_version)")
+            if str(capture.get("record_digest")) != str(capture_digest):
+                errors.append(
+                    "target_host_capture.record_digest must equal target_host_capture_digest "
+                    "(the digest and the embedded artifact are decoupled)"
+                )
+            if not (isinstance(capture.get("node_id"), str) and capture.get("node_id")):
+                errors.append("target_host_capture must carry a non-empty capturer node_id")
+            if not (isinstance(capture.get("native_agent"), str) and capture.get("native_agent")):
+                errors.append("target_host_capture must carry a non-empty capturer native_agent")
     if require_success:
         if now is None:
             errors.append("target-host choice receipt PASS acceptance requires a non-null now for freshness")
@@ -614,6 +690,15 @@ def _validate_host_identity_block(receipt: dict[str, Any]) -> list[str]:
     controllers = host.get("delegated_controllers")
     if not isinstance(controllers, list) or not REQUIRED_DELEGATED_CONTROLLERS <= set(controllers):
         errors.append(f"host_identity.delegated_controllers must include {sorted(REQUIRED_DELEGATED_CONTROLLERS)}")
+    # #T3:真觀察的 nodename 必存在、非空、且 == expected_host,否則任一非 target 盒可冒稱 target host。
+    expected_host = host.get("expected_host")
+    observed_host = host.get("observed_host")
+    if not isinstance(observed_host, str) or not observed_host:
+        errors.append("host_identity.observed_host must be a non-empty string (the real observed nodename)")
+    elif observed_host != expected_host:
+        errors.append(
+            f"host_identity.observed_host must equal expected_host (host spoof: {observed_host!r} != {expected_host!r})"
+        )
     return errors
 
 
@@ -878,14 +963,38 @@ def _validate_times(receipt: dict[str, Any], *, now: str | None) -> list[str]:
 # structural reference receipts (STRUCTURAL_ONLY; honest, never a real probe)
 # --------------------------------------------------------------------------- #
 def _structural_host_identity() -> dict[str, Any]:
+    # observed_host == expected_host:結構參照代表「真跑於 trade-core、觀察 nodename==trade-core」的形。
     return {
         "expected_host": EXPECTED_TARGET_HOST_DEFAULT,
+        "observed_host": EXPECTED_TARGET_HOST_DEFAULT,
         "non_root_uid": True,
         "passwordless_sudo_present": False,
         "delegated_controllers": sorted(REQUIRED_DELEGATED_CONTROLLERS),
         "deferred_root_only_controllers": list(DEFERRED_ROOT_ONLY_CONTROLLERS),
         "throwaway_root_under_runtime_dir": True,
     }
+
+
+def _structural_capture_artifact() -> dict[str, Any]:
+    """Minimal STRUCTURALLY-valid ``command_capture_v2`` artifact for Mac SHAPE references / structural tests.
+
+    誠實界線:這是 governed on-host ``command_capture_v2`` 記錄的**結構外形**(offline-unauthenticated),
+    **不是**真 governed capture。真 trade-core 出口綁的是 OPS ``capture-command`` 產出的真 record(其
+    ``record_digest`` 由真執行位元組導出);此 helper 僅供離線結構閘測試「digest↔artifact 綁定」路徑,絕不
+    宣稱真跑過 capture。離線結構接受並非認證(CLAUDE.md);受信主機重放此內嵌 artifact 才是認證。
+    """
+
+    artifact: dict[str, Any] = {
+        "schema_version": "command_capture_v2",
+        "node_id": "s16b_ops_capture_node",
+        "native_agent": "e3-ops",
+        "role_id": "E3",
+        "structural_reference_only": True,
+    }
+    artifact["record_digest"] = _canonical_digest(
+        {key: value for key, value in artifact.items() if key != "record_digest"}
+    )
+    return artifact
 
 
 def build_structural_reference_receipt(*, now: str, pg_mode: str = PG_MODE_DEFERRED) -> dict[str, Any]:
@@ -923,17 +1032,22 @@ def build_attested_reference_receipt(
     pg_mode: str = PG_MODE_REAL,
     independent_postcheck_attached: bool = True,
     capture_digest: str | None = None,
+    include_capture_artifact: bool = False,
 ) -> dict[str, Any]:
     """Build a PLATFORM_OR_EXTERNAL_ATTESTED (status=PASS) reference, as the REAL trade-core run would.
 
     表達「真出口長什麼樣」的 shape 參照:``evidence_class=ATTESTED`` + invoked + teardown → ``status=PASS``。
     ``pg_mode=real_initdb_cluster`` 且 ``independent_postcheck_attached`` ⇒ 全 seam PASSED ⇒ ``BINDING``。
     ``independent_postcheck_attached=False`` ⇒ independent_postcheck DEFERRED(applier 自跑形)⇒
-    ``PROVISIONAL_PENDING_LINUX`` 指名 independent_postcheck。``capture_digest=None``(預設)⇒ 無綁 governed
-    on-host capture ⇒ **過不了 ``require_target_host_attested``**(這是刻意的:Mac 參照無法自證真出口,唯有真跑
-    綁上 governed ``command_capture_v2`` digest 才可被採信)。
+    ``PROVISIONAL_PENDING_LINUX`` 指名 independent_postcheck。
+
+    預設(``include_capture_artifact=False`` 且 ``capture_digest=None``)⇒ 無內嵌 governed capture artifact ⇒
+    **過不了 ``require_target_host_attested``**(這是刻意的:Mac 參照無法自證真出口)。``include_capture_artifact=
+    True`` ⇒ 合成一個結構有效的 ``command_capture_v2`` artifact(offline-unauthenticated 的**結構參照**,非真跑)
+    以行使 attested-PASS 的結構路徑;``capture_digest`` 則只內嵌裸 digest(仍過不了 attested,示範裸 digest 不足)。
     """
 
+    capture_artifact = _structural_capture_artifact() if include_capture_artifact else None
     return build_target_host_choice_receipt(
         caller="target_host_probe_v1:attested-reference",
         platform=detect_platform(),
@@ -956,6 +1070,7 @@ def build_attested_reference_receipt(
         pg_readonly_identity_receipt_digest=_canonical_digest({"s1_1": "pg_readonly_identity"}),
         observation_time=now, ttl_seconds=900,
         target_host_capture_digest=capture_digest,
+        target_host_capture_artifact=capture_artifact,
     )
 
 
@@ -969,8 +1084,12 @@ def _resign(receipt: dict[str, Any]) -> dict[str, Any]:
     return receipt
 
 
-def _reject_or_vacuous(receipt: dict[str, Any], *, needle: str, now: str) -> None:
-    errors = validate_target_host_choice_receipt(receipt, now=now)
+def _reject_or_vacuous(
+    receipt: dict[str, Any], *, needle: str, now: str, require_target_host_attested: bool = False
+) -> None:
+    errors = validate_target_host_choice_receipt(
+        receipt, now=now, require_target_host_attested=require_target_host_attested
+    )
     matched = [error for error in errors if needle in error]
     if matched:
         raise TargetHostProbeError("rejected: " + "; ".join(matched[:2]))
@@ -1086,6 +1205,22 @@ def _bypass_plaintext_secret_ingress(now: str) -> None:
     _guard_no_secret({k: v for k, v in poisoned.items() if k != "secret_scan"})  # 必 raise
 
 
+def _bypass_host_identity_spoofed(now: str) -> None:
+    # #T3:observed_host 與 expected_host 不符(冒稱 trade-core)→ host_identity 閘拒。
+    receipt = build_attested_reference_receipt(now=now, pg_mode=PG_MODE_REAL, include_capture_artifact=True)
+    receipt["host_identity"]["observed_host"] = "attacker-box"  # != expected_host(trade-core)→ 拒
+    _reject_or_vacuous(_resign(receipt), needle="observed_host", now=now)
+
+
+def _bypass_attested_digest_without_capture_artifact(now: str) -> None:
+    # #T1:ATTESTED + 裸 synthetic digest 但無內嵌 command_capture_v2 artifact → require_target_host_attested 拒。
+    receipt = build_attested_reference_receipt(now=now, pg_mode=PG_MODE_REAL, capture_digest="sha256:" + "e" * 64)
+    _reject_or_vacuous(
+        receipt, needle="embedded governed command_capture_v2 artifact", now=now,
+        require_target_host_attested=True,
+    )
+
+
 _BYPASS_RUNNERS: dict[str, Callable[[str], None]] = {
     "oci_seam_claimed_satisfiable": _bypass_oci_seam_claimed_satisfiable,
     "oci_selected_without_all_seams_passing": _bypass_oci_selected_without_all_seams_passing,
@@ -1103,6 +1238,8 @@ _BYPASS_RUNNERS: dict[str, Callable[[str], None]] = {
     "production_running_attested_claimed": _bypass_production_running_attested_claimed,
     "matrix_digest_tamper": _bypass_matrix_digest_tamper,
     "plaintext_secret_ingress": _bypass_plaintext_secret_ingress,
+    "host_identity_spoofed": _bypass_host_identity_spoofed,
+    "attested_digest_without_capture_artifact": _bypass_attested_digest_without_capture_artifact,
 }
 
 
@@ -1131,6 +1268,6 @@ def run_bypass_negative(kind: str, *, now: str) -> dict[str, Any]:
 
 
 def build_bypass_negative_cases(*, now: str) -> list[dict[str, Any]]:
-    """Run all sixteen bypass-negatives and return their REJECTED case records."""
+    """Run all eighteen bypass-negatives and return their REJECTED case records."""
 
     return [run_bypass_negative(kind, now=now) for kind in BYPASS_KINDS]

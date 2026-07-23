@@ -71,7 +71,20 @@ def test_real_probe_emits_attested_receipt(probe_output):
     # #1:applier 自跑的 independent_postcheck 恆 DEFERRED(無法自證獨立性)。
     ip_seam = next(seam for seam in fixed_seams if seam["seam_id"] == "independent_postcheck")
     assert ip_seam["verdict"] == "DEFERRED_TARGET_HOST"
+    # #T2:failure_rollback_cleanup 必真重啟已佈署的內容定址 bundle 並解析回它(proc cwd 落在 bundle root 下)
+    # 才 PASSED——否則只證「隨便一個 sleeper 能殺能重跑」。
+    frc_seam = next(seam for seam in fixed_seams if seam["seam_id"] == "failure_rollback_cleanup")
+    assert frc_seam["verdict"] == "PASSED_TARGET_HOST", (
+        f"expected rollback seam to restart the deployed bundle and resolve to it, "
+        f"got {frc_seam['verdict']}: {frc_seam['note']}"
+    )
+    assert "resolves" in frc_seam["note"]
 
+    # #T1:require_target_host_attested 需要一個內嵌的 governed command_capture_v2 ARTIFACT(非裸 digest)。
+    # 這裡用結構有效的 artifact SHAPE(offline-unauthenticated,非真 governed capture)行使新的綁定路徑;
+    # 真出口綁的是 OPS ``capture-command`` 產出的真 record。builder 由 artifact 的 record_digest 派生
+    # target_host_capture_digest(digest 與 artifact 不可解耦)。
+    capture_artifact = th._structural_capture_artifact()
     applier = th.build_target_host_choice_receipt(
         caller="E1:S1.6B:on-target",
         platform=th.detect_platform(),
@@ -90,8 +103,10 @@ def test_real_probe_emits_attested_receipt(probe_output):
         effect_seams_ready_receipt_digest="sha256:" + "3" * 64,
         pg_readonly_identity_receipt_digest="sha256:" + "a" * 64,
         observation_time=OBS, ttl_seconds=900,
-        target_host_capture_digest=probe_output["target_host_capture_digest"],
+        target_host_capture_artifact=capture_artifact,
     )
+    assert applier["host_identity"]["observed_host"] == applier["host_identity"]["expected_host"]
+    assert applier["target_host_capture"]["record_digest"] == applier["target_host_capture_digest"]
     # applier 自跑 receipt 為 PASS 但 PROVISIONAL,指名 independent_postcheck(尚待 distinct 驗證者)。
     assert applier["status"] == "PASS"
     assert applier["selection"]["final_choice"] == "content_addressed_fixed_path"
@@ -165,3 +180,33 @@ def test_real_native_lib_bundle_origin_with_symbol(tmp_path):
     assert seam["verdict"] == "PASSED_TARGET_HOST", (
         f"expected compiled unique-soname .so to load from bundle with symbol=42, got {seam['verdict']}: {seam['note']}"
     )
+
+
+@on_target
+def test_real_rollback_restarts_and_resolves_to_deployed_bundle():
+    # #T2:真備內容定址 bundle → kill → 重啟綁到那個 rolled-back bundle 的 launcher → 讀 restart scope 的
+    # cgroup.procs、解析 /proc/<pid>/cwd 真的落在 bundle root 下才 PASSED。teardown + 獨立殘留檢查全清。
+    xdg = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
+    throwaway = os.path.join(xdg, f"aiml_s16b_frc_{os.getpid()}")
+    immut_root = os.path.join(throwaway, "bundle_store")
+    os.makedirs(throwaway, exist_ok=True)
+    try:
+        immut = th.probe_immutable_closure_on_host(deploy_root=immut_root)
+        assert immut["verdict"] == "PASSED_TARGET_HOST"
+        bundle_root = th._active_bundle_dir(immut_root)
+        assert os.path.isdir(bundle_root)
+        seam = th.probe_failure_rollback_cleanup_on_host(
+            nonce="frctest",
+            launcher_argv=th._bundle_pinned_launcher(bundle_root),
+            teardown_root=os.path.join(throwaway, "frc"),
+            bundle_root=bundle_root,
+        )
+        assert seam["seam_id"] == "failure_rollback_cleanup"
+        assert seam["verdict"] == "PASSED_TARGET_HOST", (
+            f"expected kill+restart of the deployed bundle to resolve (proc cwd) under {bundle_root!r}, "
+            f"got {seam['verdict']}: {seam['note']}"
+        )
+    finally:
+        import shutil
+
+        shutil.rmtree(throwaway, ignore_errors=True)

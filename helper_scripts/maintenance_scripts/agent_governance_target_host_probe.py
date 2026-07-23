@@ -217,7 +217,7 @@ _SEAM_NOTES = {
     SEAM_NETWORK_DENIAL: "seccomp connect/sendto/sendmsg egress denial: baseline CONNECTED, filtered ENETUNREACH (non-root, kernel-enforced)",
     SEAM_NATIVE_LIB: "compiled unique-soname .so in the bundle; CDLL resolves it from the content-addressed bundle prefix (/proc/self/maps) with a callable symbol (=42)",
     SEAM_IMMUTABLE_CLOSURE: "content-addressed bundle at a fixed path; atomic pointer swap; digest re-derived across restart",
-    SEAM_FAILURE_ROLLBACK_CLEANUP: "systemctl --user kill + restart-from-same-bundle; interrupted apply never swaps; teardown + reset-failed + rmtree",
+    SEAM_FAILURE_ROLLBACK_CLEANUP: "systemctl --user kill + restart the deployed content-addressed bundle; restarted process resolves (proc cwd) under the rolled-back bundle root; interrupted apply never swaps; teardown + reset-failed + rmtree",
     SEAM_PG_IDENTITY: "S1.1 disposable initdb cluster on-target: read-only role SET ROLE denied 42501",
     # 已附掛(distinct verifier 完成)後的 independent_postcheck note。
     SEAM_INDEPENDENT_POSTCHECK: "distinct OPS verifier (verifier != applier) attached a clean on-host residue sweep: units/cgroup/netns/temp all gone",
@@ -272,6 +272,7 @@ RECEIPT_FIELDS = frozenset({
     "unselected_path_removal",
     "production_running_attested",
     "target_host_capture_digest",
+    "target_host_capture",
     "dependency_receipts",
     "boundary",
     "source_sha256",
@@ -284,7 +285,7 @@ RECEIPT_FIELDS = frozenset({
     "self_digest",
 })
 
-# 十六個 fail-closed bypass 種類;交付需全部真觸拒(非橡皮圖章)。
+# 十八個 fail-closed bypass 種類;交付需全部真觸拒(非橡皮圖章)。
 BYPASS_KINDS = (
     "oci_seam_claimed_satisfiable",
     "oci_selected_without_all_seams_passing",
@@ -302,6 +303,10 @@ BYPASS_KINDS = (
     "production_running_attested_claimed",
     "matrix_digest_tamper",
     "plaintext_secret_ingress",
+    # #T3:觀察 host 與 expected 不符(冒稱 target host)。
+    "host_identity_spoofed",
+    # #T1:ATTESTED + 裸 digest 但無內嵌 command_capture_v2 artifact(冒充真出口)。
+    "attested_digest_without_capture_artifact",
 )
 BYPASS_KIND_SET = frozenset(BYPASS_KINDS)
 
@@ -530,6 +535,14 @@ def preflight_target_host(*, throwaway_root: str, expected_host: str = EXPECTED_
         raise FailClosedStop("target-host probe must be strictly non-root (euid==0 rejected)")
     if _passwordless_sudo_present():
         raise FailClosedStop("unexpected passwordless sudo present on target — fail-closed STOP")
+    # #T3:記錄前先真觀察本機 nodename;與 expected_host 不符即 fail-closed。否則任一非 root Linux 盒
+    # 只要設 AIML_TARGET_HOST_PROBE=1 就能發出「聲稱是 trade-core」的 receipt——這裡把 expected 綁到真 observed。
+    observed_host = os.uname().nodename
+    if observed_host != expected_host:
+        raise FailClosedStop(
+            f"observed host {observed_host!r} != expected_host {expected_host!r}; refusing to record a "
+            "target-host receipt on an unexpected node — fail-closed STOP"
+        )
     controllers = _delegated_controllers()
     if not REQUIRED_DELEGATED_CONTROLLERS <= set(controllers):
         raise FailClosedStop(
@@ -542,6 +555,7 @@ def preflight_target_host(*, throwaway_root: str, expected_host: str = EXPECTED_
     _assert_not_production_path(real_root)
     return {
         "expected_host": expected_host,
+        "observed_host": observed_host,
         "non_root_uid": True,
         "passwordless_sudo_present": False,
         "delegated_controllers": sorted(REQUIRED_DELEGATED_CONTROLLERS & set(controllers)),
@@ -1082,11 +1096,21 @@ def probe_immutable_closure_on_host(*, deploy_root: str) -> dict[str, Any]:
     )
 
 
-def probe_failure_rollback_cleanup_on_host(*, nonce: str, launcher_argv: list[str], teardown_root: str) -> dict[str, Any]:
-    """REAL failure/rollback/cleanup: kill + restart from the same bundle; teardown + INDEPENDENT residue check."""
+def probe_failure_rollback_cleanup_on_host(
+    *, nonce: str, launcher_argv: list[str], teardown_root: str, bundle_root: str | None = None
+) -> dict[str, Any]:
+    """REAL failure/rollback/cleanup: kill + RESTART THE DEPLOYED BUNDLE; teardown + INDEPENDENT residue check.
+
+    ``launcher_argv`` 必須被 ``run_target_host_probe`` 綁到真內容定址 bundle(``bundle_root`` = 佈署後
+    rolled-back 的 active bundle 目錄);restart 後不僅觀察 scope 復活,還讀 restart scope 的 cgroup.procs、
+    解析各 pid 的 ``/proc/<pid>/cwd`` 真實路徑,斷言其位於 ``bundle_root`` 之下(證明「重啟的正是那個選定的
+    固定路徑 bundle」而非任意 sleeper)。唯有 killed AND restarted AND 解析回 bundle AND 殘留全清才 PASS;
+    否則誠實 DEFERRED,絕不以「隨便一個 sleeper 能殺能重跑」冒充。``bundle_root=None``(直呼/測試)時退回
+    僅觀察 restart(不做 bundle 解析)——真跑一律由 driver 供 bundle_root。
+    """
 
     _require_target_host()
-    _assert_non_root_boundary(teardown_root)
+    _assert_non_root_boundary(*([teardown_root, bundle_root] if bundle_root else [teardown_root]))
     unit = f"aiml-probeBfrc-{nonce}.scope"
 
     def _start() -> subprocess.Popen:
@@ -1096,7 +1120,7 @@ def probe_failure_rollback_cleanup_on_host(*, nonce: str, launcher_argv: list[st
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
 
-    killed = restarted = False
+    killed = restarted = resolves_to_bundle = False
     proc = _start()
     try:
         for _ in range(50):
@@ -1109,13 +1133,16 @@ def probe_failure_rollback_cleanup_on_host(*, nonce: str, launcher_argv: list[st
             proc.wait(timeout=10)
         except subprocess.TimeoutExpired:
             proc.kill()
-        # restart from the SAME immutable bundle (new scope, same launcher argv)。
+        # restart the SAME deployed content-addressed bundle (new scope, same bundle-pinned launcher argv)。
         proc2 = _start()
         for _ in range(50):
             if _systemctl_user_show(unit, "ActiveState") == "active":
                 restarted = True
                 break
             time.sleep(0.1)
+        # #T2:restart 存活後,在停機前解析 restart 行程真的落在 bundle_root 下(否則證不了「重啟的是 bundle」)。
+        if restarted and bundle_root is not None:
+            resolves_to_bundle = _restarted_process_resolves_to_bundle(unit, bundle_root)
         _run(["systemctl", "--user", "stop", unit], timeout=10)
         try:
             proc2.wait(timeout=10)
@@ -1128,13 +1155,65 @@ def probe_failure_rollback_cleanup_on_host(*, nonce: str, launcher_argv: list[st
             pass
         shutil.rmtree(teardown_root, ignore_errors=True)
     residue = independent_postcheck_on_host(unit=unit, teardown_root=teardown_root)
-    ok = killed and restarted and residue["no_residue"]
+    # bundle_root 有給(真跑)時,resolves_to_bundle 是 PASS 的必要條件;沒給(直呼)時不強制,退回舊行為。
+    bundle_ok = resolves_to_bundle if bundle_root is not None else True
+    ok = killed and restarted and bundle_ok and residue["no_residue"]
     verdict = SEAM_VERDICT_PASSED if ok else SEAM_VERDICT_DEFERRED
+    note = _SEAM_NOTES[SEAM_FAILURE_ROLLBACK_CLEANUP]
+    if verdict == SEAM_VERDICT_DEFERRED:
+        note = (
+            f"failure/rollback not fully proven (killed={killed}, restarted={restarted}, "
+            f"restarted_resolves_to_bundle={resolves_to_bundle}, no_residue={residue['no_residue']}) — DEFERRED"
+        )
     return _seam_record(
         SEAM_FAILURE_ROLLBACK_CLEANUP, verdict,
-        {"killed": killed, "restarted_from_same_bundle": restarted, **residue},
-        _SEAM_NOTES[SEAM_FAILURE_ROLLBACK_CLEANUP],
+        {
+            "killed": killed,
+            "restarted_from_same_bundle": restarted,
+            "restarted_resolves_to_bundle": resolves_to_bundle,
+            "bundle_root": bundle_root,
+            **residue,
+        },
+        note,
     )
+
+
+def _scope_cgroup_pids(cgroup_dir: Path | None) -> list[int]:
+    # 讀 scope cgroup 目錄的 cgroup.procs,回傳其中的行程 PID(缺檔/讀不到即空)。
+    if cgroup_dir is None:
+        return []
+    try:
+        text = (cgroup_dir / "cgroup.procs").read_text(encoding="utf-8")
+    except OSError:
+        return []
+    pids: list[int] = []
+    for token in text.split():
+        try:
+            pids.append(int(token))
+        except ValueError:
+            continue
+    return pids
+
+
+def _restarted_process_resolves_to_bundle(unit: str, bundle_root: str) -> bool:
+    """Whether at least one live process in the restarted scope resolves (proc cwd) under ``bundle_root``.
+
+    讀 restart scope 的 cgroup.procs,對每個 pid 解析 ``/proc/<pid>/cwd`` 的真實路徑,只要有一個落在
+    已佈署 bundle root(或其子路徑)之下即回 True——這證明重啟的行程真的釘在那個內容定址 bundle,
+    而非任意可殺可重跑的 sleeper。輪詢數次容忍行程剛啟動、chdir 尚未生效的短暫視窗。
+    """
+
+    real_root = os.path.realpath(bundle_root)
+    for _ in range(30):
+        for pid in _scope_cgroup_pids(_scope_cgroup_dir(unit)):
+            try:
+                cwd = os.path.realpath(f"/proc/{pid}/cwd")
+            except OSError:
+                continue
+            if cwd == real_root or cwd.startswith(real_root + os.sep):
+                return True
+        time.sleep(0.1)
+    return False
 
 
 def independent_postcheck_on_host(*, unit: str, teardown_root: str) -> dict[str, Any]:
@@ -1350,6 +1429,27 @@ def synthesize_fixed_path_seams(
     return records
 
 
+# bundle-pinned launcher:chdir 進內容定址 bundle 目錄後長眠;/proc/<pid>/cwd 即解析回 bundle,
+# 供 rollback seam 斷言「重啟的正是那個選定 bundle」而非任意 sleeper。
+_BUNDLE_PINNED_SLEEP_SRC = "import os,sys,time; os.chdir(sys.argv[1]); time.sleep(30)"
+
+
+def _active_bundle_dir(deploy_root: str) -> str:
+    """Resolve the CURRENTLY-active (rolled-back) content-addressed bundle directory under a deploy root.
+
+    讀 S1.5 佈署根的 ``active_generation`` 指標(裸 sha256 hex),回傳
+    ``<deploy_root>/bundles/<active>`` ——即 immutable-closure seam rollback 後真正 active 的那個 bundle 目錄。
+    """
+
+    active = Path(deploy_root, ce._ACTIVE_POINTER).read_text(encoding="utf-8").strip()
+    return str(Path(deploy_root, ce._BUNDLES_DIR, active))
+
+
+def _bundle_pinned_launcher(bundle_root: str) -> list[str]:
+    # 產生一個釘在 bundle_root 的 launcher argv(chdir 進 bundle 後長眠),供 start/kill/restart 使用。
+    return [sys.executable, "-I", "-c", _BUNDLE_PINNED_SLEEP_SRC, bundle_root]
+
+
 def run_target_host_probe(
     *,
     throwaway_root: str,
@@ -1386,13 +1486,21 @@ def run_target_host_probe(
         # (真 42501 → REAL/PASSED;缺 server 或真跑失敗 → DEFERRED),絕不出現 mode/seam 矛盾。
         pg_seam = probe_pg_identity_on_host(pg_readonly_identity_receipt_digest=pg_readonly_identity_receipt_digest)
         pg_identity_mode = PG_MODE_REAL if pg_seam["verdict"] == SEAM_VERDICT_PASSED else PG_MODE_DEFERRED
+        # #T2:先真備內容定址 bundle(immutable-closure seam),再把 rollback seam 的 launcher 綁到那個
+        # rolled-back active bundle 目錄——rollback 必須重啟「選定的固定路徑 bundle」並解析回它,而非一個泛用 sleeper。
+        immut_seam = probe_immutable_closure_on_host(deploy_root=immut_root)
+        rollback_bundle_root = _active_bundle_dir(immut_root)
+        rollback_launcher = _bundle_pinned_launcher(rollback_bundle_root)
         seams = [
             probe_start_stop_on_host(launcher_argv=launcher_argv, nonce=nonce),
             probe_cgroup_isolation_on_host(nonce=nonce),
             probe_network_denial_on_host(),
             probe_native_lib_loading_on_host(bundle_dir=bundle_dir),
-            probe_immutable_closure_on_host(deploy_root=immut_root),
-            probe_failure_rollback_cleanup_on_host(nonce=nonce, launcher_argv=launcher_argv, teardown_root=os.path.join(throwaway_root, "frc")),
+            immut_seam,
+            probe_failure_rollback_cleanup_on_host(
+                nonce=nonce, launcher_argv=rollback_launcher,
+                teardown_root=os.path.join(throwaway_root, "frc"), bundle_root=rollback_bundle_root,
+            ),
             pg_seam,
             # #1:applier 自跑無法自證獨立性 → independent_postcheck 恆 DEFERRED,待 distinct 驗證者附掛。
             _seam_record(

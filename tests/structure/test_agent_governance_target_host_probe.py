@@ -42,8 +42,6 @@ OBS = "2026-07-23T12:00:00+00:00"
 FRESH = "2026-07-23T12:05:00+00:00"
 STALE = "2026-07-23T13:30:00+00:00"
 
-# 一個代表 governed on-host command_capture_v2 record_digest 的參照(真跑由 OPS capture 提供)。
-CAP = "sha256:" + "c" * 64
 # distinct 驗證者交來的真殘留觀察:units/cgroup/netns/temp 皆已清。
 CLEAN_RESIDUE = {"units_gone": True, "cgroup_gone": True, "netns_gone": True, "temp_gone": True}
 
@@ -60,21 +58,21 @@ def _resign(obj):
 # --------------------------------------------------------------------------- #
 @pytest.fixture(scope="module")
 def attested_binding():
-    # pg real + independent_postcheck attached (distinct verifier) + bound capture digest -> BINDING
-    return th.build_attested_reference_receipt(now=OBS, pg_mode=th.PG_MODE_REAL, capture_digest=CAP)
+    # pg real + independent_postcheck attached (distinct verifier) + EMBEDDED command_capture_v2 artifact -> BINDING
+    return th.build_attested_reference_receipt(now=OBS, pg_mode=th.PG_MODE_REAL, include_capture_artifact=True)
 
 
 @pytest.fixture(scope="module")
 def attested_provisional():
     # pg deferred (server absent), independent_postcheck attached -> PROVISIONAL_PENDING_LINUX naming pg_identity
-    return th.build_attested_reference_receipt(now=OBS, pg_mode=th.PG_MODE_DEFERRED, capture_digest=CAP)
+    return th.build_attested_reference_receipt(now=OBS, pg_mode=th.PG_MODE_DEFERRED, include_capture_artifact=True)
 
 
 @pytest.fixture(scope="module")
 def applier_only():
     # applier self-run: independent_postcheck DEFERRED, no distinct verifier yet -> PROVISIONAL naming it
     return th.build_attested_reference_receipt(
-        now=OBS, pg_mode=th.PG_MODE_REAL, independent_postcheck_attached=False, capture_digest=CAP
+        now=OBS, pg_mode=th.PG_MODE_REAL, independent_postcheck_attached=False, include_capture_artifact=True
     )
 
 
@@ -283,21 +281,44 @@ def test_deferred_independent_postcheck_cannot_be_binding(applier_only):
 
 
 # --------------------------------------------------------------------------- #
-# #3 attestation binds to a governed on-host capture digest, not a self-set label
+# #T1 attestation binds to an EMBEDDED governed command_capture_v2 ARTIFACT, not a bare digest string
 # --------------------------------------------------------------------------- #
-def test_reference_without_capture_digest_fails_require_attested():
-    ref = th.build_attested_reference_receipt(now=OBS, pg_mode=th.PG_MODE_REAL)  # capture_digest=None
+def test_reference_without_capture_fails_require_attested():
+    ref = th.build_attested_reference_receipt(now=OBS, pg_mode=th.PG_MODE_REAL)  # no digest, no artifact
     assert ref["target_host_capture_digest"] is None
+    assert ref["target_host_capture"] is None
     errors = th.validate_target_host_choice_receipt(ref, require_target_host_attested=True, now=FRESH)
-    assert any("target_host_capture_digest" in error for error in errors)
+    assert any("target_host_capture" in error for error in errors)
 
 
-def test_bound_capture_digest_passes_require_attested():
-    bound = th.build_attested_reference_receipt(now=OBS, pg_mode=th.PG_MODE_REAL, capture_digest=CAP)
-    assert bound["target_host_capture_digest"] == CAP
+def test_bare_synthetic_digest_without_artifact_fails_require_attested():
+    # #T1 anti-fake: ANY sha256-shaped string WITHOUT an embedded artifact must NOT mint an attested PASS.
+    ref = th.build_attested_reference_receipt(now=OBS, pg_mode=th.PG_MODE_REAL, capture_digest="sha256:" + "e" * 64)
+    assert ref["target_host_capture_digest"] == "sha256:" + "e" * 64
+    assert ref["target_host_capture"] is None  # bare digest embedded, but NO artifact
+    errors = th.validate_target_host_choice_receipt(ref, require_target_host_attested=True, now=FRESH)
+    assert any("embedded governed command_capture_v2 artifact" in error for error in errors)
+
+
+def test_embedded_capture_artifact_passes_require_attested():
+    # WITH a structurally-valid embedded command_capture_v2 artifact (digest derived from it) the structural gate passes.
+    bound = th.build_attested_reference_receipt(now=OBS, pg_mode=th.PG_MODE_REAL, include_capture_artifact=True)
+    capture = bound["target_host_capture"]
+    assert capture["schema_version"] == "command_capture_v2"
+    assert capture["record_digest"] == bound["target_host_capture_digest"]  # digest is DERIVED from the artifact
+    assert capture["node_id"] and capture["native_agent"]
     assert th.validate_target_host_choice_receipt(
         bound, require_success=True, require_target_host_attested=True, now=FRESH
     ) == []
+
+
+def test_decoupled_artifact_digest_is_rejected(attested_binding):
+    # digest 與內嵌 artifact 的 record_digest 被解耦 -> require_attested 拒。
+    forged = copy.deepcopy(attested_binding)
+    forged["target_host_capture"]["record_digest"] = "sha256:" + "d" * 64
+    forged = _resign(forged)
+    errors = th.validate_target_host_choice_receipt(forged, require_target_host_attested=True, now=FRESH)
+    assert any("record_digest must equal target_host_capture_digest" in error for error in errors)
 
 
 def test_malformed_capture_digest_is_rejected(attested_binding):
@@ -306,6 +327,31 @@ def test_malformed_capture_digest_is_rejected(attested_binding):
     forged = _resign(forged)
     errors = th.validate_target_host_choice_receipt(forged, now=FRESH)
     assert any("target_host_capture_digest must be a sha256" in error for error in errors)
+
+
+# --------------------------------------------------------------------------- #
+# #T3 the recorded host must be the REAL observed nodename (observed_host == expected_host)
+# --------------------------------------------------------------------------- #
+def test_host_identity_records_observed_host(attested_binding):
+    host = attested_binding["host_identity"]
+    assert host["observed_host"] == host["expected_host"]
+
+
+def test_spoofed_observed_host_is_rejected(attested_binding):
+    # 冒稱:observed_host != expected_host(任一非 target 盒謊稱 trade-core)-> host_identity 閘拒。
+    forged = copy.deepcopy(attested_binding)
+    forged["host_identity"]["observed_host"] = "attacker-box"
+    forged = _resign(forged)
+    errors = th.validate_target_host_choice_receipt(forged, now=FRESH)
+    assert any("observed_host" in error for error in errors)
+
+
+def test_missing_observed_host_is_rejected(attested_binding):
+    forged = copy.deepcopy(attested_binding)
+    del forged["host_identity"]["observed_host"]
+    forged = _resign(forged)
+    errors = th.validate_target_host_choice_receipt(forged, now=FRESH)
+    assert any("observed_host" in error for error in errors)
 
 
 # --------------------------------------------------------------------------- #
@@ -541,10 +587,12 @@ def test_secret_ingress_raises(attested_binding):
 # --------------------------------------------------------------------------- #
 def test_all_bypass_negatives_fail_closed():
     cases = th.build_bypass_negative_cases(now=OBS)
-    assert len(cases) == 16
+    assert len(cases) == 18
     assert {case["bypass_kind"] for case in cases} == th.BYPASS_KIND_SET
     assert all(case["observed_verdict"] == "REJECTED" for case in cases)
     assert all(case["expected"] == "FAIL_CLOSED" for case in cases)
+    # #T3/#T1 的兩個新負例都真觸拒(非橡皮圖章)。
+    assert {"host_identity_spoofed", "attested_digest_without_capture_artifact"} <= {c["bypass_kind"] for c in cases}
 
 
 def test_bypass_runner_is_non_vacuous():
