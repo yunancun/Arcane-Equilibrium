@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "target_host_disposable_runtime_probe_intent_v1.schema.json",
+  "title": "target_host_disposable_runtime_probe_intent_v1",
+  "description": "Typed PM/operator-approved intent for one EXACT non-root user-scope disposable target-host probe. Authorization derives from THIS validated intent (never from a user-set AIML_TARGET_HOST_PROBE env var): expected_host is the exact bound trusted target host, non_root_uid/user_scope_only are const true, throwaway_root lives under $XDG_RUNTIME_DIR (/run/user/<uid>) and is never a production path, and applier_node_id must differ from postcheck_node_id (applier != independent verifier). risk is high or critical. It is offline-structural only (CLAUDE.md): the admitted-intent execution path on the bound host is the only thing that sets AIML_TARGET_HOST_PROBE=1, after validating this intent against the admitted route/approval.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "intent_id", "expected_host", "non_root_uid",
+    "user_scope_only", "candidate_ids", "per_seam_argv", "throwaway_root",
+    "ttl_seconds", "risk", "rollback", "applier_node_id", "postcheck_node_id",
+    "created_at", "expires_at", "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "target_host_disposable_runtime_probe_intent_v1"},
+    "intent_id": {"$ref": "#/$defs/digest"},
+    "expected_host": {"type": "string", "minLength": 1},
+    "non_root_uid": {"const": true},
+    "user_scope_only": {"const": true},
+    "candidate_ids": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 2,
+      "uniqueItems": true,
+      "items": {"enum": ["exact_image_id_oci", "content_addressed_fixed_path"]}
+    },
+    "per_seam_argv": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "patternProperties": {
+        "^(start_stop|cgroup_resource_isolation|network_denial|native_lib_loading|immutable_closure_persistence|failure_rollback_cleanup|pg_identity|independent_postcheck)$": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "throwaway_root": {"type": "string", "pattern": "^/run/user/[0-9]+/.+"},
+    "ttl_seconds": {"type": "integer", "minimum": 1, "maximum": 3600},
+    "risk": {"enum": ["high", "critical"]},
+    "rollback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["atomic_pointer_swap", "teardown_reset_failed", "rmtree"],
+      "properties": {
+        "atomic_pointer_swap": {"type": "string", "minLength": 1},
+        "teardown_reset_failed": {"type": "string", "minLength": 1},
+        "rmtree": {"type": "string", "minLength": 1}
+      }
+    },
+    "applier_node_id": {"type": "string", "minLength": 1},
+    "postcheck_node_id": {"type": "string", "minLength": 1},
+    "created_at": {"$ref": "#/$defs/timestamp"},
+    "expires_at": {"$ref": "#/$defs/timestamp"},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "timestamp": {"type": "string", "format": "date-time"}
+  }
+}

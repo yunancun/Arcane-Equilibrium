@@ -13,6 +13,7 @@ from typing import Any
 from agent_governance_schema import schema_subset_errors
 from agent_governance_effect_evidence import deploy_evidence_identity_errors
 import agent_governance_p0b_effects as p0b_effects
+import agent_governance_target_host_effects as target_host_effects
 
 
 ADAPTER_ID = "deploy_adapter_v1"
@@ -658,6 +659,14 @@ def validate_effect_evidence(
         return p0b_effects.validate_p0b_effect_evidence(
             evidence, expected_source_head=expected_source_head
         )
+    if isinstance(receipt, dict) and receipt.get("adapter_id") == (
+        target_host_effects.TARGET_HOST_ADAPTER_ID
+    ):
+        # S1.6B 專屬 target-host effect(§13 C1):委派給 sibling module,其 validate 對內嵌 choice
+        # receipt 以 require_target_host_attested=True 嚴格驗(§13 C4)。
+        return target_host_effects.validate_target_host_effect_evidence(
+            evidence, expected_source_head=expected_source_head
+        )
     errors = validate_effect_receipt(receipt, require_success=True)
     if not isinstance(receipt, dict):
         return errors, None
@@ -698,6 +707,13 @@ def validate_deploy_effect_binding(
     ]
     if any(node.get("id") == p0b_effects.P0B_ADAPTER_ID for node in effect_nodes):
         return p0b_effects.validate_p0b_effect_binding(
+            packet, route, fragments_by_node, evidence_by_id, valid_receipts
+        )
+    if any(
+        node.get("id") == target_host_effects.TARGET_HOST_ADAPTER_ID
+        for node in effect_nodes
+    ):
+        return target_host_effects.validate_target_host_effect_binding(
             packet, route, fragments_by_node, evidence_by_id, valid_receipts
         )
     errors: list[str] = []

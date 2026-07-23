@@ -1,0 +1,222 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aiml_landing_session_attempt_v1.schema.json",
+  "title": "Durable AIML S1+ landing session attempt with author-declared cross-checked effect binding and closure binding",
+  "description": "Additive S1+ attempt row mirroring session_attempt_v1 but GENERALIZING the sealed S0.3 const pins (work_package_id, bootstrap_admission.task_id, side_effect_class enum, runtime_claim=false) and ADDING author-declared required_effects that are cross-checked at validation (each required_effects[*].adapter_id must equal the attempt adapter_id, and closure_binding.effect_adapter_id must match) plus an explicit closure_binding. This attempt row does NOT recompute an effect classification — there is no S1 landing classifier here; the authoritative effect classification is enforced at the target-host effect/closure lane, not at this row. It is a NEW schema file — session_attempt_v1 is not edited — validated by its own sibling semantic path (_aiml_landing_work_package_errors + the aiml_landing_session_attempt_v1 branch), NOT the S0.3-hardcoded _s0_3_work_package_errors. A session_id equal to S0 or beginning S0. is rejected at the sibling validator so this permissive schema cannot re-express an S0.x attempt with relaxed pins.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "attempt_id", "session_id", "scope_ref", "cohort_epoch", "attempt", "attempt_key", "attempt_phase", "status", "owner", "source", "path_manifest", "work_package", "dependency_generations", "bootstrap_admission", "native_admission", "dag_nodes", "semantic_rechecks", "ci_classifier", "effect_classification_digest", "required_effects", "adapter_id", "actor_node", "rollback", "independent_postcheck_node", "closure_binding", "created_at", "self_digest"],
+  "properties": {
+    "schema_version": {"const": "aiml_landing_session_attempt_v1"},
+    "attempt_id": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "session_id": {"type": "string", "pattern": "^S[0-9]+(?:\\.[0-9A-Z]+)*$"},
+    "scope_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "landing_scope_id"],
+      "properties": {
+        "kind": {"enum": ["PROGRAM", "LANDING_SCOPE"]},
+        "landing_scope_id": {"type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$"}
+      }
+    },
+    "cohort_epoch": {"type": "string", "minLength": 1},
+    "attempt": {"type": "integer", "minimum": 1},
+    "attempt_key": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["session_id", "scope_ref", "cohort_epoch", "attempt"],
+      "properties": {
+        "session_id": {"type": "string", "minLength": 1},
+        "scope_ref": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "landing_scope_id"],
+          "properties": {
+            "kind": {"enum": ["PROGRAM", "LANDING_SCOPE"]},
+            "landing_scope_id": {"type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$"}
+          }
+        },
+        "cohort_epoch": {"type": "string", "minLength": 1},
+        "attempt": {"type": "integer", "minimum": 1}
+      }
+    },
+    "attempt_phase": {"enum": ["SOURCE_BUILD", "POST_MERGE_FINALIZATION"]},
+    "status": {"enum": ["CLAIMED", "IN_PROGRESS", "BLOCKED_STALE_EVIDENCE", "RECOVERY_REQUIRED", "MERGED", "FINALIZED"]},
+    "owner": {"type": "string", "minLength": 1},
+    "lease": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lease_id", "epoch", "acquired_at", "heartbeat_at", "expires_at"],
+      "properties": {
+        "lease_id": {"type": "string", "minLength": 1},
+        "epoch": {"type": "integer", "minimum": 1},
+        "acquired_at": {"type": "string", "format": "date-time"},
+        "heartbeat_at": {"type": "string", "format": "date-time"},
+        "expires_at": {"type": "string", "format": "date-time"}
+      }
+    },
+    "read_only_admission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["epoch", "admitted_at", "heartbeat_at", "read_only"],
+      "properties": {
+        "epoch": {"type": "integer", "minimum": 1},
+        "admitted_at": {"type": "string", "format": "date-time"},
+        "heartbeat_at": {"type": "string", "format": "date-time"},
+        "read_only": {"const": true}
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["branch", "worktree", "baseline_head", "checkpoint_head"],
+      "properties": {
+        "branch": {"type": "string", "minLength": 1},
+        "worktree": {"type": "string", "pattern": "^/"},
+        "baseline_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "checkpoint_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"}
+      }
+    },
+    "path_manifest": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+"}},
+    "work_package": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["work_package_id", "phase", "side_effect_class", "runtime_claim", "owned_path_manifest", "direct_interfaces"],
+      "properties": {
+        "work_package_id": {"type": "string", "minLength": 1},
+        "phase": {"enum": ["SOURCE_BUILD", "POST_MERGE_FINALIZATION"]},
+        "side_effect_class": {"enum": ["repo_write", "none", "target_host_probe"]},
+        "runtime_claim": {"type": "boolean"},
+        "owned_path_manifest": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "direct_interfaces": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "dependency_generations": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["session_id", "schema_version", "receipt_digest"],
+        "properties": {
+          "session_id": {"type": "string", "minLength": 1},
+          "schema_version": {"type": "string", "minLength": 1},
+          "receipt_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+        }
+      }
+    },
+    "bootstrap_admission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_id", "task_contract_digest", "dag_digest", "context_artifact_digest", "baseline_head"],
+      "properties": {
+        "task_id": {"type": "string", "minLength": 1},
+        "task_contract_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "dag_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "context_artifact_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "baseline_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "writer_lease_id": {"type": "string", "minLength": 1}
+      }
+    },
+    "native_admission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["node_id", "role", "native_agent", "node_class", "permission"],
+      "properties": {
+        "node_id": {"type": "string", "minLength": 1},
+        "role": {"type": "string", "minLength": 1},
+        "native_agent": {"type": "string", "minLength": 1},
+        "node_class": {"enum": ["work", "verification", "controller", "validator"]},
+        "permission": {"type": "string", "minLength": 1}
+      }
+    },
+    "dag_nodes": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["node_id", "node_class", "permission", "requires", "writer_paths"],
+        "properties": {
+          "node_id": {"type": "string", "minLength": 1},
+          "node_class": {"enum": ["work", "verification", "controller", "validator", "effect_adapter", "join"]},
+          "permission": {"type": "string", "minLength": 1},
+          "requires": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+          "writer_paths": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+        }
+      }
+    },
+    "semantic_rechecks": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "ci_classifier": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["classifier_digest", "selected_workflows", "invocation_history", "failure_fingerprints"],
+      "properties": {
+        "classifier_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "selected_workflows": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "invocation_history": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "failure_fingerprints": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}}
+      }
+    },
+    "effect_classification_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$", "description": "Author-supplied opaque binding digest referencing the effect classification established at the target-host effect/closure lane. It is NOT recomputed at this attempt row (there is no S1 landing classifier here); it is carried as an opaque cross-reference only."},
+    "required_effects": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "description": "Author-declared required-effect rows cross-checked at validation: each item's adapter_id must equal the attempt's adapter_id. This row is NOT recomputed from a landing classifier; the authoritative effect classification is enforced at the target-host effect/closure lane, not at this attempt row.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["effect_class", "adapter_id", "actor_node_id", "rollback_contract", "independent_postcheck_node_id", "status"],
+        "properties": {
+          "effect_class": {"type": "string", "minLength": 1},
+          "adapter_id": {"type": "string", "minLength": 1},
+          "actor_node_id": {"type": "string", "minLength": 1},
+          "rollback_contract": {"type": "string", "minLength": 1},
+          "independent_postcheck_node_id": {"type": "string", "minLength": 1},
+          "status": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "adapter_id": {"type": "string", "minLength": 1},
+    "actor_node": {"type": "string", "minLength": 1},
+    "rollback": {"type": "string", "minLength": 1},
+    "independent_postcheck_node": {"type": "string", "minLength": 1},
+    "closure_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["closure_packet_digest", "effect_receipt_digest", "effect_adapter_id"],
+      "properties": {
+        "closure_packet_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "effect_receipt_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "effect_adapter_id": {"type": "string", "minLength": 1}
+      }
+    },
+    "created_at": {"type": "string", "format": "date-time"},
+    "self_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"attempt_phase": {"const": "SOURCE_BUILD"}}},
+      "then": {
+        "required": ["lease"],
+        "not": {"required": ["read_only_admission"]},
+        "properties": {
+          "bootstrap_admission": {"required": ["writer_lease_id"]}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"attempt_phase": {"const": "POST_MERGE_FINALIZATION"}}},
+      "then": {
+        "required": ["read_only_admission"],
+        "not": {"required": ["lease"]},
+        "properties": {
+          "bootstrap_admission": {"not": {"required": ["writer_lease_id"]}}
+        }
+      }
+    }
+  ]
+}

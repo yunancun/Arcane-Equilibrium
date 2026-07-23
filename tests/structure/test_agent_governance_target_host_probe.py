@@ -633,9 +633,15 @@ def test_on_host_functions_skip_not_fake(call):
 
 
 # --------------------------------------------------------------------------- #
-# self-validating: NOT registered in the central AIML closure validator
+# S1 formal-closure Wave A(S1.6B):target-host 選擇 receipt 現已加入中央 SCHEMA_FILES(委派
+# 結構驗);S1.6 Mac stand-in receipt(..._receipt_v1)仍 disjoint。
 # --------------------------------------------------------------------------- #
-def test_target_host_receipt_is_not_registered_in_central_validator():
+def test_target_host_receipt_is_registered_in_central_validator():
     import aiml_gate_receipt_validator as validator
-    assert "learning_runtime_choice_receipt_target_host_v1" not in validator.SCHEMA_FILES
+    assert "learning_runtime_choice_receipt_target_host_v1" in validator.SCHEMA_FILES
+    assert (
+        validator.SCHEMA_DIR
+        / validator.SCHEMA_FILES["learning_runtime_choice_receipt_target_host_v1"]
+    ).is_file()
+    # S1.6 Mac stand-in receipt 仍不註冊(維持 disjoint)。
     assert "learning_runtime_choice_receipt_v1" not in validator.SCHEMA_FILES

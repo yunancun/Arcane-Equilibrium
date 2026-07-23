@@ -25,13 +25,17 @@ native-lib LOADING on target / true target-host start / target-host PG identity 
 networked ML-closure resolution) are ``DEFERRED_TARGET_HOST`` for BOTH candidates —
 a receipt that marked any of them disposably-proven is **rejected**.
 
-Like S1.3/S1.4 this harness SELF-VALIDATES its own receipt and is NOT registered
-into the central AIML closure-validator, the governance registry, the
-route-compiler, permissions or the vocabulary; S1.6 stays disjoint.  (By contrast
-S1.1's pg-receipt and S1.5's effect-seam/component receipts WERE added to the
+Like S1.3/S1.4 this S1.6 Mac stand-in harness SELF-VALIDATES its own receipt
+(``learning_runtime_choice_receipt_v1``) and is NOT registered into the central AIML
+closure-validator, the governance registry, the route-compiler, permissions or the
+vocabulary; this Mac stand-in stays disjoint.  (By contrast S1.1's pg-receipt, S1.5's
+effect-seam/component receipts, and — as of AIML S1 formal-closure Wave A — S1.6B's
+TARGET-HOST receipt (``learning_runtime_choice_receipt_target_host_v1``, registered
+structure-only) plus its dedicated ``target_host_effect_result_v1`` WERE added to the
 central ``SCHEMA_FILES`` for delegated recognition — the split is: closure-carried
 seam/identity proof receipts get eager central recognition, while intermediate
-self-contained contract receipts — S1.3, S1.4, S1.6 — self-validate.)  It REUSES
+self-contained contract receipts — S1.3, S1.4, and this S1.6 Mac stand-in —
+self-validate.)  It REUSES
 (read-only imports) S1.5 ``agent_governance_component_effects`` (the disposable
 lifecycle + intent/result/attestation builders) and S1.4
 ``agent_governance_runtime_candidate_spike`` (the candidate ids, ``hash_bundle_tree``

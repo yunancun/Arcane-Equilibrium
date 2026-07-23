@@ -375,6 +375,21 @@
       "receipt_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/terminal_receipt_append_result_v1.schema.json",
       "readback_ack_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/terminal_receipt_readback_ack_v1.schema.json"
     },
+    "terminal_receipt_external_worm_sink_v1": {
+      "status": "declared_external_capable_source_adapter_fail_closed_no_destination_bound",
+      "owner_session": "S1.2A",
+      "authority": "external-capable source Adapter only; no external destination bound and no real append before S8.6; fail-closed without an operator credential channel + Object-Lock bucket",
+      "invariant": "idempotent (same idempotency key never re-puts / never rewrites a committed record); COMPLIANCE object-lock only after operator approval (GOVERNANCE default, fail-closed); independent readback ACK by a distinct actor proving checksum + version-id + retention match and overwrite/delete denied; no plaintext credential is ever requested/serialized (only a non-secret channel identifier); with no injected S3 client the Adapter returns a typed EXTERNAL_VERIFICATION_PENDING result, never a fake success; the real external append is S8.6 and no route_task node or closure effect binding is injected before then",
+      "implementation_paths": [
+        "helper_scripts/maintenance_scripts/agent_governance_terminal_receipt_external_sink.py"
+      ],
+      "component_paths": [
+        "helper_scripts/maintenance_scripts/agent_governance_terminal_receipt_sink.py"
+      ],
+      "intent_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/external_worm_append_intent_v1.schema.json",
+      "receipt_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/external_worm_append_result_v1.schema.json",
+      "readback_ack_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/external_worm_readback_ack_v1.schema.json"
+    },
     "engine_scanner_deploy_adapter_v1": {
       "status": "declared_disposable_apply_rollback_postcheck_implemented",
       "owner_session": "S1.5",
@@ -402,6 +417,21 @@
       ],
       "intent_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/component_effect_intent_v1.schema.json",
       "result_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/component_effect_result_v1.schema.json"
+    },
+    "target_host_disposable_runtime_probe_adapter_v1": {
+      "status": "declared_disposable_target_host_probe_gated",
+      "owner_session": "S1.6B",
+      "authority": "PM/operator approved target_host_disposable_runtime_probe_intent_v1 for an exact non-root user-scope disposable probe on the bound target host only; no production apply, no real service, no system-scope unit, no OCI socket, prod PG untouched",
+      "invariant": "non-root + user-scope transient units only; applier != independent postcheck verifier; exact rollback + complete teardown with an INDEPENDENT residue sweep are machine-enforced; AIML_TARGET_HOST_PROBE is set only by the admitted-intent execution path (governed capture-command strips it); real operator SSHSIG attestation is the out-of-band trusted-host step; the dedicated target_host_effect_result_v1 embeds and strictly re-validates the typed learning_runtime_choice_receipt_target_host_v1 (require_target_host_attested=True); no closure effect binding is real until the operator SSHSIG-signs the target-host execution bundle",
+      "implementation_paths": [
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_choice.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_effects.py"
+      ],
+      "component_paths": [
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_probe.py"
+      ],
+      "intent_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/target_host_disposable_runtime_probe_intent_v1.schema.json",
+      "result_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/target_host_effect_result_v1.schema.json"
     },
     "controller_workers_deploy_adapter_v1": {
       "status": "declared_disposable_apply_rollback_postcheck_implemented",

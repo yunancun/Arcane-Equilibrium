@@ -85,6 +85,15 @@ TRUSTED_EXECUTION_PUBLIC_KEY = (
     "ssh-ed25519 "
     "AAAAC3NzaC1lZDI1NTE5AAAAIJophp6Jd52hCchnFxzm4DIS/G7YOsLQGJNHI0vvLb7L"
 )
+# S1 formal-closure Wave A(S1.6B)——NEW S1 target-host 簽章身分/命名空間(domain-separated),
+# 刻意不重指向 S0.3 常量(S0.3 路徑保持 byte-identical)。指紋/公鑰為 operator 輸入的保留佔位(對應
+# 的私鑰刻意不在源碼中,如同 S0.3 的 aiml-trusted-finalize):Wave A 只建源碼機制與驗證/bundle 結構,
+# 真正的 operator SSHSIG 簽署是帶外受信主機步驟。佔位公鑰無法產生真指紋,故只可行使 domain-separation
+# 結構檢查(以 S0.3 命名空間簽的 bundle 於 S1 profile 下因身分不符而先被拒),真 bundle 驗證待 operator 提供。
+EXPECTED_S1_TARGET_HOST_SIGNER_IDENTITY = "aiml-s1-target-host-operator-v1"
+S1_TARGET_HOST_SIGNATURE_NAMESPACE = "arcane-equilibrium-aiml-s1-target-host"
+EXPECTED_S1_TARGET_HOST_SIGNER_FINGERPRINT = "SHA256:OPERATOR-PROVIDES-S1-TARGET-HOST-FINGERPRINT"
+S1_TRUSTED_TARGET_HOST_PUBLIC_KEY = "ssh-ed25519 AAAA-OPERATOR-PROVIDES-S1-TARGET-HOST-PUBLIC-KEY"
 MAX_SIGNATURE_BYTES = 16 * 1024
 MAX_BUNDLE_TTL = timedelta(minutes=15)
 MAX_BUNDLE_AGE = timedelta(minutes=5)
@@ -99,6 +108,12 @@ ALLOWED_EXECUTION_KINDS = frozenset({
     "business_outcome_receipt_v1",
     "telemetry_record_v1",
 })
+# S1 formal-closure Wave A(S1.6B),§13 更正 C2:專屬 target_host_effect_result_v1 刻意 NOT 白名單。
+# closure/attestation 路徑對每一筆 effect receipt 一律以硬編通用 kind effect_adapter_result_v1 認證
+# (見 agent_governance_execution_attestation.validate_execution_attestations:59-62),沒有任何消費端
+# 會消費 target_host_effect_result_v1 這種 bundle 項——白名單它即成死碼且是誤用陷阱(帶此 kind 的已簽
+# 項會在 exact_consumption_errors() 觸「未消費項」而 fail-closed)。與 P0-B 一致:P0-B 亦刻意不白名單
+# 自身的 p0b_alr_rollforward_effect_result_v1 kind,專屬 result 仍經通用 effect_adapter_result_v1 認證。
 _BUNDLE_FIELDS = {
     "schema_version", "signer_identity", "signer_fingerprint", "algorithm",
     "signature_namespace", "task_contract_digest", "context_artifact_digest",
@@ -107,6 +122,44 @@ _BUNDLE_FIELDS = {
 _ENTRY_FIELDS = {
     "kind", "subject_digest", "artifact_digest", "observed_at", "expires_at",
 }
+
+
+@dataclass(frozen=True)
+class ExecutionSignerProfile:
+    """One domain-separated SSHSIG signer identity/namespace/fingerprint/public-key.
+
+    把 bundle 認證的四個信任根參數化,讓 S0.3 收尾路徑與 S1 target-host 路徑各用自己的命名空間/
+    身分/公鑰,彼此 domain-separated;預設仍是 S0.3 profile,故 S0.3 路徑 byte-identical。
+    """
+
+    identity: str
+    fingerprint: str
+    namespace: str
+    algorithm: str
+    public_key: str
+
+
+def _default_s0_3_profile() -> "ExecutionSignerProfile":
+    # 於「呼叫時」由 module 全域組出 S0.3 profile(而非 import 時凍結),以保留既有測試對
+    # EXPECTED_EXECUTION_SIGNER_FINGERPRINT / TRUSTED_EXECUTION_PUBLIC_KEY 的 monkeypatch 行為;
+    # S0.3 路徑因此 byte-identical(未傳 signer_profile 即用此)。
+    return ExecutionSignerProfile(
+        identity=EXPECTED_EXECUTION_SIGNER_IDENTITY,
+        fingerprint=EXPECTED_EXECUTION_SIGNER_FINGERPRINT,
+        namespace=EXECUTION_SIGNATURE_NAMESPACE,
+        algorithm=EXECUTION_BUNDLE_ALGORITHM,
+        public_key=TRUSTED_EXECUTION_PUBLIC_KEY,
+    )
+
+
+# S1 target-host profile(保留佔位;fingerprint/public_key 為 operator 輸入)。
+S1_TARGET_HOST_EXECUTION_SIGNER_PROFILE = ExecutionSignerProfile(
+    identity=EXPECTED_S1_TARGET_HOST_SIGNER_IDENTITY,
+    fingerprint=EXPECTED_S1_TARGET_HOST_SIGNER_FINGERPRINT,
+    namespace=S1_TARGET_HOST_SIGNATURE_NAMESPACE,
+    algorithm=EXECUTION_BUNDLE_ALGORITHM,
+    public_key=S1_TRUSTED_TARGET_HOST_PUBLIC_KEY,
+)
 
 
 def ssh_public_key_fingerprint(public_key: str) -> str:
@@ -254,11 +307,18 @@ def _verify_ssh_signature(
     return result.returncode == 0
 
 
-def _verify_execution_signature(bundle: Mapping[str, Any], signature: bytes) -> bool:
+def _verify_execution_signature(
+    bundle: Mapping[str, Any],
+    signature: bytes,
+    *,
+    signer_profile: ExecutionSignerProfile | None = None,
+) -> bool:
+    # signer_profile 預設 S0.3(值同既有常量),故 S0.3 呼叫路徑 byte-identical。
+    profile = signer_profile or _default_s0_3_profile()
     try:
         fingerprint_matches = hmac.compare_digest(
-            ssh_public_key_fingerprint(TRUSTED_EXECUTION_PUBLIC_KEY),
-            EXPECTED_EXECUTION_SIGNER_FINGERPRINT,
+            ssh_public_key_fingerprint(profile.public_key),
+            profile.fingerprint,
         )
     except ValueError:
         return False
@@ -267,7 +327,9 @@ def _verify_execution_signature(bundle: Mapping[str, Any], signature: bytes) -> 
     return _verify_ssh_signature(
         _canonical_bytes(bundle),
         signature,
-        public_key=TRUSTED_EXECUTION_PUBLIC_KEY,
+        public_key=profile.public_key,
+        identity=profile.identity,
+        namespace=profile.namespace,
     )
 
 
@@ -288,21 +350,25 @@ class AuthenticatedExecutionEvidenceIndex:
         task_contract_digest: str,
         context_artifact_digest: str,
         dag_digest: str,
+        signer_profile: ExecutionSignerProfile | None = None,
     ) -> "AuthenticatedExecutionEvidenceIndex":
+        # signer_profile 預設 S0.3(值同既有常量),故 S0.3 收尾路徑 byte-identical;傳入
+        # S1_TARGET_HOST_EXECUTION_SIGNER_PROFILE 即切到 domain-separated 的 S1 target-host profile。
+        profile = signer_profile or _default_s0_3_profile()
         if not isinstance(bundle, dict) or set(bundle) != _BUNDLE_FIELDS:
             raise ValueError("trusted execution bundle fields do not match contract")
         if bundle.get("schema_version") != "trusted_execution_bundle_v1":
             raise ValueError("trusted execution bundle schema_version is invalid")
-        if bundle.get("signer_identity") != EXPECTED_EXECUTION_SIGNER_IDENTITY:
+        if bundle.get("signer_identity") != profile.identity:
             raise ValueError("trusted execution bundle signer identity is invalid")
         if (
             bundle.get("signer_fingerprint")
-            != EXPECTED_EXECUTION_SIGNER_FINGERPRINT
+            != profile.fingerprint
         ):
             raise ValueError("trusted execution bundle signer fingerprint is invalid")
-        if bundle.get("algorithm") != EXECUTION_BUNDLE_ALGORITHM:
+        if bundle.get("algorithm") != profile.algorithm:
             raise ValueError("trusted execution bundle algorithm is invalid")
-        if bundle.get("signature_namespace") != EXECUTION_SIGNATURE_NAMESPACE:
+        if bundle.get("signature_namespace") != profile.namespace:
             raise ValueError("trusted execution bundle signature namespace is invalid")
         for field_name, expected in (
             ("task_contract_digest", task_contract_digest),
@@ -313,7 +379,7 @@ class AuthenticatedExecutionEvidenceIndex:
                 raise ValueError(f"trusted execution bundle {field_name} is invalid")
             if bundle[field_name] != expected:
                 raise ValueError(f"trusted execution bundle {field_name} mismatch")
-        if not _verify_execution_signature(bundle, signature):
+        if not _verify_execution_signature(bundle, signature, signer_profile=profile):
             raise ValueError("trusted execution bundle authentication failed")
 
         current = now.astimezone(timezone.utc)
