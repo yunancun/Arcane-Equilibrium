@@ -1,9 +1,21 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-07-23（AI/ML S1 六 Session source-complete on branch；EFFECT_SEAMS_READY 實質組成，待 merge + Linux CI attestation）
+> 最後更新：2026-07-23（AI/ML S1 formal-closure PR #114 三 findings 修復 source-complete；待帶外 operator SSHSIG）
 
 ---
+
+## AI/ML S1 Formal-Closure PR #114 Findings Fixed — v845（2026-07-23）
+
+S1 formal-closure effect seam（target-host disposable probe）由 PR #114 landed（main `7d78765a2`），但在 Codex review 完成前即 merge，事後留下 2×P1 + 1×P2。本輪於 branch `agent/aiml-s1-closure-p1p2-fixes`（source commit `af2491300`，base `7d78765a2`）全數修復；source-only、九個 authority 仍全 false、非 runtime/PG/deploy/broker/order。
+
+- **P1 postcheck evidence binding**（`agent_governance_target_host_effects.py` `validate_target_host_effect_binding`）：舊閘只認 `source==ops_postcheck` 標籤（空 `evidence_refs` 亦能過）。現要求 distinct-verifier UPGRADED effect result（結構化 `verifier_capture_digest` 非空，applier 自跑不能自閉）＋ ops_postcheck 綁 verifier 自己的 governed `command_capture_v2`（結構+self-digest 完整性、與 applier role/node/process/capture 相異）＋ 全清 residue（非零 fail-closed）＋ `source_head`/`host`/`observed_at` 綁 receipt ＋ 三方 digest 交叉核對 ＋ acceptance 同綁三份 evidence id。`target_host_effect_result_v1` 新增結構化 `verifier_capture_digest`（applier 自跑 null、升 BINDING 時填，與 seam-note 綁定交叉核對）。
+- **P1 process-global authorization 移除**（`agent_governance_target_host_apply.py` + 新 `agent_governance_target_host_child_apply.py`）：applier 不再於 parent 行程設 `AIML_TARGET_HOST_PROBE`。真 runner 由 VALIDATED intent 派生 authorization capsule（綁 intent digest/source head/expected host/actor node/throwaway root/pg digest/nonce/短 TTL，`capsule_digest` 自封），經一次性 stdin pipe 委派給隔離 `python3 -I` 子行程；子行程 sanitized allowlist env、重驗 capsule（digest 自洽、未過期、`expected_host`==實際 host、格式）後才在**自身** env 開閘、跑 `run_target_host_probe`、回 canonical JSON，退出即失效。direct caller/過期/竄改/重放/host 不符/缺 capsule 均 fail-closed（退出碼 3）；注入 runner（測試）in-process 直呼且不改任何 env。governed capture-command 的 env-strip 不受削弱；未以 thread-local 假裝隔離。
+- **P2 WORM retention**（`agent_governance_terminal_receipt_external_sink.py`）：`independent_readback_ack` 於 mode 完全一致 + 未來性外，另要求 observed `retain_until` ≥ approved（tz-normalized；較短 fail-closed）；idempotent-dedup 亦讀既有物件真 Object-Lock retention，mode 不符或較短即 fail-closed。
+- **S1 signing（Amendment A1 §6）**：S1 target-host signer profile 沿用 S0.3 信任根（`TRUSTED_EXECUTION_PUBLIC_KEY`/`EXPECTED_EXECUTION_SIGNER_FINGERPRINT`），於 domain-separated 的 S1 identity（`aiml-s1-target-host-operator-v1`）+ namespace（`arcane-equilibrium-aiml-s1-target-host`）下運作（移除 operator 佔位符；不新增第二套私鑰）。S0.3 identity/namespace/keys/schema/receipt/既有簽章 byte-unchanged;真 S1 closure-bundle SSHSIG 仍為帶外 operator 步驟（私鑰於 Mac、trade-core 皆不存在）。
+- **CI selection**：`development-agent-governance` job 與變更分類器現顯式執行/觸發 target-host effect/apply 與 external-WORM-sink 套件（不符 `test_agent_governance_*` glob），使新覆蓋真的於 GitHub 執行。
+
+**邊界**：external S3 Object-Lock **effect**（真 bind/append/readback）歸 `S8.6`，非 S1 blocker，S1 關閉不需 S3 config；`S1_ENGINEERING_CLOSED_EXTERNAL_WORM_BINDING_PENDING` 被取代,唯一剩餘 S1-closure gate 為帶外 operator SSHSIG。+38 focused 測試（含新 `test_agent_governance_target_host_child_apply.py`）;本地 `tests/structure/` 全綠（2138 passed, 6 skipped）。獨立 CC 憲政複審 PASS（純 hardening,無 authority flip）;E2/E3/E4 複審 + Linux bounded-probe rerun + `closure_packet_v1` 為後續。詳見 `docs/execution_plan/ai_ml_landing/PROGRESS.md` 最新 ledger event 與 design §11。
 
 ## AI/ML S1 Effect Seams And Runtime Choice — v844（2026-07-23）
 
