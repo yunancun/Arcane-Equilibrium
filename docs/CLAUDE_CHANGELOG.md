@@ -1,9 +1,22 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-07-22（AI/ML S0 全部關閉；Linux trusted-host 已簽發 `PROGRAM_ADOPTED`，S1 ready）
+> 最後更新：2026-07-23（AI/ML S1 六 Session source-complete on branch；EFFECT_SEAMS_READY 實質組成，待 merge + Linux CI attestation）
 
 ---
+
+## AI/ML S1 Effect Seams And Runtime Choice — v844（2026-07-23）
+
+`開始並完成S1`：`AIML-LONG-LIVED-LANDING-V2` Sprint 1 六個 Session 全部 source-complete，於 feature branch `agent/aiml-s1-landing`（疊於 main `5362fdd4b`）逐一 commit。執行序 S1.1→S1.2→S1.4→S1.3→S1.5→S1.6，每個 Session 走完 `PA→E1→E2/E4→CC/E3/OPS→QA` 全鏈並經 1-2 輪修復收口，最後再做一輪跨 Session 對抗審核（PA 整合 / CC 整體憲政 / FA spec-compliance 全 PASS）。
+
+- **S1.1 `3c0b7fb2f`** LR0A PG 唯讀身分 Adapter（socket-only、psqlrc/PG* scrub、RO role、SELECT/catalog allowlist、真拋棄式叢集證 negative write `25006`/role-esc `42501`/durable search-path hijack `DENIED 25006`）→ `pg_readonly_identity_receipt_v1`。
+- **S1.2 `d12f84632`** LR0B typed 7-class effect matrix + `classify_component_required_effects`（effectful 不得宣稱 source-only）+ `terminal_receipt_sink_v1` WORM Adapter（os.link 冪等 dedup、chmod 0o444 不可變、distinct append/readback actor）+ central-validator/registry 接線（含 S1.1 pg-receipt 委派 + terminal-sink CONTRACT_ONLY→implemented 三檔協調 flip，forge-resistance 未變）。E3 揪出的 WORM 核心保證缺陷（可偽造 independent readback、dedup 內容替換、path-traversal、明文秘密、store 權限）全修。
+- **S1.4 `7d0befd86`** LR0C offline OCI vs content-addressed fixed-path 候選證明（candidate B 拿真 `LOCAL_REPRODUCIBLE`：content-addressing 確定性、`python3 -I` 隔離、sealed-input;OCI 決定性隔離 seam 全 `DEFERRED_S1_6`）→ `runtime_candidate_receipt_v1`×2 + `runtime_candidate_comparison_v1`（`final_choice` const null）。
+- **S1.3 `08789982e`** host UID/PG role/auth/socket ACL/secret lifecycle 最小權限 contracts + ≥10 negative-ACL（真叢集 `42501`/`28P01`）;E3 三個安全 P2（least-privilege 非窮盡、rotation 誤判、validator rubber-stamp）全修,validator 現重建契約重驗 → `identity_acl_contract_receipt_v1`。
+- **S1.5 `0b2805a4d`** per-component deploy Adapter（真 disposable apply→rollback→independent postcheck:exact restoration `pre==post`、`applied!=pre`、applier≠verifier;三 target kind:disposable_pg/temp_dir_artifact/temp_dir_objects）+ 6 registry entry + matrix `PENDING_S1_5→IMPLEMENTED_DISPOSABLE` flip（matrix digest re-pin,S0.3 classifier digest byte-frozen）→ `effect_seams_ready_receipt_v1`（`sprint_gate_scope` const `S1.5_CONTRIBUTION`）。E2/E3 的 no-op apply、FS 路徑未 confine、postcheck 非 load-bearing 全修。
+- **S1.6 `0e8e9fd9d`** target-host disposable runtime probe（復用 S1.5 lifecycle 探兩候選）+ 最終選擇 → `learning_runtime_choice_receipt_v1`。`final_choice = content_addressed_fixed_path`（BINDING:plan 規則「OCI 僅在所有 seam 通過時選」+ §LR2 normatively 禁 worker OCI socket/DBus;target-host seam Mac 無法證,honest `DEFERRED_TARGET_HOST`→S2.3/S2.5）、`production_running_attested` const false（attests nothing running）、`supersedes_comparison_null=true`（不改 S1.4）。E3 的 validator 非 load-bearing P2 修為 acceptance-contract + 具體檢查。
+
+**邊界（六審+跨審一致確認）**:全 body 僅 13 行刪除（皆 S1.2 terminal-sink flip）,其餘純 additive;九個 authority grant 仍全 FALSE;`PROGRAM_ADOPTED`/frozen S0.3 classifier digest byte-intact;無 production PG/deploy/runtime/broker/order/remote/network effect,全部 apply/probe 在 disposable/local target。evidence class = `LOCAL_REPRODUCIBLE`（Mac 真拋棄式證明);receipt 為 disposable-emitted。**Sprint-1 exit `EFFECT_SEAMS_READY` 由 S1.5 + S1.6 實質組成,但為 PM ledger act,待(a) exact-head merge 與(b) Linux CI/trusted-host 測試 attestation 之後才宣告**;PROGRESS rows 現為 `DONE_WITH_EXTERNAL_EVIDENCE_PENDING`。下一步=三端同步(push→PR→Linux CI→exact-head merge→Mac/Linux ff-only)。
 
 ## AI/ML S0 Program Adoption（2026-07-22）
 

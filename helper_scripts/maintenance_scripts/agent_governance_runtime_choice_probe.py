@@ -25,16 +25,20 @@ native-lib LOADING on target / true target-host start / target-host PG identity 
 networked ML-closure resolution) are ``DEFERRED_TARGET_HOST`` for BOTH candidates —
 a receipt that marked any of them disposably-proven is **rejected**.
 
-Like S1.1/S1.4/S1.5 this harness SELF-VALIDATES its own receipt and deliberately
-does NOT register into the central AIML closure-validator, the governance registry,
-the route-compiler, permissions or the vocabulary; S1.6 stays disjoint.  It REUSES
+Like S1.3/S1.4 this harness SELF-VALIDATES its own receipt and is NOT registered
+into the central AIML closure-validator, the governance registry, the
+route-compiler, permissions or the vocabulary; S1.6 stays disjoint.  (By contrast
+S1.1's pg-receipt and S1.5's effect-seam/component receipts WERE added to the
+central ``SCHEMA_FILES`` for delegated recognition — the split is: closure-carried
+seam/identity proof receipts get eager central recognition, while intermediate
+self-contained contract receipts — S1.3, S1.4, S1.6 — self-validate.)  It REUSES
 (read-only imports) S1.5 ``agent_governance_component_effects`` (the disposable
-lifecycle + intent/result/attestation builders), S1.4
+lifecycle + intent/result/attestation builders) and S1.4
 ``agent_governance_runtime_candidate_spike`` (the candidate ids, ``hash_bundle_tree``
-and the const-null comparison) and S1.1
-``agent_governance_pg_readonly_identity`` (the disposable RO-PG identity probes, for
-the ``initdb``-gated disposable PG-identity seam).  It makes NO network / remote /
-process / native-load contact and starts NO real service.
+and the const-null comparison).  The S1.1 disposable RO-PG identity probe is used by
+the disposable TEST (not imported by this module); this module binds the S1.1 42501
+evidence by digest/shape only.  It makes NO network / remote / process / native-load
+contact and starts NO real service.
 """
 
 from __future__ import annotations

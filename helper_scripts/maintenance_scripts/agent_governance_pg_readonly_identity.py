@@ -9,8 +9,11 @@ attempt.  It emits one canonical, self-hashed ``pg_readonly_identity_receipt_v1`
 S1.1 is ``DISPOSABLE_ONLY``: production PG is rejected fail-closed, direct
 ``psql`` stays denied (this Adapter uses ``psycopg2`` over the socket and never
 shells out), and no migration/writer is ever created by the Adapter.  The
-Adapter deliberately does NOT register into the central AIML closure-validator
-or the governance registry/route-compiler; it self-validates its own receipt.
+Adapter self-validates its own receipt and registers no routable node.  (Note:
+S1.2 subsequently added ``pg_readonly_identity_receipt_v1`` to the central
+validator's ``SCHEMA_FILES`` so the central gate DELEGATES to this Adapter's own
+validator with mandatory ``now`` freshness — recognition wiring only, still no
+routable/closure node.)
 """
 
 from __future__ import annotations
