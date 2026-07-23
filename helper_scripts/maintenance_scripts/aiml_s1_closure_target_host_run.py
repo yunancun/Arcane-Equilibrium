@@ -2,7 +2,7 @@
 
 驅動一次**真** bounded non-root target-host 探針,走 PR #114 findings-fix 後的完整路徑:
   1. 由 fresh 時鐘建一張 admitted typed intent(``target_host_disposable_runtime_probe_intent_v1``);
-  2. ``apply_target_host_probe_effect``(真 runner)→ 經隔離 ``python3 -I`` 子行程(P1 process-isolation
+  2. ``apply_target_host_probe_effect``(真 runner)→ 經隔離 ``python3 -E`` 子行程(P1 process-isolation
      修復)在自身 env 開閘、真跑 ``run_target_host_probe``,產出 applier 自跑的 PROVISIONAL effect result;
   3. distinct OPS 驗證者以 ``independent_postcheck_on_host`` 做**真** on-host 殘留掃描,並以 OPS
      ``capture-command`` 對殘留掃描產出一份**真 governed** ``command_capture_v2``(P1 postcheck-binding 修復
@@ -43,7 +43,10 @@ import agent_governance_command_capture_v2 as capmod
 import aiml_gate_receipt_validator as validator
 
 APPLIER_NODE = "s1fc_apply_actor"
-VERIFIER_NODE = "s1fc_independent_verifier"
+# 宣告的 postcheck 驗證者節點必須等於 verifier 的 governed command_capture_v2 的 capturer node_id
+# (下方 _governed_verifier_capture 以 OPS ``ops_postcheck`` 節點產出),使 closure 的
+# 「capture 必由宣告 verifier 節點產生」綁定成立(P1 Codex)。
+VERIFIER_NODE = "ops_postcheck"
 # 拋棄式探針的依賴 receipt(S1.1/S1.4/S1.5):此為 DISPOSABLE 證據,依賴 digest 為確定式占位
 # (closure 只驗 sha256 形狀 + 交叉綁定,非比對真 receipt 位元組;真 landing 於 S8 綁真依賴)。
 DEP = {
@@ -119,7 +122,7 @@ def _governed_verifier_capture(*, root: Path) -> dict:
     # governed capture 用一條保證通過 native-policy 的 read-only 指令產出真 record(證「distinct 驗證者
     # 跑過一條 governed command」);真 on-host 殘留觀察另由 independent_postcheck_on_host 產出(見 main)。
     return capmod.capture_governed_command(
-        native_agent="OPS", node_id="ops_preflight", context_artifact=artifact,
+        native_agent="OPS", node_id="ops_postcheck", context_artifact=artifact,
         argv=["git", "rev-parse", "--is-inside-work-tree"], root=root,
     )
 
@@ -133,7 +136,7 @@ def main() -> int:
 
     # 本 driver 是一個「專屬、拋棄式、被授權的 on-host effect 執行器」(等同 operator 手跑一次探針)。它於
     # 自身 env 開授權閘,使 target_host_available() 為真、讓 distinct 驗證者的 independent_postcheck_on_host
-    # 得以做真殘留觀察。**注意**:applier 的 apply_target_host_probe_effect(真 runner)仍走隔離 python3 -I
+    # 得以做真殘留觀察。**注意**:applier 的 apply_target_host_probe_effect(真 runner)仍走隔離 python3 -E
     # 子行程——run_probe_via_child 以 sanitized allowlist env(不含此旗標)spawn 子行程,子行程自驗 capsule 後
     # 才在**它自己**的 env 開閘。故 P1 process-isolation 修復在此真跑中依然成立(applier 不靠 parent 的閘)。
     os.environ["AIML_TARGET_HOST_PROBE"] = "1"
@@ -154,7 +157,7 @@ def main() -> int:
     applier_capture = thc._structural_capture_artifact()
 
     try:
-        # (2) 真 child-executor apply:probe_runner 為預設真 runner ⇒ 走隔離 python3 -I 子行程。
+        # (2) 真 child-executor apply:probe_runner 為預設真 runner ⇒ 走隔離 python3 -E 子行程。
         effect_result = apply_mod.apply_target_host_probe_effect(
             intent,
             source_head=args.source_head,

@@ -51,10 +51,14 @@ FROZEN_CLASSIFIER = (
 def _effect_result(*, include_capture_artifact: bool = True, pg_mode=None) -> dict:
     # applier 自跑形:independent_postcheck DEFERRED、verifier_capture_digest=None(PROVISIONAL)。
     # closure 端須先經 distinct 驗證者 attach_distinct_verifier_postcheck 升 BINDING(見 _closure_inputs)。
+    # 宣告的 postcheck 驗證者節點 == verifier 的 governed capture 的 capturer node_id(ops_postcheck),
+    # 使 closure 的「capture 必由宣告 verifier 節點產生」綁定成立(P1 Codex)。applier 節點另取。
     choice = th.build_attested_reference_receipt(
         now=OBS, pg_mode=pg_mode or th.PG_MODE_REAL,
         include_capture_artifact=include_capture_artifact,
         independent_postcheck_attached=False,
+        apply_actor_node="s16b_apply_actor",
+        postcheck_verifier_node="ops_postcheck",
     )
     return tfx.build_target_host_effect_result(
         choice_receipt=choice,
@@ -212,7 +216,7 @@ def _governed_verifier_capture() -> dict:
     routed = routing.route_task(facts)
     artifact = materialize_context_artifact(compile_context("OPS", routed["task_facts"]))
     return capmod.capture_governed_command(
-        native_agent="OPS", node_id="ops_preflight", context_artifact=artifact,
+        native_agent="OPS", node_id="ops_postcheck", context_artifact=artifact,
         argv=["git", "rev-parse", "--is-inside-work-tree"], root=ROOT,
     )
 
@@ -221,10 +225,38 @@ def _verifier_capture() -> dict:
     return copy.deepcopy(_governed_verifier_capture())
 
 
+@functools.lru_cache(maxsize=1)
+def _governed_wrong_node_capture() -> dict:
+    """A REAL governed capture from a DIFFERENT (valid) node — OPS ``ops_preflight`` (≠ verifier
+    ``ops_postcheck``) — for the capture-must-be-produced-by-the-declared-verifier negative."""
+
+    import agent_governance_command_capture_v2 as capmod
+    from agent_governance_context import capture_repository_baseline
+    from agent_governance_execution import compile_context, materialize_context_artifact
+
+    vscope = ["helper_scripts/maintenance_scripts/runtime_environment_probe.py"]
+    facts = {
+        "task_shape": "review", "surfaces": ["operations"], "risk": "medium",
+        "uncertainty": "low", "side_effect_class": "none",
+        "objective": "an unrelated OPS read-only capture from a non-verifier node",
+        "scope": vscope, "dirty_scope": [], "verification_scope": vscope,
+        "acceptance_criteria": ["one exact read-only command receipt"],
+        "hard_stops": ["no runtime mutation"], "baseline": capture_repository_baseline(),
+        "direct_interfaces": ["runtime_environment_probe_v1"],
+        "previous_failure": "no derived read-only path scope",
+    }
+    routed = routing.route_task(facts)
+    artifact = materialize_context_artifact(compile_context("OPS", routed["task_facts"]))
+    return capmod.capture_governed_command(
+        native_agent="OPS", node_id="ops_preflight", context_artifact=artifact,
+        argv=["git", "rev-parse", "--is-inside-work-tree"], root=ROOT,
+    )
+
+
 def _closure_inputs(
     result: dict,
     *,
-    verifier_node: str = "s16b_independent_verifier",
+    verifier_node: str = "ops_postcheck",
     ops_verifier_node: str | None = None,
     capture: dict | None = None,
     ops_capture_digest_override: str | None = None,
@@ -389,6 +421,15 @@ def test_closure_rejects_capture_digest_mismatch() -> None:
         packet, route, fragments, evidence_by_id, valid
     )
     assert any("verifier_capture_digest must equal the effect receipt" in e for e in errors)
+
+
+def test_closure_rejects_verifier_capture_from_wrong_node() -> None:
+    # verifier capture 由**非**宣告 verifier 節點(OPS `ops_preflight`,而宣告為 `ops_postcheck`)產生 → 拒。
+    # P1(Codex):僅「非 applier」不足,capture 必須由宣告的 postcheck verifier 節點產生。
+    review_cap = copy.deepcopy(_governed_wrong_node_capture())
+    packet, route, fragments, evidence_by_id, valid = _closure_inputs(_effect_result(), capture=review_cap)
+    errors = tfx.validate_target_host_effect_binding(packet, route, fragments, evidence_by_id, valid)
+    assert any("must equal the declared ops_postcheck verifier node" in e for e in errors)
 
 
 def test_closure_rejects_tampered_verifier_capture_record() -> None:

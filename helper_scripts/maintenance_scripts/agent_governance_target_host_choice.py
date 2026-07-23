@@ -1041,6 +1041,8 @@ def build_attested_reference_receipt(
     independent_postcheck_attached: bool = True,
     capture_digest: str | None = None,
     include_capture_artifact: bool = False,
+    apply_actor_node: str = "s16b_apply_actor",
+    postcheck_verifier_node: str = "s16b_independent_verifier",
 ) -> dict[str, Any]:
     """Build a PLATFORM_OR_EXTERNAL_ATTESTED (status=PASS) reference, as the REAL trade-core run would.
 
@@ -1061,8 +1063,8 @@ def build_attested_reference_receipt(
         platform=detect_platform(),
         target_class=TARGET_CLASS,
         host_identity=_structural_host_identity(),
-        apply_actor_node="s16b_apply_actor",
-        postcheck_verifier_node="s16b_independent_verifier",
+        apply_actor_node=apply_actor_node,
+        postcheck_verifier_node=postcheck_verifier_node,
         fixed_path_seams=synthesize_fixed_path_seams(
             pg_mode, evidence_marker=EVIDENCE_ATTESTED,
             independent_postcheck_attached=independent_postcheck_attached,

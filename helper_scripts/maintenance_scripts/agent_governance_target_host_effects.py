@@ -160,6 +160,7 @@ def _validate_verifier_capture_evidence(
     applier_capture_digest: Any,
     applier_capture: dict[str, Any],
     applier_node: Any,
+    verifier_node: Any,
 ) -> list[str]:
     """Validate the third evidence entry: the distinct verifier's own governed command_capture_v2.
 
@@ -190,6 +191,13 @@ def _validate_verifier_capture_evidence(
     )
     if str(capture.get("record_digest")) != str(expected_digest):
         errors.append("verifier command_capture_v2 record_digest must equal the referenced capture digest")
+    # P1(Codex):capture 必須由「宣告的 postcheck 驗證者節點」產生——僅「非 applier」不足,否則任一
+    # 無關的 read-only capture 都可被塞進來支撐偽造的 postcheck。綁 capturer node_id == 宣告 verifier node。
+    if capture.get("node_id") != verifier_node:
+        errors.append(
+            "verifier command_capture_v2 node_id must equal the declared ops_postcheck verifier node "
+            "(the capture must be produced by the purported residue verifier, not an unrelated node)"
+        )
     if str(expected_digest) == str(applier_capture_digest):
         errors.append(
             "verifier capture must differ from the applier on-host capture (distinct process + capture)"
@@ -548,6 +556,7 @@ def validate_target_host_effect_binding(
                 applier_capture_digest=applier_capture_digest,
                 applier_capture=applier_capture,
                 applier_node=applier_node,
+                verifier_node=verifier_node,
             ))
 
     # (f) acceptance PASS 必同時綁 effect receipt + ops_postcheck + verifier capture 三份 evidence id。

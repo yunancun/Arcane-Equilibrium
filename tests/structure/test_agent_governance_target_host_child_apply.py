@@ -34,12 +34,14 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _intent(expected_host: str = ACTUAL_HOST) -> dict:
+def _intent(expected_host: str = ACTUAL_HOST, *, expires_in: int = 3600) -> dict:
+    exp = (datetime.now(timezone.utc) + timedelta(seconds=expires_in)).isoformat()
     return {
         "intent_id": "th-intent-0001",
         "self_digest": "sha256:" + "a" * 64,
         "expected_host": expected_host,
         "applier_node_id": "s1fc_apply_actor",
+        "expires_at": exp,
     }
 
 
@@ -52,10 +54,13 @@ def _params() -> dict:
     }
 
 
-def _capsule(*, expected_host: str = ACTUAL_HOST, now: str | None = None, ttl_seconds: int = 120) -> dict:
+def _capsule(
+    *, expected_host: str = ACTUAL_HOST, now: str | None = None, ttl_seconds: int = 120,
+    intent_expires_in: int = 3600,
+) -> dict:
     return child.build_authorization_capsule(
-        intent=_intent(expected_host), source_head="a" * 40, probe_params=_params(),
-        nonce="nonce-abc-123456", now=now or _now(), ttl_seconds=ttl_seconds,
+        intent=_intent(expected_host, expires_in=intent_expires_in), source_head="a" * 40,
+        probe_params=_params(), nonce="nonce-abc-123456", now=now or _now(), ttl_seconds=ttl_seconds,
     )
 
 
@@ -117,6 +122,41 @@ def test_capsule_rejects_malformed_bindings(field, value, needle) -> None:
     cap["capsule_digest"] = child.capsule_digest(cap)  # 重簽,隔離出格式錯而非 digest 錯
     errors = child.validate_capsule(cap, now=cap["issued_at"])
     assert any(needle in e for e in errors)
+
+
+# P1(Codex): the child authorization must not outlive its authorizing intent
+def test_capsule_expiry_capped_at_intent_expiry() -> None:
+    # intent 只剩 30s 而 TTL=120s → capsule.expires_at 被夾到 intent.expires_at(不逾越 intent 期)。
+    cap = _capsule(ttl_seconds=120, intent_expires_in=30)
+    assert cap["expires_at"] == cap["intent_expires_at"]
+
+
+def test_capsule_rejects_overlong_ttl() -> None:
+    with pytest.raises(ValueError, match="ttl_seconds"):
+        _capsule(ttl_seconds=child.DEFAULT_CAPSULE_TTL_SECONDS + 1)
+
+
+def test_capsule_rejects_nonpositive_ttl() -> None:
+    with pytest.raises(ValueError, match="ttl_seconds"):
+        _capsule(ttl_seconds=0)
+
+
+def test_validate_rejects_capsule_outliving_intent() -> None:
+    # 手工把 expires_at 撐過 intent_expires_at(重簽)→ validate 拒(閘不得活過 intent)。
+    cap = _capsule(intent_expires_in=60)
+    later = (datetime.fromisoformat(cap["intent_expires_at"]) + timedelta(seconds=300)).isoformat()
+    cap["expires_at"] = later
+    cap["capsule_digest"] = child.capsule_digest(cap)
+    errors = child.validate_capsule(cap, now=cap["issued_at"])
+    assert any("must not outlive the intent" in e for e in errors)
+
+
+def test_validate_rejects_expired_intent() -> None:
+    # intent 本身已過期(now >= intent_expires_at)→ validate 拒。
+    cap = _capsule(intent_expires_in=60)
+    after_intent = (datetime.fromisoformat(cap["intent_expires_at"]) + timedelta(seconds=1)).isoformat()
+    errors = child.validate_capsule(cap, now=after_intent)
+    assert any("authorizing intent has already expired" in e for e in errors)
 
 
 # --------------------------------------------------------------------------- #

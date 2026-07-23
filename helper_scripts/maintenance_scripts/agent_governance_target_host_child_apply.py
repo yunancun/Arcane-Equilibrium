@@ -62,7 +62,7 @@ CAPSULE_FIELDS = frozenset({
     "schema_version", "intent_id", "intent_digest", "source_head", "expected_host",
     "actor_node", "throwaway_root", "pg_readonly_identity_receipt_digest",
     "launcher_argv", "target_host_capture_digest", "nonce", "issued_at",
-    "expires_at", "capsule_digest",
+    "intent_expires_at", "expires_at", "capsule_digest",
 })
 
 
@@ -116,7 +116,17 @@ def build_authorization_capsule(
     忠實投影已驗過的欄位)。
     """
 
+    # P1(Codex):TTL 必為合理正整數上限(不得任意放大),且 capsule 授權期**不得逾越** intent 期——
+    # 取 (now + 短 TTL) 與 intent expires_at 的**較早者**,故 child gate 絕不能活過其授權 intent。
+    if not (isinstance(ttl_seconds, int) and not isinstance(ttl_seconds, bool)
+            and 1 <= ttl_seconds <= DEFAULT_CAPSULE_TTL_SECONDS):
+        raise ValueError(
+            f"capsule ttl_seconds must be an int in [1, {DEFAULT_CAPSULE_TTL_SECONDS}]"
+        )
     issued = _parse_time(now)
+    intent_expires_at = str(intent["expires_at"])
+    intent_expiry = _parse_time(intent_expires_at)
+    expires = min(issued + timedelta(seconds=ttl_seconds), intent_expiry)
     capsule: dict[str, Any] = {
         "schema_version": CAPSULE_SCHEMA_VERSION,
         "intent_id": intent["intent_id"],
@@ -130,7 +140,8 @@ def build_authorization_capsule(
         "target_host_capture_digest": probe_params.get("target_host_capture_digest"),
         "nonce": nonce,
         "issued_at": now,
-        "expires_at": (issued + timedelta(seconds=ttl_seconds)).isoformat(),
+        "intent_expires_at": intent_expires_at,
+        "expires_at": expires.isoformat(),
     }
     capsule["capsule_digest"] = capsule_digest(capsule)
     return capsule
@@ -188,6 +199,7 @@ def validate_capsule(
     try:
         issued = _parse_time(capsule["issued_at"])
         expires = _parse_time(capsule["expires_at"])
+        intent_expiry = _parse_time(capsule["intent_expires_at"])
         current = _parse_time(now)
         if not issued <= expires:
             errors.append("authorization capsule issued_at must precede expires_at")
@@ -195,6 +207,11 @@ def validate_capsule(
             errors.append("authorization capsule has expired (expires_at <= now)")
         if current < issued:
             errors.append("authorization capsule is not yet valid (now < issued_at)")
+        # P1(Codex):capsule 授權期不得逾越其授權 intent 的期限;且 intent 本身不得已過期。
+        if expires > intent_expiry:
+            errors.append("authorization capsule expires_at must not outlive the intent expires_at")
+        if current >= intent_expiry:
+            errors.append("authorization capsule's authorizing intent has already expired (intent_expires_at <= now)")
     except (KeyError, TypeError, ValueError):
         errors.append("authorization capsule timestamps are invalid")
     return errors
