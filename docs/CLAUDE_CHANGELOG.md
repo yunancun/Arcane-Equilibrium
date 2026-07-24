@@ -5,17 +5,17 @@
 
 ---
 
-## AI/ML S1 Authenticated Closure Pending Merge — v847（2026-07-24）
+## AI/ML S1 Authenticated Closure Pending Merge — v848（2026-07-24）
 
 PR #115 的 forge-resistance 修復後，以最終 H_effect
-`e6572b96e60ac305e2ff2bedffa1cf148e75aa7a` 在 Linux `trade-core` 完成新一輪
+`45a854fa6638aa0be677a2b705f42fe8f417ac95` 在 Linux `trade-core` 完成新一輪
 真實 effect：S1.5 六類 component receipt 的 source/schema 與有效期均重新驗證
 （apply→exact rollback→independent postcheck，receipt
 `sha256:ab63d9db…140f`），S1.6 八個 target-host seam 全通過
-（`binding=BINDING`、零殘留、effect `sha256:e4efb9bc…50db`），production
+（`binding=BINDING`、零殘留、effect `sha256:9f8f40b1…fd99`），production
 PostgreSQL `:5432` 未觸碰。
 
-最終對抗 regression 另抓出並修復三個 P1：generated receipt 的單一超長
+最終對抗 regression 另抓出並修復四個 P1：generated receipt 的單一超長
 JSON 行可繞過 count-only caller-preview 界線，令標準 Context budget 被耗盡
 （`43735ff3d` 改為逐 preview byte-bound，同時保留完整 manifest/text digest）；
 target-host driver 接受 caller `--source-head` 卻未核對實際 worktree
@@ -23,8 +23,11 @@ target-host driver 接受 caller `--source-head` 卻未核對實際 worktree
 tracked-dirty／untracked-dirty 負測試）；finalizer 將 run 起點誤寫成
 `evaluated_at`，可能早於後建 Context source 的 `valid_from`，令已 PASS 的 closure
 無法按 receipt 時間歷史重放（`e6572b96e` 改為 trusted finalization 完成後才捕獲
-receipt timestamp，並加入順序回歸測試）。三項修復後才以 final H_effect 重跑
-effect 與簽發；即時 trusted-host 重驗和 receipt-time 歷史重放均 PASS。
+receipt timestamp，並加入順序回歸測試）；exact-head CI 又證實新 finalizer
+回歸檔名未被 required governance glob 收入，且完整 gate 會被 5 分鐘 job 上限
+取消（`45a854fa6` 將測試納入既有 required glob，並以靜態回歸鎖定 10 分鐘
+上限）。四項修復後才以 final H_effect 重跑 effect 與簽發；即時 trusted-host
+重驗和 receipt-time 歷史重放均 PASS。
 
 最終 closure packet 綁定真實 PA/CC/E3 provenance、分離的 OPS
 preflight/postcheck governed captures、workflow DAG/wave 與兩份 effect
@@ -32,7 +35,7 @@ receipt。Operator 已授權目前 SSH agent 中 fingerprint
 `SHA256:uGJ9veN7PoE6BBgfsSP2aiMndrwgbt7o/7/YfdzNzCQ`，以沿用的 S0.3
 trust root、S1 domain-separated identity/namespace 簽發 canonical bundle；
 獨立 `ssh-keygen -Y verify` PASS。closure digest 為
-`sha256:55a1fe39…ad47`，finalization digest 為 `sha256:95ff22cc…bd55`，
+`sha256:eeef47cc…6de1`，finalization digest 為 `sha256:ed6635c4…58a0`，
 errors 為空。
 
 當前狀態是 `S1_CLOSURE_AUTHENTICATED_PENDING_MERGE`：尚需 final

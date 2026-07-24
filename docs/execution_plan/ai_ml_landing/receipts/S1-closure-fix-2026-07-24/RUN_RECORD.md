@@ -2,7 +2,7 @@
 
 **Date**: 2026-07-24
 **Host**: `trade-core` (Linux, non-root uid 1000)
-**H_effect**: `e6572b96e60ac305e2ff2bedffa1cf148e75aa7a`
+**H_effect**: `45a854fa6638aa0be677a2b705f42fe8f417ac95`
 **Branch / PR**: `agent/aiml-s1-closure-p1p2-fixes` / PR #115
 **Effect class**: `TARGET_HOST_DISPOSABLE_RUNTIME_PROBE`
 
@@ -21,13 +21,13 @@ that exact head is merged.
 - S1.6 target-host effect: all eight fixed-path seams
   `PASSED_TARGET_HOST`; `binding=BINDING`;
   `final_choice=content_addressed_fixed_path`;
-  effect digest `sha256:e4efb9bc82f49278c8ab889eadf23f7de4767967aa5d406d9adb87623b1250db`.
+  effect digest `sha256:9f8f40b15598822544f0dd8618429ae3c6c2ac2b153d8b3acd70094b73fffd99`.
 - Host identity: observed and expected host are both `trade-core`.
 - Cleanup: zero unit, cgroup, netns, temporary-directory, or disposable-PG
   residue; production PostgreSQL `:5432` was not touched.
 - Closure: `closure_packet_v1` trusted finalization `PASS`, no errors;
   closure digest
-  `sha256:55a1fe393d13baf3b341505be0965d101b4c16972699e22d5c48665b943bad47`.
+  `sha256:eeef47cca1bcbfd44fb917759539b6afd06610669ec65a3be9e30b27a1f46de1`.
 - Operator authentication: the canonical trusted-execution bundle was signed
   through the current SSH agent under identity
   `aiml-s1-target-host-operator-v1` and namespace
@@ -64,8 +64,8 @@ artifact-only head still requires the separate exact-head Codex merge review.
 
 ## Adversarial closeout findings
 
-The final whole-suite regression, a deliberately mistyped SHA, and historical
-receipt replay caught three
+The final whole-suite regression, a deliberately mistyped SHA, historical
+receipt replay, and exact-head CI caught four
 additional P1s before publication:
 
 1. The direct-caller Context inventory bounded only the number of matches, not
@@ -86,10 +86,15 @@ additional P1s before publication:
    receipt timestamp only after trusted finalization and adds a load-bearing
    ordering regression. Both immediate trusted-host validation and replay at
    the persisted `evaluated_at` now pass.
+4. The replay regression's original filename did not match the required
+   governance CI glob, while the complete governance gate hit a hard five-
+   minute ceiling and was cancelled. Commit `45a854fa6` places the regression
+   under the required glob and locks a 10-minute job ceiling with a static
+   contract test.
 
 The earlier `6febd9d1e` signed generation and the rejected mistyped-head attempt
 are superseded; neither is the final S1 closure. The exact-head S1.6 producer
-effect and operator signature were rerun after all three P1 fixes at the
+effect and operator signature were rerun after all four P1 fixes at the
 H_effect above; the still-fresh S1.5 receipt was independently revalidated
 against unchanged source/schema before consumption.
 
@@ -114,15 +119,15 @@ against unchanged source/schema before consumption.
 Key finalization digests:
 
 - workflow wave:
-  `sha256:16aac28ec8b43b3c5dbe57cc58371d7b9605aed44410a46ec513f49c29e7e70f`
+  `sha256:14b2bbf4725293e030264e2dd92a3534bc7a667848fbfce5e8ddf70d24ffb93d`
 - trusted bundle:
-  `sha256:20b5d11b05b7c4b4ede438d914cb6a52060bb0aa9c50557c2288256d5e5ddc9f`
+  `sha256:c9c7756940fb2493c14a6e45261b236fcb40c1e72697696e1172cb4d8cefe359`
 - signature bytes:
-  `sha256:6c65b2e4b0bc83db2674192f688250c939849a60baa5595a53a4390ab69d8f1b`
+  `sha256:3ab69e6211127937441ab8d574bf78142ac6c551b6968020b5dc1210d0cf0c19`
 - landing attempt:
-  `sha256:6b579c935c50993e3e3cdd17886a5fc1eca1ac414181947ce0040cce91c316ed`
+  `sha256:e2522fe13952fa4203fa3ecc9609cbce3db04bb1e01a16daa9753c0e3ed0243a`
 - finalization:
-  `sha256:95ff22cc61f7eab7482762bbb34bc75ab7ca9f53268405b1383edc3c7ca0bd55`
+  `sha256:ed6635c44cae7e7e758e4dfa419e505ebfe111158abed48280ae7450b80b58a0`
 
 ## Boundary and final transition
 

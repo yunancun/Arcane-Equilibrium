@@ -624,7 +624,7 @@ This section supersedes the terminal/open-question wording in §§6, 10, 11 and
 the last sentence of §13.
 
 - Final H_effect:
-  `e6572b96e60ac305e2ff2bedffa1cf148e75aa7a`.
+  `45a854fa6638aa0be677a2b705f42fe8f417ac95`.
 - The real executor is an intent-bounded `python3 -E` child. It ignores
   `PYTHON*`/`PYTHONPATH` injection without excluding the target host's
   user-site `psycopg2`; the parent never opens the probe gate.
@@ -632,7 +632,7 @@ the last sentence of §13.
   six-class S1.5 receipt
   (`sha256:ab63d9db3682e94be195446e4e4d9a586d1ef327427547d88347d934914b140f`)
   and emitted a fresh eight-seam S1.6 effect
-  (`sha256:e4efb9bc82f49278c8ab889eadf23f7de4767967aa5d406d9adb87623b1250db`),
+  (`sha256:9f8f40b15598822544f0dd8618429ae3c6c2ac2b153d8b3acd70094b73fffd99`),
   with `binding=BINDING`, exact rollback/postcheck, and zero residue.
 - The S1 signer reuses the adopted S0.3 trust root with identity
   `aiml-s1-target-host-operator-v1` and namespace
@@ -640,7 +640,7 @@ the last sentence of §13.
   `SHA256:uGJ9veN7PoE6BBgfsSP2aiMndrwgbt7o/7/YfdzNzCQ` signed the canonical bundle;
   an independent `ssh-keygen -Y verify` passed.
 - Closure digest:
-  `sha256:55a1fe393d13baf3b341505be0965d101b4c16972699e22d5c48665b943bad47`.
+  `sha256:eeef47cca1bcbfd44fb917759539b6afd06610669ec65a3be9e30b27a1f46de1`.
   All artifacts are durable in
   `docs/execution_plan/ai_ml_landing/receipts/S1-closure-fix-2026-07-24/`.
 - Current state: `S1_CLOSURE_AUTHENTICATED_PENDING_MERGE`. The remaining
@@ -648,10 +648,12 @@ the last sentence of §13.
   final `S1_CLOSED` ledger projection, and three-way synchronization.
 - External Object-Lock execution remains S8.6 and is not an S1 blocker. All
   nine authority grants remain false.
-- Final adversarial closure repaired three additional P1s: inline caller
+- Final adversarial closure repaired four additional P1s: inline caller
   previews are byte-bounded while the complete match manifest remains
   digest-bound, and the target-host driver binds `--source-head` to the exact
   clean worktree `HEAD` before any effect. The finalization result now captures
   `evaluated_at` after trusted evaluation, so it cannot predate a Context
   source's validity window; immediate and receipt-time historical replay both
-  pass.
+  pass. The finalizer regression now matches the required governance CI glob,
+  and the job's 10-minute budget prevents a mechanically green full gate from
+  being cancelled at the former five-minute ceiling.

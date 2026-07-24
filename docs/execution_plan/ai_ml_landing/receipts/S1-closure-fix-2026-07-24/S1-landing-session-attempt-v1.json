@@ -14,10 +14,10 @@
   },
   "attempt_phase": "SOURCE_BUILD",
   "bootstrap_admission": {
-    "baseline_head": "e6572b96e60ac305e2ff2bedffa1cf148e75aa7a",
-    "context_artifact_digest": "sha256:2fc6887ca0ade3b516c08f9d4534e7647fcdbc73abbf91f41dd0a74750aa40d2",
+    "baseline_head": "45a854fa6638aa0be677a2b705f42fe8f417ac95",
+    "context_artifact_digest": "sha256:ebdf0de45ee47d5aa80ae9ecf5b8515863f3d71e190507f2ae181183f9ef3b6d",
     "dag_digest": "sha256:402288f0e54ded307bf8f98e0caf632a89502a38239a69421e79646640821152",
-    "task_contract_digest": "sha256:7d4b875088e05256ec517748f73d7c9c70dfe165dacd2e87b869a9ab1f5e12fd",
+    "task_contract_digest": "sha256:02cc6ec64d8bfd240e93b10a638558d80e44603ce820c7351771b818edbffea2",
     "task_id": "aiml-s1-formal-closure-v1",
     "writer_lease_id": "5e151851bf81fd296eef27ba46b28050"
   },
@@ -30,12 +30,12 @@
     ]
   },
   "closure_binding": {
-    "closure_packet_digest": "sha256:55a1fe393d13baf3b341505be0965d101b4c16972699e22d5c48665b943bad47",
+    "closure_packet_digest": "sha256:eeef47cca1bcbfd44fb917759539b6afd06610669ec65a3be9e30b27a1f46de1",
     "effect_adapter_id": "target_host_disposable_runtime_probe_adapter_v1",
-    "effect_receipt_digest": "sha256:e4efb9bc82f49278c8ab889eadf23f7de4767967aa5d406d9adb87623b1250db"
+    "effect_receipt_digest": "sha256:9f8f40b15598822544f0dd8618429ae3c6c2ac2b153d8b3acd70094b73fffd99"
   },
   "cohort_epoch": "2026-07-24-s1-final",
-  "created_at": "2026-07-24T01:05:44.165787Z",
+  "created_at": "2026-07-24T01:22:06.039400Z",
   "dag_nodes": [
     {
       "node_class": "work",
@@ -55,7 +55,7 @@
       "session_id": "S1.5"
     },
     {
-      "receipt_digest": "sha256:9e300001624ab2f185328c86b79d6df8a480e75fecfaf0ad521c1a6ba66dec21",
+      "receipt_digest": "sha256:52265711cf9440309786cd368dfd6e1fd20480bbd2c578db958697dbb2c71857",
       "schema_version": "learning_runtime_choice_receipt_target_host_v1",
       "session_id": "S1.6"
     }
@@ -63,10 +63,10 @@
   "effect_classification_digest": "sha256:58c3a7224a057932fbaaeebfd069cc8157a02d7d7d06a7391f91903455e03a34",
   "independent_postcheck_node": "ops_postcheck",
   "lease": {
-    "acquired_at": "2026-07-24T01:04:44.165787Z",
+    "acquired_at": "2026-07-24T01:21:06.039400Z",
     "epoch": 1,
-    "expires_at": "2026-07-24T05:05:44.165787Z",
-    "heartbeat_at": "2026-07-24T01:05:44.165787Z",
+    "expires_at": "2026-07-24T05:22:06.039400Z",
+    "heartbeat_at": "2026-07-24T01:22:06.039400Z",
     "lease_id": "5e151851bf81fd296eef27ba46b28050"
   },
   "native_admission": {
@@ -97,15 +97,15 @@
     "kind": "LANDING_SCOPE",
     "landing_scope_id": "sha256:df51082fcc3512190834f8e947a5bbc190ee3119ecd0b19af80cf46bec66f3e3"
   },
-  "self_digest": "sha256:6b579c935c50993e3e3cdd17886a5fc1eca1ac414181947ce0040cce91c316ed",
+  "self_digest": "sha256:e2522fe13952fa4203fa3ecc9609cbce3db04bb1e01a16daa9753c0e3ed0243a",
   "semantic_rechecks": [
     "path_ownership"
   ],
   "session_id": "S1.6B",
   "source": {
-    "baseline_head": "e6572b96e60ac305e2ff2bedffa1cf148e75aa7a",
+    "baseline_head": "45a854fa6638aa0be677a2b705f42fe8f417ac95",
     "branch": "agent/aiml-s1-closure-p1p2-fixes",
-    "checkpoint_head": "e6572b96e60ac305e2ff2bedffa1cf148e75aa7a",
+    "checkpoint_head": "45a854fa6638aa0be677a2b705f42fe8f417ac95",
     "worktree": "/Users/ncyu/Projects/TradeBot/.codex-worktrees/aiml-s1-closure-p1p2-fixes"
   },
   "status": "FINALIZED",

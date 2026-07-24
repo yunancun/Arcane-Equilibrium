@@ -820,24 +820,26 @@ PR #114 (Wave A-C source landing, merge `7d78765a2`) merged before Codex review 
 
 ### §8 — Authenticated closure emission (2026-07-24)
 
-The final H_effect is `e6572b96e60ac305e2ff2bedffa1cf148e75aa7a`.
+The final H_effect is `45a854fa6638aa0be677a2b705f42fe8f417ac95`.
 Linux `trade-core` revalidated the still-fresh, source/schema-identical
 six-class S1.5 receipt
 (`sha256:ab63d9db3682e94be195446e4e4d9a586d1ef327427547d88347d934914b140f`)
 and produced a fresh eight-seam S1.6 target-host effect
-(`sha256:e4efb9bc82f49278c8ab889eadf23f7de4767967aa5d406d9adb87623b1250db`);
+(`sha256:9f8f40b15598822544f0dd8618429ae3c6c2ac2b153d8b3acd70094b73fffd99`);
 both passed with exact rollback/postcheck and zero residue. The authenticated
 closure digest is
-`sha256:55a1fe393d13baf3b341505be0965d101b4c16972699e22d5c48665b943bad47`.
+`sha256:eeef47cca1bcbfd44fb917759539b6afd06610669ec65a3be9e30b27a1f46de1`.
 The signed bundle and complete causal artifacts are durable under
 `docs/execution_plan/ai_ml_landing/receipts/S1-closure-fix-2026-07-24/`.
 This emission grants none of the nine runtime/trading authorities.
 
-The final adversarial closeout also repaired three load-bearing P1s before this
+The final adversarial closeout also repaired four load-bearing P1s before this
 emission: generated one-line receipts can no longer exhaust the supposedly
 bounded direct-caller Context preview (full-match digest remains binding), and
 the target-host run driver now refuses any caller-supplied source head that is
 not the exact clean worktree `HEAD`. It also records `evaluated_at` only after
 trusted finalization completes, so the durable result cannot predate Context
 source validity. Immediate trusted-host validation and receipt-time historical
-replay both pass.
+replay both pass. The finalizer regression is also selected by the required
+governance glob, whose 10-minute budget permits the complete gate to finish
+instead of cancelling at five minutes.

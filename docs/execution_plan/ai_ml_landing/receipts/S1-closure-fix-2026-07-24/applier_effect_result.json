@@ -1,7 +1,7 @@
 {
   "adapter_id": "target_host_disposable_runtime_probe_adapter_v1",
   "applier_node_id": "s1fc_apply_actor",
-  "approved_at": "2026-07-24T01:05:08.018459+00:00",
+  "approved_at": "2026-07-24T01:21:43.994813+00:00",
   "approved_by": "operator",
   "choice_receipt": {
     "boundary": {
@@ -16,7 +16,7 @@
       "real_target_host_primitives_invoked": true,
       "user_scope_only": true
     },
-    "caller": "target_host_probe_v1:intent-applier:sha256:7494274d90d34385ae34268d5f303c340000fad27d8849e9b2ea2d2ae55be078",
+    "caller": "target_host_probe_v1:intent-applier:sha256:adf8d53925d54fa08c512d7d3786f91faee8c72c565f453daccaca3df9457168",
     "candidate_probes": [
       {
         "apply_actor_node": "s1fc_apply_actor",
@@ -35,7 +35,7 @@
             "verdict": "PASSED_TARGET_HOST"
           },
           {
-            "evidence_digest": "sha256:a936b0f00c401d37408158230b6393569f8ecb51a20806a5e0858764292dcc4d",
+            "evidence_digest": "sha256:b30c1cd2857bb71170403a99810236b2c2a5c039675189ec0fbcbe0e5bf8d642",
             "note": "scope with MemoryMax/MemoryHigh/CPUQuota/TasksMax drove memory.events:oom_kill, cpu.stat throttling and pids.events:max (cpu/mem/pids; cpuset/io root-only deferred)",
             "seam_id": "cgroup_resource_isolation",
             "verdict": "PASSED_TARGET_HOST"
@@ -60,7 +60,7 @@
             "verdict": "PASSED_TARGET_HOST"
           },
           {
-            "evidence_digest": "sha256:e905ee62a68cf53d207ec1a4eb3dcf06a1c439f40373e7bc9c759b1f8259fe18",
+            "evidence_digest": "sha256:d0bcd307174bab83dd72174805163a1dccd8c3036bea7e81ba0b888cdf2a73a1",
             "note": "systemctl --user kill + restart the deployed content-addressed bundle; restarted process resolves (proc cwd) under the rolled-back bundle root; interrupted apply never swaps; teardown + reset-failed + rmtree",
             "seam_id": "failure_rollback_cleanup",
             "verdict": "PASSED_TARGET_HOST"
@@ -150,7 +150,7 @@
       "runtime_candidate_receipt_b_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     },
     "evidence_class": "PLATFORM_OR_EXTERNAL_ATTESTED",
-    "expires_at": "2026-07-24T01:20:08.018459+00:00",
+    "expires_at": "2026-07-24T01:36:43.994813+00:00",
     "failure_reason": null,
     "harness_id": "target_host_probe_v1",
     "host_identity": {
@@ -169,7 +169,7 @@
       "passwordless_sudo_present": false,
       "throwaway_root_under_runtime_dir": true
     },
-    "observation_time": "2026-07-24T01:05:08.018459+00:00",
+    "observation_time": "2026-07-24T01:21:43.994813+00:00",
     "platform": {
       "arch": "x86_64",
       "bwrap_available": true,
@@ -206,7 +206,7 @@
       "reason": "OCI is NON_SATISFIABLE_NON_ROOT on trade-core; fixed-path is the choice but PROVISIONAL_PENDING_LINUX because these fixed-path seams are not PASSED_TARGET_HOST: ['independent_postcheck'].",
       "selection_rule": "oci_only_if_all_seams_pass_else_fixed_path"
     },
-    "self_digest": "sha256:8bef4c90358fc3c6cd8b0fea39e7f163c7870317c3d05b2ed5750013e32b4331",
+    "self_digest": "sha256:ef0f8bbc622b5e6bd8a16e2b92a77c02c6a32f8833daf7901abb7c469ddcacee",
     "source_sha256": "sha256:fcbf76a1e434ad3f94253a60f8fb369947b26ca24b47a7e696bde45c989975a7",
     "status": "PASS",
     "target_class": "target_host",
@@ -228,19 +228,19 @@
       "unselected_production_artifact_present": false
     }
   },
-  "choice_receipt_digest": "sha256:8bef4c90358fc3c6cd8b0fea39e7f163c7870317c3d05b2ed5750013e32b4331",
-  "completed_at": "2026-07-24T01:05:08.018459+00:00",
+  "choice_receipt_digest": "sha256:ef0f8bbc622b5e6bd8a16e2b92a77c02c6a32f8833daf7901abb7c469ddcacee",
+  "completed_at": "2026-07-24T01:21:43.994813+00:00",
   "effect_status": "TARGET_HOST_DISPOSABLE_PROBE_PASS",
-  "evidence_expires_at": "2026-07-24T01:15:08.018459+00:00",
+  "evidence_expires_at": "2026-07-24T01:31:43.994813+00:00",
   "failure_reason": null,
-  "intent_digest": "sha256:35a0d69dd18f33988636fb2c345fec7d6872a1b06653816db98bb7d4d87867cf",
-  "intent_expires_at": "2026-07-24T01:20:08.018459+00:00",
-  "intent_id": "sha256:7494274d90d34385ae34268d5f303c340000fad27d8849e9b2ea2d2ae55be078",
+  "intent_digest": "sha256:5311afebdca9101fa48dd098388dfa4d9da5a6301cbca19e38f731e315cecac7",
+  "intent_expires_at": "2026-07-24T01:36:43.994813+00:00",
+  "intent_id": "sha256:adf8d53925d54fa08c512d7d3786f91faee8c72c565f453daccaca3df9457168",
   "postcheck_verifier_node_id": "ops_postcheck",
-  "receipt_digest": "sha256:07df0ecc1edcdd8737245ecfbe5e3a57eb72c5ac5151cb00f432b97fab12a0f6",
+  "receipt_digest": "sha256:9342c69d130fee9157327e7b24f3b37a4b06cd5284e46fcd63f8acb6d7338396",
   "schema_version": "target_host_effect_result_v1",
-  "source_head": "e6572b96e60ac305e2ff2bedffa1cf148e75aa7a",
-  "started_at": "2026-07-24T01:05:08.018459+00:00",
+  "source_head": "45a854fa6638aa0be677a2b705f42fe8f417ac95",
+  "started_at": "2026-07-24T01:21:43.994813+00:00",
   "target_host": "trade-core",
   "verifier_capture_digest": null
 }

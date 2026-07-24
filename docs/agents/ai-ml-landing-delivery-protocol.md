@@ -172,7 +172,7 @@ No ML5/ML6 source, schema, runtime or effect implementation begins before S0.3.
   the applier passes authorization via an isolated `python3 -E` child over a
   one-time pipe (never the parent process env). The external S3 Object-Lock
   effect is `S8.6`, not an S1 blocker. On 2026-07-24 the out-of-band operator
-  SSHSIG was issued and independently verified at H_effect `e6572b96e`; both
+  SSHSIG was issued and independently verified at H_effect `45a854fa6`; both
   immediate trusted-host validation and receipt-time historical replay passed; the
   durable state is `S1_CLOSURE_AUTHENTICATED_PENDING_MERGE`. S1 becomes
   `S1_CLOSED` only after exact-head review, required CI, PR #115 merge, final

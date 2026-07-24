@@ -14,7 +14,7 @@
       "admitted_input_tokens_lower_bound": 0,
       "base_prompt_digest": "sha256:c12f84449f6b1d1a8fff7509cf36ad218a062b1a4d409a1fe29ede2c2744a068",
       "compiler_estimated_input_tokens": 0,
-      "context_artifact_digest": "sha256:2fc6887ca0ade3b516c08f9d4534e7647fcdbc73abbf91f41dd0a74750aa40d2",
+      "context_artifact_digest": "sha256:ebdf0de45ee47d5aa80ae9ecf5b8515863f3d71e190507f2ae181183f9ef3b6d",
       "description_digest": "sha256:528d234ec7d2317413eb8f1a44859e18210931f9a09057553166db98eae8f5cc",
       "dirty_scope": [
         "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_host.py",
@@ -51,13 +51,13 @@
       },
       "requires": [],
       "role": "PA",
-      "task_contract_digest": "sha256:7d4b875088e05256ec517748f73d7c9c70dfe165dacd2e87b869a9ab1f5e12fd"
+      "task_contract_digest": "sha256:02cc6ec64d8bfd240e93b10a638558d80e44603ce820c7351771b818edbffea2"
     },
     {
       "admitted_input_tokens_lower_bound": 0,
       "base_prompt_digest": "sha256:f6616139ba2f265f6e6ab12dfbf41a334e89dbb8db7d7ba6a0f99e80368462d0",
       "compiler_estimated_input_tokens": 0,
-      "context_artifact_digest": "sha256:2fc6887ca0ade3b516c08f9d4534e7647fcdbc73abbf91f41dd0a74750aa40d2",
+      "context_artifact_digest": "sha256:ebdf0de45ee47d5aa80ae9ecf5b8515863f3d71e190507f2ae181183f9ef3b6d",
       "description_digest": "sha256:3abf5b940ea980f405def51b8aea2da7ca835c832cb8fa7625cdd4eb8661a9a8",
       "dirty_scope": [
         "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_host.py",
@@ -96,13 +96,13 @@
         "pa_design"
       ],
       "role": "CC",
-      "task_contract_digest": "sha256:7d4b875088e05256ec517748f73d7c9c70dfe165dacd2e87b869a9ab1f5e12fd"
+      "task_contract_digest": "sha256:02cc6ec64d8bfd240e93b10a638558d80e44603ce820c7351771b818edbffea2"
     },
     {
       "admitted_input_tokens_lower_bound": 0,
       "base_prompt_digest": "sha256:4229c68487d55b1425078a422d82558bc49dde43687d3e05964170d077fef254",
       "compiler_estimated_input_tokens": 0,
-      "context_artifact_digest": "sha256:2fc6887ca0ade3b516c08f9d4534e7647fcdbc73abbf91f41dd0a74750aa40d2",
+      "context_artifact_digest": "sha256:ebdf0de45ee47d5aa80ae9ecf5b8515863f3d71e190507f2ae181183f9ef3b6d",
       "description_digest": "sha256:acaa2a78edc7269629786ba85b997fc3684aac5e2daf6d652771fc8582c8625c",
       "dirty_scope": [
         "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_host.py",
@@ -141,13 +141,13 @@
         "pa_design"
       ],
       "role": "E3",
-      "task_contract_digest": "sha256:7d4b875088e05256ec517748f73d7c9c70dfe165dacd2e87b869a9ab1f5e12fd"
+      "task_contract_digest": "sha256:02cc6ec64d8bfd240e93b10a638558d80e44603ce820c7351771b818edbffea2"
     },
     {
       "admitted_input_tokens_lower_bound": 0,
       "base_prompt_digest": "sha256:368943373614007af55f53fae51b14e4b113e3e36faf68742a0e5021d7a3a338",
       "compiler_estimated_input_tokens": 0,
-      "context_artifact_digest": "sha256:2fc6887ca0ade3b516c08f9d4534e7647fcdbc73abbf91f41dd0a74750aa40d2",
+      "context_artifact_digest": "sha256:ebdf0de45ee47d5aa80ae9ecf5b8515863f3d71e190507f2ae181183f9ef3b6d",
       "description_digest": "sha256:82aaa820aa296f4ea9446629766853bba57e5fe608b3119941bfda86ad65b4dc",
       "dirty_scope": [
         "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_host.py",
@@ -188,13 +188,13 @@
         "security_gate"
       ],
       "role": "OPS",
-      "task_contract_digest": "sha256:7d4b875088e05256ec517748f73d7c9c70dfe165dacd2e87b869a9ab1f5e12fd"
+      "task_contract_digest": "sha256:02cc6ec64d8bfd240e93b10a638558d80e44603ce820c7351771b818edbffea2"
     },
     {
       "admitted_input_tokens_lower_bound": 0,
       "base_prompt_digest": "sha256:1c03099c30c351b661fb6e5ad3c964cf600716bf3bbc25ddc1e1b84df1e4d071",
       "compiler_estimated_input_tokens": 0,
-      "context_artifact_digest": "sha256:2fc6887ca0ade3b516c08f9d4534e7647fcdbc73abbf91f41dd0a74750aa40d2",
+      "context_artifact_digest": "sha256:ebdf0de45ee47d5aa80ae9ecf5b8515863f3d71e190507f2ae181183f9ef3b6d",
       "description_digest": "sha256:cd7338b4f5b0b28080b57c9c55b9a0bac89220e7e66fae40c1f0cda1598fd174",
       "dirty_scope": [
         "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_host.py",
@@ -233,7 +233,7 @@
         "ops_preflight"
       ],
       "role": "OPS",
-      "task_contract_digest": "sha256:7d4b875088e05256ec517748f73d7c9c70dfe165dacd2e87b869a9ab1f5e12fd"
+      "task_contract_digest": "sha256:02cc6ec64d8bfd240e93b10a638558d80e44603ce820c7351771b818edbffea2"
     }
   ],
   "budget_authority": {
@@ -248,21 +248,21 @@
     "authority_canonical": "{\"accounting_basis\":\"utf8_bytes_div4_planned_lower_bound_v1\",\"envelope\":\"complex\",\"max_call_attempts\":14,\"max_context_tokens_per_call\":42000,\"max_prompt_utf8_bytes_per_call\":167996,\"max_unique_nodes\":12,\"max_workflow_planned_input_tokens\":588000,\"retry_budget\":2,\"schema_version\":\"context_budget_authority_v1\"}",
     "authority_digest": "sha256:300c1d04a7fbd8b395ce73d0d926cbfba8fdfabdcb1eecd88e07c69317ac5037"
   },
-  "call_manifest_digest": "sha256:ca7ea83cbbbe4968341027d89d918d27a70dfd2f1362065220dc5444d8904e08",
+  "call_manifest_digest": "sha256:90ca5c4eeea4726a9e72acab3e80f8494d545618b1f7a9df635a9e78a325f655",
   "call_record_digests": [
-    "sha256:b4c6fefb013e9ace8150f187e5033d85122db789e77676349e3626ff392b3f15",
-    "sha256:a753add69f1c7c0d93e477c99f3c087d0ed87cabaa52d4df5cedbecc2426b7d3",
-    "sha256:aeade7530dccdba5a1677b27a7b12bd762d7cede40f3b1cfd6e09abc3ee6f3aa",
-    "sha256:385ec855dfc6d756d603d75917192a766538715f7a5c71c2738df63371e52c54",
-    "sha256:1a82a24d698ffce387be3bf736753370bd8dbe186e0ed4e5d862003cce6e2870"
+    "sha256:f222fc039e19875c273288da14683c0a802ede091546c59cf9c082a7dec04a71",
+    "sha256:a48f8a53f72adc9ef5713af01b32fa0c8cefedd60843e00849fdaa8b54e5aa2f",
+    "sha256:398765b9ed267d9d63b0b5fb3e149796f7fcedc8b43a67150194e7e5d40c1d21",
+    "sha256:8bf07f01744b916966af35d307feabb8531805eea8b157aefa9abe0a6acda99b",
+    "sha256:bbf1dce04880331a084e1920b130bff349f28fe152705c456db13ddd3129fa1f"
   ],
   "compiler_planned_input_tokens_lower_bound": 0,
   "context_artifact_digests": {
-    "constitutional_gate": "sha256:2fc6887ca0ade3b516c08f9d4534e7647fcdbc73abbf91f41dd0a74750aa40d2",
-    "ops_postcheck": "sha256:2fc6887ca0ade3b516c08f9d4534e7647fcdbc73abbf91f41dd0a74750aa40d2",
-    "ops_preflight": "sha256:2fc6887ca0ade3b516c08f9d4534e7647fcdbc73abbf91f41dd0a74750aa40d2",
-    "pa_design": "sha256:2fc6887ca0ade3b516c08f9d4534e7647fcdbc73abbf91f41dd0a74750aa40d2",
-    "security_gate": "sha256:2fc6887ca0ade3b516c08f9d4534e7647fcdbc73abbf91f41dd0a74750aa40d2"
+    "constitutional_gate": "sha256:ebdf0de45ee47d5aa80ae9ecf5b8515863f3d71e190507f2ae181183f9ef3b6d",
+    "ops_postcheck": "sha256:ebdf0de45ee47d5aa80ae9ecf5b8515863f3d71e190507f2ae181183f9ef3b6d",
+    "ops_preflight": "sha256:ebdf0de45ee47d5aa80ae9ecf5b8515863f3d71e190507f2ae181183f9ef3b6d",
+    "pa_design": "sha256:ebdf0de45ee47d5aa80ae9ecf5b8515863f3d71e190507f2ae181183f9ef3b6d",
+    "security_gate": "sha256:ebdf0de45ee47d5aa80ae9ecf5b8515863f3d71e190507f2ae181183f9ef3b6d"
   },
   "coverage_debt": [],
   "dag_digest": "sha256:402288f0e54ded307bf8f98e0caf632a89502a38239a69421e79646640821152",
@@ -284,17 +284,17 @@
   "final_null_node_count": 0,
   "first_attempt_call_count": 5,
   "null_call_count": 0,
-  "record_digest": "sha256:16aac28ec8b43b3c5dbe57cc58371d7b9605aed44410a46ec513f49c29e7e70f",
+  "record_digest": "sha256:14b2bbf4725293e030264e2dd92a3534bc7a667848fbfce5e8ddf70d24ffb93d",
   "result_fragment_digests": {
-    "constitutional_gate": "sha256:0073f5be9a61fb617db2c65c1a7766b14cd0f28753ac42731e77fd023afe0009",
-    "ops_postcheck": "sha256:5d64de671965499bb37a4f0493b0280feba83a465287071f45df868244288ba7",
-    "ops_preflight": "sha256:3f5550d4dc287e1f2a67b52ce97ca355fd95130d0428e2ce70f743fe2aed9202",
-    "pa_design": "sha256:584d7d93398e679dc049046593880299abec4da8a79e24ea94042fd4f9a0daf0",
-    "security_gate": "sha256:3556ba8b11f8f23a159d3f99f7e8b981fa0ea218d699b16df8d1e576653a00d2"
+    "constitutional_gate": "sha256:a8cb0046c75b60a733168bbabe1a135374742d799ae258bcdc16f944c6cc9d4c",
+    "ops_postcheck": "sha256:c0799d5896d7f7c43897faefaa7b9e1912a32d4bc412df3b61c0ec11c87d903e",
+    "ops_preflight": "sha256:254ed066a7ed9bcc85613057a6f64e2964c140f46470297dfe75fdca0efc89c1",
+    "pa_design": "sha256:4955d0086f3d3bdd2e6231108b2ca3621c19ac20d61b72f69397559052f0739f",
+    "security_gate": "sha256:eea636b73c78e895a964b21fe87b5947ac103a27cd41510c94d5bfe09943bd1f"
   },
   "retry_call_count": 0,
   "scheduled_call_admitted_input_tokens_lower_bound": 0,
   "scheduled_call_compiler_input_tokens_lower_bound": 0,
   "schema_version": "workflow_wave_record_v1",
-  "workflow_contract_digest": "sha256:7af10f5c8a716ab8299436d30214ec39010b1be03490759d01c9d18f5a160bc5"
+  "workflow_contract_digest": "sha256:ad0d54c9c6ae358101de6ee51f5faf84e6574475c2e73b4afb26fb631685037c"
 }
