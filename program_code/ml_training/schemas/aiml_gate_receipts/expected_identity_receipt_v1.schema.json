@@ -11,6 +11,7 @@
     "status",
     "caller",
     "platform",
+    "selected_runtime_kind",
     "sealed_build_digest",
     "runtime_content_digest",
     "identity_acl_contract_digest",
@@ -47,6 +48,7 @@
         "target_platform": {"type": "string", "minLength": 1}
       }
     },
+    "selected_runtime_kind": {"const": "content_addressed_fixed_path"},
     "sealed_build_digest": {"$ref": "#/$defs/digest"},
     "runtime_content_digest": {"$ref": "#/$defs/digest"},
     "identity_acl_contract_digest": {"$ref": "#/$defs/digest"},

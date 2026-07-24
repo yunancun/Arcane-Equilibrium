@@ -60,7 +60,10 @@ def test_sealed_build_gate_covers_its_own_contract_surface() -> None:
         "requirements-ml.txt",
         "program_code/ml_training/schemas/aiml_gate_receipts/sealed_build_receipt_v1.schema.json",
         "program_code/ml_training/schemas/aiml_gate_receipts/expected_identity_receipt_v1.schema.json",
+        "program_code/ml_training/schemas/aiml_gate_receipts/learning_runtime_choice_receipt_v1.schema.json",
         "tests/fixtures/sealed_build/hermetic_closure.lock",
+        "docs/execution_plan/ai_ml_landing/receipts/S2.3-sealed-build-receipt-v1.json",
+        "docs/execution_plan/ai_ml_landing/receipts/S2.3-expected-identity-receipt-v1.json",
     )
     for path in lock_only_paths:
         result = classify_paths([path])

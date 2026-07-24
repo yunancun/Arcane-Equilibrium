@@ -193,16 +193,35 @@ def _identity_from_fixture():
         platform=sb.target_platform_block(),
         sealed_build_digest=sealed["self_digest"],
         runtime_content_digest=sealed["runtime_content_digest"],
-        identity_acl_contract_digest=_identity_binding_digest(),
+        # F3:identity_acl_contract_digest 必為 committed S1.3 ground-truth 常量。
+        identity_acl_contract_digest=sb.S1_3_IDENTITY_ACL_RECEIPT_DIGEST,
         observation_time=OBS,
         ttl_seconds=1800,
     )
 
 
-def test_fixture_expected_identity_binds_the_vendored_s1_3_receipt():
+def test_fixture_expected_identity_binds_committed_s1_3_ground_truth():
     receipt = _identity_from_fixture()
-    assert receipt["identity_acl_contract_digest"] == _identity_binding_digest()
+    assert receipt["identity_acl_contract_digest"] == sb.S1_3_IDENTITY_ACL_RECEIPT_DIGEST
     assert sb.validate_expected_identity_receipt(receipt, require_success=True, now=NOW) == []
+
+
+def test_binding_a_valid_but_noncanonical_s1_3_receipt_digest_is_rejected():
+    # F3:vendored fixture S1.3 receipt 是「合法但非 canonical」的 disposable S1.3 receipt;綁其 self_digest
+    # (≠ committed ground-truth 常量)必被 validator 拒——證明 F3 的 ground-truth 綁定確實有牙。
+    fixture_digest = _identity_binding_digest()
+    assert fixture_digest != sb.S1_3_IDENTITY_ACL_RECEIPT_DIGEST
+    sealed = _sealed_from_fixture()
+    receipt = sb.build_expected_identity_receipt(
+        caller="E1:S2.3:offline",
+        platform=sb.target_platform_block(),
+        sealed_build_digest=sealed["self_digest"],
+        runtime_content_digest=sealed["runtime_content_digest"],
+        identity_acl_contract_digest=fixture_digest,
+        observation_time=OBS,
+        ttl_seconds=1800,
+    )
+    assert any("S1.3 ground-truth" in e for e in sb.validate_expected_identity_receipt(receipt))
 
 
 def test_identity_matrix_component_with_oci_socket_true_is_rejected():
@@ -238,3 +257,72 @@ def test_identity_matrix_component_not_matching_s1_3_projection_is_rejected():
 def test_over_grant_kinds_are_at_least_ten():
     # S1.3 的 over-grant 種類數是 negative_acl_binding.count 的真相來源(>=10)。
     assert len(s1_3.OVER_GRANT_KINDS) >= 10
+
+
+# --------------------------------------------------------------------------- #
+# F2: committed receipts are tamper-evident, CI-caught, and drift-evident
+# --------------------------------------------------------------------------- #
+_RECEIPTS_DIR = ROOT / "docs/execution_plan/ai_ml_landing/receipts"
+_REAL_LOCK = ROOT / "requirements-ml.lock"
+
+
+def _serialize_receipt(payload: dict) -> str:
+    # 必須與模組 _write_json 的序列化格式逐位元一致(byte-equality drift 檢查)。
+    return json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+
+
+def test_committed_receipts_are_independently_verifiable_and_drift_evident():
+    # F2a(鏡射 S0.3 persisted-evidence 先例):載入兩張 committed receipt、以真鎖 / 配對 sealed
+    # 交叉核驗 require_success,並斷言 byte-equal 於一次 deterministic 重 emit——任何手改/漂移即紅。
+    sealed_text = (_RECEIPTS_DIR / "S2.3-sealed-build-receipt-v1.json").read_text(encoding="utf-8")
+    identity_text = (_RECEIPTS_DIR / "S2.3-expected-identity-receipt-v1.json").read_text(encoding="utf-8")
+    sealed_committed = json.loads(sealed_text)
+    identity_committed = json.loads(identity_text)
+
+    assert sb.validate_sealed_build_receipt(
+        sealed_committed, require_success=True, lock_path=_REAL_LOCK
+    ) == []
+    assert sb.validate_expected_identity_receipt(
+        identity_committed, require_success=True, sealed_receipt=sealed_committed
+    ) == []
+
+    fresh_sealed, fresh_identity = sb.emit_s23_receipts(observation_time="2026-07-24T00:00:00+00:00")
+    # dict 語義相等(含 self_digest)。
+    assert sealed_committed == fresh_sealed
+    assert identity_committed == fresh_identity
+    # 逐位元相等(連格式漂移都紅)。
+    assert sealed_text == _serialize_receipt(fresh_sealed)
+    assert identity_text == _serialize_receipt(fresh_identity)
+
+
+def test_sealed_lock_reassertion_catches_forged_counts_and_closure_hash():
+    # F2b / FORGERY A:提供真鎖時,謊報的 entries_total / closure_hash 被抓(不再是 opaque 自報值)。
+    sealed = json.loads((_RECEIPTS_DIR / "S2.3-sealed-build-receipt-v1.json").read_text(encoding="utf-8"))
+    forged_counts = deepcopy(sealed)
+    forged_counts["dependency_closure"]["entries_total"] = 99
+    forged_counts["dependency_closure"]["hashed_entries_total"] = 99
+    forged_counts["self_digest"] = sb.receipt_digest(forged_counts)
+    assert any(
+        "entries_total does not match the committed lock" in e
+        for e in sb.validate_sealed_build_receipt(forged_counts, lock_path=_REAL_LOCK)
+    )
+    forged_hash = deepcopy(sealed)
+    forged_hash["closure_hash"] = "sha256:" + ("c" * 64)
+    forged_hash["self_digest"] = sb.receipt_digest(forged_hash)
+    assert any(
+        "closure_hash does not match the committed lock" in e
+        for e in sb.validate_sealed_build_receipt(forged_hash, lock_path=_REAL_LOCK)
+    )
+
+
+def test_sealed_lock_reassertion_catches_forged_native_wheel_digest():
+    # F2b:謊報 native wheel_sha256(對真鎖投影不符)被抓。
+    sealed = json.loads((_RECEIPTS_DIR / "S2.3-sealed-build-receipt-v1.json").read_text(encoding="utf-8"))
+    assert sealed["native_library_inventory"]
+    forged = deepcopy(sealed)
+    forged["native_library_inventory"][0]["wheel_sha256"] = "sha256:" + ("d" * 64)
+    forged["self_digest"] = sb.receipt_digest(forged)
+    assert any(
+        "native_library_inventory does not match the committed lock projection" in e
+        for e in sb.validate_sealed_build_receipt(forged, lock_path=_REAL_LOCK)
+    )

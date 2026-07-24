@@ -11,6 +11,7 @@
     "status",
     "caller",
     "platform",
+    "selected_runtime_kind",
     "closure_hash",
     "runtime_content_digest",
     "lock_tool",
@@ -47,6 +48,7 @@
         "target_platform": {"type": "string", "minLength": 1}
       }
     },
+    "selected_runtime_kind": {"const": "content_addressed_fixed_path"},
     "closure_hash": {"$ref": "#/$defs/digest"},
     "runtime_content_digest": {"$ref": "#/$defs/digest"},
     "lock_tool": {"type": "string", "minLength": 1},

@@ -229,15 +229,18 @@ jobs:
             tests/structure/test_agent_governance_sealed_build_offline.py
       - name: Confirm the ephemeral sealed venv is initially absent
         run: test ! -e .sealed-venv
-      - name: Fetch the complete hash-pinned wheel closure once (online)
-        run: python3 -m pip download --require-hashes -r requirements-ml.lock -d wheelhouse
+      - name: Fetch the complete hash-pinned wheel closure once (online, wheels only)
+        # --only-binary=:all:：任何非 wheel/sdist 解析即 fail-fast(拒源碼建置),15min 內快速失敗。
+        # 用 block scalar：`:all: ` 的 colon-space 在 inline plain scalar 會被 YAML 誤判為 mapping。
+        run: |
+          python3 -m pip download --only-binary=:all: --require-hashes -r requirements-ml.lock -d wheelhouse
       - name: Create the ephemeral isolated sealed venv
         run: python3 -m venv .sealed-venv
-      - name: Install the closure offline from the local wheelhouse (no index)
+      - name: Install the closure offline from the local wheelhouse (no index, wheels only)
         run: |
           .sealed-venv/bin/python3 -I -m pip install \
-            --no-index --find-links wheelhouse --require-hashes -r requirements-ml.lock
-      - name: Import the native ML libraries under -I isolation (proves .so load on target)
+            --no-index --only-binary=:all: --find-links wheelhouse --require-hashes -r requirements-ml.lock
+      - name: Import the native ML libraries under -I isolation (proves .so load on the target platform)
         run: |
           .sealed-venv/bin/python3 -I -c "import lightgbm, sklearn, onnx, onnxruntime; print('sealed native import OK')"
       - name: Emit and self-validate both S2.3 receipts against the real lock

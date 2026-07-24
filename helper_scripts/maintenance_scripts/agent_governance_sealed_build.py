@@ -99,10 +99,29 @@ SEALED_COMPONENTS = _s1_3.COMPONENTS  # (engine_scanner, controller, fit_evaluat
 
 # 具備原生 .so / 編譯產物的套件白名單:native_library_inventory 只投影 closure 中屬此集合者。
 # 真實載入(dlopen)/目標架相符為 S2.5/LR6,故 load_verified_on_target 一律 const false。
+# 策展意圖:收錄 closure 中「ship 編譯 .so / 原生擴充」的套件——ML 核心(lightgbm/sklearn/scipy/
+# numpy/onnx/onnxruntime)、columnar/IO(pyarrow/duckdb)、JIT(llvmlite/numba/ml-dtypes)與兩個
+# 帶編譯 libpq 的 PG driver(psycopg-binary 由 psycopg[binary] 拉入;psycopg2-binary 為顯式直依賴)。
 NATIVE_PACKAGES = frozenset({
     "lightgbm", "scikit-learn", "scipy", "numpy", "onnx", "onnxruntime",
-    "pyarrow", "duckdb", "llvmlite", "ml-dtypes", "numba", "psycopg-binary",
+    "pyarrow", "duckdb", "llvmlite", "ml-dtypes", "numba",
+    "psycopg-binary", "psycopg2-binary",
 })
+
+# 跨 slice lineage 綁定的真確性分級(F3;CLAUDE §四):
+#  * OFFLINE_GROUND_TRUTH_BOUND —— S1.3 / S1.4-B digest 由本模組常量離線鎖定,且
+#    source_sha256 釘住本模組位元組,故 validator 可離線拒絕任何非 canonical 值(非 authenticity
+#    overclaim,只是離線完整性強化)。
+#  * SCHEMA_LEVEL_FORMAT_ONLY —— S1.6 runtime-choice receipt 為 disposable/uncommitted,只綁其
+#    committed schema 身分(格式層);此指標「不是」對 S1.6 receipt 實例的完整 lineage 認證。
+# 通則:一次通過的 validate_*() 只證結構完整,「非」完整 lineage 認證;S1.6(及任何 SCHEMA_LEVEL)
+# 指標的真確性需 S2.4 out-of-band 可信主機重抓(re-fetch)後方成立。
+LINEAGE_BINDING_KINDS = {
+    "identity_acl_contract_digest": "OFFLINE_GROUND_TRUTH_BOUND",
+    "runtime_candidate_receipt_b_digest": "OFFLINE_GROUND_TRUTH_BOUND",
+    "learning_runtime_choice_receipt_digest": "SCHEMA_LEVEL_FORMAT_ONLY",
+}
+LINEAGE_REFETCH_REQUIRED_AT = "S2.4_trusted_host_refetch"
 
 # --------------------------------------------------------------------------- #
 # 真實 committed S1 lineage digest(綁定來源見各常量註解)。
@@ -139,6 +158,7 @@ SEALED_RECEIPT_FIELDS = frozenset({
     "status",
     "caller",
     "platform",
+    "selected_runtime_kind",
     "closure_hash",
     "runtime_content_digest",
     "lock_tool",
@@ -166,6 +186,7 @@ EXPECTED_IDENTITY_RECEIPT_FIELDS = frozenset({
     "status",
     "caller",
     "platform",
+    "selected_runtime_kind",
     "sealed_build_digest",
     "runtime_content_digest",
     "identity_acl_contract_digest",
@@ -371,9 +392,14 @@ def verify_lock_closure(lock_path: str | Path, spec_path: str | Path) -> dict[st
     """Verify + digest a hash-pinned dependency closure; RAISE fail-closed on any gap.
 
     Asserts: 0 unpinned/``>=`` entries, every entry carries ≥1 sha256, all top-level
-    (direct) spec names present, and transitive completeness — every ``# via`` parent
-    resolves to a present entry (closure closed) and no non-direct entry is orphaned
-    (each was pulled in by something).  Returns a deterministic closure summary with
+    (direct) spec names present, and **internal structural closure** — every ``# via``
+    parent named in the lock resolves to a present entry (the graph is closed) and no
+    non-direct entry is orphaned (each is reachable from a declared ``# via`` provenance).
+    This is a STRUCTURAL check over uv's own ``# via`` annotations — it proves the lock
+    is a self-consistent, fully-pinned closed graph; it is NOT provenance authentication
+    (it does not attest the packages/hashes came from a trusted index or that the ``# via``
+    edges reflect real upstream metadata — that is the CI ``pip download --require-hashes``
+    fetch's job).  Returns a deterministic closure summary with
     ``closure_hash = canonical_digest(sorted (name, version, sorted(hashes)) tuples)``.
     """
 
@@ -614,6 +640,7 @@ def build_sealed_build_receipt(
         "status": "PASS",
         "caller": caller,
         "platform": platform_block,
+        "selected_runtime_kind": SELECTED_RUNTIME_KIND,
         "closure_hash": closure_hash,
         "runtime_content_digest": content_digest,
         "lock_tool": lock_tool,
@@ -694,14 +721,23 @@ def validate_sealed_build_receipt(
     *,
     require_success: bool = False,
     now: str | None = None,
+    lock_path: str | Path | None = None,
+    spec_path: str | Path | None = None,
 ) -> list[str]:
     """Validate the sealed-build receipt structure/integrity and the flipped LR2 consts.
 
     Schema subset, exact field-set, const identity, digest regexes, source/schema
     binding, the flipped consts (``real_ml_closure_resolved`` true / ``unpinned_count`` 0
-    / launch isolated), the const-false ``load_verified_on_target`` + boundary flags, an
-    INDEPENDENT re-derivation of ``runtime_content_digest`` from the receipt's own fields,
-    secret-free serialization, TTL/time ordering and ``self_digest`` re-hash.
+    / launch isolated), the const-false ``load_verified_on_target`` + boundary flags, the
+    ``selected_runtime_kind`` S1.6 anchor, an INDEPENDENT re-derivation of
+    ``runtime_content_digest`` from the receipt's own fields, the offline ground-truth
+    binding of ``runtime_candidate_receipt_b_digest`` to the committed S1.4-B constant
+    (F3), secret-free serialization, TTL/time ordering and ``self_digest`` re-hash.
+
+    When ``lock_path`` is given (the lock is committed + re-derivable), it RE-ASSERTS
+    ``closure_hash`` / ``entries_total`` / ``hashed_entries_total`` / ``unpinned_count`` and
+    the native ``wheel_sha256`` set against the real lock via ``verify_lock_closure`` — so
+    those counts / closure_hash are no longer opaque (kills FORGERY A: lying counts).
     """
 
     if not isinstance(receipt, dict):
@@ -723,6 +759,8 @@ def validate_sealed_build_receipt(
         errors.append("sealed build receipt adapter_id is invalid")
     if receipt.get("status") not in {"PASS", "FAIL"}:
         errors.append("sealed build receipt status is invalid")
+    if receipt.get("selected_runtime_kind") != SELECTED_RUNTIME_KIND:
+        errors.append(f"sealed build receipt selected_runtime_kind must be {SELECTED_RUNTIME_KIND} (S1.6 anchor)")
 
     for field_name in (
         "closure_hash", "runtime_content_digest", "learning_runtime_choice_receipt_digest",
@@ -734,12 +772,21 @@ def validate_sealed_build_receipt(
         errors.append("sealed build receipt source_sha256 does not bind this module")
     if receipt.get("schema_sha256") != sealed_schema_sha256():
         errors.append("sealed build receipt schema_sha256 does not bind the schema")
+    # F3:S1.4-B digest 離線鎖定到 committed ground-truth 常量(source_sha256 已釘住本模組位元組)。
+    # S1.6 digest 維持格式層(schema-level/disposable),其完整 lineage 認證需 S2.4 out-of-band 重抓。
+    if receipt.get("runtime_candidate_receipt_b_digest") != S1_4_RUNTIME_CANDIDATE_B_DIGEST:
+        errors.append(
+            "sealed build receipt runtime_candidate_receipt_b_digest does not bind the committed "
+            "S1.4-B ground-truth digest"
+        )
 
     errors.extend(_validate_sealed_consts(receipt))
     errors.extend(_validate_sealed_native_inventory(receipt))
     errors.extend(_validate_runtime_content_digest(receipt))
     errors.extend(_validate_secret_scan(receipt, kind="sealed build"))
     errors.extend(_validate_times(receipt, now=now, kind="sealed build"))
+    if lock_path is not None:
+        errors.extend(_validate_sealed_against_lock(receipt, lock_path, spec_path))
 
     status = receipt.get("status")
     failure_reason = receipt.get("failure_reason")
@@ -843,6 +890,42 @@ def _validate_runtime_content_digest(receipt: dict[str, Any]) -> list[str]:
     return []
 
 
+def _validate_sealed_against_lock(
+    receipt: dict[str, Any], lock_path: str | Path, spec_path: str | Path | None
+) -> list[str]:
+    """Re-assert closure_hash / counts / native wheel_sha256 against the committed lock (F2b).
+
+    The lock is committed and re-derivable, so ``closure_hash`` and the closure counts are
+    NOT opaque: recompute them from the real lock and reject a receipt that lies about them
+    (FORGERY A).  ``spec_path`` defaults to the committed ``requirements-ml.txt``.
+    """
+
+    errors: list[str] = []
+    spec = spec_path if spec_path is not None else (REPO_ROOT / SPEC_INPUT_REF)
+    try:
+        closure = verify_lock_closure(lock_path, spec)
+    except LockClosureError as exc:
+        return [f"sealed build receipt could not re-verify the committed lock closure: {exc}"]
+    if receipt.get("closure_hash") != closure["closure_hash"]:
+        errors.append("sealed build receipt closure_hash does not match the committed lock")
+    dependency = receipt.get("dependency_closure")
+    if isinstance(dependency, dict):
+        if dependency.get("entries_total") != closure["entries_total"]:
+            errors.append("sealed build dependency_closure.entries_total does not match the committed lock")
+        if dependency.get("hashed_entries_total") != closure["hashed_entries_total"]:
+            errors.append("sealed build dependency_closure.hashed_entries_total does not match the committed lock")
+        if dependency.get("unpinned_count") != closure["unpinned_count"]:
+            errors.append("sealed build dependency_closure.unpinned_count does not match the committed lock")
+    # native wheel_sha256 集合須逐項等於自 committed lock 重投影(package/version/wheel_sha256 皆比對)。
+    expected_inventory = project_native_inventory(closure)
+    if receipt.get("native_library_inventory") != expected_inventory:
+        errors.append(
+            "sealed build native_library_inventory does not match the committed lock projection "
+            "(package/version/wheel_sha256 drift)"
+        )
+    return errors
+
+
 # --------------------------------------------------------------------------- #
 # expected_identity_receipt builder (BINDS/projects S1.3; does not re-derive)
 # --------------------------------------------------------------------------- #
@@ -938,6 +1021,7 @@ def build_expected_identity_receipt(
         "status": "PASS",
         "caller": caller,
         "platform": platform_block,
+        "selected_runtime_kind": SELECTED_RUNTIME_KIND,
         "sealed_build_digest": sealed_build_digest,
         "runtime_content_digest": runtime_content_digest,
         "identity_acl_contract_digest": identity_acl_contract_digest,
@@ -994,6 +1078,7 @@ def validate_expected_identity_receipt(
     *,
     require_success: bool = False,
     now: str | None = None,
+    sealed_receipt: dict[str, Any] | None = None,
 ) -> list[str]:
     """Validate the expected-identity receipt structure/integrity and the S1.3 projection.
 
@@ -1004,7 +1089,14 @@ def validate_expected_identity_receipt(
     pg_role / privilege_class / auth_method / socket_dir_mode / protected_secret_loader),
     that each row is non-root with no OCI socket / DBus authority, that the negative-ACL
     binding re-derives the S1.3 ``OVER_GRANT_KINDS`` digest with ``count`` >= 10 and
-    ``all_rejected``, and that every production / running-attested flag is false.
+    ``all_rejected``, the ``selected_runtime_kind`` S1.6 anchor, that
+    ``identity_acl_contract_digest`` binds the committed S1.3 ground-truth constant (F3),
+    and that every production / running-attested flag is false.
+
+    When ``sealed_receipt`` (the paired sealed build) is given, it asserts
+    ``sealed_build_digest == sealed.self_digest`` and
+    ``runtime_content_digest == sealed.runtime_content_digest`` (kills FORGERY C: swapped
+    identity bindings).
     """
 
     if not isinstance(receipt, dict):
@@ -1028,6 +1120,8 @@ def validate_expected_identity_receipt(
         errors.append("expected identity receipt status is invalid")
     if receipt.get("observation_owner") != "S2.5_LR6":
         errors.append("expected identity receipt observation_owner must be S2.5_LR6")
+    if receipt.get("selected_runtime_kind") != SELECTED_RUNTIME_KIND:
+        errors.append(f"expected identity receipt selected_runtime_kind must be {SELECTED_RUNTIME_KIND} (S1.6 anchor)")
 
     for field_name in (
         "sealed_build_digest", "runtime_content_digest", "identity_acl_contract_digest",
@@ -1039,6 +1133,15 @@ def validate_expected_identity_receipt(
         errors.append("expected identity receipt source_sha256 does not bind this module")
     if receipt.get("schema_sha256") != expected_identity_schema_sha256():
         errors.append("expected identity receipt schema_sha256 does not bind the schema")
+    # F3:S1.3 identity/ACL digest 離線鎖定到 committed ground-truth 常量。
+    if receipt.get("identity_acl_contract_digest") != S1_3_IDENTITY_ACL_RECEIPT_DIGEST:
+        errors.append(
+            "expected identity receipt identity_acl_contract_digest does not bind the committed "
+            "S1.3 ground-truth digest"
+        )
+    # F2c:提供配對 sealed receipt 時,交叉核對 sealed_build_digest / runtime_content_digest。
+    if sealed_receipt is not None:
+        errors.extend(_validate_identity_sealed_binding(receipt, sealed_receipt))
 
     errors.extend(_validate_component_projection(receipt))
     errors.extend(_validate_least_privilege_assertions(receipt))
@@ -1062,6 +1165,23 @@ def validate_expected_identity_receipt(
         errors.append("expected identity receipt does not prove a passing binding")
     if receipt.get("self_digest") != receipt_digest(receipt):
         errors.append("expected identity receipt self_digest does not match canonical receipt")
+    return errors
+
+
+def _validate_identity_sealed_binding(
+    receipt: dict[str, Any], sealed_receipt: dict[str, Any]
+) -> list[str]:
+    """Cross-check the identity receipt against its paired sealed build (F2c, FORGERY C)."""
+
+    errors: list[str] = []
+    if not isinstance(sealed_receipt, dict):
+        return ["expected identity receipt paired sealed_receipt must be an object"]
+    # 以重算的 self_digest 為準(不盲信自報值),再比對兩指標。
+    sealed_self = receipt_digest(sealed_receipt)
+    if receipt.get("sealed_build_digest") != sealed_self:
+        errors.append("expected identity receipt sealed_build_digest does not bind the paired sealed build self_digest")
+    if receipt.get("runtime_content_digest") != sealed_receipt.get("runtime_content_digest"):
+        errors.append("expected identity receipt runtime_content_digest does not match the paired sealed build")
     return errors
 
 

@@ -82,6 +82,12 @@
     },
     {
       "load_verified_on_target": false,
+      "package": "psycopg2-binary",
+      "version": "2.9.12",
+      "wheel_sha256": "sha256:e8340a3b2be34b53140ab183f73dad08e3220074ffb8f03d36a33433546f9ae1"
+    },
+    {
+      "load_verified_on_target": false,
       "package": "pyarrow",
       "version": "25.0.0",
       "wheel_sha256": "sha256:4203a4e91296c4026b84b4d0dbda1565da8cca08812dde1094fce48c73ad8645"
@@ -107,8 +113,8 @@
     "target_platform": "x86_64-unknown-linux-gnu"
   },
   "runtime_candidate_receipt_b_digest": "sha256:3e5562b5632d1795ce498b601a54c520ffaf59151268bab5b7d404a46deca140",
-  "runtime_content_digest": "sha256:d3f2f14dbc15ddedc9eda409216134eb89987b82135d35a0585a4bdd862c8b0f",
-  "schema_sha256": "sha256:c00acf2c59f6ef8fb0b85c1bfe09a9b04e34b71ca632aba97a2a0866e6c08e43",
+  "runtime_content_digest": "sha256:8b2092e8f55ac0484ed597fe906fecb083fdbbf106367728be71decd911d7fea",
+  "schema_sha256": "sha256:3eaec38452b2fc2bfc5c327f50426118f1311b5d657cb5ad9d74f934407ee49e",
   "schema_version": "sealed_build_receipt_v1",
   "sealed_input": {
     "mutable_tag_or_alias": false,
@@ -124,8 +130,9 @@
       "provider_secret"
     ]
   },
-  "self_digest": "sha256:71ae69ffd006ae6730e238cf7fb4b6ec02a3cbca2819fc3d8f3fc1c4d0405f84",
-  "source_sha256": "sha256:9ac22753789148c7f12b4d988466c6b03cd08917bf0147fefcb7f10cbacecaa3",
+  "selected_runtime_kind": "content_addressed_fixed_path",
+  "self_digest": "sha256:a026ada7bfc48ebbfc63803b072e66d976c48ac1ce414b3ddd887ac31dea56aa",
+  "source_sha256": "sha256:3d08f73e126639dd1ea1dc7ac9a3a977091ca82230aaad0484a48b30f76b03db",
   "status": "PASS",
   "ttl_seconds": 1800
 }
