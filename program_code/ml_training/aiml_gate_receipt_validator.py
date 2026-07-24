@@ -62,6 +62,15 @@ SCHEMA_FILES = {
     # S2.2A(LR1)v2 source-compatibility receipt——內嵌 learning_runtime_manifest_v2,
     # dependency_lock 由 scalar 升為 {spec_digest, lock_digest} 物件並併入 parquet_etl COMPUTE。
     "source_compatibility_receipt_v2": "source_compatibility_receipt_v2.schema.json",
+    # S2.0(WP2)——additive:生產唯讀 PG observer-bootstrap 的 typed intent/result/獨立 postcheck/
+    # rollback。加這四鍵純為 schema 查找,絕不進入 aiml_effect_classifier_digest() 的六個 S0.3 常量
+    # 輸入(見 :46-48/§7.2),S0.3 分類身分不動。中央閘只做離線結構/整合/新鮮度委派驗(委派給
+    # agent_governance_pg_observer_bootstrap 的 SSOT validators);production apply 在有 exact
+    # operator SSHSIG 前恆 fail-closed(EXTERNAL_VERIFICATION_PENDING),真 apply 屬 S2.0 EFFECT session。
+    "pg_observer_bootstrap_intent_v1": "pg_observer_bootstrap_intent_v1.schema.json",
+    "pg_observer_bootstrap_result_v1": "pg_observer_bootstrap_result_v1.schema.json",
+    "pg_observer_bootstrap_postcheck_v1": "pg_observer_bootstrap_postcheck_v1.schema.json",
+    "pg_observer_bootstrap_rollback_v1": "pg_observer_bootstrap_rollback_v1.schema.json",
 }
 
 S0_DEPENDENCY_DIGESTS = {
@@ -1853,6 +1862,36 @@ def validate_aiml_artifact(
                 errors.extend(
                     _component_effects.validate_effect_seams_ready_receipt(artifact, now=now_text)
                 )
+    if schema_version in {
+        "pg_observer_bootstrap_intent_v1",
+        "pg_observer_bootstrap_result_v1",
+        "pg_observer_bootstrap_postcheck_v1",
+        "pg_observer_bootstrap_rollback_v1",
+    }:
+        # S2.0(WP2)生產唯讀 PG observer-bootstrap SOURCE adapter:委派給 SSOT module 的自驗
+        # 結構/整合/新鮮度檢查(standalone;跨 intent/result/postcheck/rollback 綁定由 module 測試
+        # 以成對 artifact 驗證)。與 pg_readonly / WORM / component-effect 分支同樣強制 now:陳舊
+        # artifact 於中央閘 fail-closed。
+        #
+        # ⚠ SOURCE-TRUTH 邊界(S2.0 EFFECT session 消費者請注意):此委派只證 receipt 的「內部自洽
+        # + 結構 + 離線 SSHSIG 結構」(offline-structure 模式);validate_aiml_artifact 通過「不」等於
+        # 證明真對生產 PG apply 過——production apply 恆為 EXTERNAL_VERIFICATION_PENDING(fail-closed)
+        # 直到 S2.0 EFFECT session 帶一張 platform-attested 的 out-of-band operator SSHSIG。
+        now_text = _now_text(now)
+        if now_text is None:
+            errors.append(
+                "observer bootstrap artifact requires now for freshness at the central gate"
+            )
+        else:
+            import agent_governance_pg_observer_bootstrap as _observer
+            if schema_version == "pg_observer_bootstrap_intent_v1":
+                errors.extend(_observer.validate_pg_observer_bootstrap_intent(artifact, now=now_text))
+            elif schema_version == "pg_observer_bootstrap_result_v1":
+                errors.extend(_observer.validate_pg_observer_bootstrap_result(artifact, now=now_text))
+            elif schema_version == "pg_observer_bootstrap_postcheck_v1":
+                errors.extend(_observer.validate_pg_observer_bootstrap_postcheck(artifact, now=now_text))
+            else:
+                errors.extend(_observer.validate_pg_observer_bootstrap_rollback(artifact, now=now_text))
     if schema_version == "learning_runtime_choice_receipt_target_host_v1":
         # S1 formal-closure Wave A(S1.6B):把 target-host 選擇 receipt 加入中央 SCHEMA_FILES 委派
         # 登記,但中央離線閘只做「結構/整合/新鮮度」驗(require_target_host_attested=False)——CLAUDE.md

@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/pg_observer_bootstrap_postcheck_v1.schema.json",
+  "title": "pg_observer_bootstrap_postcheck_v1",
+  "description": "Independent-verifier attestation for one S2.0 observer bootstrap. A distinct role/node/process/capture re-derives the observer from the same intent and embeds the observer's own read-only proof: write -> 42501, SET ROLE escalation denied, search_path reset harmless (queries are pg_catalog-qualified), credential-escalation -> 28P01. Bound to the verifier's own governed command_capture_v2 record digest.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "status",
+    "verifier_node",
+    "applier_node",
+    "intent_id",
+    "intent_digest",
+    "observer_role",
+    "database",
+    "host",
+    "source_head",
+    "reobserved_post_rollback_digest",
+    "restoration_confirmed",
+    "read_only_proof",
+    "verifier_capture_digest",
+    "observed_at",
+    "expires_at",
+    "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "pg_observer_bootstrap_postcheck_v1"},
+    "status": {"enum": ["PASS", "FAIL"]},
+    "verifier_node": {"type": "string", "minLength": 1},
+    "applier_node": {"type": "string", "minLength": 1},
+    "intent_id": {"$ref": "#/$defs/digest"},
+    "intent_digest": {"$ref": "#/$defs/digest"},
+    "observer_role": {"$ref": "#/$defs/pg_ident"},
+    "database": {"type": "string", "minLength": 1},
+    "host": {"type": "string", "minLength": 1},
+    "source_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "reobserved_post_rollback_digest": {"$ref": "#/$defs/digest"},
+    "restoration_confirmed": {"type": "boolean"},
+    "read_only_proof": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "write_denied",
+        "set_role_denied",
+        "search_path_reset_harmless",
+        "credential_escalation_denied"
+      ],
+      "properties": {
+        "write_denied": {"$ref": "#/$defs/denial"},
+        "set_role_denied": {"$ref": "#/$defs/denial"},
+        "search_path_reset_harmless": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["attempted", "effective_search_path", "harmless", "queries_schema_qualified"],
+          "properties": {
+            "attempted": {"type": "string", "minLength": 1},
+            "effective_search_path": {"type": "string", "minLength": 1},
+            "harmless": {"const": true},
+            "queries_schema_qualified": {"const": true}
+          }
+        },
+        "credential_escalation_denied": {"$ref": "#/$defs/denial"}
+      }
+    },
+    "verifier_capture_digest": {"$ref": "#/$defs/digest"},
+    "observed_at": {"$ref": "#/$defs/timestamp"},
+    "expires_at": {"$ref": "#/$defs/timestamp"},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "PASS"}}},
+      "then": {
+        "properties": {
+          "restoration_confirmed": {"const": true},
+          "read_only_proof": {
+            "properties": {
+              "write_denied": {"properties": {"observed_sqlstate": {"const": "42501"}, "verdict": {"const": "DENIED"}}},
+              "set_role_denied": {"properties": {"verdict": {"const": "DENIED"}}},
+              "credential_escalation_denied": {"properties": {"verdict": {"const": "DENIED"}}}
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "pg_ident": {"type": "string", "pattern": "^[a-z_][a-z0-9_]*$"},
+    "sqlstate": {"type": "string", "pattern": "^[0-9A-Z]{5}$"},
+    "denial": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attempted", "observed_sqlstate", "verdict"],
+      "properties": {
+        "attempted": {"type": "string", "minLength": 1},
+        "observed_sqlstate": {"$ref": "#/$defs/sqlstate"},
+        "verdict": {"enum": ["DENIED", "NOT_DENIED"]}
+      }
+    }
+  }
+}

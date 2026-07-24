@@ -477,6 +477,25 @@ Effect Adapters：
   `PHASE2_APPLIED_POSTCHECK_PASS`；其後 Closure PASS 仍須 independent OPS postcheck 單向綁定
   該 final effect receipt。此 Adapter 不授權 broker、
   order、Decision Lease、live/mainnet 或其他 user-manager/service effect。
+- `pg_observer_bootstrap_adapter_v1`（S2.0 WP2 SOURCE seam）：Registry status
+  `declared_production_apply_disabled_until_operator_sshsig`。它從一張 exact typed
+  `pg_observer_bootstrap_intent_v1` 投影**一組**結構化 allowlist（enum key
+  `observer_read_only_v1`，絕非呼叫端 raw SQL）產出的**最小唯讀 least-privilege observer 角色**
+  （`CREATE ROLE NOLOGIN NOSUPERUSER NOCREATEROLE NOCREATEDB NOREPLICATION NOBYPASSRLS` +
+  `GRANT USAGE ON SCHEMA` + 對 exact observed relations 的 `GRANT SELECT`；role-level 釘死
+  `default_transaction_read_only=on` 與 `search_path=pg_catalog`；peer/ident local auth，no
+  password ingress）。對生產 PG 的真 apply **恆 fail-closed**：即使帶一張 VALID SSHSIG，WP2 source
+  lane 也絕不開生產 socket，回傳一個 typed `EXTERNAL_VERIFICATION_PENDING` result（**永不**假成功），
+  直到一張 exact source-pinned、**domain-separated** 的 operator SSHSIG 存在（identity
+  `aiml-s2-observer-bootstrap-operator-v1`、namespace
+  `arcane-equilibrium-aiml-s2-observer-bootstrap`；operator 私鑰既不在 Mac 也不在 trade-core）。applier
+  != 獨立 postcheck verifier（role/node/process/capture 皆相異），closure binding 綁 verifier 自己的
+  governed `command_capture_v2`（三方 digest 交叉核對）並要求 exact restoration（pre == post catalog
+  projection、observer 消失）。此 binding 為 **SOURCE-only**：未接入 live `route_task` effect 節點，亦不注入
+  closure effect 綁定，真正的活化屬 **S2.0 EFFECT session**。Evidence：可拋棄叢集 apply 為
+  `LOCAL_REPRODUCIBLE`（真 `initdb`/`42501`/`28P01`，nothing mocked），platform/external attestation
+  DEFERRED；nine authorities 恆 false，任何 receipt 不序列化機密。完整活化 ADR deferred 給 S2.0 EFFECT
+  session。
 - `broker_probe_adapter_v1` 目前只是 Registry 中的
   `declared_fail_closed_unsupported` seam，**不是可執行 Adapter**。IBKR paths 是 gated
   operator/runtime reference surface；Bybit 是 runtime-owned 且沒有 development-agent
