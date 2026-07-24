@@ -777,9 +777,24 @@ const maxFixes = positiveInt(config.max_fixes, 5, 'max_fixes')
 const doFix = config.fix === true
 // 分層資源:機械/收斂節點(verify 票、seam critic、E2 review)往下釘到中階模型 + 中 effort;
 // 判斷核心(discovery 軸、third 裁決、E1 fix)省略 model 以繼承 session 強模型。config.cheap_model=null 可還原繼承。
+// claim-0009 家族:cheap tier 的意義是降檔,默認保留一個 active pin;其派生權威=
+// settings/ai_pricing.yaml active 條目(claude-sonnet-5 active:true),該條目退役
+// 時必須同步改此默認。顯式覆蓋 fail-closed:空字串不再靜默回落默認、非字串不再直通 runner。
+if (
+  config.cheap_model !== undefined && config.cheap_model !== null &&
+  (typeof config.cheap_model !== 'string' || !config.cheap_model.trim())
+) {
+  throw new Error('cheap_model must be null (inherit session model) or a non-empty model id derived from settings/ai_pricing.yaml active entries')
+}
+if (
+  config.cheap_effort !== undefined && config.cheap_effort !== null &&
+  (typeof config.cheap_effort !== 'string' || !config.cheap_effort.trim())
+) {
+  throw new Error('cheap_effort must be null (inherit session effort) or a non-empty effort tier string')
+}
 const cheapTier = () => ({
-  ...(config.cheap_model === null ? {} : { model: config.cheap_model || 'claude-sonnet-5' }),
-  ...(config.cheap_effort === null ? {} : { effort: config.cheap_effort || 'medium' }),
+  ...(config.cheap_model === null ? {} : { model: config.cheap_model === undefined ? 'claude-sonnet-5' : config.cheap_model }),
+  ...(config.cheap_effort === null ? {} : { effort: config.cheap_effort === undefined ? 'medium' : config.cheap_effort }),
 })
 // C-3(claim-0009):判斷層不再硬 pin 具體型號——舊 pin claude-opus-4-6 已在
 // settings/ai_pricing.yaml 退役(active:false),run0 部分 verify 呼叫實跑退役 pin。

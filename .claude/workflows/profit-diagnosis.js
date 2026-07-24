@@ -13,6 +13,118 @@ export const meta = {
   ],
 }
 
+// BEGIN SANDBOX_DETERMINISM_SHIM_V1(2026-07-24 run0 §5.1 派發側 shim 上游化)
+// 現行 desktop Workflow 沙箱無 crypto.subtle/TextEncoder;此 shim 只在缺失時補齊
+// 同義原語,兩者都在時原生實作優先。所有 digest 對比仍 fail-closed:實作錯誤只會
+// 造成 mismatch → 拒絕,不會放行偽造內容。SHA-256 為 FIPS 180-4 純 JS 實作,
+// test vectors(含中文/emoji/raw-bytes)已於派發側驗證全過。
+// UTF-8 與 WHATWG 差異:lone surrogate 原樣三位元組編碼而非 U+FFFD;
+// canonical JSON 內容不含 lone surrogate,不影響 digest 對比。
+function __shimUtf8Encode(str) {
+  const out = []
+  for (let i = 0; i < str.length; i++) {
+    const cp = str.codePointAt(i)
+    if (cp > 0xffff) i++
+    if (cp < 0x80) out.push(cp)
+    else if (cp < 0x800) out.push(0xc0 | (cp >> 6), 0x80 | (cp & 63))
+    else if (cp < 0x10000) out.push(0xe0 | (cp >> 12), 0x80 | ((cp >> 6) & 63), 0x80 | (cp & 63))
+    else out.push(0xf0 | (cp >> 18), 0x80 | ((cp >> 12) & 63), 0x80 | ((cp >> 6) & 63), 0x80 | (cp & 63))
+  }
+  return Uint8Array.from(out)
+}
+const __SHIM_K256 = new Uint32Array([
+  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+  0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+  0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+  0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+  0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+])
+function __shimRotr(x, n) { return ((x >>> n) | (x << (32 - n))) >>> 0 }
+function __shimSha256(input) {
+  const bytes = input instanceof Uint8Array ? input : new Uint8Array(input)
+  const len = bytes.length
+  const paddedLen = ((len + 9 + 63) >> 6) << 6
+  const padded = new Uint8Array(paddedLen)
+  padded.set(bytes)
+  padded[len] = 0x80
+  const bitLenHi = Math.floor(len / 0x20000000)
+  const bitLenLo = (len << 3) >>> 0
+  padded[paddedLen - 8] = (bitLenHi >>> 24) & 0xff
+  padded[paddedLen - 7] = (bitLenHi >>> 16) & 0xff
+  padded[paddedLen - 6] = (bitLenHi >>> 8) & 0xff
+  padded[paddedLen - 5] = bitLenHi & 0xff
+  padded[paddedLen - 4] = (bitLenLo >>> 24) & 0xff
+  padded[paddedLen - 3] = (bitLenLo >>> 16) & 0xff
+  padded[paddedLen - 2] = (bitLenLo >>> 8) & 0xff
+  padded[paddedLen - 1] = bitLenLo & 0xff
+  const H = new Uint32Array([0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19])
+  const w = new Uint32Array(64)
+  for (let off = 0; off < paddedLen; off += 64) {
+    for (let i = 0; i < 16; i++) {
+      const j = off + i * 4
+      w[i] = ((padded[j] << 24) | (padded[j + 1] << 16) | (padded[j + 2] << 8) | padded[j + 3]) >>> 0
+    }
+    for (let i = 16; i < 64; i++) {
+      const s0 = (__shimRotr(w[i - 15], 7) ^ __shimRotr(w[i - 15], 18) ^ (w[i - 15] >>> 3)) >>> 0
+      const s1 = (__shimRotr(w[i - 2], 17) ^ __shimRotr(w[i - 2], 19) ^ (w[i - 2] >>> 10)) >>> 0
+      w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0
+    }
+    let a = H[0], b = H[1], c = H[2], d = H[3], e = H[4], f = H[5], g = H[6], h = H[7]
+    for (let i = 0; i < 64; i++) {
+      const S1 = (__shimRotr(e, 6) ^ __shimRotr(e, 11) ^ __shimRotr(e, 25)) >>> 0
+      const ch = ((e & f) ^ (~e & g)) >>> 0
+      const t1 = (h + S1 + ch + __SHIM_K256[i] + w[i]) >>> 0
+      const S0 = (__shimRotr(a, 2) ^ __shimRotr(a, 13) ^ __shimRotr(a, 22)) >>> 0
+      const maj = ((a & b) ^ (a & c) ^ (b & c)) >>> 0
+      const t2 = (S0 + maj) >>> 0
+      h = g; g = f; f = e; e = (d + t1) >>> 0; d = c; c = b; b = a; a = (t1 + t2) >>> 0
+    }
+    H[0] = (H[0] + a) >>> 0; H[1] = (H[1] + b) >>> 0; H[2] = (H[2] + c) >>> 0; H[3] = (H[3] + d) >>> 0
+    H[4] = (H[4] + e) >>> 0; H[5] = (H[5] + f) >>> 0; H[6] = (H[6] + g) >>> 0; H[7] = (H[7] + h) >>> 0
+  }
+  const out = new Uint8Array(32)
+  for (let i = 0; i < 8; i++) {
+    out[i * 4] = (H[i] >>> 24) & 0xff
+    out[i * 4 + 1] = (H[i] >>> 16) & 0xff
+    out[i * 4 + 2] = (H[i] >>> 8) & 0xff
+    out[i * 4 + 3] = H[i] & 0xff
+  }
+  return out
+}
+if (typeof globalThis.TextEncoder === 'undefined') {
+  globalThis.TextEncoder = class TextEncoder {
+    encode(value) { return __shimUtf8Encode(String(value)) }
+  }
+}
+if (!globalThis.crypto || !globalThis.crypto.subtle) {
+  globalThis.crypto = {
+    subtle: {
+      digest: async (algorithm, data) => {
+        if (algorithm !== 'SHA-256') throw new Error('sandbox shim supports SHA-256 only')
+        return __shimSha256(data).buffer
+      },
+    },
+  }
+}
+// 沙箱亦禁 Date.now()/無參 new Date()(runtime 拋錯,且會破壞 resume 確定性)。
+// admission 時鐘一律優先取派發側傳入的 args.admission_now_ms;僅在未傳且宿主
+// 允許牆鐘時退回 Date.now()。帶參 new Date(ms) 沙箱允許。
+function resolveAdmissionNowMs(value) {
+  if (value !== undefined) {
+    if (!Number.isInteger(value) || value <= 0) {
+      throw new Error('admission_now_ms must be a positive integer epoch-ms admission clock')
+    }
+    return value
+  }
+  try { return Date.now() } catch (_error) {
+    throw new Error('sandbox denies wall clock; pass args.admission_now_ms from the dispatch side')
+  }
+}
+// END SANDBOX_DETERMINISM_SHIM_V1
+
 // BEGIN GENERATED CONTEXT_ADMISSION_V1
 // Canonical source for the inline block embedded in standalone saved workflows.
 // The AsyncFunction loader has no module-import seam, so codegen copies this
@@ -290,6 +402,10 @@ function normalizeBaseline(value) {
 }
 
 const config = parseArgs(args)
+const admissionNowMs = resolveAdmissionNowMs(config.admission_now_ms)
+// call record 的 started/ended 戳以 admission 時鐘確定性替代(沙箱無牆鐘;
+// 真實時刻屬平台 journal 遙測),同時保 resume 重放 record digest 穩定。
+const admissionClockIso = new Date(admissionNowMs).toISOString()
 const contextArtifact = config.context_artifact
 if (!exactKeys(contextArtifact, CONTEXT_ADMISSION_V1.artifactFields)) throw new Error('context_artifact_v1 exact object is required')
 if (contextArtifact.schema_version !== 'context_artifact_v1' || await sha256Text(contextArtifact.canonical_plan) !== contextArtifact.artifact_digest) throw new Error('context artifact exact canonical bytes/digest are invalid')
@@ -312,7 +428,7 @@ let sourceTokens = 0
 for (const source of contextPlan.sources) {
   const measurement = await contextSourceMeasurement(source)
   const observed = Date.parse(source.observed_at); const expires = Date.parse(source.expires_at); const ttl = CONTEXT_ADMISSION_V1.ttlMs[source.capture_kind]
-  if (!CONTEXT_ADMISSION_V1.admissibleStatuses.includes(source.status) || !/^sha256:[0-9a-f]{64}$/.test(source.digest || '') || measurement.digest !== source.content_digest || canonicalJson(source.baseline) !== canonicalJson(taskContract.baseline) || !/(?:Z|[+-]\d\d:\d\d)$/.test(source.observed_at || '') || !/(?:Z|[+-]\d\d:\d\d)$/.test(source.expires_at || '') || !Number.isFinite(observed) || !Number.isFinite(expires) || !(observed <= Date.now() && Date.now() < expires) || !ttl || expires - observed > ttl) throw new Error(`profit Context source ${source.source || '<unknown>'} provenance/freshness is invalid`)
+  if (!CONTEXT_ADMISSION_V1.admissibleStatuses.includes(source.status) || !/^sha256:[0-9a-f]{64}$/.test(source.digest || '') || measurement.digest !== source.content_digest || canonicalJson(source.baseline) !== canonicalJson(taskContract.baseline) || !/(?:Z|[+-]\d\d:\d\d)$/.test(source.observed_at || '') || !/(?:Z|[+-]\d\d:\d\d)$/.test(source.expires_at || '') || !Number.isFinite(observed) || !Number.isFinite(expires) || !(observed <= admissionNowMs && admissionNowMs < expires) || !ttl || expires - observed > ttl) throw new Error(`profit Context source ${source.source || '<unknown>'} provenance/freshness is invalid`)
   if (source.status === 'trusted_producer' ? source.producer !== 'agent_governance_context_producer_v1' || CONTEXT_ADMISSION_V1.trustedKinds[source.source] !== source.capture_kind : source.status === 'resolved_artifact' ? !source.producer || source.producer.id !== CONTEXT_ADMISSION_V1.producerByKind[source.capture_kind] || !/^sha256:[0-9a-f]{64}$/.test(source.producer.input_digest || '') : source.producer !== 'repository_bytes_v1' || source.capture_kind !== 'source_snapshot') throw new Error(`profit Context source ${source.source || '<unknown>'} producer is invalid`)
   const planned = Math.max(1, Math.ceil(measurement.bytes / 4))
   if (source.bytes !== measurement.bytes || source.planned_tokens !== planned || !Number.isInteger(source.full_file_token_estimate) || source.full_file_token_estimate < planned) throw new Error(`profit Context source ${source.source || '<unknown>'} estimate was lowered`)
@@ -381,9 +497,24 @@ const PROFIT_RULE = 'Optimize expected risk-adjusted net PnL and durable workflo
 const EVIDENCE_RULE = 'FACT requires evidence_ref equal to an existing typed closure capture id; observation prose is descriptive only, never proof. source/data FACT needs exact repository/command capture. runtime/external cannot be FACT without platform/external-attested runtime/outcome/policy capture. observed_at must equal the capture and never exceed adjudication time. Missing attestation stays INFERENCE/ASSUMPTION plus an explicit gap. Bull/stale/single-regime evidence carries caveat.'
 // 分層資源:證據收集(OPS/MIT/AI-E,讀+報事實)往下釘到中階模型 + 中 effort;
 // probes 與 PA map 是判斷/alpha 搜尋核心,省略 model 以繼承 session 強模型。config.cheap_model=null 可還原繼承。
+// claim-0009 家族:cheap tier 的意義是降檔,默認保留一個 active pin;其派生權威=
+// settings/ai_pricing.yaml active 條目(claude-sonnet-5 active:true),該條目退役
+// 時必須同步改此默認。顯式覆蓋 fail-closed:空字串不再靜默回落默認、非字串不再直通 runner。
+if (
+  config.cheap_model !== undefined && config.cheap_model !== null &&
+  (typeof config.cheap_model !== 'string' || !config.cheap_model.trim())
+) {
+  throw new Error('cheap_model must be null (inherit session model) or a non-empty model id derived from settings/ai_pricing.yaml active entries')
+}
+if (
+  config.cheap_effort !== undefined && config.cheap_effort !== null &&
+  (typeof config.cheap_effort !== 'string' || !config.cheap_effort.trim())
+) {
+  throw new Error('cheap_effort must be null (inherit session effort) or a non-empty effort tier string')
+}
 const cheapTier = () => ({
-  ...(config.cheap_model === null ? {} : { model: config.cheap_model || 'claude-sonnet-5' }),
-  ...(config.cheap_effort === null ? {} : { effort: config.cheap_effort || 'medium' }),
+  ...(config.cheap_model === null ? {} : { model: config.cheap_model === undefined ? 'claude-sonnet-5' : config.cheap_model }),
+  ...(config.cheap_effort === null ? {} : { effort: config.cheap_effort === undefined ? 'medium' : config.cheap_effort }),
 })
 const nativeAgent = role => role === 'PA' ? 'PA-investigator' : role === 'E4' ? 'E4-verifier' : role
 const workflowContract = {
@@ -449,9 +580,9 @@ async function invoke({ prompt, options, nodeId, payloadKind, attempt = 1, retry
   runtimeAdmittedAttempts += 1
   runtimeAdmittedInputTokensLowerBound += effectiveAdmittedTokens
   runtimePromptUtf8Bytes += finalPromptBytes
-  const startedAt = new Date().toISOString()
+  const startedAt = admissionClockIso
   const result = await agent(boundPrompt, runnerOptions)
-  const endedAt = new Date().toISOString()
+  const endedAt = admissionClockIso
   const core = {
     schema_version: 'workflow_call_record_v1', workflow_contract_digest: workflowContractDigest,
     logical_call_id: `profit-diagnosis:${nodeId}:attempt:${attempt}`, node_id: nodeId,
