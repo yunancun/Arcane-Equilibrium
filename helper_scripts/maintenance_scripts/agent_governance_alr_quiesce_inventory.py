@@ -1,6 +1,6 @@
 """S2.1 ALR quiesce ownership / inventory / static-guard SAMPLER 下層(AIML WP3;由 fence SSOT 拆出)。
 
-這是 ``agent_governance_alr_quiesce_fence`` 的**下層**:host 端 allowlisted ``systemctl --user show`` +
+這是 ``agent_governance_alr_quiesce_fence`` 的**下層**:host 端 allowlisted system-level ``systemctl show`` +
 模擬 ``/proc`` 讀取、以重用的 S2.0 唯讀 observer 讀 DB 端 quiesce 證據、把多訊號組裝成一份 raw inventory、
 以此判 ``CONFIRMED / STALE / AMBIGUOUS`` ownership verdict,以及 bounded observation-window 靜態守恆取樣。
 上層(fence 模組)保留 schema 註冊委派、operator SSHSIG 授權、四個 typed artifact 的 builder/validator、
@@ -10,8 +10,8 @@
 讓 Codex P1 修正(C1 exact-invocation 收斂 / C2 owner↔MainPID 綁定 / C4 取樣節奏截止)得以落地而不破 2000 行。
 
 **誠實界線不變。** 本層絕不 signal 任何真 process、絕不 stop/start;host 端跑在**模擬 /proc + 注入
-systemctl callable** 上,DB 端只經 S2.0 唯讀 observer 讀。真 live ``/proc`` / ``systemctl`` 一律 DEFERRED 給
-S2.1 EFFECT session。
+system-level systemctl callable** 上,DB 端只經 S2.0 唯讀 observer 讀。真 live ``/proc`` / ``systemctl`` 一律
+DEFERRED 給 S2.1 EFFECT session。
 
 **循環相依處理。** ``confirm_alr_owner`` / ``collect_static_guard_window`` 需要上層的 observation builder
 (``build_quiesce_observation``)與時間投影(``_plus_seconds``);為免 import 期循環,這兩處在**函式內**延遲
@@ -20,6 +20,7 @@ S2.1 EFFECT session。
 
 from __future__ import annotations
 
+import posixpath
 import re
 import sys
 from pathlib import Path
@@ -50,18 +51,19 @@ WINDOW_STATUS_HELD = "HELD"
 WINDOW_STATUS_VIOLATED = "VIOLATED"
 WINDOW_STATUS_UNDERSPECIFIED = "UNDERSPECIFIED"
 
-# ── 被 fence 的唯一具體 owner(S2.1 §1;不發明 owner model,只確認這一個)──
-UNIT_NAME = "openclaw-alr-shadow.service"
+# ── 被 fence 的唯一具體 owner(S2.1 §1;不發明 owner model,只確認這一個)。S2.4 §8 對齊:system-level unit,
+# 專屬 aiml-engine-scanner UID + content-addressed 解譯器 + protected-credential DSN + PG role aiml_engine_scanner。──
+UNIT_NAME = "arcane-equilibrium-aiml-engine-scanner.service"
 ADVISORY_LOCK_NAME = "alr_event_consumer_v1"
 LISTEN_CHANNEL = "alr_scanner_snapshot_v1"
 DEFAULT_CONSUMER_SESSION_RELATION = "learning.alr_consumer_events"
-# ALR consumer 的最小權限 DSN 身分(`_LOCAL_DSN_REQUIRED` 的 user=alr_shadow)。§3 訊號 #7 以此把 advisory
-# lock 的**持有 backend** 綁回 ALR 連線身分——注意 pg_locks.pid 是**伺服器端 backend pid**,與 systemd
+# ALR consumer 的最小權限 PG 身分(§8 的 PG role=aiml_engine_scanner,本地 Unix-socket 對映)。§3 訊號 #7 以此把
+# advisory lock 的**持有 backend** 綁回 ALR 連線身分——注意 pg_locks.pid 是**伺服器端 backend pid**,與 systemd
 # MainPID(client OS pid)本質不同、永不相等,故正確的綁定是 holder backend 的 role(usename),非 pid 比對。
-ALR_CONNECTION_ROLE = "alr_shadow"
-# host 端唯讀 allowlist 的固定路徑(prior art:p0b_alr_current_head_two_cycle_observer_v2,narrowly 重寫,不匯入)。
+ALR_CONNECTION_ROLE = "aiml_engine_scanner"
+# host 端唯讀 allowlist 的固定路徑(system-level manager;prior art:p0b_alr_current_head_two_cycle_observer_v2,narrowly 重寫,不匯入)。
 SYSTEMD = "/usr/bin/systemctl"
-# 唯一被允許的 ``systemctl --user show`` 屬性集(超出即 fail-closed);對齊 p0b 並補 restart-policy/hardening。
+# 唯一被允許的 system-level ``systemctl show`` 屬性集(超出即 fail-closed);對齊 p0b 並補 restart-policy/hardening。
 QUIESCE_SHOW_PROPERTIES = (
     "LoadState", "ActiveState", "SubState", "MainPID", "InvocationID", "NRestarts",
     "FragmentPath", "DropInPaths", "ControlGroup", "Environment", "NeedDaemonReload",
@@ -69,22 +71,27 @@ QUIESCE_SHOW_PROPERTIES = (
     "NoNewPrivileges", "ProtectSystem", "PrivateTmp", "RestrictAddressFamilies",
 )
 _SHOW_PROPERTY_SET = frozenset(QUIESCE_SHOW_PROPERTIES)
-# env-hash 只涵蓋 unit 宣告的鍵(§3 訊號 #5);runtime-digest 由 ALR_EXPECTED_LEARNING_RUNTIME_DIGEST_V2 導出。
+# env-hash 只涵蓋 unit 宣告的鍵(§3 訊號 #5);runtime-digest 由 ALR_EXPECTED_LEARNING_RUNTIME_DIGEST 導出。
+# §8 unit 恰宣告三條 ``Environment=`` 行(無 PYTHONPATH——content-addressed runtime 已內含模組樹;無 ALR_CANDIDATE_*)。
 ENV_DECLARED_KEYS = (
-    "ALR_SOURCE_HEAD", "PYTHONPATH", "ALR_CANDIDATE_EVIDENCE_DIR",
-    "ALR_CANDIDATE_POLICY_FILE", "ALR_EXPECTED_LEARNING_RUNTIME_DIGEST_V2",
+    "ALR_SOURCE_HEAD", "ALR_EXPECTED_LEARNING_RUNTIME_DIGEST", "ALR_EXPECTED_COMPATIBILITY_RECEIPT",
 )
-_RUNTIME_DIGEST_ENV_KEY = "ALR_EXPECTED_LEARNING_RUNTIME_DIGEST_V2"
+_RUNTIME_DIGEST_ENV_KEY = "ALR_EXPECTED_LEARNING_RUNTIME_DIGEST"
 CONSUMER_SESSION_TERMINALS = ("SESSION_STOPPED", "SESSION_FAILED", "UNCLEAN_RECOVERY")
 
-# ── FIX-C1(Codex :414):exact approved-flag 形。長壽命 ALR invocation 的合法解譯器 basename 明確 allowlist
-# (非 startswith)、模組固定、三旗標值逐一綁定、max-batch 為 bounded 整數;任何多餘/未知參數一律拒。──
-_ALR_INTERPRETER_BASENAMES = frozenset({"python3"})
+# ── FIX-C1(Codex :414;S2.4 §8 對齊):exact approved-flag 形。長壽命 ALR invocation 的解譯器必為 §8 的
+# content-addressed 路徑(封存 runtimes root 下的 python3;拒 /usr/bin/python3 系統 Python 與任何 home/PYTHONPATH
+# 相對 Python)、``-I`` 隔離模式固定、模組固定、三旗標值逐一綁定、max-batch 為 bounded 整數;任何多餘/未知參數一律拒。──
 _ALR_CONSUMER_MODULE = "ml_training.alr_event_consumer"
 _ALR_APPROVED_FLAGS = frozenset({"--dsn-file", "--lock-file", "--max-batch"})
 _ALR_MAX_BATCH_CEILING = 4096
-# 部署形固定 9 個 token:``<python3> -m <module> --dsn-file <v> --lock-file <v> --max-batch <int>``。
-_ALR_CMDLINE_TOKEN_COUNT = 9
+# §8 的 content-addressed 解譯器:封存 runtimes root 下的絕對路徑 + basename python3。``[^/]+`` digest 段刻意不釘
+# 精確 hex 長度/編碼(§8 只寫 <runtime-content-digest>,其 wire 形歸 S2.3 content_addressed_fixed_path 約定);regex
+# 仍強制兩個 §8 決定性事實——絕對路徑落在封存 runtimes root 下(故 /usr/bin/python3 與 home 相對 Python 皆拒)+ basename python3。
+_ALR_RUNTIME_INTERPRETER_RE = re.compile(r"^/opt/arcane-equilibrium/aiml/runtimes/[^/]+/bin/python3$")
+# 部署形固定 10 個 token(§8 resolved argv):``<runtime python3> -I -m <module> --dsn-file <v> --lock-file <v> --max-batch <int>``。
+# systemd 在 exec 前解析 specifier,故 kernel 儲存的 argv 帶**已解析的絕對路徑**(``%d``/``%t`` 永不現身於 /proc)。
+_ALR_CMDLINE_TOKEN_COUNT = 10
 
 
 class QuiesceFenceError(RuntimeError):
@@ -107,13 +114,15 @@ def _safe_ident(name: Any) -> str:
 # host-side allowlisted systemd/proc reader (SOURCE lane = injected/simulated)
 # --------------------------------------------------------------------------- #
 def _assert_allowlisted_systemctl(argv: list[str]) -> None:
-    """只允許固定的唯讀 ``systemctl --user`` 形;任何其它指令一律拒(絕不 stop/start/kill from a reader)。
+    """只允許固定的唯讀 system-level ``systemctl show/list-units`` 形;任何其它指令一律拒(絕不 stop/start/kill from a reader)。
 
+    §8 的 unit 為 system-level(host system manager 擁有生命週期,非 ``--user``);故此處以 system-level
+    ``systemctl``(``SYSTEMD`` 同一 binary,去掉 ``--user`` 即選 system manager)唯讀 show/list-units。
     prior art:``p0b_alr_current_head_two_cycle_observer_v2.build_readonly_runtime_module`` 的 narrow
     allowlist(此處 narrowly 重寫,不匯入 p0b——其硬編 fixed-path/uid1000/target-head drift-fail)。
     """
 
-    show_prefix = [SYSTEMD, "--user", "show", UNIT_NAME]
+    show_prefix = [SYSTEMD, "show", UNIT_NAME]
     if argv[: len(show_prefix)] == show_prefix:
         tail = argv[len(show_prefix):]
         if len(tail) % 2 == 0 and all(
@@ -121,14 +130,14 @@ def _assert_allowlisted_systemctl(argv: list[str]) -> None:
             for i in range(0, len(tail), 2)
         ):
             return
-    if argv == [SYSTEMD, "--user", "list-units", "--type=scope", "--state=active",
+    if argv == [SYSTEMD, "list-units", "--type=scope", "--state=active",
                 "--no-legend", "--no-pager"]:
         return
     raise QuiesceHostReadError("readonly systemctl command is not allowlisted")
 
 
 def _show_command() -> list[str]:
-    command = [SYSTEMD, "--user", "show", UNIT_NAME]
+    command = [SYSTEMD, "show", UNIT_NAME]
     for prop in QUIESCE_SHOW_PROPERTIES:
         command.extend(("-p", prop))
     return command
@@ -153,7 +162,7 @@ def _run_show(host_probe: Any) -> dict[str, str]:
 
 
 def _scope_conflict(host_probe: Any) -> bool:
-    command = [SYSTEMD, "--user", "list-units", "--type=scope", "--state=active",
+    command = [SYSTEMD, "list-units", "--type=scope", "--state=active",
                "--no-legend", "--no-pager"]
     _assert_allowlisted_systemctl(command)
     raw = host_probe.run(command)
@@ -178,19 +187,27 @@ def _read_proc_cmdline(proc_root: Path, pid: int) -> list[str] | None:
 def _is_alr_longlived_cmdline(
     args: list[str], *, expected_dsn_file: str, expected_lock_file: str,
 ) -> bool:
-    # FIX-C1(Codex :414):精確辨識**部署中**的長壽命 ALR invocation(§4 反替身守恆)。舊版只認 basename
-    # ``startswith("python3")`` 且對 ``--dsn-file`` / ``--lock-file`` / ``--max-batch`` 值任意、又容忍多餘參數,
-    # 等於把任何近似形都當 candidate。此處收斂為 exact approved-flag 形:
-    #   ① token 數固定 9;② 解譯器 basename ∈ 明確 allowlist(非 startswith);③ ``-m <module>`` 固定;
-    #   ④ 尾端三旗標為恰好 {--dsn-file,--lock-file,--max-batch}、無重複、無未知/多餘旗標;
-    #   ⑤ dsn/lock 值逐一等於 intent 宣告路徑;⑥ max-batch 為 bounded 正整數。任一不符即非 candidate。
+    # FIX-C1(Codex :414;S2.4 §8 對齊):精確辨識**部署中**的長壽命 ALR invocation(§4 反替身守恆)。§8 兩個
+    # 決定性事實迫使收斂——解譯器必為 content-addressed 路徑(拒 /usr/bin/python3 系統 Python),且 ``-I`` 插在
+    # 解譯器與 ``-m`` 之間使 token 數為 10。此處收斂為 exact approved-flag 形:
+    #   ① token 數固定 10;② 解譯器 fullmatch content-addressed regex(封存 runtimes root 下的 python3);
+    #   ③ args[1] == ``-I``;④ ``-m <module>`` 於 args[2:4] 固定;⑤ 尾端(args[4:])三旗標為恰好
+    #   {--dsn-file,--lock-file,--max-batch}、無重複、無未知/多餘旗標;⑥ dsn/lock 值逐一等於 intent/probe 的**已解析**
+    #   路徑(``%d``/``%t`` 已被 systemd 解析);⑦ max-batch 為 bounded 正整數。任一不符即非 candidate。
     if len(args) != _ALR_CMDLINE_TOKEN_COUNT:
         return False
-    if args[0].rsplit("/", 1)[-1] not in _ALR_INTERPRETER_BASENAMES:
+    if not _ALR_RUNTIME_INTERPRETER_RE.fullmatch(args[0]):
         return False
-    if args[1] != "-m" or args[2] != _ALR_CONSUMER_MODULE:
+    # 反 traversal(E2/E3/E4 P2:regex 的 ``[^/]+`` 段可吃 ``.``/``..``,單靠 regex 無法兌現「解譯器確在**封存
+    # runtimes root 下**」的宣稱不變式)。用已正規化相等強制拒 ``/runtimes/../bin``、``/runtimes/./bin``、``//``、
+    # 尾斜線等段;刻意**不**收緊 digest 段字元集,以免誤殺 §8 未定死的 wire form(如含 ``:`` 的 ``sha256:…`` 段)。
+    if posixpath.normpath(args[0]) != args[0]:
         return False
-    tail = args[3:]
+    if args[1] != "-I":
+        return False
+    if args[2] != "-m" or args[3] != _ALR_CONSUMER_MODULE:
+        return False
+    tail = args[4:]
     flags: dict[str, str] = {}
     for i in range(0, len(tail), 2):
         key = tail[i]
@@ -272,9 +289,9 @@ def _scan_candidate_pids(
 
 
 def _default_runtime_digest_resolver(source_head: Any, environ: dict[str, str]) -> str | None:
-    # SOURCE lane:runtime-digest 由 unit(S2.4)stamp 的 ALR_EXPECTED_LEARNING_RUNTIME_DIGEST_V2 導出。
+    # SOURCE lane:runtime-digest 由 unit(S2.4 §8)stamp 的 ALR_EXPECTED_LEARNING_RUNTIME_DIGEST 導出。
     # EFFECT lane 的嚴格 recompute(``resolve_pinned_learning_runtime_digest`` 由 checkout 重算)DEFERRED——
-    # 由 EFFECT session 注入更嚴格的 resolver;此處只證「已釘的 v2 runtime-digest 存在且形態合法」。
+    # 由 EFFECT session 注入更嚴格的 resolver;此處只證「已釘的 runtime-digest 存在且形態合法」。
     candidate = environ.get(_RUNTIME_DIGEST_ENV_KEY)
     return candidate if isinstance(candidate, str) and DIGEST_RE.fullmatch(candidate) else None
 
@@ -335,7 +352,7 @@ def read_db_quiesce(
 
     classid, objid = _advisory_lock_split(cursor, advisory_lock_name)
     # holder 的 usename 由 pg_stat_activity join 取得:advisory lock 為 exclusive,理應至多一位 holder;把它
-    # 綁回 ALR 連線身分(usename=alr_shadow)是 §3 訊號 #7 的可行做法(pg_locks.pid 是 server backend pid,
+    # 綁回 ALR 連線身分(usename=aiml_engine_scanner)是 §3 訊號 #7 的可行做法(pg_locks.pid 是 server backend pid,
     # 無法和 client 的 systemd MainPID 比對)。
     cursor.execute(
         "SELECT l.pid, a.usename FROM pg_locks l "
@@ -419,7 +436,7 @@ def build_owner_inventory(
 ) -> dict[str, Any]:
     """Assemble the multi-signal inventory the ownership predicate classifies (§3).
 
-    host_probe drives the allowlisted ``systemctl --user show`` + a SIMULATED ``/proc`` (SOURCE lane);
+    host_probe drives the allowlisted system-level ``systemctl show`` + a SIMULATED ``/proc`` (SOURCE lane);
     db_cursor is a connection AS the S2.0 read-only observer.  Returns a raw dict (host_inventory /
     db_quiesce / credential_exposure + the scalar signals confirm_alr_owner needs).  It NEVER mutates
     anything and NEVER signals a process.
@@ -447,7 +464,7 @@ def build_owner_inventory(
     runtime_digest = None
     if environ is not None:
         # F5(EFFECT 契約備註):env-hash(§3 訊號 #5)此處僅由 live ``/proc/<pid>/environ`` 宣告鍵導出;把它與 unit 宣告的
-        # ``Environment=``(``systemctl --user show``)交叉核對以偵測 drift/注入,DEFERRED 給 EFFECT session。
+        # ``Environment=``(system-level ``systemctl show``)交叉核對以偵測 drift/注入,DEFERRED 給 EFFECT session。
         env_hash = canonical_digest({k: environ[k] for k in ENV_DECLARED_KEYS if k in environ})
         runtime_digest = resolver(environ.get("ALR_SOURCE_HEAD"), environ)
     # §4 訊號 #4:P ∈ unit 的 cgroup(proc cgroup 含 unit 名),排除 cgroup 外的散兵 cmdline 命中。
@@ -573,8 +590,8 @@ def build_owner_inventory(
 def _confirm_grade_signals_ok(inventory: dict[str, Any]) -> bool:
     """多訊號 confirm-grade 不變量(去掉 owner_fingerprint 綁定;供 pre-fence 判定與 FIX-C3 post-unfence 復核共用)。
 
-    §3 全部訊號(unit-active / cgroup / env-hash / runtime-digest / advisory-lock 由 alr_shadow 單一 backend
-    持有 / consumer-session OPEN / fragment-path / drop-in 空 / 無需 daemon-reload),外加 FIX-C2:唯一 ALR
+    §3 全部訊號(unit-active / cgroup / env-hash / runtime-digest / advisory-lock 由 aiml_engine_scanner 單一
+    backend 持有 / consumer-session OPEN / fragment-path / drop-in 空 / 無需 daemon-reload),外加 FIX-C2:唯一 ALR
     候選的 PID 必等於 unit 的 MainPID(candidate_pids == [main_pid]),且 MainPID 自身 cmdline 為 exact ALR
     invocation(main_pid_invocation_ok)——杜絕「wrapper MainPID + 脫離的 consumer 持鎖」被誤判為 confirmed。
     """
@@ -602,7 +619,7 @@ def _confirm_grade_signals_ok(inventory: dict[str, Any]) -> bool:
         and isinstance(host["runtime_digest"], str) and DIGEST_RE.fullmatch(host["runtime_digest"] or "")
         and db["advisory_lock_held"] is True
         and db["backend_present"] is True
-        # §3 訊號 #7:advisory lock 的 holder backend 必屬 ALR 連線身分(usename=alr_shadow),把 PG 的
+        # §3 訊號 #7:advisory lock 的 holder backend 必屬 ALR 連線身分(usename=aiml_engine_scanner),把 PG 的
         # at-most-one-owner 保證綁回這個具體 owner(而非 pid 比對——server backend pid != client MainPID)。
         and inventory["advisory_holder_usename"] == ALR_CONNECTION_ROLE
         and db["consumer_session_status"] == "OPEN"

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://arcane-equilibrium.local/schemas/quiesce_observation_v1.schema.json",
   "title": "quiesce_observation_v1",
-  "description": "One evidence sample of the S2.1 quiesce cycle, discriminated by phase (PRE_FENCE_INVENTORY | IN_WINDOW_STATIC_GUARD | POST_UNFENCE_RESTORATION). It carries the multi-signal host inventory (unit/process/cgroup/env-hash/queue), the DB-side quiesce evidence read via the S2.0 read-only observer (advisory lock / backend / consumer-session / listen backlog), and the credential-exposure guards. The phase pins the admissible verdict set; the const-false credential flags and the CONFIRMED/STATIC-GUARD invariants are machine-enforced.",
+  "description": "One evidence sample of the S2.1 quiesce cycle of the system-level ALR event-consumer unit (arcane-equilibrium-aiml-engine-scanner.service), discriminated by phase (PRE_FENCE_INVENTORY | IN_WINDOW_STATIC_GUARD | POST_UNFENCE_RESTORATION). It carries the multi-signal host inventory (unit/process/cgroup/env-hash/queue), the DB-side quiesce evidence read via the S2.0 read-only observer (advisory lock / backend / consumer-session / listen backlog), and the credential-exposure guards. The phase pins the admissible verdict set; the const-false credential flags and the CONFIRMED/STATIC-GUARD invariants are machine-enforced.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -103,7 +103,7 @@
           "required": ["uid", "unit"],
           "properties": {
             "uid": {"type": "integer", "minimum": 0},
-            "unit": {"const": "openclaw-alr-shadow.service"}
+            "unit": {"const": "arcane-equilibrium-aiml-engine-scanner.service"}
           }
         },
         "process": {

@@ -13,10 +13,10 @@ signal/kill 任何真實 process。
 ``systemctl`` / ``stop``。可拋棄叢集測試會真的 ``initdb`` 起一個丟棄式 cluster、真的取得/釋放/再取得
 ``pg_try_advisory_lock('alr_event_consumer_v1')`` 並以 S2.0 唯讀 observer 角色真觀察 ``pg_locks`` /
 ``pg_stat_activity`` / consumer-session relation(LOCAL_REPRODUCIBLE);host 端 inventory / fence 邏輯跑在
-**模擬 /proc + 注入 systemctl callable + 注入 fence_ops** 上(絕無真 process 被 signal)。真正的 live
-``/proc`` / ``systemctl`` / ``systemctl --user stop/start`` 一律 DEFERRED 給 S2.1 EFFECT session。九個
-authority 恆 false;沒有任何 receipt 序列化機密(operator 私鑰既不在 Mac 也不在 trade-core;DSN 路徑被
-記錄、內容永不)。canonical self-digest 只證完整性,不證誰執行、不證外部事實。
+**模擬 /proc + 注入 system-level systemctl callable + 注入 fence_ops** 上(絕無真 process 被 signal)。真正的 live
+``/proc`` / ``systemctl`` / system-level ``systemctl stop/start`` 一律 DEFERRED 給 S2.1 EFFECT session。九個
+authority 恆 false;沒有任何 receipt 序列化機密(operator 私鑰既不在 Mac 也不在 trade-core;DSN 由
+``LoadCredentialEncrypted``/``%d/pg-dsn`` 供給,路徑被記錄、內容永不)。canonical self-digest 只證完整性,不證誰執行、不證外部事實。
 
 **Domain separation。** operator SSHSIG 沿用 S0.3/S1 既有信任根公鑰/指紋,但以**專屬 identity +
 namespace**(``aiml-s2-quiesce-fence-operator-v1`` / ``arcane-equilibrium-aiml-s2-quiesce-fence``)達成
@@ -24,8 +24,9 @@ domain separation:一張以 S1 target-host / S2.0 observer namespace 簽的 perm
 不符被拒。applier != 獨立驗證者(role/node/process/capture 皆須相異)。
 
 **O-1 effect 排序(SOURCE 不受影響,備註留給 EFFECT session)。** S1.6 最終 runtime 身分為
-``content_addressed_fixed_path``(fixed-path ``/usr/bin/python3 -m …``,非 OCI);S2.1 EFFECT 的 fence
-apply 只能在 ALR unit 已被 S2.4 安裝且 S2.5 起跑之後演練(即 EFFECT fence sequences after S2.4 + S2.5)。
+``content_addressed_fixed_path``(§8 的 ``/opt/arcane-equilibrium/aiml/runtimes/<digest>/bin/python3 -I -m …``,
+非系統 Python、非 OCI);S2.1 EFFECT 的 fence apply 只能在 ALR unit 已被 S2.4 安裝且 S2.5 起跑之後演練(即
+EFFECT fence sequences after S2.4 + S2.5)。
 WP3 ``SOURCE_READY`` 以模擬 owner 交付,不受此排序影響。
 
 **O-4 唯讀 relation 契約(參數化,非硬編第二特權路徑)。** intent 的 ``observed_relations`` 宣告 S2.1
@@ -318,20 +319,20 @@ def _result_secret_scan_view(result: dict[str, Any]) -> dict[str, Any]:
 # owner-scoped reversible fence / un-fence (§4 — the unit's OWN lifecycle only)
 # --------------------------------------------------------------------------- #
 def owner_scoped_fence(fence_ops: Any) -> None:
-    """Fence = the confirmed unit's OWN ``systemctl --user stop`` (owner-scoped, zero collateral).
+    """Fence = the confirmed unit's OWN system-level ``systemctl stop`` (owner-scoped, zero collateral).
 
     NEVER a name/pattern kill, NEVER ``kill <pid>``.  In the SOURCE lane ``fence_ops`` is an injected
     simulated-owner handle whose ``stop()`` flips the injected systemctl state to inactive and releases
     the throwaway advisory lock; no real process is signalled.
     """
 
-    # F2(EFFECT 契約備註):EFFECT 注入的 ``fence_ops.stop()`` 必為**阻塞式** ``systemctl --user stop``(回傳前 unit
-    # 已真正 inactive/dead,靜態守恆窗才觀察得到排空狀態)。
+    # F2(EFFECT 契約備註):EFFECT 注入的 ``fence_ops.stop()`` 必為**阻塞式** system-level ``systemctl stop``(回傳前
+    # unit 已真正 inactive/dead,靜態守恆窗才觀察得到排空狀態)。
     fence_ops.stop()
 
 
 def owner_scoped_unfence(fence_ops: Any) -> bool:
-    """Un-fence = the unit's OWN ``systemctl --user start``.  Returns whether the start call succeeded.
+    """Un-fence = the unit's OWN system-level ``systemctl start``.  Returns whether the start call succeeded.
 
     Every quiesce path attempts un-fence (even on failure) so the runtime is never left fenced by this
     seam.  A failed start (raises) is recorded as an honest NOT_RESTORED, never masked.
@@ -805,7 +806,7 @@ def build_quiesce_rollback(
         "unit_name": UNIT_NAME,
         "pre_fence_owner_fingerprint": pre_fence_stable_fingerprint,
         "post_unfence_owner_fingerprint": post_unfence_stable_fingerprint,
-        "unfence_operation": {"kind": "systemd_user_start", "unit": UNIT_NAME},
+        "unfence_operation": {"kind": "systemd_system_start", "unit": UNIT_NAME},
         "restored_exact": restored_exact,
         "owner_healthy": bool(owner_healthy),
         "observed_at": _iso(observed),
@@ -1145,7 +1146,7 @@ def apply_quiesce_fence(
     source_head it returns ``EXTERNAL_VERIFICATION_PENDING`` (NEVER a success, NEVER a kill).  A
     ``production`` target — OR any absent injected probe/fence/observer — ALSO returns
     ``EXTERNAL_VERIFICATION_PENDING`` in this WP3 source lane: the real ``/proc``/``systemctl`` reads and
-    the real ``systemctl --user stop/start`` are the S2.1 EFFECT session (sequenced after S2.4 installs +
+    the real system-level ``systemctl stop/start`` are the S2.1 EFFECT session (sequenced after S2.4 installs +
     S2.5 starts the unit).  For a ``disposable_local`` target with a valid SSHSIG and injected
     simulated-owner probes it runs the REAL (simulated) confirm -> fence -> static-guard window ->
     un-fence cycle against a throwaway advisory lock observed AS the S2.0 read-only observer.
@@ -1268,7 +1269,7 @@ def apply_quiesce_fence(
         host_probe, cursor, intent=intent, runtime_digest_resolver=runtime_digest_resolver,
     )
     # FIX-C3(Codex :1836):un-fence 後以與 pre-fence 同級的 confirm-grade 不變量復核 owner 全訊號
-    # (advisory holder=alr_shadow / consumer-session OPEN / fragment/cgroup match / 唯一候選 PID==MainPID /
+    # (advisory holder=aiml_engine_scanner / consumer-session OPEN / fragment/cgroup match / 唯一候選 PID==MainPID /
     # MainPID cmdline exact / 單一 backend / unit active),搭配 restart 後鑄新身分預期(新 PID/InvocationID,
     # 故以 stable-identity fingerprint 判 pre==post);任一未滿足即 NOT_RESTORED,而非把「unit 起來了」當成已還原。
     post_healthy = bool(start_ok) and _confirm_grade_signals_ok(post_inventory)

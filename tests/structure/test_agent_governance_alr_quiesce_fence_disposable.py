@@ -2,7 +2,7 @@
 
 Gated on ``shutil.which("initdb")`` + ``psycopg2``.  When PG binaries are present this ``initdb``-creates a
 throwaway, socket-only cluster and proves nothing-mocked for the DB-side quiesce evidence: a real
-``pg_try_advisory_lock('alr_event_consumer_v1')`` is acquired by an ``alr_shadow`` backend and observed
+``pg_try_advisory_lock('alr_event_consumer_v1')`` is acquired by an ``aiml_engine_scanner`` backend and observed
 **held -> free -> re-held** through a genuine read-only ``pg_locks`` / ``pg_stat_activity`` /
 ``learning.alr_consumer_events`` read AS the reused S2.0 observer role.  The host-side ownership /
 static-guard / fence logic runs against a SIMULATED ``/proc`` + an INJECTED ``systemctl`` + an INJECTED
@@ -63,17 +63,22 @@ NOW = "2026-07-24T12:01:00+00:00"
 LATER = "2026-07-24T12:02:00+00:00"
 CAP = "sha256:" + "e" * 64
 
-FRAG = "/home/x/.config/systemd/user/openclaw-alr-shadow.service"
-FLOCK = "/run/user/1000/alr-shadow/consumer.lock"
-CG = "/user.slice/user-1000.slice/user@1000.service/app.slice/openclaw-alr-shadow.service"
+# S2.4 §8 system-unit shape: system-level fragment, resolved /run credential + lock paths, content-addressed
+# interpreter under the sealed runtimes root + ``-I``, system-slice cgroup, the three §8 Environment= keys.
+FRAG = "/etc/systemd/system/arcane-equilibrium-aiml-engine-scanner.service"
+FLOCK = "/run/arcane-equilibrium/aiml-engine-scanner/consumer.lock"
+_DSN = "/run/credentials/arcane-equilibrium-aiml-engine-scanner.service/pg-dsn"
+INTERP = "/opt/arcane-equilibrium/aiml/runtimes/" + "b" * 64 + "/bin/python3"
+CG = "/system.slice/arcane-equilibrium-aiml-engine-scanner.service"
+SCANNER_UID = 4001  # 非 root 的 engine-scanner uid(§8;fixture value)
 CMDLINE = [
-    "/usr/bin/python3", "-m", "ml_training.alr_event_consumer",
-    "--dsn-file", "/home/x/.config/openclaw/alr-shadow.dsn", "--lock-file", FLOCK, "--max-batch", "32",
+    INTERP, "-I", "-m", "ml_training.alr_event_consumer",
+    "--dsn-file", _DSN, "--lock-file", FLOCK, "--max-batch", "32",
 ]
 ENVIRON = {
-    "ALR_SOURCE_HEAD": HEAD, "PYTHONPATH": "/srv/BybitOpenClaw/srv/program_code",
-    "ALR_CANDIDATE_EVIDENCE_DIR": "/run/user/1000/alr-shadow/candidates",
-    "ALR_EXPECTED_LEARNING_RUNTIME_DIGEST_V2": "sha256:" + "9" * 64,
+    "ALR_SOURCE_HEAD": HEAD,
+    "ALR_EXPECTED_LEARNING_RUNTIME_DIGEST": "sha256:" + "9" * 64,
+    "ALR_EXPECTED_COMPATIBILITY_RECEIPT": "sha256:" + "c" * 64,
 }
 CLEAN_SUBPROCESS_ENV = {"PATH": os.environ.get("PATH", ""), "LANG": "C", "LC_ALL": "C"}
 
@@ -224,7 +229,7 @@ class SimulatedOwner:
     def start(self):
         self.start_calls += 1
         if self.start_should_fail:
-            raise RuntimeError("injected systemctl --user start failure")
+            raise RuntimeError("injected system-level systemctl start failure")
         if self.drift_stable_on_start:
             # un-fence 本身成功、owner 又健康在跑,但 stable-identity 訊號(cmdline_digest)漂移 → pre != post。
             self.max_batch = "64"
@@ -242,16 +247,16 @@ class SimulatedOwner:
     def run(self, argv):
         if self._window_read_should_raise:
             raise RuntimeError("injected mid-window host read failure")
-        if argv[:4] == [q.SYSTEMD, "--user", "show", q.UNIT_NAME]:
+        if argv[:3] == [q.SYSTEMD, "show", q.UNIT_NAME]:
             return self._show_dump()
-        if argv[:3] == [q.SYSTEMD, "--user", "list-units"]:
+        if argv[:2] == [q.SYSTEMD, "list-units"]:
             return ""  # 無 active .scope 匹配(double-owner 以第二個 /proc 候選表達)
         raise AssertionError(f"unexpected systemctl argv: {argv}")
 
     def dsn_stat(self):
         return {
-            "dsn_file_path": "/home/x/.config/openclaw/alr-shadow.dsn",
-            "dsn_mode": "0600", "dsn_owner_uid": 1000, "world_readable": False,
+            "dsn_file_path": _DSN,
+            "dsn_mode": "0600", "dsn_owner_uid": SCANNER_UID, "world_readable": False,
         }
 
     def flock_held(self):
@@ -703,7 +708,7 @@ def test_unfence_active_but_session_not_open_is_not_restored(owner, cluster, tmp
     expected, _inv = _expected_fingerprint(owner, observer_conn)
     intent = _intent(expected)
     authorization, signature = _sign(private_key, intent, HEAD)
-    # un-fence 使 unit 起來、advisory lock 由 alr_shadow 重持、候選 PID==MainPID,但 consumer-session 未回 OPEN。
+    # un-fence 使 unit 起來、advisory lock 由 aiml_engine_scanner 重持、候選 PID==MainPID,但 consumer-session 未回 OPEN。
     owner.suppress_session_on_unfence = True
     result = q.apply_quiesce_fence(
         intent, authorization, signature, now=NOW, source_head=HEAD,

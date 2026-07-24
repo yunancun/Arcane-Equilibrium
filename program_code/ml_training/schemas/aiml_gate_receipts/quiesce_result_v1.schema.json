@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://arcane-equilibrium.local/schemas/quiesce_result_v1.schema.json",
   "title": "quiesce_result_v1",
-  "description": "Canonical self-hashed result of one S2.1 quiesce fence cycle. A production fence (and any fence in this WP3 source lane) is EXTERNAL_VERIFICATION_PENDING, never a fake success and never a live process kill. QUIESCED_STATIC_GUARDS_HELD is a real disposable simulated-owner proof: confirmed single owner -> owner-scoped stop -> bounded static-guard window all held -> owner-scoped start restores the stable identity. Stale/ambiguous/window-violated/not-restored are fail-closed. The const-false boundary keeps all nine authorities false; no secret is serialized.",
+  "description": "Canonical self-hashed result of one S2.1 quiesce fence cycle of the system-level ALR event-consumer unit (arcane-equilibrium-aiml-engine-scanner.service). A production fence (and any fence in this WP3 source lane) is EXTERNAL_VERIFICATION_PENDING, never a fake success and never a live process kill. QUIESCED_STATIC_GUARDS_HELD is a real disposable simulated-owner proof: confirmed single owner -> owner-scoped system-level stop -> bounded static-guard window all held -> owner-scoped system-level start restores the stable identity. Stale/ambiguous/window-violated/not-restored are fail-closed. The const-false boundary keeps all nine authorities false; no secret is serialized.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -52,7 +52,7 @@
     "intent_digest": {"$ref": "#/$defs/digest"},
     "target_class": {"enum": ["disposable_local", "production"]},
     "target_host": {"type": "string", "minLength": 1},
-    "unit_name": {"const": "openclaw-alr-shadow.service"},
+    "unit_name": {"const": "arcane-equilibrium-aiml-engine-scanner.service"},
     "owner_fingerprint": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]},
     "pre_fence_observation": {"anyOf": [{"type": "object"}, {"type": "null"}]},
     "window_samples": {"type": "array", "items": {"type": "object"}},
