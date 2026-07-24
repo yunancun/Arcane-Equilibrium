@@ -85,6 +85,10 @@ PLATFORM_OS = frozenset({"darwin", "linux"})
 
 # S1.6 選定的 runtime,以及本 receipt 面向的 Linux 目標平台(uv --python-platform 語彙)。
 SELECTED_RUNTIME_KIND = "content_addressed_fixed_path"
+# TARGET_PLATFORM 是 committed `requirements-ml.lock` 標頭 `--python-platform` token 的鏡像(C1)。
+# 權威來源是 lock 本身:`lock_target_platform()` 由標頭解析出真值,builder 綁其為 receipt 的 target_platform,
+# validator 拒任何不等於它的宣稱(如 aarch64-apple-darwin);本常量僅為離線便捷,並由一支自洽測試釘住
+# `TARGET_PLATFORM == lock_target_platform(committed lock)`,不得靜默漂離 lock。
 TARGET_PLATFORM = "x86_64-unknown-linux-gnu"
 TARGET_PYTHON_VERSION = "3.12"
 
@@ -108,20 +112,27 @@ NATIVE_PACKAGES = frozenset({
     "psycopg-binary", "psycopg2-binary",
 })
 
-# 跨 slice lineage 綁定的真確性分級(F3;CLAUDE §四):
-#  * OFFLINE_GROUND_TRUTH_BOUND —— S1.3 / S1.4-B digest 由本模組常量離線鎖定,且
-#    source_sha256 釘住本模組位元組,故 validator 可離線拒絕任何非 canonical 值(非 authenticity
-#    overclaim,只是離線完整性強化)。
-#  * SCHEMA_LEVEL_FORMAT_ONLY —— S1.6 runtime-choice receipt 為 disposable/uncommitted,只綁其
-#    committed schema 身分(格式層);此指標「不是」對 S1.6 receipt 實例的完整 lineage 認證。
-# 通則:一次通過的 validate_*() 只證結構完整,「非」完整 lineage 認證;S1.6(及任何 SCHEMA_LEVEL)
-# 指標的真確性需 S2.4 out-of-band 可信主機重抓(re-fetch)後方成立。
+# 跨 slice lineage 綁定的真確性分級(F3 + C2;CLAUDE §四):
+#  * OFFLINE_GROUND_TRUTH_BOUND —— S1.3 / S1.4-B digest 由本模組常量離線鎖定,且 source_sha256 釘住
+#    本模組位元組,故 validator 可離線拒絕任何非 canonical 值。但被指向的 receipt「實例位元組」是
+#    disposable/uncommitted,故其「完整認證」仍需 S2.4 out-of-band 可信主機 re-fetch。
+#  * OFFLINE_SCHEMA_VERIFIED —— S1.6 learning_runtime_choice digest = committed schema 檔的 sha256,
+#    檔案位元組本身已 committed、完全離線可重算(validator 現 ASSERT 其等於重算值,非只格式檢查);
+#    此處「沒有」被宣稱的 disposable-instance digest,故無任何項目需要 S2.4 re-fetch(C2)。
+# 通則:一次通過的 validate_*() 只證結構完整;OFFLINE_GROUND_TRUTH_BOUND 指標的「實例」完整認證需
+# S2.4 re-fetch,OFFLINE_SCHEMA_VERIFIED 則已離線完備。
 LINEAGE_BINDING_KINDS = {
     "identity_acl_contract_digest": "OFFLINE_GROUND_TRUTH_BOUND",
     "runtime_candidate_receipt_b_digest": "OFFLINE_GROUND_TRUTH_BOUND",
-    "learning_runtime_choice_receipt_digest": "SCHEMA_LEVEL_FORMAT_ONLY",
+    "learning_runtime_choice_receipt_digest": "OFFLINE_SCHEMA_VERIFIED",
 }
 LINEAGE_REFETCH_REQUIRED_AT = "S2.4_trusted_host_refetch"
+# 僅「綁 committed digest 常量、但被指向 receipt 實例為 disposable」的指標,其完整認證需 S2.4 re-fetch;
+# OFFLINE_SCHEMA_VERIFIED(S1.6)不在此列。
+LINEAGE_REFETCH_REQUIRED_POINTERS = (
+    "identity_acl_contract_digest",
+    "runtime_candidate_receipt_b_digest",
+)
 
 # --------------------------------------------------------------------------- #
 # 真實 committed S1 lineage digest(綁定來源見各常量註解)。
@@ -214,6 +225,8 @@ _HASH_RE = re.compile(r"--hash=sha256:([0-9a-f]{64})")
 _VIA_INLINE_RE = re.compile(r"^\s+#\s*via\s+(\S.*)$")
 _VIA_HEADER_RE = re.compile(r"^\s+#\s*via\s*$")
 _VIA_CONT_RE = re.compile(r"^\s+#\s+(\S.*)$")
+# uv 於 lock 標頭寫入的產鎖命令,含 `--python-platform <token>`(C1:target_platform 的權威來源)。
+_PYTHON_PLATFORM_RE = re.compile(r"--python-platform[=\s]+([A-Za-z0-9][A-Za-z0-9_.\-]*)")
 
 
 class SecretLeakageError(RuntimeError):
@@ -325,6 +338,27 @@ def _parse_spec_direct_names(spec_path: Path) -> list[str]:
         if match:
             names.append(_normalize_name(match.group(1)))
     return names
+
+
+def lock_target_platform(lock_path: str | Path) -> str:
+    """Derive the target platform from the committed lock's uv header (C1).
+
+    Parses the ``--python-platform <token>`` uv wrote into the top-of-file comment; this is
+    the AUTHORITATIVE target the closure was resolved for.  A caller cannot override it — the
+    builder pins the receipt's ``target_platform`` to this value and the validator rejects any
+    receipt claiming a different platform (e.g. ``aarch64-apple-darwin``) while bound to the
+    Linux lock.  If the header lacks the token (a degenerate / non-uv lock such as the hermetic
+    fixture), fall back to ``TARGET_PLATFORM`` — the committed-lock const (documented above).
+    """
+
+    for raw in Path(lock_path).read_text(encoding="utf-8").splitlines():
+        stripped = raw.lstrip()
+        if not stripped.startswith("#"):
+            break  # header comments live at the top; stop at the first requirement line
+        found = _PYTHON_PLATFORM_RE.search(raw)
+        if found:
+            return found.group(1)
+    return TARGET_PLATFORM
 
 
 def _parse_lock_entries(lock_path: Path) -> tuple[dict[str, dict[str, Any]], int]:
@@ -456,6 +490,8 @@ def verify_lock_closure(lock_path: str | Path, spec_path: str | Path) -> dict[st
         "entries_total": len(entries),
         "hashed_entries_total": sum(1 for entry in entries.values() if entry["hashes"]),
         "unpinned_count": 0,
+        # C1:target_platform 由 lock 標頭權威導出(非 caller-supplied)。
+        "target_platform": lock_target_platform(lock_path),
         "direct_names": sorted(direct_set),
         "entries": projected,
     }
@@ -603,6 +639,16 @@ def build_sealed_build_receipt(
             raise ValueError(f"{label} must be a sha256 digest")
 
     platform_block = _validate_platform(platform)
+    # C1:target_platform 權威來源=lock 標頭導出值;caller 的宣稱必須與之相符,否則 fail-closed raise
+    # (擋「把 Linux closure 標成 macOS build」)。
+    lock_target = lock_closure.get("target_platform")
+    if not isinstance(lock_target, str) or not lock_target:
+        raise LockClosureError("lock_closure lacks a lock-derived target_platform")
+    if platform_block["target_platform"] != lock_target:
+        raise ValueError(
+            f"platform.target_platform {platform_block['target_platform']!r} does not match the "
+            f"lock-derived target {lock_target!r}"
+        )
     closure_hash = lock_closure.get("closure_hash")
     if not DIGEST_RE.fullmatch(str(closure_hash)):
         raise ValueError("lock_closure.closure_hash must be a sha256 digest")
@@ -732,12 +778,16 @@ def validate_sealed_build_receipt(
     ``selected_runtime_kind`` S1.6 anchor, an INDEPENDENT re-derivation of
     ``runtime_content_digest`` from the receipt's own fields, the offline ground-truth
     binding of ``runtime_candidate_receipt_b_digest`` to the committed S1.4-B constant
-    (F3), secret-free serialization, TTL/time ordering and ``self_digest`` re-hash.
+    (F3), the ``platform.target_platform`` == committed-lock ``TARGET_PLATFORM`` bind (C1:
+    rejects a macOS claim on the Linux closure), the OFFLINE-VERIFIED S1.6
+    ``learning_runtime_choice_receipt_digest`` == committed schema sha256 (C2), secret-free
+    serialization, TTL/time ordering and ``self_digest`` re-hash.
 
     When ``lock_path`` is given (the lock is committed + re-derivable), it RE-ASSERTS
-    ``closure_hash`` / ``entries_total`` / ``hashed_entries_total`` / ``unpinned_count`` and
-    the native ``wheel_sha256`` set against the real lock via ``verify_lock_closure`` — so
-    those counts / closure_hash are no longer opaque (kills FORGERY A: lying counts).
+    ``closure_hash`` / ``entries_total`` / ``hashed_entries_total`` / ``unpinned_count`` /
+    native ``wheel_sha256`` and the lock-derived ``target_platform`` against the real lock via
+    ``verify_lock_closure`` — so those are no longer opaque (kills FORGERY A: lying counts /
+    a mislabeled build target).
     """
 
     if not isinstance(receipt, dict):
@@ -772,12 +822,26 @@ def validate_sealed_build_receipt(
         errors.append("sealed build receipt source_sha256 does not bind this module")
     if receipt.get("schema_sha256") != sealed_schema_sha256():
         errors.append("sealed build receipt schema_sha256 does not bind the schema")
+    # C1:target_platform 必等於本模組(綁 committed lock)的 TARGET_PLATFORM,離線即可拒 macOS 宣稱
+    # (即使 os/arch 自洽);lock_path 分支另對 lock 導出值再交叉核對(下方 _validate_sealed_against_lock)。
+    platform = receipt.get("platform")
+    if isinstance(platform, dict) and platform.get("target_platform") != TARGET_PLATFORM:
+        errors.append(
+            f"sealed build receipt platform.target_platform must be {TARGET_PLATFORM} "
+            "(the committed Linux lock target, not a caller-supplied platform)"
+        )
     # F3:S1.4-B digest 離線鎖定到 committed ground-truth 常量(source_sha256 已釘住本模組位元組)。
-    # S1.6 digest 維持格式層(schema-level/disposable),其完整 lineage 認證需 S2.4 out-of-band 重抓。
     if receipt.get("runtime_candidate_receipt_b_digest") != S1_4_RUNTIME_CANDIDATE_B_DIGEST:
         errors.append(
             "sealed build receipt runtime_candidate_receipt_b_digest does not bind the committed "
             "S1.4-B ground-truth digest"
+        )
+    # C2:S1.6 learning_runtime_choice digest = committed schema 檔的 sha256,離線可重算 → ASSERT 相等
+    # (不再只格式檢查;swapped valid SHA 會被抓)。此指標為 OFFLINE_SCHEMA_VERIFIED,無需 S2.4 re-fetch。
+    if receipt.get("learning_runtime_choice_receipt_digest") != learning_runtime_choice_schema_sha256():
+        errors.append(
+            "sealed build receipt learning_runtime_choice_receipt_digest does not bind the committed "
+            "S1.6 runtime-choice schema sha256"
         )
 
     errors.extend(_validate_sealed_consts(receipt))
@@ -908,6 +972,20 @@ def _validate_sealed_against_lock(
         return [f"sealed build receipt could not re-verify the committed lock closure: {exc}"]
     if receipt.get("closure_hash") != closure["closure_hash"]:
         errors.append("sealed build receipt closure_hash does not match the committed lock")
+    # C1:target_platform 交叉核對 lock 標頭導出值(擋「Linux closure 標成 macOS」);同時守 const↔lock 漂移。
+    lock_target = closure.get("target_platform")
+    platform = receipt.get("platform")
+    receipt_target = platform.get("target_platform") if isinstance(platform, dict) else None
+    if receipt_target != lock_target:
+        errors.append(
+            f"sealed build receipt platform.target_platform {receipt_target!r} does not match the "
+            f"lock-derived target {lock_target!r}"
+        )
+    if TARGET_PLATFORM != lock_target:
+        errors.append(
+            f"sealed build module TARGET_PLATFORM {TARGET_PLATFORM!r} has drifted from the lock-derived "
+            f"target {lock_target!r}"
+        )
     dependency = receipt.get("dependency_closure")
     if isinstance(dependency, dict):
         if dependency.get("entries_total") != closure["entries_total"]:
@@ -1122,6 +1200,13 @@ def validate_expected_identity_receipt(
         errors.append("expected identity receipt observation_owner must be S2.5_LR6")
     if receipt.get("selected_runtime_kind") != SELECTED_RUNTIME_KIND:
         errors.append(f"expected identity receipt selected_runtime_kind must be {SELECTED_RUNTIME_KIND} (S1.6 anchor)")
+    # C1:identity receipt 面向的目標平台必等於本模組(綁 committed lock)的 TARGET_PLATFORM。
+    platform = receipt.get("platform")
+    if isinstance(platform, dict) and platform.get("target_platform") != TARGET_PLATFORM:
+        errors.append(
+            f"expected identity receipt platform.target_platform must be {TARGET_PLATFORM} "
+            "(the committed Linux lock target)"
+        )
 
     for field_name in (
         "sealed_build_digest", "runtime_content_digest", "identity_acl_contract_digest",
@@ -1182,6 +1267,11 @@ def _validate_identity_sealed_binding(
         errors.append("expected identity receipt sealed_build_digest does not bind the paired sealed build self_digest")
     if receipt.get("runtime_content_digest") != sealed_receipt.get("runtime_content_digest"):
         errors.append("expected identity receipt runtime_content_digest does not match the paired sealed build")
+    # C1:identity 與 sealed 的 target_platform 必一致(同一 S1.6 選定 runtime 的封存)。
+    identity_platform = receipt.get("platform") or {}
+    sealed_platform = sealed_receipt.get("platform") or {}
+    if identity_platform.get("target_platform") != sealed_platform.get("target_platform"):
+        errors.append("expected identity receipt target_platform does not match the paired sealed build")
     return errors
 
 

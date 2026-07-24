@@ -113,7 +113,7 @@
   "runtime_content_digest": "sha256:8b2092e8f55ac0484ed597fe906fecb083fdbbf106367728be71decd911d7fea",
   "schema_sha256": "sha256:60e44fa21cf3f442374307d53191ec9ebb83e15e3c475a32c9e53690f4e1bbad",
   "schema_version": "expected_identity_receipt_v1",
-  "sealed_build_digest": "sha256:a026ada7bfc48ebbfc63803b072e66d976c48ac1ce414b3ddd887ac31dea56aa",
+  "sealed_build_digest": "sha256:169d2e6c9a8b90d4adc4e06897f854943acf31f9ed0e0771850e5c5007b4c852",
   "secret_loading_binding": {
     "no_plaintext_ingress": true,
     "plaintext_ingress": false
@@ -128,8 +128,8 @@
     ]
   },
   "selected_runtime_kind": "content_addressed_fixed_path",
-  "self_digest": "sha256:f66258895509c206bb9c42509cd883d15b8d21273a23358a91a5ec5717bf2f60",
-  "source_sha256": "sha256:3d08f73e126639dd1ea1dc7ac9a3a977091ca82230aaad0484a48b30f76b03db",
+  "self_digest": "sha256:a08c69657d80995793855e817c69c505c4b0e2142f0aa53231136acba7bf8baf",
+  "source_sha256": "sha256:bc32c24a1f3f1a9b532aa23a39f6bcb99aca05fc6eb6a1b77468465d1e54c207",
   "status": "PASS",
   "ttl_seconds": 1800
 }

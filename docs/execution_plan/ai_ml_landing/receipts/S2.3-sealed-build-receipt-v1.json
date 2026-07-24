@@ -131,8 +131,8 @@
     ]
   },
   "selected_runtime_kind": "content_addressed_fixed_path",
-  "self_digest": "sha256:a026ada7bfc48ebbfc63803b072e66d976c48ac1ce414b3ddd887ac31dea56aa",
-  "source_sha256": "sha256:3d08f73e126639dd1ea1dc7ac9a3a977091ca82230aaad0484a48b30f76b03db",
+  "self_digest": "sha256:169d2e6c9a8b90d4adc4e06897f854943acf31f9ed0e0771850e5c5007b4c852",
+  "source_sha256": "sha256:bc32c24a1f3f1a9b532aa23a39f6bcb99aca05fc6eb6a1b77468465d1e54c207",
   "status": "PASS",
   "ttl_seconds": 1800
 }

@@ -326,3 +326,38 @@ def test_sealed_lock_reassertion_catches_forged_native_wheel_digest():
         "native_library_inventory does not match the committed lock projection" in e
         for e in sb.validate_sealed_build_receipt(forged, lock_path=_REAL_LOCK)
     )
+
+
+# --------------------------------------------------------------------------- #
+# C1: target_platform bound to the real lock; C2: S1.6 schema digest re-derived
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("os_name,arch", [("darwin", "aarch64"), ("linux", "x86_64")])
+def test_committed_sealed_darwin_forgery_rejected_with_real_lock(os_name, arch):
+    # C1:真 committed receipt 只改 target_platform=darwin,對真 lock 交叉驗 → REJECTED(os/arch 自洽與否皆拒)。
+    sealed = json.loads((_RECEIPTS_DIR / "S2.3-sealed-build-receipt-v1.json").read_text(encoding="utf-8"))
+    forged = deepcopy(sealed)
+    forged["platform"]["target_platform"] = "aarch64-apple-darwin"
+    forged["platform"]["os"] = os_name
+    forged["platform"]["arch"] = arch
+    forged["self_digest"] = sb.receipt_digest(forged)
+    assert any("target_platform" in e for e in sb.validate_sealed_build_receipt(forged, lock_path=_REAL_LOCK))
+
+
+def test_committed_sealed_swapped_s1_6_schema_digest_rejected():
+    # C2:swapped learning_runtime_choice_receipt_digest(re-sign 後)→ REJECTED(committed schema sha256 離線可重算)。
+    sealed = json.loads((_RECEIPTS_DIR / "S2.3-sealed-build-receipt-v1.json").read_text(encoding="utf-8"))
+    forged = deepcopy(sealed)
+    forged["learning_runtime_choice_receipt_digest"] = "sha256:" + ("e" * 64)
+    forged["self_digest"] = sb.receipt_digest(forged)
+    assert any(
+        "S1.6 runtime-choice schema" in e
+        for e in sb.validate_sealed_build_receipt(forged, lock_path=_REAL_LOCK)
+    )
+
+
+def test_lock_target_platform_parses_real_header():
+    # C1:真 lock 標頭 --python-platform token 導出 == committed Linux target,且模組常量與之一致。
+    assert sb.lock_target_platform(_REAL_LOCK) == "x86_64-unknown-linux-gnu"
+    assert sb.TARGET_PLATFORM == sb.lock_target_platform(_REAL_LOCK)
+    # committed 鎖 closure 亦回報同一 lock-derived target。
+    assert sb.verify_lock_closure(_REAL_LOCK, ROOT / "requirements-ml.txt")["target_platform"] == "x86_64-unknown-linux-gnu"

@@ -53,6 +53,8 @@ def _closure(**overrides) -> dict:
         "entries_total": 12,
         "hashed_entries_total": 12,
         "unpinned_count": 0,
+        # C1:lock-derived target_platform(builder 綁定其為 receipt 的 target_platform)。
+        "target_platform": "x86_64-unknown-linux-gnu",
         "entries": [],
     }
     closure.update(overrides)
@@ -298,6 +300,48 @@ def test_sealed_fail_branch_and_pass_with_failure_reason():
     assert any("cannot carry a failure_reason" in e for e in sb.validate_sealed_build_receipt(bad_pass))
 
 
+@pytest.mark.parametrize("os_name,arch", [("darwin", "aarch64"), ("linux", "x86_64")])
+def test_sealed_darwin_target_platform_rejected_by_const(os_name, arch):
+    # C1:receipt 宣稱 aarch64-apple-darwin(綁 committed Linux lock)必被拒——無論 os/arch 是否自洽。
+    forged = deepcopy(_build_sealed())
+    forged["platform"]["target_platform"] = "aarch64-apple-darwin"
+    forged["platform"]["os"] = os_name
+    forged["platform"]["arch"] = arch
+    forged["self_digest"] = sb.receipt_digest(forged)
+    assert any("target_platform must be" in e for e in sb.validate_sealed_build_receipt(forged))
+
+
+def test_sealed_build_rejects_caller_target_platform_not_matching_lock():
+    # C1:builder 端 caller 傳非 lock-derived target → fail-closed raise(build 就發不出 receipt)。
+    darwin = dict(sb.target_platform_block())
+    darwin.update(target_platform="aarch64-apple-darwin", os="darwin", arch="aarch64")
+    with pytest.raises(ValueError, match="lock-derived target"):
+        _build_sealed(platform=darwin)
+
+
+def test_legit_linux_sealed_receipt_still_validates():
+    receipt = _build_sealed()
+    assert receipt["platform"]["target_platform"] == "x86_64-unknown-linux-gnu"
+    assert sb.validate_sealed_build_receipt(receipt, require_success=True) == []
+
+
+def test_sealed_s1_6_digest_is_committed_schema_sha256_and_swap_rejected():
+    # C2:S1.6 digest = committed schema 檔 sha256(OFFLINE_SCHEMA_VERIFIED,離線可重算);swapped → 拒。
+    receipt = _build_sealed()
+    assert receipt["learning_runtime_choice_receipt_digest"] == sb.learning_runtime_choice_schema_sha256()
+    assert sb.LINEAGE_BINDING_KINDS["learning_runtime_choice_receipt_digest"] == "OFFLINE_SCHEMA_VERIFIED"
+    assert "learning_runtime_choice_receipt_digest" not in sb.LINEAGE_REFETCH_REQUIRED_POINTERS
+    forged = deepcopy(receipt)
+    forged["learning_runtime_choice_receipt_digest"] = _digest("swapped-s1.6-schema")
+    forged["self_digest"] = sb.receipt_digest(forged)
+    assert any("S1.6 runtime-choice schema" in e for e in sb.validate_sealed_build_receipt(forged))
+
+
+def test_target_platform_const_matches_committed_lock():
+    # C1 自洽:模組常量不得靜默漂離 committed lock 標頭導出值。
+    assert sb.TARGET_PLATFORM == sb.lock_target_platform(ROOT / "requirements-ml.lock")
+
+
 # --------------------------------------------------------------------------- #
 # expected_identity_receipt: builder -> validator -> schema PASS roundtrip
 # --------------------------------------------------------------------------- #
@@ -467,6 +511,29 @@ def test_expected_identity_paired_sealed_binding_catches_swap():
     assert any(
         "runtime_content_digest does not match the paired" in e
         for e in sb.validate_expected_identity_receipt(forged2, sealed_receipt=sealed)
+    )
+
+
+@pytest.mark.parametrize("os_name,arch", [("darwin", "aarch64"), ("linux", "x86_64")])
+def test_expected_identity_darwin_target_platform_rejected(os_name, arch):
+    # C1:identity receipt 宣稱 macOS 目標(綁 Linux lock)必被拒——with/without matching os/arch。
+    forged = deepcopy(_build_identity())
+    forged["platform"]["target_platform"] = "aarch64-apple-darwin"
+    forged["platform"]["os"] = os_name
+    forged["platform"]["arch"] = arch
+    forged["self_digest"] = sb.receipt_digest(forged)
+    assert any("target_platform must be" in e for e in sb.validate_expected_identity_receipt(forged))
+
+
+def test_expected_identity_target_platform_must_match_paired_sealed():
+    # C1:identity 與 paired sealed 的 target_platform 不一致 → 被拒。
+    sealed = _build_sealed()
+    forged = deepcopy(_build_identity(sealed=sealed))
+    forged["platform"]["target_platform"] = "aarch64-apple-darwin"
+    forged["self_digest"] = sb.receipt_digest(forged)
+    assert any(
+        "target_platform does not match the paired" in e
+        for e in sb.validate_expected_identity_receipt(forged, sealed_receipt=sealed)
     )
 
 
