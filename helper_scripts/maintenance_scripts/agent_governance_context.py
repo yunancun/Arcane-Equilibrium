@@ -30,6 +30,7 @@ TRUSTED_DERIVED_SOURCES = {
     "focused acceptance tests": "test_inventory",
 }
 MAX_INLINE_MATCHES = 64
+MAX_INLINE_MATCH_TEXT_BYTES = 1024
 MAX_INLINE_DIFF_BYTES = 64 * 1024
 
 
@@ -238,17 +239,38 @@ def _scan_interface_matches(root: Path, interfaces: list[str]) -> list[dict[str,
 def _bounded_match_inventory(
     matches: list[dict[str, Any]], *, limit: int = MAX_INLINE_MATCHES,
 ) -> dict[str, Any]:
-    """Authenticate a complete match set while exposing only a bounded preview."""
+    """Authenticate a complete match set while exposing only a bounded preview.
+
+    A generated JSON receipt may contain an entire serialized Context on one
+    physical line.  Count-bounding the preview alone would still let that one
+    match consume the whole call budget.  The manifest digest therefore binds
+    every original byte, while each inline preview line is independently
+    byte-bounded and carries the full-text digest/size when truncated.
+    """
 
     manifest_raw = json.dumps(
         matches, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
         allow_nan=False,
     ).encode("utf-8")
+    preview: list[dict[str, Any]] = []
+    for match in matches[:limit]:
+        item = dict(match)
+        text = item.get("text")
+        if isinstance(text, str):
+            raw_text = text.encode("utf-8", errors="surrogateescape")
+            if len(raw_text) > MAX_INLINE_MATCH_TEXT_BYTES:
+                item["text"] = raw_text[:MAX_INLINE_MATCH_TEXT_BYTES].decode(
+                    "utf-8", errors="ignore"
+                )
+                item["text_bytes"] = len(raw_text)
+                item["text_digest"] = _sha256_bytes(raw_text)
+                item["text_truncated"] = True
+        preview.append(item)
     return {
         "match_count": len(matches),
         "manifest_digest": _sha256_bytes(manifest_raw),
         "manifest_bytes": len(manifest_raw),
-        "matches": matches[:limit],
+        "matches": preview,
         "truncated": len(matches) > limit,
         "retrieval": "open task-relevant paths from the repository on demand",
     }
