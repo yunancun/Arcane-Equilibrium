@@ -1,0 +1,131 @@
+{
+  "adapter_id": "sealed_build_adapter_v1",
+  "boundary": {
+    "nine_authorities_false": true,
+    "production_installed": false,
+    "production_running_attested": false,
+    "target_host_loaded": false
+  },
+  "caller": "E1:S2.3:LR2-sealed-build",
+  "closure_hash": "sha256:26307134daaa63d0ddd6a5fee0abf363fe243e45add49052d6ef0ae53caeaeb1",
+  "dependency_closure": {
+    "entries_total": 38,
+    "hashed_entries_total": 38,
+    "real_ml_closure_resolved": true,
+    "unpinned_count": 0
+  },
+  "expires_at": "2026-07-24T00:30:00+00:00",
+  "failure_reason": null,
+  "launch": {
+    "ignores_ambient_env": true,
+    "launch_interpreter": "absolute_pinned",
+    "python_isolated_mode": true,
+    "system_python_fallback_possible": false
+  },
+  "learning_runtime_choice_receipt_digest": "sha256:fd7620f63fe09fe681fde3e66a457928f488aa07e8af1d927ade07d6609eef12",
+  "lock_input_ref": "requirements-ml.lock",
+  "lock_tool": "uv 0.11.26",
+  "native_library_inventory": [
+    {
+      "load_verified_on_target": false,
+      "package": "duckdb",
+      "version": "1.5.5",
+      "wheel_sha256": "sha256:29f7de394a412b076f221cac053e191023fd7c247f07f14970e0657aa3423e8a"
+    },
+    {
+      "load_verified_on_target": false,
+      "package": "lightgbm",
+      "version": "4.7.0",
+      "wheel_sha256": "sha256:6f0859f75912f71fda990197670d427aed6a8292b8ad8f49aa281b9b44b70b60"
+    },
+    {
+      "load_verified_on_target": false,
+      "package": "llvmlite",
+      "version": "0.48.0",
+      "wheel_sha256": "sha256:8f011880dda127cfb02878e8b31f49c52809514e566d0dd64ef6e3f19bfe8f44"
+    },
+    {
+      "load_verified_on_target": false,
+      "package": "ml-dtypes",
+      "version": "0.5.4",
+      "wheel_sha256": "sha256:d8019a906a62adeac8a30365777483b1d06aecf7630fa0eb0b60f7880689beef"
+    },
+    {
+      "load_verified_on_target": false,
+      "package": "numba",
+      "version": "0.66.0",
+      "wheel_sha256": "sha256:fd1f70da3d13769e4180baec946966fc82dc1fd9a8ef8673862446d1eb035203"
+    },
+    {
+      "load_verified_on_target": false,
+      "package": "numpy",
+      "version": "2.4.6",
+      "wheel_sha256": "sha256:b8b9218666073bab51b1cde484370f0e6512d91b0eea0a64600d0fd36d7ba73c"
+    },
+    {
+      "load_verified_on_target": false,
+      "package": "onnx",
+      "version": "1.22.0",
+      "wheel_sha256": "sha256:df02ebfd8048433e87f29ec79bd16d2384d02b463fd6232268464faae2a294c8"
+    },
+    {
+      "load_verified_on_target": false,
+      "package": "onnxruntime",
+      "version": "1.27.0",
+      "wheel_sha256": "sha256:c6b3861248c98e6587d3d8069ff80658639fbe45fa475013a5b683e80f9ccb82"
+    },
+    {
+      "load_verified_on_target": false,
+      "package": "psycopg-binary",
+      "version": "3.3.4",
+      "wheel_sha256": "sha256:9809ea7062a4dc40bcf52d566c30bf7b031e7c8f232f73eaff19052754fc3d85"
+    },
+    {
+      "load_verified_on_target": false,
+      "package": "pyarrow",
+      "version": "25.0.0",
+      "wheel_sha256": "sha256:4203a4e91296c4026b84b4d0dbda1565da8cca08812dde1094fce48c73ad8645"
+    },
+    {
+      "load_verified_on_target": false,
+      "package": "scikit-learn",
+      "version": "1.9.0",
+      "wheel_sha256": "sha256:9a315a2c667dffceb70f63d342421beb12f4318ca21519741e7ccf33c61cce60"
+    },
+    {
+      "load_verified_on_target": false,
+      "package": "scipy",
+      "version": "1.18.0",
+      "wheel_sha256": "sha256:fa01af3ff98c7ce9f4e04f2d00fb579bcfa005bdc0c7eb002c732c5aee232279"
+    }
+  ],
+  "observation_time": "2026-07-24T00:00:00+00:00",
+  "platform": {
+    "arch": "x86_64",
+    "os": "linux",
+    "python_version": "3.12",
+    "target_platform": "x86_64-unknown-linux-gnu"
+  },
+  "runtime_candidate_receipt_b_digest": "sha256:3e5562b5632d1795ce498b601a54c520ffaf59151268bab5b7d404a46deca140",
+  "runtime_content_digest": "sha256:d3f2f14dbc15ddedc9eda409216134eb89987b82135d35a0585a4bdd862c8b0f",
+  "schema_sha256": "sha256:c00acf2c59f6ef8fb0b85c1bfe09a9b04e34b71ca632aba97a2a0866e6c08e43",
+  "schema_version": "sealed_build_receipt_v1",
+  "sealed_input": {
+    "mutable_tag_or_alias": false,
+    "relocatable_renamed_venv": false,
+    "reproducible_output_verified": true
+  },
+  "secret_scan": {
+    "leaked": false,
+    "patterns_checked": [
+      "auth_scheme_token",
+      "credential_assignment",
+      "github_token",
+      "provider_secret"
+    ]
+  },
+  "self_digest": "sha256:71ae69ffd006ae6730e238cf7fb4b6ec02a3cbca2819fc3d8f3fc1c4d0405f84",
+  "source_sha256": "sha256:9ac22753789148c7f12b4d988466c6b03cd08917bf0147fefcb7f10cbacecaa3",
+  "status": "PASS",
+  "ttl_seconds": 1800
+}

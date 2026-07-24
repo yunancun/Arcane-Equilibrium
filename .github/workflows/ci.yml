@@ -43,6 +43,7 @@ jobs:
       rust: ${{ steps.classify.outputs.rust }}
       schema: ${{ steps.classify.outputs.schema }}
       stock_etf: ${{ steps.classify.outputs.stock_etf }}
+      sealed_build: ${{ steps.classify.outputs.sealed_build }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -199,6 +200,53 @@ jobs:
         run: python3 tests/structure/test_alr_fit_verifier_source_static.py --metadata-json rust/target/alr-fit-verifier-metadata.json
       - name: Run focused static contract through pytest
         run: python3 -m pytest -q tests/structure/test_alr_fit_verifier_source_static.py
+
+  # AIML LR2 / S2.3 sealed-build build-proof（learning-runtime-sealed-build）：對 S1.6 選定的
+  # content_addressed_fixed_path runtime,證明 requirements-ml.lock 是完全解析、hash-pinned 的
+  # 依賴閉包,且 native ML wheel（lightgbm/sklearn/onnx/onnxruntime）能在 Linux 目標下以 -I 隔離
+  # 安裝並 import。仿 alr-fit-verifier「fetch-once-online → clean-offline」語義:先線上抓一次
+  # wheel 閉包,再從本地 wheelhouse 純離線 --require-hashes 安裝進拋棄式 venv,結束即丟。
+  # 硬邊界（S2.3 為 NONE-effect）:只裝進拋棄式 .sealed-venv,不裝任何 production 路徑、不啟動任何
+  # 進程(-I -c import 只證載入,非常駐)、不連 PG/Bybit。成本紀律:限 pull_request,ubuntu 1x,零 macOS 10x。
+  learning-runtime-sealed-build:
+    name: learning runtime sealed build (fetch-once-online + clean-offline install)
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.sealed_build == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: Install focused test dependency
+        run: python3 -m pip install --disable-pip-version-check pytest
+      - name: Run the offline sealed-build structural + closure verifier
+        run: |
+          python3 -m pytest -q \
+            tests/structure/test_agent_governance_sealed_build.py \
+            tests/structure/test_agent_governance_sealed_build_offline.py
+      - name: Confirm the ephemeral sealed venv is initially absent
+        run: test ! -e .sealed-venv
+      - name: Fetch the complete hash-pinned wheel closure once (online)
+        run: python3 -m pip download --require-hashes -r requirements-ml.lock -d wheelhouse
+      - name: Create the ephemeral isolated sealed venv
+        run: python3 -m venv .sealed-venv
+      - name: Install the closure offline from the local wheelhouse (no index)
+        run: |
+          .sealed-venv/bin/python3 -I -m pip install \
+            --no-index --find-links wheelhouse --require-hashes -r requirements-ml.lock
+      - name: Import the native ML libraries under -I isolation (proves .so load on target)
+        run: |
+          .sealed-venv/bin/python3 -I -c "import lightgbm, sklearn, onnx, onnxruntime; print('sealed native import OK')"
+      - name: Emit and self-validate both S2.3 receipts against the real lock
+        run: |
+          python3 helper_scripts/maintenance_scripts/agent_governance_sealed_build.py \
+            --observation-time 2026-07-24T00:00:00+00:00
+      - name: Discard the ephemeral sealed venv and wheelhouse
+        if: always()
+        run: rm -rf .sealed-venv wheelhouse
 
   rust-check-linux:
     name: rust check (x86_64-unknown-linux-gnu)

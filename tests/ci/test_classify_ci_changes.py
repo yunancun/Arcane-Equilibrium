@@ -38,6 +38,7 @@ def test_categories_are_narrow_but_cover_their_own_contracts() -> None:
             "sql/migrations/V160__alr_atomic_fit_consumption.sql",
             "program_code/exchange_connectors/bybit_connector/"
             "control_api_v1/tests/test_stock_etf_route_static_guard.py",
+            "requirements-ml.lock",
         ]
     )
     assert result == {
@@ -46,7 +47,41 @@ def test_categories_are_narrow_but_cover_their_own_contracts() -> None:
         "rust": True,
         "schema": True,
         "stock_etf": True,
+        "sealed_build": True,
     }
+
+
+def test_sealed_build_gate_covers_its_own_contract_surface() -> None:
+    # AIML LR2 / S2.3：鎖、spec、verifier 模組與兩張 receipt schema 都應觸發 sealed_build
+    # 昂貴安裝 job；且不誤點其他昂貴 gate（governance 由 maintenance_scripts / test_agent_governance_
+    # 前綴另行觸發,屬預期,見下方 verifier-module case）。
+    lock_only_paths = (
+        "requirements-ml.lock",
+        "requirements-ml.txt",
+        "program_code/ml_training/schemas/aiml_gate_receipts/sealed_build_receipt_v1.schema.json",
+        "program_code/ml_training/schemas/aiml_gate_receipts/expected_identity_receipt_v1.schema.json",
+        "tests/fixtures/sealed_build/hermetic_closure.lock",
+    )
+    for path in lock_only_paths:
+        result = classify_paths([path])
+        assert result["sealed_build"] is True, path
+        assert all(
+            enabled is False for gate, enabled in result.items() if gate != "sealed_build"
+        ), path
+
+    # verifier 模組與其結構/離線測試同時觸發 sealed_build 與 governance（兩者皆須跑）。
+    for path in (
+        "helper_scripts/maintenance_scripts/agent_governance_sealed_build.py",
+        "tests/structure/test_agent_governance_sealed_build.py",
+        "tests/structure/test_agent_governance_sealed_build_offline.py",
+    ):
+        result = classify_paths([path])
+        assert result["sealed_build"] is True, path
+        assert result["governance"] is True, path
+        assert result["alr_fit_verifier"] is False, path
+        assert result["rust"] is False, path
+        assert result["schema"] is False, path
+        assert result["stock_etf"] is False, path
 
 
 def test_stock_etf_gate_covers_ibkr_and_rust_lane_sources() -> None:
@@ -128,4 +163,5 @@ def test_cli_writes_nul_safe_github_outputs(tmp_path) -> None:
         "rust=true",
         "schema=true",
         "stock_etf=false",
+        "sealed_build=false",
     ]
