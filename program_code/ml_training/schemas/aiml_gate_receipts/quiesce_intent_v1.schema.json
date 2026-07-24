@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://arcane-equilibrium.local/schemas/quiesce_intent_v1.schema.json",
   "title": "quiesce_intent_v1",
-  "description": "Exact typed intent for one S2.1 owner-scoped reversible quiesce fence of the ALR shadow consumer unit. The fence is the unit's OWN lifecycle stop (never a name/pattern kill); it proceeds only on a confirmed single owner. observed_relations declares the read relations S2.1 reads via the S2.0 read-only observer (the S2.0 EFFECT observer intent must GRANT SELECT on them). production target_class stays fail-closed (real fence deferred to the S2.1 EFFECT session with S2.0@EFFECT_DONE + an exact operator SSHSIG). No raw command / signal / pid_list / pkill / kill_by_name key is admissible.",
+  "description": "Exact typed intent for one S2.1 owner-scoped reversible quiesce fence of the system-level ALR event-consumer unit (arcane-equilibrium-aiml-engine-scanner.service). The fence is the unit's OWN system-level lifecycle stop (never a name/pattern kill); it proceeds only on a confirmed single owner. observed_relations declares the read relations S2.1 reads via the S2.0 read-only observer (the S2.0 EFFECT observer intent must GRANT SELECT on them). production target_class stays fail-closed (real fence deferred to the S2.1 EFFECT session with S2.0@EFFECT_DONE + an exact operator SSHSIG). No raw command / signal / pid_list / pkill / kill_by_name key is admissible.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -32,7 +32,7 @@
     "intent_id": {"$ref": "#/$defs/digest"},
     "target_class": {"enum": ["disposable_local", "production"]},
     "target_host": {"type": "string", "minLength": 1},
-    "unit_name": {"const": "openclaw-alr-shadow.service"},
+    "unit_name": {"const": "arcane-equilibrium-aiml-engine-scanner.service"},
     "unit_fragment_path": {"type": "string", "minLength": 1},
     "expected_owner_fingerprint": {"$ref": "#/$defs/digest"},
     "advisory_lock_name": {"const": "alr_event_consumer_v1"},

@@ -42,16 +42,22 @@ FROZEN_CLASSIFIER = (
 )
 CAP = "sha256:" + "e" * 64
 
-FRAG = "/home/x/.config/systemd/user/openclaw-alr-shadow.service"
-FLOCK = "/run/user/1000/alr-shadow/consumer.lock"
-CG = "/user.slice/user-1000.slice/user@1000.service/app.slice/openclaw-alr-shadow.service"
+# S2.4 §8 system-unit shape: system-level fragment, resolved /run credential + lock paths, content-addressed
+# interpreter under the sealed runtimes root + ``-I``, system-slice cgroup, the three §8 Environment= keys.
+FRAG = "/etc/systemd/system/arcane-equilibrium-aiml-engine-scanner.service"
+FLOCK = "/run/arcane-equilibrium/aiml-engine-scanner/consumer.lock"
+_DSN = "/run/credentials/arcane-equilibrium-aiml-engine-scanner.service/pg-dsn"
+INTERP = "/opt/arcane-equilibrium/aiml/runtimes/" + "b" * 64 + "/bin/python3"
+CG = "/system.slice/arcane-equilibrium-aiml-engine-scanner.service"
+SCANNER_UID = 4001  # 非 root 的 engine-scanner uid(§8;fixture value)
 CMDLINE = [
-    "/usr/bin/python3", "-m", "ml_training.alr_event_consumer",
-    "--dsn-file", "/home/x/.config/openclaw/alr-shadow.dsn", "--lock-file", FLOCK, "--max-batch", "32",
+    INTERP, "-I", "-m", "ml_training.alr_event_consumer",
+    "--dsn-file", _DSN, "--lock-file", FLOCK, "--max-batch", "32",
 ]
 ENVIRON = {
-    "ALR_SOURCE_HEAD": HEAD, "PYTHONPATH": "/srv/BybitOpenClaw/srv/program_code",
-    "ALR_EXPECTED_LEARNING_RUNTIME_DIGEST_V2": "sha256:" + "9" * 64,
+    "ALR_SOURCE_HEAD": HEAD,
+    "ALR_EXPECTED_LEARNING_RUNTIME_DIGEST": "sha256:" + "9" * 64,
+    "ALR_EXPECTED_COMPATIBILITY_RECEIPT": "sha256:" + "c" * 64,
 }
 ENV_HASH = q.canonical_digest({k: ENVIRON[k] for k in q.ENV_DECLARED_KEYS if k in ENVIRON})
 CMDLINE_DIGEST = q.canonical_digest(CMDLINE)
@@ -118,7 +124,7 @@ def _host_inventory(*, main_pid=4242, start_ticks="998877", invocation="inv-1", 
                     active="active", sub="running", control_group=CG, env_hash=ENV_HASH,
                     cmdline_digest=CMDLINE_DIGEST, runtime_digest=RUNTIME_DIGEST):
     return {
-        "owner": {"uid": 1000, "unit": q.UNIT_NAME},
+        "owner": {"uid": SCANNER_UID, "unit": q.UNIT_NAME},
         "process": {
             "main_pid": main_pid, "process_start_ticks": start_ticks,
             "boot_id": "boot-1", "cmdline_digest": cmdline_digest,
@@ -148,8 +154,8 @@ def _db(*, held, count, backend, status, drained=True):
 
 def _cred():
     return {
-        "dsn_file_path": "/home/x/.config/openclaw/alr-shadow.dsn", "dsn_mode": "0600",
-        "dsn_owner_uid": 1000, "world_readable": False, "plaintext_ingress": False,
+        "dsn_file_path": _DSN, "dsn_mode": "0600",
+        "dsn_owner_uid": SCANNER_UID, "world_readable": False, "plaintext_ingress": False,
         "unit_hardening": {
             "no_new_privileges": "yes", "protect_system": "full",
             "private_tmp": "yes", "restrict_address_families": "AF_UNIX AF_INET",
@@ -310,7 +316,7 @@ def test_confirm_single_owner_happy():
     {"db_quiesce": _db(held=False, count=0, backend=False, status="ABSENT")},
     {"main_pid": 0},
     {"owner_fingerprint": "sha256:" + "1" * 64},          # 期望 owner != live owner → gone
-    {"advisory_holder_usename": "postgres"},              # lock holder 非 alr_shadow 身分 → 不 confirm
+    {"advisory_holder_usename": "postgres"},              # lock holder 非 aiml_engine_scanner 身分 → 不 confirm
     {"db_quiesce": _db(held=True, count=1, backend=True, status="STOPPED")},  # session 非 OPEN
     # FIX-C2:唯一候選 PID != unit MainPID(wrapper MainPID + 脫離的 consumer 持鎖)→ 不 confirm → STALE
     {"candidate_pids": [9999]},
@@ -341,41 +347,53 @@ def test_ambiguous_multiple_owners_refuses(mutation):
 
 
 # --------------------------------------------------------------------------- #
-# FIX-C1 (Codex :414): _is_alr_longlived_cmdline requires the EXACT deployed invocation
+# FIX-C1 (Codex :414; S2.4 §8): _is_alr_longlived_cmdline requires the EXACT §8 deployed invocation
 # --------------------------------------------------------------------------- #
-_DSN = "/home/x/.config/openclaw/alr-shadow.dsn"
-_DEPLOYED = [
-    "/usr/bin/python3", "-m", "ml_training.alr_event_consumer",
-    "--dsn-file", _DSN, "--lock-file", FLOCK, "--max-batch", "32",
-]
+_DEPLOYED = list(CMDLINE)  # 10-token content-addressed §8 invocation
 
 
 def test_is_alr_longlived_cmdline_accepts_only_exact_deployed_invocation():
-    # 精確部署形 → candidate。
+    # 精確 §8 部署形(content-addressed 解譯器 + -I + 已解析 /run 路徑) → candidate。
     assert q._is_alr_longlived_cmdline(_DEPLOYED, expected_dsn_file=_DSN, expected_lock_file=FLOCK) is True
-    # 任務指定的偽形:非 allowlist 解譯器 basename + 錯 dsn/lock 值 + 多餘 --evil → NOT a candidate。
+    # 偽形:系統 Python(§8 明拒)+ 錯 dsn/lock 值 + 多餘 --evil → NOT a candidate。
     evil = [
-        "python3-debug", "-m", "ml_training.alr_event_consumer",
+        "/usr/bin/python3", "-I", "-m", "ml_training.alr_event_consumer",
         "--dsn-file", "/tmp/other.dsn", "--lock-file", "/tmp/other.lock", "--max-batch", "999", "--evil",
     ]
     assert q._is_alr_longlived_cmdline(evil, expected_dsn_file=_DSN, expected_lock_file=FLOCK) is False
 
 
 @pytest.mark.parametrize("cmdline", [
-    ["/usr/bin/python3-debug", "-m", "ml_training.alr_event_consumer",
-     "--dsn-file", _DSN, "--lock-file", FLOCK, "--max-batch", "32"],          # basename 非 allowlist(非 startswith)
-    ["/usr/bin/python3", "-m", "ml_training.alr_event_consumer",
-     "--dsn-file", "/tmp/other.dsn", "--lock-file", FLOCK, "--max-batch", "32"],  # --dsn-file 值不符
-    ["/usr/bin/python3", "-m", "ml_training.alr_event_consumer",
-     "--dsn-file", _DSN, "--lock-file", "/tmp/other.lock", "--max-batch", "32"],  # --lock-file 值不符
-    ["/usr/bin/python3", "-m", "ml_training.alr_event_consumer",
-     "--dsn-file", _DSN, "--lock-file", FLOCK, "--max-batch", "0"],            # max-batch 非 bounded(< 1)
-    ["/usr/bin/python3", "-m", "ml_training.alr_event_consumer",
-     "--dsn-file", _DSN, "--lock-file", FLOCK, "--max-batch", "99999"],        # max-batch 超出 ceiling
-    ["/usr/bin/python3", "-m", "ml_training.alr_event_consumer",
-     "--dsn-file", _DSN, "--lock-file", FLOCK, "--max-batch", "32", "--extra", "x"],  # 多餘/未知參數
-    ["/usr/bin/python3", "-m", "ml_training.other_module",
-     "--dsn-file", _DSN, "--lock-file", FLOCK, "--max-batch", "32"],           # 模組不符
+    # §8 新守恆:系統 Python /usr/bin/python3(拒 content-addressed runtimes root 之外的解譯器)
+    ["/usr/bin/python3", "-I", "-m", "ml_training.alr_event_consumer",
+     "--dsn-file", _DSN, "--lock-file", FLOCK, "--max-batch", "32"],
+    # §8 新守恆:絕對路徑但不在封存 runtimes root 下
+    ["/opt/other/bin/python3", "-I", "-m", "ml_training.alr_event_consumer",
+     "--dsn-file", _DSN, "--lock-file", FLOCK, "--max-batch", "32"],
+    # basename 非 python3(即使落在 runtimes root 下)
+    ["/opt/arcane-equilibrium/aiml/runtimes/" + "b" * 64 + "/bin/python3-debug", "-I", "-m",
+     "ml_training.alr_event_consumer", "--dsn-file", _DSN, "--lock-file", FLOCK, "--max-batch", "32"],
+    # §8 新守恆:缺 -I(9-token 舊形,len != 10)
+    [INTERP, "-m", "ml_training.alr_event_consumer",
+     "--dsn-file", _DSN, "--lock-file", FLOCK, "--max-batch", "32"],
+    # --dsn-file 值不符
+    [INTERP, "-I", "-m", "ml_training.alr_event_consumer",
+     "--dsn-file", "/tmp/other.dsn", "--lock-file", FLOCK, "--max-batch", "32"],
+    # --lock-file 值不符
+    [INTERP, "-I", "-m", "ml_training.alr_event_consumer",
+     "--dsn-file", _DSN, "--lock-file", "/tmp/other.lock", "--max-batch", "32"],
+    # max-batch 非 bounded(< 1)
+    [INTERP, "-I", "-m", "ml_training.alr_event_consumer",
+     "--dsn-file", _DSN, "--lock-file", FLOCK, "--max-batch", "0"],
+    # max-batch 超出 ceiling
+    [INTERP, "-I", "-m", "ml_training.alr_event_consumer",
+     "--dsn-file", _DSN, "--lock-file", FLOCK, "--max-batch", "99999"],
+    # 多餘/未知參數
+    [INTERP, "-I", "-m", "ml_training.alr_event_consumer",
+     "--dsn-file", _DSN, "--lock-file", FLOCK, "--max-batch", "32", "--extra", "x"],
+    # 模組不符
+    [INTERP, "-I", "-m", "ml_training.other_module",
+     "--dsn-file", _DSN, "--lock-file", FLOCK, "--max-batch", "32"],
 ])
 def test_is_alr_longlived_cmdline_rejects_single_deviation(cmdline):
     assert q._is_alr_longlived_cmdline(cmdline, expected_dsn_file=_DSN, expected_lock_file=FLOCK) is False
@@ -386,8 +404,8 @@ def test_is_alr_longlived_cmdline_rejects_single_deviation(cmdline):
 # --------------------------------------------------------------------------- #
 def test_wrapper_mainpid_with_detached_consumer_is_stale_not_confirmed():
     # wrapper 佔住 unit MainPID(4242,自身 cmdline 非 ALR),真正持鎖的 ALR consumer 脫離在 pid 9999:
-    # candidate_count 仍為 1、advisory holder 仍是 alr_shadow,但候選 PID(9999)!= MainPID(4242)且 MainPID
-    # cmdline 非 exact ALR invocation → 絕不 CONFIRMED(否則 systemctl --user stop 停 wrapper、脫離的 consumer 續跑)。
+    # candidate_count 仍為 1、advisory holder 仍是 aiml_engine_scanner,但候選 PID(9999)!= MainPID(4242)且 MainPID
+    # cmdline 非 exact ALR invocation → 絕不 CONFIRMED(否則 system-level systemctl stop 停 wrapper、脫離的 consumer 續跑)。
     inv = _confirmed_inventory(candidate_pids=[9999], main_pid_invocation_ok=False)
     obs = q.confirm_alr_owner(
         inv, expected_fingerprint=OWNER_FP, applier_node="quiesce_apply", verifier_node="quiesce_verify",
