@@ -2,7 +2,7 @@
 
 **版本** v852 | **日期** 2026-07-24
 **來源／runtime 指針**：S0 已是 `PROGRAM_ADOPTED`，S1 已是 **`S1_CLOSED`**。H_effect `6e1ea957af35544a844f704978366d11aa6c2364` 在 Linux `trade-core` 完成 S1.5 六類真實 apply→rollback→independent-postcheck（`sha256:19498ba4…a37`）與 S1.6 八個 target-host seam（`binding=BINDING`、零殘留、effect `sha256:0a0d050b…a89b`）；指定 SSH agent fingerprint `SHA256:uGJ9veN7PoE6BBgfsSP2aiMndrwgbt7o/7/YfdzNzCQ` 的 apply permit 與 closure SSHSIG 均獨立驗證，signed-time replay PASS、errors 空。PR #115 exact head `da8e54148a60fc7be38fe5844cf85b28b293a044` 經 direct Codex 對抗收口 P0/P1/P2=`0/0/0`、全部 required/full CI 與 CodeQL 全綠後，精確合併為 GitHub main `22876b16d3b00fcaafa4f2f46ae02b1c08c60b3b`。九項 authority 全 false；S1 關閉不授予 production runtime／PG／deploy／broker／order／live authority。
-**當前態勢**：S1.1–S1.6 與 Sprint publication gate 全部關閉；當前 Sprint 轉為 `S2`，READY pool 是 `S2.0 ∥ S2.2A ∥ S2.3`，最多同時 2 個互斥 writer。S2.0/S2.4/S2.5 的 runtime effect 仍各自需要新的 runtime／authority gate，不得沿用 S1 disposable 授權。external S3 Object-Lock effect 屬 `S8.6`。完整 S1 機械證據見 `docs/execution_plan/ai_ml_landing/receipts/S1-closure-fix-2026-07-24/`；v851/v852 projection 合併後只做 Mac／GitHub／Linux ff-only 同步，不執行 S2 effect。
+**當前態勢**：S1.1–S1.6 與 Sprint publication gate 全部關閉；當前 Sprint 為 `S2`。**S2.2A（LR1 scoped-compatibility）+ S2.3（LR2 sealed build）已 `SOURCE_READY`**（source-only `NONE` effect，PR #121 merge `87a3a2503`、PR #122 merge `051df8262`；九項 authority 仍全 false）。剩餘 READY pool `S2.0`／`S2.1`／`S2.4`／`S2.5`／`S2.2B` 全部 `BLOCKED_ON_OPERATOR_EXTERNAL_AUTHORITY`，**S2 未 `S2_CLOSED`**（需真實 platform-attested running runtime + S2.2B `ingestion_compatibility_receipt_v1`，皆 gated 於 blocked effect sessions）。S2.0/S2.4/S2.5 的 runtime effect 仍各自需要新的 runtime／authority gate，不得沿用 S1 disposable 授權。external S3 Object-Lock effect 屬 `S8.6`。完整 S1 機械證據見 `docs/execution_plan/ai_ml_landing/receipts/S1-closure-fix-2026-07-24/`；v851/v852 projection 合併後只做 Mac／GitHub／Linux ff-only 同步，不執行 S2 effect。
 **入口**：正式方案 `docs/execution_plan/2026-07-19--ai_ml_long_lived_repair_and_landing_plan.md`；完成度審核 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-20--ai_ml_completion_coverage_and_delivery_audit.md`；交付協議 `docs/agents/ai-ml-landing-delivery-protocol.md`；長效進度帳本 `docs/execution_plan/ai_ml_landing/PROGRESS.md`；先前真實狀態報告 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-19--ai_ml_true_state_and_engineering_plan.md`；版本日誌 `docs/CLAUDE_CHANGELOG.md`；TODO 規範 `docs/agents/todo-maintenance.md`；v738 歸檔 `docs/archive/2026-07-04--todo_v738_pre_slim_archive.md`。
 
 ---
@@ -48,9 +48,9 @@
 | 項目 | 當前值 |
 |---|---|
 | Program | `AIML-LONG-LIVED-LANDING-V2` |
-| 當前 Sprint | `S2` runtime 修復；READY pool `S2.0 ∥ S2.2A ∥ S2.3`。 |
+| 當前 Sprint | `S2` runtime 修復。**S2.2A + S2.3 已 `SOURCE_READY`**（LR1／LR2 source landed；PR #121 merge `87a3a2503`、PR #122 merge `051df8262`）。剩餘 READY pool `S2.0`（→ `S2.1`）／`S2.4`／`S2.5`／`S2.2B` 全部 `BLOCKED_ON_OPERATOR_EXTERNAL_AUTHORITY`（production external-admin PG bootstrap＋credential/unit/install＋out-of-band signing＋running runtime，開發代理不可自備）。**S2 未 `S2_CLOSED`**。 |
 | 已關閉 Session | `S0.1`–`S0.3` 與 `S1.1`–`S1.6` 全部關閉；S1 exact-head、Linux effects、operator SSHSIG、對抗審核、CI 與 PR #115 merge 證據齊全。 |
-| 最早未關閉 Session | `S2.0`、`S2.2A`、`S2.3` 均 READY；PM 依 effect/path manifest 選最多 2 個互斥 writer。 |
+| 最早未關閉 Session | `S2.0`（production PG observer bootstrap，需 operator external-admin/DB-superuser authority）——它是 unblock root，依序解鎖 `S2.1`（quiesce）→ `S2.4`（intermediate 三端 exact-head 同步＋credential/PG/unit/install）→ `S2.5`（running attestation）→ `S2.2B`（唯一簽發 LR1 runtime `DONE` + `ingestion_compatibility_receipt_v1`）。`S2.2A`／`S2.3` 已 `SOURCE_READY`（不必再派）。 |
 | 當前 gate | **`S1_CLOSED`**。PR #115 reviewed head `da8e54148`、merge head `22876b16d`；H_effect `6e1ea957a`；S1.5 `sha256:19498ba4…a37`；S1.6 `sha256:0a0d050b…a89b`；closure `sha256:e110598b…e3dbc`；finalization `sha256:68bbced3…6d6c`；SSHSIG 與 signed-time replay PASS；exact-head CI 全綠。九項 authority 仍全 false。 |
 | 工程並行上限 | 最多 2 個 path/effect manifest 互斥的 writer Session；不互斥則串行。 |
 | 最終同步 | v851 `S1_CLOSED` projection 合併後，將 Mac／GitHub／Linux ff-only 同步至同一 final main head；整個 AIML program 的 terminal final sync 仍只在 S8.4 執行。 |
