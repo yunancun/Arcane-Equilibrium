@@ -1,9 +1,37 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-07-24（v852：TODO 自檢行同步 `S1_CLOSED` 終態）
+> 最後更新：2026-07-24（AIML S2.2A + S2.3 `SOURCE_READY`；PROGRESS ledger v8）
 
 ---
+
+## AIML S2 source sessions — S2.2A + S2.3 `SOURCE_READY`（2026-07-24）
+
+`開始並完成S2` 的可推進部分完成。S2 七個 Session 中，兩個 `NONE`-effect source
+Session 已推進至 `SOURCE_READY` 並精確合併進 `origin/main`：
+
+- **S2.2A / LR1**（scoped-compatibility `learning_runtime_digest`）：PR #121
+  reviewed `7054a3b0` → merge `87a3a2503`；receipt `source_compatibility_receipt_v1`
+  self `sha256:a8fba423…`、`learning_runtime_digest sha256:6cf76b60…`；docs-only
+  HEAD 不再停 ingestion、incompatible training contract quarantine fit 而 capture
+  續跑；E2/E3 PASS + E4 PASS_WITH_CONCERNS（含一輪 fix：receipt-drift P1 +
+  validator inner-forgery + evaluator coherence + 三 firing bind-edge negatives）。
+- **S2.3 / LR2**（sealed immutable runtime build + expected-identity）：PR #122
+  reviewed `73b083e9` → merge `051df8262`；真 `requirements-ml.lock`（uv
+  `--generate-hashes`，38 pinned / 0 unpinned，`x86_64-unknown-linux-gnu`）封存
+  S1.6 `content_addressed_fixed_path` runtime；sealed_build self `sha256:169d2e6c…`
+  + expected_identity self `sha256:a08c6965…`，全 `production_*`/`running_attested.*`
+  const false、`observation_owner=S2.5_LR6`；五 reviewer（E2/E3/E4/CC/OPS）+ 2 Codex
+  P2（target_platform pin、S1.6 schema-digest verify）+ FA/CC final audit 全 PASS；
+  full CI green 含 heavy `learning-runtime-sealed-build` job（Linux 真 offline
+  install + `-I` import）。
+
+**S2 未 `S2_CLOSED`**：effect sessions `S2.0`/`S2.1`/`S2.4`/`S2.5` 與 runtime-DONE
+`S2.2B` 皆 `BLOCKED_ON_OPERATOR_EXTERNAL_AUTHORITY`（production external-admin PG
+bootstrap＋credential/unit/install＋out-of-band signing＋running runtime；引擎現
+DOWN；九項 authority 全 false）。source 側 Mac／GitHub ff 至各 merge head，Linux
+依 protocol §7 留待 S2.4 intermediate sync。RUN_RECORD：
+`docs/execution_plan/ai_ml_landing/receipts/S2-source-sessions-2026-07-24/`。
 
 ## TODO 自檢行同步 S1_CLOSED — v852（2026-07-24）
 
