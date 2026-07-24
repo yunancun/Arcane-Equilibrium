@@ -203,6 +203,38 @@ immediately before S2.4 because Linux runtime evidence must bind the reviewed
 head. It is not the final global sync or deploy proof. S3.1A/S3.1B use the same
 split rule below; source readiness never masquerades as runtime completion.
 
+**Amendment A2 — Sprint 2 effect predicate split (source vs effect).** Operator
+authority gates only the production **effect apply**, never the source
+implementation of an effect seam (typed intent/result/postcheck/rollback
+schemas, Registry/vocabulary/route/closure wiring, structured-SQL-allowlist
+generators, disposable-PG apply/rollback/postcheck proofs, receipts, fixtures,
+CI). Each S2 effect Session (`S2.0`, `S2.1`, `S2.4`, `S2.5`) and the
+runtime-`DONE` Session `S2.2B` therefore carries two mechanical predicates:
+
+- `SOURCE_READY` — the full seam source is built, independently reviewed, tested,
+  disposable-PG-exercised where a PG effect is involved, and **fail-closed until
+  an exact operator authorization exists**. It grants no runtime/PG/deploy/
+  broker/order authority; the nine authorities stay false; no fixture may
+  impersonate a platform-attested runtime PASS. Ledger status `SOURCE_READY`,
+  recording the built adapter id, the typed intent schema, the disposable
+  apply/rollback/postcheck proof digest, and the fail-closed-until-authorization
+  attestation.
+- `EFFECT_DONE` — the real production apply, executed only under a fresh, exact,
+  operator-authenticated authorization (an out-of-band SSHSIG over the exact
+  typed intent + source head, whose private key is on neither Mac nor
+  trade-core). Ledger status `DONE`, recording the classifier-derived
+  `required_effects`, Adapter id, actor, rollback, distinct independent
+  postcheck node, and platform/external attestation.
+
+Dependency qualifiers: a downstream **source** phase may consume an upstream
+`@SOURCE_READY`; a downstream **effect** phase, and any runtime-`DONE` session
+(`S2.2B`), may consume only an upstream `@EFFECT_DONE`. Consequently every S2
+effect **SOURCE** predicate is buildable and dispatchable in parallel now
+(`P0-S2-PRODUCTION-EFFECT-SEAMS-SOURCE`); only the serial operator-gated chain
+`S2.0→S2.1→S2.4→S2.5→S2.2B` remains blocked, surfaced as one minimal
+`BLOCKED_OPERATOR_ACTION_PACKET_READY` after every source predicate lands.
+Session IDs are unchanged.
+
 ### Sprint 3 - Controller, Scanner, Retention And Foundation
 
 - `S3.1A`: LR3 source queue across target -> dataset -> fit -> evaluate -> export ->
