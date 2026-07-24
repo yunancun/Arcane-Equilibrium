@@ -2775,6 +2775,26 @@ def test_saved_workflows_expose_closure_and_consumption_envelopes() -> None:
     assert "regressionReserved" not in audit
     assert "const regression = null" in audit
     assert "regression_reserved: false" in audit
+    # run0 follow-up(2026-07-24):確定性浮動第三票在 admission 期預派——釘住機制
+    # 防無聲退回 verify 期 FCFS 搶票(舊形狀=floatingThirdVoteSlots 可變計數器,
+    # 第三票落點隨 agent 完成順序漂移,破壞 resume 重放確定性)
+    assert "const floatingThirdVoteClaimIds = new Set()" in audit
+    assert "if (!reserveVerificationSlots(1)) break" in audit
+    assert (
+        "reservedThirdVoteClaimIds.has(claim.claim_id) || floatingThirdVoteClaimIds.has(claim.claim_id)"
+        in audit
+    )
+    assert "floatingThirdVoteSlots" not in audit
+    # run0 follow-up:cheap tier 顯式覆蓋 fail-closed(claim-0009 家族)——空字串
+    # 靜默回落與非字串直通 runner 均已封;null=繼承 escape 保留;默認 pin 的
+    # 派生權威=settings/ai_pricing.yaml active 條目
+    assert (
+        "cheap_model must be null (inherit session model) or a non-empty model id"
+        " derived from settings/ai_pricing.yaml active entries"
+    ) in audit
+    assert "cheap_effort must be null (inherit session effort) or a non-empty effort tier string" in audit
+    assert "config.cheap_model || 'claude-sonnet-5'" not in audit
+    assert "config.cheap_effort || 'medium'" not in audit
 
     profit = (ROOT / ".claude/workflows/profit-diagnosis.js").read_text(encoding="utf-8")
     assert "report_path" not in profit
@@ -2795,6 +2815,37 @@ def test_saved_workflows_expose_closure_and_consumption_envelopes() -> None:
     assert "wave_record_refs: [waveRecord.record_digest]" in profit
     assert "role_fragment_v1" in profit
     assert "role_fragments: [controlFragment, ...roleFragments]" in profit
+    # run0 follow-up(2026-07-24):profit-diagnosis 與 audit 同病灶比照——cheap tier
+    # fail-closed、SANDBOX_DETERMINISM_SHIM_V1 上游化、admission 時鐘取代沙箱禁用牆鐘
+    assert (
+        "cheap_model must be null (inherit session model) or a non-empty model id"
+        " derived from settings/ai_pricing.yaml active entries"
+    ) in profit
+    assert "cheap_effort must be null (inherit session effort) or a non-empty effort tier string" in profit
+    assert "config.cheap_model || 'claude-sonnet-5'" not in profit
+    assert "config.cheap_effort || 'medium'" not in profit
+    assert "resolveAdmissionNowMs(config.admission_now_ms)" in profit
+    assert "observed <= admissionNowMs && admissionNowMs < expires" in profit
+    assert "observed <= Date.now()" not in profit
+    assert "const startedAt = admissionClockIso" in profit
+    assert "const endedAt = admissionClockIso" in profit
+    assert "new Date().toISOString()" not in profit
+
+
+def test_saved_workflows_share_byte_identical_sandbox_determinism_shim() -> None:
+    # 2026-07-24 run0 §5.1:desktop Workflow 沙箱無 crypto.subtle/TextEncoder/牆鐘,
+    # shim 上游化進 saved workflow 本體;三檔必須逐位元組一致,防修一漏二漂移。
+    blocks = {}
+    for name in ("agent-wave.js", "openclaw-full-audit.js", "profit-diagnosis.js"):
+        text = (ROOT / ".claude/workflows" / name).read_text(encoding="utf-8")
+        match = re.search(
+            r"^// BEGIN SANDBOX_DETERMINISM_SHIM_V1.*?^// END SANDBOX_DETERMINISM_SHIM_V1\n",
+            text,
+            re.DOTALL | re.MULTILINE,
+        )
+        assert match, f"{name} lacks SANDBOX_DETERMINISM_SHIM_V1"
+        blocks[name] = match.group(0)
+    assert len(set(blocks.values())) == 1, "SANDBOX_DETERMINISM_SHIM_V1 drifted between saved workflows"
 
 
 def test_active_governance_vocabulary_and_dispatch_template_use_one_fragment_and_hybrid_dag() -> None:
