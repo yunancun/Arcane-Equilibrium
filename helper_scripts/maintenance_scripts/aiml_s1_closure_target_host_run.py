@@ -40,6 +40,7 @@ import agent_governance_target_host_choice as thc
 import agent_governance_target_host_apply as apply_mod
 import agent_governance_target_host_effects as tfx
 import agent_governance_command_capture_v2 as capmod
+import agent_governance_component_effects as component_effects
 import aiml_gate_receipt_validator as validator
 
 APPLIER_NODE = "s1fc_apply_actor"
@@ -47,13 +48,14 @@ APPLIER_NODE = "s1fc_apply_actor"
 # (下方 _governed_verifier_capture 以 OPS ``ops_postcheck`` 節點產出),使 closure 的
 # 「capture 必由宣告 verifier 節點產生」綁定成立(P1 Codex)。
 VERIFIER_NODE = "ops_postcheck"
-# 拋棄式探針的依賴 receipt(S1.1/S1.4/S1.5):此為 DISPOSABLE 證據,依賴 digest 為確定式占位
-# (closure 只驗 sha256 形狀 + 交叉綁定,非比對真 receipt 位元組;真 landing 於 S8 綁真依賴)。
+# 拋棄式探針的 S1.1/S1.4 digest 仍是 disposable source-stage dependencies；S1.5 的
+# ``effect_seams_ready_receipt_v1`` 則必須由 caller 提供真 producer artifact，driver
+# 會完整驗證並把其 self_digest 綁進 target-host choice receipt。這避免以固定 digest
+# 冒充 Sprint-1 exit contribution。
 DEP = {
     "runtime_candidate_receipt_a_digest": "sha256:" + "a" * 64,
     "runtime_candidate_receipt_b_digest": "sha256:" + "b" * 64,
     "runtime_candidate_comparison_digest": "sha256:" + "c" * 64,
-    "effect_seams_ready_receipt_digest": "sha256:" + "d" * 64,
     "pg_readonly_identity_receipt_digest": "sha256:" + "e" * 64,
 }
 
@@ -99,8 +101,13 @@ def _build_intent(*, expected_host: str, throwaway_root: str, now: datetime) -> 
     return intent
 
 
-def _governed_verifier_capture(*, root: Path) -> dict:
-    """A REAL OPS governed command_capture_v2 for the distinct verifier's residue sweep."""
+def _governed_ops_capture(
+    *,
+    root: Path,
+    node_id: str,
+    objective: str,
+) -> dict:
+    """Produce one real OPS ``command_capture_v2`` for an exact DAG node."""
 
     from agent_governance_context import capture_repository_baseline
     from agent_governance_execution import compile_context, materialize_context_artifact
@@ -110,7 +117,7 @@ def _governed_verifier_capture(*, root: Path) -> dict:
     facts = {
         "task_shape": "review", "surfaces": ["operations"], "risk": "medium",
         "uncertainty": "low", "side_effect_class": "none",
-        "objective": "capture the distinct-verifier target-host residue sweep",
+        "objective": objective,
         "scope": vscope, "dirty_scope": [], "verification_scope": vscope,
         "acceptance_criteria": ["one exact read-only command receipt"],
         "hard_stops": ["no runtime mutation"], "baseline": capture_repository_baseline(),
@@ -122,7 +129,7 @@ def _governed_verifier_capture(*, root: Path) -> dict:
     # governed capture 用一條保證通過 native-policy 的 read-only 指令產出真 record(證「distinct 驗證者
     # 跑過一條 governed command」);真 on-host 殘留觀察另由 independent_postcheck_on_host 產出(見 main)。
     return capmod.capture_governed_command(
-        native_agent="OPS", node_id="ops_postcheck", context_artifact=artifact,
+        native_agent="OPS", node_id=node_id, context_artifact=artifact,
         argv=["git", "rev-parse", "--is-inside-work-tree"], root=root,
     )
 
@@ -131,6 +138,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out-dir", required=True, type=Path)
     parser.add_argument("--source-head", required=True)
+    parser.add_argument(
+        "--effect-seams-ready-receipt",
+        required=True,
+        type=Path,
+        help="producer-generated effect_seams_ready_receipt_v1 JSON",
+    )
     parser.add_argument("--repo-root", type=Path, default=_HERE.parents[1])
     args = parser.parse_args()
 
@@ -139,12 +152,27 @@ def main() -> int:
     # 得以做真殘留觀察。**注意**:applier 的 apply_target_host_probe_effect(真 runner)仍走隔離 python3 -E
     # 子行程——run_probe_via_child 以 sanitized allowlist env(不含此旗標)spawn 子行程,子行程自驗 capsule 後
     # 才在**它自己**的 env 開閘。故 P1 process-isolation 修復在此真跑中依然成立(applier 不靠 parent 的閘)。
-    os.environ["AIML_TARGET_HOST_PROBE"] = "1"
     if not th.target_host_available():
         raise SystemExit(
-            "not the target host (need linux + systemd-run on PATH); this driver runs ONLY on trade-core "
-            "and refuses to fake a kernel fact off-target."
+            "not an operator-admitted target-host process (need linux, systemd-run, and the "
+            "AIML_TARGET_HOST_PROBE=1 launch gate); this driver refuses to mutate its parent "
+            "process environment or fake a kernel fact off-target."
         )
+    effect_seams_receipt = json.loads(
+        args.effect_seams_ready_receipt.read_text(encoding="utf-8")
+    )
+    receipt_errors = component_effects.validate_effect_seams_ready_receipt(
+        effect_seams_receipt, now=_iso(_now())
+    )
+    if receipt_errors or effect_seams_receipt.get("status") != "PASS":
+        raise SystemExit(
+            "effect_seams_ready_receipt_v1 is not a fresh producer-valid PASS: "
+            + "; ".join(receipt_errors[:5])
+        )
+    dependency_receipts = {
+        **DEP,
+        "effect_seams_ready_receipt_digest": effect_seams_receipt["self_digest"],
+    }
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
     now = _now()
@@ -155,6 +183,13 @@ def main() -> int:
     intent = _build_intent(expected_host=expected_host, throwaway_root=throwaway, now=now)
     approved_at = _iso(now)
     applier_capture = thc._structural_capture_artifact()
+    # This is the real pre-effect OPS node.  It is deliberately separate from
+    # both the historical design reviews and the later residue postcheck.
+    preflight_capture = _governed_ops_capture(
+        root=args.repo_root,
+        node_id="ops_preflight",
+        objective="capture the target-host readiness preflight before the S1 effect",
+    )
 
     try:
         # (2) 真 child-executor apply:probe_runner 為預設真 runner ⇒ 走隔離 python3 -E 子行程。
@@ -167,7 +202,7 @@ def main() -> int:
             capture_artifact=applier_capture,
             verifier_node_id=VERIFIER_NODE,
             now=_iso(now),
-            dependency_receipts=DEP,
+            dependency_receipts=dependency_receipts,
         )
         # (3) distinct 驗證者:真 on-host 殘留掃描 + 真 governed capture。
         swept = th.independent_postcheck_on_host(
@@ -180,7 +215,11 @@ def main() -> int:
             "netns_gone": True,
             "temp_gone": swept["temp_gone"],
         }
-        verifier_capture = _governed_verifier_capture(root=args.repo_root)
+        verifier_capture = _governed_ops_capture(
+            root=args.repo_root,
+            node_id=VERIFIER_NODE,
+            objective="capture the distinct-verifier target-host residue sweep",
+        )
         # (4) 升 BINDING(帶結構化 verifier_capture_digest)。
         upgraded = apply_mod.attach_distinct_verifier_postcheck(
             effect_result,
@@ -203,6 +242,7 @@ def main() -> int:
         "applier_effect_result.json": effect_result,
         "upgraded_effect_result.json": upgraded,
         "applier_capture.json": applier_capture,
+        "preflight_capture.json": preflight_capture,
         "verifier_capture.json": verifier_capture,
         "residue_observation.json": residue_observation,
         "final_residue_sweep.json": final_sweep,
@@ -213,11 +253,13 @@ def main() -> int:
             "applier_node": APPLIER_NODE,
             "verifier_node": VERIFIER_NODE,
             "observed_at": _iso(now),
+            "preflight_capture_digest": preflight_capture.get("record_digest"),
             "verifier_capture_digest": upgraded.get("verifier_capture_digest"),
             "effect_status": upgraded.get("effect_status"),
             "binding": (upgraded.get("choice_receipt") or {}).get("selection", {}).get("binding"),
             "pg_identity_mode": (upgraded.get("choice_receipt") or {}).get("selection", {}).get("final_choice"),
         },
+        "effect_seams_ready_receipt.json": effect_seams_receipt,
     }
     for name, value in artifacts.items():
         (args.out_dir / name).write_text(

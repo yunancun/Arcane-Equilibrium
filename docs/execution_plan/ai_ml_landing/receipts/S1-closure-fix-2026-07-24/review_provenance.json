@@ -1,0 +1,44 @@
+{
+  "entries": {
+    "constitutional_gate": {
+      "description": "CC constitutional review of the S1 closure findings fix",
+      "ended_at": "2026-07-23T21:58:13.989Z",
+      "prompt_digest": "sha256:f6616139ba2f265f6e6ab12dfbf41a334e89dbb8db7d7ba6a0f99e80368462d0",
+      "result_digest": "sha256:430a0df31529d086de428fbd11924228813cb79c25264b4be547c7010c4d5a8b",
+      "reviewed_head": "af24913008934c6f8444a5a728faba74c271333e",
+      "role": "CC",
+      "started_at": "2026-07-23T21:55:13.351Z",
+      "transcript_digest": "sha256:e4e82cd51bb39a7ca4f1279a9a472224c57e4f5bd9476b59675a0d5d627d2679",
+      "verdict": "PASS"
+    },
+    "pa_design": {
+      "description": "PA architecture design for the S1 formal-closure Wave A",
+      "ended_at": "2026-07-23T18:00:00.952Z",
+      "prompt_digest": "sha256:c12f84449f6b1d1a8fff7509cf36ad218a062b1a4d409a1fe29ede2c2744a068",
+      "result_digest": "sha256:198a625b2f10997a4792f937ccd9a48e67c0f963305a6d3f8b7bf68be31bf121",
+      "reviewed_head": "fae656cd775151337f54b6fbfc347c444c7cf7ad",
+      "role": "PA",
+      "started_at": "2026-07-23T17:50:40.583Z",
+      "transcript_digest": "sha256:988e5d3212ec3c07eb9339eafca6d68b7475860720898d3ecc939b08f0338d29",
+      "verdict": "DESIGN_ACCEPTED"
+    },
+    "security_gate": {
+      "description": "E3 attacker-lens review of the S1 closure findings fix",
+      "ended_at": "2026-07-23T22:02:02.954Z",
+      "prompt_digest": "sha256:4229c68487d55b1425078a422d82558bc49dde43687d3e05964170d077fef254",
+      "result_digest": "sha256:4c260a257b9459df62d6c9a505f0ef0e26bcc4dd9a751b201707c3a3c69be59e",
+      "reviewed_head": "af24913008934c6f8444a5a728faba74c271333e",
+      "role": "E3",
+      "started_at": "2026-07-23T21:54:37.514Z",
+      "transcript_digest": "sha256:739b4f70b657f2d4f59181f4eb6670a9e3b08c0818bfb466ee847444d66591cb",
+      "verdict": "PASS_WITH_LOW"
+    }
+  },
+  "limitations": [
+    "These are immutable digests of completed historical provider calls, not newly replayed reviews.",
+    "The final evidence-only head still requires a separate exact-head Codex review before merge.",
+    "The fresh ops_postcheck is not historical; it is supplied by the target-host governed command capture and authenticated in the final SSHSIG bundle."
+  ],
+  "schema_version": "aiml_s1_review_provenance_v1",
+  "self_digest": "sha256:24c8c5af42bdda73338afeb48bdd9995ea26d2c35184f1f464d9613c4fe158ae"
+}

@@ -720,10 +720,25 @@ def _source_provenance_record(
         except (TypeError, ValueError):
             artifact_errors.append("artifact observed_at/expires_at interval is invalid")
     full_estimate = max(1, (len(content_bytes) + 3) // 4)
+    runtime_attested = False
+    if (
+        not artifact_errors
+        and not stale
+        and expected_kind == "runtime_observation"
+        and isinstance(payload, dict)
+    ):
+        try:
+            runtime_attested = (
+                external_evidence_verifier is not None
+                and external_evidence_verifier(payload) is True
+            )
+        except Exception:
+            runtime_attested = False
     record.update(
         status=(
             "invalid_context_artifact" if artifact_errors
             else "stale_context_artifact" if stale
+            else "resolved_artifact" if runtime_attested
             else "available_unattested_evidence"
         ),
         artifact_path=str(artifact.relative_to(root.resolve())), digest=actual_digest,
@@ -737,7 +752,7 @@ def _source_provenance_record(
         observed_at=payload.get("observed_at") if isinstance(payload, dict) else None,
         expires_at=payload.get("expires_at") if isinstance(payload, dict) else None,
     )
-    if not artifact_errors and not stale:
+    if not artifact_errors and not stale and not runtime_attested:
         record["attestation_error"] = (
             "repo-local producer metadata proves integrity only; an out-of-band host capability attestation is required for verdict evidence"
         )

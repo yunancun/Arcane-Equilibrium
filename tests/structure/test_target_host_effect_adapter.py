@@ -17,6 +17,7 @@ from __future__ import annotations
 import copy
 import functools
 import json
+import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -42,7 +43,11 @@ import aiml_gate_receipt_validator as validator  # noqa: E402
 ADAPTER = "target_host_disposable_runtime_probe_adapter_v1"
 OBS = "2026-07-23T12:00:00+00:00"
 NOW = "2026-07-23T12:05:00+00:00"
-HEAD = "0" * 40
+HEAD = subprocess.check_output(
+    ["git", "rev-parse", "HEAD"],
+    cwd=ROOT,
+    text=True,
+).strip()
 FROZEN_CLASSIFIER = (
     "sha256:1cf8c021b066ceeb364e968add074d263cb28d63db421fdc40620e9904d0ddbc"
 )
@@ -281,19 +286,22 @@ def _closure_inputs(
     )
     evidence = tfx.build_target_host_effect_evidence(upgraded)
     receipt_id = evidence["id"]
-    ops_post = {
-        "id": "ops_post_1", "scope": "runtime", "source": "ops_postcheck", "status": "PASS",
-        "verifier_node": ops_verifier_node or verifier_node,
-        "verifier_capture_digest": ops_capture_digest_override or cap["record_digest"],
-        "residue_observation": CLEAN_RESIDUE if residue is None else residue,
-        "source_head": upgraded["source_head"], "host": upgraded["target_host"],
-        "observed_at": NOW,
-        "evidence_refs": (["verifier_capture_1"] if include_capture_ref else []),
-    }
-    vcap_evidence = {
-        "id": "verifier_capture_1", "scope": "runtime", "kind": "command_capture_v2",
-        "source": cap.get("native_agent"), "digest": cap["record_digest"], "capture": cap,
-    }
+    ops_post, vcap_evidence = tfx.build_target_host_closure_evidence(
+        upgraded,
+        cap,
+        CLEAN_RESIDUE if residue is None else residue,
+    )
+    ops_post["id"] = "ops_post_1"
+    vcap_evidence["id"] = "verifier_capture_1"
+    ops_post["artifact"]["evidence_refs"] = (
+        ["verifier_capture_1"] if include_capture_ref else []
+    )
+    ops_post["artifact"]["verifier_node"] = ops_verifier_node or verifier_node
+    ops_post["artifact"]["verifier_capture_digest"] = (
+        ops_capture_digest_override or cap["record_digest"]
+    )
+    ops_post["artifact"]["self_digest"] = tfx._postcheck_digest(ops_post["artifact"])
+    ops_post["digest"] = ops_post["artifact"]["self_digest"]
     route = {"nodes": [{"id": ADAPTER, "kind": "effect_adapter", "mandatory": True}]}
     fragments = {"ops_postcheck": {"evidence_refs": ["ops_post_1"]}}
     evidence_by_id = {
@@ -369,18 +377,24 @@ def test_closure_rejects_empty_postcheck_evidence_refs() -> None:
     errors = tfx.validate_target_host_effect_binding(
         packet, route, fragments, evidence_by_id, valid
     )
-    assert any("exactly one verifier command_capture_v2" in e for e in errors)
+    assert any("exactly one verifier command capture" in e for e in errors)
 
 
 def test_closure_rejects_fake_verifier_string_without_capture() -> None:
     # ops_postcheck 只有 verifier_node 字串、無真 capture evidence(evidence_refs 指向不存在的 id)→ 拒。
     result = _effect_result()
     packet, route, fragments, evidence_by_id, valid = _closure_inputs(result)
-    evidence_by_id["ops_post_1"]["evidence_refs"] = ["nonexistent_capture"]
+    evidence_by_id["ops_post_1"]["artifact"]["evidence_refs"] = ["nonexistent_capture"]
+    evidence_by_id["ops_post_1"]["artifact"]["self_digest"] = tfx._postcheck_digest(
+        evidence_by_id["ops_post_1"]["artifact"]
+    )
+    evidence_by_id["ops_post_1"]["digest"] = evidence_by_id["ops_post_1"]["artifact"][
+        "self_digest"
+    ]
     errors = tfx.validate_target_host_effect_binding(
         packet, route, fragments, evidence_by_id, valid
     )
-    assert any("exactly one verifier command_capture_v2" in e for e in errors)
+    assert any("exactly one verifier command capture" in e for e in errors)
 
 
 def test_closure_rejects_non_governed_stub_verifier_capture() -> None:
@@ -436,7 +450,7 @@ def test_closure_rejects_tampered_verifier_capture_record() -> None:
     # verifier capture record 被竄改(native_agent 改後未重簽)→ governed 閘拒(self-digest / execution-task 不符)。
     result = _effect_result()
     packet, route, fragments, evidence_by_id, valid = _closure_inputs(result)
-    evidence_by_id["verifier_capture_1"]["capture"]["native_agent"] = "tampered-agent"
+    evidence_by_id["verifier_capture_1"]["artifact"]["native_agent"] = "tampered-agent"
     errors = tfx.validate_target_host_effect_binding(
         packet, route, fragments, evidence_by_id, valid
     )
@@ -447,7 +461,7 @@ def test_closure_rejects_missing_residue_observation() -> None:
     # ops_postcheck 缺 residue_observation → 拒(無法證明殘留已清)。
     result = _effect_result()
     packet, route, fragments, evidence_by_id, valid = _closure_inputs(result)
-    evidence_by_id["ops_post_1"].pop("residue_observation")
+    evidence_by_id["ops_post_1"]["artifact"].pop("residue_observation")
     errors = tfx.validate_target_host_effect_binding(
         packet, route, fragments, evidence_by_id, valid
     )
@@ -525,21 +539,21 @@ def test_result_validator_rejects_deferred_postcheck_with_vcd() -> None:
 # ops_postcheck non-residue binding fields (E4 gap: branch (c) + (b) partial).
 def test_closure_rejects_postcheck_wrong_source_head() -> None:
     packet, route, fragments, evidence_by_id, valid = _closure_inputs(_effect_result())
-    evidence_by_id["ops_post_1"]["source_head"] = "f" * 40
+    evidence_by_id["ops_post_1"]["artifact"]["source_head"] = "f" * 40
     errors = tfx.validate_target_host_effect_binding(packet, route, fragments, evidence_by_id, valid)
     assert any("source_head is not bound" in e for e in errors)
 
 
 def test_closure_rejects_postcheck_wrong_host() -> None:
     packet, route, fragments, evidence_by_id, valid = _closure_inputs(_effect_result())
-    evidence_by_id["ops_post_1"]["host"] = "not-trade-core"
+    evidence_by_id["ops_post_1"]["artifact"]["host"] = "not-trade-core"
     errors = tfx.validate_target_host_effect_binding(packet, route, fragments, evidence_by_id, valid)
     assert any("host is not bound" in e for e in errors)
 
 
 def test_closure_rejects_postcheck_missing_observed_at() -> None:
     packet, route, fragments, evidence_by_id, valid = _closure_inputs(_effect_result())
-    evidence_by_id["ops_post_1"].pop("observed_at")
+    evidence_by_id["ops_post_1"]["artifact"].pop("observed_at")
     errors = tfx.validate_target_host_effect_binding(packet, route, fragments, evidence_by_id, valid)
     assert any("observation time" in e for e in errors)
 

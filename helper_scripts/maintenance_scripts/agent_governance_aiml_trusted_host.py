@@ -516,14 +516,15 @@ def _finalize_program_adoption(
     }
 
 
-def finalize_from_host_inputs(
+def _finalize_from_host_inputs_with_profile(
     packet: Mapping[str, Any],
     bundle: Mapping[str, Any],
     *,
     execution_signature: bytes,
     github_token: bytes,
+    signer_profile: ExecutionSignerProfile,
 ) -> dict[str, Any]:
-    """Build fixed host capabilities, then validate the caller's complete packet."""
+    """Internal profile-bound finalizer; public entrypoints expose no trust injection."""
 
     evaluated_at = _utc_now().astimezone(timezone.utc)
     task_digest, context_digest, dag_digest = _packet_bindings(packet)
@@ -534,6 +535,7 @@ def finalize_from_host_inputs(
         task_contract_digest=task_digest,
         context_artifact_digest=context_digest,
         dag_digest=dag_digest,
+        signer_profile=signer_profile,
     )
     return _finalize_program_adoption(
         packet,
@@ -541,4 +543,40 @@ def finalize_from_host_inputs(
         github_verifier=GitHubRulesetVerifier(github_token, now=evaluated_at),
         source_verifier=GitSourceManifestVerifier(REPO_ROOT),
         evaluated_at=evaluated_at,
+    )
+
+
+def finalize_from_host_inputs(
+    packet: Mapping[str, Any],
+    bundle: Mapping[str, Any],
+    *,
+    execution_signature: bytes,
+    github_token: bytes,
+) -> dict[str, Any]:
+    """Validate one S0.3 adoption closure under the fixed S0.3 signer profile."""
+
+    return _finalize_from_host_inputs_with_profile(
+        packet,
+        bundle,
+        execution_signature=execution_signature,
+        github_token=github_token,
+        signer_profile=_default_s0_3_profile(),
+    )
+
+
+def finalize_s1_target_host_from_host_inputs(
+    packet: Mapping[str, Any],
+    bundle: Mapping[str, Any],
+    *,
+    execution_signature: bytes,
+    github_token: bytes,
+) -> dict[str, Any]:
+    """Validate one S1 target-host closure under its domain-separated SSHSIG profile."""
+
+    return _finalize_from_host_inputs_with_profile(
+        packet,
+        bundle,
+        execution_signature=execution_signature,
+        github_token=github_token,
+        signer_profile=S1_TARGET_HOST_EXECUTION_SIGNER_PROFILE,
     )

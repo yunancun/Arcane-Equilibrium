@@ -166,6 +166,7 @@ def _fragment_errors(
     fragments_by_node: dict[str, dict[str, Any]],
     *,
     captures: dict[str, Any],
+    valid_effect_receipt_ids: set[str],
     task_contract_digest: str,
     context_artifact_digest: str,
     specialized_surfaces: set[str],
@@ -175,6 +176,8 @@ def _fragment_errors(
         set(captures["repositories"])
         | set(captures["changes"])
         | set(captures["commands"])
+        | set(captures["waves"])
+        | valid_effect_receipt_ids
     )
     direct_ids |= set(captures["platform_attested"])
     for node_id, fragment in fragments_by_node.items():
@@ -207,13 +210,16 @@ def _acceptance_errors(
     packet: dict[str, Any],
     *,
     captures: dict[str, Any],
+    valid_effect_receipt_ids: set[str] | None = None,
     fragments_by_node: dict[str, dict[str, Any]],
     expected_route: dict[str, Any] | None,
 ) -> list[str]:
     errors: list[str] = []
     source_ids = set(captures["repositories"]) | set(captures["changes"])
     command_ids = set(captures["commands"])
-    runtime_ids = set(captures["runtime_attested"])
+    runtime_ids = set(captures["runtime_attested"]) | set(
+        valid_effect_receipt_ids or ()
+    )
     outcome_ids = set(captures["outcome_attested"])
     task_facts = (expected_route or {}).get("task_facts", {})
     runtime_claim = bool(task_facts.get("runtime_claim"))
@@ -465,6 +471,7 @@ def validate_closure_trust(
     task_contract_digest: str,
     expected_route: dict[str, Any] | None,
     fragments_by_node: dict[str, dict[str, Any]],
+    valid_effect_receipt_ids: set[str] | None = None,
 ) -> list[str]:
     """Apply evidence-class, authenticity-boundary, and consumption preconditions."""
 
@@ -472,6 +479,7 @@ def validate_closure_trust(
         "context_artifact", {}
     ).get("artifact_digest")
     surfaces = set((expected_route or {}).get("task_facts", {}).get("surfaces", []))
+    effect_receipt_ids = set(valid_effect_receipt_ids or ())
     errors = list(captures.get("errors", []))
     errors.extend(
         _authority_errors(
@@ -485,6 +493,7 @@ def validate_closure_trust(
         _fragment_errors(
             fragments_by_node,
             captures=captures,
+            valid_effect_receipt_ids=effect_receipt_ids,
             task_contract_digest=task_contract_digest,
             context_artifact_digest=str(context_artifact_digest),
             specialized_surfaces=surfaces & SPECIALIZED_SURFACES,
@@ -494,6 +503,7 @@ def validate_closure_trust(
         _acceptance_errors(
             packet,
             captures=captures,
+            valid_effect_receipt_ids=effect_receipt_ids,
             fragments_by_node=fragments_by_node,
             expected_route=expected_route,
         )
