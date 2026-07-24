@@ -170,14 +170,14 @@ def _fragment_errors(
     task_contract_digest: str,
     context_artifact_digest: str,
     specialized_surfaces: set[str],
+    effect_or_ops_nodes: set[str],
 ) -> list[str]:
     errors: list[str] = []
     direct_ids = (
         set(captures["repositories"])
         | set(captures["changes"])
         | set(captures["commands"])
-        | set(captures["waves"])
-        | valid_effect_receipt_ids
+        | set(captures.get("waves_by_id", {}))
     )
     direct_ids |= set(captures["platform_attested"])
     for node_id, fragment in fragments_by_node.items():
@@ -199,7 +199,33 @@ def _fragment_errors(
         )
         if fragment.get("gate_verdict") == "PASS":
             refs = set(fragment.get("evidence_refs", []))
-            if not refs & direct_ids:
+            node_direct_ids = set(direct_ids)
+            if node_id in effect_or_ops_nodes or fragment.get("role") == "OPS":
+                node_direct_ids |= valid_effect_receipt_ids
+            # An effect receipt proves the effect node, not PA/CC/E2/E3/QA
+            # judgment.  In an effect-bearing closure, every non-OPS reviewer
+            # must cite the authenticated workflow wave that owns that exact
+            # fragment digest.  `_wave_errors` and execution attestation then
+            # bind the same wave to its routed call and SSHSIG-authenticated
+            # bundle entry.
+            if valid_effect_receipt_ids and not (
+                node_id in effect_or_ops_nodes or fragment.get("role") == "OPS"
+            ):
+                owns_result = any(
+                    ref in captures.get("waves_by_id", {})
+                    and (
+                        captures["waves_by_id"][ref]
+                        .get("result_fragment_digests", {})
+                        .get(node_id)
+                        == canonical_digest(fragment)
+                    )
+                    for ref in refs
+                )
+                if not owns_result:
+                    errors.append(
+                        f"role fragment {node_id} PASS lacks its own authenticated workflow result"
+                    )
+            if not refs & node_direct_ids:
                 errors.append(
                     f"role fragment {node_id} PASS lacks direct captured source/test/attested evidence"
                 )
@@ -480,6 +506,20 @@ def validate_closure_trust(
     ).get("artifact_digest")
     surfaces = set((expected_route or {}).get("task_facts", {}).get("surfaces", []))
     effect_receipt_ids = set(valid_effect_receipt_ids or ())
+    effect_or_ops_nodes = {
+        str(node.get("id"))
+        for node in (expected_route or {}).get("nodes", [])
+        if isinstance(node, dict)
+        and node.get("kind") == "effect_adapter"
+        and isinstance(node.get("id"), str)
+    }
+    effect_or_ops_nodes |= {
+        str(node.get("node_id"))
+        for node in (expected_route or {}).get("required_role_nodes", [])
+        if isinstance(node, dict)
+        and node.get("role") == "OPS"
+        and isinstance(node.get("node_id"), str)
+    }
     errors = list(captures.get("errors", []))
     errors.extend(
         _authority_errors(
@@ -497,6 +537,7 @@ def validate_closure_trust(
             task_contract_digest=task_contract_digest,
             context_artifact_digest=str(context_artifact_digest),
             specialized_surfaces=surfaces & SPECIALIZED_SURFACES,
+            effect_or_ops_nodes=effect_or_ops_nodes,
         )
     )
     errors.extend(

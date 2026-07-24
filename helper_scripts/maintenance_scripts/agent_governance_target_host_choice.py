@@ -27,6 +27,7 @@ from datetime import datetime, timedelta
 from typing import Any, Callable
 
 import agent_governance_component_effects as ce
+import agent_governance_command_capture_v2 as governed_capture
 from agent_governance_schema import schema_subset_errors
 from agent_governance_target_host_probe import (
     BINDING_BINDING,
@@ -674,6 +675,13 @@ def validate_target_host_choice_receipt(
                 errors.append("target_host_capture must carry a non-empty capturer node_id")
             if not (isinstance(capture.get("native_agent"), str) and capture.get("native_agent")):
                 errors.append("target_host_capture must carry a non-empty capturer native_agent")
+            errors.extend(
+                "target_host_capture is not a complete governed command capture: "
+                + error
+                for error in governed_capture.validate_governed_command_capture(
+                    capture
+                )
+            )
     if require_success:
         if now is None:
             errors.append("target-host choice receipt PASS acceptance requires a non-null now for freshness")
@@ -1041,6 +1049,7 @@ def build_attested_reference_receipt(
     independent_postcheck_attached: bool = True,
     capture_digest: str | None = None,
     include_capture_artifact: bool = False,
+    capture_artifact: dict[str, Any] | None = None,
     apply_actor_node: str = "s16b_apply_actor",
     postcheck_verifier_node: str = "s16b_independent_verifier",
 ) -> dict[str, Any]:
@@ -1057,7 +1066,17 @@ def build_attested_reference_receipt(
     以行使 attested-PASS 的結構路徑;``capture_digest`` 則只內嵌裸 digest(仍過不了 attested,示範裸 digest 不足)。
     """
 
-    capture_artifact = _structural_capture_artifact() if include_capture_artifact else None
+    if capture_artifact is not None and include_capture_artifact:
+        raise ValueError(
+            "pass either capture_artifact or include_capture_artifact, not both"
+        )
+    capture_artifact = (
+        copy.deepcopy(capture_artifact)
+        if capture_artifact is not None
+        else _structural_capture_artifact()
+        if include_capture_artifact
+        else None
+    )
     return build_target_host_choice_receipt(
         caller="target_host_probe_v1:attested-reference",
         platform=detect_platform(),

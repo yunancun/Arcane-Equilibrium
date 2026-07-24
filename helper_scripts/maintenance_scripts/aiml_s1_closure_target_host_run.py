@@ -20,10 +20,13 @@ host 乾淨 fail(``target_host_available()`` False),絕不 fake。closure_packet
 from __future__ import annotations
 
 import argparse
+import base64
+import hashlib
 import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import uuid
@@ -38,11 +41,11 @@ if str(_ML) not in sys.path:
     sys.path.insert(0, str(_ML))
 
 import agent_governance_target_host_probe as th
-import agent_governance_target_host_choice as thc
 import agent_governance_target_host_apply as apply_mod
 import agent_governance_target_host_effects as tfx
 import agent_governance_command_capture_v2 as capmod
 import agent_governance_component_effects as component_effects
+import agent_governance_target_host_operator_authorization as operator_auth
 import aiml_gate_receipt_validator as validator
 
 APPLIER_NODE = "s1fc_apply_actor"
@@ -60,6 +63,50 @@ DEP = {
     "runtime_candidate_comparison_digest": "sha256:" + "c" * 64,
     "pg_readonly_identity_receipt_digest": "sha256:" + "e" * 64,
 }
+OBSERVATION_SCRIPT = (
+    "helper_scripts/maintenance_scripts/"
+    "agent_governance_target_host_observation.py"
+)
+
+
+def _target_host_observation_argv(
+    *,
+    mode: str,
+    intent: dict,
+    authorization: dict,
+    signature: bytes,
+    unit: str | None = None,
+    teardown_root: str | None = None,
+) -> list[str]:
+    encoded_intent = base64.b64encode(
+        json.dumps(
+            intent, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+    ).decode("ascii")
+    encoded_authorization = base64.b64encode(
+        operator_auth.canonical_bytes(authorization)
+    ).decode("ascii")
+    encoded_signature = base64.b64encode(signature).decode("ascii")
+    argv = [
+        "python3",
+        OBSERVATION_SCRIPT,
+        "--mode",
+        mode,
+        "--intent-base64",
+        encoded_intent,
+        "--permit-base64",
+        encoded_authorization,
+        "--signature-base64",
+        encoded_signature,
+    ]
+    if mode == "postcheck":
+        argv.extend([
+            "--unit",
+            str(unit),
+            "--teardown-root",
+            str(teardown_root),
+        ])
+    return argv
 
 
 def _now() -> datetime:
@@ -144,14 +191,23 @@ def _governed_ops_capture(
     root: Path,
     node_id: str,
     objective: str,
+    mode: str,
+    intent: dict,
+    authorization: dict,
+    signature: bytes,
+    unit: str | None = None,
+    teardown_root: str | None = None,
 ) -> dict:
-    """Produce one real OPS ``command_capture_v2`` for an exact DAG node."""
+    """Capture one operator-authenticated, read-only target-host observation."""
 
     from agent_governance_context import capture_repository_baseline
     from agent_governance_execution import compile_context, materialize_context_artifact
     from agent_governance_routing import route_task
 
-    vscope = ["helper_scripts/maintenance_scripts/runtime_environment_probe.py"]
+    vscope = [
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_observation.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_probe.py",
+    ]
     facts = {
         "task_shape": "review", "surfaces": ["operations"], "risk": "medium",
         "uncertainty": "low", "side_effect_class": "none",
@@ -159,17 +215,103 @@ def _governed_ops_capture(
         "scope": vscope, "dirty_scope": [], "verification_scope": vscope,
         "acceptance_criteria": ["one exact read-only command receipt"],
         "hard_stops": ["no runtime mutation"], "baseline": capture_repository_baseline(),
-        "direct_interfaces": ["runtime_environment_probe_v1"],
+        "direct_interfaces": ["target_host_governed_observation_v1"],
         "previous_failure": "no derived read-only path scope",
     }
     routed = route_task(facts)
     artifact = materialize_context_artifact(compile_context("OPS", routed["task_facts"]))
-    # governed capture 用一條保證通過 native-policy 的 read-only 指令產出真 record(證「distinct 驗證者
-    # 跑過一條 governed command」);真 on-host 殘留觀察另由 independent_postcheck_on_host 產出(見 main)。
+    argv = _target_host_observation_argv(
+        mode=mode,
+        intent=intent,
+        authorization=authorization,
+        signature=signature,
+        unit=unit,
+        teardown_root=teardown_root,
+    )
     return capmod.capture_governed_command(
         native_agent="OPS", node_id=node_id, context_artifact=artifact,
-        argv=["git", "rev-parse", "--is-inside-work-tree"], root=root,
+        argv=argv, root=root,
     )
+
+
+def _captured_target_host_observation(
+    capture: dict,
+    *,
+    mode: str,
+    source_head: str,
+    intent: dict,
+    authorization: dict,
+    signature: bytes,
+    unit: str | None = None,
+    teardown_root: str | None = None,
+) -> dict:
+    """Parse only a complete, valid command-capture stdout observation."""
+
+    errors = capmod.validate_governed_command_capture(
+        capture,
+        expected_source_head=source_head,
+    )
+    if errors:
+        raise SystemExit(
+            "governed target-host observation capture is invalid: "
+            + "; ".join(errors[:5])
+        )
+    expected_argv = _target_host_observation_argv(
+        mode=mode,
+        intent=intent,
+        authorization=authorization,
+        signature=signature,
+        unit=unit,
+        teardown_root=teardown_root,
+    )
+    if capture.get("argv") != expected_argv:
+        raise SystemExit(
+            "governed target-host observation command differs from the "
+            "operator-authorized exact observer invocation"
+        )
+    stdout = capture.get("stdout") or {}
+    preview = stdout.get("preview_text")
+    if (
+        capture.get("result") != "PASS"
+        or capture.get("exit_code") != 0
+        or stdout.get("encoding") != "utf-8"
+        or not isinstance(preview, str)
+        or stdout.get("truncated") is not False
+        or stdout.get("bytes") != len(preview.encode("utf-8"))
+        or stdout.get("digest")
+        != "sha256:" + hashlib.sha256(preview.encode("utf-8")).hexdigest()
+    ):
+        raise SystemExit(
+            "governed target-host observation lacks complete exact stdout"
+        )
+    try:
+        artifact = json.loads(preview)
+    except ValueError as error:
+        raise SystemExit(
+            "governed target-host observation stdout is not JSON"
+        ) from error
+    expected = {
+        "schema_version": "target_host_governed_observation_v1",
+        "mode": mode,
+        "source_head": source_head,
+        "intent_digest": intent["self_digest"],
+        "operator_authorization_digest": authorization[
+            "authorization_digest"
+        ],
+    }
+    if not isinstance(artifact, dict) or any(
+        artifact.get(field) != value for field, value in expected.items()
+    ):
+        raise SystemExit(
+            "governed target-host observation is not bound to the exact "
+            "mode/source/intent/operator permit"
+        )
+    observation = artifact.get("observation")
+    if not isinstance(observation, dict):
+        raise SystemExit(
+            "governed target-host observation payload is missing"
+        )
+    return observation
 
 
 def main() -> int:
@@ -182,22 +324,28 @@ def main() -> int:
         type=Path,
         help="producer-generated effect_seams_ready_receipt_v1 JSON",
     )
+    parser.add_argument(
+        "--prepare-intent-only",
+        action="store_true",
+        help="emit the exact typed intent for out-of-band operator signing and exit",
+    )
+    parser.add_argument("--intent-file", type=Path)
+    parser.add_argument("--operator-permit", type=Path)
+    parser.add_argument("--operator-signature", type=Path)
     parser.add_argument("--repo-root", type=Path, default=_HERE.parents[1])
     args = parser.parse_args()
     source_head = _verified_committed_source_head(
         args.repo_root.resolve(), args.source_head
     )
 
-    # 本 driver 是一個「專屬、拋棄式、被授權的 on-host effect 執行器」(等同 operator 手跑一次探針)。它於
-    # 自身 env 開授權閘,使 target_host_available() 為真、讓 distinct 驗證者的 independent_postcheck_on_host
-    # 得以做真殘留觀察。**注意**:applier 的 apply_target_host_probe_effect(真 runner)仍走隔離 python3 -E
-    # 子行程——run_probe_via_child 以 sanitized allowlist env(不含此旗標)spawn 子行程,子行程自驗 capsule 後
-    # 才在**它自己**的 env 開閘。故 P1 process-isolation 修復在此真跑中依然成立(applier 不靠 parent 的閘)。
-    if not th.target_host_available():
+    if (
+        sys.platform != "linux"
+        or shutil.which("systemd-run") is None
+        or socket.gethostname() != th.EXPECTED_TARGET_HOST_DEFAULT
+    ):
         raise SystemExit(
-            "not an operator-admitted target-host process (need linux, systemd-run, and the "
-            "AIML_TARGET_HOST_PROBE=1 launch gate); this driver refuses to mutate its parent "
-            "process environment or fake a kernel fact off-target."
+            "not the exact target host (need Linux trade-core + systemd-run); "
+            "this driver refuses to fake a kernel fact off-target"
         )
     effect_seams_receipt = json.loads(
         args.effect_seams_ready_receipt.read_text(encoding="utf-8")
@@ -216,21 +364,101 @@ def main() -> int:
     }
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
-    now = _now()
-    xdg = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
-    throwaway = os.path.join(xdg, f"aiml_s1fc_{os.getpid()}_{uuid.uuid4().hex[:8]}")
     expected_host = th.EXPECTED_TARGET_HOST_DEFAULT
-
-    intent = _build_intent(expected_host=expected_host, throwaway_root=throwaway, now=now)
+    if args.prepare_intent_only:
+        if any((
+            args.intent_file,
+            args.operator_permit,
+            args.operator_signature,
+        )):
+            raise SystemExit(
+                "--prepare-intent-only cannot consume an existing permit"
+            )
+        prepared_at = _now()
+        throwaway_root = (
+            f"/run/user/{os.getuid()}/"
+            f"aiml_s1fc_{os.getpid()}_{uuid.uuid4().hex[:8]}"
+        )
+        prepared_intent = _build_intent(
+            expected_host=expected_host,
+            throwaway_root=throwaway_root,
+            now=prepared_at,
+        )
+        (args.out_dir / "intent.json").write_text(
+            json.dumps(
+                prepared_intent,
+                ensure_ascii=False,
+                sort_keys=True,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        print(json.dumps({
+            "status": "OPERATOR_SIGNATURE_REQUIRED",
+            "intent_digest": prepared_intent["self_digest"],
+            "source_head": source_head,
+            "intent_path": str(args.out_dir / "intent.json"),
+        }, sort_keys=True))
+        return 0
+    if not all((
+        args.intent_file,
+        args.operator_permit,
+        args.operator_signature,
+    )):
+        raise SystemExit(
+            "effect execution requires --intent-file, --operator-permit, "
+            "and --operator-signature"
+        )
+    intent = json.loads(args.intent_file.read_text(encoding="utf-8"))
+    authorization = json.loads(
+        args.operator_permit.read_text(encoding="utf-8")
+    )
+    operator_signature = args.operator_signature.read_bytes()
+    now = _now()
+    intent_errors = apply_mod.validate_probe_intent(intent, now=_iso(now))
+    authorization_errors = operator_auth.validate_operator_authorization(
+        authorization,
+        operator_signature,
+        intent=intent,
+        source_head=source_head,
+        now=_iso(now),
+        actual_host=socket.gethostname(),
+    )
+    if intent_errors or authorization_errors:
+        raise SystemExit(
+            "operator-signed exact intent is not admissible: "
+            + "; ".join([*intent_errors, *authorization_errors][:6])
+        )
+    throwaway = str(intent["throwaway_root"])
     approved_at = _iso(now)
-    applier_capture = thc._structural_capture_artifact()
-    # This is the real pre-effect OPS node.  It is deliberately separate from
-    # both the historical design reviews and the later residue postcheck.
     preflight_capture = _governed_ops_capture(
         root=args.repo_root,
         node_id="ops_preflight",
         objective="capture the target-host readiness preflight before the S1 effect",
+        mode="preflight",
+        intent=intent,
+        authorization=authorization,
+        signature=operator_signature,
     )
+    preflight_observation = _captured_target_host_observation(
+        preflight_capture,
+        mode="preflight",
+        source_head=source_head,
+        intent=intent,
+        authorization=authorization,
+        signature=operator_signature,
+    )
+    if (
+        preflight_observation.get("observed_host") != expected_host
+        or preflight_observation.get("expected_host") != expected_host
+    ):
+        raise SystemExit(
+            "captured preflight is not bound to the exact target host"
+        )
+    # The applier receipt now embeds the real governed preflight capture, never
+    # the old structural_reference_only shape.
+    applier_capture = preflight_capture
 
     try:
         # (2) 真 child-executor apply:probe_runner 為預設真 runner ⇒ 走隔離 python3 -E 子行程。
@@ -244,23 +472,48 @@ def main() -> int:
             verifier_node_id=VERIFIER_NODE,
             now=_iso(now),
             dependency_receipts=dependency_receipts,
+            operator_authorization=authorization,
+            operator_signature=operator_signature,
         )
-        # (3) distinct 驗證者:真 on-host 殘留掃描 + 真 governed capture。
-        swept = th.independent_postcheck_on_host(
-            unit=f"aiml-probeB-absent-{os.getpid()}.scope",
+        # (3) distinct OPS verifier: the governed command itself performs the
+        # residue sweep.  No same-process observation is allowed to substitute
+        # for the captured stdout.
+        absent_unit = f"aiml-probeB-absent-{os.getpid()}.scope"
+        verifier_capture = _governed_ops_capture(
+            root=args.repo_root,
+            node_id=VERIFIER_NODE,
+            objective="capture the distinct-verifier target-host residue sweep",
+            mode="postcheck",
+            intent=intent,
+            authorization=authorization,
+            signature=operator_signature,
+            unit=absent_unit,
             teardown_root=throwaway,
         )
+        swept = _captured_target_host_observation(
+            verifier_capture,
+            mode="postcheck",
+            source_head=source_head,
+            intent=intent,
+            authorization=authorization,
+            signature=operator_signature,
+            unit=absent_unit,
+            teardown_root=throwaway,
+        )
+        if swept.get("no_residue") is not True:
+            raise SystemExit(
+                "captured distinct OPS postcheck observed target-host residue"
+            )
         residue_observation = {
             "units_gone": swept["unit_absent"],
             "cgroup_gone": swept["cgroup_gone"],
             "netns_gone": True,
             "temp_gone": swept["temp_gone"],
         }
-        verifier_capture = _governed_ops_capture(
-            root=args.repo_root,
-            node_id=VERIFIER_NODE,
-            objective="capture the distinct-verifier target-host residue sweep",
-        )
+        if not all(residue_observation.values()):
+            raise SystemExit(
+                "captured distinct OPS residue observation is not clean"
+            )
         # (4) 升 BINDING(帶結構化 verifier_capture_digest)。
         upgraded = apply_mod.attach_distinct_verifier_postcheck(
             effect_result,
@@ -269,11 +522,7 @@ def main() -> int:
             residue_observation=residue_observation,
             now=_iso(now),
         )
-        # 最終殘留確認(生產 PG :5432 未觸):零殘留。
-        final_sweep = th.independent_postcheck_on_host(
-            unit=f"aiml-probeB-final-{os.getpid()}.scope",
-            teardown_root=throwaway,
-        )
+        final_sweep = swept
     finally:
         shutil.rmtree(throwaway, ignore_errors=True)
 
@@ -284,6 +533,7 @@ def main() -> int:
         "upgraded_effect_result.json": upgraded,
         "applier_capture.json": applier_capture,
         "preflight_capture.json": preflight_capture,
+        "preflight_observation.json": preflight_observation,
         "verifier_capture.json": verifier_capture,
         "residue_observation.json": residue_observation,
         "final_residue_sweep.json": final_sweep,
@@ -301,11 +551,15 @@ def main() -> int:
             "pg_identity_mode": (upgraded.get("choice_receipt") or {}).get("selection", {}).get("final_choice"),
         },
         "effect_seams_ready_receipt.json": effect_seams_receipt,
+        "operator_authorization.json": authorization,
     }
     for name, value in artifacts.items():
         (args.out_dir / name).write_text(
             json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2), encoding="utf-8"
         )
+    (args.out_dir / "operator_authorization.json.sig").write_bytes(
+        operator_signature
+    )
 
     # producer-side 自驗:upgraded effect result 必過 require_success 嚴格閘。
     verify_errors = tfx.validate_target_host_effect_result(

@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 import agent_governance_target_host_choice as _th_choice
+import agent_governance_target_host_observation_capture as _observation_capture
 from agent_governance_schema import schema_subset_errors
 
 
@@ -236,6 +237,8 @@ def _validate_verifier_capture_evidence(
     expected_host: Any,
     expected_source_head: Any,
     expected_expiry: Any,
+    expected_intent_digest: Any,
+    expected_residue_observation: Any,
 ) -> list[str]:
     """Validate the third evidence entry: the distinct verifier's own governed command_capture_v2.
 
@@ -268,13 +271,23 @@ def _validate_verifier_capture_evidence(
     if not isinstance(capture, dict):
         errors.append("verifier capture evidence must embed the governed command_capture_v2 record")
         return errors
-    import agent_governance_command_capture_v2 as _cap
-
-    # 完整 offline governed 驗證(reexecute=False;不觸 fs replay):這是 CLAUDE.md 的 offline 結構接受閘。
-    # 它擋掉 E2 揪出的空殼 stub(缺 RECORD_FIELDS、自報 host_sandbox、trust_tier/effect_enforcement 不符)。
+    capture_errors, _observation = (
+        _observation_capture.validate_target_host_observation_capture(
+            capture,
+            expected_mode="postcheck",
+            expected_source_head=str(expected_source_head),
+            expected_intent_digest=str(expected_intent_digest),
+            expected_node_id=str(verifier_node),
+            expected_residue_observation=(
+                expected_residue_observation
+                if isinstance(expected_residue_observation, dict)
+                else None
+            ),
+        )
+    )
     errors.extend(
         f"verifier command_capture_v2 invalid: {error}"
-        for error in _cap.validate_governed_command_capture(capture)
+        for error in capture_errors
     )
     if str(capture.get("record_digest")) != str(expected_digest):
         errors.append("verifier command_capture_v2 record_digest must equal the referenced capture digest")
@@ -302,8 +315,6 @@ def _validate_verifier_capture_evidence(
         )
     if capture.get("node_id") == applier_capture.get("node_id"):
         errors.append("verifier command_capture_v2 node_id must differ from the applier capture node_id")
-    if capture.get("native_agent") == applier_capture.get("native_agent"):
-        errors.append("verifier command_capture_v2 native_agent must differ from the applier capture native_agent")
     if capture.get("node_id") == applier_node:
         errors.append("verifier command_capture_v2 node_id must differ from the applier node")
     return errors
@@ -441,6 +452,25 @@ def validate_target_host_effect_result(
             errors.append("target-host effect result applier_node_id is not receipt-applier-bound")
         if receipt.get("postcheck_verifier_node_id") != fixed.get("postcheck_verifier_node"):
             errors.append("target-host effect result postcheck_verifier_node_id is not receipt-verifier-bound")
+        applier_capture = choice.get("target_host_capture")
+        if isinstance(applier_capture, dict):
+            capture_errors, _preflight = (
+                _observation_capture.validate_target_host_observation_capture(
+                    applier_capture,
+                    expected_mode="preflight",
+                    expected_source_head=str(receipt.get("source_head", "")),
+                    expected_intent_digest=str(receipt.get("intent_digest", "")),
+                    expected_node_id="ops_preflight",
+                )
+            )
+            errors.extend(
+                "target-host effect applier capture invalid: " + error
+                for error in capture_errors
+            )
+            if applier_capture.get("node_id") != "ops_preflight":
+                errors.append(
+                    "target-host effect applier capture must be produced by ops_preflight"
+                )
         # 結構化 verifier_capture_digest 必與內嵌 seam 狀態一致:independent_postcheck 已由 distinct
         # 驗證者附掛(PASSED)⇒ 必為 sha256 且 == seam note 綁定的相異 capture digest;否則(applier 自跑,
         # DEFERRED)⇒ 必為 None。這讓「已升 BINDING」與結構化欄位/持久 note 綁定三者不可脫鉤。
@@ -684,6 +714,10 @@ def validate_target_host_effect_binding(
                 expected_host=receipt.get("target_host"),
                 expected_source_head=receipt.get("source_head"),
                 expected_expiry=receipt.get("evidence_expires_at"),
+                expected_intent_digest=receipt.get("intent_digest"),
+                expected_residue_observation=postcheck.get(
+                    "residue_observation"
+                ),
             ))
 
     # (f) acceptance PASS 必同時綁 effect receipt + ops_postcheck + verifier capture 三份 evidence id。

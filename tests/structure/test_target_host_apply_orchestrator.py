@@ -23,6 +23,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -42,9 +43,18 @@ import agent_governance_target_host_effects as tfx  # noqa: E402
 import agent_governance_target_host_apply as apply  # noqa: E402
 import agent_governance_target_host_child_apply as thchild  # noqa: E402
 import aiml_gate_receipt_validator as validator  # noqa: E402
+from target_host_capture_support import (  # noqa: E402
+    install_test_operator_profile,
+    signed_observation_capture,
+    typed_intent,
+)
 
 
-HEAD = "0" * 40
+HEAD = subprocess.check_output(
+    ["git", "rev-parse", "HEAD"],
+    cwd=ROOT,
+    text=True,
+).strip()
 OBS = "2026-07-23T12:00:00+00:00"
 NOW = "2026-07-23T12:05:00+00:00"
 LATER = "2026-07-23T12:06:00+00:00"
@@ -54,8 +64,9 @@ APPLIER = "s16b_apply_actor"
 VERIFIER = "s16b_independent_verifier"
 CLEAN = {"units_gone": True, "cgroup_gone": True, "netns_gone": True, "temp_gone": True}
 
-CAP = thc._structural_capture_artifact()
-CAP_DIGEST = CAP["record_digest"]
+CAP: dict = {}
+TEST_INTENT: dict = {}
+CAP_DIGEST = ""
 VERIFIER_CAP = "sha256:" + "9" * 64
 
 DEP = {
@@ -67,29 +78,28 @@ DEP = {
 }
 
 
+@pytest.fixture(autouse=True)
+def _signed_target_host_capture(tmp_path, monkeypatch):
+    global CAP, CAP_DIGEST, TEST_INTENT
+    private_key = install_test_operator_profile(tmp_path, monkeypatch)
+    TEST_INTENT = typed_intent(
+        applier_node=APPLIER,
+        postcheck_node=VERIFIER,
+        now=__import__("datetime").datetime.fromisoformat(OBS),
+    )
+    CAP = signed_observation_capture(
+        ROOT,
+        private_key=private_key,
+        intent=TEST_INTENT,
+        source_head=HEAD,
+        mode="preflight",
+        node_id="ops_preflight",
+    )
+    CAP_DIGEST = CAP["record_digest"]
+
+
 def _intent(**overrides) -> dict:
-    intent = {
-        "schema_version": "target_host_disposable_runtime_probe_intent_v1",
-        "intent_id": "sha256:" + "a" * 64,
-        "expected_host": "trade-core",
-        "non_root_uid": True,
-        "user_scope_only": True,
-        "candidate_ids": ["content_addressed_fixed_path"],
-        "per_seam_argv": {"start_stop": ["systemd-run", "--user", "--scope"]},
-        "throwaway_root": "/run/user/1000/aiml-probe-xyz",
-        "ttl_seconds": 900,
-        "risk": "high",
-        "rollback": {
-            "atomic_pointer_swap": "swap current->new",
-            "teardown_reset_failed": "systemctl --user reset-failed",
-            "rmtree": "rm -rf throwaway_root",
-        },
-        "applier_node_id": APPLIER,
-        "postcheck_node_id": VERIFIER,
-        "created_at": OBS,
-        "expires_at": "2026-07-23T12:14:00+00:00",
-        "self_digest": "sha256:" + "b" * 64,
-    }
+    intent = copy.deepcopy(TEST_INTENT)
     intent.update(overrides)
     return intent
 
@@ -99,7 +109,7 @@ def _probe_output(
     pg_mode: str = th.PG_MODE_REAL,
     evidence_class: str | None = None,
     independent_postcheck_attached: bool = False,
-    capture_digest: str | None = CAP_DIGEST,
+    capture_digest: str | None = None,
 ) -> dict:
     # 一份「as-if trade-core」的 run_target_host_probe 輸出:applier 自跑 → independent_postcheck DEFERRED。
     return {
@@ -109,7 +119,7 @@ def _probe_output(
             pg_mode, evidence_marker=th.EVIDENCE_ATTESTED,
             independent_postcheck_attached=independent_postcheck_attached,
         ),
-        "target_host_capture_digest": capture_digest,
+        "target_host_capture_digest": capture_digest or CAP_DIGEST,
         "evidence_class": evidence_class or th.EVIDENCE_ATTESTED,
     }
 
@@ -370,13 +380,21 @@ def test_real_runner_delegates_to_isolated_child_and_keeps_parent_gate_clean(mon
         return _probe_output()
 
     monkeypatch.setattr(thchild, "run_probe_via_child", _fake_child)
-    result = _apply(probe_runner=th.run_target_host_probe)
+    permit = {"authorization_digest": "sha256:" + "7" * 64}
+    result = _apply(
+        probe_runner=th.run_target_host_probe,
+        operator_authorization=permit,
+        operator_signature=b"test-signature",
+    )
 
     cap = captured["capsule"]
     assert cap["intent_digest"] == _intent()["self_digest"]  # 綁 intent digest
     assert cap["source_head"] == HEAD                          # 綁 source head
     assert cap["expected_host"] == "trade-core"                # 綁 expected host
     assert cap["actor_node"] == APPLIER                        # 綁 actor node
+    assert cap["operator_authorization_digest"] == permit[
+        "authorization_digest"
+    ]
     assert thchild.validate_capsule(cap, now=NOW) == []        # capsule 自洽、未過期
     assert captured["gate_during"] is None                     # 委派期間 parent env 無授權閘
     assert result["verifier_capture_digest"] is None           # 交付的是升 BINDING 前的 applier 自跑

@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 HELPERS = ROOT / "helper_scripts/maintenance_scripts"
 if str(HELPERS) not in sys.path:
     sys.path.insert(0, str(HELPERS))
+import agent_governance_trust as trust  # noqa: E402
 from agent_governance_trust import _acceptance_errors  # noqa: E402
 SUPPORT_PATH = ROOT / "tests/structure/test_development_agent_governance.py"
 
@@ -315,6 +316,87 @@ def test_unit_or_usage_telemetry_cannot_substitute_runtime_or_e2e_outcome() -> N
 
     assert any("end-to-end PASS requires" in error for error in e2e_errors)
     assert any("runtime PASS requires" in error for error in runtime_errors)
+
+
+def test_effect_receipt_cannot_substitute_a_reviewers_own_wave_result(
+    monkeypatch,
+) -> None:
+    """PA/CC/E3 must cite their authenticated call result, not an effect."""
+
+    monkeypatch.setattr(
+        trust,
+        "validate_role_fragment_producer",
+        lambda *_args, **_kwargs: [],
+    )
+    fragment = {
+        "node_id": "pa_design",
+        "role": "PA",
+        "gate_verdict": "PASS",
+        "evidence_refs": ["effect:target-host"],
+    }
+    captures = {
+        "repositories": {},
+        "changes": {},
+        "commands": {},
+        "waves": {},
+        "waves_by_id": {},
+        "platform_attested": set(),
+        "calls": {},
+    }
+
+    errors = trust._fragment_errors(
+        {"pa_design": fragment},
+        captures=captures,
+        valid_effect_receipt_ids={"effect:target-host"},
+        task_contract_digest="sha256:" + "a" * 64,
+        context_artifact_digest="sha256:" + "b" * 64,
+        specialized_surfaces=set(),
+        effect_or_ops_nodes={"target_host_disposable_runtime_probe_adapter_v1"},
+    )
+
+    assert any("own authenticated workflow result" in error for error in errors)
+
+
+def test_reviewer_fragment_accepts_its_authenticated_wave_owned_result(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        trust,
+        "validate_role_fragment_producer",
+        lambda *_args, **_kwargs: [],
+    )
+    fragment = {
+        "node_id": "pa_design",
+        "role": "PA",
+        "gate_verdict": "PASS",
+        "evidence_refs": ["s1-workflow-wave"],
+    }
+    wave = {
+        "result_fragment_digests": {
+            "pa_design": trust.canonical_digest(fragment),
+        },
+    }
+    captures = {
+        "repositories": {},
+        "changes": {},
+        "commands": {},
+        "waves": {"sha256:" + "c" * 64: wave},
+        "waves_by_id": {"s1-workflow-wave": wave},
+        "platform_attested": set(),
+        "calls": {},
+    }
+
+    errors = trust._fragment_errors(
+        {"pa_design": fragment},
+        captures=captures,
+        valid_effect_receipt_ids={"effect:target-host"},
+        task_contract_digest="sha256:" + "a" * 64,
+        context_artifact_digest="sha256:" + "b" * 64,
+        specialized_surfaces=set(),
+        effect_or_ops_nodes={"target_host_disposable_runtime_probe_adapter_v1"},
+    )
+
+    assert errors == []
 
 
 def test_e4_real_local_command_capture_is_closure_reachable() -> None:

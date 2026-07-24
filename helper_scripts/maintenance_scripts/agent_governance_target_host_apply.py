@@ -177,6 +177,8 @@ def _run_probe_under_intent_authorization(
     intent: dict[str, Any],
     source_head: str,
     now: str,
+    operator_authorization: dict[str, Any] | None,
+    operator_signature: bytes | None,
 ) -> dict[str, Any]:
     """Drive the low-level probe WITHOUT ever opening a process-global authorization gate.
 
@@ -194,11 +196,23 @@ def _run_probe_under_intent_authorization(
     """
 
     if probe_runner is th.run_target_host_probe:
+        if not isinstance(operator_authorization, dict) or not isinstance(
+            operator_signature, bytes
+        ):
+            raise TargetHostApplyError(
+                "real target-host probe requires an operator-signed exact intent"
+            )
         capsule = thchild.build_authorization_capsule(
             intent=intent, source_head=source_head, probe_params=params,
             nonce=uuid.uuid4().hex[:16], now=now,
+            operator_authorization=operator_authorization,
         )
-        return thchild.run_probe_via_child(capsule)
+        return thchild.run_probe_via_child(
+            capsule,
+            intent=intent,
+            operator_authorization=operator_authorization,
+            operator_signature=operator_signature,
+        )
     # 注入 runner:確定性 in-process 輸出,無任何 process-global env 變更。
     return probe_runner(**params)
 
@@ -269,6 +283,8 @@ def apply_target_host_probe_effect(
     now: str,
     dependency_receipts: dict[str, Any],
     probe_runner: Callable[..., dict[str, Any]] = th.run_target_host_probe,
+    operator_authorization: dict[str, Any] | None = None,
+    operator_signature: bytes | None = None,
 ) -> dict[str, Any]:
     """Admitted-intent applier: derive → run → embed into a dedicated ``target_host_effect_result_v1``.
 
@@ -296,7 +312,13 @@ def apply_target_host_probe_effect(
         intent, dependency_receipts=dependency_receipts, capture_digest=capture_digest
     )
     probe_output = _run_probe_under_intent_authorization(
-        probe_runner, params, intent=intent, source_head=source_head, now=now
+        probe_runner,
+        params,
+        intent=intent,
+        source_head=source_head,
+        now=now,
+        operator_authorization=operator_authorization,
+        operator_signature=operator_signature,
     )
     choice = _build_choice_from_probe_output(
         intent, probe_output, capture_digest=capture_digest,

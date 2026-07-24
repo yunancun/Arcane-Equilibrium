@@ -17,35 +17,54 @@ for candidate in (HELPERS, ML_ROOT):
 import aiml_s1_trusted_finalize as finalizer  # noqa: E402
 
 
-def test_replay_timestamp_is_captured_after_trusted_finalization(
+def test_replay_timestamp_is_the_signed_bundle_issue_time(
     monkeypatch,
 ) -> None:
     events: list[str] = []
     replay_time = datetime(2026, 7, 24, 1, 2, 3, tzinfo=timezone.utc)
     expected_result = {"status": "PASS", "errors": []}
+    bundle = {"issued_at": replay_time.isoformat().replace("+00:00", "Z")}
 
     def fake_finalize(*_args, **_kwargs):
         events.append("trusted-finalization")
         return expected_result
-
-    def fake_now() -> datetime:
-        events.append("replay-timestamp")
-        assert events == ["trusted-finalization", "replay-timestamp"]
-        return replay_time
 
     monkeypatch.setattr(
         finalizer.trusted,
         "finalize_s1_target_host_from_host_inputs",
         fake_finalize,
     )
-    monkeypatch.setattr(finalizer, "_now", fake_now)
 
     result, evaluated_at = finalizer._finalize_and_capture_replay_time(
         {},
-        {},
+        bundle,
         signature=b"signed",
         github_token=b"token",
     )
 
     assert result is expected_result
     assert evaluated_at == replay_time
+    assert events == ["trusted-finalization"]
+
+
+def test_replay_timestamp_rejects_an_unsigned_or_malformed_bundle_time(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        finalizer.trusted,
+        "finalize_s1_target_host_from_host_inputs",
+        lambda *_args, **_kwargs: {"status": "PASS", "errors": []},
+    )
+
+    for bundle in ({}, {"issued_at": "not-a-time"}):
+        try:
+            finalizer._finalize_and_capture_replay_time(
+                {},
+                bundle,
+                signature=b"signed",
+                github_token=b"token",
+            )
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("malformed signed evaluation time was accepted")

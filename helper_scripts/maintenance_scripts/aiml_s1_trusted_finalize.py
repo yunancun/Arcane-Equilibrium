@@ -215,9 +215,15 @@ def _task_facts(
         "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_host.py",
         "helper_scripts/maintenance_scripts/agent_governance_closure.py",
         "helper_scripts/maintenance_scripts/agent_governance_context.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_apply.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_child_apply.py",
         "helper_scripts/maintenance_scripts/agent_governance_target_host_effects.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_observation.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_observation_capture.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_operator_authorization.py",
         "helper_scripts/maintenance_scripts/agent_governance_trust.py",
         "helper_scripts/maintenance_scripts/aiml_s1_closure_target_host_run.py",
+        "helper_scripts/maintenance_scripts/aiml_s1_target_host_authorize.py",
         "helper_scripts/maintenance_scripts/aiml_s1_trusted_finalize.py",
     ]
     return {
@@ -760,13 +766,11 @@ def _finalize_and_capture_replay_time(
     signature: bytes,
     github_token: bytes,
 ) -> tuple[dict[str, Any], datetime]:
-    """Return the trusted result and a timestamp safe for historical replay.
+    """Return the trusted result and its signed replay evaluation instant.
 
-    Context sources can be materialized after the run-level ``now`` is
-    captured.  Persisting that earlier instant as ``evaluated_at`` makes an
-    otherwise valid closure fail when replayed because some sources are not yet
-    valid at the claimed time.  Capture the receipt timestamp only after the
-    trusted finalizer has evaluated every input.
+    S1 uses ``trusted_execution_bundle_v1.issued_at`` as the closure evaluation
+    instant.  It is inside the SSHSIG-authenticated bytes and is validated by
+    the trusted host for freshness/skew before the canonical closure runs.
     """
 
     result = trusted.finalize_s1_target_host_from_host_inputs(
@@ -775,7 +779,19 @@ def _finalize_and_capture_replay_time(
         execution_signature=signature,
         github_token=github_token,
     )
-    return result, _now()
+    try:
+        evaluated_at = datetime.fromisoformat(
+            str(bundle["issued_at"]).replace("Z", "+00:00")
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError(
+            "signed S1 bundle issued_at is not a timezone-aware timestamp"
+        ) from error
+    if evaluated_at.tzinfo is None:
+        raise ValueError(
+            "signed S1 bundle issued_at is not a timezone-aware timestamp"
+        )
+    return result, evaluated_at.astimezone(timezone.utc)
 
 
 def _landing_attempt(
@@ -815,8 +831,20 @@ def _landing_attempt(
             "closure_packet_v1",
         ],
         owned_paths=[
+            ".codex/agent_registry_v1.json",
+            "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_host.py",
+            "helper_scripts/maintenance_scripts/agent_governance_permissions.py",
+            "helper_scripts/maintenance_scripts/agent_governance_target_host_apply.py",
+            "helper_scripts/maintenance_scripts/agent_governance_target_host_child_apply.py",
+            "helper_scripts/maintenance_scripts/agent_governance_target_host_choice.py",
             "helper_scripts/maintenance_scripts/agent_governance_target_host_effects.py",
+            "helper_scripts/maintenance_scripts/agent_governance_target_host_observation.py",
+            "helper_scripts/maintenance_scripts/agent_governance_target_host_observation_capture.py",
+            "helper_scripts/maintenance_scripts/agent_governance_target_host_operator_authorization.py",
+            "helper_scripts/maintenance_scripts/agent_governance_trust.py",
             "helper_scripts/maintenance_scripts/aiml_s1_closure_target_host_run.py",
+            "helper_scripts/maintenance_scripts/aiml_s1_target_host_authorize.py",
+            "helper_scripts/maintenance_scripts/aiml_s1_trusted_finalize.py",
         ],
         dependency_generations=[
             {

@@ -523,19 +523,31 @@ def _finalize_from_host_inputs_with_profile(
     execution_signature: bytes,
     github_token: bytes,
     signer_profile: ExecutionSignerProfile,
+    evaluation_from_signed_bundle: bool = False,
 ) -> dict[str, Any]:
     """Internal profile-bound finalizer; public entrypoints expose no trust injection."""
 
-    evaluated_at = _utc_now().astimezone(timezone.utc)
+    host_now = _utc_now().astimezone(timezone.utc)
     task_digest, context_digest, dag_digest = _packet_bindings(packet)
     execution_index = AuthenticatedExecutionEvidenceIndex.from_bundle(
         bundle,
         signature=execution_signature,
-        now=evaluated_at,
+        now=host_now,
         task_contract_digest=task_digest,
         context_artifact_digest=context_digest,
         dag_digest=dag_digest,
         signer_profile=signer_profile,
+    )
+    # S1 historical replay must use an instant that is itself inside the
+    # authenticated bytes.  The bundle issue time is signed, is validated
+    # above for freshness/skew, and is emitted only after Context/wave
+    # materialization.  A caller-local timestamp (or a timestamp appended to
+    # the finalization result after signing) is forgeable and therefore cannot
+    # govern closure/source freshness.
+    evaluated_at = (
+        _instant(bundle.get("issued_at"))
+        if evaluation_from_signed_bundle
+        else host_now
     )
     return _finalize_program_adoption(
         packet,
@@ -579,4 +591,5 @@ def finalize_s1_target_host_from_host_inputs(
         execution_signature=execution_signature,
         github_token=github_token,
         signer_profile=S1_TARGET_HOST_EXECUTION_SIGNER_PROFILE,
+        evaluation_from_signed_bundle=True,
     )

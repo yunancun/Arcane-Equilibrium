@@ -11,6 +11,8 @@ from __future__ import annotations
 import socket
 import subprocess
 import sys
+import json
+import base64
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -23,6 +25,7 @@ if str(HELPERS) not in sys.path:
     sys.path.insert(0, str(HELPERS))
 
 import agent_governance_target_host_child_apply as child  # noqa: E402
+import agent_governance_target_host_operator_authorization as operator_auth  # noqa: E402
 
 
 CHILD_PATH = HELPERS / "agent_governance_target_host_child_apply.py"
@@ -36,13 +39,19 @@ def _now() -> str:
 
 def _intent(expected_host: str = ACTUAL_HOST, *, expires_in: int = 3600) -> dict:
     exp = (datetime.now(timezone.utc) + timedelta(seconds=expires_in)).isoformat()
-    return {
-        "intent_id": "th-intent-0001",
-        "self_digest": "sha256:" + "a" * 64,
+    intent = {
+        "schema_version": "target_host_disposable_runtime_probe_intent_v1",
+        "intent_id": "sha256:" + "1" * 64,
         "expected_host": expected_host,
         "applier_node_id": "s1fc_apply_actor",
+        "postcheck_node_id": "ops_postcheck",
+        "throwaway_root": "/run/user/1000/aiml-probe-xyz",
+        "per_seam_argv": {},
+        "created_at": datetime.now(timezone.utc).isoformat(),
         "expires_at": exp,
     }
+    intent["self_digest"] = operator_auth.intent_digest(intent)
+    return intent
 
 
 def _params() -> dict:
@@ -58,9 +67,15 @@ def _capsule(
     *, expected_host: str = ACTUAL_HOST, now: str | None = None, ttl_seconds: int = 120,
     intent_expires_in: int = 3600,
 ) -> dict:
+    intent = _intent(expected_host, expires_in=intent_expires_in)
+    authorization = operator_auth.build_operator_authorization(
+        intent=intent,
+        source_head="a" * 40,
+    )
     return child.build_authorization_capsule(
-        intent=_intent(expected_host, expires_in=intent_expires_in), source_head="a" * 40,
+        intent=intent, source_head="a" * 40,
         probe_params=_params(), nonce="nonce-abc-123456", now=now or _now(), ttl_seconds=ttl_seconds,
+        operator_authorization=authorization,
     )
 
 
@@ -70,6 +85,41 @@ def _run_child(capsule_bytes: bytes) -> subprocess.CompletedProcess:
         input=capsule_bytes, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         env={"PATH": "/usr/bin:/bin"},
     )
+
+
+def _ephemeral_signer(tmp_path: Path, monkeypatch) -> Path:
+    private_key = tmp_path / "operator"
+    subprocess.run(
+        ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(private_key)],
+        check=True,
+    )
+    public_parts = private_key.with_suffix(".pub").read_text(
+        encoding="ascii"
+    ).split()
+    public_key = " ".join(public_parts[:2])
+    fingerprint = subprocess.run(
+        ["ssh-keygen", "-lf", str(private_key.with_suffix(".pub")), "-E", "sha256"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.split()[1]
+    monkeypatch.setattr(operator_auth, "OPERATOR_PUBLIC_KEY", public_key)
+    monkeypatch.setattr(operator_auth, "OPERATOR_FINGERPRINT", fingerprint)
+    return private_key
+
+
+def _sign_permit(permit: dict, private_key: Path, tmp_path: Path) -> bytes:
+    message = tmp_path / "permit.json"
+    message.write_bytes(operator_auth.canonical_bytes(permit))
+    subprocess.run(
+        [
+            "ssh-keygen", "-Y", "sign", "-f", str(private_key),
+            "-n", operator_auth.OPERATOR_SIGNATURE_NAMESPACE, str(message),
+        ],
+        check=True,
+        stdout=subprocess.DEVNULL,
+    )
+    return message.with_suffix(".json.sig").read_bytes()
 
 
 # --------------------------------------------------------------------------- #
@@ -82,6 +132,122 @@ def test_capsule_roundtrip_is_self_consistent_and_valid() -> None:
     # 未提供 actual_host → 跳過 host 比對;capsule 自洽、未過期。
     assert child.validate_capsule(cap, now=cap["issued_at"]) == []
     assert child.validate_capsule(cap, now=cap["issued_at"], actual_host=ACTUAL_HOST) == []
+
+
+def test_child_request_requires_operator_signed_exact_intent(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    private_key = _ephemeral_signer(tmp_path, monkeypatch)
+    intent = _intent()
+    permit = operator_auth.build_operator_authorization(
+        intent=intent,
+        source_head="a" * 40,
+    )
+    signature = _sign_permit(permit, private_key, tmp_path)
+    capsule = child.build_authorization_capsule(
+        intent=intent,
+        source_head="a" * 40,
+        probe_params=_params(),
+        nonce="nonce-abc-123456",
+        now=intent["created_at"],
+        operator_authorization=permit,
+    )
+    request = {
+        "intent": intent,
+        "capsule": capsule,
+        "operator_authorization": permit,
+        "operator_signature_base64": base64.b64encode(signature).decode("ascii"),
+    }
+
+    assert child.validate_child_request(
+        request,
+        now=intent["created_at"],
+        actual_host=ACTUAL_HOST,
+    ) == []
+
+    forged = json.loads(json.dumps(request))
+    forged["intent"]["expected_host"] = "attacker-selected-host"
+    assert any(
+        "operator authorization" in error
+        for error in child.validate_child_request(
+            forged,
+            now=intent["created_at"],
+            actual_host=ACTUAL_HOST,
+        )
+    )
+
+
+def test_self_created_capsule_without_operator_signature_is_rejected() -> None:
+    cap = _capsule()
+    request = {
+        "intent": _intent(),
+        "capsule": cap,
+        "operator_authorization": {},
+        "operator_signature_base64": "",
+    }
+    errors = child.validate_child_request(
+        request,
+        now=cap["issued_at"],
+        actual_host=ACTUAL_HOST,
+    )
+    assert any("operator authorization" in error for error in errors)
+
+
+@pytest.mark.parametrize(
+    "field,value,needle",
+    [
+        (
+            "throwaway_root",
+            "/run/user/1000/attacker-selected-root",
+            "throwaway_root differs from the exact intent",
+        ),
+        (
+            "launcher_argv",
+            ["python3", "-c", "raise SystemExit(99)"],
+            "launcher_argv differs from the exact intent",
+        ),
+    ],
+)
+def test_signed_intent_rejects_self_resealed_capsule_parameter_substitution(
+    tmp_path: Path,
+    monkeypatch,
+    field,
+    value,
+    needle,
+) -> None:
+    """A valid operator permit cannot authorize caller-selected probe params."""
+
+    private_key = _ephemeral_signer(tmp_path, monkeypatch)
+    intent = _intent()
+    permit = operator_auth.build_operator_authorization(
+        intent=intent,
+        source_head="a" * 40,
+    )
+    signature = _sign_permit(permit, private_key, tmp_path)
+    capsule = child.build_authorization_capsule(
+        intent=intent,
+        source_head="a" * 40,
+        probe_params=_params(),
+        nonce="nonce-abc-123456",
+        now=intent["created_at"],
+        operator_authorization=permit,
+    )
+    capsule[field] = value
+    capsule["capsule_digest"] = child.capsule_digest(capsule)
+    request = {
+        "intent": intent,
+        "capsule": capsule,
+        "operator_authorization": permit,
+        "operator_signature_base64": base64.b64encode(signature).decode("ascii"),
+    }
+
+    errors = child.validate_child_request(
+        request,
+        now=intent["created_at"],
+        actual_host=ACTUAL_HOST,
+    )
+    assert any(needle in error for error in errors)
 
 
 def test_capsule_digest_detects_tamper() -> None:
@@ -176,7 +342,7 @@ def test_child_rejects_non_json() -> None:
 def test_child_rejects_host_mismatch() -> None:
     proc = _run_child(child._canonical(_capsule(expected_host="definitely-not-this-host")))
     assert proc.returncode == 3
-    assert b"does not match the actual host" in proc.stderr
+    assert b"operator authorization" in proc.stderr
 
 
 def test_child_rejects_tampered_capsule() -> None:
@@ -184,29 +350,23 @@ def test_child_rejects_tampered_capsule() -> None:
     cap["source_head"] = "f" * 40  # tamper without re-signing
     proc = _run_child(child._canonical(cap))
     assert proc.returncode == 3
-    assert b"digest mismatch" in proc.stderr
+    assert b"operator authorization" in proc.stderr
 
 
 def test_child_rejects_expired_capsule() -> None:
     issued = datetime.now(timezone.utc) - timedelta(seconds=600)
     proc = _run_child(child._canonical(_capsule(now=issued.isoformat(), ttl_seconds=60)))
     assert proc.returncode == 3
-    assert b"expired" in proc.stderr
+    assert b"operator authorization" in proc.stderr
 
 
-def test_child_accepts_valid_capsule_and_skips_on_non_target_host() -> None:
-    # 合法 capsule(expected_host == 本機)→ 通過驗證 → child 於自身 env 開閘 → 但 Mac 非 target host,
-    # run_target_host_probe 乾淨 SKIP(絕不 fake);child 以 SKIPPED 誠實回報,退出碼 0。
-    import json
-
+def test_child_rejects_a_self_created_capsule_even_when_structurally_valid() -> None:
+    # A checksum-valid capsule is no longer authority.  The exact typed intent
+    # plus operator SSHSIG envelope is mandatory before the child opens its
+    # process-local gate.
     proc = _run_child(child._canonical(_capsule()))
-    if proc.returncode != 0:
-        pytest.skip(f"unexpected child exit {proc.returncode}; stderr={proc.stderr.decode()[:200]}")
-    payload = json.loads(proc.stdout.decode())
-    # 於真 target host(trade-core)本測試不成立;那裡 status 會是 OK。Mac/CI runner 上應為 SKIPPED。
-    assert payload["status"] in {"SKIPPED_NOT_TARGET_HOST", "OK"}
-    if payload["status"] == "SKIPPED_NOT_TARGET_HOST":
-        assert "never fakes" in payload["reason"] or "target-host" in payload["reason"]
+    assert proc.returncode == 3
+    assert b"operator authorization" in proc.stderr
 
 
 def test_child_entrypoint_without_flag_is_fail_closed() -> None:

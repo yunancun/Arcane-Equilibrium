@@ -15,7 +15,6 @@ domain separation.
 from __future__ import annotations
 
 import copy
-import functools
 import json
 import subprocess
 import sys
@@ -38,6 +37,12 @@ import agent_governance_effects as effects  # noqa: E402
 import agent_governance_routing as routing  # noqa: E402
 import agent_governance_aiml_trusted_host as host  # noqa: E402
 import aiml_gate_receipt_validator as validator  # noqa: E402
+from target_host_capture_support import (  # noqa: E402
+    governed_ops_capture,
+    install_test_operator_profile,
+    signed_observation_capture,
+    typed_intent,
+)
 
 
 ADAPTER = "target_host_disposable_runtime_probe_adapter_v1"
@@ -51,6 +56,47 @@ HEAD = subprocess.check_output(
 FROZEN_CLASSIFIER = (
     "sha256:1cf8c021b066ceeb364e968add074d263cb28d63db421fdc40620e9904d0ddbc"
 )
+CAPTURE: dict = {}
+VERIFIER_CAPTURE: dict = {}
+WRONG_VERIFIER_CAPTURE: dict = {}
+TEST_INTENT: dict = {}
+
+
+@pytest.fixture(autouse=True)
+def _signed_target_host_captures(tmp_path, monkeypatch):
+    global CAPTURE, VERIFIER_CAPTURE, WRONG_VERIFIER_CAPTURE, TEST_INTENT
+    private_key = install_test_operator_profile(tmp_path, monkeypatch)
+    TEST_INTENT = typed_intent(
+        applier_node="s16b_apply_actor",
+        postcheck_node="ops_postcheck",
+        now=datetime.fromisoformat(OBS),
+    )
+    CAPTURE = signed_observation_capture(
+        ROOT,
+        private_key=private_key,
+        intent=TEST_INTENT,
+        source_head=HEAD,
+        mode="preflight",
+        node_id="ops_preflight",
+    )
+    VERIFIER_CAPTURE = signed_observation_capture(
+        ROOT,
+        private_key=private_key,
+        intent=TEST_INTENT,
+        source_head=HEAD,
+        mode="postcheck",
+        node_id="ops_postcheck",
+        unit="aiml-probeB-absent-123.scope",
+    )
+    WRONG_VERIFIER_CAPTURE = signed_observation_capture(
+        ROOT,
+        private_key=private_key,
+        intent=TEST_INTENT,
+        source_head=HEAD,
+        mode="postcheck",
+        node_id="ops_preflight",
+        unit="aiml-probeB-absent-124.scope",
+    )
 
 
 def _effect_result(*, include_capture_artifact: bool = True, pg_mode=None) -> dict:
@@ -60,15 +106,15 @@ def _effect_result(*, include_capture_artifact: bool = True, pg_mode=None) -> di
     # 使 closure 的「capture 必由宣告 verifier 節點產生」綁定成立(P1 Codex)。applier 節點另取。
     choice = th.build_attested_reference_receipt(
         now=OBS, pg_mode=pg_mode or th.PG_MODE_REAL,
-        include_capture_artifact=include_capture_artifact,
+        capture_artifact=CAPTURE if include_capture_artifact else None,
         independent_postcheck_attached=False,
         apply_actor_node="s16b_apply_actor",
         postcheck_verifier_node="ops_postcheck",
     )
     return tfx.build_target_host_effect_result(
         choice_receipt=choice,
-        intent_id="thintent-0001",
-        intent_digest="sha256:" + "a" * 64,
+        intent_id=TEST_INTENT["intent_id"],
+        intent_digest=TEST_INTENT["self_digest"],
         source_head=HEAD,
         approved_by="operator",
         approved_at="2026-07-23T12:01:00+00:00",
@@ -96,8 +142,13 @@ def test_registry_binds_target_host_adapter_paths_and_schemas() -> None:
     assert adapter["owner_session"] == "S1.6B"
     assert adapter["authority"] and adapter["invariant"]
     assert adapter["implementation_paths"] == [
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_apply.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_child_apply.py",
         "helper_scripts/maintenance_scripts/agent_governance_target_host_choice.py",
         "helper_scripts/maintenance_scripts/agent_governance_target_host_effects.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_observation.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_observation_capture.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_operator_authorization.py",
     ]
     assert adapter["component_paths"] == [
         "helper_scripts/maintenance_scripts/agent_governance_target_host_probe.py"
@@ -189,10 +240,46 @@ def test_effect_result_positive_and_wrapper_binding() -> None:
     assert receipt is result or receipt == result
 
 
+def test_effect_result_rejects_structurally_governed_but_nonsemantic_preflight() -> None:
+    """A generic OPS capture cannot impersonate the on-host readiness sweep."""
+
+    generic = governed_ops_capture(ROOT, node_id="ops_preflight")
+    choice = th.build_attested_reference_receipt(
+        now=OBS,
+        pg_mode=th.PG_MODE_REAL,
+        capture_artifact=generic,
+        independent_postcheck_attached=False,
+        apply_actor_node="s16b_apply_actor",
+        postcheck_verifier_node="ops_postcheck",
+    )
+    result = tfx.build_target_host_effect_result(
+        choice_receipt=choice,
+        intent_id=TEST_INTENT["intent_id"],
+        intent_digest=TEST_INTENT["self_digest"],
+        source_head=HEAD,
+        approved_by="operator",
+        approved_at="2026-07-23T12:01:00+00:00",
+        started_at="2026-07-23T12:02:00+00:00",
+        completed_at=NOW,
+        intent_expires_at="2026-07-23T12:14:00+00:00",
+        evidence_expires_at="2026-07-23T12:10:00+00:00",
+    )
+
+    errors = tfx.validate_target_host_effect_result(
+        result,
+        now=NOW,
+        expected_source_head=HEAD,
+        require_success=True,
+    )
+    assert any(
+        "exact operator-authenticated observer invocation" in error
+        for error in errors
+    )
+
+
 CLEAN_RESIDUE = {"units_gone": True, "cgroup_gone": True, "netns_gone": True, "temp_gone": True}
 
 
-@functools.lru_cache(maxsize=1)
 def _governed_verifier_capture() -> dict:
     """A REAL distinct-verifier governed ``command_capture_v2`` that passes the FULL offline validator.
 
@@ -203,59 +290,18 @@ def _governed_verifier_capture() -> dict:
     (native_agent=OPS / node_id=ops_preflight)與 applier(e3-ops / s16b_ops_capture_node)天然相異。
     """
 
-    import agent_governance_command_capture_v2 as capmod
-    from agent_governance_context import capture_repository_baseline
-    from agent_governance_execution import compile_context, materialize_context_artifact
-
-    vscope = ["helper_scripts/maintenance_scripts/runtime_environment_probe.py"]
-    facts = {
-        "task_shape": "review", "surfaces": ["operations"], "risk": "medium",
-        "uncertainty": "low", "side_effect_class": "none",
-        "objective": "capture one bounded target-host residue sweep receipt",
-        "scope": vscope, "dirty_scope": [], "verification_scope": vscope,
-        "acceptance_criteria": ["one exact read-only command receipt"],
-        "hard_stops": ["no runtime mutation"], "baseline": capture_repository_baseline(),
-        "direct_interfaces": ["runtime_environment_probe_v1"],
-        "previous_failure": "no derived read-only path scope",
-    }
-    routed = routing.route_task(facts)
-    artifact = materialize_context_artifact(compile_context("OPS", routed["task_facts"]))
-    return capmod.capture_governed_command(
-        native_agent="OPS", node_id="ops_postcheck", context_artifact=artifact,
-        argv=["git", "rev-parse", "--is-inside-work-tree"], root=ROOT,
-    )
+    return copy.deepcopy(VERIFIER_CAPTURE)
 
 
 def _verifier_capture() -> dict:
     return copy.deepcopy(_governed_verifier_capture())
 
 
-@functools.lru_cache(maxsize=1)
 def _governed_wrong_node_capture() -> dict:
     """A REAL governed capture from a DIFFERENT (valid) node — OPS ``ops_preflight`` (≠ verifier
     ``ops_postcheck``) — for the capture-must-be-produced-by-the-declared-verifier negative."""
 
-    import agent_governance_command_capture_v2 as capmod
-    from agent_governance_context import capture_repository_baseline
-    from agent_governance_execution import compile_context, materialize_context_artifact
-
-    vscope = ["helper_scripts/maintenance_scripts/runtime_environment_probe.py"]
-    facts = {
-        "task_shape": "review", "surfaces": ["operations"], "risk": "medium",
-        "uncertainty": "low", "side_effect_class": "none",
-        "objective": "an unrelated OPS read-only capture from a non-verifier node",
-        "scope": vscope, "dirty_scope": [], "verification_scope": vscope,
-        "acceptance_criteria": ["one exact read-only command receipt"],
-        "hard_stops": ["no runtime mutation"], "baseline": capture_repository_baseline(),
-        "direct_interfaces": ["runtime_environment_probe_v1"],
-        "previous_failure": "no derived read-only path scope",
-    }
-    routed = routing.route_task(facts)
-    artifact = materialize_context_artifact(compile_context("OPS", routed["task_facts"]))
-    return capmod.capture_governed_command(
-        native_agent="OPS", node_id="ops_preflight", context_artifact=artifact,
-        argv=["git", "rev-parse", "--is-inside-work-tree"], root=ROOT,
-    )
+    return copy.deepcopy(WRONG_VERIFIER_CAPTURE)
 
 
 def _closure_inputs(
@@ -409,6 +455,27 @@ def test_closure_rejects_non_governed_stub_verifier_capture() -> None:
         packet, route, fragments, evidence_by_id, valid
     )
     assert any("verifier command_capture_v2 invalid" in e for e in errors)
+
+
+def test_closure_rejects_generic_governed_capture_as_residue_sweep() -> None:
+    """A valid git capture cannot substitute for the declared OPS postcheck."""
+
+    generic = governed_ops_capture(ROOT, node_id="ops_postcheck")
+    packet, route, fragments, evidence_by_id, valid = _closure_inputs(
+        _effect_result(),
+        capture=generic,
+    )
+    errors = tfx.validate_target_host_effect_binding(
+        packet,
+        route,
+        fragments,
+        evidence_by_id,
+        valid,
+    )
+    assert any(
+        "exact operator-authenticated observer invocation" in error
+        for error in errors
+    )
 
 
 def test_closure_rejects_verifier_capture_self_asserting_host_sandbox() -> None:

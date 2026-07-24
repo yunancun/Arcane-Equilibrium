@@ -41,6 +41,17 @@ SENSITIVE_PATH_RE = re.compile(
     re.IGNORECASE,
 )
 ASCII_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
+TARGET_HOST_OBSERVATION_SCRIPT = (
+    "helper_scripts/maintenance_scripts/"
+    "agent_governance_target_host_observation.py"
+)
+BASE64_TOKEN_RE = re.compile(r"^[A-Za-z0-9+/]+={0,2}$")
+TARGET_HOST_UNIT_RE = re.compile(
+    r"^aiml-probeB-(?:absent|final)-[0-9]+\.scope$"
+)
+TARGET_HOST_THROWAWAY_RE = re.compile(
+    r"^/run/user/[0-9]+/[A-Za-z0-9_.-]+$"
+)
 
 
 def _shell_tokens(value: str) -> list[str]:
@@ -201,6 +212,50 @@ def _safe_pytest_allowed(tokens: list[str]) -> bool:
     return True
 
 
+def _safe_target_host_observation_allowed(
+    tokens: list[str],
+    *,
+    role_id: str,
+    node_class: str | None,
+) -> bool:
+    """Admit only the exact operator-authenticated, read-only OPS observer."""
+
+    if role_id != "OPS" or node_class != "verification":
+        return False
+    if len(tokens) < 10 or tokens[0] not in {"python", "python3"}:
+        return False
+    if tokens[1] != TARGET_HOST_OBSERVATION_SCRIPT:
+        return False
+    if tokens[2:4] not in (
+        ["--mode", "preflight"],
+        ["--mode", "postcheck"],
+    ):
+        return False
+    expected_flags = (
+        "--intent-base64",
+        "--permit-base64",
+        "--signature-base64",
+    )
+    cursor = 4
+    for flag in expected_flags:
+        if (
+            cursor + 1 >= len(tokens)
+            or tokens[cursor] != flag
+            or BASE64_TOKEN_RE.fullmatch(tokens[cursor + 1]) is None
+        ):
+            return False
+        cursor += 2
+    if tokens[3] == "preflight":
+        return cursor == len(tokens)
+    return (
+        tokens[cursor:cursor + 1] == ["--unit"]
+        and cursor + 4 == len(tokens)
+        and TARGET_HOST_UNIT_RE.fullmatch(tokens[cursor + 1]) is not None
+        and tokens[cursor + 2] == "--teardown-root"
+        and TARGET_HOST_THROWAWAY_RE.fullmatch(tokens[cursor + 3]) is not None
+    )
+
+
 def authorize_command(
     role_id: str,
     command: str,
@@ -270,6 +325,20 @@ def authorize_command(
     for reason, pattern in deny_patterns.items():
         if re.search(pattern, lowered, re.IGNORECASE):
             return {"allowed": False, "policy_class": "read_only", "reason": reason}
+
+    if _safe_target_host_observation_allowed(
+        outer_tokens,
+        role_id=role_id,
+        node_class=node_class,
+    ):
+        return {
+            "allowed": True,
+            "policy_class": "node_scoped_read_only",
+            "reason": (
+                "operator-authenticated target-host observation Adapter "
+                "(read-only OPS preflight/postcheck)"
+            ),
+        }
 
     local_path_error = _path_scope_error(outer_tokens, remote=False)
     if local_path_error:
