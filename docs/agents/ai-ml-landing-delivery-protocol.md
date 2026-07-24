@@ -226,14 +226,23 @@ runtime-`DONE` Session `S2.2B` therefore carries two mechanical predicates:
   `required_effects`, Adapter id, actor, rollback, distinct independent
   postcheck node, and platform/external attestation.
 
-Dependency qualifiers: a downstream **source** phase may consume an upstream
-`@SOURCE_READY`; a downstream **effect** phase, and any runtime-`DONE` session
-(`S2.2B`), may consume only an upstream `@EFFECT_DONE`. Consequently every S2
-effect **SOURCE** predicate is buildable and dispatchable in parallel now
-(`P0-S2-PRODUCTION-EFFECT-SEAMS-SOURCE`); only the serial operator-gated chain
-`S2.0→S2.1→S2.4→S2.5→S2.2B` remains blocked, surfaced as one minimal
-`BLOCKED_OPERATOR_ACTION_PACKET_READY` after every source predicate lands.
-Session IDs are unchanged.
+Dependency qualifiers are applied **per predicate**: a session's `SOURCE_READY`
+predicate may consume an upstream `@SOURCE_READY`; a session's `EFFECT_DONE`
+predicate — including `S2.2B`'s runtime-`DONE` predicate — may consume only an
+upstream `@EFFECT_DONE`. (So `S2.2B`'s **source** work legitimately consumes
+`S2.5@SOURCE_READY`, while its runtime-`DONE` consumes `S2.5@EFFECT_DONE`; the
+unqualified rule never blocks a source predicate on a production effect.)
+Consequently the effect **SOURCE** predicates are buildable now **in
+source-dependency order** — the `source_deps` chain `S2.0→S2.1→S2.4→S2.5→S2.2B`
+is *sequentially eligible* (a session's source predicate becomes eligible only
+once its `source_deps` upstreams are `@SOURCE_READY`), not freely parallel — and
+each is routed and closed by a bound work package under
+`P0-S2-PRODUCTION-EFFECT-SEAMS-SOURCE` through the standard source-implementation
+chain (`PM → PA → E1 → E2 → E4 → CC/E3/OPS → QA → PM`), an isolated
+worktree/writer lease, and an exact-head PR/merge. Only the serial
+operator-gated **apply** chain `S2.0→S2.1→S2.4→S2.5→S2.2B` stays blocked,
+surfaced as one minimal `BLOCKED_OPERATOR_ACTION_PACKET_READY` after every source
+predicate lands. Session IDs are unchanged.
 
 ### Sprint 3 - Controller, Scanner, Retention And Foundation
 

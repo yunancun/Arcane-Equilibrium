@@ -122,11 +122,17 @@ runtime-`DONE` session S2.2B carries two mechanical predicates — `SOURCE_READY
 until an exact operator authorization; ledger status `SOURCE_READY`, nine
 authorities false, no fixture may impersonate a platform-attested runtime PASS)
 and `EFFECT_DONE` (the real operator-authenticated production apply; ledger
-status `DONE`). A downstream **source** phase consumes an upstream
-`@SOURCE_READY`; a downstream **effect** phase and S2.2B consume only an upstream
-`@EFFECT_DONE`. The effect **SOURCE** predicates are therefore
-buildable/dispatchable in parallel now
-(`P0-S2-PRODUCTION-EFFECT-SEAMS-SOURCE`); only the serial operator-gated chain
+status `DONE`). Dependency qualifiers apply **per predicate**: a session's
+`SOURCE_READY` predicate consumes an upstream `@SOURCE_READY`; its `EFFECT_DONE`
+predicate — including S2.2B's runtime-`DONE` — consumes only an upstream
+`@EFFECT_DONE` (so S2.2B's source work legitimately consumes
+`S2.5@SOURCE_READY`, while its runtime-`DONE` consumes `S2.5@EFFECT_DONE`). The
+effect **SOURCE** predicates are buildable now **in source-dependency order**
+(the `source_deps` chain `S2.0→S2.1→S2.4→S2.5→S2.2B` is *sequentially eligible* —
+a session's source predicate is eligible only once its `source_deps` upstreams
+are `@SOURCE_READY` — not freely parallel), each routed and closed by a bound
+work package under `P0-S2-PRODUCTION-EFFECT-SEAMS-SOURCE` (see the binding table
+below). Only the serial operator-gated **apply** chain
 `S2.0→S2.1→S2.4→S2.5→S2.2B` stays blocked, surfaced as one minimal
 `BLOCKED_OPERATOR_ACTION_PACKET_READY` after every source predicate lands.
 
@@ -138,10 +144,27 @@ buildable/dispatchable in parallel now
 | S2.5 | `S2.4@SOURCE_READY` | `S2.4@EFFECT_DONE` (running runtime) |
 | S2.2B | `S2.2A@SOURCE_READY`, `S2.5@SOURCE_READY` | `S2.5@EFFECT_DONE` (runtime-`DONE` only) |
 
+**Work-package → session-source binding.** `P0-S2-PRODUCTION-EFFECT-SEAMS-SOURCE`
+builds each effect session's `SOURCE_READY` seam through the standard
+source-implementation route `PM → PA → E1 → E2 → E4 → CC/E3/OPS → QA → PM`
+(isolated worktree/writer lease, exact-head PR/merge — identical governance to
+the S2.2A/S2.3 source sessions). This binding makes the source work routable and
+closable from the board:
+
+| Work package | Builds the `SOURCE_READY` seam of | Status |
+|---|---|---|
+| WP1 | S2.2A/S2.3 source-debt closure (central registration + `_v2` identity) | DONE — PR #125 merge `6f2481c9` |
+| WP2 | `S2.0` observer-bootstrap source Adapter | IN_PROGRESS |
+| WP3 | `S2.1` quiesce/evidence/static-guard seam | queued (eligible after `S2.0@SOURCE_READY`) |
+| WP4 | `S2.4` per-component install seams | queued (eligible after `S2.1@SOURCE_READY`) |
+| WP5 | `S2.5` running-attestation + `S2.2B` `ingestion_compatibility_receipt_v1` | queued (eligible after `S2.4@SOURCE_READY`) |
+
 The `Dependencies` column of the Current Sessions table below remains the
-original edge list; this table is its source/effect projection. A session row
-flips to `SOURCE_READY` when its seam source lands (reviewed + merged) and to
-`DONE` only at `EFFECT_DONE`.
+original edge list; this table is its source/effect projection. Until a
+session's bound WP merges, its Current Sessions row keeps its original effect
+route/status; on the WP's exact-head merge the row flips to `SOURCE_READY`, and
+to `DONE` only at `EFFECT_DONE`. The effect (`EFFECT_DONE`) route in each row is
+unchanged and stays operator-gated.
 
 ## Current Sessions
 
