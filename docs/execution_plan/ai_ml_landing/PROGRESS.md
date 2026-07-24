@@ -114,6 +114,58 @@ natural expiry of already consumed `EFFECT_TIME_AUTHORITY` does not invalidate
 its `IMMUTABLE_CONSUMED_EFFECT`. `IMMUTABLE_LINEAGE` fails only on hash/causality
 break. No generic scope template can be `DONE`; it must first be instantiated.
 
+## Amendment A2 — Sprint 2 effect predicate split (source vs effect)
+
+Per delivery-protocol Amendment A2, each S2 effect Session and the
+runtime-`DONE` session S2.2B carries two mechanical predicates — `SOURCE_READY`
+(all seam source built/reviewed/tested/disposable-PG-exercised, fail-closed
+until an exact operator authorization; ledger status `SOURCE_READY`, nine
+authorities false, no fixture may impersonate a platform-attested runtime PASS)
+and `EFFECT_DONE` (the real operator-authenticated production apply; ledger
+status `DONE`). Dependency qualifiers apply **per predicate**: a session's
+`SOURCE_READY` predicate consumes an upstream `@SOURCE_READY`; its `EFFECT_DONE`
+predicate — including S2.2B's runtime-`DONE` — consumes only an upstream
+`@EFFECT_DONE` (so S2.2B's source work legitimately consumes
+`S2.5@SOURCE_READY`, while its runtime-`DONE` consumes `S2.5@EFFECT_DONE`). The
+effect **SOURCE** predicates are buildable now **in source-dependency order**
+(the `source_deps` chain `S2.0→S2.1→S2.4→S2.5→S2.2B` is *sequentially eligible* —
+a session's source predicate is eligible only once its `source_deps` upstreams
+are `@SOURCE_READY` — not freely parallel), each routed and closed by a bound
+work package under `P0-S2-PRODUCTION-EFFECT-SEAMS-SOURCE` (see the binding table
+below). Only the serial operator-gated **apply** chain
+`S2.0→S2.1→S2.4→S2.5→S2.2B` stays blocked, surfaced as one minimal
+`BLOCKED_OPERATOR_ACTION_PACKET_READY` after every source predicate lands.
+
+| Session | source_deps (buildable now) | effect_deps (operator-gated apply) |
+|---|---|---|
+| S2.0 | `PROGRAM_ADOPTED` (+ landed S1 seams) | root — operator external-admin (DB-superuser-class) authorization |
+| S2.1 | `S2.0@SOURCE_READY`, `S1.6` | `S2.0@EFFECT_DONE` |
+| S2.4 | `S2.0@SOURCE_READY`, `S2.1@SOURCE_READY`, `S2.2A@SOURCE_READY`, `S2.3@SOURCE_READY` | `S2.0@EFFECT_DONE`, `S2.1@EFFECT_DONE` (+ intermediate three-side exact-head sync) |
+| S2.5 | `S2.4@SOURCE_READY` | `S2.4@EFFECT_DONE` (running runtime) |
+| S2.2B | `S2.2A@SOURCE_READY`, `S2.5@SOURCE_READY` | `S2.5@EFFECT_DONE` (runtime-`DONE` only) |
+
+**Work-package → session-source binding.** `P0-S2-PRODUCTION-EFFECT-SEAMS-SOURCE`
+builds each effect session's `SOURCE_READY` seam through the standard
+source-implementation route `PM → PA → E1 → E2 → E4 → CC/E3/OPS → QA → PM`
+(isolated worktree/writer lease, exact-head PR/merge — identical governance to
+the S2.2A/S2.3 source sessions). This binding makes the source work routable and
+closable from the board:
+
+| Work package | Builds the `SOURCE_READY` seam of | Status |
+|---|---|---|
+| WP1 | S2.2A/S2.3 source-debt closure (central registration + `_v2` identity) | DONE — PR #125 merge `6f2481c9` |
+| WP2 | `S2.0` observer-bootstrap source Adapter | IN_PROGRESS |
+| WP3 | `S2.1` quiesce/evidence/static-guard seam | queued (eligible after `S2.0@SOURCE_READY`) |
+| WP4 | `S2.4` per-component install seams | queued (eligible after `S2.1@SOURCE_READY`) |
+| WP5 | `S2.5` running-attestation + `S2.2B` `ingestion_compatibility_receipt_v1` | queued (eligible after `S2.4@SOURCE_READY`) |
+
+The `Dependencies` column of the Current Sessions table below remains the
+original edge list; this table is its source/effect projection. Until a
+session's bound WP merges, its Current Sessions row keeps its original effect
+route/status; on the WP's exact-head merge the row flips to `SOURCE_READY`, and
+to `DONE` only at `EFFECT_DONE`. The effect (`EFFECT_DONE`) route in each row is
+unchanged and stays operator-gated.
+
 ## Current Sessions
 
 | Sprint | Session | Work package | Scope template | Dependencies | Required role route template | Status | Completion receipt | Required effect | Sync / CI policy |
@@ -169,6 +221,7 @@ break. No generic scope template can be `DONE`; it must first be instantiated.
 
 | Time | Session | Event | Evidence |
 |---|---|---|---|
+| 2026-07-24 | S2-WP1 | **WP1 source-debt closure landed** (`P0-S2-PRODUCTION-EFFECT-SEAMS-SOURCE` step 1, under Amendment A2). Central-validator registration of `sealed_build_receipt_v1` + `expected_identity_receipt_v1` + additive `source_compatibility_receipt_v2` (offline-structure; the frozen S0.3 classifier digest `sha256:1cf8c021…d0ddbc` is byte-unchanged — `SCHEMA_FILES` ∉ digest input; `PROGRAM_SCHEMA_PATHS` untouched). Additive `learning_runtime_manifest_v2` binds `dependency_lock = {spec_digest, lock_digest}` (both `requirements-ml.txt` and the real `requirements-ml.lock`, via `verify_lock_closure`) and folds `parquet_etl.py` compute into the learning-code identity; v1 is byte-frozen (`learning_runtime_digest sha256:6cf76b60…` reproduces). A launcher value-guard (`ALR_EXPECTED_LEARNING_RUNTIME_DIGEST_V2`) fails closed before any DB unless the committed v2 identity reproduces from the checkout and matches the operator pin (inert source; the S2.4 unit sets it). Reviews CC CLEAN / E2 PASS / E3 PASS / E4 PASS_WITH_CONCERNS (no P0/P1) + a consolidated hardening pass. Amendment A2 (effect predicate split) adopted. Source-only `NONE` effect; nine authorities false. | branch `agent/aiml-s2-wp1-debt`; reviewed `0e1a5a3750f2b089bf3e6c8eb8f87dd30a685820`, PR #125 merge `6f2481c9332be89179602dc986e205998d233e81`; v2 `learning_runtime_digest sha256:58bb9cc3a827872284196f57811227d367e4ff4aed5f3b22a031df1b39904c62` |
 | 2026-07-24 | S2.3 | **`SOURCE_READY`** (LR2 sealed immutable runtime build + expected-identity). A real `requirements-ml.lock` (`uv pip compile --generate-hashes`, 38 pinned / 0 unpinned, target `x86_64-unknown-linux-gnu`) seals the S1.6 `content_addressed_fixed_path` runtime; `sealed_build_receipt_v1` + `expected_identity_receipt_v1` bind the S1.3 identity matrix, S1.4-B candidate digest and the S1.6 schema-level choice, with all `production_*` / `running_attested.*` / `load_verified_on_target` const false, `observation_owner` const `S2.5_LR6`, nine authorities false. Self-validating (central-validator registration deferred as a serialized follow-up, keeping it disjoint from S2.2A). Reviews E2/E3/E4/CC/OPS PASS_WITH_CONCERNS → consolidated fix → E2 recheck PASS; two Codex P2 (target_platform pinned to the lock, S1.6 schema-digest now offline-verified) fixed + threads resolved; FA/CC final cross-cutting audit CLEAN (no P0/P1). Full CI green including the heavy `learning-runtime-sealed-build` job (real fetch-once/clean-offline `--require-hashes` install + `-I` import on the Linux target). NOT a running attestation. | branch `agent/aiml-s2-3-lr2-sealed`; reviewed `73b083e9b76b6f0a6c7971cc9f06d1c8c0651f66`, PR #122 merge `051df8262da85123213bd0937ad03c206152f5a3`; sealed_build self `sha256:169d2e6c9a8b90d4adc4e06897f854943acf31f9ed0e0771850e5c5007b4c852`, runtime_content `sha256:8b2092e8f55ac0484ed597fe906fecb083fdbbf106367728be71decd911d7fea`, closure `sha256:26307134daaa63d0ddd6a5fee0abf363fe243e45add49052d6ef0ae53caeaeb1`; expected_identity self `sha256:a08c69657d80995793855e817c69c505c4b0e2142f0aa53231136acba7bf8baf` |
 | 2026-07-24 | S2.2A | **`SOURCE_READY`** (LR1 scoped-compatibility identity). New `learning_runtime_manifest.py` computes a `learning_runtime_digest` over learning code + V151-V160 fingerprints + feature/label/action-policy contracts + dependency spec + runtime config, bound at preflight/spawn/finalize; a docs-only HEAD advance no longer stops ingestion; an incompatible training contract quarantines fit while compatible Scanner capture continues; `source_compatibility_receipt_v1` is emitted and the validator recomputes inner capture/training digests (anti-forgery). `NONE` effect; the LR1 runtime `DONE` is S2.2B. Reviews E2/E3 PASS + E4 PASS_WITH_CONCERNS after a fix round that closed the receipt-drift P1 + validator inner-forgery + evaluator-coherence + three firing bind-edge negatives; FA/CC final audit CLEAN (no P0/P1). | branch `agent/aiml-s2-2a-lr1-compat`; reviewed `7054a3b075171d9374fea935802d99740c0ef5da`, PR #121 merge `87a3a2503f7ef6e47cffdac3db80bbd3b1b1762b`; learning_runtime_digest `sha256:6cf76b60a763035d26d0d4e9e0e6aa0aa8877d99966367c778420e5f63a79595`, receipt self `sha256:a8fba423ebbd697d6bf2119a04affb710920c3421e1f14dfee9e2d3d4df64376`; evidence `LOCAL_REPRODUCIBLE` 415/1 core + 2259/36 tree |
 | 2026-07-24 | S1 Sprint closure | **`S1_CLOSED`**. Operator SSHSIG, independent signature verification, signed-time closure replay, Linux S1.5/S1.6 effects, zero-residue postcheck and nine-authority false boundary were already authenticated at H_effect `6e1ea957a`. Direct Codex reviewed final PR head `da8e54148` with P0/P1/P2=`0/0/0`; all exact-head CI/CodeQL jobs passed (development-agent governance 8m27s, schema-consumer 6m30s, IBKR lane 6m9s), open code-scanning alerts=0 and unresolved threads=0. PR #115 merged with `--match-head-commit` as `22876b16d`. The immutable finalization artifact remains truthfully named `S1_CLOSURE_AUTHENTICATED_PENDING_MERGE`; this later merge evidence satisfies its declared publication predicate and the ledger projects the composite terminal state, rather than rewriting signed history. S2 READY pool opens as `S2.0 ∥ S2.2A ∥ S2.3`; no S2 effect is executed by this projection. | PR #115 reviewed `da8e54148a60fc7be38fe5844cf85b28b293a044`, merged `22876b16d3b00fcaafa4f2f46ae02b1c08c60b3b`; H_effect `6e1ea957af35544a844f704978366d11aa6c2364`; S1.5 `sha256:19498ba4303df77eb102e259526ec04a19c665673716280818ec5d0103b60a37`; S1.6 effect `sha256:0a0d050b8b555b1f8d627937c52a91a7bb0c132364fa8f78b0ccd640b64a89bb`; closure `sha256:e110598b83123f60881e982156913944de37bdf1bab1fdaabdc31c2b567e3dbc`; finalization `sha256:68bbced3a100c9e52e9f0845e600cce0552b1b67cf3a11d925f4b537dee86d6c`; exact-head review comment `https://github.com/yunancun/Arcane-Equilibrium/pull/115#issuecomment-5065722362`. |

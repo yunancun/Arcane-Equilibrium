@@ -203,6 +203,47 @@ immediately before S2.4 because Linux runtime evidence must bind the reviewed
 head. It is not the final global sync or deploy proof. S3.1A/S3.1B use the same
 split rule below; source readiness never masquerades as runtime completion.
 
+**Amendment A2 — Sprint 2 effect predicate split (source vs effect).** Operator
+authority gates only the production **effect apply**, never the source
+implementation of an effect seam (typed intent/result/postcheck/rollback
+schemas, Registry/vocabulary/route/closure wiring, structured-SQL-allowlist
+generators, disposable-PG apply/rollback/postcheck proofs, receipts, fixtures,
+CI). Each S2 effect Session (`S2.0`, `S2.1`, `S2.4`, `S2.5`) and the
+runtime-`DONE` Session `S2.2B` therefore carries two mechanical predicates:
+
+- `SOURCE_READY` — the full seam source is built, independently reviewed, tested,
+  disposable-PG-exercised where a PG effect is involved, and **fail-closed until
+  an exact operator authorization exists**. It grants no runtime/PG/deploy/
+  broker/order authority; the nine authorities stay false; no fixture may
+  impersonate a platform-attested runtime PASS. Ledger status `SOURCE_READY`,
+  recording the built adapter id, the typed intent schema, the disposable
+  apply/rollback/postcheck proof digest, and the fail-closed-until-authorization
+  attestation.
+- `EFFECT_DONE` — the real production apply, executed only under a fresh, exact,
+  operator-authenticated authorization (an out-of-band SSHSIG over the exact
+  typed intent + source head, whose private key is on neither Mac nor
+  trade-core). Ledger status `DONE`, recording the classifier-derived
+  `required_effects`, Adapter id, actor, rollback, distinct independent
+  postcheck node, and platform/external attestation.
+
+Dependency qualifiers are applied **per predicate**: a session's `SOURCE_READY`
+predicate may consume an upstream `@SOURCE_READY`; a session's `EFFECT_DONE`
+predicate — including `S2.2B`'s runtime-`DONE` predicate — may consume only an
+upstream `@EFFECT_DONE`. (So `S2.2B`'s **source** work legitimately consumes
+`S2.5@SOURCE_READY`, while its runtime-`DONE` consumes `S2.5@EFFECT_DONE`; the
+unqualified rule never blocks a source predicate on a production effect.)
+Consequently the effect **SOURCE** predicates are buildable now **in
+source-dependency order** — the `source_deps` chain `S2.0→S2.1→S2.4→S2.5→S2.2B`
+is *sequentially eligible* (a session's source predicate becomes eligible only
+once its `source_deps` upstreams are `@SOURCE_READY`), not freely parallel — and
+each is routed and closed by a bound work package under
+`P0-S2-PRODUCTION-EFFECT-SEAMS-SOURCE` through the standard source-implementation
+chain (`PM → PA → E1 → E2 → E4 → CC/E3/OPS → QA → PM`), an isolated
+worktree/writer lease, and an exact-head PR/merge. Only the serial
+operator-gated **apply** chain `S2.0→S2.1→S2.4→S2.5→S2.2B` stays blocked,
+surfaced as one minimal `BLOCKED_OPERATOR_ACTION_PACKET_READY` after every source
+predicate lands. Session IDs are unchanged.
+
 ### Sprint 3 - Controller, Scanner, Retention And Foundation
 
 - `S3.1A`: LR3 source queue across target -> dataset -> fit -> evaluate -> export ->
