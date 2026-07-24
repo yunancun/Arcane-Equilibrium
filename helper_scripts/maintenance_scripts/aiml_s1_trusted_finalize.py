@@ -753,6 +753,31 @@ def _github_token() -> bytes:
     return token
 
 
+def _finalize_and_capture_replay_time(
+    packet: dict[str, Any],
+    bundle: dict[str, Any],
+    *,
+    signature: bytes,
+    github_token: bytes,
+) -> tuple[dict[str, Any], datetime]:
+    """Return the trusted result and a timestamp safe for historical replay.
+
+    Context sources can be materialized after the run-level ``now`` is
+    captured.  Persisting that earlier instant as ``evaluated_at`` makes an
+    otherwise valid closure fail when replayed because some sources are not yet
+    valid at the claimed time.  Capture the receipt timestamp only after the
+    trusted finalizer has evaluated every input.
+    """
+
+    result = trusted.finalize_s1_target_host_from_host_inputs(
+        packet,
+        bundle,
+        execution_signature=signature,
+        github_token=github_token,
+    )
+    return result, _now()
+
+
 def _landing_attempt(
     *,
     packet: dict[str, Any],
@@ -915,10 +940,10 @@ def main() -> int:
         now=_now(),
     )
     signature = _sign_with_agent(bundle)
-    result = trusted.finalize_s1_target_host_from_host_inputs(
+    result, finalization_evaluated_at = _finalize_and_capture_replay_time(
         packet,
         bundle,
-        execution_signature=signature,
+        signature=signature,
         github_token=_github_token(),
     )
     if result.get("status") != "PASS" or result.get("errors"):
@@ -947,7 +972,7 @@ def main() -> int:
     finalization = {
         "schema_version": "aiml_s1_closure_finalization_result_v1",
         "status": "S1_CLOSURE_AUTHENTICATED_PENDING_MERGE",
-        "evaluated_at": _iso(now),
+        "evaluated_at": _iso(finalization_evaluated_at),
         "closure_digest": result["closure_digest"],
         "trusted_bundle_digest": canonical_digest(bundle),
         "signature_sha256": (
