@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/quiesce_intent_v1.schema.json",
+  "title": "quiesce_intent_v1",
+  "description": "Exact typed intent for one S2.1 owner-scoped reversible quiesce fence of the ALR shadow consumer unit. The fence is the unit's OWN lifecycle stop (never a name/pattern kill); it proceeds only on a confirmed single owner. observed_relations declares the read relations S2.1 reads via the S2.0 read-only observer (the S2.0 EFFECT observer intent must GRANT SELECT on them). production target_class stays fail-closed (real fence deferred to the S2.1 EFFECT session with S2.0@EFFECT_DONE + an exact operator SSHSIG). No raw command / signal / pid_list / pkill / kill_by_name key is admissible.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "intent_id",
+    "target_class",
+    "target_host",
+    "unit_name",
+    "unit_fragment_path",
+    "expected_owner_fingerprint",
+    "advisory_lock_name",
+    "flock_path",
+    "listen_channel",
+    "observed_relations",
+    "consumer_session_relation",
+    "observation_window",
+    "ttl_seconds",
+    "applier_node_id",
+    "postcheck_node_id",
+    "created_at",
+    "expires_at",
+    "source_head",
+    "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "quiesce_intent_v1"},
+    "intent_id": {"$ref": "#/$defs/digest"},
+    "target_class": {"enum": ["disposable_local", "production"]},
+    "target_host": {"type": "string", "minLength": 1},
+    "unit_name": {"const": "openclaw-alr-shadow.service"},
+    "unit_fragment_path": {"type": "string", "minLength": 1},
+    "expected_owner_fingerprint": {"$ref": "#/$defs/digest"},
+    "advisory_lock_name": {"const": "alr_event_consumer_v1"},
+    "flock_path": {"type": "string", "minLength": 1},
+    "listen_channel": {"const": "alr_scanner_snapshot_v1"},
+    "observed_relations": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/pg_relation"}
+    },
+    "consumer_session_relation": {"$ref": "#/$defs/pg_relation"},
+    "observation_window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["duration_seconds", "min_samples", "sample_interval_seconds"],
+      "properties": {
+        "duration_seconds": {"type": "integer", "minimum": 1, "maximum": 3600},
+        "min_samples": {"type": "integer", "minimum": 2, "maximum": 512},
+        "sample_interval_seconds": {"type": "integer", "minimum": 1, "maximum": 3600}
+      }
+    },
+    "ttl_seconds": {"type": "integer", "minimum": 1, "maximum": 3600},
+    "applier_node_id": {"type": "string", "minLength": 1},
+    "postcheck_node_id": {"type": "string", "minLength": 1},
+    "created_at": {"$ref": "#/$defs/timestamp"},
+    "expires_at": {"$ref": "#/$defs/timestamp"},
+    "source_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "pg_relation": {"type": "string", "pattern": "^[a-z_][a-z0-9_]*\\.[a-z_][a-z0-9_]*$"}
+  }
+}

@@ -71,6 +71,15 @@ SCHEMA_FILES = {
     "pg_observer_bootstrap_result_v1": "pg_observer_bootstrap_result_v1.schema.json",
     "pg_observer_bootstrap_postcheck_v1": "pg_observer_bootstrap_postcheck_v1.schema.json",
     "pg_observer_bootstrap_rollback_v1": "pg_observer_bootstrap_rollback_v1.schema.json",
+    # S2.1(WP3)——additive:ALR quiesce fence 的 typed intent/observation/result/rollback。加這四鍵
+    # 純為 schema 查找,絕不進入 aiml_effect_classifier_digest() 的六個 S0.3 常量輸入(見 :46-48/§7.2),
+    # S0.3 分類身分不動。中央閘只做離線結構/整合/新鮮度委派驗(委派給 agent_governance_alr_quiesce_fence
+    # 的 SSOT validators);production/live fence 在有 S2.0@EFFECT_DONE + exact operator SSHSIG 前恆
+    # fail-closed(EXTERNAL_VERIFICATION_PENDING),真 fence 屬 S2.1 EFFECT session。
+    "quiesce_intent_v1": "quiesce_intent_v1.schema.json",
+    "quiesce_observation_v1": "quiesce_observation_v1.schema.json",
+    "quiesce_result_v1": "quiesce_result_v1.schema.json",
+    "quiesce_rollback_v1": "quiesce_rollback_v1.schema.json",
 }
 
 S0_DEPENDENCY_DIGESTS = {
@@ -1892,6 +1901,35 @@ def validate_aiml_artifact(
                 errors.extend(_observer.validate_pg_observer_bootstrap_postcheck(artifact, now=now_text))
             else:
                 errors.extend(_observer.validate_pg_observer_bootstrap_rollback(artifact, now=now_text))
+    if schema_version in {
+        "quiesce_intent_v1",
+        "quiesce_observation_v1",
+        "quiesce_result_v1",
+        "quiesce_rollback_v1",
+    }:
+        # S2.1(WP3)ALR quiesce fence SOURCE adapter:委派給 SSOT module 的自驗結構/整合/新鮮度檢查
+        # (standalone;跨 intent/observation/result/rollback 綁定由 module 測試以成對 artifact 驗證)。
+        # 與 pg_observer / component-effect 分支同樣強制 now:陳舊 artifact 於中央閘 fail-closed。
+        #
+        # ⚠ SOURCE-TRUTH 邊界(S2.1 EFFECT session 消費者請注意):此委派只證 receipt 的「內部自洽 +
+        # 結構 + 離線 SSHSIG 結構」;validate_aiml_artifact 通過「不」等於證明真對 live ALR 施加過 fence——
+        # production/live fence 恆為 EXTERNAL_VERIFICATION_PENDING(fail-closed)直到 S2.0@EFFECT_DONE 與一張
+        # platform-attested 的 out-of-band operator SSHSIG 存在,且 EFFECT fence 排在 S2.4/S2.5 之後。
+        now_text = _now_text(now)
+        if now_text is None:
+            errors.append(
+                "quiesce artifact requires now for freshness at the central gate"
+            )
+        else:
+            import agent_governance_alr_quiesce_fence as _quiesce
+            if schema_version == "quiesce_intent_v1":
+                errors.extend(_quiesce.validate_quiesce_fence_intent(artifact, now=now_text))
+            elif schema_version == "quiesce_observation_v1":
+                errors.extend(_quiesce.validate_quiesce_observation(artifact, now=now_text))
+            elif schema_version == "quiesce_result_v1":
+                errors.extend(_quiesce.validate_quiesce_fence_result(artifact, now=now_text))
+            else:
+                errors.extend(_quiesce.validate_quiesce_rollback(artifact, now=now_text))
     if schema_version == "learning_runtime_choice_receipt_target_host_v1":
         # S1 formal-closure Wave A(S1.6B):把 target-host 選擇 receipt 加入中央 SCHEMA_FILES 委派
         # 登記,但中央離線閘只做「結構/整合/新鮮度」驗(require_target_host_attested=False)——CLAUDE.md

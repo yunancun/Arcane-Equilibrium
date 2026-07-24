@@ -511,6 +511,24 @@
       "result_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/pg_observer_bootstrap_result_v1.schema.json",
       "postcheck_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/pg_observer_bootstrap_postcheck_v1.schema.json",
       "rollback_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/pg_observer_bootstrap_rollback_v1.schema.json"
+    },
+    "alr_quiesce_fence_adapter_v1": {
+      "status": "declared_production_fence_disabled_until_s20_effect_and_operator_sshsig",
+      "owner_session": "S2.1",
+      "authority": "PM/operator approved quiesce_intent_v1 for one exact owner-scoped reversible quiesce fence of the ALR shadow consumer unit openclaw-alr-shadow.service; the fence is the confirmed unit's OWN systemctl --user stop (never a name/pattern kill, never kill by pid); a disposable_local target is a simulated-owner harness (temp /proc + injected systemctl + a throwaway PG cluster's real advisory lock observed AS the S2.0 read-only observer) spawned inside pytest; a production target's real live fence is fail-closed and deferred to the S2.1 EFFECT session",
+      "invariant": "owner-scoped stop only (the exact unit's own systemctl --user stop; NEVER pkill/kill-by-name/kill-by-pattern/kill-by-pid); the multi-signal ownership predicate fences ONLY a CONFIRMED_SINGLE_OWNER and fail-closes on STALE_OWNER / AMBIGUOUS_MULTIPLE_OWNERS (no guess); the PG advisory lock alr_event_consumer_v1 is the authoritative at-most-one-owner proof and flock is corroborating only; the fence is reversible via the unit's own systemctl --user start with a stable-identity pre == post restoration crux (a new PID/InvocationID is expected; unit + cmdline + cgroup + env-hash + runtime-digest + advisory-lock-re-held must match); a bounded observation-window static guard (no-restart / watchdog-last / queue-drained) is machine-enforced and every path attempts un-fence; the DB-side quiesce evidence is read ONLY through the reused S2.0 read-only observer (no new privileged DB path; the S2.1 EFFECT S2.0 observer intent must GRANT SELECT on the declared observed_relations incl. learning.alr_consumer_events); applier != independent verifier in role/node/process/capture and the closure binds the verifier's own governed command_capture_v2 (three-way digest cross-check); the production/live fence stays fail-closed and returns a typed EXTERNAL_VERIFICATION_PENDING result (never a fake success, never a live process kill) until S2.0@EFFECT_DONE plus an exact source-pinned, domain-separated operator SSHSIG (identity aiml-s2-quiesce-fence-operator-v1, namespace arcane-equilibrium-aiml-s2-quiesce-fence) exists, sequenced after S2.4 (unit installed) + S2.5 (running); the operator private key is on neither Mac nor trade-core; no secret is serialized in any receipt; nine authorities stay false; no route_task effect node or closure effect binding is injected before the S2.1 EFFECT session",
+      "implementation_paths": [
+        "helper_scripts/maintenance_scripts/agent_governance_alr_quiesce_fence.py"
+      ],
+      "component_paths": [
+        "helper_scripts/maintenance_scripts/agent_governance_pg_observer_bootstrap.py",
+        "helper_scripts/maintenance_scripts/agent_governance_component_effects.py",
+        "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_host.py"
+      ],
+      "intent_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/quiesce_intent_v1.schema.json",
+      "observation_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/quiesce_observation_v1.schema.json",
+      "result_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/quiesce_result_v1.schema.json",
+      "rollback_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/quiesce_rollback_v1.schema.json"
     }
   },
   "roles": {

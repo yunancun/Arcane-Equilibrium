@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/quiesce_rollback_v1.schema.json",
+  "title": "quiesce_rollback_v1",
+  "description": "Un-fence (rollback) record for one S2.1 quiesce cycle. The un-fence is the unit's OWN lifecycle start (structured, never a raw command). A restart legitimately mints a new PID/InvocationID, so RESTORED binds the STABLE-IDENTITY fingerprint subset (unit + cmdline + cgroup + env-hash + runtime-digest + advisory-lock re-held by exactly one) pre == post, plus owner_healthy.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "status",
+    "intent_id",
+    "unit_name",
+    "pre_fence_owner_fingerprint",
+    "post_unfence_owner_fingerprint",
+    "unfence_operation",
+    "restored_exact",
+    "owner_healthy",
+    "observed_at",
+    "expires_at",
+    "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "quiesce_rollback_v1"},
+    "status": {"enum": ["RESTORED", "NOT_RESTORED"]},
+    "intent_id": {"$ref": "#/$defs/digest"},
+    "unit_name": {"const": "openclaw-alr-shadow.service"},
+    "pre_fence_owner_fingerprint": {"$ref": "#/$defs/digest"},
+    "post_unfence_owner_fingerprint": {"$ref": "#/$defs/digest"},
+    "unfence_operation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "unit"],
+      "properties": {
+        "kind": {"const": "systemd_user_start"},
+        "unit": {"const": "openclaw-alr-shadow.service"}
+      }
+    },
+    "restored_exact": {"type": "boolean"},
+    "owner_healthy": {"type": "boolean"},
+    "observed_at": {"$ref": "#/$defs/timestamp"},
+    "expires_at": {"$ref": "#/$defs/timestamp"},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "RESTORED"}}},
+      "then": {
+        "properties": {
+          "restored_exact": {"const": true},
+          "owner_healthy": {"const": true}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "timestamp": {"type": "string", "format": "date-time"}
+  }
+}

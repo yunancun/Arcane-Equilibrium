@@ -1,0 +1,210 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/quiesce_observation_v1.schema.json",
+  "title": "quiesce_observation_v1",
+  "description": "One evidence sample of the S2.1 quiesce cycle, discriminated by phase (PRE_FENCE_INVENTORY | IN_WINDOW_STATIC_GUARD | POST_UNFENCE_RESTORATION). It carries the multi-signal host inventory (unit/process/cgroup/env-hash/queue), the DB-side quiesce evidence read via the S2.0 read-only observer (advisory lock / backend / consumer-session / listen backlog), and the credential-exposure guards. The phase pins the admissible verdict set; the const-false credential flags and the CONFIRMED/STATIC-GUARD invariants are machine-enforced.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "phase",
+    "verdict",
+    "candidate_count",
+    "owner_fingerprint",
+    "host_inventory",
+    "db_quiesce",
+    "credential_exposure",
+    "applier_node",
+    "verifier_node",
+    "verifier_capture_digest",
+    "observed_at",
+    "expires_at",
+    "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "quiesce_observation_v1"},
+    "phase": {"enum": ["PRE_FENCE_INVENTORY", "IN_WINDOW_STATIC_GUARD", "POST_UNFENCE_RESTORATION"]},
+    "verdict": {
+      "enum": [
+        "CONFIRMED_SINGLE_OWNER",
+        "STALE_OWNER",
+        "AMBIGUOUS_MULTIPLE_OWNERS",
+        "STATIC_GUARDS_HELD",
+        "RESTART_DETECTED",
+        "QUEUE_NOT_DRAINED",
+        "RESTORED_HEALTHY",
+        "NOT_RESTORED"
+      ]
+    },
+    "candidate_count": {"type": "integer", "minimum": 0},
+    "owner_fingerprint": {"$ref": "#/$defs/digest"},
+    "host_inventory": {"$ref": "#/$defs/host_inventory"},
+    "db_quiesce": {"$ref": "#/$defs/db_quiesce"},
+    "credential_exposure": {"$ref": "#/$defs/credential_exposure"},
+    "applier_node": {"type": "string", "minLength": 1},
+    "verifier_node": {"type": "string", "minLength": 1},
+    "verifier_capture_digest": {"$ref": "#/$defs/digest"},
+    "observed_at": {"$ref": "#/$defs/timestamp"},
+    "expires_at": {"$ref": "#/$defs/timestamp"},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"phase": {"const": "PRE_FENCE_INVENTORY"}}},
+      "then": {"properties": {"verdict": {"enum": ["CONFIRMED_SINGLE_OWNER", "STALE_OWNER", "AMBIGUOUS_MULTIPLE_OWNERS"]}}}
+    },
+    {
+      "if": {"properties": {"phase": {"const": "IN_WINDOW_STATIC_GUARD"}}},
+      "then": {"properties": {"verdict": {"enum": ["STATIC_GUARDS_HELD", "RESTART_DETECTED", "QUEUE_NOT_DRAINED"]}}}
+    },
+    {
+      "if": {"properties": {"phase": {"const": "POST_UNFENCE_RESTORATION"}}},
+      "then": {"properties": {"verdict": {"enum": ["RESTORED_HEALTHY", "NOT_RESTORED"]}}}
+    },
+    {
+      "if": {"properties": {"verdict": {"const": "CONFIRMED_SINGLE_OWNER"}}},
+      "then": {"properties": {"candidate_count": {"const": 1}}}
+    },
+    {
+      "if": {"properties": {"verdict": {"const": "STATIC_GUARDS_HELD"}}},
+      "then": {
+        "properties": {
+          "db_quiesce": {
+            "properties": {
+              "advisory_lock_held": {"const": false},
+              "consumer_session_status": {"const": "STOPPED"},
+              "listen_backlog_drained": {"const": true}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"verdict": {"const": "RESTORED_HEALTHY"}}},
+      "then": {
+        "properties": {
+          "db_quiesce": {"properties": {"advisory_lock_held": {"const": true}, "advisory_lock_holder_count": {"const": 1}}}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "pg_relation": {"type": "string", "pattern": "^[a-z_][a-z0-9_]*\\.[a-z_][a-z0-9_]*$"},
+    "host_inventory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner", "process", "unit", "cgroup", "env_hash", "runtime_digest", "restart_policy", "watchdog", "queue"],
+      "properties": {
+        "owner": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["uid", "unit"],
+          "properties": {
+            "uid": {"type": "integer", "minimum": 0},
+            "unit": {"const": "openclaw-alr-shadow.service"}
+          }
+        },
+        "process": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["main_pid", "process_start_ticks", "boot_id", "cmdline_digest"],
+          "properties": {
+            "main_pid": {"type": "integer", "minimum": 0},
+            "process_start_ticks": {"anyOf": [{"type": "string", "minLength": 1}, {"type": "null"}]},
+            "boot_id": {"anyOf": [{"type": "string", "minLength": 1}, {"type": "null"}]},
+            "cmdline_digest": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]}
+          }
+        },
+        "unit": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["load_state", "active_state", "sub_state", "fragment_path", "drop_in_paths", "need_daemon_reload"],
+          "properties": {
+            "load_state": {"type": "string"},
+            "active_state": {"type": "string"},
+            "sub_state": {"type": "string"},
+            "fragment_path": {"type": "string"},
+            "drop_in_paths": {"type": "string"},
+            "need_daemon_reload": {"type": "string"}
+          }
+        },
+        "cgroup": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["control_group"],
+          "properties": {"control_group": {"type": "string"}}
+        },
+        "env_hash": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]},
+        "runtime_digest": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]},
+        "restart_policy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["restart", "restart_usec", "timeout_stop_usec"],
+          "properties": {
+            "restart": {"type": "string"},
+            "restart_usec": {"type": "string"},
+            "timeout_stop_usec": {"type": "string"}
+          }
+        },
+        "watchdog": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["watchdog_usec", "n_restarts", "invocation_id"],
+          "properties": {
+            "watchdog_usec": {"type": "string"},
+            "n_restarts": {"type": "integer", "minimum": 0},
+            "invocation_id": {"type": "string"}
+          }
+        },
+        "queue": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["listen_channel", "advisory_lock_name", "flock_path", "flock_held"],
+          "properties": {
+            "listen_channel": {"const": "alr_scanner_snapshot_v1"},
+            "advisory_lock_name": {"const": "alr_event_consumer_v1"},
+            "flock_path": {"type": "string", "minLength": 1},
+            "flock_held": {"anyOf": [{"type": "boolean"}, {"type": "null"}]}
+          }
+        }
+      }
+    },
+    "db_quiesce": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["advisory_lock_held", "advisory_lock_holder_count", "backend_present", "consumer_session_status", "listen_backlog_drained"],
+      "properties": {
+        "advisory_lock_held": {"type": "boolean"},
+        "advisory_lock_holder_count": {"type": "integer", "minimum": 0},
+        "backend_present": {"type": "boolean"},
+        "consumer_session_status": {"enum": ["OPEN", "STOPPED", "FAILED", "ABSENT", "UNCLEAN_RECOVERY"]},
+        "listen_backlog_drained": {"type": "boolean"}
+      }
+    },
+    "credential_exposure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dsn_file_path", "dsn_mode", "dsn_owner_uid", "world_readable", "plaintext_ingress", "unit_hardening"],
+      "properties": {
+        "dsn_file_path": {"type": "string", "minLength": 1},
+        "dsn_mode": {"type": "string", "pattern": "^[0-7]{4}$"},
+        "dsn_owner_uid": {"type": "integer", "minimum": 0},
+        "world_readable": {"const": false},
+        "plaintext_ingress": {"const": false},
+        "unit_hardening": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["no_new_privileges", "protect_system", "private_tmp", "restrict_address_families"],
+          "properties": {
+            "no_new_privileges": {"type": "string"},
+            "protect_system": {"type": "string"},
+            "private_tmp": {"type": "string"},
+            "restrict_address_families": {"type": "string"}
+          }
+        }
+      }
+    }
+  }
+}

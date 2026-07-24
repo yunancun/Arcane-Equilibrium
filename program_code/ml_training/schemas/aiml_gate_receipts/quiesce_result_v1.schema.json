@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/quiesce_result_v1.schema.json",
+  "title": "quiesce_result_v1",
+  "description": "Canonical self-hashed result of one S2.1 quiesce fence cycle. A production fence (and any fence in this WP3 source lane) is EXTERNAL_VERIFICATION_PENDING, never a fake success and never a live process kill. QUIESCED_STATIC_GUARDS_HELD is a real disposable simulated-owner proof: confirmed single owner -> owner-scoped stop -> bounded static-guard window all held -> owner-scoped start restores the stable identity. Stale/ambiguous/window-violated/not-restored are fail-closed. The const-false boundary keeps all nine authorities false; no secret is serialized.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "adapter_id",
+    "status",
+    "intent_id",
+    "intent_digest",
+    "target_class",
+    "target_host",
+    "unit_name",
+    "owner_fingerprint",
+    "pre_fence_observation",
+    "window_samples",
+    "post_unfence_observation",
+    "rollback_record",
+    "operator_authorization",
+    "operator_signature_pem",
+    "apply_actor_node",
+    "independent_verifier_node",
+    "source_head",
+    "observation_window",
+    "evidence_class",
+    "boundary",
+    "started_at",
+    "completed_at",
+    "evidence_expires_at",
+    "ttl_seconds",
+    "failure_reason",
+    "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "quiesce_result_v1"},
+    "adapter_id": {"const": "alr_quiesce_fence_adapter_v1"},
+    "status": {
+      "enum": [
+        "QUIESCED_STATIC_GUARDS_HELD",
+        "EXTERNAL_VERIFICATION_PENDING",
+        "STALE_OWNER_FAIL_CLOSED",
+        "AMBIGUOUS_OWNER_REFUSED",
+        "OBSERVATION_WINDOW_VIOLATED",
+        "NOT_RESTORED",
+        "FAILED"
+      ]
+    },
+    "intent_id": {"$ref": "#/$defs/digest"},
+    "intent_digest": {"$ref": "#/$defs/digest"},
+    "target_class": {"enum": ["disposable_local", "production"]},
+    "target_host": {"type": "string", "minLength": 1},
+    "unit_name": {"const": "openclaw-alr-shadow.service"},
+    "owner_fingerprint": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]},
+    "pre_fence_observation": {"anyOf": [{"type": "object"}, {"type": "null"}]},
+    "window_samples": {"type": "array", "items": {"type": "object"}},
+    "post_unfence_observation": {"anyOf": [{"type": "object"}, {"type": "null"}]},
+    "rollback_record": {"anyOf": [{"type": "object"}, {"type": "null"}]},
+    "operator_authorization": {"anyOf": [{"type": "object"}, {"type": "null"}]},
+    "operator_signature_pem": {"anyOf": [{"type": "string", "pattern": "^-----BEGIN SSH SIGNATURE-----\\n[A-Za-z0-9+/=\\n]+-----END SSH SIGNATURE-----\\n?$"}, {"type": "null"}]},
+    "apply_actor_node": {"type": "string", "minLength": 1},
+    "independent_verifier_node": {"type": "string", "minLength": 1},
+    "source_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "observation_window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["duration_seconds", "min_samples", "sample_interval_seconds"],
+      "properties": {
+        "duration_seconds": {"type": "integer", "minimum": 1, "maximum": 3600},
+        "min_samples": {"type": "integer", "minimum": 2, "maximum": 512},
+        "sample_interval_seconds": {"type": "integer", "minimum": 1, "maximum": 3600}
+      }
+    },
+    "evidence_class": {"enum": ["LOCAL_REPRODUCIBLE", "STRUCTURAL_ONLY"]},
+    "boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "production_fence_performed",
+        "production_running_attested",
+        "live_alr_owner_fenced",
+        "nine_authorities_false"
+      ],
+      "properties": {
+        "production_fence_performed": {"const": false},
+        "production_running_attested": {"const": false},
+        "live_alr_owner_fenced": {"const": false},
+        "nine_authorities_false": {"const": true}
+      }
+    },
+    "started_at": {"$ref": "#/$defs/timestamp"},
+    "completed_at": {"$ref": "#/$defs/timestamp"},
+    "evidence_expires_at": {"$ref": "#/$defs/timestamp"},
+    "ttl_seconds": {"type": "integer", "minimum": 1, "maximum": 3600},
+    "failure_reason": {"anyOf": [{"type": "string", "minLength": 1}, {"type": "null"}]},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "QUIESCED_STATIC_GUARDS_HELD"}}},
+      "then": {
+        "properties": {
+          "target_class": {"const": "disposable_local"},
+          "evidence_class": {"const": "LOCAL_REPRODUCIBLE"},
+          "owner_fingerprint": {"$ref": "#/$defs/digest"},
+          "pre_fence_observation": {"type": "object"},
+          "window_samples": {"type": "array", "minItems": 2, "items": {"type": "object"}},
+          "post_unfence_observation": {"type": "object"},
+          "rollback_record": {"type": "object"},
+          "operator_authorization": {"type": "object"},
+          "operator_signature_pem": {"type": "string", "pattern": "^-----BEGIN SSH SIGNATURE-----\\n[A-Za-z0-9+/=\\n]+-----END SSH SIGNATURE-----\\n?$"},
+          "failure_reason": {"type": "null"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"status": {"const": "EXTERNAL_VERIFICATION_PENDING"}}},
+      "then": {
+        "properties": {
+          "failure_reason": {"type": "string", "minLength": 1},
+          "pre_fence_observation": {"type": "null"},
+          "window_samples": {"type": "array", "maxItems": 0},
+          "post_unfence_observation": {"type": "null"},
+          "rollback_record": {"type": "null"},
+          "operator_signature_pem": {"type": "null"}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "timestamp": {"type": "string", "format": "date-time"}
+  }
+}
