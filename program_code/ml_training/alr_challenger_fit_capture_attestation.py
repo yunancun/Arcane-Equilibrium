@@ -516,16 +516,27 @@ def _normalize_actual_training_inputs(
         )
     )
     config.pop("training_config_hash", None)
+    # LR1(S2.2A):finalize 綁定。先以「具名」方式綁定 attested code_manifest 的
+    # learning_runtime_digest 對上 spawn 契約值——放在下方泛化的 code_manifest_material
+    # 逐位元比對之前,讓 learning_runtime_digest 漂移得到專屬錯誤碼而非被泛用碼吸收。
+    # (完整的位元一致仍由下方 actual_code_manifest_material_mismatch 兜底。)
+    attested_code_manifest: Any = None
+    try:
+        parsed_code_manifest = json.loads(bytes(materials["code_manifest_material"]))
+    except (TypeError, ValueError):
+        parsed_code_manifest = None
+    if isinstance(parsed_code_manifest, dict):
+        attested_code_manifest = parsed_code_manifest
+    if attested_code_manifest is not None and (
+        attested_code_manifest.get("learning_runtime_digest")
+        != code.get("learning_runtime_digest")
+    ):
+        raise AlrChallengerFitCaptureAttestationError(
+            "actual_learning_runtime_digest_mismatch"
+        )
     if materials["code_manifest_material"] != _canonical_json(code).encode("utf-8"):
         raise AlrChallengerFitCaptureAttestationError(
             "actual_code_manifest_material_mismatch"
-        )
-    # LR1(S2.2A):finalize 顯式綁定 spawn 契約的 learning_runtime_digest。它已隨
-    # code_manifest_material 逐位元校驗,這裡再對 expected_training_inputs 交叉核對,
-    # 任一側漂移即 fail-closed(等同 fit quarantine 的終端執法)。
-    if code.get("learning_runtime_digest") != expected.get("learning_runtime_digest"):
-        raise AlrChallengerFitCaptureAttestationError(
-            "actual_learning_runtime_digest_mismatch"
         )
     if materials["training_config_material"] != _canonical_json(config).encode(
         "utf-8"

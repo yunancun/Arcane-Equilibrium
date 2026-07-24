@@ -24,10 +24,12 @@ from ml_training.learning_runtime_manifest import (
     build_learning_runtime_manifest,
     build_source_compatibility_receipt,
     evaluate_compatibility,
-    evaluate_runtime_digest_pin,
     try_build_learning_runtime_manifest,
 )
-from ml_training.aiml_gate_receipt_validator import validate_aiml_artifact
+from ml_training.aiml_gate_receipt_validator import (
+    artifact_self_digest,
+    validate_aiml_artifact,
+)
 
 
 _HEAD_A = "a" * 40
@@ -88,15 +90,6 @@ def test_docs_only_change_and_head_move_does_not_change_component_digests(
     assert compat["capture_status"] == "COMPATIBLE"
     assert compat["fit_status"] == "COMPATIBLE"
     assert compat["manifest_identical"] is True
-
-
-def test_pin_reduction_keeps_capture_running_on_docs_only(fake_repo: Path) -> None:
-    m1 = build_learning_runtime_manifest(fake_repo, repo_source_head=_HEAD_A)
-    _write(fake_repo, "docs/whatever.md", b"docs\n")
-    m2 = build_learning_runtime_manifest(fake_repo, repo_source_head=_HEAD_B)
-    compat = evaluate_runtime_digest_pin(m1["self_digest"], m2)
-    assert compat["capture_status"] == "COMPATIBLE"
-    assert compat["fit_status"] == "COMPATIBLE"
 
 
 # ── (2) learning-code 翻轉 ⇒ fit QUARANTINE、capture 不變 ─────────────────────
@@ -235,16 +228,6 @@ def test_symlink_input_is_indeterminate_on_both(fake_repo: Path) -> None:
     assert compat["fit_status"] == "INDETERMINATE"
 
 
-def test_pin_reduction_fails_closed_on_build_error(fake_repo: Path) -> None:
-    (fake_repo / CAPTURE_INPUTS[0]).unlink()
-    manifest, _ = try_build_learning_runtime_manifest(
-        fake_repo, repo_source_head=_HEAD_A
-    )
-    compat = evaluate_runtime_digest_pin("sha256:" + "1" * 64, manifest)
-    assert compat["capture_status"] == "INDETERMINATE"
-    assert compat["fit_status"] == "INDETERMINATE"
-
-
 def test_bad_repo_source_head_fails_closed(fake_repo: Path) -> None:
     with pytest.raises(LearningRuntimeManifestError):
         build_learning_runtime_manifest(fake_repo, repo_source_head="not-a-head")
@@ -273,3 +256,51 @@ def test_receipt_learning_runtime_digest_must_bind_manifest(fake_repo: Path) -> 
     receipt["learning_runtime_digest"] = "sha256:" + "1" * 64
     errors = validate_aiml_artifact(receipt)
     assert any("learning_runtime_digest" in error for error in errors)
+
+
+def test_receipt_inner_capture_input_forgery_is_rejected(fake_repo: Path) -> None:
+    # 攻擊者竄改內層 capture inputs 的一個值,但保持 capture_contract.digest 不變,並只
+    # 重封「外層」receipt self_digest 讓外層自洽——validator 內層反偽造重算必攔下。
+    receipt = build_source_compatibility_receipt(fake_repo, repo_source_head=_HEAD_A)
+    inputs = receipt["learning_runtime_manifest"]["capture_contract"]["inputs"]
+    inputs[sorted(inputs)[0]] = "0" * 64
+    receipt["self_digest"] = artifact_self_digest(receipt)
+    errors = validate_aiml_artifact(receipt)
+    assert any("capture_contract.digest does not bind its inputs" in e for e in errors)
+
+
+def test_receipt_inner_component_forgery_is_rejected(fake_repo: Path) -> None:
+    # 竄改內層 training component(feature_contract_digest),不動 training_contract.digest,
+    # 只重封外層 self_digest——validator 重算 training digest 必攔下。
+    receipt = build_source_compatibility_receipt(fake_repo, repo_source_head=_HEAD_A)
+    components = receipt["learning_runtime_manifest"]["training_contract"]["components"]
+    components["feature_contract_digest"] = "sha256:" + "0" * 64
+    receipt["self_digest"] = artifact_self_digest(receipt)
+    errors = validate_aiml_artifact(receipt)
+    assert any("training_contract.digest does not bind its components" in e for e in errors)
+
+
+# ── (8) committed receipt 抗漂移(NON-tmp_path:對真實 checkout 重建) ────────────
+def test_committed_receipt_matches_real_checkout_rebuild() -> None:
+    # 由真實 repo checkout 重建清單,並斷言 committed receipt 的三個 HEAD-independent
+    # digest 與重建結果一致;任何漂移(如編輯了 allowlisted 檔卻沒重生 receipt)即紅燈。
+    repo_root = Path(__file__).resolve().parents[3]
+    receipt_path = (
+        repo_root
+        / "docs"
+        / "execution_plan"
+        / "ai_ml_landing"
+        / "receipts"
+        / "S2.2A-source-compatibility-receipt-v1.json"
+    )
+    assert receipt_path.is_file(), f"missing committed receipt at {receipt_path}"
+    committed = json.loads(receipt_path.read_text(encoding="utf-8"))
+    # 注入固定 head 以避免對 git 的依賴;三個 digest 皆為 HEAD-independent。
+    rebuilt = build_learning_runtime_manifest(repo_root, repo_source_head="0" * 40)
+    assert committed["learning_runtime_digest"] == rebuilt["self_digest"]
+    assert committed["capture_contract_digest"] == rebuilt["capture_contract"]["digest"]
+    assert committed["training_contract_digest"] == rebuilt["training_contract"]["digest"]
+    assert (
+        committed["migration_fingerprints"]
+        == rebuilt["training_contract"]["components"]["migration_fingerprints"]
+    )

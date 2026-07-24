@@ -51,9 +51,10 @@ from ml_training.alr_candidate_policy import (
     validate_candidate_policy_configuration,
 )
 from ml_training.learning_runtime_manifest import (
-    evaluate_runtime_digest_pin,
+    evaluate_compatibility,
     try_build_learning_runtime_manifest,
 )
+from ml_training.aiml_gate_receipt_validator import validate_aiml_artifact
 from ml_training.candidate_proof_repository import (
     BATCH_SCHEMA_VERSION as CANDIDATE_PROOF_BATCH_SCHEMA_VERSION,
     compute_candidate_proof_repository_receipt_hash,
@@ -95,6 +96,11 @@ _LOCAL_DSN_REQUIRED = {
 }
 _DSN_FORBIDDEN_KEYS = {"hostaddr", "service", "servicefile"}
 _SOURCE_HEAD_RE = re.compile(r"^[0-9a-f]{40}$")
+# LR1(S2.2A):in-repo pinned source_compatibility receipt(reviewed 期望清單來源)。
+_DEFAULT_COMPATIBILITY_RECEIPT_REL = (
+    "docs/execution_plan/ai_ml_landing/receipts/"
+    "S2.2A-source-compatibility-receipt-v1.json"
+)
 _RETENTION_GRACE_SECONDS = 900
 _CANDIDATE_EVIDENCE_MAX_AGE_SECONDS = 172_800
 _CANDIDATE_EVIDENCE_MAX_FILES = 128
@@ -1276,6 +1282,7 @@ def run_event_consumer(
     candidate_evidence_directory: Path | None = None,
     candidate_policy: Mapping[str, Any] | None = None,
     expected_learning_runtime_digest: str | None = None,
+    expected_compatibility_receipt: Path | None = None,
 ) -> dict[str, int]:
     """LR1 相容性 preflight 後執行 shadow consumer，並持久化真實 lifecycle。
 
@@ -1286,6 +1293,7 @@ def run_event_consumer(
         source_head=source_head,
         expected_learning_runtime_digest=expected_learning_runtime_digest,
         repo_root=repo_root,
+        expected_compatibility_receipt=expected_compatibility_receipt,
     )
     fit_quarantined = bool(compatibility["fit_quarantined"])
     dsn = read_local_dsn_file(dsn_path)
@@ -1390,28 +1398,67 @@ def _telemetry_source_head_match(
     return "match"
 
 
+def _load_expected_compatibility_manifest(
+    repo_root: Path,
+    receipt_path: Path | None,
+    expected_learning_runtime_digest: str | None,
+) -> dict[str, Any] | None:
+    """讀取 in-repo pinned source_compatibility receipt,取其 reviewed 期望清單。
+
+    fail-closed:receipt 缺失/不可解析/schema 驗證失敗/(若提供 operator pin 而)
+    learning_runtime_digest 不符,一律回 None → 由 evaluate_compatibility 判為
+    INDETERMINATE(停 capture)。
+    """
+    path = receipt_path or (repo_root / _DEFAULT_COMPATIBILITY_RECEIPT_REL)
+    try:
+        receipt = json.loads(Path(path).read_bytes())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(receipt, dict):
+        return None
+    if receipt.get("schema_version") != "source_compatibility_receipt_v1":
+        return None
+    # 中央驗證器已對 receipt 做內層反偽造重算;驗證失敗一律 fail-closed。
+    if validate_aiml_artifact(receipt):
+        return None
+    if expected_learning_runtime_digest is not None and (
+        receipt.get("learning_runtime_digest") != expected_learning_runtime_digest
+    ):
+        return None
+    manifest = receipt.get("learning_runtime_manifest")
+    return manifest if isinstance(manifest, dict) else None
+
+
 def _preflight_source_compatibility(
     *,
     source_head: str | None,
     expected_learning_runtime_digest: str | None,
     repo_root: Path | None,
+    expected_compatibility_receipt: Path | None = None,
 ) -> dict[str, Any]:
-    """LR1 preflight：以 learning_runtime_digest 判定 capture/fit 相容。
+    """LR1 preflight：唯一權威判定器 evaluate_compatibility(expected, actual)。
 
-    只有 capture 不相容(清單建置失敗等)才 raise 停 ingest；training 契約相對 reviewed
-    pin 漂移只把 fit_quarantined 設為 True。整倉 HEAD 僅作為遙測記錄。
+    expected 清單取自 in-repo pinned source_compatibility receipt;actual 由當前 checkout
+    建置。capture 面不相容/不可判定 → fail-closed 停 ingest;training 面漂移 → 只
+    quarantine fit 而 capture 續跑。整倉 HEAD 僅作遙測。
     """
     root = repo_root or Path(__file__).resolve().parents[2]
-    manifest, build_errors = try_build_learning_runtime_manifest(root)
-    compatibility = evaluate_runtime_digest_pin(
-        expected_learning_runtime_digest, manifest
+    actual, build_errors = try_build_learning_runtime_manifest(root)
+    expected = _load_expected_compatibility_manifest(
+        root, expected_compatibility_receipt, expected_learning_runtime_digest
     )
+    compatibility = evaluate_compatibility(expected, actual)
     if compatibility["capture_status"] != "COMPATIBLE":
-        reasons = compatibility["capture_stop_reasons"] or build_errors or ["unknown"]
+        reasons = (
+            compatibility["capture_stop_reasons"]
+            or build_errors
+            or (["expected_compatibility_manifest_unavailable"] if expected is None else [])
+            or ["unknown"]
+        )
         raise AlrEventConsumerError("capture_surface_incompatible:" + ",".join(reasons))
     return {
-        "repo_source_head": manifest["repo_source_head"] if manifest else None,
-        "learning_runtime_digest": manifest["self_digest"] if manifest else None,
+        "repo_source_head": actual["repo_source_head"] if actual else None,
+        "learning_runtime_digest": actual["self_digest"] if actual else None,
         "expected_learning_runtime_digest": expected_learning_runtime_digest,
         "source_head_match": _telemetry_source_head_match(source_head, repo_root=root),
         "fit_quarantined": compatibility["fit_status"] != "COMPATIBLE",
@@ -1485,6 +1532,11 @@ def main(argv: list[str] | None = None) -> int:
         default=os.environ.get("ALR_EXPECTED_LEARNING_RUNTIME_DIGEST"),
     )
     parser.add_argument(
+        "--expected-compatibility-receipt",
+        type=Path,
+        default=os.environ.get("ALR_EXPECTED_COMPATIBILITY_RECEIPT"),
+    )
+    parser.add_argument(
         "--candidate-evidence-dir",
         type=Path,
         default=os.environ.get("ALR_CANDIDATE_EVIDENCE_DIR"),
@@ -1527,6 +1579,7 @@ def main(argv: list[str] | None = None) -> int:
         candidate_evidence_directory=arguments.candidate_evidence_dir,
         candidate_policy=candidate_policy,
         expected_learning_runtime_digest=arguments.expected_learning_runtime_digest,
+        expected_compatibility_receipt=arguments.expected_compatibility_receipt,
     )
     print(
         json.dumps(

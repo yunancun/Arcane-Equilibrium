@@ -72,6 +72,9 @@ LEARNING_CODE_INPUTS: tuple[str, ...] = (
     "program_code/ml_training/alr_candidate_policy.py",
     "program_code/ml_training/alr_candidate_learning_arbiter.py",
     "program_code/ml_training/alr_candidate_learning_projection.py",
+    # fit 側投影/統計 run 的落地(persist_statistical_run /
+    # persist_candidate_learning_projection):漂移應 quarantine fit。
+    "program_code/ml_training/alr_operational_repository.py",
     "program_code/learning_engine/dsr_gate.py",
     "program_code/learning_engine/pbo_gate.py",
     "program_code/learning_engine/promotion_gate.py",
@@ -194,14 +197,49 @@ def _assert_migration_span(fingerprints: dict[str, str]) -> None:
         raise LearningRuntimeManifestError("migration_span_incomplete")
 
 
+# ── digest 構造的「唯一權威」helper(validator 與本模塊共用,兩邊不得分歧) ──
+def capture_contract_digest(
+    inputs: dict[str, str], snapshot_feature_schema_version: str
+) -> str:
+    """由 capture inputs + snapshot schema 版本重算 capture_contract.digest。"""
+    return canonical_digest(
+        {
+            "inputs": inputs,
+            "snapshot_feature_schema_version": snapshot_feature_schema_version,
+        }
+    )
+
+
+def training_contract_digest(components: dict[str, Any]) -> str:
+    """由 training components 重算 training_contract.digest。"""
+    return canonical_digest(components)
+
+
+def manifest_self_digest(
+    schema_version: str,
+    boundary: str,
+    capture_digest: str,
+    training_digest: str,
+) -> str:
+    """清單身分(== learning_runtime_digest):只綁 schema+boundary+兩個元件 digest。
+
+    刻意排除 generated_at_utc 與 repo_source_head,才能在 docs-only 提交與重生成之間
+    保持同一 self_digest。
+    """
+    return canonical_digest(
+        {
+            "schema_version": schema_version,
+            "boundary": boundary,
+            "capture_contract_digest": capture_digest,
+            "training_contract_digest": training_digest,
+        }
+    )
+
+
 def _capture_contract(repo_root: Path) -> dict[str, Any]:
     inputs = _hash_inputs(repo_root, CAPTURE_INPUTS)
-    projection = {
-        "inputs": inputs,
-        "snapshot_feature_schema_version": SNAPSHOT_FEATURE_SCHEMA_VERSION,
-    }
     return {
-        "digest": canonical_digest(projection),
+        "digest": capture_contract_digest(inputs, SNAPSHOT_FEATURE_SCHEMA_VERSION),
         "inputs": inputs,
         "snapshot_feature_schema_version": SNAPSHOT_FEATURE_SCHEMA_VERSION,
     }
@@ -281,22 +319,9 @@ def _training_contract(repo_root: Path) -> dict[str, Any]:
         "runtime_config_digest": _runtime_config_digest(repo_root, template),
     }
     return {
-        "digest": canonical_digest(components),
+        "digest": training_contract_digest(components),
         "components": components,
     }
-
-
-def _self_digest(capture_digest: str, training_digest: str) -> str:
-    # 身分只綁 schema + 兩個元件 digest + boundary;刻意排除 generated_at_utc 與
-    # repo_source_head,才能在 docs-only 提交與重生成之間保持同一個 self_digest。
-    return canonical_digest(
-        {
-            "schema_version": SCHEMA_VERSION,
-            "boundary": BOUNDARY,
-            "capture_contract_digest": capture_digest,
-            "training_contract_digest": training_digest,
-        }
-    )
 
 
 def _utc_now() -> str:
@@ -317,7 +342,12 @@ def build_learning_runtime_manifest(
 
     capture_contract = _capture_contract(root)
     training_contract = _training_contract(root)
-    self_digest = _self_digest(capture_contract["digest"], training_contract["digest"])
+    self_digest = manifest_self_digest(
+        SCHEMA_VERSION,
+        BOUNDARY,
+        capture_contract["digest"],
+        training_contract["digest"],
+    )
     return {
         "schema_version": SCHEMA_VERSION,
         "generated_at_utc": generated_at_utc or _utc_now(),
@@ -369,6 +399,11 @@ def evaluate_compatibility(
 ) -> dict[str, Any]:
     """比較兩份清單:capture digest 相等→capture 相容;training digest 相等→fit 相容。
 
+    這是「唯一權威」的相容性判定器,已接進 event-consumer preflight
+    (``alr_event_consumer._preflight_source_compatibility``):expected 清單來自 in-repo
+    的 pinned source_compatibility receipt。capture 面不相容 → 停 ingest;training 面不相容
+    → quarantine fit 而 capture 續跑。
+
     Deny-by-default:任一份清單缺失/畸形(建置錯誤的哨兵 None 或非法結構)→兩者皆
     INDETERMINATE(fail-closed)。
     """
@@ -395,45 +430,6 @@ def evaluate_compatibility(
         "manifest_identical": identical,
         "quarantine_reasons": [] if training_equal else ["training_contract_digest_changed"],
         "capture_stop_reasons": [] if capture_equal else ["capture_contract_digest_changed"],
-    }
-
-
-def evaluate_runtime_digest_pin(
-    expected_learning_runtime_digest: str | None,
-    actual_manifest: dict[str, Any] | None,
-) -> dict[str, Any]:
-    """以純量 pin(reviewed 的 learning_runtime_digest)判定 capture/fit。
-
-    這是給 event-consumer preflight 的縮減版:operator 只持有 self_digest 純量 pin。
-    - actual 建置失敗(None)→兩者 INDETERMINATE(fail-closed 停 capture)。
-    - actual 建置成功 → capture 相容(擷取面本身健全);self_digest == pin 才 fit 相容,
-      否則 quarantine fit。docs-only 提交不動 self_digest,故 fit 保持相容、capture 不停。
-    - 未提供 pin → capture 續跑但 fit quarantine(無法確認 training 相容,fail-closed)。
-    """
-    actual = _valid_manifest_or_none(actual_manifest)
-    if actual is None:
-        return {
-            "capture_status": _INDETERMINATE,
-            "fit_status": _INDETERMINATE,
-            "manifest_identical": False,
-            "quarantine_reasons": ["manifest_unavailable"],
-            "capture_stop_reasons": ["manifest_unavailable"],
-        }
-    if expected_learning_runtime_digest is None:
-        return {
-            "capture_status": _COMPATIBLE,
-            "fit_status": _QUARANTINE,
-            "manifest_identical": False,
-            "quarantine_reasons": ["expected_learning_runtime_digest_absent"],
-            "capture_stop_reasons": [],
-        }
-    identical = actual["self_digest"] == expected_learning_runtime_digest
-    return {
-        "capture_status": _COMPATIBLE,
-        "fit_status": _COMPATIBLE if identical else _QUARANTINE,
-        "manifest_identical": identical,
-        "quarantine_reasons": [] if identical else ["learning_runtime_digest_pin_drift"],
-        "capture_stop_reasons": [],
     }
 
 

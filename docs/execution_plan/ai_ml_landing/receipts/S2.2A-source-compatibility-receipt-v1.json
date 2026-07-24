@@ -19,7 +19,7 @@
   "boundary": "source_only_none_effect",
   "capture_contract_digest": "sha256:1e406a6e4d84e5cecebe565dc1314122f16fae1b13bd1bcf0b4c5cc4a8f397e7",
   "generated_at_utc": "2026-07-24T00:00:00Z",
-  "learning_runtime_digest": "sha256:2db4966e4b839f68bc806c63214a866f27386123d8968366a8c13e13b95ee091",
+  "learning_runtime_digest": "sha256:6cf76b60a763035d26d0d4e9e0e6aa0aa8877d99966367c778420e5f63a79595",
   "learning_runtime_manifest": {
     "boundary": "source_only_none_effect",
     "capture_contract": {
@@ -33,16 +33,16 @@
       "snapshot_feature_schema_version": "alr_scanner_novelty_features_v1"
     },
     "generated_at_utc": "2026-07-24T00:00:00Z",
-    "repo_source_head": "34a5681396afb3bc4c4bbb0e1986fd0a8f67c125",
+    "repo_source_head": "1bfb7920ad0553c9cece9bc5cdd3e1c840689548",
     "schema_version": "learning_runtime_manifest_v1",
-    "self_digest": "sha256:2db4966e4b839f68bc806c63214a866f27386123d8968366a8c13e13b95ee091",
+    "self_digest": "sha256:6cf76b60a763035d26d0d4e9e0e6aa0aa8877d99966367c778420e5f63a79595",
     "training_contract": {
       "components": {
         "action_policy_digest": "sha256:b33c824c7e31f721b89afd7d05db75c4b99abe2ade5d3a5c8d668f4223666ae4",
         "dependency_lock_digest": "sha256:ed827c3d5ea76e2f210b0238e522e4afd0bd4f8dac684e5f2ad3fc636b8269cb",
         "feature_contract_digest": "sha256:f4a198f367dca5948f7d4f64f41d606655f4433ccef29da93d72735ee19dfcb1",
         "label_contract_digest": "sha256:d57132b13d46481edb8eeac03450bfdd50a0d75c15c47b8c6f70852fc60567cc",
-        "learning_code_digest": "sha256:85ad979edfb8160b37173a7552129772fe468fe2915b6dbd5902849db541bd06",
+        "learning_code_digest": "sha256:88795f11af5c5a876cd3502dd965130ae789d05f2b67b88d8dd65bb5a9e5e38d",
         "migration_fingerprints": {
           "V151__alr_persistence_foundation.sql": "294d7ed007ad160958950d84f2de61a8d46b1c5fb488fefa5865190d490a653f",
           "V152__alr_operational_artifacts.sql": "05235f2baa8e53c9e789bf8f88a8cbed5b317c1e1ae8500e3c514fd5828bc849",
@@ -57,7 +57,7 @@
         },
         "runtime_config_digest": "sha256:e541dcfda24676edaccfa47929ca7dcc7ab71b2795567e04a1b905b786352954"
       },
-      "digest": "sha256:213cf5db2e246c1503dc2a1418f5dc8b3bbe7bdd2ccbff45a94fe90cefbe5222"
+      "digest": "sha256:d99484878264ec545577136fe49f02cf073df9ed86f7c56f7879b3b0be440d2d"
     }
   },
   "migration_fingerprints": {
@@ -72,10 +72,10 @@
     "V159__alr_durable_fit_attestation.sql": "2e11d0ae0cbc2c1161a47d04bed4054c31b728e8cf945f931197f9b3455b7d74",
     "V160__alr_atomic_fit_consumption.sql": "97024130f766443bd6396536ad135f33becb0b563c9e251c0b8c58799eb6e055"
   },
-  "repo_source_head": "34a5681396afb3bc4c4bbb0e1986fd0a8f67c125",
+  "repo_source_head": "1bfb7920ad0553c9cece9bc5cdd3e1c840689548",
   "schema_version": "source_compatibility_receipt_v1",
-  "self_digest": "sha256:3ee0d7b1dc159ba1eae166e660517855846ecc5c7c68b84220c17a855aebf24a",
+  "self_digest": "sha256:a8fba423ebbd697d6bf2119a04affb710920c3421e1f14dfee9e2d3d4df64376",
   "session_id": "S2.2A",
   "status": "SOURCE_READY",
-  "training_contract_digest": "sha256:213cf5db2e246c1503dc2a1418f5dc8b3bbe7bdd2ccbff45a94fe90cefbe5222"
+  "training_contract_digest": "sha256:d99484878264ec545577136fe49f02cf073df9ed86f7c56f7879b3b0be440d2d"
 }

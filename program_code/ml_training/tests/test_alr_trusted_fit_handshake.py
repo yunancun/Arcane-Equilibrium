@@ -273,6 +273,24 @@ def _request(
     return request, policy, copy.deepcopy(selected)
 
 
+def test_handshake_rejects_malformed_learning_runtime_digest() -> None:
+    # LR1(S2.2A):handshake 綁定。expected_training_inputs.learning_runtime_digest 不是
+    # sha256: 前綴 digest → learning_runtime_digest_invalid(在 admission parity 檢查之前觸發)。
+    from program_code.ml_training.alr_trusted_fit_handshake import (
+        AlrTrustedFitHandshakeError,
+        _validated_expected_inputs,
+    )
+
+    base_result, _ = _base_fit_fixture_copy()
+    expected = copy.deepcopy(base_result["expected_training_inputs"])
+    assert "learning_runtime_digest" in expected
+    expected["learning_runtime_digest"] = "not-a-sha256-digest"
+    with pytest.raises(
+        AlrTrustedFitHandshakeError, match="learning_runtime_digest_invalid"
+    ):
+        _validated_expected_inputs(expected, base_result["admission"])
+
+
 def _runner_identity(request: dict) -> dict:
     target = request["signed_payload"]["runner_target_policy"]
     raw_runner = _base_fit_fixture_copy()[1]["runner_identity"]

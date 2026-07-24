@@ -421,6 +421,29 @@ def test_every_actual_training_material_is_rehashed_and_bound(field: str) -> Non
         )
 
 
+def test_finalize_refuses_learning_runtime_digest_mismatch() -> None:
+    # LR1(S2.2A):finalize 綁定。runner 若 attest 一份 learning_runtime_digest 漂移的
+    # code_manifest_material(仍為合法 JSON)→ 專屬錯誤碼 actual_learning_runtime_digest_mismatch
+    # (在泛化的 code_manifest_material 逐位元比對之前觸發)。
+    result_contract, fit_capture = _fit_capture()
+    attested_code = json.loads(
+        bytes(fit_capture["actual_training_inputs"]["code_manifest_material"])
+    )
+    assert attested_code["learning_runtime_digest"] == "sha256:" + "6" * 64
+    attested_code["learning_runtime_digest"] = "sha256:" + "9" * 64
+    fit_capture["actual_training_inputs"]["code_manifest_material"] = _canonical_bytes(
+        attested_code
+    )
+    with pytest.raises(
+        AlrChallengerFitCaptureAttestationError,
+        match="actual_learning_runtime_digest_mismatch",
+    ):
+        build_alr_challenger_fit_capture_attestation_contract(
+            result_contract,
+            fit_capture=fit_capture,
+        )
+
+
 def test_hash_only_actual_input_and_boolean_row_count_fail_closed() -> None:
     result_contract, fit_capture = _fit_capture()
     fit_capture["actual_training_inputs"]["dataset_material"] = (

@@ -1886,33 +1886,50 @@ def validate_aiml_artifact(
     if schema_version == "program_adoption_receipt_v1":
         errors.extend(_program_adoption_receipt_errors(artifact))
     if schema_version == "source_compatibility_receipt_v1":
-        # S2.2A(LR1):receipt 完整性 + learning_runtime_digest 必等於內嵌不可變清單的
-        # self_digest,且 capture/training/migration 投影必與清單一致(識別身分綁定)。
-        manifest = artifact["learning_runtime_manifest"]
-        if artifact["self_digest"] != artifact_self_digest(artifact):
-            errors.append("source-compatibility receipt self_digest is invalid")
-        if manifest["self_digest"] != _learning_runtime_manifest_self_digest(manifest):
-            errors.append("learning_runtime_manifest self_digest is invalid")
-        if artifact["learning_runtime_digest"] != manifest["self_digest"]:
-            errors.append(
-                "learning_runtime_digest does not bind the manifest self_digest"
-            )
-        if artifact["capture_contract_digest"] != manifest["capture_contract"]["digest"]:
-            errors.append("capture_contract_digest does not bind the manifest")
-        if artifact["training_contract_digest"] != manifest["training_contract"]["digest"]:
-            errors.append("training_contract_digest does not bind the manifest")
-        if artifact["migration_fingerprints"] != (
-            manifest["training_contract"]["components"]["migration_fingerprints"]
-        ):
-            errors.append("migration_fingerprints do not bind the manifest components")
+        errors.extend(_source_compatibility_receipt_errors(artifact))
     return errors
 
 
-def _learning_runtime_manifest_self_digest(manifest: dict[str, Any]) -> str:
-    """LR1 清單身分:只綁 schema + 兩個元件 digest + boundary(排除時鐘/HEAD 遙測)。"""
-    return canonical_digest({
-        "schema_version": manifest["schema_version"],
-        "boundary": manifest["boundary"],
-        "capture_contract_digest": manifest["capture_contract"]["digest"],
-        "training_contract_digest": manifest["training_contract"]["digest"],
-    })
+def _source_compatibility_receipt_errors(artifact: dict[str, Any]) -> list[str]:
+    """S2.2A(LR1):receipt 完整性 + 內層 digest 反偽造重算 + 身分綁定交叉檢查。
+
+    內層 capture_contract.digest / training_contract.digest / 清單 self_digest 都必須由
+    各自的 inputs / components 「重算」得出——直接沿用 SSOT 模塊的構造 helper(而非在此
+    另寫一份),使 validator 與 module 不可能分歧;否則偽造內層 inputs/components 而只重封
+    外層 self_digest 的 receipt 會誤過。
+    """
+    from ml_training.learning_runtime_manifest import (  # noqa: E402 (lazy:避免循環 import)
+        capture_contract_digest as _lrm_capture_digest,
+        manifest_self_digest as _lrm_self_digest,
+        training_contract_digest as _lrm_training_digest,
+    )
+
+    errors: list[str] = []
+    manifest = artifact["learning_runtime_manifest"]
+    capture = manifest["capture_contract"]
+    training = manifest["training_contract"]
+    if artifact["self_digest"] != artifact_self_digest(artifact):
+        errors.append("source-compatibility receipt self_digest is invalid")
+    # 內層反偽造:capture/training digest 必須由自己的 inputs/components 重算得出。
+    if capture["digest"] != _lrm_capture_digest(
+        capture["inputs"], capture["snapshot_feature_schema_version"]
+    ):
+        errors.append("capture_contract.digest does not bind its inputs")
+    if training["digest"] != _lrm_training_digest(training["components"]):
+        errors.append("training_contract.digest does not bind its components")
+    if manifest["self_digest"] != _lrm_self_digest(
+        manifest["schema_version"],
+        manifest["boundary"],
+        capture["digest"],
+        training["digest"],
+    ):
+        errors.append("learning_runtime_manifest self_digest is invalid")
+    if artifact["learning_runtime_digest"] != manifest["self_digest"]:
+        errors.append("learning_runtime_digest does not bind the manifest self_digest")
+    if artifact["capture_contract_digest"] != capture["digest"]:
+        errors.append("capture_contract_digest does not bind the manifest")
+    if artifact["training_contract_digest"] != training["digest"]:
+        errors.append("training_contract_digest does not bind the manifest")
+    if artifact["migration_fingerprints"] != training["components"]["migration_fingerprints"]:
+        errors.append("migration_fingerprints do not bind the manifest components")
+    return errors

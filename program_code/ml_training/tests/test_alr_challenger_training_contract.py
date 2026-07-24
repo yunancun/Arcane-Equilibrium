@@ -188,6 +188,30 @@ def test_builds_deterministic_schema_required_contract_from_repository_receipt()
     assert set(first["authority_counters"].values()) == {0}
 
 
+def test_spawn_refuses_when_learning_runtime_digest_mismatches_expected_pin() -> None:
+    # LR1(S2.2A):spawn 綁定。code_manifest.learning_runtime_digest 與 reviewed pin 不符 →
+    # 拒絕 spawn(learning_runtime_digest_mismatch);這是 fit quarantine 的 spawn-side 執法。
+    with pytest.raises(
+        AlrChallengerTrainingContractError, match="learning_runtime_digest_mismatch"
+    ):
+        build_alr_challenger_training_contract(
+            _ready_receipt(),
+            code_manifest=_code_manifest(),  # learning_runtime_digest = sha256:6*64
+            training_config=_training_config(),
+            expected_learning_runtime_digest="sha256:" + "7" * 64,
+        )
+
+
+def test_spawn_accepts_matching_learning_runtime_digest_pin() -> None:
+    contract = build_alr_challenger_training_contract(
+        _ready_receipt(),
+        code_manifest=_code_manifest(),
+        training_config=_training_config(),
+        expected_learning_runtime_digest="sha256:" + "6" * 64,
+    )
+    assert contract["code_manifest"]["learning_runtime_digest"] == "sha256:" + "6" * 64
+
+
 def test_contract_declares_isolated_no_symlink_no_legacy_registry_execution() -> None:
     contract = build_alr_challenger_training_contract(
         _ready_receipt(),

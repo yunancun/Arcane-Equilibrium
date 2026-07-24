@@ -22,7 +22,7 @@ MODULE = ROOT / MODULE_REL
 # 凍結的 metadata-projection sha256(見下方 _projection());任何 allowlist 改動即需
 # 同步刷新此值並經 review。
 EXPECTED_PROJECTION_SHA256 = (
-    "c1489a8798244b57d67c3e4e5ba1bf4b5b6b88c09f66a6c9915d9911704462d6"
+    "975edf8900a429b8c3412e0cca93451cb7eaece62830647774381d422c8b8df9"
 )
 
 # NONE-effect 邊界:下單 / PG 寫入 / Bybit / fetch / git-mutation 一律禁。git rev-parse

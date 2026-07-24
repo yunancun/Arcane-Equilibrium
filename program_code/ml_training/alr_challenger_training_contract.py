@@ -316,9 +316,15 @@ def build_alr_challenger_training_contract(
     The result is schema-required by construction and is never training or
     registry authority.
 
-    LR1(S2.2A):spawn 綁定。當提供 ``expected_learning_runtime_digest``(reviewed 的
-    learning_runtime_manifest.self_digest)時,code_manifest 的 learning_runtime_digest
-    必須完全相符;不符即 fit 被 quarantine,拒絕 spawn。
+    LR1(S2.2A):spawn 綁定。``learning_runtime_digest`` 恆為 code_manifest 的必填欄位且
+    格式受驗(這一段本身即 fail-closed)。當提供 ``expected_learning_runtime_digest``
+    (reviewed 的 learning_runtime_manifest.self_digest)時,兩者必須完全相符;不符即
+    fit 被 quarantine,拒絕 spawn。
+
+    刻意的 opt-in polarity(``expected_learning_runtime_digest=None`` 時「不」拒絕):
+    S2.2A 是 source-only,production 不會呼叫本 builder;等值交叉檢查所需的 pin 由 S2.2B
+    的 call-site wiring 恆定供給(屆時每次 spawn 都帶 pin)。此處不預設從 checkout 反推
+    pin,是為了讓既有以 fake code_manifest 建約的測試/呼叫者不被強制做全倉建置。
     """
 
     receipt = _validate_repository_receipt(repository_receipt)
