@@ -27,6 +27,8 @@ effect 綁定(那要 S2.0 EFFECT session)。
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import hmac
 import json
@@ -228,7 +230,61 @@ def _result_secret_scan_view(result: dict[str, Any]) -> dict[str, Any]:
     # operator_signature_pem 是**公開的** SSHSIG(非機密):其 base64 body 理論上可能以 "auth=" padding
     # 收尾而誤觸 secret 正則。它是受控欄位(來自 operator 簽章 bytes),故 build 與 validate 一致地
     # 把它排除在 secret 掃描之外,避免對合法 receipt 造成 flaky false-positive 拒絕。
+    # FIX-7(E2 P3):result schema 對 operator_signature_pem 釘死完整 SSHSIG armor pattern
+    # (header+body+END footer);DSN 子形(含 ':'/'@' 等非 body-charset 字元)在 schema 階段即被 pattern 拒。
+    # FIX-10(E2 P2 更正):**僅** armor pattern 不足以令此排除安全——其 body charset [A-Za-z0-9+/=\n] 仍
+    # 允許可讀 plaintext(如 "password=hunter2"/"pgpassword=…"/"bearer …"),而這些正是 SECRET_LIKE_RE 認得、
+    # 卻因本排除而不被掃到的形。故 build 與 validate 皆額外要求 operator_signature_pem 的 armor body 必為
+    # 嚴格標準 base64(見 _operator_signature_pem_body_is_strict_base64);FIX-11(E2 P2 根因)更把 validate
+    # 側此檢查移出 APPLIED 分支、對任何非 None 字串**無條件**生效(不再僅限 APPLIED;build 兩條路徑本就以
+    # _guard_operator_signature_pem_body 對稱把關)。嚴格 base64 一旦成立,所有可讀 plaintext 機密形
+    # (credential_assignment / auth_scheme_token / DSN)在結構上皆不可能搭載
+    # ——唯一能搭載的是 base64-**編碼**後的 bytes(非可讀 plaintext,落在既有離線捏造邊界內,非 plaintext
+    # 序列化通道),故此 secret-scan 排除**可證安全**,絕非放行機密的破口。
     return {k: v for k, v in result.items() if k != "operator_signature_pem"}
+
+
+# operator_signature_pem 的 SSHSIG armor 標記列(去 armor 時據此剝除,取得純 body)。
+_SSH_SIGNATURE_ARMOR_MARKERS = (
+    "-----BEGIN SSH SIGNATURE-----",
+    "-----END SSH SIGNATURE-----",
+)
+
+
+def _operator_signature_pem_body_is_strict_base64(value: str) -> bool:
+    """去 armor(剝除 BEGIN/END 標記列 + 所有換行、串接)後,判斷 body 是否為嚴格標準 base64。
+
+    真正的 ``ssh-keygen -Y sign`` armor body 去 armor 後是合法標準 base64,
+    ``base64.b64decode(body, validate=True)`` 成功;plaintext 憑證形一律 decode 失敗:
+    ``password=hunter2`` / ``pgpassword=…`` 的 ``=`` 落在字串中段=非法 padding(Non-base64 digit),
+    ``bearer\\nAAAA…`` 去 armor 後長度不可解(Incorrect padding),armor-wrapped DSN 亦含非 base64 字元。
+    FIX-10(E2 P2):body 一旦被證明是嚴格 base64,就不可能夾帶可讀的 plaintext ``password=`` /
+    ``pgpassword=`` / ``bearer …`` / DSN 機密,故 ``_result_secret_scan_view`` 排除此欄位可證安全。
+    非字串 / 空 body / 不可 decode 一律回 False(fail-closed)。
+    """
+
+    if not isinstance(value, str):
+        return False
+    body = "".join(
+        line for line in value.split("\n") if line not in _SSH_SIGNATURE_ARMOR_MARKERS
+    )
+    if not body:
+        return False
+    try:
+        base64.b64decode(body, validate=True)
+    except (binascii.Error, ValueError):
+        return False
+    return True
+
+
+def _guard_operator_signature_pem_body(value: Any) -> None:
+    # FIX-10(E2 P2)build 期護欄:APPLIED result 的 operator_signature_pem 若為非 None 字串,其 armor body
+    # 必為嚴格 base64,否則絕不 emit(fail-closed)。與 validate 期同一判準對稱,確保 build 永遠不會產出
+    # 「armor 外殼合法但 body 夾帶可讀 plaintext」的簽章欄位。
+    if value is not None and not _operator_signature_pem_body_is_strict_base64(value):
+        raise SecretLeakageError(
+            "operator_signature_pem body is not strict base64 (possible non-signature payload)"
+        )
 
 
 def _names_privileged_identity(label: Any) -> bool:
@@ -360,13 +416,17 @@ def observer_bootstrap_apply(
             on_step(f"grant_select:{index}")
 
 
+def observer_role_present(cursor: Any, *, role: str) -> bool:
+    """Real catalog read: does the observer role already exist in ``pg_roles``?"""
+
+    cursor.execute("SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = %s", (role,))
+    return cursor.fetchone() is not None
+
+
 def observer_bootstrap_rollback(cursor: Any, *, grant_set: dict[str, Any]) -> None:
     """Real REVOKE ALL + DROP ROLE rollback; partial-failure safe (role-existence guarded)."""
 
-    cursor.execute(
-        "SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = %s", (grant_set["role"],)
-    )
-    if cursor.fetchone() is None:
+    if not observer_role_present(cursor, role=grant_set["role"]):
         return  # CREATE ROLE never committed; nothing to roll back
     for statement in grant_set["revoke"]:
         cursor.execute(statement)
@@ -592,6 +652,44 @@ def _operator_authorization_is_valid(
     if errors:
         return False, "operator SSHSIG invalid: " + "; ".join(errors[:2])
     return True, ""
+
+
+def operator_authorization_binding_errors(
+    authorization: Any, *, intent_id: Any, intent_digest: Any, source_head: Any
+) -> list[str]:
+    """STRUCTURAL-only operator_authorization binding for an emitted APPLIED receipt.
+
+    誠實界線(**只證完整性,不證真偽**):此處只驗「精確欄位契約 + domain-separation 常量 +
+    authorization_digest 完整性 + 三個 intent 綁定(intent_id/intent_digest/source_head 等於 receipt)」。
+    它**刻意不**做 SSHSIG 密碼學再驗(``_verify_ssh_signature``)也不做 trust-root 指紋/平台背書——
+    真正對 operator 公鑰的 SSHSIG 再驗 + platform attestation 屬 S2.0 EFFECT session。可拋棄 APPLIED
+    receipt 由**每測試臨時**金鑰簽章(非固定信任根),離線密碼學再驗在設計上不可行,故此結構綁定
+    只把 ``{"totally":"bogus"}`` 及任何 intent 不符的授權擋掉,絕不宣稱已認證是誰簽的。
+    """
+
+    if not isinstance(authorization, dict):
+        return ["operator authorization must be a well-formed object"]
+    if set(authorization) != AUTHORIZATION_FIELDS:
+        return ["operator authorization fields do not match the exact contract"]
+    errors: list[str] = []
+    for field, expected in (
+        ("schema_version", OPERATOR_AUTHORIZATION_SCHEMA_VERSION),
+        ("signer_identity", OPERATOR_IDENTITY),
+        ("algorithm", OPERATOR_ALGORITHM),
+        ("signature_namespace", OPERATOR_SIGNATURE_NAMESPACE),
+    ):
+        if authorization.get(field) != expected:
+            errors.append(f"operator authorization {field} is invalid")
+    if authorization.get("authorization_digest") != authorization_digest(authorization):
+        errors.append("operator authorization digest mismatch")
+    for auth_field, expected in (
+        ("intent_id", intent_id),
+        ("intent_digest", intent_digest),
+        ("source_head", source_head),
+    ):
+        if authorization.get(auth_field) != expected:
+            errors.append(f"operator authorization {auth_field} is not bound to the result")
+    return errors
 
 
 # --------------------------------------------------------------------------- #
@@ -1043,6 +1141,9 @@ def build_pg_observer_bootstrap_result(
         ),
     })
     # SSHSIG bytes 為公開簽章(非機密);掃描整份 result(排除公開簽章欄位)確保沒有 DSN/密碼被夾帶。
+    # FIX-10(E2 P2):公開簽章欄位另以 strict-base64 body 護欄把關,確保 build 不會 emit 一份 armor 外殼
+    # 合法但 body 夾帶可讀 plaintext 的簽章;其餘欄位再走(排除該欄的)secret 掃描,確保無 DSN/密碼夾帶。
+    _guard_operator_signature_pem_body(result.get("operator_signature_pem"))
     _guard_no_secret(_result_secret_scan_view(result))
     result["self_digest"] = artifact_self_digest(result)
     return result
@@ -1085,6 +1186,15 @@ def validate_pg_observer_bootstrap_result(result: Any, *, now: str | None = None
         postcheck = result.get("independent_postcheck") or {}
         if postcheck.get("reobserved_post_rollback_digest") != result.get("pre_state_digest"):
             errors.append("postcheck reobserved digest must equal the restored (pre == post) baseline")
+        # FIX-5(E2 P2):APPLIED receipt 的 operator_authorization 必須是「結構良好 + 精確 intent 綁定」
+        # 的物件(重用 AUTHORIZATION_FIELDS 契約),把 {"totally":"bogus"} 及任何 intent 不符的授權擋掉。
+        # 這是**結構完整性**綁定,不是密碼學認證——真 SSHSIG 再驗留給 S2.0 EFFECT session(見 helper 註)。
+        errors.extend(operator_authorization_binding_errors(
+            result.get("operator_authorization"),
+            intent_id=result.get("intent_id"),
+            intent_digest=result.get("intent_digest"),
+            source_head=result.get("source_head"),
+        ))
     # grant_set_digest 必可由 intent 的結構化 allowlist 獨立重算。
     intent_shape = {
         "grant_set_selector": result.get("grant_set_selector"),
@@ -1099,6 +1209,19 @@ def validate_pg_observer_bootstrap_result(result: Any, *, now: str | None = None
             errors.append("observer bootstrap result grant_set_digest does not bind the structured allowlist")
     except PgObserverBootstrapError:
         errors.append("observer bootstrap result grant set is inadmissible")
+    # FIX-11(E2 P2 根因收口):operator_signature_pem 的 strict-base64 body 護欄必須**無條件**對任何
+    # 非 None 字串生效,不限 APPLIED status。FIX-10 誤把它置於 APPLIED_ROLLED_BACK_EXACT elif 內,
+    # 使其餘 status(EXTERNAL_VERIFICATION_PENDING / FAILED / ROLLED_BACK_INTERRUPTED / NOT_RESTORED_FAILED)
+    # 的偽造 receipt 能於此欄搭載可讀 plaintext 機密(如 "password=hunter2" / "pgpassword=…"):該欄被
+    # _result_secret_scan_view 排除於下方 secret 掃描之外,central validator 又純委派(無獨立掃描)→ 機密
+    # 會被序列化過中央閘。此處把檢查移出所有 status 分支,與 build 兩條路徑的 _guard_operator_signature_pem_body
+    # (build 期 1144/1382)對稱,令任何 status/path 皆不可能於此欄搭載可讀 plaintext。None → isinstance False
+    # → 跳過(PENDING 的 None 路徑不受影響)。此無條件檢查正是令下方 secret-scan 排除該欄位得以**可證安全**者。
+    signature_pem = result.get("operator_signature_pem")
+    if isinstance(signature_pem, str) and not _operator_signature_pem_body_is_strict_base64(signature_pem):
+        errors.append(
+            "operator_signature_pem body is not strict base64 (possible non-signature payload)"
+        )
     if _contains_secret_like(_result_secret_scan_view(result)):
         errors.append("observer bootstrap result carries secret-like content")
     if result.get("self_digest") != artifact_self_digest(result):
@@ -1144,14 +1267,35 @@ def apply_observer_bootstrap(
     hook to inject a mid-apply failure (partial-failure rollback proof).
     """
 
-    intent_errors = validate_pg_observer_bootstrap_intent(intent, now=now)
-    if intent_errors:
-        raise PgObserverBootstrapError("observer bootstrap intent is inadmissible: " + "; ".join(intent_errors[:3]))
+    # FIX-6(E2 P3):先只驗「結構/整合/allowlist/TTL 上限」(now=None,**不含**當前有效窗)——
+    # genuine malformed / invalid-structure intent 一律 raise(硬契約錯誤)。
+    structural_errors = validate_pg_observer_bootstrap_intent(intent)
+    if structural_errors:
+        raise PgObserverBootstrapError("observer bootstrap intent is inadmissible: " + "; ".join(structural_errors[:3]))
     if not HEAD_RE.fullmatch(str(source_head)) or intent.get("source_head") != source_head:
         raise PgObserverBootstrapError("source_head must be a 40-hex id equal to the intent source head")
     apply_actor_node = intent["applier_node_id"]
     started_at = started_at or now
     completed_at = completed_at or now
+    # FIX-6(E2 P3):結構有效但落在「當前有效窗」之外(例如 expired TTL / not-yet-valid)→ 依 PENDING
+    # 合約 fail-closed(typed EXTERNAL_VERIFICATION_PENDING,非 raise)。此處刻意與上方 malformed-raise
+    # 分離:now=None 只擋結構,now=now 只多擋有效窗,故不會把 malformed 與 stale-window 混為一談。
+    # FIX-9(E2 #3):governance 供給的 now 若本身 malformed(無法 parse),window validator 會把它歸為
+    # 非空錯誤而落入 build_pending_result,其內 _parse_time(now) 會逸出**裸 ValueError**。此處把該路徑
+    # 唯一的 ValueError 來源(malformed now)比照 malformed-intent 硬合約轉為 typed PgObserverBootstrapError
+    # (fail-closed);不讓未分類例外逸出,也不冒充「outside validity window」的 stale-window pending。
+    # 註:此點之後才可能被走到的其他 build_pending_result 呼叫,皆以「now 已可 parse」為前提(malformed
+    # now 必先在此被攔),故不需重複包裹。
+    try:
+        if validate_pg_observer_bootstrap_intent(intent, now=now):
+            return build_pending_result(
+                intent,
+                reason="observer bootstrap intent is outside its current validity window (expired or not-yet-valid)",
+                now=now,
+                apply_actor_node=apply_actor_node,
+            )
+    except ValueError as exc:
+        raise PgObserverBootstrapError(f"observer bootstrap now is malformed: {now!r}") from exc
 
     valid, reason = _operator_authorization_is_valid(
         operator_authorization, signature, intent=intent, source_head=source_head, now=now
@@ -1175,6 +1319,19 @@ def apply_observer_bootstrap(
     role, schema, relations = intent["observer_role"], intent["observed_schema"], intent["observed_relations"]
     cursor = disposable.cursor()
     pre = observer_role_acl_state_digest(cursor, role=role, schema=schema, relations=relations)
+    # FIX-1(OPS F1):角色若「本來就存在」→ 在任何 DDL 之前 fail-closed。existence-guarded rollback
+    # 無法分辨「本次 CREATE 的角色」與「原本就有的角色」;若貿然 apply→42710(duplicate_object)→
+    # rollback,會把這個既存(非本次建立)的角色連同其權限一併 DROP。故此處在 apply 前就拒絕,
+    # 絕不進入 apply/rollback,回傳 typed fail-closed pending(既存角色必存活)。
+    if observer_role_present(cursor, role=role):
+        return build_pending_result(
+            intent,
+            reason=(
+                "observer role already exists; refusing to create or drop a pre-existing role"
+            ),
+            now=now,
+            apply_actor_node=apply_actor_node,
+        )
     apply_ok = True
     applied: str | None = None
     interruption: str | None = None
@@ -1225,6 +1382,9 @@ def apply_observer_bootstrap(
         "ttl_seconds": EVIDENCE_TTL_SECONDS,
         "failure_reason": interruption or "observer apply did not complete an exact rollback",
     })
+    # FIX-10(E2 P2):非精確路徑同樣先過 strict-base64 body 護欄再走 secret 掃描(build 永不 emit 一份
+    # body 非 base64 的簽章欄位)。
+    _guard_operator_signature_pem_body(result.get("operator_signature_pem"))
     _guard_no_secret(_result_secret_scan_view(result))
     result["self_digest"] = artifact_self_digest(result)
     return result
@@ -1267,6 +1427,15 @@ def validate_pg_observer_bootstrap_binding(
         errors.append("observer bootstrap effect receipt is not routed to the exact adapter node")
     if receipt.get("status") != "APPLIED_ROLLED_BACK_EXACT":
         errors.append("observer bootstrap closure PASS requires an APPLIED_ROLLED_BACK_EXACT receipt")
+    else:
+        # FIX-5(E2 P2):APPLIED closure receipt 的 operator_authorization 必須結構良好且精確綁定其 intent
+        # (結構完整性,不是密碼學認證——真 SSHSIG 再驗留給 S2.0 EFFECT session,見 helper 誠實界線註)。
+        errors.extend(operator_authorization_binding_errors(
+            receipt.get("operator_authorization"),
+            intent_id=receipt.get("intent_id"),
+            intent_digest=receipt.get("intent_digest"),
+            source_head=receipt.get("source_head"),
+        ))
 
     # 精確 intent 授權(claim_evidence,digest 綁定)。
     intent_source = f"{INTENT_SCHEMA_VERSION}:{receipt.get('intent_id')}"

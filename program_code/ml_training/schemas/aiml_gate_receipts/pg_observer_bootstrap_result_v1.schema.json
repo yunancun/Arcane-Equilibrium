@@ -68,7 +68,7 @@
     "independent_postcheck": {"anyOf": [{"type": "object"}, {"type": "null"}]},
     "rollback_record": {"anyOf": [{"type": "object"}, {"type": "null"}]},
     "operator_authorization": {"anyOf": [{"type": "object"}, {"type": "null"}]},
-    "operator_signature_pem": {"anyOf": [{"type": "string", "minLength": 1}, {"type": "null"}]},
+    "operator_signature_pem": {"anyOf": [{"type": "string", "pattern": "^-----BEGIN SSH SIGNATURE-----\\n[A-Za-z0-9+/=\\n]+-----END SSH SIGNATURE-----\\n?$"}, {"type": "null"}]},
     "apply_actor_node": {"type": "string", "minLength": 1},
     "independent_verifier_node": {"type": "string", "minLength": 1},
     "source_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
@@ -108,7 +108,7 @@
           "independent_postcheck": {"type": "object"},
           "rollback_record": {"type": "object"},
           "operator_authorization": {"type": "object"},
-          "operator_signature_pem": {"type": "string", "minLength": 1},
+          "operator_signature_pem": {"type": "string", "pattern": "^-----BEGIN SSH SIGNATURE-----\\n[A-Za-z0-9+/=\\n]+-----END SSH SIGNATURE-----\\n?$"},
           "failure_reason": {"type": "null"}
         }
       }
@@ -119,7 +119,8 @@
         "properties": {
           "failure_reason": {"type": "string", "minLength": 1},
           "independent_postcheck": {"type": "null"},
-          "rollback_record": {"type": "null"}
+          "rollback_record": {"type": "null"},
+          "operator_signature_pem": {"type": "null"}
         }
       }
     }

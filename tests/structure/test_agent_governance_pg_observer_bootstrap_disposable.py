@@ -302,6 +302,17 @@ def test_partial_failure_rollback(cluster, tmp_path, monkeypatch):
     assert result["pre_state_digest"] == result["rollback_record"]["post_state_digest"]
     assert not _observer_exists(sock)  # the partially-created observer is gone
     assert obs.validate_pg_observer_bootstrap_result(result, now=LATER) == []
+    # 這份 receipt 帶一份**真** armored 簽章(非 APPLIED status)→ 仍 validate [](反過度拒絕)。
+    assert result["operator_signature_pem"].startswith("-----BEGIN SSH SIGNATURE-----")
+    # FIX-11(E2 P2 根因,真 build path 佐證):把這份**真** ROLLED_BACK_INTERRUPTED receipt 的
+    # operator_signature_pem 竄改為 armor 外殼合法但 body 夾帶可讀 plaintext 機密 → 無條件 strict-base64
+    # 護欄(已移出 APPLIED elif)於此非 APPLIED status 亦擋下,central validator 同拒。
+    forged = copy.deepcopy(result)
+    forged["operator_signature_pem"] = "-----BEGIN SSH SIGNATURE-----\npassword=hunter2\n-----END SSH SIGNATURE-----\n"
+    forged["self_digest"] = obs.artifact_self_digest(forged)
+    assert any("operator_signature_pem body is not strict base64" in e
+               for e in obs.validate_pg_observer_bootstrap_result(forged, now=LATER))
+    assert validator.validate_aiml_artifact(forged, now=LATER)
 
 
 # --------------------------------------------------------------------------- #
@@ -331,10 +342,47 @@ def test_replay_stale_now_fails_closed(cluster, tmp_path, monkeypatch):
     assert obs.validate_operator_authorization(authorization, signature, intent=intent, source_head=HEAD, now=STALE)
     admin = _admin(sock)
     try:
-        with pytest.raises(obs.PgObserverBootstrapError):
-            obs.apply_observer_bootstrap(intent, authorization, signature, now=STALE, source_head=HEAD, disposable=admin)
+        # FIX-6:intent 結構有效但當前有效窗已過 → typed EXTERNAL_VERIFICATION_PENDING(fail-closed,
+        # 非 raise);真 apply 不發生,無 side effect。genuine malformed intent 仍在別處 raise。
+        result = obs.apply_observer_bootstrap(
+            intent, authorization, signature, now=STALE, source_head=HEAD, disposable=admin
+        )
     finally:
         admin.close()
+    assert result["status"] == "EXTERNAL_VERIFICATION_PENDING"
+    assert "validity window" in result["failure_reason"]
+    assert not _observer_exists(sock)
+
+
+# --------------------------------------------------------------------------- #
+# (6) FIX-1 (OPS F1) — a PRE-EXISTING observer role is refused BEFORE any DDL and SURVIVES
+# --------------------------------------------------------------------------- #
+def test_pre_existing_observer_role_refused_before_ddl_and_survives(cluster, tmp_path, monkeypatch):
+    sock = cluster["socket_dir"]
+    private_key = _install_operator_profile(tmp_path, monkeypatch)
+    intent = _intent(sock=sock)
+    authorization, signature = _sign(private_key, intent, HEAD)
+    admin = _admin(sock)
+    try:
+        cur = admin.cursor()
+        # 模擬「本來就有」的同名 observer 角色(非本次 adapter 建立)。
+        cur.execute(f'CREATE ROLE "{OBSERVER}" NOLOGIN')
+        assert _observer_exists(sock)
+        # 即使帶一張 VALID SSHSIG + 注入的丟棄式連線,角色既存 → 在任何 DDL 之前 fail-closed。
+        result = obs.apply_observer_bootstrap(
+            intent, authorization, signature, now=NOW, source_head=HEAD, disposable=admin,
+        )
+        assert result["status"] == "EXTERNAL_VERIFICATION_PENDING"
+        assert "already exists" in result["failure_reason"]
+        assert result["boundary"]["production_apply_performed"] is False
+        # 關鍵:既存(非本次建立)的角色**必須存活**,絕不被 existence-guarded rollback 誤刪。
+        assert _observer_exists(sock)
+        assert obs.validate_pg_observer_bootstrap_result(result, now=LATER) == []
+    finally:
+        try:
+            admin.cursor().execute(f'DROP ROLE IF EXISTS "{OBSERVER}"')
+        finally:
+            admin.close()
     assert not _observer_exists(sock)
 
 
@@ -387,6 +435,42 @@ def test_applied_exact_receipt_round_trip_and_forgery(cluster, tmp_path, monkeyp
     forged_c["independent_postcheck"]["read_only_proof"]["write_denied"]["observed_sqlstate"] = "00000"
     forged_c["self_digest"] = obs.artifact_self_digest(forged_c)
     assert validator.validate_aiml_artifact(forged_c, now=LATER)
+    # forgery D(E2 P2 精確重現):把 operator_authorization 換成 {"totally":"bogus"} + 重簽外層 →
+    # validate_pg_observer_bootstrap_result / validate_aiml_artifact 皆拒(結構契約 + intent 綁定)。
+    forged_d = copy.deepcopy(result)
+    forged_d["operator_authorization"] = {"totally": "bogus"}
+    forged_d["self_digest"] = obs.artifact_self_digest(forged_d)
+    assert obs.validate_pg_observer_bootstrap_result(forged_d, now=LATER)
+    assert validator.validate_aiml_artifact(forged_d, now=LATER)
+    # forgery E:結構良好但綁到「別的 intent / source_head」的授權 → intent 綁定不符被拒。
+    other = obs.build_pg_observer_bootstrap_intent(
+        target_class="disposable_local", target_host="trade-core", database=DB,
+        observer_role=OBSERVER, observed_schema=SCHEMA, observed_relations=[TABLE],
+        socket_dir=sock, auth_mapping="pg_hba_ident_local",
+        applier_node_id="observer_apply_actor", postcheck_node_id="observer_ops_postcheck",
+        created_at=CREATED, ttl_seconds=900,
+        source_head="fedcba9876543210fedcba9876543210fedcba98",
+    )
+    forged_e = copy.deepcopy(result)
+    forged_e["operator_authorization"] = obs.build_operator_authorization(
+        intent=other, source_head="fedcba9876543210fedcba9876543210fedcba98"
+    )
+    forged_e["self_digest"] = obs.artifact_self_digest(forged_e)
+    assert any("is not bound to the result" in e for e in obs.validate_pg_observer_bootstrap_result(forged_e, now=LATER))
+    # forgery F(E2 P3 精確重現):把一條 DSN 藏進 operator_signature_pem → schema armor pattern 拒。
+    forged_f = copy.deepcopy(result)
+    forged_f["operator_signature_pem"] = "postgres://trade-core:5432/openclaw"
+    forged_f["self_digest"] = obs.artifact_self_digest(forged_f)
+    assert validator.validate_aiml_artifact(forged_f, now=LATER)
+    # forgery G(E2 P2 精確重現 / FIX-10):armor 外殼合法但 body 夾帶可讀 plaintext 機密("password=hunter2")
+    # → 被 strict-base64 body 檢查擋下(secret 掃描排除此欄位,故此為唯一守門者);naked DSN 走 schema armor
+    # pattern、armor-plaintext 走 strict-base64,兩條 plaintext 通道皆封。
+    forged_g = copy.deepcopy(result)
+    forged_g["operator_signature_pem"] = "-----BEGIN SSH SIGNATURE-----\npassword=hunter2\n-----END SSH SIGNATURE-----\n"
+    forged_g["self_digest"] = obs.artifact_self_digest(forged_g)
+    assert any("operator_signature_pem body is not strict base64" in e
+               for e in obs.validate_pg_observer_bootstrap_result(forged_g, now=LATER))
+    assert validator.validate_aiml_artifact(forged_g, now=LATER)
 
     # 三方 closure binding:effect receipt + verifier command_capture_v2(digest==record_digest==bound)。
     capture = {"schema_version": "command_capture_v2", "node_id": "observer_ops_postcheck", "record_digest": capture_digest}
@@ -405,6 +489,12 @@ def test_applied_exact_receipt_round_trip_and_forgery(cluster, tmp_path, monkeyp
     assert obs.validate_pg_observer_bootstrap_binding(
         packet, route, fragments, evidence_by_id, {"ev-receipt": result}
     ) == []
+    # closure 反例(E2 P2):bogus operator_authorization 於 closure binding 亦被結構契約擋掉。
+    bogus_auth_receipt = copy.deepcopy(result)
+    bogus_auth_receipt["operator_authorization"] = {"totally": "bogus"}
+    assert any("operator authorization fields do not match the exact contract" in e
+               for e in obs.validate_pg_observer_bootstrap_binding(
+                   packet, route, fragments, evidence_by_id, {"ev-receipt": bogus_auth_receipt}))
     # closure 反例:三方 digest 不一致(capture digest 改動)→ 被拒。
     evidence_by_id["ev-cap"]["digest"] = "sha256:" + "1" * 64
     assert obs.validate_pg_observer_bootstrap_binding(
