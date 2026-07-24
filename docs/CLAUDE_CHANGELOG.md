@@ -1,9 +1,24 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-07-24（AI/ML S1 已完成 authenticated closure、exact-head merge 與 `S1_CLOSED` ledger 投影）
+> 最後更新：2026-07-24（v852：TODO 自檢行同步 `S1_CLOSED` 終態）
 
 ---
+
+## TODO 自檢行同步 S1_CLOSED — v852（2026-07-24）
+
+v851 已把 header／看板／當前起點／`P0-AIML-LONG-LIVED-RUNTIME-REPAIR` row 全部
+投影到 `S1_CLOSED`，但 §4 末的自檢行仍殘留 v84x 時代文字（S1.1–S1.6 在
+review branch `agent/aiml-s1-landing`、`DONE_WITH_EXTERNAL_EVIDENCE_PENDING`、
+PENDING exact-head merge 與 Linux CI attestation），與同檔其餘節自相矛盾——
+即 2026-07-24 全審 run0 claim-0015（TODO 落後已 merge 的 PR）的最後尾巴。
+v852 為單行手術式修正：自檢行改寫為 `S1_CLOSED` 終態（PR #115 reviewed head
+`da8e54148` → merge `22876b16d`；PR #117 ledger 投影 `2a471f374`；四 receipt
+sha 與 SSHSIG／signed-time replay PASS），補記 run0 claim-0002/0005 的 S1
+效果縫 P1 修復已包含在被簽署並合併的 PR #115 exact head 內，並以 S2 READY
+pool 與 S8.4 terminal sync 語句收尾。無其他節變動；
+`## AI/ML 一分鐘派發看板` heading 原樣保留（`.codex/agent_registry_v1.json`
+`active_state` pack selector 仍可解析）。
 
 ## AI/ML S1 Closed — v851（2026-07-24）
 
