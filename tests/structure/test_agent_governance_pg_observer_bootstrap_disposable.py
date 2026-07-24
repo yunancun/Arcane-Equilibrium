@@ -277,6 +277,33 @@ def test_idempotent_apply_rollback_cycle(cluster):
 
 
 # --------------------------------------------------------------------------- #
+# (1b) FIX-C3 (Codex P2) — the created observer role ACTUALLY carries the connection
+# restrictions (default_transaction_read_only=on + search_path=pg_catalog), proven by
+# querying pg_roles.rolconfig — not merely described in CONNECTION_OPTIONS.
+# --------------------------------------------------------------------------- #
+def test_observer_role_has_connection_restrictions_applied(cluster):
+    sock = cluster["socket_dir"]
+    intent = _intent(sock=sock)
+    grant_set = obs.generate_observer_grant_sql(intent)
+    admin = _admin(sock)
+    try:
+        cur = admin.cursor()
+        obs.observer_bootstrap_apply(cur, grant_set=grant_set)
+        # 直接查 pg_roles.rolconfig(角色級設定的真實存放處),證明兩項唯讀約束確實被施加到角色。
+        cur.execute("SELECT rolconfig FROM pg_catalog.pg_roles WHERE rolname = %s", (OBSERVER,))
+        rolconfig = cur.fetchone()[0]
+        assert rolconfig is not None, "observer role carries no role-level settings"
+        settings = dict(item.split("=", 1) for item in rolconfig)
+        assert settings.get("default_transaction_read_only") == "on", rolconfig
+        assert settings.get("search_path") == "pg_catalog", rolconfig
+        obs.observer_bootstrap_rollback(cur, grant_set=grant_set)
+    finally:
+        admin.close()
+    # rollback DROP ROLE → 這些 SET 設定隨角色一併消滅(無需額外 rollback 步驟)。
+    assert not _observer_exists(sock)
+
+
+# --------------------------------------------------------------------------- #
 # (2) partial-failure rollback — mid-apply fault still restores pre == post
 # --------------------------------------------------------------------------- #
 def test_partial_failure_rollback(cluster, tmp_path, monkeypatch):

@@ -104,6 +104,11 @@ def test_grant_set_is_exact_minimal_read_only_observer():
         'CREATE ROLE "aiml_observer_ro" NOLOGIN NOSUPERUSER NOCREATEROLE '
         'NOCREATEDB NOREPLICATION NOBYPASSRLS'
     )
+    # FIX-C3:role-level 唯讀約束為結構化(非呼叫端 SQL)、角色以引號化 ident 建構的 exact 兩敘述。
+    assert grant_set["alter_role_settings"] == [
+        'ALTER ROLE "aiml_observer_ro" SET default_transaction_read_only = on',
+        'ALTER ROLE "aiml_observer_ro" SET search_path = pg_catalog',
+    ]
     assert grant_set["grant_usage"] == 'GRANT USAGE ON SCHEMA "trading" TO "aiml_observer_ro"'
     assert grant_set["grant_select"] == [
         'GRANT SELECT ON "trading"."fills" TO "aiml_observer_ro"',
@@ -393,6 +398,11 @@ def _synthetic_binding_case():
         "status": "APPLIED_ROLLED_BACK_EXACT",
         "intent_id": intent["intent_id"],
         "intent_digest": intent["self_digest"],
+        # FIX-C1:合成 receipt 需攜帶 _base_result 的完整身分欄位(target_host/database/observer_role),
+        # 因 postcheck validator 現以完整身分綁定(不只 intent_id),否則此 baseline 會被誤判不符。
+        "target_host": intent["target_host"],
+        "database": intent["database"],
+        "observer_role": intent["observer_role"],
         "source_head": HEAD,
         "apply_actor_node": intent["applier_node_id"],
         "independent_verifier_node": intent["postcheck_node_id"],
@@ -469,6 +479,65 @@ def test_binding_rejects_intent_mismatched_operator_authorization():
     other = _intent(source_head=OTHER_HEAD)
     case["receipt"]["operator_authorization"] = obs.build_operator_authorization(intent=other, source_head=OTHER_HEAD)
     assert any("is not bound to the result" in e for e in _run_binding(case))
+
+
+# --------------------------------------------------------------------------- #
+# FIX-C1 (Codex P2) — postcheck full-identity binding: a forged postcheck for a
+# DIFFERENT target that reuses the SAME intent_id must be rejected by BOTH the
+# postcheck validator and the closure binding (intent_id alone is caller-supplied).
+# --------------------------------------------------------------------------- #
+def test_postcheck_forged_intent_digest_same_intent_id_rejected_by_validator_and_binding():
+    intent = _intent()
+    result = obs._base_result(
+        intent, obs.generate_observer_grant_sql(intent), apply_actor_node=intent["applier_node_id"]
+    )
+    baseline = "sha256:" + "b" * 64
+    postcheck = _postcheck(intent, baseline)
+    # baseline:完整身分綁定通過(intent_id/intent_digest/source_head/observer_role/database/host 皆相符)。
+    assert obs.validate_pg_observer_bootstrap_postcheck(postcheck, result=result, now=LATER) == []
+    # 偽造:intent_id **不變**(舊綁定僅比 intent_id/applier/verifier → 會放行),只把 intent_digest 換成
+    # 別的 digest 並重簽 self_digest(self_digest 檢查因此通過,唯一失敗者是新的 intent_digest 綁定)。
+    forged = copy.deepcopy(postcheck)
+    forged["intent_digest"] = "sha256:" + "f" * 64
+    forged["self_digest"] = obs.artifact_self_digest(forged)
+    assert forged["intent_id"] == result["intent_id"]  # intent_id 仍相符,只有 intent_digest 不符
+    validator_errors = obs.validate_pg_observer_bootstrap_postcheck(forged, result=result, now=LATER)
+    assert any("intent_digest is not bound to the result" in e for e in validator_errors)
+    # closure binding:把同一偽造嵌入 receipt(receipt 攜帶真 intent_digest,內嵌 postcheck 被換成別的)→ 亦拒。
+    case = _synthetic_binding_case()
+    embedded = case["receipt"]["independent_postcheck"]
+    embedded["intent_digest"] = "sha256:" + "f" * 64
+    embedded["self_digest"] = obs.artifact_self_digest(embedded)
+    assert any("intent_digest is not bound to the result" in e for e in _run_binding(case))
+
+
+def test_postcheck_forged_target_host_same_intent_id_rejected():
+    # FIX-C1(target 欄位面):host(=result.target_host)被換成別的 target 但 intent_id 不變 → 被拒。
+    intent = _intent()
+    result = obs._base_result(
+        intent, obs.generate_observer_grant_sql(intent), apply_actor_node=intent["applier_node_id"]
+    )
+    forged = copy.deepcopy(_postcheck(intent, "sha256:" + "b" * 64))
+    forged["host"] = "other_host"
+    forged["self_digest"] = obs.artifact_self_digest(forged)
+    errors = obs.validate_pg_observer_bootstrap_postcheck(forged, result=result, now=LATER)
+    assert any("host is not bound to the result" in e for e in errors)
+
+
+# --------------------------------------------------------------------------- #
+# FIX-C2 (Codex P2) — a non-dict verifier capture artifact (artifact: null / a bare
+# digest string) is REJECTED, not silently skipped past the record checks while still
+# counting toward acceptance.
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("bad_artifact", [None, "sha256:" + "e" * 64, ["not", "a", "dict"]])
+def test_binding_rejects_non_dict_verifier_capture_artifact(bad_artifact):
+    case = _synthetic_binding_case()
+    # outer digest 仍相符,但 artifact 非 dict(null / 裸 digest 字串)→ 舊 isinstance guard 會靜默跳過
+    # record 驗證卻仍計入 acceptance;修後直接 fail-closed,且不計入 acceptance。
+    case["evidence_by_id"]["ev-cap"]["artifact"] = bad_artifact
+    errors = _run_binding(case)
+    assert any("artifact must be a well-formed record" in e for e in errors)
+    assert any("must bind the effect receipt + verifier command capture" in e for e in errors)
 
 
 def test_result_validator_rejects_bogus_operator_authorization_on_pending_shell():

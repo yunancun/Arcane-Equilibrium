@@ -362,6 +362,13 @@ def generate_observer_grant_sql(intent: Any) -> dict[str, Any]:
         "relations": list(relations),
         "auth_mapping": intent.get("auth_mapping"),
         "create_role": f"CREATE ROLE {role_q} {_ROLE_ATTRIBUTE_CLAUSE}",
+        # FIX-C3(Codex P2):CONNECTION_OPTIONS 原本只是描述性資料,從未施加到角色,故 observer 角色實際
+        # 沒有唯讀/pg_catalog 約束。此處把該策略釘成 **role-level** 設定:ALTER ROLE SET(值為固定常量,
+        # 非呼叫端 SQL;角色以 _safe_ident 引號化),令廣告的 least-privilege 連線策略成為角色持久設定。
+        "alter_role_settings": [
+            f"ALTER ROLE {role_q} SET default_transaction_read_only = on",
+            f"ALTER ROLE {role_q} SET search_path = pg_catalog",
+        ],
         "grant_usage": f"GRANT USAGE ON SCHEMA {schema_q} TO {role_q}",
         "grant_select": grant_select,
         "revoke": revoke,
@@ -407,6 +414,14 @@ def observer_bootstrap_apply(
     cursor.execute(grant_set["create_role"])
     if on_step is not None:
         on_step("create_role")
+    # FIX-C3(Codex P2):create_role 後真的施加連線層唯讀約束(role-level ALTER ROLE SET),令
+    # default_transaction_read_only=on / search_path=pg_catalog 成為角色持久設定(存於 pg_db_role_setting)。
+    # rollback 無需額外步驟:角色恆為本次新建(FIX-1 在 apply 前拒絕既存角色),rollback DROP ROLE 時這些 SET
+    # 隨角色一併消滅(設定綁在角色上,角色不存在即設定不存在),故不會殘留孤兒設定。
+    for statement in grant_set["alter_role_settings"]:
+        cursor.execute(statement)
+    if on_step is not None:
+        on_step("alter_role_settings")
     cursor.execute(grant_set["grant_usage"])
     if on_step is not None:
         on_step("grant_usage")
@@ -1000,8 +1015,21 @@ def validate_pg_observer_bootstrap_postcheck(
     if postcheck.get("self_digest") != artifact_self_digest(postcheck):
         errors.append("observer bootstrap postcheck self_digest is invalid")
     if isinstance(result, dict):
-        if postcheck.get("intent_id") != result.get("intent_id"):
-            errors.append("observer bootstrap postcheck intent_id is not bound to the result")
+        # FIX-C1(Codex P2):把 postcheck 的**完整身分**綁死到 result,而非只綁 intent_id/applier/verifier。
+        # intent_id 由呼叫端供給,單綁 intent_id 會讓「針對另一個 target、卻重用同一 intent_id」的偽造
+        # postcheck 被接受。故額外要求 intent_digest / source_head 與三個 target 欄位(observer_role/database/
+        # host)皆等於 result 攜帶者。註:postcheck 的 host 對應 result 的 target_host(欄位名不同、語意相同);
+        # 其餘欄位 postcheck 與 result 同名。postcheck 這些欄位皆為 new-this-PR schema 既有欄位(無需新增)。
+        for postcheck_field, result_field in (
+            ("intent_id", "intent_id"),
+            ("intent_digest", "intent_digest"),
+            ("source_head", "source_head"),
+            ("observer_role", "observer_role"),
+            ("database", "database"),
+            ("host", "target_host"),
+        ):
+            if postcheck.get(postcheck_field) != result.get(result_field):
+                errors.append(f"observer bootstrap postcheck {postcheck_field} is not bound to the result")
         if postcheck.get("applier_node") != result.get("apply_actor_node"):
             errors.append("observer bootstrap postcheck applier_node is not the result apply actor")
         if postcheck.get("verifier_node") != result.get("independent_verifier_node"):
@@ -1474,24 +1502,39 @@ def validate_pg_observer_bootstrap_binding(
         and evidence_by_id[ref].get("source") == "ops_postcheck"
         and evidence_by_id[ref].get("kind") == "command_capture_v2"
     ]
+    verifier_capture_record_ok = False
     if len(cap_refs) != 1:
         errors.append("observer bootstrap closure requires exactly one verifier command_capture_v2 in ops_postcheck")
     elif DIGEST_RE.fullmatch(str(receipt_verifier_digest or "")):
         verifier_capture_ev = cap_refs[0]
-        if verifier_capture_ev.get("digest") != receipt_verifier_digest:
+        outer_digest_ok = verifier_capture_ev.get("digest") == receipt_verifier_digest
+        if not outer_digest_ok:
             errors.append("observer bootstrap verifier capture digest is not the three-way-bound digest")
         capture = verifier_capture_ev.get("artifact")
-        if isinstance(capture, dict) and str(capture.get("record_digest")) != str(receipt_verifier_digest):
-            errors.append("observer bootstrap verifier command_capture_v2 record_digest is not the bound digest")
-        if isinstance(capture, dict) and capture.get("node_id") == applier_node:
-            errors.append("observer bootstrap verifier capture node must differ from the applier node")
+        # FIX-C2(Codex P2):artifact 必須是 dict 型的 governed command_capture_v2 record。舊碼把 record_digest
+        # 與 node_id 兩檢查都包在 isinstance(capture, dict) guard 內,故 artifact 為 null / 裸 digest 字串等
+        # 非 dict 時**靜默跳過**驗證,evidence 卻仍計入 acceptance(等於接受一個未經 record 驗證的 bare digest
+        # 冒充 command_capture_v2)。此處對非 dict artifact 直接 fail-closed,且只有 record 完整通過
+        # (record_digest 綁定 + node_id != applier + outer digest 相符)才承認此 verifier capture。
+        if not isinstance(capture, dict):
+            errors.append("observer bootstrap verifier command_capture_v2 artifact must be a well-formed record")
+        else:
+            record_digest_ok = str(capture.get("record_digest")) == str(receipt_verifier_digest)
+            node_distinct = capture.get("node_id") != applier_node
+            if not record_digest_ok:
+                errors.append("observer bootstrap verifier command_capture_v2 record_digest is not the bound digest")
+            if not node_distinct:
+                errors.append("observer bootstrap verifier capture node must differ from the applier node")
+            verifier_capture_record_ok = outer_digest_ok and record_digest_ok and node_distinct
 
     # acceptance PASS 必同時綁 effect receipt + verifier capture 兩份 evidence id。
+    # FIX-C2:verifier capture 只有在其 record 完整通過驗證(verifier_capture_record_ok)時才計入 acceptance;
+    # 非 dict / 未綁定 record 的 bare digest 不足以構成一份 governed command_capture_v2。
     required_ids = {receipt_id}
     if verifier_capture_ev is not None:
         required_ids.add(verifier_capture_ev.get("id"))
     accepted = (
-        postcheck is not None and verifier_capture_ev is not None
+        postcheck is not None and verifier_capture_record_ok
         and any(
             item.get("status") == "PASS" and required_ids.issubset(set(item.get("evidence_refs", [])))
             for item in packet.get("acceptance", [])
