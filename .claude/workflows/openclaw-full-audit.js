@@ -775,7 +775,7 @@ if ([auditCallTokens, verificationCallTokens, seamCallTokens, fixCallTokens, rev
 const stopWhen = config.stop_when || 'mandatory coverage closed and next expected novelty or verdict-reversal value is below marginal token/time/opportunity cost'
 const maxFixes = positiveInt(config.max_fixes, 5, 'max_fixes')
 const doFix = config.fix === true
-// 分層資源:機械/收斂節點(verify 票、seam critic、E2 review、E4 regression)往下釘到中階模型 + 中 effort;
+// 分層資源:機械/收斂節點(verify 票、seam critic、E2 review)往下釘到中階模型 + 中 effort;
 // 判斷核心(discovery 軸、third 裁決、E1 fix)省略 model 以繼承 session 強模型。config.cheap_model=null 可還原繼承。
 const cheapTier = () => ({
   ...(config.cheap_model === null ? {} : { model: config.cheap_model || 'claude-sonnet-5' }),
@@ -1050,9 +1050,10 @@ if (doFix && distinctClaims.length) {
 }
 // C-1(claim-0010):第三票不再是全局唯一 reserve(舊制每輪至多 1 條 high-risk claim
 // 拿得到第三裁決)。admission 依 severity 序先為每條 high-risk claim 條件化預留專屬
-// 第三票(容量不足時該 claim 仍以兩票入場,verify 段記 debt);claim 全數入場後把
-// 剩餘容量轉為浮動第三票池,供 verify 段兩票分歧的 claim 動態取用。分配器為同步
-// check-and-decrement,單執行緒 JS 於 await 間無競態;invoke() 的 runtime caps 仍是最終防線。
+// 第三票(容量不足時該 claim 仍以兩票入場,verify 段記 debt);claim 全數入場後,
+// 剩餘容量按同一 severity 序確定性預派為浮動第三票,供 verify 段兩票分歧時使用。
+// 全部配額於 admission 期決定(E2 複審:FCFS 池取決於 agent 完成順序,resume 重放
+// 時第三票會落到不同 claim → record 集合分歧);invoke() 的 runtime caps 仍是最終防線。
 const admittedClaims = []
 const deferredClaims = []
 const reservedThirdVoteClaimIds = new Set()
@@ -1085,14 +1086,15 @@ for (const claim of distinctClaims) {
     reservedThirdVoteClaimIds.add(claim.claim_id)
   }
 }
-let floatingThirdVoteSlots = 0
-const maxFloatingThirdVotes = admittedClaims.filter(claim => !reservedThirdVoteClaimIds.has(claim.claim_id)).length
-while (floatingThirdVoteSlots < maxFloatingThirdVotes && reserveVerificationSlots(1)) floatingThirdVoteSlots += 1
-const claimThirdVote = claim => {
-  if (reservedThirdVoteClaimIds.has(claim.claim_id)) return true
-  if (floatingThirdVoteSlots > 0) { floatingThirdVoteSlots -= 1; return true }
-  return false
+const floatingThirdVoteClaimIds = new Set()
+for (const claim of admittedClaims) {
+  if (reservedThirdVoteClaimIds.has(claim.claim_id)) continue
+  if (!reserveVerificationSlots(1)) break // 單調耗盡:一次預留失敗後續必失敗
+  floatingThirdVoteClaimIds.add(claim.claim_id)
 }
+// 未用的浮動票保持 planning reserve,不回收再分配——換取重放確定性。
+const claimThirdVote = claim =>
+  reservedThirdVoteClaimIds.has(claim.claim_id) || floatingThirdVoteClaimIds.has(claim.claim_id)
 log(`findings=${allFindings.length}; decision_claims=${distinctClaims.length}; admitted=${admittedClaims.length}; deferred=${deferredClaims.length}; assumptions=${assumptions.length}`)
 
 phase('Verify')
