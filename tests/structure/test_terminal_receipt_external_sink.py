@@ -19,7 +19,7 @@ import hashlib
 import io
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -448,6 +448,112 @@ def test_readback_against_expired_retention_fails_closed_non_destructively() -> 
     assert ext.validate_external_worm_readback_ack(
         ack, result=result, now="2026-07-22T10:00:06Z"
     ) == []
+
+
+# --------------------------------------------------------------------------- #
+# P2(Codex): readback must verify observed retain_until >= approved retain_until
+# --------------------------------------------------------------------------- #
+def _readback(client, result, intent):
+    return ext.independent_readback_ack(
+        result, intent, s3_client=client, verifier_actor_id=VERIFIER,
+        observed_at="2026-07-22T10:00:05Z",
+    )
+
+
+def test_readback_longer_observed_retention_still_acks() -> None:
+    # observed retain_until 比核准更長(更不可變)⇒ retention_match=True ⇒ ack=True(>= 允許等值與更長)。
+    client = FakeObjectLockS3()
+    intent = _intent()
+    result = _apply(intent, client)
+    client.objects[(BUCKET, result["record_locator"])]["RetainUntilDate"] = datetime(
+        2028, 7, 22, 9, 0, 0, tzinfo=timezone.utc  # 比核准的 2027-07-22 更晚
+    )
+    ack = _readback(client, result, intent)
+    assert ack["retention_match"] is True
+    assert ack["ack"] is True
+
+
+def test_readback_shorter_observed_retention_fails_closed() -> None:
+    # store 接受寫入卻套用「較短的未來保留」⇒ observed < approved ⇒ retention_match=False ⇒ ack=False。
+    # 這正是 Codex P2 指出的漏洞:舊實作只比 mode + 未來性,故較短保留仍能騙過不可變 ACK。
+    client = FakeObjectLockS3()
+    intent = _intent()
+    result = _apply(intent, client)
+    # 核准的 retain_until=2027-07-22;改為 2026-08(仍在未來,但比核准短)。
+    client.objects[(BUCKET, result["record_locator"])]["RetainUntilDate"] = datetime(
+        2026, 8, 22, 9, 0, 0, tzinfo=timezone.utc
+    )
+    ack = _readback(client, result, intent)
+    assert ack["retention_match"] is False
+    assert ack["immutability_proven"] is False
+    assert ack["ack"] is False
+    assert client.delete_calls == 0 and client.retention_write_calls == 0  # 非破壞式
+
+
+def test_readback_tz_normalized_equal_retention_acks() -> None:
+    # 同一瞬時、不同時區表述(核准 2027-07-22T09:00Z == observed 2027-07-22T17:00+08:00)⇒ 視為相等 ⇒ ack。
+    client = FakeObjectLockS3()
+    intent = _intent()
+    result = _apply(intent, client)
+    client.objects[(BUCKET, result["record_locator"])]["RetainUntilDate"] = datetime(
+        2027, 7, 22, 17, 0, 0, tzinfo=timezone(timedelta(hours=8))
+    )
+    ack = _readback(client, result, intent)
+    assert ack["retention_match"] is True
+    assert ack["ack"] is True
+
+
+def test_readback_malformed_observed_retention_fails_closed() -> None:
+    # get_object_retention 回傳無法解析的 retain_until ⇒ retention_match=False ⇒ ack=False(fail-closed)。
+    client = FakeObjectLockS3()
+    intent = _intent()
+    result = _apply(intent, client)
+    client.objects[(BUCKET, result["record_locator"])]["RetainUntilDate"] = "not-a-timestamp"
+    ack = _readback(client, result, intent)
+    assert ack["retention_match"] is False
+    assert ack["ack"] is False
+
+
+def test_idempotent_dedup_rejects_shorter_existing_retention() -> None:
+    # dedup 既有物件亦須驗證 retention 不少於核准期限:既有物件被套較短保留 ⇒ 冪等重試 FAILED,絕不佯稱去重。
+    client = FakeObjectLockS3()
+    intent = _intent()
+    first = _apply(intent, client)
+    assert first["append_status"] == "APPENDED"
+    # 把既有物件改成較短保留(仍在未來),再冪等重試。
+    client.objects[(BUCKET, first["record_locator"])]["RetainUntilDate"] = datetime(
+        2026, 8, 22, 9, 0, 0, tzinfo=timezone.utc
+    )
+    second = _apply(intent, client)
+    assert second["append_status"] == "FAILED"
+    assert "shorter than or different" in (second.get("failure_reason") or "")
+    assert client.put_calls == 1  # 未重 put
+
+
+def test_idempotent_dedup_accepts_equal_existing_retention() -> None:
+    # 既有物件保留 == 核准 ⇒ 冪等去重仍成立(等值通過 >= 檢查)。
+    client = FakeObjectLockS3()
+    intent = _intent()
+    first = _apply(intent, client)
+    second = _apply(intent, client)
+    assert second["append_status"] == "IDEMPOTENT_DEDUP"
+    assert client.put_calls == 1
+
+
+def test_idempotent_dedup_fails_closed_on_retention_read_error() -> None:
+    # dedup 讀既有物件 retention 時拋錯 ⇒ fail-closed(FAILED),絕不佯稱去重(E4 gap)。
+    class RaisingRetentionS3(FakeObjectLockS3):
+        def get_object_retention(self, *, Bucket, Key, VersionId=None):
+            raise FakeS3ClientError("AccessDenied")
+
+    client = RaisingRetentionS3()
+    intent = _intent()
+    first = _apply(intent, client)
+    assert first["append_status"] == "APPENDED"
+    second = _apply(intent, client)
+    assert second["append_status"] == "FAILED"
+    assert "retention read failed" in (second.get("failure_reason") or "")
+    assert client.put_calls == 1
 
 
 def test_forged_same_actor_positive_ack_is_rejected_by_validator() -> None:

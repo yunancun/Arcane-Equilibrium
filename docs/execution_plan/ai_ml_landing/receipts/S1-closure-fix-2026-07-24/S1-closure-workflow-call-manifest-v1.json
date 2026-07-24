@@ -1,0 +1,247 @@
+{
+  "manifest_digest": "sha256:1e8b4fca1abef4d77456e1c51056507f68303218c2e4c9d022dee8de25f1d1ee",
+  "records": [
+    {
+      "admitted_input_tokens_lower_bound": 0,
+      "attempt": 1,
+      "compiler_input_tokens_lower_bound": 0,
+      "context_artifact_digest": "sha256:a77df5b80a27ec2d607a5991645c3d6a1482ddcec321c0ff3b70577bf0725daf",
+      "dag_digest": "sha256:402288f0e54ded307bf8f98e0caf632a89502a38239a69421e79646640821152",
+      "dirty_scope_digest": "sha256:4ab4de4bfa177f7f42ce0f181b8fe0eea0eb6eda7901f70937ca05cd5eb1fd2c",
+      "ended_at": "2026-07-23T18:00:00.952000Z",
+      "focus_digest": "sha256:12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+      "label": "pa_design",
+      "logical_call_id": "s1-finalization:pa_design:attempt:1",
+      "node_id": "pa_design",
+      "parsed_result_digest": "sha256:418005778a1379948c5c94516dccd795bd8a12935179d8930009bbab7fa6df6d",
+      "payload_kind": "design_fragment_v1",
+      "phase": "S1-finalization",
+      "producer_generation": {},
+      "prompt_digest": "sha256:c12f84449f6b1d1a8fff7509cf36ad218a062b1a4d409a1fe29ede2c2744a068",
+      "record_digest": "sha256:e03cd1ed996f97745fa2aabf04a2d6d348b26ac39247badef1e17be8b6a91a18",
+      "requested": {
+        "effort": null,
+        "isolation": null,
+        "logical_role": "PA",
+        "model": null,
+        "native_binding": {
+          "logical_role": "PA",
+          "native_agent": "PA-investigator",
+          "node_class": "verification",
+          "permission": "read_only"
+        },
+        "node_class": "verification",
+        "permission": "read_only",
+        "platform": "claude_saved_workflow",
+        "platform_requested_agent": "PA-investigator"
+      },
+      "requires": [],
+      "response_schema_digest": "sha256:49b140cba50043868d33424e2a740fd0594a8e6ceb700c2fc055c580f06bbb64",
+      "retry_parent_call_id": null,
+      "returned_null": false,
+      "schema_version": "workflow_call_record_v1",
+      "started_at": "2026-07-23T17:50:40.583000Z",
+      "task_contract_digest": "sha256:dfacf5311edc52b18b4e696847702a6ef794271e8036a6f1de820f830827e4e7",
+      "topological_wave": 0,
+      "workflow_contract_digest": "sha256:6e1d96d92cccf4f1a676eba080f82c71aab5a0497d9cba7ba763058a4b9a7e22"
+    },
+    {
+      "admitted_input_tokens_lower_bound": 0,
+      "attempt": 1,
+      "compiler_input_tokens_lower_bound": 0,
+      "context_artifact_digest": "sha256:a77df5b80a27ec2d607a5991645c3d6a1482ddcec321c0ff3b70577bf0725daf",
+      "dag_digest": "sha256:402288f0e54ded307bf8f98e0caf632a89502a38239a69421e79646640821152",
+      "dirty_scope_digest": "sha256:4ab4de4bfa177f7f42ce0f181b8fe0eea0eb6eda7901f70937ca05cd5eb1fd2c",
+      "ended_at": "2026-07-23T21:58:13.989000Z",
+      "focus_digest": "sha256:12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+      "label": "constitutional_gate",
+      "logical_call_id": "s1-finalization:constitutional_gate:attempt:1",
+      "node_id": "constitutional_gate",
+      "parsed_result_digest": "sha256:5061c9e660b70c48a0dfc4cc59af0d5f3d5a6ba777634ab151772cf8441210ba",
+      "payload_kind": "gate_fragment_v1",
+      "phase": "S1-finalization",
+      "producer_generation": {
+        "pa_design": "sha256:e03cd1ed996f97745fa2aabf04a2d6d348b26ac39247badef1e17be8b6a91a18"
+      },
+      "prompt_digest": "sha256:f6616139ba2f265f6e6ab12dfbf41a334e89dbb8db7d7ba6a0f99e80368462d0",
+      "record_digest": "sha256:c1741eecaf64d7f6544d1ae494b416768cb1088967e1988bda4f9af726872df7",
+      "requested": {
+        "effort": null,
+        "isolation": null,
+        "logical_role": "CC",
+        "model": null,
+        "native_binding": {
+          "logical_role": "CC",
+          "native_agent": "CC",
+          "node_class": "verification",
+          "permission": "read_only"
+        },
+        "node_class": "verification",
+        "permission": "read_only",
+        "platform": "claude_saved_workflow",
+        "platform_requested_agent": "CC"
+      },
+      "requires": [
+        "pa_design"
+      ],
+      "response_schema_digest": "sha256:8654e1ad7082b717d4195347f06ae4e6816e1058554fcc89f99f291b9747a1ba",
+      "retry_parent_call_id": null,
+      "returned_null": false,
+      "schema_version": "workflow_call_record_v1",
+      "started_at": "2026-07-23T21:55:13.351000Z",
+      "task_contract_digest": "sha256:dfacf5311edc52b18b4e696847702a6ef794271e8036a6f1de820f830827e4e7",
+      "topological_wave": 1,
+      "workflow_contract_digest": "sha256:6e1d96d92cccf4f1a676eba080f82c71aab5a0497d9cba7ba763058a4b9a7e22"
+    },
+    {
+      "admitted_input_tokens_lower_bound": 0,
+      "attempt": 1,
+      "compiler_input_tokens_lower_bound": 0,
+      "context_artifact_digest": "sha256:a77df5b80a27ec2d607a5991645c3d6a1482ddcec321c0ff3b70577bf0725daf",
+      "dag_digest": "sha256:402288f0e54ded307bf8f98e0caf632a89502a38239a69421e79646640821152",
+      "dirty_scope_digest": "sha256:4ab4de4bfa177f7f42ce0f181b8fe0eea0eb6eda7901f70937ca05cd5eb1fd2c",
+      "ended_at": "2026-07-23T22:02:02.954000Z",
+      "focus_digest": "sha256:12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+      "label": "security_gate",
+      "logical_call_id": "s1-finalization:security_gate:attempt:1",
+      "node_id": "security_gate",
+      "parsed_result_digest": "sha256:45b079647b05ed50c5bfa959992c252bae8eacb5c68d86492f4807ce994e8d80",
+      "payload_kind": "gate_fragment_v1",
+      "phase": "S1-finalization",
+      "producer_generation": {
+        "pa_design": "sha256:e03cd1ed996f97745fa2aabf04a2d6d348b26ac39247badef1e17be8b6a91a18"
+      },
+      "prompt_digest": "sha256:4229c68487d55b1425078a422d82558bc49dde43687d3e05964170d077fef254",
+      "record_digest": "sha256:d0ce01dd74dfd52cf2e035deb112e42f6b9a1ff125e6b014faa18bf3e1fd9657",
+      "requested": {
+        "effort": null,
+        "isolation": null,
+        "logical_role": "E3",
+        "model": null,
+        "native_binding": {
+          "logical_role": "E3",
+          "native_agent": "E3",
+          "node_class": "verification",
+          "permission": "read_only"
+        },
+        "node_class": "verification",
+        "permission": "read_only",
+        "platform": "claude_saved_workflow",
+        "platform_requested_agent": "E3"
+      },
+      "requires": [
+        "pa_design"
+      ],
+      "response_schema_digest": "sha256:8654e1ad7082b717d4195347f06ae4e6816e1058554fcc89f99f291b9747a1ba",
+      "retry_parent_call_id": null,
+      "returned_null": false,
+      "schema_version": "workflow_call_record_v1",
+      "started_at": "2026-07-23T21:54:37.514000Z",
+      "task_contract_digest": "sha256:dfacf5311edc52b18b4e696847702a6ef794271e8036a6f1de820f830827e4e7",
+      "topological_wave": 1,
+      "workflow_contract_digest": "sha256:6e1d96d92cccf4f1a676eba080f82c71aab5a0497d9cba7ba763058a4b9a7e22"
+    },
+    {
+      "admitted_input_tokens_lower_bound": 0,
+      "attempt": 1,
+      "compiler_input_tokens_lower_bound": 0,
+      "context_artifact_digest": "sha256:a77df5b80a27ec2d607a5991645c3d6a1482ddcec321c0ff3b70577bf0725daf",
+      "dag_digest": "sha256:402288f0e54ded307bf8f98e0caf632a89502a38239a69421e79646640821152",
+      "dirty_scope_digest": "sha256:4ab4de4bfa177f7f42ce0f181b8fe0eea0eb6eda7901f70937ca05cd5eb1fd2c",
+      "ended_at": "2026-07-24T02:45:17.407841Z",
+      "focus_digest": "sha256:12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+      "label": "ops_preflight",
+      "logical_call_id": "s1-finalization:ops_preflight:attempt:1",
+      "node_id": "ops_preflight",
+      "parsed_result_digest": "sha256:85870c91d745c713e8b05ede7733fe3dddb16a0b0847a7c252717bb72cede40c",
+      "payload_kind": "operation_review_fragment_v1",
+      "phase": "S1-finalization",
+      "producer_generation": {
+        "constitutional_gate": "sha256:c1741eecaf64d7f6544d1ae494b416768cb1088967e1988bda4f9af726872df7",
+        "pa_design": "sha256:e03cd1ed996f97745fa2aabf04a2d6d348b26ac39247badef1e17be8b6a91a18",
+        "security_gate": "sha256:d0ce01dd74dfd52cf2e035deb112e42f6b9a1ff125e6b014faa18bf3e1fd9657"
+      },
+      "prompt_digest": "sha256:1450220eb563eba73996b8786b1c7e55ff1c8f5f7032f18d8a6d0fb822caf435",
+      "record_digest": "sha256:eae8bc58805011e8ea10a7f19a53cba077dee10f8b4e5f2db355a6bd8a3b1c7d",
+      "requested": {
+        "effort": null,
+        "isolation": null,
+        "logical_role": "OPS",
+        "model": null,
+        "native_binding": {
+          "logical_role": "OPS",
+          "native_agent": "OPS",
+          "node_class": "verification",
+          "permission": "read_only"
+        },
+        "node_class": "verification",
+        "permission": "read_only",
+        "platform": "claude_saved_workflow",
+        "platform_requested_agent": "OPS"
+      },
+      "requires": [
+        "constitutional_gate",
+        "pa_design",
+        "security_gate"
+      ],
+      "response_schema_digest": "sha256:bdcf62ed231f3043b22c022c6780fb744abbbd4e5670e767de18f118d0d50add",
+      "retry_parent_call_id": null,
+      "returned_null": false,
+      "schema_version": "workflow_call_record_v1",
+      "started_at": "2026-07-24T02:45:17.293794Z",
+      "task_contract_digest": "sha256:dfacf5311edc52b18b4e696847702a6ef794271e8036a6f1de820f830827e4e7",
+      "topological_wave": 2,
+      "workflow_contract_digest": "sha256:6e1d96d92cccf4f1a676eba080f82c71aab5a0497d9cba7ba763058a4b9a7e22"
+    },
+    {
+      "admitted_input_tokens_lower_bound": 0,
+      "attempt": 1,
+      "compiler_input_tokens_lower_bound": 0,
+      "context_artifact_digest": "sha256:a77df5b80a27ec2d607a5991645c3d6a1482ddcec321c0ff3b70577bf0725daf",
+      "dag_digest": "sha256:402288f0e54ded307bf8f98e0caf632a89502a38239a69421e79646640821152",
+      "dirty_scope_digest": "sha256:4ab4de4bfa177f7f42ce0f181b8fe0eea0eb6eda7901f70937ca05cd5eb1fd2c",
+      "ended_at": "2026-07-24T02:45:22.904465Z",
+      "focus_digest": "sha256:12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+      "label": "ops_postcheck",
+      "logical_call_id": "s1-finalization:ops_postcheck:attempt:1",
+      "node_id": "ops_postcheck",
+      "parsed_result_digest": "sha256:6f8e1681da81b90b25f1f281e36dfc45183f1676ef5a43b4c9e37a2a13101f5c",
+      "payload_kind": "operation_review_fragment_v1",
+      "phase": "S1-finalization",
+      "producer_generation": {
+        "ops_preflight": "sha256:eae8bc58805011e8ea10a7f19a53cba077dee10f8b4e5f2db355a6bd8a3b1c7d"
+      },
+      "prompt_digest": "sha256:7c8421bbc3ab673f037edc04fbbe1e7ab4d0c7648a3297fb24bcf2bdba0ac60f",
+      "record_digest": "sha256:1929e977c81486ab49a4051df7d283615effbddcbfdd5149f3b9a034e7cfd48b",
+      "requested": {
+        "effort": null,
+        "isolation": null,
+        "logical_role": "OPS",
+        "model": null,
+        "native_binding": {
+          "logical_role": "OPS",
+          "native_agent": "OPS",
+          "node_class": "verification",
+          "permission": "read_only"
+        },
+        "node_class": "verification",
+        "permission": "read_only",
+        "platform": "claude_saved_workflow",
+        "platform_requested_agent": "OPS"
+      },
+      "requires": [
+        "ops_preflight"
+      ],
+      "response_schema_digest": "sha256:bdcf62ed231f3043b22c022c6780fb744abbbd4e5670e767de18f118d0d50add",
+      "retry_parent_call_id": null,
+      "returned_null": false,
+      "schema_version": "workflow_call_record_v1",
+      "started_at": "2026-07-24T02:45:22.790745Z",
+      "task_contract_digest": "sha256:dfacf5311edc52b18b4e696847702a6ef794271e8036a6f1de820f830827e4e7",
+      "topological_wave": 3,
+      "workflow_contract_digest": "sha256:6e1d96d92cccf4f1a676eba080f82c71aab5a0497d9cba7ba763058a4b9a7e22"
+    }
+  ],
+  "schema_version": "workflow_call_manifest_v1",
+  "workflow_contract_digest": "sha256:6e1d96d92cccf4f1a676eba080f82c71aab5a0497d9cba7ba763058a4b9a7e22"
+}

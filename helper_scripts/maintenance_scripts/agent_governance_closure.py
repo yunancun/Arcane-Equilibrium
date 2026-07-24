@@ -27,6 +27,9 @@ from agent_governance_effects import (
     validate_deploy_effect_binding,
     validate_effect_evidence,
 )
+from agent_governance_target_host_effects import (
+    TARGET_HOST_CLOSURE_EVIDENCE_KINDS,
+)
 from agent_governance_execution_attestation import (
     ExecutionAttestationVerifier,
     validate_execution_attestations,
@@ -247,6 +250,7 @@ def validate_closure(
             evidence.get("artifact") is not None
             and evidence.get("kind") not in CAPTURE_KINDS
             and evidence.get("kind") != PROGRAM_ADOPTION_EVIDENCE_KIND
+            and evidence.get("kind") not in TARGET_HOST_CLOSURE_EVIDENCE_KINDS
         ):
             admitted_baseline = (dispatch.get("task_facts") or {}).get("baseline")
             if isinstance(admitted_baseline, dict) and set(admitted_baseline) == {
@@ -774,6 +778,7 @@ def validate_closure(
                 context_plan=context_plan,
                 task_contract_digest=task_contract_digest,
                 expected_route=expected_route, fragments_by_node=fragments_by_node,
+                valid_effect_receipt_ids=set(valid_effect_receipts),
             )
         )
     errors.extend(

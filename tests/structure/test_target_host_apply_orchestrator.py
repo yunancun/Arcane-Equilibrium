@@ -23,6 +23,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -40,10 +41,20 @@ import agent_governance_target_host_probe as th  # noqa: E402
 import agent_governance_target_host_choice as thc  # noqa: E402
 import agent_governance_target_host_effects as tfx  # noqa: E402
 import agent_governance_target_host_apply as apply  # noqa: E402
+import agent_governance_target_host_child_apply as thchild  # noqa: E402
 import aiml_gate_receipt_validator as validator  # noqa: E402
+from target_host_capture_support import (  # noqa: E402
+    install_test_operator_profile,
+    signed_observation_capture,
+    typed_intent,
+)
 
 
-HEAD = "0" * 40
+HEAD = subprocess.check_output(
+    ["git", "rev-parse", "HEAD"],
+    cwd=ROOT,
+    text=True,
+).strip()
 OBS = "2026-07-23T12:00:00+00:00"
 NOW = "2026-07-23T12:05:00+00:00"
 LATER = "2026-07-23T12:06:00+00:00"
@@ -53,8 +64,9 @@ APPLIER = "s16b_apply_actor"
 VERIFIER = "s16b_independent_verifier"
 CLEAN = {"units_gone": True, "cgroup_gone": True, "netns_gone": True, "temp_gone": True}
 
-CAP = thc._structural_capture_artifact()
-CAP_DIGEST = CAP["record_digest"]
+CAP: dict = {}
+TEST_INTENT: dict = {}
+CAP_DIGEST = ""
 VERIFIER_CAP = "sha256:" + "9" * 64
 
 DEP = {
@@ -66,29 +78,28 @@ DEP = {
 }
 
 
+@pytest.fixture(autouse=True)
+def _signed_target_host_capture(tmp_path, monkeypatch):
+    global CAP, CAP_DIGEST, TEST_INTENT
+    private_key = install_test_operator_profile(tmp_path, monkeypatch)
+    TEST_INTENT = typed_intent(
+        applier_node=APPLIER,
+        postcheck_node=VERIFIER,
+        now=__import__("datetime").datetime.fromisoformat(OBS),
+    )
+    CAP = signed_observation_capture(
+        ROOT,
+        private_key=private_key,
+        intent=TEST_INTENT,
+        source_head=HEAD,
+        mode="preflight",
+        node_id="ops_preflight",
+    )
+    CAP_DIGEST = CAP["record_digest"]
+
+
 def _intent(**overrides) -> dict:
-    intent = {
-        "schema_version": "target_host_disposable_runtime_probe_intent_v1",
-        "intent_id": "sha256:" + "a" * 64,
-        "expected_host": "trade-core",
-        "non_root_uid": True,
-        "user_scope_only": True,
-        "candidate_ids": ["content_addressed_fixed_path"],
-        "per_seam_argv": {"start_stop": ["systemd-run", "--user", "--scope"]},
-        "throwaway_root": "/run/user/1000/aiml-probe-xyz",
-        "ttl_seconds": 900,
-        "risk": "high",
-        "rollback": {
-            "atomic_pointer_swap": "swap current->new",
-            "teardown_reset_failed": "systemctl --user reset-failed",
-            "rmtree": "rm -rf throwaway_root",
-        },
-        "applier_node_id": APPLIER,
-        "postcheck_node_id": VERIFIER,
-        "created_at": OBS,
-        "expires_at": "2026-07-23T12:14:00+00:00",
-        "self_digest": "sha256:" + "b" * 64,
-    }
+    intent = copy.deepcopy(TEST_INTENT)
     intent.update(overrides)
     return intent
 
@@ -98,7 +109,7 @@ def _probe_output(
     pg_mode: str = th.PG_MODE_REAL,
     evidence_class: str | None = None,
     independent_postcheck_attached: bool = False,
-    capture_digest: str | None = CAP_DIGEST,
+    capture_digest: str | None = None,
 ) -> dict:
     # 一份「as-if trade-core」的 run_target_host_probe 輸出:applier 自跑 → independent_postcheck DEFERRED。
     return {
@@ -108,7 +119,7 @@ def _probe_output(
             pg_mode, evidence_marker=th.EVIDENCE_ATTESTED,
             independent_postcheck_attached=independent_postcheck_attached,
         ),
-        "target_host_capture_digest": capture_digest,
+        "target_host_capture_digest": capture_digest or CAP_DIGEST,
         "evidence_class": evidence_class or th.EVIDENCE_ATTESTED,
     }
 
@@ -342,25 +353,63 @@ def test_bare_env_var_probe_skips_on_mac_never_fakes() -> None:
             os.environ["AIML_TARGET_HOST_PROBE"] = prior
 
 
-def test_applier_sets_and_restores_the_authorization_gate() -> None:
-    # applier 是唯一翻開授權閘的路徑;閘只在本次 apply 期間開啟,結束後恢復原狀(restore)。
-    prior = os.environ.get("AIML_TARGET_HOST_PROBE")
+def test_injected_runner_never_opens_the_parent_process_gate() -> None:
+    # P1(Codex)修復:applier 不再於 **parent** 行程翻開 AIML_TARGET_HOST_PROBE。注入 runner 路徑為
+    # in-process 直呼,期間 parent env 從未被設閘,結束後亦然(舊實作會在此窗口對整個 parent 行程開閘)。
+    assert "AIML_TARGET_HOST_PROBE" not in os.environ
     seen = {}
 
     def _spy_runner(**_kwargs):
         seen["gate"] = os.environ.get("AIML_TARGET_HOST_PROBE")
         return _probe_output()
 
-    os.environ.pop("AIML_TARGET_HOST_PROBE", None)
-    try:
-        _apply(probe_runner=_spy_runner)
-        assert seen["gate"] == "1"  # applier 於 spawn 探針時已由 validated intent 派生設定閘
-        assert os.environ.get("AIML_TARGET_HOST_PROBE") is None  # 結束後恢復(未洩漏)
-    finally:
-        if prior is None:
-            os.environ.pop("AIML_TARGET_HOST_PROBE", None)
-        else:
-            os.environ["AIML_TARGET_HOST_PROBE"] = prior
+    _apply(probe_runner=_spy_runner)
+    assert seen["gate"] is None  # 注入 runner 執行期間 parent env 從未持有授權閘
+    assert "AIML_TARGET_HOST_PROBE" not in os.environ  # 之後亦然
+
+
+def test_real_runner_delegates_to_isolated_child_and_keeps_parent_gate_clean(monkeypatch) -> None:
+    # 真 runner(預設 th.run_target_host_probe)由 VALIDATED intent 派生一張 authorization capsule,委派給
+    # 隔離子行程 run_probe_via_child;parent 行程從不翻開授權閘。以 fake child 捕獲 capsule 驗其綁定。
+    assert "AIML_TARGET_HOST_PROBE" not in os.environ
+    captured = {}
+
+    def _fake_child(capsule, **_kw):
+        captured["capsule"] = capsule
+        captured["gate_during"] = os.environ.get("AIML_TARGET_HOST_PROBE")
+        return _probe_output()
+
+    monkeypatch.setattr(thchild, "run_probe_via_child", _fake_child)
+    permit = {"authorization_digest": "sha256:" + "7" * 64}
+    result = _apply(
+        probe_runner=th.run_target_host_probe,
+        operator_authorization=permit,
+        operator_signature=b"test-signature",
+    )
+
+    cap = captured["capsule"]
+    assert cap["intent_digest"] == _intent()["self_digest"]  # 綁 intent digest
+    assert cap["source_head"] == HEAD                          # 綁 source head
+    assert cap["expected_host"] == "trade-core"                # 綁 expected host
+    assert cap["actor_node"] == APPLIER                        # 綁 actor node
+    assert cap["operator_authorization_digest"] == permit[
+        "authorization_digest"
+    ]
+    assert thchild.validate_capsule(cap, now=NOW) == []        # capsule 自洽、未過期
+    assert captured["gate_during"] is None                     # 委派期間 parent env 無授權閘
+    assert result["verifier_capture_digest"] is None           # 交付的是升 BINDING 前的 applier 自跑
+    assert "AIML_TARGET_HOST_PROBE" not in os.environ
+
+
+def test_real_runner_on_mac_fails_closed_via_child_no_parent_gate() -> None:
+    # 於 Mac 走真隔離子行程:因 expected_host=trade-core != 本機 / 非 target host 而 fail-closed。過程中
+    # parent env 從不持有授權閘(真隔離的證明)——授權只存在於已結束的子行程。
+    assert "AIML_TARGET_HOST_PROBE" not in os.environ
+    with pytest.raises(
+        (apply.TargetHostApplyError, thchild.TargetHostChildApplyError, th.TargetHostUnavailableError)
+    ):
+        _apply(probe_runner=th.run_target_host_probe)
+    assert "AIML_TARGET_HOST_PROBE" not in os.environ
 
 
 # --------------------------------------------------------------------------- #

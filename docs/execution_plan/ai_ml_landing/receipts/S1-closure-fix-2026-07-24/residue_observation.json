@@ -1,0 +1,6 @@
+{
+  "cgroup_gone": true,
+  "netns_gone": true,
+  "temp_gone": true,
+  "units_gone": true
+}

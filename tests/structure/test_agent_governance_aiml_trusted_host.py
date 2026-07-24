@@ -212,6 +212,133 @@ def test_caller_selected_key_cannot_forge_execution_bundle(
         _index(bundle, _sign_bundle(bundle, rogue_private, root))
 
 
+# --------------------------------------------------------------------------- #
+# S1 formal-closure signer profile (Amendment A1 §6): reuses the S0.3 trust root
+# (public key + fingerprint) under a DOMAIN-SEPARATED S1 identity + namespace.
+# The real S1 private key is operator-held out-of-band; the verification LOGIC is
+# exercised with a throwaway key + an S1-shaped profile (identity/namespace fixed).
+# --------------------------------------------------------------------------- #
+def _s1_profile(public_key: str) -> "host.ExecutionSignerProfile":
+    return host.ExecutionSignerProfile(
+        identity=host.EXPECTED_S1_TARGET_HOST_SIGNER_IDENTITY,
+        fingerprint=host.ssh_public_key_fingerprint(public_key),
+        namespace=host.S1_TARGET_HOST_SIGNATURE_NAMESPACE,
+        algorithm=host.EXECUTION_BUNDLE_ALGORITHM,
+        public_key=public_key,
+    )
+
+
+def _s1_bundle(entries: list[dict], *, fingerprint: str,
+               identity: str | None = None, namespace: str | None = None) -> dict:
+    bundle = _bundle(entries)
+    bundle["signer_identity"] = identity or host.EXPECTED_S1_TARGET_HOST_SIGNER_IDENTITY
+    bundle["signer_fingerprint"] = fingerprint
+    bundle["signature_namespace"] = namespace or host.S1_TARGET_HOST_SIGNATURE_NAMESPACE
+    return bundle
+
+
+def _sign_ns(bundle: dict, private_key: Path, root: Path, namespace: str) -> bytes:
+    payload_path = root / (host.canonical_digest(bundle).split(":", 1)[1] + ".json")
+    payload_path.write_bytes(host._canonical_bytes(bundle))
+    signature_path = Path(str(payload_path) + ".sig")
+    subprocess.run(
+        [host.SSH_KEYGEN_EXECUTABLE, "-Y", "sign", "-f", str(private_key),
+         "-n", namespace, str(payload_path)],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True,
+    )
+    return signature_path.read_bytes()
+
+
+def _s1_index(bundle, signature, profile):
+    return host.AuthenticatedExecutionEvidenceIndex.from_bundle(
+        bundle, signature=signature, now=NOW, task_contract_digest=DIGEST_A,
+        context_artifact_digest=DIGEST_B, dag_digest=DIGEST_C, signer_profile=profile,
+    )
+
+
+def _s1_entry_bundle(fingerprint, **kw):
+    return _s1_bundle(
+        [_entry("context_artifact_v1", DIGEST_B, {"schema_version": "context_artifact_v1"})],
+        fingerprint=fingerprint, **kw,
+    )
+
+
+def test_s1_profile_reuses_s0_3_trust_root_and_is_self_consistent() -> None:
+    # §6 決策:S1 沿用 S0.3 信任根(公鑰+指紋),不新增第二套私鑰。佔位符時代此測試會失敗。
+    assert host.S1_TRUSTED_TARGET_HOST_PUBLIC_KEY == host.TRUSTED_EXECUTION_PUBLIC_KEY
+    assert host.EXPECTED_S1_TARGET_HOST_SIGNER_FINGERPRINT == host.EXPECTED_EXECUTION_SIGNER_FINGERPRINT
+    prof = host.S1_TARGET_HOST_EXECUTION_SIGNER_PROFILE
+    assert host.ssh_public_key_fingerprint(prof.public_key) == prof.fingerprint
+    # 仍與 S0.3 domain-separated(identity + namespace 不同)。
+    assert prof.identity != host.EXPECTED_EXECUTION_SIGNER_IDENTITY
+    assert prof.namespace != host.EXECUTION_SIGNATURE_NAMESPACE
+
+
+def test_s1_bundle_signed_with_s1_namespace_authenticates(tmp_path: Path) -> None:
+    private_key, public_key = _generate_signer(tmp_path, "s1_signer")
+    profile = _s1_profile(public_key)
+    artifact = {"schema_version": "context_artifact_v1", "value": 1}
+    bundle = _s1_bundle([_entry("context_artifact_v1", DIGEST_B, artifact)], fingerprint=profile.fingerprint)
+    index = _s1_index(
+        bundle, _sign_ns(bundle, private_key, tmp_path, host.S1_TARGET_HOST_SIGNATURE_NAMESPACE), profile,
+    )
+    assert index.verify("context_artifact_v1", DIGEST_B, artifact) is True
+
+
+def test_s1_profile_rejects_same_key_signed_under_s0_3_namespace(tmp_path: Path) -> None:
+    # 同一把 key 以 S0.3 命名空間簽 → 於 S1 profile 因命名空間域分離而 authentication failed。
+    private_key, public_key = _generate_signer(tmp_path, "s1_signer")
+    profile = _s1_profile(public_key)
+    bundle = _s1_entry_bundle(profile.fingerprint)
+    sig_s0_3 = _sign_ns(bundle, private_key, tmp_path, host.EXECUTION_SIGNATURE_NAMESPACE)
+    with pytest.raises(ValueError, match="authentication failed"):
+        _s1_index(bundle, sig_s0_3, profile)
+
+
+def test_s1_profile_rejects_wrong_key(tmp_path: Path) -> None:
+    private_key, public_key = _generate_signer(tmp_path, "s1_signer")
+    rogue_private, _ = _generate_signer(tmp_path, "rogue")
+    profile = _s1_profile(public_key)
+    bundle = _s1_entry_bundle(profile.fingerprint)
+    with pytest.raises(ValueError, match="authentication failed"):
+        _s1_index(bundle, _sign_ns(bundle, rogue_private, tmp_path, host.S1_TARGET_HOST_SIGNATURE_NAMESPACE), profile)
+
+
+def test_s1_profile_rejects_wrong_fingerprint(tmp_path: Path) -> None:
+    private_key, public_key = _generate_signer(tmp_path, "s1_signer")
+    profile = _s1_profile(public_key)
+    bundle = _s1_entry_bundle("SHA256:" + "z" * 43)  # bundle 宣告錯指紋
+    with pytest.raises(ValueError, match="signer fingerprint is invalid"):
+        _s1_index(bundle, _sign_ns(bundle, private_key, tmp_path, host.S1_TARGET_HOST_SIGNATURE_NAMESPACE), profile)
+
+
+def test_s1_profile_rejects_wrong_namespace_field(tmp_path: Path) -> None:
+    private_key, public_key = _generate_signer(tmp_path, "s1_signer")
+    profile = _s1_profile(public_key)
+    bundle = _s1_entry_bundle(profile.fingerprint, namespace=host.EXECUTION_SIGNATURE_NAMESPACE)
+    with pytest.raises(ValueError, match="signature namespace is invalid"):
+        _s1_index(bundle, _sign_ns(bundle, private_key, tmp_path, host.S1_TARGET_HOST_SIGNATURE_NAMESPACE), profile)
+
+
+def test_s1_profile_rejects_wrong_identity(tmp_path: Path) -> None:
+    private_key, public_key = _generate_signer(tmp_path, "s1_signer")
+    profile = _s1_profile(public_key)
+    bundle = _s1_entry_bundle(profile.fingerprint, identity=host.EXPECTED_EXECUTION_SIGNER_IDENTITY)
+    with pytest.raises(ValueError, match="signer identity is invalid"):
+        _s1_index(bundle, _sign_ns(bundle, private_key, tmp_path, host.S1_TARGET_HOST_SIGNATURE_NAMESPACE), profile)
+
+
+def test_s1_bundle_byte_change_after_signing_fails(tmp_path: Path) -> None:
+    # 簽後改 bundle 綁定位元組(task/source-head 類 digest)→ 綁定不符 / auth 失敗。
+    private_key, public_key = _generate_signer(tmp_path, "s1_signer")
+    profile = _s1_profile(public_key)
+    bundle = _s1_entry_bundle(profile.fingerprint)
+    sig = _sign_ns(bundle, private_key, tmp_path, host.S1_TARGET_HOST_SIGNATURE_NAMESPACE)
+    bundle["task_contract_digest"] = DIGEST_C  # 簽後竄改
+    with pytest.raises(ValueError):
+        _s1_index(bundle, sig, profile)
+
+
 def _git(repo: Path, *args: str) -> str:
     result = subprocess.run(
         ["git", *args], cwd=repo, text=True, capture_output=True, check=True

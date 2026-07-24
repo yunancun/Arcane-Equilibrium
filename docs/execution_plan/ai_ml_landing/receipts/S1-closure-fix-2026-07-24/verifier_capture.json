@@ -1,0 +1,127 @@
+{
+  "argv": [
+    "python3",
+    "helper_scripts/maintenance_scripts/agent_governance_target_host_observation.py",
+    "--mode",
+    "postcheck",
+    "--intent-base64",
+    "eyJhcHBsaWVyX25vZGVfaWQiOiJzMWZjX2FwcGx5X2FjdG9yIiwiY2FuZGlkYXRlX2lkcyI6WyJjb250ZW50X2FkZHJlc3NlZF9maXhlZF9wYXRoIl0sImNyZWF0ZWRfYXQiOiIyMDI2LTA3LTI0VDAyOjQ0OjUxLjQyOTE4MCswMDowMCIsImV4cGVjdGVkX2hvc3QiOiJ0cmFkZS1jb3JlIiwiZXhwaXJlc19hdCI6IjIwMjYtMDctMjRUMDI6NTk6NTEuNDI5MTgwKzAwOjAwIiwiaW50ZW50X2lkIjoic2hhMjU2OjM1MWRmZTM2NTU0MTQ4NDZhMzY3Yjc5NjRiYTFhZDAzMDc1NDBkOGJiMjk2NDdmNmJmYmNkNTk4YTAxNjA0ZjEiLCJub25fcm9vdF91aWQiOnRydWUsInBlcl9zZWFtX2FyZ3YiOnsic3RhcnRfc3RvcCI6WyIvdXNyL2Jpbi9weXRob24zIiwiLUkiLCItYyIsImltcG9ydCB0aW1lOyB0aW1lLnNsZWVwKDMwKSJdfSwicG9zdGNoZWNrX25vZGVfaWQiOiJvcHNfcG9zdGNoZWNrIiwicmlzayI6ImhpZ2giLCJyb2xsYmFjayI6eyJhdG9taWNfcG9pbnRlcl9zd2FwIjoic3dhcCBjdXJyZW50LT5uZXciLCJybXRyZWUiOiJybSAtcmYgdGhyb3dhd2F5X3Jvb3QiLCJ0ZWFyZG93bl9yZXNldF9mYWlsZWQiOiJzeXN0ZW1jdGwgLS11c2VyIHJlc2V0LWZhaWxlZCJ9LCJzY2hlbWFfdmVyc2lvbiI6InRhcmdldF9ob3N0X2Rpc3Bvc2FibGVfcnVudGltZV9wcm9iZV9pbnRlbnRfdjEiLCJzZWxmX2RpZ2VzdCI6InNoYTI1NjowZGE4OWIyZmYyMmQyZmMyZWJlMDFmZWFmYjY2NGRhYjg5ODQzNjlkMzlkZDE5NzRiNzQzYjAyYWE2MTA2ZGE5IiwidGhyb3dhd2F5X3Jvb3QiOiIvcnVuL3VzZXIvMTAwMC9haW1sX3MxZmNfMTAwODIwOV84ZTNlNTE1OSIsInR0bF9zZWNvbmRzIjo5MDAsInVzZXJfc2NvcGVfb25seSI6dHJ1ZX0=",
+    "--permit-base64",
+    "eyJhbGdvcml0aG0iOiJTU0gtRUQyNTUxOSIsImFwcGxpZXJfbm9kZV9pZCI6InMxZmNfYXBwbHlfYWN0b3IiLCJhdXRob3JpemF0aW9uX2RpZ2VzdCI6InNoYTI1NjpmYjdhYWYyZmUzNDI2OGQ2YjgxMTc4MTgxNjk2OGNkNmFlOGE3ODRmNzFmMjFjYWNiMGEwNTYxZGNkYzAyMzJhIiwiZXhwZWN0ZWRfaG9zdCI6InRyYWRlLWNvcmUiLCJleHBpcmVzX2F0IjoiMjAyNi0wNy0yNFQwMjo1OTo1MS40MjkxODBaIiwiaW50ZW50X2RpZ2VzdCI6InNoYTI1NjowZGE4OWIyZmYyMmQyZmMyZWJlMDFmZWFmYjY2NGRhYjg5ODQzNjlkMzlkZDE5NzRiNzQzYjAyYWE2MTA2ZGE5IiwiaW50ZW50X2lkIjoic2hhMjU2OjM1MWRmZTM2NTU0MTQ4NDZhMzY3Yjc5NjRiYTFhZDAzMDc1NDBkOGJiMjk2NDdmNmJmYmNkNTk4YTAxNjA0ZjEiLCJpc3N1ZWRfYXQiOiIyMDI2LTA3LTI0VDAyOjQ0OjUxLjQyOTE4MFoiLCJwb3N0Y2hlY2tfbm9kZV9pZCI6Im9wc19wb3N0Y2hlY2siLCJzY2hlbWFfdmVyc2lvbiI6InRhcmdldF9ob3N0X3Byb2JlX29wZXJhdG9yX2F1dGhvcml6YXRpb25fdjEiLCJzaWduYXR1cmVfbmFtZXNwYWNlIjoiYXJjYW5lLWVxdWlsaWJyaXVtLWFpbWwtczEtdGFyZ2V0LWhvc3QtYXBwbHkiLCJzaWduZXJfZmluZ2VycHJpbnQiOiJTSEEyNTY6dUdKOXZlTjdQb0U2QkJnZnNTUDJhaU1uZHJ3Z2J0N28vNy9ZZmR6TnpDUSIsInNpZ25lcl9pZGVudGl0eSI6ImFpbWwtczEtdGFyZ2V0LWhvc3Qtb3BlcmF0b3ItdjEiLCJzb3VyY2VfaGVhZCI6IjZlMWVhOTU3YWYzNTU0NGE4NDRmNzA0OTc4MzY2ZDExYWE2YzIzNjQifQ==",
+    "--signature-base64",
+    "LS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFETUFBQUFMYzNOb0xXVmtNalUxTVRrQUFBQWdtaW1Hbm9sM25hRUp5R2NYSE9iZ01oTDhidApnNnd0QVlrMGNqUys4dHZzc0FBQUFzWVhKallXNWxMV1Z4ZFdsc2FXSnlhWFZ0TFdGcGJXd3RjekV0ZEdGeVoyVjBMV2h2CmMzUXRZWEJ3YkhrQUFBQUFBQUFBQm5Ob1lUVXhNZ0FBQUZNQUFBQUxjM05vTFdWa01qVTFNVGtBQUFCQVBxL2pNbjQ3M3AKSzBPM3A4LytBbFRBRGlnR3YxT29XMmVpNDRBSkRwRzB0b1FpV3FqelVQc2NEWVE2V3ZnVzNUdzJtMmhBMmdyL0JRUDVzbgpyb3oyQWc9PQotLS0tLUVORCBTU0ggU0lHTkFUVVJFLS0tLS0K",
+    "--unit",
+    "aiml-probeB-absent-1008668.scope",
+    "--teardown-root",
+    "/run/user/1000/aiml_s1fc_1008209_8e3e5159"
+  ],
+  "authorization": {
+    "allowed": true,
+    "effective_permission": "read_only",
+    "native_agent": "OPS",
+    "node_class": "verification",
+    "policy_class": "node_scoped_read_only",
+    "reason": "operator-authenticated target-host observation Adapter (read-only OPS preflight/postcheck)",
+    "role_id": "OPS"
+  },
+  "command": "python3 helper_scripts/maintenance_scripts/agent_governance_target_host_observation.py --mode postcheck --intent-base64 eyJhcHBsaWVyX25vZGVfaWQiOiJzMWZjX2FwcGx5X2FjdG9yIiwiY2FuZGlkYXRlX2lkcyI6WyJjb250ZW50X2FkZHJlc3NlZF9maXhlZF9wYXRoIl0sImNyZWF0ZWRfYXQiOiIyMDI2LTA3LTI0VDAyOjQ0OjUxLjQyOTE4MCswMDowMCIsImV4cGVjdGVkX2hvc3QiOiJ0cmFkZS1jb3JlIiwiZXhwaXJlc19hdCI6IjIwMjYtMDctMjRUMDI6NTk6NTEuNDI5MTgwKzAwOjAwIiwiaW50ZW50X2lkIjoic2hhMjU2OjM1MWRmZTM2NTU0MTQ4NDZhMzY3Yjc5NjRiYTFhZDAzMDc1NDBkOGJiMjk2NDdmNmJmYmNkNTk4YTAxNjA0ZjEiLCJub25fcm9vdF91aWQiOnRydWUsInBlcl9zZWFtX2FyZ3YiOnsic3RhcnRfc3RvcCI6WyIvdXNyL2Jpbi9weXRob24zIiwiLUkiLCItYyIsImltcG9ydCB0aW1lOyB0aW1lLnNsZWVwKDMwKSJdfSwicG9zdGNoZWNrX25vZGVfaWQiOiJvcHNfcG9zdGNoZWNrIiwicmlzayI6ImhpZ2giLCJyb2xsYmFjayI6eyJhdG9taWNfcG9pbnRlcl9zd2FwIjoic3dhcCBjdXJyZW50LT5uZXciLCJybXRyZWUiOiJybSAtcmYgdGhyb3dhd2F5X3Jvb3QiLCJ0ZWFyZG93bl9yZXNldF9mYWlsZWQiOiJzeXN0ZW1jdGwgLS11c2VyIHJlc2V0LWZhaWxlZCJ9LCJzY2hlbWFfdmVyc2lvbiI6InRhcmdldF9ob3N0X2Rpc3Bvc2FibGVfcnVudGltZV9wcm9iZV9pbnRlbnRfdjEiLCJzZWxmX2RpZ2VzdCI6InNoYTI1NjowZGE4OWIyZmYyMmQyZmMyZWJlMDFmZWFmYjY2NGRhYjg5ODQzNjlkMzlkZDE5NzRiNzQzYjAyYWE2MTA2ZGE5IiwidGhyb3dhd2F5X3Jvb3QiOiIvcnVuL3VzZXIvMTAwMC9haW1sX3MxZmNfMTAwODIwOV84ZTNlNTE1OSIsInR0bF9zZWNvbmRzIjo5MDAsInVzZXJfc2NvcGVfb25seSI6dHJ1ZX0= --permit-base64 eyJhbGdvcml0aG0iOiJTU0gtRUQyNTUxOSIsImFwcGxpZXJfbm9kZV9pZCI6InMxZmNfYXBwbHlfYWN0b3IiLCJhdXRob3JpemF0aW9uX2RpZ2VzdCI6InNoYTI1NjpmYjdhYWYyZmUzNDI2OGQ2YjgxMTc4MTgxNjk2OGNkNmFlOGE3ODRmNzFmMjFjYWNiMGEwNTYxZGNkYzAyMzJhIiwiZXhwZWN0ZWRfaG9zdCI6InRyYWRlLWNvcmUiLCJleHBpcmVzX2F0IjoiMjAyNi0wNy0yNFQwMjo1OTo1MS40MjkxODBaIiwiaW50ZW50X2RpZ2VzdCI6InNoYTI1NjowZGE4OWIyZmYyMmQyZmMyZWJlMDFmZWFmYjY2NGRhYjg5ODQzNjlkMzlkZDE5NzRiNzQzYjAyYWE2MTA2ZGE5IiwiaW50ZW50X2lkIjoic2hhMjU2OjM1MWRmZTM2NTU0MTQ4NDZhMzY3Yjc5NjRiYTFhZDAzMDc1NDBkOGJiMjk2NDdmNmJmYmNkNTk4YTAxNjA0ZjEiLCJpc3N1ZWRfYXQiOiIyMDI2LTA3LTI0VDAyOjQ0OjUxLjQyOTE4MFoiLCJwb3N0Y2hlY2tfbm9kZV9pZCI6Im9wc19wb3N0Y2hlY2siLCJzY2hlbWFfdmVyc2lvbiI6InRhcmdldF9ob3N0X3Byb2JlX29wZXJhdG9yX2F1dGhvcml6YXRpb25fdjEiLCJzaWduYXR1cmVfbmFtZXNwYWNlIjoiYXJjYW5lLWVxdWlsaWJyaXVtLWFpbWwtczEtdGFyZ2V0LWhvc3QtYXBwbHkiLCJzaWduZXJfZmluZ2VycHJpbnQiOiJTSEEyNTY6dUdKOXZlTjdQb0U2QkJnZnNTUDJhaU1uZHJ3Z2J0N28vNy9ZZmR6TnpDUSIsInNpZ25lcl9pZGVudGl0eSI6ImFpbWwtczEtdGFyZ2V0LWhvc3Qtb3BlcmF0b3ItdjEiLCJzb3VyY2VfaGVhZCI6IjZlMWVhOTU3YWYzNTU0NGE4NDRmNzA0OTc4MzY2ZDExYWE2YzIzNjQifQ== --signature-base64 LS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFETUFBQUFMYzNOb0xXVmtNalUxTVRrQUFBQWdtaW1Hbm9sM25hRUp5R2NYSE9iZ01oTDhidApnNnd0QVlrMGNqUys4dHZzc0FBQUFzWVhKallXNWxMV1Z4ZFdsc2FXSnlhWFZ0TFdGcGJXd3RjekV0ZEdGeVoyVjBMV2h2CmMzUXRZWEJ3YkhrQUFBQUFBQUFBQm5Ob1lUVXhNZ0FBQUZNQUFBQUxjM05vTFdWa01qVTFNVGtBQUFCQVBxL2pNbjQ3M3AKSzBPM3A4LytBbFRBRGlnR3YxT29XMmVpNDRBSkRwRzB0b1FpV3FqelVQc2NEWVE2V3ZnVzNUdzJtMmhBMmdyL0JRUDVzbgpyb3oyQWc9PQotLS0tLUVORCBTU0ggU0lHTkFUVVJFLS0tLS0K --unit aiml-probeB-absent-1008668.scope --teardown-root /run/user/1000/aiml_s1fc_1008209_8e3e5159",
+  "completed_at": "2026-07-24T04:45:22.904465+02:00",
+  "context_artifact_digest": "sha256:c3464c78f0e0d91726dda393ce995fd16123e402f4081fb6e33d054904eee44a",
+  "effect_enforcement": "repository_policy_only",
+  "execution_task": {
+    "native_agent": "OPS",
+    "node_class": "verification",
+    "node_id": "ops_postcheck",
+    "path_scope": [],
+    "permission": "read_only",
+    "requires": [
+      "ops_preflight"
+    ],
+    "role": "OPS"
+  },
+  "execution_task_digest": "sha256:5a72567da122ce91682bcb19a9f7bb4d19ee5ffed7ebf86b6fad8e31153c2371",
+  "exit_code": 0,
+  "host_sandbox_attestation_ref": null,
+  "native_agent": "OPS",
+  "node_class": "verification",
+  "node_id": "ops_postcheck",
+  "path_scope": [
+    "helper_scripts/maintenance_scripts/agent_governance_target_host_observation.py",
+    "helper_scripts/maintenance_scripts/agent_governance_target_host_probe.py"
+  ],
+  "permission": "read_only",
+  "record_digest": "sha256:992a4ba3f7d2e46c76bfc0d48ab2a93843b0ef2f3f3dceece5affd56d1e53147",
+  "replay_contract": "EXACT_OUTPUT",
+  "repository_after": {
+    "generation_digest": "sha256:0c73dfe8b79157bdc82a4b761b148d5aa0d150d51f450bfadb3e108bcd774d51",
+    "observed_at": "2026-07-24T04:45:22.913050+02:00",
+    "record_digest": "sha256:77cbd5df13bd5b417a39196deaeb4847e355e5f8d4bef53fadf707e1c076662e",
+    "schema_version": "repository_generation_summary_v1",
+    "scope": [
+      "helper_scripts/maintenance_scripts/agent_governance_target_host_observation.py",
+      "helper_scripts/maintenance_scripts/agent_governance_target_host_probe.py"
+    ],
+    "source_head": "6e1ea957af35544a844f704978366d11aa6c2364"
+  },
+  "repository_before": {
+    "generation_digest": "sha256:0c73dfe8b79157bdc82a4b761b148d5aa0d150d51f450bfadb3e108bcd774d51",
+    "observed_at": "2026-07-24T04:45:22.790540+02:00",
+    "record_digest": "sha256:421dcc927e2031d0efc6bc8c9a58ff80033c3b0f6668a7b0ef06f3cd44737ab7",
+    "schema_version": "repository_generation_summary_v1",
+    "scope": [
+      "helper_scripts/maintenance_scripts/agent_governance_target_host_observation.py",
+      "helper_scripts/maintenance_scripts/agent_governance_target_host_probe.py"
+    ],
+    "source_head": "6e1ea957af35544a844f704978366d11aa6c2364"
+  },
+  "result": "PASS",
+  "role_id": "OPS",
+  "schema_version": "command_capture_v2",
+  "started_at": "2026-07-24T04:45:22.790745+02:00",
+  "stderr": {
+    "bytes": 0,
+    "digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "encoding": "utf-8",
+    "preview_base64": null,
+    "preview_redacted": false,
+    "preview_source_bytes": 0,
+    "preview_text": "",
+    "replay_digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "truncated": false
+  },
+  "stdout": {
+    "bytes": 417,
+    "digest": "sha256:5bfc65d63680e2f4aaa2e82b960e6ed21c5313f934343d4da0314aa2743b9d8a",
+    "encoding": "utf-8",
+    "preview_base64": null,
+    "preview_redacted": false,
+    "preview_source_bytes": 417,
+    "preview_text": "{\"intent_digest\":\"sha256:0da89b2ff22d2fc2ebe01feafb664dab8984369d39dd1974b743b02aa6106da9\",\"mode\":\"postcheck\",\"observation\":{\"cgroup_gone\":true,\"no_residue\":true,\"temp_gone\":true,\"unit_absent\":true},\"operator_authorization_digest\":\"sha256:fb7aaf2fe34268d6b811781816968cd6ae8a784f71f21cacb0a0561dcdc0232a\",\"schema_version\":\"target_host_governed_observation_v1\",\"source_head\":\"6e1ea957af35544a844f704978366d11aa6c2364\"}",
+    "replay_digest": "sha256:5bfc65d63680e2f4aaa2e82b960e6ed21c5313f934343d4da0314aa2743b9d8a",
+    "truncated": false
+  },
+  "task_contract_digest": "sha256:afa1048c146f7b765fecfa9f56339054bad018d0dfba725f92f35575e95ef9aa",
+  "timed_out": false,
+  "timeout_seconds": 120,
+  "trust_tier": "LOCAL_REPRODUCIBLE",
+  "whole_repository_after": {
+    "generation_digest": "sha256:546b3a80774f44620a0a1b43215cca986b5d742ef67f352cbe89d4be0cac3773",
+    "observed_at": "2026-07-24T04:45:22.928695+02:00",
+    "record_digest": "sha256:c73592428f3e58bfc562cba89e245cc822f99aa20275e22ede34c63b2931b10e",
+    "schema_version": "repository_generation_summary_v1",
+    "scope": [
+      "."
+    ],
+    "source_head": "6e1ea957af35544a844f704978366d11aa6c2364"
+  },
+  "whole_repository_before": {
+    "generation_digest": "sha256:546b3a80774f44620a0a1b43215cca986b5d742ef67f352cbe89d4be0cac3773",
+    "observed_at": "2026-07-24T04:45:22.784123+02:00",
+    "record_digest": "sha256:25764af3884e6d84908b3be7d7167aa265d3288b4ed60faab65c06314790acb7",
+    "schema_version": "repository_generation_summary_v1",
+    "scope": [
+      "."
+    ],
+    "source_head": "6e1ea957af35544a844f704978366d11aa6c2364"
+  }
+}

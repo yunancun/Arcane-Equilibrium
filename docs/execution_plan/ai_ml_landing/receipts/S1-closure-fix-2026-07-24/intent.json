@@ -1,0 +1,31 @@
+{
+  "applier_node_id": "s1fc_apply_actor",
+  "candidate_ids": [
+    "content_addressed_fixed_path"
+  ],
+  "created_at": "2026-07-24T02:44:51.429180+00:00",
+  "expected_host": "trade-core",
+  "expires_at": "2026-07-24T02:59:51.429180+00:00",
+  "intent_id": "sha256:351dfe3655414846a367b7964ba1ad0307540d8bb29647f6bfbcd598a01604f1",
+  "non_root_uid": true,
+  "per_seam_argv": {
+    "start_stop": [
+      "/usr/bin/python3",
+      "-I",
+      "-c",
+      "import time; time.sleep(30)"
+    ]
+  },
+  "postcheck_node_id": "ops_postcheck",
+  "risk": "high",
+  "rollback": {
+    "atomic_pointer_swap": "swap current->new",
+    "rmtree": "rm -rf throwaway_root",
+    "teardown_reset_failed": "systemctl --user reset-failed"
+  },
+  "schema_version": "target_host_disposable_runtime_probe_intent_v1",
+  "self_digest": "sha256:0da89b2ff22d2fc2ebe01feafb664dab8984369d39dd1974b743b02aa6106da9",
+  "throwaway_root": "/run/user/1000/aiml_s1fc_1008209_8e3e5159",
+  "ttl_seconds": 900,
+  "user_scope_only": true
+}

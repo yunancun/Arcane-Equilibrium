@@ -30,6 +30,7 @@ for candidate in (HELPERS, ML_ROOT):
         sys.path.insert(0, str(candidate))
 
 import agent_governance_target_host_probe as th  # noqa: E402
+from target_host_capture_support import governed_ops_capture  # noqa: E402
 
 OBS = "2026-07-23T12:00:00+00:00"
 FRESH = "2026-07-23T12:05:00+00:00"
@@ -84,7 +85,7 @@ def test_real_probe_emits_attested_receipt(probe_output):
     # 這裡用結構有效的 artifact SHAPE(offline-unauthenticated,非真 governed capture)行使新的綁定路徑;
     # 真出口綁的是 OPS ``capture-command`` 產出的真 record。builder 由 artifact 的 record_digest 派生
     # target_host_capture_digest(digest 與 artifact 不可解耦)。
-    capture_artifact = th._structural_capture_artifact()
+    capture_artifact = governed_ops_capture(ROOT)
     applier = th.build_target_host_choice_receipt(
         caller="E1:S1.6B:on-target",
         platform=th.detect_platform(),

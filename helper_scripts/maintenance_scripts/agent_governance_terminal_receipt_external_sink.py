@@ -641,6 +641,41 @@ def apply_external_worm_append(
                 retention=None, pending=False,
                 failure="existing object has no VersionId; object versioning is not enabled",
             )
+        # P2(Codex):dedup 既有物件亦須驗證其真實 Object-Lock retention 不弱於本次核准期限。既有物件
+        # 可能帶較短或不同 mode 的保留;若直接 dedup 就會以「核准 retention」冒充實際較弱的保留,騙過
+        # 不可變性。以非破壞式 get_object_retention 讀既有保留:mode 須完全等於核准 mode,且 retain_until
+        # 不少於核准 retain_until,否則 fail-closed。
+        try:
+            existing_retention_resp = s3_client.get_object_retention(
+                Bucket=bucket, Key=key, VersionId=existing_version,
+            )
+            existing_payload = (existing_retention_resp or {}).get("Retention") or {}
+            existing_retention = {
+                "object_lock_mode": existing_payload.get("Mode"),
+                "retain_until": _iso(existing_payload.get("RetainUntilDate")),
+            }
+        except Exception as error:  # noqa: BLE001 - retention read failure ⇒ fail-closed
+            return _result(
+                "FAILED", record_locator=None, version_id=None, checksum=None,
+                retention=None, pending=False,
+                failure=(
+                    "existing object Object-Lock retention read failed: "
+                    f"{_s3_error_code(error)}"
+                ),
+            )
+        if not (
+            _is_retention_obj(existing_retention)
+            and existing_retention.get("object_lock_mode") == mode
+            and _retain_until_at_least(existing_retention.get("retain_until"), retain_until)
+        ):
+            return _result(
+                "FAILED", record_locator=None, version_id=None, checksum=None,
+                retention=None, pending=False,
+                failure=(
+                    "existing object Object-Lock retention is shorter than or different "
+                    "from the approved retention (dedup would misrepresent immutability)"
+                ),
+            )
         return _result(
             "IDEMPOTENT_DEDUP", record_locator=key, version_id=existing_version,
             checksum=persisted_digest, retention=retention_obj, pending=False,
@@ -687,6 +722,15 @@ def _retain_until_in_future(retention: Any, *, now_iso: str) -> bool:
         return False
     try:
         return sink._parse_time(str(retention.get("retain_until"))) > sink._parse_time(now_iso)
+    except (TypeError, ValueError):
+        return False
+
+
+def _retain_until_at_least(observed: Any, approved: Any) -> bool:
+    # P2(Codex readback):observed 保留期解析後必須「不少於」核准的 retain_until。timezone-normalized
+    # 比較(``sink._parse_time`` 對齊 UTC),故等值與更長皆通過、較短一律 FAIL——縮短保留期即削弱不可變性。
+    try:
+        return sink._parse_time(str(observed)) >= sink._parse_time(str(approved))
     except (TypeError, ValueError):
         return False
 
@@ -771,13 +815,19 @@ def independent_readback_ack(
             version_id_match = (
                 isinstance(read_version, str) and read_version == expected_version
             )
-            # 保留匹配(非破壞式):read 的 mode 等於已 commit result 的 mode,且 retain_until 仍在未來。
+            # 保留匹配(非破壞式):read 的 mode 完全等於已 commit result 的 mode、retain_until 仍在未來,
+            # 且(P2 Codex)observed retain_until 不少於核准的 retain_until——較短的實際保留期必須 FAIL,
+            # 否則 store 可接受寫入卻套用更短的未來保留而仍騙過不可變性 ACK。
             retention_match = (
                 _is_retention_obj(read_retention)
                 and _is_retention_obj(expected_retention)
                 and read_retention.get("object_lock_mode")
                 == expected_retention.get("object_lock_mode")
                 and _retain_until_in_future(read_retention, now_iso=observed)
+                and _retain_until_at_least(
+                    read_retention.get("retain_until"),
+                    expected_retention.get("retain_until"),
+                )
             )
             # 桶層 Object-Lock 設定 ENABLED(非破壞式讀);未啟用 ⇒ 非真 WORM。
             object_lock_enabled = _read_object_lock_enabled(s3_client, bucket)

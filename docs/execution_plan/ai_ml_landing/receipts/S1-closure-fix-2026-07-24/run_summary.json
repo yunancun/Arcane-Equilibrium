@@ -1,0 +1,11 @@
+{
+  "binding": "BINDING",
+  "effect_status": "TARGET_HOST_DISPOSABLE_PROBE_PASS",
+  "expected_host": "trade-core",
+  "observed_host": "trade-core",
+  "out_dir": "/tmp/aiml-s1-final8.hRkbkR/out",
+  "upgraded_effect_result_errors": [],
+  "upgraded_effect_result_valid": true,
+  "verifier_capture_governed_valid": true,
+  "zero_residue": true
+}

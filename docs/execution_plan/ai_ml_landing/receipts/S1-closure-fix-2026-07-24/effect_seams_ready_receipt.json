@@ -1,0 +1,254 @@
+{
+  "admitted_classes": [
+    {
+      "adapter_id": "engine_scanner_deploy_adapter_v1",
+      "applier_is_not_sole_verifier": true,
+      "apply_actor_node": "engine_scanner_apply_actor",
+      "disposable_target_kind": "temp_dir_artifact",
+      "effect_class": "ENGINE_SCANNER",
+      "evidence_class": "LOCAL_REPRODUCIBLE",
+      "intent_digest": "sha256:afc3ed2399fd8ee22e574f0a8b37ea5e2a85c7ee4f20321b21fd74c36977f22e",
+      "post_rollback_digest": "sha256:685dca706a114e526590f5fd8b695945f506ea112c4cd99ab48fd54f3ab6324e",
+      "postcheck_attestation_digest": "sha256:1a17f7225acd8dbef3787d7051e2ca7aa49c287c05d5cc05cb5dbff509871a12",
+      "postcheck_verifier_node": "engine_scanner_independent_verifier",
+      "pre_state_digest": "sha256:685dca706a114e526590f5fd8b695945f506ea112c4cd99ab48fd54f3ab6324e",
+      "production_apply_performed": false,
+      "reobserved_post_rollback_digest": "sha256:685dca706a114e526590f5fd8b695945f506ea112c4cd99ab48fd54f3ab6324e",
+      "result_digest": "sha256:16fa705149c7e0933e858624ac61e04c3285d49ccf5d66cacabbf3557d767a7f",
+      "rollback_restored_exact": true
+    },
+    {
+      "adapter_id": "learning_runtime_deploy_adapter_v1",
+      "applier_is_not_sole_verifier": true,
+      "apply_actor_node": "learning_runtime_apply_actor",
+      "disposable_target_kind": "temp_dir_artifact",
+      "effect_class": "LEARNING_RUNTIME",
+      "evidence_class": "LOCAL_REPRODUCIBLE",
+      "intent_digest": "sha256:74968b5056ffe131513a02e1bfeff219404150fa7cc80eaf21185964bfd6a4ec",
+      "post_rollback_digest": "sha256:685dca706a114e526590f5fd8b695945f506ea112c4cd99ab48fd54f3ab6324e",
+      "postcheck_attestation_digest": "sha256:e1e19a48803cbc151b4d0fdca4e6ad2c01707105795255de0f6a10d316d8a4a3",
+      "postcheck_verifier_node": "learning_runtime_independent_verifier",
+      "pre_state_digest": "sha256:685dca706a114e526590f5fd8b695945f506ea112c4cd99ab48fd54f3ab6324e",
+      "production_apply_performed": false,
+      "reobserved_post_rollback_digest": "sha256:685dca706a114e526590f5fd8b695945f506ea112c4cd99ab48fd54f3ab6324e",
+      "result_digest": "sha256:469af3138d29340a438f2cc0b29eaa5547fc871b3c6ed4cbb20dceff41c9f6ec",
+      "rollback_restored_exact": true
+    },
+    {
+      "adapter_id": "controller_workers_deploy_adapter_v1",
+      "applier_is_not_sole_verifier": true,
+      "apply_actor_node": "controller_workers_apply_actor",
+      "disposable_target_kind": "temp_dir_artifact",
+      "effect_class": "CONTROLLER_WORKERS",
+      "evidence_class": "LOCAL_REPRODUCIBLE",
+      "intent_digest": "sha256:df39de01295c44e987a041f801a2d7d1b9aca7ade8f37388e8056cc81f7d99ec",
+      "post_rollback_digest": "sha256:685dca706a114e526590f5fd8b695945f506ea112c4cd99ab48fd54f3ab6324e",
+      "postcheck_attestation_digest": "sha256:ead4026fb3375ff4e16d798d7c57a0b9d42d614c14faba9562362e8da8198c16",
+      "postcheck_verifier_node": "controller_workers_independent_verifier",
+      "pre_state_digest": "sha256:685dca706a114e526590f5fd8b695945f506ea112c4cd99ab48fd54f3ab6324e",
+      "production_apply_performed": false,
+      "reobserved_post_rollback_digest": "sha256:685dca706a114e526590f5fd8b695945f506ea112c4cd99ab48fd54f3ab6324e",
+      "result_digest": "sha256:140e1ddea57dc783c9937064723a4e66a4c281f7ec781ba577b1003cf70160d4",
+      "rollback_restored_exact": true
+    },
+    {
+      "adapter_id": "retention_apply_adapter_v1",
+      "applier_is_not_sole_verifier": true,
+      "apply_actor_node": "retention_apply_apply_actor",
+      "disposable_target_kind": "temp_dir_objects",
+      "effect_class": "RETENTION_APPLY",
+      "evidence_class": "LOCAL_REPRODUCIBLE",
+      "intent_digest": "sha256:f970a46e7760b307c5457285dcb2dc2e707c59c108903906dfe33d366b3b066b",
+      "post_rollback_digest": "sha256:2d1eb34db09aead001a530ddd37a193cb48b0058231f9a6c2df838a92cb889f3",
+      "postcheck_attestation_digest": "sha256:78027efc1d5f702fd0887b7ee6d522cd059b8bdd892f9b6f92d8553ecfa8af2e",
+      "postcheck_verifier_node": "retention_apply_independent_verifier",
+      "pre_state_digest": "sha256:2d1eb34db09aead001a530ddd37a193cb48b0058231f9a6c2df838a92cb889f3",
+      "production_apply_performed": false,
+      "reobserved_post_rollback_digest": "sha256:2d1eb34db09aead001a530ddd37a193cb48b0058231f9a6c2df838a92cb889f3",
+      "result_digest": "sha256:ae0951a3b92132de540a6c7e2bef7c75e9f7e04dbd990cc9448f5014b5870ad4",
+      "rollback_restored_exact": true
+    },
+    {
+      "adapter_id": "pg_role_acl_migration_adapter_v1",
+      "applier_is_not_sole_verifier": true,
+      "apply_actor_node": "pg_role_acl_migration_apply_actor",
+      "disposable_target_kind": "disposable_pg",
+      "effect_class": "PG_ROLE_ACL_MIGRATION",
+      "evidence_class": "LOCAL_REPRODUCIBLE",
+      "intent_digest": "sha256:3ed6bcf290d2db7f89a2e570f979039dec75a574a41304159fc08623f2dc8be8",
+      "post_rollback_digest": "sha256:3187fd565be1082d5beafab3308ca7ac3b06cd0c5cb865c39dbf45bf631dc21a",
+      "postcheck_attestation_digest": "sha256:fac16e4a3179a6b1b895f7913a5319e3892c42a355172ba4d2ec2736dca4e3c5",
+      "postcheck_verifier_node": "pg_role_acl_migration_independent_verifier",
+      "pre_state_digest": "sha256:3187fd565be1082d5beafab3308ca7ac3b06cd0c5cb865c39dbf45bf631dc21a",
+      "production_apply_performed": false,
+      "reobserved_post_rollback_digest": "sha256:3187fd565be1082d5beafab3308ca7ac3b06cd0c5cb865c39dbf45bf631dc21a",
+      "result_digest": "sha256:6150f812914a74fc1183070eb4d6101b0893b31af219b552858075b44574b096",
+      "rollback_restored_exact": true
+    },
+    {
+      "adapter_id": "credential_rotation_adapter_v1",
+      "applier_is_not_sole_verifier": true,
+      "apply_actor_node": "credential_rotation_apply_actor",
+      "disposable_target_kind": "disposable_pg",
+      "effect_class": "CREDENTIAL_ROTATION",
+      "evidence_class": "LOCAL_REPRODUCIBLE",
+      "intent_digest": "sha256:95bf458a346d560ac0c48f1db7a171ccc985bee5a26af43759ae303cdc1a42af",
+      "post_rollback_digest": "sha256:eba22fb360fd6f1406e0a7cc8de4597dbaad9d1f1459e809cd113ad6a3bdee21",
+      "postcheck_attestation_digest": "sha256:e56432f609bc0fa08a71145eb6d08105d8dbe31decfed2a05c79505ad72c1b0e",
+      "postcheck_verifier_node": "credential_rotation_independent_verifier",
+      "pre_state_digest": "sha256:eba22fb360fd6f1406e0a7cc8de4597dbaad9d1f1459e809cd113ad6a3bdee21",
+      "production_apply_performed": false,
+      "reobserved_post_rollback_digest": "sha256:eba22fb360fd6f1406e0a7cc8de4597dbaad9d1f1459e809cd113ad6a3bdee21",
+      "result_digest": "sha256:1320a7e02ca69c81f1a32fb4a57c31a9dffcc42acb8af29e6a9d0fe158ca8742",
+      "rollback_restored_exact": true
+    }
+  ],
+  "boundary": {
+    "nine_authorities_false": true,
+    "production_apply_performed": false,
+    "real_migration_applied": false,
+    "real_remote_host_mutation": false,
+    "real_service_restart": false
+  },
+  "bypass_negatives": [
+    {
+      "bypass_kind": "source_only_route_of_effectful_class",
+      "case_id": "neg-01-source_only_route_of_effectful_class",
+      "evidence_class": "STRUCTURAL_ONLY",
+      "expected": "FAIL_CLOSED",
+      "observed_verdict": "REJECTED"
+    },
+    {
+      "bypass_kind": "generic_deploy_apply_enabled_without_per_class_contract",
+      "case_id": "neg-02-generic_deploy_apply_enabled_without_per_class_contract",
+      "evidence_class": "STRUCTURAL_ONLY",
+      "expected": "FAIL_CLOSED",
+      "observed_verdict": "REJECTED"
+    },
+    {
+      "bypass_kind": "apply_without_preflight",
+      "case_id": "neg-03-apply_without_preflight",
+      "evidence_class": "STRUCTURAL_ONLY",
+      "expected": "FAIL_CLOSED",
+      "observed_verdict": "REJECTED"
+    },
+    {
+      "bypass_kind": "apply_without_approved_intent",
+      "case_id": "neg-04-apply_without_approved_intent",
+      "evidence_class": "STRUCTURAL_ONLY",
+      "expected": "FAIL_CLOSED",
+      "observed_verdict": "REJECTED"
+    },
+    {
+      "bypass_kind": "apply_without_rollback_binding",
+      "case_id": "neg-05-apply_without_rollback_binding",
+      "evidence_class": "STRUCTURAL_ONLY",
+      "expected": "FAIL_CLOSED",
+      "observed_verdict": "REJECTED"
+    },
+    {
+      "bypass_kind": "production_target",
+      "case_id": "neg-06-production_target",
+      "evidence_class": "STRUCTURAL_ONLY",
+      "expected": "FAIL_CLOSED",
+      "observed_verdict": "REJECTED"
+    },
+    {
+      "bypass_kind": "applier_is_sole_verifier",
+      "case_id": "neg-07-applier_is_sole_verifier",
+      "evidence_class": "STRUCTURAL_ONLY",
+      "expected": "FAIL_CLOSED",
+      "observed_verdict": "REJECTED"
+    },
+    {
+      "bypass_kind": "rollback_not_exact",
+      "case_id": "neg-08-rollback_not_exact",
+      "evidence_class": "STRUCTURAL_ONLY",
+      "expected": "FAIL_CLOSED",
+      "observed_verdict": "REJECTED"
+    },
+    {
+      "bypass_kind": "cross_class_adapter_substitution",
+      "case_id": "neg-09-cross_class_adapter_substitution",
+      "evidence_class": "STRUCTURAL_ONLY",
+      "expected": "FAIL_CLOSED",
+      "observed_verdict": "REJECTED"
+    },
+    {
+      "bypass_kind": "classifier_or_matrix_digest_tamper",
+      "case_id": "neg-10-classifier_or_matrix_digest_tamper",
+      "evidence_class": "STRUCTURAL_ONLY",
+      "expected": "FAIL_CLOSED",
+      "observed_verdict": "REJECTED"
+    },
+    {
+      "bypass_kind": "plaintext_secret_ingress",
+      "case_id": "neg-11-plaintext_secret_ingress",
+      "evidence_class": "STRUCTURAL_ONLY",
+      "expected": "FAIL_CLOSED",
+      "observed_verdict": "REJECTED"
+    },
+    {
+      "bypass_kind": "apply_was_a_noop",
+      "case_id": "neg-12-apply_was_a_noop",
+      "evidence_class": "STRUCTURAL_ONLY",
+      "expected": "FAIL_CLOSED",
+      "observed_verdict": "REJECTED"
+    }
+  ],
+  "caller": "E1:S1.5:trusted-host-final8",
+  "dependency_receipts": {
+    "component_effect_matrix_digest": "sha256:22d78882a2dace9ceb640b74b2a5dca2f2a8cc05861720f5ab25c5c9ac86c445",
+    "identity_acl_contract_receipt_digest": "sha256:fdb623c574c3e16232af51e534d2e4c17bb1d3abf748ae0ba5ff7f772f6fead3",
+    "pg_readonly_identity_receipt_digest": "sha256:38c2afd9f56ca95c4698f8ef564b34061f4f71172103be4fab1dc07bfbb3507c",
+    "runtime_candidate_receipt_a_digest": "sha256:a3ae31d7db6ba3021688c7d1447214e08a2970e1750856f8ed558c9d4fbc5176",
+    "runtime_candidate_receipt_b_digest": "sha256:3e5562b5632d1795ce498b601a54c520ffaf59151268bab5b7d404a46deca140",
+    "worm_sink_status": "declared_disposable_worm_emulation_implemented"
+  },
+  "expires_at": "2026-07-24T03:14:42.004161+00:00",
+  "failure_reason": null,
+  "governance_wiring": {
+    "central_validator_recognizes": true,
+    "component_effect_matrix_digest": "sha256:22d78882a2dace9ceb640b74b2a5dca2f2a8cc05861720f5ab25c5c9ac86c445",
+    "generated_views_unchanged": true,
+    "registered_adapter_ids": [
+      "controller_workers_deploy_adapter_v1",
+      "credential_rotation_adapter_v1",
+      "engine_scanner_deploy_adapter_v1",
+      "learning_runtime_deploy_adapter_v1",
+      "pg_role_acl_migration_adapter_v1",
+      "retention_apply_adapter_v1"
+    ],
+    "schema_files_registered": [
+      "component_effect_intent_v1",
+      "component_effect_result_v1",
+      "component_effect_postcheck_attestation_v1",
+      "effect_seams_ready_receipt_v1"
+    ]
+  },
+  "harness_id": "component_effect_seams_harness_v1",
+  "observation_seam": {
+    "attestation_schema": "component_effect_postcheck_attestation_v1",
+    "deferred_to": "S2.5_running_attestation_and_S1.6_target_host_probe",
+    "remote_platform_attested": false,
+    "seam_kind": "independent_distinct_actor_postcheck"
+  },
+  "observation_time": "2026-07-24T02:44:42.004161+00:00",
+  "schema_sha256": "sha256:bdf14ac4e744a26fdc1a33e568876b0d5eeaafa298c05b8676de144155cffc80",
+  "schema_version": "effect_seams_ready_receipt_v1",
+  "secret_scan": {
+    "leaked": false,
+    "patterns_checked": [
+      "auth_scheme_token",
+      "credential_assignment",
+      "github_token",
+      "postgres_dsn_credentials"
+    ]
+  },
+  "self_digest": "sha256:19498ba4303df77eb102e259526ec04a19c665673716280818ec5d0103b60a37",
+  "source_sha256": "sha256:d1cddf5c1d172e57d40744f4b6a94c7ff40a7c0f23ebac055eb0c73b877333d0",
+  "sprint_gate_scope": "S1.5_CONTRIBUTION",
+  "status": "PASS",
+  "target_class": "disposable_local",
+  "ttl_seconds": 1800
+}

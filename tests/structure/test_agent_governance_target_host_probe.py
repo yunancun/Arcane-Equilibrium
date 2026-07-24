@@ -36,6 +36,7 @@ for candidate in (HELPERS, ML_ROOT):
 import agent_governance_target_host_probe as th  # noqa: E402
 import agent_governance_component_effects as ce  # noqa: E402
 from agent_governance_schema import schema_subset_errors  # noqa: E402
+from target_host_capture_support import governed_ops_capture  # noqa: E402
 
 
 OBS = "2026-07-23T12:00:00+00:00"
@@ -57,22 +58,38 @@ def _resign(obj):
 # fixtures: an ATTESTED PASS reference (as the real trade-core run + distinct-OPS attach would emit)
 # --------------------------------------------------------------------------- #
 @pytest.fixture(scope="module")
-def attested_binding():
+def governed_capture():
+    return governed_ops_capture(ROOT)
+
+
+@pytest.fixture(scope="module")
+def attested_binding(governed_capture):
     # pg real + independent_postcheck attached (distinct verifier) + EMBEDDED command_capture_v2 artifact -> BINDING
-    return th.build_attested_reference_receipt(now=OBS, pg_mode=th.PG_MODE_REAL, include_capture_artifact=True)
+    return th.build_attested_reference_receipt(
+        now=OBS,
+        pg_mode=th.PG_MODE_REAL,
+        capture_artifact=governed_capture,
+    )
 
 
 @pytest.fixture(scope="module")
-def attested_provisional():
+def attested_provisional(governed_capture):
     # pg deferred (server absent), independent_postcheck attached -> PROVISIONAL_PENDING_LINUX naming pg_identity
-    return th.build_attested_reference_receipt(now=OBS, pg_mode=th.PG_MODE_DEFERRED, include_capture_artifact=True)
+    return th.build_attested_reference_receipt(
+        now=OBS,
+        pg_mode=th.PG_MODE_DEFERRED,
+        capture_artifact=governed_capture,
+    )
 
 
 @pytest.fixture(scope="module")
-def applier_only():
+def applier_only(governed_capture):
     # applier self-run: independent_postcheck DEFERRED, no distinct verifier yet -> PROVISIONAL naming it
     return th.build_attested_reference_receipt(
-        now=OBS, pg_mode=th.PG_MODE_REAL, independent_postcheck_attached=False, include_capture_artifact=True
+        now=OBS,
+        pg_mode=th.PG_MODE_REAL,
+        independent_postcheck_attached=False,
+        capture_artifact=governed_capture,
     )
 
 
@@ -300,9 +317,14 @@ def test_bare_synthetic_digest_without_artifact_fails_require_attested():
     assert any("embedded governed command_capture_v2 artifact" in error for error in errors)
 
 
-def test_embedded_capture_artifact_passes_require_attested():
-    # WITH a structurally-valid embedded command_capture_v2 artifact (digest derived from it) the structural gate passes.
-    bound = th.build_attested_reference_receipt(now=OBS, pg_mode=th.PG_MODE_REAL, include_capture_artifact=True)
+def test_complete_governed_capture_artifact_passes_require_attested(
+    governed_capture,
+):
+    bound = th.build_attested_reference_receipt(
+        now=OBS,
+        pg_mode=th.PG_MODE_REAL,
+        capture_artifact=governed_capture,
+    )
     capture = bound["target_host_capture"]
     assert capture["schema_version"] == "command_capture_v2"
     assert capture["record_digest"] == bound["target_host_capture_digest"]  # digest is DERIVED from the artifact
@@ -310,6 +332,23 @@ def test_embedded_capture_artifact_passes_require_attested():
     assert th.validate_target_host_choice_receipt(
         bound, require_success=True, require_target_host_attested=True, now=FRESH
     ) == []
+
+
+def test_structural_reference_capture_cannot_certify_attested_target_host():
+    bound = th.build_attested_reference_receipt(
+        now=OBS,
+        pg_mode=th.PG_MODE_REAL,
+        include_capture_artifact=True,
+    )
+    errors = th.validate_target_host_choice_receipt(
+        bound,
+        require_success=True,
+        require_target_host_attested=True,
+        now=FRESH,
+    )
+    assert any(
+        "complete governed command capture" in error for error in errors
+    )
 
 
 def test_decoupled_artifact_digest_is_rejected(attested_binding):

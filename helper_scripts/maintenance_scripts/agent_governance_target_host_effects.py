@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 import agent_governance_target_host_choice as _th_choice
+import agent_governance_target_host_observation_capture as _observation_capture
 from agent_governance_schema import schema_subset_errors
 
 
@@ -36,6 +37,12 @@ CHOICE_RECEIPT_SCHEMA_VERSION = "learning_runtime_choice_receipt_target_host_v1"
 # closure runtime evidence 需要非空 environment(closure.py:221);本 effect 無 target_environment,
 # 故 wrapper environment 綁到一個常量身分(非交易環境;僅拋棄式 target-host 探針)。
 TARGET_HOST_EFFECT_ENVIRONMENT = "trade_core_target_host_probe"
+TARGET_HOST_OPS_POSTCHECK_KIND = "target_host_ops_postcheck_v1"
+TARGET_HOST_VERIFIER_CAPTURE_KIND = "target_host_verifier_command_capture_v2"
+TARGET_HOST_CLOSURE_EVIDENCE_KINDS = frozenset({
+    TARGET_HOST_OPS_POSTCHECK_KIND,
+    TARGET_HOST_VERIFIER_CAPTURE_KIND,
+})
 EFFECT_STATUS_PASS = "TARGET_HOST_DISPOSABLE_PROBE_PASS"
 EFFECT_STATUS_FAILED = "FAILED"
 
@@ -51,9 +58,20 @@ INTENT_SCHEMA_PATH = SCHEMA_DIR / "target_host_disposable_runtime_probe_intent_v
 RESULT_FIELDS = frozenset({
     "schema_version", "adapter_id", "effect_status", "intent_id", "intent_digest",
     "target_host", "source_head", "applier_node_id", "postcheck_verifier_node_id",
-    "choice_receipt_digest", "choice_receipt", "approved_by", "approved_at",
+    "choice_receipt_digest", "choice_receipt", "verifier_capture_digest",
+    "approved_by", "approved_at",
     "started_at", "completed_at", "intent_expires_at", "evidence_expires_at",
     "failure_reason", "receipt_digest",
+})
+
+# choice 內嵌 independent_postcheck seam note 綁定 distinct verifier capture digest 的固定前綴
+# (見 agent_governance_target_host_apply._embed_verifier_capture_binding)。closure 端據此把
+# 結構化 ``verifier_capture_digest`` 與 note 內的持久綁定交叉核對,兩者必一致。
+VERIFIER_CAPTURE_NOTE_PREFIX = "distinct verifier capture digest: "
+POSTCHECK_FIELDS = frozenset({
+    "schema_version", "status", "verifier_node", "verifier_capture_digest",
+    "residue_observation", "source_head", "host", "observed_at",
+    "evidence_refs", "self_digest",
 })
 
 
@@ -107,6 +125,201 @@ def _fixed_path_candidate(choice_receipt: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def _independent_postcheck_seam(choice_receipt: dict[str, Any]) -> dict[str, Any]:
+    """Return the embedded fixed-path ``independent_postcheck`` seam block (or {})."""
+
+    seams = _fixed_path_candidate(choice_receipt).get("seams")
+    if not isinstance(seams, list):
+        return {}
+    return next(
+        (
+            seam for seam in seams
+            if isinstance(seam, dict)
+            and seam.get("seam_id") == _th_choice.SEAM_INDEPENDENT_POSTCHECK
+        ),
+        {},
+    )
+
+
+def _note_bound_verifier_capture_digest(choice_receipt: dict[str, Any]) -> str | None:
+    """Extract the distinct-verifier capture digest durably bound into the seam note, or None.
+
+    ``_embed_verifier_capture_binding`` 以固定前綴把驗證者的相異 capture digest 綁進 upgraded choice
+    的 independent_postcheck seam ``note``;此處反解出該 digest,供結構化 ``verifier_capture_digest`` 與
+    note 綁定交叉核對(兩者必一致,否則 receipt 遭竄改/欄位脫鉤)。
+    """
+
+    note = _independent_postcheck_seam(choice_receipt).get("note")
+    if not isinstance(note, str) or VERIFIER_CAPTURE_NOTE_PREFIX not in note:
+        return None
+    tail = note.rsplit(VERIFIER_CAPTURE_NOTE_PREFIX, 1)[1].strip()
+    candidate = tail.split()[0] if tail else ""
+    return candidate if DIGEST_RE.fullmatch(candidate) else None
+
+
+def _is_clean_residue(residue: Any) -> bool:
+    """A postcheck residue observation is clean iff every teardown flag is exactly True."""
+
+    return isinstance(residue, dict) and all(
+        residue.get(flag) is True for flag in _th_choice.RESIDUE_OBSERVATION_KEYS
+    )
+
+
+def _postcheck_digest(artifact: dict[str, Any]) -> str:
+    return _digest({
+        key: value for key, value in artifact.items() if key != "self_digest"
+    })
+
+
+def build_target_host_closure_evidence(
+    receipt: dict[str, Any],
+    verifier_capture: dict[str, Any],
+    residue_observation: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Build schema-valid runtime wrappers for the independent postcheck and capture.
+
+    The governed verifier capture was compiled under its own OPS context, so it is
+    deliberately wrapped as a target-host artifact rather than misrepresented as a
+    closure-native ``command_capture_v2``.  The effect receipt authenticates its
+    record digest and the closure cross-binds the exact bytes below.
+    """
+
+    capture_id = "target-host-verifier-capture"
+    capture_completed = str(verifier_capture.get("completed_at", ""))
+    expiry = str(receipt.get("evidence_expires_at", ""))
+    capture_evidence = {
+        "id": capture_id,
+        "scope": "runtime",
+        "kind": TARGET_HOST_VERIFIER_CAPTURE_KIND,
+        "digest": verifier_capture.get("record_digest"),
+        "observed_at": capture_completed,
+        "expiry": expiry,
+        "host": receipt.get("target_host"),
+        "environment": TARGET_HOST_EFFECT_ENVIRONMENT,
+        "source": "ops_postcheck",
+        "artifact": copy.deepcopy(verifier_capture),
+    }
+    postcheck_artifact = {
+        "schema_version": TARGET_HOST_OPS_POSTCHECK_KIND,
+        "status": "PASS",
+        "verifier_node": receipt.get("postcheck_verifier_node_id"),
+        "verifier_capture_digest": verifier_capture.get("record_digest"),
+        "residue_observation": copy.deepcopy(residue_observation),
+        "source_head": receipt.get("source_head"),
+        "host": receipt.get("target_host"),
+        "observed_at": capture_completed,
+        "evidence_refs": [capture_id],
+    }
+    postcheck_artifact["self_digest"] = _postcheck_digest(postcheck_artifact)
+    postcheck_evidence = {
+        "id": "target-host-ops-postcheck",
+        "scope": "runtime",
+        "kind": TARGET_HOST_OPS_POSTCHECK_KIND,
+        "digest": postcheck_artifact["self_digest"],
+        "observed_at": capture_completed,
+        "expiry": expiry,
+        "host": receipt.get("target_host"),
+        "environment": TARGET_HOST_EFFECT_ENVIRONMENT,
+        "source": "ops_postcheck",
+        "artifact": postcheck_artifact,
+    }
+    return postcheck_evidence, capture_evidence
+
+
+def _validate_verifier_capture_evidence(
+    evidence: dict[str, Any],
+    *,
+    expected_digest: str | None,
+    applier_capture_digest: Any,
+    applier_capture: dict[str, Any],
+    applier_node: Any,
+    verifier_node: Any,
+    expected_host: Any,
+    expected_source_head: Any,
+    expected_expiry: Any,
+    expected_intent_digest: Any,
+    expected_residue_observation: Any,
+) -> list[str]:
+    """Validate the third evidence entry: the distinct verifier's own governed command_capture_v2.
+
+    要求:(1) evidence.digest == ops_postcheck 引用的 capture digest;(2) 內嵌 record 通過
+    ``agent_governance_command_capture_v2.validate_governed_command_capture`` 的完整 **offline** 結構/
+    綁定/self-digest 驗(RECORD_FIELDS 完整、``trust_tier==LOCAL_REPRODUCIBLE``、
+    ``effect_enforcement=="repository_policy_only"``、**禁自報 ``host_sandbox_attestation_ref``**、
+    execution-task/node/argv/authorization/generation 一致、``record_digest==self-digest``)——一個內容空殼
+    stub 於此被拒;(3) ``record_digest`` == 該 digest;(4) 與 applier 的 on-host capture digest 相異
+    (distinct process + capture);(5) capturer role/node/native_agent 與 applier capture 及 applier 節點相異。
+    是否**真跑過**(replay 真確性)由受信主機重放認證,非本 offline 閘(CLAUDE.md:離線結構接受非認證)。
+    """
+
+    errors: list[str] = []
+    if evidence.get("digest") != expected_digest:
+        errors.append("verifier capture evidence digest is not the ops_postcheck-referenced capture digest")
+    if evidence.get("kind") != TARGET_HOST_VERIFIER_CAPTURE_KIND:
+        errors.append("verifier capture evidence kind is invalid")
+    if evidence.get("scope") != "runtime":
+        errors.append("verifier capture evidence scope must be runtime")
+    if evidence.get("host") != expected_host:
+        errors.append("verifier capture evidence host is not effect-receipt-bound")
+    if evidence.get("environment") != TARGET_HOST_EFFECT_ENVIRONMENT:
+        errors.append("verifier capture evidence environment is invalid")
+    if evidence.get("source") != "ops_postcheck":
+        errors.append("verifier capture evidence source is invalid")
+    if evidence.get("expiry") != expected_expiry:
+        errors.append("verifier capture evidence expiry is not effect-receipt-bound")
+    capture = evidence.get("artifact")
+    if not isinstance(capture, dict):
+        errors.append("verifier capture evidence must embed the governed command_capture_v2 record")
+        return errors
+    capture_errors, _observation = (
+        _observation_capture.validate_target_host_observation_capture(
+            capture,
+            expected_mode="postcheck",
+            expected_source_head=str(expected_source_head),
+            expected_intent_digest=str(expected_intent_digest),
+            expected_node_id=str(verifier_node),
+            expected_residue_observation=(
+                expected_residue_observation
+                if isinstance(expected_residue_observation, dict)
+                else None
+            ),
+        )
+    )
+    errors.extend(
+        f"verifier command_capture_v2 invalid: {error}"
+        for error in capture_errors
+    )
+    if str(capture.get("record_digest")) != str(expected_digest):
+        errors.append("verifier command_capture_v2 record_digest must equal the referenced capture digest")
+    if evidence.get("observed_at") != capture.get("completed_at"):
+        errors.append("verifier capture evidence observed_at must equal capture completion")
+    for boundary in ("repository_before", "repository_after"):
+        repository = capture.get(boundary)
+        if (
+            isinstance(repository, dict)
+            and repository.get("source_head") != expected_source_head
+        ):
+            errors.append(
+                f"verifier command_capture_v2 {boundary} source_head differs from effect source head"
+            )
+    # P1(Codex):capture 必須由「宣告的 postcheck 驗證者節點」產生——僅「非 applier」不足,否則任一
+    # 無關的 read-only capture 都可被塞進來支撐偽造的 postcheck。綁 capturer node_id == 宣告 verifier node。
+    if capture.get("node_id") != verifier_node:
+        errors.append(
+            "verifier command_capture_v2 node_id must equal the declared ops_postcheck verifier node "
+            "(the capture must be produced by the purported residue verifier, not an unrelated node)"
+        )
+    if str(expected_digest) == str(applier_capture_digest):
+        errors.append(
+            "verifier capture must differ from the applier on-host capture (distinct process + capture)"
+        )
+    if capture.get("node_id") == applier_capture.get("node_id"):
+        errors.append("verifier command_capture_v2 node_id must differ from the applier capture node_id")
+    if capture.get("node_id") == applier_node:
+        errors.append("verifier command_capture_v2 node_id must differ from the applier node")
+    return errors
+
+
 def build_target_host_effect_result(
     *,
     choice_receipt: dict[str, Any],
@@ -121,11 +334,16 @@ def build_target_host_effect_result(
     evidence_expires_at: str,
     effect_status: str | None = None,
     failure_reason: str | None = None,
+    verifier_capture_digest: str | None = None,
 ) -> dict[str, Any]:
     """Project one embedded target-host choice receipt into the dedicated effect result.
 
     ``applier_node_id`` / ``postcheck_verifier_node_id`` / ``target_host`` 皆由內嵌 receipt 派生
     (非自由參數);``effect_status`` 預設由 receipt 是否 PASS 且無 failure_reason 導出。
+    ``verifier_capture_digest`` 是 distinct 驗證者的 governed on-host residue capture(command_capture_v2)
+    的 record_digest:applier 自跑必為 ``None``(尚無獨立驗證者),經
+    ``attach_distinct_verifier_postcheck`` 升 BINDING 時才由驗證者的相異 capture 派生填入。closure 端
+    以此結構化欄位對「effect receipt / postcheck evidence / verifier capture」三者交叉綁定。
     """
 
     fixed = _fixed_path_candidate(choice_receipt)
@@ -147,6 +365,7 @@ def build_target_host_effect_result(
         "postcheck_verifier_node_id": fixed.get("postcheck_verifier_node"),
         "choice_receipt_digest": choice_receipt.get("self_digest"),
         "choice_receipt": copy.deepcopy(choice_receipt),
+        "verifier_capture_digest": verifier_capture_digest,
         "approved_by": approved_by,
         "approved_at": approved_at,
         "started_at": started_at,
@@ -233,6 +452,47 @@ def validate_target_host_effect_result(
             errors.append("target-host effect result applier_node_id is not receipt-applier-bound")
         if receipt.get("postcheck_verifier_node_id") != fixed.get("postcheck_verifier_node"):
             errors.append("target-host effect result postcheck_verifier_node_id is not receipt-verifier-bound")
+        applier_capture = choice.get("target_host_capture")
+        if isinstance(applier_capture, dict):
+            capture_errors, _preflight = (
+                _observation_capture.validate_target_host_observation_capture(
+                    applier_capture,
+                    expected_mode="preflight",
+                    expected_source_head=str(receipt.get("source_head", "")),
+                    expected_intent_digest=str(receipt.get("intent_digest", "")),
+                    expected_node_id="ops_preflight",
+                )
+            )
+            errors.extend(
+                "target-host effect applier capture invalid: " + error
+                for error in capture_errors
+            )
+            if applier_capture.get("node_id") != "ops_preflight":
+                errors.append(
+                    "target-host effect applier capture must be produced by ops_preflight"
+                )
+        # 結構化 verifier_capture_digest 必與內嵌 seam 狀態一致:independent_postcheck 已由 distinct
+        # 驗證者附掛(PASSED)⇒ 必為 sha256 且 == seam note 綁定的相異 capture digest;否則(applier 自跑,
+        # DEFERRED)⇒ 必為 None。這讓「已升 BINDING」與結構化欄位/持久 note 綁定三者不可脫鉤。
+        vcd = receipt.get("verifier_capture_digest")
+        ip_verdict = _independent_postcheck_seam(choice).get("verdict")
+        note_digest = _note_bound_verifier_capture_digest(choice)
+        if ip_verdict == _th_choice.SEAM_VERDICT_PASSED:
+            if not DIGEST_RE.fullmatch(str(vcd or "")):
+                errors.append(
+                    "target-host effect result with an attached (PASSED) independent_postcheck must "
+                    "carry a sha256 verifier_capture_digest"
+                )
+            elif note_digest != vcd:
+                errors.append(
+                    "target-host effect result verifier_capture_digest must equal the distinct-verifier "
+                    "capture digest durably bound into the independent_postcheck seam note"
+                )
+        elif vcd is not None:
+            errors.append(
+                "target-host effect result verifier_capture_digest must be null when the "
+                "independent_postcheck is not an attached distinct-verifier PASS"
+            )
 
     failure_reason = receipt.get("failure_reason")
     if success:
@@ -347,29 +607,138 @@ def validate_target_host_effect_binding(
         except (TypeError, ValueError):
             errors.append("target-host intent authority timestamp is invalid")
 
-    # 獨立驗證者(ops_postcheck)綁自己的 runtime 殘留掃描證據;applier(adapter 節點)!= verifier。
+    # ── P1(Codex):獨立驗證者 ops_postcheck 不能只憑 ``source==ops_postcheck`` 標籤過關。它必須綁定
+    #    「驗證者自己產生並通過驗證的 command_capture_v2」,並與 effect receipt 的結構化
+    #    ``verifier_capture_digest`` 及該 capture 三者 digest 交叉一致;applier 與 verifier 在
+    #    role/node/process/capture 皆須相異;殘留必須全清(非零殘留 fail-closed);acceptance 必須同時
+    #    綁 effect receipt + ops_postcheck + verifier capture 三份 evidence。
+    choice = receipt.get("choice_receipt") if isinstance(receipt.get("choice_receipt"), dict) else {}
+    applier_node = receipt.get("applier_node_id")
+    applier_capture_digest = choice.get("target_host_capture_digest")
+    applier_capture = choice.get("target_host_capture") if isinstance(choice.get("target_host_capture"), dict) else {}
+    receipt_verifier_digest = receipt.get("verifier_capture_digest")
+
     fragment = fragments_by_node.get("ops_postcheck", {})
-    postchecks = [
+    postcheck_wrappers = [
         evidence_by_id[ref] for ref in fragment.get("evidence_refs", [])
         if ref in evidence_by_id
         and evidence_by_id[ref].get("scope") == "runtime"
         and evidence_by_id[ref].get("source") == "ops_postcheck"
+        and evidence_by_id[ref].get("kind") == TARGET_HOST_OPS_POSTCHECK_KIND
     ]
-    if len(postchecks) != 1:
+    postcheck_wrapper = postcheck_wrappers[0] if len(postcheck_wrappers) == 1 else None
+    postcheck = (
+        postcheck_wrapper.get("artifact")
+        if isinstance(postcheck_wrapper, dict)
+        and isinstance(postcheck_wrapper.get("artifact"), dict)
+        else None
+    )
+    verifier_capture_ev: dict[str, Any] | None = None
+    if postcheck is None:
         errors.append("target-host closure requires exactly one independent ops_postcheck")
     else:
-        verifier_node = postchecks[0].get("verifier_node") or postchecks[0].get("source")
-        if verifier_node == receipt.get("applier_node_id"):
+        if set(postcheck) != POSTCHECK_FIELDS:
+            errors.append("target-host ops_postcheck artifact fields are not exact")
+        if postcheck.get("schema_version") != TARGET_HOST_OPS_POSTCHECK_KIND:
+            errors.append("target-host ops_postcheck schema_version is invalid")
+        if postcheck.get("status") != "PASS":
+            errors.append("target-host ops_postcheck status must be PASS")
+        if postcheck.get("self_digest") != _postcheck_digest(postcheck):
+            errors.append("target-host ops_postcheck self_digest is invalid")
+        if postcheck_wrapper.get("digest") != postcheck.get("self_digest"):
+            errors.append("target-host ops_postcheck wrapper digest differs from artifact")
+        for field, expected in (
+            ("host", receipt.get("target_host")),
+            ("environment", TARGET_HOST_EFFECT_ENVIRONMENT),
+            ("source", "ops_postcheck"),
+            ("observed_at", postcheck.get("observed_at")),
+            ("expiry", receipt.get("evidence_expires_at")),
+        ):
+            if postcheck_wrapper.get(field) != expected:
+                errors.append(f"target-host ops_postcheck wrapper {field} is not receipt-bound")
+        # (a) closure PASS 需要已升 BINDING 的 effect receipt:結構化 verifier_capture_digest 非空。
+        if not DIGEST_RE.fullmatch(str(receipt_verifier_digest or "")):
+            errors.append(
+                "target-host effect receipt lacks a bound verifier_capture_digest; a PASS closure requires "
+                "the distinct-verifier-upgraded effect result (applier self-run alone cannot close)"
+            )
+        # (b) verifier node 為宣告的 postcheck 節點且 != applier。
+        verifier_node = postcheck.get("verifier_node")
+        if not (isinstance(verifier_node, str) and verifier_node):
+            errors.append("target-host ops_postcheck must carry a non-empty verifier_node")
+        elif verifier_node == applier_node:
             errors.append("target-host ops_postcheck verifier must differ from the applier node")
+        elif verifier_node != receipt.get("postcheck_verifier_node_id"):
+            errors.append(
+                "target-host ops_postcheck verifier_node must equal the effect receipt postcheck_verifier_node_id"
+            )
+        # (c) ops_postcheck 綁 source_head / host / observed_at,且 residue 全清(非零殘留 fail-closed)。
+        if postcheck.get("source_head") != receipt.get("source_head"):
+            errors.append("target-host ops_postcheck source_head is not bound to the effect source head")
+        if postcheck.get("host") != receipt.get("target_host"):
+            errors.append("target-host ops_postcheck host is not bound to the effect target host")
+        if not (isinstance(postcheck.get("observed_at"), str) and postcheck.get("observed_at")):
+            errors.append("target-host ops_postcheck must carry an observation time (observed_at)")
+        if not _is_clean_residue(postcheck.get("residue_observation")):
+            errors.append(
+                "target-host ops_postcheck must record a fully clean residue_observation "
+                "(a nonzero/absent residue observation fails closed)"
+            )
+        # (d) ops_postcheck 攜帶的 verifier_capture_digest 與 effect receipt 結構化欄位一致。
+        pc_capture_digest = postcheck.get("verifier_capture_digest")
+        if not DIGEST_RE.fullmatch(str(pc_capture_digest or "")):
+            errors.append("target-host ops_postcheck must reference a sha256 verifier capture digest")
+        elif DIGEST_RE.fullmatch(str(receipt_verifier_digest or "")) and pc_capture_digest != receipt_verifier_digest:
+            errors.append(
+                "target-host ops_postcheck verifier_capture_digest must equal the effect receipt verifier_capture_digest"
+            )
+        # (e) verifier capture 為第三份 evidence:內嵌 command_capture_v2 通過驗證、digest 綁定,且
+        #     capturer role/node/capture 與 applier 相異。
+        cap_refs = [
+            evidence_by_id[ref] for ref in postcheck.get("evidence_refs", [])
+            if ref in evidence_by_id
+            and evidence_by_id[ref].get("scope") == "runtime"
+            and evidence_by_id[ref].get("kind") == TARGET_HOST_VERIFIER_CAPTURE_KIND
+        ]
+        if len(cap_refs) != 1:
+            errors.append("target-host ops_postcheck must reference exactly one verifier command capture evidence")
+        else:
+            verifier_capture_ev = cap_refs[0]
+            errors.extend(_validate_verifier_capture_evidence(
+                verifier_capture_ev,
+                expected_digest=pc_capture_digest,
+                applier_capture_digest=applier_capture_digest,
+                applier_capture=applier_capture,
+                applier_node=applier_node,
+                verifier_node=verifier_node,
+                expected_host=receipt.get("target_host"),
+                expected_source_head=receipt.get("source_head"),
+                expected_expiry=receipt.get("evidence_expires_at"),
+                expected_intent_digest=receipt.get("intent_digest"),
+                expected_residue_observation=postcheck.get(
+                    "residue_observation"
+                ),
+            ))
 
-    accepted = bool(postchecks) and any(
-        item.get("status") == "PASS"
-        and {receipt_id, postchecks[0].get("id")}.issubset(set(item.get("evidence_refs", [])))
-        for item in packet.get("acceptance", [])
+    # (f) acceptance PASS 必同時綁 effect receipt + ops_postcheck + verifier capture 三份 evidence id。
+    required_ids = {receipt_id}
+    if postcheck_wrapper is not None:
+        required_ids.add(postcheck_wrapper.get("id"))
+    if verifier_capture_ev is not None:
+        required_ids.add(verifier_capture_ev.get("id"))
+    accepted = (
+        postcheck is not None
+        and verifier_capture_ev is not None
+        and any(
+            item.get("status") == "PASS"
+            and required_ids.issubset(set(item.get("evidence_refs", [])))
+            for item in packet.get("acceptance", [])
+        )
     )
     if not accepted:
         errors.append(
-            "target-host passed acceptance does not bind the effect receipt plus independent ops_postcheck"
+            "target-host passed acceptance must bind the effect receipt + independent ops_postcheck "
+            "+ verifier capture"
         )
     if packet.get("side_effects", {}).get("runtime_contact") is not True:
         errors.append("target-host successful effect must record runtime_contact=true")

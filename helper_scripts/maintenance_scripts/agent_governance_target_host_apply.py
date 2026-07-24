@@ -27,12 +27,14 @@ from __future__ import annotations
 
 import os
 import re
+import uuid
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
 import agent_governance_target_host_probe as th
 import agent_governance_target_host_choice as thc
 import agent_governance_target_host_effects as tfx
+import agent_governance_target_host_child_apply as thchild
 
 
 TARGET_HOST_ADAPTER_ID = tfx.TARGET_HOST_ADAPTER_ID
@@ -166,28 +168,53 @@ def _derive_probe_params(
 
 
 # --------------------------------------------------------------------------- #
-# (c) the authorization gate is SET BY THIS admitted-intent applier
+# (c) authorization is passed to a DEDICATED CHILD PROCESS — never process-global
 # --------------------------------------------------------------------------- #
 def _run_probe_under_intent_authorization(
-    probe_runner: Callable[..., dict[str, Any]], params: dict[str, Any]
+    probe_runner: Callable[..., dict[str, Any]],
+    params: dict[str, Any],
+    *,
+    intent: dict[str, Any],
+    source_head: str,
+    now: str,
+    operator_authorization: dict[str, Any] | None,
+    operator_signature: bytes | None,
 ) -> dict[str, Any]:
-    """Set ``AIML_TARGET_HOST_PROBE=1`` for the spawned probe, then restore the prior env.
+    """Drive the low-level probe WITHOUT ever opening a process-global authorization gate.
 
-    這是誠實界線的核心:``target_host_available()`` 仍讀此 env(低階 seam 需要),但**只有** admitted-intent
-    applier 會在驗證過 intent 後、程式化地翻開這個授權閘。裸 user env 或 capture 都不足以產生 admissible
-    effect result——因為它們不經本路徑,拿不到 intent 綁定 / dedicated result 封裝。governed
-    ``capture-command`` 又會 env-strip 此旗標,故不可能被走私。restore 保證閘只在本次 apply 期間開啟。
+    P1(Codex)修復:舊實作在 **parent** 行程設 ``os.environ["AIML_TARGET_HOST_PROBE"]=1`` 跑 probe,期間
+    整個 parent 行程的低階閘都開著——同行程另一 task / direct caller 可在該窗口未經自己的 validated intent
+    就跑真基元。改為:
+
+    * **真 runner(預設 ``th.run_target_host_probe``)**:由 VALIDATED intent 派生一張 canonical
+      authorization capsule,經一次性 stdin pipe 傳入一個 ``python3 -I`` 子行程;子行程自行重驗 capsule、
+      在**自己**的 env 設閘、跑真探針、回傳 JSON。parent 行程從不翻開該閘;子行程退出即失效。
+    * **注入的 runner(結構測試)**:不需真閘、也不改任何 env,直接 in-process 呼叫以確定性行使綁定邏輯。
+
+    ``target_host_available()`` 仍讀該 env,但只有子行程於驗過 capsule 後才設定它;governed
+    ``capture-command`` 的 env-strip 不受削弱(child 授權來自 capsule 而非 env)。
     """
 
-    prior = os.environ.get(AIML_TARGET_HOST_PROBE_ENV)
-    os.environ[AIML_TARGET_HOST_PROBE_ENV] = "1"
-    try:
-        return probe_runner(**params)
-    finally:
-        if prior is None:
-            os.environ.pop(AIML_TARGET_HOST_PROBE_ENV, None)
-        else:
-            os.environ[AIML_TARGET_HOST_PROBE_ENV] = prior
+    if probe_runner is th.run_target_host_probe:
+        if not isinstance(operator_authorization, dict) or not isinstance(
+            operator_signature, bytes
+        ):
+            raise TargetHostApplyError(
+                "real target-host probe requires an operator-signed exact intent"
+            )
+        capsule = thchild.build_authorization_capsule(
+            intent=intent, source_head=source_head, probe_params=params,
+            nonce=uuid.uuid4().hex[:16], now=now,
+            operator_authorization=operator_authorization,
+        )
+        return thchild.run_probe_via_child(
+            capsule,
+            intent=intent,
+            operator_authorization=operator_authorization,
+            operator_signature=operator_signature,
+        )
+    # 注入 runner:確定性 in-process 輸出,無任何 process-global env 變更。
+    return probe_runner(**params)
 
 
 def _build_choice_from_probe_output(
@@ -256,6 +283,8 @@ def apply_target_host_probe_effect(
     now: str,
     dependency_receipts: dict[str, Any],
     probe_runner: Callable[..., dict[str, Any]] = th.run_target_host_probe,
+    operator_authorization: dict[str, Any] | None = None,
+    operator_signature: bytes | None = None,
 ) -> dict[str, Any]:
     """Admitted-intent applier: derive → run → embed into a dedicated ``target_host_effect_result_v1``.
 
@@ -282,7 +311,15 @@ def apply_target_host_probe_effect(
     params = _derive_probe_params(
         intent, dependency_receipts=dependency_receipts, capture_digest=capture_digest
     )
-    probe_output = _run_probe_under_intent_authorization(probe_runner, params)
+    probe_output = _run_probe_under_intent_authorization(
+        probe_runner,
+        params,
+        intent=intent,
+        source_head=source_head,
+        now=now,
+        operator_authorization=operator_authorization,
+        operator_signature=operator_signature,
+    )
     choice = _build_choice_from_probe_output(
         intent, probe_output, capture_digest=capture_digest,
         capture_artifact=capture_artifact, now=now, dependency_receipts=dependency_receipts,
@@ -386,6 +423,8 @@ def attach_distinct_verifier_postcheck(
     )
     # B1 P2:把 verifier 的相異 capture digest 持久綁進升級後 receipt(而非比對後丟棄),再重簽。
     _embed_verifier_capture_binding(upgraded, str(verifier_capture_digest))
+    # P1(Codex):同一 digest 亦以結構化 ``verifier_capture_digest`` 欄位帶進 effect result,供 closure
+    # 對「effect receipt / ops_postcheck / verifier capture」三者交叉綁定(不只是 seam note 文字)。
     return tfx.build_target_host_effect_result(
         choice_receipt=upgraded,
         intent_id=effect_result["intent_id"],
@@ -397,6 +436,7 @@ def attach_distinct_verifier_postcheck(
         completed_at=effect_result["completed_at"],
         intent_expires_at=effect_result["intent_expires_at"],
         evidence_expires_at=effect_result["evidence_expires_at"],
+        verifier_capture_digest=str(verifier_capture_digest),
     )
 
 

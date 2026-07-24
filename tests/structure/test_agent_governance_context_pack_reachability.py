@@ -21,6 +21,7 @@ from agent_governance_execution import (  # noqa: E402
     validate_context_artifact,
 )
 from agent_governance_execution import context_plan_digest  # noqa: E402
+import agent_governance_context as context_producer  # noqa: E402
 from agent_governance_registry import load_registry, validate_registry  # noqa: E402
 
 
@@ -213,6 +214,30 @@ def test_high_cardinality_interface_inventory_is_bounded_and_spawnable() -> None
     assert len(tests["content"]["matches"]) <= 64
     assert plan["budget"]["compiler_estimated_input_tokens"] < 24_000
     assert plan["budget"]["call_allowed"] is True
+
+
+def test_single_generated_receipt_line_cannot_exhaust_context_budget() -> None:
+    prefix = "governed_interface="
+    oversized = prefix + ("x" * 250_000)
+    matches = [{"path": "receipts/generated.json", "line": 1, "text": oversized}]
+
+    inventory = context_producer._bounded_match_inventory(matches)
+    preview = inventory["matches"][0]
+
+    assert len(preview["text"].encode("utf-8")) <= (
+        context_producer.MAX_INLINE_MATCH_TEXT_BYTES
+    )
+    assert preview["text_truncated"] is True
+    assert preview["text_bytes"] == len(oversized.encode("utf-8"))
+    assert preview["text_digest"] == context_producer._sha256_bytes(
+        oversized.encode("utf-8")
+    )
+
+    changed_tail = [{**matches[0], "text": oversized[:-1] + "y"}]
+    changed_inventory = context_producer._bounded_match_inventory(changed_tail)
+    assert changed_inventory["matches"][0]["text"] == preview["text"]
+    assert changed_inventory["manifest_digest"] != inventory["manifest_digest"]
+    assert changed_inventory["matches"][0]["text_digest"] != preview["text_digest"]
 
 
 def test_standard_review_band_avoids_a_more_expensive_duplicate_context_split() -> None:

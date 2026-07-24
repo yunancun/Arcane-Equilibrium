@@ -1,0 +1,16 @@
+{
+  "algorithm": "SSH-ED25519",
+  "applier_node_id": "s1fc_apply_actor",
+  "authorization_digest": "sha256:fb7aaf2fe34268d6b811781816968cd6ae8a784f71f21cacb0a0561dcdc0232a",
+  "expected_host": "trade-core",
+  "expires_at": "2026-07-24T02:59:51.429180Z",
+  "intent_digest": "sha256:0da89b2ff22d2fc2ebe01feafb664dab8984369d39dd1974b743b02aa6106da9",
+  "intent_id": "sha256:351dfe3655414846a367b7964ba1ad0307540d8bb29647f6bfbcd598a01604f1",
+  "issued_at": "2026-07-24T02:44:51.429180Z",
+  "postcheck_node_id": "ops_postcheck",
+  "schema_version": "target_host_probe_operator_authorization_v1",
+  "signature_namespace": "arcane-equilibrium-aiml-s1-target-host-apply",
+  "signer_fingerprint": "SHA256:uGJ9veN7PoE6BBgfsSP2aiMndrwgbt7o/7/YfdzNzCQ",
+  "signer_identity": "aiml-s1-target-host-operator-v1",
+  "source_head": "6e1ea957af35544a844f704978366d11aa6c2364"
+}

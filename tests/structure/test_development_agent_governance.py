@@ -1155,8 +1155,12 @@ async function execute(input, nullFirst = false) {
         "__ARGS__", json.dumps(wave_args)
     )
     completed = subprocess.run(
-        ["node", "-e", script],
+        # Feed the generated harness through stdin.  The bound inline context is
+        # intentionally large enough to exceed Linux's argv limit, so `node -e`
+        # would fail before the governance assertions could execute.
+        ["node"],
         cwd=ROOT,
+        input=script,
         text=True,
         capture_output=True,
         check=False,

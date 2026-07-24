@@ -422,10 +422,15 @@
       "status": "declared_disposable_target_host_probe_gated",
       "owner_session": "S1.6B",
       "authority": "PM/operator approved target_host_disposable_runtime_probe_intent_v1 for an exact non-root user-scope disposable probe on the bound target host only; no production apply, no real service, no system-scope unit, no OCI socket, prod PG untouched",
-      "invariant": "non-root + user-scope transient units only; applier != independent postcheck verifier; exact rollback + complete teardown with an INDEPENDENT residue sweep are machine-enforced; AIML_TARGET_HOST_PROBE is set only by the admitted-intent execution path (governed capture-command strips it); real operator SSHSIG attestation is the out-of-band trusted-host step; the dedicated target_host_effect_result_v1 embeds and strictly re-validates the typed learning_runtime_choice_receipt_target_host_v1 (require_target_host_attested=True); no closure effect binding is real until the operator SSHSIG-signs the target-host execution bundle",
+      "invariant": "non-root + user-scope transient units only; applier != independent postcheck verifier in role/node/process/capture; exact rollback + complete teardown with an INDEPENDENT residue sweep are machine-enforced and the closure binds the verifier's own semantically validated governed command_capture_v2 (operator-authenticated exact observer command + complete stdout + three-way digest cross-check: effect-result verifier_capture_digest == ops_postcheck digest == capture record_digest); AIML_TARGET_HOST_PROBE is NEVER set on the parent process — before the isolated python3 -E child can open its own gate, the exact typed intent/source head and capsule-to-intent parameter projection must pass a source-pinned, domain-separated operator SSHSIG; the governed capture-command still strips the env gate; final closure independently requires the operator SSHSIG-signed target-host execution bundle under the fixed S1 trusted-host profile; the dedicated target_host_effect_result_v1 embeds and strictly re-validates the typed learning_runtime_choice_receipt_target_host_v1 (require_target_host_attested=True)",
       "implementation_paths": [
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_apply.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_child_apply.py",
         "helper_scripts/maintenance_scripts/agent_governance_target_host_choice.py",
-        "helper_scripts/maintenance_scripts/agent_governance_target_host_effects.py"
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_effects.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_observation.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_observation_capture.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_operator_authorization.py"
       ],
       "component_paths": [
         "helper_scripts/maintenance_scripts/agent_governance_target_host_probe.py"

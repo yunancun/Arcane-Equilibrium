@@ -1,0 +1,359 @@
+{
+  "adapter_id": "target_host_disposable_runtime_probe_adapter_v1",
+  "applier_node_id": "s1fc_apply_actor",
+  "approved_at": "2026-07-24T02:45:17.201665+00:00",
+  "approved_by": "operator",
+  "choice_receipt": {
+    "boundary": {
+      "applier_ne_verifier": true,
+      "complete_teardown_verified": true,
+      "no_docker_invoked": true,
+      "no_production_path": true,
+      "no_system_scope": true,
+      "non_root": true,
+      "prod_pg_untouched": true,
+      "production_running_attested": false,
+      "real_target_host_primitives_invoked": true,
+      "user_scope_only": true
+    },
+    "caller": "target_host_probe_v1:intent-applier:sha256:351dfe3655414846a367b7964ba1ad0307540d8bb29647f6bfbcd598a01604f1",
+    "candidate_probes": [
+      {
+        "apply_actor_node": "s1fc_apply_actor",
+        "candidate_id": "content_addressed_fixed_path",
+        "caveats": [
+          "cpuset_io_isolation_root_only_deferred_pm_q4",
+          "native_closure_representative_full_sealed_s2_3_pm_q3"
+        ],
+        "postcheck_verifier_node": "ops_postcheck",
+        "runtime_identity_kind": "content_addressed_path",
+        "seams": [
+          {
+            "evidence_digest": "sha256:ba6cf01b16d73dfc6ab4881bfc03d6d64d21662371942571d8e59d6946c533db",
+            "note": "systemd-run --user --scope lifecycle observed Active->dead, unit present->absent",
+            "seam_id": "start_stop",
+            "verdict": "PASSED_TARGET_HOST"
+          },
+          {
+            "evidence_digest": "sha256:aceb6275e6d15a3174b7335bedda9bd7290b569519897bbf6c077c4bdf24e1d3",
+            "note": "scope with MemoryMax/MemoryHigh/CPUQuota/TasksMax drove memory.events:oom_kill, cpu.stat throttling and pids.events:max (cpu/mem/pids; cpuset/io root-only deferred)",
+            "seam_id": "cgroup_resource_isolation",
+            "verdict": "PASSED_TARGET_HOST"
+          },
+          {
+            "evidence_digest": "sha256:dd5a7578dba7fac39ae8a100ef0dc7a1cc119a61051c9cb24f071ab45bdd462c",
+            "note": "seccomp connect/sendto/sendmsg egress denial: baseline CONNECTED, filtered ENETUNREACH (non-root, kernel-enforced)",
+            "seam_id": "network_denial",
+            "verdict": "PASSED_TARGET_HOST"
+          },
+          {
+            "evidence_digest": "sha256:af324dc7a558d35590d828d24c2d9777b31a36d2495a265042e4b86f95a72a77",
+            "note": "unique-soname .so compiled into bundle; CDLL loaded from bundle path (maps-origin confirmed, symbol=42); bwrap mount-isolation unavailable non-root (AppArmor apparmor_restrict_unprivileged_userns=1); direct load — maps-origin proof still real, mount-isolated variant deferred",
+            "representativeness": "representative_native_lib",
+            "seam_id": "native_lib_loading",
+            "verdict": "PASSED_TARGET_HOST"
+          },
+          {
+            "evidence_digest": "sha256:71ebdf425335f1c6c32972c1c97125afbad7c17ab1aec2d9554d2d672630754b",
+            "note": "content-addressed bundle at a fixed path; atomic pointer swap; digest re-derived across restart",
+            "seam_id": "immutable_closure_persistence",
+            "verdict": "PASSED_TARGET_HOST"
+          },
+          {
+            "evidence_digest": "sha256:de2d121e1390ea112f8023762368f02be07557f34d3401de6a6ad143bf9040f3",
+            "note": "systemctl --user kill + restart the deployed content-addressed bundle; restarted process resolves (proc cwd) under the rolled-back bundle root; interrupted apply never swaps; teardown + reset-failed + rmtree",
+            "seam_id": "failure_rollback_cleanup",
+            "verdict": "PASSED_TARGET_HOST"
+          },
+          {
+            "evidence_digest": "sha256:b43a631216820120251d783bd68de91872e74017bc04cad987b24ba3ee194019",
+            "note": "S1.1 disposable initdb cluster on-target: read-only role SET ROLE denied 42501",
+            "seam_id": "pg_identity",
+            "verdict": "PASSED_TARGET_HOST"
+          },
+          {
+            "evidence_digest": "sha256:7b4185eba727416c86ad47a727b7f0f621ac6a165eaeab59d69341988043e268",
+            "note": "distinct OPS verifier (verifier != applier) attached a clean on-host residue sweep: units/cgroup/netns/temp all gone | distinct verifier capture digest: sha256:992a4ba3f7d2e46c76bfc0d48ab2a93843b0ef2f3f3dceece5affd56d1e53147",
+            "seam_id": "independent_postcheck",
+            "verdict": "PASSED_TARGET_HOST"
+          }
+        ]
+      },
+      {
+        "apply_actor_node": "s1fc_apply_actor",
+        "candidate_id": "exact_image_id_oci",
+        "caveats": [
+          "no_non_root_oci_runtime_on_target",
+          "rootful_docker_daemon_only",
+          "lr2_no_oci_socket_dbus"
+        ],
+        "postcheck_verifier_node": "ops_postcheck",
+        "runtime_identity_kind": "exact_image_id",
+        "seams": [
+          {
+            "evidence_digest": "sha256:fbcdb8be5961f0b7b3f25173ca9bc1fe45f69f412443d5153afc7af45e6352a4",
+            "note": "no non-root OCI runtime on target (rootful docker only); LR2 forbids the OCI socket surface",
+            "seam_id": "start_stop",
+            "verdict": "NON_SATISFIABLE_NON_ROOT"
+          },
+          {
+            "evidence_digest": "sha256:5460c035f1bbcccd46e8c9dbfee85605115dacd60de23ebfcd74ed8320eadce1",
+            "note": "no non-root OCI runtime on target (rootful docker only); LR2 forbids the OCI socket surface",
+            "seam_id": "cgroup_resource_isolation",
+            "verdict": "NON_SATISFIABLE_NON_ROOT"
+          },
+          {
+            "evidence_digest": "sha256:ba897c8400b6ff939967d1c72c11b349544ff2f781765de6b77c6d0a72a55a80",
+            "note": "no non-root OCI runtime on target (rootful docker only); LR2 forbids the OCI socket surface",
+            "seam_id": "network_denial",
+            "verdict": "NON_SATISFIABLE_NON_ROOT"
+          },
+          {
+            "evidence_digest": "sha256:f7feb5abee578e0caaa5484008e118046e0844d39ed6d84894f909ea9413744b",
+            "note": "no non-root OCI runtime on target (rootful docker only); LR2 forbids the OCI socket surface",
+            "seam_id": "native_lib_loading",
+            "verdict": "NON_SATISFIABLE_NON_ROOT"
+          },
+          {
+            "evidence_digest": "sha256:94ebc7ad3278ce3ddc6aa31ff2a3de83f0a63aea5637da9f580690e1f00a5587",
+            "note": "no non-root OCI runtime on target (rootful docker only); LR2 forbids the OCI socket surface",
+            "seam_id": "immutable_closure_persistence",
+            "verdict": "NON_SATISFIABLE_NON_ROOT"
+          },
+          {
+            "evidence_digest": "sha256:738f956bf4cc3a43c86acd8c1af5e95dec8e2b6a85746703ee70f894e4cc1cad",
+            "note": "no non-root OCI runtime on target (rootful docker only); LR2 forbids the OCI socket surface",
+            "seam_id": "failure_rollback_cleanup",
+            "verdict": "NON_SATISFIABLE_NON_ROOT"
+          },
+          {
+            "evidence_digest": "sha256:9b0ad17c0249822483f890c55d5c218c5e236cd666c00f93f61990687564772c",
+            "note": "no non-root OCI runtime on target (rootful docker only); LR2 forbids the OCI socket surface",
+            "seam_id": "pg_identity",
+            "verdict": "NON_SATISFIABLE_NON_ROOT"
+          },
+          {
+            "evidence_digest": "sha256:7cee80e6cfc0e37686a057c1df00c674ed625f5165850ad51b1f66857ec90f08",
+            "note": "no non-root OCI runtime on target (rootful docker only); LR2 forbids the OCI socket surface",
+            "seam_id": "independent_postcheck",
+            "verdict": "NON_SATISFIABLE_NON_ROOT"
+          }
+        ]
+      }
+    ],
+    "dependency_receipts": {
+      "component_effect_matrix_digest": "sha256:22d78882a2dace9ceb640b74b2a5dca2f2a8cc05861720f5ab25c5c9ac86c445",
+      "effect_seams_ready_receipt_digest": "sha256:19498ba4303df77eb102e259526ec04a19c665673716280818ec5d0103b60a37",
+      "pg_readonly_identity_receipt_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "runtime_candidate_comparison_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "runtime_candidate_receipt_a_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "runtime_candidate_receipt_b_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "evidence_class": "PLATFORM_OR_EXTERNAL_ATTESTED",
+    "expires_at": "2026-07-24T03:00:17.201665+00:00",
+    "failure_reason": null,
+    "harness_id": "target_host_probe_v1",
+    "host_identity": {
+      "deferred_root_only_controllers": [
+        "cpuset",
+        "io"
+      ],
+      "delegated_controllers": [
+        "cpu",
+        "memory",
+        "pids"
+      ],
+      "expected_host": "trade-core",
+      "non_root_uid": true,
+      "observed_host": "trade-core",
+      "passwordless_sudo_present": false,
+      "throwaway_root_under_runtime_dir": true
+    },
+    "observation_time": "2026-07-24T02:45:17.201665+00:00",
+    "platform": {
+      "arch": "x86_64",
+      "bwrap_available": true,
+      "non_root_oci_runtime_available": false,
+      "os": "linux",
+      "python_version": "3.12.3",
+      "systemd_run_available": true
+    },
+    "probe_scope": {
+      "adapter_id": "learning_runtime_deploy_adapter_v1",
+      "effect_class": "TARGET_HOST_DISPOSABLE_RUNTIME_PROBE",
+      "pg_identity_mode": "real_initdb_cluster",
+      "target_host_probe_performed": true
+    },
+    "production_running_attested": false,
+    "schema_sha256": "sha256:f62f8e722a1ea4a15586f822b62f5ed4ad8bf5e85ecf49424865f1131220291e",
+    "schema_version": "learning_runtime_choice_receipt_target_host_v1",
+    "secret_scan": {
+      "leaked": false,
+      "patterns_checked": [
+        "auth_scheme_token",
+        "credential_assignment",
+        "github_token",
+        "postgres_dsn_credentials"
+      ]
+    },
+    "selection": {
+      "binding": "BINDING",
+      "final_choice": "content_addressed_fixed_path",
+      "oci_selectable": false,
+      "pending_seams": [],
+      "reason": "OCI is NON_SATISFIABLE_NON_ROOT on trade-core; a distinct OPS verifier attached a clean on-host residue sweep, so every fixed-path seam is PASSED_TARGET_HOST and content_addressed_fixed_path is BINDING.",
+      "selection_rule": "oci_only_if_all_seams_pass_else_fixed_path"
+    },
+    "self_digest": "sha256:85cc3aadf5f245a303679931f69049f705a8475e9d946f9c1bb566d7f3c99cae",
+    "source_sha256": "sha256:fcbf76a1e434ad3f94253a60f8fb369947b26ca24b47a7e696bde45c989975a7",
+    "status": "PASS",
+    "target_class": "target_host",
+    "target_host_capture": {
+      "argv": [
+        "python3",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_observation.py",
+        "--mode",
+        "preflight",
+        "--intent-base64",
+        "eyJhcHBsaWVyX25vZGVfaWQiOiJzMWZjX2FwcGx5X2FjdG9yIiwiY2FuZGlkYXRlX2lkcyI6WyJjb250ZW50X2FkZHJlc3NlZF9maXhlZF9wYXRoIl0sImNyZWF0ZWRfYXQiOiIyMDI2LTA3LTI0VDAyOjQ0OjUxLjQyOTE4MCswMDowMCIsImV4cGVjdGVkX2hvc3QiOiJ0cmFkZS1jb3JlIiwiZXhwaXJlc19hdCI6IjIwMjYtMDctMjRUMDI6NTk6NTEuNDI5MTgwKzAwOjAwIiwiaW50ZW50X2lkIjoic2hhMjU2OjM1MWRmZTM2NTU0MTQ4NDZhMzY3Yjc5NjRiYTFhZDAzMDc1NDBkOGJiMjk2NDdmNmJmYmNkNTk4YTAxNjA0ZjEiLCJub25fcm9vdF91aWQiOnRydWUsInBlcl9zZWFtX2FyZ3YiOnsic3RhcnRfc3RvcCI6WyIvdXNyL2Jpbi9weXRob24zIiwiLUkiLCItYyIsImltcG9ydCB0aW1lOyB0aW1lLnNsZWVwKDMwKSJdfSwicG9zdGNoZWNrX25vZGVfaWQiOiJvcHNfcG9zdGNoZWNrIiwicmlzayI6ImhpZ2giLCJyb2xsYmFjayI6eyJhdG9taWNfcG9pbnRlcl9zd2FwIjoic3dhcCBjdXJyZW50LT5uZXciLCJybXRyZWUiOiJybSAtcmYgdGhyb3dhd2F5X3Jvb3QiLCJ0ZWFyZG93bl9yZXNldF9mYWlsZWQiOiJzeXN0ZW1jdGwgLS11c2VyIHJlc2V0LWZhaWxlZCJ9LCJzY2hlbWFfdmVyc2lvbiI6InRhcmdldF9ob3N0X2Rpc3Bvc2FibGVfcnVudGltZV9wcm9iZV9pbnRlbnRfdjEiLCJzZWxmX2RpZ2VzdCI6InNoYTI1NjowZGE4OWIyZmYyMmQyZmMyZWJlMDFmZWFmYjY2NGRhYjg5ODQzNjlkMzlkZDE5NzRiNzQzYjAyYWE2MTA2ZGE5IiwidGhyb3dhd2F5X3Jvb3QiOiIvcnVuL3VzZXIvMTAwMC9haW1sX3MxZmNfMTAwODIwOV84ZTNlNTE1OSIsInR0bF9zZWNvbmRzIjo5MDAsInVzZXJfc2NvcGVfb25seSI6dHJ1ZX0=",
+        "--permit-base64",
+        "eyJhbGdvcml0aG0iOiJTU0gtRUQyNTUxOSIsImFwcGxpZXJfbm9kZV9pZCI6InMxZmNfYXBwbHlfYWN0b3IiLCJhdXRob3JpemF0aW9uX2RpZ2VzdCI6InNoYTI1NjpmYjdhYWYyZmUzNDI2OGQ2YjgxMTc4MTgxNjk2OGNkNmFlOGE3ODRmNzFmMjFjYWNiMGEwNTYxZGNkYzAyMzJhIiwiZXhwZWN0ZWRfaG9zdCI6InRyYWRlLWNvcmUiLCJleHBpcmVzX2F0IjoiMjAyNi0wNy0yNFQwMjo1OTo1MS40MjkxODBaIiwiaW50ZW50X2RpZ2VzdCI6InNoYTI1NjowZGE4OWIyZmYyMmQyZmMyZWJlMDFmZWFmYjY2NGRhYjg5ODQzNjlkMzlkZDE5NzRiNzQzYjAyYWE2MTA2ZGE5IiwiaW50ZW50X2lkIjoic2hhMjU2OjM1MWRmZTM2NTU0MTQ4NDZhMzY3Yjc5NjRiYTFhZDAzMDc1NDBkOGJiMjk2NDdmNmJmYmNkNTk4YTAxNjA0ZjEiLCJpc3N1ZWRfYXQiOiIyMDI2LTA3LTI0VDAyOjQ0OjUxLjQyOTE4MFoiLCJwb3N0Y2hlY2tfbm9kZV9pZCI6Im9wc19wb3N0Y2hlY2siLCJzY2hlbWFfdmVyc2lvbiI6InRhcmdldF9ob3N0X3Byb2JlX29wZXJhdG9yX2F1dGhvcml6YXRpb25fdjEiLCJzaWduYXR1cmVfbmFtZXNwYWNlIjoiYXJjYW5lLWVxdWlsaWJyaXVtLWFpbWwtczEtdGFyZ2V0LWhvc3QtYXBwbHkiLCJzaWduZXJfZmluZ2VycHJpbnQiOiJTSEEyNTY6dUdKOXZlTjdQb0U2QkJnZnNTUDJhaU1uZHJ3Z2J0N28vNy9ZZmR6TnpDUSIsInNpZ25lcl9pZGVudGl0eSI6ImFpbWwtczEtdGFyZ2V0LWhvc3Qtb3BlcmF0b3ItdjEiLCJzb3VyY2VfaGVhZCI6IjZlMWVhOTU3YWYzNTU0NGE4NDRmNzA0OTc4MzY2ZDExYWE2YzIzNjQifQ==",
+        "--signature-base64",
+        "LS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFETUFBQUFMYzNOb0xXVmtNalUxTVRrQUFBQWdtaW1Hbm9sM25hRUp5R2NYSE9iZ01oTDhidApnNnd0QVlrMGNqUys4dHZzc0FBQUFzWVhKallXNWxMV1Z4ZFdsc2FXSnlhWFZ0TFdGcGJXd3RjekV0ZEdGeVoyVjBMV2h2CmMzUXRZWEJ3YkhrQUFBQUFBQUFBQm5Ob1lUVXhNZ0FBQUZNQUFBQUxjM05vTFdWa01qVTFNVGtBQUFCQVBxL2pNbjQ3M3AKSzBPM3A4LytBbFRBRGlnR3YxT29XMmVpNDRBSkRwRzB0b1FpV3FqelVQc2NEWVE2V3ZnVzNUdzJtMmhBMmdyL0JRUDVzbgpyb3oyQWc9PQotLS0tLUVORCBTU0ggU0lHTkFUVVJFLS0tLS0K"
+      ],
+      "authorization": {
+        "allowed": true,
+        "effective_permission": "read_only",
+        "native_agent": "OPS",
+        "node_class": "verification",
+        "policy_class": "node_scoped_read_only",
+        "reason": "operator-authenticated target-host observation Adapter (read-only OPS preflight/postcheck)",
+        "role_id": "OPS"
+      },
+      "command": "python3 helper_scripts/maintenance_scripts/agent_governance_target_host_observation.py --mode preflight --intent-base64 eyJhcHBsaWVyX25vZGVfaWQiOiJzMWZjX2FwcGx5X2FjdG9yIiwiY2FuZGlkYXRlX2lkcyI6WyJjb250ZW50X2FkZHJlc3NlZF9maXhlZF9wYXRoIl0sImNyZWF0ZWRfYXQiOiIyMDI2LTA3LTI0VDAyOjQ0OjUxLjQyOTE4MCswMDowMCIsImV4cGVjdGVkX2hvc3QiOiJ0cmFkZS1jb3JlIiwiZXhwaXJlc19hdCI6IjIwMjYtMDctMjRUMDI6NTk6NTEuNDI5MTgwKzAwOjAwIiwiaW50ZW50X2lkIjoic2hhMjU2OjM1MWRmZTM2NTU0MTQ4NDZhMzY3Yjc5NjRiYTFhZDAzMDc1NDBkOGJiMjk2NDdmNmJmYmNkNTk4YTAxNjA0ZjEiLCJub25fcm9vdF91aWQiOnRydWUsInBlcl9zZWFtX2FyZ3YiOnsic3RhcnRfc3RvcCI6WyIvdXNyL2Jpbi9weXRob24zIiwiLUkiLCItYyIsImltcG9ydCB0aW1lOyB0aW1lLnNsZWVwKDMwKSJdfSwicG9zdGNoZWNrX25vZGVfaWQiOiJvcHNfcG9zdGNoZWNrIiwicmlzayI6ImhpZ2giLCJyb2xsYmFjayI6eyJhdG9taWNfcG9pbnRlcl9zd2FwIjoic3dhcCBjdXJyZW50LT5uZXciLCJybXRyZWUiOiJybSAtcmYgdGhyb3dhd2F5X3Jvb3QiLCJ0ZWFyZG93bl9yZXNldF9mYWlsZWQiOiJzeXN0ZW1jdGwgLS11c2VyIHJlc2V0LWZhaWxlZCJ9LCJzY2hlbWFfdmVyc2lvbiI6InRhcmdldF9ob3N0X2Rpc3Bvc2FibGVfcnVudGltZV9wcm9iZV9pbnRlbnRfdjEiLCJzZWxmX2RpZ2VzdCI6InNoYTI1NjowZGE4OWIyZmYyMmQyZmMyZWJlMDFmZWFmYjY2NGRhYjg5ODQzNjlkMzlkZDE5NzRiNzQzYjAyYWE2MTA2ZGE5IiwidGhyb3dhd2F5X3Jvb3QiOiIvcnVuL3VzZXIvMTAwMC9haW1sX3MxZmNfMTAwODIwOV84ZTNlNTE1OSIsInR0bF9zZWNvbmRzIjo5MDAsInVzZXJfc2NvcGVfb25seSI6dHJ1ZX0= --permit-base64 eyJhbGdvcml0aG0iOiJTU0gtRUQyNTUxOSIsImFwcGxpZXJfbm9kZV9pZCI6InMxZmNfYXBwbHlfYWN0b3IiLCJhdXRob3JpemF0aW9uX2RpZ2VzdCI6InNoYTI1NjpmYjdhYWYyZmUzNDI2OGQ2YjgxMTc4MTgxNjk2OGNkNmFlOGE3ODRmNzFmMjFjYWNiMGEwNTYxZGNkYzAyMzJhIiwiZXhwZWN0ZWRfaG9zdCI6InRyYWRlLWNvcmUiLCJleHBpcmVzX2F0IjoiMjAyNi0wNy0yNFQwMjo1OTo1MS40MjkxODBaIiwiaW50ZW50X2RpZ2VzdCI6InNoYTI1NjowZGE4OWIyZmYyMmQyZmMyZWJlMDFmZWFmYjY2NGRhYjg5ODQzNjlkMzlkZDE5NzRiNzQzYjAyYWE2MTA2ZGE5IiwiaW50ZW50X2lkIjoic2hhMjU2OjM1MWRmZTM2NTU0MTQ4NDZhMzY3Yjc5NjRiYTFhZDAzMDc1NDBkOGJiMjk2NDdmNmJmYmNkNTk4YTAxNjA0ZjEiLCJpc3N1ZWRfYXQiOiIyMDI2LTA3LTI0VDAyOjQ0OjUxLjQyOTE4MFoiLCJwb3N0Y2hlY2tfbm9kZV9pZCI6Im9wc19wb3N0Y2hlY2siLCJzY2hlbWFfdmVyc2lvbiI6InRhcmdldF9ob3N0X3Byb2JlX29wZXJhdG9yX2F1dGhvcml6YXRpb25fdjEiLCJzaWduYXR1cmVfbmFtZXNwYWNlIjoiYXJjYW5lLWVxdWlsaWJyaXVtLWFpbWwtczEtdGFyZ2V0LWhvc3QtYXBwbHkiLCJzaWduZXJfZmluZ2VycHJpbnQiOiJTSEEyNTY6dUdKOXZlTjdQb0U2QkJnZnNTUDJhaU1uZHJ3Z2J0N28vNy9ZZmR6TnpDUSIsInNpZ25lcl9pZGVudGl0eSI6ImFpbWwtczEtdGFyZ2V0LWhvc3Qtb3BlcmF0b3ItdjEiLCJzb3VyY2VfaGVhZCI6IjZlMWVhOTU3YWYzNTU0NGE4NDRmNzA0OTc4MzY2ZDExYWE2YzIzNjQifQ== --signature-base64 LS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFETUFBQUFMYzNOb0xXVmtNalUxTVRrQUFBQWdtaW1Hbm9sM25hRUp5R2NYSE9iZ01oTDhidApnNnd0QVlrMGNqUys4dHZzc0FBQUFzWVhKallXNWxMV1Z4ZFdsc2FXSnlhWFZ0TFdGcGJXd3RjekV0ZEdGeVoyVjBMV2h2CmMzUXRZWEJ3YkhrQUFBQUFBQUFBQm5Ob1lUVXhNZ0FBQUZNQUFBQUxjM05vTFdWa01qVTFNVGtBQUFCQVBxL2pNbjQ3M3AKSzBPM3A4LytBbFRBRGlnR3YxT29XMmVpNDRBSkRwRzB0b1FpV3FqelVQc2NEWVE2V3ZnVzNUdzJtMmhBMmdyL0JRUDVzbgpyb3oyQWc9PQotLS0tLUVORCBTU0ggU0lHTkFUVVJFLS0tLS0K",
+      "completed_at": "2026-07-24T04:45:17.407841+02:00",
+      "context_artifact_digest": "sha256:d941b9a65309111b02a0ffde70ac17ce8fd8172897cae808e8c4b00260d398f5",
+      "effect_enforcement": "repository_policy_only",
+      "execution_task": {
+        "native_agent": "OPS",
+        "node_class": "verification",
+        "node_id": "ops_preflight",
+        "path_scope": [],
+        "permission": "read_only",
+        "requires": [
+          "security_gate"
+        ],
+        "role": "OPS"
+      },
+      "execution_task_digest": "sha256:e8f012730c40e041abbda5e80d8174ad738ca0bce18486eb6a4b0762e24379e8",
+      "exit_code": 0,
+      "host_sandbox_attestation_ref": null,
+      "native_agent": "OPS",
+      "node_class": "verification",
+      "node_id": "ops_preflight",
+      "path_scope": [
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_observation.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_probe.py"
+      ],
+      "permission": "read_only",
+      "record_digest": "sha256:8378a800e1995934c7451cb25053d72f93cabd91abc8befbbebdb65763b046ac",
+      "replay_contract": "EXACT_OUTPUT",
+      "repository_after": {
+        "generation_digest": "sha256:0c73dfe8b79157bdc82a4b761b148d5aa0d150d51f450bfadb3e108bcd774d51",
+        "observed_at": "2026-07-24T04:45:17.419886+02:00",
+        "record_digest": "sha256:b850a15fe232fabc647f083e0f28a8cc2d732465c2ad19835b95c8d1e419aeee",
+        "schema_version": "repository_generation_summary_v1",
+        "scope": [
+          "helper_scripts/maintenance_scripts/agent_governance_target_host_observation.py",
+          "helper_scripts/maintenance_scripts/agent_governance_target_host_probe.py"
+        ],
+        "source_head": "6e1ea957af35544a844f704978366d11aa6c2364"
+      },
+      "repository_before": {
+        "generation_digest": "sha256:0c73dfe8b79157bdc82a4b761b148d5aa0d150d51f450bfadb3e108bcd774d51",
+        "observed_at": "2026-07-24T04:45:17.293578+02:00",
+        "record_digest": "sha256:c9ab567cd7ed233dbd238aa236eb5bc61798d218a267a3fd11f702b6f0cdeef9",
+        "schema_version": "repository_generation_summary_v1",
+        "scope": [
+          "helper_scripts/maintenance_scripts/agent_governance_target_host_observation.py",
+          "helper_scripts/maintenance_scripts/agent_governance_target_host_probe.py"
+        ],
+        "source_head": "6e1ea957af35544a844f704978366d11aa6c2364"
+      },
+      "result": "PASS",
+      "role_id": "OPS",
+      "schema_version": "command_capture_v2",
+      "started_at": "2026-07-24T04:45:17.293794+02:00",
+      "stderr": {
+        "bytes": 0,
+        "digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "encoding": "utf-8",
+        "preview_base64": null,
+        "preview_redacted": false,
+        "preview_source_bytes": 0,
+        "preview_text": "",
+        "replay_digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "truncated": false
+      },
+      "stdout": {
+        "bytes": 589,
+        "digest": "sha256:6fff952556d9cd8a287c861f91f4c4e716f7060bffc5da04b52096f2ae733ed1",
+        "encoding": "utf-8",
+        "preview_base64": null,
+        "preview_redacted": false,
+        "preview_source_bytes": 589,
+        "preview_text": "{\"intent_digest\":\"sha256:0da89b2ff22d2fc2ebe01feafb664dab8984369d39dd1974b743b02aa6106da9\",\"mode\":\"preflight\",\"observation\":{\"deferred_root_only_controllers\":[\"cpuset\",\"io\"],\"delegated_controllers\":[\"cpu\",\"memory\",\"pids\"],\"expected_host\":\"trade-core\",\"non_root_uid\":true,\"observed_host\":\"trade-core\",\"sudo_noprompt_present\":false,\"throwaway_root_under_runtime_dir\":true},\"operator_authorization_digest\":\"sha256:fb7aaf2fe34268d6b811781816968cd6ae8a784f71f21cacb0a0561dcdc0232a\",\"schema_version\":\"target_host_governed_observation_v1\",\"source_head\":\"6e1ea957af35544a844f704978366d11aa6c2364\"}",
+        "replay_digest": "sha256:6fff952556d9cd8a287c861f91f4c4e716f7060bffc5da04b52096f2ae733ed1",
+        "truncated": false
+      },
+      "task_contract_digest": "sha256:8e174a784a4bfb95f17879c7ede2b2dc0c2139cf4466437ad9c25c9e74eb9022",
+      "timed_out": false,
+      "timeout_seconds": 120,
+      "trust_tier": "LOCAL_REPRODUCIBLE",
+      "whole_repository_after": {
+        "generation_digest": "sha256:546b3a80774f44620a0a1b43215cca986b5d742ef67f352cbe89d4be0cac3773",
+        "observed_at": "2026-07-24T04:45:17.435875+02:00",
+        "record_digest": "sha256:cbc0a9070f83650438433524abdc2923ba5b5d62ac128e50bb35fe04ed577dd5",
+        "schema_version": "repository_generation_summary_v1",
+        "scope": [
+          "."
+        ],
+        "source_head": "6e1ea957af35544a844f704978366d11aa6c2364"
+      },
+      "whole_repository_before": {
+        "generation_digest": "sha256:546b3a80774f44620a0a1b43215cca986b5d742ef67f352cbe89d4be0cac3773",
+        "observed_at": "2026-07-24T04:45:17.287056+02:00",
+        "record_digest": "sha256:5ec888d5a7625e56f6876f6e5fcaae0d71a459363ccdb767edbff00b715cdfcd",
+        "schema_version": "repository_generation_summary_v1",
+        "scope": [
+          "."
+        ],
+        "source_head": "6e1ea957af35544a844f704978366d11aa6c2364"
+      }
+    },
+    "target_host_capture_digest": "sha256:8378a800e1995934c7451cb25053d72f93cabd91abc8befbbebdb65763b046ac",
+    "ttl_seconds": 900,
+    "unselected_path_removal": {
+      "forecloses_downstream": true,
+      "note": "no non-root OCI runtime exists on trade-core to build/install; LR2/S2.3 seals ONLY the fixed-path runtime, so no downstream session may create an OCI build/install/socket path.",
+      "production_path_removed": true,
+      "unselected_candidate": "exact_image_id_oci",
+      "unselected_production_artifact_present": false
+    }
+  },
+  "choice_receipt_digest": "sha256:85cc3aadf5f245a303679931f69049f705a8475e9d946f9c1bb566d7f3c99cae",
+  "completed_at": "2026-07-24T02:45:17.201665+00:00",
+  "effect_status": "TARGET_HOST_DISPOSABLE_PROBE_PASS",
+  "evidence_expires_at": "2026-07-24T02:55:17.201665+00:00",
+  "failure_reason": null,
+  "intent_digest": "sha256:0da89b2ff22d2fc2ebe01feafb664dab8984369d39dd1974b743b02aa6106da9",
+  "intent_expires_at": "2026-07-24T02:59:51.429180+00:00",
+  "intent_id": "sha256:351dfe3655414846a367b7964ba1ad0307540d8bb29647f6bfbcd598a01604f1",
+  "postcheck_verifier_node_id": "ops_postcheck",
+  "receipt_digest": "sha256:0a0d050b8b555b1f8d627937c52a91a7bb0c132364fa8f78b0ccd640b64a89bb",
+  "schema_version": "target_host_effect_result_v1",
+  "source_head": "6e1ea957af35544a844f704978366d11aa6c2364",
+  "started_at": "2026-07-24T02:45:17.201665+00:00",
+  "target_host": "trade-core",
+  "verifier_capture_digest": "sha256:992a4ba3f7d2e46c76bfc0d48ab2a93843b0ef2f3f3dceece5affd56d1e53147"
+}
