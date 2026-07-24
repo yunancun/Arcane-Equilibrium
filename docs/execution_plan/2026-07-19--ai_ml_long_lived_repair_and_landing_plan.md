@@ -814,7 +814,7 @@ PR #114 (Wave A-C source landing, merge `7d78765a2`) merged before Codex review 
 
 - **§3 signing — REVISED AND COMPLETED (supersedes the operator-placeholder plan)**: the S1 target-host signer profile **reuses the S0.3 trust root** — `TRUSTED_EXECUTION_PUBLIC_KEY` / `EXPECTED_EXECUTION_SIGNER_FINGERPRINT` — under the domain-separated S1 identity (`aiml-s1-target-host-operator-v1`) and namespace (`arcane-equilibrium-aiml-s1-target-host`). No second physical key is introduced; the placeholder consts are removed and the S1 profile is self-consistent (fingerprint == public-key fingerprint). S0.3 identity/namespace/keys/schemas/receipts/signatures are byte-unchanged. On 2026-07-24, the operator authorized the current SSH agent key `SHA256:uGJ9veN7PoE6BBgfsSP2aiMndrwgbt7o/7/YfdzNzCQ`; the exact H_effect bundle was signed and independently verified.
 
-- **§6 terminal — REVISED**: the external S3 Object-Lock **effect** (real bind/append/readback) is `S8.6`, **NOT an S1 blocker** — an S3 config is not required to close S1 (§4's S1.2A source Adapter is the S1 scope). `S1_ENGINEERING_CLOSED_EXTERNAL_WORM_BINDING_PENDING` and `BLOCKED_OPERATOR_SIGNING_ACTION` are superseded. The authenticated durable state is now `S1_CLOSURE_AUTHENTICATED_PENDING_MERGE`; it reaches `S1_CLOSED` only after exact-head review, required CI, PR #115 merge, final ledger projection and three-way synchronization.
+- **§6 terminal — REVISED AND COMPLETED**: the external S3 Object-Lock **effect** (real bind/append/readback) is `S8.6`, **NOT an S1 blocker** — an S3 config is not required to close S1 (§4's S1.2A source Adapter is the S1 scope). `S1_ENGINEERING_CLOSED_EXTERNAL_WORM_BINDING_PENDING` and `BLOCKED_OPERATOR_SIGNING_ACTION` are superseded. The signed artifact truthfully emitted `S1_CLOSURE_AUTHENTICATED_PENDING_MERGE`; direct exact-head review, required/full CI and PR #115 exact-head merge subsequently satisfied its publication predicate. The composite Sprint state is now **`S1_CLOSED`**.
 
 - **CI**: the `development-agent-governance` job and the change classifier now explicitly run/trigger the target-host effect/apply and external-WORM-sink suites (they do not match `test_agent_governance_*`). The exact-head Linux run additionally exposed an `ARG_MAX` failure in the large inline-Context test harness after 1,091 passes; commit `6e1ea957a` moves that harness from `node -e` argv to stdin and raises the complete governance job ceiling from 10 to 20 minutes without changing production behavior or authority. Evidence: +38 focused tests; full local `tests/structure/` green before the final CI-only repair (2174 passed, 6 skipped), plus the repaired focused suites 36/36. Design detail: `docs/execution_plan/ai_ml_landing/design/S1.6B-real-target-host-probe.md` §11.
 
@@ -850,3 +850,20 @@ not a caller-local appended timestamp. Every mandatory non-OPS reviewer must
 also cite the authenticated workflow wave that owns its exact fragment digest;
 an effect receipt cannot substitute for reviewer evidence. The required
 governance CI selection includes the two-phase target-host driver suite.
+
+### §9 — Publication closeout (2026-07-24)
+
+Direct Codex reviewed exact PR #115 head
+`da8e54148a60fc7be38fe5844cf85b28b293a044` with P0/P1/P2=`0/0/0`.
+All exact-head CI and CodeQL jobs passed; the repaired governance gate
+completed in 8m27s, schema-consumer in 6m30s, and the IBKR lane in 6m9s.
+Open code-scanning alerts and unresolved review threads were both zero. PR
+#115 then merged with exact-head matching as
+`22876b16d3b00fcaafa4f2f46ae02b1c08c60b3b`.
+
+The signed finalization bytes are immutable and remain named
+`S1_CLOSURE_AUTHENTICATED_PENDING_MERGE`; the ledger composes them with the
+later review/CI/merge evidence rather than rewriting signed history. S1 is
+therefore **`S1_CLOSED`**, and the next READY pool is
+`S2.0 ∥ S2.2A ∥ S2.3`. This closeout performs no S2 effect and grants none of
+the nine runtime/trading authorities.

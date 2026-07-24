@@ -10,9 +10,11 @@
 
 The fresh target-host effect, complete governance closure, and operator SSHSIG
 all passed. The durable state emitted by the fixed finalizer is
-`S1_CLOSURE_AUTHENTICATED_PENDING_MERGE`; `S1_CLOSED` is deliberately withheld
-until PR #115 receives an exact-head Codex review, all required CI is green, and
-that exact head is merged.
+`S1_CLOSURE_AUTHENTICATED_PENDING_MERGE`; at emission time `S1_CLOSED` was
+deliberately withheld until exact-head review, green CI and merge. Those later
+publication gates subsequently passed, so the composite Sprint state is now
+`S1_CLOSED`; see “Publication closeout” below. The signed finalization bytes
+remain immutable.
 
 - S1.5 contribution: all six real disposable component classes were freshly
   rerun at the exact H_effect with byte-identical source/schema; each performed
@@ -158,15 +160,28 @@ Key finalization digests:
 - finalization:
   `sha256:68bbced3a100c9e52e9f0845e600cce0552b1b67cf3a11d925f4b537dee86d6c`
 
-## Boundary and final transition
+## Publication closeout
 
 All nine AIML authority grants remain false. This work created no production
 runtime, build, PostgreSQL, migration, deploy, ML5/ML6, broker, order, or live
 authority. External S3 Object-Lock execution remains S8.6 and is not an S1
 blocker.
 
-The only remaining transition is repository publication: exact-head review,
-required CI, PR #115 merge, and three-way source synchronization. After those
-checks pass, the ledger may move from
-`S1_CLOSURE_AUTHENTICATED_PENDING_MERGE` to `S1_CLOSED` and open the S2 ready
-pool `S2.0 ∥ S2.2A ∥ S2.3`.
+Repository publication completed after this immutable signed generation:
+
+- Direct Codex reviewed exact PR head
+  `da8e54148a60fc7be38fe5844cf85b28b293a044` and found
+  P0/P1/P2=`0/0/0`.
+- Every exact-head CI and CodeQL job passed; the repaired development-agent
+  governance gate completed in 8m27s, schema-consumer in 6m30s, and the IBKR
+  lane in 6m9s. Open code-scanning alerts and unresolved review threads were
+  both zero.
+- PR #115 merged with exact-head matching as
+  `22876b16d3b00fcaafa4f2f46ae02b1c08c60b3b`.
+
+The signed finalization artifact correctly remains
+`S1_CLOSURE_AUTHENTICATED_PENDING_MERGE`: it recorded the state at emission
+time and is not rewritten after signing. The later exact-head review, green CI
+and merge evidence satisfy that artifact's declared publication predicate, so
+the composite Sprint state is now **`S1_CLOSED`** and the S2 ready pool is
+`S2.0 ∥ S2.2A ∥ S2.3`.
