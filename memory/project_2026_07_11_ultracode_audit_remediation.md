@@ -1,11 +1,12 @@
 ---
 name: project_2026_07_11_ultracode_audit_remediation
-description: "2026-07-11 ultracode 全盤審計→修復→部署完整弧;9 項上 main+引擎重部署,6/7/Q4 held 在分支待 migration 部署,GUI 9/10 需重做"
+description: "ultracode 全盤審計弧:07-11 審計→修復→部署 + 07-24 run0 治理版全審(9C/1L/3D/1R,S1 P1 fix branch 未併=首要,adaptive 會漏 44%)"
 metadata: 
   node_type: memory
   heat: 0
   type: project
   originSessionId: 76772c74-e189-4bd6-afb6-fa63d693bdfe
+  modified: 2026-07-24T01:16:28.667Z
 ---
 
 2026-07-11 operator 要求「跑 ultracode full audit」→ 後續「派 subagent 生成工程安排→另一 workflow 全鏈修掉→三端同步(含 runtime 部署)」。完整弧走完並經驗證。
@@ -28,3 +29,13 @@ metadata:
 - **Item 14 BLOCKED**:AE_INVENTORY_CONSOLIDATED.md 仍在 root,E1 grep 到 live references 正確拒移;需先解 reference 歸屬(LOW)。
 
 相關:[[project_2026_07_07_ai_ml_maturity_roadmap]](PIT/registry=WP2)、[[project_2026_06_14_cold_audit]](前次全審)、[[feedback_v_migration_pg_dry_run]]、[[project_ssh_bridge_workflow]]、[[project_multi_session_memory_race]](本弧全程有並行 session 活躍推 main,worktree 隔離+cherry-pick/rebase 同步)。
+
+## 2026-07-24 run 0:治理版 full audit(S1 formal-closure 後首輪)
+
+run `wf_749b4f8c-2ea`,baseline main=runtime=`7d78765a2`(PR#114 merge),`adaptive_shadow` report-only。13 軸 backstop 全完成(45 calls,E3/IB 首攻 API error 由 retry budget 恰好吸收,`final_null_node_count=0`);130 findings→16 claims→**9 CONFIRMED/1 LATENT-HIGH/3 DISPUTED/1 REFUTED**+5 seam+92 assumption;5.06M subagent tokens。正本=`docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-24--full_system_ultracode_audit_run0.md`(+decision_view.json 含全 digest)。
+
+- **首要**:claim-0002/0005(HIGH)=main 帶已知 S1 效果縫 P1 缺陷,fix 只在 `agent/aiml-s1-closure-p1p2-fixes` 未併;**併入前不得做任何 S1 SSHSIG 簽署**。claim-0015(HIGH)=TODO.md 落後 3 個已 merge PR。
+- **治理硬數據**:9 confirmed 有 4 條(BB/OPS/QC×2)來自 adaptive shadow 子集之外 → **adaptive-only recall 不及格,`adaptive_shadow` 默認必須維持**。
+- QC 重確認 PROFIT-1 現況(gates.rs 雙扣仍在,提交 operator 再裁決非默改);新 QC 發現 DSR gate 缺 √Var(SR_k) 縮放=K≥2 幾乎必 block(over-gate 壓 promotion);BB:110003/110049 零消費者(INSTR-ENSURE-FORCE-1 自 04-23 懸置);AI-E×3=workflow 自身缺陷(retired model pin `claude-opus-4-6`/第三票 reserve=1/regression 死碼)+closure-quality ledger 零實例。
+- seam:S1 attestation 三軸同源、成本模型雙缺陷(fill-sim fee 半價×PROFIT-1)須同輪裁決、promotion 統計功效 QC+MIT 聯查、DSN split-string 繞掃描器(E3 追蹤)、active-state 家族 stale。
+- **教訓(派發側)**:①現行 desktop Workflow 沙箱無 crypto.subtle/TextEncoder 且 Date.now 拋錯→saved 治理 workflow 原樣必死;解=派發側 shim runner(純 JS SHA-256/UTF-8 注入 globalThis+`admission_now_ms` 走 args),驗證邏輯 0 改動、digest 全過;修法應上游化。②bybit/ibkr surface 不能入 full-audit task contract(external_policy_snapshot 本地必 blocking/debt 而 admission 要求 debt 全空)→摘除後 BB/IB 軸照樣在 backstop 跑。③context artifact 220KB 不可能手打入 args→byte-exact 嵌入 runner(`scriptPath`)。
