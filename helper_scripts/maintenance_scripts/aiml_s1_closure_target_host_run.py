@@ -22,7 +22,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
+import subprocess
 import sys
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -66,6 +68,42 @@ def _now() -> datetime:
 
 def _iso(dt: datetime) -> str:
     return dt.isoformat()
+
+
+def _verified_committed_source_head(repo_root: Path, claimed_head: str) -> str:
+    """Bind the effect label to the exact clean Git worktree being executed."""
+
+    if re.fullmatch(r"[0-9a-f]{40}", claimed_head) is None:
+        raise SystemExit("--source-head must be exact lowercase 40-hex")
+    try:
+        actual = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo_root,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip().lower()
+        status = subprocess.run(
+            [
+                "git", "status", "--porcelain=v1", "--untracked-files=all",
+                "--ignore-submodules=all",
+            ],
+            cwd=repo_root,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise SystemExit(f"cannot verify target-host source worktree: {error}") from error
+    if actual != claimed_head:
+        raise SystemExit(
+            f"--source-head differs from target-host worktree HEAD: {claimed_head} != {actual}"
+        )
+    if status.strip():
+        raise SystemExit(
+            "target-host source worktree must be clean before effect execution"
+        )
+    return actual
 
 
 def _build_intent(*, expected_host: str, throwaway_root: str, now: datetime) -> dict:
@@ -146,6 +184,9 @@ def main() -> int:
     )
     parser.add_argument("--repo-root", type=Path, default=_HERE.parents[1])
     args = parser.parse_args()
+    source_head = _verified_committed_source_head(
+        args.repo_root.resolve(), args.source_head
+    )
 
     # 本 driver 是一個「專屬、拋棄式、被授權的 on-host effect 執行器」(等同 operator 手跑一次探針)。它於
     # 自身 env 開授權閘,使 target_host_available() 為真、讓 distinct 驗證者的 independent_postcheck_on_host
@@ -195,7 +236,7 @@ def main() -> int:
         # (2) 真 child-executor apply:probe_runner 為預設真 runner ⇒ 走隔離 python3 -E 子行程。
         effect_result = apply_mod.apply_target_host_probe_effect(
             intent,
-            source_head=args.source_head,
+            source_head=source_head,
             approved_by="operator",
             approved_at=approved_at,
             capture_digest=applier_capture["record_digest"],
@@ -248,7 +289,7 @@ def main() -> int:
         "final_residue_sweep.json": final_sweep,
         "host_identity.json": host_identity,
         "run_meta.json": {
-            "source_head": args.source_head,
+            "source_head": source_head,
             "expected_host": expected_host,
             "applier_node": APPLIER_NODE,
             "verifier_node": VERIFIER_NODE,
@@ -268,7 +309,7 @@ def main() -> int:
 
     # producer-side 自驗:upgraded effect result 必過 require_success 嚴格閘。
     verify_errors = tfx.validate_target_host_effect_result(
-        upgraded, now=_iso(now), expected_source_head=args.source_head, require_success=True
+        upgraded, now=_iso(now), expected_source_head=source_head, require_success=True
     )
     summary = {
         "effect_status": upgraded.get("effect_status"),
