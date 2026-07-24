@@ -1,0 +1,1014 @@
+{
+ "schema_version": "full_audit_decision_view_v1",
+ "run_id": "wf_749b4f8c-2ea",
+ "run_date": "2026-07-24",
+ "workflow": "openclaw-full-audit (dispatch-side deterministic-shim runner; validation logic byte-identical)",
+ "baseline": {
+  "source_head": "7d78765a251dc19997dae48b5591b3f1a591d3aa",
+  "dirty_diff_hash": "sha256:6c65171f446a1cab7fe50f81031e719fa77c4cb1c908c7d9303133ac6ae3c952",
+  "untracked_relevant_hash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+  "runtime_head": "7d78765a251dc19997dae48b5591b3f1a591d3aa",
+  "runtime_observed_at": "2026-07-24T00:24:34Z"
+ },
+ "baseline_identity": "7d78765a251dc19997dae48b5591b3f1a591d3aa:sha256:6c65171f446a1cab7fe50f81031e719fa77c4cb1c908c7d9303133ac6ae3c952:sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945:7d78765a251dc19997dae48b5591b3f1a591d3aa",
+ "scheduler": "adaptive_shadow",
+ "axes_executed": [
+  "CC",
+  "FA",
+  "E2",
+  "E3",
+  "BB",
+  "IB",
+  "OPS",
+  "QC",
+  "MIT",
+  "AI-E",
+  "E5",
+  "A3",
+  "R4"
+ ],
+ "shadow_selected_axes": [
+  "CC",
+  "FA",
+  "E2",
+  "E3",
+  "MIT",
+  "AI-E",
+  "A3",
+  "R4"
+ ],
+ "pass_eligible": false,
+ "totals": {
+  "findings": 130,
+  "distinct_decision_claims": 16,
+  "exact_duplicate_claims_saved": 0,
+  "confirmed": 9,
+  "latent": 1,
+  "disputed": 3,
+  "refuted": 1,
+  "deferred_claims": 2,
+  "clusters": 9,
+  "assumptions": 92,
+  "seam_reprobes": 5,
+  "decision_changing_findings": 9
+ },
+ "context_artifact_digest": "sha256:9941ee33959e85dcc8a3df8b5795dd9d26e7cb9dd85ae774973a62115f62e838",
+ "task_contract_digest": "sha256:774eef20a1d9cd5101742ec6478a3ad01a166e55f0d33975ad9643c35fd55760",
+ "budget_authority_digest": "sha256:07d2d4366cc55f9379ea58e797280637c6d33e94256344e9da46426b93575370",
+ "workflow_contract_digest": "sha256:bdbcd0d13600908ec770f55de762ace68b83005a4d612eff1a9cbf6734674fed",
+ "call_manifest_digest": "sha256:7339ff9ed43ef35ef6ffe7830c0d142b6c8df23997f8e24e1d473f9493c43fb1",
+ "wave_record_digest": "sha256:344f40af516d227a88e5519ad0780d831eab84be1c76302c2bc7041cd6c854aa",
+ "execution": {
+  "first_attempt_calls": 43,
+  "retry_calls": 2,
+  "final_null_nodes": 0,
+  "subagent_tokens_platform_observed": 5062344,
+  "tool_calls": 1110,
+  "duration_ms": 2258512,
+  "transient_api_failures_absorbed": [
+   "audit:E3",
+   "audit:IB"
+  ]
+ },
+ "claims": [
+  {
+   "claim_id": "claim-0009",
+   "bucket": "confirmed",
+   "severity": "HIGH",
+   "axis": "AI-E",
+   "title": "Full-audit strong-judgment tier pins retired model claude-opus-4-6, contradicting the repo pricing authority",
+   "file": "/Users/ncyu/Projects/TradeBot/srv/.claude/workflows/openclaw-full-audit.js",
+   "symbol_anchor": "strongJudgmentTier",
+   "assertion": "strongJudgmentTier() in the full-audit workflow defaults model:'claude-opus-4-6' for every CRITICAL/HIGH verification vote (via verificationTier) and the third adjudication, while settings/ai_pricing.yaml — the repo's AI pricing authority — marks claude-opus-4-6 retired (active:false, fail-closed) at the top price tier $15/$75 per MTok (opus-4-8 current tier is $5/$25). Additionally, config.judgment_model=null cannot restore session-model inheritance (`config.judgment_model || 'claude-opus-4-6'` coerces null back to the default), unlike cheapTier's explicit `config.cheap_model === null` escape, and the tiering comment at lines 666-667 states the third adjudication omits model to inherit the session strong model — contradicted by line 1041 which spreads strongJudgmentTier().",
+   "evidence": ".claude/workflows/openclaw-full-audit.js:672-675 `strongJudgmentTier = () => ({ model: config.judgment_model || 'claude-opus-4-6', effort: ... })`; :676-680 verificationTier routes CRITICAL/HIGH/isHighRisk to strongJudgmentTier; :1041 verify-3 uses `...strongJudgmentTier()` despite the :666-667 comment claiming inheritance; settings/ai_pricing.yaml `claude-opus-4-6: input_per_mtok 15.00 / output_per_mtok 75.00 / active: false` under the '退役型號 / retired (active:false → fail-closed)' block (aligned to official pricing 2026-06-14, header updated 2026-07-10).",
+   "impact": "Every full-audit run routes its highest-value calls — verification of CRITICAL/HIGH claims and the tie-breaking third vote — to a model the project itself declared retired. If the platform still serves it, judgment calls pay the top retired price tier (~3x the current opus-4-8 rate); if the platform rejects it, those calls return infrastructure nulls and the priciest claims silently degrade to disputed/coverage-debt after the full discovery spend is already sunk. Either branch is the exact anti-",
+   "fix_hint": "Derive tier defaults from settings/ai_pricing.yaml active entries (or a Registry-owned model map) instead of literals; add a judgment_model null escape symmetric with cheap_model; align the tiering comment with actual behavior. Same review for profit-diagnosis.js cheapTier default.",
+   "classification": "FACT",
+   "defect_type": [
+    "hardcoded-config",
+    "doc-stale"
+   ]
+  },
+  {
+   "claim_id": "claim-0015",
+   "bucket": "confirmed",
+   "severity": "HIGH",
+   "axis": "R4",
+   "title": "TODO.md active-state authority is stale by three merged PRs: it still orders a push/PR/merge of the already-merged S1 branch",
+   "file": "TODO.md",
+   "symbol_anchor": "AI/ML 一分鐘派發看板 · 當前起點/當前態勢 (lines 4-5, 12, 51-56, 129, 215)",
+   "assertion": "At frozen head 7d78765a251dc19997dae48b5591b3f1a591d3aa, TODO.md (lines 4-5, 12, 51-56, row P0-AIML line 129, self-check line 215) states the S1 review branch `agent/aiml-s1-landing` is 'source-complete... branch 尚未 merge/push', that Sprint-1 exit is 'PENDING exact-head merge 與 Linux CI attestation', and that the next actionable is 'push → exact-head PR → Linux CI → exact-head merge → ff-only'. Git at the same head proves all six S1 session commits (3c0b7fb2f, d12f84632, 7d0befd86, 08789982e, 0b2805a4d, 0e8e9fd9d) are ancestors of HEAD (merged via 'Merge pull request #112 from yunancun/agent/aiml-s1-landing' = 640121b91), and PR#113 (S1.6B real target-host attestation on trade-core) and PR#114 (S1 formal governance closure, terminal S1_ENGINEERING_CLOSED_EXTERNAL_WORM_BINDING_PENDING) are also merged. TODO was last touched at 00781db5b, authored on the review branch before any of these merges.",
+   "evidence": "`git merge-base --is-ancestor <sha> HEAD` returns IN_MAIN for all six S1 commits; `git log --oneline -25` shows 7d78765a2=Merge PR#114, fae656cd7=Merge PR#113, 640121b91=Merge PR#112; `git log -- TODO.md` last-touch = 00781db5b (pre-PR#112). TODO.md:5 '（a）exact-head merge 與（b）Linux CI／trusted-host attestation' still listed as pending; TODO.md:53 next actionable = three-way sync push→PR→merge.",
+   "impact": "TODO.md is the declared single active-state authority and the AI/ML dispatch board's entry point; the board's own rule ('若三者衝突，先停止並修正文件，不得自行猜測') means any `推進 S2`/`繼續推進` command must now fail closed at W0 on the TODO-vs-git conflict, stalling the program. A less careful session would re-attempt push/PR of an already-merged branch (duplicate-PR/rework risk) while S2's TODO-declared precondition (merge) is actually satisfied pending only the PM EFFECT_SEAMS_READY declaration — valid forward work i",
+   "fix_hint": "Single writer task: refresh TODO 當前態勢/看板 當前起點/P0-AIML row/自檢 to post-PR#114 truth — record PR#112/#113/#114 merge heads, terminal state S1_ENGINEERING_CLOSED_EXTERNAL_WORM_BINDING_PENDING, the two operator-gated inputs, and the S2 gate as awaiting PM EFFECT_SEAMS_READY declaration (not awaiting merge).",
+   "classification": "FACT",
+   "defect_type": [
+    "doc-stale",
+    "over-gate",
+    "evolution-blocker"
+   ]
+  },
+  {
+   "claim_id": "claim-0004",
+   "bucket": "confirmed",
+   "severity": "MEDIUM",
+   "axis": "BB",
+   "title": "Instrument-filter retCodes (110003/110049) have no force-refresh recovery: INSTR-ENSURE-FORCE-1 TODO open since 2026-04-23, cache refresh only every 4h",
+   "file": "rust/openclaw_engine/src/event_consumer/dispatch_retcode.rs",
+   "symbol_anchor": "classify_business_retcode (missing 110003/110049 arm) / BybitRetCode::is_instrument_filter",
+   "assertion": "BybitRetCode::is_instrument_filter classifies 110003 PriceOutOfRange and 110049 PriceTickInvalid, but grep shows zero consumers of is_instrument_filter or InstrumentInfoCache::ensure_symbol_force outside the classifier's own doc-TODOs; classify_business_retcode has no 110003/110049 arm, so both fall to `_ => Structural` (fail-closed, no retry, no cache refresh). The positive instrument cache is refreshed only at startup and by a periodic 4h task (main_instruments.rs 'Spawns periodic 4h instrument refresh').",
+   "evidence": "rust/openclaw_engine/src/bybit_rest_client.rs:874-890 and 969-986 (INSTR-ENSURE-FORCE-1 TODO dated 2026-04-23: 'no actual retry path reads the cache and retries'); grep -rn is_instrument_filter rust/ → only classifier+tests; rust/openclaw_engine/src/event_consumer/dispatch_retcode.rs:130-260 has no 110003/110049 arm (default Structural); rust/openclaw_engine/src/main_instruments.rs:16,216-218 (4h refresh cadence).",
+   "impact": "Bybit periodically adjusts tickSize/price filters on live symbols. After such a change, every limit-order intent on the affected symbol is rejected structurally for up to 4h with no self-heal — suppressed valid edge (annuity-type loss) and noisy 5xx incident-window counting. Market-order closes are unaffected (no price field), so survival risk is low; the cost is opportunity plus a 3-month-old documented-but-unwired recovery path.",
+   "fix_hint": "Wire the documented path: on is_instrument_filter in the OrderManager submit wrapper, call InstrumentInfoCache::ensure_symbol_force(force_refresh=true), re-round via fresh spec, retry once with the same orderLinkId; fall through to Structural on second failure.",
+   "classification": "FACT",
+   "defect_type": [
+    "over-gate",
+    "bybit-incompat",
+    "dead-code"
+   ]
+  },
+  {
+   "claim_id": "claim-0006",
+   "bucket": "confirmed",
+   "severity": "MEDIUM",
+   "axis": "OPS",
+   "title": "Claimed real trade-core effect artifacts are digest-only at head; the evidence bytes are not repo-resident",
+   "file": "docs/execution_plan/ai_ml_landing/receipts/S1-formal-closure-target-host-run-record.md",
+   "symbol_anchor": "'Durable governance chain' table (lines 53-63) and 'closure_packet_v1' paragraph (lines 65-70)",
+   "assertion": "The S1 formal-closure run record pins the real trade-core effect result (sha256:e2b838e8...), choice receipt (sha256:447ab474...), and landing attempt (sha256:5f174e05...) as digests in markdown only. The receipts directory contains JSON+SSHSIG artifacts for S0.* but no S1 effect-result bytes, so the claimed PLATFORM_OR_EXTERNAL_ATTESTED result cannot be independently re-verified or recomputed from the repository at head. The closure_binding carries a placeholder closure_packet_digest by the record's own admission.",
+   "evidence": "ls /Users/ncyu/Projects/TradeBot/srv/docs/execution_plan/ai_ml_landing/receipts/ shows only S0.1/S0.2/S0.3 JSON(+.sig) plus S1-formal-closure-target-host-run-record.md; the run record's own text: 'The closure_binding above carries a placeholder closure_packet_digest until the trusted-host step... mints the attested closure.' Corroborated by unmerged-branch commit b784221df 'docs(aiml-s1): H_final — persist real trade-core effect artifacts + BINDING run record', which adds the artifacts only on origin/agent/aiml-s1-closure-p1p2-fixes.",
+   "impact": "Lineage gap: if the disposable emission is lost, the claimed real-effect evidence is unreconstructible; a digest string in markdown is an unverifiable anchor, not evidence. Any downstream claim that S1.6B was 'attested on trade-core' currently rests on ORCHESTRATOR_BOUND narrative plus digests, honest about its pending SSHSIG but not independently checkable at head.",
+   "fix_hint": "Land the persisted artifact JSONs (as the fix branch already does) so digests are recomputable, then bind the operator SSHSIG over the bundle.",
+   "classification": "FACT",
+   "defect_type": [
+    "lineage-gap"
+   ]
+  },
+  {
+   "claim_id": "claim-0007",
+   "bucket": "confirmed",
+   "severity": "MEDIUM",
+   "axis": "QC",
+   "title": "PROFIT-1 standing: cost gates double-count trading costs (net-of-fee edge compared to a fee threshold wall) in both demo and live paths",
+   "file": "/Users/ncyu/Projects/TradeBot/srv/rust/openclaw_engine/src/intent_processor/gates.rs",
+   "symbol_anchor": "cost_gate_live_with_slippage",
+   "assertion": "cost_gate_moderate_with_slippage and cost_gate_live_with_slippage require cell.shrunk_bps >= 2*(fee_rate+slippage)*1e4 / win_rate * 1.3, but shrunk_bps is derived from net_pnl_bps (gross minus entry+exit fees), so round-trip cost is deducted once in the realized metric and demanded again in the threshold — an effective ~2.6x–4.3x cost wall on an already-net edge (win_rate floor 0.3, safety multiplier 1.3).",
+   "evidence": "gates.rs:145 `fee_bps = 2.0*(fee_rate+slippage)*10_000.0`; gates.rs:147-151 and 475-478 `threshold_bps = fee_bps / wr * cost_gate_safety_multiplier` compared to cell.shrunk_bps. Producer chain: realized_edge_stats.py:405-430 `net_bps = _bps(gross_pnl_usd - entry_fee_usd - exit_fee_usd, ...)`; james_stein_estimator.py:384 `raw_values = [stats[k].mean_net_bps ...]` feeds shrunk_bps. Config: settings/risk_control_rules/risk_config*.toml `cost_gate_win_rate_floor=0.3`, `cost_gate_safety_multiplier=1.3`. Matches PROFIT-1 confirmed 2026-06-14 and operator-ratified-not-fixed 2026-07-09.",
+   "impact": "Suppressed-valid-edge annuity: cells with genuinely positive after-cost edge (e.g. net +5 bps against an ~11-13 bps round-trip taker cost) are rejected unless net edge exceeds ~28-47 bps. This over-gating is operator-ratified as a standing decision (hard-boundary priority), so it must not be silently changed, but it remains the largest single quant-side headwind to net-PnL discovery and should be re-decided explicitly, e.g. threshold on gross edge or a reduced multiplier on net edge.",
+   "fix_hint": "Bring to operator as an explicit re-decision (not a silent code change): either compare gross edge to the cost wall, or compare net edge to a residual-safety margin (e.g. fee_bps*(multiplier-1)); keep live fail-closed posture.",
+   "classification": "FACT",
+   "defect_type": [
+    "over-gate",
+    "math-error"
+   ]
+  },
+  {
+   "claim_id": "claim-0008",
+   "bucket": "confirmed",
+   "severity": "MEDIUM",
+   "axis": "QC",
+   "title": "DSR gate deviates from cited Bailey-LdP Eq.8: E[max SR_k] omits sqrt(Var(SR_k)) scaling, making DSR effectively always-block for K>=2 on per-trade Sharpe inputs",
+   "file": "/Users/ncyu/Projects/TradeBot/srv/program_code/learning_engine/dsr_gate.py",
+   "symbol_anchor": "_compute_expected_max_sharpe",
+   "assertion": "_compute_expected_max_sharpe returns (1-γ)Φ⁻¹(1-1/K)+γΦ⁻¹(1-1/(Ke)) with implicit unit cross-trial Sharpe variance. Callers feed per-trade OOS Sharpe (observed_sharpe ← oos_sharpe, n_trials = n_eff) without trial_sharpes, so for K>=2 the deflation threshold (≈1.16σ at K=5, 1.539σ at K=10) sits far above any plausible per-trade Sharpe, driving DSR≈0 regardless of true edge. The repo's own walk-forward skill §2.2 formula includes the sqrt(Var(SR)) factor that the code drops.",
+   "evidence": "dsr_gate.py:227-255 (_compute_expected_max_sharpe, no Var(SR_k) term); dsr_gate.py:444-450 uses it directly as PSR threshold; l2_candidate_evidence_adapter.py:152-155 `observed_sharpe ← oos_sharpe` (per-candidate OOS trade series, per-period units); l2_ml_advisory_executor.py:1786-1800/_run_dsr_stage passes n_trials=n_eff with no trial_sharpes; n_eff_cluster.py MODULE_NOTE confirms n_eff (often >1) is the sole DSR n_trials feed. .claude/skills/walk-forward-validation-protocol/SKILL.md §2.2 writes SR_max_expected = sqrt(Var(SR))·(...). Mitigating context: alpha_wealth_refund_reconciler.py N-7 note ratifies 'discovery ≈ 0 初期是設計後果' via the separate wealth-derived threshold >=0.9995, and residual_alpha_gate defaults n_trials=1 (unaffected); when trial_sharpes are supplied, sample-max sidesteps the issue.",
+   "impact": "An un-ratified extra layer of over-deflation on the candidate discovery loop, compounding the ratified near-zero-pass wealth threshold; candidates with real deflated significance can never numerically pass the DSR stage when K>=2 and units are per-trade. Direction is conservative (no live-loss risk) but it is a structural evolution blocker for the profit-first loop and can silently invalidate any future decision to relax the wealth threshold.",
+   "fix_hint": "Scale E[max SR_k] by the cross-trial Sharpe standard deviation (estimated from trial_sharpes or a declared prior) per Bailey-LdP Eq.8, and assert/normalize the Sharpe unit contract (per-period SR with T=n_observations) at the compute_dsr boundary; add a unit test with realistic per-trade SR magnitudes.",
+   "classification": "INFERENCE",
+   "defect_type": [
+    "math-error",
+    "over-gate",
+    "evolution-blocker"
+   ]
+  },
+  {
+   "claim_id": "claim-0010",
+   "bucket": "confirmed",
+   "severity": "MEDIUM",
+   "axis": "AI-E",
+   "title": "Global single third-vote reserve caps confirmed high-risk claims at one per full-audit run",
+   "file": "/Users/ncyu/Projects/TradeBot/srv/.claude/workflows/openclaw-full-audit.js",
+   "symbol_anchor": "thirdVoteClaimId",
+   "assertion": "needsThird is true for every isHighRisk claim (CRITICAL severity or auth-bypass/secret-leak/missing-gate/leakage/replay-misuse defect types), but thirdAllowed holds only for the single global thirdVoteClaimId; quorum requires an eligible third whenever needsThird, so every high-risk claim except one is structurally forced to disputed even when both first-view verifiers unanimously confirm it, and is pushed to coverage debt ('global risk-conditioned third-vote reserve exhausted').",
+   "evidence": ".claude/workflows/openclaw-full-audit.js:927 `globalThirdVoteReserve = distinctClaims.length > 0 ? 1 : 0`; :964-968 thirdVoteClaimId selects exactly one claim; :1026-1027 `needsThird = isHighRisk(finding) || disagreement; thirdAllowed = needsThird && claim.claim_id === thirdVoteClaimId`; :1058 `quorum = firstComplete && (!needsThird || Boolean(eligibleThird))`; :1073 `disputed: !quorum`. Envelope math: 46 attempts − 13 audits − 1 seam − 2 retry reserve leaves ~30; 14 claims × 2 votes + 1 third = 29, so capacity, not value, sets the single slot.",
+   "impact": "An audit that surfaces multiple CRITICAL/auth-class claims can confirm at most one of them per run; the rest cannot reach quorum regardless of evidence and each requires a new cold-restart task (full re-discovery cost, since Full Audit continuation is unsupported at :610-612). The marginal cost of confirming the Nth CRITICAL claim is an entire audit run — a large rework annuity concentrated on precisely the highest-severity claims.",
+   "fix_hint": "Make the third-vote reserve risk-conditioned per admitted claim within remaining attempt/token capacity (trade later low-severity claim admissions for thirds on earlier CRITICAL ones), or admit a claims-only verification workflow that can consume immutable prior findings without re-running discovery.",
+   "classification": "FACT",
+   "defect_type": [
+    "over-gate"
+   ]
+  },
+  {
+   "claim_id": "claim-0011",
+   "bucket": "confirmed",
+   "severity": "MEDIUM",
+   "axis": "AI-E",
+   "title": "Regression phase is unreachable dead code whose reserve displaces one verifiable claim in fix-enabled runs",
+   "file": "/Users/ncyu/Projects/TradeBot/srv/.claude/workflows/openclaw-full-audit.js",
+   "symbol_anchor": "integratedFixes",
+   "assertion": "Every fix result is hardcoded integration_status:'NOT_INTEGRATED' and the status vocabulary never contains 'APPLIED_VERIFIED', so integratedFixes is always empty and the Regression phase can never execute; yet when fix=true the admission loop reserves fixReserveNodes=3 and fixReserveTokens including the permanently unusable regression node and estimated_regression_tokens (default 8000), shrinking the claim-verification envelope (44-node math: 26 vs 28 verification slots, i.e. one fewer decision claim verified per run).",
+   "evidence": ".claude/workflows/openclaw-full-audit.js:1184 `status, integration_status: 'NOT_INTEGRATED'` (unconditional); :1157-1166 status enum is CANDIDATE_REVIEWED_NOT_INTEGRATED/CANDIDATE_REVIEW_UNVERIFIED/NO_CHANGE_NEEDED/CANDIDATE_BLOCKED; :1191 `integratedFixes = fixes.filter(item => item.integration_status === 'APPLIED_VERIFIED')` — provably always []; :908-909 `fixReserveNodes = 3; fixReserveTokens = fixCallTokens + reviewCallTokens + regressionCallTokens`; :1193 unreachable throw.",
+   "impact": "fix=true runs pay a permanent node+token reserve for a node that cannot run, and one additional decision claim per run is deferred to coverage debt/cold restart. The meta.phases block also advertises Regression evidence the workflow cannot produce, overstating what a fix-enabled run buys. No effect on fix=false runs (this run).",
+   "fix_hint": "Drop the in-run regression reserve (candidates are never integrated in-run by design) and reallocate its node/tokens to claim verification, or gate the reserve on a real integration adapter existing.",
+   "classification": "FACT",
+   "defect_type": [
+    "dead-code",
+    "over-gate"
+   ]
+  },
+  {
+   "claim_id": "claim-0012",
+   "bucket": "confirmed",
+   "severity": "MEDIUM",
+   "axis": "AI-E",
+   "title": "closure_quality_followup_v1 ledger has zero instances anywhere: cost-per-durable-closure has no denominator",
+   "file": "/Users/ncyu/Projects/TradeBot/srv/helper_scripts/maintenance_scripts/agent_governance_closure_quality.py",
+   "symbol_anchor": "build_scheduled_closure_quality_followup",
+   "assertion": "agent_governance_closure_quality.py implements schedule/validate/summarize and agent_governance.py exposes a 'closure-quality' validation CLI, but no producer, cron, CI job, or PM closure path ever creates or persists a follow-up record: at the frozen head there are zero closure_quality_followup_v1 instances in the repository (and none under TradeBot/artifacts). The registry-mandated AI-E join — closure_quality_followup_v1 durability × separately platform-attested cost by immutable closure digest — and the primary metric 'cost per durable accepted closure' are therefore structurally unmeasurable for every closure produced to date, including PROGRAM_ADOPTED and all prior full audits.",
+   "evidence": "Module docstring: 'This module deliberately has no telemetry producer' (agent_governance_closure_quality.py:3-7); build_scheduled_closure_quality_followup (:124) has no caller outside agent_governance.py's validation-only CLI (:290,:495) and tests; `find`/`grep` across srv and TradeBot/artifacts return no *followup*/closure_quality instance files; docs/agents/development-agent-governance.md:626 documents only the validation invocation.",
+   "impact": "Reopen/rework/false-closure annuities and realized value remain invisible, so orchestration ROI decisions (role skips, adaptive-scheduler adoption, model tiering, Full Audit envelope sizing) are made with no durability feedback loop — the exact blind spot this contract was built to close. The honest 'unavailable, never zero-filled' design is correct, but 'scheduled' records must exist for measurement to ever start.",
+   "fix_hint": "Have the PM closure/Report Sink projection schedule one follow-up record per durable closure into a canonical ledger path (e.g., alongside closure packets), leaving measurement_status=scheduled until a platform/external attestation arrives; the validator already supports this lifecycle.",
+   "classification": "FACT",
+   "defect_type": [
+    "evolution-blocker",
+    "lineage-gap"
+   ]
+  },
+  {
+   "claim_id": "claim-0002",
+   "bucket": "latent",
+   "severity": "HIGH",
+   "axis": "FA",
+   "title": "Frozen head carries acknowledged P1 attestation-integrity defects in S1 formal-closure effect seam; fixes live only on unmerged branch",
+   "file": "srv/helper_scripts/maintenance_scripts/agent_governance_target_host_apply.py",
+   "symbol_anchor": "_run_probe_under_intent_authorization",
+   "assertion": "Main at 7d78765a2 contains the S1 target-host effect-seam governance code with defects that post-merge review (PR#114 findings + PR#115 Codex review) already confirmed and fixed on origin branch agent/aiml-s1-closure-p1p2-fixes: (a) process-global authorization — the applier opens the probe gate by setting os.environ AIML_TARGET_HOST_PROBE=1 on the parent process (verified line-level on main); (b) validate_target_host_effect_binding accepts runtime evidence merely labeled source==ops_postcheck, enabling a fabricated postcheck to back a PASS closure; (c) verifier capture not bound to the declared ops_postcheck node, so an unrelated non-applier capture could back the postcheck; (d) authorization capsule TTL unbounded and not capped at intent expiry; (e) a forge-resistance gap in trusted closure evidence (commit 5031cc1d2). The fix branch (9 commits, ~4025 insertions incl. agent_governance_target_host_child_apply.py and aiml_s1_trusted_finalize.py) is pushed but not merged.",
+   "evidence": "srv/helper_scripts/maintenance_scripts/agent_governance_target_host_apply.py:182-190 sets/restores os.environ[AIML_TARGET_HOST_PROBE]; git merge-base --is-ancestor shows af2491300/5705a480a/5031cc1d2 NOT ancestors of HEAD; commit messages on agent/aiml-s1-closure-p1p2-fixes (af2491300 'close 3 PR #114 findings — postcheck evidence binding, process-global auth, WORM retention'; 5705a480a 'resolve 2 Codex P1 on PR #115 — bind verifier capture to its node + cap capsule at intent expiry') describe the defects as present in the merged PR#114 code; git diff --stat HEAD..branch = 42 files, 4025 insertions.",
+   "impact": "The S1 closure evidence chain admissible at the frozen head is forgeable/over-permissive by its own later review: a PASS closure could be backed by a fabricated postcheck or a mislabeled capture, and probe authorization leaks process-globally. Any consumer of main — including the imminent operator-gated SSHSIG signing decision — reading the main-resident run record trusts digests produced under the weaker validators; the record's authoritative effect receipt (sha256:e2b838e8…) has already been s",
+   "fix_hint": "Merge agent/aiml-s1-closure-p1p2-fixes via exact-head PR before any operator SSHSIG signing over S1 closure evidence; until merged, treat main's S1 formal-closure validators as non-authoritative for closure PASS.",
+   "classification": "FACT",
+   "defect_type": [
+    "auth-bypass",
+    "lineage-gap",
+    "drift-source-runtime"
+   ]
+  },
+  {
+   "claim_id": "claim-0005",
+   "bucket": "disputed",
+   "severity": "HIGH",
+   "axis": "OPS",
+   "title": "Frozen head ships S1 formal-closure effect seam with its own already-identified P1 defects unfixed (fixes live only on an unmerged branch)",
+   "file": "helper_scripts/maintenance_scripts/agent_governance_target_host_apply.py",
+   "symbol_anchor": "_run_probe_under_intent_authorization (lines 171-190); attach_distinct_verifier_postcheck (lines 344-400)",
+   "assertion": "At the frozen head 7d78765a2, the merged PR#114 S1 target-host closure machinery contains defects that the project's own Codex review already classified as two P1 + one P2, and later two more P1 on PR#115; all fixes exist only on the unmerged remote branch origin/agent/aiml-s1-closure-p1p2-fixes (9 commits, 2026-07-23 21:53Z through 2026-07-24 00:28Z). Concretely at head: (a) the apply orchestrator sets os.environ['AIML_TARGET_HOST_PROBE']='1' process-globally on the parent process during probe execution (independently verified at agent_governance_target_host_apply.py:182-190), so any concurrent code in the same interpreter runs under the opened authorization gate; (b) validate_target_host_effect_binding accepts runtime evidence merely labeled source==ops_postcheck without binding it to the distinct verifier's own capture (per commit af2491300 body); (c) attach_distinct_verifier_postcheck only requires the verifier capture digest to be a sha256 that differs from the applier's — it is not bound to the verifier node (agent_governance_target_host_apply.py:375-381); (d) WORM retention P2 in agent_governance_terminal_receipt_external_sink.py.",
+   "evidence": "git log HEAD..origin/agent/aiml-s1-closure-p1p2-fixes shows 9 unmerged commits incl. af2491300 'fix(aiml-s1): close 3 PR #114 findings — postcheck evidence binding, process-global auth, WORM retention' whose body states 'Fixes the two P1 + one P2 findings the Codex review raised on the already-merged PR #114' and 'The applier no longer sets os.environ AIML_TARGET_HOST_PROBE on the parent process' (fixed only on-branch via a new agent_governance_target_host_child_apply.py). At head, /Users/ncyu/Projects/TradeBot/srv/helper_scripts/maintenance_scripts/agent_governance_target_host_apply.py:182-190 _run_probe_under_intent_authorization does exactly the process-global env set. Also on-branch: 5705a480a 'resolve 2 Codex P1 on PR #115 — bind verifier capture to its node + cap capsule at intent expiry', 5031cc1d2 'make trusted closure evidence forge-resistant'.",
+   "impact": "Any S1.6B effect result or closure produced with head code has weaker forge resistance than PR#114's review narrative claims: the authorization gate leaks process-wide, the OPS postcheck evidence class is spoofable by label, and the distinct-verifier capture binding is not node-authentic. Downstream consumers (S2 gating, EFFECT_SEAMS_READY declaration) must treat head-produced closure evidence as contestable until the fix branch merges. No live/trading authority is affected (nine authorities rem",
+   "fix_hint": "Merge origin/agent/aiml-s1-closure-p1p2-fixes after its own review closes (it already implements: python3 child with capsule-scoped env gate, ops_postcheck bound to verifier capture/node/head/host, capsule TTL capped at intent expiry, WORM retention). Until merged, no closure PASS should cite head-produced target-host effect results.",
+   "classification": "FACT",
+   "defect_type": [
+    "auth-bypass",
+    "missing-gate",
+    "lineage-gap"
+   ]
+  },
+  {
+   "claim_id": "claim-0003",
+   "bucket": "disputed",
+   "severity": "MEDIUM",
+   "axis": "FA",
+   "title": "Sprint-1 exit criterion 'current, verifiable effect_seams_ready_receipt_v1' maps to no repo-resident evidence on main",
+   "file": "srv/docs/execution_plan/ai_ml_landing/PROGRESS.md",
+   "symbol_anchor": "S1.5 row completion-receipt cell (PROGRESS.md:95) + S1 exit criterion (TODO.md:41)",
+   "assertion": "The S1 exit criterion (TODO.md board line 41) requires a current, verifiable effect_seams_ready_receipt_v1 and learning_runtime_choice_receipt_v1, but on main no JSON and no digest of the S1.5 effect_seams_ready receipt exists anywhere (grep across docs/ and TODO.md finds only prose descriptions); PROGRESS.md line 141 states S1 receipts are 'emitted disposably, not committed as JSON like S0.3'. Only the S1.6 choice receipt has a digest pinned (sha256:447ab474… in the run record), and that run's effect result was superseded twice on the unmerged fix branch. S0.3, by contrast, committed its receipt JSON plus producer-signed attestation and SSHSIG.",
+   "evidence": "grep -rn 'effect_seams_ready' over docs/ and TODO.md returns design prose only, no sha256 pin for the S1.5 receipt; docs/execution_plan/ai_ml_landing/PROGRESS.md:95 S1.5 completion-receipt cell says 'disposably emitted, Linux attestation owed' with no digest; receipts/ dir at HEAD contains only S0.* JSONs + one S1 run-record markdown.",
+   "impact": "A later session (or PM declaring the EFFECT_SEAMS_READY ledger gate) cannot establish that the S1.5 receipt is 'current' or verify it without re-running producers; acceptance maps to regeneration trust rather than pinned evidence, weakening the ledger contract's own rule ('Update a row only with the exact branch/PR/head and completion receipt') and creating a lineage gap between the Sprint gate and its constituent receipt. The gap is honestly disclosed in PROGRESS, but disclosure does not close ",
+   "fix_hint": "Before PM declares EFFECT_SEAMS_READY, pin the S1.5 receipt digest (and ideally commit the receipt JSON, as the fix branch already does for the S1 closure artifacts under receipts/S1-closure-fix-2026-07-24/) so the gate binds to durable evidence.",
+   "classification": "FACT",
+   "defect_type": [
+    "lineage-gap",
+    "missing-gate"
+   ]
+  },
+  {
+   "claim_id": "claim-0013",
+   "bucket": "disputed",
+   "severity": "MEDIUM",
+   "axis": "E5",
+   "title": "agent_governance_component_effects.py at 1941 lines is 59 lines below the no-exception CI hard-fail gate",
+   "file": "helper_scripts/maintenance_scripts/agent_governance_component_effects.py",
+   "symbol_anchor": "module file length (1941 lines)",
+   "assertion": "tests/structure/test_development_agent_governance.py (MAX_FILE_LINES = 2_000, line 16; assertion at line 253) hard-fails any helper_scripts/maintenance_scripts/agent_governance*.py over 2000 lines with no exception-registry escape, and it runs as a required PR check in the 'development-agent governance (cheap static gate)' CI job. agent_governance_component_effects.py currently measures 1941 lines, identity_acl_contract.py 1682, target_host_probe.py 1552 — the largest is one moderate feature addition away from blocking its own PR. This exact failure mode already occurred once: PR#113 hit the gate when target_host_probe reached 2470 lines and required an emergency mid-PR split (commit d3de26b74 'split target-host probe under 2000-line governance cap').",
+   "evidence": "wc -l helper_scripts/maintenance_scripts/agent_governance*.py → component_effects 1941; tests/structure/test_development_agent_governance.py:16 `MAX_FILE_LINES = 2_000`, line 253 asserts splitlines ≤ MAX_FILE_LINES for the agent_governance*.py glob; .github/workflows/ci.yml:150-154 runs this test as the required cheap static gate; git log shows d3de26b74 (2026-07-23) as the precedent forced split.",
+   "impact": "Evolution blocker with a known repeat pattern: the S2 sprint will extend component-effect contracts (S2.4/S2.5 effect apply sessions per the TODO board), and the first writer touching component_effects.py risks a mid-PR forced refactor — an unplanned split under review pressure costs a full extra E1/E2/E4 round (~1 session of rework annuity) and delays the sprint JOIN.",
+   "fix_hint": "Before S2 writer work touches it, split component_effects along its existing section comments (matrix-derived contract accessors vs effect validation) or land the shared-helper extraction from the duplication finding first — dedup alone removes ~130+ lines from this file. Plan-level E5 work; implementation to E1.",
+   "classification": "FACT",
+   "defect_type": [
+    "evolution-blocker",
+    "readability-debt"
+   ]
+  },
+  {
+   "claim_id": "claim-0001",
+   "bucket": "refuted",
+   "severity": "MEDIUM",
+   "axis": "CC",
+   "title": "S1 run record labels its effect receipt PLATFORM_OR_EXTERNAL_ATTESTED while the authenticating operator SSHSIG step is still pending",
+   "file": "docs/execution_plan/ai_ml_landing/receipts/S1-formal-closure-target-host-run-record.md",
+   "symbol_anchor": "receipt field table line 35: evidence_class = PLATFORM_OR_EXTERNAL_ATTESTED",
+   "assertion": "The committed run record claims evidence_class=PLATFORM_OR_EXTERNAL_ATTESTED for the trade-core target-host probe receipt, but the same document and the registry invariant state that the real out-of-band attestation (operator SSHSIG over the target-host execution bundle) is operator-gated and not yet performed; under the repo's own evidence-tier definitions (AGENTS.md: packet-local receipts cannot authenticate their own execution; the S1 signer public key in agent_governance_aiml_trusted_host.py is a placeholder that cannot validate anything), the receipt is at best ORCHESTRATOR_BOUND until that signature exists.",
+   "evidence": "docs/execution_plan/ai_ml_landing/receipts/S1-formal-closure-target-host-run-record.md:35 '| `evidence_class` | `PLATFORM_OR_EXTERNAL_ATTESTED` |' vs :11 'operator SSHSIG (operator-gated, §Pending)' and :85 terminal 'S1_ENGINEERING_CLOSED_EXTERNAL_WORM_BINDING_PENDING'. Registry invariant for target_host_disposable_runtime_probe_adapter_v1 (.codex/agent_registry_v1.json): 'real operator SSHSIG attestation is the out-of-band trusted-host step; no closure effect binding is real until the operator SSHSIG-signs the target-host execution bundle'. agent_governance_aiml_trusted_host.py: EXPECTED_S1_TARGET_HOST_SIGNER_FINGERPRINT='SHA256:OPERATOR-PROVIDES-…' placeholder.",
+   "impact": "A downstream closure consumer or later PM could read the committed receipt table as already externally attested and skip the SSHSIG binding, silently upgrading an unauthenticated self-recorded run to attested status. The honest BINDING_PENDING terminal and the fail-closed placeholder key materially mitigate; verdict integrity is intact, the label is what drifts.",
+   "fix_hint": "Relabel the committed projection as 'PLATFORM_OR_EXTERNAL_ATTESTED (claimed; pending operator SSHSIG binding — currently ORCHESTRATOR_BOUND from the closure's perspective)' or add an explicit assurance-status column, so the tier only reads as attested after the SSHSIG lands.",
+   "classification": "INFERENCE",
+   "defect_type": [
+    "lineage-gap",
+    "doc-stale"
+   ]
+  }
+ ],
+ "seam_reprobes": [
+  {
+   "seam": "CC's 'PLATFORM_OR_EXTERNAL_ATTESTED effect receipt with SSHSIG pending' + E2's 'target-host attested lane accepts non-replayable structural_reference_only capture' + OPS's 'Linux attestation OWED not discharged by pytest-only CI gate' are three independent partial findings about the same S1 effect-receipt evidence-tier claim, but no axis synthesizes them into one adjudicated verdict on whether the PLATFORM_OR_EXTERNAL_ATTESTED label itself is currently a false/overclaimed evidence tier (root-principle 8/12 exposure).",
+   "assign_axis": "CC",
+   "why": "This is an authority-class question (evidence-tier truthfulness of a closure-relevant receipt), not a single-axis bug; CC must pull E2's non-replayability finding and OPS's CI-scope finding to render one combined verdict instead of leaving three separate partial signals that could each be individually dismissed as 'someone else's problem'."
+  },
+  {
+   "seam": "BB's D2 finding (fill-sim taker fee modeled at half Bybit's real 5.5bps/leg schedule) and QC's PROFIT-1 finding (cost_gate double-counts trading costs against a fee threshold) are both cost-model defects feeding the same promotion/edge-viability decision, but no one has computed whether they cancel, compound, or are orthogonal in net effect on shipped-candidate bps.",
+   "assign_axis": "QC",
+   "why": "QC owns the promotion-gate/cost-accounting math and is best positioned to pull BB's fee-schedule evidence and quantify the combined directional bias; leaving them as two separately-filed findings risks the closure treating each as independently low-impact when together they could reverse or double a promotion decision."
+  },
+  {
+   "seam": "QC's own promotion-gate statistics findings (DSR Eq.8 scaling omission, CPCV not actually combinatorial, ad-hoc power formula with fixed effect size) and MIT's independently-derived 'ship-gate statistical power very low at n_test≈26' are not reconciled against each other — unclear whether MIT's finding is a downstream symptom of QC's same defective formulas (one root cause, redundant filing) or an independent confirming data point (two distinct roots, higher aggregate confidence).",
+   "assign_axis": "QC",
+   "why": "QC is the quant-methodology authority for both gates; only QC can trace whether MIT's empirical power number derives from the same flawed DSR/power-formula code path QC flagged, which changes whether closure should record one root-cause defect or two independently corroborating ones."
+  },
+  {
+   "seam": "MIT's 'DSN split-string deliberately evades the public-repo credential scanner in ML persistence fallback' and OPS's 'restart_all.sh documents an in-code evasion of the same credential gate via split DSN literal' describe structurally identical anti-patterns in two different files/subsystems, but no axis checked whether this is one shared convention/helper (systemic, more instances likely) or two coincidentally similar one-offs, nor swept the repo for further occurrences.",
+   "assign_axis": "CC",
+   "why": "This is a security/authority-boundary pattern (credential-gate bypass), which is CC's ownership; only a repo-wide grep for the split-string DSN pattern can settle whether remediation scope is 2 files or an unknown-N systemic convention, which materially changes severity and remediation ownership."
+  },
+  {
+   "seam": "Multiple axes (CC/FA/E2/OPS/MIT/E5/R4) independently rediscovered that TODO.md/PROGRESS.md/initiative_index.md are stale about S1 merge state, but none checked E5's separately-filed finding that 'the Registry active_state pack pins only the AI/ML dispatch board into every task capsule' as a possible root mechanism — i.e., whether the staleness is simply an un-edited document (content bug) or a symptom of the active_state pack-generation logic itself serving frozen/cached content into every task capsule regardless of source freshness.",
+   "assign_axis": "E5",
+   "why": "E5 is the Registry/pack-generation owner and is the only axis positioned to check the pack's generation timestamp/refresh logic against source_head; if the pack mechanism itself is stale-by-design, seven axes independently re-filing the same symptom is masking one systemic Registry defect rather than a one-line doc edit."
+  }
+ ],
+ "coverage_debt_count": 102,
+ "coverage_debt": [
+  {
+   "kind": "assumption",
+   "id": "assumption-1",
+   "owner": "CC",
+   "reason": "PROFIT-1 (cost_gate double cost deduction, confirmed 2026-06-14 and operator-accepted as unfixed) was not re-verified in code this run; its accepted-debt status is carried, not proven current.: Budget was spent on the S1 merge wave and authority seams; locating and re-deriving the double-deduction arithmetic in the cost gate needs a dedicated read that would have displaced higher-yield authority checks."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-2",
+   "owner": "CC",
+   "reason": "SCHEMA-1 (absence of a column contract test) from the 2026-06-14 cold audit was not re-checked; a contract test may or may not have landed since.: No targeted search performed; test inventory grep in the supplied capsule does not disambiguate column-contract coverage."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-3",
+   "owner": "CC",
+   "reason": "Rust five-gate live authorization was verified only at fingerprint/spot level (gate surfaces exist in live_spawn_assert.rs, live_authorization.rs, live_auth_watcher.rs, ipc_server/live_authz.rs); no exhaustive path proof that all five gates are conjunctive on every spawn path, and no per-engine (paper/demo/live) independent verification as the 16-principles skill requires for a full A-grade rating.: Deep semantic read of the live authorization chain is several thousand lines; prior audits (2026-06-14 runtime-proven fail-closed; 07-06 AUTH-1 fix) are claim_inputs-grade history, and this contract forbids runtime confirmation, so a full re-proof could not reach a stronger tier anyway."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-4",
+   "owner": "CC",
+   "reason": "GUI write-path compliance is sampled (2 endpoints of ~93); the remaining write surface, including any trading_mode cold-parameter path, is unproven this run.: Full sweep of 93 endpoints exceeds this role's budget share; the sampled endpoints were chosen as the risk-representative config/promotion writes."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-5",
+   "owner": "CC",
+   "reason": "ML leakage repair (three-way partition + two-way shadow-cap fix from 2026-07-11) was confirmed present only by file/symbol existence (shadow_cap in quantile_trainer.py/run_training_pipeline.py, tests/test_item1_two_way_fallback_e1.py); leak-freedom semantics were not re-derived.: Semantic leakage re-derivation is QC/MIT-native math; as CC I verified persistence of the mandated fix artifacts, and per independent-discovery rules I flag rather than assume the other axes cover the semantic depth."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-6",
+   "owner": "CC",
+   "reason": "Delivery-protocol Amendment A1 and the repair-plan edits inside PR#114 were not line-verified against the S0.3-adopted constraint set; the ledger's claim that the frozen S0.3 classifier digest is byte-unchanged (sha256:1cf8c021…d0ddbc) was accepted from the ledger and registry tests, not independently recomputed.: Recomputing the classifier digest and diffing the protocol amendment against adoption-time bytes needs the S0.3 bundle replay; structural tests (test_agent_governance_aiml_adoption.py) exist and CI-gate it, but I did not execute them under a governed capture in this run."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-7",
+   "owner": "CC",
+   "reason": "S1 per-session role-chain PASS claims (E2/E4/CC/E3/OPS/QA per session, cross-session PA/CC/FA) rest on disposably-emitted receipts that are not committed JSON; they are ORCHESTRATOR_BOUND at best and cannot be locally re-verified from this head.: PROGRESS.md states the S1 receipts were deliberately not committed (unlike S0.3); no repo bytes exist to recapture, so the claims stay unverifiable coverage debt until the operator SSHSIG/WORM binding lands."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-8",
+   "owner": "CC",
+   "reason": "Runtime state on trade-core (engine/watchdog/PG/cron actual behavior), Bybit and IBKR official external-policy freshness, and Linux CI execution facts for PR#112-114 are outside this contract; only the pinned runtime head identity (7d78765a2 observed 2026-07-24T00:24:34Z) is admitted.: Task contract excludes runtime-family and external-policy verdict evidence for this role; deeper claims are explicitly coverage debt, never PASS."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-9",
+   "owner": "CC",
+   "reason": "The many p0_*.json context/task artifacts and GITHUB_SUPPORT_SECRET_PURGE_REQUEST.md sitting in the repo parent directory (/Users/ncyu/Projects/TradeBot/, outside srv/) were not audited for secret content or staleness.: They are outside the repository and outside the contracted scope roots; noting their existence only, since a secret-bearing stray artifact adjacent to the repo would matter to a future OPS/E3 sweep."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-10",
+   "owner": "FA",
+   "reason": "GitHub-side facts are unverified: PR#115 open state and review threads, PR#88 (IBKR W7-S4a WIP) state, and whether the Linux CI required checks actually ran green on the PR#112/#113/#114 merges (the 'Linux CI attestation owed' claim in TODO/PROGRESS can be settled only against GitHub check runs).: FA identity has no admitted public-web/GitHub tool in this task; ruleset-enforced required checks are external-platform facts (PLATFORM_OR_EXTERNAL_ATTESTED class) that repo bytes cannot attest. Reported as coverage debt, not inferred green."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-11",
+   "owner": "FA",
+   "reason": "Runtime facts beyond the pinned identity (engine/watchdog dormancy, systemd unit env, cron heads, PG state, IBKR runtime dormancy) were not observed; only source-level dormancy (OrderEffectPermit cfg(test)-only mint, no production HMAC release arm) was verified.: Task contract excludes runtime-family verdicts; runtime claims beyond the baseline identity pin are contractually coverage debt and this role performed no Linux capture."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-12",
+   "owner": "FA",
+   "reason": "ML/data leakage and methodology (three-way partition integrity, dedup/n_eff pipeline, label/PIT contracts under program_code/ml_training) were not re-audited by FA beyond confirming the QC seam re-probe row still queues the known false-GO amplifier concern.: Owned by QC/MIT lenses in this DAG; FA time-boxed to acceptance-mapping surfaces. Independent-discovery rule noted: if those axes did not run, this remains an open recall hole."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-13",
+   "owner": "FA",
+   "reason": "The GUI write-path inventory (93 endpoints, fake-success discrimination) and Bybit external policy freshness (fee constants incl. the 5.5bps SSOT seam, retCode/timeout semantics) were not re-verified.: BB/A3/E2 axis territory; Bybit policy freshness additionally requires public-web evidence capture not admitted for FA. Flagged via the aging seam-reprobe finding instead."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-14",
+   "owner": "FA",
+   "reason": "Of the five acknowledged defects in Finding 1, only the process-global env authorization was verified line-level on main; the fabricated-postcheck acceptance, capture-node binding, capsule TTL, and forge-resistance sub-claims rest on fix-branch commit messages plus diff stats, not on independent re-derivation of main's validator code paths.: Line-auditing ~4000 inserted/changed lines across agent_governance_target_host_effects.py and peers exceeded the audit time-box; commit messages are trusted-producer but self-reported, so those sub-claims carry INFERENCE strength individually."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-15",
+   "owner": "FA",
+   "reason": "P2 OOM streaming wave (PR#43-56) half-landing check was shallow: verified no p0-oom-* branches remain locally, but did not line-audit main for orphaned streaming flags or dead candidate-scoped projection code.: E5/perf axis territory; FA limited to branch-topology evidence."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-16",
+   "owner": "FA",
+   "reason": "The 46-session PROGRESS row inventory was not exhaustively cross-checked against the TODO board's Sprint/JOIN table for row-by-row consistency (only S0/S1/S2.0 rows and the S1 exit criterion were mapped).: Time-boxed; highest-risk rows (current sprint boundary) were prioritized over dormant S3-S8 template rows."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-17",
+   "owner": "E2",
+   "reason": "Runtime truth of the Wave-C claims (probe really executed on trade-core, zero residue, verifier genuinely distinct in role+process+capture, prod PG untouched, Linux CI attestation state) was NOT verified; only the receipt digests exist in docs and the receipt JSONs are deliberately not committed.: Task contract excludes runtime-family verdict evidence; the only admitted runtime fact is the baseline head pin (trade-core at 7d78765a2, observed 2026-07-24T00:24:34Z). Anything deeper is coverage debt, never PASS."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-18",
+   "owner": "E2",
+   "reason": "Bybit external policy freshness (docs/references/2026-04-04--bybit_api_reference.md vs current official Bybit API) and IBKR/TWS external policy freshness were not checked.: E2 has no admitted public-web tool; external_policy class facts require PLATFORM_OR_EXTERNAL_ATTESTED snapshots I cannot obtain. git log shows no bybit/exchange-connector semantic changes since 2026-07-01 in this window, which bounds but does not eliminate the risk."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-19",
+   "owner": "E2",
+   "reason": "The five-gate true-live path, Bybit nonzero-retCode fail-closed semantics, Guardian/Decision Lease enforcement, and the broader Rust W6/W7 IBKR machinery (reconciliation, cash-constraint engine, calendar guards) were sampled only via INV-ORDER; no full re-audit this run.: No commits touched these surfaces inside the audit emphasis window except IBKR W6/W7 additions, and budget was prioritized to the newest merge (PR#113/114). Prior R8 (07-16) adversarial audit CONFIRMED INV-1; I verified only the newest order-verb always-reject foundation in source."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-20",
+   "owner": "E2",
+   "reason": "ML leakage/methodology was not re-executed: the 07-11 three-way-partition leakage fix and CPCV/canary items 6/7/Q4 were verified only as source-history (commits c7078ee9c/e7529e664 present; V157 row honestly marked DONE_WITH_REATTESTATION_REQUIRED). No training pipeline, label, or lookahead sweep was rerun.: Requires PG/runtime data access and long-running pipelines outside this read-only Mac audit; ml_training changes since 07-11 are otherwise confined to AIML governance validator/schemas per git log."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-21",
+   "owner": "E2",
+   "reason": "The 8 seam re-probes from the 2026-07-11 ultracode audit (TODO v788 follow-ups), the accepted-not-fixed PROFIT-1 double cost deduction, and the three PERF items were not individually re-verified.: Each needs its original repro context (runtime PG queries or perf harness); within budget I re-verified only SCHEMA-1 (still open, reported as finding) as the cheapest carried claim."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-22",
+   "owner": "E2",
+   "reason": "GUI write paths were not re-swept; no static/console/dashboard changes since 2026-07-10 were found in git log sampling, so the gui-baseline arc conclusions were assumed to stand.: No change signal in the window; a full 93-endpoint write-path re-audit was out of proportion to expected decision gain for this frozen head."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-23",
+   "owner": "E2",
+   "reason": "Full test suite and Linux CI parity were not executed; only 204 focused structure tests (target-host adapter/orchestrator/landing-attempt/WORM-sink/probe) plus governance validate/render were run locally on Mac.: Governed capture-command attestation requires an admitted node-id/context artifact not provisioned to this session, and Mac pytest runs are LOCAL_REPRODUCIBLE at best per the platform boundary; the CI-attested layer remains OWED exactly as TODO states."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-24",
+   "owner": "E2",
+   "reason": ".claude/workflows/openclaw-full-audit.js (this run's own orchestration interface) and the large sibling governance modules (component_effects 1941L, identity_acl_contract 1682L, terminal_receipt_sink 972L) were not line-audited.: Budget triage: they predate the emphasis window and carry dedicated adversarial test suites (test_agent_governance_full_audit_adversarial.py et al.); unreviewed remainder is declared, not silently passed."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-25",
+   "owner": "E3",
+   "reason": "Runtime/live state on trade-core (engine process, PG, deployed socket dir mode/umask, live authorization.json presence) was not observed.: Task is read-only with no runtime attestation capability; only the pinned baseline identity (trade-core head 7d78765a2, observed 2026-07-24T00:24:34Z) is admitted. Deeper runtime assertions are coverage debt, never PASS."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-26",
+   "owner": "E3",
+   "reason": "Bybit and IBKR external broker-policy freshness/compatibility not independently verified.: Official broker policy snapshots cannot be locally attested; per task contract the BB/IB policy surfaces are excluded from the contract and any external-policy claim is coverage debt."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-27",
+   "owner": "E3",
+   "reason": "Full Rust order-emission and live-mutation reachability not exhaustively traced.: Sampled the key authority gates (IBKR activation envelope, RiskConfig applier default-deny, ipc_server/live_authz nonce bind-string) but did not enumerate every path from IPC dispatch to a live effect; time/budget bounded. Residual: an unsampled order path could theoretically bypass a gate."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-28",
+   "owner": "E3",
+   "reason": "Not all 68 agent_governance_* modules were audited line-by-line.: Focused on security-critical modules (permissions, capture v1/v2, trust, aiml_trusted_host, target_host_apply). The remaining modules (closure/dispatch/routing/effects/p0b) were only inventoried; a latent auth/effect gap in an unread module is possible."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-29",
+   "owner": "E3",
+   "reason": "GUI write-through-Rust enforcement was sampled, not exhaustively verified across all ~93 endpoints.: Verified CORS wildcard strip, cookie/CSRF handling, current_actor token check, and the RiskConfig live-write structural block; did not trace every settings/strategy/executor write route to confirm none has a Python fake-success path."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-30",
+   "owner": "E3",
+   "reason": "Deployed socket directory permissions and umask on the runtime host are unknown.: Only source was read; the actual /tmp/openclaw dir mode and process umask on trade-core determine the real exploitability window of the IPC 0o600 finding, and those are runtime facts outside this read-only scope."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-31",
+   "owner": "BB",
+   "reason": "Current official Bybit fee schedule (standard/VIP0 linear maker 0.02% / taker 0.055%), per-endpoint rate limits, demo-trading endpoint support matrix, and restricted-jurisdiction list are assumed unchanged since their in-repo capture dates (2026-07-04 rate limits, 2026-05-31 funding caps, 2026-04 jurisdictions/demo topics). Finding F4's severity depends on the taker schedule still being 5.5 bps/leg.: external_policy facts require an opened-official-URL capture (PLATFORM_OR_EXTERNAL_ATTESTED); this task contract excludes broker policy surfaces from local attestation and supplied no admitted public_web_read evidence-acquisition node id for BB, so live re-verification was out of authority. Explicit coverage debt."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-32",
+   "owner": "BB",
+   "reason": "Runtime behavior on trade-core (actual rate-limit header convergence, BybitFailClosed incident firing history, demo book cleanliness, private WS reconnect behavior under real disconnects, crontab/env of the deployed engine) was not observed; all claims here are source-generation claims at head 7d78765a251dc19997dae48b5591b3f1a591d3aa.: Task contract pins runtime identity only and declares deeper runtime assertions coverage debt; BB is read-only with no runtime probe authority in this admission."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-33",
+   "owner": "BB",
+   "reason": "bybit_private_ws.rs (1750 lines) was spot-checked only (ping 20s cadence, 3s/60s/x2 reconnect profile, demo topic set order/execution/position/wallet, execution parse shape, exec_id dedup at consumer). Full reconnect snapshot-gap semantics, auth-expiry handling, and sequence-gap recovery were not line-audited.: Depth/budget trade-off; the module is large and the highest-risk seams (topic sets, funding branch, dedup) were independently verified. Residual risk: unreviewed reconnect edge cases."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-34",
+   "owner": "BB",
+   "reason": "Funding settlement sign convention (whether positive execFee from a Funding execution row correctly maps to balance decrease in paper_state.apply_funding_settlement, and whether the raw-key fallback list fundingFee/cashFlow/walletBalanceChange matches current Bybit WS payloads) was not traced to its consumer or verified against a live payload.: apply_funding_settlement lives in paper_state (outside the surfaces I opened); payload-shape verification needs either a runtime capture or fresh official docs — both outside this admission."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-35",
+   "owner": "BB",
+   "reason": "The 2026-07-11 ultracode audit's 8 open seam re-probes (TODO v788 follow-up rows) were not individually re-verified; only Bybit-facing surfaces were independently re-derived. Any non-venue seam remains unassessed by this axis.: Independent-discovery rule: I audited my owned venue lens from scratch rather than replaying another axis's seam list; the seam inventory itself was not in my supplied context and enumerating it would have consumed budget outside my ownership."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-36",
+   "owner": "BB",
+   "reason": "GUI/console write surfaces affecting Bybit state were verified only for the API-key/endpoint-switch chain (settings_routes operator gating, slot mapping, bundle rollback). The remaining ~90 GUI endpoints, live_session stop pipeline details, and governance_routes reconcile trigger arming state were not re-audited.: Frontend/GUI write-path ownership belongs primarily to the GUI axes; I verified only the slice where GUI writes become venue environment/credential truth."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-37",
+   "owner": "BB",
+   "reason": "Demo learning lane and bounded-probe modules (demo_learning_lane*.rs, bounded_probe_active_order.rs, bounded_probe_near_touch.rs) are assumed to construct clients only through the audited BybitRestClient environment defaults (safe default Demo).: Not line-audited this pass; the client constructor gates audited here are the chokepoint, and no alternative HTTP client construction for private Bybit endpoints was found in grep sweeps, but per-module intent was not read."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-38",
+   "owner": "IB",
+   "reason": "Runtime dormancy on trade-core (zero listeners on 4001/4002/7496/7497, absent ~/Jts, zero ibkr secret slot, absent <DATA_DIR>/governance/ibkr_phase2 seal) is assumed to still match the last ledgered observation (2026-07-17 per IBKR_TODO §4.3/§0); this run only holds the baseline identity pin (runtime_head 7d78765a2 observed 2026-07-24T00:24:34Z).: Runtime observation claims require platform-attested capture on Linux; the task contract admits only the identity pin and routes deeper runtime assertions to coverage debt. No SSH/runtime read was performed."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-39",
+   "owner": "IB",
+   "reason": "Official IBKR external-policy facts were NOT re-verified for freshness in this run: pacing = market-data-lines÷2, Sunday ~1:00am ET forced re-authentication, GFV enforcement mechanics, paper-account 2FA applicability, regulatorySnapshot fee semantics, and all 10.x-band (sv158-176) wire layouts. The ledger's own UNVERIFIED markers (D8/BLOCK-ORDER-BAND, EA-CAL items, W7-S2 illustrative constants) are preserved as-is.: External-policy class evidence needs an opened public URL preserved as external_evidence_capture_v1 with citation/provenance under an admitted evidence-acquisition node; the task contract excluded broker policy surfaces from local attestation and no such node was admitted, so freshness stays coverage debt rather than an unverifiable claim."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-40",
+   "owner": "IB",
+   "reason": "The W7-S4a branch content (agent/ibkr-w7-s4a-option-b-hmac, ledgered head 36e829cb1, PR#88 OPEN WIP) was not audited; only its absence from main was proven.: The remote branch is not present in the local clone at the frozen baseline and fetching was out of scope for a read-only frozen-head audit; S4a quality-chain review remains owned by the loop §6 takeover protocol."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-41",
+   "owner": "IB",
+   "reason": "Test-suite executions backing the ledgered counts (engine ibkr 511, types 74+287, Python 201, fake 12+) were not re-run; INV-1/INV-ORDER verdicts rest on exhaustive source reading plus CI-wiring inspection, not on a fresh green run at this head.: Read-only pass without an admitted capture-command node-id for cargo/pytest; the governed wrapper cannot run pytest on Mac (known HOME-isolation limitation), so execution attestation belongs to Linux CI, which is outside this fragment's evidence scope."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-42",
+   "owner": "IB",
+   "reason": "Bybit-live-unchanged was checked only structurally (stock_etf IPC methods lane-scoped read-only; no IBKR module touches the Bybit hot path); the per-gate Bybit regression suite was not executed, and the post-GUI-migration native stock view files were not exhaustively re-audited for write paths (legacy tab and route layer were).: Regression execution and a full GUI render-layer sweep exceed the read-only budget of this axis; the cross-lane iron rule's runtime proof remains with the standing CI/regression chain."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-43",
+   "owner": "OPS",
+   "reason": "Runtime state on trade-core beyond the pinned identity (whether flock/OOM-victim cron mitigations, logrotate applied:true manifest, watchdog unit env, engine/watchdog oom_score_adj, crontab parity, and service active-states are actually deployed and current) is unverified and treated as coverage debt.: Task hard stop pins the only admitted runtime fact to the baseline identity (trade-core head 7d78765a2 observed 2026-07-24T00:24:34Z); this read-only Mac audit has no admitted governed capture node for remote probes, and source capture cannot prove runtime state."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-44",
+   "owner": "OPS",
+   "reason": "Rust engine authority boundaries (five-gate live path, execution_authority surfaces, IBKR permit denial in engine code) were not exercised beyond source presence and unit/installer inspection; no cargo build/test was run.: Read-only audit with no build effects permitted; deep engine authority verification is E2/CC/IB axis work and exceeded the OPS wave budget — flagged rather than assumed clean."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-45",
+   "owner": "OPS",
+   "reason": "GitHub-side facts (required checks actually green on PR#112-114, ruleset configuration, whether PR#115 exists/what state the fix branch review is in) were not re-attested; conclusions rest on local git ancestry and commit messages only.: OPS has no admitted public-web/gh evidence node in this task; external-policy/platform facts require PLATFORM_OR_EXTERNAL_ATTESTED evidence I cannot produce here."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-46",
+   "owner": "OPS",
+   "reason": "Whether origin/agent/aiml-s1-closure-p1p2-fixes fully and correctly closes the PR#114/#115 findings was not verified; only its commit messages and diffstat were read, not the fix code.: Reviewing ~4000 inserted lines on an unmerged branch is outside the frozen-head audit scope; the branch is cited as evidence of known-at-head defects, not as a verified remedy."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-47",
+   "owner": "OPS",
+   "reason": "ML/data leakage methodology, GUI write-path fake-success surfaces, Bybit/IBKR external policy freshness, and the carried PROFIT-1/SCHEMA-1/PERF items from the 2026-06-14 cold audit were not expanded by this axis.: Outside the OPS ownership boundary (OPS refuses security/broker-policy verdicts); these belong to MIT/QC/A3/E1a/BB/IB axes — recorded here so the gap is not silently assumed covered."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-48",
+   "owner": "OPS",
+   "reason": "No exhaustive secret scan of the repository was performed; only the restart_all.sh DSN-gate-evasion site was assessed.: The public-repository-hygiene workflow exists as the standing control; re-running a full scan exceeded budget and duplicates E3's axis."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-49",
+   "owner": "QC",
+   "reason": "Runtime state of the promotion/discovery pipeline on trade-core (whether any registry rows currently have NULL acceptance_report or two_way partition_mode, whether OPENCLAW auto-promote env gates are enabled, whether the DSR stage has actually vetoed real candidates for the unit-scaling reason) was not verified.: Read-only Mac audit; direct psql is governance-denied and runtime claims beyond the pinned baseline identity are explicit coverage debt per the task contract. Findings F3/F4 are therefore source-level INFERENCE about reachable behavior, not observed runtime facts."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-50",
+   "owner": "QC",
+   "reason": "V151-V157 ALR migration chain deployment status (memory: V157 pending coordinated deployment) and whether registry lineage columns exist in the live PG schema were not verified; model_registry code explicitly tolerates their absence.: PG reflection requires Linux runtime evidence via a read-only-identity Adapter; unavailable in this read-only source audit."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-51",
+   "owner": "QC",
+   "reason": "AIML-V2 S1 Linux platform-attested test evidence remains OWED (S1 closed DONE_WITH_EXTERNAL_EVIDENCE_PENDING). This audit confirms only the source-level claim that S1 touched no quant surface; it cannot convert any S1 test/CI claim into attested PASS.: Governed capture-command cannot run pytest on Mac (HOME isolation, per pinned memory); platform attestation is a Linux trusted-host step outside this fragment's authority."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-52",
+   "owner": "QC",
+   "reason": "No tests were executed in this audit; all leakage/cap/guard coverage claims are from reading test source, not from a green run at the frozen head.: Read-only contract plus the Mac pytest attestation gap; re-execution is coverage debt for E2/E4 or a Linux CI run."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-53",
+   "owner": "QC",
+   "reason": "Bybit fee-tier/external policy freshness (fee_rate inputs feeding the cost gates) and IBKR gated-lane risk math were not audited from the QC lens.: External broker policy snapshots are not locally attestable and are BB/IB axis ownership; QC only verified the internal math consuming those inputs. IBKR lane contains no active quant gate surface in the audited diff."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-54",
+   "owner": "QC",
+   "reason": "The 46-session AIML PROGRESS.md quant-bearing plan rows (S4 label/PIT design, S5 fit/OOS/registry, S7 G2/DR/soak) were not deep-audited; they are plan-stage text, not implemented code at this head.: Expected decision gain is low before implementation exists; methodology review is properly owed at S4/S5 W3 review time. Risk recorded: the S1-S3 waves are governance-heavy and none of the F2/F3/F7 gate-math debts above are on the AIML plan's fix list."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-55",
+   "owner": "QC",
+   "reason": "GUI write paths, docs/index drift, governance module internals (agent_governance_*), and secret hygiene were not covered by this fragment.: Outside QC ownership boundary (owned by A3/E1a, R4/FA, CC/E2, and security axes respectively); QC did not assume their coverage but also did not duplicate it."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-56",
+   "owner": "QC",
+   "reason": "The intra-holdout boundary-leak magnitude (F5) and the practical false-negative rate of the double-counted cost wall (F2) were not quantified empirically against real fills.: Requires demo fill/label data from PG (runtime evidence class); the direction and bound are established analytically from source constants (4h label window, 24/72h embargo, 0.3 wr floor, 1.3 multiplier)."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-57",
+   "owner": "MIT",
+   "reason": "V151-V160 ALR migration chain actual apply state on trade-core PG (and whether V157 lineage columns are live in production) was not verified; sql/migrations/applied_checksums.sha384 covers through V160 at source level only.: Runtime/PG evidence is excluded by the task contract (runtime identity pin only); direct psql is denied to read-only roles and no read-only-identity Adapter artifact was supplied. Coverage debt, not PASS."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-58",
+   "owner": "MIT",
+   "reason": "Rust decision_features write-side PIT semantics (feature values captured strictly at decision time, intent-only emit) were trusted from existing tests (test_decision_features_intent_only_emit.py, features.rs to_json) and not re-verified at value level against live rows.: Value-level verification requires PG row sampling on trade-core, which is outside this read-only Mac audit's admitted evidence classes."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-59",
+   "owner": "MIT",
+   "reason": "V158/V159/V160 (6,600 lines of ALR challenger training / fit attestation / atomic fit consumption DDL) were spot-checked for structure (hash CHECKs, no-authority constraints, table/index/trigger inventory) only; full constraint/trigger semantics and idempotent double-apply behavior were not line-audited.: Budget: full semantic review of ~6.6k migration lines exceeds this axis's reserve; double-apply proof additionally requires a disposable PG, unavailable read-only on Mac."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-60",
+   "owner": "MIT",
+   "reason": "ONNX numerical train/serve parity (<1e-3 max abs err between Python golden predictions and Rust ort) is enforced Rust-side; the harness was not re-executed in this audit.: Executing the harness requires building/running the Rust test suite; read-only source inspection confirmed the gate exists but not its current empirical margin."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-61",
+   "owner": "MIT",
+   "reason": "GUI write paths, Bybit external policy freshness, IBKR gated-lane wire compatibility, and the S1 governance modules' internals (agent_governance_target_host_*.py) were not expanded by this axis beyond confirming dormancy/advisory posture where they intersect ML lineage.: MIT ownership boundary (data/ML methodology, schema, serving parity); expanding these surfaces would exceed the role's decision-gain-per-token threshold given other axes own them — recorded here so the gap is explicit rather than assumed covered."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-62",
+   "owner": "MIT",
+   "reason": "Ultracode seam (3) 'CV-leakage → deprecated IID t-test false-GO amplifier' exact code locus could not be re-identified from the seam label; no ttest_1samp/ttest_ind call sites exist in production python, suggesting the seam may reference an already-removed or research-lane path.: The originating audit fragment's file anchor is not in the seam row text; resolving it requires the archived wf_27620bc0-5a4 fragment, which was not in the supplied context packs."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-63",
+   "owner": "MIT",
+   "reason": "Whether concurrent same-symbol/strategy entries actually overlap in production (precondition for the funding double-count finding) was not measured.: Requires PG window-overlap query on trading.fills/learning.decision_features; runtime read denied in this contract — finding filed as INFERENCE with med confidence accordingly."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-64",
+   "owner": "AI-E",
+   "reason": "Current platform model catalog and official Anthropic pricing (whether claude-opus-4-6 is still servable, whether the claude-sonnet-5 intro window terms in ai_pricing.yaml are still accurate) were not externally verified.: This task contract admits no owned public-web evidence-acquisition node for AI-E and excludes external policy snapshots; only opened public URLs preserved as external_evidence_capture_v1 could support the claim. The F1 finding therefore rests on the internal cross-surface contradiction (workflow literal vs repo pricing authority), which is byte-verifiable at the frozen head."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-65",
+   "owner": "AI-E",
+   "reason": "Runtime AI spend was not measured: learning.ai_usage_log contents, actual 7d/30d cost, budget-gate ($2/day) firing history, realized cost_edge_ratio, and whether Rust BudgetTracker fail-closed rejections occur for dated model IDs.: Requires Linux trade-core PG read; direct psql is denied by governance preflight and no read-only-identity adapter capture was available in this run. The contract pins runtime to identity only; deeper runtime assertions are coverage debt."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-66",
+   "owner": "AI-E",
+   "reason": "Saved-workflow agent() behavior when given an unavailable/retired model ID (throw vs infrastructure null) was not established, which determines whether F1 degrades CRITICAL claims to disputed or crashes the run mid-verification.: Platform-internal behavior is not locally attestable and probing it would require spending a live workflow run, out of scope for a read-only audit."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-67",
+   "owner": "AI-E",
+   "reason": "Prompt-cache economics of the shared contextPrefix design (cache anchor across ~30+ calls per audit run) were not measured — cache hit rate, cache_read vs input ratio, and whether the prefix ordering actually achieves cache reuse.: No internal cache telemetry exists (finding on learning.ai_usage_log lacking cache columns) and no platform usage telemetry was exposed to this sub-agent."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-68",
+   "owner": "AI-E",
+   "reason": "Deep attestation of the S1.6B PLATFORM_OR_EXTERNAL_ATTESTED target-host probe evidence and the S0.3/S1 SSHSIG digest chains was not re-verified by this axis.: Ownership belongs to OPS/E3/CC lenses and digest re-verification needs trusted-host tooling; this axis only confirmed the S1 arc makes no AI-usage/cost claims."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-69",
+   "owner": "AI-E",
+   "reason": "Rust engine authority boundaries, IBKR dormancy, Bybit policy compatibility, ML leakage, and GUI write paths were not expanded beyond their AI-economics couplings (budget_config, ai_pricing, attention-tax config).: Outside AI-E ownership; independent-discovery rule means I did not rely on other axes but also did not spend budget re-auditing surfaces where AI/model/orchestration economics cannot change the decision (registry skip_when)."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-70",
+   "owner": "AI-E",
+   "reason": "The two budget_config.toml copies (repo root vs settings/risk_control_rules) were verified semantically identical in values (ordering/comments differ), but which copy the deployed engine actually loads (OPENCLAW_BUDGET_CONFIG env vs base path) was not runtime-verified.: Engine load path resolution depends on runtime environment variables on trade-core; runtime observation beyond the pinned identity is contract-excluded coverage debt."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-71",
+   "owner": "E5",
+   "reason": "Actual runtime performance (engine tick latency vs the <0.3ms SLA, PG query timings, cron RSS ceilings after the streaming repair, watchdog behavior) was not measured.: Task contract excludes runtime-family claims beyond the pinned identity; the performance-profiling skill's flamegraph/py-spy/pg_stat workflow requires the Linux runtime and platform-attested capture, neither admitted to this read-only Mac audit. All runtime performance assertions remain coverage debt."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-72",
+   "owner": "E5",
+   "reason": "CI job wall-times (cheap static gate vs 5-min timeout; alr-fit-verifier double cargo test vs 10-min) are inferred from workload size, not measured.: GitHub Actions telemetry is PLATFORM_OR_EXTERNAL_ATTESTED evidence not available locally; recent successful merges only prove the jobs currently fit, not the margin."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-73",
+   "owner": "E5",
+   "reason": "Whether the stale 'not yet merged' language in TODO/PROGRESS is a deliberate PM staging choice pending the owed Linux attestation, rather than an omission, was not adjudicated.: PR#114's diff and the board's self-declared conflict rule are the only local evidence; PM ledger intent is not readable from source. The contradiction with git history is FACT either way; only the intent is unresolved."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-74",
+   "owner": "E5",
+   "reason": "Rust engine authority-boundary semantics, Bybit venue policy compatibility, IBKR dormancy invariants, and ML leakage/CV methodology were verified only at the structural/recency level (no semantic hot-path change since 2026-07-15 except comment-only line-gate commits; IBKR producer confirmed unwired-by-registry-note), not deeply reviewed.: E5 decision lens prioritized measured structural-cost items; deep semantic review of these surfaces exceeds the role's measurement mandate and remaining budget. Flagged rather than assumed covered by other axes."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-75",
+   "owner": "E5",
+   "reason": "Duplication detection was limited to top-level symbol-name collision plus targeted pairwise difflib on 5 module pairs; no token-level clone detection was run across the full 59k-line program_code/ml_training tree or the 24k-line test_agent_governance_* suite.: A full clone-detection pass over ~1.6M repo lines was out of budget; undetected clones outside the governance family may exist, especially among the alr_* repositories and their mirrored test fixtures."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-76",
+   "owner": "E5",
+   "reason": "No pytest or cargo command was executed; all test-related claims are static reads.: Executing tests would create .pytest_cache/__pycache__/target artifacts, mutating the untracked state of the frozen baseline (untracked_relevant_hash pins the empty set), and no governed capture-command node-id was supplied for attested execution."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-77",
+   "owner": "E5",
+   "reason": "The dirty file memory/reference_pr_merge_gates.md matches the pinned dirty_diff scope and was not audited beyond identity confirmation.: It is task-declared dirty scope owned by another workstream; content review of memory files is outside E5 ownership."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-78",
+   "owner": "A3",
+   "reason": "No live browser/visual/runtime evidence: the GUI was not rendered in this session (runtime GUI lives on Linux trade-core; Mac has no running console), the repository contains zero screenshots/browser traces (PM-supplied screenshot inventory matched 0 files), and no governed runtime capture was executed. All keyboard, viewport, contrast, and error-state claims are source-derived static analysis.: A3 permission is read_only with no admitted browser/runtime capture path for this task; runtime claims beyond the baseline identity pin are excluded by the task contract and would be coverage debt regardless."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-79",
+   "owner": "A3",
+   "reason": "Light-theme (帛晝) WCAG AA contrast ratios were taken from tokens.css annotation comments (e.g. --warn 6.30, --live 5.62 on-surface) and not independently computed or render-verified; shell.js's own honesty note marks 帛晝 AA as NEEDS-LINUX.: Verifying computed contrast requires rendering both themes or an independent color-math pass over every consuming rule; not performed within this audit's budget."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-80",
+   "owner": "A3",
+   "reason": "The governance/risk/system/settings inline scripts (tab-governance.html ~76KB, tab-system.html ~59KB, tab-risk.html ~39KB, tab-settings.html ~98KB) were spot-checked (typed-confirm sites, API-key masking, close-all confirms), not line-audited; the '12 governance writes with typed-confirm preserved' claim rests partly on shell.js/view-governance.js migration module notes asserting byte-parity reuse.: Exhaustive per-write tracing of four multi-thousand-line inline scripts exceeded the remaining budget after the higher-risk live/demo/modal surfaces were verified directly."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-81",
+   "owner": "A3",
+   "reason": "Unresolved 2026-07-11 ultracode audit GUI items 9-10 (deferred to P0.4) were not re-verified against the original audit report; only indirect evidence was seen (view-governance.css notes referencing 'pre-existing P0.4' rgba literals).: The original ultracode GUI findings report was not in the compiled context packs and on-demand history loading was deprioritized against direct source probes of the same surfaces."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-82",
+   "owner": "A3",
+   "reason": "IBKR stock lane GUI dormancy was verified via the shell view registry (badge 'read-only', 16 GET status routes, zero write paths per module notes and file survey of tab-stock-etf-*.js) but not by tracing each of the 11 stock-etf JS modules for hidden write calls.: Per-module fetch-verb tracing across 11 files was sampled, not exhausted; the shell adds no IBKR write/activation UI and Hard Boundaries make any such write inert server-side, lowering the marginal value of full tracing."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-83",
+   "owner": "A3",
+   "reason": "Non-GUI backstop axes named in the shared hypothesis (AIML S1 closure receipts, agent_governance_* module internals, Rust engine authority boundaries, Bybit external policy freshness, ML leakage methodology, SQL migrations) were not expanded by this role beyond incidental contact (e.g. confirming the Jul-22 commits were comment-only, runbooks/TODO drift).: These are owned by CC/FA/E2/QC/MIT/BB/IB axes in the same wave; A3's ownership boundary is operator-facing surfaces, and independent-discovery duty was met by not assuming their GUI-adjacent slices (routing, docs pointers, write confirms) — which were checked here."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-84",
+   "owner": "A3",
+   "reason": "i18n_zh.js key coverage and the legacy tab-*.html pages not individually opened (tab-agents, tab-ai, tab-learning, tab-monitoring, tab-phase4, tab-edge-gates, trading.html sidebar flows) were not audited for terminology/recovery gaps.: Sampling prioritized default-entry and money-touching surfaces; remaining tabs are read-mostly and lower loss-on-error, left as explicit residual coverage debt."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-85",
+   "owner": "R4",
+   "reason": "GitHub-side facts for PR#112/#113/#114 (merge timestamps, whether the required Linux CI checks actually ran green, thread resolution) were not verified; merge existence was proven only from local git ancestry at the frozen head.: R4 has no admitted public-web/gh evidence node in this task contract; external-policy/outcome facts need PLATFORM_OR_EXTERNAL_ATTESTED evidence. Note memory records a case (PR#112 itself) where the ci workflow silently did not fire on open — the ruleset ostensibly blocks merge without green checks, but I did not independently confirm the checks ran, so 'Linux CI attestation satisfied by merge' remains an inference, reported as coverage debt not PASS."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-86",
+   "owner": "R4",
+   "reason": "render --check and validate were executed directly (read-only CLI), not through the governed capture-command adapter, so their results are LOCAL_REPRODUCIBLE only, not governed-receipt attested.: No admitted node-id or context-artifact file was supplied to this session for the one-call capture adapter; running the argv without those bindings is impossible, and fabricating a node-id would violate the adapter contract."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-87",
+   "owner": "R4",
+   "reason": "docs/_indexes/document_index.md (1719 lines) was verified only for first-column path existence, duplicate PROGRESS entries, and sampled archive links; row-by-row description accuracy was not audited.: Full semantic verification of ~1700 index rows exceeds the audit budget; the mechanical existence check plus the AIML-emphasis rows were prioritized per task focus."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-88",
+   "owner": "R4",
+   "reason": "SHA-256 pins in PROGRESS/receipts (S0.3 receipt digest, S1 effect/choice/attempt digests) were not recomputed against file bytes.: Claim-evidence digest verification is owned by the closure/QA lanes with typed claim_inputs; R4 verified referenced files exist but recomputation was outside the doc-cross-reference budget."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-89",
+   "owner": "R4",
+   "reason": "README Control Console tab table vs console.html nav and GUI static files were not compared item-by-item; only the SoT-deferral banner was checked.: README explicitly defers the tab list to console.html nav as SoT (2026-07-04 alignment note), lowering drift risk; full GUI surface audit belongs to the A3/GUI axis and was not expanded here to preserve independence and budget."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-90",
+   "owner": "R4",
+   "reason": "No runtime assertion beyond the supplied baseline identity pin (trade-core head 7d78765a observed 2026-07-24T00:24:34Z) was examined; whether the Linux working tree, services, or cron match this head is unverified.: Task hard stop: runtime/live claims cannot PASS from this audit; Linux evidence is allowlisted read-only and no runtime probe was admitted for R4."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-91",
+   "owner": "R4",
+   "reason": "Whole-repository backstop areas outside the R4 lens (rust/ engine authority code, sql/ migrations, program_code/ ML leakage, .github workflows semantics, Bybit/IBKR policy content) were touched only where they intersect documentation/index/generated-view integrity.: R4 Registry ownership is cross-reference verdict, index integrity, and generated-view drift; independent-discovery rules forbid assuming other axes' coverage, but expanding into their owned domains would exceed my permission profile and budget — recorded as negative space rather than silently skipped."
+  },
+  {
+   "kind": "assumption",
+   "id": "assumption-92",
+   "owner": "R4",
+   "reason": "docs/governance_dev/SPECIFICATION_REGISTER.md registration of ADR-0051/AMD-2026-07-21-01 was not directly re-verified this run.: The AMD file exists and is indexed in document_index (line 25) with Accepted status; the register's Active/Deprecated dual-entry check was deprioritized after the ADR-0049/0051 supersession table proved coherent, leaving a small residual risk of a missing register row."
+  },
+  {
+   "kind": "claim",
+   "id": "claim-0014",
+   "owner": "E5",
+   "claim_key": ".codex/agent_registry_v1.json::context_packs.active_state (line 200)::in .codex/agent_registry_v1.json line 200, the active_state context pack's sole repository source is 'todo.md#ai/ml 一分鐘派發看板', required for any task whose surfaces include operations, runtime, deploy, service, cron, pg, full_audit, profit_diagnosis, or incident_rca, or with runtime/end-to-end claims or high uncertainty. the pinned section is ~9.7kb and includes the 40-line mandatory expansion table for the '開始並完成s1' command — work that is closed at this head — while todo.md §0 (影響派發的當前事實) and §1 (活躍派發佇列), the sections that actually carry non-aiml active state, are not pack sources at all.::.codex/agent_registry_v1.json:200 shows the single-source active_state pack with the quoted required_when; this task's own capsule (full_audit surface) carries the full board section as its only todo pin; grep confirms no §0/§1 selector anywhere in the registry or context compiler; sed -n '26,45p' todo.md shows the closed-s1 expansion block inside the pinned section.",
+   "reason": "verification admission envelope exhausted"
+  },
+  {
+   "kind": "claim",
+   "id": "claim-0016",
+   "owner": "R4",
+   "claim_key": "docs/execution_plan/ai_ml_landing/progress.md::overall state / next gate header (lines 4-40) + s1.1-s1.6 rows (lines 91-96)::progress.md header (lines 6-40: 'not yet merged and not yet a pm-declared effect_seams_ready ledger gate', 'not yet merged or pushed', 'linux trust-host/ci test attestation is still owed', evidence class local_reproducible) and all six s1 table rows ('linux attestation owed'; s1.6 row evidence class local_reproducible) are contradicted by the same file's dated ledger events: line 140 (s1.6_target_host_attestation_real_on_trade_core — real probe on trade-core, platform_or_external_attested, closes the 'linux attestation owed') and line 139 (s1_formal_governance_closure_engineering_complete, binding=binding 8/8 seams). additionally, no s1 row or event records the pr#112/#113/#114 merge heads, while the ledger contract (line 46-47) requires 'update a row only with the exact branch/pr/head' and every s0 row carries full pr/merge lineage.::progress.md:6-8 'not yet merged...'; :24 'not yet merged or pushed.'; :37 'attestation is still owed'; s1.6 row (~line 96) 'evidence class local_reproducible... linux attestation owed' vs :139-140 'evidence_class=platform_or_external_attested... real bounded non-root disposable probe ran on trade-core'; grep for 'pr #112|pr #113|pr #114' yields no lineage row; s0.3 row records pr #104/#106/#107/#108 merge shas. pr#114 commit d22f1d267 edited progress.md (appended event) without updating the header.",
+   "reason": "verification admission envelope exhausted"
+  },
+  {
+   "kind": "claim",
+   "id": "claim-0005",
+   "owner": "OPS",
+   "claim_key": "helper_scripts/maintenance_scripts/agent_governance_target_host_apply.py::_run_probe_under_intent_authorization (lines 171-190); attach_distinct_verifier_postcheck (lines 344-400)::at the frozen head 7d78765a2, the merged pr#114 s1 target-host closure machinery contains defects that the project's own codex review already classified as two p1 + one p2, and later two more p1 on pr#115; all fixes exist only on the unmerged remote branch origin/agent/aiml-s1-closure-p1p2-fixes (9 commits, 2026-07-23 21:53z through 2026-07-24 00:28z). concretely at head: (a) the apply orchestrator sets os.environ['aiml_target_host_probe']='1' process-globally on the parent process during probe execution (independently verified at agent_governance_target_host_apply.py:182-190), so any concurrent code in the same interpreter runs under the opened authorization gate; (b) validate_target_host_effect_binding accepts runtime evidence merely labeled source==ops_postcheck without binding it to the distinct verifier's own capture (per commit af2491300 body); (c) attach_distinct_verifier_postcheck only requires the verifier capture digest to be a sha256 that differs from the applier's — it is not bound to the verifier node (agent_governance_target_host_apply.py:375-381); (d) worm retention p2 in agent_governance_terminal_receipt_external_sink.py.::git log head..origin/agent/aiml-s1-closure-p1p2-fixes shows 9 unmerged commits incl. af2491300 'fix(aiml-s1): close 3 pr #114 findings — postcheck evidence binding, process-global auth, worm retention' whose body states 'fixes the two p1 + one p2 findings the codex review raised on the already-merged pr #114' and 'the applier no longer sets os.environ aiml_target_host_probe on the parent process' (fixed only on-branch via a new agent_governance_target_host_child_apply.py). at head, /users/ncyu/projects/tradebot/srv/helper_scripts/maintenance_scripts/agent_governance_target_host_apply.py:182-190 _run_probe_under_intent_authorization does exactly the process-global env set. also on-branch: 5705a480a 'resolve 2 codex p1 on pr #115 — bind verifier capture to its node + cap capsule at intent expiry', 5031cc1d2 'make trusted closure evidence forge-resistant'.",
+   "reason": "global risk-conditioned third-vote reserve exhausted; continue from immutable finding in a later verification wave"
+  },
+  {
+   "kind": "claim",
+   "id": "claim-0003",
+   "owner": "FA",
+   "claim_key": "docs/execution_plan/ai_ml_landing/progress.md::s1.5 row completion-receipt cell (progress.md:95) + s1 exit criterion (todo.md:41)::the s1 exit criterion (todo.md board line 41) requires a current, verifiable effect_seams_ready_receipt_v1 and learning_runtime_choice_receipt_v1, but on main no json and no digest of the s1.5 effect_seams_ready receipt exists anywhere (grep across docs/ and todo.md finds only prose descriptions); progress.md line 141 states s1 receipts are 'emitted disposably, not committed as json like s0.3'. only the s1.6 choice receipt has a digest pinned (sha256:447ab474… in the run record), and that run's effect result was superseded twice on the unmerged fix branch. s0.3, by contrast, committed its receipt json plus producer-signed attestation and sshsig.::grep -rn 'effect_seams_ready' over docs/ and todo.md returns design prose only, no sha256 pin for the s1.5 receipt; docs/execution_plan/ai_ml_landing/progress.md:95 s1.5 completion-receipt cell says 'disposably emitted, linux attestation owed' with no digest; receipts/ dir at head contains only s0.* jsons + one s1 run-record markdown.",
+   "reason": "global risk-conditioned third-vote reserve exhausted; continue from immutable finding in a later verification wave"
+  },
+  {
+   "kind": "claim",
+   "id": "claim-0013",
+   "owner": "E5",
+   "claim_key": "helper_scripts/maintenance_scripts/agent_governance_component_effects.py::module file length (1941 lines)::tests/structure/test_development_agent_governance.py (max_file_lines = 2_000, line 16; assertion at line 253) hard-fails any helper_scripts/maintenance_scripts/agent_governance*.py over 2000 lines with no exception-registry escape, and it runs as a required pr check in the 'development-agent governance (cheap static gate)' ci job. agent_governance_component_effects.py currently measures 1941 lines, identity_acl_contract.py 1682, target_host_probe.py 1552 — the largest is one moderate feature addition away from blocking its own pr. this exact failure mode already occurred once: pr#113 hit the gate when target_host_probe reached 2470 lines and required an emergency mid-pr split (commit d3de26b74 'split target-host probe under 2000-line governance cap').::wc -l helper_scripts/maintenance_scripts/agent_governance*.py → component_effects 1941; tests/structure/test_development_agent_governance.py:16 `max_file_lines = 2_000`, line 253 asserts splitlines ≤ max_file_lines for the agent_governance*.py glob; .github/workflows/ci.yml:150-154 runs this test as the required cheap static gate; git log shows d3de26b74 (2026-07-23) as the precedent forced split.",
+   "reason": "global risk-conditioned third-vote reserve exhausted; continue from immutable finding in a later verification wave"
+  },
+  {
+   "kind": "seam_reprobe",
+   "id": "seam-1",
+   "reason": "CC's 'PLATFORM_OR_EXTERNAL_ATTESTED effect receipt with SSHSIG pending' + E2's 'target-host attested lane accepts non-replayable structural_reference_only capture' + OPS's 'Linux attestation OWED not discharged by pytest-only CI gate' are three independent partial findings about the same S1 effect-receipt evidence-tier claim, but no axis synthesizes them into one adjudicated verdict on whether the PLATFORM_OR_EXTERNAL_ATTESTED label itself is currently a false/overclaimed evidence tier (root-principle 8/12 exposure).",
+   "owner": "CC"
+  },
+  {
+   "kind": "seam_reprobe",
+   "id": "seam-2",
+   "reason": "BB's D2 finding (fill-sim taker fee modeled at half Bybit's real 5.5bps/leg schedule) and QC's PROFIT-1 finding (cost_gate double-counts trading costs against a fee threshold) are both cost-model defects feeding the same promotion/edge-viability decision, but no one has computed whether they cancel, compound, or are orthogonal in net effect on shipped-candidate bps.",
+   "owner": "QC"
+  },
+  {
+   "kind": "seam_reprobe",
+   "id": "seam-3",
+   "reason": "QC's own promotion-gate statistics findings (DSR Eq.8 scaling omission, CPCV not actually combinatorial, ad-hoc power formula with fixed effect size) and MIT's independently-derived 'ship-gate statistical power very low at n_test≈26' are not reconciled against each other — unclear whether MIT's finding is a downstream symptom of QC's same defective formulas (one root cause, redundant filing) or an independent confirming data point (two distinct roots, higher aggregate confidence).",
+   "owner": "QC"
+  },
+  {
+   "kind": "seam_reprobe",
+   "id": "seam-4",
+   "reason": "MIT's 'DSN split-string deliberately evades the public-repo credential scanner in ML persistence fallback' and OPS's 'restart_all.sh documents an in-code evasion of the same credential gate via split DSN literal' describe structurally identical anti-patterns in two different files/subsystems, but no axis checked whether this is one shared convention/helper (systemic, more instances likely) or two coincidentally similar one-offs, nor swept the repo for further occurrences.",
+   "owner": "CC"
+  },
+  {
+   "kind": "seam_reprobe",
+   "id": "seam-5",
+   "reason": "Multiple axes (CC/FA/E2/OPS/MIT/E5/R4) independently rediscovered that TODO.md/PROGRESS.md/initiative_index.md are stale about S1 merge state, but none checked E5's separately-filed finding that 'the Registry active_state pack pins only the AI/ML dispatch board into every task capsule' as a possible root mechanism — i.e., whether the staleness is simply an un-edited document (content bug) or a symptom of the active_state pack-generation logic itself serving frozen/cached content into every task capsule regardless of source freshness.",
+   "owner": "E5"
+  }
+ ],
+ "split_recommendation": {
+  "schema_version": "full_audit_split_recommendation_v1",
+  "disposition": "NEW_TASK_COLD_RESTART_REQUIRED",
+  "reason": "bounded Full Audit envelope left explicit debt; no continuation or inherited-verdict admission exists",
+  "baseline_digest": "sha256:8db7d12aff1d3238c90c8f787c08e663df6ecd30a1a0e39ed7aedd8b6574e365",
+  "scope_digest": "sha256:7773f6132def2ab9d9135af4ead9c3ddc412eb6365ea63168651fa5bda0d58bd",
+  "coverage_debt_digest": "sha256:083caa5d3c67a2376e3ad4ab9c81e183949958dc33c747c73aa1c48645c220bf",
+  "unresolved_claim_ids": [
+   "claim-0003",
+   "claim-0005",
+   "claim-0013",
+   "claim-0014",
+   "claim-0016"
+  ],
+  "instruction": "Start a new task with a newly compiled Context and re-establish evidence; this recommendation is not verdict authority."
+ },
+ "consumption": {
+  "measurement_status": "partial",
+  "measurement_source": "orchestrator_receipt",
+  "unavailable_reason": "actual model output/cache/tool/controller telemetry is unavailable",
+  "wave_record_refs": [
+   "sha256:344f40af516d227a88e5519ad0780d831eab84be1c76302c2bc7041cd6c854aa"
+  ],
+  "missing_metrics": [
+   "input_tokens",
+   "output_tokens",
+   "cache_read_tokens",
+   "tool_calls",
+   "wall_time_ms",
+   "accepted_findings",
+   "rework_count"
+  ],
+  "planned_tokens": 1132605,
+  "quality_reserve_used": true,
+  "retry_count": 2,
+  "fan_out": 43
+ }
+}
