@@ -184,6 +184,10 @@ class SimulatedOwner:
         self.start_calls = 0
         self.start_should_fail = False
         self.stop_causes_restart = False
+        self.raise_during_window = False       # FIX-W3-1a:fence 後第一個 window host read 拋錯
+        self._window_read_should_raise = False
+        self.drift_stable_on_start = False     # E4 gap #2:un-fence 成功但 stable identity 漂移
+        self.max_batch = "32"                  # --max-batch 值;drift 改此值以漂移 cmdline_digest(仍是合法 ALR cmdline)
         self.session_id = None
         self._admin = _connect(sock)
         self._owner_conn = _connect(sock, user=q.ALR_CONNECTION_ROLE)
@@ -201,6 +205,9 @@ class SimulatedOwner:
     # -- lifecycle (fence_ops interface) ------------------------------------ #
     def stop(self):
         self.stop_calls += 1
+        if self.raise_during_window:
+            # fence 完成後,讓第一個 window 取樣的 host read(systemctl show)拋錯(模擬 mid-window host/DB 讀取失敗)。
+            self._window_read_should_raise = True
         if self.stop_causes_restart:
             # scenario #4:一個 supervening restart 贏了 stop 的競賽(NRestarts++ / new InvocationID)。
             self.n_restarts += 1
@@ -216,6 +223,9 @@ class SimulatedOwner:
         self.start_calls += 1
         if self.start_should_fail:
             raise RuntimeError("injected systemctl --user start failure")
+        if self.drift_stable_on_start:
+            # un-fence 本身成功、owner 又健康在跑,但 stable-identity 訊號(cmdline_digest)漂移 → pre != post。
+            self.max_batch = "64"
         self.pid += 1313
         self.invocation = "inv-2"
         self.state = "running"
@@ -225,6 +235,8 @@ class SimulatedOwner:
 
     # -- host_probe interface ----------------------------------------------- #
     def run(self, argv):
+        if self._window_read_should_raise:
+            raise RuntimeError("injected mid-window host read failure")
         if argv[:4] == [q.SYSTEMD, "--user", "show", q.UNIT_NAME]:
             return self._show_dump()
         if argv[:3] == [q.SYSTEMD, "--user", "list-units"]:
@@ -265,7 +277,9 @@ class SimulatedOwner:
         rest = ["S"] + ["0"] * 30
         rest[19] = self.start_ticks  # /proc/<pid>/stat field 22 (starttime) = token index 19 after ") "
         (directory / "stat").write_text(f"{pid} (python3) " + " ".join(rest) + "\n", encoding="utf-8")
-        (directory / "cmdline").write_bytes(b"\x00".join(a.encode() for a in CMDLINE) + b"\x00")
+        cmdline = list(CMDLINE)
+        cmdline[-1] = self.max_batch  # --max-batch 值(drift 改此值以漂移 stable identity,仍是合法 ALR cmdline)
+        (directory / "cmdline").write_bytes(b"\x00".join(a.encode() for a in cmdline) + b"\x00")
         (directory / "environ").write_bytes(
             b"\x00".join(f"{k}={v}".encode() for k, v in ENVIRON.items()) + b"\x00"
         )
@@ -593,3 +607,82 @@ def test_quiesced_receipt_forgery_rejected(owner, cluster, tmp_path, monkeypatch
     assert any("operator_signature_pem body is not strict base64" in e
                for e in q.validate_quiesce_fence_result(forged_d, now=LATER))
     assert validator.validate_aiml_artifact(forged_d, now=LATER)
+
+
+# --------------------------------------------------------------------------- #
+# (6) FIX-W3-1a — a mid-window read raises AFTER fence -> typed FAILED, un-fence attempted
+# --------------------------------------------------------------------------- #
+def test_window_raise_after_fence_is_failed_and_unfence_attempted(owner, cluster, tmp_path, monkeypatch):
+    observer_conn = _observer_connection(cluster["socket_dir"])
+    private_key = _install_operator_profile(tmp_path, monkeypatch)
+    expected, _inv = _expected_fingerprint(owner, observer_conn)
+    intent = _intent(expected)
+    authorization, signature = _sign(private_key, intent, HEAD)
+    owner.raise_during_window = True  # fence 後第一個 window host read 拋錯
+    result = q.apply_quiesce_fence(
+        intent, authorization, signature, now=NOW, source_head=HEAD,
+        host_probe=owner, fence_ops=owner, db_observer=observer_conn, clock=_stepping_clock(),
+        verifier_capture_digest=CAP,
+    )
+    assert result["status"] == "FAILED"
+    assert "un-fence attempted" in result["failure_reason"]
+    # fence 一經發起就必在 finally 嘗試 un-fence:絕不把 ALR 留在 fenced/down 而無 typed 結果。
+    assert owner.stop_calls == 1 and owner.start_calls == 1
+    assert result["post_unfence_observation"] is None and result["rollback_record"] is None
+    assert q.validate_quiesce_fence_result(result, now=LATER) == []
+    assert validator.validate_aiml_artifact(result, now=LATER) == []
+    observer_conn.close()
+
+
+# --------------------------------------------------------------------------- #
+# (7) FIX-W3-1c — an underspecified window (non-advancing clock) -> typed FAILED (not VIOLATED)
+# --------------------------------------------------------------------------- #
+def test_underspecified_window_is_failed_not_violated(owner, cluster, tmp_path, monkeypatch):
+    observer_conn = _observer_connection(cluster["socket_dir"])
+    private_key = _install_operator_profile(tmp_path, monkeypatch)
+    expected, _inv = _expected_fingerprint(owner, observer_conn)
+    intent = _intent(expected)
+    authorization, signature = _sign(private_key, intent, HEAD)
+    monkeypatch.setattr(q, "MAX_WINDOW_SAMPLES", 3)  # 非前進時鐘快速撞上限
+    result = q.apply_quiesce_fence(
+        intent, authorization, signature, now=NOW, source_head=HEAD,
+        host_probe=owner, fence_ops=owner, db_observer=observer_conn,
+        clock=lambda: 0.0,  # 非前進時鐘 → 永達不到 duration → underspecified(非 VIOLATED)
+        verifier_capture_digest=CAP,
+    )
+    assert result["status"] == "FAILED"
+    assert "underspecified" in result["failure_reason"]
+    # 全 held(無真 non-held 樣本)→ 這正是 UNDERSPECIFIED 有別於 OBSERVATION_WINDOW_VIOLATED 之處。
+    assert result["window_samples"]
+    assert all(s["verdict"] == "STATIC_GUARDS_HELD" for s in result["window_samples"])
+    assert owner.stop_calls == 1 and owner.start_calls == 1  # un-fence 仍嘗試
+    assert q.validate_quiesce_fence_result(result, now=LATER) == []
+    assert validator.validate_aiml_artifact(result, now=LATER) == []
+    observer_conn.close()
+
+
+# --------------------------------------------------------------------------- #
+# (8) E4 gap #2 — un-fence SUCCEEDS but stable identity drifted -> typed NOT_RESTORED
+# --------------------------------------------------------------------------- #
+def test_unfence_succeeds_but_drifted_identity_is_not_restored(owner, cluster, tmp_path, monkeypatch):
+    observer_conn = _observer_connection(cluster["socket_dir"])
+    private_key = _install_operator_profile(tmp_path, monkeypatch)
+    expected, _inv = _expected_fingerprint(owner, observer_conn)
+    intent = _intent(expected)
+    authorization, signature = _sign(private_key, intent, HEAD)
+    owner.drift_stable_on_start = True  # un-fence 成功(owner 又健康)但 cmdline_digest 漂移
+    result = q.apply_quiesce_fence(
+        intent, authorization, signature, now=NOW, source_head=HEAD,
+        host_probe=owner, fence_ops=owner, db_observer=observer_conn, clock=_stepping_clock(),
+        verifier_capture_digest=CAP,
+    )
+    assert result["status"] == "NOT_RESTORED"
+    assert result["post_unfence_observation"]["verdict"] == "NOT_RESTORED"
+    assert result["rollback_record"]["status"] == "NOT_RESTORED"
+    assert owner.start_calls == 1  # un-fence 本身成功(start 被呼叫且未拋錯)
+    # 但 stable pre != post(cmdline_digest 漂移)→ 誠實 NOT_RESTORED,非假成功。
+    assert (result["rollback_record"]["pre_fence_owner_fingerprint"]
+            != result["rollback_record"]["post_unfence_owner_fingerprint"])
+    assert q.validate_quiesce_fence_result(result, now=LATER) == []
+    assert validator.validate_aiml_artifact(result, now=LATER) == []
+    observer_conn.close()

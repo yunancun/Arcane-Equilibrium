@@ -179,7 +179,7 @@
         "advisory_lock_held": {"type": "boolean"},
         "advisory_lock_holder_count": {"type": "integer", "minimum": 0},
         "backend_present": {"type": "boolean"},
-        "consumer_session_status": {"enum": ["OPEN", "STOPPED", "FAILED", "ABSENT"]},
+        "consumer_session_status": {"enum": ["OPEN", "STOPPED", "FAILED", "ABSENT", "UNCLEAN_RECOVERY"]},
         "listen_backlog_drained": {"type": "boolean"}
       }
     },

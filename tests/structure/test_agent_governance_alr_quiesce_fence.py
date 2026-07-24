@@ -194,10 +194,11 @@ def _quiesced_result(intent, *, authorization, signature):
         _observation("IN_WINDOW_STATIC_GUARD", "STATIC_GUARDS_HELD", candidate_count=0,
                      host_inventory=_host_inventory(main_pid=0, start_ticks=None, invocation="", active="inactive", sub="dead"),
                      db_quiesce=_db(held=False, count=0, backend=False, status="STOPPED"), observed_at=NOW),
+        # 第二個樣本的 observed_at 距首樣本 >= duration_seconds(5s):滿足 FIX-W3-1d 的 window-adequacy 再驗跨度。
         _observation("IN_WINDOW_STATIC_GUARD", "STATIC_GUARDS_HELD", candidate_count=0,
                      host_inventory=_host_inventory(main_pid=0, start_ticks=None, invocation="", active="inactive", sub="dead"),
                      db_quiesce=_db(held=False, count=0, backend=False, status="STOPPED"),
-                     observed_at="2026-07-24T12:01:01+00:00"),
+                     observed_at="2026-07-24T12:01:05+00:00"),
     ]
     post = _observation("POST_UNFENCE_RESTORATION", "RESTORED_HEALTHY", candidate_count=1,
                         host_inventory=_host_inventory(main_pid=5555, start_ticks="1002003", invocation="inv-2"),
@@ -553,3 +554,206 @@ def test_no_secret_serialized_and_credential_exposure_const_false():
 def test_central_delegation_requires_now_for_freshness():
     intent = _intent()
     assert any("requires now" in e for e in validator.validate_aiml_artifact(intent))
+
+
+# --------------------------------------------------------------------------- #
+# FIX-W3-1(b/c): static-guard window sampler — cadence, three-valued status, spin-guard
+# --------------------------------------------------------------------------- #
+class _CoupledClock:
+    """注入式單調時鐘 + sleep:``sleep(n)`` 前進 n 秒;``clock()`` 只讀不自動前進(確定性,無真 time.sleep)。"""
+
+    def __init__(self, start=0.0):
+        self.now = float(start)
+        self.sleeps = []
+
+    def __call__(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.sleeps.append(seconds)
+        self.now += float(seconds)
+
+
+_BASELINE = {"n_restarts": 0, "invocation_id": ""}
+
+
+def _window_inventory(*, active="inactive", n_restarts=0, invocation="", held=False,
+                      count=0, backend=False, status="STOPPED", drained=True):
+    # collect_static_guard_window / _classify_static_guard 只讀取 inventory 的這幾個鍵(不必是完整 build_owner_inventory 輸出)。
+    return {
+        "host_inventory": _host_inventory(main_pid=0, start_ticks=None, invocation=invocation,
+                                          n_restarts=n_restarts, active=active, sub="dead"),
+        "db_quiesce": _db(held=held, count=count, backend=backend, status=status, drained=drained),
+        "credential_exposure": _cred(),
+        "candidate_count": 0,
+        "owner_fingerprint": OWNER_FP,
+    }
+
+
+def _collect(monkeypatch, provider, *, window=None, clock=None, sleep=None, base=NOW):
+    if not callable(provider):
+        fixed = provider
+        provider = lambda *a, **k: fixed  # noqa: E731 - 每次取樣回同一份 inventory
+    monkeypatch.setattr(q, "build_owner_inventory", provider)
+    intent = _intent(observation_window=window or {"duration_seconds": 5, "min_samples": 2, "sample_interval_seconds": 5})
+    return q.collect_static_guard_window(
+        None, None, intent=intent, baseline=_BASELINE, applier_node="quiesce_apply",
+        verifier_node="quiesce_verify", verifier_capture_digest=CAP, clock=clock,
+        observed_at_base=base, sleep=sleep,
+    )
+
+
+def test_classify_static_guard_verdicts():
+    assert q._classify_static_guard(_window_inventory(), _BASELINE) == "STATIC_GUARDS_HELD"
+    assert q._classify_static_guard(_window_inventory(active="active"), _BASELINE) == "RESTART_DETECTED"
+    assert q._classify_static_guard(_window_inventory(n_restarts=1), _BASELINE) == "RESTART_DETECTED"
+    assert q._classify_static_guard(_window_inventory(invocation="inv-x"), _BASELINE) == "RESTART_DETECTED"
+    assert q._classify_static_guard(
+        _window_inventory(held=True, count=1, backend=True, status="OPEN"), _BASELINE
+    ) == "QUEUE_NOT_DRAINED"
+    # FIX-W3-2:UNCLEAN_RECOVERY 終端不算乾淨排空 → QUEUE_NOT_DRAINED(不會被讀成 STOPPED/held)。
+    assert q._classify_static_guard(_window_inventory(status="UNCLEAN_RECOVERY"), _BASELINE) == "QUEUE_NOT_DRAINED"
+
+
+def test_collect_window_held_realizes_cadence(monkeypatch):
+    clock = _CoupledClock()
+    samples, status = _collect(monkeypatch, _window_inventory(), clock=clock, sleep=clock.sleep)
+    assert status == q.WINDOW_STATUS_HELD
+    assert len(samples) == 2
+    assert all(s["verdict"] == "STATIC_GUARDS_HELD" for s in samples)
+    # FIX-W3-1b:兩樣本之間確實消費 sample_interval_seconds;observed_at 反映真實經過時間(跨度 5s == duration)。
+    assert clock.sleeps == [5]
+    assert q._observation_span_seconds(samples) == 5
+
+
+def test_collect_window_non_advancing_clock_is_underspecified_not_violated(monkeypatch):
+    # 非前進時鐘 + no-op sleep:全 held 但永達不到 duration → 撞 MAX 上限 → UNDERSPECIFIED(非 VIOLATED),絕不 spin。
+    monkeypatch.setattr(q, "MAX_WINDOW_SAMPLES", 4)
+    samples, status = _collect(monkeypatch, _window_inventory(), clock=lambda: 0.0, sleep=None)
+    assert status == q.WINDOW_STATUS_UNDERSPECIFIED
+    assert len(samples) == 4  # 撞上限即止,不會無限取樣
+    assert all(s["verdict"] == "STATIC_GUARDS_HELD" for s in samples)
+
+
+def test_collect_window_too_short_span_is_underspecified(monkeypatch):
+    monkeypatch.setattr(q, "MAX_WINDOW_SAMPLES", 3)
+    clock = _CoupledClock()
+    samples, status = _collect(
+        monkeypatch, _window_inventory(), clock=clock, sleep=clock.sleep,
+        window={"duration_seconds": 3600, "min_samples": 2, "sample_interval_seconds": 1},
+    )
+    assert status == q.WINDOW_STATUS_UNDERSPECIFIED  # 跨度 << duration
+    assert len(samples) == 3
+
+
+def test_collect_window_too_few_samples_is_underspecified(monkeypatch):
+    monkeypatch.setattr(q, "MAX_WINDOW_SAMPLES", 3)
+    clock = _CoupledClock()
+    samples, status = _collect(
+        monkeypatch, _window_inventory(), clock=clock, sleep=clock.sleep,
+        window={"duration_seconds": 1, "min_samples": 5, "sample_interval_seconds": 1},
+    )
+    assert status == q.WINDOW_STATUS_UNDERSPECIFIED  # min_samples(5) > MAX(3):永遠湊不到 min_samples
+    assert len(samples) == 3
+
+
+def test_collect_window_queue_not_drained_sample_is_violation(monkeypatch):
+    clock = _CoupledClock()
+    samples, status = _collect(
+        monkeypatch, _window_inventory(held=True, count=1, backend=True, status="OPEN"),
+        clock=clock, sleep=clock.sleep,
+    )
+    assert status == q.WINDOW_STATUS_VIOLATED  # 帶一個真 non-held 樣本
+    assert len(samples) == 1 and samples[0]["verdict"] == "QUEUE_NOT_DRAINED"
+
+
+def test_collect_window_restart_midwindow_is_violation(monkeypatch):
+    clock = _CoupledClock()
+    seq = [_window_inventory(), _window_inventory(active="active")]  # 第二樣本 supervening restart
+    samples, status = _collect(
+        monkeypatch, lambda *a, **k: seq.pop(0), clock=clock, sleep=clock.sleep,
+        window={"duration_seconds": 10, "min_samples": 3, "sample_interval_seconds": 5},
+    )
+    assert status == q.WINDOW_STATUS_VIOLATED
+    assert samples[-1]["verdict"] == "RESTART_DETECTED"
+
+
+# --------------------------------------------------------------------------- #
+# FIX-W3-1(d): validator window-adequacy defense-in-depth on a forged QUIESCED
+# --------------------------------------------------------------------------- #
+def test_validator_rejects_quiesced_forged_below_claimed_min_samples(tmp_path, monkeypatch):
+    private_key = _install_operator_profile(tmp_path, monkeypatch)
+    intent = _intent()
+    authorization, signature = _sign(private_key, intent, HEAD)
+    result = _quiesced_result(intent, authorization=authorization, signature=signature)
+    assert q.validate_quiesce_fence_result(result, now=LATER) == []
+    # 竄改:把 result 宣稱的 observation_window.min_samples 抬到 3(> 實際 2 個 in-window 樣本)+ 重簽外層。
+    forged = copy.deepcopy(result)
+    forged["observation_window"]["min_samples"] = 3
+    forged["self_digest"] = q.artifact_self_digest(forged)
+    assert any("below the window min_samples" in e for e in q.validate_quiesce_fence_result(forged, now=LATER))
+    assert validator.validate_aiml_artifact(forged, now=LATER)
+
+
+def test_validator_rejects_quiesced_forged_span_below_duration(tmp_path, monkeypatch):
+    private_key = _install_operator_profile(tmp_path, monkeypatch)
+    intent = _intent()
+    authorization, signature = _sign(private_key, intent, HEAD)
+    result = _quiesced_result(intent, authorization=authorization, signature=signature)
+    # 竄改:把兩個 in-window 樣本 observed_at 收攏到同一刻(span 0 < duration 5)+ 逐一重簽 → 跨度再驗擋下。
+    forged = copy.deepcopy(result)
+    for sample in forged["window_samples"]:
+        sample["observed_at"] = NOW
+        sample["self_digest"] = q.artifact_self_digest(sample)
+    forged["self_digest"] = q.artifact_self_digest(forged)
+    assert any("span is below the window duration_seconds" in e
+               for e in q.validate_quiesce_fence_result(forged, now=LATER))
+    assert validator.validate_aiml_artifact(forged, now=LATER)
+
+
+# --------------------------------------------------------------------------- #
+# FIX-W3-2: UNCLEAN_RECOVERY terminal maps to a distinct non-STOPPED status
+# --------------------------------------------------------------------------- #
+class _ScriptedCursor:
+    def __init__(self, rows):
+        self._rows = list(rows)
+        self._last = None
+
+    def execute(self, sql, params=None):
+        self._last = self._rows.pop(0)
+
+    def fetchone(self):
+        return self._last
+
+
+def test_consumer_session_status_unclean_recovery_is_distinct_non_stopped():
+    # 序列:open-count=0(非 OPEN)→ all-count=1(非 ABSENT)→ latest terminal = UNCLEAN_RECOVERY。
+    unclean = q._consumer_session_status(
+        _ScriptedCursor([(0,), (1,), ("UNCLEAN_RECOVERY",)]), schema="learning", relation="alr_consumer_events"
+    )
+    assert unclean == "UNCLEAN_RECOVERY" and unclean != "STOPPED"
+    # 只有顯式 SESSION_STOPPED 才算乾淨停止。
+    assert q._consumer_session_status(
+        _ScriptedCursor([(0,), (1,), ("SESSION_STOPPED",)]), schema="learning", relation="alr_consumer_events"
+    ) == "STOPPED"
+    assert q._consumer_session_status(
+        _ScriptedCursor([(0,), (1,), ("SESSION_FAILED",)]), schema="learning", relation="alr_consumer_events"
+    ) == "FAILED"
+
+
+# --------------------------------------------------------------------------- #
+# FIX-W3-5: consumer_session_relation must not target a system-catalog schema
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("relation", ["pg_catalog.pg_locks", "pg_toast.pg_toast_1", "information_schema.tables"])
+def test_build_intent_rejects_system_catalog_consumer_relation(relation):
+    with pytest.raises(q.QuiesceFenceError):
+        _intent(observed_relations=[relation], consumer_session_relation=relation)
+
+
+def test_validate_intent_rejects_system_catalog_consumer_relation():
+    intent = _intent()
+    forged = copy.deepcopy(intent)
+    forged["observed_relations"] = ["pg_catalog.pg_locks"]
+    forged["consumer_session_relation"] = "pg_catalog.pg_locks"
+    forged["self_digest"] = q.artifact_digest_excluding_self(forged)
+    assert any("system-catalog schema" in e for e in q.validate_quiesce_fence_intent(forged, now=NOW))

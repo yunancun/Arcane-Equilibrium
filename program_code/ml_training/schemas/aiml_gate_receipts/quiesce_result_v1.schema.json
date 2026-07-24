@@ -24,6 +24,7 @@
     "apply_actor_node",
     "independent_verifier_node",
     "source_head",
+    "observation_window",
     "evidence_class",
     "boundary",
     "started_at",
@@ -62,6 +63,16 @@
     "apply_actor_node": {"type": "string", "minLength": 1},
     "independent_verifier_node": {"type": "string", "minLength": 1},
     "source_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "observation_window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["duration_seconds", "min_samples", "sample_interval_seconds"],
+      "properties": {
+        "duration_seconds": {"type": "integer", "minimum": 1, "maximum": 3600},
+        "min_samples": {"type": "integer", "minimum": 2, "maximum": 512},
+        "sample_interval_seconds": {"type": "integer", "minimum": 1, "maximum": 3600}
+      }
+    },
     "evidence_class": {"enum": ["LOCAL_REPRODUCIBLE", "STRUCTURAL_ONLY"]},
     "boundary": {
       "type": "object",

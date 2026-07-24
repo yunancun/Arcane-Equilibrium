@@ -122,6 +122,10 @@ EVIDENCE_TTL_SECONDS = 900
 MIN_WINDOW_SECONDS = 1
 # 靜態守恆窗取樣的硬上限:防止注入 clock 永不前進導致無限取樣(spin → fail-closed)。
 MAX_WINDOW_SAMPLES = 512
+# collect_static_guard_window 三值窗判定(FIX-W3-1c):HELD=達標;VIOLATED=帶真 non-held 樣本;UNDERSPECIFIED=全 held 但窗不足→typed FAILED。
+WINDOW_STATUS_HELD = "HELD"
+WINDOW_STATUS_VIOLATED = "VIOLATED"
+WINDOW_STATUS_UNDERSPECIFIED = "UNDERSPECIFIED"
 
 # ── 被 fence 的唯一具體 owner(S2.1 §1;不發明 owner model,只確認這一個)──
 UNIT_NAME = "openclaw-alr-shadow.service"
@@ -517,7 +521,9 @@ def _consumer_session_status(cursor: Any, *, schema: str, relation: str) -> str:
         return "STOPPED"
     if latest == "SESSION_FAILED":
         return "FAILED"
-    return "STOPPED"
+    # FIX-W3-2:UNCLEAN_RECOVERY(或任何非乾淨/未知終端)映射為 distinct 非 STOPPED 狀態——unclean 終端絕不可被 §5
+    # queue-drained 守恆讀成「乾淨排空的 STOPPED」;只有顯式 SESSION_STOPPED 才算乾淨停止。
+    return "UNCLEAN_RECOVERY"
 
 
 def read_db_quiesce(
@@ -553,6 +559,8 @@ def read_db_quiesce(
         raise QuiesceFenceError("consumer_session_relation must be schema-qualified")
     schema, _, relation = consumer_session_relation.partition(".")
     session_status = _consumer_session_status(cursor, schema=schema, relation=relation)
+    # F3(EFFECT 契約備註):``pg_notification_queue_usage()`` 是**叢集層** coarse LISTEN backlog 訊號,非本 channel
+    # 的 per-channel backlog,且 consumer 被 fence 後近乎 vacuous;drained 權威證據=lock 釋放+backend 消失+session STOPPED。
     cursor.execute("SELECT pg_notification_queue_usage()")
     usage = float(cursor.fetchone()[0])
     return {
@@ -641,6 +649,8 @@ def build_owner_inventory(
     env_hash = None
     runtime_digest = None
     if environ is not None:
+        # F5(EFFECT 契約備註):env-hash(§3 訊號 #5)此處僅由 live ``/proc/<pid>/environ`` 宣告鍵導出;把它與 unit 宣告的
+        # ``Environment=``(``systemctl --user show``)交叉核對以偵測 drift/注入,DEFERRED 給 EFFECT session。
         env_hash = canonical_digest({k: environ[k] for k in ENV_DECLARED_KEYS if k in environ})
         runtime_digest = resolver(environ.get("ALR_SOURCE_HEAD"), environ)
     # §4 訊號 #4:P ∈ unit 的 cgroup(proc cgroup 含 unit 名),排除 cgroup 外的散兵 cmdline 命中。
@@ -825,6 +835,8 @@ def owner_scoped_fence(fence_ops: Any) -> None:
     the throwaway advisory lock; no real process is signalled.
     """
 
+    # F2(EFFECT 契約備註):EFFECT 注入的 ``fence_ops.stop()`` 必為**阻塞式** ``systemctl --user stop``(回傳前 unit
+    # 已真正 inactive/dead,靜態守恆窗才觀察得到排空狀態)。
     fence_ops.stop()
 
 
@@ -877,25 +889,32 @@ def collect_static_guard_window(
     verifier_capture_digest: str,
     clock: Callable[[], float],
     observed_at_base: str,
+    sleep: Callable[[float], None] | None = None,
     runtime_digest_resolver: Callable[[Any, dict[str, str]], str | None] | None = None,
-) -> tuple[list[dict[str, Any]], bool]:
-    """Collect ``>= min_samples`` IN_WINDOW samples spanning ``>= duration_seconds`` at the declared
-    cadence, using an INJECTED monotonic clock (deterministic tests).  Returns (samples, window_ok).
-
-    Fail-closed: fewer than ``min_samples`` / span shorter than ``duration_seconds`` / any sample not
-    ``STATIC_GUARDS_HELD`` (a restart supervened or the queue was not drained) → window_ok False.
+) -> tuple[list[dict[str, Any]], str]:
+    """Collect IN_WINDOW static-guard samples at the declared cadence (INJECTED monotonic clock).  Returns
+    ``(samples, window_status)`` ∈ {HELD, VIOLATED, UNDERSPECIFIED}: HELD = ``>= min_samples`` all-held samples
+    spanning ``>= duration_seconds``; VIOLATED = a GENUINE non-held sample (restart / queue-not-drained) → applier
+    maps to ``OBSERVATION_WINDOW_VIOLATED``; UNDERSPECIFIED = all-held but inadequate (too few samples / span <
+    duration / hit ``MAX_WINDOW_SAMPLES`` on a non-advancing clock) → applier maps to a typed ``FAILED``, DISTINCT
+    from VIOLATED (FIX-W3-1c).  FIX-W3-1(b):the sampler CONSUMES ``sample_interval_seconds`` via the injected
+    ``sleep`` between samples (SOURCE lane never real-sleeps; EFFECT injects real ``time.sleep`` + monotonic clock);
+    with the ``MAX_WINDOW_SAMPLES`` ceiling it can never spin (a non-advancing clock ends as ``UNDERSPECIFIED``).
     """
 
     window = intent["observation_window"]
     min_samples = int(window["min_samples"])
     duration = int(window["duration_seconds"])
+    interval = int(window["sample_interval_seconds"])
+    pace = sleep if sleep is not None else (lambda _seconds: None)
     samples: list[dict[str, Any]] = []
-    window_ok = True
     first_t: float | None = None
+    last_t: float = 0.0
     while True:
         current = float(clock())
         if first_t is None:
             first_t = current
+        last_t = current
         inventory = build_owner_inventory(
             host_probe, db_cursor, intent=intent, runtime_digest_resolver=runtime_digest_resolver,
         )
@@ -908,20 +927,20 @@ def collect_static_guard_window(
             credential_exposure=inventory["credential_exposure"],
             applier_node=applier_node, verifier_node=verifier_node,
             verifier_capture_digest=verifier_capture_digest,
-            observed_at=_plus_seconds(observed_at_base, len(samples)),
+            # observed_at 反映**真實**經過的注入時鐘時間(非樣本序號),讓 FIX-W3-1d 的跨度再驗(span>=duration)自洽。
+            observed_at=_plus_seconds(observed_at_base, max(0, int(round(current - first_t)))),
         ))
         if verdict != "STATIC_GUARDS_HELD":
-            window_ok = False
-            break
+            return samples, WINDOW_STATUS_VIOLATED  # 帶真 non-held 樣本 → 真 window violation
         if len(samples) >= min_samples and (current - first_t) >= duration:
             break
         if len(samples) >= MAX_WINDOW_SAMPLES:
-            # 注入 clock 未前進到滿足 duration 的取樣上限 → fail-closed(不假裝 window 已滿足)。
-            window_ok = False
-            break
-    if len(samples) < min_samples:
-        window_ok = False
-    return samples, window_ok
+            break  # 注入 clock 未前進到滿足 duration 的取樣上限 → underspecified(spin-guard)
+        pace(interval)  # 以宣告節奏在下一取樣前等待 sample_interval_seconds(注入式;SOURCE lane 絕不真 sleep)
+    # 全 held 才走到這:樣本數 >= min_samples 且真實跨度 >= duration_seconds 才 HELD,否則 underspecified。
+    if len(samples) >= min_samples and (last_t - first_t) >= duration:
+        return samples, WINDOW_STATUS_HELD
+    return samples, WINDOW_STATUS_UNDERSPECIFIED
 
 
 # --------------------------------------------------------------------------- #
@@ -1098,6 +1117,13 @@ def operator_authorization_binding_errors(
 # --------------------------------------------------------------------------- #
 # intent builder + validator
 # --------------------------------------------------------------------------- #
+def _is_system_catalog_schema(relation: str) -> bool:
+    # FIX-W3-5(深度防禦):consumer_session_relation 是唯一被參數化的 DB-read 目標,即便在簽名 intent 下也絕不允許把它
+    # 瞄準 pg_catalog/pg_toast/pg_temp_*/information_schema 等 catalog 表(今日已由 observer 最小權限+SSHSIG 綁定緩解)。
+    schema = str(relation).split(".", 1)[0]
+    return schema.startswith("pg_") or schema == "information_schema"
+
+
 def build_quiesce_intent(
     *,
     target_class: str,
@@ -1133,6 +1159,9 @@ def build_quiesce_intent(
     if consumer_session_relation not in observed_relations:
         # O-4:consumer_session_relation 必為宣告的 observed_relations 成員(S2.0 observer 必 GRANT SELECT 它)。
         raise QuiesceFenceError("consumer_session_relation must be a member of observed_relations")
+    if _is_system_catalog_schema(consumer_session_relation):
+        # FIX-W3-5:DB-read 目標不得瞄準系統/catalog schema(pg_*/information_schema)。
+        raise QuiesceFenceError("consumer_session_relation must not target a system-catalog schema (pg_*/information_schema)")
     if not isinstance(observation_window, dict):
         raise QuiesceFenceError("observation_window must be an object")
     duration = observation_window.get("duration_seconds")
@@ -1200,6 +1229,9 @@ def validate_quiesce_fence_intent(intent: Any, *, now: str | None = None) -> lis
         errors.append("quiesce intent applier_node_id must differ from postcheck_node_id")
     if intent.get("consumer_session_relation") not in intent.get("observed_relations", []):
         errors.append("quiesce intent consumer_session_relation must be a declared observed relation")
+    if _is_system_catalog_schema(str(intent.get("consumer_session_relation", ""))):
+        # FIX-W3-5:即使 schema/簽名皆合法,DB-read 目標也不得為系統/catalog schema。
+        errors.append("quiesce intent consumer_session_relation must not target a system-catalog schema")
     if _contains_secret_like(intent):
         errors.append("quiesce intent carries secret-like content")
     if intent.get("self_digest") != artifact_digest_excluding_self(intent):
@@ -1381,6 +1413,7 @@ def validate_quiesce_rollback(rollback: Any, *, now: str | None = None) -> list[
 # result builder + validator (+ the fail-closed pending result)
 # --------------------------------------------------------------------------- #
 def _base_result(intent: dict[str, Any], *, apply_actor_node: str) -> dict[str, Any]:
+    window = intent["observation_window"]
     return {
         "schema_version": RESULT_SCHEMA_VERSION,
         "adapter_id": ADAPTER_ID,
@@ -1392,6 +1425,12 @@ def _base_result(intent: dict[str, Any], *, apply_actor_node: str) -> dict[str, 
         "apply_actor_node": apply_actor_node,
         "independent_verifier_node": intent["postcheck_node_id"],
         "source_head": intent["source_head"],
+        # FIX-W3-1(d):把綁定 intent 的觀察窗投影進 result,讓中央閘離線再驗 window adequacy(擋 forged/underspecified QUIESCED)。
+        "observation_window": {
+            "duration_seconds": int(window["duration_seconds"]),
+            "min_samples": int(window["min_samples"]),
+            "sample_interval_seconds": int(window["sample_interval_seconds"]),
+        },
         "boundary": {
             "production_fence_performed": False,
             "production_running_attested": False,
@@ -1504,6 +1543,15 @@ def _validate_embedded_observation(
     return errors
 
 
+def _observation_span_seconds(samples: list[dict[str, Any]]) -> float:
+    # 樣本 observed_at 的 max-min 秒數(不可解析 / 空 → -1;供 FIX-W3-1d 跨度再驗)。
+    try:
+        times = [_parse_time(s["observed_at"]) for s in samples if isinstance(s, dict)]
+    except (KeyError, TypeError, ValueError):
+        return -1.0
+    return (max(times) - min(times)).total_seconds() if times else -1.0
+
+
 def validate_quiesce_fence_result(result: Any, *, now: str | None = None) -> list[str]:
     if not isinstance(result, dict):
         return ["quiesce result must be an object"]
@@ -1574,6 +1622,15 @@ def validate_quiesce_fence_result(result: Any, *, now: str | None = None) -> lis
             if status == "QUIESCED_STATIC_GUARDS_HELD":
                 if len(held) != len(window):
                     errors.append("QUIESCED_STATIC_GUARDS_HELD requires every in-window sample to hold")
+                # FIX-W3-1(d):window adequacy 再驗——in-window 樣本數 >= min_samples 且跨度 >= duration_seconds(擋 forged/underspecified QUIESCED)。
+                ow = result.get("observation_window") if isinstance(result.get("observation_window"), dict) else {}
+                in_window = [s for s in window if isinstance(s, dict) and s.get("phase") == "IN_WINDOW_STATIC_GUARD"]
+                min_samples = ow.get("min_samples")
+                duration = ow.get("duration_seconds")
+                if isinstance(min_samples, int) and len(in_window) < min_samples:
+                    errors.append("QUIESCED_STATIC_GUARDS_HELD in-window sample count is below the window min_samples")
+                if isinstance(duration, int) and _observation_span_seconds(in_window) < duration:
+                    errors.append("QUIESCED_STATIC_GUARDS_HELD in-window sample span is below the window duration_seconds")
                 if isinstance(post, dict) and post.get("verdict") != "RESTORED_HEALTHY":
                     errors.append("QUIESCED_STATIC_GUARDS_HELD requires a RESTORED_HEALTHY post-unfence observation")
                 if isinstance(rollback, dict) and rollback.get("status") != "RESTORED":
@@ -1590,6 +1647,16 @@ def validate_quiesce_fence_result(result: Any, *, now: str | None = None) -> lis
                     errors.append("NOT_RESTORED requires a NOT_RESTORED rollback record")
                 if isinstance(post, dict) and post.get("verdict") != "NOT_RESTORED":
                     errors.append("NOT_RESTORED requires a NOT_RESTORED post-unfence observation")
+        elif status == "FAILED":
+            # FAILED(已 fenced+finally 已嘗試 un-fence,FIX-W3-1a/c):必帶 honest failure_reason,pre 若在場則再驗;
+            # window/post/rollback 由外層 self_digest+secret 掃描兜底整合性。
+            if not (isinstance(result.get("failure_reason"), str) and result.get("failure_reason")):
+                errors.append("FAILED requires a failure_reason")
+            if pre is not None:
+                errors.extend(_validate_embedded_observation(
+                    pre, phase="PRE_FENCE_INVENTORY",
+                    allowed_verdicts=frozenset({"CONFIRMED_SINGLE_OWNER"}), now=now, label="pre_fence_observation",
+                ))
 
     # operator_signature_pem 的 strict-base64 body 護欄:對任何非 None 字串**無條件**生效(不限 status)。
     signature_pem = result.get("operator_signature_pem")
@@ -1625,6 +1692,7 @@ def apply_quiesce_fence(
     fence_ops: Any = None,
     db_observer: Any = None,
     clock: Callable[[], float] | None = None,
+    sleep: Callable[[float], None] | None = None,
     verifier_capture_digest: str | None = None,
     apply_actor_node: str | None = None,
     started_at: str | None = None,
@@ -1689,6 +1757,8 @@ def apply_quiesce_fence(
     if not DIGEST_RE.fullmatch(str(verifier_capture_digest or "")):
         raise QuiesceFenceError("a disposable quiesce cycle requires the verifier's bound capture digest")
     verifier_node = intent["postcheck_node_id"]
+    # F2(EFFECT 契約備註):此單一 observer cursor 被 pre/window/post 重用;EFFECT 注入的 observer 連線必 ``autocommit=True``,
+    # 否則某次 mid-window read 出錯的失敗交易會 poison 後續讀取(SOURCE lane 可拋棄叢集測試已以 autocommit 連線滿足)。
     cursor = db_observer.cursor()
 
     pre_inventory = build_owner_inventory(
@@ -1720,15 +1790,40 @@ def apply_quiesce_fence(
             failure_reason="multiple ownership candidates; refusing to guess (no fence attempted)",
         )
 
-    # CONFIRMED_SINGLE_OWNER:owner-scoped fence(unit 自身 stop),之後**無論如何都嘗試 un-fence**。
+    # CONFIRMED_SINGLE_OWNER:fence 一經發起(即使 stop/window 拋錯)就必在 finally 嘗試 un-fence(FIX-W3-1a),絕不留 fenced/down。
     baseline = {"n_restarts": pre_inventory["host_inventory"]["watchdog"]["n_restarts"], "invocation_id": ""}
-    owner_scoped_fence(fence_ops)
-    window_samples, window_ok = collect_static_guard_window(
-        host_probe, cursor, intent=intent, baseline=baseline, applier_node=apply_actor_node,
-        verifier_node=verifier_node, verifier_capture_digest=verifier_capture_digest,
-        clock=clock, observed_at_base=started_at, runtime_digest_resolver=runtime_digest_resolver,
-    )
-    start_ok = owner_scoped_unfence(fence_ops)
+    fence_initiated = False
+    start_ok = False
+    window_samples: list[dict[str, Any]] = []
+    window_status = WINDOW_STATUS_UNDERSPECIFIED
+    window_error: Exception | None = None
+    try:
+        fence_initiated = True
+        owner_scoped_fence(fence_ops)
+        window_samples, window_status = collect_static_guard_window(
+            host_probe, cursor, intent=intent, baseline=baseline, applier_node=apply_actor_node,
+            verifier_node=verifier_node, verifier_capture_digest=verifier_capture_digest,
+            clock=clock, observed_at_base=started_at, sleep=sleep,
+            runtime_digest_resolver=runtime_digest_resolver,
+        )
+    except Exception as exc:  # noqa: BLE001 - stop/window 拋錯改走 typed FAILED,絕不逸出裸例外、絕不留 fenced
+        window_error = exc
+    finally:
+        if fence_initiated:
+            start_ok = owner_scoped_unfence(fence_ops)
+
+    if window_error is not None:
+        # 例外路徑:un-fence 已在 finally 嘗試(start_ok 已記錄);回傳 typed FAILED(非裸例外、非假成功)。
+        return build_quiesce_fence_result(
+            intent=intent, status="FAILED", owner_fingerprint=pre_inventory["owner_fingerprint"],
+            pre_fence_observation=pre_observation, window_samples=window_samples,
+            post_unfence_observation=None, rollback_record=None,
+            operator_authorization=operator_authorization, operator_signature=bytes(signature),
+            apply_actor_node=apply_actor_node, started_at=started_at, completed_at=completed_at,
+            failure_reason=(f"quiesce static-guard window raised after fence "
+                            f"({type(window_error).__name__}); un-fence attempted (start_ok={start_ok})"),
+        )
+
     post_inventory = build_owner_inventory(
         host_probe, cursor, intent=intent, runtime_digest_resolver=runtime_digest_resolver,
     )
@@ -1759,9 +1854,18 @@ def apply_quiesce_fence(
         owner_healthy=post_healthy, observed_at=completed_at,
     )
 
-    if not window_ok:
+    if window_status == WINDOW_STATUS_VIOLATED:
+        # 帶一個真 non-held 樣本(restart supervened / queue not drained)→ OBSERVATION_WINDOW_VIOLATED。
         status = "OBSERVATION_WINDOW_VIOLATED"
-        failure_reason = "a static-guard window sample failed (restart supervened / queue not drained / too few samples)"
+        failure_reason = "a static-guard window sample was not held (a restart supervened or the queue was not drained)"
+        evidence_class = "STRUCTURAL_ONLY"
+    elif window_status == WINDOW_STATUS_UNDERSPECIFIED:
+        # FIX-W3-1c:全 held 但窗不足 → typed FAILED(非 OBSERVATION_WINDOW_VIOLATED,後者 validator 要求 >=1 non-held 樣本)。
+        status = "FAILED"
+        failure_reason = (
+            "static-guard window underspecified (too few samples / span shorter than duration / the sampler "
+            "hit the spin ceiling); not an observation-window violation"
+        )
         evidence_class = "STRUCTURAL_ONLY"
     elif rollback_record["status"] == "NOT_RESTORED":
         status = "NOT_RESTORED"
