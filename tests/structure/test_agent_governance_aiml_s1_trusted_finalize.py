@@ -1,4 +1,4 @@
-"""Replay-safe timestamp binding for the S1 trusted finalizer."""
+"""Governed replay-safe timestamp binding for the S1 trusted finalizer."""
 
 from __future__ import annotations
 
