@@ -141,6 +141,8 @@ _EXPECTED_INPUT_FIELDS = {
     "durable_receipt_hash",
     "training_key_hash",
     "source_head",
+    # LR1(S2.2A):finalize 綁定的 scoped learning identity(源自 spawn code_manifest)。
+    "learning_runtime_digest",
     "dataset_hash",
     "row_ids_hash",
     "split_hash",
@@ -550,6 +552,7 @@ def _expected_training_inputs(
         "durable_receipt_hash": receipt["durable_receipt_hash"],
         "training_key_hash": receipt["training_key_hash"],
         "source_head": code["source_head"],
+        "learning_runtime_digest": code["learning_runtime_digest"],
         "dataset_hash": payload["dataset_hash"],
         "row_ids_hash": payload["row_ids_hash"],
         "split_hash": payload["split_hash"],

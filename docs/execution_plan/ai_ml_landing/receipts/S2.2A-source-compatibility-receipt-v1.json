@@ -1,0 +1,81 @@
+{
+  "bind_points": [
+    {
+      "binds": "learning_runtime_digest",
+      "file": "program_code/ml_training/alr_event_consumer.py",
+      "function": "run_event_consumer"
+    },
+    {
+      "binds": "learning_runtime_digest",
+      "file": "program_code/ml_training/alr_challenger_training_contract.py",
+      "function": "build_alr_challenger_training_contract"
+    },
+    {
+      "binds": "learning_runtime_digest",
+      "file": "program_code/ml_training/alr_challenger_fit_capture_attestation.py",
+      "function": "build_alr_challenger_fit_capture_attestation_contract"
+    }
+  ],
+  "boundary": "source_only_none_effect",
+  "capture_contract_digest": "sha256:1e406a6e4d84e5cecebe565dc1314122f16fae1b13bd1bcf0b4c5cc4a8f397e7",
+  "generated_at_utc": "2026-07-24T00:00:00Z",
+  "learning_runtime_digest": "sha256:6cf76b60a763035d26d0d4e9e0e6aa0aa8877d99966367c778420e5f63a79595",
+  "learning_runtime_manifest": {
+    "boundary": "source_only_none_effect",
+    "capture_contract": {
+      "digest": "sha256:1e406a6e4d84e5cecebe565dc1314122f16fae1b13bd1bcf0b4c5cc4a8f397e7",
+      "inputs": {
+        "program_code/ml_training/alr_consumer_repository.py": "76e9ea7b0c0006bc94f427ccdb16c092f453d2f9f4ab0078ea38dc01afa166c2",
+        "program_code/ml_training/alr_freshness_runtime.py": "f1acd9e66650d585e64fb9d93749a3ea28a1b750ca1e7252080a9507ecaec697",
+        "program_code/ml_training/alr_persistence_repository.py": "c761822a88e446931f367cb88fe1bc9404d9712dba9f02f54ddb4a214eb0d859",
+        "program_code/ml_training/alr_scanner_snapshot_adapter.py": "764906b7151dad3bcf2928f2817ae7d9eb6b19c18fcd813624f30be7bcf7f32a"
+      },
+      "snapshot_feature_schema_version": "alr_scanner_novelty_features_v1"
+    },
+    "generated_at_utc": "2026-07-24T00:00:00Z",
+    "repo_source_head": "1bfb7920ad0553c9cece9bc5cdd3e1c840689548",
+    "schema_version": "learning_runtime_manifest_v1",
+    "self_digest": "sha256:6cf76b60a763035d26d0d4e9e0e6aa0aa8877d99966367c778420e5f63a79595",
+    "training_contract": {
+      "components": {
+        "action_policy_digest": "sha256:b33c824c7e31f721b89afd7d05db75c4b99abe2ade5d3a5c8d668f4223666ae4",
+        "dependency_lock_digest": "sha256:ed827c3d5ea76e2f210b0238e522e4afd0bd4f8dac684e5f2ad3fc636b8269cb",
+        "feature_contract_digest": "sha256:f4a198f367dca5948f7d4f64f41d606655f4433ccef29da93d72735ee19dfcb1",
+        "label_contract_digest": "sha256:d57132b13d46481edb8eeac03450bfdd50a0d75c15c47b8c6f70852fc60567cc",
+        "learning_code_digest": "sha256:88795f11af5c5a876cd3502dd965130ae789d05f2b67b88d8dd65bb5a9e5e38d",
+        "migration_fingerprints": {
+          "V151__alr_persistence_foundation.sql": "294d7ed007ad160958950d84f2de61a8d46b1c5fb488fefa5865190d490a653f",
+          "V152__alr_operational_artifacts.sql": "05235f2baa8e53c9e789bf8f88a8cbed5b317c1e1ae8500e3c514fd5828bc849",
+          "V153__alr_outcome_feedback.sql": "b2a572ba57c1c18777319e47af14962df29419eae0742766c562642737ee5e01",
+          "V154__alr_retention_guardian.sql": "0e39a9845086b970da14a300647dd374f10321f4583ee8a73cfa3f54d0884976",
+          "V155__alr_health_state.sql": "e18de3be2a69822cb5168d8f02e4cc3f5eb2a036b74658ec4b9af3511f1b8ab9",
+          "V156__alr_consumer_freshness_state.sql": "d55d2ab71e40e921b9d60362112a75d42b5ad84f0793ba42ba3d2073cccc6b9f",
+          "V157__model_registry_pit_lineage.sql": "0b81e5795f4d387b2768ebf22440641c30a61ded7ed5115db92c542f67ff8000",
+          "V158__alr_qualified_challenger_training.sql": "7ed70599c6bd5f3cdb3376bc135a952d8c18f4ad62a62432c2bfdd8ee84e446b",
+          "V159__alr_durable_fit_attestation.sql": "2e11d0ae0cbc2c1161a47d04bed4054c31b728e8cf945f931197f9b3455b7d74",
+          "V160__alr_atomic_fit_consumption.sql": "97024130f766443bd6396536ad135f33becb0b563c9e251c0b8c58799eb6e055"
+        },
+        "runtime_config_digest": "sha256:e541dcfda24676edaccfa47929ca7dcc7ab71b2795567e04a1b905b786352954"
+      },
+      "digest": "sha256:d99484878264ec545577136fe49f02cf073df9ed86f7c56f7879b3b0be440d2d"
+    }
+  },
+  "migration_fingerprints": {
+    "V151__alr_persistence_foundation.sql": "294d7ed007ad160958950d84f2de61a8d46b1c5fb488fefa5865190d490a653f",
+    "V152__alr_operational_artifacts.sql": "05235f2baa8e53c9e789bf8f88a8cbed5b317c1e1ae8500e3c514fd5828bc849",
+    "V153__alr_outcome_feedback.sql": "b2a572ba57c1c18777319e47af14962df29419eae0742766c562642737ee5e01",
+    "V154__alr_retention_guardian.sql": "0e39a9845086b970da14a300647dd374f10321f4583ee8a73cfa3f54d0884976",
+    "V155__alr_health_state.sql": "e18de3be2a69822cb5168d8f02e4cc3f5eb2a036b74658ec4b9af3511f1b8ab9",
+    "V156__alr_consumer_freshness_state.sql": "d55d2ab71e40e921b9d60362112a75d42b5ad84f0793ba42ba3d2073cccc6b9f",
+    "V157__model_registry_pit_lineage.sql": "0b81e5795f4d387b2768ebf22440641c30a61ded7ed5115db92c542f67ff8000",
+    "V158__alr_qualified_challenger_training.sql": "7ed70599c6bd5f3cdb3376bc135a952d8c18f4ad62a62432c2bfdd8ee84e446b",
+    "V159__alr_durable_fit_attestation.sql": "2e11d0ae0cbc2c1161a47d04bed4054c31b728e8cf945f931197f9b3455b7d74",
+    "V160__alr_atomic_fit_consumption.sql": "97024130f766443bd6396536ad135f33becb0b563c9e251c0b8c58799eb6e055"
+  },
+  "repo_source_head": "1bfb7920ad0553c9cece9bc5cdd3e1c840689548",
+  "schema_version": "source_compatibility_receipt_v1",
+  "self_digest": "sha256:a8fba423ebbd697d6bf2119a04affb710920c3421e1f14dfee9e2d3d4df64376",
+  "session_id": "S2.2A",
+  "status": "SOURCE_READY",
+  "training_contract_digest": "sha256:d99484878264ec545577136fe49f02cf073df9ed86f7c56f7879b3b0be440d2d"
+}

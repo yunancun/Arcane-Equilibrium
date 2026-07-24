@@ -28,6 +28,8 @@ _HASH_NAMESPACE = b'alr_trusted_fit_handshake_v1\x00'
 _BASE64URL_RE = re.compile('^[A-Za-z0-9_-]+$')
 _HASH_RE = re.compile('^[0-9a-f]{64}$')
 _HEAD_RE = re.compile('^[0-9a-f]{40}$')
+# LR1(S2.2A):scoped learning identity(== learning_runtime_manifest.self_digest)。
+_LEARNING_RUNTIME_DIGEST_RE = re.compile('^sha256:[0-9a-f]{64}$')
 _IDENTIFIER_RE = re.compile('^[a-z0-9][a-z0-9_.:-]{0,127}$')
 _NONCE_RE = re.compile('^[0-9a-f]{64}$')
 _UTC_TIMESTAMP_RE = re.compile('^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{6}Z$')
@@ -40,7 +42,7 @@ _KEY_FIELDS = _fields('issuer_id key_id generation algorithm usage public_key_ba
 _TRUST_POLICY_FIELDS = _fields('schema_version policy_id epoch audience allowed_keys retired_key_verification_allowed')
 _OVERLAY_FIELDS = _fields('schema_version evidence_tier issuer_id trust_policy_snapshot_digest key_id public_key_digest algorithm usage generation status observed_at valid_until provider_evidence_digest overlay_digest')
 _ADMISSION_FIELDS = _fields('training_contract qualified_receipt_read durable_receipt_hash training_key_hash training_contract_hash qualified_receipt_binding_hash')
-_EXPECTED_INPUT_FIELDS = _fields('training_contract_hash durable_receipt_hash training_key_hash source_head dataset_hash row_ids_hash split_hash code_manifest_hash training_config_hash feature_schema_hash label_schema_hash training_rows')
+_EXPECTED_INPUT_FIELDS = _fields('training_contract_hash durable_receipt_hash training_key_hash source_head learning_runtime_digest dataset_hash row_ids_hash split_hash code_manifest_hash training_config_hash feature_schema_hash label_schema_hash training_rows')
 _EXECUTION_TRUE = _fields('actual_dataset_rehash_required actual_code_rehash_required exact_source_head_required effective_config_rehash_required exact_split_membership_required actual_fit_required model_artifact_bytes_required immutable_output_directory_required isolated_challenger_registry_required')
 _EXECUTION_FALSE = _fields('symlink_updates_allowed legacy_run_training_pipeline_allowed legacy_model_registry_allowed serving_or_promotion_allowed')
 _EXECUTION_CONTRACT = {**dict.fromkeys(_EXECUTION_TRUE, True), **dict.fromkeys(_EXECUTION_FALSE, False)}
@@ -700,12 +702,22 @@ def _validated_expected_inputs(value: Any, admission: Mapping[str, Any]) -> dict
     if set(snapshot) != _EXPECTED_INPUT_FIELDS:
         raise AlrTrustedFitHandshakeError('expected_training_inputs_fields_invalid')
     result: dict[str, Any] = {}
-    for field in sorted(_EXPECTED_INPUT_FIELDS - {'source_head', 'training_rows'}):
+    for field in sorted(
+        _EXPECTED_INPUT_FIELDS
+        - {'source_head', 'training_rows', 'learning_runtime_digest'}
+    ):
         result[field] = _hash(snapshot.get(field), field + '_invalid')
     head = snapshot.get('source_head')
     if type(head) is not str or _HEAD_RE.fullmatch(head) is None:
         raise AlrTrustedFitHandshakeError('source_head_invalid')
     result['source_head'] = head
+    # LR1(S2.2A):learning_runtime_digest 是 sha256: 前綴 digest,非 64-hex hash。
+    learning_runtime_digest = snapshot.get('learning_runtime_digest')
+    if type(learning_runtime_digest) is not str or (
+        _LEARNING_RUNTIME_DIGEST_RE.fullmatch(learning_runtime_digest) is None
+    ):
+        raise AlrTrustedFitHandshakeError('learning_runtime_digest_invalid')
+    result['learning_runtime_digest'] = learning_runtime_digest
     result['training_rows'] = _positive_int(snapshot.get('training_rows'), 'training_rows_invalid')
     parity = {'training_contract_hash': 'training_contract_hash', 'durable_receipt_hash': 'durable_receipt_hash', 'training_key_hash': 'training_key_hash'}
     for (expected_field, admission_field) in parity.items():

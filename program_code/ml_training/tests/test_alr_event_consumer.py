@@ -926,7 +926,11 @@ def test_missing_candidate_directory_fails_before_db_listener_connect(
             nonlocal active_lock
             active_lock = False
 
-    monkeypatch.setattr(consumer, "verify_runtime_source_head", lambda *args, **kwargs: "a" * 40)
+    monkeypatch.setattr(
+        consumer,
+        "_preflight_source_compatibility",
+        lambda **kwargs: {"fit_quarantined": False, "repo_source_head": "a" * 40},
+    )
     monkeypatch.setattr(consumer, "read_local_dsn_file", lambda path: "local-dsn")
     monkeypatch.setattr(consumer, "_install_shutdown_handlers", lambda event: {})
     monkeypatch.setattr(consumer, "_restore_shutdown_handlers", lambda previous: None)
@@ -967,7 +971,11 @@ def test_busy_runtime_lock_never_opens_candidate_board_watch(
         def __exit__(self, *args: object) -> None:
             return None
 
-    monkeypatch.setattr(consumer, "verify_runtime_source_head", lambda *args, **kwargs: "a" * 40)
+    monkeypatch.setattr(
+        consumer,
+        "_preflight_source_compatibility",
+        lambda **kwargs: {"fit_quarantined": False, "repo_source_head": "a" * 40},
+    )
     monkeypatch.setattr(consumer, "read_local_dsn_file", lambda path: "local-dsn")
     monkeypatch.setattr(consumer, "_install_shutdown_handlers", lambda event: {})
     monkeypatch.setattr(consumer, "_restore_shutdown_handlers", lambda previous: None)
@@ -1846,10 +1854,12 @@ def test_dsn_file_must_be_private_and_explicitly_local(tmp_path: Path) -> None:
         read_local_dsn_file(linked_dsn)
 
 
-def test_runtime_source_head_must_match_checkout_before_database_use(
+def test_demoted_verify_runtime_source_head_is_telemetry_only(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    # LR1(S2.2A):verify_runtime_source_head 已降級為遙測 helper(不再是 capture 的
+    # fail-closed 存活閘)。此測試只覆蓋這個 helper 本身的比對契約。
     head = "a" * 40
     monkeypatch.setattr(
         consumer.subprocess,
@@ -1867,6 +1877,124 @@ def test_runtime_source_head_must_match_checkout_before_database_use(
     source = Path(consumer.__file__).read_text(encoding="utf-8")
     assert "ALR_RECONCILE_AFTER" not in source
     assert "reconcile_after" not in source
+
+
+def _lr_manifest(*, capture: str, training: str, self_digest: str, head: str = "c" * 40) -> dict:
+    return {
+        "schema_version": "learning_runtime_manifest_v1",
+        "repo_source_head": head,
+        "capture_contract": {"digest": capture},
+        "training_contract": {"digest": training},
+        "self_digest": self_digest,
+    }
+
+
+_CAP = "sha256:" + "a" * 64
+_TRN = "sha256:" + "b" * 64
+_SELF = "sha256:" + "d" * 64
+
+
+def _stub_preflight_manifests(
+    monkeypatch: pytest.MonkeyPatch, *, actual: dict | None, expected: dict | None
+) -> None:
+    monkeypatch.setattr(
+        consumer, "try_build_learning_runtime_manifest", lambda *a, **k: (actual, [])
+    )
+    monkeypatch.setattr(
+        consumer, "_load_expected_compatibility_manifest", lambda *a, **k: expected
+    )
+
+    def _head_moved(source_head: str, **kwargs: object) -> str:
+        raise AlrEventConsumerError("source_head_mismatch")
+
+    monkeypatch.setattr(consumer, "verify_runtime_source_head", _head_moved)
+
+
+def test_docs_only_head_move_does_not_stop_capture(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # LR1(S2.2A):docs-only 提交只移動整倉 HEAD;expected(pinned receipt)與 actual 的
+    # capture/training 元件 digest 相同 → capture 不停、fit 不 quarantine;HEAD 比對只留遙測。
+    actual = _lr_manifest(capture=_CAP, training=_TRN, self_digest=_SELF, head="e" * 40)
+    expected = _lr_manifest(capture=_CAP, training=_TRN, self_digest=_SELF, head="c" * 40)
+    _stub_preflight_manifests(monkeypatch, actual=actual, expected=expected)
+
+    result = consumer._preflight_source_compatibility(
+        source_head="e" * 40,
+        expected_learning_runtime_digest=_SELF,
+        repo_root=None,
+    )
+    assert result["fit_quarantined"] is False
+    assert result["capture_status"] == "COMPATIBLE"
+    assert result["source_head_match"] == "source_head_mismatch"
+    assert result["repo_source_head"] == "e" * 40
+
+
+def test_capture_surface_incompatible_stops_capture(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # LR1:actual 的 capture digest 相對 reviewed pin 漂移 → capture INCOMPATIBLE → 停 ingest。
+    actual = _lr_manifest(capture="sha256:" + "9" * 64, training=_TRN, self_digest="sha256:" + "1" * 64)
+    expected = _lr_manifest(capture=_CAP, training=_TRN, self_digest=_SELF)
+    _stub_preflight_manifests(monkeypatch, actual=actual, expected=expected)
+    with pytest.raises(AlrEventConsumerError, match="capture_surface_incompatible"):
+        consumer._preflight_source_compatibility(
+            source_head="a" * 40,
+            expected_learning_runtime_digest=None,
+            repo_root=None,
+        )
+
+
+def test_training_drift_quarantines_fit_but_keeps_capture(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # LR1:training digest 漂移而 capture digest 相同 → capture 續跑、fit_quarantined=True。
+    actual = _lr_manifest(capture=_CAP, training="sha256:" + "7" * 64, self_digest="sha256:" + "2" * 64)
+    expected = _lr_manifest(capture=_CAP, training=_TRN, self_digest=_SELF)
+    _stub_preflight_manifests(monkeypatch, actual=actual, expected=expected)
+    result = consumer._preflight_source_compatibility(
+        source_head="a" * 40,
+        expected_learning_runtime_digest=None,
+        repo_root=None,
+    )
+    assert result["capture_status"] == "COMPATIBLE"
+    assert result["fit_quarantined"] is True
+
+
+def test_capture_surface_build_failure_stops_capture(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # LR1:actual 清單建置失敗(缺 allowlisted 輸入等)→ INDETERMINATE → fail-closed 停 ingest。
+    monkeypatch.setattr(
+        consumer,
+        "try_build_learning_runtime_manifest",
+        lambda *a, **k: (None, ["missing_input:program_code/ml_training/x.py"]),
+    )
+    monkeypatch.setattr(
+        consumer,
+        "_load_expected_compatibility_manifest",
+        lambda *a, **k: _lr_manifest(capture=_CAP, training=_TRN, self_digest=_SELF),
+    )
+    with pytest.raises(AlrEventConsumerError, match="capture_surface_incompatible"):
+        consumer._preflight_source_compatibility(
+            source_head="a" * 40,
+            expected_learning_runtime_digest=None,
+            repo_root=None,
+        )
+
+
+def test_missing_expected_receipt_stops_capture(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # LR1:pinned receipt 缺失/不可驗 → expected=None → INDETERMINATE → fail-closed 停 ingest。
+    actual = _lr_manifest(capture=_CAP, training=_TRN, self_digest=_SELF)
+    _stub_preflight_manifests(monkeypatch, actual=actual, expected=None)
+    with pytest.raises(AlrEventConsumerError, match="capture_surface_incompatible"):
+        consumer._preflight_source_compatibility(
+            source_head="a" * 40,
+            expected_learning_runtime_digest=None,
+            repo_root=None,
+        )
 
 
 def test_main_emits_exact_zero_authority_counter_vector(
