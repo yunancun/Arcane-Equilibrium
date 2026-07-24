@@ -52,6 +52,16 @@ SCHEMA_FILES = {
     "target_host_effect_result_v1": "target_host_effect_result_v1.schema.json",
     # S2.2A(LR1)scoped source-compatibility receipt——中央閘結構驗 + 下方 identity 交叉檢查。
     "source_compatibility_receipt_v1": "source_compatibility_receipt_v1.schema.json",
+    # S2.3(LR2)——additive:sealed-build 與 expected-identity receipt。加這兩鍵純為 schema
+    # 查找,絕不進入 aiml_effect_classifier_digest() 的六個 S0.3 常量輸入(見 :46-48/§7.2),
+    # S0.3 分類身分不動。中央閘只做離線結構/整合/身分綁定/新鮮度委派驗(委派給
+    # agent_governance_sealed_build 的 SSOT validators);真 offline-install 證明留在既有綠燈
+    # `learning-runtime-sealed-build` CI job。
+    "sealed_build_receipt_v1": "sealed_build_receipt_v1.schema.json",
+    "expected_identity_receipt_v1": "expected_identity_receipt_v1.schema.json",
+    # S2.2A(LR1)v2 source-compatibility receipt——內嵌 learning_runtime_manifest_v2,
+    # dependency_lock 由 scalar 升為 {spec_digest, lock_digest} 物件並併入 parquet_etl COMPUTE。
+    "source_compatibility_receipt_v2": "source_compatibility_receipt_v2.schema.json",
 }
 
 S0_DEPENDENCY_DIGESTS = {
@@ -1887,6 +1897,43 @@ def validate_aiml_artifact(
         errors.extend(_program_adoption_receipt_errors(artifact))
     if schema_version == "source_compatibility_receipt_v1":
         errors.extend(_source_compatibility_receipt_errors(artifact))
+    if schema_version in {"sealed_build_receipt_v1", "expected_identity_receipt_v1"}:
+        # S2.3(LR2)sealed-build / expected-identity 是 BUILD-IDENTITY / source 產物
+        # (content-addressed、可重算、production_running_attested=false、observation_owner=
+        # S2.5_LR6)——與 source_compatibility receipt 同類、非 effect-class。故中央閘只做離線
+        # 結構/整合/const-false/S1.3·S1.4 ground-truth 身分綁定/self_digest 委派驗,「刻意不施加
+        # wall-clock 新鮮度窗」:committed build 證據帶固定 30-min TTL,若以真牆鐘 now 判窗會過期成
+        # time-bomb,任何以 wall-clock now 呼叫中央閘的 closure/CI/S2.4 消費者都會誤拒 committed 證據。
+        # 真正的 recency 證明留在既有綠燈 `learning-runtime-sealed-build` CI job。故傳 now=None
+        # (mirror S2.3 CLI + offline 測試對這兩類 receipt 的既有處置);SSOT 內部仍驗 ttl 範圍與
+        # observed<expires 等結構性時間不變量,只是不做 wall-clock 窗判。亦刻意不傳 lock_path 與配對
+        # sealed(不重跑 lock 封閉 re-derivation、不做 F2c 配對):同屬 CI job 的 offline-install 證明。
+        #
+        # ⚠ SOURCE-TRUTH 邊界(WP4/WP5 消費者請注意):此委派(及下方 source_compatibility_receipt_v2
+        # 分支)只證 receipt 的「內部自洽 + 結構」(offline-structure 模式);validate_aiml_artifact
+        # 通過「不」等於證明 receipt 與真 repo/真 lock 相符。build-identity receipt 的 source-truth
+        # 綁定在別處:(i) launcher 端的 recompute-from-checkout(alr_event_consumer.
+        # try_build_learning_runtime_manifest_v2)+ operator pin,與 (ii) `learning-runtime-sealed-build`
+        # CI job 內 verify_lock_closure(lock_path=) 對真 lock 的 re-derivation。
+        import agent_governance_sealed_build as _sealed_build
+        if schema_version == "sealed_build_receipt_v1":
+            errors.extend(
+                _sealed_build.validate_sealed_build_receipt(artifact, now=None)
+            )
+        else:
+            errors.extend(
+                _sealed_build.validate_expected_identity_receipt(artifact, now=None)
+            )
+    if schema_version == "source_compatibility_receipt_v2":
+        # v2 沿用「版本無關」的內層反偽造重算:_source_compatibility_receipt_errors 由 manifest
+        # 自身 schema_version 驅動 self_digest 重算,且 training_contract.digest 綁定整個
+        # components(含 dependency_lock 物件)→ 偽造內層 dependency_lock 而只重封外層 self_digest
+        # 必被抓。另補 v2 專屬 dependency_lock 物件形狀檢查(spec/lock 兩子 digest)。
+        # ⚠ 同上 SOURCE-TRUTH 邊界:此為 internal-consistency + structure 驗,非 source-truth——
+        # dependency_lock 的 spec/lock 子 digest 是內嵌值,離線閘無法重算真檔;真檔綁定在 launcher
+        # recompute-from-checkout 與 sealed-build CI job 的 verify_lock_closure。
+        errors.extend(_source_compatibility_receipt_errors(artifact))
+        errors.extend(_source_compatibility_receipt_v2_dependency_lock_errors(artifact))
     return errors
 
 
@@ -1933,3 +1980,27 @@ def _source_compatibility_receipt_errors(artifact: dict[str, Any]) -> list[str]:
     if artifact["migration_fingerprints"] != training["components"]["migration_fingerprints"]:
         errors.append("migration_fingerprints do not bind the manifest components")
     return errors
+
+
+def _source_compatibility_receipt_v2_dependency_lock_errors(
+    artifact: dict[str, Any],
+) -> list[str]:
+    """v2 專屬:training components 的 dependency_lock 必為 {spec_digest, lock_digest} 物件。
+
+    子 digest 的 sha256 形狀由 v2 schema($defs/dependency_lock)在 schema_subset 階段強制;
+    反偽造(不可竄改 spec/lock digest 而只重封外層)由上方版本無關的
+    ``_source_compatibility_receipt_errors`` 經 training_contract.digest 綁定整個 components 保證。
+    此處僅補一道 Python 層形狀斷言(schema 已保證,故為 defense-in-depth)。
+    """
+    manifest = artifact["learning_runtime_manifest"]
+    components = manifest["training_contract"]["components"]
+    dependency_lock = components.get("dependency_lock")
+    if not isinstance(dependency_lock, dict) or set(dependency_lock) != {
+        "spec_digest",
+        "lock_digest",
+    }:
+        return [
+            "source_compatibility_receipt_v2 dependency_lock must be a "
+            "{spec_digest, lock_digest} object"
+        ]
+    return []

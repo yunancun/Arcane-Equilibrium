@@ -25,6 +25,12 @@ EXPECTED_PROJECTION_SHA256 = (
     "975edf8900a429b8c3412e0cca93451cb7eaece62830647774381d422c8b8df9"
 )
 
+# S2-WP1 additive:v2 allowlist 的獨立凍結 projection(不動上方 v1 sha)。v2 對「digest 涵蓋
+# 什麼」的任何靜默增刪(learning-code v2 集、dependency_lock 兩檔、v2 schema 版本)即讓此 sha 變動。
+EXPECTED_PROJECTION_V2_SHA256 = (
+    "d281f3dfe68149cb58c9e6ff279d3d63f42029a6c5e7ea3b66c99f38c23da717"
+)
+
 # NONE-effect 邊界:下單 / PG 寫入 / Bybit / fetch / git-mutation 一律禁。git rev-parse
 # 是唯讀,允許;但任何 git 變異動詞(以 subprocess arg 字面或 "git <verb>" 形式)禁。
 FORBIDDEN_TOKENS = (
@@ -142,3 +148,47 @@ def test_migration_allowlist_is_exactly_v151_to_v160() -> None:
         Path(rel).name.split("__", 1)[0] for rel in projection["migration_inputs"]
     )
     assert versions == [f"V{index}" for index in range(151, 161)]
+
+
+# ── S2-WP1 additive:v2 allowlist projection 守衛 ──────────────────────────────
+def _projection_v2() -> dict[str, object]:
+    if str(ROOT / "program_code") not in sys.path:
+        sys.path.insert(0, str(ROOT / "program_code"))
+    from ml_training import learning_runtime_manifest as lrm
+
+    return {
+        "schema_version_v2": lrm.SCHEMA_VERSION_V2,
+        "receipt_schema_version_v2": lrm.RECEIPT_SCHEMA_VERSION_V2,
+        "learning_code_inputs_v2": sorted(lrm.LEARNING_CODE_INPUTS_V2),
+        "dependency_lock_spec_file": lrm.DEPENDENCY_LOCK_SPEC_FILE,
+        "dependency_lock_lock_file": lrm.DEPENDENCY_LOCK_LOCK_FILE,
+    }
+
+
+def test_frozen_allowlist_projection_v2_is_pinned() -> None:
+    projection = _projection_v2()
+    blob = json.dumps(projection, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    actual = hashlib.sha256(blob).hexdigest()
+    assert actual == EXPECTED_PROJECTION_V2_SHA256, (
+        "learning_runtime_manifest v2 allowlist changed; review the new digest coverage "
+        f"then update EXPECTED_PROJECTION_V2_SHA256 to {actual}"
+    )
+
+
+def test_v2_allowlist_references_real_repository_files() -> None:
+    projection = _projection_v2()
+    referenced = [
+        *projection["learning_code_inputs_v2"],
+        projection["dependency_lock_spec_file"],
+        projection["dependency_lock_lock_file"],
+    ]
+    missing = [rel for rel in referenced if not (ROOT / rel).is_file()]
+    assert missing == [], f"v2 allowlist references non-existent files: {missing}"
+
+
+def test_v2_learning_code_is_v1_superset_plus_parquet_etl() -> None:
+    from ml_training import learning_runtime_manifest as lrm
+
+    assert set(lrm.LEARNING_CODE_INPUTS).issubset(set(lrm.LEARNING_CODE_INPUTS_V2))
+    added = set(lrm.LEARNING_CODE_INPUTS_V2) - set(lrm.LEARNING_CODE_INPUTS)
+    assert added == {"program_code/ml_training/parquet_etl.py"}
