@@ -44,8 +44,9 @@ runtime/live claim without fresh runtime identity cannot PASS.
   surface-to-role table. Selection surfaces and run sequence are closure-bound
   and recomputed; CC/FA-only cannot PASS.
 
-Default full axes include CC/FA/E2/E3/BB/IB/OPS/QC/MIT/AI-E/E5/A3/R4. E4 is the
-post-fix regression phase and TW is a writer, so neither is a discovery axis.
+Default full axes include CC/FA/E2/E3/BB/IB/OPS/QC/MIT/AI-E/E5/A3/R4. E4
+regression evidence belongs to the post-integration pipeline outside this
+workflow (claim-0011) and TW is a writer, so neither is a discovery axis.
 IBKR never routes to BB; runtime/deploy evidence gets OPS.
 
 ## Elastic admission envelope
@@ -66,8 +67,9 @@ Tunable args inside that authority:
 | `estimated_seam_tokens` | 4,000 | Cross-axis seam critic reserve |
 | `estimated_fix_tokens` | 8,000 | Optional E1 fix reserve per admitted finding |
 | `estimated_review_tokens` | 4,000 | Independent E2 fix-review reserve |
-| `estimated_regression_tokens` | 8,000 | One E4 regression reserve when fix queue is admitted |
 | `max_fixes` | 5 | Optional fix-mode source patches |
+| `admission_now_ms` | wall clock | Dispatch-side epoch-ms admission clock; mandatory where the sandbox denies `Date.now()` |
+| `judgment_model` | inherit session model | Explicit strong-judgment override; derive from `settings/ai_pricing.yaml` active entries, `null` = inherit |
 | `stop_when` | decision-value rule | Mandatory coverage closed and next novelty/verdict-reversal value below marginal cost |
 
 If the envelope cannot admit an axis/claim/fix, it becomes explicit
@@ -76,8 +78,8 @@ scheduler never truncates it into PASS. Increase the envelope or split scope whe
 the debt is decision-critical.
 
 Call and token accounting reserves every phase: audit axes, one shared total
-retry budget across audit and verification, seam critic, verifier quorum,
-optional E1/E2 fix pairs, and E4 regression. The 20/96k authority is a ceiling,
+retry budget across audit and verification, seam critic, verifier quorum with
+risk-conditioned third votes, and optional E1/E2 fix pairs. The 20/96k authority is a ceiling,
 not a target; unused reserves are not actual usage. If full backstop plus claims
 cannot fit, split scope and preserve coverage debt rather than lowering evidence.
 
@@ -103,7 +105,9 @@ discovery; this protects independence.
 3. Every admitted CRITICAL/HIGH/goal-bearing MEDIUM claim receives two
    independent verifiers.
 4. High-risk/reachability or verifier disagreement receives a third independent
-   adjudicator.
+   adjudicator within the risk-conditioned third-vote capacity (dedicated
+   reservation per admitted high-risk claim, then deterministic severity-order
+   floating entitlements); shortfall is explicit coverage debt.
 5. Missing quorum is disputed, never confirmed.
 6. A seam critic returns re-probes; these remain coverage debt until an assigned
    role obtains evidence.
@@ -112,20 +116,22 @@ The workflow preserves verifier dissent. Capability/over-gate findings are not
 downgraded merely because the capability is unreachable; unreachability may be
 the defect itself.
 
-## Cluster, fix, regression
+## Cluster and fix
 
 Clustering is presentation-only by normalized file+symbol. Members, severity,
 evidence, and fix identity remain untouched.
 
 `fix=true` admits only bounded confirmed claims. E1 fixes in isolated scope; E2
-reviews without editing. E4 uses focused-to-broad content-addressed evidence;
-second run only for critical, failed, known-flaky, or release-gate proof.
+reviews without editing. Candidates are never integrated in-run
+(`integration_status` stays `NOT_INTEGRATED`); E4 regression evidence belongs to
+the post-integration pipeline after the candidate merges (claim-0011).
 
 ## Closure
 
 The workflow returns one immutable `full_audit_control_v1` fragment, exact
 `closure_admissions`, immutable axis `role_fragment_v1` objects, slim decision
-views, coverage holes/debt, assumptions, seam re-probes, fixes/regression, and
+views, coverage holes/debt, assumptions, seam re-probes, fixes (in-run
+regression is retired; result fields stay null), and
 partial or measured consumption. PM must copy controller/admissions/fragments and
 the canonical unverified projection into one `closure_packet_v1`. Closure
 recomputes adaptive selection, eligibility and axis parity; validates canonical

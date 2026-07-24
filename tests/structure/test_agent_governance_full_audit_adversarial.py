@@ -1165,11 +1165,13 @@ def test_saved_workflow_binds_e2_and_never_regresses_unintegrated_fix_candidates
     assert "CANDIDATE_REVIEWED_NOT_INTEGRATED" in source
     assert "reviewMatchesCandidate" in source
     assert "integration_status: 'NOT_INTEGRATED'" in source
-    assert "integration_status === 'APPLIED_VERIFIED'" in source
     assert ".fix.status === 'FIXED'" not in source
-    regression_guard = source.index("if (integratedFixes.length)")
-    regression_call = source.index("label: 'audit-regression'")
-    assert regression_guard < regression_call
+    # claim-0011(2026-07-24 run0):fix 產物依設計永不在 run 內 integration,
+    # in-run regression 呼叫路徑不得復活;result 保留 regression 欄位恆 null
+    assert "integration_status === 'APPLIED_VERIFIED'" not in source
+    assert "if (integratedFixes.length)" not in source
+    assert "label: 'audit-regression'" not in source
+    assert "const regression = null" in source
 
 
 def _full_audit_workflow_context() -> tuple[object, dict, dict, list[str]]:

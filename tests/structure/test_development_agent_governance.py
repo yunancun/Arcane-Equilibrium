@@ -2766,11 +2766,15 @@ def test_saved_workflows_expose_closure_and_consumption_envelopes() -> None:
     assert "estimated_seam_tokens" in audit
     assert "estimated_fix_tokens" in audit
     assert "estimated_review_tokens" in audit
-    assert "estimated_regression_tokens" in audit
+    # claim-0011(2026-07-24 run0):in-run Regression 死碼已移除——釘「死碼不存在」
+    # 與新 reserve 不變量(E1 candidate + E2 review 兩節點;result 欄位形狀恆 null 保留)
+    assert "estimated_regression_tokens" not in audit
     assert "retryBudget * auditCallTokens" in audit
-    assert "const fixReserveNodes = 3" in audit
-    assert "fixCallTokens + reviewCallTokens + regressionCallTokens" in audit
-    assert "regressionReserved" in audit
+    assert "const fixReserveNodes = 2" in audit
+    assert "const fixReserveTokens = fixCallTokens + reviewCallTokens" in audit
+    assert "regressionReserved" not in audit
+    assert "const regression = null" in audit
+    assert "regression_reserved: false" in audit
 
     profit = (ROOT / ".claude/workflows/profit-diagnosis.js").read_text(encoding="utf-8")
     assert "report_path" not in profit
