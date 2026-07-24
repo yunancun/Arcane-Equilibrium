@@ -1,0 +1,16 @@
+{
+  "deferred_root_only_controllers": [
+    "cpuset",
+    "io"
+  ],
+  "delegated_controllers": [
+    "cpu",
+    "memory",
+    "pids"
+  ],
+  "expected_host": "trade-core",
+  "non_root_uid": true,
+  "observed_host": "trade-core",
+  "sudo_noprompt_present": false,
+  "throwaway_root_under_runtime_dir": true
+}

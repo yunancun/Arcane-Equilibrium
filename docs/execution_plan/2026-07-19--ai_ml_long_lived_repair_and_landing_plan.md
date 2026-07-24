@@ -820,26 +820,33 @@ PR #114 (Wave A-C source landing, merge `7d78765a2`) merged before Codex review 
 
 ### §8 — Authenticated closure emission (2026-07-24)
 
-The final H_effect is `45a854fa6638aa0be677a2b705f42fe8f417ac95`.
-Linux `trade-core` revalidated the still-fresh, source/schema-identical
-six-class S1.5 receipt
-(`sha256:ab63d9db3682e94be195446e4e4d9a586d1ef327427547d88347d934914b140f`)
-and produced a fresh eight-seam S1.6 target-host effect
-(`sha256:9f8f40b15598822544f0dd8618429ae3c6c2ac2b153d8b3acd70094b73fffd99`);
-both passed with exact rollback/postcheck and zero residue. The authenticated
-closure digest is
-`sha256:eeef47cca1bcbfd44fb917759539b6afd06610669ec65a3be9e30b27a1f46de1`.
+The final H_effect is `f6e0099523de93e11986947bf673cea6e5209639`.
+Linux `trade-core` freshly executed all six S1.5 disposable component classes
+(`sha256:cb96671598707d4dd3ca6b4284106bf8b19baf4ff259e6c9a0bcdeca04ef7cdf`)
+and all eight S1.6 target-host seams
+(`sha256:1a0fde065ae4b95bb390e66b65be472a6e560f8f3d76135be6bc0c7c2b25a91c`);
+both passed with exact rollback/postcheck and zero residue. The operator first
+signed the exact intent/source head under the dedicated apply namespace, then
+signed the complete closure bundle under the S1 closure namespace. Independent
+SSHSIG verification, immediate trusted finalization and historical replay at
+the signed bundle instant all pass with zero errors. The authenticated closure
+digest is
+`sha256:52842fdfe6237e25d939d738eb54c2a79fdca5c87ec2577da304b83127282180`;
+the trusted bundle is
+`sha256:81860f0dfd78954847209fcb05db317bf8063742c7d7b7accd5dbd4bad521d6c`,
+and the finalization digest is
+`sha256:8f26a57373faa5a2b20ed566837736e6ce6e3189d6e117b5112edf8b9f9cff71`.
 The signed bundle and complete causal artifacts are durable under
 `docs/execution_plan/ai_ml_landing/receipts/S1-closure-fix-2026-07-24/`.
 This emission grants none of the nine runtime/trading authorities.
 
-The final adversarial closeout also repaired four load-bearing P1s before this
-emission: generated one-line receipts can no longer exhaust the supposedly
-bounded direct-caller Context preview (full-match digest remains binding), and
-the target-host run driver now refuses any caller-supplied source head that is
-not the exact clean worktree `HEAD`. It also records `evaluated_at` only after
-trusted finalization completes, so the durable result cannot predate Context
-source validity. Immediate trusted-host validation and receipt-time historical
-replay both pass. The finalizer regression is also selected by the required
-governance glob, whose 10-minute budget permits the complete gate to finish
-instead of cancelling at five minutes.
+The exact-head adversarial closeout repaired five further load-bearing P1s
+before this emission. The child gate now requires a source-pinned operator
+signature over the exact intent rather than a caller-created checksum capsule.
+The preflight and postcheck captures must come from their declared signed
+semantic observers, and the verifier performs the residue sweep inside its own
+captured command. Closure freshness uses the SSHSIG-bound bundle `issued_at`,
+not a caller-local appended timestamp. Every mandatory non-OPS reviewer must
+also cite the authenticated workflow wave that owns its exact fragment digest;
+an effect receipt cannot substitute for reviewer evidence. The required
+governance CI selection includes the two-phase target-host driver suite.

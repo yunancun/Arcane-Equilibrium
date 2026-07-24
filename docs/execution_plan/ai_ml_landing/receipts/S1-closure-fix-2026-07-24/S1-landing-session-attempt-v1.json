@@ -14,10 +14,10 @@
   },
   "attempt_phase": "SOURCE_BUILD",
   "bootstrap_admission": {
-    "baseline_head": "45a854fa6638aa0be677a2b705f42fe8f417ac95",
-    "context_artifact_digest": "sha256:ebdf0de45ee47d5aa80ae9ecf5b8515863f3d71e190507f2ae181183f9ef3b6d",
+    "baseline_head": "f6e0099523de93e11986947bf673cea6e5209639",
+    "context_artifact_digest": "sha256:44dc67114565d8abd8675825c1d5f6604ccc182fdd7d96a2612d8faab7cc1c86",
     "dag_digest": "sha256:402288f0e54ded307bf8f98e0caf632a89502a38239a69421e79646640821152",
-    "task_contract_digest": "sha256:02cc6ec64d8bfd240e93b10a638558d80e44603ce820c7351771b818edbffea2",
+    "task_contract_digest": "sha256:b81ffadd76bab3b66b3ac6faac72602d841e1f81eb60a2fa6efe84e8d1563e99",
     "task_id": "aiml-s1-formal-closure-v1",
     "writer_lease_id": "5e151851bf81fd296eef27ba46b28050"
   },
@@ -30,12 +30,12 @@
     ]
   },
   "closure_binding": {
-    "closure_packet_digest": "sha256:eeef47cca1bcbfd44fb917759539b6afd06610669ec65a3be9e30b27a1f46de1",
+    "closure_packet_digest": "sha256:52842fdfe6237e25d939d738eb54c2a79fdca5c87ec2577da304b83127282180",
     "effect_adapter_id": "target_host_disposable_runtime_probe_adapter_v1",
-    "effect_receipt_digest": "sha256:9f8f40b15598822544f0dd8618429ae3c6c2ac2b153d8b3acd70094b73fffd99"
+    "effect_receipt_digest": "sha256:1a0fde065ae4b95bb390e66b65be472a6e560f8f3d76135be6bc0c7c2b25a91c"
   },
   "cohort_epoch": "2026-07-24-s1-final",
-  "created_at": "2026-07-24T01:22:06.039400Z",
+  "created_at": "2026-07-24T02:19:51.842075Z",
   "dag_nodes": [
     {
       "node_class": "work",
@@ -43,19 +43,31 @@
       "permission": "source_writer",
       "requires": [],
       "writer_paths": [
+        ".codex/agent_registry_v1.json",
+        "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_host.py",
+        "helper_scripts/maintenance_scripts/agent_governance_permissions.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_apply.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_child_apply.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_choice.py",
         "helper_scripts/maintenance_scripts/agent_governance_target_host_effects.py",
-        "helper_scripts/maintenance_scripts/aiml_s1_closure_target_host_run.py"
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_observation.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_observation_capture.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_operator_authorization.py",
+        "helper_scripts/maintenance_scripts/agent_governance_trust.py",
+        "helper_scripts/maintenance_scripts/aiml_s1_closure_target_host_run.py",
+        "helper_scripts/maintenance_scripts/aiml_s1_target_host_authorize.py",
+        "helper_scripts/maintenance_scripts/aiml_s1_trusted_finalize.py"
       ]
     }
   ],
   "dependency_generations": [
     {
-      "receipt_digest": "sha256:ab63d9db3682e94be195446e4e4d9a586d1ef327427547d88347d934914b140f",
+      "receipt_digest": "sha256:cb96671598707d4dd3ca6b4284106bf8b19baf4ff259e6c9a0bcdeca04ef7cdf",
       "schema_version": "effect_seams_ready_receipt_v1",
       "session_id": "S1.5"
     },
     {
-      "receipt_digest": "sha256:52265711cf9440309786cd368dfd6e1fd20480bbd2c578db958697dbb2c71857",
+      "receipt_digest": "sha256:067a3700620730e1faecb533ebd6080eaaa5dc0a857c2a17f44351601a5fdb49",
       "schema_version": "learning_runtime_choice_receipt_target_host_v1",
       "session_id": "S1.6"
     }
@@ -63,10 +75,10 @@
   "effect_classification_digest": "sha256:58c3a7224a057932fbaaeebfd069cc8157a02d7d7d06a7391f91903455e03a34",
   "independent_postcheck_node": "ops_postcheck",
   "lease": {
-    "acquired_at": "2026-07-24T01:21:06.039400Z",
+    "acquired_at": "2026-07-24T02:18:51.842075Z",
     "epoch": 1,
-    "expires_at": "2026-07-24T05:22:06.039400Z",
-    "heartbeat_at": "2026-07-24T01:22:06.039400Z",
+    "expires_at": "2026-07-24T06:19:51.842075Z",
+    "heartbeat_at": "2026-07-24T02:19:51.842075Z",
     "lease_id": "5e151851bf81fd296eef27ba46b28050"
   },
   "native_admission": {
@@ -78,8 +90,20 @@
   },
   "owner": "PM",
   "path_manifest": [
+    ".codex/agent_registry_v1.json",
+    "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_host.py",
+    "helper_scripts/maintenance_scripts/agent_governance_permissions.py",
+    "helper_scripts/maintenance_scripts/agent_governance_target_host_apply.py",
+    "helper_scripts/maintenance_scripts/agent_governance_target_host_child_apply.py",
+    "helper_scripts/maintenance_scripts/agent_governance_target_host_choice.py",
     "helper_scripts/maintenance_scripts/agent_governance_target_host_effects.py",
-    "helper_scripts/maintenance_scripts/aiml_s1_closure_target_host_run.py"
+    "helper_scripts/maintenance_scripts/agent_governance_target_host_observation.py",
+    "helper_scripts/maintenance_scripts/agent_governance_target_host_observation_capture.py",
+    "helper_scripts/maintenance_scripts/agent_governance_target_host_operator_authorization.py",
+    "helper_scripts/maintenance_scripts/agent_governance_trust.py",
+    "helper_scripts/maintenance_scripts/aiml_s1_closure_target_host_run.py",
+    "helper_scripts/maintenance_scripts/aiml_s1_target_host_authorize.py",
+    "helper_scripts/maintenance_scripts/aiml_s1_trusted_finalize.py"
   ],
   "required_effects": [
     {
@@ -97,15 +121,15 @@
     "kind": "LANDING_SCOPE",
     "landing_scope_id": "sha256:df51082fcc3512190834f8e947a5bbc190ee3119ecd0b19af80cf46bec66f3e3"
   },
-  "self_digest": "sha256:e2522fe13952fa4203fa3ecc9609cbce3db04bb1e01a16daa9753c0e3ed0243a",
+  "self_digest": "sha256:74b87c966c041a6c569f5a55c10a8f2a71c9e7f0a11930646ce4e6cd23befa35",
   "semantic_rechecks": [
     "path_ownership"
   ],
   "session_id": "S1.6B",
   "source": {
-    "baseline_head": "45a854fa6638aa0be677a2b705f42fe8f417ac95",
+    "baseline_head": "f6e0099523de93e11986947bf673cea6e5209639",
     "branch": "agent/aiml-s1-closure-p1p2-fixes",
-    "checkpoint_head": "45a854fa6638aa0be677a2b705f42fe8f417ac95",
+    "checkpoint_head": "f6e0099523de93e11986947bf673cea6e5209639",
     "worktree": "/Users/ncyu/Projects/TradeBot/.codex-worktrees/aiml-s1-closure-p1p2-fixes"
   },
   "status": "FINALIZED",
@@ -115,8 +139,20 @@
       "closure_packet_v1"
     ],
     "owned_path_manifest": [
+      ".codex/agent_registry_v1.json",
+      "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_host.py",
+      "helper_scripts/maintenance_scripts/agent_governance_permissions.py",
+      "helper_scripts/maintenance_scripts/agent_governance_target_host_apply.py",
+      "helper_scripts/maintenance_scripts/agent_governance_target_host_child_apply.py",
+      "helper_scripts/maintenance_scripts/agent_governance_target_host_choice.py",
       "helper_scripts/maintenance_scripts/agent_governance_target_host_effects.py",
-      "helper_scripts/maintenance_scripts/aiml_s1_closure_target_host_run.py"
+      "helper_scripts/maintenance_scripts/agent_governance_target_host_observation.py",
+      "helper_scripts/maintenance_scripts/agent_governance_target_host_observation_capture.py",
+      "helper_scripts/maintenance_scripts/agent_governance_target_host_operator_authorization.py",
+      "helper_scripts/maintenance_scripts/agent_governance_trust.py",
+      "helper_scripts/maintenance_scripts/aiml_s1_closure_target_host_run.py",
+      "helper_scripts/maintenance_scripts/aiml_s1_target_host_authorize.py",
+      "helper_scripts/maintenance_scripts/aiml_s1_trusted_finalize.py"
     ],
     "phase": "SOURCE_BUILD",
     "runtime_claim": true,

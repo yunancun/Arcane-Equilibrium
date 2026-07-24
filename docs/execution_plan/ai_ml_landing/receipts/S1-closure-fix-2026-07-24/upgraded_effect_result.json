@@ -1,7 +1,7 @@
 {
   "adapter_id": "target_host_disposable_runtime_probe_adapter_v1",
   "applier_node_id": "s1fc_apply_actor",
-  "approved_at": "2026-07-24T01:21:43.994813+00:00",
+  "approved_at": "2026-07-24T02:19:20.125764+00:00",
   "approved_by": "operator",
   "choice_receipt": {
     "boundary": {
@@ -16,7 +16,7 @@
       "real_target_host_primitives_invoked": true,
       "user_scope_only": true
     },
-    "caller": "target_host_probe_v1:intent-applier:sha256:adf8d53925d54fa08c512d7d3786f91faee8c72c565f453daccaca3df9457168",
+    "caller": "target_host_probe_v1:intent-applier:sha256:5ef4206b9c534ba18a0d241b40038b1f3a692ba39f2f4665a51a0de90ea9b899",
     "candidate_probes": [
       {
         "apply_actor_node": "s1fc_apply_actor",
@@ -35,7 +35,7 @@
             "verdict": "PASSED_TARGET_HOST"
           },
           {
-            "evidence_digest": "sha256:b30c1cd2857bb71170403a99810236b2c2a5c039675189ec0fbcbe0e5bf8d642",
+            "evidence_digest": "sha256:3dc29243b59d9e228bf7da206aab386ecb12bb2b3cf7f4d322ef7f5620c2ff45",
             "note": "scope with MemoryMax/MemoryHigh/CPUQuota/TasksMax drove memory.events:oom_kill, cpu.stat throttling and pids.events:max (cpu/mem/pids; cpuset/io root-only deferred)",
             "seam_id": "cgroup_resource_isolation",
             "verdict": "PASSED_TARGET_HOST"
@@ -60,7 +60,7 @@
             "verdict": "PASSED_TARGET_HOST"
           },
           {
-            "evidence_digest": "sha256:d0bcd307174bab83dd72174805163a1dccd8c3036bea7e81ba0b888cdf2a73a1",
+            "evidence_digest": "sha256:7b2ec00d79f7add14bda2b56993845010c57cef658cbb18bba940fd85fdcf186",
             "note": "systemctl --user kill + restart the deployed content-addressed bundle; restarted process resolves (proc cwd) under the rolled-back bundle root; interrupted apply never swaps; teardown + reset-failed + rmtree",
             "seam_id": "failure_rollback_cleanup",
             "verdict": "PASSED_TARGET_HOST"
@@ -72,8 +72,8 @@
             "verdict": "PASSED_TARGET_HOST"
           },
           {
-            "evidence_digest": "sha256:d7fb2437f2d5d458a6148406885e375efadf3caeb015a502efa522a41d4e4c73",
-            "note": "distinct OPS verifier (verifier != applier) attached a clean on-host residue sweep: units/cgroup/netns/temp all gone | distinct verifier capture digest: sha256:474ea3bcdd4e4b114de2932f5bbad8ab72f2071d40cfb7ba6e9ffb082517b81b",
+            "evidence_digest": "sha256:8f88a8c9a9de9d1c2425cfd75cbb521e86f5f531a31f002bdc359dbc5178fd68",
+            "note": "distinct OPS verifier (verifier != applier) attached a clean on-host residue sweep: units/cgroup/netns/temp all gone | distinct verifier capture digest: sha256:bc4ba653fd08572e9134775023068b92f407acdc53e0af1d29f0c0a4626f1093",
             "seam_id": "independent_postcheck",
             "verdict": "PASSED_TARGET_HOST"
           }
@@ -143,14 +143,14 @@
     ],
     "dependency_receipts": {
       "component_effect_matrix_digest": "sha256:22d78882a2dace9ceb640b74b2a5dca2f2a8cc05861720f5ab25c5c9ac86c445",
-      "effect_seams_ready_receipt_digest": "sha256:ab63d9db3682e94be195446e4e4d9a586d1ef327427547d88347d934914b140f",
+      "effect_seams_ready_receipt_digest": "sha256:cb96671598707d4dd3ca6b4284106bf8b19baf4ff259e6c9a0bcdeca04ef7cdf",
       "pg_readonly_identity_receipt_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
       "runtime_candidate_comparison_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
       "runtime_candidate_receipt_a_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "runtime_candidate_receipt_b_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     },
     "evidence_class": "PLATFORM_OR_EXTERNAL_ATTESTED",
-    "expires_at": "2026-07-24T01:36:43.994813+00:00",
+    "expires_at": "2026-07-24T02:34:20.125764+00:00",
     "failure_reason": null,
     "harness_id": "target_host_probe_v1",
     "host_identity": {
@@ -169,7 +169,7 @@
       "passwordless_sudo_present": false,
       "throwaway_root_under_runtime_dir": true
     },
-    "observation_time": "2026-07-24T01:21:43.994813+00:00",
+    "observation_time": "2026-07-24T02:19:20.125764+00:00",
     "platform": {
       "arch": "x86_64",
       "bwrap_available": true,
@@ -204,19 +204,134 @@
       "reason": "OCI is NON_SATISFIABLE_NON_ROOT on trade-core; a distinct OPS verifier attached a clean on-host residue sweep, so every fixed-path seam is PASSED_TARGET_HOST and content_addressed_fixed_path is BINDING.",
       "selection_rule": "oci_only_if_all_seams_pass_else_fixed_path"
     },
-    "self_digest": "sha256:52265711cf9440309786cd368dfd6e1fd20480bbd2c578db958697dbb2c71857",
+    "self_digest": "sha256:067a3700620730e1faecb533ebd6080eaaa5dc0a857c2a17f44351601a5fdb49",
     "source_sha256": "sha256:fcbf76a1e434ad3f94253a60f8fb369947b26ca24b47a7e696bde45c989975a7",
     "status": "PASS",
     "target_class": "target_host",
     "target_host_capture": {
-      "native_agent": "e3-ops",
-      "node_id": "s16b_ops_capture_node",
-      "record_digest": "sha256:22b5a5e5eee3a952080e2b3350f3c3f4398e7d24da7e3bb3604ee926b4477f96",
-      "role_id": "E3",
+      "argv": [
+        "python3",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_observation.py",
+        "--mode",
+        "preflight",
+        "--intent-base64",
+        "eyJhcHBsaWVyX25vZGVfaWQiOiJzMWZjX2FwcGx5X2FjdG9yIiwiY2FuZGlkYXRlX2lkcyI6WyJjb250ZW50X2FkZHJlc3NlZF9maXhlZF9wYXRoIl0sImNyZWF0ZWRfYXQiOiIyMDI2LTA3LTI0VDAyOjE5OjAxLjU1OTE2NCswMDowMCIsImV4cGVjdGVkX2hvc3QiOiJ0cmFkZS1jb3JlIiwiZXhwaXJlc19hdCI6IjIwMjYtMDctMjRUMDI6MzQ6MDEuNTU5MTY0KzAwOjAwIiwiaW50ZW50X2lkIjoic2hhMjU2OjVlZjQyMDZiOWM1MzRiYTE4YTBkMjQxYjQwMDM4YjFmM2E2OTJiYTM5ZjJmNDY2NWE1MWEwZGU5MGVhOWI4OTkiLCJub25fcm9vdF91aWQiOnRydWUsInBlcl9zZWFtX2FyZ3YiOnsic3RhcnRfc3RvcCI6WyIvdXNyL2Jpbi9weXRob24zIiwiLUkiLCItYyIsImltcG9ydCB0aW1lOyB0aW1lLnNsZWVwKDMwKSJdfSwicG9zdGNoZWNrX25vZGVfaWQiOiJvcHNfcG9zdGNoZWNrIiwicmlzayI6ImhpZ2giLCJyb2xsYmFjayI6eyJhdG9taWNfcG9pbnRlcl9zd2FwIjoic3dhcCBjdXJyZW50LT5uZXciLCJybXRyZWUiOiJybSAtcmYgdGhyb3dhd2F5X3Jvb3QiLCJ0ZWFyZG93bl9yZXNldF9mYWlsZWQiOiJzeXN0ZW1jdGwgLS11c2VyIHJlc2V0LWZhaWxlZCJ9LCJzY2hlbWFfdmVyc2lvbiI6InRhcmdldF9ob3N0X2Rpc3Bvc2FibGVfcnVudGltZV9wcm9iZV9pbnRlbnRfdjEiLCJzZWxmX2RpZ2VzdCI6InNoYTI1NjoyYTU5YmY0NmQyZDAyNzkxY2M0YzQ3ODk3ZDRlMTBkNDg5OWVhYmE5YmQyYTJmNzNiNmZlMjE0ZWNiMjUxNmZiIiwidGhyb3dhd2F5X3Jvb3QiOiIvcnVuL3VzZXIvMTAwMC9haW1sX3MxZmNfOTk4MzYyXzNjYWZjZDM0IiwidHRsX3NlY29uZHMiOjkwMCwidXNlcl9zY29wZV9vbmx5Ijp0cnVlfQ==",
+        "--permit-base64",
+        "eyJhbGdvcml0aG0iOiJTU0gtRUQyNTUxOSIsImFwcGxpZXJfbm9kZV9pZCI6InMxZmNfYXBwbHlfYWN0b3IiLCJhdXRob3JpemF0aW9uX2RpZ2VzdCI6InNoYTI1NjplMjZmMTg1MDFiZDQyY2M4YTAzNDEzNzFkYTdkY2EzN2E5ZGEyODA1YmNkMDk2YTNkNjU3MDM3MzJkYTI5MzU4IiwiZXhwZWN0ZWRfaG9zdCI6InRyYWRlLWNvcmUiLCJleHBpcmVzX2F0IjoiMjAyNi0wNy0yNFQwMjozNDowMS41NTkxNjRaIiwiaW50ZW50X2RpZ2VzdCI6InNoYTI1NjoyYTU5YmY0NmQyZDAyNzkxY2M0YzQ3ODk3ZDRlMTBkNDg5OWVhYmE5YmQyYTJmNzNiNmZlMjE0ZWNiMjUxNmZiIiwiaW50ZW50X2lkIjoic2hhMjU2OjVlZjQyMDZiOWM1MzRiYTE4YTBkMjQxYjQwMDM4YjFmM2E2OTJiYTM5ZjJmNDY2NWE1MWEwZGU5MGVhOWI4OTkiLCJpc3N1ZWRfYXQiOiIyMDI2LTA3LTI0VDAyOjE5OjAxLjU1OTE2NFoiLCJwb3N0Y2hlY2tfbm9kZV9pZCI6Im9wc19wb3N0Y2hlY2siLCJzY2hlbWFfdmVyc2lvbiI6InRhcmdldF9ob3N0X3Byb2JlX29wZXJhdG9yX2F1dGhvcml6YXRpb25fdjEiLCJzaWduYXR1cmVfbmFtZXNwYWNlIjoiYXJjYW5lLWVxdWlsaWJyaXVtLWFpbWwtczEtdGFyZ2V0LWhvc3QtYXBwbHkiLCJzaWduZXJfZmluZ2VycHJpbnQiOiJTSEEyNTY6dUdKOXZlTjdQb0U2QkJnZnNTUDJhaU1uZHJ3Z2J0N28vNy9ZZmR6TnpDUSIsInNpZ25lcl9pZGVudGl0eSI6ImFpbWwtczEtdGFyZ2V0LWhvc3Qtb3BlcmF0b3ItdjEiLCJzb3VyY2VfaGVhZCI6ImY2ZTAwOTk1MjNkZTkzZTExOTg2OTQ3YmY2NzNjZWE2ZTUyMDk2MzkifQ==",
+        "--signature-base64",
+        "LS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFETUFBQUFMYzNOb0xXVmtNalUxTVRrQUFBQWdtaW1Hbm9sM25hRUp5R2NYSE9iZ01oTDhidApnNnd0QVlrMGNqUys4dHZzc0FBQUFzWVhKallXNWxMV1Z4ZFdsc2FXSnlhWFZ0TFdGcGJXd3RjekV0ZEdGeVoyVjBMV2h2CmMzUXRZWEJ3YkhrQUFBQUFBQUFBQm5Ob1lUVXhNZ0FBQUZNQUFBQUxjM05vTFdWa01qVTFNVGtBQUFCQVRDYlVpSG05UEYKMmpCd0xUbERUdEFIa2UzekgrWEZtLzQ3NTVvNUs2S0dPaXdPUW8vTFhWTjR5T2h0SjZWVEVvZkIyYVQ1MkZDK1dLT0xGQgphd1RDRGc9PQotLS0tLUVORCBTU0ggU0lHTkFUVVJFLS0tLS0K"
+      ],
+      "authorization": {
+        "allowed": true,
+        "effective_permission": "read_only",
+        "native_agent": "OPS",
+        "node_class": "verification",
+        "policy_class": "node_scoped_read_only",
+        "reason": "operator-authenticated target-host observation Adapter (read-only OPS preflight/postcheck)",
+        "role_id": "OPS"
+      },
+      "command": "python3 helper_scripts/maintenance_scripts/agent_governance_target_host_observation.py --mode preflight --intent-base64 eyJhcHBsaWVyX25vZGVfaWQiOiJzMWZjX2FwcGx5X2FjdG9yIiwiY2FuZGlkYXRlX2lkcyI6WyJjb250ZW50X2FkZHJlc3NlZF9maXhlZF9wYXRoIl0sImNyZWF0ZWRfYXQiOiIyMDI2LTA3LTI0VDAyOjE5OjAxLjU1OTE2NCswMDowMCIsImV4cGVjdGVkX2hvc3QiOiJ0cmFkZS1jb3JlIiwiZXhwaXJlc19hdCI6IjIwMjYtMDctMjRUMDI6MzQ6MDEuNTU5MTY0KzAwOjAwIiwiaW50ZW50X2lkIjoic2hhMjU2OjVlZjQyMDZiOWM1MzRiYTE4YTBkMjQxYjQwMDM4YjFmM2E2OTJiYTM5ZjJmNDY2NWE1MWEwZGU5MGVhOWI4OTkiLCJub25fcm9vdF91aWQiOnRydWUsInBlcl9zZWFtX2FyZ3YiOnsic3RhcnRfc3RvcCI6WyIvdXNyL2Jpbi9weXRob24zIiwiLUkiLCItYyIsImltcG9ydCB0aW1lOyB0aW1lLnNsZWVwKDMwKSJdfSwicG9zdGNoZWNrX25vZGVfaWQiOiJvcHNfcG9zdGNoZWNrIiwicmlzayI6ImhpZ2giLCJyb2xsYmFjayI6eyJhdG9taWNfcG9pbnRlcl9zd2FwIjoic3dhcCBjdXJyZW50LT5uZXciLCJybXRyZWUiOiJybSAtcmYgdGhyb3dhd2F5X3Jvb3QiLCJ0ZWFyZG93bl9yZXNldF9mYWlsZWQiOiJzeXN0ZW1jdGwgLS11c2VyIHJlc2V0LWZhaWxlZCJ9LCJzY2hlbWFfdmVyc2lvbiI6InRhcmdldF9ob3N0X2Rpc3Bvc2FibGVfcnVudGltZV9wcm9iZV9pbnRlbnRfdjEiLCJzZWxmX2RpZ2VzdCI6InNoYTI1NjoyYTU5YmY0NmQyZDAyNzkxY2M0YzQ3ODk3ZDRlMTBkNDg5OWVhYmE5YmQyYTJmNzNiNmZlMjE0ZWNiMjUxNmZiIiwidGhyb3dhd2F5X3Jvb3QiOiIvcnVuL3VzZXIvMTAwMC9haW1sX3MxZmNfOTk4MzYyXzNjYWZjZDM0IiwidHRsX3NlY29uZHMiOjkwMCwidXNlcl9zY29wZV9vbmx5Ijp0cnVlfQ== --permit-base64 eyJhbGdvcml0aG0iOiJTU0gtRUQyNTUxOSIsImFwcGxpZXJfbm9kZV9pZCI6InMxZmNfYXBwbHlfYWN0b3IiLCJhdXRob3JpemF0aW9uX2RpZ2VzdCI6InNoYTI1NjplMjZmMTg1MDFiZDQyY2M4YTAzNDEzNzFkYTdkY2EzN2E5ZGEyODA1YmNkMDk2YTNkNjU3MDM3MzJkYTI5MzU4IiwiZXhwZWN0ZWRfaG9zdCI6InRyYWRlLWNvcmUiLCJleHBpcmVzX2F0IjoiMjAyNi0wNy0yNFQwMjozNDowMS41NTkxNjRaIiwiaW50ZW50X2RpZ2VzdCI6InNoYTI1NjoyYTU5YmY0NmQyZDAyNzkxY2M0YzQ3ODk3ZDRlMTBkNDg5OWVhYmE5YmQyYTJmNzNiNmZlMjE0ZWNiMjUxNmZiIiwiaW50ZW50X2lkIjoic2hhMjU2OjVlZjQyMDZiOWM1MzRiYTE4YTBkMjQxYjQwMDM4YjFmM2E2OTJiYTM5ZjJmNDY2NWE1MWEwZGU5MGVhOWI4OTkiLCJpc3N1ZWRfYXQiOiIyMDI2LTA3LTI0VDAyOjE5OjAxLjU1OTE2NFoiLCJwb3N0Y2hlY2tfbm9kZV9pZCI6Im9wc19wb3N0Y2hlY2siLCJzY2hlbWFfdmVyc2lvbiI6InRhcmdldF9ob3N0X3Byb2JlX29wZXJhdG9yX2F1dGhvcml6YXRpb25fdjEiLCJzaWduYXR1cmVfbmFtZXNwYWNlIjoiYXJjYW5lLWVxdWlsaWJyaXVtLWFpbWwtczEtdGFyZ2V0LWhvc3QtYXBwbHkiLCJzaWduZXJfZmluZ2VycHJpbnQiOiJTSEEyNTY6dUdKOXZlTjdQb0U2QkJnZnNTUDJhaU1uZHJ3Z2J0N28vNy9ZZmR6TnpDUSIsInNpZ25lcl9pZGVudGl0eSI6ImFpbWwtczEtdGFyZ2V0LWhvc3Qtb3BlcmF0b3ItdjEiLCJzb3VyY2VfaGVhZCI6ImY2ZTAwOTk1MjNkZTkzZTExOTg2OTQ3YmY2NzNjZWE2ZTUyMDk2MzkifQ== --signature-base64 LS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFETUFBQUFMYzNOb0xXVmtNalUxTVRrQUFBQWdtaW1Hbm9sM25hRUp5R2NYSE9iZ01oTDhidApnNnd0QVlrMGNqUys4dHZzc0FBQUFzWVhKallXNWxMV1Z4ZFdsc2FXSnlhWFZ0TFdGcGJXd3RjekV0ZEdGeVoyVjBMV2h2CmMzUXRZWEJ3YkhrQUFBQUFBQUFBQm5Ob1lUVXhNZ0FBQUZNQUFBQUxjM05vTFdWa01qVTFNVGtBQUFCQVRDYlVpSG05UEYKMmpCd0xUbERUdEFIa2UzekgrWEZtLzQ3NTVvNUs2S0dPaXdPUW8vTFhWTjR5T2h0SjZWVEVvZkIyYVQ1MkZDK1dLT0xGQgphd1RDRGc9PQotLS0tLUVORCBTU0ggU0lHTkFUVVJFLS0tLS0K",
+      "completed_at": "2026-07-24T04:19:20.332614+02:00",
+      "context_artifact_digest": "sha256:7b8755cd0ce5388f71d24f15d081620b0c6a3ba38bcec2e7f16f8c5a3d57fbb5",
+      "effect_enforcement": "repository_policy_only",
+      "execution_task": {
+        "native_agent": "OPS",
+        "node_class": "verification",
+        "node_id": "ops_preflight",
+        "path_scope": [],
+        "permission": "read_only",
+        "requires": [
+          "security_gate"
+        ],
+        "role": "OPS"
+      },
+      "execution_task_digest": "sha256:e8f012730c40e041abbda5e80d8174ad738ca0bce18486eb6a4b0762e24379e8",
+      "exit_code": 0,
+      "host_sandbox_attestation_ref": null,
+      "native_agent": "OPS",
+      "node_class": "verification",
+      "node_id": "ops_preflight",
+      "path_scope": [
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_observation.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_probe.py"
+      ],
+      "permission": "read_only",
+      "record_digest": "sha256:fc76f8abe13a0f85fe7197125a3d225fd0afba71420381f431e0d0cc3a594216",
+      "replay_contract": "EXACT_OUTPUT",
+      "repository_after": {
+        "generation_digest": "sha256:9daa857dbf4210bbe45925a8a8878bf8f4d6660680bc6e8099f7d4ca10d7a227",
+        "observed_at": "2026-07-24T04:19:20.344541+02:00",
+        "record_digest": "sha256:7a078d0a2c90010694b8c891c54505f40dcecd91474006a151069e4d7457b013",
+        "schema_version": "repository_generation_summary_v1",
+        "scope": [
+          "helper_scripts/maintenance_scripts/agent_governance_target_host_observation.py",
+          "helper_scripts/maintenance_scripts/agent_governance_target_host_probe.py"
+        ],
+        "source_head": "f6e0099523de93e11986947bf673cea6e5209639"
+      },
+      "repository_before": {
+        "generation_digest": "sha256:9daa857dbf4210bbe45925a8a8878bf8f4d6660680bc6e8099f7d4ca10d7a227",
+        "observed_at": "2026-07-24T04:19:20.218557+02:00",
+        "record_digest": "sha256:a04080f47359112e67b10c685f5497b8d42bfcc2a8c89b588b80b86613514cd8",
+        "schema_version": "repository_generation_summary_v1",
+        "scope": [
+          "helper_scripts/maintenance_scripts/agent_governance_target_host_observation.py",
+          "helper_scripts/maintenance_scripts/agent_governance_target_host_probe.py"
+        ],
+        "source_head": "f6e0099523de93e11986947bf673cea6e5209639"
+      },
+      "result": "PASS",
+      "role_id": "OPS",
       "schema_version": "command_capture_v2",
-      "structural_reference_only": true
+      "started_at": "2026-07-24T04:19:20.218767+02:00",
+      "stderr": {
+        "bytes": 0,
+        "digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "encoding": "utf-8",
+        "preview_base64": null,
+        "preview_redacted": false,
+        "preview_source_bytes": 0,
+        "preview_text": "",
+        "replay_digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "truncated": false
+      },
+      "stdout": {
+        "bytes": 589,
+        "digest": "sha256:3db4eb9c570e768a0f82fc5b4e616a409988ffea6cbc558b362f94adb3911db5",
+        "encoding": "utf-8",
+        "preview_base64": null,
+        "preview_redacted": false,
+        "preview_source_bytes": 589,
+        "preview_text": "{\"intent_digest\":\"sha256:2a59bf46d2d02791cc4c47897d4e10d4899eaba9bd2a2f73b6fe214ecb2516fb\",\"mode\":\"preflight\",\"observation\":{\"deferred_root_only_controllers\":[\"cpuset\",\"io\"],\"delegated_controllers\":[\"cpu\",\"memory\",\"pids\"],\"expected_host\":\"trade-core\",\"non_root_uid\":true,\"observed_host\":\"trade-core\",\"sudo_noprompt_present\":false,\"throwaway_root_under_runtime_dir\":true},\"operator_authorization_digest\":\"sha256:e26f18501bd42cc8a0341371da7dca37a9da2805bcd096a3d65703732da29358\",\"schema_version\":\"target_host_governed_observation_v1\",\"source_head\":\"f6e0099523de93e11986947bf673cea6e5209639\"}",
+        "replay_digest": "sha256:3db4eb9c570e768a0f82fc5b4e616a409988ffea6cbc558b362f94adb3911db5",
+        "truncated": false
+      },
+      "task_contract_digest": "sha256:0f0d491bc9e11af13da558a9e2cf2f844f6f36734d50dbf67835704289abeab8",
+      "timed_out": false,
+      "timeout_seconds": 120,
+      "trust_tier": "LOCAL_REPRODUCIBLE",
+      "whole_repository_after": {
+        "generation_digest": "sha256:4bec7c5ba56b6a9dab9d06fe439724a27dbd258a85d9528f0e996ae5a5edb640",
+        "observed_at": "2026-07-24T04:19:20.361138+02:00",
+        "record_digest": "sha256:7975ab6bc3edef5164568cc0555ec0a0295d4c5210b183dd8c19ed1d701ab779",
+        "schema_version": "repository_generation_summary_v1",
+        "scope": [
+          "."
+        ],
+        "source_head": "f6e0099523de93e11986947bf673cea6e5209639"
+      },
+      "whole_repository_before": {
+        "generation_digest": "sha256:4bec7c5ba56b6a9dab9d06fe439724a27dbd258a85d9528f0e996ae5a5edb640",
+        "observed_at": "2026-07-24T04:19:20.212009+02:00",
+        "record_digest": "sha256:271629b3f710f6443a061efcc9ad9a6d705f4b77134360d00dc490292bd4430f",
+        "schema_version": "repository_generation_summary_v1",
+        "scope": [
+          "."
+        ],
+        "source_head": "f6e0099523de93e11986947bf673cea6e5209639"
+      }
     },
-    "target_host_capture_digest": "sha256:22b5a5e5eee3a952080e2b3350f3c3f4398e7d24da7e3bb3604ee926b4477f96",
+    "target_host_capture_digest": "sha256:fc76f8abe13a0f85fe7197125a3d225fd0afba71420381f431e0d0cc3a594216",
     "ttl_seconds": 900,
     "unselected_path_removal": {
       "forecloses_downstream": true,
@@ -226,19 +341,19 @@
       "unselected_production_artifact_present": false
     }
   },
-  "choice_receipt_digest": "sha256:52265711cf9440309786cd368dfd6e1fd20480bbd2c578db958697dbb2c71857",
-  "completed_at": "2026-07-24T01:21:43.994813+00:00",
+  "choice_receipt_digest": "sha256:067a3700620730e1faecb533ebd6080eaaa5dc0a857c2a17f44351601a5fdb49",
+  "completed_at": "2026-07-24T02:19:20.125764+00:00",
   "effect_status": "TARGET_HOST_DISPOSABLE_PROBE_PASS",
-  "evidence_expires_at": "2026-07-24T01:31:43.994813+00:00",
+  "evidence_expires_at": "2026-07-24T02:29:20.125764+00:00",
   "failure_reason": null,
-  "intent_digest": "sha256:5311afebdca9101fa48dd098388dfa4d9da5a6301cbca19e38f731e315cecac7",
-  "intent_expires_at": "2026-07-24T01:36:43.994813+00:00",
-  "intent_id": "sha256:adf8d53925d54fa08c512d7d3786f91faee8c72c565f453daccaca3df9457168",
+  "intent_digest": "sha256:2a59bf46d2d02791cc4c47897d4e10d4899eaba9bd2a2f73b6fe214ecb2516fb",
+  "intent_expires_at": "2026-07-24T02:34:01.559164+00:00",
+  "intent_id": "sha256:5ef4206b9c534ba18a0d241b40038b1f3a692ba39f2f4665a51a0de90ea9b899",
   "postcheck_verifier_node_id": "ops_postcheck",
-  "receipt_digest": "sha256:9f8f40b15598822544f0dd8618429ae3c6c2ac2b153d8b3acd70094b73fffd99",
+  "receipt_digest": "sha256:1a0fde065ae4b95bb390e66b65be472a6e560f8f3d76135be6bc0c7c2b25a91c",
   "schema_version": "target_host_effect_result_v1",
-  "source_head": "45a854fa6638aa0be677a2b705f42fe8f417ac95",
-  "started_at": "2026-07-24T01:21:43.994813+00:00",
+  "source_head": "f6e0099523de93e11986947bf673cea6e5209639",
+  "started_at": "2026-07-24T02:19:20.125764+00:00",
   "target_host": "trade-core",
-  "verifier_capture_digest": "sha256:474ea3bcdd4e4b114de2932f5bbad8ab72f2071d40cfb7ba6e9ffb082517b81b"
+  "verifier_capture_digest": "sha256:bc4ba653fd08572e9134775023068b92f407acdc53e0af1d29f0c0a4626f1093"
 }

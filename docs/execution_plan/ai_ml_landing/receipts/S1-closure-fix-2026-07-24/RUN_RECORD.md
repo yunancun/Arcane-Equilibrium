@@ -2,7 +2,7 @@
 
 **Date**: 2026-07-24
 **Host**: `trade-core` (Linux, non-root uid 1000)
-**H_effect**: `45a854fa6638aa0be677a2b705f42fe8f417ac95`
+**H_effect**: `f6e0099523de93e11986947bf673cea6e5209639`
 **Branch / PR**: `agent/aiml-s1-closure-p1p2-fixes` / PR #115
 **Effect class**: `TARGET_HOST_DISPOSABLE_RUNTIME_PROBE`
 
@@ -14,20 +14,20 @@ all passed. The durable state emitted by the fixed finalizer is
 until PR #115 receives an exact-head Codex review, all required CI is green, and
 that exact head is merged.
 
-- S1.5 contribution: the still-fresh receipt for six real disposable component
-  classes was revalidated against byte-identical source/schema; each had
-  performed apply → exact rollback → independent postcheck; status `PASS`,
-  digest `sha256:ab63d9db3682e94be195446e4e4d9a586d1ef327427547d88347d934914b140f`.
+- S1.5 contribution: all six real disposable component classes were freshly
+  rerun at the exact H_effect with byte-identical source/schema; each performed
+  apply → exact rollback → independent postcheck; status `PASS`,
+  digest `sha256:cb96671598707d4dd3ca6b4284106bf8b19baf4ff259e6c9a0bcdeca04ef7cdf`.
 - S1.6 target-host effect: all eight fixed-path seams
   `PASSED_TARGET_HOST`; `binding=BINDING`;
   `final_choice=content_addressed_fixed_path`;
-  effect digest `sha256:9f8f40b15598822544f0dd8618429ae3c6c2ac2b153d8b3acd70094b73fffd99`.
+  effect digest `sha256:1a0fde065ae4b95bb390e66b65be472a6e560f8f3d76135be6bc0c7c2b25a91c`.
 - Host identity: observed and expected host are both `trade-core`.
 - Cleanup: zero unit, cgroup, netns, temporary-directory, or disposable-PG
   residue; production PostgreSQL `:5432` was not touched.
 - Closure: `closure_packet_v1` trusted finalization `PASS`, no errors;
   closure digest
-  `sha256:eeef47cca1bcbfd44fb917759539b6afd06610669ec65a3be9e30b27a1f46de1`.
+  `sha256:52842fdfe6237e25d939d738eb54c2a79fdca5c87ec2577da304b83127282180`.
 - Operator authentication: the canonical trusted-execution bundle was signed
   through the current SSH agent under identity
   `aiml-s1-target-host-operator-v1` and namespace
@@ -42,21 +42,26 @@ the Linux runtime `main` checkout stayed clean and untouched.
 
 1. A real S1.5 `effect_seams_ready_receipt_v1` was produced from the six
    committed disposable component-effect harnesses.
-2. Before the effect, OPS node `ops_preflight` produced its own governed
-   `command_capture_v2`.
-3. The typed intent authorized the isolated `python3 -E` child executor. The
-   parent process never opened `AIML_TARGET_HOST_PROBE`.
+2. Linux emitted one exact typed intent. The operator key signed that
+   intent/source head under the separate
+   `arcane-equilibrium-aiml-s1-target-host-apply` namespace before any effect.
+3. Before the effect, OPS node `ops_preflight` ran the exact signed observer
+   command; its complete stdout is the load-bearing governed
+   `command_capture_v2`. The same signed intent authorized the isolated
+   `python3 -E` child executor. The parent process never opened
+   `AIML_TARGET_HOST_PROBE`.
 4. The child exercised start/stop, cgroup isolation, network denial,
    native-library loading, immutable closure persistence, rollback/cleanup, and
    real disposable-PG identity.
 5. After the effect, distinct OPS node `ops_postcheck` performed the residue
-   sweep and produced a different governed capture. The closure cross-binds
-   effect-result `verifier_capture_digest`, postcheck digest, and capture
-   `record_digest`.
+   sweep inside its own exact signed observer command and produced a different
+   governed capture. The closure cross-binds effect-result
+   `verifier_capture_digest`, postcheck digest, capture `record_digest`, and the
+   exact zero-residue stdout projection.
 6. The finalizer retained the true historical PA/CC/E3 provider-call digests
-   and timestamps, used the fresh preflight/postcheck capture timestamps, built
-   the complete workflow DAG and `closure_packet_v1`, signed its exact
-   trusted-execution bundle, and ran the fixed S1 trusted-host validator.
+   and timestamps, built a workflow wave that owns every mandatory reviewer
+   fragment, and signed the complete DAG/closure packet. Closure freshness is
+   evaluated at the bundle's signed `issued_at`, not at a caller-appended time.
 
 The historical provider calls are not represented as fresh replays. Their
 limitation is load-bearing in `review_provenance.json`; the current
@@ -81,27 +86,44 @@ additional P1s before publication:
    Mismatch, tracked-dirty, untracked-dirty, abbreviated, and noncanonical
    negative tests all fail closed.
 3. The finalizer persisted the run-start instant as `evaluated_at`, although
-   the Context sources were materialized later. A PASS result could therefore
-   fail when replayed at its own durable time. Commit `e6572b96e` captures the
-   receipt timestamp only after trusted finalization and adds a load-bearing
-   ordering regression. Both immediate trusted-host validation and replay at
-   the persisted `evaluated_at` now pass.
+   the Context sources were materialized later. Commit `e6572b96e` moved the
+   timestamp after trusted finalization; the later exact-head review correctly
+   found that a caller-local timestamp still was not authenticated. The final
+   repair in H_effect evaluates S1 at the SSHSIG-bound bundle `issued_at`.
 4. The replay regression's original filename did not match the required
    governance CI glob, while the complete governance gate hit a hard five-
    minute ceiling and was cancelled. Commit `45a854fa6` places the regression
    under the required glob and locks a 10-minute job ceiling with a static
    contract test.
 
-The earlier `6febd9d1e` signed generation and the rejected mistyped-head attempt
-are superseded; neither is the final S1 closure. The exact-head S1.6 producer
-effect and operator signature were rerun after all four P1 fixes at the
-H_effect above; the still-fresh S1.5 receipt was independently revalidated
-against unchanged source/schema before consumption.
+The exact-head adversarial review then found five further P1 forge paths, all
+closed in source commit `f6e009952` with load-bearing negatives:
+
+1. A caller-created checksum capsule could open the child gate. The child now
+   requires the source-pinned operator SSHSIG over the exact intent/source
+   head, and rejects a self-resealed root or launcher substitution.
+2. A structurally governed but unrelated command could back the applier's host
+   claim. The effect validator now requires the exact signed `ops_preflight`
+   observer and complete safe-host stdout.
+3. The residue claim was derived outside the verifier capture. The declared
+   `ops_postcheck` command now performs the sweep itself, and closure validates
+   its exact zero-residue stdout against the attached residue evidence.
+4. The earlier caller-local replay time was not signed. The bundle's
+   SSHSIG-bound `issued_at` is now the only S1 evaluation instant.
+5. The effect receipt could substitute for reviewer evidence. Every mandatory
+   non-OPS reviewer now cites the authenticated workflow wave that owns its
+   exact fragment digest.
+
+The earlier `6febd9d1e`, `45a854fa6`, and rejected mistyped-head generations
+are superseded; none is the final S1 closure. Both S1.5 and S1.6 effects and
+both operator signatures were freshly emitted at the H_effect above.
 
 ## Durable artifacts
 
 - Producer inputs: `effect_seams_ready_receipt.json`, `intent.json`,
+  `operator_authorization.json` plus `.sig`,
   `applier_capture.json`, `preflight_capture.json`,
+  `preflight_observation.json`,
   `applier_effect_result.json`, `verifier_capture.json`,
   `upgraded_effect_result.json`, `residue_observation.json`,
   `final_residue_sweep.json`, `host_identity.json`, `run_meta.json`, and
@@ -119,15 +141,15 @@ against unchanged source/schema before consumption.
 Key finalization digests:
 
 - workflow wave:
-  `sha256:14b2bbf4725293e030264e2dd92a3534bc7a667848fbfce5e8ddf70d24ffb93d`
+  `sha256:e43edb47e809243282bebb87a95289f453181f0d5f8d3528b681f3c346300f68`
 - trusted bundle:
-  `sha256:c9c7756940fb2493c14a6e45261b236fcb40c1e72697696e1172cb4d8cefe359`
+  `sha256:81860f0dfd78954847209fcb05db317bf8063742c7d7b7accd5dbd4bad521d6c`
 - signature bytes:
-  `sha256:3ab69e6211127937441ab8d574bf78142ac6c551b6968020b5dc1210d0cf0c19`
+  `sha256:ee455990a1dd6247f547296bc1803e755d03031352c037d71b073fdc4d16b8e7`
 - landing attempt:
-  `sha256:e2522fe13952fa4203fa3ecc9609cbce3db04bb1e01a16daa9753c0e3ed0243a`
+  `sha256:74b87c966c041a6c569f5a55c10a8f2a71c9e7f0a11930646ce4e6cd23befa35`
 - finalization:
-  `sha256:ed6635c44cae7e7e758e4dfa419e505ebfe111158abed48280ae7450b80b58a0`
+  `sha256:8f26a57373faa5a2b20ed566837736e6ce6e3189d6e117b5112edf8b9f9cff71`
 
 ## Boundary and final transition
 

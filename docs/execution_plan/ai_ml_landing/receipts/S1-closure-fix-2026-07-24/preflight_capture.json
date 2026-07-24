@@ -1,21 +1,28 @@
 {
   "argv": [
-    "git",
-    "rev-parse",
-    "--is-inside-work-tree"
+    "python3",
+    "helper_scripts/maintenance_scripts/agent_governance_target_host_observation.py",
+    "--mode",
+    "preflight",
+    "--intent-base64",
+    "eyJhcHBsaWVyX25vZGVfaWQiOiJzMWZjX2FwcGx5X2FjdG9yIiwiY2FuZGlkYXRlX2lkcyI6WyJjb250ZW50X2FkZHJlc3NlZF9maXhlZF9wYXRoIl0sImNyZWF0ZWRfYXQiOiIyMDI2LTA3LTI0VDAyOjE5OjAxLjU1OTE2NCswMDowMCIsImV4cGVjdGVkX2hvc3QiOiJ0cmFkZS1jb3JlIiwiZXhwaXJlc19hdCI6IjIwMjYtMDctMjRUMDI6MzQ6MDEuNTU5MTY0KzAwOjAwIiwiaW50ZW50X2lkIjoic2hhMjU2OjVlZjQyMDZiOWM1MzRiYTE4YTBkMjQxYjQwMDM4YjFmM2E2OTJiYTM5ZjJmNDY2NWE1MWEwZGU5MGVhOWI4OTkiLCJub25fcm9vdF91aWQiOnRydWUsInBlcl9zZWFtX2FyZ3YiOnsic3RhcnRfc3RvcCI6WyIvdXNyL2Jpbi9weXRob24zIiwiLUkiLCItYyIsImltcG9ydCB0aW1lOyB0aW1lLnNsZWVwKDMwKSJdfSwicG9zdGNoZWNrX25vZGVfaWQiOiJvcHNfcG9zdGNoZWNrIiwicmlzayI6ImhpZ2giLCJyb2xsYmFjayI6eyJhdG9taWNfcG9pbnRlcl9zd2FwIjoic3dhcCBjdXJyZW50LT5uZXciLCJybXRyZWUiOiJybSAtcmYgdGhyb3dhd2F5X3Jvb3QiLCJ0ZWFyZG93bl9yZXNldF9mYWlsZWQiOiJzeXN0ZW1jdGwgLS11c2VyIHJlc2V0LWZhaWxlZCJ9LCJzY2hlbWFfdmVyc2lvbiI6InRhcmdldF9ob3N0X2Rpc3Bvc2FibGVfcnVudGltZV9wcm9iZV9pbnRlbnRfdjEiLCJzZWxmX2RpZ2VzdCI6InNoYTI1NjoyYTU5YmY0NmQyZDAyNzkxY2M0YzQ3ODk3ZDRlMTBkNDg5OWVhYmE5YmQyYTJmNzNiNmZlMjE0ZWNiMjUxNmZiIiwidGhyb3dhd2F5X3Jvb3QiOiIvcnVuL3VzZXIvMTAwMC9haW1sX3MxZmNfOTk4MzYyXzNjYWZjZDM0IiwidHRsX3NlY29uZHMiOjkwMCwidXNlcl9zY29wZV9vbmx5Ijp0cnVlfQ==",
+    "--permit-base64",
+    "eyJhbGdvcml0aG0iOiJTU0gtRUQyNTUxOSIsImFwcGxpZXJfbm9kZV9pZCI6InMxZmNfYXBwbHlfYWN0b3IiLCJhdXRob3JpemF0aW9uX2RpZ2VzdCI6InNoYTI1NjplMjZmMTg1MDFiZDQyY2M4YTAzNDEzNzFkYTdkY2EzN2E5ZGEyODA1YmNkMDk2YTNkNjU3MDM3MzJkYTI5MzU4IiwiZXhwZWN0ZWRfaG9zdCI6InRyYWRlLWNvcmUiLCJleHBpcmVzX2F0IjoiMjAyNi0wNy0yNFQwMjozNDowMS41NTkxNjRaIiwiaW50ZW50X2RpZ2VzdCI6InNoYTI1NjoyYTU5YmY0NmQyZDAyNzkxY2M0YzQ3ODk3ZDRlMTBkNDg5OWVhYmE5YmQyYTJmNzNiNmZlMjE0ZWNiMjUxNmZiIiwiaW50ZW50X2lkIjoic2hhMjU2OjVlZjQyMDZiOWM1MzRiYTE4YTBkMjQxYjQwMDM4YjFmM2E2OTJiYTM5ZjJmNDY2NWE1MWEwZGU5MGVhOWI4OTkiLCJpc3N1ZWRfYXQiOiIyMDI2LTA3LTI0VDAyOjE5OjAxLjU1OTE2NFoiLCJwb3N0Y2hlY2tfbm9kZV9pZCI6Im9wc19wb3N0Y2hlY2siLCJzY2hlbWFfdmVyc2lvbiI6InRhcmdldF9ob3N0X3Byb2JlX29wZXJhdG9yX2F1dGhvcml6YXRpb25fdjEiLCJzaWduYXR1cmVfbmFtZXNwYWNlIjoiYXJjYW5lLWVxdWlsaWJyaXVtLWFpbWwtczEtdGFyZ2V0LWhvc3QtYXBwbHkiLCJzaWduZXJfZmluZ2VycHJpbnQiOiJTSEEyNTY6dUdKOXZlTjdQb0U2QkJnZnNTUDJhaU1uZHJ3Z2J0N28vNy9ZZmR6TnpDUSIsInNpZ25lcl9pZGVudGl0eSI6ImFpbWwtczEtdGFyZ2V0LWhvc3Qtb3BlcmF0b3ItdjEiLCJzb3VyY2VfaGVhZCI6ImY2ZTAwOTk1MjNkZTkzZTExOTg2OTQ3YmY2NzNjZWE2ZTUyMDk2MzkifQ==",
+    "--signature-base64",
+    "LS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFETUFBQUFMYzNOb0xXVmtNalUxTVRrQUFBQWdtaW1Hbm9sM25hRUp5R2NYSE9iZ01oTDhidApnNnd0QVlrMGNqUys4dHZzc0FBQUFzWVhKallXNWxMV1Z4ZFdsc2FXSnlhWFZ0TFdGcGJXd3RjekV0ZEdGeVoyVjBMV2h2CmMzUXRZWEJ3YkhrQUFBQUFBQUFBQm5Ob1lUVXhNZ0FBQUZNQUFBQUxjM05vTFdWa01qVTFNVGtBQUFCQVRDYlVpSG05UEYKMmpCd0xUbERUdEFIa2UzekgrWEZtLzQ3NTVvNUs2S0dPaXdPUW8vTFhWTjR5T2h0SjZWVEVvZkIyYVQ1MkZDK1dLT0xGQgphd1RDRGc9PQotLS0tLUVORCBTU0ggU0lHTkFUVVJFLS0tLS0K"
   ],
   "authorization": {
     "allowed": true,
     "effective_permission": "read_only",
     "native_agent": "OPS",
     "node_class": "verification",
-    "policy_class": "repo_or_local_test_read",
-    "reason": "declared local read/test command",
+    "policy_class": "node_scoped_read_only",
+    "reason": "operator-authenticated target-host observation Adapter (read-only OPS preflight/postcheck)",
     "role_id": "OPS"
   },
-  "command": "git rev-parse --is-inside-work-tree",
-  "completed_at": "2026-07-24T03:21:44.081698+02:00",
-  "context_artifact_digest": "sha256:9f329e8421795c24d48561b7f2c3638c11bbb38c2be3a0802da09978a946f7bc",
+  "command": "python3 helper_scripts/maintenance_scripts/agent_governance_target_host_observation.py --mode preflight --intent-base64 eyJhcHBsaWVyX25vZGVfaWQiOiJzMWZjX2FwcGx5X2FjdG9yIiwiY2FuZGlkYXRlX2lkcyI6WyJjb250ZW50X2FkZHJlc3NlZF9maXhlZF9wYXRoIl0sImNyZWF0ZWRfYXQiOiIyMDI2LTA3LTI0VDAyOjE5OjAxLjU1OTE2NCswMDowMCIsImV4cGVjdGVkX2hvc3QiOiJ0cmFkZS1jb3JlIiwiZXhwaXJlc19hdCI6IjIwMjYtMDctMjRUMDI6MzQ6MDEuNTU5MTY0KzAwOjAwIiwiaW50ZW50X2lkIjoic2hhMjU2OjVlZjQyMDZiOWM1MzRiYTE4YTBkMjQxYjQwMDM4YjFmM2E2OTJiYTM5ZjJmNDY2NWE1MWEwZGU5MGVhOWI4OTkiLCJub25fcm9vdF91aWQiOnRydWUsInBlcl9zZWFtX2FyZ3YiOnsic3RhcnRfc3RvcCI6WyIvdXNyL2Jpbi9weXRob24zIiwiLUkiLCItYyIsImltcG9ydCB0aW1lOyB0aW1lLnNsZWVwKDMwKSJdfSwicG9zdGNoZWNrX25vZGVfaWQiOiJvcHNfcG9zdGNoZWNrIiwicmlzayI6ImhpZ2giLCJyb2xsYmFjayI6eyJhdG9taWNfcG9pbnRlcl9zd2FwIjoic3dhcCBjdXJyZW50LT5uZXciLCJybXRyZWUiOiJybSAtcmYgdGhyb3dhd2F5X3Jvb3QiLCJ0ZWFyZG93bl9yZXNldF9mYWlsZWQiOiJzeXN0ZW1jdGwgLS11c2VyIHJlc2V0LWZhaWxlZCJ9LCJzY2hlbWFfdmVyc2lvbiI6InRhcmdldF9ob3N0X2Rpc3Bvc2FibGVfcnVudGltZV9wcm9iZV9pbnRlbnRfdjEiLCJzZWxmX2RpZ2VzdCI6InNoYTI1NjoyYTU5YmY0NmQyZDAyNzkxY2M0YzQ3ODk3ZDRlMTBkNDg5OWVhYmE5YmQyYTJmNzNiNmZlMjE0ZWNiMjUxNmZiIiwidGhyb3dhd2F5X3Jvb3QiOiIvcnVuL3VzZXIvMTAwMC9haW1sX3MxZmNfOTk4MzYyXzNjYWZjZDM0IiwidHRsX3NlY29uZHMiOjkwMCwidXNlcl9zY29wZV9vbmx5Ijp0cnVlfQ== --permit-base64 eyJhbGdvcml0aG0iOiJTU0gtRUQyNTUxOSIsImFwcGxpZXJfbm9kZV9pZCI6InMxZmNfYXBwbHlfYWN0b3IiLCJhdXRob3JpemF0aW9uX2RpZ2VzdCI6InNoYTI1NjplMjZmMTg1MDFiZDQyY2M4YTAzNDEzNzFkYTdkY2EzN2E5ZGEyODA1YmNkMDk2YTNkNjU3MDM3MzJkYTI5MzU4IiwiZXhwZWN0ZWRfaG9zdCI6InRyYWRlLWNvcmUiLCJleHBpcmVzX2F0IjoiMjAyNi0wNy0yNFQwMjozNDowMS41NTkxNjRaIiwiaW50ZW50X2RpZ2VzdCI6InNoYTI1NjoyYTU5YmY0NmQyZDAyNzkxY2M0YzQ3ODk3ZDRlMTBkNDg5OWVhYmE5YmQyYTJmNzNiNmZlMjE0ZWNiMjUxNmZiIiwiaW50ZW50X2lkIjoic2hhMjU2OjVlZjQyMDZiOWM1MzRiYTE4YTBkMjQxYjQwMDM4YjFmM2E2OTJiYTM5ZjJmNDY2NWE1MWEwZGU5MGVhOWI4OTkiLCJpc3N1ZWRfYXQiOiIyMDI2LTA3LTI0VDAyOjE5OjAxLjU1OTE2NFoiLCJwb3N0Y2hlY2tfbm9kZV9pZCI6Im9wc19wb3N0Y2hlY2siLCJzY2hlbWFfdmVyc2lvbiI6InRhcmdldF9ob3N0X3Byb2JlX29wZXJhdG9yX2F1dGhvcml6YXRpb25fdjEiLCJzaWduYXR1cmVfbmFtZXNwYWNlIjoiYXJjYW5lLWVxdWlsaWJyaXVtLWFpbWwtczEtdGFyZ2V0LWhvc3QtYXBwbHkiLCJzaWduZXJfZmluZ2VycHJpbnQiOiJTSEEyNTY6dUdKOXZlTjdQb0U2QkJnZnNTUDJhaU1uZHJ3Z2J0N28vNy9ZZmR6TnpDUSIsInNpZ25lcl9pZGVudGl0eSI6ImFpbWwtczEtdGFyZ2V0LWhvc3Qtb3BlcmF0b3ItdjEiLCJzb3VyY2VfaGVhZCI6ImY2ZTAwOTk1MjNkZTkzZTExOTg2OTQ3YmY2NzNjZWE2ZTUyMDk2MzkifQ== --signature-base64 LS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFETUFBQUFMYzNOb0xXVmtNalUxTVRrQUFBQWdtaW1Hbm9sM25hRUp5R2NYSE9iZ01oTDhidApnNnd0QVlrMGNqUys4dHZzc0FBQUFzWVhKallXNWxMV1Z4ZFdsc2FXSnlhWFZ0TFdGcGJXd3RjekV0ZEdGeVoyVjBMV2h2CmMzUXRZWEJ3YkhrQUFBQUFBQUFBQm5Ob1lUVXhNZ0FBQUZNQUFBQUxjM05vTFdWa01qVTFNVGtBQUFCQVRDYlVpSG05UEYKMmpCd0xUbERUdEFIa2UzekgrWEZtLzQ3NTVvNUs2S0dPaXdPUW8vTFhWTjR5T2h0SjZWVEVvZkIyYVQ1MkZDK1dLT0xGQgphd1RDRGc9PQotLS0tLUVORCBTU0ggU0lHTkFUVVJFLS0tLS0K",
+  "completed_at": "2026-07-24T04:19:20.332614+02:00",
+  "context_artifact_digest": "sha256:7b8755cd0ce5388f71d24f15d081620b0c6a3ba38bcec2e7f16f8c5a3d57fbb5",
   "effect_enforcement": "repository_policy_only",
   "execution_task": {
     "native_agent": "OPS",
@@ -35,35 +42,38 @@
   "node_class": "verification",
   "node_id": "ops_preflight",
   "path_scope": [
-    "helper_scripts/maintenance_scripts/runtime_environment_probe.py"
+    "helper_scripts/maintenance_scripts/agent_governance_target_host_observation.py",
+    "helper_scripts/maintenance_scripts/agent_governance_target_host_probe.py"
   ],
   "permission": "read_only",
-  "record_digest": "sha256:99e91863bff38f77d97c156b585895264f6749477e0715da613d7134e3e7cf1d",
+  "record_digest": "sha256:fc76f8abe13a0f85fe7197125a3d225fd0afba71420381f431e0d0cc3a594216",
   "replay_contract": "EXACT_OUTPUT",
   "repository_after": {
-    "generation_digest": "sha256:8b2e285e61d234f022bcd5e205ab3d36e375b1acf2698047bbab74d36fbf7fa9",
-    "observed_at": "2026-07-24T03:21:44.089044+02:00",
-    "record_digest": "sha256:20688a6518d3a81bbdd985fa1e84fc56d5eadac6bb7b86df952521d5aa58ddfd",
+    "generation_digest": "sha256:9daa857dbf4210bbe45925a8a8878bf8f4d6660680bc6e8099f7d4ca10d7a227",
+    "observed_at": "2026-07-24T04:19:20.344541+02:00",
+    "record_digest": "sha256:7a078d0a2c90010694b8c891c54505f40dcecd91474006a151069e4d7457b013",
     "schema_version": "repository_generation_summary_v1",
     "scope": [
-      "helper_scripts/maintenance_scripts/runtime_environment_probe.py"
+      "helper_scripts/maintenance_scripts/agent_governance_target_host_observation.py",
+      "helper_scripts/maintenance_scripts/agent_governance_target_host_probe.py"
     ],
-    "source_head": "45a854fa6638aa0be677a2b705f42fe8f417ac95"
+    "source_head": "f6e0099523de93e11986947bf673cea6e5209639"
   },
   "repository_before": {
-    "generation_digest": "sha256:8b2e285e61d234f022bcd5e205ab3d36e375b1acf2698047bbab74d36fbf7fa9",
-    "observed_at": "2026-07-24T03:21:44.079857+02:00",
-    "record_digest": "sha256:769805d47d108955ee0cd1d79885018603ea14ca3d46696258f467227e15f5a1",
+    "generation_digest": "sha256:9daa857dbf4210bbe45925a8a8878bf8f4d6660680bc6e8099f7d4ca10d7a227",
+    "observed_at": "2026-07-24T04:19:20.218557+02:00",
+    "record_digest": "sha256:a04080f47359112e67b10c685f5497b8d42bfcc2a8c89b588b80b86613514cd8",
     "schema_version": "repository_generation_summary_v1",
     "scope": [
-      "helper_scripts/maintenance_scripts/runtime_environment_probe.py"
+      "helper_scripts/maintenance_scripts/agent_governance_target_host_observation.py",
+      "helper_scripts/maintenance_scripts/agent_governance_target_host_probe.py"
     ],
-    "source_head": "45a854fa6638aa0be677a2b705f42fe8f417ac95"
+    "source_head": "f6e0099523de93e11986947bf673cea6e5209639"
   },
   "result": "PASS",
   "role_id": "OPS",
   "schema_version": "command_capture_v2",
-  "started_at": "2026-07-24T03:21:44.080327+02:00",
+  "started_at": "2026-07-24T04:19:20.218767+02:00",
   "stderr": {
     "bytes": 0,
     "digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -76,38 +86,38 @@
     "truncated": false
   },
   "stdout": {
-    "bytes": 5,
-    "digest": "sha256:a17fcf0a2f50e2d495e4f90ce263410edc183add6c62699a2facbccf60410f74",
+    "bytes": 589,
+    "digest": "sha256:3db4eb9c570e768a0f82fc5b4e616a409988ffea6cbc558b362f94adb3911db5",
     "encoding": "utf-8",
     "preview_base64": null,
     "preview_redacted": false,
-    "preview_source_bytes": 5,
-    "preview_text": "true\n",
-    "replay_digest": "sha256:a17fcf0a2f50e2d495e4f90ce263410edc183add6c62699a2facbccf60410f74",
+    "preview_source_bytes": 589,
+    "preview_text": "{\"intent_digest\":\"sha256:2a59bf46d2d02791cc4c47897d4e10d4899eaba9bd2a2f73b6fe214ecb2516fb\",\"mode\":\"preflight\",\"observation\":{\"deferred_root_only_controllers\":[\"cpuset\",\"io\"],\"delegated_controllers\":[\"cpu\",\"memory\",\"pids\"],\"expected_host\":\"trade-core\",\"non_root_uid\":true,\"observed_host\":\"trade-core\",\"sudo_noprompt_present\":false,\"throwaway_root_under_runtime_dir\":true},\"operator_authorization_digest\":\"sha256:e26f18501bd42cc8a0341371da7dca37a9da2805bcd096a3d65703732da29358\",\"schema_version\":\"target_host_governed_observation_v1\",\"source_head\":\"f6e0099523de93e11986947bf673cea6e5209639\"}",
+    "replay_digest": "sha256:3db4eb9c570e768a0f82fc5b4e616a409988ffea6cbc558b362f94adb3911db5",
     "truncated": false
   },
-  "task_contract_digest": "sha256:28b73f2e813f06f28ad5ee202cc4b49bfd347d5f778685a89d71ac755b8111b7",
+  "task_contract_digest": "sha256:0f0d491bc9e11af13da558a9e2cf2f844f6f36734d50dbf67835704289abeab8",
   "timed_out": false,
   "timeout_seconds": 120,
   "trust_tier": "LOCAL_REPRODUCIBLE",
   "whole_repository_after": {
-    "generation_digest": "sha256:0240e8e9df6f797eee6d710f0a0c4a5c0c9a8221e7504ed93af0dd65cdcf1dee",
-    "observed_at": "2026-07-24T03:21:44.103717+02:00",
-    "record_digest": "sha256:06986a62dd37a08a639be3eb3f4726cea8f426802c3f54357be112ea01b7a952",
+    "generation_digest": "sha256:4bec7c5ba56b6a9dab9d06fe439724a27dbd258a85d9528f0e996ae5a5edb640",
+    "observed_at": "2026-07-24T04:19:20.361138+02:00",
+    "record_digest": "sha256:7975ab6bc3edef5164568cc0555ec0a0295d4c5210b183dd8c19ed1d701ab779",
     "schema_version": "repository_generation_summary_v1",
     "scope": [
       "."
     ],
-    "source_head": "45a854fa6638aa0be677a2b705f42fe8f417ac95"
+    "source_head": "f6e0099523de93e11986947bf673cea6e5209639"
   },
   "whole_repository_before": {
-    "generation_digest": "sha256:0240e8e9df6f797eee6d710f0a0c4a5c0c9a8221e7504ed93af0dd65cdcf1dee",
-    "observed_at": "2026-07-24T03:21:44.073051+02:00",
-    "record_digest": "sha256:157d1b9c1ddc0ccc88eb134b9cf7594dc5c2cf2cac57a16d54d805a364d3b63e",
+    "generation_digest": "sha256:4bec7c5ba56b6a9dab9d06fe439724a27dbd258a85d9528f0e996ae5a5edb640",
+    "observed_at": "2026-07-24T04:19:20.212009+02:00",
+    "record_digest": "sha256:271629b3f710f6443a061efcc9ad9a6d705f4b77134360d00dc490292bd4430f",
     "schema_version": "repository_generation_summary_v1",
     "scope": [
       "."
     ],
-    "source_head": "45a854fa6638aa0be677a2b705f42fe8f417ac95"
+    "source_head": "f6e0099523de93e11986947bf673cea6e5209639"
   }
 }

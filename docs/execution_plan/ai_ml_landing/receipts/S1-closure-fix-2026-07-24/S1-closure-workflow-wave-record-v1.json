@@ -14,18 +14,24 @@
       "admitted_input_tokens_lower_bound": 0,
       "base_prompt_digest": "sha256:c12f84449f6b1d1a8fff7509cf36ad218a062b1a4d409a1fe29ede2c2744a068",
       "compiler_estimated_input_tokens": 0,
-      "context_artifact_digest": "sha256:ebdf0de45ee47d5aa80ae9ecf5b8515863f3d71e190507f2ae181183f9ef3b6d",
+      "context_artifact_digest": "sha256:44dc67114565d8abd8675825c1d5f6604ccc182fdd7d96a2612d8faab7cc1c86",
       "description_digest": "sha256:528d234ec7d2317413eb8f1a44859e18210931f9a09057553166db98eae8f5cc",
       "dirty_scope": [
         "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_host.py",
         "helper_scripts/maintenance_scripts/agent_governance_closure.py",
         "helper_scripts/maintenance_scripts/agent_governance_context.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_apply.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_child_apply.py",
         "helper_scripts/maintenance_scripts/agent_governance_target_host_effects.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_observation.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_observation_capture.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_operator_authorization.py",
         "helper_scripts/maintenance_scripts/agent_governance_trust.py",
         "helper_scripts/maintenance_scripts/aiml_s1_closure_target_host_run.py",
+        "helper_scripts/maintenance_scripts/aiml_s1_target_host_authorize.py",
         "helper_scripts/maintenance_scripts/aiml_s1_trusted_finalize.py"
       ],
-      "dirty_scope_digest": "sha256:6bf0034525e798fb70d019e521d08aeb4eac4b18d0f84ba4c75be1dd4618af94",
+      "dirty_scope_digest": "sha256:4ab4de4bfa177f7f42ce0f181b8fe0eea0eb6eda7901f70937ca05cd5eb1fd2c",
       "focus": "",
       "focus_digest": "sha256:12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
       "native_agent": "PA-investigator",
@@ -51,24 +57,30 @@
       },
       "requires": [],
       "role": "PA",
-      "task_contract_digest": "sha256:02cc6ec64d8bfd240e93b10a638558d80e44603ce820c7351771b818edbffea2"
+      "task_contract_digest": "sha256:b81ffadd76bab3b66b3ac6faac72602d841e1f81eb60a2fa6efe84e8d1563e99"
     },
     {
       "admitted_input_tokens_lower_bound": 0,
       "base_prompt_digest": "sha256:f6616139ba2f265f6e6ab12dfbf41a334e89dbb8db7d7ba6a0f99e80368462d0",
       "compiler_estimated_input_tokens": 0,
-      "context_artifact_digest": "sha256:ebdf0de45ee47d5aa80ae9ecf5b8515863f3d71e190507f2ae181183f9ef3b6d",
+      "context_artifact_digest": "sha256:44dc67114565d8abd8675825c1d5f6604ccc182fdd7d96a2612d8faab7cc1c86",
       "description_digest": "sha256:3abf5b940ea980f405def51b8aea2da7ca835c832cb8fa7625cdd4eb8661a9a8",
       "dirty_scope": [
         "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_host.py",
         "helper_scripts/maintenance_scripts/agent_governance_closure.py",
         "helper_scripts/maintenance_scripts/agent_governance_context.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_apply.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_child_apply.py",
         "helper_scripts/maintenance_scripts/agent_governance_target_host_effects.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_observation.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_observation_capture.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_operator_authorization.py",
         "helper_scripts/maintenance_scripts/agent_governance_trust.py",
         "helper_scripts/maintenance_scripts/aiml_s1_closure_target_host_run.py",
+        "helper_scripts/maintenance_scripts/aiml_s1_target_host_authorize.py",
         "helper_scripts/maintenance_scripts/aiml_s1_trusted_finalize.py"
       ],
-      "dirty_scope_digest": "sha256:6bf0034525e798fb70d019e521d08aeb4eac4b18d0f84ba4c75be1dd4618af94",
+      "dirty_scope_digest": "sha256:4ab4de4bfa177f7f42ce0f181b8fe0eea0eb6eda7901f70937ca05cd5eb1fd2c",
       "focus": "",
       "focus_digest": "sha256:12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
       "native_agent": "CC",
@@ -96,24 +108,30 @@
         "pa_design"
       ],
       "role": "CC",
-      "task_contract_digest": "sha256:02cc6ec64d8bfd240e93b10a638558d80e44603ce820c7351771b818edbffea2"
+      "task_contract_digest": "sha256:b81ffadd76bab3b66b3ac6faac72602d841e1f81eb60a2fa6efe84e8d1563e99"
     },
     {
       "admitted_input_tokens_lower_bound": 0,
       "base_prompt_digest": "sha256:4229c68487d55b1425078a422d82558bc49dde43687d3e05964170d077fef254",
       "compiler_estimated_input_tokens": 0,
-      "context_artifact_digest": "sha256:ebdf0de45ee47d5aa80ae9ecf5b8515863f3d71e190507f2ae181183f9ef3b6d",
+      "context_artifact_digest": "sha256:44dc67114565d8abd8675825c1d5f6604ccc182fdd7d96a2612d8faab7cc1c86",
       "description_digest": "sha256:acaa2a78edc7269629786ba85b997fc3684aac5e2daf6d652771fc8582c8625c",
       "dirty_scope": [
         "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_host.py",
         "helper_scripts/maintenance_scripts/agent_governance_closure.py",
         "helper_scripts/maintenance_scripts/agent_governance_context.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_apply.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_child_apply.py",
         "helper_scripts/maintenance_scripts/agent_governance_target_host_effects.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_observation.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_observation_capture.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_operator_authorization.py",
         "helper_scripts/maintenance_scripts/agent_governance_trust.py",
         "helper_scripts/maintenance_scripts/aiml_s1_closure_target_host_run.py",
+        "helper_scripts/maintenance_scripts/aiml_s1_target_host_authorize.py",
         "helper_scripts/maintenance_scripts/aiml_s1_trusted_finalize.py"
       ],
-      "dirty_scope_digest": "sha256:6bf0034525e798fb70d019e521d08aeb4eac4b18d0f84ba4c75be1dd4618af94",
+      "dirty_scope_digest": "sha256:4ab4de4bfa177f7f42ce0f181b8fe0eea0eb6eda7901f70937ca05cd5eb1fd2c",
       "focus": "",
       "focus_digest": "sha256:12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
       "native_agent": "E3",
@@ -141,24 +159,30 @@
         "pa_design"
       ],
       "role": "E3",
-      "task_contract_digest": "sha256:02cc6ec64d8bfd240e93b10a638558d80e44603ce820c7351771b818edbffea2"
+      "task_contract_digest": "sha256:b81ffadd76bab3b66b3ac6faac72602d841e1f81eb60a2fa6efe84e8d1563e99"
     },
     {
       "admitted_input_tokens_lower_bound": 0,
-      "base_prompt_digest": "sha256:368943373614007af55f53fae51b14e4b113e3e36faf68742a0e5021d7a3a338",
+      "base_prompt_digest": "sha256:4f14b3267cbf117753ff7def75a28eb823ff1b1d61a7668302a725d5e3c1853b",
       "compiler_estimated_input_tokens": 0,
-      "context_artifact_digest": "sha256:ebdf0de45ee47d5aa80ae9ecf5b8515863f3d71e190507f2ae181183f9ef3b6d",
+      "context_artifact_digest": "sha256:44dc67114565d8abd8675825c1d5f6604ccc182fdd7d96a2612d8faab7cc1c86",
       "description_digest": "sha256:82aaa820aa296f4ea9446629766853bba57e5fe608b3119941bfda86ad65b4dc",
       "dirty_scope": [
         "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_host.py",
         "helper_scripts/maintenance_scripts/agent_governance_closure.py",
         "helper_scripts/maintenance_scripts/agent_governance_context.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_apply.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_child_apply.py",
         "helper_scripts/maintenance_scripts/agent_governance_target_host_effects.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_observation.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_observation_capture.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_operator_authorization.py",
         "helper_scripts/maintenance_scripts/agent_governance_trust.py",
         "helper_scripts/maintenance_scripts/aiml_s1_closure_target_host_run.py",
+        "helper_scripts/maintenance_scripts/aiml_s1_target_host_authorize.py",
         "helper_scripts/maintenance_scripts/aiml_s1_trusted_finalize.py"
       ],
-      "dirty_scope_digest": "sha256:6bf0034525e798fb70d019e521d08aeb4eac4b18d0f84ba4c75be1dd4618af94",
+      "dirty_scope_digest": "sha256:4ab4de4bfa177f7f42ce0f181b8fe0eea0eb6eda7901f70937ca05cd5eb1fd2c",
       "focus": "",
       "focus_digest": "sha256:12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
       "native_agent": "OPS",
@@ -188,24 +212,30 @@
         "security_gate"
       ],
       "role": "OPS",
-      "task_contract_digest": "sha256:02cc6ec64d8bfd240e93b10a638558d80e44603ce820c7351771b818edbffea2"
+      "task_contract_digest": "sha256:b81ffadd76bab3b66b3ac6faac72602d841e1f81eb60a2fa6efe84e8d1563e99"
     },
     {
       "admitted_input_tokens_lower_bound": 0,
-      "base_prompt_digest": "sha256:1c03099c30c351b661fb6e5ad3c964cf600716bf3bbc25ddc1e1b84df1e4d071",
+      "base_prompt_digest": "sha256:834a29a91b78588674b7b442a5ebc7c238e40a3a2c640a1405f1cdead85910f9",
       "compiler_estimated_input_tokens": 0,
-      "context_artifact_digest": "sha256:ebdf0de45ee47d5aa80ae9ecf5b8515863f3d71e190507f2ae181183f9ef3b6d",
+      "context_artifact_digest": "sha256:44dc67114565d8abd8675825c1d5f6604ccc182fdd7d96a2612d8faab7cc1c86",
       "description_digest": "sha256:cd7338b4f5b0b28080b57c9c55b9a0bac89220e7e66fae40c1f0cda1598fd174",
       "dirty_scope": [
         "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_host.py",
         "helper_scripts/maintenance_scripts/agent_governance_closure.py",
         "helper_scripts/maintenance_scripts/agent_governance_context.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_apply.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_child_apply.py",
         "helper_scripts/maintenance_scripts/agent_governance_target_host_effects.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_observation.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_observation_capture.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_operator_authorization.py",
         "helper_scripts/maintenance_scripts/agent_governance_trust.py",
         "helper_scripts/maintenance_scripts/aiml_s1_closure_target_host_run.py",
+        "helper_scripts/maintenance_scripts/aiml_s1_target_host_authorize.py",
         "helper_scripts/maintenance_scripts/aiml_s1_trusted_finalize.py"
       ],
-      "dirty_scope_digest": "sha256:6bf0034525e798fb70d019e521d08aeb4eac4b18d0f84ba4c75be1dd4618af94",
+      "dirty_scope_digest": "sha256:4ab4de4bfa177f7f42ce0f181b8fe0eea0eb6eda7901f70937ca05cd5eb1fd2c",
       "focus": "",
       "focus_digest": "sha256:12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
       "native_agent": "OPS",
@@ -233,7 +263,7 @@
         "ops_preflight"
       ],
       "role": "OPS",
-      "task_contract_digest": "sha256:02cc6ec64d8bfd240e93b10a638558d80e44603ce820c7351771b818edbffea2"
+      "task_contract_digest": "sha256:b81ffadd76bab3b66b3ac6faac72602d841e1f81eb60a2fa6efe84e8d1563e99"
     }
   ],
   "budget_authority": {
@@ -248,21 +278,21 @@
     "authority_canonical": "{\"accounting_basis\":\"utf8_bytes_div4_planned_lower_bound_v1\",\"envelope\":\"complex\",\"max_call_attempts\":14,\"max_context_tokens_per_call\":42000,\"max_prompt_utf8_bytes_per_call\":167996,\"max_unique_nodes\":12,\"max_workflow_planned_input_tokens\":588000,\"retry_budget\":2,\"schema_version\":\"context_budget_authority_v1\"}",
     "authority_digest": "sha256:300c1d04a7fbd8b395ce73d0d926cbfba8fdfabdcb1eecd88e07c69317ac5037"
   },
-  "call_manifest_digest": "sha256:90ca5c4eeea4726a9e72acab3e80f8494d545618b1f7a9df635a9e78a325f655",
+  "call_manifest_digest": "sha256:94e6473495ea8be513c8b6df5eb3fadf9251750b2b6b3f1d929ad037ea150b73",
   "call_record_digests": [
-    "sha256:f222fc039e19875c273288da14683c0a802ede091546c59cf9c082a7dec04a71",
-    "sha256:a48f8a53f72adc9ef5713af01b32fa0c8cefedd60843e00849fdaa8b54e5aa2f",
-    "sha256:398765b9ed267d9d63b0b5fb3e149796f7fcedc8b43a67150194e7e5d40c1d21",
-    "sha256:8bf07f01744b916966af35d307feabb8531805eea8b157aefa9abe0a6acda99b",
-    "sha256:bbf1dce04880331a084e1920b130bff349f28fe152705c456db13ddd3129fa1f"
+    "sha256:dfeccc9f138a831c3e81fc956f76f57ae7c77907a1c290601527123a5d5e5740",
+    "sha256:b83f42f634e7076268574776533893d063ede5ff03efd92a331d2ba6a9f379cb",
+    "sha256:b70617b1e07dc413fc1863736d6449a67cf35aae16ff516aabf999b44a97e224",
+    "sha256:5e7ae596e870cd12c374162170b00f7650b24b5b14fb01ac7cb31b30de3e9454",
+    "sha256:b07966340e1c6712b55af3509e620202c83cd0faa0fb76cea1c9ba650739c6e9"
   ],
   "compiler_planned_input_tokens_lower_bound": 0,
   "context_artifact_digests": {
-    "constitutional_gate": "sha256:ebdf0de45ee47d5aa80ae9ecf5b8515863f3d71e190507f2ae181183f9ef3b6d",
-    "ops_postcheck": "sha256:ebdf0de45ee47d5aa80ae9ecf5b8515863f3d71e190507f2ae181183f9ef3b6d",
-    "ops_preflight": "sha256:ebdf0de45ee47d5aa80ae9ecf5b8515863f3d71e190507f2ae181183f9ef3b6d",
-    "pa_design": "sha256:ebdf0de45ee47d5aa80ae9ecf5b8515863f3d71e190507f2ae181183f9ef3b6d",
-    "security_gate": "sha256:ebdf0de45ee47d5aa80ae9ecf5b8515863f3d71e190507f2ae181183f9ef3b6d"
+    "constitutional_gate": "sha256:44dc67114565d8abd8675825c1d5f6604ccc182fdd7d96a2612d8faab7cc1c86",
+    "ops_postcheck": "sha256:44dc67114565d8abd8675825c1d5f6604ccc182fdd7d96a2612d8faab7cc1c86",
+    "ops_preflight": "sha256:44dc67114565d8abd8675825c1d5f6604ccc182fdd7d96a2612d8faab7cc1c86",
+    "pa_design": "sha256:44dc67114565d8abd8675825c1d5f6604ccc182fdd7d96a2612d8faab7cc1c86",
+    "security_gate": "sha256:44dc67114565d8abd8675825c1d5f6604ccc182fdd7d96a2612d8faab7cc1c86"
   },
   "coverage_debt": [],
   "dag_digest": "sha256:402288f0e54ded307bf8f98e0caf632a89502a38239a69421e79646640821152",
@@ -284,17 +314,17 @@
   "final_null_node_count": 0,
   "first_attempt_call_count": 5,
   "null_call_count": 0,
-  "record_digest": "sha256:14b2bbf4725293e030264e2dd92a3534bc7a667848fbfce5e8ddf70d24ffb93d",
+  "record_digest": "sha256:e43edb47e809243282bebb87a95289f453181f0d5f8d3528b681f3c346300f68",
   "result_fragment_digests": {
-    "constitutional_gate": "sha256:a8cb0046c75b60a733168bbabe1a135374742d799ae258bcdc16f944c6cc9d4c",
-    "ops_postcheck": "sha256:c0799d5896d7f7c43897faefaa7b9e1912a32d4bc412df3b61c0ec11c87d903e",
-    "ops_preflight": "sha256:254ed066a7ed9bcc85613057a6f64e2964c140f46470297dfe75fdca0efc89c1",
-    "pa_design": "sha256:4955d0086f3d3bdd2e6231108b2ca3621c19ac20d61b72f69397559052f0739f",
-    "security_gate": "sha256:eea636b73c78e895a964b21fe87b5947ac103a27cd41510c94d5bfe09943bd1f"
+    "constitutional_gate": "sha256:25c92c4332dc5d4860b227c85898fed3cfb58ef540ef1c068ef2ad2e74a9b713",
+    "ops_postcheck": "sha256:361734d47d24069d01c7f80b2227117b2ee16e8e79188f1ef903218ecb0987a9",
+    "ops_preflight": "sha256:cf6f0b654a14e6241a7e75fa267ba7f5af5b1405c754f7425683b7e8579228f4",
+    "pa_design": "sha256:a3dc34cedb4f58d3ce6880585a114e393cdb9c622c85cb621d4cbd9e9999b9ce",
+    "security_gate": "sha256:3dc35b8ae6286596ff50ff5f19b219ff06060b4d829d5759f8665f985dcc3659"
   },
   "retry_call_count": 0,
   "scheduled_call_admitted_input_tokens_lower_bound": 0,
   "scheduled_call_compiler_input_tokens_lower_bound": 0,
   "schema_version": "workflow_wave_record_v1",
-  "workflow_contract_digest": "sha256:ad0d54c9c6ae358101de6ee51f5faf84e6574475c2e73b4afb26fb631685037c"
+  "workflow_contract_digest": "sha256:3e1926ee18e007a0aae556ba6112c36f029a668f846bdd874e1f6a290c886f3d"
 }

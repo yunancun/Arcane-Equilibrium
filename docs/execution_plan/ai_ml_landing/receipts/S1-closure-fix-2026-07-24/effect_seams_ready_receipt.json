@@ -7,14 +7,14 @@
       "disposable_target_kind": "temp_dir_artifact",
       "effect_class": "ENGINE_SCANNER",
       "evidence_class": "LOCAL_REPRODUCIBLE",
-      "intent_digest": "sha256:4d77db5c4691bce99120566ac94ab4854db4939d2883c116d66be769d55bef31",
+      "intent_digest": "sha256:3ae59eb71290f351fdc5740e3eeb2c0deb5854841a20e5cfef6b2cb1d2f12a17",
       "post_rollback_digest": "sha256:685dca706a114e526590f5fd8b695945f506ea112c4cd99ab48fd54f3ab6324e",
-      "postcheck_attestation_digest": "sha256:61b0b39775b8d2ad36385277ebe799206674a118d00dc4b57ff5719a14e1a2e6",
+      "postcheck_attestation_digest": "sha256:b391763d4c80987c5625aeae85b8b7fd70b9628b5f1babfcba665cd2a2562ed1",
       "postcheck_verifier_node": "engine_scanner_independent_verifier",
       "pre_state_digest": "sha256:685dca706a114e526590f5fd8b695945f506ea112c4cd99ab48fd54f3ab6324e",
       "production_apply_performed": false,
       "reobserved_post_rollback_digest": "sha256:685dca706a114e526590f5fd8b695945f506ea112c4cd99ab48fd54f3ab6324e",
-      "result_digest": "sha256:222fdb200c27fe568bb99610adb056209abbb587c65598bb80003d898f9c952f",
+      "result_digest": "sha256:7d51410f94e0f33a5b65d2fe02b741a8d201c26397aeeb481daa05593b75c01d",
       "rollback_restored_exact": true
     },
     {
@@ -24,14 +24,14 @@
       "disposable_target_kind": "temp_dir_artifact",
       "effect_class": "LEARNING_RUNTIME",
       "evidence_class": "LOCAL_REPRODUCIBLE",
-      "intent_digest": "sha256:fac517b21a4cbd7fb7d0ed0205d7d7783e781e1adf55f20127fa2b4b02e1ecae",
+      "intent_digest": "sha256:4e47cdc4704b925bb7c799c5923bd3ea0308c4ab4e6b2175f32824ce7cf281c5",
       "post_rollback_digest": "sha256:685dca706a114e526590f5fd8b695945f506ea112c4cd99ab48fd54f3ab6324e",
-      "postcheck_attestation_digest": "sha256:fbb6add9b4e3778db1c80b0cdfedba74497ba20741d277172ea78fba4c84e3b5",
+      "postcheck_attestation_digest": "sha256:3b4f376db1c89590d197cd00206d8d2c921dcc1200ea2b237dc9e46a93e1e51b",
       "postcheck_verifier_node": "learning_runtime_independent_verifier",
       "pre_state_digest": "sha256:685dca706a114e526590f5fd8b695945f506ea112c4cd99ab48fd54f3ab6324e",
       "production_apply_performed": false,
       "reobserved_post_rollback_digest": "sha256:685dca706a114e526590f5fd8b695945f506ea112c4cd99ab48fd54f3ab6324e",
-      "result_digest": "sha256:febc5f881f355f4542b909e81a33a698d982d5e06da49446e861431c3c1809c3",
+      "result_digest": "sha256:0874ca722c7c365cb5785e7dfa192461add4ed8e0d687fd97a3902d2d0084e05",
       "rollback_restored_exact": true
     },
     {
@@ -41,14 +41,14 @@
       "disposable_target_kind": "temp_dir_artifact",
       "effect_class": "CONTROLLER_WORKERS",
       "evidence_class": "LOCAL_REPRODUCIBLE",
-      "intent_digest": "sha256:e8d3a43616d6b5c4ed9f1c482ab942179a3a1391f209e8fd3859b936ae718c9b",
+      "intent_digest": "sha256:d73673e0afc9e1c473b6f95ddbfaed1348cd3bab2a84ffb6f28540ed54036ffb",
       "post_rollback_digest": "sha256:685dca706a114e526590f5fd8b695945f506ea112c4cd99ab48fd54f3ab6324e",
-      "postcheck_attestation_digest": "sha256:c5d1d5519606ecb54f48981ff85d5ad466d3bbc3e21b72dda1656858d7b1b70c",
+      "postcheck_attestation_digest": "sha256:b0a03dd250ee3064cd9275efd1359ae2815b7cddfceacaae0d4cdf92419468f0",
       "postcheck_verifier_node": "controller_workers_independent_verifier",
       "pre_state_digest": "sha256:685dca706a114e526590f5fd8b695945f506ea112c4cd99ab48fd54f3ab6324e",
       "production_apply_performed": false,
       "reobserved_post_rollback_digest": "sha256:685dca706a114e526590f5fd8b695945f506ea112c4cd99ab48fd54f3ab6324e",
-      "result_digest": "sha256:f9fd23dbaac612cb91630b95586b0240ffa3d7fcd85b114ea5637a128175e77c",
+      "result_digest": "sha256:cbc27d568e2e686dee4ccaffcbe9898d9d64a4c29136a674e2bd447a8534f63d",
       "rollback_restored_exact": true
     },
     {
@@ -58,14 +58,14 @@
       "disposable_target_kind": "temp_dir_objects",
       "effect_class": "RETENTION_APPLY",
       "evidence_class": "LOCAL_REPRODUCIBLE",
-      "intent_digest": "sha256:1c8c45dfed9ee0d8c704d940f6b31d806fd12b976a652fa00824f04ea6a930a0",
+      "intent_digest": "sha256:a3bcc27de4661b027421d6386ddda332b71a72706e1d56241196050962f036aa",
       "post_rollback_digest": "sha256:2d1eb34db09aead001a530ddd37a193cb48b0058231f9a6c2df838a92cb889f3",
-      "postcheck_attestation_digest": "sha256:a8f825188c887b370dcb72f61e5b8cecfefe3dcb1d49bf92f4a4983ec25cbdb2",
+      "postcheck_attestation_digest": "sha256:ed84ad0153ee9d178944f4f6ee1f967224c08f6b3cb7ba63ea3709dcc3ef5429",
       "postcheck_verifier_node": "retention_apply_independent_verifier",
       "pre_state_digest": "sha256:2d1eb34db09aead001a530ddd37a193cb48b0058231f9a6c2df838a92cb889f3",
       "production_apply_performed": false,
       "reobserved_post_rollback_digest": "sha256:2d1eb34db09aead001a530ddd37a193cb48b0058231f9a6c2df838a92cb889f3",
-      "result_digest": "sha256:21ef90aeead75dabbf7b39b607edae4d7d8d263b0efcd9f8bfee99352c8d4332",
+      "result_digest": "sha256:36cd04a3b3eb54037df3c5ba2b4901e6a76b0bf143ec387b8840f498d66a73ae",
       "rollback_restored_exact": true
     },
     {
@@ -75,14 +75,14 @@
       "disposable_target_kind": "disposable_pg",
       "effect_class": "PG_ROLE_ACL_MIGRATION",
       "evidence_class": "LOCAL_REPRODUCIBLE",
-      "intent_digest": "sha256:da5aa1c739cc4c84f78096a2eb73743ece13e28f421772d67b4f69ff885a9d16",
+      "intent_digest": "sha256:7816f533089e7f09f9cf24e30ce106cf77dddb59f1abe9a58bc961a6ee1e5a5f",
       "post_rollback_digest": "sha256:3187fd565be1082d5beafab3308ca7ac3b06cd0c5cb865c39dbf45bf631dc21a",
-      "postcheck_attestation_digest": "sha256:b4a1207a28b7504cc25ef1b68c59e131b314d138bdaa05125ccbe94f58167890",
+      "postcheck_attestation_digest": "sha256:7a26c8a5bb5c682ad0fb601443e04f79931e52e5fab5032e3b7da5f05e579b8b",
       "postcheck_verifier_node": "pg_role_acl_migration_independent_verifier",
       "pre_state_digest": "sha256:3187fd565be1082d5beafab3308ca7ac3b06cd0c5cb865c39dbf45bf631dc21a",
       "production_apply_performed": false,
       "reobserved_post_rollback_digest": "sha256:3187fd565be1082d5beafab3308ca7ac3b06cd0c5cb865c39dbf45bf631dc21a",
-      "result_digest": "sha256:14763645d55c2388868a8e2ca7003967116b5e99e5eb46369fa44c5fdd9ccdce",
+      "result_digest": "sha256:838094af9584fc6d46d16e7a151dea8f7be0c4fae47fff3d9b9e8ec43f37a58d",
       "rollback_restored_exact": true
     },
     {
@@ -92,14 +92,14 @@
       "disposable_target_kind": "disposable_pg",
       "effect_class": "CREDENTIAL_ROTATION",
       "evidence_class": "LOCAL_REPRODUCIBLE",
-      "intent_digest": "sha256:6c5af7db9799a165fa755fa56560a2fafc5b43dab1ef2dcba87ca28d474dfce5",
+      "intent_digest": "sha256:2eb39066dc943c6f70959e8a8a4dfa859e634a80a6df7325bd106062a585574a",
       "post_rollback_digest": "sha256:eba22fb360fd6f1406e0a7cc8de4597dbaad9d1f1459e809cd113ad6a3bdee21",
-      "postcheck_attestation_digest": "sha256:2535daf16506cd3815b64d10b090cc790a8d3717ead4db91dcf44aed27450c10",
+      "postcheck_attestation_digest": "sha256:0340383cf3c2f27449cbf1ee367ffe4191ef5bdbd4251f6bec4a6d3470bcd003",
       "postcheck_verifier_node": "credential_rotation_independent_verifier",
       "pre_state_digest": "sha256:eba22fb360fd6f1406e0a7cc8de4597dbaad9d1f1459e809cd113ad6a3bdee21",
       "production_apply_performed": false,
       "reobserved_post_rollback_digest": "sha256:eba22fb360fd6f1406e0a7cc8de4597dbaad9d1f1459e809cd113ad6a3bdee21",
-      "result_digest": "sha256:24163654123c6a2fabe07fc877eaedbd3e0f61c14773025b9cd9c2252457fad0",
+      "result_digest": "sha256:d7baec36f5175c6cceb5f25812f31a836472a653acdef65baff67d578193cb91",
       "rollback_restored_exact": true
     }
   ],
@@ -205,7 +205,7 @@
     "runtime_candidate_receipt_b_digest": "sha256:3e5562b5632d1795ce498b601a54c520ffaf59151268bab5b7d404a46deca140",
     "worm_sink_status": "declared_disposable_worm_emulation_implemented"
   },
-  "expires_at": "2026-07-24T01:53:14.976208+00:00",
+  "expires_at": "2026-07-24T03:18:44.427295+00:00",
   "failure_reason": null,
   "governance_wiring": {
     "central_validator_recognizes": true,
@@ -233,7 +233,7 @@
     "remote_platform_attested": false,
     "seam_kind": "independent_distinct_actor_postcheck"
   },
-  "observation_time": "2026-07-24T00:53:14.976208+00:00",
+  "observation_time": "2026-07-24T02:18:44.427295+00:00",
   "schema_sha256": "sha256:bdf14ac4e744a26fdc1a33e568876b0d5eeaafa298c05b8676de144155cffc80",
   "schema_version": "effect_seams_ready_receipt_v1",
   "secret_scan": {
@@ -245,7 +245,7 @@
       "postgres_dsn_credentials"
     ]
   },
-  "self_digest": "sha256:ab63d9db3682e94be195446e4e4d9a586d1ef327427547d88347d934914b140f",
+  "self_digest": "sha256:cb96671598707d4dd3ca6b4284106bf8b19baf4ff259e6c9a0bcdeca04ef7cdf",
   "source_sha256": "sha256:d1cddf5c1d172e57d40744f4b6a94c7ff40a7c0f23ebac055eb0c73b877333d0",
   "sprint_gate_scope": "S1.5_CONTRIBUTION",
   "status": "PASS",

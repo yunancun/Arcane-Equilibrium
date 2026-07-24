@@ -1,24 +1,24 @@
 {
-  "manifest_digest": "sha256:90ca5c4eeea4726a9e72acab3e80f8494d545618b1f7a9df635a9e78a325f655",
+  "manifest_digest": "sha256:94e6473495ea8be513c8b6df5eb3fadf9251750b2b6b3f1d929ad037ea150b73",
   "records": [
     {
       "admitted_input_tokens_lower_bound": 0,
       "attempt": 1,
       "compiler_input_tokens_lower_bound": 0,
-      "context_artifact_digest": "sha256:ebdf0de45ee47d5aa80ae9ecf5b8515863f3d71e190507f2ae181183f9ef3b6d",
+      "context_artifact_digest": "sha256:44dc67114565d8abd8675825c1d5f6604ccc182fdd7d96a2612d8faab7cc1c86",
       "dag_digest": "sha256:402288f0e54ded307bf8f98e0caf632a89502a38239a69421e79646640821152",
-      "dirty_scope_digest": "sha256:6bf0034525e798fb70d019e521d08aeb4eac4b18d0f84ba4c75be1dd4618af94",
+      "dirty_scope_digest": "sha256:4ab4de4bfa177f7f42ce0f181b8fe0eea0eb6eda7901f70937ca05cd5eb1fd2c",
       "ended_at": "2026-07-23T18:00:00.952000Z",
       "focus_digest": "sha256:12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
       "label": "pa_design",
       "logical_call_id": "s1-finalization:pa_design:attempt:1",
       "node_id": "pa_design",
-      "parsed_result_digest": "sha256:e95fbbe28ea76c4cbd03b7849123855934727f2e8c607497240d540a7caaa622",
+      "parsed_result_digest": "sha256:18c205173c6df046082f989e0ecabbb6eee2a38ec3d8b17c5260024b41f76842",
       "payload_kind": "design_fragment_v1",
       "phase": "S1-finalization",
       "producer_generation": {},
       "prompt_digest": "sha256:c12f84449f6b1d1a8fff7509cf36ad218a062b1a4d409a1fe29ede2c2744a068",
-      "record_digest": "sha256:f222fc039e19875c273288da14683c0a802ede091546c59cf9c082a7dec04a71",
+      "record_digest": "sha256:dfeccc9f138a831c3e81fc956f76f57ae7c77907a1c290601527123a5d5e5740",
       "requested": {
         "effort": null,
         "isolation": null,
@@ -41,30 +41,30 @@
       "returned_null": false,
       "schema_version": "workflow_call_record_v1",
       "started_at": "2026-07-23T17:50:40.583000Z",
-      "task_contract_digest": "sha256:02cc6ec64d8bfd240e93b10a638558d80e44603ce820c7351771b818edbffea2",
+      "task_contract_digest": "sha256:b81ffadd76bab3b66b3ac6faac72602d841e1f81eb60a2fa6efe84e8d1563e99",
       "topological_wave": 0,
-      "workflow_contract_digest": "sha256:ad0d54c9c6ae358101de6ee51f5faf84e6574475c2e73b4afb26fb631685037c"
+      "workflow_contract_digest": "sha256:3e1926ee18e007a0aae556ba6112c36f029a668f846bdd874e1f6a290c886f3d"
     },
     {
       "admitted_input_tokens_lower_bound": 0,
       "attempt": 1,
       "compiler_input_tokens_lower_bound": 0,
-      "context_artifact_digest": "sha256:ebdf0de45ee47d5aa80ae9ecf5b8515863f3d71e190507f2ae181183f9ef3b6d",
+      "context_artifact_digest": "sha256:44dc67114565d8abd8675825c1d5f6604ccc182fdd7d96a2612d8faab7cc1c86",
       "dag_digest": "sha256:402288f0e54ded307bf8f98e0caf632a89502a38239a69421e79646640821152",
-      "dirty_scope_digest": "sha256:6bf0034525e798fb70d019e521d08aeb4eac4b18d0f84ba4c75be1dd4618af94",
+      "dirty_scope_digest": "sha256:4ab4de4bfa177f7f42ce0f181b8fe0eea0eb6eda7901f70937ca05cd5eb1fd2c",
       "ended_at": "2026-07-23T21:58:13.989000Z",
       "focus_digest": "sha256:12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
       "label": "constitutional_gate",
       "logical_call_id": "s1-finalization:constitutional_gate:attempt:1",
       "node_id": "constitutional_gate",
-      "parsed_result_digest": "sha256:390e9ef286d0257f1bf2528b4c96ba385e77963c790a2cd6a4399645c5584c50",
+      "parsed_result_digest": "sha256:f09a474e77aab2123c8496fe9fe7d3a06c311bd189ae79eae08aaaf7c1ed5ad5",
       "payload_kind": "gate_fragment_v1",
       "phase": "S1-finalization",
       "producer_generation": {
-        "pa_design": "sha256:f222fc039e19875c273288da14683c0a802ede091546c59cf9c082a7dec04a71"
+        "pa_design": "sha256:dfeccc9f138a831c3e81fc956f76f57ae7c77907a1c290601527123a5d5e5740"
       },
       "prompt_digest": "sha256:f6616139ba2f265f6e6ab12dfbf41a334e89dbb8db7d7ba6a0f99e80368462d0",
-      "record_digest": "sha256:a48f8a53f72adc9ef5713af01b32fa0c8cefedd60843e00849fdaa8b54e5aa2f",
+      "record_digest": "sha256:b83f42f634e7076268574776533893d063ede5ff03efd92a331d2ba6a9f379cb",
       "requested": {
         "effort": null,
         "isolation": null,
@@ -89,30 +89,30 @@
       "returned_null": false,
       "schema_version": "workflow_call_record_v1",
       "started_at": "2026-07-23T21:55:13.351000Z",
-      "task_contract_digest": "sha256:02cc6ec64d8bfd240e93b10a638558d80e44603ce820c7351771b818edbffea2",
+      "task_contract_digest": "sha256:b81ffadd76bab3b66b3ac6faac72602d841e1f81eb60a2fa6efe84e8d1563e99",
       "topological_wave": 1,
-      "workflow_contract_digest": "sha256:ad0d54c9c6ae358101de6ee51f5faf84e6574475c2e73b4afb26fb631685037c"
+      "workflow_contract_digest": "sha256:3e1926ee18e007a0aae556ba6112c36f029a668f846bdd874e1f6a290c886f3d"
     },
     {
       "admitted_input_tokens_lower_bound": 0,
       "attempt": 1,
       "compiler_input_tokens_lower_bound": 0,
-      "context_artifact_digest": "sha256:ebdf0de45ee47d5aa80ae9ecf5b8515863f3d71e190507f2ae181183f9ef3b6d",
+      "context_artifact_digest": "sha256:44dc67114565d8abd8675825c1d5f6604ccc182fdd7d96a2612d8faab7cc1c86",
       "dag_digest": "sha256:402288f0e54ded307bf8f98e0caf632a89502a38239a69421e79646640821152",
-      "dirty_scope_digest": "sha256:6bf0034525e798fb70d019e521d08aeb4eac4b18d0f84ba4c75be1dd4618af94",
+      "dirty_scope_digest": "sha256:4ab4de4bfa177f7f42ce0f181b8fe0eea0eb6eda7901f70937ca05cd5eb1fd2c",
       "ended_at": "2026-07-23T22:02:02.954000Z",
       "focus_digest": "sha256:12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
       "label": "security_gate",
       "logical_call_id": "s1-finalization:security_gate:attempt:1",
       "node_id": "security_gate",
-      "parsed_result_digest": "sha256:ec7a0acc5c935553b1daaab92efa9da757c75194df0a4b9f72ba6b9c75264239",
+      "parsed_result_digest": "sha256:9fd85aea825afa21ccbf9d28b3478e782bfbec5d993af5a621a80c1ced1f006b",
       "payload_kind": "gate_fragment_v1",
       "phase": "S1-finalization",
       "producer_generation": {
-        "pa_design": "sha256:f222fc039e19875c273288da14683c0a802ede091546c59cf9c082a7dec04a71"
+        "pa_design": "sha256:dfeccc9f138a831c3e81fc956f76f57ae7c77907a1c290601527123a5d5e5740"
       },
       "prompt_digest": "sha256:4229c68487d55b1425078a422d82558bc49dde43687d3e05964170d077fef254",
-      "record_digest": "sha256:398765b9ed267d9d63b0b5fb3e149796f7fcedc8b43a67150194e7e5d40c1d21",
+      "record_digest": "sha256:b70617b1e07dc413fc1863736d6449a67cf35aae16ff516aabf999b44a97e224",
       "requested": {
         "effort": null,
         "isolation": null,
@@ -137,32 +137,32 @@
       "returned_null": false,
       "schema_version": "workflow_call_record_v1",
       "started_at": "2026-07-23T21:54:37.514000Z",
-      "task_contract_digest": "sha256:02cc6ec64d8bfd240e93b10a638558d80e44603ce820c7351771b818edbffea2",
+      "task_contract_digest": "sha256:b81ffadd76bab3b66b3ac6faac72602d841e1f81eb60a2fa6efe84e8d1563e99",
       "topological_wave": 1,
-      "workflow_contract_digest": "sha256:ad0d54c9c6ae358101de6ee51f5faf84e6574475c2e73b4afb26fb631685037c"
+      "workflow_contract_digest": "sha256:3e1926ee18e007a0aae556ba6112c36f029a668f846bdd874e1f6a290c886f3d"
     },
     {
       "admitted_input_tokens_lower_bound": 0,
       "attempt": 1,
       "compiler_input_tokens_lower_bound": 0,
-      "context_artifact_digest": "sha256:ebdf0de45ee47d5aa80ae9ecf5b8515863f3d71e190507f2ae181183f9ef3b6d",
+      "context_artifact_digest": "sha256:44dc67114565d8abd8675825c1d5f6604ccc182fdd7d96a2612d8faab7cc1c86",
       "dag_digest": "sha256:402288f0e54ded307bf8f98e0caf632a89502a38239a69421e79646640821152",
-      "dirty_scope_digest": "sha256:6bf0034525e798fb70d019e521d08aeb4eac4b18d0f84ba4c75be1dd4618af94",
-      "ended_at": "2026-07-24T01:21:44.081698Z",
+      "dirty_scope_digest": "sha256:4ab4de4bfa177f7f42ce0f181b8fe0eea0eb6eda7901f70937ca05cd5eb1fd2c",
+      "ended_at": "2026-07-24T02:19:20.332614Z",
       "focus_digest": "sha256:12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
       "label": "ops_preflight",
       "logical_call_id": "s1-finalization:ops_preflight:attempt:1",
       "node_id": "ops_preflight",
-      "parsed_result_digest": "sha256:bbafce20b8c824e75d927ebcdc296202768de6a24699dfc8ea44da234540d565",
+      "parsed_result_digest": "sha256:93e2a0bb7e94440ba6859cb4c6a21f598b31c40d445424df57da53b0ae0f212d",
       "payload_kind": "operation_review_fragment_v1",
       "phase": "S1-finalization",
       "producer_generation": {
-        "constitutional_gate": "sha256:a48f8a53f72adc9ef5713af01b32fa0c8cefedd60843e00849fdaa8b54e5aa2f",
-        "pa_design": "sha256:f222fc039e19875c273288da14683c0a802ede091546c59cf9c082a7dec04a71",
-        "security_gate": "sha256:398765b9ed267d9d63b0b5fb3e149796f7fcedc8b43a67150194e7e5d40c1d21"
+        "constitutional_gate": "sha256:b83f42f634e7076268574776533893d063ede5ff03efd92a331d2ba6a9f379cb",
+        "pa_design": "sha256:dfeccc9f138a831c3e81fc956f76f57ae7c77907a1c290601527123a5d5e5740",
+        "security_gate": "sha256:b70617b1e07dc413fc1863736d6449a67cf35aae16ff516aabf999b44a97e224"
       },
-      "prompt_digest": "sha256:368943373614007af55f53fae51b14e4b113e3e36faf68742a0e5021d7a3a338",
-      "record_digest": "sha256:8bf07f01744b916966af35d307feabb8531805eea8b157aefa9abe0a6acda99b",
+      "prompt_digest": "sha256:4f14b3267cbf117753ff7def75a28eb823ff1b1d61a7668302a725d5e3c1853b",
+      "record_digest": "sha256:5e7ae596e870cd12c374162170b00f7650b24b5b14fb01ac7cb31b30de3e9454",
       "requested": {
         "effort": null,
         "isolation": null,
@@ -188,31 +188,31 @@
       "retry_parent_call_id": null,
       "returned_null": false,
       "schema_version": "workflow_call_record_v1",
-      "started_at": "2026-07-24T01:21:44.080327Z",
-      "task_contract_digest": "sha256:02cc6ec64d8bfd240e93b10a638558d80e44603ce820c7351771b818edbffea2",
+      "started_at": "2026-07-24T02:19:20.218767Z",
+      "task_contract_digest": "sha256:b81ffadd76bab3b66b3ac6faac72602d841e1f81eb60a2fa6efe84e8d1563e99",
       "topological_wave": 2,
-      "workflow_contract_digest": "sha256:ad0d54c9c6ae358101de6ee51f5faf84e6574475c2e73b4afb26fb631685037c"
+      "workflow_contract_digest": "sha256:3e1926ee18e007a0aae556ba6112c36f029a668f846bdd874e1f6a290c886f3d"
     },
     {
       "admitted_input_tokens_lower_bound": 0,
       "attempt": 1,
       "compiler_input_tokens_lower_bound": 0,
-      "context_artifact_digest": "sha256:ebdf0de45ee47d5aa80ae9ecf5b8515863f3d71e190507f2ae181183f9ef3b6d",
+      "context_artifact_digest": "sha256:44dc67114565d8abd8675825c1d5f6604ccc182fdd7d96a2612d8faab7cc1c86",
       "dag_digest": "sha256:402288f0e54ded307bf8f98e0caf632a89502a38239a69421e79646640821152",
-      "dirty_scope_digest": "sha256:6bf0034525e798fb70d019e521d08aeb4eac4b18d0f84ba4c75be1dd4618af94",
-      "ended_at": "2026-07-24T01:21:49.356365Z",
+      "dirty_scope_digest": "sha256:4ab4de4bfa177f7f42ce0f181b8fe0eea0eb6eda7901f70937ca05cd5eb1fd2c",
+      "ended_at": "2026-07-24T02:19:25.835050Z",
       "focus_digest": "sha256:12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
       "label": "ops_postcheck",
       "logical_call_id": "s1-finalization:ops_postcheck:attempt:1",
       "node_id": "ops_postcheck",
-      "parsed_result_digest": "sha256:b9b9ab619da7557517eb6395bdb83af7ab74a9b3bc806adc6f3dfeab97ac3c44",
+      "parsed_result_digest": "sha256:2a56843ee73f4dbb6e5de47e44ac3356cc0b03156c7560667aaf3c876fbf6e8e",
       "payload_kind": "operation_review_fragment_v1",
       "phase": "S1-finalization",
       "producer_generation": {
-        "ops_preflight": "sha256:8bf07f01744b916966af35d307feabb8531805eea8b157aefa9abe0a6acda99b"
+        "ops_preflight": "sha256:5e7ae596e870cd12c374162170b00f7650b24b5b14fb01ac7cb31b30de3e9454"
       },
-      "prompt_digest": "sha256:1c03099c30c351b661fb6e5ad3c964cf600716bf3bbc25ddc1e1b84df1e4d071",
-      "record_digest": "sha256:bbf1dce04880331a084e1920b130bff349f28fe152705c456db13ddd3129fa1f",
+      "prompt_digest": "sha256:834a29a91b78588674b7b442a5ebc7c238e40a3a2c640a1405f1cdead85910f9",
+      "record_digest": "sha256:b07966340e1c6712b55af3509e620202c83cd0faa0fb76cea1c9ba650739c6e9",
       "requested": {
         "effort": null,
         "isolation": null,
@@ -236,12 +236,12 @@
       "retry_parent_call_id": null,
       "returned_null": false,
       "schema_version": "workflow_call_record_v1",
-      "started_at": "2026-07-24T01:21:49.355024Z",
-      "task_contract_digest": "sha256:02cc6ec64d8bfd240e93b10a638558d80e44603ce820c7351771b818edbffea2",
+      "started_at": "2026-07-24T02:19:25.721348Z",
+      "task_contract_digest": "sha256:b81ffadd76bab3b66b3ac6faac72602d841e1f81eb60a2fa6efe84e8d1563e99",
       "topological_wave": 3,
-      "workflow_contract_digest": "sha256:ad0d54c9c6ae358101de6ee51f5faf84e6574475c2e73b4afb26fb631685037c"
+      "workflow_contract_digest": "sha256:3e1926ee18e007a0aae556ba6112c36f029a668f846bdd874e1f6a290c886f3d"
     }
   ],
   "schema_version": "workflow_call_manifest_v1",
-  "workflow_contract_digest": "sha256:ad0d54c9c6ae358101de6ee51f5faf84e6574475c2e73b4afb26fb631685037c"
+  "workflow_contract_digest": "sha256:3e1926ee18e007a0aae556ba6112c36f029a668f846bdd874e1f6a290c886f3d"
 }
