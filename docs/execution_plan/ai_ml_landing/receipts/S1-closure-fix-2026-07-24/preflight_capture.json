@@ -14,36 +14,36 @@
     "role_id": "OPS"
   },
   "command": "git rev-parse --is-inside-work-tree",
-  "completed_at": "2026-07-24T03:05:13.399323+02:00",
-  "context_artifact_digest": "sha256:6cb3c7e7d0b76f246e680ca032007f7a9c512f8ff5d9f613d2bb7d9e6f1f030e",
+  "completed_at": "2026-07-24T03:05:08.109118+02:00",
+  "context_artifact_digest": "sha256:091ec8296d89e9b0dbe76eb8266829d36da918220b74453ae317fb5ac428dd2b",
   "effect_enforcement": "repository_policy_only",
   "execution_task": {
     "native_agent": "OPS",
     "node_class": "verification",
-    "node_id": "ops_postcheck",
+    "node_id": "ops_preflight",
     "path_scope": [],
     "permission": "read_only",
     "requires": [
-      "ops_preflight"
+      "security_gate"
     ],
     "role": "OPS"
   },
-  "execution_task_digest": "sha256:5a72567da122ce91682bcb19a9f7bb4d19ee5ffed7ebf86b6fad8e31153c2371",
+  "execution_task_digest": "sha256:e8f012730c40e041abbda5e80d8174ad738ca0bce18486eb6a4b0762e24379e8",
   "exit_code": 0,
   "host_sandbox_attestation_ref": null,
   "native_agent": "OPS",
   "node_class": "verification",
-  "node_id": "ops_postcheck",
+  "node_id": "ops_preflight",
   "path_scope": [
     "helper_scripts/maintenance_scripts/runtime_environment_probe.py"
   ],
   "permission": "read_only",
-  "record_digest": "sha256:38df705c8588b101532432cdc03b29a8aff99d213c87845dbe29b5e66f3198fd",
+  "record_digest": "sha256:ffec8b4461256042b26d9c6e52b2faa4db724f092c951fa4eb19d7a6c7c51492",
   "replay_contract": "EXACT_OUTPUT",
   "repository_after": {
     "generation_digest": "sha256:5c723e2c707df39811d510549a018fae7b3c51806a051ffa85d1ac44295aa250",
-    "observed_at": "2026-07-24T03:05:13.405828+02:00",
-    "record_digest": "sha256:6ebc8303740162f13ad5d6965c3869ffb2cff6f83b3e429f4c2dd6a05beb2091",
+    "observed_at": "2026-07-24T03:05:08.115582+02:00",
+    "record_digest": "sha256:fc6290b9011daad3f3986b3c271ddcae22c01555e94979eb8de4395254d457e4",
     "schema_version": "repository_generation_summary_v1",
     "scope": [
       "helper_scripts/maintenance_scripts/runtime_environment_probe.py"
@@ -52,8 +52,8 @@
   },
   "repository_before": {
     "generation_digest": "sha256:5c723e2c707df39811d510549a018fae7b3c51806a051ffa85d1ac44295aa250",
-    "observed_at": "2026-07-24T03:05:13.397660+02:00",
-    "record_digest": "sha256:c60548a95b6d64d048e6cd49d393bf040b94e38b61f6763b841578c2d0f406be",
+    "observed_at": "2026-07-24T03:05:08.107286+02:00",
+    "record_digest": "sha256:b5de0b6531c21c722e8ebd0fff0382fe0d3ad2b4ba0c78ef75bf16c38a72792f",
     "schema_version": "repository_generation_summary_v1",
     "scope": [
       "helper_scripts/maintenance_scripts/runtime_environment_probe.py"
@@ -63,7 +63,7 @@
   "result": "PASS",
   "role_id": "OPS",
   "schema_version": "command_capture_v2",
-  "started_at": "2026-07-24T03:05:13.397900+02:00",
+  "started_at": "2026-07-24T03:05:08.107748+02:00",
   "stderr": {
     "bytes": 0,
     "digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -86,14 +86,14 @@
     "replay_digest": "sha256:a17fcf0a2f50e2d495e4f90ce263410edc183add6c62699a2facbccf60410f74",
     "truncated": false
   },
-  "task_contract_digest": "sha256:5c7a76845cdef73cedfb650939077db1e8b19bcda9ad6fded9da7b6361a27144",
+  "task_contract_digest": "sha256:4a117863aac9c100a05f1cc379abdd252fced0678a8593df661c0d078fd858fc",
   "timed_out": false,
   "timeout_seconds": 120,
   "trust_tier": "LOCAL_REPRODUCIBLE",
   "whole_repository_after": {
     "generation_digest": "sha256:12faebf50619b4e0ffe40bc2f88193ad9ebc2eaf9630e5040ee660c9a096e8d9",
-    "observed_at": "2026-07-24T03:05:13.422450+02:00",
-    "record_digest": "sha256:dd1d276081639f7276196dfd669944c04d396cc8603024818b2aa713676608e6",
+    "observed_at": "2026-07-24T03:05:08.129376+02:00",
+    "record_digest": "sha256:63140ed59e42ff82c889db856409e8d0172e8c8467f06d88876d334b13e4c822",
     "schema_version": "repository_generation_summary_v1",
     "scope": [
       "."
@@ -102,8 +102,8 @@
   },
   "whole_repository_before": {
     "generation_digest": "sha256:12faebf50619b4e0ffe40bc2f88193ad9ebc2eaf9630e5040ee660c9a096e8d9",
-    "observed_at": "2026-07-24T03:05:13.391255+02:00",
-    "record_digest": "sha256:aa037e1c4e0266d8ce97c9782c7c3fccaf14ec9a34f638ab19890372add6ce97",
+    "observed_at": "2026-07-24T03:05:08.101055+02:00",
+    "record_digest": "sha256:03073db3abbb559e61b06c1181190588351f6c443e9f3a3c048abe61a6db4695",
     "schema_version": "repository_generation_summary_v1",
     "scope": [
       "."

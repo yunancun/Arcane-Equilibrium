@@ -3,10 +3,10 @@
   "candidate_ids": [
     "content_addressed_fixed_path"
   ],
-  "created_at": "2026-07-23T23:13:48.889730+00:00",
+  "created_at": "2026-07-24T01:05:08.018459+00:00",
   "expected_host": "trade-core",
-  "expires_at": "2026-07-23T23:28:48.889730+00:00",
-  "intent_id": "sha256:3cb1071935404ab4ba1a29f750e513d59c238302ebb341b1971eee3ba8a30f66",
+  "expires_at": "2026-07-24T01:20:08.018459+00:00",
+  "intent_id": "sha256:7494274d90d34385ae34268d5f303c340000fad27d8849e9b2ea2d2ae55be078",
   "non_root_uid": true,
   "per_seam_argv": {
     "start_stop": [
@@ -24,8 +24,8 @@
     "teardown_reset_failed": "systemctl --user reset-failed"
   },
   "schema_version": "target_host_disposable_runtime_probe_intent_v1",
-  "self_digest": "sha256:2314f696bd63f7c4af4e563ba853800371853f58a92c27ee5e8614dae4ffa017",
-  "throwaway_root": "/run/user/1000/aiml_s1fc_929953_005ff173",
+  "self_digest": "sha256:35a0d69dd18f33988636fb2c345fec7d6872a1b06653816db98bb7d4d87867cf",
+  "throwaway_root": "/run/user/1000/aiml_s1fc_970153_e4f2b71f",
   "ttl_seconds": 900,
   "user_scope_only": true
 }

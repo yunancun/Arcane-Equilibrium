@@ -1,0 +1,126 @@
+{
+  "actor_node": "s1fc_apply_actor",
+  "adapter_id": "target_host_disposable_runtime_probe_adapter_v1",
+  "attempt": 1,
+  "attempt_id": "sha256:cd35751faf6a1e7d1d046f7f9cf1718233ad36eb7424234127e2c3f49f1b36db",
+  "attempt_key": {
+    "attempt": 1,
+    "cohort_epoch": "2026-07-24-s1-final",
+    "scope_ref": {
+      "kind": "LANDING_SCOPE",
+      "landing_scope_id": "sha256:df51082fcc3512190834f8e947a5bbc190ee3119ecd0b19af80cf46bec66f3e3"
+    },
+    "session_id": "S1.6B"
+  },
+  "attempt_phase": "SOURCE_BUILD",
+  "bootstrap_admission": {
+    "baseline_head": "e6572b96e60ac305e2ff2bedffa1cf148e75aa7a",
+    "context_artifact_digest": "sha256:2fc6887ca0ade3b516c08f9d4534e7647fcdbc73abbf91f41dd0a74750aa40d2",
+    "dag_digest": "sha256:402288f0e54ded307bf8f98e0caf632a89502a38239a69421e79646640821152",
+    "task_contract_digest": "sha256:7d4b875088e05256ec517748f73d7c9c70dfe165dacd2e87b869a9ab1f5e12fd",
+    "task_id": "aiml-s1-formal-closure-v1",
+    "writer_lease_id": "5e151851bf81fd296eef27ba46b28050"
+  },
+  "ci_classifier": {
+    "classifier_digest": "sha256:1cf8c021b066ceeb364e968add074d263cb28d63db421fdc40620e9904d0ddbc",
+    "failure_fingerprints": [],
+    "invocation_history": [],
+    "selected_workflows": [
+      "structure"
+    ]
+  },
+  "closure_binding": {
+    "closure_packet_digest": "sha256:55a1fe393d13baf3b341505be0965d101b4c16972699e22d5c48665b943bad47",
+    "effect_adapter_id": "target_host_disposable_runtime_probe_adapter_v1",
+    "effect_receipt_digest": "sha256:e4efb9bc82f49278c8ab889eadf23f7de4767967aa5d406d9adb87623b1250db"
+  },
+  "cohort_epoch": "2026-07-24-s1-final",
+  "created_at": "2026-07-24T01:05:44.165787Z",
+  "dag_nodes": [
+    {
+      "node_class": "work",
+      "node_id": "implementation",
+      "permission": "source_writer",
+      "requires": [],
+      "writer_paths": [
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_effects.py",
+        "helper_scripts/maintenance_scripts/aiml_s1_closure_target_host_run.py"
+      ]
+    }
+  ],
+  "dependency_generations": [
+    {
+      "receipt_digest": "sha256:ab63d9db3682e94be195446e4e4d9a586d1ef327427547d88347d934914b140f",
+      "schema_version": "effect_seams_ready_receipt_v1",
+      "session_id": "S1.5"
+    },
+    {
+      "receipt_digest": "sha256:9e300001624ab2f185328c86b79d6df8a480e75fecfaf0ad521c1a6ba66dec21",
+      "schema_version": "learning_runtime_choice_receipt_target_host_v1",
+      "session_id": "S1.6"
+    }
+  ],
+  "effect_classification_digest": "sha256:58c3a7224a057932fbaaeebfd069cc8157a02d7d7d06a7391f91903455e03a34",
+  "independent_postcheck_node": "ops_postcheck",
+  "lease": {
+    "acquired_at": "2026-07-24T01:04:44.165787Z",
+    "epoch": 1,
+    "expires_at": "2026-07-24T05:05:44.165787Z",
+    "heartbeat_at": "2026-07-24T01:05:44.165787Z",
+    "lease_id": "5e151851bf81fd296eef27ba46b28050"
+  },
+  "native_admission": {
+    "native_agent": "pm",
+    "node_class": "work",
+    "node_id": "implementation",
+    "permission": "source_writer",
+    "role": "PM"
+  },
+  "owner": "PM",
+  "path_manifest": [
+    "helper_scripts/maintenance_scripts/agent_governance_target_host_effects.py",
+    "helper_scripts/maintenance_scripts/aiml_s1_closure_target_host_run.py"
+  ],
+  "required_effects": [
+    {
+      "actor_node_id": "s1fc_apply_actor",
+      "adapter_id": "target_host_disposable_runtime_probe_adapter_v1",
+      "effect_class": "TARGET_HOST_DISPOSABLE_RUNTIME_PROBE",
+      "independent_postcheck_node_id": "ops_postcheck",
+      "rollback_contract": "atomic_pointer_swap+teardown_reset_failed+rmtree",
+      "status": "REQUIRED_PENDING"
+    }
+  ],
+  "rollback": "atomic_pointer_swap+teardown_reset_failed+rmtree",
+  "schema_version": "aiml_landing_session_attempt_v1",
+  "scope_ref": {
+    "kind": "LANDING_SCOPE",
+    "landing_scope_id": "sha256:df51082fcc3512190834f8e947a5bbc190ee3119ecd0b19af80cf46bec66f3e3"
+  },
+  "self_digest": "sha256:6b579c935c50993e3e3cdd17886a5fc1eca1ac414181947ce0040cce91c316ed",
+  "semantic_rechecks": [
+    "path_ownership"
+  ],
+  "session_id": "S1.6B",
+  "source": {
+    "baseline_head": "e6572b96e60ac305e2ff2bedffa1cf148e75aa7a",
+    "branch": "agent/aiml-s1-closure-p1p2-fixes",
+    "checkpoint_head": "e6572b96e60ac305e2ff2bedffa1cf148e75aa7a",
+    "worktree": "/Users/ncyu/Projects/TradeBot/.codex-worktrees/aiml-s1-closure-p1p2-fixes"
+  },
+  "status": "FINALIZED",
+  "work_package": {
+    "direct_interfaces": [
+      "target_host_disposable_runtime_probe_adapter_v1",
+      "closure_packet_v1"
+    ],
+    "owned_path_manifest": [
+      "helper_scripts/maintenance_scripts/agent_governance_target_host_effects.py",
+      "helper_scripts/maintenance_scripts/aiml_s1_closure_target_host_run.py"
+    ],
+    "phase": "SOURCE_BUILD",
+    "runtime_claim": true,
+    "side_effect_class": "target_host_probe",
+    "work_package_id": "AIML_S1_FORMAL_CLOSURE_V1"
+  }
+}

@@ -1,100 +1,138 @@
-# S1 Formal-Closure Fix — Real Target-Host Effect Run Record
+# S1 Formal Closure — Authenticated Target-Host Run Record
 
-**Date**: 2026-07-24 · **Host**: `trade-core` (Linux, non-root uid=1000) ·
-**Source head (H_effect)**: `5705a480a1858e4678b95c59eb98728e834bf6cf` ·
-**Branch**: `agent/aiml-s1-closure-p1p2-fixes` · **Effect class**:
-`TARGET_HOST_DISPOSABLE_RUNTIME_PROBE`.
+**Date**: 2026-07-24
+**Host**: `trade-core` (Linux, non-root uid 1000)
+**H_effect**: `e6572b96e60ac305e2ff2bedffa1cf148e75aa7a`
+**Branch / PR**: `agent/aiml-s1-closure-p1p2-fixes` / PR #115
+**Effect class**: `TARGET_HOST_DISPOSABLE_RUNTIME_PROBE`
 
-This run exercises the **PR #114 findings-fix** generation end-to-end on the real
-target host: the isolated `python3 -E` child-executor authorization path (P1 #2),
-the distinct-verifier governed `command_capture_v2` postcheck binding (P1 #1), and
-the reproducible driver `helper_scripts/maintenance_scripts/aiml_s1_closure_target_host_run.py`.
-It was run from a throwaway detached `git worktree` at the exact committed head — the
-runtime `main` checkout was never touched.
+## Outcome
 
-## What ran
+The fresh target-host effect, complete governance closure, and operator SSHSIG
+all passed. The durable state emitted by the fixed finalizer is
+`S1_CLOSURE_AUTHENTICATED_PENDING_MERGE`; `S1_CLOSED` is deliberately withheld
+until PR #115 receives an exact-head Codex review, all required CI is green, and
+that exact head is merged.
 
-`aiml_s1_closure_target_host_run.py` built an admitted typed
-`target_host_disposable_runtime_probe_intent_v1` (fresh clock, real `self_digest`,
-`expected_host=trade-core`, throwaway root under `$XDG_RUNTIME_DIR`), then:
+- S1.5 contribution: the still-fresh receipt for six real disposable component
+  classes was revalidated against byte-identical source/schema; each had
+  performed apply → exact rollback → independent postcheck; status `PASS`,
+  digest `sha256:ab63d9db3682e94be195446e4e4d9a586d1ef327427547d88347d934914b140f`.
+- S1.6 target-host effect: all eight fixed-path seams
+  `PASSED_TARGET_HOST`; `binding=BINDING`;
+  `final_choice=content_addressed_fixed_path`;
+  effect digest `sha256:e4efb9bc82f49278c8ab889eadf23f7de4767967aa5d406d9adb87623b1250db`.
+- Host identity: observed and expected host are both `trade-core`.
+- Cleanup: zero unit, cgroup, netns, temporary-directory, or disposable-PG
+  residue; production PostgreSQL `:5432` was not touched.
+- Closure: `closure_packet_v1` trusted finalization `PASS`, no errors;
+  closure digest
+  `sha256:55a1fe393d13baf3b341505be0965d101b4c16972699e22d5c48665b943bad47`.
+- Operator authentication: the canonical trusted-execution bundle was signed
+  through the current SSH agent under identity
+  `aiml-s1-target-host-operator-v1` and namespace
+  `arcane-equilibrium-aiml-s1-target-host`. Independent `ssh-keygen -Y verify`
+  passed against fingerprint
+  `SHA256:uGJ9veN7PoE6BBgfsSP2aiMndrwgbt7o/7/YfdzNzCQ`.
 
-1. `apply_target_host_probe_effect` (**real** runner) → the isolated `python3 -E`
-   child (sanitized allowlist env, no gate) validated the intent-derived
-   authorization capsule and opened `AIML_TARGET_HOST_PROBE` **only in its own env**,
-   ran `run_target_host_probe`, and returned canonical JSON — the parent process
-   never held the gate.
-2. A **distinct** OPS verifier node `ops_postcheck` (≠ applier `s1fc_apply_actor`)
-   ran a real on-host residue sweep (`independent_postcheck_on_host`) and produced a
-   **real governed** `command_capture_v2` via the OPS `capture-command` path; the
-   closure requires this capture's bound execution `node_id` to equal the declared
-   `ops_postcheck` verifier node (P1 Codex — the capture must be produced by the
-   purported residue verifier, not any non-applier node).
-3. `attach_distinct_verifier_postcheck` upgraded the effect result to **BINDING**,
-   carrying the structured `verifier_capture_digest`.
+## Causal execution
 
-## Result — all 8 fixed-path seams PASSED_TARGET_HOST
+The run used a detached throwaway worktree at the exact committed H_effect;
+the Linux runtime `main` checkout stayed clean and untouched.
 
-| Seam | Verdict |
-|---|---|
-| start_stop | `PASSED_TARGET_HOST` |
-| cgroup_resource_isolation | `PASSED_TARGET_HOST` |
-| network_denial | `PASSED_TARGET_HOST` |
-| native_lib_loading | `PASSED_TARGET_HOST` |
-| immutable_closure_persistence | `PASSED_TARGET_HOST` |
-| failure_rollback_cleanup | `PASSED_TARGET_HOST` |
-| pg_identity | `PASSED_TARGET_HOST` (real disposable initdb cluster → 42501 SET ROLE denial) |
-| independent_postcheck | `PASSED_TARGET_HOST` (distinct verifier clean residue sweep) |
+1. A real S1.5 `effect_seams_ready_receipt_v1` was produced from the six
+   committed disposable component-effect harnesses.
+2. Before the effect, OPS node `ops_preflight` produced its own governed
+   `command_capture_v2`.
+3. The typed intent authorized the isolated `python3 -E` child executor. The
+   parent process never opened `AIML_TARGET_HOST_PROBE`.
+4. The child exercised start/stop, cgroup isolation, network denial,
+   native-library loading, immutable closure persistence, rollback/cleanup, and
+   real disposable-PG identity.
+5. After the effect, distinct OPS node `ops_postcheck` performed the residue
+   sweep and produced a different governed capture. The closure cross-binds
+   effect-result `verifier_capture_digest`, postcheck digest, and capture
+   `record_digest`.
+6. The finalizer retained the true historical PA/CC/E3 provider-call digests
+   and timestamps, used the fresh preflight/postcheck capture timestamps, built
+   the complete workflow DAG and `closure_packet_v1`, signed its exact
+   trusted-execution bundle, and ran the fixed S1 trusted-host validator.
 
-- `effect_status` = `TARGET_HOST_DISPOSABLE_PROBE_PASS`; `binding` = **`BINDING`**;
-  `final_choice` = `content_addressed_fixed_path`; OCI stays `NON_SATISFIABLE_NON_ROOT`.
-- `observed_host` == `expected_host` == `trade-core`.
-- **Zero residue**: no `aiml-probe*` / `aiml_s1fc_*` / `aiml_s16b_pg_*` units or dirs
-  after the run; the disposable cluster was socket-only (`listen_addresses=''`),
-  **production PG `127.0.0.1:5432` untouched**.
-- Nine AIML authorities remain false; no production PG write, deploy, broker, order,
-  or live effect. `source_adoption_only` unchanged.
+The historical provider calls are not represented as fresh replays. Their
+limitation is load-bearing in `review_provenance.json`; the current
+artifact-only head still requires the separate exact-head Codex merge review.
 
-## Persisted producer artifacts (this directory)
+## Adversarial closeout findings
 
-`intent.json`, `applier_effect_result.json`, `upgraded_effect_result.json`,
-`applier_capture.json`, `verifier_capture.json`, `residue_observation.json`,
-`final_residue_sweep.json`, `host_identity.json`, `run_meta.json`,
-`run_summary.json`, plus the reconstructed `closure_binding.json` and the offline
-`closure_verification.json`.
+The final whole-suite regression, a deliberately mistyped SHA, and historical
+receipt replay caught three
+additional P1s before publication:
 
-Key digests:
-- effect result `receipt_digest`: `sha256:6a6056169f273230f920a76c1dd68a38243a90d5f744853025e9607b3bccbd40`
-- structured `verifier_capture_digest` == the verifier `command_capture_v2` `record_digest`
-  (bound three ways: effect result ↔ ops_postcheck ↔ capture — see `closure_binding.json`).
+1. The direct-caller Context inventory bounded only the number of matches, not
+   the byte length of each preview. A generated closure receipt could therefore
+   inject a single 250 KB JSON line into every standard review Context and make
+   `call_allowed=false`. Commit `43735ff3d` byte-bounds inline match previews
+   while retaining `manifest_digest` and `text_digest` over the complete
+   original bytes. The reproduced Context fell from 69,152 to 12,985 planned
+   tokens and remained admissible.
+2. The target-host driver accepted caller `--source-head` without comparing it
+   to the worktree it executed. Commit `102b1bb85` requires an exact lowercase
+   40-hex match to a completely clean target-host `HEAD` before any effect.
+   Mismatch, tracked-dirty, untracked-dirty, abbreviated, and noncanonical
+   negative tests all fail closed.
+3. The finalizer persisted the run-start instant as `evaluated_at`, although
+   the Context sources were materialized later. A PASS result could therefore
+   fail when replayed at its own durable time. Commit `e6572b96e` captures the
+   receipt timestamp only after trusted finalization and adds a load-bearing
+   ordering regression. Both immediate trusted-host validation and replay at
+   the persisted `evaluated_at` now pass.
 
-## Offline mechanical re-verification (Mac, `closure_verification.json`)
+The earlier `6febd9d1e` signed generation and the rejected mistyped-head attempt
+are superseded; neither is the final S1 closure. The exact-head S1.6 producer
+effect and operator signature were rerun after all three P1 fixes at the
+H_effect above; the still-fresh S1.5 receipt was independently revalidated
+against unchanged source/schema before consumption.
 
-Re-running the offline validators on the portable artifacts:
-`validate_target_host_effect_result(require_success=True)` = **PASS**;
-`validate_governed_command_capture(verifier_capture)` = **PASS**;
-`validate_target_host_effect_binding(...)` = **PASS**. Per CLAUDE.md, offline
-structural acceptance is **not** authentication — a fully-attested closure PASS
-additionally requires the operator out-of-band SSHSIG below.
+## Durable artifacts
 
-## Remaining gate — one operator out-of-band signing action
+- Producer inputs: `effect_seams_ready_receipt.json`, `intent.json`,
+  `applier_capture.json`, `preflight_capture.json`,
+  `applier_effect_result.json`, `verifier_capture.json`,
+  `upgraded_effect_result.json`, `residue_observation.json`,
+  `final_residue_sweep.json`, `host_identity.json`, `run_meta.json`, and
+  `run_summary.json`.
+- Governance: `review_provenance.json`,
+  `S1-closure-context-artifact-v1.json`,
+  `S1-closure-workflow-call-manifest-v1.json`,
+  `S1-closure-workflow-wave-record-v1.json`, and
+  `S1-closure-packet-v1.json`.
+- Authentication and landing:
+  `S1-closure-trusted-execution-bundle-v1.json` plus `.sig`,
+  `S1-landing-session-attempt-v1.json`, and
+  `S1-closure-finalization-result-v1.json`.
 
-The only step left for `S1_CLOSED` is the operator SSHSIG over the trusted
-execution bundle, using the **existing S0.3 signer key** (private key on neither
-Mac nor `trade-core`; no new key). Precise action:
+Key finalization digests:
 
-- Build a `trusted_execution_bundle_v1` (fresh `issued_at`/`expires_at` within the
-  15-minute TTL) with **one entry** of kind `effect_adapter_result_v1`,
-  `subject_digest` = `artifact_digest` =
-  `sha256:6a6056169f273230f920a76c1dd68a38243a90d5f744853025e9607b3bccbd40`, under
-  `signer_identity=aiml-s1-target-host-operator-v1`,
-  `signature_namespace=arcane-equilibrium-aiml-s1-target-host`,
-  `signer_fingerprint=SHA256:uGJ9veN7PoE6BBgfsSP2aiMndrwgbt7o/7/YfdzNzCQ` (the S0.3
-  trust root), binding the task/context/dag digests.
-- Sign its canonical bytes with the S0.3 private key:
-  `ssh-keygen -Y sign -f <s0.3-private-key> -n arcane-equilibrium-aiml-s1-target-host`.
-- Commit `S1-closure-fix-trusted-execution-bundle-v1.json` + `.sig` here; then the
-  closure `closure_packet_v1` PASS is authenticated and S1 reaches `S1_CLOSED`.
+- workflow wave:
+  `sha256:16aac28ec8b43b3c5dbe57cc58371d7b9605aed44410a46ec513f49c29e7e70f`
+- trusted bundle:
+  `sha256:20b5d11b05b7c4b4ede438d914cb6a52060bb0aa9c50557c2288256d5e5ddc9f`
+- signature bytes:
+  `sha256:6c65b2e4b0bc83db2674192f688250c939849a60baa5595a53a4390ab69d8f1b`
+- landing attempt:
+  `sha256:6b579c935c50993e3e3cdd17886a5fc1eca1ac414181947ce0040cce91c316ed`
+- finalization:
+  `sha256:95ff22cc61f7eab7482762bbb34bc75ab7ca9f53268405b1383edc3c7ca0bd55`
 
-Until then the honest terminal is **`BLOCKED_OPERATOR_SIGNING_ACTION`**: all internal
-work, the real effect, and all artifacts are complete; only the existing private
-key's out-of-band signature remains.
+## Boundary and final transition
+
+All nine AIML authority grants remain false. This work created no production
+runtime, build, PostgreSQL, migration, deploy, ML5/ML6, broker, order, or live
+authority. External S3 Object-Lock execution remains S8.6 and is not an S1
+blocker.
+
+The only remaining transition is repository publication: exact-head review,
+required CI, PR #115 merge, and three-way source synchronization. After those
+checks pass, the ledger may move from
+`S1_CLOSURE_AUTHENTICATED_PENDING_MERGE` to `S1_CLOSED` and open the S2 ready
+pool `S2.0 ∥ S2.2A ∥ S2.3`.

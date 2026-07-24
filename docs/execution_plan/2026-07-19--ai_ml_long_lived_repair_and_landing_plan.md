@@ -809,11 +809,35 @@ Accepted decisions closing S1's `EFFECT_SEAMS_READY` governance wiring (the deli
 PR #114 (Wave A-C source landing, merge `7d78765a2`) merged before Codex review completed and surfaced two P1 + one P2. All three are fixed on branch `agent/aiml-s1-closure-p1p2-fixes` (source commit `af2491300`); source-only, nine authorities false, no runtime/broker/order. Frozen-surface guarantee (§5) holds — `aiml_effect_classifier_digest()` byte-unchanged.
 
 - **P1 — OPS postcheck evidence binding**: `validate_target_host_effect_binding` previously accepted any runtime evidence labeled `source==ops_postcheck` (empty `evidence_refs` passed). It now requires the distinct-verifier UPGRADED effect result (new structured `verifier_capture_digest`, non-null — an applier self-run cannot close), an ops_postcheck bound to the verifier's own governed `command_capture_v2` (structural + self-digest integrity; distinct role/node/process/capture from the applier), a fully-clean residue observation (nonzero fails closed), `source_head`/`host`/`observed_at` bound to the receipt, a three-way digest cross-check, and acceptance binding all three evidence ids. `target_host_effect_result_v1` gains `verifier_capture_digest` (schema + builder + validator, cross-checked with the durable seam-note binding).
-- **P1 — process-global authorization removed**: the applier no longer sets `AIML_TARGET_HOST_PROBE` on the parent process. The real runner derives an intent-bound authorization capsule and delegates to an isolated `python3 -I` child (new `agent_governance_target_host_child_apply.py`) over a one-time stdin pipe; the child re-validates the capsule and opens the gate only in its own env. Direct/expired/tampered/replayed/host-mismatch all fail closed; the governed capture-command env-strip is unchanged; thread-local was NOT used.
+- **P1 — process-global authorization removed**: the applier no longer sets `AIML_TARGET_HOST_PROBE` on the parent process. The real runner derives an intent-bound authorization capsule and delegates to an isolated `python3 -E` child (new `agent_governance_target_host_child_apply.py`) over a one-time stdin pipe; the child re-validates the capsule and opens the gate only in its own env. `-E` ignores `PYTHON*`/`PYTHONPATH` injection while preserving the target host's user-site `psycopg2`; direct/expired/tampered/replayed/host-mismatch all fail closed; the governed capture-command env-strip is unchanged; thread-local was NOT used.
 - **P2 — external WORM retention**: readback + idempotent-dedup now require observed `retain_until` ≥ approved (tz-normalized; shorter fails closed), on top of exact mode + future-date.
 
-- **§3 signing — REVISED (supersedes the operator-placeholder plan)**: the S1 target-host signer profile now **reuses the S0.3 trust root** — `TRUSTED_EXECUTION_PUBLIC_KEY` / `EXPECTED_EXECUTION_SIGNER_FINGERPRINT` — under the domain-separated S1 identity (`aiml-s1-target-host-operator-v1`) and namespace (`arcane-equilibrium-aiml-s1-target-host`). No second physical key is introduced; the placeholder consts are removed and the S1 profile is self-consistent (fingerprint == public-key fingerprint). S0.3 identity/namespace/keys/schemas/receipts/signatures are byte-unchanged. The real S1 closure-bundle SSHSIG remains an out-of-band operator step (the matching private key is on neither Mac nor trade-core).
+- **§3 signing — REVISED AND COMPLETED (supersedes the operator-placeholder plan)**: the S1 target-host signer profile **reuses the S0.3 trust root** — `TRUSTED_EXECUTION_PUBLIC_KEY` / `EXPECTED_EXECUTION_SIGNER_FINGERPRINT` — under the domain-separated S1 identity (`aiml-s1-target-host-operator-v1`) and namespace (`arcane-equilibrium-aiml-s1-target-host`). No second physical key is introduced; the placeholder consts are removed and the S1 profile is self-consistent (fingerprint == public-key fingerprint). S0.3 identity/namespace/keys/schemas/receipts/signatures are byte-unchanged. On 2026-07-24, the operator authorized the current SSH agent key `SHA256:uGJ9veN7PoE6BBgfsSP2aiMndrwgbt7o/7/YfdzNzCQ`; the exact H_effect bundle was signed and independently verified.
 
-- **§6 terminal — REVISED**: the external S3 Object-Lock **effect** (real bind/append/readback) is `S8.6`, **NOT an S1 blocker** — an S3 config is no longer required to close S1 (§4's S1.2A source Adapter is the S1 scope). `S1_ENGINEERING_CLOSED_EXTERNAL_WORM_BINDING_PENDING` is therefore superseded; the **only** remaining S1-closure gate is the single out-of-band operator SSHSIG over the target-host execution bundle. When that signature is provided, S1 reaches `S1_CLOSED`.
+- **§6 terminal — REVISED**: the external S3 Object-Lock **effect** (real bind/append/readback) is `S8.6`, **NOT an S1 blocker** — an S3 config is not required to close S1 (§4's S1.2A source Adapter is the S1 scope). `S1_ENGINEERING_CLOSED_EXTERNAL_WORM_BINDING_PENDING` and `BLOCKED_OPERATOR_SIGNING_ACTION` are superseded. The authenticated durable state is now `S1_CLOSURE_AUTHENTICATED_PENDING_MERGE`; it reaches `S1_CLOSED` only after exact-head review, required CI, PR #115 merge, final ledger projection and three-way synchronization.
 
 - **CI**: the `development-agent-governance` job and the change classifier now explicitly run/trigger the target-host effect/apply and external-WORM-sink suites (they do not match `test_agent_governance_*`). Evidence: +38 focused tests; full local `tests/structure/` green (2138 passed, 6 skipped). Design detail: `docs/execution_plan/ai_ml_landing/design/S1.6B-real-target-host-probe.md` §11.
+
+### §8 — Authenticated closure emission (2026-07-24)
+
+The final H_effect is `e6572b96e60ac305e2ff2bedffa1cf148e75aa7a`.
+Linux `trade-core` revalidated the still-fresh, source/schema-identical
+six-class S1.5 receipt
+(`sha256:ab63d9db3682e94be195446e4e4d9a586d1ef327427547d88347d934914b140f`)
+and produced a fresh eight-seam S1.6 target-host effect
+(`sha256:e4efb9bc82f49278c8ab889eadf23f7de4767967aa5d406d9adb87623b1250db`);
+both passed with exact rollback/postcheck and zero residue. The authenticated
+closure digest is
+`sha256:55a1fe393d13baf3b341505be0965d101b4c16972699e22d5c48665b943bad47`.
+The signed bundle and complete causal artifacts are durable under
+`docs/execution_plan/ai_ml_landing/receipts/S1-closure-fix-2026-07-24/`.
+This emission grants none of the nine runtime/trading authorities.
+
+The final adversarial closeout also repaired three load-bearing P1s before this
+emission: generated one-line receipts can no longer exhaust the supposedly
+bounded direct-caller Context preview (full-match digest remains binding), and
+the target-host run driver now refuses any caller-supplied source head that is
+not the exact clean worktree `HEAD`. It also records `evaluated_at` only after
+trusted finalization completes, so the durable result cannot predate Context
+source validity. Immediate trusted-host validation and receipt-time historical
+replay both pass.

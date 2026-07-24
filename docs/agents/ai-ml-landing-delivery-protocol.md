@@ -169,10 +169,14 @@ No ML5/ML6 source, schema, runtime or effect implementation begins before S0.3.
   **Amendment A1 §7 (post-merge, PR #114 findings)**: the closure now binds the
   OPS postcheck to the verifier's own governed `command_capture_v2` (three-way
   digest cross-check + clean residue + distinct role/node/process/capture), and
-  the applier passes authorization via an isolated `python3 -I` child over a
+  the applier passes authorization via an isolated `python3 -E` child over a
   one-time pipe (never the parent process env). The external S3 Object-Lock
-  effect is `S8.6`, not an S1 blocker; the only remaining S1-closure gate is the
-  out-of-band operator SSHSIG.
+  effect is `S8.6`, not an S1 blocker. On 2026-07-24 the out-of-band operator
+  SSHSIG was issued and independently verified at H_effect `e6572b96e`; both
+  immediate trusted-host validation and receipt-time historical replay passed; the
+  durable state is `S1_CLOSURE_AUTHENTICATED_PENDING_MERGE`. S1 becomes
+  `S1_CLOSED` only after exact-head review, required CI, PR #115 merge, final
+  ledger projection and three-way synchronization.
 
 S1.1-S1.4 may overlap only where path manifests are disjoint. S1.5 depends on
 their accepted contracts; S1.6 depends on S1.4/S1.5. `EFFECT_SEAMS_READY`

@@ -1,0 +1,300 @@
+{
+  "accounting_boundary": {
+    "controller_overhead_status": "unavailable",
+    "excluded_from_token_lower_bounds": [
+      "model output, cache, and tool usage",
+      "PM/controller dispatch and synthesis",
+      "workflow admission, hashing, and record construction"
+    ],
+    "usage_measurement_status": "unavailable"
+  },
+  "admitted_planned_input_tokens_lower_bound": 0,
+  "admitted_tasks": [
+    {
+      "admitted_input_tokens_lower_bound": 0,
+      "base_prompt_digest": "sha256:c12f84449f6b1d1a8fff7509cf36ad218a062b1a4d409a1fe29ede2c2744a068",
+      "compiler_estimated_input_tokens": 0,
+      "context_artifact_digest": "sha256:2fc6887ca0ade3b516c08f9d4534e7647fcdbc73abbf91f41dd0a74750aa40d2",
+      "description_digest": "sha256:528d234ec7d2317413eb8f1a44859e18210931f9a09057553166db98eae8f5cc",
+      "dirty_scope": [
+        "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_host.py",
+        "helper_scripts/maintenance_scripts/agent_governance_closure.py",
+        "helper_scripts/maintenance_scripts/agent_governance_context.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_effects.py",
+        "helper_scripts/maintenance_scripts/agent_governance_trust.py",
+        "helper_scripts/maintenance_scripts/aiml_s1_closure_target_host_run.py",
+        "helper_scripts/maintenance_scripts/aiml_s1_trusted_finalize.py"
+      ],
+      "dirty_scope_digest": "sha256:6bf0034525e798fb70d019e521d08aeb4eac4b18d0f84ba4c75be1dd4618af94",
+      "focus": "",
+      "focus_digest": "sha256:12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+      "native_agent": "PA-investigator",
+      "node_class": "verification",
+      "node_id": "pa_design",
+      "payload_kind": "design_fragment_v1",
+      "permission": "read_only",
+      "requested": {
+        "effort": null,
+        "isolation": null,
+        "logical_role": "PA",
+        "model": null,
+        "native_binding": {
+          "logical_role": "PA",
+          "native_agent": "PA-investigator",
+          "node_class": "verification",
+          "permission": "read_only"
+        },
+        "node_class": "verification",
+        "permission": "read_only",
+        "platform": "claude_saved_workflow",
+        "platform_requested_agent": "PA-investigator"
+      },
+      "requires": [],
+      "role": "PA",
+      "task_contract_digest": "sha256:7d4b875088e05256ec517748f73d7c9c70dfe165dacd2e87b869a9ab1f5e12fd"
+    },
+    {
+      "admitted_input_tokens_lower_bound": 0,
+      "base_prompt_digest": "sha256:f6616139ba2f265f6e6ab12dfbf41a334e89dbb8db7d7ba6a0f99e80368462d0",
+      "compiler_estimated_input_tokens": 0,
+      "context_artifact_digest": "sha256:2fc6887ca0ade3b516c08f9d4534e7647fcdbc73abbf91f41dd0a74750aa40d2",
+      "description_digest": "sha256:3abf5b940ea980f405def51b8aea2da7ca835c832cb8fa7625cdd4eb8661a9a8",
+      "dirty_scope": [
+        "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_host.py",
+        "helper_scripts/maintenance_scripts/agent_governance_closure.py",
+        "helper_scripts/maintenance_scripts/agent_governance_context.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_effects.py",
+        "helper_scripts/maintenance_scripts/agent_governance_trust.py",
+        "helper_scripts/maintenance_scripts/aiml_s1_closure_target_host_run.py",
+        "helper_scripts/maintenance_scripts/aiml_s1_trusted_finalize.py"
+      ],
+      "dirty_scope_digest": "sha256:6bf0034525e798fb70d019e521d08aeb4eac4b18d0f84ba4c75be1dd4618af94",
+      "focus": "",
+      "focus_digest": "sha256:12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+      "native_agent": "CC",
+      "node_class": "verification",
+      "node_id": "constitutional_gate",
+      "payload_kind": "gate_fragment_v1",
+      "permission": "read_only",
+      "requested": {
+        "effort": null,
+        "isolation": null,
+        "logical_role": "CC",
+        "model": null,
+        "native_binding": {
+          "logical_role": "CC",
+          "native_agent": "CC",
+          "node_class": "verification",
+          "permission": "read_only"
+        },
+        "node_class": "verification",
+        "permission": "read_only",
+        "platform": "claude_saved_workflow",
+        "platform_requested_agent": "CC"
+      },
+      "requires": [
+        "pa_design"
+      ],
+      "role": "CC",
+      "task_contract_digest": "sha256:7d4b875088e05256ec517748f73d7c9c70dfe165dacd2e87b869a9ab1f5e12fd"
+    },
+    {
+      "admitted_input_tokens_lower_bound": 0,
+      "base_prompt_digest": "sha256:4229c68487d55b1425078a422d82558bc49dde43687d3e05964170d077fef254",
+      "compiler_estimated_input_tokens": 0,
+      "context_artifact_digest": "sha256:2fc6887ca0ade3b516c08f9d4534e7647fcdbc73abbf91f41dd0a74750aa40d2",
+      "description_digest": "sha256:acaa2a78edc7269629786ba85b997fc3684aac5e2daf6d652771fc8582c8625c",
+      "dirty_scope": [
+        "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_host.py",
+        "helper_scripts/maintenance_scripts/agent_governance_closure.py",
+        "helper_scripts/maintenance_scripts/agent_governance_context.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_effects.py",
+        "helper_scripts/maintenance_scripts/agent_governance_trust.py",
+        "helper_scripts/maintenance_scripts/aiml_s1_closure_target_host_run.py",
+        "helper_scripts/maintenance_scripts/aiml_s1_trusted_finalize.py"
+      ],
+      "dirty_scope_digest": "sha256:6bf0034525e798fb70d019e521d08aeb4eac4b18d0f84ba4c75be1dd4618af94",
+      "focus": "",
+      "focus_digest": "sha256:12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+      "native_agent": "E3",
+      "node_class": "verification",
+      "node_id": "security_gate",
+      "payload_kind": "gate_fragment_v1",
+      "permission": "read_only",
+      "requested": {
+        "effort": null,
+        "isolation": null,
+        "logical_role": "E3",
+        "model": null,
+        "native_binding": {
+          "logical_role": "E3",
+          "native_agent": "E3",
+          "node_class": "verification",
+          "permission": "read_only"
+        },
+        "node_class": "verification",
+        "permission": "read_only",
+        "platform": "claude_saved_workflow",
+        "platform_requested_agent": "E3"
+      },
+      "requires": [
+        "pa_design"
+      ],
+      "role": "E3",
+      "task_contract_digest": "sha256:7d4b875088e05256ec517748f73d7c9c70dfe165dacd2e87b869a9ab1f5e12fd"
+    },
+    {
+      "admitted_input_tokens_lower_bound": 0,
+      "base_prompt_digest": "sha256:368943373614007af55f53fae51b14e4b113e3e36faf68742a0e5021d7a3a338",
+      "compiler_estimated_input_tokens": 0,
+      "context_artifact_digest": "sha256:2fc6887ca0ade3b516c08f9d4534e7647fcdbc73abbf91f41dd0a74750aa40d2",
+      "description_digest": "sha256:82aaa820aa296f4ea9446629766853bba57e5fe608b3119941bfda86ad65b4dc",
+      "dirty_scope": [
+        "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_host.py",
+        "helper_scripts/maintenance_scripts/agent_governance_closure.py",
+        "helper_scripts/maintenance_scripts/agent_governance_context.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_effects.py",
+        "helper_scripts/maintenance_scripts/agent_governance_trust.py",
+        "helper_scripts/maintenance_scripts/aiml_s1_closure_target_host_run.py",
+        "helper_scripts/maintenance_scripts/aiml_s1_trusted_finalize.py"
+      ],
+      "dirty_scope_digest": "sha256:6bf0034525e798fb70d019e521d08aeb4eac4b18d0f84ba4c75be1dd4618af94",
+      "focus": "",
+      "focus_digest": "sha256:12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+      "native_agent": "OPS",
+      "node_class": "verification",
+      "node_id": "ops_preflight",
+      "payload_kind": "operation_review_fragment_v1",
+      "permission": "read_only",
+      "requested": {
+        "effort": null,
+        "isolation": null,
+        "logical_role": "OPS",
+        "model": null,
+        "native_binding": {
+          "logical_role": "OPS",
+          "native_agent": "OPS",
+          "node_class": "verification",
+          "permission": "read_only"
+        },
+        "node_class": "verification",
+        "permission": "read_only",
+        "platform": "claude_saved_workflow",
+        "platform_requested_agent": "OPS"
+      },
+      "requires": [
+        "constitutional_gate",
+        "pa_design",
+        "security_gate"
+      ],
+      "role": "OPS",
+      "task_contract_digest": "sha256:7d4b875088e05256ec517748f73d7c9c70dfe165dacd2e87b869a9ab1f5e12fd"
+    },
+    {
+      "admitted_input_tokens_lower_bound": 0,
+      "base_prompt_digest": "sha256:1c03099c30c351b661fb6e5ad3c964cf600716bf3bbc25ddc1e1b84df1e4d071",
+      "compiler_estimated_input_tokens": 0,
+      "context_artifact_digest": "sha256:2fc6887ca0ade3b516c08f9d4534e7647fcdbc73abbf91f41dd0a74750aa40d2",
+      "description_digest": "sha256:cd7338b4f5b0b28080b57c9c55b9a0bac89220e7e66fae40c1f0cda1598fd174",
+      "dirty_scope": [
+        "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_host.py",
+        "helper_scripts/maintenance_scripts/agent_governance_closure.py",
+        "helper_scripts/maintenance_scripts/agent_governance_context.py",
+        "helper_scripts/maintenance_scripts/agent_governance_target_host_effects.py",
+        "helper_scripts/maintenance_scripts/agent_governance_trust.py",
+        "helper_scripts/maintenance_scripts/aiml_s1_closure_target_host_run.py",
+        "helper_scripts/maintenance_scripts/aiml_s1_trusted_finalize.py"
+      ],
+      "dirty_scope_digest": "sha256:6bf0034525e798fb70d019e521d08aeb4eac4b18d0f84ba4c75be1dd4618af94",
+      "focus": "",
+      "focus_digest": "sha256:12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+      "native_agent": "OPS",
+      "node_class": "verification",
+      "node_id": "ops_postcheck",
+      "payload_kind": "operation_review_fragment_v1",
+      "permission": "read_only",
+      "requested": {
+        "effort": null,
+        "isolation": null,
+        "logical_role": "OPS",
+        "model": null,
+        "native_binding": {
+          "logical_role": "OPS",
+          "native_agent": "OPS",
+          "node_class": "verification",
+          "permission": "read_only"
+        },
+        "node_class": "verification",
+        "permission": "read_only",
+        "platform": "claude_saved_workflow",
+        "platform_requested_agent": "OPS"
+      },
+      "requires": [
+        "ops_preflight"
+      ],
+      "role": "OPS",
+      "task_contract_digest": "sha256:7d4b875088e05256ec517748f73d7c9c70dfe165dacd2e87b869a9ab1f5e12fd"
+    }
+  ],
+  "budget_authority": {
+    "admitted_caps": {
+      "max_call_attempts": 14,
+      "max_context_tokens_per_call": 42000,
+      "max_prompt_utf8_bytes_per_call": 167996,
+      "max_unique_nodes": 12,
+      "max_workflow_planned_input_tokens": 588000,
+      "retry_budget": 2
+    },
+    "authority_canonical": "{\"accounting_basis\":\"utf8_bytes_div4_planned_lower_bound_v1\",\"envelope\":\"complex\",\"max_call_attempts\":14,\"max_context_tokens_per_call\":42000,\"max_prompt_utf8_bytes_per_call\":167996,\"max_unique_nodes\":12,\"max_workflow_planned_input_tokens\":588000,\"retry_budget\":2,\"schema_version\":\"context_budget_authority_v1\"}",
+    "authority_digest": "sha256:300c1d04a7fbd8b395ce73d0d926cbfba8fdfabdcb1eecd88e07c69317ac5037"
+  },
+  "call_manifest_digest": "sha256:ca7ea83cbbbe4968341027d89d918d27a70dfd2f1362065220dc5444d8904e08",
+  "call_record_digests": [
+    "sha256:b4c6fefb013e9ace8150f187e5033d85122db789e77676349e3626ff392b3f15",
+    "sha256:a753add69f1c7c0d93e477c99f3c087d0ed87cabaa52d4df5cedbecc2426b7d3",
+    "sha256:aeade7530dccdba5a1677b27a7b12bd762d7cede40f3b1cfd6e09abc3ee6f3aa",
+    "sha256:385ec855dfc6d756d603d75917192a766538715f7a5c71c2738df63371e52c54",
+    "sha256:1a82a24d698ffce387be3bf736753370bd8dbe186e0ed4e5d862003cce6e2870"
+  ],
+  "compiler_planned_input_tokens_lower_bound": 0,
+  "context_artifact_digests": {
+    "constitutional_gate": "sha256:2fc6887ca0ade3b516c08f9d4534e7647fcdbc73abbf91f41dd0a74750aa40d2",
+    "ops_postcheck": "sha256:2fc6887ca0ade3b516c08f9d4534e7647fcdbc73abbf91f41dd0a74750aa40d2",
+    "ops_preflight": "sha256:2fc6887ca0ade3b516c08f9d4534e7647fcdbc73abbf91f41dd0a74750aa40d2",
+    "pa_design": "sha256:2fc6887ca0ade3b516c08f9d4534e7647fcdbc73abbf91f41dd0a74750aa40d2",
+    "security_gate": "sha256:2fc6887ca0ade3b516c08f9d4534e7647fcdbc73abbf91f41dd0a74750aa40d2"
+  },
+  "coverage_debt": [],
+  "dag_digest": "sha256:402288f0e54ded307bf8f98e0caf632a89502a38239a69421e79646640821152",
+  "execution_waves": [
+    [
+      "pa_design"
+    ],
+    [
+      "constitutional_gate",
+      "security_gate"
+    ],
+    [
+      "ops_preflight"
+    ],
+    [
+      "ops_postcheck"
+    ]
+  ],
+  "final_null_node_count": 0,
+  "first_attempt_call_count": 5,
+  "null_call_count": 0,
+  "record_digest": "sha256:16aac28ec8b43b3c5dbe57cc58371d7b9605aed44410a46ec513f49c29e7e70f",
+  "result_fragment_digests": {
+    "constitutional_gate": "sha256:0073f5be9a61fb617db2c65c1a7766b14cd0f28753ac42731e77fd023afe0009",
+    "ops_postcheck": "sha256:5d64de671965499bb37a4f0493b0280feba83a465287071f45df868244288ba7",
+    "ops_preflight": "sha256:3f5550d4dc287e1f2a67b52ce97ca355fd95130d0428e2ce70f743fe2aed9202",
+    "pa_design": "sha256:584d7d93398e679dc049046593880299abec4da8a79e24ea94042fd4f9a0daf0",
+    "security_gate": "sha256:3556ba8b11f8f23a159d3f99f7e8b981fa0ea218d699b16df8d1e576653a00d2"
+  },
+  "retry_call_count": 0,
+  "scheduled_call_admitted_input_tokens_lower_bound": 0,
+  "scheduled_call_compiler_input_tokens_lower_bound": 0,
+  "schema_version": "workflow_wave_record_v1",
+  "workflow_contract_digest": "sha256:7af10f5c8a716ab8299436d30214ec39010b1be03490759d01c9d18f5a160bc5"
+}

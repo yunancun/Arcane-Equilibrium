@@ -531,6 +531,10 @@ S1.6B already separate disposable-real source seams from real effects.
 
 ## 10. Terminal-state analysis (achievable now vs operator-gated)
 
+> **Historical design analysis.** The operator and target-host gates described
+> below were completed on 2026-07-24. Section 14 is the authoritative current
+> state and supersedes this section's terminal wording.
+
 **Achievable source-side now (Wave A)**:
 - Additive `aiml_landing_session_attempt_v1` schema + sibling validator.
 - Central-validator structure-only registration of the target-host receipt
@@ -568,6 +572,10 @@ and live attestation explicitly pending — never a forced or faked PASS.
 ---
 
 ## 11. Open questions for PM (residual ambiguity)
+
+> **Resolved.** Section 13 records the build-time decisions and section 14
+> records the final runtime/signing resolution. These questions are retained
+> only as design history.
 
 1. **Effect-receipt shape**: does the closure evidence carry the typed
    `learning_runtime_choice_receipt_target_host_v1` *embedded inside* an
@@ -607,3 +615,43 @@ CC verdict: constitutionally sound to build; frozen S0.3 surface independently c
 - **C8 (E2 P2-6): housekeeping.** Add `agent_governance_target_host_effects.py` (+ any new module) to `helper_scripts/SCRIPT_INDEX.md`; new module is glob-subject to the ≤2000-line cap; split/rename the flipped `test_target_host_receipt_is_not_registered_in_central_validator` (post-`:640`-flip its name is misleading).
 
 Everything else in the design (frozen-surface additivity, dispatch separation, central-gate structure-only, two-notion adapter-id, registry/route/closure wiring, SSHSIG S1 domain separation, additive attempt schema, WORM S1.2A/S8.6 split, terminal `S1_ENGINEERING_CLOSED_EXTERNAL_WORM_BINDING_PENDING`) is confirmed SOUND by CC + E2 and stands.
+
+---
+
+## 14. Final runtime and signing resolution (AUTHORITATIVE, 2026-07-24)
+
+This section supersedes the terminal/open-question wording in §§6, 10, 11 and
+the last sentence of §13.
+
+- Final H_effect:
+  `e6572b96e60ac305e2ff2bedffa1cf148e75aa7a`.
+- The real executor is an intent-bounded `python3 -E` child. It ignores
+  `PYTHON*`/`PYTHONPATH` injection without excluding the target host's
+  user-site `psycopg2`; the parent never opens the probe gate.
+- Linux `trade-core` revalidated the still-fresh, source/schema-identical
+  six-class S1.5 receipt
+  (`sha256:ab63d9db3682e94be195446e4e4d9a586d1ef327427547d88347d934914b140f`)
+  and emitted a fresh eight-seam S1.6 effect
+  (`sha256:e4efb9bc82f49278c8ab889eadf23f7de4767967aa5d406d9adb87623b1250db`),
+  with `binding=BINDING`, exact rollback/postcheck, and zero residue.
+- The S1 signer reuses the adopted S0.3 trust root with identity
+  `aiml-s1-target-host-operator-v1` and namespace
+  `arcane-equilibrium-aiml-s1-target-host`. Operator fingerprint
+  `SHA256:uGJ9veN7PoE6BBgfsSP2aiMndrwgbt7o/7/YfdzNzCQ` signed the canonical bundle;
+  an independent `ssh-keygen -Y verify` passed.
+- Closure digest:
+  `sha256:55a1fe393d13baf3b341505be0965d101b4c16972699e22d5c48665b943bad47`.
+  All artifacts are durable in
+  `docs/execution_plan/ai_ml_landing/receipts/S1-closure-fix-2026-07-24/`.
+- Current state: `S1_CLOSURE_AUTHENTICATED_PENDING_MERGE`. The remaining
+  publication gates are exact-head Codex review, required CI, PR #115 merge,
+  final `S1_CLOSED` ledger projection, and three-way synchronization.
+- External Object-Lock execution remains S8.6 and is not an S1 blocker. All
+  nine authority grants remain false.
+- Final adversarial closure repaired three additional P1s: inline caller
+  previews are byte-bounded while the complete match manifest remains
+  digest-bound, and the target-host driver binds `--source-head` to the exact
+  clean worktree `HEAD` before any effect. The finalization result now captures
+  `evaluated_at` after trusted evaluation, so it cannot predate a Context
+  source's validity window; immediate and receipt-time historical replay both
+  pass.

@@ -1,9 +1,45 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-07-23（AI/ML S1 formal-closure PR #114 三 findings 修復 source-complete；待帶外 operator SSHSIG）
+> 最後更新：2026-07-24（AI/ML S1 closure 已完成 Linux effect、operator SSHSIG 與 trusted finalization；待 PR #115 exact-head merge）
 
 ---
+
+## AI/ML S1 Authenticated Closure Pending Merge — v847（2026-07-24）
+
+PR #115 的 forge-resistance 修復後，以最終 H_effect
+`e6572b96e60ac305e2ff2bedffa1cf148e75aa7a` 在 Linux `trade-core` 完成新一輪
+真實 effect：S1.5 六類 component receipt 的 source/schema 與有效期均重新驗證
+（apply→exact rollback→independent postcheck，receipt
+`sha256:ab63d9db…140f`），S1.6 八個 target-host seam 全通過
+（`binding=BINDING`、零殘留、effect `sha256:e4efb9bc…50db`），production
+PostgreSQL `:5432` 未觸碰。
+
+最終對抗 regression 另抓出並修復三個 P1：generated receipt 的單一超長
+JSON 行可繞過 count-only caller-preview 界線，令標準 Context budget 被耗盡
+（`43735ff3d` 改為逐 preview byte-bound，同時保留完整 manifest/text digest）；
+target-host driver 接受 caller `--source-head` 卻未核對實際 worktree
+（`102b1bb85` 現強制 exact lowercase 40-hex == clean `HEAD`，並有 mismatch／
+tracked-dirty／untracked-dirty 負測試）；finalizer 將 run 起點誤寫成
+`evaluated_at`，可能早於後建 Context source 的 `valid_from`，令已 PASS 的 closure
+無法按 receipt 時間歷史重放（`e6572b96e` 改為 trusted finalization 完成後才捕獲
+receipt timestamp，並加入順序回歸測試）。三項修復後才以 final H_effect 重跑
+effect 與簽發；即時 trusted-host 重驗和 receipt-time 歷史重放均 PASS。
+
+最終 closure packet 綁定真實 PA/CC/E3 provenance、分離的 OPS
+preflight/postcheck governed captures、workflow DAG/wave 與兩份 effect
+receipt。Operator 已授權目前 SSH agent 中 fingerprint
+`SHA256:uGJ9veN7PoE6BBgfsSP2aiMndrwgbt7o/7/YfdzNzCQ`，以沿用的 S0.3
+trust root、S1 domain-separated identity/namespace 簽發 canonical bundle；
+獨立 `ssh-keygen -Y verify` PASS。closure digest 為
+`sha256:55a1fe39…ad47`，finalization digest 為 `sha256:95ff22cc…bd55`，
+errors 為空。
+
+當前狀態是 `S1_CLOSURE_AUTHENTICATED_PENDING_MERGE`：尚需 final
+artifact/docs exact-head Codex review、required CI、PR #115 精確合併、最終
+`S1_CLOSED` ledger 投影及三端同步。external S3 Object-Lock effect 仍屬
+S8.6；九項 authority 全 false，沒有 production runtime／PG／deploy／
+broker／order／live authority。
 
 ## AI/ML S1 Formal-Closure PR #114 Findings Fixed — v845（2026-07-23）
 

@@ -1,0 +1,20 @@
+{
+  "closure_digest": "sha256:55a1fe393d13baf3b341505be0965d101b4c16972699e22d5c48665b943bad47",
+  "context_artifact_digest": "sha256:2fc6887ca0ade3b516c08f9d4534e7647fcdbc73abbf91f41dd0a74750aa40d2",
+  "dag_digest": "sha256:402288f0e54ded307bf8f98e0caf632a89502a38239a69421e79646640821152",
+  "effect_receipt_digest": "sha256:e4efb9bc82f49278c8ab889eadf23f7de4767967aa5d406d9adb87623b1250db",
+  "effect_seams_ready_receipt_digest": "sha256:ab63d9db3682e94be195446e4e4d9a586d1ef327427547d88347d934914b140f",
+  "errors": [],
+  "evaluated_at": "2026-07-24T01:05:44.558761Z",
+  "landing_attempt_digest": "sha256:6b579c935c50993e3e3cdd17886a5fc1eca1ac414181947ce0040cce91c316ed",
+  "merge_state": "PENDING_EXACT_HEAD_REVIEW_AND_MERGE",
+  "nine_authorities_false": true,
+  "review_provenance_digest": "sha256:24c8c5af42bdda73338afeb48bdd9995ea26d2c35184f1f464d9613c4fe158ae",
+  "schema_version": "aiml_s1_closure_finalization_result_v1",
+  "self_digest": "sha256:95ff22cc61f7eab7482762bbb34bc75ab7ca9f53268405b1383edc3c7ca0bd55",
+  "signature_sha256": "sha256:6c65b2e4b0bc83db2674192f688250c939849a60baa5595a53a4390ab69d8f1b",
+  "status": "S1_CLOSURE_AUTHENTICATED_PENDING_MERGE",
+  "task_contract_digest": "sha256:7d4b875088e05256ec517748f73d7c9c70dfe165dacd2e87b869a9ab1f5e12fd",
+  "trusted_bundle_digest": "sha256:20b5d11b05b7c4b4ede438d914cb6a52060bb0aa9c50557c2288256d5e5ddc9f",
+  "workflow_wave_record_digest": "sha256:16aac28ec8b43b3c5dbe57cc58371d7b9605aed44410a46ec513f49c29e7e70f"
+}
