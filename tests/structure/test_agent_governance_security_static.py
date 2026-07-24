@@ -165,7 +165,7 @@ def test_ci_runs_the_cheap_development_agent_governance_gate() -> None:
 
     for required in (
         "runs-on: ubuntu-latest",
-        "timeout-minutes: 10",
+        "timeout-minutes: 20",
         "python3 helper_scripts/maintenance_scripts/agent_governance.py validate",
         "python3 helper_scripts/maintenance_scripts/agent_governance.py render --check",
         "tests/structure/test_development_agent_governance.py",
