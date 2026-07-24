@@ -624,15 +624,15 @@ This section supersedes the terminal/open-question wording in §§6, 10, 11 and
 the last sentence of §13.
 
 - Final H_effect:
-  `45a854fa6638aa0be677a2b705f42fe8f417ac95`.
+  `6e1ea957af35544a844f704978366d11aa6c2364`.
 - The real executor is an intent-bounded `python3 -E` child. It ignores
   `PYTHON*`/`PYTHONPATH` injection without excluding the target host's
   user-site `psycopg2`; the parent never opens the probe gate.
 - Linux `trade-core` revalidated the still-fresh, source/schema-identical
   six-class S1.5 receipt
-  (`sha256:ab63d9db3682e94be195446e4e4d9a586d1ef327427547d88347d934914b140f`)
+  (`sha256:19498ba4303df77eb102e259526ec04a19c665673716280818ec5d0103b60a37`)
   and emitted a fresh eight-seam S1.6 effect
-  (`sha256:9f8f40b15598822544f0dd8618429ae3c6c2ac2b153d8b3acd70094b73fffd99`),
+  (`sha256:0a0d050b8b555b1f8d627937c52a91a7bb0c132364fa8f78b0ccd640b64a89bb`),
   with `binding=BINDING`, exact rollback/postcheck, and zero residue.
 - The S1 signer reuses the adopted S0.3 trust root with identity
   `aiml-s1-target-host-operator-v1` and namespace
@@ -640,20 +640,22 @@ the last sentence of §13.
   `SHA256:uGJ9veN7PoE6BBgfsSP2aiMndrwgbt7o/7/YfdzNzCQ` signed the canonical bundle;
   an independent `ssh-keygen -Y verify` passed.
 - Closure digest:
-  `sha256:eeef47cca1bcbfd44fb917759539b6afd06610669ec65a3be9e30b27a1f46de1`.
+  `sha256:e110598b83123f60881e982156913944de37bdf1bab1fdaabdc31c2b567e3dbc`.
   All artifacts are durable in
   `docs/execution_plan/ai_ml_landing/receipts/S1-closure-fix-2026-07-24/`.
-- Current state: `S1_CLOSURE_AUTHENTICATED_PENDING_MERGE`. The remaining
-  publication gates are exact-head Codex review, required CI, PR #115 merge,
-  final `S1_CLOSED` ledger projection, and three-way synchronization.
+- Current state: **`S1_CLOSED`**. Direct Codex reviewed exact PR #115 head
+  `da8e54148a60fc7be38fe5844cf85b28b293a044` with P0/P1/P2=`0/0/0`;
+  every exact-head CI/CodeQL job passed, and PR #115 merged with exact-head
+  matching as `22876b16d3b00fcaafa4f2f46ae02b1c08c60b3b`.
 - External Object-Lock execution remains S8.6 and is not an S1 blocker. All
   nine authority grants remain false.
-- Final adversarial closure repaired four additional P1s: inline caller
-  previews are byte-bounded while the complete match manifest remains
-  digest-bound, and the target-host driver binds `--source-head` to the exact
-  clean worktree `HEAD` before any effect. The finalization result now captures
-  `evaluated_at` after trusted evaluation, so it cannot predate a Context
-  source's validity window; immediate and receipt-time historical replay both
-  pass. The finalizer regression now matches the required governance CI glob,
-  and the job's 10-minute budget prevents a mechanically green full gate from
-  being cancelled at the former five-minute ceiling.
+- Final adversarial closure repaired the earlier Context/source-head/replay/CI
+  P1s plus five exact-head forge paths: the child gate requires the
+  source-pinned operator SSHSIG; preflight/postcheck are exact signed semantic
+  captures; residue is observed inside the verifier capture; freshness uses
+  signed bundle `issued_at`; and mandatory reviewers cite the authenticated
+  wave that owns each fragment. Exact-head Linux CI then exposed one final
+  publication blocker: the large inline-Context harness exceeded `ARG_MAX`
+  through `node -e`. Commit `6e1ea957a` feeds it through stdin and raises the
+  governance ceiling from 10 to 20 minutes; the exact-head job passed in
+  8m27s.
