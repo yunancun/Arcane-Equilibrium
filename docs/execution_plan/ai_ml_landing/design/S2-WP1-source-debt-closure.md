@@ -90,9 +90,19 @@ identity**, never in place:
 - The launcher contract: env `ALR_EXPECTED_LEARNING_RUNTIME_DIGEST_V2` /
   `--expected-learning-runtime-digest-v2` (the systemd unit S2.4 installs sets it).
   When set, `main()` resolves the pinned digest and, before any DB work, fails closed
-  (`FAIL_CLOSED_UNRESOLVED` / `FAIL_CLOSED_PIN_MISMATCH`, exit 1, `run_event_consumer`
-  never entered) unless the operator pin equals the reproduced committed identity
-  (`PASS`). Absent the env var the guard is `DISABLED` (backward compatible).
+  (`FAIL_CLOSED_UNRESOLVED` / `FAIL_CLOSED_PIN_MISMATCH` / `FAIL_CLOSED_ERROR` for an
+  unexpected exception, exit 1, `run_event_consumer` never entered) unless the operator
+  pin equals the reproduced committed identity (`PASS`). Absent the env var the guard is
+  `DISABLED` (backward compatible). The `source_value_guard` sub-object of the
+  `alr_event_consumer_result_v2` stdout envelope carries its own
+  `schema_version="source_value_guard_v1"`.
+
+Source-truth note (WP4/WP5 consumers): `validate_aiml_artifact` on the S2.3 and v2
+source-compat receipts is INTERNAL-CONSISTENCY + STRUCTURE only (offline-structure); a
+pass is not proof the receipt matches the real repo. Source-truth binding is (i) the
+launcher's recompute-from-checkout (`try_build_learning_runtime_manifest_v2`) + operator
+pin, and (ii) the `learning-runtime-sealed-build` CI job's `verify_lock_closure(lock_path=)`
+re-derivation. Both the validator delegation branches and the resolver docstring state this.
 
 Scope note: the guard is a **launcher-level** proof deliberately kept orthogonal to
 the frozen v1 `_preflight_source_compatibility` / `evaluate_compatibility` path

@@ -1908,6 +1908,13 @@ def validate_aiml_artifact(
         # (mirror S2.3 CLI + offline 測試對這兩類 receipt 的既有處置);SSOT 內部仍驗 ttl 範圍與
         # observed<expires 等結構性時間不變量,只是不做 wall-clock 窗判。亦刻意不傳 lock_path 與配對
         # sealed(不重跑 lock 封閉 re-derivation、不做 F2c 配對):同屬 CI job 的 offline-install 證明。
+        #
+        # ⚠ SOURCE-TRUTH 邊界(WP4/WP5 消費者請注意):此委派(及下方 source_compatibility_receipt_v2
+        # 分支)只證 receipt 的「內部自洽 + 結構」(offline-structure 模式);validate_aiml_artifact
+        # 通過「不」等於證明 receipt 與真 repo/真 lock 相符。build-identity receipt 的 source-truth
+        # 綁定在別處:(i) launcher 端的 recompute-from-checkout(alr_event_consumer.
+        # try_build_learning_runtime_manifest_v2)+ operator pin,與 (ii) `learning-runtime-sealed-build`
+        # CI job 內 verify_lock_closure(lock_path=) 對真 lock 的 re-derivation。
         import agent_governance_sealed_build as _sealed_build
         if schema_version == "sealed_build_receipt_v1":
             errors.extend(
@@ -1922,6 +1929,9 @@ def validate_aiml_artifact(
         # 自身 schema_version 驅動 self_digest 重算,且 training_contract.digest 綁定整個
         # components(含 dependency_lock 物件)→ 偽造內層 dependency_lock 而只重封外層 self_digest
         # 必被抓。另補 v2 專屬 dependency_lock 物件形狀檢查(spec/lock 兩子 digest)。
+        # ⚠ 同上 SOURCE-TRUTH 邊界:此為 internal-consistency + structure 驗,非 source-truth——
+        # dependency_lock 的 spec/lock 子 digest 是內嵌值,離線閘無法重算真檔;真檔綁定在 launcher
+        # recompute-from-checkout 與 sealed-build CI job 的 verify_lock_closure。
         errors.extend(_source_compatibility_receipt_errors(artifact))
         errors.extend(_source_compatibility_receipt_v2_dependency_lock_errors(artifact))
     return errors

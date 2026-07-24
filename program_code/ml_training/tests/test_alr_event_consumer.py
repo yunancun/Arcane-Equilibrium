@@ -2109,7 +2109,11 @@ def test_main_value_guard_disabled_by_default(
     monkeypatch.delenv("ALR_EXPECTED_LEARNING_RUNTIME_DIGEST_V2", raising=False)
     assert consumer.main(_main_args()) == 0
     output = json.loads(capsys.readouterr().out)
-    assert output["source_value_guard"] == {"status": "DISABLED", "learning_runtime_digest_v2": None}
+    assert output["source_value_guard"] == {
+        "schema_version": "source_value_guard_v1",
+        "status": "DISABLED",
+        "learning_runtime_digest_v2": None,
+    }
 
 
 def test_main_value_guard_pass_when_pin_matches(
@@ -2119,7 +2123,11 @@ def test_main_value_guard_pass_when_pin_matches(
     monkeypatch.setattr(consumer, "resolve_pinned_learning_runtime_digest", lambda *a, **k: _V2_PIN)
     assert consumer.main(_main_args(**{"--expected-learning-runtime-digest-v2": _V2_PIN})) == 0
     output = json.loads(capsys.readouterr().out)
-    assert output["source_value_guard"] == {"status": "PASS", "learning_runtime_digest_v2": _V2_PIN}
+    assert output["source_value_guard"] == {
+        "schema_version": "source_value_guard_v1",
+        "status": "PASS",
+        "learning_runtime_digest_v2": _V2_PIN,
+    }
 
 
 def test_main_value_guard_fail_closed_on_pin_mismatch(
@@ -2145,4 +2153,28 @@ def test_main_value_guard_fail_closed_when_unresolved(
     assert consumer.main(_main_args(**{"--expected-learning-runtime-digest-v2": _V2_PIN})) == 1
     output = json.loads(capsys.readouterr().out)
     assert output["source_value_guard"]["status"] == "FAIL_CLOSED_UNRESOLVED"
+    assert output["source_value_guard"]["schema_version"] == "source_value_guard_v1"
+    assert calls == []
+
+
+def test_main_value_guard_fail_closed_on_unexpected_error(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # E3 nit-5:resolver 若拋非預期例外,轉為結構化 FAIL_CLOSED_ERROR + return 1(不外洩 traceback、
+    # 不進 run_event_consumer)。
+    calls: list[bool] = []
+    monkeypatch.setattr(consumer, "run_event_consumer", lambda **kwargs: calls.append(True))
+
+    def _boom(*a: object, **k: object) -> str:
+        raise RuntimeError("unexpected")
+
+    monkeypatch.setattr(consumer, "resolve_pinned_learning_runtime_digest", _boom)
+    assert consumer.main(_main_args(**{"--expected-learning-runtime-digest-v2": _V2_PIN})) == 1
+    output = json.loads(capsys.readouterr().out)
+    assert output["source_value_guard"] == {
+        "schema_version": "source_value_guard_v1",
+        "status": "FAIL_CLOSED_ERROR",
+        "learning_runtime_digest_v2": None,
+    }
+    assert output["result"] is None
     assert calls == []

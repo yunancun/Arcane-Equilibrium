@@ -1460,6 +1460,12 @@ def resolve_pinned_learning_runtime_digest(
     fail-closed:receipt 缺失/非 v2/中央驗證失敗/v2 重算失敗或不符 → 一律回 None,由 spawn
     端(main)據此拒啟(不進 run_event_consumer)。此為「production spawn 把 pinned v2 digest
     帶成 non-None value-guard」的來源函數;systemd unit(S2.4 安裝)以 env 供 operator pin。
+
+    SOURCE-TRUTH 註記:此處呼叫的 ``validate_aiml_artifact(receipt)`` 只證 receipt 內部自洽 +
+    結構(offline-structure),「不」證 receipt 與真 repo 相符。真正把 pinned 身分綁到「當前
+    checkout 真檔」的,是本函數的 ``try_build_learning_runtime_manifest_v2`` recompute 步驟
+    (逐檔重算 learning-code/lock/feature 後與 pin 比對);它與 sealed-build CI job 的
+    ``verify_lock_closure(lock_path=)`` 共同構成 build-identity receipt 的 source-truth 綁定。
     """
     root = repo_root or Path(__file__).resolve().parents[2]
     path = receipt_path or (root / _DEFAULT_COMPATIBILITY_RECEIPT_V2_REL)
@@ -1633,28 +1639,43 @@ def main(argv: list[str] | None = None) -> int:
             }
     # S2-WP1 spawn value-guard:若 operator 供了 v2 pin,先在任何 DB 前 fail-closed 核驗
     # committed v2 身分(完整 + 可由 checkout 重算 + 與 pin 相符);任一不符即拒啟,不進 consumer。
+    # resolve_pinned_learning_runtime_digest 的 recompute-from-checkout 是此 guard 的 source-truth
+    # 依據(其內部 validate_aiml_artifact 只證結構自洽,非真檔相符——見該函數 docstring)。任何非
+    # 預期例外一律轉為 FAIL_CLOSED_ERROR:仍 fail-closed,但輸出結構化 JSON、不外洩 raw traceback。
     v2_pin = arguments.expected_learning_runtime_digest_v2
     source_value_guard: dict[str, Any] = {
+        "schema_version": "source_value_guard_v1",
         "status": "DISABLED",
         "learning_runtime_digest_v2": None,
     }
     if v2_pin is not None:
-        resolved = resolve_pinned_learning_runtime_digest()
-        if resolved is None:
+        try:
+            resolved = resolve_pinned_learning_runtime_digest()
+        except Exception:  # noqa: BLE001 — 拒啟優先於任何錯誤外洩(fail-closed)
             source_value_guard = {
-                "status": "FAIL_CLOSED_UNRESOLVED",
+                "schema_version": "source_value_guard_v1",
+                "status": "FAIL_CLOSED_ERROR",
                 "learning_runtime_digest_v2": None,
             }
-        elif resolved != v2_pin:
-            source_value_guard = {
-                "status": "FAIL_CLOSED_PIN_MISMATCH",
-                "learning_runtime_digest_v2": resolved,
-            }
         else:
-            source_value_guard = {
-                "status": "PASS",
-                "learning_runtime_digest_v2": resolved,
-            }
+            if resolved is None:
+                source_value_guard = {
+                    "schema_version": "source_value_guard_v1",
+                    "status": "FAIL_CLOSED_UNRESOLVED",
+                    "learning_runtime_digest_v2": None,
+                }
+            elif resolved != v2_pin:
+                source_value_guard = {
+                    "schema_version": "source_value_guard_v1",
+                    "status": "FAIL_CLOSED_PIN_MISMATCH",
+                    "learning_runtime_digest_v2": resolved,
+                }
+            else:
+                source_value_guard = {
+                    "schema_version": "source_value_guard_v1",
+                    "status": "PASS",
+                    "learning_runtime_digest_v2": resolved,
+                }
         if source_value_guard["status"] != "PASS":
             print(
                 json.dumps(

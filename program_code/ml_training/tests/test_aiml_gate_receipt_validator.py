@@ -2249,21 +2249,57 @@ def test_central_gate_round_trips_freshly_built_s23_receipts_at_wallclock() -> N
 
 
 def test_central_gate_rejects_sealed_const_false_forgery_regardless_of_clock() -> None:
-    # (b) forgery:翻 load_verified_on_target=True 後只重封外層 self_digest → 中央閘委派拒(與時鐘無關)。
+    # (b) forgery:翻 load_verified_on_target=True 後只重封外層 self_digest → 中央閘拒(與時鐘無關)。
+    # 斷言「精確欄位 + 訊息」,避免未來 refactor 讓它以別的錯誤誤過(E4 nit-1)。
     sealed, _identity = _committed_s23_pair()
     forged = deepcopy(sealed)
     assert forged["native_library_inventory"], "committed lock projects native libs"
     forged["native_library_inventory"][0]["load_verified_on_target"] = True
     forged["self_digest"] = _sb.receipt_digest(forged)
-    assert validate_aiml_artifact(forged, now=_wallclock_now()) != []
-    assert validate_aiml_artifact(forged, now=None) != []
+    for errs in (validate_aiml_artifact(forged, now=_wallclock_now()),
+                 validate_aiml_artifact(forged, now=None)):
+        assert any(
+            "native_library_inventory[0].load_verified_on_target: expected const False" in e
+            for e in errs
+        ), errs
 
 
 def test_central_gate_rejects_identity_production_flag_forgery_regardless_of_clock() -> None:
-    # (b) forgery:翻 production_provisioned.uid=True 後只重封外層 self_digest → 中央閘委派拒。
+    # (b) forgery:翻 production_provisioned.uid=True 後只重封外層 self_digest → 中央閘拒(精確訊息)。
     _sealed, identity = _committed_s23_pair()
     forged = deepcopy(identity)
     forged["production_provisioned"]["uid"] = True
     forged["self_digest"] = _sb.receipt_digest(forged)
-    assert validate_aiml_artifact(forged, now=_wallclock_now()) != []
-    assert validate_aiml_artifact(forged, now=None) != []
+    for errs in (validate_aiml_artifact(forged, now=_wallclock_now()),
+                 validate_aiml_artifact(forged, now=None)):
+        assert any(
+            "production_provisioned.uid: expected const False" in e for e in errs
+        ), errs
+
+
+def test_v2_dependency_lock_shape_guard_rejects_malformed_object() -> None:
+    # E4 nit-2b(直接單測 Python 形狀 guard;schema 通常先攔,此處直呼確保 guard 自身有牙):
+    # dependency_lock 非 {spec_digest, lock_digest} 物件 → 特定訊息;正確形狀 → 無錯。
+    from aiml_gate_receipt_validator import (
+        _source_compatibility_receipt_v2_dependency_lock_errors as _guard,
+    )
+
+    def _artifact(dependency_lock: object) -> dict:
+        return {
+            "learning_runtime_manifest": {
+                "training_contract": {"components": {"dependency_lock": dependency_lock}}
+            }
+        }
+
+    for bad in (
+        None,
+        "x",
+        {"spec_digest": "a"},
+        {"spec_digest": "a", "lock_digest": "b", "extra": "c"},
+    ):
+        errs = _guard(_artifact(bad))
+        assert any(
+            "dependency_lock must be a {spec_digest, lock_digest} object" in e for e in errs
+        ), (bad, errs)
+    ok = _artifact({"spec_digest": "sha256:" + "a" * 64, "lock_digest": "sha256:" + "b" * 64})
+    assert _guard(ok) == []
