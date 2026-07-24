@@ -37,6 +37,7 @@ for candidate in (HELPERS, ML_ROOT):
         sys.path.insert(0, str(candidate))
 
 import agent_governance_alr_quiesce_fence as q  # noqa: E402
+import agent_governance_alr_quiesce_inventory as qi  # noqa: E402
 import agent_governance_pg_observer_bootstrap as observer  # noqa: E402
 import aiml_gate_receipt_validator as validator  # noqa: E402
 
@@ -187,6 +188,7 @@ class SimulatedOwner:
         self.raise_during_window = False       # FIX-W3-1a:fence 後第一個 window host read 拋錯
         self._window_read_should_raise = False
         self.drift_stable_on_start = False     # E4 gap #2:un-fence 成功但 stable identity 漂移
+        self.suppress_session_on_unfence = False  # FIX-C3:un-fence 使 unit 起來但 consumer-session 未回 OPEN
         self.max_batch = "32"                  # --max-batch 值;drift 改此值以漂移 cmdline_digest(仍是合法 ALR cmdline)
         self.session_id = None
         self._admin = _connect(sock)
@@ -231,7 +233,10 @@ class SimulatedOwner:
         self.state = "running"
         self._materialize(self.pid)
         self._acquire_lock()
-        self._record_session("SESSION_STARTED", new=True)
+        if not self.suppress_session_on_unfence:
+            # FIX-C3:預設 un-fence 記一筆 SESSION_STARTED(consumer-session 回 OPEN);抑制時故意不記,
+            # 讓 post-unfence 的 consumer_session_status 停在 STOPPED(unit 起來、lock 重持,但 owner 訊號未全復)。
+            self._record_session("SESSION_STARTED", new=True)
 
     # -- host_probe interface ----------------------------------------------- #
     def run(self, argv):
@@ -643,7 +648,7 @@ def test_underspecified_window_is_failed_not_violated(owner, cluster, tmp_path, 
     expected, _inv = _expected_fingerprint(owner, observer_conn)
     intent = _intent(expected)
     authorization, signature = _sign(private_key, intent, HEAD)
-    monkeypatch.setattr(q, "MAX_WINDOW_SAMPLES", 3)  # 非前進時鐘快速撞上限
+    monkeypatch.setattr(qi, "MAX_WINDOW_SAMPLES", 3)  # 非前進時鐘快速撞上限(sampler 於 inventory 下層讀此常量)
     result = q.apply_quiesce_fence(
         intent, authorization, signature, now=NOW, source_head=HEAD,
         host_probe=owner, fence_ops=owner, db_observer=observer_conn,
@@ -683,6 +688,70 @@ def test_unfence_succeeds_but_drifted_identity_is_not_restored(owner, cluster, t
     # 但 stable pre != post(cmdline_digest 漂移)→ 誠實 NOT_RESTORED,非假成功。
     assert (result["rollback_record"]["pre_fence_owner_fingerprint"]
             != result["rollback_record"]["post_unfence_owner_fingerprint"])
+    assert q.validate_quiesce_fence_result(result, now=LATER) == []
+    assert validator.validate_aiml_artifact(result, now=LATER) == []
+    observer_conn.close()
+
+
+# --------------------------------------------------------------------------- #
+# (9) FIX-C3 (Codex :1836) — un-fence brings the unit up but an owner signal is missing
+#     (consumer-session not OPEN) -> typed NOT_RESTORED, NOT a fake QUIESCED
+# --------------------------------------------------------------------------- #
+def test_unfence_active_but_session_not_open_is_not_restored(owner, cluster, tmp_path, monkeypatch):
+    observer_conn = _observer_connection(cluster["socket_dir"])
+    private_key = _install_operator_profile(tmp_path, monkeypatch)
+    expected, _inv = _expected_fingerprint(owner, observer_conn)
+    intent = _intent(expected)
+    authorization, signature = _sign(private_key, intent, HEAD)
+    # un-fence 使 unit 起來、advisory lock 由 alr_shadow 重持、候選 PID==MainPID,但 consumer-session 未回 OPEN。
+    owner.suppress_session_on_unfence = True
+    result = q.apply_quiesce_fence(
+        intent, authorization, signature, now=NOW, source_head=HEAD,
+        host_probe=owner, fence_ops=owner, db_observer=observer_conn, clock=_stepping_clock(),
+        verifier_capture_digest=CAP,
+    )
+    # 舊 post_healthy 只看 unit_active + lock + holder + candidate → 會誤判 QUIESCED;FIX-C3 的 confirm-grade
+    # 復核發現 consumer_session_status != OPEN → 誠實 NOT_RESTORED。
+    assert result["status"] == "NOT_RESTORED"
+    assert result["post_unfence_observation"]["verdict"] == "NOT_RESTORED"
+    assert result["rollback_record"]["status"] == "NOT_RESTORED"
+    assert owner.start_calls == 1  # un-fence 本身成功(start 未拋錯、unit active、lock 重持)
+    assert result["post_unfence_observation"]["db_quiesce"]["advisory_lock_held"] is True
+    assert result["post_unfence_observation"]["db_quiesce"]["consumer_session_status"] != "OPEN"
+    assert q.validate_quiesce_fence_result(result, now=LATER) == []
+    assert validator.validate_aiml_artifact(result, now=LATER) == []
+    observer_conn.close()
+
+
+# --------------------------------------------------------------------------- #
+# (10) FIX-C4 (Codex :1177) — injected clock jumps past the declared-window deadline
+#      before completing -> typed FAILED (bounded), un-fence attempted
+# --------------------------------------------------------------------------- #
+def _jump_clock(steps):
+    seq = list(steps)
+
+    def _clock():
+        return float(seq.pop(0)) if len(seq) > 1 else float(seq[0])
+
+    return _clock
+
+
+def test_window_elapsed_beyond_deadline_is_failed_and_unfence_attempted(owner, cluster, tmp_path, monkeypatch):
+    observer_conn = _observer_connection(cluster["socket_dir"])
+    private_key = _install_operator_profile(tmp_path, monkeypatch)
+    expected, _inv = _expected_fingerprint(owner, observer_conn)
+    intent = _intent(expected)  # window {5,2,5} → 硬截止 = duration+interval = 10s
+    authorization, signature = _sign(private_key, intent, HEAD)
+    # 注入時鐘第二次取樣就跨過宣告窗上限(0 → 100000s),min_samples 尚未湊足 → 硬截止 → typed FAILED、絕不 HELD。
+    result = q.apply_quiesce_fence(
+        intent, authorization, signature, now=NOW, source_head=HEAD,
+        host_probe=owner, fence_ops=owner, db_observer=observer_conn,
+        clock=_jump_clock([0.0, 100000.0]), verifier_capture_digest=CAP,
+    )
+    assert result["status"] == "FAILED"
+    assert "deadline" in result["failure_reason"]
+    assert owner.stop_calls == 1 and owner.start_calls == 1  # fence 一經發起就在 finally 嘗試 un-fence
+    assert result["window_samples"]  # 至少取到第一個 held 樣本(elapsed 0)
     assert q.validate_quiesce_fence_result(result, now=LATER) == []
     assert validator.validate_aiml_artifact(result, now=LATER) == []
     observer_conn.close()

@@ -29,6 +29,7 @@ for candidate in (HELPERS, ML_ROOT):
         sys.path.insert(0, str(candidate))
 
 import agent_governance_alr_quiesce_fence as q  # noqa: E402
+import agent_governance_alr_quiesce_inventory as qi  # noqa: E402
 import aiml_gate_receipt_validator as validator  # noqa: E402
 
 HEAD = "0123456789abcdef0123456789abcdef01234567"
@@ -162,6 +163,9 @@ def _confirmed_inventory(**over):
         "db_quiesce": _db(held=True, count=1, backend=True, status="OPEN"),
         "credential_exposure": _cred(),
         "candidate_count": 1,
+        # FIX-C2:唯一 ALR 候選 PID == unit MainPID(4242)且 MainPID cmdline 為 exact ALR invocation。
+        "candidate_pids": [4242],
+        "main_pid_invocation_ok": True,
         "advisory_holder_pid": 31337,
         "advisory_holder_usename": q.ALR_CONNECTION_ROLE,
         "main_pid": 4242,
@@ -246,6 +250,46 @@ def test_intent_rejects_non_qualified_relation():
         _intent(observed_relations=["alr_consumer_events"], consumer_session_relation="alr_consumer_events")
 
 
+def test_intent_rejects_cadence_outliving_window():
+    # FIX-C4(Codex :1177):duration=1s / min_samples=512 / interval=3600s ⇒ 湊足取樣需 ~511 小時(遠超 TTL)。
+    # build 期即拒。
+    with pytest.raises(q.QuiesceFenceError):
+        _intent(observation_window={"duration_seconds": 1, "min_samples": 512, "sample_interval_seconds": 3600})
+    # validator defense-in-depth:偽造一份繞過 build 的 intent 仍被擋。
+    forged = copy.deepcopy(_intent())
+    forged["observation_window"] = {"duration_seconds": 1, "min_samples": 512, "sample_interval_seconds": 3600}
+    forged["self_digest"] = q.artifact_digest_excluding_self(forged)
+    assert any("cadence" in e for e in q.validate_quiesce_fence_intent(forged, now=NOW))
+    assert validator.validate_aiml_artifact(forged, now=NOW)
+    # 邊界:(min_samples-1)*interval == duration 剛好允許(合法節奏)。
+    assert q.validate_quiesce_fence_intent(
+        _intent(observation_window={"duration_seconds": 10, "min_samples": 3, "sample_interval_seconds": 5}), now=NOW
+    ) == []
+
+
+def test_intent_rejects_hold_window_exceeding_authorization_ttl():
+    # FIX-C4-TTL(E2+OPS must-fix-before-EFFECT):fence 最壞持有窗 = duration_seconds + 一步取樣節奏,必須可證地
+    # <= min(ttl_seconds, MAX_AUTHORIZATION_TTL=900s)。{duration:3600, min_samples:2, interval:3600, ttl:3600} 通過
+    # cadence guard((2-1)*3600=3600<=3600),但 3600+3600=7200 > 900(operator 簽署天花板)且 > 3600(ttl)→ build 期即拒。
+    with pytest.raises(q.QuiesceFenceError):
+        _intent(
+            observation_window={"duration_seconds": 3600, "min_samples": 2, "sample_interval_seconds": 3600},
+            ttl_seconds=3600,
+        )
+    # validator defense-in-depth:偽造一份繞過 build 的內部自洽 intent(ttl_seconds 與 expires_at 一致)仍被擋。
+    forged = copy.deepcopy(_intent())
+    forged["ttl_seconds"] = 3600
+    forged["expires_at"] = q._plus_seconds(forged["created_at"], 3600)
+    forged["observation_window"] = {"duration_seconds": 3600, "min_samples": 2, "sample_interval_seconds": 3600}
+    forged["self_digest"] = q.artifact_digest_excluding_self(forged)
+    assert any("worst-case hold" in e for e in q.validate_quiesce_fence_intent(forged, now=NOW))
+    assert validator.validate_aiml_artifact(forged, now=NOW)
+    # 邊界:duration+interval == min(ttl_seconds, 900) 剛好允許({895,2,5}:895+5=900<=900,cadence (2-1)*5=5<=895)。
+    assert q.validate_quiesce_fence_intent(
+        _intent(observation_window={"duration_seconds": 895, "min_samples": 2, "sample_interval_seconds": 5}), now=NOW
+    ) == []
+
+
 # --------------------------------------------------------------------------- #
 # ownership predicate verdicts (pure logic, no host / no PG)
 # --------------------------------------------------------------------------- #
@@ -268,6 +312,10 @@ def test_confirm_single_owner_happy():
     {"owner_fingerprint": "sha256:" + "1" * 64},          # 期望 owner != live owner → gone
     {"advisory_holder_usename": "postgres"},              # lock holder 非 alr_shadow 身分 → 不 confirm
     {"db_quiesce": _db(held=True, count=1, backend=True, status="STOPPED")},  # session 非 OPEN
+    # FIX-C2:唯一候選 PID != unit MainPID(wrapper MainPID + 脫離的 consumer 持鎖)→ 不 confirm → STALE
+    {"candidate_pids": [9999]},
+    # FIX-C2:MainPID 自身 cmdline 非 exact ALR invocation(wrapper)→ 不 confirm → STALE
+    {"main_pid_invocation_ok": False},
 ])
 def test_stale_owner_fails_closed(mutation):
     inv = _confirmed_inventory(**mutation)
@@ -290,6 +338,64 @@ def test_ambiguous_multiple_owners_refuses(mutation):
         verifier_capture_digest=CAP, observed_at=NOW,
     )
     assert obs["verdict"] == "AMBIGUOUS_MULTIPLE_OWNERS"
+
+
+# --------------------------------------------------------------------------- #
+# FIX-C1 (Codex :414): _is_alr_longlived_cmdline requires the EXACT deployed invocation
+# --------------------------------------------------------------------------- #
+_DSN = "/home/x/.config/openclaw/alr-shadow.dsn"
+_DEPLOYED = [
+    "/usr/bin/python3", "-m", "ml_training.alr_event_consumer",
+    "--dsn-file", _DSN, "--lock-file", FLOCK, "--max-batch", "32",
+]
+
+
+def test_is_alr_longlived_cmdline_accepts_only_exact_deployed_invocation():
+    # 精確部署形 → candidate。
+    assert q._is_alr_longlived_cmdline(_DEPLOYED, expected_dsn_file=_DSN, expected_lock_file=FLOCK) is True
+    # 任務指定的偽形:非 allowlist 解譯器 basename + 錯 dsn/lock 值 + 多餘 --evil → NOT a candidate。
+    evil = [
+        "python3-debug", "-m", "ml_training.alr_event_consumer",
+        "--dsn-file", "/tmp/other.dsn", "--lock-file", "/tmp/other.lock", "--max-batch", "999", "--evil",
+    ]
+    assert q._is_alr_longlived_cmdline(evil, expected_dsn_file=_DSN, expected_lock_file=FLOCK) is False
+
+
+@pytest.mark.parametrize("cmdline", [
+    ["/usr/bin/python3-debug", "-m", "ml_training.alr_event_consumer",
+     "--dsn-file", _DSN, "--lock-file", FLOCK, "--max-batch", "32"],          # basename 非 allowlist(非 startswith)
+    ["/usr/bin/python3", "-m", "ml_training.alr_event_consumer",
+     "--dsn-file", "/tmp/other.dsn", "--lock-file", FLOCK, "--max-batch", "32"],  # --dsn-file 值不符
+    ["/usr/bin/python3", "-m", "ml_training.alr_event_consumer",
+     "--dsn-file", _DSN, "--lock-file", "/tmp/other.lock", "--max-batch", "32"],  # --lock-file 值不符
+    ["/usr/bin/python3", "-m", "ml_training.alr_event_consumer",
+     "--dsn-file", _DSN, "--lock-file", FLOCK, "--max-batch", "0"],            # max-batch 非 bounded(< 1)
+    ["/usr/bin/python3", "-m", "ml_training.alr_event_consumer",
+     "--dsn-file", _DSN, "--lock-file", FLOCK, "--max-batch", "99999"],        # max-batch 超出 ceiling
+    ["/usr/bin/python3", "-m", "ml_training.alr_event_consumer",
+     "--dsn-file", _DSN, "--lock-file", FLOCK, "--max-batch", "32", "--extra", "x"],  # 多餘/未知參數
+    ["/usr/bin/python3", "-m", "ml_training.other_module",
+     "--dsn-file", _DSN, "--lock-file", FLOCK, "--max-batch", "32"],           # 模組不符
+])
+def test_is_alr_longlived_cmdline_rejects_single_deviation(cmdline):
+    assert q._is_alr_longlived_cmdline(cmdline, expected_dsn_file=_DSN, expected_lock_file=FLOCK) is False
+
+
+# --------------------------------------------------------------------------- #
+# FIX-C2 (Codex :779): the confirmed owner's candidate PID must equal the unit MainPID
+# --------------------------------------------------------------------------- #
+def test_wrapper_mainpid_with_detached_consumer_is_stale_not_confirmed():
+    # wrapper 佔住 unit MainPID(4242,自身 cmdline 非 ALR),真正持鎖的 ALR consumer 脫離在 pid 9999:
+    # candidate_count 仍為 1、advisory holder 仍是 alr_shadow,但候選 PID(9999)!= MainPID(4242)且 MainPID
+    # cmdline 非 exact ALR invocation → 絕不 CONFIRMED(否則 systemctl --user stop 停 wrapper、脫離的 consumer 續跑)。
+    inv = _confirmed_inventory(candidate_pids=[9999], main_pid_invocation_ok=False)
+    obs = q.confirm_alr_owner(
+        inv, expected_fingerprint=OWNER_FP, applier_node="quiesce_apply", verifier_node="quiesce_verify",
+        verifier_capture_digest=CAP, observed_at=NOW,
+    )
+    assert obs["verdict"] == "STALE_OWNER"
+    # 反面:候選 PID == MainPID 且 invocation exact → 回到 CONFIRMED。
+    assert q._owner_verdict(_confirmed_inventory(), expected_fingerprint=OWNER_FP) == "CONFIRMED_SINGLE_OWNER"
 
 
 # --------------------------------------------------------------------------- #
@@ -594,7 +700,8 @@ def _collect(monkeypatch, provider, *, window=None, clock=None, sleep=None, base
     if not callable(provider):
         fixed = provider
         provider = lambda *a, **k: fixed  # noqa: E731 - 每次取樣回同一份 inventory
-    monkeypatch.setattr(q, "build_owner_inventory", provider)
+    # 拆分後 collect_static_guard_window 在 inventory 下層,build_owner_inventory 於該模組命名空間解析 → patch qi。
+    monkeypatch.setattr(qi, "build_owner_inventory", provider)
     intent = _intent(observation_window=window or {"duration_seconds": 5, "min_samples": 2, "sample_interval_seconds": 5})
     return q.collect_static_guard_window(
         None, None, intent=intent, baseline=_BASELINE, applier_node="quiesce_apply",
@@ -628,7 +735,7 @@ def test_collect_window_held_realizes_cadence(monkeypatch):
 
 def test_collect_window_non_advancing_clock_is_underspecified_not_violated(monkeypatch):
     # 非前進時鐘 + no-op sleep:全 held 但永達不到 duration → 撞 MAX 上限 → UNDERSPECIFIED(非 VIOLATED),絕不 spin。
-    monkeypatch.setattr(q, "MAX_WINDOW_SAMPLES", 4)
+    monkeypatch.setattr(qi, "MAX_WINDOW_SAMPLES", 4)
     samples, status = _collect(monkeypatch, _window_inventory(), clock=lambda: 0.0, sleep=None)
     assert status == q.WINDOW_STATUS_UNDERSPECIFIED
     assert len(samples) == 4  # 撞上限即止,不會無限取樣
@@ -636,22 +743,26 @@ def test_collect_window_non_advancing_clock_is_underspecified_not_violated(monke
 
 
 def test_collect_window_too_short_span_is_underspecified(monkeypatch):
-    monkeypatch.setattr(q, "MAX_WINDOW_SAMPLES", 3)
+    monkeypatch.setattr(qi, "MAX_WINDOW_SAMPLES", 3)
     clock = _CoupledClock()
+    # FIX-C4-TTL 使 duration+interval > min(ttl_seconds, 900) 的窗於 intent build 即被拒,故 duration 壓在
+    # 界內({800,2,1}:800+1=801<=900)但仍 >> 注入時鐘的真實跨度(~2s)→ 撞 MAX 上限、span << duration → UNDERSPECIFIED。
     samples, status = _collect(
         monkeypatch, _window_inventory(), clock=clock, sleep=clock.sleep,
-        window={"duration_seconds": 3600, "min_samples": 2, "sample_interval_seconds": 1},
+        window={"duration_seconds": 800, "min_samples": 2, "sample_interval_seconds": 1},
     )
     assert status == q.WINDOW_STATUS_UNDERSPECIFIED  # 跨度 << duration
     assert len(samples) == 3
 
 
 def test_collect_window_too_few_samples_is_underspecified(monkeypatch):
-    monkeypatch.setattr(q, "MAX_WINDOW_SAMPLES", 3)
+    monkeypatch.setattr(qi, "MAX_WINDOW_SAMPLES", 3)
     clock = _CoupledClock()
+    # FIX-C4 使 (min_samples-1)*interval > duration 的窗於 intent build 即被拒,故改用**合法節奏**({100,5,1}:
+    # (5-1)*1=4<=100)但把 MAX 壓到 3 < min_samples(5):撞 MAX 上限前永遠湊不到 min_samples → UNDERSPECIFIED。
     samples, status = _collect(
         monkeypatch, _window_inventory(), clock=clock, sleep=clock.sleep,
-        window={"duration_seconds": 1, "min_samples": 5, "sample_interval_seconds": 1},
+        window={"duration_seconds": 100, "min_samples": 5, "sample_interval_seconds": 1},
     )
     assert status == q.WINDOW_STATUS_UNDERSPECIFIED  # min_samples(5) > MAX(3):永遠湊不到 min_samples
     assert len(samples) == 3
