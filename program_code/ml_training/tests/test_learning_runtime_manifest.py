@@ -16,20 +16,29 @@ from ml_training import learning_runtime_manifest as lrm
 from ml_training.learning_runtime_manifest import (
     CAPTURE_INPUTS,
     DEPENDENCY_LOCK_FILE,
+    DEPENDENCY_LOCK_LOCK_FILE,
+    DEPENDENCY_LOCK_SPEC_FILE,
     LEARNING_CODE_INPUTS,
+    LEARNING_CODE_INPUTS_V2,
     MIGRATION_INPUTS,
     POLICY_TEMPLATE,
     REGIME_OOS_LABEL_CONTRACT,
     LearningRuntimeManifestError,
     build_learning_runtime_manifest,
+    build_learning_runtime_manifest_v2,
     build_source_compatibility_receipt,
+    build_source_compatibility_receipt_v2,
     evaluate_compatibility,
     try_build_learning_runtime_manifest,
+    try_build_learning_runtime_manifest_v2,
 )
 from ml_training.aiml_gate_receipt_validator import (
     artifact_self_digest,
     validate_aiml_artifact,
 )
+
+
+import hashlib
 
 
 _HEAD_A = "a" * 40
@@ -304,3 +313,122 @@ def test_committed_receipt_matches_real_checkout_rebuild() -> None:
         committed["migration_fingerprints"]
         == rebuilt["training_contract"]["components"]["migration_fingerprints"]
     )
+
+
+# ── (9) v2(learning_runtime_manifest_v2)additive 身分 ────────────────────────
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_V1_FROZEN_DIGEST = (
+    "sha256:6cf76b60a763035d26d0d4e9e0e6aa0aa8877d99966367c778420e5f63a79595"
+)
+_COMMITTED_V2_RECEIPT = (
+    _REPO_ROOT
+    / "docs/execution_plan/ai_ml_landing/receipts"
+    / "S2.2A-source-compatibility-receipt-v2.json"
+)
+
+
+def _serialize_receipt(payload: dict) -> str:
+    # 必須與 _write_json 的序列化逐位元一致(byte-equality drift 檢查)。
+    return json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+
+
+def test_v2_is_distinct_identity_and_v1_stays_byte_frozen() -> None:
+    # v1 身分不動(仍 6cf76b60);v2 因 schema_version + dependency_lock + parquet_etl 而相異;
+    # capture 面兩者相同(v2 只強化 training)。
+    v1 = build_learning_runtime_manifest(_REPO_ROOT, repo_source_head="0" * 40)
+    v2 = build_learning_runtime_manifest_v2(_REPO_ROOT, repo_source_head="0" * 40)
+    assert v1["self_digest"] == _V1_FROZEN_DIGEST
+    assert v2["schema_version"] == "learning_runtime_manifest_v2"
+    assert v2["self_digest"] != v1["self_digest"]
+    assert v2["capture_contract"]["digest"] == v1["capture_contract"]["digest"]
+    assert v2["training_contract"]["digest"] != v1["training_contract"]["digest"]
+
+
+def test_v2_dependency_lock_binds_both_spec_and_sealed_lock() -> None:
+    # v2 dependency_lock = {spec_digest(requirements-ml.txt), lock_digest(requirements-ml.lock)}。
+    v2 = build_learning_runtime_manifest_v2(_REPO_ROOT, repo_source_head="0" * 40)
+    dependency_lock = v2["training_contract"]["components"]["dependency_lock"]
+    assert set(dependency_lock) == {"spec_digest", "lock_digest"}
+    spec_sha = hashlib.sha256(
+        (_REPO_ROOT / DEPENDENCY_LOCK_SPEC_FILE).read_bytes()
+    ).hexdigest()
+    lock_sha = hashlib.sha256(
+        (_REPO_ROOT / DEPENDENCY_LOCK_LOCK_FILE).read_bytes()
+    ).hexdigest()
+    assert dependency_lock["spec_digest"] == "sha256:" + spec_sha
+    assert dependency_lock["lock_digest"] == "sha256:" + lock_sha
+    # spec 面與 v1 scalar dependency_lock_digest 同源(requirements-ml.txt);lock 面為 v2 新綁。
+    v1 = build_learning_runtime_manifest(_REPO_ROOT, repo_source_head="0" * 40)
+    assert (
+        v1["training_contract"]["components"]["dependency_lock_digest"]
+        == dependency_lock["spec_digest"]
+    )
+    assert dependency_lock["lock_digest"] != dependency_lock["spec_digest"]
+
+
+def test_v2_learning_code_digest_folds_parquet_etl_compute() -> None:
+    # B.3:parquet_etl.py 併入 v2 learning-code allowlist(v1 只綁特徵名+schema 版本,漏 COMPUTE)。
+    assert "program_code/ml_training/parquet_etl.py" in LEARNING_CODE_INPUTS_V2
+    assert "program_code/ml_training/parquet_etl.py" not in LEARNING_CODE_INPUTS
+    assert len(LEARNING_CODE_INPUTS_V2) == len(LEARNING_CODE_INPUTS) + 1
+    v1 = build_learning_runtime_manifest(_REPO_ROOT, repo_source_head="0" * 40)
+    v2 = build_learning_runtime_manifest_v2(_REPO_ROOT, repo_source_head="0" * 40)
+    assert (
+        v2["training_contract"]["components"]["learning_code_digest"]
+        != v1["training_contract"]["components"]["learning_code_digest"]
+    )
+
+
+def test_v2_receipt_round_trips_and_validates() -> None:
+    receipt = build_source_compatibility_receipt_v2(
+        _REPO_ROOT, repo_source_head="0" * 40, generated_at_utc="2026-07-24T00:00:00Z"
+    )
+    assert receipt["schema_version"] == "source_compatibility_receipt_v2"
+    assert receipt["session_id"] == "S2.2A"
+    assert receipt["learning_runtime_digest"] == receipt["learning_runtime_manifest"]["self_digest"]
+    assert validate_aiml_artifact(json.loads(json.dumps(receipt))) == []
+
+
+def test_v2_build_fails_closed_without_valid_lock(fake_repo: Path) -> None:
+    # fake_repo 無有效 requirements-ml.lock(且缺 parquet_etl.py)→ v2 建置 fail-closed。
+    manifest, errors = try_build_learning_runtime_manifest_v2(
+        fake_repo, repo_source_head=_HEAD_A
+    )
+    assert manifest is None
+    assert errors
+
+
+def test_committed_v2_receipt_head_independent_digests_match_rebuild() -> None:
+    # 抗漂移(mirror v1 §8):三個 HEAD-independent digest 必等於真 checkout 的 v2 重建;
+    # 任何 allowlisted 檔(含 parquet_etl / requirements-ml.lock)被改卻沒重生 receipt 即紅。
+    assert _COMMITTED_V2_RECEIPT.is_file(), f"missing committed v2 receipt {_COMMITTED_V2_RECEIPT}"
+    committed = json.loads(_COMMITTED_V2_RECEIPT.read_text(encoding="utf-8"))
+    rebuilt = build_learning_runtime_manifest_v2(_REPO_ROOT, repo_source_head="0" * 40)
+    assert committed["learning_runtime_digest"] == rebuilt["self_digest"]
+    assert committed["capture_contract_digest"] == rebuilt["capture_contract"]["digest"]
+    assert committed["training_contract_digest"] == rebuilt["training_contract"]["digest"]
+
+
+def test_committed_v2_receipt_rebuilds_byte_for_byte() -> None:
+    # B.4/B.5 PR-time receipt-freshness:以 committed 的 head+time 重建,斷言逐位元相等——
+    # stale pin(改了 allowlisted 檔卻沒重生 receipt)無法靜默出貨。head 取自 receipt(免 git 依賴)。
+    committed_text = _COMMITTED_V2_RECEIPT.read_text(encoding="utf-8")
+    committed = json.loads(committed_text)
+    rebuilt = build_source_compatibility_receipt_v2(
+        _REPO_ROOT,
+        repo_source_head=committed["repo_source_head"],
+        generated_at_utc=committed["generated_at_utc"],
+    )
+    assert committed == rebuilt
+    assert committed_text == _serialize_receipt(rebuilt)
+
+
+def test_v2_receipt_lock_digest_forgery_is_rejected() -> None:
+    # B.5 forgery:交換內層 dependency_lock.lock_digest,只重封外層 self_digest——中央閘由
+    # training_contract.digest 重算綁定整個 components,必攔下。
+    receipt = build_source_compatibility_receipt_v2(_REPO_ROOT, repo_source_head="0" * 40)
+    components = receipt["learning_runtime_manifest"]["training_contract"]["components"]
+    components["dependency_lock"]["lock_digest"] = "sha256:" + "0" * 64
+    receipt["self_digest"] = artifact_self_digest(receipt)
+    errors = validate_aiml_artifact(receipt)
+    assert any("training_contract.digest does not bind its components" in e for e in errors)

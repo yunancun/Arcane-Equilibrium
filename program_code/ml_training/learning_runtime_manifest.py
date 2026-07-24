@@ -139,6 +139,22 @@ _RUNTIME_CONFIG_TEMPLATE_KEYS: tuple[str, ...] = (
 # 的 sealed lock 屬 LR2/S2.3,此處不建。
 DEPENDENCY_LOCK_FILE = "requirements-ml.txt"
 
+# ── v2(learning_runtime_manifest_v2)additive 常量 ────────────────────────────
+# 動機(S2-WP1 debt closure):v1 有兩處已知缺口——(1)dependency_lock 只綁 spec 文字
+# (requirements-ml.txt),不綁 S2.3 真正封存的 requirements-ml.lock;(2)feature 面只綁
+# 特徵名+schema 版本(_feature_contract_digest),不綁 parquet_etl 的 COMPUTE 邏輯。v2 兩者
+# 皆補上,且是「相異身分」(schema_version 進 manifest_self_digest);v1 全數保持凍結。
+SCHEMA_VERSION_V2 = "learning_runtime_manifest_v2"
+RECEIPT_SCHEMA_VERSION_V2 = "source_compatibility_receipt_v2"
+# v2 dependency_lock 物件同時綁 spec 與 sealed lock 兩檔的內容 sha256(對齊 S2.3 雙檔綁定)。
+DEPENDENCY_LOCK_SPEC_FILE = "requirements-ml.txt"
+DEPENDENCY_LOCK_LOCK_FILE = "requirements-ml.lock"
+# v2 learning-code allowlist:v1 全集 + parquet_etl.py 內容,把特徵 COMPUTE 邏輯併入
+# learning_code_digest(_hash_inputs 內部排序,元素順序不影響 digest)。
+LEARNING_CODE_INPUTS_V2: tuple[str, ...] = LEARNING_CODE_INPUTS + (
+    "program_code/ml_training/parquet_etl.py",
+)
+
 _COMPATIBLE = "COMPATIBLE"
 _INCOMPATIBLE = "INCOMPATIBLE"
 _QUARANTINE = "QUARANTINE"
@@ -467,6 +483,150 @@ def build_source_compatibility_receipt(
     components = manifest["training_contract"]["components"]
     receipt: dict[str, Any] = {
         "schema_version": RECEIPT_SCHEMA_VERSION,
+        "session_id": SESSION_ID,
+        "generated_at_utc": manifest["generated_at_utc"],
+        "repo_source_head": manifest["repo_source_head"],
+        "learning_runtime_manifest": manifest,
+        "learning_runtime_digest": manifest["self_digest"],
+        "capture_contract_digest": manifest["capture_contract"]["digest"],
+        "training_contract_digest": manifest["training_contract"]["digest"],
+        "migration_fingerprints": dict(components["migration_fingerprints"]),
+        "bind_points": [dict(point) for point in BIND_POINTS],
+        "status": "SOURCE_READY",
+        "boundary": BOUNDARY,
+    }
+    receipt["self_digest"] = artifact_self_digest(receipt)
+    return receipt
+
+
+# ── v2 builders(S2-WP1 additive;v1 全數保持凍結,不共用可變狀態) ────────────────
+def _dependency_lock_v2(repo_root: Path) -> dict[str, str]:
+    """v2 dependency_lock:同時綁 spec(requirements-ml.txt)與 sealed lock
+    (requirements-ml.lock)兩檔的內容 sha256。
+
+    重用 S2.3 sealed-build 的 verify_lock_closure 作 fail-closed 閘:lock 必須是「完全 pin、
+    完全 hash、封閉且無孤兒」的圖,否則 raise——與 S2.3 同一把尺,LR1↔LR2 不分歧;本函數
+    不自行 re-parse lock。lock_target_platform 亦一併呼叫,作為 lock 標頭可解析性的附帶
+    fail-closed 檢查(header 缺失時其內部退回常量,不 raise)。
+    """
+    from agent_governance_sealed_build import (  # 延遲 import:避免 import-time 耦合/循環
+        LockClosureError,
+        lock_target_platform,
+        verify_lock_closure,
+    )
+
+    spec_rel = DEPENDENCY_LOCK_SPEC_FILE
+    lock_rel = DEPENDENCY_LOCK_LOCK_FILE
+    spec_path = repo_root / spec_rel
+    lock_path = repo_root / lock_rel
+    if spec_path.is_symlink() or lock_path.is_symlink():
+        raise LearningRuntimeManifestError("symlink_input:dependency_lock")
+    try:
+        verify_lock_closure(lock_path, spec_path)
+        lock_target_platform(lock_path)
+    except LockClosureError as exc:
+        raise LearningRuntimeManifestError(f"dependency_lock_closure_invalid:{exc}") from exc
+    except OSError as exc:
+        raise LearningRuntimeManifestError("dependency_lock_unreadable") from exc
+    return {
+        "spec_digest": "sha256:" + _hash_file(repo_root, spec_rel),
+        "lock_digest": "sha256:" + _hash_file(repo_root, lock_rel),
+    }
+
+
+def _training_contract_v2(repo_root: Path) -> dict[str, Any]:
+    """v2 training contract:元件與 v1 對齊,但 learning_code 併入 parquet_etl COMPUTE,
+    且 dependency_lock 由 scalar digest 升為 {spec_digest, lock_digest} 物件。"""
+    learning_code_inputs = _hash_inputs(repo_root, LEARNING_CODE_INPUTS_V2)
+    fingerprints = {
+        rel.split("/")[-1]: _hash_file(repo_root, rel) for rel in MIGRATION_INPUTS
+    }
+    _assert_migration_span(fingerprints)
+    template = _load_policy_template(repo_root)
+    components = {
+        "learning_code_digest": canonical_digest(learning_code_inputs),
+        "migration_fingerprints": dict(sorted(fingerprints.items())),
+        "feature_contract_digest": _feature_contract_digest(),
+        "label_contract_digest": _label_contract_digest(repo_root),
+        "action_policy_digest": _action_policy_digest(repo_root),
+        "dependency_lock": _dependency_lock_v2(repo_root),
+        "runtime_config_digest": _runtime_config_digest(repo_root, template),
+    }
+    return {
+        "digest": training_contract_digest(components),
+        "components": components,
+    }
+
+
+def build_learning_runtime_manifest_v2(
+    repo_root: str | Path,
+    *,
+    repo_source_head: str | None = None,
+    generated_at_utc: str | None = None,
+) -> dict[str, Any]:
+    """建置 learning_runtime_manifest_v2;capture 面與 v1 相同(共用 _capture_contract),
+    training 面採 v2 元件。schema_version 進 manifest_self_digest → v2 為相異身分。"""
+    root = Path(repo_root)
+    head = repo_source_head if repo_source_head is not None else resolve_repo_source_head(root)
+    if not _GIT_HEAD_RE.fullmatch(str(head)):
+        raise LearningRuntimeManifestError("repo_source_head_invalid")
+
+    capture_contract = _capture_contract(root)
+    training_contract = _training_contract_v2(root)
+    self_digest = manifest_self_digest(
+        SCHEMA_VERSION_V2,
+        BOUNDARY,
+        capture_contract["digest"],
+        training_contract["digest"],
+    )
+    return {
+        "schema_version": SCHEMA_VERSION_V2,
+        "generated_at_utc": generated_at_utc or _utc_now(),
+        "repo_source_head": str(head),
+        "capture_contract": capture_contract,
+        "training_contract": training_contract,
+        "boundary": BOUNDARY,
+        "self_digest": self_digest,
+    }
+
+
+def try_build_learning_runtime_manifest_v2(
+    repo_root: str | Path,
+    *,
+    repo_source_head: str | None = None,
+    generated_at_utc: str | None = None,
+) -> tuple[dict[str, Any] | None, list[str]]:
+    """fail-closed 包裝(v2):成功回 (manifest, []);任何建置錯誤回 (None, [reason])。"""
+    try:
+        manifest = build_learning_runtime_manifest_v2(
+            repo_root,
+            repo_source_head=repo_source_head,
+            generated_at_utc=generated_at_utc,
+        )
+    except LearningRuntimeManifestError as exc:
+        return None, [str(exc)]
+    return manifest, []
+
+
+def build_source_compatibility_receipt_v2(
+    repo_root: str | Path,
+    *,
+    repo_source_head: str | None = None,
+    generated_at_utc: str | None = None,
+) -> dict[str, Any]:
+    """建置 SOURCE_READY 的 source_compatibility_receipt_v2(內嵌 v2 manifest;皆真值)。
+
+    頂層結構與 v1 逐欄對齊,使中央驗證器的版本無關內層反偽造重算
+    (``_source_compatibility_receipt_errors``)可原樣覆蓋 v2。
+    """
+    manifest = build_learning_runtime_manifest_v2(
+        repo_root,
+        repo_source_head=repo_source_head,
+        generated_at_utc=generated_at_utc,
+    )
+    components = manifest["training_contract"]["components"]
+    receipt: dict[str, Any] = {
+        "schema_version": RECEIPT_SCHEMA_VERSION_V2,
         "session_id": SESSION_ID,
         "generated_at_utc": manifest["generated_at_utc"],
         "repo_source_head": manifest["repo_source_head"],

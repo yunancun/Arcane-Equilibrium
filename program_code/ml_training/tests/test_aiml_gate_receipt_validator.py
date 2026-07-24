@@ -14,6 +14,7 @@ if str(ML_ROOT) not in sys.path:
     sys.path.insert(0, str(ML_ROOT))
 
 from aiml_gate_receipt_validator import (  # noqa: E402
+    aiml_effect_classifier_digest,
     artifact_self_digest,
     canonical_digest,
     classify_required_effects,
@@ -24,11 +25,15 @@ from aiml_gate_receipt_validator import (  # noqa: E402
     program_adoption_identity_digest,
     S0_3_EXACT_OWNED_PATHS,
     S0_DEPENDENCY_DIGESTS,
+    SCHEMA_DIR,
+    SCHEMA_FILES,
     session_attempt_identity_digest,
     terminal_receipt_sink_contract,
     validate_aiml_artifact,
     validate_program_adoption_receipt,
 )
+
+import agent_governance_sealed_build as _sb  # noqa: E402 (HELPER_DIR 由 validator import 時已入 path)
 
 
 DIGEST_A = "sha256:" + "a" * 64
@@ -2182,3 +2187,83 @@ def test_program_adoption_rejects_dependency_graph_validity_class_outside_enum()
     )
 
     assert any("value is outside enum" in error for error in errors)
+
+
+# ── S2-WP1(S2.3 LR2 delegation + digest-drift guard;B.1 tests a-e) ───────────
+_S23_RECEIPTS_DIR = REPO_ROOT / "docs/execution_plan/ai_ml_landing/receipts"
+
+
+def _committed_s23_pair() -> tuple[dict, dict]:
+    sealed = json.loads(
+        (_S23_RECEIPTS_DIR / "S2.3-sealed-build-receipt-v1.json").read_text(encoding="utf-8")
+    )
+    identity = json.loads(
+        (_S23_RECEIPTS_DIR / "S2.3-expected-identity-receipt-v1.json").read_text(encoding="utf-8")
+    )
+    return sealed, identity
+
+
+def _wallclock_now() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).isoformat()
+
+
+def test_classifier_digest_is_byte_frozen_after_registering_s23_schemas() -> None:
+    # (d) digest-drift guard:註冊新 schema 只動 SCHEMA_FILES(schema 查找),不動
+    # aiml_effect_classifier_digest() 的六個 S0.3 常量輸入 → 分類身分 digest 位元不變。
+    assert aiml_effect_classifier_digest() == (
+        "sha256:1cf8c021b066ceeb364e968add074d263cb28d63db421fdc40620e9904d0ddbc"
+    )
+
+
+def test_s23_and_v2_schema_files_resolve_via_schema_files() -> None:
+    # (e) 兩份 S2.3 schema(+ v2 source-compat)皆經 SCHEMA_FILES 解析到磁碟上的真實檔。
+    for key in (
+        "sealed_build_receipt_v1",
+        "expected_identity_receipt_v1",
+        "source_compatibility_receipt_v2",
+    ):
+        assert key in SCHEMA_FILES, key
+        assert (SCHEMA_DIR / SCHEMA_FILES[key]).is_file(), key
+
+
+def test_central_gate_passes_committed_s23_receipts_at_any_wallclock() -> None:
+    # (a) round-trip + 無 freshness time-bomb:S2.3 是 BUILD-IDENTITY / source 產物(非 effect-class)。
+    # committed receipt 帶固定 30-min TTL,但中央閘刻意不施加 wall-clock 新鮮度窗 → 在真牆鐘 now、
+    # now=None、及不傳 now 皆 validate == []。真 recency 證明留在 learning-runtime-sealed-build CI job。
+    sealed, identity = _committed_s23_pair()
+    wallclock = _wallclock_now()  # 遠超 receipt 的 00:00–00:30Z 窗
+    for receipt in (sealed, identity):
+        assert validate_aiml_artifact(receipt, now=wallclock) == []
+        assert validate_aiml_artifact(receipt, now=None) == []
+        assert validate_aiml_artifact(receipt) == []
+
+
+def test_central_gate_round_trips_freshly_built_s23_receipts_at_wallclock() -> None:
+    # SSOT builder 造的 S2.3 receipt 亦經中央閘委派 validate == [](真牆鐘,不 gate 新鮮度)。
+    sealed, identity = _sb.emit_s23_receipts(observation_time="2026-07-24T00:00:00+00:00")
+    wallclock = _wallclock_now()
+    assert validate_aiml_artifact(sealed, now=wallclock) == []
+    assert validate_aiml_artifact(identity, now=wallclock) == []
+
+
+def test_central_gate_rejects_sealed_const_false_forgery_regardless_of_clock() -> None:
+    # (b) forgery:翻 load_verified_on_target=True 後只重封外層 self_digest → 中央閘委派拒(與時鐘無關)。
+    sealed, _identity = _committed_s23_pair()
+    forged = deepcopy(sealed)
+    assert forged["native_library_inventory"], "committed lock projects native libs"
+    forged["native_library_inventory"][0]["load_verified_on_target"] = True
+    forged["self_digest"] = _sb.receipt_digest(forged)
+    assert validate_aiml_artifact(forged, now=_wallclock_now()) != []
+    assert validate_aiml_artifact(forged, now=None) != []
+
+
+def test_central_gate_rejects_identity_production_flag_forgery_regardless_of_clock() -> None:
+    # (b) forgery:翻 production_provisioned.uid=True 後只重封外層 self_digest → 中央閘委派拒。
+    _sealed, identity = _committed_s23_pair()
+    forged = deepcopy(identity)
+    forged["production_provisioned"]["uid"] = True
+    forged["self_digest"] = _sb.receipt_digest(forged)
+    assert validate_aiml_artifact(forged, now=_wallclock_now()) != []
+    assert validate_aiml_artifact(forged, now=None) != []

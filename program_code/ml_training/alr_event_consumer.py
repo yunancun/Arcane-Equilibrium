@@ -53,6 +53,7 @@ from ml_training.alr_candidate_policy import (
 from ml_training.learning_runtime_manifest import (
     evaluate_compatibility,
     try_build_learning_runtime_manifest,
+    try_build_learning_runtime_manifest_v2,
 )
 from ml_training.aiml_gate_receipt_validator import validate_aiml_artifact
 from ml_training.candidate_proof_repository import (
@@ -101,6 +102,13 @@ _DEFAULT_COMPATIBILITY_RECEIPT_REL = (
     "docs/execution_plan/ai_ml_landing/receipts/"
     "S2.2A-source-compatibility-receipt-v1.json"
 )
+# S2-WP1(spawn value-guard):in-repo pinned v2 source_compatibility receipt(更強身分——
+# 綁 spec+sealed lock 雙檔 + parquet_etl COMPUTE)。production spawn 端據此把 pinned v2
+# learning_runtime_digest 帶成 non-None value-guard(env 契約見 main / S2.4 unit)。
+_DEFAULT_COMPATIBILITY_RECEIPT_V2_REL = (
+    "docs/execution_plan/ai_ml_landing/receipts/"
+    "S2.2A-source-compatibility-receipt-v2.json"
+)
 _RETENTION_GRACE_SECONDS = 900
 _CANDIDATE_EVIDENCE_MAX_AGE_SECONDS = 172_800
 _CANDIDATE_EVIDENCE_MAX_FILES = 128
@@ -136,6 +144,18 @@ _ZERO_AUTHORITY_COUNTERS = {
     "proof_claim_count": 0,
     "serving_promotion_count": 0,
     "latest_pointer_update_count": 0,
+}
+# 九項 authority 恆為 false 的常量向量(main 成功/value-guard fail-closed 兩路共用,避免漂移)。
+_ZERO_AUTHORITY = {
+    "exchange_authority": False,
+    "trading_authority": False,
+    "order_or_probe_authority": False,
+    "decision_lease_authority": False,
+    "cost_gate_authority": False,
+    "proof_authority": False,
+    "serving_authority": False,
+    "promotion_authority": False,
+    "latest_authority": False,
 }
 
 
@@ -1429,6 +1449,39 @@ def _load_expected_compatibility_manifest(
     return manifest if isinstance(manifest, dict) else None
 
 
+def resolve_pinned_learning_runtime_digest(
+    repo_root: Path | None = None,
+    *,
+    receipt_path: Path | None = None,
+) -> str | None:
+    """S2-WP1 spawn value-guard:讀取 committed v2 source_compatibility receipt 的 pinned
+    ``learning_runtime_digest``,並以當前 checkout 重算 v2 manifest 證明可重現(HEAD-independent)。
+
+    fail-closed:receipt 缺失/非 v2/中央驗證失敗/v2 重算失敗或不符 → 一律回 None,由 spawn
+    端(main)據此拒啟(不進 run_event_consumer)。此為「production spawn 把 pinned v2 digest
+    帶成 non-None value-guard」的來源函數;systemd unit(S2.4 安裝)以 env 供 operator pin。
+    """
+    root = repo_root or Path(__file__).resolve().parents[2]
+    path = receipt_path or (root / _DEFAULT_COMPATIBILITY_RECEIPT_V2_REL)
+    try:
+        receipt = json.loads(Path(path).read_bytes())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(receipt, dict):
+        return None
+    if receipt.get("schema_version") != "source_compatibility_receipt_v2":
+        return None
+    # 中央驗證器對 v2 receipt 做內層反偽造重算 + dependency_lock 形狀驗;失敗一律 fail-closed。
+    if validate_aiml_artifact(receipt):
+        return None
+    pinned = receipt.get("learning_runtime_digest")
+    # 以當前 checkout 重算 v2 身分(HEAD-independent,注入 dummy head 免 git 依賴)並比對 pin。
+    manifest, _errors = try_build_learning_runtime_manifest_v2(root, repo_source_head="0" * 40)
+    if manifest is None or manifest.get("self_digest") != pinned:
+        return None
+    return pinned
+
+
 def _preflight_source_compatibility(
     *,
     source_head: str | None,
@@ -1536,6 +1589,13 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         default=os.environ.get("ALR_EXPECTED_COMPATIBILITY_RECEIPT"),
     )
+    # S2-WP1 spawn value-guard(選用;S2.4 systemd unit 設此 env 啟用):operator pin 的 v2
+    # learning_runtime_digest。非 None 即啟用 value-guard——在任何 DB 前證 committed v2 身分
+    # 完整、可由當前 checkout 重算、且與此 pin 相符,任一不符即 fail-closed 拒啟。
+    parser.add_argument(
+        "--expected-learning-runtime-digest-v2",
+        default=os.environ.get("ALR_EXPECTED_LEARNING_RUNTIME_DIGEST_V2"),
+    )
     parser.add_argument(
         "--candidate-evidence-dir",
         type=Path,
@@ -1571,6 +1631,45 @@ def main(argv: list[str] | None = None) -> int:
                 "policy_config_hash": None,
                 "reason": str(exc),
             }
+    # S2-WP1 spawn value-guard:若 operator 供了 v2 pin,先在任何 DB 前 fail-closed 核驗
+    # committed v2 身分(完整 + 可由 checkout 重算 + 與 pin 相符);任一不符即拒啟,不進 consumer。
+    v2_pin = arguments.expected_learning_runtime_digest_v2
+    source_value_guard: dict[str, Any] = {
+        "status": "DISABLED",
+        "learning_runtime_digest_v2": None,
+    }
+    if v2_pin is not None:
+        resolved = resolve_pinned_learning_runtime_digest()
+        if resolved is None:
+            source_value_guard = {
+                "status": "FAIL_CLOSED_UNRESOLVED",
+                "learning_runtime_digest_v2": None,
+            }
+        elif resolved != v2_pin:
+            source_value_guard = {
+                "status": "FAIL_CLOSED_PIN_MISMATCH",
+                "learning_runtime_digest_v2": resolved,
+            }
+        else:
+            source_value_guard = {
+                "status": "PASS",
+                "learning_runtime_digest_v2": resolved,
+            }
+        if source_value_guard["status"] != "PASS":
+            print(
+                json.dumps(
+                    {
+                        "schema_version": "alr_event_consumer_result_v2",
+                        "result": None,
+                        "candidate_policy": candidate_policy_status,
+                        "source_value_guard": source_value_guard,
+                        "authority": dict(_ZERO_AUTHORITY),
+                        "authority_counters": dict(_ZERO_AUTHORITY_COUNTERS),
+                    },
+                    sort_keys=True,
+                )
+            )
+            return 1
     result = run_event_consumer(
         dsn_path=arguments.dsn_file,
         lock_path=arguments.lock_file,
@@ -1587,17 +1686,8 @@ def main(argv: list[str] | None = None) -> int:
                 "schema_version": "alr_event_consumer_result_v2",
                 "result": result,
                 "candidate_policy": candidate_policy_status,
-                "authority": {
-                    "exchange_authority": False,
-                    "trading_authority": False,
-                    "order_or_probe_authority": False,
-                    "decision_lease_authority": False,
-                    "cost_gate_authority": False,
-                    "proof_authority": False,
-                    "serving_authority": False,
-                    "promotion_authority": False,
-                    "latest_authority": False,
-                },
+                "source_value_guard": source_value_guard,
+                "authority": dict(_ZERO_AUTHORITY),
                 "authority_counters": dict(_ZERO_AUTHORITY_COUNTERS),
             },
             sort_keys=True,

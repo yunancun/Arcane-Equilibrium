@@ -2054,3 +2054,95 @@ def test_listen_wait_boundedly_drains_prepopulated_queue_without_dropping_remain
     second = wait_for_pg_notifications(connection, timeout_seconds=1.0, max_batch=2)
     assert len(second) == 1
     assert connection.notifies == []
+
+
+# ── S2-WP1 spawn value-guard(resolver + main 佈線) ─────────────────────────────
+_V2_PIN = "sha256:" + "5" * 64
+
+
+def _main_args(**extra: str) -> list[str]:
+    args = [
+        "--dsn-file", "/tmp/alr-shadow.dsn",
+        "--lock-file", "/tmp/alr-shadow.lock",
+        "--source-head", "a" * 40,
+    ]
+    for key, value in extra.items():
+        args += [key, value]
+    return args
+
+
+def test_resolve_pinned_reads_committed_v2_receipt() -> None:
+    # 真 checkout:resolver 讀 committed v2 receipt 並以重建核驗,回其 pinned learning_runtime_digest。
+    repo_root = Path(consumer.__file__).resolve().parents[2]
+    committed = json.loads(
+        (
+            repo_root
+            / "docs/execution_plan/ai_ml_landing/receipts"
+            / "S2.2A-source-compatibility-receipt-v2.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert consumer.resolve_pinned_learning_runtime_digest() == committed["learning_runtime_digest"]
+
+
+def test_resolve_pinned_fail_closed_when_receipt_absent(tmp_path: Path) -> None:
+    assert consumer.resolve_pinned_learning_runtime_digest(
+        receipt_path=tmp_path / "missing.json"
+    ) is None
+
+
+def test_resolve_pinned_fail_closed_on_checkout_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # checkout 漂移:重建的 v2 self_digest 與 committed pin 不符 → fail-closed None。
+    monkeypatch.setattr(
+        consumer,
+        "try_build_learning_runtime_manifest_v2",
+        lambda *a, **k: ({"self_digest": "sha256:" + "0" * 64}, []),
+    )
+    assert consumer.resolve_pinned_learning_runtime_digest() is None
+
+
+def test_main_value_guard_disabled_by_default(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(consumer, "run_event_consumer", lambda **kwargs: _drain_result())
+    monkeypatch.delenv("ALR_EXPECTED_LEARNING_RUNTIME_DIGEST_V2", raising=False)
+    assert consumer.main(_main_args()) == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["source_value_guard"] == {"status": "DISABLED", "learning_runtime_digest_v2": None}
+
+
+def test_main_value_guard_pass_when_pin_matches(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(consumer, "run_event_consumer", lambda **kwargs: _drain_result())
+    monkeypatch.setattr(consumer, "resolve_pinned_learning_runtime_digest", lambda *a, **k: _V2_PIN)
+    assert consumer.main(_main_args(**{"--expected-learning-runtime-digest-v2": _V2_PIN})) == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["source_value_guard"] == {"status": "PASS", "learning_runtime_digest_v2": _V2_PIN}
+
+
+def test_main_value_guard_fail_closed_on_pin_mismatch(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    calls: list[bool] = []
+    monkeypatch.setattr(consumer, "run_event_consumer", lambda **kwargs: calls.append(True))
+    monkeypatch.setattr(consumer, "resolve_pinned_learning_runtime_digest", lambda *a, **k: _V2_PIN)
+    other = "sha256:" + "6" * 64
+    assert consumer.main(_main_args(**{"--expected-learning-runtime-digest-v2": other})) == 1
+    output = json.loads(capsys.readouterr().out)
+    assert output["source_value_guard"]["status"] == "FAIL_CLOSED_PIN_MISMATCH"
+    assert output["result"] is None
+    assert calls == []  # 拒啟:未進 run_event_consumer
+
+
+def test_main_value_guard_fail_closed_when_unresolved(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    calls: list[bool] = []
+    monkeypatch.setattr(consumer, "run_event_consumer", lambda **kwargs: calls.append(True))
+    monkeypatch.setattr(consumer, "resolve_pinned_learning_runtime_digest", lambda *a, **k: None)
+    assert consumer.main(_main_args(**{"--expected-learning-runtime-digest-v2": _V2_PIN})) == 1
+    output = json.loads(capsys.readouterr().out)
+    assert output["source_value_guard"]["status"] == "FAIL_CLOSED_UNRESOLVED"
+    assert calls == []
