@@ -816,26 +816,26 @@ PR #114 (Wave A-C source landing, merge `7d78765a2`) merged before Codex review 
 
 - **§6 terminal — REVISED**: the external S3 Object-Lock **effect** (real bind/append/readback) is `S8.6`, **NOT an S1 blocker** — an S3 config is not required to close S1 (§4's S1.2A source Adapter is the S1 scope). `S1_ENGINEERING_CLOSED_EXTERNAL_WORM_BINDING_PENDING` and `BLOCKED_OPERATOR_SIGNING_ACTION` are superseded. The authenticated durable state is now `S1_CLOSURE_AUTHENTICATED_PENDING_MERGE`; it reaches `S1_CLOSED` only after exact-head review, required CI, PR #115 merge, final ledger projection and three-way synchronization.
 
-- **CI**: the `development-agent-governance` job and the change classifier now explicitly run/trigger the target-host effect/apply and external-WORM-sink suites (they do not match `test_agent_governance_*`). Evidence: +38 focused tests; full local `tests/structure/` green (2138 passed, 6 skipped). Design detail: `docs/execution_plan/ai_ml_landing/design/S1.6B-real-target-host-probe.md` §11.
+- **CI**: the `development-agent-governance` job and the change classifier now explicitly run/trigger the target-host effect/apply and external-WORM-sink suites (they do not match `test_agent_governance_*`). The exact-head Linux run additionally exposed an `ARG_MAX` failure in the large inline-Context test harness after 1,091 passes; commit `6e1ea957a` moves that harness from `node -e` argv to stdin and raises the complete governance job ceiling from 10 to 20 minutes without changing production behavior or authority. Evidence: +38 focused tests; full local `tests/structure/` green before the final CI-only repair (2174 passed, 6 skipped), plus the repaired focused suites 36/36. Design detail: `docs/execution_plan/ai_ml_landing/design/S1.6B-real-target-host-probe.md` §11.
 
 ### §8 — Authenticated closure emission (2026-07-24)
 
-The final H_effect is `f6e0099523de93e11986947bf673cea6e5209639`.
+The final H_effect is `6e1ea957af35544a844f704978366d11aa6c2364`.
 Linux `trade-core` freshly executed all six S1.5 disposable component classes
-(`sha256:cb96671598707d4dd3ca6b4284106bf8b19baf4ff259e6c9a0bcdeca04ef7cdf`)
+(`sha256:19498ba4303df77eb102e259526ec04a19c665673716280818ec5d0103b60a37`)
 and all eight S1.6 target-host seams
-(`sha256:1a0fde065ae4b95bb390e66b65be472a6e560f8f3d76135be6bc0c7c2b25a91c`);
+(`sha256:0a0d050b8b555b1f8d627937c52a91a7bb0c132364fa8f78b0ccd640b64a89bb`);
 both passed with exact rollback/postcheck and zero residue. The operator first
 signed the exact intent/source head under the dedicated apply namespace, then
 signed the complete closure bundle under the S1 closure namespace. Independent
 SSHSIG verification, immediate trusted finalization and historical replay at
 the signed bundle instant all pass with zero errors. The authenticated closure
 digest is
-`sha256:52842fdfe6237e25d939d738eb54c2a79fdca5c87ec2577da304b83127282180`;
+`sha256:e110598b83123f60881e982156913944de37bdf1bab1fdaabdc31c2b567e3dbc`;
 the trusted bundle is
-`sha256:81860f0dfd78954847209fcb05db317bf8063742c7d7b7accd5dbd4bad521d6c`,
+`sha256:cdbed2fcacfa26f93d5c6a0a8e36f604df8b6fb28bbf5793d9a0baceea9bd0b7`,
 and the finalization digest is
-`sha256:8f26a57373faa5a2b20ed566837736e6ce6e3189d6e117b5112edf8b9f9cff71`.
+`sha256:68bbced3a100c9e52e9f0845e600cce0552b1b67cf3a11d925f4b537dee86d6c`.
 The signed bundle and complete causal artifacts are durable under
 `docs/execution_plan/ai_ml_landing/receipts/S1-closure-fix-2026-07-24/`.
 This emission grants none of the nine runtime/trading authorities.

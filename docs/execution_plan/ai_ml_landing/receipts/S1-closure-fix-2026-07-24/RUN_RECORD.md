@@ -2,7 +2,7 @@
 
 **Date**: 2026-07-24
 **Host**: `trade-core` (Linux, non-root uid 1000)
-**H_effect**: `f6e0099523de93e11986947bf673cea6e5209639`
+**H_effect**: `6e1ea957af35544a844f704978366d11aa6c2364`
 **Branch / PR**: `agent/aiml-s1-closure-p1p2-fixes` / PR #115
 **Effect class**: `TARGET_HOST_DISPOSABLE_RUNTIME_PROBE`
 
@@ -17,17 +17,17 @@ that exact head is merged.
 - S1.5 contribution: all six real disposable component classes were freshly
   rerun at the exact H_effect with byte-identical source/schema; each performed
   apply → exact rollback → independent postcheck; status `PASS`,
-  digest `sha256:cb96671598707d4dd3ca6b4284106bf8b19baf4ff259e6c9a0bcdeca04ef7cdf`.
+  digest `sha256:19498ba4303df77eb102e259526ec04a19c665673716280818ec5d0103b60a37`.
 - S1.6 target-host effect: all eight fixed-path seams
   `PASSED_TARGET_HOST`; `binding=BINDING`;
   `final_choice=content_addressed_fixed_path`;
-  effect digest `sha256:1a0fde065ae4b95bb390e66b65be472a6e560f8f3d76135be6bc0c7c2b25a91c`.
+  effect digest `sha256:0a0d050b8b555b1f8d627937c52a91a7bb0c132364fa8f78b0ccd640b64a89bb`.
 - Host identity: observed and expected host are both `trade-core`.
 - Cleanup: zero unit, cgroup, netns, temporary-directory, or disposable-PG
   residue; production PostgreSQL `:5432` was not touched.
 - Closure: `closure_packet_v1` trusted finalization `PASS`, no errors;
   closure digest
-  `sha256:52842fdfe6237e25d939d738eb54c2a79fdca5c87ec2577da304b83127282180`.
+  `sha256:e110598b83123f60881e982156913944de37bdf1bab1fdaabdc31c2b567e3dbc`.
 - Operator authentication: the canonical trusted-execution bundle was signed
   through the current SSH agent under identity
   `aiml-s1-target-host-operator-v1` and namespace
@@ -70,7 +70,7 @@ artifact-only head still requires the separate exact-head Codex merge review.
 ## Adversarial closeout findings
 
 The final whole-suite regression, a deliberately mistyped SHA, historical
-receipt replay, and exact-head CI caught four
+receipt replay, and exact-head CI caught five
 additional P1s before publication:
 
 1. The direct-caller Context inventory bounded only the number of matches, not
@@ -95,6 +95,12 @@ additional P1s before publication:
    minute ceiling and was cancelled. Commit `45a854fa6` places the regression
    under the required glob and locks a 10-minute job ceiling with a static
    contract test.
+5. The exact-head Linux gate then proved that the inline Context harness itself
+   exceeded Linux `ARG_MAX` when passed through `node -e`; 1,091 tests passed
+   before that process failed to start. Commit `6e1ea957a` feeds the same large
+   generated harness through stdin, adds the Linux-safe regression path, and
+   raises the complete governance job ceiling from 10 to 20 minutes. This
+   changes no production workflow or authority.
 
 The exact-head adversarial review then found five further P1 forge paths, all
 closed in source commit `f6e009952` with load-bearing negatives:
@@ -114,9 +120,10 @@ closed in source commit `f6e009952` with load-bearing negatives:
    non-OPS reviewer now cites the authenticated workflow wave that owns its
    exact fragment digest.
 
-The earlier `6febd9d1e`, `45a854fa6`, and rejected mistyped-head generations
-are superseded; none is the final S1 closure. Both S1.5 and S1.6 effects and
-both operator signatures were freshly emitted at the H_effect above.
+The earlier `6febd9d1e`, `45a854fa6`, `f6e009952`, and rejected mistyped-head
+closure generations are superseded; none is the final S1 closure. Both S1.5
+and S1.6 effects and both operator signatures were freshly emitted at the
+H_effect above.
 
 ## Durable artifacts
 
@@ -141,15 +148,15 @@ both operator signatures were freshly emitted at the H_effect above.
 Key finalization digests:
 
 - workflow wave:
-  `sha256:e43edb47e809243282bebb87a95289f453181f0d5f8d3528b681f3c346300f68`
+  `sha256:cbc5d36984d0edbabc3a112c0c36f86f333a24acbf16e45c5c73a2efa4383a42`
 - trusted bundle:
-  `sha256:81860f0dfd78954847209fcb05db317bf8063742c7d7b7accd5dbd4bad521d6c`
+  `sha256:cdbed2fcacfa26f93d5c6a0a8e36f604df8b6fb28bbf5793d9a0baceea9bd0b7`
 - signature bytes:
-  `sha256:ee455990a1dd6247f547296bc1803e755d03031352c037d71b073fdc4d16b8e7`
+  `sha256:bd84abf880954177c6d23367ac2c6ca907003eaad22e044ad0bb16193727635e`
 - landing attempt:
-  `sha256:74b87c966c041a6c569f5a55c10a8f2a71c9e7f0a11930646ce4e6cd23befa35`
+  `sha256:b572eb279056b4647c93cdad5333de9ff9ecaaeb559e8b181e6e73538a429e1e`
 - finalization:
-  `sha256:8f26a57373faa5a2b20ed566837736e6ce6e3189d6e117b5112edf8b9f9cff71`
+  `sha256:68bbced3a100c9e52e9f0845e600cce0552b1b67cf3a11d925f4b537dee86d6c`
 
 ## Boundary and final transition
 
