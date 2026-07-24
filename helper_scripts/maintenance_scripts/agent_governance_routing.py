@@ -43,6 +43,10 @@ SIDE_EFFECT_CLASSES = {
     "broker_private_effect", "public_web_read", "private_external_contact",
     # S1 formal-closure Wave A(S1.6B):非 root user-scope 拋棄式 target-host 探針效果類。
     "target_host_probe",
+    # S2.0(WP2):生產唯讀 PG observer-bootstrap 效果類(SOURCE seam;真 apply 在有 exact operator
+    # SSHSIG 前恆 fail-closed)。此處只認得 + 表面一致性驗;live route_task effect 節點的注入刻意
+    # 延遲到 S2.0 EFFECT session(見下方 route_task 註解與 registry invariant)。
+    "pg_observer_bootstrap",
 }
 SOURCE_WRITE_SHAPES = {
     "implementation", "feature", "change", "bug", "fix", "refactor", "migration",
@@ -61,6 +65,9 @@ UNSUPPORTED_EFFECT_CLASSES = {
 P0B_ADAPTER_ID = "p0b_alr_rollforward_adapter_v1"
 # S1 formal-closure Wave A(S1.6B):專屬拋棄式 target-host 探針 effect adapter 的 route-node 身分。
 TARGET_HOST_PROBE_ADAPTER_ID = "target_host_disposable_runtime_probe_adapter_v1"
+# S2.0(WP2):生產唯讀 PG observer-bootstrap effect adapter 的 route-node 身分(SOURCE 已宣告;
+# 真 route_task effect 節點注入延遲到 S2.0 EFFECT session)。
+PG_OBSERVER_BOOTSTRAP_ADAPTER_ID = "pg_observer_bootstrap_adapter_v1"
 P0B_CLAIM_KEYS_BY_PHASE = {
     "stage": frozenset({
         "p0b_effect_adapter_selection",
@@ -429,6 +436,18 @@ def _normalize_task_facts(task_facts: dict[str, Any]) -> dict[str, Any]:
             "side_effect_class=target_host_probe requires a runtime_effect/service surface, "
             "runtime_claim=true, and high or critical risk"
         )
+    # S2.0(WP2)FORWARD-only 表面一致性——pg_observer_bootstrap 效果必須帶 pg/runtime_effect 表面 +
+    # runtime_claim=true + 高/critical risk。同 target_host_probe:刻意 NOT 加反向「裸 pg 表面即需此類」
+    # 規則(pg 是共享 OPERATION_SURFACES,反向規則會回歸既有 deploy/ops 路由)。
+    if effect == "pg_observer_bootstrap" and not (
+        normalized_surfaces & {"pg", "runtime_effect"}
+        and normalized.get("runtime_claim") is True
+        and risk in {"high", "critical"}
+    ):
+        raise ValueError(
+            "side_effect_class=pg_observer_bootstrap requires a pg/runtime_effect surface, "
+            "runtime_claim=true, and high or critical risk"
+        )
     normalized["side_effect_class"] = effect
     aiml_program_adoption = aiml_program_adoption_selected(
         normalized.get("claim_inputs", {})
@@ -753,6 +772,11 @@ def route_task(task_facts: dict[str, Any]) -> dict[str, Any]:
                 result_schema_version="target_host_effect_result_v1",
             )
             postcheck_requires = [TARGET_HOST_PROBE_ADAPTER_ID]
+        # S2.0(WP2)pg_observer_bootstrap:route class(side_effect_class + 表面一致性)已宣告,但依
+        # registry invariant「no route_task effect node injected before the S2.0 EFFECT session」,此 WP2
+        # SOURCE 波刻意 NOT 注入 PG_OBSERVER_BOOTSTRAP_ADAPTER_ID effect 節點——一個 pg_observer_bootstrap
+        # 任務走 ops_preflight -> ops_postcheck(無 effect adapter),生產 apply 恆 fail-closed
+        # (EXTERNAL_VERIFICATION_PENDING)直到 S2.0 EFFECT session 帶 exact operator SSHSIG 才注入。
         add("ops_postcheck", role="OPS", requires=postcheck_requires, reason="independent operational evidence")
         predecessor = "ops_postcheck"
     elif unsupported_effect:

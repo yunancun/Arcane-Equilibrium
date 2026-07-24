@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/pg_observer_bootstrap_rollback_v1.schema.json",
+  "title": "pg_observer_bootstrap_rollback_v1",
+  "description": "Exact REVOKE/DROP rollback record for one S2.0 observer bootstrap, with a pre == post catalog-projection digest proving exact restoration (the observer role and its grants are gone).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "status",
+    "intent_id",
+    "observer_role",
+    "database",
+    "host",
+    "pre_state_digest",
+    "post_state_digest",
+    "revoke_statements",
+    "drop_statement",
+    "restored_exact",
+    "observer_absent",
+    "observed_at",
+    "expires_at",
+    "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "pg_observer_bootstrap_rollback_v1"},
+    "status": {"enum": ["RESTORED_EXACT", "NOT_RESTORED"]},
+    "intent_id": {"$ref": "#/$defs/digest"},
+    "observer_role": {"$ref": "#/$defs/pg_ident"},
+    "database": {"type": "string", "minLength": 1},
+    "host": {"type": "string", "minLength": 1},
+    "pre_state_digest": {"$ref": "#/$defs/digest"},
+    "post_state_digest": {"$ref": "#/$defs/digest"},
+    "revoke_statements": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "drop_statement": {"type": "string", "minLength": 1},
+    "restored_exact": {"type": "boolean"},
+    "observer_absent": {"type": "boolean"},
+    "observed_at": {"$ref": "#/$defs/timestamp"},
+    "expires_at": {"$ref": "#/$defs/timestamp"},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "RESTORED_EXACT"}}},
+      "then": {
+        "properties": {
+          "restored_exact": {"const": true},
+          "observer_absent": {"const": true}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "pg_ident": {"type": "string", "pattern": "^[a-z_][a-z0-9_]*$"}
+  }
+}
