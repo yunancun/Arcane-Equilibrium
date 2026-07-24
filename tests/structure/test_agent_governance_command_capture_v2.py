@@ -122,19 +122,28 @@ def _patch_test_binding(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def test_absent_claims_are_canonical_false_and_live_facade_is_readable() -> None:
+def test_absent_claims_are_canonical_false_and_live_facade_is_readable(
+    tmp_path: Path,
+) -> None:
     artifact, routed = _review_context()
     contract = json.loads(artifact["canonical_plan"])["task_contract"]
     assert contract["runtime_claim"] is False
     assert contract["end_to_end_claim"] is False
     assert routed["task_facts"]["runtime_claim"] is False
+    # context artifact 以 @file 傳入(AGENTS.md / 各 role card 的 canonical 慣例),
+    # 不塞進單一 argv 元素;否則隨 registry 成長,序列化 JSON 會超過 Linux
+    # execve 的 MAX_ARG_STRLEN(128 KiB)單參數上限而觸發 E2BIG。
+    context_file = tmp_path / "context.json"
+    context_file.write_text(
+        json.dumps(artifact, separators=(",", ":")), encoding="utf-8"
+    )
     completed = subprocess.run(
         [
             sys.executable,
             "helper_scripts/maintenance_scripts/agent_governance.py",
             "capture-command", "--native-agent", "E2",
             "--node-id", "independent_review",
-            "--context-artifact", json.dumps(artifact, separators=(",", ":")),
+            "--context-artifact", f"@{context_file}",
             "--", "git", "rev-parse", "--is-inside-work-tree",
         ],
         cwd=ROOT, check=False, capture_output=True, text=True,
