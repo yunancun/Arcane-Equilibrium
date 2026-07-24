@@ -520,6 +520,13 @@ def _normalize_actual_training_inputs(
         raise AlrChallengerFitCaptureAttestationError(
             "actual_code_manifest_material_mismatch"
         )
+    # LR1(S2.2A):finalize 顯式綁定 spawn 契約的 learning_runtime_digest。它已隨
+    # code_manifest_material 逐位元校驗,這裡再對 expected_training_inputs 交叉核對,
+    # 任一側漂移即 fail-closed(等同 fit quarantine 的終端執法)。
+    if code.get("learning_runtime_digest") != expected.get("learning_runtime_digest"):
+        raise AlrChallengerFitCaptureAttestationError(
+            "actual_learning_runtime_digest_mismatch"
+        )
     if materials["training_config_material"] != _canonical_json(config).encode(
         "utf-8"
     ):

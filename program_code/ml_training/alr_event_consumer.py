@@ -50,6 +50,10 @@ from ml_training.alr_candidate_policy import (
     CandidatePolicyError,
     validate_candidate_policy_configuration,
 )
+from ml_training.learning_runtime_manifest import (
+    evaluate_runtime_digest_pin,
+    try_build_learning_runtime_manifest,
+)
 from ml_training.candidate_proof_repository import (
     BATCH_SCHEMA_VERSION as CANDIDATE_PROOF_BATCH_SCHEMA_VERSION,
     compute_candidate_proof_repository_receipt_hash,
@@ -459,8 +463,13 @@ def event_consumer_loop(
     notification_timeout_seconds: float = 5.0,
     history_interval_seconds: float = 60.0,
     monotonic_seconds: Any = time.monotonic,
+    fit_quarantined: bool = False,
 ) -> dict[str, int]:
-    """Fresh 優先 listener；idle reconciliation 後才允許小額 history lane。"""
+    """Fresh 優先 listener；idle reconciliation 後才允許小額 history lane。
+
+    LR1：fit_quarantined=True 時，capture(drain)照常，但 fit-triggering 的 candidate
+    projection 轉換被 fence(不再由漂移的 training 面產生新學習候選)。
+    """
     totals = {
         "drains": 0,
         "notifications_seen": 0,
@@ -490,6 +499,7 @@ def event_consumer_loop(
             session_id=session_id,
             candidate_evidence_directory=candidate_evidence_directory,
             candidate_policy=candidate_policy,
+            fit_quarantined=fit_quarantined,
         )
     while not should_stop():
         wait_kwargs = {
@@ -548,6 +558,7 @@ def event_consumer_loop(
                     session_id=session_id,
                     candidate_evidence_directory=candidate_evidence_directory,
                     candidate_policy=candidate_policy,
+                    fit_quarantined=fit_quarantined,
                 )
             elif candidate_board_wake:
                 _process_candidate_reconciliation(
@@ -558,6 +569,7 @@ def event_consumer_loop(
                     session_id=session_id,
                     candidate_evidence_directory=candidate_evidence_directory,
                     candidate_policy=candidate_policy,
+                    fit_quarantined=fit_quarantined,
                 )
             else:
                 _accumulate_health(
@@ -1263,9 +1275,19 @@ def run_event_consumer(
     repo_root: Path | None = None,
     candidate_evidence_directory: Path | None = None,
     candidate_policy: Mapping[str, Any] | None = None,
+    expected_learning_runtime_digest: str | None = None,
 ) -> dict[str, int]:
-    """驗證 checkout pin 後執行 shadow consumer，並持久化真實 lifecycle。"""
-    verify_runtime_source_head(source_head, repo_root=repo_root)
+    """LR1 相容性 preflight 後執行 shadow consumer，並持久化真實 lifecycle。
+
+    整倉 HEAD 已降為遙測：docs-only 提交不再停 ingest。只有 capture 面不相容(建置失敗
+    等)才 fail-closed 停 capture；training 契約漂移只 quarantine fit(fit_quarantined)。
+    """
+    compatibility = _preflight_source_compatibility(
+        source_head=source_head,
+        expected_learning_runtime_digest=expected_learning_runtime_digest,
+        repo_root=repo_root,
+    )
+    fit_quarantined = bool(compatibility["fit_quarantined"])
     dsn = read_local_dsn_file(dsn_path)
     stop_event = threading.Event()
     previous_handlers = _install_shutdown_handlers(stop_event)
@@ -1299,6 +1321,7 @@ def run_event_consumer(
                         candidate_evidence_directory=candidate_evidence_directory,
                         candidate_policy=candidate_policy,
                         candidate_board_source=board_source,
+                        fit_quarantined=fit_quarantined,
                     )
                     stop_consumer_session(connection, session_id=session_id)
                     session_started = False
@@ -1350,6 +1373,51 @@ def verify_runtime_source_head(
     if actual != source_head:
         raise AlrEventConsumerError("source_head_mismatch")
     return actual
+
+
+def _telemetry_source_head_match(
+    source_head: str | None,
+    *,
+    repo_root: Path | None = None,
+) -> str:
+    """LR1 降級：整倉 HEAD 比對只留遙測；mismatch/unavailable 不再停 capture。"""
+    if not isinstance(source_head, str) or not _SOURCE_HEAD_RE.fullmatch(source_head):
+        return "unpinned"
+    try:
+        verify_runtime_source_head(source_head, repo_root=repo_root)
+    except AlrEventConsumerError as exc:
+        return str(exc)
+    return "match"
+
+
+def _preflight_source_compatibility(
+    *,
+    source_head: str | None,
+    expected_learning_runtime_digest: str | None,
+    repo_root: Path | None,
+) -> dict[str, Any]:
+    """LR1 preflight：以 learning_runtime_digest 判定 capture/fit 相容。
+
+    只有 capture 不相容(清單建置失敗等)才 raise 停 ingest；training 契約相對 reviewed
+    pin 漂移只把 fit_quarantined 設為 True。整倉 HEAD 僅作為遙測記錄。
+    """
+    root = repo_root or Path(__file__).resolve().parents[2]
+    manifest, build_errors = try_build_learning_runtime_manifest(root)
+    compatibility = evaluate_runtime_digest_pin(
+        expected_learning_runtime_digest, manifest
+    )
+    if compatibility["capture_status"] != "COMPATIBLE":
+        reasons = compatibility["capture_stop_reasons"] or build_errors or ["unknown"]
+        raise AlrEventConsumerError("capture_surface_incompatible:" + ",".join(reasons))
+    return {
+        "repo_source_head": manifest["repo_source_head"] if manifest else None,
+        "learning_runtime_digest": manifest["self_digest"] if manifest else None,
+        "expected_learning_runtime_digest": expected_learning_runtime_digest,
+        "source_head_match": _telemetry_source_head_match(source_head, repo_root=root),
+        "fit_quarantined": compatibility["fit_status"] != "COMPATIBLE",
+        "capture_status": compatibility["capture_status"],
+        "fit_status": compatibility["fit_status"],
+    }
 
 
 def _connect_listener(dsn: str) -> Any:
@@ -1413,6 +1481,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-batch", type=int, default=32)
     parser.add_argument("--source-head", default=os.environ.get("ALR_SOURCE_HEAD"))
     parser.add_argument(
+        "--expected-learning-runtime-digest",
+        default=os.environ.get("ALR_EXPECTED_LEARNING_RUNTIME_DIGEST"),
+    )
+    parser.add_argument(
         "--candidate-evidence-dir",
         type=Path,
         default=os.environ.get("ALR_CANDIDATE_EVIDENCE_DIR"),
@@ -1454,6 +1526,7 @@ def main(argv: list[str] | None = None) -> int:
         source_head=arguments.source_head,
         candidate_evidence_directory=arguments.candidate_evidence_dir,
         candidate_policy=candidate_policy,
+        expected_learning_runtime_digest=arguments.expected_learning_runtime_digest,
     )
     print(
         json.dumps(
@@ -1489,22 +1562,28 @@ def _process_operational_cycle(
     session_id: str,
     candidate_evidence_directory: Path | None = None,
     candidate_policy: Mapping[str, Any] | None = None,
+    fit_quarantined: bool = False,
 ) -> None:
-    """Fresh/history drain 後依既有順序執行 bounded research-only 工作。"""
+    """Fresh/history drain 後依既有順序執行 bounded research-only 工作。
+
+    LR1：fit_quarantined 時 fence 掉 fit-triggering 的 candidate projection 轉換，
+    feedback/proof/retention/health 等非 fit 工作照常。
+    """
     _accumulate_feedback(
         totals,
         process_outcome_feedback_backlog(connection, max_batch=max_batch),
     )
-    _accumulate_operational(
-        totals,
-        run_candidate_aware_backlog(
-            connection,
-            source_head=source_head,
-            max_batch=max_batch,
-            evidence_directory=candidate_evidence_directory,
-            candidate_policy=candidate_policy,
-        ),
-    )
+    if not fit_quarantined:
+        _accumulate_operational(
+            totals,
+            run_candidate_aware_backlog(
+                connection,
+                source_head=source_head,
+                max_batch=max_batch,
+                evidence_directory=candidate_evidence_directory,
+                candidate_policy=candidate_policy,
+            ),
+        )
     _accumulate_candidate_proof_repository(
         totals,
         process_candidate_proof_repository_backlog(
@@ -1538,18 +1617,24 @@ def _process_candidate_reconciliation(
     session_id: str,
     candidate_evidence_directory: Path | None = None,
     candidate_policy: Mapping[str, Any] | None = None,
+    fit_quarantined: bool = False,
 ) -> None:
-    """Board wake path: candidate reconciliation plus health, never feedback/retention."""
-    _accumulate_operational(
-        totals,
-        run_candidate_aware_backlog(
-            connection,
-            source_head=source_head,
-            max_batch=max_batch,
-            evidence_directory=candidate_evidence_directory,
-            candidate_policy=candidate_policy,
-        ),
-    )
+    """Board wake path: candidate reconciliation plus health, never feedback/retention.
+
+    LR1：fit_quarantined 時 fence 掉 fit-triggering 的 candidate projection，只保留
+    proof-repository 唯讀映射與 health 心跳。
+    """
+    if not fit_quarantined:
+        _accumulate_operational(
+            totals,
+            run_candidate_aware_backlog(
+                connection,
+                source_head=source_head,
+                max_batch=max_batch,
+                evidence_directory=candidate_evidence_directory,
+                candidate_policy=candidate_policy,
+            ),
+        )
     _accumulate_candidate_proof_repository(
         totals,
         process_candidate_proof_repository_backlog(

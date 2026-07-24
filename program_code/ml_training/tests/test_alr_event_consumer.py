@@ -926,7 +926,11 @@ def test_missing_candidate_directory_fails_before_db_listener_connect(
             nonlocal active_lock
             active_lock = False
 
-    monkeypatch.setattr(consumer, "verify_runtime_source_head", lambda *args, **kwargs: "a" * 40)
+    monkeypatch.setattr(
+        consumer,
+        "_preflight_source_compatibility",
+        lambda **kwargs: {"fit_quarantined": False, "repo_source_head": "a" * 40},
+    )
     monkeypatch.setattr(consumer, "read_local_dsn_file", lambda path: "local-dsn")
     monkeypatch.setattr(consumer, "_install_shutdown_handlers", lambda event: {})
     monkeypatch.setattr(consumer, "_restore_shutdown_handlers", lambda previous: None)
@@ -967,7 +971,11 @@ def test_busy_runtime_lock_never_opens_candidate_board_watch(
         def __exit__(self, *args: object) -> None:
             return None
 
-    monkeypatch.setattr(consumer, "verify_runtime_source_head", lambda *args, **kwargs: "a" * 40)
+    monkeypatch.setattr(
+        consumer,
+        "_preflight_source_compatibility",
+        lambda **kwargs: {"fit_quarantined": False, "repo_source_head": "a" * 40},
+    )
     monkeypatch.setattr(consumer, "read_local_dsn_file", lambda path: "local-dsn")
     monkeypatch.setattr(consumer, "_install_shutdown_handlers", lambda event: {})
     monkeypatch.setattr(consumer, "_restore_shutdown_handlers", lambda previous: None)
@@ -1867,6 +1875,56 @@ def test_runtime_source_head_must_match_checkout_before_database_use(
     source = Path(consumer.__file__).read_text(encoding="utf-8")
     assert "ALR_RECONCILE_AFTER" not in source
     assert "reconcile_after" not in source
+
+
+def test_docs_only_head_move_does_not_stop_capture(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # LR1(S2.2A):學習面身分不變(self_digest==expected pin),但整倉 HEAD 已移動
+    # (docs-only 提交)。preflight 不得 raise(capture 不停),fit 也不 quarantine;
+    # 整倉 HEAD 比對只留遙測。
+    manifest = {
+        "schema_version": "learning_runtime_manifest_v1",
+        "repo_source_head": "c" * 40,
+        "capture_contract": {"digest": "sha256:" + "a" * 64},
+        "training_contract": {"digest": "sha256:" + "b" * 64},
+        "self_digest": "sha256:" + "d" * 64,
+    }
+    monkeypatch.setattr(
+        consumer, "try_build_learning_runtime_manifest", lambda *a, **k: (manifest, [])
+    )
+
+    def _head_moved(source_head: str, **kwargs: object) -> str:
+        raise AlrEventConsumerError("source_head_mismatch")
+
+    monkeypatch.setattr(consumer, "verify_runtime_source_head", _head_moved)
+
+    result = consumer._preflight_source_compatibility(
+        source_head="e" * 40,
+        expected_learning_runtime_digest="sha256:" + "d" * 64,
+        repo_root=None,
+    )
+    assert result["fit_quarantined"] is False
+    assert result["capture_status"] == "COMPATIBLE"
+    assert result["source_head_match"] == "source_head_mismatch"
+    assert result["repo_source_head"] == "c" * 40
+
+
+def test_capture_surface_build_failure_stops_capture(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # LR1:清單建置失敗(缺 allowlisted 輸入等)→ capture 面不相容 → fail-closed 停 ingest。
+    monkeypatch.setattr(
+        consumer,
+        "try_build_learning_runtime_manifest",
+        lambda *a, **k: (None, ["missing_input:program_code/ml_training/x.py"]),
+    )
+    with pytest.raises(AlrEventConsumerError, match="capture_surface_incompatible"):
+        consumer._preflight_source_compatibility(
+            source_head="a" * 40,
+            expected_learning_runtime_digest=None,
+            repo_root=None,
+        )
 
 
 def test_main_emits_exact_zero_authority_counter_vector(

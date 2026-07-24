@@ -259,8 +259,10 @@ def test_persist_qualified_training_receipt_uses_valid_contract_and_returns_exac
     assert payload["reward_set_hash"] == (
         "73580dd7c29558f97192815111add42323b5660ace93c78a2b7821c1a94ce90f"
     )
+    # LR1(S2.2A):code_manifest 新增 learning_runtime_digest → code_manifest_hash 變動 →
+    # durable_receipt_hash 隨之更新(確定性重算值)。
     assert payload["durable_receipt_hash"] == (
-        "b5846686e523e3816094631fdc1881491caaae776aed2783218fd4b563a72739"
+        "81e7a4f2e585db6c3ab4cc86a42fcf525b36a9a0bb3b6cbd02f2a39a624cfc96"
     )
     assert connection.cursor_count == 1
     assert connection.events == [

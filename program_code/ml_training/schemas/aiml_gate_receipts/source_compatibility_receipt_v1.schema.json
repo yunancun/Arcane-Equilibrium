@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "source_compatibility_receipt_v1.schema.json",
+  "title": "Scoped source-compatibility receipt (S2.2A LR1)",
+  "description": "SOURCE_READY receipt binding the immutable learning_runtime_manifest_v1 whose self_digest is the learning_runtime_digest. repo_source_head is telemetry only and is never hashed into any component digest; docs-only commits move it without changing any digest. Cross-field integrity (self_digest, learning_runtime_digest==manifest.self_digest, capture/training_contract_digest==manifest, migration_fingerprints==manifest) is enforced in the Python validator, not schema if/then.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "session_id", "generated_at_utc", "repo_source_head", "learning_runtime_manifest", "learning_runtime_digest", "capture_contract_digest", "training_contract_digest", "migration_fingerprints", "bind_points", "status", "boundary", "self_digest"],
+  "properties": {
+    "schema_version": {"const": "source_compatibility_receipt_v1"},
+    "session_id": {"const": "S2.2A"},
+    "generated_at_utc": {"$ref": "#/$defs/timestamp"},
+    "repo_source_head": {"$ref": "#/$defs/git_head"},
+    "learning_runtime_manifest": {"$ref": "#/$defs/learning_runtime_manifest"},
+    "learning_runtime_digest": {"$ref": "#/$defs/digest"},
+    "capture_contract_digest": {"$ref": "#/$defs/digest"},
+    "training_contract_digest": {"$ref": "#/$defs/digest"},
+    "migration_fingerprints": {"$ref": "#/$defs/migration_fingerprints"},
+    "bind_points": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["file", "function", "binds"],
+        "properties": {
+          "file": {"type": "string", "minLength": 1},
+          "function": {"type": "string", "minLength": 1},
+          "binds": {"const": "learning_runtime_digest"}
+        }
+      }
+    },
+    "status": {"const": "SOURCE_READY"},
+    "boundary": {"type": "string", "minLength": 1},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "sha256hex": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "git_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "migration_fingerprints": {
+      "type": "object",
+      "minProperties": 10,
+      "additionalProperties": {"$ref": "#/$defs/sha256hex"}
+    },
+    "learning_runtime_manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "generated_at_utc", "repo_source_head", "capture_contract", "training_contract", "boundary", "self_digest"],
+      "properties": {
+        "schema_version": {"const": "learning_runtime_manifest_v1"},
+        "generated_at_utc": {"$ref": "#/$defs/timestamp"},
+        "repo_source_head": {"$ref": "#/$defs/git_head"},
+        "capture_contract": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["digest", "inputs", "snapshot_feature_schema_version"],
+          "properties": {
+            "digest": {"$ref": "#/$defs/digest"},
+            "inputs": {
+              "type": "object",
+              "minProperties": 1,
+              "additionalProperties": {"$ref": "#/$defs/sha256hex"}
+            },
+            "snapshot_feature_schema_version": {"type": "string", "minLength": 1}
+          }
+        },
+        "training_contract": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["digest", "components"],
+          "properties": {
+            "digest": {"$ref": "#/$defs/digest"},
+            "components": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["learning_code_digest", "migration_fingerprints", "feature_contract_digest", "label_contract_digest", "action_policy_digest", "dependency_lock_digest", "runtime_config_digest"],
+              "properties": {
+                "learning_code_digest": {"$ref": "#/$defs/digest"},
+                "migration_fingerprints": {"$ref": "#/$defs/migration_fingerprints"},
+                "feature_contract_digest": {"$ref": "#/$defs/digest"},
+                "label_contract_digest": {"$ref": "#/$defs/digest"},
+                "action_policy_digest": {"$ref": "#/$defs/digest"},
+                "dependency_lock_digest": {"$ref": "#/$defs/digest"},
+                "runtime_config_digest": {"$ref": "#/$defs/digest"}
+              }
+            }
+          }
+        },
+        "boundary": {"type": "string", "minLength": 1},
+        "self_digest": {"$ref": "#/$defs/digest"}
+      }
+    }
+  }
+}

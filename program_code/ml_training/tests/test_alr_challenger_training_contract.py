@@ -67,6 +67,8 @@ def _code_manifest() -> dict:
             "model_registry.py": "4" * 64,
         },
         "dependency_lock_hash": "5" * 64,
+        # LR1(S2.2A):scoped learning identity(== learning_runtime_manifest.self_digest)。
+        "learning_runtime_digest": "sha256:" + "6" * 64,
     }
 
 
@@ -592,10 +594,18 @@ def test_validator_returns_invalid_for_noncanonical_nested_values() -> None:
 
 def test_builder_accepts_no_caller_pit_or_raw_candidate_inputs() -> None:
     signature = inspect.signature(build_alr_challenger_training_contract)
+    # LR1(S2.2A):新增的 expected_learning_runtime_digest 是治理 pin(非 PIT/原始候選
+    # 輸入),仍為 keyword-only,不放寬「不接受 caller PIT/raw candidate」的原意。
     assert tuple(signature.parameters) == (
         "repository_receipt",
         "code_manifest",
         "training_config",
+        "expected_learning_runtime_digest",
     )
     assert signature.parameters["code_manifest"].kind is inspect.Parameter.KEYWORD_ONLY
     assert signature.parameters["training_config"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert (
+        signature.parameters["expected_learning_runtime_digest"].kind
+        is inspect.Parameter.KEYWORD_ONLY
+    )
+    assert signature.parameters["expected_learning_runtime_digest"].default is None

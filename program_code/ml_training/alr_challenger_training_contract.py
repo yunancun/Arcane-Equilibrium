@@ -122,6 +122,8 @@ _POSITIVE_RESOURCE_KEYS = {
 }
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 _GIT_HEAD_RE = re.compile(r"^[0-9a-f]{40}$")
+# LR1(S2.2A):spawn 綁定的 scoped learning identity(== learning_runtime_manifest.self_digest)。
+_LEARNING_RUNTIME_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 _NO_AUTHORITY = {
     "exchange_authority": False,
@@ -305,6 +307,7 @@ def build_alr_challenger_training_contract(
     *,
     code_manifest: Mapping[str, Any],
     training_config: Mapping[str, Any],
+    expected_learning_runtime_digest: str | None = None,
 ) -> dict[str, Any]:
     """Bind repository evidence to a non-executable challenger training key.
 
@@ -312,6 +315,10 @@ def build_alr_challenger_training_contract(
     accepted.  Those inputs must be reconstructed from the repository receipt.
     The result is schema-required by construction and is never training or
     registry authority.
+
+    LR1(S2.2A):spawn 綁定。當提供 ``expected_learning_runtime_digest``(reviewed 的
+    learning_runtime_manifest.self_digest)時,code_manifest 的 learning_runtime_digest
+    必須完全相符;不符即 fit 被 quarantine,拒絕 spawn。
     """
 
     receipt = _validate_repository_receipt(repository_receipt)
@@ -322,6 +329,10 @@ def build_alr_challenger_training_contract(
     manifest = _mapping(_mapping(proof.get("provenance")).get("pit_dataset_manifest"))
 
     normalized_code = _validate_code_manifest(code_manifest)
+    if expected_learning_runtime_digest is not None and (
+        normalized_code["learning_runtime_digest"] != expected_learning_runtime_digest
+    ):
+        raise AlrChallengerTrainingContractError("learning_runtime_digest_mismatch")
     normalized_config = _validate_training_config(
         training_config,
         feature_schema_hash=_required_hash(
@@ -903,11 +914,19 @@ def _validate_code_manifest(value: Any) -> dict[str, Any]:
         "source_head",
         "module_hashes",
         "dependency_lock_hash",
+        # LR1(S2.2A):新增 scoped learning identity;整倉 HEAD 已降為遙測。
+        "learning_runtime_digest",
     }
     if set(manifest) != expected_fields:
         raise AlrChallengerTrainingContractError("code_manifest_fields_invalid")
     if manifest.get("schema_version") != CODE_MANIFEST_SCHEMA_VERSION:
         raise AlrChallengerTrainingContractError("code_manifest_schema_invalid")
+    if not isinstance(
+        manifest.get("learning_runtime_digest"), str
+    ) or not _LEARNING_RUNTIME_DIGEST_RE.fullmatch(manifest["learning_runtime_digest"]):
+        raise AlrChallengerTrainingContractError(
+            "code_manifest_learning_runtime_digest_invalid"
+        )
     if not isinstance(manifest.get("source_head"), str) or not _GIT_HEAD_RE.fullmatch(
         manifest["source_head"]
     ):
