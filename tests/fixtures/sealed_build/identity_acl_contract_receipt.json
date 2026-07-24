@@ -1,0 +1,381 @@
+{
+  "adapter_id": "identity_acl_contract_adapter_v1",
+  "auth_mapping": {
+    "evidence_class": "STRUCTURAL_ONLY",
+    "ident_map": null,
+    "local_only": true,
+    "method": "pg_hba_scram_local",
+    "production_hba_installed": false,
+    "trust_from_anywhere": false,
+    "wide_cidr": false
+  },
+  "caller": "E1:S2.3:fixture",
+  "evidence_class": "STRUCTURAL_ONLY",
+  "expires_at": "2026-07-24T00:30:00+00:00",
+  "failure_reason": null,
+  "host_uid_topology": [
+    {
+      "component": "engine_scanner",
+      "dbus_authority": false,
+      "evidence_class": "STRUCTURAL_ONLY",
+      "least_privilege_caps": [
+        "read_config",
+        "connect_pg_socket"
+      ],
+      "non_root": true,
+      "oci_socket_access": false,
+      "production_uid_provisioned": false,
+      "uid_label": "aiml-engine-scanner"
+    },
+    {
+      "component": "controller",
+      "dbus_authority": false,
+      "evidence_class": "STRUCTURAL_ONLY",
+      "least_privilege_caps": [
+        "read_config",
+        "connect_pg_socket"
+      ],
+      "non_root": true,
+      "oci_socket_access": false,
+      "production_uid_provisioned": false,
+      "uid_label": "aiml-controller"
+    },
+    {
+      "component": "fit_evaluation",
+      "dbus_authority": false,
+      "evidence_class": "STRUCTURAL_ONLY",
+      "least_privilege_caps": [
+        "read_config",
+        "connect_pg_socket"
+      ],
+      "non_root": true,
+      "oci_socket_access": false,
+      "production_uid_provisioned": false,
+      "uid_label": "aiml-fit-evaluation"
+    },
+    {
+      "component": "serving",
+      "dbus_authority": false,
+      "evidence_class": "STRUCTURAL_ONLY",
+      "least_privilege_caps": [
+        "read_config",
+        "connect_pg_socket"
+      ],
+      "non_root": true,
+      "oci_socket_access": false,
+      "production_uid_provisioned": false,
+      "uid_label": "aiml-serving"
+    },
+    {
+      "component": "deleter",
+      "dbus_authority": false,
+      "evidence_class": "STRUCTURAL_ONLY",
+      "least_privilege_caps": [
+        "read_config",
+        "connect_pg_socket"
+      ],
+      "non_root": true,
+      "oci_socket_access": false,
+      "production_uid_provisioned": false,
+      "uid_label": "aiml-deleter"
+    }
+  ],
+  "negative_acl_cases": [
+    {
+      "case_id": "neg-01-writer_role_for_reader",
+      "evidence_class": "STRUCTURAL_ONLY",
+      "expected": "FAIL_CLOSED",
+      "observed_verdict": "REJECTED",
+      "over_grant_kind": "writer_role_for_reader",
+      "reason": "a reader role carrying a write privilege is rejected"
+    },
+    {
+      "case_id": "neg-02-shared_uid",
+      "evidence_class": "STRUCTURAL_ONLY",
+      "expected": "FAIL_CLOSED",
+      "observed_verdict": "REJECTED",
+      "over_grant_kind": "shared_uid",
+      "reason": "two components sharing one host UID label is rejected"
+    },
+    {
+      "case_id": "neg-03-root_uid",
+      "evidence_class": "STRUCTURAL_ONLY",
+      "expected": "FAIL_CLOSED",
+      "observed_verdict": "REJECTED",
+      "over_grant_kind": "root_uid",
+      "reason": "a component running as a root (uid 0) identity is rejected"
+    },
+    {
+      "case_id": "neg-04-world_readable_socket",
+      "evidence_class": "STRUCTURAL_ONLY",
+      "expected": "FAIL_CLOSED",
+      "observed_verdict": "REJECTED",
+      "over_grant_kind": "world_readable_socket",
+      "reason": "a socket dir mode with group/world access (& 0o077 != 0) is rejected"
+    },
+    {
+      "case_id": "neg-05-superuser_role",
+      "evidence_class": "STRUCTURAL_ONLY",
+      "expected": "FAIL_CLOSED",
+      "observed_verdict": "REJECTED",
+      "over_grant_kind": "superuser_role",
+      "reason": "a PG role with superuser or any forbidden attribute is rejected"
+    },
+    {
+      "case_id": "neg-06-trust_auth_from_anywhere",
+      "evidence_class": "STRUCTURAL_ONLY",
+      "expected": "FAIL_CLOSED",
+      "observed_verdict": "REJECTED",
+      "over_grant_kind": "trust_auth_from_anywhere",
+      "reason": "a non-local-only / trust auth method is rejected"
+    },
+    {
+      "case_id": "neg-07-wide_cidr",
+      "evidence_class": "STRUCTURAL_ONLY",
+      "expected": "FAIL_CLOSED",
+      "observed_verdict": "REJECTED",
+      "over_grant_kind": "wide_cidr",
+      "reason": "a wide / non-local CIDR auth mapping is rejected"
+    },
+    {
+      "case_id": "neg-08-missing_rollback",
+      "evidence_class": "STRUCTURAL_ONLY",
+      "expected": "FAIL_CLOSED",
+      "observed_verdict": "REJECTED",
+      "over_grant_kind": "missing_rollback",
+      "reason": "an identity/ACL change lacking a rollback entry is rejected"
+    },
+    {
+      "case_id": "neg-09-controller_oci_socket_or_dbus",
+      "evidence_class": "STRUCTURAL_ONLY",
+      "expected": "FAIL_CLOSED",
+      "observed_verdict": "REJECTED",
+      "over_grant_kind": "controller_oci_socket_or_dbus",
+      "reason": "a controller/worker with OCI socket or DBus authority is rejected"
+    },
+    {
+      "case_id": "neg-10-plaintext_secret_ingress",
+      "evidence_class": "STRUCTURAL_ONLY",
+      "expected": "FAIL_CLOSED",
+      "observed_verdict": "REJECTED",
+      "over_grant_kind": "plaintext_secret_ingress",
+      "reason": "a plaintext secret-like value in the contract is rejected"
+    }
+  ],
+  "observation_time": "2026-07-24T00:00:00+00:00",
+  "pg_role_topology": [
+    {
+      "component": "engine_scanner",
+      "evidence_class": "STRUCTURAL_ONLY",
+      "forbidden_attrs_all_false": true,
+      "is_reader": false,
+      "is_superuser": false,
+      "privilege_class": "scanner_capture_writer",
+      "production_role_provisioned": false,
+      "role_name": "aiml_engine_scanner",
+      "writer_for_reader": false
+    },
+    {
+      "component": "controller",
+      "evidence_class": "STRUCTURAL_ONLY",
+      "forbidden_attrs_all_false": true,
+      "is_reader": false,
+      "is_superuser": false,
+      "privilege_class": "queue_writer",
+      "production_role_provisioned": false,
+      "role_name": "aiml_controller",
+      "writer_for_reader": false
+    },
+    {
+      "component": "fit_evaluation",
+      "evidence_class": "STRUCTURAL_ONLY",
+      "forbidden_attrs_all_false": true,
+      "is_reader": false,
+      "is_superuser": false,
+      "privilege_class": "fit_evaluation_writer",
+      "production_role_provisioned": false,
+      "role_name": "aiml_fit_evaluation",
+      "writer_for_reader": false
+    },
+    {
+      "component": "serving",
+      "evidence_class": "STRUCTURAL_ONLY",
+      "forbidden_attrs_all_false": true,
+      "is_reader": true,
+      "is_superuser": false,
+      "privilege_class": "serving_read_only",
+      "production_role_provisioned": false,
+      "role_name": "aiml_serving",
+      "writer_for_reader": false
+    },
+    {
+      "component": "deleter",
+      "evidence_class": "STRUCTURAL_ONLY",
+      "forbidden_attrs_all_false": true,
+      "is_reader": false,
+      "is_superuser": false,
+      "privilege_class": "retention_deleter",
+      "production_role_provisioned": false,
+      "role_name": "aiml_deleter",
+      "writer_for_reader": false
+    },
+    {
+      "component": "observation",
+      "evidence_class": "STRUCTURAL_ONLY",
+      "forbidden_attrs_all_false": true,
+      "is_reader": true,
+      "is_superuser": false,
+      "privilege_class": "observer_read_only",
+      "production_role_provisioned": false,
+      "role_name": "aiml_observer_ro",
+      "writer_for_reader": false
+    }
+  ],
+  "platform": {
+    "arch": "arm64",
+    "os": "darwin",
+    "postgres_version": "16.4"
+  },
+  "rollback": [
+    {
+      "change_id": "chg-host_uid",
+      "change_kind": "host_uid",
+      "pre_state_digest": "sha256:ce3fa486af1241bf89ac37dae67ceafbd5e462555556d53c49fe1ead33e5ec62",
+      "recovery": "rollback",
+      "rollback_action": "delete provisioned component UIDs and restore prior identity generation"
+    },
+    {
+      "change_id": "chg-pg_role",
+      "change_kind": "pg_role",
+      "pre_state_digest": "sha256:fc4002c30a100feb4760e5777d51a39144e536cc828269fe2fc7134e7ea85928",
+      "recovery": "rollback",
+      "rollback_action": "DROP ROLE the provisioned component roles"
+    },
+    {
+      "change_id": "chg-auth_mapping",
+      "change_kind": "auth_mapping",
+      "pre_state_digest": "sha256:5066b766adaab775e02c626e59f6d8bbff5e7ce9d19c3f76d97218287d7933ec",
+      "recovery": "rollback",
+      "rollback_action": "restore prior pg_hba.conf generation and reload"
+    },
+    {
+      "change_id": "chg-socket_acl",
+      "change_kind": "socket_acl",
+      "pre_state_digest": "sha256:f2b15fe239e1e415db9a62e9b80129711943b507785a2ed5b6177c1d3c51e196",
+      "recovery": "rollback",
+      "rollback_action": "restore prior socket dir mode and owner"
+    },
+    {
+      "change_id": "chg-secret_slot",
+      "change_kind": "secret_slot",
+      "pre_state_digest": "sha256:1dd518c4639193bbcb01c3f7d45fca80c588311e514c867c01bae1c2a6b7575b",
+      "recovery": "rollback",
+      "rollback_action": "restore prior credential slot and revoke the new one"
+    }
+  ],
+  "schema_sha256": "sha256:d8ff9b12632e06095ab2aee5e732e4b20eb3e788abc8a626a9fa4dbf41626f0f",
+  "schema_version": "identity_acl_contract_receipt_v1",
+  "secret_lifecycle": {
+    "evidence_class": "STRUCTURAL_ONLY",
+    "plaintext_ingress": false,
+    "production_credential_rotated": false,
+    "protected_loading": {
+      "loader_kind": "systemd_credential_load",
+      "no_plaintext_ingress": true
+    },
+    "rotation": {
+      "new_fingerprint": "sha256:e65a0d813019c7ef0c0dd5d77a6c8ffefe84d3268ff2b10ee924c17f3c871e4f",
+      "old_credential_rejection_proof": {
+        "attempted": "reconnect_with_superseded_credential",
+        "new_credential_connected": false,
+        "observation_source": "structural_contract",
+        "observed_sqlstate": "28P01",
+        "verdict": "DENIED"
+      },
+      "old_fingerprint": "sha256:bc119ad8a0045053573457c3a2ff1e787d5bb68847ed0e8436a49f1f675181e5",
+      "role_target": "aiml_fit_evaluation",
+      "rotation_order": [
+        "stage_new_secret",
+        "alter_role_credential",
+        "revoke_old_secret"
+      ],
+      "secret_slot_target": "aiml_pg_credential_slot"
+    }
+  },
+  "secret_scan": {
+    "leaked": false,
+    "patterns_checked": [
+      "auth_scheme_token",
+      "credential_assignment",
+      "github_token",
+      "postgres_dsn_credentials"
+    ]
+  },
+  "self_digest": "sha256:6717b668f20c7d2ad2857079a2fd652dbeb75973f074f9873209fdae3fc871a3",
+  "socket_dir_acl": [
+    {
+      "component": "engine_scanner",
+      "evidence_class": "STRUCTURAL_ONLY",
+      "group_label": "aiml-engine-scanner",
+      "mode": "0700",
+      "mode_source": "structural_contract",
+      "owner_uid_label": "aiml-engine-scanner",
+      "production_socket_provisioned": false,
+      "socket_dir_label": "/opt/aiml/run/engine_scanner",
+      "world_readable": false,
+      "world_writable": false
+    },
+    {
+      "component": "controller",
+      "evidence_class": "STRUCTURAL_ONLY",
+      "group_label": "aiml-controller",
+      "mode": "0700",
+      "mode_source": "structural_contract",
+      "owner_uid_label": "aiml-controller",
+      "production_socket_provisioned": false,
+      "socket_dir_label": "/opt/aiml/run/controller",
+      "world_readable": false,
+      "world_writable": false
+    },
+    {
+      "component": "fit_evaluation",
+      "evidence_class": "STRUCTURAL_ONLY",
+      "group_label": "aiml-fit-evaluation",
+      "mode": "0700",
+      "mode_source": "structural_contract",
+      "owner_uid_label": "aiml-fit-evaluation",
+      "production_socket_provisioned": false,
+      "socket_dir_label": "/opt/aiml/run/fit_evaluation",
+      "world_readable": false,
+      "world_writable": false
+    },
+    {
+      "component": "serving",
+      "evidence_class": "STRUCTURAL_ONLY",
+      "group_label": "aiml-serving",
+      "mode": "0700",
+      "mode_source": "structural_contract",
+      "owner_uid_label": "aiml-serving",
+      "production_socket_provisioned": false,
+      "socket_dir_label": "/opt/aiml/run/serving",
+      "world_readable": false,
+      "world_writable": false
+    },
+    {
+      "component": "deleter",
+      "evidence_class": "STRUCTURAL_ONLY",
+      "group_label": "aiml-deleter",
+      "mode": "0700",
+      "mode_source": "structural_contract",
+      "owner_uid_label": "aiml-deleter",
+      "production_socket_provisioned": false,
+      "socket_dir_label": "/opt/aiml/run/deleter",
+      "world_readable": false,
+      "world_writable": false
+    }
+  ],
+  "source_sha256": "sha256:cbae660cafb1254015d8a589aef52fc0652a54fc968abf9d42c5d45dbaa8a0ee",
+  "status": "PASS",
+  "target_class": "disposable_local",
+  "ttl_seconds": 1800
+}

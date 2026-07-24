@@ -20,6 +20,7 @@ GATES = (
     "rust",
     "schema",
     "stock_etf",
+    "sealed_build",
 )
 
 _CONTROL_PLANE_PATHS = {
@@ -141,6 +142,33 @@ def classify_paths(paths: Iterable[str], *, force_all: bool = False) -> dict[str
             ),
         ):
             result["stock_etf"] = True
+
+        # sealed_build gate（AIML LR2 / S2.3）：自涵蓋整個 sealed-build 契約面——
+        # 依賴鎖（requirements-ml.lock）+ 其 spec、closure verifier 模組、兩張 receipt
+        # schema、兩支結構/離線測試與 hermetic fixtures。鎖或 verifier 改動觸發昂貴的
+        # fetch-once-online → clean-offline 安裝驗證 job（仿 alr_fit_verifier 形狀）。
+        if _matches(
+            path,
+            exact={
+                "requirements-ml.lock",
+                "requirements-ml.txt",
+                "helper_scripts/maintenance_scripts/agent_governance_sealed_build.py",
+                "program_code/ml_training/schemas/aiml_gate_receipts/"
+                "sealed_build_receipt_v1.schema.json",
+                "program_code/ml_training/schemas/aiml_gate_receipts/"
+                "expected_identity_receipt_v1.schema.json",
+                # S1.6 runtime-choice schema：sealed receipt 綁其 sha256,改它會 silently stale digest。
+                "program_code/ml_training/schemas/aiml_gate_receipts/"
+                "learning_runtime_choice_receipt_v1.schema.json",
+                "tests/structure/test_agent_governance_sealed_build.py",
+                "tests/structure/test_agent_governance_sealed_build_offline.py",
+                # committed receipts：receipt-only 手改也要觸發 sealed_build → 跑 drift 測試(F2d)。
+                "docs/execution_plan/ai_ml_landing/receipts/S2.3-sealed-build-receipt-v1.json",
+                "docs/execution_plan/ai_ml_landing/receipts/S2.3-expected-identity-receipt-v1.json",
+            },
+            prefixes=("tests/fixtures/sealed_build/",),
+        ):
+            result["sealed_build"] = True
 
     return result
 

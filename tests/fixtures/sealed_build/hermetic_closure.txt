@@ -1,0 +1,3 @@
+# hermetic fixture spec — NOT the real ML closure
+alpha-lib>=1.0.0
+beta-tool>=2.0.0

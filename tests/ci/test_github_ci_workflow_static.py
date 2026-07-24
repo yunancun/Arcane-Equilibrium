@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 import re
 
+from helper_scripts.ci.classify_ci_changes import GATES
+
 
 WORKFLOW = (
     Path(__file__).resolve().parents[2] / ".github" / "workflows" / "ci.yml"
@@ -89,11 +91,21 @@ def test_ci_workflow_classifies_paths_before_expensive_jobs() -> None:
         "rust-check-macos": "rust",
         "schema-contract": "schema",
         "stock-etf-static-guards": "stock_etf",
+        "learning-runtime-sealed-build": "sealed_build",
     }
     for job_name, output_name in expected_gate.items():
         job = _job(job_name)
         assert "needs: changes" in job
         assert f"needs.changes.outputs.{output_name} == 'true'" in job
+
+    # Exhaustiveness: every classifier GATE must be BOTH declared as a `changes` output
+    # AND consumed by at least one gated job. A dropped job / removed `if:` gate / removed
+    # `changes` output reddens here (guards against silently orphaning an expensive gate).
+    classifier_gate = _job("changes")
+    for gate in GATES:
+        assert f"{gate}: ${{{{ steps.classify.outputs.{gate} }}}}" in classifier_gate, gate
+        assert f"needs.changes.outputs.{gate} == 'true'" in WORKFLOW, gate
+    assert set(expected_gate.values()) == set(GATES)
 
 
 def test_ci_workflow_keeps_cheap_guards_unconditional() -> None:

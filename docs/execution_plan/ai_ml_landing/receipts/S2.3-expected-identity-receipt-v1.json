@@ -1,0 +1,135 @@
+{
+  "adapter_id": "sealed_build_adapter_v1",
+  "caller": "E1:S2.3:LR2-sealed-build",
+  "expected_component_identities": [
+    {
+      "auth_method": "pg_hba_scram_local",
+      "component": "engine_scanner",
+      "dbus_authority": false,
+      "non_root": true,
+      "oci_socket_access": false,
+      "pg_role": "aiml_engine_scanner",
+      "privilege_class": "scanner_capture_writer",
+      "protected_secret_loader": "systemd_credential_load",
+      "socket_dir_mode": "0700",
+      "uid_label": "aiml-engine-scanner"
+    },
+    {
+      "auth_method": "pg_hba_scram_local",
+      "component": "controller",
+      "dbus_authority": false,
+      "non_root": true,
+      "oci_socket_access": false,
+      "pg_role": "aiml_controller",
+      "privilege_class": "queue_writer",
+      "protected_secret_loader": "systemd_credential_load",
+      "socket_dir_mode": "0700",
+      "uid_label": "aiml-controller"
+    },
+    {
+      "auth_method": "pg_hba_scram_local",
+      "component": "fit_evaluation",
+      "dbus_authority": false,
+      "non_root": true,
+      "oci_socket_access": false,
+      "pg_role": "aiml_fit_evaluation",
+      "privilege_class": "fit_evaluation_writer",
+      "protected_secret_loader": "systemd_credential_load",
+      "socket_dir_mode": "0700",
+      "uid_label": "aiml-fit-evaluation"
+    },
+    {
+      "auth_method": "pg_hba_scram_local",
+      "component": "serving",
+      "dbus_authority": false,
+      "non_root": true,
+      "oci_socket_access": false,
+      "pg_role": "aiml_serving",
+      "privilege_class": "serving_read_only",
+      "protected_secret_loader": "systemd_credential_load",
+      "socket_dir_mode": "0700",
+      "uid_label": "aiml-serving"
+    },
+    {
+      "auth_method": "pg_hba_scram_local",
+      "component": "deleter",
+      "dbus_authority": false,
+      "non_root": true,
+      "oci_socket_access": false,
+      "pg_role": "aiml_deleter",
+      "privilege_class": "retention_deleter",
+      "protected_secret_loader": "systemd_credential_load",
+      "socket_dir_mode": "0700",
+      "uid_label": "aiml-deleter"
+    }
+  ],
+  "expires_at": "2026-07-24T00:30:00+00:00",
+  "failure_reason": null,
+  "identity_acl_contract_digest": "sha256:fdb623c574c3e16232af51e534d2e4c17bb1d3abf748ae0ba5ff7f772f6fead3",
+  "least_privilege_assertions": {
+    "host_systemd_owns_lifecycle": true,
+    "no_dbus_authority": true,
+    "no_oci_socket": true,
+    "non_root_all": true
+  },
+  "negative_acl_binding": {
+    "all_rejected": true,
+    "count": 10,
+    "s1_3_negatives_digest": "sha256:414eff2d41d63b1c9eefde979726a196113770d32881558fe301402601aa184f"
+  },
+  "observation_owner": "S2.5_LR6",
+  "observation_time": "2026-07-24T00:00:00+00:00",
+  "platform": {
+    "arch": "x86_64",
+    "os": "linux",
+    "python_version": "3.12",
+    "target_platform": "x86_64-unknown-linux-gnu"
+  },
+  "production_provisioned": {
+    "credential": false,
+    "hba": false,
+    "pg_role": false,
+    "socket": false,
+    "uid": false
+  },
+  "rollback_binding": {
+    "change_kinds": [
+      "auth_mapping",
+      "host_uid",
+      "pg_role",
+      "secret_slot",
+      "socket_acl"
+    ],
+    "rollback_digest": "sha256:0856771bb1c2e73ee16fe5d346dd6b472ae814e88baf06f16d3423d8479d294c",
+    "rollback_present": true
+  },
+  "running_attested": {
+    "mount": false,
+    "network": false,
+    "pg_identity": false,
+    "pid_cgroup": false,
+    "unit": false
+  },
+  "runtime_content_digest": "sha256:8b2092e8f55ac0484ed597fe906fecb083fdbbf106367728be71decd911d7fea",
+  "schema_sha256": "sha256:60e44fa21cf3f442374307d53191ec9ebb83e15e3c475a32c9e53690f4e1bbad",
+  "schema_version": "expected_identity_receipt_v1",
+  "sealed_build_digest": "sha256:169d2e6c9a8b90d4adc4e06897f854943acf31f9ed0e0771850e5c5007b4c852",
+  "secret_loading_binding": {
+    "no_plaintext_ingress": true,
+    "plaintext_ingress": false
+  },
+  "secret_scan": {
+    "leaked": false,
+    "patterns_checked": [
+      "auth_scheme_token",
+      "credential_assignment",
+      "github_token",
+      "provider_secret"
+    ]
+  },
+  "selected_runtime_kind": "content_addressed_fixed_path",
+  "self_digest": "sha256:a08c69657d80995793855e817c69c505c4b0e2142f0aa53231136acba7bf8baf",
+  "source_sha256": "sha256:bc32c24a1f3f1a9b532aa23a39f6bcb99aca05fc6eb6a1b77468465d1e54c207",
+  "status": "PASS",
+  "ttl_seconds": 1800
+}
