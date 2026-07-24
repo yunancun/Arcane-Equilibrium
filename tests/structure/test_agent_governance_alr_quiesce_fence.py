@@ -394,9 +394,32 @@ def test_is_alr_longlived_cmdline_accepts_only_exact_deployed_invocation():
     # 模組不符
     [INTERP, "-I", "-m", "ml_training.other_module",
      "--dsn-file", _DSN, "--lock-file", FLOCK, "--max-batch", "32"],
+    # 反 traversal(E2/E3/E4 P2):runtimes/../bin 逃出封存 root(regex [^/]+ 會吃 `..`)→ normpath guard 必拒
+    ["/opt/arcane-equilibrium/aiml/runtimes/../bin/python3", "-I", "-m", "ml_training.alr_event_consumer",
+     "--dsn-file", _DSN, "--lock-file", FLOCK, "--max-batch", "32"],
+    # 反 traversal:runtimes/./bin(單點段,無 digest 目錄)→ normpath guard 必拒
+    ["/opt/arcane-equilibrium/aiml/runtimes/./bin/python3", "-I", "-m", "ml_training.alr_event_consumer",
+     "--dsn-file", _DSN, "--lock-file", FLOCK, "--max-batch", "32"],
+    # 旗標名替換但 token 數仍 10(舊 --dsn/--lock 形)→ 命中固定數未知旗標分支 → 必拒
+    [INTERP, "-I", "-m", "ml_training.alr_event_consumer",
+     "--dsn", _DSN, "--lock", FLOCK, "--max-batch", "32"],
 ])
 def test_is_alr_longlived_cmdline_rejects_single_deviation(cmdline):
     assert q._is_alr_longlived_cmdline(cmdline, expected_dsn_file=_DSN, expected_lock_file=FLOCK) is False
+
+
+def test_allowlisted_systemctl_rejects_user_flag():
+    # E4 建議:``--user`` → system-level 收緊必須 fail-closed(不得再接受 user-manager 呼叫)。
+    with pytest.raises(qi.QuiesceHostReadError):
+        qi._assert_allowlisted_systemctl([qi.SYSTEMD, "--user", "show", qi.UNIT_NAME, "-p", "ActiveState"])
+
+
+def test_env_declared_keys_are_exactly_the_three_section8_keys():
+    # E4 建議:釘死 §8 env-key 集合,防未來殘留 PYTHONPATH/ALR_CANDIDATE_* 無聲漂回。
+    assert set(q.ENV_DECLARED_KEYS) == {
+        "ALR_SOURCE_HEAD", "ALR_EXPECTED_LEARNING_RUNTIME_DIGEST", "ALR_EXPECTED_COMPATIBILITY_RECEIPT",
+    }
+    assert "PYTHONPATH" not in q.ENV_DECLARED_KEYS
 
 
 # --------------------------------------------------------------------------- #

@@ -20,6 +20,7 @@ DEFERRED 給 S2.1 EFFECT session。
 
 from __future__ import annotations
 
+import posixpath
 import re
 import sys
 from pathlib import Path
@@ -196,6 +197,11 @@ def _is_alr_longlived_cmdline(
     if len(args) != _ALR_CMDLINE_TOKEN_COUNT:
         return False
     if not _ALR_RUNTIME_INTERPRETER_RE.fullmatch(args[0]):
+        return False
+    # 反 traversal(E2/E3/E4 P2:regex 的 ``[^/]+`` 段可吃 ``.``/``..``,單靠 regex 無法兌現「解譯器確在**封存
+    # runtimes root 下**」的宣稱不變式)。用已正規化相等強制拒 ``/runtimes/../bin``、``/runtimes/./bin``、``//``、
+    # 尾斜線等段;刻意**不**收緊 digest 段字元集,以免誤殺 §8 未定死的 wire form(如含 ``:`` 的 ``sha256:…`` 段)。
+    if posixpath.normpath(args[0]) != args[0]:
         return False
     if args[1] != "-I":
         return False
