@@ -240,9 +240,13 @@ each is routed and closed by a bound work package under
 `P0-S2-PRODUCTION-EFFECT-SEAMS-SOURCE` through the standard source-implementation
 chain (`PM → PA → E1 → E2 → E4 → CC/E3/OPS → QA → PM`), an isolated
 worktree/writer lease, and an exact-head PR/merge. Only the serial
-operator-gated **apply** chain `S2.0→S2.1→S2.4→S2.5→S2.2B` stays blocked,
-surfaced as one minimal `BLOCKED_OPERATOR_ACTION_PACKET_READY` after every source
-predicate lands. Session IDs are unchanged.
+operator-gated **apply** chain `S2.0→S2.4→S2.5A→S2.1→S2.5B→S2.2B` (the
+§1.2-corrected effect DAG in the S2.4 install design — `S2.1`'s quiesce/restore
+drill runs *after* the S2.4 install and the S2.5A initial start because a real
+drill needs the installed+started runtime, so `S2.1@EFFECT_DONE` is **not** an
+`S2.4` predecessor; the `source_deps` build order above is unchanged) stays
+blocked, surfaced as one minimal `BLOCKED_OPERATOR_ACTION_PACKET_READY` after
+every source predicate lands. Session IDs are unchanged.
 
 ### Sprint 3 - Controller, Scanner, Retention And Foundation
 
