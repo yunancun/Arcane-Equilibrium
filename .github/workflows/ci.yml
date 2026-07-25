@@ -138,6 +138,11 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          # W0/W1 admission 的 predecessor-ancestry 再導出需要完整歷史;shallow checkout
+          # 下 merge-base --is-ancestor 無史可證,中央 derive 會 fail-closed 拒絕(正確
+          # 行為,但 CI 環境必須供足歷史讓真實 ADMITTED/PASS 可在門上重現)。
+          fetch-depth: 0
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
@@ -157,6 +162,7 @@ jobs:
           python3 -m pytest -q \
             tests/structure/test_development_agent_governance.py \
             tests/structure/test_agent_governance_*.py \
+            tests/structure/test_s2_4_w0_admission.py \
             tests/structure/test_aiml_s1_closure_target_host_run.py \
             tests/structure/test_target_host_effect_adapter.py \
             tests/structure/test_target_host_apply_orchestrator.py \
