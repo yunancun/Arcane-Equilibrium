@@ -57,6 +57,19 @@ dynamic source/origin、phase-runtime capture、typed intent 與 claim inputs。
 cutover 只改 `openclaw-alr-shadow.service`，並以 provisional -> observer-v2 exact PASS ->
 independent postcheck 的單向 DAG 收口。它不授予 broker/order/live/mainnet authority。
 
+2026-07-25 增補（S2.1 quiesce fence 的 system-level 契約批准投影）：AIML-V2 Sprint-2 的
+`alr_quiesce_fence_adapter_v1`（owner S2.1，經 PR #129 landed、PR #134 realigned）之 fence 對象
+是 **system-level** `arcane-equilibrium-aiml-engine-scanner.service`（host system manager 擁有
+lifecycle；`systemctl stop/start` 一律不帶 `--user`），非 legacy 的 user-manager
+`openclaw-alr-shadow.service`（後者仍專屬上段 P0-B lane）。此批准的 normative 源是
+operator-merged 的 corrected S2.4 install design（PR #130 §1/§8）與 WP3 system-unit
+amendment（PR #134）；本增補只把該既有 operator 決定投影進 accepted ADR 層，不新增授權：
+fence 的真 production 效果仍 fail-closed，需 `S2.0@EFFECT_DONE` + S2.1 EFFECT session 的
+exact source-pinned operator SSHSIG（identity `aiml-s2-quiesce-fence-operator-v1`、namespace
+`arcane-equilibrium-aiml-s2-quiesce-fence`），且依修正後 effect DAG 排在 S2.4 install +
+S2.5A start 之後。九項 authority 全 false 不變；EFFECT 時的 root/polkit `manage-units` 權限
+屬 operator 動作，開發 agent 不得自持。
+
 ### Dispatch
 
 固定 chain 改為 hybrid risk-DAG。Implementation→E2→E4、authority/security、runtime/

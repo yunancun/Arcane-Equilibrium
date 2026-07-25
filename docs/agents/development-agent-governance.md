@@ -496,6 +496,23 @@ Effect Adapters：
   `LOCAL_REPRODUCIBLE`（真 `initdb`/`42501`/`28P01`，nothing mocked），platform/external attestation
   DEFERRED；nine authorities 恆 false，任何 receipt 不序列化機密。完整活化 ADR deferred 給 S2.0 EFFECT
   session。
+- `alr_quiesce_fence_adapter_v1`（S2.1 WP3 SOURCE seam）：Registry status
+  `declared_production_fence_disabled_until_s20_effect_and_operator_sshsig`。它對 **system-level**
+  `arcane-equilibrium-aiml-engine-scanner.service`（host system manager 擁有 lifecycle；PR #134
+  realigned，normative 源=operator-merged corrected S2.4 §8 + ADR-0050 2026-07-25 增補）做
+  owner-scoped、可逆的 quiesce fence：只有 multi-signal ownership predicate 確認
+  `CONFIRMED_SINGLE_OWNER` 才 fence，且 fence 是該 unit 自己的 system-level `systemctl stop`
+  （永不 `--user`、永不 pkill/kill-by-name/pattern/pid），restore 是同 unit 的 system-level
+  `systemctl start` + stable-identity pre==post 復原 crux。production/live fence **恆 fail-closed**：
+  回 typed `EXTERNAL_VERIFICATION_PENDING`，直到 `S2.0@EFFECT_DONE` + S2.1 EFFECT session 的
+  exact source-pinned、domain-separated operator SSHSIG（identity
+  `aiml-s2-quiesce-fence-operator-v1`、namespace `arcane-equilibrium-aiml-s2-quiesce-fence`）存在，
+  並依 §1.2 修正後 effect DAG 排在 S2.4 install（`EFFECT_DONE_INACTIVE`）+ S2.5A start 之後。
+  已知開放對齊項（blocking S2.1 EFFECT drill，非 W0/W1 source admission）：WP3 C1 invocation
+  fingerprint／env-hash 契約與 S2.4 §8.3 rendered ExecStart（`launches/<digest>` + `-B` + 完整
+  application/launch/topology 參數與十個環境變數）尚未逐位對齊，須由 W2 unit renderer 定案
+  argv 後以 WP3-side fingerprint amendment 收口。九項 authority 恆 false；EFFECT 時所需
+  root/polkit `manage-units` 屬 operator 動作。
 - `broker_probe_adapter_v1` 目前只是 Registry 中的
   `declared_fail_closed_unsupported` seam，**不是可執行 Adapter**。IBKR paths 是 gated
   operator/runtime reference surface；Bybit 是 runtime-owned 且沒有 development-agent
