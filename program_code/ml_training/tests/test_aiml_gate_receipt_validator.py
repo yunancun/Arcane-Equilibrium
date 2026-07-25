@@ -2474,12 +2474,6 @@ _CP2A_D = "sha256:" + "a" * 64
 _CP2A_D2 = "sha256:" + "b" * 64
 _CP2A_GIT = "0" * 40
 _CP2A_TS = "2026-07-24T00:00:00+00:00"
-_CP2A_PROBE_HEX = "c" * 64
-_CP2A_PREP_HEX = "d" * 64
-_CP2A_PROBE_ID = "s2-4-probe-" + _CP2A_PROBE_HEX
-_CP2A_PREP_ID = "s2-4-prepare-" + _CP2A_PREP_HEX
-_CP2A_UNIT = "arcane-aiml-s2-4-probe-" + _CP2A_PROBE_HEX + ".service"
-_CP2A_STAGING = "/var/lib/arcane-equilibrium/aiml/install/s2_4/prepared/" + _CP2A_PREP_ID
 
 
 def _cp2a_probe_core() -> dict:
@@ -2514,6 +2508,16 @@ def _cp2a_prepare_core() -> dict:
         "target_host": "trade-core",
         "created_at": _CP2A_TS,
     }
+
+
+# CP3 §5.1 re-derivation:route-class 載體的 derived id 必 = prefix + hex(canonical_digest(core)),
+# 故 probe_id / prepare_id 由 core 真實導出(先前 placeholder hex 會被 CP3 中央閘拒)。
+_CP2A_PROBE_HEX = canonical_digest(_cp2a_probe_core()).split(":", 1)[1]
+_CP2A_PREP_HEX = canonical_digest(_cp2a_prepare_core()).split(":", 1)[1]
+_CP2A_PROBE_ID = "s2-4-probe-" + _CP2A_PROBE_HEX
+_CP2A_PREP_ID = "s2-4-prepare-" + _CP2A_PREP_HEX
+_CP2A_UNIT = "arcane-aiml-s2-4-probe-" + _CP2A_PROBE_HEX + ".service"
+_CP2A_STAGING = "/var/lib/arcane-equilibrium/aiml/install/s2_4/prepared/" + _CP2A_PREP_ID
 
 
 def _cp2a_fixtures() -> dict:
@@ -3004,8 +3008,6 @@ _CP2B_D = "sha256:" + "a" * 64
 _CP2B_D2 = "sha256:" + "b" * 64
 _CP2B_GIT = "0" * 40
 _CP2B_TS = "2026-07-24T00:00:00+00:00"
-_CP2B_PLAN_HEX = "e" * 64
-_CP2B_PLAN_ID = "s2-4-" + _CP2B_PLAN_HEX
 _CP2B_CLASSES = (
     "HOST_IDENTITY_INSTALL",
     "PG_ROLE_ACL_MIGRATION",
@@ -3031,6 +3033,12 @@ def _cp2b_install_plan_core() -> dict:
         "target_host": "trade-core",
         "created_at": _CP2B_TS,
     }
+
+
+# CP3 §5.1 re-derivation:plan_id = 's2-4-' + hex(canonical_digest(plan_core)),idempotency_key=plan_id
+# (idempotency_key 在 plan 物件、非簽名 core)。先前 placeholder hex 會被 CP3 中央閘拒。
+_CP2B_PLAN_HEX = canonical_digest(_cp2b_install_plan_core()).split(":", 1)[1]
+_CP2B_PLAN_ID = "s2-4-" + _CP2B_PLAN_HEX
 
 
 def _cp2b_fixtures() -> dict:
@@ -3601,3 +3609,106 @@ def test_cp2b_frozen_pins_unchanged_after_schema_files_additions() -> None:
         "sha256:01d3062c79725b32b7c1468d02013a0df28dfeba1cf29d513cbf3bd6b4143c64"
     )
     assert len(PROGRAM_SCHEMA_PATHS) == 7
+
+
+# ── S2.4 · WP4 · W1 · CP3(§5.1 re-derivation + §4:259-264 aggregate-lineage 謂詞)──
+def _lineage_receipt(**overrides: object) -> dict:
+    receipt = deepcopy(_cp2b_fixtures()["s2_4_install_effect_receipt_v1"])
+    receipt.update(overrides)
+    return receipt
+
+
+def test_aggregate_requires_two_probe_receipts_prepare_and_five_apply_rows() -> None:
+    from aiml_gate_receipt_validator import derive_install_lineage_status
+
+    receipt = _cp2b_fixtures()["s2_4_install_effect_receipt_v1"]
+    # happy lineage → SATISFIED:兩 scoped probe digest 相異(PREPARE_SANDBOX + INSTALLED_UNIT)、
+    # 五 APPLY row exact 次序且 unique、PREPARE 結果/postcheck、逆向補償鏈皆在。
+    assert derive_install_lineage_status(receipt) == {"status": "SATISFIED", "reasons": []}
+    # 交叉綁 install_plan(plan_id/idempotency_key 一致 + plan.core.apply_rows 五類 exact 次序)亦 SATISFIED。
+    plan = _cp2b_fixtures()["s2_4_install_plan_v1"]
+    assert derive_install_lineage_status(receipt, install_plan=plan)["status"] == "SATISFIED"
+
+    # negative: missing a row(四列)。schema minItems=5 會擋,故直接呼叫謂詞(離線結構驗補 schema 空缺)。
+    r = derive_install_lineage_status(
+        _lineage_receipt(apply_row_results=receipt["apply_row_results"][:4])
+    )
+    assert r["status"] == "NOT_SATISFIED"
+    assert any("exactly five APPLY rows" in x for x in r["reasons"]), r["reasons"]
+
+    # negative: duplicated class(HOST 出現兩次、ENGINE 缺)。
+    dup_rows = deepcopy(receipt["apply_row_results"])
+    dup_rows[4]["component_effect_class"] = "HOST_IDENTITY_INSTALL"
+    r = derive_install_lineage_status(_lineage_receipt(apply_row_results=dup_rows))
+    assert r["status"] == "NOT_SATISFIED"
+    assert any("duplicated class" in x for x in r["reasons"]), r["reasons"]
+
+    # negative: misordered classes(五 unique 但亂序)。
+    mis_rows = deepcopy(receipt["apply_row_results"])
+    mis_rows[0], mis_rows[1] = mis_rows[1], mis_rows[0]
+    r = derive_install_lineage_status(_lineage_receipt(apply_row_results=mis_rows))
+    assert r["status"] == "NOT_SATISFIED"
+    assert any("out of the required §5.1 class order" in x for x in r["reasons"]), r["reasons"]
+
+    # negative: both probes same scope(兩 scoped probe digest 相同 = 同一 probe 充當兩 scope)。
+    r = derive_install_lineage_status(_lineage_receipt(
+        prepare_sandbox_probe_receipt_digest=receipt["installed_unit_probe_receipt_digest"],
+    ))
+    assert r["status"] == "NOT_SATISFIED"
+    assert any("scopes must be distinct" in x for x in r["reasons"]), r["reasons"]
+
+    # negative: an extra 6th row。schema maxItems=5 會擋,故直接呼叫謂詞。
+    six = deepcopy(receipt["apply_row_results"])
+    six.append({"component_effect_class": "ENGINE_SCANNER", "result_digest": _CP2B_D, "postcheck_digest": _CP2B_D2})
+    r = derive_install_lineage_status(_lineage_receipt(apply_row_results=six))
+    assert r["status"] == "NOT_SATISFIED"
+    assert any("exactly five APPLY rows" in x for x in r["reasons"]), r["reasons"]
+
+
+def test_misordered_install_receipt_rejected_by_central_gate() -> None:
+    # 五列(schema 通過)但亂序 → 中央閘的 lineage 謂詞在 closed-schema 之上拒。
+    receipt = deepcopy(_cp2b_fixtures()["s2_4_install_effect_receipt_v1"])
+    receipt["apply_row_results"][0], receipt["apply_row_results"][1] = (
+        receipt["apply_row_results"][1],
+        receipt["apply_row_results"][0],
+    )
+    receipt["self_digest"] = artifact_self_digest(receipt)
+    errors = validate_aiml_artifact(receipt)
+    assert any("out of the required §5.1 class order" in e for e in errors), errors
+
+
+def test_install_plan_id_and_idempotency_key_rederive_from_core() -> None:
+    # item #3:idempotency_key 在 plan 物件、不在簽名 core;plan_id/idempotency_key 由 core 再導出。
+    plan = _cp2b_fixtures()["s2_4_install_plan_v1"]
+    assert "idempotency_key" in plan
+    assert "idempotency_key" not in plan["core"] and "plan_id" not in plan["core"]
+    assert plan["idempotency_key"] == plan["plan_id"]
+    assert plan["plan_id"] == "s2-4-" + canonical_digest(plan["core"]).split(":", 1)[1]
+    assert validate_aiml_artifact(plan) == []
+
+    # plan_id 竄改 → 中央閘拒(不從 core 再導出)。
+    tampered = deepcopy(plan)
+    tampered["plan_id"] = "s2-4-" + "f" * 64
+    tampered["idempotency_key"] = tampered["plan_id"]
+    tampered["self_digest"] = artifact_self_digest(tampered)
+    assert any("plan_id does not re-derive" in e for e in validate_aiml_artifact(tampered))
+
+    # idempotency_key != plan_id → 拒。
+    drift = deepcopy(plan)
+    drift["idempotency_key"] = "s2-4-" + "f" * 64
+    drift["self_digest"] = artifact_self_digest(drift)
+    assert any("idempotency_key must equal plan_id" in e for e in validate_aiml_artifact(drift))
+
+
+def test_probe_and_prepare_intent_ids_rederive_from_core() -> None:
+    probe = deepcopy(_cp2a_fixtures()["s2_4_capability_probe_intent_v1"])
+    assert probe["probe_id"] == "s2-4-probe-" + canonical_digest(probe["core"]).split(":", 1)[1]
+    probe["probe_id"] = "s2-4-probe-" + "f" * 64
+    probe["self_digest"] = artifact_self_digest(probe)
+    assert any("probe_id does not re-derive" in e for e in validate_aiml_artifact(probe))
+
+    prep = deepcopy(_cp2a_fixtures()["s2_4_prepare_intent_v1"])
+    assert prep["prepare_id"] == "s2-4-prepare-" + canonical_digest(prep["core"]).split(":", 1)[1]
+    prep["prepare_id"] = "s2-4-prepare-" + "f" * 64
+    prep["self_digest"] = artifact_self_digest(prep)
+    assert any("prepare_id does not re-derive" in e for e in validate_aiml_artifact(prep))

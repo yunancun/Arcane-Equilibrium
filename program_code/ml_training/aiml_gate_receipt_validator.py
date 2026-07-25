@@ -1047,6 +1047,289 @@ def classify_component_required_effects_v2(
     return classification
 
 
+# --------------------------------------------------------------------------- #
+# S2.4(WP4·W1·CP3)per-row ABI 綁定 + aggregate-lineage 謂詞。此區只「讀」CP1 凍結的
+# v2 矩陣(digest sha256:01d3062c…3c64 不動),在 CP2 的 closed-schema 之上再導出 §4:251-257
+# 逐行 ABI 綁定,並補齊 JSON schema 無法表達的次序/唯一/exact-set/lineage 契約。全為離線
+# 結構驗:「不」執行任何東西、「不」斷言 runtime/production PASS,九 authority 不受影響。
+# --------------------------------------------------------------------------- #
+# 五個 APPLY row 的 §4 class 次序(§5.1 required order)。兩個前置(HOST_CAPABILITY_PROBE /
+# LEARNING_RUNTIME_PREPARE)不是 install-plan component,故不在此序;它們走各自 probe/prepare
+# core+intent(見 s2_4_capability_probe_intent_v1 / s2_4_prepare_intent_v1)。
+S2_4_APPLY_ROW_CLASS_ORDER = (
+    "HOST_IDENTITY_INSTALL",
+    "PG_ROLE_ACL_MIGRATION",
+    "CREDENTIAL_INSTALL",
+    "LEARNING_RUNTIME",
+    "ENGINE_SCANNER",
+)
+# §4 逐行 required_intent_fields 的三個 common token(plan/pre_state/expiry)落在
+# s2_4_component_effect_intent_v1 的頂層欄位;全部 5 個 APPLY 矩陣列都含這三 token。
+_S2_4_APPLY_INTENT_COMMON_TOKEN_FIELDS = {
+    "plan": "install_plan_digest",
+    "pre_state": "pre_state_digest",
+    "expiry": "expires_at",
+}
+# 每個 APPLY class 的 class-specific §4 token -> intent 的 required_intent_fields 物件鍵。此表把
+# §4 prose token 逐一綁到具體 intent 欄位鍵,使 derive_component_intent_binding 能「重建」該 intent
+# 的完整 §4 token 集並與凍結 v2 矩陣列比對。它同時是 schema 縫的封口點:intent schema 的
+# required_intent_fields $def 以 additionalProperties:false 列全 12 個 digest 鍵為「可選」,只在
+# allOf 條件式強制「該類必含」某些鍵,卻不禁一個 HOST intent 夾帶 PG 的 topology_attestation_digest;
+# 這裡以「exact 鍵集」把跨類夾帶的縫關閉。此表逐位元組對齊凍結矩陣列的 token(見下方
+# _assert 於 import 期不做,改由 test #1 斷言),矩陣本身仍 CP1-frozen、此處只讀。
+_S2_4_APPLY_INTENT_CLASS_TOKEN_FIELDS = {
+    "HOST_IDENTITY_INSTALL": {
+        "uid_gid_directory_manifest": "uid_gid_directory_manifest_digest",
+    },
+    "PG_ROLE_ACL_MIGRATION": {
+        "topology": "topology_attestation_digest",
+        "acl_manifest": "acl_manifest_digest",
+        "pg_migration_permit": "pg_migration_permit_digest",
+        "admin_handle_descriptor": "admin_handle_descriptor_digest",
+    },
+    "CREDENTIAL_INSTALL": {
+        "credential_name": "credential_name",
+        "encrypted_blob_digest": "encrypted_blob_digest",
+        "host_identity": "host_identity_digest",
+    },
+    "LEARNING_RUNTIME": {
+        "prepare_receipt": "prepare_effect_receipt_digest",
+        "base_app_launch_manifests_and_target_paths": "base_app_launch_target_manifest_digest",
+    },
+    "ENGINE_SCANNER": {
+        "unit_policy_evidence_manifests": "unit_policy_evidence_manifest_digest",
+        "inactive_post_state": "inactive_post_state_digest",
+    },
+}
+
+
+def derive_component_intent_binding(intent: Any) -> dict[str, Any]:
+    """從一份 s2_4_component_effect_intent_v1 導出其 §4 逐行 ABI 綁定並強制 exact intent-field 集。
+
+    給定一份 APPLY-row intent artifact,依凍結的 v2 矩陣(CP1)把其 ``component_effect_class``
+    綁到 exact ``adapter_id`` / ``actor_node_id`` / ``independent_postcheck_node_id`` /
+    ``recovery_contract``(rollback 契約 id)/ ``adapter_binding_status``,並重建該 intent 的完整
+    §4 required_intent_fields token 集——頂層 install_plan_digest/pre_state_digest/expires_at 三個
+    common token 加上 required_intent_fields 物件的 class-specific 鍵——要求其恰等於
+    ``sorted(矩陣列["required_intent_fields"])``。caller 無法供給或降級 adapter/actor/postcheck/
+    rollback:它們由矩陣導出,此函式即權威(swapped adapter/downgraded status 無從發生於此 intent)。
+
+    以下任一縫皆 raise ``ValueError``(typed 拒絕):
+      * ``component_effect_class`` 不是五個 APPLY row 之一(未知/前置類/缺失);
+      * required_intent_fields 夾帶跨類額外鍵(schema additionalProperties 縫)或缺 class 必要鍵;
+      * 頂層 plan/pre_state/expiry 任一缺失(schema 已 required;防禦式)。
+    """
+
+    if not isinstance(intent, dict):
+        raise ValueError("component effect intent must be an object")
+    declared_class = intent.get("component_effect_class")
+    class_token_fields = _S2_4_APPLY_INTENT_CLASS_TOKEN_FIELDS.get(str(declared_class))
+    matrix_row = AIML_COMPONENT_EFFECT_CLASS_MATRIX_V2.get(str(declared_class))
+    if class_token_fields is None or matrix_row is None:
+        raise ValueError(
+            f"component effect intent class {declared_class!r} is not one of the five "
+            "S2.4 APPLY rows"
+        )
+    declared_intent_fields = intent.get("required_intent_fields")
+    if not isinstance(declared_intent_fields, dict):
+        raise ValueError(
+            "component effect intent required_intent_fields must be an object"
+        )
+    # exact class-specific 鍵集(關閉 schema 允許跨類夾帶額外 digest 鍵的縫)。
+    expected_keys = set(class_token_fields.values())
+    present_keys = set(declared_intent_fields)
+    if present_keys != expected_keys:
+        extra = sorted(present_keys - expected_keys)
+        missing = sorted(expected_keys - present_keys)
+        raise ValueError(
+            f"{declared_class} required_intent_fields do not match the exact §4 row "
+            f"set (extra={extra}, missing={missing})"
+        )
+    # 三個 common token 必在頂層(schema 已 required;防禦式再驗)。
+    missing_common = sorted(
+        token
+        for token, field in _S2_4_APPLY_INTENT_COMMON_TOKEN_FIELDS.items()
+        if field not in intent
+    )
+    if missing_common:
+        raise ValueError(
+            f"{declared_class} intent is missing top-level field(s) for §4 common "
+            f"token(s) {missing_common}"
+        )
+    # 重建完整 §4 token 集並與凍結矩陣列比對(此即 per-row ABI 綁定的等式核心)。
+    reconstructed = set(_S2_4_APPLY_INTENT_COMMON_TOKEN_FIELDS) | set(class_token_fields)
+    if sorted(reconstructed) != sorted(matrix_row["required_intent_fields"]):
+        raise ValueError(
+            f"{declared_class} reconstructed §4 intent-field set does not equal the "
+            "frozen v2 matrix row"
+        )
+    return {
+        "component_effect_class": declared_class,
+        "adapter_id": matrix_row["adapter_id"],
+        "actor_node_id": matrix_row["actor_node_id"],
+        "independent_postcheck_node_id": matrix_row["independent_postcheck_node_id"],
+        "recovery_contract": matrix_row["recovery_contract"],
+        "adapter_binding_status": matrix_row["adapter_binding_status"],
+        "required_intent_fields": list(matrix_row["required_intent_fields"]),
+    }
+
+
+def _s2_4_route_core_rederivation_errors(
+    artifact: dict[str, Any], *, id_field: str, id_prefix: str
+) -> list[str]:
+    """§5.1:route-class artifact 攜帶 unsigned core 時,中央閘再導出 core_digest/derived id/self_digest。
+
+    ``core_digest = canonical_digest(core)``;``derived_id = id_prefix + hex(core_digest)``。
+    core 是被簽名對象,其 digest 導 id,故 core「不」含任何導出 id/self_digest(schema 已以
+    additionalProperties:false 保證,此處為再導出而非自證)。
+    """
+
+    errors: list[str] = []
+    core = artifact.get("core")
+    if not isinstance(core, dict):
+        return ["route-class artifact core must be an object"]
+    expected_core_digest = canonical_digest(core)
+    if artifact.get("core_digest") != expected_core_digest:
+        errors.append("route-class core_digest does not bind the canonical core")
+    expected_id = id_prefix + expected_core_digest.split(":", 1)[1]
+    if artifact.get(id_field) != expected_id:
+        errors.append(f"{id_field} does not re-derive from the core digest")
+    if artifact.get("self_digest") != artifact_self_digest(artifact):
+        errors.append("route-class artifact self_digest is invalid")
+    return errors
+
+
+def _s2_4_install_plan_apply_rows_errors(artifact: dict[str, Any]) -> list[str]:
+    """install plan 的 core.apply_rows 與 route_surface.apply_rows 必為五類 exact 次序(schema 無 prefixItems)。"""
+
+    errors: list[str] = []
+    core = artifact.get("core")
+    if isinstance(core, dict) and isinstance(core.get("apply_rows"), list):
+        core_classes = tuple(
+            row.get("component_effect_class")
+            for row in core["apply_rows"]
+            if isinstance(row, dict)
+        )
+        if core_classes != S2_4_APPLY_ROW_CLASS_ORDER:
+            errors.append(
+                "install plan core apply_rows are not the five required classes in "
+                f"§5.1 order (got {list(core_classes)})"
+            )
+    surface = artifact.get("route_surface")
+    if isinstance(surface, dict) and isinstance(surface.get("apply_rows"), list):
+        if tuple(surface["apply_rows"]) != S2_4_APPLY_ROW_CLASS_ORDER:
+            errors.append(
+                "install plan route_surface apply_rows are not the five required "
+                f"classes in §5.1 order (got {surface['apply_rows']})"
+            )
+    return errors
+
+
+def derive_install_lineage_status(
+    install_effect_receipt: Any, *, install_plan: Any = None
+) -> dict[str, Any]:
+    """離線結構謂詞:聚合協調 install 交易的 lineage 是否 SATISFIED(§4:259-264)。
+
+    僅做結構/次序/唯一/綁定驗——「不」執行任何東西、「不」斷言 runtime PASS。JSON schema 無
+    ``prefixItems`` 故無法強制五 APPLY row 的 class 次序與唯一,亦無法保證兩 scoped probe receipt
+    digest 相異;此謂詞補齊,消費 ``s2_4_install_effect_receipt_v1``(可選再交叉綁 ``s2_4_install_plan_v1``):
+
+      * 恰 5 個 APPLY row,class 依序 == ``S2_4_APPLY_ROW_CLASS_ORDER`` 且 unique-by-class
+        (缺一列/重複類/亂序/多第六列皆非 SATISFIED);
+      * 兩 scoped capability-probe receipt digest(PREPARE_SANDBOX + INSTALLED_UNIT)存在且相異
+        (同一 digest = 同一 probe 充當兩 scope = 未 distinct);
+      * PREPARE 結果 + PREPARE postcheck digest 存在;
+      * 一條逆向補償鏈 digest 存在。
+    交叉綁定 plan 時再驗 plan_id/idempotency_key 與 receipt 一致、plan.core.apply_rows 五類 exact 次序。
+    回 ``{"status": "SATISFIED"|"NOT_SATISFIED", "reasons": [...]}``;此謂詞絕不簽發 runtime/production 判定。
+    """
+
+    reasons: list[str] = []
+    if not isinstance(install_effect_receipt, dict):
+        return {
+            "status": "NOT_SATISFIED",
+            "reasons": ["install effect receipt must be an object"],
+        }
+    receipt = install_effect_receipt
+
+    rows = receipt.get("apply_row_results")
+    if not isinstance(rows, list):
+        reasons.append("install lineage apply_row_results must be a list")
+        classes: list[Any] = []
+    else:
+        classes = [
+            row.get("component_effect_class") if isinstance(row, dict) else None
+            for row in rows
+        ]
+    if len(classes) != 5:
+        reasons.append(
+            f"install lineage requires exactly five APPLY rows (got {len(classes)})"
+        )
+    duplicated = sorted(
+        {c for c in classes if c is not None and classes.count(c) > 1}
+    )
+    if duplicated:
+        reasons.append(
+            f"install lineage APPLY rows contain duplicated class(es) {duplicated}"
+        )
+    if len(classes) == 5 and not duplicated:
+        if set(classes) != set(S2_4_APPLY_ROW_CLASS_ORDER):
+            reasons.append(
+                "install lineage APPLY rows are not exactly the five required classes"
+            )
+        elif tuple(classes) != S2_4_APPLY_ROW_CLASS_ORDER:
+            reasons.append(
+                "install lineage APPLY rows are out of the required §5.1 class order "
+                f"(got {classes}, want {list(S2_4_APPLY_ROW_CLASS_ORDER)})"
+            )
+
+    prepare_sandbox = receipt.get("prepare_sandbox_probe_receipt_digest")
+    installed_unit = receipt.get("installed_unit_probe_receipt_digest")
+    if not isinstance(prepare_sandbox, str) or not isinstance(installed_unit, str):
+        reasons.append(
+            "install lineage requires two scoped capability-probe receipt digests "
+            "(PREPARE_SANDBOX + INSTALLED_UNIT)"
+        )
+    elif prepare_sandbox == installed_unit:
+        reasons.append(
+            "install lineage scoped probe receipts share one digest; the "
+            "PREPARE_SANDBOX and INSTALLED_UNIT scopes must be distinct"
+        )
+    for field, label in (
+        ("prepare_result_digest", "PREPARE result"),
+        ("prepare_postcheck_digest", "PREPARE postcheck"),
+        ("reverse_compensation_chain_digest", "reverse compensation chain"),
+    ):
+        if not isinstance(receipt.get(field), str):
+            reasons.append(f"install lineage requires a {label} digest")
+
+    if install_plan is not None:
+        reasons.extend(_install_lineage_plan_binding_errors(install_plan, receipt))
+
+    return {
+        "status": "SATISFIED" if not reasons else "NOT_SATISFIED",
+        "reasons": reasons,
+    }
+
+
+def _install_lineage_plan_binding_errors(
+    install_plan: Any, receipt: dict[str, Any]
+) -> list[str]:
+    """交叉綁定:plan_id/idempotency_key 與 receipt 一致 + plan.core.apply_rows 五類 exact 次序。"""
+
+    errors: list[str] = []
+    if not isinstance(install_plan, dict):
+        return ["install lineage plan cross-binding requires a plan object"]
+    if install_plan.get("plan_id") != receipt.get("plan_id"):
+        errors.append("install lineage plan_id does not match the effect receipt")
+    if install_plan.get("idempotency_key") != receipt.get("idempotency_key"):
+        errors.append(
+            "install lineage plan idempotency_key does not match the effect receipt"
+        )
+    errors.extend(_s2_4_install_plan_apply_rows_errors(install_plan))
+    return errors
+
+
 def _terminal_receipt_sink_body() -> dict[str, Any]:
     return {
         "schema_version": "terminal_receipt_sink_v1",
@@ -3015,6 +3298,54 @@ def validate_aiml_artifact(
             )
         else:
             errors.extend(_wave_exit_structural_errors(artifact))
+    if schema_version == "s2_4_capability_probe_intent_v1":
+        # S2.4(WP4·W1·CP3)§5.1 re-derivation:probe 是 route-class 載體,攜帶 unsigned probe core
+        # → 中央閘再導出 core_digest / probe_id('s2-4-probe-'+hex(core_digest)) / self_digest。
+        errors.extend(_s2_4_route_core_rederivation_errors(
+            artifact, id_field="probe_id", id_prefix="s2-4-probe-"
+        ))
+    if schema_version == "s2_4_prepare_intent_v1":
+        # 同上:prepare core → prepare_id = 's2-4-prepare-'+hex(core_digest)。
+        errors.extend(_s2_4_route_core_rederivation_errors(
+            artifact, id_field="prepare_id", id_prefix="s2-4-prepare-"
+        ))
+    if schema_version == "s2_4_install_plan_v1":
+        # §5.1 re-derivation:aggregate plan 攜帶 unsigned plan core → plan_id = 's2-4-'+hex(core_digest)
+        # 且 idempotency_key=plan_id(idempotency_key 在 plan 物件、非簽名 core;core 由 schema 排除)。
+        # 另補 five APPLY row 的 exact 次序驗(JSON schema 無 prefixItems 無法表達)。
+        errors.extend(_s2_4_route_core_rederivation_errors(
+            artifact, id_field="plan_id", id_prefix="s2-4-"
+        ))
+        if artifact.get("idempotency_key") != artifact.get("plan_id"):
+            errors.append("install plan idempotency_key must equal plan_id")
+        core = artifact.get("core")
+        if isinstance(core, dict) and (
+            "plan_id" in core or "idempotency_key" in core
+        ):
+            errors.append(
+                "install plan signed core must not carry plan_id/idempotency_key "
+                "(derived ids live on the plan object)"
+            )
+        errors.extend(_s2_4_install_plan_apply_rows_errors(artifact))
+    if schema_version == "s2_4_component_effect_intent_v1":
+        # S2.4(WP4·W1·CP3)per-row ABI 綁定:closed schema(CP2b)之上,再導出 §4 逐行 ABI 綁定並
+        # 強制 required_intent_fields 恰等於凍結矩陣列(關閉 schema 允許跨類夾帶額外 digest 鍵的縫,
+        # 例如一份 PG intent 夾帶 host-identity 的 uid_gid_directory_manifest_digest)。
+        if artifact["self_digest"] != artifact_self_digest(artifact):
+            errors.append("component effect intent self_digest is invalid")
+        try:
+            derive_component_intent_binding(artifact)
+        except ValueError as error:
+            errors.append(f"component effect intent binding is not admitted: {error}")
+    if schema_version == "s2_4_install_effect_receipt_v1":
+        # S2.4(WP4·W1·CP3)aggregate-lineage:closed schema(CP2b)之上,再導出離線結構 lineage
+        # (五 APPLY row exact 次序+unique、兩 scoped probe digest 相異、PREPARE 結果/postcheck、
+        # 逆向補償鏈)。此為結構驗,「不」斷言 runtime PASS。self_digest 完整性另驗。
+        if artifact["self_digest"] != artifact_self_digest(artifact):
+            errors.append("install effect receipt self_digest is invalid")
+        lineage = derive_install_lineage_status(artifact)
+        if lineage["status"] != "SATISFIED":
+            errors.extend(lineage["reasons"])
     return errors
 
 

@@ -412,6 +412,34 @@ def _component_work_package_v2(effect_class: str, **overrides: object) -> dict:
     return work_package
 
 
+# CP3 per-row ABI 綁定:一份合法 s2_4_component_effect_intent_v1(五 APPLY class 之一)。三個 common
+# token(plan/pre_state/expiry)落頂層,class-specific token 落 required_intent_fields 物件的 digest 鍵。
+_INTENT_D = "sha256:" + "a" * 64
+_INTENT_D2 = "sha256:" + "b" * 64
+_INTENT_TS = "2026-07-24T00:00:00Z"
+_V2_APPLY_CLASSES = validator.S2_4_APPLY_ROW_CLASS_ORDER
+
+
+def _component_effect_intent_v2(effect_class: str, **overrides: object) -> dict:
+    keys = validator._S2_4_APPLY_INTENT_CLASS_TOKEN_FIELDS[effect_class].values()
+    required_intent_fields = {
+        key: ("engine-scanner-db" if key == "credential_name" else _INTENT_D)
+        for key in keys
+    }
+    intent = {
+        "schema_version": "s2_4_component_effect_intent_v1",
+        "component_effect_class": effect_class,
+        "install_plan_digest": _INTENT_D,
+        "pre_state_digest": _INTENT_D2,
+        "required_intent_fields": required_intent_fields,
+        "expires_at": _INTENT_TS,
+        "self_digest": _INTENT_D,
+    }
+    intent.update(overrides)
+    intent["self_digest"] = validator.artifact_self_digest(intent)
+    return intent
+
+
 # --------------------------------------------------------------------------- #
 # §6 #1 (via #24): seven v2 classes each derive exact §4 matrix fields
 # --------------------------------------------------------------------------- #
@@ -449,6 +477,24 @@ def test_v2_seven_classes_each_derive_exact_matrix_fields() -> None:
             "independent_postcheck_node_id": postcheck,
             "required_intent_fields": intent_fields,
             "adapter_binding_status": "AUTHORITY_LOCKED_PRODUCTION_CAPABLE",
+        }
+
+    # CP3:五個 APPLY row 的 typed component-effect intent 逐份 derive 出 exact §4 ABI 綁定,
+    # 且中央閘接受該 intent(closed schema + per-row 綁定)。兩個前置類(HOST_CAPABILITY_PROBE /
+    # LEARNING_RUNTIME_PREPARE)不走此 intent schema,故只在上方 classify 迴圈涵蓋。
+    for effect_class in _V2_APPLY_CLASSES:
+        adapter, actor, postcheck, rollback, intent_fields = _V2_EXPECTED_ABI[effect_class]
+        intent = _component_effect_intent_v2(effect_class)
+        assert validator.validate_aiml_artifact(intent) == [], effect_class
+        binding = validator.derive_component_intent_binding(intent)
+        assert binding == {
+            "component_effect_class": effect_class,
+            "adapter_id": adapter,
+            "actor_node_id": actor,
+            "independent_postcheck_node_id": postcheck,
+            "recovery_contract": rollback,
+            "adapter_binding_status": "AUTHORITY_LOCKED_PRODUCTION_CAPABLE",
+            "required_intent_fields": intent_fields,
         }
 
 
@@ -668,4 +714,73 @@ def test_v2_declared_none_touching_component_surface_raises() -> None:
     with pytest.raises(ValueError, match="cannot be source-only"):
         validator.classify_component_required_effects_v2(
             work_package, classified_at=CLASSIFIED_AT
+        )
+
+
+# --------------------------------------------------------------------------- #
+# §6 #22:host-identity 突變面只屬 HOST_IDENTITY_INSTALL;PG-permit intent 不得夾帶它。
+# --------------------------------------------------------------------------- #
+def test_host_identity_only_classifies_as_host_identity_install() -> None:
+    # §4 token uid_gid_directory_manifest(host UID/GID/目錄突變)只出現在 HOST_IDENTITY_INSTALL 列。
+    owners = [
+        cls
+        for cls, row in validator.AIML_COMPONENT_EFFECT_CLASS_MATRIX_V2.items()
+        if "uid_gid_directory_manifest" in row["required_intent_fields"]
+    ]
+    assert owners == ["HOST_IDENTITY_INSTALL"]
+    # 一份合法 HOST_IDENTITY_INSTALL intent 綁到 host-identity ABI,且中央閘接受。
+    intent = _component_effect_intent_v2("HOST_IDENTITY_INSTALL")
+    binding = validator.derive_component_intent_binding(intent)
+    assert binding["adapter_id"] == "s2_4_host_identity_adapter_v1"
+    assert binding["actor_node_id"] == "s2_4_host_identity_actor"
+    assert binding["recovery_contract"] == "s2_4_host_identity_rollback_v1"
+    assert binding["required_intent_fields"] == [
+        "plan", "uid_gid_directory_manifest", "pre_state", "expiry",
+    ]
+    assert validator.validate_aiml_artifact(intent) == []
+
+
+def test_pg_permit_cannot_authorize_host_identity_mutation() -> None:
+    # PG_ROLE_ACL_MIGRATION 列的 required_intent_fields 排除任何 host uid/gid/目錄/身分突變 token。
+    pg_row = validator.AIML_COMPONENT_EFFECT_CLASS_MATRIX_V2["PG_ROLE_ACL_MIGRATION"]
+    assert not any(
+        tok in pg_row["required_intent_fields"]
+        for tok in ("uid_gid_directory_manifest", "host_identity", "credential_name")
+    )
+    # 一份 PG intent 夾帶 host-identity 面(uid_gid_directory_manifest_digest):intent schema 允許
+    # (該鍵在共享 $defs 為合法可選,PG 必要鍵仍在),但 CP3 per-row 綁定關閉此縫 → extra 鍵拒。
+    forged = _component_effect_intent_v2("PG_ROLE_ACL_MIGRATION")
+    forged["required_intent_fields"]["uid_gid_directory_manifest_digest"] = _INTENT_D
+    forged["self_digest"] = validator.artifact_self_digest(forged)
+    schema = validator._load_schema("s2_4_component_effect_intent_v1")
+    assert validator.schema_subset_errors(forged, schema, schema) == []  # schema 本身通過
+    errors = validator.validate_aiml_artifact(forged)  # 但中央閘的 per-row 綁定拒
+    assert any("do not match the exact §4 row set" in e for e in errors), errors
+    with pytest.raises(ValueError, match="do not match the exact §4 row set"):
+        validator.derive_component_intent_binding(forged)
+
+
+# --------------------------------------------------------------------------- #
+# per-row 綁定 tamper 反例:swapped adapter_id / short-or-extra intent-field set → 拒。
+# --------------------------------------------------------------------------- #
+def test_v2_per_row_binding_tamper_rejected() -> None:
+    # swapped adapter_id(classify 的 per-row 綁定;caller 不能換 adapter)。
+    with pytest.raises(ValueError, match="not the admitted adapter"):
+        validator.classify_component_required_effects_v2(
+            _component_work_package_v2(
+                "ENGINE_SCANNER", declared_adapter_id="s2_4_prepare_adapter_v1"
+            ),
+            classified_at=CLASSIFIED_AT,
+        )
+    # short intent-field set(intent 缺 class 必要鍵)→ derive raise。
+    short = _component_effect_intent_v2("PG_ROLE_ACL_MIGRATION")
+    del short["required_intent_fields"]["acl_manifest_digest"]
+    with pytest.raises(ValueError, match="do not match the exact §4 row set"):
+        validator.derive_component_intent_binding(short)
+    # 前置類/未知類不是五個 APPLY row → derive raise。
+    with pytest.raises(ValueError, match="not one of the five"):
+        validator.derive_component_intent_binding(
+            _component_effect_intent_v2(
+                "PG_ROLE_ACL_MIGRATION", component_effect_class="HOST_CAPABILITY_PROBE"
+            )
         )
