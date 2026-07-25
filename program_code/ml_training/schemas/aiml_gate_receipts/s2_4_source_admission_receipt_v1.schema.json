@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2_4_source_admission_receipt_v1.schema.json",
+  "title": "s2_4_source_admission_receipt_v1",
+  "description": "Evidence-only S2.4/WP4/W0 source-implementation admission receipt. It carries NO caller status/admitted/pass/done field (this closed schema simply omits them): the central validator DERIVES ADMITTED by independently re-reading the §1.2 effect-DAG projection, re-hashing the §9.1 trust pins, re-checking the S2.0 driver-reachability seam and the WP3 system-level property, and re-deriving the frozen S0.3 classifier + v1 component-matrix digests. A caller cannot self-declare admission. This is source-seam integrity re-derivation, never a runtime attestation: the nine authorities stay false, production_apply_performed false and running_attested false.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "program_id",
+    "work_package",
+    "wave",
+    "source_head",
+    "predecessor_heads",
+    "three_head_projection_digest",
+    "trust_pin_digests",
+    "s2_0_driver_reachability_proof",
+    "wp3_system_unit_alignment_proof",
+    "frozen_classifier_digest",
+    "component_classifier_v1_digest",
+    "production_authority_flags",
+    "negative_tests_pass",
+    "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2_4_source_admission_receipt_v1"},
+    "program_id": {"const": "AIML-LONG-LIVED-LANDING-V2"},
+    "work_package": {"const": "WP4"},
+    "wave": {"const": "W0"},
+    "source_head": {"$ref": "#/$defs/git_sha"},
+    "predecessor_heads": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["program_dag_projection_merge", "wp3_system_unit_merge"],
+      "properties": {
+        "program_dag_projection_merge": {"$ref": "#/$defs/git_sha"},
+        "wp3_system_unit_merge": {"$ref": "#/$defs/git_sha"}
+      }
+    },
+    "three_head_projection_digest": {"$ref": "#/$defs/digest"},
+    "trust_pin_digests": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "trusted_host_module_blob",
+        "trusted_host_module_sha256",
+        "independent_test_blob",
+        "independent_test_sha256",
+        "operator_fingerprint"
+      ],
+      "properties": {
+        "trusted_host_module_blob": {"$ref": "#/$defs/git_sha"},
+        "trusted_host_module_sha256": {"$ref": "#/$defs/digest"},
+        "independent_test_blob": {"$ref": "#/$defs/git_sha"},
+        "independent_test_sha256": {"$ref": "#/$defs/digest"},
+        "operator_fingerprint": {"type": "string", "pattern": "^SHA256:[A-Za-z0-9+/=]{40,}$"}
+      }
+    },
+    "s2_0_driver_reachability_proof": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "adapter_id",
+        "registry_status",
+        "unconditional_production_pending_removed",
+        "driver_protocol_present",
+        "production_success_status"
+      ],
+      "properties": {
+        "adapter_id": {"const": "pg_observer_bootstrap_adapter_v1"},
+        "registry_status": {"const": "AUTHORITY_LOCKED_PRODUCTION_CAPABLE"},
+        "unconditional_production_pending_removed": {"const": true},
+        "driver_protocol_present": {"const": true},
+        "production_success_status": {"const": "APPLIED"}
+      }
+    },
+    "wp3_system_unit_alignment_proof": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lifecycle_owner", "systemctl_user_absent", "role", "database"],
+      "properties": {
+        "lifecycle_owner": {"const": "host_system_manager"},
+        "systemctl_user_absent": {"const": true},
+        "role": {"const": "aiml_engine_scanner"},
+        "database": {"const": "trading_ai"}
+      }
+    },
+    "frozen_classifier_digest": {"$ref": "#/$defs/digest"},
+    "component_classifier_v1_digest": {"$ref": "#/$defs/digest"},
+    "production_authority_flags": {"$ref": "#/$defs/production_authority_flags"},
+    "negative_tests_pass": {"$ref": "#/$defs/digest"},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "git_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "production_authority_flags": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["nine_authorities_false", "production_apply_performed", "running_attested"],
+      "properties": {
+        "nine_authorities_false": {"const": true},
+        "production_apply_performed": {"const": false},
+        "running_attested": {"const": false}
+      }
+    }
+  }
+}
