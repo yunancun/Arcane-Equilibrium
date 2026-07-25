@@ -42,6 +42,17 @@ FROZEN_S0_3_TERMINAL_SINK_CONTRACT_DIGEST = (
 PINNED_COMPONENT_MATRIX_DIGEST = (
     "sha256:22d78882a2dace9ceb640b74b2a5dca2f2a8cc05861720f5ab25c5c9ac86c445"
 )
+# S2.4(WP4·W1)v2 install-seam 矩陣 digest 的 build-day pin。此 digest 綁定七類的 exact §4
+# ABI(adapter/actor/postcheck/rollback/required_intent_fields tokens);intent-field tokens
+# 一經敲定即為 ABI,除有意變更外此 pin 不得漂移。與 v1 矩陣 digest、S0.3 classifier digest
+# 是三個分開的 digest(v1 與 S0.3 仍 byte-frozen)。
+PINNED_COMPONENT_MATRIX_V2_DIGEST = (
+    "sha256:01d3062c79725b32b7c1468d02013a0df28dfeba1cf29d513cbf3bd6b4143c64"
+)
+# v1 sibling schema 檔的逐位元組凍結雜湊:v1 為 byte-frozen,W1 只做嚴格 additive。
+FROZEN_COMPONENT_V1_SCHEMA_FILE_DIGEST = (
+    "sha256:deb153a023d3e183a538597c0c8cdac1356e2c70e89d0837b805aa47159e5af9"
+)
 CLASSIFIED_AT = "2026-07-22T10:00:00Z"
 
 
@@ -318,3 +329,343 @@ def test_s0_3_required_effect_classification_still_validates() -> None:
         "EXTERNAL_READONLY_ATTESTATION"
     )
     assert validator.validate_aiml_artifact(classification) == []
+
+
+# =========================================================================== #
+# S2.4(WP4·W1)CP1:v2 install-source-seam 七類 sibling 分類器。嚴格 additive,
+# v1 與 S0.3 byte-frozen。§6 items 1-10。
+# =========================================================================== #
+# §4 逐行 ABI 期望表(contract lines 251-257):class -> (adapter, actor, postcheck,
+# rollback, required_intent_fields)。此表釘死 CP3 將斷言的 per-row 綁定。
+_V2_EXPECTED_ABI = {
+    "HOST_CAPABILITY_PROBE": (
+        "s2_4_capability_probe_adapter_v1",
+        "s2_4_capability_probe_actor",
+        "s2_4_capability_probe_postcheck_v1",
+        "s2_4_capability_probe_rollback_v1",
+        ["probe_scope", "transient_unit_property_digest", "host_cgroup_identity",
+         "cleanup_budget", "expiry"],
+    ),
+    "HOST_IDENTITY_INSTALL": (
+        "s2_4_host_identity_adapter_v1",
+        "s2_4_host_identity_actor",
+        "s2_4_host_identity_postcheck_v1",
+        "s2_4_host_identity_rollback_v1",
+        ["plan", "uid_gid_directory_manifest", "pre_state", "expiry"],
+    ),
+    "PG_ROLE_ACL_MIGRATION": (
+        "s2_4_pg_role_acl_adapter_v1",
+        "s2_4_pg_admin_actor",
+        "s2_4_pg_acl_postcheck_v1",
+        "s2_4_pg_acl_rollback_v1",
+        ["plan", "topology", "acl_manifest", "pg_migration_permit",
+         "admin_handle_descriptor", "pre_state", "expiry"],
+    ),
+    "CREDENTIAL_INSTALL": (
+        "s2_4_credential_install_adapter_v1",
+        "s2_4_host_secret_actor",
+        "s2_4_credential_postcheck_v1",
+        "s2_4_credential_rollback_v1",
+        ["plan", "credential_name", "encrypted_blob_digest", "host_identity",
+         "pre_state", "expiry"],
+    ),
+    "LEARNING_RUNTIME_PREPARE": (
+        "s2_4_prepare_adapter_v1",
+        "s2_4_prepare_actor",
+        "s2_4_prepare_postcheck_v1",
+        "s2_4_prepare_rollback_v1",
+        ["prepare_core", "prepare_authorization", "staging_root_device_inode",
+         "resource_budget", "expiry"],
+    ),
+    "LEARNING_RUNTIME": (
+        "s2_4_runtime_install_adapter_v1",
+        "s2_4_host_runtime_actor",
+        "s2_4_runtime_postcheck_v1",
+        "s2_4_runtime_rollback_v1",
+        ["plan", "prepare_receipt", "base_app_launch_manifests_and_target_paths",
+         "pre_state", "expiry"],
+    ),
+    "ENGINE_SCANNER": (
+        "s2_4_engine_scanner_install_adapter_v1",
+        "s2_4_host_service_actor",
+        "s2_4_engine_scanner_postcheck_v1",
+        "s2_4_engine_scanner_rollback_v1",
+        ["plan", "unit_policy_evidence_manifests", "inactive_post_state",
+         "pre_state", "expiry"],
+    ),
+}
+
+
+def _component_work_package_v2(effect_class: str, **overrides: object) -> dict:
+    row = validator.AIML_COMPONENT_EFFECT_CLASS_MATRIX_V2[effect_class]
+    work_package = {
+        "component_work_package_id": f"AIML-{effect_class}-V2-WP",
+        "component_effect_class": effect_class,
+        "declared_adapter_id": row["adapter_id"],
+        "declared_intent_fields": list(row["required_intent_fields"]),
+        "owned_path_manifest": [
+            "program_code/ml_training/schemas/aiml_gate_receipts/example.schema.json"
+        ],
+        "direct_interfaces": [row["adapter_id"]],
+    }
+    work_package.update(overrides)
+    return work_package
+
+
+# --------------------------------------------------------------------------- #
+# §6 #1 (via #24): seven v2 classes each derive exact §4 matrix fields
+# --------------------------------------------------------------------------- #
+def test_v2_seven_classes_each_derive_exact_matrix_fields() -> None:
+    assert set(validator.AIML_COMPONENT_EFFECT_CLASS_MATRIX_V2) == set(_V2_EXPECTED_ABI)
+    for effect_class, row in validator.AIML_COMPONENT_EFFECT_CLASS_MATRIX_V2.items():
+        adapter, actor, postcheck, rollback, intent_fields = _V2_EXPECTED_ABI[
+            effect_class
+        ]
+        # 矩陣逐行 = §4 ABI(CP3 將再斷言,這裡先釘死)。
+        assert row["adapter_id"] == adapter
+        assert row["actor_node_id"] == actor
+        assert row["independent_postcheck_node_id"] == postcheck
+        assert row["recovery_contract"] == rollback
+        assert list(row["required_intent_fields"]) == intent_fields
+        assert row["adapter_binding_status"] == "AUTHORITY_LOCKED_PRODUCTION_CAPABLE"
+
+        classification = validator.classify_component_required_effects_v2(
+            _component_work_package_v2(effect_class), classified_at=CLASSIFIED_AT
+        )
+        assert validator.validate_aiml_artifact(classification, now=CLASSIFIED_AT) == []
+        assert classification["schema_version"] == (
+            "aiml_component_effect_classification_v2"
+        )
+        assert classification["classifier_digest"] == (
+            validator.aiml_component_effect_class_matrix_v2_digest()
+        )
+        (effect,) = classification["required_effects"]
+        assert effect == {
+            "effect_class": effect_class,
+            "status": "REQUIRED_PENDING",
+            "adapter_id": adapter,
+            "actor_node_id": actor,
+            "rollback_contract": rollback,
+            "independent_postcheck_node_id": postcheck,
+            "required_intent_fields": intent_fields,
+            "adapter_binding_status": "AUTHORITY_LOCKED_PRODUCTION_CAPABLE",
+        }
+
+
+def test_v2_matrix_carries_same_four_independence_invariants_as_v1() -> None:
+    assert validator.AIML_COMPONENT_EFFECT_CLASS_V2_INVARIANTS == {
+        "requires_ops_preflight": True,
+        "requires_pm_operator_approved_intent": True,
+        "requires_independent_ops_postcheck": True,
+        "applier_is_not_sole_verifier": True,
+    }
+
+
+# --------------------------------------------------------------------------- #
+# §6 #2: PINNED_COMPONENT_MATRIX_V2_DIGEST pin
+# --------------------------------------------------------------------------- #
+def test_v2_component_matrix_digest_pin() -> None:
+    assert validator.aiml_component_effect_class_matrix_v2_digest() == (
+        PINNED_COMPONENT_MATRIX_V2_DIGEST
+    )
+
+
+# --------------------------------------------------------------------------- #
+# §6 #3: v2 digest distinct from v1 digest and from S0.3 classifier
+# --------------------------------------------------------------------------- #
+def test_v2_digest_is_distinct_from_v1_and_s0_3() -> None:
+    v2 = validator.aiml_component_effect_class_matrix_v2_digest()
+    assert v2 != validator.aiml_component_effect_class_matrix_digest()
+    assert v2 != validator.aiml_effect_classifier_digest()
+    assert v2 == PINNED_COMPONENT_MATRIX_V2_DIGEST
+
+
+# --------------------------------------------------------------------------- #
+# §6 #4: v1 matrix + v1 schema bytes + PROGRAM_SCHEMA_PATHS byte-frozen
+# --------------------------------------------------------------------------- #
+def test_v1_matrix_schema_and_program_schema_paths_byte_frozen() -> None:
+    import hashlib
+
+    assert validator.aiml_component_effect_class_matrix_digest() == (
+        PINNED_COMPONENT_MATRIX_DIGEST
+    )
+    assert validator.aiml_effect_classifier_digest() == FROZEN_S0_3_CLASSIFIER_DIGEST
+    v1_schema = (
+        validator.SCHEMA_DIR / "aiml_component_effect_classification_v1.schema.json"
+    ).read_bytes()
+    assert "sha256:" + hashlib.sha256(v1_schema).hexdigest() == (
+        FROZEN_COMPONENT_V1_SCHEMA_FILE_DIGEST
+    )
+    # v1 sibling schema 仍只在 SCHEMA_FILES 查找、絕不進入 PROGRAM_SCHEMA_PATHS(固定七名 tuple)。
+    assert len(validator.PROGRAM_SCHEMA_PATHS) == 7
+    assert not any(
+        "component_effect_classification" in path
+        for path in validator.PROGRAM_SCHEMA_PATHS
+    )
+    # v2 schema 亦僅 SCHEMA_FILES 查找,不觸 PROGRAM_SCHEMA_PATHS。
+    assert "aiml_component_effect_classification_v2" in validator.SCHEMA_FILES
+    assert (
+        validator.SCHEMA_DIR
+        / validator.SCHEMA_FILES["aiml_component_effect_classification_v2"]
+    ).is_file()
+
+
+# --------------------------------------------------------------------------- #
+# §6 #5: a valid v2 step is accepted by the central validator
+# --------------------------------------------------------------------------- #
+def test_v2_valid_classification_step_is_accepted() -> None:
+    classification = validator.classify_component_required_effects_v2(
+        _component_work_package_v2("PG_ROLE_ACL_MIGRATION"), classified_at=CLASSIFIED_AT
+    )
+    assert validator.validate_aiml_artifact(classification, now=CLASSIFIED_AT) == []
+
+
+# --------------------------------------------------------------------------- #
+# §6 #6: cross-version digest rejected in BOTH directions
+# --------------------------------------------------------------------------- #
+def test_v2_artifact_carrying_v1_digest_is_rejected() -> None:
+    classification = validator.classify_component_required_effects_v2(
+        _component_work_package_v2("LEARNING_RUNTIME"), classified_at=CLASSIFIED_AT
+    )
+    forged = deepcopy(classification)
+    forged["classifier_digest"] = validator.aiml_component_effect_class_matrix_digest()
+    forged["classification_id"] = validator._component_effect_class_identity_digest(
+        forged
+    )
+    forged["self_digest"] = validator.artifact_self_digest(forged)
+    errors = validator.validate_aiml_artifact(forged, now=CLASSIFIED_AT)
+    assert "AIML component effect v2 classifier digest is not admitted" in errors
+
+
+def test_v1_artifact_carrying_v2_digest_is_rejected() -> None:
+    classification = validator.classify_component_required_effects(
+        _component_work_package("ENGINE_SCANNER"), classified_at=CLASSIFIED_AT
+    )
+    forged = deepcopy(classification)
+    forged["classifier_digest"] = validator.aiml_component_effect_class_matrix_v2_digest()
+    forged["classification_id"] = validator._component_effect_class_identity_digest(
+        forged
+    )
+    forged["self_digest"] = validator.artifact_self_digest(forged)
+    errors = validator.validate_aiml_artifact(forged, now=CLASSIFIED_AT)
+    assert "AIML component effect classifier digest is not admitted" in errors
+
+
+def test_v2_schema_version_does_not_match_v1_dispatch() -> None:
+    # 同一 artifact 不會同時被兩個分支處理:v2 schema_version 只走 v2 分支。
+    classification = validator.classify_component_required_effects_v2(
+        _component_work_package_v2("HOST_CAPABILITY_PROBE"), classified_at=CLASSIFIED_AT
+    )
+    assert classification["schema_version"] == "aiml_component_effect_classification_v2"
+    assert validator.validate_aiml_artifact(classification, now=CLASSIFIED_AT) == []
+
+
+# --------------------------------------------------------------------------- #
+# §6 #7: forged downgrade-to-NONE rejected by the central recompute
+# --------------------------------------------------------------------------- #
+def test_v2_validator_rejects_forged_downgrade_to_none() -> None:
+    classification = validator.classify_component_required_effects_v2(
+        _component_work_package_v2("CREDENTIAL_INSTALL"), classified_at=CLASSIFIED_AT
+    )
+    forged = deepcopy(classification)
+    forged["required_effects"] = [{
+        "effect_class": "NONE",
+        "status": "NOT_REQUIRED",
+        "adapter_id": "none",
+        "actor_node_id": "none",
+        "rollback_contract": "none",
+        "independent_postcheck_node_id": "none",
+        "required_intent_fields": ["none"],
+        "adapter_binding_status": "AUTHORITY_LOCKED_PRODUCTION_CAPABLE",
+    }]
+    errors = validator.validate_aiml_artifact(forged, now=CLASSIFIED_AT)
+    assert "AIML component v2 required effects differ from classifier output" in errors
+
+
+# --------------------------------------------------------------------------- #
+# §6 #8: adapter-substitution rejected (classify + central recompute)
+# --------------------------------------------------------------------------- #
+def test_v2_adapter_substitution_is_rejected_at_classify() -> None:
+    work_package = _component_work_package_v2(
+        "ENGINE_SCANNER", declared_adapter_id="s2_4_prepare_adapter_v1"
+    )
+    with pytest.raises(ValueError, match="not the admitted adapter"):
+        validator.classify_component_required_effects_v2(
+            work_package, classified_at=CLASSIFIED_AT
+        )
+
+
+def test_v2_validator_rejects_forged_adapter_in_classified_inputs() -> None:
+    classification = validator.classify_component_required_effects_v2(
+        _component_work_package_v2("HOST_IDENTITY_INSTALL"), classified_at=CLASSIFIED_AT
+    )
+    forged = deepcopy(classification)
+    forged["classified_inputs"]["declared_adapter_id"] = "s2_4_prepare_adapter_v1"
+    forged["classification_id"] = validator._component_effect_class_identity_digest(
+        forged
+    )
+    forged["self_digest"] = validator.artifact_self_digest(forged)
+    errors = validator.validate_aiml_artifact(forged, now=CLASSIFIED_AT)
+    assert any("is not admitted" in error for error in errors)
+
+
+# --------------------------------------------------------------------------- #
+# §6 #9: adapter_binding_status tamper rejected (schema enum is single-valued)
+# --------------------------------------------------------------------------- #
+def test_v2_binding_status_tamper_is_rejected_by_schema_enum() -> None:
+    classification = validator.classify_component_required_effects_v2(
+        _component_work_package_v2("LEARNING_RUNTIME_PREPARE"), classified_at=CLASSIFIED_AT
+    )
+    tampered = deepcopy(classification)
+    # v1 的綁定值在 v2 schema enum 之外,故 schema-subset 檢查即拒。
+    tampered["required_effects"][0]["adapter_binding_status"] = "IMPLEMENTED_DISPOSABLE"
+    tampered["classification_id"] = validator._component_effect_class_identity_digest(
+        tampered
+    )
+    tampered["self_digest"] = validator.artifact_self_digest(tampered)
+    errors = validator.validate_aiml_artifact(tampered, now=CLASSIFIED_AT)
+    assert any("enum" in error for error in errors)
+
+
+# --------------------------------------------------------------------------- #
+# §6 #10: intent-field-set tamper rejected (classify + central recompute)
+# --------------------------------------------------------------------------- #
+def test_v2_intent_field_set_tamper_is_rejected_at_classify() -> None:
+    work_package = _component_work_package_v2("PG_ROLE_ACL_MIGRATION")
+    work_package["declared_intent_fields"] = work_package["declared_intent_fields"][:-1]
+    with pytest.raises(ValueError, match="do not match the exact"):
+        validator.classify_component_required_effects_v2(
+            work_package, classified_at=CLASSIFIED_AT
+        )
+
+
+def test_v2_validator_rejects_forged_intent_fields_in_required_effects() -> None:
+    classification = validator.classify_component_required_effects_v2(
+        _component_work_package_v2("HOST_CAPABILITY_PROBE"), classified_at=CLASSIFIED_AT
+    )
+    forged = deepcopy(classification)
+    forged["required_effects"][0]["required_intent_fields"] = ["probe_scope"]
+    forged["classification_id"] = validator._component_effect_class_identity_digest(
+        forged
+    )
+    forged["self_digest"] = validator.artifact_self_digest(forged)
+    errors = validator.validate_aiml_artifact(forged, now=CLASSIFIED_AT)
+    assert "AIML component v2 required effects differ from classifier output" in errors
+
+
+# --------------------------------------------------------------------------- #
+# bypass-negative: an effectful v2 surface cannot be self-declared source-only
+# --------------------------------------------------------------------------- #
+def test_v2_declared_none_touching_component_surface_raises() -> None:
+    work_package = {
+        "component_work_package_id": "AIML-v2-sneaky-WP",
+        "component_effect_class": "NONE",
+        "declared_adapter_id": "none",
+        "declared_intent_fields": ["irrelevant"],
+        "owned_path_manifest": [],
+        "direct_interfaces": ["s2_4_runtime_install_adapter_v1"],
+    }
+    with pytest.raises(ValueError, match="cannot be source-only"):
+        validator.classify_component_required_effects_v2(
+            work_package, classified_at=CLASSIFIED_AT
+        )

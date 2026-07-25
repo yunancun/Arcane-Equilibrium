@@ -37,6 +37,12 @@ SCHEMA_FILES = {
     "terminal_receipt_readback_ack_v1": "terminal_receipt_readback_ack_v1.schema.json",
     # S1.2(LR0B)七類 component effect 的 sibling 分類 artifact(不動 S0.3 分類)。
     "aiml_component_effect_classification_v1": "aiml_component_effect_classification_v1.schema.json",
+    # S2.4(WP4·W1)——additive:七類 S2.4 install-seam component effect 的 v2 sibling 分類
+    # artifact(不動 v1 component matrix/schema)。加這鍵純為 schema 查找,絕不進入
+    # aiml_effect_classifier_digest() 的六個 S0.3 常量輸入(見 :46-48/§7.2),S0.3 分類身分不動;
+    # 亦不改 PROGRAM_SCHEMA_PATHS 與 v1 component matrix/digest。中央閘依 exact schema_version
+    # 分派並拒跨版本 digest;required_effects 由 AIML_COMPONENT_EFFECT_CLASS_MATRIX_V2 再導出。
+    "aiml_component_effect_classification_v2": "aiml_component_effect_classification_v2.schema.json",
     # S1.5(LR0B)每元件 deploy adapter 的 typed intent/result + 獨立 postcheck attestation
     # + effect-seams-ready rollup;central-validator 委派給 S1.5 module 的 self-validating 檢查。
     "component_effect_intent_v1": "component_effect_intent_v1.schema.json",
@@ -761,6 +767,221 @@ def classify_component_required_effects(
         "component_work_package_id": work_package.get("component_work_package_id"),
         "classified_inputs": json.loads(json.dumps(work_package)),
         "classifier_digest": aiml_component_effect_class_matrix_digest(),
+        "required_effects": required_effects,
+        "classified_at": classified_at,
+        "self_digest": "sha256:" + "0" * 64,
+    }
+    classification["classification_id"] = _component_effect_class_identity_digest(
+        classification
+    )
+    classification["self_digest"] = artifact_self_digest(classification)
+    return classification
+
+
+# --------------------------------------------------------------------------- #
+# S2.4(WP4·W1)七類 install-source-seam component effect 的 v2 vocabulary/matrix +
+# sibling 分類器。這是 S2.4 §4 要求的 typed 七類擁有權/allowlist 矩陣:每類 → 必綁的
+# exact §4 ABI(adapter_id / actor / 獨立 postcheck / rollback 契約 / required intent
+# 欄位)。此為「新增一版矩陣=資料編輯」,不是動 v1。此 v2 矩陣與其 digest 與 v1 component
+# matrix、與 S0.3 的 aiml_effect_classifier_digest 全部獨立(sibling),故 v1 與 S0.3 都
+# 保持 byte-frozen(見 §0 凍結約束)。recovery_contract 逐字綁 §4 rollback schema id;
+# adapter_binding_status 為 v2 唯一綁定值 AUTHORITY_LOCKED_PRODUCTION_CAPABLE(可達的
+# 契約強制 + authority-lock;可執行 host-driver ABI 屬後續 wave,絕不在此處隱含)。
+# --------------------------------------------------------------------------- #
+AIML_COMPONENT_EFFECT_CLASS_MATRIX_V2: dict[str, dict[str, Any]] = {
+    "HOST_CAPABILITY_PROBE": {
+        "required_intent_fields": [
+            "probe_scope", "transient_unit_property_digest", "host_cgroup_identity",
+            "cleanup_budget", "expiry",
+        ],
+        "recovery_contract": "s2_4_capability_probe_rollback_v1",
+        "adapter_id": "s2_4_capability_probe_adapter_v1",
+        "adapter_binding_status": "AUTHORITY_LOCKED_PRODUCTION_CAPABLE",
+        "actor_node_id": "s2_4_capability_probe_actor",
+        "independent_postcheck_node_id": "s2_4_capability_probe_postcheck_v1",
+    },
+    "HOST_IDENTITY_INSTALL": {
+        "required_intent_fields": [
+            "plan", "uid_gid_directory_manifest", "pre_state", "expiry",
+        ],
+        "recovery_contract": "s2_4_host_identity_rollback_v1",
+        "adapter_id": "s2_4_host_identity_adapter_v1",
+        "adapter_binding_status": "AUTHORITY_LOCKED_PRODUCTION_CAPABLE",
+        "actor_node_id": "s2_4_host_identity_actor",
+        "independent_postcheck_node_id": "s2_4_host_identity_postcheck_v1",
+    },
+    "PG_ROLE_ACL_MIGRATION": {
+        "required_intent_fields": [
+            "plan", "topology", "acl_manifest", "pg_migration_permit",
+            "admin_handle_descriptor", "pre_state", "expiry",
+        ],
+        "recovery_contract": "s2_4_pg_acl_rollback_v1",
+        "adapter_id": "s2_4_pg_role_acl_adapter_v1",
+        "adapter_binding_status": "AUTHORITY_LOCKED_PRODUCTION_CAPABLE",
+        "actor_node_id": "s2_4_pg_admin_actor",
+        "independent_postcheck_node_id": "s2_4_pg_acl_postcheck_v1",
+    },
+    "CREDENTIAL_INSTALL": {
+        "required_intent_fields": [
+            "plan", "credential_name", "encrypted_blob_digest", "host_identity",
+            "pre_state", "expiry",
+        ],
+        "recovery_contract": "s2_4_credential_rollback_v1",
+        "adapter_id": "s2_4_credential_install_adapter_v1",
+        "adapter_binding_status": "AUTHORITY_LOCKED_PRODUCTION_CAPABLE",
+        "actor_node_id": "s2_4_host_secret_actor",
+        "independent_postcheck_node_id": "s2_4_credential_postcheck_v1",
+    },
+    "LEARNING_RUNTIME_PREPARE": {
+        "required_intent_fields": [
+            "prepare_core", "prepare_authorization", "staging_root_device_inode",
+            "resource_budget", "expiry",
+        ],
+        "recovery_contract": "s2_4_prepare_rollback_v1",
+        "adapter_id": "s2_4_prepare_adapter_v1",
+        "adapter_binding_status": "AUTHORITY_LOCKED_PRODUCTION_CAPABLE",
+        "actor_node_id": "s2_4_prepare_actor",
+        "independent_postcheck_node_id": "s2_4_prepare_postcheck_v1",
+    },
+    "LEARNING_RUNTIME": {
+        "required_intent_fields": [
+            "plan", "prepare_receipt", "base_app_launch_manifests_and_target_paths",
+            "pre_state", "expiry",
+        ],
+        "recovery_contract": "s2_4_runtime_rollback_v1",
+        "adapter_id": "s2_4_runtime_install_adapter_v1",
+        "adapter_binding_status": "AUTHORITY_LOCKED_PRODUCTION_CAPABLE",
+        "actor_node_id": "s2_4_host_runtime_actor",
+        "independent_postcheck_node_id": "s2_4_runtime_postcheck_v1",
+    },
+    "ENGINE_SCANNER": {
+        "required_intent_fields": [
+            "plan", "unit_policy_evidence_manifests", "inactive_post_state",
+            "pre_state", "expiry",
+        ],
+        "recovery_contract": "s2_4_engine_scanner_rollback_v1",
+        "adapter_id": "s2_4_engine_scanner_install_adapter_v1",
+        "adapter_binding_status": "AUTHORITY_LOCKED_PRODUCTION_CAPABLE",
+        "actor_node_id": "s2_4_host_service_actor",
+        "independent_postcheck_node_id": "s2_4_engine_scanner_postcheck_v1",
+    },
+}
+# 與 v1 相同的四條 OPS/PM/獨立性契約旗標:「施加 effect 的 actor 不能是其唯一驗證者」。
+AIML_COMPONENT_EFFECT_CLASS_V2_INVARIANTS = {
+    "requires_ops_preflight": True,
+    "requires_pm_operator_approved_intent": True,
+    "requires_independent_ops_postcheck": True,
+    "applier_is_not_sole_verifier": True,
+}
+
+
+def aiml_component_effect_class_matrix_v2_digest() -> str:
+    """Identify the 7-class S2.4 v2 component-effect matrix, independent of v1/S0.3.
+
+    Analogue of ``aiml_component_effect_class_matrix_digest`` but a **separate**
+    digest so the v1 component matrix and the S0.3 classifier stay byte-frozen.
+    """
+
+    return canonical_digest({
+        "component_effect_class_matrix": AIML_COMPONENT_EFFECT_CLASS_MATRIX_V2,
+        "class_invariants": AIML_COMPONENT_EFFECT_CLASS_V2_INVARIANTS,
+    })
+
+
+def _component_effect_surface_tokens_v2() -> frozenset[str]:
+    # 任一 v2 component 的 adapter/actor/postcheck 節點 id 都是「碰到 effectful 面」的標記。
+    tokens: set[str] = set()
+    for row in AIML_COMPONENT_EFFECT_CLASS_MATRIX_V2.values():
+        tokens.add(row["adapter_id"])
+        tokens.add(row["actor_node_id"])
+        tokens.add(row["independent_postcheck_node_id"])
+    return frozenset(tokens)
+
+
+def _component_surfaces_touched_v2(
+    owned_path_manifest: Any, direct_interfaces: Any
+) -> set[str]:
+    tokens = _component_effect_surface_tokens_v2()
+    touched: set[str] = set()
+    for collection in (owned_path_manifest, direct_interfaces):
+        if isinstance(collection, list):
+            for item in collection:
+                if isinstance(item, str) and item in tokens:
+                    touched.add(item)
+    return touched
+
+
+def classify_component_required_effects_v2(
+    work_package: Any, *, classified_at: str
+) -> dict[str, Any]:
+    """Derive a v2 component's required effect from the v2 matrix; block source-only.
+
+    Structural clone of ``classify_component_required_effects`` but resolving the
+    exact ``adapter_id`` / ``actor_node_id`` / ``rollback_contract`` /
+    ``independent_postcheck_node_id`` / ``required_intent_fields`` in
+    ``AIML_COMPONENT_EFFECT_CLASS_MATRIX_V2``; the caller cannot supply or
+    downgrade them.  It **raises** (never emits a ``NONE`` classification) when:
+
+    * ``component_effect_class`` is ``NONE``/omitted/unknown yet the
+      ``owned_path_manifest``/``direct_interfaces`` intersect a v2 component surface;
+    * the declared ``declared_adapter_id`` is not the matrix adapter for the class;
+    * the ``declared_intent_fields`` are not exactly the matrix intent contract.
+    """
+
+    if not isinstance(work_package, dict):
+        raise ValueError("component work_package is required")
+    declared_class = work_package.get("component_effect_class")
+    matrix_row = (
+        AIML_COMPONENT_EFFECT_CLASS_MATRIX_V2.get(str(declared_class))
+        if declared_class is not None
+        else None
+    )
+    if matrix_row is None:
+        # NONE/缺失/未知類:若其 owned paths / direct interfaces 碰到任一 v2 component
+        # 面,即為「effectful 面偽裝成 source-only」的繞過 → fail-closed raise。
+        touched = _component_surfaces_touched_v2(
+            work_package.get("owned_path_manifest"),
+            work_package.get("direct_interfaces"),
+        )
+        if touched:
+            raise ValueError(
+                "component work-package touches effectful component surface(s) "
+                f"{sorted(touched)} but declares component_effect_class="
+                f"{declared_class!r}; an effectful class cannot be source-only"
+            )
+        raise ValueError(
+            f"unsupported component_effect_class: {declared_class!r}"
+        )
+    declared_adapter = work_package.get("declared_adapter_id")
+    if declared_adapter != matrix_row["adapter_id"]:
+        raise ValueError(
+            f"declared_adapter_id {declared_adapter!r} is not the admitted adapter "
+            f"for {declared_class}"
+        )
+    declared_fields = work_package.get("declared_intent_fields")
+    if not isinstance(declared_fields, list) or sorted(declared_fields) != sorted(
+        matrix_row["required_intent_fields"]
+    ):
+        raise ValueError(
+            f"declared_intent_fields do not match the exact {declared_class} "
+            "intent contract"
+        )
+    required_effects = [{
+        "effect_class": declared_class,
+        "status": "REQUIRED_PENDING",
+        "adapter_id": matrix_row["adapter_id"],
+        "actor_node_id": matrix_row["actor_node_id"],
+        "rollback_contract": matrix_row["recovery_contract"],
+        "independent_postcheck_node_id": matrix_row["independent_postcheck_node_id"],
+        "required_intent_fields": list(matrix_row["required_intent_fields"]),
+        "adapter_binding_status": matrix_row["adapter_binding_status"],
+    }]
+    classification: dict[str, Any] = {
+        "schema_version": "aiml_component_effect_classification_v2",
+        "classification_id": "sha256:" + "0" * 64,
+        "component_work_package_id": work_package.get("component_work_package_id"),
+        "classified_inputs": json.loads(json.dumps(work_package)),
+        "classifier_digest": aiml_component_effect_class_matrix_v2_digest(),
         "required_effects": required_effects,
         "classified_at": classified_at,
         "self_digest": "sha256:" + "0" * 64,
@@ -2451,6 +2672,37 @@ def validate_aiml_artifact(
             if artifact["required_effects"] != expected["required_effects"]:
                 errors.append(
                     "AIML component required effects differ from classifier output"
+                )
+    if schema_version == "aiml_component_effect_classification_v2":
+        # S2.4(WP4·W1)v2 sibling 分類 artifact:結構等同 v1 分支但指向 v2 分類器與 v2
+        # 矩陣 digest。跨版本互拒為自動性——v1 artifact 帶 v1 digest 而此分支要 v2 digest,
+        # 反之亦然;classifier_digest 不符即 fail-closed(下方 negative test 另補顯式反例)。
+        if artifact["classification_id"] != _component_effect_class_identity_digest(
+            artifact
+        ):
+            errors.append("AIML component effect v2 classification_id is invalid")
+        if artifact["self_digest"] != artifact_self_digest(artifact):
+            errors.append("AIML component effect v2 classification self_digest is invalid")
+        if artifact["classifier_digest"] != aiml_component_effect_class_matrix_v2_digest():
+            errors.append("AIML component effect v2 classifier digest is not admitted")
+        if artifact["component_work_package_id"] != artifact["classified_inputs"][
+            "component_work_package_id"
+        ]:
+            errors.append("AIML component v2 classification work-package id is not bound")
+        try:
+            expected = classify_component_required_effects_v2(
+                artifact["classified_inputs"],
+                classified_at=artifact["classified_at"],
+            )
+        except ValueError as error:
+            # NONE-block / adapter-substitution / 缺欄位 → fail-closed。
+            errors.append(
+                f"AIML component effect v2 classification is not admitted: {error}"
+            )
+        else:
+            if artifact["required_effects"] != expected["required_effects"]:
+                errors.append(
+                    "AIML component v2 required effects differ from classifier output"
                 )
     if schema_version == "pg_readonly_identity_receipt_v1":
         # S1.1 central-validator wiring(CC review note D2):委派給 S1.1 validator 並
