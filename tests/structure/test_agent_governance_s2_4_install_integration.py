@@ -207,3 +207,35 @@ def test_w1_emit_rejects_empty_or_malformed_evidence(
             review_provenance=review_provenance,
         )
     assert list(tmp_path.iterdir()) == []
+
+
+def test_w1_emit_hard_refuses_tampered_historical_w0(tmp_path) -> None:
+    """PM 裁決回歸(E2 recheck P3):歷史 W0 receipt 竄改 → 硬拒 W1 發射且不落檔。"""
+
+    import json as _json
+    import shutil as _shutil
+
+    poisoned_dir = tmp_path / "w0"
+    poisoned_dir.mkdir()
+    for name in (
+        install.W0_ADMISSION_FILENAME,
+        install.W0_WAVE_EXIT_FILENAME,
+        install.W0_DERIVATION_RECORD_FILENAME,
+    ):
+        _shutil.copy(install.W0_RECEIPT_DIR / name, poisoned_dir / name)
+    target = poisoned_dir / install.W0_ADMISSION_FILENAME
+    artifact = _json.loads(target.read_text(encoding="utf-8"))
+    artifact["source_head"] = "0" * 40  # 改 byte 不重封 self_digest
+    target.write_text(_json.dumps(artifact, indent=2, sort_keys=True), encoding="utf-8")
+
+    out_dir = tmp_path / "out"
+    result = install.emit_w1_receipts(
+        out_dir=out_dir,
+        test_evidence={"command": "pytest -q", "exit_code": 0},
+        review_provenance=[{"pr": 0, "verdict": "fixture"}],
+        w0_receipt_dir=poisoned_dir,
+    )
+    assert result["status"] == "W1_EMIT_REFUSED"
+    assert result["stage"] == "historical_w0_receipts"
+    assert "self-digest" in result["reasons"][0]
+    assert not out_dir.exists() or list(out_dir.iterdir()) == []

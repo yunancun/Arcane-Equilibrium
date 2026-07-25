@@ -375,6 +375,17 @@ def emit_w1_receipts(
                 f"persisted W0 receipts are unreadable or malformed under {w0_receipt_dir}"
             ],
         }
+    # PM 裁決(E2 recheck P3):竄改過的歷史 lineage 不是「可註記後續行」的資訊——它意味
+    # repo 內的治理 receipt 曾被改寫,屬停機調查事件;硬拒發射,對齊 fail-closed 文化。
+    if historical_w0.get("historical_w0_integrity") != "VERIFIED":
+        return {
+            "status": "W1_EMIT_REFUSED",
+            "stage": "historical_w0_receipts",
+            "reasons": [
+                "persisted W0 receipts fail self-digest verification "
+                "(tampered governance history; investigate before any W1 emission)"
+            ],
+        }
 
     # 當前世代 W0 admission(記憶體重發;同 builder,綁當前 HEAD/repo bytes)。
     admission = build_w0_source_admission_receipt(repo_root)
