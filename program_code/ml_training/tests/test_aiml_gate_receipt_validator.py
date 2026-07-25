@@ -2359,7 +2359,8 @@ def _w0_admission_receipt() -> dict:
             "production_apply_performed": False,
             "running_attested": False,
         },
-        "negative_tests_pass": _w0.canonical_digest(["w0-negative-manifest"]),
+        # 由 code-owned W0 負向測試清單「重算」而得(綁定非回聲);見 derive_source_admission_status。
+        "negative_tests_pass": _w0.w0_negative_test_manifest_digest(),
     }
     receipt["self_digest"] = _w0.artifact_self_digest(receipt)
     return receipt

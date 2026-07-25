@@ -95,9 +95,9 @@ def _build_admission_receipt(source_head: str) -> dict:
             "production_apply_performed": False,
             "running_attested": False,
         },
-        "negative_tests_pass": validator.canonical_digest(
-            ["reject_old_chain", "reject_systemctl_user", "reject_self_declared_status"]
-        ),
+        # 由 code-owned W0 負向測試清單「重算」而得(不硬編陳舊字面量);admission 因此
+        # 真正綁定本檔負向測試身分,而非帶任意 digest 佯裝負向測試已驗。
+        "negative_tests_pass": validator.w0_negative_test_manifest_digest(),
     }
     receipt["self_digest"] = validator.artifact_self_digest(receipt)
     return receipt
@@ -148,6 +148,26 @@ def test_wave_exit_derives_pass_when_bound_admission_is_admitted() -> None:
     assert result == {"status": "PASS", "reasons": []}
     # central gate (no bound admission) still validates the self-contained structure
     assert validator.validate_aiml_artifact(wave_exit) == []
+
+
+def test_central_gate_wave_exit_is_structural_only_not_w0_pass() -> None:
+    # 邊界回歸釘:中央閘的 wave-exit 分支只做 STRUCTURAL-ONLY 再導出,乾淨的 [] 「不」等於 W0 PASS。
+    admission = _build_admission_receipt(_current_head())
+    wave_exit = _build_wave_exit_receipt(admission)
+    # 竄改綁定的 admission digest 為假值,但 wave-exit 本身結構仍自足合法。
+    wave_exit["source_admission_receipt_digest"] = "sha256:" + "0" * 64
+    wave_exit["self_digest"] = validator.artifact_self_digest(wave_exit)
+    # (a) 中央閘只驗結構 → 回 [](記錄此危害:bogus admission digest 仍過中央閘)。
+    assert validator.validate_aiml_artifact(wave_exit) == []
+    # (b) 真 PASS 需綁定「已導 ADMITTED 的 admission」再導出;bogus digest 與 admission.self_digest
+    #     不符 → NON-PASS。此釘住「中央閘單獨結果不得讀為 PASS」。
+    result = validator.derive_wave_exit_status(
+        wave_exit, source_admission_receipt=admission
+    )
+    assert result["status"] == "NOT_PASS"
+    assert any(
+        "source_admission_receipt_digest does not bind" in r for r in result["reasons"]
+    )
 
 
 # ── §10.5 #27: caller cannot self-declare a status ───────────────────────────
@@ -287,6 +307,57 @@ def test_tamper_production_flag_true_breaks_admission() -> None:
     result = validator.derive_source_admission_status(receipt)
     assert result["status"] == "NOT_ADMITTED"
     assert any("production_authority_flags" in r for r in result["reasons"])
+
+
+def test_tamper_component_classifier_v1_digest_breaks_admission() -> None:
+    receipt = _build_admission_receipt(_current_head())
+    receipt["component_classifier_v1_digest"] = "sha256:" + "0" * 64
+    receipt["self_digest"] = validator.artifact_self_digest(receipt)
+    result = validator.derive_source_admission_status(receipt)
+    assert result["status"] == "NOT_ADMITTED"
+    assert any("component_classifier_v1_digest" in r for r in result["reasons"])
+
+
+def test_tamper_negative_tests_pass_breaks_admission() -> None:
+    # negative_tests_pass 是形狀合法卻不符 code-owned 清單的 digest → 綁定(非形狀)檢查必拒。
+    receipt = _build_admission_receipt(_current_head())
+    receipt["negative_tests_pass"] = validator.canonical_digest(["wrong-manifest"])
+    receipt["self_digest"] = validator.artifact_self_digest(receipt)
+    result = validator.derive_source_admission_status(receipt)
+    assert result["status"] == "NOT_ADMITTED"
+    assert any(
+        "negative_tests_pass does not re-derive to the W0 negative-test manifest" in r
+        for r in result["reasons"]
+    )
+
+
+def test_tamper_non_ancestor_source_head_breaks_admission() -> None:
+    # 有效 40-hex 但「非」PR#132/#134 predecessor 後代的 commit:predecessor_heads 仍與
+    # _PREDECESSOR_HEADS 相等(不觸 dict-equality guard),故控制流真正進入祖裔 LOOP,
+    # 每個 predecessor 的 _git_is_ancestor 皆回 False → 兩條 "is not an ancestor" reason。
+    receipt = _build_admission_receipt("0" * 39 + "1")
+    result = validator.derive_source_admission_status(receipt)
+    assert result["status"] == "NOT_ADMITTED"
+    assert receipt["predecessor_heads"] == dict(validator._PREDECESSOR_HEADS)
+    assert [
+        r for r in result["reasons"] if "is not an ancestor" in r
+    ] == [
+        f"admission predecessor {name} is not an ancestor of source_head"
+        for name in validator._PREDECESSOR_HEADS
+    ]
+
+
+# ── manifest binding is honest: it enumerates the real committed negatives ────
+
+
+def test_w0_negative_test_manifest_matches_the_committed_negatives() -> None:
+    # 清單必須「恰好」等於本檔實際定義的 reject_/tamper_ 負向測試(雙向防漂移):少列 →
+    # admission 對未驗測試背書;多列 → digest 綁到不存在的測試。
+    committed = tuple(sorted(
+        name for name in globals()
+        if name.startswith(("test_reject_", "test_tamper_"))
+    ))
+    assert validator._W0_NEGATIVE_TEST_MANIFEST == committed
 
 
 # ── §10.5 #2: frozen S0.3 + v1 component bytes unchanged after the schemas ────

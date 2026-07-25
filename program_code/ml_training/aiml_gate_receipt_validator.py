@@ -1470,11 +1470,34 @@ _W0_OWNED_PATHS = (
     "tests/structure/test_agent_governance_pg_observer_bootstrap.py",
     "tests/structure/test_s2_4_w0_admission.py",
 )
+# §3.1 W0 負向測試清單:admission 的 negative_tests_pass 必須「重導出」等於本清單的正規
+# digest,而非只通過形狀檢查(否則偽造 receipt 可帶任意 digest 仍導出 ADMITTED,verdict 便
+# 暗示 W0 負向測試已驗,實則從未綁定)。此為 code-owned 常量——恰好列出
+# tests/structure/test_s2_4_w0_admission.py 內每一支負向(reject_/tamper_)測試的確切函式名
+# (舊 effect-chain / systemctl --user / 自證 status / 逐欄竄改拒絕),已排序去重。
+_W0_NEGATIVE_TEST_MANIFEST = (
+    "test_reject_old_effect_chain_if_reintroduced_into_a_projection",
+    "test_reject_self_declared_admission_status",
+    "test_reject_self_declared_wave_exit_status",
+    "test_reject_wp3_systemctl_user_production_path_from_executable_constants",
+    "test_tamper_component_classifier_v1_digest_breaks_admission",
+    "test_tamper_driver_reachability_flag_breaks_admission",
+    "test_tamper_frozen_classifier_digest_breaks_admission",
+    "test_tamper_negative_tests_pass_breaks_admission",
+    "test_tamper_non_ancestor_source_head_breaks_admission",
+    "test_tamper_operator_fingerprint_breaks_admission",
+    "test_tamper_predecessor_head_breaks_admission",
+    "test_tamper_production_flag_true_breaks_admission",
+    "test_tamper_projection_digest_breaks_admission",
+    "test_tamper_trust_pin_breaks_admission",
+)
 _CALLER_STATUS_KEYS = ("admitted", "done", "pass", "status")
 
 
-def _is_digest(value: Any) -> bool:
-    return isinstance(value, str) and re.fullmatch(r"sha256:[0-9a-f]{64}", value) is not None
+def w0_negative_test_manifest_digest() -> str:
+    """W0 負向測試清單的正規 digest(admission negative_tests_pass 綁定的固定投影)。"""
+
+    return canonical_digest(list(_W0_NEGATIVE_TEST_MANIFEST))
 
 
 def git_blob_sha1(data: bytes) -> str:
@@ -1714,8 +1737,13 @@ def derive_source_admission_status(
         reasons.append(
             "admission production_authority_flags must all be false (nine authorities / apply / running)"
         )
-    if not _is_digest(receipt.get("negative_tests_pass")):
-        reasons.append("admission negative_tests_pass must be a canonical digest")
+    # 綁定(而非只驗形狀):negative_tests_pass 必須重導出等於 code-owned W0 負向測試清單的
+    # 正規 digest。任意形狀合法卻不符清單的 digest 一律拒——admission 因此真正背書 W0 負向測試
+    # 身分,而非讓偽造 receipt 帶任意 digest 佯裝負向測試已驗。
+    if receipt.get("negative_tests_pass") != w0_negative_test_manifest_digest():
+        reasons.append(
+            "admission negative_tests_pass does not re-derive to the W0 negative-test manifest"
+        )
     return {
         "status": "ADMITTED" if not reasons else "NOT_ADMITTED",
         "reasons": reasons,
@@ -1760,6 +1788,12 @@ def derive_wave_exit_status(
     ``source_admission_receipt`` 再導出 ADMITTED 且其 self_digest == 本 receipt 綁定的
     ``source_admission_receipt_digest``、owned-path/ABI/flags 再導出相符、source_head 一致。
     caller 帶 status/pass/done 於 derivation 前即拒(§10.3/§10.5 #27)。
+
+    邊界(必要非充分):中央閘 :func:`validate_aiml_artifact` 對 wave-exit 只做 STRUCTURAL-ONLY
+    再導出(不綁 admission 物件),乾淨的 ``[]`` 結果「不」等於 W0 PASS——它未驗
+    ``source_admission_receipt_digest`` 是否綁到一份真能再導出 ADMITTED 的 admission。真正的
+    PASS 只能由「本函式帶 ``source_admission_receipt=<已導出 ADMITTED 的 admission>``」授予
+    (鏡射 CLAUDE.md standalone-CLI / typed-authority 邊界:離線結構驗無法自證 PASS)。
     """
 
     if not isinstance(receipt, dict):
@@ -2423,10 +2457,12 @@ def validate_aiml_artifact(
         if result["status"] != "ADMITTED":
             errors.extend(result["reasons"])
     if schema_version == "s2_4_wave_exit_receipt_v1":
-        # S2.4(WP4·W0)wave-exit:中央閘無綁定 admission 對象,故只驗「自足」再導出(caller-status
-        # 拒 + self_digest + flags + W0 的 ABI/owned-path/predecessor-null)。完整 PASS(需成對
-        # admission 再導 ADMITTED)由 test/closure lane 以 derive_wave_exit_status(source_admission_
-        # receipt=...) 執行——mirror sealed-build 的 offline-structure 邊界。
+        # S2.4(WP4·W0)wave-exit:此中央閘分支為 STRUCTURAL-ONLY——無綁定 admission 對象,故只驗
+        # 「自足」再導出(caller-status 拒 + self_digest + flags + W0 的 ABI/owned-path/predecessor-null),
+        # 「不」驗 source_admission_receipt_digest 是否綁到一份真能再導出 ADMITTED 的 admission。
+        # ⚠ 乾淨的 [] 結果「不」等於 W0 PASS:帶 bogus source_admission_receipt_digest 的 wave-exit
+        # 仍會回 []。完整 PASS 必須由 derive_wave_exit_status(source_admission_receipt=<已導 ADMITTED>)
+        # 授予——mirror CLAUDE.md standalone-CLI / typed-authority 邊界(離線結構驗無法自證 PASS)。
         declared = sorted(key for key in _CALLER_STATUS_KEYS if key in artifact)
         if declared:
             errors.append(
