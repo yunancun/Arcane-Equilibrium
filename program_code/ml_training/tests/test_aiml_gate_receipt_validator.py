@@ -25,6 +25,8 @@ from aiml_gate_receipt_validator import (  # noqa: E402
     program_adoption_identity_digest,
     S0_3_EXACT_OWNED_PATHS,
     S0_DEPENDENCY_DIGESTS,
+    S2_4_AUTHORIZATION_PROFILES,
+    s2_4_authorization_profiles_digest,
     SCHEMA_DIR,
     SCHEMA_FILES,
     session_attempt_identity_digest,
@@ -3008,6 +3010,8 @@ _CP2B_D = "sha256:" + "a" * 64
 _CP2B_D2 = "sha256:" + "b" * 64
 _CP2B_GIT = "0" * 40
 _CP2B_TS = "2026-07-24T00:00:00+00:00"
+# operator authorization 需 issued < expires 且窗 ≤ profile 上限(600s < 900s):CP4 分支再驗 TTL 相干。
+_CP2B_TS_EXP = "2026-07-24T00:10:00+00:00"
 _CP2B_CLASSES = (
     "HOST_IDENTITY_INSTALL",
     "PG_ROLE_ACL_MIGRATION",
@@ -3288,9 +3292,16 @@ def _cp2b_fixtures() -> dict:
         "profile_identity": "aiml-s2-install-operator-v1",
         "signature_namespace": "arcane-equilibrium-aiml-s2-install",
         "authorization_id": _CP2B_D,
-        "payload_fields": ["domain", "authorization_id", "plan_core_digest", "plan_id"],
+        # CP4:payload_fields 必逐位元組等於 APPLY profile 的 §9.1 ordered list(15 欄)。
+        "payload_fields": [
+            "domain", "authorization_id", "plan_core_digest", "plan_id",
+            "source_head", "target_host", "prepare_receipt_digest",
+            "topology_pre_digest", "installed_unit_probe_receipt_digest",
+            "hba_delta_digest", "pre_state_digest", "aggregate_rollback_digest",
+            "idempotency_key", "issued_at", "expires_at",
+        ],
         "issued_at": _CP2B_TS,
-        "expires_at": _CP2B_TS,
+        "expires_at": _CP2B_TS_EXP,
         "sshsig_armored": _CP2B_SSHSIG,
         "self_digest": _CP2B_D,
     }
@@ -3435,6 +3446,16 @@ def test_cp2b_schema_files_resolve_to_real_files() -> None:
 @pytest.mark.parametrize("key", _CP2B_KEYS)
 def test_cp2b_round_trip_validates_clean(key: str) -> None:
     fixture = _cp2b_fixtures()[key]
+    if key == "s2_4_operator_authorization_v1":
+        # CP4 為此 artifact 的中央閘分支加上真 §9.1 信任根 SSHSIG 驗簽。CP2b 佔位 fixture 結構全清(profile
+        # 解析、full §9.1 ordered payload_fields、相干 TTL、指紋綁定皆過)但攜帶假 armored 簽章,故唯一殘餘
+        # 錯誤即該離線公鑰驗簽——已簽的正例(monkeypatch 丟棄式鑰)由 CP4 test 擁有。CP2b 的契約(closed-schema
+        # round-trip)在此仍成立:唯一殘餘不是 schema/結構錯,而是信任根驗簽這道 CP4 真閘。
+        assert validate_aiml_artifact(fixture) == [
+            "s2_4 operator authorization SSH signature is invalid"
+        ]
+        assert fixture["schema_version"] == key
+        return
     assert validate_aiml_artifact(fixture) == [], key
     assert fixture["schema_version"] == key
 
@@ -3712,3 +3733,242 @@ def test_probe_and_prepare_intent_ids_rederive_from_core() -> None:
     prep["prepare_id"] = "s2-4-prepare-" + "f" * 64
     prep["self_digest"] = artifact_self_digest(prep)
     assert any("prepare_id does not re-derive" in e for e in validate_aiml_artifact(prep))
+
+
+# ── S2.4 · WP4 · W1 · CP4(四 §9.1 operator-authorization trust profile + 離線驗證分支)──────
+# 這批測試用**丟棄式** ed25519 鑰 + monkeypatch 本 validator 模組副本的 pinned 信任根,證離線驗簽
+# CODE(整合 + 信任根綁定)——鏡 W0a 的 _install_operator_profile 姿態。真 §9.1 帶外私鑰不在任何
+# fixture,故沒有 fixture 冒充 runtime 真偽:離線驗簽只證「簽章完整 + 綁 §9.1 信任根」,不證真 operator
+# 於 runtime 簽了真語義 payload(W6A/W6B EFFECT)。
+_CP4_ISSUED = "2026-07-24T00:00:00+00:00"
+_CP4_EXPIRES = "2026-07-24T00:10:00+00:00"   # +600s(< 900s profile 上限)
+_CP4_NOW = "2026-07-24T00:05:00+00:00"       # 在 [issued, expires) 窗內
+_CP4_SIGN_SEQ = [0]
+
+
+def _cp4_mint_ed25519_key(tmp_path, name):
+    """鑄一把丟棄式 ed25519 keypair;回 (private_key_path, public_key, fingerprint)。鏡 W0a helper。"""
+
+    private_key = tmp_path / name
+    _subprocess.run(
+        ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(private_key)], check=True
+    )
+    parts = private_key.with_suffix(".pub").read_text(encoding="ascii").split()
+    public_key = " ".join(parts[:2])
+    fingerprint = _subprocess.run(
+        ["ssh-keygen", "-lf", str(private_key.with_suffix(".pub")), "-E", "sha256"],
+        check=True, capture_output=True, text=True,
+    ).stdout.split()[1]
+    return private_key, public_key, fingerprint
+
+
+def _cp4_install_pinned_key(monkeypatch, public_key, fingerprint) -> None:
+    # monkeypatch **本 validator 模組**的信任根副本(非 trusted-host 模組本身)注入丟棄式鑰;驗簽基元
+    # (_verify_ssh_signature / ssh_public_key_fingerprint)仍取自 out-of-scope trusted-host,不被 monkeypatch。
+    monkeypatch.setattr(_w0, "S2_4_OPERATOR_TRUST_ROOT_PUBLIC_KEY", public_key)
+    monkeypatch.setattr(_w0, "S2_4_OPERATOR_TRUST_ROOT_FINGERPRINT", fingerprint)
+
+
+def _cp4_authorization(profile_key, **overrides):
+    profile = S2_4_AUTHORIZATION_PROFILES[profile_key]
+    artifact = {
+        "schema_version": "s2_4_operator_authorization_v1",
+        "profile_identity": profile["profile_identity"],
+        "signature_namespace": profile["signature_namespace"],
+        "authorization_id": "sha256:" + "1" * 64,
+        "payload_fields": list(profile["payload_fields"]),
+        "issued_at": _CP4_ISSUED,
+        "expires_at": _CP4_EXPIRES,
+        "sshsig_armored": _CP2B_SSHSIG,
+        "self_digest": "sha256:" + "0" * 64,
+    }
+    artifact.update(overrides)
+    return artifact
+
+
+def _cp4_sign(private_key, artifact, *, namespace):
+    # 對 validator 的離線被簽投影(排除 sshsig_armored + self_digest)簽章,回填真 armored 與 self_digest。
+    signed = _w0._s2_4_operator_authorization_signed_bytes(artifact)
+    _CP4_SIGN_SEQ[0] += 1
+    message = private_key.parent / f"s2_4-auth-{_CP4_SIGN_SEQ[0]}.bin"
+    message.write_bytes(signed)
+    _subprocess.run(
+        ["ssh-keygen", "-Y", "sign", "-f", str(private_key), "-n", namespace, str(message)],
+        check=True, stdout=_subprocess.DEVNULL, stderr=_subprocess.DEVNULL,
+    )
+    artifact["sshsig_armored"] = message.with_name(message.name + ".sig").read_text(encoding="ascii")
+    artifact["self_digest"] = artifact_self_digest(artifact)
+    return artifact
+
+
+def _cp4_profiles_projection(profiles):
+    return {
+        key: {
+            "profile_identity": row["profile_identity"],
+            "signature_namespace": row["signature_namespace"],
+            "payload_fields": list(row["payload_fields"]),
+            "max_ttl_seconds": row["max_ttl_seconds"],
+            "skew_seconds": row["skew_seconds"],
+        }
+        for key, row in profiles.items()
+    }
+
+
+def test_cp4_authorization_profiles_are_pinned() -> None:
+    # #17:四 §9.1 profile 的 identity/namespace/ordered payload/max-TTL/skew 釘選——悄改任一即 digest 漂移。
+    assert s2_4_authorization_profiles_digest() == (
+        "sha256:79b27b7040e8a8d3af84b6a5f0c7c20e45888caaedac146428145ffea54be2dc"
+    )
+    profiles = S2_4_AUTHORIZATION_PROFILES
+    assert set(profiles) == {"capability_probe", "prepare", "apply_aggregate", "pg_migration"}
+    # 四 identity ↔ namespace 精確配對(§9.1)。
+    assert profiles["capability_probe"]["profile_identity"] == "aiml-s2-capability-probe-operator-v1"
+    assert profiles["capability_probe"]["signature_namespace"] == "arcane-equilibrium-aiml-s2-capability-probe"
+    assert profiles["prepare"]["profile_identity"] == "aiml-s2-install-prepare-operator-v1"
+    assert profiles["prepare"]["signature_namespace"] == "arcane-equilibrium-aiml-s2-install-prepare"
+    assert profiles["apply_aggregate"]["profile_identity"] == "aiml-s2-install-operator-v1"
+    assert profiles["apply_aggregate"]["signature_namespace"] == "arcane-equilibrium-aiml-s2-install"
+    assert profiles["pg_migration"]["profile_identity"] == "aiml-s2-pg-migration-operator-v1"
+    assert profiles["pg_migration"]["signature_namespace"] == "arcane-equilibrium-aiml-s2-pg-migration"
+    # §9.1 payload token（follow §9.1，非 task 稿）：probe 用 `scope` / `output_derived_unit_digest_or_null`。
+    assert profiles["capability_probe"]["payload_fields"][4] == "scope"
+    assert profiles["capability_probe"]["payload_fields"][8] == "output_derived_unit_digest_or_null"
+    assert "probe_scope" not in profiles["capability_probe"]["payload_fields"]
+    # APPLY/PG 上限 900s、skew 60s(§9.1 數值釘定);PROBE/PREPARE 沿用同一保守上限。
+    for key in profiles:
+        assert profiles[key]["max_ttl_seconds"] == 900
+        assert profiles[key]["skew_seconds"] == 60
+    # 悄悄重拼一個 payload token → 釘選 digest 漂移(silent re-spelling 被拒)。
+    mutated = _cp4_profiles_projection(profiles)
+    mutated["apply_aggregate"]["payload_fields"][2] = "plan_core_digest_RENAMED"
+    assert canonical_digest(mutated) != s2_4_authorization_profiles_digest()
+
+
+def test_cp4_monkeypatched_key_validates_clean(tmp_path, monkeypatch) -> None:
+    # 正例(counterfactual:valid authorization validates clean):把 pinned 信任根 monkeypatch 成丟棄式鑰
+    # 並以之簽 canonical payload → 四 profile 皆離線驗過(乾淨 [])。只證 CODE 驗簽 + 信任根綁定,不冒充 runtime。
+    private_key, public_key, fingerprint = _cp4_mint_ed25519_key(tmp_path, "operator")
+    _cp4_install_pinned_key(monkeypatch, public_key, fingerprint)
+    for profile_key in ("capability_probe", "prepare", "apply_aggregate", "pg_migration"):
+        namespace = S2_4_AUTHORIZATION_PROFILES[profile_key]["signature_namespace"]
+        auth = _cp4_authorization(profile_key)
+        _cp4_sign(private_key, auth, namespace=namespace)
+        assert validate_aiml_artifact(auth, now=_CP4_NOW) == [], profile_key
+
+
+def test_cp4_forged_key_is_rejected_by_trust_root(tmp_path) -> None:
+    # #18:丟棄式鑰簽 APPLY 授權,但**不** monkeypatch pinned 信任根(仍是固定 §9.1 根)→ 簽章對 pinned 公鑰
+    # 驗證失敗 → 拒。這證信任根綁定是真閘;丟棄式鑰無從冒充真 §9.1 根(離線驗簽 CODE 有效)。指紋檢查仍過
+    # (pinned 公鑰指紋 == pinned 指紋),故唯一殘餘即 SSH 簽章無效——正是信任根這道閘。
+    private_key, _pub, _fp = _cp4_mint_ed25519_key(tmp_path, "forged")
+    auth = _cp4_authorization("apply_aggregate")
+    _cp4_sign(private_key, auth, namespace="arcane-equilibrium-aiml-s2-install")
+    errors = validate_aiml_artifact(auth, now=_CP4_NOW)
+    assert errors == ["s2_4 operator authorization SSH signature is invalid"], errors
+    # 進一步:連指紋一起冒充(把 pinned 指紋 monkeypatch 成丟棄式鑰指紋,但**不**改 pinned 公鑰)→ 指紋
+    # 與公鑰不再一致 → trust-root fingerprint mismatch(fail-closed;caller-provided 指紋永不被信)。
+
+
+def test_cp4_fingerprint_mismatch_is_rejected(tmp_path, monkeypatch) -> None:
+    # #18(續):把 pinned **指紋**換成丟棄式鑰指紋而 pinned **公鑰**維持 §9.1 根 → 公鑰導出的指紋 ≠ pinned
+    # 指紋 → trust-root fingerprint mismatch。證指紋綁定由「公鑰導出」而非採信 caller/常量任意值。
+    _priv, _pub, forged_fp = _cp4_mint_ed25519_key(tmp_path, "unpinned")
+    monkeypatch.setattr(_w0, "S2_4_OPERATOR_TRUST_ROOT_FINGERPRINT", forged_fp)
+    auth = _cp4_authorization("apply_aggregate")  # 假 armored 即可,指紋 mismatch 先觸發
+    errors = validate_aiml_artifact(auth, now=_CP4_NOW)
+    assert any("trust-root fingerprint mismatch" in e for e in errors), errors
+
+
+def test_cp4_cross_profile_signature_is_rejected(tmp_path, monkeypatch) -> None:
+    # #19:一張 probe 授權不能授權 APPLY/PREPARE 或別 scope。namespace/identity 綁定拒跨 profile 挪用。
+    private_key, public_key, fingerprint = _cp4_mint_ed25519_key(tmp_path, "probe")
+    _cp4_install_pinned_key(monkeypatch, public_key, fingerprint)
+    # 合法 probe 授權(probe payload + probe namespace 簽)→ 乾淨。
+    probe = _cp4_authorization("capability_probe")
+    _cp4_sign(private_key, probe, namespace="arcane-equilibrium-aiml-s2-capability-probe")
+    assert validate_aiml_artifact(probe, now=_CP4_NOW) == []
+    # (a) 把這張 probe 授權冒充成 APPLY profile:改 identity+namespace 成 install(schema allOf 自洽),但
+    #     payload_fields 仍是 probe 的、簽章仍在 probe namespace 下 → payload 不符 APPLY ordered list + 簽章於
+    #     install namespace 驗證失敗。
+    forged = deepcopy(probe)
+    forged["profile_identity"] = "aiml-s2-install-operator-v1"
+    forged["signature_namespace"] = "arcane-equilibrium-aiml-s2-install"
+    forged["self_digest"] = artifact_self_digest(forged)
+    errors = validate_aiml_artifact(forged, now=_CP4_NOW)
+    assert any("payload_fields do not match" in e for e in errors), errors
+    assert any("SSH signature is invalid" in e for e in errors), errors
+    # (b) 反向:正確 APPLY payload,但**在 probe namespace 下簽** → 於 install namespace 驗證失敗(唯一殘餘)。
+    #     這證 namespace domain-separation:一張以別 profile namespace 簽的授權不能在此 profile 下通過。
+    mismatch = _cp4_authorization("apply_aggregate")
+    _cp4_sign(private_key, mismatch, namespace="arcane-equilibrium-aiml-s2-capability-probe")
+    assert validate_aiml_artifact(mismatch, now=_CP4_NOW) == [
+        "s2_4 operator authorization SSH signature is invalid"
+    ]
+
+
+def test_cp4_ttl_freshness_and_replay_chain_bounds(tmp_path, monkeypatch) -> None:
+    # #20:freshness + TTL 界（>900s APPLY/PG 拒;expired 拒）+ replay-ledger 重複/亂序斷鏈 SHAPE(結構)。
+    private_key, public_key, fingerprint = _cp4_mint_ed25519_key(tmp_path, "operator")
+    _cp4_install_pinned_key(monkeypatch, public_key, fingerprint)
+    # (a) >900s APPLY TTL → 拒(strict >)。issued 00:00 → expires 00:16 = 960s。
+    over = _cp4_authorization(
+        "apply_aggregate", issued_at="2026-07-24T00:00:00+00:00",
+        expires_at="2026-07-24T00:16:00+00:00",
+    )
+    _cp4_sign(private_key, over, namespace="arcane-equilibrium-aiml-s2-install")
+    assert any(
+        "TTL exceeds the profile ceiling (900s)" in e
+        for e in validate_aiml_artifact(over, now=_CP4_NOW)
+    )
+    # (b) >900s PG TTL → 拒(1200s)。
+    over_pg = _cp4_authorization(
+        "pg_migration", issued_at="2026-07-24T00:00:00+00:00",
+        expires_at="2026-07-24T00:20:00+00:00",
+    )
+    _cp4_sign(private_key, over_pg, namespace="arcane-equilibrium-aiml-s2-pg-migration")
+    assert any(
+        "TTL exceeds the profile ceiling" in e
+        for e in validate_aiml_artifact(over_pg, now=_CP4_NOW)
+    )
+    # (c) expired → 拒(now 超過 expires + skew)。先證窗內乾淨,再證窗外拒。
+    fresh = _cp4_authorization("apply_aggregate")
+    _cp4_sign(private_key, fresh, namespace="arcane-equilibrium-aiml-s2-install")
+    assert validate_aiml_artifact(fresh, now="2026-07-24T00:05:00+00:00") == []
+    expired_now = "2026-07-24T00:12:00+00:00"   # > expires(00:10)+skew(60s)=00:11
+    assert any(
+        "not currently within its freshness window" in e
+        for e in validate_aiml_artifact(fresh, now=expired_now)
+    )
+    # (d) replay-ledger hash-chain SHAPE(結構):genesis prev=null;後續 entry.prev_entry_digest 必鏈住前一
+    #     entry_digest;重複/亂序即斷鏈。runtime 消費/fsync/AUTHORIZATION_REJECTED 屬 W6 EFFECT,此處只證形。
+    def _entry(seq, prev):
+        entry = {
+            "seq": seq, "prev_entry_digest": prev, "authorization_id": _CP2B_D,
+            "authorization_digest": _CP2B_D2,
+            "profile_identity": "aiml-s2-install-operator-v1",
+            "consumed_at": _CP2B_TS, "entry_digest": "sha256:" + "0" * 64, "fsynced": True,
+        }
+        entry["entry_digest"] = canonical_digest(
+            {k: v for k, v in entry.items() if k != "entry_digest"}
+        )
+        return entry
+
+    genesis = _entry(0, None)
+    second = _entry(1, genesis["entry_digest"])
+    good = {
+        "schema_version": "s2_4_authorization_replay_ledger_v1",
+        "ledger_path": "/var/lib/arcane-equilibrium/aiml/install/s2_4/authorization-replay-ledger.json",
+        "entries": [genesis, second], "append_only": True, "self_digest": "sha256:" + "0" * 64,
+    }
+    good["self_digest"] = artifact_self_digest(good)
+    assert validate_aiml_artifact(good) == []
+    assert good["entries"][0]["prev_entry_digest"] is None                       # genesis
+    assert good["entries"][1]["prev_entry_digest"] == good["entries"][0]["entry_digest"]  # 鏈成立
+    # 亂序:交換兩 entry → entries[1].prev 不再等於 entries[0].entry_digest(斷鏈)且首位不再是 genesis。
+    reordered = [good["entries"][1], good["entries"][0]]
+    assert reordered[1]["prev_entry_digest"] != reordered[0]["entry_digest"]
+    assert reordered[0]["prev_entry_digest"] is not None
+    # 重複:把 genesis 複製一份 → seq 重複且第二筆 prev 為 null(應鏈前一 entry_digest)→ 斷鏈。
+    duplicated = [good["entries"][0], deepcopy(good["entries"][0])]
+    assert duplicated[1]["seq"] == duplicated[0]["seq"]
+    assert duplicated[1]["prev_entry_digest"] is None

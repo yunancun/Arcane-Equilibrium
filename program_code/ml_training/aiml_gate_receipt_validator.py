@@ -3,7 +3,10 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
+import hmac
 import json
 import re
 import sys
@@ -18,6 +21,10 @@ if str(HELPER_DIR) not in sys.path:
     sys.path.insert(0, str(HELPER_DIR))
 
 from agent_governance_schema import schema_subset_errors  # noqa: E402
+# 唯讀消費 S2.4 §9.1 SSHSIG 信任根與離線公鑰驗簽基元(_verify_ssh_signature /
+# ssh_public_key_fingerprint)。此為葉層信任根 facade,不反向匯入本 validator(無循環);
+# CP4 僅呼叫其驗證基元,「絕不」修改該模組或其測試(§9.1:trust-root 輪替屬獨立授權 session)。
+import agent_governance_aiml_trusted_host as _trusted_host  # noqa: E402
 
 
 SCHEMA_DIR = Path(__file__).resolve().parent / "schemas" / "aiml_gate_receipts"
@@ -1327,6 +1334,237 @@ def _install_lineage_plan_binding_errors(
             "install lineage plan idempotency_key does not match the effect receipt"
         )
     errors.extend(_s2_4_install_plan_apply_rows_errors(install_plan))
+    return errors
+
+
+# --------------------------------------------------------------------------- #
+# S2.4(WP4·W1·CP4)四 operator-authorization 信任 profile + 離線驗證分支(§9.1)。
+#
+# 四個 domain-separated profile(capability-probe / prepare / apply-aggregate / pg-migration)
+# 共用**同一把**已審 §9.1 Ed25519 實體信任根(公鑰 == trusted-host 的 TRUSTED_EXECUTION_PUBLIC_KEY,
+# 必符指紋 SHA256:uGJ9veN7PoE6BBgfsSP2aiMndrwgbt7o/7/YfdzNzCQ),以 **identity + namespace** 做
+# domain separation:一張以某 profile namespace 簽的授權於別 profile 下因 identity/namespace 不符
+# 而被拒。此常量是 v2 profile 契約的 code-owned SSOT(routing/registry/closure 於 CP5 再導出並綁
+# canonical_digest(projection),cross-consumer test 斷言各投影 digest 相等)。
+#
+# 誠實界線(**只證離線結構/完整性/信任根綁定,不證 runtime 真偽**):此區呼叫 out-of-scope 的
+# agent_governance_aiml_trusted_host 驗證基元對 pinned 公鑰做**離線公鑰驗簽**——證「此 payload 由 §9.1
+# 私鑰持有者簽過(簽章完整 + 綁到信任根)」,但**不**證真 operator 於 runtime 對真語義 payload
+# (綁真 plan/probe 值 + replay-ledger 消費 + 平台背書)簽了——後者屬 W6A/W6B EFFECT session。九
+# authority 不受影響;凍結 S0.3 classifier / v1·v2 matrix / PROGRAM_SCHEMA_PATHS 一律「只讀不改」。
+#
+# §9 TTL 註記(delta):§9.1 只數值釘定 APPLY/PG 上限 900 秒、skew 60 秒;PROBE/PREPARE 僅以不等式
+# (probe+cleanup+postcheck+safety_margin / fetch+build+postcheck+rollback+safety_margin)描述「自有
+# 有界預算」而未給數字。此處對 PROBE/PREPARE 採 §9.1 全域「Maximum … TTL is 15 minutes」同一 900 秒
+# 保守上限(skew 60 秒),釘入 profile digest;真正更緊的 per-probe/per-prepare 預算屬 W6 EFFECT 收緊。
+# --------------------------------------------------------------------------- #
+S2_4_OPERATOR_AUTHORIZATION_SCHEMA_VERSION = "s2_4_operator_authorization_v1"
+# §9.1 實體信任根:公鑰/指紋沿用 trusted-host 已審常量(import 期綁定;測試以 monkeypatch 這兩個
+# **本模組**副本注入丟棄式鑰,不觸碰 trusted-host 模組本身)。
+S2_4_OPERATOR_TRUST_ROOT_PUBLIC_KEY = _trusted_host.TRUSTED_EXECUTION_PUBLIC_KEY
+S2_4_OPERATOR_TRUST_ROOT_FINGERPRINT = _trusted_host.EXPECTED_EXECUTION_SIGNER_FINGERPRINT
+S2_4_AUTHORIZATION_PROFILES: dict[str, dict[str, Any]] = {
+    "capability_probe": {
+        "profile_identity": "aiml-s2-capability-probe-operator-v1",
+        "signature_namespace": "arcane-equilibrium-aiml-s2-capability-probe",
+        # §9.1 CAPABILITY PROBE ordered payload(follow §9.1:用 `scope` 非 task 稿的
+        # `probe_scope`;用 `output_derived_unit_digest_or_null` 非 `output_unit_digest_or_null`)。
+        "payload_fields": (
+            "domain", "authorization_id", "probe_core_digest", "probe_id",
+            "scope", "source_head", "target_host", "transient_unit_property_digest",
+            "output_derived_unit_digest_or_null", "cleanup_rollback_digest",
+            "issued_at", "expires_at",
+        ),
+        "max_ttl_seconds": 900,
+        "skew_seconds": 60,
+    },
+    "prepare": {
+        "profile_identity": "aiml-s2-install-prepare-operator-v1",
+        "signature_namespace": "arcane-equilibrium-aiml-s2-install-prepare",
+        "payload_fields": (
+            "domain", "authorization_id", "prepare_core_digest", "prepare_id",
+            "source_head", "target_host", "prepare_sandbox_probe_receipt_digest",
+            "staging_parent_identity", "prepare_rollback_digest",
+            "issued_at", "expires_at",
+        ),
+        "max_ttl_seconds": 900,
+        "skew_seconds": 60,
+    },
+    "apply_aggregate": {
+        "profile_identity": "aiml-s2-install-operator-v1",
+        "signature_namespace": "arcane-equilibrium-aiml-s2-install",
+        "payload_fields": (
+            "domain", "authorization_id", "plan_core_digest", "plan_id",
+            "source_head", "target_host", "prepare_receipt_digest",
+            "topology_pre_digest", "installed_unit_probe_receipt_digest",
+            "hba_delta_digest", "pre_state_digest", "aggregate_rollback_digest",
+            "idempotency_key", "issued_at", "expires_at",
+        ),
+        "max_ttl_seconds": 900,
+        "skew_seconds": 60,
+    },
+    "pg_migration": {
+        "profile_identity": "aiml-s2-pg-migration-operator-v1",
+        "signature_namespace": "arcane-equilibrium-aiml-s2-pg-migration",
+        "payload_fields": (
+            "domain", "authorization_id", "plan_core_digest", "plan_id",
+            "source_head", "target_host", "topology_pre_digest",
+            "installed_unit_probe_receipt_digest", "pg_acl_digest", "hba_delta_digest",
+            "pg_pre_state_digest", "pg_rollback_digest", "idempotency_key",
+            "issued_at", "expires_at",
+        ),
+        "max_ttl_seconds": 900,
+        "skew_seconds": 60,
+    },
+}
+_S2_4_PROFILE_BY_IDENTITY = {
+    row["profile_identity"]: row for row in S2_4_AUTHORIZATION_PROFILES.values()
+}
+_SSH_SIGNATURE_ARMOR_MARKERS = (
+    "-----BEGIN SSH SIGNATURE-----",
+    "-----END SSH SIGNATURE-----",
+)
+
+
+def s2_4_authorization_profiles_digest() -> str:
+    """釘選四 §9.1 trust profile(identity/namespace/ordered payload/max-TTL/skew)為 canonical digest。
+
+    任一 profile 的 identity/namespace 被悄悄重拼字、payload token 增刪/亂序、TTL 或 skew 被改動皆令此
+    digest 漂移,被 CP4 test #17 的硬編釘選拒。此即 code-owned profile 契約的完整性錨。
+    """
+
+    return canonical_digest({
+        key: {
+            "profile_identity": row["profile_identity"],
+            "signature_namespace": row["signature_namespace"],
+            "payload_fields": list(row["payload_fields"]),
+            "max_ttl_seconds": row["max_ttl_seconds"],
+            "skew_seconds": row["skew_seconds"],
+        }
+        for key, row in S2_4_AUTHORIZATION_PROFILES.items()
+    })
+
+
+def _sshsig_armor_body_is_strict_base64(value: str) -> bool:
+    """去 armor(剝 BEGIN/END 標記列 + 換行後串接)得純 body,判斷是否嚴格標準 base64。
+
+    真 ``ssh-keygen -Y sign`` armor body 去 armor 後為合法標準 base64,``b64decode(validate=True)``
+    成功;plaintext 憑證形(``password=…`` 的 ``=`` 落中段、``bearer\\nAAAA`` 長度不可解)一律失敗。
+    非字串 / 空 body / 不可 decode 一律回 False(fail-closed)。
+    """
+
+    if not isinstance(value, str):
+        return False
+    body = "".join(
+        line for line in value.split("\n") if line not in _SSH_SIGNATURE_ARMOR_MARKERS
+    )
+    if not body:
+        return False
+    try:
+        base64.b64decode(body, validate=True)
+    except (binascii.Error, ValueError):
+        return False
+    return True
+
+
+def _s2_4_operator_authorization_signed_bytes(artifact: dict[str, Any]) -> bytes:
+    """離線可重建的被簽 canonical payload:排除 ``sshsig_armored`` 與 ``self_digest`` 兩個後綁欄位。
+
+    §9.1 的 ``domain || authorization_id || … `` 是 W6 runtime 真 operator 簽的**語義** payload(綁真
+    plan/probe 值),離線中央閘拿不到那些值;此處對授權物件自身(除簽章與整合 digest 外)取 canonical
+    bytes 作為被驗 payload,令 throwaway-key 正例能完整測 CODE 驗簽路徑而不冒充 runtime 真偽。build 端
+    以同一投影簽章,故兩側逐位元組一致。
+    """
+
+    return _canonical_bytes({
+        key: value
+        for key, value in artifact.items()
+        if key not in {"sshsig_armored", "self_digest"}
+    })
+
+
+def _s2_4_operator_authorization_errors(
+    artifact: dict[str, Any], *, now: str | datetime | None = None
+) -> list[str]:
+    """離線驗一份 ``s2_4_operator_authorization_v1``(§9.1)——結構/完整性/信任根綁定,fail-closed。
+
+    驗:(a) ``profile_identity`` 恰解析為一列 :data:`S2_4_AUTHORIZATION_PROFILES`;(b) ``signature_namespace``
+    與 ``payload_fields`` 逐位元組等於該 profile 的 §9.1 值/ordered list;(c) ``self_digest`` 完整性;
+    (d) armored SSHSIG 之 body 嚴格 base64 且 ≤16 KiB;(e) ``expires_at - issued_at`` ≤ profile max-TTL
+    (strict ``>`` 拒)且 issued<expires 相干,now 若提供再驗 skew 內新鮮度;(f) 信任根綁定——pinned 公鑰
+    指紋以 ``hmac.compare_digest`` 比對 pinned 指紋,且 armored SSHSIG 在 exact identity+namespace 下對
+    pinned 公鑰驗過 canonical payload(呼叫 out-of-scope ``_verify_ssh_signature``,與 W0a operator 授權同姿態)。
+
+    **誠實界線**:此離線公鑰驗簽只證簽章完整 + 信任根綁定,「不」宣稱真 operator 於 runtime 簽了真語義
+    payload(W6A/W6B EFFECT)。任一項不符即回非空 reasons(絕不半通過)。
+    """
+
+    profile = _S2_4_PROFILE_BY_IDENTITY.get(artifact.get("profile_identity"))
+    if profile is None:
+        return [
+            "s2_4 operator authorization profile_identity is not one of the four "
+            "§9.1 trust profiles"
+        ]
+    errors: list[str] = []
+    if artifact.get("signature_namespace") != profile["signature_namespace"]:
+        errors.append(
+            "s2_4 operator authorization signature_namespace does not match the profile"
+        )
+    if list(artifact.get("payload_fields") or []) != list(profile["payload_fields"]):
+        errors.append(
+            "s2_4 operator authorization payload_fields do not match the profile's "
+            "exact §9.1 ordered list"
+        )
+    if artifact.get("self_digest") != artifact_self_digest(artifact):
+        errors.append("s2_4 operator authorization self_digest is invalid")
+    armored = artifact.get("sshsig_armored")
+    if not isinstance(armored, str) or len(armored.encode("utf-8")) > 16 * 1024:
+        errors.append("s2_4 operator authorization sshsig_armored exceeds 16 KiB")
+    elif not _sshsig_armor_body_is_strict_base64(armored):
+        errors.append(
+            "s2_4 operator authorization sshsig_armored body is not strict base64"
+        )
+    try:
+        issued = _parse_timestamp(artifact["issued_at"])
+        expires = _parse_timestamp(artifact["expires_at"])
+        if not issued < expires:
+            errors.append(
+                "s2_4 operator authorization issued_at must precede expires_at"
+            )
+        if (expires - issued).total_seconds() > profile["max_ttl_seconds"]:
+            errors.append(
+                "s2_4 operator authorization TTL exceeds the profile ceiling "
+                f"({profile['max_ttl_seconds']}s)"
+            )
+        now_text = _now_text(now)
+        if now_text is not None:
+            current = _parse_timestamp(now_text)
+            skew = profile["skew_seconds"]
+            if not (issued.timestamp() - skew) <= current.timestamp() < expires.timestamp():
+                errors.append(
+                    "s2_4 operator authorization is not currently within its freshness window"
+                )
+    except (KeyError, TypeError, ValueError):
+        errors.append("s2_4 operator authorization timestamps are invalid")
+    # 信任根綁定:pinned 公鑰指紋必等於 pinned 指紋(hmac.compare_digest),且 armored SSHSIG 在 exact
+    # identity+namespace 下對 pinned 公鑰驗過 canonical payload。讀本模組 global(可被測試 monkeypatch 注入
+    # 丟棄式鑰),但驗簽基元一律取自 out-of-scope trusted-host(真驗證邏輯,不 monkeypatch)。
+    public_key = S2_4_OPERATOR_TRUST_ROOT_PUBLIC_KEY
+    fingerprint = S2_4_OPERATOR_TRUST_ROOT_FINGERPRINT
+    try:
+        actual_fingerprint = _trusted_host.ssh_public_key_fingerprint(public_key)
+    except ValueError:
+        actual_fingerprint = ""
+    if not hmac.compare_digest(actual_fingerprint, fingerprint):
+        errors.append("s2_4 operator authorization trust-root fingerprint mismatch")
+    if isinstance(armored, str) and not _trusted_host._verify_ssh_signature(
+        _s2_4_operator_authorization_signed_bytes(artifact),
+        armored.encode("utf-8"),
+        public_key=public_key,
+        identity=profile["profile_identity"],
+        namespace=profile["signature_namespace"],
+    ):
+        errors.append("s2_4 operator authorization SSH signature is invalid")
     return errors
 
 
@@ -3346,6 +3584,14 @@ def validate_aiml_artifact(
         lineage = derive_install_lineage_status(artifact)
         if lineage["status"] != "SATISFIED":
             errors.extend(lineage["reasons"])
+    if schema_version == S2_4_OPERATOR_AUTHORIZATION_SCHEMA_VERSION:
+        # S2.4(WP4·W1·CP4)§9.1 四 trust profile:closed schema(CP2b)之上,再驗 profile 解析、
+        # payload_fields == 該 profile 的 §9.1 ordered list、namespace/identity 綁定、armored SSHSIG
+        # strict-base64/≤16 KiB、TTL≤profile 上限(now 若提供再驗 skew 新鮮度)、以及**信任根綁定**——
+        # 呼叫 out-of-scope trusted-host 的 _verify_ssh_signature 對 pinned 公鑰做離線公鑰驗簽。此為離線
+        # 結構/完整性/信任根綁定驗;「不」斷言 runtime 真偽(真 operator 對真語義 payload 的 runtime 簽署
+        # + replay-ledger 消費 + 平台背書屬 W6A/W6B EFFECT)。
+        errors.extend(_s2_4_operator_authorization_errors(artifact, now=now))
     return errors
 
 
