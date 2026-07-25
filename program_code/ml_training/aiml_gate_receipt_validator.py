@@ -1734,6 +1734,28 @@ def validate_aiml_artifact(
         lineage = derive_install_lineage_status(artifact)
         if lineage["status"] != "SATISFIED":
             errors.extend(lineage["reasons"])
+    if schema_version == "pg_acl_manifest_v1":
+        # S2.4(WP4·W2a·§2.1)closed PG ACL manifest:closed schema(privilege 全面 enum 封閉)
+        # 之上,再驗 self_digest 反偽造重算與 canonical 排序(schemas/tables/functions 按 name、
+        # privileges 按字典序——排序唯一化令 manifest bytes 與 canonical digest 一一對應)。
+        # ⚠ 乾淨的 [] 「不」等於 privilege-split PASS:與 post-split consumer 靜態 SQL inventory
+        # 的雙向 exact-match 由 agent_governance_s2_4_install.derive_engine_scanner_privilege_split
+        # 導出(unlisted statement 或 over-grant 皆 fail);中央閘此分支只證結構/完整性。
+        if artifact["self_digest"] != artifact_self_digest(artifact):
+            errors.append("pg acl manifest self_digest is invalid")
+        for section in ("schemas", "tables", "functions"):
+            names = [entry["name"] for entry in artifact[section]]
+            if names != sorted(names) or len(names) != len(set(names)):
+                errors.append(
+                    f"pg acl manifest {section} must be sorted by name and unique"
+                )
+            if any(
+                entry["privileges"] != sorted(set(entry["privileges"]))
+                for entry in artifact[section]
+            ):
+                errors.append(
+                    f"pg acl manifest {section} privileges must be sorted and unique"
+                )
     if schema_version == S2_4_OPERATOR_AUTHORIZATION_SCHEMA_VERSION:
         # S2.4(WP4·W1·CP4)§9.1 四 trust profile:closed schema(CP2b)之上,再驗 profile 解析、
         # payload_fields == 該 profile 的 §9.1 ordered list、namespace/identity 綁定、armored SSHSIG

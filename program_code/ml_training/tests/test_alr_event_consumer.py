@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 import os
 from pathlib import Path
@@ -26,7 +27,6 @@ from ml_training.alr_event_consumer import (
     process_candidate_proof_repository_backlog,
     process_health_snapshot,
     process_outcome_feedback_backlog,
-    process_retention_backlog,
     run_operational_backlog,
     verify_runtime_source_head,
     wait_for_pg_notifications,
@@ -486,113 +486,20 @@ def test_event_loop_history_is_fixed_smaller_bound_after_idle_fresh_zero(
     assert result["drains"] == 3
 
 
-def test_candidate_board_inotify_source_wakes_on_immutable_create_and_recovers_overflow(
-    tmp_path: Path,
-) -> None:
-    read_fd, write_fd = os.pipe()
-    os.set_blocking(read_fd, False)
-    rearms: list[Path] = []
+def test_consumer_reexports_board_event_source_identity() -> None:
+    """W2a 拆分後,consumer 對 board-watch 面的 re-export 必須是同一物件(縫不裂)。
 
-    def open_watch(directory: Path) -> tuple[int, int, int]:
-        assert directory == tmp_path
-        return read_fd, 17, -1
+    board-watch 行為測試已搬至 test_alr_candidate_board_events.py。
+    """
 
-    def reopen_watch(directory: Path) -> tuple[int, int, int]:
-        rearms.append(directory)
-        return read_fd, 23, -1
+    from ml_training import alr_candidate_board_events as board
 
-    source = consumer.open_candidate_board_event_source(
-        tmp_path,
-        open_watch=open_watch,
-        reopen_watch=reopen_watch,
+    assert consumer.AlrEventConsumerError is board.AlrEventConsumerError
+    assert consumer.CandidateBoardEventSource is board.CandidateBoardEventSource
+    assert (
+        consumer.open_candidate_board_event_source
+        is board.open_candidate_board_event_source
     )
-    try:
-        assert source.consume_reconciliation_request() is True
-        assert source.consume_reconciliation_request() is False
-
-        for mask in (
-            consumer._IN_CREATE,
-            consumer._IN_MOVED_TO,
-            consumer._IN_CLOSE_WRITE,
-            consumer._IN_DELETE,
-        ):
-            name = b"blocked_outcome_review_20260711T120000Z.json\x00"
-            padded = name + b"\x00" * ((4 - len(name) % 4) % 4)
-            os.write(
-                write_fd,
-                struct.pack("iIII", 17, mask, 0, len(padded)) + padded,
-            )
-            source.drain_ready()
-            assert source.consume_reconciliation_request() is True
-
-        os.write(
-            write_fd,
-            struct.pack("iIII", -1, consumer._IN_Q_OVERFLOW, 0, 0),
-        )
-        source.drain_ready()
-        assert source.consume_reconciliation_request() is True
-        assert rearms == [tmp_path]
-
-        os.write(
-            write_fd,
-            struct.pack("iIII", 17, consumer._IN_IGNORED, 0, 0),
-        )
-        source.drain_ready()
-        assert source.consume_reconciliation_request() is False
-        assert rearms == [tmp_path]
-
-        os.write(
-            write_fd,
-            struct.pack("iIII", 23, consumer._IN_IGNORED, 0, 0),
-        )
-        source.drain_ready()
-        assert source.consume_reconciliation_request() is True
-        assert rearms == [tmp_path, tmp_path]
-    finally:
-        source.close()
-        with pytest.raises(OSError):
-            os.fstat(read_fd)
-        os.close(write_fd)
-
-
-def test_candidate_board_rearm_closes_old_descriptors_and_owns_new_pair(
-    tmp_path: Path,
-) -> None:
-    old_read_fd, old_write_fd = os.pipe()
-    new_read_fd, new_write_fd = os.pipe()
-    os.set_blocking(old_read_fd, False)
-    old_directory_fd = os.open(tmp_path, os.O_RDONLY)
-    new_directory_fd = os.open(tmp_path, os.O_RDONLY)
-
-    source = consumer.open_candidate_board_event_source(
-        tmp_path,
-        open_watch=lambda directory: (old_read_fd, 17, old_directory_fd),
-        reopen_watch=lambda directory: (new_read_fd, 23, new_directory_fd),
-    )
-    try:
-        source.consume_reconciliation_request()
-        os.write(
-            old_write_fd,
-            struct.pack("iIII", 17, consumer._IN_IGNORED, 0, 0),
-        )
-        source.drain_ready()
-
-        with pytest.raises(OSError):
-            os.fstat(old_read_fd)
-        with pytest.raises(OSError):
-            os.fstat(old_directory_fd)
-        os.fstat(new_read_fd)
-        os.fstat(new_directory_fd)
-        assert source.consume_reconciliation_request() is True
-    finally:
-        source.close()
-        os.close(old_write_fd)
-        os.close(new_write_fd)
-
-    with pytest.raises(OSError):
-        os.fstat(new_read_fd)
-    with pytest.raises(OSError):
-        os.fstat(new_directory_fd)
 
 
 def test_empty_pg_wait_uses_rearmed_candidate_board_descriptor(
@@ -725,11 +632,6 @@ def test_candidate_board_wake_runs_candidate_only_with_zero_scanner_drain_rows(
         "process_outcome_feedback_backlog",
         lambda *args, **kwargs: pytest.fail("board wake must not run feedback"),
     )
-    monkeypatch.setattr(
-        consumer,
-        "process_retention_backlog",
-        lambda *args, **kwargs: pytest.fail("board wake must not run retention"),
-    )
 
     def wait(
         connection: object,
@@ -776,88 +678,6 @@ def test_candidate_board_wake_runs_candidate_only_with_zero_scanner_drain_rows(
     ]
 
 
-def test_candidate_board_event_source_rejects_truncated_kernel_record(
-    tmp_path: Path,
-) -> None:
-    read_fd, write_fd = os.pipe()
-    os.set_blocking(read_fd, False)
-    source = consumer.open_candidate_board_event_source(
-        tmp_path,
-        open_watch=lambda directory: (read_fd, 7, -1),
-        reopen_watch=lambda directory: (read_fd, 7, -1),
-    )
-    source.consume_reconciliation_request()
-    try:
-        os.write(write_fd, b"truncated")
-        with pytest.raises(AlrEventConsumerError, match="candidate_board_event_truncated"):
-            source.drain_ready()
-    finally:
-        source.close()
-        os.close(write_fd)
-
-
-def test_inotify_watch_binds_held_directory_fd_across_configured_path_aba(
-    tmp_path: Path,
-) -> None:
-    configured = tmp_path / "configured"
-    replacement = tmp_path / "replacement"
-    held_name = tmp_path / "held-original"
-    configured.mkdir()
-    replacement.mkdir()
-    original_identity = configured.stat().st_dev, configured.stat().st_ino
-    replacement_identity = replacement.stat().st_dev, replacement.stat().st_ino
-    observed_paths: list[bytes] = []
-
-    class AddWatch:
-        argtypes: object = None
-        restype: object = None
-
-        def __call__(self, event_fd: int, path: bytes, mask: int) -> int:
-            assert event_fd == 41
-            assert mask & consumer._IN_ONLYDIR
-            assert mask & consumer._IN_DONT_FOLLOW
-            observed_paths.append(path)
-            decoded = os.fsdecode(path)
-            prefix = "/proc/self/fd/"
-            assert decoded.startswith(prefix)
-            assert decoded.endswith("/.")
-            directory_fd = int(decoded[len(prefix) : -2])
-            assert (os.fstat(directory_fd).st_dev, os.fstat(directory_fd).st_ino) == (
-                original_identity
-            )
-
-            configured.rename(held_name)
-            replacement.rename(configured)
-            try:
-                assert (configured.stat().st_dev, configured.stat().st_ino) == (
-                    replacement_identity
-                )
-                assert (os.fstat(directory_fd).st_dev, os.fstat(directory_fd).st_ino) == (
-                    original_identity
-                )
-            finally:
-                configured.rename(replacement)
-                held_name.rename(configured)
-            return 19
-
-    class Libc:
-        inotify_add_watch = AddWatch()
-
-    descriptor, directory_fd = consumer._add_linux_candidate_board_watch(
-        Libc(),
-        41,
-        configured,
-    )
-    try:
-        assert descriptor == 19
-        assert observed_paths == [os.fsencode(f"/proc/self/fd/{directory_fd}/.")]
-        assert (configured.stat().st_dev, configured.stat().st_ino) == (
-            original_identity
-        )
-    finally:
-        os.close(directory_fd)
-
-
 def test_prequeued_pg_notification_still_services_ready_board_fd() -> None:
     read_fd, write_fd = os.pipe()
     drained: list[bool] = []
@@ -888,27 +708,6 @@ def test_prequeued_pg_notification_still_services_ready_board_fd() -> None:
 
     assert result == [("channel", "payload")]
     assert drained == [True]
-
-
-@pytest.mark.skipif(consumer.sys.platform != "linux", reason="Linux inotify integration")
-def test_linux_inotify_real_link_publish_wakes_bounded_source(tmp_path: Path) -> None:
-    evidence_directory = tmp_path / "evidence"
-    evidence_directory.mkdir()
-    producer_path = tmp_path / "producer.json"
-    producer_path.write_text("{}\n", encoding="utf-8")
-    source = consumer.open_candidate_board_event_source(evidence_directory)
-    try:
-        assert source.consume_reconciliation_request() is True
-        os.link(
-            producer_path,
-            evidence_directory / "blocked_outcome_review_20260711T120000Z.json",
-        )
-        ready, _, _ = consumer.select.select([source], [], [], 1.0)
-        assert ready == [source]
-        source.drain_ready()
-        assert source.consume_reconciliation_request() is True
-    finally:
-        source.close()
 
 
 def test_missing_candidate_directory_fails_before_db_listener_connect(
@@ -1466,19 +1265,6 @@ def test_event_loop_processes_feedback_before_next_target_rotation(
             candidate_proof_pending=1,
         ),
     )
-    monkeypatch.setattr(
-        consumer,
-        "process_retention_backlog",
-        lambda connection, *, max_batch: calls.append("retention")
-        or {
-            "retention_scanned": 0,
-            "retention_quarantined": 0,
-            "retention_restored": 0,
-            "retention_swept": 0,
-            "retention_retained": 0,
-            "retention_skipped": 0,
-        },
-    )
     def health(
         connection: object,
         *,
@@ -1512,11 +1298,11 @@ def test_event_loop_processes_feedback_before_next_target_rotation(
         candidate_policy={"policy_hash": "b" * 64},
     )
 
+    # S2.4 §2.1(W2a):retention 已整段移出 engine-scanner orchestration。
     assert calls == [
         "feedback",
         "target",
         "proof_repository",
-        "retention",
         "health",
     ]
     assert result["feedback_rotations"] == 1
@@ -1653,18 +1439,6 @@ def test_idle_health_heartbeat_does_not_trigger_another_training_cycle(
         "process_candidate_proof_repository_backlog",
         proof_repository,
     )
-    monkeypatch.setattr(
-        consumer,
-        "process_retention_backlog",
-        lambda connection, *, max_batch: {
-            "retention_scanned": 0,
-            "retention_quarantined": 0,
-            "retention_restored": 0,
-            "retention_swept": 0,
-            "retention_retained": 0,
-            "retention_skipped": 0,
-        },
-    )
     monkeypatch.setattr(consumer, "process_health_snapshot", health)
 
     def wait(*args: object, **kwargs: object) -> list[tuple[str, str]]:
@@ -1686,32 +1460,26 @@ def test_idle_health_heartbeat_does_not_trigger_another_training_cycle(
     assert health_calls == 2
 
 
-def test_retention_backlog_reports_only_derived_cache_actions(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        consumer,
-        "run_retention_pass",
-        lambda connection, *, now, grace_seconds, limit: {
-            "scanned": 2,
-            "quarantined": 1,
-            "restored": 0,
-            "swept": 1,
-            "retained": 0,
-            "skipped": 0,
-        },
-    )
+def test_consumer_module_has_zero_retention_surface() -> None:
+    """S2.4 §2.1(W2a):engine-scanner 模組必須對 retention apply 面零匯入/零屬性。
 
-    result = process_retention_backlog(object(), max_batch=8)
+    retention-backlog 入口已移至 ``ml_training.alr_retention_runner``(其行為測試
+    在 test_alr_retention_runner.py);此處鎖死 consumer 側不得回流——無屬性、無
+    import 語句(含 lazy/條件;字面掃描 + 屬性斷言雙重防護,完整 AST 閉包執法在
+    tests/structure 的 privilege-split 測試)。
+    """
 
-    assert result == {
-        "retention_scanned": 2,
-        "retention_quarantined": 1,
-        "retention_restored": 0,
-        "retention_swept": 1,
-        "retention_retained": 0,
-        "retention_skipped": 0,
-    }
+    assert not hasattr(consumer, "process_retention_backlog")
+    assert not hasattr(consumer, "run_retention_pass")
+    assert not hasattr(consumer, "_accumulate_retention")
+    source = Path(consumer.__file__).read_text(encoding="utf-8")
+    imported: set[str] = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            imported.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imported.add(node.module)
+    assert not any("alr_retention" in name for name in imported)
 
 
 def test_health_snapshot_is_collected_and_persisted_without_authority(

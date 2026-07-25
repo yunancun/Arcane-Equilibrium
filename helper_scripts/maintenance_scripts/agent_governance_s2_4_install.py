@@ -19,8 +19,10 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -497,6 +499,526 @@ def emit_w1_receipts(
     }
 
 
+# --------------------------------------------------------------------------- #
+# W2a(§2.1/§10.5 #23)engine-scanner retention split + closed PG ACL 靜態執法。
+#
+# 契約:PASS 只能由本檔對 repo 當前 checkout 的三段再導出「同時」成立而導出——
+#   (a) 靜態 AST import 閉包內,post-split consumer 對 retention apply 面零可達
+#       (含 lazy/條件 import;閉包同時走 ml_training 與 maintenance_scripts 兩域);
+#   (b) 靜態 SQL inventory(consumer 模組 + 其 PG data-plane repository 閉包)不含
+#       任何 DELETE、任何 retention-table mutation、任何不可解析/不可分類語句;
+#   (c) inventory 導出的必要權限與 pg_acl_manifest_v1.json 雙向 exact-match
+#       (unlisted statement 或 over-grant 皆 fail),且 manifest 過中央閘結構驗。
+# 任一不成立 → typed ENGINE_SCANNER_PRIVILEGE_SPLIT_REQUIRED(§10.2)。此為 SOURCE
+# 靜態執法,「不」認證任何 runtime;disposable-PG trace 證明屬 sibling 測試。
+# --------------------------------------------------------------------------- #
+_ENGINE_SCANNER_ENTRY_MODULE = "alr_event_consumer"
+_ENGINE_SCANNER_ROLE = "aiml_engine_scanner"
+_PG_ACL_MANIFEST_REL = "program_code/ml_training/pg_acl_manifest_v1.json"
+_ML_TRAINING_REL = "program_code/ml_training"
+_HELPER_SCRIPTS_REL = "helper_scripts/maintenance_scripts"
+# §2.1:retention apply 面(decision + repository)必須自 engine-scanner 進程不可達。
+_RETENTION_FORBIDDEN_MODULES = ("alr_retention_guardian", "alr_retention_repository")
+# retention-owned 資料表:consumer 對其只允許唯讀(health 計數);任何 mutation 即違規。
+_RETENTION_TABLES = (
+    "learning.alr_derived_cache_entries",
+    "learning.alr_retention_events",
+)
+# SQL-scan 唯一排除(理由必須成立且入 verdict):parquet_etl 是 duckdb 本地 ETL 面——其
+# execute 綁 duckdb 連線與動態檔案路徑,非本進程的 PG data-plane;server-side ACL 由
+# manifest + disposable trace 執法,不受客戶端字串影響。排除「不」適用於 (a) 的 import
+# 可達性檢查(closure 仍完整走訪)。
+_ENGINE_SCANNER_SQL_SCAN_EXCLUDED = {
+    "parquet_etl": "duckdb_local_etl_surface_not_pg_data_plane",
+}
+# 進 manifest functions 段的 pg_catalog advisory-lock 家族(PUBLIC-default EXECUTE)。
+_ADVISORY_FUNCTION_NAMES = ("hashtext", "pg_advisory_unlock", "pg_try_advisory_lock")
+_ADVISORY_FUNCTION_RE = re.compile(
+    r"\b(hashtext|pg_advisory_unlock|pg_try_advisory_lock)\s*\("
+)
+_QUALIFIED_TABLE_RE = re.compile(r"\b(?:trading|learning)\.[a-z_][a-z0-9_]*")
+_INSERT_TARGET_RE = re.compile(
+    r"^\s*INSERT\s+INTO\s+((?:trading|learning)\.[a-z_][a-z0-9_]*)", re.IGNORECASE
+)
+_UPDATE_TARGET_RE = re.compile(
+    r"^\s*UPDATE\s+((?:trading|learning)\.[a-z_][a-z0-9_]*)", re.IGNORECASE
+)
+_DELETE_TARGET_RE = re.compile(
+    r"^\s*DELETE\s+FROM\s+((?:trading|learning)\.[a-z_][a-z0-9_]*)", re.IGNORECASE
+)
+_RELATION_KEYWORD_RE = re.compile(
+    r"\b(?:FROM|JOIN|INTO|UPDATE)\s+([A-Za-z_][A-Za-z0-9_.]*)", re.IGNORECASE
+)
+_CTE_NAME_RE = re.compile(r"(?:\bWITH\s+|,\s*)([a-z_][a-z0-9_]*)\s+AS\s*\(", re.IGNORECASE)
+_SAFE_SQL_IDENT_RE = re.compile(r"^[a-z_][a-z0-9_]*$")
+_SAFE_SQL_QUALIFIED_RE = re.compile(r"^[a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*$")
+
+
+class _SqlUnresolvable(Exception):
+    """一個 execute 第一參數無法靜態解析為常量 SQL(fail-closed 進 unresolved)。"""
+
+
+def _engine_scanner_import_names(tree: ast.AST) -> set[str]:
+    """收集模組內全部 import 名(含函式內 lazy import 與 `from ml_training import X`)。"""
+
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                names.add(alias.name)
+        elif isinstance(node, ast.ImportFrom) and node.module is not None:
+            names.add(node.module)
+            if node.module == "ml_training":
+                for alias in node.names:
+                    names.add("ml_training." + alias.name)
+    return names
+
+
+def _engine_scanner_resolve_module(repo_root: Path, name: str) -> tuple[str, Path] | None:
+    """把 import 名解析為 repo 內檔案(ml_training 優先,再 maintenance_scripts)。"""
+
+    short = name.split(".", 1)[1] if name.startswith("ml_training.") else name
+    if "." in short:
+        return None
+    for base_rel in (_ML_TRAINING_REL, _HELPER_SCRIPTS_REL):
+        candidate = repo_root / base_rel / f"{short}.py"
+        if candidate.is_file():
+            return short, candidate
+    return None
+
+
+def _engine_scanner_import_closure(repo_root: Path) -> dict[str, Path]:
+    """自 consumer 起的完整靜態 import 閉包(fail-closed:解析錯誤即 raise)。"""
+
+    closure: dict[str, Path] = {}
+    stack = ["ml_training." + _ENGINE_SCANNER_ENTRY_MODULE]
+    while stack:
+        resolved = _engine_scanner_resolve_module(repo_root, stack.pop())
+        if resolved is None:
+            continue
+        short, path = resolved
+        if short in closure:
+            continue
+        closure[short] = path
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        stack.extend(sorted(_engine_scanner_import_names(tree)))
+    return closure
+
+
+def _resolve_sql_strings(
+    node: ast.AST,
+    module_consts: dict[str, str],
+    local_consts: dict[str, set[str]],
+) -> set[str]:
+    """把 execute 第一參數解析為常量 SQL 變體集合(分支/條件展開;無法解析即 raise)。"""
+
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return {node.value}
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        lefts = _resolve_sql_strings(node.left, module_consts, local_consts)
+        rights = _resolve_sql_strings(node.right, module_consts, local_consts)
+        return {left + right for left in lefts for right in rights}
+    if isinstance(node, ast.Name):
+        if node.id in local_consts:
+            return set(local_consts[node.id])
+        if node.id in module_consts:
+            return {module_consts[node.id]}
+        raise _SqlUnresolvable(f"name:{node.id}")
+    if isinstance(node, ast.IfExp):
+        return _resolve_sql_strings(node.body, module_consts, local_consts) | (
+            _resolve_sql_strings(node.orelse, module_consts, local_consts)
+        )
+    if isinstance(node, ast.JoinedStr):
+        variants = {""}
+        for value in node.values:
+            parts = _resolve_sql_strings(value, module_consts, local_consts)
+            variants = {variant + part for variant in variants for part in parts}
+        return variants
+    if isinstance(node, ast.FormattedValue):
+        return _resolve_sql_strings(node.value, module_consts, local_consts)
+    raise _SqlUnresolvable(f"node:{type(node).__name__}")
+
+
+def _module_sql_statements(path: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """抽取一個模組內每個 ``*.execute(...)`` 的常量 SQL 變體(deterministic)。"""
+
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    module_consts: dict[str, str] = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            try:
+                values = _resolve_sql_strings(node.value, module_consts, {})
+            except _SqlUnresolvable:
+                continue
+            if len(values) == 1:
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        module_consts[target.id] = next(iter(values))
+    statements: list[dict[str, Any]] = []
+    unresolved: list[dict[str, Any]] = []
+    for func in ast.walk(tree):
+        if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        local_consts: dict[str, set[str]] = {}
+        for node in ast.walk(func):
+            if isinstance(node, ast.Assign):
+                try:
+                    values = _resolve_sql_strings(node.value, module_consts, local_consts)
+                except _SqlUnresolvable:
+                    continue
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        local_consts.setdefault(target.id, set()).update(values)
+        for node in ast.walk(func):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr in {"execute", "executemany"}
+                and node.args
+            ):
+                try:
+                    values = _resolve_sql_strings(
+                        node.args[0], module_consts, local_consts
+                    )
+                except _SqlUnresolvable as exc:
+                    unresolved.append({
+                        "function": func.name,
+                        "line": node.lineno,
+                        "reason": str(exc),
+                    })
+                    continue
+                for statement in sorted(values):
+                    statements.append({
+                        "function": func.name,
+                        "line": node.lineno,
+                        "statement": statement,
+                    })
+    return statements, unresolved
+
+
+def _statement_unqualified_relations(sql: str) -> list[str]:
+    """找出未以 trading./learning. 限定、又非 CTE 名的關聯目標(fail-closed)。"""
+
+    cte_names = {match.group(1).lower() for match in _CTE_NAME_RE.finditer(sql)}
+    violations: list[str] = []
+    for match in _RELATION_KEYWORD_RE.finditer(sql):
+        name = match.group(1)
+        if "." in name:
+            if _QUALIFIED_TABLE_RE.fullmatch(name.lower()) is None:
+                violations.append(name)
+            continue
+        # LATERAL 是 JOIN 後的結構關鍵字(如 JOIN LATERAL (subquery)),非關聯名。
+        if name.lower() == "lateral":
+            continue
+        if name.lower() in cte_names:
+            continue
+        violations.append(name)
+    return sorted(set(violations))
+
+
+def _classify_sql_statement(sql: str) -> dict[str, Any]:
+    """把一條常量 SQL 分類並導出必要權限;無法分類即回 errors(fail-closed)。"""
+
+    head = sql.strip().split()[0].upper() if sql.strip() else ""
+    tables: dict[str, set[str]] = {}
+    errors: list[str] = []
+    mutation = False
+    referenced = sorted({match.lower() for match in _QUALIFIED_TABLE_RE.findall(sql)})
+    if head in {"SELECT", "WITH"}:
+        statement_class = "read"
+        for table in referenced:
+            tables.setdefault(table, set()).add("SELECT")
+    elif head == "INSERT":
+        statement_class = "insert"
+        target_match = _INSERT_TARGET_RE.match(sql)
+        if target_match is None:
+            errors.append("insert_target_not_schema_qualified")
+        else:
+            target = target_match.group(1).lower()
+            tables.setdefault(target, set()).add("INSERT")
+            # PG 語義:INSERT .. ON CONFLICT 需讀 arbiter 欄位 → 目標表另需 SELECT
+            # (disposable trace 以真 42501 實證;見 W2a 佐證測試)。
+            if re.search(r"\bON\s+CONFLICT\b", sql, re.IGNORECASE):
+                tables[target].add("SELECT")
+            for table in referenced:
+                if table != target:
+                    tables.setdefault(table, set()).add("SELECT")
+    elif head == "UPDATE":
+        statement_class = "update"
+        mutation = True
+        target_match = _UPDATE_TARGET_RE.match(sql)
+        if target_match is None:
+            errors.append("update_target_not_schema_qualified")
+        else:
+            tables.setdefault(target_match.group(1).lower(), set()).add("UPDATE")
+    elif head == "DELETE":
+        statement_class = "delete"
+        mutation = True
+        target_match = _DELETE_TARGET_RE.match(sql)
+        if target_match is None:
+            errors.append("delete_target_not_schema_qualified")
+        else:
+            tables.setdefault(target_match.group(1).lower(), set()).add("DELETE")
+    elif head == "LISTEN":
+        statement_class = "listen"
+    else:
+        statement_class = "unrecognized"
+        errors.append(f"unrecognized_statement_class:{head or 'EMPTY'}")
+    if statement_class != "listen":
+        for name in _statement_unqualified_relations(sql):
+            errors.append(f"unqualified_relation:{name}")
+    functions = sorted({match for match in _ADVISORY_FUNCTION_RE.findall(sql)})
+    return {
+        "statement_class": statement_class,
+        "tables": {name: sorted(privileges) for name, privileges in tables.items()},
+        "functions": [f"pg_catalog.{name}" for name in functions],
+        "mutation": mutation,
+        "errors": errors,
+    }
+
+
+def build_engine_scanner_sql_inventory(repo_root: Path = REPO_ROOT) -> dict[str, Any]:
+    """post-split consumer 的 deterministic 靜態 SQL inventory(§10.5 #23 的 SOURCE 面)。
+
+    inventory 同時攜帶:完整 import 閉包(retention 可達性證據)、逐條語句的分類/
+    權限導出、unresolved/violation 清單、與聚合 required_privileges。任何 caller
+    不可自帶 PASS;裁決一律經 :func:`derive_engine_scanner_privilege_split`。
+    """
+
+    closure = _engine_scanner_import_closure(repo_root)
+    retention_reachable = sorted(
+        name for name in _RETENTION_FORBIDDEN_MODULES if name in closure
+    )
+    ml_dir = (repo_root / _ML_TRAINING_REL).resolve()
+    statements: list[dict[str, Any]] = []
+    unresolved: list[dict[str, Any]] = []
+    violations: list[str] = []
+    scanned: list[str] = []
+    for name in sorted(closure):
+        path = closure[name]
+        if path.resolve().parent != ml_dir:
+            continue  # 治理 helper 域不屬 PG data-plane(import 可達性已在 closure 覆蓋)
+        if name in _ENGINE_SCANNER_SQL_SCAN_EXCLUDED:
+            continue
+        scanned.append(name)
+        module_statements, module_unresolved = _module_sql_statements(path)
+        for entry in module_unresolved:
+            unresolved.append({"module": name, **entry})
+        for entry in module_statements:
+            classified = _classify_sql_statement(entry["statement"])
+            record = {"module": name, **entry, **classified}
+            statements.append(record)
+            for error in classified["errors"]:
+                violations.append(
+                    f"{name}:{entry['function']}:{entry['line']}:{error}"
+                )
+            if classified["statement_class"] == "delete":
+                violations.append(
+                    f"{name}:{entry['function']}:{entry['line']}:delete_statement_forbidden"
+                )
+            if classified["mutation"] and any(
+                table in _RETENTION_TABLES for table in classified["tables"]
+            ):
+                violations.append(
+                    f"{name}:{entry['function']}:{entry['line']}:retention_table_mutation"
+                )
+            if classified["statement_class"] == "insert" and any(
+                table in _RETENTION_TABLES and "INSERT" in privileges
+                for table, privileges in classified["tables"].items()
+            ):
+                violations.append(
+                    f"{name}:{entry['function']}:{entry['line']}:retention_table_mutation"
+                )
+    statements.sort(key=lambda item: (item["module"], item["line"], item["statement"]))
+    required_tables: dict[str, set[str]] = {}
+    required_functions: set[str] = set()
+    for record in statements:
+        for table, privileges in record["tables"].items():
+            required_tables.setdefault(table, set()).update(privileges)
+        required_functions.update(record["functions"])
+    required_schemas = sorted({table.split(".", 1)[0] for table in required_tables})
+    return {
+        "schema_version": "engine_scanner_sql_inventory_v1",
+        "entry_module": f"ml_training.{_ENGINE_SCANNER_ENTRY_MODULE}",
+        "import_closure": sorted(closure),
+        "sql_scanned_modules": scanned,
+        "sql_scan_excluded": dict(_ENGINE_SCANNER_SQL_SCAN_EXCLUDED),
+        "retention_forbidden_reachable": retention_reachable,
+        "statements": statements,
+        "unresolved": sorted(
+            unresolved, key=lambda item: (item["module"], item["line"], item["reason"])
+        ),
+        "violations": sorted(set(violations)),
+        "required_privileges": {
+            "schemas": required_schemas,
+            "tables": {
+                table: sorted(privileges)
+                for table, privileges in sorted(required_tables.items())
+            },
+            "functions": sorted(required_functions),
+        },
+    }
+
+
+def derive_engine_scanner_privilege_split(
+    repo_root: Path = REPO_ROOT,
+    *,
+    manifest_path: Path | None = None,
+) -> dict[str, Any]:
+    """§2.1/§10.5 #23 的中央再導出裁決(typed;caller 不可自證 PASS)。
+
+    PASS ⇔ (a) retention 面 import 不可達 ∧ (b) inventory 零 DELETE/零 retention
+    mutation/零 unresolved/零 violation ∧ (c) inventory 必要權限與 manifest 雙向
+    exact-match 且 manifest 過中央閘。否則 ENGINE_SCANNER_PRIVILEGE_SPLIT_REQUIRED
+    (§10.2 typed terminal failure)+ 逐項 reasons。
+    """
+
+    reasons: list[str] = []
+    inventory = build_engine_scanner_sql_inventory(repo_root)
+    for module in inventory["retention_forbidden_reachable"]:
+        reasons.append(f"retention module is import-reachable from the consumer: {module}")
+    for entry in inventory["unresolved"]:
+        reasons.append(
+            "sql statement is not statically resolvable: "
+            f"{entry['module']}:{entry['line']}:{entry['reason']}"
+        )
+    reasons.extend(
+        f"sql inventory violation: {violation}" for violation in inventory["violations"]
+    )
+
+    manifest_file = manifest_path or (repo_root / _PG_ACL_MANIFEST_REL)
+    manifest: dict[str, Any] | None = None
+    try:
+        loaded = json.loads(Path(manifest_file).read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            manifest = loaded
+        else:
+            reasons.append("pg acl manifest is not an object")
+    except (OSError, json.JSONDecodeError) as error:
+        reasons.append(f"pg acl manifest is unreadable: {error}")
+
+    manifest_digest: str | None = None
+    if manifest is not None:
+        central_errors = central_validator.validate_aiml_artifact(manifest)
+        reasons.extend(f"pg acl manifest rejected: {error}" for error in central_errors)
+        if not central_errors:
+            manifest_digest = manifest["self_digest"]
+            expected_database = central_validator._consumer_authoritative_database(
+                repo_root
+            )
+            if expected_database is None:
+                reasons.append(
+                    "consumer authoritative database cannot be re-derived from the checkout"
+                )
+            elif manifest["database"]["name"] != expected_database:
+                reasons.append(
+                    "pg acl manifest database differs from the consumer authoritative DSN"
+                )
+            if manifest["role_name"] != _ENGINE_SCANNER_ROLE:
+                reasons.append("pg acl manifest role_name is not the engine-scanner role")
+            required = inventory["required_privileges"]
+            manifest_tables = {
+                entry["name"]: sorted(entry["privileges"])
+                for entry in manifest["tables"]
+            }
+            for table, privileges in required["tables"].items():
+                granted = manifest_tables.get(table)
+                if granted is None:
+                    reasons.append(f"inventoried statement privilege is unlisted: {table}")
+                    continue
+                missing = sorted(set(privileges) - set(granted))
+                if missing:
+                    reasons.append(
+                        f"inventoried statement privilege is unlisted: {table} "
+                        f"{','.join(missing)}"
+                    )
+            for table, granted in manifest_tables.items():
+                exercised = required["tables"].get(table, [])
+                extra = sorted(set(granted) - set(exercised))
+                if table not in required["tables"]:
+                    reasons.append(f"manifest table grant is never exercised: {table}")
+                elif extra:
+                    reasons.append(
+                        f"manifest table grant is never exercised: {table} "
+                        f"{','.join(extra)}"
+                    )
+            manifest_schemas = sorted(entry["name"] for entry in manifest["schemas"])
+            if manifest_schemas != required["schemas"]:
+                reasons.append(
+                    "manifest schemas differ from the inventoried schema set: "
+                    f"manifest={manifest_schemas} required={required['schemas']}"
+                )
+            manifest_functions = sorted(entry["name"] for entry in manifest["functions"])
+            if manifest_functions != required["functions"]:
+                reasons.append(
+                    "manifest functions differ from the inventoried function set: "
+                    f"manifest={manifest_functions} required={required['functions']}"
+                )
+            if manifest["sequences"]:
+                reasons.append("manifest sequences must stay empty (no sequence is exercised)")
+
+    status = "PASS" if not reasons else "ENGINE_SCANNER_PRIVILEGE_SPLIT_REQUIRED"
+    return {
+        "schema_version": "engine_scanner_privilege_split_verdict_v1",
+        "status": status,
+        "reasons": reasons,
+        "entry_module": inventory["entry_module"],
+        "import_closure_size": len(inventory["import_closure"]),
+        "statement_count": len(inventory["statements"]),
+        "retention_forbidden_reachable": inventory["retention_forbidden_reachable"],
+        "required_privileges": inventory["required_privileges"],
+        "sql_scan_excluded": inventory["sql_scan_excluded"],
+        "manifest_digest": manifest_digest,
+        "sql_inventory_digest": central_validator.canonical_digest(inventory),
+        "production_authority_flags": {
+            "nine_authorities_false": True,
+            "production_apply_performed": False,
+            "running_attested": False,
+        },
+    }
+
+
+def generate_engine_scanner_grant_sql(manifest: dict[str, Any]) -> list[str]:
+    """由 manifest 生成 deterministic REVOKE/GRANT 序列(disposable trace 專用)。
+
+    僅供 throwaway cluster 佐證:語句嚴格由 manifest 導出——無 ALL-on-schema
+    wildcard、無 GRANT OPTION、無 role membership、無 CREATE/TEMP/OWNER。identifier
+    先過白名單正則(拒注入),角色建立(含 credential)不在此生成器內。
+    """
+
+    errors = central_validator.validate_aiml_artifact(manifest)
+    if errors:
+        raise ValueError(f"pg acl manifest rejected: {errors[0]}")
+    role = manifest["role_name"]
+    database = manifest["database"]["name"]
+    if not _SAFE_SQL_IDENT_RE.fullmatch(role) or not _SAFE_SQL_IDENT_RE.fullmatch(database):
+        raise ValueError("pg acl manifest identifiers are not safe SQL identifiers")
+    attributes = manifest["role_attributes"]
+    statements = [
+        f'ALTER ROLE "{role}" NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT '
+        f'NOREPLICATION NOBYPASSRLS CONNECTION LIMIT {int(attributes["connection_limit"])}',
+        f'REVOKE ALL PRIVILEGES ON DATABASE "{database}" FROM "{role}"',
+        f'GRANT CONNECT ON DATABASE "{database}" TO "{role}"',
+    ]
+    for entry in manifest["schemas"]:
+        schema = entry["name"]
+        if not _SAFE_SQL_IDENT_RE.fullmatch(schema):
+            raise ValueError("pg acl manifest schema name is not a safe SQL identifier")
+        statements.append(f'REVOKE ALL ON SCHEMA "{schema}" FROM "{role}"')
+        statements.append(f'GRANT USAGE ON SCHEMA "{schema}" TO "{role}"')
+    for entry in manifest["tables"]:
+        table = entry["name"]
+        if not _SAFE_SQL_QUALIFIED_RE.fullmatch(table):
+            raise ValueError("pg acl manifest table name is not a safe SQL identifier")
+        schema, relation = table.split(".", 1)
+        qualified = f'"{schema}"."{relation}"'
+        statements.append(f'REVOKE ALL ON TABLE {qualified} FROM "{role}"')
+        statements.append(
+            f'GRANT {", ".join(sorted(entry["privileges"]))} ON TABLE {qualified} TO "{role}"'
+        )
+    return statements
+
+
 def _main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="action", required=True)
@@ -511,7 +1033,15 @@ def _main(argv: list[str] | None = None) -> int:
     w1_emit.add_argument("--out", required=True, type=Path)
     w1_emit.add_argument("--test-evidence", required=True, type=Path)
     w1_emit.add_argument("--review-provenance", required=True, type=Path)
+    sub.add_parser(
+        "engine-scanner-split",
+        help="再導出 §2.1 engine-scanner privilege-split verdict(typed;不可自證)",
+    )
     args = parser.parse_args(argv)
+    if args.action == "engine-scanner-split":
+        verdict = derive_engine_scanner_privilege_split()
+        print(json.dumps(verdict, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0 if verdict["status"] == "PASS" else 2
     if args.action == "w0-emit":
         result = emit_w0_receipts(
             out_dir=args.out,

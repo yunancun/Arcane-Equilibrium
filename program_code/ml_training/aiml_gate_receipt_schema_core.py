@@ -174,6 +174,12 @@ SCHEMA_FILES = {
     "s2_4_pg_hba_delta_v1": "s2_4_pg_hba_delta_v1.schema.json",
     "pg_topology_attestation_v1": "pg_topology_attestation_v1.schema.json",
     "pg_topology_runtime_guard_v1": "pg_topology_runtime_guard_v1.schema.json",
+    # S2.4(WP4·W2a)——additive:engine-scanner 的 closed PG ACL manifest(§2.1)。加這鍵純為
+    # schema 查找,絕不進入 aiml_effect_classifier_digest() 的六個 S0.3 常量輸入(見 :46-48/§7.2),
+    # S0.3 分類身分不動;亦不改 PROGRAM_SCHEMA_PATHS 與 v1/v2 component matrix/digest。中央閘只做
+    # 結構驗 + self_digest 反偽造重算;與 static SQL inventory 的 exact-match 裁決委派給
+    # agent_governance_s2_4_install.derive_engine_scanner_privilege_split(caller 不可自證)。
+    "pg_acl_manifest_v1": "pg_acl_manifest_v1.schema.json",
 }
 
 S0_DEPENDENCY_DIGESTS = {

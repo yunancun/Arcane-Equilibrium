@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import ctypes
-import errno
 import hashlib
 import json
 import os
@@ -12,10 +10,7 @@ import re
 import select
 import shlex
 import signal
-import stat
-import struct
 import subprocess
-import sys
 import threading
 import time
 from contextlib import contextmanager, nullcontext
@@ -24,6 +19,25 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+# S2.4 §2.1 W2a 拆分:inotify board-watch 面(含共用 AlrEventConsumerError)搬入
+# alr_candidate_board_events;此處 re-export 保持公開匯入面/monkeypatch 縫不變。
+# retention apply 面已「整段」移出本進程(見 alr_retention_runner)——本模組對
+# alr_retention_repository 零匯入路徑(無 lazy/條件;由 privilege-split 靜態執法)。
+from ml_training.alr_candidate_board_events import (  # noqa: F401 — re-export
+    AlrEventConsumerError,
+    CandidateBoardEventSource,
+    _IN_ACCESS_EVENT,
+    _IN_CLOSE_WRITE,
+    _IN_CREATE,
+    _IN_DELETE,
+    _IN_DONT_FOLLOW,
+    _IN_IGNORED,
+    _IN_MOVED_TO,
+    _IN_ONLYDIR,
+    _IN_Q_OVERFLOW,
+    _add_linux_candidate_board_watch,
+    open_candidate_board_event_source,
+)
 from ml_training.alr_consumer_repository import (
     fail_consumer_session,
     new_session_id,
@@ -35,7 +49,6 @@ from ml_training.alr_freshness_runtime import (
     drain_historical_lane,
     drain_notified_identities,
 )
-from ml_training.alr_retention_repository import run_retention_pass
 from ml_training.alr_operational_repository import (
     fetch_recent_candidate_scanner_cycles,
     fetch_recent_candidate_projection_decisions,
@@ -109,32 +122,9 @@ _DEFAULT_COMPATIBILITY_RECEIPT_V2_REL = (
     "docs/execution_plan/ai_ml_landing/receipts/"
     "S2.2A-source-compatibility-receipt-v2.json"
 )
-_RETENTION_GRACE_SECONDS = 900
 _CANDIDATE_EVIDENCE_MAX_AGE_SECONDS = 172_800
 _CANDIDATE_EVIDENCE_MAX_FILES = 128
 _CANDIDATE_EVIDENCE_MAX_BYTES = 64 * 1024 * 1024
-_IN_ACCESS_EVENT = struct.Struct("iIII")
-_IN_CREATE = 0x00000100
-_IN_DELETE = 0x00000200
-_IN_MOVED_TO = 0x00000080
-_IN_CLOSE_WRITE = 0x00000008
-_IN_DELETE_SELF = 0x00000400
-_IN_MOVE_SELF = 0x00000800
-_IN_UNMOUNT = 0x00002000
-_IN_Q_OVERFLOW = 0x00004000
-_IN_IGNORED = 0x00008000
-_IN_ONLYDIR = 0x01000000
-_IN_DONT_FOLLOW = 0x02000000
-# The immutable publisher links the new board before pruning the old board.
-# DELETE is the retry wake when a CREATE reconciliation observes that transient.
-_INOTIFY_WAKE_MASK = _IN_CREATE | _IN_DELETE | _IN_MOVED_TO | _IN_CLOSE_WRITE
-_INOTIFY_INVALIDATION_MASK = _IN_DELETE_SELF | _IN_MOVE_SELF | _IN_UNMOUNT | _IN_IGNORED
-_INOTIFY_WATCH_MASK = _INOTIFY_WAKE_MASK | (
-    _IN_DELETE_SELF | _IN_MOVE_SELF | _IN_UNMOUNT
-) | _IN_ONLYDIR | _IN_DONT_FOLLOW
-_IMMUTABLE_CANDIDATE_BOARD_NAME_RE = re.compile(
-    r"^blocked_outcome_review_[0-9]{8}T[0-9]{6}Z\.json$"
-)
 _ZERO_AUTHORITY_COUNTERS = {
     "exchange_contact_count": 0,
     "trading_action_count": 0,
@@ -157,224 +147,6 @@ _ZERO_AUTHORITY = {
     "promotion_authority": False,
     "latest_authority": False,
 }
-
-
-class AlrEventConsumerError(ValueError):
-    """An ALR notification or consumer control cannot be handled safely."""
-
-
-class CandidateBoardEventSource:
-    """Linux inotify wake source; event names never carry learning content."""
-
-    def __init__(
-        self,
-        directory: Path,
-        *,
-        event_fd: int,
-        watch_descriptor: int,
-        directory_fd: int,
-        reopen_watch: Any,
-    ) -> None:
-        self._directory = directory
-        self._event_fd = event_fd
-        self._watch_descriptor = watch_descriptor
-        self._directory_fd = directory_fd
-        self._reopen_watch = reopen_watch
-        self._reconciliation_required = True
-        self._closed = False
-
-    def __enter__(self) -> "CandidateBoardEventSource":
-        return self
-
-    def __exit__(self, *args: object) -> None:
-        self.close()
-
-    def fileno(self) -> int:
-        if self._closed:
-            raise AlrEventConsumerError("candidate_board_event_source_closed")
-        return self._event_fd
-
-    def consume_reconciliation_request(self) -> bool:
-        requested = self._reconciliation_required
-        self._reconciliation_required = False
-        return requested
-
-    def drain_ready(self) -> None:
-        """Drain bounded kernel records and reduce every valid event to one wake."""
-        if self._closed:
-            raise AlrEventConsumerError("candidate_board_event_source_closed")
-        try:
-            payload = os.read(self._event_fd, 64 * 1024)
-        except BlockingIOError:
-            return
-        except OSError as exc:
-            if exc.errno in {errno.EAGAIN, errno.EWOULDBLOCK}:
-                return
-            raise AlrEventConsumerError("candidate_board_event_read_failed") from exc
-        if not payload:
-            return
-        offset = 0
-        invalidated = False
-        while offset < len(payload):
-            if len(payload) - offset < _IN_ACCESS_EVENT.size:
-                raise AlrEventConsumerError("candidate_board_event_truncated")
-            watch_descriptor, mask, _cookie, name_length = _IN_ACCESS_EVENT.unpack_from(
-                payload, offset
-            )
-            offset += _IN_ACCESS_EVENT.size
-            if name_length > 4096 or offset + name_length > len(payload):
-                raise AlrEventConsumerError("candidate_board_event_name_invalid")
-            raw_name = bytes(payload[offset : offset + name_length])
-            offset += name_length
-            if watch_descriptor == -1 and mask & _IN_Q_OVERFLOW:
-                invalidated = True
-                self._reconciliation_required = True
-                continue
-            if watch_descriptor != self._watch_descriptor:
-                continue
-            if mask & _INOTIFY_INVALIDATION_MASK:
-                invalidated = True
-                self._reconciliation_required = True
-                continue
-            if mask & _INOTIFY_WAKE_MASK:
-                name = raw_name.split(b"\x00", 1)[0]
-                try:
-                    decoded_name = name.decode("ascii")
-                except UnicodeDecodeError:
-                    continue
-                if _IMMUTABLE_CANDIDATE_BOARD_NAME_RE.fullmatch(decoded_name):
-                    self._reconciliation_required = True
-        if invalidated:
-            new_event_fd, new_watch, new_directory_fd = self._reopen_watch(
-                self._directory
-            )
-            old_event_fd = self._event_fd
-            old_directory_fd = self._directory_fd
-            self._event_fd = new_event_fd
-            self._watch_descriptor = new_watch
-            self._directory_fd = new_directory_fd
-            _close_candidate_board_watch_descriptors(
-                old_event_fd if old_event_fd != new_event_fd else -1,
-                old_directory_fd
-                if old_directory_fd >= 0 and old_directory_fd != new_directory_fd
-                else -1,
-            )
-
-    def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
-        _close_candidate_board_watch_descriptors(
-            self._event_fd,
-            self._directory_fd,
-        )
-
-
-def _close_candidate_board_watch_descriptors(
-    event_fd: int,
-    directory_fd: int,
-) -> None:
-    try:
-        if directory_fd >= 0:
-            os.close(directory_fd)
-    finally:
-        if event_fd >= 0:
-            os.close(event_fd)
-
-
-def open_candidate_board_event_source(
-    directory: Path,
-    *,
-    open_watch: Any = None,
-    reopen_watch: Any = None,
-) -> CandidateBoardEventSource:
-    """Open one nonblocking Linux directory watch with startup reconciliation."""
-    opener = open_watch or _open_linux_candidate_board_watch
-    reopen = reopen_watch or _open_linux_candidate_board_watch
-    event_fd, watch_descriptor, directory_fd = opener(Path(directory))
-    return CandidateBoardEventSource(
-        Path(directory),
-        event_fd=event_fd,
-        watch_descriptor=watch_descriptor,
-        directory_fd=directory_fd,
-        reopen_watch=reopen,
-    )
-
-
-def _open_linux_candidate_board_watch(directory: Path) -> tuple[int, int, int]:
-    if sys.platform != "linux":
-        raise AlrEventConsumerError("candidate_board_inotify_unsupported")
-    try:
-        libc = ctypes.CDLL(None, use_errno=True)
-        init = libc.inotify_init1
-        init.argtypes = [ctypes.c_int]
-        init.restype = ctypes.c_int
-    except (AttributeError, OSError) as exc:
-        raise AlrEventConsumerError("candidate_board_inotify_unavailable") from exc
-    event_fd = init(os.O_NONBLOCK | os.O_CLOEXEC)
-    if event_fd < 0:
-        error_number = ctypes.get_errno()
-        raise AlrEventConsumerError(
-            f"candidate_board_inotify_open_failed:{error_number}"
-        ) from OSError(error_number, os.strerror(error_number))
-    try:
-        watch_descriptor, directory_fd = _add_linux_candidate_board_watch(
-            libc,
-            event_fd,
-            directory,
-        )
-    except Exception:
-        os.close(event_fd)
-        raise
-    return event_fd, watch_descriptor, directory_fd
-
-
-def _add_linux_candidate_board_watch(
-    libc: Any,
-    event_fd: int,
-    directory: Path,
-) -> tuple[int, int]:
-    try:
-        before = directory.lstat()
-    except OSError as exc:
-        raise AlrEventConsumerError("candidate_board_directory_unavailable") from exc
-    if stat.S_ISLNK(before.st_mode) or not stat.S_ISDIR(before.st_mode):
-        raise AlrEventConsumerError("candidate_board_directory_invalid")
-    try:
-        directory_fd = os.open(
-            directory,
-            os.O_RDONLY
-            | os.O_CLOEXEC
-            | getattr(os, "O_DIRECTORY", 0)
-            | getattr(os, "O_NOFOLLOW", 0),
-        )
-    except OSError as exc:
-        raise AlrEventConsumerError("candidate_board_directory_unavailable") from exc
-    try:
-        opened = os.fstat(directory_fd)
-        if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
-            raise AlrEventConsumerError("candidate_board_directory_changed")
-        add_watch = libc.inotify_add_watch
-        add_watch.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_uint32]
-        add_watch.restype = ctypes.c_int
-        held_directory_path = os.fsencode(f"/proc/self/fd/{directory_fd}/.")
-        descriptor = add_watch(
-            event_fd,
-            held_directory_path,
-            _INOTIFY_WATCH_MASK,
-        )
-        if descriptor < 0:
-            error_number = ctypes.get_errno()
-            raise AlrEventConsumerError(
-                f"candidate_board_inotify_watch_failed:{error_number}"
-            ) from OSError(error_number, os.strerror(error_number))
-        after = directory.lstat()
-        if (after.st_dev, after.st_ino) != (opened.st_dev, opened.st_ino):
-            raise AlrEventConsumerError("candidate_board_directory_changed")
-        return descriptor, directory_fd
-    except Exception:
-        os.close(directory_fd)
-        raise
 
 
 def parse_scanner_notification(channel: str, payload: str) -> dict[str, Any]:
@@ -898,25 +670,6 @@ def process_candidate_proof_repository_backlog(
         "candidate_proof_rows_written": 0,
         "candidate_proof_payload_bytes_written": 0,
     }
-
-
-def process_retention_backlog(connection: Any, *, max_batch: int) -> dict[str, int]:
-    """Run one bounded two-phase pass over ALR-owned derived cache only."""
-    if isinstance(max_batch, bool) or not isinstance(max_batch, int) or not 1 <= max_batch <= 256:
-        raise AlrEventConsumerError("retention_batch_limit_invalid")
-    result = run_retention_pass(
-        connection,
-        now=datetime.now(timezone.utc),
-        grace_seconds=_RETENTION_GRACE_SECONDS,
-        limit=min(max_batch, 64),
-    )
-    required = {"scanned", "quarantined", "restored", "swept", "retained", "skipped"}
-    if set(result) != required or any(
-        isinstance(result[key], bool) or not isinstance(result[key], int) or result[key] < 0
-        for key in required
-    ):
-        raise AlrEventConsumerError("retention_result_invalid")
-    return {f"retention_{key}": result[key] for key in required}
 
 
 def process_health_snapshot(
@@ -1731,7 +1484,10 @@ def _process_operational_cycle(
     """Fresh/history drain 後依既有順序執行 bounded research-only 工作。
 
     LR1：fit_quarantined 時 fence 掉 fit-triggering 的 candidate projection 轉換，
-    feedback/proof/retention/health 等非 fit 工作照常。
+    feedback/proof/health 等非 fit 工作照常。
+
+    S2.4 §2.1(W2a):retention pass 已「整段」移出 engine-scanner 進程(獨立入口
+    ``alr_retention_runner``);本 orchestration 不再含任何 retention 步驟。
     """
     _accumulate_feedback(
         totals,
@@ -1754,10 +1510,6 @@ def _process_operational_cycle(
             connection,
             max_batch=max_batch,
         ),
-    )
-    _accumulate_retention(
-        totals,
-        process_retention_backlog(connection, max_batch=max_batch),
     )
     _accumulate_health(
         totals,
@@ -1783,7 +1535,7 @@ def _process_candidate_reconciliation(
     candidate_policy: Mapping[str, Any] | None = None,
     fit_quarantined: bool = False,
 ) -> None:
-    """Board wake path: candidate reconciliation plus health, never feedback/retention.
+    """Board wake path: candidate reconciliation plus health, never feedback.
 
     LR1：fit_quarantined 時 fence 掉 fit-triggering 的 candidate projection，只保留
     proof-repository 唯讀映射與 health 心跳。
@@ -1996,24 +1748,6 @@ def _accumulate_candidate_proof_repository(
         or result["candidate_proof_payload_bytes_written"] != 0
     ):
         raise AlrEventConsumerError("candidate_proof_write_claim")
-    for key in required:
-        totals[key] = totals.get(key, 0) + result[key]
-
-
-def _accumulate_retention(totals: dict[str, int], result: Mapping[str, int]) -> None:
-    required = {
-        "retention_scanned",
-        "retention_quarantined",
-        "retention_restored",
-        "retention_swept",
-        "retention_retained",
-        "retention_skipped",
-    }
-    if set(result) != required or any(
-        isinstance(result[key], bool) or not isinstance(result[key], int) or result[key] < 0
-        for key in required
-    ):
-        raise AlrEventConsumerError("retention_result_invalid")
     for key in required:
         totals[key] = totals.get(key, 0) + result[key]
 
