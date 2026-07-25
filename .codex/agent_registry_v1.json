@@ -529,6 +529,79 @@
       "observation_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/quiesce_observation_v1.schema.json",
       "result_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/quiesce_result_v1.schema.json",
       "rollback_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/quiesce_rollback_v1.schema.json"
+    },
+    "s2_4_capability_probe_adapter_v1": {
+      "status": "AUTHORITY_LOCKED_PRODUCTION_CAPABLE",
+      "owner_session": "S2.4",
+      "authority": "PM/operator approved s2_4_capability_probe_intent_v1 for one exact signed, scope-bound (PREPARE_SANDBOX or INSTALLED_UNIT), task-bound transient systemd/cgroup capability test with a journaled stop/reset-failed/remove postcheck and zero surviving unit/cgroup/process/file state; production is reachable but authority-locked: only a governed Linux effect driver behind a fresh exact operator SSHSIG for the capability-probe profile (identity aiml-s2-capability-probe-operator-v1, namespace arcane-equilibrium-aiml-s2-capability-probe, §9.1 trust root) at its exact effect-DAG position (S2.0@EFFECT_DONE -> W6A PREPARE -> W6B APPLY; one PREPARE_SANDBOX probe immediately before W6A, one INSTALLED_UNIT probe immediately before W6B) may perform the probe; Mac/tests/no-driver/no-authorization return a typed fail-closed EXTERNAL_VERIFICATION_PENDING with zero mutation; nine authorities stay false",
+      "invariant": "production reachable but authority-locked; fail-closed EXTERNAL_VERIFICATION_PENDING until a fresh exact operator SSHSIG per the capability-probe profile plus the effect-DAG position S2.0@EFFECT_DONE -> W6A PREPARE -> W6B APPLY are independently verified; the capability probe cannot reach any APPLY surface (no persistent unit write/enable/start, no daemon-reload, no PG/migration/secret/credential/host-identity mutation, no /opt or /etc write, no broker/order surface) and cannot substitute for the PREPARE or APPLY adapters; transient units use unpredictable task-bound names, RuntimeMaxSec, fixed sandbox properties and a journaled stop/reset-failed/remove postcheck and cannot survive their authorized operation; the two probe scopes are non-interchangeable (a PREPARE_SANDBOX receipt can never satisfy W6B and an INSTALLED_UNIT receipt can never satisfy W6A); each probe consumes only its own scope-bound authorization in the hash-chained replay ledger before transient-unit creation and a consumed authorization is never released by rollback; probe expiry forbids new creation/observation but never blocks safety cleanup; a valid signature alone never yields an applied/production status in the source lane; nine authorities stay false; no route_task effect node or closure effect binding is injected before the S2.4 EFFECT session (W6A/W6B)",
+      "implementation_paths": [
+        "helper_scripts/maintenance_scripts/agent_governance_s2_4_install.py"
+      ],
+      "component_paths": [
+        "program_code/ml_training/aiml_gate_receipt_validator.py",
+        "program_code/ml_training/aiml_gate_receipt_s2_4_contracts.py",
+        "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_host.py"
+      ],
+      "intent_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_capability_probe_intent_v1.schema.json",
+      "core_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_capability_probe_core_v1.schema.json",
+      "receipt_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_capability_probe_effect_receipt_v1.schema.json",
+      "postcheck_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_capability_probe_postcheck_v1.schema.json",
+      "rollback_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_capability_probe_rollback_v1.schema.json",
+      "journal_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_capability_probe_journal_v1.schema.json",
+      "authorization_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_operator_authorization_v1.schema.json",
+      "replay_ledger_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_authorization_replay_ledger_v1.schema.json"
+    },
+    "s2_4_prepare_adapter_v1": {
+      "status": "AUTHORITY_LOCKED_PRODUCTION_CAPABLE",
+      "owner_session": "S2.4",
+      "authority": "PM/operator approved s2_4_prepare_intent_v1 for one exact signed LEARNING_RUNTIME_PREPARE staging build (hash-pinned fetch + sandboxed build/import + independent re-hash) strictly below the private task-owned staging root, emitting s2_4_prepared_install_bundle_v1 and a terminal s2_4_prepare_effect_receipt_v1; production is reachable but authority-locked: only a governed Linux effect driver behind a fresh exact operator SSHSIG for the prepare profile (identity aiml-s2-install-prepare-operator-v1, namespace arcane-equilibrium-aiml-s2-install-prepare, §9.1 trust root) at its exact effect-DAG position (S2.0@EFFECT_DONE -> W6A PREPARE -> W6B APPLY; a terminal PREPARE_SANDBOX capability-probe receipt is a mandatory prerequisite bound into the prepare core) may run PREPARE; Mac/tests/no-driver/no-authorization return a typed fail-closed EXTERNAL_VERIFICATION_PENDING with zero mutation; nine authorities stay false",
+      "invariant": "production reachable but authority-locked; fail-closed EXTERNAL_VERIFICATION_PENDING until a fresh exact operator SSHSIG per the prepare profile plus the effect-DAG position S2.0@EFFECT_DONE -> W6A PREPARE -> W6B APPLY (with a terminal PREPARE_SANDBOX probe receipt bound into the prepare core) are independently verified; PREPARE cannot reach any APPLY surface (no persistent unit write/enable/start, no daemon-reload, no PG/migration/secret/credential-install/host-identity mutation, no /opt or /etc publication, no start of the installed openclaw-alr-shadow.service, no broker/order surface) and PREPARE authority can never authorize or resume an APPLY; it may start/stop only its exact task-bound transient fetch/build units (FETCH_BYTES without code execution, BUILD_AND_IMPORT without network/secret/state access) and materialize files only below the exact task-owned staging path; the prepare authorization is consumed once in the hash-chained replay ledger before the first staging mutation and is never released by rollback; the signed prepare rollback digest authorizes compensation of only that journal's task-owned staging delta even after expiry; expired/changed/consumed prepared artifacts are PREPARED_BUNDLE_INVALID; a valid signature alone never yields an applied/production status in the source lane; nine authorities stay false; no route_task effect node or closure effect binding is injected before the S2.4 EFFECT session (W6A)",
+      "implementation_paths": [
+        "helper_scripts/maintenance_scripts/agent_governance_s2_4_install.py"
+      ],
+      "component_paths": [
+        "program_code/ml_training/aiml_gate_receipt_validator.py",
+        "program_code/ml_training/aiml_gate_receipt_s2_4_contracts.py",
+        "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_host.py"
+      ],
+      "intent_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_prepare_intent_v1.schema.json",
+      "core_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_prepare_core_v1.schema.json",
+      "receipt_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_prepare_effect_receipt_v1.schema.json",
+      "result_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_prepared_install_bundle_v1.schema.json",
+      "postcheck_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_prepare_postcheck_v1.schema.json",
+      "rollback_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_prepare_rollback_v1.schema.json",
+      "journal_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_prepare_journal_v1.schema.json",
+      "authorization_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_operator_authorization_v1.schema.json",
+      "replay_ledger_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_authorization_replay_ledger_v1.schema.json"
+    },
+    "s2_4_install_adapter_v1": {
+      "status": "AUTHORITY_LOCKED_PRODUCTION_CAPABLE",
+      "owner_session": "S2.4",
+      "authority": "PM/operator approved s2_4_install_plan_v1 as the aggregate APPLY transaction coordinator (never an alias for any single row): its success receipt s2_4_install_effect_receipt_v1(status=APPLIED_INACTIVE) embeds two scoped capability-probe receipts (PREPARE_SANDBOX + INSTALLED_UNIT), the PREPARE result/postcheck, five ordered APPLY component result/postcheck digests (HOST_IDENTITY_INSTALL -> PG_ROLE_ACL_MIGRATION -> CREDENTIAL_INSTALL -> LEARNING_RUNTIME -> ENGINE_SCANNER) and one reverse compensation chain; production is reachable but authority-locked: only a governed Linux effect driver behind BOTH fresh exact operator SSHSIGs (aggregate profile identity aiml-s2-install-operator-v1, namespace arcane-equilibrium-aiml-s2-install; plus the mandatory narrower PG-migration profile identity aiml-s2-pg-migration-operator-v1, namespace arcane-equilibrium-aiml-s2-pg-migration, §9.1 trust root) at the exact effect-DAG position S2.0@EFFECT_DONE -> W6A PREPARE -> W6B APPLY, after exact-head, dependency, topology, pre-state and complete §9 time-budget checks, may APPLY and leaves the unit loaded/disabled/inactive; Mac/tests/no-driver/no-authorization return a typed fail-closed EXTERNAL_VERIFICATION_PENDING with zero mutation; nine authorities stay false",
+      "invariant": "production reachable but authority-locked; fail-closed EXTERNAL_VERIFICATION_PENDING until BOTH fresh exact operator SSHSIGs (aggregate + narrower PG-migration profile; the aggregate permit never replaces the PG permit and S2.0 observer evidence is never PG mutation authority) plus the effect-DAG position S2.0@EFFECT_DONE -> W6A PREPARE -> W6B APPLY are independently verified against an unexpired independently re-hashed s2_4_prepared_install_bundle_v1 and a fresh terminal INSTALLED_UNIT capability-probe receipt; APPLY rejects any probe/PREPARE fetch/build surface and accepts no caller-provided shell/SQL/unit text/arbitrary path; both authorization IDs/digests are atomically consumed in the hash-chained replay ledger under the install lock before the first mutation (duplicate/reordered/chain-invalid/consumed entries are AUTHORIZATION_REJECTED and a consumed authorization is never released by rollback; the same replay id can never bind a different plan); APPLIED_INACTIVE requires the terminal journal plus an independent postcheck proving loaded/disabled/inactive with service_started_by_s2_4=false and never starts/enables the installed openclaw-alr-shadow.service; failure after any applied step triggers ownership-aware reverse compensation and an unconfirmable compensation returns RECOVERY_REQUIRED (never converted to success); a valid signature alone never yields an applied/production status in the source lane; nine authorities stay false; no route_task effect node or closure effect binding is injected before the S2.4 EFFECT session (W6B)",
+      "implementation_paths": [
+        "helper_scripts/maintenance_scripts/agent_governance_s2_4_install.py"
+      ],
+      "component_paths": [
+        "program_code/ml_training/aiml_gate_receipt_validator.py",
+        "program_code/ml_training/aiml_gate_receipt_s2_4_contracts.py",
+        "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_host.py"
+      ],
+      "intent_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_install_plan_v1.schema.json",
+      "core_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_install_plan_core_v1.schema.json",
+      "receipt_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_install_effect_receipt_v1.schema.json",
+      "result_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_install_step_result_v1.schema.json",
+      "postcheck_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_install_postcheck_v1.schema.json",
+      "rollback_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_install_rollback_v1.schema.json",
+      "journal_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_install_journal_v1.schema.json",
+      "component_intent_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_component_effect_intent_v1.schema.json",
+      "component_result_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_component_effect_result_v1.schema.json",
+      "component_postcheck_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_component_effect_postcheck_v1.schema.json",
+      "component_rollback_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_component_effect_rollback_v1.schema.json",
+      "hba_delta_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_pg_hba_delta_v1.schema.json",
+      "authorization_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_operator_authorization_v1.schema.json",
+      "replay_ledger_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_authorization_replay_ledger_v1.schema.json"
     }
   },
   "roles": {

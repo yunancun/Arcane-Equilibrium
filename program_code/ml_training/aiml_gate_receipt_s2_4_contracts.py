@@ -557,3 +557,146 @@ def _s2_4_operator_authorization_errors(
     ):
         errors.append("s2_4 operator authorization SSH signature is invalid")
     return errors
+
+
+# --------------------------------------------------------------------------- #
+# S2.4(WP4·W1)§9.1 replay-ledger 語義驗 + 授權↔ledger 消費綁定謂詞。
+#
+# 兩層分工(對齊 schema description 與 CP4 測試既定行為):
+#   * `_s2_4_replay_ledger_errors` —— ledger 自身的 hash-chain 完整性(逐 entry 重算
+#     entry_digest、genesis prev=null、後續 prev 鏈住前一 entry_digest、seq == index、
+#     self_digest)。「不」在此拒同一 authorization_id 的多筆消費——重複消費是「對某張授權
+#     的消費裁決」,屬下方謂詞;裸 ledger 帶重複 id 但鏈完整仍是結構合法的歷史紀錄。
+#   * `derive_authorization_replay_binding` —— 驗證層的消費語義(§9.1:Duplicate …
+#     entries return AUTHORIZATION_REJECTED):一張授權必須引用「未被消費」的 replay id
+#     才可消費;同 id 已消費(consuming twice)拒;同 id 綁到不同授權/plan
+#     (same-id-different-plan,以 entry.authorization_digest ≠ 該授權 self_digest 判)拒。
+#
+# 誠實界線:此為離線驗證層語義,「不」是 runtime 消費(真 fsync/install-lock/append 屬
+# W6A/W6B EFFECT);有效簽章 + 未消費 replay id 在 source lane 也「絕不」產生 applied/
+# production 狀態——謂詞恆帶 typed `production_effect: EXTERNAL_VERIFICATION_PENDING`。
+# --------------------------------------------------------------------------- #
+def _s2_4_replay_ledger_errors(artifact: dict[str, Any]) -> list[str]:
+    """離線重算一份 ``s2_4_authorization_replay_ledger_v1`` 的 hash-chain 完整性(fail-closed)。"""
+
+    if not isinstance(artifact, dict):
+        return ["replay ledger must be an object"]
+    errors: list[str] = []
+    if artifact.get("self_digest") != artifact_self_digest(artifact):
+        errors.append("replay ledger self_digest is invalid")
+    entries = artifact.get("entries")
+    if not isinstance(entries, list) or not entries:
+        return errors + ["replay ledger entries must be a non-empty list"]
+    previous_digest: Any = None
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            errors.append(f"replay ledger entry[{index}] must be an object")
+            return errors
+        expected_digest = canonical_digest(
+            {key: value for key, value in entry.items() if key != "entry_digest"}
+        )
+        if entry.get("entry_digest") != expected_digest:
+            errors.append(
+                f"replay ledger entry[{index}] entry_digest does not re-derive its "
+                "canonical entry bytes"
+            )
+        if entry.get("seq") != index:
+            errors.append(
+                f"replay ledger entry[{index}] seq is out of order (append-only chain)"
+            )
+        if index == 0:
+            if entry.get("prev_entry_digest") is not None:
+                errors.append(
+                    "replay ledger genesis entry prev_entry_digest must be null"
+                )
+        elif entry.get("prev_entry_digest") != previous_digest:
+            errors.append(
+                f"replay ledger entry[{index}] prev_entry_digest does not chain the "
+                "previous entry_digest (duplicate/reordered/truncated chain)"
+            )
+        previous_digest = entry.get("entry_digest")
+    return errors
+
+
+def derive_authorization_replay_binding(
+    authorization: Any,
+    replay_ledger: Any,
+    *,
+    now: str | datetime | None = None,
+) -> dict[str, Any]:
+    """驗證層消費裁決:此授權「現在」可否消費其 replay id(§9.1;fail-closed)。
+
+    回 ``{"status": "UNCONSUMED_AUTHORIZATION_VALID"|"AUTHORIZATION_REJECTED", "reasons": [...],
+    "production_effect": "EXTERNAL_VERIFICATION_PENDING"}``:
+
+      * 授權自身必須全過 :func:`_s2_4_operator_authorization_errors`(profile/簽章/信任根/TTL;
+        ``now`` 傳入時再驗新鮮窗——過期/未生效授權在此拒);
+      * ledger 自身必須全過 :func:`_s2_4_replay_ledger_errors`(斷鏈/亂序/竄改拒);
+      * ledger 中同 ``authorization_id`` 的既有 entry:
+          - 0 筆 → 未消費,可消費(UNCONSUMED_AUTHORIZATION_VALID);
+          - 1 筆且 ``authorization_digest`` == 本授權 ``self_digest`` → 已消費過一次,
+            再消費即 consuming-twice → 拒;
+          - 1 筆但 ``authorization_digest`` ≠ 本授權 ``self_digest`` → 同 replay id 已綁到
+            「不同」授權/plan(same-id-different-plan)→ 拒;
+          - ≥2 筆 → ledger 已含重複消費 → 拒。
+      * ``profile_identity`` 與既有 entry 的 profile 不符亦拒(跨 profile 挪用縫)。
+
+    **誠實界線**:UNCONSUMED_AUTHORIZATION_VALID 只是離線驗證層裁決;真消費(fsync/install
+    lock/append)與任何 applied/production 狀態屬 W6A/W6B EFFECT——回傳恆帶 typed
+    ``production_effect: EXTERNAL_VERIFICATION_PENDING``,source lane 無從以有效簽章換取
+    applied/production。
+    """
+
+    verdict: dict[str, Any] = {
+        "status": "AUTHORIZATION_REJECTED",
+        "reasons": [],
+        # source lane 恆值:離線驗證絕不授予 production(§6/§10.2 typed fail-closed)。
+        "production_effect": "EXTERNAL_VERIFICATION_PENDING",
+    }
+    if not isinstance(authorization, dict):
+        verdict["reasons"] = ["authorization must be an object"]
+        return verdict
+    reasons = _s2_4_operator_authorization_errors(authorization, now=now)
+    if not isinstance(replay_ledger, dict):
+        reasons.append("replay ledger must be an object")
+        verdict["reasons"] = reasons
+        return verdict
+    reasons.extend(_s2_4_replay_ledger_errors(replay_ledger))
+    if reasons:
+        verdict["reasons"] = reasons
+        return verdict
+    authorization_id = authorization.get("authorization_id")
+    matches = [
+        entry
+        for entry in replay_ledger.get("entries", [])
+        if isinstance(entry, dict)
+        and entry.get("authorization_id") == authorization_id
+    ]
+    if len(matches) >= 2:
+        reasons.append(
+            "replay id has duplicated consumption entries in the ledger "
+            "(consuming twice is AUTHORIZATION_REJECTED)"
+        )
+    elif len(matches) == 1:
+        entry = matches[0]
+        if entry.get("authorization_digest") != authorization.get("self_digest"):
+            reasons.append(
+                "replay id is already bound to a DIFFERENT authorization/plan "
+                "(same-id-different-plan is AUTHORIZATION_REJECTED)"
+            )
+        elif entry.get("profile_identity") != authorization.get("profile_identity"):
+            reasons.append(
+                "replay id was consumed under a different profile identity "
+                "(cross-profile substitution is AUTHORIZATION_REJECTED)"
+            )
+        else:
+            reasons.append(
+                "authorization replay id is already consumed; a consumed "
+                "authorization is never released (consuming twice is "
+                "AUTHORIZATION_REJECTED)"
+            )
+    if reasons:
+        verdict["reasons"] = reasons
+        return verdict
+    verdict["status"] = "UNCONSUMED_AUTHORIZATION_VALID"
+    return verdict

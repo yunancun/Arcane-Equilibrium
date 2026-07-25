@@ -115,8 +115,10 @@ from aiml_gate_receipt_s2_4_contracts import (  # noqa: E402,F401
     _s2_4_install_plan_apply_rows_errors,
     _s2_4_operator_authorization_errors,
     _s2_4_operator_authorization_signed_bytes,
+    _s2_4_replay_ledger_errors,
     _s2_4_route_core_rederivation_errors,
     _sshsig_armor_body_is_strict_base64,
+    derive_authorization_replay_binding,
     derive_component_intent_binding,
     derive_install_lineage_status,
     s2_4_authorization_profiles_digest,
@@ -373,6 +375,129 @@ def w0_owned_path_diff_digest(repo_root: Path = REPO_ROOT) -> str:
 
     projection: dict[str, str | None] = {}
     for rel in sorted(_W0_OWNED_PATHS):
+        try:
+            projection[rel] = "sha256:" + hashlib.sha256(
+                (repo_root / rel).read_bytes()
+            ).hexdigest()
+        except OSError:
+            projection[rel] = None
+    return canonical_digest(projection)
+
+
+# --------------------------------------------------------------------------- #
+# S2.4 · WP4 · W1(contracts/routing)wave-exit 綁定的 code-owned 投影(§10.3 W1 row)。
+#
+# 與 W0 同一機制:owned-path「路徑集合」digest + 「內容」投影 digest + exported-ABI digest,
+# 全由 repo 當前 checkout 再導出;receipt 只帶 evidence,PASS 恆由 derive_wave_exit_status 導出。
+# W1 的 PASS 另需前導 W0 wave-exit receipt 物件(predecessor_wave_receipt)連同其綁定 admission
+# 「一起」再導出 PASS/ADMITTED——admission 鏈不因跨波而鬆脫(§10.5 #27)。
+# --------------------------------------------------------------------------- #
+_W1_SCHEMA_DIR_REL = "program_code/ml_training/schemas/aiml_gate_receipts"
+# §10.1 W1 schemas-dir additions:29 支 s2_4_* + v2 classifier + topology/network 三支。
+_W1_SCHEMA_FILENAMES = (
+    "aiml_component_effect_classification_v2.schema.json",
+    "network_sandbox_capability_attestation_v1.schema.json",
+    "pg_topology_attestation_v1.schema.json",
+    "pg_topology_runtime_guard_v1.schema.json",
+    "s2_4_authorization_replay_ledger_v1.schema.json",
+    "s2_4_capability_probe_core_v1.schema.json",
+    "s2_4_capability_probe_effect_receipt_v1.schema.json",
+    "s2_4_capability_probe_intent_v1.schema.json",
+    "s2_4_capability_probe_journal_v1.schema.json",
+    "s2_4_capability_probe_postcheck_v1.schema.json",
+    "s2_4_capability_probe_rollback_v1.schema.json",
+    "s2_4_component_effect_intent_v1.schema.json",
+    "s2_4_component_effect_postcheck_v1.schema.json",
+    "s2_4_component_effect_result_v1.schema.json",
+    "s2_4_component_effect_rollback_v1.schema.json",
+    "s2_4_install_effect_receipt_v1.schema.json",
+    "s2_4_install_journal_v1.schema.json",
+    "s2_4_install_plan_core_v1.schema.json",
+    "s2_4_install_plan_v1.schema.json",
+    "s2_4_install_postcheck_v1.schema.json",
+    "s2_4_install_rollback_v1.schema.json",
+    "s2_4_install_step_result_v1.schema.json",
+    "s2_4_operator_authorization_v1.schema.json",
+    "s2_4_pg_hba_delta_v1.schema.json",
+    "s2_4_prepare_core_v1.schema.json",
+    "s2_4_prepare_effect_receipt_v1.schema.json",
+    "s2_4_prepare_intent_v1.schema.json",
+    "s2_4_prepare_journal_v1.schema.json",
+    "s2_4_prepare_postcheck_v1.schema.json",
+    "s2_4_prepare_rollback_v1.schema.json",
+    "s2_4_prepared_install_bundle_v1.schema.json",
+    "s2_4_source_admission_receipt_v1.schema.json",
+    "s2_4_wave_exit_receipt_v1.schema.json",
+)
+# §10.1 W1 owned-path 投影:registry + routing/closure/component-effects 模組 + contracts 葉
+# (與其 facade/classifiers sibling)+ schemas dir additions + install 模組與其測試。
+_W1_OWNED_PATHS = tuple(sorted(
+    (
+        ".codex/agent_registry_v1.json",
+        "helper_scripts/maintenance_scripts/agent_governance_closure.py",
+        "helper_scripts/maintenance_scripts/agent_governance_component_effects.py",
+        "helper_scripts/maintenance_scripts/agent_governance_routing.py",
+        "helper_scripts/maintenance_scripts/agent_governance_s2_4_install.py",
+        "program_code/ml_training/aiml_gate_receipt_classifiers.py",
+        "program_code/ml_training/aiml_gate_receipt_s2_4_contracts.py",
+        "program_code/ml_training/aiml_gate_receipt_validator.py",
+        "program_code/ml_training/tests/test_aiml_gate_receipt_validator_s2_4.py",
+        "tests/structure/test_agent_governance_s2_4_install.py",
+        "tests/structure/test_agent_governance_s2_4_install_integration.py",
+    )
+    + tuple(f"{_W1_SCHEMA_DIR_REL}/{name}" for name in _W1_SCHEMA_FILENAMES)
+))
+# §10.2 凍結 ABI 的 W1 delta(exported_abi_digest 綁定的 code-owned 投影骨架;live 部分見
+# w1_exported_abi_projection)。
+_W1_EXPORTED_ABI = {
+    "route_classes": [
+        "s2_4_capability_probe_intent",
+        "s2_4_prepare_intent",
+        "s2_4_install_plan",
+    ],
+    "adapter_ids": [
+        "s2_4_capability_probe_adapter_v1",
+        "s2_4_prepare_adapter_v1",
+        "s2_4_install_adapter_v1",
+    ],
+    "adapter_binding": "AUTHORITY_LOCKED_PRODUCTION_CAPABLE",
+    "component_classifier_v2": "aiml_component_effect_classification_v2",
+    "install_receipt_success": "s2_4_install_effect_receipt_v1(status=APPLIED_INACTIVE)",
+    "source_admission": "s2_4_source_admission_receipt_v1(status=ADMITTED)",
+}
+
+
+def w1_exported_abi_projection(repo_root: Path = REPO_ROOT) -> dict[str, Any]:
+    """W1 exported-ABI 投影:code-owned §10.2 骨架 + live registry/classifier 再導出。
+
+    折入兩個「活」再導出令 ABI-surface drift 必然破壞 W1 導出(§10.5 #3/#27/#36):
+      * 三 adapter 的 registry status 逐 id 再讀(registry 身分替換/降級 → 投影變值);
+      * v2 classifier 矩陣 digest 再算(v2→v1 降級/矩陣竄改 → 投影變值)。
+    fail-closed:registry 不可讀時 status 記 None(投影仍變值 → 導出失敗)。
+    """
+
+    try:
+        registry = json.loads(
+            (repo_root / ".codex" / "agent_registry_v1.json").read_text(encoding="utf-8")
+        )
+        adapters = registry.get("effect_adapters", {})
+    except (OSError, json.JSONDecodeError):
+        adapters = {}
+    return {
+        **_W1_EXPORTED_ABI,
+        "registry_adapter_status": {
+            adapter_id: adapters.get(adapter_id, {}).get("status")
+            for adapter_id in _W1_EXPORTED_ABI["adapter_ids"]
+        },
+        "component_classifier_v2_digest": aiml_component_effect_class_matrix_v2_digest(),
+    }
+
+
+def w1_owned_path_diff_digest(repo_root: Path = REPO_ROOT) -> str:
+    """W1 owned-path 內容投影 digest(同 :func:`w0_owned_path_diff_digest` 機制,綁 W1 面)。"""
+
+    projection: dict[str, str | None] = {}
+    for rel in sorted(_W1_OWNED_PATHS):
         try:
             projection[rel] = "sha256:" + hashlib.sha256(
                 (repo_root / rel).read_bytes()
@@ -702,24 +827,53 @@ def _wave_exit_structural_errors(
         reasons.append("wave-exit self_digest does not bind the canonical receipt")
     if receipt.get("production_authority_flags") != _ALL_FALSE_PRODUCTION_FLAGS:
         reasons.append("wave-exit production_authority_flags must all be false")
-    if receipt.get("wave") != "W0":
-        # W0b 只導出 W0 wave-exit;W1+ 各 wave 於其自身 owned path 擴充 derivation。
-        reasons.append("wave-exit derivation is only implemented for W0 in W0b")
+    wave = receipt.get("wave")
+    if wave == "W0":
+        if receipt.get("predecessor_wave_receipt_digest") is not None:
+            reasons.append(
+                "W0 wave-exit has no predecessor wave (predecessor_wave_receipt_digest must be null)"
+            )
+        if receipt.get("exported_abi_digest") != canonical_digest(_W0_EXPORTED_ABI):
+            reasons.append("wave-exit exported_abi_digest does not equal the W0 ABI delta")
+        if receipt.get("owned_path_manifest_digest") != canonical_digest(sorted(_W0_OWNED_PATHS)):
+            reasons.append("wave-exit owned_path_manifest_digest is not the exact W0 owned-path set")
+        # T1(a):owned_path_diff_digest 綁定到 W0 owned-path 內容投影的再導出(同 owned_path_manifest_digest
+        # 的 canonical_digest 機制),故 arbitrary/empty 值無法通過 W0 完成閘。
+        if receipt.get("owned_path_diff_digest") != w0_owned_path_diff_digest(repo_root):
+            reasons.append(
+                "wave-exit owned_path_diff_digest does not re-derive the W0 owned-path content projection"
+            )
+    elif wave == "W1":
+        # W1(contracts/routing):同 W0 機制,但綁 W1 面;另需非 null 的前導 W0 digest
+        # (predecessor 物件鏈的完整驗在 derive_wave_exit_status,結構層先擋 null)。
+        if receipt.get("predecessor_wave_receipt_digest") is None:
+            reasons.append(
+                "W1 wave-exit requires a non-null predecessor_wave_receipt_digest "
+                "(the W0 wave-exit self_digest)"
+            )
+        abi_projection = w1_exported_abi_projection(repo_root)
+        if receipt.get("exported_abi_digest") != canonical_digest(abi_projection):
+            reasons.append(
+                "wave-exit exported_abi_digest does not re-derive the W1 exported-ABI projection"
+            )
+        # ABI-surface 活再導出(不只 digest 等式):三 adapter 的 registry status 必真為凍結
+        # binding 字串——registry 身分替換/降級即失敗(§10.5 #3/#36 的 adapter-substitution 縫)。
+        for adapter_id, status in sorted(abi_projection["registry_adapter_status"].items()):
+            if status != _W1_EXPORTED_ABI["adapter_binding"]:
+                reasons.append(
+                    f"W1 adapter {adapter_id} registry status does not re-derive "
+                    "AUTHORITY_LOCKED_PRODUCTION_CAPABLE"
+                )
+        if receipt.get("owned_path_manifest_digest") != canonical_digest(sorted(_W1_OWNED_PATHS)):
+            reasons.append("wave-exit owned_path_manifest_digest is not the exact W1 owned-path set")
+        if receipt.get("owned_path_diff_digest") != w1_owned_path_diff_digest(repo_root):
+            reasons.append(
+                "wave-exit owned_path_diff_digest does not re-derive the W1 owned-path content projection"
+            )
+    else:
+        # W2+ 各 wave 於其自身 owned path 擴充 derivation;未實作的 wave 一律 fail-closed。
+        reasons.append("wave-exit derivation is only implemented for W0/W1 so far")
         return reasons
-    if receipt.get("predecessor_wave_receipt_digest") is not None:
-        reasons.append(
-            "W0 wave-exit has no predecessor wave (predecessor_wave_receipt_digest must be null)"
-        )
-    if receipt.get("exported_abi_digest") != canonical_digest(_W0_EXPORTED_ABI):
-        reasons.append("wave-exit exported_abi_digest does not equal the W0 ABI delta")
-    if receipt.get("owned_path_manifest_digest") != canonical_digest(sorted(_W0_OWNED_PATHS)):
-        reasons.append("wave-exit owned_path_manifest_digest is not the exact W0 owned-path set")
-    # T1(a):owned_path_diff_digest 綁定到 W0 owned-path 內容投影的再導出(同 owned_path_manifest_digest
-    # 的 canonical_digest 機制),故 arbitrary/empty 值無法通過 W0 完成閘。
-    if receipt.get("owned_path_diff_digest") != w0_owned_path_diff_digest(repo_root):
-        reasons.append(
-            "wave-exit owned_path_diff_digest does not re-derive the W0 owned-path content projection"
-        )
     # T1(b):test/capture/review 三類證據必為「非空」的合法 digest list——empty/arbitrary 不得導出 PASS。
     # 誠實邊界:每一支 test/capture/review 的「PLATFORM-ATTESTED 綁定」屬下游 EFFECT/closure 關切(離線
     # 結構驗無法認證其真跑過);此處只擋「空/畸形證據仍導 PASS」的洞,不冒充已認證 runtime。
@@ -738,19 +892,24 @@ def derive_wave_exit_status(
     repo_root: Path = REPO_ROOT,
     now: str | datetime | None = None,
     source_admission_receipt: Any = None,
+    predecessor_wave_receipt: Any = None,
 ) -> dict[str, Any]:
-    """Independently re-derive the W0 wave-exit status (§3.2).
+    """Independently re-derive the W0/W1 wave-exit status (§3.2/§10.3).
 
     回傳 ``{"status": "PASS"|"NOT_PASS", "reasons": [...]}``。W0 的 PASS 需:綁定的
     ``source_admission_receipt`` 再導出 ADMITTED 且其 self_digest == 本 receipt 綁定的
     ``source_admission_receipt_digest``、owned-path/ABI/flags 再導出相符、source_head 一致。
-    caller 帶 status/pass/done 於 derivation 前即拒(§10.3/§10.5 #27)。
+    W1 的 PASS 另需 caller 傳 ``predecessor_wave_receipt``(W0 wave-exit 物件,姿態同
+    ``source_admission_receipt``):該 W0 receipt 必須「連同其綁定 admission」在此再導出 PASS、
+    其 self_digest == 本 receipt 的 ``predecessor_wave_receipt_digest``、三方 source_head 一致
+    且等於目前 checkout HEAD——admission 鏈不因跨波而鬆脫。caller 帶 status/pass/done 於
+    derivation 前即拒(§10.3/§10.5 #27)。
 
     邊界(必要非充分):中央閘 :func:`validate_aiml_artifact` 對 wave-exit 只做 STRUCTURAL-ONLY
-    再導出(不綁 admission 物件),乾淨的 ``[]`` 結果「不」等於 W0 PASS——它未驗
-    ``source_admission_receipt_digest`` 是否綁到一份真能再導出 ADMITTED 的 admission。真正的
-    PASS 只能由「本函式帶 ``source_admission_receipt=<已導出 ADMITTED 的 admission>``」授予
-    (鏡射 CLAUDE.md standalone-CLI / typed-authority 邊界:離線結構驗無法自證 PASS)。
+    再導出(不綁 admission/predecessor 物件),乾淨的 ``[]`` 結果「不」等於 PASS——它未驗
+    ``source_admission_receipt_digest`` / ``predecessor_wave_receipt_digest`` 是否綁到真能再導出
+    ADMITTED/PASS 的物件。真正的 PASS 只能由「本函式帶已導出物件」授予(鏡射 CLAUDE.md
+    standalone-CLI / typed-authority 邊界:離線結構驗無法自證 PASS)。
     """
 
     if not isinstance(receipt, dict):
@@ -777,24 +936,26 @@ def derive_wave_exit_status(
     if _schema_errors:
         return {"status": "NOT_PASS", "reasons": _schema_errors}
     reasons = _wave_exit_structural_errors(receipt, repo_root)
-    if receipt.get("wave") != "W0":
+    wave = receipt.get("wave")
+    if wave not in {"W0", "W1"}:
         return {"status": "NOT_PASS", "reasons": reasons}
     if source_admission_receipt is None:
         reasons.append(
-            "W0 wave-exit requires the bound source_admission_receipt to re-derive ADMITTED"
+            f"{wave} wave-exit requires the bound source_admission_receipt to re-derive ADMITTED"
         )
-    else:
-        admission = derive_source_admission_status(
-            source_admission_receipt, repo_root=repo_root, now=now
+        return {"status": "NOT_PASS", "reasons": reasons}
+    admission = derive_source_admission_status(
+        source_admission_receipt, repo_root=repo_root, now=now
+    )
+    # T6:綁定的 admission 若非 ADMITTED 或根本不是 dict(list/str/None),立即回 typed NOT_PASS——
+    # 在任何 .get(...) 之前護欄,杜絕 non-dict 綁定物件觸發 AttributeError。
+    if admission["status"] != "ADMITTED" or not isinstance(source_admission_receipt, dict):
+        reasons.append(
+            "wave-exit bound source_admission_receipt does not derive ADMITTED: "
+            + "; ".join(admission["reasons"])
         )
-        # T6:綁定的 admission 若非 ADMITTED 或根本不是 dict(list/str/None),立即回 typed NOT_PASS——
-        # 在任何 .get(...) 之前護欄,杜絕 non-dict 綁定物件觸發 AttributeError。
-        if admission["status"] != "ADMITTED" or not isinstance(source_admission_receipt, dict):
-            reasons.append(
-                "wave-exit bound source_admission_receipt does not derive ADMITTED: "
-                + "; ".join(admission["reasons"])
-            )
-            return {"status": "NOT_PASS", "reasons": reasons}
+        return {"status": "NOT_PASS", "reasons": reasons}
+    if wave == "W0":
         if source_admission_receipt.get("self_digest") != receipt.get(
             "source_admission_receipt_digest"
         ):
@@ -803,6 +964,57 @@ def derive_wave_exit_status(
             )
         if source_admission_receipt.get("source_head") != receipt.get("source_head"):
             reasons.append("wave-exit source_head differs from the bound admission receipt")
+        return {
+            "status": "PASS" if not reasons else "NOT_PASS",
+            "reasons": reasons,
+        }
+    # ── W1:predecessor 鏈(W0 wave-exit 物件連同其 admission 再導出 PASS)────────────
+    if predecessor_wave_receipt is None:
+        reasons.append(
+            "W1 wave-exit requires the bound predecessor_wave_receipt (the W0 wave-exit "
+            "receipt object) to re-derive PASS with its bound admission"
+        )
+        return {"status": "NOT_PASS", "reasons": reasons}
+    predecessor = derive_wave_exit_status(
+        predecessor_wave_receipt,
+        repo_root=repo_root,
+        now=now,
+        source_admission_receipt=source_admission_receipt,
+    )
+    # 同 T6 護欄:非 dict / 非 PASS 的 predecessor 立即 typed NOT_PASS(admission 鏈斷即斷)。
+    if predecessor["status"] != "PASS" or not isinstance(predecessor_wave_receipt, dict):
+        reasons.append(
+            "W1 wave-exit bound predecessor_wave_receipt does not derive PASS: "
+            + "; ".join(predecessor["reasons"])
+        )
+        return {"status": "NOT_PASS", "reasons": reasons}
+    if predecessor_wave_receipt.get("wave") != "W0":
+        reasons.append("W1 wave-exit predecessor must be the W0 wave-exit receipt")
+    if predecessor_wave_receipt.get("self_digest") != receipt.get(
+        "predecessor_wave_receipt_digest"
+    ):
+        reasons.append(
+            "W1 predecessor_wave_receipt_digest does not bind the derived W0 wave-exit receipt"
+        )
+    if source_admission_receipt.get("self_digest") != receipt.get(
+        "source_admission_receipt_digest"
+    ):
+        reasons.append(
+            "wave-exit source_admission_receipt_digest does not bind the derived admission receipt"
+        )
+    # source_head 三方一致 + 等於目前 checkout HEAD(admission 的 T2 已綁 HEAD;此處把 W1 receipt
+    # 也直接釘住,杜絕「W1 receipt 宣稱另一世代卻由當前樹導 PASS」的漂移)。
+    head = _git_head(repo_root)
+    if head is None:
+        reasons.append(
+            "W1 wave-exit source_head cannot be bound: repo HEAD is unreadable (fail-closed)"
+        )
+    elif receipt.get("source_head") != head:
+        reasons.append("W1 wave-exit source_head is not the current checkout HEAD")
+    if receipt.get("source_head") != predecessor_wave_receipt.get("source_head"):
+        reasons.append("W1 wave-exit source_head differs from the bound W0 wave-exit receipt")
+    if receipt.get("source_head") != source_admission_receipt.get("source_head"):
+        reasons.append("W1 wave-exit source_head differs from the bound admission receipt")
     return {
         "status": "PASS" if not reasons else "NOT_PASS",
         "reasons": reasons,
@@ -1529,6 +1741,10 @@ def validate_aiml_artifact(
         # 呼叫 out-of-scope trusted-host 的 _verify_ssh_signature 對 pinned 公鑰做離線公鑰驗簽。此為離線
         # 結構/完整性/信任根綁定驗;「不」斷言 runtime 真偽(真 operator 對真語義 payload 的 runtime 簽署
         # + replay-ledger 消費 + 平台背書屬 W6A/W6B EFFECT)。
+        # 註(W1):s2_4_authorization_replay_ledger_v1 的中央閘分支維持 CP2b 的 closed-schema
+        # 驗(佔位 fixture 契約);逐 entry hash-chain 重算 + 消費語義(unconsumed/consuming-twice/
+        # same-id-different-plan)由 facade-reachable 的 derive_authorization_replay_binding /
+        # _s2_4_replay_ledger_errors 執法——消費是「授權↔ledger」裁決,非裸 ledger 結構。
         errors.extend(_s2_4_operator_authorization_errors(artifact, now=now))
     return errors
 
