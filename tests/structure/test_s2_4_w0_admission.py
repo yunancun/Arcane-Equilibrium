@@ -44,6 +44,7 @@ for candidate in (HELPERS, ML_ROOT):
 
 import aiml_gate_receipt_validator as validator  # noqa: E402
 import agent_governance_alr_quiesce_inventory as inventory  # noqa: E402
+import agent_governance_pg_observer_bootstrap as observer  # noqa: E402
 
 
 def _current_head() -> str:
@@ -113,11 +114,13 @@ def _build_wave_exit_receipt(admission: dict) -> dict:
         "owned_path_manifest_digest": validator.canonical_digest(
             sorted(validator._W0_OWNED_PATHS)
         ),
-        "owned_path_diff_digest": validator.canonical_digest(["w0b-diff"]),
+        # T1(a):owned_path_diff_digest 由 W0 owned-path 內容投影再導出(非任意佔位字面量)。
+        "owned_path_diff_digest": validator.w0_owned_path_diff_digest(),
         "exported_abi_digest": validator.canonical_digest(validator._W0_EXPORTED_ABI),
+        # T1(b):test/capture/review 三類皆為「非空」合法 digest list(空/任意值不得導 PASS)。
         "test_digests": [validator.canonical_digest(["test_s2_4_w0_admission"])],
-        "capture_digests": [],
-        "review_fragment_digests": [],
+        "capture_digests": [validator.canonical_digest(["w0b-capture"])],
+        "review_fragment_digests": [validator.canonical_digest(["e2-review-fragment"])],
         "production_authority_flags": {
             "nine_authorities_false": True,
             "production_apply_performed": False,
@@ -406,3 +409,122 @@ def test_pr132_projection_and_pr134_wp3_property_present() -> None:
         "role": "aiml_engine_scanner",
         "database": "trading_ai",
     }) == []
+
+
+# ── Codex remediation counterfactuals: each fix rejects the exact bad case ─────
+
+
+def test_t1_empty_or_arbitrary_wave_exit_evidence_does_not_derive_pass() -> None:
+    # T1:空 test/capture/review 證據 list 或任意 owned_path_diff_digest 一律不得導 PASS。
+    admission = _build_admission_receipt(_current_head())
+    empty = _build_wave_exit_receipt(admission)
+    empty["capture_digests"] = []
+    empty["review_fragment_digests"] = []
+    empty["self_digest"] = validator.artifact_self_digest(empty)
+    r_empty = validator.derive_wave_exit_status(empty, source_admission_receipt=admission)
+    assert r_empty["status"] == "NOT_PASS"
+    assert any("capture_digests" in r for r in r_empty["reasons"])
+    # 任意(形狀合法)owned_path_diff_digest:繞不過內容投影再導出。
+    arbitrary = _build_wave_exit_receipt(admission)
+    arbitrary["owned_path_diff_digest"] = validator.canonical_digest(["arbitrary-diff"])
+    arbitrary["self_digest"] = validator.artifact_self_digest(arbitrary)
+    r_arb = validator.derive_wave_exit_status(arbitrary, source_admission_receipt=admission)
+    assert r_arb["status"] == "NOT_PASS"
+    assert any("owned_path_diff_digest" in r for r in r_arb["reasons"])
+
+
+def test_t2_source_head_not_current_checkout_head_breaks_admission() -> None:
+    # T2:有效 40-hex 且為兩 predecessor 的後代(HEAD~1),但 != 目前 checkout HEAD → drift → NOT_ADMITTED。
+    parent = subprocess.run(
+        ["git", "-C", str(ROOT), "rev-parse", "HEAD~1"],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    receipt = _build_admission_receipt(parent)
+    result = validator.derive_source_admission_status(receipt)
+    assert result["status"] == "NOT_ADMITTED"
+    assert any(
+        "source_head is not the current checkout HEAD" in r for r in result["reasons"]
+    )
+    # 乾淨性:parent 為兩 predecessor 後代,故不應出現任何 "is not an ancestor" reason。
+    assert not [r for r in result["reasons"] if "is not an ancestor" in r]
+
+
+def test_t3_schema_extra_property_admission_is_not_admitted_and_blocks_pass() -> None:
+    # T3:額外 forbidden 欄位(self_digest 會把它一併雜湊,故 self_digest 檢查抓不到)——
+    # closed-schema additionalProperties:false 於再導出「之前」擋下;經 wave-exit 直呼路徑亦擋。
+    receipt = _build_admission_receipt(_current_head())
+    receipt["evil_extra"] = "sha256:" + "0" * 64
+    receipt["self_digest"] = validator.artifact_self_digest(receipt)
+    result = validator.derive_source_admission_status(receipt)
+    assert result["status"] == "NOT_ADMITTED"
+    assert any("unexpected property evil_extra" in r for r in result["reasons"])
+    # wave-exit → derive_source_admission_status(bound) 亦回 NOT_PASS(繞過中央閘的直呼路徑)。
+    wave_exit = _build_wave_exit_receipt(receipt)
+    wr = validator.derive_wave_exit_status(wave_exit, source_admission_receipt=receipt)
+    assert wr["status"] == "NOT_PASS"
+
+
+def test_t4_signature_only_but_unreachable_driver_breaks_admission(monkeypatch) -> None:
+    # T4:模擬回歸——保留 driver 參數(signature 仍含)卻重引入「無條件 pending」(未跑 reachable §6 閘)。
+    # 舊 inspect.signature 檢查會誤放行;新行為探針因 reason 不含 AUTHORIZATION_REJECTED → 導出 False。
+    def _fake_apply(intent, operator_authorization=None, signature=None, *,
+                    now, source_head, driver=None, **kwargs):
+        return {
+            "status": "EXTERNAL_VERIFICATION_PENDING",
+            "boundary": {"production_apply_performed": False, "nine_authorities_false": True},
+            "failure_reason": "production observer apply deferred to the S2.0 EFFECT session",
+        }
+
+    monkeypatch.setattr(observer, "apply_observer_bootstrap", _fake_apply)
+    receipt = _build_admission_receipt(_current_head())
+    result = validator.derive_source_admission_status(receipt)
+    assert result["status"] == "NOT_ADMITTED"
+    assert any(
+        "s2_0_driver_reachability_proof.unconditional_production_pending_removed" in r
+        for r in result["reasons"]
+    )
+
+
+def test_t5_non_allowlist_exception_is_not_treated_as_user_form_rejection(monkeypatch) -> None:
+    # T5:allowlist 探針拋「非 QuiesceHostReadError」的例外(回歸引入的 TypeError)不得被誤讀為
+    # 「--user 被拒」的證據——舊 broad except 會偽證 systemctl_user_absent=True 而放行。
+    def _boom(argv):
+        raise TypeError("regression: allowlist signature changed")
+
+    monkeypatch.setattr(inventory, "_assert_allowlisted_systemctl", _boom)
+    receipt = _build_admission_receipt(_current_head())
+    result = validator.derive_source_admission_status(receipt)
+    assert result["status"] == "NOT_ADMITTED"
+    assert any("unexpected (non-allowlist) error" in r for r in result["reasons"])
+
+
+def test_t6_non_dict_bound_admission_returns_typed_not_pass() -> None:
+    # T6:綁定的 source_admission_receipt 非 dict(list/str/int)→ typed NOT_PASS,絕無 AttributeError。
+    admission = _build_admission_receipt(_current_head())
+    wave_exit = _build_wave_exit_receipt(admission)
+    for bad in (["not", "a", "dict"], "string-admission", 12345, None):
+        result = validator.derive_wave_exit_status(
+            wave_exit, source_admission_receipt=bad
+        )
+        assert result["status"] == "NOT_PASS", bad
+    # 明確一例的 reason(非 dict 於 derive_source_admission_status 回「must be an object」)。
+    r = validator.derive_wave_exit_status(
+        wave_exit, source_admission_receipt=["not", "a", "dict"]
+    )
+    assert any("must be an object" in reason for reason in r["reasons"])
+
+
+def test_t7_database_rederived_from_consumer_and_dsn_drift_breaks_admission(monkeypatch) -> None:
+    # T7:database 由消費端權威 DSN 常量再讀取(非硬編鏡像);消費端 dbname 漂移 → admission 失敗。
+    assert validator._consumer_authoritative_database() == "trading_ai"
+    monkeypatch.setattr(
+        validator,
+        "_consumer_authoritative_database",
+        lambda repo_root=validator.REPO_ROOT: "some_other_db",
+    )
+    receipt = _build_admission_receipt(_current_head())
+    result = validator.derive_source_admission_status(receipt)
+    assert result["status"] == "NOT_ADMITTED"
+    assert any(
+        "wp3_system_unit_alignment_proof.database" in r for r in result["reasons"]
+    )

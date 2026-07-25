@@ -2374,11 +2374,13 @@ def _w0_wave_exit_receipt(admission: dict) -> dict:
         "source_admission_receipt_digest": admission["self_digest"],
         "source_head": admission["source_head"],
         "owned_path_manifest_digest": _w0.canonical_digest(sorted(_w0._W0_OWNED_PATHS)),
-        "owned_path_diff_digest": _w0.canonical_digest(["w0b-diff"]),
+        # T1(a):owned_path_diff_digest 由 W0 owned-path 內容投影再導出(非任意佔位字面量)。
+        "owned_path_diff_digest": _w0.w0_owned_path_diff_digest(),
         "exported_abi_digest": _w0.canonical_digest(_w0._W0_EXPORTED_ABI),
+        # T1(b):test/capture/review 三類皆為「非空」合法 digest list(空/任意值不得導 PASS)。
         "test_digests": [_w0.canonical_digest(["w0-tests"])],
-        "capture_digests": [],
-        "review_fragment_digests": [],
+        "capture_digests": [_w0.canonical_digest(["w0-capture"])],
+        "review_fragment_digests": [_w0.canonical_digest(["w0-review"])],
         "production_authority_flags": {
             "nine_authorities_false": True,
             "production_apply_performed": False,

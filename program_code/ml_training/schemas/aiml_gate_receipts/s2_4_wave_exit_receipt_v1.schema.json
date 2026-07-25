@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://arcane-equilibrium.local/schemas/s2_4_wave_exit_receipt_v1.schema.json",
   "title": "s2_4_wave_exit_receipt_v1",
-  "description": "Evidence-only per-wave (W0-W5) source-wave exit receipt. It carries NO caller status/pass/done field (this closed schema simply omits them): the central validator DERIVES PASS. For W0 the derivation requires the bound source_admission_receipt to re-derive ADMITTED, the owned-path manifest digest to equal the exact W0 owned-path set, the exported_abi_digest to equal the W0 ABI delta, and every production authority flag false. A caller cannot self-declare a wave exit.",
+  "description": "Evidence-only per-wave (W0-W5) source-wave exit receipt. It carries NO caller status/pass/done field (this closed schema simply omits them): the central validator DERIVES PASS. For W0 the derivation requires the bound source_admission_receipt to re-derive ADMITTED, the owned-path manifest digest to equal the exact W0 owned-path set, the owned_path_diff_digest to re-derive the W0 owned-path content projection, the exported_abi_digest to equal the W0 ABI delta, non-empty test/capture/review digest lists (empty/arbitrary evidence must not derive PASS; per-artifact PLATFORM-ATTESTED binding stays a downstream EFFECT/closure concern), and every production authority flag false. A caller cannot self-declare a wave exit.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -30,8 +30,8 @@
     "owned_path_diff_digest": {"$ref": "#/$defs/digest"},
     "exported_abi_digest": {"$ref": "#/$defs/digest"},
     "test_digests": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/digest"}},
-    "capture_digests": {"type": "array", "items": {"$ref": "#/$defs/digest"}},
-    "review_fragment_digests": {"type": "array", "items": {"$ref": "#/$defs/digest"}},
+    "capture_digests": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/digest"}},
+    "review_fragment_digests": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/digest"}},
     "production_authority_flags": {"$ref": "#/$defs/production_authority_flags"},
     "self_digest": {"$ref": "#/$defs/digest"}
   },
