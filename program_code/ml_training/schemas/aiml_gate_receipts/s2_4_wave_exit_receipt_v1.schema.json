@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2_4_wave_exit_receipt_v1.schema.json",
+  "title": "s2_4_wave_exit_receipt_v1",
+  "description": "Evidence-only per-wave (W0-W5) source-wave exit receipt. It carries NO caller status/pass/done field (this closed schema simply omits them): the central validator DERIVES PASS. For W0 the derivation requires the bound source_admission_receipt to re-derive ADMITTED, the owned-path manifest digest to equal the exact W0 owned-path set, the exported_abi_digest to equal the W0 ABI delta, and every production authority flag false. A caller cannot self-declare a wave exit.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "wave",
+    "predecessor_wave_receipt_digest",
+    "source_admission_receipt_digest",
+    "source_head",
+    "owned_path_manifest_digest",
+    "owned_path_diff_digest",
+    "exported_abi_digest",
+    "test_digests",
+    "capture_digests",
+    "review_fragment_digests",
+    "production_authority_flags",
+    "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2_4_wave_exit_receipt_v1"},
+    "wave": {"enum": ["W0", "W1", "W2", "W3", "W4", "W5"]},
+    "predecessor_wave_receipt_digest": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/digest"}]},
+    "source_admission_receipt_digest": {"$ref": "#/$defs/digest"},
+    "source_head": {"$ref": "#/$defs/git_sha"},
+    "owned_path_manifest_digest": {"$ref": "#/$defs/digest"},
+    "owned_path_diff_digest": {"$ref": "#/$defs/digest"},
+    "exported_abi_digest": {"$ref": "#/$defs/digest"},
+    "test_digests": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/digest"}},
+    "capture_digests": {"type": "array", "items": {"$ref": "#/$defs/digest"}},
+    "review_fragment_digests": {"type": "array", "items": {"$ref": "#/$defs/digest"}},
+    "production_authority_flags": {"$ref": "#/$defs/production_authority_flags"},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "git_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "production_authority_flags": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["nine_authorities_false", "production_apply_performed", "running_attested"],
+      "properties": {
+        "nine_authorities_false": {"const": true},
+        "production_apply_performed": {"const": false},
+        "running_attested": {"const": false}
+      }
+    }
+  }
+}

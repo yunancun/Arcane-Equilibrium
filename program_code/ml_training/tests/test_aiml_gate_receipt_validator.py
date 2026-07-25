@@ -2303,3 +2303,162 @@ def test_v2_dependency_lock_shape_guard_rejects_malformed_object() -> None:
         ), (bad, errs)
     ok = _artifact({"spec_digest": "sha256:" + "a" * 64, "lock_digest": "sha256:" + "b" * 64})
     assert _guard(ok) == []
+
+
+# ── S2.4 · WP4 · W0(W0b)admission / wave-exit schema + derivation ─────────────
+import hashlib as _hashlib  # noqa: E402
+import subprocess as _subprocess  # noqa: E402
+
+import aiml_gate_receipt_validator as _w0  # noqa: E402
+
+
+def _w0_current_head() -> str:
+    return _subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+
+def _w0_admission_receipt() -> dict:
+    module_bytes = (REPO_ROOT / _w0._TRUSTED_HOST_MODULE_PATH).read_bytes()
+    test_bytes = (REPO_ROOT / _w0._TRUSTED_HOST_TEST_PATH).read_bytes()
+    receipt = {
+        "schema_version": "s2_4_source_admission_receipt_v1",
+        "program_id": "AIML-LONG-LIVED-LANDING-V2",
+        "work_package": "WP4",
+        "wave": "W0",
+        "source_head": _w0_current_head(),
+        "predecessor_heads": dict(_w0._PREDECESSOR_HEADS),
+        "three_head_projection_digest": _w0.three_head_projection_digest(),
+        "trust_pin_digests": {
+            "trusted_host_module_blob": _w0.git_blob_sha1(module_bytes),
+            "trusted_host_module_sha256": "sha256:" + _hashlib.sha256(module_bytes).hexdigest(),
+            "independent_test_blob": _w0.git_blob_sha1(test_bytes),
+            "independent_test_sha256": "sha256:" + _hashlib.sha256(test_bytes).hexdigest(),
+            "operator_fingerprint": _w0._OPERATOR_FINGERPRINT,
+        },
+        "s2_0_driver_reachability_proof": {
+            "adapter_id": "pg_observer_bootstrap_adapter_v1",
+            "registry_status": "AUTHORITY_LOCKED_PRODUCTION_CAPABLE",
+            "unconditional_production_pending_removed": True,
+            "driver_protocol_present": True,
+            "production_success_status": "APPLIED",
+        },
+        "wp3_system_unit_alignment_proof": {
+            "lifecycle_owner": "host_system_manager",
+            "systemctl_user_absent": True,
+            "role": "aiml_engine_scanner",
+            "database": "trading_ai",
+        },
+        "frozen_classifier_digest": _w0.aiml_effect_classifier_digest(),
+        "component_classifier_v1_digest": _w0.aiml_component_effect_class_matrix_digest(),
+        "production_authority_flags": {
+            "nine_authorities_false": True,
+            "production_apply_performed": False,
+            "running_attested": False,
+        },
+        "negative_tests_pass": _w0.canonical_digest(["w0-negative-manifest"]),
+    }
+    receipt["self_digest"] = _w0.artifact_self_digest(receipt)
+    return receipt
+
+
+def _w0_wave_exit_receipt(admission: dict) -> dict:
+    receipt = {
+        "schema_version": "s2_4_wave_exit_receipt_v1",
+        "wave": "W0",
+        "predecessor_wave_receipt_digest": None,
+        "source_admission_receipt_digest": admission["self_digest"],
+        "source_head": admission["source_head"],
+        "owned_path_manifest_digest": _w0.canonical_digest(sorted(_w0._W0_OWNED_PATHS)),
+        "owned_path_diff_digest": _w0.canonical_digest(["w0b-diff"]),
+        "exported_abi_digest": _w0.canonical_digest(_w0._W0_EXPORTED_ABI),
+        "test_digests": [_w0.canonical_digest(["w0-tests"])],
+        "capture_digests": [],
+        "review_fragment_digests": [],
+        "production_authority_flags": {
+            "nine_authorities_false": True,
+            "production_apply_performed": False,
+            "running_attested": False,
+        },
+    }
+    receipt["self_digest"] = _w0.artifact_self_digest(receipt)
+    return receipt
+
+
+def test_w0_schema_files_resolve_via_schema_files() -> None:
+    for key in ("s2_4_source_admission_receipt_v1", "s2_4_wave_exit_receipt_v1"):
+        assert key in SCHEMA_FILES, key
+        assert (SCHEMA_DIR / SCHEMA_FILES[key]).is_file(), key
+
+
+def test_w0_admission_round_trip_and_self_digest() -> None:
+    receipt = _w0_admission_receipt()
+    # canonical self-digest binds the whole receipt (integrity only).
+    assert receipt["self_digest"] == artifact_self_digest(receipt)
+    # central gate derives ADMITTED → validate returns [].
+    assert validate_aiml_artifact(receipt) == []
+    assert _w0.derive_source_admission_status(receipt) == {
+        "status": "ADMITTED",
+        "reasons": [],
+    }
+
+
+def test_w0_wave_exit_round_trip_and_self_digest() -> None:
+    admission = _w0_admission_receipt()
+    wave_exit = _w0_wave_exit_receipt(admission)
+    assert wave_exit["self_digest"] == artifact_self_digest(wave_exit)
+    # central gate validates the self-contained structure.
+    assert validate_aiml_artifact(wave_exit) == []
+    # full PASS with the bound admission pair.
+    assert _w0.derive_wave_exit_status(
+        wave_exit, source_admission_receipt=admission
+    ) == {"status": "PASS", "reasons": []}
+
+
+def test_frozen_classifier_pin_holds_after_w0_schema_files_additions() -> None:
+    # the SCHEMA_FILES additions (schema lookup) leave the six S0.3 classifier constants
+    # untouched → the frozen digest is byte-identical to the contract's pin.
+    assert aiml_effect_classifier_digest() == (
+        "sha256:1cf8c021b066ceeb364e968add074d263cb28d63db421fdc40620e9904d0ddbc"
+    )
+    assert len(PROGRAM_GOVERNANCE_PATHS) == len(set(PROGRAM_GOVERNANCE_PATHS))
+
+
+def test_w0_central_gate_rejects_self_declared_status() -> None:
+    receipt = _w0_admission_receipt()
+    receipt["status"] = "ADMITTED"
+    receipt["self_digest"] = artifact_self_digest(receipt)
+    # closed schema (additionalProperties:false) rejects the extra caller field.
+    assert validate_aiml_artifact(receipt) != []
+    # derivation also rejects it independently, before any re-derivation.
+    result = _w0.derive_source_admission_status(receipt)
+    assert result["status"] == "NOT_ADMITTED"
+    assert any("must not self-declare status" in r for r in result["reasons"])
+
+
+def test_w0_derivation_tamper_rejections() -> None:
+    base = _w0_admission_receipt()
+    # (a) tamper the S2.0 registry-status echo in the receipt.
+    a = deepcopy(base)
+    a["s2_0_driver_reachability_proof"]["registry_status"] = "declared_production_apply_disabled"
+    a["self_digest"] = artifact_self_digest(a)
+    ra = _w0.derive_source_admission_status(a)
+    assert ra["status"] == "NOT_ADMITTED"
+    assert any("s2_0_driver_reachability_proof" in r for r in ra["reasons"])
+    # (b) tamper the WP3 role property.
+    b = deepcopy(base)
+    b["wp3_system_unit_alignment_proof"]["role"] = "postgres"
+    b["self_digest"] = artifact_self_digest(b)
+    rb = _w0.derive_source_admission_status(b)
+    assert rb["status"] == "NOT_ADMITTED"
+    assert any("wp3_system_unit_alignment_proof.role" in r for r in rb["reasons"])
+    # (c) tamper the wave-exit owned-path manifest → NOT_PASS.
+    wave_exit = _w0_wave_exit_receipt(base)
+    wave_exit["owned_path_manifest_digest"] = "sha256:" + "0" * 64
+    wave_exit["self_digest"] = artifact_self_digest(wave_exit)
+    rc = _w0.derive_wave_exit_status(wave_exit, source_admission_receipt=base)
+    assert rc["status"] == "NOT_PASS"
+    assert any("owned_path_manifest_digest" in r for r in rc["reasons"])

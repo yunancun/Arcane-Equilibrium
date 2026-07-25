@@ -80,6 +80,14 @@ SCHEMA_FILES = {
     "quiesce_observation_v1": "quiesce_observation_v1.schema.json",
     "quiesce_result_v1": "quiesce_result_v1.schema.json",
     "quiesce_rollback_v1": "quiesce_rollback_v1.schema.json",
+    # S2.4(WP4·W0)——additive:source-implementation admission receipt 與 per-wave exit
+    # receipt。加這兩鍵純為 schema 查找,絕不進入 aiml_effect_classifier_digest() 的六個 S0.3 常量
+    # 輸入(見 :46-48/§7.2),S0.3 分類身分不動;亦不改 PROGRAM_SCHEMA_PATHS 與 v1 component matrix。
+    # 中央閘「不」讓 caller 自證 status——委派給 derive_source_admission_status /
+    # derive_wave_exit_status 由 repo 獨立再導出 ADMITTED/PASS(caller 帶 status/admitted/pass/done
+    # 一律先拒);此為 source-seam 完整性再導出,通過「不」等於認證任何 runtime(九 authority 全 false)。
+    "s2_4_source_admission_receipt_v1": "s2_4_source_admission_receipt_v1.schema.json",
+    "s2_4_wave_exit_receipt_v1": "s2_4_wave_exit_receipt_v1.schema.json",
 }
 
 S0_DEPENDENCY_DIGESTS = {
@@ -1401,6 +1409,400 @@ def _now_text(now: str | datetime | None) -> str | None:
     return None
 
 
+# --------------------------------------------------------------------------- #
+# S2.4 · WP4 · W0(W0b)source-admission / wave-exit 中央「再導出」機制。
+#
+# 契約鐵則:receipt 只帶 evidence,status「絕不」由 caller 宣告。derive_* 以 repo 內獨立重算
+# 每一欄位——§1.2 effect-DAG 三投影、§9.1 四 trust pin、S2.0 driver-reachability seam、WP3
+# system-level property(property 非 exact unit-name,PM §7#4)、frozen S0.3 classifier + v1
+# component matrix——ADMITTED/PASS 由重算相符「導出」;caller 帶 status/admitted/pass/done 於
+# derivation 前即拒(§10.5 #27)。此機制與 aiml_effect_classifier_digest() 的六個 S0.3 常量、
+# PROGRAM_SCHEMA_PATHS、AIML_COMPONENT_EFFECT_CLASS_MATRIX 完全「只讀不改」,故分類身分保持
+# byte-frozen(§0 凍結約束)。它證的是 source-seam 完整性,「不」認證任何 runtime——九 authority /
+# production_apply_performed / running_attested 恆 false。
+# --------------------------------------------------------------------------- #
+_PROGRAM_EFFECT_DAG = "S2.0→S2.4→S2.5A→S2.1→S2.5B→S2.2B"
+_THREE_HEAD_PROJECTION_PATHS = (
+    "TODO.md",
+    "docs/execution_plan/ai_ml_landing/PROGRESS.md",
+    "docs/agents/ai-ml-landing-delivery-protocol.md",
+)
+# §1.2 的兩個 W0 predecessor merge(admission 的固定祖先);兩者皆須為 receipt.source_head 的
+# 祖先(local-checkout 拓撲證,非 runtime)。PR#132 = effect-DAG 投影;PR#134 = WP3 system-unit 對齊。
+_PREDECESSOR_HEADS = {
+    "program_dag_projection_merge": "4915be30c4214f8a3d591b7f9259169cdb65c75b",
+    "wp3_system_unit_merge": "e514f1e761ab9c1965a133f1f113e2e7ccd854df",
+}
+# §9.1 operator 信任根指紋(out-of-scope pin;W0 只再驗、絕不改 trusted-host 模組/測試/指紋)。
+_OPERATOR_FINGERPRINT = "SHA256:uGJ9veN7PoE6BBgfsSP2aiMndrwgbt7o/7/YfdzNzCQ"
+_TRUSTED_HOST_MODULE_PATH = (
+    "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_host.py"
+)
+_TRUSTED_HOST_TEST_PATH = "tests/structure/test_agent_governance_aiml_trusted_host.py"
+_S2_0_ADAPTER_ID = "pg_observer_bootstrap_adapter_v1"
+_S2_0_EXPECTED_REGISTRY_STATUS = "AUTHORITY_LOCKED_PRODUCTION_CAPABLE"
+# WP3 system-level PROPERTY:role / systemctl --user 缺席由 WP3 executable 常量 + allowlist 動態
+# 再導出;database 為 runtime DSN 固定值(alr_event_consumer.py `dbname=trading_ai`,§10.4 runtime-DB
+# 不可變),故此處以固定期望值綁定(非 WP3 inventory 常量但屬同一 runtime 拓撲事實)。
+_WP3_RUNTIME_DATABASE = "trading_ai"
+_ALL_FALSE_PRODUCTION_FLAGS = {
+    "nine_authorities_false": True,
+    "production_apply_performed": False,
+    "running_attested": False,
+}
+# §4.1 W0 exported-ABI delta(wave-exit exported_abi_digest 綁定的固定投影)。
+_W0_EXPORTED_ABI = {
+    "s2_0_adapter_binding": "AUTHORITY_LOCKED_PRODUCTION_CAPABLE",
+    "s2_0_production_success_status": "APPLIED",
+    "s2_0_production_driver_protocol": "ObserverBootstrapProductionDriver",
+    "source_admission": "s2_4_source_admission_receipt_v1(status=ADMITTED)",
+    "wave_exit": "s2_4_wave_exit_receipt_v1(status=PASS)",
+}
+# §5 W0 owned-path allowlist(wave-exit owned_path_manifest_digest 綁定的固定投影)。
+_W0_OWNED_PATHS = (
+    ".codex/agent_registry_v1.json",
+    "helper_scripts/maintenance_scripts/agent_governance_pg_observer_bootstrap.py",
+    "program_code/ml_training/aiml_gate_receipt_validator.py",
+    "program_code/ml_training/schemas/aiml_gate_receipts/pg_observer_bootstrap_result_v1.schema.json",
+    "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_source_admission_receipt_v1.schema.json",
+    "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_wave_exit_receipt_v1.schema.json",
+    "program_code/ml_training/tests/test_aiml_gate_receipt_validator.py",
+    "tests/structure/test_agent_governance_pg_observer_bootstrap.py",
+    "tests/structure/test_s2_4_w0_admission.py",
+)
+_CALLER_STATUS_KEYS = ("admitted", "done", "pass", "status")
+
+
+def _is_digest(value: Any) -> bool:
+    return isinstance(value, str) and re.fullmatch(r"sha256:[0-9a-f]{64}", value) is not None
+
+
+def git_blob_sha1(data: bytes) -> str:
+    """Reproduce ``git hash-object`` (blob) so trust-pin blob ids re-hash offline."""
+
+    hasher = hashlib.sha1()
+    hasher.update(b"blob " + str(len(data)).encode("ascii") + b"\x00")
+    hasher.update(data)
+    return hasher.hexdigest()
+
+
+def _git_is_ancestor(repo_root: Path, ancestor: str, descendant: str) -> bool:
+    """Local-checkout ancestry proof(fail-closed)。只證 repo 拓撲,不是 runtime 認證。"""
+
+    import subprocess
+
+    if re.fullmatch(r"[0-9a-f]{40}", ancestor) is None or re.fullmatch(
+        r"[0-9a-f]{7,40}", descendant
+    ) is None:
+        return False
+    try:
+        proc = subprocess.run(
+            [
+                "git", "-C", str(repo_root), "merge-base", "--is-ancestor",
+                ancestor, descendant,
+            ],
+            capture_output=True,
+            timeout=30,
+        )
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return False
+    return proc.returncode == 0
+
+
+def _read_three_head_texts(repo_root: Path) -> dict[str, str]:
+    return {
+        rel: (repo_root / rel).read_text(encoding="utf-8")
+        for rel in _THREE_HEAD_PROJECTION_PATHS
+    }
+
+
+def _projection_effect_dag_errors(texts: dict[str, str]) -> list[str]:
+    """Require the canonical NEW apply-order in every projection text(§10.5 #20)。
+
+    一份把 canonical apply-order 換回舊鏈(``S2.1@EFFECT_DONE``-before-``S2.4``)的 projection
+    會因 NEW 鏈缺席而被拒。刻意「不」以「舊鏈子串出現」判拒——真 PROGRESS.md changelog 會同時
+    載明舊→新兩鏈作歷史,單以子串判會誤傷。
+    """
+
+    return [
+        f"three_head_projection missing the canonical §1.2 effect DAG in {path}"
+        for path, text in sorted(texts.items())
+        if _PROGRAM_EFFECT_DAG not in text
+    ]
+
+
+def three_head_projection_digest(repo_root: Path = REPO_ROOT) -> str:
+    """Canonical digest of the §1.2 effect-DAG over the projections that carry it.
+
+    數值依「再讀」而變:缺任一投影 → present set 縮小 → digest 改變(且 derivation 另以
+    :func:`_projection_effect_dag_errors` 明確報缺)。
+    """
+
+    texts = _read_three_head_texts(repo_root)
+    present = sorted(rel for rel, text in texts.items() if _PROGRAM_EFFECT_DAG in text)
+    return canonical_digest({
+        "effect_dag": _PROGRAM_EFFECT_DAG,
+        "present_projections": present,
+    })
+
+
+def _trust_pin_errors(pins: Any, repo_root: Path) -> list[str]:
+    if not isinstance(pins, dict):
+        return ["admission trust_pin_digests must be an object"]
+    try:
+        module_bytes = (repo_root / _TRUSTED_HOST_MODULE_PATH).read_bytes()
+        test_bytes = (repo_root / _TRUSTED_HOST_TEST_PATH).read_bytes()
+    except OSError as error:
+        return [f"admission trust-pin blobs unreadable: {error}"]
+    expected = {
+        "trusted_host_module_blob": git_blob_sha1(module_bytes),
+        "trusted_host_module_sha256": "sha256:" + hashlib.sha256(module_bytes).hexdigest(),
+        "independent_test_blob": git_blob_sha1(test_bytes),
+        "independent_test_sha256": "sha256:" + hashlib.sha256(test_bytes).hexdigest(),
+        "operator_fingerprint": _OPERATOR_FINGERPRINT,
+    }
+    errors = [
+        f"admission trust pin {key} does not re-hash to the §9.1 trust root"
+        for key, value in expected.items()
+        if pins.get(key) != value
+    ]
+    # 交叉綁定:指紋必須真的釘在 trusted-host 模組源碼裡(而非只在 receipt 中自洽)。
+    if _OPERATOR_FINGERPRINT not in module_bytes.decode("utf-8", "replace"):
+        errors.append("admission operator_fingerprint is not pinned in the trusted-host module source")
+    return errors
+
+
+def _s2_0_reachability_errors(proof: Any, repo_root: Path) -> list[str]:
+    if not isinstance(proof, dict):
+        return ["admission s2_0_driver_reachability_proof must be an object"]
+    errors: list[str] = []
+    registry_status: Any = None
+    try:
+        registry = json.loads(
+            (repo_root / ".codex" / "agent_registry_v1.json").read_text(encoding="utf-8")
+        )
+        registry_status = (
+            registry.get("effect_adapters", {})
+            .get(_S2_0_ADAPTER_ID, {})
+            .get("status")
+        )
+    except (OSError, json.JSONDecodeError) as error:
+        errors.append(f"admission S2.0 registry adapter unreadable: {error}")
+    import inspect
+
+    import agent_governance_pg_observer_bootstrap as _observer
+
+    expected = {
+        "adapter_id": _S2_0_ADAPTER_ID,
+        "registry_status": registry_status,
+        "unconditional_production_pending_removed": "driver"
+        in inspect.signature(_observer.apply_observer_bootstrap).parameters,
+        "driver_protocol_present": hasattr(_observer, "ObserverBootstrapProductionDriver"),
+        "production_success_status": "APPLIED"
+        if "APPLIED" in _observer.RESULT_STATUSES
+        else None,
+    }
+    if registry_status != _S2_0_EXPECTED_REGISTRY_STATUS:
+        errors.append(
+            "admission S2.0 adapter registry_status is not AUTHORITY_LOCKED_PRODUCTION_CAPABLE"
+        )
+    errors.extend(
+        f"admission s2_0_driver_reachability_proof.{key} does not re-derive"
+        for key, value in expected.items()
+        if proof.get(key) != value
+    )
+    return errors
+
+
+def _wp3_system_unit_property_errors(proof: Any) -> list[str]:
+    if not isinstance(proof, dict):
+        return ["admission wp3_system_unit_alignment_proof must be an object"]
+    import agent_governance_alr_quiesce_inventory as _inventory
+
+    systemd_is_system_level = _inventory.SYSTEMD == "/usr/bin/systemctl"
+    try:
+        # executable 再導出:allowlist 對任何 ``--user`` 形一律拒(§8.3/PR#134 system-level 語意)。
+        _inventory._assert_allowlisted_systemctl(
+            [_inventory.SYSTEMD, "--user", "show", _inventory.UNIT_NAME]
+        )
+        user_form_rejected = False
+    except Exception:  # noqa: BLE001 - 任何拒絕型例外都代表 --user 形被 allowlist 擋下
+        user_form_rejected = True
+    systemctl_user_absent = systemd_is_system_level and user_form_rejected
+    # property 非 exact unit-name:刻意「不」綁 UNIT_NAME(§7#4 unit-name 分歧 defer 至 W2)。
+    expected = {
+        "lifecycle_owner": "host_system_manager" if systemctl_user_absent else "unknown",
+        "systemctl_user_absent": systemctl_user_absent,
+        "role": _inventory.ALR_CONNECTION_ROLE,
+        "database": _WP3_RUNTIME_DATABASE,
+    }
+    return [
+        f"admission wp3_system_unit_alignment_proof.{key} does not re-derive the WP3 system-level property"
+        for key, value in expected.items()
+        if proof.get(key) != value
+    ]
+
+
+def derive_source_admission_status(
+    receipt: Any,
+    *,
+    repo_root: Path = REPO_ROOT,
+    now: str | datetime | None = None,
+) -> dict[str, Any]:
+    """Independently re-derive the S2.4/WP4/W0 source-admission status (§3.1).
+
+    回傳 ``{"status": "ADMITTED"|"NOT_ADMITTED", "reasons": [...]}``。每一欄位皆由 ``repo_root``
+    重算並與 receipt 比對;全部相符且九 authority 全 false 才 ADMITTED,否則回 typed 非-ADMITTED
+    reason list。caller 帶 status/admitted/pass/done 於 derivation 前即拒(§10.5 #27)。``now``
+    刻意不作 wall-clock 新鮮度窗(source-admission 為 build-identity 證據,無 timestamp 欄位——
+    以 wall-clock 判窗會變 time-bomb;真新鮮度由 wave/closure lane 綁 source_head 拓撲保證)。
+    """
+
+    if not isinstance(receipt, dict):
+        return {"status": "NOT_ADMITTED", "reasons": ["admission receipt must be an object"]}
+    declared = sorted(key for key in _CALLER_STATUS_KEYS if key in receipt)
+    if declared:
+        return {
+            "status": "NOT_ADMITTED",
+            "reasons": [
+                "admission receipt must not self-declare status "
+                f"({', '.join(declared)}); the central validator derives ADMITTED"
+            ],
+        }
+    reasons: list[str] = []
+    if receipt.get("schema_version") != "s2_4_source_admission_receipt_v1":
+        reasons.append("admission schema_version is not s2_4_source_admission_receipt_v1")
+    if receipt.get("work_package") != "WP4" or receipt.get("wave") != "W0":
+        reasons.append("admission work_package/wave must be WP4/W0")
+    if receipt.get("self_digest") != artifact_self_digest(receipt):
+        reasons.append("admission self_digest does not bind the canonical receipt")
+    source_head = receipt.get("source_head")
+    if receipt.get("predecessor_heads") != _PREDECESSOR_HEADS:
+        reasons.append("admission predecessor_heads differ from the exact §1.2 W0 lineage")
+    if not (isinstance(source_head, str) and re.fullmatch(r"[0-9a-f]{40}", source_head)):
+        reasons.append("admission source_head must be a 40-hex commit")
+    else:
+        for name, head in _PREDECESSOR_HEADS.items():
+            if not _git_is_ancestor(repo_root, head, source_head):
+                reasons.append(
+                    f"admission predecessor {name} is not an ancestor of source_head"
+                )
+    try:
+        texts = _read_three_head_texts(repo_root)
+    except OSError as error:
+        reasons.append(f"admission three-head projection unreadable: {error}")
+    else:
+        reasons.extend(_projection_effect_dag_errors(texts))
+        if receipt.get("three_head_projection_digest") != three_head_projection_digest(
+            repo_root
+        ):
+            reasons.append("admission three_head_projection_digest does not re-derive")
+    reasons.extend(_trust_pin_errors(receipt.get("trust_pin_digests"), repo_root))
+    reasons.extend(
+        _s2_0_reachability_errors(receipt.get("s2_0_driver_reachability_proof"), repo_root)
+    )
+    reasons.extend(
+        _wp3_system_unit_property_errors(receipt.get("wp3_system_unit_alignment_proof"))
+    )
+    if receipt.get("frozen_classifier_digest") != aiml_effect_classifier_digest():
+        reasons.append(
+            "admission frozen_classifier_digest does not re-derive to the frozen S0.3 classifier"
+        )
+    if receipt.get("component_classifier_v1_digest") != aiml_component_effect_class_matrix_digest():
+        reasons.append("admission component_classifier_v1_digest does not re-derive")
+    if receipt.get("production_authority_flags") != _ALL_FALSE_PRODUCTION_FLAGS:
+        reasons.append(
+            "admission production_authority_flags must all be false (nine authorities / apply / running)"
+        )
+    if not _is_digest(receipt.get("negative_tests_pass")):
+        reasons.append("admission negative_tests_pass must be a canonical digest")
+    return {
+        "status": "ADMITTED" if not reasons else "NOT_ADMITTED",
+        "reasons": reasons,
+    }
+
+
+def _wave_exit_structural_errors(receipt: dict[str, Any]) -> list[str]:
+    """Self-contained wave-exit re-derivations(不需綁定 admission 物件即可在中央閘檢查)。"""
+
+    reasons: list[str] = []
+    if receipt.get("schema_version") != "s2_4_wave_exit_receipt_v1":
+        reasons.append("wave-exit schema_version is not s2_4_wave_exit_receipt_v1")
+    if receipt.get("self_digest") != artifact_self_digest(receipt):
+        reasons.append("wave-exit self_digest does not bind the canonical receipt")
+    if receipt.get("production_authority_flags") != _ALL_FALSE_PRODUCTION_FLAGS:
+        reasons.append("wave-exit production_authority_flags must all be false")
+    if receipt.get("wave") != "W0":
+        # W0b 只導出 W0 wave-exit;W1+ 各 wave 於其自身 owned path 擴充 derivation。
+        reasons.append("wave-exit derivation is only implemented for W0 in W0b")
+        return reasons
+    if receipt.get("predecessor_wave_receipt_digest") is not None:
+        reasons.append(
+            "W0 wave-exit has no predecessor wave (predecessor_wave_receipt_digest must be null)"
+        )
+    if receipt.get("exported_abi_digest") != canonical_digest(_W0_EXPORTED_ABI):
+        reasons.append("wave-exit exported_abi_digest does not equal the W0 ABI delta")
+    if receipt.get("owned_path_manifest_digest") != canonical_digest(sorted(_W0_OWNED_PATHS)):
+        reasons.append("wave-exit owned_path_manifest_digest is not the exact W0 owned-path set")
+    return reasons
+
+
+def derive_wave_exit_status(
+    receipt: Any,
+    *,
+    repo_root: Path = REPO_ROOT,
+    now: str | datetime | None = None,
+    source_admission_receipt: Any = None,
+) -> dict[str, Any]:
+    """Independently re-derive the W0 wave-exit status (§3.2).
+
+    回傳 ``{"status": "PASS"|"NOT_PASS", "reasons": [...]}``。W0 的 PASS 需:綁定的
+    ``source_admission_receipt`` 再導出 ADMITTED 且其 self_digest == 本 receipt 綁定的
+    ``source_admission_receipt_digest``、owned-path/ABI/flags 再導出相符、source_head 一致。
+    caller 帶 status/pass/done 於 derivation 前即拒(§10.3/§10.5 #27)。
+    """
+
+    if not isinstance(receipt, dict):
+        return {"status": "NOT_PASS", "reasons": ["wave-exit receipt must be an object"]}
+    declared = sorted(key for key in _CALLER_STATUS_KEYS if key in receipt)
+    if declared:
+        return {
+            "status": "NOT_PASS",
+            "reasons": [
+                "wave-exit receipt must not self-declare status "
+                f"({', '.join(declared)}); the central validator derives PASS"
+            ],
+        }
+    reasons = _wave_exit_structural_errors(receipt)
+    if receipt.get("wave") != "W0":
+        return {"status": "NOT_PASS", "reasons": reasons}
+    if source_admission_receipt is None:
+        reasons.append(
+            "W0 wave-exit requires the bound source_admission_receipt to re-derive ADMITTED"
+        )
+    else:
+        admission = derive_source_admission_status(
+            source_admission_receipt, repo_root=repo_root, now=now
+        )
+        if admission["status"] != "ADMITTED":
+            reasons.append(
+                "wave-exit bound source_admission_receipt does not derive ADMITTED: "
+                + "; ".join(admission["reasons"])
+            )
+        if source_admission_receipt.get("self_digest") != receipt.get(
+            "source_admission_receipt_digest"
+        ):
+            reasons.append(
+                "wave-exit source_admission_receipt_digest does not bind the derived admission receipt"
+            )
+        if source_admission_receipt.get("source_head") != receipt.get("source_head"):
+            reasons.append("wave-exit source_head differs from the bound admission receipt")
+    return {
+        "status": "PASS" if not reasons else "NOT_PASS",
+        "reasons": reasons,
+    }
+
+
 def validate_aiml_artifact(
     artifact: Any, *, now: str | datetime | None = None
 ) -> list[str]:
@@ -2013,6 +2415,26 @@ def validate_aiml_artifact(
         # recompute-from-checkout 與 sealed-build CI job 的 verify_lock_closure。
         errors.extend(_source_compatibility_receipt_errors(artifact))
         errors.extend(_source_compatibility_receipt_v2_dependency_lock_errors(artifact))
+    if schema_version == "s2_4_source_admission_receipt_v1":
+        # S2.4(WP4·W0)source-admission:closed schema 已禁 caller status;此處委派給
+        # derive_source_admission_status 由 repo 完整再導出(source-seam 自足)。非 ADMITTED →
+        # 把 typed reasons 併入 errors。此再導出只證 source-seam 完整性,「不」認證任何 runtime。
+        result = derive_source_admission_status(artifact, repo_root=REPO_ROOT, now=now)
+        if result["status"] != "ADMITTED":
+            errors.extend(result["reasons"])
+    if schema_version == "s2_4_wave_exit_receipt_v1":
+        # S2.4(WP4·W0)wave-exit:中央閘無綁定 admission 對象,故只驗「自足」再導出(caller-status
+        # 拒 + self_digest + flags + W0 的 ABI/owned-path/predecessor-null)。完整 PASS(需成對
+        # admission 再導 ADMITTED)由 test/closure lane 以 derive_wave_exit_status(source_admission_
+        # receipt=...) 執行——mirror sealed-build 的 offline-structure 邊界。
+        declared = sorted(key for key in _CALLER_STATUS_KEYS if key in artifact)
+        if declared:
+            errors.append(
+                "wave-exit receipt must not self-declare status "
+                f"({', '.join(declared)}); the central validator derives PASS"
+            )
+        else:
+            errors.extend(_wave_exit_structural_errors(artifact))
     return errors
 
 
