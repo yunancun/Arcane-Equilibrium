@@ -3,7 +3,7 @@
     "reasons": [],
     "status": "ADMITTED"
   },
-  "admission_self_digest": "sha256:d686acd7d8284a413dbd8c3e54f14fa76af44ad4852a996411ae7ce16eddfeff",
+  "admission_self_digest": "sha256:6805273415b022154ef2305aad4bc2c38171933c5be0ceeba02cdf3f7e543709",
   "historical_persisted_w0": {
     "admission_self_digest": "sha256:d40bed03b0a2ac3736bf62114717e869691143cf66cba186646447aa8ccbaf12",
     "historical_source_head": "37cb9094956b8ee2b3af33efd610ee0d8566557f",
@@ -15,7 +15,7 @@
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w0_wave_exit_self_digest": "sha256:e1c727b97426d00aee6a956485a34bb9dddf260edea6cdcd60cd213bb1b79242",
+  "regenerated_w0_wave_exit_self_digest": "sha256:505c82fad19568bd452708044d1b41064a6aef344614628c45505276c93f5b75",
   "replay_note": "W1 re-derivation binds source_head == checkout HEAD; to replay, checkout source_head, rebuild the in-memory W0 chain with the same builders, then run derive_wave_exit_status(w1, source_admission_receipt=admission, predecessor_wave_receipt=w0_wave_exit)",
   "review_provenance": [
     {
@@ -50,23 +50,46 @@
       "note": "wall-clock fail-closed freshness default, id shape guard, lineage self-digest recompute plus hard-refuse ruling, secret-like evidence scan; regression pins added for each",
       "role": "PM",
       "scope": "wave-fix rounds"
+    },
+    {
+      "agent_id": "a2661150dd29eb566",
+      "kind": "w1_review_provenance",
+      "reviewed_head": "3a781e311e3f4834a2361eb13731648028c5fb68",
+      "role": "CC",
+      "verdict": "PASS_WITH_NOTES grade A (hard boundaries zero touches; DRIFT-1 registry denial-string unit-name drift, closed by 58d62a0e1)"
+    },
+    {
+      "agent_id": "a36c3e23cd28a9e9e",
+      "kind": "w1_review_provenance",
+      "reviewed_head": "3a781e311e3f4834a2361eb13731648028c5fb68",
+      "role": "OPS",
+      "verdict": "PASS_WITH_CONCERNS (effect-phase contract encoded four-layer redundant; zero runtime reach today; F1 unit-name drift closed by 58d62a0e1; F2/F3/F5 P3 notes queued for W2; F4 W6 builder obligations recorded)"
+    },
+    {
+      "commits": [
+        "58d62a0e1"
+      ],
+      "kind": "w1_review_provenance",
+      "note": "two CP5 registry denial strings retargeted to arcane-equilibrium-aiml-engine-scanner.service per CC DRIFT-1 / OPS F1",
+      "role": "PM",
+      "scope": "post-review drift fix"
     }
   ],
   "schema_version": "s2_4_w1_derivation_record_v1_informal",
-  "source_head": "6288f5414f3321c61228888043176d7b4bab5951",
+  "source_head": "58d62a0e1707f04f9c996ed65361fa1bad5da13c",
   "test_evidence": {
     "command": "python3 -m pytest tests/structure/test_agent_governance_s2_4_install.py tests/structure/test_agent_governance_s2_4_install_integration.py tests/structure/test_s2_4_w0_admission.py program_code/ml_training/tests -q",
-    "executed_at": "2026-07-25T19:17:47Z",
+    "executed_at": "2026-07-25T19:28:57Z",
     "exit_code": 0,
-    "full_tree_reference": "tests/structure 2546 passed/6 skipped at 5f713333f pre-merge lineage; re-run scheduled at publication head",
     "host_role": "mac_development_checkout",
     "kind": "w1_formal_exit_test_run",
-    "source_head": "6288f5414f3321c61228888043176d7b4bab5951",
-    "summary_line": "2485 passed, 39 skipped in 46.16s"
+    "note": "full tests/structure re-run executes at this publication head immediately before push; result recorded in the publication PR body",
+    "source_head": "58d62a0e1707f04f9c996ed65361fa1bad5da13c",
+    "summary_line": "2485 passed, 39 skipped in 46.33s"
   },
   "w1_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "w1_wave_exit_self_digest": "sha256:a19ab7b1615dab2725c389af5b48f2d91c6aa5f776962966e7e056133c9ea0fb"
+  "w1_wave_exit_self_digest": "sha256:3b462d91531dff77c5843d86b103293302398579915b8ef247ee331b5333001e"
 }
