@@ -45,6 +45,7 @@ for candidate in (HELPERS, ML_ROOT):
         sys.path.insert(0, str(candidate))
 
 import agent_governance_pg_observer_bootstrap as obs  # noqa: E402
+import agent_governance_pg_observer_bootstrap_attestation as obs_att  # noqa: E402
 import aiml_gate_receipt_validator as validator  # noqa: E402
 
 INITDB = shutil.which("initdb")
@@ -167,8 +168,9 @@ def _install_operator_profile(tmp_path, monkeypatch):
         ["ssh-keygen", "-lf", str(private_key.with_suffix(".pub")), "-E", "sha256"],
         check=True, capture_output=True, text=True,
     ).stdout.split()[1]
-    monkeypatch.setattr(obs, "OPERATOR_PUBLIC_KEY", public_key)
-    monkeypatch.setattr(obs, "OPERATOR_FINGERPRINT", fingerprint)
+    # build/validate_operator_authorization 讀這兩者為姊妹葉模組 obs_att 的 globals(obs 僅為再匯出副本)。
+    monkeypatch.setattr(obs_att, "OPERATOR_PUBLIC_KEY", public_key)
+    monkeypatch.setattr(obs_att, "OPERATOR_FINGERPRINT", fingerprint)
     return private_key
 
 

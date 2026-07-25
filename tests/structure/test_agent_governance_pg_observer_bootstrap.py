@@ -30,6 +30,7 @@ for candidate in (HELPERS, ML_ROOT):
         sys.path.insert(0, str(candidate))
 
 import agent_governance_pg_observer_bootstrap as obs  # noqa: E402
+import agent_governance_pg_observer_bootstrap_attestation as obs_att  # noqa: E402
 import aiml_gate_receipt_validator as validator  # noqa: E402
 from agent_governance_schema import schema_subset_errors  # noqa: E402
 
@@ -80,8 +81,10 @@ def _mint_ed25519_key(tmp_path, name):
 
 def _install_operator_profile(tmp_path, monkeypatch):
     private_key, public_key, fingerprint = _mint_ed25519_key(tmp_path, "operator")
-    monkeypatch.setattr(obs, "OPERATOR_PUBLIC_KEY", public_key)
-    monkeypatch.setattr(obs, "OPERATOR_FINGERPRINT", fingerprint)
+    # validate/build_operator_authorization 讀 OPERATOR_PUBLIC_KEY/FINGERPRINT 為**姊妹葉模組**的 globals,
+    # 故 monkeypatch 目標為 obs_att(非再匯出副本 obs);否則丟棄式鑰不生效、驗簽會對固定 §9.1 信任根失敗。
+    monkeypatch.setattr(obs_att, "OPERATOR_PUBLIC_KEY", public_key)
+    monkeypatch.setattr(obs_att, "OPERATOR_FINGERPRINT", fingerprint)
     return private_key
 
 
@@ -90,8 +93,9 @@ def _install_attestor_profile(tmp_path, monkeypatch):
     # 這**只**驗簽章驗證 CODE(T1 SSHSIG + trust-root 綁定)——不冒充真平台背書 runtime(鑰是丟棄式的;
     # 真正的生產 APPLIED 仍需 §9.1 帶外私鑰,不在 Mac/trade-core/任何 fixture)。
     private_key, public_key, fingerprint = _mint_ed25519_key(tmp_path, "attestor")
-    monkeypatch.setattr(obs, "ATTESTOR_PUBLIC_KEY", public_key)
-    monkeypatch.setattr(obs, "ATTESTOR_FINGERPRINT", fingerprint)
+    # 同理:build/validate_apply_attestation 讀 ATTESTOR_PUBLIC_KEY/FINGERPRINT 為姊妹葉模組的 globals。
+    monkeypatch.setattr(obs_att, "ATTESTOR_PUBLIC_KEY", public_key)
+    monkeypatch.setattr(obs_att, "ATTESTOR_FINGERPRINT", fingerprint)
     return private_key
 
 
