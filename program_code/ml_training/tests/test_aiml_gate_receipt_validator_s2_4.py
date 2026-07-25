@@ -1004,10 +1004,18 @@ def test_cp2b_schema_files_resolve_to_real_files() -> None:
         assert (SCHEMA_DIR / SCHEMA_FILES[key]).is_file(), key
     assert len(_CP2B_KEYS) == 16
     # CP2a(14)+ CP2b(16)加上既有基線 → 中央 SCHEMA_FILES 委派表 = 65;
-    # W2a(§2.1)additive 註冊 pg_acl_manifest_v1 → 66。
-    assert len(SCHEMA_FILES) == 66
+    # W2a(§2.1)additive 註冊 pg_acl_manifest_v1 → 66;
+    # W2b(§8.1)additive 註冊 application_bundle_runtime_closure_v1 +
+    # application_bundle_manifest_v1 → 68。
+    assert len(SCHEMA_FILES) == 68
     assert "pg_acl_manifest_v1" in SCHEMA_FILES
     assert (SCHEMA_DIR / SCHEMA_FILES["pg_acl_manifest_v1"]).is_file()
+    for w2b_key in (
+        "application_bundle_runtime_closure_v1",
+        "application_bundle_manifest_v1",
+    ):
+        assert w2b_key in SCHEMA_FILES
+        assert (SCHEMA_DIR / SCHEMA_FILES[w2b_key]).is_file()
 
 
 @pytest.mark.parametrize("key", _CP2B_KEYS)

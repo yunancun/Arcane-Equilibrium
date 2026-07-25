@@ -180,6 +180,18 @@ SCHEMA_FILES = {
     # 結構驗 + self_digest 反偽造重算;與 static SQL inventory 的 exact-match 裁決委派給
     # agent_governance_s2_4_install.derive_engine_scanner_privilege_split(caller 不可自證)。
     "pg_acl_manifest_v1": "pg_acl_manifest_v1.schema.json",
+    # S2.4(WP4·W2b·§8.1)——additive:checked-in runtime-closure allowlist 與由它產出的
+    # application_bundle_manifest_v1(§8.1 第 3 內容身分 application_bundle_digest)。加這兩鍵
+    # 純為 schema 查找,絕不進入 aiml_effect_classifier_digest() 的六個 S0.3 常量輸入
+    # (見 :46-48/§7.2),S0.3 分類身分不動;亦不改 PROGRAM_SCHEMA_PATHS 與 v1/v2 component
+    # matrix/digest。中央閘只做結構驗 + self_digest 反偽造重算;closure 與靜態 import 閉包的
+    # 雙向 exact-match、effect-capable/broker/credential deny、committed-blob 溯源裁決全部
+    # 委派給 agent_governance_s2_4_install(caller 不可自證);runtime 整樹重算屬
+    # ml_training.alr_application_identity(兩側共用同一 canonical 文件構造點)。
+    "application_bundle_runtime_closure_v1": (
+        "application_bundle_runtime_closure_v1.schema.json"
+    ),
+    "application_bundle_manifest_v1": "application_bundle_manifest_v1.schema.json",
 }
 
 S0_DEPENDENCY_DIGESTS = {

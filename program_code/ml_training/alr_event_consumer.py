@@ -96,6 +96,15 @@ from ml_training.alr_safe_file import (
     SIZE_INVALID,
     read_bounded_regular_file,
 )
+# S2.4 §8.1/§8.3(W2b):production 身分前置(application-root 整樹重算 + v2 receipt +
+# launch/topology 期望硬比對)下沉至 governed 葉模組;consumer 只消費 typed 結果。
+from ml_training.alr_application_identity import (
+    AlrApplicationIdentityError,
+    EX_CONFIG_EXIT_CODE,
+    is_permanent_pre_db_error,
+    production_failure_summary,
+    run_production_preflight_from_args,
+)
 
 
 ALR_SCANNER_NOTIFY_CHANNEL = "alr_scanner_snapshot_v1"
@@ -939,7 +948,9 @@ def run_candidate_aware_backlog(
     return result
 
 
-def read_local_dsn_file(dsn_path: Path) -> str:
+def read_local_dsn_file(
+    dsn_path: Path, *, required_identity: Mapping[str, str] | None = None
+) -> str:
     """Read a private local-PG DSN without falling back to ambient credentials."""
     try:
         raw = read_bounded_regular_file(
@@ -961,7 +972,7 @@ def read_local_dsn_file(dsn_path: Path) -> str:
         raise AlrEventConsumerError("dsn_file_unreadable") from exc
     if not dsn:
         raise AlrEventConsumerError("dsn_file_blank")
-    _validate_local_dsn(dsn)
+    _validate_local_dsn(dsn, required_identity)
     return dsn
 
 
@@ -1056,20 +1067,31 @@ def run_event_consumer(
     candidate_policy: Mapping[str, Any] | None = None,
     expected_learning_runtime_digest: str | None = None,
     expected_compatibility_receipt: Path | None = None,
+    pinned_repo_source_head: str | None = None,
+    dsn_required_identity: Mapping[str, str] | None = None,
 ) -> dict[str, int]:
     """LR1 相容性 preflight 後執行 shadow consumer，並持久化真實 lifecycle。
 
     整倉 HEAD 已降為遙測：docs-only 提交不再停 ingest。只有 capture 面不相容(建置失敗
     等)才 fail-closed 停 capture；training 契約漂移只 quarantine fit(fit_quarantined)。
+
+    W2b(§8.3 production):``pinned_repo_source_head`` 非 None 時,相容性重算以該 pinned
+    head 建置(零 Git 呼叫——application root 無 checkout);``dsn_required_identity``
+    非 None 時 DSN 綁 production 身分表(aiml_engine_scanner)。兩者皆 None = 舊行為。
     """
     compatibility = _preflight_source_compatibility(
         source_head=source_head,
         expected_learning_runtime_digest=expected_learning_runtime_digest,
         repo_root=repo_root,
         expected_compatibility_receipt=expected_compatibility_receipt,
+        pinned_repo_source_head=pinned_repo_source_head,
     )
     fit_quarantined = bool(compatibility["fit_quarantined"])
-    dsn = read_local_dsn_file(dsn_path)
+    dsn = (
+        read_local_dsn_file(dsn_path)
+        if dsn_required_identity is None
+        else read_local_dsn_file(dsn_path, required_identity=dsn_required_identity)
+    )
     stop_event = threading.Event()
     previous_handlers = _install_shutdown_handlers(stop_event)
     connection: Any | None = None
@@ -1247,15 +1269,21 @@ def _preflight_source_compatibility(
     expected_learning_runtime_digest: str | None,
     repo_root: Path | None,
     expected_compatibility_receipt: Path | None = None,
+    pinned_repo_source_head: str | None = None,
 ) -> dict[str, Any]:
     """LR1 preflight：唯一權威判定器 evaluate_compatibility(expected, actual)。
 
     expected 清單取自 in-repo pinned source_compatibility receipt;actual 由當前 checkout
     建置。capture 面不相容/不可判定 → fail-closed 停 ingest;training 面漂移 → 只
     quarantine fit 而 capture 續跑。整倉 HEAD 僅作遙測。
+
+    W2b(§8.3):pinned_repo_source_head 非 None(production)時,建置注入 pinned head、
+    HEAD 遙測不呼叫 Git(application root 是不可變 bundle,非 checkout)。
     """
     root = repo_root or Path(__file__).resolve().parents[2]
-    actual, build_errors = try_build_learning_runtime_manifest(root)
+    actual, build_errors = try_build_learning_runtime_manifest(
+        root, repo_source_head=pinned_repo_source_head
+    )
     expected = _load_expected_compatibility_manifest(
         root, expected_compatibility_receipt, expected_learning_runtime_digest
     )
@@ -1272,7 +1300,11 @@ def _preflight_source_compatibility(
         "repo_source_head": actual["repo_source_head"] if actual else None,
         "learning_runtime_digest": actual["self_digest"] if actual else None,
         "expected_learning_runtime_digest": expected_learning_runtime_digest,
-        "source_head_match": _telemetry_source_head_match(source_head, repo_root=root),
+        "source_head_match": (
+            "pinned_application_root"
+            if pinned_repo_source_head is not None
+            else _telemetry_source_head_match(source_head, repo_root=root)
+        ),
         "fit_quarantined": compatibility["fit_status"] != "COMPATIBLE",
         "capture_status": compatibility["capture_status"],
         "fit_status": compatibility["fit_status"],
@@ -1313,7 +1345,12 @@ def _restore_shutdown_handlers(previous: Mapping[int, Any]) -> None:
         signal.signal(signum, handler)
 
 
-def _validate_local_dsn(dsn: str) -> None:
+def _validate_local_dsn(
+    dsn: str, required: Mapping[str, str] | None = None
+) -> None:
+    # W2b(§8.3):production 模式以 aiml_engine_scanner 身分表覆蓋;預設維持 legacy
+    # user-level shadow lane 的 alr_shadow(dev/test 路徑不變)。
+    required = _LOCAL_DSN_REQUIRED if required is None else required
     try:
         parts = shlex.split(dsn)
     except ValueError as exc:
@@ -1328,8 +1365,32 @@ def _validate_local_dsn(dsn: str) -> None:
         parsed[key] = value
     if _DSN_FORBIDDEN_KEYS.intersection(parsed):
         raise AlrEventConsumerError("dsn_not_local_trading_ai")
-    if any(parsed.get(key) != value for key, value in _LOCAL_DSN_REQUIRED.items()):
+    if any(parsed.get(key) != value for key, value in required.items()):
         raise AlrEventConsumerError("dsn_not_local_trading_ai")
+
+
+def _emit_result(
+    result: dict[str, int] | None,
+    *,
+    candidate_policy_status: dict[str, Any],
+    source_value_guard: dict[str, Any] | None,
+    production_identity: dict[str, Any] | None,
+) -> None:
+    """v2 結果 JSON 的唯一出口(main 全部出口共用;九 authority 恆 false)。"""
+    print(
+        json.dumps(
+            {
+                "schema_version": "alr_event_consumer_result_v2",
+                "result": result,
+                "candidate_policy": candidate_policy_status,
+                "source_value_guard": source_value_guard,
+                "production_identity": production_identity,
+                "authority": dict(_ZERO_AUTHORITY),
+                "authority_counters": dict(_ZERO_AUTHORITY_COUNTERS),
+            },
+            sort_keys=True,
+        )
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1365,6 +1426,27 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         default=os.environ.get("ALR_CANDIDATE_POLICY_FILE"),
     )
+    # S2.4 §8.3(W2b)production ABI:--application-root 出現即進 production 模式(唯一根;
+    # 期望缺失/不符絕不回退,permanent 失敗 exit 78——語義詳 alr_application_identity)。
+    parser.add_argument("--application-root", type=Path, default=None)
+    parser.add_argument(
+        "--expected-compatibility-receipt-v2",
+        type=Path,
+        default=os.environ.get("ALR_EXPECTED_COMPATIBILITY_RECEIPT_V2"),
+    )
+    parser.add_argument(
+        "--expected-application-bundle-digest",
+        default=os.environ.get("ALR_APPLICATION_BUNDLE_DIGEST"),
+    )
+    parser.add_argument(
+        "--expected-launch-bundle-digest",
+        default=os.environ.get("ALR_LAUNCH_BUNDLE_DIGEST"),
+    )
+    parser.add_argument(
+        "--topology-guard-file",
+        type=Path,
+        default=os.environ.get("ALR_TOPOLOGY_GUARD_FILE"),
+    )
     arguments = parser.parse_args(argv)
     candidate_policy: Mapping[str, Any] | None = None
     candidate_policy_status: dict[str, Any] = {
@@ -1390,6 +1472,22 @@ def main(argv: list[str] | None = None) -> int:
                 "policy_config_hash": None,
                 "reason": str(exc),
             }
+    # S2.4 §8.3(W2b)production 前置:--application-root 出現即整樹重算 application bundle
+    # digest 並硬比對全部期望;任何 permanent 身分/組態失敗輸出結構化 JSON 後 exit 78,
+    # 「絕不」回退 ambient/Git/module-relative 來源。preflight 通過後,v2 value-guard 由
+    # preflight 的 root-scoped 驗證承接(legacy resolver 走 module-relative 根,production 禁用)。
+    production_identity: dict[str, Any] | None = None
+    if arguments.application_root is not None:
+        try:
+            production_identity = run_production_preflight_from_args(arguments)
+        except AlrApplicationIdentityError as exc:
+            _emit_result(
+                None,
+                candidate_policy_status=candidate_policy_status,
+                source_value_guard=None,
+                production_identity=production_failure_summary(exc.code),
+            )
+            return EX_CONFIG_EXIT_CODE
     # S2-WP1 spawn value-guard:若 operator 供了 v2 pin,先在任何 DB 前 fail-closed 核驗
     # committed v2 身分(完整 + 可由 checkout 重算 + 與 pin 相符);任一不符即拒啟,不進 consumer。
     # resolve_pinned_learning_runtime_digest 的 recompute-from-checkout 是此 guard 的 source-truth
@@ -1401,7 +1499,9 @@ def main(argv: list[str] | None = None) -> int:
         "status": "DISABLED",
         "learning_runtime_digest_v2": None,
     }
-    if v2_pin is not None:
+    if production_identity is not None:
+        source_value_guard = production_identity["source_value_guard"]
+    elif v2_pin is not None:
         try:
             resolved = resolve_pinned_learning_runtime_digest()
         except Exception:  # noqa: BLE001 — 拒啟優先於任何錯誤外洩(fail-closed)
@@ -1430,42 +1530,48 @@ def main(argv: list[str] | None = None) -> int:
                     "learning_runtime_digest_v2": resolved,
                 }
         if source_value_guard["status"] != "PASS":
-            print(
-                json.dumps(
-                    {
-                        "schema_version": "alr_event_consumer_result_v2",
-                        "result": None,
-                        "candidate_policy": candidate_policy_status,
-                        "source_value_guard": source_value_guard,
-                        "authority": dict(_ZERO_AUTHORITY),
-                        "authority_counters": dict(_ZERO_AUTHORITY_COUNTERS),
-                    },
-                    sort_keys=True,
-                )
+            _emit_result(
+                None,
+                candidate_policy_status=candidate_policy_status,
+                source_value_guard=source_value_guard,
+                production_identity=None,
             )
             return 1
-    result = run_event_consumer(
-        dsn_path=arguments.dsn_file,
-        lock_path=arguments.lock_file,
-        max_batch=arguments.max_batch,
-        source_head=arguments.source_head,
-        candidate_evidence_directory=arguments.candidate_evidence_dir,
-        candidate_policy=candidate_policy,
-        expected_learning_runtime_digest=arguments.expected_learning_runtime_digest,
-        expected_compatibility_receipt=arguments.expected_compatibility_receipt,
-    )
-    print(
-        json.dumps(
-            {
-                "schema_version": "alr_event_consumer_result_v2",
-                "result": result,
-                "candidate_policy": candidate_policy_status,
-                "source_value_guard": source_value_guard,
-                "authority": dict(_ZERO_AUTHORITY),
-                "authority_counters": dict(_ZERO_AUTHORITY_COUNTERS),
-            },
-            sort_keys=True,
-        )
+    run_kwargs: dict[str, Any] = {
+        "dsn_path": arguments.dsn_file,
+        "lock_path": arguments.lock_file,
+        "max_batch": arguments.max_batch,
+        "source_head": arguments.source_head,
+        "candidate_evidence_directory": arguments.candidate_evidence_dir,
+        "candidate_policy": candidate_policy,
+        "expected_learning_runtime_digest": arguments.expected_learning_runtime_digest,
+        "expected_compatibility_receipt": arguments.expected_compatibility_receipt,
+    }
+    production_summary: dict[str, Any] | None = None
+    if production_identity is not None:
+        # production:唯一根 = application root;pinned head 重算(零 Git);DSN 綁
+        # aiml_engine_scanner;v1 receipt 為 root-scoped 路徑(preflight 已驗 containment)。
+        run_kwargs.update(production_identity["run_kwargs"])
+        production_summary = production_identity["summary"]
+    try:
+        result = run_event_consumer(**run_kwargs)
+    except AlrEventConsumerError as exc:
+        # §8.3:production 的 permanent pre-DB config/identity 失敗 → exit 78
+        # (unit RestartPreventExitStatus=78);其餘與 dev/test 路徑一致向上拋。
+        if production_identity is not None and is_permanent_pre_db_error(exc):
+            _emit_result(
+                None,
+                candidate_policy_status=candidate_policy_status,
+                source_value_guard=source_value_guard,
+                production_identity=production_failure_summary(str(exc)),
+            )
+            return EX_CONFIG_EXIT_CODE
+        raise
+    _emit_result(
+        result,
+        candidate_policy_status=candidate_policy_status,
+        source_value_guard=source_value_guard,
+        production_identity=production_summary,
     )
     return 0
 

@@ -31,7 +31,10 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HELPER_DIR = REPO_ROOT / "helper_scripts" / "maintenance_scripts"
 ML_TRAINING_DIR = REPO_ROOT / "program_code" / "ml_training"
-for _candidate in (HELPER_DIR, ML_TRAINING_DIR):
+# W2b:alr_application_identity 以 ml_training.* 套件形匯入其 sibling,故 program_code
+# 亦須入 path(單獨 CLI 執行時 pytest 的套件根注入不存在)。
+PROGRAM_CODE_DIR = REPO_ROOT / "program_code"
+for _candidate in (HELPER_DIR, ML_TRAINING_DIR, PROGRAM_CODE_DIR):
     if str(_candidate) not in sys.path:
         sys.path.insert(0, str(_candidate))
 
@@ -1019,6 +1022,348 @@ def generate_engine_scanner_grant_sql(manifest: dict[str, Any]) -> list[str]:
     return statements
 
 
+# --------------------------------------------------------------------------- #
+# W2b(§8.1/§10.5 #17)application closure allowlist + application-bundle manifest
+# builder。
+#
+# 契約:
+#   (a) checked-in allowlist(application_bundle_runtime_closure_v1.json)必須與
+#       「靜態 runtime import 閉包」雙向 exact-match——閉包 = entrypoint 起的 top-level
+#       transitive 匯入 + allowlist 顯式宣告的 runtime-reachable lazy helper 根
+#       (§8.1:undeclared runtime import 即 escape;declared-but-unreachable 即漂移);
+#   (b) 每個宣告路徑過 deny 謂詞:tests/caches/.pyc/.git/mutable 產物、effect-capable
+#       deploy/rollback driver、broker/order 模組、credential 材料、symlink、路徑逃逸;
+#   (c) manifest 只從「bound source head 的 committed blobs」產出(git ls-tree/cat-file,
+#       非 working tree);任一 allowlist 路徑 dirty/未提交 → typed 拒絕;
+#   (d) canonical 文件構造點共用 ml_training.alr_application_identity(runtime 整樹重算
+#       與 builder 不可能分歧);digest == application_bundle_digest(§8.1 #3)。
+# 全部 SOURCE 靜態執法,「不」認證任何 runtime;九 authority 恆 false。
+# --------------------------------------------------------------------------- #
+import alr_application_identity as _app_identity  # noqa: E402(ml_training 已入 sys.path)
+import learning_runtime_manifest as _lrm  # noqa: E402
+
+_APP_CLOSURE_REL = _app_identity.RUNTIME_CLOSURE_REL
+# effect-capable / broker-order / credential 的 deny 謂詞(§8.1 builder rejects)。
+_BUNDLE_FORBIDDEN_PATH_MARKERS = ("/tests/", "/__pycache__/", "/.git/")
+_BUNDLE_FORBIDDEN_PATH_PREFIXES = (
+    ".git/",
+    "docs/CCAgentWorkSpace/",
+    "memory/",
+    "program_code/api/",
+    "rust/",
+)
+_BUNDLE_FORBIDDEN_SUFFIXES = (".pyc", ".pyo", ".pem", ".key", ".p12", ".pfx")
+# helper_scripts/deploy 下只允許宣告過的非可執行 template 資源;任何 .py/.sh 都是
+# effect-capable deployment driver。
+_BUNDLE_FORBIDDEN_DEPLOY_CODE_SUFFIXES = (".py", ".sh")
+_EFFECT_CAPABLE_MODULE_MARKERS = ("_effects", "_install_driver", "_deploy")
+_EFFECT_CAPABLE_MODULE_NAMES = frozenset({
+    "agent_governance_s2_4_install",
+    "agent_governance_s2_4_install_driver",
+    "agent_governance_pg_observer_bootstrap",
+    "agent_governance_alr_quiesce_fence",
+    "agent_governance_execution",
+})
+_BROKER_ORDER_MODULE_MARKERS = ("bybit", "ibkr", "broker", "order_", "_order")
+
+
+def _toplevel_import_names(tree: ast.Module) -> set[str]:
+    """只收 module top-level 的 import 名(runtime 啟動即載入的邊;lazy 邊另行顯式宣告)。"""
+    names: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                names.add(alias.name)
+        elif isinstance(node, ast.ImportFrom) and node.module is not None:
+            names.add(node.module)
+            if node.module == "ml_training":
+                for alias in node.names:
+                    names.add("ml_training." + alias.name)
+    return names
+
+
+def build_engine_scanner_runtime_import_closure(
+    repo_root: Path = REPO_ROOT,
+    *,
+    lazy_helper_roots: tuple[str, ...] = (),
+) -> dict[str, str]:
+    """entrypoint 起的 top-level transitive 閉包 + 顯式 lazy helper 根 → {module: rel_path}。"""
+    closure: dict[str, str] = {}
+    stack = ["ml_training." + _ENGINE_SCANNER_ENTRY_MODULE, *lazy_helper_roots]
+    while stack:
+        resolved = _engine_scanner_resolve_module(repo_root, stack.pop())
+        if resolved is None:
+            continue
+        short, path = resolved
+        if short in closure:
+            continue
+        closure[short] = path.resolve().relative_to(repo_root.resolve()).as_posix()
+        stack.extend(sorted(_toplevel_import_names(
+            ast.parse(path.read_text(encoding="utf-8"))
+        )))
+    return closure
+
+
+def _bundle_path_deny_reasons(rel: str) -> list[str]:
+    """§8.1 deny 謂詞:單一宣告路徑的全部拒絕理由(空列表 = 通過)。"""
+    reasons: list[str] = []
+    probe = "/" + rel + "/"
+    if rel.startswith("/") or ".." in rel.split("/"):
+        reasons.append(f"path escapes the bundle root: {rel}")
+    for marker in _BUNDLE_FORBIDDEN_PATH_MARKERS:
+        if marker in probe:
+            reasons.append(f"forbidden path family (tests/caches/git): {rel}")
+            break
+    for prefix in _BUNDLE_FORBIDDEN_PATH_PREFIXES:
+        if rel.startswith(prefix):
+            reasons.append(f"forbidden mutable/effect path prefix: {rel}")
+            break
+    if rel.endswith(_BUNDLE_FORBIDDEN_SUFFIXES):
+        reasons.append(f"forbidden cache/credential material suffix: {rel}")
+    if rel.startswith("helper_scripts/deploy/") and rel.endswith(
+        _BUNDLE_FORBIDDEN_DEPLOY_CODE_SUFFIXES
+    ):
+        reasons.append(f"effect-capable deployment driver: {rel}")
+    module_name = rel.rsplit("/", 1)[-1].removesuffix(".py")
+    if rel.endswith(".py"):
+        if module_name in _EFFECT_CAPABLE_MODULE_NAMES or any(
+            marker in module_name for marker in _EFFECT_CAPABLE_MODULE_MARKERS
+        ):
+            reasons.append(f"effect-capable driver module: {rel}")
+        if any(marker in module_name for marker in _BROKER_ORDER_MODULE_MARKERS):
+            reasons.append(f"broker/order module: {rel}")
+    return reasons
+
+
+def derive_application_runtime_closure_status(
+    repo_root: Path = REPO_ROOT,
+    *,
+    closure_path: Path | None = None,
+) -> dict[str, Any]:
+    """§8.1/§10.5 #17 的中央再導出裁決(typed;caller 不可自證 PASS)。
+
+    PASS ⇔ (a) allowlist 過中央閘 ∧ (b) python_modules 與「靜態 runtime import 閉包 +
+    package init」雙向 exact-match ∧ (c) 全部宣告路徑過 deny 謂詞且為 repo 內既存常規檔
+    (非 symlink)∧ (d) 資源段與 SSOT 常量同步(learning_runtime_manifest 的 v2 輸入面、
+    migration span、dependency lock 雙檔、policy template、SCHEMA_FILES 註冊表)。
+    """
+    reasons: list[str] = []
+    file_path = closure_path or (repo_root / _APP_CLOSURE_REL)
+    try:
+        closure = _app_identity.load_runtime_closure(Path(file_path))
+    except _app_identity.AlrApplicationIdentityError as error:
+        return {
+            "schema_version": "application_runtime_closure_verdict_v1",
+            "status": "APPLICATION_BUNDLE_CLOSURE_INVALID",
+            "reasons": [f"runtime closure allowlist rejected: {error.code}"],
+            "closure_digest": None,
+            "declared_path_count": 0,
+            "production_authority_flags": {
+                "nine_authorities_false": True,
+                "production_apply_performed": False,
+                "running_attested": False,
+            },
+        }
+
+    lazy_roots = tuple(
+        entry["module"] for entry in closure["runtime_lazy_helper_roots"]
+    )
+    derived = build_engine_scanner_runtime_import_closure(
+        repo_root, lazy_helper_roots=lazy_roots
+    )
+    derived_paths = sorted(set(derived.values()))
+    declared_modules = list(closure["python_modules"])
+    for rel in sorted(set(derived_paths) - set(declared_modules)):
+        reasons.append(f"runtime import escapes the declared closure: {rel}")
+    for rel in sorted(set(declared_modules) - set(derived_paths)):
+        reasons.append(f"declared module is not runtime-import-reachable: {rel}")
+
+    declared_all = _app_identity.closure_declared_paths(closure)
+    for rel in declared_all:
+        reasons.extend(_bundle_path_deny_reasons(rel))
+        path = repo_root / rel
+        if path.is_symlink():
+            reasons.append(f"declared path is a symlink: {rel}")
+        elif not path.is_file():
+            reasons.append(f"declared path is not an existing regular file: {rel}")
+
+    # SSOT 常量同步:runtime preflight 的每個真實檔案讀取面必須被宣告(§8.1)。
+    expected_inputs = sorted(
+        set(_lrm.CAPTURE_INPUTS)
+        | set(_lrm.LEARNING_CODE_INPUTS_V2)
+        | {_lrm.REGIME_OOS_LABEL_CONTRACT}
+    )
+    if list(closure["learning_runtime_inputs"]) != expected_inputs:
+        reasons.append(
+            "learning_runtime_inputs differ from the learning_runtime_manifest v2 SSOT"
+        )
+    if list(closure["sql_fingerprints"]) != sorted(_lrm.MIGRATION_INPUTS):
+        reasons.append("sql_fingerprints differ from the migration-span SSOT")
+    if list(closure["dependency_lock_files"]) != sorted(
+        {_lrm.DEPENDENCY_LOCK_SPEC_FILE, _lrm.DEPENDENCY_LOCK_LOCK_FILE}
+    ):
+        reasons.append("dependency_lock_files differ from the dependency-lock SSOT")
+    if closure["policy_template"] != _lrm.POLICY_TEMPLATE:
+        reasons.append("policy_template differs from the learning_runtime_manifest SSOT")
+    expected_schemas = sorted(
+        "program_code/ml_training/schemas/aiml_gate_receipts/" + name
+        for name in set(central_validator.SCHEMA_FILES.values())
+    )
+    if list(closure["schema_resources"]) != expected_schemas:
+        reasons.append("schema_resources differ from the registered SCHEMA_FILES set")
+    if list(closure["compatibility_receipts"]) != sorted({
+        _app_identity.COMPATIBILITY_RECEIPT_V1_REL,
+        _app_identity.COMPATIBILITY_RECEIPT_V2_REL,
+    }):
+        reasons.append("compatibility_receipts differ from the pinned S2.2A receipt paths")
+
+    status = "PASS" if not reasons else "APPLICATION_BUNDLE_CLOSURE_INVALID"
+    return {
+        "schema_version": "application_runtime_closure_verdict_v1",
+        "status": status,
+        "reasons": sorted(set(reasons)),
+        "closure_digest": closure["self_digest"],
+        "declared_path_count": len(declared_all),
+        "runtime_import_closure_size": len(derived_paths),
+        "production_authority_flags": {
+            "nine_authorities_false": True,
+            "production_apply_performed": False,
+            "running_attested": False,
+        },
+    }
+
+
+def _git_ls_tree_entries(
+    repo_root: Path, source_head: str, paths: list[str]
+) -> dict[str, tuple[str, str, str]]:
+    """git ls-tree 於 bound head 取 {rel: (git_mode, object_type, blob_sha)}。"""
+    completed = subprocess.run(
+        ["git", "-C", str(repo_root), "ls-tree", "-z", source_head, "--", *paths],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    entries: dict[str, tuple[str, str, str]] = {}
+    for record in completed.stdout.split("\0"):
+        if not record:
+            continue
+        meta, rel = record.split("\t", 1)
+        git_mode, object_type, blob_sha = meta.split(" ")
+        entries[rel] = (git_mode, object_type, blob_sha)
+    return entries
+
+
+def build_application_bundle_manifest(
+    repo_root: Path = REPO_ROOT,
+    source_head: str | None = None,
+) -> dict[str, Any]:
+    """§8.1 #3:從 bound source head 的 committed blobs 產出 application_bundle_manifest_v1。
+
+    typed 拒絕(依序):source head 非當前 checkout HEAD、closure 裁決非 PASS、任一宣告
+    路徑 dirty/未提交、head 樹缺檔/symlink/非 blob。成功回
+    {status: "BUILT", application_bundle_digest, manifest};中央閘結構驗必過。
+    """
+    head = source_head if source_head is not None else _git_head(repo_root)
+    if not re.fullmatch(r"[0-9a-f]{40}", str(head)):
+        return {
+            "status": "APPLICATION_BUNDLE_SOURCE_HEAD_MISMATCH",
+            "reasons": [f"source_head is not a 40-hex commit: {head!r}"],
+        }
+    if head != _git_head(repo_root):
+        # committed-blob 溯源 + working-tree clean 檢查要求兩者同世代(重放時 checkout 該 head)。
+        return {
+            "status": "APPLICATION_BUNDLE_SOURCE_HEAD_MISMATCH",
+            "reasons": ["source_head is not the current checkout HEAD"],
+        }
+    closure_verdict = derive_application_runtime_closure_status(repo_root)
+    if closure_verdict["status"] != "PASS":
+        return {
+            "status": "APPLICATION_BUNDLE_CLOSURE_INVALID",
+            "reasons": closure_verdict["reasons"],
+        }
+    closure = _app_identity.load_runtime_closure(repo_root / _APP_CLOSURE_REL)
+    declared = _app_identity.closure_declared_paths(closure)
+
+    dirty = subprocess.run(
+        [
+            "git", "-C", str(repo_root), "status", "--porcelain", "-z", "--", *declared,
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    if dirty.strip("\0"):
+        dirty_paths = sorted({
+            record[3:] for record in dirty.split("\0") if len(record) > 3
+        })
+        return {
+            "status": "APPLICATION_BUNDLE_SOURCE_DIRTY",
+            "reasons": [
+                f"declared allowlist path is dirty/uncommitted: {rel}"
+                for rel in dirty_paths
+            ],
+        }
+
+    tree = _git_ls_tree_entries(repo_root, head, declared)
+    reasons: list[str] = []
+    entries: list[dict[str, str]] = []
+    for rel in declared:
+        meta = tree.get(rel)
+        if meta is None:
+            reasons.append(f"declared path is absent from the bound head tree: {rel}")
+            continue
+        git_mode, object_type, blob_sha = meta
+        if object_type != "blob" or git_mode == "120000":
+            reasons.append(f"declared path is not a committed regular blob: {rel}")
+            continue
+        blob = subprocess.run(
+            ["git", "-C", str(repo_root), "cat-file", "blob", blob_sha],
+            capture_output=True,
+            check=True,
+        ).stdout
+        entries.append({
+            "path": rel,
+            # §8.1:git 100755 → 0555 可執行;其餘一律 0444 不可變資料。
+            "mode": "0555" if git_mode == "100755" else "0444",
+            "sha256": "sha256:" + hashlib.sha256(blob).hexdigest(),
+        })
+    if reasons:
+        return {"status": "APPLICATION_BUNDLE_TREE_INVALID", "reasons": reasons}
+
+    # 宣告路徑已證 clean 且等於 head blobs → 以 checkout 重算 v2 身分(零 Git 依賴,
+    # 注入 bound head 作 telemetry;其輸入面 ⊆ declared,已由 closure 裁決保證)。
+    v2_manifest, v2_errors = _lrm.try_build_learning_runtime_manifest_v2(
+        repo_root, repo_source_head=head
+    )
+    if v2_manifest is None:
+        return {
+            "status": "APPLICATION_BUNDLE_TREE_INVALID",
+            "reasons": [f"learning runtime v2 identity unbuildable: {err}" for err in v2_errors],
+        }
+    manifest = _app_identity.build_application_bundle_document(
+        source_head=head,
+        learning_runtime_digest_v2=v2_manifest["self_digest"],
+        runtime_closure_digest=central_validator.artifact_self_digest(closure),
+        entries=entries,
+    )
+    central_errors = central_validator.validate_aiml_artifact(manifest)
+    if central_errors:
+        return {"status": "APPLICATION_BUNDLE_TREE_INVALID", "reasons": central_errors}
+    return {
+        "status": "BUILT",
+        "source_head": head,
+        "application_bundle_digest": manifest["self_digest"],
+        "entry_count": len(entries),
+        "closure_digest": closure["self_digest"],
+        "manifest": manifest,
+        "production_authority_flags": {
+            "nine_authorities_false": True,
+            "production_apply_performed": False,
+            "running_attested": False,
+        },
+    }
+
+
 def _main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="action", required=True)
@@ -1037,11 +1382,29 @@ def _main(argv: list[str] | None = None) -> int:
         "engine-scanner-split",
         help="再導出 §2.1 engine-scanner privilege-split verdict(typed;不可自證)",
     )
+    sub.add_parser(
+        "application-closure",
+        help="再導出 §8.1 runtime-closure allowlist verdict(typed;不可自證)",
+    )
+    bundle = sub.add_parser(
+        "application-bundle-manifest",
+        help="從 bound head 的 committed blobs 產出 application_bundle_manifest_v1",
+    )
+    bundle.add_argument("--source-head", default=None)
     args = parser.parse_args(argv)
     if args.action == "engine-scanner-split":
         verdict = derive_engine_scanner_privilege_split()
         print(json.dumps(verdict, ensure_ascii=False, indent=2, sort_keys=True))
         return 0 if verdict["status"] == "PASS" else 2
+    if args.action == "application-closure":
+        verdict = derive_application_runtime_closure_status()
+        print(json.dumps(verdict, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0 if verdict["status"] == "PASS" else 2
+    if args.action == "application-bundle-manifest":
+        result = build_application_bundle_manifest(source_head=args.source_head)
+        summary = {key: value for key, value in result.items() if key != "manifest"}
+        print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0 if result["status"] == "BUILT" else 2
     if args.action == "w0-emit":
         result = emit_w0_receipts(
             out_dir=args.out,

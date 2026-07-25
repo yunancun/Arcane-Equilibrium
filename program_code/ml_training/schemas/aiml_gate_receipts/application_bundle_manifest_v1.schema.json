@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/application_bundle_manifest_v1.schema.json",
+  "title": "application_bundle_manifest_v1",
+  "description": "S2.4 §8.1 content identity #3: canonical manifest whose sorted {path, mode, sha256} entries plus source head, entrypoint, learning_runtime_digest_v2, bundle-layout version and required runtime resources define application_bundle_digest (== self_digest). Produced only from committed blobs at the bound source head via agent_governance_s2_4_install.build_application_bundle_manifest; independently recomputed from the immutable application root tree by ml_training.alr_application_identity. Closed by construction: entry modes admit only immutable 0444/0555, paths are repository-relative with no escape, and the external application-data read surface is the frozen §8.3 constant set. self_digest is integrity evidence only and never a runtime/production claim.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "program_id",
+    "component",
+    "bundle_layout_version",
+    "entrypoint",
+    "source_head",
+    "learning_runtime_digest_v2",
+    "runtime_closure_digest",
+    "required_runtime_resources",
+    "entries",
+    "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "application_bundle_manifest_v1"},
+    "program_id": {"const": "AIML-LONG-LIVED-LANDING-V2"},
+    "component": {"const": "engine_scanner"},
+    "bundle_layout_version": {"const": "aiml_app_bundle_layout_v1"},
+    "entrypoint": {"const": "ml_training.alr_event_consumer"},
+    "source_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "learning_runtime_digest_v2": {"$ref": "#/$defs/digest"},
+    "runtime_closure_digest": {"$ref": "#/$defs/digest"},
+    "required_runtime_resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dsn_credential_name",
+        "candidate_policy_file",
+        "topology_guard_file",
+        "candidate_evidence_directory"
+      ],
+      "properties": {
+        "dsn_credential_name": {"const": "pg-dsn"},
+        "candidate_policy_file": {
+          "const": "/etc/arcane-equilibrium/aiml/engine-scanner/candidate-policy.json"
+        },
+        "topology_guard_file": {
+          "const": "/etc/arcane-equilibrium/aiml/engine-scanner/topology-runtime-guard.json"
+        },
+        "candidate_evidence_directory": {
+          "const": "/var/lib/arcane-equilibrium/aiml/engine-scanner/candidate-evidence"
+        }
+      }
+    },
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "mode", "sha256"],
+        "properties": {
+          "path": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.\\-]*(/[A-Za-z0-9_.\\-]+)*$",
+            "not": {"pattern": "(^|/)\\.\\.(/|$)"}
+          },
+          "mode": {"enum": ["0444", "0555"]},
+          "sha256": {"$ref": "#/$defs/digest"}
+        }
+      }
+    },
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}

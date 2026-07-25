@@ -1756,6 +1756,41 @@ def validate_aiml_artifact(
                 errors.append(
                     f"pg acl manifest {section} privileges must be sorted and unique"
                 )
+    if schema_version == "application_bundle_runtime_closure_v1":
+        # S2.4(WP4·W2b·§8.1)checked-in runtime-closure allowlist:closed schema 之上,再驗
+        # self_digest 反偽造重算與每個路徑段的 canonical 排序唯一化(bytes↔digest 一一對應)。
+        # ⚠ 乾淨的 [] 「不」等於 closure PASS:與靜態 runtime import 閉包的雙向 exact-match、
+        # effect-capable/broker/credential deny、SSOT 常量同步(learning_runtime_manifest/
+        # SCHEMA_FILES)由 agent_governance_s2_4_install.derive_application_runtime_closure_status
+        # 導出;中央閘此分支只證結構/完整性。
+        if artifact["self_digest"] != artifact_self_digest(artifact):
+            errors.append("application runtime closure self_digest is invalid")
+        for section in (
+            "python_modules",
+            "package_init_files",
+            "compatibility_receipts",
+            "learning_runtime_inputs",
+            "sql_fingerprints",
+            "dependency_lock_files",
+            "schema_resources",
+        ):
+            if artifact[section] != sorted(set(artifact[section])):
+                errors.append(
+                    f"application runtime closure {section} must be sorted and unique"
+                )
+    if schema_version == "application_bundle_manifest_v1":
+        # S2.4(WP4·W2b·§8.1 #3)application_bundle_manifest:closed schema 之上,再驗
+        # self_digest(== application_bundle_digest)反偽造重算與 entries 依 path 排序唯一。
+        # ⚠ 乾淨的 [] 只證結構/完整性,「不」證 manifest 出自 committed blobs 或與某棵真樹
+        # 相符——builder 溯源屬 agent_governance_s2_4_install.build_application_bundle_manifest,
+        # runtime 整樹重算屬 ml_training.alr_application_identity.verify_application_root。
+        if artifact["self_digest"] != artifact_self_digest(artifact):
+            errors.append("application bundle manifest self_digest is invalid")
+        entry_paths = [entry["path"] for entry in artifact["entries"]]
+        if entry_paths != sorted(entry_paths) or len(entry_paths) != len(set(entry_paths)):
+            errors.append(
+                "application bundle manifest entries must be sorted by path and unique"
+            )
     if schema_version == S2_4_OPERATOR_AUTHORIZATION_SCHEMA_VERSION:
         # S2.4(WP4·W1·CP4)§9.1 四 trust profile:closed schema(CP2b)之上,再驗 profile 解析、
         # payload_fields == 該 profile 的 §9.1 ordered list、namespace/identity 綁定、armored SSHSIG
