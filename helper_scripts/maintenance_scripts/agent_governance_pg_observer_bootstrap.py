@@ -3,9 +3,23 @@
 把 S1.1(唯讀身分證明)/ S1.3(最小權限契約)/ S1.5(可拋棄 role/ACL apply+rollback)接成
 一條「生產唯讀 observer 角色 bootstrap」的 SOURCE seam:一張 exact typed intent、一組**結構化
 allowlist**(絕非呼叫端 raw SQL)產出的最小唯讀 observer grant set、一個 applier、與一位**相異**
-獨立驗證者的唯讀證明,外加精確 REVOKE/DROP rollback。這是 S2.0 的 **SOURCE_READY** 交付,不是
-EFFECT_DONE:真正對生產 PG 的 apply 在有一張 exact operator SSHSIG 之前**恆 fail-closed**——回傳
-一個 typed ``EXTERNAL_VERIFICATION_PENDING`` result,**永不**假成功。
+獨立驗證者的唯讀證明,外加精確 REVOKE/DROP rollback。這是 S2.0 的 **SOURCE_READY** 交付。
+
+**Reachable(但 authority-locked)生產閘(W0a + W0a 真實性強化)。** 生產 apply 不再是無條件 deferred:
+``apply_observer_bootstrap`` 多一個 typed ``ObserverBootstrapProductionDriver`` 參數(預設 ``None``),production
+目標走一條 mirror §6 的 fail-closed 閘(target-host 身分 → 必觀 ``learning.alr_consumer_events`` 依賴 → fresh
+domain-separated operator SSHSIG → 結構化依賴 → driver)。**源碼/測試/Mac 恆 driver=None**,於閘的 step 5 回傳
+typed ``EXTERNAL_VERIFICATION_PENDING`` 且**零變更**;``APPLIED``(``production_apply_performed=true``)唯有在真
+Linux host driver 回傳一份**trusted-host 簽章的 apply attestation**(``pg_observer_bootstrap_apply_attestation_v1``
+——綁 exact intent、applied 目錄 digest、獨立驗證者 reobserved(==applied,T2)、與**簽章的** trusted_host_time)
+且通過 :func:`validate_apply_attestation`(T1 SSHSIG + §9.1 trust-root 綁定、T2 reobserved==applied、T5 trusted-clock
+窗)時才 emit。bare ``evidence_class`` 只是第一道 cheap filter,不再是 unlock;注入的 simulation/disposable driver
+的 ``LOCAL_REPRODUCIBLE``/``STRUCTURAL_ONLY`` 證據**永不**能偽造生產旗標。任何 mutation 若**補償無法確認**
+→ 回傳 ``RECOVERY_REQUIRED``(絕不冒充「已補償」pending)。**誠實界線**:離線 validator/CLI 只證簽章完整性 +
+trust-root 綁定,**不**背書「真 apply 過」;真正的 runtime-apply 真實性(§9.1 私鑰不在 Mac/trade-core)屬 S2.0 EFFECT
+session 的帶外 trusted-host 驗證(OPS-2 closure predicate 未動)。W0a 只 land 這條 reachable 閘 + driver protocol +
+attestation 驗證 + schema + 丟棄式測試鑰測試;**絕不**在生產跑它、**絕不**注入 live ``route_task`` effect 節點。
+**永不**假成功。
 
 **誠實界線(CLAUDE 四 / Typed Authority Matrix)。** land 時不接觸任何生產 PG/psql/network/broker。
 可拋棄叢集測試(S1.1/S1.3/S1.5 同一 pattern)會真的 ``initdb`` 起一個丟棄式 cluster、真跑
@@ -27,17 +41,13 @@ effect 綁定(那要 S2.0 EFFECT session)。
 
 from __future__ import annotations
 
-import base64
-import binascii
 import hashlib
-import hmac
-import json
 import re
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Protocol
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -49,12 +59,62 @@ for _candidate in (HELPER_DIR, ML_TRAINING_DIR):
         sys.path.insert(0, str(_candidate))
 
 # 唯讀消費:S1.5 的 PG 識別碼引號 + role/ACL catalog 投影;S1.3 的最小權限常量/憑證拒絕碼;
-# S1 target-host 的 SSHSIG 信任根與驗證基元;中央 validator 的 canonical_digest / artifact_self_digest。
+# 中央 validator 的 canonical_digest / artifact_self_digest。SSHSIG 信任根與驗證基元已隨 operator 授權 +
+# apply attestation 加密葉層移至姊妹模組 agent_governance_pg_observer_bootstrap_attestation(見下方再匯出)。
 import agent_governance_component_effects as ce  # noqa: E402
 import agent_governance_identity_acl_contract as acl  # noqa: E402
-import agent_governance_aiml_trusted_host as trusted  # noqa: E402
 import aiml_gate_receipt_validator as central_validator  # noqa: E402
 from agent_governance_schema import schema_subset_errors  # noqa: E402
+
+# ── W0a helper decomposition(§10.4 行為守恆):operator 授權 + apply attestation 加密葉層已抽到
+#    姊妹葉模組;此處單向再匯出所有被搬移的符號,使既有呼叫端 obs.<symbol> 一律仍解析到同一物件
+#    (單一真實來源在葉模組;葉模組不反向匯入本模組,無循環匯入)。
+from agent_governance_pg_observer_bootstrap_attestation import (  # noqa: E402,F401
+    OPERATOR_AUTHORIZATION_SCHEMA_VERSION,
+    OPERATOR_IDENTITY,
+    OPERATOR_FINGERPRINT,
+    OPERATOR_PUBLIC_KEY,
+    OPERATOR_ALGORITHM,
+    OPERATOR_SIGNATURE_NAMESPACE,
+    MAX_AUTHORIZATION_TTL,
+    AUTHORIZATION_FIELDS,
+    APPLY_ATTESTATION_SCHEMA_VERSION,
+    ATTESTOR_IDENTITY,
+    ATTESTOR_FINGERPRINT,
+    ATTESTOR_PUBLIC_KEY,
+    ATTESTOR_ALGORITHM,
+    APPLY_ATTESTATION_NAMESPACE,
+    MAX_APPLY_ATTESTATION_TTL,
+    ATTESTATION_FIELDS,
+    APPLY_ATTESTATION_SCHEMA_PATH,
+    DIGEST_RE,
+    HEAD_RE,
+    EVIDENCE_TTL_SECONDS,
+    PRODUCTION_APPLIED_EVIDENCE_CLASS,
+    PgObserverBootstrapError,
+    SecretLeakageError,
+    SECRET_LIKE_RE,
+    _contains_secret_like,
+    _guard_no_secret,
+    canonical_bytes,
+    _schema,
+    _parse_time,
+    _plus_seconds,
+    intent_self_digest,
+    authorization_digest,
+    apply_attestation_digest,
+    _SSH_SIGNATURE_ARMOR_MARKERS,
+    _operator_signature_pem_body_is_strict_base64,
+    _guard_operator_signature_pem_body,
+    _guard_apply_attestation_signature_pem_body,
+    build_operator_authorization,
+    validate_operator_authorization,
+    _operator_authorization_is_valid,
+    operator_authorization_binding_errors,
+    build_apply_attestation,
+    validate_apply_attestation,
+    _apply_attestation_binding_errors,
+)
 
 
 ADAPTER_ID = "pg_observer_bootstrap_adapter_v1"
@@ -71,8 +131,6 @@ RESULT_SCHEMA_PATH = SCHEMA_DIR / f"{RESULT_SCHEMA_VERSION}.schema.json"
 POSTCHECK_SCHEMA_PATH = SCHEMA_DIR / f"{POSTCHECK_SCHEMA_VERSION}.schema.json"
 ROLLBACK_SCHEMA_PATH = SCHEMA_DIR / f"{ROLLBACK_SCHEMA_VERSION}.schema.json"
 
-DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
-HEAD_RE = re.compile(r"^[0-9a-f]{40}$")
 SQLSTATE_RE = re.compile(r"^[0-9A-Z]{5}$")
 
 TARGET_CLASSES = frozenset({"disposable_local", "production"})
@@ -80,14 +138,22 @@ DISPOSABLE_TARGET_CLASS = "disposable_local"
 PRODUCTION_TARGET_CLASS = "production"
 EVIDENCE_CLASSES = frozenset({"LOCAL_REPRODUCIBLE", "STRUCTURAL_ONLY"})
 RESULT_STATUSES = frozenset({
+    "APPLIED",
     "APPLIED_ROLLED_BACK_EXACT",
     "ROLLED_BACK_INTERRUPTED",
     "NOT_RESTORED_FAILED",
+    # W0a(F2):生產 apply 失敗且**補償無法確認**(compensate 拋錯或 role 仍在)→ 新 additive status,
+    # 帶明確 residual reason(observer role 可能殘留,需 operator 手動 recovery),絕不冒充「已補償」pending。
+    "RECOVERY_REQUIRED",
     "EXTERNAL_VERIFICATION_PENDING",
     "FAILED",
 })
+# 非生產目標的主機標記:production apply 若 target_host 命名 Mac/dev/loopback → 於 step 2 typed
+# 非成功(zero mutation)。真正的主機身分背書屬 driver + operator SSHSIG + 平台層(離線源碼不可自證)。
+_NON_PRODUCTION_HOST_MARKERS = (
+    "localhost", "127.0.0.1", "::1", ".local", "macbook", "mac-", "darwin", "dev-", "laptop",
+)
 TTL_CEILING_SECONDS = 3600
-EVIDENCE_TTL_SECONDS = 900
 
 # 唯一可選的結構化 grant set(enum key,非 raw SQL);任何更寬的 selector 一律 fail-closed。
 OBSERVER_GRANT_SET_SELECTOR = "observer_read_only_v1"
@@ -114,41 +180,14 @@ SET_ROLE_DENIAL_SQLSTATES = frozenset({"42501", "0LP01", "42P01"})
 # uid/role label 不得命名的特權身分 token(鏡像 S1.3 ``_PRIVILEGED_IDENTITY_TOKENS``)。
 _PRIVILEGED_IDENTITY_TOKENS = ("root", "superuser", "sudo", "wheel", "admin")
 
-# ── operator SSHSIG 信任根(沿用 S0.3/S1 公鑰/指紋,專屬 identity + namespace 做 domain separation) ──
-OPERATOR_AUTHORIZATION_SCHEMA_VERSION = "pg_observer_bootstrap_operator_authorization_v1"
-OPERATOR_IDENTITY = "aiml-s2-observer-bootstrap-operator-v1"
-OPERATOR_FINGERPRINT = trusted.EXPECTED_S1_TARGET_HOST_SIGNER_FINGERPRINT
-OPERATOR_PUBLIC_KEY = trusted.S1_TRUSTED_TARGET_HOST_PUBLIC_KEY
-OPERATOR_ALGORITHM = trusted.EXECUTION_BUNDLE_ALGORITHM
-OPERATOR_SIGNATURE_NAMESPACE = "arcane-equilibrium-aiml-s2-observer-bootstrap"
-MAX_AUTHORIZATION_TTL = timedelta(minutes=15)
-AUTHORIZATION_FIELDS = frozenset({
-    "schema_version", "signer_identity", "signer_fingerprint", "algorithm",
-    "signature_namespace", "intent_id", "intent_digest", "source_head",
-    "target_host", "applier_node_id", "postcheck_node_id",
-    "issued_at", "expires_at", "authorization_digest",
-})
 
-# 機密掃描(沿用 S1.1/S1.3/S1.5 樣態:github token / credential 賦值 / auth header / postgres DSN 憑證形)。
-SECRET_LIKE_RE = re.compile(
-    r"(?:github_pat_|gh[pousr]_[A-Za-z0-9]{12,})"
-    r"|(?:access[_-]?token|auth(?:orization)?|client[_-]?secret|password|"
-    r"pgpassword|private[_-]?key)\s*[:=]"
-    r"|(?:basic|bearer)\s+[A-Za-z0-9._~+/=-]{12,}"
-    r"|postgres(?:ql)?://[^\s:/@]+:[^\s:/@]+@",
-    re.IGNORECASE,
-)
+# ── W0a(F4)生產 intent 必須觀察的 read-only 依賴關係(design S2.4 §2.2):S2.1 需觀 consumer-session 狀態 ──
+REQUIRED_PRODUCTION_OBSERVED_SCHEMA = "learning"
+REQUIRED_PRODUCTION_OBSERVED_RELATION = "alr_consumer_events"
+
 SECRET_PATTERNS_CHECKED = (
     "auth_scheme_token", "credential_assignment", "github_token", "postgres_dsn_credentials",
 )
-
-
-class PgObserverBootstrapError(RuntimeError):
-    """Base for a would-be observer artifact that cannot be safely emitted (fail-closed)."""
-
-
-class SecretLeakageError(PgObserverBootstrapError):
-    """Raised when a would-be artifact field carries secret-like content."""
 
 
 class PgObserverReadOnlyError(PgObserverBootstrapError):
@@ -156,18 +195,84 @@ class PgObserverReadOnlyError(PgObserverBootstrapError):
 
 
 # --------------------------------------------------------------------------- #
+# typed production-driver protocol (fixed operations only; NEVER raw SQL / DSN)
+# --------------------------------------------------------------------------- #
+class ObserverBootstrapProductionDriver(Protocol):
+    """Typed, fixed-operation production driver for the reachable S2.0 apply path.
+
+    誠實界線:此 protocol 只暴露**固定操作**方法,呼叫端**永不**遞交 raw SQL、DSN 字串或
+    admin 憑證——``create_read_only_observer`` 消費的是由 ``generate_observer_grant_sql`` 結構化
+    allowlist 投影出的 grant_set(``CREATE ROLE ... NO*`` + ``GRANT USAGE``/``GRANT SELECT``),
+    driver 內部持有一個**不可序列化、僅本機**的 PG admin handle。具體 Linux 實作是 authority-locked
+    且 dormant 的:只有在後續 S2.0 EFFECT session 於真主機上供給 handle 時才開真連線。W0a 只 land
+    這個 protocol + reachable 閘,W0a **絕不**在生產跑它(源碼/測試路徑 driver 恆為 None)。
+
+    ``evidence_class`` W0a 後降級為**第一道 cheap filter**(非最終 unlock):一個回報 ``LOCAL_REPRODUCIBLE``/
+    ``STRUCTURAL_ONLY`` 的 simulation/disposable driver 於請求 attestation **之前**即被擋下。真正解鎖
+    ``APPLIED`` 的是 ``signed_apply_attestation`` 回傳、且通過 :func:`validate_apply_attestation`(T1 簽章 +
+    trust-root 綁定、T2 reobserved==applied、T5 trusted-clock 窗)的**簽章 attestation**;bare
+    ``evidence_class`` 屬性不再足以令 ``production_apply_performed=true``。
+    """
+
+    evidence_class: str
+
+    def observer_role_present(self, *, role: str) -> bool:
+        """Read-only catalog probe: does the observer role already exist? (pre-state guard)."""
+        ...
+
+    def signed_apply_attestation(
+        self, *, intent: dict[str, Any], applied_grant_set_digest: str, reobserved_digest: str
+    ) -> dict[str, Any]:
+        """Return ``{"attestation": <pg_observer_bootstrap_apply_attestation_v1 object>,
+                    "signature": <raw ASCII-armored SSHSIG bytes>}``.
+
+        The attestation binds the exact intent identity, the applied catalog digest, the DISTINCT
+        verifier's ``reobserved_digest`` (== applied), ``evidence_class=PLATFORM_ATTESTED``, and a
+        trusted-host-signed timestamp; it is signed by the §9.1 trust-root key family under the
+        observer-bootstrap-apply namespace.  Only a real trusted host that holds the off-repo
+        private key can produce a signature that verifies against the pinned ``ATTESTOR_PUBLIC_KEY``.
+        """
+        ...
+
+    def observe_acl_state(self, *, role: str, schema: str, relations: list[str]) -> str:
+        """Read-only observation → the ``observer_role_acl_state_digest`` projection digest."""
+        ...
+
+    def create_read_only_observer(self, *, grant_set: dict[str, Any]) -> None:
+        """Drive the fixed structured CREATE ROLE + GRANT USAGE/SELECT (grant_set only; no caller SQL)."""
+        ...
+
+    def independent_read_only_proof(self, *, grant_set: dict[str, Any]) -> dict[str, Any]:
+        """The DISTINCT verifier node re-observes the provisioned observer and returns
+        ``{read_only_proof, reobserved_digest, verifier_capture_digest}`` — the platform-attested
+        denial evidence (write->42501, SET ROLE->42501, credential->28P01, harmless search_path)."""
+        ...
+
+    def compensate(self, *, grant_set: dict[str, Any]) -> None:
+        """Ownership-aware failure/compensation rollback ONLY (a successful production apply leaves
+        the observer provisioned for S2.1; this is never used to undo an attested success)."""
+        ...
+
+
+def _is_attested_production_target_host(target_host: Any) -> bool:
+    """Structural step-2 guard: a production apply must name a non-Mac/non-dev/non-loopback host.
+
+    誠實界線:離線源碼**無法**真正背書「我此刻正跑在該 Linux 主機上」(那是平台層事實);真主機身分
+    由 operator SSHSIG(綁 exact target_host)+ driver 只存在於真主機 + 平台背書共同保證。此處只做
+    結構性理智檢查,擋掉明顯的 Mac/dev/loopback 標記,令 Mac/non-target 於 step 2 即 typed 非成功。
+    """
+
+    if not isinstance(target_host, str) or not target_host.strip():
+        return False
+    lowered = target_host.lower()
+    return not any(marker in lowered for marker in _NON_PRODUCTION_HOST_MARKERS)
+
+
+# --------------------------------------------------------------------------- #
 # canonical digest helpers (reuse central validator; local bytes for SSHSIG)
 # --------------------------------------------------------------------------- #
 canonical_digest = central_validator.canonical_digest
 artifact_self_digest = central_validator.artifact_self_digest
-
-
-def canonical_bytes(value: Any) -> bytes:
-    """Return the exact bytes the operator signs / the SSHSIG is verified against."""
-
-    return json.dumps(
-        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False,
-    ).encode("utf-8")
 
 
 def _file_sha256(path: Path) -> str:
@@ -181,51 +286,9 @@ def source_sha256() -> str:
     return _file_sha256(SOURCE_PATH)
 
 
-@lru_cache(maxsize=None)
-def _schema(path_str: str) -> dict[str, Any]:
-    return json.loads(Path(path_str).read_text(encoding="utf-8"))
-
-
-def _parse_time(value: Any) -> datetime:
-    parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    if parsed.tzinfo is None:
-        raise ValueError("timezone is required")
-    return parsed.astimezone(timezone.utc)
-
-
-def _plus_seconds(iso: str, seconds: int) -> str:
-    return (_parse_time(iso) + timedelta(seconds=seconds)).isoformat().replace("+00:00", "Z")
-
-
-def intent_self_digest(intent: dict[str, Any]) -> str:
-    return canonical_digest({k: v for k, v in intent.items() if k != "self_digest"})
-
-
-def authorization_digest(value: dict[str, Any]) -> str:
-    return canonical_digest({k: v for k, v in value.items() if k != "authorization_digest"})
-
-
 # --------------------------------------------------------------------------- #
 # secret scan (fail-closed)
 # --------------------------------------------------------------------------- #
-def _contains_secret_like(value: Any) -> bool:
-    if isinstance(value, str):
-        return SECRET_LIKE_RE.search(value) is not None
-    if isinstance(value, list):
-        return any(_contains_secret_like(item) for item in value)
-    if isinstance(value, dict):
-        return any(
-            _contains_secret_like(key) or _contains_secret_like(item)
-            for key, item in value.items()
-        )
-    return False
-
-
-def _guard_no_secret(payload: Any) -> None:
-    if _contains_secret_like(payload):
-        raise SecretLeakageError("observer-bootstrap payload carries secret-like content")
-
-
 def _result_secret_scan_view(result: dict[str, Any]) -> dict[str, Any]:
     # operator_signature_pem 是**公開的** SSHSIG(非機密):其 base64 body 理論上可能以 "auth=" padding
     # 收尾而誤觸 secret 正則。它是受控欄位(來自 operator 簽章 bytes),故 build 與 validate 一致地
@@ -241,50 +304,13 @@ def _result_secret_scan_view(result: dict[str, Any]) -> dict[str, Any]:
     # (credential_assignment / auth_scheme_token / DSN)在結構上皆不可能搭載
     # ——唯一能搭載的是 base64-**編碼**後的 bytes(非可讀 plaintext,落在既有離線捏造邊界內,非 plaintext
     # 序列化通道),故此 secret-scan 排除**可證安全**,絕非放行機密的破口。
-    return {k: v for k, v in result.items() if k != "operator_signature_pem"}
-
-
-# operator_signature_pem 的 SSHSIG armor 標記列(去 armor 時據此剝除,取得純 body)。
-_SSH_SIGNATURE_ARMOR_MARKERS = (
-    "-----BEGIN SSH SIGNATURE-----",
-    "-----END SSH SIGNATURE-----",
-)
-
-
-def _operator_signature_pem_body_is_strict_base64(value: str) -> bool:
-    """去 armor(剝除 BEGIN/END 標記列 + 所有換行、串接)後,判斷 body 是否為嚴格標準 base64。
-
-    真正的 ``ssh-keygen -Y sign`` armor body 去 armor 後是合法標準 base64,
-    ``base64.b64decode(body, validate=True)`` 成功;plaintext 憑證形一律 decode 失敗:
-    ``password=hunter2`` / ``pgpassword=…`` 的 ``=`` 落在字串中段=非法 padding(Non-base64 digit),
-    ``bearer\\nAAAA…`` 去 armor 後長度不可解(Incorrect padding),armor-wrapped DSN 亦含非 base64 字元。
-    FIX-10(E2 P2):body 一旦被證明是嚴格 base64,就不可能夾帶可讀的 plaintext ``password=`` /
-    ``pgpassword=`` / ``bearer …`` / DSN 機密,故 ``_result_secret_scan_view`` 排除此欄位可證安全。
-    非字串 / 空 body / 不可 decode 一律回 False(fail-closed)。
-    """
-
-    if not isinstance(value, str):
-        return False
-    body = "".join(
-        line for line in value.split("\n") if line not in _SSH_SIGNATURE_ARMOR_MARKERS
-    )
-    if not body:
-        return False
-    try:
-        base64.b64decode(body, validate=True)
-    except (binascii.Error, ValueError):
-        return False
-    return True
-
-
-def _guard_operator_signature_pem_body(value: Any) -> None:
-    # FIX-10(E2 P2)build 期護欄:APPLIED result 的 operator_signature_pem 若為非 None 字串,其 armor body
-    # 必為嚴格 base64,否則絕不 emit(fail-closed)。與 validate 期同一判準對稱,確保 build 永遠不會產出
-    # 「armor 外殼合法但 body 夾帶可讀 plaintext」的簽章欄位。
-    if value is not None and not _operator_signature_pem_body_is_strict_base64(value):
-        raise SecretLeakageError(
-            "operator_signature_pem body is not strict base64 (possible non-signature payload)"
-        )
+    # W0a(§4):apply_attestation_signature_pem 是**另一份公開的** SSHSIG(非機密),其 armor body 亦可能誤觸
+    # secret 正則,故與 operator_signature_pem 一致排除於 secret 掃描之外;兩者皆另以嚴格 base64 body 護欄
+    # (build + validate)無條件把關,故此排除可證安全(不可搭載可讀 plaintext 機密)。
+    return {
+        k: v for k, v in result.items()
+        if k not in {"operator_signature_pem", "apply_attestation_signature_pem"}
+    }
 
 
 def _names_privileged_identity(label: Any) -> bool:
@@ -532,179 +558,6 @@ def probe_credential_escalation_denied(
     except Exception:  # pragma: no cover - best effort  # noqa: BLE001
         pass
     raise PgObserverReadOnlyError("escalated credential connected; the observer is not fail-closed")
-
-
-# --------------------------------------------------------------------------- #
-# operator SSHSIG authorization (reuse the S1 pattern; NEW namespace + identity)
-# --------------------------------------------------------------------------- #
-def build_operator_authorization(*, intent: dict[str, Any], source_head: str) -> dict[str, Any]:
-    """Project one exact typed observer intent into the bytes the operator signs."""
-
-    if not isinstance(intent, dict):
-        raise PgObserverBootstrapError("operator authorization intent must be an object")
-    if not HEAD_RE.fullmatch(str(source_head)):
-        raise PgObserverBootstrapError("operator authorization source_head must be exact 40-hex")
-    for field in ("intent_id", "self_digest", "target_host", "applier_node_id", "postcheck_node_id", "created_at", "expires_at"):
-        if not intent.get(field):
-            raise PgObserverBootstrapError(f"operator authorization intent lacks required field {field}")
-    if not DIGEST_RE.fullmatch(str(intent["intent_id"])):
-        raise PgObserverBootstrapError("operator authorization intent_id must be a sha256 digest")
-    if intent["self_digest"] != intent_self_digest(intent):
-        raise PgObserverBootstrapError("operator authorization intent self_digest does not match its bytes")
-    issued = _parse_time(intent["created_at"])
-    intent_expiry = _parse_time(intent["expires_at"])
-    expires = min(intent_expiry, issued + MAX_AUTHORIZATION_TTL)
-    if expires <= issued:
-        raise PgObserverBootstrapError("operator authorization intent interval is invalid")
-    authorization: dict[str, Any] = {
-        "schema_version": OPERATOR_AUTHORIZATION_SCHEMA_VERSION,
-        "signer_identity": OPERATOR_IDENTITY,
-        "signer_fingerprint": OPERATOR_FINGERPRINT,
-        "algorithm": OPERATOR_ALGORITHM,
-        "signature_namespace": OPERATOR_SIGNATURE_NAMESPACE,
-        "intent_id": intent["intent_id"],
-        "intent_digest": intent["self_digest"],
-        "source_head": source_head,
-        "target_host": intent["target_host"],
-        "applier_node_id": intent["applier_node_id"],
-        "postcheck_node_id": intent["postcheck_node_id"],
-        "issued_at": issued.isoformat().replace("+00:00", "Z"),
-        "expires_at": expires.isoformat().replace("+00:00", "Z"),
-    }
-    authorization["authorization_digest"] = authorization_digest(authorization)
-    return authorization
-
-
-def validate_operator_authorization(
-    authorization: Any,
-    signature: Any,
-    *,
-    intent: dict[str, Any],
-    source_head: str,
-    now: str,
-) -> list[str]:
-    """Validate structure, exact-intent bindings, time window, trust root, and SSHSIG."""
-
-    errors: list[str] = []
-    if not isinstance(authorization, dict):
-        return ["operator authorization must be an object"]
-    if not isinstance(signature, (bytes, bytearray)):
-        errors.append("operator authorization signature must be raw SSHSIG bytes")
-        signature = b""
-    if set(authorization) != AUTHORIZATION_FIELDS:
-        return ["operator authorization fields do not match the exact contract"]
-    if authorization.get("schema_version") != OPERATOR_AUTHORIZATION_SCHEMA_VERSION:
-        errors.append("operator authorization schema_version is invalid")
-    for field, expected in (
-        ("signer_identity", OPERATOR_IDENTITY),
-        ("signer_fingerprint", OPERATOR_FINGERPRINT),
-        ("algorithm", OPERATOR_ALGORITHM),
-        ("signature_namespace", OPERATOR_SIGNATURE_NAMESPACE),
-    ):
-        if authorization.get(field) != expected:
-            errors.append(f"operator authorization {field} is invalid")
-    if authorization.get("authorization_digest") != authorization_digest(authorization):
-        errors.append("operator authorization digest mismatch")
-    if not HEAD_RE.fullmatch(str(source_head)):
-        errors.append("operator authorization expected source head is invalid")
-    if authorization.get("source_head") != source_head:
-        errors.append("operator authorization source head differs from the effect")
-    if not isinstance(intent, dict):
-        errors.append("operator authorization exact intent is missing")
-        intent = {}
-    elif intent.get("self_digest") != intent_self_digest(intent):
-        errors.append("operator authorization exact intent self_digest is invalid")
-    for auth_field, intent_field in (
-        ("intent_id", "intent_id"),
-        ("intent_digest", "self_digest"),
-        ("target_host", "target_host"),
-        ("applier_node_id", "applier_node_id"),
-        ("postcheck_node_id", "postcheck_node_id"),
-    ):
-        if authorization.get(auth_field) != intent.get(intent_field):
-            errors.append(f"operator authorization {auth_field} differs from the exact intent")
-    try:
-        issued = _parse_time(authorization["issued_at"])
-        expires = _parse_time(authorization["expires_at"])
-        current = _parse_time(now)
-        intent_created = _parse_time(intent["created_at"])
-        intent_expires = _parse_time(intent["expires_at"])
-        if issued != intent_created:
-            errors.append("operator authorization issued_at differs from intent created_at")
-        if not issued <= current < expires:
-            errors.append("operator authorization is not currently valid")
-        if expires > intent_expires:
-            errors.append("operator authorization outlives its exact intent")
-        if expires - issued > MAX_AUTHORIZATION_TTL:
-            errors.append("operator authorization TTL exceeds fifteen minutes")
-    except (KeyError, TypeError, ValueError):
-        errors.append("operator authorization timestamps are invalid")
-    try:
-        actual_fingerprint = trusted.ssh_public_key_fingerprint(OPERATOR_PUBLIC_KEY)
-    except ValueError:
-        actual_fingerprint = ""
-    if not hmac.compare_digest(actual_fingerprint, OPERATOR_FINGERPRINT):
-        errors.append("operator authorization trust-root fingerprint mismatch")
-    if not trusted._verify_ssh_signature(
-        canonical_bytes(authorization),
-        bytes(signature),
-        public_key=OPERATOR_PUBLIC_KEY,
-        identity=OPERATOR_IDENTITY,
-        namespace=OPERATOR_SIGNATURE_NAMESPACE,
-    ):
-        errors.append("operator authorization SSH signature is invalid")
-    return errors
-
-
-def _operator_authorization_is_valid(
-    authorization: Any, signature: Any, *, intent: dict[str, Any], source_head: str, now: str
-) -> tuple[bool, str]:
-    if not isinstance(authorization, dict) or not isinstance(signature, (bytes, bytearray)):
-        return False, "operator SSHSIG is absent (an exact signed intent is required)"
-    errors = validate_operator_authorization(
-        authorization, signature, intent=intent, source_head=source_head, now=now
-    )
-    if errors:
-        return False, "operator SSHSIG invalid: " + "; ".join(errors[:2])
-    return True, ""
-
-
-def operator_authorization_binding_errors(
-    authorization: Any, *, intent_id: Any, intent_digest: Any, source_head: Any
-) -> list[str]:
-    """STRUCTURAL-only operator_authorization binding for an emitted APPLIED receipt.
-
-    誠實界線(**只證完整性,不證真偽**):此處只驗「精確欄位契約 + domain-separation 常量 +
-    authorization_digest 完整性 + 三個 intent 綁定(intent_id/intent_digest/source_head 等於 receipt)」。
-    它**刻意不**做 SSHSIG 密碼學再驗(``_verify_ssh_signature``)也不做 trust-root 指紋/平台背書——
-    真正對 operator 公鑰的 SSHSIG 再驗 + platform attestation 屬 S2.0 EFFECT session。可拋棄 APPLIED
-    receipt 由**每測試臨時**金鑰簽章(非固定信任根),離線密碼學再驗在設計上不可行,故此結構綁定
-    只把 ``{"totally":"bogus"}`` 及任何 intent 不符的授權擋掉,絕不宣稱已認證是誰簽的。
-    """
-
-    if not isinstance(authorization, dict):
-        return ["operator authorization must be a well-formed object"]
-    if set(authorization) != AUTHORIZATION_FIELDS:
-        return ["operator authorization fields do not match the exact contract"]
-    errors: list[str] = []
-    for field, expected in (
-        ("schema_version", OPERATOR_AUTHORIZATION_SCHEMA_VERSION),
-        ("signer_identity", OPERATOR_IDENTITY),
-        ("algorithm", OPERATOR_ALGORITHM),
-        ("signature_namespace", OPERATOR_SIGNATURE_NAMESPACE),
-    ):
-        if authorization.get(field) != expected:
-            errors.append(f"operator authorization {field} is invalid")
-    if authorization.get("authorization_digest") != authorization_digest(authorization):
-        errors.append("operator authorization digest mismatch")
-    for auth_field, expected in (
-        ("intent_id", intent_id),
-        ("intent_digest", intent_digest),
-        ("source_head", source_head),
-    ):
-        if authorization.get(auth_field) != expected:
-            errors.append(f"operator authorization {auth_field} is not bound to the result")
-    return errors
 
 
 # --------------------------------------------------------------------------- #
@@ -1078,6 +931,11 @@ def _base_result(intent: dict[str, Any], grant_set: dict[str, Any], *, apply_act
         "apply_actor_node": apply_actor_node,
         "independent_verifier_node": intent["postcheck_node_id"],
         "source_head": intent["source_head"],
+        # W0a additive:每個 builder 皆繼承這三個「恆存在」欄位的預設;唯生產 APPLIED path 帶簽章 attestation,
+        # 唯 RECOVERY_REQUIRED path 把 recovery_required 設 true。其餘 status 一律 None/None/False。
+        "apply_attestation": None,
+        "apply_attestation_signature_pem": None,
+        "recovery_required": False,
         "boundary": {
             "production_apply_performed": False,
             "production_running_attested": False,
@@ -1107,6 +965,49 @@ def build_pending_result(
         "rollback_record": None,
         "operator_authorization": None,
         "operator_signature_pem": None,
+        "evidence_class": "STRUCTURAL_ONLY",
+        "started_at": _parse_time(now).isoformat().replace("+00:00", "Z"),
+        "completed_at": _parse_time(now).isoformat().replace("+00:00", "Z"),
+        "evidence_expires_at": _plus_seconds(now, ttl_seconds),
+        "ttl_seconds": ttl_seconds,
+        "failure_reason": reason,
+    })
+    _guard_no_secret(result)
+    result["self_digest"] = artifact_self_digest(result)
+    return result
+
+
+def build_recovery_required_result(
+    intent: dict[str, Any],
+    *,
+    reason: str,
+    now: str,
+    apply_actor_node: str | None = None,
+    ttl_seconds: int = EVIDENCE_TTL_SECONDS,
+) -> dict[str, Any]:
+    """Build the additive ``RECOVERY_REQUIRED`` result (W0a F2).
+
+    Emitted ONLY when a failed production apply's compensation could **not** be confirmed
+    (``driver.compensate`` raised OR the observer role is still present after compensate).  Unlike a
+    "compensated" ``EXTERNAL_VERIFICATION_PENDING`` it honestly signals the observer role may persist
+    in production and requires explicit operator recovery.  It is a failure (blocks S2.5, which admits
+    only ``APPLIED_ROLLED_BACK_EXACT``): ``recovery_required=true``, ``STRUCTURAL_ONLY`` evidence, no
+    postcheck/rollback/attestation, ``production_apply_performed=false``, nine authorities false.
+    """
+
+    grant_set = generate_observer_grant_sql(intent)
+    result = _base_result(intent, grant_set, apply_actor_node=apply_actor_node or intent["applier_node_id"])
+    result.update({
+        "status": "RECOVERY_REQUIRED",
+        "pre_state_digest": None,
+        "applied_grant_set_digest": None,
+        "independent_postcheck": None,
+        "rollback_record": None,
+        "operator_authorization": None,
+        "operator_signature_pem": None,
+        "apply_attestation": None,
+        "apply_attestation_signature_pem": None,
+        "recovery_required": True,
         "evidence_class": "STRUCTURAL_ONLY",
         "started_at": _parse_time(now).isoformat().replace("+00:00", "Z"),
         "completed_at": _parse_time(now).isoformat().replace("+00:00", "Z"),
@@ -1177,6 +1078,81 @@ def build_pg_observer_bootstrap_result(
     return result
 
 
+def build_pg_observer_bootstrap_applied_result(
+    *,
+    intent: dict[str, Any],
+    grant_set: dict[str, Any],
+    pre_state_digest: str,
+    applied_grant_set_digest: str,
+    postcheck: dict[str, Any],
+    operator_authorization: dict[str, Any],
+    operator_signature: bytes,
+    apply_attestation: dict[str, Any],
+    apply_attestation_signature: bytes,
+    apply_actor_node: str,
+    evidence_class: str,
+    ttl_seconds: int = EVIDENCE_TTL_SECONDS,
+) -> dict[str, Any]:
+    """Build the production ``APPLIED`` result (``production_apply_performed=true``).
+
+    Emitted ONLY by the reachable production gate when the real Linux host driver returns
+    ``PLATFORM_ATTESTED`` apply evidence AND a trusted-host-signed ``apply_attestation`` that passed
+    :func:`validate_apply_attestation`.  Unlike the disposable proof the observer role is left
+    provisioned (no rollback record) for S2.1; the nine authorities + ``production_running_attested``/
+    ``load_verified`` stay false.  ``started_at``/``completed_at``/``evidence_expires_at`` are derived
+    from the **signed** ``trusted_host_time`` (trusted-anchored, not caller-anchored).  Never emitted in
+    the source lane (driver is None on Mac/tests) and never by a simulation driver (non-attested).
+    """
+
+    if intent.get("target_class") != PRODUCTION_TARGET_CLASS:
+        raise PgObserverBootstrapError("an APPLIED result is only emitted for a production target")
+    if evidence_class != PRODUCTION_APPLIED_EVIDENCE_CLASS:
+        raise PgObserverBootstrapError(
+            "APPLIED requires PLATFORM_ATTESTED driver evidence (a simulation/disposable driver cannot forge it)"
+        )
+    if not isinstance(apply_attestation, dict):
+        raise PgObserverBootstrapError("APPLIED requires a trusted-host apply attestation object")
+    if not isinstance(postcheck, dict):
+        raise PgObserverBootstrapError("APPLIED requires the distinct verifier's independent postcheck")
+    if applied_grant_set_digest is None or applied_grant_set_digest == pre_state_digest:
+        raise PgObserverBootstrapError("APPLIED requires the apply to change catalog state (applied != pre)")
+    if not (
+        apply_attestation.get("reobserved_digest")
+        == apply_attestation.get("applied_grant_set_digest")
+        == applied_grant_set_digest
+    ):
+        raise PgObserverBootstrapError(
+            "APPLIED requires the attestation reobserved == applied == the applied catalog digest (T2)"
+        )
+    result = _base_result(intent, grant_set, apply_actor_node=apply_actor_node)
+    result["boundary"]["production_apply_performed"] = True
+    # trusted-anchored receipt bookkeeping:started/completed/evidence_expires 皆由簽章 trusted_host_time 導出。
+    completed = _parse_time(apply_attestation["trusted_host_time"])
+    result.update({
+        "status": "APPLIED",
+        "pre_state_digest": pre_state_digest,
+        "applied_grant_set_digest": applied_grant_set_digest,
+        "independent_postcheck": postcheck,
+        "rollback_record": None,
+        "operator_authorization": operator_authorization,
+        "operator_signature_pem": bytes(operator_signature).decode("ascii"),
+        "apply_attestation": apply_attestation,
+        "apply_attestation_signature_pem": bytes(apply_attestation_signature).decode("ascii"),
+        "recovery_required": False,
+        "evidence_class": PRODUCTION_APPLIED_EVIDENCE_CLASS,
+        "started_at": completed.isoformat().replace("+00:00", "Z"),
+        "completed_at": completed.isoformat().replace("+00:00", "Z"),
+        "evidence_expires_at": (completed + timedelta(seconds=ttl_seconds)).isoformat().replace("+00:00", "Z"),
+        "ttl_seconds": ttl_seconds,
+        "failure_reason": None,
+    })
+    _guard_operator_signature_pem_body(result.get("operator_signature_pem"))
+    _guard_apply_attestation_signature_pem_body(result.get("apply_attestation_signature_pem"))
+    _guard_no_secret(_result_secret_scan_view(result))
+    result["self_digest"] = artifact_self_digest(result)
+    return result
+
+
 def validate_pg_observer_bootstrap_result(result: Any, *, now: str | None = None) -> list[str]:
     if not isinstance(result, dict):
         return ["observer bootstrap result must be an object"]
@@ -1190,15 +1166,74 @@ def validate_pg_observer_bootstrap_result(result: Any, *, now: str | None = None
     status = result.get("status")
     if result.get("apply_actor_node") == result.get("independent_verifier_node"):
         errors.append("observer bootstrap result apply actor must differ from the independent verifier")
-    # 邊界恆 false(九 authority、生產施加、running attested、load verified)。
+    # 邊界:九 authority / running attested / load verified 恆 false;production_apply_performed 唯有
+    # APPLIED(真 Linux driver + PLATFORM_ATTESTED)才為 true,其餘 status 一律 false。
     boundary = result.get("boundary", {})
-    if boundary.get("nine_authorities_false") is not True or boundary.get("production_apply_performed") is not False:
-        errors.append("observer bootstrap result boundary must keep production apply off and nine authorities false")
+    expect_production_apply = status == "APPLIED"
+    if boundary.get("nine_authorities_false") is not True:
+        errors.append("observer bootstrap result boundary must keep the nine authorities false")
+    if boundary.get("production_apply_performed") is not expect_production_apply:
+        errors.append(
+            "observer bootstrap result production_apply_performed must be True only for APPLIED and False otherwise"
+        )
+    # W0a(F2):recovery_required 唯 RECOVERY_REQUIRED status 才可為 true,其餘 status 一律 false。
+    if bool(result.get("recovery_required")) is not (status == "RECOVERY_REQUIRED"):
+        errors.append(
+            "observer bootstrap result recovery_required must be True only for RECOVERY_REQUIRED and False otherwise"
+        )
+    if status == "APPLIED":
+        # 生產 reachable apply:唯有真 Linux host driver + PLATFORM_ATTESTED 才可達此;離線 validator 只證
+        # 結構/整合(不背書「真 apply 過」——平台背書屬 S2.0 EFFECT session,見模組 docstring 誠實界線)。
+        if result.get("target_class") != PRODUCTION_TARGET_CLASS:
+            errors.append("APPLIED requires a production target")
+        if result.get("evidence_class") != PRODUCTION_APPLIED_EVIDENCE_CLASS:
+            errors.append("APPLIED requires PLATFORM_ATTESTED evidence (never fabricated by a non-attested driver)")
+        if result.get("rollback_record") is not None:
+            errors.append("APPLIED leaves the observer provisioned; it carries no rollback record")
+        if result.get("failure_reason") is not None:
+            errors.append("APPLIED must not carry a failure_reason")
+        applied_digest = result.get("applied_grant_set_digest")
+        if applied_digest is None or applied_digest == result.get("pre_state_digest"):
+            errors.append("APPLIED requires the apply to change catalog state (applied != pre)")
+        errors.extend(validate_pg_observer_bootstrap_postcheck(result.get("independent_postcheck"), result=result, now=now))
+        errors.extend(operator_authorization_binding_errors(
+            result.get("operator_authorization"),
+            intent_id=result.get("intent_id"),
+            intent_digest=result.get("intent_digest"),
+            source_head=result.get("source_head"),
+        ))
+        # W0a(§6):T2 offline mirror + 結構性 apply-attestation 綁定(F1 Option A;不做離線 SSHSIG 再驗)。
+        postcheck = result.get("independent_postcheck") or {}
+        if postcheck.get("reobserved_post_rollback_digest") != result.get("applied_grant_set_digest"):
+            errors.append("APPLIED postcheck reobserved digest must equal the applied catalog digest (T2)")
+        errors.extend(_apply_attestation_binding_errors(
+            result.get("apply_attestation"),
+            result.get("apply_attestation_signature_pem"),
+            intent_id=result.get("intent_id"),
+            intent_digest=result.get("intent_digest"),
+            source_head=result.get("source_head"),
+            applied_grant_set_digest=result.get("applied_grant_set_digest"),
+            operator_authorization=result.get("operator_authorization"),
+        ))
     if status == "EXTERNAL_VERIFICATION_PENDING":
         if result.get("independent_postcheck") is not None or result.get("rollback_record") is not None:
             errors.append("EXTERNAL_VERIFICATION_PENDING must not embed a postcheck or rollback record")
         if not (isinstance(result.get("failure_reason"), str) and result.get("failure_reason")):
             errors.append("EXTERNAL_VERIFICATION_PENDING requires a failure_reason")
+    elif status == "RECOVERY_REQUIRED":
+        # W0a(F2):生產 apply 補償無法確認 → 明確 residual failure;絕不冒充「已補償」pending。
+        if result.get("recovery_required") is not True:
+            errors.append("RECOVERY_REQUIRED requires recovery_required=true")
+        if result.get("evidence_class") != "STRUCTURAL_ONLY":
+            errors.append("RECOVERY_REQUIRED requires STRUCTURAL_ONLY evidence")
+        if result.get("independent_postcheck") is not None or result.get("rollback_record") is not None:
+            errors.append("RECOVERY_REQUIRED must not embed a postcheck or rollback record")
+        if result.get("apply_attestation") is not None or result.get("apply_attestation_signature_pem") is not None:
+            errors.append("RECOVERY_REQUIRED must not carry an apply attestation")
+        if not (isinstance(result.get("failure_reason"), str) and result.get("failure_reason")):
+            errors.append("RECOVERY_REQUIRED requires a failure_reason")
+        if boundary.get("production_apply_performed") is not False:
+            errors.append("RECOVERY_REQUIRED must keep production_apply_performed false")
     elif status == "APPLIED_ROLLED_BACK_EXACT":
         if result.get("target_class") != DISPOSABLE_TARGET_CLASS:
             errors.append("APPLIED_ROLLED_BACK_EXACT requires a disposable_local target")
@@ -1250,6 +1285,13 @@ def validate_pg_observer_bootstrap_result(result: Any, *, now: str | None = None
         errors.append(
             "operator_signature_pem body is not strict base64 (possible non-signature payload)"
         )
+    # W0a(§4):apply_attestation_signature_pem 亦為公開 SSHSIG(secret 掃描排除此欄位)——同樣**無條件**要求
+    # 其 armor body 為嚴格 base64,關閉「armor 外殼合法但 body 夾帶可讀 plaintext 機密」的同型破口(任何 status)。
+    attestation_signature_pem = result.get("apply_attestation_signature_pem")
+    if isinstance(attestation_signature_pem, str) and not _operator_signature_pem_body_is_strict_base64(attestation_signature_pem):
+        errors.append(
+            "apply_attestation_signature_pem body is not strict base64 (possible non-signature payload)"
+        )
     if _contains_secret_like(_result_secret_scan_view(result)):
         errors.append("observer bootstrap result carries secret-like content")
     if result.get("self_digest") != artifact_self_digest(result):
@@ -1267,8 +1309,250 @@ def validate_pg_observer_bootstrap_result(result: Any, *, now: str | None = None
 
 
 # --------------------------------------------------------------------------- #
-# the applier (production stays fail-closed until an exact operator SSHSIG)
+# the applier (production is REACHABLE but authority-locked; APPLIED needs a real
+# host driver returning a trusted-host-SIGNED apply attestation — never source/tests)
 # --------------------------------------------------------------------------- #
+_RECOVERY_REQUIRED_REASON = (
+    "production observer apply RECOVERY_REQUIRED: compensation was NOT confirmed "
+    "(driver.compensate raised or the observer role is still present); the observer role may persist "
+    "in production and requires explicit operator recovery; production_apply_performed stays false"
+)
+
+
+def _compensate_and_confirm(
+    driver: "ObserverBootstrapProductionDriver", *, grant_set: dict[str, Any], role: str
+) -> bool:
+    """Compensate the throwaway/created state, then re-observe the observer role is ABSENT.
+
+    Returns True (CONFIRMED gone) iff ``compensate`` did not raise AND a follow-up
+    ``observer_role_present`` returns False.  A raising ``compensate`` or a still-present role (or a
+    raising re-observation) returns False (NOT confirmed) — the caller then emits RECOVERY_REQUIRED
+    instead of a misleading "compensated" pending (W0a T3).
+    """
+
+    try:
+        driver.compensate(grant_set=grant_set)
+    except Exception:  # noqa: BLE001 - a raising compensate is NOT a confirmed rollback
+        return False
+    try:
+        return not driver.observer_role_present(role=role)
+    except Exception:  # noqa: BLE001 - a raising re-observation cannot confirm absence (fail-closed)
+        return False
+
+
+def _apply_production_observer_bootstrap(
+    intent: dict[str, Any],
+    operator_authorization: Any,
+    signature: Any,
+    *,
+    now: str,
+    source_head: str,
+    driver: "ObserverBootstrapProductionDriver | None",
+    apply_actor_node: str,
+) -> dict[str, Any]:
+    """Reachable, fail-closed production gate (mirrors §6 order).
+
+    Each step returns a typed non-success on failure; there is **zero mutation** before the driver
+    call.  Steps 1 (intent schema/digests/idempotency) and the source_head==intent binding were
+    already enforced by :func:`apply_observer_bootstrap` before this branch.
+
+    2.  Linux target-host identity — Mac/dev/loopback -> ``EXTERNAL_VERIFICATION_PENDING`` (zero mutation);
+    2.5 required production dependency relation — the intent must observe ``learning.alr_consumer_events``
+        (design S2.4 §2.2); otherwise a typed ``EXTERNAL_VERIFICATION_PENDING`` with zero mutation,
+        BEFORE any driver call (auth-independent policy reject of a structurally-valid intent);
+    3.  a FRESH domain-separated operator SSHSIG over the exact intent (identity/namespace = §2.2) —
+        missing/stale/wrong-namespace -> AUTHORIZATION_REJECTED-class ``EXTERNAL_VERIFICATION_PENDING``;
+    4.  structured dependency pre-state — the exact read-only ``observer_read_only_v1`` grant set must
+        project (pure/zero-mutation; the observer-absent DB check happens via the driver in step 6);
+    5.  ``driver is None`` (Mac / source / tests / no host) -> ``EXTERNAL_VERIFICATION_PENDING`` (zero mutation);
+    6-9. driver present: observe pre-state (observer must be ABSENT), drive the fixed structured
+        create-role/grants, run the DISTINCT verifier's independent proof, gate T2 (reobserved==applied),
+        first-filter the driver's ``evidence_class``, then require a trusted-host-SIGNED apply attestation
+        that passes :func:`validate_apply_attestation` (T1 signature + trust-root, T2, T5 trusted-clock).
+        ``APPLIED`` (``production_apply_performed=true``) emits ONLY when the signed attestation verifies.
+        Any mutation that cannot be CONFIRMED compensated returns ``RECOVERY_REQUIRED`` (never a
+        misleading "compensated" pending, never a stranded role reported as gone).
+    """
+
+    # step 2 — attested Linux target-host identity (Mac/non-target -> typed non-success, zero mutation).
+    if not _is_attested_production_target_host(intent.get("target_host")):
+        return build_pending_result(
+            intent,
+            reason=(
+                "production observer apply requires the attested Linux target host; this environment "
+                "is not the S2.0 production target (zero mutation)"
+            ),
+            now=now,
+            apply_actor_node=apply_actor_node,
+        )
+    # step 2.5 — required production dependency relation (W0a T4; auth-independent, zero mutation, pre-driver).
+    observed_schema = intent.get("observed_schema")
+    relations = intent.get("observed_relations") or []
+    if observed_schema != REQUIRED_PRODUCTION_OBSERVED_SCHEMA or REQUIRED_PRODUCTION_OBSERVED_RELATION not in relations:
+        return build_pending_result(
+            intent,
+            reason=(
+                "production observer intent OMITS the required read-only dependency "
+                "learning.alr_consumer_events (design S2.4 §2.2); refusing to invoke the driver"
+            ),
+            now=now,
+            apply_actor_node=apply_actor_node,
+        )
+    # step 3 — a fresh domain-separated operator SSHSIG over the exact intent (AUTHORIZATION_REJECTED class).
+    valid, reason = _operator_authorization_is_valid(
+        operator_authorization, signature, intent=intent, source_head=source_head, now=now
+    )
+    if not valid:
+        return build_pending_result(
+            intent,
+            reason="production observer apply AUTHORIZATION_REJECTED: " + reason,
+            now=now,
+            apply_actor_node=apply_actor_node,
+        )
+    # step 4 — structured dependency pre-state: the exact read-only allowlist must project (zero mutation).
+    grant_set = generate_observer_grant_sql(intent)
+    # step 5 — no host production driver (Mac / source / tests): reachable gate present, nothing to run.
+    if driver is None:
+        return build_pending_result(
+            intent,
+            reason=(
+                "production observer apply is reachable but authority-locked: no host production driver "
+                "is present (Mac/source/test lane); EXTERNAL_VERIFICATION_PENDING with zero mutation"
+            ),
+            now=now,
+            apply_actor_node=apply_actor_node,
+        )
+    # steps 6-9 — driver-present interaction. The whole region is fail-closed: ANY failure after the
+    # create is attempted (a raising create/proof/postcheck OR the APPLIED build raising) must
+    # _compensate_and_confirm; a CONFIRMED-gone role keeps the honest "compensated" pending, an
+    # UNCONFIRMED compensation (raised / role still present) returns RECOVERY_REQUIRED — never an
+    # uncaught exception, never a stranded provisioned role reported as gone (W0a T3).
+    role = intent["observer_role"]
+    schema = intent["observed_schema"]
+    relations = intent["observed_relations"]
+    role_created = False
+    try:
+        # step 6 — read-only pre-state; the observer role must be ABSENT (no adoption/rotation).
+        if driver.observer_role_present(role=role):
+            return build_pending_result(
+                intent,
+                reason="observer role already exists; refusing to adopt or rotate a pre-existing role",
+                now=now,
+                apply_actor_node=apply_actor_node,
+            )
+        pre = driver.observe_acl_state(role=role, schema=schema, relations=relations)
+        # step 7 — the driver drives the fixed structured operations (create role + grants); NO caller SQL/DSN.
+        # From here any failure must compensate (a create may partially apply), so mark before the call.
+        role_created = True
+        driver.create_read_only_observer(grant_set=grant_set)
+        applied = driver.observe_acl_state(role=role, schema=schema, relations=relations)
+        # step 8 — the DISTINCT verifier node independently re-observes the provisioned observer's denials.
+        proof = driver.independent_read_only_proof(grant_set=grant_set)
+        reobserved = proof.get("reobserved_digest") if isinstance(proof, dict) else None
+        # step 8a — T2 runtime gate: the verifier's reobserved digest must equal the applied catalog digest.
+        if reobserved != applied:
+            confirmed = _compensate_and_confirm(driver, grant_set=grant_set, role=role)
+            if confirmed:
+                return build_pending_result(
+                    intent,
+                    reason=(
+                        "production observer apply verifier reobserved digest != applied (T2); "
+                        "compensated; production_apply_performed stays false"
+                    ),
+                    now=now,
+                    apply_actor_node=apply_actor_node,
+                )
+            return build_recovery_required_result(
+                intent, reason=_RECOVERY_REQUIRED_REASON, now=now, apply_actor_node=apply_actor_node
+            )
+        # step 9a — FIRST FILTER (cheap): a non-attested simulation/disposable driver is rejected BEFORE
+        # any attestation is requested (preserves the exact existing behaviour for _SimulationProductionDriver).
+        if getattr(driver, "evidence_class", None) != PRODUCTION_APPLIED_EVIDENCE_CLASS:
+            confirmed = _compensate_and_confirm(driver, grant_set=grant_set, role=role)
+            if confirmed:
+                return build_pending_result(
+                    intent,
+                    reason=(
+                        "production observer apply driver evidence is not PLATFORM_ATTESTED "
+                        f"(got {getattr(driver, 'evidence_class', None)!r}); production_apply_performed stays false"
+                    ),
+                    now=now,
+                    apply_actor_node=apply_actor_node,
+                )
+            return build_recovery_required_result(
+                intent, reason=_RECOVERY_REQUIRED_REASON, now=now, apply_actor_node=apply_actor_node
+            )
+        # step 9b — request the trusted-host-SIGNED apply attestation (opaque object + raw SSHSIG bytes).
+        bundle = driver.signed_apply_attestation(
+            intent=intent, applied_grant_set_digest=applied, reobserved_digest=reobserved
+        )
+        attestation = bundle.get("attestation") if isinstance(bundle, dict) else None
+        attestation_signature = bundle.get("signature") if isinstance(bundle, dict) else None
+        # step 9c — the REAL gate: verify the signed attestation (T1 signature + trust-root, T2, T5 clock).
+        attestation_errors = validate_apply_attestation(
+            attestation, attestation_signature, intent=intent,
+            operator_authorization=operator_authorization, applied_grant_set_digest=applied,
+        )
+        if attestation_errors:
+            confirmed = _compensate_and_confirm(driver, grant_set=grant_set, role=role)
+            if confirmed:
+                return build_pending_result(
+                    intent,
+                    reason=(
+                        "production observer apply attestation invalid: "
+                        + "; ".join(str(e) for e in attestation_errors[:2])
+                        + "; compensated; production_apply_performed stays false"
+                    ),
+                    now=now,
+                    apply_actor_node=apply_actor_node,
+                )
+            return build_recovery_required_result(
+                intent, reason=_RECOVERY_REQUIRED_REASON, now=now, apply_actor_node=apply_actor_node
+            )
+        # step 9d — build the DISTINCT verifier's postcheck, trusted-anchored on the SIGNED trusted_host_time.
+        trusted_completed = attestation["trusted_host_time"]
+        postcheck = build_pg_observer_bootstrap_postcheck(
+            intent=intent,
+            verifier_node=intent["postcheck_node_id"],
+            applier_node=apply_actor_node,
+            reobserved_post_rollback_digest=reobserved,
+            read_only_proof=proof.get("read_only_proof") if isinstance(proof, dict) else None,
+            verifier_capture_digest=proof.get("verifier_capture_digest") if isinstance(proof, dict) else None,
+            observed_at=trusted_completed,
+        )
+        # step 9e — attested success: leave the observer provisioned for S2.1 (no rollback) and emit APPLIED.
+        return build_pg_observer_bootstrap_applied_result(
+            intent=intent,
+            grant_set=grant_set,
+            pre_state_digest=pre,
+            applied_grant_set_digest=applied,
+            postcheck=postcheck,
+            operator_authorization=operator_authorization,
+            operator_signature=bytes(signature),
+            apply_attestation=attestation,
+            apply_attestation_signature=bytes(attestation_signature),
+            apply_actor_node=apply_actor_node,
+            evidence_class=PRODUCTION_APPLIED_EVIDENCE_CLASS,
+        )
+    except Exception as exc:  # noqa: BLE001 - any driver/postcheck/build failure fails closed
+        if role_created:
+            confirmed = _compensate_and_confirm(driver, grant_set=grant_set, role=role)
+            if not confirmed:
+                return build_recovery_required_result(
+                    intent, reason=_RECOVERY_REQUIRED_REASON, now=now, apply_actor_node=apply_actor_node
+                )
+        return build_pending_result(
+            intent,
+            reason=(
+                f"production observer apply interrupted and compensated: {exc}"
+                if role_created
+                else f"production observer apply preflight failed and fails closed: {exc}"
+            ),
+            now=now,
+            apply_actor_node=apply_actor_node,
+        )
+
+
 def apply_observer_bootstrap(
     intent: Any,
     operator_authorization: Any = None,
@@ -1277,22 +1561,25 @@ def apply_observer_bootstrap(
     now: str,
     source_head: str,
     disposable: Any = None,
+    driver: "ObserverBootstrapProductionDriver | None" = None,
     postcheck: dict[str, Any] | None = None,
     started_at: str | None = None,
     completed_at: str | None = None,
     apply_fault: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
-    """Intent-derived observer-bootstrap applier — production apply stays fail-closed.
+    """Intent-derived observer-bootstrap applier — production apply is reachable but authority-locked.
 
-    Returns a typed ``pg_observer_bootstrap_result_v1``.  Without a VALID operator
-    SSHSIG over the exact intent+source_head it returns ``EXTERNAL_VERIFICATION_PENDING``
-    (NEVER a success).  A ``production`` target ALSO returns
-    ``EXTERNAL_VERIFICATION_PENDING`` in this WP2 source lane: the real production
-    socket / apply is the S2.0 EFFECT session (no production PG contact here).  For a
-    ``disposable_local`` target with a valid SSHSIG and an injected throwaway-cluster
-    connection it runs the REAL structured SQL (apply -> rollback, exact restoration)
-    and embeds the distinct verifier's ``postcheck``.  ``apply_fault`` is a test-only
-    hook to inject a mid-apply failure (partial-failure rollback proof).
+    Returns a typed ``pg_observer_bootstrap_result_v1``.  Without a VALID operator SSHSIG over the
+    exact intent+source_head it returns ``EXTERNAL_VERIFICATION_PENDING`` (NEVER a success).  A
+    ``production`` target enters the reachable, fail-closed gate
+    (:func:`_apply_production_observer_bootstrap`, mirroring §6): with ``driver=None`` (Mac / source
+    / tests) it returns ``EXTERNAL_VERIFICATION_PENDING`` with **zero mutation**; only a real Linux
+    host ``ObserverBootstrapProductionDriver`` returning ``PLATFORM_ATTESTED`` evidence may emit
+    ``APPLIED`` (``production_apply_performed=true``).  For a ``disposable_local`` target with a
+    valid SSHSIG and an injected throwaway-cluster ``disposable`` connection it runs the REAL
+    structured SQL (apply -> rollback, exact restoration) and embeds the distinct verifier's
+    ``postcheck``.  ``apply_fault`` is a test-only hook to inject a mid-apply failure
+    (partial-failure rollback proof).
     """
 
     # FIX-6(E2 P3):先只驗「結構/整合/allowlist/TTL 上限」(now=None,**不含**當前有效窗)——
@@ -1325,18 +1612,30 @@ def apply_observer_bootstrap(
     except ValueError as exc:
         raise PgObserverBootstrapError(f"observer bootstrap now is malformed: {now!r}") from exc
 
+    if intent["target_class"] == PRODUCTION_TARGET_CLASS:
+        # 生產 reachable(但 authority-locked)閘:mirror §6 的固定順序;driver 為 None(Mac/源碼/測試)
+        # 時於 step 5 回傳 EXTERNAL_VERIFICATION_PENDING 且**零變更**——reachable 閘已在,但無 driver 可執行。
+        return _apply_production_observer_bootstrap(
+            intent,
+            operator_authorization,
+            signature,
+            now=now,
+            source_head=source_head,
+            driver=driver,
+            apply_actor_node=apply_actor_node,
+        )
+
+    # ── disposable_local 邏輯證明路徑(SSHSIG → 注入的丟棄式叢集;順序不變) ──
     valid, reason = _operator_authorization_is_valid(
         operator_authorization, signature, intent=intent, source_head=source_head, now=now
     )
     if not valid:
         return build_pending_result(intent, reason=reason, now=now, apply_actor_node=apply_actor_node)
-    if intent["target_class"] == PRODUCTION_TARGET_CLASS or disposable is None:
-        # SOURCE 界線:即使已授權,WP2 也絕不開生產 socket;真 apply 屬 S2.0 EFFECT session。
+    if disposable is None:
         return build_pending_result(
             intent,
             reason=(
-                "production observer apply is deferred to the S2.0 EFFECT session; "
-                "the WP2 source lane makes no production PG socket"
+                "disposable_local logic proof requires an injected throwaway-cluster connection; none was provided"
             ),
             now=now,
             apply_actor_node=apply_actor_node,

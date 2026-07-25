@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/pg_observer_bootstrap_apply_attestation_v1.schema.json",
+  "title": "pg_observer_bootstrap_apply_attestation_v1",
+  "description": "Trusted-host-signed post-apply attestation that unlocks a production S2.0 observer-bootstrap APPLIED. It binds the exact intent identity, the applied catalog digest, the DISTINCT verifier's reobserved digest (== applied), evidence_class=PLATFORM_ATTESTED, and a trusted-host-signed timestamp; it is signed by the §9.1 trust-root Ed25519 key family under a DISTINCT attestor identity (aiml-s2-observer-bootstrap-attestor-v1) and namespace (arcane-equilibrium-aiml-s2-observer-bootstrap-apply), domain-separated from the pre-approval operator authorization. Only a real trusted host holding the off-repo private key can produce a signature that verifies against the pinned ATTESTOR_PUBLIC_KEY. The offline validator verifies structure + attestation_digest integrity + trust-root binding only; the SSHSIG crypto gate lives at apply time and full runtime authenticity is EFFECT-only.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "attestor_identity",
+    "attestor_fingerprint",
+    "algorithm",
+    "signature_namespace",
+    "intent_id",
+    "intent_digest",
+    "source_head",
+    "target_host",
+    "applier_node_id",
+    "postcheck_node_id",
+    "applied_grant_set_digest",
+    "reobserved_digest",
+    "evidence_class",
+    "trusted_host_time",
+    "attestation_expires_at",
+    "attestation_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "pg_observer_bootstrap_apply_attestation_v1"},
+    "attestor_identity": {"const": "aiml-s2-observer-bootstrap-attestor-v1"},
+    "attestor_fingerprint": {"type": "string", "pattern": "^SHA256:[A-Za-z0-9+/]{43}$"},
+    "algorithm": {"const": "SSH-ED25519"},
+    "signature_namespace": {"const": "arcane-equilibrium-aiml-s2-observer-bootstrap-apply"},
+    "intent_id": {"$ref": "#/$defs/digest"},
+    "intent_digest": {"$ref": "#/$defs/digest"},
+    "source_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "target_host": {"type": "string", "minLength": 1},
+    "applier_node_id": {"type": "string", "minLength": 1},
+    "postcheck_node_id": {"type": "string", "minLength": 1},
+    "applied_grant_set_digest": {"$ref": "#/$defs/digest"},
+    "reobserved_digest": {"$ref": "#/$defs/digest"},
+    "evidence_class": {"const": "PLATFORM_ATTESTED"},
+    "trusted_host_time": {"$ref": "#/$defs/timestamp"},
+    "attestation_expires_at": {"$ref": "#/$defs/timestamp"},
+    "attestation_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "timestamp": {"type": "string", "format": "date-time"}
+  }
+}

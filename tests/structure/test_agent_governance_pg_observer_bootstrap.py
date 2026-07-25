@@ -12,6 +12,7 @@ live in the disposable-cluster sibling; production apply is fail-closed here.
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import subprocess
 import sys
@@ -29,6 +30,7 @@ for candidate in (HELPERS, ML_ROOT):
         sys.path.insert(0, str(candidate))
 
 import agent_governance_pg_observer_bootstrap as obs  # noqa: E402
+import agent_governance_pg_observer_bootstrap_attestation as obs_att  # noqa: E402
 import aiml_gate_receipt_validator as validator  # noqa: E402
 from agent_governance_schema import schema_subset_errors  # noqa: E402
 
@@ -43,10 +45,16 @@ FROZEN_CLASSIFIER = (
 
 
 def _intent(target_class="disposable_local", **overrides):
+    # W0a(T4):production intent 必觀 learning.alr_consumer_events(design S2.4 §2.2),故 production
+    # 預設用 relation-complete 的 learning schema;disposable 工廠不變(trading/fills/orders)。
+    if target_class == "production":
+        base_schema, base_relations = "learning", ["alr_consumer_events"]
+    else:
+        base_schema, base_relations = "trading", ["fills", "orders"]
     kwargs = dict(
         target_class=target_class, target_host="trade-core", database="openclaw",
-        observer_role="aiml_observer_ro", observed_schema="trading",
-        observed_relations=["fills", "orders"], socket_dir="/var/run/postgresql",
+        observer_role="aiml_observer_ro", observed_schema=base_schema,
+        observed_relations=base_relations, socket_dir="/var/run/postgresql",
         auth_mapping="pg_hba_ident_local", applier_node_id="observer_apply_actor",
         postcheck_node_id="observer_ops_postcheck", created_at=CREATED,
         ttl_seconds=900, source_head=HEAD,
@@ -55,8 +63,10 @@ def _intent(target_class="disposable_local", **overrides):
     return obs.build_pg_observer_bootstrap_intent(**kwargs)
 
 
-def _install_operator_profile(tmp_path, monkeypatch):
-    private_key = tmp_path / "operator"
+def _mint_ed25519_key(tmp_path, name):
+    """Mint one throwaway ed25519 keypair; return (private_key_path, public_key, fingerprint)."""
+
+    private_key = tmp_path / name
     subprocess.run(
         ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(private_key)], check=True
     )
@@ -66,12 +76,43 @@ def _install_operator_profile(tmp_path, monkeypatch):
         ["ssh-keygen", "-lf", str(private_key.with_suffix(".pub")), "-E", "sha256"],
         check=True, capture_output=True, text=True,
     ).stdout.split()[1]
-    monkeypatch.setattr(obs, "OPERATOR_PUBLIC_KEY", public_key)
-    monkeypatch.setattr(obs, "OPERATOR_FINGERPRINT", fingerprint)
+    return private_key, public_key, fingerprint
+
+
+def _install_operator_profile(tmp_path, monkeypatch):
+    private_key, public_key, fingerprint = _mint_ed25519_key(tmp_path, "operator")
+    # validate/build_operator_authorization 讀 OPERATOR_PUBLIC_KEY/FINGERPRINT 為**姊妹葉模組**的 globals,
+    # 故 monkeypatch 目標為 obs_att(非再匯出副本 obs);否則丟棄式鑰不生效、驗簽會對固定 §9.1 信任根失敗。
+    monkeypatch.setattr(obs_att, "OPERATOR_PUBLIC_KEY", public_key)
+    monkeypatch.setattr(obs_att, "OPERATOR_FINGERPRINT", fingerprint)
+    return private_key
+
+
+def _install_attestor_profile(tmp_path, monkeypatch):
+    # W0a:鑄一把丟棄式 ed25519 attestor 鑰,monkeypatch obs.ATTESTOR_PUBLIC_KEY / ATTESTOR_FINGERPRINT。
+    # 這**只**驗簽章驗證 CODE(T1 SSHSIG + trust-root 綁定)——不冒充真平台背書 runtime(鑰是丟棄式的;
+    # 真正的生產 APPLIED 仍需 §9.1 帶外私鑰,不在 Mac/trade-core/任何 fixture)。
+    private_key, public_key, fingerprint = _mint_ed25519_key(tmp_path, "attestor")
+    # 同理:build/validate_apply_attestation 讀 ATTESTOR_PUBLIC_KEY/FINGERPRINT 為姊妹葉模組的 globals。
+    monkeypatch.setattr(obs_att, "ATTESTOR_PUBLIC_KEY", public_key)
+    monkeypatch.setattr(obs_att, "ATTESTOR_FINGERPRINT", fingerprint)
     return private_key
 
 
 _SIGN_SEQ = [0]
+
+
+def _sign_attestation(private_key, attestation, *, namespace=None):
+    # ssh-keygen -Y sign 不覆寫既有 .sig,故每次用獨一無二的 message 檔名。
+    _SIGN_SEQ[0] += 1
+    message = private_key.parent / f"attest-{_SIGN_SEQ[0]}.json"
+    message.write_bytes(obs.canonical_bytes(attestation))
+    subprocess.run(
+        ["ssh-keygen", "-Y", "sign", "-f", str(private_key), "-n",
+         namespace or obs.APPLY_ATTESTATION_NAMESPACE, str(message)],
+        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    return message.with_suffix(".json.sig").read_bytes()
 
 
 def _sign(private_key, intent, source_head, *, namespace=None):
@@ -153,7 +194,9 @@ def test_apply_without_sshsig_is_pending_never_success():
 
 
 def test_production_apply_with_valid_sshsig_still_pending(tmp_path, monkeypatch):
-    # 即使帶一張 VALID operator SSHSIG,WP2 SOURCE lane 也絕不開生產 socket:恆 pending。
+    # W0a 重構:reachable-but-authority-locked。即使帶一張 VALID operator SSHSIG,production 目標在**無 host
+    # driver**(Mac/源碼/測試恆 driver=None)時走 reachable 閘的 step 5 → EXTERNAL_VERIFICATION_PENDING 且
+    # 零變更(reachable 閘已在,只是沒有 driver 可執行)。不再是「deferred to the S2.0 EFFECT session」。
     private_key = _install_operator_profile(tmp_path, monkeypatch)
     intent = _intent(target_class="production")
     authorization, signature = _sign(private_key, intent, HEAD)
@@ -162,8 +205,612 @@ def test_production_apply_with_valid_sshsig_still_pending(tmp_path, monkeypatch)
     ) == []
     result = obs.apply_observer_bootstrap(intent, authorization, signature, now=NOW, source_head=HEAD)
     assert result["status"] == "EXTERNAL_VERIFICATION_PENDING"
-    assert "deferred to the S2.0 EFFECT session" in result["failure_reason"]
+    assert "no host production driver" in result["failure_reason"]
+    assert "zero mutation" in result["failure_reason"]
+    assert result["boundary"]["production_apply_performed"] is False
     assert result["boundary"]["nine_authorities_false"] is True
+    assert result["independent_postcheck"] is None and result["rollback_record"] is None
+    assert result["operator_signature_pem"] is None  # 零變更:pending 不帶簽章
+    assert validator.validate_aiml_artifact(result, now=LATER) == []
+
+
+# --------------------------------------------------------------------------- #
+# W0a — S2.0 production-driver reachability (reachable, authority-locked gate).
+# driver=None (all source/tests/Mac) -> EXTERNAL_VERIFICATION_PENDING, zero mutation.
+# An injected simulation driver REACHES the driver call but its non-attested evidence
+# can NEVER forge production_apply_performed=true; a naive fabricated APPLIED is rejected.
+# NOTE (honest boundary): no fixture here impersonates PLATFORM_ATTESTED runtime — every
+# injected driver honestly reports LOCAL_REPRODUCIBLE/STRUCTURAL_ONLY, so NONE emits APPLIED.
+# --------------------------------------------------------------------------- #
+class _SimulationProductionDriver:
+    """In-memory (NO real PG) fixed-operation driver for the reachable-gate tests.
+
+    刻意回報一個**非** PLATFORM_ATTESTED 的 evidence_class 且**永不**提供簽章 apply attestation
+    (無 signed_apply_attestation);它不可、也絕不冒充平台背書的 runtime,故經此 driver 的 production 閘
+    **永不** emit APPLIED(§10.5 #13),於 step 9a 的 evidence_class first-filter 即被擋(在請求 attestation
+    之前)。records method calls to prove the gate REACHES the driver.  其 proof 的 reobserved_digest 刻意
+    == observe_acl_state 的 applied 值,以通過 T2 runtime gate 並落在 9a first-filter(而非誤在 T2 就被擋)。
+    """
+
+    def __init__(self, *, evidence_class="LOCAL_REPRODUCIBLE"):
+        self.evidence_class = evidence_class
+        self.calls: list[str] = []
+        self._present = False
+        self._applied = False
+
+    def observer_role_present(self, *, role):
+        self.calls.append("observer_role_present")
+        return self._present
+
+    def _acl_digest(self, role, schema):
+        marker = "present" if self._applied else "absent"
+        return "sha256:" + hashlib.sha256(f"{role}:{schema}:{marker}".encode()).hexdigest()
+
+    def observe_acl_state(self, *, role, schema, relations):
+        self.calls.append("observe_acl_state")
+        return self._acl_digest(role, schema)
+
+    def create_read_only_observer(self, *, grant_set):
+        self.calls.append("create_read_only_observer")
+        self._present = True
+        self._applied = True
+
+    def independent_read_only_proof(self, *, grant_set):
+        self.calls.append("independent_read_only_proof")
+        # reobserved == applied(同 observe_acl_state 的 present 投影)→ 通過 T2 runtime gate。
+        return {
+            "read_only_proof": _valid_read_only_proof(),
+            "reobserved_digest": self._acl_digest(grant_set["role"], grant_set["schema"]),
+            "verifier_capture_digest": "sha256:" + "e" * 64,
+        }
+
+    def compensate(self, *, grant_set):
+        self.calls.append("compensate")
+        self._present = False
+        self._applied = False
+
+
+def test_production_driver_none_is_pending_zero_mutation(tmp_path, monkeypatch):
+    # (a) production 目標 + driver=None(即使 SSHSIG 有效)→ EXTERNAL_VERIFICATION_PENDING,零變更。
+    private_key = _install_operator_profile(tmp_path, monkeypatch)
+    intent = _intent(target_class="production")
+    authorization, signature = _sign(private_key, intent, HEAD)
+    result = obs.apply_observer_bootstrap(
+        intent, authorization, signature, now=NOW, source_head=HEAD, driver=None
+    )
+    assert result["status"] == "EXTERNAL_VERIFICATION_PENDING"
+    assert result["boundary"]["production_apply_performed"] is False
+    assert result["boundary"]["nine_authorities_false"] is True
+    assert result["independent_postcheck"] is None and result["rollback_record"] is None
+    # 零變更佐證:pending result 不帶任何 apply/簽章欄位。
+    assert result["operator_signature_pem"] is None
+    assert result["applied_grant_set_digest"] is None
+    assert validator.validate_aiml_artifact(result, now=LATER) == []
+
+
+def test_production_non_attested_target_host_is_pending(tmp_path, monkeypatch):
+    # step 2:production 目標的 target_host 命名 Mac/dev/loopback → 於 SSHSIG 之前即 typed 非成功(零變更)。
+    private_key = _install_operator_profile(tmp_path, monkeypatch)
+    intent = _intent(target_class="production", target_host="my-macbook.local")
+    authorization, signature = _sign(private_key, intent, HEAD)
+    driver = _SimulationProductionDriver()
+    result = obs.apply_observer_bootstrap(
+        intent, authorization, signature, now=NOW, source_head=HEAD, driver=driver
+    )
+    assert result["status"] == "EXTERNAL_VERIFICATION_PENDING"
+    assert "attested Linux target host" in result["failure_reason"]
+    assert driver.calls == []  # host 檢查在 driver 之前 → 零變更
+
+
+def test_production_missing_stale_wrong_namespace_sshsig_rejected(tmp_path, monkeypatch):
+    # (b) production + (missing / wrong-namespace / stale) SSHSIG → typed pending;driver 從不被觸達(零變更)。
+    private_key = _install_operator_profile(tmp_path, monkeypatch)
+    intent = _intent(target_class="production")
+    driver = _SimulationProductionDriver()
+    # missing:無授權/簽章 → AUTHORIZATION_REJECTED-class pending。
+    r_missing = obs.apply_observer_bootstrap(intent, None, None, now=NOW, source_head=HEAD, driver=driver)
+    assert r_missing["status"] == "EXTERNAL_VERIFICATION_PENDING"
+    assert "AUTHORIZATION_REJECTED" in r_missing["failure_reason"]
+    # wrong-namespace:以 S1 target-host namespace 簽的授權 → SSHSIG 無效 → AUTHORIZATION_REJECTED。
+    authorization, wrong_ns_sig = _sign(
+        private_key, intent, HEAD, namespace="arcane-equilibrium-aiml-s1-target-host-apply"
+    )
+    r_wrongns = obs.apply_observer_bootstrap(
+        intent, authorization, wrong_ns_sig, now=NOW, source_head=HEAD, driver=driver
+    )
+    assert r_wrongns["status"] == "EXTERNAL_VERIFICATION_PENDING"
+    assert "AUTHORIZATION_REJECTED" in r_wrongns["failure_reason"]
+    # stale:授權/意圖皆逾期(now 超出有效窗)→ 於上游 window 檢查先 fail-closed(仍 pending)。
+    authorization2, signature2 = _sign(private_key, intent, HEAD)
+    stale = "2026-07-24T13:30:00+00:00"
+    r_stale = obs.apply_observer_bootstrap(
+        intent, authorization2, signature2, now=stale, source_head=HEAD, driver=driver
+    )
+    assert r_stale["status"] == "EXTERNAL_VERIFICATION_PENDING"
+    assert "validity window" in r_stale["failure_reason"]
+    # driver 全程未被觸達(SSHSIG/window 在 driver 之前 fail-closed)→ 零變更。
+    assert driver.calls == []
+
+
+def test_production_reachable_with_injected_driver(tmp_path, monkeypatch):
+    # 「gate REACHES the driver call」:注入一個(非 PLATFORM_ATTESTED)simulation driver,production 閘走過
+    # step 6-8(observe/create/independent postcheck)真的觸達 driver;step 9 因 evidence 非 PLATFORM_ATTESTED
+    # → 補償 + typed pending(絕不 APPLIED)。這證 reachable 閘已在、driver 被真觸達。
+    private_key = _install_operator_profile(tmp_path, monkeypatch)
+    intent = _intent(target_class="production")
+    authorization, signature = _sign(private_key, intent, HEAD)
+    driver = _SimulationProductionDriver(evidence_class="LOCAL_REPRODUCIBLE")
+    result = obs.apply_observer_bootstrap(
+        intent, authorization, signature, now=NOW, source_head=HEAD, driver=driver
+    )
+    for reached in ("observer_role_present", "observe_acl_state", "create_read_only_observer",
+                    "independent_read_only_proof", "compensate"):
+        assert reached in driver.calls, reached
+    assert result["status"] == "EXTERNAL_VERIFICATION_PENDING"
+    assert result["status"] != "APPLIED"
+    assert result["boundary"]["production_apply_performed"] is False
+    assert "not PLATFORM_ATTESTED" in result["failure_reason"]
+    assert validator.validate_aiml_artifact(result, now=LATER) == []
+
+
+def test_injected_simulation_driver_cannot_forge_production_flag(tmp_path, monkeypatch):
+    # §10.5 #13:任何注入的 simulation/disposable driver(誠實回報 LOCAL_REPRODUCIBLE / STRUCTURAL_ONLY)
+    # 皆**不可**令 production_apply_performed=true / status=APPLIED。fixture 絕不冒充平台背書 runtime。
+    private_key = _install_operator_profile(tmp_path, monkeypatch)
+    intent = _intent(target_class="production")
+    authorization, signature = _sign(private_key, intent, HEAD)
+    for evidence in ("LOCAL_REPRODUCIBLE", "STRUCTURAL_ONLY"):
+        driver = _SimulationProductionDriver(evidence_class=evidence)
+        result = obs.apply_observer_bootstrap(
+            intent, authorization, signature, now=NOW, source_head=HEAD, driver=driver
+        )
+        assert result["status"] != "APPLIED", evidence
+        assert result["status"] == "EXTERNAL_VERIFICATION_PENDING", evidence
+        assert result["boundary"]["production_apply_performed"] is False, evidence
+        assert validator.validate_aiml_artifact(result, now=LATER) == [], evidence
+
+
+# --------------------------------------------------------------------------- #
+# W0a authenticity hardening — trusted-host SIGNED apply attestation (T1/T2/T5),
+# RECOVERY_REQUIRED (T3), required-relation (T4).
+#
+# HONEST BOUNDARY (no impersonation): _AttestedProductionDriver signs the attestation with a
+# THROWAWAY ed25519 key that _install_attestor_profile monkeypatches into ATTESTOR_PUBLIC_KEY/
+# ATTESTOR_FINGERPRINT.  This exercises the signature-VERIFICATION CODE + trust-root binding, NOT a
+# real platform-attested runtime: a genuine production APPLIED still requires the real §9.1 trust-root
+# private key at the S2.0 EFFECT session (off Mac/trade-core); no fixture holds it.  The receipt's
+# boundary flags stay honest (production_running_attested=false, load_verified=false, nine false).
+# --------------------------------------------------------------------------- #
+class _AttestedProductionDriver(_SimulationProductionDriver):
+    """Returns a throwaway-signed apply attestation → drives the FULL T1/T2/T5 verification path."""
+
+    def __init__(self, private_key, *, trusted_host_time=NOW, sign_namespace=None,
+                 mutate_before_sign=None, mutate_after_sign=None, proof_reobserved=None):
+        super().__init__(evidence_class="PLATFORM_ATTESTED")
+        self._private_key = private_key
+        self._trusted_host_time = trusted_host_time
+        self._sign_namespace = sign_namespace
+        self._mutate_before_sign = mutate_before_sign
+        self._mutate_after_sign = mutate_after_sign
+        self._proof_reobserved = proof_reobserved
+
+    def independent_read_only_proof(self, *, grant_set):
+        proof = super().independent_read_only_proof(grant_set=grant_set)
+        if self._proof_reobserved is not None:
+            proof["reobserved_digest"] = self._proof_reobserved
+        return proof
+
+    def signed_apply_attestation(self, *, intent, applied_grant_set_digest, reobserved_digest):
+        self.calls.append("signed_apply_attestation")
+        attestation = obs.build_apply_attestation(
+            intent=intent, applied_grant_set_digest=applied_grant_set_digest,
+            reobserved_digest=reobserved_digest, trusted_host_time=self._trusted_host_time,
+        )
+        if self._mutate_before_sign is not None:
+            self._mutate_before_sign(attestation)
+        signature = _sign_attestation(self._private_key, attestation, namespace=self._sign_namespace)
+        if self._mutate_after_sign is not None:
+            self._mutate_after_sign(attestation)
+        return {"attestation": attestation, "signature": signature}
+
+
+def test_production_apply_with_signed_attestation_emits_applied(tmp_path, monkeypatch):
+    # T1 core happy-path:一份**丟棄式簽章**的 apply attestation 通過完整驗證(T1 簽章 + trust-root、
+    # T2 reobserved==applied、T5 trusted-clock 窗)→ 真 APPLIED round-trip 過 module + central validator。
+    # 這證的是簽章驗證 CODE(非真 runtime attestation);真生產 APPLIED 仍需 §9.1 帶外私鑰。
+    operator_key = _install_operator_profile(tmp_path, monkeypatch)
+    attestor_key = _install_attestor_profile(tmp_path, monkeypatch)
+    intent = _intent(target_class="production")
+    authorization, signature = _sign(operator_key, intent, HEAD)
+    driver = _AttestedProductionDriver(attestor_key, trusted_host_time=NOW)
+    result = obs.apply_observer_bootstrap(
+        intent, authorization, signature, now=NOW, source_head=HEAD, driver=driver
+    )
+    assert result["status"] == "APPLIED", result.get("failure_reason")
+    assert result["boundary"]["production_apply_performed"] is True
+    assert result["boundary"]["nine_authorities_false"] is True
+    assert result["boundary"]["production_running_attested"] is False
+    assert result["boundary"]["load_verified"] is False
+    assert result["evidence_class"] == "PLATFORM_ATTESTED"
+    assert result["recovery_required"] is False
+    att = result["apply_attestation"]
+    assert att["attestor_identity"] == "aiml-s2-observer-bootstrap-attestor-v1"
+    assert att["signature_namespace"] == "arcane-equilibrium-aiml-s2-observer-bootstrap-apply"
+    assert att["reobserved_digest"] == att["applied_grant_set_digest"] == result["applied_grant_set_digest"]
+    assert result["apply_attestation_signature_pem"].startswith("-----BEGIN SSH SIGNATURE-----")
+    # trusted-anchored:started/completed 由**簽章** trusted_host_time 導出(非呼叫端 now)。
+    assert result["started_at"] == "2026-07-24T12:01:00Z" == att["trusted_host_time"]
+    assert result["completed_at"] == "2026-07-24T12:01:00Z"
+    assert "signed_apply_attestation" in driver.calls
+    assert "compensate" not in driver.calls  # attested success leaves the observer provisioned (no rollback)
+    assert obs.validate_pg_observer_bootstrap_result(result, now=LATER) == []
+    assert validator.validate_aiml_artifact(result, now=LATER) == []
+    # standalone apply-attestation verifier is green for this exact bundle.
+    bundle = driver.signed_apply_attestation(
+        intent=intent, applied_grant_set_digest=result["applied_grant_set_digest"],
+        reobserved_digest=result["applied_grant_set_digest"],
+    )
+    assert obs.validate_apply_attestation(
+        bundle["attestation"], bundle["signature"], intent=intent,
+        operator_authorization=authorization, applied_grant_set_digest=result["applied_grant_set_digest"],
+    ) == []
+
+
+def test_production_attestation_wrong_namespace_rejected(tmp_path, monkeypatch):
+    # T1:attestation 以**別的 namespace** 簽 → SSHSIG 於 APPLY_ATTESTATION_NAMESPACE 下驗證失敗 →
+    # 補償 + PENDING(絕不 APPLIED)。namespace domain-separation 令 pre-approval 簽章不可被當 attestation 重放。
+    operator_key = _install_operator_profile(tmp_path, monkeypatch)
+    attestor_key = _install_attestor_profile(tmp_path, monkeypatch)
+    intent = _intent(target_class="production")
+    authorization, signature = _sign(operator_key, intent, HEAD)
+    driver = _AttestedProductionDriver(
+        attestor_key, sign_namespace="arcane-equilibrium-aiml-s2-observer-bootstrap"  # operator ns, not apply ns
+    )
+    result = obs.apply_observer_bootstrap(
+        intent, authorization, signature, now=NOW, source_head=HEAD, driver=driver
+    )
+    assert result["status"] == "EXTERNAL_VERIFICATION_PENDING"
+    assert result["status"] != "APPLIED"
+    assert "attestation invalid" in result["failure_reason"]
+    assert "compensate" in driver.calls
+    assert result["boundary"]["production_apply_performed"] is False
+    assert validator.validate_aiml_artifact(result, now=LATER) == []
+
+
+def test_production_attestation_non_monkeypatched_key_rejected(tmp_path, monkeypatch):
+    # T1:attestation 以丟棄式鑰簽,但 ATTESTOR_PUBLIC_KEY **未** monkeypatch(仍是固定 §9.1 信任根)→
+    # SSHSIG 驗不過固定公鑰 → PENDING。證「固定信任根才是真正的 gate」(丟棄式簽章騙不過真公鑰)。
+    operator_key = _install_operator_profile(tmp_path, monkeypatch)
+    # 只鑄 attestor 鑰,**不** monkeypatch(ATTESTOR_PUBLIC_KEY/FINGERPRINT 維持固定信任根)。
+    attestor_key, _pub, _fp = _mint_ed25519_key(tmp_path, "unpinned_attestor")
+    intent = _intent(target_class="production")
+    authorization, signature = _sign(operator_key, intent, HEAD)
+    driver = _AttestedProductionDriver(attestor_key, trusted_host_time=NOW)
+    result = obs.apply_observer_bootstrap(
+        intent, authorization, signature, now=NOW, source_head=HEAD, driver=driver
+    )
+    assert result["status"] == "EXTERNAL_VERIFICATION_PENDING"
+    assert result["status"] != "APPLIED"
+    assert "attestation invalid" in result["failure_reason"]
+    assert validator.validate_aiml_artifact(result, now=LATER) == []
+
+
+def test_production_attestation_tampered_digest_rejected(tmp_path, monkeypatch):
+    # T1:簽章**之後**竄改 attestation_digest → attestation_digest 完整性檢查 + SSHSIG(over 原始 bytes)雙雙失敗
+    # → PENDING(絕不 APPLIED)。
+    operator_key = _install_operator_profile(tmp_path, monkeypatch)
+    attestor_key = _install_attestor_profile(tmp_path, monkeypatch)
+    intent = _intent(target_class="production")
+    authorization, signature = _sign(operator_key, intent, HEAD)
+
+    def _tamper(att):
+        att["attestation_digest"] = "sha256:" + "0" * 64
+
+    driver = _AttestedProductionDriver(attestor_key, mutate_after_sign=_tamper)
+    result = obs.apply_observer_bootstrap(
+        intent, authorization, signature, now=NOW, source_head=HEAD, driver=driver
+    )
+    assert result["status"] == "EXTERNAL_VERIFICATION_PENDING"
+    assert result["status"] != "APPLIED"
+    assert "attestation invalid" in result["failure_reason"]
+    assert validator.validate_aiml_artifact(result, now=LATER) == []
+
+
+def test_production_attestation_reobserved_not_applied_rejected(tmp_path, monkeypatch):
+    # T2:獨立驗證者的 reobserved_digest != applied → step 8a 的 T2 runtime gate 於**請求 attestation 之前**
+    # 即擋下 → 補償 + PENDING;signed_apply_attestation 從未被呼叫。
+    operator_key = _install_operator_profile(tmp_path, monkeypatch)
+    attestor_key = _install_attestor_profile(tmp_path, monkeypatch)
+    intent = _intent(target_class="production")
+    authorization, signature = _sign(operator_key, intent, HEAD)
+    driver = _AttestedProductionDriver(attestor_key, proof_reobserved="sha256:" + "0" * 64)
+    result = obs.apply_observer_bootstrap(
+        intent, authorization, signature, now=NOW, source_head=HEAD, driver=driver
+    )
+    assert result["status"] == "EXTERNAL_VERIFICATION_PENDING"
+    assert result["status"] != "APPLIED"
+    assert "T2" in result["failure_reason"]
+    assert "signed_apply_attestation" not in driver.calls  # T2 gate is BEFORE the attestation request
+    assert "compensate" in driver.calls
+    assert validator.validate_aiml_artifact(result, now=LATER) == []
+
+
+def test_production_attestation_historical_now_replay_rejected(tmp_path, monkeypatch):
+    # T5:攻擊者以 historical 呼叫端 now(=NOW,落在原有效窗內)重放,但真實的 trusted_host_time 已在 intent
+    # 到期後(12:20 > expires 12:15)。freshness 由**簽章的** trusted_host_time 決定(非呼叫端 now)→ 落在 intent
+    # 窗外 → attestation 無效 → PENDING。呼叫端 now 只能收緊、不能放寬 freshness。
+    operator_key = _install_operator_profile(tmp_path, monkeypatch)
+    attestor_key = _install_attestor_profile(tmp_path, monkeypatch)
+    intent = _intent(target_class="production")  # created 12:00, ttl 900 -> expires 12:15
+    authorization, signature = _sign(operator_key, intent, HEAD)
+    # 呼叫端 now 仍落在原窗內(12:01),故上游 window / operator SSHSIG 檢查全過;真 apply 時鐘卻已過期。
+    replay_trusted_time = "2026-07-24T12:20:00+00:00"
+    driver = _AttestedProductionDriver(attestor_key, trusted_host_time=replay_trusted_time)
+    result = obs.apply_observer_bootstrap(
+        intent, authorization, signature, now=NOW, source_head=HEAD, driver=driver
+    )
+    assert result["status"] == "EXTERNAL_VERIFICATION_PENDING"
+    assert result["status"] != "APPLIED"
+    assert "attestation invalid" in result["failure_reason"]
+    assert "signed_apply_attestation" in driver.calls  # attestation WAS requested, then rejected on the signed clock
+    assert validator.validate_aiml_artifact(result, now=LATER) == []
+
+
+class _CompensateRaisesDriver(_SimulationProductionDriver):
+    def compensate(self, *, grant_set):
+        self.calls.append("compensate")
+        raise RuntimeError("compensation failed on the production host")
+
+
+class _CompensateNoOpDriver(_SimulationProductionDriver):
+    def compensate(self, *, grant_set):
+        self.calls.append("compensate")
+        # deliberately does NOT clear _present -> the observer role persists -> unconfirmed compensation
+
+
+def test_production_compensate_unconfirmed_is_recovery_required(tmp_path, monkeypatch):
+    # T3:一個 compensate **拋錯**(或 compensate 後 observer_role_present 仍 True)的 driver → 補償無法確認 →
+    # RECOVERY_REQUIRED(recovery_required=true + 明確 residual reason),絕不冒充「已補償」pending、絕不 APPLIED。
+    private_key = _install_operator_profile(tmp_path, monkeypatch)
+    intent = _intent(target_class="production")
+    authorization, signature = _sign(private_key, intent, HEAD)
+    for driver in (_CompensateRaisesDriver(), _CompensateNoOpDriver()):
+        result = obs.apply_observer_bootstrap(
+            intent, authorization, signature, now=NOW, source_head=HEAD, driver=driver
+        )
+        label = type(driver).__name__
+        assert result["status"] == "RECOVERY_REQUIRED", label
+        assert result["status"] != "APPLIED", label
+        assert result["recovery_required"] is True, label
+        assert result["boundary"]["production_apply_performed"] is False, label
+        assert result["boundary"]["nine_authorities_false"] is True, label
+        assert "RECOVERY_REQUIRED" in result["failure_reason"], label
+        assert "requires explicit operator recovery" in result["failure_reason"], label
+        assert result["apply_attestation"] is None and result["apply_attestation_signature_pem"] is None, label
+        assert result["independent_postcheck"] is None and result["rollback_record"] is None, label
+        assert result["evidence_class"] == "STRUCTURAL_ONLY", label
+        assert "compensate" in driver.calls, label
+        assert validator.validate_aiml_artifact(result, now=LATER) == [], label
+
+
+def test_production_confirmed_compensation_stays_pending_not_recovery(tmp_path, monkeypatch):
+    # 對照 T3:一個 compensate 能**確認**把 role 撤回的 non-attested driver → 保留誠實的「compensated」
+    # EXTERNAL_VERIFICATION_PENDING(非 RECOVERY_REQUIRED)。這確保 RECOVERY_REQUIRED 只在**無法確認**時觸發。
+    private_key = _install_operator_profile(tmp_path, monkeypatch)
+    intent = _intent(target_class="production")
+    authorization, signature = _sign(private_key, intent, HEAD)
+    driver = _SimulationProductionDriver(evidence_class="LOCAL_REPRODUCIBLE")
+    result = obs.apply_observer_bootstrap(
+        intent, authorization, signature, now=NOW, source_head=HEAD, driver=driver
+    )
+    assert result["status"] == "EXTERNAL_VERIFICATION_PENDING"
+    assert result["recovery_required"] is False
+    assert "not PLATFORM_ATTESTED" in result["failure_reason"]
+    assert driver._present is False  # compensation confirmed the role is gone
+    assert validator.validate_aiml_artifact(result, now=LATER) == []
+
+
+def test_production_intent_omitting_required_relation_is_pending(tmp_path, monkeypatch):
+    # T4:production intent **未觀** learning.alr_consumer_events → step 2.5 於任何 driver 呼叫之前 typed
+    # EXTERNAL_VERIFICATION_PENDING 且零變更(driver.calls == [])。auth-independent 的政策拒絕。
+    private_key = _install_operator_profile(tmp_path, monkeypatch)
+    # (a) 錯 schema(trading)且缺 relation。
+    intent = _intent(target_class="production", observed_schema="trading", observed_relations=["fills"])
+    authorization, signature = _sign(private_key, intent, HEAD)
+    driver = _SimulationProductionDriver()
+    result = obs.apply_observer_bootstrap(
+        intent, authorization, signature, now=NOW, source_head=HEAD, driver=driver
+    )
+    assert result["status"] == "EXTERNAL_VERIFICATION_PENDING"
+    assert "learning.alr_consumer_events" in result["failure_reason"]
+    assert driver.calls == []  # T4 fires pre-driver -> zero mutation
+    assert result["boundary"]["production_apply_performed"] is False
+    assert validator.validate_aiml_artifact(result, now=LATER) == []
+    # (b) 對 schema(learning)但**缺** alr_consumer_events relation → 仍被拒(F4 strict schema+relation)。
+    intent2 = _intent(target_class="production", observed_schema="learning", observed_relations=["some_other_rel"])
+    auth2, sig2 = _sign(private_key, intent2, HEAD)
+    driver2 = _SimulationProductionDriver()
+    r2 = obs.apply_observer_bootstrap(intent2, auth2, sig2, now=NOW, source_head=HEAD, driver=driver2)
+    assert r2["status"] == "EXTERNAL_VERIFICATION_PENDING"
+    assert "learning.alr_consumer_events" in r2["failure_reason"]
+    assert driver2.calls == []
+
+
+def test_recovery_required_result_builder_round_trip():
+    # build_recovery_required_result 直接 round-trip(module + central validator):recovery_required=true、
+    # STRUCTURAL_ONLY、無 postcheck/rollback/attestation、production_apply_performed=false。
+    intent = _intent(target_class="production")
+    result = obs.build_recovery_required_result(
+        intent, reason="observer role may persist; requires explicit operator recovery", now=NOW
+    )
+    assert result["status"] == "RECOVERY_REQUIRED"
+    assert result["recovery_required"] is True
+    assert result["boundary"]["production_apply_performed"] is False
+    assert obs.validate_pg_observer_bootstrap_result(result, now=LATER) == []
+    assert validator.validate_aiml_artifact(result, now=LATER) == []
+    # forgery:把 recovery_required 掛到非 RECOVERY_REQUIRED status(翻 status)並重簽 → 被拒。
+    forged = copy.deepcopy(result)
+    forged["status"] = "FAILED"
+    forged["self_digest"] = obs.artifact_self_digest(forged)
+    assert obs.validate_pg_observer_bootstrap_result(forged, now=LATER)
+
+
+def test_apply_attestation_schema_offline_round_trip(tmp_path, monkeypatch):
+    # 新 attestation schema 的離線結構 round-trip:一份 build 出的 attestation 通過其 JSON schema;
+    # 竄改一個常量欄位 → schema 拒。schema 未進 PROGRAM_SCHEMA_PATHS / SCHEMA_FILES(F1/§10.5)。
+    _install_attestor_profile(tmp_path, monkeypatch)
+    intent = _intent(target_class="production")
+    applied = "sha256:" + "c" * 64
+    attestation = obs.build_apply_attestation(
+        intent=intent, applied_grant_set_digest=applied, reobserved_digest=applied, trusted_host_time=NOW,
+    )
+    schema = json.loads(obs.APPLY_ATTESTATION_SCHEMA_PATH.read_text(encoding="utf-8"))
+    assert schema_subset_errors(attestation, schema, schema) == []
+    bad = copy.deepcopy(attestation)
+    bad["signature_namespace"] = "arcane-equilibrium-aiml-s2-observer-bootstrap"  # operator ns, wrong
+    assert schema_subset_errors(bad, schema, schema)
+    # 未進中央 schema 委派 / program schema manifest。
+    assert "pg_observer_bootstrap_apply_attestation_v1" not in validator.SCHEMA_FILES
+    ap = "program_code/ml_training/schemas/aiml_gate_receipts/pg_observer_bootstrap_apply_attestation_v1.schema.json"
+    assert ap not in validator.PROGRAM_SCHEMA_PATHS
+
+
+def test_fabricated_applied_without_platform_attested_is_rejected():
+    # (c) 從一份 production PENDING result 竄改為 APPLIED / production_apply_performed=true(無真 driver、無
+    # PLATFORM_ATTESTED 結構證據)並重簽 self_digest → result validator + central validator 皆拒。
+    # 誠實界線:離線 validator 只證結構/整合——它擋下的是「缺 PLATFORM_ATTESTED 結構」的偽造;真「已 apply」
+    # 的平台背書屬 S2.0 EFFECT session(見模組 docstring)。故此測試用**未帶** PLATFORM_ATTESTED 結構的偽造。
+    pending = obs.apply_observer_bootstrap(
+        _intent(target_class="production"), None, None, now=NOW, source_head=HEAD
+    )
+    assert pending["status"] == "EXTERNAL_VERIFICATION_PENDING"
+
+    # (c1) 只翻 status + production_apply_performed(evidence_class 仍 STRUCTURAL_ONLY、postcheck 仍 null)。
+    c1 = copy.deepcopy(pending)
+    c1["status"] = "APPLIED"
+    c1["boundary"]["production_apply_performed"] = True
+    c1["self_digest"] = obs.artifact_self_digest(c1)
+    assert obs.validate_pg_observer_bootstrap_result(c1, now=LATER)
+    assert validator.validate_aiml_artifact(c1, now=LATER)
+
+    # (c2) 再把 evidence_class 改成 PLATFORM_ATTESTED,但仍缺 postcheck/簽章、failure_reason 未清 → 仍被拒。
+    c2 = copy.deepcopy(c1)
+    c2["evidence_class"] = "PLATFORM_ATTESTED"
+    c2["self_digest"] = obs.artifact_self_digest(c2)
+    assert obs.validate_pg_observer_bootstrap_result(c2, now=LATER)
+    assert validator.validate_aiml_artifact(c2, now=LATER)
+
+    # (c3) production_apply_performed=true 掛在**非** APPLIED status → schema else 釘 false + validator 皆拒。
+    c3 = copy.deepcopy(pending)
+    c3["boundary"]["production_apply_performed"] = True
+    c3["self_digest"] = obs.artifact_self_digest(c3)
+    assert obs.validate_pg_observer_bootstrap_result(c3, now=LATER)
+    assert validator.validate_aiml_artifact(c3, now=LATER)
+
+
+def test_applied_result_builder_fail_closed_guards():
+    # APPLIED builder 護欄(只證 fail-closed、不造「通過」的 APPLIED、不冒充平台背書):非 PLATFORM_ATTESTED /
+    # 非 dict apply_attestation / applied==pre / 非 production 目標皆 raise。這些是純函式護欄斷言。
+    intent = _intent(target_class="production")
+    grant_set = obs.generate_observer_grant_sql(intent)
+    applied = "sha256:" + "c" * 64
+    postcheck = _postcheck(intent, applied)
+    armor_sig = b"-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQ==\n-----END SSH SIGNATURE-----\n"
+    attestation = obs.build_apply_attestation(
+        intent=intent, applied_grant_set_digest=applied, reobserved_digest=applied, trusted_host_time=NOW,
+    )
+    common = dict(
+        grant_set=grant_set, pre_state_digest="sha256:" + "a" * 64,
+        applied_grant_set_digest=applied, postcheck=postcheck,
+        operator_authorization=obs.build_operator_authorization(intent=intent, source_head=HEAD),
+        operator_signature=armor_sig, apply_attestation=attestation,
+        apply_attestation_signature=armor_sig, apply_actor_node=intent["applier_node_id"],
+    )
+    # 非 PLATFORM_ATTESTED evidence → raise。
+    with pytest.raises(obs.PgObserverBootstrapError):
+        obs.build_pg_observer_bootstrap_applied_result(intent=intent, evidence_class="LOCAL_REPRODUCIBLE", **common)
+    # 非 dict apply_attestation → raise(bare evidence_class 不再足以造 APPLIED)。
+    with pytest.raises(obs.PgObserverBootstrapError):
+        obs.build_pg_observer_bootstrap_applied_result(
+            intent=intent, evidence_class="PLATFORM_ATTESTED", **{**common, "apply_attestation": None},
+        )
+    # applied == pre(apply 未改變 catalog)→ raise。
+    with pytest.raises(obs.PgObserverBootstrapError):
+        obs.build_pg_observer_bootstrap_applied_result(
+            intent=intent, evidence_class="PLATFORM_ATTESTED",
+            **{**common, "applied_grant_set_digest": common["pre_state_digest"]},
+        )
+    # 非 production 目標 → raise(在 evidence 檢查之前)。
+    disp = _intent(target_class="disposable_local")
+    with pytest.raises(obs.PgObserverBootstrapError):
+        obs.build_pg_observer_bootstrap_applied_result(
+            intent=disp, evidence_class="PLATFORM_ATTESTED",
+            **{**common, "grant_set": obs.generate_observer_grant_sql(disp)},
+        )
+
+
+def test_production_proof_failure_after_create_compensates_and_pending(tmp_path, monkeypatch):
+    # OPS-1 / E3-P2 / E2-P2-1 修復:create 成功後 step-8(independent_read_only_proof / postcheck build)
+    # 拋錯——例如獨立驗證者正確發現已建 observer **並非**唯讀——必**補償**已建 role 並回 typed
+    # EXTERNAL_VERIFICATION_PENDING(絕不留 stranded role、絕不 raise、絕不 APPLIED)。用**非** PLATFORM_ATTESTED
+    # driver(不冒充平台背書),其 proof 直接拋錯以模擬「create 後失敗」。
+    class _ProofRaisesDriver(_SimulationProductionDriver):
+        def independent_read_only_proof(self, *, grant_set):
+            self.calls.append("independent_read_only_proof")
+            raise RuntimeError("verifier detected the provisioned observer is not read-only")
+
+    private_key = _install_operator_profile(tmp_path, monkeypatch)
+    intent = _intent(target_class="production")
+    authorization, signature = _sign(private_key, intent, HEAD)
+    driver = _ProofRaisesDriver(evidence_class="LOCAL_REPRODUCIBLE")
+    result = obs.apply_observer_bootstrap(
+        intent, authorization, signature, now=NOW, source_head=HEAD, driver=driver
+    )
+    assert "create_read_only_observer" in driver.calls
+    assert "independent_read_only_proof" in driver.calls
+    assert "compensate" in driver.calls          # 已建 role → 觸發後失敗必補償
+    assert driver._present is False               # 補償已把已建 role 撤回(不留 stranded role)
+    assert result["status"] == "EXTERNAL_VERIFICATION_PENDING"
+    assert result["status"] != "APPLIED"
+    assert result["boundary"]["production_apply_performed"] is False
+    assert "compensated" in result["failure_reason"]
+    assert validator.validate_aiml_artifact(result, now=LATER) == []
+
+
+def test_production_preflight_raise_before_create_is_pending_not_raise(tmp_path, monkeypatch):
+    # E2-P2-1(step 6):create **之前**的 read-only 前檢(observer_role_present)拋錯 → 尚無 mutation,
+    # 故不呼叫 compensate,回 typed EXTERNAL_VERIFICATION_PENDING(絕不 raise),role 未被建立。
+    class _PreflightRaisesDriver(_SimulationProductionDriver):
+        def observer_role_present(self, *, role):
+            self.calls.append("observer_role_present")
+            raise RuntimeError("transient read failure before any mutation")
+
+    private_key = _install_operator_profile(tmp_path, monkeypatch)
+    intent = _intent(target_class="production")
+    authorization, signature = _sign(private_key, intent, HEAD)
+    driver = _PreflightRaisesDriver(evidence_class="LOCAL_REPRODUCIBLE")
+    result = obs.apply_observer_bootstrap(
+        intent, authorization, signature, now=NOW, source_head=HEAD, driver=driver
+    )
+    assert "create_read_only_observer" not in driver.calls   # 前檢即失敗,未建 role
+    assert "compensate" not in driver.calls                  # 無 mutation → 不補償
+    assert driver._present is False
+    assert result["status"] == "EXTERNAL_VERIFICATION_PENDING"
+    assert result["boundary"]["production_apply_performed"] is False
+    assert "preflight failed" in result["failure_reason"]
+    assert validator.validate_aiml_artifact(result, now=LATER) == []
+
+
+def test_registry_adapter_status_is_authority_locked_production_capable():
+    # (d) registry status 由 declared_production_apply_disabled_until_operator_sshsig 翻為
+    # AUTHORITY_LOCKED_PRODUCTION_CAPABLE(reachable 但 authority-locked);authority/invariant prose 明載三要件。
+    registry = json.loads((ROOT / ".codex/agent_registry_v1.json").read_text(encoding="utf-8"))
+    adapter = registry["effect_adapters"]["pg_observer_bootstrap_adapter_v1"]
+    assert adapter["status"] == "AUTHORITY_LOCKED_PRODUCTION_CAPABLE"
+    assert "reachable but authority-locked" in adapter["authority"]
+    assert "PLATFORM_ATTESTED" in adapter["authority"]
+    assert "zero mutation" in adapter["authority"]
+    assert "nine authorities stay false" in adapter["invariant"]
 
 
 # --------------------------------------------------------------------------- #
