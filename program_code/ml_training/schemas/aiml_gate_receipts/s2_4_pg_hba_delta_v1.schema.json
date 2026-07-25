@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2_4_pg_hba_delta_v1.schema.json",
+  "title": "s2_4_pg_hba_delta_v1",
+  "description": "Closed signed HBA-delta contract for the S2.4 PG step (§5.1/§8.2), signed by both the aggregate and PG permits. It binds the attested pre-HBA digest, either one normalized task-owned row addition or an exact no-op with its insertion anchor, the expected full post-HBA digest, the exact effective rule for the fixed 127.0.0.1/32 SCRAM source (database/user property-only per §9-G, never a frozen exact identity), the typed reload operation and the exact rollback projection digest, all bound to the plan and cluster identity. The authorized projected row itself is not topology drift; any listener/proxy/cluster change or HBA change outside this signed delta is PG_TOPOLOGY_UNPROVEN downstream. self_digest is integrity evidence only.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "plan_id",
+    "plan_core_digest",
+    "cluster_identity_ref",
+    "pre_hba_digest",
+    "delta",
+    "post_hba_digest",
+    "effective_rule",
+    "reload_operation",
+    "rollback_projection_digest",
+    "observed_at",
+    "expires_at",
+    "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2_4_pg_hba_delta_v1"},
+    "plan_id": {"$ref": "#/$defs/plan_id"},
+    "plan_core_digest": {"$ref": "#/$defs/digest"},
+    "cluster_identity_ref": {"$ref": "#/$defs/digest"},
+    "pre_hba_digest": {"$ref": "#/$defs/digest"},
+    "delta": {"$ref": "#/$defs/delta"},
+    "post_hba_digest": {"$ref": "#/$defs/digest"},
+    "effective_rule": {"$ref": "#/$defs/effective_rule"},
+    "reload_operation": {"const": "pg_hba_reload"},
+    "rollback_projection_digest": {"$ref": "#/$defs/digest"},
+    "observed_at": {"$ref": "#/$defs/timestamp"},
+    "expires_at": {"$ref": "#/$defs/timestamp"},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"delta": {"properties": {"operation": {"const": "ADD_ROW"}}}}},
+      "then": {"properties": {"delta": {"required": ["normalized_row", "insertion_anchor"]}}}
+    }
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "plan_id": {"type": "string", "pattern": "^s2-4-[0-9a-f]{64}$"},
+    "delta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operation"],
+      "properties": {
+        "operation": {"enum": ["ADD_ROW", "NOOP"]},
+        "normalized_row": {"type": "string", "minLength": 1},
+        "insertion_anchor": {"type": "string", "minLength": 1}
+      }
+    },
+    "effective_rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "database", "user", "method"],
+      "properties": {
+        "source": {"const": "127.0.0.1/32"},
+        "database": {"type": "string", "minLength": 1},
+        "user": {"type": "string", "minLength": 1},
+        "method": {"const": "scram-sha-256"}
+      }
+    }
+  }
+}

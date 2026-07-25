@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2_4_capability_probe_effect_receipt_v1.schema.json",
+  "title": "s2_4_capability_probe_effect_receipt_v1",
+  "description": "Terminal receipt for one S2.4 capability probe (§5.2/§9.2). It binds the exact probe_id/core digest, the consumed scope-bound authorization identity, the transient-unit lifecycle evidence (derived unit name 'arcane-aiml-s2-4-probe-<64hex>.service', InvocationID, created/observed/stopped/reset-failed/removed transitions and zero-residue verification), the terminal journal digest, the consumed replay-ledger entry, the independent no-surviving-unit postcheck digest, the cleanup rollback digest and the embedded network_sandbox_capability_attestation digest for that scope. A terminal receipt requires a terminal journal plus absence from systemd unit lists, cgroup/process state and task-owned transient files. production_authority_flags keep the nine authorities false and production_apply_performed/running_attested false: the probe is a bounded transient runtime test, never a production install. self_digest is integrity evidence only.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "probe_id",
+    "probe_core_digest",
+    "probe_scope",
+    "authorization_id",
+    "authorization_digest",
+    "derived_unit_name",
+    "transient_unit_lifecycle",
+    "journal_digest",
+    "consumed_replay_entry_digest",
+    "postcheck_digest",
+    "rollback_digest",
+    "network_sandbox_capability_attestation_digest",
+    "terminal_status",
+    "evidence_class",
+    "source_head",
+    "target_host",
+    "trusted_host_time",
+    "observed_at",
+    "expires_at",
+    "production_authority_flags",
+    "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2_4_capability_probe_effect_receipt_v1"},
+    "probe_id": {"$ref": "#/$defs/probe_id"},
+    "probe_core_digest": {"$ref": "#/$defs/digest"},
+    "probe_scope": {"enum": ["PREPARE_SANDBOX", "INSTALLED_UNIT"]},
+    "authorization_id": {"$ref": "#/$defs/digest"},
+    "authorization_digest": {"$ref": "#/$defs/digest"},
+    "derived_unit_name": {"$ref": "#/$defs/derived_unit_name"},
+    "transient_unit_lifecycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "invocation_id",
+        "unit_created",
+        "unit_observed",
+        "stopped_after_grace",
+        "reset_failed",
+        "removed",
+        "zero_residue_verified"
+      ],
+      "properties": {
+        "invocation_id": {"type": "string", "minLength": 1},
+        "unit_created": {"type": "boolean"},
+        "unit_observed": {"type": "boolean"},
+        "stopped_after_grace": {"type": "boolean"},
+        "reset_failed": {"type": "boolean"},
+        "removed": {"type": "boolean"},
+        "zero_residue_verified": {"type": "boolean"}
+      }
+    },
+    "journal_digest": {"$ref": "#/$defs/digest"},
+    "consumed_replay_entry_digest": {"$ref": "#/$defs/digest"},
+    "postcheck_digest": {"$ref": "#/$defs/digest"},
+    "rollback_digest": {"$ref": "#/$defs/digest"},
+    "network_sandbox_capability_attestation_digest": {"$ref": "#/$defs/digest"},
+    "terminal_status": {"enum": ["TERMINAL_CLEAN", "TERMINAL_FAILED", "RECOVERY_REQUIRED"]},
+    "evidence_class": {"enum": ["PLATFORM_ATTESTED", "PLATFORM_OR_EXTERNAL_ATTESTED", "STRUCTURAL_ONLY"]},
+    "source_head": {"$ref": "#/$defs/git_sha"},
+    "target_host": {"type": "string", "minLength": 1},
+    "trusted_host_time": {"$ref": "#/$defs/timestamp"},
+    "observed_at": {"$ref": "#/$defs/timestamp"},
+    "expires_at": {"$ref": "#/$defs/timestamp"},
+    "production_authority_flags": {"$ref": "#/$defs/production_authority_flags"},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"terminal_status": {"const": "TERMINAL_CLEAN"}}},
+      "then": {
+        "properties": {
+          "transient_unit_lifecycle": {
+            "properties": {
+              "stopped_after_grace": {"const": true},
+              "reset_failed": {"const": true},
+              "removed": {"const": true},
+              "zero_residue_verified": {"const": true}
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "git_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "probe_id": {"type": "string", "pattern": "^s2-4-probe-[0-9a-f]{64}$"},
+    "derived_unit_name": {"type": "string", "pattern": "^arcane-aiml-s2-4-probe-[0-9a-f]{64}\\.service$"},
+    "production_authority_flags": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["nine_authorities_false", "production_apply_performed", "running_attested"],
+      "properties": {
+        "nine_authorities_false": {"const": true},
+        "production_apply_performed": {"const": false},
+        "running_attested": {"const": false}
+      }
+    }
+  }
+}

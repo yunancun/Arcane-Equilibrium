@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2_4_component_effect_postcheck_v1.schema.json",
+  "title": "s2_4_component_effect_postcheck_v1",
+  "description": "Independent per-row postcheck for one of the five S2.4 APPLY component-effect rows (§4 per-row ABI). A distinct role/node (verifier_node != applier_node) independently re-observes the row subject and confirms the applied state and pre-state lineage, bound to the verifier's own governed command_capture_v2 record digest. status==PASS requires applied_state_verified and pre_state_lineage_verified true; the applier can never be its own sole verifier. Contract only: this attests one row's apply hygiene, not any production PASS.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "status",
+    "component_effect_class",
+    "install_plan_digest",
+    "verifier_node",
+    "applier_node",
+    "observed_subject_digest",
+    "applied_state_verified",
+    "pre_state_lineage_verified",
+    "verifier_capture_digest",
+    "observed_at",
+    "expires_at",
+    "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2_4_component_effect_postcheck_v1"},
+    "status": {"enum": ["PASS", "FAIL"]},
+    "component_effect_class": {"$ref": "#/$defs/component_effect_class"},
+    "install_plan_digest": {"$ref": "#/$defs/digest"},
+    "verifier_node": {"type": "string", "minLength": 1},
+    "applier_node": {"type": "string", "minLength": 1},
+    "observed_subject_digest": {"$ref": "#/$defs/digest"},
+    "applied_state_verified": {"type": "boolean"},
+    "pre_state_lineage_verified": {"type": "boolean"},
+    "verifier_capture_digest": {"$ref": "#/$defs/digest"},
+    "observed_at": {"$ref": "#/$defs/timestamp"},
+    "expires_at": {"$ref": "#/$defs/timestamp"},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "PASS"}}},
+      "then": {
+        "properties": {
+          "applied_state_verified": {"const": true},
+          "pre_state_lineage_verified": {"const": true}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "component_effect_class": {
+      "enum": [
+        "HOST_IDENTITY_INSTALL",
+        "PG_ROLE_ACL_MIGRATION",
+        "CREDENTIAL_INSTALL",
+        "LEARNING_RUNTIME",
+        "ENGINE_SCANNER"
+      ]
+    }
+  }
+}

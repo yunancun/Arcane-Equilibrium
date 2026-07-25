@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2_4_capability_probe_core_v1.schema.json",
+  "title": "s2_4_capability_probe_core_v1",
+  "description": "Unsigned canonical core for one S2.4 HOST_CAPABILITY_PROBE (§5.1 PREPARE->sign->APPLY). It is the exact object that gets SSHSIG-signed: its canonical digest yields probe_id = 's2-4-probe-' + hex(digest). The core therefore deliberately excludes probe_id, any authorization object/signature and any self_digest (those are derived/attached later and live only in the intent/authorization_set). It binds the probe scope, the fixed transient-unit sandbox property digest, the host/cgroup identity, a bounded cleanup budget and the source-head/target-host. It is a contract only: no runtime/production PASS is asserted here.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "probe_scope",
+    "transient_unit_property_digest",
+    "host_cgroup_identity",
+    "cleanup_budget",
+    "source_head",
+    "target_host",
+    "created_at"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2_4_capability_probe_core_v1"},
+    "probe_scope": {"enum": ["PREPARE_SANDBOX", "INSTALLED_UNIT"]},
+    "transient_unit_property_digest": {"$ref": "#/$defs/digest"},
+    "host_cgroup_identity": {"$ref": "#/$defs/host_cgroup_identity"},
+    "cleanup_budget": {"$ref": "#/$defs/cleanup_budget"},
+    "source_head": {"$ref": "#/$defs/git_sha"},
+    "target_host": {"type": "string", "minLength": 1},
+    "created_at": {"$ref": "#/$defs/timestamp"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "git_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "host_cgroup_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host", "cgroup_manager_scope", "cgroup_root_pattern"],
+      "properties": {
+        "host": {"type": "string", "minLength": 1},
+        "cgroup_manager_scope": {"enum": ["system_manager", "user_manager"]},
+        "cgroup_root_pattern": {"type": "string", "minLength": 1}
+      }
+    },
+    "cleanup_budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_cleanup_seconds", "max_cgroup_drain_seconds"],
+      "properties": {
+        "max_cleanup_seconds": {"type": "integer", "minimum": 1, "maximum": 3600},
+        "max_cgroup_drain_seconds": {"type": "integer", "minimum": 1, "maximum": 3600}
+      }
+    }
+  }
+}

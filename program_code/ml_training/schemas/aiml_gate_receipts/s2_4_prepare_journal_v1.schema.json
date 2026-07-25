@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2_4_prepare_journal_v1.schema.json",
+  "title": "s2_4_prepare_journal_v1",
+  "description": "Write-ahead log contract for one S2.4 LEARNING_RUNTIME_PREPARE phase (§5.2). Schema only; the W4 effect runner writes it. It records/fsyncs PREPARING BEFORE creating the staging directory, so a crash before the prepared receipt still has task-ownership/reconcile evidence. Each monotonic-seq entry carries pre/post-state digests and no secret bytes; journal_integrity records the same-filesystem temp-create/file-fsync/atomic-rename/parent-fsync discipline. self_digest is the canonical inner digest; outer_checksum is the separate outer integrity checksum. A WAL, never a retrospective log.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "prepare_id",
+    "staging_root",
+    "entries",
+    "terminal",
+    "journal_integrity",
+    "outer_checksum",
+    "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2_4_prepare_journal_v1"},
+    "prepare_id": {"$ref": "#/$defs/prepare_id"},
+    "staging_root": {"type": "string", "minLength": 1},
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/journal_entry"}
+    },
+    "terminal": {"type": "boolean"},
+    "journal_integrity": {"$ref": "#/$defs/journal_integrity"},
+    "outer_checksum": {"$ref": "#/$defs/digest"},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "prepare_id": {"type": "string", "pattern": "^s2-4-prepare-[0-9a-f]{64}$"},
+    "state": {
+      "enum": [
+        "NOT_STARTED",
+        "PREPARING",
+        "APPLYING",
+        "APPLIED",
+        "VERIFYING",
+        "VERIFIED",
+        "COMPENSATING",
+        "COMPENSATED",
+        "FAILED"
+      ]
+    },
+    "journal_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["seq", "state", "pre_state_digest", "post_state_digest", "fsynced", "recorded_at"],
+      "properties": {
+        "seq": {"type": "integer", "minimum": 0},
+        "state": {"$ref": "#/$defs/state"},
+        "pre_state_digest": {"$ref": "#/$defs/digest"},
+        "post_state_digest": {"$ref": "#/$defs/digest"},
+        "fsynced": {"const": true},
+        "recorded_at": {"$ref": "#/$defs/timestamp"}
+      }
+    },
+    "journal_integrity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["preparing_fsynced_before_staging_create", "same_filesystem_atomic_rename", "file_fsynced", "parent_dir_fsynced"],
+      "properties": {
+        "preparing_fsynced_before_staging_create": {"const": true},
+        "same_filesystem_atomic_rename": {"const": true},
+        "file_fsynced": {"const": true},
+        "parent_dir_fsynced": {"const": true}
+      }
+    }
+  }
+}

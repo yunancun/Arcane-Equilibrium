@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2_4_capability_probe_postcheck_v1.schema.json",
+  "title": "s2_4_capability_probe_postcheck_v1",
+  "description": "Independent-verifier postcheck for one S2.4 capability probe (§4 per-row ABI, §5.2). A distinct role/node (verifier_node != applier_node) proves stop/reset-failed/remove completed and that no transient unit, cgroup or process survives, bound to the verifier's own governed command_capture_v2 record digest. status==PASS requires every survival flag false and every completion confirmation true; the applier can never be its own sole verifier. Contract only: this attests probe cleanup, not any production PASS.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "status",
+    "probe_id",
+    "probe_core_digest",
+    "derived_unit_name",
+    "verifier_node",
+    "applier_node",
+    "stopped_confirmed",
+    "reset_failed_confirmed",
+    "removed_confirmed",
+    "no_surviving_unit",
+    "no_surviving_cgroup",
+    "no_surviving_process",
+    "verifier_capture_digest",
+    "observed_at",
+    "expires_at",
+    "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2_4_capability_probe_postcheck_v1"},
+    "status": {"enum": ["PASS", "FAIL"]},
+    "probe_id": {"$ref": "#/$defs/probe_id"},
+    "probe_core_digest": {"$ref": "#/$defs/digest"},
+    "derived_unit_name": {"$ref": "#/$defs/derived_unit_name"},
+    "verifier_node": {"type": "string", "minLength": 1},
+    "applier_node": {"type": "string", "minLength": 1},
+    "stopped_confirmed": {"type": "boolean"},
+    "reset_failed_confirmed": {"type": "boolean"},
+    "removed_confirmed": {"type": "boolean"},
+    "no_surviving_unit": {"type": "boolean"},
+    "no_surviving_cgroup": {"type": "boolean"},
+    "no_surviving_process": {"type": "boolean"},
+    "verifier_capture_digest": {"$ref": "#/$defs/digest"},
+    "observed_at": {"$ref": "#/$defs/timestamp"},
+    "expires_at": {"$ref": "#/$defs/timestamp"},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "PASS"}}},
+      "then": {
+        "properties": {
+          "stopped_confirmed": {"const": true},
+          "reset_failed_confirmed": {"const": true},
+          "removed_confirmed": {"const": true},
+          "no_surviving_unit": {"const": true},
+          "no_surviving_cgroup": {"const": true},
+          "no_surviving_process": {"const": true}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "probe_id": {"type": "string", "pattern": "^s2-4-probe-[0-9a-f]{64}$"},
+    "derived_unit_name": {"type": "string", "pattern": "^arcane-aiml-s2-4-probe-[0-9a-f]{64}\\.service$"}
+  }
+}

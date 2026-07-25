@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/pg_topology_attestation_v1.schema.json",
+  "title": "pg_topology_attestation_v1",
+  "description": "Attested PG topology evidence emitted by an independent read-only OPS producer after W6A and before final-plan signing/W6B (§8.2). It binds the runtime listener socket/owner/endpoint, every proxy/pooler/forwarder hop and config digest, the administration endpoint/opaque-handle class, the PostgreSQL cluster identity (system_identifier, server version, database OID, postmaster identity, reload operation id), the data/config/HBA file device/inode/path/digests, the exact effective HBA rule for the fixed 127.0.0.1/32 SCRAM source and the end-to-end assertion that runtime endpoint 5432 reaches that exact cluster. This artifact carries EVIDENCE ONLY: topology_status is an observation class (never a PASS), and derived_verdict is pinned const null because whether the topology is PROVEN is re-derived by an independent verifier, never self-declared here (mirroring the W0 admission no-self-declared-status posture). An unproved hop or a listener/proxy/cluster change is PG_TOPOLOGY_UNPROVEN downstream. self_digest is integrity evidence only.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "target_host",
+    "source_head",
+    "topology_status",
+    "derived_verdict",
+    "runtime_listener",
+    "proxy_hops",
+    "admin_endpoint",
+    "cluster_identity",
+    "file_identities",
+    "effective_hba_rule",
+    "end_to_end_reaches_cluster",
+    "listener_config_digest",
+    "proxy_config_digest",
+    "cluster_identity_digest",
+    "observed_at",
+    "expires_at",
+    "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "pg_topology_attestation_v1"},
+    "target_host": {"type": "string", "minLength": 1},
+    "source_head": {"$ref": "#/$defs/git_sha"},
+    "topology_status": {"enum": ["PG_TOPOLOGY_UNPROVEN", "PG_TOPOLOGY_EVIDENCE_CAPTURED"]},
+    "derived_verdict": {"const": null},
+    "runtime_listener": {"$ref": "#/$defs/runtime_listener"},
+    "proxy_hops": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/proxy_hop"}
+    },
+    "admin_endpoint": {"$ref": "#/$defs/admin_endpoint"},
+    "cluster_identity": {"$ref": "#/$defs/cluster_identity"},
+    "file_identities": {"$ref": "#/$defs/file_identities"},
+    "effective_hba_rule": {"$ref": "#/$defs/effective_hba_rule"},
+    "end_to_end_reaches_cluster": {"type": "boolean"},
+    "listener_config_digest": {"$ref": "#/$defs/digest"},
+    "proxy_config_digest": {"$ref": "#/$defs/digest"},
+    "cluster_identity_digest": {"$ref": "#/$defs/digest"},
+    "observed_at": {"$ref": "#/$defs/timestamp"},
+    "expires_at": {"$ref": "#/$defs/timestamp"},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "git_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "runtime_listener": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["socket_inode", "owning_pid", "owning_uid", "executable_digest", "cgroup", "endpoint"],
+      "properties": {
+        "socket_inode": {"type": "integer", "minimum": 0},
+        "owning_pid": {"type": "integer", "minimum": 0},
+        "owning_uid": {"type": "integer", "minimum": 0},
+        "executable_digest": {"$ref": "#/$defs/digest"},
+        "cgroup": {"type": "string", "minLength": 1},
+        "endpoint": {"type": "string", "minLength": 1}
+      }
+    },
+    "proxy_hop": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["config_digest", "upstream_endpoint"],
+      "properties": {
+        "config_digest": {"$ref": "#/$defs/digest"},
+        "upstream_endpoint": {"type": "string", "minLength": 1}
+      }
+    },
+    "admin_endpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["endpoint_class", "handle_class"],
+      "properties": {
+        "endpoint_class": {"enum": ["attested_local_socket", "port_5433"]},
+        "handle_class": {"type": "string", "minLength": 1}
+      }
+    },
+    "cluster_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["system_identifier", "server_version", "database_oid", "postmaster_identity", "reload_operation_id"],
+      "properties": {
+        "system_identifier": {"type": "string", "minLength": 1},
+        "server_version": {"type": "string", "minLength": 1},
+        "database_oid": {"type": "integer", "minimum": 0},
+        "postmaster_identity": {"type": "string", "minLength": 1},
+        "reload_operation_id": {"type": "string", "minLength": 1}
+      }
+    },
+    "file_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["device", "inode", "path", "digest"],
+      "properties": {
+        "device": {"type": "integer", "minimum": 0},
+        "inode": {"type": "integer", "minimum": 0},
+        "path": {"type": "string", "minLength": 1},
+        "digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "file_identities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["data_dir", "config_file", "hba_file"],
+      "properties": {
+        "data_dir": {"$ref": "#/$defs/file_identity"},
+        "config_file": {"$ref": "#/$defs/file_identity"},
+        "hba_file": {"$ref": "#/$defs/file_identity"}
+      }
+    },
+    "effective_hba_rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "database", "user", "method"],
+      "properties": {
+        "source": {"const": "127.0.0.1/32"},
+        "database": {"type": "string", "minLength": 1},
+        "user": {"type": "string", "minLength": 1},
+        "method": {"const": "scram-sha-256"}
+      }
+    }
+  }
+}

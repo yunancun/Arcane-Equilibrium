@@ -1,0 +1,59 @@
+{
+  "admission_derivation": {
+    "reasons": [],
+    "status": "ADMITTED"
+  },
+  "admission_self_digest": "sha256:d40bed03b0a2ac3736bf62114717e869691143cf66cba186646447aa8ccbaf12",
+  "replay_note": "re-derivation binds source_head == checkout HEAD; to replay, checkout source_head and run derive_source_admission_status/derive_wave_exit_status",
+  "review_provenance": [
+    {
+      "branch": "agent/aiml-s2-wp3-unit-ledger",
+      "kind": "w0_review_provenance",
+      "merge_head": "560d64be8",
+      "pr": 135,
+      "scope": "S2.1 system-unit amendment ledger event (Blocker-1 recorded, ledger v12)",
+      "verdict": "merged; PM ledger projection"
+    },
+    {
+      "branch": "agent/aiml-s2-wp4-w0",
+      "kind": "w0_review_provenance",
+      "merge_head": "f87bae724",
+      "pr": 136,
+      "scope": "W0 admission alignment + W0a authenticity hardening (reachable S2.0 production gate; Codex 5xP1 resolved; 2000-line governance cap split of observer crypto layer)",
+      "verdict": "merged after Codex closeout; findings resolved"
+    },
+    {
+      "branch": "agent/aiml-s2-wp4-w0b",
+      "kind": "w0_review_provenance",
+      "merge_head": "9572a2c06602106d5c41068d3aff911f279128c8",
+      "pr": 137,
+      "scope": "S2.4 source-admission + wave-exit machinery (validator-derived, never self-declared); negative_tests_pass binding; wave-exit boundary pin; 3 tamper-test gaps + 7 Codex authenticity findings closed",
+      "verdict": "merged after Codex closeout; findings resolved"
+    },
+    {
+      "branch": "agent/aiml-s2-wp4-unit-contract-fix",
+      "kind": "w0_review_provenance",
+      "merge_head": "PENDING_MERGE_AT_EMISSION_TIME",
+      "pr": 138,
+      "scope": "PM contract amendment: S2.4 unit identity reconciled to arcane-equilibrium-aiml-engine-scanner.service (W0 fork #4/#5)",
+      "verdict": "open at emission time; W0 admission binds the WP3 system-level property, not the exact unit name (per S2.4-W0-admission-alignment.md §7 #4 property-only binding)"
+    }
+  ],
+  "schema_version": "s2_4_w0_derivation_record_v1_informal",
+  "source_head": "37cb9094956b8ee2b3af33efd610ee0d8566557f",
+  "test_evidence": {
+    "command": "python3 -m pytest tests/structure/test_s2_4_w0_admission.py tests/structure/test_agent_governance_s2_4_install.py -q",
+    "executed_at": "2026-07-25T13:13:56Z",
+    "exit_code": 0,
+    "host_role": "mac_development_checkout",
+    "kind": "w0_formal_exit_test_run",
+    "python": "Python 3.10.1",
+    "source_head": "37cb9094956b8ee2b3af33efd610ee0d8566557f",
+    "summary_line": "40 passed in 1.59s"
+  },
+  "wave_exit_derivation": {
+    "reasons": [],
+    "status": "PASS"
+  },
+  "wave_exit_self_digest": "sha256:6c86008f343b93367d845779baaef12d002ba710e073c6953a0b57badad78a16"
+}

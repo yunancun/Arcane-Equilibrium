@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/network_sandbox_capability_attestation_v1.schema.json",
+  "title": "network_sandbox_capability_attestation_v1",
+  "description": "Scope-bound sandbox-capability attestation embedded in a terminal capability-probe effect receipt (§3/§5.2/§9.2). scope=PREPARE_SANDBOX attests the fixed fetch/build sandbox properties before W6A; scope=INSTALLED_UNIT attests the exact rendered unit/host after W6A; neither scope can satisfy the other. It binds the probe identity, the transient-unit property digest and the observed sandbox/network-isolation capability digests. It is explicitly NOT a runtime production PASS: production_posture pins is_runtime_production_pass/production_apply_performed/running_attested false with nine_authorities_false true, and evidence_class only records the assurance class (a self_digest is integrity evidence, never producer authenticity).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "scope",
+    "probe_id",
+    "probe_core_digest",
+    "transient_unit_property_digest",
+    "observed_sandbox_capability_digest",
+    "network_isolation_verified",
+    "evidence_class",
+    "production_posture",
+    "observed_at",
+    "expires_at",
+    "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "network_sandbox_capability_attestation_v1"},
+    "scope": {"enum": ["PREPARE_SANDBOX", "INSTALLED_UNIT"]},
+    "probe_id": {"$ref": "#/$defs/probe_id"},
+    "probe_core_digest": {"$ref": "#/$defs/digest"},
+    "transient_unit_property_digest": {"$ref": "#/$defs/digest"},
+    "observed_sandbox_capability_digest": {"$ref": "#/$defs/digest"},
+    "network_isolation_verified": {"type": "boolean"},
+    "evidence_class": {"enum": ["PLATFORM_ATTESTED", "PLATFORM_OR_EXTERNAL_ATTESTED", "STRUCTURAL_ONLY"]},
+    "production_posture": {"$ref": "#/$defs/production_posture"},
+    "observed_at": {"$ref": "#/$defs/timestamp"},
+    "expires_at": {"$ref": "#/$defs/timestamp"},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "probe_id": {"type": "string", "pattern": "^s2-4-probe-[0-9a-f]{64}$"},
+    "production_posture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "is_runtime_production_pass",
+        "production_apply_performed",
+        "running_attested",
+        "nine_authorities_false"
+      ],
+      "properties": {
+        "is_runtime_production_pass": {"const": false},
+        "production_apply_performed": {"const": false},
+        "running_attested": {"const": false},
+        "nine_authorities_false": {"const": true}
+      }
+    }
+  }
+}

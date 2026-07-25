@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2_4_install_plan_core_v1.schema.json",
+  "title": "s2_4_install_plan_core_v1",
+  "description": "Unsigned canonical aggregate core for one S2.4 APPLY transaction (§5.1). It is the exact object signed by the aggregate install profile: its canonical digest yields plan_core_digest, plan_id = 's2-4-' + hex(plan_core_digest) and idempotency_key = plan_id. The core therefore deliberately excludes plan_id, idempotency_key, any authorization object/signature and any self_digest (those are derived/attached later and live only in the plan artifact / authorization_set). It binds the ordered set of the five APPLY component rows (each by exact v2 effect class plus its component-intent digest), the terminal prepare-effect-receipt digest, the attested pre-mutation topology digest, the signed HBA-delta digest, the expected pre-state digest and the source-head/target-host. Contract only: no runtime/production PASS is asserted here.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "apply_rows",
+    "prepare_receipt_digest",
+    "topology_pre_digest",
+    "hba_delta_digest",
+    "pre_state_digest",
+    "source_head",
+    "target_host",
+    "created_at"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2_4_install_plan_core_v1"},
+    "apply_rows": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": {"$ref": "#/$defs/apply_row"}
+    },
+    "prepare_receipt_digest": {"$ref": "#/$defs/digest"},
+    "topology_pre_digest": {"$ref": "#/$defs/digest"},
+    "hba_delta_digest": {"$ref": "#/$defs/digest"},
+    "pre_state_digest": {"$ref": "#/$defs/digest"},
+    "source_head": {"$ref": "#/$defs/git_sha"},
+    "target_host": {"type": "string", "minLength": 1},
+    "created_at": {"$ref": "#/$defs/timestamp"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "git_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "component_effect_class": {
+      "enum": [
+        "HOST_IDENTITY_INSTALL",
+        "PG_ROLE_ACL_MIGRATION",
+        "CREDENTIAL_INSTALL",
+        "LEARNING_RUNTIME",
+        "ENGINE_SCANNER"
+      ]
+    },
+    "apply_row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["component_effect_class", "component_intent_digest"],
+      "properties": {
+        "component_effect_class": {"$ref": "#/$defs/component_effect_class"},
+        "component_intent_digest": {"$ref": "#/$defs/digest"}
+      }
+    }
+  }
+}

@@ -1,0 +1,178 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2_4_prepare_intent_v1.schema.json",
+  "title": "s2_4_prepare_intent_v1",
+  "description": "Closed top-level route-class artifact for the s2_4_prepare_intent route (§4/§5.1). It contains {core, core_digest, derived_id(prepare_id), self_digest}: the embedded unsigned core is what was signed, core_digest re-derives from it and prepare_id = 's2-4-prepare-' + hex(core_digest). It binds the S2.3 lock/closure identity, the requested application manifest (digest-string only) and the pre-W6A terminal PREPARE_SANDBOX capability-probe receipt digest, and declares only the required LEARNING_RUNTIME_PREPARE surface posture plus the required PREPARE authorization profile/namespace/max-TTL policy (never the signature itself). Every §4:286 forbidden surface (APPLY publish, persistent unit write/enable/start, daemon-reload, PG/migration/secret, credential install, host identity, /opt, /etc, broker/order) is pinned const false so a PREPARE request carrying any APPLY surface is rejected before node injection. Contract only: no runtime/production PASS is asserted.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "route_class",
+    "core",
+    "core_digest",
+    "prepare_id",
+    "route_surface",
+    "forbidden_surfaces",
+    "required_authorization",
+    "source_lock_closure_identity",
+    "application_manifest_digest",
+    "prepare_sandbox_probe_receipt_digest",
+    "expires_at",
+    "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2_4_prepare_intent_v1"},
+    "route_class": {"const": "s2_4_prepare_intent"},
+    "core": {"$ref": "#/$defs/prepare_core"},
+    "core_digest": {"$ref": "#/$defs/digest"},
+    "prepare_id": {"$ref": "#/$defs/prepare_id"},
+    "route_surface": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required_effect_class",
+        "runtime_effect",
+        "service",
+        "risk",
+        "runtime_claim",
+        "staging_budget_bound",
+        "fetch_budget_bound",
+        "build_budget_bound",
+        "cleanup_budget_bound"
+      ],
+      "properties": {
+        "required_effect_class": {"const": "LEARNING_RUNTIME_PREPARE"},
+        "runtime_effect": {"const": true},
+        "service": {"const": "transient_builder_only"},
+        "risk": {"const": "high"},
+        "runtime_claim": {"const": true},
+        "staging_budget_bound": {"const": true},
+        "fetch_budget_bound": {"const": true},
+        "build_budget_bound": {"const": true},
+        "cleanup_budget_bound": {"const": true}
+      }
+    },
+    "forbidden_surfaces": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "apply_publish",
+        "persistent_unit_write",
+        "persistent_unit_enable",
+        "persistent_unit_start",
+        "daemon_reload",
+        "pg",
+        "migration",
+        "secret",
+        "credential_install",
+        "host_identity",
+        "opt_publish",
+        "etc_write",
+        "broker_or_order"
+      ],
+      "properties": {
+        "apply_publish": {"const": false},
+        "persistent_unit_write": {"const": false},
+        "persistent_unit_enable": {"const": false},
+        "persistent_unit_start": {"const": false},
+        "daemon_reload": {"const": false},
+        "pg": {"const": false},
+        "migration": {"const": false},
+        "secret": {"const": false},
+        "credential_install": {"const": false},
+        "host_identity": {"const": false},
+        "opt_publish": {"const": false},
+        "etc_write": {"const": false},
+        "broker_or_order": {"const": false}
+      }
+    },
+    "required_authorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profile_identity", "signature_namespace", "max_ttl_seconds"],
+      "properties": {
+        "profile_identity": {"const": "aiml-s2-install-prepare-operator-v1"},
+        "signature_namespace": {"const": "arcane-equilibrium-aiml-s2-install-prepare"},
+        "max_ttl_seconds": {"type": "integer", "minimum": 1, "maximum": 3600}
+      }
+    },
+    "source_lock_closure_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_compatibility_receipt_digest", "sealed_build_receipt_digest", "identity_contract_digest"],
+      "properties": {
+        "source_compatibility_receipt_digest": {"$ref": "#/$defs/digest"},
+        "sealed_build_receipt_digest": {"$ref": "#/$defs/digest"},
+        "identity_contract_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "application_manifest_digest": {"$ref": "#/$defs/digest"},
+    "prepare_sandbox_probe_receipt_digest": {"$ref": "#/$defs/digest"},
+    "expires_at": {"$ref": "#/$defs/timestamp"},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "git_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "prepare_id": {"type": "string", "pattern": "^s2-4-prepare-[0-9a-f]{64}$"},
+    "prepare_core": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "staging_root_device_inode",
+        "resource_budget",
+        "fetch_budget",
+        "build_budget",
+        "source_head",
+        "target_host",
+        "created_at"
+      ],
+      "properties": {
+        "schema_version": {"const": "s2_4_prepare_core_v1"},
+        "staging_root_device_inode": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["staging_parent_path", "device", "inode"],
+          "properties": {
+            "staging_parent_path": {"type": "string", "minLength": 1},
+            "device": {"type": "integer", "minimum": 0},
+            "inode": {"type": "integer", "minimum": 0}
+          }
+        },
+        "resource_budget": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["max_bytes", "max_seconds"],
+          "properties": {
+            "max_bytes": {"type": "integer", "minimum": 1},
+            "max_seconds": {"type": "integer", "minimum": 1, "maximum": 3600}
+          }
+        },
+        "fetch_budget": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["max_fetch_bytes", "max_fetch_seconds", "max_artifacts"],
+          "properties": {
+            "max_fetch_bytes": {"type": "integer", "minimum": 1},
+            "max_fetch_seconds": {"type": "integer", "minimum": 1, "maximum": 3600},
+            "max_artifacts": {"type": "integer", "minimum": 1}
+          }
+        },
+        "build_budget": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["max_build_bytes", "max_build_seconds"],
+          "properties": {
+            "max_build_bytes": {"type": "integer", "minimum": 1},
+            "max_build_seconds": {"type": "integer", "minimum": 1, "maximum": 3600}
+          }
+        },
+        "source_head": {"$ref": "#/$defs/git_sha"},
+        "target_host": {"type": "string", "minLength": 1},
+        "created_at": {"$ref": "#/$defs/timestamp"}
+      }
+    }
+  }
+}

@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2_4_capability_probe_intent_v1.schema.json",
+  "title": "s2_4_capability_probe_intent_v1",
+  "description": "Closed top-level route-class artifact for the s2_4_capability_probe_intent route (§4/§5.1). It contains {core, core_digest, derived_id(probe_id), self_digest}: the embedded unsigned core is what was signed, core_digest re-derives from it and probe_id = 's2-4-probe-' + hex(core_digest). It declares only the required HOST_CAPABILITY_PROBE surface posture and the required probe authorization profile/namespace/max-TTL policy; the actual authorization object/signature is never embedded (it lives in authorization_set). Every §4:285 forbidden surface (persistent unit write/enable/start, daemon-reload, PG/migration/secret/credential/host identity, broker/order) is pinned const false so a probe request carrying builder/install authority is structurally rejected before node injection. Contract only: no runtime/production PASS is asserted.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "route_class",
+    "core",
+    "core_digest",
+    "probe_id",
+    "route_surface",
+    "forbidden_surfaces",
+    "required_authorization",
+    "expires_at",
+    "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2_4_capability_probe_intent_v1"},
+    "route_class": {"const": "s2_4_capability_probe_intent"},
+    "core": {"$ref": "#/$defs/probe_core"},
+    "core_digest": {"$ref": "#/$defs/digest"},
+    "probe_id": {"$ref": "#/$defs/probe_id"},
+    "route_surface": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required_effect_class",
+        "runtime_effect",
+        "service",
+        "risk",
+        "runtime_claim",
+        "probe_budget_bound",
+        "cleanup_budget_bound"
+      ],
+      "properties": {
+        "required_effect_class": {"const": "HOST_CAPABILITY_PROBE"},
+        "runtime_effect": {"const": true},
+        "service": {"const": "transient_probe_only"},
+        "risk": {"const": "high"},
+        "runtime_claim": {"const": true},
+        "probe_budget_bound": {"const": true},
+        "cleanup_budget_bound": {"const": true}
+      }
+    },
+    "forbidden_surfaces": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "persistent_unit_write",
+        "persistent_unit_enable",
+        "persistent_unit_start",
+        "daemon_reload",
+        "pg",
+        "migration",
+        "secret",
+        "credential_install",
+        "host_identity",
+        "broker_or_order"
+      ],
+      "properties": {
+        "persistent_unit_write": {"const": false},
+        "persistent_unit_enable": {"const": false},
+        "persistent_unit_start": {"const": false},
+        "daemon_reload": {"const": false},
+        "pg": {"const": false},
+        "migration": {"const": false},
+        "secret": {"const": false},
+        "credential_install": {"const": false},
+        "host_identity": {"const": false},
+        "broker_or_order": {"const": false}
+      }
+    },
+    "required_authorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profile_identity", "signature_namespace", "max_ttl_seconds"],
+      "properties": {
+        "profile_identity": {"const": "aiml-s2-capability-probe-operator-v1"},
+        "signature_namespace": {"const": "arcane-equilibrium-aiml-s2-capability-probe"},
+        "max_ttl_seconds": {"type": "integer", "minimum": 1, "maximum": 3600}
+      }
+    },
+    "expires_at": {"$ref": "#/$defs/timestamp"},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "git_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "probe_id": {"type": "string", "pattern": "^s2-4-probe-[0-9a-f]{64}$"},
+    "probe_core": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "probe_scope",
+        "transient_unit_property_digest",
+        "host_cgroup_identity",
+        "cleanup_budget",
+        "source_head",
+        "target_host",
+        "created_at"
+      ],
+      "properties": {
+        "schema_version": {"const": "s2_4_capability_probe_core_v1"},
+        "probe_scope": {"enum": ["PREPARE_SANDBOX", "INSTALLED_UNIT"]},
+        "transient_unit_property_digest": {"$ref": "#/$defs/digest"},
+        "host_cgroup_identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["host", "cgroup_manager_scope", "cgroup_root_pattern"],
+          "properties": {
+            "host": {"type": "string", "minLength": 1},
+            "cgroup_manager_scope": {"enum": ["system_manager", "user_manager"]},
+            "cgroup_root_pattern": {"type": "string", "minLength": 1}
+          }
+        },
+        "cleanup_budget": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["max_cleanup_seconds", "max_cgroup_drain_seconds"],
+          "properties": {
+            "max_cleanup_seconds": {"type": "integer", "minimum": 1, "maximum": 3600},
+            "max_cgroup_drain_seconds": {"type": "integer", "minimum": 1, "maximum": 3600}
+          }
+        },
+        "source_head": {"$ref": "#/$defs/git_sha"},
+        "target_host": {"type": "string", "minLength": 1},
+        "created_at": {"$ref": "#/$defs/timestamp"}
+      }
+    }
+  }
+}

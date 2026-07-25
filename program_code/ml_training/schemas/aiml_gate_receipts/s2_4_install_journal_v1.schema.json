@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2_4_install_journal_v1.schema.json",
+  "title": "s2_4_install_journal_v1",
+  "description": "Write-ahead log contract for one S2.4 APPLY transaction (§5.2). Schema only; the W4 effect runner writes it under the exclusive install lock. It binds the plan_id/core digest, idempotency key, expected pre-state digest and the aggregate reverse-compensation-chain (rollback) digest, then journals every typed step as monotonic-seq transitions: APPLYING with the expected pre/post-state is written and fsynced BEFORE the external effect, the subject is independently re-observed, then APPLIED is written with the observed digest. Each entry carries pre/post-state digests and no secret bytes; journal_integrity records the applying-before-effect discipline plus the same-filesystem temp-create/file-fsync/atomic-rename/parent-fsync discipline. self_digest is the canonical inner digest; outer_checksum is the separate outer integrity checksum. A WAL, never a retrospective log.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "plan_id",
+    "plan_core_digest",
+    "idempotency_key",
+    "expected_pre_state_digest",
+    "aggregate_rollback_digest",
+    "entries",
+    "terminal",
+    "journal_integrity",
+    "outer_checksum",
+    "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2_4_install_journal_v1"},
+    "plan_id": {"$ref": "#/$defs/plan_id"},
+    "plan_core_digest": {"$ref": "#/$defs/digest"},
+    "idempotency_key": {"$ref": "#/$defs/plan_id"},
+    "expected_pre_state_digest": {"$ref": "#/$defs/digest"},
+    "aggregate_rollback_digest": {"$ref": "#/$defs/digest"},
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/journal_entry"}
+    },
+    "terminal": {"type": "boolean"},
+    "journal_integrity": {"$ref": "#/$defs/journal_integrity"},
+    "outer_checksum": {"$ref": "#/$defs/digest"},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "plan_id": {"type": "string", "pattern": "^s2-4-[0-9a-f]{64}$"},
+    "state": {
+      "enum": [
+        "NOT_STARTED",
+        "APPLYING",
+        "APPLIED",
+        "VERIFYING",
+        "VERIFIED",
+        "COMPENSATING",
+        "COMPENSATED",
+        "FAILED"
+      ]
+    },
+    "journal_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["seq", "step_index", "state", "pre_state_digest", "post_state_digest", "fsynced", "recorded_at"],
+      "properties": {
+        "seq": {"type": "integer", "minimum": 0},
+        "step_index": {"type": "integer", "minimum": 0, "maximum": 5},
+        "state": {"$ref": "#/$defs/state"},
+        "pre_state_digest": {"$ref": "#/$defs/digest"},
+        "post_state_digest": {"$ref": "#/$defs/digest"},
+        "fsynced": {"const": true},
+        "recorded_at": {"$ref": "#/$defs/timestamp"}
+      }
+    },
+    "journal_integrity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "applying_fsynced_before_effect",
+        "same_filesystem_atomic_rename",
+        "file_fsynced",
+        "parent_dir_fsynced"
+      ],
+      "properties": {
+        "applying_fsynced_before_effect": {"const": true},
+        "same_filesystem_atomic_rename": {"const": true},
+        "file_fsynced": {"const": true},
+        "parent_dir_fsynced": {"const": true}
+      }
+    }
+  }
+}

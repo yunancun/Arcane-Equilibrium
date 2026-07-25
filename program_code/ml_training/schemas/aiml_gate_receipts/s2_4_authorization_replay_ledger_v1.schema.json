@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2_4_authorization_replay_ledger_v1.schema.json",
+  "title": "s2_4_authorization_replay_ledger_v1",
+  "description": "Hash-chained authorization replay-ledger contract for S2.4 (§9.1). Each capability probe, PREPARE and APPLY durably consumes its authorization IDs/digests here under the install lock before mutation; the ledger is append-only and root-owned mode 0600 at runtime. entries are ordered and hash-chained: the genesis entry's prev_entry_digest is null and every later entry binds the previous entry_digest, so a duplicate, reordered, truncated or chain-invalid entry is rejected (AUTHORIZATION_REJECTED). A consumed authorization is never released by rollback. self_digest is integrity evidence only.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "ledger_path",
+    "entries",
+    "append_only",
+    "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2_4_authorization_replay_ledger_v1"},
+    "ledger_path": {"type": "string", "minLength": 1},
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/ledger_entry"}
+    },
+    "append_only": {"const": true},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "nullable_digest": {
+      "anyOf": [
+        {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        {"type": "null"}
+      ]
+    },
+    "timestamp": {"type": "string", "format": "date-time"},
+    "profile_identity": {
+      "enum": [
+        "aiml-s2-capability-probe-operator-v1",
+        "aiml-s2-install-prepare-operator-v1",
+        "aiml-s2-install-operator-v1",
+        "aiml-s2-pg-migration-operator-v1"
+      ]
+    },
+    "ledger_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "seq",
+        "prev_entry_digest",
+        "authorization_id",
+        "authorization_digest",
+        "profile_identity",
+        "consumed_at",
+        "entry_digest",
+        "fsynced"
+      ],
+      "properties": {
+        "seq": {"type": "integer", "minimum": 0},
+        "prev_entry_digest": {"$ref": "#/$defs/nullable_digest"},
+        "authorization_id": {"$ref": "#/$defs/digest"},
+        "authorization_digest": {"$ref": "#/$defs/digest"},
+        "profile_identity": {"$ref": "#/$defs/profile_identity"},
+        "consumed_at": {"$ref": "#/$defs/timestamp"},
+        "entry_digest": {"$ref": "#/$defs/digest"},
+        "fsynced": {"const": true}
+      }
+    }
+  }
+}

@@ -3,7 +3,10 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
+import hmac
 import json
 import re
 import sys
@@ -16,1397 +19,120 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 HELPER_DIR = REPO_ROOT / "helper_scripts" / "maintenance_scripts"
 if str(HELPER_DIR) not in sys.path:
     sys.path.insert(0, str(HELPER_DIR))
+# 2000 行治理拆分:facade 匯入 sibling 葉模組(aiml_gate_receipt_*),故把本模組目錄一併入
+# path——無論本檔以 top-level 或 ml_training.* 套件形被匯入,葉模組都以 top-level 名解析為
+# 同一單例(鏡射上方 HELPER_DIR 姿態)。
+_ML_TRAINING_DIR = Path(__file__).resolve().parent
+if str(_ML_TRAINING_DIR) not in sys.path:
+    sys.path.insert(0, str(_ML_TRAINING_DIR))
 
 from agent_governance_schema import schema_subset_errors  # noqa: E402
-
-
-SCHEMA_DIR = Path(__file__).resolve().parent / "schemas" / "aiml_gate_receipts"
-SCHEMA_FILES = {
-    "aiml_required_effect_classification_v1": "aiml_required_effect_classification_v1.schema.json",
-    "github_repository_policy_attestation_v1": "github_repository_policy_attestation_v1.schema.json",
-    "aiml_receipt_dependency_graph_v1": "aiml_receipt_dependency_graph_v1.schema.json",
-    "landing_scope_v1": "landing_scope_v1.schema.json",
-    "program_adoption_receipt_v1": "program_adoption_receipt_v1.schema.json",
-    "session_attempt_v1": "session_attempt_v1.schema.json",
-    "terminal_receipt_sink_v1": "terminal_receipt_sink_v1.schema.json",
-    # S1.1(LR0A)disposable PG 唯讀身分 receipt——central-validator 委派登記。
-    "pg_readonly_identity_receipt_v1": "pg_readonly_identity_receipt_v1.schema.json",
-    # S1.2(LR0B)WORM 終端 sink 的 append intent/result + 獨立 readback ACK。
-    "terminal_receipt_append_intent_v1": "terminal_receipt_append_intent_v1.schema.json",
-    "terminal_receipt_append_result_v1": "terminal_receipt_append_result_v1.schema.json",
-    "terminal_receipt_readback_ack_v1": "terminal_receipt_readback_ack_v1.schema.json",
-    # S1.2(LR0B)七類 component effect 的 sibling 分類 artifact(不動 S0.3 分類)。
-    "aiml_component_effect_classification_v1": "aiml_component_effect_classification_v1.schema.json",
-    # S1.5(LR0B)每元件 deploy adapter 的 typed intent/result + 獨立 postcheck attestation
-    # + effect-seams-ready rollup;central-validator 委派給 S1.5 module 的 self-validating 檢查。
-    "component_effect_intent_v1": "component_effect_intent_v1.schema.json",
-    "component_effect_result_v1": "component_effect_result_v1.schema.json",
-    "component_effect_postcheck_attestation_v1": "component_effect_postcheck_attestation_v1.schema.json",
-    "effect_seams_ready_receipt_v1": "effect_seams_ready_receipt_v1.schema.json",
-    # S1 formal-closure Wave A(S1.6B)——additive:generalized landing attempt row、target-host
-    # 選擇 receipt(中央閘只結構驗)、typed 探針 intent、與專屬 target-host effect result。加這些鍵
-    # 純為 schema 查找,絕不進入 aiml_effect_classifier_digest() 的輸入(見 §7.2),S0.3 分類身分不動。
-    "aiml_landing_session_attempt_v1": "aiml_landing_session_attempt_v1.schema.json",
-    "learning_runtime_choice_receipt_target_host_v1": "learning_runtime_choice_receipt_target_host_v1.schema.json",
-    "target_host_disposable_runtime_probe_intent_v1": "target_host_disposable_runtime_probe_intent_v1.schema.json",
-    "target_host_effect_result_v1": "target_host_effect_result_v1.schema.json",
-    # S2.2A(LR1)scoped source-compatibility receipt——中央閘結構驗 + 下方 identity 交叉檢查。
-    "source_compatibility_receipt_v1": "source_compatibility_receipt_v1.schema.json",
-    # S2.3(LR2)——additive:sealed-build 與 expected-identity receipt。加這兩鍵純為 schema
-    # 查找,絕不進入 aiml_effect_classifier_digest() 的六個 S0.3 常量輸入(見 :46-48/§7.2),
-    # S0.3 分類身分不動。中央閘只做離線結構/整合/身分綁定/新鮮度委派驗(委派給
-    # agent_governance_sealed_build 的 SSOT validators);真 offline-install 證明留在既有綠燈
-    # `learning-runtime-sealed-build` CI job。
-    "sealed_build_receipt_v1": "sealed_build_receipt_v1.schema.json",
-    "expected_identity_receipt_v1": "expected_identity_receipt_v1.schema.json",
-    # S2.2A(LR1)v2 source-compatibility receipt——內嵌 learning_runtime_manifest_v2,
-    # dependency_lock 由 scalar 升為 {spec_digest, lock_digest} 物件並併入 parquet_etl COMPUTE。
-    "source_compatibility_receipt_v2": "source_compatibility_receipt_v2.schema.json",
-    # S2.0(WP2)——additive:生產唯讀 PG observer-bootstrap 的 typed intent/result/獨立 postcheck/
-    # rollback。加這四鍵純為 schema 查找,絕不進入 aiml_effect_classifier_digest() 的六個 S0.3 常量
-    # 輸入(見 :46-48/§7.2),S0.3 分類身分不動。中央閘只做離線結構/整合/新鮮度委派驗(委派給
-    # agent_governance_pg_observer_bootstrap 的 SSOT validators);production apply 在有 exact
-    # operator SSHSIG 前恆 fail-closed(EXTERNAL_VERIFICATION_PENDING),真 apply 屬 S2.0 EFFECT session。
-    "pg_observer_bootstrap_intent_v1": "pg_observer_bootstrap_intent_v1.schema.json",
-    "pg_observer_bootstrap_result_v1": "pg_observer_bootstrap_result_v1.schema.json",
-    "pg_observer_bootstrap_postcheck_v1": "pg_observer_bootstrap_postcheck_v1.schema.json",
-    "pg_observer_bootstrap_rollback_v1": "pg_observer_bootstrap_rollback_v1.schema.json",
-    # S2.1(WP3)——additive:ALR quiesce fence 的 typed intent/observation/result/rollback。加這四鍵
-    # 純為 schema 查找,絕不進入 aiml_effect_classifier_digest() 的六個 S0.3 常量輸入(見 :46-48/§7.2),
-    # S0.3 分類身分不動。中央閘只做離線結構/整合/新鮮度委派驗(委派給 agent_governance_alr_quiesce_fence
-    # 的 SSOT validators);production/live fence 在有 S2.0@EFFECT_DONE + exact operator SSHSIG 前恆
-    # fail-closed(EXTERNAL_VERIFICATION_PENDING),真 fence 屬 S2.1 EFFECT session。
-    "quiesce_intent_v1": "quiesce_intent_v1.schema.json",
-    "quiesce_observation_v1": "quiesce_observation_v1.schema.json",
-    "quiesce_result_v1": "quiesce_result_v1.schema.json",
-    "quiesce_rollback_v1": "quiesce_rollback_v1.schema.json",
-    # S2.4(WP4·W0)——additive:source-implementation admission receipt 與 per-wave exit
-    # receipt。加這兩鍵純為 schema 查找,絕不進入 aiml_effect_classifier_digest() 的六個 S0.3 常量
-    # 輸入(見 :46-48/§7.2),S0.3 分類身分不動;亦不改 PROGRAM_SCHEMA_PATHS 與 v1 component matrix。
-    # 中央閘「不」讓 caller 自證 status——委派給 derive_source_admission_status /
-    # derive_wave_exit_status 由 repo 獨立再導出 ADMITTED/PASS(caller 帶 status/admitted/pass/done
-    # 一律先拒);此為 source-seam 完整性再導出,通過「不」等於認證任何 runtime(九 authority 全 false)。
-    "s2_4_source_admission_receipt_v1": "s2_4_source_admission_receipt_v1.schema.json",
-    "s2_4_wave_exit_receipt_v1": "s2_4_wave_exit_receipt_v1.schema.json",
-}
-
-S0_DEPENDENCY_DIGESTS = {
-    "S0.1": "sha256:8fc9417f984025deabdc1b83ace95921ccfff1acb26a1b29243fc0a0a5ba79ad",
-    "S0.2": "sha256:0115dbd3dc62d84e183aae5a28cbfd252eb45ecee51a652d8a4a155f14dfb41a",
-}
-S0_PREDECESSOR_CONTRACTS = {
-    "s0_1_receipt": {
-        "session_id": "S0.1",
-        "receipt_type": "planning_documents_published_v1",
-        "program_id": "AIML-LONG-LIVED-LANDING-V2",
-        "self_digest": S0_DEPENDENCY_DIGESTS["S0.1"],
-    },
-    "s0_2_receipt": {
-        "session_id": "S0.2",
-        "receipt_type": "serving_authority_receipt_v1",
-        "program_id": "AIML-LONG-LIVED-LANDING-V2",
-        "self_digest": S0_DEPENDENCY_DIGESTS["S0.2"],
-    },
-}
-PROGRAM_DOCUMENT_PATHS = (
-    "TODO.md",
-    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-19--ai_ml_true_state_and_engineering_plan.md",
-    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-20--ai_ml_completion_coverage_and_delivery_audit.md",
-    "docs/CLAUDE_CHANGELOG.md",
-    "docs/_indexes/document_index.md",
-    "docs/_indexes/initiative_index.md",
-    "docs/adr/0049-scanner-driven-alr-operational-shadow.md",
-    "docs/adr/0050-development-agent-governance.md",
-    "docs/adr/0051-registry-authorized-advisory-model-serving.md",
-    "docs/agents/ai-ml-landing-delivery-protocol.md",
-    "docs/agents/development-agent-governance.md",
-    "docs/execution_plan/2026-07-19--ai_ml_long_lived_repair_and_landing_plan.md",
-    "docs/execution_plan/ai_ml_landing/PROGRESS.md",
-    "docs/governance_dev/SPECIFICATION_REGISTER.md",
-    "docs/governance_dev/amendments/2026-07-21--AMD-2026-07-21-01-aiml-advisory-serving-authority.md",
-)
-PROGRAM_SCHEMA_PATHS = tuple(
-    f"program_code/ml_training/schemas/aiml_gate_receipts/{name}.schema.json"
-    for name in (
-        "aiml_receipt_dependency_graph_v1",
-        "aiml_required_effect_classification_v1",
-        "github_repository_policy_attestation_v1",
-        "landing_scope_v1",
-        "program_adoption_receipt_v1",
-        "session_attempt_v1",
-        "terminal_receipt_sink_v1",
-    )
-)
-PROGRAM_GOVERNANCE_PATHS = (
-    ".codex/agent_registry_v1.json",
-    "helper_scripts/maintenance_scripts/agent_governance.py",
-    "helper_scripts/maintenance_scripts/agent_governance_aiml_adoption.py",
-    "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_common.py",
-    "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_git.py",
-    "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_github.py",
-    "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_github_pr.py",
-    "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_host.py",
-    "helper_scripts/maintenance_scripts/agent_governance_closure.py",
-    "helper_scripts/maintenance_scripts/agent_governance_closure_time.py",
-    "helper_scripts/maintenance_scripts/agent_governance_closure_inputs.py",
-    "helper_scripts/maintenance_scripts/agent_governance_evidence.py",
-    "helper_scripts/maintenance_scripts/agent_governance_execution.py",
-    "helper_scripts/maintenance_scripts/agent_governance_registry.py",
-    "helper_scripts/maintenance_scripts/agent_governance_routing.py",
-    "helper_scripts/maintenance_scripts/agent_governance_vocabulary.py",
-    "program_code/ml_training/aiml_gate_receipt_validator.py",
-    "program_code/ml_training/tests/test_aiml_gate_receipt_validator.py",
-    "tests/structure/test_agent_governance_aiml_adoption.py",
-    "tests/structure/test_agent_governance_aiml_trusted_host.py",
-)
-PROGRAM_REVIEW_NODES = {
-    "CC": "constitutional_gate",
-    "E2": "independent_review",
-    "E3": "security_gate",
-    "E4": "regression",
-    "MIT": "data_ml_review",
-    "QA": "business_acceptance",
-    "R4": "docs_integrity_review",
-}
-
-AIML_EFFECT_CLASSIFIER_RULES = {
-    "S0.3": {
-        "effect_class": "EXTERNAL_READONLY_ATTESTATION",
-        "adapter_id": "github_repository_policy_attestation_v1",
-        "actor_node_id": "github_policy_observer",
-        "rollback_contract": "NOT_APPLICABLE_READ_ONLY",
-        "independent_postcheck_node_id": "aiml_program_adoption_validator",
-    }
-}
-S0_3_WORK_PACKAGE_ID = "AIML-S0.3-GOVERNANCE-ADOPTION"
-S0_3_DIRECT_INTERFACES_BY_PHASE = {
-    "SOURCE_BUILD": (
-        "agent_governance_registry_v1",
-        "agent_governance_route_task",
-        "agent_governance_validate_closure",
-        "aiml_receipt_dependency_graph_v1",
-        "aiml_required_effect_classification_v1",
-        "github_repository_policy_attestation_v1",
-        "landing_scope_v1",
-        "program_adoption_receipt_v1",
-        "session_attempt_v1",
-        "terminal_receipt_sink_v1",
-    ),
-    "POST_MERGE_FINALIZATION": (
-        "aiml_program_adoption_validator",
-        "aiml_trusted_host_finalizer_v1",
-        "github_repository_policy_attestation_v1",
-        "program_adoption_receipt_v1",
-    ),
-}
-S0_3_SIDE_EFFECT_BY_PHASE = {
-    "SOURCE_BUILD": "repo_write",
-    "POST_MERGE_FINALIZATION": "none",
-}
-S0_3_EXACT_OWNED_PATHS = {
-    ".codex/agent_registry_v1.json",
-    "TODO.md",
-    "docs/adr/0050-development-agent-governance.md",
-    "docs/agents/ai-ml-landing-delivery-protocol.md",
-    "docs/agents/development-agent-governance.md",
-    "docs/execution_plan/2026-07-19--ai_ml_long_lived_repair_and_landing_plan.md",
-    "docs/execution_plan/ai_ml_landing/PROGRESS.md",
-    "helper_scripts/maintenance_scripts/agent_governance.py",
-    "helper_scripts/maintenance_scripts/agent_governance_aiml_adoption.py",
-    "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_common.py",
-    "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_git.py",
-    "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_github.py",
-    "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_github_pr.py",
-    "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_host.py",
-    "helper_scripts/maintenance_scripts/agent_governance_closure.py",
-    "helper_scripts/maintenance_scripts/agent_governance_closure_time.py",
-    "helper_scripts/maintenance_scripts/agent_governance_closure_inputs.py",
-    "helper_scripts/maintenance_scripts/agent_governance_evidence.py",
-    "helper_scripts/maintenance_scripts/agent_governance_execution.py",
-    "helper_scripts/maintenance_scripts/agent_governance_registry.py",
-    "helper_scripts/maintenance_scripts/agent_governance_routing.py",
-    "helper_scripts/maintenance_scripts/agent_governance_vocabulary.py",
-    "program_code/ml_training/aiml_gate_receipt_validator.py",
-    "program_code/ml_training/tests/test_aiml_gate_receipt_validator.py",
-    "tests/structure/test_agent_governance_aiml_adoption.py",
-    "tests/structure/test_agent_governance_aiml_trusted_host.py",
-}
-S0_3_OWNED_PATH_PREFIXES = (
-    ".codex/schemas/",
-    "docs/execution_plan/ai_ml_landing/",
-    "program_code/ml_training/schemas/aiml_gate_receipts/",
-)
-S0_3_FORBIDDEN_FACT_RE = re.compile(
-    r"(?:^|[^a-z0-9])(?:runtime|pg|postgres|deploy|broker|order|ml5|ml6|"
-    r"migration|rust|bybit|ibkr)(?:[^a-z0-9]|$)",
-    re.IGNORECASE,
-)
-GITHUB_SECRET_LIKE_RE = re.compile(
-    r"(?:github_pat_|gh[pousr]_[A-Za-z0-9]{12,})|"
-    r"(?:access[_-]?token|auth(?:orization)?|client[_-]?secret|password|"
-    r"private[_-]?key)\s*[:=]|(?:basic|bearer)\s+[A-Za-z0-9._~+/=-]{12,}",
-    re.IGNORECASE,
-)
-
-ExternalAttestationVerifier = Callable[[dict[str, Any]], bool]
-# SourceManifestVerifier 是 caller/host 提供的來源清單驗證能力,簽章為
-# (reviewed_head, merge_head, {path: sha256}) -> bool。回傳 True 是一項強契約,
-# 必須同時成立:
-#   1. reviewed_head 與 merge_head 兩者在 repo 皆存在;
-#   2. `git merge-base --is-ancestor reviewed_head merge_head`(自反:兩者相等亦
-#      通過),即 merge_head 為 reviewed_head 的後代或同一 commit,審過的樹確實被
-#      合入採納樹;
-#   3. 清單中每個 path 於 merge_head 的 blob sha256 與所給 digest 完全相符。
-# 保持回傳 bool 以免簽章變動;祖裔義務由本 docstring 規範並由測試強制。離線 CLI
-# 無此可信主機能力,故無法自證 PASS——此為刻意保留的可信主機委派。
-SourceManifestVerifier = Callable[[str, str, dict[str, str]], bool]
-
-
-def _canonical_bytes(value: Any) -> bytes:
-    return json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    ).encode("utf-8")
-
-
-def canonical_digest(value: Any) -> str:
-    """Return the canonical sha256 identity used by AIML governance artifacts."""
-
-    return "sha256:" + hashlib.sha256(_canonical_bytes(value)).hexdigest()
-
-
-def artifact_self_digest(artifact: dict[str, Any]) -> str:
-    """Hash an immutable artifact while excluding its self-referential field."""
-
-    return canonical_digest({
-        key: value for key, value in artifact.items() if key != "self_digest"
-    })
-
-
-def landing_scope_identity_digest(scope: dict[str, Any]) -> str:
-    """Bind the complete scope, cell coverage, environment and promotion graph."""
-
-    projection = {
-        field: scope.get(field)
-        for field in (
-            "scope_kind",
-            "platform_scope",
-            "policy_surface_id",
-            "decision_cells",
-            "evidence_environments",
-            "promotion_edges",
-        )
-    }
-    return canonical_digest(projection)
-
-
-def evidence_environment_identity_digest(environment: dict[str, Any]) -> str:
-    """Bind one declared evidence environment independently of list position."""
-
-    return canonical_digest({
-        key: value
-        for key, value in environment.items()
-        if key != "environment_id"
-    })
-
-
-def _canonical_list_is_sorted_unique(values: list[Any]) -> bool:
-    identities = [_canonical_bytes(value) for value in values]
-    return identities == sorted(set(identities))
-
-
-def _contains_github_secret_like_content(value: Any) -> bool:
-    if isinstance(value, str):
-        return GITHUB_SECRET_LIKE_RE.search(value) is not None
-    if isinstance(value, list):
-        return any(_contains_github_secret_like_content(item) for item in value)
-    if isinstance(value, dict):
-        return any(
-            _contains_github_secret_like_content(key)
-            or _contains_github_secret_like_content(item)
-            for key, item in value.items()
-        )
-    return False
-
-
-def _directed_graph_has_cycle(adjacency: dict[str, set[str]]) -> bool:
-    visiting: set[str] = set()
-    visited: set[str] = set()
-
-    def visit(node: str) -> bool:
-        if node in visiting:
-            return True
-        if node in visited:
-            return False
-        visiting.add(node)
-        if any(visit(next_node) for next_node in adjacency.get(node, set())):
-            return True
-        visiting.remove(node)
-        visited.add(node)
-        return False
-
-    return any(visit(node) for node in adjacency)
-
-
-def session_attempt_identity_digest(attempt: dict[str, Any]) -> str:
-    """Bind the row key and phase that fence one durable Session attempt."""
-
-    return canonical_digest({
-        "attempt_key": attempt.get("attempt_key"),
-        "attempt_phase": attempt.get("attempt_phase"),
-    })
-
-
-def aiml_effect_classifier_digest() -> str:
-    """Identify the fail-closed S0.3 classifier rules, independent of PM input."""
-
-    return canonical_digest({
-        "effect_rules": AIML_EFFECT_CLASSIFIER_RULES,
-        "work_package_id": S0_3_WORK_PACKAGE_ID,
-        "direct_interfaces_by_phase": S0_3_DIRECT_INTERFACES_BY_PHASE,
-        "side_effect_by_phase": S0_3_SIDE_EFFECT_BY_PHASE,
-        "exact_owned_paths": sorted(S0_3_EXACT_OWNED_PATHS),
-        "owned_path_prefixes": S0_3_OWNED_PATH_PREFIXES,
-    })
-
-
-def _effect_classification_identity_digest(classification: dict[str, Any]) -> str:
-    return canonical_digest({
-        key: value
-        for key, value in classification.items()
-        if key not in {"classification_id", "self_digest"}
-    })
-
-
-def _s0_3_owned_path(path: str) -> bool:
-    if (
-        not path
-        or path.startswith("/")
-        or "\\" in path
-        or any(segment in {"", ".", ".."} for segment in path.split("/"))
-    ):
-        return False
-    if S0_3_FORBIDDEN_FACT_RE.search(path):
-        return False
-    return path in S0_3_EXACT_OWNED_PATHS or any(
-        path.startswith(prefix) for prefix in S0_3_OWNED_PATH_PREFIXES
-    )
-
-
-def _s0_3_work_package_errors(
-    work_package: Any,
-    *,
-    session_id: Any,
-    attempt_phase: Any,
-    attempt_paths: Any,
-) -> list[str]:
-    if session_id != "S0.3":
-        return [f"unsupported AIML work package session: {session_id}"]
-    if not isinstance(work_package, dict):
-        return ["AIML work_package is required"]
-    phase = work_package.get("phase")
-    if phase not in S0_3_SIDE_EFFECT_BY_PHASE or phase != attempt_phase:
-        return ["AIML work_package phase is invalid"]
-    errors: list[str] = []
-    if work_package.get("work_package_id") != S0_3_WORK_PACKAGE_ID:
-        errors.append("unsupported AIML work_package_id")
-    if work_package.get("side_effect_class") != S0_3_SIDE_EFFECT_BY_PHASE[phase]:
-        errors.append("AIML work_package generic side_effect_class is invalid")
-    if work_package.get("runtime_claim") is not False:
-        errors.append("AIML S0.3 work_package runtime_claim must be false")
-    owned_paths = work_package.get("owned_path_manifest")
-    if not isinstance(owned_paths, list):
-        errors.append("AIML work_package owned_path_manifest is invalid")
-    else:
-        if owned_paths != sorted(set(owned_paths)):
-            errors.append("AIML work_package owned_path_manifest must be sorted and unique")
-        if owned_paths != attempt_paths:
-            errors.append("AIML work_package paths differ from attempt path_manifest")
-        if phase == "SOURCE_BUILD" and not owned_paths:
-            errors.append("AIML source-build work_package requires owned paths")
-        if phase == "POST_MERGE_FINALIZATION" and owned_paths:
-            errors.append("AIML post-merge finalization cannot own source paths")
-        if any(not isinstance(path, str) or not _s0_3_owned_path(path) for path in owned_paths):
-            errors.append("AIML work_package contains a forbidden owned path")
-    interfaces = work_package.get("direct_interfaces")
-    expected_interfaces = list(S0_3_DIRECT_INTERFACES_BY_PHASE[phase])
-    if interfaces != expected_interfaces:
-        errors.append(
-            "AIML work_package direct_interfaces differ from exact phase contract"
-        )
-    return errors
-
-
-# S1 formal-closure Wave A:generalized landing attempt 的 sibling work-package 檢查。刻意 NOT
-# 呼叫 _s0_3_work_package_errors——它把 S0.3 const(work_package_id / direct_interfaces / side_effect
-# / runtime_claim=false)全數硬綁。這裡只做結構檢查(sorted/unique owned paths、path⊆manifest、
-# 相位一致、路徑安全)且 side_effect_class/runtime_claim 已被寬鬆化,S0.3 分類身分因此完全不受影響。
-AIML_LANDING_SIDE_EFFECT_CLASSES = {"repo_write", "none", "target_host_probe"}
-
-
-def _aiml_landing_owned_path(path: Any) -> bool:
-    if not isinstance(path, str) or not path or path.startswith("/") or "\\" in path:
-        return False
-    return not any(segment in {"", ".", ".."} for segment in path.split("/"))
-
-
-def _aiml_landing_work_package_errors(
-    work_package: Any,
-    *,
-    attempt_phase: Any,
-    attempt_paths: Any,
-) -> list[str]:
-    if not isinstance(work_package, dict):
-        return ["AIML landing work_package is required"]
-    phase = work_package.get("phase")
-    if phase not in {"SOURCE_BUILD", "POST_MERGE_FINALIZATION"} or phase != attempt_phase:
-        return ["AIML landing work_package phase is invalid"]
-    errors: list[str] = []
-    if not isinstance(work_package.get("work_package_id"), str) or not work_package.get(
-        "work_package_id"
-    ):
-        errors.append("AIML landing work_package_id must be a non-empty string")
-    if work_package.get("side_effect_class") not in AIML_LANDING_SIDE_EFFECT_CLASSES:
-        errors.append("AIML landing work_package side_effect_class is not admitted")
-    if not isinstance(work_package.get("runtime_claim"), bool):
-        errors.append("AIML landing work_package runtime_claim must be boolean")
-    owned_paths = work_package.get("owned_path_manifest")
-    if not isinstance(owned_paths, list):
-        errors.append("AIML landing work_package owned_path_manifest is invalid")
-    else:
-        if owned_paths != sorted(set(owned_paths)):
-            errors.append("AIML landing work_package owned_path_manifest must be sorted and unique")
-        if owned_paths != attempt_paths:
-            errors.append("AIML landing work_package paths differ from attempt path_manifest")
-        if phase == "SOURCE_BUILD" and not owned_paths:
-            errors.append("AIML landing source-build work_package requires owned paths")
-        if phase == "POST_MERGE_FINALIZATION" and owned_paths:
-            errors.append("AIML landing post-merge finalization cannot own source paths")
-        if any(not _aiml_landing_owned_path(path) for path in owned_paths):
-            errors.append("AIML landing work_package contains an unsafe owned path")
-    interfaces = work_package.get("direct_interfaces")
-    if not isinstance(interfaces, list) or not interfaces or any(
-        not isinstance(item, str) or not item for item in interfaces
-    ):
-        errors.append("AIML landing work_package direct_interfaces must be a non-empty string list")
-    return errors
-
-
-def classify_required_effects(
-    attempt: dict[str, Any], *, classified_at: str
-) -> dict[str, Any]:
-    """Derive AIML-required effects; callers cannot supply or downgrade them."""
-
-    session_id = attempt.get("session_id")
-    phase = attempt.get("attempt_phase")
-    work_package = attempt.get("work_package")
-    work_package_errors = _s0_3_work_package_errors(
-        work_package,
-        session_id=session_id,
-        attempt_phase=phase,
-        attempt_paths=attempt.get("path_manifest"),
-    )
-    if work_package_errors:
-        raise ValueError("; ".join(work_package_errors))
-    rule = AIML_EFFECT_CLASSIFIER_RULES.get(str(session_id))
-    if rule is None:
-        raise ValueError(f"unsupported AIML work package session: {session_id}")
-    effects = [{
-        "effect_class": rule["effect_class"],
-        "status": (
-            "DEFERRED_TO_POST_MERGE_FINALIZATION"
-            if phase == "SOURCE_BUILD"
-            else "REQUIRED_PENDING"
-        ),
-        "adapter_id": rule["adapter_id"],
-        "actor_node_id": rule["actor_node_id"],
-        "rollback_contract": rule["rollback_contract"],
-        "independent_postcheck_node_id": rule[
-            "independent_postcheck_node_id"
-        ],
-    }]
-    classification: dict[str, Any] = {
-        "schema_version": "aiml_required_effect_classification_v1",
-        "classification_id": "sha256:" + "0" * 64,
-        "session_attempt_id": attempt.get("attempt_id"),
-        "session_id": session_id,
-        "attempt_phase": phase,
-        "classified_inputs": json.loads(json.dumps(work_package)),
-        "classifier_digest": aiml_effect_classifier_digest(),
-        "required_effects": effects,
-        "classified_at": classified_at,
-        "self_digest": "sha256:" + "0" * 64,
-    }
-    classification["classification_id"] = _effect_classification_identity_digest(
-        classification
-    )
-    classification["self_digest"] = artifact_self_digest(classification)
-    return classification
-
+# 唯讀消費 S2.4 §9.1 SSHSIG 信任根與離線公鑰驗簽基元(_verify_ssh_signature /
+# ssh_public_key_fingerprint)。此為葉層信任根 facade,不反向匯入本 validator(無循環);
+# CP4 僅呼叫其驗證基元,「絕不」修改該模組或其測試(§9.1:trust-root 輪替屬獨立授權 session)。
+import agent_governance_aiml_trusted_host as _trusted_host  # noqa: E402
 
 # --------------------------------------------------------------------------- #
-# S1.2 (LR0B) 七類 component effect 的宣告式 vocabulary/matrix + sibling 分類器。
-# 這是 plan §LR0B 要求的 typed 七類擁有權/allowlist 矩陣:每類 → 必綁的 exact-intent
-# 欄位 + recovery 契約 + adapter 綁定。新增一類是「資料編輯」,不是新程式碼。此矩陣與其
-# digest 與 S0.3 的 AIML_EFFECT_CLASSIFIER_RULES / aiml_effect_classifier_digest 完全
-# 獨立(sibling),故 S0.3 保持 byte-frozen(見 §0 凍結約束)。
+# 2000 行治理拆分(WP4 S2.4·操作者 P0):本 facade 是唯一公開匯入面;實作逐位元組下沉至
+# 四個 sibling 葉模組並在此逐名 re-export,ABI 與行為不變(S0.3/v1/v2/§9.1/W0 五個身分
+# digest 拆分前後重算相等)。
+#   aiml_gate_receipt_schema_core    —— canonical digest 基元 / SCHEMA_FILES / S0 常量
+#   aiml_gate_receipt_classifiers    —— S0.3 classifier + v1/v2 component-effect 矩陣
+#   aiml_gate_receipt_s2_4_contracts —— S2.4 per-row ABI / install lineage / §9.1 授權 profile
+#   aiml_gate_receipt_adoption       —— terminal sink 契約 / GitHub attestation / program adoption
+# 葉模組 top-level 絕不反向匯入本 facade(僅函式內延遲匯入以保 monkeypatch 縫);W0
+# admission/wave-exit 再導出與中央 dispatcher 留在本檔(測試 monkeypatch 的 facade 縫:
+# derive_source_admission_status / derive_wave_exit_status / _consumer_authoritative_database /
+# S2_4_OPERATOR_TRUST_ROOT_*)。
 # --------------------------------------------------------------------------- #
-AIML_COMPONENT_EFFECT_CLASS_MATRIX: dict[str, dict[str, Any]] = {
-    "CREDENTIAL_ROTATION": {
-        "required_intent_fields": [
-            "secret_slot_target", "role_target", "old_fingerprint",
-            "new_fingerprint", "rotation_order", "old_credential_rejection_proof",
-        ],
-        "recovery_contract": "rollback_or_forward_only",
-        "adapter_id": "credential_rotation_adapter_v1",
-        "adapter_binding_status": "IMPLEMENTED_DISPOSABLE",
-        "actor_node_id": "credential_rotation_actor",
-        "independent_postcheck_node_id": "credential_rotation_ops_postcheck",
-    },
-    "PG_ROLE_ACL_MIGRATION": {
-        "required_intent_fields": [
-            "migration_id", "migration_checksum", "role_acl_delta",
-            "pre_state_digest", "transactional_or_double_apply", "recovery",
-        ],
-        "recovery_contract": "rollback_or_approved_forward",
-        "adapter_id": "pg_role_acl_migration_adapter_v1",
-        "adapter_binding_status": "IMPLEMENTED_DISPOSABLE",
-        "actor_node_id": "pg_role_acl_migration_actor",
-        "independent_postcheck_node_id": "pg_role_acl_migration_ops_postcheck",
-    },
-    "ENGINE_SCANNER": {
-        "required_intent_fields": [
-            "binary_digest", "unit", "env_digest", "config_digest",
-            "stop_start_order", "readiness_deadman_checks", "prior_bundle_rollback",
-        ],
-        "recovery_contract": "prior_bundle_rollback",
-        "adapter_id": "engine_scanner_deploy_adapter_v1",
-        "adapter_binding_status": "IMPLEMENTED_DISPOSABLE",
-        "actor_node_id": "engine_scanner_deploy_actor",
-        "independent_postcheck_node_id": "engine_scanner_ops_postcheck",
-    },
-    "LEARNING_RUNTIME": {
-        "required_intent_fields": [
-            "runtime_identity", "dependency_manifest_digest",
-            "mount_network_socket_secret_surface", "exact_rollback",
-        ],
-        "recovery_contract": "exact_rollback",
-        "adapter_id": "learning_runtime_deploy_adapter_v1",
-        "adapter_binding_status": "IMPLEMENTED_DISPOSABLE",
-        "actor_node_id": "learning_runtime_deploy_actor",
-        "independent_postcheck_node_id": "learning_runtime_ops_postcheck",
-    },
-    "CONTROLLER_WORKERS": {
-        "required_intent_fields": [
-            "unit_slice_cgroup_uid_pgrole_set", "queue_fencing_state",
-            "start_order", "drain_rollback",
-        ],
-        "recovery_contract": "drain_rollback",
-        "adapter_id": "controller_workers_deploy_adapter_v1",
-        "adapter_binding_status": "IMPLEMENTED_DISPOSABLE",
-        "actor_node_id": "controller_workers_deploy_actor",
-        "independent_postcheck_node_id": "controller_workers_ops_postcheck",
-    },
-    "RETENTION_APPLY": {
-        "required_intent_fields": [
-            "tombstone_object_set", "deleter_identity", "restore_capacity",
-            "interruption_recovery",
-        ],
-        "recovery_contract": "interruption_recovery_and_postcheck",
-        "adapter_id": "retention_apply_adapter_v1",
-        "adapter_binding_status": "IMPLEMENTED_DISPOSABLE",
-        "actor_node_id": "retention_apply_actor",
-        "independent_postcheck_node_id": "retention_apply_ops_postcheck",
-    },
-    # 唯一在 S1.2 落地並 disposable-proven 的具體 adapter(見 §5)。
-    "TERMINAL_RECEIPT_APPEND": {
-        "required_intent_fields": [
-            "destination_class", "terminal_payload_digest", "final_source_head",
-            "landing_scope_id", "learning_runtime_digest", "terminal_state",
-            "append_actor", "idempotency_key", "independent_readback_ack",
-        ],
-        "recovery_contract": "interruption_retry_same_idempotency_key",
-        "adapter_id": "terminal_receipt_sink_adapter_v1",
-        "adapter_binding_status": "IMPLEMENTED_DISPOSABLE",
-        "actor_node_id": "terminal_receipt_append_actor",
-        "independent_postcheck_node_id": "terminal_receipt_independent_readback_verifier",
-    },
-}
-# 每一類都攜帶的不可調 OPS/PM/獨立性契約旗標:「施加 effect 的 actor 不能是其唯一驗證者」。
-AIML_COMPONENT_EFFECT_CLASS_INVARIANTS = {
-    "requires_ops_preflight": True,
-    "requires_pm_operator_approved_intent": True,
-    "requires_independent_ops_postcheck": True,
-    "applier_is_not_sole_verifier": True,
-}
-
-
-def aiml_component_effect_class_matrix_digest() -> str:
-    """Identify the 7-class component-effect matrix, independent of S0.3.
-
-    Analogue of ``aiml_effect_classifier_digest`` but a **separate** digest so
-    the S0.3 classifier stays byte-frozen.
-    """
-
-    return canonical_digest({
-        "component_effect_class_matrix": AIML_COMPONENT_EFFECT_CLASS_MATRIX,
-        "class_invariants": AIML_COMPONENT_EFFECT_CLASS_INVARIANTS,
-    })
-
-
-def _component_effect_class_identity_digest(classification: dict[str, Any]) -> str:
-    return canonical_digest({
-        key: value
-        for key, value in classification.items()
-        if key not in {"classification_id", "self_digest"}
-    })
-
-
-def _component_effect_surface_tokens() -> frozenset[str]:
-    # 任一 component 的 adapter/actor/postcheck 節點 id 都是「碰到 effectful 面」的標記。
-    tokens: set[str] = set()
-    for row in AIML_COMPONENT_EFFECT_CLASS_MATRIX.values():
-        tokens.add(row["adapter_id"])
-        tokens.add(row["actor_node_id"])
-        tokens.add(row["independent_postcheck_node_id"])
-    return frozenset(tokens)
-
-
-def _component_surfaces_touched(
-    owned_path_manifest: Any, direct_interfaces: Any
-) -> set[str]:
-    tokens = _component_effect_surface_tokens()
-    touched: set[str] = set()
-    for collection in (owned_path_manifest, direct_interfaces):
-        if isinstance(collection, list):
-            for item in collection:
-                if isinstance(item, str) and item in tokens:
-                    touched.add(item)
-    return touched
-
-
-def classify_component_required_effects(
-    work_package: Any, *, classified_at: str
-) -> dict[str, Any]:
-    """Derive a component's required effect from the matrix; block source-only.
-
-    The required ``effect_class`` / ``adapter_id`` / ``actor_node_id`` /
-    ``rollback_contract`` / ``independent_postcheck_node_id`` /
-    ``required_intent_fields`` are looked up in
-    ``AIML_COMPONENT_EFFECT_CLASS_MATRIX``; the caller cannot supply or downgrade
-    them.  This is the enforcement point for "a Session cannot self-declare an
-    effectful component row as source-only" — it **raises** (never emits a
-    ``NONE`` classification) when:
-
-    * ``component_effect_class`` is ``NONE``/omitted/unknown yet the
-      ``owned_path_manifest``/``direct_interfaces`` intersect a component surface;
-    * the declared ``declared_adapter_id`` is not the matrix adapter for the class;
-    * the ``declared_intent_fields`` are not exactly the matrix intent contract.
-    """
-
-    if not isinstance(work_package, dict):
-        raise ValueError("component work_package is required")
-    declared_class = work_package.get("component_effect_class")
-    matrix_row = (
-        AIML_COMPONENT_EFFECT_CLASS_MATRIX.get(str(declared_class))
-        if declared_class is not None
-        else None
-    )
-    if matrix_row is None:
-        # NONE/缺失/未知類:若其 owned paths / direct interfaces 碰到任一 component
-        # 面,即為「effectful 面偽裝成 source-only」的繞過 → fail-closed raise。
-        touched = _component_surfaces_touched(
-            work_package.get("owned_path_manifest"),
-            work_package.get("direct_interfaces"),
-        )
-        if touched:
-            raise ValueError(
-                "component work-package touches effectful component surface(s) "
-                f"{sorted(touched)} but declares component_effect_class="
-                f"{declared_class!r}; an effectful class cannot be source-only"
-            )
-        raise ValueError(
-            f"unsupported component_effect_class: {declared_class!r}"
-        )
-    declared_adapter = work_package.get("declared_adapter_id")
-    if declared_adapter != matrix_row["adapter_id"]:
-        raise ValueError(
-            f"declared_adapter_id {declared_adapter!r} is not the admitted adapter "
-            f"for {declared_class}"
-        )
-    declared_fields = work_package.get("declared_intent_fields")
-    if not isinstance(declared_fields, list) or sorted(declared_fields) != sorted(
-        matrix_row["required_intent_fields"]
-    ):
-        raise ValueError(
-            f"declared_intent_fields do not match the exact {declared_class} "
-            "intent contract"
-        )
-    required_effects = [{
-        "effect_class": declared_class,
-        "status": "REQUIRED_PENDING",
-        "adapter_id": matrix_row["adapter_id"],
-        "actor_node_id": matrix_row["actor_node_id"],
-        "rollback_contract": matrix_row["recovery_contract"],
-        "independent_postcheck_node_id": matrix_row["independent_postcheck_node_id"],
-        "required_intent_fields": list(matrix_row["required_intent_fields"]),
-        "adapter_binding_status": matrix_row["adapter_binding_status"],
-    }]
-    classification: dict[str, Any] = {
-        "schema_version": "aiml_component_effect_classification_v1",
-        "classification_id": "sha256:" + "0" * 64,
-        "component_work_package_id": work_package.get("component_work_package_id"),
-        "classified_inputs": json.loads(json.dumps(work_package)),
-        "classifier_digest": aiml_component_effect_class_matrix_digest(),
-        "required_effects": required_effects,
-        "classified_at": classified_at,
-        "self_digest": "sha256:" + "0" * 64,
-    }
-    classification["classification_id"] = _component_effect_class_identity_digest(
-        classification
-    )
-    classification["self_digest"] = artifact_self_digest(classification)
-    return classification
-
-
-def _terminal_receipt_sink_body() -> dict[str, Any]:
-    return {
-        "schema_version": "terminal_receipt_sink_v1",
-        "sink_id": "terminal_receipt_sink_v1",
-        "status": "CONTRACT_ONLY",
-        "authority": "terminal_candidate_validators_only",
-        "destination_class": "EXTERNAL_IMMUTABLE_WORM",
-        "allowed_terminal_receipt_types": [
-            "aiml_module_landed_for_trading_receipt_v1",
-            "aiml_platform_no_candidate_receipt_v1",
-        ],
-        "append_intent_schema_version": "terminal_receipt_append_intent_v1",
-        "append_result_schema_version": "terminal_receipt_append_result_v1",
-        "readback_ack_schema_version": "terminal_receipt_readback_ack_v1",
-        "actor_contract": {
-            "append_actor_class": "DEDICATED_APPEND_ACTOR",
-            "readback_verifier_class": "INDEPENDENT_READBACK_VERIFIER",
-            "same_actor_allowed": False,
-        },
-        "idempotency_key_fields": [
-            "landing_scope_id",
-            "terminal_state",
-            "terminal_payload_digest",
-        ],
-        "payload_binding_fields": [
-            "final_source_head",
-            "landing_scope_id",
-            "learning_runtime_digest",
-            "terminal_payload_digest",
-            "terminal_state",
-        ],
-        "implementation_owner_session": "S1.2",
-        "implementation_paths": [],
-    }
-
-
-def terminal_receipt_sink_contract() -> dict[str, Any]:
-    """Return S0.3's non-executable sink contract; S1.2 owns implementation."""
-
-    contract = _terminal_receipt_sink_body()
-    contract["self_digest"] = artifact_self_digest(contract)
-    return contract
-
-
-def github_policy_attestation_identity_digest(attestation: dict[str, Any]) -> str:
-    """Bind repository, exact heads, observed policy, provenance and validity window."""
-
-    return canonical_digest({
-        key: value
-        for key, value in attestation.items()
-        if key not in {"attestation_id", "self_digest"}
-    })
-
-
-def program_adoption_identity_digest(receipt: dict[str, Any]) -> str:
-    """Return the pre-graph adoption identity used as the dependency-graph root.
-
-    The graph digest is intentionally excluded: the graph binds this adoption
-    identity as its root, while the completed receipt binds the graph digest.
-    This gives both directions without a self-digest cycle.
-    """
-
-    return canonical_digest({
-        key: value
-        for key, value in receipt.items()
-        if key not in {
-            "adoption_id", "receipt_dependency_graph_digest", "self_digest"
-        }
-    })
-
-
-def _github_policy_attestation_errors(
-    attestation: dict[str, Any], *, now: str | datetime | None
-) -> list[str]:
-    errors: list[str] = []
-    if _contains_github_secret_like_content(attestation):
-        errors.append(
-            "GitHub repository-policy attestation contains secret-like content"
-        )
-    try:
-        if isinstance(now, str):
-            evaluated_at = _parse_timestamp(now)
-        elif isinstance(now, datetime):
-            if now.tzinfo is None:
-                raise ValueError("now must be timezone-aware")
-            evaluated_at = now
-        else:
-            evaluated_at = datetime.now(timezone.utc)
-        observed_at = _parse_timestamp(attestation["observed_at"])
-        expires_at = _parse_timestamp(attestation["expires_at"])
-        valid_from = _parse_timestamp(attestation["valid_from"])
-        effect_at = _parse_timestamp(attestation["effect_at"])
-        if observed_at > evaluated_at:
-            errors.append("GitHub repository-policy attestation is future-dated")
-        if not observed_at <= valid_from <= effect_at < expires_at:
-            errors.append(
-                "GitHub repository-policy effect time is outside its authority window"
-            )
-        if any(
-            _parse_timestamp(capture["captured_at"]) > observed_at
-            for capture in attestation["evidence_captures"]
-        ):
-            errors.append("GitHub evidence capture postdates the attested observation")
-    except (TypeError, ValueError) as error:
-        errors.append(f"GitHub repository-policy timestamp is invalid: {error}")
-    if attestation["observer_node_id"] == attestation["validator_node_id"]:
-        errors.append("GitHub policy observer and adoption validator must be independent")
-    ruleset = attestation["ruleset"]
-    expected_checks = sorted(
-        ruleset["required_checks"],
-        key=lambda check: (check["context"], check["integration_id"] or -1),
-    )
-    if ruleset["required_checks"] != expected_checks:
-        errors.append("GitHub required checks must be in canonical sorted order")
-    if ruleset["ref_includes"] != sorted(ruleset["ref_includes"]) or ruleset[
-        "ref_excludes"
-    ] != sorted(ruleset["ref_excludes"]):
-        errors.append("GitHub ruleset ref conditions must be sorted")
-    if "~DEFAULT_BRANCH" in ruleset["ref_excludes"]:
-        errors.append("GitHub ruleset excludes the default branch")
-    if attestation["attestation_id"] != github_policy_attestation_identity_digest(
-        attestation
-    ):
-        errors.append("GitHub repository-policy attestation_id is invalid")
-    if attestation["self_digest"] != artifact_self_digest(attestation):
-        errors.append("GitHub repository-policy attestation self_digest is invalid")
-    return errors
-
-
-def _program_adoption_receipt_errors(receipt: dict[str, Any]) -> list[str]:
-    errors: list[str] = []
-    if receipt["adoption_id"] != program_adoption_identity_digest(receipt):
-        errors.append("program adoption_id is invalid")
-    if receipt["self_digest"] != artifact_self_digest(receipt):
-        errors.append("program adoption receipt self_digest is invalid")
-    dependencies = {
-        item["session_id"]: item["receipt_digest"]
-        for item in receipt["dependency_receipts"]
-    }
-    if dependencies != S0_DEPENDENCY_DIGESTS:
-        errors.append("program adoption dependencies are not the exact S0.1/S0.2 lineage")
-    for field, expected_paths in (
-        ("document_manifest", PROGRAM_DOCUMENT_PATHS),
-        ("schema_manifest", PROGRAM_SCHEMA_PATHS),
-        ("governance_manifest", PROGRAM_GOVERNANCE_PATHS),
-    ):
-        paths = [item["path"] for item in receipt[field]]
-        if paths != list(expected_paths):
-            errors.append(f"program adoption {field} paths differ from exact contract")
-    review_nodes = {
-        item["role"]: item["node_id"] for item in receipt["review_bindings"]
-    }
-    if (
-        len(review_nodes) != len(receipt["review_bindings"])
-        or review_nodes != PROGRAM_REVIEW_NODES
-    ):
-        errors.append("program adoption review bindings are incomplete or substituted")
-    # 每個 reviewer 綁定一個唯一的 role_fragment id;採納收尾不得讓兩個 reviewer 共用
-    # 同一 fragment 佯裝獨立審查。
-    fragment_ids = [item["fragment_id"] for item in receipt["review_bindings"]]
-    if len(set(fragment_ids)) != len(fragment_ids):
-        errors.append("program adoption review binding fragment ids are not unique")
-    # review_generation 綁定 merge_head 的完整 repo 位元代(source_head==merge_head),
-    # 其 digest 為正規雜湊,採納 fragment 的 final_generation 必須逐一等於它。
-    review_generation = receipt["review_generation"]
-    if receipt["review_generation_digest"] != canonical_digest(review_generation):
-        errors.append("program adoption review generation digest is invalid")
-    if review_generation["source_head"] != receipt["merge_head"]:
-        errors.append("program adoption review generation is not bound to merge_head")
-    if receipt["terminal_sink_contract_digest"] != terminal_receipt_sink_contract()[
-        "self_digest"
-    ]:
-        errors.append("program adoption terminal sink contract binding is invalid")
-    governance_digests = {
-        item["path"]: item["digest"] for item in receipt["governance_manifest"]
-    }
-    if receipt["validator_binding"]["implementation_digest"] != governance_digests.get(
-        "program_code/ml_training/aiml_gate_receipt_validator.py"
-    ):
-        errors.append("program adoption non-call validator implementation binding is invalid")
-    return errors
-
-
-def _s0_predecessor_receipt_errors(
-    artifact_name: str,
-    receipt: Any,
-) -> list[str]:
-    expected = S0_PREDECESSOR_CONTRACTS[artifact_name]
-    if not isinstance(receipt, dict):
-        return [f"{artifact_name} must be a complete receipt object"]
-    errors: list[str] = []
-    for field in ("session_id", "receipt_type", "program_id"):
-        if receipt.get(field) != expected[field]:
-            errors.append(f"{artifact_name} {field} differs from exact S0 lineage")
-    claimed_digest = receipt.get("self_digest")
-    if claimed_digest != artifact_self_digest(receipt):
-        errors.append(
-            f"{artifact_name} self_digest does not bind the complete canonical receipt"
-        )
-    if claimed_digest != expected["self_digest"]:
-        errors.append(f"{artifact_name} digest differs from hardcoded S0 lineage")
-    return errors
-
-
-def validate_program_adoption_receipt(
-    receipt: Any,
-    *,
-    artifacts: dict[str, Any],
-    now: str | datetime | None = None,
-    external_verifier: ExternalAttestationVerifier | None = None,
-    source_manifest_verifier: SourceManifestVerifier | None = None,
-) -> list[str]:
-    """Validate the only S0.3 path that can issue ``PROGRAM_ADOPTED``.
-
-    This is the canonical cross-artifact semantic validator used by governance
-    closure.  Registry, routing and closure may select/call it but must not
-    duplicate these AIML adoption rules.
-
-    ``source_manifest_verifier`` is mandatory and fail-closed: a missing verifier
-    or any non-``True`` return (including a raised exception) rejects the
-    receipt.  Returning ``True`` is a strengthened obligation — the host must have
-    confirmed that ``reviewed_head`` and ``merge_head`` both exist, that
-    ``git merge-base --is-ancestor reviewed_head merge_head`` holds (reflexive:
-    ``reviewed_head == merge_head`` is accepted as a fast-forward), and that every
-    manifest ``path`` resolves at ``merge_head`` to the exact declared blob
-    ``sha256``.  The reviewed/merge cross-binds below feed the exact heads handed
-    to that obligation; the offline CLI has no such host capability.
-    """
-
-    errors = [
-        f"program adoption receipt invalid: {error}"
-        for error in validate_aiml_artifact(receipt, now=now)
-    ]
-    github_candidate = artifacts.get("github_attestation")
-    if external_verifier is None:
-        errors.append(
-            "program adoption requires caller-supplied external GitHub verification"
-        )
-    elif not isinstance(github_candidate, dict):
-        errors.append("program adoption external GitHub artifact is absent")
-    else:
-        try:
-            externally_verified = external_verifier(github_candidate)
-        except Exception:  # pragma: no cover - boundary failure is fail-closed
-            externally_verified = False
-        if externally_verified is not True:
-            errors.append("program adoption external GitHub verification failed")
-    if source_manifest_verifier is None:
-        errors.append(
-            "program adoption requires caller-supplied source manifest verification"
-        )
-    else:
-        try:
-            manifest_items = [
-                item
-                for field in (
-                    "document_manifest",
-                    "schema_manifest",
-                    "governance_manifest",
-                )
-                for item in receipt[field]
-            ]
-            source_manifest = {
-                item["path"]: item["digest"] for item in manifest_items
-            }
-            if len(source_manifest) != len(manifest_items):
-                raise ValueError("source manifest paths are not unique")
-            # reviewed_head/merge_head 是下方(reviewed_head==source-build
-            # checkpoint、merge_head==finalization baseline)交叉綁定過的確切 head,
-            # 於此餵給主機祖裔義務:主機須確認 merge_head 為 reviewed_head 的後代
-            # (自反相等亦可),且各 path 於 merge_head 的 blob 與清單 digest 相符。
-            source_verified = source_manifest_verifier(
-                receipt["reviewed_head"],
-                receipt["merge_head"],
-                source_manifest,
-            )
-        except Exception:  # pragma: no cover - boundary failure is fail-closed
-            source_verified = False
-        if source_verified is not True:
-            errors.append("program adoption source manifest verification failed")
-    required_artifacts = {
-        "s0_1_receipt",
-        "s0_2_receipt",
-        "source_attempt",
-        "finalization_attempt",
-        "effect_classification",
-        "dependency_graph",
-        "github_attestation",
-        "terminal_sink_contract",
-    }
-    if set(artifacts) != required_artifacts:
-        errors.append(
-            "program adoption artifact inventory mismatch: "
-            f"missing={sorted(required_artifacts - set(artifacts))} "
-            f"extra={sorted(set(artifacts) - required_artifacts)}"
-        )
-        return errors
-    for name, artifact in artifacts.items():
-        if name in S0_PREDECESSOR_CONTRACTS:
-            errors.extend(
-                f"program adoption {error}"
-                for error in _s0_predecessor_receipt_errors(name, artifact)
-            )
-            continue
-        errors.extend(
-            f"program adoption {name} invalid: {error}"
-            for error in validate_aiml_artifact(artifact, now=now)
-        )
-    if errors or not isinstance(receipt, dict):
-        return errors
-
-    source_attempt = artifacts["source_attempt"]
-    final_attempt = artifacts["finalization_attempt"]
-    classification = artifacts["effect_classification"]
-    graph = artifacts["dependency_graph"]
-    github = artifacts["github_attestation"]
-    terminal_sink = artifacts["terminal_sink_contract"]
-
-    program_scope_ref = {"kind": "PROGRAM", "landing_scope_id": None}
-    if receipt["scope_ref"] != program_scope_ref or any(
-        artifact["scope_ref"] != program_scope_ref
-        for artifact in (source_attempt, final_attempt, graph)
-    ):
-        errors.append("program adoption requires the PROGRAM null scope_ref throughout")
-    if not (
-        source_attempt["session_id"] == "S0.3"
-        and source_attempt["attempt"] == 1
-        and source_attempt["attempt_phase"] == "SOURCE_BUILD"
-        and source_attempt["status"] == "MERGED"
-    ):
-        errors.append("program adoption requires merged S0.3 source-build attempt 1")
-    if not (
-        final_attempt["session_id"] == "S0.3"
-        and final_attempt["attempt"] >= 2
-        and final_attempt["attempt_phase"] == "POST_MERGE_FINALIZATION"
-        and final_attempt["status"] == "FINALIZED"
-    ):
-        errors.append("program adoption requires a finalized post-merge S0.3 attempt")
-    if receipt["source_build_attempt_id"] != source_attempt["attempt_id"]:
-        errors.append("program adoption source-build attempt binding is invalid")
-    if receipt["finalization_attempt_id"] != final_attempt["attempt_id"]:
-        errors.append("program adoption finalization attempt binding is invalid")
-    if receipt["attempt"] != final_attempt["attempt"]:
-        errors.append("program adoption finalization attempt number binding is invalid")
-    # reviewed_head/merge_head 交叉綁定:分別必須等於 source-build checkpoint 與
-    # finalization baseline。這兩個確切 head 是上方 source_manifest_verifier 祖裔
-    # 義務(merge_head 為 reviewed_head 後代 + blob 相符)的輸入。
-    if receipt["reviewed_head"] != source_attempt["source"]["checkpoint_head"]:
-        errors.append("program adoption reviewed_head differs from source-build checkpoint")
-    if receipt["merge_head"] != final_attempt["source"]["baseline_head"]:
-        errors.append("program adoption merge_head differs from finalization baseline")
-    if github["reviewed_head"] != receipt["reviewed_head"] or github[
-        "merge_head"
-    ] != receipt["merge_head"]:
-        errors.append("GitHub policy attestation is not bound to reviewed/merge heads")
-    if receipt["github_policy_attestation_digest"] != github["self_digest"]:
-        errors.append("program adoption GitHub policy attestation binding is invalid")
-    if receipt["required_effect_classification_digest"] != classification[
-        "self_digest"
-    ]:
-        errors.append("program adoption required-effect classification binding is invalid")
-    if final_attempt["effect_classification_digest"] != classification["self_digest"]:
-        errors.append("finalization attempt does not bind required-effect classification")
-    if classification["session_attempt_id"] != final_attempt["attempt_id"] or (
-        classification["required_effects"] != [{
-            **AIML_EFFECT_CLASSIFIER_RULES["S0.3"],
-            "status": "REQUIRED_PENDING",
-        }]
-    ):
-        errors.append("program adoption requires exact post-merge external attestation classification")
-    if receipt["receipt_dependency_graph_digest"] != graph["self_digest"]:
-        errors.append("program adoption dependency-graph binding is invalid")
-    if receipt["terminal_sink_contract_digest"] != terminal_sink["self_digest"]:
-        errors.append("program adoption terminal sink contract artifact binding is invalid")
-    graph_receipts = {
-        item["receipt_id"]: item["receipt_digest"]
-        for item in graph["receipts"]
-    }
-    if graph["root_receipt_id"] != "S0.3" or graph_receipts.get("S0.3") != (
-        receipt["adoption_id"]
-    ):
-        errors.append("program adoption dependency graph root is invalid")
-    if {
-        key: graph_receipts.get(key) for key in S0_DEPENDENCY_DIGESTS
-    } != S0_DEPENDENCY_DIGESTS:
-        errors.append("program adoption dependency graph lacks exact S0 lineage")
-    if graph_receipts.get("github-policy") != github["self_digest"]:
-        errors.append("program adoption dependency graph substitutes GitHub authority")
-    try:
-        issued_at = _parse_timestamp(receipt["issued_at"])
-        if isinstance(now, str):
-            evaluated_at = _parse_timestamp(now)
-        elif isinstance(now, datetime):
-            evaluated_at = now
-        else:
-            evaluated_at = datetime.now(timezone.utc)
-        if issued_at > evaluated_at:
-            errors.append("program adoption receipt is future-dated")
-        if _parse_timestamp(github["effect_at"]) != issued_at:
-            errors.append("program adoption issuance differs from GitHub authority effect time")
-    except (TypeError, ValueError) as error:
-        errors.append(f"program adoption timestamp is invalid: {error}")
-    return errors
-
-
-def _load_schema(schema_version: str) -> dict[str, Any]:
-    filename = SCHEMA_FILES.get(schema_version)
-    if filename is None:
-        raise ValueError(f"unsupported AIML artifact schema_version: {schema_version}")
-    return json.loads((SCHEMA_DIR / filename).read_text(encoding="utf-8"))
-
-
-def _parse_timestamp(value: str) -> datetime:
-    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    if parsed.tzinfo is None:
-        raise ValueError("timezone missing")
-    return parsed
-
-
-def _dependency_graph_errors(
-    graph: dict[str, Any], *, now: str | datetime | None
-) -> list[str]:
-    errors: list[str] = []
-    if isinstance(now, str):
-        evaluated_at = _parse_timestamp(now)
-    elif isinstance(now, datetime):
-        if now.tzinfo is None:
-            raise ValueError("now must be timezone-aware")
-        evaluated_at = now
-    else:
-        evaluated_at = datetime.now(timezone.utc)
-
-    receipts = graph["receipts"]
-    ids = [receipt["receipt_id"] for receipt in receipts]
-    if len(ids) != len(set(ids)):
-        errors.append("receipt dependency graph ids are not unique")
-    by_id = {receipt["receipt_id"]: receipt for receipt in receipts}
-    if graph["root_receipt_id"] not in by_id:
-        errors.append("receipt dependency graph root is absent")
-    if any(receipt["scope_ref"] != graph["scope_ref"] for receipt in receipts):
-        errors.append("receipt dependency graph mixes landing scopes")
-    if graph["scope_ref"] != {"kind": "PROGRAM", "landing_scope_id": None}:
-        errors.append("S0 receipt dependency graph requires the PROGRAM null scope_ref")
-
-    invalid: set[str] = set()
-    digest_ids: dict[str, str] = {}
-    for receipt in receipts:
-        receipt_id = receipt["receipt_id"]
-        receipt_digest = receipt["receipt_digest"]
-        if receipt_digest in digest_ids:
-            errors.append("receipt dependency graph digests are not unique")
-            invalid.add(receipt_id)
-        digest_ids[receipt_digest] = receipt_id
-        observed_at = _parse_timestamp(receipt["observed_at"])
-        if observed_at > evaluated_at:
-            errors.append(f"receipt {receipt_id} is future-dated")
-            invalid.add(receipt_id)
-        validity_class = receipt["validity_class"]
-        valid_from = receipt["valid_from"]
-        expires = receipt["expires_at"]
-        effect = receipt["effect_at"]
-        consumed = receipt["consumed_at"]
-        authority_digest = receipt["authority_receipt_digest"]
-        if receipt["state"] != "ACTIVE":
-            errors.append(f"receipt {receipt_id} is {receipt['state'].lower()}")
-            invalid.add(receipt_id)
-        if validity_class == "CURRENT_STATE_TTL":
-            if (
-                valid_from is None
-                or expires is None
-                or any(value is not None for value in (effect, consumed, authority_digest))
-            ):
-                errors.append(
-                    f"receipt {receipt_id} CURRENT_STATE_TTL fields are invalid"
-                )
-                invalid.add(receipt_id)
-            elif not (
-                observed_at <= _parse_timestamp(valid_from)
-                <= evaluated_at
-                < _parse_timestamp(expires)
-            ):
-                errors.append(f"receipt {receipt_id} CURRENT_STATE_TTL is stale")
-                invalid.add(receipt_id)
-        elif validity_class == "EFFECT_TIME_AUTHORITY":
-            if (
-                valid_from is None
-                or expires is None
-                or effect is None
-                or consumed is not None
-                or authority_digest is not None
-            ):
-                errors.append(
-                    f"receipt {receipt_id} EFFECT_TIME_AUTHORITY fields are invalid"
-                )
-                invalid.add(receipt_id)
-            elif not (
-                observed_at <= _parse_timestamp(valid_from)
-                <= _parse_timestamp(effect)
-                < _parse_timestamp(expires)
-            ):
-                errors.append(
-                    f"receipt {receipt_id} EFFECT_TIME_AUTHORITY effect is outside its window"
-                )
-                invalid.add(receipt_id)
-        elif validity_class == "IMMUTABLE_CONSUMED_EFFECT":
-            if (
-                any(value is not None for value in (valid_from, expires))
-                or effect is None
-                or consumed is None
-                or authority_digest is None
-            ):
-                errors.append(
-                    f"receipt {receipt_id} IMMUTABLE_CONSUMED_EFFECT fields are invalid"
-                )
-                invalid.add(receipt_id)
-            elif not (
-                observed_at
-                <= _parse_timestamp(effect)
-                <= _parse_timestamp(consumed)
-                <= evaluated_at
-            ):
-                errors.append(
-                    f"receipt {receipt_id} IMMUTABLE_CONSUMED_EFFECT time binding is invalid"
-                )
-                invalid.add(receipt_id)
-        elif validity_class == "IMMUTABLE_LINEAGE":
-            if any(
-                value is not None
-                for value in (
-                    valid_from, expires, effect, consumed, authority_digest
-                )
-            ):
-                errors.append(
-                    f"receipt {receipt_id} IMMUTABLE_LINEAGE fields are invalid"
-                )
-                invalid.add(receipt_id)
-
-    adjacency: dict[str, set[str]] = {receipt_id: set() for receipt_id in ids}
-    for edge in graph["edges"]:
-        consumer = edge["consumer_receipt_id"]
-        dependency = edge["dependency_receipt_id"]
-        if consumer not in by_id or dependency not in by_id:
-            errors.append("receipt dependency edge references an unknown receipt")
-            continue
-        if consumer == dependency:
-            errors.append(f"receipt {consumer} cannot depend on itself")
-            invalid.add(consumer)
-            continue
-        adjacency[consumer].add(dependency)
-        consumed_at = _parse_timestamp(edge["consumed_at"])
-        authority = by_id[dependency]
-        observed_at = _parse_timestamp(authority["observed_at"])
-        valid_from = authority["valid_from"]
-        expires = authority["expires_at"]
-        lower_bound = (
-            _parse_timestamp(valid_from) if valid_from is not None else observed_at
-        )
-        if consumed_at < lower_bound or (
-            expires is not None and consumed_at >= _parse_timestamp(expires)
-        ):
-            errors.append(
-                f"receipt {consumer} consumed dependency {dependency} outside its validity window"
-            )
-            invalid.add(consumer)
-        if (
-            authority["validity_class"] == "EFFECT_TIME_AUTHORITY"
-            and authority["effect_at"] != edge["consumed_at"]
-        ):
-            errors.append(
-                f"receipt {consumer} effect time differs from authority {dependency}"
-            )
-            invalid.add(consumer)
-
-    for receipt in receipts:
-        if receipt["validity_class"] != "IMMUTABLE_CONSUMED_EFFECT":
-            continue
-        receipt_id = receipt["receipt_id"]
-        authority_id = digest_ids.get(str(receipt["authority_receipt_digest"]))
-        if authority_id is None:
-            errors.append(
-                f"receipt {receipt_id} immutable effect authority digest is unknown"
-            )
-            invalid.add(receipt_id)
-            continue
-        authority = by_id[authority_id]
-        if (
-            authority["validity_class"] != "EFFECT_TIME_AUTHORITY"
-            or authority["effect_at"] != receipt["effect_at"]
-            or authority_id not in adjacency.get(receipt_id, set())
-        ):
-            errors.append(
-                f"receipt {receipt_id} immutable effect authority binding is invalid"
-            )
-            invalid.add(receipt_id)
-
-    visiting: set[str] = set()
-    visited: set[str] = set()
-
-    def visit(receipt_id: str) -> None:
-        if receipt_id in visited:
-            return
-        if receipt_id in visiting:
-            errors.append("receipt dependency graph contains a cycle")
-            invalid.add(receipt_id)
-            return
-        visiting.add(receipt_id)
-        for dependency in adjacency.get(receipt_id, set()):
-            visit(dependency)
-        visiting.remove(receipt_id)
-        visited.add(receipt_id)
-
-    for receipt_id in ids:
-        visit(receipt_id)
-
-    changed = True
-    while changed:
-        changed = False
-        for consumer, dependencies in adjacency.items():
-            if consumer not in invalid and dependencies.intersection(invalid):
-                invalid.add(consumer)
-                changed = True
-    if graph["root_receipt_id"] in invalid:
-        errors.append("receipt dependency graph root is invalidated by dependency state")
-    if graph["self_digest"] != artifact_self_digest(graph):
-        errors.append("receipt dependency graph self_digest is invalid")
-    return errors
-
-
-def _now_text(now: str | datetime | None) -> str | None:
-    # 委派給 adapter validator(其 now 契約為 str|None)前,把 now 正規化為字串。
-    if isinstance(now, datetime):
-        return now.isoformat()
-    if isinstance(now, str):
-        return now
-    return None
+from aiml_gate_receipt_schema_core import (  # noqa: E402,F401
+    ExternalAttestationVerifier,
+    GITHUB_SECRET_LIKE_RE,
+    PROGRAM_DOCUMENT_PATHS,
+    PROGRAM_GOVERNANCE_PATHS,
+    PROGRAM_REVIEW_NODES,
+    PROGRAM_SCHEMA_PATHS,
+    S0_DEPENDENCY_DIGESTS,
+    S0_PREDECESSOR_CONTRACTS,
+    SCHEMA_DIR,
+    SCHEMA_FILES,
+    SourceManifestVerifier,
+    _canonical_bytes,
+    _canonical_list_is_sorted_unique,
+    _contains_github_secret_like_content,
+    _dependency_graph_errors,
+    _directed_graph_has_cycle,
+    _load_schema,
+    _now_text,
+    _parse_timestamp,
+    artifact_self_digest,
+    canonical_digest,
+    evidence_environment_identity_digest,
+    landing_scope_identity_digest,
+    session_attempt_identity_digest,
+)
+from aiml_gate_receipt_classifiers import (  # noqa: E402,F401
+    AIML_COMPONENT_EFFECT_CLASS_INVARIANTS,
+    AIML_COMPONENT_EFFECT_CLASS_MATRIX,
+    AIML_COMPONENT_EFFECT_CLASS_MATRIX_V2,
+    AIML_COMPONENT_EFFECT_CLASS_V2_INVARIANTS,
+    AIML_EFFECT_CLASSIFIER_RULES,
+    AIML_LANDING_SIDE_EFFECT_CLASSES,
+    S0_3_DIRECT_INTERFACES_BY_PHASE,
+    S0_3_EXACT_OWNED_PATHS,
+    S0_3_FORBIDDEN_FACT_RE,
+    S0_3_OWNED_PATH_PREFIXES,
+    S0_3_SIDE_EFFECT_BY_PHASE,
+    S0_3_WORK_PACKAGE_ID,
+    _aiml_landing_owned_path,
+    _aiml_landing_work_package_errors,
+    _component_effect_class_identity_digest,
+    _component_effect_surface_tokens,
+    _component_effect_surface_tokens_v2,
+    _component_surfaces_touched,
+    _component_surfaces_touched_v2,
+    _effect_classification_identity_digest,
+    _s0_3_owned_path,
+    _s0_3_work_package_errors,
+    aiml_component_effect_class_matrix_digest,
+    aiml_component_effect_class_matrix_v2_digest,
+    aiml_effect_classifier_digest,
+    classify_component_required_effects,
+    classify_component_required_effects_v2,
+    classify_required_effects,
+)
+from aiml_gate_receipt_s2_4_contracts import (  # noqa: E402,F401
+    S2_4_APPLY_ROW_CLASS_ORDER,
+    S2_4_AUTHORIZATION_PROFILES,
+    S2_4_OPERATOR_AUTHORIZATION_SCHEMA_VERSION,
+    S2_4_OPERATOR_TRUST_ROOT_FINGERPRINT,
+    S2_4_OPERATOR_TRUST_ROOT_PUBLIC_KEY,
+    _S2_4_APPLY_INTENT_CLASS_TOKEN_FIELDS,
+    _S2_4_APPLY_INTENT_COMMON_TOKEN_FIELDS,
+    _S2_4_PROFILE_BY_IDENTITY,
+    _SSH_SIGNATURE_ARMOR_MARKERS,
+    _install_lineage_plan_binding_errors,
+    _s2_4_install_plan_apply_rows_errors,
+    _s2_4_operator_authorization_errors,
+    _s2_4_operator_authorization_signed_bytes,
+    _s2_4_replay_ledger_errors,
+    _s2_4_route_core_rederivation_errors,
+    _sshsig_armor_body_is_strict_base64,
+    derive_authorization_replay_binding,
+    derive_component_intent_binding,
+    derive_install_lineage_status,
+    s2_4_authorization_profiles_digest,
+)
+from aiml_gate_receipt_adoption import (  # noqa: E402,F401
+    _github_policy_attestation_errors,
+    _program_adoption_receipt_errors,
+    _s0_predecessor_receipt_errors,
+    _terminal_receipt_sink_body,
+    github_policy_attestation_identity_digest,
+    program_adoption_identity_digest,
+    terminal_receipt_sink_contract,
+    validate_program_adoption_receipt,
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -1460,14 +186,24 @@ _W0_EXPORTED_ABI = {
     "wave_exit": "s2_4_wave_exit_receipt_v1(status=PASS)",
 }
 # §5 W0 owned-path allowlist(wave-exit owned_path_manifest_digest 綁定的固定投影)。
+# 2026-07-25 2000 行治理拆分後擴列(E2 P1-2):validator 邏輯與主測試分居多檔,
+# owned-path diff 綁定必須覆蓋拆分後全家族,否則對 leaf/測試 sibling 的削弱性
+# 修改不會改變 wave-exit 的 owned_path_diff_digest(治理不變量覆蓋面靜默收窄)。
 _W0_OWNED_PATHS = (
     ".codex/agent_registry_v1.json",
     "helper_scripts/maintenance_scripts/agent_governance_pg_observer_bootstrap.py",
+    "program_code/ml_training/aiml_gate_receipt_adoption.py",
+    "program_code/ml_training/aiml_gate_receipt_classifiers.py",
+    "program_code/ml_training/aiml_gate_receipt_s2_4_contracts.py",
+    "program_code/ml_training/aiml_gate_receipt_schema_core.py",
     "program_code/ml_training/aiml_gate_receipt_validator.py",
     "program_code/ml_training/schemas/aiml_gate_receipts/pg_observer_bootstrap_result_v1.schema.json",
     "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_source_admission_receipt_v1.schema.json",
     "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_wave_exit_receipt_v1.schema.json",
+    "program_code/ml_training/tests/aiml_gate_receipt_validator_testkit.py",
     "program_code/ml_training/tests/test_aiml_gate_receipt_validator.py",
+    "program_code/ml_training/tests/test_aiml_gate_receipt_validator_adoption.py",
+    "program_code/ml_training/tests/test_aiml_gate_receipt_validator_s2_4.py",
     "tests/structure/test_agent_governance_pg_observer_bootstrap.py",
     "tests/structure/test_s2_4_w0_admission.py",
 )
@@ -1639,6 +375,129 @@ def w0_owned_path_diff_digest(repo_root: Path = REPO_ROOT) -> str:
 
     projection: dict[str, str | None] = {}
     for rel in sorted(_W0_OWNED_PATHS):
+        try:
+            projection[rel] = "sha256:" + hashlib.sha256(
+                (repo_root / rel).read_bytes()
+            ).hexdigest()
+        except OSError:
+            projection[rel] = None
+    return canonical_digest(projection)
+
+
+# --------------------------------------------------------------------------- #
+# S2.4 · WP4 · W1(contracts/routing)wave-exit 綁定的 code-owned 投影(§10.3 W1 row)。
+#
+# 與 W0 同一機制:owned-path「路徑集合」digest + 「內容」投影 digest + exported-ABI digest,
+# 全由 repo 當前 checkout 再導出;receipt 只帶 evidence,PASS 恆由 derive_wave_exit_status 導出。
+# W1 的 PASS 另需前導 W0 wave-exit receipt 物件(predecessor_wave_receipt)連同其綁定 admission
+# 「一起」再導出 PASS/ADMITTED——admission 鏈不因跨波而鬆脫(§10.5 #27)。
+# --------------------------------------------------------------------------- #
+_W1_SCHEMA_DIR_REL = "program_code/ml_training/schemas/aiml_gate_receipts"
+# §10.1 W1 schemas-dir additions:29 支 s2_4_* + v2 classifier + topology/network 三支。
+_W1_SCHEMA_FILENAMES = (
+    "aiml_component_effect_classification_v2.schema.json",
+    "network_sandbox_capability_attestation_v1.schema.json",
+    "pg_topology_attestation_v1.schema.json",
+    "pg_topology_runtime_guard_v1.schema.json",
+    "s2_4_authorization_replay_ledger_v1.schema.json",
+    "s2_4_capability_probe_core_v1.schema.json",
+    "s2_4_capability_probe_effect_receipt_v1.schema.json",
+    "s2_4_capability_probe_intent_v1.schema.json",
+    "s2_4_capability_probe_journal_v1.schema.json",
+    "s2_4_capability_probe_postcheck_v1.schema.json",
+    "s2_4_capability_probe_rollback_v1.schema.json",
+    "s2_4_component_effect_intent_v1.schema.json",
+    "s2_4_component_effect_postcheck_v1.schema.json",
+    "s2_4_component_effect_result_v1.schema.json",
+    "s2_4_component_effect_rollback_v1.schema.json",
+    "s2_4_install_effect_receipt_v1.schema.json",
+    "s2_4_install_journal_v1.schema.json",
+    "s2_4_install_plan_core_v1.schema.json",
+    "s2_4_install_plan_v1.schema.json",
+    "s2_4_install_postcheck_v1.schema.json",
+    "s2_4_install_rollback_v1.schema.json",
+    "s2_4_install_step_result_v1.schema.json",
+    "s2_4_operator_authorization_v1.schema.json",
+    "s2_4_pg_hba_delta_v1.schema.json",
+    "s2_4_prepare_core_v1.schema.json",
+    "s2_4_prepare_effect_receipt_v1.schema.json",
+    "s2_4_prepare_intent_v1.schema.json",
+    "s2_4_prepare_journal_v1.schema.json",
+    "s2_4_prepare_postcheck_v1.schema.json",
+    "s2_4_prepare_rollback_v1.schema.json",
+    "s2_4_prepared_install_bundle_v1.schema.json",
+    "s2_4_source_admission_receipt_v1.schema.json",
+    "s2_4_wave_exit_receipt_v1.schema.json",
+)
+# §10.1 W1 owned-path 投影:registry + routing/closure/component-effects 模組 + contracts 葉
+# (與其 facade/classifiers sibling)+ schemas dir additions + install 模組與其測試。
+_W1_OWNED_PATHS = tuple(sorted(
+    (
+        ".codex/agent_registry_v1.json",
+        "helper_scripts/maintenance_scripts/agent_governance_closure.py",
+        "helper_scripts/maintenance_scripts/agent_governance_component_effects.py",
+        "helper_scripts/maintenance_scripts/agent_governance_routing.py",
+        "helper_scripts/maintenance_scripts/agent_governance_s2_4_install.py",
+        "program_code/ml_training/aiml_gate_receipt_classifiers.py",
+        "program_code/ml_training/aiml_gate_receipt_s2_4_contracts.py",
+        "program_code/ml_training/aiml_gate_receipt_validator.py",
+        "program_code/ml_training/tests/test_aiml_gate_receipt_validator_s2_4.py",
+        "tests/structure/test_agent_governance_s2_4_install.py",
+        "tests/structure/test_agent_governance_s2_4_install_integration.py",
+    )
+    + tuple(f"{_W1_SCHEMA_DIR_REL}/{name}" for name in _W1_SCHEMA_FILENAMES)
+))
+# §10.2 凍結 ABI 的 W1 delta(exported_abi_digest 綁定的 code-owned 投影骨架;live 部分見
+# w1_exported_abi_projection)。
+_W1_EXPORTED_ABI = {
+    "route_classes": [
+        "s2_4_capability_probe_intent",
+        "s2_4_prepare_intent",
+        "s2_4_install_plan",
+    ],
+    "adapter_ids": [
+        "s2_4_capability_probe_adapter_v1",
+        "s2_4_prepare_adapter_v1",
+        "s2_4_install_adapter_v1",
+    ],
+    "adapter_binding": "AUTHORITY_LOCKED_PRODUCTION_CAPABLE",
+    "component_classifier_v2": "aiml_component_effect_classification_v2",
+    "install_receipt_success": "s2_4_install_effect_receipt_v1(status=APPLIED_INACTIVE)",
+    "source_admission": "s2_4_source_admission_receipt_v1(status=ADMITTED)",
+}
+
+
+def w1_exported_abi_projection(repo_root: Path = REPO_ROOT) -> dict[str, Any]:
+    """W1 exported-ABI 投影:code-owned §10.2 骨架 + live registry/classifier 再導出。
+
+    折入兩個「活」再導出令 ABI-surface drift 必然破壞 W1 導出(§10.5 #3/#27/#36):
+      * 三 adapter 的 registry status 逐 id 再讀(registry 身分替換/降級 → 投影變值);
+      * v2 classifier 矩陣 digest 再算(v2→v1 降級/矩陣竄改 → 投影變值)。
+    fail-closed:registry 不可讀時 status 記 None(投影仍變值 → 導出失敗)。
+    """
+
+    try:
+        registry = json.loads(
+            (repo_root / ".codex" / "agent_registry_v1.json").read_text(encoding="utf-8")
+        )
+        adapters = registry.get("effect_adapters", {})
+    except (OSError, json.JSONDecodeError):
+        adapters = {}
+    return {
+        **_W1_EXPORTED_ABI,
+        "registry_adapter_status": {
+            adapter_id: adapters.get(adapter_id, {}).get("status")
+            for adapter_id in _W1_EXPORTED_ABI["adapter_ids"]
+        },
+        "component_classifier_v2_digest": aiml_component_effect_class_matrix_v2_digest(),
+    }
+
+
+def w1_owned_path_diff_digest(repo_root: Path = REPO_ROOT) -> str:
+    """W1 owned-path 內容投影 digest(同 :func:`w0_owned_path_diff_digest` 機制,綁 W1 面)。"""
+
+    projection: dict[str, str | None] = {}
+    for rel in sorted(_W1_OWNED_PATHS):
         try:
             projection[rel] = "sha256:" + hashlib.sha256(
                 (repo_root / rel).read_bytes()
@@ -1968,24 +827,53 @@ def _wave_exit_structural_errors(
         reasons.append("wave-exit self_digest does not bind the canonical receipt")
     if receipt.get("production_authority_flags") != _ALL_FALSE_PRODUCTION_FLAGS:
         reasons.append("wave-exit production_authority_flags must all be false")
-    if receipt.get("wave") != "W0":
-        # W0b 只導出 W0 wave-exit;W1+ 各 wave 於其自身 owned path 擴充 derivation。
-        reasons.append("wave-exit derivation is only implemented for W0 in W0b")
+    wave = receipt.get("wave")
+    if wave == "W0":
+        if receipt.get("predecessor_wave_receipt_digest") is not None:
+            reasons.append(
+                "W0 wave-exit has no predecessor wave (predecessor_wave_receipt_digest must be null)"
+            )
+        if receipt.get("exported_abi_digest") != canonical_digest(_W0_EXPORTED_ABI):
+            reasons.append("wave-exit exported_abi_digest does not equal the W0 ABI delta")
+        if receipt.get("owned_path_manifest_digest") != canonical_digest(sorted(_W0_OWNED_PATHS)):
+            reasons.append("wave-exit owned_path_manifest_digest is not the exact W0 owned-path set")
+        # T1(a):owned_path_diff_digest 綁定到 W0 owned-path 內容投影的再導出(同 owned_path_manifest_digest
+        # 的 canonical_digest 機制),故 arbitrary/empty 值無法通過 W0 完成閘。
+        if receipt.get("owned_path_diff_digest") != w0_owned_path_diff_digest(repo_root):
+            reasons.append(
+                "wave-exit owned_path_diff_digest does not re-derive the W0 owned-path content projection"
+            )
+    elif wave == "W1":
+        # W1(contracts/routing):同 W0 機制,但綁 W1 面;另需非 null 的前導 W0 digest
+        # (predecessor 物件鏈的完整驗在 derive_wave_exit_status,結構層先擋 null)。
+        if receipt.get("predecessor_wave_receipt_digest") is None:
+            reasons.append(
+                "W1 wave-exit requires a non-null predecessor_wave_receipt_digest "
+                "(the W0 wave-exit self_digest)"
+            )
+        abi_projection = w1_exported_abi_projection(repo_root)
+        if receipt.get("exported_abi_digest") != canonical_digest(abi_projection):
+            reasons.append(
+                "wave-exit exported_abi_digest does not re-derive the W1 exported-ABI projection"
+            )
+        # ABI-surface 活再導出(不只 digest 等式):三 adapter 的 registry status 必真為凍結
+        # binding 字串——registry 身分替換/降級即失敗(§10.5 #3/#36 的 adapter-substitution 縫)。
+        for adapter_id, status in sorted(abi_projection["registry_adapter_status"].items()):
+            if status != _W1_EXPORTED_ABI["adapter_binding"]:
+                reasons.append(
+                    f"W1 adapter {adapter_id} registry status does not re-derive "
+                    "AUTHORITY_LOCKED_PRODUCTION_CAPABLE"
+                )
+        if receipt.get("owned_path_manifest_digest") != canonical_digest(sorted(_W1_OWNED_PATHS)):
+            reasons.append("wave-exit owned_path_manifest_digest is not the exact W1 owned-path set")
+        if receipt.get("owned_path_diff_digest") != w1_owned_path_diff_digest(repo_root):
+            reasons.append(
+                "wave-exit owned_path_diff_digest does not re-derive the W1 owned-path content projection"
+            )
+    else:
+        # W2+ 各 wave 於其自身 owned path 擴充 derivation;未實作的 wave 一律 fail-closed。
+        reasons.append("wave-exit derivation is only implemented for W0/W1 so far")
         return reasons
-    if receipt.get("predecessor_wave_receipt_digest") is not None:
-        reasons.append(
-            "W0 wave-exit has no predecessor wave (predecessor_wave_receipt_digest must be null)"
-        )
-    if receipt.get("exported_abi_digest") != canonical_digest(_W0_EXPORTED_ABI):
-        reasons.append("wave-exit exported_abi_digest does not equal the W0 ABI delta")
-    if receipt.get("owned_path_manifest_digest") != canonical_digest(sorted(_W0_OWNED_PATHS)):
-        reasons.append("wave-exit owned_path_manifest_digest is not the exact W0 owned-path set")
-    # T1(a):owned_path_diff_digest 綁定到 W0 owned-path 內容投影的再導出(同 owned_path_manifest_digest
-    # 的 canonical_digest 機制),故 arbitrary/empty 值無法通過 W0 完成閘。
-    if receipt.get("owned_path_diff_digest") != w0_owned_path_diff_digest(repo_root):
-        reasons.append(
-            "wave-exit owned_path_diff_digest does not re-derive the W0 owned-path content projection"
-        )
     # T1(b):test/capture/review 三類證據必為「非空」的合法 digest list——empty/arbitrary 不得導出 PASS。
     # 誠實邊界:每一支 test/capture/review 的「PLATFORM-ATTESTED 綁定」屬下游 EFFECT/closure 關切(離線
     # 結構驗無法認證其真跑過);此處只擋「空/畸形證據仍導 PASS」的洞,不冒充已認證 runtime。
@@ -2004,19 +892,24 @@ def derive_wave_exit_status(
     repo_root: Path = REPO_ROOT,
     now: str | datetime | None = None,
     source_admission_receipt: Any = None,
+    predecessor_wave_receipt: Any = None,
 ) -> dict[str, Any]:
-    """Independently re-derive the W0 wave-exit status (§3.2).
+    """Independently re-derive the W0/W1 wave-exit status (§3.2/§10.3).
 
     回傳 ``{"status": "PASS"|"NOT_PASS", "reasons": [...]}``。W0 的 PASS 需:綁定的
     ``source_admission_receipt`` 再導出 ADMITTED 且其 self_digest == 本 receipt 綁定的
     ``source_admission_receipt_digest``、owned-path/ABI/flags 再導出相符、source_head 一致。
-    caller 帶 status/pass/done 於 derivation 前即拒(§10.3/§10.5 #27)。
+    W1 的 PASS 另需 caller 傳 ``predecessor_wave_receipt``(W0 wave-exit 物件,姿態同
+    ``source_admission_receipt``):該 W0 receipt 必須「連同其綁定 admission」在此再導出 PASS、
+    其 self_digest == 本 receipt 的 ``predecessor_wave_receipt_digest``、三方 source_head 一致
+    且等於目前 checkout HEAD——admission 鏈不因跨波而鬆脫。caller 帶 status/pass/done 於
+    derivation 前即拒(§10.3/§10.5 #27)。
 
     邊界(必要非充分):中央閘 :func:`validate_aiml_artifact` 對 wave-exit 只做 STRUCTURAL-ONLY
-    再導出(不綁 admission 物件),乾淨的 ``[]`` 結果「不」等於 W0 PASS——它未驗
-    ``source_admission_receipt_digest`` 是否綁到一份真能再導出 ADMITTED 的 admission。真正的
-    PASS 只能由「本函式帶 ``source_admission_receipt=<已導出 ADMITTED 的 admission>``」授予
-    (鏡射 CLAUDE.md standalone-CLI / typed-authority 邊界:離線結構驗無法自證 PASS)。
+    再導出(不綁 admission/predecessor 物件),乾淨的 ``[]`` 結果「不」等於 PASS——它未驗
+    ``source_admission_receipt_digest`` / ``predecessor_wave_receipt_digest`` 是否綁到真能再導出
+    ADMITTED/PASS 的物件。真正的 PASS 只能由「本函式帶已導出物件」授予(鏡射 CLAUDE.md
+    standalone-CLI / typed-authority 邊界:離線結構驗無法自證 PASS)。
     """
 
     if not isinstance(receipt, dict):
@@ -2043,24 +936,26 @@ def derive_wave_exit_status(
     if _schema_errors:
         return {"status": "NOT_PASS", "reasons": _schema_errors}
     reasons = _wave_exit_structural_errors(receipt, repo_root)
-    if receipt.get("wave") != "W0":
+    wave = receipt.get("wave")
+    if wave not in {"W0", "W1"}:
         return {"status": "NOT_PASS", "reasons": reasons}
     if source_admission_receipt is None:
         reasons.append(
-            "W0 wave-exit requires the bound source_admission_receipt to re-derive ADMITTED"
+            f"{wave} wave-exit requires the bound source_admission_receipt to re-derive ADMITTED"
         )
-    else:
-        admission = derive_source_admission_status(
-            source_admission_receipt, repo_root=repo_root, now=now
+        return {"status": "NOT_PASS", "reasons": reasons}
+    admission = derive_source_admission_status(
+        source_admission_receipt, repo_root=repo_root, now=now
+    )
+    # T6:綁定的 admission 若非 ADMITTED 或根本不是 dict(list/str/None),立即回 typed NOT_PASS——
+    # 在任何 .get(...) 之前護欄,杜絕 non-dict 綁定物件觸發 AttributeError。
+    if admission["status"] != "ADMITTED" or not isinstance(source_admission_receipt, dict):
+        reasons.append(
+            "wave-exit bound source_admission_receipt does not derive ADMITTED: "
+            + "; ".join(admission["reasons"])
         )
-        # T6:綁定的 admission 若非 ADMITTED 或根本不是 dict(list/str/None),立即回 typed NOT_PASS——
-        # 在任何 .get(...) 之前護欄,杜絕 non-dict 綁定物件觸發 AttributeError。
-        if admission["status"] != "ADMITTED" or not isinstance(source_admission_receipt, dict):
-            reasons.append(
-                "wave-exit bound source_admission_receipt does not derive ADMITTED: "
-                + "; ".join(admission["reasons"])
-            )
-            return {"status": "NOT_PASS", "reasons": reasons}
+        return {"status": "NOT_PASS", "reasons": reasons}
+    if wave == "W0":
         if source_admission_receipt.get("self_digest") != receipt.get(
             "source_admission_receipt_digest"
         ):
@@ -2069,6 +964,57 @@ def derive_wave_exit_status(
             )
         if source_admission_receipt.get("source_head") != receipt.get("source_head"):
             reasons.append("wave-exit source_head differs from the bound admission receipt")
+        return {
+            "status": "PASS" if not reasons else "NOT_PASS",
+            "reasons": reasons,
+        }
+    # ── W1:predecessor 鏈(W0 wave-exit 物件連同其 admission 再導出 PASS)────────────
+    if predecessor_wave_receipt is None:
+        reasons.append(
+            "W1 wave-exit requires the bound predecessor_wave_receipt (the W0 wave-exit "
+            "receipt object) to re-derive PASS with its bound admission"
+        )
+        return {"status": "NOT_PASS", "reasons": reasons}
+    predecessor = derive_wave_exit_status(
+        predecessor_wave_receipt,
+        repo_root=repo_root,
+        now=now,
+        source_admission_receipt=source_admission_receipt,
+    )
+    # 同 T6 護欄:非 dict / 非 PASS 的 predecessor 立即 typed NOT_PASS(admission 鏈斷即斷)。
+    if predecessor["status"] != "PASS" or not isinstance(predecessor_wave_receipt, dict):
+        reasons.append(
+            "W1 wave-exit bound predecessor_wave_receipt does not derive PASS: "
+            + "; ".join(predecessor["reasons"])
+        )
+        return {"status": "NOT_PASS", "reasons": reasons}
+    if predecessor_wave_receipt.get("wave") != "W0":
+        reasons.append("W1 wave-exit predecessor must be the W0 wave-exit receipt")
+    if predecessor_wave_receipt.get("self_digest") != receipt.get(
+        "predecessor_wave_receipt_digest"
+    ):
+        reasons.append(
+            "W1 predecessor_wave_receipt_digest does not bind the derived W0 wave-exit receipt"
+        )
+    if source_admission_receipt.get("self_digest") != receipt.get(
+        "source_admission_receipt_digest"
+    ):
+        reasons.append(
+            "wave-exit source_admission_receipt_digest does not bind the derived admission receipt"
+        )
+    # source_head 三方一致 + 等於目前 checkout HEAD(admission 的 T2 已綁 HEAD;此處把 W1 receipt
+    # 也直接釘住,杜絕「W1 receipt 宣稱另一世代卻由當前樹導 PASS」的漂移)。
+    head = _git_head(repo_root)
+    if head is None:
+        reasons.append(
+            "W1 wave-exit source_head cannot be bound: repo HEAD is unreadable (fail-closed)"
+        )
+    elif receipt.get("source_head") != head:
+        reasons.append("W1 wave-exit source_head is not the current checkout HEAD")
+    if receipt.get("source_head") != predecessor_wave_receipt.get("source_head"):
+        reasons.append("W1 wave-exit source_head differs from the bound W0 wave-exit receipt")
+    if receipt.get("source_head") != source_admission_receipt.get("source_head"):
+        reasons.append("W1 wave-exit source_head differs from the bound admission receipt")
     return {
         "status": "PASS" if not reasons else "NOT_PASS",
         "reasons": reasons,
@@ -2452,6 +1398,37 @@ def validate_aiml_artifact(
                 errors.append(
                     "AIML component required effects differ from classifier output"
                 )
+    if schema_version == "aiml_component_effect_classification_v2":
+        # S2.4(WP4·W1)v2 sibling 分類 artifact:結構等同 v1 分支但指向 v2 分類器與 v2
+        # 矩陣 digest。跨版本互拒為自動性——v1 artifact 帶 v1 digest 而此分支要 v2 digest,
+        # 反之亦然;classifier_digest 不符即 fail-closed(下方 negative test 另補顯式反例)。
+        if artifact["classification_id"] != _component_effect_class_identity_digest(
+            artifact
+        ):
+            errors.append("AIML component effect v2 classification_id is invalid")
+        if artifact["self_digest"] != artifact_self_digest(artifact):
+            errors.append("AIML component effect v2 classification self_digest is invalid")
+        if artifact["classifier_digest"] != aiml_component_effect_class_matrix_v2_digest():
+            errors.append("AIML component effect v2 classifier digest is not admitted")
+        if artifact["component_work_package_id"] != artifact["classified_inputs"][
+            "component_work_package_id"
+        ]:
+            errors.append("AIML component v2 classification work-package id is not bound")
+        try:
+            expected = classify_component_required_effects_v2(
+                artifact["classified_inputs"],
+                classified_at=artifact["classified_at"],
+            )
+        except ValueError as error:
+            # NONE-block / adapter-substitution / 缺欄位 → fail-closed。
+            errors.append(
+                f"AIML component effect v2 classification is not admitted: {error}"
+            )
+        else:
+            if artifact["required_effects"] != expected["required_effects"]:
+                errors.append(
+                    "AIML component v2 required effects differ from classifier output"
+                )
     if schema_version == "pg_readonly_identity_receipt_v1":
         # S1.1 central-validator wiring(CC review note D2):委派給 S1.1 validator 並
         # 強制傳 now;只接受 disposable-real/attested receipt,結構手搭的 stub 由 S1.1
@@ -2709,6 +1686,66 @@ def validate_aiml_artifact(
             )
         else:
             errors.extend(_wave_exit_structural_errors(artifact))
+    if schema_version == "s2_4_capability_probe_intent_v1":
+        # S2.4(WP4·W1·CP3)§5.1 re-derivation:probe 是 route-class 載體,攜帶 unsigned probe core
+        # → 中央閘再導出 core_digest / probe_id('s2-4-probe-'+hex(core_digest)) / self_digest。
+        errors.extend(_s2_4_route_core_rederivation_errors(
+            artifact, id_field="probe_id", id_prefix="s2-4-probe-"
+        ))
+    if schema_version == "s2_4_prepare_intent_v1":
+        # 同上:prepare core → prepare_id = 's2-4-prepare-'+hex(core_digest)。
+        errors.extend(_s2_4_route_core_rederivation_errors(
+            artifact, id_field="prepare_id", id_prefix="s2-4-prepare-"
+        ))
+    if schema_version == "s2_4_install_plan_v1":
+        # §5.1 re-derivation:aggregate plan 攜帶 unsigned plan core → plan_id = 's2-4-'+hex(core_digest)
+        # 且 idempotency_key=plan_id(idempotency_key 在 plan 物件、非簽名 core;core 由 schema 排除)。
+        # 另補 five APPLY row 的 exact 次序驗(JSON schema 無 prefixItems 無法表達)。
+        errors.extend(_s2_4_route_core_rederivation_errors(
+            artifact, id_field="plan_id", id_prefix="s2-4-"
+        ))
+        if artifact.get("idempotency_key") != artifact.get("plan_id"):
+            errors.append("install plan idempotency_key must equal plan_id")
+        core = artifact.get("core")
+        if isinstance(core, dict) and (
+            "plan_id" in core or "idempotency_key" in core
+        ):
+            errors.append(
+                "install plan signed core must not carry plan_id/idempotency_key "
+                "(derived ids live on the plan object)"
+            )
+        errors.extend(_s2_4_install_plan_apply_rows_errors(artifact))
+    if schema_version == "s2_4_component_effect_intent_v1":
+        # S2.4(WP4·W1·CP3)per-row ABI 綁定:closed schema(CP2b)之上,再導出 §4 逐行 ABI 綁定並
+        # 強制 required_intent_fields 恰等於凍結矩陣列(關閉 schema 允許跨類夾帶額外 digest 鍵的縫,
+        # 例如一份 PG intent 夾帶 host-identity 的 uid_gid_directory_manifest_digest)。
+        if artifact["self_digest"] != artifact_self_digest(artifact):
+            errors.append("component effect intent self_digest is invalid")
+        try:
+            derive_component_intent_binding(artifact)
+        except ValueError as error:
+            errors.append(f"component effect intent binding is not admitted: {error}")
+    if schema_version == "s2_4_install_effect_receipt_v1":
+        # S2.4(WP4·W1·CP3)aggregate-lineage:closed schema(CP2b)之上,再導出離線結構 lineage
+        # (五 APPLY row exact 次序+unique、兩 scoped probe digest 相異、PREPARE 結果/postcheck、
+        # 逆向補償鏈)。此為結構驗,「不」斷言 runtime PASS。self_digest 完整性另驗。
+        if artifact["self_digest"] != artifact_self_digest(artifact):
+            errors.append("install effect receipt self_digest is invalid")
+        lineage = derive_install_lineage_status(artifact)
+        if lineage["status"] != "SATISFIED":
+            errors.extend(lineage["reasons"])
+    if schema_version == S2_4_OPERATOR_AUTHORIZATION_SCHEMA_VERSION:
+        # S2.4(WP4·W1·CP4)§9.1 四 trust profile:closed schema(CP2b)之上,再驗 profile 解析、
+        # payload_fields == 該 profile 的 §9.1 ordered list、namespace/identity 綁定、armored SSHSIG
+        # strict-base64/≤16 KiB、TTL≤profile 上限(now 若提供再驗 skew 新鮮度)、以及**信任根綁定**——
+        # 呼叫 out-of-scope trusted-host 的 _verify_ssh_signature 對 pinned 公鑰做離線公鑰驗簽。此為離線
+        # 結構/完整性/信任根綁定驗;「不」斷言 runtime 真偽(真 operator 對真語義 payload 的 runtime 簽署
+        # + replay-ledger 消費 + 平台背書屬 W6A/W6B EFFECT)。
+        # 註(W1):s2_4_authorization_replay_ledger_v1 的中央閘分支維持 CP2b 的 closed-schema
+        # 驗(佔位 fixture 契約);逐 entry hash-chain 重算 + 消費語義(unconsumed/consuming-twice/
+        # same-id-different-plan)由 facade-reachable 的 derive_authorization_replay_binding /
+        # _s2_4_replay_ledger_errors 執法——消費是「授權↔ledger」裁決,非裸 ledger 結構。
+        errors.extend(_s2_4_operator_authorization_errors(artifact, now=now))
     return errors
 
 
