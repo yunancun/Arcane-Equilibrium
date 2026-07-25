@@ -1,0 +1,163 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2_4_install_plan_v1.schema.json",
+  "title": "s2_4_install_plan_v1",
+  "description": "Closed top-level route-class artifact for the s2_4_install_plan route (§4/§5.1). It contains {core, core_digest, plan_id, idempotency_key, self_digest}: the embedded unsigned aggregate core is what was signed, core_digest re-derives from it, plan_id = 's2-4-' + hex(core_digest) and idempotency_key = plan_id. It declares only the aggregate APPLY surface posture (aggregate coordinator plus the five ordered APPLY rows; runtime_effect/service/pg/migration/secret present, critical risk, runtime_claim=true) and the required aggregate + PG-migration authorization profile/namespace/max-TTL policy; the actual authorization objects/signatures are never embedded (they live in authorization_set). Every §4:287 forbidden surface (PREPARE fetch/build, arbitrary shell/SQL/path, broker/order) is pinned const false so a plan carrying PREPARE fetch/build authority or a raw shell/SQL/path is structurally rejected before node injection. Contract only: no runtime/production PASS is asserted.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "route_class",
+    "core",
+    "core_digest",
+    "plan_id",
+    "idempotency_key",
+    "route_surface",
+    "forbidden_surfaces",
+    "required_authorization",
+    "expires_at",
+    "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2_4_install_plan_v1"},
+    "route_class": {"const": "s2_4_install_plan"},
+    "core": {"$ref": "#/$defs/install_plan_core"},
+    "core_digest": {"$ref": "#/$defs/digest"},
+    "plan_id": {"$ref": "#/$defs/plan_id"},
+    "idempotency_key": {"$ref": "#/$defs/plan_id"},
+    "route_surface": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "aggregate_coordinator",
+        "runtime_effect",
+        "service",
+        "pg",
+        "migration",
+        "secret",
+        "risk",
+        "runtime_claim",
+        "apply_rows"
+      ],
+      "properties": {
+        "aggregate_coordinator": {"const": true},
+        "runtime_effect": {"const": true},
+        "service": {"const": "system_unit_install_inactive"},
+        "pg": {"const": true},
+        "migration": {"const": true},
+        "secret": {"const": true},
+        "risk": {"const": "critical"},
+        "runtime_claim": {"const": true},
+        "apply_rows": {
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "items": {"$ref": "#/$defs/component_effect_class"}
+        }
+      }
+    },
+    "forbidden_surfaces": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "prepare_fetch",
+        "prepare_build",
+        "arbitrary_shell",
+        "arbitrary_sql",
+        "arbitrary_path",
+        "broker_or_order"
+      ],
+      "properties": {
+        "prepare_fetch": {"const": false},
+        "prepare_build": {"const": false},
+        "arbitrary_shell": {"const": false},
+        "arbitrary_sql": {"const": false},
+        "arbitrary_path": {"const": false},
+        "broker_or_order": {"const": false}
+      }
+    },
+    "required_authorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["aggregate", "pg_migration"],
+      "properties": {
+        "aggregate": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["profile_identity", "signature_namespace", "max_ttl_seconds"],
+          "properties": {
+            "profile_identity": {"const": "aiml-s2-install-operator-v1"},
+            "signature_namespace": {"const": "arcane-equilibrium-aiml-s2-install"},
+            "max_ttl_seconds": {"type": "integer", "minimum": 1, "maximum": 900}
+          }
+        },
+        "pg_migration": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["profile_identity", "signature_namespace", "max_ttl_seconds"],
+          "properties": {
+            "profile_identity": {"const": "aiml-s2-pg-migration-operator-v1"},
+            "signature_namespace": {"const": "arcane-equilibrium-aiml-s2-pg-migration"},
+            "max_ttl_seconds": {"type": "integer", "minimum": 1, "maximum": 900}
+          }
+        }
+      }
+    },
+    "expires_at": {"$ref": "#/$defs/timestamp"},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "git_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "plan_id": {"type": "string", "pattern": "^s2-4-[0-9a-f]{64}$"},
+    "component_effect_class": {
+      "enum": [
+        "HOST_IDENTITY_INSTALL",
+        "PG_ROLE_ACL_MIGRATION",
+        "CREDENTIAL_INSTALL",
+        "LEARNING_RUNTIME",
+        "ENGINE_SCANNER"
+      ]
+    },
+    "install_plan_core": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "apply_rows",
+        "prepare_receipt_digest",
+        "topology_pre_digest",
+        "hba_delta_digest",
+        "pre_state_digest",
+        "source_head",
+        "target_host",
+        "created_at"
+      ],
+      "properties": {
+        "schema_version": {"const": "s2_4_install_plan_core_v1"},
+        "apply_rows": {
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["component_effect_class", "component_intent_digest"],
+            "properties": {
+              "component_effect_class": {"$ref": "#/$defs/component_effect_class"},
+              "component_intent_digest": {"$ref": "#/$defs/digest"}
+            }
+          }
+        },
+        "prepare_receipt_digest": {"$ref": "#/$defs/digest"},
+        "topology_pre_digest": {"$ref": "#/$defs/digest"},
+        "hba_delta_digest": {"$ref": "#/$defs/digest"},
+        "pre_state_digest": {"$ref": "#/$defs/digest"},
+        "source_head": {"$ref": "#/$defs/git_sha"},
+        "target_host": {"type": "string", "minLength": 1},
+        "created_at": {"$ref": "#/$defs/timestamp"}
+      }
+    }
+  }
+}

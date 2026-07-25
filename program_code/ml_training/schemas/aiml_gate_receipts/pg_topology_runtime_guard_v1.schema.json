@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/pg_topology_runtime_guard_v1.schema.json",
+  "title": "pg_topology_runtime_guard_v1",
+  "description": "Root-owned runtime guard contract that binds the immutable scanner-read-only learning.alr_runtime_cluster_identity row to the exact runtime DB identity (§8.2). It binds that row digest, the plan/topology digest, the independently observed system_identifier / database OID / server major version, the fixed runtime endpoint (host/port/dbname property-only per §9-G, never a frozen exact unit/identity name) and a host-generated non-secret binding nonce. The guard file is rendered by the ENGINE_SCANNER host actor from signed plan fields, is group-readable mode 0440 at runtime and is included in the unit/plan/postcheck identities. self_digest is integrity evidence only.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "guard_path",
+    "cluster_identity_row_digest",
+    "plan_topology_digest",
+    "runtime_endpoint",
+    "system_identifier",
+    "database_oid",
+    "server_major_version",
+    "binding_nonce",
+    "expected_topology_values_digest",
+    "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "pg_topology_runtime_guard_v1"},
+    "guard_path": {"type": "string", "minLength": 1},
+    "cluster_identity_row_digest": {"$ref": "#/$defs/digest"},
+    "plan_topology_digest": {"$ref": "#/$defs/digest"},
+    "runtime_endpoint": {"$ref": "#/$defs/runtime_endpoint"},
+    "system_identifier": {"type": "string", "minLength": 1},
+    "database_oid": {"type": "integer", "minimum": 0},
+    "server_major_version": {"type": "integer", "minimum": 1},
+    "binding_nonce": {"type": "string", "minLength": 1},
+    "expected_topology_values_digest": {"$ref": "#/$defs/digest"},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "runtime_endpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host", "port", "dbname"],
+      "properties": {
+        "host": {"type": "string", "minLength": 1},
+        "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "dbname": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

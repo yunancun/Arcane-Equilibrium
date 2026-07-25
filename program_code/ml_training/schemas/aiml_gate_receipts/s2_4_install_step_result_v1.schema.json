@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2_4_install_step_result_v1.schema.json",
+  "title": "s2_4_install_step_result_v1",
+  "description": "Per-step typed result inside one S2.4 APPLY transaction (§5.2). It records the exact plan_id, the ordered step index (0..5 for the six required typed steps), the bound v2 component-effect class and the current step state from the §5.2 state machine. It carries the pre/post-state digests, the task-owned delta digest, the apply and independent-postcheck evidence digests and the compensation intent/result digests (null until a compensation runs). No secret bytes appear. Contract only: a step result is not a production PASS.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "plan_id",
+    "step_index",
+    "component_effect_class",
+    "state",
+    "pre_state_digest",
+    "post_state_digest",
+    "task_owned_delta_digest",
+    "apply_evidence_digest",
+    "postcheck_evidence_digest",
+    "compensation_intent_digest",
+    "compensation_result_digest",
+    "observed_at",
+    "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2_4_install_step_result_v1"},
+    "plan_id": {"$ref": "#/$defs/plan_id"},
+    "step_index": {"type": "integer", "minimum": 0, "maximum": 5},
+    "component_effect_class": {"$ref": "#/$defs/component_effect_class"},
+    "state": {"$ref": "#/$defs/state"},
+    "pre_state_digest": {"$ref": "#/$defs/digest"},
+    "post_state_digest": {"$ref": "#/$defs/digest"},
+    "task_owned_delta_digest": {"$ref": "#/$defs/digest"},
+    "apply_evidence_digest": {"$ref": "#/$defs/nullable_digest"},
+    "postcheck_evidence_digest": {"$ref": "#/$defs/nullable_digest"},
+    "compensation_intent_digest": {"$ref": "#/$defs/nullable_digest"},
+    "compensation_result_digest": {"$ref": "#/$defs/nullable_digest"},
+    "observed_at": {"$ref": "#/$defs/timestamp"},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "nullable_digest": {
+      "anyOf": [
+        {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        {"type": "null"}
+      ]
+    },
+    "timestamp": {"type": "string", "format": "date-time"},
+    "plan_id": {"type": "string", "pattern": "^s2-4-[0-9a-f]{64}$"},
+    "component_effect_class": {
+      "enum": [
+        "HOST_IDENTITY_INSTALL",
+        "PG_ROLE_ACL_MIGRATION",
+        "CREDENTIAL_INSTALL",
+        "LEARNING_RUNTIME",
+        "ENGINE_SCANNER"
+      ]
+    },
+    "state": {
+      "enum": [
+        "NOT_STARTED",
+        "APPLYING",
+        "APPLIED",
+        "VERIFYING",
+        "VERIFIED",
+        "COMPENSATING",
+        "COMPENSATED",
+        "FAILED",
+        "RECOVERY_REQUIRED"
+      ]
+    }
+  }
+}

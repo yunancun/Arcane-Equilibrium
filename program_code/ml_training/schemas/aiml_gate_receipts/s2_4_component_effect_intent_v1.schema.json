@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2_4_component_effect_intent_v1.schema.json",
+  "title": "s2_4_component_effect_intent_v1",
+  "description": "Typed intent for one of the five S2.4 APPLY component-effect rows (§4 v2 row ABI). component_effect_class selects HOST_IDENTITY_INSTALL / PG_ROLE_ACL_MIGRATION / CREDENTIAL_INSTALL / LEARNING_RUNTIME / ENGINE_SCANNER. The three fields common to every row (plan reference by install_plan_digest, expected pre_state_digest, expiry) sit at the top level; the class-specific typed intent fields sit inside required_intent_fields and are bound per class by the allOf conditionals (transliterated from the §4 row ABI table). All references are digests or non-secret names (credential_name is a slot name, never a secret value). Contract only: no runtime/production PASS is asserted. NOTE: the exact required_intent_fields tokens per class are pinned and cross-checked against §4 prose in CP3 (PINNED_COMPONENT_MATRIX_V2_DIGEST); this schema encodes their closed shape.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "component_effect_class",
+    "install_plan_digest",
+    "pre_state_digest",
+    "required_intent_fields",
+    "expires_at",
+    "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2_4_component_effect_intent_v1"},
+    "component_effect_class": {"$ref": "#/$defs/component_effect_class"},
+    "install_plan_digest": {"$ref": "#/$defs/digest"},
+    "pre_state_digest": {"$ref": "#/$defs/digest"},
+    "required_intent_fields": {"$ref": "#/$defs/required_intent_fields"},
+    "expires_at": {"$ref": "#/$defs/timestamp"},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"component_effect_class": {"const": "HOST_IDENTITY_INSTALL"}}},
+      "then": {
+        "properties": {
+          "required_intent_fields": {"required": ["uid_gid_directory_manifest_digest"]}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"component_effect_class": {"const": "PG_ROLE_ACL_MIGRATION"}}},
+      "then": {
+        "properties": {
+          "required_intent_fields": {
+            "required": [
+              "topology_attestation_digest",
+              "acl_manifest_digest",
+              "pg_migration_permit_digest",
+              "admin_handle_descriptor_digest"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"component_effect_class": {"const": "CREDENTIAL_INSTALL"}}},
+      "then": {
+        "properties": {
+          "required_intent_fields": {
+            "required": ["credential_name", "encrypted_blob_digest", "host_identity_digest"]
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"component_effect_class": {"const": "LEARNING_RUNTIME"}}},
+      "then": {
+        "properties": {
+          "required_intent_fields": {
+            "required": ["prepare_effect_receipt_digest", "base_app_launch_target_manifest_digest"]
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"component_effect_class": {"const": "ENGINE_SCANNER"}}},
+      "then": {
+        "properties": {
+          "required_intent_fields": {
+            "required": ["unit_policy_evidence_manifest_digest", "inactive_post_state_digest"]
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "component_effect_class": {
+      "enum": [
+        "HOST_IDENTITY_INSTALL",
+        "PG_ROLE_ACL_MIGRATION",
+        "CREDENTIAL_INSTALL",
+        "LEARNING_RUNTIME",
+        "ENGINE_SCANNER"
+      ]
+    },
+    "required_intent_fields": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "uid_gid_directory_manifest_digest": {"$ref": "#/$defs/digest"},
+        "topology_attestation_digest": {"$ref": "#/$defs/digest"},
+        "acl_manifest_digest": {"$ref": "#/$defs/digest"},
+        "pg_migration_permit_digest": {"$ref": "#/$defs/digest"},
+        "admin_handle_descriptor_digest": {"$ref": "#/$defs/digest"},
+        "credential_name": {"type": "string", "minLength": 1, "maxLength": 128},
+        "encrypted_blob_digest": {"$ref": "#/$defs/digest"},
+        "host_identity_digest": {"$ref": "#/$defs/digest"},
+        "prepare_effect_receipt_digest": {"$ref": "#/$defs/digest"},
+        "base_app_launch_target_manifest_digest": {"$ref": "#/$defs/digest"},
+        "unit_policy_evidence_manifest_digest": {"$ref": "#/$defs/digest"},
+        "inactive_post_state_digest": {"$ref": "#/$defs/digest"}
+      }
+    }
+  }
+}

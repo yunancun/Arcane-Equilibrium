@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2_4_operator_authorization_v1.schema.json",
+  "title": "s2_4_operator_authorization_v1",
+  "description": "Closed SSHSIG operator-authorization artifact for S2.4 (§9.1). Four domain-separated profiles reuse the one reviewed Ed25519 trust root: capability-probe, install-prepare, install-aggregate and pg-migration. profile_identity and signature_namespace are exact-paired by the allOf conditionals. authorization_id is derived from the profile's unsigned ordered payload BEFORE the SSHSIG is attached; payload_fields records that exact ordered payload field list. sshsig_armored is a strict ASCII-armored SSH signature (at most 16 KiB) verified out of band with ssh-keygen -Y verify; this schema never carries the private key or a caller-provided public key/fingerprint. self_digest is integrity evidence, not producer authenticity. NOTE: the S2_4_AUTHORIZATION_PROFILES constant, exact per-profile payload tokens and TTL/skew validation branch are CP4; this schema encodes only the closed structure and identity/namespace pairing.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "profile_identity",
+    "signature_namespace",
+    "authorization_id",
+    "payload_fields",
+    "issued_at",
+    "expires_at",
+    "sshsig_armored",
+    "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2_4_operator_authorization_v1"},
+    "profile_identity": {"$ref": "#/$defs/profile_identity"},
+    "signature_namespace": {"$ref": "#/$defs/signature_namespace"},
+    "authorization_id": {"$ref": "#/$defs/digest"},
+    "payload_fields": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "issued_at": {"$ref": "#/$defs/timestamp"},
+    "expires_at": {"$ref": "#/$defs/timestamp"},
+    "sshsig_armored": {"$ref": "#/$defs/sshsig_armored"},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"profile_identity": {"const": "aiml-s2-capability-probe-operator-v1"}}},
+      "then": {"properties": {"signature_namespace": {"const": "arcane-equilibrium-aiml-s2-capability-probe"}}}
+    },
+    {
+      "if": {"properties": {"profile_identity": {"const": "aiml-s2-install-prepare-operator-v1"}}},
+      "then": {"properties": {"signature_namespace": {"const": "arcane-equilibrium-aiml-s2-install-prepare"}}}
+    },
+    {
+      "if": {"properties": {"profile_identity": {"const": "aiml-s2-install-operator-v1"}}},
+      "then": {"properties": {"signature_namespace": {"const": "arcane-equilibrium-aiml-s2-install"}}}
+    },
+    {
+      "if": {"properties": {"profile_identity": {"const": "aiml-s2-pg-migration-operator-v1"}}},
+      "then": {"properties": {"signature_namespace": {"const": "arcane-equilibrium-aiml-s2-pg-migration"}}}
+    }
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "profile_identity": {
+      "enum": [
+        "aiml-s2-capability-probe-operator-v1",
+        "aiml-s2-install-prepare-operator-v1",
+        "aiml-s2-install-operator-v1",
+        "aiml-s2-pg-migration-operator-v1"
+      ]
+    },
+    "signature_namespace": {
+      "enum": [
+        "arcane-equilibrium-aiml-s2-capability-probe",
+        "arcane-equilibrium-aiml-s2-install-prepare",
+        "arcane-equilibrium-aiml-s2-install",
+        "arcane-equilibrium-aiml-s2-pg-migration"
+      ]
+    },
+    "sshsig_armored": {
+      "type": "string",
+      "maxLength": 16384,
+      "pattern": "^-----BEGIN SSH SIGNATURE-----\\n[A-Za-z0-9+/=\\n]+-----END SSH SIGNATURE-----\\n?$"
+    }
+  }
+}

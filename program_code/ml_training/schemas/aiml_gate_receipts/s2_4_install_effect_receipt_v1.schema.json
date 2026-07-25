@@ -1,0 +1,168 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2_4_install_effect_receipt_v1.schema.json",
+  "title": "s2_4_install_effect_receipt_v1",
+  "description": "Immutable terminal receipt for one S2.4 APPLY transaction (§3/§5.1/§6/§10.2). It binds the exact plan_id/core digest and idempotency key, the consumed aggregate + PG-migration authorization identities, the two scoped terminal capability-probe receipt digests (PREPARE_SANDBOX + INSTALLED_UNIT), the prepare result + prepare postcheck digests, the five ordered APPLY-row result + independent-postcheck digests, one reverse compensation-chain digest and the terminal APPLY journal digest. status uses the §10.2 ABI: only the Linux production driver may emit APPLIED_INACTIVE, and then every required subject is observed and the unit is loaded/disabled/inactive with the service never enabled/active/started by S2.4. production_authority_flags keep the nine authorities false and production_apply_performed/running_attested false: installing a disabled/inactive unit is not a production/trading apply and is not running-attested. It never rewrites the S2.3 false fields. self_digest is integrity evidence only.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "plan_id",
+    "plan_core_digest",
+    "idempotency_key",
+    "status",
+    "aggregate_authorization_id",
+    "aggregate_authorization_digest",
+    "pg_authorization_id",
+    "pg_authorization_digest",
+    "prepare_sandbox_probe_receipt_digest",
+    "installed_unit_probe_receipt_digest",
+    "prepare_result_digest",
+    "prepare_postcheck_digest",
+    "apply_row_results",
+    "reverse_compensation_chain_digest",
+    "journal_digest",
+    "unit_state",
+    "service_flags",
+    "evidence_class",
+    "production_authority_flags",
+    "source_head",
+    "target_host",
+    "trusted_host_time",
+    "observed_at",
+    "expires_at",
+    "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2_4_install_effect_receipt_v1"},
+    "plan_id": {"$ref": "#/$defs/plan_id"},
+    "plan_core_digest": {"$ref": "#/$defs/digest"},
+    "idempotency_key": {"$ref": "#/$defs/plan_id"},
+    "status": {"$ref": "#/$defs/status"},
+    "aggregate_authorization_id": {"$ref": "#/$defs/digest"},
+    "aggregate_authorization_digest": {"$ref": "#/$defs/digest"},
+    "pg_authorization_id": {"$ref": "#/$defs/digest"},
+    "pg_authorization_digest": {"$ref": "#/$defs/digest"},
+    "prepare_sandbox_probe_receipt_digest": {"$ref": "#/$defs/digest"},
+    "installed_unit_probe_receipt_digest": {"$ref": "#/$defs/digest"},
+    "prepare_result_digest": {"$ref": "#/$defs/digest"},
+    "prepare_postcheck_digest": {"$ref": "#/$defs/digest"},
+    "apply_row_results": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": {"$ref": "#/$defs/apply_row_result"}
+    },
+    "reverse_compensation_chain_digest": {"$ref": "#/$defs/digest"},
+    "journal_digest": {"$ref": "#/$defs/digest"},
+    "unit_state": {"$ref": "#/$defs/unit_state"},
+    "service_flags": {"$ref": "#/$defs/service_flags"},
+    "evidence_class": {"enum": ["PLATFORM_ATTESTED", "PLATFORM_OR_EXTERNAL_ATTESTED", "STRUCTURAL_ONLY"]},
+    "production_authority_flags": {"$ref": "#/$defs/production_authority_flags"},
+    "source_head": {"$ref": "#/$defs/git_sha"},
+    "target_host": {"type": "string", "minLength": 1},
+    "trusted_host_time": {"$ref": "#/$defs/timestamp"},
+    "observed_at": {"$ref": "#/$defs/timestamp"},
+    "expires_at": {"$ref": "#/$defs/timestamp"},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "APPLIED_INACTIVE"}}},
+      "then": {
+        "properties": {
+          "unit_state": {
+            "properties": {
+              "loaded": {"const": true},
+              "disabled": {"const": true},
+              "inactive": {"const": true}
+            }
+          },
+          "production_authority_flags": {
+            "properties": {"running_attested": {"const": false}}
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "git_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "plan_id": {"type": "string", "pattern": "^s2-4-[0-9a-f]{64}$"},
+    "status": {
+      "enum": [
+        "APPLIED_INACTIVE",
+        "SOURCE_SIMULATION_PASS",
+        "EXTERNAL_VERIFICATION_PENDING",
+        "PROGRAM_DAG_AMENDMENT_REQUIRED",
+        "S2_0_PRODUCTION_DRIVER_REQUIRED",
+        "PG_TOPOLOGY_UNPROVEN",
+        "WP3_SYSTEM_UNIT_ALIGNMENT_REQUIRED",
+        "ENGINE_SCANNER_PRIVILEGE_SPLIT_REQUIRED",
+        "OBSERVER_PREREQUISITE_MISSING",
+        "AUTHORIZATION_REJECTED",
+        "PREPARED_BUNDLE_INVALID",
+        "PRECHECK_FAILED",
+        "PRESTATE_MISMATCH",
+        "PREEXISTING_UNOWNED_STATE",
+        "INSTALL_LOCK_HELD",
+        "JOURNAL_CORRUPT_RECOVERY_REQUIRED",
+        "RECOVERY_REQUIRED",
+        "HOST_CREDENTIAL_CAPABILITY_UNSATISFIED",
+        "HOST_NETWORK_SANDBOX_CAPABILITY_UNSATISFIED",
+        "CANDIDATE_POLICY_CONFIGURATION_REQUIRED",
+        "POSTCHECK_FAILED_ROLLED_BACK"
+      ]
+    },
+    "component_effect_class": {
+      "enum": [
+        "HOST_IDENTITY_INSTALL",
+        "PG_ROLE_ACL_MIGRATION",
+        "CREDENTIAL_INSTALL",
+        "LEARNING_RUNTIME",
+        "ENGINE_SCANNER"
+      ]
+    },
+    "apply_row_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["component_effect_class", "result_digest", "postcheck_digest"],
+      "properties": {
+        "component_effect_class": {"$ref": "#/$defs/component_effect_class"},
+        "result_digest": {"$ref": "#/$defs/digest"},
+        "postcheck_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "unit_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["loaded", "disabled", "inactive"],
+      "properties": {
+        "loaded": {"type": "boolean"},
+        "disabled": {"type": "boolean"},
+        "inactive": {"type": "boolean"}
+      }
+    },
+    "service_flags": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["service_enabled", "service_active", "service_started_by_s2_4"],
+      "properties": {
+        "service_enabled": {"const": false},
+        "service_active": {"const": false},
+        "service_started_by_s2_4": {"const": false}
+      }
+    },
+    "production_authority_flags": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["nine_authorities_false", "production_apply_performed", "running_attested"],
+      "properties": {
+        "nine_authorities_false": {"const": true},
+        "production_apply_performed": {"const": false},
+        "running_attested": {"const": false}
+      }
+    }
+  }
+}

@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2_4_component_effect_rollback_v1.schema.json",
+  "title": "s2_4_component_effect_rollback_v1",
+  "description": "Per-row rollback contract for one of the five S2.4 APPLY component-effect rows (§4 recovery contract, §5.4). Its signed digest is authority only for the ownership-aware compensation of this exact row: remove only a task-owned delta whose pre-state proved absent, or restore exact non-secret captured prior bytes; restore an existing role/directory exactly rather than dropping it; never drop aiml_observer_ro and never read/serialize/reconstruct a pre-existing secret. status==COMPENSATED_EXACT requires ownership-aware exact pre-state restoration with a pre/post state digest pair.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "status",
+    "component_effect_class",
+    "install_plan_digest",
+    "pre_state_digest",
+    "post_state_digest",
+    "ownership_aware",
+    "exact_pre_state_restored",
+    "no_secret_reconstructed",
+    "observed_at",
+    "expires_at",
+    "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2_4_component_effect_rollback_v1"},
+    "status": {"enum": ["COMPENSATED_EXACT", "RECOVERY_REQUIRED", "NOT_COMPENSATED"]},
+    "component_effect_class": {"$ref": "#/$defs/component_effect_class"},
+    "install_plan_digest": {"$ref": "#/$defs/digest"},
+    "pre_state_digest": {"$ref": "#/$defs/digest"},
+    "post_state_digest": {"$ref": "#/$defs/digest"},
+    "ownership_aware": {"type": "boolean"},
+    "exact_pre_state_restored": {"type": "boolean"},
+    "no_secret_reconstructed": {"const": true},
+    "observed_at": {"$ref": "#/$defs/timestamp"},
+    "expires_at": {"$ref": "#/$defs/timestamp"},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "COMPENSATED_EXACT"}}},
+      "then": {
+        "properties": {
+          "ownership_aware": {"const": true},
+          "exact_pre_state_restored": {"const": true}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "component_effect_class": {
+      "enum": [
+        "HOST_IDENTITY_INSTALL",
+        "PG_ROLE_ACL_MIGRATION",
+        "CREDENTIAL_INSTALL",
+        "LEARNING_RUNTIME",
+        "ENGINE_SCANNER"
+      ]
+    }
+  }
+}

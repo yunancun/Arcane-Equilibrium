@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2_4_component_effect_result_v1.schema.json",
+  "title": "s2_4_component_effect_result_v1",
+  "description": "Typed result for one of the five S2.4 APPLY component-effect rows (§4 v2 row ABI, §5.3 pre-existing-state matrix). It binds the component_effect_class, the parent install_plan_digest, the typed row status (SATISFIED / NOOP_VERIFIED / PREEXISTING_UNOWNED_STATE / PRESTATE_MISMATCH / RECOVERY_REQUIRED / FAILED), the applied-state/postcheck/rollback digests and the pre/post-state digests. production_authority_flags keep the nine authorities false and production_apply_performed/running_attested false. self_digest is integrity evidence only. Contract only: a row result is not a production PASS.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "component_effect_class",
+    "install_plan_digest",
+    "status",
+    "applied_state_digest",
+    "postcheck_digest",
+    "rollback_digest",
+    "pre_state_digest",
+    "post_state_digest",
+    "evidence_class",
+    "production_authority_flags",
+    "observed_at",
+    "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2_4_component_effect_result_v1"},
+    "component_effect_class": {"$ref": "#/$defs/component_effect_class"},
+    "install_plan_digest": {"$ref": "#/$defs/digest"},
+    "status": {
+      "enum": [
+        "SATISFIED",
+        "NOOP_VERIFIED",
+        "PREEXISTING_UNOWNED_STATE",
+        "PRESTATE_MISMATCH",
+        "RECOVERY_REQUIRED",
+        "FAILED"
+      ]
+    },
+    "applied_state_digest": {"$ref": "#/$defs/digest"},
+    "postcheck_digest": {"$ref": "#/$defs/digest"},
+    "rollback_digest": {"$ref": "#/$defs/digest"},
+    "pre_state_digest": {"$ref": "#/$defs/digest"},
+    "post_state_digest": {"$ref": "#/$defs/digest"},
+    "evidence_class": {"enum": ["PLATFORM_ATTESTED", "PLATFORM_OR_EXTERNAL_ATTESTED", "STRUCTURAL_ONLY"]},
+    "production_authority_flags": {"$ref": "#/$defs/production_authority_flags"},
+    "observed_at": {"$ref": "#/$defs/timestamp"},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "component_effect_class": {
+      "enum": [
+        "HOST_IDENTITY_INSTALL",
+        "PG_ROLE_ACL_MIGRATION",
+        "CREDENTIAL_INSTALL",
+        "LEARNING_RUNTIME",
+        "ENGINE_SCANNER"
+      ]
+    },
+    "production_authority_flags": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["nine_authorities_false", "production_apply_performed", "running_attested"],
+      "properties": {
+        "nine_authorities_false": {"const": true},
+        "production_apply_performed": {"const": false},
+        "running_attested": {"const": false}
+      }
+    }
+  }
+}

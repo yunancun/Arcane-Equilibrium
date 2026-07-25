@@ -2994,3 +2994,610 @@ def test_cp2a_frozen_pins_unchanged_after_schema_files_additions() -> None:
         "sha256:01d3062c79725b32b7c1468d02013a0df28dfeba1cf29d513cbf3bd6b4143c64"
     )
     assert len(PROGRAM_SCHEMA_PATHS) == 7
+
+
+# ── S2.4 · WP4 · W1 · CP2b(install/APPLY + component-effect + authorization + PG-topology 契約)──
+# 這 16 份 closed schema 皆屬「契約」:round-trip 乾淨、additionalProperties 拒外鍵、unsigned
+# aggregate core 排除 plan_id/idempotency_key/auth/self_digest、const-false 生產旗標與 allOf 有牙、
+# install-plan 前置拒跨面、operator authorization 四 profile↔namespace 綁定、pg-topology 不自證判定。
+_CP2B_D = "sha256:" + "a" * 64
+_CP2B_D2 = "sha256:" + "b" * 64
+_CP2B_GIT = "0" * 40
+_CP2B_TS = "2026-07-24T00:00:00+00:00"
+_CP2B_PLAN_HEX = "e" * 64
+_CP2B_PLAN_ID = "s2-4-" + _CP2B_PLAN_HEX
+_CP2B_CLASSES = (
+    "HOST_IDENTITY_INSTALL",
+    "PG_ROLE_ACL_MIGRATION",
+    "CREDENTIAL_INSTALL",
+    "LEARNING_RUNTIME",
+    "ENGINE_SCANNER",
+)
+_CP2B_SSHSIG = "-----BEGIN SSH SIGNATURE-----\n" + "AAAA" * 12 + "\n-----END SSH SIGNATURE-----\n"
+
+
+def _cp2b_install_plan_core() -> dict:
+    return {
+        "schema_version": "s2_4_install_plan_core_v1",
+        "apply_rows": [
+            {"component_effect_class": c, "component_intent_digest": _CP2B_D}
+            for c in _CP2B_CLASSES
+        ],
+        "prepare_receipt_digest": _CP2B_D,
+        "topology_pre_digest": _CP2B_D2,
+        "hba_delta_digest": _CP2B_D,
+        "pre_state_digest": _CP2B_D2,
+        "source_head": _CP2B_GIT,
+        "target_host": "trade-core",
+        "created_at": _CP2B_TS,
+    }
+
+
+def _cp2b_fixtures() -> dict:
+    core = _cp2b_install_plan_core()
+    core_digest = canonical_digest(core)
+
+    artifacts: dict[str, dict] = {}
+    artifacts["s2_4_install_plan_core_v1"] = core
+
+    artifacts["s2_4_install_plan_v1"] = {
+        "schema_version": "s2_4_install_plan_v1",
+        "route_class": "s2_4_install_plan",
+        "core": core,
+        "core_digest": core_digest,
+        "plan_id": _CP2B_PLAN_ID,
+        "idempotency_key": _CP2B_PLAN_ID,
+        "route_surface": {
+            "aggregate_coordinator": True,
+            "runtime_effect": True,
+            "service": "system_unit_install_inactive",
+            "pg": True,
+            "migration": True,
+            "secret": True,
+            "risk": "critical",
+            "runtime_claim": True,
+            "apply_rows": list(_CP2B_CLASSES),
+        },
+        "forbidden_surfaces": {
+            "prepare_fetch": False,
+            "prepare_build": False,
+            "arbitrary_shell": False,
+            "arbitrary_sql": False,
+            "arbitrary_path": False,
+            "broker_or_order": False,
+        },
+        "required_authorization": {
+            "aggregate": {
+                "profile_identity": "aiml-s2-install-operator-v1",
+                "signature_namespace": "arcane-equilibrium-aiml-s2-install",
+                "max_ttl_seconds": 900,
+            },
+            "pg_migration": {
+                "profile_identity": "aiml-s2-pg-migration-operator-v1",
+                "signature_namespace": "arcane-equilibrium-aiml-s2-pg-migration",
+                "max_ttl_seconds": 900,
+            },
+        },
+        "expires_at": _CP2B_TS,
+        "self_digest": _CP2B_D,
+    }
+
+    artifacts["s2_4_install_effect_receipt_v1"] = {
+        "schema_version": "s2_4_install_effect_receipt_v1",
+        "plan_id": _CP2B_PLAN_ID,
+        "plan_core_digest": core_digest,
+        "idempotency_key": _CP2B_PLAN_ID,
+        "status": "APPLIED_INACTIVE",
+        "aggregate_authorization_id": _CP2B_D,
+        "aggregate_authorization_digest": _CP2B_D2,
+        "pg_authorization_id": _CP2B_D,
+        "pg_authorization_digest": _CP2B_D2,
+        "prepare_sandbox_probe_receipt_digest": _CP2B_D,
+        "installed_unit_probe_receipt_digest": _CP2B_D2,
+        "prepare_result_digest": _CP2B_D,
+        "prepare_postcheck_digest": _CP2B_D2,
+        "apply_row_results": [
+            {"component_effect_class": c, "result_digest": _CP2B_D, "postcheck_digest": _CP2B_D2}
+            for c in _CP2B_CLASSES
+        ],
+        "reverse_compensation_chain_digest": _CP2B_D,
+        "journal_digest": _CP2B_D2,
+        "unit_state": {"loaded": True, "disabled": True, "inactive": True},
+        "service_flags": {
+            "service_enabled": False,
+            "service_active": False,
+            "service_started_by_s2_4": False,
+        },
+        "evidence_class": "PLATFORM_ATTESTED",
+        "production_authority_flags": {
+            "nine_authorities_false": True,
+            "production_apply_performed": False,
+            "running_attested": False,
+        },
+        "source_head": _CP2B_GIT,
+        "target_host": "trade-core",
+        "trusted_host_time": _CP2B_TS,
+        "observed_at": _CP2B_TS,
+        "expires_at": _CP2B_TS,
+        "self_digest": _CP2B_D,
+    }
+
+    artifacts["s2_4_install_journal_v1"] = {
+        "schema_version": "s2_4_install_journal_v1",
+        "plan_id": _CP2B_PLAN_ID,
+        "plan_core_digest": core_digest,
+        "idempotency_key": _CP2B_PLAN_ID,
+        "expected_pre_state_digest": _CP2B_D,
+        "aggregate_rollback_digest": _CP2B_D2,
+        "entries": [
+            {
+                "seq": 0,
+                "step_index": 0,
+                "state": "APPLYING",
+                "pre_state_digest": _CP2B_D,
+                "post_state_digest": _CP2B_D2,
+                "fsynced": True,
+                "recorded_at": _CP2B_TS,
+            }
+        ],
+        "terminal": True,
+        "journal_integrity": {
+            "applying_fsynced_before_effect": True,
+            "same_filesystem_atomic_rename": True,
+            "file_fsynced": True,
+            "parent_dir_fsynced": True,
+        },
+        "outer_checksum": _CP2B_D,
+        "self_digest": _CP2B_D2,
+    }
+
+    artifacts["s2_4_install_postcheck_v1"] = {
+        "schema_version": "s2_4_install_postcheck_v1",
+        "status": "PASS",
+        "plan_id": _CP2B_PLAN_ID,
+        "plan_core_digest": core_digest,
+        "verifier_node": "ops-verifier",
+        "applier_node": "install-applier",
+        "probe_lineage_verified": True,
+        "prepare_lineage_verified": True,
+        "plan_lineage_verified": True,
+        "idempotency_verified": True,
+        "pre_state_lineage_verified": True,
+        "all_apply_rows_satisfied": True,
+        "verifier_capture_digest": _CP2B_D,
+        "observed_at": _CP2B_TS,
+        "expires_at": _CP2B_TS,
+        "self_digest": _CP2B_D,
+    }
+
+    artifacts["s2_4_install_rollback_v1"] = {
+        "schema_version": "s2_4_install_rollback_v1",
+        "status": "COMPENSATED_EXACT",
+        "plan_id": _CP2B_PLAN_ID,
+        "plan_core_digest": core_digest,
+        "pre_state_digest": _CP2B_D,
+        "post_state_digest": _CP2B_D2,
+        "reverse_ops": [
+            {"component_effect_class": c, "per_row_rollback_digest": _CP2B_D, "ownership_verified": True}
+            for c in reversed(_CP2B_CLASSES)
+        ],
+        "ownership_aware": True,
+        "exact_pre_state_restored": True,
+        "daemon_reload_reasserted": True,
+        "hba_reload_reasserted": True,
+        "observer_role_preserved": True,
+        "no_secret_reconstructed": True,
+        "observed_at": _CP2B_TS,
+        "expires_at": _CP2B_TS,
+        "self_digest": _CP2B_D,
+    }
+
+    artifacts["s2_4_install_step_result_v1"] = {
+        "schema_version": "s2_4_install_step_result_v1",
+        "plan_id": _CP2B_PLAN_ID,
+        "step_index": 0,
+        "component_effect_class": "HOST_IDENTITY_INSTALL",
+        "state": "APPLIED",
+        "pre_state_digest": _CP2B_D,
+        "post_state_digest": _CP2B_D2,
+        "task_owned_delta_digest": _CP2B_D,
+        "apply_evidence_digest": _CP2B_D2,
+        "postcheck_evidence_digest": _CP2B_D,
+        "compensation_intent_digest": None,
+        "compensation_result_digest": None,
+        "observed_at": _CP2B_TS,
+        "self_digest": _CP2B_D,
+    }
+
+    artifacts["s2_4_component_effect_intent_v1"] = {
+        "schema_version": "s2_4_component_effect_intent_v1",
+        "component_effect_class": "PG_ROLE_ACL_MIGRATION",
+        "install_plan_digest": _CP2B_D,
+        "pre_state_digest": _CP2B_D2,
+        "required_intent_fields": {
+            "topology_attestation_digest": _CP2B_D,
+            "acl_manifest_digest": _CP2B_D2,
+            "pg_migration_permit_digest": _CP2B_D,
+            "admin_handle_descriptor_digest": _CP2B_D2,
+        },
+        "expires_at": _CP2B_TS,
+        "self_digest": _CP2B_D,
+    }
+
+    artifacts["s2_4_component_effect_result_v1"] = {
+        "schema_version": "s2_4_component_effect_result_v1",
+        "component_effect_class": "CREDENTIAL_INSTALL",
+        "install_plan_digest": _CP2B_D,
+        "status": "SATISFIED",
+        "applied_state_digest": _CP2B_D,
+        "postcheck_digest": _CP2B_D2,
+        "rollback_digest": _CP2B_D,
+        "pre_state_digest": _CP2B_D2,
+        "post_state_digest": _CP2B_D,
+        "evidence_class": "PLATFORM_ATTESTED",
+        "production_authority_flags": {
+            "nine_authorities_false": True,
+            "production_apply_performed": False,
+            "running_attested": False,
+        },
+        "observed_at": _CP2B_TS,
+        "self_digest": _CP2B_D,
+    }
+
+    artifacts["s2_4_component_effect_postcheck_v1"] = {
+        "schema_version": "s2_4_component_effect_postcheck_v1",
+        "status": "PASS",
+        "component_effect_class": "ENGINE_SCANNER",
+        "install_plan_digest": _CP2B_D,
+        "verifier_node": "ops-verifier",
+        "applier_node": "install-applier",
+        "observed_subject_digest": _CP2B_D,
+        "applied_state_verified": True,
+        "pre_state_lineage_verified": True,
+        "verifier_capture_digest": _CP2B_D2,
+        "observed_at": _CP2B_TS,
+        "expires_at": _CP2B_TS,
+        "self_digest": _CP2B_D,
+    }
+
+    artifacts["s2_4_component_effect_rollback_v1"] = {
+        "schema_version": "s2_4_component_effect_rollback_v1",
+        "status": "COMPENSATED_EXACT",
+        "component_effect_class": "LEARNING_RUNTIME",
+        "install_plan_digest": _CP2B_D,
+        "pre_state_digest": _CP2B_D,
+        "post_state_digest": _CP2B_D2,
+        "ownership_aware": True,
+        "exact_pre_state_restored": True,
+        "no_secret_reconstructed": True,
+        "observed_at": _CP2B_TS,
+        "expires_at": _CP2B_TS,
+        "self_digest": _CP2B_D,
+    }
+
+    artifacts["s2_4_operator_authorization_v1"] = {
+        "schema_version": "s2_4_operator_authorization_v1",
+        "profile_identity": "aiml-s2-install-operator-v1",
+        "signature_namespace": "arcane-equilibrium-aiml-s2-install",
+        "authorization_id": _CP2B_D,
+        "payload_fields": ["domain", "authorization_id", "plan_core_digest", "plan_id"],
+        "issued_at": _CP2B_TS,
+        "expires_at": _CP2B_TS,
+        "sshsig_armored": _CP2B_SSHSIG,
+        "self_digest": _CP2B_D,
+    }
+
+    artifacts["s2_4_authorization_replay_ledger_v1"] = {
+        "schema_version": "s2_4_authorization_replay_ledger_v1",
+        "ledger_path": "/var/lib/arcane-equilibrium/aiml/install/s2_4/authorization-replay-ledger.json",
+        "entries": [
+            {
+                "seq": 0,
+                "prev_entry_digest": None,
+                "authorization_id": _CP2B_D,
+                "authorization_digest": _CP2B_D2,
+                "profile_identity": "aiml-s2-install-operator-v1",
+                "consumed_at": _CP2B_TS,
+                "entry_digest": _CP2B_D,
+                "fsynced": True,
+            }
+        ],
+        "append_only": True,
+        "self_digest": _CP2B_D,
+    }
+
+    artifacts["s2_4_pg_hba_delta_v1"] = {
+        "schema_version": "s2_4_pg_hba_delta_v1",
+        "plan_id": _CP2B_PLAN_ID,
+        "plan_core_digest": core_digest,
+        "cluster_identity_ref": _CP2B_D,
+        "pre_hba_digest": _CP2B_D,
+        "delta": {
+            "operation": "ADD_ROW",
+            "normalized_row": "host trading_ai aiml_engine_scanner 127.0.0.1/32 scram-sha-256",
+            "insertion_anchor": "after:local all all",
+        },
+        "post_hba_digest": _CP2B_D2,
+        "effective_rule": {
+            "source": "127.0.0.1/32",
+            "database": "trading_ai",
+            "user": "aiml_engine_scanner",
+            "method": "scram-sha-256",
+        },
+        "reload_operation": "pg_hba_reload",
+        "rollback_projection_digest": _CP2B_D,
+        "observed_at": _CP2B_TS,
+        "expires_at": _CP2B_TS,
+        "self_digest": _CP2B_D,
+    }
+
+    artifacts["pg_topology_attestation_v1"] = {
+        "schema_version": "pg_topology_attestation_v1",
+        "target_host": "trade-core",
+        "source_head": _CP2B_GIT,
+        "topology_status": "PG_TOPOLOGY_EVIDENCE_CAPTURED",
+        "derived_verdict": None,
+        "runtime_listener": {
+            "socket_inode": 123,
+            "owning_pid": 10,
+            "owning_uid": 0,
+            "executable_digest": _CP2B_D,
+            "cgroup": "/system.slice/postgresql.service",
+            "endpoint": "127.0.0.1:5432",
+        },
+        "proxy_hops": [],
+        "admin_endpoint": {"endpoint_class": "attested_local_socket", "handle_class": "local_admin_handle"},
+        "cluster_identity": {
+            "system_identifier": "7000000000000000000",
+            "server_version": "16.2",
+            "database_oid": 16400,
+            "postmaster_identity": "postmaster-pid-9",
+            "reload_operation_id": "reload-op-1",
+        },
+        "file_identities": {
+            "data_dir": {"device": 66306, "inode": 1, "path": "/var/lib/pgsql/16/data", "digest": _CP2B_D},
+            "config_file": {"device": 66306, "inode": 2, "path": "/pg/postgresql.conf", "digest": _CP2B_D2},
+            "hba_file": {"device": 66306, "inode": 3, "path": "/pg/pg_hba.conf", "digest": _CP2B_D},
+        },
+        "effective_hba_rule": {
+            "source": "127.0.0.1/32",
+            "database": "trading_ai",
+            "user": "aiml_engine_scanner",
+            "method": "scram-sha-256",
+        },
+        "end_to_end_reaches_cluster": True,
+        "listener_config_digest": _CP2B_D,
+        "proxy_config_digest": _CP2B_D2,
+        "cluster_identity_digest": _CP2B_D,
+        "observed_at": _CP2B_TS,
+        "expires_at": _CP2B_TS,
+        "self_digest": _CP2B_D,
+    }
+
+    artifacts["pg_topology_runtime_guard_v1"] = {
+        "schema_version": "pg_topology_runtime_guard_v1",
+        "guard_path": "/etc/arcane-equilibrium/aiml/engine-scanner/topology-runtime-guard.json",
+        "cluster_identity_row_digest": _CP2B_D,
+        "plan_topology_digest": _CP2B_D2,
+        "runtime_endpoint": {"host": "127.0.0.1", "port": 5432, "dbname": "trading_ai"},
+        "system_identifier": "7000000000000000000",
+        "database_oid": 16400,
+        "server_major_version": 16,
+        "binding_nonce": "host-nonce-abc123",
+        "expected_topology_values_digest": _CP2B_D,
+        "self_digest": _CP2B_D,
+    }
+
+    for artifact in artifacts.values():
+        if "self_digest" in artifact:
+            artifact["self_digest"] = artifact_self_digest(artifact)
+    return artifacts
+
+
+_CP2B_KEYS = (
+    "s2_4_install_plan_core_v1",
+    "s2_4_install_plan_v1",
+    "s2_4_install_effect_receipt_v1",
+    "s2_4_install_journal_v1",
+    "s2_4_install_postcheck_v1",
+    "s2_4_install_rollback_v1",
+    "s2_4_install_step_result_v1",
+    "s2_4_component_effect_intent_v1",
+    "s2_4_component_effect_result_v1",
+    "s2_4_component_effect_postcheck_v1",
+    "s2_4_component_effect_rollback_v1",
+    "s2_4_operator_authorization_v1",
+    "s2_4_authorization_replay_ledger_v1",
+    "s2_4_pg_hba_delta_v1",
+    "pg_topology_attestation_v1",
+    "pg_topology_runtime_guard_v1",
+)
+_CP2B_CORE_KEYS = ("s2_4_install_plan_core_v1",)
+
+
+def test_cp2b_schema_files_resolve_to_real_files() -> None:
+    for key in _CP2B_KEYS:
+        assert key in SCHEMA_FILES, key
+        assert (SCHEMA_DIR / SCHEMA_FILES[key]).is_file(), key
+    assert len(_CP2B_KEYS) == 16
+    # CP2a(14)+ CP2b(16)加上既有基線 → 中央 SCHEMA_FILES 委派表 = 65。
+    assert len(SCHEMA_FILES) == 65
+
+
+@pytest.mark.parametrize("key", _CP2B_KEYS)
+def test_cp2b_round_trip_validates_clean(key: str) -> None:
+    fixture = _cp2b_fixtures()[key]
+    assert validate_aiml_artifact(fixture) == [], key
+    assert fixture["schema_version"] == key
+
+
+@pytest.mark.parametrize("key", _CP2B_KEYS)
+def test_cp2b_additional_properties_extra_key_rejected(key: str) -> None:
+    fixture = deepcopy(_cp2b_fixtures()[key])
+    fixture["__unexpected_extra__"] = "x"
+    if "self_digest" in fixture:
+        fixture["self_digest"] = artifact_self_digest(fixture)
+    errors = validate_aiml_artifact(fixture)
+    assert any("unexpected property" in e or "__unexpected_extra__" in e for e in errors), (key, errors)
+
+
+@pytest.mark.parametrize("key", _CP2B_KEYS)
+def test_cp2b_self_digest_binds_integrity_when_present(key: str) -> None:
+    fixture = _cp2b_fixtures()[key]
+    if "self_digest" not in fixture:
+        pytest.skip(f"{key} carries no self_digest")
+    assert fixture["self_digest"] == artifact_self_digest(fixture)
+
+
+@pytest.mark.parametrize("key", _CP2B_CORE_KEYS)
+def test_cp2b_unsigned_core_excludes_id_auth_self_digest(key: str) -> None:
+    # §5.1:aggregate core 是被簽名對象,其 digest 導 plan_id 且 idempotency_key=plan_id → core
+    # 不得含 plan_id/idempotency_key/authorization/self_digest(與 probe/prepare core 排除導出 id 同構)。
+    schema = json.loads((SCHEMA_DIR / SCHEMA_FILES[key]).read_text(encoding="utf-8"))
+    props = set(schema["properties"])
+    required = set(schema["required"])
+    forbidden = {
+        "self_digest",
+        "plan_id",
+        "idempotency_key",
+        "derived_id",
+        "authorization",
+        "authorization_id",
+        "authorization_digest",
+        "authorization_set",
+        "core_digest",
+    }
+    assert not (props & forbidden), (key, props & forbidden)
+    assert not (required & forbidden), (key, required & forbidden)
+    fixture = _cp2b_fixtures()[key]
+    assert not (set(fixture) & forbidden), (key, set(fixture) & forbidden)
+
+
+def test_cp2b_receipt_and_row_result_pin_no_runtime_production_pass() -> None:
+    # 契約鐵律:install effect receipt 與每個 component-effect row result 不得斷言 runtime/production PASS。
+    fixtures = _cp2b_fixtures()
+    for key in ("s2_4_install_effect_receipt_v1", "s2_4_component_effect_result_v1"):
+        forged = deepcopy(fixtures[key])
+        forged["production_authority_flags"]["production_apply_performed"] = True
+        forged["self_digest"] = artifact_self_digest(forged)
+        assert any("production_apply_performed" in e for e in validate_aiml_artifact(forged)), key
+        forged = deepcopy(fixtures[key])
+        forged["production_authority_flags"]["running_attested"] = True
+        forged["self_digest"] = artifact_self_digest(forged)
+        assert any("running_attested" in e for e in validate_aiml_artifact(forged)), key
+    # install effect receipt:service_enabled/active/started_by_s2_4 皆 const-false。
+    forged = deepcopy(fixtures["s2_4_install_effect_receipt_v1"])
+    forged["service_flags"]["service_enabled"] = True
+    forged["self_digest"] = artifact_self_digest(forged)
+    assert any("service_enabled" in e for e in validate_aiml_artifact(forged))
+
+
+def test_cp2b_terminal_and_pass_conditionals_have_teeth() -> None:
+    fixtures = _cp2b_fixtures()
+    # install effect receipt:APPLIED_INACTIVE 要求 unit loaded/disabled/inactive 皆 true。
+    forged = deepcopy(fixtures["s2_4_install_effect_receipt_v1"])
+    forged["unit_state"]["inactive"] = False
+    forged["self_digest"] = artifact_self_digest(forged)
+    assert any("inactive" in e for e in validate_aiml_artifact(forged))
+    # install postcheck:PASS 要求 all_apply_rows_satisfied 為 true。
+    forged = deepcopy(fixtures["s2_4_install_postcheck_v1"])
+    forged["all_apply_rows_satisfied"] = False
+    forged["self_digest"] = artifact_self_digest(forged)
+    assert any("all_apply_rows_satisfied" in e for e in validate_aiml_artifact(forged))
+    # install rollback:COMPENSATED_EXACT 要求 exact_pre_state_restored 為 true。
+    forged = deepcopy(fixtures["s2_4_install_rollback_v1"])
+    forged["exact_pre_state_restored"] = False
+    forged["self_digest"] = artifact_self_digest(forged)
+    assert any("exact_pre_state_restored" in e for e in validate_aiml_artifact(forged))
+    # component postcheck:PASS 要求 applied_state_verified 為 true。
+    forged = deepcopy(fixtures["s2_4_component_effect_postcheck_v1"])
+    forged["applied_state_verified"] = False
+    forged["self_digest"] = artifact_self_digest(forged)
+    assert any("applied_state_verified" in e for e in validate_aiml_artifact(forged))
+    # component rollback:COMPENSATED_EXACT 要求 ownership_aware 為 true。
+    forged = deepcopy(fixtures["s2_4_component_effect_rollback_v1"])
+    forged["ownership_aware"] = False
+    forged["self_digest"] = artifact_self_digest(forged)
+    assert any("ownership_aware" in e for e in validate_aiml_artifact(forged))
+
+
+def test_cp2b_install_plan_forbids_cross_route_surfaces() -> None:
+    # install plan:§4:287 forbidden surface(PREPARE fetch/build、任意 shell/SQL/path、broker/order)
+    # 任一翻 true → 結構性拒(node injection 前)。
+    fixtures = _cp2b_fixtures()
+    for surface in ("prepare_build", "arbitrary_shell", "arbitrary_sql", "arbitrary_path", "broker_or_order"):
+        forged = deepcopy(fixtures["s2_4_install_plan_v1"])
+        forged["forbidden_surfaces"][surface] = True
+        forged["self_digest"] = artifact_self_digest(forged)
+        assert any(surface in e for e in validate_aiml_artifact(forged)), surface
+
+
+def test_cp2b_component_intent_binds_required_fields_per_class() -> None:
+    # §4 row ABI:每 class 的 required_intent_fields 少一個 → 拒(per-class allOf 有牙)。
+    fixtures = _cp2b_fixtures()
+    forged = deepcopy(fixtures["s2_4_component_effect_intent_v1"])
+    del forged["required_intent_fields"]["acl_manifest_digest"]
+    forged["self_digest"] = artifact_self_digest(forged)
+    assert any("acl_manifest_digest" in e for e in validate_aiml_artifact(forged))
+    # 換到 CREDENTIAL_INSTALL class,缺 encrypted_blob_digest → 拒。
+    forged = deepcopy(fixtures["s2_4_component_effect_intent_v1"])
+    forged["component_effect_class"] = "CREDENTIAL_INSTALL"
+    forged["required_intent_fields"] = {"credential_name": "engine-scanner-db", "host_identity_digest": _CP2B_D}
+    forged["self_digest"] = artifact_self_digest(forged)
+    assert any("encrypted_blob_digest" in e for e in validate_aiml_artifact(forged))
+
+
+def test_cp2b_operator_authorization_binds_profile_to_namespace() -> None:
+    # §9.1:四 profile↔namespace 精確配對,錯配 → 拒;profile_identity 越界 enum → 拒。
+    fixtures = _cp2b_fixtures()
+    forged = deepcopy(fixtures["s2_4_operator_authorization_v1"])
+    forged["signature_namespace"] = "arcane-equilibrium-aiml-s2-pg-migration"
+    forged["self_digest"] = artifact_self_digest(forged)
+    assert any("signature_namespace" in e for e in validate_aiml_artifact(forged))
+    forged = deepcopy(fixtures["s2_4_operator_authorization_v1"])
+    forged["profile_identity"] = "aiml-s2-rogue-operator-v1"
+    forged["self_digest"] = artifact_self_digest(forged)
+    assert any("enum" in e for e in validate_aiml_artifact(forged))
+
+
+def test_cp2b_pg_topology_cannot_self_declare_verdict() -> None:
+    # §8.2:pg_topology_attestation 僅載證據,derived_verdict 恆 const null;caller 帶任何判定 → 拒。
+    fixtures = _cp2b_fixtures()
+    forged = deepcopy(fixtures["pg_topology_attestation_v1"])
+    forged["derived_verdict"] = "PASS"
+    forged["self_digest"] = artifact_self_digest(forged)
+    assert any("derived_verdict" in e for e in validate_aiml_artifact(forged))
+    # topology_status 只是觀測類,無 PASS 值可選(越界即拒)。
+    forged = deepcopy(fixtures["pg_topology_attestation_v1"])
+    forged["topology_status"] = "PASS"
+    forged["self_digest"] = artifact_self_digest(forged)
+    assert any("enum" in e for e in validate_aiml_artifact(forged))
+
+
+def test_cp2b_pg_hba_delta_add_row_requires_normalized_row() -> None:
+    # §5.1:HBA delta ADD_ROW 必帶 normalized_row + insertion_anchor;缺 → 拒。
+    fixtures = _cp2b_fixtures()
+    forged = deepcopy(fixtures["s2_4_pg_hba_delta_v1"])
+    del forged["delta"]["normalized_row"]
+    forged["self_digest"] = artifact_self_digest(forged)
+    assert any("normalized_row" in e for e in validate_aiml_artifact(forged))
+
+
+def test_cp2b_frozen_pins_unchanged_after_schema_files_additions() -> None:
+    # 加 16 個 SCHEMA_FILES 查找鍵不動 S0.3 classifier / v1|v2 component matrix / PROGRAM_SCHEMA_PATHS。
+    from aiml_gate_receipt_validator import (
+        aiml_component_effect_class_matrix_digest,
+        aiml_component_effect_class_matrix_v2_digest,
+        PROGRAM_SCHEMA_PATHS,
+    )
+
+    assert aiml_effect_classifier_digest() == (
+        "sha256:1cf8c021b066ceeb364e968add074d263cb28d63db421fdc40620e9904d0ddbc"
+    )
+    assert aiml_component_effect_class_matrix_digest() == (
+        "sha256:22d78882a2dace9ceb640b74b2a5dca2f2a8cc05861720f5ab25c5c9ac86c445"
+    )
+    assert aiml_component_effect_class_matrix_v2_digest() == (
+        "sha256:01d3062c79725b32b7c1468d02013a0df28dfeba1cf29d513cbf3bd6b4143c64"
+    )
+    assert len(PROGRAM_SCHEMA_PATHS) == 7

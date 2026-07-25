@@ -117,6 +117,37 @@ SCHEMA_FILES = {
     "s2_4_prepare_postcheck_v1": "s2_4_prepare_postcheck_v1.schema.json",
     "s2_4_prepare_rollback_v1": "s2_4_prepare_rollback_v1.schema.json",
     "s2_4_prepared_install_bundle_v1": "s2_4_prepared_install_bundle_v1.schema.json",
+    # S2.4(WP4·W1·CP2b)——additive:install/APPLY 家族的聚合協調契約 schema:unsigned aggregate
+    # plan-core(排除 plan_id/idempotency_key/authorization/self_digest,digest 導 plan_id;
+    # idempotency_key=plan_id 屬導出值故移出 core 落於 plan 物件,與 probe/prepare core 排除其導出 id
+    # 同構)、closed route-class install-plan、immutable install effect receipt(§10.2 ABI status 含
+    # APPLIED_INACTIVE,內嵌兩 scoped probe receipt + prepare 結果/postcheck + 五 APPLY row 結果/postcheck
+    # + 一逆向補償鏈 + 終端 journal)、APPLY WAL journal、聚合獨立 postcheck、逆向補償鏈 rollback、
+    # per-step typed result;五 APPLY row(HOST_IDENTITY_INSTALL/PG_ROLE_ACL_MIGRATION/CREDENTIAL_INSTALL/
+    # LEARNING_RUNTIME/ENGINE_SCANNER)的 typed intent/result/postcheck/rollback;四 profile SSHSIG
+    # operator authorization、hash-chained replay ledger、signed HBA delta、attested pg-topology(僅載
+    # 證據,derived_verdict 恆 const null=不自證判定)與 root-owned pg-topology runtime guard(dbname
+    # 屬性化不凍結)。加這 16 鍵純為 schema 查找,絕不進入 aiml_effect_classifier_digest() 的六個 S0.3
+    # 常量輸入(見 :46-48/§7.2),S0.3 分類身分不動;亦不改 PROGRAM_SCHEMA_PATHS 與 v1/v2 component
+    # matrix/digest。全為契約:無 schema 斷言 runtime/production PASS,九 authority 於 receipt/result 皆
+    # const-false,secret 一律以 digest/handle/名稱綁(無明文);真 driver/routing/profile 常量/per-row
+    # ABI 綁定屬後續 CP3-CP6/W2-W6。
+    "s2_4_install_plan_core_v1": "s2_4_install_plan_core_v1.schema.json",
+    "s2_4_install_plan_v1": "s2_4_install_plan_v1.schema.json",
+    "s2_4_install_effect_receipt_v1": "s2_4_install_effect_receipt_v1.schema.json",
+    "s2_4_install_journal_v1": "s2_4_install_journal_v1.schema.json",
+    "s2_4_install_postcheck_v1": "s2_4_install_postcheck_v1.schema.json",
+    "s2_4_install_rollback_v1": "s2_4_install_rollback_v1.schema.json",
+    "s2_4_install_step_result_v1": "s2_4_install_step_result_v1.schema.json",
+    "s2_4_component_effect_intent_v1": "s2_4_component_effect_intent_v1.schema.json",
+    "s2_4_component_effect_result_v1": "s2_4_component_effect_result_v1.schema.json",
+    "s2_4_component_effect_postcheck_v1": "s2_4_component_effect_postcheck_v1.schema.json",
+    "s2_4_component_effect_rollback_v1": "s2_4_component_effect_rollback_v1.schema.json",
+    "s2_4_operator_authorization_v1": "s2_4_operator_authorization_v1.schema.json",
+    "s2_4_authorization_replay_ledger_v1": "s2_4_authorization_replay_ledger_v1.schema.json",
+    "s2_4_pg_hba_delta_v1": "s2_4_pg_hba_delta_v1.schema.json",
+    "pg_topology_attestation_v1": "pg_topology_attestation_v1.schema.json",
+    "pg_topology_runtime_guard_v1": "pg_topology_runtime_guard_v1.schema.json",
 }
 
 S0_DEPENDENCY_DIGESTS = {

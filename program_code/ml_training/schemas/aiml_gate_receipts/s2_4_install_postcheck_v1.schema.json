@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2_4_install_postcheck_v1.schema.json",
+  "title": "s2_4_install_postcheck_v1",
+  "description": "Independent aggregate postcheck for one S2.4 APPLY transaction (§4 per-row ABI, §5.1). A distinct role/node (verifier_node != applier_node) independently verifies the full install lineage: both scoped capability-probe receipts, the prepare receipt, the plan/idempotency binding, the expected pre-state and that all five APPLY rows are independently SATISFIED, bound to the verifier's own governed command_capture_v2 record digest. status==PASS requires every lineage flag true; the applier can never be its own sole verifier. Contract only: this attests aggregate install lineage, not any production PASS.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "status",
+    "plan_id",
+    "plan_core_digest",
+    "verifier_node",
+    "applier_node",
+    "probe_lineage_verified",
+    "prepare_lineage_verified",
+    "plan_lineage_verified",
+    "idempotency_verified",
+    "pre_state_lineage_verified",
+    "all_apply_rows_satisfied",
+    "verifier_capture_digest",
+    "observed_at",
+    "expires_at",
+    "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2_4_install_postcheck_v1"},
+    "status": {"enum": ["PASS", "FAIL"]},
+    "plan_id": {"$ref": "#/$defs/plan_id"},
+    "plan_core_digest": {"$ref": "#/$defs/digest"},
+    "verifier_node": {"type": "string", "minLength": 1},
+    "applier_node": {"type": "string", "minLength": 1},
+    "probe_lineage_verified": {"type": "boolean"},
+    "prepare_lineage_verified": {"type": "boolean"},
+    "plan_lineage_verified": {"type": "boolean"},
+    "idempotency_verified": {"type": "boolean"},
+    "pre_state_lineage_verified": {"type": "boolean"},
+    "all_apply_rows_satisfied": {"type": "boolean"},
+    "verifier_capture_digest": {"$ref": "#/$defs/digest"},
+    "observed_at": {"$ref": "#/$defs/timestamp"},
+    "expires_at": {"$ref": "#/$defs/timestamp"},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "PASS"}}},
+      "then": {
+        "properties": {
+          "probe_lineage_verified": {"const": true},
+          "prepare_lineage_verified": {"const": true},
+          "plan_lineage_verified": {"const": true},
+          "idempotency_verified": {"const": true},
+          "pre_state_lineage_verified": {"const": true},
+          "all_apply_rows_satisfied": {"const": true}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "plan_id": {"type": "string", "pattern": "^s2-4-[0-9a-f]{64}$"}
+  }
+}
