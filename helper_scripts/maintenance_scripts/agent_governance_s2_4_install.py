@@ -55,6 +55,29 @@ W1_REGENERATED_W0_WAVE_EXIT_FILENAME = "S2.4-WP4-W1-regenerated-W0-wave-exit-rec
 W1_DERIVATION_RECORD_FILENAME = "S2.4-WP4-W1-derivation-record.json"
 
 
+def _validate_emit_evidence(
+    test_evidence: Any, review_provenance: Any
+) -> None:
+    """兩個發射器共用的 evidence 防呆(E3 P2-4 含 secret 深掃)。
+
+    persisted evidence 會逐字進入 Git-committed receipt 檔;除形狀檢查外,以中央
+    secret-like 內容掃描拒絕任何疑似機密的 evidence——寧可拒發射,不可把密鑰寫進 repo。
+    """
+
+    if not isinstance(test_evidence, dict) or not test_evidence:
+        raise ValueError("test_evidence must be a non-empty object")
+    if not isinstance(review_provenance, list) or not review_provenance or not all(
+        isinstance(item, dict) and item for item in review_provenance
+    ):
+        raise ValueError("review_provenance must be a non-empty list of objects")
+    if central_validator._contains_github_secret_like_content(
+        test_evidence
+    ) or central_validator._contains_github_secret_like_content(review_provenance):
+        raise ValueError(
+            "emit evidence contains secret-like content; refusing to persist"
+        )
+
+
 def _git_head(repo_root: Path) -> str:
     return subprocess.run(
         ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
@@ -163,12 +186,7 @@ def emit_w0_receipts(
     兩者都會原樣持久化,receipt 內的 digest 綁定其 canonical bytes,任何人可重驗。
     """
 
-    if not isinstance(test_evidence, dict) or not test_evidence:
-        raise ValueError("test_evidence must be a non-empty object")
-    if not isinstance(review_provenance, list) or not review_provenance or not all(
-        isinstance(item, dict) and item for item in review_provenance
-    ):
-        raise ValueError("review_provenance must be a non-empty list of objects")
+    _validate_emit_evidence(test_evidence, review_provenance)
 
     admission = build_w0_source_admission_receipt(repo_root)
     admission_result = central_validator.derive_source_admission_status(
@@ -286,7 +304,12 @@ def build_w1_wave_exit_receipt(
 
 
 def _load_persisted_w0_receipts(w0_receipt_dir: Path) -> dict[str, Any] | None:
-    """讀持久化的歷史 W0 receipts(lineage 記錄用;讀不到/畸形回 None → 發射 fail-closed)。"""
+    """讀持久化的歷史 W0 receipts(lineage 記錄用;讀不到/畸形回 None → 發射 fail-closed)。
+
+    E2 P3-2:宣稱的 ``self_digest`` 不可照抄——就地以 ``artifact_self_digest`` 重算比對,
+    lineage 記錄同時攜帶完整性判定,竄改過的持久化 receipt 無法把偽 digest 傳播進
+    derivation record。
+    """
 
     try:
         admission = json.loads(
@@ -301,11 +324,22 @@ def _load_persisted_w0_receipts(w0_receipt_dir: Path) -> dict[str, Any] | None:
         return None
     if not admission.get("self_digest") or not wave_exit.get("self_digest"):
         return None
+    integrity = (
+        "VERIFIED"
+        if (
+            admission["self_digest"]
+            == central_validator.artifact_self_digest(admission)
+            and wave_exit["self_digest"]
+            == central_validator.artifact_self_digest(wave_exit)
+        )
+        else "SELF_DIGEST_MISMATCH"
+    )
     return {
         "persisted_dir": str(w0_receipt_dir),
         "admission_self_digest": admission["self_digest"],
         "wave_exit_self_digest": wave_exit["self_digest"],
         "historical_source_head": admission.get("source_head"),
+        "historical_w0_integrity": integrity,
     }
 
 
@@ -330,12 +364,7 @@ def emit_w1_receipts(
          W0 digests 的 lineage)。
     """
 
-    if not isinstance(test_evidence, dict) or not test_evidence:
-        raise ValueError("test_evidence must be a non-empty object")
-    if not isinstance(review_provenance, list) or not review_provenance or not all(
-        isinstance(item, dict) and item for item in review_provenance
-    ):
-        raise ValueError("review_provenance must be a non-empty list of objects")
+    _validate_emit_evidence(test_evidence, review_provenance)
 
     historical_w0 = _load_persisted_w0_receipts(w0_receipt_dir)
     if historical_w0 is None:

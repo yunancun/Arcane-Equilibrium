@@ -17,7 +17,7 @@ import base64
 import binascii
 import hmac
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -507,7 +507,10 @@ def _s2_4_operator_authorization_errors(
         errors.append("s2_4 operator authorization self_digest is invalid")
     armored = artifact.get("sshsig_armored")
     if not isinstance(armored, str) or len(armored.encode("utf-8")) > 16 * 1024:
-        errors.append("s2_4 operator authorization sshsig_armored exceeds 16 KiB")
+        errors.append(
+            "s2_4 operator authorization sshsig_armored must be a string of at "
+            "most 16 KiB"
+        )
     elif not _sshsig_armor_body_is_strict_base64(armored):
         errors.append(
             "s2_4 operator authorization sshsig_armored body is not strict base64"
@@ -644,9 +647,17 @@ def derive_authorization_replay_binding(
     **誠實界線**:UNCONSUMED_AUTHORIZATION_VALID 只是離線驗證層裁決;真消費(fsync/install
     lock/append)與任何 applied/production 狀態屬 W6A/W6B EFFECT——回傳恆帶 typed
     ``production_effect: EXTERNAL_VERIFICATION_PENDING``,source lane 無從以有效簽章換取
-    applied/production。
+    applied/production。**W6 driver 義務(E3 P2-1)**:本謂詞對「caller 供給的 ledger 物件」
+    裁決,無從偵測 stale-prefix/fork snapshot;真消費決策必須錨定 install lock 下讀取的
+    exact runtime ledger head,絕不可用呼叫端傳入的 ledger 快照代替。
+
+    新鮮窗 fail-closed(E2 P2-1/E3 P2-2):``now`` 省略時默認「真實 wall clock」——消費裁決
+    本質是 runtime 決策,過期授權不得因 caller 忘傳 now 而被判 VALID(對齊
+    ``_dependency_graph_errors`` 的 wall-clock 默認先例)。
     """
 
+    if now is None:
+        now = datetime.now(timezone.utc)
     verdict: dict[str, Any] = {
         "status": "AUTHORIZATION_REJECTED",
         "reasons": [],
@@ -657,6 +668,11 @@ def derive_authorization_replay_binding(
         verdict["reasons"] = ["authorization must be an object"]
         return verdict
     reasons = _s2_4_operator_authorization_errors(authorization, now=now)
+    # E3 P2-3:authorization_id 形狀防禦——缺失/非字串/空值即拒,杜絕「信任根簽了缺 id 的
+    # 畸形授權 → 恆匹配零筆 entry → 永遠 UNCONSUMED」的縫。
+    authorization_id_value = authorization.get("authorization_id")
+    if not isinstance(authorization_id_value, str) or not authorization_id_value.strip():
+        reasons.append("authorization_id must be a non-empty string")
     if not isinstance(replay_ledger, dict):
         reasons.append("replay ledger must be an object")
         verdict["reasons"] = reasons

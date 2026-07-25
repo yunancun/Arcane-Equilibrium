@@ -702,3 +702,38 @@ def test_replay_binding_rejects_cross_profile_and_wrong_trust_root(
     assert verdict["status"] == "AUTHORIZATION_REJECTED"
     assert any("payload_fields do not match" in r for r in verdict["reasons"])
     assert any("SSH signature is invalid" in r for r in verdict["reasons"])
+
+
+def test_replay_binding_defaults_to_wall_clock_and_rejects_expired(
+    tmp_path, monkeypatch
+) -> None:
+    """E2 P2-1/E3 P2-2 回歸:now 省略時默認真實 wall clock(fail-closed)。
+
+    fixture 授權窗固定在 2026-07-24(單調地永遠過期);caller 忘傳 now 不得換得 VALID。
+    """
+
+    private_key, public_key, fingerprint = _mint_ed25519_key(tmp_path, "operator")
+    _install_pinned_key(monkeypatch, public_key, fingerprint)
+    auth = _signed_authorization(private_key)
+    ledger = _ledger([_OTHER])
+    verdict = validator.derive_authorization_replay_binding(auth, ledger)
+    assert verdict["status"] == "AUTHORIZATION_REJECTED"
+    assert any("freshness" in reason for reason in verdict["reasons"])
+    assert verdict["production_effect"] == "EXTERNAL_VERIFICATION_PENDING"
+
+
+def test_emitters_refuse_secret_like_evidence(tmp_path) -> None:
+    """E3 P2-4 回歸:persisted evidence 含 secret-like 內容即拒發射且不落任何檔。"""
+
+    poisoned = {
+        "command": "pytest -q",
+        "exit_code": 0,
+        "leak": "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8",
+    }
+    with pytest.raises(ValueError, match="secret-like"):
+        install.emit_w0_receipts(
+            out_dir=tmp_path,
+            test_evidence=poisoned,
+            review_provenance=[{"pr": 1, "verdict": "x"}],
+        )
+    assert list(tmp_path.iterdir()) == []
