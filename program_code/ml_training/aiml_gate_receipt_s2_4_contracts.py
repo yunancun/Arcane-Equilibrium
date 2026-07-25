@@ -35,6 +35,7 @@ from aiml_gate_receipt_schema_core import (  # noqa: E402
     _parse_timestamp,
     artifact_self_digest,
     canonical_digest,
+    resolve_facade as _resolve_facade,
 )
 from aiml_gate_receipt_classifiers import (  # noqa: E402
     AIML_COMPONENT_EFFECT_CLASS_MATRIX_V2,
@@ -534,10 +535,11 @@ def _s2_4_operator_authorization_errors(
     except (KeyError, TypeError, ValueError):
         errors.append("s2_4 operator authorization timestamps are invalid")
     # 信任根綁定:pinned 公鑰指紋必等於 pinned 指紋(hmac.compare_digest),且 armored SSHSIG 在 exact
-    # identity+namespace 下對 pinned 公鑰驗過 canonical payload。延遲匯入 facade 讀其信任根副本
-    # (2000 行治理拆分前為「本模組 global」;測試 monkeypatch 的注入點是 facade 模組物件,經 facade
-    # 讀取保持該縫逐字有效),但驗簽基元一律取自 out-of-scope trusted-host(真驗證邏輯,不 monkeypatch)。
-    import aiml_gate_receipt_validator as _facade
+    # identity+namespace 下對 pinned 公鑰驗過 canonical payload。經 resolve_facade() 讀「既載入」的
+    # facade 信任根副本(頂層/ package 形皆命中同一物件,monkeypatch 縫在兩種 import 形下都逐字有效;
+    # 硬編頂層名會在 package-form 行程惰性創建第二份 facade 拷貝而繞過 patch——E2 P1-1),
+    # 驗簽基元一律取自 out-of-scope trusted-host(真驗證邏輯,不 monkeypatch)。
+    _facade = _resolve_facade()
     public_key = _facade.S2_4_OPERATOR_TRUST_ROOT_PUBLIC_KEY
     fingerprint = _facade.S2_4_OPERATOR_TRUST_ROOT_FINGERPRINT
     try:

@@ -16,9 +16,35 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
+
+
+def resolve_facade():
+    """以 sys.modules 為準解析「既載入」的 facade 模組(頂層名優先,dotted 形次之)。
+
+    2000 行治理拆分後,facade(aiml_gate_receipt_validator)可能以頂層名或
+    package 形(ml_training.aiml_gate_receipt_validator)被載入。leaf 內的延遲
+    facade 讀取若硬編頂層名,在「只有 package 形已載入」的行程裡會惰性創建第二份
+    完整 facade 拷貝,使針對 package 形模組物件的 monkeypatch 縫被繞過(E2 P1-1)。
+    本解析器只回傳既載入的模組:頂層名存在取頂層(兩形並存時的確定性優先序);
+    否則取排序後第一個 dotted 形;兩者皆無才回退為頂層 import(leaf 被單獨載入
+    的邊緣情形,行為與拆分前一致)。
+    """
+
+    module = sys.modules.get("aiml_gate_receipt_validator")
+    if module is not None:
+        return module
+    for name in sorted(sys.modules):
+        if name.endswith(".aiml_gate_receipt_validator"):
+            module = sys.modules[name]
+            if module is not None:
+                return module
+    import aiml_gate_receipt_validator as module
+    return module
+
 
 SCHEMA_DIR = Path(__file__).resolve().parent / "schemas" / "aiml_gate_receipts"
 SCHEMA_FILES = {

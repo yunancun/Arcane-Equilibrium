@@ -142,3 +142,28 @@ def test_emit_rejects_empty_or_malformed_evidence(
             review_provenance=review_provenance,
         )
     assert list(tmp_path.iterdir()) == []
+
+
+def test_w0_owned_paths_cover_the_post_split_validator_family() -> None:
+    """E2 P1-2 回歸:2000 行拆分後 W0 owned-path 綁定必須覆蓋 validator 全家族。
+
+    否則對 leaf 模組或測試 sibling 的削弱性修改不會改變 wave-exit 的
+    owned_path_diff_digest,治理不變量的覆蓋面被靜默收窄。
+    """
+
+    required = {
+        "program_code/ml_training/aiml_gate_receipt_adoption.py",
+        "program_code/ml_training/aiml_gate_receipt_classifiers.py",
+        "program_code/ml_training/aiml_gate_receipt_s2_4_contracts.py",
+        "program_code/ml_training/aiml_gate_receipt_schema_core.py",
+        "program_code/ml_training/aiml_gate_receipt_validator.py",
+        "program_code/ml_training/tests/aiml_gate_receipt_validator_testkit.py",
+        "program_code/ml_training/tests/test_aiml_gate_receipt_validator.py",
+        "program_code/ml_training/tests/test_aiml_gate_receipt_validator_adoption.py",
+        "program_code/ml_training/tests/test_aiml_gate_receipt_validator_s2_4.py",
+    }
+    missing = required - set(validator._W0_OWNED_PATHS)
+    assert not missing, f"W0 owned-path binding misses split family members: {sorted(missing)}"
+    # 每一個 pinned 路徑都必須真實存在(防呆:改名/移動後 pin 變成死路徑)。
+    dead = [p for p in validator._W0_OWNED_PATHS if not (ROOT / p).is_file()]
+    assert not dead, f"W0 owned paths contain dead entries: {dead}"

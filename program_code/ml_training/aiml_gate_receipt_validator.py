@@ -184,14 +184,24 @@ _W0_EXPORTED_ABI = {
     "wave_exit": "s2_4_wave_exit_receipt_v1(status=PASS)",
 }
 # §5 W0 owned-path allowlist(wave-exit owned_path_manifest_digest 綁定的固定投影)。
+# 2026-07-25 2000 行治理拆分後擴列(E2 P1-2):validator 邏輯與主測試分居多檔,
+# owned-path diff 綁定必須覆蓋拆分後全家族,否則對 leaf/測試 sibling 的削弱性
+# 修改不會改變 wave-exit 的 owned_path_diff_digest(治理不變量覆蓋面靜默收窄)。
 _W0_OWNED_PATHS = (
     ".codex/agent_registry_v1.json",
     "helper_scripts/maintenance_scripts/agent_governance_pg_observer_bootstrap.py",
+    "program_code/ml_training/aiml_gate_receipt_adoption.py",
+    "program_code/ml_training/aiml_gate_receipt_classifiers.py",
+    "program_code/ml_training/aiml_gate_receipt_s2_4_contracts.py",
+    "program_code/ml_training/aiml_gate_receipt_schema_core.py",
     "program_code/ml_training/aiml_gate_receipt_validator.py",
     "program_code/ml_training/schemas/aiml_gate_receipts/pg_observer_bootstrap_result_v1.schema.json",
     "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_source_admission_receipt_v1.schema.json",
     "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_wave_exit_receipt_v1.schema.json",
+    "program_code/ml_training/tests/aiml_gate_receipt_validator_testkit.py",
     "program_code/ml_training/tests/test_aiml_gate_receipt_validator.py",
+    "program_code/ml_training/tests/test_aiml_gate_receipt_validator_adoption.py",
+    "program_code/ml_training/tests/test_aiml_gate_receipt_validator_s2_4.py",
     "tests/structure/test_agent_governance_pg_observer_bootstrap.py",
     "tests/structure/test_s2_4_w0_admission.py",
 )

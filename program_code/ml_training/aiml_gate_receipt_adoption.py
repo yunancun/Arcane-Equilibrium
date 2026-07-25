@@ -29,6 +29,7 @@ from aiml_gate_receipt_schema_core import (
     _parse_timestamp,
     artifact_self_digest,
     canonical_digest,
+    resolve_facade,
 )
 from aiml_gate_receipt_classifiers import AIML_EFFECT_CLASSIFIER_RULES
 
@@ -262,9 +263,10 @@ def validate_program_adoption_receipt(
     to that obligation; the offline CLI has no such host capability.
     """
 
-    # 延遲匯入 facade:中央 dispatcher validate_aiml_artifact 留在 aiml_gate_receipt_validator;
-    # 經 facade 模組物件呼叫保持測試 monkeypatch 縫並避免 import 期循環(2000 行治理拆分)。
-    import aiml_gate_receipt_validator as _central
+    # 經 resolve_facade() 呼叫「既載入」的 facade dispatcher validate_aiml_artifact:
+    # 保持測試 monkeypatch 縫(頂層/ package 兩種 import 形皆命中同一模組物件,E2 P1-1)
+    # 並避免 import 期循環(2000 行治理拆分)。
+    _central = resolve_facade()
 
     errors = [
         f"program adoption receipt invalid: {error}"

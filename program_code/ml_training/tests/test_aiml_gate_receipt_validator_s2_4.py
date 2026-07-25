@@ -1536,3 +1536,37 @@ def test_cp4_ttl_freshness_and_replay_chain_bounds(tmp_path, monkeypatch) -> Non
     duplicated = [good["entries"][0], deepcopy(good["entries"][0])]
     assert duplicated[1]["seq"] == duplicated[0]["seq"]
     assert duplicated[1]["prev_entry_digest"] is None
+
+
+# ── 2000 行拆分 E2 P1-1 回歸:package-form facade seam ─────────────────────────
+
+
+def test_package_form_resolver_hits_loaded_facade_without_second_copy() -> None:
+    """只載入 package 形 facade 的行程:resolver 必命中同一物件且不惰性創建頂層拷貝。
+
+    E2 P1-1:leaf 的延遲 facade 讀取若硬編頂層名,在 package-form 行程會建立第二份
+    完整 facade 拷貝,使 package 形模組物件上的 monkeypatch 被繞過。本測試以獨立
+    subprocess 證明修復後:resolver 回傳的就是 package 形 facade 物件、頂層名不被
+    惰性載入、對 package 形 facade 的信任根 patch 經 resolver 逐字可見。
+    """
+
+    program_code = str(ML_ROOT.parent)
+    script = "\n".join((
+        "import sys",
+        f"sys.path.insert(0, {program_code!r})",
+        "import ml_training.aiml_gate_receipt_validator as pkg_facade",
+        "import ml_training.aiml_gate_receipt_s2_4_contracts as pkg_contracts",
+        "assert 'aiml_gate_receipt_validator' not in sys.modules, 'top-level copy pre-exists'",
+        "facade = pkg_contracts._resolve_facade()",
+        "assert facade is pkg_facade, ('resolver returned a different module', facade.__name__)",
+        "assert 'aiml_gate_receipt_validator' not in sys.modules, 'resolver lazily created a second copy'",
+        "pkg_facade.S2_4_OPERATOR_TRUST_ROOT_FINGERPRINT = 'SHA256:forged-for-seam-test'",
+        "seen = pkg_contracts._resolve_facade().S2_4_OPERATOR_TRUST_ROOT_FINGERPRINT",
+        "assert seen == 'SHA256:forged-for-seam-test', ('patch bypassed', seen)",
+        "print('SEAM_OK')",
+    ))
+    result = _subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True, timeout=120
+    )
+    assert result.returncode == 0, result.stderr
+    assert "SEAM_OK" in result.stdout
