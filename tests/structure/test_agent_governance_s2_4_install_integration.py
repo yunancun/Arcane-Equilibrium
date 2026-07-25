@@ -1,12 +1,14 @@
-"""S2.4(WP4·W1)w1-emit 整合測試——正式 W1 receipt 發射鏈的 happy path + 拒絕分支。
+"""S2.4(WP4·W1/W2)w1-emit + w2-emit 整合測試——正式 receipt 發射鏈的 happy path + 拒絕分支。
 
 證明(鏡 w0-emit 測試姿態;mock 只用來「逼出拒絕」,絕不 mock 出成功):
 - w1-emit 於活 repo 重算:記憶體重發「當前世代」W0 admission+wave-exit(同 builder)、
   綁定該鏈構建 W1 wave-exit、由中央 validator 導出 PASS 後才持久化四個檔;
-- 歷史持久化 W0 receipts 的 digests 記入 derivation record 作 lineage(其 source_head 為
-  歷史世代,「不」直接進 derivation 鏈);
+- w2-emit 鏡 w1-emit:記憶體重發當前世代 W0+W1 鏈、構建 W2 wave-exit(predecessor=W1
+  物件 + predecessor_wave_chain=(W0,) 遞迴鏈)、全段 PASS 後才持久化五個檔;
+- 歷史持久化 W0/W1 receipts 的 digests 記入 derivation record 作 lineage(其 source_head
+  為歷史世代,「不」直接進 derivation 鏈);竄改 → 硬拒;
 - 任一段導出非 ADMITTED/PASS → typed refusal 且「不」寫任何檔(fail-closed);
-- 歷史 W0 receipts 缺失/畸形 → typed refusal;
+- 歷史 receipts 缺失/畸形 → typed refusal;
 - 空/畸形 evidence 直接 ValueError。
 """
 from __future__ import annotations
@@ -202,6 +204,178 @@ def test_w1_emit_rejects_empty_or_malformed_evidence(
 ) -> None:
     with pytest.raises(ValueError):
         install.emit_w1_receipts(
+            out_dir=tmp_path,
+            test_evidence=test_evidence,
+            review_provenance=review_provenance,
+        )
+    assert list(tmp_path.iterdir()) == []
+
+
+# ═════════════════════════════ w2-emit(鏡 w1-emit)═════════════════════════════
+def _emit_w2(tmp_path, **overrides):
+    kwargs = {
+        "out_dir": tmp_path,
+        "test_evidence": dict(_TEST_EVIDENCE),
+        "review_provenance": [dict(item) for item in _REVIEW_PROVENANCE],
+    }
+    kwargs.update(overrides)
+    return install.emit_w2_receipts(**kwargs)
+
+
+def test_w2_emit_happy_path_persists_and_rederives(tmp_path) -> None:
+    result = _emit_w2(tmp_path)
+    assert result["status"] == "W2_RECEIPTS_EMITTED", result
+    w2 = json.loads(
+        (tmp_path / install.W2_WAVE_EXIT_FILENAME).read_text(encoding="utf-8")
+    )
+    admission = json.loads(
+        (tmp_path / install.W2_REGENERATED_W0_ADMISSION_FILENAME).read_text(
+            encoding="utf-8"
+        )
+    )
+    w0 = json.loads(
+        (tmp_path / install.W2_REGENERATED_W0_WAVE_EXIT_FILENAME).read_text(
+            encoding="utf-8"
+        )
+    )
+    w1 = json.loads(
+        (tmp_path / install.W2_REGENERATED_W1_WAVE_EXIT_FILENAME).read_text(
+            encoding="utf-8"
+        )
+    )
+    record = json.loads(
+        (tmp_path / install.W2_DERIVATION_RECORD_FILENAME).read_text(encoding="utf-8")
+    )
+    # evidence-only:四份 receipt 皆無 caller-status 鍵。
+    for receipt in (admission, w0, w1, w2):
+        assert not any(key in receipt for key in validator._CALLER_STATUS_KEYS)
+    # 持久化後可獨立重驗完整 W2 鏈(W1 predecessor + W0 遞迴 chain + admission 三重綁定)。
+    assert validator.derive_wave_exit_status(
+        w2,
+        source_admission_receipt=admission,
+        predecessor_wave_receipt=w1,
+        predecessor_wave_chain=(w0,),
+    ) == {"status": "PASS", "reasons": []}
+    assert validator.validate_aiml_artifact(w2) == []
+    assert w2["wave"] == "W2"
+    assert w2["predecessor_wave_receipt_digest"] == w1["self_digest"]
+    assert w1["predecessor_wave_receipt_digest"] == w0["self_digest"]
+    assert w2["source_head"] == admission["source_head"] == record["source_head"]
+    # 世代分離:歷史持久化 W1 只作 lineage 記錄。
+    historical = record["historical_persisted_w1"]
+    persisted_w1 = json.loads(
+        (install.W1_RECEIPT_DIR / install.W1_WAVE_EXIT_FILENAME).read_text(
+            encoding="utf-8"
+        )
+    )
+    assert historical["w1_wave_exit_self_digest"] == persisted_w1["self_digest"]
+    assert historical["historical_source_head"] == persisted_w1["source_head"]
+    assert w2["production_authority_flags"] == {
+        "nine_authorities_false": True,
+        "production_apply_performed": False,
+        "running_attested": False,
+    }
+    assert w2["test_digests"] == [validator.canonical_digest(_TEST_EVIDENCE)]
+
+
+def test_w2_emit_refuses_when_any_chain_segment_not_pass(tmp_path, monkeypatch) -> None:
+    original = validator.derive_wave_exit_status
+
+    def _fail_wave(wave_name, reason):
+        def _inner(receipt, **kwargs):
+            if isinstance(receipt, dict) and receipt.get("wave") == wave_name:
+                return {"status": "NOT_PASS", "reasons": [reason]}
+            return original(receipt, **kwargs)
+
+        return _inner
+
+    for wave_name, stage in (
+        ("W0", "regenerated_w0_wave_exit"),
+        ("W1", "regenerated_w1_wave_exit"),
+        ("W2", "w2_wave_exit"),
+    ):
+        monkeypatch.setattr(
+            validator, "derive_wave_exit_status", _fail_wave(wave_name, f"forced-{wave_name}")
+        )
+        result = _emit_w2(tmp_path)
+        assert result == {
+            "status": "W2_EMIT_REFUSED",
+            "stage": stage,
+            "reasons": [f"forced-{wave_name}"],
+        }
+        assert list(tmp_path.iterdir()) == []
+    monkeypatch.setattr(
+        validator,
+        "derive_source_admission_status",
+        lambda receipt, *, repo_root=None, now=None: {
+            "status": "NOT_ADMITTED",
+            "reasons": ["forced-admission"],
+        },
+    )
+    result = _emit_w2(tmp_path)
+    assert result["stage"] == "regenerated_w0_admission"
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_w2_emit_refuses_when_central_gate_rejects(tmp_path, monkeypatch) -> None:
+    # 只對 admission schema 逼出中央閘拒絕:全域拒會先毒化 W2 exported-ABI 的兩個活裁決
+    # (它們也消費 validate_aiml_artifact),使拒絕發生在 w2_wave_exit 段而非 central_gate。
+    original = validator.validate_aiml_artifact
+
+    def _reject_admission_only(artifact, *, now=None):
+        if (
+            isinstance(artifact, dict)
+            and artifact.get("schema_version") == "s2_4_source_admission_receipt_v1"
+        ):
+            return ["forced-central-error"]
+        return original(artifact, now=now)
+
+    monkeypatch.setattr(validator, "validate_aiml_artifact", _reject_admission_only)
+    result = _emit_w2(tmp_path)
+    assert result["status"] == "W2_EMIT_REFUSED"
+    assert result["stage"] == "central_gate"
+    assert "forced-central-error" in result["reasons"]
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_w2_emit_refuses_missing_or_tampered_historical_w1(tmp_path) -> None:
+    import shutil as _shutil
+
+    # (a) 目錄不存在。
+    result = _emit_w2(tmp_path, w1_receipt_dir=tmp_path / "no-such-dir")
+    assert result["status"] == "W2_EMIT_REFUSED"
+    assert result["stage"] == "historical_w1_receipts"
+    assert list(tmp_path.iterdir()) == []
+    # (b) 竄改歷史 W1(改 byte 不重封 self_digest)→ 硬拒且不落檔。
+    poisoned_dir = tmp_path / "w1"
+    poisoned_dir.mkdir()
+    for name in (
+        install.W1_WAVE_EXIT_FILENAME,
+        install.W1_REGENERATED_W0_ADMISSION_FILENAME,
+        install.W1_REGENERATED_W0_WAVE_EXIT_FILENAME,
+    ):
+        _shutil.copy(install.W1_RECEIPT_DIR / name, poisoned_dir / name)
+    target = poisoned_dir / install.W1_WAVE_EXIT_FILENAME
+    artifact = json.loads(target.read_text(encoding="utf-8"))
+    artifact["source_head"] = "0" * 40
+    target.write_text(json.dumps(artifact, indent=2, sort_keys=True), encoding="utf-8")
+    out_dir = tmp_path / "out"
+    result = _emit_w2(out_dir, w1_receipt_dir=poisoned_dir)
+    assert result["status"] == "W2_EMIT_REFUSED"
+    assert result["stage"] == "historical_w1_receipts"
+    assert "self-digest" in result["reasons"][0]
+    assert not out_dir.exists() or list(out_dir.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    "test_evidence,review_provenance",
+    [({}, [{"pr": 1}]), ({"ok": 1}, [])],
+)
+def test_w2_emit_rejects_empty_or_malformed_evidence(
+    tmp_path, test_evidence, review_provenance
+) -> None:
+    with pytest.raises(ValueError):
+        install.emit_w2_receipts(
             out_dir=tmp_path,
             test_evidence=test_evidence,
             review_provenance=review_provenance,

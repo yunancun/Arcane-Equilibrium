@@ -192,6 +192,16 @@ SCHEMA_FILES = {
         "application_bundle_runtime_closure_v1.schema.json"
     ),
     "application_bundle_manifest_v1": "application_bundle_manifest_v1.schema.json",
+    # S2.4(WP4·W2c·§8.1 #2/#4)——additive:base_runtime_tree_manifest_v1(self_digest ==
+    # base_runtime_tree_digest,PREPARE staging 樹身分)與 launch_bundle_manifest_v1
+    # (self_digest == launch_bundle_digest,launches/<64-hex> 葉名契約)。加這兩鍵純為
+    # schema 查找,絕不進入 aiml_effect_classifier_digest() 的六個 S0.3 常量輸入
+    # (見 :46-48/§7.2),S0.3 分類身分不動;亦不改 PROGRAM_SCHEMA_PATHS 與 v1/v2 component
+    # matrix/digest。中央閘只做結構驗 + self_digest 反偽造重算 + canonical 排序(委派
+    # aiml_gate_receipt_wave_w2.w2_manifest_artifact_errors);真樹走訪/builder 溯源屬
+    # agent_governance_s2_4_render(caller 提供樹;絕不觸生產路徑,不自證 runtime)。
+    "base_runtime_tree_manifest_v1": "base_runtime_tree_manifest_v1.schema.json",
+    "launch_bundle_manifest_v1": "launch_bundle_manifest_v1.schema.json",
 }
 
 S0_DEPENDENCY_DIGESTS = {

@@ -52,6 +52,7 @@
     "program_code/ml_training/aiml_gate_receipt_s2_4_contracts.py",
     "program_code/ml_training/aiml_gate_receipt_schema_core.py",
     "program_code/ml_training/aiml_gate_receipt_validator.py",
+    "program_code/ml_training/aiml_gate_receipt_wave_w2.py",
     "program_code/ml_training/alr_application_identity.py",
     "program_code/ml_training/alr_candidate_board_events.py",
     "program_code/ml_training/alr_candidate_evidence_adapter.py",
@@ -97,6 +98,7 @@
     "program_code/ml_training/schemas/aiml_gate_receipts/aiml_required_effect_classification_v1.schema.json",
     "program_code/ml_training/schemas/aiml_gate_receipts/application_bundle_manifest_v1.schema.json",
     "program_code/ml_training/schemas/aiml_gate_receipts/application_bundle_runtime_closure_v1.schema.json",
+    "program_code/ml_training/schemas/aiml_gate_receipts/base_runtime_tree_manifest_v1.schema.json",
     "program_code/ml_training/schemas/aiml_gate_receipts/component_effect_intent_v1.schema.json",
     "program_code/ml_training/schemas/aiml_gate_receipts/component_effect_postcheck_attestation_v1.schema.json",
     "program_code/ml_training/schemas/aiml_gate_receipts/component_effect_result_v1.schema.json",
@@ -104,6 +106,7 @@
     "program_code/ml_training/schemas/aiml_gate_receipts/expected_identity_receipt_v1.schema.json",
     "program_code/ml_training/schemas/aiml_gate_receipts/github_repository_policy_attestation_v1.schema.json",
     "program_code/ml_training/schemas/aiml_gate_receipts/landing_scope_v1.schema.json",
+    "program_code/ml_training/schemas/aiml_gate_receipts/launch_bundle_manifest_v1.schema.json",
     "program_code/ml_training/schemas/aiml_gate_receipts/learning_runtime_choice_receipt_target_host_v1.schema.json",
     "program_code/ml_training/schemas/aiml_gate_receipts/network_sandbox_capability_attestation_v1.schema.json",
     "program_code/ml_training/schemas/aiml_gate_receipts/pg_acl_manifest_v1.schema.json",
@@ -160,7 +163,7 @@
     "program_code/ml_training/schemas/aiml_gate_receipts/terminal_receipt_sink_v1.schema.json"
   ],
   "schema_version": "application_bundle_runtime_closure_v1",
-  "self_digest": "sha256:e1bc2adcc23095cfcfe2e696eecb352067a1eb8a3c5f0e2350c2e3e3ed205719",
+  "self_digest": "sha256:c695e43090c27f72cfdac8c6853d4e92f0c40d7240b97702f9225942ff605fe6",
   "sql_fingerprints": [
     "sql/migrations/V151__alr_persistence_foundation.sql",
     "sql/migrations/V152__alr_operational_artifacts.sql",

@@ -500,6 +500,158 @@ def test_w1_owned_paths_exist_and_cover_the_w1_surfaces() -> None:
     assert not missing, f"W1 owned-path binding misses: {sorted(missing)}"
 
 
+# ── W2 wave-exit 中央導出:happy path + 偽造負例(§10.3 W2 row/§10.5 #27)────────
+def _w2_chain():
+    admission, w0, w1 = _w1_chain()
+    w2 = install.build_w2_wave_exit_receipt(admission, w1, **deepcopy(_EVID))
+    return admission, w0, w1, w2
+
+
+def test_w2_wave_exit_derives_pass_with_full_predecessor_chain() -> None:
+    admission, w0, w1, w2 = _w2_chain()
+    result = validator.derive_wave_exit_status(
+        w2,
+        source_admission_receipt=admission,
+        predecessor_wave_receipt=w1,
+        predecessor_wave_chain=(w0,),
+    )
+    assert result == {"status": "PASS", "reasons": []}
+    assert not any(key in w2 for key in validator._CALLER_STATUS_KEYS)
+    assert validator.validate_aiml_artifact(w2) == []
+
+
+def test_w2_self_declared_status_rejected_before_derivation() -> None:
+    admission, w0, w1, w2 = _w2_chain()
+    forged = deepcopy(w2)
+    forged["status"] = "PASS"
+    forged["self_digest"] = validator.artifact_self_digest(forged)
+    result = validator.derive_wave_exit_status(
+        forged,
+        source_admission_receipt=admission,
+        predecessor_wave_receipt=w1,
+        predecessor_wave_chain=(w0,),
+    )
+    assert result["status"] == "NOT_PASS"
+    assert any("must not self-declare status" in r for r in result["reasons"])
+
+
+def test_w2_requires_predecessor_object_and_regenerated_w0_chain() -> None:
+    admission, w0, w1, w2 = _w2_chain()
+    # 缺 W1 predecessor 物件 → typed NOT_PASS。
+    result = validator.derive_wave_exit_status(w2, source_admission_receipt=admission)
+    assert result["status"] == "NOT_PASS"
+    assert any("requires the bound predecessor_wave_receipt" in r for r in result["reasons"])
+    # 缺 predecessor_wave_chain(W1 無法遞迴綁其 W0)→ typed NOT_PASS。
+    result = validator.derive_wave_exit_status(
+        w2, source_admission_receipt=admission, predecessor_wave_receipt=w1
+    )
+    assert result["status"] == "NOT_PASS"
+    assert any("predecessor_wave_chain" in r for r in result["reasons"])
+    # W0/W1 wave 不消費 chain(fail-closed 拒非空 chain,杜絕誤信多綁前導)。
+    _admission, w0_only, w1_only = _w1_chain()
+    result = validator.derive_wave_exit_status(
+        w1_only,
+        source_admission_receipt=_admission,
+        predecessor_wave_receipt=w0_only,
+        predecessor_wave_chain=(w0_only,),
+    )
+    assert result["status"] == "NOT_PASS"
+    assert any("does not accept a predecessor_wave_chain" in r for r in result["reasons"])
+
+
+def test_w2_tampered_w1_predecessor_breaks_derivation() -> None:
+    # (g) 功能探針負例:竄改 W1(owned-path digest)→ W1 鏈斷 → W2 NOT_PASS。
+    admission, w0, w1, _w2 = _w2_chain()
+    broken_w1 = deepcopy(w1)
+    broken_w1["owned_path_diff_digest"] = validator.canonical_digest(["tampered"])
+    broken_w1["self_digest"] = validator.artifact_self_digest(broken_w1)
+    rebound = install.build_w2_wave_exit_receipt(admission, broken_w1, **deepcopy(_EVID))
+    result = validator.derive_wave_exit_status(
+        rebound,
+        source_admission_receipt=admission,
+        predecessor_wave_receipt=broken_w1,
+        predecessor_wave_chain=(w0,),
+    )
+    assert result["status"] == "NOT_PASS"
+    assert any("does not derive PASS" in r for r in result["reasons"])
+    # 竄改 predecessor digest 綁定 → NOT_PASS。
+    forged = deepcopy(_w2)
+    forged["predecessor_wave_receipt_digest"] = "sha256:" + "0" * 64
+    forged["self_digest"] = validator.artifact_self_digest(forged)
+    result = validator.derive_wave_exit_status(
+        forged,
+        source_admission_receipt=admission,
+        predecessor_wave_receipt=w1,
+        predecessor_wave_chain=(w0,),
+    )
+    assert result["status"] == "NOT_PASS"
+    assert any(
+        "predecessor_wave_receipt_digest does not bind" in r for r in result["reasons"]
+    )
+
+
+def test_w2_abi_folds_live_split_and_closure_verdicts(monkeypatch) -> None:
+    # §10.3 W2 exit:privilege-split / application-closure 兩個活裁決折進 exported-ABI——
+    # 任一被降為非 PASS(模擬源碼回歸)→ 投影變值 + 顯式 reason → W2 導出失敗。
+    admission, w0, w1, w2 = _w2_chain()
+    monkeypatch.setattr(
+        install,
+        "derive_engine_scanner_privilege_split",
+        lambda repo_root=None, **kwargs: {
+            "status": "ENGINE_SCANNER_PRIVILEGE_SPLIT_REQUIRED",
+            "manifest_digest": None,
+        },
+    )
+    result = validator.derive_wave_exit_status(
+        w2,
+        source_admission_receipt=admission,
+        predecessor_wave_receipt=w1,
+        predecessor_wave_chain=(w0,),
+    )
+    assert result["status"] == "NOT_PASS"
+    assert any(
+        "engine-scanner privilege-split does not re-derive PASS" in r
+        for r in result["reasons"]
+    )
+
+
+def test_w2_unit_template_drift_breaks_derivation(monkeypatch) -> None:
+    # template 檔漂移(≠ code-owned 渲染形狀)→ unit_template_matches_renderer=False → 拒。
+    import agent_governance_s2_4_render as render
+
+    admission, w0, w1, w2 = _w2_chain()
+    monkeypatch.setattr(
+        render, "unit_template_text", lambda: "[Service]\nExecStart=/bin/sh\n"
+    )
+    result = validator.derive_wave_exit_status(
+        w2,
+        source_admission_receipt=admission,
+        predecessor_wave_receipt=w1,
+        predecessor_wave_chain=(w0,),
+    )
+    assert result["status"] == "NOT_PASS"
+    assert any("unit template" in r for r in result["reasons"])
+
+
+def test_w2_owned_paths_exist_and_cover_the_w2_surfaces() -> None:
+    dead = [p for p in validator._W2_OWNED_PATHS if not (ROOT / p).is_file()]
+    assert not dead, f"W2 owned paths contain dead entries: {dead}"
+    required = {
+        "helper_scripts/deploy/arcane-equilibrium-aiml-engine-scanner.service.template",
+        "helper_scripts/maintenance_scripts/agent_governance_s2_4_install.py",
+        "helper_scripts/maintenance_scripts/agent_governance_s2_4_render.py",
+        "program_code/ml_training/aiml_gate_receipt_wave_w2.py",
+        "program_code/ml_training/alr_event_consumer.py",
+        "program_code/ml_training/application_bundle_runtime_closure_v1.json",
+        "program_code/ml_training/pg_acl_manifest_v1.json",
+        "program_code/ml_training/schemas/aiml_gate_receipts/base_runtime_tree_manifest_v1.schema.json",
+        "program_code/ml_training/schemas/aiml_gate_receipts/launch_bundle_manifest_v1.schema.json",
+        "tests/structure/test_agent_governance_s2_4_install_render.py",
+    }
+    missing = required - set(validator._W2_OWNED_PATHS)
+    assert not missing, f"W2 owned-path binding misses: {sorted(missing)}"
+
+
 # ── §9.1 replay 綁定謂詞(驗證層消費語義;§10.5 #9/#36)─────────────────────────
 _AUTH_ISSUED = "2026-07-24T00:00:00+00:00"
 _AUTH_EXPIRES = "2026-07-24T00:10:00+00:00"

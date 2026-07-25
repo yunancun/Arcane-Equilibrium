@@ -58,6 +58,18 @@ W1_REGENERATED_W0_ADMISSION_FILENAME = (
 )
 W1_REGENERATED_W0_WAVE_EXIT_FILENAME = "S2.4-WP4-W1-regenerated-W0-wave-exit-receipt-v1.json"
 W1_DERIVATION_RECORD_FILENAME = "S2.4-WP4-W1-derivation-record.json"
+# ── W2(runnable application)wave-exit 發射面(鏡 W1;歷史 W1 receipts 只作 lineage)──
+W1_RECEIPT_DIR = (
+    REPO_ROOT / "docs" / "execution_plan" / "ai_ml_landing" / "receipts" / W1_RECEIPT_DIRNAME
+)
+W2_RECEIPT_DIRNAME = "S2.4-WP4-W2"
+W2_WAVE_EXIT_FILENAME = "S2.4-WP4-W2-wave-exit-receipt-v1.json"
+W2_REGENERATED_W0_ADMISSION_FILENAME = (
+    "S2.4-WP4-W2-regenerated-W0-source-admission-receipt-v1.json"
+)
+W2_REGENERATED_W0_WAVE_EXIT_FILENAME = "S2.4-WP4-W2-regenerated-W0-wave-exit-receipt-v1.json"
+W2_REGENERATED_W1_WAVE_EXIT_FILENAME = "S2.4-WP4-W2-regenerated-W1-wave-exit-receipt-v1.json"
+W2_DERIVATION_RECORD_FILENAME = "S2.4-WP4-W2-derivation-record.json"
 
 
 def _validate_emit_evidence(
@@ -1042,6 +1054,27 @@ def generate_engine_scanner_grant_sql(manifest: dict[str, Any]) -> list[str]:
 import alr_application_identity as _app_identity  # noqa: E402(ml_training 已入 sys.path)
 import learning_runtime_manifest as _lrm  # noqa: E402
 
+# --------------------------------------------------------------------------- #
+# W2c(§8.3/§8.1 #2/#4/§10.5 #21/#22)渲染與 manifest-builder 葉:實作依 2000 行治理
+# 拆分下沉至 agent_governance_s2_4_render,此處逐名 re-export(ABI 經本模組不變)。
+# --------------------------------------------------------------------------- #
+from agent_governance_s2_4_render import (  # noqa: E402,F401
+    ENGINE_SCANNER_ENV_KEYS,
+    UNIT_NAME as ENGINE_SCANNER_UNIT_NAME,
+    UNIT_TEMPLATE_REL as ENGINE_SCANNER_UNIT_TEMPLATE_REL,
+    EngineScannerUnitRenderError,
+    build_base_runtime_tree_manifest,
+    build_launch_bundle_manifest,
+    derive_candidate_evidence_directory_status,
+    derive_candidate_policy_status,
+    derive_rendered_unit_status,
+    engine_scanner_rendered_invocation_contract,
+    launch_tree_walk_digest,
+    render_candidate_policy,
+    render_engine_scanner_unit,
+    unit_template_text,
+)
+
 _APP_CLOSURE_REL = _app_identity.RUNTIME_CLOSURE_REL
 # effect-capable / broker-order / credential 的 deny 謂詞(§8.1 builder rejects)。
 _BUNDLE_FORBIDDEN_PATH_MARKERS = ("/tests/", "/__pycache__/", "/.git/")
@@ -1364,6 +1397,274 @@ def build_application_bundle_manifest(
     }
 
 
+# --------------------------------------------------------------------------- #
+# W2(§10.3 W2 row)wave-exit 中央導出 + w2-emit(鏡 w1-emit)。
+# 鏈路:記憶體重發「當前世代」W0 admission → W0 wave-exit → W1 wave-exit → 構建 W2
+# wave-exit 綁定該鏈,由中央 validator 導出 PASS(predecessor=W1 物件,其自身鏈以
+# predecessor_wave_chain=(W0,) 遞迴再導出)。歷史持久化 W1 receipts 只作 lineage。
+# --------------------------------------------------------------------------- #
+def build_w2_wave_exit_receipt(
+    admission: dict[str, Any],
+    predecessor_wave_exit: dict[str, Any],
+    *,
+    test_digests: list[str],
+    capture_digests: list[str],
+    review_fragment_digests: list[str],
+) -> dict[str, Any]:
+    """綁定當前世代 W0/W1 鏈與真實 test/capture/review 證據 digest 的 W2 wave-exit(無 status)。
+
+    W2 面(owned-path/diff/exported-ABI)全由中央 validator 的 code-owned W2 投影於活 repo
+    重算(exported-ABI 折入 privilege-split / application-closure 兩個活裁決);predecessor
+    綁 W1 wave-exit 的 self_digest。
+    """
+
+    receipt: dict[str, Any] = {
+        "schema_version": "s2_4_wave_exit_receipt_v1",
+        "wave": "W2",
+        "predecessor_wave_receipt_digest": predecessor_wave_exit["self_digest"],
+        "source_admission_receipt_digest": admission["self_digest"],
+        "source_head": admission["source_head"],
+        "owned_path_manifest_digest": central_validator.canonical_digest(
+            sorted(central_validator._W2_OWNED_PATHS)
+        ),
+        "owned_path_diff_digest": central_validator.w2_owned_path_diff_digest(),
+        "exported_abi_digest": central_validator.canonical_digest(
+            central_validator.w2_exported_abi_projection()
+        ),
+        "test_digests": list(test_digests),
+        "capture_digests": list(capture_digests),
+        "review_fragment_digests": list(review_fragment_digests),
+        "production_authority_flags": {
+            "nine_authorities_false": True,
+            "production_apply_performed": False,
+            "running_attested": False,
+        },
+    }
+    receipt["self_digest"] = central_validator.artifact_self_digest(receipt)
+    return receipt
+
+
+def _load_persisted_w1_receipts(w1_receipt_dir: Path) -> dict[str, Any] | None:
+    """讀持久化的歷史 W1 receipts(lineage 記錄用;讀不到/畸形回 None → 發射 fail-closed)。
+
+    同 `_load_persisted_w0_receipts` 的 E2 P3-2 姿態:三份 receipt(W1 wave-exit + 其
+    regenerated W0 admission/wave-exit)的 ``self_digest`` 就地重算比對,竄改即
+    SELF_DIGEST_MISMATCH(caller 硬拒發射,屬停機調查事件)。
+    """
+
+    try:
+        w1_wave_exit = json.loads(
+            (w1_receipt_dir / W1_WAVE_EXIT_FILENAME).read_text(encoding="utf-8")
+        )
+        w0_admission = json.loads(
+            (w1_receipt_dir / W1_REGENERATED_W0_ADMISSION_FILENAME).read_text(
+                encoding="utf-8"
+            )
+        )
+        w0_wave_exit = json.loads(
+            (w1_receipt_dir / W1_REGENERATED_W0_WAVE_EXIT_FILENAME).read_text(
+                encoding="utf-8"
+            )
+        )
+    except (OSError, json.JSONDecodeError):
+        return None
+    artifacts = (w1_wave_exit, w0_admission, w0_wave_exit)
+    if not all(isinstance(item, dict) and item.get("self_digest") for item in artifacts):
+        return None
+    integrity = (
+        "VERIFIED"
+        if all(
+            item["self_digest"] == central_validator.artifact_self_digest(item)
+            for item in artifacts
+        )
+        else "SELF_DIGEST_MISMATCH"
+    )
+    return {
+        "persisted_dir": str(w1_receipt_dir),
+        "w1_wave_exit_self_digest": w1_wave_exit["self_digest"],
+        "regenerated_w0_admission_self_digest": w0_admission["self_digest"],
+        "regenerated_w0_wave_exit_self_digest": w0_wave_exit["self_digest"],
+        "historical_source_head": w1_wave_exit.get("source_head"),
+        "historical_w1_integrity": integrity,
+    }
+
+
+def emit_w2_receipts(
+    *,
+    repo_root: Path = REPO_ROOT,
+    out_dir: Path,
+    test_evidence: dict[str, Any],
+    review_provenance: list[dict[str, Any]],
+    w1_receipt_dir: Path = W1_RECEIPT_DIR,
+) -> dict[str, Any]:
+    """發射並持久化正式 W2 wave-exit receipt;任一導出非 ADMITTED/PASS 即 fail-closed 不寫檔。
+
+    鏈路(鏡 w1-emit;§10.3 W2 row):
+      1. 讀持久化的歷史 W1 receipts 作 lineage 記錄(其 source_head 為歷史世代,「不」
+         直接進 derivation 鏈;竄改 → 硬拒);
+      2. 以同一批 builder 於記憶體內重發「當前世代」W0 admission + W0/W1 wave-exit 並逐段
+         導出 ADMITTED/PASS;
+      3. 構建 W2 wave-exit 綁定該鏈,由中央 validator 導出 W2 PASS(predecessor=W1 物件 +
+         predecessor_wave_chain=(W0,) 遞迴鏈);
+      4. 中央閘結構驗全過後,持久化 W2 receipt + 當前世代 W0/W1 鏈 + derivation record。
+    """
+
+    _validate_emit_evidence(test_evidence, review_provenance)
+
+    historical_w1 = _load_persisted_w1_receipts(w1_receipt_dir)
+    if historical_w1 is None:
+        return {
+            "status": "W2_EMIT_REFUSED",
+            "stage": "historical_w1_receipts",
+            "reasons": [
+                f"persisted W1 receipts are unreadable or malformed under {w1_receipt_dir}"
+            ],
+        }
+    if historical_w1.get("historical_w1_integrity") != "VERIFIED":
+        return {
+            "status": "W2_EMIT_REFUSED",
+            "stage": "historical_w1_receipts",
+            "reasons": [
+                "persisted W1 receipts fail self-digest verification "
+                "(tampered governance history; investigate before any W2 emission)"
+            ],
+        }
+
+    admission = build_w0_source_admission_receipt(repo_root)
+    admission_result = central_validator.derive_source_admission_status(
+        admission, repo_root=repo_root
+    )
+    if admission_result["status"] != "ADMITTED":
+        return {
+            "status": "W2_EMIT_REFUSED",
+            "stage": "regenerated_w0_admission",
+            "reasons": admission_result["reasons"],
+        }
+
+    test_digests = [central_validator.canonical_digest(test_evidence)]
+    capture_digests = [
+        central_validator.canonical_digest(
+            {"kind": "raw_local_test_capture", "record": test_evidence}
+        )
+    ]
+    review_digests = [
+        central_validator.canonical_digest(item) for item in review_provenance
+    ]
+
+    w0_wave_exit = build_w0_wave_exit_receipt(
+        admission,
+        test_digests=test_digests,
+        capture_digests=capture_digests,
+        review_fragment_digests=review_digests,
+    )
+    w0_result = central_validator.derive_wave_exit_status(
+        w0_wave_exit, repo_root=repo_root, source_admission_receipt=admission
+    )
+    if w0_result["status"] != "PASS":
+        return {
+            "status": "W2_EMIT_REFUSED",
+            "stage": "regenerated_w0_wave_exit",
+            "reasons": w0_result["reasons"],
+        }
+
+    w1_wave_exit = build_w1_wave_exit_receipt(
+        admission,
+        w0_wave_exit,
+        test_digests=test_digests,
+        capture_digests=capture_digests,
+        review_fragment_digests=review_digests,
+    )
+    w1_result = central_validator.derive_wave_exit_status(
+        w1_wave_exit,
+        repo_root=repo_root,
+        source_admission_receipt=admission,
+        predecessor_wave_receipt=w0_wave_exit,
+    )
+    if w1_result["status"] != "PASS":
+        return {
+            "status": "W2_EMIT_REFUSED",
+            "stage": "regenerated_w1_wave_exit",
+            "reasons": w1_result["reasons"],
+        }
+
+    w2_wave_exit = build_w2_wave_exit_receipt(
+        admission,
+        w1_wave_exit,
+        test_digests=test_digests,
+        capture_digests=capture_digests,
+        review_fragment_digests=review_digests,
+    )
+    w2_result = central_validator.derive_wave_exit_status(
+        w2_wave_exit,
+        repo_root=repo_root,
+        source_admission_receipt=admission,
+        predecessor_wave_receipt=w1_wave_exit,
+        predecessor_wave_chain=(w0_wave_exit,),
+    )
+    if w2_result["status"] != "PASS":
+        return {
+            "status": "W2_EMIT_REFUSED",
+            "stage": "w2_wave_exit",
+            "reasons": w2_result["reasons"],
+        }
+
+    central_errors = central_validator.validate_aiml_artifact(admission)
+    central_errors += central_validator.validate_aiml_artifact(w0_wave_exit)
+    central_errors += central_validator.validate_aiml_artifact(w1_wave_exit)
+    central_errors += central_validator.validate_aiml_artifact(w2_wave_exit)
+    if central_errors:
+        return {
+            "status": "W2_EMIT_REFUSED",
+            "stage": "central_gate",
+            "reasons": central_errors,
+        }
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    derivation_record = {
+        "schema_version": "s2_4_w2_derivation_record_v1_informal",
+        "source_head": admission["source_head"],
+        "admission_derivation": admission_result,
+        "regenerated_w0_wave_exit_derivation": w0_result,
+        "regenerated_w1_wave_exit_derivation": w1_result,
+        "w2_wave_exit_derivation": w2_result,
+        "admission_self_digest": admission["self_digest"],
+        "regenerated_w0_wave_exit_self_digest": w0_wave_exit["self_digest"],
+        "regenerated_w1_wave_exit_self_digest": w1_wave_exit["self_digest"],
+        "w2_wave_exit_self_digest": w2_wave_exit["self_digest"],
+        # lineage:歷史持久化 W1 的 digests/世代(僅記錄;derivation 綁的是當前世代重發鏈)。
+        "historical_persisted_w1": historical_w1,
+        "test_evidence": test_evidence,
+        "review_provenance": review_provenance,
+        "replay_note": (
+            "W2 re-derivation binds source_head == checkout HEAD; to replay, checkout "
+            "source_head, rebuild the in-memory W0/W1 chain with the same builders, then run "
+            "derive_wave_exit_status(w2, source_admission_receipt=admission, "
+            "predecessor_wave_receipt=w1_wave_exit, predecessor_wave_chain=(w0_wave_exit,))"
+        ),
+    }
+    for name, artifact in (
+        (W2_WAVE_EXIT_FILENAME, w2_wave_exit),
+        (W2_REGENERATED_W0_ADMISSION_FILENAME, admission),
+        (W2_REGENERATED_W0_WAVE_EXIT_FILENAME, w0_wave_exit),
+        (W2_REGENERATED_W1_WAVE_EXIT_FILENAME, w1_wave_exit),
+        (W2_DERIVATION_RECORD_FILENAME, derivation_record),
+    ):
+        (out_dir / name).write_text(
+            json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    return {
+        "status": "W2_RECEIPTS_EMITTED",
+        "out_dir": str(out_dir),
+        "source_head": admission["source_head"],
+        "admission_self_digest": admission["self_digest"],
+        "regenerated_w0_wave_exit_self_digest": w0_wave_exit["self_digest"],
+        "regenerated_w1_wave_exit_self_digest": w1_wave_exit["self_digest"],
+        "w2_wave_exit_self_digest": w2_wave_exit["self_digest"],
+        "historical_persisted_w1": historical_w1,
+    }
+
+
 def _main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="action", required=True)
@@ -1378,6 +1679,13 @@ def _main(argv: list[str] | None = None) -> int:
     w1_emit.add_argument("--out", required=True, type=Path)
     w1_emit.add_argument("--test-evidence", required=True, type=Path)
     w1_emit.add_argument("--review-provenance", required=True, type=Path)
+    w2_emit = sub.add_parser(
+        "w2-emit",
+        help="發射並持久化正式 W2 wave-exit receipt(記憶體重發當前世代 W0+W1 鏈並綁定)",
+    )
+    w2_emit.add_argument("--out", required=True, type=Path)
+    w2_emit.add_argument("--test-evidence", required=True, type=Path)
+    w2_emit.add_argument("--review-provenance", required=True, type=Path)
     sub.add_parser(
         "engine-scanner-split",
         help="再導出 §2.1 engine-scanner privilege-split verdict(typed;不可自證)",
@@ -1425,6 +1733,16 @@ def _main(argv: list[str] | None = None) -> int:
         )
         print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
         return 0 if result["status"] == "W1_RECEIPTS_EMITTED" else 2
+    if args.action == "w2-emit":
+        result = emit_w2_receipts(
+            out_dir=args.out,
+            test_evidence=json.loads(args.test_evidence.read_text(encoding="utf-8")),
+            review_provenance=json.loads(
+                args.review_provenance.read_text(encoding="utf-8")
+            ),
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0 if result["status"] == "W2_RECEIPTS_EMITTED" else 2
     return 2
 
 

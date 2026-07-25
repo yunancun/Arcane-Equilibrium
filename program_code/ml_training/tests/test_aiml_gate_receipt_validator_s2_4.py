@@ -1006,16 +1006,20 @@ def test_cp2b_schema_files_resolve_to_real_files() -> None:
     # CP2a(14)+ CP2b(16)加上既有基線 → 中央 SCHEMA_FILES 委派表 = 65;
     # W2a(§2.1)additive 註冊 pg_acl_manifest_v1 → 66;
     # W2b(§8.1)additive 註冊 application_bundle_runtime_closure_v1 +
-    # application_bundle_manifest_v1 → 68。
-    assert len(SCHEMA_FILES) == 68
+    # application_bundle_manifest_v1 → 68;
+    # W2c(§8.1 #2/#4)additive 註冊 base_runtime_tree_manifest_v1 +
+    # launch_bundle_manifest_v1 → 70。
+    assert len(SCHEMA_FILES) == 70
     assert "pg_acl_manifest_v1" in SCHEMA_FILES
     assert (SCHEMA_DIR / SCHEMA_FILES["pg_acl_manifest_v1"]).is_file()
-    for w2b_key in (
+    for w2_key in (
         "application_bundle_runtime_closure_v1",
         "application_bundle_manifest_v1",
+        "base_runtime_tree_manifest_v1",
+        "launch_bundle_manifest_v1",
     ):
-        assert w2b_key in SCHEMA_FILES
-        assert (SCHEMA_DIR / SCHEMA_FILES[w2b_key]).is_file()
+        assert w2_key in SCHEMA_FILES
+        assert (SCHEMA_DIR / SCHEMA_FILES[w2_key]).is_file()
 
 
 @pytest.mark.parametrize("key", _CP2B_KEYS)
@@ -1581,3 +1585,84 @@ def test_package_form_resolver_hits_loaded_facade_without_second_copy() -> None:
     )
     assert result.returncode == 0, result.stderr
     assert "SEAM_OK" in result.stdout
+
+
+# ── S2.4 · WP4 · W2c(base/launch manifest 契約 schema)─────────────────────────
+_W2C_D = "sha256:" + "c" * 64
+
+
+def _w2c_fixtures() -> dict:
+    base = {
+        "schema_version": "base_runtime_tree_manifest_v1",
+        "program_id": "AIML-LONG-LIVED-LANDING-V2",
+        "component": "engine_scanner",
+        "runtime_content_digest": _W2C_D,
+        "target_platform": "x86_64-unknown-linux-gnu",
+        "build_tool_versions": [{"tool": "python3", "version": "3.12.3"}],
+        "interpreter_target": "bin/python3",
+        "native_libraries": [{"path": "lib/libssl.so.3", "sha256": _W2C_D}],
+        "entries": [
+            {"path": "bin", "type": "dir", "mode": "0755", "sha256": None},
+            {"path": "bin/python3", "type": "file", "mode": "0555", "sha256": _W2C_D},
+            {"path": "lib", "type": "dir", "mode": "0755", "sha256": None},
+            {"path": "lib/libssl.so.3", "type": "file", "mode": "0555", "sha256": _W2C_D},
+        ],
+    }
+    base["self_digest"] = artifact_self_digest(base)
+    launch = {
+        "schema_version": "launch_bundle_manifest_v1",
+        "program_id": "AIML-LONG-LIVED-LANDING-V2",
+        "component": "engine_scanner",
+        "runtime_content_digest": _W2C_D,
+        "base_runtime_tree_digest": "sha256:" + "d" * 64,
+        "application_bundle_digest": "sha256:" + "e" * 64,
+        "launcher_config_digest": "sha256:" + "f" * 64,
+        "launch_tree_digest": "sha256:" + "1" * 64,
+        "target_platform": "x86_64-unknown-linux-gnu",
+    }
+    launch["self_digest"] = artifact_self_digest(launch)
+    return {
+        "base_runtime_tree_manifest_v1": base,
+        "launch_bundle_manifest_v1": launch,
+    }
+
+
+@pytest.mark.parametrize(
+    "key", ("base_runtime_tree_manifest_v1", "launch_bundle_manifest_v1")
+)
+def test_w2c_manifest_round_trip_validates_clean(key: str) -> None:
+    fixture = _w2c_fixtures()[key]
+    assert validate_aiml_artifact(fixture) == [], key
+    assert fixture["schema_version"] == key
+
+
+@pytest.mark.parametrize(
+    "key", ("base_runtime_tree_manifest_v1", "launch_bundle_manifest_v1")
+)
+def test_w2c_manifest_extra_key_and_self_digest_tamper_rejected(key: str) -> None:
+    fixture = deepcopy(_w2c_fixtures()[key])
+    fixture["__unexpected_extra__"] = "x"
+    fixture["self_digest"] = artifact_self_digest(fixture)
+    errors = validate_aiml_artifact(fixture)
+    assert any("unexpected property" in e or "__unexpected_extra__" in e for e in errors)
+    tampered = deepcopy(_w2c_fixtures()[key])
+    tampered["runtime_content_digest"] = "sha256:" + "0" * 64  # 改 byte 不重封
+    assert any("self_digest" in e for e in validate_aiml_artifact(tampered))
+
+
+def test_w2c_base_manifest_canonical_sortedness_and_type_coherence() -> None:
+    # entries 亂序(重封 self_digest)→ canonical 排序驗抓。
+    shuffled = deepcopy(_w2c_fixtures()["base_runtime_tree_manifest_v1"])
+    shuffled["entries"] = list(reversed(shuffled["entries"]))
+    shuffled["self_digest"] = artifact_self_digest(shuffled)
+    assert any("sorted" in e for e in validate_aiml_artifact(shuffled))
+    # dir 帶 digest(file↔digest 不一致)→ 抓。
+    incoherent = deepcopy(_w2c_fixtures()["base_runtime_tree_manifest_v1"])
+    incoherent["entries"][0]["sha256"] = _W2C_D
+    incoherent["self_digest"] = artifact_self_digest(incoherent)
+    assert any("null for dirs" in e for e in validate_aiml_artifact(incoherent))
+    # interpreter_target 缺席於 entries → 抓。
+    orphan = deepcopy(_w2c_fixtures()["base_runtime_tree_manifest_v1"])
+    orphan["entries"] = [e for e in orphan["entries"] if e["path"] != "bin/python3"]
+    orphan["self_digest"] = artifact_self_digest(orphan)
+    assert any("interpreter_target" in e for e in validate_aiml_artifact(orphan))

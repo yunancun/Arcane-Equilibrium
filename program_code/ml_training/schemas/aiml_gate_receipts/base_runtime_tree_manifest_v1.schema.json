@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/base_runtime_tree_manifest_v1.schema.json",
+  "title": "base_runtime_tree_manifest_v1",
+  "description": "S2.4 §8.1 content identity #2: canonical manifest of the ACTUAL installed staging tree created in PREPARE. Sorted immutable-tree entries bind {path, type, mode, sha256} (dirs carry null sha256; files are 0444/0555 only) plus the interpreter target (bin/python3), the native-library inventory, the unchanged S2.3 runtime_content_digest, the target platform token and the build-tool versions. self_digest IS base_runtime_tree_digest and names the immutable leaf /opt/arcane-equilibrium/aiml/runtimes/<64-hex>. Produced by agent_governance_s2_4_render.build_base_runtime_tree_manifest from a caller-provided staging root only (tmp-dir tests; no production path contact); symlinks, devices, group/other-writable entries and path escapes are typed rejections before any output. self_digest is integrity evidence only and never a runtime/production claim.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "program_id",
+    "component",
+    "runtime_content_digest",
+    "target_platform",
+    "build_tool_versions",
+    "interpreter_target",
+    "native_libraries",
+    "entries",
+    "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "base_runtime_tree_manifest_v1"},
+    "program_id": {"const": "AIML-LONG-LIVED-LANDING-V2"},
+    "component": {"const": "engine_scanner"},
+    "runtime_content_digest": {"$ref": "#/$defs/digest"},
+    "target_platform": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.\\-]*$"},
+    "build_tool_versions": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["tool", "version"],
+        "properties": {
+          "tool": {"type": "string", "pattern": "^[A-Za-z0-9_.+\\-]+$"},
+          "version": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "interpreter_target": {"const": "bin/python3"},
+    "native_libraries": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "sha256"],
+        "properties": {
+          "path": {"$ref": "#/$defs/tree_path"},
+          "sha256": {"$ref": "#/$defs/digest"}
+        }
+      }
+    },
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "type", "mode", "sha256"],
+        "properties": {
+          "path": {"$ref": "#/$defs/tree_path"},
+          "type": {"enum": ["file", "dir"]},
+          "mode": {"enum": ["0444", "0555", "0755"]},
+          "sha256": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/digest"}]}
+        }
+      }
+    },
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "tree_path": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.+\\-]+(/[A-Za-z0-9_.+\\-]+)*$",
+      "not": {"pattern": "(^|/)\\.\\.(/|$)"}
+    }
+  }
+}
