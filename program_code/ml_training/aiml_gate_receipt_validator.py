@@ -94,6 +94,29 @@ SCHEMA_FILES = {
     # 一律先拒);此為 source-seam 完整性再導出,通過「不」等於認證任何 runtime(九 authority 全 false)。
     "s2_4_source_admission_receipt_v1": "s2_4_source_admission_receipt_v1.schema.json",
     "s2_4_wave_exit_receipt_v1": "s2_4_wave_exit_receipt_v1.schema.json",
+    # S2.4(WP4·W1·CP2a)——additive:capability-probe 家族(HOST_CAPABILITY_PROBE row,§4/§5.1)
+    # 與 prepare 家族(LEARNING_RUNTIME_PREPARE row)的 PREPARE->sign->APPLY 契約 schema:unsigned
+    # core(排除 id/authorization/self_digest,digest 導 id)、closed route-class intent、terminal
+    # effect receipt、WAL journal、獨立 postcheck、per-row rollback,加 network_sandbox 能力 attestation
+    # 與 prepared-install bundle(base/app/launch manifest 僅以 digest-string 綁,manifest schema 屬 W2)。
+    # 加這 14 鍵純為 schema 查找,絕不進入 aiml_effect_classifier_digest() 的六個 S0.3 常量輸入
+    # (見 :46-48/§7.2),S0.3 分類身分不動;亦不改 PROGRAM_SCHEMA_PATHS 與 v1/v2 component matrix/digest。
+    # 全為契約:無 schema 斷言 runtime/production PASS,九 authority 於 receipt 皆 const-false,
+    # secret 一律以 digest/handle 綁,絕不含明文;真 driver/effect/routing 屬後續 CP3-CP6/W2-W6。
+    "s2_4_capability_probe_core_v1": "s2_4_capability_probe_core_v1.schema.json",
+    "s2_4_capability_probe_intent_v1": "s2_4_capability_probe_intent_v1.schema.json",
+    "s2_4_capability_probe_effect_receipt_v1": "s2_4_capability_probe_effect_receipt_v1.schema.json",
+    "s2_4_capability_probe_journal_v1": "s2_4_capability_probe_journal_v1.schema.json",
+    "s2_4_capability_probe_postcheck_v1": "s2_4_capability_probe_postcheck_v1.schema.json",
+    "s2_4_capability_probe_rollback_v1": "s2_4_capability_probe_rollback_v1.schema.json",
+    "network_sandbox_capability_attestation_v1": "network_sandbox_capability_attestation_v1.schema.json",
+    "s2_4_prepare_core_v1": "s2_4_prepare_core_v1.schema.json",
+    "s2_4_prepare_intent_v1": "s2_4_prepare_intent_v1.schema.json",
+    "s2_4_prepare_effect_receipt_v1": "s2_4_prepare_effect_receipt_v1.schema.json",
+    "s2_4_prepare_journal_v1": "s2_4_prepare_journal_v1.schema.json",
+    "s2_4_prepare_postcheck_v1": "s2_4_prepare_postcheck_v1.schema.json",
+    "s2_4_prepare_rollback_v1": "s2_4_prepare_rollback_v1.schema.json",
+    "s2_4_prepared_install_bundle_v1": "s2_4_prepared_install_bundle_v1.schema.json",
 }
 
 S0_DEPENDENCY_DIGESTS = {

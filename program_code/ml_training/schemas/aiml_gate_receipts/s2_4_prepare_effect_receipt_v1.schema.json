@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2_4_prepare_effect_receipt_v1.schema.json",
+  "title": "s2_4_prepare_effect_receipt_v1",
+  "description": "Terminal receipt for one S2.4 LEARNING_RUNTIME_PREPARE phase (§5.1 point 2). After the prepared-bundle digest is fixed, PREPARE closes/fsyncs its journal, runs the independent residue postcheck and emits this receipt binding the intent/authorization identity, the prepared_install_bundle digest, the staging device/inode locator, the terminal journal, the consumed replay-ledger entry, and the postcheck/rollback digests. production_authority_flags keep the nine authorities false and production_apply_performed/running_attested false: PREPARE builds/hashes private staging only and never publishes into /opt or changes UID/PG/credential/persistent-unit state. self_digest is integrity evidence only.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "prepare_id",
+    "prepare_core_digest",
+    "authorization_id",
+    "authorization_digest",
+    "prepared_install_bundle_digest",
+    "staging_locator",
+    "journal_digest",
+    "consumed_replay_entry_digest",
+    "postcheck_digest",
+    "rollback_digest",
+    "terminal_status",
+    "evidence_class",
+    "source_head",
+    "target_host",
+    "trusted_host_time",
+    "observed_at",
+    "expires_at",
+    "production_authority_flags",
+    "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2_4_prepare_effect_receipt_v1"},
+    "prepare_id": {"$ref": "#/$defs/prepare_id"},
+    "prepare_core_digest": {"$ref": "#/$defs/digest"},
+    "authorization_id": {"$ref": "#/$defs/digest"},
+    "authorization_digest": {"$ref": "#/$defs/digest"},
+    "prepared_install_bundle_digest": {"$ref": "#/$defs/digest"},
+    "staging_locator": {"$ref": "#/$defs/staging_locator"},
+    "journal_digest": {"$ref": "#/$defs/digest"},
+    "consumed_replay_entry_digest": {"$ref": "#/$defs/digest"},
+    "postcheck_digest": {"$ref": "#/$defs/digest"},
+    "rollback_digest": {"$ref": "#/$defs/digest"},
+    "terminal_status": {"enum": ["PREPARED", "PREPARED_BUNDLE_INVALID", "PREPARE_FAILED", "RECOVERY_REQUIRED"]},
+    "evidence_class": {"enum": ["PLATFORM_ATTESTED", "PLATFORM_OR_EXTERNAL_ATTESTED", "STRUCTURAL_ONLY"]},
+    "source_head": {"$ref": "#/$defs/git_sha"},
+    "target_host": {"type": "string", "minLength": 1},
+    "trusted_host_time": {"$ref": "#/$defs/timestamp"},
+    "observed_at": {"$ref": "#/$defs/timestamp"},
+    "expires_at": {"$ref": "#/$defs/timestamp"},
+    "production_authority_flags": {"$ref": "#/$defs/production_authority_flags"},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "git_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "prepare_id": {"type": "string", "pattern": "^s2-4-prepare-[0-9a-f]{64}$"},
+    "staging_locator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["staging_root", "device", "inode"],
+      "properties": {
+        "staging_root": {"type": "string", "minLength": 1},
+        "device": {"type": "integer", "minimum": 0},
+        "inode": {"type": "integer", "minimum": 0}
+      }
+    },
+    "production_authority_flags": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["nine_authorities_false", "production_apply_performed", "running_attested"],
+      "properties": {
+        "nine_authorities_false": {"const": true},
+        "production_apply_performed": {"const": false},
+        "running_attested": {"const": false}
+      }
+    }
+  }
+}

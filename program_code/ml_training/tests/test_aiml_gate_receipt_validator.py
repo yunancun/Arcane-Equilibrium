@@ -2465,3 +2465,532 @@ def test_w0_derivation_tamper_rejections() -> None:
     rc = _w0.derive_wave_exit_status(wave_exit, source_admission_receipt=base)
     assert rc["status"] == "NOT_PASS"
     assert any("owned_path_manifest_digest" in r for r in rc["reasons"])
+
+
+# ── S2.4 · WP4 · W1 · CP2a(capability-probe + prepare 契約 schema)─────────────
+# 這 14 份 closed schema 皆屬「契約」:round-trip 乾淨、additionalProperties 拒外鍵、
+# unsigned core 排除 id/auth/self_digest、const-false 生產旗標與 allOf 有牙(不得斷言 runtime PASS)。
+_CP2A_D = "sha256:" + "a" * 64
+_CP2A_D2 = "sha256:" + "b" * 64
+_CP2A_GIT = "0" * 40
+_CP2A_TS = "2026-07-24T00:00:00+00:00"
+_CP2A_PROBE_HEX = "c" * 64
+_CP2A_PREP_HEX = "d" * 64
+_CP2A_PROBE_ID = "s2-4-probe-" + _CP2A_PROBE_HEX
+_CP2A_PREP_ID = "s2-4-prepare-" + _CP2A_PREP_HEX
+_CP2A_UNIT = "arcane-aiml-s2-4-probe-" + _CP2A_PROBE_HEX + ".service"
+_CP2A_STAGING = "/var/lib/arcane-equilibrium/aiml/install/s2_4/prepared/" + _CP2A_PREP_ID
+
+
+def _cp2a_probe_core() -> dict:
+    return {
+        "schema_version": "s2_4_capability_probe_core_v1",
+        "probe_scope": "PREPARE_SANDBOX",
+        "transient_unit_property_digest": _CP2A_D,
+        "host_cgroup_identity": {
+            "host": "trade-core",
+            "cgroup_manager_scope": "system_manager",
+            "cgroup_root_pattern": "/sys/fs/cgroup/system.slice",
+        },
+        "cleanup_budget": {"max_cleanup_seconds": 30, "max_cgroup_drain_seconds": 10},
+        "source_head": _CP2A_GIT,
+        "target_host": "trade-core",
+        "created_at": _CP2A_TS,
+    }
+
+
+def _cp2a_prepare_core() -> dict:
+    return {
+        "schema_version": "s2_4_prepare_core_v1",
+        "staging_root_device_inode": {
+            "staging_parent_path": "/var/lib/arcane-equilibrium/aiml/install/s2_4/prepared",
+            "device": 66306,
+            "inode": 12345,
+        },
+        "resource_budget": {"max_bytes": 1048576, "max_seconds": 600},
+        "fetch_budget": {"max_fetch_bytes": 524288, "max_fetch_seconds": 300, "max_artifacts": 32},
+        "build_budget": {"max_build_bytes": 524288, "max_build_seconds": 600},
+        "source_head": _CP2A_GIT,
+        "target_host": "trade-core",
+        "created_at": _CP2A_TS,
+    }
+
+
+def _cp2a_fixtures() -> dict:
+    probe_core = _cp2a_probe_core()
+    probe_core_digest = canonical_digest(probe_core)
+    prepare_core = _cp2a_prepare_core()
+    prepare_core_digest = canonical_digest(prepare_core)
+    staging_locator = {"staging_root": _CP2A_STAGING, "device": 66306, "inode": 22222}
+
+    artifacts: dict[str, dict] = {}
+
+    artifacts["s2_4_capability_probe_core_v1"] = probe_core
+
+    artifacts["s2_4_capability_probe_intent_v1"] = {
+        "schema_version": "s2_4_capability_probe_intent_v1",
+        "route_class": "s2_4_capability_probe_intent",
+        "core": probe_core,
+        "core_digest": probe_core_digest,
+        "probe_id": _CP2A_PROBE_ID,
+        "route_surface": {
+            "required_effect_class": "HOST_CAPABILITY_PROBE",
+            "runtime_effect": True,
+            "service": "transient_probe_only",
+            "risk": "high",
+            "runtime_claim": True,
+            "probe_budget_bound": True,
+            "cleanup_budget_bound": True,
+        },
+        "forbidden_surfaces": {
+            "persistent_unit_write": False,
+            "persistent_unit_enable": False,
+            "persistent_unit_start": False,
+            "daemon_reload": False,
+            "pg": False,
+            "migration": False,
+            "secret": False,
+            "credential_install": False,
+            "host_identity": False,
+            "broker_or_order": False,
+        },
+        "required_authorization": {
+            "profile_identity": "aiml-s2-capability-probe-operator-v1",
+            "signature_namespace": "arcane-equilibrium-aiml-s2-capability-probe",
+            "max_ttl_seconds": 600,
+        },
+        "expires_at": _CP2A_TS,
+        "self_digest": _CP2A_D,
+    }
+
+    artifacts["network_sandbox_capability_attestation_v1"] = {
+        "schema_version": "network_sandbox_capability_attestation_v1",
+        "scope": "PREPARE_SANDBOX",
+        "probe_id": _CP2A_PROBE_ID,
+        "probe_core_digest": probe_core_digest,
+        "transient_unit_property_digest": _CP2A_D,
+        "observed_sandbox_capability_digest": _CP2A_D2,
+        "network_isolation_verified": True,
+        "evidence_class": "PLATFORM_ATTESTED",
+        "production_posture": {
+            "is_runtime_production_pass": False,
+            "production_apply_performed": False,
+            "running_attested": False,
+            "nine_authorities_false": True,
+        },
+        "observed_at": _CP2A_TS,
+        "expires_at": _CP2A_TS,
+        "self_digest": _CP2A_D,
+    }
+
+    artifacts["s2_4_capability_probe_effect_receipt_v1"] = {
+        "schema_version": "s2_4_capability_probe_effect_receipt_v1",
+        "probe_id": _CP2A_PROBE_ID,
+        "probe_core_digest": probe_core_digest,
+        "probe_scope": "PREPARE_SANDBOX",
+        "authorization_id": _CP2A_D,
+        "authorization_digest": _CP2A_D2,
+        "derived_unit_name": _CP2A_UNIT,
+        "transient_unit_lifecycle": {
+            "invocation_id": "abc123",
+            "unit_created": True,
+            "unit_observed": True,
+            "stopped_after_grace": True,
+            "reset_failed": True,
+            "removed": True,
+            "zero_residue_verified": True,
+        },
+        "journal_digest": _CP2A_D,
+        "consumed_replay_entry_digest": _CP2A_D2,
+        "postcheck_digest": _CP2A_D,
+        "rollback_digest": _CP2A_D2,
+        "network_sandbox_capability_attestation_digest": _CP2A_D,
+        "terminal_status": "TERMINAL_CLEAN",
+        "evidence_class": "PLATFORM_ATTESTED",
+        "source_head": _CP2A_GIT,
+        "target_host": "trade-core",
+        "trusted_host_time": _CP2A_TS,
+        "observed_at": _CP2A_TS,
+        "expires_at": _CP2A_TS,
+        "production_authority_flags": {
+            "nine_authorities_false": True,
+            "production_apply_performed": False,
+            "running_attested": False,
+        },
+        "self_digest": _CP2A_D,
+    }
+
+    artifacts["s2_4_capability_probe_journal_v1"] = {
+        "schema_version": "s2_4_capability_probe_journal_v1",
+        "probe_id": _CP2A_PROBE_ID,
+        "derived_unit_name": _CP2A_UNIT,
+        "scope": "PREPARE_SANDBOX",
+        "transient_unit_property_digest": _CP2A_D,
+        "expected_invocation_id_pattern": "^[0-9a-f]{32}$",
+        "cleanup_rollback_digest": _CP2A_D2,
+        "entries": [
+            {
+                "seq": 0,
+                "state": "APPLYING",
+                "pre_state_digest": _CP2A_D,
+                "post_state_digest": _CP2A_D2,
+                "fsynced": True,
+                "recorded_at": _CP2A_TS,
+            }
+        ],
+        "terminal": True,
+        "journal_integrity": {
+            "same_filesystem_atomic_rename": True,
+            "file_fsynced": True,
+            "parent_dir_fsynced": True,
+        },
+        "outer_checksum": _CP2A_D,
+        "self_digest": _CP2A_D2,
+    }
+
+    artifacts["s2_4_capability_probe_postcheck_v1"] = {
+        "schema_version": "s2_4_capability_probe_postcheck_v1",
+        "status": "PASS",
+        "probe_id": _CP2A_PROBE_ID,
+        "probe_core_digest": probe_core_digest,
+        "derived_unit_name": _CP2A_UNIT,
+        "verifier_node": "ops-verifier",
+        "applier_node": "probe-applier",
+        "stopped_confirmed": True,
+        "reset_failed_confirmed": True,
+        "removed_confirmed": True,
+        "no_surviving_unit": True,
+        "no_surviving_cgroup": True,
+        "no_surviving_process": True,
+        "verifier_capture_digest": _CP2A_D,
+        "observed_at": _CP2A_TS,
+        "expires_at": _CP2A_TS,
+        "self_digest": _CP2A_D2,
+    }
+
+    artifacts["s2_4_capability_probe_rollback_v1"] = {
+        "schema_version": "s2_4_capability_probe_rollback_v1",
+        "status": "CLEANED_EXACT",
+        "probe_id": _CP2A_PROBE_ID,
+        "derived_unit_name": _CP2A_UNIT,
+        "pre_state_digest": _CP2A_D,
+        "post_state_digest": _CP2A_D2,
+        "stop_operation": "transient_unit_stop",
+        "cgroup_drain_operation": "bounded_cgroup_drain",
+        "reset_failed_operation": "reset_failed",
+        "remove_operation": "transient_unit_remove",
+        "cgroup_drain_bounded": True,
+        "unit_absent": True,
+        "cgroup_absent": True,
+        "task_files_absent": True,
+        "observed_at": _CP2A_TS,
+        "expires_at": _CP2A_TS,
+        "self_digest": _CP2A_D,
+    }
+
+    artifacts["s2_4_prepare_core_v1"] = prepare_core
+
+    artifacts["s2_4_prepare_intent_v1"] = {
+        "schema_version": "s2_4_prepare_intent_v1",
+        "route_class": "s2_4_prepare_intent",
+        "core": prepare_core,
+        "core_digest": prepare_core_digest,
+        "prepare_id": _CP2A_PREP_ID,
+        "route_surface": {
+            "required_effect_class": "LEARNING_RUNTIME_PREPARE",
+            "runtime_effect": True,
+            "service": "transient_builder_only",
+            "risk": "high",
+            "runtime_claim": True,
+            "staging_budget_bound": True,
+            "fetch_budget_bound": True,
+            "build_budget_bound": True,
+            "cleanup_budget_bound": True,
+        },
+        "forbidden_surfaces": {
+            "apply_publish": False,
+            "persistent_unit_write": False,
+            "persistent_unit_enable": False,
+            "persistent_unit_start": False,
+            "daemon_reload": False,
+            "pg": False,
+            "migration": False,
+            "secret": False,
+            "credential_install": False,
+            "host_identity": False,
+            "opt_publish": False,
+            "etc_write": False,
+            "broker_or_order": False,
+        },
+        "required_authorization": {
+            "profile_identity": "aiml-s2-install-prepare-operator-v1",
+            "signature_namespace": "arcane-equilibrium-aiml-s2-install-prepare",
+            "max_ttl_seconds": 900,
+        },
+        "source_lock_closure_identity": {
+            "source_compatibility_receipt_digest": _CP2A_D,
+            "sealed_build_receipt_digest": _CP2A_D2,
+            "identity_contract_digest": _CP2A_D,
+        },
+        "application_manifest_digest": _CP2A_D2,
+        "prepare_sandbox_probe_receipt_digest": _CP2A_D,
+        "expires_at": _CP2A_TS,
+        "self_digest": _CP2A_D,
+    }
+
+    prepared_bundle = {
+        "schema_version": "s2_4_prepared_install_bundle_v1",
+        "prepare_id": _CP2A_PREP_ID,
+        "artifact_locators": [{"locator": "blobs/sha256/aaa", "content_digest": _CP2A_D}],
+        "base_runtime_tree_manifest_digest": _CP2A_D,
+        "base_runtime_tree_digest": _CP2A_D2,
+        "application_bundle_manifest_digest": _CP2A_D,
+        "application_bundle_digest": _CP2A_D2,
+        "launch_bundle_manifest_digest": _CP2A_D,
+        "launch_bundle_digest": _CP2A_D2,
+        "native_import_proof_digest": _CP2A_D,
+        "staging_locator": staging_locator,
+        "staging_root_owned_nonwritable": True,
+        "source_head": _CP2A_GIT,
+        "target_host": "trade-core",
+        "created_at": _CP2A_TS,
+        "expires_at": _CP2A_TS,
+        "self_digest": _CP2A_D,
+    }
+    artifacts["s2_4_prepared_install_bundle_v1"] = prepared_bundle
+
+    artifacts["s2_4_prepare_effect_receipt_v1"] = {
+        "schema_version": "s2_4_prepare_effect_receipt_v1",
+        "prepare_id": _CP2A_PREP_ID,
+        "prepare_core_digest": prepare_core_digest,
+        "authorization_id": _CP2A_D,
+        "authorization_digest": _CP2A_D2,
+        "prepared_install_bundle_digest": _CP2A_D,
+        "staging_locator": staging_locator,
+        "journal_digest": _CP2A_D,
+        "consumed_replay_entry_digest": _CP2A_D2,
+        "postcheck_digest": _CP2A_D,
+        "rollback_digest": _CP2A_D2,
+        "terminal_status": "PREPARED",
+        "evidence_class": "PLATFORM_ATTESTED",
+        "source_head": _CP2A_GIT,
+        "target_host": "trade-core",
+        "trusted_host_time": _CP2A_TS,
+        "observed_at": _CP2A_TS,
+        "expires_at": _CP2A_TS,
+        "production_authority_flags": {
+            "nine_authorities_false": True,
+            "production_apply_performed": False,
+            "running_attested": False,
+        },
+        "self_digest": _CP2A_D,
+    }
+
+    artifacts["s2_4_prepare_journal_v1"] = {
+        "schema_version": "s2_4_prepare_journal_v1",
+        "prepare_id": _CP2A_PREP_ID,
+        "staging_root": _CP2A_STAGING,
+        "entries": [
+            {
+                "seq": 0,
+                "state": "PREPARING",
+                "pre_state_digest": _CP2A_D,
+                "post_state_digest": _CP2A_D2,
+                "fsynced": True,
+                "recorded_at": _CP2A_TS,
+            }
+        ],
+        "terminal": True,
+        "journal_integrity": {
+            "preparing_fsynced_before_staging_create": True,
+            "same_filesystem_atomic_rename": True,
+            "file_fsynced": True,
+            "parent_dir_fsynced": True,
+        },
+        "outer_checksum": _CP2A_D,
+        "self_digest": _CP2A_D2,
+    }
+
+    artifacts["s2_4_prepare_postcheck_v1"] = {
+        "schema_version": "s2_4_prepare_postcheck_v1",
+        "status": "PASS",
+        "prepare_id": _CP2A_PREP_ID,
+        "prepare_core_digest": prepare_core_digest,
+        "verifier_node": "ops-verifier",
+        "applier_node": "prepare-applier",
+        "zero_residue_outside_staging": True,
+        "staging_root_owned_nonwritable": True,
+        "residue_scan_digest": _CP2A_D,
+        "verifier_capture_digest": _CP2A_D2,
+        "observed_at": _CP2A_TS,
+        "expires_at": _CP2A_TS,
+        "self_digest": _CP2A_D,
+    }
+
+    artifacts["s2_4_prepare_rollback_v1"] = {
+        "schema_version": "s2_4_prepare_rollback_v1",
+        "status": "CLEANED_EXACT",
+        "prepare_id": _CP2A_PREP_ID,
+        "staging_root": _CP2A_STAGING,
+        "pre_state_digest": _CP2A_D,
+        "post_state_digest": _CP2A_D2,
+        "task_owned_only": True,
+        "staging_delta_removed": True,
+        "staging_absent": True,
+        "observed_at": _CP2A_TS,
+        "expires_at": _CP2A_TS,
+        "self_digest": _CP2A_D,
+    }
+
+    # 每份帶 self_digest 者以 canonical self-digest 重封(完整性;非生產者身分)。
+    for artifact in artifacts.values():
+        if "self_digest" in artifact:
+            artifact["self_digest"] = artifact_self_digest(artifact)
+    return artifacts
+
+
+_CP2A_KEYS = (
+    "s2_4_capability_probe_core_v1",
+    "s2_4_capability_probe_intent_v1",
+    "s2_4_capability_probe_effect_receipt_v1",
+    "s2_4_capability_probe_journal_v1",
+    "s2_4_capability_probe_postcheck_v1",
+    "s2_4_capability_probe_rollback_v1",
+    "network_sandbox_capability_attestation_v1",
+    "s2_4_prepare_core_v1",
+    "s2_4_prepare_intent_v1",
+    "s2_4_prepare_effect_receipt_v1",
+    "s2_4_prepare_journal_v1",
+    "s2_4_prepare_postcheck_v1",
+    "s2_4_prepare_rollback_v1",
+    "s2_4_prepared_install_bundle_v1",
+)
+_CP2A_CORE_KEYS = ("s2_4_capability_probe_core_v1", "s2_4_prepare_core_v1")
+
+
+def test_cp2a_schema_files_resolve_to_real_files() -> None:
+    for key in _CP2A_KEYS:
+        assert key in SCHEMA_FILES, key
+        assert (SCHEMA_DIR / SCHEMA_FILES[key]).is_file(), key
+    assert len(_CP2A_KEYS) == 14
+
+
+@pytest.mark.parametrize("key", _CP2A_KEYS)
+def test_cp2a_round_trip_validates_clean(key: str) -> None:
+    fixture = _cp2a_fixtures()[key]
+    assert validate_aiml_artifact(fixture) == [], key
+    # closed schema: every top-level schema_version const matches its SCHEMA_FILES key.
+    assert fixture["schema_version"] == key
+
+
+@pytest.mark.parametrize("key", _CP2A_KEYS)
+def test_cp2a_additional_properties_extra_key_rejected(key: str) -> None:
+    fixture = deepcopy(_cp2a_fixtures()[key])
+    fixture["__unexpected_extra__"] = "x"
+    if "self_digest" in fixture:
+        fixture["self_digest"] = artifact_self_digest(fixture)
+    errors = validate_aiml_artifact(fixture)
+    assert any("unexpected property" in e or "__unexpected_extra__" in e for e in errors), (key, errors)
+
+
+@pytest.mark.parametrize("key", _CP2A_KEYS)
+def test_cp2a_self_digest_binds_integrity_when_present(key: str) -> None:
+    fixture = _cp2a_fixtures()[key]
+    if "self_digest" not in fixture:
+        pytest.skip(f"{key} is an unsigned core / journal-inner artifact")
+    assert fixture["self_digest"] == artifact_self_digest(fixture)
+
+
+@pytest.mark.parametrize("key", _CP2A_CORE_KEYS)
+def test_cp2a_unsigned_core_excludes_id_auth_self_digest(key: str) -> None:
+    # §5.1:core 是被簽名對象,其 digest 導 id → core 不得含 id/authorization/self_digest。
+    schema = json.loads((SCHEMA_DIR / SCHEMA_FILES[key]).read_text(encoding="utf-8"))
+    props = set(schema["properties"])
+    required = set(schema["required"])
+    forbidden = {
+        "self_digest",
+        "probe_id",
+        "prepare_id",
+        "derived_id",
+        "authorization",
+        "authorization_id",
+        "authorization_digest",
+        "authorization_set",
+        "intent_id",
+        "core_digest",
+    }
+    assert not (props & forbidden), (key, props & forbidden)
+    assert not (required & forbidden), (key, required & forbidden)
+    fixture = _cp2a_fixtures()[key]
+    assert not (set(fixture) & forbidden), (key, set(fixture) & forbidden)
+
+
+def test_cp2a_receipts_and_attestation_pin_no_runtime_production_pass() -> None:
+    # 契約鐵律:任何 receipt/attestation 不得斷言 runtime/production PASS。
+    fixtures = _cp2a_fixtures()
+    # effect receipts:九 authority const-false + production_apply_performed/running_attested const-false。
+    for key in ("s2_4_capability_probe_effect_receipt_v1", "s2_4_prepare_effect_receipt_v1"):
+        forged = deepcopy(fixtures[key])
+        forged["production_authority_flags"]["production_apply_performed"] = True
+        forged["self_digest"] = artifact_self_digest(forged)
+        errs = validate_aiml_artifact(forged)
+        assert any("production_apply_performed" in e for e in errs), (key, errs)
+    # network_sandbox attestation:is_runtime_production_pass const-false。
+    forged = deepcopy(fixtures["network_sandbox_capability_attestation_v1"])
+    forged["production_posture"]["is_runtime_production_pass"] = True
+    forged["self_digest"] = artifact_self_digest(forged)
+    errs = validate_aiml_artifact(forged)
+    assert any("is_runtime_production_pass" in e for e in errs), errs
+
+
+def test_cp2a_terminal_and_pass_conditionals_have_teeth() -> None:
+    fixtures = _cp2a_fixtures()
+    # probe receipt:TERMINAL_CLEAN 要求 removed/reset_failed/zero_residue 皆 true。
+    forged = deepcopy(fixtures["s2_4_capability_probe_effect_receipt_v1"])
+    forged["transient_unit_lifecycle"]["removed"] = False
+    forged["self_digest"] = artifact_self_digest(forged)
+    assert any("removed" in e for e in validate_aiml_artifact(forged))
+    # probe postcheck:PASS 要求 no_surviving_unit 為 true。
+    forged = deepcopy(fixtures["s2_4_capability_probe_postcheck_v1"])
+    forged["no_surviving_unit"] = False
+    forged["self_digest"] = artifact_self_digest(forged)
+    assert any("no_surviving_unit" in e for e in validate_aiml_artifact(forged))
+    # prepare postcheck:PASS 要求 zero_residue_outside_staging 為 true。
+    forged = deepcopy(fixtures["s2_4_prepare_postcheck_v1"])
+    forged["zero_residue_outside_staging"] = False
+    forged["self_digest"] = artifact_self_digest(forged)
+    assert any("zero_residue_outside_staging" in e for e in validate_aiml_artifact(forged))
+
+
+def test_cp2a_route_intents_forbid_cross_route_surfaces() -> None:
+    fixtures = _cp2a_fixtures()
+    # probe intent:任一 §4:285 forbidden surface 翻 true → 拒(結構性,injection 前)。
+    forged = deepcopy(fixtures["s2_4_capability_probe_intent_v1"])
+    forged["forbidden_surfaces"]["pg"] = True
+    forged["self_digest"] = artifact_self_digest(forged)
+    assert any("pg" in e for e in validate_aiml_artifact(forged))
+    # prepare intent:APPLY/opt/etc 面翻 true → 拒。
+    forged = deepcopy(fixtures["s2_4_prepare_intent_v1"])
+    forged["forbidden_surfaces"]["opt_publish"] = True
+    forged["self_digest"] = artifact_self_digest(forged)
+    assert any("opt_publish" in e for e in validate_aiml_artifact(forged))
+
+
+def test_cp2a_frozen_pins_unchanged_after_schema_files_additions() -> None:
+    # 加 14 個 SCHEMA_FILES 查找鍵不動 S0.3 classifier / v1|v2 component matrix / PROGRAM_SCHEMA_PATHS。
+    from aiml_gate_receipt_validator import (
+        aiml_component_effect_class_matrix_digest,
+        aiml_component_effect_class_matrix_v2_digest,
+        PROGRAM_SCHEMA_PATHS,
+    )
+
+    assert aiml_effect_classifier_digest() == (
+        "sha256:1cf8c021b066ceeb364e968add074d263cb28d63db421fdc40620e9904d0ddbc"
+    )
+    assert aiml_component_effect_class_matrix_digest() == (
+        "sha256:22d78882a2dace9ceb640b74b2a5dca2f2a8cc05861720f5ab25c5c9ac86c445"
+    )
+    assert aiml_component_effect_class_matrix_v2_digest() == (
+        "sha256:01d3062c79725b32b7c1468d02013a0df28dfeba1cf29d513cbf3bd6b4143c64"
+    )
+    assert len(PROGRAM_SCHEMA_PATHS) == 7

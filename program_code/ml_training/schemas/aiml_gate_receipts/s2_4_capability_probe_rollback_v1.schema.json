@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2_4_capability_probe_rollback_v1.schema.json",
+  "title": "s2_4_capability_probe_rollback_v1",
+  "description": "Per-row cleanup/rollback contract for one S2.4 capability probe (§4 recovery contract, §5.2). Its signed digest is authority only for this exact stop/drain/reset/remove compensation of the task-owned transient unit; authorization expiry forbids new creation or observation resumption but never blocks this safety cleanup. Operations are typed (never raw shell): stop -> bounded cgroup drain -> reset-failed -> remove. status==CLEANED_EXACT requires unit/cgroup/task-file absence with a pre/post state digest pair proving exact restoration.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "status",
+    "probe_id",
+    "derived_unit_name",
+    "pre_state_digest",
+    "post_state_digest",
+    "stop_operation",
+    "cgroup_drain_operation",
+    "reset_failed_operation",
+    "remove_operation",
+    "cgroup_drain_bounded",
+    "unit_absent",
+    "cgroup_absent",
+    "task_files_absent",
+    "observed_at",
+    "expires_at",
+    "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2_4_capability_probe_rollback_v1"},
+    "status": {"enum": ["CLEANED_EXACT", "NOT_CLEANED"]},
+    "probe_id": {"$ref": "#/$defs/probe_id"},
+    "derived_unit_name": {"$ref": "#/$defs/derived_unit_name"},
+    "pre_state_digest": {"$ref": "#/$defs/digest"},
+    "post_state_digest": {"$ref": "#/$defs/digest"},
+    "stop_operation": {"const": "transient_unit_stop"},
+    "cgroup_drain_operation": {"const": "bounded_cgroup_drain"},
+    "reset_failed_operation": {"const": "reset_failed"},
+    "remove_operation": {"const": "transient_unit_remove"},
+    "cgroup_drain_bounded": {"type": "boolean"},
+    "unit_absent": {"type": "boolean"},
+    "cgroup_absent": {"type": "boolean"},
+    "task_files_absent": {"type": "boolean"},
+    "observed_at": {"$ref": "#/$defs/timestamp"},
+    "expires_at": {"$ref": "#/$defs/timestamp"},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "CLEANED_EXACT"}}},
+      "then": {
+        "properties": {
+          "cgroup_drain_bounded": {"const": true},
+          "unit_absent": {"const": true},
+          "cgroup_absent": {"const": true},
+          "task_files_absent": {"const": true}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "probe_id": {"type": "string", "pattern": "^s2-4-probe-[0-9a-f]{64}$"},
+    "derived_unit_name": {"type": "string", "pattern": "^arcane-aiml-s2-4-probe-[0-9a-f]{64}\\.service$"}
+  }
+}

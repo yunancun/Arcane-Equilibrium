@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2_4_prepared_install_bundle_v1.schema.json",
+  "title": "s2_4_prepared_install_bundle_v1",
+  "description": "Prepared-bundle contract emitted by the PREPARE driver (§5.1 point 2). It binds the immutable content-addressed artifact locators plus the base-runtime-tree, application-bundle and launch-bundle manifests strictly BY DIGEST STRING (those manifest schemas are W2; this schema never $ref-imports them), their content digests, a native-import proof, the staging device/inode locator and an unexpired window. Staging remains root-owned/non-writable and is independently re-hashed. The bundle deliberately does NOT hash the prepare effect receipt or the prepare journal (the receipt references the bundle, not the reverse). self_digest is the fixed bundle identity; downstream APPLY references it by that digest. Contract only: no runtime/production PASS is asserted.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "prepare_id",
+    "artifact_locators",
+    "base_runtime_tree_manifest_digest",
+    "base_runtime_tree_digest",
+    "application_bundle_manifest_digest",
+    "application_bundle_digest",
+    "launch_bundle_manifest_digest",
+    "launch_bundle_digest",
+    "native_import_proof_digest",
+    "staging_locator",
+    "staging_root_owned_nonwritable",
+    "source_head",
+    "target_host",
+    "created_at",
+    "expires_at",
+    "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2_4_prepared_install_bundle_v1"},
+    "prepare_id": {"$ref": "#/$defs/prepare_id"},
+    "artifact_locators": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["locator", "content_digest"],
+        "properties": {
+          "locator": {"type": "string", "minLength": 1},
+          "content_digest": {"$ref": "#/$defs/digest"}
+        }
+      }
+    },
+    "base_runtime_tree_manifest_digest": {"$ref": "#/$defs/digest"},
+    "base_runtime_tree_digest": {"$ref": "#/$defs/digest"},
+    "application_bundle_manifest_digest": {"$ref": "#/$defs/digest"},
+    "application_bundle_digest": {"$ref": "#/$defs/digest"},
+    "launch_bundle_manifest_digest": {"$ref": "#/$defs/digest"},
+    "launch_bundle_digest": {"$ref": "#/$defs/digest"},
+    "native_import_proof_digest": {"$ref": "#/$defs/digest"},
+    "staging_locator": {"$ref": "#/$defs/staging_locator"},
+    "staging_root_owned_nonwritable": {"type": "boolean"},
+    "source_head": {"$ref": "#/$defs/git_sha"},
+    "target_host": {"type": "string", "minLength": 1},
+    "created_at": {"$ref": "#/$defs/timestamp"},
+    "expires_at": {"$ref": "#/$defs/timestamp"},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "git_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "prepare_id": {"type": "string", "pattern": "^s2-4-prepare-[0-9a-f]{64}$"},
+    "staging_locator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["staging_root", "device", "inode"],
+      "properties": {
+        "staging_root": {"type": "string", "minLength": 1},
+        "device": {"type": "integer", "minimum": 0},
+        "inode": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}

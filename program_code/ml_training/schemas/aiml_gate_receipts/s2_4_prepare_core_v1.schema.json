@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2_4_prepare_core_v1.schema.json",
+  "title": "s2_4_prepare_core_v1",
+  "description": "Unsigned canonical core for one S2.4 LEARNING_RUNTIME_PREPARE phase (§5.1). It is the exact object signed by the PREPARE profile: its canonical digest yields prepare_id = 's2-4-prepare-' + hex(digest). The core deliberately excludes prepare_id, any authorization object/signature and any self_digest. It binds the staging-parent device/inode identity (the final <prepare_id> staging path is derived, never named here), the resource/fetch/build budgets and the source-head/target-host. The S2.3 lock/closure identity, requested application manifest and PREPARE_SANDBOX probe receipt live in the intent, not the core. Contract only: no runtime/production PASS is asserted.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "staging_root_device_inode",
+    "resource_budget",
+    "fetch_budget",
+    "build_budget",
+    "source_head",
+    "target_host",
+    "created_at"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2_4_prepare_core_v1"},
+    "staging_root_device_inode": {"$ref": "#/$defs/staging_parent_identity"},
+    "resource_budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_bytes", "max_seconds"],
+      "properties": {
+        "max_bytes": {"type": "integer", "minimum": 1},
+        "max_seconds": {"type": "integer", "minimum": 1, "maximum": 3600}
+      }
+    },
+    "fetch_budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_fetch_bytes", "max_fetch_seconds", "max_artifacts"],
+      "properties": {
+        "max_fetch_bytes": {"type": "integer", "minimum": 1},
+        "max_fetch_seconds": {"type": "integer", "minimum": 1, "maximum": 3600},
+        "max_artifacts": {"type": "integer", "minimum": 1}
+      }
+    },
+    "build_budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_build_bytes", "max_build_seconds"],
+      "properties": {
+        "max_build_bytes": {"type": "integer", "minimum": 1},
+        "max_build_seconds": {"type": "integer", "minimum": 1, "maximum": 3600}
+      }
+    },
+    "source_head": {"$ref": "#/$defs/git_sha"},
+    "target_host": {"type": "string", "minLength": 1},
+    "created_at": {"$ref": "#/$defs/timestamp"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "git_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "staging_parent_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["staging_parent_path", "device", "inode"],
+      "properties": {
+        "staging_parent_path": {"type": "string", "minLength": 1},
+        "device": {"type": "integer", "minimum": 0},
+        "inode": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}

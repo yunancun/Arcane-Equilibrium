@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2_4_prepare_postcheck_v1.schema.json",
+  "title": "s2_4_prepare_postcheck_v1",
+  "description": "Independent-verifier postcheck for one S2.4 LEARNING_RUNTIME_PREPARE phase (§4 per-row ABI, §5.2). A distinct role/node (verifier_node != applier_node) proves zero residue outside the task-owned staging/journal/replay footprint and that the staging root remains root-owned/non-writable, bound to the verifier's own governed command_capture_v2 record digest. status==PASS requires every residue/ownership flag true; the applier can never be its own sole verifier. Contract only: this attests prepare residue hygiene, not any production PASS.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "status",
+    "prepare_id",
+    "prepare_core_digest",
+    "verifier_node",
+    "applier_node",
+    "zero_residue_outside_staging",
+    "staging_root_owned_nonwritable",
+    "residue_scan_digest",
+    "verifier_capture_digest",
+    "observed_at",
+    "expires_at",
+    "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2_4_prepare_postcheck_v1"},
+    "status": {"enum": ["PASS", "FAIL"]},
+    "prepare_id": {"$ref": "#/$defs/prepare_id"},
+    "prepare_core_digest": {"$ref": "#/$defs/digest"},
+    "verifier_node": {"type": "string", "minLength": 1},
+    "applier_node": {"type": "string", "minLength": 1},
+    "zero_residue_outside_staging": {"type": "boolean"},
+    "staging_root_owned_nonwritable": {"type": "boolean"},
+    "residue_scan_digest": {"$ref": "#/$defs/digest"},
+    "verifier_capture_digest": {"$ref": "#/$defs/digest"},
+    "observed_at": {"$ref": "#/$defs/timestamp"},
+    "expires_at": {"$ref": "#/$defs/timestamp"},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "PASS"}}},
+      "then": {
+        "properties": {
+          "zero_residue_outside_staging": {"const": true},
+          "staging_root_owned_nonwritable": {"const": true}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "prepare_id": {"type": "string", "pattern": "^s2-4-prepare-[0-9a-f]{64}$"}
+  }
+}
