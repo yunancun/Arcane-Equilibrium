@@ -389,6 +389,58 @@ def test_applied_result_builder_fail_closed_guards():
         )
 
 
+def test_production_proof_failure_after_create_compensates_and_pending(tmp_path, monkeypatch):
+    # OPS-1 / E3-P2 / E2-P2-1 修復:create 成功後 step-8(independent_read_only_proof / postcheck build)
+    # 拋錯——例如獨立驗證者正確發現已建 observer **並非**唯讀——必**補償**已建 role 並回 typed
+    # EXTERNAL_VERIFICATION_PENDING(絕不留 stranded role、絕不 raise、絕不 APPLIED)。用**非** PLATFORM_ATTESTED
+    # driver(不冒充平台背書),其 proof 直接拋錯以模擬「create 後失敗」。
+    class _ProofRaisesDriver(_SimulationProductionDriver):
+        def independent_read_only_proof(self, *, grant_set):
+            self.calls.append("independent_read_only_proof")
+            raise RuntimeError("verifier detected the provisioned observer is not read-only")
+
+    private_key = _install_operator_profile(tmp_path, monkeypatch)
+    intent = _intent(target_class="production")
+    authorization, signature = _sign(private_key, intent, HEAD)
+    driver = _ProofRaisesDriver(evidence_class="LOCAL_REPRODUCIBLE")
+    result = obs.apply_observer_bootstrap(
+        intent, authorization, signature, now=NOW, source_head=HEAD, driver=driver
+    )
+    assert "create_read_only_observer" in driver.calls
+    assert "independent_read_only_proof" in driver.calls
+    assert "compensate" in driver.calls          # 已建 role → 觸發後失敗必補償
+    assert driver._present is False               # 補償已把已建 role 撤回(不留 stranded role)
+    assert result["status"] == "EXTERNAL_VERIFICATION_PENDING"
+    assert result["status"] != "APPLIED"
+    assert result["boundary"]["production_apply_performed"] is False
+    assert "compensated" in result["failure_reason"]
+    assert validator.validate_aiml_artifact(result, now=LATER) == []
+
+
+def test_production_preflight_raise_before_create_is_pending_not_raise(tmp_path, monkeypatch):
+    # E2-P2-1(step 6):create **之前**的 read-only 前檢(observer_role_present)拋錯 → 尚無 mutation,
+    # 故不呼叫 compensate,回 typed EXTERNAL_VERIFICATION_PENDING(絕不 raise),role 未被建立。
+    class _PreflightRaisesDriver(_SimulationProductionDriver):
+        def observer_role_present(self, *, role):
+            self.calls.append("observer_role_present")
+            raise RuntimeError("transient read failure before any mutation")
+
+    private_key = _install_operator_profile(tmp_path, monkeypatch)
+    intent = _intent(target_class="production")
+    authorization, signature = _sign(private_key, intent, HEAD)
+    driver = _PreflightRaisesDriver(evidence_class="LOCAL_REPRODUCIBLE")
+    result = obs.apply_observer_bootstrap(
+        intent, authorization, signature, now=NOW, source_head=HEAD, driver=driver
+    )
+    assert "create_read_only_observer" not in driver.calls   # 前檢即失敗,未建 role
+    assert "compensate" not in driver.calls                  # 無 mutation → 不補償
+    assert driver._present is False
+    assert result["status"] == "EXTERNAL_VERIFICATION_PENDING"
+    assert result["boundary"]["production_apply_performed"] is False
+    assert "preflight failed" in result["failure_reason"]
+    assert validator.validate_aiml_artifact(result, now=LATER) == []
+
+
 def test_registry_adapter_status_is_authority_locked_production_capable():
     # (d) registry status 由 declared_production_apply_disabled_until_operator_sshsig 翻為
     # AUTHORITY_LOCKED_PRODUCTION_CAPABLE(reachable 但 authority-locked);authority/invariant prose 明載三要件。

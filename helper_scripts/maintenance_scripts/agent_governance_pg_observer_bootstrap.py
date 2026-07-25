@@ -1496,75 +1496,89 @@ def _apply_production_observer_bootstrap(
             now=now,
             apply_actor_node=apply_actor_node,
         )
-    # step 6 — driver present: read-only pre-state; the observer role must be ABSENT (no adoption/rotation).
+    # steps 6-9 — driver-present interaction. The whole region is fail-closed: ANY failure after the
+    # create is attempted (a raising create/proof/postcheck OR the APPLIED build raising on applied==pre)
+    # must compensate the throwaway/created state and return a typed EXTERNAL_VERIFICATION_PENDING —
+    # never an uncaught exception, never a stranded provisioned role (OPS-1/E3-P2/E2-P2-1 review fix).
     role = intent["observer_role"]
     schema = intent["observed_schema"]
     relations = intent["observed_relations"]
-    if driver.observer_role_present(role=role):
-        return build_pending_result(
-            intent,
-            reason="observer role already exists; refusing to adopt or rotate a pre-existing role",
-            now=now,
-            apply_actor_node=apply_actor_node,
-        )
-    pre = driver.observe_acl_state(role=role, schema=schema, relations=relations)
-    # step 7 — the driver drives the fixed structured operations (create role + grants); NO caller SQL/DSN.
+    role_created = False
     try:
+        # step 6 — read-only pre-state; the observer role must be ABSENT (no adoption/rotation).
+        if driver.observer_role_present(role=role):
+            return build_pending_result(
+                intent,
+                reason="observer role already exists; refusing to adopt or rotate a pre-existing role",
+                now=now,
+                apply_actor_node=apply_actor_node,
+            )
+        pre = driver.observe_acl_state(role=role, schema=schema, relations=relations)
+        # step 7 — the driver drives the fixed structured operations (create role + grants); NO caller SQL/DSN.
+        # From here any failure must compensate (a create may partially apply), so mark before the call.
+        role_created = True
         driver.create_read_only_observer(grant_set=grant_set)
         applied = driver.observe_acl_state(role=role, schema=schema, relations=relations)
-    except Exception as exc:  # noqa: BLE001 - any driver failure compensates and fails closed
-        try:
-            driver.compensate(grant_set=grant_set)
-        except Exception:  # pragma: no cover - best effort  # noqa: BLE001
-            pass
-        return build_pending_result(
-            intent,
-            reason=f"production observer apply interrupted and compensated: {exc}",
-            now=now,
-            apply_actor_node=apply_actor_node,
+        # step 8 — the DISTINCT verifier node independently re-observes the provisioned observer's denials.
+        # A raising proof or a build_pg_observer_bootstrap_postcheck that refuses (denials not observed) now
+        # falls into the compensating handler below instead of escaping uncaught.
+        proof = driver.independent_read_only_proof(grant_set=grant_set)
+        postcheck = build_pg_observer_bootstrap_postcheck(
+            intent=intent,
+            verifier_node=intent["postcheck_node_id"],
+            applier_node=apply_actor_node,
+            reobserved_post_rollback_digest=proof.get("reobserved_digest") if isinstance(proof, dict) else None,
+            read_only_proof=proof.get("read_only_proof") if isinstance(proof, dict) else None,
+            verifier_capture_digest=proof.get("verifier_capture_digest") if isinstance(proof, dict) else None,
+            observed_at=completed_at,
         )
-    # step 8 — the DISTINCT verifier node independently re-observes the provisioned observer's denials.
-    proof = driver.independent_read_only_proof(grant_set=grant_set)
-    postcheck = build_pg_observer_bootstrap_postcheck(
-        intent=intent,
-        verifier_node=intent["postcheck_node_id"],
-        applier_node=apply_actor_node,
-        reobserved_post_rollback_digest=proof.get("reobserved_digest") if isinstance(proof, dict) else None,
-        read_only_proof=proof.get("read_only_proof") if isinstance(proof, dict) else None,
-        verifier_capture_digest=proof.get("verifier_capture_digest") if isinstance(proof, dict) else None,
-        observed_at=completed_at,
-    )
-    # step 9 — emit APPLIED ONLY when the driver's evidence is PLATFORM_ATTESTED (a real host driver).
-    # A simulation/disposable driver's LOCAL_REPRODUCIBLE/STRUCTURAL_ONLY evidence CANNOT forge the
-    # production flag: compensate its throwaway mutation and fail closed (never a fake production success).
-    if getattr(driver, "evidence_class", None) != PRODUCTION_APPLIED_EVIDENCE_CLASS:
-        try:
-            driver.compensate(grant_set=grant_set)
-        except Exception:  # pragma: no cover - best effort  # noqa: BLE001
-            pass
+        # step 9 — emit APPLIED ONLY when the driver's evidence is PLATFORM_ATTESTED (a real host driver).
+        # A simulation/disposable driver's LOCAL_REPRODUCIBLE/STRUCTURAL_ONLY evidence CANNOT forge the
+        # production flag: compensate its throwaway mutation and fail closed (never a fake production success).
+        if getattr(driver, "evidence_class", None) != PRODUCTION_APPLIED_EVIDENCE_CLASS:
+            try:
+                driver.compensate(grant_set=grant_set)
+            except Exception:  # pragma: no cover - best effort  # noqa: BLE001
+                pass
+            return build_pending_result(
+                intent,
+                reason=(
+                    "production observer apply driver evidence is not PLATFORM_ATTESTED "
+                    f"(got {getattr(driver, 'evidence_class', None)!r}); production_apply_performed stays false"
+                ),
+                now=now,
+                apply_actor_node=apply_actor_node,
+            )
+        # attested success: leave the observer provisioned for S2.1 (no rollback) and emit APPLIED.
+        return build_pg_observer_bootstrap_applied_result(
+            intent=intent,
+            grant_set=grant_set,
+            pre_state_digest=pre,
+            applied_grant_set_digest=applied,
+            postcheck=postcheck,
+            operator_authorization=operator_authorization,
+            operator_signature=bytes(signature),
+            apply_actor_node=apply_actor_node,
+            started_at=started_at,
+            completed_at=completed_at,
+            evidence_class=PRODUCTION_APPLIED_EVIDENCE_CLASS,
+        )
+    except Exception as exc:  # noqa: BLE001 - any driver/postcheck/build failure fails closed
+        if role_created:
+            try:
+                driver.compensate(grant_set=grant_set)
+            except Exception:  # pragma: no cover - best effort  # noqa: BLE001
+                pass
         return build_pending_result(
             intent,
             reason=(
-                "production observer apply driver evidence is not PLATFORM_ATTESTED "
-                f"(got {getattr(driver, 'evidence_class', None)!r}); production_apply_performed stays false"
+                f"production observer apply interrupted and compensated: {exc}"
+                if role_created
+                else f"production observer apply preflight failed and fails closed: {exc}"
             ),
             now=now,
             apply_actor_node=apply_actor_node,
         )
-    # attested success: leave the observer provisioned for S2.1 (no rollback) and emit APPLIED.
-    return build_pg_observer_bootstrap_applied_result(
-        intent=intent,
-        grant_set=grant_set,
-        pre_state_digest=pre,
-        applied_grant_set_digest=applied,
-        postcheck=postcheck,
-        operator_authorization=operator_authorization,
-        operator_signature=bytes(signature),
-        apply_actor_node=apply_actor_node,
-        started_at=started_at,
-        completed_at=completed_at,
-        evidence_class=PRODUCTION_APPLIED_EVIDENCE_CLASS,
-    )
 
 
 def apply_observer_bootstrap(

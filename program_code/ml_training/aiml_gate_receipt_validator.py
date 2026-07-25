@@ -1884,8 +1884,10 @@ def validate_aiml_artifact(
         #
         # ⚠ SOURCE-TRUTH 邊界(S2.0 EFFECT session 消費者請注意):此委派只證 receipt 的「內部自洽
         # + 結構 + 離線 SSHSIG 結構」(offline-structure 模式);validate_aiml_artifact 通過「不」等於
-        # 證明真對生產 PG apply 過——production apply 恆為 EXTERNAL_VERIFICATION_PENDING(fail-closed)
-        # 直到 S2.0 EFFECT session 帶一張 platform-attested 的 out-of-band operator SSHSIG。
+        # 證明真對生產 PG apply 過。production apply 現為 reachable 但 authority-locked:source/Mac/test
+        # lane(driver=None)恆回 EXTERNAL_VERIFICATION_PENDING 零 mutation;真 APPLIED 僅由 S2.0 EFFECT
+        # session 的真 host driver + platform-attested 證據簽發,且需 out-of-band 信任主機驗證(離線通過
+        # 仍「不」證明真 apply 過)。
         now_text = _now_text(now)
         if now_text is None:
             errors.append(
