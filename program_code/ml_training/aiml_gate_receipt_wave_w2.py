@@ -38,6 +38,7 @@ from aiml_gate_receipt_schema_core import canonical_digest, resolve_facade  # no
 _W2_OWNED_PATHS = tuple(sorted((
     "helper_scripts/deploy/arcane-equilibrium-aiml-engine-scanner.service.template",
     "helper_scripts/deploy/openclaw-alr-candidate-policy.template.json",
+    "helper_scripts/maintenance_scripts/agent_governance_s2_4_emit_sink.py",
     "helper_scripts/maintenance_scripts/agent_governance_s2_4_install.py",
     "helper_scripts/maintenance_scripts/agent_governance_s2_4_render.py",
     "program_code/ml_training/aiml_gate_receipt_schema_core.py",
@@ -45,9 +46,13 @@ _W2_OWNED_PATHS = tuple(sorted((
     "program_code/ml_training/aiml_gate_receipt_wave_w2.py",
     "program_code/ml_training/alr_application_identity.py",
     "program_code/ml_training/alr_candidate_board_events.py",
+    "program_code/ml_training/alr_consumer_resilience.py",
+    "program_code/ml_training/alr_consumer_write_metrics.py",
     "program_code/ml_training/alr_event_consumer.py",
     "program_code/ml_training/alr_retention_runner.py",
     "program_code/ml_training/application_bundle_runtime_closure_v1.json",
+    "program_code/ml_training/edge_feature_schema_contract.py",
+    "program_code/ml_training/learning_runtime_manifest.py",
     "program_code/ml_training/pg_acl_manifest_v1.json",
     "program_code/ml_training/schemas/aiml_gate_receipts/application_bundle_manifest_v1.schema.json",
     "program_code/ml_training/schemas/aiml_gate_receipts/application_bundle_runtime_closure_v1.schema.json",
@@ -57,6 +62,7 @@ _W2_OWNED_PATHS = tuple(sorted((
     "program_code/ml_training/tests/test_aiml_gate_receipt_validator_s2_4.py",
     "program_code/ml_training/tests/test_alr_application_identity.py",
     "program_code/ml_training/tests/test_alr_candidate_board_events.py",
+    "program_code/ml_training/tests/test_alr_consumer_resilience.py",
     "program_code/ml_training/tests/test_alr_candidate_full_chain.py",
     "program_code/ml_training/tests/test_alr_event_consumer.py",
     "program_code/ml_training/tests/test_alr_retention_runner.py",
@@ -66,6 +72,7 @@ _W2_OWNED_PATHS = tuple(sorted((
     "tests/structure/test_agent_governance_s2_4_install_engine_scanner_disposable.py",
     "tests/structure/test_agent_governance_s2_4_install_integration.py",
     "tests/structure/test_agent_governance_s2_4_install_render.py",
+    "tests/structure/test_learning_runtime_manifest_source_static.py",
 )))
 # §10.2/§10.3 W2 exported-ABI 的 code-owned 骨架(live 部分見 w2_exported_abi_projection)。
 _W2_EXPORTED_ABI = {

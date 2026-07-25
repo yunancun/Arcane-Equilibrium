@@ -119,6 +119,35 @@ def test_closure_never_admits_retention_or_effect_driver_modules() -> None:
         assert install._bundle_path_deny_reasons(rel) == [], rel
 
 
+def test_closure_excludes_the_ambient_dsn_parquet_etl_import_but_keeps_its_identity_bytes() -> None:
+    """W2 P1-C(E3 P1-2):parquet_etl 退出 *import* 閉包,但仍是 v2 身分的內容輸入。
+
+    它真的會連 PG(duckdb ``ATTACH ... TYPE postgres`` + ambient ``OPENCLAW_DATABASE_URL``
+    等 env 回退),故不得留在 runtime import 面;其**檔案內容**必須續留 bundle,否則
+    runtime 端以 application root 重算 learning_runtime_digest_v2 會缺輸入而失敗。
+    """
+    closure = _load_closure()
+    parquet = "program_code/ml_training/parquet_etl.py"
+    assert parquet not in closure["python_modules"]
+    assert parquet in closure["learning_runtime_inputs"]
+    assert parquet in app_identity.closure_declared_paths(closure)
+    # 取代它的 PG-surface-free 葉必須被宣告且 runtime-import 可達。
+    for rel in (
+        "program_code/ml_training/edge_feature_schema_contract.py",
+        "program_code/ml_training/alr_consumer_resilience.py",
+        "program_code/ml_training/alr_consumer_write_metrics.py",
+    ):
+        assert rel in closure["python_modules"], rel
+    derived = install.build_engine_scanner_runtime_import_closure(
+        ROOT,
+        lazy_helper_roots=tuple(
+            entry["module"] for entry in closure["runtime_lazy_helper_roots"]
+        ),
+    )
+    assert parquet not in set(derived.values())
+    assert install.derive_application_runtime_closure_status()["status"] == "PASS"
+
+
 # --------------------------------------------------------------------------- #
 # 合成違規樹:undeclared import escape / effect-capable inclusion
 # --------------------------------------------------------------------------- #

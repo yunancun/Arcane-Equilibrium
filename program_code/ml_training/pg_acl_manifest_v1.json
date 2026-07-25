@@ -21,6 +21,20 @@
   "functions": [
     {
       "granted_via": "PUBLIC_DEFAULT",
+      "name": "pg_catalog.current_database",
+      "privileges": [
+        "EXECUTE"
+      ]
+    },
+    {
+      "granted_via": "PUBLIC_DEFAULT",
+      "name": "pg_catalog.current_setting",
+      "privileges": [
+        "EXECUTE"
+      ]
+    },
+    {
+      "granted_via": "PUBLIC_DEFAULT",
       "name": "pg_catalog.hashtext",
       "privileges": [
         "EXECUTE"
@@ -69,7 +83,7 @@
       ]
     }
   ],
-  "self_digest": "sha256:e84ec76615992fa2af516470a00ce1034ef828d1d4ace18862d96e3f2c457832",
+  "self_digest": "sha256:2a739d0a5c40efe355f70753bf46716fb31418e9ef9ea219ff1d4bb221e939ad",
   "sequences": [],
   "tables": [
     {
@@ -122,6 +136,12 @@
     },
     {
       "name": "learning.alr_retention_events",
+      "privileges": [
+        "SELECT"
+      ]
+    },
+    {
+      "name": "learning.alr_runtime_cluster_identity_v1",
       "privileges": [
         "SELECT"
       ]

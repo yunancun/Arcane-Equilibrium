@@ -86,6 +86,83 @@ def test_emitted_receipts_are_evidence_only_and_centrally_derivable(tmp_path) ->
     assert wave_exit["test_digests"] == [validator.canonical_digest(_TEST_EVIDENCE)]
 
 
+# --------------------------------------------------------------------------- #
+# W2 P2-I(E3):receipt 不得被靜默覆蓋;CLI --out 受限於 repo receipts 目錄
+# --------------------------------------------------------------------------- #
+def test_emit_refuses_to_silently_overwrite_existing_receipts(tmp_path) -> None:
+    first = install.emit_w0_receipts(
+        out_dir=tmp_path,
+        test_evidence=dict(_TEST_EVIDENCE),
+        review_provenance=[dict(item) for item in _REVIEW_PROVENANCE],
+    )
+    assert first["status"] == "W0_RECEIPTS_EMITTED"
+    # derivation record 綁定 test_evidence 原文 → 覆蓋與否可逐位元組判別。
+    target = tmp_path / install.W0_DERIVATION_RECORD_FILENAME
+    sentinel = target.read_text(encoding="utf-8")
+    # 第二次發射:任一目標已存在 → typed 拒絕且「零寫入」(既有 bytes 逐字不變)。
+    second = install.emit_w0_receipts(
+        out_dir=tmp_path,
+        test_evidence={"command": "different", "exit_code": 0},
+        review_provenance=[{"pr": 999, "verdict": "different"}],
+    )
+    assert second["status"] == "W0_EMIT_REFUSED"
+    assert second["stage"] == "output_collision"
+    assert any(install.W0_ADMISSION_FILENAME in reason for reason in second["reasons"])
+    assert any(
+        install.W0_DERIVATION_RECORD_FILENAME in reason for reason in second["reasons"]
+    )
+    assert target.read_text(encoding="utf-8") == sentinel
+    # 顯式覆蓋才允許
+    third = install.emit_w0_receipts(
+        out_dir=tmp_path,
+        test_evidence={"command": "explicit-overwrite", "exit_code": 0},
+        review_provenance=[{"pr": 1000, "verdict": "explicit"}],
+        allow_overwrite=True,
+    )
+    assert third["status"] == "W0_RECEIPTS_EMITTED"
+    assert target.read_text(encoding="utf-8") != sentinel
+
+
+def test_partial_collision_still_writes_nothing(tmp_path) -> None:
+    """全有全無:只要有一個目標檔存在,其餘檔案也不得被建立。"""
+    (tmp_path / install.W0_DERIVATION_RECORD_FILENAME).write_text("{}", encoding="utf-8")
+    result = install.emit_w0_receipts(
+        out_dir=tmp_path,
+        test_evidence=dict(_TEST_EVIDENCE),
+        review_provenance=[dict(item) for item in _REVIEW_PROVENANCE],
+    )
+    assert result["status"] == "W0_EMIT_REFUSED"
+    assert sorted(p.name for p in tmp_path.iterdir()) == [
+        install.W0_DERIVATION_RECORD_FILENAME
+    ]
+
+
+def test_cli_out_dir_is_constrained_to_the_repository_receipts_directory(
+    tmp_path, capsys
+) -> None:
+    evidence = tmp_path / "evidence.json"
+    evidence.write_text(json.dumps(_TEST_EVIDENCE), encoding="utf-8")
+    provenance = tmp_path / "provenance.json"
+    provenance.write_text(json.dumps(_REVIEW_PROVENANCE), encoding="utf-8")
+    for action in ("w0-emit", "w1-emit", "w2-emit"):
+        exit_code = install._main([
+            action,
+            "--out", str(tmp_path / "escaped"),
+            "--test-evidence", str(evidence),
+            "--review-provenance", str(provenance),
+        ])
+        assert exit_code == 2
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["stage"] == "out_dir"
+        assert "receipts" in payload["reasons"][0]
+        assert not (tmp_path / "escaped").exists()
+    # receipts 目錄內的路徑通過約束(不實際發射,只證解析)
+    inside = install.RECEIPTS_ROOT / "S2.4-WP4-W2"
+    assert install._resolve_cli_out_dir(inside) == inside.resolve()
+    with pytest.raises(ValueError):
+        install._resolve_cli_out_dir(install.RECEIPTS_ROOT.parent)
+
+
 def test_emit_refuses_and_writes_nothing_when_admission_not_admitted(
     tmp_path, monkeypatch
 ) -> None:

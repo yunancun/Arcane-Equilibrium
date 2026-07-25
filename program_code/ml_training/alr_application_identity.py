@@ -427,6 +427,9 @@ def run_production_preflight(
             "pinned_repo_source_head": source_head,
             "dsn_required_identity": dict(PRODUCTION_DSN_IDENTITY),
             "expected_compatibility_receipt": v1_receipt_path,
+            # §8.3(W2 P1-A):每次(重)連線都要重載此 guard 並比對叢集身分列;
+            # preflight 已證其可讀/自我 digest 一致,但 runtime 一律重讀不快取。
+            "topology_guard_file": Path(topology_guard_file),
         },
     }
 
@@ -454,17 +457,30 @@ def run_production_preflight_from_args(arguments: Any) -> dict[str, Any]:
     )
 
 
-# production 模式下屬 permanent pre-DB config/identity/credential-format 的 consumer
-# 錯誤碼前綴(§8.3 → exit 78);lock-busy 等 transient 類刻意不在列。
+# production 模式下屬 permanent config/identity/credential-format 的 consumer 錯誤碼
+# 前綴(§8.3 → exit 78);lock-busy 等 transient 類刻意不在列。
+#
+# E2 P2-1(W2):``psycopg2_unavailable``(runtime 相依缺失)與
+# ``runtime_file_lock_unsupported``(平台無 fcntl)是永不自癒的組態失敗——留在列外會讓
+# 單元以 Restart=on-failure 崩潰迴圈直到耗盡 start limit,而非一次 78 停下等 operator。
+# ``topology_guard_``/``cluster_identity_`` 是 §8.3 重連身分閘的 permanent 不符(嚴格說
+# 發生在連線之後,但語義同屬「不可重試的身分/組態失敗 → 78」)。
 _PERMANENT_PRE_DB_PREFIXES = (
     "dsn_",
     "capture_surface_incompatible",
     "source_head_",
+    "psycopg2_unavailable",
+    "runtime_file_lock_unsupported",
+    "candidate_board_inotify_unsupported",
+    "topology_guard_",
+    "cluster_identity_",
 )
+# 刻意「不」在列(可自癒/可由 operator 於運行中修復,或屬 host 競用):
+# runtime_file_lock_busy / single_instance_lock_busy / candidate_board_directory_*。
 
 
 def is_permanent_pre_db_error(error: Exception) -> bool:
-    """AlrEventConsumerError 是否屬 §8.3 的 permanent pre-DB 類(production → 78)。"""
+    """AlrEventConsumerError 是否屬 §8.3 的 permanent 類(production → exit 78)。"""
     text = str(error)
     return any(text.startswith(prefix) for prefix in _PERMANENT_PRE_DB_PREFIXES)
 

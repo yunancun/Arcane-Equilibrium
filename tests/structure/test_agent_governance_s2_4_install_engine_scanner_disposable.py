@@ -17,7 +17,13 @@ Gated on ``shutil.which("initdb")`` + ``psycopg2``(缺任一 → 整模組誠實
   INSERT..SELECT WHERE false)證明 intended statements 都成功;
 * over-grant probes(DELETE/UPDATE retention 表、INSERT retention events、
   TRUNCATE、CREATE TABLE/SCHEMA/TEMP、SET ROLE)全部觀察到**真** ``42501``
-  (insufficient_privilege;真 postgres 產生,production PG 永不接觸)。
+  (insufficient_privilege;真 postgres 產生,production PG 永不接觸);
+* W2 P1-A(§8.3/§10.5 #35):在 throwaway cluster 建立 admin-owned 的
+  ``learning.alr_runtime_cluster_identity_v1``(source 樹尚無其 V### migration——該關聯
+  屬 W6B PG migration,此處依 ``pg_topology_runtime_guard_v1`` /
+  ``alr_consumer_resilience.CLUSTER_IDENTITY_COLUMNS`` 的封閉欄位契約建同形關聯並灌入
+  本 cluster 真實觀測值),再以受限角色跑**真**在帶身分閘:相符即 MATCH、漂移即 typed
+  permanent 失敗(→ exit 78),且對該關聯的 INSERT/UPDATE/DELETE/TRUNCATE 全數真 42501。
 """
 
 from __future__ import annotations
@@ -80,6 +86,24 @@ MIGRATIONS = (
 )
 
 CLEAN_SUBPROCESS_ENV = {"PATH": os.environ.get("PATH", ""), "LANG": "C", "LC_ALL": "C"}
+
+# §8.2/§8.3 叢集身分列(W6B PG migration 的 source-面契約鏡像;欄位集合由
+# ml_training.alr_consumer_resilience.CLUSTER_IDENTITY_COLUMNS 執法)。
+RUNTIME_HOST = "127.0.0.1"
+RUNTIME_PORT = 5432
+BINDING_NONCE = "disposable-binding-nonce-v0"
+_CLUSTER_IDENTITY_DDL = """
+CREATE TABLE IF NOT EXISTS learning.alr_runtime_cluster_identity_v1 (
+    system_identifier   text    NOT NULL,
+    database_oid        integer NOT NULL,
+    server_major_version integer NOT NULL,
+    runtime_host        text    NOT NULL,
+    runtime_port        integer NOT NULL,
+    runtime_dbname      text    NOT NULL,
+    binding_nonce       text    NOT NULL,
+    singleton           boolean NOT NULL DEFAULT true UNIQUE CHECK (singleton)
+)
+"""
 
 
 def _run(cmd, *, logfile, timeout):
@@ -149,6 +173,21 @@ def _bootstrap(sock_dir: str) -> None:
         cur.execute("CREATE SCHEMA IF NOT EXISTS trading")
         for rel in MIGRATIONS:
             cur.execute((ROOT / rel).read_text(encoding="utf-8"))
+        # §8.2/§8.3(W2 P1-A):admin-owned、scanner-read-only 的叢集身分列。此關聯屬
+        # W6B 的 PG migration(source 樹尚無 V### 檔),故 disposable cluster 在此
+        # 依 pg_topology_runtime_guard_v1 / alr_consumer_resilience 宣告的封閉欄位契約
+        # 建立同形關聯,並灌入「本 cluster 真實觀測值」(system_identifier/OID/版本)。
+        cur.execute(_CLUSTER_IDENTITY_DDL)
+        cur.execute(
+            "INSERT INTO learning.alr_runtime_cluster_identity_v1 "
+            "(system_identifier, database_oid, server_major_version, runtime_host, "
+            "runtime_port, runtime_dbname, binding_nonce) SELECT "
+            "(pg_control_system()).system_identifier::text, "
+            "(SELECT oid FROM pg_database WHERE datname = current_database())::integer, "
+            "current_setting('server_version_num')::integer / 10000, "
+            "%s, %s, current_database(), %s",
+            (RUNTIME_HOST, RUNTIME_PORT, BINDING_NONCE),
+        )
         cur.execute(
             f'CREATE ROLE "{ROLE}" LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD %s',
             (ROLE_PW,),
@@ -357,3 +396,136 @@ def test_secret_never_serialized_into_manifest_grants_or_verdict(cluster):
     verdict = install.derive_engine_scanner_privilege_split()
     assert ROLE_PW not in json.dumps(verdict)
     assert verdict["status"] == "PASS"
+
+
+# --------------------------------------------------------------------------- #
+# (5) §8.3(W2 P1-A)在帶叢集身分閘:真 SELECT 通過、真 42501 拒絕任何寫入
+# --------------------------------------------------------------------------- #
+def _observed_identity(sock_dir: str) -> dict:
+    admin = _admin(sock_dir)
+    try:
+        cur = admin.cursor()
+        cur.execute(
+            "SELECT system_identifier, database_oid, server_major_version, "
+            "runtime_host, runtime_port, runtime_dbname, binding_nonce "
+            "FROM learning.alr_runtime_cluster_identity_v1"
+        )
+        row = cur.fetchone()
+    finally:
+        admin.close()
+    return {
+        "system_identifier": str(row[0]),
+        "database_oid": int(row[1]),
+        "server_major_version": int(row[2]),
+        "runtime_host": str(row[3]),
+        "runtime_port": int(row[4]),
+        "runtime_dbname": str(row[5]),
+        "binding_nonce": str(row[6]),
+    }
+
+
+def _write_guard(tmp_path, projection: dict, **overrides):
+    from ml_training import alr_consumer_resilience as resilience
+    from ml_training.aiml_gate_receipt_schema_core import resolve_facade
+
+    guard = {
+        "schema_version": "pg_topology_runtime_guard_v1",
+        "guard_path": "/etc/arcane-equilibrium/aiml/engine-scanner/topology-runtime-guard.json",
+        "cluster_identity_row_digest": resilience.cluster_identity_row_digest(projection),
+        "plan_topology_digest": "sha256:" + "1" * 64,
+        "runtime_endpoint": {
+            "host": projection["runtime_host"],
+            "port": projection["runtime_port"],
+            "dbname": projection["runtime_dbname"],
+        },
+        "system_identifier": projection["system_identifier"],
+        "database_oid": projection["database_oid"],
+        "server_major_version": projection["server_major_version"],
+        "binding_nonce": projection["binding_nonce"],
+        "expected_topology_values_digest": "sha256:" + "2" * 64,
+    }
+    guard.update(overrides)
+    guard["self_digest"] = resolve_facade().artifact_self_digest(guard)
+    path = tmp_path / "topology-runtime-guard.json"
+    path.write_text(json.dumps(guard, sort_keys=True), encoding="utf-8")
+    return path
+
+
+def test_identity_gate_passes_against_the_real_cluster_row(cluster, tmp_path):
+    """真 PG:受限角色以「恰好 manifest」的 SELECT 讀身分列並與 guard 逐欄比對。
+
+    guard/身分列綁的是**宣告的 production endpoint**(127.0.0.1:5432/trading_ai);
+    disposable cluster 走 unix socket,故此測試證的是「在帶身分比對可執行且權限足夠」,
+    不宣稱 listener/proxy 拓樸(§8.3 明文:此非 host 行程檢視)。
+    """
+    from ml_training import alr_consumer_resilience as resilience
+
+    projection = _observed_identity(cluster["socket_dir"])
+    guard_path = _write_guard(tmp_path, projection)
+    connection = _role_connection(cluster["socket_dir"])
+    try:
+        check = resilience.verify_connected_cluster_identity(
+            connection,
+            topology_guard_file=guard_path,
+            dsn_identity={
+                "host": projection["runtime_host"],
+                "port": str(projection["runtime_port"]),
+                "dbname": projection["runtime_dbname"],
+                "user": ROLE,
+            },
+        )
+    finally:
+        connection.close()
+    assert check["status"] == "MATCH"
+    assert check["connected_user"] == ROLE
+    assert check["connected_database"] == DB
+
+
+def test_identity_gate_refuses_a_drifted_cluster(cluster, tmp_path):
+    from ml_training import alr_consumer_resilience as resilience
+
+    projection = _observed_identity(cluster["socket_dir"])
+    drifted = dict(projection)
+    drifted["system_identifier"] = "1" + projection["system_identifier"][1:]
+    guard_path = _write_guard(tmp_path, drifted)
+    connection = _role_connection(cluster["socket_dir"])
+    try:
+        with pytest.raises(resilience.AlrRuntimeIdentityError) as failure:
+            resilience.verify_connected_cluster_identity(
+                connection, topology_guard_file=guard_path
+            )
+    finally:
+        connection.close()
+    assert "cluster_identity_" in str(failure.value)
+    # §8.3:此類不符恆為 permanent → production main 以 exit 78 收場(不重試)。
+    from ml_training import alr_application_identity as app_identity
+
+    assert app_identity.is_permanent_pre_db_error(failure.value)
+
+
+_IDENTITY_OVER_GRANT_PROBES = (
+    ("identity_insert", "INSERT INTO learning.alr_runtime_cluster_identity_v1 "
+     "SELECT * FROM learning.alr_runtime_cluster_identity_v1 WHERE false"),
+    ("identity_update", "UPDATE learning.alr_runtime_cluster_identity_v1 "
+     "SET binding_nonce = 'forged'"),
+    ("identity_delete", "DELETE FROM learning.alr_runtime_cluster_identity_v1"),
+    ("identity_truncate", "TRUNCATE learning.alr_runtime_cluster_identity_v1"),
+)
+
+
+@pytest.mark.parametrize("name,statement", _IDENTITY_OVER_GRANT_PROBES)
+def test_cluster_identity_row_is_read_only_for_the_scanner(cluster, name, statement):
+    connection = _role_connection(cluster["socket_dir"], autocommit=True)
+    try:
+        with pytest.raises(psycopg2.Error) as denial:
+            connection.cursor().execute(statement)
+        assert denial.value.pgcode == "42501", (name, denial.value.pgcode)
+    finally:
+        connection.close()
+
+
+def test_manifest_lists_exactly_the_identity_relation_select_grant():
+    entries = {entry["name"]: entry["privileges"] for entry in MANIFEST["tables"]}
+    assert entries["learning.alr_runtime_cluster_identity_v1"] == ["SELECT"]
+    functions = {entry["name"] for entry in MANIFEST["functions"]}
+    assert {"pg_catalog.current_database", "pg_catalog.current_setting"} <= functions

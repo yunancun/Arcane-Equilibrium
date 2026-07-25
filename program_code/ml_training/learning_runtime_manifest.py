@@ -7,8 +7,9 @@ MODULE_NOTE
 主要函數：build_learning_runtime_manifest、evaluate_compatibility、
   build_source_compatibility_receipt、resolve_repo_source_head。
 依賴：標準庫 + 既有 canonical_digest/artifact_self_digest(aiml_gate_receipt_validator)
-  + parquet_etl 的 feature schema 常量。硬邊界：source-only、NONE-effect;任何建置
-  錯誤(缺檔/symlink/非常規檔/不可讀)一律 deny-by-default(fail-closed)。
+  + edge_feature_schema_contract 的 feature schema 常量(PG-surface-free 葉;parquet_etl
+  的檔案內容仍是 v2 身分輸入,但不再被 import)。硬邊界：source-only、NONE-effect;任何
+  建置錯誤(缺檔/symlink/非常規檔/不可讀)一律 deny-by-default(fail-closed)。
 """
 
 from __future__ import annotations
@@ -27,7 +28,11 @@ from ml_training.aiml_gate_receipt_validator import (
     artifact_self_digest,
     canonical_digest,
 )
-from ml_training.parquet_etl import (
+# W2 P1-C(E3 P1-2):特徵 schema 契約改由 PG-surface-free 葉提供。parquet_etl 是真連
+# PG 的 duckdb ETL 面(ATTACH TYPE postgres + ambient DSN env 回退),不可留在
+# engine-scanner 的 runtime import 閉包內;其**檔案內容**仍是 LEARNING_CODE_INPUTS_V2
+# 的身分輸入(learning_runtime_digest_v2 不變),只是不再被 import。
+from ml_training.edge_feature_schema_contract import (
     EDGE_P3_FEATURE_NAMES,
     EDGE_P3_FEATURE_SCHEMA_VERSION,
     compute_feature_schema_hash,

@@ -14,7 +14,7 @@ import subprocess
 import threading
 import time
 from contextlib import contextmanager, nullcontext
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -87,6 +87,20 @@ from ml_training.alr_scanner_statistical_experiment import (
     AlrScannerStatisticalExperimentError,
     build_candidate_aware_learning_projection,
     build_scanner_statistical_experiment,
+)
+# S2.4 §8.3(W2 P1-A):常駐重連韌性 + 在帶叢集身分閘下沉至 governed 葉;
+# write-metrics 純投影面同樣下沉(2000 行治理拆分),此處逐名 re-export 保持既有
+# 匯入面/monkeypatch 縫不變(``consumer._build_write_metrics`` 等仍可用)。
+from ml_training.alr_consumer_resilience import (
+    AlrRuntimeIdentityError,  # noqa: F401 — re-export
+    ResidentConsumerState,  # noqa: F401 — re-export
+    default_jitter,
+    run_resident_db_sessions,
+    verify_connected_cluster_identity,
+)
+from ml_training.alr_consumer_write_metrics import (
+    build_write_metrics as _build_write_metrics,
+    row_value as _row_value,
 )
 from ml_training.alr_safe_file import (
     AlrSafeFileError,
@@ -1069,8 +1083,12 @@ def run_event_consumer(
     expected_compatibility_receipt: Path | None = None,
     pinned_repo_source_head: str | None = None,
     dsn_required_identity: Mapping[str, str] | None = None,
+    topology_guard_file: Path | None = None,
+    reconnect_sleep: Callable[[float], Any] | None = None,
+    reconnect_jitter: Callable[[], float] | None = None,
+    reconnect_state: Any | None = None,
 ) -> dict[str, int]:
-    """LR1 相容性 preflight 後執行 shadow consumer，並持久化真實 lifecycle。
+    """LR1 相容性 preflight 後執行常駐 consumer，並持久化真實 lifecycle。
 
     整倉 HEAD 已降為遙測：docs-only 提交不再停 ingest。只有 capture 面不相容(建置失敗
     等)才 fail-closed 停 capture；training 契約漂移只 quarantine fit(fit_quarantined)。
@@ -1078,6 +1096,12 @@ def run_event_consumer(
     W2b(§8.3 production):``pinned_repo_source_head`` 非 None 時,相容性重算以該 pinned
     head 建置(零 Git 呼叫——application root 無 checkout);``dsn_required_identity``
     非 None 時 DSN 綁 production 身分表(aiml_engine_scanner)。兩者皆 None = 舊行為。
+
+    W2 P1-A(§8.3 resident 語義):DB 可用性 transient 失敗**不退出**——關閉失敗連線後,
+    以有界指數退避 + jitter(5s..300s)無限重連;host 面資源(檔案鎖、candidate board
+    watch)跨重連持有,進度 cursor 全在 DB 側,故不累積 task/row/記憶體。重連時
+    ``topology_guard_file`` 非 None 即先載入並自我 digest guard、比對連上的
+    user/database/endpoint 與叢集身分列,不符即 permanent typed 失敗(production → 78)。
     """
     compatibility = _preflight_source_compatibility(
         source_head=source_head,
@@ -1094,10 +1118,6 @@ def run_event_consumer(
     )
     stop_event = threading.Event()
     previous_handlers = _install_shutdown_handlers(stop_event)
-    connection: Any | None = None
-    db_lock_acquired = False
-    session_id: str | None = None
-    session_started = False
     try:
         with runtime_file_lock(lock_path):
             board_source_context = (
@@ -1106,48 +1126,109 @@ def run_event_consumer(
                 else nullcontext(None)
             )
             with board_source_context as board_source:
-                connection = _connect_listener(dsn)
-                db_lock_acquired = acquire_single_instance(connection)
-                if not db_lock_acquired:
-                    raise AlrEventConsumerError("single_instance_lock_busy")
-                session_id = new_session_id()
-                start_consumer_session(connection, session_id=session_id)
-                session_started = True
-                try:
-                    result = event_consumer_loop(
+                outcome = run_resident_db_sessions(
+                    open_connection=lambda: _connect_listener(dsn),
+                    run_session=lambda connection: _run_single_db_session(
                         connection,
                         max_batch=max_batch,
-                        should_stop=stop_event.is_set,
-                        wait_for_notifications=wait_for_pg_notifications,
-                        session_id=session_id,
                         source_head=source_head,
+                        stop_event=stop_event,
+                        board_source=board_source,
                         candidate_evidence_directory=candidate_evidence_directory,
                         candidate_policy=candidate_policy,
-                        candidate_board_source=board_source,
                         fit_quarantined=fit_quarantined,
-                    )
-                    stop_consumer_session(connection, session_id=session_id)
-                    session_started = False
-                    return result
-                except Exception as exc:
-                    connection.rollback()
-                    if session_started:
-                        try:
-                            fail_consumer_session(
-                                connection,
-                                session_id=session_id,
-                                error_code=type(exc).__name__,
-                            )
-                            session_started = False
-                        except Exception:
-                            connection.rollback()
-                    raise
+                        topology_guard_file=topology_guard_file,
+                        dsn_required_identity=dsn_required_identity,
+                    ),
+                    close_connection=_close_db_session,
+                    should_stop=stop_event.is_set,
+                    # 可中斷等待:退避期間收到 SIGTERM 立即醒來(不拖到 TimeoutStopSec)。
+                    sleep=reconnect_sleep or stop_event.wait,
+                    jitter=reconnect_jitter or default_jitter,
+                    state=reconnect_state,
+                )
+                # result 為 None = 停機訊號在 DB 中斷期間到達(零 session 完成、非失敗)。
+                return outcome["result"] if outcome["result"] is not None else {}
     finally:
-        if connection is not None:
-            if db_lock_acquired:
-                release_single_instance(connection)
-            connection.close()
         _restore_shutdown_handlers(previous_handlers)
+
+
+def _run_single_db_session(
+    connection: Any,
+    *,
+    max_batch: int,
+    source_head: str,
+    stop_event: threading.Event,
+    board_source: Any,
+    candidate_evidence_directory: Path | None,
+    candidate_policy: Mapping[str, Any] | None,
+    fit_quarantined: bool,
+    topology_guard_file: Path | None = None,
+    dsn_required_identity: Mapping[str, str] | None = None,
+) -> dict[str, int]:
+    """一次 DB session 的完整生命週期(身分閘 → 單例 → session → 事件迴圈)。"""
+    if topology_guard_file is not None:
+        verify_connected_cluster_identity(
+            connection,
+            topology_guard_file=topology_guard_file,
+            dsn_identity=dsn_required_identity,
+        )
+    if not acquire_single_instance(connection):
+        raise AlrEventConsumerError("single_instance_lock_busy")
+    session_id = new_session_id()
+    start_consumer_session(connection, session_id=session_id)
+    try:
+        result = event_consumer_loop(
+            connection,
+            max_batch=max_batch,
+            should_stop=stop_event.is_set,
+            wait_for_notifications=wait_for_pg_notifications,
+            session_id=session_id,
+            source_head=source_head,
+            candidate_evidence_directory=candidate_evidence_directory,
+            candidate_policy=candidate_policy,
+            candidate_board_source=board_source,
+            fit_quarantined=fit_quarantined,
+        )
+    except Exception as exc:
+        _fail_session_best_effort(
+            connection, session_id=session_id, error_code=type(exc).__name__
+        )
+        raise
+    stop_consumer_session(connection, session_id=session_id)
+    return result
+
+
+def _fail_session_best_effort(
+    connection: Any, *, session_id: str, error_code: str
+) -> None:
+    """失敗路徑的 durable 記帳:盡力 rollback + fail_consumer_session。
+
+    連線已死(DB 停機)時記帳必然失敗——此處一律吞掉次生例外,讓**原始**失敗原因
+    上拋,否則 transient 分類會被 rollback 的 InterfaceError 掩蓋成永久崩潰。
+    """
+    try:
+        connection.rollback()
+        fail_consumer_session(
+            connection, session_id=session_id, error_code=error_code
+        )
+    except Exception:  # noqa: BLE001 — 見 docstring:絕不掩蓋原始失敗
+        try:
+            connection.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _close_db_session(connection: Any) -> None:
+    """關閉一次 session 的連線;先盡力釋放 advisory 單例(死連線不得阻斷重連)。"""
+    try:
+        release_single_instance(connection)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        connection.close()
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def verify_runtime_source_head(
@@ -1876,124 +1957,6 @@ def _accumulate_health(totals: dict[str, int], result: Mapping[str, int]) -> Non
         raise AlrEventConsumerError("health_result_invalid")
     for key in required:
         totals[key] = totals.get(key, 0) + result[key]
-
-
-def _build_write_metrics(
-    totals: Mapping[str, int],
-    *,
-    session_id: str,
-) -> dict[str, Any]:
-    def counter(key: str) -> int:
-        value = totals.get(key, 0)
-        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-            raise AlrEventConsumerError("write_metric_counter_invalid")
-        return value
-
-    def ratio(numerator: int, denominator: int) -> float:
-        if numerator > denominator:
-            raise AlrEventConsumerError("write_metric_ratio_invalid")
-        return numerator / denominator if denominator else 0.0
-
-    health_attempts = counter("health_attempts")
-    health_emitted = counter("health_snapshots")
-    health_suppressed = counter("health_writes_suppressed")
-    decision_attempts = counter("decision_write_attempts")
-    decision_suppressed = counter("decision_writes_suppressed")
-    feedback_attempts = counter("feedback_write_attempts")
-    feedback_persisted = counter("feedback_persisted")
-    feedback_duplicate_retries = counter("feedback_duplicate_retries")
-    feedback_artifact_rows = counter("feedback_artifact_rows_written")
-    feedback_provenance_rows = counter(
-        "feedback_provenance_rows_written"
-    )
-    feedback_event_rows = counter("feedback_event_rows_written")
-    feedback_total_rows = counter("feedback_total_rows_written")
-    feedback_payload_bytes = counter("feedback_payload_bytes_written")
-    if feedback_persisted + feedback_duplicate_retries != feedback_attempts:
-        raise AlrEventConsumerError("feedback_write_metric_attempt_invalid")
-    if feedback_total_rows != (
-        feedback_artifact_rows
-        + feedback_provenance_rows
-        + feedback_event_rows
-    ):
-        raise AlrEventConsumerError("feedback_write_metric_total_invalid")
-    return {
-        "schema_version": "alr_write_metrics_v1",
-        "scope": {
-            "kind": "consumer_session_cumulative",
-            "session_id": session_id,
-            "through_completed_health_attempt": health_attempts,
-        },
-        "health": {
-            "attempts": health_attempts,
-            "emitted": health_emitted,
-            "state_delta_writes": counter("health_state_delta_writes"),
-            "heartbeat_writes": counter("health_heartbeat_writes"),
-            "writes_suppressed": health_suppressed,
-            "rows_written": counter("health_rows_written"),
-            "payload_bytes_written": counter(
-                "health_payload_bytes_written"
-            ),
-            "suppression_ratio": ratio(
-                health_suppressed,
-                health_attempts,
-            ),
-        },
-        "decision": {
-            "attempts": decision_attempts,
-            "writes_suppressed": decision_suppressed,
-            "duplicate_retries": counter("decision_duplicate_retries"),
-            "artifact_rows_written": counter(
-                "operational_artifact_rows_written"
-            )
-            + feedback_artifact_rows,
-            "provenance_rows_written": counter(
-                "operational_provenance_rows_written"
-            )
-            + feedback_provenance_rows,
-            "run_rows_written": counter("operational_run_rows_written"),
-            "feedback_rows_written": feedback_event_rows
-            + counter("operational_feedback_rows_written"),
-            "defer_artifact_rows_written": counter(
-                "operational_defer_artifact_rows_written"
-            ),
-            "payload_bytes_written": counter(
-                "operational_payload_bytes_written"
-            )
-            + feedback_payload_bytes,
-            "source_rows_consumed": counter(
-                "operational_source_rows_consumed"
-            ),
-            "suppression_ratio": ratio(
-                decision_suppressed,
-                decision_attempts,
-            ),
-        },
-        "feedback": {
-            "attempts": feedback_attempts,
-            "persisted": feedback_persisted,
-            "duplicate_retries": feedback_duplicate_retries,
-            "persisted_ratio": ratio(
-                feedback_persisted,
-                feedback_attempts,
-            ),
-            "duplicate_retry_ratio": ratio(
-                feedback_duplicate_retries,
-                feedback_attempts,
-            ),
-            "artifact_rows_written": feedback_artifact_rows,
-            "provenance_rows_written": feedback_provenance_rows,
-            "event_rows_written": feedback_event_rows,
-            "total_rows_written": feedback_total_rows,
-            "payload_bytes_written": feedback_payload_bytes,
-        },
-    }
-
-
-def _row_value(row: Any, index: int, key: str) -> Any:
-    if isinstance(row, Mapping):
-        return row[key]
-    return row[index]
 
 
 if __name__ == "__main__":  # pragma: no cover - exercised by the user unit

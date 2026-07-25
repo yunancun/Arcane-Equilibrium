@@ -72,27 +72,25 @@ W2_REGENERATED_W1_WAVE_EXIT_FILENAME = "S2.4-WP4-W2-regenerated-W1-wave-exit-rec
 W2_DERIVATION_RECORD_FILENAME = "S2.4-WP4-W2-derivation-record.json"
 
 
-def _validate_emit_evidence(
-    test_evidence: Any, review_provenance: Any
-) -> None:
-    """兩個發射器共用的 evidence 防呆(E3 P2-4 含 secret 深掃)。
+# P2-I(E3):receipt 發射的持久化邊界(不靜默覆蓋 + CLI --out 受限於 receipts 目錄)
+# 依 2000 行治理拆分下沉至 agent_governance_s2_4_emit_sink,此處逐名 re-export。
+from agent_governance_s2_4_emit_sink import (  # noqa: E402
+    RECEIPTS_ROOT,
+    emit_collision_refusal as _emit_collision_refusal,
+    persist_emit_artifacts as _persist_emit_artifacts,
+    resolve_cli_out_dir as _resolve_cli_out_dir,
+    validate_emit_evidence as _validate_emit_evidence_impl,
+)
 
-    persisted evidence 會逐字進入 Git-committed receipt 檔;除形狀檢查外,以中央
-    secret-like 內容掃描拒絕任何疑似機密的 evidence——寧可拒發射,不可把密鑰寫進 repo。
-    """
 
-    if not isinstance(test_evidence, dict) or not test_evidence:
-        raise ValueError("test_evidence must be a non-empty object")
-    if not isinstance(review_provenance, list) or not review_provenance or not all(
-        isinstance(item, dict) and item for item in review_provenance
-    ):
-        raise ValueError("review_provenance must be a non-empty list of objects")
-    if central_validator._contains_github_secret_like_content(
-        test_evidence
-    ) or central_validator._contains_github_secret_like_content(review_provenance):
-        raise ValueError(
-            "emit evidence contains secret-like content; refusing to persist"
-        )
+def _validate_emit_evidence(test_evidence: Any, review_provenance: Any) -> None:
+    """三個發射器共用的 evidence 防呆(secret 判準注入中央 validator 實作)。"""
+
+    _validate_emit_evidence_impl(
+        test_evidence,
+        review_provenance,
+        secret_scanner=central_validator._contains_github_secret_like_content,
+    )
 
 
 def _git_head(repo_root: Path) -> str:
@@ -195,6 +193,7 @@ def emit_w0_receipts(
     out_dir: Path,
     test_evidence: dict[str, Any],
     review_provenance: list[dict[str, Any]],
+    allow_overwrite: bool = False,
 ) -> dict[str, Any]:
     """發射並持久化正式 W0 receipts;導出非 ADMITTED/PASS 即 fail-closed 不寫檔。
 
@@ -247,7 +246,6 @@ def emit_w0_receipts(
             "reasons": central_errors,
         }
 
-    out_dir.mkdir(parents=True, exist_ok=True)
     derivation_record = {
         "schema_version": "s2_4_w0_derivation_record_v1_informal",
         "source_head": admission["source_head"],
@@ -262,15 +260,17 @@ def emit_w0_receipts(
             "source_head and run derive_source_admission_status/derive_wave_exit_status"
         ),
     }
-    for name, artifact in (
-        (W0_ADMISSION_FILENAME, admission),
-        (W0_WAVE_EXIT_FILENAME, wave_exit),
-        (W0_DERIVATION_RECORD_FILENAME, derivation_record),
-    ):
-        (out_dir / name).write_text(
-            json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
+    existing = _persist_emit_artifacts(
+        out_dir,
+        (
+            (W0_ADMISSION_FILENAME, admission),
+            (W0_WAVE_EXIT_FILENAME, wave_exit),
+            (W0_DERIVATION_RECORD_FILENAME, derivation_record),
+        ),
+        allow_overwrite=allow_overwrite,
+    )
+    if existing is not None:
+        return _emit_collision_refusal("W0_EMIT_REFUSED", existing)
     return {
         "status": "W0_RECEIPTS_EMITTED",
         "out_dir": str(out_dir),
@@ -367,6 +367,7 @@ def emit_w1_receipts(
     test_evidence: dict[str, Any],
     review_provenance: list[dict[str, Any]],
     w0_receipt_dir: Path = W0_RECEIPT_DIR,
+    allow_overwrite: bool = False,
 ) -> dict[str, Any]:
     """發射並持久化正式 W1 wave-exit receipt;任一導出非 ADMITTED/PASS 即 fail-closed 不寫檔。
 
@@ -472,7 +473,6 @@ def emit_w1_receipts(
             "reasons": central_errors,
         }
 
-    out_dir.mkdir(parents=True, exist_ok=True)
     derivation_record = {
         "schema_version": "s2_4_w1_derivation_record_v1_informal",
         "source_head": admission["source_head"],
@@ -493,16 +493,18 @@ def emit_w1_receipts(
             "predecessor_wave_receipt=w0_wave_exit)"
         ),
     }
-    for name, artifact in (
-        (W1_WAVE_EXIT_FILENAME, w1_wave_exit),
-        (W1_REGENERATED_W0_ADMISSION_FILENAME, admission),
-        (W1_REGENERATED_W0_WAVE_EXIT_FILENAME, w0_wave_exit),
-        (W1_DERIVATION_RECORD_FILENAME, derivation_record),
-    ):
-        (out_dir / name).write_text(
-            json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
+    existing = _persist_emit_artifacts(
+        out_dir,
+        (
+            (W1_WAVE_EXIT_FILENAME, w1_wave_exit),
+            (W1_REGENERATED_W0_ADMISSION_FILENAME, admission),
+            (W1_REGENERATED_W0_WAVE_EXIT_FILENAME, w0_wave_exit),
+            (W1_DERIVATION_RECORD_FILENAME, derivation_record),
+        ),
+        allow_overwrite=allow_overwrite,
+    )
+    if existing is not None:
+        return _emit_collision_refusal("W1_EMIT_REFUSED", existing)
     return {
         "status": "W1_RECEIPTS_EMITTED",
         "out_dir": str(out_dir),
@@ -539,17 +541,24 @@ _RETENTION_TABLES = (
     "learning.alr_derived_cache_entries",
     "learning.alr_retention_events",
 )
-# SQL-scan 唯一排除(理由必須成立且入 verdict):parquet_etl 是 duckdb 本地 ETL 面——其
-# execute 綁 duckdb 連線與動態檔案路徑,非本進程的 PG data-plane;server-side ACL 由
-# manifest + disposable trace 執法,不受客戶端字串影響。排除「不」適用於 (a) 的 import
-# 可達性檢查(closure 仍完整走訪)。
-_ENGINE_SCANNER_SQL_SCAN_EXCLUDED = {
-    "parquet_etl": "duckdb_local_etl_surface_not_pg_data_plane",
-}
-# 進 manifest functions 段的 pg_catalog advisory-lock 家族(PUBLIC-default EXECUTE)。
-_ADVISORY_FUNCTION_NAMES = ("hashtext", "pg_advisory_unlock", "pg_try_advisory_lock")
+# W2 P1-C/P2-F(E3):SQL-scan **零排除**。掃描面 = engine-scanner 進程「真的能載入」的
+# 模組全集 = 靜態 import 閉包 ∩ (ml_training 模組 ∪ application runtime closure 成員),
+# 涵蓋 helper 域的 bundle 成員(舊版以「parent == ml_training 目錄」硬篩,把 bundle 內的
+# helper 模組整片漏掉)。非 bundle 的治理模組不入 bundle 樹 → runtime 不存在該檔案 →
+# 不可能執行其 SQL;其 import 可達性仍由 (a) 與 application-closure 雙向 exact-match 執法。
+# parquet_etl 的排除已隨其退出 import 閉包一併移除(檔案仍是 v2 身分的內容輸入)。
+# 進 manifest functions 段的 pg_catalog 家族(PUBLIC-default EXECUTE):advisory-lock
+# 三支 + §8.3 在帶身分閘用到的 current_database/current_setting。
+_ADVISORY_FUNCTION_NAMES = (
+    "current_database",
+    "current_setting",
+    "hashtext",
+    "pg_advisory_unlock",
+    "pg_try_advisory_lock",
+)
 _ADVISORY_FUNCTION_RE = re.compile(
-    r"\b(hashtext|pg_advisory_unlock|pg_try_advisory_lock)\s*\("
+    r"\b(current_database|current_setting|hashtext|pg_advisory_unlock"
+    r"|pg_try_advisory_lock)\s*\("
 )
 _QUALIFIED_TABLE_RE = re.compile(r"\b(?:trading|learning)\.[a-z_][a-z0-9_]*")
 _INSERT_TARGET_RE = re.compile(
@@ -567,6 +576,25 @@ _RELATION_KEYWORD_RE = re.compile(
 _CTE_NAME_RE = re.compile(r"(?:\bWITH\s+|,\s*)([a-z_][a-z0-9_]*)\s+AS\s*\(", re.IGNORECASE)
 _SAFE_SQL_IDENT_RE = re.compile(r"^[a-z_][a-z0-9_]*$")
 _SAFE_SQL_QUALIFIED_RE = re.compile(r"^[a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*$")
+# W2 P1-B(E3 P1-1):data-modifying CTE。第一個 token 分類會把
+# ``WITH x AS (DELETE FROM ... RETURNING ...) SELECT ...`` 判成 read,§2.1 的
+# 「零 retention mutation / 零 DELETE」在閘口即被繞過。故分類前先全句掃描
+# DELETE/UPDATE/INSERT/TRUNCATE(含 CTE 內、含 ON CONFLICT DO UPDATE),導出真目標的
+# 真權限;read 類語句一旦內含任一 mutation 即 typed 拒絕(必然 fail split 謂詞)。
+_EMBEDDED_MUTATION_RE = re.compile(
+    r"\b(?P<op>DELETE\s+FROM|INSERT\s+INTO|TRUNCATE(?:\s+TABLE)?|UPDATE)\s+"
+    r"(?:ONLY\s+)?(?P<target>[A-Za-z_][A-Za-z0-9_.]*)?",
+    re.IGNORECASE,
+)
+_MUTATION_PRIVILEGES = {
+    "DELETE": "DELETE",
+    "INSERT": "INSERT",
+    "TRUNCATE": "TRUNCATE",
+    "UPDATE": "UPDATE",
+}
+# repo-local「看起來像」本倉來源的 import 根(P2-D:解析不到即 fail-closed 記 unresolved,
+# 而非靜默略過;第三方/stdlib 名不在此列,不進靜態 SQL/closure 執法面)。
+_REPO_LOCAL_IMPORT_ROOTS = ("ml_training", "program_code", "helper_scripts", "learning_engine")
 
 
 class _SqlUnresolvable(Exception):
@@ -590,9 +618,18 @@ def _engine_scanner_import_names(tree: ast.AST) -> set[str]:
 
 
 def _engine_scanner_resolve_module(repo_root: Path, name: str) -> tuple[str, Path] | None:
-    """把 import 名解析為 repo 內檔案(ml_training 優先,再 maintenance_scripts)。"""
+    """把 import 名解析為 repo 內檔案(ml_training 優先,再 maintenance_scripts)。
 
-    short = name.split(".", 1)[1] if name.startswith("ml_training.") else name
+    支援 ``ml_training.X`` 與 repo 實體佈局的 ``program_code.ml_training.X``;更深的
+    dotted 子套件無對應檔案,回 None 由 :func:`_engine_scanner_unresolved_import_reason`
+    決定是否 fail-closed(P2-D:repo-local-looking 的不可解析 import 不得靜默略過)。
+    """
+
+    short = name
+    for prefix in ("program_code.ml_training.", "ml_training."):
+        if short.startswith(prefix):
+            short = short[len(prefix):]
+            break
     if "." in short:
         return None
     for base_rel in (_ML_TRAINING_REL, _HELPER_SCRIPTS_REL):
@@ -602,14 +639,43 @@ def _engine_scanner_resolve_module(repo_root: Path, name: str) -> tuple[str, Pat
     return None
 
 
-def _engine_scanner_import_closure(repo_root: Path) -> dict[str, Path]:
-    """自 consumer 起的完整靜態 import 閉包(fail-closed:解析錯誤即 raise)。"""
+def _engine_scanner_unresolved_import_reason(repo_root: Path, name: str) -> str | None:
+    """P2-D:repo-local-looking 卻解析不到 repo 檔案的 import → typed 理由(否則 None)。
+
+    純套件根名(``ml_training`` 等,``from ml_training import X`` 的副產物)不算違規——
+    其成員名會各自入 stack;真正被攔下的是 ``ml_training.tests.x`` 這類指向 repo 內、
+    卻不是任一受掃描模組的 dotted 名(舊版靜默 return None,等同一條無人審查的逃逸縫)。
+    """
+
+    if _engine_scanner_resolve_module(repo_root, name) is not None:
+        return None
+    root = name.split(".", 1)[0]
+    if root not in _REPO_LOCAL_IMPORT_ROOTS:
+        return None  # stdlib/第三方:不在本靜態執法面
+    if "." not in name:
+        return None  # 純套件根名
+    return f"repo-local import does not resolve to a scanned module: {name}"
+
+
+def _engine_scanner_import_closure(
+    repo_root: Path, *, unresolved_imports: list[str] | None = None
+) -> dict[str, Path]:
+    """自 consumer 起的完整靜態 import 閉包(fail-closed:解析錯誤即 raise)。
+
+    ``unresolved_imports`` 非 None 時,額外收集 repo-local-looking 卻無法解析的 import
+    名(P2-D:交由裁決層轉成 violation)。
+    """
 
     closure: dict[str, Path] = {}
     stack = ["ml_training." + _ENGINE_SCANNER_ENTRY_MODULE]
     while stack:
-        resolved = _engine_scanner_resolve_module(repo_root, stack.pop())
+        name = stack.pop()
+        resolved = _engine_scanner_resolve_module(repo_root, name)
         if resolved is None:
+            if unresolved_imports is not None:
+                reason = _engine_scanner_unresolved_import_reason(repo_root, name)
+                if reason is not None and reason not in unresolved_imports:
+                    unresolved_imports.append(reason)
             continue
         short, path = resolved
         if short in closure:
@@ -671,6 +737,14 @@ def _module_sql_statements(path: Path) -> tuple[list[dict[str, Any]], list[dict[
                         module_consts[target.id] = next(iter(values))
     statements: list[dict[str, Any]] = []
     unresolved: list[dict[str, Any]] = []
+    # P2-E(E3):只走 FunctionDef/AsyncFunctionDef 會漏掉 module 層級、class body、
+    # module 層 lambda 內的 ``.execute(...)``——那是一條「加一行就靜默出掃描面」的縫。
+    # 先記下所有落在函式內的節點,之後對其餘節點做同等 fail-closed 掃描。
+    in_function: set[int] = set()
+    for func in ast.walk(tree):
+        if isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for node in ast.walk(func):
+                in_function.add(id(node))
     for func in ast.walk(tree):
         if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
@@ -708,6 +782,29 @@ def _module_sql_statements(path: Path) -> tuple[list[dict[str, Any]], list[dict[
                         "line": node.lineno,
                         "statement": statement,
                     })
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in {"execute", "executemany"}
+            and node.args
+            and id(node) not in in_function
+        ):
+            try:
+                values = _resolve_sql_strings(node.args[0], module_consts, {})
+            except _SqlUnresolvable as exc:
+                unresolved.append({
+                    "function": "<module>",
+                    "line": node.lineno,
+                    "reason": str(exc),
+                })
+                continue
+            for statement in sorted(values):
+                statements.append({
+                    "function": "<module>",
+                    "line": node.lineno,
+                    "statement": statement,
+                })
     return statements, unresolved
 
 
@@ -731,6 +828,23 @@ def _statement_unqualified_relations(sql: str) -> list[str]:
     return sorted(set(violations))
 
 
+def _embedded_data_modifications(sql: str) -> list[tuple[str, str | None]]:
+    """全句掃描 data-modifying 動詞及其目標(含 CTE 內部);回 [(op, target|None)]。
+
+    P1-B:第一個 token 不足以判定語句是否會改資料——``WITH x AS (DELETE ...) SELECT``
+    的 head 是 WITH。此處以動詞為準,目標未 schema-qualified 時回 None(呼叫端 typed 拒絕)。
+    """
+
+    found: list[tuple[str, str | None]] = []
+    for match in _EMBEDDED_MUTATION_RE.finditer(sql):
+        op = match.group("op").split()[0].upper()
+        target = match.group("target")
+        if target is not None and _QUALIFIED_TABLE_RE.fullmatch(target.lower()) is None:
+            target = None
+        found.append((op, None if target is None else target.lower()))
+    return found
+
+
 def _classify_sql_statement(sql: str) -> dict[str, Any]:
     """把一條常量 SQL 分類並導出必要權限;無法分類即回 errors(fail-closed)。"""
 
@@ -739,7 +853,21 @@ def _classify_sql_statement(sql: str) -> dict[str, Any]:
     errors: list[str] = []
     mutation = False
     referenced = sorted({match.lower() for match in _QUALIFIED_TABLE_RE.findall(sql)})
-    if head in {"SELECT", "WITH"}:
+    embedded = _embedded_data_modifications(sql)
+    if head in {"SELECT", "WITH"} and embedded:
+        # P1-B:read-class 語句內含 data-modifying CTE → 導出真目標的真權限並 typed 拒絕
+        # (§2.1 的「零 retention mutation / 零 DELETE」不可經 CTE 繞過)。
+        statement_class = "data_modifying_cte"
+        mutation = True
+        for table in referenced:
+            tables.setdefault(table, set()).add("SELECT")
+        for op, target in embedded:
+            if target is None:
+                errors.append(f"data_modifying_cte_target_not_schema_qualified:{op}")
+                continue
+            tables.setdefault(target, set()).add(_MUTATION_PRIVILEGES[op])
+            errors.append(f"data_modifying_cte:{op}:{target}")
+    elif head in {"SELECT", "WITH"}:
         statement_class = "read"
         for table in referenced:
             tables.setdefault(table, set()).add("SELECT")
@@ -755,9 +883,23 @@ def _classify_sql_statement(sql: str) -> dict[str, Any]:
             # (disposable trace 以真 42501 實證;見 W2a 佐證測試)。
             if re.search(r"\bON\s+CONFLICT\b", sql, re.IGNORECASE):
                 tables[target].add("SELECT")
+            # P1-B:ON CONFLICT DO UPDATE 是真 mutation(PG 於 plan 期即要求 UPDATE 權限)。
+            if re.search(r"\bDO\s+UPDATE\b", sql, re.IGNORECASE):
+                tables[target].add("UPDATE")
+                mutation = True
             for table in referenced:
                 if table != target:
                     tables.setdefault(table, set()).add("SELECT")
+            # P1-B:INSERT 之外的第二個 data-modifying 動詞(如 CTE 內 DELETE)必須被導出。
+            for op, cte_target in embedded:
+                if op == "INSERT" or (op == "UPDATE" and cte_target is None):
+                    continue
+                mutation = True
+                if cte_target is None:
+                    errors.append(f"data_modifying_cte_target_not_schema_qualified:{op}")
+                    continue
+                tables.setdefault(cte_target, set()).add(_MUTATION_PRIVILEGES[op])
+                errors.append(f"data_modifying_cte:{op}:{cte_target}")
     elif head == "UPDATE":
         statement_class = "update"
         mutation = True
@@ -798,22 +940,34 @@ def build_engine_scanner_sql_inventory(repo_root: Path = REPO_ROOT) -> dict[str,
     inventory 同時攜帶:完整 import 閉包(retention 可達性證據)、逐條語句的分類/
     權限導出、unresolved/violation 清單、與聚合 required_privileges。任何 caller
     不可自帶 PASS;裁決一律經 :func:`derive_engine_scanner_privilege_split`。
+
+    P1-C/P2-F(W2):掃描面 = 靜態 import 閉包 ∩(ml_training 模組 ∪ bundle runtime
+    closure 成員 ∪ 宣告的 lazy helper 根),**零具名排除**;非 bundle 的治理模組不入
+    bundle 樹(runtime 無該檔案),其 import 可達性另由 (a) 與 application-closure
+    雙向 exact-match 執法。
     """
 
-    closure = _engine_scanner_import_closure(repo_root)
+    unresolved_imports: list[str] = []
+    closure = _engine_scanner_import_closure(
+        repo_root, unresolved_imports=unresolved_imports
+    )
     retention_reachable = sorted(
         name for name in _RETENTION_FORBIDDEN_MODULES if name in closure
     )
     ml_dir = (repo_root / _ML_TRAINING_REL).resolve()
+    bundle_members = set(
+        build_engine_scanner_runtime_import_closure(
+            repo_root,
+            lazy_helper_roots=_declared_lazy_helper_roots(repo_root),
+        )
+    )
     statements: list[dict[str, Any]] = []
     unresolved: list[dict[str, Any]] = []
     violations: list[str] = []
     scanned: list[str] = []
     for name in sorted(closure):
         path = closure[name]
-        if path.resolve().parent != ml_dir:
-            continue  # 治理 helper 域不屬 PG data-plane(import 可達性已在 closure 覆蓋)
-        if name in _ENGINE_SCANNER_SQL_SCAN_EXCLUDED:
+        if path.resolve().parent != ml_dir and name not in bundle_members:
             continue
         scanned.append(name)
         module_statements, module_unresolved = _module_sql_statements(path)
@@ -827,9 +981,18 @@ def build_engine_scanner_sql_inventory(repo_root: Path = REPO_ROOT) -> dict[str,
                 violations.append(
                     f"{name}:{entry['function']}:{entry['line']}:{error}"
                 )
-            if classified["statement_class"] == "delete":
+            if classified["statement_class"] == "delete" or any(
+                op in {"DELETE", "TRUNCATE"}
+                for op, _ in _embedded_data_modifications(entry["statement"])
+            ):
+                # P1-B:CTE 內的 DELETE/TRUNCATE 與 head-DELETE 同等禁止。
                 violations.append(
                     f"{name}:{entry['function']}:{entry['line']}:delete_statement_forbidden"
+                )
+            if classified["statement_class"] == "data_modifying_cte":
+                violations.append(
+                    f"{name}:{entry['function']}:{entry['line']}"
+                    ":data_modifying_cte_forbidden"
                 )
             if classified["mutation"] and any(
                 table in _RETENTION_TABLES for table in classified["tables"]
@@ -857,7 +1020,9 @@ def build_engine_scanner_sql_inventory(repo_root: Path = REPO_ROOT) -> dict[str,
         "entry_module": f"ml_training.{_ENGINE_SCANNER_ENTRY_MODULE}",
         "import_closure": sorted(closure),
         "sql_scanned_modules": scanned,
-        "sql_scan_excluded": dict(_ENGINE_SCANNER_SQL_SCAN_EXCLUDED),
+        # P2-F:掃描面規則(具名排除已移除;非 bundle 的治理模組不隨 bundle 出貨)。
+        "sql_scan_surface": "ml_training_modules_union_application_runtime_closure",
+        "unresolved_imports": sorted(set(unresolved_imports)),
         "retention_forbidden_reachable": retention_reachable,
         "statements": statements,
         "unresolved": sorted(
@@ -897,6 +1062,11 @@ def derive_engine_scanner_privilege_split(
             "sql statement is not statically resolvable: "
             f"{entry['module']}:{entry['line']}:{entry['reason']}"
         )
+    # P2-D:repo-local-looking 卻解析不到的 import 必須 fail-closed(不得靜默略過)。
+    reasons.extend(
+        f"import closure is not statically resolvable: {reason}"
+        for reason in inventory["unresolved_imports"]
+    )
     reasons.extend(
         f"sql inventory violation: {violation}" for violation in inventory["violations"]
     )
@@ -982,7 +1152,8 @@ def derive_engine_scanner_privilege_split(
         "statement_count": len(inventory["statements"]),
         "retention_forbidden_reachable": inventory["retention_forbidden_reachable"],
         "required_privileges": inventory["required_privileges"],
-        "sql_scan_excluded": inventory["sql_scan_excluded"],
+        "sql_scanned_module_count": len(inventory["sql_scanned_modules"]),
+        "sql_scan_surface": inventory["sql_scan_surface"],
         "manifest_digest": manifest_digest,
         "sql_inventory_digest": central_validator.canonical_digest(inventory),
         "production_authority_flags": {
@@ -1115,17 +1286,44 @@ def _toplevel_import_names(tree: ast.Module) -> set[str]:
     return names
 
 
+def _declared_lazy_helper_roots(repo_root: Path = REPO_ROOT) -> tuple[str, ...]:
+    """讀 checked-in allowlist 宣告的 runtime lazy helper 根(讀不到即空;掃描面用)。"""
+    try:
+        declared = json.loads(
+            (repo_root / _APP_CLOSURE_REL).read_text(encoding="utf-8")
+        )["runtime_lazy_helper_roots"]
+    except (OSError, json.JSONDecodeError, KeyError, TypeError):
+        return ()
+    if not isinstance(declared, list):
+        return ()
+    return tuple(
+        entry["module"]
+        for entry in declared
+        if isinstance(entry, dict) and isinstance(entry.get("module"), str)
+    )
+
+
 def build_engine_scanner_runtime_import_closure(
     repo_root: Path = REPO_ROOT,
     *,
     lazy_helper_roots: tuple[str, ...] = (),
+    unresolved_imports: list[str] | None = None,
 ) -> dict[str, str]:
-    """entrypoint 起的 top-level transitive 閉包 + 顯式 lazy helper 根 → {module: rel_path}。"""
+    """entrypoint 起的 top-level transitive 閉包 + 顯式 lazy helper 根 → {module: rel_path}。
+
+    ``unresolved_imports`` 非 None 時,額外收集 repo-local-looking 卻無法解析的 top-level
+    import 名(P2-D:closure 裁決把它轉成 violation,不得靜默略過)。
+    """
     closure: dict[str, str] = {}
     stack = ["ml_training." + _ENGINE_SCANNER_ENTRY_MODULE, *lazy_helper_roots]
     while stack:
-        resolved = _engine_scanner_resolve_module(repo_root, stack.pop())
+        name = stack.pop()
+        resolved = _engine_scanner_resolve_module(repo_root, name)
         if resolved is None:
+            if unresolved_imports is not None:
+                reason = _engine_scanner_unresolved_import_reason(repo_root, name)
+                if reason is not None and reason not in unresolved_imports:
+                    unresolved_imports.append(reason)
             continue
         short, path = resolved
         if short in closure:
@@ -1201,8 +1399,14 @@ def derive_application_runtime_closure_status(
     lazy_roots = tuple(
         entry["module"] for entry in closure["runtime_lazy_helper_roots"]
     )
+    unresolved_imports: list[str] = []
     derived = build_engine_scanner_runtime_import_closure(
-        repo_root, lazy_helper_roots=lazy_roots
+        repo_root, lazy_helper_roots=lazy_roots, unresolved_imports=unresolved_imports
+    )
+    # P2-D:repo-local-looking 卻解析不到的 runtime import → 不得靜默略過。
+    reasons.extend(
+        f"runtime import is not statically resolvable: {reason}"
+        for reason in sorted(set(unresolved_imports))
     )
     derived_paths = sorted(set(derived.values()))
     declared_modules = list(closure["python_modules"])
@@ -1496,6 +1700,7 @@ def emit_w2_receipts(
     test_evidence: dict[str, Any],
     review_provenance: list[dict[str, Any]],
     w1_receipt_dir: Path = W1_RECEIPT_DIR,
+    allow_overwrite: bool = False,
 ) -> dict[str, Any]:
     """發射並持久化正式 W2 wave-exit receipt;任一導出非 ADMITTED/PASS 即 fail-closed 不寫檔。
 
@@ -1619,7 +1824,6 @@ def emit_w2_receipts(
             "reasons": central_errors,
         }
 
-    out_dir.mkdir(parents=True, exist_ok=True)
     derivation_record = {
         "schema_version": "s2_4_w2_derivation_record_v1_informal",
         "source_head": admission["source_head"],
@@ -1642,17 +1846,19 @@ def emit_w2_receipts(
             "predecessor_wave_receipt=w1_wave_exit, predecessor_wave_chain=(w0_wave_exit,))"
         ),
     }
-    for name, artifact in (
-        (W2_WAVE_EXIT_FILENAME, w2_wave_exit),
-        (W2_REGENERATED_W0_ADMISSION_FILENAME, admission),
-        (W2_REGENERATED_W0_WAVE_EXIT_FILENAME, w0_wave_exit),
-        (W2_REGENERATED_W1_WAVE_EXIT_FILENAME, w1_wave_exit),
-        (W2_DERIVATION_RECORD_FILENAME, derivation_record),
-    ):
-        (out_dir / name).write_text(
-            json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
+    existing = _persist_emit_artifacts(
+        out_dir,
+        (
+            (W2_WAVE_EXIT_FILENAME, w2_wave_exit),
+            (W2_REGENERATED_W0_ADMISSION_FILENAME, admission),
+            (W2_REGENERATED_W0_WAVE_EXIT_FILENAME, w0_wave_exit),
+            (W2_REGENERATED_W1_WAVE_EXIT_FILENAME, w1_wave_exit),
+            (W2_DERIVATION_RECORD_FILENAME, derivation_record),
+        ),
+        allow_overwrite=allow_overwrite,
+    )
+    if existing is not None:
+        return _emit_collision_refusal("W2_EMIT_REFUSED", existing)
     return {
         "status": "W2_RECEIPTS_EMITTED",
         "out_dir": str(out_dir),
@@ -1669,23 +1875,20 @@ def _main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="action", required=True)
     emit = sub.add_parser("w0-emit", help="發射並持久化正式 W0 admission/wave-exit receipts")
-    emit.add_argument("--out", required=True, type=Path)
-    emit.add_argument("--test-evidence", required=True, type=Path)
-    emit.add_argument("--review-provenance", required=True, type=Path)
     w1_emit = sub.add_parser(
         "w1-emit",
         help="發射並持久化正式 W1 wave-exit receipt(記憶體重發當前世代 W0 鏈並綁定)",
     )
-    w1_emit.add_argument("--out", required=True, type=Path)
-    w1_emit.add_argument("--test-evidence", required=True, type=Path)
-    w1_emit.add_argument("--review-provenance", required=True, type=Path)
     w2_emit = sub.add_parser(
         "w2-emit",
         help="發射並持久化正式 W2 wave-exit receipt(記憶體重發當前世代 W0+W1 鏈並綁定)",
     )
-    w2_emit.add_argument("--out", required=True, type=Path)
-    w2_emit.add_argument("--test-evidence", required=True, type=Path)
-    w2_emit.add_argument("--review-provenance", required=True, type=Path)
+    for emitter in (emit, w1_emit, w2_emit):
+        # P2-I:--out 受限於 repo receipts 目錄;覆蓋既有 receipt 必須顯式宣告。
+        emitter.add_argument("--out", required=True, type=Path)
+        emitter.add_argument("--test-evidence", required=True, type=Path)
+        emitter.add_argument("--review-provenance", required=True, type=Path)
+        emitter.add_argument("--allow-overwrite", action="store_true")
     sub.add_parser(
         "engine-scanner-split",
         help="再導出 §2.1 engine-scanner privilege-split verdict(typed;不可自證)",
@@ -1713,36 +1916,35 @@ def _main(argv: list[str] | None = None) -> int:
         summary = {key: value for key, value in result.items() if key != "manifest"}
         print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
         return 0 if result["status"] == "BUILT" else 2
-    if args.action == "w0-emit":
-        result = emit_w0_receipts(
-            out_dir=args.out,
+    emitters = {
+        "w0-emit": (emit_w0_receipts, "W0_RECEIPTS_EMITTED"),
+        "w1-emit": (emit_w1_receipts, "W1_RECEIPTS_EMITTED"),
+        "w2-emit": (emit_w2_receipts, "W2_RECEIPTS_EMITTED"),
+    }
+    if args.action in emitters:
+        emitter, success_status = emitters[args.action]
+        try:
+            out_dir = _resolve_cli_out_dir(args.out)  # P2-I:receipts 目錄外一律拒絕
+        except ValueError as error:
+            print(
+                json.dumps(
+                    {"status": "EMIT_REFUSED", "stage": "out_dir", "reasons": [str(error)]},
+                    ensure_ascii=False,
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+            return 2
+        result = emitter(
+            out_dir=out_dir,
             test_evidence=json.loads(args.test_evidence.read_text(encoding="utf-8")),
             review_provenance=json.loads(
                 args.review_provenance.read_text(encoding="utf-8")
             ),
+            allow_overwrite=bool(args.allow_overwrite),
         )
         print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
-        return 0 if result["status"] == "W0_RECEIPTS_EMITTED" else 2
-    if args.action == "w1-emit":
-        result = emit_w1_receipts(
-            out_dir=args.out,
-            test_evidence=json.loads(args.test_evidence.read_text(encoding="utf-8")),
-            review_provenance=json.loads(
-                args.review_provenance.read_text(encoding="utf-8")
-            ),
-        )
-        print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
-        return 0 if result["status"] == "W1_RECEIPTS_EMITTED" else 2
-    if args.action == "w2-emit":
-        result = emit_w2_receipts(
-            out_dir=args.out,
-            test_evidence=json.loads(args.test_evidence.read_text(encoding="utf-8")),
-            review_provenance=json.loads(
-                args.review_provenance.read_text(encoding="utf-8")
-            ),
-        )
-        print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
-        return 0 if result["status"] == "W2_RECEIPTS_EMITTED" else 2
+        return 0 if result["status"] == success_status else 2
     return 2
 
 

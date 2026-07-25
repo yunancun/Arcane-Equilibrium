@@ -23,6 +23,8 @@ import sys
 import textwrap
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 HELPERS = ROOT / "helper_scripts/maintenance_scripts"
 ML_ROOT = ROOT / "program_code/ml_training"
@@ -87,6 +89,281 @@ def test_real_tree_inventory_is_deterministic() -> None:
     first = install.build_engine_scanner_sql_inventory()
     second = install.build_engine_scanner_sql_inventory()
     assert validator.canonical_digest(first) == validator.canonical_digest(second)
+
+
+# --------------------------------------------------------------------------- #
+# W2 P1-C/P2-F:掃描面零排除,且覆蓋 bundle 內的 helper 域模組
+# --------------------------------------------------------------------------- #
+def test_sql_scan_has_zero_named_exclusions_and_covers_every_closure_member() -> None:
+    inventory = install.build_engine_scanner_sql_inventory()
+    verdict = install.derive_engine_scanner_privilege_split()
+    # 具名排除面(舊 sql_scan_excluded)必須「整個消失」——不得留任何殘存鍵。
+    assert "sql_scan_excluded" not in inventory
+    assert "sql_scan_excluded" not in verdict
+    assert not hasattr(install, "_ENGINE_SCANNER_SQL_SCAN_EXCLUDED")
+    scanned = set(inventory["sql_scanned_modules"])
+    # bundle runtime closure 的每一個成員(含 helper 域)都必須在掃描面內。
+    bundle = install.build_engine_scanner_runtime_import_closure(
+        ROOT, lazy_helper_roots=install._declared_lazy_helper_roots(ROOT)
+    )
+    assert set(bundle) <= scanned, sorted(set(bundle) - scanned)
+    assert {"agent_governance_schema", "agent_governance_sealed_build"} <= scanned
+    # ml_training 域的每一個 import-closure 成員同樣在掃描面內。
+    ml_dir = (ROOT / "program_code/ml_training").resolve()
+    ml_members = {
+        name
+        for name in inventory["import_closure"]
+        if (ml_dir / f"{name}.py").is_file()
+    }
+    assert ml_members <= scanned, sorted(ml_members - scanned)
+    assert verdict["sql_scan_surface"] == (
+        "ml_training_modules_union_application_runtime_closure"
+    )
+
+
+def test_ambient_dsn_parquet_etl_is_no_longer_import_reachable() -> None:
+    """P1-C:parquet_etl(真連 PG 的 duckdb ETL 面)必須離開 import 閉包。"""
+    inventory = install.build_engine_scanner_sql_inventory()
+    assert "parquet_etl" not in inventory["import_closure"]
+    assert "parquet_etl" not in inventory["sql_scanned_modules"]
+    bundle = install.build_engine_scanner_runtime_import_closure(
+        ROOT, lazy_helper_roots=install._declared_lazy_helper_roots(ROOT)
+    )
+    assert "parquet_etl" not in bundle
+
+
+def test_reintroduced_parquet_etl_import_is_refused(tmp_path: Path) -> None:
+    """回歸:任何人把 ambient-DSN 面 import 回 runtime 閉包即掃描面違規。"""
+    root = _write_synthetic_tree(
+        tmp_path,
+        consumer_source="""
+        _LOCAL_DSN_REQUIRED = {
+            "host": "127.0.0.1",
+            "port": "5432",
+            "dbname": "trading_ai",
+            "user": "aiml_engine_scanner",
+        }
+        from ml_training.parquet_etl import EDGE_P3_FEATURE_NAMES
+        """,
+        extra={
+            "parquet_etl.py": """
+            import os
+
+
+            def extract(pg_url=None):
+                db_url = pg_url or os.getenv("OPENCLAW_DATABASE_URL", "")
+                conn = duckdb.connect()
+                conn.execute(f"ATTACH '{db_url}' AS pg (TYPE postgres, READ_ONLY);")
+            """,
+        },
+    )
+    inventory = install.build_engine_scanner_sql_inventory(root)
+    assert "parquet_etl" in inventory["sql_scanned_modules"]
+    verdict = install.derive_engine_scanner_privilege_split(
+        root, manifest_path=MANIFEST_PATH
+    )
+    assert verdict["status"] == "ENGINE_SCANNER_PRIVILEGE_SPLIT_REQUIRED"
+
+
+# --------------------------------------------------------------------------- #
+# W2 P1-B(E3 P1-1):data-modifying CTE 不得被首 token 分類放行
+# --------------------------------------------------------------------------- #
+# 審查報告給出的原始攻擊字串(head 是 WITH → 舊分類器判 read → 只導出 SELECT)。
+_CTE_ATTACK_SQL = (
+    "WITH purged AS ("
+    "DELETE FROM learning.alr_derived_cache_entries WHERE cache_key = %s "
+    "RETURNING cache_key"
+    ") SELECT count(*) AS purged_count FROM purged"
+)
+
+
+def test_data_modifying_cte_is_classified_as_mutation_not_read() -> None:
+    classified = install._classify_sql_statement(_CTE_ATTACK_SQL)
+    assert classified["statement_class"] == "data_modifying_cte"
+    assert classified["mutation"] is True
+    # 真目標的真權限被導出(不是只有 SELECT)
+    assert "DELETE" in classified["tables"]["learning.alr_derived_cache_entries"]
+    assert any("data_modifying_cte:DELETE" in error for error in classified["errors"])
+    # 對照:同一形狀的純讀 CTE 仍是 read 類(無誤報)
+    benign = install._classify_sql_statement(
+        "WITH recent AS (SELECT source_key FROM learning.alr_source_events) "
+        "SELECT count(*) AS n FROM recent"
+    )
+    assert benign["statement_class"] == "read"
+    assert benign["mutation"] is False
+    assert benign["errors"] == []
+
+
+def test_data_modifying_cte_fails_the_split_predicate(tmp_path: Path) -> None:
+    root = _write_synthetic_tree(
+        tmp_path,
+        consumer_source=f'''
+        _LOCAL_DSN_REQUIRED = {{
+            "host": "127.0.0.1",
+            "port": "5432",
+            "dbname": "trading_ai",
+            "user": "aiml_engine_scanner",
+        }}
+        _PURGE_SQL = (
+            "{_CTE_ATTACK_SQL}"
+        )
+
+
+        def sweep(connection):
+            with connection.cursor() as cursor:
+                cursor.execute(_PURGE_SQL, ("k",))
+        ''',
+    )
+    verdict = install.derive_engine_scanner_privilege_split(
+        root, manifest_path=MANIFEST_PATH
+    )
+    assert verdict["status"] == "ENGINE_SCANNER_PRIVILEGE_SPLIT_REQUIRED"
+    assert any("delete_statement_forbidden" in reason for reason in verdict["reasons"])
+    assert any("retention_table_mutation" in reason for reason in verdict["reasons"])
+    assert any(
+        "data_modifying_cte_forbidden" in reason for reason in verdict["reasons"]
+    )
+
+
+@pytest.mark.parametrize(
+    "sql,needle",
+    [
+        (
+            "WITH bumped AS (UPDATE learning.alr_consumer_events SET error_code = NULL "
+            "RETURNING session_id) SELECT count(*) AS n FROM bumped",
+            "data_modifying_cte:UPDATE:learning.alr_consumer_events",
+        ),
+        (
+            "WITH copied AS (INSERT INTO learning.alr_retention_events "
+            "SELECT * FROM learning.alr_retention_events WHERE false RETURNING 1) "
+            "SELECT count(*) AS n FROM copied",
+            "data_modifying_cte:INSERT:learning.alr_retention_events",
+        ),
+        (
+            "SELECT count(*) AS n FROM learning.alr_source_events; "
+            "TRUNCATE TABLE learning.alr_source_events",
+            "data_modifying_cte:TRUNCATE:learning.alr_source_events",
+        ),
+    ],
+)
+def test_every_embedded_data_modification_verb_is_derived(sql: str, needle: str) -> None:
+    classified = install._classify_sql_statement(sql)
+    assert classified["mutation"] is True
+    assert needle in classified["errors"]
+
+
+def test_insert_on_conflict_do_update_requires_update_privilege() -> None:
+    classified = install._classify_sql_statement(
+        "INSERT INTO learning.alr_source_events (source_key) VALUES (%s) "
+        "ON CONFLICT (source_key) DO UPDATE SET source_key = EXCLUDED.source_key"
+    )
+    assert classified["mutation"] is True
+    assert set(classified["tables"]["learning.alr_source_events"]) == {
+        "INSERT",
+        "SELECT",
+        "UPDATE",
+    }
+
+
+# --------------------------------------------------------------------------- #
+# W2 P2-E:module 層級 / lambda 的 execute 不得靜默漏掃
+# --------------------------------------------------------------------------- #
+def test_module_level_and_lambda_execute_are_scanned(tmp_path: Path) -> None:
+    root = _write_synthetic_tree(
+        tmp_path,
+        consumer_source="""
+        _LOCAL_DSN_REQUIRED = {
+            "host": "127.0.0.1",
+            "port": "5432",
+            "dbname": "trading_ai",
+            "user": "aiml_engine_scanner",
+        }
+        _BOOTSTRAP = connection.cursor().execute(
+            "DELETE FROM learning.alr_source_events"
+        )
+        _SWEEP = lambda cursor: cursor.execute(
+            "DELETE FROM learning.alr_derived_cache_entries"
+        )
+        """,
+    )
+    inventory = install.build_engine_scanner_sql_inventory(root)
+    module_level = [
+        entry for entry in inventory["statements"] if entry["function"] == "<module>"
+    ]
+    assert len(module_level) == 2, inventory["statements"]
+    verdict = install.derive_engine_scanner_privilege_split(
+        root, manifest_path=MANIFEST_PATH
+    )
+    assert verdict["status"] == "ENGINE_SCANNER_PRIVILEGE_SPLIT_REQUIRED"
+    assert sum("delete_statement_forbidden" in r for r in verdict["reasons"]) == 2
+
+
+def test_module_level_unresolvable_execute_is_fail_closed(tmp_path: Path) -> None:
+    root = _write_synthetic_tree(
+        tmp_path,
+        consumer_source="""
+        import os
+
+        _LOCAL_DSN_REQUIRED = {
+            "host": "127.0.0.1",
+            "port": "5432",
+            "dbname": "trading_ai",
+            "user": "aiml_engine_scanner",
+        }
+        _BOOTSTRAP = connection.cursor().execute(os.environ["SQL"])
+        """,
+    )
+    inventory = install.build_engine_scanner_sql_inventory(root)
+    assert [entry["function"] for entry in inventory["unresolved"]] == ["<module>"]
+    verdict = install.derive_engine_scanner_privilege_split(
+        root, manifest_path=MANIFEST_PATH
+    )
+    assert verdict["status"] == "ENGINE_SCANNER_PRIVILEGE_SPLIT_REQUIRED"
+    assert any("not statically resolvable" in r for r in verdict["reasons"])
+
+
+# --------------------------------------------------------------------------- #
+# W2 P2-D:repo-local-looking 但解析不到的 import 必須 fail-closed
+# --------------------------------------------------------------------------- #
+def test_dotted_repo_local_import_that_does_not_resolve_is_refused(
+    tmp_path: Path,
+) -> None:
+    root = _write_synthetic_tree(
+        tmp_path,
+        consumer_source="""
+        _LOCAL_DSN_REQUIRED = {
+            "host": "127.0.0.1",
+            "port": "5432",
+            "dbname": "trading_ai",
+            "user": "aiml_engine_scanner",
+        }
+        from ml_training.hidden.retention_backdoor import purge
+        """,
+    )
+    inventory = install.build_engine_scanner_sql_inventory(root)
+    assert inventory["unresolved_imports"] == [
+        "repo-local import does not resolve to a scanned module: "
+        "ml_training.hidden.retention_backdoor"
+    ]
+    verdict = install.derive_engine_scanner_privilege_split(
+        root, manifest_path=MANIFEST_PATH
+    )
+    assert verdict["status"] == "ENGINE_SCANNER_PRIVILEGE_SPLIT_REQUIRED"
+    assert any(
+        "import closure is not statically resolvable" in reason
+        for reason in verdict["reasons"]
+    )
+
+
+def test_stdlib_and_package_root_imports_are_not_flagged(tmp_path: Path) -> None:
+    """反向防呆:stdlib/第三方/純套件根名不得被誤判(否則真樹會假紅)。"""
+    for name in ("os", "psycopg2.extras", "urllib.request", "ml_training", "program_code"):
+        assert install._engine_scanner_unresolved_import_reason(ROOT, name) is None
+    # repo 實體佈局的 program_code.ml_training.X 必須「真的解析到」同一個檔案
+    resolved = install._engine_scanner_resolve_module(
+        ROOT, "program_code.ml_training.alr_safe_file"
+    )
+    assert resolved is not None and resolved[0] == "alr_safe_file"
 
 
 def test_real_manifest_passes_central_validator_and_forgery_is_rejected() -> None:

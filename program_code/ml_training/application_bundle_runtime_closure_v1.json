@@ -60,6 +60,8 @@
     "program_code/ml_training/alr_candidate_learning_projection.py",
     "program_code/ml_training/alr_candidate_policy.py",
     "program_code/ml_training/alr_consumer_repository.py",
+    "program_code/ml_training/alr_consumer_resilience.py",
+    "program_code/ml_training/alr_consumer_write_metrics.py",
     "program_code/ml_training/alr_controller_contracts.py",
     "program_code/ml_training/alr_event_consumer.py",
     "program_code/ml_training/alr_freshness_runtime.py",
@@ -76,9 +78,9 @@
     "program_code/ml_training/candidate_proof_adapter.py",
     "program_code/ml_training/candidate_proof_repository.py",
     "program_code/ml_training/demo_mutation_envelope.py",
+    "program_code/ml_training/edge_feature_schema_contract.py",
     "program_code/ml_training/learning_runtime_manifest.py",
     "program_code/ml_training/learning_target_arbiter.py",
-    "program_code/ml_training/parquet_etl.py",
     "program_code/ml_training/pit_dataset_manifest.py",
     "program_code/ml_training/proof_packet_contract.py",
     "program_code/ml_training/registry_serving_contract.py",
@@ -163,7 +165,7 @@
     "program_code/ml_training/schemas/aiml_gate_receipts/terminal_receipt_sink_v1.schema.json"
   ],
   "schema_version": "application_bundle_runtime_closure_v1",
-  "self_digest": "sha256:c695e43090c27f72cfdac8c6853d4e92f0c40d7240b97702f9225942ff605fe6",
+  "self_digest": "sha256:9189c04c84ae96505ae715cbd27330c394e66ca371c25bb3bd68be0e1e88968d",
   "sql_fingerprints": [
     "sql/migrations/V151__alr_persistence_foundation.sql",
     "sql/migrations/V152__alr_operational_artifacts.sql",
