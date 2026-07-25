@@ -3,9 +3,16 @@
 把 S1.1(唯讀身分證明)/ S1.3(最小權限契約)/ S1.5(可拋棄 role/ACL apply+rollback)接成
 一條「生產唯讀 observer 角色 bootstrap」的 SOURCE seam:一張 exact typed intent、一組**結構化
 allowlist**(絕非呼叫端 raw SQL)產出的最小唯讀 observer grant set、一個 applier、與一位**相異**
-獨立驗證者的唯讀證明,外加精確 REVOKE/DROP rollback。這是 S2.0 的 **SOURCE_READY** 交付,不是
-EFFECT_DONE:真正對生產 PG 的 apply 在有一張 exact operator SSHSIG 之前**恆 fail-closed**——回傳
-一個 typed ``EXTERNAL_VERIFICATION_PENDING`` result,**永不**假成功。
+獨立驗證者的唯讀證明,外加精確 REVOKE/DROP rollback。這是 S2.0 的 **SOURCE_READY** 交付。
+
+**Reachable(但 authority-locked)生產閘(W0a)。** 生產 apply 不再是無條件 deferred:``apply_observer_bootstrap``
+多一個 typed ``ObserverBootstrapProductionDriver`` 參數(預設 ``None``),production 目標走一條 mirror §6 的
+fail-closed 閘(target-host 身分 → fresh domain-separated operator SSHSIG → 結構化依賴 → driver)。**源碼/測試/
+Mac 恆 driver=None**,於閘的 step 5 回傳 typed ``EXTERNAL_VERIFICATION_PENDING`` 且**零變更**;唯有真 Linux host
+driver 回傳 ``PLATFORM_ATTESTED`` 的 apply+獨立 postcheck 證據時才 emit ``APPLIED``
+(``production_apply_performed=true``)——注入的 simulation/disposable driver 的 ``LOCAL_REPRODUCIBLE``/
+``STRUCTURAL_ONLY`` 證據**永不**能偽造生產旗標。W0a 只 land 這條 reachable 閘 + driver protocol;**絕不**在生產
+跑它、**絕不**注入 live ``route_task`` effect 節點(那屬 S2.0 EFFECT session)。**永不**假成功。
 
 **誠實界線(CLAUDE 四 / Typed Authority Matrix)。** land 時不接觸任何生產 PG/psql/network/broker。
 可拋棄叢集測試(S1.1/S1.3/S1.5 同一 pattern)會真的 ``initdb`` 起一個丟棄式 cluster、真跑
@@ -37,7 +44,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Protocol
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -79,13 +86,23 @@ TARGET_CLASSES = frozenset({"disposable_local", "production"})
 DISPOSABLE_TARGET_CLASS = "disposable_local"
 PRODUCTION_TARGET_CLASS = "production"
 EVIDENCE_CLASSES = frozenset({"LOCAL_REPRODUCIBLE", "STRUCTURAL_ONLY"})
+# 生產 APPLIED 唯一可接受的 evidence 等級:只有真 Linux host driver 能回傳(平台背書);
+# 任何注入的 simulation/disposable driver 的 LOCAL_REPRODUCIBLE/STRUCTURAL_ONLY 皆不足以令
+# production_apply_performed=true(見 _apply_production_observer_bootstrap 的 step 9 閘)。
+PRODUCTION_APPLIED_EVIDENCE_CLASS = "PLATFORM_ATTESTED"
 RESULT_STATUSES = frozenset({
+    "APPLIED",
     "APPLIED_ROLLED_BACK_EXACT",
     "ROLLED_BACK_INTERRUPTED",
     "NOT_RESTORED_FAILED",
     "EXTERNAL_VERIFICATION_PENDING",
     "FAILED",
 })
+# 非生產目標的主機標記:production apply 若 target_host 命名 Mac/dev/loopback → 於 step 2 typed
+# 非成功(zero mutation)。真正的主機身分背書屬 driver + operator SSHSIG + 平台層(離線源碼不可自證)。
+_NON_PRODUCTION_HOST_MARKERS = (
+    "localhost", "127.0.0.1", "::1", ".local", "macbook", "mac-", "darwin", "dev-", "laptop",
+)
 TTL_CEILING_SECONDS = 3600
 EVIDENCE_TTL_SECONDS = 900
 
@@ -153,6 +170,64 @@ class SecretLeakageError(PgObserverBootstrapError):
 
 class PgObserverReadOnlyError(PgObserverBootstrapError):
     """Raised when a negative probe did not observe its required denial (not truly read-only)."""
+
+
+# --------------------------------------------------------------------------- #
+# typed production-driver protocol (fixed operations only; NEVER raw SQL / DSN)
+# --------------------------------------------------------------------------- #
+class ObserverBootstrapProductionDriver(Protocol):
+    """Typed, fixed-operation production driver for the reachable S2.0 apply path.
+
+    誠實界線:此 protocol 只暴露**固定操作**方法,呼叫端**永不**遞交 raw SQL、DSN 字串或
+    admin 憑證——``create_read_only_observer`` 消費的是由 ``generate_observer_grant_sql`` 結構化
+    allowlist 投影出的 grant_set(``CREATE ROLE ... NO*`` + ``GRANT USAGE``/``GRANT SELECT``),
+    driver 內部持有一個**不可序列化、僅本機**的 PG admin handle。具體 Linux 實作是 authority-locked
+    且 dormant 的:只有在後續 S2.0 EFFECT session 於真主機上供給 handle 時才開真連線。W0a 只 land
+    這個 protocol + reachable 閘,W0a **絕不**在生產跑它(源碼/測試路徑 driver 恆為 None)。
+
+    ``evidence_class`` 是 builder 據以決定 ``production_apply_performed`` 可否為 true 的標記:唯有
+    ``PLATFORM_ATTESTED``(真 Linux host driver 的平台背書)才解鎖 ``APPLIED``;注入的 simulation/
+    disposable driver 的 ``LOCAL_REPRODUCIBLE``/``STRUCTURAL_ONLY`` 令生產旗標恆為 false。
+    """
+
+    evidence_class: str
+
+    def observer_role_present(self, *, role: str) -> bool:
+        """Read-only catalog probe: does the observer role already exist? (pre-state guard)."""
+        ...
+
+    def observe_acl_state(self, *, role: str, schema: str, relations: list[str]) -> str:
+        """Read-only observation → the ``observer_role_acl_state_digest`` projection digest."""
+        ...
+
+    def create_read_only_observer(self, *, grant_set: dict[str, Any]) -> None:
+        """Drive the fixed structured CREATE ROLE + GRANT USAGE/SELECT (grant_set only; no caller SQL)."""
+        ...
+
+    def independent_read_only_proof(self, *, grant_set: dict[str, Any]) -> dict[str, Any]:
+        """The DISTINCT verifier node re-observes the provisioned observer and returns
+        ``{read_only_proof, reobserved_digest, verifier_capture_digest}`` — the platform-attested
+        denial evidence (write->42501, SET ROLE->42501, credential->28P01, harmless search_path)."""
+        ...
+
+    def compensate(self, *, grant_set: dict[str, Any]) -> None:
+        """Ownership-aware failure/compensation rollback ONLY (a successful production apply leaves
+        the observer provisioned for S2.1; this is never used to undo an attested success)."""
+        ...
+
+
+def _is_attested_production_target_host(target_host: Any) -> bool:
+    """Structural step-2 guard: a production apply must name a non-Mac/non-dev/non-loopback host.
+
+    誠實界線:離線源碼**無法**真正背書「我此刻正跑在該 Linux 主機上」(那是平台層事實);真主機身分
+    由 operator SSHSIG(綁 exact target_host)+ driver 只存在於真主機 + 平台背書共同保證。此處只做
+    結構性理智檢查,擋掉明顯的 Mac/dev/loopback 標記,令 Mac/non-target 於 step 2 即 typed 非成功。
+    """
+
+    if not isinstance(target_host, str) or not target_host.strip():
+        return False
+    lowered = target_host.lower()
+    return not any(marker in lowered for marker in _NON_PRODUCTION_HOST_MARKERS)
 
 
 # --------------------------------------------------------------------------- #
@@ -1177,6 +1252,64 @@ def build_pg_observer_bootstrap_result(
     return result
 
 
+def build_pg_observer_bootstrap_applied_result(
+    *,
+    intent: dict[str, Any],
+    grant_set: dict[str, Any],
+    pre_state_digest: str,
+    applied_grant_set_digest: str,
+    postcheck: dict[str, Any],
+    operator_authorization: dict[str, Any],
+    operator_signature: bytes,
+    apply_actor_node: str,
+    started_at: str,
+    completed_at: str,
+    evidence_class: str,
+    ttl_seconds: int = EVIDENCE_TTL_SECONDS,
+) -> dict[str, Any]:
+    """Build the production ``APPLIED`` result (``production_apply_performed=true``).
+
+    Emitted ONLY by the reachable production gate when the real Linux host driver returns
+    ``PLATFORM_ATTESTED`` apply + independent-postcheck evidence.  Unlike the disposable proof
+    the observer role is left provisioned (no rollback record) for S2.1; the nine authorities +
+    ``production_running_attested``/``load_verified`` stay false.  Never emitted in the source
+    lane (driver is None on Mac/tests) and never by a simulation driver (non-attested evidence).
+    """
+
+    if intent.get("target_class") != PRODUCTION_TARGET_CLASS:
+        raise PgObserverBootstrapError("an APPLIED result is only emitted for a production target")
+    if evidence_class != PRODUCTION_APPLIED_EVIDENCE_CLASS:
+        raise PgObserverBootstrapError(
+            "APPLIED requires PLATFORM_ATTESTED driver evidence (a simulation/disposable driver cannot forge it)"
+        )
+    if not isinstance(postcheck, dict):
+        raise PgObserverBootstrapError("APPLIED requires the distinct verifier's independent postcheck")
+    if applied_grant_set_digest is None or applied_grant_set_digest == pre_state_digest:
+        raise PgObserverBootstrapError("APPLIED requires the apply to change catalog state (applied != pre)")
+    result = _base_result(intent, grant_set, apply_actor_node=apply_actor_node)
+    result["boundary"]["production_apply_performed"] = True
+    completed = _parse_time(completed_at)
+    result.update({
+        "status": "APPLIED",
+        "pre_state_digest": pre_state_digest,
+        "applied_grant_set_digest": applied_grant_set_digest,
+        "independent_postcheck": postcheck,
+        "rollback_record": None,
+        "operator_authorization": operator_authorization,
+        "operator_signature_pem": bytes(operator_signature).decode("ascii"),
+        "evidence_class": PRODUCTION_APPLIED_EVIDENCE_CLASS,
+        "started_at": _parse_time(started_at).isoformat().replace("+00:00", "Z"),
+        "completed_at": completed.isoformat().replace("+00:00", "Z"),
+        "evidence_expires_at": (completed + timedelta(seconds=ttl_seconds)).isoformat().replace("+00:00", "Z"),
+        "ttl_seconds": ttl_seconds,
+        "failure_reason": None,
+    })
+    _guard_operator_signature_pem_body(result.get("operator_signature_pem"))
+    _guard_no_secret(_result_secret_scan_view(result))
+    result["self_digest"] = artifact_self_digest(result)
+    return result
+
+
 def validate_pg_observer_bootstrap_result(result: Any, *, now: str | None = None) -> list[str]:
     if not isinstance(result, dict):
         return ["observer bootstrap result must be an object"]
@@ -1190,10 +1323,37 @@ def validate_pg_observer_bootstrap_result(result: Any, *, now: str | None = None
     status = result.get("status")
     if result.get("apply_actor_node") == result.get("independent_verifier_node"):
         errors.append("observer bootstrap result apply actor must differ from the independent verifier")
-    # 邊界恆 false(九 authority、生產施加、running attested、load verified)。
+    # 邊界:九 authority / running attested / load verified 恆 false;production_apply_performed 唯有
+    # APPLIED(真 Linux driver + PLATFORM_ATTESTED)才為 true,其餘 status 一律 false。
     boundary = result.get("boundary", {})
-    if boundary.get("nine_authorities_false") is not True or boundary.get("production_apply_performed") is not False:
-        errors.append("observer bootstrap result boundary must keep production apply off and nine authorities false")
+    expect_production_apply = status == "APPLIED"
+    if boundary.get("nine_authorities_false") is not True:
+        errors.append("observer bootstrap result boundary must keep the nine authorities false")
+    if boundary.get("production_apply_performed") is not expect_production_apply:
+        errors.append(
+            "observer bootstrap result production_apply_performed must be True only for APPLIED and False otherwise"
+        )
+    if status == "APPLIED":
+        # 生產 reachable apply:唯有真 Linux host driver + PLATFORM_ATTESTED 才可達此;離線 validator 只證
+        # 結構/整合(不背書「真 apply 過」——平台背書屬 S2.0 EFFECT session,見模組 docstring 誠實界線)。
+        if result.get("target_class") != PRODUCTION_TARGET_CLASS:
+            errors.append("APPLIED requires a production target")
+        if result.get("evidence_class") != PRODUCTION_APPLIED_EVIDENCE_CLASS:
+            errors.append("APPLIED requires PLATFORM_ATTESTED evidence (never fabricated by a non-attested driver)")
+        if result.get("rollback_record") is not None:
+            errors.append("APPLIED leaves the observer provisioned; it carries no rollback record")
+        if result.get("failure_reason") is not None:
+            errors.append("APPLIED must not carry a failure_reason")
+        applied_digest = result.get("applied_grant_set_digest")
+        if applied_digest is None or applied_digest == result.get("pre_state_digest"):
+            errors.append("APPLIED requires the apply to change catalog state (applied != pre)")
+        errors.extend(validate_pg_observer_bootstrap_postcheck(result.get("independent_postcheck"), result=result, now=now))
+        errors.extend(operator_authorization_binding_errors(
+            result.get("operator_authorization"),
+            intent_id=result.get("intent_id"),
+            intent_digest=result.get("intent_digest"),
+            source_head=result.get("source_head"),
+        ))
     if status == "EXTERNAL_VERIFICATION_PENDING":
         if result.get("independent_postcheck") is not None or result.get("rollback_record") is not None:
             errors.append("EXTERNAL_VERIFICATION_PENDING must not embed a postcheck or rollback record")
@@ -1267,8 +1427,146 @@ def validate_pg_observer_bootstrap_result(result: Any, *, now: str | None = None
 
 
 # --------------------------------------------------------------------------- #
-# the applier (production stays fail-closed until an exact operator SSHSIG)
+# the applier (production is REACHABLE but authority-locked; APPLIED needs a real
+# host driver returning PLATFORM_ATTESTED evidence — never the source/test lane)
 # --------------------------------------------------------------------------- #
+def _apply_production_observer_bootstrap(
+    intent: dict[str, Any],
+    operator_authorization: Any,
+    signature: Any,
+    *,
+    now: str,
+    source_head: str,
+    driver: "ObserverBootstrapProductionDriver | None",
+    apply_actor_node: str,
+    started_at: str,
+    completed_at: str,
+) -> dict[str, Any]:
+    """Reachable, fail-closed production gate (mirrors §6 order).
+
+    Each step returns a typed non-success on failure; there is **zero mutation** before the driver
+    call.  Steps 1 (intent schema/digests/idempotency) and the source_head==intent binding were
+    already enforced by :func:`apply_observer_bootstrap` before this branch.
+
+    2. Linux target-host identity — Mac/dev/loopback -> ``EXTERNAL_VERIFICATION_PENDING`` (zero mutation);
+    3. a FRESH domain-separated operator SSHSIG over the exact intent (identity/namespace = §2.2) —
+       missing/stale/wrong-namespace -> AUTHORIZATION_REJECTED-class ``EXTERNAL_VERIFICATION_PENDING``;
+    4. structured dependency pre-state — the exact read-only ``observer_read_only_v1`` grant set must
+       project (pure/zero-mutation; the observer-absent DB check happens via the driver in step 6);
+    5. ``driver is None`` (Mac / source / tests / no host) -> ``EXTERNAL_VERIFICATION_PENDING`` (zero mutation);
+    6-9. driver present: observe pre-state (observer must be ABSENT), drive the fixed structured
+       create-role/grants, run the DISTINCT verifier's independent postcheck, and emit ``APPLIED``
+       (``production_apply_performed=true``) ONLY when the driver's ``evidence_class`` is
+       ``PLATFORM_ATTESTED``; a simulation/disposable driver's non-attested evidence is compensated
+       and keeps the production flag false.
+    """
+
+    # step 2 — attested Linux target-host identity (Mac/non-target -> typed non-success, zero mutation).
+    if not _is_attested_production_target_host(intent.get("target_host")):
+        return build_pending_result(
+            intent,
+            reason=(
+                "production observer apply requires the attested Linux target host; this environment "
+                "is not the S2.0 production target (zero mutation)"
+            ),
+            now=now,
+            apply_actor_node=apply_actor_node,
+        )
+    # step 3 — a fresh domain-separated operator SSHSIG over the exact intent (AUTHORIZATION_REJECTED class).
+    valid, reason = _operator_authorization_is_valid(
+        operator_authorization, signature, intent=intent, source_head=source_head, now=now
+    )
+    if not valid:
+        return build_pending_result(
+            intent,
+            reason="production observer apply AUTHORIZATION_REJECTED: " + reason,
+            now=now,
+            apply_actor_node=apply_actor_node,
+        )
+    # step 4 — structured dependency pre-state: the exact read-only allowlist must project (zero mutation).
+    grant_set = generate_observer_grant_sql(intent)
+    # step 5 — no host production driver (Mac / source / tests): reachable gate present, nothing to run.
+    if driver is None:
+        return build_pending_result(
+            intent,
+            reason=(
+                "production observer apply is reachable but authority-locked: no host production driver "
+                "is present (Mac/source/test lane); EXTERNAL_VERIFICATION_PENDING with zero mutation"
+            ),
+            now=now,
+            apply_actor_node=apply_actor_node,
+        )
+    # step 6 — driver present: read-only pre-state; the observer role must be ABSENT (no adoption/rotation).
+    role = intent["observer_role"]
+    schema = intent["observed_schema"]
+    relations = intent["observed_relations"]
+    if driver.observer_role_present(role=role):
+        return build_pending_result(
+            intent,
+            reason="observer role already exists; refusing to adopt or rotate a pre-existing role",
+            now=now,
+            apply_actor_node=apply_actor_node,
+        )
+    pre = driver.observe_acl_state(role=role, schema=schema, relations=relations)
+    # step 7 — the driver drives the fixed structured operations (create role + grants); NO caller SQL/DSN.
+    try:
+        driver.create_read_only_observer(grant_set=grant_set)
+        applied = driver.observe_acl_state(role=role, schema=schema, relations=relations)
+    except Exception as exc:  # noqa: BLE001 - any driver failure compensates and fails closed
+        try:
+            driver.compensate(grant_set=grant_set)
+        except Exception:  # pragma: no cover - best effort  # noqa: BLE001
+            pass
+        return build_pending_result(
+            intent,
+            reason=f"production observer apply interrupted and compensated: {exc}",
+            now=now,
+            apply_actor_node=apply_actor_node,
+        )
+    # step 8 — the DISTINCT verifier node independently re-observes the provisioned observer's denials.
+    proof = driver.independent_read_only_proof(grant_set=grant_set)
+    postcheck = build_pg_observer_bootstrap_postcheck(
+        intent=intent,
+        verifier_node=intent["postcheck_node_id"],
+        applier_node=apply_actor_node,
+        reobserved_post_rollback_digest=proof.get("reobserved_digest") if isinstance(proof, dict) else None,
+        read_only_proof=proof.get("read_only_proof") if isinstance(proof, dict) else None,
+        verifier_capture_digest=proof.get("verifier_capture_digest") if isinstance(proof, dict) else None,
+        observed_at=completed_at,
+    )
+    # step 9 — emit APPLIED ONLY when the driver's evidence is PLATFORM_ATTESTED (a real host driver).
+    # A simulation/disposable driver's LOCAL_REPRODUCIBLE/STRUCTURAL_ONLY evidence CANNOT forge the
+    # production flag: compensate its throwaway mutation and fail closed (never a fake production success).
+    if getattr(driver, "evidence_class", None) != PRODUCTION_APPLIED_EVIDENCE_CLASS:
+        try:
+            driver.compensate(grant_set=grant_set)
+        except Exception:  # pragma: no cover - best effort  # noqa: BLE001
+            pass
+        return build_pending_result(
+            intent,
+            reason=(
+                "production observer apply driver evidence is not PLATFORM_ATTESTED "
+                f"(got {getattr(driver, 'evidence_class', None)!r}); production_apply_performed stays false"
+            ),
+            now=now,
+            apply_actor_node=apply_actor_node,
+        )
+    # attested success: leave the observer provisioned for S2.1 (no rollback) and emit APPLIED.
+    return build_pg_observer_bootstrap_applied_result(
+        intent=intent,
+        grant_set=grant_set,
+        pre_state_digest=pre,
+        applied_grant_set_digest=applied,
+        postcheck=postcheck,
+        operator_authorization=operator_authorization,
+        operator_signature=bytes(signature),
+        apply_actor_node=apply_actor_node,
+        started_at=started_at,
+        completed_at=completed_at,
+        evidence_class=PRODUCTION_APPLIED_EVIDENCE_CLASS,
+    )
+
+
 def apply_observer_bootstrap(
     intent: Any,
     operator_authorization: Any = None,
@@ -1277,22 +1575,25 @@ def apply_observer_bootstrap(
     now: str,
     source_head: str,
     disposable: Any = None,
+    driver: "ObserverBootstrapProductionDriver | None" = None,
     postcheck: dict[str, Any] | None = None,
     started_at: str | None = None,
     completed_at: str | None = None,
     apply_fault: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
-    """Intent-derived observer-bootstrap applier — production apply stays fail-closed.
+    """Intent-derived observer-bootstrap applier — production apply is reachable but authority-locked.
 
-    Returns a typed ``pg_observer_bootstrap_result_v1``.  Without a VALID operator
-    SSHSIG over the exact intent+source_head it returns ``EXTERNAL_VERIFICATION_PENDING``
-    (NEVER a success).  A ``production`` target ALSO returns
-    ``EXTERNAL_VERIFICATION_PENDING`` in this WP2 source lane: the real production
-    socket / apply is the S2.0 EFFECT session (no production PG contact here).  For a
-    ``disposable_local`` target with a valid SSHSIG and an injected throwaway-cluster
-    connection it runs the REAL structured SQL (apply -> rollback, exact restoration)
-    and embeds the distinct verifier's ``postcheck``.  ``apply_fault`` is a test-only
-    hook to inject a mid-apply failure (partial-failure rollback proof).
+    Returns a typed ``pg_observer_bootstrap_result_v1``.  Without a VALID operator SSHSIG over the
+    exact intent+source_head it returns ``EXTERNAL_VERIFICATION_PENDING`` (NEVER a success).  A
+    ``production`` target enters the reachable, fail-closed gate
+    (:func:`_apply_production_observer_bootstrap`, mirroring §6): with ``driver=None`` (Mac / source
+    / tests) it returns ``EXTERNAL_VERIFICATION_PENDING`` with **zero mutation**; only a real Linux
+    host ``ObserverBootstrapProductionDriver`` returning ``PLATFORM_ATTESTED`` evidence may emit
+    ``APPLIED`` (``production_apply_performed=true``).  For a ``disposable_local`` target with a
+    valid SSHSIG and an injected throwaway-cluster ``disposable`` connection it runs the REAL
+    structured SQL (apply -> rollback, exact restoration) and embeds the distinct verifier's
+    ``postcheck``.  ``apply_fault`` is a test-only hook to inject a mid-apply failure
+    (partial-failure rollback proof).
     """
 
     # FIX-6(E2 P3):先只驗「結構/整合/allowlist/TTL 上限」(now=None,**不含**當前有效窗)——
@@ -1325,18 +1626,32 @@ def apply_observer_bootstrap(
     except ValueError as exc:
         raise PgObserverBootstrapError(f"observer bootstrap now is malformed: {now!r}") from exc
 
+    if intent["target_class"] == PRODUCTION_TARGET_CLASS:
+        # 生產 reachable(但 authority-locked)閘:mirror §6 的固定順序;driver 為 None(Mac/源碼/測試)
+        # 時於 step 5 回傳 EXTERNAL_VERIFICATION_PENDING 且**零變更**——reachable 閘已在,但無 driver 可執行。
+        return _apply_production_observer_bootstrap(
+            intent,
+            operator_authorization,
+            signature,
+            now=now,
+            source_head=source_head,
+            driver=driver,
+            apply_actor_node=apply_actor_node,
+            started_at=started_at,
+            completed_at=completed_at,
+        )
+
+    # ── disposable_local 邏輯證明路徑(SSHSIG → 注入的丟棄式叢集;順序不變) ──
     valid, reason = _operator_authorization_is_valid(
         operator_authorization, signature, intent=intent, source_head=source_head, now=now
     )
     if not valid:
         return build_pending_result(intent, reason=reason, now=now, apply_actor_node=apply_actor_node)
-    if intent["target_class"] == PRODUCTION_TARGET_CLASS or disposable is None:
-        # SOURCE 界線:即使已授權,WP2 也絕不開生產 socket;真 apply 屬 S2.0 EFFECT session。
+    if disposable is None:
         return build_pending_result(
             intent,
             reason=(
-                "production observer apply is deferred to the S2.0 EFFECT session; "
-                "the WP2 source lane makes no production PG socket"
+                "disposable_local logic proof requires an injected throwaway-cluster connection; none was provided"
             ),
             now=now,
             apply_actor_node=apply_actor_node,

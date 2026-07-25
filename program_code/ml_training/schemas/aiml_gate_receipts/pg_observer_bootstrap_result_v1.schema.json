@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://arcane-equilibrium.local/schemas/pg_observer_bootstrap_result_v1.schema.json",
   "title": "pg_observer_bootstrap_result_v1",
-  "description": "Canonical self-hashed result of one S2.0 observer bootstrap apply. A production apply with no valid operator SSHSIG (and every production apply in the WP2 source lane) is EXTERNAL_VERIFICATION_PENDING, never a fake success. Disposable_local apply against a throwaway cluster is a real APPLIED_ROLLED_BACK_EXACT proof. The const-false boundary keeps all nine authorities false; no secret is serialized.",
+  "description": "Canonical self-hashed result of one S2.0 observer bootstrap apply. Production apply is reachable but authority-locked: without a valid operator SSHSIG, or with no host production driver (Mac/source/tests), it is EXTERNAL_VERIFICATION_PENDING with zero mutation, never a fake success. APPLIED (production_apply_performed=true) is emitted ONLY by a real Linux host driver returning PLATFORM_ATTESTED apply+postcheck evidence; a disposable_local apply against a throwaway cluster is a real APPLIED_ROLLED_BACK_EXACT logic proof. The boundary keeps production_apply_performed false for every status except APPLIED, production_running_attested/load_verified false and the nine authorities false; no secret is serialized.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -44,6 +44,7 @@
     "adapter_id": {"const": "pg_observer_bootstrap_adapter_v1"},
     "status": {
       "enum": [
+        "APPLIED",
         "APPLIED_ROLLED_BACK_EXACT",
         "ROLLED_BACK_INTERRUPTED",
         "NOT_RESTORED_FAILED",
@@ -72,7 +73,7 @@
     "apply_actor_node": {"type": "string", "minLength": 1},
     "independent_verifier_node": {"type": "string", "minLength": 1},
     "source_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
-    "evidence_class": {"enum": ["LOCAL_REPRODUCIBLE", "STRUCTURAL_ONLY"]},
+    "evidence_class": {"enum": ["LOCAL_REPRODUCIBLE", "STRUCTURAL_ONLY", "PLATFORM_ATTESTED"]},
     "boundary": {
       "type": "object",
       "additionalProperties": false,
@@ -83,7 +84,7 @@
         "nine_authorities_false"
       ],
       "properties": {
-        "production_apply_performed": {"const": false},
+        "production_apply_performed": {"type": "boolean"},
         "production_running_attested": {"const": false},
         "load_verified": {"const": false},
         "nine_authorities_false": {"const": true}
@@ -97,6 +98,28 @@
     "self_digest": {"$ref": "#/$defs/digest"}
   },
   "allOf": [
+    {
+      "if": {"required": ["status"], "properties": {"status": {"const": "APPLIED"}}},
+      "then": {
+        "properties": {
+          "target_class": {"const": "production"},
+          "evidence_class": {"const": "PLATFORM_ATTESTED"},
+          "pre_state_digest": {"$ref": "#/$defs/digest"},
+          "applied_grant_set_digest": {"$ref": "#/$defs/digest"},
+          "independent_postcheck": {"type": "object"},
+          "rollback_record": {"type": "null"},
+          "operator_authorization": {"type": "object"},
+          "operator_signature_pem": {"type": "string", "pattern": "^-----BEGIN SSH SIGNATURE-----\\n[A-Za-z0-9+/=\\n]+-----END SSH SIGNATURE-----\\n?$"},
+          "failure_reason": {"type": "null"},
+          "boundary": {"properties": {"production_apply_performed": {"const": true}}}
+        }
+      },
+      "else": {
+        "properties": {
+          "boundary": {"properties": {"production_apply_performed": {"const": false}}}
+        }
+      }
+    },
     {
       "if": {"properties": {"status": {"const": "APPLIED_ROLLED_BACK_EXACT"}}},
       "then": {
