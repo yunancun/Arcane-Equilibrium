@@ -105,6 +105,7 @@ from agent_governance_s2_4_component import (  # noqa: E402,F401
     _subject_digest,
     _verdict,
     build_component_effect_intent,
+    classify_ownership_only,
     classify_pre_state,
     compensation_outcome,
     component_raw_ingress_reasons,
@@ -599,9 +600,13 @@ def _pre_existing_pg_role_verdict(
             [f"pg role grant pre-state observation failed: {redact_driver_error(error)}"],
             component_effect_class="PG_ROLE_ACL_MIGRATION", row_abi=row_abi, driver_engaged=True,
         )
-    state = classify_pre_state(
-        observed={"role": role, "grants": observed_grants},
-        desired={"role": role, "grants": observed_grants},
+    # E2 P2-D:這一步只裁決**擁有權**(NOOP_VERIFIED vs PREEXISTING_UNOWNED_STATE)。
+    # PG 沒有可宣告的 desired grant-set 供逐欄比對——真正的漂移偵測是下方對前一份 S2.4
+    # receipt 的 applied_state_digest 重導出。原本把同一物件同時當 observed/desired 傳入,
+    # 讀起來像在偵測漂移,實際上結構上永遠不可能回 PRESTATE_MISMATCH;改為顯式的
+    # 擁有權裁決,語義與行為一致。
+    state = classify_ownership_only(
+        observed_subject={"role": role, "grants": observed_grants},
         ownership_evidence=ownership,
     )
     reasons: list[str] = []
@@ -834,6 +839,21 @@ def apply_s2_4_credential_install(
         login_reasons = _login_postcheck_reasons(login, applier_node)
         if login_reasons:
             raise ComponentContractError("; ".join(login_reasons))
+        # E2 P2-E:成功 verdict 必須在 sentinel **仍存活**時建構並掃描。原本 _finish_row
+        # 落在 finally 之後,而 active_secret_sentinels() 會跳過已 zeroize 的 buffer——於是
+        # 唯一真正握有 closed DSN 的這一列,成功路徑的掃描剛好沒有任何 live sentinel,
+        # 「每一份 verdict 都在 sentinel 存活下被掃描」的不變量恰恰在此處破掉。
+        verdict = _finish_row(
+            status=COMPONENT_STATUS_SATISFIED, reasons=[],
+            component_effect_class="CREDENTIAL_INSTALL", row_abi=row_abi, driver=driver,
+            plan_digest=plan_digest, pre_state_digest=pre_state_digest,
+            post_state_digest=_subject_digest(applied),
+            applied_state_digest=_subject_digest(applied), journal=journal,
+            applier_node=applier_node, clock=tick, mutation_performed=True,
+            compensate=lambda: _compensate_credential(driver, slot_path, mode, prior_digest),
+            observed_subjects=applied,
+        )
+        verdict["encrypted_credential_fingerprint"] = fingerprint
     except Exception as error:  # noqa: BLE001
         return _compensating_failure(
             reason=f"credential install failed: {redact_driver_error(error)}",
@@ -846,17 +866,6 @@ def apply_s2_4_credential_install(
     finally:
         if hasattr(dsn_handle, "zeroize"):
             dsn_handle.zeroize()
-    verdict = _finish_row(
-        status=COMPONENT_STATUS_SATISFIED, reasons=[],
-        component_effect_class="CREDENTIAL_INSTALL", row_abi=row_abi, driver=driver,
-        plan_digest=plan_digest, pre_state_digest=pre_state_digest,
-        post_state_digest=_subject_digest(applied),
-        applied_state_digest=_subject_digest(applied), journal=journal,
-        applier_node=applier_node, clock=tick, mutation_performed=True,
-        compensate=lambda: _compensate_credential(driver, slot_path, mode, prior_digest),
-        observed_subjects=applied,
-    )
-    verdict["encrypted_credential_fingerprint"] = fingerprint
     return verdict
 
 

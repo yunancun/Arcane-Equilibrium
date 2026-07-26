@@ -53,6 +53,26 @@ redact_driver_error = _component.redact_driver_error
 scan_serializable_surface = _component.scan_serializable_surface
 derive_recorded_evidence_class = _component.derive_recorded_evidence_class
 
+
+def _recordable_evidence_class(declared: Any) -> str:
+    """把任何傳入的 evidence_class 收斂成 W3 唯一可記錄的等級(E2 P2-B)。
+
+    `derive_recorded_evidence_class` 只守住 governed entry point;但 attestation/receipt
+    builder 是 public 且被 install 模組再匯出的,直接呼叫它們可以繞過那道閘,而
+    `derive_scoped_capability_attestation_status` 不看 evidence_class——於是一份「直接
+    建出來的 attested attestation」仍能充當 W6A/W6B 前置。這裡讓兩個 builder 走同一道
+    拒絕:W3 沒有 trusted-host attestation 驗證面,任何 attested 等級一律降為
+    STRUCTURAL_ONLY,因此**合法的 W3 artifact 永不帶 attested 等級**——消費側便可據此
+    把帶 attested 的 artifact 判為偽造(見 derive_scoped_capability_attestation_status)。
+    """
+
+    value = str(declared)
+    if value in _component.EVIDENCE_CLASS_ATTESTED:
+        return _component.EVIDENCE_CLASS_STRUCTURAL_ONLY
+    if value != _component.EVIDENCE_CLASS_STRUCTURAL_ONLY:
+        return _component.EVIDENCE_CLASS_STRUCTURAL_ONLY
+    return value
+
 # ── §8.3 / §9.1 code-owned 契約常量 ──────────────────────────────────────────────
 PROBE_SCOPES = ("PREPARE_SANDBOX", "INSTALLED_UNIT")
 PROBE_ROUTE_CLASS = "s2_4_capability_probe_intent"
@@ -550,9 +570,12 @@ class ProbeRecoveryState:
 class CapabilityProbeDriver(Protocol):
     """task-bound transient unit 的固定操作面;caller **永不**遞交 raw shell/D-Bus 字串。
 
-    誠實界線:本 protocol 只宣告操作形狀。source lane 的 driver 恆為 ``None``;
-    disposable/simulation driver 的 ``evidence_class`` 不是 PLATFORM_ATTESTED,故其結果
-    永遠不能被當成 runtime 證據(receipt 的 evidence_class 由 driver 自報並在此第一道過濾)。
+    誠實界線:本 protocol 只宣告操作形狀。source lane 的 driver 恆為 ``None``。
+    ``evidence_class`` 是**自報**欄位,in-process 無從分辨 fixture 與真主機 driver,
+    所以 W3 的模型是「閘拒絕自證」而非「接受自證」:任何 attested 等級一律被
+    `_recordable_evidence_class` 降為 ``STRUCTURAL_ONLY``(builder 與 governed entry
+    point 兩層),因此合法的 W3 artifact 永不帶 attested 等級;真 attested 等級要等
+    W4/W6 的 trusted-host attestation 驗證面(見 `w4_owned_obligations`)。
     """
 
     evidence_class: str
@@ -1359,11 +1382,9 @@ def build_network_sandbox_capability_attestation(
             "egress_observations": egress.get("egress_observations"),
         }),
         "network_isolation_verified": bool(egress.get("network_isolation_verified")),
-        "evidence_class": (
-            evidence_class
-            if evidence_class in {"PLATFORM_ATTESTED", "PLATFORM_OR_EXTERNAL_ATTESTED", "STRUCTURAL_ONLY"}
-            else "STRUCTURAL_ONLY"
-        ),
+        # E2 P2-B:builder 自己也拒絕 attested 自證(本函式 public 且被再匯出,不能只靠
+        # governed entry point 那道閘)。
+        "evidence_class": _recordable_evidence_class(evidence_class),
         "production_posture": {
             "is_runtime_production_pass": False,
             "production_apply_performed": False,
@@ -1423,11 +1444,8 @@ def _build_effect_receipt(
         "rollback_digest": rollback["self_digest"],
         "network_sandbox_capability_attestation_digest": attestation["self_digest"],
         "terminal_status": terminal_status,
-        "evidence_class": (
-            evidence_class
-            if evidence_class in {"PLATFORM_ATTESTED", "PLATFORM_OR_EXTERNAL_ATTESTED", "STRUCTURAL_ONLY"}
-            else "STRUCTURAL_ONLY"
-        ),
+        # E2 P2-B:同 attestation builder,receipt 也在 builder 層拒絕 attested 自證。
+        "evidence_class": _recordable_evidence_class(evidence_class),
         "source_head": core["source_head"],
         "target_host": core["target_host"],
         "trusted_host_time": _iso(at),
@@ -1579,6 +1597,21 @@ def derive_scoped_capability_attestation_status(
         attestation.get("probe_core_digest") != effect_receipt.get("probe_core_digest")
     ):
         reasons.append("attestation and terminal probe receipt bind different probe identities")
+    # E2 P2-B:W3 的兩個 builder 都把 attested 等級降為 STRUCTURAL_ONLY,所以「合法的 W3
+    # artifact 永不帶 attested 等級」。消費側據此把帶 attested 的 artifact 判為未經本閘
+    # 產出的偽造品——這是 latent minting surface 的最後一道關,不是重複檢查。
+    for label, artifact in (("attestation", attestation), ("terminal probe receipt", effect_receipt)):
+        declared = str(artifact.get("evidence_class"))
+        if declared in _component.EVIDENCE_CLASS_ATTESTED:
+            reasons.append(
+                f"{label} carries evidence_class={declared!r}; no W3-produced artifact can carry "
+                "an attested class (the builders refuse self-declaration), so this artifact was "
+                "not produced by the governed path and cannot satisfy a capability consumer"
+            )
+        elif declared != _component.EVIDENCE_CLASS_STRUCTURAL_ONLY:
+            reasons.append(
+                f"{label} evidence_class {declared!r} is not the STRUCTURAL_ONLY class W3 records"
+            )
     if effect_receipt.get("terminal_status") != PROBE_STATUS_TERMINAL_CLEAN:
         reasons.append(
             "probe receipt is not TERMINAL_CLEAN; a failed or recovery-pending probe cannot "

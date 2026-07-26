@@ -523,9 +523,10 @@ def derive_prepare_route_surface_status(intent: Any) -> dict[str, Any]:
 class PrepareDriver(Protocol):
     """PREPARE 的固定操作面;caller **永不**遞交 raw shell/路徑/wheel URL 字串。
 
-    誠實界線:本 protocol 只宣告操作形狀。source lane 的 driver 恆為 ``None``;
-    disposable/simulation driver 的 ``evidence_class`` 不是 PLATFORM_ATTESTED,故其結果
-    永遠不能被當成 runtime 證據。
+    誠實界線:本 protocol 只宣告操作形狀。source lane 的 driver 恆為 ``None``。
+    ``evidence_class`` 是**自報**欄位:W3 的模型是「閘拒絕自證」——任何 attested 等級
+    一律被降為 ``STRUCTURAL_ONLY``,故合法的 W3 artifact 永不帶 attested 等級;真
+    attested 等級屬 W4/W6 的 trusted-host attestation 驗證面。
     """
 
     evidence_class: str

@@ -483,6 +483,32 @@ def classify_pre_state(
     }
 
 
+def classify_ownership_only(
+    *, observed_subject: Any, ownership_evidence: Any
+) -> dict[str, Any]:
+    """只裁決擁有權的 §5.3 分支(E2 P2-D:語義與行為一致)。
+
+    有些資源沒有可逐欄比對的「signed desired state」——PG 的既有 grant-set 就是一例,
+    它的漂移偵測靠的是對前一份 S2.4 receipt 之 ``applied_state_digest`` 的重導出,而不是
+    欄位比對。這些 row 過去以 ``observed == desired`` 呼叫 :func:`classify_pre_state`,
+    讀起來像在偵測漂移,結構上卻永遠不可能回 ``PRESTATE_MISMATCH``。本函式把該意圖寫明:
+    absent → ``ABSENT``;存在且有 S2.4 擁有權證據 → ``NOOP_VERIFIED``;存在但無證據 →
+    ``PREEXISTING_UNOWNED_STATE``(不收養、不覆寫)。漂移由呼叫端的 digest 重導出負責。
+    """
+
+    if observed_subject is None:
+        return {"state": "ABSENT", "reasons": []}
+    if ownership_binding_present(ownership_evidence):
+        return {"state": "NOOP_VERIFIED", "reasons": []}
+    return {
+        "state": "PREEXISTING_UNOWNED_STATE",
+        "reasons": [
+            "the resource exists without matching S2.4 ownership evidence; "
+            "no adoption is performed"
+        ],
+    }
+
+
 def _iso(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat()
 

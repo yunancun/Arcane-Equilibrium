@@ -1551,23 +1551,34 @@ def test_no_in_memory_fixture_can_mint_platform_attested_evidence(signed) -> Non
     assert gate["recorded_evidence_class"] == "STRUCTURAL_ONLY"
 
 
-def test_the_w3_abi_names_the_three_w4_owned_obligations() -> None:
-    """RECORD HONESTLY:三項 W3 不提供的義務必須是 machine-visible 的 typed 記錄。"""
+def test_the_w3_abi_names_the_four_w4_owned_obligations() -> None:
+    """RECORD HONESTLY:四項 W3 不提供的義務必須是 machine-visible 的 typed 記錄。
+
+    第四項(E2 P2-C)是 independent post-compensation postcheck:W3 的
+    COMPENSATED_EXACT 靠的是「同一個 applier driver」自己再觀測一次,而 §5.2 要的是
+    **獨立** residue postcheck——protocol 上那個 independent_postcheck verifier 在補償
+    之後從未被重跑。
+    """
 
     obligations = {
         item["obligation_id"]: item
         for item in validator._W3_EXPORTED_ABI["w4_owned_obligations"]
     }
     assert sorted(obligations) == [
-        "ENCRYPTED_BLOB_DIGEST_ORDERING", "PERMIT_PLAN_BINDING", "REPLAY_LEDGER_APPEND",
+        "ENCRYPTED_BLOB_DIGEST_ORDERING", "INDEPENDENT_POST_COMPENSATION_POSTCHECK",
+        "PERMIT_PLAN_BINDING", "REPLAY_LEDGER_APPEND",
     ]
     assert obligations["PERMIT_PLAN_BINDING"]["typed_status"] == "NOT_PROVIDED_BY_W3"
     assert obligations["REPLAY_LEDGER_APPEND"]["typed_status"] == "NOT_PROVIDED_BY_W3"
     assert obligations["ENCRYPTED_BLOB_DIGEST_ORDERING"]["typed_status"] == "OPEN_DESIGN_QUESTION"
+    assert (
+        obligations["INDEPENDENT_POST_COMPENSATION_POSTCHECK"]["typed_status"]
+        == "NOT_PROVIDED_BY_W3"
+    )
     for item in obligations.values():
         assert item["owner_wave"].startswith("W4")
         assert item["spec_refs"] and item["statement"] and item["w3_provides"]
-    # 這三項必然被 W3 wave-exit receipt 的 exported_abi_digest 綁住。
+    # 這四項必然被 W3 wave-exit receipt 的 exported_abi_digest 綁住。
     assert obligations == {
         item["obligation_id"]: item
         for item in validator.w3_exported_abi_projection()["w4_owned_obligations"]
@@ -1584,3 +1595,44 @@ def test_apply_abi_projection_is_stable_and_complete() -> None:
         "/etc/systemd/system/arcane-equilibrium-aiml-engine-scanner.service"
     )
     assert projection == apply_mod.apply_abi_projection()
+
+
+def test_the_credential_success_verdict_is_scanned_while_the_sentinel_is_live(signed) -> None:
+    """E2 P2-E:唯一握有 closed DSN 的這一列,成功路徑必須在哨兵存活下被掃描。
+
+    修前 ``_finish_row`` 落在 ``finally: dsn_handle.zeroize()`` 之後,而
+    ``active_secret_sentinels()`` 會跳過已 zeroize 的 buffer——於是成功 verdict 的掃描
+    恰好沒有任何 live sentinel,秘密可以原樣出境。這裡讓 driver 把 DSN 塞進它自由塑形的
+    ``verifier_node`` 字串:修前會漏出去,修後整份 verdict 被丟棄。
+    """
+
+    broker, (pg_handle, dsn_handle) = _broker_handles()
+    rendered_dsn = credential._render_closed_dsn_bytes(
+        pg_handle.consume(operation_id="cred-op")
+    ).decode("ascii")
+    # 關鍵:把 pg_handle 先 zeroize,讓 dsn_handle 成為**唯一**活哨兵。否則 pg_handle 的
+    # 密碼哨兵會替 dsn_handle 擋下這次洩漏,測試就測不到「掃描發生在 dsn_handle
+    # zeroize 之前還是之後」這件事。
+    pg_handle.zeroize()
+
+    class _LeakyLoginDriver(_FakeCredentialDriver):
+        # 出境面是 ``_finish_row`` 建的獨立 postcheck artifact(``verifier_node`` 由 driver
+        # 自由塑形),不是 login postcheck——後者只被驗證,不隨 verdict 出境。
+        def independent_postcheck(self, *, component_effect_class, install_plan_digest,
+                                  applier_node):
+            observed = super().independent_postcheck(
+                component_effect_class=component_effect_class,
+                install_plan_digest=install_plan_digest, applier_node=applier_node,
+            )
+            observed["verifier_node"] = f"s2-4-credential-verifier?dsn={rendered_dsn}"
+            return observed
+
+    verdict = apply_mod.apply_s2_4_credential_install(
+        _credential_intent(), driver=_LeakyLoginDriver(), dsn_handle=dsn_handle,
+        operation_id="cred-op", **_common(signed),
+    )
+    assert rendered_dsn not in json_module.dumps(verdict, default=str)
+    assert verdict["status"] == "SECRET_MATERIAL_LEAK_BLOCKED"
+    assert verdict["result"] is None and verdict["postcheck"] is None
+    credential.assert_no_secret_material(verdict, [rendered_dsn])
+    broker.zeroize_all()

@@ -176,6 +176,24 @@ _W3_EXPORTED_ABI = {
                 "the fail-closed comparison only; the §5.1 ordering question is unresolved"
             ),
         },
+        {
+            "obligation_id": "INDEPENDENT_POST_COMPENSATION_POSTCHECK",
+            "typed_status": "NOT_PROVIDED_BY_W3",
+            "owner_wave": "W4",
+            "spec_refs": ["§5.2", "§5.4"],
+            "statement": (
+                "W3's COMPENSATED_EXACT rests on a re-observation performed through the SAME "
+                "injected applier driver that carried out the mutation. Every protocol already "
+                "declares an independent_postcheck verifier, but it is never re-run after "
+                "compensation, so a driver that misreports its own residue can still produce "
+                "COMPENSATED_EXACT. §5.2 requires an INDEPENDENT residue postcheck; W3 does not "
+                "provide one."
+            ),
+            "w3_provides": (
+                "applier-side post-compensation re-observation with a typed "
+                "COMPENSATED_NOT_REOBSERVED fallback; no independent verifier re-run"
+            ),
+        },
     ],
 }
 # code-owned 探針輸入(與真 repo/runtime 無關;只為把行為折成 deterministic 投影值)。

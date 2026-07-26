@@ -765,3 +765,46 @@ def test_probe_never_declares_a_production_or_running_claim(tmp_path, monkeypatc
         "nine_authorities_false": True,
     }
     assert verdict["status"] in probe.PROBE_TYPED_STATUSES
+
+
+def test_a_directly_built_attested_attestation_cannot_satisfy_a_consumer(
+    tmp_path, monkeypatch
+) -> None:
+    """E2 P2-B:繞過 governed entry point 直接建出的 attested artifact 不得充當前置。
+
+    修前:兩個 builder 各自只做 enum 收斂(會接受 attested 值),而
+    ``derive_scoped_capability_attestation_status`` 完全不看 evidence_class——於是
+    「直接呼叫 public builder 並塞 PLATFORM_ATTESTED」就能造出一份可充當 W6A/W6B
+    前置的 attestation。修後:builder 層一律降級,消費側再把帶 attested 的 artifact
+    判為未經本閘產出的偽造品。
+    """
+
+    attestation, receipt = _terminal_pair(tmp_path / "prepare", monkeypatch, "PREPARE_SANDBOX")
+    # builder 層:即使呼叫端明說 PLATFORM_ATTESTED,產出仍是 STRUCTURAL_ONLY。
+    direct = probe.build_network_sandbox_capability_attestation(
+        scope=attestation["scope"],
+        probe_id=attestation["probe_id"],
+        probe_core_digest=attestation["probe_core_digest"],
+        transient_unit_property_digest=attestation["transient_unit_property_digest"],
+        # egress 的內容只折進 observed_sandbox_capability_digest;本斷言只看 evidence_class
+        # 是否被 builder 降級,故最小輸入即足。
+        egress={"network_isolation_verified": True},
+        evidence_class="PLATFORM_ATTESTED",
+        observed_at=attestation["observed_at"],
+    )
+    assert direct["evidence_class"] == "STRUCTURAL_ONLY"
+
+    # 消費側:手工把 attested 值塞進 artifact(並重封 self_digest)仍被拒。
+    forged_attestation = deepcopy(attestation)
+    forged_attestation["evidence_class"] = "PLATFORM_ATTESTED"
+    forged_attestation["self_digest"] = validator.artifact_self_digest(forged_attestation)
+    forged_receipt = deepcopy(receipt)
+    forged_receipt["network_sandbox_capability_attestation_digest"] = (
+        forged_attestation["self_digest"]
+    )
+    forged_receipt["self_digest"] = validator.artifact_self_digest(forged_receipt)
+    verdict = probe.derive_scoped_capability_attestation_status(
+        forged_attestation, forged_receipt, required_scope="PREPARE_SANDBOX", now=_NOW
+    )
+    assert verdict["status"] == "SCOPE_SUBSTITUTION_REJECTED"
+    assert any("not produced by the governed path" in r for r in verdict["reasons"])
