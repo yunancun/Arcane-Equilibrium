@@ -53,6 +53,7 @@
     "program_code/ml_training/aiml_gate_receipt_schema_core.py",
     "program_code/ml_training/aiml_gate_receipt_validator.py",
     "program_code/ml_training/aiml_gate_receipt_wave_w2.py",
+    "program_code/ml_training/aiml_gate_receipt_wave_w3.py",
     "program_code/ml_training/alr_application_identity.py",
     "program_code/ml_training/alr_candidate_board_events.py",
     "program_code/ml_training/alr_candidate_evidence_adapter.py",
@@ -165,7 +166,7 @@
     "program_code/ml_training/schemas/aiml_gate_receipts/terminal_receipt_sink_v1.schema.json"
   ],
   "schema_version": "application_bundle_runtime_closure_v1",
-  "self_digest": "sha256:9189c04c84ae96505ae715cbd27330c394e66ca371c25bb3bd68be0e1e88968d",
+  "self_digest": "sha256:76ba06e62f14b9137fd606870c5df4a2bcee4f5a8ed0caaaf1f67e54c17bf556",
   "sql_fingerprints": [
     "sql/migrations/V151__alr_persistence_foundation.sql",
     "sql/migrations/V152__alr_operational_artifacts.sql",

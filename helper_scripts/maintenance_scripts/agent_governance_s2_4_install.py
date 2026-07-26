@@ -11,8 +11,11 @@
 - 發射 fail-closed:任一導出非 ADMITTED/PASS 即拒絕寫檔並回 typed reason;
 - 持久化物包含 derivation record(綁 source_head 與兩份 derive 結果),
   供之後任何世代 checkout 該 head 重放驗證(同 S2.0 checkout+rerun 慣例);
-- 本片不含任何 install/probe/PREPARE/APPLY 面;W1-W4 逐波擴充本模組時
-  不得回頭改寫已發射的歷史 receipt。
+- W1-W4 逐波擴充本模組時不得回頭改寫已發射的歷史 receipt;
+- W3a 起本模組 re-export 兩個 governed 葉的 typed 主機面——capability probe
+  (`agent_governance_s2_4_probe`)與 PG topology observer(`agent_governance_s2_4_topology`)。
+  兩者的**真主機動作一律經注入 driver / 注入觀測**,source lane 恆 typed 非成功且零變更;
+  真 driver 與 PREPARE/APPLY 面屬 W3b/W4/W6。
 
 九 authority 恆 false;production_apply_performed / running_attested 恆 false。
 """
@@ -70,6 +73,9 @@ W2_REGENERATED_W0_ADMISSION_FILENAME = (
 W2_REGENERATED_W0_WAVE_EXIT_FILENAME = "S2.4-WP4-W2-regenerated-W0-wave-exit-receipt-v1.json"
 W2_REGENERATED_W1_WAVE_EXIT_FILENAME = "S2.4-WP4-W2-regenerated-W1-wave-exit-receipt-v1.json"
 W2_DERIVATION_RECORD_FILENAME = "S2.4-WP4-W2-derivation-record.json"
+W2_RECEIPT_DIR = (
+    REPO_ROOT / "docs" / "execution_plan" / "ai_ml_landing" / "receipts" / W2_RECEIPT_DIRNAME
+)
 
 
 # P2-I(E3):receipt 發射的持久化邊界(不靜默覆蓋 + CLI --out 受限於 receipts 目錄)
@@ -1089,6 +1095,60 @@ from agent_governance_s2_4_render import (  # noqa: E402,F401
     render_engine_scanner_unit,
     unit_template_text,
 )
+# --------------------------------------------------------------------------- #
+# W3a(§8.3 / §8.2):typed host capability probe 與 PG topology observer 兩個 governed
+# 葉,依 2000 行治理拆分下沉,此處逐名 re-export(消費者匯入面不變;真 driver 屬 W3b)。
+# --------------------------------------------------------------------------- #
+from agent_governance_s2_4_probe import (  # noqa: E402,F401
+    PROBE_SCOPES,
+    PROBE_TYPED_STATUSES,
+    W6A_PREREQUISITE_PROBE_SCOPES,
+    W6B_PREREQUISITE_PROBE_SCOPES,
+    CapabilityProbeDriver,
+    ProbeContractError,
+    ProbeRecoveryState,
+    build_capability_probe_core,
+    build_capability_probe_intent,
+    build_network_sandbox_capability_attestation,
+    capability_probe_cleanup_contract,
+    capability_probe_property_digest,
+    capability_probe_property_set,
+    derive_probe_phase_prerequisite_status,
+    derive_probe_route_surface_status,
+    derive_scoped_capability_attestation_status,
+    derived_probe_unit_name,
+    probe_abi_projection,
+    probe_id_for_core,
+    probe_route_surface_contract,
+    run_s2_4_capability_probe,
+    verify_probe_core_scope_binding,
+)
+from agent_governance_s2_4_topology import (  # noqa: E402,F401
+    ADMIN_ENDPOINT_CLASSES,
+    RUNTIME_ENDPOINT as PG_RUNTIME_ENDPOINT,
+    TOPOLOGY_GUARD_PATH,
+    TOPOLOGY_STATUS_PROVEN,
+    TOPOLOGY_STATUS_UNPROVEN,
+    PgTopologyContractError,
+    build_pg_topology_runtime_guard,
+    derive_pg_topology_status,
+    observe_pg_topology,
+    pg_topology_guard_field_contract,
+    topology_abi_projection,
+)
+# W3 wave-exit 發射葉(同 emit_sink 姿態:install 上層 re-export,CLI 於 _main 掛 w3-emit)。
+from agent_governance_s2_4_w3_emit import (  # noqa: E402,F401
+    W3_DERIVATION_RECORD_FILENAME,
+    W3_RECEIPT_DIRNAME,
+    W3_REGENERATED_W0_ADMISSION_FILENAME,
+    W3_REGENERATED_W0_WAVE_EXIT_FILENAME,
+    W3_REGENERATED_W1_WAVE_EXIT_FILENAME,
+    W3_REGENERATED_W2_WAVE_EXIT_FILENAME,
+    W3_WAVE_EXIT_FILENAME,
+    build_w3_wave_exit_receipt,
+    emit_w3_receipts,
+    load_persisted_w2_receipts as _load_persisted_w2_receipts,
+)
 
 _APP_CLOSURE_REL = _app_identity.RUNTIME_CLOSURE_REL
 # effect-capable / broker-order / credential 的 deny 謂詞(§8.1 builder rejects)。
@@ -1727,7 +1787,11 @@ def _main(argv: list[str] | None = None) -> int:
         "w2-emit",
         help="發射並持久化正式 W2 wave-exit receipt(記憶體重發當前世代 W0+W1 鏈並綁定)",
     )
-    for emitter in (emit, w1_emit, w2_emit):
+    w3_emit = sub.add_parser(
+        "w3-emit",
+        help="發射並持久化正式 W3 wave-exit receipt(記憶體重發當前世代 W0+W1+W2 鏈並綁定)",
+    )
+    for emitter in (emit, w1_emit, w2_emit, w3_emit):
         # P2-I:--out 受限於 repo receipts 目錄;覆蓋既有 receipt 必須顯式宣告。
         emitter.add_argument("--out", required=True, type=Path)
         emitter.add_argument("--test-evidence", required=True, type=Path)
@@ -1764,6 +1828,7 @@ def _main(argv: list[str] | None = None) -> int:
         "w0-emit": (emit_w0_receipts, "W0_RECEIPTS_EMITTED"),
         "w1-emit": (emit_w1_receipts, "W1_RECEIPTS_EMITTED"),
         "w2-emit": (emit_w2_receipts, "W2_RECEIPTS_EMITTED"),
+        "w3-emit": (emit_w3_receipts, "W3_RECEIPTS_EMITTED"),
     }
     if args.action in emitters:
         emitter, success_status = emitters[args.action]
