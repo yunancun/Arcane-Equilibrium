@@ -54,6 +54,22 @@ scan_serializable_surface = _component.scan_serializable_surface
 derive_recorded_evidence_class = _component.derive_recorded_evidence_class
 
 
+def _reconcile_leaf() -> Any:
+    """延遲匯入 §5.2 的啟動 reconcile 葉(避免與 install/runner 家族的匯入次序糾纏)。"""
+
+    import agent_governance_s2_4_reconcile as _reconcile
+
+    return _reconcile
+
+
+def _journal_leaf() -> Any:
+    """延遲匯入 durable WAL journal 葉(路徑導出 SSOT)。"""
+
+    import agent_governance_s2_4_journal as _journal
+
+    return _journal
+
+
 def _recordable_evidence_class(declared: Any) -> str:
     """把任何傳入的 evidence_class 收斂成 W3 唯一可記錄的等級(E2 P2-B)。
 
@@ -853,6 +869,21 @@ def run_s2_4_capability_probe(
     probe_id = intent["probe_id"]
     core_digest = intent["core_digest"]
     unit_name = derived_probe_unit_name(probe_id)
+    # step 1b —— §5.2 startup reconcile:接受這個新 probe **之前**先收斂任何非終端 journal。
+    # 這是 §10.5 #39 的跨崩潰保證:step 0 的 in-process 閂救不了「行程消失」這件事,而未解的
+    # recovery 一定在磁碟上留下一本非終端的 probe journal。此處零主機接觸(僅讀 journal)。
+    startup_reconcile = _reconcile_leaf().reconcile_before_new_intent(
+        driver, lane="probe", lane_path=_journal_leaf().probe_journal_path(probe_id)
+    )
+    if startup_reconcile["admits_new_work"] is False:
+        return _verdict(
+            PROBE_STATUS_RECOVERY_REQUIRED,
+            list(startup_reconcile["reasons"]) + [
+                "§5.2: any non-terminal probe/prepare/apply journal is reconciled before a "
+                "new probe is accepted; no new probe may start"
+            ],
+            probe_id=probe_id, probe_scope=scope, derived_unit_name=unit_name,
+        )
     # step 2 —— route surface(§10.5 #38)。
     surface = derive_probe_route_surface_status(intent)
     if surface["status"] != "PASS":
@@ -1012,7 +1043,7 @@ def _run_probe_with_driver(
                 expired=True,
             )
 
-    def _journal(state: str, pre: str, post: str) -> None:
+    def _journal(state: str, pre: str, post: str, *, terminal: bool = False) -> None:
         entry = {
             "seq": len(entries),
             "state": state,
@@ -1020,8 +1051,16 @@ def _run_probe_with_driver(
             "post_state_digest": post,
             "fsynced": True,
             "recorded_at": _iso(clock()),
+            # §5.2 的 producer 判別欄兩者皆為必填:誰寫的(capability_probe)+ 哪一個 subject
+            # digest 空間(HOST_CAPABILITY_PROBE)。缺任一欄,重啟的 runner 讀到 entries[-1]
+            # 時只能猜這個 digest 屬於哪個空間。
+            "entry_source": "capability_probe",
+            "component_effect_class": PROBE_REQUIRED_EFFECT_CLASS,
         }
-        driver.journal_transition(entry=entry)
+        # ``terminal`` 是 journal 級宣告(不進 entry 本體):durable 落盤層以它決定這本
+        # journal 是否已終結。少了它,一次**成功**的 probe 也會在磁碟上留下一本永遠非終端
+        # 的 journal,下一次啟動的 §5.2 收斂就再也放不出任何新工作。
+        driver.journal_transition(entry=dict(entry, terminal=terminal) if terminal else entry)
         entries.append(entry)
 
     try:
@@ -1142,7 +1181,7 @@ def _run_probe_with_driver(
         )
     lifecycle["zero_residue_verified"] = True
     try:
-        _journal("VERIFIED", absent_state, absent_state)
+        _journal("VERIFIED", absent_state, absent_state, terminal=True)
     except Exception as error:  # noqa: BLE001
         return _verdict(
             PROBE_STATUS_RECOVERY_REQUIRED,
@@ -1573,7 +1612,12 @@ def _abort_outcome(
             "post_state_digest": post_state if cleanup["cleaned"] else pre_state,
             "fsynced": True,
             "recorded_at": _iso(clock()),
+            "entry_source": "capability_probe",
+            "component_effect_class": PROBE_REQUIRED_EFFECT_CLASS,
         }
+        # 失敗路徑**刻意**不宣告 terminal:未解的 recovery 必須在磁碟上留下一本非終端的
+        # probe journal,那才是跨崩潰的 §10.5 #39 閂(in-process 的 ProbeRecoveryState 只
+        # 在同一個行程裡有效)。
         driver.journal_transition(entry=entry)
         entries.append(entry)
     except Exception as error:  # noqa: BLE001

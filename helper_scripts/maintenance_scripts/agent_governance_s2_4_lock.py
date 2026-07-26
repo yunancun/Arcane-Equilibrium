@@ -25,6 +25,7 @@ temp→fsync→rename→parent-fsync 紀律。九 authority 恆 false。
 from __future__ import annotations
 
 import json
+import secrets
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -57,6 +58,7 @@ LOCK_PARENT_ACCEPTED_MODES = ("0700", "0750", "0755")
 
 LOCK_STATUS_ACQUIRED = "INSTALL_LOCK_ACQUIRED"
 LOCK_STATUS_HELD = "INSTALL_LOCK_HELD"
+LOCK_STATUS_RELEASED = "INSTALL_LOCK_RELEASED"
 LOCK_STATUS_PRECHECK_FAILED = "PRECHECK_FAILED"
 LOCK_STATUS_PENDING = "EXTERNAL_VERIFICATION_PENDING"
 LOCK_STATUS_RECOVERY_REQUIRED = "RECOVERY_REQUIRED"
@@ -66,6 +68,7 @@ LOCK_TYPED_STATUSES = (
     LOCK_STATUS_PENDING,
     LOCK_STATUS_PRECHECK_FAILED,
     LOCK_STATUS_RECOVERY_REQUIRED,
+    LOCK_STATUS_RELEASED,
 )
 # §5.2:lock 永不被 unlink——driver 上出現這些面即 typed 拒。
 FORBIDDEN_LOCK_METHODS = (
@@ -113,6 +116,69 @@ class LockContractError(ValueError):
     def __init__(self, code: str) -> None:
         super().__init__(code)
         self.code = code
+
+
+class _InstallLockToken:
+    """module-private 的持有憑證(不可由呼叫端偽造:類別本身不對外 re-export)。
+
+    ``nonce`` 是這張憑證的身分。過去 live-set 記的是 ``id(token)``——CPython 的位址在物件被
+    回收後會被**重用**,所以一個「acquire 之後把 verdict 丟掉而沒有 release」的呼叫端會在
+    set 裡留下一個永久 live 的 id,而之後任何一個恰好配置到同一位址的新 token(包括從未經
+    ``acquire_s2_4_install_lock`` 發出的)都會通過 ``install_lock_is_held``,卻沒有持有任何
+    ``flock``。128-bit 隨機 nonce 沒有這個性質。
+    """
+
+    __slots__ = ("lock_fd", "nonce")
+
+    def __init__(self, lock_fd: Any) -> None:
+        self.lock_fd = lock_fd
+        self.nonce = secrets.token_bytes(16)
+
+
+# 目前**真的**持有中的 token nonce。release 之後移出,於是一份已釋放的 verdict 立刻失效。
+_LIVE_LOCK_TOKENS: set[bytes] = set()
+
+
+def install_lock_is_held(lock_verdict: Any) -> bool:
+    """「這個呼叫端此刻真的持有 install lock」的唯一判準(§5.2)。
+
+    舊判準 ``lock_verdict.get("status") == "INSTALL_LOCK_ACQUIRED"`` 是**未認證的 caller
+    字典**:任何人手寫一個同形 dict 就能通過每一道「必須持有 lock」的閘,而這些閘是
+    W6 runner 的匯出接縫(SCRIPT_INDEX 明載),所以那是現在就可利用的洞,不是潛在風險。
+    此處改為 type + membership:token 只由 :func:`acquire_s2_4_install_lock` 產生,且必須
+    仍在 :data:`_LIVE_LOCK_TOKENS` 內(釋放後即失效)。
+    """
+
+    if not isinstance(lock_verdict, dict):
+        return False
+    if lock_verdict.get("status") != LOCK_STATUS_ACQUIRED:
+        return False
+    token = lock_verdict.get("lock_token")
+    return isinstance(token, _InstallLockToken) and token.nonce in _LIVE_LOCK_TOKENS
+
+
+def _lock_not_held_reasons(lock_verdict: Any, *, action: str) -> list[str]:
+    """未持有 lock 的 typed reason(區分「沒 token」與「token 已釋放/偽造」)。"""
+
+    if isinstance(lock_verdict, dict) and lock_verdict.get("status") == (
+        LOCK_STATUS_ACQUIRED
+    ) and not isinstance(lock_verdict.get("lock_token"), _InstallLockToken):
+        return [
+            f"{action} refused: the supplied lock proof carries no install-lock token. A "
+            "verdict-shaped dict is not the lock; only acquire_s2_4_install_lock issues a "
+            "token and only while it is still held (§5.2)"
+        ]
+    if isinstance(lock_verdict, dict) and isinstance(
+        lock_verdict.get("lock_token"), _InstallLockToken
+    ):
+        return [
+            f"{action} refused: this install-lock token has already been released; a released "
+            "proof never re-authorizes anything (§5.2)"
+        ]
+    return [
+        f"{action} refused: no acquired install lock was supplied; the exclusive S2.4 install "
+        "lock is the only writer admission (§5.2)"
+    ]
 
 
 def _iso(value: datetime) -> str:
@@ -177,6 +243,7 @@ def _lock_verdict(
     bound_parent: dict[str, Any] | None = None,
     lock_file_created: bool = False,
     driver_engaged: bool = False,
+    lock_token: Any = None,
 ) -> dict[str, Any]:
     return {
         "schema_version": "s2_4_install_lock_verdict_v1_informal",
@@ -184,6 +251,7 @@ def _lock_verdict(
         "reasons": list(reasons),
         "lock_path": INSTALL_LOCK_PATH,
         "lock_fd": lock_fd,
+        "lock_token": lock_token,
         "bound_parent": bound_parent,
         # lock 檔的建立不是 install 狀態的變更(§5.2 明載 O_CREAT 且永不 unlink);
         # 競爭/precheck 失敗時 install 狀態一律零變更。
@@ -279,6 +347,7 @@ def acquire_s2_4_install_lock(driver: Any = None) -> dict[str, Any]:
     parent_fd = None
     lock_fd = None
     created = False
+    acquired = False
     try:
         parent = driver.open_parent_directory(
             path=INSTALL_LOCK_PARENT, flags=LOCK_PARENT_OPEN_FLAGS
@@ -315,18 +384,10 @@ def acquire_s2_4_install_lock(driver: Any = None) -> dict[str, Any]:
                 LOCK_STATUS_PRECHECK_FAILED, file_reasons, bound_parent=bound_parent,
                 lock_file_created=created, driver_engaged=True,
             )
-        recheck = driver.fstat_parent(fd=parent_fd)
-        if (
-            not isinstance(recheck, dict)
-            or recheck.get("device") != bound_parent["device"]
-            or recheck.get("inode") != bound_parent["inode"]
-        ):
+        recheck_reasons = _reresolve_lock_parent_reasons(driver, bound_parent)
+        if recheck_reasons:
             return _lock_verdict(
-                LOCK_STATUS_PRECHECK_FAILED,
-                [
-                    f"install-lock parent {INSTALL_LOCK_PARENT} was replaced between the "
-                    "directory-FD binding and the flock; PRECHECK_FAILED with zero mutation"
-                ],
+                LOCK_STATUS_PRECHECK_FAILED, recheck_reasons,
                 bound_parent=bound_parent, lock_file_created=created, driver_engaged=True,
             )
         if driver.flock_exclusive_nonblocking(fd=lock_fd) is not True:
@@ -345,29 +406,76 @@ def acquire_s2_4_install_lock(driver: Any = None) -> dict[str, Any]:
             [f"install-lock acquisition failed: {_journal.redact_driver_error(error)}"],
             lock_file_created=created, driver_engaged=True,
         )
+    else:
+        acquired = True
     finally:
+        # lock FD 只有在**真的取得**時才交給呼叫端;競爭、precheck 失敗與例外路徑都必須把它
+        # 關掉,否則一個重試迴圈會把 RLIMIT_NOFILE 用盡(每次競爭洩一個 fd)。
+        if not acquired and lock_fd is not None:
+            try:
+                driver.close(fd=lock_fd)
+            except Exception:  # noqa: BLE001
+                pass
         if parent_fd is not None:
             try:
                 driver.close(fd=parent_fd)
             except Exception:  # noqa: BLE001
                 pass
+    token = _InstallLockToken(lock_fd)
+    _LIVE_LOCK_TOKENS.add(token.nonce)
     return _lock_verdict(
         LOCK_STATUS_ACQUIRED, [], lock_fd=lock_fd, bound_parent=bound_parent,
-        lock_file_created=created, driver_engaged=True,
+        lock_file_created=created, driver_engaged=True, lock_token=token,
     )
 
 
-def release_s2_4_install_lock(driver: Any, lock_verdict: Any) -> dict[str, Any]:
-    """關閉 lock FD 釋放 ``flock``;**永不** unlink(§5.2)。"""
+def _reresolve_lock_parent_reasons(driver: Any, bound_parent: dict[str, Any]) -> list[str]:
+    """flock 之前**重新解析** ``/run/lock`` 並與綁定值比對(有牙齒的置換偵測)。
 
-    if not isinstance(lock_verdict, dict) or lock_verdict.get("status") != (
-        LOCK_STATUS_ACQUIRED
-    ):
+    以同一個 dirfd 再 ``fstat`` 一次不可能失敗——fd 釘住 inode。真正要排除的情境是:綁定
+    之後 ``/run/lock`` 這個**路徑**被換成別的目錄,於是我們鎖住的是一個孤兒 inode 上的檔,
+    而其他 runner 會去鎖新路徑下的另一個檔——互斥就此消失。重新解析才看得見這件事。
+    """
+
+    observed = driver.open_parent_directory(
+        path=INSTALL_LOCK_PARENT, flags=LOCK_PARENT_OPEN_FLAGS
+    )
+    try:
+        reasons = _lock_parent_reasons(observed)
+        if not reasons and (
+            observed["device"] != bound_parent["device"]
+            or observed["inode"] != bound_parent["inode"]
+        ):
+            reasons.append(
+                f"install-lock parent {INSTALL_LOCK_PARENT} was replaced between the "
+                "directory-FD binding and the flock (the path now resolves to a different "
+                "directory); PRECHECK_FAILED with zero mutation"
+            )
+        return reasons
+    finally:
+        if isinstance(observed, dict) and observed.get("fd") is not None:
+            try:
+                driver.close(fd=observed["fd"])
+            except Exception:  # noqa: BLE001
+                pass
+
+
+def release_s2_4_install_lock(driver: Any, lock_verdict: Any) -> dict[str, Any]:
+    """關閉 lock FD 釋放 ``flock``,並**作廢 token**;永不 unlink(§5.2)。
+
+    舊行為只關 fd 而不動 verdict,於是一份已釋放的 verdict 永遠通得過每一道「必須持有
+    lock」的閘。釋放之後 token 立刻移出 :data:`_LIVE_LOCK_TOKENS`,verdict 自身也改記
+    ``INSTALL_LOCK_RELEASED``。
+    """
+
+    if not install_lock_is_held(lock_verdict):
         return {
             "status": "NOT_HELD",
-            "reasons": ["release requires a verdict with status INSTALL_LOCK_ACQUIRED"],
+            "reasons": _lock_not_held_reasons(lock_verdict, action="install-lock release"),
             "lock_unlinked": False,
         }
+    _LIVE_LOCK_TOKENS.discard(lock_verdict["lock_token"].nonce)
+    lock_verdict["status"] = LOCK_STATUS_RELEASED
     try:
         driver.close(fd=lock_verdict.get("lock_fd"))
     except Exception as error:  # noqa: BLE001
@@ -376,7 +484,7 @@ def release_s2_4_install_lock(driver: Any, lock_verdict: Any) -> dict[str, Any]:
             "reasons": [f"install-lock release failed: {_journal.redact_driver_error(error)}"],
             "lock_unlinked": False,
         }
-    return {"status": "INSTALL_LOCK_RELEASED", "reasons": [], "lock_unlinked": False}
+    return {"status": LOCK_STATUS_RELEASED, "reasons": [], "lock_unlinked": False}
 
 
 # --------------------------------------------------------------------------- #
@@ -422,9 +530,18 @@ def seal_replay_ledger(ledger: dict[str, Any]) -> dict[str, Any]:
 
 
 def append_replay_entries(
-    ledger: Any, authorizations: list[dict[str, Any]], *, consumed_at: str
+    ledger: Any,
+    authorizations: list[dict[str, Any]],
+    *,
+    consumed_at: str,
+    ledger_path: str = REPLAY_LEDGER_PATH,
 ) -> dict[str, Any]:
-    """純函式 append:回**新的**已封 ledger(hash chain 續接;不改動輸入物件)。"""
+    """純函式 append:回**新的**已封 ledger(hash chain 續接;不改動輸入物件)。
+
+    ``ledger_path`` 一律取**呼叫端實際要寫進去的那個路徑**,絕不沿用被讀回物件自報的值:
+    後者是被讀取的位元組的一部分,一份宣稱自己住在別處的 ledger 若被原樣沿用,封好的
+    artifact 就會記著一個它從未被寫入過的位置。
+    """
 
     if not isinstance(ledger, dict):
         raise LockContractError("replay_ledger_not_an_object")
@@ -439,7 +556,7 @@ def append_replay_entries(
         entries.append(entry)
     return seal_replay_ledger({
         "schema_version": REPLAY_LEDGER_SCHEMA_VERSION,
-        "ledger_path": str(ledger.get("ledger_path") or REPLAY_LEDGER_PATH),
+        "ledger_path": str(ledger_path),
         "entries": entries,
         "append_only": True,
     })
@@ -480,6 +597,11 @@ def derive_replay_consumption_decision(
         verdict["reasons"] = ["authorization must be an object"]
         return verdict
     verdict["authorization_id"] = authorization.get("authorization_id")
+    # §9.1 新鮮窗:``_s2_4_operator_authorization_errors`` 在 ``now is None`` 時**整段跳過**
+    # 新鮮度檢查,而本函式過去把 ``now`` 原樣轉發。於是「空 ledger + now=None」——也就是系統
+    # 一生中燒掉的第一張 permit——會把一張 2030 年才生效的 permit 判成 CONSUME_ADMITTED。
+    # 姊妹函式 derive_authorization_replay_binding 早就預設牆鐘,這裡對齊它。
+    resolved_now = _resolve_now(now)
     binding = central_validator.derive_permit_plan_binding_status(
         authorization,
         expected_payload_binding=expected_payload_binding,
@@ -493,7 +615,7 @@ def derive_replay_consumption_decision(
         # 空 ledger:schema 的 minItems:1 不適用於「還沒有任何消費」的 genesis 狀態,
         # 故此處只驗 permit 本身(下方 read-binding 需要非空 entries)。
         permit_reasons = central_validator._s2_4_operator_authorization_errors(
-            authorization, now=now
+            authorization, now=resolved_now
         )
         if permit_reasons:
             verdict["reasons"] = permit_reasons
@@ -501,7 +623,7 @@ def derive_replay_consumption_decision(
         verdict["status"] = REPLAY_STATUS_CONSUME_ADMITTED
         return verdict
     read_binding = central_validator.derive_authorization_replay_binding(
-        authorization, ledger, now=now
+        authorization, ledger, now=resolved_now
     )
     if read_binding["status"] == "UNCONSUMED_AUTHORIZATION_VALID":
         verdict["status"] = REPLAY_STATUS_CONSUME_ADMITTED
@@ -517,7 +639,9 @@ def derive_replay_consumption_decision(
         and matches[0].get("authorization_digest") == authorization.get("self_digest")
         and matches[0].get("profile_identity") == authorization.get("profile_identity")
         and not central_validator._s2_4_replay_ledger_errors(ledger)
-        and not central_validator._s2_4_operator_authorization_errors(authorization, now=now)
+        and not central_validator._s2_4_operator_authorization_errors(
+            authorization, now=resolved_now
+        )
     ):
         verdict["status"] = REPLAY_STATUS_IDEMPOTENT_REPLAY
         verdict["reasons"] = [
@@ -573,11 +697,11 @@ def consume_authorizations_under_lock(
             "binding (an unbound permit authorizes any intent of its class inside its TTL)"
         ]
         return outcome
-    if not isinstance(lock_verdict, dict) or lock_verdict.get("status") != (
-        LOCK_STATUS_ACQUIRED
-    ):
+    if not install_lock_is_held(lock_verdict):
         outcome["status"] = REPLAY_STATUS_LOCK_REQUIRED
-        outcome["reasons"] = [
+        outcome["reasons"] = _lock_not_held_reasons(
+            lock_verdict, action="authorization consumption"
+        ) + [
             "authorization consumption is appended and fsynced only under the exclusive "
             "S2.4 install lock (§9.1); no lock, no append"
         ]
@@ -629,7 +753,8 @@ def consume_authorizations_under_lock(
         ]
         return outcome
     appended = append_replay_entries(
-        ledger, [authorization for _, authorization in pending], consumed_at=now_text
+        ledger, [authorization for _, authorization in pending], consumed_at=now_text,
+        ledger_path=ledger_path,
     )
     central_errors = central_validator.validate_aiml_artifact(appended)
     chain_errors = central_validator._s2_4_replay_ledger_errors(appended)
@@ -706,6 +831,14 @@ def _read_durable_ledger(store: Any, *, ledger_path: str) -> dict[str, Any]:
     errors = central_validator.validate_aiml_artifact(
         ledger
     ) + central_validator._s2_4_replay_ledger_errors(ledger)
+    # 讀回來的 ledger 必須自報它就住在我們剛剛讀的那個路徑;不符即 typed CORRUPT
+    # (一份被搬過來的 ledger 不是這條 lane 的 durable head)。
+    if isinstance(ledger, dict) and ledger.get("ledger_path") != ledger_path:
+        errors.append(
+            f"replay ledger self-reports ledger_path {ledger.get('ledger_path')!r} but was "
+            f"read from {ledger_path}; a ledger that records a location it was not written "
+            "to is not this lane's durable head"
+        )
     if errors:
         return {"status": REPLAY_STATUS_CORRUPT, "reasons": errors, "ledger": None}
     return {"status": "LEDGER_LOADED", "reasons": [], "ledger": ledger}
@@ -719,17 +852,26 @@ def _commit_durable_ledger(store: Any, ledger: dict[str, Any]) -> dict[str, Any]
         return {"status": _journal.JOURNAL_STATUS_PRECHECK_FAILED, "reasons": destructive}
     parent_fd = None
     temp_fd = None
-    # 同 JournalStore.commit:暫存檔名數**嘗試**次數(失敗留下的同名暫存檔會讓 O_EXCL 回 EEXIST)。
+    # 同 JournalStore.commit:暫存名的唯一性來自 ``<pid>-<隨機>``(見 journal_temp_basename
+    # 的說明);``attempts`` 只數同一行程內的重試。
     temp_basename = _journal.journal_temp_basename(store.basename, attempt=store.attempts)
     store.attempts += 1
     try:
         parent_fd, reasons = store._open_parent()
         if reasons:
             return {"status": _journal.JOURNAL_STATUS_PRECHECK_FAILED, "reasons": reasons}
-        temp = store.driver.create_temp_file(
-            parent_fd=parent_fd, basename=temp_basename,
-            flags=_journal.JOURNAL_TEMP_OPEN_FLAGS, mode=_journal.JOURNAL_FILE_MODE_BITS,
-        )
+        try:
+            temp = store.driver.create_temp_file(
+                parent_fd=parent_fd, basename=temp_basename,
+                flags=_journal.JOURNAL_TEMP_OPEN_FLAGS, mode=_journal.JOURNAL_FILE_MODE_BITS,
+            )
+        except FileExistsError:
+            return {
+                "status": _journal.JOURNAL_STATUS_TEMP_COLLISION,
+                "reasons": [
+                    _journal._temp_residue_reason(store.parent_path, temp_basename)
+                ],
+            }
         temp_reasons = _journal._temp_file_precheck_reasons(
             temp, expected_device=store.bound_parent["device"]
         )
@@ -744,18 +886,11 @@ def _commit_durable_ledger(store: Any, ledger: dict[str, Any]) -> dict[str, Any]
                 "reasons": ["replay-ledger temp write was short; refusing to rename it"],
             }
         store.driver.fsync_file(fd=temp_fd)
-        recheck = store.driver.fstat_parent(fd=parent_fd)
-        if (
-            not isinstance(recheck, dict)
-            or recheck.get("device") != store.bound_parent["device"]
-            or recheck.get("inode") != store.bound_parent["inode"]
-        ):
+        recheck_reasons = store._reresolve_parent_reasons()
+        if recheck_reasons:
             return {
                 "status": _journal.JOURNAL_STATUS_PRECHECK_FAILED,
-                "reasons": [
-                    "the replay-ledger parent was replaced before the atomic rename; "
-                    "PRECHECK_FAILED"
-                ],
+                "reasons": recheck_reasons,
             }
         store.driver.atomic_rename(
             parent_fd=parent_fd, from_basename=temp_basename, to_basename=store.basename
@@ -796,4 +931,7 @@ def lock_abi_projection() -> dict[str, Any]:
         "lock_typed_statuses": list(LOCK_TYPED_STATUSES),
         "replay_ledger_path": REPLAY_LEDGER_PATH,
         "replay_typed_statuses": list(REPLAY_TYPED_STATUSES),
+        # A2:每一道「必須持有 lock」的閘用的是 token(type + membership),不是 caller 字典。
+        "lock_proof_is_a_module_private_token": True,
+        "lock_release_invalidates_the_proof": True,
     }

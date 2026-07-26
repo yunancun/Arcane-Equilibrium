@@ -46,6 +46,8 @@ _W4_OWNED_PATHS = tuple(sorted((
     "helper_scripts/maintenance_scripts/agent_governance_s2_4_install.py",
     # W4b 的 aggregate 交易葉(§10.1 明列)與其 §10.1.1 拆出的 §5.2 recovery/wiring 葉。
     "helper_scripts/maintenance_scripts/agent_governance_s2_4_install_driver.py",
+    "helper_scripts/maintenance_scripts/agent_governance_s2_4_install_evidence.py",
+    "helper_scripts/maintenance_scripts/agent_governance_s2_4_install_plan.py",
     "helper_scripts/maintenance_scripts/agent_governance_s2_4_reconcile.py",
     # W4a 的三個新 governed 葉(§5.2 durable WAL / install lock + §9.1 replay append / §9 預算)。
     "helper_scripts/maintenance_scripts/agent_governance_s2_4_journal.py",
@@ -81,6 +83,9 @@ _W4_OWNED_PATHS = tuple(sorted((
     "tests/structure/test_agent_governance_s2_4_pre_state_matrix.py",
     "tests/structure/test_agent_governance_s2_4_prepare.py",
     "tests/structure/test_agent_governance_s2_4_probe.py",
+    # W4b 的 §5.2/§9.1 硬化 focused 測試(aggregate 交易的硬化回歸落在既有的兩支:
+    # test_agent_governance_s2_4_install_driver / _crash_matrix)。
+    "tests/structure/test_agent_governance_s2_4_w4_hardening.py",
 )))
 # §10.2/§10.3 W4 exported-ABI 的 code-owned 骨架(live 部分見 w4_exported_abi_projection)。
 _W4_EXPORTED_ABI = {
@@ -151,7 +156,11 @@ _W4_EXPORTED_ABI = {
         "INDEPENDENT postcheck verifier, re-run after compensation, reports the applied state "
         "absent, the pre-state lineage intact and an observation that actually changed; an "
         "unobtainable independent re-observation yields COMPENSATED_NOT_REOBSERVED with "
-        "exact_pre_state_restored=false, and any disproof is RECOVERY_REQUIRED"
+        "exact_pre_state_restored=false, and any disproof is RECOVERY_REQUIRED. The "
+        "'observation that actually changed' check is load-bearing at BOTH levels: the row-level "
+        "site and the aggregate transaction both pass the pre-compensation observed digest, so a "
+        "verifier returning one constant digest before and after compensation can no longer buy "
+        "an exactness claim at either level"
     ),
     "driver_injection_contract": (
         "every host action stays behind the injected InstallLockDriver / DurableFileDriver / "
@@ -168,15 +177,28 @@ _W4_EXPORTED_ABI = {
         "acquire the install lock -> §5.2 startup reconciliation -> consume both permits once "
         "under that lock -> the five §5.1 rows as write-ahead steps -> independent aggregate "
         "postcheck -> §10.5 #24 success predicate -> observed inactive unit -> terminal "
-        "journal -> immutable s2_4_install_effect_receipt_v1"
+        "journal -> verified apply attestation -> immutable s2_4_install_effect_receipt_v1. "
+        "Both operator SSHSIGs are verified at step 6 (before the lock is created or flocked, "
+        "before startup reconciliation and before the ledger is read) and re-verified under the "
+        "lock at consume time; every §9 remaining-TTL bound is derived from each artifact's own "
+        "expires_at and a caller value may only tighten it; per-row payloads are restricted to "
+        "an exact allowlist so repo_root/applier_node/now/clock/replay_ledger/ownership_evidence "
+        "stay code-owned; an unobservable installed unit is RECOVERY_REQUIRED with ZERO "
+        "compensation; a failure after the terminal journal is a retryable "
+        "RECEIPT_EMISSION_PENDING and re-running the same signed plan is "
+        "ALREADY_APPLIED_IDEMPOTENT, neither of which is a recovery incident"
     ),
     "success_identity_contract": (
         "the frozen success identity is s2_4_install_effect_receipt_v1(status="
-        "APPLIED_INACTIVE) and it is unreachable from source by construction: the recorded "
-        "evidence class comes from derive_recorded_evidence_class, which refuses a "
-        "self-declared attested class, so an in-memory/disposable driver terminates at "
-        "SOURCE_SIMULATION_PASS with all nine authorities false (§6 table, §10.5 #13). Only "
-        "a trusted-host attested production driver (W6B) can reach APPLIED_INACTIVE"
+        "APPLIED_INACTIVE) and its ONLY key is a verified s2_4_install_apply_attestation_v1: "
+        "distinct attestor identity/namespace over the §9.1 trust root, a real SSHSIG over "
+        "canonical_bytes(attestation), exact-plan binding, applier != verifier, "
+        "reobserved == applied == the row results this transaction produced, and freshness "
+        "derived only from the SIGNED trusted_host_time inside both permit windows. A driver's "
+        "self-declared evidence_class is refused and is no longer a key to anything, so an "
+        "in-memory/disposable driver terminates at SOURCE_SIMULATION_PASS with all nine "
+        "authorities false (§6 table, §10.5 #13). Only a trusted host holding the §9.1 private "
+        "key (W6B) can produce an attestation that unlocks APPLIED_INACTIVE"
     ),
     "plan_intent_binding_contract": (
         "§5.1 forbids a digest/signature cycle, so the plan core pins each component intent "
@@ -206,14 +228,21 @@ _W4_EXPORTED_ABI = {
         "survives. Anything unproven is RECOVERY_REQUIRED, never APPLIED_INACTIVE"
     ),
     "startup_reconcile_contract": (
-        "before accepting a new probe, prepare intent or plan the runner reconciles every "
-        "non-terminal journal it is given a path for, while holding the install lock: "
-        "observed == planned post-state resumes verification, observed == pre-state marks the "
-        "step not applied and resumes safely, a task-owned partial with a valid journal "
-        "ownership binding compensates in reverse order, and ambiguous ownership/state is "
-        "RECOVERY_REQUIRED with zero new mutation; malformed bytes are "
-        "JOURNAL_CORRUPT_RECOVERY_REQUIRED and are never renamed away. Only CLEAN and "
-        "STEP_NOT_APPLIED admit new work"
+        "before accepting a new probe, prepare intent or plan the runner ENUMERATES the three "
+        "§5.2 journal parents while holding the install lock (a lane the caller did not name is "
+        "still inspected; only the independent observation digest is caller-supplied) and "
+        "classifies every non-terminal journal it finds: observed == planned post-state resumes "
+        "verification, observed == pre-state marks the step not applied and resumes safely, a "
+        "task-owned partial with a valid journal ownership binding is classified "
+        "COMPENSATE_REVERSE, and ambiguous ownership/state is RECOVERY_REQUIRED with zero new "
+        "mutation; malformed bytes are JOURNAL_CORRUPT_RECOVERY_REQUIRED and are never renamed "
+        "away. Only CLEAN and STEP_NOT_APPLIED admit new work. HONEST BOUNDARY: reconciliation "
+        "itself performs ZERO mutation — apply_s2_4_install_plan projects COMPENSATE_REVERSE "
+        "unconditionally to RECOVERY_REQUIRED and does NOT run the §5.4 reverse compensation "
+        "itself; the W6 runner that owns all three phases compensates on that typed verdict and "
+        "re-runs. Enumeration only sees basenames that re-derive through the journal leaf's own "
+        "path functions in those three parents, and a driver with no enumeration surface is "
+        "fail-closed"
     ),
     "runner_wal_lock_wiring_contract": (
         "JournalRoutedDriver routes an existing probe/PREPARE/APPLY driver's "
@@ -271,24 +300,307 @@ _W4_EXPORTED_ABI = {
         },
         {
             "obligation_id": "ATTESTED_EVIDENCE_CLASS_VERIFIER",
-            "typed_status": "NOT_PROVIDED_BY_W4",
+            "typed_status": "VERIFIER_PROVIDED_BY_W4B_ATTESTATION_PENDING",
             "owner_wave": "W6B",
-            "spec_refs": ["§6", "§10.2", "§10.5 #13", "§10.5 #14"],
+            "spec_refs": ["§6", "§9.1", "§10.2", "§10.5 #13", "§10.5 #14"],
             "statement": (
-                "The aggregate transaction's success identity APPLIED_INACTIVE is gated on the "
-                "RECORDED evidence class being attested, and derive_recorded_evidence_class "
-                "refuses every self-declared attested class because nothing in-process can "
-                "distinguish a fixture from a real host driver. There is therefore no code "
-                "path in the source lane that can emit APPLIED_INACTIVE — every driver W4b can "
-                "be handed terminates at SOURCE_SIMULATION_PASS. A trusted-host platform "
-                "attestation verifier (the same obligation W3 recorded in its "
-                "evidence_class_contract) is W6B's, and until it exists §11.3 EFFECT_DONE_"
-                "INACTIVE is unreachable, which is the intended posture rather than a defect."
+                "The VERIFIER now exists in the source lane (PM ruling, W4b Fix-C). "
+                "s2_4_install_apply_attestation_v1 is the analogue of S2.0's "
+                "pg_observer_bootstrap_apply_attestation_v1: distinct attestor identity "
+                "(aiml-s2-4-install-attestor-v1) and namespace "
+                "(arcane-equilibrium-aiml-s2-4-install-apply) over the SAME §9.1 trust root, a "
+                "real _verify_ssh_signature over canonical_bytes(attestation), exact-plan "
+                "binding (plan_id/core_digest/idempotency_key/source_head/target_host), "
+                "applier != verifier, reobserved_row_results_digest == "
+                "applied_row_results_digest == the digest this transaction actually produced, "
+                "and freshness derived ONLY from the SIGNED trusted_host_time (inside both "
+                "permit windows and a bounded 900s attestation TTL) — never the caller's now. "
+                "APPLIED_INACTIVE is gated on that verification, not on "
+                "derive_recorded_evidence_class's reading of a self-declared attribute, so "
+                "§10.2's success identity now has a live transition and §10.5 #14 has a "
+                "positive test. What remains W6B's is OBTAINING a real attestation: only a "
+                "trusted host holding the §9.1 private key can sign one, so on Mac/source/"
+                "disposable lanes no attestation is produced and every driver still terminates "
+                "at SOURCE_SIMULATION_PASS with all nine authorities false."
             ),
             "w4_provides": (
-                "the reachable-but-authority-locked branch, its typed SOURCE_SIMULATION_PASS "
-                "terminal with all nine authorities false, and a test proving a self-declared "
-                "PLATFORM_ATTESTED driver still cannot reach APPLIED_INACTIVE"
+                "the verifier itself, the APPLIED_INACTIVE gate on it, a throwaway-key POSITIVE "
+                "test proving APPLIED_INACTIVE is REACHABLE with a valid attestation, and a "
+                "negative set that now includes the two cases only the signature check can "
+                "refuse -- an attestation whose 18 fields are all correct but which is signed by "
+                "a FOREIGN throwaway key, and one carrying literal garbage SSHSIG bytes -- "
+                "alongside a self-declared PLATFORM_ATTESTED driver, a substituted plan, a "
+                "substituted namespace/verifier/row-results/unit-state and a stale signed "
+                "trusted_host_time, all terminating at SOURCE_SIMULATION_PASS. Correction "
+                "(E2 @ this wave): the earlier text claimed the positive test proved "
+                "APPLIED_INACTIVE is reachable ONLY with a valid attestation. It did not, and no "
+                "test did: every negative mutated attestation FIELDS and then re-signed them, so "
+                "each was caught by a field comparison and the SSHSIG verification at "
+                "agent_governance_s2_4_install_evidence.py:412 had ZERO coverage (short-"
+                "circuiting it left the whole W4 subset green). The 'only' half is what the two "
+                "signature negatives now carry."
+            ),
+        },
+        {
+            "obligation_id": "ATTESTOR_KEY_IS_NOT_SEPARATE_FROM_THE_PERMIT_KEY",
+            "typed_status": "NOT_PROVIDED_BY_W4B",
+            "owner_wave": "W6B",
+            "spec_refs": ["§9.1", "§10.2"],
+            "statement": (
+                "One physical Ed25519 key roots BOTH the four operator permit profiles and the "
+                "new apply attestation. Domain separation is real but it is namespace-level "
+                "only: ssh-keygen -Y verify binds identity+namespace, so a permit SSHSIG cannot "
+                "be replayed as an attestation and vice versa. What it does NOT separate is "
+                "CUSTODY. In the only realistic W6 configuration the private key sits on the "
+                "applier host so that the post-apply attestation (which binds trusted_host_time "
+                "and the observed row results, and therefore can only be produced after the "
+                "apply) can be signed there at all -- and whoever can sign an attestation on "
+                "that host can equally sign an aggregate/PG operator permit. The pre-approval "
+                "property that 'an operator authorized THIS exact plan before it ran' then rests "
+                "on the same key material as the post-apply evidence. The fix is a separate "
+                "attestor keypair with its own pinned fingerprint (permit key stays off the "
+                "applier host, attestor key stays on it), which is a W6 key-custody decision "
+                "about a real host, not a source change a worker may make unilaterally."
+            ),
+            "w4_provides": (
+                "the namespace/identity domain separation, the exact-plan and applier!=verifier "
+                "bindings, and this explicit statement that custody is NOT separated"
+            ),
+        },
+        {
+            "obligation_id": "ATTESTATION_EXPIRY_AND_HOST_TIME_ARE_NOT_CROSS_CHECKED",
+            "typed_status": "NOT_PROVIDED_BY_W4B",
+            "owner_wave": "W6B",
+            "spec_refs": ["§9.1", "§10.2"],
+            "statement": (
+                "Two freshness relations the attestation SIGNS are never enforced. (a) "
+                "attestation_expires_at is signed and its distance from trusted_host_time is "
+                "bounded by the 900s ceiling, but nothing ever compares the OBSERVED moment "
+                "against it: derive_apply_attestation_status deliberately excludes the caller's "
+                "now, and the only observed-time anchor available (the driver's "
+                "trusted_host_time()) is not used here, so an attestation whose own expiry has "
+                "passed still verifies as long as its SIGNED trusted_host_time sits inside both "
+                "permit windows. (b) The attestation's signed trusted_host_time is never "
+                "reconciled with the value driver.trusted_host_time() returned for the same "
+                "transaction, even though the receipt records the latter -- a trusted host could "
+                "sign an attestation timestamped at one moment and report another. Closing "
+                "either needs a decision about WHICH clock is authoritative for the observed "
+                "moment on a real host (§9.1 says the host's, and on a real host the two values "
+                "come from the same clock), so it belongs to W6B rather than to a source lane "
+                "where both are fixtures."
+            ),
+            "w4_provides": (
+                "the signed-trusted_host_time-only freshness derivation, the bounded 900s "
+                "attestation TTL, the trusted_host_time<attestation_expires_at ordering check, "
+                "and the requirement that the signed trusted_host_time falls inside BOTH permit "
+                "windows"
+            ),
+        },
+        {
+            "obligation_id": "RECEIPT_EMISSION_PENDING_IS_NOT_A_RECEIPT_RETRY",
+            "typed_status": "PARTIALLY_PROVIDED_BY_W4B",
+            "owner_wave": "W6B",
+            "spec_refs": ["§10.5 #8", "§10.5 #14"],
+            "statement": (
+                "RECEIPT_EMISSION_PENDING is safe to re-run but it is NOT a path to the missing "
+                "receipt. After it, the APPLY journal is durably terminal in state VERIFIED and "
+                "the host is complete, so re-running the same signed plan returns "
+                "ALREADY_APPLIED_IDEMPOTENT with receipt=None -- and that replay cannot "
+                "reconstruct the receipt, because s2_4_install_effect_receipt_v1 binds the five "
+                "row result/postcheck digests, the probe/PREPARE lineage digests and the "
+                "attestation-derived evidence_class, none of which the journal carries. A "
+                "terminal, complete install can therefore permanently have no receipt. W4b "
+                "corrects the reason text so no reader infers otherwise and commits the durable "
+                "evidence set on that path (terminal journal digest + applied rows + step "
+                "results + reconcile verdict + residue), which is the artifact a downstream "
+                "reader must bind to. Actually EMITTING the receipt on retry needs the row "
+                "result/postcheck digests to become part of the durable evidence the journal or "
+                "evidence set carries -- an artifact-shape decision that belongs with the W6B "
+                "runner."
+            ),
+            "w4_provides": (
+                "the corrected reason text on both RECEIPT_EMISSION_PENDING and "
+                "ALREADY_APPLIED_IDEMPOTENT, the durable evidence-set commit on the "
+                "receipt-pending path, and the terminal-VERIFIED gate that makes "
+                "ALREADY_APPLIED_IDEMPOTENT mean 'the first run provably completed'"
+            ),
+        },
+        {
+            "obligation_id": "STARTUP_JOURNAL_PARENTS_MUST_PREEXIST",
+            "typed_status": "NOT_PROVIDED_BY_W4B",
+            "owner_wave": "W6B",
+            "spec_refs": ["§5.2"],
+            "statement": (
+                "New W6 bootstrap precondition introduced by the three-parent enumeration. On a "
+                "fresh host .../s2_4/probes and .../s2_4/prepared do not exist, so "
+                "open_parent_directory raises FileNotFoundError, the enumeration fails and "
+                "startup reconciliation returns RECOVERY_REQUIRED. Because the probe and PREPARE "
+                "entry points now reconcile too, NOTHING in S2.4 can start until an operator "
+                "pre-creates all three parents (.../s2_4, .../s2_4/probes, .../s2_4/prepared) "
+                "root-owned 0700 -- the journal surface deliberately exposes no mkdir, and "
+                "creating a state root is not something an authority-locked source lane may do. "
+                "The behaviour is fail-closed and the reason names the exact path, but it is an "
+                "OPERATOR PRECONDITION that must appear in the W6 runbook, not a defect to be "
+                "fixed by giving this surface a directory-creation capability."
+            ),
+            "w4_provides": (
+                "the fail-closed refusal, the exact parent path in the typed reason, and the "
+                "root-owned-0700 precheck that would reject a loosely-permissioned parent"
+            ),
+        },
+        {
+            "obligation_id": "STRANDED_WAL_TEMP_FILES_ARE_REPORT_ONLY",
+            "typed_status": "PARTIALLY_PROVIDED_BY_W4B",
+            "owner_wave": "W6B",
+            "spec_refs": ["§5.2"],
+            "statement": (
+                "The cross-process-unique temp basename (.<basename>.tmp.<pid>-<128 bit "
+                "random>.<attempt>) removes the EEXIST trap where every later runner collided "
+                "with a previous crash's .tmp.0, but it also means O_EXCL can never again see "
+                "that residue, so JOURNAL_TEMP_RESIDUE_RECOVERY_REQUIRED is reachable only "
+                "within one process. W4b makes the §5.2 startup enumeration match the residue "
+                "pattern, list it per lane and return RECOVERY_REQUIRED naming the exact "
+                "basenames. What remains W6B's is the DISPOSITION: §5.2 forbids this surface "
+                "from renaming or removing anything, so clearing the residue (after an operator "
+                "inspects a possibly half-written journal body in a root-owned 0700 directory) "
+                "is an operator step in the runbook."
+            ),
+            "w4_provides": (
+                "the residue basename pattern, the per-lane enumeration and typed report, and "
+                "the RECOVERY_REQUIRED with zero mutation that blocks new work while it exists"
+            ),
+        },
+        {
+            "obligation_id": "INSTALLED_UNIT_PROBE_CORE_BINDING",
+            "typed_status": "PARTIALLY_PROVIDED_BY_W4B",
+            "owner_wave": "W6B",
+            "spec_refs": ["§6", "§10.4", "§10.5 #36"],
+            "statement": (
+                "The terminal INSTALLED_UNIT probe receipt carries probe_core_digest, which is "
+                "exactly what the probe permit binds (together with "
+                "output_derived_unit_digest_or_null). The aggregate compares which RECEIPT was "
+                "admitted (the aggregate/PG permits sign installed_unit_probe_receipt_digest and "
+                "the transaction re-derives it), but it has no signed expected value for the "
+                "probe CORE, because s2_4_install_plan_core_v1 has no "
+                "installed_unit_probe_core_digest field and adding one is a schema change §10.4 "
+                "forbids the worker from choosing. Consequence while open: an operator who signs "
+                "a permit for a terminal probe receipt of unit U1 could gate an APPLY that "
+                "renders U2, because nothing re-derives 'this receipt probed THIS rendered "
+                "unit'. W4b adds the optional expected_installed_unit_probe_core_digest "
+                "parameter and compares it byte-for-byte when supplied; closing it means either "
+                "the W6B runner (which holds probe and APPLY) always supplying it, or the plan "
+                "core field. Supplying expected_installed_unit_probe_core_digest is MANDATORY "
+                "for the W6 runner: it holds both the probe and the APPLY segment, so it is the "
+                "only party that can, and an omission is not a neutral default. W4b makes the "
+                "omission auditable rather than invisible: every transaction verdict now carries "
+                "a typed probe_core_binding of UNVERIFIED_NO_EXPECTED_VALUE_SUPPLIED or "
+                "VERIFIED_AGAINST_SUPPLIED_EXPECTED_DIGEST, so a downstream reader can tell "
+                "whether the binding was checked or skipped (previously the string 'probe_core' "
+                "appeared nowhere in the verdict and the two cases were indistinguishable)."
+            ),
+            "w4_provides": (
+                "the optional exact-comparison gate, the receipt-level freshness check, the "
+                "existing permit-signed installed_unit_probe_receipt_digest comparison, and the "
+                "typed probe_core_binding status on every verdict"
+            ),
+        },
+        {
+            "obligation_id": "PLAN_EXPIRY_OUTSIDE_SIGNED_CORE",
+            "typed_status": "PARTIALLY_PROVIDED_BY_W4B",
+            "owner_wave": "W6B",
+            "spec_refs": ["§9", "§9.2", "§10.4", "§10.5 #28"],
+            "statement": (
+                "s2_4_install_plan_v1.expires_at lives OUTSIDE core, so it is not covered by "
+                "core_digest and therefore not covered by the operator signature: moving it to "
+                "2040 leaves core_digest unchanged and both permits still verify. W4b closes the "
+                "reachable half — the aggregate now refuses an expired plan before any lock, "
+                "reconcile, ledger read or mutation, and every §9 remaining-TTL bound is derived "
+                "from each artifact's own expires_at (a caller-supplied remaining_ttls value may "
+                "only make the bound TIGHTER). It cannot close the signature-coverage half: "
+                "moving expires_at inside core is a s2_4_install_plan_core_v1 schema change "
+                "§10.4 forbids the worker from choosing. Residual risk is bounded because permit "
+                "TTLs are independently signed and capped at 900s, so extending the plan window "
+                "does not extend permit validity."
+            ),
+            "w4_provides": (
+                "the zero-mutation expired-plan refusal, evidence-derived remaining TTLs with "
+                "caller-tightening-only semantics, and expiry checks on the probe receipts, the "
+                "PREPARE receipt and the five component intents BEFORE step 7's consume"
+            ),
+        },
+        {
+            "obligation_id": "EFFECT_RECEIPT_RECONCILE_BINDING",
+            "typed_status": "PARTIALLY_PROVIDED_BY_W4B",
+            "owner_wave": "W6B",
+            "spec_refs": ["§5.2", "§10.4"],
+            "statement": (
+                "§5.2 requires that no result claim 'nothing stranded' without a terminal "
+                "journal PLUS an independent residue postcheck. s2_4_install_effect_receipt_v1 "
+                "binds journal_digest and unit_state but has no field for the startup-reconcile "
+                "verdict, and the schema is additionalProperties:false — adding one is a schema "
+                "change §10.4 forbids the worker from choosing. W4b binds all three "
+                "(terminal journal digest, startup-reconcile status AND digest, independent "
+                "residue observation digest) into the DURABLE s2_4_install_evidence_set file "
+                "written beside the journal, and makes the receipt's existence conditional on an "
+                "admitting reconcile verdict and a positive loaded/disabled/inactive "
+                "observation. A downstream consumer holding only the receipt still cannot "
+                "re-derive the reconcile verdict from it."
+            ),
+            "w4_provides": (
+                "the durable evidence set (step results, rollback, journal digest, reconcile "
+                "status+digest, residue digest, receipt digest, applied rows) under the same "
+                "temp->fsync->rename->parent-fsync discipline and the same 0600/0700 parent"
+            ),
+        },
+        {
+            "obligation_id": "STARTUP_RECONCILE_SURFACE_ABSENT",
+            "typed_status": "OPEN_BY_DESIGN_W6_RUNNER_PRECONDITION",
+            "owner_wave": "W6",
+            "spec_refs": ["§5.2", "§10.5 #39"],
+            "statement": (
+                "reconcile_before_new_intent lets the probe and PREPARE entry points run §5.2 "
+                "reconciliation before accepting a new intent, but a host driver that is NOT "
+                "wrapped by JournalRoutedDriver has no durable journal surface at all, so it "
+                "returns STARTUP_RECONCILE_SURFACE_ABSENT with admits_new_work=None. That is "
+                "deliberately NOT a hard refusal: making it one would break every in-memory fake "
+                "path and every source-lane probe/PREPARE test, which have no durable journal by "
+                "construction. The residual is a W6-RUNNER PRECONDITION, not a source defect: "
+                "the W6 runner MUST inject a journal-routed driver into the probe and PREPARE "
+                "entry points, otherwise 'reconciliation was established' is never actually "
+                "true for those two lanes. The cross-crash guarantee of §10.5 #39 is provided "
+                "independently by reconcile_startup_journals enumerating the probe parent: an "
+                "unresolved recovery leaves a NON-TERMINAL probe journal, so the next startup is "
+                "RECOVERY_REQUIRED regardless."
+            ),
+            "w4_provides": (
+                "the typed SURFACE_ABSENT status with admits_new_work=None (never coerced to "
+                "'clean'), the JournalRoutedDriver.startup_reconcile_surface accessor the W6 "
+                "runner wires, and the three-parent enumeration that backstops it"
+            ),
+        },
+        {
+            "obligation_id": "REPLAY_LEDGER_CONSUME_ONCE_IS_A_FILESYSTEM_PROPERTY",
+            "typed_status": "OPEN_HONEST_BOUNDARY",
+            "owner_wave": "W6B",
+            "spec_refs": ["§9.1", "§10.5 #8"],
+            "statement": (
+                "The replay ledger's consume-once property is a FILESYSTEM-ACL property, not a "
+                "cryptographic one. self_digest and every entry_digest are unkeyed sha256 values "
+                "that anyone able to read the ledger can recompute, and any PREFIX of a valid "
+                "hash chain is itself a valid hash chain. Re-ORDERING is caught (the chain "
+                "breaks) and TAMPERING with an entry is caught, but ROLLBACK (truncating the "
+                "ledger back to an earlier consistent state) and FORKING (writing a different "
+                "but internally consistent continuation) are not — they are prevented only by "
+                "the root-owned 0700 parent, the 0600 file mode and the exclusive install lock. "
+                "Under the S2.4 non-root threat model this is not exploitable, but the 'W3 "
+                "obligation REPLAY_LEDGER_APPEND (closed)' claim must carry this caveat: what "
+                "was closed is the durable append discipline, not a cryptographic anti-rollback "
+                "guarantee. Closing it needs a monotonic counter in trusted storage or an "
+                "attestor-signed ledger head, both of which need the real host."
+            ),
+            "w4_provides": (
+                "the hash-chained append under the exclusive lock, the root-owned-0700 parent "
+                "and 0600 file preconditions, and the typed same-key-different-plan rejection"
             ),
         },
         {
@@ -317,18 +629,24 @@ _W4_EXPORTED_ABI = {
             "typed_status": "NOT_PROVIDED_BY_W4B",
             "owner_wave": "W6B",
             "spec_refs": ["§5.2"],
+            "typed_status_note": "narrowed by the Fix-A three-parent enumeration",
             "statement": (
-                "Startup reconciliation always inspects the APPLY lane (its path derives from "
-                "plan_id) but can only inspect the probe/PREPARE lanes when the caller supplies "
-                "their exact derived paths, because probe_id/prepare_id are not derivable from "
-                "the plan. A W6B runner that omits startup_journal_paths therefore leaves those "
-                "two lanes unchecked. Closing it means the W6B runner passing the paths it "
-                "already holds from W6A (still derived by the journal leaf, never joined from a "
-                "caller string), or the same plan-core/threading change named in "
-                "PRIOR_LINEAGE_ENTRY_IDENTITY."
+                "Startup reconciliation no longer depends on the caller NAMING a lane: it "
+                "enumerates the three §5.2 journal parents, so a non-terminal probe/PREPARE "
+                "journal (including one a PREVIOUS plan stranded) is seen and blocks new work "
+                "even when startup_journal_paths omits it. What the caller's paths still decide "
+                "is which lane receives the caller's INDEPENDENT observation digest and per-lane "
+                "ownership key; an enumerated-but-unnamed non-terminal journal therefore lands "
+                "on RECOVERY_REQUIRED rather than on the resume/not-applied classification it "
+                "could have received. Closing that half still means the W6B runner passing the "
+                "probe_id/prepare_id-derived paths it already holds from W6A (still derived by "
+                "the journal leaf, never joined from a caller string). Enumeration also only "
+                "recognises basenames that re-derive through the journal leaf's own path "
+                "functions, and a driver with no enumeration surface is fail-closed."
             ),
             "w4_provides": (
-                "the three-lane reconcile with per-lane typed outcomes, the fail-closed refusal "
+                "the three-parent enumeration, per-lane typed outcomes, per-lane ownership keys, "
+                "caller lane values re-derived through the journal leaf, the fail-closed refusal "
                 "when no path at all is supplied, and tests covering a stranded probe lane"
             ),
         },
@@ -503,9 +821,20 @@ def _journal_live() -> dict[str, Any]:
                 "pre_state_digest": "sha256:" + "2" * 64,
                 "post_state_digest": "sha256:" + "4" * 64,
                 "fsynced": True, "recorded_at": _W4_CREATED_AT,
+                # H2:producer 判別欄是**完整** entry 的一部分。過去這個投影漏掉它們,於是
+                # 三本 journal 的 schema 只能把它們留成 optional,``journal_entry_sequence_errors``
+                # 也就無法要求它們——一筆沒有 producer 判別的 entry 依然合法。
+                "entry_source": _journal.ENTRY_SOURCE_AGGREGATE,
+                "component_effect_class": "HOST_IDENTITY_INSTALL",
             }],
             terminal=False,
         )
+        live["journal_entry_carries_producer_discriminators"] = all(
+            entry.get("entry_source") in _journal.ENTRY_SOURCES
+            and isinstance(entry.get("component_effect_class"), str)
+            for entry in journal["entries"]
+        )
+        live["entry_sources"] = list(_journal.ENTRY_SOURCES)
         live["journal_integrity_reobserves"] = (
             _journal.journal_integrity_errors(journal) == []
         )
@@ -538,6 +867,8 @@ def _journal_live() -> dict[str, Any]:
     except Exception:  # noqa: BLE001
         for key in (
             "prepare_journal_path_matches_prepare_leaf",
+            "journal_entry_carries_producer_discriminators",
+            "entry_sources",
             "journal_integrity_reobserves",
             "journal_self_and_outer_digests_differ",
             "tampered_journal_breaks_digests",
@@ -708,6 +1039,50 @@ def _aggregate_live() -> dict[str, Any]:
         live["clean_aggregate_surface_accepted"] = (
             _runner.assert_no_aggregate_forbidden_surface(object()) == []
         )
+        # C15:五 row 的 payload allowlist 與 code-owned applier 身分。
+        live["row_payload_allowlist"] = {
+            name: sorted(keys) for name, keys in _runner.ROW_PAYLOAD_ALLOWLIST.items()
+        }
+        live["row_applier_nodes"] = dict(_runner.ROW_APPLIER_NODES)
+        live["code_owned_row_keys_rejected"] = _runner._row_payload_allowlist_reasons(
+            {"HOST_IDENTITY_INSTALL": {"applier_node": "attacker", "repo_root": "/tmp"}}
+        ) != []
+        # C8:兩個只存在於 verdict 的終端絕不可出現在凍結 receipt enum 內。
+        live["transaction_only_statuses"] = list(_runner.AGGREGATE_TRANSACTION_ONLY_STATUSES)
+        # C12:自報 attested 的 driver 拿不到 attested evidence class;只有已驗背書可以。
+        import agent_governance_s2_4_component as _component_leaf
+        forged = type("_SelfDeclared", (), {"evidence_class": "PLATFORM_ATTESTED"})()
+        live["self_declared_attested_is_refused"] = _component_leaf.derive_recorded_evidence_class(
+            forged
+        )["recorded_evidence_class"] == "STRUCTURAL_ONLY"
+        live["verified_attestation_records_attested"] = (
+            _component_leaf.derive_recorded_evidence_class(
+                object(), attestation_verified=True,
+                attested_evidence_class="PLATFORM_ATTESTED",
+            )["recorded_evidence_class"] == "PLATFORM_ATTESTED"
+        )
+        # 沒有 attestation 面的 driver = 沒有背書(絕不當成通過)。
+        import agent_governance_s2_4_install_evidence as _evidence_leaf
+        live["absent_attestation_status"] = _evidence_leaf.derive_apply_attestation_status(
+            None, None, plan={"plan_id": None, "core": {}}, applier_node="a",
+            verifier_node="b", row_results={}, installed_unit_state={}, authorizations={},
+        )["status"]
+        live["attestation_namespace"] = _evidence_leaf.APPLY_ATTESTATION_NAMESPACE
+        live["attestation_identity"] = _evidence_leaf.APPLY_ATTESTOR_IDENTITY
+        # C1/C16:殘留觀測的 typed 四分,以及「absent 不是成功」。
+        live["residue_absent_is_not_a_success"] = _evidence_leaf.success_path_residue_reasons({
+            "observation_status": _evidence_leaf.RESIDUE_OBSERVED_ABSENT,
+            "unit_state": {"loaded": False, "disabled": True, "inactive": True},
+            "reasons": [],
+        }) != []
+        live["residue_unavailable_is_not_active"] = _evidence_leaf.observe_install_residue(
+            type("_Blind", (), {
+                "observe_installed_unit_state": lambda self: (_ for _ in ()).throw(
+                    TimeoutError("unreadable")
+                )
+            })(),
+            {},
+        )["observation_status"] == _evidence_leaf.RESIDUE_OBSERVATION_UNAVAILABLE
         # typed 終端集合必為 install receipt schema 的封閉 enum 子集(無別名換成 success)。
         schema = resolve_facade()._load_schema("s2_4_install_effect_receipt_v1")
         live["typed_statuses_within_receipt_enum"] = set(
@@ -729,9 +1104,61 @@ def _aggregate_live() -> dict[str, Any]:
             "forbidden_aggregate_surface_rejected",
             "clean_aggregate_surface_accepted",
             "typed_statuses_within_receipt_enum",
+            "row_payload_allowlist",
+            "row_applier_nodes",
+            "code_owned_row_keys_rejected",
+            "transaction_only_statuses",
+            "self_declared_attested_is_refused",
+            "verified_attestation_records_attested",
+            "absent_attestation_status",
+            "attestation_namespace",
+            "attestation_identity",
+            "residue_absent_is_not_a_success",
+            "residue_unavailable_is_not_active",
         ):
             live.setdefault(key, None)
     return live
+
+
+class _ProjectionLockDriver:
+    """W4 投影專用的 in-memory ``InstallLockDriver``(零主機接觸;**沒有** unlink/chmod 面)。
+
+    它的存在只為了讓 :func:`_reconcile_live` 拿到一個由 ``acquire_s2_4_install_lock`` 真正
+    發出的 module-private token,而不是像過去那樣手寫一個 ``{"status":
+    "INSTALL_LOCK_ACQUIRED"}`` 字典——那正是 A2 修掉的那個洞的形狀,投影葉不該示範它。
+    """
+
+    _DEVICE = 66310
+    _PARENT = {
+        "fd": "parent-fd", "device": _DEVICE, "inode": 909, "nlink": 2, "mode": "0755",
+        "uid": 0, "is_dir": True, "is_symlink": False,
+    }
+
+    def open_parent_directory(self, *, path, flags):
+        del path, flags
+        return dict(self._PARENT)
+
+    def fstat_parent(self, *, fd):
+        del fd
+        return dict(self._PARENT)
+
+    def openat_lock_file(self, *, parent_fd, basename, flags, mode):
+        del parent_fd, basename, flags, mode
+        return {"fd": "lock-fd", "created": True}
+
+    def fstat_lock_file(self, *, fd):
+        del fd
+        return {
+            "uid": 0, "gid": 0, "mode": "0600", "nlink": 1, "device": self._DEVICE,
+            "inode": 910, "is_regular_file": True,
+        }
+
+    def flock_exclusive_nonblocking(self, *, fd):
+        del fd
+        return True
+
+    def close(self, *, fd):
+        del fd
 
 
 def _reconcile_live() -> dict[str, Any]:
@@ -746,7 +1173,18 @@ def _reconcile_live() -> dict[str, Any]:
         live["lock_required_status"] = _reconcile.reconcile_startup_journals(
             object(), journal_paths=paths, lock_verdict=None
         )["status"]
-        held = {"status": "INSTALL_LOCK_ACQUIRED"}
+        # H1:這裡曾經遞交一個手寫的 ``{"status": "INSTALL_LOCK_ACQUIRED"}``——也就是 A2 修掉的
+        # 那個洞的**形狀本身**。投影葉不得示範偽造 lock 證明,故此處由
+        # ``acquire_s2_4_install_lock`` 取一個**真** token(對一個 code-owned 的 in-memory lock
+        # 面;它不碰任何主機路徑),用完立刻釋放。
+        import agent_governance_s2_4_lock as _lock_leaf
+        lock_driver = _ProjectionLockDriver()
+        held = _lock_leaf.acquire_s2_4_install_lock(lock_driver)
+        live["projection_lock_status"] = held["status"]
+        live["projection_lock_proof_is_a_token"] = _lock_leaf.install_lock_is_held(held)
+        live["forged_lock_dict_is_not_held"] = _lock_leaf.install_lock_is_held(
+            {"status": "INSTALL_LOCK_ACQUIRED"}
+        ) is False
         pending = _reconcile.reconcile_startup_journals(
             None, journal_paths=paths, lock_verdict=held
         )
@@ -755,6 +1193,9 @@ def _reconcile_live() -> dict[str, Any]:
         live["source_lane_admits_new_work"] = pending["admits_new_work"]
         live["no_paths_status"] = _reconcile.reconcile_startup_journals(
             object(), journal_paths={}, lock_verdict=held
+        )["status"]
+        live["projection_lock_release_status"] = _lock_leaf.release_s2_4_install_lock(
+            lock_driver, held
         )["status"]
         live["reconcile_projection"] = dict(_reconcile._RECONCILE_PROJECTION)
         live["admits_new_work_only_for"] = list(_reconcile.RECONCILE_ADMITS_NEW_WORK)
@@ -779,6 +1220,10 @@ def _reconcile_live() -> dict[str, Any]:
     except Exception:  # noqa: BLE001
         for key in (
             "lock_required_status",
+            "projection_lock_status",
+            "projection_lock_proof_is_a_token",
+            "forged_lock_dict_is_not_held",
+            "projection_lock_release_status",
             "source_lane_status",
             "source_lane_mutation_performed",
             "source_lane_admits_new_work",
@@ -1021,6 +1466,46 @@ def w4_structural_errors(receipt: dict[str, Any], repo_root: Path = REPO_ROOT) -
             "W4 aggregate typed statuses are not a subset of the frozen install-receipt enum "
             "(no alias may turn one of them into success)"
         )
+    if aggregate_live.get("transaction_only_statuses") != [
+        "ALREADY_APPLIED_IDEMPOTENT", "RECEIPT_EMISSION_PENDING"
+    ]:
+        reasons.append(
+            "W4 does not separate the two receipt-less transaction terminals (an idempotent "
+            "replay and a pending receipt projection are not recovery incidents)"
+        )
+    if aggregate_live.get("code_owned_row_keys_rejected") is not True or (
+        aggregate_live.get("row_applier_nodes", {}).get("PG_ROLE_ACL_MIGRATION")
+        != "s2-4-pg-admin-applier"
+    ):
+        reasons.append(
+            "W4 lets a caller reach code-owned row-ABI fields (repo_root / applier_node) through "
+            "the §10.2 entry point; the applier != verifier separation would be nominal"
+        )
+    if aggregate_live.get("self_declared_attested_is_refused") is not True or (
+        aggregate_live.get("verified_attestation_records_attested") is not True
+    ):
+        reasons.append(
+            "W4 evidence-class gate is not driven by a verified apply attestation (a "
+            "self-declared attested driver must be refused and a verified attestation must be "
+            "the only way to record an attested class)"
+        )
+    if aggregate_live.get("absent_attestation_status") != "APPLY_ATTESTATION_ABSENT" or (
+        aggregate_live.get("attestation_namespace")
+        != "arcane-equilibrium-aiml-s2-4-install-apply"
+    ) or aggregate_live.get("attestation_identity") != "aiml-s2-4-install-attestor-v1":
+        reasons.append(
+            "W4 apply-attestation domain separation drifted (identity/namespace must be "
+            "distinct from every operator-permit profile so a permit SSHSIG can never be "
+            "replayed as an attestation)"
+        )
+    if aggregate_live.get("residue_absent_is_not_a_success") is not True or (
+        aggregate_live.get("residue_unavailable_is_not_active") is not True
+    ):
+        reasons.append(
+            "W4 installed-unit observation does not separate 'absent' and 'unobservable' from "
+            "'observed inactive'; a read failure would be treated as an active unit and a "
+            "transaction that installed nothing would be a terminal success"
+        )
     reconcile_live = projection["reconcile_live"]
     if reconcile_live.get("lock_required_status") != "INSTALL_LOCK_REQUIRED":
         reasons.append(
@@ -1046,6 +1531,25 @@ def w4_structural_errors(receipt: dict[str, Any], repo_root: Path = REPO_ROOT) -
     if reconcile_live.get("routed_without_lock_refused") is not True:
         reasons.append(
             "W4 RUNNER_WAL_LOCK_WIRING does not refuse to journal without the install lock"
+        )
+    # H1:這個投影自己必須持有一把**真** token;偽造的同形字典必須被拒。
+    if reconcile_live.get("projection_lock_status") != "INSTALL_LOCK_ACQUIRED" or (
+        reconcile_live.get("projection_lock_proof_is_a_token") is not True
+    ) or reconcile_live.get("forged_lock_dict_is_not_held") is not True or (
+        reconcile_live.get("projection_lock_release_status") != "INSTALL_LOCK_RELEASED"
+    ):
+        reasons.append(
+            "W4 startup-reconcile projection does not hold a real module-private install-lock "
+            "token (a verdict-shaped dict is not the lock, §5.2)"
+        )
+    if journal_live.get("journal_entry_carries_producer_discriminators") is not True or (
+        journal_live.get("entry_sources") != [
+            "aggregate_transaction", "component_row_driver", "prepare_bundle", "capability_probe"
+        ]
+    ):
+        reasons.append(
+            "W4 WAL entries do not carry the §5.2 producer discriminators "
+            "(entry_source / component_effect_class)"
         )
     if receipt.get("owned_path_manifest_digest") != canonical_digest(sorted(_W4_OWNED_PATHS)):
         reasons.append("wave-exit owned_path_manifest_digest is not the exact W4 owned-path set")

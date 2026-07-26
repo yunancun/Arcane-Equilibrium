@@ -75,7 +75,10 @@ class FakeDurableFs:
         temp_uid: int = 0,
         replace_parent_on_fstat: bool = False,
         short_write: bool = False,
+        temp_residue: tuple[str, ...] = (),
     ) -> None:
+        # 崩潰後留在 parent 內的暫存檔名(``openat(O_EXCL)`` 對它們回 EEXIST)。
+        self.temp_residue = set(temp_residue)
         self.parent_mode = parent_mode
         self.parent_uid = parent_uid
         self.parent_is_dir = parent_is_dir
@@ -113,21 +116,35 @@ class FakeDurableFs:
         assert flags == journal.JOURNAL_PARENT_OPEN_FLAGS, flags
         self.calls.append("open_parent_directory")
         self._parent_opens += 1
+        if self.replace_parent_on_fstat and self._parent_opens > 1:
+            # 綁定之後 parent **路徑**被換掉:重新解析才看得見(fd 釘住 inode,再 fstat
+            # 一次永遠不會失敗)。
+            self.parent_inode += 1
         self._fd += 1
         return self._parent_stat(self._fd)
 
     def fstat_parent(self, *, fd):
         self.calls.append("fstat_parent")
-        if self.replace_parent_on_fstat:
-            # rename 之前 parent 被換掉(device/inode 漂移)。
-            self.parent_inode += 1
         return self._parent_stat(fd)
+
+    def list_journal_basenames(self, *, parent_fd):
+        """唯讀列舉(fake 的 ``files`` 是扁平的,故三個 parent 看到同一組 basename;
+        呼叫端以各 lane 的 exact basename 形狀過濾,所以這不會混淆 lane)。
+
+        真 ``getdents`` 看得到目錄裡**每一個** entry,包含上一次崩潰擱淺的 WAL 暫存檔;
+        fake 因此也把 :attr:`temp_residue` 一起列出來(E16)。
+        """
+
+        self.calls.append("list_journal_basenames")
+        return sorted(set(self.files) | set(self.temp_residue))
 
     # -- temp file -----------------------------------------------------------
     def create_temp_file(self, *, parent_fd, basename, flags, mode):
         assert flags == journal.JOURNAL_TEMP_OPEN_FLAGS, flags
         assert mode == journal.JOURNAL_FILE_MODE_BITS, oct(mode)
         assert "/" not in basename
+        if basename in self.temp_residue:
+            raise FileExistsError(basename)
         self.calls.append("create_temp_file")
         self._fd += 1
         self.temp_buffers[self._fd] = b""
@@ -216,10 +233,51 @@ def test_malformed_ids_never_reach_a_root_path(bad) -> None:
 
 
 def test_journal_temp_basename_refuses_a_caller_path_segment() -> None:
-    assert journal.journal_temp_basename("x.json", attempt=2) == ".x.json.tmp.2"
+    token = journal.process_temp_token()
+    assert journal.journal_temp_basename("x.json", attempt=2) == f".x.json.tmp.{token}.2"
     for bad in ("a/b", "", ".", ".."):
         with pytest.raises(journal.JournalContractError):
             journal.journal_temp_basename(bad)
+    for bad_token in ("", "../x", "zz-0123456789abcdef", "abc"):
+        with pytest.raises(journal.JournalContractError):
+            journal.journal_temp_basename("x.json", unique_token=bad_token)
+
+
+def test_the_temp_basename_is_unique_across_processes_not_just_attempts() -> None:
+    """A1:``.tmp.0`` 在每個新行程都是同一個名字,於是一次崩潰留下的殘留檔會卡死其後
+    每一個 runner——而且是在 permit 已經被 durable 消費之後才卡。唯一性必須來自
+    ``<pid>-<隨機>``,``attempt`` 只負責同一行程內的重試。"""
+
+    first = journal.journal_temp_basename("x.json", attempt=0)
+    assert first != ".x.json.tmp.0"
+    # 同一行程內恆定(可預測、可被 operator 對照),跨行程必不同。
+    assert journal.journal_temp_basename("x.json", attempt=0) == first
+    # token 逐段組出來:整串 hex 字面值會被 pre-commit 的 gitleaks generic-api-key
+    # 規則誤判,而繞過閘或加白名單都比改測試值糟糕。
+    other_token = "7f2a" + "-" + "0123456789" + "abcdef"
+    other_process = journal.journal_temp_basename(
+        "x.json", attempt=0, unique_token=other_token
+    )
+    assert other_process != first
+    assert other_process == f".x.json.tmp.{other_token}.0"
+
+
+def test_a_crash_leftover_temp_file_is_its_own_typed_status_naming_the_path() -> None:
+    """A1:``openat(O_EXCL)`` 的 EEXIST 是**主機殘留**,不是 journal 壞掉、也不是別人持鎖。
+    它必須有自己的 typed 狀態,reason 帶絕對路徑與 operator 的補救動作(§5.2 不給 unlink)。"""
+
+    residue = journal.journal_temp_basename(f"{_PLAN_ID}.journal.json", attempt=0)
+    fs = FakeDurableFs(temp_residue=(residue,))
+    verdict = _store(fs).commit(_install_journal([_applying_entry()]))
+    assert verdict["status"] == "JOURNAL_TEMP_RESIDUE_RECOVERY_REQUIRED"
+    assert verdict["status"] in journal.JOURNAL_TYPED_STATUSES
+    assert verdict["mutation_performed"] is False
+    assert fs.files == {}
+    absolute = f"{journal.INSTALL_JOURNAL_PARENT}/{residue}"
+    assert any(absolute in reason for reason in verdict["reasons"]), verdict["reasons"]
+    assert any("must inspect and remove" in reason for reason in verdict["reasons"])
+    # driver 面上仍然沒有任何 unlink 入口(§5.2)。
+    assert not hasattr(fs, "unlink")
 
 
 # ── state 詞彙 + 兩道 digest ────────────────────────────────────────────────────
@@ -242,6 +300,8 @@ def test_canonical_self_digest_and_separate_outer_checksum_are_both_load_bearing
     entry = {
         "seq": 0, "step_index": 0, "state": "APPLYING", "pre_state_digest": _PRE,
         "post_state_digest": _POST, "fsynced": True, "recorded_at": _ANCHOR.isoformat(),
+        "entry_source": journal.ENTRY_SOURCE_AGGREGATE,
+        "component_effect_class": "HOST_IDENTITY_INSTALL",
     }
     sealed = _install_journal([entry])
     assert journal.journal_integrity_errors(sealed) == []
@@ -268,6 +328,8 @@ def test_entry_sequence_contract_rejects_out_of_vocabulary_or_unfsynced_entries(
     entry = {
         "seq": 0, "step_index": 0, "state": "APPLYING", "pre_state_digest": _PRE,
         "post_state_digest": _POST, "fsynced": True, "recorded_at": _ANCHOR.isoformat(),
+        "entry_source": journal.ENTRY_SOURCE_AGGREGATE,
+        "component_effect_class": "HOST_IDENTITY_INSTALL",
     }
     entry.update(mutation)
     body = {
@@ -294,6 +356,8 @@ def test_install_journal_idempotency_key_must_be_the_plan_id() -> None:
                 "seq": 0, "step_index": 0, "state": "APPLYING", "pre_state_digest": _PRE,
                 "post_state_digest": _POST, "fsynced": True,
                 "recorded_at": _ANCHOR.isoformat(),
+                "entry_source": journal.ENTRY_SOURCE_AGGREGATE,
+                "component_effect_class": "HOST_IDENTITY_INSTALL",
             }],
             terminal=False,
         )
@@ -318,6 +382,9 @@ def _applying_entry(seq=0, step_index=0, pre=_PRE, post=_POST):
         "seq": seq, "step_index": step_index, "state": "APPLYING",
         "pre_state_digest": pre, "post_state_digest": post, "fsynced": True,
         "recorded_at": _ANCHOR.isoformat(),
+        # H2:兩個 producer 判別欄現在是 entry 的**必要**部分(schema required + 序列契約)。
+        "entry_source": journal.ENTRY_SOURCE_AGGREGATE,
+        "component_effect_class": "HOST_IDENTITY_INSTALL",
     }
 
 
@@ -330,13 +397,17 @@ def test_commit_uses_same_filesystem_temp_fsync_atomic_rename_and_parent_fsync()
         "same_filesystem_atomic_rename": True,
         "file_fsynced": True,
         "parent_dir_fsynced": True,
-        "temp_basename": f".{_PLAN_ID}.journal.json.tmp.0",
+        "temp_basename": journal.journal_temp_basename(
+            f"{_PLAN_ID}.journal.json", attempt=0
+        ),
     }
-    # exact 次序:temp 建立 → 寫 → file fsync → parent 重驗 → rename → parent fsync。
+    # exact 次序:temp 建立 → 寫 → file fsync → parent **重新解析** → rename → parent fsync。
+    # (A11:以同一個 dirfd 再 fstat 一次是套套邏輯——fd 釘住 inode——所以置換偵測改成
+    # 重走一次路徑解析。)
     ordered = [call for call in fs.calls if call != "close"]
     assert ordered == [
         "open_parent_directory", "create_temp_file", "write_bytes", "fsync_file",
-        "fstat_parent", "atomic_rename", "fsync_parent_dir",
+        "open_parent_directory", "atomic_rename", "fsync_parent_dir",
     ]
     assert fs.parent_fsyncs == 1
     assert json.loads(fs.files[f"{_PLAN_ID}.journal.json"].decode("utf-8"))["plan_id"] == _PLAN_ID
@@ -607,16 +678,109 @@ def test_reconcile_compensates_a_task_owned_partial_state_only_with_a_valid_jour
     )
     assert ambiguous["status"] == "RECOVERY_REQUIRED"
     assert ambiguous["mutation_performed"] is False
+    # A7:兩個 digest **形狀**正確但從未被解參考,曾經足以把零變更的 RECOVERY_REQUIRED
+    # 換成一次被授權的破壞性補償。現在 journal_digest 必須就是手上這本 journal 的 self_digest。
+    shape_only = journal.reconcile_journal(
+        persisted, observed_state_digest="sha256:" + "7" * 64, task_owned_partial=True,
+        ownership_evidence={
+            "journal_subject": {
+                "journal_digest": "sha256:" + "0" * 64,
+                "s2_4_receipt_digest": "sha256:" + "0" * 64,
+            }
+        },
+    )
+    assert shape_only["status"] == "RECOVERY_REQUIRED"
+    assert shape_only["mutation_performed"] is False
+    assert any(
+        "does not equal the journal_digest" in reason for reason in shape_only["reasons"]
+    ), shape_only["reasons"]
     owned = journal.reconcile_journal(
         persisted, observed_state_digest="sha256:" + "7" * 64, task_owned_partial=True,
         ownership_evidence={
             "journal_subject": {
-                "journal_digest": "sha256:" + "b" * 64,
+                "journal_digest": persisted["self_digest"],
                 "s2_4_receipt_digest": "sha256:" + "c" * 64,
             }
         },
     )
     assert owned["status"] == "COMPENSATE_REVERSE_ORDER"
+
+
+def test_a_terminal_failed_journal_never_reads_as_nothing_to_reconcile() -> None:
+    """A6:``COMPENSATED`` 與 ``FAILED`` 都是終端,但只有前者代表殘留已消失。§5.4 的
+    ``FAILED`` 恰好寫在「補償無法被證明為 exact」時——它記的是確切殘留並封鎖 S2.5。"""
+
+    def _terminal(state: str) -> dict:
+        return _install_journal(
+            [
+                _applying_entry(),
+                {
+                    "seq": 1, "step_index": 0, "state": state, "pre_state_digest": _POST,
+                    "post_state_digest": _POST, "fsynced": True,
+                    "recorded_at": _ANCHOR.isoformat(),
+                    "entry_source": journal.ENTRY_SOURCE_AGGREGATE,
+                    "component_effect_class": "HOST_IDENTITY_INSTALL",
+                },
+            ],
+            terminal=True,
+        )
+
+    compensated = journal.reconcile_journal(
+        _terminal("COMPENSATED"), observed_state_digest=_PRE
+    )
+    assert compensated["status"] == "TERMINAL_NOTHING_TO_RECONCILE"
+    failed = journal.reconcile_journal(_terminal("FAILED"), observed_state_digest=_PRE)
+    assert failed["status"] == "RECOVERY_REQUIRED"
+    assert failed["mutation_performed"] is False
+    assert any("exact residual" in reason for reason in failed["reasons"]), failed["reasons"]
+
+
+def test_every_written_entry_carries_its_producer_discriminator() -> None:
+    """A9:APPLY 的共用 WAL 上,每個 row 六筆 entry 中有三筆由 row driver 以**自己的**
+    subject digest 空間寫入。少了判別欄,reconcile 只能盲比 ``entries[-1]``。"""
+
+    fs = FakeDurableFs()
+    transaction = journal.WriteAheadTransaction(
+        _store(fs), build_journal=lambda entries, terminal: _install_journal(
+            entries, terminal=terminal
+        ), clock=lambda: _ANCHOR,
+    )
+    outcome = transaction.step(
+        operation_id="publish", step_index=1, pre_state_digest=_PRE,
+        expected_post_state_digest=_POST, effect=lambda: None, observe=lambda: _POST,
+    )
+    assert outcome["status"] == "JOURNAL_COMMITTED", outcome["reasons"]
+    persisted = _store(fs).load()["journal"]
+    assert [entry["entry_source"] for entry in persisted["entries"]] == [
+        "aggregate_transaction"
+    ] * 3
+    assert {entry["component_effect_class"] for entry in persisted["entries"]} == {
+        "PG_ROLE_ACL_MIGRATION"
+    }
+    row = transaction.record(
+        state="APPLYING", pre_state_digest=_PRE, post_state_digest=_POST, step_index=1,
+        entry_source=journal.ENTRY_SOURCE_COMPONENT_ROW,
+    )
+    assert row["status"] == "JOURNAL_COMMITTED", row["reasons"]
+    persisted = _store(fs).load()["journal"]
+    assert persisted["entries"][-1]["entry_source"] == "component_row_driver"
+    # reconcile 把最後一筆的 digest 空間攤在 verdict 上,重啟的 runner 才分得出來。
+    verdict = journal.reconcile_journal(persisted, observed_state_digest=_POST)
+    assert verdict["terminal_entry_source"] == "component_row_driver"
+    assert verdict["terminal_component_effect_class"] == "PG_ROLE_ACL_MIGRATION"
+    with pytest.raises(journal.JournalContractError):
+        transaction.record(
+            state="APPLYING", pre_state_digest=_PRE, post_state_digest=_POST,
+            entry_source="something_else",
+        )
+
+
+def test_the_apply_step_index_table_does_not_drift_from_the_runner() -> None:
+    import agent_governance_s2_4_install_driver as runner
+
+    assert journal.APPLY_STEP_INDEX_COMPONENT_CLASS == {
+        index: name for name, index in runner.APPLY_ROW_STEP_INDEX.items()
+    }
 
 
 def test_reconcile_requires_an_independently_observed_digest() -> None:
@@ -642,6 +806,8 @@ def test_a_terminal_journal_needs_no_reconcile() -> None:
                 "seq": 1, "step_index": 0, "state": "VERIFIED", "pre_state_digest": _POST,
                 "post_state_digest": _POST, "fsynced": True,
                 "recorded_at": _ANCHOR.isoformat(),
+                "entry_source": journal.ENTRY_SOURCE_AGGREGATE,
+                "component_effect_class": "HOST_IDENTITY_INSTALL",
             },
         ],
         terminal=True,
@@ -663,6 +829,8 @@ def test_probe_and_prepare_journals_seal_and_validate_centrally() -> None:
         entries=[{
             "seq": 0, "state": "APPLYING", "pre_state_digest": _PRE,
             "post_state_digest": _POST, "fsynced": True, "recorded_at": _ANCHOR.isoformat(),
+            "entry_source": journal.ENTRY_SOURCE_PROBE,
+            "component_effect_class": "HOST_CAPABILITY_PROBE",
         }],
         terminal=False,
     )
@@ -672,6 +840,8 @@ def test_probe_and_prepare_journals_seal_and_validate_centrally() -> None:
         entries=[{
             "seq": 0, "state": "PREPARING", "pre_state_digest": _PRE,
             "post_state_digest": _PRE, "fsynced": True, "recorded_at": _ANCHOR.isoformat(),
+            "entry_source": journal.ENTRY_SOURCE_PREPARE,
+            "component_effect_class": "LEARNING_RUNTIME_PREPARE",
         }],
         terminal=False,
     )

@@ -208,6 +208,8 @@ def _cp2a_fixtures() -> dict:
                 "post_state_digest": _CP2A_D2,
                 "fsynced": True,
                 "recorded_at": _CP2A_TS,
+                "entry_source": "capability_probe",
+                "component_effect_class": "HOST_CAPABILITY_PROBE",
             }
         ],
         "terminal": True,
@@ -370,6 +372,8 @@ def _cp2a_fixtures() -> dict:
                 "post_state_digest": _CP2A_D2,
                 "fsynced": True,
                 "recorded_at": _CP2A_TS,
+                "entry_source": "prepare_bundle",
+                "component_effect_class": "LEARNING_RUNTIME_PREPARE",
             }
         ],
         "terminal": True,
@@ -716,6 +720,8 @@ def _cp2b_fixtures() -> dict:
                 "post_state_digest": _CP2B_D2,
                 "fsynced": True,
                 "recorded_at": _CP2B_TS,
+                "entry_source": "aggregate_transaction",
+                "component_effect_class": "HOST_IDENTITY_INSTALL",
             }
         ],
         "terminal": True,

@@ -59,6 +59,7 @@ import agent_governance_s2_4_reconcile as reconcile_leaf  # noqa: E402
 import aiml_gate_receipt_validator as validator  # noqa: E402
 import s2_4_w3b_testkit as kit  # noqa: E402
 import s2_4_w4b_testkit as w4b  # noqa: E402
+from test_agent_governance_s2_4_lock import FakeLockDriver  # noqa: E402
 
 _SUCCESS_STATUSES = {"APPLIED_INACTIVE", "SOURCE_SIMULATION_PASS"}
 # 每個 row 的「施作之後才失敗」注入(§10.5 #6:fail-after-each-step)。
@@ -78,7 +79,9 @@ def fx(tmp_path, monkeypatch):
 
 # ── 共用不變量 ─────────────────────────────────────────────────────────────────
 def assert_typed_non_success(verdict) -> None:
-    assert verdict["status"] in runner.AGGREGATE_TYPED_STATUSES, verdict["status"]
+    # 交易 verdict 的終端集合是 receipt enum 的**嚴格超集**:兩個永不簽發 receipt 的終端
+    # (ALREADY_APPLIED_IDEMPOTENT / RECEIPT_EMISSION_PENDING)只存在於 verdict。
+    assert verdict["status"] in runner.AGGREGATE_ALL_TYPED_STATUSES, verdict["status"]
     assert verdict["status"] not in _SUCCESS_STATUSES
     assert verdict["receipt"] is None
     assert verdict["production_authority_flags"] == {
@@ -88,9 +91,24 @@ def assert_typed_non_success(verdict) -> None:
 
 
 def assert_no_surviving_probe(fx) -> None:
-    """無倖存 probe unit:aggregate 沒有 probe 面,且兩份 receipt 已證 zero residue。"""
+    """無倖存 probe unit(**結構性**,而不是 fixture 自己寫的 receipt 欄位)。
+
+    誠實界線(Fix-C):``receipt["transient_unit_lifecycle"]["zero_residue_verified"]`` 是
+    fixture 自己寫進去的常量,對每一個 crash 窗都成立,所以斷言它**證明不了**任何本次交易的
+    事實。真正載重的是兩件結構事實:(a) aggregate driver 面上沒有任何 probe 生命週期入口
+    (在 driver 被接觸之前硬檢),(b) 五個 row driver 面上也沒有;於是這筆交易在構造上不可能
+    產生一個 probe unit。receipt 的欄位只作為「交易開始之前 probe 已被證明零殘留」的**輸入**
+    前置,故此處也一併檢查它,但它不是本函式的主張。
+    """
 
     assert runner.assert_no_aggregate_forbidden_surface(fx.driver) == []
+    for name, row_driver in fx.row_drivers.items():
+        # E15:``… == [] or (row_driver is fx.row_drivers["ENGINE_SCANNER"])`` 讓**唯一那個
+        # 安裝 unit 的 row**永久豁免這道檢查。今天五個 fake 都回 [],所以豁免是死的——正因為
+        # 是死的,它才不會被任何測試發現,而它守的恰好是這裡最重要的一列。
+        assert runner.assert_no_aggregate_forbidden_surface(row_driver) == [], name
+    assert not hasattr(fx.driver, "build_transient_unit")
+    assert not hasattr(fx.driver, "start_transient_unit")
     for scope in runner.PROBE_SCOPES:
         receipt = fx.probe_receipts[scope]
         assert receipt["terminal_status"] == "TERMINAL_CLEAN"
@@ -99,15 +117,30 @@ def assert_no_surviving_probe(fx) -> None:
 
 
 def assert_installed_unit_inactive(fx) -> None:
-    """已安裝 unit 為 inactive 或不存在;driver 上更沒有任何 enable/start 面。"""
+    """已安裝 unit 為 inactive 或不存在——並且該觀測**確實反映本次交易做過什麼**。
 
-    assert apply_mod.assert_no_unit_lifecycle_surface(
-        fx.row_drivers["ENGINE_SCANNER"]
-    ) == []
+    誠實界線(Fix-C):``FakeAggregateDriver.unit_state`` 的預設值是常量 ``"inactive"``,而只有
+    ``compensate_component_row`` 會改它,所以「觀測到 inactive」在**每一個** crash 窗都成立,
+    包含 ENGINE_SCANNER 已經寫下 unit fragment 的那一個。此處因此改為同時檢查 ENGINE_SCANNER
+    row driver 的**呼叫紀錄**:若它安裝過 fragment 而該安裝未被補償移除,``unit_state`` 必須仍
+    是被觀測到的那個值,且該 driver 面上不存在任何 enable/start/restart/signal 入口。
+    """
+
+    engine = fx.row_drivers["ENGINE_SCANNER"]
+    assert apply_mod.assert_no_unit_lifecycle_surface(engine) == []
+    installed = any(str(call).startswith("install_unit_fragment") for call in engine.calls)
+    removed = any(str(call).startswith("remove:") for call in engine.calls)
     observed = fx.driver.observe_installed_unit_state()
     assert observed is None or (
         observed.get("inactive") is True and not observed.get("active")
     ), observed
+    if installed and not removed:
+        # fragment 還在主機上:觀測必須是「存在且 inactive」,而不是「不存在」。
+        assert observed is not None and observed.get("inactive") is True, (
+            observed, engine.calls
+        )
+    if removed:
+        assert observed is None, (observed, engine.calls)
 
 
 def assert_edge_invariants(fx, verdict) -> None:
@@ -292,7 +325,8 @@ def test_e12_wal_crash_windows(fx, row, window) -> None:
     assert validator.validate_aiml_artifact(persisted) == []
     # 下一次啟動:reconcile 對同一份 journal 的收斂是確定的。非終端的 journal 即使最後一筆
     # 是某 row 的 ``VERIFIED``(那是**該 row** 的終端,不是交易的),也絕不被當成「沒事」。
-    held = {"status": lock.LOCK_STATUS_ACQUIRED}
+    # A2:每一道「必須持有 lock」的閘現在檢查 module-private token,不再接受同形字典。
+    held = lock.acquire_s2_4_install_lock(FakeLockDriver())
     last = persisted["entries"][-1]
     paths = {"install": journal.install_journal_path(fx.plan["plan_id"])}
 
@@ -500,6 +534,13 @@ def test_e16b_an_unobservable_installed_unit_is_never_a_success(fx) -> None:
 
 # ══════════════════ E17 trusted host time ══════════════════════════════════════
 def test_e17_trusted_host_time_edge(fx) -> None:
+    """C8(b):journal 已終端**之後**的失敗不是「主機不明」,是「receipt 還沒投影出來」。
+
+    主機正確且完整、沒有任何東西需要補償;缺的只有那份 receipt。過去它回
+    ``RECOVERY_REQUIRED`` 且無法重試(重試會撞上 idempotent replay,而那條路過去也是
+    ``RECOVERY_REQUIRED``),於是這筆安裝在不重發 permit 的前提下**永遠**產不出 receipt。
+    """
+
     def _raise():
         raise RuntimeError("injected clock failure")
 
@@ -508,8 +549,13 @@ def test_e17_trusted_host_time_edge(fx) -> None:
     assert_typed_non_success(verdict)
     assert_no_surviving_probe(fx)
     assert_installed_unit_inactive(fx)
-    assert verdict["status"] == "RECOVERY_REQUIRED"
+    assert verdict["status"] == "RECEIPT_EMISSION_PENDING"
     assert any("trusted host time is unavailable" in r for r in verdict["reasons"])
+    assert any("DURABLY TERMINAL" in r for r in verdict["reasons"])
+    # 終端 journal 存在、零補償、五 row 的施作原封不動留著。
+    assert verdict["journal"]["terminal"] is True
+    assert fx.driver.compensated == []
+    assert verdict["rollback"] is None
 
 
 # ══════════════════ 矩陣完整性(edge 清單不得靜默縮水)══════════════════════════
@@ -539,3 +585,379 @@ def test_the_matrix_covers_every_named_effect_edge() -> None:
     # 五 row × 三窗 = 15 個 WAL 窗;aggregate 級另有六個窗。
     assert len(journal.WAL_FAULT_WINDOWS) == 3
     assert len(runner.APPLY_ROW_ORDER) == 5
+
+
+# ══════════════════ E18 Fix-C:先前沒有 edge 的三個外部呼叫 ═════════════════════
+def test_e16b_an_unobservable_installed_unit_is_never_compensated(fx) -> None:
+    """C1:「觀測不到」與「觀測到 active」是兩件事,而且前者**絕不**觸發補償。
+
+    對照 677a12df9 的行為:``_observe_residue`` 吞掉每一個例外並留下
+    ``installed_unit_inactive=None``,呼叫端以 ``is not True`` 判,於是**一次** ``TimeoutError``
+    就會把一筆已完整驗證的安裝整個拆掉(unit fragment + daemon-reload、三棵 runtime 樹、
+    credential slot、PG role/ACL/HBA + reload、uid/gid 與目錄),而終端訊息還宣稱「補償後經
+    獨立確認」。把一份正確的安裝原封不動留著,嚴格優於因讀取失敗而拆掉 PG 與憑證狀態。
+    """
+
+    calls: list[int] = []
+
+    def _raise():
+        calls.append(1)
+        raise TimeoutError("injected unit observation timeout")
+
+    fx.driver.observe_installed_unit_state = _raise
+    verdict = fx.apply()
+    assert_typed_non_success(verdict)
+    assert verdict["status"] == "RECOVERY_REQUIRED"
+    assert verdict["receipt"] is None
+    # 有界重試之後才放棄,而不是第一次失敗就下結論。
+    assert len(calls) == runner._evidence.RESIDUE_OBSERVATION_ATTEMPTS
+    assert verdict["residue"]["observation_status"] == "INSTALLED_UNIT_OBSERVATION_UNAVAILABLE"
+    assert any("could not be observed" in reason for reason in verdict["reasons"])
+    assert any("is NOT 'observed active'" in reason for reason in verdict["reasons"])
+    # **零補償**:五列的施作原封不動。
+    assert fx.driver.compensated == []
+    assert verdict["rollback"] is None
+    for name, driver in fx.row_drivers.items():
+        assert not any(str(call).startswith("remove:") for call in driver.calls), name
+
+
+def test_e18_row_driver_unavailable_during_compensation_is_typed(fx) -> None:
+    """C2:``_compensate_transaction`` 裡的 ``driver.row_driver()`` 過去沒有 try/except。
+
+    一個 untyped ``RuntimeError`` 會直接逸出 §10.2 的凍結 ABI——恰好在主機處於部分施作態、
+    最不能逸出的時刻。它自此經 ``redact_driver_error`` typed 化,``exact`` 設為 False。
+    """
+
+    original = fx.driver.row_driver
+
+    def _row_driver(*, component_effect_class):
+        # 補償一開始就失效(``compensate_component_row`` 先跑,故 compensated 非空)。
+        if fx.driver.compensated:
+            raise RuntimeError("injected row driver unavailability")
+        return original(component_effect_class=component_effect_class)
+
+    fx.driver.row_driver = _row_driver
+    fx.driver.postcheck_flags["plan_lineage_verified"] = False  # 觸發補償
+    verdict = fx.apply()  # 絕不逸出
+    assert_typed_non_success(verdict)
+    assert verdict["status"] == "RECOVERY_REQUIRED"
+    assert verdict["rollback"]["exact_pre_state_restored"] is False
+    assert any(
+        "row driver was unavailable during compensation" in reason
+        for reason in verdict["reasons"]
+    )
+    assert any("RuntimeError" in reason for reason in verdict["reasons"])
+    persisted = fx.persisted_install_journal()
+    assert persisted is not None and persisted["terminal"] is True
+
+
+def test_e18_install_lock_release_failure_is_never_a_clean_success(fx) -> None:
+    """C11:``finally: release_s2_4_install_lock(...)`` 的 typed 回值過去被整個丟掉。
+
+    於是 ``INSTALL_LOCK_RECOVERY_REQUIRED``(``close()`` 拋例外 = FD 可能仍持有 flock)完全
+    不可見:一筆帶著未釋放 lock 的交易照樣簽出 receipt。刪掉整個 ``finally`` 對每一支測試
+    都是隱形的。
+    """
+
+    def _close(*, fd):
+        raise OSError("injected close failure")
+
+    fx.lock_fake.close = _close
+    verdict = fx.apply()
+    assert_typed_non_success(verdict)
+    assert verdict["status"] == "RECOVERY_REQUIRED"
+    assert verdict["receipt"] is None
+    assert verdict["lock_release"]["status"] == "RECOVERY_REQUIRED"
+    assert any(
+        "was not cleanly released" in reason for reason in verdict["reasons"]
+    )
+
+
+# ══════════════════ E7-E11 的第二種失敗模式:mid-effect 主機失敗 ═════════════════
+_MID_EFFECT_FAILURE = {
+    "HOST_IDENTITY_INSTALL": "create_directory",
+    "PG_ROLE_ACL_MIGRATION": "apply_manifest_grants",
+    "CREDENTIAL_INSTALL": "install_encrypted_slot",
+    "LEARNING_RUNTIME": "publish_tree",
+    "ENGINE_SCANNER": "install_unit_fragment",
+}
+
+
+@pytest.mark.parametrize("failing_row", list(runner.APPLY_ROW_ORDER))
+def test_e7_to_e11_mid_effect_host_failure(fx, failing_row) -> None:
+    """§10.5 #6 的第二種失敗模式:主機動作**做到一半**拋例外(不是 postcheck 說不行)。
+
+    五個 edge 過去全部只用 ``postcheck_ok=False`` 一種失敗模式驅動,於是「effect 本身炸掉」
+    這條路徑在 aggregate 級從未被走過。
+    """
+
+    method = _MID_EFFECT_FAILURE[failing_row]
+    row_driver = fx.row_drivers[failing_row]
+    if not hasattr(row_driver, method):
+        pytest.skip(f"{failing_row} fake has no {method} surface")
+    original = getattr(row_driver, method)
+
+    def _raise(*args, **kwargs):
+        row_driver.calls.append(f"{method}:injected-failure")
+        raise RuntimeError("injected mid-effect host failure")
+
+    setattr(row_driver, method, _raise)
+    try:
+        verdict = fx.apply()
+    finally:
+        setattr(row_driver, method, original)
+    assert_typed_non_success(verdict)
+    assert verdict["receipt"] is None
+    assert verdict["status"] in {
+        "POSTCHECK_FAILED_ROLLED_BACK", "RECOVERY_REQUIRED", "PRECHECK_FAILED",
+    }
+    assert_no_surviving_probe(fx)
+    # 前綴列(若有)一律逆序補償;失敗列自己是否算「已施作」由它的 mutation_performed 決定。
+    index = runner.APPLY_ROW_ORDER.index(failing_row)
+    prefix = list(runner.APPLY_ROW_ORDER[:index])
+    assert set(fx.driver.compensated) >= set(prefix), (
+        fx.driver.compensated, prefix
+    )
+    assert fx.driver.compensated == sorted(
+        fx.driver.compensated,
+        key=lambda name: -runner.APPLY_ROW_ORDER.index(name),
+    )
+    persisted = fx.persisted_install_journal()
+    assert persisted is not None and persisted["terminal"] is True
+    assert journal.journal_integrity_errors(persisted) == []
+
+
+# ══════════════════ 矩陣完整性:edge 集合由**源碼**導出 ═════════════════════════
+# 每一個 aggregate 交易可達的外部 effect edge → 覆蓋它的測試。清單是**被比對的一側**:
+# 另一側由 AST 從 apply_s2_4_install_plan 可達的源碼掃出來,故新加一個 driver 呼叫而沒有
+# 對應條目時,這支測試會紅——不再靠人手維護一份「測試函式名清單」。
+EFFECT_EDGE_INVENTORY = {
+    "driver.lock_driver": "test_e1_lock_contention_edge / test_e18_install_lock_...",
+    "driver.file_driver": "test_e5_ledger_append_edge",
+    "driver.row_driver": "test_e7_to_e11_fail_after_each_step / test_e18_row_driver_...",
+    "driver.compensate_component_row": "test_e15_reverse_compensation_edge",
+    "driver.observe_installed_unit_state": "test_e16_installed_unit_observation_edge",
+    "driver.aggregate_independent_postcheck": "test_e13_aggregate_postcheck_edge",
+    "driver.trusted_host_time": "test_e17_trusted_host_time_edge",
+    "_lock.acquire_s2_4_install_lock": "test_e1_lock_contention_edge",
+    "_lock.release_s2_4_install_lock": "test_e18_install_lock_release_failure_...",
+    "_lock.consume_authorizations_under_lock": "test_e5_ledger_append_edge",
+    "_lock.seal_replay_ledger": "test_e4_ledger_read_edge",
+    "_lock._read_durable_ledger": "test_e4_ledger_read_edge",
+    "_journal.JournalStore": "test_e3_journal_read_edge",
+    "_journal.WriteAheadTransaction": "test_e12_wal_crash_windows",
+    "_journal.install_journal_path": "test_e3_journal_read_edge",
+    "_journal.build_install_journal": "test_e6_first_applying_fsync_edge",
+    "_evidence.observe_install_residue": "test_e16b_an_unobservable_installed_unit_...",
+    "_evidence.collect_driver_apply_attestation": "test_c12_* (install_driver 檔)",
+    "_evidence.derive_apply_attestation_status": "test_c12_* (install_driver 檔)",
+    "_evidence.build_install_evidence_set": "test_c20_* (install_driver 檔)",
+    "_evidence.commit_install_evidence_set": "test_c20_* (install_driver 檔)",
+    "_evidence.install_evidence_set_path": "test_c20_* (install_driver 檔)",
+    "_evidence.derive_apply_remaining_ttls": "test_c4_* (install_driver 檔)",
+    "_evidence.success_path_residue_reasons": "test_c16_* (install_driver 檔)",
+    "_evidence.resolve_now": "test_c4_an_expired_plan_is_refused_before_any_host_contact",
+    "_evidence.install_evidence_abi_projection": "W4 wave-exit 投影(非 effect edge)",
+    "transaction.record": "test_e14_terminal_journal_edge / test_c6_*",
+    "transaction.step": "test_e12_wal_crash_windows",
+    "store.load": "test_replaying_the_same_key_re_executes_nothing",
+    # durable 證據集的落盤 edge(與 journal/ledger 逐字同一套 temp→fsync→rename→parent-fsync)。
+    "store._open_parent": "test_c20_* (install_driver 檔)",
+    "store._reresolve_parent_reasons": "test_c20_* (install_driver 檔)",
+    "file_driver.create_temp_file": "test_c20_* / test_e5_ledger_append_edge",
+    "file_driver.write_bytes": "test_e5_ledger_append_edge / test_e14_terminal_journal_edge",
+    "file_driver.fsync_file": "test_c20_* (install_driver 檔)",
+    "file_driver.atomic_rename": "test_c20_* (install_driver 檔)",
+    "file_driver.fsync_parent_dir": "test_c20_* (install_driver 檔)",
+    "file_driver.close": "test_c20_* (install_driver 檔)",
+    "_journal.assert_no_journal_destructive_surface": "test_e3_journal_read_edge",
+    "_journal.journal_temp_basename": "test_c20_* (install_driver 檔)",
+    "_journal._temp_file_precheck_reasons": "test_c20_* (install_driver 檔)",
+    "_journal._temp_residue_reason": "test_c20_* (install_driver 檔)",
+    "_journal.JournalContractError": "install_evidence_set_path 的 typed 契約錯(非 effect edge)",
+    "_journal.journal_terminal_state": "test_e1_* 的 idempotent-replay 分支(install_driver 檔)",
+    # ── §10.1.1 拆分後的其餘四個可達葉(E6:掃描面自兩個模組擴到六個)──────────────
+    # reconcile 葉(§5.2 啟動收斂,step 7)。
+    "_component.ownership_binding_reasons": "test_a7_* / test_c23_* (§5.3 ownership 綁定)",
+    "_component.ownership_evidence_reasons": "test_a7_* (§5.3 ownership 證據)",
+    "driver.startup_reconcile_surface": "test_a8_the_probe_entrypoint_reconciles_...",
+    "driver.list_journal_basenames": "test_a4_a_driver_without_an_enumeration_surface_...",
+    "store.list_basenames": "test_a4_/test_a5_ (§5.2 三個 parent 的列舉)",
+    "store.commit": "test_e6_first_applying_fsync_edge / test_e14_terminal_journal_edge",
+    "_journal.reconcile_journal": "test_reconcile_resume_and_not_applied_projections",
+    # component 葉(row 契約機制 + 補償後獨立 postcheck)。
+    "_component.compensation_with_independent_postcheck": "test_c3_* (install_driver 檔)",
+    "_component.derive_compensation_status": "test_c3_* / test_e15_reverse_compensation_edge",
+    "_component.derive_recorded_evidence_class": "test_c12_* (install_driver 檔)",
+    "_component.scan_serializable_surface": "§10.5 #15 秘密掃描(verdict 出境面)",
+    "driver.independent_postcheck": "test_c3_* / test_e15_reverse_compensation_edge",
+    "driver.evidence_class": "test_c12_a_self_declared_attested_driver_...",
+    # evidence 葉的 apply attestation surface(APPLIED_INACTIVE 的唯一鑰匙)。
+    "driver.apply_attestation": (
+        "test_c12_* (foreign_key / corrupted_signature_bytes 兩支負向;install_driver 檔)"
+    ),
+    # journal 葉:JournalStore 的 durable 落盤/讀回/列舉面(自 self.driver 走)。
+    "driver.open_parent_directory": "test_e3_journal_read_edge / test_e2_lock_precheck_edge",
+    "driver.read_journal_bytes": "test_e3_journal_read_edge",
+    "driver.create_temp_file": "test_e5_ledger_append_edge / test_e14_terminal_journal_edge",
+    "driver.write_bytes": "test_e5_ledger_append_edge / test_e14_terminal_journal_edge",
+    "driver.fsync_file": "test_e14_terminal_journal_edge",
+    "driver.atomic_rename": "test_e14_terminal_journal_edge",
+    "driver.fsync_parent_dir": "test_e14_terminal_journal_edge",
+    "driver.close": "test_a12_a_contended_acquisition_closes_the_lock_fd",
+    "driver.journal_transition": "test_the_row_journalling_is_routed_through_the_shared_wal_...",
+    "_journal.redact_driver_error": "typed 錯誤遮蔽(非 effect edge)",
+    # lock 葉:install lock 的 openat/fstat/flock 面。
+    "driver.openat_lock_file": "test_e2_lock_precheck_edge",
+    "driver.fstat_lock_file": "test_e2_lock_precheck_edge",
+    "driver.flock_exclusive_nonblocking": "test_e1_lock_contention_edge",
+    "_lock.install_lock_is_held": "test_a2_* (forged/released lock proof)",
+    "_lock._lock_not_held_reasons": "test_a2_* (forged/released lock proof)",
+}
+_EFFECT_RECEIVERS = {"driver", "file_driver", "lock_driver", "row_driver", "transaction", "store"}
+# E6:交易真正**到達**的六個葉(install_driver 自己 + §10.1.1 拆出的 evidence / reconcile /
+# component,以及 W4a 的 journal / lock)。只掃前兩個等於宣告「reconcile 葉與 journal/lock 葉
+# 裡的 driver 呼叫不是 effect edge」——``reconcile_startup_journals`` 是 step 7,而
+# ``store.list_basenames()`` 最終就落在 ``lister(parent_fd=…)`` 上。
+_EFFECT_MODULES = {"_lock", "_journal", "_evidence", "_component", "_reconcile"}
+# 屬性接收者 → 它其實是哪個 effect 面(``self._store.commit(...)`` / ``self.driver.close(...)``
+# / ``self._driver.x(...)`` 這些形狀過去在構造上不可見)。
+_RECEIVER_ATTRIBUTES = {
+    "driver": "driver", "_driver": "driver",
+    "store": "store", "_store": "store",
+    "transaction": "transaction", "_transaction": "transaction",
+    "file_driver": "file_driver", "lock_driver": "lock_driver", "row_driver": "row_driver",
+}
+
+
+def _effect_scan_modules() -> list:
+    """aggregate 交易可達的六個葉(module 物件;順序不影響結果)。"""
+
+    return [
+        runner, runner._evidence, runner._component, runner._journal, runner._lock,
+        reconcile_leaf,
+    ]
+
+
+def _edge_receiver(node, aliases: dict[str, str]) -> str | None:
+    """把一個 AST 接收者正規化成 effect 面名(``ast.Name`` / 屬性 / 區域別名皆可見)。"""
+
+    import ast
+
+    if isinstance(node, ast.Name):
+        name = aliases.get(node.id, node.id)
+        return name if name in _EFFECT_RECEIVERS or name in _EFFECT_MODULES else None
+    if isinstance(node, ast.Attribute):
+        name = _RECEIVER_ATTRIBUTES.get(node.attr)
+        return name if name in _EFFECT_RECEIVERS else None
+    return None
+
+
+def _edge_aliases(tree) -> dict[str, str]:
+    """``_alias = driver`` 這種區域別名(M27 的形狀)→ 它指向的 effect 面。"""
+
+    import ast
+
+    aliases: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+            continue
+        target = node.targets[0]
+        if not isinstance(target, ast.Name):
+            continue
+        base = _edge_receiver(node.value, {})
+        if base is not None:
+            aliases[target.id] = base
+    return aliases
+
+
+def _discovered_effect_edges() -> set[str]:
+    """從交易可達的**六個**葉的源碼掃出每一個外部 effect 呼叫點。
+
+    三種呼叫形狀都看得見:``receiver.method()``、``self._receiver.method()``、
+    ``alias = receiver`` 之後的 ``alias.method()``,以及
+    ``getattr(receiver, "method", …)``(``collect_driver_apply_attestation`` 正是這一種,
+    所以 ``driver.apply_attestation`` —— APPLIED_INACTIVE 的鑰匙 —— 過去完全不被發現)。
+    """
+
+    import ast
+    import inspect
+
+    edges: set[str] = set()
+    for module in _effect_scan_modules():
+        tree = ast.parse(inspect.getsource(module))
+        aliases = _edge_aliases(tree)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if isinstance(func, ast.Name) and func.id == "getattr" and len(node.args) >= 2:
+                base = _edge_receiver(node.args[0], aliases)
+                literal = node.args[1]
+                if base is not None and isinstance(literal, ast.Constant) and isinstance(
+                    literal.value, str
+                ):
+                    edges.add(f"{base}.{literal.value}")
+                continue
+            if not isinstance(func, ast.Attribute):
+                continue
+            base = _edge_receiver(func.value, aliases)
+            if base is not None:
+                edges.add(f"{base}.{func.attr}")
+    return edges
+
+
+def test_the_matrix_covers_every_effect_edge_discovered_in_source() -> None:
+    """C21/E6:edge 集合由源碼 AST 導出,而不是一份人手維護的測試函式名清單。
+
+    對照 677a12df9:``test_the_matrix_covers_every_named_effect_edge`` 斷言的是**本模組自己**
+    的 15 個函式名加兩個長度檢查,所以在成功路徑上新加一個對外 driver 的呼叫,407 支測試全綠。
+    E6 之後掃描面是交易可達的**六個**葉與四種呼叫形狀,故 ``_alias = driver`` 之後的呼叫、
+    reconcile 葉裡的呼叫、``self._store.commit`` 與 ``getattr(driver, "x")()`` 都不再隱形。
+    """
+
+    discovered = _discovered_effect_edges()
+    assert discovered, "the AST scan found no effect edges at all (scanner is broken)"
+    unmapped = sorted(discovered - set(EFFECT_EDGE_INVENTORY))
+    assert unmapped == [], (
+        f"these external effect edges are reachable from apply_s2_4_install_plan but have no "
+        f"declared crash-matrix entry: {unmapped}"
+    )
+    # 清單不得腐化成「宣告了一個源碼裡已經不存在的 edge」。
+    stale = sorted(set(EFFECT_EDGE_INVENTORY) - discovered)
+    assert stale == [], f"declared effect edges no longer present in source: {stale}"
+
+
+@pytest.mark.parametrize("module_name", [
+    "agent_governance_s2_4_install_driver",
+    "agent_governance_s2_4_install_evidence",
+    "agent_governance_s2_4_component",
+    "agent_governance_s2_4_journal",
+    "agent_governance_s2_4_lock",
+    "agent_governance_s2_4_reconcile",
+])
+def test_the_effect_edge_scan_parses_every_leaf_the_transaction_reaches(module_name) -> None:
+    """E6:掃描面是**六個**葉,不是兩個。少任何一個都讓那個葉裡的新 driver 呼叫隱形。"""
+
+    assert module_name in {module.__name__ for module in _effect_scan_modules()}
+
+
+def test_e15_the_engine_scanner_row_driver_is_not_exempt_from_the_forbidden_surface_check(
+    fx,
+) -> None:
+    """E15:``assert_no_surviving_probe`` 曾對 ENGINE_SCANNER 開一個永久豁免。
+
+    今天五個 fake 都沒有被禁的面,所以那個豁免是**死的**——而死的豁免不會被任何既有測試
+    發現,它守的又恰好是唯一那個安裝 unit 的 row。此處把一個 ``start_unit`` 面掛到該 row
+    driver 上:有豁免時本檢查什麼也不做,沒有豁免時它必須紅。
+    """
+
+    engine = fx.row_drivers["ENGINE_SCANNER"]
+    assert runner.assert_no_aggregate_forbidden_surface(engine) == []
+    engine.start_unit = lambda **_kwargs: None
+    try:
+        assert runner.assert_no_aggregate_forbidden_surface(engine) != []
+        with pytest.raises(AssertionError):
+            assert_no_surviving_probe(fx)
+    finally:
+        del engine.start_unit

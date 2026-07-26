@@ -40,12 +40,14 @@ for candidate in (HELPERS, ML_ROOT, PROGRAM_CODE, ROOT / "tests/structure"):
         sys.path.insert(0, str(candidate))
 
 import agent_governance_s2_4_install_driver as runner  # noqa: E402
+import agent_governance_s2_4_install_evidence as evidence_leaf  # noqa: E402
 import agent_governance_s2_4_journal as journal  # noqa: E402
 import agent_governance_s2_4_lock as lock  # noqa: E402
 import agent_governance_s2_4_reconcile as reconcile_leaf  # noqa: E402
 import aiml_gate_receipt_validator as validator  # noqa: E402
 import s2_4_w3b_testkit as kit  # noqa: E402
 import s2_4_w4b_testkit as w4b  # noqa: E402
+from test_agent_governance_s2_4_lock import FakeLockDriver  # noqa: E402
 
 
 @pytest.fixture()
@@ -458,14 +460,27 @@ def test_both_permits_are_consumed_once_under_the_acquired_lock(fx) -> None:
 
 
 def test_replaying_the_same_key_re_executes_nothing(fx) -> None:
+    """§10.5 #8:重跑同一份已簽 plan 是 idempotent replay,**不是** recovery 事故。
+
+    這是操作員在一次含糊逾時之後最可能做的事;它過去和「主機處於未知半途態」共用同一個
+    ``RECOVERY_REQUIRED``,於是 on-call 無法以狀態分流。它自此有自己的非 recovery 終端,
+    並帶回 durable APPLY journal 的 digest(receipt 是那本終端 journal 的投影)。
+    """
+
     first = fx.apply()
     assert first["status"] == "SOURCE_SIMULATION_PASS"
     before = {name: list(driver.calls) for name, driver in fx.row_drivers.items()}
     ledger_before = fx.persisted_replay_ledger()
     second = fx.apply()
-    assert second["status"] == "RECOVERY_REQUIRED"
+    assert second["status"] == "ALREADY_APPLIED_IDEMPOTENT"
+    assert second["status"] not in runner.AGGREGATE_TYPED_STATUSES
+    assert second["status"] in runner.AGGREGATE_ALL_TYPED_STATUSES
     assert any("re-executes nothing" in reason for reason in second["reasons"])
+    assert any("idempotent replay, NOT a recovery" in r for r in second["reasons"])
     assert second["receipt"] is None
+    # 終端 journal 的 digest 被交回來,所以 receipt 可以由它投影而不必重新消費 permit。
+    assert second["journal"]["terminal"] is True
+    assert second["journal"]["self_digest"] == first["journal"]["self_digest"]
     # 沒有第二筆 append,也沒有任何 row 被重跑。
     assert fx.persisted_replay_ledger() == ledger_before
     assert {name: driver.calls for name, driver in fx.row_drivers.items()} == before
@@ -529,6 +544,8 @@ def test_a_non_terminal_apply_journal_blocks_a_new_plan(fx) -> None:
             "pre_state_digest": "sha256:" + "2" * 64,
             "post_state_digest": "sha256:" + "4" * 64,
             "fsynced": True, "recorded_at": kit.ISSUED,
+            "entry_source": "aggregate_transaction",
+            "component_effect_class": "HOST_IDENTITY_INSTALL",
         }],
         terminal=False,
     )
@@ -568,6 +585,8 @@ def test_reconcile_resume_and_not_applied_projections(fx) -> None:
                 "seq": 0, "step_index": 0, "state": "APPLYING",
                 "pre_state_digest": "sha256:" + "2" * 64, "post_state_digest": post_state,
                 "fsynced": True, "recorded_at": kit.ISSUED,
+                "entry_source": "aggregate_transaction",
+                "component_effect_class": "HOST_IDENTITY_INSTALL",
             }],
             terminal=False,
         )
@@ -596,7 +615,10 @@ def test_reconcile_requires_the_lock_and_refuses_without_a_driver() -> None:
     assert reconcile_leaf.reconcile_startup_journals(
         object(), journal_paths=paths, lock_verdict=None
     )["status"] == "INSTALL_LOCK_REQUIRED"
-    held = {"status": lock.LOCK_STATUS_ACQUIRED}
+    # H1:lock 閘在 driver 閘**之前**(§5.2:重啟的 runner 只在持有互斥 install lock 時巡查
+    # 並收斂 journal),所以「沒有 driver」這句話只在**已持有** lock 之後才說得出口。
+    held = lock.acquire_s2_4_install_lock(FakeLockDriver())
+    assert lock.install_lock_is_held(held)
     pending = reconcile_leaf.reconcile_startup_journals(
         None, journal_paths=paths, lock_verdict=held
     )
@@ -619,6 +641,8 @@ def test_reconcile_covers_the_probe_and_prepare_lanes_when_paths_are_supplied(fx
             "seq": 0, "state": "APPLYING", "pre_state_digest": "sha256:" + "3" * 64,
             "post_state_digest": "sha256:" + "4" * 64, "fsynced": True,
             "recorded_at": kit.ISSUED,
+            "entry_source": "capability_probe",
+            "component_effect_class": "HOST_CAPABILITY_PROBE",
         }],
         terminal=False,
     )
@@ -671,10 +695,16 @@ def test_journal_routed_driver_persists_through_the_store_under_the_lock() -> No
 
     fs = FakeDurableFs()
     host = _Host()
-    routed = _routed(host, fs, lock_verdict={"status": lock.LOCK_STATUS_ACQUIRED})
+    # A2:lock 證明現在是 module-private token,不再是同形的 caller 字典。
+    routed = _routed(host, fs, lock_verdict=lock.acquire_s2_4_install_lock(
+        FakeLockDriver()
+    ))
     routed.journal_transition(entry={
         "state": "APPLYING", "pre_state_digest": "sha256:" + "2" * 64,
         "post_state_digest": "sha256:" + "4" * 64,
+        # H2:producer 判別欄現在是 entry 的必要部分,連 pass-through 分支也不例外。
+        "entry_source": "component_row_driver",
+        "component_effect_class": "HOST_IDENTITY_INSTALL",
     })
     # journalling 走 store(temp → fsync → rename → parent fsync),不再落在 host driver 上。
     assert host.calls == []
@@ -715,7 +745,9 @@ def test_journal_routed_driver_raises_when_the_write_is_not_durable() -> None:
             return None
 
     fs = FakeDurableFs(short_write=True)
-    routed = _routed(_Host(), fs, lock_verdict={"status": lock.LOCK_STATUS_ACQUIRED})
+    routed = _routed(_Host(), fs, lock_verdict=lock.acquire_s2_4_install_lock(
+        FakeLockDriver()
+    ))
     with pytest.raises(reconcile_leaf.InstallDriverContractError) as excinfo:
         routed.journal_transition(entry={
             "state": "APPLYING", "pre_state_digest": "sha256:" + "2" * 64,
@@ -903,3 +935,677 @@ def test_the_verifier_cannot_claim_rows_the_applier_did_not_observe(fx) -> None:
     )
     assert clean["status"] == "PASS" and clean_reasons == []
     assert validator.validate_aiml_artifact(clean) == []
+
+
+# ══════════════════ Fix-C:五腿對抗審計的回歸 ═══════════════════════════════════
+def _sign_attestation(fixture, attestation, *, tag, signing_key=None):
+    import subprocess
+
+    key = signing_key if signing_key is not None else fixture.private_key
+    message = key.parent / f"w4b-attestation-{tag}.bin"
+    message.write_bytes(validator._canonical_bytes(attestation))
+    signature_path = message.with_name(message.name + ".sig")
+    if signature_path.exists():
+        signature_path.unlink()
+    subprocess.run(
+        ["ssh-keygen", "-Y", "sign", "-f", str(key),
+         "-n", evidence_leaf.APPLY_ATTESTATION_NAMESPACE, str(message)],
+        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    return signature_path.read_bytes()
+
+
+def _attest_on_demand(
+    fixture, monkeypatch, *, tag="live", mutate=None, signing_key=None, signature_bytes=None,
+):
+    """讓 fixture 的 driver 在 ``apply_attestation()` 被呼叫時,以**本次**的實觀 row 結果簽出背書。
+
+    真主機上,attestation 正是在 apply 跑完之後才產生的(它綁的 ``applied_row_results_digest``
+    只有那時才知道);此處以同一個時序在丟棄式線上重現它。
+    """
+
+    captured: dict = {}
+    original_run_row = runner._run_row
+
+    def _record(name, **kwargs):
+        verdict = original_run_row(name, **kwargs)
+        captured[name] = verdict
+        return verdict
+
+    monkeypatch.setattr(runner, "_run_row", _record)
+
+    def _produce():
+        row_results = {
+            name: (
+                captured[name]["result"]["self_digest"],
+                captured[name]["postcheck"]["self_digest"],
+            )
+            for name in runner.APPLY_ROW_ORDER
+            if isinstance(captured.get(name, {}).get("result"), dict)
+        }
+        attestation = evidence_leaf.build_s2_4_install_apply_attestation(
+            plan=fixture.plan, applier_node=runner.AGGREGATE_APPLIER_NODE,
+            verifier_node=fixture.driver.verifier_node, row_results=row_results,
+            installed_unit_state={"loaded": True, "disabled": True, "inactive": True},
+            trusted_host_time=kit.NOW,
+        )
+        if mutate is not None:
+            attestation = mutate(attestation)
+            attestation["attestation_digest"] = evidence_leaf.apply_attestation_digest(
+                attestation
+            )
+        if signature_bytes is not None:
+            return {"attestation": attestation, "signature": signature_bytes}
+        return {
+            "attestation": attestation,
+            "signature": _sign_attestation(
+                fixture, attestation, tag=tag, signing_key=signing_key
+            ),
+        }
+
+    fixture.driver.apply_attestation = _produce
+    return captured
+
+
+def test_c12_a_full_transaction_with_a_valid_attestation_reaches_applied_inactive(
+    fx, monkeypatch
+) -> None:
+    """§10.2 的成功身分自此有**活的**轉移:APPLIED_INACTIVE 只由已驗簽的背書解鎖。
+
+    在此之前 ``recorded_evidence_class in EVIDENCE_CLASS_ATTESTED`` 是恆假的套套邏輯
+    (``derive_recorded_evidence_class`` 兩條分支都回 ``STRUCTURAL_ONLY``),於是
+    ``APPLIED_INACTIVE`` 從未被執行過一次,§10.5 #14 也拿不到正向測試。
+    """
+
+    _attest_on_demand(fx, monkeypatch)
+    verdict = fx.apply()
+    assert verdict["status"] == "APPLIED_INACTIVE", verdict["reasons"]
+    assert verdict["attestation"]["status"] == "APPLY_ATTESTATION_VERIFIED"
+    assert verdict["receipt"]["status"] == "APPLIED_INACTIVE"
+    assert verdict["receipt"]["evidence_class"] == "PLATFORM_ATTESTED"
+    assert validator.validate_aiml_artifact(verdict["receipt"]) == []
+    assert validator.derive_install_lineage_status(
+        verdict["receipt"], install_plan=fx.plan
+    )["status"] == "SATISFIED"
+    # §10.5 #13:成功身分**不**放寬九 authority,unit 仍 disabled/inactive。
+    assert verdict["production_authority_flags"] == {
+        "nine_authorities_false": True, "production_apply_performed": False,
+        "running_attested": False,
+    }
+    assert verdict["receipt"]["production_authority_flags"] == (
+        verdict["production_authority_flags"]
+    )
+    assert verdict["receipt"]["service_flags"] == {
+        "service_enabled": False, "service_active": False, "service_started_by_s2_4": False,
+    }
+    assert verdict["receipt"]["unit_state"] == {
+        "loaded": True, "disabled": True, "inactive": True
+    }
+
+
+def test_c12_a_self_declared_attested_driver_still_terminates_at_source_simulation(
+    fx,
+) -> None:
+    fx.driver.evidence_class = "PLATFORM_ATTESTED"
+    verdict = fx.apply()
+    assert verdict["status"] == "SOURCE_SIMULATION_PASS"
+    assert verdict["receipt"]["evidence_class"] == "STRUCTURAL_ONLY"
+    assert verdict["attestation"]["status"] == "APPLY_ATTESTATION_ABSENT"
+    assert any("self-declares evidence_class" in r for r in verdict["reasons"])
+
+
+@pytest.mark.parametrize("mutation", [
+    "plan", "namespace", "verifier", "row_results", "unit_state", "stale_signed_time",
+])
+def test_c12_a_tampered_attestation_never_unlocks_applied_inactive(
+    fx, monkeypatch, mutation
+) -> None:
+    def _mutate(attestation):
+        attestation = dict(attestation)
+        if mutation == "plan":
+            attestation["plan_core_digest"] = "sha256:" + "e" * 64
+        elif mutation == "namespace":
+            attestation["signature_namespace"] = (
+                "arcane-equilibrium-aiml-s2-install"  # permit 的 namespace
+            )
+        elif mutation == "verifier":
+            attestation["verifier_node"] = runner.AGGREGATE_APPLIER_NODE
+        elif mutation == "row_results":
+            attestation["reobserved_row_results_digest"] = "sha256:" + "f" * 64
+        elif mutation == "unit_state":
+            attestation["installed_unit_state_digest"] = "sha256:" + "0" * 64
+        else:
+            attestation["trusted_host_time"] = "2025-01-01T00:00:00+00:00"
+            attestation["attestation_expires_at"] = "2025-01-01T00:10:00+00:00"
+        return attestation
+
+    _attest_on_demand(fx, monkeypatch, tag=mutation, mutate=_mutate)
+    verdict = fx.apply()
+    assert verdict["status"] == "SOURCE_SIMULATION_PASS", verdict["status"]
+    assert verdict["attestation"]["status"] == "APPLY_ATTESTATION_REJECTED"
+    assert verdict["receipt"]["evidence_class"] == "STRUCTURAL_ONLY"
+
+
+# ── E2:上面六個負向全部**改欄位再重簽**,所以每一個都被某個欄位比對抓住,沒有一個
+#     真的走到 ``_verify_ssh_signature``。M07(把那道驗簽短路掉)因此在 624 支測試下全綠,
+#     而一份帶著字面垃圾 bytes 的 attestation 能一路換到 APPLIED_INACTIVE。以下兩支是
+#     **只有**驗簽能擋住的負向:攜帶完全合法欄位、但簽章不是 §9.1 信任根簽的。
+def test_c12_an_attestation_signed_by_a_foreign_key_never_unlocks_applied_inactive(
+    fx, monkeypatch, tmp_path
+) -> None:
+    """完全合法的 18 欄 + 一把丟棄式外來 Ed25519 金鑰的**真** SSHSIG。
+
+    每一個欄位比對都通過(內容與正例逐字相同),唯一不同的是簽章不是 pinned 信任根簽的——
+    所以只有 ``_trusted_host._verify_ssh_signature`` 能拒絕它。
+    """
+
+    foreign_key, _foreign_public, _foreign_fingerprint = kit.mint_key(
+        tmp_path, name="w4b-foreign-attestor"
+    )
+    _attest_on_demand(fx, monkeypatch, tag="foreign-key", signing_key=foreign_key)
+    verdict = fx.apply()
+    assert verdict["status"] == "SOURCE_SIMULATION_PASS", verdict["reasons"]
+    assert verdict["attestation"]["status"] == "APPLY_ATTESTATION_REJECTED"
+    assert verdict["attestation"]["reasons"] == [
+        "apply attestation SSH signature is invalid"
+    ], verdict["attestation"]["reasons"]
+    assert verdict["receipt"]["evidence_class"] == "STRUCTURAL_ONLY"
+    assert verdict["receipt"]["status"] != "APPLIED_INACTIVE"
+
+
+def test_c12_an_attestation_with_garbage_signature_bytes_never_unlocks_applied_inactive(
+    fx, monkeypatch
+) -> None:
+    """合法欄位 + 字面垃圾 SSHSIG bytes:同樣只有真驗簽能擋。"""
+
+    _attest_on_demand(
+        fx, monkeypatch, tag="garbage-signature",
+        signature_bytes=(
+            b"-----BEGIN SSH SIGNATURE-----\nAAAAdeadbeef\n-----END SSH SIGNATURE-----"
+        ),
+    )
+    verdict = fx.apply()
+    assert verdict["status"] == "SOURCE_SIMULATION_PASS", verdict["reasons"]
+    assert verdict["attestation"]["status"] == "APPLY_ATTESTATION_REJECTED"
+    assert verdict["attestation"]["reasons"] == [
+        "apply attestation SSH signature is invalid"
+    ], verdict["attestation"]["reasons"]
+    assert verdict["receipt"]["evidence_class"] == "STRUCTURAL_ONLY"
+    assert verdict["receipt"]["status"] != "APPLIED_INACTIVE"
+
+
+# ── C3:aggregate 級也必須把補償前的獨立觀測 digest 交出去 ──────────────────────
+def test_c3_a_constant_returning_verifier_cannot_buy_exactness_at_the_aggregate_level(
+    fx,
+) -> None:
+    """五個 row driver 在補償前後都回同一個常量 digest → 絕不可換到 ``COMPENSATED_EXACT``。
+
+    row 級呼叫點本來就傳 ``pre_compensation_observed_digest``;aggregate 級過去沒傳,於是
+    ``component.py`` 那道「byte-identical ⇒ verifier 沒真的再看一次」的檢查在交易層完全空轉,
+    而 W4a commit body 與 ``compensation_exactness_contract`` 都宣稱它有效。
+    """
+
+    constant = "sha256:" + "8" * 64
+    for row_driver in fx.row_drivers.values():
+        row_driver.independent_postcheck = (
+            lambda *, component_effect_class, install_plan_digest, applier_node: {
+                "verifier_node": "s2-4-independent-verifier",
+                "observed_subject_digest": constant,
+                "verifier_capture_digest": kit.CAPTURE_DIGEST,
+                "applied_state_verified": False,
+                "pre_state_lineage_verified": True,
+            }
+        )
+    fx.driver.postcheck_flags["plan_lineage_verified"] = False  # 觸發補償
+    verdict = fx.apply()
+    assert verdict["status"] == "RECOVERY_REQUIRED", verdict["status"]
+    assert verdict["rollback"]["status"] != "COMPENSATED_EXACT"
+    assert verdict["rollback"]["exact_pre_state_restored"] is False
+    assert any(
+        "byte-identical to the pre-compensation observation" in reason
+        for reason in verdict["reasons"]
+    )
+
+
+# ── C4:證據新鮮度不再是 caller 自報 ────────────────────────────────────────────
+def test_c4_a_year_stale_probe_receipt_can_never_gate_an_apply(fx) -> None:
+    stale = deepcopy(fx.probe_receipts)
+    receipt = dict(stale["INSTALLED_UNIT"])
+    receipt["expires_at"] = "2025-01-01T00:00:00+00:00"
+    receipt["self_digest"] = validator.artifact_self_digest(receipt)
+    stale["INSTALLED_UNIT"] = receipt
+    verdict = fx.apply(probe_receipts=stale)
+    assert verdict["status"] in {"PRECHECK_FAILED", "AUTHORIZATION_REJECTED"}
+    assert verdict["mutation_performed"] is False
+    assert all(driver.calls == [] for driver in fx.row_drivers.values())
+
+
+def test_c4_an_expired_plan_is_refused_before_any_host_contact(fx) -> None:
+    stale = deepcopy(fx.plan)
+    stale["expires_at"] = "2025-01-01T00:00:00+00:00"
+    stale["self_digest"] = validator.artifact_self_digest(stale)
+    verdict = runner.apply_s2_4_install_plan(
+        stale, fx.authorization_set, fx.driver,
+        component_intents=fx.component_intents, row_payloads=fx.row_payloads(),
+        probe_receipts=fx.probe_receipts, prepare_effect_receipt=fx.prepare_receipt,
+        apply_budget=dict(w4b.APPLY_BUDGET), remaining_ttls=dict(w4b.REMAINING_TTLS),
+        now=kit.NOW, clock=kit.frozen_clock(),
+    )
+    assert verdict["status"] == "PRECHECK_FAILED"
+    assert any("the install plan expired" in reason for reason in verdict["reasons"])
+    assert verdict["driver_engaged"] is False
+    assert fx.driver.calls == []
+
+
+def test_c4_a_caller_remaining_ttl_can_only_tighten_the_bound(fx) -> None:
+    ttls = evidence_leaf.derive_apply_remaining_ttls(
+        plan=fx.plan, component_intents=fx.component_intents,
+        probe_receipts=fx.probe_receipts, prepare_effect_receipt=fx.prepare_receipt,
+        authorizations=fx.authorization_set, row_payloads=fx.row_payloads(),
+        now=kit.NOW, caller_remaining_ttls={term: 10 ** 9 for term in ttls_terms()},
+    )
+    assert ttls["status"] == "APPLY_EVIDENCE_TTLS_DERIVED"
+    # caller 遞交十億秒也不能把界放寬:每一項都仍是證據自己的剩餘 TTL。
+    for term, value in ttls["effective"].items():
+        assert value == ttls["derived"][term] <= 10 ** 9
+    tighter = evidence_leaf.derive_apply_remaining_ttls(
+        plan=fx.plan, component_intents=fx.component_intents,
+        probe_receipts=fx.probe_receipts, prepare_effect_receipt=fx.prepare_receipt,
+        authorizations=fx.authorization_set, row_payloads=fx.row_payloads(),
+        now=kit.NOW, caller_remaining_ttls={term: 1 for term in ttls_terms()},
+    )
+    assert set(tighter["effective"].values()) == {1}
+
+
+def ttls_terms():
+    import agent_governance_s2_4_permit as permit_leaf
+
+    return permit_leaf.APPLY_TTL_BOUND_TERMS
+
+
+def test_c4_a_stale_prepare_receipt_is_a_zero_mutation_refusal(fx) -> None:
+    """§6 step 5 的 prepared-bundle 再雜湊排在 step 7 的 consume 與 step 11 的 driver 之前。
+
+    過去一份過期的 PREPARE receipt 只在第 4 列(``LEARNING_RUNTIME``)被抓到——也就是在 host
+    identity / PG / credential 三列都已施作**之後**,於是它們必須被補償。
+    """
+
+    stale = deepcopy(fx.prepare_receipt)
+    stale["expires_at"] = "2025-01-01T00:00:00+00:00"
+    verdict = fx.apply(prepare_effect_receipt=stale)
+    assert verdict["status"] == "PRECHECK_FAILED"
+    assert verdict["mutation_performed"] is False
+    assert fx.driver.compensated == []
+    assert all(driver.calls == [] for driver in fx.row_drivers.values())
+
+
+# ── C5:INSTALLED_UNIT probe receipt 的 probe_core_digest 比對 ─────────────────
+def test_c5_a_probe_receipt_for_another_unit_is_rejected_when_the_expected_core_is_supplied(
+    fx,
+) -> None:
+    verdict = fx.apply(
+        expected_installed_unit_probe_core_digest="sha256:" + "e" * 64
+    )
+    assert verdict["status"] == "PRECHECK_FAILED"
+    assert any("probe_core_digest is not the expected" in r for r in verdict["reasons"])
+    assert all(driver.calls == [] for driver in fx.row_drivers.values())
+    # 遞交正確值時照常放行(閘只在被指名時生效;未指名的殘餘由 obligation 記錄)。
+    ok = fx.apply(
+        expected_installed_unit_probe_core_digest=(
+            fx.probe_receipts["INSTALLED_UNIT"]["probe_core_digest"]
+        )
+    )
+    assert ok["status"] == "SOURCE_SIMULATION_PASS", ok["reasons"]
+
+
+# ── C6:COMPENSATING 是 write-ahead 的 ─────────────────────────────────────────
+def test_c6_an_uncommittable_compensating_record_compensates_nothing(
+    tmp_path, monkeypatch
+) -> None:
+    """``COMPENSATING`` 沒能 durable commit → **一列都不補償**,typed RECOVERY_REQUIRED。
+
+    過去它的回值被丟掉:短寫時 durable journal 裡沒有 COMPENSATING,五 row 卻已被破壞性補償,
+    verdict 還記成乾淨的 ``POSTCHECK_FAILED_ROLLED_BACK``;若行程在此消失,WAL 的最後一筆是某
+    row 的 ``VERIFYING``,重啟的 runner 會對一台被部分拆解的主機收斂出 ``RESUME_VERIFICATION``。
+    """
+
+    fixture = w4b.Fixture(tmp_path, monkeypatch, fs=w4b.CountingFs(fail_write_at=32))
+    fixture.driver.postcheck_flags["plan_lineage_verified"] = False
+    verdict = fixture.apply()
+    assert verdict["status"] == "RECOVERY_REQUIRED"
+    assert fixture.driver.compensated == []
+    assert verdict["rollback"] is None
+    assert any(
+        "NO reverse compensation was attempted" in reason for reason in verdict["reasons"]
+    )
+    persisted = fixture.persisted_install_journal()
+    assert "COMPENSATING" not in [entry["state"] for entry in persisted["entries"]]
+
+
+# ── C7:ownership-aware 條件不再恆真 ───────────────────────────────────────────
+def test_c7_the_ownership_aware_condition_is_actually_computed(fx) -> None:
+    """``or isinstance(row_verdicts.get(name), dict)`` 對任何有 verdict 的 row 恆為真。
+
+    而 row 只有產生 verdict 才可能進 ``applied_rows``,所以 §5.4 的 ownership-aware 條件
+    從未被計算,production driver 永遠收到「ownership 已驗」。
+    """
+
+    seen: list[bool] = []
+    original = fx.driver.compensate_component_row
+
+    def _record(*, component_effect_class, plan_id, per_row_rollback_digest,
+                ownership_verified):
+        seen.append(ownership_verified)
+        return original(
+            component_effect_class=component_effect_class, plan_id=plan_id,
+            per_row_rollback_digest=per_row_rollback_digest,
+            ownership_verified=ownership_verified,
+        )
+
+    fx.driver.compensate_component_row = _record
+    # LEARNING_RUNTIME 的 rollback artifact 被抽掉 ownership_aware → 該 row 的條件必為 False。
+    fx.driver.postcheck_flags["plan_lineage_verified"] = False
+    verdict = fx.apply()
+    assert verdict["status"] in {"POSTCHECK_FAILED_ROLLED_BACK", "RECOVERY_REQUIRED"}
+    # 每一列都有自己的 per-row rollback artifact,故此處全為 True(見下一支測試:把該
+    # artifact 的 ownership_aware 拿掉,那一列就必須收到 False,而不是被 fallback 補成 True)。
+    assert seen == [True] * len(runner.APPLY_ROW_ORDER)
+
+
+def test_c7_a_row_without_a_rollback_artifact_is_not_ownership_verified(fx) -> None:
+    seen: dict[str, bool] = {}
+    original = fx.driver.compensate_component_row
+
+    def _record(*, component_effect_class, plan_id, per_row_rollback_digest,
+                ownership_verified):
+        seen[component_effect_class] = ownership_verified
+        return original(
+            component_effect_class=component_effect_class, plan_id=plan_id,
+            per_row_rollback_digest=per_row_rollback_digest,
+            ownership_verified=ownership_verified,
+        )
+
+    fx.driver.compensate_component_row = _record
+    fx.driver.postcheck_flags["plan_lineage_verified"] = False
+    original_run_row = runner._run_row
+
+    def _strip(name, **kwargs):
+        verdict = original_run_row(name, **kwargs)
+        if name == "CREDENTIAL_INSTALL" and isinstance(verdict.get("rollback"), dict):
+            verdict["rollback"] = dict(verdict["rollback"])
+            verdict["rollback"]["ownership_aware"] = False
+        return verdict
+
+    runner._run_row = _strip
+    try:
+        verdict = fx.apply()
+    finally:
+        runner._run_row = original_run_row
+    assert seen["CREDENTIAL_INSTALL"] is False
+    assert seen["ENGINE_SCANNER"] is True
+    assert any(
+        "no per-row rollback artifact declaring ownership_aware" in reason
+        for reason in verdict["reasons"]
+    )
+
+
+# ── C9:未簽 permit 在 lock 之前即被拒 ──────────────────────────────────────────
+def test_c9_an_unsigned_permit_never_reaches_the_install_lock(fx) -> None:
+    """§6 固定「step 6 驗兩張 fresh SSHSIG → step 7 取 install lock」。
+
+    過去第一次簽章驗證發生在 ``consume_authorizations_under_lock`` 內,也就是**取得 lock、
+    跑完啟動 reconcile、讀完 ledger 之後**;一張未簽的 permit 因此能走到在主機上建立並 flock
+    ``/run/lock/arcane-equilibrium-aiml-s2-4-install.lock``,verdict 還記 ``driver_engaged=True``。
+    """
+
+    forged = deepcopy(fx.authorization_set)
+    permit = dict(forged["apply_aggregate"])
+    permit["sshsig_armored"] = (
+        "-----BEGIN SSH SIGNATURE-----\nAAAA\n-----END SSH SIGNATURE-----\n"
+    )
+    forged["apply_aggregate"] = permit
+    verdict = fx.apply(authorization_set=forged)
+    assert verdict["status"] == "AUTHORIZATION_REJECTED"
+    assert verdict["driver_engaged"] is False
+    assert verdict["mutation_performed"] is False
+    assert any("before the install lock is created" in r for r in verdict["reasons"])
+    # 零主機接觸:lock/file 面從未被要求。
+    assert fx.driver.calls == []
+    assert fx.lock_fake.calls == [] if hasattr(fx.lock_fake, "calls") else True
+
+
+# ── C10:§10.5 #24 的成功閘必須在**真路徑**上被證明 ─────────────────────────────
+def test_c10_the_success_gate_is_enforced_on_the_real_transaction_path(fx) -> None:
+    """刪掉 ``_drive_rows`` 裡的成功閘分支,829+127 支測試全綠——因為它只被當純函式測過。
+
+    此測讓一個 row 回「satisfied 但沒有 result/postcheck」,於是 ``row_results`` 缺一列,
+    成功謂詞不滿足,而這件事**必須**在真交易上導致零 receipt + 逆序補償。
+    """
+
+    original_run_row = runner._run_row
+
+    def _strip_result(name, **kwargs):
+        verdict = original_run_row(name, **kwargs)
+        if name == "CREDENTIAL_INSTALL":
+            verdict = dict(verdict)
+            verdict["result"] = None
+            verdict["postcheck"] = None
+        return verdict
+
+    runner._run_row = _strip_result
+    try:
+        verdict = fx.apply()
+    finally:
+        runner._run_row = original_run_row
+    assert verdict["receipt"] is None
+    # 被抽掉 postcheck 的那一列因此也沒有補償**前**的獨立觀測 digest,§5.4 的 exactness 於是
+    # typed 為未證(E4 修:``pre_compensation_observed_digest is None`` = 沒有約束**可證**,
+    # 不是沒有約束),終端因而是 RECOVERY_REQUIRED 而非 POSTCHECK_FAILED_ROLLED_BACK。
+    # 本測的載重主張不變:零 receipt + 五列全數逆序補償 + 成功閘的 typed 原因。
+    assert verdict["status"] == "RECOVERY_REQUIRED"
+    assert fx.driver.compensated == list(reversed(runner.APPLY_ROW_ORDER))
+    assert any(
+        "aggregate success requires all five distinct APPLY component results" in reason
+        for reason in verdict["reasons"]
+    )
+    assert any(
+        "no independent pre-compensation observation was captured" in reason
+        for reason in verdict["reasons"]
+    )
+
+
+# ── C15:row payload 的 exact allowlist ────────────────────────────────────────
+@pytest.mark.parametrize("key,value", [
+    ("applier_node", "s2-4-install-verifier"),
+    ("repo_root", "/tmp"),
+    ("now", "2030-01-01T00:00:00+00:00"),
+    ("clock", None),
+    ("replay_ledger", {}),
+    ("ownership_evidence", {}),
+])
+def test_c15_code_owned_row_abi_fields_can_never_be_supplied(fx, key, value) -> None:
+    payloads = fx.row_payloads()
+    payloads["PG_ROLE_ACL_MIGRATION"] = {**payloads["PG_ROLE_ACL_MIGRATION"], key: value}
+    verdict = fx.apply(row_payloads=payloads)
+    assert verdict["status"] == "PRECHECK_FAILED"
+    assert any("outside the frozen row ABI allowlist" in r for r in verdict["reasons"])
+    assert verdict["mutation_performed"] is False
+    assert all(driver.calls == [] for driver in fx.row_drivers.values())
+
+
+def test_c15_the_applier_node_is_code_owned_per_row(fx) -> None:
+    verdict = fx.apply()
+    assert verdict["status"] == "SOURCE_SIMULATION_PASS", verdict["reasons"]
+    for name in runner.APPLY_ROW_ORDER:
+        assert verdict["row_verdicts"][name]["postcheck"]["applier_node"] == (
+            runner.ROW_APPLIER_NODES[name]
+        )
+        assert verdict["row_verdicts"][name]["postcheck"]["verifier_node"] != (
+            runner.ROW_APPLIER_NODES[name]
+        )
+
+
+# ── C16:absent 不是成功;probe_unit_surviving 不再是無讀者的字面值 ──────────────
+def test_c16_a_transaction_that_installed_nothing_is_never_a_terminal_success(fx) -> None:
+    fx.driver.unit_state = "absent"
+    verdict = fx.apply()
+    assert verdict["receipt"] is None
+    assert verdict["status"] in {"POSTCHECK_FAILED_ROLLED_BACK", "RECOVERY_REQUIRED"}
+    assert any(
+        "installed nothing and can never be a terminal success" in r
+        for r in verdict["reasons"]
+    )
+
+
+def test_c16_the_success_path_requires_a_positive_loaded_observation(fx) -> None:
+    fx.driver.unit_state = {"loaded": False, "disabled": True, "inactive": True}
+    verdict = fx.apply()
+    assert verdict["receipt"] is None
+    assert any("OBSERVED loaded, disabled and inactive" in r for r in verdict["reasons"])
+
+
+def test_c16_residue_no_longer_presents_a_write_only_probe_flag(fx) -> None:
+    verdict = fx.apply()
+    assert "probe_unit_surviving" not in verdict["residue"]
+    assert verdict["residue"]["probe_residue_evidence"] == (
+        "terminal_probe_receipt_zero_residue_verified"
+    )
+    assert verdict["residue"]["observation_status"] == "INSTALLED_UNIT_OBSERVED_INACTIVE"
+
+
+# ── C17:五個相異 postcheck ────────────────────────────────────────────────────
+def test_c17_five_rows_sharing_one_postcheck_digest_do_not_satisfy_the_aggregate() -> None:
+    shared = "sha256:" + "c" * 64
+    results = {
+        name: ("sha256:" + str(index) * 64, shared)
+        for index, name in enumerate(runner.APPLY_ROW_ORDER)
+    }
+    verdict = runner.derive_aggregate_success_status(
+        probe_receipt_digests={
+            "PREPARE_SANDBOX": "sha256:" + "a" * 64,
+            "INSTALLED_UNIT": "sha256:" + "b" * 64,
+        },
+        prepare_result_digest="sha256:" + "d" * 64,
+        row_results=results,
+    )
+    assert verdict["status"] == "AGGREGATE_SUCCESS_NOT_SATISFIED"
+    assert any("postcheck_digest duplicates" in reason for reason in verdict["reasons"])
+
+
+# ── C18:permit 新鮮度不由 caller 的時鐘決定 ────────────────────────────────────
+def test_c18_the_trusted_host_time_is_cross_checked_against_the_observed_time(fx) -> None:
+    fx.driver.trusted_time = "2030-01-01T00:00:00+00:00"
+    verdict = fx.apply()
+    assert verdict["receipt"] is None
+    assert verdict["status"] == "RECEIPT_EMISSION_PENDING"
+    assert any("§9.1 clock skew ceiling" in r for r in verdict["reasons"])
+
+
+# ── C19/C20:durable 證據集 ────────────────────────────────────────────────────
+def test_c20_the_step_results_and_rollback_are_durably_persisted(fx) -> None:
+    """失敗之後,「五列裡哪幾列施作過」必須是 durable 事實,而不是記憶體裡的 verdict 欄位。"""
+
+    fx.driver.postcheck_flags["plan_lineage_verified"] = False
+    verdict = fx.apply()
+    assert verdict["evidence_set"]["status"] == "INSTALL_EVIDENCE_SET_COMMITTED"
+    basename = evidence_leaf.install_evidence_set_path(
+        fx.plan["plan_id"]
+    ).rsplit("/", 1)[-1]
+    import json as _json
+
+    persisted = _json.loads(fx.fs.files[basename].decode("utf-8"))
+    assert persisted["schema_version"] == "s2_4_install_evidence_set_v1_informal"
+    assert persisted["applied_rows"] == list(runner.APPLY_ROW_ORDER)
+    assert [step["component_effect_class"] for step in persisted["step_results"]] == list(
+        runner.APPLY_ROW_ORDER
+    )
+    assert persisted["rollback"]["schema_version"] == "s2_4_install_rollback_v1"
+    assert persisted["journal_digest"] == verdict["journal"]["self_digest"]
+    # C19:§5.2 的三件證據(終端 journal + 獨立殘留觀測 + 啟動 reconcile 裁決)一起被綁住。
+    assert persisted["startup_reconcile_status"] == verdict["reconcile"]["status"]
+    assert persisted["startup_reconcile_digest"] == validator.canonical_digest(
+        verdict["reconcile"]
+    )
+    assert persisted["residue_digest"] == validator.canonical_digest(verdict["residue"])
+    assert persisted["installed_unit_observation_status"] == (
+        verdict["residue"]["observation_status"]
+    )
+
+
+def test_c20_the_success_path_evidence_set_binds_the_receipt(fx) -> None:
+    verdict = fx.apply()
+    assert verdict["status"] == "SOURCE_SIMULATION_PASS", verdict["reasons"]
+    basename = evidence_leaf.install_evidence_set_path(
+        fx.plan["plan_id"]
+    ).rsplit("/", 1)[-1]
+    import json as _json
+
+    persisted = _json.loads(fx.fs.files[basename].decode("utf-8"))
+    assert persisted["effect_receipt_digest"] == verdict["receipt"]["self_digest"]
+    assert persisted["terminal_status"] == "SOURCE_SIMULATION_PASS"
+
+
+# ── C22:plan 的 pre-state 投影不是一個 row-independent 常量 ────────────────────
+def test_c22_the_plan_pre_state_projection_is_row_dependent(fx) -> None:
+    """把 ``derive_plan_pre_state_projection`` 換成 row-independent 常量,零測試轉紅。
+
+    因為 ``derive_aggregate_input_status`` 用同一支函式再導出,``build_s2_4_install_plan``
+    也用它建。此處以**獨立寫出**的期望值取證,並證明任一 row 的 pre-state 被換掉即改變
+    ``core["pre_state_digest"]``。
+    """
+
+    expected = validator.canonical_digest({
+        "domain": "arcane-equilibrium-aiml-s2-4-plan-pre-state-projection-v1",
+        "rows": [
+            {
+                "component_effect_class": name,
+                "pre_state_digest": fx.component_intents[name]["pre_state_digest"],
+            }
+            for name in [
+                "HOST_IDENTITY_INSTALL", "PG_ROLE_ACL_MIGRATION", "CREDENTIAL_INSTALL",
+                "LEARNING_RUNTIME", "ENGINE_SCANNER",
+            ]
+        ],
+    })
+    assert fx.plan["core"]["pre_state_digest"] == expected
+    for name in runner.APPLY_ROW_ORDER:
+        mutated = dict(fx.component_intents)
+        mutated[name] = {
+            **fx.component_intents[name], "pre_state_digest": "sha256:" + "9" * 64
+        }
+        assert runner.derive_plan_pre_state_projection(mutated) != expected
+
+
+# ── C23:§5.3 列 5 的 COMPENSATE lane 也要在 aggregate 級被證明 ─────────────────
+def test_c23_a_task_owned_partial_reconcile_lane_blocks_the_aggregate_fail_closed(
+    fx,
+) -> None:
+    """``STARTUP_RECONCILE_COMPENSATE_REVERSE`` 經 ``apply_s2_4_install_plan`` 可達且 fail-closed。
+
+    它過去只被當純函式測過;此測走真進入點,並釘住「aggregate **自己不補償**」這個誠實面。
+    """
+
+    crash = w4b.CrashingClock("HOST_IDENTITY_INSTALL:post_effect_pre_observation")
+    with pytest.raises(journal.JournalCrash):
+        fx.apply(fault=crash)
+    persisted = fx.persisted_install_journal()
+    verdict = fx.apply(
+        startup_observed_state_digests={"install": "sha256:" + "9" * 64},
+        startup_task_owned_partials={"install": True},
+        ownership_evidence={
+            "install": {
+                "journal_subject": {
+                    "s2_4_receipt_digest": "sha256:" + "1" * 64,
+                    "journal_digest": persisted["self_digest"],
+                }
+            }
+        },
+    )
+    assert verdict["status"] == "RECOVERY_REQUIRED"
+    assert verdict["reconcile"]["status"] == "STARTUP_RECONCILE_COMPENSATE_REVERSE_ORDER"
+    assert verdict["reconcile"]["mutation_performed"] is False
+    assert any(
+        "does NOT itself run the §5.4 reverse compensation" in reason
+        for reason in verdict["reasons"]
+    )
+    assert fx.driver.compensated == []

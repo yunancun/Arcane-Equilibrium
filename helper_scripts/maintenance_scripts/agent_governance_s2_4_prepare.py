@@ -828,6 +828,20 @@ def prepare_s2_4_install_bundle(
     prepare_id = intent["prepare_id"]
     core_digest = intent["core_digest"]
     staging_root = prepared_staging_root(prepare_id)
+    # step 1b —— §5.2 startup reconcile:接受這個新 prepare intent **之前**先收斂任何非終端
+    # journal(probe / PREPARE / APPLY 三條 lane 都列舉)。此處零主機接觸,只讀 journal。
+    startup_reconcile = _probe._reconcile_leaf().reconcile_before_new_intent(
+        driver, lane="prepare", lane_path=prepare_journal_path(prepare_id)
+    )
+    if startup_reconcile["admits_new_work"] is False:
+        return _verdict(
+            PREPARE_STATUS_RECOVERY_REQUIRED,
+            list(startup_reconcile["reasons"]) + [
+                "§5.2: any non-terminal probe/prepare/apply journal is reconciled before a "
+                "new prepare intent is accepted; no new PREPARE may start"
+            ],
+            prepare_id=prepare_id, staging_root=staging_root,
+        )
     # step 2 —— route surface(§10.5 #38)。
     surface = derive_prepare_route_surface_status(intent)
     if surface["status"] != "PASS":
@@ -946,7 +960,7 @@ def _run_prepare_with_driver(
         if fault is not None:
             fault(label)
 
-    def _journal(state: str, pre: str, post: str) -> None:
+    def _journal(state: str, pre: str, post: str, *, terminal: bool = False) -> None:
         entry = {
             "seq": len(entries),
             "state": state,
@@ -954,8 +968,14 @@ def _run_prepare_with_driver(
             "post_state_digest": post,
             "fsynced": True,
             "recorded_at": _iso(clock()),
+            # §5.2 的 producer 判別欄兩者皆為必填:誰寫的(prepare_bundle)+ 哪一個 subject
+            # digest 空間(LEARNING_RUNTIME_PREPARE)。
+            "entry_source": "prepare_bundle",
+            "component_effect_class": PREPARE_REQUIRED_EFFECT_CLASS,
         }
-        driver.journal_transition(entry=entry)
+        # ``terminal`` 是 journal 級宣告(不進 entry 本體);少了它,一次成功的 PREPARE 也會
+        # 在磁碟上留下一本永遠非終端的 journal,§5.2 的啟動收斂便再也放不出新工作。
+        driver.journal_transition(entry=dict(entry, terminal=terminal) if terminal else entry)
         entries.append(entry)
 
     try:
@@ -1048,9 +1068,15 @@ def _run_prepare_with_driver(
     )
     # bundle digest 固定之後才關 journal / 跑 postcheck(§5.1 #2 的次序)。
     try:
-        _journal("VERIFIED", _staging_state(staging_root, present=True), _staging_state(
-            staging_root, present=True, device=frozen.get("device"), inode=frozen.get("inode")
-        ))
+        _journal(
+            "VERIFIED",
+            _staging_state(staging_root, present=True),
+            _staging_state(
+                staging_root, present=True, device=frozen.get("device"),
+                inode=frozen.get("inode"),
+            ),
+            terminal=True,
+        )
     except Exception as error:  # noqa: BLE001
         return _verdict(
             PREPARE_STATUS_RECOVERY_REQUIRED, [f"terminal journal transition failed: {redact_driver_error(error)}"],
@@ -1532,7 +1558,10 @@ def _abort_outcome(
             ),
             "fsynced": True,
             "recorded_at": _iso(clock()),
+            "entry_source": "prepare_bundle",
+            "component_effect_class": PREPARE_REQUIRED_EFFECT_CLASS,
         }
+        # 補償路徑刻意不宣告 terminal:未解的殘留必須在磁碟上留下一本非終端的 journal。
         driver.journal_transition(entry=entry)
         entries.append(entry)
     except Exception as error:  # noqa: BLE001

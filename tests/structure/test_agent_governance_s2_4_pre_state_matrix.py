@@ -73,9 +73,22 @@ def test_row1_absent_creates_and_marks_the_task_owned_delta(fx) -> None:
     verdict = fx.apply()
     assert verdict["status"] == "SOURCE_SIMULATION_PASS", verdict["reasons"]
     for step in verdict["step_results"]:
+        # §5.2/§5.4:step entry 記的是**這一列真正擁有的 subject**(獨立 verifier 實觀的
+        # subject 集合 + per-subject digest),而不是 {class, mutation_performed} 的雜湊——
+        # 後者只有十種可能取值,支持不了「只移除 journal 記錄了擁有權的路徑」這個謂詞。
+        name = step["component_effect_class"]
+        subjects = verdict["row_verdicts"][name]["observed_subjects"]
         assert step["task_owned_delta_digest"] == validator.canonical_digest({
-            "component_effect_class": step["component_effect_class"],
+            "domain": "arcane-equilibrium-aiml-s2-4-task-owned-delta-v1",
+            "component_effect_class": name,
             "mutation_performed": True,
+            "task_owned_subjects": sorted(subjects),
+            "task_owned_subject_digests": {
+                key: validator.canonical_digest(subjects[key]) for key in sorted(subjects)
+            },
+        })
+        assert step["task_owned_delta_digest"] != validator.canonical_digest({
+            "component_effect_class": name, "mutation_performed": True,
         })
         assert step["compensation_intent_digest"] == runner.per_row_rollback_digest(
             plan_id=fx.plan["plan_id"],
@@ -180,6 +193,8 @@ def test_row5_task_owned_partial_with_a_valid_journal_reconciles() -> None:
             "pre_state_digest": "sha256:" + "2" * 64,
             "post_state_digest": "sha256:" + "4" * 64,
             "fsynced": True, "recorded_at": kit.ISSUED,
+            "entry_source": "aggregate_transaction",
+            "component_effect_class": "HOST_IDENTITY_INSTALL",
         }],
         terminal=False,
     )
@@ -191,9 +206,17 @@ def test_row5_task_owned_partial_with_a_valid_journal_reconciles() -> None:
     assert journal.reconcile_journal(
         built, observed_state_digest="sha256:" + "2" * 64
     )["status"] == journal.RECONCILE_STEP_NOT_APPLIED
-    compensate = journal.reconcile_journal(
+    # A7:形狀合法但從未被解參考的一對 digest 不再授權破壞性補償;``journal_digest``
+    # 必須就是手上這本(已完整性驗過的)journal 的 self_digest。
+    assert journal.reconcile_journal(
         built, observed_state_digest="sha256:" + "9" * 64, task_owned_partial=True,
         ownership_evidence={"journal_subject": dict(_OWNED)},
+    )["status"] == journal.RECONCILE_RECOVERY_REQUIRED
+    compensate = journal.reconcile_journal(
+        built, observed_state_digest="sha256:" + "9" * 64, task_owned_partial=True,
+        ownership_evidence={
+            "journal_subject": dict(_OWNED, journal_digest=built["self_digest"])
+        },
     )
     assert compensate["status"] == journal.RECONCILE_COMPENSATE_REVERSE
     assert compensate["mutation_performed"] is False
@@ -220,6 +243,8 @@ def test_row6_partial_without_a_valid_journal_is_recovery_required(fx) -> None:
             "pre_state_digest": "sha256:" + "2" * 64,
             "post_state_digest": "sha256:" + "4" * 64,
             "fsynced": True, "recorded_at": kit.ISSUED,
+            "entry_source": "aggregate_transaction",
+            "component_effect_class": "HOST_IDENTITY_INSTALL",
         }],
         terminal=False,
     )

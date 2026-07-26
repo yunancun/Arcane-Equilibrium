@@ -170,10 +170,13 @@ COMPENSATION_STATUS_EXACT = "COMPENSATED_EXACT"
 COMPENSATION_STATUS_NOT_REOBSERVED = "COMPENSATED_NOT_REOBSERVED"
 COMPENSATION_STATUS_NOT_COMPENSATED = "NOT_COMPENSATED"
 COMPENSATION_STATUS_RECOVERY_REQUIRED = "RECOVERY_REQUIRED"
-# W4a INDEPENDENT_POST_COMPENSATION_POSTCHECK 的三分 typed 結果(獨立 verifier 重跑)。
+# W4a INDEPENDENT_POST_COMPENSATION_POSTCHECK 的四分 typed 結果(獨立 verifier 重跑)。
 POST_COMPENSATION_POSTCHECK_CONFIRMED = "POST_COMPENSATION_RESIDUE_CONFIRMED_CLEAN"
 POST_COMPENSATION_POSTCHECK_DISPROVED = "POST_COMPENSATION_RESIDUE_DISPROVED"
 POST_COMPENSATION_POSTCHECK_UNAVAILABLE = "POST_COMPENSATION_POSTCHECK_UNAVAILABLE"
+# 「補償前沒有任何獨立觀測可比」——不是 disproved(沒有反證),但更不是 confirmed:
+# 「verifier 真的再看了一次」這個謂詞在缺少補償前 digest 時**無從計算**,故 typed 為未證。
+POST_COMPENSATION_POSTCHECK_UNPROVEN = "POST_COMPENSATION_PRE_OBSERVATION_UNPROVEN"
 
 class ComponentContractError(ValueError):
     """component-effect 契約層硬錯誤(帶 typed ``code``)。"""
@@ -451,16 +454,62 @@ def _authorization_set_reasons(
     return reasons
 
 
-def ownership_binding_present(evidence: Any) -> bool:
-    """單一 subject 的 ownership 綁定是否成立(兩個欄位都必須是 digest 形狀)。"""
+def ownership_binding_present(
+    evidence: Any,
+    *,
+    expected_journal_digest: Any = None,
+    expected_receipt_digest: Any = None,
+) -> bool:
+    """單一 subject 的 ownership 綁定是否成立。
+
+    形狀(兩個欄位都是 digest)只是**必要**條件。給了 ``expected_*`` 時,對應欄位必須逐位元
+    等於呼叫端手上那份**已完整性驗過**的 journal / 前一份 S2.4 receipt 的 digest——否則兩個
+    ``sha256:000…0`` 就能冒充擁有權。詳細 reason 見 :func:`ownership_binding_reasons`。
+    """
+
+    return not ownership_binding_reasons(
+        evidence,
+        expected_journal_digest=expected_journal_digest,
+        expected_receipt_digest=expected_receipt_digest,
+    )
+
+
+def ownership_binding_reasons(
+    evidence: Any,
+    *,
+    subject: str = "subject",
+    expected_journal_digest: Any = None,
+    expected_receipt_digest: Any = None,
+) -> list[str]:
+    """單一 subject 的 ownership 綁定逐條 typed reason(形狀 + **解參考**比對)。"""
 
     if not isinstance(evidence, dict):
-        return False
+        return [
+            f"ownership_evidence[{subject!r}] must be an object binding "
+            f"{list(OWNERSHIP_EVIDENCE_REQUIRED_FIELDS)}"
+        ]
+    reasons: list[str] = []
     for field in OWNERSHIP_EVIDENCE_REQUIRED_FIELDS:
         value = evidence.get(field)
         if not isinstance(value, str) or _DIGEST_RE.fullmatch(value) is None:
-            return False
-    return True
+            reasons.append(
+                f"ownership_evidence[{subject!r}].{field} must be a sha256 digest bound to "
+                "the prior S2.4 receipt/journal"
+            )
+    expected = {
+        "journal_digest": expected_journal_digest,
+        "s2_4_receipt_digest": expected_receipt_digest,
+    }
+    for field, wanted in expected.items():
+        if wanted is None:
+            continue
+        if evidence.get(field) != wanted:
+            reasons.append(
+                f"ownership_evidence[{subject!r}].{field} does not equal the {field} of the "
+                "artifact this decision is actually about; a digest-shaped string that is "
+                "never dereferenced proves nothing about task ownership (§5.3/§5.4)"
+            )
+    return reasons
 
 
 def ownership_evidence_reasons(ownership_evidence: Any) -> list[str]:
@@ -495,17 +544,39 @@ def ownership_evidence_reasons(ownership_evidence: Any) -> list[str]:
     return reasons
 
 
-def derive_recorded_evidence_class(driver: Any) -> dict[str, Any]:
+def derive_recorded_evidence_class(
+    driver: Any,
+    *,
+    attestation_verified: bool = False,
+    attested_evidence_class: str = EVIDENCE_CLASS_STRUCTURAL_ONLY,
+) -> dict[str, Any]:
     """把 driver **自報**的 ``evidence_class`` 收斂成「可被記錄」的等級(§10.2)。
 
     誠實界線:``evidence_class`` 是注入物件上的一個自報欄位——in-process 沒有任何方法
     能把 fixture 與真主機 driver 區分開(兩者都能寫 ``evidence_class =
-    "PLATFORM_ATTESTED"``)。故本閘**拒絕**憑自報就記錄 attested 等級:W3 沒有(也不該有)
-    trusted-host attestation 的驗證面,那屬 W4/W6;在此之前一律記錄
-    ``STRUCTURAL_ONLY`` 並附 typed 說明。這是「閘拒絕自證」而非「接受自證」。
+    "PLATFORM_ATTESTED"``)。故本閘**永遠拒絕**憑自報就記錄 attested 等級。
+
+    W4b 起,attested 等級有了唯一一條真正的入口:``attestation_verified=True`` 只由
+    :func:`agent_governance_s2_4_install_evidence.derive_apply_attestation_status` 的
+    ``APPLY_ATTESTATION_VERIFIED`` 傳入,而那個判定要求一份綁定 exact plan、
+    ``reobserved == applied``、由 §9.1 信任根私鑰在專屬 attestor identity + namespace 下**真簽**、
+    且新鮮度錨在**已簽的** ``trusted_host_time`` 的 ``s2_4_install_apply_attestation_v1``。
+    driver 上的那個字串屬性到此為止不再是任何東西的鑰匙(它連被讀都只為了記錄「誰在自報」)。
     """
 
     declared = str(getattr(driver, "evidence_class", EVIDENCE_CLASS_STRUCTURAL_ONLY))
+    if attestation_verified and attested_evidence_class in EVIDENCE_CLASS_ATTESTED:
+        return {
+            "status": EVIDENCE_CLASS_STATUS_RECORDED,
+            "declared_evidence_class": declared,
+            "recorded_evidence_class": attested_evidence_class,
+            "reasons": [
+                "the recorded evidence class comes from a VERIFIED trusted-host apply "
+                "attestation (exact-plan bound, reobserved == applied, real SSHSIG under the "
+                "§9.1 trust root, freshness anchored to the signed trusted_host_time), not from "
+                "the driver's self-declared attribute"
+            ],
+        }
     if declared in EVIDENCE_CLASS_ATTESTED:
         return {
             "status": EVIDENCE_CLASS_STATUS_SELF_DECLARATION_REFUSED,
@@ -514,8 +585,8 @@ def derive_recorded_evidence_class(driver: Any) -> dict[str, Any]:
             "reasons": [
                 f"the injected driver self-declares evidence_class={declared!r}; a self-declared "
                 "attested class is never recorded because nothing in-process can distinguish a "
-                "fixture from a real host driver. W3 records STRUCTURAL_ONLY until a trusted-host "
-                "platform attestation verifier exists (W4/W6 obligation)"
+                "fixture from a real host driver. Only a verified "
+                "s2_4_install_apply_attestation_v1 records an attested class (W4b)"
             ],
         }
     return {
@@ -605,9 +676,12 @@ def independent_post_compensation_postcheck(
       * verifier 節點存在且不等於 applier(applier 不得自證自己的殘留);
       * ``applied_state_verified`` 必須為 **假**——補償後那個 applied 狀態必須已觀測不到;
       * ``pre_state_lineage_verified`` 必須為 **真**——前態譜系成立;
-      * ``observed_subject_digest`` 必須**不同於**補償前那次獨立觀測的 digest
-        (``pre_compensation_observed_digest`` 提供時):回同一個常量的 verifier 等於沒有真的
-        重看一次,不得換到 exact 宣稱;
+      * ``observed_subject_digest`` 必須**不同於**補償前那次獨立觀測的 digest:回同一個常量的
+        verifier 等於沒有真的重看一次,不得換到 exact 宣稱。``pre_compensation_observed_digest``
+        **缺席**時這個謂詞無從計算,故結果是 typed 的
+        :data:`POST_COMPENSATION_POSTCHECK_UNPROVEN`(``independent_reobserved=None`` ⇒
+        ``COMPENSATED_NOT_REOBSERVED``、``exact=False``)——「沒有補償前觀測」永遠是「沒有
+        約束可證」,絕不是「沒有約束要滿足」;
       * ``expected_post_compensation_digest`` 提供時(同一 observer digest 空間內的期望值),
         再要求逐位元組相等。
 
@@ -674,6 +748,7 @@ def independent_post_compensation_postcheck(
         "pre_compensation_observed_digest": pre_compensation_observed_digest,
     }
     mismatches: list[str] = []
+    unproven: list[str] = []
     if bool(observed.get("applied_state_verified")):
         mismatches.append(
             "the independent verifier still observes the applied state after compensation "
@@ -683,10 +758,17 @@ def independent_post_compensation_postcheck(
         mismatches.append(
             "the independent verifier did not confirm the pre-state lineage after compensation"
         )
-    if (
-        pre_compensation_observed_digest is not None
-        and observed["observed_subject_digest"] == pre_compensation_observed_digest
-    ):
+    if pre_compensation_observed_digest is None:
+        # 「沒給補償前的獨立觀測」在此**不是**放行條件:那道 byte-identity 檢查是
+        # ``COMPENSATED_EXACT`` 唯一能排除「常量 verifier」的手段,缺了它就沒有任何東西能
+        # 證明這次再觀測是真的。故 typed 為未證(exact=False),而不是無約束通過。
+        unproven.append(
+            "no independent pre-compensation observation was captured for this subject, so "
+            "'the verifier actually re-observed it after compensation' cannot be checked at "
+            "all; exact pre-state restoration is NOT proved (a constant-returning verifier "
+            "would be indistinguishable)"
+        )
+    elif observed["observed_subject_digest"] == pre_compensation_observed_digest:
         mismatches.append(
             "the independent post-compensation observation is byte-identical to the "
             "pre-compensation observation; the verifier did not actually re-observe the "
@@ -705,9 +787,48 @@ def independent_post_compensation_postcheck(
         outcome["independent_reobserved"] = False
         outcome["reasons"] = mismatches
         return outcome
+    if unproven:
+        outcome["status"] = POST_COMPENSATION_POSTCHECK_UNPROVEN
+        outcome["independent_reobserved"] = None
+        outcome["reasons"] = unproven
+        return outcome
     outcome["status"] = POST_COMPENSATION_POSTCHECK_CONFIRMED
     outcome["independent_reobserved"] = True
     return outcome
+
+
+def capture_pre_compensation_observation(
+    driver: Any,
+    *,
+    component_effect_class: str,
+    install_plan_digest: str,
+    applier_node: str,
+) -> str | None:
+    """補償**之前**先取一次獨立 verifier 的 subject digest(拿不到回 ``None``)。
+
+    §5.4 的 ``COMPENSATED_EXACT`` 靠「補償前後兩次獨立觀測不同」排除常量 verifier;那個前提
+    只有在補償**之前**真的觀測過一次才存在。mid-effect 失敗的 row 從來沒有跑到它的獨立
+    postcheck(effect 就是在那裡炸的),所以此處補上這一次唯讀觀測——它不改變主機,只把
+    「補償前長什麼樣」變成一個可比對的事實。拿不到時回 ``None``,呼叫端據此停在 typed 未證。
+    """
+
+    verifier = getattr(driver, "independent_postcheck", None)
+    if not callable(verifier):
+        return None
+    try:
+        observed = verifier(
+            component_effect_class=component_effect_class,
+            install_plan_digest=install_plan_digest,
+            applier_node=applier_node,
+        )
+    except Exception:  # noqa: BLE001
+        return None
+    if not isinstance(observed, dict):
+        return None
+    digest = observed.get("observed_subject_digest")
+    if isinstance(digest, str) and _DIGEST_RE.fullmatch(digest) is not None:
+        return digest
+    return None
 
 
 def compensation_with_independent_postcheck(
@@ -1132,11 +1253,25 @@ def _build_rollback(
 
 
 class _Journal:
-    """per-row 的 WAL 轉移記錄器(真持久化屬 W4;此處保「先寫後做」語義)。"""
+    """per-row 的 WAL 轉移記錄器(真持久化屬 W4;此處保「先寫後做」語義)。
 
-    def __init__(self, driver: Any, clock: Callable[[], datetime]) -> None:
+    ``component_effect_class`` 是**必填**的:APPLY 的共用 WAL 上,每個 row 六筆 entry 中有三筆
+    由本記錄器以**該 row 自己的** subject digest 空間寫入,另三筆由 aggregate 以 row-observation
+    空間寫入。少了「是哪一 row」這一半判別,重啟的 runner 拿到最後一筆 entry 時仍然只能猜——
+    ``entry_source`` 只說得出「是 row driver 寫的」,說不出是**哪一** row 的 digest 空間。
+    """
+
+    def __init__(
+        self,
+        driver: Any,
+        clock: Callable[[], datetime],
+        component_effect_class: str,
+    ) -> None:
+        if str(component_effect_class) not in COMPONENT_CLASSES:
+            raise ComponentContractError("component_effect_class_not_an_apply_row")
         self.driver = driver
         self.clock = clock
+        self.component_effect_class = str(component_effect_class)
         self.entries: list[dict[str, Any]] = []
 
     def write(self, state: str, pre: str, post: str) -> None:
@@ -1147,6 +1282,11 @@ class _Journal:
             "post_state_digest": post,
             "fsynced": True,
             "recorded_at": _iso(self.clock()),
+            # §5.2 digest 空間判別:這三筆是**該 row 的 driver** 以自己的 subject digest
+            # 空間寫的,和 aggregate 的 row-observation 空間不是同一件事。兩欄同時在場才
+            # 構成完整判別(誰寫的 + 哪一 row 的 subject)。
+            "entry_source": "component_row_driver",
+            "component_effect_class": self.component_effect_class,
         }
         self.driver.journal_transition(entry=entry)
         self.entries.append(entry)
@@ -1307,10 +1447,17 @@ def _compensating_failure(
         "postcheck": None,
     }
     if driver is not None and applier_node is not None:
+        # mid-effect 失敗的 row 從未跑到自己的獨立 postcheck,故補償前的獨立觀測必須在此
+        # **先**取一次;沒有它,補償後那次再觀測就沒有任何可比對的前值,exact 只能是未證。
+        pre_observed = capture_pre_compensation_observation(
+            driver, component_effect_class=component_effect_class,
+            install_plan_digest=plan_digest, applier_node=applier_node,
+        )
         compensation, independent = compensation_with_independent_postcheck(
             compensate(), driver=driver, component_effect_class=component_effect_class,
             install_plan_digest=plan_digest, applier_node=applier_node,
             pre_state_digest=pre_state_digest,
+            pre_compensation_observed_digest=pre_observed,
         )
     else:
         compensation = normalize_compensation(compensate())

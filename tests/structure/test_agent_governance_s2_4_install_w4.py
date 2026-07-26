@@ -331,6 +331,11 @@ def test_w4_records_its_own_remaining_obligations_in_the_same_honest_shape() -> 
         assert row["typed_status"] in {
             "OPEN_DESIGN_QUESTION", "NOT_PROVIDED_BY_W4A", "NOT_PROVIDED_BY_W4B",
             "NOT_PROVIDED_BY_W4", "PARTIALLY_PROVIDED_BY_W4B",
+            # Fix-C:verifier 已在源碼線交付,待交付的是**取得**一份真背書(W6B);
+            # 另有一條刻意保持開放的 W6-runner 前置,與一條誠實界線。
+            "VERIFIER_PROVIDED_BY_W4B_ATTESTATION_PENDING",
+            "OPEN_BY_DESIGN_W6_RUNNER_PRECONDITION",
+            "OPEN_HONEST_BOUNDARY",
         }
         assert row["owner_wave"] and row["spec_refs"] and row["statement"]
     # OBSERVER_SPACE_PRE_STATE_DIGEST 現在必須說清楚「什麼才算關閉」。
@@ -497,3 +502,94 @@ def test_install_module_reexports_the_w4a_surface() -> None:
         "s2_4_authorization_identity_digest",
     ):
         assert hasattr(validator, name), name
+
+
+# ── E2:W4 ABI 對 attestation verifier 的 w4_provides 曾宣稱一件測試沒證明的事 ──
+def test_w4_abi_no_longer_claims_the_positive_test_proves_the_only_half() -> None:
+    """``w4_provides`` 曾寫「a throwaway-key positive test proving APPLIED_INACTIVE is
+    reachable ONLY with a valid attestation」。正例證明的是**可達**;「只有」那一半在
+    W4b 交付時沒有任何測試支持——六個負向全部改欄位再重簽,所以每個都被欄位比對抓住,
+    ``_verify_ssh_signature`` 那一行零覆蓋。修正後的文字必須明載那兩支只有驗簽能擋的負向。
+    """
+
+    obligations = {
+        item["obligation_id"]: item
+        for item in validator._W4_EXPORTED_ABI["remaining_owned_obligations"]
+    }
+    provides = obligations["ATTESTED_EVIDENCE_CLASS_VERIFIER"]["w4_provides"]
+    assert "POSITIVE test proving APPLIED_INACTIVE is REACHABLE" in provides
+    assert "FOREIGN throwaway key" in provides
+    assert "garbage SSHSIG bytes" in provides
+    # 誠實的自我更正必須留在 ABI 上,而不是靜默改掉。
+    assert "Correction" in provides and "ZERO coverage" in provides
+
+
+@pytest.mark.parametrize("obligation_id", [
+    "ATTESTOR_KEY_IS_NOT_SEPARATE_FROM_THE_PERMIT_KEY",
+    "ATTESTATION_EXPIRY_AND_HOST_TIME_ARE_NOT_CROSS_CHECKED",
+    "RECEIPT_EMISSION_PENDING_IS_NOT_A_RECEIPT_RETRY",
+    "STARTUP_JOURNAL_PARENTS_MUST_PREEXIST",
+    "STRANDED_WAL_TEMP_FILES_ARE_REPORT_ONLY",
+])
+def test_w4_records_the_new_open_obligations_in_the_same_honest_shape(obligation_id) -> None:
+    """E2/E9/E17 + 兩則「記錄而非默默接受」的觀察必須以同一個 typed 形狀留在 ABI 上。"""
+
+    obligations = {
+        item["obligation_id"]: item
+        for item in validator._W4_EXPORTED_ABI["remaining_owned_obligations"]
+    }
+    entry = obligations[obligation_id]
+    assert entry["typed_status"] in {
+        "NOT_PROVIDED_BY_W4B", "PARTIALLY_PROVIDED_BY_W4B",
+    }
+    assert entry["owner_wave"] == "W6B"
+    assert entry["spec_refs"]
+    assert len(entry["statement"]) > 200
+    assert entry["w4_provides"]
+
+
+def test_w4_abi_states_the_probe_core_binding_is_mandatory_for_the_w6_runner() -> None:
+    """E8:綁定被略過必須可稽核,而「W6 runner 必須遞交」必須是白紙黑字的義務。"""
+
+    obligations = {
+        item["obligation_id"]: item
+        for item in validator._W4_EXPORTED_ABI["remaining_owned_obligations"]
+    }
+    statement = obligations["INSTALLED_UNIT_PROBE_CORE_BINDING"]["statement"]
+    assert "MANDATORY for the W6 runner" in statement
+    assert "UNVERIFIED_NO_EXPECTED_VALUE_SUPPLIED" in statement
+
+
+# ── E7:Registry 的 invariant 是 normative-policy 面,不得留下已不成立的敘述 ──
+def test_registry_install_adapter_invariant_states_custody_not_unreachability() -> None:
+    """E7:``a valid signature alone never yields an applied/production status in the source
+    lane`` 在 ``derive_recorded_evidence_class`` 無條件拒收的時代是**構造性**為真的。W4b 之後
+    ``APPLIED_INACTIVE`` 在 in-memory 線上只要 patch 兩個 facade 屬性並遞交一份合法簽章的
+    attestation 就可達,真實世界的保證改由**金鑰保管**提供。Registry 是 normative-policy 面,
+    所以那句話必須被重述,而不是留著。"""
+
+    registry = json.loads(
+        (ROOT / ".codex/agent_registry_v1.json").read_text(encoding="utf-8")
+    )
+    adapters = registry["effect_adapters"]
+    entry = adapters["s2_4_install_adapter_v1"]
+    assert entry["status"] == "AUTHORITY_LOCKED_PRODUCTION_CAPABLE"
+    invariant = entry["invariant"]
+    # 舊的、已不成立的敘述必須消失。
+    assert (
+        "a valid signature alone never yields an applied/production status in the source lane"
+        not in invariant
+    )
+    # 新敘述必須同時說出兩件事:構造性不可達已不成立,以及真保證是金鑰保管。
+    assert "NO LONGER structurally unreachable" in invariant
+    assert "KEY CUSTODY" in invariant
+    assert "a valid operator PERMIT signature alone never yields" in invariant
+    assert "nine authorities stay false even on APPLIED_INACTIVE" in invariant
+    assert "s2_4_install_apply_attestation_v1" in entry["authority"]
+    # 另兩支 adapter 的構造性敘述**仍然**成立,不得被順手改掉。
+    for other in ("s2_4_capability_probe_adapter_v1", "s2_4_prepare_adapter_v1"):
+        assert adapters[other]["status"] == "AUTHORITY_LOCKED_PRODUCTION_CAPABLE"
+        assert (
+            "a valid signature alone never yields an applied/production status in the source "
+            "lane" in adapters[other]["invariant"]
+        ), other

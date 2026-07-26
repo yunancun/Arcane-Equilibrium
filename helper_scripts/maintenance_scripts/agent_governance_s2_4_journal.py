@@ -27,6 +27,7 @@ running_attested 恆 false;真 fd/fsync/rename 由 W6 的注入 driver 提供。
 """
 from __future__ import annotations
 
+import os
 import re
 import sys
 from datetime import datetime, timezone
@@ -94,6 +95,9 @@ JOURNAL_STATUS_CORRUPT = "JOURNAL_CORRUPT_RECOVERY_REQUIRED"
 JOURNAL_STATUS_PRECHECK_FAILED = "PRECHECK_FAILED"
 JOURNAL_STATUS_PENDING = "EXTERNAL_VERIFICATION_PENDING"
 JOURNAL_STATUS_RECOVERY_REQUIRED = "RECOVERY_REQUIRED"
+# 崩潰殘留的暫存檔讓 ``openat(O_EXCL)`` 回 EEXIST:那是**主機殘留**,不是 journal 內容壞掉,
+# 也不是「別人拿著 lock」——給它自己的 typed 狀態,reason 帶絕對路徑與 operator 的補救動作。
+JOURNAL_STATUS_TEMP_COLLISION = "JOURNAL_TEMP_RESIDUE_RECOVERY_REQUIRED"
 JOURNAL_TYPED_STATUSES = (
     JOURNAL_STATUS_ABSENT,
     JOURNAL_STATUS_COMMITTED,
@@ -102,6 +106,7 @@ JOURNAL_TYPED_STATUSES = (
     JOURNAL_STATUS_PENDING,
     JOURNAL_STATUS_PRECHECK_FAILED,
     JOURNAL_STATUS_RECOVERY_REQUIRED,
+    JOURNAL_STATUS_TEMP_COLLISION,
 )
 # §5.2 reconcile 的四分收斂。
 RECONCILE_RESUME_VERIFICATION = "RESUME_VERIFICATION"
@@ -115,6 +120,31 @@ WAL_FAULT_WINDOWS = (
     "post_effect_pre_observation",
     "post_observation_pre_applied_fsync",
 )
+# ── entry 的 producer 判別欄(重啟的 runner 必須分得出某筆 entry 的 digest 空間)────
+# APPLY 的共用 WAL 上,每個 row 六筆 entry 中有三筆由**該 row 的 driver** 以自己的 subject
+# digest 空間寫入,另三筆由 aggregate 以 row-observation digest 空間寫入。少了判別欄,
+# reconcile 只能拿 caller 的一個 digest 去比 ``entries[-1]["post_state_digest"]``,卻不知道
+# 那是哪個空間——同一個字串在兩個空間裡意義完全不同。
+ENTRY_SOURCE_AGGREGATE = "aggregate_transaction"
+ENTRY_SOURCE_COMPONENT_ROW = "component_row_driver"
+ENTRY_SOURCE_PROBE = "capability_probe"
+ENTRY_SOURCE_PREPARE = "prepare_bundle"
+ENTRY_SOURCES = (
+    ENTRY_SOURCE_AGGREGATE,
+    ENTRY_SOURCE_COMPONENT_ROW,
+    ENTRY_SOURCE_PREPARE,
+    ENTRY_SOURCE_PROBE,
+)
+# 交易級(而非某一 row 級)的 entry 的判別值。APPLY WAL 上有三種 entry 的 subject **不是**
+# 任何一 row:``COMPENSATING`` 與終端的 ``VERIFIED``/``COMPENSATED``/``FAILED``——它們的
+# pre/post digest 是 plan 級的 ``pre_state_digest``,涵蓋整筆交易。過去它們只帶一個
+# ``step_index``,而 :data:`APPLY_STEP_INDEX_COMPONENT_CLASS` 會把 ``step_index=0`` 推成
+# ``HOST_IDENTITY_INSTALL``——於是「五列全數拆除」在 WAL 上被記成「第 0 列」。判別欄是必填的,
+# 但滿足它的值必須是**真的**;此常量讓交易級 entry 說出自己的 scope,而不是冒名一列。
+ENTRY_SCOPE_AGGREGATE_TRANSACTION = "AGGREGATE_TRANSACTION"
+# §5.1 的六個 typed step ↔ 五個 v2 class(step 4 由 LEARNING_RUNTIME 原子併發佈,故不獨立
+# 存在)。class 次序取中央 SSOT,index 元組在此釘住(定義見 JournalContractError 之後)。
+APPLY_ROW_STEP_INDICES = (0, 1, 2, 3, 5)
 _ALL_FALSE_PRODUCTION_FLAGS = {
     "nine_authorities_false": True,
     "production_apply_performed": False,
@@ -128,6 +158,13 @@ class JournalContractError(ValueError):
     def __init__(self, code: str) -> None:
         super().__init__(code)
         self.code = code
+
+
+if len(APPLY_ROW_STEP_INDICES) != len(central_validator.S2_4_APPLY_ROW_CLASS_ORDER):
+    raise JournalContractError("apply_row_step_index_table_drifted")
+APPLY_STEP_INDEX_COMPONENT_CLASS = dict(
+    zip(APPLY_ROW_STEP_INDICES, central_validator.S2_4_APPLY_ROW_CLASS_ORDER)
+)
 
 
 class JournalCrash(RuntimeError):
@@ -175,12 +212,43 @@ def install_journal_path(plan_id: Any) -> str:
     return f"{INSTALL_JOURNAL_PARENT}/{plan_id}.journal.json"
 
 
-def journal_temp_basename(basename: str, *, attempt: int = 0) -> str:
-    """同檔案系統的暫存名(與正本同 parent,故 rename 恆為 same-filesystem atomic)。"""
+_TEMP_TOKEN_RE = re.compile(r"^[0-9a-f]{1,32}-[0-9a-f]{16}$")
+# E16:擱淺 WAL 暫存檔的 basename 形狀(``.<basename>.tmp.<pid hex>-<128 bit hex>.<attempt>``)。
+# 跨行程唯一的名字讓 ``O_EXCL`` 再也撞不到上一次崩潰的殘留,所以**列舉**是唯一還看得見它的面。
+JOURNAL_TEMP_RESIDUE_RE = re.compile(
+    r"^\..+\.tmp\.[0-9a-f]{1,32}-[0-9a-f]{16}\.[0-9]+$"
+)
+_PROCESS_TEMP_TOKEN: str | None = None
+
+
+def process_temp_token() -> str:
+    """本行程的暫存檔前綴(``<pid hex>-<128 bit 隨機>``);同一行程內恆定,跨行程必不同。"""
+
+    global _PROCESS_TEMP_TOKEN
+    if _PROCESS_TEMP_TOKEN is None:
+        _PROCESS_TEMP_TOKEN = f"{os.getpid():x}-{os.urandom(8).hex()}"
+    return _PROCESS_TEMP_TOKEN
+
+
+def journal_temp_basename(
+    basename: str, *, attempt: int = 0, unique_token: str | None = None
+) -> str:
+    """同檔案系統的暫存名(與正本同 parent,故 rename 恆為 same-filesystem atomic)。
+
+    名字必須**跨行程唯一**。舊形 ``.<basename>.tmp.<attempt>`` 把 ``attempt`` 綁在
+    :class:`JournalStore` 實例上,於是每個新行程的第一次落盤永遠瞄準 ``.tmp.0``:一次
+    「``create_temp_file`` 之後、``atomic_rename`` 之前」的崩潰——正是 WAL 存在的理由——
+    留下的殘留檔,會讓其後**每一個** runner 在已經 durable 消費掉 permit 之後才撞上
+    ``openat(O_EXCL)`` 的 EEXIST。``O_EXCL`` 是防競態的原子性手段,不是正確性的錨點;
+    唯一性由 ``<pid>-<隨機>`` 提供,``attempt`` 只負責同一行程內的重試。
+    """
 
     if "/" in basename or basename in {"", ".", ".."}:
         raise JournalContractError("journal_basename_invalid")
-    return f".{basename}.tmp.{int(attempt)}"
+    token = process_temp_token() if unique_token is None else str(unique_token)
+    if _TEMP_TOKEN_RE.fullmatch(token) is None:
+        raise JournalContractError("journal_temp_token_invalid")
+    return f".{basename}.tmp.{token}.{int(attempt)}"
 
 
 # --------------------------------------------------------------------------- #
@@ -230,7 +298,13 @@ def journal_state_vocabulary(schema_version: Any) -> tuple[str, ...]:
 
 
 def journal_entry_sequence_errors(journal: Any) -> list[str]:
-    """entries 必為 monotonic ``seq`` 自 0 起、state 落在該 schema 的封閉詞彙內。"""
+    """entries 必為 monotonic ``seq`` 自 0 起、state 落在該 schema 的封閉詞彙內、且**每一筆**
+    都帶完整的 producer 判別欄(``entry_source`` + ``component_effect_class``)。
+
+    判別欄是**必要**的,不是選配:選配的判別欄等於沒有判別欄——任何一個 producer 只要省略它,
+    重啟的 runner 讀到 ``entries[-1]`` 時就又回到猜 digest 空間的狀態,而「猜對」與「猜錯」在
+    §5.2 的四分收斂上分別是「續驗」與「對一台部分施作的主機宣稱沒事」。
+    """
 
     if not isinstance(journal, dict):
         return ["journal must be an object"]
@@ -257,6 +331,19 @@ def journal_entry_sequence_errors(journal: Any) -> list[str]:
             errors.append(
                 f"journal entry[{index}] is not recorded as fsynced (a WAL entry that was not "
                 "fsynced cannot be write-ahead evidence)"
+            )
+        if entry.get("entry_source") not in ENTRY_SOURCES:
+            errors.append(
+                f"journal entry[{index}] entry_source {entry.get('entry_source')!r} is not one "
+                "of the §5.2 producers; a WAL entry that does not say WHO wrote it cannot be "
+                "reconciled against any observed digest"
+            )
+        effect_class = entry.get("component_effect_class")
+        if not isinstance(effect_class, str) or not effect_class:
+            errors.append(
+                f"journal entry[{index}] carries no component_effect_class; without it a "
+                "restarting runner cannot tell WHICH subject digest space entries[-1] lives in "
+                "(§5.2)"
             )
     return errors
 
@@ -369,9 +456,17 @@ class DurableFileDriver(Protocol):
     """§5.2 的 durable-write 面。**沒有** unlink/truncate/chmod 入口。
 
     ``open_parent_directory`` 必回 ``{"fd", "device", "inode", "nlink", "mode", "uid",
-    "is_dir", "is_symlink"}``;``fstat_parent`` 以同一形狀重讀(置換偵測);
+    "is_dir", "is_symlink"}``;``fstat_parent`` 以同一形狀重讀**同一個 fd**;
     ``create_temp_file`` 回 ``{"fd", "device", "inode", "nlink", "mode", "uid",
-    "is_regular_file"}``。任何逸出的例外都會被上層轉成 typed 非成功(絕不半通過)。
+    "is_regular_file"}``;``list_journal_basenames`` 是**唯讀**列舉(只回 basename 字串,
+    絕不回路徑,更沒有任何刪改面)。任何逸出的例外都會被上層轉成 typed 非成功(絕不半通過)。
+
+    誠實界線:一個已開啟的 dirfd 會釘住 inode,所以「拿同一個 fd 再 ``fstat`` 一次」在真
+    POSIX driver 上**永遠**不會偵測到 parent 被置換——那只是重讀同一個 inode。真正的置換
+    偵測有兩處:(a) ``openat``/``renameat`` 全部相對於已綁定的 dirfd,所以即使路徑被換掉,
+    寫入也仍然落在當初驗過的那個目錄;(b) :meth:`JournalStore._open_parent` 每次呼叫都
+    **重新解析路徑**並與首次綁定的 device/inode 比對,以及 rename 之前的一次獨立
+    :func:`JournalStore._reresolve_parent_reasons`——那才是有牙齒的檢查。
     """
 
     def open_parent_directory(
@@ -379,6 +474,8 @@ class DurableFileDriver(Protocol):
     ) -> dict[str, Any]: ...
 
     def fstat_parent(self, *, fd: Any) -> dict[str, Any]: ...
+
+    def list_journal_basenames(self, *, parent_fd: Any) -> list[str]: ...
 
     def create_temp_file(
         self, *, parent_fd: Any, basename: str, flags: tuple[str, ...], mode: int
@@ -532,6 +629,105 @@ class JournalStore:
             )
         return (observed["fd"], reasons)
 
+    def _reresolve_parent_reasons(self) -> list[str]:
+        """rename 之前**重新解析** parent 路徑並與綁定值比對(有牙齒的置換偵測)。
+
+        以同一個 dirfd 再 ``fstat`` 一次是套套邏輯:fd 釘住 inode,值必然相同。真正能發現
+        「``/var/lib/…/s2_4`` 現在指向別的目錄」的,只有重新走一次路徑解析。此檢查失敗
+        並不代表寫入會落錯地方(``renameat`` 仍相對於已驗的 dirfd),而是代表這本 journal
+        的**絕對路徑語義**已經不成立——那足以 typed 拒且零變更。
+        """
+
+        observed = self.driver.open_parent_directory(
+            path=self.parent_path, flags=JOURNAL_PARENT_OPEN_FLAGS
+        )
+        try:
+            reasons = _parent_precheck_reasons(
+                observed, path=self.parent_path, expected_mode=self.parent_mode
+            )
+            if not reasons and (
+                observed["device"] != self.bound_parent["device"]
+                or observed["inode"] != self.bound_parent["inode"]
+            ):
+                reasons.append(
+                    f"journal parent {self.parent_path} was replaced before the atomic "
+                    "rename (the path now resolves to a different directory); PRECHECK_FAILED"
+                )
+            return reasons
+        finally:
+            if isinstance(observed, dict) and observed.get("fd") is not None:
+                try:
+                    self.driver.close(fd=observed["fd"])
+                except Exception:  # noqa: BLE001
+                    pass
+
+    def list_basenames(self) -> dict[str, Any]:
+        """**唯讀**列出 parent 目錄內的 basename(§5.2 啟動巡查用;絕無刪改面)。
+
+        沒有列舉面的 driver 一律 typed 非成功:「我沒辦法知道這個目錄裡還躺著什麼」與
+        「這個目錄是乾淨的」是兩件事,後者不得由前者推得。
+        """
+
+        if self.driver is None:
+            return {
+                "status": JOURNAL_STATUS_PENDING,
+                "reasons": [
+                    "the durable journal enumeration is reachable but authority-locked: no "
+                    "host file driver is present; EXTERNAL_VERIFICATION_PENDING"
+                ],
+                "basenames": [],
+            }
+        lister = getattr(self.driver, "list_journal_basenames", None)
+        if not callable(lister):
+            return {
+                "status": JOURNAL_STATUS_RECOVERY_REQUIRED,
+                "reasons": [
+                    f"the injected journal driver cannot enumerate {self.parent_path}; a "
+                    "previous plan's stranded transaction would be invisible, so no new work "
+                    "is admitted (§5.2)"
+                ],
+                "basenames": [],
+            }
+        parent_fd = None
+        try:
+            parent_fd, reasons = self._open_parent()
+            if reasons:
+                return {
+                    "status": JOURNAL_STATUS_PRECHECK_FAILED,
+                    "reasons": reasons,
+                    "basenames": [],
+                }
+            listed = lister(parent_fd=parent_fd)
+        except Exception as error:  # noqa: BLE001
+            return {
+                "status": JOURNAL_STATUS_RECOVERY_REQUIRED,
+                "reasons": [
+                    f"journal parent {self.parent_path} could not be enumerated: "
+                    f"{redact_driver_error(error)}"
+                ],
+                "basenames": [],
+            }
+        finally:
+            if parent_fd is not None:
+                try:
+                    self.driver.close(fd=parent_fd)
+                except Exception:  # noqa: BLE001
+                    pass
+        if not isinstance(listed, (list, tuple)) or any(
+            not isinstance(name, str) or "/" in name for name in listed
+        ):
+            return {
+                "status": JOURNAL_STATUS_RECOVERY_REQUIRED,
+                "reasons": [
+                    f"journal parent {self.parent_path} enumeration did not return plain "
+                    "basenames"
+                ],
+                "basenames": [],
+            }
+        return {
+            "status": JOURNAL_STATUS_LOADED, "reasons": [], "basenames": sorted(listed)
+        }
+
     def commit(self, journal: dict[str, Any]) -> dict[str, Any]:
         """把一份已封 digest 的 journal durable 落盤(temp → fsync → rename → parent fsync)。"""
 
@@ -581,12 +777,19 @@ class JournalStore:
                     JOURNAL_STATUS_PRECHECK_FAILED, reasons, journal_path=self.journal_path,
                     driver_engaged=True, durability=durability,
                 )
-            temp = self.driver.create_temp_file(
-                parent_fd=parent_fd,
-                basename=temp_basename,
-                flags=JOURNAL_TEMP_OPEN_FLAGS,
-                mode=JOURNAL_FILE_MODE_BITS,
-            )
+            try:
+                temp = self.driver.create_temp_file(
+                    parent_fd=parent_fd,
+                    basename=temp_basename,
+                    flags=JOURNAL_TEMP_OPEN_FLAGS,
+                    mode=JOURNAL_FILE_MODE_BITS,
+                )
+            except FileExistsError:
+                return _verdict(
+                    JOURNAL_STATUS_TEMP_COLLISION,
+                    [_temp_residue_reason(self.parent_path, temp_basename)],
+                    journal_path=self.journal_path, driver_engaged=True, durability=durability,
+                )
             temp_reasons = _temp_file_precheck_reasons(
                 temp, expected_device=self.bound_parent["device"]
             )
@@ -607,19 +810,11 @@ class JournalStore:
                 )
             self.driver.fsync_file(fd=temp_fd)
             durability["file_fsynced"] = True
-            # 後驗 parent 未被置換(rename 之前的最後一道 §5.2 檢查)。
-            recheck = self.driver.fstat_parent(fd=parent_fd)
-            if (
-                not isinstance(recheck, dict)
-                or recheck.get("device") != self.bound_parent["device"]
-                or recheck.get("inode") != self.bound_parent["inode"]
-            ):
+            # rename 之前重新解析 parent 路徑(見 _reresolve_parent_reasons 的誠實界線)。
+            recheck_reasons = self._reresolve_parent_reasons()
+            if recheck_reasons:
                 return _verdict(
-                    JOURNAL_STATUS_PRECHECK_FAILED,
-                    [
-                        f"journal parent {self.parent_path} was replaced before the atomic "
-                        "rename; PRECHECK_FAILED"
-                    ],
+                    JOURNAL_STATUS_PRECHECK_FAILED, recheck_reasons,
                     journal_path=self.journal_path, driver_engaged=True, durability=durability,
                 )
             self.driver.atomic_rename(
@@ -696,6 +891,19 @@ class JournalStore:
         verdict = verify_journal_bytes(payload, journal_path=self.journal_path)
         verdict["driver_engaged"] = True
         return verdict
+
+
+def _temp_residue_reason(parent_path: str, temp_basename: str) -> str:
+    """EEXIST 的 reason:帶**絕對路徑**與 operator 的補救動作(§5.2 不給任何 unlink 面)。"""
+
+    return (
+        f"the write-ahead temp file {parent_path}/{temp_basename} already exists "
+        "(openat O_EXCL returned EEXIST). The journal surface deliberately exposes no "
+        "unlink/truncate entry point (§5.2), so this residue of an interrupted write is "
+        "never removed automatically: an operator must inspect and remove exactly "
+        f"{parent_path}/{temp_basename} as root before this transaction can proceed. "
+        "The journal itself was neither renamed away nor overwritten."
+    )
 
 
 def _temp_file_precheck_reasons(observed: Any, *, expected_device: Any) -> list[str]:
@@ -806,7 +1014,11 @@ class WriteAheadTransaction:
         post: str,
         step_index: int | None,
         terminal: bool = False,
+        entry_source: str = ENTRY_SOURCE_AGGREGATE,
+        component_effect_class: Any = None,
     ) -> dict[str, Any]:
+        if entry_source not in ENTRY_SOURCES:
+            raise JournalContractError("journal_entry_source_unknown")
         entry: dict[str, Any] = {
             "seq": len(self.entries),
             "state": state,
@@ -814,9 +1026,35 @@ class WriteAheadTransaction:
             "post_state_digest": post,
             "fsynced": True,
             "recorded_at": _iso(self.clock()),
+            # §5.2 的 digest 空間判別:這一筆是誰寫的、寫的是哪一 row 的 subject。
+            "entry_source": entry_source,
         }
         if step_index is not None:
             entry["step_index"] = int(step_index)
+        mapped_class = (
+            APPLY_STEP_INDEX_COMPONENT_CLASS.get(int(step_index))
+            if step_index is not None
+            else None
+        )
+        resolved_class = component_effect_class
+        if resolved_class is None:
+            resolved_class = mapped_class
+        elif str(resolved_class) == ENTRY_SCOPE_AGGREGATE_TRANSACTION:
+            # 交易級 scope:subject 是整筆交易的 plan 級前態,不屬於任何一 row 的 digest 空間,
+            # 所以不與 step_index 推出的 class 比對(它本來就不冒充那一列)。只有 aggregate
+            # producer 能宣告它——row driver 借用這個 scope 會把自己的 subject 講成交易級。
+            if entry_source != ENTRY_SOURCE_AGGREGATE:
+                raise JournalContractError(
+                    "journal_entry_aggregate_scope_requires_the_aggregate_producer"
+                )
+        elif mapped_class is not None and str(resolved_class) != mapped_class:
+            # producer 自報的 row 與 step_index 表推出的 row 不一致 = digest 空間衝突。兩個
+            # 都寫下去只會讓收斂端二選一,故此處 typed 硬拒(絕不落盤一筆自相矛盾的判別)。
+            raise JournalContractError("journal_entry_component_effect_class_conflicts_step")
+        if resolved_class is None:
+            # 判別欄是必填的:寫不出「哪一 row 的 subject 空間」就不該有這筆 WAL entry。
+            raise JournalContractError("journal_entry_component_effect_class_required")
+        entry["component_effect_class"] = str(resolved_class)
         candidate = self.entries + [entry]
         journal = self.build_journal(candidate, terminal)
         verdict = self.store.commit(journal)
@@ -834,12 +1072,15 @@ class WriteAheadTransaction:
         post_state_digest: str,
         step_index: int | None = None,
         terminal: bool = False,
+        entry_source: str = ENTRY_SOURCE_AGGREGATE,
+        component_effect_class: Any = None,
     ) -> dict[str, Any]:
         """durable 記一次 state 轉移(補償/終端態走此路;失敗即 typed 非成功)。"""
 
         return self._append_and_commit(
             state=state, pre=pre_state_digest, post=post_state_digest,
-            step_index=step_index, terminal=terminal,
+            step_index=step_index, terminal=terminal, entry_source=entry_source,
+            component_effect_class=component_effect_class,
         )
 
     def step(
@@ -979,6 +1220,8 @@ def reconcile_journal(
         "status": RECONCILE_RECOVERY_REQUIRED,
         "reasons": [],
         "terminal_state": None,
+        "terminal_entry_source": None,
+        "terminal_component_effect_class": None,
         "mutation_performed": False,
         "production_authority_flags": dict(_ALL_FALSE_PRODUCTION_FLAGS),
     }
@@ -994,11 +1237,27 @@ def reconcile_journal(
     verdict["terminal_state"] = state
     entries = journal["entries"]
     last = entries[-1]
+    # §5.2 的 digest 空間判別(A9):最後一筆是誰寫的、寫的是哪一 row 的 subject。呼叫端拿
+    # 來比對的 observed digest 必須屬於同一個空間,否則「相等」只是巧合。
+    verdict["terminal_entry_source"] = last.get("entry_source")
+    verdict["terminal_component_effect_class"] = last.get("component_effect_class")
     # 「無需收斂」必須**兩者**成立:journal 自己宣告 terminal,且最後一筆 state 亦為終端態。
     # 只看最後一筆 state 會 fail-open:APPLY 的共用 WAL 上,某個 row 內部的 ``VERIFIED``
     # (那是**該 row** 的終端,不是**交易**的終端)恰好落在最後一筆時,一筆未完成的交易會被
     # 誤判為「沒事」,於是一個新 plan 被放行,而主機上還躺著部分施作的狀態。
     if state in TERMINAL_JOURNAL_STATES and journal.get("terminal") is True:
+        # ``FAILED`` 與 ``COMPENSATED`` 都是終端,但只有後者代表殘留已消失。§5.4 的
+        # ``FAILED`` 恰好寫在「補償無法被證明為 exact」時——它記的是**確切殘留**並封鎖
+        # S2.5。把它讀成「沒事要收斂」正是 row-level VERIFIED 那個 fail-open 的同一族。
+        if state == "FAILED":
+            verdict["status"] = RECONCILE_RECOVERY_REQUIRED
+            verdict["reasons"] = [
+                "the journal is terminal in state FAILED: compensation could not be proved "
+                "exact, so the exact residual it records is still on the host (§5.4). "
+                "RECOVERY_REQUIRED with zero mutation; no new probe, prepare intent or plan "
+                "is admitted until an independent residue postcheck clears it"
+            ]
+            return verdict
         verdict["status"] = RECONCILE_TERMINAL_NOTHING_TO_DO
         return verdict
     if not isinstance(observed_state_digest, str) or (
@@ -1027,10 +1286,17 @@ def reconcile_journal(
         import agent_governance_s2_4_component as _component
 
         ownership_reasons = _component.ownership_evidence_reasons(ownership_evidence)
-        if ownership_reasons or not _component.ownership_binding_present(
-            (ownership_evidence or {}).get("journal_subject")
-        ):
-            verdict["reasons"] = (ownership_reasons or []) + [
+        # §5.3/§5.4:授權「破壞性的逆序補償」不能只看兩個字串長得像 digest。``journal_digest``
+        # 必須**就是**剛剛讀回並完整性驗過的那本 journal 的 ``self_digest``——它就在手上,
+        # 沒有任何理由不比對。不比對的話,兩個 ``sha256:000…0`` 就能把零變更的
+        # RECOVERY_REQUIRED 換成一次被授權的破壞性補償。
+        binding_reasons = _component.ownership_binding_reasons(
+            (ownership_evidence or {}).get("journal_subject"),
+            subject="journal_subject",
+            expected_journal_digest=journal.get("self_digest"),
+        )
+        if ownership_reasons or binding_reasons:
+            verdict["reasons"] = (ownership_reasons or []) + binding_reasons + [
                 "a partial state was declared task-owned but no valid task-owned journal "
                 "ownership binding was supplied; RECOVERY_REQUIRED with no mutation (§5.3)"
             ]
@@ -1059,6 +1325,15 @@ def journal_abi_projection() -> dict[str, Any]:
         "install_journal_path": install_journal_path(PLAN_ID_PREFIX + sample),
         "journal_states": list(JOURNAL_STATES),
         "prepare_journal_states": list(PREPARE_JOURNAL_STATES),
+        "terminal_journal_states": list(TERMINAL_JOURNAL_STATES),
+        "terminal_states_admitting_new_work": [
+            state for state in TERMINAL_JOURNAL_STATES if state != "FAILED"
+        ],
+        "entry_sources": list(ENTRY_SOURCES),
+        "apply_step_index_component_class": {
+            str(index): name
+            for index, name in sorted(APPLY_STEP_INDEX_COMPONENT_CLASS.items())
+        },
         "wal_fault_windows": list(WAL_FAULT_WINDOWS),
         "parent_open_flags": list(JOURNAL_PARENT_OPEN_FLAGS),
         "temp_open_flags": list(JOURNAL_TEMP_OPEN_FLAGS),

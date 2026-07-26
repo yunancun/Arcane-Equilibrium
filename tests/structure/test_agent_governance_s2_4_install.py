@@ -379,10 +379,20 @@ def test_registry_declares_three_s2_4_adapters_authority_locked() -> None:
         for key, value in entry.items():
             if key.endswith("_schema_path"):
                 assert (ROOT / value).is_file(), (adapter_id, key, value)
-        # W1 不建 driver 模組:implementation 只綁 install 治理模組(driver 屬 W3)。
-        assert entry["implementation_paths"] == [
+        # implementation_paths 必含 install 治理模組;§10.2 的凍結進入點所在的模組也必須在列
+        # (CC DRIFT-3:`apply_s2_4_install_plan` 住在 `..._install_driver.py` 而 `install.py`
+        # 並不 re-export 它,於是照著 operator 已核准的 adapter 紀錄找,找不到真正碰主機的碼)。
+        assert (
             "helper_scripts/maintenance_scripts/agent_governance_s2_4_install.py"
-        ]
+            in entry["implementation_paths"]
+        )
+        for path in entry["implementation_paths"] + entry["component_paths"]:
+            assert (ROOT / path).is_file(), (adapter_id, path)
+        if adapter_id == "s2_4_install_adapter_v1":
+            assert (
+                "helper_scripts/maintenance_scripts/agent_governance_s2_4_install_driver.py"
+                in entry["implementation_paths"]
+            )
     # probe/PREPARE 明文「cannot reach」APPLY 面(§4/§10.5 #38)。
     for adapter_id in _S2_4_ADAPTER_IDS[:2]:
         assert "cannot reach any APPLY surface" in adapters[adapter_id]["invariant"]

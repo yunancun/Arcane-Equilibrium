@@ -73,6 +73,10 @@ class FakeLockDriver:
         self.replace_parent_on_fstat = replace_parent_on_fstat
         self.calls: list[str] = []
         self.closed: list[int] = []
+        self._parent_opens = 0
+        # parent 的 fd 與 lock 的 fd(11)必須可分辨:置換重驗會再開一次 parent,
+        # 兩者撞號會讓「lock fd 有沒有被關掉」的斷言失去意義。
+        self._next_parent_fd = 20
 
     def _parent(self, fd):
         return {
@@ -85,12 +89,16 @@ class FakeLockDriver:
         assert path == lock.INSTALL_LOCK_PARENT, path
         assert flags == lock.LOCK_PARENT_OPEN_FLAGS, flags
         self.calls.append("open_parent_directory")
-        return self._parent(10)
+        self._parent_opens += 1
+        if self.replace_parent_on_fstat and self._parent_opens > 1:
+            # 綁定之後 ``/run/lock`` 這個**路徑**被換掉:唯有重新解析看得見。
+            self.parent_inode += 1
+        fd = self._next_parent_fd
+        self._next_parent_fd += 1
+        return self._parent(fd)
 
     def fstat_parent(self, *, fd):
         self.calls.append("fstat_parent")
-        if self.replace_parent_on_fstat:
-            self.parent_inode += 1
         return self._parent(fd)
 
     def openat_lock_file(self, *, parent_fd, basename, flags, mode):
@@ -147,10 +155,11 @@ def test_clean_acquisition_follows_the_exact_flag_and_fstat_order() -> None:
     assert verdict["lock_fd"] == 11
     assert verdict["bound_parent"] == {"device": 66306, "inode": 555, "mode": "0755"}
     assert verdict["lock_unlinked"] is False
-    # fstat 四項證明必在 flock **之前**;parent 置換重驗亦在 flock 之前。
+    # fstat 四項證明必在 flock **之前**;parent 置換重驗亦在 flock 之前——而且那道重驗是
+    # 一次**重新解析路徑**(A11:同一個 dirfd 再 fstat 一次永遠不會失敗,fd 釘住 inode)。
     assert [call for call in driver.calls if call != "close"] == [
-        "open_parent_directory", "openat_lock_file", "fstat_lock_file", "fstat_parent",
-        "flock_exclusive_nonblocking",
+        "open_parent_directory", "openat_lock_file", "fstat_lock_file",
+        "open_parent_directory", "flock_exclusive_nonblocking",
     ]
 
 

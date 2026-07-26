@@ -663,8 +663,12 @@ def test_a_to_b_to_a_rotation_restores_the_previous_encrypted_slot(signed) -> No
     prior = "sha256:" + "1" * 64
     _, (_pg, dsn_handle) = _broker_handles()
     driver = _FakeCredentialDriver(
+        # A7:既有 slot 的收養必須解參考——driver 為這個 slot 報回的前一份 receipt/journal
+        # digest 必須逐位元等於 caller 遞交的 ownership pair。
         slot={"owner": "root", "mode": "0600", "task_owned": True,
-              "encrypted_blob_digest": prior},
+              "encrypted_blob_digest": prior,
+              "s2_4_receipt_digest": "sha256:" + "a" * 64,
+              "journal_digest": "sha256:" + "b" * 64},
         login_ok=False,
     )
     verdict = apply_mod.apply_s2_4_credential_install(
