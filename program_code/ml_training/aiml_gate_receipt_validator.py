@@ -106,19 +106,35 @@ from aiml_gate_receipt_classifiers import (  # noqa: E402,F401
     classify_required_effects,
 )
 from aiml_gate_receipt_s2_4_contracts import (  # noqa: E402,F401
+    DEPENDENCY_EVIDENCE_REOBSERVATION_REQUIRED,
+    DEPENDENCY_REFRESH_BY_REFERENCE_FORBIDDEN,
+    DEPENDENCY_REFRESH_STATUS_ADMITTED,
+    DEPENDENCY_REFRESH_STATUS_REJECTED,
+    MAX_DEPENDENCY_REFRESH_TTL_SECONDS,
     PERMIT_PLAN_BINDING_STATUS_REJECTED,
     PERMIT_PLAN_BINDING_STATUS_VERIFIED,
+    S2_2A_OBSERVATION_TTL_SECONDS,
     S2_4_APPLY_ROW_CLASS_ORDER,
     S2_4_AUTHORIZATION_ID_DOMAIN,
     S2_4_AUTHORIZATION_ID_SELF_FIELD,
     S2_4_AUTHORIZATION_PROFILES,
+    S2_4_DEPENDENCY_REFRESH_CLASSES,
+    S2_4_DEPENDENCY_REFRESH_METHOD,
+    S2_4_DEPENDENCY_REFRESH_SCHEMA_VERSION,
+    S2_4_NEVER_REFRESHABLE_EVIDENCE,
     S2_4_OPERATOR_AUTHORIZATION_SCHEMA_VERSION,
     S2_4_OPERATOR_TRUST_ROOT_FINGERPRINT,
     S2_4_OPERATOR_TRUST_ROOT_PUBLIC_KEY,
+    S2_4_W1_SCHEMA_FILENAMES as _W1_SCHEMA_FILENAMES,
+    SOURCE_DEPENDENCY_STATUS_ADMITTED_BY_REFRESH,
+    SOURCE_DEPENDENCY_STATUS_EXPIRED_NO_REFRESH,
+    SOURCE_DEPENDENCY_STATUS_FRESH,
+    SOURCE_DEPENDENCY_STATUS_REJECTED,
     _S2_4_APPLY_INTENT_CLASS_TOKEN_FIELDS,
     _S2_4_APPLY_INTENT_COMMON_TOKEN_FIELDS,
     _S2_4_PROFILE_BY_IDENTITY,
     _SSH_SIGNATURE_ARMOR_MARKERS,
+    _dependency_refresh_structural_errors,
     _install_lineage_plan_binding_errors,
     _s2_4_authorization_payload_binding_errors,
     _s2_4_install_plan_apply_rows_errors,
@@ -128,12 +144,19 @@ from aiml_gate_receipt_s2_4_contracts import (  # noqa: E402,F401
     _s2_4_route_core_rederivation_errors,
     _sshsig_armor_body_is_strict_base64,
     authorization_payload_binding_fields,
+    build_s2_4_dependency_refresh_attestation,
     build_s2_4_operator_authorization,
+    dependency_class_for_schema_version,
+    dependency_original_observation_window,
+    dependency_producer_identity,
     derive_authorization_id,
     derive_authorization_replay_binding,
     derive_component_intent_binding,
+    derive_dependency_refresh_status,
     derive_install_lineage_status,
     derive_permit_plan_binding_status,
+    derive_source_dependency_admission_status,
+    reproduce_dependency_semantic_digests,
     s2_4_authorization_identity_digest,
     s2_4_authorization_profiles_digest,
 )
@@ -429,42 +452,6 @@ def w0_owned_path_diff_digest(
 # 「一起」再導出 PASS/ADMITTED——admission 鏈不因跨波而鬆脫(§10.5 #27)。
 # --------------------------------------------------------------------------- #
 _W1_SCHEMA_DIR_REL = "program_code/ml_training/schemas/aiml_gate_receipts"
-# §10.1 W1 schemas-dir additions:29 支 s2_4_* + v2 classifier + topology/network 三支。
-_W1_SCHEMA_FILENAMES = (
-    "aiml_component_effect_classification_v2.schema.json",
-    "network_sandbox_capability_attestation_v1.schema.json",
-    "pg_topology_attestation_v1.schema.json",
-    "pg_topology_runtime_guard_v1.schema.json",
-    "s2_4_authorization_replay_ledger_v1.schema.json",
-    "s2_4_capability_probe_core_v1.schema.json",
-    "s2_4_capability_probe_effect_receipt_v1.schema.json",
-    "s2_4_capability_probe_intent_v1.schema.json",
-    "s2_4_capability_probe_journal_v1.schema.json",
-    "s2_4_capability_probe_postcheck_v1.schema.json",
-    "s2_4_capability_probe_rollback_v1.schema.json",
-    "s2_4_component_effect_intent_v1.schema.json",
-    "s2_4_component_effect_postcheck_v1.schema.json",
-    "s2_4_component_effect_result_v1.schema.json",
-    "s2_4_component_effect_rollback_v1.schema.json",
-    "s2_4_install_effect_receipt_v1.schema.json",
-    "s2_4_install_journal_v1.schema.json",
-    "s2_4_install_plan_core_v1.schema.json",
-    "s2_4_install_plan_v1.schema.json",
-    "s2_4_install_postcheck_v1.schema.json",
-    "s2_4_install_rollback_v1.schema.json",
-    "s2_4_install_step_result_v1.schema.json",
-    "s2_4_operator_authorization_v1.schema.json",
-    "s2_4_pg_hba_delta_v1.schema.json",
-    "s2_4_prepare_core_v1.schema.json",
-    "s2_4_prepare_effect_receipt_v1.schema.json",
-    "s2_4_prepare_intent_v1.schema.json",
-    "s2_4_prepare_journal_v1.schema.json",
-    "s2_4_prepare_postcheck_v1.schema.json",
-    "s2_4_prepare_rollback_v1.schema.json",
-    "s2_4_prepared_install_bundle_v1.schema.json",
-    "s2_4_source_admission_receipt_v1.schema.json",
-    "s2_4_wave_exit_receipt_v1.schema.json",
-)
 # §10.1 W1 owned-path 投影:registry + routing/closure/component-effects 模組 + contracts 葉
 # (與其 facade/classifiers sibling)+ schemas dir additions + install 模組與其測試。
 _W1_OWNED_PATHS = tuple(sorted(
@@ -1925,6 +1912,20 @@ def validate_aiml_artifact(
         # same-id-different-plan)由 facade-reachable 的 derive_authorization_replay_binding /
         # _s2_4_replay_ledger_errors 執法——消費是「授權↔ledger」裁決,非裸 ledger 結構。
         errors.extend(_s2_4_operator_authorization_errors(artifact, now=now))
+    if schema_version == S2_4_DEPENDENCY_REFRESH_SCHEMA_VERSION:
+        # S2.4(WP4·W5·§9.2)dependency refresh:closed schema 之上只作**自足**驗(caller-status
+        # 拒 + self_digest + 封閉族表 + 復現值不得是原 digest 的複述 + producer 投影相異)——中央閘
+        # 手上沒有原 receipt 物件。⚠ 乾淨的 [] 「不」等於 ADMITTED:真裁決恆由
+        # derive_dependency_refresh_status(original_receipt=<原 receipt>) 於當前 head 重算後授予
+        # (鏡 wave-exit 分支的同一條誠實界線)。
+        declared = sorted(key for key in _CALLER_STATUS_KEYS if key in artifact)
+        if declared:
+            errors.append(
+                "dependency refresh attestation must not self-declare status "
+                f"({', '.join(declared)}); the central validator derives it"
+            )
+        else:
+            errors.extend(_dependency_refresh_structural_errors(artifact))
     return errors
 
 

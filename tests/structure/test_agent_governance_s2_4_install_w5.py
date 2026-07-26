@@ -58,7 +58,10 @@ _W4_HANDOVER = (
     "STRANDED_WAL_TEMP_FILES_ARE_REPORT_ONLY",
 )
 _W5_NEW = (
-    "DEPENDENCY_REFRESH_ATTESTATION_ABSENT",
+    # W5 後半段(2026-07-27)實作了 §9.2 的閘,於是舊的「整份缺席」義務被關閉,換成兩條
+    # 精確殘留:§3 的 receipt 綁定欄位不存在,以及 reproducer 節點獨立性只有宣告面。
+    "DEPENDENCY_REFRESH_RECEIPT_BINDING_ABSENT",
+    "DEPENDENCY_REFRESH_REPRODUCER_NODE_IS_DECLARATIVE",
     "OWNED_PATH_PROJECTION_RULER_IS_NOT_UNIFORM",
     "PR_SET_DUMPABLE_IS_DECLARED_NOT_ENFORCED",
     "S2_5_LIFECYCLE_FIXTURES_DO_NOT_EXIST",
@@ -250,7 +253,33 @@ def test_the_w5_projection_leaf_is_declared_in_the_runtime_import_closure() -> N
     )
 
 
-def test_w5_exported_abi_projection_folds_the_six_live_verdict_groups() -> None:
+def test_a_degraded_dependency_refresh_gate_breaks_the_w5_wave_exit_by_name(
+    chain, monkeypatch
+) -> None:
+    """§9.2 的活裁決是**接進 wave-exit** 的,不只是投影裡的一個值。
+
+    把 ``_dependency_refresh_live`` 換成一份「refresh-by-reference 被放行 + 復述舊 digest
+    被採信」的退化投影,``w5_structural_errors`` 必須給出具名 reason。若有人把
+    ``_dependency_refresh_reasons`` 的接線拿掉,本測試轉紅。
+    """
+
+    import aiml_gate_receipt_wave_w5 as wave_w5
+
+    _admission, _w0, _w1, _w2, _w3, _w4, w5 = chain
+    clean = wave_w5._dependency_refresh_live(ROOT)
+    degraded = dict(clean)
+    degraded["reasserted_original_digest_status"] = "DEPENDENCY_REFRESH_ADMITTED"
+    degraded["never_refreshable_statuses"] = {
+        name: "SOURCE_DEPENDENCY_ADMITTED_BY_REFRESH"
+        for name in clean["never_refreshable_classes"]
+    }
+    monkeypatch.setattr(wave_w5, "_dependency_refresh_live", lambda *_a, **_k: degraded)
+    reasons = validator.w5_structural_errors(w5)
+    assert any("merely re-asserts the original digest" in r for r in reasons), reasons
+    assert any("refresh-by-reference" in r for r in reasons), reasons
+
+
+def test_w5_exported_abi_projection_folds_the_seven_live_verdict_groups() -> None:
     projection = validator.w5_exported_abi_projection()
     secret = projection["secret_scan_live"]
     assert secret["encoded_forms_detected"] == {
@@ -285,7 +314,32 @@ def test_w5_exported_abi_projection_folds_the_six_live_verdict_groups() -> None:
     assert schema["unregistered_schema_keys"] == []
     assert schema["unresolvable_schema_keys"] == []
     assert schema["undeclared_on_disk_schema_keys"] == []
-    assert schema["dependency_refresh_schema_file_exists"] is False
+    # W5 後半段:§10.1 明列的那一份 schema 已存在且已註冊(缺口由「記錄」翻成「已建」)。
+    assert schema["dependency_refresh_schema_file_exists"] is True
+    assert schema["dependency_refresh_schema_registered"] is True
+    refresh = projection["dependency_refresh_live"]
+    assert refresh["positive_refresh_status"] == "DEPENDENCY_REFRESH_ADMITTED"
+    assert refresh["positive_admission_status"] == "SOURCE_DEPENDENCY_ADMITTED_BY_REFRESH"
+    assert refresh["expired_without_refresh_status"] == (
+        "SOURCE_DEPENDENCY_EXPIRED_NO_REFRESH"
+    )
+    for key in (
+        "reasserted_original_digest_status",
+        "same_producer_node_status",
+        "refresh_of_a_refresh_status",
+        "self_declared_status_status",
+        "substituted_original_status",
+        "stale_head_status",
+        "semantic_digest_drift_status",
+    ):
+        assert refresh[key] == "DEPENDENCY_REFRESH_REJECTED", key
+    assert refresh["two_refreshes_status"] == "SOURCE_DEPENDENCY_REJECTED"
+    assert all(
+        status == "DEPENDENCY_REFRESH_BY_REFERENCE_FORBIDDEN"
+        for status in refresh["never_refreshable_statuses"].values()
+    )
+    assert refresh["refresh_carries_no_signature_field"] is True
+    assert all(refresh["reproducible_class_field_sets"].values())
 
 
 def test_w5_abi_states_its_boundary_and_names_no_effect() -> None:

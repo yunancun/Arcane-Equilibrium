@@ -20,10 +20,16 @@ W5 的工作是「把 §10.5 每一條驗收項對到一支**source 錯了就會
   測試要求「S2.4 的**每一份** schema 都在中央 ``SCHEMA_FILES`` 上」——新增一份沒人 round-trip
   的 schema 不會弄紅任何東西。
 
-另外兩條是**誠實記錄**而非新覆蓋:§10.5 #28 的「一份獨立重算的 refresh attestation」在此
-checkout 上沒有 source 可測(§10.1 明列的 schema 檔不存在),而 §10.5 #26 的
-``PR_SET_DUMPABLE=0`` 是一個沒有任何 enforcement 的宣告常數。兩者都以 W5 obligation 的形狀
-釘在這裡,任何人默默拿掉義務或默默「實作了但沒關閉義務」都會轉紅。
+* **#28 前半(一份獨立重算的 refresh attestation)**:W5 前半段記錄它「無 source 可測」
+  (§10.1 明列的 schema 檔不存在);W5 後半段把 §9.2 的閘實作出來,於是本檔補上正向與**每一種**
+  §9.2 明文禁止的失敗模式——只複述舊 digest / 同一個 producer 節點 / refresh 去 refresh
+  refresh / 自證 status / 被替換或已漂移的原身分 / 過時 head / 兩份 refresh —— 並把
+  §10.5 #28 後半(runtime·topology·prepare·auth 永不可引用刷新)**經同一支閘**再證一次
+  (既有的 TTL lane 測試不重複)。
+
+仍以**誠實記錄**留著的是 §10.5 #26 的 ``PR_SET_DUMPABLE=0``:一個沒有任何 enforcement 的
+宣告常數,以 W5 obligation 的形狀釘在這裡,任何人默默拿掉義務或默默「實作了但沒關閉義務」
+都會轉紅。
 
 本檔零 runtime 接觸:所有斷言都在記憶體內對 source 投影求值。
 """
@@ -366,7 +372,10 @@ def test_every_s2_4_schema_is_registered_centrally_and_resolves_to_a_real_file()
     assert live["unregistered_schema_keys"] == []
     assert live["unresolvable_schema_keys"] == []
     assert live["undeclared_on_disk_schema_keys"] == []
-    assert live["s2_4_schema_count"] == 38
+    # 39 = W5 前半段的 38 份 + §10.1 明列而當時缺席、W5 後半段補上的 §9.2 refresh schema。
+    assert live["s2_4_schema_count"] == 39
+    assert live["dependency_refresh_schema_registered"] is True
+    assert live["dependency_refresh_schema_file_exists"] is True
 
 
 def test_the_schema_directory_holds_no_s2_4_schema_outside_the_declared_inventory() -> None:
@@ -388,35 +397,399 @@ def test_the_schema_directory_holds_no_s2_4_schema_outside_the_declared_inventor
     )
 
 
-# ══════════════ 誠實記錄:兩項 W5 不能在 source 關閉的義務 ═══════════════════════
-def test_the_dependency_refresh_attestation_is_absent_and_recorded_as_an_obligation() -> None:
-    """§10.1 把 ``s2_4_dependency_refresh_attestation_v1.schema.json`` 列進 owned-path,
-    §9.2 讓它成為過期 source 身分**唯一**的補救途徑,§10.3 的 W5 row 要求 W5 產出它。
-    它在這個 head 上完全不存在:沒有 schema、沒有 SCHEMA_FILES 條目、沒有 validator 分支、
-    沒有 builder、沒有測試。W5 不擁有「寫生產閘」,所以把它釘成 obligation。"""
+# ═════════ §10.5 #28 前半:過期 source 身分需要一份獨立重算的 refresh ═════════════
+# 正向素材是 repo 內**真實且已過期**的 S2.2A receipt(generated_at_utc=2026-07-24,
+# code-owned 觀測 TTL 3600s),不是合成 fixture;時鐘一律顯式凍結,絕不取 wall clock。
+_REFRESH_NOW = "2026-07-27T00:05:00+00:00"
+_REFRESH_REPRODUCED_AT = "2026-07-27T00:00:00+00:00"
+_REFRESH_CALLER = "E1:S2.4:W5-dependency-refresh-test"
+_REFRESH_PLATFORM = {"os": "darwin", "arch": "arm64", "python_version": "3.12"}
+_S2_2A_V1 = "docs/execution_plan/ai_ml_landing/receipts/S2.2A-source-compatibility-receipt-v1.json"
+_S2_2A_V2 = "docs/execution_plan/ai_ml_landing/receipts/S2.2A-source-compatibility-receipt-v2.json"
+_S2_3_SEALED = "docs/execution_plan/ai_ml_landing/receipts/S2.3-sealed-build-receipt-v1.json"
+_S2_3_IDENTITY = (
+    "docs/execution_plan/ai_ml_landing/receipts/S2.3-expected-identity-receipt-v1.json"
+)
 
-    from aiml_gate_receipt_wave_w5 import _DEPENDENCY_REFRESH_SCHEMA
 
-    declared = (
-        ML_ROOT / "schemas/aiml_gate_receipts"
-        / f"{_DEPENDENCY_REFRESH_SCHEMA}.schema.json"
+def _receipt(rel: str) -> dict:
+    return json.loads((ROOT / rel).read_text(encoding="utf-8"))
+
+
+def _reseal(artifact: dict) -> dict:
+    artifact = dict(artifact)
+    artifact.pop("self_digest", None)
+    artifact["self_digest"] = validator.artifact_self_digest(artifact)
+    return artifact
+
+
+def _refresh(original: dict, **overrides) -> dict:
+    return validator.build_s2_4_dependency_refresh_attestation(
+        original,
+        reproducer_caller=overrides.pop("reproducer_caller", _REFRESH_CALLER),
+        reproducer_platform=dict(_REFRESH_PLATFORM),
+        reproduced_at=overrides.pop("reproduced_at", _REFRESH_REPRODUCED_AT),
+        **overrides,
     )
-    absent = not declared.is_file() and _DEPENDENCY_REFRESH_SCHEMA not in (
-        validator.SCHEMA_FILES
+
+
+def _derive(refresh, original) -> dict:
+    return validator.derive_dependency_refresh_status(
+        refresh, original_receipt=original, now=_REFRESH_NOW
     )
+
+
+@pytest.fixture(scope="module")
+def s2_2a_pair():
+    original = _receipt(_S2_2A_V1)
+    return original, _refresh(original)
+
+
+def test_one_independently_reproduced_refresh_admits_the_expired_source_identity(
+    s2_2a_pair,
+) -> None:
+    """§9.2 正向:真實已過期的 S2.2A 身分 + 一份獨立重算的 refresh = 被採信。
+
+    復現值不是 caller 帶進來的——builder 與閘共用同一支
+    ``reproduce_dependency_semantic_digests``,它只從當前 checkout 的位元組算。
+    """
+
+    original, refresh = s2_2a_pair
+    # 原身分**確實**已過期(否則正向路徑證不到任何東西)。
+    window = validator.dependency_original_observation_window(original)
+    assert window[1] < _REFRESH_NOW
+    assert validator.validate_aiml_artifact(refresh) == []
+    assert not any(key in refresh for key in validator._CALLER_STATUS_KEYS)
+    assert refresh["production_authority_flags"] == {
+        "nine_authorities_false": True,
+        "production_apply_performed": False,
+        "running_attested": False,
+    }
+    outcome = _derive(refresh, original)
+    assert outcome == {
+        "status": "DEPENDENCY_REFRESH_ADMITTED",
+        "reasons": [],
+        "dependency_class": "S2_2A_SOURCE_COMPATIBILITY",
+        "reproduced_semantic_digests": {
+            "capture_contract_digest": original["capture_contract_digest"],
+            "learning_runtime_digest": original["learning_runtime_digest"],
+            "training_contract_digest": original["training_contract_digest"],
+        },
+        "admits_expired_source_identity": True,
+    }
+    admission = validator.derive_source_dependency_admission_status(
+        evidence_class="S2_2A_SOURCE_COMPATIBILITY",
+        receipt=original,
+        refresh=refresh,
+        now=_REFRESH_NOW,
+    )
+    assert admission["status"] == "SOURCE_DEPENDENCY_ADMITTED_BY_REFRESH"
+    assert admission["refresh_admitted"] is True
+    assert admission["runtime_observation_substituted"] is False
+    # 沒有 refresh 時,同一份過期身分不被採信。
+    assert validator.derive_source_dependency_admission_status(
+        evidence_class="S2_2A_SOURCE_COMPATIBILITY", receipt=original, now=_REFRESH_NOW
+    )["status"] == "SOURCE_DEPENDENCY_EXPIRED_NO_REFRESH"
+
+
+@pytest.mark.parametrize(
+    "rel,dependency_class",
+    (
+        (_S2_2A_V2, "S2_2A_SOURCE_COMPATIBILITY"),
+        (_S2_3_SEALED, "S2_3_SEALED_BUILD"),
+        (_S2_3_IDENTITY, "S2_3_EXPECTED_IDENTITY"),
+    ),
+)
+def test_every_shipped_expired_source_identity_is_refreshable(rel, dependency_class) -> None:
+    """§9.2 第一列的三族在 repo 內都有真實、已過期的 receipt,且都能被獨立復現。"""
+
+    original = _receipt(rel)
+    refresh = _refresh(original)
+    assert refresh["dependency_class"] == dependency_class
+    assert _derive(refresh, original)["status"] == "DEPENDENCY_REFRESH_ADMITTED"
+    assert validator.derive_source_dependency_admission_status(
+        evidence_class=dependency_class, receipt=original, refresh=refresh, now=_REFRESH_NOW
+    )["status"] == "SOURCE_DEPENDENCY_ADMITTED_BY_REFRESH"
+
+
+def test_a_refresh_that_merely_reasserts_the_original_digest_does_not_admit(
+    s2_2a_pair,
+) -> None:
+    """§9.2:「independently RECOMPUTED」——把原 receipt 的 digest 抄進復現欄位不算復現。"""
+
+    original, refresh = s2_2a_pair
+    forged = _reseal({
+        **refresh,
+        "reproduced_semantic_digests": {
+            field: refresh["original_receipt_digest"]
+            for field in refresh["reproduced_semantic_digests"]
+        },
+    })
+    outcome = _derive(forged, original)
+    assert outcome["status"] == "DEPENDENCY_REFRESH_REJECTED"
+    assert any("merely re-asserts" in reason for reason in outcome["reasons"])
+    # 中央閘的**自足**分支也擋得住(不需要原 receipt 就能看出這是複述)。
+    assert any(
+        "merely re-asserts" in error for error in validator.validate_aiml_artifact(forged)
+    )
+
+
+def test_a_refresh_produced_by_the_original_producer_node_does_not_admit(
+    s2_2a_pair,
+) -> None:
+    """§9.2:「independently replays」——同一個 producer 標籤重放的不是獨立復現。"""
+
+    original, _refresh_ok = s2_2a_pair
+    same_node = _refresh(original, reproducer_caller=original["session_id"])
+    outcome = _derive(same_node, original)
+    assert outcome["status"] == "DEPENDENCY_REFRESH_REJECTED"
+    assert any("same node/caller" in reason for reason in outcome["reasons"])
+
+
+def test_a_refresh_reproduced_inside_the_original_observation_window_does_not_admit(
+    s2_2a_pair,
+) -> None:
+    """同一次觀測不能被改寫成 refresh:``reproduced_at`` 必須嚴格晚於原證據的到期時刻。
+
+    這一條是「不同節點」宣告面之外**結構性**的那一半:即使同一台機器,它也不可能在原觀測窗
+    之內產出一份合格的 refresh。
+    """
+
+    original, _ok = s2_2a_pair
+    window = validator.dependency_original_observation_window(original)
+    inside = _refresh(original, reproduced_at=window[0])
+    outcome = validator.derive_dependency_refresh_status(
+        inside, original_receipt=original, now=_REFRESH_NOW
+    )
+    assert outcome["status"] == "DEPENDENCY_REFRESH_REJECTED"
+    assert any(
+        "not strictly after the original evidence's own expiry" in reason
+        for reason in outcome["reasons"]
+    )
+
+
+def test_a_refresh_cannot_refresh_another_refresh(s2_2a_pair) -> None:
+    """§9.2 / §12 #15:refresh 不得續 refresh——builder 與閘兩側都拒,schema enum 亦不含它。"""
+
+    original, refresh = s2_2a_pair
+    outcome = _derive(refresh, refresh)
+    assert outcome["status"] == "DEPENDENCY_REFRESH_REJECTED"
+    assert any("cannot refresh another refresh" in r for r in outcome["reasons"])
+    with pytest.raises(ValueError, match="cannot refresh another refresh"):
+        _refresh(refresh)
+    schema = validator._load_schema("s2_4_dependency_refresh_attestation_v1")
+    assert "s2_4_dependency_refresh_attestation_v1" not in (
+        schema["properties"]["original_schema_version"]["enum"]
+    )
+
+
+def test_a_refresh_cannot_self_declare_its_own_status(s2_2a_pair) -> None:
+    """§10.3 / §12 #15:S2.4 沒有任何 artifact 自證 status——refresh 也不例外。"""
+
+    original, refresh = s2_2a_pair
+    for key in validator._CALLER_STATUS_KEYS:
+        declared = {**refresh, key: "ADMITTED"}
+        outcome = _derive(declared, original)
+        assert outcome["status"] == "DEPENDENCY_REFRESH_REJECTED"
+        assert any("must not self-declare status" in r for r in outcome["reasons"])
+        # 中央閘更早一層就擋掉:closed schema 的 additionalProperties:false 讓自證欄位
+        # 連進到 W5 分支的機會都沒有(兩道各自獨立,拿掉任一道另一道仍拒)。
+        assert any(
+            f"unexpected property {key}" in e
+            for e in validator.validate_aiml_artifact(_reseal(declared))
+        )
+
+
+def test_a_substituted_or_stale_dependency_identity_does_not_admit(s2_2a_pair) -> None:
+    """被替換的原身分 / 過時的 head / 已漂移的語義 digest,三者都不得被續命。"""
+
+    original, refresh = s2_2a_pair
+    # (a) 拿另一份身分(v2 receipt)來對 v1 的 refresh。
+    substituted = _derive(refresh, _receipt(_S2_2A_V2))
+    assert substituted["status"] == "DEPENDENCY_REFRESH_REJECTED"
+    assert any("substituted source identity" in r for r in substituted["reasons"])
+    # (b) 不是當前 head 的復現。
+    stale_head = _derive(_reseal({**refresh, "current_source_head": "0" * 40}), original)
+    assert stale_head["status"] == "DEPENDENCY_REFRESH_REJECTED"
+    assert any("current checkout HEAD" in r for r in stale_head["reasons"])
+    # (c) 原 receipt 的語義 digest 在當前 head 上已重算不出來 → 只能重新觀測,不能刷新。
+    drifted = _reseal({**original, "learning_runtime_digest": "sha256:" + "a" * 64})
+    drift = _derive(
+        _reseal({
+            **refresh,
+            "original_receipt_digest": validator.artifact_self_digest(drifted),
+        }),
+        drifted,
+    )
+    assert drift["status"] == "DEPENDENCY_REFRESH_REJECTED"
+    assert any("must be re-observed, not refreshed" in r for r in drift["reasons"])
+
+
+def test_the_refresh_is_an_exact_field_set_bound_by_its_canonical_digest(
+    s2_2a_pair,
+) -> None:
+    """與 S2.4 receipt 家族同一套慣例:exact 欄位集 + canonical self-digest 反偽造重算。"""
+
+    original, refresh = s2_2a_pair
+    schema = validator._load_schema("s2_4_dependency_refresh_attestation_v1")
+    assert schema["additionalProperties"] is False
+    assert sorted(schema["required"]) == sorted(schema["properties"])
+    assert sorted(refresh) == sorted(schema["properties"])
+    # (a) 多一個欄位 → closed schema 拒(self_digest 會把任意鍵一併雜湊,故只靠它抓不到)。
+    extra = _reseal({**refresh, "operator_note": "x"})
+    assert validator.validate_aiml_artifact(extra) != []
+    assert _derive(extra, original)["status"] == "DEPENDENCY_REFRESH_REJECTED"
+    # (b) 少一個欄位 → 拒。
+    for field in ("producer_module_digest", "reproduction", "refresh_ttl_seconds"):
+        missing = _reseal({k: v for k, v in refresh.items() if k != field})
+        assert validator.validate_aiml_artifact(missing) != []
+    # (c) 竄改任一欄位而不重封 self_digest → 拒。
+    for field, value in (
+        ("current_source_head", "1" * 40),
+        ("original_expires_at", "2099-01-01T00:00:00+00:00"),
+        ("refresh_ttl_seconds", 60),
+    ):
+        tampered = {**refresh, field: value}
+        assert any(
+            "self_digest" in e for e in validator.validate_aiml_artifact(tampered)
+        ), field
+        assert _derive(tampered, original)["status"] == "DEPENDENCY_REFRESH_REJECTED"
+    # (d) 復現欄位集不是該族的 exact 集合 → 拒。
+    partial = _reseal({
+        **refresh,
+        "reproduced_semantic_digests": {
+            "learning_runtime_digest": refresh["reproduced_semantic_digests"][
+                "learning_runtime_digest"
+            ]
+        },
+    })
+    assert any(
+        "exact §9.2 semantic-digest field set" in e
+        for e in validator.validate_aiml_artifact(partial)
+    )
+    assert _derive(partial, original)["status"] == "DEPENDENCY_REFRESH_REJECTED"
+    # (e) 新窗必須短且與 reproduced_at 一致,且 refresh 自身不得已過期。
+    assert refresh["refresh_ttl_seconds"] <= validator.MAX_DEPENDENCY_REFRESH_TTL_SECONDS
+    expired = _reseal({
+        **refresh,
+        "expires_at": "2026-07-27T00:01:00+00:00",
+        "refresh_ttl_seconds": 60,
+    })
+    outcome = validator.derive_dependency_refresh_status(
+        expired, original_receipt=original, now=_REFRESH_NOW
+    )
+    assert outcome["status"] == "DEPENDENCY_REFRESH_REJECTED"
+    assert any("itself expired" in r for r in outcome["reasons"])
+
+
+def test_expired_runtime_topology_prepare_and_auth_evidence_route_through_the_same_gate(
+    s2_2a_pair,
+) -> None:
+    """§10.5 #28 後半:§9.2 明列「必須新鮮觀測/新鮮授權/重新雜湊/重新簽章」的每一列,
+    遞交任何 refresh 一律 typed 拒。既有的 TTL lane(derive_apply_remaining_ttls)已證
+    「過期即拒」,這裡證的是**另一件事**:那些證據**連被刷新的資格都沒有**。"""
+
+    _original, refresh = s2_2a_pair
+    never = validator.S2_4_NEVER_REFRESHABLE_EVIDENCE
+    assert sorted(never) == [
+        "APPLY_AGGREGATE_AUTHORIZATION",
+        "CAPABILITY_PROBE_AUTHORIZATION",
+        "CAPABILITY_PROBE_RECEIPT_INSTALLED_UNIT",
+        "CAPABILITY_PROBE_RECEIPT_PREPARE_SANDBOX",
+        "PG_MIGRATION_AUTHORIZATION",
+        "PG_TOPOLOGY_ATTESTATION",
+        "PREPARED_BUNDLE",
+        "PREPARE_AUTHORIZATION",
+        "S2_0_EFFECT_RECEIPT",
+    ]
+    for name in never:
+        # 即使該證據**還沒過期**,遞交 refresh 本身就是被禁的行為。
+        forbidden = validator.derive_source_dependency_admission_status(
+            evidence_class=name,
+            receipt={"expires_at": "2099-01-01T00:00:00+00:00"},
+            refresh=refresh,
+            now=_REFRESH_NOW,
+        )
+        assert forbidden["status"] == "DEPENDENCY_REFRESH_BY_REFERENCE_FORBIDDEN", name
+        assert forbidden["refresh_admitted"] is False
+        # 過期且沒 refresh → 只能重新觀測/重簽,絕不是 FRESH。
+        stale = validator.derive_source_dependency_admission_status(
+            evidence_class=name,
+            receipt={"expires_at": "2026-07-24T00:00:00+00:00"},
+            now=_REFRESH_NOW,
+        )
+        assert stale["status"] == "DEPENDENCY_EVIDENCE_REOBSERVATION_REQUIRED", name
+    # 封閉表:未知類別不預設放行。
+    assert validator.derive_source_dependency_admission_status(
+        evidence_class="SOMETHING_ELSE", receipt={}, now=_REFRESH_NOW
+    )["status"] == "SOURCE_DEPENDENCY_REJECTED"
+
+
+def test_exactly_one_current_refresh_admits_an_expired_source_identity(s2_2a_pair) -> None:
+    """§9.2 逐字:「only together with ONE current refresh attestation」。"""
+
+    original, refresh = s2_2a_pair
+    assert validator.derive_source_dependency_admission_status(
+        evidence_class="S2_2A_SOURCE_COMPATIBILITY",
+        receipt=original,
+        refresh=[refresh, refresh],
+        now=_REFRESH_NOW,
+    )["status"] == "SOURCE_DEPENDENCY_REJECTED"
+    assert validator.derive_source_dependency_admission_status(
+        evidence_class="S2_2A_SOURCE_COMPATIBILITY",
+        receipt=original,
+        refresh=[refresh],
+        now=_REFRESH_NOW,
+    )["status"] == "SOURCE_DEPENDENCY_ADMITTED_BY_REFRESH"
+
+
+def test_the_refresh_carries_no_signature_surface_and_adds_no_ninth_authority(
+    s2_2a_pair,
+) -> None:
+    """簽章判斷的可測形:§9.2 只要求四項綁定,§9.1 把可用 profile 封閉在**四**個。
+
+    若有人日後替 refresh 加上第五個 SSHSIG profile/namespace,這支測試會轉紅——那是
+    §12 #15 明令禁止的 trust-root 變更,不是 WP4 worker 可自選的實作細節。
+    """
+
+    _original, refresh = s2_2a_pair
+    schema = validator._load_schema("s2_4_dependency_refresh_attestation_v1")
+    for marker in ("signature", "sshsig", "namespace", "profile_identity", "signer"):
+        assert not any(marker in name for name in schema["properties"]), marker
+        assert not any(marker in name for name in refresh), marker
+    assert sorted(validator.S2_4_AUTHORIZATION_PROFILES) == [
+        "apply_aggregate", "capability_probe", "pg_migration", "prepare",
+    ]
+    assert validator.s2_4_authorization_profiles_digest() == (
+        "sha256:79b27b7040e8a8d3af84b6a5f0c7c20e45888caaedac146428145ffea54be2dc"
+    )
+
+
+# ══════════════════ 誠實記錄:W5 不能在 source 關閉的義務 ═════════════════════════
+def test_the_dependency_refresh_residuals_are_named_precisely_not_blanketly() -> None:
+    """§9.2 的閘已建成,舊的「整份缺席」義務必須被關掉,換成兩條**精確**的殘留。"""
+
     obligations = {
         row["obligation_id"]: row
         for row in validator._W5_EXPORTED_ABI["remaining_owned_obligations"]
     }
-    if absent:
-        entry = obligations["DEPENDENCY_REFRESH_ATTESTATION_ABSENT"]
-        assert entry["typed_status"] == "NOT_PROVIDED_BY_W5_SOURCE_ABSENT"
-        assert entry["owner_wave"] == "PM"
-        assert "§9.2" in entry["spec_refs"]
-        # 誠實邊界:第二半(過期 runtime/topology/prepare/auth 不得以引用刷新)**是**被證明的。
-        assert "cannot be refreshed by reference" in entry["statement"]
-    else:  # pragma: no cover - 一旦有人實作了它,義務必須被關閉而不是留著
-        assert "DEPENDENCY_REFRESH_ATTESTATION_ABSENT" not in obligations
+    assert "DEPENDENCY_REFRESH_ATTESTATION_ABSENT" not in obligations
+    binding = obligations["DEPENDENCY_REFRESH_RECEIPT_BINDING_ABSENT"]
+    assert binding["typed_status"] == "NOT_PROVIDED_BY_W5"
+    assert binding["owner_wave"] == "PM"
+    assert "§3" in binding["spec_refs"]
+    # 殘留必須是真的:install effect receipt 至今沒有任何 refresh 欄位,且 schema 封閉。
+    receipt_schema = validator._load_schema("s2_4_install_effect_receipt_v1")
+    assert receipt_schema["additionalProperties"] is False
+    assert not any("refresh" in name for name in receipt_schema["properties"])
+    node = obligations["DEPENDENCY_REFRESH_REPRODUCER_NODE_IS_DECLARATIVE"]
+    assert node["typed_status"] == "PARTIALLY_PROVIDED_BY_W5"
+    assert node["owner_wave"] == "W6"
+    assert "declarative" in node["statement"].casefold()
+    # S2.2A 的 producer 標籤退化為 session_id 這件事被逐字記錄,而不是被藏起來。
+    assert "session_id" in node["statement"]
+    original = _receipt(_S2_2A_V1)
+    assert "caller" not in original and "platform" not in original
 
 
 def test_pr_set_dumpable_is_declared_but_enforced_nowhere_and_is_recorded() -> None:

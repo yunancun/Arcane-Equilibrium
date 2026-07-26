@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2_4_dependency_refresh_attestation_v1.schema.json",
+  "title": "s2_4_dependency_refresh_attestation_v1",
+  "description": "Evidence-only S2.4 §9.2 dependency-freshness refresh. It is the ONLY mechanism by which an expired S2.2A compatibility, S2.3 sealed-build/expected-identity or S1.3 contract SOURCE identity may still be admitted, and it carries NO caller status/admitted/pass/done field (this closed schema simply omits them): the central validator DERIVES DEPENDENCY_REFRESH_ADMITTED by INDEPENDENTLY replaying the original producer's semantic checks against the repository at current_source_head and comparing the result with BOTH the reproduced_semantic_digests claimed here AND the original receipt's own values. A refresh that merely re-asserts the original digest cannot be produced: its evidentiary content is recomputed by the verifier, never accepted from the caller. §9.2's hard line is enforced elsewhere by the same gate — S2.0 effect, pg_topology_attestation_v1, capability-probe/network-sandbox, prepared-bundle and every operator authorization are NEVER refreshable by reference and must be freshly observed or newly signed. original_schema_version is a closed enum that does not contain this schema, so a refresh can never refresh another refresh. No SSHSIG: §9.2 requires independent recomputation, not a signature, and §9.1 fixes exactly four domain-separated profiles, none of which is a refresh (see the module docstring in aiml_gate_receipt_s2_4_contracts.py). Source-seam evidence only: the nine authorities stay false, production_apply_performed false and running_attested false, and no refresh ever substitutes for a runtime observation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "program_id",
+    "work_package",
+    "dependency_class",
+    "original_schema_version",
+    "original_receipt_digest",
+    "original_observed_at",
+    "original_expires_at",
+    "current_source_head",
+    "producer_module_digest",
+    "reproduced_semantic_digests",
+    "reproduction",
+    "expires_at",
+    "refresh_ttl_seconds",
+    "production_authority_flags",
+    "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2_4_dependency_refresh_attestation_v1"},
+    "program_id": {"const": "AIML-LONG-LIVED-LANDING-V2"},
+    "work_package": {"const": "WP4"},
+    "dependency_class": {
+      "enum": [
+        "S1_3_IDENTITY_CONTRACT",
+        "S2_2A_SOURCE_COMPATIBILITY",
+        "S2_3_EXPECTED_IDENTITY",
+        "S2_3_SEALED_BUILD"
+      ]
+    },
+    "original_schema_version": {
+      "enum": [
+        "expected_identity_receipt_v1",
+        "identity_acl_contract_receipt_v1",
+        "sealed_build_receipt_v1",
+        "source_compatibility_receipt_v1",
+        "source_compatibility_receipt_v2"
+      ]
+    },
+    "original_receipt_digest": {"$ref": "#/$defs/digest"},
+    "original_observed_at": {"$ref": "#/$defs/timestamp"},
+    "original_expires_at": {"$ref": "#/$defs/timestamp"},
+    "current_source_head": {"$ref": "#/$defs/git_sha"},
+    "producer_module_digest": {"$ref": "#/$defs/digest"},
+    "reproduced_semantic_digests": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "patternProperties": {"^[a-z][a-z0-9_]*$": {"$ref": "#/$defs/digest"}}
+    },
+    "reproduction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "method",
+        "reproduced_at",
+        "reproducer_caller",
+        "reproducer_platform",
+        "reproducer_identity",
+        "original_producer_identity"
+      ],
+      "properties": {
+        "method": {"const": "INDEPENDENT_REPOSITORY_RECOMPUTATION"},
+        "reproduced_at": {"$ref": "#/$defs/timestamp"},
+        "reproducer_caller": {"type": "string", "minLength": 1},
+        "reproducer_platform": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["os", "arch", "python_version"],
+          "properties": {
+            "os": {"enum": ["darwin", "linux"]},
+            "arch": {"type": "string", "minLength": 1},
+            "python_version": {"type": "string", "minLength": 1}
+          }
+        },
+        "reproducer_identity": {"$ref": "#/$defs/digest"},
+        "original_producer_identity": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "expires_at": {"$ref": "#/$defs/timestamp"},
+    "refresh_ttl_seconds": {"type": "integer", "minimum": 1, "maximum": 900},
+    "production_authority_flags": {"$ref": "#/$defs/production_authority_flags"},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "git_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "production_authority_flags": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["nine_authorities_false", "production_apply_performed", "running_attested"],
+      "properties": {
+        "nine_authorities_false": {"const": true},
+        "production_apply_performed": {"const": false},
+        "running_attested": {"const": false}
+      }
+    }
+  }
+}

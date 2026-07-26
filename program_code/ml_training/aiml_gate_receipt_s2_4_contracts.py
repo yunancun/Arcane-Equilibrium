@@ -17,7 +17,7 @@ import base64
 import binascii
 import hmac
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +25,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 HELPER_DIR = REPO_ROOT / "helper_scripts" / "maintenance_scripts"
 if str(HELPER_DIR) not in sys.path:
     sys.path.insert(0, str(HELPER_DIR))
+# §9.2 的 producer 重算需以 package 形匯入 ml_training.learning_runtime_manifest(與 facade
+# 的 _source_compatibility_receipt_errors 同一形,避免同模組被載成兩份);故把 program_code
+# 一併入 path。此處只動 sys.path,不在 top-level 匯入任何 S2.2A/S2.3 producer 模組。
+PROGRAM_CODE_DIR = REPO_ROOT / "program_code"
+if str(PROGRAM_CODE_DIR) not in sys.path:
+    sys.path.insert(0, str(PROGRAM_CODE_DIR))
 
 # 唯讀消費 S2.4 §9.1 SSHSIG 信任根與離線公鑰驗簽基元(同 facade 姿態;不反向匯入 facade)。
 import agent_governance_aiml_trusted_host as _trusted_host  # noqa: E402
@@ -57,6 +63,46 @@ S2_4_APPLY_ROW_CLASS_ORDER = (
     "CREDENTIAL_INSTALL",
     "LEARNING_RUNTIME",
     "ENGINE_SCANNER",
+)
+# §10.1 W1 schemas-dir additions:29 支 s2_4_* + v2 classifier + topology/network 三支。
+# (2026-07-27 §10.1.1 治理搬移:逐位元組自 facade 遷入本葉以守住 2000 行上限,facade 以
+# ``_W1_SCHEMA_FILENAMES`` 逐名 re-export,值與次序不動 → W1 owned-path 投影 digest 不變。
+# 這是 **W1** 波的歷史加列清單,不是「當前 S2.4 schema 全集」——W5 新增的 §9.2 refresh
+# schema 刻意**不**入此列,否則會把後來的變更倒寫進 W1 的 exported ABI。)
+S2_4_W1_SCHEMA_FILENAMES = (
+    "aiml_component_effect_classification_v2.schema.json",
+    "network_sandbox_capability_attestation_v1.schema.json",
+    "pg_topology_attestation_v1.schema.json",
+    "pg_topology_runtime_guard_v1.schema.json",
+    "s2_4_authorization_replay_ledger_v1.schema.json",
+    "s2_4_capability_probe_core_v1.schema.json",
+    "s2_4_capability_probe_effect_receipt_v1.schema.json",
+    "s2_4_capability_probe_intent_v1.schema.json",
+    "s2_4_capability_probe_journal_v1.schema.json",
+    "s2_4_capability_probe_postcheck_v1.schema.json",
+    "s2_4_capability_probe_rollback_v1.schema.json",
+    "s2_4_component_effect_intent_v1.schema.json",
+    "s2_4_component_effect_postcheck_v1.schema.json",
+    "s2_4_component_effect_result_v1.schema.json",
+    "s2_4_component_effect_rollback_v1.schema.json",
+    "s2_4_install_effect_receipt_v1.schema.json",
+    "s2_4_install_journal_v1.schema.json",
+    "s2_4_install_plan_core_v1.schema.json",
+    "s2_4_install_plan_v1.schema.json",
+    "s2_4_install_postcheck_v1.schema.json",
+    "s2_4_install_rollback_v1.schema.json",
+    "s2_4_install_step_result_v1.schema.json",
+    "s2_4_operator_authorization_v1.schema.json",
+    "s2_4_pg_hba_delta_v1.schema.json",
+    "s2_4_prepare_core_v1.schema.json",
+    "s2_4_prepare_effect_receipt_v1.schema.json",
+    "s2_4_prepare_intent_v1.schema.json",
+    "s2_4_prepare_journal_v1.schema.json",
+    "s2_4_prepare_postcheck_v1.schema.json",
+    "s2_4_prepare_rollback_v1.schema.json",
+    "s2_4_prepared_install_bundle_v1.schema.json",
+    "s2_4_source_admission_receipt_v1.schema.json",
+    "s2_4_wave_exit_receipt_v1.schema.json",
 )
 # §4 逐行 required_intent_fields 的三個 common token(plan/pre_state/expiry)落在
 # s2_4_component_effect_intent_v1 的頂層欄位;全部 5 個 APPLY 矩陣列都含這三 token。
@@ -969,4 +1015,784 @@ def derive_authorization_replay_binding(
         verdict["reasons"] = reasons
         return verdict
     verdict["status"] = "UNCONSUMED_AUTHORIZATION_VALID"
+    return verdict
+
+
+# --------------------------------------------------------------------------- #
+# S2.4(WP4·W5·§9.2)dependency freshness——過期 **source** 身分的唯一補救途徑。
+#
+# §9.2 對三族 source 身分(S2.2A compatibility / S2.3 sealed-build·expected-identity /
+# S1.3 contract)的原文是:
+#
+#   「exact source/content identities; if their original observation TTL is elapsed, an
+#     independently recomputed ``s2_4_dependency_refresh_attestation_v1`` must bind the
+#     original digest, current exact head, reproduced semantic digests and a new short
+#     expiry」
+#   「The central validator accepts an expired source-identity receipt only together with
+#     one current refresh attestation that independently replays its producer/semantic
+#     checks. A refresh cannot refresh another refresh, cannot change any semantic digest
+#     and cannot substitute for runtime observation.」
+#
+# 三個設計後果,逐條落成結構(而非欄位):
+#
+# 1. **「independently reproduced」不是 caller 能宣稱的東西。** 本閘「不」採信
+#    ``reproduced_semantic_digests``:它由**驗證端自己**在 ``current_source_head`` 的 repo
+#    上重跑該 dependency 的 producer SSOT(S2.2A 走 learning_runtime_manifest 的 v1/v2 builder;
+#    S2.3/S1.3 走 sealed-build / identity-acl 的 source·schema sha 與 lock closure),再與
+#    (a)refresh 宣稱值 (b)原 receipt 自己的語義欄位**兩邊**比對。於是一份「只把舊 digest
+#    再抄一次」的 refresh 根本產不出來——它必須真的持有當前 head 的源碼樹;而源碼一旦漂移,
+#    重算值 ≠ 原值,refresh 立刻不可用(§9.2:refresh 不得改動任何語義 digest)。
+# 2. **同一個節點、同一次觀測產不出 refresh。** ``reproduction.reproduced_at`` 必須嚴格晚於
+#    原 receipt 自己的到期時刻,且 ``reproducer_identity`` / ``original_producer_identity``
+#    以**同一個** projection 函式各自再導出後必須相異;``reproducer_caller`` 亦不得等於原
+#    receipt 的 producer 標籤。誠實界線:source lane 沒有任何 key custody,故「不同節點」的
+#    宣告半邊只是宣告(見 W5 obligation DEPENDENCY_REFRESH_REPRODUCER_NODE_IS_DECLARATIVE);
+#    **不可偽造**的半邊是上面第 1 點的驗證端重算。
+# 3. **refresh 不能 refresh 另一份 refresh、也不能代替 runtime 觀測。** 前者由 schema 的封閉
+#    ``original_schema_version`` enum(不含本 schema)加本閘的具名檢查雙重擋;後者由
+#    :data:`S2_4_NEVER_REFRESHABLE_EVIDENCE` 封閉表執法——§9.2 表中「always freshly
+#    observed / freshly authorized / freshly re-hashed / newly signed…never refreshed or
+#    chained」那幾列,遞交任何 refresh 一律 typed 拒(§10.5 #28 後半、§12 #15)。
+#
+# **簽章判斷(worker 判斷,顯式記錄):本 artifact 不帶 SSHSIG。** §9.2 對 refresh 只要求
+# 四項綁定(original digest / current exact head / reproduced semantic digests / new short
+# expiry),通篇未提簽章;同一張表在真的要求簽章的列上一律明寫 “newly signed”
+# (probe / PREPARE / aggregate / PG 四種授權)。§9.1 又把可重用該物理金鑰的 profile 封閉成
+# **恰四**個 domain-separated 身分/namespace,refresh 不在其中;§10.4 明令 worker 不得自選
+# exported schema/status/adapter 身分,§12 #15 明令「No arbitrary SSHSIG public key」。再者
+# 授權是「授予效果」並經 replay ledger 一次性消費,refresh 則什麼也不授予——它只是「這次重算
+# 復現了」的證據,其完整性由 canonical self-digest 提供,其真確性由**驗證端自己重算**提供
+# (§9.1 原文:「A self-digest is integrity evidence, not producer authenticity」;對 refresh
+# 而言 producer authenticity 正是被 independent replay 取代的那一項)。一份簽了名卻復現不出
+# 的 refresh 仍必須被拒,一份沒簽名卻復現得出的 refresh 已載明 §9.2 要求的全部資訊——故加簽
+# 只會多一個 §9.1 未授權的 namespace,不會多一分保證。
+# --------------------------------------------------------------------------- #
+S2_4_DEPENDENCY_REFRESH_SCHEMA_VERSION = "s2_4_dependency_refresh_attestation_v1"
+S2_4_DEPENDENCY_REFRESH_METHOD = "INDEPENDENT_REPOSITORY_RECOMPUTATION"
+DEPENDENCY_REFRESH_STATUS_ADMITTED = "DEPENDENCY_REFRESH_ADMITTED"
+DEPENDENCY_REFRESH_STATUS_REJECTED = "DEPENDENCY_REFRESH_REJECTED"
+DEPENDENCY_REFRESH_BY_REFERENCE_FORBIDDEN = "DEPENDENCY_REFRESH_BY_REFERENCE_FORBIDDEN"
+DEPENDENCY_EVIDENCE_REOBSERVATION_REQUIRED = "DEPENDENCY_EVIDENCE_REOBSERVATION_REQUIRED"
+SOURCE_DEPENDENCY_STATUS_FRESH = "SOURCE_DEPENDENCY_FRESH"
+SOURCE_DEPENDENCY_STATUS_ADMITTED_BY_REFRESH = "SOURCE_DEPENDENCY_ADMITTED_BY_REFRESH"
+SOURCE_DEPENDENCY_STATUS_EXPIRED_NO_REFRESH = "SOURCE_DEPENDENCY_EXPIRED_NO_REFRESH"
+SOURCE_DEPENDENCY_STATUS_REJECTED = "SOURCE_DEPENDENCY_REJECTED"
+# §9.2「a new short expiry」:沿用 §9.1 對 permit 的同一保守上限(900s),不自創新窗。
+MAX_DEPENDENCY_REFRESH_TTL_SECONDS = 900
+# S2.2A receipt 自身「不帶」 expires_at/ttl_seconds(只有 generated_at_utc),故其「original
+# observation TTL」是 code-owned 常量,而非 caller 可調值;取 S2.3/S1.3 兩族 schema 自己的
+# TTL 天花板(3600s)為同一保守窗。
+S2_2A_OBSERVATION_TTL_SECONDS = 3600
+
+# §9.2 第一列:**可**以一份獨立重算的 refresh 續命的三族 source 身分。每列宣告
+#   original_schema_versions —— 允許的原 receipt schema(封閉;不含 refresh 自身)
+#   semantic_digest_fields  —— 該族的 exact 語義 digest 欄位集(refresh 必須逐欄復現)
+#   producer_module         —— 驗證端重跑的 producer SSOT 模組(其 blob 亦被 refresh 綁)
+S2_4_DEPENDENCY_REFRESH_CLASSES = {
+    "S1_3_IDENTITY_CONTRACT": {
+        "original_schema_versions": ("identity_acl_contract_receipt_v1",),
+        "semantic_digest_fields": ("schema_sha256", "source_sha256"),
+        "producer_module": (
+            "helper_scripts/maintenance_scripts/agent_governance_identity_acl_contract.py"
+        ),
+    },
+    "S2_2A_SOURCE_COMPATIBILITY": {
+        "original_schema_versions": (
+            "source_compatibility_receipt_v1",
+            "source_compatibility_receipt_v2",
+        ),
+        "semantic_digest_fields": (
+            "capture_contract_digest",
+            "learning_runtime_digest",
+            "training_contract_digest",
+        ),
+        "producer_module": "program_code/ml_training/learning_runtime_manifest.py",
+    },
+    "S2_3_EXPECTED_IDENTITY": {
+        "original_schema_versions": ("expected_identity_receipt_v1",),
+        "semantic_digest_fields": ("schema_sha256", "source_sha256"),
+        "producer_module": (
+            "helper_scripts/maintenance_scripts/agent_governance_sealed_build.py"
+        ),
+    },
+    "S2_3_SEALED_BUILD": {
+        "original_schema_versions": ("sealed_build_receipt_v1",),
+        "semantic_digest_fields": ("closure_hash", "schema_sha256", "source_sha256"),
+        "producer_module": (
+            "helper_scripts/maintenance_scripts/agent_governance_sealed_build.py"
+        ),
+    },
+}
+# §9.2 其餘各列:**永不**可以引用刷新的證據。值為該列自己的補救文字(§10.5 #28 後半)。
+S2_4_NEVER_REFRESHABLE_EVIDENCE = {
+    "APPLY_AGGREGATE_AUTHORIZATION": (
+        "the aggregate operator permit is newly signed only after W6A, the topology/HBA/"
+        "network evidence and the final plan core exist; it is never refreshed or chained"
+    ),
+    "CAPABILITY_PROBE_AUTHORIZATION": (
+        "a capability-probe permit is newly signed for one exact scope/core before each "
+        "probe; it cannot authorize PREPARE/APPLY or the other scope"
+    ),
+    "CAPABILITY_PROBE_RECEIPT_INSTALLED_UNIT": (
+        "the INSTALLED_UNIT capability-probe receipt is freshly authorized/observed only "
+        "after W6A against the exact rendered unit/host"
+    ),
+    "CAPABILITY_PROBE_RECEIPT_PREPARE_SANDBOX": (
+        "the PREPARE_SANDBOX capability-probe receipt is freshly authorized/observed "
+        "immediately before W6A against fixed prepare sandbox properties"
+    ),
+    "PG_MIGRATION_AUTHORIZATION": (
+        "the PG-migration operator permit is newly signed only after W6A; it is never "
+        "refreshed or chained"
+    ),
+    "PG_TOPOLOGY_ATTESTATION": (
+        "pg_topology_attestation_v1 is always freshly observed; no refresh-by-reference"
+    ),
+    "PREPARED_BUNDLE": (
+        "the prepared bundle is freshly re-hashed and inside its own expiry; otherwise "
+        "rerun PREPARE"
+    ),
+    "PREPARE_AUTHORIZATION": (
+        "the PREPARE permit is newly signed after the final prepare core and PREPARE-scope "
+        "probe receipt exist, before W6A; it is never refreshed or chained"
+    ),
+    "S2_0_EFFECT_RECEIPT": (
+        "the S2.0 effect receipt is a fresh production observation; rerun the S2.0 effect/"
+        "postcheck if expired"
+    ),
+}
+
+
+def _file_digest(path: Path) -> str:
+    """repo 內某檔案位元組的 canonical sha256(``sha256:`` 前綴;與各 SSOT 模組同形)。"""
+
+    import hashlib
+
+    return "sha256:" + hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def _utc_text(value: Any) -> str:
+    """把任意可解析時間戳正規成 UTC ISO 字串(``Z`` 與 ``+00:00`` 兩形視為同一時刻)。"""
+
+    return _parse_timestamp(str(value)).astimezone(timezone.utc).isoformat()
+
+
+def dependency_producer_identity(
+    *, caller: Any, observation_time: Any, platform: Any
+) -> str:
+    """producer 身分投影(原 receipt 與 reproducer **共用同一形狀**,故兩者可直接比較)。"""
+
+    return canonical_digest({
+        "caller": caller,
+        "observation_time": _utc_text(observation_time),
+        "platform": platform,
+    })
+
+
+def _original_producer_fields(original: Any) -> dict[str, Any] | None:
+    """從原 receipt **自身**導出 producer 三元組(caller / observation_time / platform)。
+
+    S2.3(sealed-build、expected-identity)與 S1.3 三族都帶 ``caller``/``platform``/
+    ``observation_time``;S2.2A 兩版只有 ``session_id``/``generated_at_utc``(無 caller、
+    無 platform),故其 caller 標籤退化為 session_id、platform 為 ``None``。此不對稱是
+    schema 事實,不是本閘的選擇——W5 obligation 逐字記錄它。
+    """
+
+    if not isinstance(original, dict):
+        return None
+    caller = original.get("caller")
+    if not isinstance(caller, str) or not caller.strip():
+        caller = original.get("session_id")
+    observed = original.get("observation_time") or original.get("generated_at_utc")
+    if not isinstance(caller, str) or not isinstance(observed, str):
+        return None
+    return {
+        "caller": caller,
+        "observation_time": observed,
+        "platform": original.get("platform"),
+    }
+
+
+def dependency_original_observation_window(original: Any) -> tuple[str, str] | None:
+    """原 receipt 自己的 (observed_at, expires_at);S2.2A 以 code-owned TTL 導出到期。"""
+
+    if not isinstance(original, dict):
+        return None
+    observed = original.get("observation_time")
+    expires = original.get("expires_at")
+    if isinstance(observed, str) and isinstance(expires, str):
+        return observed, expires
+    generated = original.get("generated_at_utc")
+    if isinstance(generated, str) and str(
+        original.get("schema_version", "")
+    ).startswith("source_compatibility_receipt_"):
+        try:
+            moment = _parse_timestamp(generated)
+        except (TypeError, ValueError):
+            return None
+        return generated, (
+            moment + timedelta(seconds=S2_2A_OBSERVATION_TTL_SECONDS)
+        ).astimezone(timezone.utc).isoformat()
+    return None
+
+
+def dependency_class_for_schema_version(schema_version: Any) -> str | None:
+    """該原 receipt schema 屬於哪一個 §9.2 可刷新族(不屬於任何一族回 ``None``)。"""
+
+    for name, row in S2_4_DEPENDENCY_REFRESH_CLASSES.items():
+        if schema_version in row["original_schema_versions"]:
+            return name
+    return None
+
+
+def reproduce_dependency_semantic_digests(
+    dependency_class: Any,
+    *,
+    original_schema_version: Any,
+    repo_root: Path = REPO_ROOT,
+) -> dict[str, str]:
+    """**驗證端自己**在當前 checkout 上重跑該 dependency 的 producer/語義再算。
+
+    這是 §9.2「independently replays its producer/semantic checks」的實體:每一個值都由
+    repo 位元組重算得出,呼叫端遞交的任何值都不參與此函式。無法重算即 raise
+    ``ValueError``(fail-closed;絕不回半份或空 dict)。
+    """
+
+    row = S2_4_DEPENDENCY_REFRESH_CLASSES.get(str(dependency_class))
+    if row is None:
+        raise ValueError(
+            f"{dependency_class!r} is not one of the §9.2 refreshable source-identity classes"
+        )
+    if original_schema_version not in row["original_schema_versions"]:
+        raise ValueError(
+            f"{original_schema_version!r} is not an original schema of {dependency_class}"
+        )
+    root = Path(repo_root)
+    if dependency_class == "S2_2A_SOURCE_COMPATIBILITY":
+        from ml_training.learning_runtime_manifest import (  # noqa: E402 (lazy:避免循環)
+            build_learning_runtime_manifest as _build_v1,
+            build_learning_runtime_manifest_v2 as _build_v2,
+        )
+
+        builder = _build_v2 if original_schema_version.endswith("_v2") else _build_v1
+        manifest = builder(root)
+        return {
+            "capture_contract_digest": manifest["capture_contract"]["digest"],
+            "learning_runtime_digest": manifest["self_digest"],
+            "training_contract_digest": manifest["training_contract"]["digest"],
+        }
+    if dependency_class == "S1_3_IDENTITY_CONTRACT":
+        import agent_governance_identity_acl_contract as _s1_3  # noqa: E402 (lazy)
+
+        return {
+            "schema_sha256": _s1_3.schema_sha256(),
+            "source_sha256": _s1_3.source_sha256(),
+        }
+    import agent_governance_sealed_build as _sealed  # noqa: E402 (lazy)
+
+    if dependency_class == "S2_3_EXPECTED_IDENTITY":
+        return {
+            "schema_sha256": _sealed.expected_identity_schema_sha256(),
+            "source_sha256": _sealed.source_sha256(),
+        }
+    closure = _sealed.verify_lock_closure(
+        root / "requirements-ml.lock", root / "requirements-ml.txt"
+    )
+    return {
+        "closure_hash": closure["closure_hash"],
+        "schema_sha256": _sealed.sealed_schema_sha256(),
+        "source_sha256": _sealed.source_sha256(),
+    }
+
+
+def _dependency_refresh_structural_errors(artifact: dict[str, Any]) -> list[str]:
+    """§9.2 refresh 的**自足**結構驗:中央閘手上沒有原 receipt 時仍必須成立的那一半。
+
+    facade 的 ``validate_aiml_artifact`` 分支委派本函式;完整裁決(含原 receipt 綁定、head、
+    producer 獨立性、驗證端重算比對)恆由 :func:`derive_dependency_refresh_status` 授予。
+    """
+
+    errors: list[str] = []
+    if artifact["self_digest"] != artifact_self_digest(artifact):
+        errors.append("dependency refresh self_digest does not bind the canonical artifact")
+    row = S2_4_DEPENDENCY_REFRESH_CLASSES.get(artifact["dependency_class"])
+    if row is None:
+        return errors + ["dependency_class is not a §9.2 refreshable source-identity class"]
+    if artifact["original_schema_version"] not in row["original_schema_versions"]:
+        errors.append(
+            "original_schema_version does not belong to the declared dependency_class"
+        )
+    expected = set(row["semantic_digest_fields"])
+    if set(artifact["reproduced_semantic_digests"]) != expected:
+        errors.append(
+            "reproduced_semantic_digests is not the exact §9.2 semantic-digest field set "
+            f"of {artifact['dependency_class']}"
+        )
+    if any(
+        value == artifact["original_receipt_digest"]
+        for value in artifact["reproduced_semantic_digests"].values()
+    ):
+        errors.append(
+            "a reproduced semantic digest merely re-asserts original_receipt_digest; §9.2 "
+            "requires an independently recomputed semantic digest"
+        )
+    reproduction = artifact["reproduction"]
+    if reproduction["reproducer_identity"] == reproduction["original_producer_identity"]:
+        errors.append(
+            "the refresh's producer projection equals the original's; a refresh cannot be "
+            "the original observation restated (§9.2)"
+        )
+    return errors
+
+
+def build_s2_4_dependency_refresh_attestation(
+    original_receipt: dict[str, Any],
+    *,
+    reproducer_caller: str,
+    reproducer_platform: dict[str, Any],
+    reproduced_at: str,
+    refresh_ttl_seconds: int = MAX_DEPENDENCY_REFRESH_TTL_SECONDS,
+    repo_root: Path = REPO_ROOT,
+    current_source_head: str | None = None,
+) -> dict[str, Any]:
+    """組出一份 §9.2 refresh:語義 digest **一律**由驗證端重算填入,caller 無從遞交。
+
+    builder 與閘共用同一支 :func:`reproduce_dependency_semantic_digests`,故「能建出來」本身
+    就代表持有當前 head 的源碼樹且復現成功;建構 ≠ 認可,PASS 恆由
+    :func:`derive_dependency_refresh_status` 導出(receipt 不帶任何 status 欄位)。
+    """
+
+    if not isinstance(original_receipt, dict):
+        raise ValueError("original receipt must be an object")
+    original_schema_version = original_receipt.get("schema_version")
+    if original_schema_version == S2_4_DEPENDENCY_REFRESH_SCHEMA_VERSION:
+        raise ValueError("§9.2: a refresh cannot refresh another refresh")
+    dependency_class = dependency_class_for_schema_version(original_schema_version)
+    if dependency_class is None:
+        raise ValueError(
+            f"{original_schema_version!r} is not a §9.2 refreshable source identity"
+        )
+    window = dependency_original_observation_window(original_receipt)
+    if window is None:
+        raise ValueError("original receipt carries no resolvable observation window")
+    producer = _original_producer_fields(original_receipt)
+    if producer is None:
+        raise ValueError("original receipt carries no resolvable producer identity")
+    head = current_source_head or _resolve_facade()._git_head(Path(repo_root))
+    if head is None:
+        raise ValueError("repo HEAD is unreadable; a refresh cannot bind a current head")
+    ttl = int(refresh_ttl_seconds)
+    reproduced_moment = _parse_timestamp(reproduced_at)
+    artifact: dict[str, Any] = {
+        "schema_version": S2_4_DEPENDENCY_REFRESH_SCHEMA_VERSION,
+        "program_id": "AIML-LONG-LIVED-LANDING-V2",
+        "work_package": "WP4",
+        "dependency_class": dependency_class,
+        "original_schema_version": original_schema_version,
+        "original_receipt_digest": artifact_self_digest(original_receipt),
+        "original_observed_at": window[0],
+        "original_expires_at": window[1],
+        "current_source_head": head,
+        "producer_module_digest": _file_digest(
+            Path(repo_root)
+            / S2_4_DEPENDENCY_REFRESH_CLASSES[dependency_class]["producer_module"]
+        ),
+        "reproduced_semantic_digests": reproduce_dependency_semantic_digests(
+            dependency_class,
+            original_schema_version=original_schema_version,
+            repo_root=repo_root,
+        ),
+        "reproduction": {
+            "method": S2_4_DEPENDENCY_REFRESH_METHOD,
+            "reproduced_at": reproduced_at,
+            "reproducer_caller": reproducer_caller,
+            "reproducer_platform": dict(reproducer_platform),
+            "reproducer_identity": dependency_producer_identity(
+                caller=reproducer_caller,
+                observation_time=reproduced_at,
+                platform=dict(reproducer_platform),
+            ),
+            "original_producer_identity": dependency_producer_identity(**producer),
+        },
+        "expires_at": (
+            reproduced_moment + timedelta(seconds=ttl)
+        ).astimezone(timezone.utc).isoformat(),
+        "refresh_ttl_seconds": ttl,
+        "production_authority_flags": {
+            "nine_authorities_false": True,
+            "production_apply_performed": False,
+            "running_attested": False,
+        },
+    }
+    artifact["self_digest"] = artifact_self_digest(artifact)
+    return artifact
+
+
+def derive_dependency_refresh_status(
+    refresh: Any,
+    *,
+    original_receipt: Any,
+    now: str | datetime | None = None,
+    repo_root: Path = REPO_ROOT,
+) -> dict[str, Any]:
+    """§9.2:這份 refresh 是否**獨立復現**了那份過期 source 身分(typed;caller 不可自證)。
+
+    回 ``{"status": DEPENDENCY_REFRESH_ADMITTED|DEPENDENCY_REFRESH_REJECTED, "reasons": [...],
+    "dependency_class": …, "reproduced_semantic_digests": <驗證端重算值或 None>,
+    "admits_expired_source_identity": bool}``。
+
+    新鮮窗 fail-closed:``now`` 省略時取真實 wall clock(鏡 derive_authorization_replay_binding)。
+    """
+
+    if now is None:
+        now = datetime.now(timezone.utc)
+    verdict: dict[str, Any] = {
+        "status": DEPENDENCY_REFRESH_STATUS_REJECTED,
+        "reasons": [],
+        "dependency_class": None,
+        "reproduced_semantic_digests": None,
+        "admits_expired_source_identity": False,
+    }
+    if not isinstance(refresh, dict):
+        verdict["reasons"] = ["dependency refresh attestation must be an object"]
+        return verdict
+    facade = _resolve_facade()
+    declared = sorted(key for key in facade._CALLER_STATUS_KEYS if key in refresh)
+    if declared:
+        verdict["reasons"] = [
+            "dependency refresh attestation must not self-declare status "
+            f"({', '.join(declared)}); the central validator derives "
+            "DEPENDENCY_REFRESH_ADMITTED from an independent recomputation"
+        ]
+        return verdict
+    try:
+        schema = facade._load_schema(S2_4_DEPENDENCY_REFRESH_SCHEMA_VERSION)
+        schema_errors = facade.schema_subset_errors(refresh, schema, schema)
+    except Exception as error:  # noqa: BLE001 - schema 不可讀即 fail-closed
+        verdict["reasons"] = [f"dependency refresh closed-schema is unloadable: {error}"]
+        return verdict
+    if schema_errors:
+        verdict["reasons"] = schema_errors
+        return verdict
+    reasons: list[str] = []
+    if refresh["self_digest"] != artifact_self_digest(refresh):
+        reasons.append("dependency refresh self_digest does not bind the canonical artifact")
+    dependency_class = refresh["dependency_class"]
+    verdict["dependency_class"] = dependency_class
+    row = S2_4_DEPENDENCY_REFRESH_CLASSES.get(dependency_class)
+    original_schema_version = refresh["original_schema_version"]
+    if row is None:
+        verdict["reasons"] = [
+            f"{dependency_class!r} is not a §9.2 refreshable source-identity class"
+        ]
+        return verdict
+    if original_schema_version not in row["original_schema_versions"]:
+        reasons.append(
+            f"original_schema_version {original_schema_version!r} does not belong to "
+            f"{dependency_class} (allowed: {list(row['original_schema_versions'])})"
+        )
+    if not isinstance(original_receipt, dict):
+        verdict["reasons"] = reasons + [
+            "the original source-identity receipt object is required: §9.2's replay is "
+            "performed by the verifier over the ORIGINAL artifact, never over its digest"
+        ]
+        return verdict
+    if original_receipt.get("schema_version") == S2_4_DEPENDENCY_REFRESH_SCHEMA_VERSION:
+        reasons.append(
+            "§9.2: a refresh cannot refresh another refresh (the bound original is itself "
+            "an s2_4_dependency_refresh_attestation_v1)"
+        )
+    elif original_receipt.get("schema_version") != original_schema_version:
+        reasons.append(
+            "the bound original receipt is a different schema than original_schema_version "
+            f"({original_receipt.get('schema_version')!r} != {original_schema_version!r})"
+        )
+    original_digest = artifact_self_digest(original_receipt)
+    if refresh["original_receipt_digest"] != original_digest:
+        reasons.append(
+            "original_receipt_digest does not bind the supplied original receipt "
+            "(a substituted source identity is not the identity being refreshed)"
+        )
+    # ── §9.2「current exact head」──────────────────────────────────────────────
+    head = facade._git_head(Path(repo_root))
+    if head is None:
+        reasons.append(
+            "current_source_head cannot be bound: repo HEAD is unreadable (fail-closed)"
+        )
+    elif refresh["current_source_head"] != head:
+        reasons.append(
+            "current_source_head is not the current checkout HEAD; §9.2 requires the "
+            "reproduction to be performed at the exact current head"
+        )
+    # ── 原 receipt 自己的觀測窗必須被逐字綁住 ──────────────────────────────────
+    window = dependency_original_observation_window(original_receipt)
+    if window is None:
+        reasons.append("the original receipt carries no resolvable observation window")
+    else:
+        try:
+            if _utc_text(refresh["original_observed_at"]) != _utc_text(window[0]):
+                reasons.append(
+                    "original_observed_at is not the original receipt's own observation time"
+                )
+            if _utc_text(refresh["original_expires_at"]) != _utc_text(window[1]):
+                reasons.append(
+                    "original_expires_at is not the original receipt's own expiry"
+                )
+        except (TypeError, ValueError) as error:
+            reasons.append(f"original observation window is unparseable: {error}")
+    # ── producer 模組身分:驗證端重算該族 producer SSOT 的 blob ────────────────
+    try:
+        producer_module_digest = _file_digest(Path(repo_root) / row["producer_module"])
+    except OSError as error:
+        producer_module_digest = None
+        reasons.append(f"producer module is unreadable at the current head: {error}")
+    if producer_module_digest is not None and (
+        refresh["producer_module_digest"] != producer_module_digest
+    ):
+        reasons.append(
+            "producer_module_digest is not the current-head blob of "
+            f"{row['producer_module']}; the replay did not run the reviewed producer"
+        )
+    # ── §9.2 的核心:語義 digest 由**驗證端**重算,再與 refresh 與原 receipt 兩邊比對 ──
+    try:
+        reproduced = reproduce_dependency_semantic_digests(
+            dependency_class,
+            original_schema_version=original_schema_version,
+            repo_root=repo_root,
+        )
+    except Exception as error:  # noqa: BLE001 - 重算不出即 fail-closed
+        reproduced = None
+        reasons.append(
+            "the verifier could not independently reproduce the semantic digests at the "
+            f"current head: {error}"
+        )
+    verdict["reproduced_semantic_digests"] = reproduced
+    claimed = refresh["reproduced_semantic_digests"]
+    expected_fields = set(row["semantic_digest_fields"])
+    if set(claimed) != expected_fields:
+        reasons.append(
+            "reproduced_semantic_digests is not the exact §9.2 semantic-digest field set of "
+            f"{dependency_class} (extra={sorted(set(claimed) - expected_fields)}, "
+            f"missing={sorted(expected_fields - set(claimed))})"
+        )
+    if any(value == refresh["original_receipt_digest"] for value in claimed.values()):
+        reasons.append(
+            "a reproduced semantic digest merely re-asserts original_receipt_digest; §9.2 "
+            "requires an INDEPENDENTLY RECOMPUTED semantic digest, not a copy of the "
+            "original receipt identity"
+        )
+    if reproduced is not None:
+        for field in sorted(expected_fields):
+            recomputed = reproduced.get(field)
+            if claimed.get(field) != recomputed:
+                reasons.append(
+                    f"reproduced_semantic_digests[{field!r}] does not equal the verifier's "
+                    "own recomputation at the current head"
+                )
+            if original_receipt.get(field) != recomputed:
+                reasons.append(
+                    f"the original receipt's {field!r} is no longer reproducible at the "
+                    "current head; §9.2 forbids a refresh from changing any semantic digest "
+                    "— the dependency must be re-observed, not refreshed"
+                )
+    # ── 獨立性:同一次觀測 / 同一個 producer 標籤都不得換到 refresh ─────────────
+    reproduction = refresh["reproduction"]
+    if reproduction["method"] != S2_4_DEPENDENCY_REFRESH_METHOD:
+        reasons.append("reproduction.method is not the §9.2 independent-recomputation method")
+    producer_fields = _original_producer_fields(original_receipt)
+    if producer_fields is None:
+        reasons.append("the original receipt carries no resolvable producer identity")
+    else:
+        original_identity = dependency_producer_identity(**producer_fields)
+        if reproduction["original_producer_identity"] != original_identity:
+            reasons.append(
+                "reproduction.original_producer_identity is not the producer projection the "
+                "verifier derives from the original receipt"
+            )
+        if reproduction["reproducer_caller"] == producer_fields["caller"]:
+            reasons.append(
+                "the refresh is produced by the same node/caller that produced the original "
+                f"({producer_fields['caller']!r}); §9.2 requires an INDEPENDENT replay"
+            )
+        try:
+            reproducer_identity = dependency_producer_identity(
+                caller=reproduction["reproducer_caller"],
+                observation_time=reproduction["reproduced_at"],
+                platform=reproduction["reproducer_platform"],
+            )
+        except (TypeError, ValueError) as error:
+            reproducer_identity = None
+            reasons.append(f"reproducer identity is unprojectable: {error}")
+        if reproducer_identity is not None:
+            if reproduction["reproducer_identity"] != reproducer_identity:
+                reasons.append(
+                    "reproduction.reproducer_identity is not the projection of its own "
+                    "carried caller/platform/reproduced_at"
+                )
+            elif reproducer_identity == original_identity:
+                reasons.append(
+                    "the refresh's producer projection equals the original's; a refresh "
+                    "cannot be the original observation restated (§9.2)"
+                )
+    # ── 時間:復現必須在原證據到期之後、觀測時刻之前;新窗必須短且未過期 ────────
+    moment = None
+    try:
+        moment = _parse_timestamp(_now_text(now) or str(now))
+    except (TypeError, ValueError) as error:
+        reasons.append(f"the observed moment is unparseable: {error}")
+    try:
+        reproduced_at = _parse_timestamp(refresh["reproduction"]["reproduced_at"])
+        expires_at = _parse_timestamp(refresh["expires_at"])
+        if window is not None and reproduced_at <= _parse_timestamp(window[1]):
+            reasons.append(
+                "reproduction.reproduced_at is not strictly after the original evidence's "
+                "own expiry; a replay inside the original observation window is the same "
+                "observation restated, not an independent reproduction (§9.2)"
+            )
+        if int((expires_at - reproduced_at).total_seconds()) != int(
+            refresh["refresh_ttl_seconds"]
+        ):
+            reasons.append(
+                "refresh_ttl_seconds does not equal expires_at - reproduced_at; the new "
+                "short expiry must be exactly the declared window (§9.2)"
+            )
+        if int(refresh["refresh_ttl_seconds"]) > MAX_DEPENDENCY_REFRESH_TTL_SECONDS:
+            reasons.append(
+                "the refresh window exceeds the §9.2 'new short expiry' ceiling of "
+                f"{MAX_DEPENDENCY_REFRESH_TTL_SECONDS}s"
+            )
+        if moment is not None:
+            if reproduced_at > moment:
+                reasons.append("reproduction.reproduced_at is in the future")
+            if expires_at <= moment:
+                reasons.append(
+                    "the refresh attestation is itself expired; §9.2 admits an expired "
+                    "source identity only together with a CURRENT refresh"
+                )
+    except (TypeError, ValueError) as error:
+        reasons.append(f"refresh timestamps are unparseable: {error}")
+    if reasons:
+        verdict["reasons"] = sorted(set(reasons))
+        return verdict
+    verdict["status"] = DEPENDENCY_REFRESH_STATUS_ADMITTED
+    verdict["admits_expired_source_identity"] = True
+    return verdict
+
+
+def derive_source_dependency_admission_status(
+    *,
+    evidence_class: Any,
+    receipt: Any,
+    refresh: Any = None,
+    now: str | datetime | None = None,
+    repo_root: Path = REPO_ROOT,
+) -> dict[str, Any]:
+    """§9.2 的分類裁決:這份 dependency 證據現在可否被 S2.4 採信(typed;fail-closed)。
+
+    三條互斥路徑:
+
+    * ``evidence_class`` 落在 :data:`S2_4_NEVER_REFRESHABLE_EVIDENCE` —— 遞交**任何** refresh
+      一律 ``DEPENDENCY_REFRESH_BY_REFERENCE_FORBIDDEN``(§10.5 #28 後半、§12 #15);未過期
+      即 FRESH,過期即 ``DEPENDENCY_EVIDENCE_REOBSERVATION_REQUIRED``(只能重新觀測/重簽)。
+    * ``evidence_class`` 落在 :data:`S2_4_DEPENDENCY_REFRESH_CLASSES` —— 未過期 FRESH;過期且
+      **恰一份** refresh 通過獨立復現才 ``SOURCE_DEPENDENCY_ADMITTED_BY_REFRESH``;零份是
+      ``SOURCE_DEPENDENCY_EXPIRED_NO_REFRESH``,兩份以上直接拒(§9.2:「one current refresh」)。
+    * 其他 —— 未知類別一律拒(封閉表,不預設放行)。
+    """
+
+    if now is None:
+        now = datetime.now(timezone.utc)
+    verdict: dict[str, Any] = {
+        "status": SOURCE_DEPENDENCY_STATUS_REJECTED,
+        "reasons": [],
+        "evidence_class": evidence_class,
+        "refresh_admitted": False,
+        "runtime_observation_substituted": False,
+    }
+    refreshes: list[Any]
+    if refresh is None:
+        refreshes = []
+    elif isinstance(refresh, (list, tuple)):
+        refreshes = list(refresh)
+    else:
+        refreshes = [refresh]
+    if evidence_class in S2_4_NEVER_REFRESHABLE_EVIDENCE:
+        if refreshes:
+            verdict["status"] = DEPENDENCY_REFRESH_BY_REFERENCE_FORBIDDEN
+            verdict["reasons"] = [
+                f"{evidence_class} can never be refreshed by reference: "
+                f"{S2_4_NEVER_REFRESHABLE_EVIDENCE[evidence_class]} (§9.2 / §10.5 #28 / §12 #15)"
+            ]
+            return verdict
+        expires = receipt.get("expires_at") if isinstance(receipt, dict) else None
+        try:
+            if expires is None:
+                raise ValueError("evidence carries no expires_at")
+            fresh = _parse_timestamp(str(expires)) > _parse_timestamp(
+                _now_text(now) or str(now)
+            )
+        except (TypeError, ValueError) as error:
+            verdict["reasons"] = [
+                f"{evidence_class} freshness cannot be derived: {error} (fail-closed)"
+            ]
+            return verdict
+        if fresh:
+            verdict["status"] = SOURCE_DEPENDENCY_STATUS_FRESH
+            return verdict
+        verdict["status"] = DEPENDENCY_EVIDENCE_REOBSERVATION_REQUIRED
+        verdict["reasons"] = [
+            f"{evidence_class} is expired and cannot be refreshed by reference: "
+            f"{S2_4_NEVER_REFRESHABLE_EVIDENCE[evidence_class]}"
+        ]
+        return verdict
+    row = S2_4_DEPENDENCY_REFRESH_CLASSES.get(evidence_class)
+    if row is None:
+        verdict["reasons"] = [
+            f"{evidence_class!r} is not a §9.2 dependency-freshness class; the table is "
+            "closed and an unknown class is never admitted"
+        ]
+        return verdict
+    window = dependency_original_observation_window(receipt)
+    if window is None:
+        verdict["reasons"] = [
+            f"{evidence_class} carries no resolvable observation window (fail-closed)"
+        ]
+        return verdict
+    try:
+        moment = _parse_timestamp(_now_text(now) or str(now))
+        expired = _parse_timestamp(window[1]) <= moment
+    except (TypeError, ValueError) as error:
+        verdict["reasons"] = [f"{evidence_class} freshness is unparseable: {error}"]
+        return verdict
+    if len(refreshes) > 1:
+        verdict["reasons"] = [
+            "§9.2 admits an expired source identity together with exactly ONE current "
+            f"refresh attestation; {len(refreshes)} were supplied"
+        ]
+        return verdict
+    if not expired:
+        verdict["status"] = SOURCE_DEPENDENCY_STATUS_FRESH
+        return verdict
+    if not refreshes:
+        verdict["status"] = SOURCE_DEPENDENCY_STATUS_EXPIRED_NO_REFRESH
+        verdict["reasons"] = [
+            f"{evidence_class} observation TTL is elapsed and no refresh attestation was "
+            "supplied; §9.2 admits it only together with one independently reproduced "
+            "s2_4_dependency_refresh_attestation_v1"
+        ]
+        return verdict
+    outcome = derive_dependency_refresh_status(
+        refreshes[0], original_receipt=receipt, now=now, repo_root=repo_root
+    )
+    verdict["reasons"] = list(outcome["reasons"])
+    if outcome["status"] != DEPENDENCY_REFRESH_STATUS_ADMITTED:
+        return verdict
+    if outcome["dependency_class"] != evidence_class:
+        verdict["reasons"] = [
+            "the refresh attests a different dependency class than the evidence being "
+            f"admitted ({outcome['dependency_class']!r} != {evidence_class!r})"
+        ]
+        return verdict
+    verdict["status"] = SOURCE_DEPENDENCY_STATUS_ADMITTED_BY_REFRESH
+    verdict["refresh_admitted"] = True
     return verdict

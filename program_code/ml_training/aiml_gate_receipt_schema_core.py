@@ -202,6 +202,18 @@ SCHEMA_FILES = {
     # agent_governance_s2_4_render(caller 提供樹;絕不觸生產路徑,不自證 runtime)。
     "base_runtime_tree_manifest_v1": "base_runtime_tree_manifest_v1.schema.json",
     "launch_bundle_manifest_v1": "launch_bundle_manifest_v1.schema.json",
+    # S2.4(WP4·W5·§9.2)——additive:dependency-freshness refresh attestation。§10.1 明列此
+    # 路徑,§9.2 令它成為「過期 S2.2A/S2.3/S1.3 **source** 身分」唯一的補救途徑。加這鍵純為
+    # schema 查找,絕不進入 aiml_effect_classifier_digest() 的六個 S0.3 常量輸入
+    # (見 :46-48/§7.2),S0.3 分類身分不動;亦不改 PROGRAM_SCHEMA_PATHS 與 v1/v2 component
+    # matrix/digest。中央閘「不」讓 caller 自證 status——委派給
+    # aiml_gate_receipt_s2_4_contracts.derive_dependency_refresh_status,由**驗證端自己**在
+    # current_source_head 上重跑該 dependency 的 producer/語義再算並與原 receipt 比對
+    # (caller 帶 status/admitted/pass/done 一律先拒)。§9.2 的硬線由同一支閘的封閉分類表
+    # 執法:runtime/topology/prepare/auth 證據永不可 refresh-by-reference。
+    "s2_4_dependency_refresh_attestation_v1": (
+        "s2_4_dependency_refresh_attestation_v1.schema.json"
+    ),
 }
 
 S0_DEPENDENCY_DIGESTS = {

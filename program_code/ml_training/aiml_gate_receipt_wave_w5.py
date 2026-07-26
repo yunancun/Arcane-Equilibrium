@@ -64,9 +64,13 @@ _SCHEMA_DIR_REL = "program_code/ml_training/schemas/aiml_gate_receipts"
 # import 使本葉進入 engine-scanner runtime import 閉包)、W5 新寫的兩支測試,以及把
 # 「未實作 wave」邊界由 W5 推到 W6 的那支既有 W3 wave 測試。
 _W5_OWNED_PATHS = tuple(sorted((
+    "program_code/ml_training/aiml_gate_receipt_s2_4_contracts.py",
+    "program_code/ml_training/aiml_gate_receipt_schema_core.py",
     "program_code/ml_training/aiml_gate_receipt_validator.py",
     "program_code/ml_training/aiml_gate_receipt_wave_w5.py",
     "program_code/ml_training/application_bundle_runtime_closure_v1.json",
+    "program_code/ml_training/tests/test_aiml_gate_receipt_validator_s2_4.py",
+    f"{_SCHEMA_DIR_REL}/s2_4_dependency_refresh_attestation_v1.schema.json",
     "tests/structure/test_agent_governance_s2_4_acceptance_matrix.py",
     "tests/structure/test_agent_governance_s2_4_install_w3.py",
     "tests/structure/test_agent_governance_s2_4_install_w5.py",
@@ -86,8 +90,27 @@ _FORBIDDEN_COMPONENT_IDENTITIES = (
 # S1.1 的唯讀觀察身分:S2.4 永不建立/刪除/收回它(§10.5 #12)。
 _OBSERVER_ROLE = "aiml_observer_ro"
 _SCANNER_ROLE = "aiml_engine_scanner"
-# §9.2 明列、§10.1 明列,但當前 checkout 上**不存在**的 schema(§10.5 #28 的未證半邊)。
+# §9.2 / §10.1 明列的 dependency-refresh schema。W5 前半段(2026-07-26)在此 head 上**不存在**,
+# 被誠實折成 typed 缺口;W5 後半段(2026-07-27)把它實作出來,於是同一個投影鍵由「缺席」翻成
+# 「已註冊 + 中央閘活裁決」(§10.5 #28 的前半邊自此可證)。
 _DEPENDENCY_REFRESH_SCHEMA = "s2_4_dependency_refresh_attestation_v1"
+# §9.2 活探針的 code-owned 固定時鐘/身分(絕不取 wall clock:投影值一旦隨真實時間漂移,
+# W5 wave-exit 的 exported_abi_digest 就無法跨時重現)。
+_DEPENDENCY_REFRESH_PROBE_NOW = "2026-07-27T00:05:00+00:00"
+_DEPENDENCY_REFRESH_PROBE_REPRODUCED_AT = "2026-07-27T00:00:00+00:00"
+_DEPENDENCY_REFRESH_PROBE_CALLER = "E1:S2.4:W5-dependency-refresh-probe"
+_DEPENDENCY_REFRESH_PROBE_PLATFORM = {
+    "os": "darwin",
+    "arch": "arm64",
+    "python_version": "3.12",
+}
+# 真實的、已過期的 S2.2A source 身分(repo 內既有 receipt;非合成 fixture)。
+_S2_2A_RECEIPT_V1_REL = (
+    "docs/execution_plan/ai_ml_landing/receipts/S2.2A-source-compatibility-receipt-v1.json"
+)
+_S2_2A_RECEIPT_V2_REL = (
+    "docs/execution_plan/ai_ml_landing/receipts/S2.2A-source-compatibility-receipt-v2.json"
+)
 # §10.5 #1:S2.4 owned schema 的完整集合(§10.1 逐行,扣掉上面那份缺席者)。
 _S2_4_SCHEMA_KEYS = tuple(sorted((
     "aiml_component_effect_classification_v2",
@@ -110,6 +133,7 @@ _S2_4_SCHEMA_KEYS = tuple(sorted((
     "s2_4_component_effect_postcheck_v1",
     "s2_4_component_effect_result_v1",
     "s2_4_component_effect_rollback_v1",
+    "s2_4_dependency_refresh_attestation_v1",
     "s2_4_install_effect_receipt_v1",
     "s2_4_install_journal_v1",
     "s2_4_install_plan_core_v1",
@@ -206,8 +230,25 @@ _W5_EXPORTED_ABI = {
     "schema_registration_contract": (
         "every S2.4 schema named by §10.1 is registered in the central SCHEMA_FILES delegation "
         "table and resolves to a real file, so a schema can never be shipped outside the "
-        "central gate. The one §10.1 path that does NOT exist on this head is named explicitly "
-        "rather than skipped: s2_4_dependency_refresh_attestation_v1 (§10.5 #1 / §9.2)"
+        "central gate. The §10.1 owned-path inventory is now complete: the one path that was "
+        "missing when W5 opened, s2_4_dependency_refresh_attestation_v1, exists, is registered "
+        "and has a central branch (§10.5 #1 / §9.2)"
+    ),
+    "dependency_refresh_contract": (
+        "§9.2: an expired S2.2A/S2.3/S1.3 SOURCE identity is admitted only together with ONE "
+        "current s2_4_dependency_refresh_attestation_v1 whose semantic digests the VERIFIER "
+        "recomputes itself, at the exact current head, from the reviewed producer SSOT, and "
+        "which must equal BOTH the refresh's claim and the original receipt's own values. The "
+        "refresh therefore cannot be minted from the original digest alone, cannot change any "
+        "semantic digest, cannot be produced inside the original's own observation window or "
+        "by the same producer label, cannot refresh another refresh (closed enum) and cannot "
+        "self-declare a status. Everything §9.2 marks as freshly observed, freshly re-hashed "
+        "or newly signed — S2.0 effect, PG topology, both scoped capability probes, the "
+        "prepared bundle and all four operator permits — is a closed NEVER_REFRESHABLE table "
+        "that returns DEPENDENCY_REFRESH_BY_REFERENCE_FORBIDDEN for any refresh at all "
+        "(§10.5 #28, both halves; §12 #15). No SSHSIG: §9.2 names four bindings and no "
+        "signature, §9.1 closes the profile set at four, and the unforgeable half of this "
+        "gate is the verifier's own recomputation"
     ),
     "boundary_contract": (
         "W5 produces no runtime, host, production-PostgreSQL or effect evidence of any kind. "
@@ -441,33 +482,58 @@ _W5_EXPORTED_ABI = {
         },
         # ── W5 自審新增的四項 ────────────────────────────────────────────────────
         {
-            "obligation_id": "DEPENDENCY_REFRESH_ATTESTATION_ABSENT",
-            "typed_status": "NOT_PROVIDED_BY_W5_SOURCE_ABSENT",
+            "obligation_id": "DEPENDENCY_REFRESH_RECEIPT_BINDING_ABSENT",
+            "typed_status": "NOT_PROVIDED_BY_W5",
             "owner_wave": "PM",
-            "spec_refs": ["§9.2", "§10.1", "§10.3 W5 row", "§10.5 #28"],
+            "spec_refs": ["§3", "§10.4", "§11.3"],
             "statement": (
-                "§10.1 names program_code/ml_training/schemas/aiml_gate_receipts/"
-                "s2_4_dependency_refresh_attestation_v1.schema.json in the owned-path allowlist "
-                "and §9.2 makes it the ONLY way an expired S2.2A/S2.3/S1.3 source identity may "
-                "still be admitted. It does not exist on this head: no schema file, no "
-                "SCHEMA_FILES entry, no validator branch, no builder, no test — the string "
-                "'dependency_refresh' appears nowhere in program_code/, helper_scripts/ or "
-                "tests/. §10.3's W5 row also asks W5 to 'generate dependency refresh/admission/"
-                "wave rollup'. Consequence while open: §10.5 #28's first half ('expired source "
-                "evidence needs one independently reproduced refresh') is UNPROVEN and "
-                "unprovable — there is nothing to test. The second half ('expired runtime/"
-                "topology/prepare/auth evidence cannot be refreshed by reference') IS proven "
-                "and is unaffected: those lanes refuse outright. Building the schema, its "
-                "central-validator branch and its independent-replay semantics is production "
-                "implementation, which the W5 test-writer role does not own; W5 records it, "
-                "names the exact missing path and makes its absence a live projection value so "
-                "it cannot be forgotten. This is the one finding that makes a literal reading "
-                "of §11.2's 'complete source inventory' false today."
+                "The §9.2 gate itself is now built and load-bearing (schema, central branch, "
+                "verifier-side recomputation, builder, tests), so §11.2's 'complete source "
+                "inventory' is no longer false and §10.5 #28's first half is PROVEN. What is "
+                "NOT closed is the receipt binding: §3 requires the terminal "
+                "s2_4_install_effect_receipt_v1 to reference 'source_admission_receipt, W0-W5 "
+                "wave-chain and DEPENDENCY-REFRESH digests', and that closed "
+                "additionalProperties:false schema has no field for them — a consumer holding "
+                "only the install receipt cannot see which refreshes admitted the expired "
+                "source identities. Adding the field is an exported-schema change §10.4 "
+                "forbids the worker from choosing, exactly like PLAN_EXPIRY_OUTSIDE_SIGNED_CORE "
+                "and EFFECT_RECEIPT_RECONCILE_BINDING. Until PM rules, the refresh verdicts are "
+                "reachable only through derive_source_dependency_admission_status at APPLY "
+                "time, never from the persisted receipt."
             ),
             "w5_provides": (
-                "the named absence as a live re-derivation, the honest classification of "
-                "§10.5 #28 as PARTIALLY PROVEN, and the statement that no S2.4 evidence is "
-                "currently expired so nothing is being admitted through a missing gate"
+                "the complete §9.2 gate (four refreshable classes, nine never-refreshable "
+                "classes, verifier-side reproduction, one-refresh rule) and the exact residual: "
+                "the terminal receipt has nowhere to carry the refresh digests §3 names"
+            ),
+        },
+        {
+            "obligation_id": "DEPENDENCY_REFRESH_REPRODUCER_NODE_IS_DECLARATIVE",
+            "typed_status": "PARTIALLY_PROVIDED_BY_W5",
+            "owner_wave": "W6",
+            "spec_refs": ["§9.1", "§9.2"],
+            "statement": (
+                "§9.2 requires an INDEPENDENT replay. W5 makes two halves of that structural "
+                "and one half declarative, and says which is which. STRUCTURAL and unforgeable: "
+                "the semantic digests are recomputed BY THE VERIFIER from the repository at the "
+                "bound head and must equal both the refresh's claim and the original's own "
+                "values, so a refresh can never be minted from the original digest; and "
+                "reproduced_at must be strictly after the original evidence's own expiry, so "
+                "the same observation cannot be restated as a refresh. DECLARATIVE: that the "
+                "reproducing NODE differs from the producing node rests on reproducer_caller "
+                "not equalling the original's producer label, which a hostile producer can "
+                "simply relabel. The source lane holds no key material at all (see "
+                "ATTESTOR_KEY_IS_NOT_SEPARATE_FROM_THE_PERMIT_KEY), so node custody cannot be "
+                "established here; closing it means a per-node attestor identity, which is a "
+                "W6 key-custody decision about real hosts. A second, smaller asymmetry is "
+                "recorded rather than hidden: source_compatibility_receipt_v1/v2 carry no "
+                "'caller' or 'platform' field at all, so for S2.2A the producer label degrades "
+                "to session_id ('S2.2A') and the platform component of the projection is null."
+            ),
+            "w5_provides": (
+                "the verifier-side recomputation and the strictly-after-expiry rule as the two "
+                "unforgeable halves, the caller inequality as the declared half, and the exact "
+                "statement of what a relabelling producer could still do"
             ),
         },
         {
@@ -842,8 +908,180 @@ def _schema_registration_live(repo_root: Path = REPO_ROOT) -> dict[str, Any]:
     return live
 
 
+_DEPENDENCY_REFRESH_LIVE_KEYS = (
+    "refreshable_classes",
+    "never_refreshable_classes",
+    "reproducible_class_field_sets",
+    "central_gate_accepts_the_positive_refresh",
+    "positive_refresh_status",
+    "positive_admission_status",
+    "expired_without_refresh_status",
+    "reasserted_original_digest_status",
+    "same_producer_node_status",
+    "refresh_of_a_refresh_status",
+    "builder_refuses_a_refresh_of_a_refresh",
+    "self_declared_status_status",
+    "substituted_original_status",
+    "stale_head_status",
+    "semantic_digest_drift_status",
+    "two_refreshes_status",
+    "never_refreshable_statuses",
+    "refresh_carries_no_signature_field",
+)
+
+
+def _dependency_refresh_live(repo_root: Path = REPO_ROOT) -> dict[str, Any]:
+    """§9.2 / §10.5 #28:過期 source 身分的獨立復現閘,逐個失敗模式的活再導出。
+
+    正向用的是 repo 內**真實且已過期**的 S2.2A receipt(非合成 fixture);時鐘為 code-owned
+    固定常量,故投影跨時可重現。每一個負向都對應 §9.2 的一句話。
+    """
+
+    import json as _json
+
+    live: dict[str, Any] = {}
+    facade = resolve_facade()
+    try:
+        original = _json.loads(
+            (repo_root / _S2_2A_RECEIPT_V1_REL).read_text(encoding="utf-8")
+        )
+        other_original = _json.loads(
+            (repo_root / _S2_2A_RECEIPT_V2_REL).read_text(encoding="utf-8")
+        )
+        live["refreshable_classes"] = sorted(facade.S2_4_DEPENDENCY_REFRESH_CLASSES)
+        live["never_refreshable_classes"] = sorted(facade.S2_4_NEVER_REFRESHABLE_EVIDENCE)
+        # 四族的語義欄位集都必須真的能由當前 checkout 重算出來(缺一族 = 該族無法被續命)。
+        field_sets: dict[str, Any] = {}
+        for name, row in sorted(facade.S2_4_DEPENDENCY_REFRESH_CLASSES.items()):
+            try:
+                reproduced = facade.reproduce_dependency_semantic_digests(
+                    name,
+                    original_schema_version=row["original_schema_versions"][0],
+                    repo_root=repo_root,
+                )
+                field_sets[name] = sorted(reproduced)
+            except Exception:  # noqa: BLE001
+                field_sets[name] = None
+        live["reproducible_class_field_sets"] = field_sets
+
+        def _build(**overrides: Any) -> dict[str, Any]:
+            return facade.build_s2_4_dependency_refresh_attestation(
+                overrides.pop("original_receipt", original),
+                reproducer_caller=overrides.pop(
+                    "reproducer_caller", _DEPENDENCY_REFRESH_PROBE_CALLER
+                ),
+                reproducer_platform=dict(_DEPENDENCY_REFRESH_PROBE_PLATFORM),
+                reproduced_at=_DEPENDENCY_REFRESH_PROBE_REPRODUCED_AT,
+                repo_root=repo_root,
+                **overrides,
+            )
+
+        def _status(refresh: Any, original_receipt: Any = None) -> str:
+            return facade.derive_dependency_refresh_status(
+                refresh,
+                original_receipt=original if original_receipt is None else original_receipt,
+                now=_DEPENDENCY_REFRESH_PROBE_NOW,
+                repo_root=repo_root,
+            )["status"]
+
+        def _reseal(artifact: dict[str, Any]) -> dict[str, Any]:
+            artifact = dict(artifact)
+            artifact.pop("self_digest", None)
+            artifact["self_digest"] = facade.artifact_self_digest(artifact)
+            return artifact
+
+        refresh = _build()
+        live["central_gate_accepts_the_positive_refresh"] = (
+            facade.validate_aiml_artifact(refresh) == []
+        )
+        live["positive_refresh_status"] = _status(refresh)
+        live["positive_admission_status"] = facade.derive_source_dependency_admission_status(
+            evidence_class="S2_2A_SOURCE_COMPATIBILITY",
+            receipt=original,
+            refresh=refresh,
+            now=_DEPENDENCY_REFRESH_PROBE_NOW,
+            repo_root=repo_root,
+        )["status"]
+        live["expired_without_refresh_status"] = (
+            facade.derive_source_dependency_admission_status(
+                evidence_class="S2_2A_SOURCE_COMPATIBILITY",
+                receipt=original,
+                now=_DEPENDENCY_REFRESH_PROBE_NOW,
+                repo_root=repo_root,
+            )["status"]
+        )
+        # 1) 只把舊 digest 再抄一次(§9.2:independently RECOMPUTED,不是複述)。
+        reasserted = _reseal({
+            **refresh,
+            "reproduced_semantic_digests": {
+                field: refresh["original_receipt_digest"]
+                for field in refresh["reproduced_semantic_digests"]
+            },
+        })
+        live["reasserted_original_digest_status"] = _status(reasserted)
+        # 2) 由原 receipt 的同一個 producer 標籤產出。
+        same_node = _build(reproducer_caller=original["session_id"])
+        live["same_producer_node_status"] = _status(same_node)
+        # 3) refresh 去 refresh 另一份 refresh(閘拒 + builder 亦拒)。
+        live["refresh_of_a_refresh_status"] = _status(refresh, refresh)
+        try:
+            _build(original_receipt=refresh)
+            live["builder_refuses_a_refresh_of_a_refresh"] = False
+        except ValueError:
+            live["builder_refuses_a_refresh_of_a_refresh"] = True
+        # 4) caller 自證 status。
+        live["self_declared_status_status"] = _status({**refresh, "status": "ADMITTED"})
+        # 5) 被替換掉的原身分(v1 的 refresh 拿 v2 receipt 來對)。
+        live["substituted_original_status"] = _status(refresh, other_original)
+        # 6) 過時的 head。
+        live["stale_head_status"] = _status(
+            _reseal({**refresh, "current_source_head": "0" * 40})
+        )
+        # 7) 原 receipt 的語義 digest 已經在當前 head 上重算不出來(= 只能重新觀測)。
+        drifted = _reseal({
+            **original,
+            "learning_runtime_digest": "sha256:" + "a" * 64,
+        })
+        live["semantic_digest_drift_status"] = facade.derive_dependency_refresh_status(
+            _reseal({**refresh, "original_receipt_digest": facade.artifact_self_digest(drifted)}),
+            original_receipt=drifted,
+            now=_DEPENDENCY_REFRESH_PROBE_NOW,
+            repo_root=repo_root,
+        )["status"]
+        # 8) 兩份 refresh(§9.2:one current refresh attestation)。
+        live["two_refreshes_status"] = facade.derive_source_dependency_admission_status(
+            evidence_class="S2_2A_SOURCE_COMPATIBILITY",
+            receipt=original,
+            refresh=[refresh, refresh],
+            now=_DEPENDENCY_REFRESH_PROBE_NOW,
+            repo_root=repo_root,
+        )["status"]
+        # 9) §10.5 #28 後半:runtime / topology / prepare / auth 一律不可引用刷新。
+        live["never_refreshable_statuses"] = {
+            name: facade.derive_source_dependency_admission_status(
+                evidence_class=name,
+                receipt={"expires_at": "2099-01-01T00:00:00+00:00"},
+                refresh=refresh,
+                now=_DEPENDENCY_REFRESH_PROBE_NOW,
+                repo_root=repo_root,
+            )["status"]
+            for name in sorted(facade.S2_4_NEVER_REFRESHABLE_EVIDENCE)
+        }
+        # 10) 簽章判斷的可測形:closed schema 不含任何簽章面。
+        schema = facade._load_schema(_DEPENDENCY_REFRESH_SCHEMA)
+        live["refresh_carries_no_signature_field"] = not any(
+            marker in name
+            for name in schema.get("properties", {})
+            for marker in ("signature", "sshsig", "namespace", "profile_identity")
+        )
+    except Exception:  # noqa: BLE001 - 任何逸出 = fail-closed 未證
+        for key in _DEPENDENCY_REFRESH_LIVE_KEYS:
+            live.setdefault(key, None)
+    return live
+
+
 def w5_exported_abi_projection(repo_root: Path = REPO_ROOT) -> dict[str, Any]:
-    """W5 exported-ABI 投影:code-owned 骨架 + 六組覆蓋缺口的活再導出。"""
+    """W5 exported-ABI 投影:code-owned 骨架 + 七組覆蓋缺口的活再導出。"""
 
     return {
         **_W5_EXPORTED_ABI,
@@ -856,6 +1094,7 @@ def w5_exported_abi_projection(repo_root: Path = REPO_ROOT) -> dict[str, Any]:
         "inactive_postcheck_live": _inactive_postcheck_live(),
         "rendered_unit_negative_live": _rendered_unit_negative_live(),
         "schema_registration_live": _schema_registration_live(repo_root),
+        "dependency_refresh_live": _dependency_refresh_live(repo_root),
     }
 
 
@@ -867,6 +1106,127 @@ def w5_owned_path_diff_digest(
     return owned_path_blob_projection_digest(
         repo_root, _W5_OWNED_PATHS, source_head=source_head
     )
+
+
+def _dependency_refresh_reasons(live: dict[str, Any]) -> list[str]:
+    """§9.2 活裁決逐條轉成具名 reason(任一失敗模式回到「可過」,W5 exit 必破)。"""
+
+    reasons: list[str] = []
+    if sorted(live.get("refreshable_classes") or []) != [
+        "S1_3_IDENTITY_CONTRACT",
+        "S2_2A_SOURCE_COMPATIBILITY",
+        "S2_3_EXPECTED_IDENTITY",
+        "S2_3_SEALED_BUILD",
+    ]:
+        reasons.append(
+            "W5 §9.2 refreshable-class table is not the exact three source-identity families "
+            "of the §9.2 first row (S2.2A compatibility, S2.3 sealed-build/expected-identity, "
+            "S1.3 contract)"
+        )
+    unreproducible = sorted(
+        name
+        for name, fields in (live.get("reproducible_class_field_sets") or {}).items()
+        if not fields
+    )
+    if unreproducible or not live.get("reproducible_class_field_sets"):
+        reasons.append(
+            "W5 cannot independently reproduce the semantic digests of "
+            f"{unreproducible or 'any'} §9.2 class at the current head; a class whose "
+            "producer checks cannot be replayed can never be refreshed (§9.2)"
+        )
+    if live.get("central_gate_accepts_the_positive_refresh") is not True:
+        reasons.append("W5 central gate rejects a well-formed dependency refresh attestation")
+    for key, expected, detail in (
+        (
+            "positive_refresh_status",
+            "DEPENDENCY_REFRESH_ADMITTED",
+            "one independently reproduced refresh must admit an expired source identity",
+        ),
+        (
+            "positive_admission_status",
+            "SOURCE_DEPENDENCY_ADMITTED_BY_REFRESH",
+            "the expired S2.2A identity must be admitted THROUGH the refresh, not despite it",
+        ),
+        (
+            "expired_without_refresh_status",
+            "SOURCE_DEPENDENCY_EXPIRED_NO_REFRESH",
+            "an expired source identity with no refresh must not be admitted",
+        ),
+        (
+            "reasserted_original_digest_status",
+            "DEPENDENCY_REFRESH_REJECTED",
+            "a refresh that merely re-asserts the original digest is not a reproduction",
+        ),
+        (
+            "same_producer_node_status",
+            "DEPENDENCY_REFRESH_REJECTED",
+            "a refresh produced by the original's own producer label is not independent",
+        ),
+        (
+            "refresh_of_a_refresh_status",
+            "DEPENDENCY_REFRESH_REJECTED",
+            "a refresh cannot refresh another refresh",
+        ),
+        (
+            "self_declared_status_status",
+            "DEPENDENCY_REFRESH_REJECTED",
+            "no S2.4 artifact self-declares its own status",
+        ),
+        (
+            "substituted_original_status",
+            "DEPENDENCY_REFRESH_REJECTED",
+            "a substituted original identity is not the identity being refreshed",
+        ),
+        (
+            "stale_head_status",
+            "DEPENDENCY_REFRESH_REJECTED",
+            "the reproduction must be performed at the exact current head",
+        ),
+        (
+            "semantic_digest_drift_status",
+            "DEPENDENCY_REFRESH_REJECTED",
+            "a refresh cannot change any semantic digest; drifted source must be re-observed",
+        ),
+        (
+            "two_refreshes_status",
+            "SOURCE_DEPENDENCY_REJECTED",
+            "§9.2 admits an expired source identity together with exactly ONE refresh",
+        ),
+    ):
+        if live.get(key) != expected:
+            reasons.append(
+                f"W5 §9.2 dependency-refresh gate: {key} is {live.get(key)!r}, expected "
+                f"{expected!r} — {detail}"
+            )
+    if live.get("builder_refuses_a_refresh_of_a_refresh") is not True:
+        reasons.append(
+            "W5 dependency-refresh builder accepts a refresh as its own original; §9.2 "
+            "forbids refreshing a refresh at both the builder and the gate"
+        )
+    never = live.get("never_refreshable_statuses") or {}
+    if sorted(never) != sorted(live.get("never_refreshable_classes") or []) or not never:
+        reasons.append(
+            "W5 never-refreshable evidence table is not exercised in full; §9.2's runtime/"
+            "topology/prepare/auth rows must each refuse a refresh (§10.5 #28)"
+        )
+    admitted_by_reference = sorted(
+        name
+        for name, status in never.items()
+        if status != "DEPENDENCY_REFRESH_BY_REFERENCE_FORBIDDEN"
+    )
+    if admitted_by_reference:
+        reasons.append(
+            "W5 accepts refresh-by-reference for evidence §9.2 requires to be freshly "
+            f"observed/authorized/re-hashed/newly signed: {admitted_by_reference} "
+            "(§10.5 #28 second half / §12 #15)"
+        )
+    if live.get("refresh_carries_no_signature_field") is not True:
+        reasons.append(
+            "W5 dependency-refresh schema grew a signature/namespace/profile surface; §9.2 "
+            "requires an independent recomputation and §9.1 closes the SSHSIG profile set at "
+            "four — a fifth profile is a trust-root change no WP4 worker may make (§12 #15)"
+        )
+    return reasons
 
 
 def w5_structural_errors(receipt: dict[str, Any], repo_root: Path = REPO_ROOT) -> list[str]:
@@ -1030,6 +1390,8 @@ def w5_structural_errors(receipt: dict[str, Any], repo_root: Path = REPO_ROOT) -
             f"W5 still records DEPENDENCY_REFRESH_ATTESTATION_ABSENT although "
             f"{_DEPENDENCY_REFRESH_SCHEMA} now exists; close the obligation instead"
         )
+    # 7) §9.2 / §10.5 #28:過期 source 身分的獨立復現閘。
+    reasons.extend(_dependency_refresh_reasons(projection["dependency_refresh_live"]))
     if receipt.get("owned_path_manifest_digest") != canonical_digest(sorted(_W5_OWNED_PATHS)):
         reasons.append("wave-exit owned_path_manifest_digest is not the exact W5 owned-path set")
     if receipt.get("owned_path_diff_digest") != w5_owned_path_diff_digest(
