@@ -1162,6 +1162,36 @@ from agent_governance_s2_4_topology import (  # noqa: E402,F401
     pg_topology_guard_field_contract,
     topology_abi_projection,
 )
+# --------------------------------------------------------------------------- #
+# W3b(§5.1 / §4 五 APPLY row / §7):typed PREPARE driver、五個 component driver 與
+# systemd-creds 憑證託管。三葉在 agent_governance_s2_4_apply 彙總,故此處單一匯入面即可
+# (名稱與值皆不變;打包成組是為守住本檔的 2000 行治理上限)。
+# --------------------------------------------------------------------------- #
+from agent_governance_s2_4_apply import (  # noqa: E402,F401
+    CANDIDATE_EVIDENCE_DIR, CANDIDATE_POLICY_PATH, CLOSED_DSN_KEYS, COMPONENT_CLASSES,
+    COMPONENT_REQUIRED_PROFILES, COMPONENT_TYPED_STATUSES, CREDENTIAL_SLOT_PATH,
+    ENGINE_SCANNER_IDENTITY_CONTRACT, FORBIDDEN_DSN_KEYS, FORBIDDEN_UNIT_LIFECYCLE_METHODS,
+    INACTIVE_UNIT_POSTSTATE, INSTALL_ROOTS, PREPARE_PUBLICATION_DENY_ROOTS,
+    PREPARE_STAGING_PARENT, PREPARE_TYPED_STATUSES, UNIT_FRAGMENT_PATH,
+    ComponentContractError, CredentialContractError, CredentialInstallDriver,
+    EngineScannerInstallDriver, HostIdentityDriver, PgRoleAclDriver, PrepareContractError,
+    PrepareDriver, RuntimeInstallDriver, SealedSecretHandle, SecretBroker, SecretMaterialLeak,
+    apply_abi_projection, apply_s2_4_credential_install, apply_s2_4_engine_scanner_unit,
+    apply_s2_4_host_identity, apply_s2_4_learning_runtime, apply_s2_4_pg_role_acl,
+    assert_no_secret_material, assert_no_unit_lifecycle_surface,
+    build_component_effect_intent, build_prepare_core, build_prepare_intent,
+    build_prepared_install_bundle, build_uid_gid_directory_manifest, classify_pre_state,
+    closed_dsn_key_contract, component_raw_ingress_reasons, component_row_abi,
+    credential_abi_projection, derive_closed_dsn_key_status,
+    derive_host_credential_capability_status, derive_host_identity_effect_class_status,
+    derive_prepare_route_surface_status, derive_prepared_bundle_status,
+    encrypted_credential_fingerprint, generate_manifest_grant_statements,
+    generate_manifest_revoke_statements, generate_public_default_restore_statements,
+    host_identity_directory_tree, install_target_root, prepare_abi_projection,
+    prepare_id_for_core, prepare_journal_path, prepare_raw_ingress_reasons,
+    prepare_route_surface_contract, prepare_s2_4_install_bundle, prepare_sandbox_contract,
+    prepare_sandbox_contract_digest, prepared_staging_root, public_default_surfaces,
+)
 # W3 wave-exit 發射葉(同 emit_sink 姿態:install 上層 re-export,CLI 於 _main 掛 w3-emit)。
 from agent_governance_s2_4_w3_emit import (  # noqa: E402,F401
     W3_DERIVATION_RECORD_FILENAME,
