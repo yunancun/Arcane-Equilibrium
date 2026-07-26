@@ -33,7 +33,37 @@ for candidate in (HELPERS, ML_ROOT, PROGRAM_CODE):
 
 import agent_governance_s2_4_topology as topology  # noqa: E402
 import aiml_gate_receipt_validator as validator  # noqa: E402
+from ml_training import alr_application_identity as app_identity  # noqa: E402
 from ml_training import alr_consumer_resilience as resilience  # noqa: E402
+
+
+def _install_guard_with_required_posture(guard: dict, guard_file: Path) -> None:
+    """把渲染好的 guard 以契約要求的 host 姿態落檔(§8.3 / W2 P2-4)。
+
+    W3 的 topology observer 產出 guard 內容,佈署姿態(root:aiml-engine-scanner、
+    mode 恰 0440)則由 W2 的 `verify_topology_guard_host_posture` 在信任內容之前執法。
+    測試在無 root 的 checkout 上只能真寫 mode;owner/group 由 `guard_host_identity`
+    唯一縫模擬(判定邏輯不動,故不可能放行 group-writable 或非 root 所有的 guard)。
+    """
+
+    guard_file.write_text(
+        json.dumps(guard, ensure_ascii=False, sort_keys=True), encoding="utf-8"
+    )
+    guard_file.chmod(app_identity.TOPOLOGY_GUARD_REQUIRED_MODE)
+
+
+@pytest.fixture(autouse=True)
+def _simulate_guard_host_ownership(monkeypatch: pytest.MonkeyPatch) -> None:
+    """無 root checkout 上模擬 guard 的真實 host 佈署身分(唯一縫;mode 仍照真檔驗)。"""
+
+    monkeypatch.setattr(
+        app_identity,
+        "guard_host_identity",
+        lambda st: (
+            app_identity.TOPOLOGY_GUARD_REQUIRED_OWNER_UID,
+            app_identity.TOPOLOGY_GUARD_REQUIRED_GROUP,
+        ),
+    )
 
 # 凍結時鐘錨點(每次呼叫都顯式傳 now;與 wall clock 無關)。
 _ANCHOR = datetime(2030, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
@@ -394,13 +424,16 @@ def test_rendered_guard_file_is_accepted_by_the_consumer_reconnect_identity_gate
         binding_nonce=_NONCE,
     )
     guard_file = tmp_path / "topology-runtime-guard.json"
-    guard_file.write_text(json.dumps(guard, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+    _install_guard_with_required_posture(guard, guard_file)
     connection = _FakeConnection(
         row=dict(_row()),
         connected={
             "connected_user": "aiml_engine_scanner",
             "connected_database": "trading_ai",
             "server_version_num": "160003",
+            # W2 P1-4:身分閘同時比對 lc_messages(非英文伺服器會讓連線期錯誤
+            # 訊息指紋失效),故 fake connection 必須供出契約要求的值。
+            "lc_messages": resilience.REQUIRED_LC_MESSAGES,
         },
     )
     result = resilience.verify_connected_cluster_identity(
@@ -421,6 +454,9 @@ def test_rendered_guard_file_is_accepted_by_the_consumer_reconnect_identity_gate
             "connected_user": "aiml_engine_scanner",
             "connected_database": "trading_ai",
             "server_version_num": "160003",
+            # W2 P1-4:身分閘同時比對 lc_messages(非英文伺服器會讓連線期錯誤
+            # 訊息指紋失效),故 fake connection 必須供出契約要求的值。
+            "lc_messages": resilience.REQUIRED_LC_MESSAGES,
         },
     )
     with pytest.raises(resilience.AlrRuntimeIdentityError):
