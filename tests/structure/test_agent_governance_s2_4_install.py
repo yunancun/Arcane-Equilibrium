@@ -379,10 +379,20 @@ def test_registry_declares_three_s2_4_adapters_authority_locked() -> None:
         for key, value in entry.items():
             if key.endswith("_schema_path"):
                 assert (ROOT / value).is_file(), (adapter_id, key, value)
-        # W1 不建 driver 模組:implementation 只綁 install 治理模組(driver 屬 W3)。
-        assert entry["implementation_paths"] == [
+        # implementation_paths 必含 install 治理模組;§10.2 的凍結進入點所在的模組也必須在列
+        # (CC DRIFT-3:`apply_s2_4_install_plan` 住在 `..._install_driver.py` 而 `install.py`
+        # 並不 re-export 它,於是照著 operator 已核准的 adapter 紀錄找,找不到真正碰主機的碼)。
+        assert (
             "helper_scripts/maintenance_scripts/agent_governance_s2_4_install.py"
-        ]
+            in entry["implementation_paths"]
+        )
+        for path in entry["implementation_paths"] + entry["component_paths"]:
+            assert (ROOT / path).is_file(), (adapter_id, path)
+        if adapter_id == "s2_4_install_adapter_v1":
+            assert (
+                "helper_scripts/maintenance_scripts/agent_governance_s2_4_install_driver.py"
+                in entry["implementation_paths"]
+            )
     # probe/PREPARE 明文「cannot reach」APPLY 面(§4/§10.5 #38)。
     for adapter_id in _S2_4_ADAPTER_IDS[:2]:
         assert "cannot reach any APPLY surface" in adapters[adapter_id]["invariant"]
@@ -830,19 +840,59 @@ def _install_pinned_key(monkeypatch, public_key, fingerprint) -> None:
     monkeypatch.setattr(validator, "S2_4_OPERATOR_TRUST_ROOT_FINGERPRINT", fingerprint)
 
 
+def _payload_binding(profile_key="apply_aggregate", **overrides):
+    """W4a:profile 的 exact payload_binding(§9.1 payload 減去自指的 authorization_id)。"""
+
+    import hashlib
+
+    profile = validator.S2_4_AUTHORIZATION_PROFILES[profile_key]
+    plan_core_digest = overrides.pop(
+        "plan_core_digest", "sha256:" + hashlib.sha256(b"w1-plan-core").hexdigest()
+    )
+    plan_id = "s2-4-" + plan_core_digest.split(":", 1)[1]
+    binding = {}
+    for field in validator.authorization_payload_binding_fields(profile_key):
+        if field == "domain":
+            binding[field] = profile["signature_namespace"]
+        elif field == "issued_at":
+            binding[field] = _AUTH_ISSUED
+        elif field == "expires_at":
+            binding[field] = _AUTH_EXPIRES
+        elif field == "output_derived_unit_digest_or_null":
+            binding[field] = None
+        elif field == "plan_core_digest":
+            binding[field] = plan_core_digest
+        elif field in {"plan_id", "idempotency_key"}:
+            binding[field] = plan_id
+        elif field == "source_head":
+            binding[field] = "0" * 40
+        elif field == "target_host":
+            binding[field] = "trade-core"
+        elif field == "scope":
+            binding[field] = "PREPARE_SANDBOX"
+        else:
+            binding[field] = "sha256:" + hashlib.sha256(field.encode("utf-8")).hexdigest()
+    binding.update(overrides)
+    return binding
+
+
 def _signed_authorization(private_key, profile_key="apply_aggregate", **overrides):
     profile = validator.S2_4_AUTHORIZATION_PROFILES[profile_key]
+    binding = overrides.pop("payload_binding", None) or _payload_binding(profile_key)
     artifact = {
         "schema_version": "s2_4_operator_authorization_v1",
         "profile_identity": profile["profile_identity"],
         "signature_namespace": profile["signature_namespace"],
-        "authorization_id": "sha256:" + "a" * 64,
+        "authorization_id": "",
         "payload_fields": list(profile["payload_fields"]),
+        "payload_binding": binding,
         "issued_at": _AUTH_ISSUED,
         "expires_at": _AUTH_EXPIRES,
         "sshsig_armored": "-----BEGIN SSH SIGNATURE-----\nAAAA\n-----END SSH SIGNATURE-----\n",
         "self_digest": "sha256:" + "0" * 64,
     }
+    # W4a §9.1:authorization_id 由 payload 導出(overrides 可顯式覆蓋以測負向)。
+    artifact["authorization_id"] = validator.derive_authorization_id(artifact)
     artifact.update(overrides)
     signed = validator._s2_4_operator_authorization_signed_bytes(artifact)
     _SIGN_SEQ[0] += 1

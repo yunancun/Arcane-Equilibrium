@@ -668,8 +668,68 @@ def _verdict(
     }
 
 
+def prepare_rollback_contract(*, prepare_id: str, staging_root: str) -> dict[str, Any]:
+    """§5.1 的**可預先導出**PREPARE rollback 契約(operator 簽的就是它的 digest)。
+
+    鏡 :func:`agent_governance_s2_4_probe.capability_probe_cleanup_contract`:被簽的
+    ``prepare_rollback_digest`` 必須在跑之前就能算出來(不能是跑完才生成、帶 observed_at 的
+    ``s2_4_prepare_rollback_v1`` artifact),否則 §5.1「先簽再跑」根本無法成立。此契約授權的
+    範圍**恰為**這一份 prepare journal 的 task-owned staging delta——無 age-scan、無捷徑,
+    且該權限在 apply 授權過期之後仍然有效(§5.1 最後一段)。
+    """
+
+    return {
+        "schema_version": "s2_4_prepare_rollback_contract_v1_informal",
+        "prepare_id": prepare_id,
+        "staging_root": staging_root,
+        "journal_path": prepare_journal_path(prepare_id),
+        "operations": ["staging_delta_removal", "staging_absence_verification"],
+        "task_owned_only": True,
+        "authorized_after_apply_authority_expiry": True,
+    }
+
+
+def prepare_rollback_contract_digest(*, prepare_id: str, staging_root: str) -> str:
+    return canonical_digest(
+        prepare_rollback_contract(prepare_id=prepare_id, staging_root=staging_root)
+    )
+
+
+def prepare_permit_payload_binding(intent: dict[str, Any]) -> dict[str, Any]:
+    """§9.1 PREPARE payload 的**獨立再導出**期望值(W4a PERMIT_PLAN_BINDING)。
+
+    全部由 intent 的 unsigned core / 頂層 lineage 導出:``prepare_core_digest`` /
+    ``prepare_id`` / ``source_head`` / ``target_host`` /
+    ``prepare_sandbox_probe_receipt_digest`` / ``staging_parent_identity``
+    (parent path+device+inode 的 canonical digest)/ ``prepare_rollback_digest``。
+    """
+
+    core = intent["core"]
+    prepare_id = intent["prepare_id"]
+    staging_root = prepared_staging_root(prepare_id)
+    return {
+        "domain": PREPARE_SIGNATURE_NAMESPACE,
+        "prepare_core_digest": intent["core_digest"],
+        "prepare_id": prepare_id,
+        "source_head": core["source_head"],
+        "target_host": core["target_host"],
+        "prepare_sandbox_probe_receipt_digest": intent[
+            "prepare_sandbox_probe_receipt_digest"
+        ],
+        "staging_parent_identity": canonical_digest(core["staging_root_device_inode"]),
+        "prepare_rollback_digest": prepare_rollback_contract_digest(
+            prepare_id=prepare_id, staging_root=staging_root
+        ),
+    }
+
+
 def _authorization_profile_errors(authorization: Any, intent: dict[str, Any]) -> list[str]:
-    """PREPARE 授權只接受 PREPARE profile;probe/install/pg 授權挪用即拒。"""
+    """PREPARE 授權只接受 PREPARE profile;probe/install/pg 授權挪用即拒。
+
+    W4a 追加 PERMIT_PLAN_BINDING:permit 的 ``payload_binding`` 必須逐欄等於
+    :func:`prepare_permit_payload_binding` 從**這一份** intent 獨立再導出的值——一張簽好的
+    PREPARE permit 於是無法在 TTL 內授權另一份 prepare core/staging/probe lineage。
+    """
 
     if not isinstance(authorization, dict):
         return ["prepare authorization must be an object"]
@@ -683,6 +743,22 @@ def _authorization_profile_errors(authorization: Any, intent: dict[str, Any]) ->
         )
     if authorization.get("signature_namespace") != PREPARE_SIGNATURE_NAMESPACE:
         reasons.append("prepare authorization signature_namespace is not the PREPARE namespace")
+    try:
+        expected_binding = prepare_permit_payload_binding(intent)
+    except (KeyError, TypeError, PrepareContractError) as error:
+        reasons.append(
+            "PREPARE permit plan binding cannot be re-derived from this intent "
+            f"({type(error).__name__}); fail-closed"
+        )
+        expected_binding = None
+    if expected_binding is not None:
+        binding = central_validator.derive_permit_plan_binding_status(
+            authorization,
+            expected_payload_binding=expected_binding,
+            profile_key="prepare",
+        )
+        if binding["status"] != central_validator.PERMIT_PLAN_BINDING_STATUS_VERIFIED:
+            reasons.extend(binding["reasons"])
     required = intent.get("required_authorization")
     if isinstance(required, dict):
         try:
@@ -752,6 +828,20 @@ def prepare_s2_4_install_bundle(
     prepare_id = intent["prepare_id"]
     core_digest = intent["core_digest"]
     staging_root = prepared_staging_root(prepare_id)
+    # step 1b —— §5.2 startup reconcile:接受這個新 prepare intent **之前**先收斂任何非終端
+    # journal(probe / PREPARE / APPLY 三條 lane 都列舉)。此處零主機接觸,只讀 journal。
+    startup_reconcile = _probe._reconcile_leaf().reconcile_before_new_intent(
+        driver, lane="prepare", lane_path=prepare_journal_path(prepare_id)
+    )
+    if startup_reconcile["admits_new_work"] is False:
+        return _verdict(
+            PREPARE_STATUS_RECOVERY_REQUIRED,
+            list(startup_reconcile["reasons"]) + [
+                "§5.2: any non-terminal probe/prepare/apply journal is reconciled before a "
+                "new prepare intent is accepted; no new PREPARE may start"
+            ],
+            prepare_id=prepare_id, staging_root=staging_root,
+        )
     # step 2 —— route surface(§10.5 #38)。
     surface = derive_prepare_route_surface_status(intent)
     if surface["status"] != "PASS":
@@ -870,7 +960,7 @@ def _run_prepare_with_driver(
         if fault is not None:
             fault(label)
 
-    def _journal(state: str, pre: str, post: str) -> None:
+    def _journal(state: str, pre: str, post: str, *, terminal: bool = False) -> None:
         entry = {
             "seq": len(entries),
             "state": state,
@@ -878,8 +968,14 @@ def _run_prepare_with_driver(
             "post_state_digest": post,
             "fsynced": True,
             "recorded_at": _iso(clock()),
+            # §5.2 的 producer 判別欄兩者皆為必填:誰寫的(prepare_bundle)+ 哪一個 subject
+            # digest 空間(LEARNING_RUNTIME_PREPARE)。
+            "entry_source": "prepare_bundle",
+            "component_effect_class": PREPARE_REQUIRED_EFFECT_CLASS,
         }
-        driver.journal_transition(entry=entry)
+        # ``terminal`` 是 journal 級宣告(不進 entry 本體);少了它,一次成功的 PREPARE 也會
+        # 在磁碟上留下一本永遠非終端的 journal,§5.2 的啟動收斂便再也放不出新工作。
+        driver.journal_transition(entry=dict(entry, terminal=terminal) if terminal else entry)
         entries.append(entry)
 
     try:
@@ -972,9 +1068,15 @@ def _run_prepare_with_driver(
     )
     # bundle digest 固定之後才關 journal / 跑 postcheck(§5.1 #2 的次序)。
     try:
-        _journal("VERIFIED", _staging_state(staging_root, present=True), _staging_state(
-            staging_root, present=True, device=frozen.get("device"), inode=frozen.get("inode")
-        ))
+        _journal(
+            "VERIFIED",
+            _staging_state(staging_root, present=True),
+            _staging_state(
+                staging_root, present=True, device=frozen.get("device"),
+                inode=frozen.get("inode"),
+            ),
+            terminal=True,
+        )
     except Exception as error:  # noqa: BLE001
         return _verdict(
             PREPARE_STATUS_RECOVERY_REQUIRED, [f"terminal journal transition failed: {redact_driver_error(error)}"],
@@ -1456,7 +1558,10 @@ def _abort_outcome(
             ),
             "fsynced": True,
             "recorded_at": _iso(clock()),
+            "entry_source": "prepare_bundle",
+            "component_effect_class": PREPARE_REQUIRED_EFFECT_CLASS,
         }
+        # 補償路徑刻意不宣告 terminal:未解的殘留必須在磁碟上留下一本非終端的 journal。
         driver.journal_transition(entry=entry)
         entries.append(entry)
     except Exception as error:  # noqa: BLE001

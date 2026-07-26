@@ -88,10 +88,15 @@ from agent_governance_s2_4_component import (  # noqa: E402,F401
     OWNERSHIP_EVIDENCE_REQUIRED_FIELDS,
     PG_MIGRATION_NAMESPACE,
     PG_MIGRATION_PROFILE,
+    POST_COMPENSATION_POSTCHECK_CONFIRMED,
+    POST_COMPENSATION_POSTCHECK_DISPROVED,
+    POST_COMPENSATION_POSTCHECK_UNAVAILABLE,
+    POST_COMPENSATION_POSTCHECK_UNPROVEN,
     ComponentContractError,
     _ALL_FALSE_PRODUCTION_FLAGS,
     _DIGEST_RE,
     _Journal,
+    _apply_permit_internal_derivation_reasons,
     _authorization_set_reasons,
     _build_postcheck,
     _build_result,
@@ -104,17 +109,22 @@ from agent_governance_s2_4_component import (  # noqa: E402,F401
     _resolve_now,
     _subject_digest,
     _verdict,
+    apply_permit_payload_binding,
     build_component_effect_intent,
+    capture_pre_compensation_observation,
     classify_ownership_only,
     classify_pre_state,
     compensation_outcome,
+    compensation_with_independent_postcheck,
     component_raw_ingress_reasons,
     component_row_abi,
     derive_compensation_status,
     derive_host_identity_effect_class_status,
     derive_recorded_evidence_class,
+    independent_post_compensation_postcheck,
     normalize_compensation,
     ownership_binding_present,
+    ownership_binding_reasons,
     ownership_evidence_reasons,
     redact_driver_error,
     scan_serializable_surface,
@@ -465,7 +475,7 @@ def apply_s2_4_pg_role_acl(
         return _pending_verdict("PG_ROLE_ACL_MIGRATION", row_abi)
 
     tick = clock or (lambda: datetime.now(timezone.utc))
-    journal = _Journal(driver, tick)
+    journal = _Journal(driver, tick, "PG_ROLE_ACL_MIGRATION")
     role = acl_manifest["role_name"]
     plan_digest = intent["install_plan_digest"]
     pre_state_digest = intent["pre_state_digest"]
@@ -553,6 +563,7 @@ def apply_s2_4_pg_role_acl(
             plan_digest=plan_digest, pre_state_digest=pre_state_digest,
             post_state_digest=_subject_digest({"role": role, "grants": None}),
             journal=journal, clock=tick, compensate=_compensate,
+            driver=driver, applier_node=applier_node,
         )
     return _finish_row(
         status=COMPONENT_STATUS_SATISFIED, reasons=[],
@@ -729,7 +740,7 @@ def apply_s2_4_credential_install(
         return _pending_verdict("CREDENTIAL_INSTALL", row_abi)
 
     tick = clock or (lambda: datetime.now(timezone.utc))
-    journal = _Journal(driver, tick)
+    journal = _Journal(driver, tick, "CREDENTIAL_INSTALL")
     plan_digest = intent["install_plan_digest"]
     pre_state_digest = intent["pre_state_digest"]
     slot_path = _credential.CREDENTIAL_SLOT_PATH
@@ -759,10 +770,26 @@ def apply_s2_4_credential_install(
         )
     # §5.3:``task_owned`` 是 driver 的自報,必須另有 digest 綁定的 S2.4 receipt/journal
     # 佐證才成立;一個裸 dict(甚至 ``{}``)絕不足以把 PREEXISTING_UNOWNED 換成放行。
+    # A7:光是「兩個欄位長得像 digest」也不夠——它們必須**逐位元等於 driver 為這個 slot
+    # 報回的** 前一份 S2.4 receipt / journal digest,否則兩個 sha256:000…0 就能收養一個
+    # 既有的憑證槽。driver 報不出那對 digest 的既有 slot 一律不被收養。
+    slot_ownership_reasons = ownership_binding_reasons(
+        (ownership_evidence or {}).get("credential_slot"),
+        subject="credential_slot",
+        expected_journal_digest=(
+            observed_slot.get("journal_digest") if isinstance(observed_slot, dict) else None
+        ),
+        expected_receipt_digest=(
+            observed_slot.get("s2_4_receipt_digest")
+            if isinstance(observed_slot, dict) else None
+        ),
+    ) if isinstance(observed_slot, dict) else ["credential slot is absent"]
     owned = (
         isinstance(observed_slot, dict)
         and bool(observed_slot.get("task_owned"))
-        and ownership_binding_present((ownership_evidence or {}).get("credential_slot"))
+        and not slot_ownership_reasons
+        and isinstance(observed_slot.get("journal_digest"), str)
+        and isinstance(observed_slot.get("s2_4_receipt_digest"), str)
     )
     if observed_slot is not None and not owned:
         return _verdict(
@@ -770,7 +797,7 @@ def apply_s2_4_credential_install(
             [
                 "the credential slot already exists without matching S2.4 task ownership; "
                 "no read, backup, adoption or rotation is performed (§5.3)"
-            ],
+            ] + (slot_ownership_reasons if isinstance(observed_slot, dict) else []),
             component_effect_class="CREDENTIAL_INSTALL", row_abi=row_abi, driver_engaged=True,
         )
     if mode == "ROTATION" and not owned:
@@ -862,6 +889,7 @@ def apply_s2_4_credential_install(
             post_state_digest=_subject_digest({"slot_path": slot_path, "state": "partial"}),
             journal=journal, clock=tick,
             compensate=lambda: _compensate_credential(driver, slot_path, mode, prior_digest),
+            driver=driver, applier_node=applier_node,
         )
     finally:
         if hasattr(dsn_handle, "zeroize"):
@@ -1039,7 +1067,7 @@ def apply_s2_4_learning_runtime(
         return _pending_verdict("LEARNING_RUNTIME", row_abi)
 
     tick = clock or (lambda: datetime.now(timezone.utc))
-    journal = _Journal(driver, tick)
+    journal = _Journal(driver, tick, "LEARNING_RUNTIME")
     plan_digest = intent["install_plan_digest"]
     pre_state_digest = intent["pre_state_digest"]
     staging_root = prepared_bundle["staging_locator"]["staging_root"]
@@ -1133,6 +1161,7 @@ def apply_s2_4_learning_runtime(
             post_state_digest=_subject_digest({"targets": targets, "state": "partial"}),
             journal=journal, clock=tick,
             compensate=lambda: _compensate_trees(driver, published),
+            driver=driver, applier_node=applier_node,
         )
     return _finish_row(
         status=COMPONENT_STATUS_SATISFIED, reasons=[],
@@ -1431,7 +1460,7 @@ def apply_s2_4_engine_scanner_unit(
         )
 
     tick = clock or (lambda: datetime.now(timezone.utc))
-    journal = _Journal(driver, tick)
+    journal = _Journal(driver, tick, "ENGINE_SCANNER")
     plan_digest = intent["install_plan_digest"]
     pre_state_digest = intent["pre_state_digest"]
     installed: list[str] = []
@@ -1551,6 +1580,7 @@ def apply_s2_4_engine_scanner_unit(
             post_state_digest=_subject_digest({"unit": UNIT_FRAGMENT_PATH, "state": "partial"}),
             journal=journal, clock=tick,
             compensate=lambda: _compensate_engine_scanner(driver, installed),
+            driver=driver, applier_node=applier_node,
         )
     return _finish_row(
         status=COMPONENT_STATUS_SATISFIED, reasons=[],

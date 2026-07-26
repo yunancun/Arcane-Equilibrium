@@ -54,7 +54,7 @@
     "journal_entry": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["seq", "step_index", "state", "pre_state_digest", "post_state_digest", "fsynced", "recorded_at"],
+      "required": ["seq", "step_index", "state", "pre_state_digest", "post_state_digest", "fsynced", "recorded_at", "entry_source", "component_effect_class"],
       "properties": {
         "seq": {"type": "integer", "minimum": 0},
         "step_index": {"type": "integer", "minimum": 0, "maximum": 5},
@@ -62,7 +62,9 @@
         "pre_state_digest": {"$ref": "#/$defs/digest"},
         "post_state_digest": {"$ref": "#/$defs/digest"},
         "fsynced": {"const": true},
-        "recorded_at": {"$ref": "#/$defs/timestamp"}
+        "recorded_at": {"$ref": "#/$defs/timestamp"},
+        "entry_source": {"enum": ["aggregate_transaction", "component_row_driver", "prepare_bundle", "capability_probe"]},
+        "component_effect_class": {"type": "string", "minLength": 1}
       }
     },
     "journal_integrity": {

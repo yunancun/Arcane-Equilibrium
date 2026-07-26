@@ -221,7 +221,7 @@ def apply_s2_4_host_identity(
         return _pending_verdict("HOST_IDENTITY_INSTALL", row_abi)
 
     tick = clock or (lambda: datetime.now(timezone.utc))
-    journal = _Journal(driver, tick)
+    journal = _Journal(driver, tick, "HOST_IDENTITY_INSTALL")
     plan_digest = intent["install_plan_digest"]
     pre_state_digest = intent["pre_state_digest"]
     created_dirs: list[str] = []
@@ -335,6 +335,7 @@ def apply_s2_4_host_identity(
             compensate=lambda: _compensate_host_identity(
                 driver, created_account, created_dirs, desired_identity["name"]
             ),
+            driver=driver, applier_node=applier_node,
         )
     expected = {
         "identity": _normalize_identity(desired_identity),
@@ -352,6 +353,7 @@ def apply_s2_4_host_identity(
             compensate=lambda: _compensate_host_identity(
                 driver, created_account, created_dirs, desired_identity["name"]
             ),
+            driver=driver, applier_node=applier_node,
         )
     return _finish_row(
         status=COMPONENT_STATUS_SATISFIED, reasons=[],

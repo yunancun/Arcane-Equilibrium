@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://arcane-equilibrium.local/schemas/s2_4_operator_authorization_v1.schema.json",
   "title": "s2_4_operator_authorization_v1",
-  "description": "Closed SSHSIG operator-authorization artifact for S2.4 (§9.1). Four domain-separated profiles reuse the one reviewed Ed25519 trust root: capability-probe, install-prepare, install-aggregate and pg-migration. profile_identity and signature_namespace are exact-paired by the allOf conditionals. authorization_id is derived from the profile's unsigned ordered payload BEFORE the SSHSIG is attached; payload_fields records that exact ordered payload field list. sshsig_armored is a strict ASCII-armored SSH signature (at most 16 KiB) verified out of band with ssh-keygen -Y verify; this schema never carries the private key or a caller-provided public key/fingerprint. self_digest is integrity evidence, not producer authenticity. NOTE: the S2_4_AUTHORIZATION_PROFILES constant, exact per-profile payload tokens and TTL/skew validation branch are CP4; this schema encodes only the closed structure and identity/namespace pairing.",
+  "description": "Closed SSHSIG operator-authorization artifact for S2.4 (§9.1). Four domain-separated profiles reuse the one reviewed Ed25519 trust root: capability-probe, install-prepare, install-aggregate and pg-migration. profile_identity and signature_namespace are exact-paired by the allOf conditionals. authorization_id is derived from the profile's unsigned ordered payload BEFORE the SSHSIG is attached; payload_fields records that exact ordered payload field list and payload_binding carries the exact VALUE of every one of those fields except the self-referential authorization_id (W4, §9.1/§10.5 #36). authorization_id = canonical_digest({domain, profile_identity, signature_namespace, payload_fields, payload_binding}) and every consuming gate re-derives it, so one permit is bound to exactly one plan/intent and an intent substitution inside the TTL is AUTHORIZATION_REJECTED. sshsig_armored is a strict ASCII-armored SSH signature (at most 16 KiB) verified out of band with ssh-keygen -Y verify; this schema never carries the private key or a caller-provided public key/fingerprint. self_digest is integrity evidence, not producer authenticity. NOTE: the S2_4_AUTHORIZATION_PROFILES constant, exact per-profile payload tokens and TTL/skew validation branch are CP4; this schema encodes only the closed structure and identity/namespace pairing.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -11,6 +11,7 @@
     "signature_namespace",
     "authorization_id",
     "payload_fields",
+    "payload_binding",
     "issued_at",
     "expires_at",
     "sshsig_armored",
@@ -25,6 +26,17 @@
       "type": "array",
       "minItems": 1,
       "items": {"type": "string", "minLength": 1}
+    },
+    "payload_binding": {
+      "description": "field name -> exact signed VALUE for every payload_fields token except authorization_id (which derives from this object). Values are digests, derived ids, a scope, a source head, a target host or timestamps; only output_derived_unit_digest_or_null may be null. The consuming gate re-derives each expected value independently from the probe/prepare intent or the install plan and rejects any mismatch.",
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "anyOf": [
+          {"type": "string", "minLength": 1},
+          {"type": "null"}
+        ]
+      }
     },
     "issued_at": {"$ref": "#/$defs/timestamp"},
     "expires_at": {"$ref": "#/$defs/timestamp"},

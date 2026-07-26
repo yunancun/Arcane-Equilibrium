@@ -1205,6 +1205,21 @@ from agent_governance_s2_4_w3_emit import (  # noqa: E402,F401
     emit_w3_receipts,
     load_persisted_w2_receipts as _load_persisted_w2_receipts,
 )
+# W4 wave-exit 發射葉(同一姿態;CLI 於 _main 掛 w4-emit)。
+from agent_governance_s2_4_w4_emit import (  # noqa: E402,F401
+    W3_RECEIPT_DIR,
+    W4_DERIVATION_RECORD_FILENAME,
+    W4_RECEIPT_DIRNAME,
+    W4_REGENERATED_W0_ADMISSION_FILENAME,
+    W4_REGENERATED_W0_WAVE_EXIT_FILENAME,
+    W4_REGENERATED_W1_WAVE_EXIT_FILENAME,
+    W4_REGENERATED_W2_WAVE_EXIT_FILENAME,
+    W4_REGENERATED_W3_WAVE_EXIT_FILENAME,
+    W4_WAVE_EXIT_FILENAME,
+    build_w4_wave_exit_receipt,
+    emit_w4_receipts,
+    load_persisted_w3_receipts as _load_persisted_w3_receipts,
+)
 
 _APP_CLOSURE_REL = _app_identity.RUNTIME_CLOSURE_REL
 # effect-capable / broker-order / credential 的 deny 謂詞(§8.1 builder rejects)。
@@ -1900,7 +1915,11 @@ def _main(argv: list[str] | None = None) -> int:
         "w3-emit",
         help="發射並持久化正式 W3 wave-exit receipt(記憶體重發當前世代 W0+W1+W2 鏈並綁定)",
     )
-    for emitter in (emit, w1_emit, w2_emit, w3_emit):
+    w4_emit = sub.add_parser(
+        "w4-emit",
+        help="發射並持久化正式 W4 wave-exit receipt(記憶體重發當前世代 W0+W1+W2+W3 鏈並綁定)",
+    )
+    for emitter in (emit, w1_emit, w2_emit, w3_emit, w4_emit):
         # P2-I:--out 受限於 repo receipts 目錄;覆蓋既有 receipt 必須顯式宣告。
         emitter.add_argument("--out", required=True, type=Path)
         emitter.add_argument("--test-evidence", required=True, type=Path)
@@ -1938,6 +1957,7 @@ def _main(argv: list[str] | None = None) -> int:
         "w1-emit": (emit_w1_receipts, "W1_RECEIPTS_EMITTED"),
         "w2-emit": (emit_w2_receipts, "W2_RECEIPTS_EMITTED"),
         "w3-emit": (emit_w3_receipts, "W3_RECEIPTS_EMITTED"),
+        "w4-emit": (emit_w4_receipts, "W4_RECEIPTS_EMITTED"),
     }
     if args.action in emitters:
         emitter, success_status = emitters[args.action]

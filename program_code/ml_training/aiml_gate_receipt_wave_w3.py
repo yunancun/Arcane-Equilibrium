@@ -124,42 +124,23 @@ _W3_EXPORTED_ABI = {
         "verifier exists (see w4_owned_obligations)"
     ),
     "compensation_exactness_contract": (
-        "s2_4_component_effect_rollback_v1.status==COMPENSATED_EXACT is emitted only when a "
-        "post-compensation re-observation equals the captured pre-state; an absent exception "
-        "yields COMPENSATED_NOT_REOBSERVED with exact_pre_state_restored=false"
+        "s2_4_component_effect_rollback_v1.status==COMPENSATED_EXACT is emitted only when the "
+        "INDEPENDENT postcheck verifier, re-run after compensation, reports the applied state "
+        "absent and the pre-state lineage intact (W4a closed the "
+        "INDEPENDENT_POST_COMPENSATION_POSTCHECK obligation); an applier-side self-report or an "
+        "unobtainable independent re-observation yields COMPENSATED_NOT_REOBSERVED with "
+        "exact_pre_state_restored=false"
     ),
-    # §10.3:W3 **不**提供、且不得被當成已提供的三項——每一項都是 W4/W6 的 owned 義務,
-    # 以 typed 狀態明載於 exported ABI(W3 wave-exit receipt 以 exported_abi_digest 綁定本表)。
+    # §10.3:W3 **不**提供、且不得被當成已提供的義務——以 typed 狀態明載於 exported ABI
+    # (W3 wave-exit receipt 以 exported_abi_digest 綁定本表)。
+    #
+    # W4a(2026-07-26)已交付並因此自本表移除三項:PERMIT_PLAN_BINDING(authorization_id 現由
+    # profile 具名的 exact payload 導出,且每個消費閘再導出比對)、REPLAY_LEDGER_APPEND
+    # (install lock 下的 atomic/hash-chained/fsynced/consume-once append 與 idempotent replay)、
+    # INDEPENDENT_POST_COMPENSATION_POSTCHECK(補償後重跑獨立 verifier,exactness 只由它導出)。
+    # 三者的當前契約見 aiml_gate_receipt_wave_w4._W4_EXPORTED_ABI;W4a 自身未交付的義務亦以
+    # 同一誠實形狀記在該表的 remaining_owned_obligations。
     "w4_owned_obligations": [
-        {
-            "obligation_id": "PERMIT_PLAN_BINDING",
-            "typed_status": "NOT_PROVIDED_BY_W3",
-            "owner_wave": "W4",
-            "spec_refs": ["§9.1", "§10.5 #36"],
-            "statement": (
-                "s2_4_operator_authorization_v1 carries only authorization_id and the NAMES in "
-                "payload_fields; it never carries the plan/intent VALUES, and no W3 gate "
-                "re-derives authorization_id from the intent. One signed permit therefore "
-                "authorizes any intent of that class inside its TTL, and §10.5 #36's 'rejected "
-                "by profile-specific SSHSIG' cannot be satisfied by construction today."
-            ),
-            "w3_provides": (
-                "profile identity + signature namespace + TTL + replay-ledger read; nothing that "
-                "binds a permit to one exact plan"
-            ),
-        },
-        {
-            "obligation_id": "REPLAY_LEDGER_APPEND",
-            "typed_status": "NOT_PROVIDED_BY_W3",
-            "owner_wave": "W4",
-            "spec_refs": ["§9.1", "§5.2"],
-            "statement": (
-                "W3 reads the replay ledger head to prove an authorization is UNCONSUMED, but "
-                "never appends a consumption entry. One permit therefore drives an unbounded "
-                "number of operations within its TTL."
-            ),
-            "w3_provides": "read-side derive_authorization_replay_binding only",
-        },
         {
             "obligation_id": "ENCRYPTED_BLOB_DIGEST_ORDERING",
             "typed_status": "OPEN_DESIGN_QUESTION",
@@ -174,24 +155,6 @@ _W3_EXPORTED_ABI = {
             ),
             "w3_provides": (
                 "the fail-closed comparison only; the §5.1 ordering question is unresolved"
-            ),
-        },
-        {
-            "obligation_id": "INDEPENDENT_POST_COMPENSATION_POSTCHECK",
-            "typed_status": "NOT_PROVIDED_BY_W3",
-            "owner_wave": "W4",
-            "spec_refs": ["§5.2", "§5.4"],
-            "statement": (
-                "W3's COMPENSATED_EXACT rests on a re-observation performed through the SAME "
-                "injected applier driver that carried out the mutation. Every protocol already "
-                "declares an independent_postcheck verifier, but it is never re-run after "
-                "compensation, so a driver that misreports its own residue can still produce "
-                "COMPENSATED_EXACT. §5.2 requires an INDEPENDENT residue postcheck; W3 does not "
-                "provide one."
-            ),
-            "w3_provides": (
-                "applier-side post-compensation re-observation with a typed "
-                "COMPENSATED_NOT_REOBSERVED fallback; no independent verifier re-run"
             ),
         },
     ],

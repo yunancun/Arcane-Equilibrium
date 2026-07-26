@@ -1235,3 +1235,86 @@ def test_persisted_s03_finalization_evidence_is_independently_verifiable() -> No
         "source_manifest_verified": True,
         "status": "PASS",
     }
+
+
+# ── S2.4(WP4)§9.1 信任根:contracts 葉的常量必須**是**本模組的物件,不是它的副本 ──
+def test_s2_4_contracts_trust_root_is_the_trusted_host_object_not_a_copy() -> None:
+    """CC CONFLICT-1:WP4-owned 葉不得成為自己信任根的權威。
+
+    ``aiml_gate_receipt_s2_4_contracts`` 以
+    ``S2_4_OPERATOR_TRUST_ROOT_PUBLIC_KEY = _trusted_host.TRUSTED_EXECUTION_PUBLIC_KEY``
+    複製了一份公鑰與指紋,而它的驗證器再從**同一份副本**導出指紋並與**同一份副本**比對——
+    那是自洽性檢查,不是信任根檢查:把這兩行同時換成另一把鑰及其指紋,驗證照樣通過。
+    W0 的 trust pin 雜湊的是 ``agent_governance_aiml_trusted_host.py`` 的 bytes,對這支
+    WP4-owned 檔案隻字未提,而 WP4 側唯一的負向測試只偽造指紋一欄。§9.1 要求「WP4 worker
+    不能把 pin 和它的測試一起改掉」——本測試因此**刻意**放在 WP4 path scope 之外
+    (``_W4_OWNED_PATHS`` 不含本檔;本檔是 W0 trust-pin 的 independent test blob),於是
+    WP4 的任何一次 wave-exit 都無法連同它一起被改寫。
+    """
+
+    import aiml_gate_receipt_s2_4_contracts as contracts  # noqa: PLC0415
+
+    # (a) 物件恆等:不是「值相等的另一個字串」,而是同一個被 pin 的物件。
+    assert contracts.S2_4_OPERATOR_TRUST_ROOT_PUBLIC_KEY is host.TRUSTED_EXECUTION_PUBLIC_KEY
+    assert (
+        contracts.S2_4_OPERATOR_TRUST_ROOT_FINGERPRINT
+        is host.EXPECTED_EXECUTION_SIGNER_FINGERPRINT
+    )
+    # (b) 指紋的**字面**錨:換掉那兩行(公鑰 + 相符的指紋)不再能靜默通過。
+    assert (
+        contracts.S2_4_OPERATOR_TRUST_ROOT_FINGERPRINT
+        == "SHA256:uGJ9veN7PoE6BBgfsSP2aiMndrwgbt7o/7/YfdzNzCQ"
+    )
+    # (c) 該指紋確實是該公鑰的指紋(由 out-of-scope 的 trusted-host 基元導出)。
+    assert (
+        host.ssh_public_key_fingerprint(contracts.S2_4_OPERATOR_TRUST_ROOT_PUBLIC_KEY)
+        == "SHA256:uGJ9veN7PoE6BBgfsSP2aiMndrwgbt7o/7/YfdzNzCQ"
+    )
+
+
+def test_s2_4_facade_trust_root_is_the_trusted_host_object_not_a_copy() -> None:
+    """E3:pin 必須釘在**驗證器真正讀的那一份**上,也就是 facade,而不是 contracts 葉。
+
+    上面那支只釘 ``aiml_gate_receipt_s2_4_contracts``,但每一個驗證器讀的都是
+    ``resolve_facade()``:``agent_governance_s2_4_install_evidence`` 的四處
+    (trust-root 指紋、公鑰、attestor fingerprint 欄位)與
+    ``aiml_gate_receipt_s2_4_contracts._s2_4_operator_authorization_errors`` 的四張 permit
+    profile,全部走 facade。live binding 在
+    ``program_code/ml_training/aiml_gate_receipt_validator.py``——而那支檔案**在**
+    ``aiml_gate_receipt_wave_w4._W4_OWNED_PATHS`` 內。動態驗證過:只重綁 facade 的那兩個屬性,
+    contracts 葉仍指向 trusted-host 物件(上面那支測試因此照樣綠),而 attestation 驗證器與四張
+    permit 全部改讀攻擊者的鑰。所以 pin 必須同時釘 facade。
+
+    本測試與上面那支同樣**刻意**放在 WP4 path scope 之外(``_W4_OWNED_PATHS`` 不含本檔)。
+    """
+
+    import aiml_gate_receipt_s2_4_contracts as contracts  # noqa: PLC0415
+    import aiml_gate_receipt_schema_core as schema_core  # noqa: PLC0415
+    import aiml_gate_receipt_validator as facade  # noqa: PLC0415
+
+    for surface in (facade, schema_core.resolve_facade()):
+        # (a) 物件恆等:facade 的兩個名字必須**是**被 pin 的 trusted-host 物件。
+        assert surface.S2_4_OPERATOR_TRUST_ROOT_PUBLIC_KEY is (
+            host.TRUSTED_EXECUTION_PUBLIC_KEY
+        )
+        assert surface.S2_4_OPERATOR_TRUST_ROOT_FINGERPRINT is (
+            host.EXPECTED_EXECUTION_SIGNER_FINGERPRINT
+        )
+        # (b) 指紋的**字面**錨。
+        assert (
+            surface.S2_4_OPERATOR_TRUST_ROOT_FINGERPRINT
+            == "SHA256:uGJ9veN7PoE6BBgfsSP2aiMndrwgbt7o/7/YfdzNzCQ"
+        )
+        # (c) 該指紋確實是該公鑰的指紋。
+        assert (
+            host.ssh_public_key_fingerprint(surface.S2_4_OPERATOR_TRUST_ROOT_PUBLIC_KEY)
+            == "SHA256:uGJ9veN7PoE6BBgfsSP2aiMndrwgbt7o/7/YfdzNzCQ"
+        )
+    # (d) facade 與 contracts 是**同一個**物件,不是兩份值相等的副本:只換掉其中一邊
+    #     (正是 W4 owned path 能做到的事)必須被看見。
+    assert facade.S2_4_OPERATOR_TRUST_ROOT_PUBLIC_KEY is (
+        contracts.S2_4_OPERATOR_TRUST_ROOT_PUBLIC_KEY
+    )
+    assert facade.S2_4_OPERATOR_TRUST_ROOT_FINGERPRINT is (
+        contracts.S2_4_OPERATOR_TRUST_ROOT_FINGERPRINT
+    )
