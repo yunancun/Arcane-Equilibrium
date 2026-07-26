@@ -190,8 +190,11 @@ def test_w3_exported_abi_projection_folds_the_six_live_verdicts() -> None:
     ]
 
 
-def test_w5_and_beyond_remain_fail_closed() -> None:
-    # W4 已於 W4a 實作(見 test_agent_governance_s2_4_install_w4.py);未實作的 wave 仍 fail-closed。
+def test_w5_shaped_receipt_carrying_a_w3_projection_is_not_pass() -> None:
+    """W5 已於 W5 實作(見 test_agent_governance_s2_4_install_w5.py),故「未實作 wave」的
+    fail-closed 邊界由 W5 推進到 W6。W3 的投影冒充 W5 依然必須 NOT_PASS——換的是**拒絕理由**
+    (由「wave 未實作」變成「W5 投影不再導出」),不是放行。"""
+
     admission, w0, w1, w2, w3 = _chain()
     forged = deepcopy(w3)
     forged["wave"] = "W5"
@@ -199,8 +202,12 @@ def test_w5_and_beyond_remain_fail_closed() -> None:
     result = _derive(forged, admission, w2, w0, w1)
     assert result["status"] == "NOT_PASS"
     assert any(
-        "only implemented for W0/W1/W2/W3/W4" in reason for reason in result["reasons"]
-    )
+        "W5 exported-ABI projection" in reason or "predecessor must be the W4" in reason
+        for reason in result["reasons"]
+    ), result["reasons"]
+    # 未實作邊界本身仍在,只是移到 W6:wave enum 封閉於 W0..W5。
+    schema = validator._load_schema("s2_4_wave_exit_receipt_v1")
+    assert schema["properties"]["wave"]["enum"] == ["W0", "W1", "W2", "W3", "W4", "W5"]
 
 
 def test_w3_emit_cli_out_dir_is_constrained_to_the_receipts_directory(tmp_path, capsys) -> None:

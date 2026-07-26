@@ -147,37 +147,29 @@ from aiml_gate_receipt_adoption import (  # noqa: E402,F401
     terminal_receipt_sink_contract,
     validate_program_adoption_receipt,
 )
-# S2.4(WP4·W2)wave 投影葉(2000 行治理拆分):owned-path/exported-ABI/manifest 補充驗
-# 下沉至 aiml_gate_receipt_wave_w2,facade 逐名 re-export;W2 的 derive 分支委派該葉。
+# S2.4(WP4·W2/W3/W4/W5)四片 wave 投影葉(2000 行治理拆分):owned-path / exported-ABI /
+# manifest 補充驗下沉至各葉,facade 逐名 re-export,對應 wave 的 derive 分支委派該葉。
+# W2=runnable application,W3=typed host driver,W4=aggregate transaction,W5=source closure
+# (W5 綁「§10.5 每一條驗收項到底被什麼證明」的六組活裁決)。
+# 版式註記(W5):四塊 import 由逐行改為逐段,純格式、無語意變動——facade 於 W4 收口時恰為
+# 2000 行(治理門檻上限),W5 的新增名若逐行排列即越線,§10.1.1 要求先擠出空間再擴充。
 from aiml_gate_receipt_wave_w2 import (  # noqa: E402,F401
-    _W2_ABI_PROBE_FIELDS,
-    _W2_EXPORTED_ABI,
-    _W2_OWNED_PATHS,
-    w2_chain_binding_errors,
-    w2_exported_abi_projection,
-    w2_manifest_artifact_errors,
-    w2_owned_path_diff_digest,
+    _W2_ABI_PROBE_FIELDS, _W2_EXPORTED_ABI, _W2_OWNED_PATHS, w2_chain_binding_errors,
+    w2_exported_abi_projection, w2_manifest_artifact_errors, w2_owned_path_diff_digest,
     w2_structural_errors,
 )
-# S2.4(WP4·W3)wave 投影葉(同一機制,綁 W3a 的 capability-probe / PG-topology 面);
-# facade 逐名 re-export,W3 的 derive 分支委派該葉。
 from aiml_gate_receipt_wave_w3 import (  # noqa: E402,F401
-    _W3_EXPORTED_ABI,
-    _W3_OWNED_PATHS,
-    w3_chain_binding_errors,
-    w3_exported_abi_projection,
-    w3_owned_path_diff_digest,
-    w3_structural_errors,
+    _W3_EXPORTED_ABI, _W3_OWNED_PATHS, w3_chain_binding_errors,
+    w3_exported_abi_projection, w3_owned_path_diff_digest, w3_structural_errors,
 )
-# S2.4(WP4·W4)wave 投影葉(同一機制,綁 W4a 的 permit/replay/lock/WAL/預算/補償面);
-# facade 逐名 re-export,W4 的 derive 分支委派該葉。
 from aiml_gate_receipt_wave_w4 import (  # noqa: E402,F401
-    _W4_EXPORTED_ABI,
-    _W4_OWNED_PATHS,
-    w4_chain_binding_errors,
-    w4_exported_abi_projection,
-    w4_owned_path_diff_digest,
-    w4_structural_errors,
+    _W4_EXPORTED_ABI, _W4_OWNED_PATHS, w4_chain_binding_errors,
+    w4_exported_abi_projection, w4_owned_path_diff_digest, w4_structural_errors,
+)
+from aiml_gate_receipt_wave_w5 import (  # noqa: E402,F401
+    _W5_EXPORTED_ABI, _W5_OWNED_PATHS, build_w5_wave_exit_receipt,
+    w5_chain_binding_errors, w5_exported_abi_projection, w5_owned_path_diff_digest,
+    w5_structural_errors,
 )
 
 
@@ -928,9 +920,12 @@ def _wave_exit_structural_errors(
         # 三本 WAL journal 的 durability/corrupt/reconcile、§9 TTL 不等式與獨立補償後 postcheck
         # 的活裁決委派 wave_w4 葉再導出。
         reasons.extend(w4_structural_errors(receipt, repo_root))
+    elif wave == "W5":
+        # W5(source closure):同一機制,綁 W5 面;§10.5 六組覆蓋缺口的活裁決委派 wave_w5 葉。
+        reasons.extend(w5_structural_errors(receipt, repo_root))
     else:
-        # W5+ 各 wave 於其自身 owned path 擴充 derivation;未實作的 wave 一律 fail-closed。
-        reasons.append("wave-exit derivation is only implemented for W0/W1/W2/W3/W4 so far")
+        # W6+ 各 wave 於其自身 owned path 擴充 derivation;未實作的 wave 一律 fail-closed。
+        reasons.append("wave-exit derivation is only implemented for W0/W1/W2/W3/W4/W5 so far")
         return reasons
     # T1(b):test/capture/review 三類證據必為「非空」的合法 digest list——empty/arbitrary 不得導出 PASS。
     # 誠實邊界:每一支 test/capture/review 的「PLATFORM-ATTESTED 綁定」屬下游 EFFECT/closure 關切(離線
@@ -944,11 +939,12 @@ def _wave_exit_structural_errors(
     return reasons
 
 
-# W2/W3/W4 predecessor-鏈規格 =(前導 wave, 必需 chain 長度, wave-specific 綁定謂詞);W0 無前導、W1 綁定為 inline(chain 必空),兩者不入表。
+# W2/W3/W4/W5 predecessor-鏈規格 =(前導 wave, 必需 chain 長度, wave-specific 綁定謂詞);W0 無前導、W1 綁定為 inline(chain 必空),兩者不入表。
 _WAVE_PREDECESSOR_CHAIN = {
     "W2": ("W1", 1, w2_chain_binding_errors),
     "W3": ("W2", 2, w3_chain_binding_errors),
     "W4": ("W3", 3, w4_chain_binding_errors),
+    "W5": ("W4", 4, w5_chain_binding_errors),
 }
 
 
@@ -961,7 +957,7 @@ def derive_wave_exit_status(
     predecessor_wave_receipt: Any = None,
     predecessor_wave_chain: Any = (),
 ) -> dict[str, Any]:
-    """Independently re-derive the W0/W1/W2/W3/W4 wave-exit status (§3.2/§10.3).
+    """Independently re-derive the W0/W1/W2/W3/W4/W5 wave-exit status (§3.2/§10.3).
 
     回傳 ``{"status": "PASS"|"NOT_PASS", "reasons": [...]}``。W0 的 PASS 需:綁定的
     ``source_admission_receipt`` 再導出 ADMITTED 且其 self_digest == 本 receipt 綁定的
@@ -974,7 +970,8 @@ def derive_wave_exit_status(
     ``predecessor_wave_chain=(regenerated W0 wave-exit,)`` 供 W1 遞迴綁其前導(次序=
     由舊到新、不含 ``predecessor_wave_receipt`` 本身;W0/W1 拒非空 chain)。W3 再鏡 W2:
     predecessor 是 W2 wave-exit 物件,``predecessor_wave_chain=(W0, W1)``;W4 再鏡 W3:
-    predecessor 是 W3 wave-exit 物件,``predecessor_wave_chain=(W0, W1, W2)``。caller 帶
+    predecessor 是 W3 wave-exit 物件,``predecessor_wave_chain=(W0, W1, W2)``;W5 再鏡 W4:
+    predecessor 是 W4 wave-exit 物件,``predecessor_wave_chain=(W0, W1, W2, W3)``。caller 帶
     status/pass/done 於 derivation 前即拒(§10.3/§10.5 #27)。
 
     邊界(必要非充分):中央閘 :func:`validate_aiml_artifact` 對 wave-exit 只做 STRUCTURAL-ONLY
@@ -1009,7 +1006,7 @@ def derive_wave_exit_status(
         return {"status": "NOT_PASS", "reasons": _schema_errors}
     reasons = _wave_exit_structural_errors(receipt, repo_root)
     wave = receipt.get("wave")
-    if wave not in {"W0", "W1", "W2", "W3", "W4"}:
+    if wave not in {"W0", "W1", "W2", "W3", "W4", "W5"}:
         return {"status": "NOT_PASS", "reasons": reasons}
     chain = tuple(predecessor_wave_chain) if predecessor_wave_chain else ()
     if wave in {"W0", "W1"} and chain:
