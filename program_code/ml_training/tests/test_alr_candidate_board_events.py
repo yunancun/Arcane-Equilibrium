@@ -210,6 +210,60 @@ def test_inotify_watch_binds_held_directory_fd_across_configured_path_aba(
         os.close(directory_fd)
 
 
+def test_rename_out_of_the_watched_directory_wakes_reconciliation(tmp_path: Path) -> None:
+    """P2-2:把看板改名搬出本目錄,核心發 IN_MOVED_FROM(**不是** IN_DELETE)。
+
+    舊 wake/watch mask 不訂閱該事件 → 被移除的看板永遠留在投影裡。此處以 kernel 記錄的
+    位元組形直接餵入事件源:mask 必須被認成 wake,且 watch mask 也必須訂閱它,否則核心
+    根本不會投遞這條記錄。
+    """
+    read_fd, write_fd = os.pipe()
+    os.set_blocking(read_fd, False)
+
+    def open_watch(directory: Path) -> tuple[int, int, int]:
+        return read_fd, 31, -1
+
+    source = board.open_candidate_board_event_source(
+        tmp_path, open_watch=open_watch, reopen_watch=open_watch
+    )
+    try:
+        assert source.consume_reconciliation_request() is True  # 啟動對帳
+        assert source.consume_reconciliation_request() is False
+        # 訂閱面:核心只投遞 watch mask 內的事件,故兩個 mask 都必須含 IN_MOVED_FROM。
+        assert board._INOTIFY_WAKE_MASK & board._IN_MOVED_FROM
+        assert board._INOTIFY_WATCH_MASK & board._IN_MOVED_FROM
+        name = b"blocked_outcome_review_20260711T120000Z.json\x00"
+        padded = name + b"\x00" * ((4 - len(name) % 4) % 4)
+        os.write(
+            write_fd,
+            struct.pack("iIII", 31, board._IN_MOVED_FROM, 7, len(padded)) + padded,
+        )
+        source.drain_ready()
+        assert source.consume_reconciliation_request() is True
+    finally:
+        source.close()
+        os.close(write_fd)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux inotify integration")
+def test_linux_inotify_real_rename_out_wakes_bounded_source(tmp_path: Path) -> None:
+    """真 inotify:把看板改名搬出受監看目錄,事件源必須醒來並要求對帳。"""
+    evidence_directory = tmp_path / "evidence"
+    evidence_directory.mkdir()
+    board_path = evidence_directory / "blocked_outcome_review_20260711T120000Z.json"
+    board_path.write_text("{}\n", encoding="utf-8")
+    source = board.open_candidate_board_event_source(evidence_directory)
+    try:
+        assert source.consume_reconciliation_request() is True
+        os.rename(board_path, tmp_path / "blocked_outcome_review_20260711T120000Z.json")
+        ready, _, _ = select.select([source], [], [], 1.0)
+        assert ready == [source]
+        source.drain_ready()
+        assert source.consume_reconciliation_request() is True
+    finally:
+        source.close()
+
+
 @pytest.mark.skipif(sys.platform != "linux", reason="Linux inotify integration")
 def test_linux_inotify_real_link_publish_wakes_bounded_source(tmp_path: Path) -> None:
     evidence_directory = tmp_path / "evidence"

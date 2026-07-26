@@ -260,7 +260,7 @@ def emit_w0_receipts(
             "source_head and run derive_source_admission_status/derive_wave_exit_status"
         ),
     }
-    existing = _persist_emit_artifacts(
+    refusal = _persist_emit_artifacts(
         out_dir,
         (
             (W0_ADMISSION_FILENAME, admission),
@@ -269,8 +269,8 @@ def emit_w0_receipts(
         ),
         allow_overwrite=allow_overwrite,
     )
-    if existing is not None:
-        return _emit_collision_refusal("W0_EMIT_REFUSED", existing)
+    if refusal is not None:
+        return _emit_collision_refusal("W0_EMIT_REFUSED", refusal)
     return {
         "status": "W0_RECEIPTS_EMITTED",
         "out_dir": str(out_dir),
@@ -493,7 +493,7 @@ def emit_w1_receipts(
             "predecessor_wave_receipt=w0_wave_exit)"
         ),
     }
-    existing = _persist_emit_artifacts(
+    refusal = _persist_emit_artifacts(
         out_dir,
         (
             (W1_WAVE_EXIT_FILENAME, w1_wave_exit),
@@ -503,8 +503,8 @@ def emit_w1_receipts(
         ),
         allow_overwrite=allow_overwrite,
     )
-    if existing is not None:
-        return _emit_collision_refusal("W1_EMIT_REFUSED", existing)
+    if refusal is not None:
+        return _emit_collision_refusal("W1_EMIT_REFUSED", refusal)
     return {
         "status": "W1_RECEIPTS_EMITTED",
         "out_dir": str(out_dir),
@@ -1014,6 +1014,13 @@ def generate_engine_scanner_grant_sql(manifest: dict[str, Any]) -> list[str]:
     僅供 throwaway cluster 佐證:語句嚴格由 manifest 導出——無 ALL-on-schema
     wildcard、無 GRANT OPTION、無 role membership、無 CREATE/TEMP/OWNER。identifier
     先過白名單正則(拒注入),角色建立(含 credential)不在此生成器內。
+
+    P1-3(W2 review):PG 權限是**相加**的,而一個正常初始化的 database 預設把
+    ``TEMPORARY``(以及 PG<15 的 ``CREATE``)授給 ``PUBLIC``——只對
+    ``aiml_engine_scanner`` 收回 database 權限,manifest 的
+    ``closed_boundary.database_temp/database_create = false`` 就仍然是假的:該角色經
+    PUBLIC 繼承仍可建 temp 表。故 closed_boundary 的這兩個 false 直接導出對 PUBLIC 的
+    REVOKE,由生成器自己讓宣稱為真(disposable fixture 不再預先代勞)。
     """
 
     errors = central_validator.validate_aiml_artifact(manifest)
@@ -1024,16 +1031,35 @@ def generate_engine_scanner_grant_sql(manifest: dict[str, Any]) -> list[str]:
     if not _SAFE_SQL_IDENT_RE.fullmatch(role) or not _SAFE_SQL_IDENT_RE.fullmatch(database):
         raise ValueError("pg acl manifest identifiers are not safe SQL identifiers")
     attributes = manifest["role_attributes"]
+    boundary = manifest["closed_boundary"]
     statements = [
         f'ALTER ROLE "{role}" NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT '
         f'NOREPLICATION NOBYPASSRLS CONNECTION LIMIT {int(attributes["connection_limit"])}',
         f'REVOKE ALL PRIVILEGES ON DATABASE "{database}" FROM "{role}"',
-        f'GRANT CONNECT ON DATABASE "{database}" TO "{role}"',
     ]
+    # P1-3:PUBLIC 繼承面——database_temp/database_create 宣稱為 false 就必須先把
+    # PostgreSQL 的預設 PUBLIC 授權收回,否則該宣稱在任何正常初始化的 cluster 上皆為假。
+    public_revokes = [
+        keyword
+        for keyword, claimed in (
+            ("TEMPORARY", boundary["database_temp"]),
+            ("CREATE", boundary["database_create"]),
+        )
+        if claimed is False
+    ]
+    if public_revokes:
+        statements.append(
+            f'REVOKE {", ".join(public_revokes)} ON DATABASE "{database}" FROM PUBLIC'
+        )
+    statements.append(f'GRANT CONNECT ON DATABASE "{database}" TO "{role}"')
     for entry in manifest["schemas"]:
         schema = entry["name"]
         if not _SAFE_SQL_IDENT_RE.fullmatch(schema):
             raise ValueError("pg acl manifest schema name is not a safe SQL identifier")
+        # schema_create=false 同理:PUBLIC 對 schema 的預設 CREATE(PG<15 的 public
+        # schema)必須先收回,才輪得到只給該角色 USAGE 這件事成立。
+        if boundary["schema_create"] is False:
+            statements.append(f'REVOKE CREATE ON SCHEMA "{schema}" FROM PUBLIC')
         statements.append(f'REVOKE ALL ON SCHEMA "{schema}" FROM "{role}"')
         statements.append(f'GRANT USAGE ON SCHEMA "{schema}" TO "{role}"')
     for entry in manifest["tables"]:
@@ -1334,15 +1360,55 @@ def _git_ls_tree_entries(
     return entries
 
 
+def _git_batch_blobs(repo_root: Path, blob_shas: list[str]) -> dict[str, bytes]:
+    """單一 ``git cat-file --batch`` 進程取回多個 blob 的位元組(N 個子行程 → 1 個)。
+
+    此路徑會被 W2 exported-ABI 的 builder 探針每次再導出時走到,逐檔 spawn 會把再導出
+    成本推高一個數量級;批次讀取讓探針維持「活的」卻仍然便宜。
+    """
+    if not blob_shas:
+        return {}
+    completed = subprocess.run(
+        ["git", "-C", str(repo_root), "cat-file", "--batch"],
+        input="".join(f"{sha}\n" for sha in blob_shas).encode("ascii"),
+        capture_output=True,
+        check=True,
+    )
+    stream = completed.stdout
+    blobs: dict[str, bytes] = {}
+    offset = 0
+    for sha in blob_shas:
+        newline = stream.find(b"\n", offset)
+        if newline < 0:
+            break
+        header = stream[offset:newline].decode("utf-8", "replace").split(" ")
+        offset = newline + 1
+        if len(header) != 3 or header[1] != "blob":
+            continue
+        size = int(header[2])
+        blobs[sha] = stream[offset : offset + size]
+        offset += size + 1
+    return blobs
+
+
 def build_application_bundle_manifest(
     repo_root: Path = REPO_ROOT,
     source_head: str | None = None,
+    *,
+    materialize_root: Path | None = None,
+    require_clean_declared_paths: bool = True,
 ) -> dict[str, Any]:
     """§8.1 #3:從 bound source head 的 committed blobs 產出 application_bundle_manifest_v1。
 
     typed 拒絕(依序):source head 非當前 checkout HEAD、closure 裁決非 PASS、任一宣告
     路徑 dirty/未提交、head 樹缺檔/symlink/非 blob。成功回
     {status: "BUILT", application_bundle_digest, manifest};中央閘結構驗必過。
+
+    ``materialize_root`` 非 None 時,同時把 bound head 的 blob 位元組以 §8.1 mode 落成
+    一棵不可變 application 樹(W2 exported-ABI 的 launch-builder 探針需要一份**真的**
+    已物化的包才能行使 P1-1 的 digest 綁定;該樹 100% 來自 commit blob,與工作樹無關)。
+    ``require_clean_declared_paths=False`` 只解除「發射前工作樹必須乾淨」這條發佈政策
+    (manifest 位元組本來就只來自 commit blob),供上述探針在髒工作樹上仍能再導出。
     """
     head = source_head if source_head is not None else _git_head(repo_root)
     if not re.fullmatch(r"[0-9a-f]{40}", str(head)):
@@ -1373,10 +1439,10 @@ def build_application_bundle_manifest(
         text=True,
         check=True,
     ).stdout
-    if dirty.strip("\0"):
-        dirty_paths = sorted({
-            record[3:] for record in dirty.split("\0") if len(record) > 3
-        })
+    dirty_paths = sorted({
+        record[3:] for record in dirty.split("\0") if len(record) > 3
+    })
+    if dirty_paths and require_clean_declared_paths:
         return {
             "status": "APPLICATION_BUNDLE_SOURCE_DIRTY",
             "reasons": [
@@ -1388,6 +1454,7 @@ def build_application_bundle_manifest(
     tree = _git_ls_tree_entries(repo_root, head, declared)
     reasons: list[str] = []
     entries: list[dict[str, str]] = []
+    resolved: list[tuple[str, str, str]] = []  # (rel, mode, blob_sha)
     for rel in declared:
         meta = tree.get(rel)
         if meta is None:
@@ -1397,17 +1464,26 @@ def build_application_bundle_manifest(
         if object_type != "blob" or git_mode == "120000":
             reasons.append(f"declared path is not a committed regular blob: {rel}")
             continue
-        blob = subprocess.run(
-            ["git", "-C", str(repo_root), "cat-file", "blob", blob_sha],
-            capture_output=True,
-            check=True,
-        ).stdout
+        # §8.1:git 100755 → 0555 可執行;其餘一律 0444 不可變資料。
+        resolved.append((rel, "0555" if git_mode == "100755" else "0444", blob_sha))
+    if reasons:
+        return {"status": "APPLICATION_BUNDLE_TREE_INVALID", "reasons": reasons}
+    blobs = _git_batch_blobs(repo_root, [blob_sha for _rel, _mode, blob_sha in resolved])
+    for rel, mode, blob_sha in resolved:
+        blob = blobs.get(blob_sha)
+        if blob is None:
+            reasons.append(f"declared path blob is unreadable at the bound head: {rel}")
+            continue
         entries.append({
             "path": rel,
-            # §8.1:git 100755 → 0555 可執行;其餘一律 0444 不可變資料。
-            "mode": "0555" if git_mode == "100755" else "0444",
+            "mode": mode,
             "sha256": "sha256:" + hashlib.sha256(blob).hexdigest(),
         })
+        if materialize_root is not None:
+            destination = Path(materialize_root) / rel
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(blob)
+            destination.chmod(int(mode, 8))
     if reasons:
         return {"status": "APPLICATION_BUNDLE_TREE_INVALID", "reasons": reasons}
 
@@ -1436,6 +1512,9 @@ def build_application_bundle_manifest(
         "application_bundle_digest": manifest["self_digest"],
         "entry_count": len(entries),
         "closure_digest": closure["self_digest"],
+        # P1-5 可見性:manifest 位元組只來自 commit blob,但「發射時工作樹是否乾淨」
+        # 本身是事實——記錄下來,不靜默。
+        "declared_paths_worktree_delta": dirty_paths,
         "manifest": manifest,
         "production_authority_flags": {
             "nine_authorities_false": True,
@@ -1690,7 +1769,7 @@ def emit_w2_receipts(
             "predecessor_wave_receipt=w1_wave_exit, predecessor_wave_chain=(w0_wave_exit,))"
         ),
     }
-    existing = _persist_emit_artifacts(
+    refusal = _persist_emit_artifacts(
         out_dir,
         (
             (W2_WAVE_EXIT_FILENAME, w2_wave_exit),
@@ -1701,8 +1780,8 @@ def emit_w2_receipts(
         ),
         allow_overwrite=allow_overwrite,
     )
-    if existing is not None:
-        return _emit_collision_refusal("W2_EMIT_REFUSED", existing)
+    if refusal is not None:
+        return _emit_collision_refusal("W2_EMIT_REFUSED", refusal)
     return {
         "status": "W2_RECEIPTS_EMITTED",
         "out_dir": str(out_dir),

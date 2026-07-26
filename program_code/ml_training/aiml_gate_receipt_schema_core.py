@@ -328,6 +328,133 @@ def artifact_self_digest(artifact: dict[str, Any]) -> str:
     })
 
 
+# --------------------------------------------------------------------------- #
+# W2 P1-5(review):owned-path 內容投影必須綁「被宣稱的那個 commit 的 blob」,而不是
+# 工作樹當下的位元組。舊機制讀 working tree:任一 owned 檔有 staged/unstaged 改動時,
+# receipt 記的是未變的 HEAD,投影 hash 的卻是髒位元組——驗證端 hash 同一棵髒樹於是照樣
+# PASS,而該 commit 的乾淨 checkout 永遠重現不出那份 receipt。改由 ``git cat-file``
+# 自 bound head 讀 blob:投影因此是該 commit 的函數,任何人 checkout 它都重算得出同值。
+# fail-closed:git 不可用/commit 不存在/路徑不在該樹 → 該路徑記 None(投影變值 → 導出失敗)。
+# --------------------------------------------------------------------------- #
+def _git_stdout(repo_root: Path, arguments: list[str]) -> str | None:
+    import subprocess
+
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(repo_root), *arguments],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    return proc.stdout if proc.returncode == 0 else None
+
+
+def resolve_commit_head(repo_root: Path, source_head: str | None = None) -> str | None:
+    """把 ``source_head``(或 HEAD)解析為 40-hex commit;不可解析即 None(fail-closed)。"""
+
+    revision = source_head if source_head is not None else "HEAD"
+    if re.fullmatch(r"[0-9a-f]{7,40}", str(revision)) is None and revision != "HEAD":
+        return None
+    stdout = _git_stdout(repo_root, ["rev-parse", f"{revision}^{{commit}}"])
+    if stdout is None:
+        return None
+    head = stdout.strip()
+    return head if re.fullmatch(r"[0-9a-f]{40}", head) else None
+
+
+def owned_path_blob_projection(
+    repo_root: Path,
+    paths: tuple[str, ...] | list[str],
+    *,
+    source_head: str | None = None,
+) -> dict[str, str | None]:
+    """{owned path: sha256 of its blob **at the bound commit**}(缺席/不可讀記 None)。
+
+    以單一 ``git cat-file --batch`` 進程串流讀取(N 個路徑不再是 N 個子行程);
+    ``<commit>:<path>`` 形的 revision 直接把路徑解析到那棵樹,故工作樹狀態完全不參與。
+    """
+
+    import subprocess
+
+    ordered = sorted(paths)
+    projection: dict[str, str | None] = {rel: None for rel in ordered}
+    head = resolve_commit_head(repo_root, source_head)
+    if head is None:
+        return projection
+    request = "".join(f"{head}:{rel}\n" for rel in ordered).encode("utf-8")
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(repo_root), "cat-file", "--batch"],
+            input=request,
+            capture_output=True,
+            timeout=180,
+        )
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return projection
+    if proc.returncode != 0:
+        return projection
+    stream = proc.stdout
+    offset = 0
+    for rel in ordered:
+        newline = stream.find(b"\n", offset)
+        if newline < 0:
+            break
+        header = stream[offset:newline].decode("utf-8", "replace").split(" ")
+        offset = newline + 1
+        if len(header) != 3 or header[1] != "blob":
+            # "missing" / "ambiguous" / 非 blob(目錄、submodule)→ fail-closed 記 None。
+            continue
+        try:
+            size = int(header[2])
+        except ValueError:
+            break
+        payload = stream[offset : offset + size]
+        offset += size + 1  # 每筆物件後接一個換行
+        projection[rel] = "sha256:" + hashlib.sha256(payload).hexdigest()
+    return projection
+
+
+def owned_path_blob_projection_digest(
+    repo_root: Path,
+    paths: tuple[str, ...] | list[str],
+    *,
+    source_head: str | None = None,
+) -> str:
+    """owned-path commit-blob 投影的 canonical digest(W0/W1/W2 共用同一把尺)。"""
+
+    return canonical_digest(
+        owned_path_blob_projection(repo_root, paths, source_head=source_head)
+    )
+
+
+def owned_scope_worktree_delta(
+    repo_root: Path,
+    paths: tuple[str, ...] | list[str],
+    *,
+    source_head: str | None = None,
+) -> list[str] | None:
+    """owned scope 內 index/worktree 與 bound commit 的差異路徑(不可判定回 None)。
+
+    P1-5 的可見性面:投影已綁 commit blob,故髒工作樹不再污染 digest;但「這份 receipt
+    是從一棵髒工作樹發射的」本身是事實,必須可被看見而不是靜默。
+    """
+
+    ordered = sorted(paths)
+    head = resolve_commit_head(repo_root, source_head)
+    if head is None:
+        return None
+    stdout = _git_stdout(
+        repo_root, ["status", "--porcelain", "-z", "--", *ordered]
+    )
+    if stdout is None:
+        return None
+    return sorted({
+        record[3:] for record in stdout.split("\0") if len(record) > 3
+    })
+
+
 def landing_scope_identity_digest(scope: dict[str, Any]) -> str:
     """Bind the complete scope, cell coverage, environment and promotion graph."""
 

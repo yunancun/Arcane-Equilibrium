@@ -75,6 +75,19 @@ COMPATIBILITY_RECEIPT_V2_REL = (
     "S2.2A-source-compatibility-receipt-v2.json"
 )
 
+# P2-4(W2 review)§8.3 topology guard 的 host 佈署姿態:root 所有、scanner 群組可讀、
+# mode 恰為 0440。舊碼只拒 world-write,於是 group-writable(0660)的 guard 每次重連驗證
+# 都通過——scanner 群組內的另一個行程可以改寫 guard 值再重算其 self_digest,身分閘就被
+# 對齊到攻擊者選定的叢集。mode/owner/group 三者都必須在信任該檔之前驗過。
+TOPOLOGY_GUARD_REQUIRED_MODE = 0o440
+TOPOLOGY_GUARD_REQUIRED_OWNER_UID = 0
+TOPOLOGY_GUARD_REQUIRED_GROUP = "aiml-engine-scanner"
+# P1-7(W2 review):application root 自身必須是**真目錄**(非 symlink 別名)。舊碼的
+# ``Path.is_dir()`` 跟隨 symlink,walk 只拒 root 以下的 symlink,於是 digest 前置驗過的是
+# 別名指向的樹;preflight 之後把別名重指到另一棵樹,unit 路徑與 digest 都不變,receipts
+# 與 runtime 輸入卻已換人。root 以 O_NOFOLLOW|O_DIRECTORY 開著、(dev,ino) 於走訪後再驗。
+_APPLICATION_ROOT_FORBIDDEN_MODE_BITS = 0o022
+
 _DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _HEAD_RE = re.compile(r"^[0-9a-f]{40}$")
 # closure allowlist 中承載 repo 相對路徑的段名(closed schema 同步凍結此形狀)。
@@ -268,6 +281,49 @@ def verify_application_root(
     return document
 
 
+def open_immutable_application_root(root: Path) -> int:
+    """P1-7:以 O_NOFOLLOW|O_DIRECTORY 開啟 application root 並驗其不可變姿態。
+
+    回傳持有中的目錄 fd(呼叫端負責關閉)。root 自身若是 symlink 別名、非目錄、或
+    group/other 可寫(可被重建/重指),一律 typed 拒絕——digest 前置驗過的樹必須就是
+    之後被執行的那一棵。
+    """
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        directory_fd = os.open(root, flags)
+    except OSError as exc:
+        # ELOOP/ENOTDIR = 別名或非目錄;ENOENT = 缺席。兩者都不得回退。
+        raise AlrApplicationIdentityError("application_root_not_a_real_directory") from exc
+    try:
+        meta = os.fstat(directory_fd)
+        if not stat.S_ISDIR(meta.st_mode):
+            raise AlrApplicationIdentityError("application_root_not_a_real_directory")
+        if stat.S_IMODE(meta.st_mode) & _APPLICATION_ROOT_FORBIDDEN_MODE_BITS:
+            raise AlrApplicationIdentityError("application_root_mutable_mode")
+    except BaseException:
+        os.close(directory_fd)
+        raise
+    return directory_fd
+
+
+def revalidate_application_root_identity(root: Path, directory_fd: int) -> None:
+    """P1-7:走訪之後再驗 root 身分——(dev,ino) 必須仍等於開啟時持有的那一個。
+
+    別名在 preflight 與 runtime 之間被重指(rename/symlink 換靶)即在此 typed 失敗;
+    路徑名相同但 inode 已換人,digest 便不再描述將被執行的那棵樹。
+    """
+    held = os.fstat(directory_fd)
+    try:
+        current = os.lstat(root)
+    except OSError as exc:
+        raise AlrApplicationIdentityError("application_root_identity_changed") from exc
+    if stat.S_ISLNK(current.st_mode) or (current.st_dev, current.st_ino) != (
+        held.st_dev,
+        held.st_ino,
+    ):
+        raise AlrApplicationIdentityError("application_root_identity_changed")
+
+
 def _contained_path(root: Path, candidate: Path, *, code: str) -> Path:
     """production 模式:receipt 路徑必須落在 application root 之內(唯一根)。"""
     resolved = candidate.resolve()
@@ -308,8 +364,53 @@ def verify_pinned_v2_receipt(
     return str(pinned)
 
 
+def _guard_group_name(gid: int) -> str | None:
+    """gid → 群組名(解析不到即 None;無 grp 模組的平台亦然)。"""
+    try:
+        import grp  # noqa: PLC0415 - 平台相依,延遲匯入
+
+        return grp.getgrgid(gid).gr_name
+    except (ImportError, KeyError, OverflowError, OSError, TypeError, ValueError):
+        return None
+
+
+def guard_host_identity(st: os.stat_result) -> tuple[int, str | None]:
+    """topology guard 的 host 身分事實(owner uid, group name)。
+
+    這是**唯一**的 host 身分讀取點:測試在無 root 的 checkout 上以此縫模擬真實佈署
+    (root:aiml-engine-scanner),production 走真 stat。判定邏輯不在此處,故縫本身無法
+    放行任何不符姿態。
+    """
+    return int(st.st_uid), _guard_group_name(int(st.st_gid))
+
+
+def verify_topology_guard_host_posture(path: Path) -> None:
+    """P2-4:信任 guard 內容之前先驗其 host 佈署姿態(mode/owner/group 三者皆 exact)。"""
+    try:
+        st = os.lstat(path)
+    except OSError as exc:
+        raise AlrApplicationIdentityError("topology_guard_missing") from exc
+    if stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode):
+        raise AlrApplicationIdentityError("topology_guard_not_regular")
+    mode = stat.S_IMODE(st.st_mode)
+    if mode != TOPOLOGY_GUARD_REQUIRED_MODE:
+        raise AlrApplicationIdentityError(f"topology_guard_mode_invalid:{mode:04o}")
+    owner_uid, group_name = guard_host_identity(st)
+    if owner_uid != TOPOLOGY_GUARD_REQUIRED_OWNER_UID:
+        raise AlrApplicationIdentityError(f"topology_guard_owner_invalid:{owner_uid}")
+    if group_name != TOPOLOGY_GUARD_REQUIRED_GROUP:
+        raise AlrApplicationIdentityError(
+            f"topology_guard_group_invalid:{group_name or 'unresolved'}"
+        )
+
+
 def verify_topology_guard(path: Path) -> dict[str, Any]:
-    """載入不可變 topology guard 並自我 digest 驗證(§8.3;結構由 closed schema 執法)。"""
+    """載入不可變 topology guard 並自我 digest 驗證(§8.3;結構由 closed schema 執法)。
+
+    P2-4:先驗 host 佈署姿態(root 所有、scanner 群組、mode 恰 0440),再讀內容——
+    group-writable 的 guard 連被解析的機會都沒有。
+    """
+    verify_topology_guard_host_posture(Path(path))
     guard = _read_bounded_json(
         path, code_prefix="topology_guard", max_bytes=_CLOSURE_MAX_BYTES
     )
@@ -359,8 +460,40 @@ def run_production_preflight(
     任何缺失/不符 → AlrApplicationIdentityError(exit 78),絕不回退 ambient/Git 來源。
     """
     root = Path(application_root)
-    if not root.is_dir():
-        raise AlrApplicationIdentityError("application_root_missing")
+    # P1-7:root 自身以 lstat/O_NOFOLLOW 驗為不可變真目錄,並在整段前置期間持有其 fd;
+    # 走訪結束後再比對 (dev,ino),別名重指即 typed 失敗。
+    root_fd = open_immutable_application_root(root)
+    try:
+        return _run_production_preflight_under_held_root(
+            root,
+            root_fd,
+            source_head=source_head,
+            expected_compatibility_receipt_v2=expected_compatibility_receipt_v2,
+            expected_application_bundle_digest=expected_application_bundle_digest,
+            expected_launch_bundle_digest=expected_launch_bundle_digest,
+            topology_guard_file=topology_guard_file,
+            expected_learning_runtime_digest_v2=expected_learning_runtime_digest_v2,
+            expected_compatibility_receipt=expected_compatibility_receipt,
+            interpreter_prefix=interpreter_prefix,
+        )
+    finally:
+        os.close(root_fd)
+
+
+def _run_production_preflight_under_held_root(
+    root: Path,
+    root_fd: int,
+    *,
+    source_head: Any,
+    expected_compatibility_receipt_v2: Path | None,
+    expected_application_bundle_digest: Any,
+    expected_launch_bundle_digest: Any,
+    topology_guard_file: Path | None,
+    expected_learning_runtime_digest_v2: Any,
+    expected_compatibility_receipt: Path | None,
+    interpreter_prefix: str | None,
+) -> dict[str, Any]:
+    """§8.3 前置的本體(root fd 由 caller 持有;結束前再驗 root 身分)。"""
     if not isinstance(source_head, str) or not _HEAD_RE.fullmatch(source_head):
         raise AlrApplicationIdentityError("expectation_missing:source_head")
     for name, value in (
@@ -380,6 +513,8 @@ def run_production_preflight(
         source_head=source_head,
         expected_application_bundle_digest=str(expected_application_bundle_digest),
     )
+    # P1-7:整樹走訪之後立刻再驗 root 身分——走訪期間被重指的別名在此 typed 失敗。
+    revalidate_application_root_identity(root, root_fd)
     v2_receipt_path = _contained_path(
         root,
         Path(expected_compatibility_receipt_v2),
@@ -405,10 +540,17 @@ def run_production_preflight(
         else root / COMPATIBILITY_RECEIPT_V1_REL,
         code="compatibility_receipt_outside_application_root",
     )
+    # P1-7:全部讀取結束後最後一次驗 root 身分,並把「已驗身分的實體路徑」交給 runtime
+    # (中間路徑段的別名於此被解析掉,preflight 之後重指任一段都無法換掉這棵樹)。
+    revalidate_application_root_identity(root, root_fd)
+    held = os.fstat(root_fd)
+    real_root = Path(os.path.realpath(root))
     summary = {
         "schema_version": "alr_production_identity_preflight_v1",
         "status": "PASS",
         "application_root": str(root),
+        "application_root_realpath": str(real_root),
+        "application_root_identity": f"{held.st_dev}:{held.st_ino}",
         "source_head": source_head,
         "application_bundle_digest": document["self_digest"],
         "launch_bundle_digest": str(expected_launch_bundle_digest),
@@ -423,7 +565,7 @@ def run_production_preflight(
             "learning_runtime_digest_v2": resolved_v2,
         },
         "run_kwargs": {
-            "repo_root": root,
+            "repo_root": real_root,
             "pinned_repo_source_head": source_head,
             "dsn_required_identity": dict(PRODUCTION_DSN_IDENTITY),
             "expected_compatibility_receipt": v1_receipt_path,
@@ -513,18 +655,25 @@ __all__ = [
     "PRODUCTION_DSN_IDENTITY",
     "REQUIRED_RUNTIME_RESOURCES",
     "RUNTIME_CLOSURE_REL",
+    "TOPOLOGY_GUARD_REQUIRED_GROUP",
+    "TOPOLOGY_GUARD_REQUIRED_MODE",
+    "TOPOLOGY_GUARD_REQUIRED_OWNER_UID",
     "build_application_bundle_document",
     "closure_declared_paths",
     "derive_tree_entries",
     "find_undeclared_paths",
+    "guard_host_identity",
     "is_permanent_pre_db_error",
     "load_runtime_closure",
+    "open_immutable_application_root",
     "production_failure_summary",
     "recompute_application_bundle_digest",
+    "revalidate_application_root_identity",
     "run_production_preflight",
     "run_production_preflight_from_args",
     "verify_application_root",
     "verify_launch_prefix",
     "verify_pinned_v2_receipt",
     "verify_topology_guard",
+    "verify_topology_guard_host_posture",
 ]

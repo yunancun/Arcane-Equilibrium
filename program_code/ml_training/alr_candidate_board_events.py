@@ -31,6 +31,7 @@ from typing import Any
 _IN_ACCESS_EVENT = struct.Struct("iIII")
 _IN_CREATE = 0x00000100
 _IN_DELETE = 0x00000200
+_IN_MOVED_FROM = 0x00000040
 _IN_MOVED_TO = 0x00000080
 _IN_CLOSE_WRITE = 0x00000008
 _IN_DELETE_SELF = 0x00000400
@@ -42,7 +43,12 @@ _IN_ONLYDIR = 0x01000000
 _IN_DONT_FOLLOW = 0x02000000
 # The immutable publisher links the new board before pruning the old board.
 # DELETE is the retry wake when a CREATE reconciliation observes that transient.
-_INOTIFY_WAKE_MASK = _IN_CREATE | _IN_DELETE | _IN_MOVED_TO | _IN_CLOSE_WRITE
+# P2-2(W2 review):把一份不可變看板「改名搬出」本目錄,核心發的是 IN_MOVED_FROM 而
+# **不是** IN_DELETE——舊 wake mask 不訂閱它,該看板於是永遠留在投影裡(移除事件被吞)。
+# rename-out 與 unlink 對帳語義完全相同,故一併入 wake mask(watch mask 由其導出)。
+_INOTIFY_WAKE_MASK = (
+    _IN_CREATE | _IN_DELETE | _IN_MOVED_FROM | _IN_MOVED_TO | _IN_CLOSE_WRITE
+)
 _INOTIFY_INVALIDATION_MASK = _IN_DELETE_SELF | _IN_MOVE_SELF | _IN_UNMOUNT | _IN_IGNORED
 _INOTIFY_WATCH_MASK = _INOTIFY_WAKE_MASK | (
     _IN_DELETE_SELF | _IN_MOVE_SELF | _IN_UNMOUNT

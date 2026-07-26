@@ -31,6 +31,7 @@ import json
 import os
 import re
 import stat
+import struct
 import sys
 from pathlib import Path
 from typing import Any, Mapping
@@ -45,6 +46,7 @@ for _candidate in (HELPER_DIR, ML_TRAINING_DIR, PROGRAM_CODE_DIR):
 
 from aiml_gate_receipt_schema_core import resolve_facade  # noqa: E402
 from ml_training import alr_candidate_policy as _policy  # noqa: E402
+from ml_training import alr_application_identity as _app_identity  # noqa: E402
 
 # ── §8.3 契約常量(canonical unit name 依 §8 reconciliation note/PR#134 釘死)──────
 UNIT_NAME = "arcane-equilibrium-aiml-engine-scanner.service"
@@ -612,9 +614,344 @@ _DIR_MODES = ("0555", "0755")
 _INTERPRETER_TARGET = "bin/python3"
 _NATIVE_LIBRARY_MARKERS = (".so", ".dylib")
 
+# --------------------------------------------------------------------------- #
+# P1-2(W2 review)loader closure:副檔名篩選(*.so/*.dylib)只是**檔名**清單,它既不
+# 證明那些檔案是可載入的機器碼,也完全不記錄 staged interpreter 真正會去載入什麼。真正
+# 決定「同一個 base_runtime_tree_digest 之下實際執行哪些機器碼」的是 ELF 的 PT_INTERP
+# (動態載入器)與 DT_NEEDED(相依 soname)——若它們解析到樹**外**,host 的 libc/loader
+# 一換,執行的位元組就變了,而 digest 一動不動。
+#
+# 本葉對 caller 提供的樹做**純位元組**推導(零 host 接觸、零網路、零 ldconfig):逐檔解析
+# ELF 的 PT_INTERP / DT_NEEDED / DT_SONAME / DT_RPATH / DT_RUNPATH,並要求整個相依閉包
+# 在樹內閉合。誠實邊界(source-only 不可導出,故一律 typed 拒絕而非靜默通過):
+#   * host 上 loader 解析出來的 realpath、inode/device 身分、發行版套件身分、
+#     ldconfig 快取與 LD_* 搜尋狀態——這些是 runtime/host 事實,原始碼推導不出來;
+#   * 因此「非 hermetic 的 interpreter」(任一 NEEDED/PT_INTERP 落在樹外)一律
+#     BASE_RUNTIME_TREE_INVALID / LAUNCH_BUNDLE_INVALID,絕不以「只記樹內 .so」蒙混。
+#   * Mach-O 等其他原生格式此處不解析 → 同樣 typed 拒絕(不假裝已綁)。
+# --------------------------------------------------------------------------- #
+_ELF_MAGIC = b"\x7fELF"
+_MACHO_MAGICS = (
+    b"\xcf\xfa\xed\xfe",
+    b"\xce\xfa\xed\xfe",
+    b"\xfe\xed\xfa\xcf",
+    b"\xfe\xed\xfa\xce",
+    b"\xca\xfe\xba\xbe",
+)
+_PT_LOAD = 1
+_PT_DYNAMIC = 2
+_PT_INTERP = 3
+_DT_NULL = 0
+_DT_NEEDED = 1
+_DT_STRTAB = 5
+_DT_SONAME = 14
+_DT_RPATH = 15
+_DT_RUNPATH = 29
+# source-only 導不出的 host 事實(顯式具名;hermetic 要求正是為了讓它們無從參與)。
+LOADER_CLOSURE_UNDERIVABLE_HOST_FACTS = (
+    "host_loader_resolved_realpaths",
+    "inode_device_identity",
+    "distribution_package_identity",
+    "ldconfig_cache_and_ld_search_state",
+)
+LOADER_CLOSURE_DERIVATION = "in_tree_elf_pt_interp_dt_needed_v1"
+
 
 def _is_native_library(name: str) -> bool:
     return name.endswith(_NATIVE_LIBRARY_MARKERS) or ".so." in name
+
+
+def _elf_program_headers(
+    data: bytes, endian: str, is64: bool
+) -> list[tuple[int, int, int, int]]:
+    """(p_type, p_offset, p_vaddr, p_filesz) 逐段;越界即停(fail-closed 少讀不亂讀)。"""
+    if is64:
+        e_phoff = struct.unpack_from(endian + "Q", data, 32)[0]
+        e_phentsize = struct.unpack_from(endian + "H", data, 54)[0]
+        e_phnum = struct.unpack_from(endian + "H", data, 56)[0]
+    else:
+        e_phoff = struct.unpack_from(endian + "I", data, 28)[0]
+        e_phentsize = struct.unpack_from(endian + "H", data, 42)[0]
+        e_phnum = struct.unpack_from(endian + "H", data, 44)[0]
+    segments: list[tuple[int, int, int, int]] = []
+    for index in range(min(e_phnum, 256)):
+        offset = e_phoff + index * e_phentsize
+        if offset + e_phentsize > len(data) or e_phentsize < (56 if is64 else 32):
+            break
+        if is64:
+            p_type = struct.unpack_from(endian + "I", data, offset)[0]
+            p_offset = struct.unpack_from(endian + "Q", data, offset + 8)[0]
+            p_vaddr = struct.unpack_from(endian + "Q", data, offset + 16)[0]
+            p_filesz = struct.unpack_from(endian + "Q", data, offset + 32)[0]
+        else:
+            p_type = struct.unpack_from(endian + "I", data, offset)[0]
+            p_offset = struct.unpack_from(endian + "I", data, offset + 4)[0]
+            p_vaddr = struct.unpack_from(endian + "I", data, offset + 8)[0]
+            p_filesz = struct.unpack_from(endian + "I", data, offset + 16)[0]
+        segments.append((p_type, p_offset, p_vaddr, p_filesz))
+    return segments
+
+
+def _elf_string(data: bytes, base: int, offset: int) -> str | None:
+    start = base + offset
+    if base < 0 or start < 0 or start >= len(data):
+        return None
+    end = data.find(b"\0", start)
+    if end < 0:
+        return None
+    return data[start:end].decode("utf-8", "replace")
+
+
+def elf_dynamic_facts(data: bytes) -> dict[str, Any] | None:
+    """ELF 的動態相依事實(非 ELF 或無法解析即 None;純位元組,零 host 接觸)。"""
+    if not data.startswith(_ELF_MAGIC) or len(data) < 64:
+        return None
+    ei_class, ei_data = data[4], data[5]
+    if ei_class not in (1, 2) or ei_data not in (1, 2):
+        return None
+    is64 = ei_class == 2
+    endian = "<" if ei_data == 1 else ">"
+    try:
+        machine = struct.unpack_from(endian + "H", data, 18)[0]
+        segments = _elf_program_headers(data, endian, is64)
+    except struct.error:
+        return None
+
+    def _vaddr_to_offset(vaddr: int) -> int | None:
+        for p_type, p_offset, p_vaddr, p_filesz in segments:
+            if p_type == _PT_LOAD and p_vaddr <= vaddr < p_vaddr + p_filesz:
+                return p_offset + (vaddr - p_vaddr)
+        return None
+
+    interpreter: str | None = None
+    for p_type, p_offset, _p_vaddr, p_filesz in segments:
+        if p_type == _PT_INTERP and p_offset + p_filesz <= len(data):
+            text = data[p_offset : p_offset + p_filesz].split(b"\0", 1)[0].decode(
+                "utf-8", "replace"
+            )
+            interpreter = text or None
+    entries: list[tuple[int, int]] = []
+    for p_type, p_offset, _p_vaddr, p_filesz in segments:
+        if p_type != _PT_DYNAMIC:
+            continue
+        entsize = 16 if is64 else 8
+        position, end = p_offset, min(p_offset + p_filesz, len(data))
+        while position + entsize <= end:
+            try:
+                tag, value = struct.unpack_from(
+                    endian + ("qQ" if is64 else "iI"), data, position
+                )
+            except struct.error:
+                break
+            position += entsize
+            if tag == _DT_NULL:
+                break
+            entries.append((tag, value))
+    strtab_offset: int | None = None
+    for tag, value in entries:
+        if tag == _DT_STRTAB:
+            strtab_offset = _vaddr_to_offset(value)
+            if strtab_offset is None and value < len(data):
+                strtab_offset = value  # 未經 PT_LOAD 映射的極簡樹:vaddr == file offset
+    needed: list[str] = []
+    soname: str | None = None
+    rpath: list[str] = []
+    runpath: list[str] = []
+    if strtab_offset is not None:
+        for tag, value in entries:
+            if tag not in (_DT_NEEDED, _DT_SONAME, _DT_RPATH, _DT_RUNPATH):
+                continue
+            text = _elf_string(data, strtab_offset, value)
+            if text is None:
+                continue
+            if tag == _DT_NEEDED:
+                needed.append(text)
+            elif tag == _DT_SONAME:
+                soname = text
+            elif tag == _DT_RPATH:
+                rpath.extend(part for part in text.split(":") if part)
+            else:
+                runpath.extend(part for part in text.split(":") if part)
+    return {
+        "format": "elf64" if is64 else "elf32",
+        "machine": int(machine),
+        "interpreter": interpreter,
+        "soname": soname,
+        # DT_NEEDED 的**次序**即載入器的搜尋次序,故保留位元組次序(不排序)。
+        "needed": needed,
+        "rpath": rpath,
+        "runpath": runpath,
+    }
+
+
+def synthetic_probe_elf(
+    *,
+    needed: tuple[str, ...] = (),
+    soname: str | None = None,
+    interpreter: str | None = None,
+    filler: bytes = b"",
+) -> bytes:
+    """deterministic 的最小 ELF64-LE 位元組(**探針/測試夾具**,不是任何部署產物)。
+
+    存在理由:base/launch builder 現在要求 interpreter 是可解析的原生執行檔並要求整個
+    loader 閉包在樹內閉合(P1-2)。要在無 host 依賴下確定性地行使那條路徑,就需要一份
+    由本模組自己合成、逐位元組可重現的 ELF。它只含 PT_LOAD/PT_INTERP/PT_DYNAMIC 與
+    DT_NEEDED/DT_SONAME/DT_STRTAB/DT_STRSZ,不含任何可執行指令。
+    """
+    header_size, phentsize = 64, 56
+    segments: list[tuple[int, int, int]] = []  # (p_type, p_offset, p_filesz)
+    body = bytearray()
+    body_base = header_size + 3 * phentsize
+
+    interp_offset = body_base
+    if interpreter is not None:
+        payload = interpreter.encode("utf-8") + b"\0"
+        body += payload
+        segments.append((_PT_INTERP, interp_offset, len(payload)))
+        while len(body) % 8:
+            body += b"\0"
+    else:
+        # 共享物件沒有 PT_INTERP;以 PT_NULL 佔位保持 e_phnum 固定(形狀 deterministic)。
+        segments.append((0, interp_offset, 0))
+
+    strings = bytearray(b"\0")
+    offsets: dict[str, int] = {}
+    for name in (*needed, *((soname,) if soname else ())):
+        if name in offsets:
+            continue
+        offsets[name] = len(strings)
+        strings += name.encode("utf-8") + b"\0"
+    dynamic_offset = body_base + len(body)
+    entries: list[tuple[int, int]] = [(_DT_NEEDED, offsets[name]) for name in needed]
+    if soname:
+        entries.append((_DT_SONAME, offsets[soname]))
+    strtab_offset = dynamic_offset + (len(entries) + 3) * 16
+    entries.append((_DT_STRTAB, strtab_offset))
+    entries.append((10, len(strings)))  # DT_STRSZ
+    entries.append((_DT_NULL, 0))
+    dynamic = bytearray()
+    for tag, value in entries:
+        dynamic += struct.pack("<qQ", tag, value)
+    body += dynamic
+    segments.append((_PT_DYNAMIC, dynamic_offset, len(dynamic)))
+    body += strings
+    body += filler
+
+    total = body_base + len(body)
+    header = bytearray(header_size)
+    header[0:4] = _ELF_MAGIC
+    header[4] = 2  # ELFCLASS64
+    header[5] = 1  # ELFDATA2LSB
+    header[6] = 1  # EV_CURRENT
+    struct.pack_into("<H", header, 16, 3)  # ET_DYN
+    struct.pack_into("<H", header, 18, 62)  # EM_X86_64
+    struct.pack_into("<I", header, 20, 1)
+    struct.pack_into("<Q", header, 32, header_size)  # e_phoff
+    struct.pack_into("<H", header, 52, header_size)  # e_ehsize
+    struct.pack_into("<H", header, 54, phentsize)
+    struct.pack_into("<H", header, 56, 3)  # e_phnum
+    phdrs = bytearray()
+    # PT_LOAD 覆蓋整檔且 p_vaddr == p_offset(vaddr→offset 映射恆等,解析可重現)。
+    for p_type, p_offset, p_filesz in ((_PT_LOAD, 0, total), *segments):
+        phdrs += struct.pack(
+            "<IIQQQQQQ", p_type, 4, p_offset, p_offset, p_offset, p_filesz, p_filesz, 8
+        )
+    return bytes(header) + bytes(phdrs)[: 3 * phentsize] + bytes(body)
+
+
+# 探針樹的 code-owned 形狀(hermetic:interpreter 的 PT_INTERP 與每一個 DT_NEEDED 都由
+# 樹內 ELF 提供)。位元組全部由 synthetic_probe_elf 決定 → 逐位元組可重現。
+PROBE_LOADER_LEAF = "ld-linux-x86-64.so.2"
+PROBE_INTERPRETER_PATH = f"/opt/arcane-equilibrium/aiml/launches/probe/lib/{PROBE_LOADER_LEAF}"
+
+
+def materialize_probe_runtime_tree(root: Path) -> Path:
+    """在 caller 指定的 tmp 目錄物化一棵 deterministic hermetic 探針樹(零生產路徑接觸)。"""
+    root = Path(root)
+    (root / "bin").mkdir(parents=True, exist_ok=True)
+    (root / "lib").mkdir(parents=True, exist_ok=True)
+    libraries = {
+        f"lib/{PROBE_LOADER_LEAF}": synthetic_probe_elf(soname=PROBE_LOADER_LEAF),
+        "lib/libc.so.6": synthetic_probe_elf(soname="libc.so.6"),
+        "lib/libpython3.12.so.1.0": synthetic_probe_elf(
+            soname="libpython3.12.so.1.0", needed=("libc.so.6",)
+        ),
+    }
+    for rel, payload in libraries.items():
+        target = root / rel
+        target.write_bytes(payload)
+        target.chmod(0o555)
+    interpreter = root / "bin/python3"
+    interpreter.write_bytes(
+        synthetic_probe_elf(
+            needed=("libpython3.12.so.1.0", "libc.so.6"),
+            interpreter=PROBE_INTERPRETER_PATH,
+        )
+    )
+    interpreter.chmod(0o555)
+    data = root / "lib/python312.txt"
+    data.write_bytes(b"deterministic stdlib payload\n")
+    data.chmod(0o444)
+    for directory in (root / "bin", root / "lib"):
+        directory.chmod(0o755)
+    return root
+
+
+def derive_tree_loader_closure(
+    root: Path, entries: list[dict[str, Any]]
+) -> tuple[dict[str, Any] | None, list[str]]:
+    """樹內 ELF 的 loader 閉包 + typed reasons(閉包外洩 = 非 hermetic → 拒絕)。"""
+    reasons: list[str] = []
+    binaries: list[dict[str, Any]] = []
+    providers: dict[str, str] = {}
+    for entry in entries:
+        if entry["type"] != "file":
+            continue
+        rel = entry["path"]
+        try:
+            data = (root / rel).read_bytes()
+        except OSError:
+            reasons.append(f"tree file became unreadable during loader analysis: {rel}")
+            continue
+        facts = elf_dynamic_facts(data)
+        if facts is None:
+            if data[:4] in _MACHO_MAGICS:
+                reasons.append(
+                    "native binary format is not statically derivable from source "
+                    f"(mach-o); reject rather than claim a bound loader closure: {rel}"
+                )
+            continue
+        binaries.append({"path": rel, **facts})
+        providers[rel.rsplit("/", 1)[-1]] = rel
+        if facts["soname"]:
+            providers[facts["soname"]] = rel
+    external: list[str] = []
+    for record in binaries:
+        for soname in record["needed"]:
+            if soname not in providers:
+                external.append(f"{record['path']} -> DT_NEEDED {soname}")
+        if record["interpreter"] is not None:
+            interpreter_leaf = record["interpreter"].rsplit("/", 1)[-1]
+            if interpreter_leaf not in providers:
+                external.append(
+                    f"{record['path']} -> PT_INTERP {record['interpreter']}"
+                )
+    for item in sorted(set(external)):
+        reasons.append(
+            "loader closure escapes the tree (non-hermetic interpreter; the host "
+            "loader/libc bytes it would resolve are not derivable from source): " + item
+        )
+    if reasons:
+        return None, sorted(set(reasons))
+    return (
+        {
+            "derivation": LOADER_CLOSURE_DERIVATION,
+            "binaries": sorted(binaries, key=lambda item: item["path"]),
+            "external_dependencies": [],
+            "undecidable_host_facts": list(LOADER_CLOSURE_UNDERIVABLE_HOST_FACTS),
+        },
+        [],
+    )
 
 
 def _walk_immutable_tree(root: Path) -> tuple[list[dict[str, Any]], list[str]]:
@@ -712,6 +1049,19 @@ def build_base_runtime_tree_manifest(
         reasons.append("interpreter target bin/python3 is absent from the staging tree")
     elif interpreter["mode"] != "0555":
         reasons.append("interpreter target bin/python3 must be an executable 0555 file")
+    # P1-2:loader 閉包必須在樹內閉合,且 interpreter 本身必須是可解析的原生執行檔——
+    # 否則「同一個 base_runtime_tree_digest 執行同一批機器碼」這句話不成立。
+    loader_closure, loader_reasons = derive_tree_loader_closure(
+        Path(staging_root), entries
+    )
+    reasons.extend(loader_reasons)
+    if loader_closure is not None and not any(
+        record["path"] == _INTERPRETER_TARGET for record in loader_closure["binaries"]
+    ):
+        reasons.append(
+            "interpreter target bin/python3 is not a parsable native executable; its "
+            "loader closure cannot be derived (refusing to bind an unverified interpreter)"
+        )
     if reasons:
         return {"status": "BASE_RUNTIME_TREE_INVALID", "reasons": sorted(set(reasons))}
     facade = resolve_facade()
@@ -728,6 +1078,7 @@ def build_base_runtime_tree_manifest(
             for entry in entries
             if entry["type"] == "file" and _is_native_library(entry["path"].rsplit("/", 1)[-1])
         ],
+        "loader_closure": loader_closure,
         "entries": entries,
     }
     manifest["self_digest"] = facade.artifact_self_digest(manifest)
@@ -739,6 +1090,7 @@ def build_base_runtime_tree_manifest(
         "base_runtime_tree_digest": manifest["self_digest"],
         "entry_count": len(entries),
         "native_library_count": len(manifest["native_libraries"]),
+        "loader_binary_count": len(loader_closure["binaries"]),
         "manifest": manifest,
         "production_authority_flags": {
             "nine_authorities_false": True,
@@ -749,13 +1101,28 @@ def build_base_runtime_tree_manifest(
 
 
 def launch_tree_walk_digest(launch_tree_root: str | Path) -> tuple[str | None, list[str]]:
-    """§8.1 #4:對「提供的」materialized launch 樹獨立走訪並 hash(typed)。"""
-    entries, reasons = _walk_immutable_tree(Path(launch_tree_root))
+    """§8.1 #4:對「提供的」materialized launch 樹獨立走訪並 hash(typed)。
+
+    P1-2:走訪 digest 綁的不只是 {path,type,mode,sha256},還有樹內 ELF 的 loader 閉包
+    (PT_INTERP/DT_NEEDED/SONAME/RPATH/RUNPATH)。閉包外洩(host libc/loader)即 typed
+    拒絕——否則同一個 launch_tree_digest 在不同 host 上會執行不同的機器碼。
+    """
+    root = Path(launch_tree_root)
+    entries, reasons = _walk_immutable_tree(root)
     if not any(
         entry["path"] == _INTERPRETER_TARGET and entry["type"] == "file"
         for entry in entries
     ):
         reasons.append("launch tree interpreter bin/python3 is absent")
+    loader_closure, loader_reasons = derive_tree_loader_closure(root, entries)
+    reasons.extend(loader_reasons)
+    if loader_closure is not None and not any(
+        record["path"] == _INTERPRETER_TARGET for record in loader_closure["binaries"]
+    ):
+        reasons.append(
+            "launch tree interpreter bin/python3 is not a parsable native executable; "
+            "its loader closure cannot be derived"
+        )
     if reasons:
         return None, sorted(set(reasons))
     facade = resolve_facade()
@@ -763,6 +1130,7 @@ def launch_tree_walk_digest(launch_tree_root: str | Path) -> tuple[str | None, l
         facade.canonical_digest({
             "schema_version": "launch_tree_walk_v1",
             "entries": entries,
+            "loader_closure": loader_closure,
         }),
         [],
     )
@@ -776,6 +1144,8 @@ def build_launch_bundle_manifest(
     application_bundle_digest: str,
     launcher_config_digest: str,
     target_platform: str,
+    application_root: str | Path,
+    application_source_head: str,
 ) -> dict[str, Any]:
     """§8.1 #4:launch_bundle_manifest_v1 builder(self_digest == launch_bundle_digest)。
 
@@ -783,6 +1153,13 @@ def build_launch_bundle_manifest(
     launcher_config_digest, launch_tree_digest, target_platform};launch_tree_digest
     由「提供的」materialized launch-tree 走訪獨立 hash。launch 葉名契約:digest 的
     64-hex(launches/<64-hex>,W2b verify_launch_prefix 消費)。
+
+    P1-1(W2 review):``application_bundle_digest`` **不再**是「語法正確就收」的字串。
+    launch 身分一旦發出,之後的 installer 會拿它去發佈一個 launch;若那個 digest 與真正
+    被物化的 application package 無關,發佈出去的 launch 可能根本沒有、或執行著與被審查
+    包不同的位元組。故此處在發出任何 launch 身分之前,先對 caller 提供的**已物化**
+    application root 整樹重算 §8.1 #3 身分並與所給 digest 硬比對(不符即 typed 拒絕),
+    並把該包綁定的 source head 一併寫進 manifest。
     """
     reasons: list[str] = []
     digests = {
@@ -796,9 +1173,28 @@ def build_launch_bundle_manifest(
             reasons.append(f"{name} must be a sha256 digest")
     if not isinstance(target_platform, str) or _PLATFORM_RE.fullmatch(target_platform) is None:
         reasons.append("target_platform must be a target-platform token")
+    if not isinstance(application_source_head, str) or _HEAD_RE.fullmatch(
+        application_source_head
+    ) is None:
+        reasons.append("application_source_head must be a 40-hex commit")
+    verified_application: dict[str, Any] | None = None
+    if not reasons:
+        try:
+            verified_application = _app_identity.verify_application_root(
+                Path(application_root),
+                source_head=application_source_head,
+                expected_application_bundle_digest=application_bundle_digest,
+            )
+        except _app_identity.AlrApplicationIdentityError as error:
+            reasons.append(
+                "materialized application package does not verify against "
+                f"application_bundle_digest: {error.code}"
+            )
+        except OSError as error:
+            reasons.append(f"materialized application package is unreadable: {error}")
     tree_digest, tree_reasons = launch_tree_walk_digest(launch_tree_root)
     reasons.extend(tree_reasons)
-    if reasons or tree_digest is None:
+    if reasons or tree_digest is None or verified_application is None:
         return {"status": "LAUNCH_BUNDLE_INVALID", "reasons": sorted(set(reasons))}
     facade = resolve_facade()
     manifest: dict[str, Any] = {
@@ -806,6 +1202,7 @@ def build_launch_bundle_manifest(
         "program_id": "AIML-LONG-LIVED-LANDING-V2",
         "component": "engine_scanner",
         **digests,
+        "application_source_head": verified_application["source_head"],
         "launch_tree_digest": tree_digest,
         "target_platform": target_platform,
     }
@@ -818,6 +1215,7 @@ def build_launch_bundle_manifest(
         "launch_bundle_digest": manifest["self_digest"],
         "launch_leaf_name": _digest_leaf(manifest["self_digest"]),
         "launch_tree_digest": tree_digest,
+        "verified_application_bundle_digest": verified_application["self_digest"],
         "manifest": manifest,
         "production_authority_flags": {
             "nine_authorities_false": True,

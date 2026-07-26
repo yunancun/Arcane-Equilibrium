@@ -1601,6 +1601,39 @@ def _w2c_fixtures() -> dict:
         "build_tool_versions": [{"tool": "python3", "version": "3.12.3"}],
         "interpreter_target": "bin/python3",
         "native_libraries": [{"path": "lib/libssl.so.3", "sha256": _W2C_D}],
+        # P1-2:loader 閉包(樹內 ELF 的 PT_INTERP/DT_NEEDED)是 manifest 的必填面。
+        "loader_closure": {
+            "derivation": "in_tree_elf_pt_interp_dt_needed_v1",
+            "binaries": [
+                {
+                    "path": "bin/python3",
+                    "format": "elf64",
+                    "machine": 62,
+                    "interpreter": "/opt/arcane-equilibrium/aiml/launches/x/lib/libssl.so.3",
+                    "soname": None,
+                    "needed": ["libssl.so.3"],
+                    "rpath": [],
+                    "runpath": ["$ORIGIN/../lib"],
+                },
+                {
+                    "path": "lib/libssl.so.3",
+                    "format": "elf64",
+                    "machine": 62,
+                    "interpreter": None,
+                    "soname": "libssl.so.3",
+                    "needed": [],
+                    "rpath": [],
+                    "runpath": [],
+                },
+            ],
+            "external_dependencies": [],
+            "undecidable_host_facts": [
+                "host_loader_resolved_realpaths",
+                "inode_device_identity",
+                "distribution_package_identity",
+                "ldconfig_cache_and_ld_search_state",
+            ],
+        },
         "entries": [
             {"path": "bin", "type": "dir", "mode": "0755", "sha256": None},
             {"path": "bin/python3", "type": "file", "mode": "0555", "sha256": _W2C_D},
@@ -1616,6 +1649,8 @@ def _w2c_fixtures() -> dict:
         "runtime_content_digest": _W2C_D,
         "base_runtime_tree_digest": "sha256:" + "d" * 64,
         "application_bundle_digest": "sha256:" + "e" * 64,
+        # P1-1:launch 身分綁的是「已驗證的那個包」的 source head(非任意 digest 宣告)。
+        "application_source_head": "a" * 40,
         "launcher_config_digest": "sha256:" + "f" * 64,
         "launch_tree_digest": "sha256:" + "1" * 64,
         "target_platform": "x86_64-unknown-linux-gnu",
@@ -1666,3 +1701,188 @@ def test_w2c_base_manifest_canonical_sortedness_and_type_coherence() -> None:
     orphan["entries"] = [e for e in orphan["entries"] if e["path"] != "bin/python3"]
     orphan["self_digest"] = artifact_self_digest(orphan)
     assert any("interpreter_target" in e for e in validate_aiml_artifact(orphan))
+
+
+# ── S2.4 · WP4 · W2(review P1-5 / P1-6)owned-path commit 綁定 + builder 活探針 ──
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _git(cwd: Path, *args: str) -> str:
+    return _subprocess.run(
+        ["git", "-C", str(cwd), *args], capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+
+def _owned_scope_repo(tmp_path: Path, paths: tuple[str, ...]) -> Path:
+    """把一組 owned path 複製進 throwaway repo 並提交(投影的可控實驗場)。"""
+    import shutil
+
+    repo = tmp_path / "owned-scope-repo"
+    repo.mkdir()
+    for rel in paths:
+        source = _REPO_ROOT / rel
+        if not source.is_file():
+            continue
+        destination = repo / rel
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, destination)
+    for args in (
+        ("init", "-q"),
+        ("config", "user.email", "w2@test"),
+        ("config", "user.name", "w2"),
+        ("add", "-A"),
+        ("commit", "-q", "-m", "owned scope snapshot"),
+    ):
+        _git(repo, *args)
+    return repo
+
+
+@pytest.mark.parametrize(
+    "projection",
+    ("w0_owned_path_diff_digest", "w1_owned_path_diff_digest", "w2_owned_path_diff_digest"),
+)
+def test_owned_path_projection_binds_commit_blobs_not_the_dirty_worktree(
+    tmp_path: Path, projection: str
+) -> None:
+    """P1-5:owned 檔有 staged/unstaged 改動時,投影必須仍是**被綁定 commit** 的函數。
+
+    修前:投影 hash 工作樹位元組,而 receipt 記的是未變的 HEAD;驗證端 hash 同一棵髒樹
+    於是照樣 PASS,可是該 commit 的乾淨 checkout 永遠重現不出那份 receipt。
+    修後:投影只讀 commit blob,髒工作樹不改變任何 digest,而髒這件事另有可見出口。
+    """
+    owned = {
+        "w0_owned_path_diff_digest": _w0._W0_OWNED_PATHS,
+        "w1_owned_path_diff_digest": _w0._W1_OWNED_PATHS,
+        "w2_owned_path_diff_digest": _w0._W2_OWNED_PATHS,
+    }[projection]
+    repo = _owned_scope_repo(tmp_path, tuple(owned))
+    derive = getattr(_w0, projection)
+    clean = derive(repo)
+    victim = next(rel for rel in sorted(owned) if (repo / rel).is_file())
+    original = (repo / victim).read_bytes()
+    (repo / victim).write_bytes(original + b"\n# smuggled worktree byte\n")
+    assert (repo / victim).read_bytes() != original  # 工作樹確實已髒
+    assert derive(repo) == clean  # 投影不隨髒工作樹改變(綁 commit blob)
+    # 但「髒」本身必須看得見,而不是靜默
+    delta = _w0.owned_scope_worktree_delta(repo, tuple(owned))
+    assert victim in delta
+    # 真的把它提交進去 → 這是**新的** commit,投影必須改變(綁定仍然有牙)
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "commit the change")
+    assert derive(repo) != clean
+    assert _w0.owned_scope_worktree_delta(repo, tuple(owned)) == []
+    # 舊 commit 仍可重現原值(投影是 commit 的函數)
+    previous = _git(repo, "rev-parse", "HEAD~1")
+    assert derive(repo, source_head=previous) == clean
+
+
+def test_owned_path_projection_is_fail_closed_without_a_resolvable_commit(
+    tmp_path: Path,
+) -> None:
+    """P1-5:不是 git checkout / commit 不可解析 → 全數 None(投影變值 → 導出失敗)。"""
+    projection = _w0.owned_path_blob_projection(tmp_path, ("a.py", "b.py"))
+    assert projection == {"a.py": None, "b.py": None}
+    assert _w0.owned_scope_worktree_delta(tmp_path, ("a.py",)) is None
+
+
+def _w2_projection_reasons(monkeypatch, **broken) -> list[str]:
+    """以注入的壞 builder 再導出 W2 結構層,回傳 typed reasons。"""
+    import agent_governance_s2_4_install as _install
+    import agent_governance_s2_4_render as _render
+
+    # 注意:install 模組**逐名 re-export** render 的 builder,故注入點必須逐個指名到
+    # 探針真正呼叫的那個模組物件(patch 錯模組 = 測試靜默失效)。
+    owners = {
+        "build_application_bundle_manifest": _install,
+        "build_base_runtime_tree_manifest": _render,
+        "build_launch_bundle_manifest": _render,
+    }
+    for name, replacement in broken.items():
+        monkeypatch.setattr(owners[name], name, replacement)
+    receipt = {
+        "wave": "W2",
+        "predecessor_wave_receipt_digest": "sha256:" + "0" * 64,
+        "owned_path_manifest_digest": canonical_digest(sorted(_w0._W2_OWNED_PATHS)),
+        "owned_path_diff_digest": _w0.w2_owned_path_diff_digest(),
+        "exported_abi_digest": "sha256:" + "0" * 64,
+    }
+    return _w0.w2_structural_errors(receipt)
+
+
+def test_w2_exit_requires_live_probes_of_all_three_bundle_builders(monkeypatch) -> None:
+    """P1-6:三個 builder 必須被**執行**;硬編字串 ABI 讓刪掉它們仍能重發 PASS。
+
+    修前:W2 ABI 只以字串代表 base/launch builder、完全漏掉 application-bundle builder,
+    而 w2_structural_errors 一個都沒跑過——把它們改壞只會改變 owned-byte digest,重發一份
+    新 receipt 之後照樣 PASS。
+    """
+    helpers = _REPO_ROOT / "helper_scripts/maintenance_scripts"
+    if str(helpers) not in sys.path:
+        sys.path.insert(0, str(helpers))
+
+    def _deleted(*args, **kwargs):
+        raise AttributeError("builder deleted")
+
+    for name, needle in (
+        ("build_base_runtime_tree_manifest", "base runtime tree builder"),
+        ("build_application_bundle_manifest", "application bundle builder"),
+        ("build_launch_bundle_manifest", "launch bundle builder"),
+    ):
+        with monkeypatch.context() as patched:
+            reasons = _w2_projection_reasons(patched, **{name: _deleted})
+        assert any(needle in reason for reason in reasons), (name, reasons)
+
+
+def test_w2_exit_requires_the_launch_builder_to_verify_application_bytes(
+    monkeypatch,
+) -> None:
+    """P1-6/P1-1:launch builder 若「照單全收」任意 application digest,W2 必須拒絕導出。"""
+    import agent_governance_s2_4_render as _render
+
+    real_builder = _render.build_launch_bundle_manifest
+
+    def _credulous(launch_tree_root, **kwargs):
+        """模擬修前行為:不驗物化的包,語法正確的 digest 一律收下。"""
+        supplied = kwargs["application_bundle_digest"]
+        if not supplied.endswith("6" * 8):  # 真 digest → 照常建置
+            return real_builder(launch_tree_root, **kwargs)
+        return {  # 無關 digest → 修前照樣「BUILT」
+            "status": "BUILT",
+            "launch_bundle_digest": "sha256:" + "7" * 64,
+            "launch_leaf_name": "7" * 64,
+            "launch_tree_digest": "sha256:" + "8" * 64,
+            "verified_application_bundle_digest": supplied,
+            "manifest": {
+                "application_bundle_digest": supplied,
+                "base_runtime_tree_digest": kwargs["base_runtime_tree_digest"],
+            },
+        }
+
+    with monkeypatch.context() as patched:
+        reasons = _w2_projection_reasons(patched, build_launch_bundle_manifest=_credulous)
+    assert any(
+        "accepts an unrelated application_bundle_digest" in reason for reason in reasons
+    ), reasons
+
+
+def test_w2_exported_abi_carries_the_three_builder_probe_identities() -> None:
+    """P1-6:探針結果(狀態 + digest)真的進了 exported-ABI 投影(receipt 可見)。"""
+    projection = _w0.w2_exported_abi_projection()
+    assert projection["base_runtime_tree_status"] == "BUILT"
+    assert projection["application_bundle_status"] == "BUILT"
+    assert projection["launch_bundle_status"] == "BUILT"
+    assert projection["launch_binds_probed_application"] is True
+    assert projection["launch_foreign_application_digest_status"] == "LAUNCH_BUNDLE_INVALID"
+    for field in (
+        "base_runtime_tree_probe_digest",
+        "application_bundle_probe_digest",
+        "launch_bundle_probe_digest",
+    ):
+        assert projection[field].startswith("sha256:"), field
+    assert projection["application_bundle_builder"].endswith(
+        "build_application_bundle_manifest"
+    )
+    # P1-4:連線期錯誤分類的 locale 契約亦折入(設定漂移 → receipt 面可見)。
+    assert projection["connect_error_locale_contract_digest"].startswith("sha256:")
+    # P1-5 可見性:owned scope 的工作樹差異是投影的一部分(髒發射不再是靜默事實)。
+    assert isinstance(projection["owned_scope_worktree_delta"], list)
