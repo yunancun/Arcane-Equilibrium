@@ -43,10 +43,15 @@ for _candidate in (HELPER_DIR, ML_TRAINING_DIR, PROGRAM_CODE_DIR):
         sys.path.insert(0, str(_candidate))
 
 import aiml_gate_receipt_validator as central_validator  # noqa: E402
+import agent_governance_s2_4_component as _component  # noqa: E402
 import agent_governance_s2_4_render as _render  # noqa: E402
 
 canonical_digest = central_validator.canonical_digest
 artifact_self_digest = central_validator.artifact_self_digest
+# §7/§10.5 #15:driver 例外紅字化與可序列化面秘密掃描的共用來源(component 葉)。
+redact_driver_error = _component.redact_driver_error
+scan_serializable_surface = _component.scan_serializable_surface
+derive_recorded_evidence_class = _component.derive_recorded_evidence_class
 
 # ── §8.3 / §9.1 code-owned 契約常量 ──────────────────────────────────────────────
 PROBE_SCOPES = ("PREPARE_SANDBOX", "INSTALLED_UNIT")
@@ -637,7 +642,7 @@ def _verdict(
     rollback: dict[str, Any] | None = None,
     postcheck: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    verdict = {
         "schema_version": "s2_4_capability_probe_run_verdict_v1_informal",
         "status": status,
         "reasons": list(reasons),
@@ -653,6 +658,29 @@ def _verdict(
         "rollback": rollback,
         "postcheck": postcheck,
         "production_authority_flags": dict(_ALL_FALSE_PRODUCTION_FLAGS),
+        "secret_material_scanned": True,
+    }
+    # §10.5 #15:probe 的唯一出境面。本 route 沒有秘密 ingress,但掃描仍是無條件的。
+    leak_reasons = scan_serializable_surface(verdict)
+    if not leak_reasons:
+        return verdict
+    return {
+        **{key: None for key in ("effect_receipt", "attestation", "journal", "rollback",
+                                 "postcheck")},
+        "schema_version": "s2_4_capability_probe_run_verdict_v1_informal",
+        "status": PROBE_STATUS_RECOVERY_REQUIRED,
+        "reasons": leak_reasons + [
+            "the constructed capability-probe verdict carried secret material; every artifact "
+            "and reason was dropped rather than returned (§7)"
+        ],
+        "probe_id": probe_id,
+        "probe_scope": probe_scope,
+        "derived_unit_name": derived_unit_name,
+        "mutation_performed": bool(mutation_performed),
+        "driver_engaged": bool(driver_engaged),
+        "blocks_next_phase": True,
+        "production_authority_flags": dict(_ALL_FALSE_PRODUCTION_FLAGS),
+        "secret_material_scanned": True,
     }
 
 
@@ -974,7 +1002,7 @@ def _run_probe_with_driver(
         )
     except Exception as error:  # noqa: BLE001 - 任何 driver/journal 逸出都 fail-closed
         return _abort_outcome(
-            f"capability probe interrupted: {error}",
+            f"capability probe interrupted: {redact_driver_error(error)}",
             expired=False,
             committed=committed,
             mutation_performed=mutation_performed,
@@ -995,7 +1023,7 @@ def _run_probe_with_driver(
         _journal("COMPENSATING", pre_cleanup_state, pre_cleanup_state)
         _journal("COMPENSATED", pre_cleanup_state, absent_state)
     except Exception as error:  # noqa: BLE001
-        cleanup["reasons"].append(f"cleanup journal transition failed: {error}")
+        cleanup["reasons"].append(f"cleanup journal transition failed: {redact_driver_error(error)}")
         cleanup["cleaned"] = False
     rollback = _build_rollback(
         probe_id=probe_id, unit_name=unit_name, cleanup=cleanup,
@@ -1030,7 +1058,7 @@ def _run_probe_with_driver(
     except Exception as error:  # noqa: BLE001
         return _verdict(
             PROBE_STATUS_RECOVERY_REQUIRED,
-            [f"terminal journal transition failed: {error}"],
+            [f"terminal journal transition failed: {redact_driver_error(error)}"],
             probe_id=probe_id, probe_scope=scope, derived_unit_name=unit_name,
             mutation_performed=mutation_performed, driver_engaged=True,
             rollback=rollback, postcheck=postcheck,
@@ -1044,7 +1072,8 @@ def _run_probe_with_driver(
     attestation = build_network_sandbox_capability_attestation(
         scope=scope, probe_id=probe_id, probe_core_digest=core_digest,
         transient_unit_property_digest=core["transient_unit_property_digest"],
-        egress=egress, evidence_class=str(getattr(driver, "evidence_class", "STRUCTURAL_ONLY")),
+        egress=egress,
+        evidence_class=derive_recorded_evidence_class(driver)["recorded_evidence_class"],
         observed_at=trusted_time,
     )
     capability_ok = bool(egress.get("network_isolation_verified")) is True
@@ -1053,7 +1082,7 @@ def _run_probe_with_driver(
         authorization=authorization, replay_ledger=replay_ledger, unit_name=unit_name,
         lifecycle=lifecycle, journal=journal, postcheck=postcheck, rollback=rollback,
         attestation=attestation, trusted_time=trusted_time, now_dt=now_dt,
-        evidence_class=str(getattr(driver, "evidence_class", "STRUCTURAL_ONLY")),
+        evidence_class=derive_recorded_evidence_class(driver)["recorded_evidence_class"],
         terminal_status=(
             PROBE_STATUS_TERMINAL_CLEAN if capability_ok else PROBE_STATUS_TERMINAL_FAILED
         ),
@@ -1168,7 +1197,7 @@ def _run_cleanup(
         else:
             residue = {key: bool(swept.get(key)) for key in residue}
     except Exception as error:  # noqa: BLE001 - 清理失敗即 ambiguous cleanup
-        reasons.append(f"capability probe cleanup did not complete: {error}")
+        reasons.append(f"capability probe cleanup did not complete: {redact_driver_error(error)}")
     missing = sorted(key for key, value in residue.items() if value is not True)
     if missing:
         reasons.append(f"capability probe residue survives: {missing}")
@@ -1226,7 +1255,7 @@ def _build_postcheck(
             unit_name=unit_name, probe_id=probe_id, probe_core_digest=core_digest
         )
     except Exception as error:  # noqa: BLE001
-        return None, [f"independent cleanup postcheck failed: {error}"]
+        return None, [f"independent cleanup postcheck failed: {redact_driver_error(error)}"]
     if not isinstance(observed, dict):
         return None, ["independent cleanup postcheck did not return an object"]
     verifier_node = str(observed.get("verifier_node", ""))
@@ -1465,7 +1494,7 @@ def _abort_outcome(
         driver.journal_transition(entry=entry)
         entries.append(entry)
     except Exception as error:  # noqa: BLE001
-        cleanup["reasons"].append(f"compensation journal transition failed: {error}")
+        cleanup["reasons"].append(f"compensation journal transition failed: {redact_driver_error(error)}")
     reasons = [reason]
     if expired:
         reasons.append(

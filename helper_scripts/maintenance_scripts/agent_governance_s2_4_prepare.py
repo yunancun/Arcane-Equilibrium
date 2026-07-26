@@ -29,6 +29,7 @@ running_attested 恆 false;帶真 driver 的 ``PREPARED`` 也只是 receipt 證�
 """
 from __future__ import annotations
 
+import posixpath
 import re
 import sys
 from datetime import datetime, timedelta, timezone
@@ -44,10 +45,15 @@ for _candidate in (HELPER_DIR, ML_TRAINING_DIR, PROGRAM_CODE_DIR):
         sys.path.insert(0, str(_candidate))
 
 import aiml_gate_receipt_validator as central_validator  # noqa: E402
+import agent_governance_s2_4_component as _component  # noqa: E402
 import agent_governance_s2_4_probe as _probe  # noqa: E402
 
 canonical_digest = central_validator.canonical_digest
 artifact_self_digest = central_validator.artifact_self_digest
+# §7/§10.5 #15:driver 例外紅字化與可序列化面秘密掃描的共用來源(component 葉)。
+redact_driver_error = _component.redact_driver_error
+scan_serializable_surface = _component.scan_serializable_surface
+derive_recorded_evidence_class = _component.derive_recorded_evidence_class
 
 # ── §5.1 / §9.1 code-owned 契約常量 ──────────────────────────────────────────────
 PREPARE_ROUTE_CLASS = "s2_4_prepare_intent"
@@ -168,18 +174,69 @@ def prepare_journal_path(prepare_id: Any) -> str:
     return f"{PREPARE_STAGING_PARENT}/{prepare_id}.prepare.journal.json"
 
 
+def normalize_prepare_path(entry: Any) -> str | None:
+    """把 driver 回報的路徑正規化成絕對 POSIX 形;不可接受的形狀回 ``None``。
+
+    ``startswith`` 的文字比對可被 ``<staging_root>/../../../../opt/...`` 整個繞過——它同時
+    「以 staging_root 開頭」且「不以任何 deny root 開頭」,兩道閘都放行(W3 review E3 P2-3)。
+    故本函式在比對之前正規化,並把**任何** ``..`` 節段直接判為不可接受(不試圖解析它:
+    符號連結存在時 ``normpath`` 的語意解析並不等於核心的真實解析)。
+    """
+
+    if not isinstance(entry, (str, Path)):
+        return None
+    text = str(entry)
+    if not text or "\x00" in text:
+        return None
+    if not text.startswith("/"):
+        return None
+    segments = text.split("/")
+    if any(segment == ".." for segment in segments):
+        return None
+    normalized = posixpath.normpath(text)
+    return normalized if normalized.startswith("/") else None
+
+
 def prepare_publication_boundary_reasons(paths: Any) -> list[str]:
     """任一 driver 回報的寫入路徑必須落在 staging root 之下,且不得碰 deny 根。"""
 
     reasons: list[str] = []
     for entry in list(paths or []):
-        text = str(entry)
+        normalized = normalize_prepare_path(entry)
+        if normalized is None:
+            reasons.append(
+                f"PREPARE reported a path that cannot be normalized to a traversal-free "
+                f"absolute path: {entry!r} (a '..' segment is rejected outright)"
+            )
+            continue
         for deny in PREPARE_PUBLICATION_DENY_ROOTS:
-            if text == deny or text.startswith(deny + "/"):
+            if normalized == deny or normalized.startswith(deny + "/"):
                 reasons.append(
-                    f"PREPARE wrote below the forbidden publication root {deny}: {text} "
+                    f"PREPARE wrote below the forbidden publication root {deny}: {normalized} "
                     "(PREPARE cannot publish into /opt, /etc, credstore or persistent units)"
                 )
+    return reasons
+
+
+def prepare_containment_reasons(paths: Any, staging_root: str) -> list[str]:
+    """所有寫入路徑必須(正規化後)落在**本 task 的** staging root 之下。"""
+
+    reasons: list[str] = []
+    root = normalize_prepare_path(staging_root)
+    if root is None:
+        return ["the derived staging root is not a traversal-free absolute path"]
+    for entry in list(paths or []):
+        normalized = normalize_prepare_path(entry)
+        if normalized is None:
+            reasons.append(
+                f"PREPARE reported a path that cannot be normalized to a traversal-free "
+                f"absolute path: {entry!r}"
+            )
+            continue
+        if not (normalized == root or normalized.startswith(root + "/")):
+            reasons.append(
+                f"PREPARE wrote outside its task-owned staging root: {normalized}"
+            )
     return reasons
 
 
@@ -569,7 +626,7 @@ def _verdict(
     rollback: dict[str, Any] | None = None,
     postcheck: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    verdict = {
         "schema_version": "s2_4_prepare_run_verdict_v1_informal",
         "status": status,
         "reasons": list(reasons),
@@ -584,6 +641,29 @@ def _verdict(
         "rollback": rollback,
         "postcheck": postcheck,
         "production_authority_flags": dict(_ALL_FALSE_PRODUCTION_FLAGS),
+        "secret_material_scanned": True,
+    }
+    # §10.5 #15:PREPARE 的唯一出境面。本 route 沒有秘密 ingress,但掃描仍是無條件的——
+    # 任一 driver 回報值帶著進程內活哨兵的秘密即整份丟棄,fail-closed 回 RECOVERY_REQUIRED。
+    leak_reasons = scan_serializable_surface(verdict)
+    if not leak_reasons:
+        return verdict
+    return {
+        **{key: None for key in ("prepared_bundle", "effect_receipt", "journal", "rollback",
+                                 "postcheck")},
+        "schema_version": "s2_4_prepare_run_verdict_v1_informal",
+        "status": PREPARE_STATUS_RECOVERY_REQUIRED,
+        "reasons": leak_reasons + [
+            "the constructed PREPARE verdict carried secret material; every artifact and reason "
+            "was dropped rather than returned (§7)"
+        ],
+        "prepare_id": prepare_id,
+        "staging_root": staging_root,
+        "mutation_performed": bool(mutation_performed),
+        "driver_engaged": bool(driver_engaged),
+        "blocks_apply": True,
+        "production_authority_flags": dict(_ALL_FALSE_PRODUCTION_FLAGS),
+        "secret_material_scanned": True,
     }
 
 
@@ -851,11 +931,9 @@ def _run_prepare_with_driver(
             raise _PrepareAbort(PREPARE_STATUS_FAILED, "; ".join(build_reasons))
         native_proof = str((built or {}).get("native_import_proof_digest") or "")
 
-        boundary = prepare_publication_boundary_reasons(written_paths) + [
-            f"PREPARE wrote outside its task-owned staging root: {path}"
-            for path in written_paths
-            if not (str(path) == staging_root or str(path).startswith(staging_root + "/"))
-        ]
+        boundary = prepare_publication_boundary_reasons(
+            written_paths
+        ) + prepare_containment_reasons(written_paths, staging_root)
         if boundary:
             raise _PrepareAbort(PREPARE_STATUS_FAILED, "; ".join(boundary))
 
@@ -879,7 +957,7 @@ def _run_prepare_with_driver(
         )
     except Exception as error:  # noqa: BLE001 - 任何 driver/journal 逸出都 fail-closed
         return _abort_outcome(
-            PREPARE_STATUS_RECOVERY_REQUIRED, f"PREPARE interrupted: {error}",
+            PREPARE_STATUS_RECOVERY_REQUIRED, f"PREPARE interrupted: {redact_driver_error(error)}",
             committed=committed, mutation_performed=mutation_performed, driver=driver,
             prepare_id=prepare_id, staging_root=staging_root, core_digest=core_digest,
             entries=entries, clock=clock, sandbox_digest=sandbox_digest,
@@ -898,7 +976,7 @@ def _run_prepare_with_driver(
         ))
     except Exception as error:  # noqa: BLE001
         return _verdict(
-            PREPARE_STATUS_RECOVERY_REQUIRED, [f"terminal journal transition failed: {error}"],
+            PREPARE_STATUS_RECOVERY_REQUIRED, [f"terminal journal transition failed: {redact_driver_error(error)}"],
             prepare_id=prepare_id, staging_root=staging_root,
             mutation_performed=mutation_performed, driver_engaged=True,
         )
@@ -929,7 +1007,7 @@ def _run_prepare_with_driver(
         replay_ledger=replay_ledger, bundle=bundle, journal=journal, postcheck=postcheck,
         rollback=rollback, staging_root=staging_root, frozen=frozen,
         trusted_time=trusted_time, now_dt=now_dt,
-        evidence_class=str(getattr(driver, "evidence_class", "STRUCTURAL_ONLY")),
+        evidence_class=derive_recorded_evidence_class(driver)["recorded_evidence_class"],
         terminal_status="PREPARED",
     )
     central_errors = (
@@ -975,8 +1053,16 @@ def _staging_parent_reasons(parent: Any, core: dict[str, Any]) -> list[str]:
         reasons.append("staging parent is not root-owned")
     if str(parent.get("mode")) != "0700":
         reasons.append("staging parent mode is not 0700")
-    if int(parent.get("link_count", 0)) != 2:
-        reasons.append("staging parent link count is not the expected directory link count")
+    # link_count 只能證明「這是一個目錄」(自身 + ``.`` ≥ 2);每一個既存的
+    # ``prepared/<prepare_id>/`` 子目錄都會再 +1,而每一次成功的 PREPARE 依設計都會留下
+    # 一個。舊的 ``!= 2`` 因此要求 parent 底下**零**子目錄——任何主機上的第二次 PREPARE
+    # 都必然永久失敗(W3 review E3 P2-5)。真正的反替換保證來自 device/inode 綁定 +
+    # 非 symlink + root-owned + 0700 四條,不在 link 計數上。
+    if int(parent.get("link_count", 0)) < 2:
+        reasons.append(
+            "staging parent link count is below the minimum for a directory "
+            "(the observation is not a directory)"
+        )
     return reasons
 
 
@@ -1179,7 +1265,7 @@ def _build_postcheck(
             staging_root=staging_root, prepare_id=prepare_id, prepare_core_digest=core_digest
         )
     except Exception as error:  # noqa: BLE001
-        return None, [f"independent prepare residue postcheck failed: {error}"]
+        return None, [f"independent prepare residue postcheck failed: {redact_driver_error(error)}"]
     if not isinstance(observed, dict):
         return None, ["independent prepare residue postcheck did not return an object"]
     verifier_node = str(observed.get("verifier_node", ""))
@@ -1373,7 +1459,7 @@ def _abort_outcome(
         driver.journal_transition(entry=entry)
         entries.append(entry)
     except Exception as error:  # noqa: BLE001
-        reason = f"{reason}; compensation journal transition failed: {error}"
+        reason = f"{reason}; compensation journal transition failed: {redact_driver_error(error)}"
     journal = _build_journal(
         prepare_id=prepare_id, staging_root=staging_root, entries=entries, terminal=False,
         sandbox_contract_digest=sandbox_digest,
@@ -1494,6 +1580,27 @@ def prepare_abi_projection() -> dict[str, Any]:
         "prepare_raw_ingress_keys": list(PREPARE_RAW_INGRESS_KEYS),
         "prepared_bundle_consumer_predicate": (
             "agent_governance_s2_4_prepare.derive_prepared_bundle_status"
+        ),
+        # §10.5 #33:路徑圍堵在比對之前正規化,``..`` 節段一律外拒(活再導出)。
+        "path_normalizer": "agent_governance_s2_4_prepare.normalize_prepare_path",
+        "traversal_segment_rejected": normalize_prepare_path(
+            PREPARE_STAGING_PARENT + "/x/../../../../opt/arcane-equilibrium/aiml/runtimes/z"
+        ) is None,
+        "traversal_escape_reason_count": len(
+            prepare_publication_boundary_reasons([
+                PREPARE_STAGING_PARENT + "/x/../../../../opt/arcane-equilibrium/aiml/runtimes/z"
+            ])
+        ),
+        "containment_predicate": "agent_governance_s2_4_prepare.prepare_containment_reasons",
+        # §5.2:parent 的 link-count 契約只證「是目錄」;每一次成功 PREPARE 都會留下一個
+        # ``prepared/<prepare_id>/`` 子目錄,故第二次 PREPARE 必須可通過。
+        "staging_parent_minimum_link_count": 2,
+        "second_prepare_on_the_same_host_is_satisfiable": not _staging_parent_reasons(
+            {
+                "device": 1, "inode": 2, "is_symlink": False, "owner": "root",
+                "mode": "0700", "link_count": 3,
+            },
+            {"staging_root_device_inode": {"device": 1, "inode": 2}},
         ),
         "schema_ids": [
             "s2_4_prepare_core_v1",

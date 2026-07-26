@@ -182,7 +182,8 @@ def _replay_ledger(consumed=()):
 class _FakeProbeDriver:
     """注入式測試 driver:只記錄固定操作,絕不觸碰任何主機(W3b 才有真 driver)。"""
 
-    evidence_class = "PLATFORM_ATTESTED"
+    # in-memory fixture 絕不冒充平台背書(W3 review E2 P1-1 / E3 P2-6)。
+    evidence_class = "STRUCTURAL_ONLY"
 
     def __init__(
         self,

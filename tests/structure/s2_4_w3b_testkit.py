@@ -151,7 +151,8 @@ def replay_ledger(consumed=()) -> dict:
 
 # ── 終端 PREPARE_SANDBOX probe 證據(以 W3a 葉 + 注入 driver 真跑一次)──────────
 class _ProbeDriver:
-    evidence_class = "PLATFORM_ATTESTED"
+    # in-memory fixture 絕不冒充平台背書(W3 review E2 P1-1 / E3 P2-6)。
+    evidence_class = "STRUCTURAL_ONLY"
 
     def __init__(self, property_digest: str) -> None:
         self.property_digest = property_digest
@@ -310,3 +311,82 @@ def terminal_probe_evidence(private_key: Path, *, scope: str = "PREPARE_SANDBOX"
             "effect_receipt": verdict["effect_receipt"],
         }
     }
+
+
+# ── W3b APPLY row 的共用測試腳手架(依 §10.1.1 的 2000 行治理自 apply 測試檔下沉)──────
+PLAN_DIGEST = "sha256:" + "1" * 64
+PRE_STATE = "sha256:" + "2" * 64
+AGGREGATE_AUTH_ID = "sha256:" + "4" * 64
+PG_AUTH_ID = "sha256:" + "5" * 64
+UID = 947
+GID = 947
+
+
+def signed_authorizations(tmp_path, monkeypatch) -> dict:
+    """丟棄式 operator 信任根 + aggregate/pg-migration 兩張真簽章 permit。"""
+
+    private_key, public_key, fingerprint = mint_key(tmp_path)
+    install_pinned_key(monkeypatch, public_key, fingerprint)
+    return {
+        "private_key": private_key,
+        "apply_aggregate": authorization(
+            private_key, profile_key="apply_aggregate", authorization_id=AGGREGATE_AUTH_ID
+        ),
+        "pg_migration": authorization(
+            private_key, profile_key="pg_migration", authorization_id=PG_AUTH_ID
+        ),
+    }
+
+
+def component_intent(component_effect_class: str, required_intent_fields: dict) -> dict:
+    import agent_governance_s2_4_apply as apply_mod
+
+    return apply_mod.build_component_effect_intent(
+        component_effect_class=component_effect_class,
+        install_plan_digest=PLAN_DIGEST, pre_state_digest=PRE_STATE,
+        required_intent_fields=required_intent_fields, expires_at=EXPIRES,
+    )
+
+
+def common_apply_kwargs(signed, *, pg: bool = False) -> dict:
+    auth_set = {"apply_aggregate": signed["apply_aggregate"]}
+    if pg:
+        auth_set["pg_migration"] = signed["pg_migration"]
+    return {
+        "authorization_set": auth_set,
+        "replay_ledger": replay_ledger(),
+        "now": NOW,
+        "clock": frozen_clock(),
+    }
+
+
+def owned_evidence(**extra) -> dict:
+    """digest 形狀完整的 ownership 綁定(裸物件一律不成立)。"""
+
+    return {
+        "s2_4_receipt_digest": "sha256:" + "a" * 64,
+        "journal_digest": "sha256:" + "b" * 64,
+        **extra,
+    }
+
+
+class PostcheckMixin:
+    """所有 fake driver 共用的相異 verifier postcheck(applier 不得自證)。"""
+
+    postcheck_ok = True
+
+    def independent_postcheck(self, *, component_effect_class, install_plan_digest, applier_node):
+        self.calls.append("independent_postcheck")
+        return {
+            "verifier_node": "s2-4-independent-verifier",
+            "observed_subject_digest": "sha256:" + "8" * 64,
+            "applied_state_verified": self.postcheck_ok,
+            "pre_state_lineage_verified": self.postcheck_ok,
+            "verifier_capture_digest": CAPTURE_DIGEST,
+        }
+
+    def trusted_host_time(self):
+        return NOW
+
+    def journal_transition(self, *, entry):
+        self.calls.append("journal:" + entry["state"])

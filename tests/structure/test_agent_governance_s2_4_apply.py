@@ -8,9 +8,8 @@
   跨 class 的 intent 替換在任何主機接觸之前即拒;
 - §10.5 #31:host identity effect 只能分類為 ``HOST_IDENTITY_INSTALL``,且**只有 PG permit**
   時 typed 拒絕並明文點名該縫;
-- §10.5 #37:service-account 屬性漂移(uid/gid/shell/home/locked/supplementary/expiry)與目錄
-  owner/mode 漂移在第一次變更之前失敗;
 - §5.3:exact desired + 無 ownership → ``PREEXISTING_UNOWNED_STATE``(絕不收養);
+  ``HOST_IDENTITY_INSTALL`` row 依 §10.1.1 拆到 test_agent_governance_s2_4_host_identity;
 - §7/§10.5 #26/#32:兩把 sealed handle、封閉 DSN 八鍵、加密 blob 指紋、A→B→A rotation 的
   exact 補償、以及任何序列化面的秘密掃描;
 - §8.1:``/opt`` 三根的 target 路徑由內容 digest 導出(caller 無從遞交);樹 mode/owner/ACL/
@@ -21,6 +20,7 @@
 """
 from __future__ import annotations
 
+import json as json_module
 import sys
 from copy import deepcopy
 from pathlib import Path
@@ -41,336 +41,43 @@ import agent_governance_s2_4_prepare as prepare  # noqa: E402
 import aiml_gate_receipt_validator as validator  # noqa: E402
 import s2_4_w3b_testkit as kit  # noqa: E402
 
-_PLAN_DIGEST = "sha256:" + "1" * 64
-_PRE_STATE = "sha256:" + "2" * 64
-_AGGREGATE_AUTH_ID = "sha256:" + "4" * 64
-_PG_AUTH_ID = "sha256:" + "5" * 64
-_UID = 947
-_GID = 947
+_DEFAULT = object()
+_PLAN_DIGEST = kit.PLAN_DIGEST
+_PRE_STATE = kit.PRE_STATE
+_AGGREGATE_AUTH_ID = kit.AGGREGATE_AUTH_ID
+_PG_AUTH_ID = kit.PG_AUTH_ID
+_UID = kit.UID
+_GID = kit.GID
 _CAPTURE = kit.CAPTURE_DIGEST
 _BLOB_DIGEST = "sha256:" + "d" * 64
 _BASE_TREE = "sha256:" + "c" * 64
 _APP_BUNDLE = "sha256:" + "d" * 64
 _LAUNCH_BUNDLE = "sha256:" + "e" * 64
+_PostcheckMixin = kit.PostcheckMixin
+_intent = kit.component_intent
+_common = kit.common_apply_kwargs
+_owned = kit.owned_evidence
 
 
-# ── 共用 fixtures ───────────────────────────────────────────────────────────────
 @pytest.fixture()
 def signed(tmp_path, monkeypatch):
-    private_key, public_key, fingerprint = kit.mint_key(tmp_path)
-    kit.install_pinned_key(monkeypatch, public_key, fingerprint)
-    return {
-        "private_key": private_key,
-        "apply_aggregate": kit.authorization(
-            private_key, profile_key="apply_aggregate", authorization_id=_AGGREGATE_AUTH_ID
-        ),
-        "pg_migration": kit.authorization(
-            private_key, profile_key="pg_migration", authorization_id=_PG_AUTH_ID
-        ),
-    }
+    return kit.signed_authorizations(tmp_path, monkeypatch)
 
 
-def _intent(component_effect_class: str, required_intent_fields: dict) -> dict:
-    return apply_mod.build_component_effect_intent(
-        component_effect_class=component_effect_class,
-        install_plan_digest=_PLAN_DIGEST, pre_state_digest=_PRE_STATE,
-        required_intent_fields=required_intent_fields, expires_at=kit.EXPIRES,
-    )
 
-
-def _common(signed, *, pg: bool = False) -> dict:
-    auth_set = {"apply_aggregate": signed["apply_aggregate"]}
-    if pg:
-        auth_set["pg_migration"] = signed["pg_migration"]
-    return {
-        "authorization_set": auth_set,
-        "replay_ledger": kit.replay_ledger(),
-        "now": kit.NOW,
-        "clock": kit.frozen_clock(),
-    }
-
-
-class _PostcheckMixin:
-    """所有 fake driver 共用的相異 verifier postcheck(applier 不得自證)。"""
-
-    postcheck_ok = True
-
-    def independent_postcheck(self, *, component_effect_class, install_plan_digest, applier_node):
-        self.calls.append("independent_postcheck")
-        return {
-            "verifier_node": "s2-4-independent-verifier",
-            "observed_subject_digest": "sha256:" + "8" * 64,
-            "applied_state_verified": self.postcheck_ok,
-            "pre_state_lineage_verified": self.postcheck_ok,
-            "verifier_capture_digest": _CAPTURE,
-        }
-
-    def trusted_host_time(self):
-        return kit.NOW
-
-    def journal_transition(self, *, entry):
-        self.calls.append("journal:" + entry["state"])
-
-
-# ══════════════════════════ 1) HOST_IDENTITY_INSTALL ═══════════════════════════
-class _FakeHostIdentityDriver(_PostcheckMixin):
-    evidence_class = "PLATFORM_ATTESTED"
-
-    def __init__(self, *, identity=None, directories=None, postcheck_ok=True,
-                 fail_at=None, compensation_ok=True):
-        self.calls: list[str] = []
-        self.identity = identity
-        self.directories = dict(directories or {})
-        self.postcheck_ok = postcheck_ok
-        self.fail_at = fail_at
-        self.compensation_ok = compensation_ok
-        self.removed: list[str] = []
-
-    def observe_identity(self, *, name):
-        self.calls.append("observe_identity")
-        if self.identity is not None:
-            return dict(self.identity)
-        if "create_system_account" in self.calls:
-            return apply_mod.host_identity_desired_state(uid=_UID, gid=_GID)
-        return None
-
-    def create_system_account(self, *, name, uid, gid, home, shell):
-        self.calls.append("create_system_account")
-        if self.fail_at == "create_system_account":
-            raise RuntimeError("injected identity failure")
-
-    def remove_system_account(self, *, name):
-        self.calls.append("remove_system_account")
-        if not self.compensation_ok:
-            raise RuntimeError("compensation failed")
-
-    def observe_directory(self, *, path):
-        self.calls.append("observe_directory")
-        if path in self.directories:
-            return dict(self.directories[path])
-        if f"create_directory:{path}" in self.calls:
-            return next(
-                dict(entry) for entry in apply_mod.host_identity_directory_tree()
-                if entry["path"] == path
-            )
-        return None
-
-    def create_directory(self, *, path, owner, group, mode):
-        self.calls.append(f"create_directory:{path}")
-        if self.fail_at == path:
-            raise RuntimeError("injected directory failure")
-
-    def remove_directory(self, *, path):
-        self.calls.append(f"remove_directory:{path}")
-        self.removed.append(path)
-        if not self.compensation_ok:
-            raise RuntimeError("compensation failed")
-
-
-def _host_identity_intent(uid: int = _UID, gid: int = _GID) -> tuple[dict, dict]:
-    manifest = apply_mod.build_uid_gid_directory_manifest(uid=uid, gid=gid)
-    intent = _intent(
-        "HOST_IDENTITY_INSTALL",
-        {"uid_gid_directory_manifest_digest": validator.canonical_digest(manifest)},
-    )
-    return intent, manifest
-
-
-def test_host_identity_source_lane_is_pending_with_zero_mutation(signed) -> None:
-    intent, manifest = _host_identity_intent()
-    verdict = apply_mod.apply_s2_4_host_identity(
-        intent, driver=None, uid_gid_directory_manifest=manifest, **_common(signed)
-    )
-    assert verdict["status"] == "EXTERNAL_VERIFICATION_PENDING"
-    assert verdict["mutation_performed"] is False and verdict["driver_engaged"] is False
-    assert verdict["result"] is None and verdict["blocks_aggregate"] is True
-    assert verdict["row_abi"]["adapter_id"] == "s2_4_host_identity_adapter_v1"
-    assert verdict["row_abi"]["actor_node_id"] == "s2_4_host_identity_actor"
-    assert verdict["row_abi"]["independent_postcheck_node_id"] == "s2_4_host_identity_postcheck_v1"
-    assert verdict["row_abi"]["recovery_contract"] == "s2_4_host_identity_rollback_v1"
-    assert verdict["production_authority_flags"] == {
-        "nine_authorities_false": True,
-        "production_apply_performed": False,
-        "running_attested": False,
-    }
-
-
-def test_host_identity_apply_creates_the_exact_account_and_tree(signed) -> None:
-    intent, manifest = _host_identity_intent()
-    driver = _FakeHostIdentityDriver()
-    verdict = apply_mod.apply_s2_4_host_identity(
-        intent, driver=driver, uid_gid_directory_manifest=manifest, **_common(signed)
-    )
-    assert verdict["status"] == "SATISFIED", verdict["reasons"]
-    assert validator.validate_aiml_artifact(verdict["result"]) == []
-    assert validator.validate_aiml_artifact(verdict["postcheck"]) == []
-    assert validator.validate_aiml_artifact(verdict["rollback"]) == []
-    assert verdict["result"]["status"] == "SATISFIED"
-    assert verdict["result"]["production_authority_flags"]["running_attested"] is False
-    identity = verdict["observed_subjects"]["identity"]
-    assert identity["shell"] == "/usr/sbin/nologin"
-    assert identity["password_locked"] is True
-    assert identity["supplementary_groups"] == []
-    assert identity["account_expiry"] is None
-    assert identity["uid"] == _UID and identity["gid"] == _GID
-    assert sorted(entry["path"] for entry in apply_mod.host_identity_directory_tree()) == sorted(
-        verdict["observed_subjects"]["directories"]
-    )
-    assert driver.calls[0] == "observe_identity"
-
-
-@pytest.mark.parametrize("attribute,value", [
-    ("uid", 1000), ("gid", 1000), ("shell", "/bin/bash"), ("home", "/home/aiml"),
-    ("password_locked", False), ("supplementary_groups", ["sudo"]),
-    ("account_expiry", "2031-01-01"), ("system_account", False),
-])
-def test_service_account_attribute_drift_fails_before_mutation(signed, attribute, value) -> None:
-    intent, manifest = _host_identity_intent()
-    drifted = apply_mod.host_identity_desired_state(uid=_UID, gid=_GID)
-    drifted[attribute] = value
-    driver = _FakeHostIdentityDriver(identity=drifted)
-    verdict = apply_mod.apply_s2_4_host_identity(
-        intent, driver=driver, uid_gid_directory_manifest=manifest, **_common(signed)
-    )
-    assert verdict["status"] == "PRESTATE_MISMATCH"
-    assert verdict["mutation_performed"] is False
-    assert "create_system_account" not in driver.calls
-    assert any("before any mutation" in reason for reason in verdict["reasons"])
-
-
-def test_directory_mode_or_owner_drift_fails_before_mutation(signed) -> None:
-    intent, manifest = _host_identity_intent()
-    tree = apply_mod.host_identity_directory_tree()
-    drifted = {tree[0]["path"]: {**tree[0], "mode": "0777"}}
-    driver = _FakeHostIdentityDriver(
-        identity=apply_mod.host_identity_desired_state(uid=_UID, gid=_GID), directories=drifted
-    )
-    verdict = apply_mod.apply_s2_4_host_identity(
-        intent, driver=driver, uid_gid_directory_manifest=manifest, **_common(signed)
-    )
-    assert verdict["status"] == "PRESTATE_MISMATCH"
-    assert not any(call.startswith("create_directory") for call in driver.calls)
-
-
-def test_exact_desired_identity_without_ownership_is_never_adopted(signed) -> None:
-    intent, manifest = _host_identity_intent()
-    driver = _FakeHostIdentityDriver(
-        identity=apply_mod.host_identity_desired_state(uid=_UID, gid=_GID),
-        directories={
-            entry["path"]: dict(entry) for entry in apply_mod.host_identity_directory_tree()
-        },
-    )
-    verdict = apply_mod.apply_s2_4_host_identity(
-        intent, driver=driver, uid_gid_directory_manifest=manifest, **_common(signed)
-    )
-    assert verdict["status"] == "PREEXISTING_UNOWNED_STATE"
-    assert verdict["mutation_performed"] is False
-
-
-def test_exact_desired_identity_with_ownership_is_noop_verified(signed) -> None:
-    intent, manifest = _host_identity_intent()
-    owned = {"s2_4_receipt_digest": "sha256:" + "a" * 64, "journal_digest": "sha256:" + "b" * 64}
-    tree = apply_mod.host_identity_directory_tree()
-    driver = _FakeHostIdentityDriver(
-        identity=apply_mod.host_identity_desired_state(uid=_UID, gid=_GID),
-        directories={entry["path"]: dict(entry) for entry in tree},
-    )
-    verdict = apply_mod.apply_s2_4_host_identity(
-        intent, driver=driver, uid_gid_directory_manifest=manifest,
-        ownership_evidence={"identity": owned, **{entry["path"]: owned for entry in tree}},
-        **_common(signed),
-    )
-    assert verdict["status"] == "NOOP_VERIFIED"
-    assert verdict["mutation_performed"] is False
-    assert verdict["result"]["status"] == "NOOP_VERIFIED"
-
-
-def test_a_pg_permit_cannot_authorize_host_identity_mutation(signed) -> None:
-    intent, manifest = _host_identity_intent()
-    driver = _FakeHostIdentityDriver()
-    verdict = apply_mod.apply_s2_4_host_identity(
-        intent, {"pg_migration": signed["pg_migration"]}, driver,
-        uid_gid_directory_manifest=manifest, replay_ledger=kit.replay_ledger(),
-        now=kit.NOW, clock=kit.frozen_clock(),
-    )
-    assert verdict["status"] == "AUTHORIZATION_REJECTED"
-    assert any("PG-migration permit cannot authorize" in reason for reason in verdict["reasons"])
-    assert driver.calls == []
-
-
-def test_host_identity_effects_classify_only_as_host_identity_install() -> None:
-    for subject in ("host_user", "host_group", "host_directory"):
-        assert apply_mod.derive_host_identity_effect_class_status(
-            subject_kind=subject, declared_class="HOST_IDENTITY_INSTALL"
-        )["status"] == "HOST_IDENTITY_CLASSIFICATION_ADMITTED"
-        for other in ("PG_ROLE_ACL_MIGRATION", "CREDENTIAL_INSTALL", "LEARNING_RUNTIME",
-                      "ENGINE_SCANNER", "NONE"):
-            verdict = apply_mod.derive_host_identity_effect_class_status(
-                subject_kind=subject, declared_class=other
-            )
-            assert verdict["status"] == "HOST_IDENTITY_CLASSIFICATION_REJECTED"
-            assert any("#31" in reason for reason in verdict["reasons"])
-
-
-def test_host_identity_failure_compensates_only_task_owned_creations(signed) -> None:
-    intent, manifest = _host_identity_intent()
-    tree = apply_mod.host_identity_directory_tree()
-    driver = _FakeHostIdentityDriver(fail_at=tree[-1]["path"])
-    verdict = apply_mod.apply_s2_4_host_identity(
-        intent, driver=driver, uid_gid_directory_manifest=manifest, **_common(signed)
-    )
-    assert verdict["status"] == "FAILED"
-    assert verdict["rollback"]["status"] == "COMPENSATED_EXACT"
-    assert verdict["rollback"]["no_secret_reconstructed"] is True
-    assert "remove_system_account" in driver.calls
-    assert driver.removed == [entry["path"] for entry in reversed(tree[:-1])]
-
-
-def test_host_identity_postcheck_failure_rolls_back(signed) -> None:
-    intent, manifest = _host_identity_intent()
-    driver = _FakeHostIdentityDriver(postcheck_ok=False)
-    verdict = apply_mod.apply_s2_4_host_identity(
-        intent, driver=driver, uid_gid_directory_manifest=manifest, **_common(signed)
-    )
-    assert verdict["status"] == "POSTCHECK_FAILED_ROLLED_BACK"
-    assert verdict["rollback"]["status"] == "COMPENSATED_EXACT"
-    assert "remove_system_account" in driver.calls
-
-
-def test_host_identity_manifest_must_bind_the_signed_digest(signed) -> None:
-    intent, _ = _host_identity_intent()
-    driver = _FakeHostIdentityDriver()
-    verdict = apply_mod.apply_s2_4_host_identity(
-        intent, driver=driver,
-        uid_gid_directory_manifest=apply_mod.build_uid_gid_directory_manifest(uid=1, gid=1),
-        **_common(signed),
-    )
-    assert verdict["status"] == "PRECHECK_FAILED"
-    assert driver.calls == []
-
-
-def test_host_identity_manifest_cannot_smuggle_a_worker_chosen_directory(signed) -> None:
-    manifest = apply_mod.build_uid_gid_directory_manifest(uid=_UID, gid=_GID)
-    manifest["static_directories"].append(
-        {"path": "/srv/evil", "owner": "root", "group": "root", "mode": "0777"}
-    )
-    intent = _intent(
-        "HOST_IDENTITY_INSTALL",
-        {"uid_gid_directory_manifest_digest": validator.canonical_digest(manifest)},
-    )
-    driver = _FakeHostIdentityDriver()
-    verdict = apply_mod.apply_s2_4_host_identity(
-        intent, driver=driver, uid_gid_directory_manifest=manifest, **_common(signed)
-    )
-    assert verdict["status"] == "PRECHECK_FAILED"
-    assert driver.calls == []
+# HOST_IDENTITY row 的 driver/intent 於 §10.1.1 拆分後仍被跨 row 不變量測試引用。
+from test_agent_governance_s2_4_host_identity import (  # noqa: E402
+    _FakeHostIdentityDriver, _host_identity_intent,
+)
 
 
 # ══════════════════════════ 2) PG_ROLE_ACL_MIGRATION ═══════════════════════════
 class _FakePgDriver(_PostcheckMixin):
-    evidence_class = "PLATFORM_ATTESTED"
+    # in-memory fixture 絕不冒充平台背書(W3 review E2 P1-1 / E3 P2-6)。
+    evidence_class = "STRUCTURAL_ONLY"
 
-    def __init__(self, *, role=None, postcheck_ok=True, fail_at=None):
+    def __init__(self, *, role=None, postcheck_ok=True, fail_at=None, public_pre_state=_DEFAULT,
+                 public_after_restore=None, grants=None):
         self.calls: list[str] = []
         self.role = role
         self.postcheck_ok = postcheck_ok
@@ -378,11 +85,20 @@ class _FakePgDriver(_PostcheckMixin):
         self.applied_statements: list[str] = []
         self.revoked_statements: list[str] = []
         self.public_restored: list[str] = []
-        self.public_pre_state: dict = {}
+        # 預設是本 plan 剝除面的**完整**擷取(全 False = PUBLIC 本來就沒持有);
+        # 顯式傳入的值(含 ``None``)一律原樣回給 driver 呼叫端。
+        self.public_pre_state = (
+            _public_pre_state() if public_pre_state is _DEFAULT else public_pre_state
+        )
+        # 補償後的再觀測(None = 與擷取的前態相符)。
+        self.public_after_restore = public_after_restore
+        self.grants = grants
         self.dropped = False
 
     def observe_role(self, *, role_name):
         self.calls.append("observe_role")
+        if self.dropped:
+            return None
         return dict(self.role) if self.role else None
 
     def create_role_with_sealed_password(self, *, role_name, secret_handle, operation_id):
@@ -398,11 +114,17 @@ class _FakePgDriver(_PostcheckMixin):
 
     def observe_grants(self, *, role_name):
         self.calls.append("observe_grants")
+        if self.grants is not None:
+            return dict(self.grants)
         return {"tables": len(kit.PG_ACL_MANIFEST["tables"])}
 
     def observe_public_defaults(self, *, database, schemas):
         self.calls.append("observe_public_defaults")
-        return dict(self.public_pre_state)
+        if "revoke_manifest_grants" in self.calls and self.public_after_restore is not None:
+            return dict(self.public_after_restore)
+        return dict(self.public_pre_state) if isinstance(self.public_pre_state, dict) else (
+            self.public_pre_state
+        )
 
     def revoke_manifest_grants(self, *, generated_statements):
         self.calls.append("revoke_manifest_grants")
@@ -415,6 +137,16 @@ class _FakePgDriver(_PostcheckMixin):
     def drop_task_owned_role(self, *, role_name):
         self.calls.append("drop_task_owned_role")
         self.dropped = True
+
+
+def _public_pre_state(**held: bool) -> dict:
+    """本 plan 自 PUBLIC 剝除面的**完整**前態擷取(預設全 False)。"""
+
+    keys = apply_mod.public_default_pre_state_keys(deepcopy(kit.PG_ACL_MANIFEST))
+    captured = {key: False for key in keys}
+    for key, value in held.items():
+        captured[key.replace("__", ":")] = value
+    return captured
 
 
 def _pg_intent(attestation: dict) -> dict:
@@ -564,23 +296,125 @@ def test_pg_failure_revokes_only_this_plans_grants_and_drops_only_a_new_role(sig
 
 def test_public_default_privileges_are_restored_only_when_the_pre_state_held_them(signed) -> None:
     attestation = kit.topology_attestation()
-    driver = _FakePgDriver(fail_at="apply_manifest_grants")
-    driver.public_pre_state = {
-        "database:trading_ai:TEMPORARY": True,
-        "database:trading_ai:CREATE": False,
-        "schema:learning:CREATE": False,
-        "schema:trading:CREATE": True,
-    }
+    held = _public_pre_state()
+    held["database:trading_ai:TEMPORARY"] = True
+    held["schema:trading:CREATE"] = True
+    driver = _FakePgDriver(fail_at="apply_manifest_grants", public_pre_state=held)
     verdict = apply_mod.apply_s2_4_pg_role_acl(
         _pg_intent(attestation), driver=driver, **_pg_kwargs(attestation),
         **_common(signed, pg=True),
     )
     assert verdict["status"] == "FAILED"
     assert verdict["rollback"]["status"] == "COMPENSATED_EXACT"
+    assert verdict["rollback"]["exact_pre_state_restored"] is True
     assert driver.public_restored == [
         'GRANT TEMPORARY ON DATABASE "trading_ai" TO PUBLIC',
         'GRANT CREATE ON SCHEMA "trading" TO PUBLIC',
     ]
+
+
+# ── W3 review E2 P1-5:PUBLIC 前態擷取不完整 → 變更前 fail-closed(不得靜默少還原)───
+@pytest.mark.parametrize("capture", [
+    None, {}, {"database:trading_ai:TEMPORARY": True},
+    {**_public_pre_state(), "schema:trading:CREATE": "yes"},
+    {**_public_pre_state(), "database:other:CREATE": True},
+])
+def test_incomplete_public_pre_state_capture_blocks_before_any_revoke(signed, capture) -> None:
+    """driver 回 ``None``/``{}``/半份 dict 時,舊碼把「缺鍵」讀成「未持有」→ 零 restore
+    語句、卻仍 ``COMPENSATED_EXACT``,``trading_ai`` 上的 PUBLIC 被永久剝光。"""
+
+    attestation = kit.topology_attestation()
+    driver = _FakePgDriver(public_pre_state=capture)
+    verdict = apply_mod.apply_s2_4_pg_role_acl(
+        _pg_intent(attestation), driver=driver, **_pg_kwargs(attestation),
+        **_common(signed, pg=True),
+    )
+    assert verdict["status"] == "PRECHECK_FAILED", verdict["status"]
+    assert verdict["mutation_performed"] is False
+    assert "apply_manifest_grants" not in driver.calls
+    assert "create_role_with_sealed_password" not in driver.calls
+    assert any("cannot prove it may take" in reason for reason in verdict["reasons"])
+
+
+def test_restore_generator_refuses_an_incomplete_capture() -> None:
+    manifest = deepcopy(kit.PG_ACL_MANIFEST)
+    complete = _public_pre_state()
+    assert apply_mod.generate_public_default_restore_statements(manifest, complete) == []
+    partial = dict(complete)
+    partial.pop(sorted(partial)[0])
+    with pytest.raises(apply_mod.ComponentContractError):
+        apply_mod.generate_public_default_restore_statements(manifest, partial)
+    with pytest.raises(apply_mod.ComponentContractError):
+        apply_mod.generate_public_default_restore_statements(manifest, None)
+
+
+# ── W3 review E2 P1-4:exact_pre_state_restored 必須自「補償後再觀測」導出 ────────────
+def test_public_restore_that_does_not_reobserve_is_recovery_required(signed) -> None:
+    """補償的 revoke/restore 全部「沒拋例外」,但補償後 PUBLIC 的再觀測與擷取的前態不符
+    → 絕不得宣稱 ``COMPENSATED_EXACT``。"""
+
+    attestation = kit.topology_attestation()
+    held = _public_pre_state()
+    held["database:trading_ai:TEMPORARY"] = True
+    after = dict(held)
+    after["database:trading_ai:TEMPORARY"] = False  # restore 實際上沒生效
+    driver = _FakePgDriver(
+        fail_at="apply_manifest_grants", public_pre_state=held, public_after_restore=after
+    )
+    verdict = apply_mod.apply_s2_4_pg_role_acl(
+        _pg_intent(attestation), driver=driver, **_pg_kwargs(attestation),
+        **_common(signed, pg=True),
+    )
+    assert verdict["status"] == "RECOVERY_REQUIRED"
+    assert verdict["rollback"]["status"] == "RECOVERY_REQUIRED"
+    assert verdict["rollback"]["exact_pre_state_restored"] is False
+    assert any("re-observation" in reason for reason in verdict["reasons"])
+
+
+# ── W3 review E2 P1-6:task-owned 既有 PG role 絕不被重跑前向 grant 後剝光 ────────────
+def _owned(**extra) -> dict:
+    return {
+        "s2_4_receipt_digest": "sha256:" + "a" * 64,
+        "journal_digest": "sha256:" + "b" * 64,
+        **extra,
+    }
+
+
+def test_task_owned_pg_role_matching_the_prior_applied_state_is_a_zero_mutation_noop(
+    signed,
+) -> None:
+    attestation = kit.topology_attestation()
+    grants = {"tables": len(kit.PG_ACL_MANIFEST["tables"])}
+    applied = validator.canonical_digest({"role": "aiml_engine_scanner", "grants": grants})
+    driver = _FakePgDriver(role={"attributes": {"login": True}}, grants=grants)
+    verdict = apply_mod.apply_s2_4_pg_role_acl(
+        _pg_intent(attestation), driver=driver, **_pg_kwargs(attestation),
+        ownership_evidence={"pg_role": _owned(applied_state_digest=applied)},
+        **_common(signed, pg=True),
+    )
+    assert verdict["status"] == "NOOP_VERIFIED", verdict["reasons"]
+    assert verdict["mutation_performed"] is False
+    assert "apply_manifest_grants" not in driver.calls
+    assert "drop_task_owned_role" not in driver.calls
+    assert driver.dropped is False
+
+
+def test_task_owned_pg_role_that_drifted_is_never_re_granted_or_stripped(signed) -> None:
+    """舊行為:task-owned 既有角色直接落入 ``apply_manifest_grants``(沒擷取它原本的
+    grant/屬性),補償又因 ``created_role=False`` 不 drop、也不還原前向 ALTER ROLE
+    → 既有角色被剝光。現在:零變更 typed 拒。"""
+
+    attestation = kit.topology_attestation()
+    driver = _FakePgDriver(role={"attributes": {"login": True}}, grants={"tables": 99})
+    verdict = apply_mod.apply_s2_4_pg_role_acl(
+        _pg_intent(attestation), driver=driver, **_pg_kwargs(attestation),
+        ownership_evidence={"pg_role": _owned(applied_state_digest="sha256:" + "0" * 64)},
+        **_common(signed, pg=True),
+    )
+    assert verdict["status"] == "PRESTATE_MISMATCH"
+    assert verdict["mutation_performed"] is False
+    assert "apply_manifest_grants" not in driver.calls
+    assert "drop_task_owned_role" not in driver.calls
 
 
 def test_pg_row_rejects_a_forged_acl_manifest(signed) -> None:
@@ -598,7 +432,8 @@ def test_pg_row_rejects_a_forged_acl_manifest(signed) -> None:
 
 # ══════════════════════════ 3) CREDENTIAL_INSTALL ══════════════════════════════
 class _FakeCredentialDriver(_PostcheckMixin):
-    evidence_class = "PLATFORM_ATTESTED"
+    # in-memory fixture 絕不冒充平台背書(W3 review E2 P1-1 / E3 P2-6)。
+    evidence_class = "STRUCTURAL_ONLY"
 
     def __init__(self, *, slot=None, capability=None, postcheck_ok=True,
                  login_ok=True, dsn_keys=None, fail_at=None, blob_digest=_BLOB_DIGEST):
@@ -835,7 +670,7 @@ def test_a_to_b_to_a_rotation_restores_the_previous_encrypted_slot(signed) -> No
     verdict = apply_mod.apply_s2_4_credential_install(
         _credential_intent(), driver=driver, dsn_handle=dsn_handle,
         operation_id="cred-op", mode="ROTATION",
-        ownership_evidence={"credential_slot": {"s2_4_receipt_digest": "sha256:" + "a" * 64}},
+        ownership_evidence={"credential_slot": _owned()},
         **_common(signed),
     )
     assert verdict["status"] == "FAILED"
@@ -890,7 +725,8 @@ def test_process_hardening_contract_is_load_bearing() -> None:
 
 # ══════════════════════════ 4) LEARNING_RUNTIME ════════════════════════════════
 class _FakeRuntimeDriver(_PostcheckMixin):
-    evidence_class = "PLATFORM_ATTESTED"
+    # in-memory fixture 絕不冒充平台背書(W3 review E2 P1-1 / E3 P2-6)。
+    evidence_class = "STRUCTURAL_ONLY"
 
     def __init__(self, *, existing=None, rehash=None, tree_overrides=None,
                  postcheck_ok=True, fail_at=None):
@@ -1067,10 +903,13 @@ def test_pre_existing_unowned_install_root_is_never_overwritten(signed) -> None:
 
 # ══════════════════════════ 5) ENGINE_SCANNER ══════════════════════════════════
 class _FakeEngineScannerDriver(_PostcheckMixin):
-    evidence_class = "PLATFORM_ATTESTED"
+    # in-memory fixture 絕不冒充平台背書(W3 review E2 P1-1 / E3 P2-6)。
+    evidence_class = "STRUCTURAL_ONLY"
 
     def __init__(self, *, existing_unit=None, unit_overrides=None, postcheck_ok=True,
-                 fail_at=None, evidence_empty=True):
+                 fail_at=None, evidence_empty=True, existing_policy=None,
+                 existing_guard=None, existing_evidence=None,
+                 residual_after_compensation=()):
         self.calls: list[str] = []
         self.existing_unit = existing_unit
         self.unit_overrides = unit_overrides or {}
@@ -1080,9 +919,16 @@ class _FakeEngineScannerDriver(_PostcheckMixin):
         self.installed_unit_text: str | None = None
         self.reloads = 0
         self.removed: list[str] = []
+        # 變更前既存的 policy / guard / evidence(S2.4 不擁有的 operator 檔案)。
+        self.existing_policy = existing_policy
+        self.existing_guard = existing_guard
+        self.existing_evidence = existing_evidence
+        self.residual_after_compensation = set(residual_after_compensation)
 
     def observe_unit(self):
         self.calls.append("observe_unit")
+        if "remove_unit_fragment" in self.calls and "unit" not in self.residual_after_compensation:
+            return None
         if self.installed_unit_text is None:
             return dict(self.existing_unit) if self.existing_unit else None
         observed = {
@@ -1093,6 +939,33 @@ class _FakeEngineScannerDriver(_PostcheckMixin):
         }
         observed.update(self.unit_overrides)
         return observed
+
+    def observe_policy_file(self, *, path):
+        self.calls.append("observe_policy_file")
+        if "remove_policy_file" in self.calls and "policy" not in self.residual_after_compensation:
+            return None
+        if "install_policy_file" in self.calls:
+            return dict(self._installed_policy)
+        return dict(self.existing_policy) if self.existing_policy else None
+
+    def observe_topology_guard(self, *, path):
+        self.calls.append("observe_topology_guard")
+        if "remove_topology_guard" in self.calls and "guard" not in self.residual_after_compensation:
+            return None
+        if "install_topology_guard" in self.calls:
+            return dict(self._installed_guard)
+        return dict(self.existing_guard) if self.existing_guard else None
+
+    def observe_evidence_directory(self, *, path):
+        self.calls.append("observe_evidence_directory")
+        if (
+            "remove_evidence_directory" in self.calls
+            and "evidence" not in self.residual_after_compensation
+        ):
+            return None
+        if "create_evidence_directory" in self.calls:
+            return dict(self._created_evidence)
+        return dict(self.existing_evidence) if self.existing_evidence else None
 
     def install_unit_fragment(self, *, fragment_path, unit_text):
         self.calls.append("install_unit_fragment")
@@ -1108,15 +981,27 @@ class _FakeEngineScannerDriver(_PostcheckMixin):
     def install_policy_file(self, *, path, policy_bytes, owner, group, mode):
         self.calls.append("install_policy_file")
         self.policy = (path, bytes(policy_bytes), owner, group, mode)
+        self._installed_policy = {
+            "path": path, "owner": owner, "group": group, "mode": mode,
+            "digest": apply_mod._bytes_digest(bytes(policy_bytes)),
+        }
         return {"path": path}
 
     def install_topology_guard(self, *, path, guard_bytes, owner, group, mode):
         self.calls.append("install_topology_guard")
         self.guard = (path, bytes(guard_bytes), owner, group, mode)
+        self._installed_guard = {
+            "path": path, "owner": owner, "group": group, "mode": mode,
+            "digest": apply_mod._bytes_digest(bytes(guard_bytes)),
+        }
         return {"path": path}
 
     def create_evidence_directory(self, *, path, owner, group, mode):
         self.calls.append("create_evidence_directory")
+        self._created_evidence = {
+            "path": path, "owner": owner, "group": group, "mode": mode,
+            "empty": self.evidence_empty,
+        }
         return {"path": path, "owner": owner, "mode": mode, "empty": self.evidence_empty}
 
     def remove_unit_fragment(self, *, fragment_path):
@@ -1272,7 +1157,40 @@ def test_non_empty_candidate_evidence_directory_compensates(signed) -> None:
     assert verdict["rollback"]["status"] == "COMPENSATED_EXACT"
 
 
+def _engine_scanner_observed_subjects(guard: dict) -> dict:
+    """§8.3 四 subject 的「恰好等於期望狀態」觀測(用來造 exact-desired 前態)。"""
+
+    unit_text = kit.rendered_unit()
+    policy_bytes, _ = __import__("agent_governance_s2_4_render").render_candidate_policy(
+        ROOT / apply_mod.CANDIDATE_POLICY_TEMPLATE_REL, dict(kit.POLICY_BUDGETS)
+    )
+    desired = apply_mod.engine_scanner_desired_subjects(
+        policy_bytes=policy_bytes,
+        guard_bytes=apply_mod.canonical_guard_bytes(guard),
+        unit_text=unit_text,
+    )
+    return {
+        "policy": dict(desired["policy"]),
+        "guard": dict(desired["guard"]),
+        "evidence": dict(desired["evidence"]),
+        "unit": {**desired["unit"], "shadowing_paths": [], "started_by_s2_4": False},
+    }
+
+
 def test_pre_existing_unowned_unit_is_never_overwritten(signed) -> None:
+    intent, guard = _engine_scanner_fixture()
+    subjects = _engine_scanner_observed_subjects(guard)
+    driver = _FakeEngineScannerDriver(existing_unit=subjects["unit"])
+    verdict = apply_mod.apply_s2_4_engine_scanner_unit(
+        intent, driver=driver, unit_fields=dict(kit.UNIT_FIELDS),
+        candidate_policy_budgets=dict(kit.POLICY_BUDGETS), topology_guard=guard,
+        **_common(signed),
+    )
+    assert verdict["status"] == "PREEXISTING_UNOWNED_STATE"
+    assert "install_unit_fragment" not in driver.calls
+
+
+def test_a_drifted_pre_existing_unit_fails_before_any_mutation(signed) -> None:
     intent, guard = _engine_scanner_fixture()
     driver = _FakeEngineScannerDriver(existing_unit={"LoadState": "loaded"})
     verdict = apply_mod.apply_s2_4_engine_scanner_unit(
@@ -1280,7 +1198,71 @@ def test_pre_existing_unowned_unit_is_never_overwritten(signed) -> None:
         candidate_policy_budgets=dict(kit.POLICY_BUDGETS), topology_guard=guard,
         **_common(signed),
     )
-    assert verdict["status"] == "PREEXISTING_UNOWNED_STATE"
+    assert verdict["status"] == "PRESTATE_MISMATCH"
+    assert verdict["mutation_performed"] is False
+    assert "install_unit_fragment" not in driver.calls
+
+
+# ── W3 review E2 P1-3 / E3 P1-1 / 硬邊界 11:policy / guard / evidence 也必須分類 ────
+@pytest.mark.parametrize("subject,kwarg", [
+    ("policy", "existing_policy"),
+    ("guard", "existing_guard"),
+    ("evidence", "existing_evidence"),
+])
+def test_a_pre_existing_operator_policy_guard_or_evidence_is_never_overwritten(
+    signed, subject, kwarg
+) -> None:
+    """舊行為:``install_policy_file`` / ``install_topology_guard`` /
+    ``create_evidence_directory`` 三者**無條件**被呼叫(driver protocol 上根本沒有它們的
+    observe 面),既有的 operator policy 檔會被靜默覆寫、再被補償刪掉。"""
+
+    intent, guard = _engine_scanner_fixture()
+    operator_owned = {
+        "policy": {
+            "path": apply_mod.CANDIDATE_POLICY_PATH, "owner": "root", "group": "root",
+            "mode": "0644", "digest": "sha256:" + "7" * 64,
+        },
+        "guard": {
+            "path": "/etc/arcane-equilibrium/aiml/engine-scanner/pg-topology-guard.json",
+            "owner": "root", "group": "root", "mode": "0644", "digest": "sha256:" + "7" * 64,
+        },
+        "evidence": {
+            "path": apply_mod.CANDIDATE_EVIDENCE_DIR, "owner": "root", "group": "root",
+            "mode": "0755", "empty": False,
+        },
+    }[subject]
+    driver = _FakeEngineScannerDriver(**{kwarg: operator_owned})
+    verdict = apply_mod.apply_s2_4_engine_scanner_unit(
+        intent, driver=driver, unit_fields=dict(kit.UNIT_FIELDS),
+        candidate_policy_budgets=dict(kit.POLICY_BUDGETS), topology_guard=guard,
+        **_common(signed),
+    )
+    assert verdict["status"] in {"PRESTATE_MISMATCH", "PREEXISTING_UNOWNED_STATE"}
+    assert verdict["mutation_performed"] is False
+    assert driver.removed == []
+    for call in ("install_policy_file", "install_topology_guard", "create_evidence_directory",
+                 "install_unit_fragment", "remove_policy_file", "remove_topology_guard",
+                 "remove_evidence_directory"):
+        assert call not in driver.calls, call
+
+
+def test_a_fully_task_owned_engine_scanner_row_is_a_zero_mutation_noop(signed) -> None:
+    intent, guard = _engine_scanner_fixture()
+    subjects = _engine_scanner_observed_subjects(guard)
+    driver = _FakeEngineScannerDriver(
+        existing_unit=subjects["unit"], existing_policy=subjects["policy"],
+        existing_guard=subjects["guard"], existing_evidence=subjects["evidence"],
+    )
+    verdict = apply_mod.apply_s2_4_engine_scanner_unit(
+        intent, driver=driver, unit_fields=dict(kit.UNIT_FIELDS),
+        candidate_policy_budgets=dict(kit.POLICY_BUDGETS), topology_guard=guard,
+        ownership_evidence={name: _owned() for name in ("policy", "guard", "evidence", "unit")},
+        **_common(signed),
+    )
+    assert verdict["status"] == "NOOP_VERIFIED", verdict["reasons"]
+    assert verdict["mutation_performed"] is False
+    assert driver.removed == []
+    assert "install_policy_file" not in driver.calls
     assert "install_unit_fragment" not in driver.calls
 
 
@@ -1396,6 +1378,200 @@ def test_runtime_target_paths_come_only_from_the_prepared_identities(signed) -> 
     # 換掉任一內容身分 → 導出的 target manifest 不再等於被簽 digest → 變更之前即拒。
     assert verdict["status"] in {"PREPARED_BUNDLE_INVALID", "PRECHECK_FAILED"}
     assert not any(call.startswith("publish_tree") for call in driver.calls)
+
+
+# ── W3 review E2 P1-3 / E3 P1-1:ownership_evidence 是被驗證的契約,不是裸 kwarg ─────
+@pytest.mark.parametrize("hostile", [
+    {},                                        # 空物件:舊碼在 CREDENTIAL/ENGINE_SCANNER 上放行
+    {"unit": {}},
+    {"credential_slot": {}},
+    {"pg_role": {"s2_4_receipt_digest": "sha256:" + "a" * 64}},   # 缺 journal_digest
+    {"unit": {"s2_4_receipt_digest": "not-a-digest", "journal_digest": "nope"}},
+    {"unit": "owned"},
+    "owned",
+    ["owned"],
+])
+def test_ownership_evidence_shape_is_validated_before_any_driver_contact(signed, hostile) -> None:
+    if hostile == {}:
+        # 空映射本身形狀合法(沒有任何 subject 被宣稱擁有);它必須**不**滿足任何 subject。
+        assert apply_mod.ownership_evidence_reasons(hostile) == []
+        driver = _FakeEngineScannerDriver(existing_unit={"LoadState": "loaded"})
+        intent, guard = _engine_scanner_fixture()
+        verdict = apply_mod.apply_s2_4_engine_scanner_unit(
+            intent, driver=driver, unit_fields=dict(kit.UNIT_FIELDS),
+            candidate_policy_budgets=dict(kit.POLICY_BUDGETS), topology_guard=guard,
+            ownership_evidence=hostile, **_common(signed),
+        )
+        assert verdict["status"] != "SATISFIED"
+        assert "install_unit_fragment" not in driver.calls
+        return
+    assert apply_mod.ownership_evidence_reasons(hostile)
+    intent, manifest = _host_identity_intent()
+    driver = _FakeHostIdentityDriver()
+    verdict = apply_mod.apply_s2_4_host_identity(
+        intent, driver=driver, uid_gid_directory_manifest=manifest,
+        ownership_evidence=hostile, **_common(signed),
+    )
+    assert verdict["status"] == "COMPONENT_REQUEST_REJECTED"
+    assert verdict["mutation_performed"] is False
+    assert driver.calls == []
+
+
+@pytest.mark.parametrize("evidence,expected", [
+    # 第一層:形狀閘(driver 接觸之前)。
+    ({"credential_slot": {}}, "COMPONENT_REQUEST_REJECTED"),
+    ({"credential_slot": {"s2_4_receipt_digest": "sha256:" + "a" * 64}},
+     "COMPONENT_REQUEST_REJECTED"),
+    # 第二層:形狀合法但**沒有**宣稱這個 subject → 前態仍是 unowned。
+    ({}, "PREEXISTING_UNOWNED_STATE"),
+    ({"unit": _owned()}, "PREEXISTING_UNOWNED_STATE"),
+    (None, "PREEXISTING_UNOWNED_STATE"),
+])
+def test_a_bare_ownership_object_never_converts_unowned_pre_state_into_a_proceed(
+    signed, evidence, expected
+) -> None:
+    """CREDENTIAL_INSTALL 舊碼只驗 ``isinstance(dict)``:``{"credential_slot": {}}`` 就能把
+    PREEXISTING_UNOWNED_STATE 換成放行,進而對一個不屬於本 task 的加密 slot 做 rotation。"""
+
+    _, (_pg, dsn_handle) = _broker_handles()
+    driver = _FakeCredentialDriver(
+        slot={"owner": "root", "mode": "0600", "task_owned": True,
+              "encrypted_blob_digest": "sha256:" + "1" * 64}
+    )
+    verdict = apply_mod.apply_s2_4_credential_install(
+        _credential_intent(), driver=driver, dsn_handle=dsn_handle, operation_id="cred-op",
+        mode="ROTATION", ownership_evidence=evidence, **_common(signed),
+    )
+    assert verdict["status"] == expected
+    assert verdict["mutation_performed"] is False
+    assert "encrypt_credential" not in driver.calls
+    assert "install_encrypted_slot" not in driver.calls
+
+
+# ── W3 review E3 P1-5:秘密永不抵達任何可序列化面(含 driver 例外文字)──────────────
+def test_a_driver_exception_carrying_a_secret_never_reaches_a_reason(signed) -> None:
+    broker, (pg_handle, dsn_handle) = _broker_handles()
+    password = pg_handle.consume(operation_id="cred-op").decode("ascii")
+
+    class _LeakyDriver(_FakeCredentialDriver):
+        def install_encrypted_slot(self, *, slot_path, encrypted_blob_digest, owner, group, mode):
+            self.calls.append("install_encrypted_slot")
+            raise RuntimeError(f"libpq: connection failed for {password}")
+
+    driver = _LeakyDriver()
+    verdict = apply_mod.apply_s2_4_credential_install(
+        _credential_intent(), driver=driver, dsn_handle=dsn_handle,
+        operation_id="cred-op", **_common(signed),
+    )
+    assert verdict["status"] in {"FAILED", "RECOVERY_REQUIRED"}
+    blob = json_module.dumps(verdict, default=str)
+    assert password not in blob
+    assert any("<redacted>" in reason for reason in verdict["reasons"])
+    credential.assert_no_secret_material(verdict, [password])
+    broker.zeroize_all()
+
+
+def test_a_called_process_error_never_renders_its_argv_into_a_reason(signed) -> None:
+    """``systemd-creds`` 的 ``CalledProcessError.__str__`` 會渲染完整 argv;
+    libpq 例外會渲染連線選項。兩者一律只留型別。"""
+
+    import subprocess
+
+    error = subprocess.CalledProcessError(
+        1, ["systemd-creds", "encrypt", "--name=pg-dsn", "--with-key=host+tpm2"],
+        output=b"secret-output", stderr=b"secret-stderr",
+    )
+    redacted = credential.redact_driver_error(error)
+    assert redacted == "CalledProcessError: <redacted driver diagnostics>"
+    assert "systemd-creds" not in redacted and "secret-output" not in redacted
+    assert credential.redact_driver_error(
+        apply_mod.ComponentContractError("encrypted_blob_digest_invalid")
+    ) == "ComponentContractError: encrypted_blob_digest_invalid"
+    long_error = RuntimeError("x" * 4000)
+    assert len(credential.redact_driver_error(long_error)) <= 200
+
+
+def test_a_verdict_that_would_carry_secret_material_is_dropped_wholesale(signed) -> None:
+    """``_verdict`` 是五 row 唯一的出境面:任一處帶著活哨兵的秘密即整份丟棄。"""
+
+    broker, (pg_handle, dsn_handle) = _broker_handles()
+    password = pg_handle.consume(operation_id="cred-op").decode("ascii")
+    intent, manifest = _host_identity_intent()
+
+    class _LeakyVerifierDriver(_FakeHostIdentityDriver):
+        # 獨立 postcheck 的 ``verifier_node`` 是 driver 自由塑形的**字串**,會原樣落進
+        # postcheck artifact 並隨 verdict 出境——舊碼沒有任何生產側掃描擋它。
+        def independent_postcheck(self, *, component_effect_class, install_plan_digest,
+                                  applier_node):
+            observed = super().independent_postcheck(
+                component_effect_class=component_effect_class,
+                install_plan_digest=install_plan_digest, applier_node=applier_node,
+            )
+            observed["verifier_node"] = f"s2-4-verifier?dsn={password}"
+            return observed
+
+    driver = _LeakyVerifierDriver()
+    # 先證明「舊解讀」的洩漏是真的:postcheck artifact 本身確實帶著秘密。
+    leaked_postcheck = driver.independent_postcheck(
+        component_effect_class="HOST_IDENTITY_INSTALL", install_plan_digest=_PLAN_DIGEST,
+        applier_node="s2-4-host-identity-applier",
+    )
+    assert password in leaked_postcheck["verifier_node"]
+    verdict = apply_mod.apply_s2_4_host_identity(
+        intent, driver=driver, uid_gid_directory_manifest=manifest, **_common(signed)
+    )
+    assert password not in json_module.dumps(verdict, default=str)
+    assert verdict["status"] == "SECRET_MATERIAL_LEAK_BLOCKED"
+    assert verdict["blocks_aggregate"] is True
+    assert verdict["result"] is None and verdict["postcheck"] is None
+    assert verdict["observed_subjects"] is None and verdict["journal_entries"] == []
+    credential.assert_no_secret_material(verdict, [password])
+    broker.zeroize_all()
+
+
+# ── W3 review E2 P1-1 / E3 P2-6:fixture 不得鑄造 PLATFORM_ATTESTED ─────────────────
+def test_no_in_memory_fixture_can_mint_platform_attested_evidence(signed) -> None:
+    intent, manifest = _host_identity_intent()
+    liar = _FakeHostIdentityDriver()
+    liar.evidence_class = "PLATFORM_ATTESTED"
+    verdict = apply_mod.apply_s2_4_host_identity(
+        intent, driver=liar, uid_gid_directory_manifest=manifest, **_common(signed)
+    )
+    assert verdict["status"] == "SATISFIED", verdict["reasons"]
+    assert verdict["result"]["evidence_class"] == "STRUCTURAL_ONLY"
+    assert any("self-declares evidence_class" in reason for reason in verdict["reasons"])
+    honest = apply_mod.apply_s2_4_host_identity(
+        intent, driver=_FakeHostIdentityDriver(), uid_gid_directory_manifest=manifest,
+        **_common(signed),
+    )
+    # fixture 與「謊報 attested 的 fixture」的 result 在 evidence_class 上不可區分且都非 attested。
+    assert honest["result"]["evidence_class"] == "STRUCTURAL_ONLY"
+    gate = apply_mod.derive_recorded_evidence_class(liar)
+    assert gate["status"] == "EVIDENCE_CLASS_SELF_DECLARATION_REFUSED"
+    assert gate["recorded_evidence_class"] == "STRUCTURAL_ONLY"
+
+
+def test_the_w3_abi_names_the_three_w4_owned_obligations() -> None:
+    """RECORD HONESTLY:三項 W3 不提供的義務必須是 machine-visible 的 typed 記錄。"""
+
+    obligations = {
+        item["obligation_id"]: item
+        for item in validator._W3_EXPORTED_ABI["w4_owned_obligations"]
+    }
+    assert sorted(obligations) == [
+        "ENCRYPTED_BLOB_DIGEST_ORDERING", "PERMIT_PLAN_BINDING", "REPLAY_LEDGER_APPEND",
+    ]
+    assert obligations["PERMIT_PLAN_BINDING"]["typed_status"] == "NOT_PROVIDED_BY_W3"
+    assert obligations["REPLAY_LEDGER_APPEND"]["typed_status"] == "NOT_PROVIDED_BY_W3"
+    assert obligations["ENCRYPTED_BLOB_DIGEST_ORDERING"]["typed_status"] == "OPEN_DESIGN_QUESTION"
+    for item in obligations.values():
+        assert item["owner_wave"].startswith("W4")
+        assert item["spec_refs"] and item["statement"] and item["w3_provides"]
+    # 這三項必然被 W3 wave-exit receipt 的 exported_abi_digest 綁住。
+    assert obligations == {
+        item["obligation_id"]: item
+        for item in validator.w3_exported_abi_projection()["w4_owned_obligations"]
+    }
 
 
 def test_apply_abi_projection_is_stable_and_complete() -> None:

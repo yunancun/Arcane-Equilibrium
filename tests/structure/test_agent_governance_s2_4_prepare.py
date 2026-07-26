@@ -18,6 +18,7 @@
 """
 from __future__ import annotations
 
+import json
 import sys
 from copy import deepcopy
 from pathlib import Path
@@ -71,9 +72,14 @@ def _intent(probe_receipt_digest: str) -> dict:
 
 
 class _FakePrepareDriver:
-    """注入式測試 driver:只記錄固定操作,絕不觸碰任何主機(真 driver 屬 W6A)。"""
+    """注入式測試 driver:只記錄固定操作,絕不觸碰任何主機(真 driver 屬 W6A)。
 
-    evidence_class = "PLATFORM_ATTESTED"
+    ``evidence_class`` 刻意宣告 ``STRUCTURAL_ONLY``:in-memory fixture 絕不冒充平台背書。
+    (即使它謊報 attested,``derive_recorded_evidence_class`` 也會拒絕記錄——見
+    ``test_a_self_declared_attested_fixture_cannot_mint_platform_trust``。)
+    """
+
+    evidence_class = "STRUCTURAL_ONLY"
 
     def __init__(
         self,
@@ -492,7 +498,7 @@ def test_failed_compensation_is_recovery_required(signed) -> None:
 
 @pytest.mark.parametrize("override", [
     {"is_symlink": True}, {"owner": "nobody"}, {"mode": "0777"},
-    {"device": 1}, {"inode": 1}, {"link_count": 3},
+    {"device": 1}, {"inode": 1}, {"link_count": 1}, {"link_count": 0},
 ])
 def test_hostile_staging_parent_fails_before_mutation(signed, override) -> None:
     driver = _FakePrepareDriver(parent_overrides=override)
@@ -500,6 +506,45 @@ def test_hostile_staging_parent_fails_before_mutation(signed, override) -> None:
     assert verdict["status"] == "PRECHECK_FAILED"
     assert verdict["mutation_performed"] is False
     assert "create_staging_root" not in driver.calls
+
+
+# ── W3 review E3 P2-5:第二次 PREPARE 不得被 parent link-count 契約永久自鎖 ──────────
+@pytest.mark.parametrize("link_count", [2, 3, 9])
+def test_a_second_prepare_on_the_same_host_is_not_self_blocked(signed, link_count) -> None:
+    """每一次成功的 PREPARE 依設計都留下 ``prepared/<prepare_id>/``,parent 的 link 計數
+    因此必然 >2;舊的 ``link_count != 2`` 令任何主機的第二次 PREPARE 永久 PRECHECK_FAILED。"""
+
+    driver = _FakePrepareDriver(parent_overrides={"link_count": link_count})
+    verdict = _run(signed, driver)
+    assert verdict["status"] == "PREPARED", verdict["reasons"]
+    assert "create_staging_root" in driver.calls
+
+
+# ── W3 review E3 P2-3:圍堵/deny-root 比對必須先正規化(``..`` 一律外拒)─────────────
+def test_traversal_escape_out_of_the_staging_root_is_rejected(signed) -> None:
+    escape = (
+        prepare.PREPARE_STAGING_PARENT
+        + "/s2-4-prepare-" + "0" * 64
+        + "/../../../../../../opt/arcane-equilibrium/aiml/runtimes/injected"
+    )
+    # 舊的 startswith 文字比對同時通過兩道閘:以 staging_root 開頭、且不以 deny root 開頭。
+    assert escape.startswith(prepare.PREPARE_STAGING_PARENT)
+    assert not any(
+        escape.startswith(deny + "/") for deny in prepare.PREPARE_PUBLICATION_DENY_ROOTS
+    )
+    assert prepare.normalize_prepare_path(escape) is None
+    assert prepare.prepare_publication_boundary_reasons([escape])
+    assert prepare.prepare_containment_reasons([escape], prepare.PREPARE_STAGING_PARENT + "/x")
+    driver = _FakePrepareDriver(written_paths=[escape])
+    verdict = _run(signed, driver)
+    assert verdict["status"] in {"PREPARE_FAILED", "RECOVERY_REQUIRED"}
+    assert verdict["status"] != "PREPARED"
+
+
+def test_relative_or_null_bearing_written_path_is_rejected() -> None:
+    for hostile in ("relative/path", "", "/tmp/\x00evil", None, 7):
+        assert prepare.normalize_prepare_path(hostile) is None
+        assert prepare.prepare_publication_boundary_reasons([hostile])
 
 
 def test_residue_postcheck_failure_is_recovery_required(signed) -> None:
@@ -533,4 +578,50 @@ def test_prepare_abi_projection_is_stable_and_complete() -> None:
     )
     assert projection["prepare_sandbox_contract_digest"] is not None
     assert "EXTERNAL_VERIFICATION_PENDING" in projection["prepare_typed_statuses"]
+    assert projection["traversal_segment_rejected"] is True
+    assert projection["traversal_escape_reason_count"] == 1
+    assert projection["second_prepare_on_the_same_host_is_satisfiable"] is True
     assert projection == prepare.prepare_abi_projection()
+
+
+# ── W3 review E2 P1-1 / E3 P2-6:fixture 不得鑄造 runtime 信任 ─────────────────────
+def test_a_prepare_verdict_that_would_carry_secret_material_is_dropped_wholesale(signed) -> None:
+    """§10.5 #15:PREPARE 的 verdict 建構點也做無條件掃描(``assert_no_secret_material``
+    以前只有測試呼叫者;現在生產路徑本身就是呼叫者)。"""
+
+    import agent_governance_s2_4_credential as credential
+
+    broker = credential.SecretBroker(operation_id="prepare-leak")
+    pg_handle, _dsn = broker.mint_first_provisioning_handles()
+    password = pg_handle.consume(operation_id="prepare-leak").decode("ascii")
+
+    class _LeakyResidueDriver(_FakePrepareDriver):
+        def independent_residue_postcheck(self, *, staging_root, prepare_id, prepare_core_digest):
+            observed = super().independent_residue_postcheck(
+                staging_root=staging_root, prepare_id=prepare_id,
+                prepare_core_digest=prepare_core_digest,
+            )
+            observed["verifier_node"] = f"s2-4-prepare-verifier?dsn={password}"
+            return observed
+
+    verdict = _run(signed, _LeakyResidueDriver())
+    assert password not in json.dumps(verdict, default=str)
+    assert verdict["status"] == "RECOVERY_REQUIRED"
+    assert verdict["blocks_apply"] is True
+    assert verdict["effect_receipt"] is None and verdict["postcheck"] is None
+    credential.assert_no_secret_material(verdict, [password])
+    broker.zeroize_all()
+
+
+def test_a_self_declared_attested_fixture_cannot_mint_platform_trust(signed) -> None:
+    """一個 in-memory fixture 只要寫 ``evidence_class = "PLATFORM_ATTESTED"``,舊碼就把該
+    字串原樣寫進 receipt——artifact 在該欄位上與真主機產物**逐位元相同**。閘因此必須拒絕
+    「自證」:不論 driver 宣告什麼,W3 一律記錄 ``STRUCTURAL_ONLY``。"""
+
+    liar = _FakePrepareDriver()
+    liar.evidence_class = "PLATFORM_ATTESTED"
+    verdict = _run(signed, liar)
+    assert verdict["status"] == "PREPARED", verdict["reasons"]
+    assert verdict["effect_receipt"]["evidence_class"] == "STRUCTURAL_ONLY"
+    honest = _run(signed, _FakePrepareDriver())
+    assert honest["effect_receipt"]["evidence_class"] == "STRUCTURAL_ONLY"

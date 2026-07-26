@@ -55,6 +55,10 @@ import agent_governance_s2_4_topology as _topology  # noqa: E402
 from agent_governance_s2_4_component import (  # noqa: E402,F401
     APPLY_AGGREGATE_NAMESPACE,
     APPLY_AGGREGATE_PROFILE,
+    COMPENSATION_STATUS_EXACT,
+    COMPENSATION_STATUS_NOT_COMPENSATED,
+    COMPENSATION_STATUS_NOT_REOBSERVED,
+    COMPENSATION_STATUS_RECOVERY_REQUIRED,
     COMPONENT_CLASSES,
     COMPONENT_EVIDENCE_TTL_SECONDS,
     COMPONENT_RAW_INGRESS_KEYS,
@@ -73,9 +77,15 @@ from agent_governance_s2_4_component import (  # noqa: E402,F401
     COMPONENT_STATUS_RECOVERY_REQUIRED,
     COMPONENT_STATUS_REQUEST_REJECTED,
     COMPONENT_STATUS_SATISFIED,
+    COMPONENT_STATUS_SECRET_LEAK_BLOCKED,
     COMPONENT_STATUS_TOPOLOGY_UNPROVEN,
     COMPONENT_TYPED_STATUSES,
+    EVIDENCE_CLASS_ATTESTED,
+    EVIDENCE_CLASS_STATUS_RECORDED,
+    EVIDENCE_CLASS_STATUS_SELF_DECLARATION_REFUSED,
+    EVIDENCE_CLASS_STRUCTURAL_ONLY,
     FORBIDDEN_UNIT_LIFECYCLE_METHODS,
+    OWNERSHIP_EVIDENCE_REQUIRED_FIELDS,
     PG_MIGRATION_NAMESPACE,
     PG_MIGRATION_PROFILE,
     ComponentContractError,
@@ -96,9 +106,17 @@ from agent_governance_s2_4_component import (  # noqa: E402,F401
     _verdict,
     build_component_effect_intent,
     classify_pre_state,
+    compensation_outcome,
     component_raw_ingress_reasons,
     component_row_abi,
+    derive_compensation_status,
     derive_host_identity_effect_class_status,
+    derive_recorded_evidence_class,
+    normalize_compensation,
+    ownership_binding_present,
+    ownership_evidence_reasons,
+    redact_driver_error,
+    scan_serializable_surface,
 )
 # W3b 的兩個姊妹葉亦於此彙總 re-export,讓 install 上層只需一個匯入面。
 from agent_governance_s2_4_prepare import (  # noqa: E402,F401
@@ -122,38 +140,34 @@ canonical_digest = central_validator.canonical_digest
 artifact_self_digest = central_validator.artifact_self_digest
 
 
-# ── §8/§8.1/§8.3 host identity 與靜態目錄樹(worker 不得選)──────────────────────
-ENGINE_SCANNER_IDENTITY_NAME = "aiml-engine-scanner"
-ENGINE_SCANNER_HOME = "/var/lib/arcane-equilibrium/aiml/engine-scanner"
-ENGINE_SCANNER_SHELL = "/usr/sbin/nologin"
-ENGINE_SCANNER_IDENTITY_CONTRACT = {
-    "name": ENGINE_SCANNER_IDENTITY_NAME,
-    "group": ENGINE_SCANNER_IDENTITY_NAME,
-    "home": ENGINE_SCANNER_HOME,
-    "shell": ENGINE_SCANNER_SHELL,
-    "password_locked": True,
-    "supplementary_groups": [],
-    "account_expiry": None,
-    "system_account": True,
-    "interactive_login": False,
-}
-HOST_IDENTITY_STATIC_DIRECTORIES = (
-    {"path": "/opt/arcane-equilibrium/aiml/apps", "owner": "root", "group": "root", "mode": "0755"},
-    {"path": "/opt/arcane-equilibrium/aiml/launches", "owner": "root", "group": "root", "mode": "0755"},
-    {"path": "/opt/arcane-equilibrium/aiml/runtimes", "owner": "root", "group": "root", "mode": "0755"},
-    {
-        "path": "/etc/arcane-equilibrium/aiml/engine-scanner",
-        "owner": "root",
-        "group": ENGINE_SCANNER_IDENTITY_NAME,
-        "mode": "0750",
-    },
-    {
-        "path": ENGINE_SCANNER_HOME,
-        "owner": ENGINE_SCANNER_IDENTITY_NAME,
-        "group": ENGINE_SCANNER_IDENTITY_NAME,
-        "mode": "0700",
-    },
+
+# 依 §10.1.1 的 2000 行治理下沉至 agent_governance_s2_4_host_identity,此處逐名 re-export
+# (消費者的 ``apply.<name>`` 匯入面與常量值皆不變)。
+from agent_governance_s2_4_host_identity import (  # noqa: E402,F401
+    ENGINE_SCANNER_HOME,
+    ENGINE_SCANNER_IDENTITY_CONTRACT,
+    ENGINE_SCANNER_IDENTITY_NAME,
+    ENGINE_SCANNER_SHELL,
+    HOST_IDENTITY_STATIC_DIRECTORIES,
+    HOST_IDENTITY_SYSTEM_ID_MAX,
+    HOST_IDENTITY_SYSTEM_ID_MIN,
+    S2_3_ENGINE_SCANNER_COMPONENT,
+    S2_3_ENGINE_SCANNER_PG_ROLE,
+    S2_3_EXPECTED_IDENTITY_REL,
+    HostIdentityDriver,
+    _compensate_host_identity,
+    _host_identity_contract_reasons,
+    _normalize_directory,
+    _normalize_identity,
+    _uid_gid_collision_reasons,
+    apply_s2_4_host_identity,
+    build_uid_gid_directory_manifest,
+    host_identity_abi_projection,
+    host_identity_desired_state,
+    host_identity_directory_tree,
+    s2_3_expected_identity_reasons,
 )
+
 # §8.1:三個不可變安裝根;digest 葉名由內容身分導出,caller 永不遞交路徑。
 INSTALL_ROOTS = {
     "base_runtime_tree_digest": "/opt/arcane-equilibrium/aiml/runtimes",
@@ -176,297 +190,6 @@ INACTIVE_UNIT_POSTSTATE = {
     "FragmentPath": UNIT_FRAGMENT_PATH,
     "DropInPaths": "",
 }
-
-
-# --------------------------------------------------------------------------- #
-# 1) HOST_IDENTITY_INSTALL
-# --------------------------------------------------------------------------- #
-class HostIdentityDriver(Protocol):
-    """host 身分/靜態目錄的固定操作面;caller 永不遞交 shell 或任意路徑。"""
-
-    evidence_class: str
-
-    def journal_transition(self, *, entry: dict[str, Any]) -> None: ...
-
-    def observe_identity(self, *, name: str) -> dict[str, Any] | None:
-        """回 passwd/shadow/group/NSS 觀測;不存在回 ``None``。"""
-        ...
-
-    def create_system_account(
-        self, *, name: str, uid: int, gid: int, home: str, shell: str
-    ) -> None:
-        """建立 system account(locked password、無 supplementary group、無到期)。"""
-        ...
-
-    def remove_system_account(self, *, name: str) -> None: ...
-
-    def observe_directory(self, *, path: str) -> dict[str, Any] | None: ...
-
-    def create_directory(self, *, path: str, owner: str, group: str, mode: str) -> None: ...
-
-    def remove_directory(self, *, path: str) -> None: ...
-
-    def independent_postcheck(
-        self, *, component_effect_class: str, install_plan_digest: str, applier_node: str
-    ) -> dict[str, Any]: ...
-
-    def trusted_host_time(self) -> str: ...
-
-
-def host_identity_desired_state(*, uid: int, gid: int) -> dict[str, Any]:
-    """§8 的 code-owned 期望身分(UID/GID 由被簽 manifest 供給,其餘全部凍結)。"""
-
-    desired = dict(ENGINE_SCANNER_IDENTITY_CONTRACT)
-    desired["uid"] = int(uid)
-    desired["gid"] = int(gid)
-    return desired
-
-
-def host_identity_directory_tree() -> list[dict[str, Any]]:
-    return [dict(entry) for entry in HOST_IDENTITY_STATIC_DIRECTORIES]
-
-
-def build_uid_gid_directory_manifest(*, uid: int, gid: int) -> dict[str, Any]:
-    """被 intent 以 digest 綁定的 UID/GID/目錄 manifest(唯一構造點)。"""
-
-    return {
-        "schema_version": "s2_4_uid_gid_directory_manifest_v1_informal",
-        "identity": host_identity_desired_state(uid=uid, gid=gid),
-        "static_directories": host_identity_directory_tree(),
-    }
-
-
-def apply_s2_4_host_identity(
-    intent: Any,
-    authorization_set: Any = None,
-    driver: "HostIdentityDriver | None" = None,
-    *,
-    uid_gid_directory_manifest: Any = None,
-    now: str | datetime | None = None,
-    replay_ledger: Any = None,
-    ownership_evidence: Any = None,
-    clock: Callable[[], datetime] | None = None,
-    applier_node: str = "s2-4-host-identity-applier",
-) -> dict[str, Any]:
-    """``HOST_IDENTITY_INSTALL``:exact S2.3 身分 + 靜態目錄樹;屬性漂移在變更之前即停手。"""
-
-    reject, row_abi = _component_precheck(
-        intent, authorization_set, replay_ledger,
-        expected_class="HOST_IDENTITY_INSTALL", now=now,
-    )
-    if reject is not None:
-        return reject
-    fields = intent["required_intent_fields"]
-    if not isinstance(uid_gid_directory_manifest, dict) or canonical_digest(
-        uid_gid_directory_manifest
-    ) != fields["uid_gid_directory_manifest_digest"]:
-        return _verdict(
-            COMPONENT_STATUS_PRECHECK_FAILED,
-            [
-                "the supplied UID/GID/directory manifest does not re-derive the digest bound "
-                "into the signed component intent"
-            ],
-            component_effect_class="HOST_IDENTITY_INSTALL", row_abi=row_abi,
-        )
-    desired_identity = uid_gid_directory_manifest.get("identity")
-    desired_dirs = uid_gid_directory_manifest.get("static_directories")
-    contract_reasons = _host_identity_contract_reasons(desired_identity, desired_dirs)
-    if contract_reasons:
-        return _verdict(
-            COMPONENT_STATUS_PRECHECK_FAILED, contract_reasons,
-            component_effect_class="HOST_IDENTITY_INSTALL", row_abi=row_abi,
-        )
-    if driver is None:
-        return _pending_verdict("HOST_IDENTITY_INSTALL", row_abi)
-
-    tick = clock or (lambda: datetime.now(timezone.utc))
-    journal = _Journal(driver, tick)
-    plan_digest = intent["install_plan_digest"]
-    pre_state_digest = intent["pre_state_digest"]
-    created_dirs: list[str] = []
-    created_account = False
-    try:
-        observed_identity = driver.observe_identity(name=desired_identity["name"])
-        identity_state = classify_pre_state(
-            observed=_normalize_identity(observed_identity),
-            desired=_normalize_identity(desired_identity),
-            ownership_evidence=(ownership_evidence or {}).get("identity"),
-        )
-        observed_dirs = {
-            entry["path"]: driver.observe_directory(path=entry["path"]) for entry in desired_dirs
-        }
-        dir_states = {
-            entry["path"]: classify_pre_state(
-                observed=_normalize_directory(observed_dirs[entry["path"]]),
-                desired=_normalize_directory(entry),
-                ownership_evidence=(ownership_evidence or {}).get(entry["path"]),
-            )
-            for entry in desired_dirs
-        }
-    except Exception as error:  # noqa: BLE001 - 觀測逸出 = 零變更 typed 失敗
-        return _verdict(
-            COMPONENT_STATUS_PRECHECK_FAILED,
-            [f"host identity pre-state observation failed: {error}"],
-            component_effect_class="HOST_IDENTITY_INSTALL", row_abi=row_abi, driver_engaged=True,
-        )
-    # §10.5 #37:任何 service-account / 目錄屬性漂移在第一次變更之前失敗。漂移(PRESTATE_MISMATCH)
-    # 的優先序高於「未擁有」——只要任一 subject 漂移,整個 row 就停手,不論其他 subject 的狀態。
-    blocking = [("identity", identity_state)] + sorted(dir_states.items())
-    drifted = [(label, state) for label, state in blocking if state["state"] == "PRESTATE_MISMATCH"]
-    if drifted:
-        return _verdict(
-            COMPONENT_STATUS_PRESTATE_MISMATCH,
-            [f"{label}: {reason}" for label, state in drifted for reason in state["reasons"]]
-            + ["service-account/directory attribute drift fails before any mutation (§10.5 #37)"],
-            component_effect_class="HOST_IDENTITY_INSTALL", row_abi=row_abi, driver_engaged=True,
-        )
-    unowned = [
-        (label, state) for label, state in blocking
-        if state["state"] == "PREEXISTING_UNOWNED_STATE"
-    ]
-    if unowned:
-        return _verdict(
-            COMPONENT_STATUS_PREEXISTING_UNOWNED,
-            [f"{label}: {reason}" for label, state in unowned for reason in state["reasons"]],
-            component_effect_class="HOST_IDENTITY_INSTALL", row_abi=row_abi, driver_engaged=True,
-        )
-    if identity_state["state"] == "NOOP_VERIFIED" and all(
-        state["state"] == "NOOP_VERIFIED" for state in dir_states.values()
-    ):
-        return _finish_row(
-            status=COMPONENT_STATUS_NOOP_VERIFIED, reasons=[],
-            component_effect_class="HOST_IDENTITY_INSTALL", row_abi=row_abi, driver=driver,
-            plan_digest=plan_digest, pre_state_digest=pre_state_digest,
-            post_state_digest=pre_state_digest,
-            applied_state_digest=_subject_digest(uid_gid_directory_manifest),
-            journal=journal, applier_node=applier_node, clock=tick,
-            mutation_performed=False, compensate=lambda: True,
-        )
-    absent_state = _subject_digest({"identity": None, "directories": {}})
-    try:
-        journal.write("APPLYING", pre_state_digest, pre_state_digest)
-        if identity_state["state"] == "ABSENT":
-            driver.create_system_account(
-                name=desired_identity["name"],
-                uid=int(desired_identity["uid"]),
-                gid=int(desired_identity["gid"]),
-                home=desired_identity["home"],
-                shell=desired_identity["shell"],
-            )
-            created_account = True
-        for entry in desired_dirs:
-            if dir_states[entry["path"]]["state"] == "ABSENT":
-                driver.create_directory(
-                    path=entry["path"], owner=entry["owner"], group=entry["group"],
-                    mode=entry["mode"],
-                )
-                created_dirs.append(entry["path"])
-        applied = {
-            "identity": _normalize_identity(driver.observe_identity(name=desired_identity["name"])),
-            "directories": {
-                entry["path"]: _normalize_directory(driver.observe_directory(path=entry["path"]))
-                for entry in desired_dirs
-            },
-        }
-        journal.write("APPLIED", pre_state_digest, _subject_digest(applied))
-    except Exception as error:  # noqa: BLE001
-        return _compensating_failure(
-            reason=f"host identity apply failed: {error}",
-            component_effect_class="HOST_IDENTITY_INSTALL", row_abi=row_abi,
-            plan_digest=plan_digest, pre_state_digest=pre_state_digest,
-            post_state_digest=absent_state, journal=journal, clock=tick,
-            compensate=lambda: _compensate_host_identity(
-                driver, created_account, created_dirs, desired_identity["name"]
-            ),
-        )
-    expected = {
-        "identity": _normalize_identity(desired_identity),
-        "directories": {entry["path"]: _normalize_directory(entry) for entry in desired_dirs},
-    }
-    if applied != expected:
-        return _compensating_failure(
-            reason=(
-                "the observed post-apply host identity/directory tree does not equal the signed "
-                "desired state"
-            ),
-            component_effect_class="HOST_IDENTITY_INSTALL", row_abi=row_abi,
-            plan_digest=plan_digest, pre_state_digest=pre_state_digest,
-            post_state_digest=_subject_digest(applied), journal=journal, clock=tick,
-            compensate=lambda: _compensate_host_identity(
-                driver, created_account, created_dirs, desired_identity["name"]
-            ),
-        )
-    return _finish_row(
-        status=COMPONENT_STATUS_SATISFIED, reasons=[],
-        component_effect_class="HOST_IDENTITY_INSTALL", row_abi=row_abi, driver=driver,
-        plan_digest=plan_digest, pre_state_digest=pre_state_digest,
-        post_state_digest=_subject_digest(applied),
-        applied_state_digest=_subject_digest(applied), journal=journal,
-        applier_node=applier_node, clock=tick, mutation_performed=True,
-        compensate=lambda: _compensate_host_identity(
-            driver, created_account, created_dirs, desired_identity["name"]
-        ),
-        observed_subjects=applied,
-    )
-
-
-def _host_identity_contract_reasons(identity: Any, directories: Any) -> list[str]:
-    """被簽 manifest 必須逐欄等於 §8 的 code-owned 身分/目錄契約。"""
-
-    reasons: list[str] = []
-    if not isinstance(identity, dict):
-        return ["uid/gid manifest identity must be an object"]
-    for key, value in ENGINE_SCANNER_IDENTITY_CONTRACT.items():
-        if identity.get(key) != value:
-            reasons.append(
-                f"host identity {key}={identity.get(key)!r} is not the §8 contract value {value!r}"
-            )
-    for key in ("uid", "gid"):
-        value = identity.get(key)
-        if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
-            reasons.append(f"host identity {key} must be a positive integer from the signed plan")
-    if not isinstance(directories, list) or [
-        {k: entry.get(k) for k in ("path", "owner", "group", "mode")}
-        for entry in directories
-        if isinstance(entry, dict)
-    ] != host_identity_directory_tree():
-        reasons.append(
-            "the static directory manifest is not the exact §8/§8.1 owner/mode tree "
-            "(worker-selected directories or modes are rejected)"
-        )
-    return reasons
-
-
-def _normalize_identity(observed: Any) -> dict[str, Any] | None:
-    if not isinstance(observed, dict):
-        return None
-    keys = tuple(ENGINE_SCANNER_IDENTITY_CONTRACT) + ("uid", "gid")
-    return {key: observed.get(key) for key in keys}
-
-
-def _normalize_directory(observed: Any) -> dict[str, Any] | None:
-    if not isinstance(observed, dict):
-        return None
-    return {key: observed.get(key) for key in ("path", "owner", "group", "mode")}
-
-
-def _compensate_host_identity(
-    driver: Any, created_account: bool, created_dirs: list[str], name: str
-) -> bool:
-    """§5.4 ownership-aware:只移除本次證明為 absent 且已標 task-owned 的新增物。"""
-
-    ok = True
-    for path in reversed(created_dirs):
-        try:
-            driver.remove_directory(path=path)
-        except Exception:  # noqa: BLE001
-            ok = False
-    if created_account:
-        try:
-            driver.remove_system_account(name=name)
-        except Exception:  # noqa: BLE001
-            ok = False
-    return ok
 
 
 # --------------------------------------------------------------------------- #
@@ -565,6 +288,75 @@ def public_default_surfaces(manifest: dict[str, Any]) -> list[dict[str, str]]:
     return surfaces
 
 
+def public_default_surface_key(surface: dict[str, str]) -> str:
+    """``kind:object:privilege`` —— PUBLIC 前態擷取的封閉鍵名(唯一構造點)。"""
+
+    return f'{surface["kind"]}:{surface["object"]}:{surface["privilege"]}'
+
+
+def public_default_pre_state_keys(manifest: dict[str, Any]) -> list[str]:
+    """本 plan 會自 ``PUBLIC`` 收走的**精確**鍵集(擷取必須逐鍵覆蓋,不多不少)。"""
+
+    return sorted(public_default_surface_key(surface) for surface in public_default_surfaces(manifest))
+
+
+def derive_public_default_pre_state_status(
+    manifest: dict[str, Any], public_pre_state: Any
+) -> dict[str, Any]:
+    """§5.4:PUBLIC 前態擷取的**變更前**分類——缺鍵/多鍵/非布林一律 UNPROVEN。
+
+    這是 ``exact_pre_state_restored`` 的真正前提:driver 回 ``None``/``{}``/半份 dict 時,
+    「缺鍵 = 未持有」的舊解讀會讓補償一條 restore 都不發、卻仍宣稱 exact 還原,把
+    ``trading_ai`` 上的 PUBLIC 永久剝光(W3 review E2 P1-5)。故本函式改採
+    「缺鍵 = 無法證明」,並在任何一個 plan 會剝除的面上無法證明時 fail-closed。
+    """
+
+    expected = public_default_pre_state_keys(manifest)
+    if not isinstance(public_pre_state, dict):
+        return {
+            "status": "PUBLIC_PRESTATE_UNPROVEN",
+            "reasons": [
+                "the PUBLIC default-privilege pre-state capture is not an object; the plan "
+                "revokes PUBLIC surfaces it then cannot prove it may restore"
+            ],
+            "held_surfaces": [],
+            "plan_strips": expected,
+        }
+    observed_keys = sorted(str(key) for key in public_pre_state)
+    reasons: list[str] = []
+    missing = sorted(set(expected) - set(observed_keys))
+    extra = sorted(set(observed_keys) - set(expected))
+    if missing:
+        reasons.append(
+            f"the PUBLIC pre-state capture is missing {missing}; a surface this plan revokes "
+            "from PUBLIC must be captured before the forward revoke or it can never be exactly "
+            "restored (a missing key is NOT evidence that PUBLIC did not hold it)"
+        )
+    if extra:
+        reasons.append(
+            f"the PUBLIC pre-state capture carries out-of-plan surfaces {extra}; compensation "
+            "must never restore a privilege this plan never took"
+        )
+    non_boolean = sorted(
+        key for key in observed_keys if not isinstance(public_pre_state[key], bool)
+    )
+    if non_boolean:
+        reasons.append(
+            f"the PUBLIC pre-state capture carries non-boolean values for {non_boolean}"
+        )
+    if reasons:
+        return {
+            "status": "PUBLIC_PRESTATE_UNPROVEN", "reasons": reasons,
+            "held_surfaces": [], "plan_strips": expected,
+        }
+    return {
+        "status": "PUBLIC_PRESTATE_CAPTURED",
+        "reasons": [],
+        "held_surfaces": sorted(key for key in expected if public_pre_state[key] is True),
+        "plan_strips": expected,
+    }
+
+
 def generate_public_default_restore_statements(
     manifest: dict[str, Any], public_pre_state: Any
 ) -> list[str]:
@@ -572,13 +364,20 @@ def generate_public_default_restore_statements(
 
     ``public_pre_state`` 形如 ``{"database:trading_ai:TEMPORARY": True, ...}``:前態為假的面
     絕不被「還原」成真——補償永不授出本 plan 沒有拿走過的權限。
+
+    **前態必須逐鍵完整**:任何一個 plan 會剝除的面缺鍵/非布林即
+    ``ComponentContractError``——絕不把「缺鍵」默默當成「未持有」而少發還原語句。
     """
 
-    held = public_pre_state if isinstance(public_pre_state, dict) else {}
+    if not isinstance(public_pre_state, dict):
+        raise ComponentContractError("public_default_pre_state_not_captured")
     statements: list[str] = []
     for surface in public_default_surfaces(manifest):
-        key = f'{surface["kind"]}:{surface["object"]}:{surface["privilege"]}'
-        if held.get(key) is not True:
+        key = public_default_surface_key(surface)
+        held = public_pre_state.get(key)
+        if not isinstance(held, bool):
+            raise ComponentContractError("public_default_pre_state_incomplete")
+        if held is not True:
             continue
         keyword = "DATABASE" if surface["kind"] == "database" else "SCHEMA"
         statements.append(
@@ -608,7 +407,7 @@ def apply_s2_4_pg_role_acl(
     reject, row_abi = _component_precheck(
         intent, authorization_set, replay_ledger,
         expected_class="PG_ROLE_ACL_MIGRATION", now=now,
-        ingress_payloads=(),
+        ingress_payloads=(), ownership_evidence=ownership_evidence,
     )
     if reject is not None:
         return reject
@@ -655,7 +454,10 @@ def apply_s2_4_pg_role_acl(
     except ValueError as error:
         return _verdict(
             COMPONENT_STATUS_PRECHECK_FAILED,
-            [f"the closed ACL manifest could not generate its grant sequence: {error}"],
+            [
+                "the closed ACL manifest could not generate its grant sequence: "
+                f"{redact_driver_error(error)}"
+            ],
             component_effect_class="PG_ROLE_ACL_MIGRATION", row_abi=row_abi,
         )
     if driver is None:
@@ -667,46 +469,68 @@ def apply_s2_4_pg_role_acl(
     plan_digest = intent["install_plan_digest"]
     pre_state_digest = intent["pre_state_digest"]
     created_role = False
+    database = acl_manifest["database"]["name"]
+    schemas = [entry["name"] for entry in acl_manifest["schemas"]]
     try:
         observed_role = driver.observe_role(role_name=role)
     except Exception as error:  # noqa: BLE001
         return _verdict(
             COMPONENT_STATUS_PRECHECK_FAILED,
-            [f"pg role pre-state observation failed: {error}"],
+            [f"pg role pre-state observation failed: {redact_driver_error(error)}"],
             component_effect_class="PG_ROLE_ACL_MIGRATION", row_abi=row_abi, driver_engaged=True,
         )
-    if observed_role is not None:
-        ownership = (ownership_evidence or {}).get("pg_role")
-        if not (
-            isinstance(ownership, dict)
-            and ownership.get("s2_4_receipt_digest")
-            and ownership.get("journal_digest")
-        ):
-            return _verdict(
-                COMPONENT_STATUS_PREEXISTING_UNOWNED,
-                [
-                    f"pg role {role} already exists without matching S2.4 ownership evidence; "
-                    "S2.4 never adopts, re-passwords or overwrites an unowned role"
-                ],
-                component_effect_class="PG_ROLE_ACL_MIGRATION", row_abi=row_abi,
-                driver_engaged=True,
-            )
     # §5.4:擷取本 plan 將自 PUBLIC 收走的預設權限前態(非秘密),供 exact 還原。
     try:
-        public_pre_state = driver.observe_public_defaults(
-            database=acl_manifest["database"]["name"],
-            schemas=[entry["name"] for entry in acl_manifest["schemas"]],
-        )
+        public_pre_state = driver.observe_public_defaults(database=database, schemas=schemas)
     except Exception as error:  # noqa: BLE001
         return _verdict(
             COMPONENT_STATUS_PRECHECK_FAILED,
-            [f"PUBLIC default-privilege pre-state observation failed: {error}"],
+            [
+                "PUBLIC default-privilege pre-state observation failed: "
+                f"{redact_driver_error(error)}"
+            ],
             component_effect_class="PG_ROLE_ACL_MIGRATION", row_abi=row_abi, driver_engaged=True,
         )
-    public_restore = generate_public_default_restore_statements(acl_manifest, public_pre_state)
+    # §5.4:PUBLIC 前態必須在前向 REVOKE **之前**逐鍵分類;無法證明即零變更 typed 拒。
+    public_status = derive_public_default_pre_state_status(acl_manifest, public_pre_state)
+    if public_status["status"] != "PUBLIC_PRESTATE_CAPTURED":
+        return _verdict(
+            COMPONENT_STATUS_PRECHECK_FAILED,
+            public_status["reasons"] + [
+                "the plan would strip PUBLIC surfaces it cannot prove it may take; no revoke is "
+                "issued (§5.4)"
+            ],
+            component_effect_class="PG_ROLE_ACL_MIGRATION", row_abi=row_abi, driver_engaged=True,
+        )
+    captured_public = {key: bool(public_pre_state[key]) for key in public_status["plan_strips"]}
+    public_restore = generate_public_default_restore_statements(acl_manifest, captured_public)
+    if observed_role is not None:
+        reject = _pre_existing_pg_role_verdict(
+            driver, role=role, row_abi=row_abi, ownership_evidence=ownership_evidence,
+            captured_public=captured_public, plan_strips=public_status["plan_strips"],
+        )
+        if reject is not None:
+            return reject
+        # 既有且逐位元等於前一次 S2.4 run 留下的狀態 → 零變更 NOOP(絕不重跑前向 grant,
+        # 因為那會讓補償把一個既有角色剝光——§5.4 要求既有資源原樣還原而非 drop)。
+        return _finish_row(
+            status=COMPONENT_STATUS_NOOP_VERIFIED, reasons=[],
+            component_effect_class="PG_ROLE_ACL_MIGRATION", row_abi=row_abi, driver=driver,
+            plan_digest=plan_digest, pre_state_digest=pre_state_digest,
+            post_state_digest=pre_state_digest,
+            applied_state_digest=_subject_digest(
+                {"role": role, "grants": driver.observe_grants(role_name=role)}
+            ),
+            journal=journal, applier_node=applier_node, clock=tick,
+            mutation_performed=False,
+            compensate=lambda: compensation_outcome(compensated=True, reobserved=True),
+        )
 
-    def _compensate() -> bool:
-        return _compensate_pg(driver, revoke_statements, public_restore, created_role, role)
+    def _compensate() -> dict[str, Any]:
+        return _compensate_pg(
+            driver, revoke_statements, public_restore, created_role, role,
+            database=database, schemas=schemas, captured_public=captured_public,
+        )
 
     try:
         journal.write("APPLYING", pre_state_digest, pre_state_digest)
@@ -723,7 +547,7 @@ def apply_s2_4_pg_role_acl(
         journal.write("APPLIED", pre_state_digest, _subject_digest(applied))
     except Exception as error:  # noqa: BLE001
         return _compensating_failure(
-            reason=f"pg role/ACL apply failed: {error}",
+            reason=f"pg role/ACL apply failed: {redact_driver_error(error)}",
             component_effect_class="PG_ROLE_ACL_MIGRATION", row_abi=row_abi,
             plan_digest=plan_digest, pre_state_digest=pre_state_digest,
             post_state_digest=_subject_digest({"role": role, "grants": None}),
@@ -740,15 +564,88 @@ def apply_s2_4_pg_role_acl(
     )
 
 
+def _pre_existing_pg_role_verdict(
+    driver: Any,
+    *,
+    role: str,
+    row_abi: dict[str, Any],
+    ownership_evidence: Any,
+    captured_public: dict[str, bool],
+    plan_strips: list[str],
+) -> dict[str, Any] | None:
+    """§5.3/§5.4:既有 PG role 的變更前分類;可以繼續(NOOP)時回 ``None``。
+
+    S2.4 對既有角色只有兩條合法出路:**逐位元等於前一次 S2.4 run 的 applied 狀態**
+    (→ 零變更 NOOP),或**零變更 typed 拒**。舊行為(task-owned 就直接重跑
+    ``apply_manifest_grants``)沒有擷取角色的既有 grant/屬性,補償又因 ``created_role=False``
+    不 drop、也不還原前向 ``ALTER ROLE``——結果是把一個既有角色剝光(W3 review E2 P1-6)。
+    """
+
+    ownership = (ownership_evidence or {}).get("pg_role")
+    if not ownership_binding_present(ownership):
+        return _verdict(
+            COMPONENT_STATUS_PREEXISTING_UNOWNED,
+            [
+                f"pg role {role} already exists without matching S2.4 ownership evidence; "
+                "S2.4 never adopts, re-passwords or overwrites an unowned role"
+            ],
+            component_effect_class="PG_ROLE_ACL_MIGRATION", row_abi=row_abi, driver_engaged=True,
+        )
+    try:
+        observed_grants = driver.observe_grants(role_name=role)
+    except Exception as error:  # noqa: BLE001
+        return _verdict(
+            COMPONENT_STATUS_PRECHECK_FAILED,
+            [f"pg role grant pre-state observation failed: {redact_driver_error(error)}"],
+            component_effect_class="PG_ROLE_ACL_MIGRATION", row_abi=row_abi, driver_engaged=True,
+        )
+    state = classify_pre_state(
+        observed={"role": role, "grants": observed_grants},
+        desired={"role": role, "grants": observed_grants},
+        ownership_evidence=ownership,
+    )
+    reasons: list[str] = []
+    if ownership.get("applied_state_digest") != _subject_digest(
+        {"role": role, "grants": observed_grants}
+    ):
+        reasons.append(
+            f"pg role {role} exists and is task-owned, but the observed role/grant state does "
+            "not re-derive the applied_state_digest of the prior S2.4 receipt; S2.4 will not "
+            "mutate a role whose prior grants and attributes it cannot exactly restore"
+        )
+    still_held = sorted(key for key in plan_strips if captured_public.get(key) is True)
+    if still_held:
+        reasons.append(
+            f"pg role {role} is task-owned but PUBLIC still holds {still_held}; a re-apply of "
+            "the forward PUBLIC revoke cannot be compensated exactly against a pre-existing role"
+        )
+    if state["state"] != "NOOP_VERIFIED":
+        reasons.extend(state["reasons"])
+    if reasons:
+        return _verdict(
+            COMPONENT_STATUS_PRESTATE_MISMATCH, reasons,
+            component_effect_class="PG_ROLE_ACL_MIGRATION", row_abi=row_abi, driver_engaged=True,
+        )
+    return None
+
+
 def _compensate_pg(
     driver: Any,
     revoke_statements: list[str],
     public_restore_statements: list[str],
     created_role: bool,
     role: str,
-) -> bool:
+    *,
+    database: str,
+    schemas: list[str],
+    captured_public: dict[str, bool],
+) -> dict[str, Any]:
     """§5.4:收回本 plan 授出的 grant、原樣還原本 plan 自 PUBLIC 收走的預設權限;
-    新建角色才 drop,既有角色一律原樣還原。``aiml_observer_ro`` 永不被觸及。"""
+    新建角色才 drop,既有角色一律原樣還原。``aiml_observer_ro`` 永不被觸及。
+
+    補償跑完之後**再觀測** PUBLIC 預設權限與角色存在性,逐鍵比對擷取的前態;不相符即
+    ``reobserved=False`` → ``RECOVERY_REQUIRED``(永不憑「沒拋例外」宣稱 exact 還原)。
+    """
 
     ok = True
     try:
@@ -767,7 +664,17 @@ def _compensate_pg(
             driver.drop_task_owned_role(role_name=role)
         except Exception:  # noqa: BLE001
             ok = False
-    return ok
+    reobserved: bool | None
+    try:
+        after = driver.observe_public_defaults(database=database, schemas=schemas)
+        reobserved = isinstance(after, dict) and all(
+            after.get(key) is value for key, value in captured_public.items()
+        )
+        if created_role and driver.observe_role(role_name=role) is not None:
+            reobserved = False
+    except Exception:  # noqa: BLE001 - 無法再觀測 = 不宣稱 exact
+        reobserved = None
+    return compensation_outcome(compensated=ok, reobserved=reobserved)
 
 
 # --------------------------------------------------------------------------- #
@@ -793,6 +700,7 @@ def apply_s2_4_credential_install(
     reject, row_abi = _component_precheck(
         intent, authorization_set, replay_ledger,
         expected_class="CREDENTIAL_INSTALL", now=now, ingress_payloads=(),
+        ownership_evidence=ownership_evidence,
     )
     if reject is not None:
         return reject
@@ -825,7 +733,7 @@ def apply_s2_4_credential_install(
     except Exception as error:  # noqa: BLE001
         return _verdict(
             COMPONENT_STATUS_CREDENTIAL_UNSATISFIED,
-            [f"host credential capability could not be observed: {error}"],
+            [f"host credential capability could not be observed: {redact_driver_error(error)}"],
             component_effect_class="CREDENTIAL_INSTALL", row_abi=row_abi, driver_engaged=True,
         )
     capability_status = _credential.derive_host_credential_capability_status(capability)
@@ -841,13 +749,15 @@ def apply_s2_4_credential_install(
     except Exception as error:  # noqa: BLE001
         return _verdict(
             COMPONENT_STATUS_PRECHECK_FAILED,
-            [f"credential slot pre-state observation failed: {error}"],
+            [f"credential slot pre-state observation failed: {redact_driver_error(error)}"],
             component_effect_class="CREDENTIAL_INSTALL", row_abi=row_abi, driver_engaged=True,
         )
+    # §5.3:``task_owned`` 是 driver 的自報,必須另有 digest 綁定的 S2.4 receipt/journal
+    # 佐證才成立;一個裸 dict(甚至 ``{}``)絕不足以把 PREEXISTING_UNOWNED 換成放行。
     owned = (
         isinstance(observed_slot, dict)
         and bool(observed_slot.get("task_owned"))
-        and isinstance((ownership_evidence or {}).get("credential_slot"), dict)
+        and ownership_binding_present((ownership_evidence or {}).get("credential_slot"))
     )
     if observed_slot is not None and not owned:
         return _verdict(
@@ -926,7 +836,7 @@ def apply_s2_4_credential_install(
             raise ComponentContractError("; ".join(login_reasons))
     except Exception as error:  # noqa: BLE001
         return _compensating_failure(
-            reason=f"credential install failed: {error}",
+            reason=f"credential install failed: {redact_driver_error(error)}",
             component_effect_class="CREDENTIAL_INSTALL", row_abi=row_abi,
             plan_digest=plan_digest, pre_state_digest=pre_state_digest,
             post_state_digest=_subject_digest({"slot_path": slot_path, "state": "partial"}),
@@ -987,22 +897,28 @@ def _login_postcheck_reasons(login: Any, applier_node: str) -> list[str]:
 
 def _compensate_credential(
     driver: Any, slot_path: str, mode: str, prior_digest: str | None
-) -> bool:
-    """§7:first-provision 移除新 slot;rotation 原樣復原前一份**密文**(絕不重建明文)。"""
+) -> dict[str, Any]:
+    """§7:first-provision 移除新 slot;rotation 原樣復原前一份**密文**(絕不重建明文)。
+
+    本 row 的補償**本身就是**再觀測:``restore_previous_slot`` / ``remove_task_owned_slot``
+    的回傳即是補償後的 slot 觀測,故 ``reobserved`` 與 ``compensated`` 同源同真。
+    """
 
     try:
         if mode == "ROTATION" and prior_digest:
             observed = driver.restore_previous_slot(
                 slot_path=slot_path, previous_encrypted_blob_digest=prior_digest
             )
-            return bool(
+            restored = bool(
                 isinstance(observed, dict)
                 and observed.get("encrypted_blob_digest") == prior_digest
             )
+            return compensation_outcome(compensated=restored, reobserved=restored)
         observed = driver.remove_task_owned_slot(slot_path=slot_path)
-        return bool(isinstance(observed, dict) and observed.get("slot_absent"))
+        removed = bool(isinstance(observed, dict) and observed.get("slot_absent"))
+        return compensation_outcome(compensated=removed, reobserved=removed)
     except Exception:  # noqa: BLE001
-        return False
+        return compensation_outcome(compensated=False, reobserved=None)
 
 
 # --------------------------------------------------------------------------- #
@@ -1065,6 +981,7 @@ def apply_s2_4_learning_runtime(
     reject, row_abi = _component_precheck(
         intent, authorization_set, replay_ledger,
         expected_class="LEARNING_RUNTIME", now=now,
+        ownership_evidence=ownership_evidence,
     )
     if reject is not None:
         return reject
@@ -1123,7 +1040,7 @@ def apply_s2_4_learning_runtime(
     except Exception as error:  # noqa: BLE001
         return _verdict(
             COMPONENT_STATUS_BUNDLE_INVALID,
-            [f"independent staging re-hash failed: {error}"],
+            [f"independent staging re-hash failed: {redact_driver_error(error)}"],
             component_effect_class="LEARNING_RUNTIME", row_abi=row_abi, driver_engaged=True,
         )
     rehash_reasons = [
@@ -1143,29 +1060,51 @@ def apply_s2_4_learning_runtime(
     except Exception as error:  # noqa: BLE001
         return _verdict(
             COMPONENT_STATUS_PRECHECK_FAILED,
-            [f"install-root pre-state observation failed: {error}"],
+            [f"install-root pre-state observation failed: {redact_driver_error(error)}"],
             component_effect_class="LEARNING_RUNTIME", row_abi=row_abi, driver_engaged=True,
         )
-    for field, observed in pre_trees.items():
-        if observed is None:
-            continue
-        ownership = (ownership_evidence or {}).get(targets[field])
-        if isinstance(ownership, dict) and ownership.get("s2_4_receipt_digest") and (
-            observed.get("digest") == prepared_bundle[field]
-        ):
-            continue
+    # §5.3:三個安裝根逐一過同一條 classify_pre_state;NOOP 的樹**不再發佈**——舊行為會把
+    # 一棵 task-owned 既有樹重新發佈,補償再把它 remove 掉(§5.4 只准移除證明為 absent 的
+    # 新增物,W3 review E2 P1-6)。
+    tree_states = {
+        field: classify_pre_state(
+            observed=_normalize_tree(pre_trees[field]),
+            desired={"digest": prepared_bundle[field]},
+            ownership_evidence=(ownership_evidence or {}).get(targets[field]),
+        )
+        for field in sorted(targets)
+    }
+    blocked = [
+        (field, state) for field, state in tree_states.items()
+        if state["state"] not in {"ABSENT", "NOOP_VERIFIED"}
+    ]
+    if blocked:
         return _verdict(
             COMPONENT_STATUS_PREEXISTING_UNOWNED,
             [
                 f"{targets[field]} already exists without matching S2.4 ownership evidence; "
                 "the immutable install root is never adopted or overwritten"
-            ],
+                for field, _state in blocked
+            ] + [reason for _field, state in blocked for reason in state["reasons"]],
             component_effect_class="LEARNING_RUNTIME", row_abi=row_abi, driver_engaged=True,
+        )
+    if all(state["state"] == "NOOP_VERIFIED" for state in tree_states.values()):
+        return _finish_row(
+            status=COMPONENT_STATUS_NOOP_VERIFIED, reasons=[],
+            component_effect_class="LEARNING_RUNTIME", row_abi=row_abi, driver=driver,
+            plan_digest=plan_digest, pre_state_digest=pre_state_digest,
+            post_state_digest=pre_state_digest,
+            applied_state_digest=_subject_digest({"targets": targets, "observed": pre_trees}),
+            journal=journal, applier_node=applier_node, clock=tick, mutation_performed=False,
+            compensate=lambda: compensation_outcome(compensated=True, reobserved=True),
         )
     try:
         journal.write("APPLYING", pre_state_digest, pre_state_digest)
         observed_trees: dict[str, Any] = {}
         for field, target in sorted(targets.items()):
+            if tree_states[field]["state"] == "NOOP_VERIFIED":
+                observed_trees[field] = pre_trees[field]
+                continue
             result = driver.publish_tree(
                 staging_root=staging_root, target_root=target,
                 expected_digest=prepared_bundle[field], subtree=field,
@@ -1179,7 +1118,7 @@ def apply_s2_4_learning_runtime(
         journal.write("APPLIED", pre_state_digest, _subject_digest(applied))
     except Exception as error:  # noqa: BLE001
         return _compensating_failure(
-            reason=f"immutable tree publication failed: {error}",
+            reason=f"immutable tree publication failed: {redact_driver_error(error)}",
             component_effect_class="LEARNING_RUNTIME", row_abi=row_abi,
             plan_digest=plan_digest, pre_state_digest=pre_state_digest,
             post_state_digest=_subject_digest({"targets": targets, "state": "partial"}),
@@ -1221,14 +1160,31 @@ def _immutable_tree_reasons(observed: Any, expected_digest: str, target: str) ->
     return reasons
 
 
-def _compensate_trees(driver: Any, published: list[str]) -> bool:
+def _normalize_tree(observed: Any) -> dict[str, Any] | None:
+    """安裝根前態的封閉投影(內容身分即該樹的身分)。"""
+
+    if not isinstance(observed, dict):
+        return None
+    return {"digest": observed.get("digest")}
+
+
+def _compensate_trees(driver: Any, published: list[str]) -> dict[str, Any]:
+    """§5.4:只移除本次真正發佈的樹,並在移除後**再觀測**確認其確實不存在。"""
+
     ok = True
     for target in reversed(published):
         try:
             driver.remove_tree(target_root=target)
         except Exception:  # noqa: BLE001
             ok = False
-    return ok
+    reobserved: bool | None = True
+    try:
+        for target in published:
+            if driver.observe_tree(target_root=target) is not None:
+                reobserved = False
+    except Exception:  # noqa: BLE001 - 無法再觀測 = 不宣稱 exact
+        reobserved = None
+    return compensation_outcome(compensated=ok, reobserved=reobserved)
 
 
 # --------------------------------------------------------------------------- #
@@ -1246,6 +1202,18 @@ class EngineScannerInstallDriver(Protocol):
     def journal_transition(self, *, entry: dict[str, Any]) -> None: ...
 
     def observe_unit(self) -> dict[str, Any] | None: ...
+
+    def observe_policy_file(self, *, path: str) -> dict[str, Any] | None:
+        """回 candidate policy 檔的 ``{path, owner, group, mode, digest}``;不存在回 ``None``。"""
+        ...
+
+    def observe_topology_guard(self, *, path: str) -> dict[str, Any] | None:
+        """回 topology guard 檔的同形觀測;不存在回 ``None``。"""
+        ...
+
+    def observe_evidence_directory(self, *, path: str) -> dict[str, Any] | None:
+        """回 candidate evidence 目錄的 ``{path, owner, group, mode, empty}``;不存在回 ``None``。"""
+        ...
 
     def install_unit_fragment(self, *, fragment_path: str, unit_text: str) -> dict[str, Any]:
         """安裝由 W2c renderer 產生的 unit bytes(caller 無從遞交 unit 文本)。"""
@@ -1278,6 +1246,48 @@ class EngineScannerInstallDriver(Protocol):
     ) -> dict[str, Any]: ...
 
     def trusted_host_time(self) -> str: ...
+
+
+def _bytes_digest(payload: bytes) -> str:
+    """落盤位元組的內容身分(檔案觀測與期望狀態共用的同一形)。"""
+
+    import hashlib
+
+    return "sha256:" + hashlib.sha256(bytes(payload)).hexdigest()
+
+
+def engine_scanner_desired_subjects(
+    *, policy_bytes: bytes, guard_bytes: bytes, unit_text: str
+) -> dict[str, dict[str, Any]]:
+    """§8.3:ENGINE_SCANNER row 四個 subject 的 code-owned 期望狀態(caller 不可選)。"""
+
+    return {
+        "policy": {
+            "path": CANDIDATE_POLICY_PATH, "owner": "root",
+            "group": ENGINE_SCANNER_IDENTITY_NAME, "mode": "0440",
+            "digest": _bytes_digest(policy_bytes),
+        },
+        "guard": {
+            "path": _topology.TOPOLOGY_GUARD_PATH, "owner": "root",
+            "group": ENGINE_SCANNER_IDENTITY_NAME, "mode": "0440",
+            "digest": _bytes_digest(guard_bytes),
+        },
+        "evidence": {
+            "path": CANDIDATE_EVIDENCE_DIR, "owner": ENGINE_SCANNER_IDENTITY_NAME,
+            "group": ENGINE_SCANNER_IDENTITY_NAME, "mode": "0700", "empty": True,
+        },
+        "unit": {**INACTIVE_UNIT_POSTSTATE, "fragment_digest": canonical_digest(unit_text)},
+    }
+
+
+def _normalize_engine_scanner_subject(
+    subject: str, observed: Any, desired: dict[str, Any]
+) -> dict[str, Any] | None:
+    """把觀測收斂成與期望狀態**同鍵集**的投影(多餘欄位不參與分類)。"""
+
+    if not isinstance(observed, dict):
+        return None
+    return {key: observed.get(key) for key in desired}
 
 
 def canonical_guard_bytes(guard: dict[str, Any]) -> bytes:
@@ -1324,6 +1334,7 @@ def apply_s2_4_engine_scanner_unit(
         intent, authorization_set, replay_ledger,
         expected_class="ENGINE_SCANNER", now=now,
         ingress_payloads=(unit_fields, candidate_policy_budgets),
+        ownership_evidence=ownership_evidence,
     )
     if reject is not None:
         return reject
@@ -1415,48 +1426,108 @@ def apply_s2_4_engine_scanner_unit(
     plan_digest = intent["install_plan_digest"]
     pre_state_digest = intent["pre_state_digest"]
     installed: list[str] = []
+    guard_bytes = canonical_guard_bytes(topology_guard)
+    desired_subjects = engine_scanner_desired_subjects(
+        policy_bytes=policy_bytes, guard_bytes=guard_bytes, unit_text=unit_text
+    )
+    # §5.3 / 硬邊界 11:四個 subject(policy / guard / evidence / unit)全部走同一條
+    # classify_pre_state。舊行為只分類 unit,policy/guard/evidence 一律無條件安裝——
+    # 一份既有的 operator policy 檔會被靜默覆寫、再被補償刪掉(W3 review E2 P1-3)。
     try:
-        pre_unit = driver.observe_unit()
+        observed_subjects = {
+            "policy": driver.observe_policy_file(path=CANDIDATE_POLICY_PATH),
+            "guard": driver.observe_topology_guard(path=_topology.TOPOLOGY_GUARD_PATH),
+            "evidence": driver.observe_evidence_directory(path=CANDIDATE_EVIDENCE_DIR),
+            "unit": driver.observe_unit(),
+        }
     except Exception as error:  # noqa: BLE001
         return _verdict(
             COMPONENT_STATUS_PRECHECK_FAILED,
-            [f"unit pre-state observation failed: {error}"],
-            component_effect_class="ENGINE_SCANNER", row_abi=row_abi, driver_engaged=True,
-        )
-    if pre_unit is not None and not isinstance(
-        (ownership_evidence or {}).get("unit"), dict
-    ):
-        return _verdict(
-            COMPONENT_STATUS_PREEXISTING_UNOWNED,
             [
-                f"{UNIT_FRAGMENT_PATH} already exists without matching S2.4 ownership evidence; "
-                "no adoption or overwrite is performed"
+                "engine-scanner unit/policy/guard/evidence pre-state observation failed: "
+                f"{redact_driver_error(error)}"
             ],
             component_effect_class="ENGINE_SCANNER", row_abi=row_abi, driver_engaged=True,
         )
+    subject_states = {
+        subject: classify_pre_state(
+            observed=_normalize_engine_scanner_subject(
+                subject, observed_subjects[subject], desired_subjects[subject]
+            ),
+            desired=desired_subjects[subject],
+            ownership_evidence=(ownership_evidence or {}).get(subject),
+        )
+        for subject in sorted(desired_subjects)
+    }
+    drifted = [
+        (subject, state) for subject, state in subject_states.items()
+        if state["state"] == "PRESTATE_MISMATCH"
+    ]
+    if drifted:
+        return _verdict(
+            COMPONENT_STATUS_PRESTATE_MISMATCH,
+            [f"{subject}: {reason}" for subject, state in drifted for reason in state["reasons"]]
+            + [
+                "an existing engine-scanner unit/policy/guard/evidence subject drifted from the "
+                "signed desired state; S2.4 never overwrites it (§5.3/§5.4)"
+            ],
+            component_effect_class="ENGINE_SCANNER", row_abi=row_abi, driver_engaged=True,
+        )
+    unowned = [
+        (subject, state) for subject, state in subject_states.items()
+        if state["state"] == "PREEXISTING_UNOWNED_STATE"
+    ]
+    if unowned:
+        return _verdict(
+            COMPONENT_STATUS_PREEXISTING_UNOWNED,
+            [
+                f"{desired_subjects[subject]['path'] if 'path' in desired_subjects[subject] else UNIT_FRAGMENT_PATH}"
+                " already exists without matching S2.4 ownership evidence; no adoption or "
+                "overwrite is performed"
+                for subject, _state in unowned
+            ],
+            component_effect_class="ENGINE_SCANNER", row_abi=row_abi, driver_engaged=True,
+        )
+    if all(state["state"] == "NOOP_VERIFIED" for state in subject_states.values()):
+        return _finish_row(
+            status=COMPONENT_STATUS_NOOP_VERIFIED, reasons=[],
+            component_effect_class="ENGINE_SCANNER", row_abi=row_abi, driver=driver,
+            plan_digest=plan_digest, pre_state_digest=pre_state_digest,
+            post_state_digest=pre_state_digest,
+            applied_state_digest=_subject_digest(
+                {"unit": observed_subjects["unit"], "manifests": manifests}
+            ),
+            journal=journal, applier_node=applier_node, clock=tick, mutation_performed=False,
+            compensate=lambda: compensation_outcome(compensated=True, reobserved=True),
+        )
     try:
         journal.write("APPLYING", pre_state_digest, pre_state_digest)
-        driver.install_policy_file(
-            path=CANDIDATE_POLICY_PATH, policy_bytes=policy_bytes, owner="root",
-            group=ENGINE_SCANNER_IDENTITY_NAME, mode="0440",
-        )
-        installed.append("policy")
-        driver.install_topology_guard(
-            path=_topology.TOPOLOGY_GUARD_PATH,
-            guard_bytes=canonical_guard_bytes(topology_guard),
-            owner="root", group=ENGINE_SCANNER_IDENTITY_NAME, mode="0440",
-        )
-        installed.append("guard")
-        evidence = driver.create_evidence_directory(
-            path=CANDIDATE_EVIDENCE_DIR, owner=ENGINE_SCANNER_IDENTITY_NAME,
-            group=ENGINE_SCANNER_IDENTITY_NAME, mode="0700",
-        )
-        installed.append("evidence")
-        if not isinstance(evidence, dict) or evidence.get("empty") is not True:
-            raise ComponentContractError("candidate_evidence_directory_must_be_empty_on_install")
-        driver.install_unit_fragment(fragment_path=UNIT_FRAGMENT_PATH, unit_text=unit_text)
-        installed.append("unit")
-        driver.daemon_reload()
+        if subject_states["policy"]["state"] == "ABSENT":
+            driver.install_policy_file(
+                path=CANDIDATE_POLICY_PATH, policy_bytes=policy_bytes, owner="root",
+                group=ENGINE_SCANNER_IDENTITY_NAME, mode="0440",
+            )
+            installed.append("policy")
+        if subject_states["guard"]["state"] == "ABSENT":
+            driver.install_topology_guard(
+                path=_topology.TOPOLOGY_GUARD_PATH, guard_bytes=guard_bytes,
+                owner="root", group=ENGINE_SCANNER_IDENTITY_NAME, mode="0440",
+            )
+            installed.append("guard")
+        if subject_states["evidence"]["state"] == "ABSENT":
+            evidence = driver.create_evidence_directory(
+                path=CANDIDATE_EVIDENCE_DIR, owner=ENGINE_SCANNER_IDENTITY_NAME,
+                group=ENGINE_SCANNER_IDENTITY_NAME, mode="0700",
+            )
+            installed.append("evidence")
+            if not isinstance(evidence, dict) or evidence.get("empty") is not True:
+                raise ComponentContractError(
+                    "candidate_evidence_directory_must_be_empty_on_install"
+                )
+        if subject_states["unit"]["state"] == "ABSENT":
+            driver.install_unit_fragment(fragment_path=UNIT_FRAGMENT_PATH, unit_text=unit_text)
+            installed.append("unit")
+            driver.daemon_reload()
         observed_unit = driver.observe_unit()
         unit_reasons = _inactive_unit_reasons(observed_unit, unit_text)
         if unit_reasons:
@@ -1465,7 +1536,7 @@ def apply_s2_4_engine_scanner_unit(
         journal.write("APPLIED", pre_state_digest, _subject_digest(applied))
     except Exception as error:  # noqa: BLE001
         return _compensating_failure(
-            reason=f"engine-scanner unit install failed: {error}",
+            reason=f"engine-scanner unit install failed: {redact_driver_error(error)}",
             component_effect_class="ENGINE_SCANNER", row_abi=row_abi,
             plan_digest=plan_digest, pre_state_digest=pre_state_digest,
             post_state_digest=_subject_digest({"unit": UNIT_FRAGMENT_PATH, "state": "partial"}),
@@ -1504,8 +1575,12 @@ def _inactive_unit_reasons(observed: Any, unit_text: str) -> list[str]:
     return reasons
 
 
-def _compensate_engine_scanner(driver: Any, installed: list[str]) -> bool:
-    """§5.4 逆序補償;unit bytes 回滾後必須再跑一次 typed daemon-reload。"""
+def _compensate_engine_scanner(driver: Any, installed: list[str]) -> dict[str, Any]:
+    """§5.4 逆序補償;unit bytes 回滾後必須再跑一次 typed daemon-reload。
+
+    只移除本次分類為 ABSENT 而真正安裝的 subject(既有的 policy/guard/evidence/unit 永不
+    被刪),補償後逐一**再觀測**確認其確實不存在,不相符即 ``reobserved=False``。
+    """
 
     ok = True
     actions = {
@@ -1513,6 +1588,12 @@ def _compensate_engine_scanner(driver: Any, installed: list[str]) -> bool:
         "evidence": lambda: driver.remove_evidence_directory(path=CANDIDATE_EVIDENCE_DIR),
         "guard": lambda: driver.remove_topology_guard(path=_topology.TOPOLOGY_GUARD_PATH),
         "policy": lambda: driver.remove_policy_file(path=CANDIDATE_POLICY_PATH),
+    }
+    observers = {
+        "unit": lambda: driver.observe_unit(),
+        "evidence": lambda: driver.observe_evidence_directory(path=CANDIDATE_EVIDENCE_DIR),
+        "guard": lambda: driver.observe_topology_guard(path=_topology.TOPOLOGY_GUARD_PATH),
+        "policy": lambda: driver.observe_policy_file(path=CANDIDATE_POLICY_PATH),
     }
     unit_rolled_back = False
     for name in reversed(installed):
@@ -1526,7 +1607,14 @@ def _compensate_engine_scanner(driver: Any, installed: list[str]) -> bool:
             driver.daemon_reload()
         except Exception:  # noqa: BLE001
             ok = False
-    return ok
+    reobserved: bool | None = True
+    try:
+        for name in installed:
+            if observers[name]() is not None:
+                reobserved = False
+    except Exception:  # noqa: BLE001 - 無法再觀測 = 不宣稱 exact
+        reobserved = None
+    return compensation_outcome(compensated=ok, reobserved=reobserved)
 
 
 # --------------------------------------------------------------------------- #
@@ -1548,14 +1636,16 @@ def apply_abi_projection() -> dict[str, Any]:
         target_probe = None
     return {
         "component_entrypoints": {
-            "HOST_IDENTITY_INSTALL": "agent_governance_s2_4_apply.apply_s2_4_host_identity",
+            "HOST_IDENTITY_INSTALL": (
+                "agent_governance_s2_4_host_identity.apply_s2_4_host_identity"
+            ),
             "PG_ROLE_ACL_MIGRATION": "agent_governance_s2_4_apply.apply_s2_4_pg_role_acl",
             "CREDENTIAL_INSTALL": "agent_governance_s2_4_apply.apply_s2_4_credential_install",
             "LEARNING_RUNTIME": "agent_governance_s2_4_apply.apply_s2_4_learning_runtime",
             "ENGINE_SCANNER": "agent_governance_s2_4_apply.apply_s2_4_engine_scanner_unit",
         },
         "component_driver_protocols": [
-            "agent_governance_s2_4_apply.HostIdentityDriver",
+            "agent_governance_s2_4_host_identity.HostIdentityDriver",
             "agent_governance_s2_4_apply.PgRoleAclDriver",
             "agent_governance_s2_4_credential.CredentialInstallDriver",
             "agent_governance_s2_4_apply.RuntimeInstallDriver",
@@ -1568,10 +1658,31 @@ def apply_abi_projection() -> dict[str, Any]:
         },
         "component_raw_ingress_keys": list(COMPONENT_RAW_INGRESS_KEYS),
         "forbidden_unit_lifecycle_methods": list(FORBIDDEN_UNIT_LIFECYCLE_METHODS),
-        "host_identity_contract_digest": canonical_digest({
-            "identity": ENGINE_SCANNER_IDENTITY_CONTRACT,
-            "static_directories": host_identity_directory_tree(),
-        }),
+        # §8 / S2.3:HOST_IDENTITY 葉的 ABI 面(契約 digest + UID/GID 三重把關)。
+        **host_identity_abi_projection(),
+        # §5.3/§5.4:ownership_evidence 的封閉形狀與補償 typed 三分的活再導出。
+        "ownership_evidence_required_fields": list(OWNERSHIP_EVIDENCE_REQUIRED_FIELDS),
+        "bare_ownership_object_rejected": bool(
+            ownership_evidence_reasons({"unit": {}})
+        ),
+        "compensation_statuses": [
+            COMPENSATION_STATUS_EXACT,
+            COMPENSATION_STATUS_NOT_REOBSERVED,
+            COMPENSATION_STATUS_NOT_COMPENSATED,
+            COMPENSATION_STATUS_RECOVERY_REQUIRED,
+        ],
+        "absent_exception_does_not_claim_exact": (
+            derive_compensation_status(
+                compensation_outcome(compensated=True, reobserved=None)
+            )[0] == COMPENSATION_STATUS_NOT_REOBSERVED
+        ),
+        # §10.2:自報 attested evidence_class 一律被閘拒(fixture 無法鑄造 runtime 信任)。
+        "self_declared_attested_evidence_class_refused": (
+            derive_recorded_evidence_class(
+                type("_SelfDeclared", (), {"evidence_class": "PLATFORM_ATTESTED"})()
+            )["recorded_evidence_class"] == EVIDENCE_CLASS_STRUCTURAL_ONLY
+        ),
+        "engine_scanner_pre_state_subjects": ["evidence", "guard", "policy", "unit"],
         "install_roots": dict(INSTALL_ROOTS),
         "install_target_probe": target_probe,
         "immutable_tree_modes": dict(IMMUTABLE_TREE_MODES),

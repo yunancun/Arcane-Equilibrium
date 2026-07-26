@@ -41,6 +41,7 @@ _W3_OWNED_PATHS = tuple(sorted((
     "helper_scripts/maintenance_scripts/agent_governance_s2_4_apply.py",
     "helper_scripts/maintenance_scripts/agent_governance_s2_4_component.py",
     "helper_scripts/maintenance_scripts/agent_governance_s2_4_credential.py",
+    "helper_scripts/maintenance_scripts/agent_governance_s2_4_host_identity.py",
     "helper_scripts/maintenance_scripts/agent_governance_s2_4_install.py",
     "helper_scripts/maintenance_scripts/agent_governance_s2_4_prepare.py",
     "helper_scripts/maintenance_scripts/agent_governance_s2_4_probe.py",
@@ -77,6 +78,7 @@ _W3_OWNED_PATHS = tuple(sorted((
     "tests/structure/s2_4_w3b_testkit.py",
     "tests/structure/test_agent_governance_s2_4_apply.py",
     "tests/structure/test_agent_governance_s2_4_apply_pg_disposable.py",
+    "tests/structure/test_agent_governance_s2_4_host_identity.py",
     "tests/structure/test_agent_governance_s2_4_prepare.py",
     "tests/structure/test_agent_governance_s2_4_probe.py",
     "tests/structure/test_agent_governance_s2_4_topology.py",
@@ -114,6 +116,67 @@ _W3_EXPORTED_ABI = {
         "destination paths; every target path, grant statement and unit byte is derived from "
         "code-owned contracts and closed manifests"
     ),
+    "evidence_class_contract": (
+        "evidence_class is a self-declared attribute on the injected driver; nothing in-process "
+        "can distinguish a fixture from a real host driver by that field. W3 therefore REFUSES "
+        "to record a self-declared attested class and stamps STRUCTURAL_ONLY on every result, "
+        "prepare receipt and probe attestation until a trusted-host platform-attestation "
+        "verifier exists (see w4_owned_obligations)"
+    ),
+    "compensation_exactness_contract": (
+        "s2_4_component_effect_rollback_v1.status==COMPENSATED_EXACT is emitted only when a "
+        "post-compensation re-observation equals the captured pre-state; an absent exception "
+        "yields COMPENSATED_NOT_REOBSERVED with exact_pre_state_restored=false"
+    ),
+    # §10.3:W3 **不**提供、且不得被當成已提供的三項——每一項都是 W4/W6 的 owned 義務,
+    # 以 typed 狀態明載於 exported ABI(W3 wave-exit receipt 以 exported_abi_digest 綁定本表)。
+    "w4_owned_obligations": [
+        {
+            "obligation_id": "PERMIT_PLAN_BINDING",
+            "typed_status": "NOT_PROVIDED_BY_W3",
+            "owner_wave": "W4",
+            "spec_refs": ["§9.1", "§10.5 #36"],
+            "statement": (
+                "s2_4_operator_authorization_v1 carries only authorization_id and the NAMES in "
+                "payload_fields; it never carries the plan/intent VALUES, and no W3 gate "
+                "re-derives authorization_id from the intent. One signed permit therefore "
+                "authorizes any intent of that class inside its TTL, and §10.5 #36's 'rejected "
+                "by profile-specific SSHSIG' cannot be satisfied by construction today."
+            ),
+            "w3_provides": (
+                "profile identity + signature namespace + TTL + replay-ledger read; nothing that "
+                "binds a permit to one exact plan"
+            ),
+        },
+        {
+            "obligation_id": "REPLAY_LEDGER_APPEND",
+            "typed_status": "NOT_PROVIDED_BY_W3",
+            "owner_wave": "W4",
+            "spec_refs": ["§9.1", "§5.2"],
+            "statement": (
+                "W3 reads the replay ledger head to prove an authorization is UNCONSUMED, but "
+                "never appends a consumption entry. One permit therefore drives an unbounded "
+                "number of operations within its TTL."
+            ),
+            "w3_provides": "read-side derive_authorization_replay_binding only",
+        },
+        {
+            "obligation_id": "ENCRYPTED_BLOB_DIGEST_ORDERING",
+            "typed_status": "OPEN_DESIGN_QUESTION",
+            "owner_wave": "W4/W6",
+            "spec_refs": ["§5.1", "§7"],
+            "statement": (
+                "CREDENTIAL_INSTALL's signed intent must carry encrypted_blob_digest, but that "
+                "digest is the hash of non-deterministic `systemd-creds encrypt` output. Either "
+                "the intent cannot be signed before the encryption runs, or the plaintext handle "
+                "must survive the signing window. W3 enforces the binding it was given "
+                "(encrypt -> compare against the signed field) and does not resolve the ordering."
+            ),
+            "w3_provides": (
+                "the fail-closed comparison only; the §5.1 ordering question is unresolved"
+            ),
+        },
+    ],
 }
 # code-owned 探針輸入(與真 repo/runtime 無關;只為把行為折成 deterministic 投影值)。
 _W3_PROBE_MIRROR_ALLOWLIST = ("203.0.113.0/24",)

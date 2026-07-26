@@ -8,7 +8,11 @@
 
 - **零明文可序列化面**:秘密只存在於 :class:`SealedSecretHandle` 內;該物件拒
   ``repr``/``str``/``format``/``__reduce__``/``copy``/``json``,且**只能被消費一次**,
-  消費後 best-effort 歸零。任何 artifact 皆經 :func:`assert_no_secret_material` 遞迴掃描;
+  消費後 best-effort 歸零。每一把 handle 於建構時以 weakref 進入進程內哨兵登記簿,
+  生產側的 verdict/result/receipt 建構點一律呼叫 :func:`scan_serializable_surface`
+  (內部即 :func:`assert_no_secret_material`)遞迴掃描,命中即 fail-closed typed 拒;
+  driver/子行程例外文字一律經 :func:`redact_driver_error` 收斂成「型別 + 有界已掃描訊息」,
+  ``CalledProcessError`` 這類會渲染完整 argv/連線選項的例外**只留型別**;
 - **兩把 handle**(§7 #1/#2):PG actor 消費其一於固定 parameterized create/alter-role;
   credential actor 消費另一把,把封閉 DSN **直接**餵進
   ``systemd-creds encrypt --name=pg-dsn --with-key=host+tpm2``——中間永不產生 str;
@@ -28,7 +32,9 @@ import hashlib
 import hmac
 import re
 import secrets
+import subprocess as _subprocess
 import sys
+import weakref
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -115,12 +121,108 @@ class SecretMaterialLeak(AssertionError):
 
 
 # --------------------------------------------------------------------------- #
+# 進程內秘密哨兵登記簿(§10.5 #15:讓生產路徑得以「無參數」掃描任何可序列化面)。
+#
+# 登記的是 sealed handle 的 **weakref**——不另複製明文,故本登記簿既不延長秘密的生命
+# 週期、也不阻止 handle 被回收;``zeroize()`` 就地歸零後登記項即刻失效,handle 被 GC 後
+# 登記項自動消失(無單調成長)。
+# --------------------------------------------------------------------------- #
+_SECRET_SENTINEL_HANDLES: "list[weakref.ReferenceType[SealedSecretHandle]]" = []
+
+
+def register_secret_sentinel(handle: "SealedSecretHandle") -> None:
+    """把一把 sealed handle 登記為掃描哨兵(weakref;絕不複製明文)。"""
+
+    _SECRET_SENTINEL_HANDLES.append(weakref.ref(handle))
+
+
+def active_secret_sentinels() -> list[bytes]:
+    """目前仍「活著」(未被回收、未歸零)的哨兵材料快照(函式局部、用完即棄)。"""
+
+    alive: list[bytes] = []
+    survivors: list[weakref.ReferenceType] = []
+    for reference in _SECRET_SENTINEL_HANDLES:
+        handle = reference()
+        if handle is None:
+            continue
+        survivors.append(reference)
+        buffer = handle._buffer  # noqa: SLF001 - 同葉內部面
+        if any(buffer):
+            alive.append(bytes(buffer))
+    _SECRET_SENTINEL_HANDLES[:] = survivors
+    return alive
+
+
+def scan_serializable_surface(artifact: Any) -> list[str]:
+    """對任何**即將被回傳/落盤**的結構做秘密掃描;命中回 typed 理由(不逸出例外)。
+
+    生產路徑(component/prepare/probe 的 verdict 建構點)呼叫此函式而非直接呼叫
+    :func:`assert_no_secret_material`:gate 需要的是 fail-closed 的 typed 拒絕,而不是
+    一個會從 fail-closed 閘中逃逸的 ``AssertionError``。
+    """
+
+    sentinels = active_secret_sentinels()
+    if not sentinels:
+        return []
+    try:
+        assert_no_secret_material(artifact, sentinels)
+    except SecretMaterialLeak as leak:
+        return [str(leak)]
+    return []
+
+
+# §7:driver/子行程例外文字的最大保留長度(超出即截斷;argv/連線字串永不整段入 reason)。
+_MAX_REDACTED_ERROR_CHARS = 160
+# 任一片段命中即整段改寫為 <redacted>(密碼賦值、DSN 鍵、PEM/SSH armor、長 base64/hex 串)。
+_SECRET_SHAPED_PATTERNS = (
+    re.compile(r"(?i)pass(word|file)\s*=", re.UNICODE),
+    re.compile(r"(?i)\b(dsn|secret|token|credential)\b", re.UNICODE),
+    re.compile(r"-----BEGIN [A-Z ]+-----", re.UNICODE),
+    re.compile(r"[A-Za-z0-9+/=_-]{32,}", re.UNICODE),
+)
+# 這些屬性一出現就代表例外會把 argv / stdout / stderr 渲染進 str()(subprocess 家族、
+# libpq 的 Error.pgerror 等);此時只留型別,連截斷訊息都不保留。
+_DIAGNOSTIC_LEAK_ATTRIBUTES = (
+    "cmd", "argv", "output", "stdout", "stderr", "pgerror", "diag", "args_repr",
+)
+
+
+def redact_driver_error(error: BaseException) -> str:
+    """把 driver/子行程例外收斂成「型別 + 有界且已掃描的訊息」(§7:秘密永不入 reason)。
+
+    - 帶 typed ``code`` 的契約例外:``code`` 是 code-owned 常量,原樣保留;
+    - 帶 ``cmd``/``output``/``stderr``/``pgerror`` 等診斷屬性者(``CalledProcessError``、
+      libpq 例外):**只留型別**——``str()`` 會渲染完整 argv / 連線選項;
+    - 其餘:截斷到 :data:`_MAX_REDACTED_ERROR_CHARS`,再過 secret-shaped 形狀掃描與
+      進程內哨兵掃描,任一命中即整段 ``<redacted>``。
+    """
+
+    kind = type(error).__name__
+    code = getattr(error, "code", None)
+    if isinstance(code, str) and code:
+        return f"{kind}: {code}"
+    if any(hasattr(error, name) for name in _DIAGNOSTIC_LEAK_ATTRIBUTES):
+        return f"{kind}: <redacted driver diagnostics>"
+    try:
+        text = str(error)
+    except Exception:  # noqa: BLE001 - __str__ 本身逸出也不得洩漏
+        return f"{kind}: <unrenderable>"
+    text = text[:_MAX_REDACTED_ERROR_CHARS]
+    if any(pattern.search(text) for pattern in _SECRET_SHAPED_PATTERNS):
+        return f"{kind}: <redacted>"
+    if scan_serializable_surface(text):
+        return f"{kind}: <redacted>"
+    return f"{kind}: {text}" if text else kind
+
+
+# --------------------------------------------------------------------------- #
 # 不可序列化、單次消費的 sealed handle(§7:driver 收 handle,絕不收字串)。
 # --------------------------------------------------------------------------- #
 class SealedSecretHandle:
     """operation-ID 綁定的 read-once 秘密控點;任何序列化/顯示面一律拒。"""
 
-    __slots__ = ("_buffer", "_consumed", "_operation_id", "_purpose", "_closed")
+    # ``__weakref__`` 存在才可被哨兵登記簿以 weakref 追蹤(見下方登記簿說明)。
+    __slots__ = ("_buffer", "_consumed", "_operation_id", "_purpose", "_closed", "__weakref__")
 
     def __init__(self, payload: bytearray, *, operation_id: str, purpose: str) -> None:
         self._buffer = payload
@@ -128,6 +230,9 @@ class SealedSecretHandle:
         self._closed = False
         self._operation_id = operation_id
         self._purpose = purpose
+        # §10.5 #15:handle 一存在,其明文即成為「任何可序列化面都不得出現」的哨兵。
+        # 登記的是 weakref(零額外明文複本),故 zeroize()/GC 皆即刻使其失效。
+        register_secret_sentinel(self)
 
     @property
     def operation_id(self) -> str:
@@ -459,4 +564,16 @@ def credential_abi_projection() -> dict[str, Any]:
         "credential_fingerprint_probe": fingerprint_probe,
         "process_hardening": dict(PROCESS_HARDENING_CONTRACT),
         "typed_failure": CREDENTIAL_STATUS_CAPABILITY_UNSATISFIED,
+        # §10.5 #15:秘密掃描與例外文字紅字化在生產路徑上的活再導出面。
+        "serializable_surface_scanner": (
+            "agent_governance_s2_4_credential.scan_serializable_surface"
+        ),
+        "driver_error_redactor": "agent_governance_s2_4_credential.redact_driver_error",
+        "diagnostic_leak_attributes": list(_DIAGNOSTIC_LEAK_ATTRIBUTES),
+        "redacted_error_max_chars": _MAX_REDACTED_ERROR_CHARS,
+        "called_process_error_redaction_probe": redact_driver_error(
+            _subprocess.CalledProcessError(
+                1, ["systemd-creds", "encrypt", "--name=pg-dsn"], output=b"", stderr=b""
+            )
+        ),
     }
