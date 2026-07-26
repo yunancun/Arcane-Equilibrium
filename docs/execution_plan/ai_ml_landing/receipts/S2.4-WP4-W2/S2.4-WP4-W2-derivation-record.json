@@ -1,0 +1,94 @@
+{
+  "admission_derivation": {
+    "reasons": [],
+    "status": "ADMITTED"
+  },
+  "admission_self_digest": "sha256:638d3cd8d54a3f2c4ea732b1934a2e2899cea005929308b06ffa6b5c30a65abd",
+  "historical_persisted_w1": {
+    "historical_source_head": "58d62a0e1707f04f9c996ed65361fa1bad5da13c",
+    "historical_w1_integrity": "VERIFIED",
+    "persisted_dir": "/Users/ncyu/Projects/TradeBot/.codex-worktrees/aiml-s2-wp4-w0/docs/execution_plan/ai_ml_landing/receipts/S2.4-WP4-W1",
+    "regenerated_w0_admission_self_digest": "sha256:6805273415b022154ef2305aad4bc2c38171933c5be0ceeba02cdf3f7e543709",
+    "regenerated_w0_wave_exit_self_digest": "sha256:505c82fad19568bd452708044d1b41064a6aef344614628c45505276c93f5b75",
+    "w1_wave_exit_self_digest": "sha256:3b462d91531dff77c5843d86b103293302398579915b8ef247ee331b5333001e"
+  },
+  "regenerated_w0_wave_exit_derivation": {
+    "reasons": [],
+    "status": "PASS"
+  },
+  "regenerated_w0_wave_exit_self_digest": "sha256:6d6cb57bd863c0090dfda6c82b6c5b1da4b753fe54783837198884439c075c8d",
+  "regenerated_w1_wave_exit_derivation": {
+    "reasons": [],
+    "status": "PASS"
+  },
+  "regenerated_w1_wave_exit_self_digest": "sha256:acdc0ca822d67fc9fccdba5a5e82d1cb3f2466d33412f9b1aa72647480d2d242",
+  "replay_note": "W2 re-derivation binds source_head == checkout HEAD; to replay, checkout source_head, rebuild the in-memory W0/W1 chain with the same builders, then run derive_wave_exit_status(w2, source_admission_receipt=admission, predecessor_wave_receipt=w1_wave_exit, predecessor_wave_chain=(w0_wave_exit,))",
+  "review_provenance": [
+    {
+      "agent_id": "a93b9a8e8d454bbed",
+      "kind": "w2_review_provenance",
+      "recheck_head": "1d21116ffa21e059a73a2a8f53c6d5e9c8e6e326",
+      "recheck_verdict": "RECHECK_PASS (three P1s truly closed; 6 new P2 all fail-closed direction)",
+      "reviewed_head": "066e83a1ca11404b1f74e5b3a2b3e34b017106db",
+      "role": "E2",
+      "verdict": "PASS-with-findings (no P0; 1xP1 §8.3 resident reconnect missing, 4xP2, 3xP3)"
+    },
+    {
+      "agent_id": "ace86232641c92eed",
+      "kind": "w2_review_provenance",
+      "reviewed_head": "066e83a1ca11404b1f74e5b3a2b3e34b017106db",
+      "role": "E3",
+      "verdict": "PASS_WITH_NOTES (no P0; 2xP1 — data-modifying CTE gate bypass, parquet_etl exclusion unsound with ambient-DSN surface in bundle; 10xP2)"
+    },
+    {
+      "agent_id": "aab543bca5d20820e",
+      "kind": "w2_review_provenance",
+      "reviewed_head": "066e83a1ca11404b1f74e5b3a2b3e34b017106db",
+      "role": "E4",
+      "verdict": "EVIDENCE_CONFIRMED (8/8 checks EXECUTED, zero mismatches; W2 chain probe clean and tampered both held; renderer probe typed rejection held)"
+    },
+    {
+      "agent_id": "a8424e5afb327134f",
+      "kind": "w2_review_provenance",
+      "reviewed_head": "781fd209e49b4969b7870bad6aa935136fc72b93",
+      "role": "CC",
+      "verdict": "PASS_WITH_NOTES grade A (16/16 root principles, zero hard-boundary touches; N-1 §10.1 path-scope amendment named a publication precondition — landed as 9f770b18f §10.1.1; N-2 executable design↔renderer binding — landed; N-3 WP3 fingerprint OPEN carried in ledger; N-4 network-client import deny predicate queued for W3/W5)"
+    },
+    {
+      "agent_id": "ac8cfc203b2dec751",
+      "kind": "w2_review_provenance",
+      "reviewed_head": "781fd209e49b4969b7870bad6aa935136fc72b93",
+      "role": "OPS",
+      "verdict": "PASS_WITH_CONCERNS (zero runtime-touch capability confirmed; F1 P1 proven with a real fake-PG probe — connect-time failures carry no SQLSTATE so the auth/HBA exit-78 path never fired; F2/D1/D2/F5/F6 P2-P3)"
+    },
+    {
+      "commits": [
+        "1d21116ff",
+        "781fd209e",
+        "9f770b18f",
+        "3f7aedc7f"
+      ],
+      "kind": "w2_review_provenance",
+      "note": "three P1s (resident reconnect, CTE gate, parquet_etl closure) then six P2s then OPS F1/F2 + D1/D2 + CC N-1/N-2; every fix carries a regression that fails against its pristine parent tree; real-driver disposable coverage added for connect-time classification",
+      "role": "PM",
+      "scope": "wave fix rounds"
+    }
+  ],
+  "schema_version": "s2_4_w2_derivation_record_v1_informal",
+  "source_head": "3f7aedc7f68fbd70befb3a8494ba7b0eaaf75f1d",
+  "test_evidence": {
+    "command": "python3 -m pytest tests/structure program_code/ml_training/tests -q",
+    "disposable_lanes": "engine-scanner ACL trace and consumer-resilience connect-time classification both ran against real throwaway PG clusters on this host",
+    "executed_at": "2026-07-26T01:45:09Z",
+    "exit_code": 0,
+    "host_role": "mac_development_checkout",
+    "kind": "w2_formal_exit_test_run",
+    "source_head": "3f7aedc7f68fbd70befb3a8494ba7b0eaaf75f1d",
+    "summary_line": "5206 passed, 45 skipped in 437.48s (0:07:17)"
+  },
+  "w2_wave_exit_derivation": {
+    "reasons": [],
+    "status": "PASS"
+  },
+  "w2_wave_exit_self_digest": "sha256:6f754e1232c517fd80a37c0a4cc9efcae4e3d7de61d3248b7edfa86f3e82e4b1"
+}

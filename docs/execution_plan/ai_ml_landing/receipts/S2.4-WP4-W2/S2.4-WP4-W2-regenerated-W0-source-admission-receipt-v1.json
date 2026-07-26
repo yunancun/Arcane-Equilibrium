@@ -1,0 +1,41 @@
+{
+  "component_classifier_v1_digest": "sha256:22d78882a2dace9ceb640b74b2a5dca2f2a8cc05861720f5ab25c5c9ac86c445",
+  "frozen_classifier_digest": "sha256:1cf8c021b066ceeb364e968add074d263cb28d63db421fdc40620e9904d0ddbc",
+  "negative_tests_pass": "sha256:1bd86de7b636bf57ead1a1ecfd00c9b75379ae49d1458a41bd7c22987d6f92f6",
+  "predecessor_heads": {
+    "program_dag_projection_merge": "4915be30c4214f8a3d591b7f9259169cdb65c75b",
+    "wp3_system_unit_merge": "e514f1e761ab9c1965a133f1f113e2e7ccd854df"
+  },
+  "production_authority_flags": {
+    "nine_authorities_false": true,
+    "production_apply_performed": false,
+    "running_attested": false
+  },
+  "program_id": "AIML-LONG-LIVED-LANDING-V2",
+  "s2_0_driver_reachability_proof": {
+    "adapter_id": "pg_observer_bootstrap_adapter_v1",
+    "driver_protocol_present": true,
+    "production_success_status": "APPLIED",
+    "registry_status": "AUTHORITY_LOCKED_PRODUCTION_CAPABLE",
+    "unconditional_production_pending_removed": true
+  },
+  "schema_version": "s2_4_source_admission_receipt_v1",
+  "self_digest": "sha256:638d3cd8d54a3f2c4ea732b1934a2e2899cea005929308b06ffa6b5c30a65abd",
+  "source_head": "3f7aedc7f68fbd70befb3a8494ba7b0eaaf75f1d",
+  "three_head_projection_digest": "sha256:0ce1503f9a7643420e077db10db9b643712dce7f096a5ab8a2ad1fd07598640b",
+  "trust_pin_digests": {
+    "independent_test_blob": "2364f2cab6340e0c746e567ed717f1440c50314f",
+    "independent_test_sha256": "sha256:ce6727536f3820d808d01553330cca87fce8d13455d3a0b4276d86f5041dabc7",
+    "operator_fingerprint": "SHA256:uGJ9veN7PoE6BBgfsSP2aiMndrwgbt7o/7/YfdzNzCQ",
+    "trusted_host_module_blob": "8b494cd2678ee70e4afc4efe62561a0ef0f2169e",
+    "trusted_host_module_sha256": "sha256:00b568a577afbe8d29bb2ab5b33da8487c6fdda1c73f0c7fc63b5b11254d09eb"
+  },
+  "wave": "W0",
+  "work_package": "WP4",
+  "wp3_system_unit_alignment_proof": {
+    "database": "trading_ai",
+    "lifecycle_owner": "host_system_manager",
+    "role": "aiml_engine_scanner",
+    "systemctl_user_absent": true
+  }
+}
