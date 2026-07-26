@@ -547,51 +547,20 @@ _RETENTION_TABLES = (
 # helper 模組整片漏掉)。非 bundle 的治理模組不入 bundle 樹 → runtime 不存在該檔案 →
 # 不可能執行其 SQL;其 import 可達性仍由 (a) 與 application-closure 雙向 exact-match 執法。
 # parquet_etl 的排除已隨其退出 import 閉包一併移除(檔案仍是 v2 身分的內容輸入)。
-# 進 manifest functions 段的 pg_catalog 家族(PUBLIC-default EXECUTE):advisory-lock
-# 三支 + §8.3 在帶身分閘用到的 current_database/current_setting。
-_ADVISORY_FUNCTION_NAMES = (
-    "current_database",
-    "current_setting",
-    "hashtext",
-    "pg_advisory_unlock",
-    "pg_try_advisory_lock",
+# SQL **文字面**的規範化/分類(註解剝除、關聯抽取、data-modifying 動詞集、語句分類)
+# 依 2000 行治理拆分下沉至 agent_governance_s2_4_sql_scan,此處逐名 re-export——
+# 既有 install._classify_sql_statement / _embedded_data_modifications 匯入面不變。
+# 該葉同時收口 E2 W2-recheck 的 P2-D(註解規避)/P2-E(MERGE)/P2-F(DO UPDATE SET)。
+from agent_governance_s2_4_sql_scan import (  # noqa: E402
+    ADVISORY_FUNCTION_NAMES as _ADVISORY_FUNCTION_NAMES,
+    classify_sql_statement as _classify_sql_statement,
+    embedded_data_modifications as _embedded_data_modifications,
+    statement_unqualified_relations as _statement_unqualified_relations,
+    strip_sql_comments as _strip_sql_comments,
 )
-_ADVISORY_FUNCTION_RE = re.compile(
-    r"\b(current_database|current_setting|hashtext|pg_advisory_unlock"
-    r"|pg_try_advisory_lock)\s*\("
-)
-_QUALIFIED_TABLE_RE = re.compile(r"\b(?:trading|learning)\.[a-z_][a-z0-9_]*")
-_INSERT_TARGET_RE = re.compile(
-    r"^\s*INSERT\s+INTO\s+((?:trading|learning)\.[a-z_][a-z0-9_]*)", re.IGNORECASE
-)
-_UPDATE_TARGET_RE = re.compile(
-    r"^\s*UPDATE\s+((?:trading|learning)\.[a-z_][a-z0-9_]*)", re.IGNORECASE
-)
-_DELETE_TARGET_RE = re.compile(
-    r"^\s*DELETE\s+FROM\s+((?:trading|learning)\.[a-z_][a-z0-9_]*)", re.IGNORECASE
-)
-_RELATION_KEYWORD_RE = re.compile(
-    r"\b(?:FROM|JOIN|INTO|UPDATE)\s+([A-Za-z_][A-Za-z0-9_.]*)", re.IGNORECASE
-)
-_CTE_NAME_RE = re.compile(r"(?:\bWITH\s+|,\s*)([a-z_][a-z0-9_]*)\s+AS\s*\(", re.IGNORECASE)
+
 _SAFE_SQL_IDENT_RE = re.compile(r"^[a-z_][a-z0-9_]*$")
 _SAFE_SQL_QUALIFIED_RE = re.compile(r"^[a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*$")
-# W2 P1-B(E3 P1-1):data-modifying CTE。第一個 token 分類會把
-# ``WITH x AS (DELETE FROM ... RETURNING ...) SELECT ...`` 判成 read,§2.1 的
-# 「零 retention mutation / 零 DELETE」在閘口即被繞過。故分類前先全句掃描
-# DELETE/UPDATE/INSERT/TRUNCATE(含 CTE 內、含 ON CONFLICT DO UPDATE),導出真目標的
-# 真權限;read 類語句一旦內含任一 mutation 即 typed 拒絕(必然 fail split 謂詞)。
-_EMBEDDED_MUTATION_RE = re.compile(
-    r"\b(?P<op>DELETE\s+FROM|INSERT\s+INTO|TRUNCATE(?:\s+TABLE)?|UPDATE)\s+"
-    r"(?:ONLY\s+)?(?P<target>[A-Za-z_][A-Za-z0-9_.]*)?",
-    re.IGNORECASE,
-)
-_MUTATION_PRIVILEGES = {
-    "DELETE": "DELETE",
-    "INSERT": "INSERT",
-    "TRUNCATE": "TRUNCATE",
-    "UPDATE": "UPDATE",
-}
 # repo-local「看起來像」本倉來源的 import 根(P2-D:解析不到即 fail-closed 記 unresolved,
 # 而非靜默略過;第三方/stdlib 名不在此列,不進靜態 SQL/closure 執法面)。
 _REPO_LOCAL_IMPORT_ROOTS = ("ml_training", "program_code", "helper_scripts", "learning_engine")
@@ -808,132 +777,6 @@ def _module_sql_statements(path: Path) -> tuple[list[dict[str, Any]], list[dict[
     return statements, unresolved
 
 
-def _statement_unqualified_relations(sql: str) -> list[str]:
-    """找出未以 trading./learning. 限定、又非 CTE 名的關聯目標(fail-closed)。"""
-
-    cte_names = {match.group(1).lower() for match in _CTE_NAME_RE.finditer(sql)}
-    violations: list[str] = []
-    for match in _RELATION_KEYWORD_RE.finditer(sql):
-        name = match.group(1)
-        if "." in name:
-            if _QUALIFIED_TABLE_RE.fullmatch(name.lower()) is None:
-                violations.append(name)
-            continue
-        # LATERAL 是 JOIN 後的結構關鍵字(如 JOIN LATERAL (subquery)),非關聯名。
-        if name.lower() == "lateral":
-            continue
-        if name.lower() in cte_names:
-            continue
-        violations.append(name)
-    return sorted(set(violations))
-
-
-def _embedded_data_modifications(sql: str) -> list[tuple[str, str | None]]:
-    """全句掃描 data-modifying 動詞及其目標(含 CTE 內部);回 [(op, target|None)]。
-
-    P1-B:第一個 token 不足以判定語句是否會改資料——``WITH x AS (DELETE ...) SELECT``
-    的 head 是 WITH。此處以動詞為準,目標未 schema-qualified 時回 None(呼叫端 typed 拒絕)。
-    """
-
-    found: list[tuple[str, str | None]] = []
-    for match in _EMBEDDED_MUTATION_RE.finditer(sql):
-        op = match.group("op").split()[0].upper()
-        target = match.group("target")
-        if target is not None and _QUALIFIED_TABLE_RE.fullmatch(target.lower()) is None:
-            target = None
-        found.append((op, None if target is None else target.lower()))
-    return found
-
-
-def _classify_sql_statement(sql: str) -> dict[str, Any]:
-    """把一條常量 SQL 分類並導出必要權限;無法分類即回 errors(fail-closed)。"""
-
-    head = sql.strip().split()[0].upper() if sql.strip() else ""
-    tables: dict[str, set[str]] = {}
-    errors: list[str] = []
-    mutation = False
-    referenced = sorted({match.lower() for match in _QUALIFIED_TABLE_RE.findall(sql)})
-    embedded = _embedded_data_modifications(sql)
-    if head in {"SELECT", "WITH"} and embedded:
-        # P1-B:read-class 語句內含 data-modifying CTE → 導出真目標的真權限並 typed 拒絕
-        # (§2.1 的「零 retention mutation / 零 DELETE」不可經 CTE 繞過)。
-        statement_class = "data_modifying_cte"
-        mutation = True
-        for table in referenced:
-            tables.setdefault(table, set()).add("SELECT")
-        for op, target in embedded:
-            if target is None:
-                errors.append(f"data_modifying_cte_target_not_schema_qualified:{op}")
-                continue
-            tables.setdefault(target, set()).add(_MUTATION_PRIVILEGES[op])
-            errors.append(f"data_modifying_cte:{op}:{target}")
-    elif head in {"SELECT", "WITH"}:
-        statement_class = "read"
-        for table in referenced:
-            tables.setdefault(table, set()).add("SELECT")
-    elif head == "INSERT":
-        statement_class = "insert"
-        target_match = _INSERT_TARGET_RE.match(sql)
-        if target_match is None:
-            errors.append("insert_target_not_schema_qualified")
-        else:
-            target = target_match.group(1).lower()
-            tables.setdefault(target, set()).add("INSERT")
-            # PG 語義:INSERT .. ON CONFLICT 需讀 arbiter 欄位 → 目標表另需 SELECT
-            # (disposable trace 以真 42501 實證;見 W2a 佐證測試)。
-            if re.search(r"\bON\s+CONFLICT\b", sql, re.IGNORECASE):
-                tables[target].add("SELECT")
-            # P1-B:ON CONFLICT DO UPDATE 是真 mutation(PG 於 plan 期即要求 UPDATE 權限)。
-            if re.search(r"\bDO\s+UPDATE\b", sql, re.IGNORECASE):
-                tables[target].add("UPDATE")
-                mutation = True
-            for table in referenced:
-                if table != target:
-                    tables.setdefault(table, set()).add("SELECT")
-            # P1-B:INSERT 之外的第二個 data-modifying 動詞(如 CTE 內 DELETE)必須被導出。
-            for op, cte_target in embedded:
-                if op == "INSERT" or (op == "UPDATE" and cte_target is None):
-                    continue
-                mutation = True
-                if cte_target is None:
-                    errors.append(f"data_modifying_cte_target_not_schema_qualified:{op}")
-                    continue
-                tables.setdefault(cte_target, set()).add(_MUTATION_PRIVILEGES[op])
-                errors.append(f"data_modifying_cte:{op}:{cte_target}")
-    elif head == "UPDATE":
-        statement_class = "update"
-        mutation = True
-        target_match = _UPDATE_TARGET_RE.match(sql)
-        if target_match is None:
-            errors.append("update_target_not_schema_qualified")
-        else:
-            tables.setdefault(target_match.group(1).lower(), set()).add("UPDATE")
-    elif head == "DELETE":
-        statement_class = "delete"
-        mutation = True
-        target_match = _DELETE_TARGET_RE.match(sql)
-        if target_match is None:
-            errors.append("delete_target_not_schema_qualified")
-        else:
-            tables.setdefault(target_match.group(1).lower(), set()).add("DELETE")
-    elif head == "LISTEN":
-        statement_class = "listen"
-    else:
-        statement_class = "unrecognized"
-        errors.append(f"unrecognized_statement_class:{head or 'EMPTY'}")
-    if statement_class != "listen":
-        for name in _statement_unqualified_relations(sql):
-            errors.append(f"unqualified_relation:{name}")
-    functions = sorted({match for match in _ADVISORY_FUNCTION_RE.findall(sql)})
-    return {
-        "statement_class": statement_class,
-        "tables": {name: sorted(privileges) for name, privileges in tables.items()},
-        "functions": [f"pg_catalog.{name}" for name in functions],
-        "mutation": mutation,
-        "errors": errors,
-    }
-
-
 def build_engine_scanner_sql_inventory(repo_root: Path = REPO_ROOT) -> dict[str, Any]:
     """post-split consumer 的 deterministic 靜態 SQL inventory(§10.5 #23 的 SOURCE 面)。
 
@@ -982,10 +825,11 @@ def build_engine_scanner_sql_inventory(repo_root: Path = REPO_ROOT) -> dict[str,
                     f"{name}:{entry['function']}:{entry['line']}:{error}"
                 )
             if classified["statement_class"] == "delete" or any(
-                op in {"DELETE", "TRUNCATE"}
+                op in {"DELETE", "MERGE", "TRUNCATE"}
                 for op, _ in _embedded_data_modifications(entry["statement"])
             ):
                 # P1-B:CTE 內的 DELETE/TRUNCATE 與 head-DELETE 同等禁止。
+                # P2-E:MERGE 的 WHEN MATCHED 分支可刪列,靜態文字面無法排除 → 同等禁止。
                 violations.append(
                     f"{name}:{entry['function']}:{entry['line']}:delete_statement_forbidden"
                 )

@@ -263,6 +263,169 @@ def test_insert_on_conflict_do_update_requires_update_privilege() -> None:
         "SELECT",
         "UPDATE",
     }
+    # E2 P2-F:修前 `DO UPDATE SET` 的 SET 被當成關聯名 → 恆有 unqualified_relation:SET
+    # → 這條路徑「永遠不可能 PASS」,未來一條合法語句會被以誤導理由攔下。
+    assert classified["errors"] == []
+    assert classified["statement_class"] == "insert"
+
+
+# --------------------------------------------------------------------------- #
+# E2 P2-D(已證實的規避):verb 與 FROM 之間的註解不得繞過 CTE mutation 掃描
+# --------------------------------------------------------------------------- #
+# 審查報告給出的兩條原始 evasion 字串(PG 兩條都照收;舊掃描器 read + 零 error)。
+_COMMENT_EVASION_BLOCK = (
+    "WITH x AS (DELETE /*evade*/ FROM learning.alr_derived_cache_entries "
+    "RETURNING entry_id) SELECT count(*) FROM x"
+)
+_COMMENT_EVASION_LINE = (
+    "WITH x AS (DELETE --evade\n FROM learning.alr_derived_cache_entries "
+    "RETURNING entry_id) SELECT count(*) FROM x"
+)
+# PG 的區塊註解可巢狀;單層剝除會在此處提前收尾,verb 與 FROM 又被拆開。
+_COMMENT_EVASION_NESTED = (
+    "WITH x AS (DELETE /* a /* b */ still-comment */ FROM "
+    "learning.alr_derived_cache_entries RETURNING entry_id) SELECT count(*) FROM x"
+)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [_COMMENT_EVASION_BLOCK, _COMMENT_EVASION_LINE, _COMMENT_EVASION_NESTED],
+    ids=["block_comment", "line_comment", "nested_block_comment"],
+)
+def test_comments_between_verb_and_from_do_not_bypass_the_mutation_scan(
+    sql: str,
+) -> None:
+    classified = install._classify_sql_statement(sql)
+    assert classified["statement_class"] == "data_modifying_cte"
+    assert classified["mutation"] is True
+    assert "DELETE" in classified["tables"]["learning.alr_derived_cache_entries"]
+    assert any("data_modifying_cte:DELETE" in error for error in classified["errors"])
+    assert ("DELETE", "learning.alr_derived_cache_entries") in (
+        install._embedded_data_modifications(sql)
+    )
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [_COMMENT_EVASION_BLOCK, _COMMENT_EVASION_LINE, _COMMENT_EVASION_NESTED],
+    ids=["block_comment", "line_comment", "nested_block_comment"],
+)
+def test_comment_evasion_fails_the_split_predicate(tmp_path: Path, sql: str) -> None:
+    root = _write_synthetic_tree(
+        tmp_path,
+        consumer_source='''
+        _LOCAL_DSN_REQUIRED = {{
+            "host": "127.0.0.1",
+            "port": "5432",
+            "dbname": "trading_ai",
+            "user": "aiml_engine_scanner",
+        }}
+        _PURGE_SQL = {sql!r}
+
+
+        def sweep(connection):
+            with connection.cursor() as cursor:
+                cursor.execute(_PURGE_SQL)
+        '''.format(sql=sql),
+    )
+    verdict = install.derive_engine_scanner_privilege_split(
+        root, manifest_path=MANIFEST_PATH
+    )
+    assert verdict["status"] == "ENGINE_SCANNER_PRIVILEGE_SPLIT_REQUIRED"
+    assert any("delete_statement_forbidden" in reason for reason in verdict["reasons"])
+    assert any("retention_table_mutation" in reason for reason in verdict["reasons"])
+    assert any(
+        "data_modifying_cte_forbidden" in reason for reason in verdict["reasons"]
+    )
+
+
+def test_comment_stripping_never_touches_string_or_dollar_quoted_literals() -> None:
+    """反向防呆:剝註解不得動到字面量,否則會把資料當註解吃掉(製造假紅/假綠)。"""
+    literal = (
+        "SELECT source_key FROM learning.alr_source_events "
+        "WHERE note = '-- not a comment' AND tag = '/* nor this */'"
+    )
+    classified = install._classify_sql_statement(literal)
+    assert classified["statement_class"] == "read"
+    assert classified["errors"] == []
+    stripped = install._strip_sql_comments(literal)
+    assert "-- not a comment" in stripped and "/* nor this */" in stripped
+    dollar = (
+        "SELECT source_key FROM learning.alr_source_events "
+        "WHERE body = $tag$ -- keep /* keep */ $tag$"
+    )
+    assert "-- keep /* keep */" in install._strip_sql_comments(dollar)
+    assert install._classify_sql_statement(dollar)["errors"] == []
+    # 雙引號識別子內同理;且剝除是 idempotent(重複套用結果不變)。
+    quoted = 'SELECT "we--ird" FROM learning.alr_source_events'
+    assert install._strip_sql_comments(quoted) == quoted
+    once = install._strip_sql_comments(_COMMENT_EVASION_BLOCK)
+    assert install._strip_sql_comments(once) == once
+    # 註解代換為空白而非刪除:相鄰 token 不得被黏成一個。
+    assert "DELETE   FROM" in install._strip_sql_comments(
+        "DELETE /*x*/ FROM learning.alr_source_events"
+    )
+    assert (
+        install._strip_sql_comments("DELETE/*x*/FROM learning.alr_source_events")
+        == "DELETE FROM learning.alr_source_events"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# E2 P2-E:MERGE(PG15+;PG17 起可入 CTE)必須在 data-modifying 動詞集內
+# --------------------------------------------------------------------------- #
+_MERGE_CTE_SQL = (
+    "WITH m AS (MERGE INTO learning.alr_derived_cache_entries t "
+    "USING learning.alr_source_events s ON t.cache_key = s.source_key "
+    "WHEN MATCHED THEN DELETE RETURNING 1) SELECT count(*) FROM m"
+)
+
+
+def test_merge_inside_a_cte_is_a_data_modifying_verb() -> None:
+    classified = install._classify_sql_statement(_MERGE_CTE_SQL)
+    assert classified["statement_class"] == "data_modifying_cte"
+    assert classified["mutation"] is True
+    # MERGE 的 WHEN 分支可 INSERT/UPDATE/DELETE,靜態文字面無法排除 → fail-closed 導三者
+    assert set(classified["tables"]["learning.alr_derived_cache_entries"]) >= {
+        "DELETE",
+        "INSERT",
+        "UPDATE",
+    }
+    assert "data_modifying_cte:MERGE:learning.alr_derived_cache_entries" in (
+        classified["errors"]
+    )
+    assert ("MERGE", "learning.alr_derived_cache_entries") in (
+        install._embedded_data_modifications(_MERGE_CTE_SQL)
+    )
+
+
+def test_merge_in_a_cte_fails_the_split_predicate(tmp_path: Path) -> None:
+    root = _write_synthetic_tree(
+        tmp_path,
+        consumer_source='''
+        _LOCAL_DSN_REQUIRED = {{
+            "host": "127.0.0.1",
+            "port": "5432",
+            "dbname": "trading_ai",
+            "user": "aiml_engine_scanner",
+        }}
+        _MERGE_SQL = {sql!r}
+
+
+        def sweep(connection):
+            with connection.cursor() as cursor:
+                cursor.execute(_MERGE_SQL)
+        '''.format(sql=_MERGE_CTE_SQL),
+    )
+    verdict = install.derive_engine_scanner_privilege_split(
+        root, manifest_path=MANIFEST_PATH
+    )
+    assert verdict["status"] == "ENGINE_SCANNER_PRIVILEGE_SPLIT_REQUIRED"
+    assert any("data_modifying_cte:MERGE" in reason for reason in verdict["reasons"])
+    assert any("retention_table_mutation" in reason for reason in verdict["reasons"])
+    # MERGE 的 WHEN MATCHED 分支可刪列 → 與 head-DELETE 同等禁止。
+    assert any("delete_statement_forbidden" in reason for reason in verdict["reasons"])
 
 
 # --------------------------------------------------------------------------- #

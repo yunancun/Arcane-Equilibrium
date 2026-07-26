@@ -465,6 +465,11 @@ def run_production_preflight_from_args(arguments: Any) -> dict[str, Any]:
 # 單元以 Restart=on-failure 崩潰迴圈直到耗盡 start limit,而非一次 78 停下等 operator。
 # ``topology_guard_``/``cluster_identity_`` 是 §8.3 重連身分閘的 permanent 不符(嚴格說
 # 發生在連線之後,但語義同屬「不可重試的身分/組態失敗 → 78」)。
+#
+# E2 P2-A(W2 recheck):``db_config_permanent_sqlstate_`` 是 SQLSTATE 判定的 permanent
+# DB 認證/組態失敗(28xxx / 0P000 / 3D000 / 3F000 / 42501 / 42704)。它們包在
+# psycopg2 的 ``OperationalError`` 裡,只看型別會被當成 transient 無限重試——單元恆
+# active、每 300 秒敲一次、永遠不蒐集,operator 也永遠等不到那個 78。
 _PERMANENT_PRE_DB_PREFIXES = (
     "dsn_",
     "capture_surface_incompatible",
@@ -474,6 +479,7 @@ _PERMANENT_PRE_DB_PREFIXES = (
     "candidate_board_inotify_unsupported",
     "topology_guard_",
     "cluster_identity_",
+    "db_config_permanent_sqlstate_",
 )
 # 刻意「不」在列(可自癒/可由 operator 於運行中修復,或屬 host 競用):
 # runtime_file_lock_busy / single_instance_lock_busy / candidate_board_directory_*。

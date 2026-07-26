@@ -41,6 +41,7 @@ _W2_OWNED_PATHS = tuple(sorted((
     "helper_scripts/maintenance_scripts/agent_governance_s2_4_emit_sink.py",
     "helper_scripts/maintenance_scripts/agent_governance_s2_4_install.py",
     "helper_scripts/maintenance_scripts/agent_governance_s2_4_render.py",
+    "helper_scripts/maintenance_scripts/agent_governance_s2_4_sql_scan.py",
     "program_code/ml_training/aiml_gate_receipt_schema_core.py",
     "program_code/ml_training/aiml_gate_receipt_validator.py",
     "program_code/ml_training/aiml_gate_receipt_wave_w2.py",
