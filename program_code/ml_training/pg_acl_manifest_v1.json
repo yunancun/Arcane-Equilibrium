@@ -1,0 +1,177 @@
+{
+  "closed_boundary": {
+    "bypassrls": false,
+    "database_create": false,
+    "database_temp": false,
+    "default_privileges": false,
+    "grant_option": false,
+    "ownership": false,
+    "replication": false,
+    "role_memberships": false,
+    "schema_create": false,
+    "wildcard_privileges": false
+  },
+  "component": "engine_scanner",
+  "database": {
+    "name": "trading_ai",
+    "privileges": [
+      "CONNECT"
+    ]
+  },
+  "functions": [
+    {
+      "granted_via": "PUBLIC_DEFAULT",
+      "name": "pg_catalog.current_database",
+      "privileges": [
+        "EXECUTE"
+      ]
+    },
+    {
+      "granted_via": "PUBLIC_DEFAULT",
+      "name": "pg_catalog.current_setting",
+      "privileges": [
+        "EXECUTE"
+      ]
+    },
+    {
+      "granted_via": "PUBLIC_DEFAULT",
+      "name": "pg_catalog.hashtext",
+      "privileges": [
+        "EXECUTE"
+      ]
+    },
+    {
+      "granted_via": "PUBLIC_DEFAULT",
+      "name": "pg_catalog.pg_advisory_unlock",
+      "privileges": [
+        "EXECUTE"
+      ]
+    },
+    {
+      "granted_via": "PUBLIC_DEFAULT",
+      "name": "pg_catalog.pg_try_advisory_lock",
+      "privileges": [
+        "EXECUTE"
+      ]
+    }
+  ],
+  "privilege_class": "scanner_capture_writer",
+  "program_id": "AIML-LONG-LIVED-LANDING-V2",
+  "role_attributes": {
+    "bypassrls": false,
+    "connection_limit": 2,
+    "createdb": false,
+    "createrole": false,
+    "inherit": false,
+    "login": true,
+    "replication": false,
+    "superuser": false
+  },
+  "role_name": "aiml_engine_scanner",
+  "schema_version": "pg_acl_manifest_v1",
+  "schemas": [
+    {
+      "name": "learning",
+      "privileges": [
+        "USAGE"
+      ]
+    },
+    {
+      "name": "trading",
+      "privileges": [
+        "USAGE"
+      ]
+    }
+  ],
+  "self_digest": "sha256:2a739d0a5c40efe355f70753bf46716fb31418e9ef9ea219ff1d4bb221e939ad",
+  "sequences": [],
+  "tables": [
+    {
+      "name": "learning.alr_artifact_nodes",
+      "privileges": [
+        "INSERT",
+        "SELECT"
+      ]
+    },
+    {
+      "name": "learning.alr_consumer_events",
+      "privileges": [
+        "INSERT",
+        "SELECT"
+      ]
+    },
+    {
+      "name": "learning.alr_derived_cache_entries",
+      "privileges": [
+        "SELECT"
+      ]
+    },
+    {
+      "name": "learning.alr_health_events",
+      "privileges": [
+        "INSERT",
+        "SELECT"
+      ]
+    },
+    {
+      "name": "learning.alr_ingest_events",
+      "privileges": [
+        "INSERT",
+        "SELECT"
+      ]
+    },
+    {
+      "name": "learning.alr_outcome_feedback_events",
+      "privileges": [
+        "INSERT",
+        "SELECT"
+      ]
+    },
+    {
+      "name": "learning.alr_provenance_edges",
+      "privileges": [
+        "INSERT",
+        "SELECT"
+      ]
+    },
+    {
+      "name": "learning.alr_retention_events",
+      "privileges": [
+        "SELECT"
+      ]
+    },
+    {
+      "name": "learning.alr_runtime_cluster_identity_v1",
+      "privileges": [
+        "SELECT"
+      ]
+    },
+    {
+      "name": "learning.alr_source_events",
+      "privileges": [
+        "INSERT",
+        "SELECT"
+      ]
+    },
+    {
+      "name": "learning.alr_training_runs",
+      "privileges": [
+        "INSERT",
+        "SELECT"
+      ]
+    },
+    {
+      "name": "learning.alr_watermark_events",
+      "privileges": [
+        "INSERT",
+        "SELECT"
+      ]
+    },
+    {
+      "name": "trading.scanner_snapshots",
+      "privileges": [
+        "SELECT"
+      ]
+    }
+  ]
+}

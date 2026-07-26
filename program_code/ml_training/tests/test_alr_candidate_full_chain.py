@@ -400,18 +400,7 @@ def _patch_non_candidate_boundaries(monkeypatch: pytest.MonkeyPatch) -> None:
             "candidate_proof_payload_bytes_written": 0,
         },
     )
-    monkeypatch.setattr(
-        consumer,
-        "process_retention_backlog",
-        lambda connection, *, max_batch: {
-            "retention_scanned": 0,
-            "retention_quarantined": 0,
-            "retention_restored": 0,
-            "retention_swept": 0,
-            "retention_retained": 0,
-            "retention_skipped": 0,
-        },
-    )
+    # S2.4 §2.1(W2a):retention 已整段移出 engine-scanner orchestration,無縫可補。
     monkeypatch.setattr(
         consumer,
         "process_health_snapshot",

@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from copy import deepcopy
@@ -84,6 +85,153 @@ def test_emitted_receipts_are_evidence_only_and_centrally_derivable(tmp_path) ->
     # 真實證據原樣持久化(digest 可重算)
     assert record["test_evidence"] == _TEST_EVIDENCE
     assert wave_exit["test_digests"] == [validator.canonical_digest(_TEST_EVIDENCE)]
+
+
+# --------------------------------------------------------------------------- #
+# W2 P2-I(E3):receipt 不得被靜默覆蓋;CLI --out 受限於 repo receipts 目錄
+# --------------------------------------------------------------------------- #
+def test_emit_refuses_to_silently_overwrite_existing_receipts(tmp_path) -> None:
+    first = install.emit_w0_receipts(
+        out_dir=tmp_path,
+        test_evidence=dict(_TEST_EVIDENCE),
+        review_provenance=[dict(item) for item in _REVIEW_PROVENANCE],
+    )
+    assert first["status"] == "W0_RECEIPTS_EMITTED"
+    # derivation record 綁定 test_evidence 原文 → 覆蓋與否可逐位元組判別。
+    target = tmp_path / install.W0_DERIVATION_RECORD_FILENAME
+    sentinel = target.read_text(encoding="utf-8")
+    # 第二次發射:任一目標已存在 → typed 拒絕且「零寫入」(既有 bytes 逐字不變)。
+    second = install.emit_w0_receipts(
+        out_dir=tmp_path,
+        test_evidence={"command": "different", "exit_code": 0},
+        review_provenance=[{"pr": 999, "verdict": "different"}],
+    )
+    assert second["status"] == "W0_EMIT_REFUSED"
+    assert second["stage"] == "output_collision"
+    assert any(install.W0_ADMISSION_FILENAME in reason for reason in second["reasons"])
+    assert any(
+        install.W0_DERIVATION_RECORD_FILENAME in reason for reason in second["reasons"]
+    )
+    assert target.read_text(encoding="utf-8") == sentinel
+    # 顯式覆蓋才允許
+    third = install.emit_w0_receipts(
+        out_dir=tmp_path,
+        test_evidence={"command": "explicit-overwrite", "exit_code": 0},
+        review_provenance=[{"pr": 1000, "verdict": "explicit"}],
+        allow_overwrite=True,
+    )
+    assert third["status"] == "W0_RECEIPTS_EMITTED"
+    assert target.read_text(encoding="utf-8") != sentinel
+
+
+def test_partial_collision_still_writes_nothing(tmp_path) -> None:
+    """全有全無:只要有一個目標檔存在,其餘檔案也不得被建立。"""
+    (tmp_path / install.W0_DERIVATION_RECORD_FILENAME).write_text("{}", encoding="utf-8")
+    result = install.emit_w0_receipts(
+        out_dir=tmp_path,
+        test_evidence=dict(_TEST_EVIDENCE),
+        review_provenance=[dict(item) for item in _REVIEW_PROVENANCE],
+    )
+    assert result["status"] == "W0_EMIT_REFUSED"
+    assert sorted(p.name for p in tmp_path.iterdir()) == [
+        install.W0_DERIVATION_RECORD_FILENAME
+    ]
+
+
+def test_publication_failure_leaves_no_partial_receipt_set(tmp_path, monkeypatch) -> None:
+    """P2-1:發佈途中失敗必須回滾整組——半套殘留會讓下一次重試把自己的殘骸當碰撞。
+
+    修前:逐檔依序寫入,第二個檔案的 I/O 失敗就留下第一個檔案;重試時 collision 檢查
+    看到它 → 拒絕 → 這條 lineage 再也發不出來(除非人手清理)。
+    """
+    import agent_governance_s2_4_emit_sink as sink
+
+    real_link = os.link
+    calls = {"count": 0}
+
+    def _failing_link(source, target, *args, **kwargs):
+        calls["count"] += 1
+        if calls["count"] == 2:  # 第二個 artifact 推上正位時裝置失敗
+            raise OSError(28, "No space left on device")
+        return real_link(source, target, *args, **kwargs)
+
+    monkeypatch.setattr(sink.os, "link", _failing_link)
+    result = install.emit_w0_receipts(
+        out_dir=tmp_path,
+        test_evidence=dict(_TEST_EVIDENCE),
+        review_provenance=[dict(item) for item in _REVIEW_PROVENANCE],
+    )
+    assert result["status"] == "W0_EMIT_REFUSED"
+    assert result["stage"] == "publication"
+    assert any("rolled back" in reason for reason in result["reasons"])
+    # 零殘留:既無 receipt、也無 staging/lock 檔
+    assert sorted(p.name for p in tmp_path.iterdir()) == []
+    # 復原:同一目錄下一次發射必須成功(不得把自己的殘骸看成碰撞)
+    monkeypatch.setattr(sink.os, "link", real_link)
+    recovered = install.emit_w0_receipts(
+        out_dir=tmp_path,
+        test_evidence=dict(_TEST_EVIDENCE),
+        review_provenance=[dict(item) for item in _REVIEW_PROVENANCE],
+    )
+    assert recovered["status"] == "W0_RECEIPTS_EMITTED"
+    assert (tmp_path / install.W0_ADMISSION_FILENAME).exists()
+
+
+def test_concurrent_emitters_are_serialized_by_an_exclusive_publication_lock(
+    tmp_path,
+) -> None:
+    """P2-1:分離的存在性檢查讓兩個並行發射器可以雙雙通過再交錯寫入。
+
+    獨佔建立的 lock 檔把發佈邊界串行化:第二個發射器拿不到 lock 即 typed 拒絕,
+    絕不與第一個交錯出兩條混合 lineage。
+    """
+    import agent_governance_s2_4_emit_sink as sink
+
+    held = tmp_path / sink.PUBLICATION_LOCK_NAME
+    held.write_text("31337\n", encoding="utf-8")  # 模擬另一個發射器持有中
+    blocked = install.emit_w0_receipts(
+        out_dir=tmp_path,
+        test_evidence=dict(_TEST_EVIDENCE),
+        review_provenance=[dict(item) for item in _REVIEW_PROVENANCE],
+    )
+    assert blocked["status"] == "W0_EMIT_REFUSED"
+    assert blocked["stage"] == "publication_lock"
+    assert sorted(p.name for p in tmp_path.iterdir()) == [sink.PUBLICATION_LOCK_NAME]
+    held.unlink()
+    released = install.emit_w0_receipts(
+        out_dir=tmp_path,
+        test_evidence=dict(_TEST_EVIDENCE),
+        review_provenance=[dict(item) for item in _REVIEW_PROVENANCE],
+    )
+    assert released["status"] == "W0_RECEIPTS_EMITTED"
+    # 發佈結束後 lock 必須被釋放(否則下一次發射永遠被自己擋住)
+    assert not held.exists()
+
+
+def test_cli_out_dir_is_constrained_to_the_repository_receipts_directory(
+    tmp_path, capsys
+) -> None:
+    evidence = tmp_path / "evidence.json"
+    evidence.write_text(json.dumps(_TEST_EVIDENCE), encoding="utf-8")
+    provenance = tmp_path / "provenance.json"
+    provenance.write_text(json.dumps(_REVIEW_PROVENANCE), encoding="utf-8")
+    for action in ("w0-emit", "w1-emit", "w2-emit"):
+        exit_code = install._main([
+            action,
+            "--out", str(tmp_path / "escaped"),
+            "--test-evidence", str(evidence),
+            "--review-provenance", str(provenance),
+        ])
+        assert exit_code == 2
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["stage"] == "out_dir"
+        assert "receipts" in payload["reasons"][0]
+        assert not (tmp_path / "escaped").exists()
+    # receipts 目錄內的路徑通過約束(不實際發射,只證解析)
+    inside = install.RECEIPTS_ROOT / "S2.4-WP4-W2"
+    assert install._resolve_cli_out_dir(inside) == inside.resolve()
+    with pytest.raises(ValueError):
+        install._resolve_cli_out_dir(install.RECEIPTS_ROOT.parent)
 
 
 def test_emit_refuses_and_writes_nothing_when_admission_not_admitted(
@@ -500,6 +648,160 @@ def test_w1_owned_paths_exist_and_cover_the_w1_surfaces() -> None:
     assert not missing, f"W1 owned-path binding misses: {sorted(missing)}"
 
 
+# ── W2 wave-exit 中央導出:happy path + 偽造負例(§10.3 W2 row/§10.5 #27)────────
+def _w2_chain():
+    admission, w0, w1 = _w1_chain()
+    w2 = install.build_w2_wave_exit_receipt(admission, w1, **deepcopy(_EVID))
+    return admission, w0, w1, w2
+
+
+def test_w2_wave_exit_derives_pass_with_full_predecessor_chain() -> None:
+    admission, w0, w1, w2 = _w2_chain()
+    result = validator.derive_wave_exit_status(
+        w2,
+        source_admission_receipt=admission,
+        predecessor_wave_receipt=w1,
+        predecessor_wave_chain=(w0,),
+    )
+    assert result == {"status": "PASS", "reasons": []}
+    assert not any(key in w2 for key in validator._CALLER_STATUS_KEYS)
+    assert validator.validate_aiml_artifact(w2) == []
+
+
+def test_w2_self_declared_status_rejected_before_derivation() -> None:
+    admission, w0, w1, w2 = _w2_chain()
+    forged = deepcopy(w2)
+    forged["status"] = "PASS"
+    forged["self_digest"] = validator.artifact_self_digest(forged)
+    result = validator.derive_wave_exit_status(
+        forged,
+        source_admission_receipt=admission,
+        predecessor_wave_receipt=w1,
+        predecessor_wave_chain=(w0,),
+    )
+    assert result["status"] == "NOT_PASS"
+    assert any("must not self-declare status" in r for r in result["reasons"])
+
+
+def test_w2_requires_predecessor_object_and_regenerated_w0_chain() -> None:
+    admission, w0, w1, w2 = _w2_chain()
+    # 缺 W1 predecessor 物件 → typed NOT_PASS。
+    result = validator.derive_wave_exit_status(w2, source_admission_receipt=admission)
+    assert result["status"] == "NOT_PASS"
+    assert any("requires the bound predecessor_wave_receipt" in r for r in result["reasons"])
+    # 缺 predecessor_wave_chain(W1 無法遞迴綁其 W0)→ typed NOT_PASS。
+    result = validator.derive_wave_exit_status(
+        w2, source_admission_receipt=admission, predecessor_wave_receipt=w1
+    )
+    assert result["status"] == "NOT_PASS"
+    assert any("predecessor_wave_chain" in r for r in result["reasons"])
+    # W0/W1 wave 不消費 chain(fail-closed 拒非空 chain,杜絕誤信多綁前導)。
+    _admission, w0_only, w1_only = _w1_chain()
+    result = validator.derive_wave_exit_status(
+        w1_only,
+        source_admission_receipt=_admission,
+        predecessor_wave_receipt=w0_only,
+        predecessor_wave_chain=(w0_only,),
+    )
+    assert result["status"] == "NOT_PASS"
+    assert any("does not accept a predecessor_wave_chain" in r for r in result["reasons"])
+
+
+def test_w2_tampered_w1_predecessor_breaks_derivation() -> None:
+    # (g) 功能探針負例:竄改 W1(owned-path digest)→ W1 鏈斷 → W2 NOT_PASS。
+    admission, w0, w1, _w2 = _w2_chain()
+    broken_w1 = deepcopy(w1)
+    broken_w1["owned_path_diff_digest"] = validator.canonical_digest(["tampered"])
+    broken_w1["self_digest"] = validator.artifact_self_digest(broken_w1)
+    rebound = install.build_w2_wave_exit_receipt(admission, broken_w1, **deepcopy(_EVID))
+    result = validator.derive_wave_exit_status(
+        rebound,
+        source_admission_receipt=admission,
+        predecessor_wave_receipt=broken_w1,
+        predecessor_wave_chain=(w0,),
+    )
+    assert result["status"] == "NOT_PASS"
+    assert any("does not derive PASS" in r for r in result["reasons"])
+    # 竄改 predecessor digest 綁定 → NOT_PASS。
+    forged = deepcopy(_w2)
+    forged["predecessor_wave_receipt_digest"] = "sha256:" + "0" * 64
+    forged["self_digest"] = validator.artifact_self_digest(forged)
+    result = validator.derive_wave_exit_status(
+        forged,
+        source_admission_receipt=admission,
+        predecessor_wave_receipt=w1,
+        predecessor_wave_chain=(w0,),
+    )
+    assert result["status"] == "NOT_PASS"
+    assert any(
+        "predecessor_wave_receipt_digest does not bind" in r for r in result["reasons"]
+    )
+
+
+def test_w2_abi_folds_live_split_and_closure_verdicts(monkeypatch) -> None:
+    # §10.3 W2 exit:privilege-split / application-closure 兩個活裁決折進 exported-ABI——
+    # 任一被降為非 PASS(模擬源碼回歸)→ 投影變值 + 顯式 reason → W2 導出失敗。
+    admission, w0, w1, w2 = _w2_chain()
+    monkeypatch.setattr(
+        install,
+        "derive_engine_scanner_privilege_split",
+        lambda repo_root=None, **kwargs: {
+            "status": "ENGINE_SCANNER_PRIVILEGE_SPLIT_REQUIRED",
+            "manifest_digest": None,
+        },
+    )
+    result = validator.derive_wave_exit_status(
+        w2,
+        source_admission_receipt=admission,
+        predecessor_wave_receipt=w1,
+        predecessor_wave_chain=(w0,),
+    )
+    assert result["status"] == "NOT_PASS"
+    assert any(
+        "engine-scanner privilege-split does not re-derive PASS" in r
+        for r in result["reasons"]
+    )
+
+
+def test_w2_unit_template_drift_breaks_derivation(monkeypatch) -> None:
+    # template 檔漂移(≠ code-owned 渲染形狀)→ unit_template_matches_renderer=False → 拒。
+    import agent_governance_s2_4_render as render
+
+    admission, w0, w1, w2 = _w2_chain()
+    monkeypatch.setattr(
+        render, "unit_template_text", lambda: "[Service]\nExecStart=/bin/sh\n"
+    )
+    result = validator.derive_wave_exit_status(
+        w2,
+        source_admission_receipt=admission,
+        predecessor_wave_receipt=w1,
+        predecessor_wave_chain=(w0,),
+    )
+    assert result["status"] == "NOT_PASS"
+    assert any("unit template" in r for r in result["reasons"])
+
+
+def test_w2_owned_paths_exist_and_cover_the_w2_surfaces() -> None:
+    dead = [p for p in validator._W2_OWNED_PATHS if not (ROOT / p).is_file()]
+    assert not dead, f"W2 owned paths contain dead entries: {dead}"
+    required = {
+        "helper_scripts/deploy/arcane-equilibrium-aiml-engine-scanner.service.template",
+        "helper_scripts/maintenance_scripts/agent_governance_s2_4_install.py",
+        "helper_scripts/maintenance_scripts/agent_governance_s2_4_render.py",
+        "program_code/ml_training/aiml_gate_receipt_wave_w2.py",
+        "program_code/ml_training/alr_event_consumer.py",
+        "program_code/ml_training/application_bundle_runtime_closure_v1.json",
+        "program_code/ml_training/pg_acl_manifest_v1.json",
+        "program_code/ml_training/schemas/aiml_gate_receipts/base_runtime_tree_manifest_v1.schema.json",
+        "program_code/ml_training/schemas/aiml_gate_receipts/launch_bundle_manifest_v1.schema.json",
+        "tests/structure/test_agent_governance_s2_4_install_render.py",
+        # F1 的真驅動證據面(hermetic fixture 不能自證 psycopg2 的連線期外形)。
+        "tests/structure/test_agent_governance_s2_4_consumer_resilience_disposable.py",
+    }
+    missing = required - set(validator._W2_OWNED_PATHS)
+    assert not missing, f"W2 owned-path binding misses: {sorted(missing)}"
+
+
 # ── §9.1 replay 綁定謂詞(驗證層消費語義;§10.5 #9/#36)─────────────────────────
 _AUTH_ISSUED = "2026-07-24T00:00:00+00:00"
 _AUTH_EXPIRES = "2026-07-24T00:10:00+00:00"
@@ -737,3 +1039,84 @@ def test_emitters_refuse_secret_like_evidence(tmp_path) -> None:
             review_provenance=[{"pr": 1, "verdict": "x"}],
         )
     assert list(tmp_path.iterdir()) == []
+
+
+# ── D1/D2:consumer 側兩個 code-owned 契約必須 receipt-bound ─────────────────────
+def _resilience_module():
+    from ml_training import alr_consumer_resilience
+
+    return alr_consumer_resilience
+
+
+def test_w2_exported_abi_binds_the_cluster_identity_column_contract() -> None:
+    """D1:身分列的封閉欄位契約折入 exported ABI(該關聯的 migration 屬 W6B)。
+
+    修前:``CLUSTER_IDENTITY_COLUMNS`` 與 ``cluster_identity_row_digest`` 單方面定義了
+    一個別人擁有的關聯——W6B 改名/換序不會弄破任何 W2 receipt,卻讓每次重連的
+    row-digest 比對永久失敗(exit 78)。折入後 drift 在 receipt 面就看得見。
+    """
+    resilience = _resilience_module()
+    projection = validator.w2_exported_abi_projection()
+    assert projection["cluster_identity_relation_name"] == (
+        resilience.CLUSTER_IDENTITY_RELATION
+    )
+    assert projection["cluster_identity_columns_digest"] == validator.canonical_digest(
+        list(resilience.CLUSTER_IDENTITY_COLUMNS)
+    )
+    assert projection["consumer_liveness_contract_digest"] == validator.canonical_digest(
+        resilience.derive_consumer_liveness_contract()
+    )
+
+
+def test_w2_receipt_breaks_when_the_identity_column_contract_drifts(monkeypatch) -> None:
+    """W6B 換一個欄位序/欄位名 → W2 wave-exit 立刻 NOT_PASS(不再靜默)。"""
+    admission, w0, w1, w2 = _w2_chain()
+    resilience = _resilience_module()
+    drifted = tuple(reversed(resilience.CLUSTER_IDENTITY_COLUMNS))
+    monkeypatch.setattr(resilience, "CLUSTER_IDENTITY_COLUMNS", drifted)
+    result = validator.derive_wave_exit_status(
+        w2,
+        source_admission_receipt=admission,
+        predecessor_wave_receipt=w1,
+        predecessor_wave_chain=(w0,),
+    )
+    assert result["status"] == "NOT_PASS"
+    assert any("exported_abi_digest does not re-derive" in r for r in result["reasons"])
+
+
+def test_w2_receipt_breaks_when_the_liveness_contract_drifts(monkeypatch) -> None:
+    """D2:staleness 門檻/信號面漂移同樣必須弄破 W2 導出。"""
+    admission, w0, w1, w2 = _w2_chain()
+    resilience = _resilience_module()
+    monkeypatch.setattr(
+        resilience,
+        "derive_consumer_liveness_contract",
+        lambda: {"schema_version": "alr_consumer_liveness_contract_v1"},
+    )
+    result = validator.derive_wave_exit_status(
+        w2,
+        source_admission_receipt=admission,
+        predecessor_wave_receipt=w1,
+        predecessor_wave_chain=(w0,),
+    )
+    assert result["status"] == "NOT_PASS"
+    assert any("exported_abi_digest does not re-derive" in r for r in result["reasons"])
+
+
+def test_w2_structural_errors_flag_an_unresolvable_consumer_contract(monkeypatch) -> None:
+    """fail-closed:契約導不出來(import 壞掉)時投影記 None 且顯式列 reason。"""
+    import aiml_gate_receipt_wave_w2 as wave_w2
+
+    admission, w0, w1, w2 = _w2_chain()
+    real_projection = wave_w2.w2_exported_abi_projection
+
+    def broken_projection(repo_root=wave_w2.REPO_ROOT):
+        broken = dict(real_projection(repo_root))
+        broken["cluster_identity_columns_digest"] = None
+        broken["consumer_liveness_contract_digest"] = None
+        return broken
+
+    monkeypatch.setattr(wave_w2, "w2_exported_abi_projection", broken_projection)
+    reasons = wave_w2.w2_structural_errors(w2)
+    assert any("cluster-identity column contract" in r for r in reasons)
+    assert any("liveness/staleness contract" in r for r in reasons)

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import ctypes
 import errno
 import hashlib
 import json
@@ -12,18 +11,34 @@ import re
 import select
 import shlex
 import signal
-import stat
-import struct
 import subprocess
-import sys
 import threading
 import time
 from contextlib import contextmanager, nullcontext
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+# S2.4 §2.1 W2a 拆分:inotify board-watch 面(含共用 AlrEventConsumerError)搬入
+# alr_candidate_board_events;此處 re-export 保持公開匯入面/monkeypatch 縫不變。
+# retention apply 面已「整段」移出本進程(見 alr_retention_runner)——本模組對
+# alr_retention_repository 零匯入路徑(無 lazy/條件;由 privilege-split 靜態執法)。
+from ml_training.alr_candidate_board_events import (  # noqa: F401 — re-export
+    AlrEventConsumerError,
+    CandidateBoardEventSource,
+    _IN_ACCESS_EVENT,
+    _IN_CLOSE_WRITE,
+    _IN_CREATE,
+    _IN_DELETE,
+    _IN_DONT_FOLLOW,
+    _IN_IGNORED,
+    _IN_MOVED_TO,
+    _IN_ONLYDIR,
+    _IN_Q_OVERFLOW,
+    _add_linux_candidate_board_watch,
+    open_candidate_board_event_source,
+)
 from ml_training.alr_consumer_repository import (
     fail_consumer_session,
     new_session_id,
@@ -35,7 +50,6 @@ from ml_training.alr_freshness_runtime import (
     drain_historical_lane,
     drain_notified_identities,
 )
-from ml_training.alr_retention_repository import run_retention_pass
 from ml_training.alr_operational_repository import (
     fetch_recent_candidate_scanner_cycles,
     fetch_recent_candidate_projection_decisions,
@@ -75,6 +89,20 @@ from ml_training.alr_scanner_statistical_experiment import (
     build_candidate_aware_learning_projection,
     build_scanner_statistical_experiment,
 )
+# S2.4 §8.3(W2 P1-A):常駐重連韌性 + 在帶叢集身分閘下沉至 governed 葉;
+# write-metrics 純投影面同樣下沉(2000 行治理拆分),此處逐名 re-export 保持既有
+# 匯入面/monkeypatch 縫不變(``consumer._build_write_metrics`` 等仍可用)。
+from ml_training.alr_consumer_resilience import (
+    AlrRuntimeIdentityError,  # noqa: F401 — re-export
+    ResidentConsumerState,  # noqa: F401 — re-export
+    default_jitter,
+    run_resident_db_sessions,
+    verify_connected_cluster_identity,
+)
+from ml_training.alr_consumer_write_metrics import (
+    build_write_metrics as _build_write_metrics,
+    row_value as _row_value,
+)
 from ml_training.alr_safe_file import (
     AlrSafeFileError,
     CHANGED,
@@ -82,6 +110,15 @@ from ml_training.alr_safe_file import (
     NOT_REGULAR,
     SIZE_INVALID,
     read_bounded_regular_file,
+)
+# S2.4 §8.1/§8.3(W2b):production 身分前置(application-root 整樹重算 + v2 receipt +
+# launch/topology 期望硬比對)下沉至 governed 葉模組;consumer 只消費 typed 結果。
+from ml_training.alr_application_identity import (
+    AlrApplicationIdentityError,
+    EX_CONFIG_EXIT_CODE,
+    is_permanent_pre_db_error,
+    production_failure_summary,
+    run_production_preflight_from_args,
 )
 
 
@@ -109,32 +146,9 @@ _DEFAULT_COMPATIBILITY_RECEIPT_V2_REL = (
     "docs/execution_plan/ai_ml_landing/receipts/"
     "S2.2A-source-compatibility-receipt-v2.json"
 )
-_RETENTION_GRACE_SECONDS = 900
 _CANDIDATE_EVIDENCE_MAX_AGE_SECONDS = 172_800
 _CANDIDATE_EVIDENCE_MAX_FILES = 128
 _CANDIDATE_EVIDENCE_MAX_BYTES = 64 * 1024 * 1024
-_IN_ACCESS_EVENT = struct.Struct("iIII")
-_IN_CREATE = 0x00000100
-_IN_DELETE = 0x00000200
-_IN_MOVED_TO = 0x00000080
-_IN_CLOSE_WRITE = 0x00000008
-_IN_DELETE_SELF = 0x00000400
-_IN_MOVE_SELF = 0x00000800
-_IN_UNMOUNT = 0x00002000
-_IN_Q_OVERFLOW = 0x00004000
-_IN_IGNORED = 0x00008000
-_IN_ONLYDIR = 0x01000000
-_IN_DONT_FOLLOW = 0x02000000
-# The immutable publisher links the new board before pruning the old board.
-# DELETE is the retry wake when a CREATE reconciliation observes that transient.
-_INOTIFY_WAKE_MASK = _IN_CREATE | _IN_DELETE | _IN_MOVED_TO | _IN_CLOSE_WRITE
-_INOTIFY_INVALIDATION_MASK = _IN_DELETE_SELF | _IN_MOVE_SELF | _IN_UNMOUNT | _IN_IGNORED
-_INOTIFY_WATCH_MASK = _INOTIFY_WAKE_MASK | (
-    _IN_DELETE_SELF | _IN_MOVE_SELF | _IN_UNMOUNT
-) | _IN_ONLYDIR | _IN_DONT_FOLLOW
-_IMMUTABLE_CANDIDATE_BOARD_NAME_RE = re.compile(
-    r"^blocked_outcome_review_[0-9]{8}T[0-9]{6}Z\.json$"
-)
 _ZERO_AUTHORITY_COUNTERS = {
     "exchange_contact_count": 0,
     "trading_action_count": 0,
@@ -157,224 +171,6 @@ _ZERO_AUTHORITY = {
     "promotion_authority": False,
     "latest_authority": False,
 }
-
-
-class AlrEventConsumerError(ValueError):
-    """An ALR notification or consumer control cannot be handled safely."""
-
-
-class CandidateBoardEventSource:
-    """Linux inotify wake source; event names never carry learning content."""
-
-    def __init__(
-        self,
-        directory: Path,
-        *,
-        event_fd: int,
-        watch_descriptor: int,
-        directory_fd: int,
-        reopen_watch: Any,
-    ) -> None:
-        self._directory = directory
-        self._event_fd = event_fd
-        self._watch_descriptor = watch_descriptor
-        self._directory_fd = directory_fd
-        self._reopen_watch = reopen_watch
-        self._reconciliation_required = True
-        self._closed = False
-
-    def __enter__(self) -> "CandidateBoardEventSource":
-        return self
-
-    def __exit__(self, *args: object) -> None:
-        self.close()
-
-    def fileno(self) -> int:
-        if self._closed:
-            raise AlrEventConsumerError("candidate_board_event_source_closed")
-        return self._event_fd
-
-    def consume_reconciliation_request(self) -> bool:
-        requested = self._reconciliation_required
-        self._reconciliation_required = False
-        return requested
-
-    def drain_ready(self) -> None:
-        """Drain bounded kernel records and reduce every valid event to one wake."""
-        if self._closed:
-            raise AlrEventConsumerError("candidate_board_event_source_closed")
-        try:
-            payload = os.read(self._event_fd, 64 * 1024)
-        except BlockingIOError:
-            return
-        except OSError as exc:
-            if exc.errno in {errno.EAGAIN, errno.EWOULDBLOCK}:
-                return
-            raise AlrEventConsumerError("candidate_board_event_read_failed") from exc
-        if not payload:
-            return
-        offset = 0
-        invalidated = False
-        while offset < len(payload):
-            if len(payload) - offset < _IN_ACCESS_EVENT.size:
-                raise AlrEventConsumerError("candidate_board_event_truncated")
-            watch_descriptor, mask, _cookie, name_length = _IN_ACCESS_EVENT.unpack_from(
-                payload, offset
-            )
-            offset += _IN_ACCESS_EVENT.size
-            if name_length > 4096 or offset + name_length > len(payload):
-                raise AlrEventConsumerError("candidate_board_event_name_invalid")
-            raw_name = bytes(payload[offset : offset + name_length])
-            offset += name_length
-            if watch_descriptor == -1 and mask & _IN_Q_OVERFLOW:
-                invalidated = True
-                self._reconciliation_required = True
-                continue
-            if watch_descriptor != self._watch_descriptor:
-                continue
-            if mask & _INOTIFY_INVALIDATION_MASK:
-                invalidated = True
-                self._reconciliation_required = True
-                continue
-            if mask & _INOTIFY_WAKE_MASK:
-                name = raw_name.split(b"\x00", 1)[0]
-                try:
-                    decoded_name = name.decode("ascii")
-                except UnicodeDecodeError:
-                    continue
-                if _IMMUTABLE_CANDIDATE_BOARD_NAME_RE.fullmatch(decoded_name):
-                    self._reconciliation_required = True
-        if invalidated:
-            new_event_fd, new_watch, new_directory_fd = self._reopen_watch(
-                self._directory
-            )
-            old_event_fd = self._event_fd
-            old_directory_fd = self._directory_fd
-            self._event_fd = new_event_fd
-            self._watch_descriptor = new_watch
-            self._directory_fd = new_directory_fd
-            _close_candidate_board_watch_descriptors(
-                old_event_fd if old_event_fd != new_event_fd else -1,
-                old_directory_fd
-                if old_directory_fd >= 0 and old_directory_fd != new_directory_fd
-                else -1,
-            )
-
-    def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
-        _close_candidate_board_watch_descriptors(
-            self._event_fd,
-            self._directory_fd,
-        )
-
-
-def _close_candidate_board_watch_descriptors(
-    event_fd: int,
-    directory_fd: int,
-) -> None:
-    try:
-        if directory_fd >= 0:
-            os.close(directory_fd)
-    finally:
-        if event_fd >= 0:
-            os.close(event_fd)
-
-
-def open_candidate_board_event_source(
-    directory: Path,
-    *,
-    open_watch: Any = None,
-    reopen_watch: Any = None,
-) -> CandidateBoardEventSource:
-    """Open one nonblocking Linux directory watch with startup reconciliation."""
-    opener = open_watch or _open_linux_candidate_board_watch
-    reopen = reopen_watch or _open_linux_candidate_board_watch
-    event_fd, watch_descriptor, directory_fd = opener(Path(directory))
-    return CandidateBoardEventSource(
-        Path(directory),
-        event_fd=event_fd,
-        watch_descriptor=watch_descriptor,
-        directory_fd=directory_fd,
-        reopen_watch=reopen,
-    )
-
-
-def _open_linux_candidate_board_watch(directory: Path) -> tuple[int, int, int]:
-    if sys.platform != "linux":
-        raise AlrEventConsumerError("candidate_board_inotify_unsupported")
-    try:
-        libc = ctypes.CDLL(None, use_errno=True)
-        init = libc.inotify_init1
-        init.argtypes = [ctypes.c_int]
-        init.restype = ctypes.c_int
-    except (AttributeError, OSError) as exc:
-        raise AlrEventConsumerError("candidate_board_inotify_unavailable") from exc
-    event_fd = init(os.O_NONBLOCK | os.O_CLOEXEC)
-    if event_fd < 0:
-        error_number = ctypes.get_errno()
-        raise AlrEventConsumerError(
-            f"candidate_board_inotify_open_failed:{error_number}"
-        ) from OSError(error_number, os.strerror(error_number))
-    try:
-        watch_descriptor, directory_fd = _add_linux_candidate_board_watch(
-            libc,
-            event_fd,
-            directory,
-        )
-    except Exception:
-        os.close(event_fd)
-        raise
-    return event_fd, watch_descriptor, directory_fd
-
-
-def _add_linux_candidate_board_watch(
-    libc: Any,
-    event_fd: int,
-    directory: Path,
-) -> tuple[int, int]:
-    try:
-        before = directory.lstat()
-    except OSError as exc:
-        raise AlrEventConsumerError("candidate_board_directory_unavailable") from exc
-    if stat.S_ISLNK(before.st_mode) or not stat.S_ISDIR(before.st_mode):
-        raise AlrEventConsumerError("candidate_board_directory_invalid")
-    try:
-        directory_fd = os.open(
-            directory,
-            os.O_RDONLY
-            | os.O_CLOEXEC
-            | getattr(os, "O_DIRECTORY", 0)
-            | getattr(os, "O_NOFOLLOW", 0),
-        )
-    except OSError as exc:
-        raise AlrEventConsumerError("candidate_board_directory_unavailable") from exc
-    try:
-        opened = os.fstat(directory_fd)
-        if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
-            raise AlrEventConsumerError("candidate_board_directory_changed")
-        add_watch = libc.inotify_add_watch
-        add_watch.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_uint32]
-        add_watch.restype = ctypes.c_int
-        held_directory_path = os.fsencode(f"/proc/self/fd/{directory_fd}/.")
-        descriptor = add_watch(
-            event_fd,
-            held_directory_path,
-            _INOTIFY_WATCH_MASK,
-        )
-        if descriptor < 0:
-            error_number = ctypes.get_errno()
-            raise AlrEventConsumerError(
-                f"candidate_board_inotify_watch_failed:{error_number}"
-            ) from OSError(error_number, os.strerror(error_number))
-        after = directory.lstat()
-        if (after.st_dev, after.st_ino) != (opened.st_dev, opened.st_ino):
-            raise AlrEventConsumerError("candidate_board_directory_changed")
-        return descriptor, directory_fd
-    except Exception:
-        os.close(directory_fd)
-        raise
 
 
 def parse_scanner_notification(channel: str, payload: str) -> dict[str, Any]:
@@ -448,6 +244,37 @@ def drain_notified_backlog(
     )
 
 
+# F5:``os.open`` / ``mkdir`` 的失敗只有 ``BlockingIOError`` 被轉成 typed code,其餘
+# ``OSError`` 裸奔出 main 的 ``except AlrEventConsumerError`` → exit 1 + 原始 traceback。
+# 下列 errno 是永不自癒的部署/組態錯(RuntimeDirectory 權限、路徑被檔案佔住、只讀掛載、
+# symlink 攻擊被 O_NOFOLLOW 擋下),必須一次 78 停下等 operator,而不是 300 秒燒三次
+# start limit 把單元變成永久 failed。
+_RUNTIME_LOCK_PERMANENT_ERRNOS = frozenset({
+    errno.EACCES,
+    errno.EPERM,
+    errno.EROFS,
+    errno.ENOTDIR,
+    errno.EISDIR,
+    errno.ELOOP,
+    errno.ENAMETOOLONG,
+})
+
+
+def _runtime_file_lock_open_code(error: OSError) -> str:
+    """把 lock 開檔失敗轉成 typed code;permanent 類走 ``_denied_``(→ exit 78)。
+
+    ENOSPC / EMFILE / ENFILE 等資源耗盡刻意**不**列為 permanent(operator 清空間即自癒),
+    只做 typed 化,讓失敗以結構化 code 而非裸 traceback 收場。
+    """
+    name = errno.errorcode.get(error.errno, str(error.errno))
+    prefix = (
+        "runtime_file_lock_denied_"
+        if error.errno in _RUNTIME_LOCK_PERMANENT_ERRNOS
+        else "runtime_file_lock_unavailable_"
+    )
+    return f"{prefix}{name}"
+
+
 @contextmanager
 def runtime_file_lock(lock_path: Path) -> Iterator[None]:
     """Hold a nonblocking local process lock for the consumer lifetime."""
@@ -456,12 +283,15 @@ def runtime_file_lock(lock_path: Path) -> Iterator[None]:
     except ImportError as exc:  # pragma: no cover - P2 target is Linux only
         raise AlrEventConsumerError("runtime_file_lock_unsupported") from exc
 
-    lock_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    descriptor = os.open(
-        lock_path,
-        os.O_WRONLY | os.O_CREAT | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0),
-        0o600,
-    )
+    try:
+        lock_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        descriptor = os.open(
+            lock_path,
+            os.O_WRONLY | os.O_CREAT | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
+    except OSError as exc:  # F5:ENOSPC/EACCES/EPERM/… 不再以 exit 1 裸奔
+        raise AlrEventConsumerError(_runtime_file_lock_open_code(exc)) from exc
     try:
         try:
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -900,25 +730,6 @@ def process_candidate_proof_repository_backlog(
     }
 
 
-def process_retention_backlog(connection: Any, *, max_batch: int) -> dict[str, int]:
-    """Run one bounded two-phase pass over ALR-owned derived cache only."""
-    if isinstance(max_batch, bool) or not isinstance(max_batch, int) or not 1 <= max_batch <= 256:
-        raise AlrEventConsumerError("retention_batch_limit_invalid")
-    result = run_retention_pass(
-        connection,
-        now=datetime.now(timezone.utc),
-        grace_seconds=_RETENTION_GRACE_SECONDS,
-        limit=min(max_batch, 64),
-    )
-    required = {"scanned", "quarantined", "restored", "swept", "retained", "skipped"}
-    if set(result) != required or any(
-        isinstance(result[key], bool) or not isinstance(result[key], int) or result[key] < 0
-        for key in required
-    ):
-        raise AlrEventConsumerError("retention_result_invalid")
-    return {f"retention_{key}": result[key] for key in required}
-
-
 def process_health_snapshot(
     connection: Any,
     *,
@@ -1186,7 +997,9 @@ def run_candidate_aware_backlog(
     return result
 
 
-def read_local_dsn_file(dsn_path: Path) -> str:
+def read_local_dsn_file(
+    dsn_path: Path, *, required_identity: Mapping[str, str] | None = None
+) -> str:
     """Read a private local-PG DSN without falling back to ambient credentials."""
     try:
         raw = read_bounded_regular_file(
@@ -1208,7 +1021,7 @@ def read_local_dsn_file(dsn_path: Path) -> str:
         raise AlrEventConsumerError("dsn_file_unreadable") from exc
     if not dsn:
         raise AlrEventConsumerError("dsn_file_blank")
-    _validate_local_dsn(dsn)
+    _validate_local_dsn(dsn, required_identity)
     return dsn
 
 
@@ -1303,26 +1116,43 @@ def run_event_consumer(
     candidate_policy: Mapping[str, Any] | None = None,
     expected_learning_runtime_digest: str | None = None,
     expected_compatibility_receipt: Path | None = None,
+    pinned_repo_source_head: str | None = None,
+    dsn_required_identity: Mapping[str, str] | None = None,
+    topology_guard_file: Path | None = None,
+    reconnect_sleep: Callable[[float], Any] | None = None,
+    reconnect_jitter: Callable[[], float] | None = None,
+    reconnect_state: Any | None = None,
 ) -> dict[str, int]:
-    """LR1 相容性 preflight 後執行 shadow consumer，並持久化真實 lifecycle。
+    """LR1 相容性 preflight 後執行常駐 consumer，並持久化真實 lifecycle。
 
     整倉 HEAD 已降為遙測：docs-only 提交不再停 ingest。只有 capture 面不相容(建置失敗
     等)才 fail-closed 停 capture；training 契約漂移只 quarantine fit(fit_quarantined)。
+
+    W2b(§8.3 production):``pinned_repo_source_head`` 非 None 時,相容性重算以該 pinned
+    head 建置(零 Git 呼叫——application root 無 checkout);``dsn_required_identity``
+    非 None 時 DSN 綁 production 身分表(aiml_engine_scanner)。兩者皆 None = 舊行為。
+
+    W2 P1-A(§8.3 resident 語義):DB 可用性 transient 失敗**不退出**——關閉失敗連線後,
+    以有界指數退避 + jitter(5s..300s)無限重連;host 面資源(檔案鎖、candidate board
+    watch)跨重連持有,進度 cursor 全在 DB 側,故不累積 task/row/記憶體。重連時
+    ``topology_guard_file`` 非 None 即先載入並自我 digest guard、比對連上的
+    user/database/endpoint 與叢集身分列,不符即 permanent typed 失敗(production → 78)。
     """
     compatibility = _preflight_source_compatibility(
         source_head=source_head,
         expected_learning_runtime_digest=expected_learning_runtime_digest,
         repo_root=repo_root,
         expected_compatibility_receipt=expected_compatibility_receipt,
+        pinned_repo_source_head=pinned_repo_source_head,
     )
     fit_quarantined = bool(compatibility["fit_quarantined"])
-    dsn = read_local_dsn_file(dsn_path)
+    dsn = (
+        read_local_dsn_file(dsn_path)
+        if dsn_required_identity is None
+        else read_local_dsn_file(dsn_path, required_identity=dsn_required_identity)
+    )
     stop_event = threading.Event()
     previous_handlers = _install_shutdown_handlers(stop_event)
-    connection: Any | None = None
-    db_lock_acquired = False
-    session_id: str | None = None
-    session_started = False
     try:
         with runtime_file_lock(lock_path):
             board_source_context = (
@@ -1331,48 +1161,109 @@ def run_event_consumer(
                 else nullcontext(None)
             )
             with board_source_context as board_source:
-                connection = _connect_listener(dsn)
-                db_lock_acquired = acquire_single_instance(connection)
-                if not db_lock_acquired:
-                    raise AlrEventConsumerError("single_instance_lock_busy")
-                session_id = new_session_id()
-                start_consumer_session(connection, session_id=session_id)
-                session_started = True
-                try:
-                    result = event_consumer_loop(
+                outcome = run_resident_db_sessions(
+                    open_connection=lambda: _connect_listener(dsn),
+                    run_session=lambda connection: _run_single_db_session(
                         connection,
                         max_batch=max_batch,
-                        should_stop=stop_event.is_set,
-                        wait_for_notifications=wait_for_pg_notifications,
-                        session_id=session_id,
                         source_head=source_head,
+                        stop_event=stop_event,
+                        board_source=board_source,
                         candidate_evidence_directory=candidate_evidence_directory,
                         candidate_policy=candidate_policy,
-                        candidate_board_source=board_source,
                         fit_quarantined=fit_quarantined,
-                    )
-                    stop_consumer_session(connection, session_id=session_id)
-                    session_started = False
-                    return result
-                except Exception as exc:
-                    connection.rollback()
-                    if session_started:
-                        try:
-                            fail_consumer_session(
-                                connection,
-                                session_id=session_id,
-                                error_code=type(exc).__name__,
-                            )
-                            session_started = False
-                        except Exception:
-                            connection.rollback()
-                    raise
+                        topology_guard_file=topology_guard_file,
+                        dsn_required_identity=dsn_required_identity,
+                    ),
+                    close_connection=_close_db_session,
+                    should_stop=stop_event.is_set,
+                    # 可中斷等待:退避期間收到 SIGTERM 立即醒來(不拖到 TimeoutStopSec)。
+                    sleep=reconnect_sleep or stop_event.wait,
+                    jitter=reconnect_jitter or default_jitter,
+                    state=reconnect_state,
+                )
+                # result 為 None = 停機訊號在 DB 中斷期間到達(零 session 完成、非失敗)。
+                return outcome["result"] if outcome["result"] is not None else {}
     finally:
-        if connection is not None:
-            if db_lock_acquired:
-                release_single_instance(connection)
-            connection.close()
         _restore_shutdown_handlers(previous_handlers)
+
+
+def _run_single_db_session(
+    connection: Any,
+    *,
+    max_batch: int,
+    source_head: str,
+    stop_event: threading.Event,
+    board_source: Any,
+    candidate_evidence_directory: Path | None,
+    candidate_policy: Mapping[str, Any] | None,
+    fit_quarantined: bool,
+    topology_guard_file: Path | None = None,
+    dsn_required_identity: Mapping[str, str] | None = None,
+) -> dict[str, int]:
+    """一次 DB session 的完整生命週期(身分閘 → 單例 → session → 事件迴圈)。"""
+    if topology_guard_file is not None:
+        verify_connected_cluster_identity(
+            connection,
+            topology_guard_file=topology_guard_file,
+            dsn_identity=dsn_required_identity,
+        )
+    if not acquire_single_instance(connection):
+        raise AlrEventConsumerError("single_instance_lock_busy")
+    session_id = new_session_id()
+    start_consumer_session(connection, session_id=session_id)
+    try:
+        result = event_consumer_loop(
+            connection,
+            max_batch=max_batch,
+            should_stop=stop_event.is_set,
+            wait_for_notifications=wait_for_pg_notifications,
+            session_id=session_id,
+            source_head=source_head,
+            candidate_evidence_directory=candidate_evidence_directory,
+            candidate_policy=candidate_policy,
+            candidate_board_source=board_source,
+            fit_quarantined=fit_quarantined,
+        )
+    except Exception as exc:
+        _fail_session_best_effort(
+            connection, session_id=session_id, error_code=type(exc).__name__
+        )
+        raise
+    stop_consumer_session(connection, session_id=session_id)
+    return result
+
+
+def _fail_session_best_effort(
+    connection: Any, *, session_id: str, error_code: str
+) -> None:
+    """失敗路徑的 durable 記帳:盡力 rollback + fail_consumer_session。
+
+    連線已死(DB 停機)時記帳必然失敗——此處一律吞掉次生例外,讓**原始**失敗原因
+    上拋,否則 transient 分類會被 rollback 的 InterfaceError 掩蓋成永久崩潰。
+    """
+    try:
+        connection.rollback()
+        fail_consumer_session(
+            connection, session_id=session_id, error_code=error_code
+        )
+    except Exception:  # noqa: BLE001 — 見 docstring:絕不掩蓋原始失敗
+        try:
+            connection.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _close_db_session(connection: Any) -> None:
+    """關閉一次 session 的連線;先盡力釋放 advisory 單例(死連線不得阻斷重連)。"""
+    try:
+        release_single_instance(connection)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        connection.close()
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def verify_runtime_source_head(
@@ -1494,15 +1385,21 @@ def _preflight_source_compatibility(
     expected_learning_runtime_digest: str | None,
     repo_root: Path | None,
     expected_compatibility_receipt: Path | None = None,
+    pinned_repo_source_head: str | None = None,
 ) -> dict[str, Any]:
     """LR1 preflight：唯一權威判定器 evaluate_compatibility(expected, actual)。
 
     expected 清單取自 in-repo pinned source_compatibility receipt;actual 由當前 checkout
     建置。capture 面不相容/不可判定 → fail-closed 停 ingest;training 面漂移 → 只
     quarantine fit 而 capture 續跑。整倉 HEAD 僅作遙測。
+
+    W2b(§8.3):pinned_repo_source_head 非 None(production)時,建置注入 pinned head、
+    HEAD 遙測不呼叫 Git(application root 是不可變 bundle,非 checkout)。
     """
     root = repo_root or Path(__file__).resolve().parents[2]
-    actual, build_errors = try_build_learning_runtime_manifest(root)
+    actual, build_errors = try_build_learning_runtime_manifest(
+        root, repo_source_head=pinned_repo_source_head
+    )
     expected = _load_expected_compatibility_manifest(
         root, expected_compatibility_receipt, expected_learning_runtime_digest
     )
@@ -1519,7 +1416,11 @@ def _preflight_source_compatibility(
         "repo_source_head": actual["repo_source_head"] if actual else None,
         "learning_runtime_digest": actual["self_digest"] if actual else None,
         "expected_learning_runtime_digest": expected_learning_runtime_digest,
-        "source_head_match": _telemetry_source_head_match(source_head, repo_root=root),
+        "source_head_match": (
+            "pinned_application_root"
+            if pinned_repo_source_head is not None
+            else _telemetry_source_head_match(source_head, repo_root=root)
+        ),
         "fit_quarantined": compatibility["fit_status"] != "COMPATIBLE",
         "capture_status": compatibility["capture_status"],
         "fit_status": compatibility["fit_status"],
@@ -1560,7 +1461,12 @@ def _restore_shutdown_handlers(previous: Mapping[int, Any]) -> None:
         signal.signal(signum, handler)
 
 
-def _validate_local_dsn(dsn: str) -> None:
+def _validate_local_dsn(
+    dsn: str, required: Mapping[str, str] | None = None
+) -> None:
+    # W2b(§8.3):production 模式以 aiml_engine_scanner 身分表覆蓋;預設維持 legacy
+    # user-level shadow lane 的 alr_shadow(dev/test 路徑不變)。
+    required = _LOCAL_DSN_REQUIRED if required is None else required
     try:
         parts = shlex.split(dsn)
     except ValueError as exc:
@@ -1575,8 +1481,32 @@ def _validate_local_dsn(dsn: str) -> None:
         parsed[key] = value
     if _DSN_FORBIDDEN_KEYS.intersection(parsed):
         raise AlrEventConsumerError("dsn_not_local_trading_ai")
-    if any(parsed.get(key) != value for key, value in _LOCAL_DSN_REQUIRED.items()):
+    if any(parsed.get(key) != value for key, value in required.items()):
         raise AlrEventConsumerError("dsn_not_local_trading_ai")
+
+
+def _emit_result(
+    result: dict[str, int] | None,
+    *,
+    candidate_policy_status: dict[str, Any],
+    source_value_guard: dict[str, Any] | None,
+    production_identity: dict[str, Any] | None,
+) -> None:
+    """v2 結果 JSON 的唯一出口(main 全部出口共用;九 authority 恆 false)。"""
+    print(
+        json.dumps(
+            {
+                "schema_version": "alr_event_consumer_result_v2",
+                "result": result,
+                "candidate_policy": candidate_policy_status,
+                "source_value_guard": source_value_guard,
+                "production_identity": production_identity,
+                "authority": dict(_ZERO_AUTHORITY),
+                "authority_counters": dict(_ZERO_AUTHORITY_COUNTERS),
+            },
+            sort_keys=True,
+        )
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1612,6 +1542,27 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         default=os.environ.get("ALR_CANDIDATE_POLICY_FILE"),
     )
+    # S2.4 §8.3(W2b)production ABI:--application-root 出現即進 production 模式(唯一根;
+    # 期望缺失/不符絕不回退,permanent 失敗 exit 78——語義詳 alr_application_identity)。
+    parser.add_argument("--application-root", type=Path, default=None)
+    parser.add_argument(
+        "--expected-compatibility-receipt-v2",
+        type=Path,
+        default=os.environ.get("ALR_EXPECTED_COMPATIBILITY_RECEIPT_V2"),
+    )
+    parser.add_argument(
+        "--expected-application-bundle-digest",
+        default=os.environ.get("ALR_APPLICATION_BUNDLE_DIGEST"),
+    )
+    parser.add_argument(
+        "--expected-launch-bundle-digest",
+        default=os.environ.get("ALR_LAUNCH_BUNDLE_DIGEST"),
+    )
+    parser.add_argument(
+        "--topology-guard-file",
+        type=Path,
+        default=os.environ.get("ALR_TOPOLOGY_GUARD_FILE"),
+    )
     arguments = parser.parse_args(argv)
     candidate_policy: Mapping[str, Any] | None = None
     candidate_policy_status: dict[str, Any] = {
@@ -1637,6 +1588,22 @@ def main(argv: list[str] | None = None) -> int:
                 "policy_config_hash": None,
                 "reason": str(exc),
             }
+    # S2.4 §8.3(W2b)production 前置:--application-root 出現即整樹重算 application bundle
+    # digest 並硬比對全部期望;任何 permanent 身分/組態失敗輸出結構化 JSON 後 exit 78,
+    # 「絕不」回退 ambient/Git/module-relative 來源。preflight 通過後,v2 value-guard 由
+    # preflight 的 root-scoped 驗證承接(legacy resolver 走 module-relative 根,production 禁用)。
+    production_identity: dict[str, Any] | None = None
+    if arguments.application_root is not None:
+        try:
+            production_identity = run_production_preflight_from_args(arguments)
+        except AlrApplicationIdentityError as exc:
+            _emit_result(
+                None,
+                candidate_policy_status=candidate_policy_status,
+                source_value_guard=None,
+                production_identity=production_failure_summary(exc.code),
+            )
+            return EX_CONFIG_EXIT_CODE
     # S2-WP1 spawn value-guard:若 operator 供了 v2 pin,先在任何 DB 前 fail-closed 核驗
     # committed v2 身分(完整 + 可由 checkout 重算 + 與 pin 相符);任一不符即拒啟,不進 consumer。
     # resolve_pinned_learning_runtime_digest 的 recompute-from-checkout 是此 guard 的 source-truth
@@ -1648,7 +1615,9 @@ def main(argv: list[str] | None = None) -> int:
         "status": "DISABLED",
         "learning_runtime_digest_v2": None,
     }
-    if v2_pin is not None:
+    if production_identity is not None:
+        source_value_guard = production_identity["source_value_guard"]
+    elif v2_pin is not None:
         try:
             resolved = resolve_pinned_learning_runtime_digest()
         except Exception:  # noqa: BLE001 — 拒啟優先於任何錯誤外洩(fail-closed)
@@ -1677,42 +1646,48 @@ def main(argv: list[str] | None = None) -> int:
                     "learning_runtime_digest_v2": resolved,
                 }
         if source_value_guard["status"] != "PASS":
-            print(
-                json.dumps(
-                    {
-                        "schema_version": "alr_event_consumer_result_v2",
-                        "result": None,
-                        "candidate_policy": candidate_policy_status,
-                        "source_value_guard": source_value_guard,
-                        "authority": dict(_ZERO_AUTHORITY),
-                        "authority_counters": dict(_ZERO_AUTHORITY_COUNTERS),
-                    },
-                    sort_keys=True,
-                )
+            _emit_result(
+                None,
+                candidate_policy_status=candidate_policy_status,
+                source_value_guard=source_value_guard,
+                production_identity=None,
             )
             return 1
-    result = run_event_consumer(
-        dsn_path=arguments.dsn_file,
-        lock_path=arguments.lock_file,
-        max_batch=arguments.max_batch,
-        source_head=arguments.source_head,
-        candidate_evidence_directory=arguments.candidate_evidence_dir,
-        candidate_policy=candidate_policy,
-        expected_learning_runtime_digest=arguments.expected_learning_runtime_digest,
-        expected_compatibility_receipt=arguments.expected_compatibility_receipt,
-    )
-    print(
-        json.dumps(
-            {
-                "schema_version": "alr_event_consumer_result_v2",
-                "result": result,
-                "candidate_policy": candidate_policy_status,
-                "source_value_guard": source_value_guard,
-                "authority": dict(_ZERO_AUTHORITY),
-                "authority_counters": dict(_ZERO_AUTHORITY_COUNTERS),
-            },
-            sort_keys=True,
-        )
+    run_kwargs: dict[str, Any] = {
+        "dsn_path": arguments.dsn_file,
+        "lock_path": arguments.lock_file,
+        "max_batch": arguments.max_batch,
+        "source_head": arguments.source_head,
+        "candidate_evidence_directory": arguments.candidate_evidence_dir,
+        "candidate_policy": candidate_policy,
+        "expected_learning_runtime_digest": arguments.expected_learning_runtime_digest,
+        "expected_compatibility_receipt": arguments.expected_compatibility_receipt,
+    }
+    production_summary: dict[str, Any] | None = None
+    if production_identity is not None:
+        # production:唯一根 = application root;pinned head 重算(零 Git);DSN 綁
+        # aiml_engine_scanner;v1 receipt 為 root-scoped 路徑(preflight 已驗 containment)。
+        run_kwargs.update(production_identity["run_kwargs"])
+        production_summary = production_identity["summary"]
+    try:
+        result = run_event_consumer(**run_kwargs)
+    except AlrEventConsumerError as exc:
+        # §8.3:production 的 permanent pre-DB config/identity 失敗 → exit 78
+        # (unit RestartPreventExitStatus=78);其餘與 dev/test 路徑一致向上拋。
+        if production_identity is not None and is_permanent_pre_db_error(exc):
+            _emit_result(
+                None,
+                candidate_policy_status=candidate_policy_status,
+                source_value_guard=source_value_guard,
+                production_identity=production_failure_summary(str(exc)),
+            )
+            return EX_CONFIG_EXIT_CODE
+        raise
+    _emit_result(
+        result,
+        candidate_policy_status=candidate_policy_status,
+        source_value_guard=source_value_guard,
+        production_identity=production_summary,
     )
     return 0
 
@@ -1731,7 +1706,10 @@ def _process_operational_cycle(
     """Fresh/history drain 後依既有順序執行 bounded research-only 工作。
 
     LR1：fit_quarantined 時 fence 掉 fit-triggering 的 candidate projection 轉換，
-    feedback/proof/retention/health 等非 fit 工作照常。
+    feedback/proof/health 等非 fit 工作照常。
+
+    S2.4 §2.1(W2a):retention pass 已「整段」移出 engine-scanner 進程(獨立入口
+    ``alr_retention_runner``);本 orchestration 不再含任何 retention 步驟。
     """
     _accumulate_feedback(
         totals,
@@ -1754,10 +1732,6 @@ def _process_operational_cycle(
             connection,
             max_batch=max_batch,
         ),
-    )
-    _accumulate_retention(
-        totals,
-        process_retention_backlog(connection, max_batch=max_batch),
     )
     _accumulate_health(
         totals,
@@ -1783,7 +1757,7 @@ def _process_candidate_reconciliation(
     candidate_policy: Mapping[str, Any] | None = None,
     fit_quarantined: bool = False,
 ) -> None:
-    """Board wake path: candidate reconciliation plus health, never feedback/retention.
+    """Board wake path: candidate reconciliation plus health, never feedback.
 
     LR1：fit_quarantined 時 fence 掉 fit-triggering 的 candidate projection，只保留
     proof-repository 唯讀映射與 health 心跳。
@@ -2000,24 +1974,6 @@ def _accumulate_candidate_proof_repository(
         totals[key] = totals.get(key, 0) + result[key]
 
 
-def _accumulate_retention(totals: dict[str, int], result: Mapping[str, int]) -> None:
-    required = {
-        "retention_scanned",
-        "retention_quarantined",
-        "retention_restored",
-        "retention_swept",
-        "retention_retained",
-        "retention_skipped",
-    }
-    if set(result) != required or any(
-        isinstance(result[key], bool) or not isinstance(result[key], int) or result[key] < 0
-        for key in required
-    ):
-        raise AlrEventConsumerError("retention_result_invalid")
-    for key in required:
-        totals[key] = totals.get(key, 0) + result[key]
-
-
 def _accumulate_health(totals: dict[str, int], result: Mapping[str, int]) -> None:
     required = {
         "health_attempts",
@@ -2036,124 +1992,6 @@ def _accumulate_health(totals: dict[str, int], result: Mapping[str, int]) -> Non
         raise AlrEventConsumerError("health_result_invalid")
     for key in required:
         totals[key] = totals.get(key, 0) + result[key]
-
-
-def _build_write_metrics(
-    totals: Mapping[str, int],
-    *,
-    session_id: str,
-) -> dict[str, Any]:
-    def counter(key: str) -> int:
-        value = totals.get(key, 0)
-        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-            raise AlrEventConsumerError("write_metric_counter_invalid")
-        return value
-
-    def ratio(numerator: int, denominator: int) -> float:
-        if numerator > denominator:
-            raise AlrEventConsumerError("write_metric_ratio_invalid")
-        return numerator / denominator if denominator else 0.0
-
-    health_attempts = counter("health_attempts")
-    health_emitted = counter("health_snapshots")
-    health_suppressed = counter("health_writes_suppressed")
-    decision_attempts = counter("decision_write_attempts")
-    decision_suppressed = counter("decision_writes_suppressed")
-    feedback_attempts = counter("feedback_write_attempts")
-    feedback_persisted = counter("feedback_persisted")
-    feedback_duplicate_retries = counter("feedback_duplicate_retries")
-    feedback_artifact_rows = counter("feedback_artifact_rows_written")
-    feedback_provenance_rows = counter(
-        "feedback_provenance_rows_written"
-    )
-    feedback_event_rows = counter("feedback_event_rows_written")
-    feedback_total_rows = counter("feedback_total_rows_written")
-    feedback_payload_bytes = counter("feedback_payload_bytes_written")
-    if feedback_persisted + feedback_duplicate_retries != feedback_attempts:
-        raise AlrEventConsumerError("feedback_write_metric_attempt_invalid")
-    if feedback_total_rows != (
-        feedback_artifact_rows
-        + feedback_provenance_rows
-        + feedback_event_rows
-    ):
-        raise AlrEventConsumerError("feedback_write_metric_total_invalid")
-    return {
-        "schema_version": "alr_write_metrics_v1",
-        "scope": {
-            "kind": "consumer_session_cumulative",
-            "session_id": session_id,
-            "through_completed_health_attempt": health_attempts,
-        },
-        "health": {
-            "attempts": health_attempts,
-            "emitted": health_emitted,
-            "state_delta_writes": counter("health_state_delta_writes"),
-            "heartbeat_writes": counter("health_heartbeat_writes"),
-            "writes_suppressed": health_suppressed,
-            "rows_written": counter("health_rows_written"),
-            "payload_bytes_written": counter(
-                "health_payload_bytes_written"
-            ),
-            "suppression_ratio": ratio(
-                health_suppressed,
-                health_attempts,
-            ),
-        },
-        "decision": {
-            "attempts": decision_attempts,
-            "writes_suppressed": decision_suppressed,
-            "duplicate_retries": counter("decision_duplicate_retries"),
-            "artifact_rows_written": counter(
-                "operational_artifact_rows_written"
-            )
-            + feedback_artifact_rows,
-            "provenance_rows_written": counter(
-                "operational_provenance_rows_written"
-            )
-            + feedback_provenance_rows,
-            "run_rows_written": counter("operational_run_rows_written"),
-            "feedback_rows_written": feedback_event_rows
-            + counter("operational_feedback_rows_written"),
-            "defer_artifact_rows_written": counter(
-                "operational_defer_artifact_rows_written"
-            ),
-            "payload_bytes_written": counter(
-                "operational_payload_bytes_written"
-            )
-            + feedback_payload_bytes,
-            "source_rows_consumed": counter(
-                "operational_source_rows_consumed"
-            ),
-            "suppression_ratio": ratio(
-                decision_suppressed,
-                decision_attempts,
-            ),
-        },
-        "feedback": {
-            "attempts": feedback_attempts,
-            "persisted": feedback_persisted,
-            "duplicate_retries": feedback_duplicate_retries,
-            "persisted_ratio": ratio(
-                feedback_persisted,
-                feedback_attempts,
-            ),
-            "duplicate_retry_ratio": ratio(
-                feedback_duplicate_retries,
-                feedback_attempts,
-            ),
-            "artifact_rows_written": feedback_artifact_rows,
-            "provenance_rows_written": feedback_provenance_rows,
-            "event_rows_written": feedback_event_rows,
-            "total_rows_written": feedback_total_rows,
-            "payload_bytes_written": feedback_payload_bytes,
-        },
-    }
-
-
-def _row_value(row: Any, index: int, key: str) -> Any:
-    if isinstance(row, Mapping):
-        return row[key]
-    return row[index]
 
 
 if __name__ == "__main__":  # pragma: no cover - exercised by the user unit

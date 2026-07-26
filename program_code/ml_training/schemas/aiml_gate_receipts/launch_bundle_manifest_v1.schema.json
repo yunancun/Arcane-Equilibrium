@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/launch_bundle_manifest_v1.schema.json",
+  "title": "launch_bundle_manifest_v1",
+  "description": "S2.4 §8.1 content identity #4: canonical manifest binding {runtime_content_digest, base_runtime_tree_digest, application_bundle_digest, application_source_head, launcher_config_digest, launch_tree_digest, target_platform}. launch_tree_digest independently hashes the sorted materialized launch-tree {path, type, mode, sha256} walk plus the in-tree ELF loader closure of a caller-provided tree (agent_governance_s2_4_render.launch_tree_walk_digest; tmp-dir tests only, no production path contact); a launch tree whose loader closure escapes it is a typed refusal. application_bundle_digest is never accepted as an unrelated well-formed digest: the builder recomputes §8.1 identity #3 over the caller-provided MATERIALIZED application root and refuses unless it equals the supplied digest, and application_source_head is taken from that verified package. self_digest IS launch_bundle_digest; its 64-hex leaf names the immutable launch tree /opt/arcane-equilibrium/aiml/launches/<64-hex> consumed by ml_training.alr_application_identity.verify_launch_prefix (the W2b leaf-name contract). self_digest is integrity evidence only and never a runtime/production claim.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "program_id",
+    "component",
+    "runtime_content_digest",
+    "base_runtime_tree_digest",
+    "application_bundle_digest",
+    "application_source_head",
+    "launcher_config_digest",
+    "launch_tree_digest",
+    "target_platform",
+    "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "launch_bundle_manifest_v1"},
+    "program_id": {"const": "AIML-LONG-LIVED-LANDING-V2"},
+    "component": {"const": "engine_scanner"},
+    "runtime_content_digest": {"$ref": "#/$defs/digest"},
+    "base_runtime_tree_digest": {"$ref": "#/$defs/digest"},
+    "application_bundle_digest": {"$ref": "#/$defs/digest"},
+    "application_source_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "launcher_config_digest": {"$ref": "#/$defs/digest"},
+    "launch_tree_digest": {"$ref": "#/$defs/digest"},
+    "target_platform": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.\\-]*$"},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}

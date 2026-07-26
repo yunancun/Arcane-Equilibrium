@@ -192,3 +192,59 @@ def test_v2_learning_code_is_v1_superset_plus_parquet_etl() -> None:
     assert set(lrm.LEARNING_CODE_INPUTS).issubset(set(lrm.LEARNING_CODE_INPUTS_V2))
     added = set(lrm.LEARNING_CODE_INPUTS_V2) - set(lrm.LEARNING_CODE_INPUTS)
     assert added == {"program_code/ml_training/parquet_etl.py"}
+
+
+# --------------------------------------------------------------------------- #
+# W2 P1-C(E3 P1-2):特徵 schema 契約葉 ↔ parquet_etl 的常量平價 + 身分不變
+# --------------------------------------------------------------------------- #
+def test_feature_schema_contract_leaf_is_byte_parity_with_parquet_etl() -> None:
+    """兩側常量/雜湊必須逐位元組一致——否則 train/serve schema 會靜默分岔。"""
+    from ml_training import edge_feature_schema_contract as leaf
+    from ml_training import parquet_etl
+
+    assert leaf.EDGE_P3_FEATURE_NAMES == parquet_etl.EDGE_P3_FEATURE_NAMES
+    assert (
+        leaf.EDGE_P3_FEATURE_SCHEMA_VERSION == parquet_etl.EDGE_P3_FEATURE_SCHEMA_VERSION
+    )
+    assert leaf.compute_feature_schema_hash() == parquet_etl.compute_feature_schema_hash()
+    assert leaf.compute_feature_schema_hash(["a", "b"]) == (
+        parquet_etl.compute_feature_schema_hash(["a", "b"])
+    )
+
+
+def test_learning_runtime_manifest_imports_the_pg_free_leaf_not_parquet_etl() -> None:
+    """SSOT 模塊不得再 import 真連 PG 的 duckdb ETL 面(ambient DSN 逃逸縫)。"""
+    source = MODULE.read_text(encoding="utf-8")
+    assert "from ml_training.parquet_etl import" not in source
+    assert "from ml_training.edge_feature_schema_contract import" in source
+    # 葉自身必須零 PG/duckdb/env 面(否則等於把同一條縫搬家)。只掃「可執行碼」:
+    # 以 AST 去掉 module docstring/註解後 unparse,避免文件敘述造成假紅。
+    import ast
+
+    tree = ast.parse(
+        (ROOT / "program_code/ml_training/edge_feature_schema_contract.py").read_text(
+            encoding="utf-8"
+        )
+    )
+    body = tree.body[1:] if ast.get_docstring(tree) is not None else tree.body
+    leaf_code = "\n".join(ast.unparse(node) for node in body)
+    for token in ("duckdb", "psycopg2", "OPENCLAW_DATABASE_URL", "POSTGRES_",
+                  "os.environ", "getenv", "ATTACH", "connect("):
+        assert token not in leaf_code, token
+
+
+def test_v2_identity_still_binds_parquet_etl_file_contents() -> None:
+    """身分守恆:v2 learning-code 輸入仍含 parquet_etl.py(digest 不得因拆分而改變)。"""
+    from ml_training import learning_runtime_manifest as lrm
+
+    assert "program_code/ml_training/parquet_etl.py" in lrm.LEARNING_CODE_INPUTS_V2
+    manifest_v2, errors = lrm.try_build_learning_runtime_manifest_v2(ROOT)
+    assert errors == [] and manifest_v2 is not None
+    assert manifest_v2["self_digest"] == (
+        "sha256:58bb9cc3a827872284196f57811227d367e4ff4aed5f3b22a031df1b39904c62"
+    )
+    manifest_v1, errors_v1 = lrm.try_build_learning_runtime_manifest(ROOT)
+    assert errors_v1 == [] and manifest_v1 is not None
+    assert manifest_v1["self_digest"] == (
+        "sha256:6cf76b60a763035d26d0d4e9e0e6aa0aa8877d99966367c778420e5f63a79595"
+    )

@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/application_bundle_runtime_closure_v1.schema.json",
+  "title": "application_bundle_runtime_closure_v1",
+  "description": "S2.4 §8.1 checked-in, reviewable runtime-closure allowlist from which application_bundle_manifest_v1 is produced. Closed by construction: every section carries repository-relative regular-file paths (no absolute paths, no '..' escape, no symlink targets); the entrypoint, layout version and policy template are frozen constants. self_digest is integrity evidence only; the bidirectional exact-match of python_modules against the statically derived runtime import closure (and every effect-capable/broker/credential deny predicate) is derived by agent_governance_s2_4_install.derive_application_runtime_closure_status, never self-declared.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "program_id",
+    "component",
+    "entrypoint",
+    "bundle_layout_version",
+    "runtime_lazy_helper_roots",
+    "python_modules",
+    "package_init_files",
+    "compatibility_receipts",
+    "learning_runtime_inputs",
+    "sql_fingerprints",
+    "dependency_lock_files",
+    "policy_template",
+    "schema_resources",
+    "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "application_bundle_runtime_closure_v1"},
+    "program_id": {"const": "AIML-LONG-LIVED-LANDING-V2"},
+    "component": {"const": "engine_scanner"},
+    "entrypoint": {"const": "ml_training.alr_event_consumer"},
+    "bundle_layout_version": {"const": "aiml_app_bundle_layout_v1"},
+    "runtime_lazy_helper_roots": {
+      "type": "array",
+      "maxItems": 4,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["module", "reason"],
+        "properties": {
+          "module": {"type": "string", "pattern": "^[a-z_][a-z0-9_]*$"},
+          "reason": {"type": "string", "minLength": 8}
+        }
+      }
+    },
+    "python_modules": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/python_path"}
+    },
+    "package_init_files": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/python_path"}
+    },
+    "compatibility_receipts": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/json_path"}
+    },
+    "learning_runtime_inputs": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/repo_path"}
+    },
+    "sql_fingerprints": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^sql/migrations/V1[0-9]{2}__[a-z0-9_]+\\.sql$"
+      }
+    },
+    "dependency_lock_files": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "uniqueItems": true,
+      "items": {"enum": ["requirements-ml.lock", "requirements-ml.txt"]}
+    },
+    "policy_template": {
+      "const": "helper_scripts/deploy/openclaw-alr-candidate-policy.template.json"
+    },
+    "schema_resources": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^program_code/ml_training/schemas/aiml_gate_receipts/[a-z0-9_]+\\.schema\\.json$"
+      }
+    },
+    "self_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  },
+  "$defs": {
+    "repo_path": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.\\-]*(/[A-Za-z0-9_.\\-]+)*$",
+      "not": {"pattern": "(^|/)\\.\\.(/|$)"}
+    },
+    "python_path": {
+      "allOf": [
+        {"$ref": "#/$defs/repo_path"},
+        {"pattern": "\\.py$"}
+      ]
+    },
+    "json_path": {
+      "allOf": [
+        {"$ref": "#/$defs/repo_path"},
+        {"pattern": "\\.json$"}
+      ]
+    }
+  }
+}

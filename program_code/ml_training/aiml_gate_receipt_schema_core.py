@@ -174,6 +174,34 @@ SCHEMA_FILES = {
     "s2_4_pg_hba_delta_v1": "s2_4_pg_hba_delta_v1.schema.json",
     "pg_topology_attestation_v1": "pg_topology_attestation_v1.schema.json",
     "pg_topology_runtime_guard_v1": "pg_topology_runtime_guard_v1.schema.json",
+    # S2.4(WP4·W2a)——additive:engine-scanner 的 closed PG ACL manifest(§2.1)。加這鍵純為
+    # schema 查找,絕不進入 aiml_effect_classifier_digest() 的六個 S0.3 常量輸入(見 :46-48/§7.2),
+    # S0.3 分類身分不動;亦不改 PROGRAM_SCHEMA_PATHS 與 v1/v2 component matrix/digest。中央閘只做
+    # 結構驗 + self_digest 反偽造重算;與 static SQL inventory 的 exact-match 裁決委派給
+    # agent_governance_s2_4_install.derive_engine_scanner_privilege_split(caller 不可自證)。
+    "pg_acl_manifest_v1": "pg_acl_manifest_v1.schema.json",
+    # S2.4(WP4·W2b·§8.1)——additive:checked-in runtime-closure allowlist 與由它產出的
+    # application_bundle_manifest_v1(§8.1 第 3 內容身分 application_bundle_digest)。加這兩鍵
+    # 純為 schema 查找,絕不進入 aiml_effect_classifier_digest() 的六個 S0.3 常量輸入
+    # (見 :46-48/§7.2),S0.3 分類身分不動;亦不改 PROGRAM_SCHEMA_PATHS 與 v1/v2 component
+    # matrix/digest。中央閘只做結構驗 + self_digest 反偽造重算;closure 與靜態 import 閉包的
+    # 雙向 exact-match、effect-capable/broker/credential deny、committed-blob 溯源裁決全部
+    # 委派給 agent_governance_s2_4_install(caller 不可自證);runtime 整樹重算屬
+    # ml_training.alr_application_identity(兩側共用同一 canonical 文件構造點)。
+    "application_bundle_runtime_closure_v1": (
+        "application_bundle_runtime_closure_v1.schema.json"
+    ),
+    "application_bundle_manifest_v1": "application_bundle_manifest_v1.schema.json",
+    # S2.4(WP4·W2c·§8.1 #2/#4)——additive:base_runtime_tree_manifest_v1(self_digest ==
+    # base_runtime_tree_digest,PREPARE staging 樹身分)與 launch_bundle_manifest_v1
+    # (self_digest == launch_bundle_digest,launches/<64-hex> 葉名契約)。加這兩鍵純為
+    # schema 查找,絕不進入 aiml_effect_classifier_digest() 的六個 S0.3 常量輸入
+    # (見 :46-48/§7.2),S0.3 分類身分不動;亦不改 PROGRAM_SCHEMA_PATHS 與 v1/v2 component
+    # matrix/digest。中央閘只做結構驗 + self_digest 反偽造重算 + canonical 排序(委派
+    # aiml_gate_receipt_wave_w2.w2_manifest_artifact_errors);真樹走訪/builder 溯源屬
+    # agent_governance_s2_4_render(caller 提供樹;絕不觸生產路徑,不自證 runtime)。
+    "base_runtime_tree_manifest_v1": "base_runtime_tree_manifest_v1.schema.json",
+    "launch_bundle_manifest_v1": "launch_bundle_manifest_v1.schema.json",
 }
 
 S0_DEPENDENCY_DIGESTS = {
@@ -297,6 +325,133 @@ def artifact_self_digest(artifact: dict[str, Any]) -> str:
 
     return canonical_digest({
         key: value for key, value in artifact.items() if key != "self_digest"
+    })
+
+
+# --------------------------------------------------------------------------- #
+# W2 P1-5(review):owned-path 內容投影必須綁「被宣稱的那個 commit 的 blob」,而不是
+# 工作樹當下的位元組。舊機制讀 working tree:任一 owned 檔有 staged/unstaged 改動時,
+# receipt 記的是未變的 HEAD,投影 hash 的卻是髒位元組——驗證端 hash 同一棵髒樹於是照樣
+# PASS,而該 commit 的乾淨 checkout 永遠重現不出那份 receipt。改由 ``git cat-file``
+# 自 bound head 讀 blob:投影因此是該 commit 的函數,任何人 checkout 它都重算得出同值。
+# fail-closed:git 不可用/commit 不存在/路徑不在該樹 → 該路徑記 None(投影變值 → 導出失敗)。
+# --------------------------------------------------------------------------- #
+def _git_stdout(repo_root: Path, arguments: list[str]) -> str | None:
+    import subprocess
+
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(repo_root), *arguments],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    return proc.stdout if proc.returncode == 0 else None
+
+
+def resolve_commit_head(repo_root: Path, source_head: str | None = None) -> str | None:
+    """把 ``source_head``(或 HEAD)解析為 40-hex commit;不可解析即 None(fail-closed)。"""
+
+    revision = source_head if source_head is not None else "HEAD"
+    if re.fullmatch(r"[0-9a-f]{7,40}", str(revision)) is None and revision != "HEAD":
+        return None
+    stdout = _git_stdout(repo_root, ["rev-parse", f"{revision}^{{commit}}"])
+    if stdout is None:
+        return None
+    head = stdout.strip()
+    return head if re.fullmatch(r"[0-9a-f]{40}", head) else None
+
+
+def owned_path_blob_projection(
+    repo_root: Path,
+    paths: tuple[str, ...] | list[str],
+    *,
+    source_head: str | None = None,
+) -> dict[str, str | None]:
+    """{owned path: sha256 of its blob **at the bound commit**}(缺席/不可讀記 None)。
+
+    以單一 ``git cat-file --batch`` 進程串流讀取(N 個路徑不再是 N 個子行程);
+    ``<commit>:<path>`` 形的 revision 直接把路徑解析到那棵樹,故工作樹狀態完全不參與。
+    """
+
+    import subprocess
+
+    ordered = sorted(paths)
+    projection: dict[str, str | None] = {rel: None for rel in ordered}
+    head = resolve_commit_head(repo_root, source_head)
+    if head is None:
+        return projection
+    request = "".join(f"{head}:{rel}\n" for rel in ordered).encode("utf-8")
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(repo_root), "cat-file", "--batch"],
+            input=request,
+            capture_output=True,
+            timeout=180,
+        )
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return projection
+    if proc.returncode != 0:
+        return projection
+    stream = proc.stdout
+    offset = 0
+    for rel in ordered:
+        newline = stream.find(b"\n", offset)
+        if newline < 0:
+            break
+        header = stream[offset:newline].decode("utf-8", "replace").split(" ")
+        offset = newline + 1
+        if len(header) != 3 or header[1] != "blob":
+            # "missing" / "ambiguous" / 非 blob(目錄、submodule)→ fail-closed 記 None。
+            continue
+        try:
+            size = int(header[2])
+        except ValueError:
+            break
+        payload = stream[offset : offset + size]
+        offset += size + 1  # 每筆物件後接一個換行
+        projection[rel] = "sha256:" + hashlib.sha256(payload).hexdigest()
+    return projection
+
+
+def owned_path_blob_projection_digest(
+    repo_root: Path,
+    paths: tuple[str, ...] | list[str],
+    *,
+    source_head: str | None = None,
+) -> str:
+    """owned-path commit-blob 投影的 canonical digest(W0/W1/W2 共用同一把尺)。"""
+
+    return canonical_digest(
+        owned_path_blob_projection(repo_root, paths, source_head=source_head)
+    )
+
+
+def owned_scope_worktree_delta(
+    repo_root: Path,
+    paths: tuple[str, ...] | list[str],
+    *,
+    source_head: str | None = None,
+) -> list[str] | None:
+    """owned scope 內 index/worktree 與 bound commit 的差異路徑(不可判定回 None)。
+
+    P1-5 的可見性面:投影已綁 commit blob,故髒工作樹不再污染 digest;但「這份 receipt
+    是從一棵髒工作樹發射的」本身是事實,必須可被看見而不是靜默。
+    """
+
+    ordered = sorted(paths)
+    head = resolve_commit_head(repo_root, source_head)
+    if head is None:
+        return None
+    stdout = _git_stdout(
+        repo_root, ["status", "--porcelain", "-z", "--", *ordered]
+    )
+    if stdout is None:
+        return None
+    return sorted({
+        record[3:] for record in stdout.split("\0") if len(record) > 3
     })
 
 

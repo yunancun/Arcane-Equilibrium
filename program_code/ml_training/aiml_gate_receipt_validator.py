@@ -69,6 +69,10 @@ from aiml_gate_receipt_schema_core import (  # noqa: E402,F401
     canonical_digest,
     evidence_environment_identity_digest,
     landing_scope_identity_digest,
+    owned_path_blob_projection,
+    owned_path_blob_projection_digest,
+    owned_scope_worktree_delta,
+    resolve_commit_head,
     session_attempt_identity_digest,
 )
 from aiml_gate_receipt_classifiers import (  # noqa: E402,F401
@@ -132,6 +136,18 @@ from aiml_gate_receipt_adoption import (  # noqa: E402,F401
     program_adoption_identity_digest,
     terminal_receipt_sink_contract,
     validate_program_adoption_receipt,
+)
+# S2.4(WP4·W2)wave 投影葉(2000 行治理拆分):owned-path/exported-ABI/manifest 補充驗
+# 下沉至 aiml_gate_receipt_wave_w2,facade 逐名 re-export;W2 的 derive 分支委派該葉。
+from aiml_gate_receipt_wave_w2 import (  # noqa: E402,F401
+    _W2_ABI_PROBE_FIELDS,
+    _W2_EXPORTED_ABI,
+    _W2_OWNED_PATHS,
+    w2_chain_binding_errors,
+    w2_exported_abi_projection,
+    w2_manifest_artifact_errors,
+    w2_owned_path_diff_digest,
+    w2_structural_errors,
 )
 
 
@@ -365,23 +381,21 @@ def three_head_projection_digest(repo_root: Path = REPO_ROOT) -> str:
     })
 
 
-def w0_owned_path_diff_digest(repo_root: Path = REPO_ROOT) -> str:
+def w0_owned_path_diff_digest(
+    repo_root: Path = REPO_ROOT, *, source_head: str | None = None
+) -> str:
     """W0 owned-path 內容投影 digest(wave-exit owned_path_diff_digest 綁定的再導出;T1)。
 
-    對每個 W0 owned path 讀目前 checkout 的 blob sha256(缺檔記 None),故任一 owned 檔位元改動都會改變
-    此值——arbitrary/empty 值無法通過 W0 完成閘。與 owned_path_manifest_digest 同套 canonical_digest 機制,
-    只是綁「內容」而非「路徑集合」。此為 SOURCE-seam 內容綁定,非 runtime 認證。
+    P1-5(W2 review):每個 owned path 讀的是**被綁定 commit 的 blob**(預設 HEAD),
+    不是工作樹當下的位元組。舊機制 hash 髒 checkout:receipt 記未變的 HEAD、投影卻綁
+    髒位元組,驗證端 hash 同一棵髒樹照樣 PASS,而該 commit 的乾淨 checkout 重現不出
+    這份 receipt。改綁 commit blob 後,投影是該 commit 的函數(缺檔/非 blob 記 None),
+    任何世代 checkout 它都重算得出同值。此為 SOURCE-seam 內容綁定,非 runtime 認證。
     """
 
-    projection: dict[str, str | None] = {}
-    for rel in sorted(_W0_OWNED_PATHS):
-        try:
-            projection[rel] = "sha256:" + hashlib.sha256(
-                (repo_root / rel).read_bytes()
-            ).hexdigest()
-        except OSError:
-            projection[rel] = None
-    return canonical_digest(projection)
+    return owned_path_blob_projection_digest(
+        repo_root, _W0_OWNED_PATHS, source_head=source_head
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -493,18 +507,17 @@ def w1_exported_abi_projection(repo_root: Path = REPO_ROOT) -> dict[str, Any]:
     }
 
 
-def w1_owned_path_diff_digest(repo_root: Path = REPO_ROOT) -> str:
-    """W1 owned-path 內容投影 digest(同 :func:`w0_owned_path_diff_digest` 機制,綁 W1 面)。"""
+def w1_owned_path_diff_digest(
+    repo_root: Path = REPO_ROOT, *, source_head: str | None = None
+) -> str:
+    """W1 owned-path 內容投影 digest(同 :func:`w0_owned_path_diff_digest` 機制,綁 W1 面)。
 
-    projection: dict[str, str | None] = {}
-    for rel in sorted(_W1_OWNED_PATHS):
-        try:
-            projection[rel] = "sha256:" + hashlib.sha256(
-                (repo_root / rel).read_bytes()
-            ).hexdigest()
-        except OSError:
-            projection[rel] = None
-    return canonical_digest(projection)
+    P1-5:同樣綁 bound commit 的 blob——W0/W1/W2 三波共用同一把尺,無一例外。
+    """
+
+    return owned_path_blob_projection_digest(
+        repo_root, _W1_OWNED_PATHS, source_head=source_head
+    )
 
 
 def _trust_pin_errors(pins: Any, repo_root: Path) -> list[str]:
@@ -870,9 +883,13 @@ def _wave_exit_structural_errors(
             reasons.append(
                 "wave-exit owned_path_diff_digest does not re-derive the W1 owned-path content projection"
             )
+    elif wave == "W2":
+        # W2(runnable application):同 W0/W1 機制,綁 W2 面;owned-path/exported-ABI/
+        # 兩個活裁決(privilege-split / application-closure)委派 wave_w2 葉再導出。
+        reasons.extend(w2_structural_errors(receipt, repo_root))
     else:
-        # W2+ 各 wave 於其自身 owned path 擴充 derivation;未實作的 wave 一律 fail-closed。
-        reasons.append("wave-exit derivation is only implemented for W0/W1 so far")
+        # W3+ 各 wave 於其自身 owned path 擴充 derivation;未實作的 wave 一律 fail-closed。
+        reasons.append("wave-exit derivation is only implemented for W0/W1/W2 so far")
         return reasons
     # T1(b):test/capture/review 三類證據必為「非空」的合法 digest list——empty/arbitrary 不得導出 PASS。
     # 誠實邊界:每一支 test/capture/review 的「PLATFORM-ATTESTED 綁定」屬下游 EFFECT/closure 關切(離線
@@ -893,8 +910,9 @@ def derive_wave_exit_status(
     now: str | datetime | None = None,
     source_admission_receipt: Any = None,
     predecessor_wave_receipt: Any = None,
+    predecessor_wave_chain: Any = (),
 ) -> dict[str, Any]:
-    """Independently re-derive the W0/W1 wave-exit status (§3.2/§10.3).
+    """Independently re-derive the W0/W1/W2 wave-exit status (§3.2/§10.3).
 
     回傳 ``{"status": "PASS"|"NOT_PASS", "reasons": [...]}``。W0 的 PASS 需:綁定的
     ``source_admission_receipt`` 再導出 ADMITTED 且其 self_digest == 本 receipt 綁定的
@@ -902,8 +920,11 @@ def derive_wave_exit_status(
     W1 的 PASS 另需 caller 傳 ``predecessor_wave_receipt``(W0 wave-exit 物件,姿態同
     ``source_admission_receipt``):該 W0 receipt 必須「連同其綁定 admission」在此再導出 PASS、
     其 self_digest == 本 receipt 的 ``predecessor_wave_receipt_digest``、三方 source_head 一致
-    且等於目前 checkout HEAD——admission 鏈不因跨波而鬆脫。caller 帶 status/pass/done 於
-    derivation 前即拒(§10.3/§10.5 #27)。
+    且等於目前 checkout HEAD——admission 鏈不因跨波而鬆脫。W2 鏡 W1:predecessor 是 W1
+    wave-exit 物件,且其「自身的鏈」必須先再導出 PASS——caller 另以
+    ``predecessor_wave_chain=(regenerated W0 wave-exit,)`` 供 W1 遞迴綁其前導(次序=
+    由舊到新、不含 ``predecessor_wave_receipt`` 本身;W0/W1 拒非空 chain)。caller 帶
+    status/pass/done 於 derivation 前即拒(§10.3/§10.5 #27)。
 
     邊界(必要非充分):中央閘 :func:`validate_aiml_artifact` 對 wave-exit 只做 STRUCTURAL-ONLY
     再導出(不綁 admission/predecessor 物件),乾淨的 ``[]`` 結果「不」等於 PASS——它未驗
@@ -937,7 +958,12 @@ def derive_wave_exit_status(
         return {"status": "NOT_PASS", "reasons": _schema_errors}
     reasons = _wave_exit_structural_errors(receipt, repo_root)
     wave = receipt.get("wave")
-    if wave not in {"W0", "W1"}:
+    if wave not in {"W0", "W1", "W2"}:
+        return {"status": "NOT_PASS", "reasons": reasons}
+    chain = tuple(predecessor_wave_chain) if predecessor_wave_chain else ()
+    if wave in {"W0", "W1"} and chain:
+        # fail-closed:W0/W1 不消費 chain——靜默忽略會讓 caller 誤信多綁了前導。
+        reasons.append(f"{wave} wave-exit does not accept a predecessor_wave_chain")
         return {"status": "NOT_PASS", "reasons": reasons}
     if source_admission_receipt is None:
         reasons.append(
@@ -964,6 +990,43 @@ def derive_wave_exit_status(
             )
         if source_admission_receipt.get("source_head") != receipt.get("source_head"):
             reasons.append("wave-exit source_head differs from the bound admission receipt")
+        return {
+            "status": "PASS" if not reasons else "NOT_PASS",
+            "reasons": reasons,
+        }
+    # ── W2:predecessor 鏈(W1 wave-exit 物件連同其 W0/admission 鏈再導出 PASS)──────
+    if wave == "W2":
+        if predecessor_wave_receipt is None:
+            reasons.append(
+                "W2 wave-exit requires the bound predecessor_wave_receipt (the W1 wave-exit "
+                "receipt object) to re-derive PASS with its bound W0/admission chain"
+            )
+            return {"status": "NOT_PASS", "reasons": reasons}
+        if len(chain) != 1:
+            reasons.append(
+                "W2 wave-exit requires predecessor_wave_chain=(regenerated W0 wave-exit "
+                "receipt,) so the W1 predecessor can re-derive PASS"
+            )
+            return {"status": "NOT_PASS", "reasons": reasons}
+        predecessor = derive_wave_exit_status(
+            predecessor_wave_receipt,
+            repo_root=repo_root,
+            now=now,
+            source_admission_receipt=source_admission_receipt,
+            predecessor_wave_receipt=chain[0],
+        )
+        # 同 T6 護欄:非 dict / 非 PASS 的 predecessor 立即 typed NOT_PASS(鏈斷即斷)。
+        if predecessor["status"] != "PASS" or not isinstance(predecessor_wave_receipt, dict):
+            reasons.append(
+                "W2 wave-exit bound predecessor_wave_receipt does not derive PASS: "
+                + "; ".join(predecessor["reasons"])
+            )
+            return {"status": "NOT_PASS", "reasons": reasons}
+        reasons.extend(
+            w2_chain_binding_errors(
+                receipt, source_admission_receipt, predecessor_wave_receipt, _git_head(repo_root)
+            )
+        )
         return {
             "status": "PASS" if not reasons else "NOT_PASS",
             "reasons": reasons,
@@ -1734,6 +1797,68 @@ def validate_aiml_artifact(
         lineage = derive_install_lineage_status(artifact)
         if lineage["status"] != "SATISFIED":
             errors.extend(lineage["reasons"])
+    if schema_version == "pg_acl_manifest_v1":
+        # S2.4(WP4·W2a·§2.1)closed PG ACL manifest:closed schema(privilege 全面 enum 封閉)
+        # 之上,再驗 self_digest 反偽造重算與 canonical 排序(schemas/tables/functions 按 name、
+        # privileges 按字典序——排序唯一化令 manifest bytes 與 canonical digest 一一對應)。
+        # ⚠ 乾淨的 [] 「不」等於 privilege-split PASS:與 post-split consumer 靜態 SQL inventory
+        # 的雙向 exact-match 由 agent_governance_s2_4_install.derive_engine_scanner_privilege_split
+        # 導出(unlisted statement 或 over-grant 皆 fail);中央閘此分支只證結構/完整性。
+        if artifact["self_digest"] != artifact_self_digest(artifact):
+            errors.append("pg acl manifest self_digest is invalid")
+        for section in ("schemas", "tables", "functions"):
+            names = [entry["name"] for entry in artifact[section]]
+            if names != sorted(names) or len(names) != len(set(names)):
+                errors.append(
+                    f"pg acl manifest {section} must be sorted by name and unique"
+                )
+            if any(
+                entry["privileges"] != sorted(set(entry["privileges"]))
+                for entry in artifact[section]
+            ):
+                errors.append(
+                    f"pg acl manifest {section} privileges must be sorted and unique"
+                )
+    if schema_version == "application_bundle_runtime_closure_v1":
+        # S2.4(WP4·W2b·§8.1)checked-in runtime-closure allowlist:closed schema 之上,再驗
+        # self_digest 反偽造重算與每個路徑段的 canonical 排序唯一化(bytes↔digest 一一對應)。
+        # ⚠ 乾淨的 [] 「不」等於 closure PASS:與靜態 runtime import 閉包的雙向 exact-match、
+        # effect-capable/broker/credential deny、SSOT 常量同步(learning_runtime_manifest/
+        # SCHEMA_FILES)由 agent_governance_s2_4_install.derive_application_runtime_closure_status
+        # 導出;中央閘此分支只證結構/完整性。
+        if artifact["self_digest"] != artifact_self_digest(artifact):
+            errors.append("application runtime closure self_digest is invalid")
+        for section in (
+            "python_modules",
+            "package_init_files",
+            "compatibility_receipts",
+            "learning_runtime_inputs",
+            "sql_fingerprints",
+            "dependency_lock_files",
+            "schema_resources",
+        ):
+            if artifact[section] != sorted(set(artifact[section])):
+                errors.append(
+                    f"application runtime closure {section} must be sorted and unique"
+                )
+    if schema_version == "application_bundle_manifest_v1":
+        # S2.4(WP4·W2b·§8.1 #3)application_bundle_manifest:closed schema 之上,再驗
+        # self_digest(== application_bundle_digest)反偽造重算與 entries 依 path 排序唯一。
+        # ⚠ 乾淨的 [] 只證結構/完整性,「不」證 manifest 出自 committed blobs 或與某棵真樹
+        # 相符——builder 溯源屬 agent_governance_s2_4_install.build_application_bundle_manifest,
+        # runtime 整樹重算屬 ml_training.alr_application_identity.verify_application_root。
+        if artifact["self_digest"] != artifact_self_digest(artifact):
+            errors.append("application bundle manifest self_digest is invalid")
+        entry_paths = [entry["path"] for entry in artifact["entries"]]
+        if entry_paths != sorted(entry_paths) or len(entry_paths) != len(set(entry_paths)):
+            errors.append(
+                "application bundle manifest entries must be sorted by path and unique"
+            )
+    if schema_version in ("base_runtime_tree_manifest_v1", "launch_bundle_manifest_v1"):
+        # S2.4(WP4·W2c·§8.1 #2/#4):closed schema 之上,再驗 self_digest 反偽造重算與
+        # canonical 排序/file↔digest 一致(委派 wave_w2 葉)。⚠ 乾淨的 [] 只證結構/完整性,
+        # 「不」證 manifest 與某棵真樹相符——樹走訪/builder 屬 agent_governance_s2_4_render。
+        errors.extend(w2_manifest_artifact_errors(schema_version, artifact))
     if schema_version == S2_4_OPERATOR_AUTHORIZATION_SCHEMA_VERSION:
         # S2.4(WP4·W1·CP4)§9.1 四 trust profile:closed schema(CP2b)之上,再驗 profile 解析、
         # payload_fields == 該 profile 的 §9.1 ordered list、namespace/identity 綁定、armored SSHSIG

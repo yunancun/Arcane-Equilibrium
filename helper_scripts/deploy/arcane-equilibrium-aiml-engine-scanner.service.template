@@ -1,0 +1,65 @@
+[Unit]
+Description=Arcane Equilibrium ALR scanner event consumer
+After=network.target
+StartLimitIntervalSec=300s
+StartLimitBurst=3
+
+[Service]
+Type=exec
+User=aiml-engine-scanner
+Group=aiml-engine-scanner
+WorkingDirectory=/var/lib/arcane-equilibrium/aiml/engine-scanner
+LoadCredentialEncrypted=pg-dsn:/etc/credstore.encrypted/aiml-engine-scanner-pg-dsn
+Environment=ALR_SOURCE_HEAD=@ALR_SOURCE_HEAD@
+Environment=ALR_EXPECTED_LEARNING_RUNTIME_DIGEST=@LEARNING_RUNTIME_DIGEST@
+Environment=ALR_EXPECTED_LEARNING_RUNTIME_DIGEST_V2=@LEARNING_RUNTIME_DIGEST_V2@
+Environment=ALR_EXPECTED_COMPATIBILITY_RECEIPT=/opt/arcane-equilibrium/aiml/apps/@APPLICATION_BUNDLE_LEAF@/docs/execution_plan/ai_ml_landing/receipts/S2.2A-source-compatibility-receipt-v1.json
+Environment=ALR_EXPECTED_COMPATIBILITY_RECEIPT_V2=/opt/arcane-equilibrium/aiml/apps/@APPLICATION_BUNDLE_LEAF@/docs/execution_plan/ai_ml_landing/receipts/S2.2A-source-compatibility-receipt-v2.json
+Environment=ALR_APPLICATION_BUNDLE_DIGEST=@APPLICATION_BUNDLE_DIGEST@
+Environment=ALR_LAUNCH_BUNDLE_DIGEST=@LAUNCH_BUNDLE_DIGEST@
+Environment=ALR_CANDIDATE_EVIDENCE_DIR=/var/lib/arcane-equilibrium/aiml/engine-scanner/candidate-evidence
+Environment=ALR_CANDIDATE_POLICY_FILE=/etc/arcane-equilibrium/aiml/engine-scanner/candidate-policy.json
+Environment=ALR_TOPOLOGY_GUARD_FILE=/etc/arcane-equilibrium/aiml/engine-scanner/topology-runtime-guard.json
+ExecStart=/opt/arcane-equilibrium/aiml/launches/@LAUNCH_BUNDLE_LEAF@/bin/python3 -I -B \
+  -m ml_training.alr_event_consumer --dsn-file %d/pg-dsn \
+  --application-root /opt/arcane-equilibrium/aiml/apps/@APPLICATION_BUNDLE_LEAF@ \
+  --expected-compatibility-receipt-v2 /opt/arcane-equilibrium/aiml/apps/@APPLICATION_BUNDLE_LEAF@/docs/execution_plan/ai_ml_landing/receipts/S2.2A-source-compatibility-receipt-v2.json \
+  --expected-application-bundle-digest @APPLICATION_BUNDLE_DIGEST@ \
+  --expected-launch-bundle-digest @LAUNCH_BUNDLE_DIGEST@ \
+  --topology-guard-file /etc/arcane-equilibrium/aiml/engine-scanner/topology-runtime-guard.json \
+  --lock-file %t/arcane-equilibrium/aiml/engine-scanner/consumer.lock --max-batch 32
+RuntimeDirectory=arcane-equilibrium/aiml/engine-scanner
+RuntimeDirectoryMode=0700
+StateDirectory=arcane-equilibrium/aiml/engine-scanner
+StateDirectoryMode=0700
+Restart=on-failure
+RestartSec=30s
+RestartPreventExitStatus=78
+TimeoutStopSec=30s
+KillMode=control-group
+NoNewPrivileges=true
+LimitCORE=0
+UMask=0077
+UnsetEnvironment=PGPASSWORD PGPASSFILE PGSERVICE PGSERVICEFILE PGHOST PGHOSTADDR PGPORT PGDATABASE PGUSER PGOPTIONS PGAPPNAME PGCONNECT_TIMEOUT PGCLIENTENCODING PGTARGETSESSIONATTRS PGCHANNELBINDING PGGSSENCMODE PGKRBSRVNAME PGGSSLIB PGREQUIREPEER PGSSLMODE PGREQUIRESSL PGSSLCERT PGSSLKEY PGSSLROOTCERT PGSSLCRL PGSSLCRLDIR PGSSLSNI PGLOADBALANCEHOSTS LD_PRELOAD LD_LIBRARY_PATH PYTHONHOME PYTHONPATH PYTHONUSERBASE
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET
+IPAddressDeny=any
+IPAddressAllow=127.0.0.1/32
+MemoryMax=512M
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,163 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/pg_acl_manifest_v1.schema.json",
+  "title": "pg_acl_manifest_v1",
+  "description": "S2.4 §2.1 closed, hash-bound allowlist of every database/schema/table/sequence/function privilege the post-split engine-scanner entrypoint (ml_training.alr_event_consumer) requires. Closed by construction: table privileges admit only SELECT/INSERT (no UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER), schema privileges only USAGE (no CREATE), database privileges only CONNECT (no CREATE/TEMP), sequences empty until a real sequence dependency exists, functions only PUBLIC-default EXECUTE on the pg_catalog advisory-lock family. No wildcard/default privilege, no ownership, no role membership, no GRANT OPTION, no replication, no BYPASSRLS. self_digest is integrity evidence only; the exact-match against the static SQL inventory is derived by agent_governance_s2_4_install.derive_engine_scanner_privilege_split, never self-declared.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "program_id",
+    "component",
+    "role_name",
+    "privilege_class",
+    "database",
+    "role_attributes",
+    "closed_boundary",
+    "schemas",
+    "tables",
+    "sequences",
+    "functions",
+    "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "pg_acl_manifest_v1"},
+    "program_id": {"const": "AIML-LONG-LIVED-LANDING-V2"},
+    "component": {"const": "engine_scanner"},
+    "role_name": {"const": "aiml_engine_scanner"},
+    "privilege_class": {"const": "scanner_capture_writer"},
+    "database": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "privileges"],
+      "properties": {
+        "name": {"const": "trading_ai"},
+        "privileges": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": {"const": "CONNECT"}
+        }
+      }
+    },
+    "role_attributes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "login",
+        "superuser",
+        "createdb",
+        "createrole",
+        "inherit",
+        "replication",
+        "bypassrls",
+        "connection_limit"
+      ],
+      "properties": {
+        "login": {"const": true},
+        "superuser": {"const": false},
+        "createdb": {"const": false},
+        "createrole": {"const": false},
+        "inherit": {"const": false},
+        "replication": {"const": false},
+        "bypassrls": {"const": false},
+        "connection_limit": {"type": "integer", "minimum": 1, "maximum": 4}
+      }
+    },
+    "closed_boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "wildcard_privileges",
+        "default_privileges",
+        "ownership",
+        "role_memberships",
+        "grant_option",
+        "schema_create",
+        "database_create",
+        "database_temp",
+        "replication",
+        "bypassrls"
+      ],
+      "properties": {
+        "wildcard_privileges": {"const": false},
+        "default_privileges": {"const": false},
+        "ownership": {"const": false},
+        "role_memberships": {"const": false},
+        "grant_option": {"const": false},
+        "schema_create": {"const": false},
+        "database_create": {"const": false},
+        "database_temp": {"const": false},
+        "replication": {"const": false},
+        "bypassrls": {"const": false}
+      }
+    },
+    "schemas": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 2,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "privileges"],
+        "properties": {
+          "name": {"enum": ["learning", "trading"]},
+          "privileges": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 1,
+            "items": {"const": "USAGE"}
+          }
+        }
+      }
+    },
+    "tables": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "privileges"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^(trading|learning)\\.[a-z_][a-z0-9_]*$"
+          },
+          "privileges": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 2,
+            "uniqueItems": true,
+            "items": {"enum": ["INSERT", "SELECT"]}
+          }
+        }
+      }
+    },
+    "sequences": {"type": "array", "maxItems": 0},
+    "functions": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "privileges", "granted_via"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^pg_catalog\\.[a-z_][a-z0-9_]*$"
+          },
+          "privileges": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 1,
+            "items": {"const": "EXECUTE"}
+          },
+          "granted_via": {"const": "PUBLIC_DEFAULT"}
+        }
+      }
+    },
+    "self_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}
