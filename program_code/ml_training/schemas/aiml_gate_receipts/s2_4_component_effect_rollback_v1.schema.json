@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://arcane-equilibrium.local/schemas/s2_4_component_effect_rollback_v1.schema.json",
   "title": "s2_4_component_effect_rollback_v1",
-  "description": "Per-row rollback contract for one of the five S2.4 APPLY component-effect rows (§4 recovery contract, §5.4). Its signed digest is authority only for the ownership-aware compensation of this exact row: remove only a task-owned delta whose pre-state proved absent, or restore exact non-secret captured prior bytes; restore an existing role/directory exactly rather than dropping it; never drop aiml_observer_ro and never read/serialize/reconstruct a pre-existing secret. status==COMPENSATED_EXACT requires ownership-aware exact pre-state restoration with a pre/post state digest pair.",
+  "description": "Per-row rollback contract for one of the five S2.4 APPLY component-effect rows (§4 recovery contract, §5.4). Its signed digest is authority only for the ownership-aware compensation of this exact row: remove only a task-owned delta whose pre-state proved absent, or restore exact non-secret captured prior bytes; restore an existing role/directory exactly rather than dropping it; never drop aiml_observer_ro and never read/serialize/reconstruct a pre-existing secret. status==COMPENSATED_EXACT requires ownership-aware exact pre-state restoration PROVEN BY A POST-COMPENSATION RE-OBSERVATION equal to the captured pre-state, with a pre/post state digest pair; an absent exception is never sufficient. status==COMPENSATED_NOT_REOBSERVED means the compensation ran without raising but the row's driver protocol could not re-observe the result, and therefore exact_pre_state_restored is false.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -21,7 +21,14 @@
   ],
   "properties": {
     "schema_version": {"const": "s2_4_component_effect_rollback_v1"},
-    "status": {"enum": ["COMPENSATED_EXACT", "RECOVERY_REQUIRED", "NOT_COMPENSATED"]},
+    "status": {
+      "enum": [
+        "COMPENSATED_EXACT",
+        "COMPENSATED_NOT_REOBSERVED",
+        "RECOVERY_REQUIRED",
+        "NOT_COMPENSATED"
+      ]
+    },
     "component_effect_class": {"$ref": "#/$defs/component_effect_class"},
     "install_plan_digest": {"$ref": "#/$defs/digest"},
     "pre_state_digest": {"$ref": "#/$defs/digest"},
@@ -42,6 +49,18 @@
           "exact_pre_state_restored": {"const": true}
         }
       }
+    },
+    {
+      "if": {"properties": {"status": {"const": "COMPENSATED_NOT_REOBSERVED"}}},
+      "then": {"properties": {"exact_pre_state_restored": {"const": false}}}
+    },
+    {
+      "if": {"properties": {"status": {"const": "NOT_COMPENSATED"}}},
+      "then": {"properties": {"exact_pre_state_restored": {"const": false}}}
+    },
+    {
+      "if": {"properties": {"status": {"const": "RECOVERY_REQUIRED"}}},
+      "then": {"properties": {"exact_pre_state_restored": {"const": false}}}
     }
   ],
   "$defs": {
