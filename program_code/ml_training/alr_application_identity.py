@@ -467,22 +467,30 @@ def run_production_preflight_from_args(arguments: Any) -> dict[str, Any]:
 # 發生在連線之後,但語義同屬「不可重試的身分/組態失敗 → 78」)。
 #
 # E2 P2-A(W2 recheck):``db_config_permanent_sqlstate_`` 是 SQLSTATE 判定的 permanent
-# DB 認證/組態失敗(28xxx / 0P000 / 3D000 / 3F000 / 42501 / 42704)。它們包在
-# psycopg2 的 ``OperationalError`` 裡,只看型別會被當成 transient 無限重試——單元恆
-# active、每 300 秒敲一次、永遠不蒐集,operator 也永遠等不到那個 78。
+# DB 認證/組態失敗(28xxx / 0P000 / 3D000 / 3F000 / 42501 / 42703 / 42P01 / 42704)。
+# 它們包在 psycopg2 的 ``OperationalError``/``ProgrammingError`` 裡,只看型別會被當成
+# transient 無限重試——單元恆 active、每 300 秒敲一次、永遠不蒐集,operator 也永遠等不到
+# 那個 78。連線期(``pgcode is None``)的認證/pg_hba/缺 DB 由訊息指紋回填同一前綴。
+#
+# F5(W2 OPS 復核):``runtime_file_lock_denied_`` 是 lock 開檔的**永不自癒**失敗
+# (EACCES/EPERM/EROFS/ENOTDIR/EISDIR/ELOOP/ENAMETOOLONG:RuntimeDirectory 權限錯、
+# 路徑被目錄佔住、只讀掛載、O_NOFOLLOW 擋下 symlink)。同族的
+# ``runtime_file_lock_unavailable_``(ENOSPC/EMFILE/…)刻意留在列外:那些會自癒。
 _PERMANENT_PRE_DB_PREFIXES = (
     "dsn_",
     "capture_surface_incompatible",
     "source_head_",
     "psycopg2_unavailable",
     "runtime_file_lock_unsupported",
+    "runtime_file_lock_denied_",
     "candidate_board_inotify_unsupported",
     "topology_guard_",
     "cluster_identity_",
     "db_config_permanent_sqlstate_",
 )
 # 刻意「不」在列(可自癒/可由 operator 於運行中修復,或屬 host 競用):
-# runtime_file_lock_busy / single_instance_lock_busy / candidate_board_directory_*。
+# runtime_file_lock_busy / runtime_file_lock_unavailable_* / single_instance_lock_busy /
+# candidate_board_directory_*。
 
 
 def is_permanent_pre_db_error(error: Exception) -> bool:

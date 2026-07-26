@@ -403,3 +403,85 @@ def test_manifest_tamper_is_rejected_by_the_central_gate(tmp_path) -> None:
     assert any(
         "sorted" in error for error in validator.validate_aiml_artifact(shuffled)
     )
+
+
+# --------------------------------------------------------------------------- #
+# N-2(CC):設計 §8.3 的 normative ini 區塊與渲染器之間必須有可執行綁定
+# --------------------------------------------------------------------------- #
+# 修前:template 檔與 unit_template_text() 互釘,但兩者可以「一起」漂走,與設計正本的
+# §8.3 靜默分歧,而沒有任何測試會紅。此處把設計 doc 拉進執法面:抽出 §8.3 的 ini 區塊,
+# 把設計的 <placeholder> 正規化成 template 的 @TOKEN@ 形,逐位元組比對。
+DESIGN_DOC = ROOT / "docs/execution_plan/ai_ml_landing/design/S2.4-install-source-seams.md"
+# 順序敏感:先處理 Environment 行(同一個 <exact-digest> 依鍵各自對應不同 token),
+# 再處理路徑葉(apps/launches),最後才是旗標值(那是完整 digest,不是 leaf)。
+_DESIGN_PLACEHOLDER_RULES = (
+    ("Environment=ALR_SOURCE_HEAD=<exact-40-hex-head>", "Environment=ALR_SOURCE_HEAD=@ALR_SOURCE_HEAD@"),
+    (
+        "Environment=ALR_EXPECTED_LEARNING_RUNTIME_DIGEST=<exact-digest>",
+        "Environment=ALR_EXPECTED_LEARNING_RUNTIME_DIGEST=@LEARNING_RUNTIME_DIGEST@",
+    ),
+    (
+        "Environment=ALR_EXPECTED_LEARNING_RUNTIME_DIGEST_V2=<exact-digest>",
+        "Environment=ALR_EXPECTED_LEARNING_RUNTIME_DIGEST_V2=@LEARNING_RUNTIME_DIGEST_V2@",
+    ),
+    (
+        "Environment=ALR_APPLICATION_BUNDLE_DIGEST=<exact-digest>",
+        "Environment=ALR_APPLICATION_BUNDLE_DIGEST=@APPLICATION_BUNDLE_DIGEST@",
+    ),
+    (
+        "Environment=ALR_LAUNCH_BUNDLE_DIGEST=<exact-digest>",
+        "Environment=ALR_LAUNCH_BUNDLE_DIGEST=@LAUNCH_BUNDLE_DIGEST@",
+    ),
+    ("apps/<application-bundle-digest>", "apps/@APPLICATION_BUNDLE_LEAF@"),
+    ("launches/<launch-bundle-digest>", "launches/@LAUNCH_BUNDLE_LEAF@"),
+    (
+        "--expected-application-bundle-digest <application-bundle-digest>",
+        "--expected-application-bundle-digest @APPLICATION_BUNDLE_DIGEST@",
+    ),
+    (
+        "--expected-launch-bundle-digest <launch-bundle-digest>",
+        "--expected-launch-bundle-digest @LAUNCH_BUNDLE_DIGEST@",
+    ),
+)
+
+
+def _design_normative_unit_block() -> str:
+    """自設計 doc 抽出 §8.3 的 ```ini``` 區塊(找不到/多於一個即 fail-closed)。"""
+    text = DESIGN_DOC.read_text(encoding="utf-8")
+    marker = "### 8.3 Normative system-unit shape"
+    head = text.index(marker)
+    opening = text.index("```ini", head)
+    body_start = text.index("\n", opening) + 1
+    body_end = text.index("\n```", body_start) + 1
+    block = text[body_start:body_end]
+    assert block.startswith("[Unit]"), "§8.3 ini block must start at [Unit]"
+    assert block.endswith("WantedBy=multi-user.target\n")
+    return block
+
+
+def _normalize_design_block(block: str) -> str:
+    for design_form, token_form in _DESIGN_PLACEHOLDER_RULES:
+        block = block.replace(design_form, token_form)
+    return block
+
+
+def test_design_section_8_3_ini_block_is_byte_identical_to_the_renderer() -> None:
+    design = _normalize_design_block(_design_normative_unit_block())
+    rendered = render.unit_template_text()
+    # 未映射的 <placeholder> 一律 fail-closed:不得靠「剛好沒比到」而綠。
+    assert "<" not in design, [line for line in design.splitlines() if "<" in line]
+    assert design.splitlines() == rendered.splitlines(), "design §8.3 vs renderer drift"
+    assert design == rendered  # 逐位元組(含尾端換行)
+    # checked-in template 也是同一份 bytes(三方一致:設計 ↔ 渲染器 ↔ template 檔)。
+    assert UNIT_TEMPLATE.read_bytes() == rendered.encode("utf-8")
+
+
+def test_design_binding_actually_fails_when_the_design_block_drifts() -> None:
+    """反向證明:綁定不是恆真式——設計側任何一行改動都會被抓到。"""
+    design = _normalize_design_block(_design_normative_unit_block())
+    for mutation in (
+        design.replace("RestartPreventExitStatus=78", "RestartPreventExitStatus=77"),
+        design.replace("StartLimitBurst=3", "StartLimitBurst=5"),
+        design.replace("IPAddressDeny=any\n", ""),
+    ):
+        assert mutation != render.unit_template_text()

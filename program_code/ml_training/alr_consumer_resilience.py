@@ -19,7 +19,9 @@ facade 依 2000 行治理拆分規約「只」經 schema_core.resolve_facade() �
 
 from __future__ import annotations
 
+import math
 import random
+import re
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -69,16 +71,63 @@ _CONNECTION_DB_ERROR_TYPES = frozenset({
 # 「password authentication failed」(28P01)、「no pg_hba.conf entry」(28000)、
 # 「database ... does not exist」(3D000)、「role ... does not exist」(42704)一律拋
 # ``OperationalError``。型別分類下這些會被無限重試:單元恆 active、每 300 秒敲一次、
-# 永遠不蒐集,operator 也永遠拿不到那個 exit 78。故以 SQLSTATE(psycopg2 的 ``pgcode``)
-# 為權威分流。
+# 永遠不蒐集,operator 也永遠拿不到那個 exit 78。故以 SQLSTATE 為權威分流。
 #
 # permanent(無 operator 介入永不自癒 → typed → production exit 78):
 #   class 28 = invalid_authorization_specification(28000 pg_hba 無條目 / 28P01 密碼錯);
 #   0P000 invalid_role_specification;42704 undefined_object(role 不存在);
 #   3D000 invalid_catalog_name(database 不存在);3F000 invalid_schema_name;
-#   42501 insufficient_privilege(ACL 與 pg_acl_manifest 錯配)。
+#   42501 insufficient_privilege / 42P01 undefined_table / 42703 undefined_column
+#   (F2:schema/ACL 契約與 pg_acl_manifest 錯配——見下方 _SCHEMA_CONTRACT_SQLSTATES)。
 _PERMANENT_DB_SQLSTATE_CLASSES = frozenset({"28"})
-_PERMANENT_DB_SQLSTATES = frozenset({"0P000", "3D000", "3F000", "42501", "42704"})
+# F2:ACL manifest 涵蓋的 14 個關聯上任何 undefined-table / undefined-column /
+# insufficient-privilege 都與身分列同一個 crash-loop 類——psycopg2 的 ``ProgrammingError``
+# 逸出 consumer 的 ``AlrEventConsumerError`` 捕捉面 → exit 1 → ``Restart=on-failure``
+# 在 300 秒內燒掉 ``StartLimitBurst=3`` → 單元永久 failed(§8.3 明文禁止的結果)。
+# 這三碼在「session 內任何位置」都是 permanent,不限身分讀取。
+_SCHEMA_CONTRACT_SQLSTATES = frozenset({"42501", "42703", "42P01"})
+_PERMANENT_DB_SQLSTATES = frozenset({"0P000", "3D000", "3F000", "42704"}) | (
+    _SCHEMA_CONTRACT_SQLSTATES
+)
+# F1(真驅動實證:psycopg2 2.9.12 + PostgreSQL 16,連線期逐一觀察):**連線期失敗沒有
+# SQLSTATE**。libpq 在「連線建立」失敗時不回 PGresult,psycopg2 因而讓 ``pgcode`` /
+# ``diag.sqlstate`` / ``pgerror`` **全為 None**,只留 server 的 FATAL 文本。所以單靠
+# ``pgcode`` 分流在 connect path 上等於沒修:密碼錯、pg_hba 無條目、DB 不存在、role
+# 不存在照樣落回 transient 分支被無限重試——正是 §8.3 要關掉的失敗。SQLSTATE 缺席時,
+# 以 PG 的**逐字** errmsg 指紋回填 SQLSTATE;每條都對應一個固定的 PG 原始碼格式:
+#   src/backend/libpq/auth.c  auth_failed()  → 密碼類 ERRCODE_INVALID_PASSWORD(28P01);
+#                                              其餘方法 INVALID_AUTHORIZATION_SPEC(28000);
+#   src/backend/libpq/hba.c(經 auth.c)      → 無條目 / 顯式 reject → 28000;
+#   src/backend/utils/init/postinit.c        → role 不存在/不可登入 28000、DB 不存在 3D000。
+# 反向硬邊界:真連線/可用性失敗(Connection refused、No such file or directory、timeout
+# expired、server closed the connection unexpectedly、could not translate host name、
+# the database system is starting up、sorry too many clients already)一條都不匹配 →
+# 維持 transient。名單只收「已知 permanent」,未知文本永遠留在 transient(§8.3)。
+_CONNECT_PERMANENT_MESSAGE_SQLSTATES: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r'password authentication failed for user "[^"]*"'), "28P01"),
+    (re.compile(r'no pg_hba\.conf entry for host "[^"]*"'), "28000"),
+    (re.compile(r'pg_hba\.conf rejects connection for host "[^"]*"'), "28000"),
+    (
+        re.compile(
+            r'(?:"trust"|Ident|Peer|GSSAPI|SSPI|PAM|LDAP|RADIUS|Certificate|BSD)'
+            r' authentication failed for user "[^"]*"'
+        ),
+        "28000",
+    ),
+    (re.compile(r'authentication failed for user "[^"]*": host rejected'), "28000"),
+    (re.compile(r'role "[^"]*" does not exist'), "28000"),
+    (re.compile(r'role "[^"]*" is not permitted to log in'), "28000"),
+    (re.compile(r'database "[^"]*" does not exist'), "3D000"),
+)
+# 診斷面:psycopg2 對 42P01/42703/42501 的 ``diag.table_name`` / ``diag.column_name``
+# 實測恆為 None(server 不在 errdata 附關聯),故關聯/欄位名只能自 message_primary 解析。
+_RELATION_SUBJECT_PATTERNS = (
+    re.compile(r'relation "([^"]{1,120})" does not exist'),
+    re.compile(r'column "([^"]{1,120})" does not exist'),
+    re.compile(r'permission denied for \w+ ([A-Za-z0-9_.$"]{1,120})'),
+)
+# typed code 是要被 operator 讀、被 journal 記的:只讓識別字字元進去(其餘一律折成 _)。
+_SUBJECT_UNSAFE_RE = re.compile(r'[^A-Za-z0-9_.$]')
 # transient 保持「連線型別 ∧ 非 permanent SQLSTATE」:真連線失敗(connection refused /
 # timeout / server closed)沒有 SQLSTATE,而 class 08(connection_exception)、
 # 53(insufficient_resources)、57(operator_intervention:admin_shutdown/
@@ -86,8 +135,28 @@ _PERMANENT_DB_SQLSTATES = frozenset({"0P000", "3D000", "3F000", "42501", "42704"
 # transient:§8.3 規範「DB 可用性失敗不得退出」,寧可有界重試也不得把可恢復停機
 # 鎖成永久 78。permanent 名單則必須把已知的認證/組態碼收全(本輪 P2-A 的修補面)。
 PERMANENT_DB_CONFIG_CODE_PREFIX = "db_config_permanent_sqlstate_"
+# 診斷用後綴:typed code 帶上關聯/欄位名,operator 不必翻 traceback 就知道是哪一張表。
+DB_ERROR_SUBJECT_INFIX = "_relation_"
 # §8.3 單例 advisory lock 佔用碼(consumer 於身分閘後、消費前 raise 的 typed 值)。
 SINGLE_INSTANCE_LOCK_BUSY_CODE = "single_instance_lock_busy"
+# 身分關聯讀取失敗的 typed 前綴(F2:其後接 SQLSTATE 與關聯名,不再把 42P01/42703/42501
+# 壓成同一個無資訊碼——那相對於原 traceback 是診斷性退步)。
+CLUSTER_IDENTITY_RELATION_UNAVAILABLE_CODE = "cluster_identity_relation_unavailable"
+
+# D2 §8.3 可觀測性契約(source-only 宣告,零 runtime 接觸):**沉默重試的 consumer 在
+# journal 與 ``systemctl status`` 上與健康者不可區分**——單元 active、行程存在、零日誌,
+# 但每 300 秒只是敲一次連不上的 DB。唯一真信號是 ``learning.alr_health_events`` 的
+# heartbeat 是否變舊。S2.5A 的「initial running evidence」postcheck 必須消費本契約,
+# **不得**以 ``ActiveState=active`` 結案。
+CONSUMER_HEALTH_RELATION = "learning.alr_health_events"
+# 與 alr_health_repository.persist_health_snapshot 的 heartbeat_seconds 預設同值
+# (focused 測試以 inspect.signature 釘死,漂移即紅)。
+CONSUMER_HEARTBEAT_INTERVAL_SECONDS = 300
+# 容忍兩次遺失後才判 STALE(退避上限恰為一個 heartbeat 週期,單次錯過可能只是重連)。
+CONSUMER_MISSED_HEARTBEATS_BEFORE_STALE = 3
+CONSUMER_LIVENESS_STALENESS_SECONDS = (
+    CONSUMER_HEARTBEAT_INTERVAL_SECONDS * CONSUMER_MISSED_HEARTBEATS_BEFORE_STALE
+)
 
 
 class AlrRuntimeIdentityError(AlrEventConsumerError):
@@ -204,20 +273,61 @@ def _is_connection_db_error_type(error: BaseException) -> bool:
     return False
 
 
+def _connect_message_sqlstate(message: str) -> str | None:
+    """F1:自 libpq/PG 的逐字 FATAL 文本回填 permanent SQLSTATE(不匹配即 None)。"""
+    for pattern, sqlstate in _CONNECT_PERMANENT_MESSAGE_SQLSTATES:
+        if pattern.search(message):
+            return sqlstate
+    return None
+
+
+def resolve_db_error_sqlstate(error: BaseException) -> str | None:
+    """權威 SQLSTATE:先取 driver 的 ``pgcode``;連線期缺席時退回訊息指紋。
+
+    F1:``pgcode`` 只在 server 真的回過 error response(session 內)時才有值;連線期
+    失敗(認證/pg_hba/缺 DB/缺 role)一律 ``pgcode is None``,只有訊息可判。訊息回填
+    **僅限**連線/可用性錯誤型別,避免任意例外因文字巧合被判成 permanent。
+    """
+    sqlstate = _db_error_sqlstate(error)
+    if sqlstate is not None:
+        return sqlstate
+    if not _is_connection_db_error_type(error):
+        return None
+    return _connect_message_sqlstate(str(error))
+
+
+def db_error_subject(error: BaseException) -> str | None:
+    """自訊息解析關聯/欄位名(diag.table_name 對這三碼實測恆為 None);消毒後回傳。"""
+    text = str(error)
+    for pattern in _RELATION_SUBJECT_PATTERNS:
+        found = pattern.search(text)
+        if found:
+            subject = _SUBJECT_UNSAFE_RE.sub("_", found.group(1)).strip("_")[:64]
+            if subject:
+                return subject
+    return None
+
+
+def _is_permanent_db_sqlstate(sqlstate: str) -> bool:
+    return (
+        sqlstate[:2] in _PERMANENT_DB_SQLSTATE_CLASSES
+        or sqlstate in _PERMANENT_DB_SQLSTATES
+    )
+
+
 def classify_db_error(error: BaseException) -> str:
     """§8.3 的 DB 失敗三分類:``transient`` / ``permanent_config`` / ``unclassified``。
 
     P2-A:SQLSTATE 優先於型別——permanent 的認證/組態碼即使包在 ``OperationalError``
     裡也絕不重試(否則單元永遠 active 卻永遠不蒐集);其餘連線型錯誤(含無 SQLSTATE
     的 connection refused / timeout / server closed)維持 transient。
+    F1:SQLSTATE 由 :func:`resolve_db_error_sqlstate` 解析,故連線期(``pgcode is None``)
+    的認證/pg_hba/缺 DB 失敗一樣走 permanent,不再被無限重試。
     """
     if isinstance(error, AlrEventConsumerError):
         return "unclassified"  # typed consumer 失敗自有分流(身分不符/單例佔用)
-    sqlstate = _db_error_sqlstate(error)
-    if sqlstate is not None and (
-        sqlstate[:2] in _PERMANENT_DB_SQLSTATE_CLASSES
-        or sqlstate in _PERMANENT_DB_SQLSTATES
-    ):
+    sqlstate = resolve_db_error_sqlstate(error)
+    if sqlstate is not None and _is_permanent_db_sqlstate(sqlstate):
         return "permanent_config"
     if _is_connection_db_error_type(error):
         return "transient"
@@ -229,12 +339,28 @@ def is_transient_db_availability_error(error: BaseException) -> bool:
     return classify_db_error(error) == "transient"
 
 
+def _typed_failure_code(prefix: str, error: BaseException) -> str:
+    """typed code = 前綴 + SQLSTATE(+ 關聯名)。F2:42P01/42703/42501 必須可區分。"""
+    code = prefix
+    sqlstate = resolve_db_error_sqlstate(error)
+    if sqlstate is not None:
+        code = f"{code}{'' if prefix.endswith('_') else '_'}{sqlstate}"
+    subject = db_error_subject(error)
+    if subject is not None:
+        code = f"{code}{DB_ERROR_SUBJECT_INFIX}{subject}"
+    return code
+
+
 def permanent_db_config_error(error: BaseException) -> AlrPermanentDbConfigError | None:
-    """permanent 的 DB 認證/組態失敗 → typed 錯誤(production main 映射為 exit 78)。"""
+    """permanent 的 DB 認證/組態失敗 → typed 錯誤(production main 映射為 exit 78)。
+
+    F2:涵蓋面不再只有身分讀取——session 內任何位置的 42P01/42703/42501 都在此收斂成
+    typed permanent(否則裸 psycopg2 錯誤逸出 → exit 1 → start limit 燒成永久 failed)。
+    """
     if classify_db_error(error) != "permanent_config":
         return None
     return AlrPermanentDbConfigError(
-        f"{PERMANENT_DB_CONFIG_CODE_PREFIX}{_db_error_sqlstate(error)}"
+        _typed_failure_code(PERMANENT_DB_CONFIG_CODE_PREFIX, error)
     )
 
 
@@ -246,6 +372,58 @@ def is_single_instance_lock_busy(error: BaseException) -> bool:
     )
 
 
+def derive_consumer_liveness_contract() -> dict[str, Any]:
+    """D2:常駐 consumer 的 liveness/staleness 契約(code-owned;source-only,零 runtime)。
+
+    §8.3 允許 consumer 在 DB 停機時無限重試而**不退出**——正確,但代價是「單元 active」
+    從此不再是「在蒐集」的證據:沉默重連的 consumer 與健康的 consumer 在 systemd 與
+    journal 上完全一樣。本契約把唯一的真信號寫成可執行常量:``learning.alr_health_events``
+    的 heartbeat 年齡。折入 W2 exported ABI 後,S2.5A 的「initial running evidence」
+    postcheck 有一個明確輸入,不能以 ``ActiveState=active`` 結案。
+
+    ⚠ 本函數不連 DB、不讀 host、不宣稱任何 runtime 事實;它只宣告「要看什麼、多舊算死」。
+    """
+    return {
+        "schema_version": "alr_consumer_liveness_contract_v1",
+        "health_relation": CONSUMER_HEALTH_RELATION,
+        "heartbeat_interval_seconds": CONSUMER_HEARTBEAT_INTERVAL_SECONDS,
+        "missed_heartbeats_before_stale": CONSUMER_MISSED_HEARTBEATS_BEFORE_STALE,
+        "staleness_threshold_seconds": CONSUMER_LIVENESS_STALENESS_SECONDS,
+        "liveness_signal": (
+            "max(observed_at) of learning.alr_health_events written by the unit's "
+            "consumer session lane"
+        ),
+        "insufficient_signals": [
+            "systemd ActiveState=active",
+            "systemd SubState=running",
+            "process exists / journal is silent",
+        ],
+        "verdicts": ["LIVE", "STALE", "UNKNOWN"],
+        "runtime_contact": False,
+    }
+
+
+def classify_consumer_liveness(heartbeat_age_seconds: Any) -> str:
+    """依契約把 heartbeat 年齡判為 ``LIVE`` / ``STALE`` / ``UNKNOWN``(純函數)。
+
+    年齡不可得(從未寫過 heartbeat / 查不到)= ``UNKNOWN``,**不是** LIVE:postcheck
+    在沒有證據時必須 fail-closed,不得把「查不到」讀成「活著」。
+    """
+    if (
+        isinstance(heartbeat_age_seconds, bool)
+        or not isinstance(heartbeat_age_seconds, (int, float))
+        # NaN 的所有比較皆為 False,漏掉這一條會讓 NaN 直接落進 LIVE(fail-open)。
+        or not math.isfinite(heartbeat_age_seconds)
+        or heartbeat_age_seconds < 0
+    ):
+        return "UNKNOWN"
+    return (
+        "STALE"
+        if float(heartbeat_age_seconds) > CONSUMER_LIVENESS_STALENESS_SECONDS
+        else "LIVE"
+    )
+
+
 def _identity_relation_failure(error: BaseException) -> AlrRuntimeIdentityError | None:
     """P2-B:身分讀取的非 transient 失敗 → permanent typed(否則 None = 原樣上拋)。
 
@@ -254,12 +432,17 @@ def _identity_relation_failure(error: BaseException) -> AlrRuntimeIdentityError 
     ``AlrEventConsumerError`` 捕捉面 → exit 1 → ``Restart=on-failure`` 把 start limit
     燒成永久 failed 單元。此處一律收斂成與「零列」同一條 permanent 路徑(→ 78);
     transient 與既有 typed 失敗維持原分流,不被掩蓋。
+
+    F2:typed code 帶上 SQLSTATE 與關聯/欄位名——舊版把三碼壓成同一個無資訊字串,
+    operator 分不出「表不存在 / 欄位不符 / 權限不足」,相對原 traceback 是診斷性退步。
     """
     if isinstance(error, AlrEventConsumerError) or is_transient_db_availability_error(
         error
     ):
         return None
-    return AlrRuntimeIdentityError("cluster_identity_relation_unavailable")
+    return AlrRuntimeIdentityError(
+        _typed_failure_code(CLUSTER_IDENTITY_RELATION_UNAVAILABLE_CODE, error)
+    )
 
 
 def _row_value(row: Any, index: int, key: str) -> Any:
@@ -336,6 +519,11 @@ def verify_connected_cluster_identity(
 
     任何一項不符即 :class:`AlrRuntimeIdentityError`(permanent;production → exit 78)。
     本函數只讀,不寫、不建、不改任何 DB 狀態;結束前 rollback 以不持有讀交易。
+
+    F6:失敗路徑上的 rollback 只做**盡力而為**。舊的 ``finally: connection.rollback()``
+    會在連線半死時以 ``InterfaceError`` 取代 in-flight 的 ``AlrRuntimeIdentityError``,
+    把 permanent 身分不符降級成 transient → 無限重連,永遠不會有那個 78。成功路徑上的
+    rollback 失敗則刻意保持上拋(連線已壞,transient 重連正是對的處置)。
     """
     guard = load_runtime_topology_guard(topology_guard_file)
     endpoint = guard["runtime_endpoint"]
@@ -361,8 +549,14 @@ def verify_connected_cluster_identity(
         if server_major != int(guard["server_major_version"]):
             raise AlrRuntimeIdentityError("cluster_identity_server_version_mismatch")
         row = _fetch_cluster_identity_row(connection)
-    finally:
-        connection.rollback()
+    except BaseException:
+        # in-flight 失敗優先:rollback 自己的錯誤絕不得取代它(見 docstring F6)。
+        try:
+            connection.rollback()
+        except Exception:  # noqa: BLE001 — 盡力而為;原因必須原樣上拋
+            pass
+        raise
+    connection.rollback()
     projection = {
         "system_identifier": str(row["system_identifier"]),
         "database_oid": int(row["database_oid"]),
@@ -480,19 +674,29 @@ __all__ = [
     "AlrRuntimeIdentityError",
     "CLUSTER_IDENTITY_COLUMNS",
     "CLUSTER_IDENTITY_RELATION",
+    "CLUSTER_IDENTITY_RELATION_UNAVAILABLE_CODE",
+    "CONSUMER_HEALTH_RELATION",
+    "CONSUMER_HEARTBEAT_INTERVAL_SECONDS",
+    "CONSUMER_LIVENESS_STALENESS_SECONDS",
+    "CONSUMER_MISSED_HEARTBEATS_BEFORE_STALE",
+    "DB_ERROR_SUBJECT_INFIX",
     "PERMANENT_DB_CONFIG_CODE_PREFIX",
     "RECONNECT_MAX_BACKOFF_SECONDS",
     "RECONNECT_MIN_BACKOFF_SECONDS",
     "SINGLE_INSTANCE_LOCK_BUSY_CODE",
     "ResidentConsumerState",
+    "classify_consumer_liveness",
     "classify_db_error",
     "cluster_identity_row_digest",
+    "db_error_subject",
     "default_jitter",
+    "derive_consumer_liveness_contract",
     "is_single_instance_lock_busy",
     "is_transient_db_availability_error",
     "load_runtime_topology_guard",
     "next_backoff_seconds",
     "permanent_db_config_error",
+    "resolve_db_error_sqlstate",
     "run_resident_db_sessions",
     "verify_connected_cluster_identity",
 ]

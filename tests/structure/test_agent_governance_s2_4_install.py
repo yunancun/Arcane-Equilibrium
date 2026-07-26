@@ -724,6 +724,8 @@ def test_w2_owned_paths_exist_and_cover_the_w2_surfaces() -> None:
         "program_code/ml_training/schemas/aiml_gate_receipts/base_runtime_tree_manifest_v1.schema.json",
         "program_code/ml_training/schemas/aiml_gate_receipts/launch_bundle_manifest_v1.schema.json",
         "tests/structure/test_agent_governance_s2_4_install_render.py",
+        # F1 的真驅動證據面(hermetic fixture 不能自證 psycopg2 的連線期外形)。
+        "tests/structure/test_agent_governance_s2_4_consumer_resilience_disposable.py",
     }
     missing = required - set(validator._W2_OWNED_PATHS)
     assert not missing, f"W2 owned-path binding misses: {sorted(missing)}"
@@ -966,3 +968,84 @@ def test_emitters_refuse_secret_like_evidence(tmp_path) -> None:
             review_provenance=[{"pr": 1, "verdict": "x"}],
         )
     assert list(tmp_path.iterdir()) == []
+
+
+# ── D1/D2:consumer 側兩個 code-owned 契約必須 receipt-bound ─────────────────────
+def _resilience_module():
+    from ml_training import alr_consumer_resilience
+
+    return alr_consumer_resilience
+
+
+def test_w2_exported_abi_binds_the_cluster_identity_column_contract() -> None:
+    """D1:身分列的封閉欄位契約折入 exported ABI(該關聯的 migration 屬 W6B)。
+
+    修前:``CLUSTER_IDENTITY_COLUMNS`` 與 ``cluster_identity_row_digest`` 單方面定義了
+    一個別人擁有的關聯——W6B 改名/換序不會弄破任何 W2 receipt,卻讓每次重連的
+    row-digest 比對永久失敗(exit 78)。折入後 drift 在 receipt 面就看得見。
+    """
+    resilience = _resilience_module()
+    projection = validator.w2_exported_abi_projection()
+    assert projection["cluster_identity_relation_name"] == (
+        resilience.CLUSTER_IDENTITY_RELATION
+    )
+    assert projection["cluster_identity_columns_digest"] == validator.canonical_digest(
+        list(resilience.CLUSTER_IDENTITY_COLUMNS)
+    )
+    assert projection["consumer_liveness_contract_digest"] == validator.canonical_digest(
+        resilience.derive_consumer_liveness_contract()
+    )
+
+
+def test_w2_receipt_breaks_when_the_identity_column_contract_drifts(monkeypatch) -> None:
+    """W6B 換一個欄位序/欄位名 → W2 wave-exit 立刻 NOT_PASS(不再靜默)。"""
+    admission, w0, w1, w2 = _w2_chain()
+    resilience = _resilience_module()
+    drifted = tuple(reversed(resilience.CLUSTER_IDENTITY_COLUMNS))
+    monkeypatch.setattr(resilience, "CLUSTER_IDENTITY_COLUMNS", drifted)
+    result = validator.derive_wave_exit_status(
+        w2,
+        source_admission_receipt=admission,
+        predecessor_wave_receipt=w1,
+        predecessor_wave_chain=(w0,),
+    )
+    assert result["status"] == "NOT_PASS"
+    assert any("exported_abi_digest does not re-derive" in r for r in result["reasons"])
+
+
+def test_w2_receipt_breaks_when_the_liveness_contract_drifts(monkeypatch) -> None:
+    """D2:staleness 門檻/信號面漂移同樣必須弄破 W2 導出。"""
+    admission, w0, w1, w2 = _w2_chain()
+    resilience = _resilience_module()
+    monkeypatch.setattr(
+        resilience,
+        "derive_consumer_liveness_contract",
+        lambda: {"schema_version": "alr_consumer_liveness_contract_v1"},
+    )
+    result = validator.derive_wave_exit_status(
+        w2,
+        source_admission_receipt=admission,
+        predecessor_wave_receipt=w1,
+        predecessor_wave_chain=(w0,),
+    )
+    assert result["status"] == "NOT_PASS"
+    assert any("exported_abi_digest does not re-derive" in r for r in result["reasons"])
+
+
+def test_w2_structural_errors_flag_an_unresolvable_consumer_contract(monkeypatch) -> None:
+    """fail-closed:契約導不出來(import 壞掉)時投影記 None 且顯式列 reason。"""
+    import aiml_gate_receipt_wave_w2 as wave_w2
+
+    admission, w0, w1, w2 = _w2_chain()
+    real_projection = wave_w2.w2_exported_abi_projection
+
+    def broken_projection(repo_root=wave_w2.REPO_ROOT):
+        broken = dict(real_projection(repo_root))
+        broken["cluster_identity_columns_digest"] = None
+        broken["consumer_liveness_contract_digest"] = None
+        return broken
+
+    monkeypatch.setattr(wave_w2, "w2_exported_abi_projection", broken_projection)
+    reasons = wave_w2.w2_structural_errors(w2)
+    assert any("cluster-identity column contract" in r for r in reasons)
+    assert any("liveness/staleness contract" in r for r in reasons)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import errno
 import hashlib
 import json
 import os
@@ -243,6 +244,37 @@ def drain_notified_backlog(
     )
 
 
+# F5:``os.open`` / ``mkdir`` 的失敗只有 ``BlockingIOError`` 被轉成 typed code,其餘
+# ``OSError`` 裸奔出 main 的 ``except AlrEventConsumerError`` → exit 1 + 原始 traceback。
+# 下列 errno 是永不自癒的部署/組態錯(RuntimeDirectory 權限、路徑被檔案佔住、只讀掛載、
+# symlink 攻擊被 O_NOFOLLOW 擋下),必須一次 78 停下等 operator,而不是 300 秒燒三次
+# start limit 把單元變成永久 failed。
+_RUNTIME_LOCK_PERMANENT_ERRNOS = frozenset({
+    errno.EACCES,
+    errno.EPERM,
+    errno.EROFS,
+    errno.ENOTDIR,
+    errno.EISDIR,
+    errno.ELOOP,
+    errno.ENAMETOOLONG,
+})
+
+
+def _runtime_file_lock_open_code(error: OSError) -> str:
+    """把 lock 開檔失敗轉成 typed code;permanent 類走 ``_denied_``(→ exit 78)。
+
+    ENOSPC / EMFILE / ENFILE 等資源耗盡刻意**不**列為 permanent(operator 清空間即自癒),
+    只做 typed 化,讓失敗以結構化 code 而非裸 traceback 收場。
+    """
+    name = errno.errorcode.get(error.errno, str(error.errno))
+    prefix = (
+        "runtime_file_lock_denied_"
+        if error.errno in _RUNTIME_LOCK_PERMANENT_ERRNOS
+        else "runtime_file_lock_unavailable_"
+    )
+    return f"{prefix}{name}"
+
+
 @contextmanager
 def runtime_file_lock(lock_path: Path) -> Iterator[None]:
     """Hold a nonblocking local process lock for the consumer lifetime."""
@@ -251,12 +283,15 @@ def runtime_file_lock(lock_path: Path) -> Iterator[None]:
     except ImportError as exc:  # pragma: no cover - P2 target is Linux only
         raise AlrEventConsumerError("runtime_file_lock_unsupported") from exc
 
-    lock_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    descriptor = os.open(
-        lock_path,
-        os.O_WRONLY | os.O_CREAT | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0),
-        0o600,
-    )
+    try:
+        lock_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        descriptor = os.open(
+            lock_path,
+            os.O_WRONLY | os.O_CREAT | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
+    except OSError as exc:  # F5:ENOSPC/EACCES/EPERM/… 不再以 exit 1 裸奔
+        raise AlrEventConsumerError(_runtime_file_lock_open_code(exc)) from exc
     try:
         try:
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)

@@ -30,6 +30,11 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 _HELPER_DIR = REPO_ROOT / "helper_scripts" / "maintenance_scripts"
 if str(_HELPER_DIR) not in sys.path:
     sys.path.insert(0, str(_HELPER_DIR))
+# consumer 葉以 package-qualified 匯入(D1/D2 折入需要),故 program_code 必須在路徑上——
+# 本葉可被 facade 以裸模組名載入,不能假設 caller 已插入。
+_PROGRAM_CODE_DIR = REPO_ROOT / "program_code"
+if str(_PROGRAM_CODE_DIR) not in sys.path:
+    sys.path.insert(0, str(_PROGRAM_CODE_DIR))
 
 from aiml_gate_receipt_schema_core import canonical_digest, resolve_facade  # noqa: E402
 
@@ -67,6 +72,7 @@ _W2_OWNED_PATHS = tuple(sorted((
     "program_code/ml_training/tests/test_alr_candidate_full_chain.py",
     "program_code/ml_training/tests/test_alr_event_consumer.py",
     "program_code/ml_training/tests/test_alr_retention_runner.py",
+    "tests/structure/test_agent_governance_s2_4_consumer_resilience_disposable.py",
     "tests/structure/test_agent_governance_s2_4_install.py",
     "tests/structure/test_agent_governance_s2_4_install_application_bundle.py",
     "tests/structure/test_agent_governance_s2_4_install_engine_scanner.py",
@@ -100,6 +106,13 @@ _W2_EXPORTED_ABI = {
     ),
     "launch_bundle_builder": "agent_governance_s2_4_render.build_launch_bundle_manifest",
     "launch_leaf_contract": "launches/<64-hex launch_bundle_digest leaf>",
+    # D1/D2:§8.3 consumer 側兩個 code-owned 契約的**名稱**面(值面在 live 折入)。
+    "cluster_identity_relation": (
+        "ml_training.alr_consumer_resilience.CLUSTER_IDENTITY_RELATION"
+    ),
+    "consumer_liveness_contract": (
+        "ml_training.alr_consumer_resilience.derive_consumer_liveness_contract"
+    ),
     "schema_ids": [
         "application_bundle_manifest_v1",
         "application_bundle_runtime_closure_v1",
@@ -140,7 +153,12 @@ def w2_exported_abi_projection(repo_root: Path = REPO_ROOT) -> dict[str, Any]:
       * §8.3 invocation contract 於固定探針欄位下的 canonical digest(argv/env drift
         即變值)+ 渲染探針裁決 status;
       * policy/unit template 的檔案 sha256,且 unit template bytes 必須等於 code-owned
-        `unit_template_text()`(template 檔漂移 → False → 導出失敗)。
+        `unit_template_text()`(template 檔漂移 → False → 導出失敗);
+      * D1 §8.2/§8.3 叢集身分列的**封閉欄位契約** digest:該關聯的 migration 由 W6B 擁有,
+        W2 只綁名稱與欄位序;不折入的話 W6B 改名/換序不會弄破任何 W2 receipt,卻會讓每次
+        重連的 row-digest 比對永久失敗(exit 78)——drift 必須在 receipt 面就可見;
+      * D2 常駐 liveness/staleness 契約 digest:讓 S2.5A 的 running-evidence postcheck
+        有一個 receipt-bound 的輸入,不能退回「ActiveState=active」。
     任何例外一律 fail-closed 記 None(投影仍變值 → 導出失敗)。
     """
     import agent_governance_s2_4_install as _install
@@ -176,8 +194,25 @@ def w2_exported_abi_projection(repo_root: Path = REPO_ROOT) -> dict[str, Any]:
         template_matches = unit_template_bytes == _render.unit_template_text().encode("utf-8")
     except Exception:  # noqa: BLE001
         template_matches = False
+    try:
+        from ml_training import alr_consumer_resilience as _resilience
+
+        identity_columns_digest = canonical_digest(
+            list(_resilience.CLUSTER_IDENTITY_COLUMNS)
+        )
+        identity_relation_name = _resilience.CLUSTER_IDENTITY_RELATION
+        liveness_contract_digest = canonical_digest(
+            _resilience.derive_consumer_liveness_contract()
+        )
+    except Exception:  # noqa: BLE001 - 任何逸出 = fail-closed 未證
+        identity_columns_digest = None
+        identity_relation_name = None
+        liveness_contract_digest = None
     return {
         **_W2_EXPORTED_ABI,
+        "cluster_identity_relation_name": identity_relation_name,
+        "cluster_identity_columns_digest": identity_columns_digest,
+        "consumer_liveness_contract_digest": liveness_contract_digest,
         "engine_scanner_split_status": split_status,
         "application_closure_status": closure_status,
         "pg_acl_manifest_digest": pg_acl_digest,
@@ -240,6 +275,12 @@ def w2_structural_errors(receipt: dict[str, Any], repo_root: Path = REPO_ROOT) -
         reasons.append("W2 pg_acl manifest digest cannot be re-derived")
     if projection["policy_template_digest"] is None:
         reasons.append("W2 candidate-policy template digest cannot be re-derived")
+    if projection["cluster_identity_columns_digest"] is None:
+        reasons.append(
+            "W2 cluster-identity column contract cannot be re-derived (W6B-owned relation)"
+        )
+    if projection["consumer_liveness_contract_digest"] is None:
+        reasons.append("W2 consumer liveness/staleness contract cannot be re-derived")
     if receipt.get("owned_path_manifest_digest") != canonical_digest(sorted(_W2_OWNED_PATHS)):
         reasons.append("wave-exit owned_path_manifest_digest is not the exact W2 owned-path set")
     if receipt.get("owned_path_diff_digest") != w2_owned_path_diff_digest(repo_root):
