@@ -22,7 +22,9 @@ if str(ML_ROOT) not in sys.path:
 from aiml_gate_receipt_validator import (  # noqa: E402
     aiml_effect_classifier_digest,
     artifact_self_digest,
+    authorization_payload_binding_fields,
     canonical_digest,
+    derive_authorization_id,
     S2_4_AUTHORIZATION_PROFILES,
     s2_4_authorization_profiles_digest,
     SCHEMA_DIR,
@@ -851,11 +853,11 @@ def _cp2b_fixtures() -> dict:
         "self_digest": _CP2B_D,
     }
 
-    artifacts["s2_4_operator_authorization_v1"] = {
+    _cp2b_authorization = {
         "schema_version": "s2_4_operator_authorization_v1",
         "profile_identity": "aiml-s2-install-operator-v1",
         "signature_namespace": "arcane-equilibrium-aiml-s2-install",
-        "authorization_id": _CP2B_D,
+        "authorization_id": "",
         # CP4:payload_fields 必逐位元組等於 APPLY profile 的 §9.1 ordered list(15 欄)。
         "payload_fields": [
             "domain", "authorization_id", "plan_core_digest", "plan_id",
@@ -864,11 +866,18 @@ def _cp2b_fixtures() -> dict:
             "hba_delta_digest", "pre_state_digest", "aggregate_rollback_digest",
             "idempotency_key", "issued_at", "expires_at",
         ],
+        # W4a §9.1:payload_binding 帶 payload 每一欄的 exact 值(authorization_id 除外),
+        # authorization_id 由它導出——permit 因此只綁一份 plan。
+        "payload_binding": _cp4_payload_binding(
+            "apply_aggregate", issued_at=_CP2B_TS, expires_at=_CP2B_TS_EXP
+        ),
         "issued_at": _CP2B_TS,
         "expires_at": _CP2B_TS_EXP,
         "sshsig_armored": _CP2B_SSHSIG,
         "self_digest": _CP2B_D,
     }
+    _cp2b_authorization["authorization_id"] = derive_authorization_id(_cp2b_authorization)
+    artifacts["s2_4_operator_authorization_v1"] = _cp2b_authorization
 
     artifacts["s2_4_authorization_replay_ledger_v1"] = {
         "schema_version": "s2_4_authorization_replay_ledger_v1",
@@ -1348,20 +1357,72 @@ def _cp4_install_pinned_key(monkeypatch, public_key, fingerprint) -> None:
     monkeypatch.setattr(_w0, "S2_4_OPERATOR_TRUST_ROOT_FINGERPRINT", fingerprint)
 
 
+def _cp4_payload_binding(profile_key, *, issued_at=None, expires_at=None, **overrides):
+    """W4a §9.1:profile 的 exact payload_binding(payload 減去自指的 authorization_id)。
+
+    值以欄位名 deterministic 導出;``plan_id``/``idempotency_key`` 依 §5.1 自
+    ``plan_core_digest`` 導出,故正例同時滿足 permit 的內部導出檢查。
+    """
+
+    import hashlib as _hashlib
+
+    profile = S2_4_AUTHORIZATION_PROFILES[profile_key]
+    issued_at = issued_at if issued_at is not None else _CP4_ISSUED
+    expires_at = expires_at if expires_at is not None else _CP4_EXPIRES
+    plan_core_digest = overrides.pop(
+        "plan_core_digest", "sha256:" + _hashlib.sha256(b"cp4-plan-core").hexdigest()
+    )
+    plan_id = "s2-4-" + plan_core_digest.split(":", 1)[1]
+    binding = {}
+    for field in authorization_payload_binding_fields(profile_key):
+        if field == "domain":
+            binding[field] = profile["signature_namespace"]
+        elif field == "issued_at":
+            binding[field] = issued_at
+        elif field == "expires_at":
+            binding[field] = expires_at
+        elif field == "output_derived_unit_digest_or_null":
+            binding[field] = None
+        elif field == "plan_core_digest":
+            binding[field] = plan_core_digest
+        elif field in {"plan_id", "idempotency_key"}:
+            binding[field] = plan_id
+        elif field == "source_head":
+            binding[field] = "0" * 40
+        elif field == "target_host":
+            binding[field] = "trade-core"
+        elif field == "scope":
+            binding[field] = "PREPARE_SANDBOX"
+        else:
+            binding[field] = "sha256:" + _hashlib.sha256(field.encode("utf-8")).hexdigest()
+    binding.update(overrides)
+    return binding
+
+
 def _cp4_authorization(profile_key, **overrides):
     profile = S2_4_AUTHORIZATION_PROFILES[profile_key]
+    issued_at = overrides.get("issued_at", _CP4_ISSUED)
+    expires_at = overrides.get("expires_at", _CP4_EXPIRES)
+    binding = overrides.pop("payload_binding", None) or _cp4_payload_binding(
+        profile_key, issued_at=issued_at, expires_at=expires_at
+    )
     artifact = {
         "schema_version": "s2_4_operator_authorization_v1",
         "profile_identity": profile["profile_identity"],
         "signature_namespace": profile["signature_namespace"],
-        "authorization_id": "sha256:" + "1" * 64,
+        "authorization_id": "",
         "payload_fields": list(profile["payload_fields"]),
+        "payload_binding": binding,
         "issued_at": _CP4_ISSUED,
         "expires_at": _CP4_EXPIRES,
         "sshsig_armored": _CP2B_SSHSIG,
         "self_digest": "sha256:" + "0" * 64,
     }
     artifact.update(overrides)
+    # W4a:authorization_id 由最終 payload 導出(overrides 亦可顯式指定以測負向)。
+    artifact.setdefault("authorization_id", "")
+    if not artifact["authorization_id"]:
+        artifact["authorization_id"] = derive_authorization_id(artifact)
     return artifact
 
 

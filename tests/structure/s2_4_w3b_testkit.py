@@ -96,25 +96,95 @@ def sign(private_key: Path, artifact: dict, *, namespace: str) -> dict:
     return artifact
 
 
+def filler_payload_binding(
+    profile_key: str,
+    *,
+    issued_at: str = ISSUED,
+    expires_at: str = EXPIRES,
+    plan_core_digest: str | None = None,
+    **overrides,
+) -> dict:
+    """W4a:profile 的 exact payload_binding(值以欄位名 deterministic 導出,可逐欄覆蓋)。
+
+    ``plan_core_digest`` 提供時,``plan_id``/``idempotency_key`` 依 §5.1 由它導出——permit 的
+    內部導出檢查(``plan_id == 's2-4-' + hex(plan_core_digest)``、``idempotency_key ==
+    plan_id``)因此在正例中成立。
+    """
+
+    import hashlib as _hashlib
+
+    profile = validator.S2_4_AUTHORIZATION_PROFILES[profile_key]
+    fields = validator.authorization_payload_binding_fields(profile_key)
+    plan_digest = plan_core_digest or (
+        "sha256:" + _hashlib.sha256(b"plan_core_digest").hexdigest()
+    )
+    plan_id = "s2-4-" + plan_digest.split(":", 1)[1]
+    binding: dict = {}
+    for field in fields:
+        if field == "domain":
+            binding[field] = profile["signature_namespace"]
+        elif field == "issued_at":
+            binding[field] = issued_at
+        elif field == "expires_at":
+            binding[field] = expires_at
+        elif field == "output_derived_unit_digest_or_null":
+            binding[field] = None
+        elif field == "plan_core_digest":
+            binding[field] = plan_digest
+        elif field in {"plan_id", "idempotency_key"}:
+            binding[field] = plan_id
+        elif field == "source_head":
+            binding[field] = SOURCE_HEAD
+        elif field == "target_host":
+            binding[field] = HOST
+        elif field == "scope":
+            binding[field] = "PREPARE_SANDBOX"
+        else:
+            binding[field] = "sha256:" + _hashlib.sha256(field.encode("utf-8")).hexdigest()
+    binding.update(overrides)
+    return binding
+
+
 def authorization(
     private_key: Path,
     *,
     profile_key: str,
-    authorization_id: str,
+    authorization_id: str | None = None,
     expires_at: str = EXPIRES,
+    payload_binding: dict | None = None,
 ) -> dict:
+    """一張丟棄式簽章 permit;``authorization_id`` 由 payload_binding **導出**(W4a §9.1)。
+
+    ``authorization_id`` 仍可顯式覆蓋——負向測試用它證明「id 與其 payload 不符」必被拒。
+    """
+
     profile = validator.S2_4_AUTHORIZATION_PROFILES[profile_key]
+    binding = (
+        dict(payload_binding)
+        if payload_binding is not None
+        else filler_payload_binding(profile_key, expires_at=expires_at)
+    )
+    # 消費閘刻意「不」再導出 permit 自身的窗(那由 §9.1 TTL/skew 閘驗),故 route 葉的
+    # payload-binding 導出函式不含這兩欄;fixture 在此補上,使 key 集恰為 profile 的 payload。
+    binding.setdefault("issued_at", ISSUED)
+    binding.setdefault("expires_at", expires_at)
     artifact = {
         "schema_version": "s2_4_operator_authorization_v1",
         "profile_identity": profile["profile_identity"],
         "signature_namespace": profile["signature_namespace"],
-        "authorization_id": authorization_id,
+        "authorization_id": "",
         "payload_fields": list(profile["payload_fields"]),
+        "payload_binding": binding,
         "issued_at": ISSUED,
         "expires_at": expires_at,
         "sshsig_armored": "-----BEGIN SSH SIGNATURE-----\nAAAA\n-----END SSH SIGNATURE-----\n",
         "self_digest": "sha256:" + "0" * 64,
     }
+    artifact["authorization_id"] = (
+        authorization_id
+        if authorization_id is not None
+        else validator.derive_authorization_id(artifact)
+    )
     return sign(private_key, artifact, namespace=profile["signature_namespace"])
 
 
@@ -296,9 +366,10 @@ def terminal_probe_evidence(private_key: Path, *, scope: str = "PREPARE_SANDBOX"
         created_at=ISSUED, max_cleanup_seconds=30, max_cgroup_drain_seconds=10, **scope_inputs,
     )
     intent = probe.build_capability_probe_intent(core, expires_at=EXPIRES, max_ttl_seconds=600)
+    # W4a:permit 必須綁**這一份** probe intent(payload_binding 由 W3a 葉獨立再導出)。
     auth = authorization(
         private_key, profile_key="capability_probe",
-        authorization_id="sha256:" + ("1" if scope == "PREPARE_SANDBOX" else "2") * 64,
+        payload_binding=probe.probe_permit_payload_binding(intent, **scope_inputs),
     )
     verdict = probe.run_s2_4_capability_probe(
         intent, auth, _ProbeDriver(core["transient_unit_property_digest"]),
@@ -315,27 +386,57 @@ def terminal_probe_evidence(private_key: Path, *, scope: str = "PREPARE_SANDBOX"
 
 # ── W3b APPLY row 的共用測試腳手架(依 §10.1.1 的 2000 行治理自 apply 測試檔下沉)──────
 PLAN_DIGEST = "sha256:" + "1" * 64
+PLAN_ID = "s2-4-" + "1" * 64
 PRE_STATE = "sha256:" + "2" * 64
-AGGREGATE_AUTH_ID = "sha256:" + "4" * 64
-PG_AUTH_ID = "sha256:" + "5" * 64
 UID = 947
 GID = 947
 
 
+def apply_payload_binding(profile_key: str, **overrides) -> dict:
+    """APPLY row permit 的 plan-bound payload_binding(綁 :data:`PLAN_DIGEST`)。"""
+
+    return filler_payload_binding(
+        profile_key, plan_core_digest=PLAN_DIGEST, **overrides
+    )
+
+
 def signed_authorizations(tmp_path, monkeypatch) -> dict:
-    """丟棄式 operator 信任根 + aggregate/pg-migration 兩張真簽章 permit。"""
+    """丟棄式 operator 信任根 + aggregate/pg-migration 兩張真簽章 permit(皆綁同一份 plan)。"""
 
     private_key, public_key, fingerprint = mint_key(tmp_path)
     install_pinned_key(monkeypatch, public_key, fingerprint)
+    aggregate = authorization(
+        private_key, profile_key="apply_aggregate",
+        payload_binding=apply_payload_binding("apply_aggregate"),
+    )
+    pg_migration = authorization(
+        private_key, profile_key="pg_migration",
+        payload_binding=apply_payload_binding("pg_migration"),
+    )
     return {
         "private_key": private_key,
-        "apply_aggregate": authorization(
-            private_key, profile_key="apply_aggregate", authorization_id=AGGREGATE_AUTH_ID
-        ),
-        "pg_migration": authorization(
-            private_key, profile_key="pg_migration", authorization_id=PG_AUTH_ID
-        ),
+        "apply_aggregate": aggregate,
+        "pg_migration": pg_migration,
+        # 兩個 id 現在由 payload 導出;測試沿用同名常量讀取。
+        "apply_aggregate_id": aggregate["authorization_id"],
+        "pg_migration_id": pg_migration["authorization_id"],
     }
+
+
+# W3b 測試以模組常量讀取兩個 permit id;W4a 起它們由 payload_binding 導出,故在此以同一
+# 契約再導出一次(值改變不影響測試語義:測試比對的是「同一張 permit 的 id」)。
+def _derived_apply_authorization_id(profile_key: str) -> str:
+    profile = validator.S2_4_AUTHORIZATION_PROFILES[profile_key]
+    return validator.s2_4_authorization_identity_digest(
+        profile_identity=profile["profile_identity"],
+        signature_namespace=profile["signature_namespace"],
+        payload_fields=list(profile["payload_fields"]),
+        payload_binding=apply_payload_binding(profile_key),
+    )
+
+
+AGGREGATE_AUTH_ID = _derived_apply_authorization_id("apply_aggregate")
+PG_AUTH_ID = _derived_apply_authorization_id("pg_migration")
 
 
 def component_intent(component_effect_class: str, required_intent_fields: dict) -> dict:
@@ -370,13 +471,43 @@ def owned_evidence(**extra) -> dict:
     }
 
 
+# W4a:補償動作在 fake driver 上的呼叫名前綴——獨立 verifier 以此判斷「現在是補償**之後**」,
+# 因為真主機 driver 的 independent_postcheck 回值取決於呼叫當下的實際主機狀態。
+_COMPENSATION_CALL_PREFIXES = ("remove", "drop", "revoke", "restore", "delete", "purge")
+
+
 class PostcheckMixin:
-    """所有 fake driver 共用的相異 verifier postcheck(applier 不得自證)。"""
+    """所有 fake driver 共用的相異 verifier postcheck(applier 不得自證)。
+
+    W4a INDEPENDENT_POST_COMPENSATION_POSTCHECK:同一支 ``independent_postcheck`` 在補償
+    **之後**被重跑,故 fake 必須反映當下狀態——補償跑過就回「觀測到擷取的前態、applied
+    狀態已不存在」;``residue_clean=False`` 讓測試模擬「driver 誤報自己乾淨」的情形。
+    """
 
     postcheck_ok = True
+    residue_clean = True
+    post_compensation_pre_state = PRE_STATE
+
+    def _compensation_ran(self) -> bool:
+        return any(
+            str(call).split(":", 1)[0].startswith(_COMPENSATION_CALL_PREFIXES)
+            for call in self.calls
+        )
 
     def independent_postcheck(self, *, component_effect_class, install_plan_digest, applier_node):
         self.calls.append("independent_postcheck")
+        if self._compensation_ran():
+            return {
+                "verifier_node": "s2-4-independent-verifier",
+                "observed_subject_digest": (
+                    self.post_compensation_pre_state
+                    if self.residue_clean
+                    else "sha256:" + "6" * 64
+                ),
+                "applied_state_verified": not self.residue_clean,
+                "pre_state_lineage_verified": self.residue_clean,
+                "verifier_capture_digest": CAPTURE_DIGEST,
+            }
         return {
             "verifier_node": "s2-4-independent-verifier",
             "observed_subject_digest": "sha256:" + "8" * 64,

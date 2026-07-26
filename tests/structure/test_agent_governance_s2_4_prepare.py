@@ -206,12 +206,15 @@ def signed(tmp_path, monkeypatch):
     kit.install_pinned_key(monkeypatch, public_key, fingerprint)
     evidence = kit.terminal_probe_evidence(private_key)
     receipt_digest = evidence["PREPARE_SANDBOX"]["effect_receipt"]["self_digest"]
+    intent = _intent(receipt_digest)
     return {
         "private_key": private_key,
         "probe_evidence": evidence,
-        "intent": _intent(receipt_digest),
+        "intent": intent,
+        # W4a:PREPARE permit 必須綁**這一份** prepare core/staging/probe lineage。
         "authorization": kit.authorization(
-            private_key, profile_key="prepare", authorization_id=_PREPARE_AUTH_ID
+            private_key, profile_key="prepare",
+            payload_binding=prepare.prepare_permit_payload_binding(intent),
         ),
     }
 

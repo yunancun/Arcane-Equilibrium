@@ -271,6 +271,8 @@ class _DisposablePgDriver:
         self.calls: list[str] = []
         self.journal: list[dict] = []
         self.password: bytes | None = None
+        # W4a:補償後的獨立 exact-還原判斷需要一個「動手之前」的真基線。
+        self.baseline_digest = _snapshot_digest(_catalog_snapshot(sock_dir))
 
     def _cursor(self):
         return _admin(self.sock_dir)
@@ -369,10 +371,30 @@ class _DisposablePgDriver:
             admin.close()
 
     def independent_postcheck(self, *, component_effect_class, install_plan_digest, applier_node):
+        """相異 verifier 節點的獨立觀測。
+
+        W4a:同一個方法會在**補償之後**被重跑,故它必須回答「呼叫當下」的真叢集狀態——
+        補償後 ``applied_state_verified`` 由「角色是否還在」實測,``pre_state_lineage_verified``
+        由「當下快照是否等於本 driver 建構時擷取的基線」實測(這才是獨立的 exact 還原證據)。
+        """
+
         self.calls.append("independent_postcheck")
+        snapshot = _catalog_snapshot(self.sock_dir)
+        digest = _snapshot_digest(snapshot)
+        if any(
+            call in {"drop_task_owned_role", "revoke_manifest_grants", "restore_public_defaults"}
+            for call in self.calls
+        ):
+            return {
+                "verifier_node": "s2-4-disposable-verifier",
+                "observed_subject_digest": digest,
+                "applied_state_verified": snapshot.get("role") is not None,
+                "pre_state_lineage_verified": digest == self.baseline_digest,
+                "verifier_capture_digest": kit.CAPTURE_DIGEST,
+            }
         return {
             "verifier_node": "s2-4-disposable-verifier",
-            "observed_subject_digest": _snapshot_digest(_catalog_snapshot(self.sock_dir)),
+            "observed_subject_digest": digest,
             "applied_state_verified": self.postcheck_ok,
             "pre_state_lineage_verified": self.postcheck_ok,
             "verifier_capture_digest": kit.CAPTURE_DIGEST,
@@ -430,13 +452,15 @@ def _authorizations(tmp_path, monkeypatch):
         tmp_path, name=f"w3b-pg-operator-{_KEY_SEQ[0]}"
     )
     kit.install_pinned_key(monkeypatch, public_key, fingerprint)
+    # W4a:兩張 permit 都綁同一份 plan(payload_binding → 導出 authorization_id)。
     return {
         "apply_aggregate": kit.authorization(
             private_key, profile_key="apply_aggregate",
-            authorization_id="sha256:" + "4" * 64,
+            payload_binding=kit.apply_payload_binding("apply_aggregate"),
         ),
         "pg_migration": kit.authorization(
-            private_key, profile_key="pg_migration", authorization_id="sha256:" + "5" * 64
+            private_key, profile_key="pg_migration",
+            payload_binding=kit.apply_payload_binding("pg_migration"),
         ),
     }
 

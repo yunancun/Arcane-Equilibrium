@@ -128,19 +128,66 @@ def _sign(private_key, artifact, *, namespace):
     return artifact
 
 
-def _authorization(private_key, *, profile_key="capability_probe", expires_at=_EXPIRES):
+def _filler_binding(profile_key, *, expires_at=_EXPIRES):
+    """非 probe profile 的 exact payload_binding(值由欄位名 deterministic 導出)。"""
+
+    import hashlib
+
     profile = validator.S2_4_AUTHORIZATION_PROFILES[profile_key]
+    binding = {}
+    for field in validator.authorization_payload_binding_fields(profile_key):
+        if field == "domain":
+            binding[field] = profile["signature_namespace"]
+        elif field == "issued_at":
+            binding[field] = _ISSUED
+        elif field == "expires_at":
+            binding[field] = expires_at
+        elif field == "output_derived_unit_digest_or_null":
+            binding[field] = None
+        else:
+            binding[field] = "sha256:" + hashlib.sha256(field.encode("utf-8")).hexdigest()
+    return binding
+
+
+def _authorization(
+    private_key,
+    *,
+    profile_key="capability_probe",
+    expires_at=_EXPIRES,
+    scope="PREPARE_SANDBOX",
+    payload_binding=None,
+    authorization_id=None,
+):
+    """一張丟棄式 permit。W4a:``authorization_id`` 由 payload_binding 導出,且 probe profile 的
+    binding 預設綁**同一份** probe intent(故正例過 PERMIT_PLAN_BINDING)。"""
+
+    profile = validator.S2_4_AUTHORIZATION_PROFILES[profile_key]
+    if payload_binding is None:
+        if profile_key == "capability_probe":
+            payload_binding = probe.probe_permit_payload_binding(
+                _intent(scope), **_scope_kwargs(scope)
+            )
+            payload_binding["issued_at"] = _ISSUED
+            payload_binding["expires_at"] = expires_at
+        else:
+            payload_binding = _filler_binding(profile_key, expires_at=expires_at)
     artifact = {
         "schema_version": "s2_4_operator_authorization_v1",
         "profile_identity": profile["profile_identity"],
         "signature_namespace": profile["signature_namespace"],
-        "authorization_id": "sha256:" + "1" * 64,
+        "authorization_id": "",
         "payload_fields": list(profile["payload_fields"]),
+        "payload_binding": dict(payload_binding),
         "issued_at": _ISSUED,
         "expires_at": expires_at,
         "sshsig_armored": "-----BEGIN SSH SIGNATURE-----\nAAAA\n-----END SSH SIGNATURE-----\n",
         "self_digest": "sha256:" + "0" * 64,
     }
+    artifact["authorization_id"] = (
+        authorization_id
+        if authorization_id is not None
+        else validator.derive_authorization_id(artifact)
+    )
     return _sign(private_key, artifact, namespace=profile["signature_namespace"])
 
 
@@ -434,7 +481,9 @@ def _terminal_pair(tmp_path, monkeypatch, scope):
     _install_pinned_key(monkeypatch, public_key, fingerprint)
     core = _core(scope)
     driver = _FakeProbeDriver(property_digest=core["transient_unit_property_digest"])
-    verdict = _run(_intent(scope), _authorization(private_key), driver, scope=scope)
+    verdict = _run(
+        _intent(scope), _authorization(private_key, scope=scope), driver, scope=scope
+    )
     assert verdict["status"] == "TERMINAL_CLEAN", verdict["reasons"]
     return verdict["attestation"], verdict["effect_receipt"]
 

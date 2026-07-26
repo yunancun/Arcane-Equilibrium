@@ -106,7 +106,11 @@ from aiml_gate_receipt_classifiers import (  # noqa: E402,F401
     classify_required_effects,
 )
 from aiml_gate_receipt_s2_4_contracts import (  # noqa: E402,F401
+    PERMIT_PLAN_BINDING_STATUS_REJECTED,
+    PERMIT_PLAN_BINDING_STATUS_VERIFIED,
     S2_4_APPLY_ROW_CLASS_ORDER,
+    S2_4_AUTHORIZATION_ID_DOMAIN,
+    S2_4_AUTHORIZATION_ID_SELF_FIELD,
     S2_4_AUTHORIZATION_PROFILES,
     S2_4_OPERATOR_AUTHORIZATION_SCHEMA_VERSION,
     S2_4_OPERATOR_TRUST_ROOT_FINGERPRINT,
@@ -116,15 +120,21 @@ from aiml_gate_receipt_s2_4_contracts import (  # noqa: E402,F401
     _S2_4_PROFILE_BY_IDENTITY,
     _SSH_SIGNATURE_ARMOR_MARKERS,
     _install_lineage_plan_binding_errors,
+    _s2_4_authorization_payload_binding_errors,
     _s2_4_install_plan_apply_rows_errors,
     _s2_4_operator_authorization_errors,
     _s2_4_operator_authorization_signed_bytes,
     _s2_4_replay_ledger_errors,
     _s2_4_route_core_rederivation_errors,
     _sshsig_armor_body_is_strict_base64,
+    authorization_payload_binding_fields,
+    build_s2_4_operator_authorization,
+    derive_authorization_id,
     derive_authorization_replay_binding,
     derive_component_intent_binding,
     derive_install_lineage_status,
+    derive_permit_plan_binding_status,
+    s2_4_authorization_identity_digest,
     s2_4_authorization_profiles_digest,
 )
 from aiml_gate_receipt_adoption import (  # noqa: E402,F401
@@ -158,6 +168,16 @@ from aiml_gate_receipt_wave_w3 import (  # noqa: E402,F401
     w3_exported_abi_projection,
     w3_owned_path_diff_digest,
     w3_structural_errors,
+)
+# S2.4(WP4·W4)wave 投影葉(同一機制,綁 W4a 的 permit/replay/lock/WAL/預算/補償面);
+# facade 逐名 re-export,W4 的 derive 分支委派該葉。
+from aiml_gate_receipt_wave_w4 import (  # noqa: E402,F401
+    _W4_EXPORTED_ABI,
+    _W4_OWNED_PATHS,
+    w4_chain_binding_errors,
+    w4_exported_abi_projection,
+    w4_owned_path_diff_digest,
+    w4_structural_errors,
 )
 
 
@@ -903,9 +923,14 @@ def _wave_exit_structural_errors(
         # scope 替換拒 / topology PROVEN·UNPROVEN 雙向 / guard↔身分列欄位契約)委派
         # wave_w3 葉再導出。
         reasons.extend(w3_structural_errors(receipt, repo_root))
+    elif wave == "W4":
+        # W4(aggregate transaction·W4a):同一機制,綁 W4 面;permit↔plan 綁定、install lock、
+        # 三本 WAL journal 的 durability/corrupt/reconcile、§9 TTL 不等式與獨立補償後 postcheck
+        # 的活裁決委派 wave_w4 葉再導出。
+        reasons.extend(w4_structural_errors(receipt, repo_root))
     else:
-        # W4+ 各 wave 於其自身 owned path 擴充 derivation;未實作的 wave 一律 fail-closed。
-        reasons.append("wave-exit derivation is only implemented for W0/W1/W2/W3 so far")
+        # W5+ 各 wave 於其自身 owned path 擴充 derivation;未實作的 wave 一律 fail-closed。
+        reasons.append("wave-exit derivation is only implemented for W0/W1/W2/W3/W4 so far")
         return reasons
     # T1(b):test/capture/review 三類證據必為「非空」的合法 digest list——empty/arbitrary 不得導出 PASS。
     # 誠實邊界:每一支 test/capture/review 的「PLATFORM-ATTESTED 綁定」屬下游 EFFECT/closure 關切(離線
@@ -919,6 +944,14 @@ def _wave_exit_structural_errors(
     return reasons
 
 
+# W2/W3/W4 predecessor-鏈規格 =(前導 wave, 必需 chain 長度, wave-specific 綁定謂詞);W0 無前導、W1 綁定為 inline(chain 必空),兩者不入表。
+_WAVE_PREDECESSOR_CHAIN = {
+    "W2": ("W1", 1, w2_chain_binding_errors),
+    "W3": ("W2", 2, w3_chain_binding_errors),
+    "W4": ("W3", 3, w4_chain_binding_errors),
+}
+
+
 def derive_wave_exit_status(
     receipt: Any,
     *,
@@ -928,7 +961,7 @@ def derive_wave_exit_status(
     predecessor_wave_receipt: Any = None,
     predecessor_wave_chain: Any = (),
 ) -> dict[str, Any]:
-    """Independently re-derive the W0/W1/W2/W3 wave-exit status (§3.2/§10.3).
+    """Independently re-derive the W0/W1/W2/W3/W4 wave-exit status (§3.2/§10.3).
 
     回傳 ``{"status": "PASS"|"NOT_PASS", "reasons": [...]}``。W0 的 PASS 需:綁定的
     ``source_admission_receipt`` 再導出 ADMITTED 且其 self_digest == 本 receipt 綁定的
@@ -940,7 +973,8 @@ def derive_wave_exit_status(
     wave-exit 物件,且其「自身的鏈」必須先再導出 PASS——caller 另以
     ``predecessor_wave_chain=(regenerated W0 wave-exit,)`` 供 W1 遞迴綁其前導(次序=
     由舊到新、不含 ``predecessor_wave_receipt`` 本身;W0/W1 拒非空 chain)。W3 再鏡 W2:
-    predecessor 是 W2 wave-exit 物件,``predecessor_wave_chain=(W0, W1)``。caller 帶
+    predecessor 是 W2 wave-exit 物件,``predecessor_wave_chain=(W0, W1)``;W4 再鏡 W3:
+    predecessor 是 W3 wave-exit 物件,``predecessor_wave_chain=(W0, W1, W2)``。caller 帶
     status/pass/done 於 derivation 前即拒(§10.3/§10.5 #27)。
 
     邊界(必要非充分):中央閘 :func:`validate_aiml_artifact` 對 wave-exit 只做 STRUCTURAL-ONLY
@@ -975,7 +1009,7 @@ def derive_wave_exit_status(
         return {"status": "NOT_PASS", "reasons": _schema_errors}
     reasons = _wave_exit_structural_errors(receipt, repo_root)
     wave = receipt.get("wave")
-    if wave not in {"W0", "W1", "W2", "W3"}:
+    if wave not in {"W0", "W1", "W2", "W3", "W4"}:
         return {"status": "NOT_PASS", "reasons": reasons}
     chain = tuple(predecessor_wave_chain) if predecessor_wave_chain else ()
     if wave in {"W0", "W1"} and chain:
@@ -1011,18 +1045,23 @@ def derive_wave_exit_status(
             "status": "PASS" if not reasons else "NOT_PASS",
             "reasons": reasons,
         }
-    # ── W3:predecessor 鏈(W2 wave-exit 物件連同其 W1/W0/admission 鏈再導出 PASS)────
-    if wave == "W3":
+    # ── W2/W3/W4:predecessor 鏈(前導 wave-exit 物件**連同其自身的鏈**再導出 PASS)。三者
+    # 收斂同形,由 :data:`_WAVE_PREDECESSOR_CHAIN` 表驅動(行為逐字等同展開三次)。
+    spec = _WAVE_PREDECESSOR_CHAIN.get(wave)
+    if spec is not None:
+        predecessor_wave, chain_length, binding_errors = spec
         if predecessor_wave_receipt is None:
             reasons.append(
-                "W3 wave-exit requires the bound predecessor_wave_receipt (the W2 wave-exit "
-                "receipt object) to re-derive PASS with its bound W1/W0/admission chain"
+                f"{wave} wave-exit requires the bound predecessor_wave_receipt (the "
+                f"{predecessor_wave} wave-exit receipt object) to re-derive PASS with its bound "
+                "predecessor/admission chain"
             )
             return {"status": "NOT_PASS", "reasons": reasons}
-        if len(chain) != 2:
+        if len(chain) != chain_length:
             reasons.append(
-                "W3 wave-exit requires predecessor_wave_chain=(regenerated W0 wave-exit, "
-                "regenerated W1 wave-exit) so the W2 predecessor can re-derive PASS"
+                f"{wave} wave-exit requires predecessor_wave_chain=(the {chain_length} "
+                "regenerated W0.. wave-exit receipts, oldest first) so the "
+                f"{predecessor_wave} predecessor can re-derive PASS"
             )
             return {"status": "NOT_PASS", "reasons": reasons}
         predecessor = derive_wave_exit_status(
@@ -1030,55 +1069,18 @@ def derive_wave_exit_status(
             repo_root=repo_root,
             now=now,
             source_admission_receipt=source_admission_receipt,
-            predecessor_wave_receipt=chain[1],
-            predecessor_wave_chain=(chain[0],),
+            predecessor_wave_receipt=chain[-1],
+            predecessor_wave_chain=tuple(chain[:-1]),
         )
         # 同 T6 護欄:非 dict / 非 PASS 的 predecessor 立即 typed NOT_PASS(鏈斷即斷)。
         if predecessor["status"] != "PASS" or not isinstance(predecessor_wave_receipt, dict):
             reasons.append(
-                "W3 wave-exit bound predecessor_wave_receipt does not derive PASS: "
+                f"{wave} wave-exit bound predecessor_wave_receipt does not derive PASS: "
                 + "; ".join(predecessor["reasons"])
             )
             return {"status": "NOT_PASS", "reasons": reasons}
         reasons.extend(
-            w3_chain_binding_errors(
-                receipt, source_admission_receipt, predecessor_wave_receipt, _git_head(repo_root)
-            )
-        )
-        return {
-            "status": "PASS" if not reasons else "NOT_PASS",
-            "reasons": reasons,
-        }
-    # ── W2:predecessor 鏈(W1 wave-exit 物件連同其 W0/admission 鏈再導出 PASS)──────
-    if wave == "W2":
-        if predecessor_wave_receipt is None:
-            reasons.append(
-                "W2 wave-exit requires the bound predecessor_wave_receipt (the W1 wave-exit "
-                "receipt object) to re-derive PASS with its bound W0/admission chain"
-            )
-            return {"status": "NOT_PASS", "reasons": reasons}
-        if len(chain) != 1:
-            reasons.append(
-                "W2 wave-exit requires predecessor_wave_chain=(regenerated W0 wave-exit "
-                "receipt,) so the W1 predecessor can re-derive PASS"
-            )
-            return {"status": "NOT_PASS", "reasons": reasons}
-        predecessor = derive_wave_exit_status(
-            predecessor_wave_receipt,
-            repo_root=repo_root,
-            now=now,
-            source_admission_receipt=source_admission_receipt,
-            predecessor_wave_receipt=chain[0],
-        )
-        # 同 T6 護欄:非 dict / 非 PASS 的 predecessor 立即 typed NOT_PASS(鏈斷即斷)。
-        if predecessor["status"] != "PASS" or not isinstance(predecessor_wave_receipt, dict):
-            reasons.append(
-                "W2 wave-exit bound predecessor_wave_receipt does not derive PASS: "
-                + "; ".join(predecessor["reasons"])
-            )
-            return {"status": "NOT_PASS", "reasons": reasons}
-        reasons.extend(
-            w2_chain_binding_errors(
+            binding_errors(
                 receipt, source_admission_receipt, predecessor_wave_receipt, _git_head(repo_root)
             )
         )

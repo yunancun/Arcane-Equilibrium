@@ -414,6 +414,258 @@ _SSH_SIGNATURE_ARMOR_MARKERS = (
 )
 
 
+# --------------------------------------------------------------------------- #
+# S2.4(WP4·W4a)PERMIT_PLAN_BINDING —— authorization_id 由 profile 具名的 exact payload 導出。
+#
+# W3 記錄的 obligation:授權物件只帶 ``authorization_id`` 與 payload_fields 的**名字**,從不帶
+# plan/intent 的**值**,任何閘也不從 intent 再導出 ``authorization_id``——故一張簽好的 permit 在
+# TTL 內可授權該類別的**任意** intent,§10.5 #36「rejected by profile-specific SSHSIG」由構造上
+# 無法滿足。W4a 的修法:
+#
+#   payload_binding      = {field: 該 field 的 exact 值 | field ∈ payload_fields \ {authorization_id}}
+#   authorization_id     = canonical_digest({domain, profile_identity, signature_namespace,
+#                                            payload_fields, payload_binding})
+#
+# 兩層閘缺一不可:
+#   (a) :func:`_s2_4_authorization_payload_binding_errors`(無條件,由 CP4 授權驗證呼叫)——
+#       ``authorization_id`` 必須由**它自己攜帶的** payload_binding 再導出,且 payload_binding 的
+#       鍵集恰為 profile 的 payload_fields 減 authorization_id,``domain`` 必等於簽章 namespace、
+#       ``issued_at``/``expires_at`` 必等於頂層值。permit 因此**不可**被重新指向另一份 payload;
+#   (b) :func:`derive_permit_plan_binding_status`(每個消費閘各自呼叫)——payload_binding 必須
+#       逐欄等於消費端**獨立再導出**的期望值(probe/prepare 由 intent core 全量導出;APPLY row
+#       由 intent 的 plan 參照導出)。intent 替換於是在 driver 接觸之前即 AUTHORIZATION_REJECTED。
+#
+# ``authorization_id`` 的 domain 常量把此導出與任何別的 digest 空間分開(同一組值在別的語義下
+# 不會碰撞出同一 id)。誠實界線不變:此為離線結構/綁定驗,**不**認證真 operator 於 runtime 簽了
+# 真語義 payload(W6A/W6B),九 authority 不受影響。
+# --------------------------------------------------------------------------- #
+S2_4_AUTHORIZATION_ID_DOMAIN = (
+    "arcane-equilibrium-aiml-s2-4-operator-authorization-id-v1"
+)
+# payload_fields 中唯一「自指」的 token:id 由其餘 payload 導出,故不可含自己。
+S2_4_AUTHORIZATION_ID_SELF_FIELD = "authorization_id"
+# payload_binding 中必須與頂層授權欄位逐位元組一致的兩個 token(§9.1 payload 尾二項)。
+_S2_4_AUTHORIZATION_TOP_LEVEL_BOUND_FIELDS = ("issued_at", "expires_at")
+# payload_binding 中唯一允許為 null 的 token(§9.1 CAPABILITY PROBE payload)。
+_S2_4_AUTHORIZATION_NULLABLE_BINDING_FIELDS = ("output_derived_unit_digest_or_null",)
+PERMIT_PLAN_BINDING_STATUS_VERIFIED = "PERMIT_PLAN_BINDING_VERIFIED"
+PERMIT_PLAN_BINDING_STATUS_REJECTED = "PERMIT_PLAN_BINDING_REJECTED"
+
+
+def authorization_payload_binding_fields(profile: Any) -> tuple[str, ...]:
+    """該 profile 的 payload_binding 鍵集(§9.1 ordered payload 減去自指的 authorization_id)。
+
+    ``profile`` 可為 :data:`S2_4_AUTHORIZATION_PROFILES` 的鍵(``capability_probe`` …)或
+    ``profile_identity`` 字串;都不是即 raise ``ValueError``(fail-closed,絕不回空集)。
+    """
+
+    row = S2_4_AUTHORIZATION_PROFILES.get(str(profile)) or _S2_4_PROFILE_BY_IDENTITY.get(
+        str(profile)
+    )
+    if row is None:
+        raise ValueError(
+            f"{profile!r} is not one of the four §9.1 S2.4 authorization profiles"
+        )
+    return tuple(
+        field
+        for field in row["payload_fields"]
+        if field != S2_4_AUTHORIZATION_ID_SELF_FIELD
+    )
+
+
+def s2_4_authorization_identity_digest(
+    *,
+    profile_identity: Any,
+    signature_namespace: Any,
+    payload_fields: Any,
+    payload_binding: Any,
+) -> str:
+    """§9.1 的 ``authorization_id`` 導出(domain-separated;簽章附上之前即可算)。
+
+    id 綁 profile 身分 + 簽章 namespace + ordered payload token list + 每個 token 的 exact 值;
+    任一項改動(換 plan core digest、換 probe scope、換 host、改 TTL 窗)都得到不同的 id。
+    """
+
+    return canonical_digest({
+        "domain": S2_4_AUTHORIZATION_ID_DOMAIN,
+        "profile_identity": profile_identity,
+        "signature_namespace": signature_namespace,
+        "payload_fields": list(payload_fields or []),
+        "payload_binding": payload_binding,
+    })
+
+
+def derive_authorization_id(authorization: Any) -> str:
+    """從一份(未簽或已簽)授權物件再導出其 ``authorization_id``。"""
+
+    if not isinstance(authorization, dict):
+        raise ValueError("authorization must be an object")
+    return s2_4_authorization_identity_digest(
+        profile_identity=authorization.get("profile_identity"),
+        signature_namespace=authorization.get("signature_namespace"),
+        payload_fields=authorization.get("payload_fields"),
+        payload_binding=authorization.get("payload_binding"),
+    )
+
+
+def build_s2_4_operator_authorization(
+    profile_key: str,
+    *,
+    payload_binding: dict[str, Any],
+    issued_at: str,
+    expires_at: str,
+) -> dict[str, Any]:
+    """組出**未簽**的授權物件,其 ``authorization_id`` 已由 payload_binding 導出(§9.1 次序)。
+
+    ``payload_binding`` 必須恰含該 profile 的 payload token(減 authorization_id);``domain``
+    與 ``issued_at``/``expires_at`` 由本函式填入 code-owned 值,caller 無從讓三者與頂層不一致。
+    簽名者接著對 :func:`_s2_4_operator_authorization_signed_bytes` 的 canonical bytes 簽 SSHSIG。
+    """
+
+    profile = S2_4_AUTHORIZATION_PROFILES.get(profile_key)
+    if profile is None:
+        raise ValueError(f"{profile_key!r} is not an S2.4 authorization profile key")
+    expected = set(authorization_payload_binding_fields(profile_key))
+    binding = dict(payload_binding or {})
+    binding["domain"] = profile["signature_namespace"]
+    binding["issued_at"] = issued_at
+    binding["expires_at"] = expires_at
+    if set(binding) != expected:
+        raise ValueError(
+            f"{profile_key} payload_binding must be exactly {sorted(expected)} "
+            f"(got {sorted(binding)})"
+        )
+    artifact: dict[str, Any] = {
+        "schema_version": S2_4_OPERATOR_AUTHORIZATION_SCHEMA_VERSION,
+        "profile_identity": profile["profile_identity"],
+        "signature_namespace": profile["signature_namespace"],
+        "authorization_id": "",
+        "payload_fields": list(profile["payload_fields"]),
+        "payload_binding": binding,
+        "issued_at": issued_at,
+        "expires_at": expires_at,
+    }
+    artifact["authorization_id"] = derive_authorization_id(artifact)
+    return artifact
+
+
+def _s2_4_authorization_payload_binding_errors(artifact: dict[str, Any]) -> list[str]:
+    """PERMIT_PLAN_BINDING 第 (a) 層:permit 必須綁到它自己攜帶的 exact payload。"""
+
+    profile = _S2_4_PROFILE_BY_IDENTITY.get(artifact.get("profile_identity"))
+    if profile is None:
+        return []  # profile 解析失敗已由呼叫端回報,不重複。
+    errors: list[str] = []
+    binding = artifact.get("payload_binding")
+    if not isinstance(binding, dict):
+        return [
+            "s2_4 operator authorization payload_binding must be an object carrying the "
+            "exact signed value of every payload field except authorization_id "
+            "(a permit that names fields without binding their values authorizes any "
+            "intent of its class inside its TTL)"
+        ]
+    expected_fields = set(
+        authorization_payload_binding_fields(profile["profile_identity"])
+    )
+    present = set(str(key) for key in binding)
+    if present != expected_fields:
+        errors.append(
+            "s2_4 operator authorization payload_binding key set is not the profile's "
+            f"exact §9.1 payload minus authorization_id (extra="
+            f"{sorted(present - expected_fields)}, missing="
+            f"{sorted(expected_fields - present)})"
+        )
+    for field, value in sorted(binding.items()):
+        if value is None and str(field) not in _S2_4_AUTHORIZATION_NULLABLE_BINDING_FIELDS:
+            errors.append(
+                f"s2_4 operator authorization payload_binding[{field!r}] must not be null"
+            )
+    if "domain" in binding and binding.get("domain") != profile["signature_namespace"]:
+        errors.append(
+            "s2_4 operator authorization payload_binding['domain'] is not the profile's "
+            "signature namespace (§9.1 domain separation)"
+        )
+    for field in _S2_4_AUTHORIZATION_TOP_LEVEL_BOUND_FIELDS:
+        if field in binding and binding.get(field) != artifact.get(field):
+            errors.append(
+                f"s2_4 operator authorization payload_binding[{field!r}] does not equal the "
+                "top-level authorization field (the signed window must be the recorded window)"
+            )
+    if not errors and artifact.get("authorization_id") != derive_authorization_id(artifact):
+        errors.append(
+            "s2_4 operator authorization authorization_id does not re-derive from its own "
+            "profile/namespace/payload_fields/payload_binding (§9.1: the id is derived from "
+            "the unsigned payload before the SSHSIG is attached)"
+        )
+    return errors
+
+
+def derive_permit_plan_binding_status(
+    authorization: Any,
+    *,
+    expected_payload_binding: Any,
+    profile_key: Any = None,
+) -> dict[str, Any]:
+    """PERMIT_PLAN_BINDING 第 (b) 層:permit 是否綁到**這一份** intent/plan(§10.5 #36)。
+
+    ``expected_payload_binding`` 是消費閘從 intent core / install plan **獨立再導出**的
+    ``{payload field: 期望值}``(可為 profile payload 的子集——消費端只比對它自己能導出的欄位;
+    它導不出的欄位仍由第 (a) 層釘死在 permit 的 id 內,故 permit 整體仍只綁一份 payload)。
+
+    回 ``{"status": PERMIT_PLAN_BINDING_VERIFIED|PERMIT_PLAN_BINDING_REJECTED, "reasons": [...],
+    "derived_authorization_id": …}``。任一欄位不符、payload_binding 缺該欄位、id 不再導出、
+    profile 不符即 REJECTED(絕不半通過)。
+    """
+
+    verdict: dict[str, Any] = {
+        "status": PERMIT_PLAN_BINDING_STATUS_REJECTED,
+        "reasons": [],
+        "derived_authorization_id": None,
+    }
+    if not isinstance(authorization, dict):
+        verdict["reasons"] = ["permit plan binding requires an authorization object"]
+        return verdict
+    if not isinstance(expected_payload_binding, dict) or not expected_payload_binding:
+        verdict["reasons"] = [
+            "permit plan binding requires a non-empty independently derived expected "
+            "payload binding (an empty expectation would authorize any intent)"
+        ]
+        return verdict
+    reasons = list(_s2_4_authorization_payload_binding_errors(authorization))
+    if profile_key is not None:
+        profile = S2_4_AUTHORIZATION_PROFILES.get(str(profile_key))
+        if profile is None:
+            reasons.append(f"{profile_key!r} is not an S2.4 authorization profile key")
+        elif authorization.get("profile_identity") != profile["profile_identity"]:
+            reasons.append(
+                f"permit profile_identity is not the required {profile['profile_identity']}"
+            )
+    binding = authorization.get("payload_binding")
+    if isinstance(binding, dict):
+        for field in sorted(expected_payload_binding):
+            expected_value = expected_payload_binding[field]
+            if field not in binding:
+                reasons.append(
+                    f"permit payload_binding is missing {field!r}; the permit is not bound "
+                    "to this plan/intent"
+                )
+            elif binding[field] != expected_value:
+                reasons.append(
+                    f"permit payload_binding[{field!r}] does not equal the independently "
+                    "re-derived value for this plan/intent (intent substitution under one "
+                    "signed permit is AUTHORIZATION_REJECTED, §10.5 #36)"
+                )
+    try:
+        verdict["derived_authorization_id"] = derive_authorization_id(authorization)
+    except ValueError as error:
+        reasons.append(str(error))
+    if reasons:
+        verdict["reasons"] = reasons
+        return verdict
+    verdict["status"] = PERMIT_PLAN_BINDING_STATUS_VERIFIED
+    return verdict
+
+
 def s2_4_authorization_profiles_digest() -> str:
     """釘選四 §9.1 trust profile(identity/namespace/ordered payload/max-TTL/skew)為 canonical digest。
 
@@ -505,6 +757,8 @@ def _s2_4_operator_authorization_errors(
         )
     if artifact.get("self_digest") != artifact_self_digest(artifact):
         errors.append("s2_4 operator authorization self_digest is invalid")
+    # W4a PERMIT_PLAN_BINDING 第 (a) 層(無條件):id 必須由它自己攜帶的 exact payload 再導出。
+    errors.extend(_s2_4_authorization_payload_binding_errors(artifact))
     armored = artifact.get("sshsig_armored")
     if not isinstance(armored, str) or len(armored.encode("utf-8")) > 16 * 1024:
         errors.append(

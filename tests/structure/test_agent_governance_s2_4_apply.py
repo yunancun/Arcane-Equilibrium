@@ -778,8 +778,11 @@ def _runtime_fixture(signed):
     prepare_intent = _p_intent(evidence["PREPARE_SANDBOX"]["effect_receipt"]["self_digest"])
     verdict = prepare.prepare_s2_4_install_bundle(
         prepare_intent,
-        kit.authorization(signed["private_key"], profile_key="prepare",
-                          authorization_id="sha256:" + "3" * 64),
+        # W4a:PREPARE permit 綁**這一份** prepare intent(否則 PERMIT_PLAN_BINDING 拒)。
+        kit.authorization(
+            signed["private_key"], profile_key="prepare",
+            payload_binding=prepare.prepare_permit_payload_binding(prepare_intent),
+        ),
         _FakePrepareDriver(),
         now=kit.NOW, clock=kit.frozen_clock(), replay_ledger=kit.replay_ledger(),
         probe_evidence=evidence, pinned_artifacts=deepcopy(_PINNED),
@@ -1551,37 +1554,38 @@ def test_no_in_memory_fixture_can_mint_platform_attested_evidence(signed) -> Non
     assert gate["recorded_evidence_class"] == "STRUCTURAL_ONLY"
 
 
-def test_the_w3_abi_names_the_four_w4_owned_obligations() -> None:
-    """RECORD HONESTLY:四項 W3 不提供的義務必須是 machine-visible 的 typed 記錄。
+def test_the_w3_abi_hands_over_only_the_open_design_question_after_w4a() -> None:
+    """RECORD HONESTLY:W3 不提供的義務必須是 machine-visible 的 typed 記錄。
 
-    第四項(E2 P2-C)是 independent post-compensation postcheck:W3 的
-    COMPENSATED_EXACT 靠的是「同一個 applier driver」自己再觀測一次,而 §5.2 要的是
-    **獨立** residue postcheck——protocol 上那個 independent_postcheck verifier 在補償
-    之後從未被重跑。
+    W4a(2026-07-26)交付了其中三項並因此自 W3 表移除:``PERMIT_PLAN_BINDING``
+    (``authorization_id`` 現由 profile 具名的 exact payload 導出且每個消費閘再導出比對)、
+    ``REPLAY_LEDGER_APPEND``(install lock 下的 atomic/hash-chained/fsynced/consume-once
+    append 與 idempotent replay)、``INDEPENDENT_POST_COMPENSATION_POSTCHECK``(補償後重跑
+    獨立 verifier,exactness 只由它導出)。留下的只有 §5.1 的 encrypt-then-sign 次序問題。
     """
 
     obligations = {
         item["obligation_id"]: item
         for item in validator._W3_EXPORTED_ABI["w4_owned_obligations"]
     }
-    assert sorted(obligations) == [
-        "ENCRYPTED_BLOB_DIGEST_ORDERING", "INDEPENDENT_POST_COMPENSATION_POSTCHECK",
-        "PERMIT_PLAN_BINDING", "REPLAY_LEDGER_APPEND",
-    ]
-    assert obligations["PERMIT_PLAN_BINDING"]["typed_status"] == "NOT_PROVIDED_BY_W3"
-    assert obligations["REPLAY_LEDGER_APPEND"]["typed_status"] == "NOT_PROVIDED_BY_W3"
+    assert sorted(obligations) == ["ENCRYPTED_BLOB_DIGEST_ORDERING"]
     assert obligations["ENCRYPTED_BLOB_DIGEST_ORDERING"]["typed_status"] == "OPEN_DESIGN_QUESTION"
-    assert (
-        obligations["INDEPENDENT_POST_COMPENSATION_POSTCHECK"]["typed_status"]
-        == "NOT_PROVIDED_BY_W3"
-    )
     for item in obligations.values():
         assert item["owner_wave"].startswith("W4")
         assert item["spec_refs"] and item["statement"] and item["w3_provides"]
-    # 這四項必然被 W3 wave-exit receipt 的 exported_abi_digest 綁住。
+    # 這一項必然被 W3 wave-exit receipt 的 exported_abi_digest 綁住。
     assert obligations == {
         item["obligation_id"]: item
         for item in validator.w3_exported_abi_projection()["w4_owned_obligations"]
+    }
+    # 三項交付物的當前契約在 W4 ABI 上是 machine-visible 的(不是靜默消失)。
+    w4_abi = validator._W4_EXPORTED_ABI
+    assert "authorization_id = canonical_digest(" in w4_abi["permit_plan_binding_contract"]
+    assert "idempotent replay" in w4_abi["replay_append_contract"]
+    assert "INDEPENDENT postcheck verifier" in w4_abi["compensation_exactness_contract"]
+    # W4a 自身未交付的義務以同一誠實形狀繼續被記錄。
+    assert {"ENCRYPTED_BLOB_DIGEST_ORDERING", "AGGREGATE_PLAN_PAYLOAD_FULL_COMPARISON"} <= {
+        item["obligation_id"] for item in w4_abi["remaining_owned_obligations"]
     }
 
 

@@ -88,10 +88,14 @@ from agent_governance_s2_4_component import (  # noqa: E402,F401
     OWNERSHIP_EVIDENCE_REQUIRED_FIELDS,
     PG_MIGRATION_NAMESPACE,
     PG_MIGRATION_PROFILE,
+    POST_COMPENSATION_POSTCHECK_CONFIRMED,
+    POST_COMPENSATION_POSTCHECK_DISPROVED,
+    POST_COMPENSATION_POSTCHECK_UNAVAILABLE,
     ComponentContractError,
     _ALL_FALSE_PRODUCTION_FLAGS,
     _DIGEST_RE,
     _Journal,
+    _apply_permit_internal_derivation_reasons,
     _authorization_set_reasons,
     _build_postcheck,
     _build_result,
@@ -104,15 +108,18 @@ from agent_governance_s2_4_component import (  # noqa: E402,F401
     _resolve_now,
     _subject_digest,
     _verdict,
+    apply_permit_payload_binding,
     build_component_effect_intent,
     classify_ownership_only,
     classify_pre_state,
     compensation_outcome,
+    compensation_with_independent_postcheck,
     component_raw_ingress_reasons,
     component_row_abi,
     derive_compensation_status,
     derive_host_identity_effect_class_status,
     derive_recorded_evidence_class,
+    independent_post_compensation_postcheck,
     normalize_compensation,
     ownership_binding_present,
     ownership_evidence_reasons,
@@ -553,6 +560,7 @@ def apply_s2_4_pg_role_acl(
             plan_digest=plan_digest, pre_state_digest=pre_state_digest,
             post_state_digest=_subject_digest({"role": role, "grants": None}),
             journal=journal, clock=tick, compensate=_compensate,
+            driver=driver, applier_node=applier_node,
         )
     return _finish_row(
         status=COMPONENT_STATUS_SATISFIED, reasons=[],
@@ -862,6 +870,7 @@ def apply_s2_4_credential_install(
             post_state_digest=_subject_digest({"slot_path": slot_path, "state": "partial"}),
             journal=journal, clock=tick,
             compensate=lambda: _compensate_credential(driver, slot_path, mode, prior_digest),
+            driver=driver, applier_node=applier_node,
         )
     finally:
         if hasattr(dsn_handle, "zeroize"):
@@ -1133,6 +1142,7 @@ def apply_s2_4_learning_runtime(
             post_state_digest=_subject_digest({"targets": targets, "state": "partial"}),
             journal=journal, clock=tick,
             compensate=lambda: _compensate_trees(driver, published),
+            driver=driver, applier_node=applier_node,
         )
     return _finish_row(
         status=COMPONENT_STATUS_SATISFIED, reasons=[],
@@ -1551,6 +1561,7 @@ def apply_s2_4_engine_scanner_unit(
             post_state_digest=_subject_digest({"unit": UNIT_FRAGMENT_PATH, "state": "partial"}),
             journal=journal, clock=tick,
             compensate=lambda: _compensate_engine_scanner(driver, installed),
+            driver=driver, applier_node=applier_node,
         )
     return _finish_row(
         status=COMPONENT_STATUS_SATISFIED, reasons=[],

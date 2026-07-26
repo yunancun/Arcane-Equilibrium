@@ -335,6 +335,7 @@ def apply_s2_4_host_identity(
             compensate=lambda: _compensate_host_identity(
                 driver, created_account, created_dirs, desired_identity["name"]
             ),
+            driver=driver, applier_node=applier_node,
         )
     expected = {
         "identity": _normalize_identity(desired_identity),
@@ -352,6 +353,7 @@ def apply_s2_4_host_identity(
             compensate=lambda: _compensate_host_identity(
                 driver, created_account, created_dirs, desired_identity["name"]
             ),
+            driver=driver, applier_node=applier_node,
         )
     return _finish_row(
         status=COMPONENT_STATUS_SATISFIED, reasons=[],

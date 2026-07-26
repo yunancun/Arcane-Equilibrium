@@ -170,6 +170,10 @@ COMPENSATION_STATUS_EXACT = "COMPENSATED_EXACT"
 COMPENSATION_STATUS_NOT_REOBSERVED = "COMPENSATED_NOT_REOBSERVED"
 COMPENSATION_STATUS_NOT_COMPENSATED = "NOT_COMPENSATED"
 COMPENSATION_STATUS_RECOVERY_REQUIRED = "RECOVERY_REQUIRED"
+# W4a INDEPENDENT_POST_COMPENSATION_POSTCHECK 的三分 typed 結果(獨立 verifier 重跑)。
+POST_COMPENSATION_POSTCHECK_CONFIRMED = "POST_COMPENSATION_RESIDUE_CONFIRMED_CLEAN"
+POST_COMPENSATION_POSTCHECK_DISPROVED = "POST_COMPENSATION_RESIDUE_DISPROVED"
+POST_COMPENSATION_POSTCHECK_UNAVAILABLE = "POST_COMPENSATION_POSTCHECK_UNAVAILABLE"
 
 class ComponentContractError(ValueError):
     """component-effect 契約層硬錯誤(帶 typed ``code``)。"""
@@ -279,14 +283,103 @@ def derive_host_identity_effect_class_status(
     }
 
 
+def apply_permit_payload_binding(
+    intent: Any, *, profile_key: str
+) -> dict[str, Any]:
+    """APPLY row 能**獨立再導出**的 §9.1 permit payload 子集(W4a PERMIT_PLAN_BINDING)。
+
+    row 層拿到的是一份 ``s2_4_component_effect_intent_v1``,不是整份 plan;它能獨立導出的是
+    「這個 intent 指向哪一份 plan」——W4a 把 component intent 的 ``install_plan_digest`` 定義為
+    §5.1 的 ``plan_core_digest``(plan 的身分**就是**其 core digest,``plan_id`` 與
+    ``idempotency_key`` 皆由它導出)。故 row 層比對三欄:``domain`` / ``plan_core_digest`` /
+    ``plan_id``,並在 :func:`_apply_permit_internal_derivation_reasons` 另驗 permit 自身的
+    §5.1 內部導出與跨 permit 一致性。
+
+    permit 其餘欄位(topology / HBA / prepare receipt / pre-state / rollback digest)在 row 層
+    無法獨立再導出,但它們已被 ``authorization_id`` 釘死在同一份 payload 內——permit 整體仍只
+    綁一份 plan。逐欄比對完整 aggregate payload 屬 W4b 的 ``apply_s2_4_install_plan``
+    orchestrator(見 W4 exported ABI 的 remaining_owned_obligations)。
+    """
+
+    if not isinstance(intent, dict):
+        raise ComponentContractError("component_effect_intent_not_an_object")
+    plan_core_digest = intent.get("install_plan_digest")
+    if not isinstance(plan_core_digest, str) or _DIGEST_RE.fullmatch(plan_core_digest) is None:
+        raise ComponentContractError("component_effect_intent_install_plan_digest_invalid")
+    profile = central_validator.S2_4_AUTHORIZATION_PROFILES[profile_key]
+    return {
+        "domain": profile["signature_namespace"],
+        "plan_core_digest": plan_core_digest,
+        "plan_id": "s2-4-" + plan_core_digest.split(":", 1)[1],
+    }
+
+
+def _apply_permit_internal_derivation_reasons(
+    authorization_set: dict[str, Any], required: tuple[str, ...]
+) -> list[str]:
+    """permit 內部的 §5.1 導出 + 跨 permit 一致性(aggregate 與 PG 必須指同一份 plan)。"""
+
+    reasons: list[str] = []
+    shared_fields = (
+        "plan_core_digest",
+        "plan_id",
+        "idempotency_key",
+        "topology_pre_digest",
+        "installed_unit_probe_receipt_digest",
+        "hba_delta_digest",
+    )
+    bindings: dict[str, Any] = {}
+    for profile_key in required:
+        authorization = authorization_set.get(profile_key)
+        binding = (authorization or {}).get("payload_binding")
+        if not isinstance(binding, dict):
+            continue
+        bindings[profile_key] = binding
+        plan_core_digest = binding.get("plan_core_digest")
+        plan_id = binding.get("plan_id")
+        if isinstance(plan_core_digest, str) and _DIGEST_RE.fullmatch(plan_core_digest):
+            expected_plan_id = "s2-4-" + plan_core_digest.split(":", 1)[1]
+            if plan_id != expected_plan_id:
+                reasons.append(
+                    f"{profile_key} permit plan_id does not re-derive from its bound "
+                    "plan_core_digest (§5.1: plan_id = 's2-4-' + hex(plan_core_digest))"
+                )
+        if binding.get("idempotency_key") != plan_id:
+            reasons.append(
+                f"{profile_key} permit idempotency_key is not the bound plan_id "
+                "(§5.1: idempotency_key = plan_id)"
+            )
+    if len(bindings) >= 2:
+        keys = sorted(bindings)
+        first = bindings[keys[0]]
+        for other_key in keys[1:]:
+            other = bindings[other_key]
+            drifted = sorted(
+                field for field in shared_fields if first.get(field) != other.get(field)
+            )
+            if drifted:
+                reasons.append(
+                    f"the {keys[0]} and {other_key} permits are bound to different plan "
+                    f"lineages (drifted: {drifted}); §9 requires both to bind the same "
+                    "plan/journal/idempotency/pre-state and compensation chain"
+                )
+    return reasons
+
+
 def _authorization_set_reasons(
     authorization_set: Any,
     replay_ledger: Any,
     *,
     component_effect_class: str,
     now: str | datetime | None,
+    intent: Any = None,
 ) -> list[str]:
-    """逐 profile 驗 §9.1 授權並綁 replay 消費;缺 aggregate permit 即明文點名 PG-permit 縫。"""
+    """逐 profile 驗 §9.1 授權並綁 replay 消費;缺 aggregate permit 即明文點名 PG-permit 縫。
+
+    W4a 追加 PERMIT_PLAN_BINDING:``intent`` 在場時,每張 permit 的 ``payload_binding``
+    必須綁到**這一份 intent 指向的 plan**,且 aggregate 與 PG permit 必須綁同一份 plan
+    lineage;否則 typed ``AUTHORIZATION_REJECTED``(§10.5 #36)。
+    """
 
     required = COMPONENT_REQUIRED_PROFILES[component_effect_class]
     if not isinstance(authorization_set, dict):
@@ -314,6 +407,29 @@ def _authorization_set_reasons(
             )
         if authorization.get("signature_namespace") != profile["signature_namespace"]:
             reasons.append(f"{profile_key} authorization signature_namespace is not the {profile_key} namespace")
+        if intent is not None:
+            try:
+                expected_binding = apply_permit_payload_binding(
+                    intent, profile_key=profile_key
+                )
+            except (ComponentContractError, KeyError, TypeError) as error:
+                reasons.append(
+                    f"{profile_key} permit plan binding cannot be re-derived from this intent "
+                    f"({type(error).__name__}); fail-closed"
+                )
+                expected_binding = None
+            if expected_binding is not None:
+                binding = central_validator.derive_permit_plan_binding_status(
+                    authorization,
+                    expected_payload_binding=expected_binding,
+                    profile_key=profile_key,
+                )
+                if binding["status"] != (
+                    central_validator.PERMIT_PLAN_BINDING_STATUS_VERIFIED
+                ):
+                    reasons.extend(
+                        f"{profile_key}: {reason}" for reason in binding["reasons"]
+                    )
         if replay_ledger is None:
             reasons.append(
                 f"{profile_key} authorization replay-consumption cannot be proved without the "
@@ -331,6 +447,7 @@ def _authorization_set_reasons(
             f"{component_effect_class} was handed unrelated authorization profiles {extra}; "
             "each row consumes only its own admitted permits"
         )
+    reasons.extend(_apply_permit_internal_derivation_reasons(authorization_set, required))
     return reasons
 
 
@@ -411,13 +528,25 @@ def derive_recorded_evidence_class(driver: Any) -> dict[str, Any]:
     }
 
 
-def compensation_outcome(*, compensated: bool, reobserved: bool | None) -> dict[str, Any]:
-    """§5.4:補償的 typed 結果——``compensated`` 只說「動作沒拋例外」,
-    ``reobserved`` 才說「補償後的**再觀測**是否等於擷取的前態」。"""
+def compensation_outcome(
+    *,
+    compensated: bool,
+    reobserved: bool | None,
+    independent_reobserved: bool | None = None,
+) -> dict[str, Any]:
+    """§5.4:補償的 typed 結果。
+
+    ``compensated`` 只說「動作沒拋例外」;``reobserved`` 說「**applier** 側的再觀測是否等於
+    擷取的前態」;``independent_reobserved``(W4a)才說「**獨立** verifier 於補償後再觀測是否
+    等於前態」——只有它為真才可宣稱 ``COMPENSATED_EXACT``。
+    """
 
     return {
         "compensated": bool(compensated),
         "reobserved": None if reobserved is None else bool(reobserved),
+        "independent_reobserved": (
+            None if independent_reobserved is None else bool(independent_reobserved)
+        ),
     }
 
 
@@ -426,7 +555,9 @@ def normalize_compensation(value: Any) -> dict[str, Any]:
 
     if isinstance(value, dict) and "compensated" in value:
         return compensation_outcome(
-            compensated=bool(value.get("compensated")), reobserved=value.get("reobserved")
+            compensated=bool(value.get("compensated")),
+            reobserved=value.get("reobserved"),
+            independent_reobserved=value.get("independent_reobserved"),
         )
     return compensation_outcome(compensated=bool(value), reobserved=None)
 
@@ -434,20 +565,185 @@ def normalize_compensation(value: Any) -> dict[str, Any]:
 def derive_compensation_status(compensation: dict[str, Any]) -> tuple[str, bool]:
     """回 ``(rollback_status, exact_pre_state_restored)``。
 
-    ``COMPENSATED_EXACT`` **只**在補償跑完且再觀測確認等於前態時成立;再觀測矛盾即
-    ``RECOVERY_REQUIRED``;protocol 無法再觀測即 ``COMPENSATED_NOT_REOBSERVED``
-    (不宣稱 exact)。「沒有拋例外」永遠不足以宣稱 exact(W3 review E2 P1-4)。
+    ``COMPENSATED_EXACT`` **只**在補償跑完且**獨立** verifier 於補償後再觀測確認等於前態時
+    成立(W4a:``independent_reobserved``);再觀測矛盾即 ``RECOVERY_REQUIRED``;拿不到獨立
+    再觀測即 ``COMPENSATED_NOT_REOBSERVED``(不宣稱 exact)。「沒有拋例外」永遠不足以宣稱
+    exact(W3 review E2 P1-4),「applier 自己說還原了」也不足以(W4a
+    INDEPENDENT_POST_COMPENSATION_POSTCHECK)。
     """
 
     compensated = bool(compensation.get("compensated"))
+    independent = compensation.get("independent_reobserved")
     reobserved = compensation.get("reobserved")
     if not compensated:
         return (COMPENSATION_STATUS_RECOVERY_REQUIRED, False)
-    if reobserved is True:
-        return (COMPENSATION_STATUS_EXACT, True)
-    if reobserved is False:
+    if independent is False or reobserved is False:
+        # 任一側反證 exact 還原即 RECOVERY_REQUIRED(獨立與 applier 側都有否決權)。
         return (COMPENSATION_STATUS_RECOVERY_REQUIRED, False)
+    if independent is True:
+        return (COMPENSATION_STATUS_EXACT, True)
+    # 沒有獨立再觀測:即使 applier 側自報 reobserved=True 也只到 NOT_REOBSERVED。
     return (COMPENSATION_STATUS_NOT_REOBSERVED, False)
+
+
+def independent_post_compensation_postcheck(
+    *,
+    driver: Any,
+    component_effect_class: str,
+    install_plan_digest: str,
+    applier_node: str,
+    pre_state_digest: str,
+    pre_compensation_observed_digest: str | None = None,
+    expected_post_compensation_digest: str | None = None,
+) -> dict[str, Any]:
+    """§5.2/§5.4:補償**之後**再跑一次**獨立** verifier 的殘留 postcheck(W4a 義務)。
+
+    W3 的 ``COMPENSATED_EXACT`` 建立在「同一支 applier driver 的再觀測」上——會誤報自身殘留
+    的 driver 仍能換到 exact 宣稱。每個 protocol 本來就宣告了 ``independent_postcheck``
+    (相異 verifier 節點),此處在補償後**重跑**它,exactness 只由它的回答導出:
+
+      * verifier 節點存在且不等於 applier(applier 不得自證自己的殘留);
+      * ``applied_state_verified`` 必須為 **假**——補償後那個 applied 狀態必須已觀測不到;
+      * ``pre_state_lineage_verified`` 必須為 **真**——前態譜系成立;
+      * ``observed_subject_digest`` 必須**不同於**補償前那次獨立觀測的 digest
+        (``pre_compensation_observed_digest`` 提供時):回同一個常量的 verifier 等於沒有真的
+        重看一次,不得換到 exact 宣稱;
+      * ``expected_post_compensation_digest`` 提供時(同一 observer digest 空間內的期望值),
+        再要求逐位元組相等。
+
+    回 ``{"status", "independent_reobserved": True|False|None, "reasons", "postcheck"}``:
+    拿不到獨立再觀測(protocol 未宣告/逸出/形狀不符)→ ``independent_reobserved=None``,呼叫端
+    據此停在 typed ``COMPENSATED_NOT_REOBSERVED``,絕不宣稱 exact。
+
+    誠實界線:``pre_state_digest``(plan 宣告的期望前態)與 verifier 自己的觀測 digest 不必然
+    落在同一 digest 空間,故它被記入證據(``expected_pre_state_digest``)而**不**充當等式;把
+    plan 級 pre-state 綁進同一 observer 空間屬 W4b/W6B(見 W4 ABI 的 remaining obligations)。
+    """
+
+    outcome: dict[str, Any] = {
+        "status": POST_COMPENSATION_POSTCHECK_UNAVAILABLE,
+        "independent_reobserved": None,
+        "reasons": [],
+        "postcheck": None,
+    }
+    verifier = getattr(driver, "independent_postcheck", None)
+    if not callable(verifier):
+        outcome["reasons"] = [
+            "the injected driver declares no independent_postcheck verifier, so the "
+            "post-compensation residue re-observation is unavailable; exactness is not claimed"
+        ]
+        return outcome
+    try:
+        observed = verifier(
+            component_effect_class=component_effect_class,
+            install_plan_digest=install_plan_digest,
+            applier_node=applier_node,
+        )
+    except Exception as error:  # noqa: BLE001
+        outcome["reasons"] = [
+            f"independent post-compensation postcheck failed: {redact_driver_error(error)}"
+        ]
+        return outcome
+    if not isinstance(observed, dict):
+        outcome["reasons"] = [
+            "independent post-compensation postcheck did not return an object"
+        ]
+        return outcome
+    verifier_node = str(observed.get("verifier_node", ""))
+    if not verifier_node or verifier_node == applier_node:
+        outcome["reasons"] = [
+            "independent post-compensation postcheck verifier_node must differ from the "
+            "applier (the applier cannot attest its own residue)"
+        ]
+        return outcome
+    for field in ("observed_subject_digest", "verifier_capture_digest"):
+        value = observed.get(field)
+        if not isinstance(value, str) or _DIGEST_RE.fullmatch(value) is None:
+            outcome["reasons"] = [
+                f"independent post-compensation postcheck {field} is invalid"
+            ]
+            return outcome
+    outcome["postcheck"] = {
+        "verifier_node": verifier_node,
+        "applier_node": applier_node,
+        "observed_subject_digest": observed["observed_subject_digest"],
+        "verifier_capture_digest": observed["verifier_capture_digest"],
+        "pre_state_lineage_verified": bool(observed.get("pre_state_lineage_verified")),
+        "applied_state_verified": bool(observed.get("applied_state_verified")),
+        "expected_pre_state_digest": pre_state_digest,
+        "pre_compensation_observed_digest": pre_compensation_observed_digest,
+    }
+    mismatches: list[str] = []
+    if bool(observed.get("applied_state_verified")):
+        mismatches.append(
+            "the independent verifier still observes the applied state after compensation "
+            "(the task-owned delta survives)"
+        )
+    if not bool(observed.get("pre_state_lineage_verified")):
+        mismatches.append(
+            "the independent verifier did not confirm the pre-state lineage after compensation"
+        )
+    if (
+        pre_compensation_observed_digest is not None
+        and observed["observed_subject_digest"] == pre_compensation_observed_digest
+    ):
+        mismatches.append(
+            "the independent post-compensation observation is byte-identical to the "
+            "pre-compensation observation; the verifier did not actually re-observe the "
+            "subject, so exact restoration is not proved"
+        )
+    if (
+        expected_post_compensation_digest is not None
+        and observed["observed_subject_digest"] != expected_post_compensation_digest
+    ):
+        mismatches.append(
+            "the independent post-compensation observation does not equal the expected "
+            "post-compensation state digest; exact restoration is disproved"
+        )
+    if mismatches:
+        outcome["status"] = POST_COMPENSATION_POSTCHECK_DISPROVED
+        outcome["independent_reobserved"] = False
+        outcome["reasons"] = mismatches
+        return outcome
+    outcome["status"] = POST_COMPENSATION_POSTCHECK_CONFIRMED
+    outcome["independent_reobserved"] = True
+    return outcome
+
+
+def compensation_with_independent_postcheck(
+    compensation: Any,
+    *,
+    driver: Any,
+    component_effect_class: str,
+    install_plan_digest: str,
+    applier_node: str,
+    pre_state_digest: str,
+    pre_compensation_observed_digest: str | None = None,
+    expected_post_compensation_digest: str | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """把 applier 側的補償結果與**獨立**補償後 postcheck 合成一個 outcome(W4a)。
+
+    只有補償真的跑過(``compensated=True``)才值得再觀測——沒跑過就沒有 exact 可宣稱。
+    """
+
+    normalized = normalize_compensation(compensation)
+    if not normalized["compensated"]:
+        normalized["independent_reobserved"] = None
+        return normalized, {
+            "status": POST_COMPENSATION_POSTCHECK_UNAVAILABLE,
+            "independent_reobserved": None,
+            "reasons": ["compensation did not complete; no exactness claim is made"],
+            "postcheck": None,
+        }
+    independent = independent_post_compensation_postcheck(
+        driver=driver, component_effect_class=component_effect_class,
+        install_plan_digest=install_plan_digest, applier_node=applier_node,
+        pre_state_digest=pre_state_digest,
+        pre_compensation_observed_digest=pre_compensation_observed_digest,
+        expected_post_compensation_digest=expected_post_compensation_digest,
+    )
+    normalized["independent_reobserved"] = independent["independent_reobserved"]
+    return normalized, independent
 
 
 def classify_pre_state(
@@ -651,7 +947,8 @@ def _component_precheck(
             row_abi,
         )
     authorization_reasons = _authorization_set_reasons(
-        authorization_set, replay_ledger, component_effect_class=expected_class, now=now
+        authorization_set, replay_ledger, component_effect_class=expected_class, now=now,
+        intent=intent,
     )
     if authorization_reasons:
         return (
@@ -805,7 +1102,8 @@ def _build_rollback(
     """§5.4:rollback 契約 artifact。
 
     ``status`` / ``exact_pre_state_restored`` **只**由 :func:`derive_compensation_status`
-    自實際再觀測導出;沒有再觀測就不得宣稱 ``COMPENSATED_EXACT``。
+    自實際再觀測導出;而 W4a 起 ``COMPENSATED_EXACT`` 更要求那次再觀測來自**獨立** verifier
+    (``independent_reobserved``),applier 自報一律只到 ``COMPENSATED_NOT_REOBSERVED``。
     ``mutation_performed=False``(從未動過主機)時,不存在需要還原的 delta,
     故 rollback 記 ``NOT_COMPENSATED`` 且不宣稱 exact。
     """
@@ -885,10 +1183,25 @@ def _finish_row(
     )
     evidence = derive_recorded_evidence_class(driver)
     if postcheck is None or postcheck["status"] != "PASS":
-        compensation = (
-            normalize_compensation(compensate()) if mutation_performed
-            else compensation_outcome(compensated=True, reobserved=True)
-        )
+        if mutation_performed:
+            # W4a:補償之後**重跑獨立 verifier**;exact 宣稱只能來自它(不是 applier 自證)。
+            # 並把補償**前**那次獨立觀測的 digest 帶進去——回同一常量者等於沒真的再看一次。
+            compensation, independent = compensation_with_independent_postcheck(
+                compensate(), driver=driver,
+                component_effect_class=component_effect_class,
+                install_plan_digest=plan_digest, applier_node=applier_node,
+                pre_state_digest=pre_state_digest,
+                pre_compensation_observed_digest=(
+                    postcheck.get("observed_subject_digest")
+                    if isinstance(postcheck, dict)
+                    else None
+                ),
+            )
+            postcheck_reasons = postcheck_reasons + list(independent["reasons"])
+        else:
+            compensation = compensation_outcome(
+                compensated=True, reobserved=True, independent_reobserved=True
+            )
         rollback = _build_rollback(
             component_effect_class=component_effect_class, install_plan_digest=plan_digest,
             pre_state_digest=pre_state_digest, post_state_digest=post_state_digest,
@@ -905,11 +1218,13 @@ def _finish_row(
                 f"compensation journal failed: {redact_driver_error(error)}"
             ]
             compensated = False
-        # 補償未跑完、或再觀測**反證**了 exact 還原,一律 RECOVERY_REQUIRED;
-        # 只有「跑完 + 再觀測相符」或「protocol 無法再觀測」才停在 rolled-back。
+        # 補償未跑完、或(applier 側或**獨立** verifier)再觀測**反證**了 exact 還原,一律
+        # RECOVERY_REQUIRED;只有「跑完 + 無人反證」才停在 rolled-back。
         final = (
             COMPONENT_STATUS_POSTCHECK_ROLLED_BACK
-            if compensated and compensation["reobserved"] is not False
+            if compensated
+            and compensation["reobserved"] is not False
+            and compensation["independent_reobserved"] is not False
             else COMPONENT_STATUS_RECOVERY_REQUIRED
         )
         return _verdict(
@@ -975,10 +1290,30 @@ def _compensating_failure(
     journal: _Journal,
     clock: Callable[[], datetime],
     compensate: Callable[[], Any],
+    driver: Any = None,
+    applier_node: str | None = None,
 ) -> dict[str, Any]:
-    """apply 中途失敗:ownership-aware 逆向補償;無法 exact 還原即 ``RECOVERY_REQUIRED``。"""
+    """apply 中途失敗:ownership-aware 逆向補償;無法 exact 還原即 ``RECOVERY_REQUIRED``。
 
-    compensation = normalize_compensation(compensate())
+    W4a:補償後**重跑獨立 verifier** 的殘留 postcheck,``COMPENSATED_EXACT`` 只由它導出;
+    ``driver``/``applier_node`` 缺席(或 protocol 拿不到獨立再觀測)一律停在
+    ``COMPENSATED_NOT_REOBSERVED``——絕不由 applier 自證 exact。
+    """
+
+    independent: dict[str, Any] = {
+        "status": POST_COMPENSATION_POSTCHECK_UNAVAILABLE,
+        "independent_reobserved": None,
+        "reasons": [],
+        "postcheck": None,
+    }
+    if driver is not None and applier_node is not None:
+        compensation, independent = compensation_with_independent_postcheck(
+            compensate(), driver=driver, component_effect_class=component_effect_class,
+            install_plan_digest=plan_digest, applier_node=applier_node,
+            pre_state_digest=pre_state_digest,
+        )
+    else:
+        compensation = normalize_compensation(compensate())
     rollback = _build_rollback(
         component_effect_class=component_effect_class, install_plan_digest=plan_digest,
         pre_state_digest=pre_state_digest, post_state_digest=post_state_digest,
@@ -986,6 +1321,7 @@ def _compensating_failure(
     )
     compensated = bool(compensation["compensated"])
     reobserved = compensation["reobserved"]
+    independent_reobserved = compensation["independent_reobserved"]
     try:
         journal.write(
             "COMPENSATED" if compensated else "FAILED", post_state_digest, pre_state_digest
@@ -995,25 +1331,27 @@ def _compensating_failure(
         compensated = False
     if not compensated:
         outcome_reason = "exact compensation was impossible; RECOVERY_REQUIRED blocks S2.5"
-    elif reobserved is True:
-        outcome_reason = (
-            "the task-owned delta was compensated in reverse order and re-observed equal to the "
-            "captured pre-state"
-        )
-    elif reobserved is False:
+    elif independent_reobserved is False or reobserved is False:
+        # 任一側(applier 或獨立 verifier)反證 exact 還原,一律優先於任何 exact 宣稱。
         outcome_reason = (
             "compensation ran without raising, but the post-compensation re-observation does not "
             "equal the captured pre-state; RECOVERY_REQUIRED blocks S2.5"
         )
+    elif independent_reobserved is True:
+        outcome_reason = (
+            "the task-owned delta was compensated in reverse order and an INDEPENDENT verifier "
+            "re-observation equals the exact captured pre-state"
+        )
     else:
         outcome_reason = (
-            "the task-owned delta was compensated in reverse order, but this row's driver "
-            "protocol could not re-observe it; exactness is not claimed"
+            "the task-owned delta was compensated in reverse order, but no INDEPENDENT "
+            "post-compensation re-observation could be obtained; exactness is not claimed"
         )
     return _verdict(
-        COMPONENT_STATUS_FAILED if compensated and reobserved is not False
+        COMPONENT_STATUS_FAILED
+        if compensated and independent_reobserved is not False and reobserved is not False
         else COMPONENT_STATUS_RECOVERY_REQUIRED,
-        [reason, outcome_reason],
+        [reason, outcome_reason] + list(independent["reasons"]),
         component_effect_class=component_effect_class, row_abi=row_abi,
         mutation_performed=True, driver_engaged=True, rollback=rollback,
         journal_entries=journal.entries,

@@ -707,8 +707,56 @@ def _verdict(
     }
 
 
-def _authorization_profile_errors(authorization: Any, intent: dict[str, Any]) -> list[str]:
-    """probe 授權只接受 capability-probe profile;install/prepare/pg 授權挪用即拒。"""
+def probe_permit_payload_binding(
+    intent: dict[str, Any], **scope_inputs: Any
+) -> dict[str, Any]:
+    """§9.1 CAPABILITY PROBE payload 的**獨立再導出**期望值(W4a PERMIT_PLAN_BINDING)。
+
+    每一項都由 intent 自己的 unsigned core 導出,caller 無從供給:``probe_core_digest`` /
+    ``probe_id`` / ``scope`` / ``source_head`` / ``target_host`` /
+    ``transient_unit_property_digest`` / ``output_derived_unit_digest_or_null``
+    (``INSTALLED_UNIT`` 為 W2c rendered-unit digest,``PREPARE_SANDBOX`` 恆 null)/
+    ``cleanup_rollback_digest``(由 :func:`capability_probe_cleanup_contract` 再導出)。
+    permit 的 ``issued_at``/``expires_at`` 屬其自身窗(由 §9.1 TTL/skew 閘驗),不在此比對。
+    """
+
+    core = intent["core"]
+    scope = core["probe_scope"]
+    probe_id = intent["probe_id"]
+    unit_name = derived_probe_unit_name(probe_id)
+    output_unit_digest = None
+    if scope == "INSTALLED_UNIT":
+        rendered_unit = scope_inputs.get("rendered_unit")
+        output_unit_digest = installed_unit_property_set(rendered_unit)["rendered_unit_digest"]
+    cleanup_rollback_digest = canonical_digest(
+        capability_probe_cleanup_contract(
+            probe_id=probe_id,
+            derived_unit_name=unit_name,
+            cleanup_budget=core["cleanup_budget"],
+        )
+    )
+    return {
+        "domain": PROBE_SIGNATURE_NAMESPACE,
+        "probe_core_digest": intent["core_digest"],
+        "probe_id": probe_id,
+        "scope": scope,
+        "source_head": core["source_head"],
+        "target_host": core["target_host"],
+        "transient_unit_property_digest": core["transient_unit_property_digest"],
+        "output_derived_unit_digest_or_null": output_unit_digest,
+        "cleanup_rollback_digest": cleanup_rollback_digest,
+    }
+
+
+def _authorization_profile_errors(
+    authorization: Any, intent: dict[str, Any], **scope_inputs: Any
+) -> list[str]:
+    """probe 授權只接受 capability-probe profile;install/prepare/pg 授權挪用即拒。
+
+    W4a 追加 PERMIT_PLAN_BINDING:permit 的 ``payload_binding`` 必須逐欄等於
+    :func:`probe_permit_payload_binding` 從**這一份** intent 獨立再導出的值——一張簽好的
+    probe permit 於是無法在 TTL 內授權另一個 probe intent(§10.5 #36)。
+    """
 
     if not isinstance(authorization, dict):
         return ["probe authorization must be an object"]
@@ -722,6 +770,22 @@ def _authorization_profile_errors(authorization: Any, intent: dict[str, Any]) ->
         )
     if authorization.get("signature_namespace") != PROBE_SIGNATURE_NAMESPACE:
         reasons.append("probe authorization signature_namespace is not the probe namespace")
+    try:
+        expected_binding = probe_permit_payload_binding(intent, **scope_inputs)
+    except (KeyError, TypeError, ProbeContractError) as error:
+        reasons.append(
+            "probe permit plan binding cannot be re-derived from this intent "
+            f"({type(error).__name__}); fail-closed"
+        )
+        expected_binding = None
+    if expected_binding is not None:
+        binding = central_validator.derive_permit_plan_binding_status(
+            authorization,
+            expected_payload_binding=expected_binding,
+            profile_key="capability_probe",
+        )
+        if binding["status"] != central_validator.PERMIT_PLAN_BINDING_STATUS_VERIFIED:
+            reasons.extend(binding["reasons"])
     required = intent.get("required_authorization")
     if isinstance(required, dict):
         try:
@@ -820,8 +884,9 @@ def run_s2_4_capability_probe(
             PROBE_STATUS_REQUEST_REJECTED, binding_errors,
             probe_id=probe_id, probe_scope=scope, derived_unit_name=unit_name,
         )
-    # step 4 —— 授權(profile/namespace/TTL + §9.1 SSHSIG/信任根 + replay 消費綁定)。
-    reasons = _authorization_profile_errors(authorization, intent)
+    # step 4 —— 授權(profile/namespace/TTL + PERMIT_PLAN_BINDING + §9.1 SSHSIG/信任根 +
+    # replay 消費綁定)。plan binding 用的是 step 3 已驗過的同一組 scope 輸入。
+    reasons = _authorization_profile_errors(authorization, intent, **scope_inputs)
     if replay_ledger is None:
         reasons.append(
             "probe authorization replay-consumption cannot be proved without the "
