@@ -1,0 +1,173 @@
+{
+  "admission_derivation": {
+    "reasons": [],
+    "status": "ADMITTED"
+  },
+  "admission_self_digest": "sha256:adeb39b7f70e51c20db6a5175dc1b9c37d619597a2f2b28c7a2d37738781163b",
+  "historical_persisted_w3": {
+    "historical_source_head": "8c04a18f748c1750fb411a14b8a6d42e7e04a669",
+    "historical_w3_integrity": "VERIFIED",
+    "persisted_dir": "/Users/ncyu/Projects/TradeBot/.codex-worktrees/aiml-s2-wp4-w0/docs/execution_plan/ai_ml_landing/receipts/S2.4-WP4-W3",
+    "regenerated_w0_admission_self_digest": "sha256:668b08335aa45cbea52f9531c2a96a6b0b5b366aabf0bdcfef63256ebd671628",
+    "regenerated_w0_wave_exit_self_digest": "sha256:1360f7f45f018db98cb815eb066bbf13b3e6bf3e338eecfaf5e7fc4c57101362",
+    "regenerated_w1_wave_exit_self_digest": "sha256:95c6360d2c14243c40a49543d90f67f6f216b0fdf7b693b2047ae540fa0935a8",
+    "regenerated_w2_wave_exit_self_digest": "sha256:b3f5f088f6e25e74c4048dbf43b78617f94e1fe5039ba540f2a494c800a5f241",
+    "w3_wave_exit_self_digest": "sha256:bc4367a5de20ff89da8898f2eb86e10600425a602535b8a36d24fc1819699cba"
+  },
+  "regenerated_w0_wave_exit_derivation": {
+    "reasons": [],
+    "status": "PASS"
+  },
+  "regenerated_w0_wave_exit_self_digest": "sha256:cdd4516920cb6b4004dc7b551cb68818d453f7922bd78f8ec0da7e82a829c3d6",
+  "regenerated_w1_wave_exit_derivation": {
+    "reasons": [],
+    "status": "PASS"
+  },
+  "regenerated_w1_wave_exit_self_digest": "sha256:57814db9446335a57c6695d793f17ef9b7c56798796ce65b33934f20ea57776d",
+  "regenerated_w2_wave_exit_derivation": {
+    "reasons": [],
+    "status": "PASS"
+  },
+  "regenerated_w2_wave_exit_self_digest": "sha256:3d177dc0c60db298b1e1e80c8589b2f26bf890ee8c5bba35f37df8d2d10245d1",
+  "regenerated_w3_wave_exit_derivation": {
+    "reasons": [],
+    "status": "PASS"
+  },
+  "regenerated_w3_wave_exit_self_digest": "sha256:f0b54fb1088fc0e3a3b5944c32407a38223c28e3942da757bd0f150c493fb01c",
+  "replay_note": "W4 re-derivation binds source_head == checkout HEAD; to replay, checkout source_head, rebuild the in-memory W0/W1/W2/W3 chain with the same builders, then run derive_wave_exit_status(w4, source_admission_receipt=admission, predecessor_wave_receipt=w3_wave_exit, predecessor_wave_chain=(w0_wave_exit, w1_wave_exit, w2_wave_exit))",
+  "review_provenance": [
+    {
+      "disposition": "all P0/P1 fixed in-branch with regressions; the preflight checklist it produced feeds the eventual W6 operator packet",
+      "findings": "2 P0, 4 P1, 4 P2",
+      "headline": "The crash matrix proves the WAL is honest, never that recovery works: no test crashed a run and then completed the install from the wreckage. Doing that surfaced a state that permanently wedges the host and burns both signed permits, and a state where one systemctl read timeout tears down a correct five-row install.",
+      "role": "OPS",
+      "round": "W4 five-leg review of checkpoint 677a12df9",
+      "verdict": "NOT READY for a W6 operator packet"
+    },
+    {
+      "disposition": "CONFLICT and all DRIFT closed or recorded; the ownership question was escalated to PM and ruled on",
+      "findings": "1 CONFLICT, 5 DRIFT, no hard-boundary breach, no effect authority acquired",
+      "headline": "The §9.1 trust-root pin was a self-consistency check inside a WP4-editable file, defeating the one mechanism the design names as separating an operator from a development agent. Separately, ATTESTED_EVIDENCE_CLASS_VERIFIER was assigned to an effect wave, which made it unsatisfiable and would have shipped §10.2's success identity into SOURCE_READY never once exercised.",
+      "role": "CC",
+      "round": "W4 five-leg review of checkpoint 677a12df9",
+      "verdict": "PASS_WITH_CONFLICTS"
+    },
+    {
+      "disposition": "all P1 fixed with regressions; P2 fixed or recorded",
+      "findings": "4 P1, 8 P2",
+      "headline": "The install-lock proof was an unauthenticated caller dict and a released verdict passed forever; compensation authority was a shape check on two caller-supplied strings, so two literal all-zero digests converted zero-mutation into authorized destructive reverse compensation.",
+      "role": "E3",
+      "round": "W4 five-leg review of checkpoint 677a12df9",
+      "verdict": "four must-holds HOLD; the durability and serialization layer beneath them did not"
+    },
+    {
+      "disposition": "all P1 fixed with regressions",
+      "findings": "5 P1, 10 P2, no P0",
+      "headline": "Startup reconcile's install lane was plan-scoped, so a previous plan's stranded transaction was structurally invisible: plan A crashed with two rows applied on the host and plan B ran to a terminal successful receipt. It also confirmed W4a's PERMIT_PLAN_BINDING, the §5.1 acyclic cut, driver=None zero mutation and §10.5 #24 as genuinely sound.",
+      "role": "E2",
+      "round": "W4 five-leg review of checkpoint 677a12df9",
+      "verdict": "DONE + FAIL"
+    },
+    {
+      "disposition": "all fixed; the edge inventory is now derived from a source AST scan in both directions",
+      "findings": "1 P0, 3 P1, 5 P2; 14 mutations run, 10 killed (several with 18-86 failures)",
+      "headline": "An untyped RuntimeError escaped the frozen §10.2 ABI during compensation, and the crash-matrix inventory was hand-maintained: a brand-new external effect edge added to the success path left all 407 tests green.",
+      "role": "E4",
+      "round": "W4 five-leg review of checkpoint 677a12df9",
+      "verdict": "numbers confirmed exactly; coverage real but with four mutation survivors"
+    },
+    {
+      "disposition": "all P1 fixed with regressions; this reviewer executed no tests (no admitted verification node), which is stated rather than glossed",
+      "findings": "4 P1 (2 exploitable-now), 11 P2, 5 P3",
+      "headline": "The trust-root fix pinned a copy no verifier reads - every verifier resolves the facade, and the facade module is inside _W4_OWNED_PATHS - so a WP4 wave could still re-point the trust root for all four permits and the apply attestation. PM confirmed this dynamically.",
+      "role": "E3",
+      "round": "recheck of the remediation diff",
+      "verdict": "four must-holds still HOLD; the remediation itself carried defects"
+    },
+    {
+      "disposition": "all P0/P1 fixed; each fix carries a regression proven red under the exact surviving mutation",
+      "findings": "2 P0, 5 P1, 12 P2; 40 mutations run, 9 survived",
+      "headline": "Two of the wave's own claims were false: the SSHSIG verification that is the only key to APPLIED_INACTIVE had zero test coverage (a one-line regression minted it from garbage bytes with the whole suite green), and COMPENSATED_EXACT could still be bought by a constant-returning verifier on the crash matrix's own second failure mode. ALREADY_APPLIED_IDEMPOTENT was a new fail-open converting an unknown or partially-applied host into 'no operator action is required'.",
+      "role": "E2",
+      "round": "recheck of the remediation diff",
+      "verdict": "DONE + FAIL"
+    },
+    {
+      "disposition": "receipts emitted only after both recheck legs returned and their findings were closed",
+      "headline": "Ruled that ATTESTED_EVIDENCE_CLASS_VERIFIER moves from W6B to the source lane on the S2.0 precedent. Independently re-derived the whole-tree numbers, both CLIs, the adapter statuses and the trust-root facade exploit rather than accepting the builders' reports.",
+      "role": "PM",
+      "round": "adjudication and independent verification",
+      "verdict": "rulings recorded, spot-checks confirmed"
+    }
+  ],
+  "schema_version": "s2_4_w4_derivation_record_v1_informal",
+  "source_head": "f66fe0790ee13c098ad99bbdea3c9001f76328a4",
+  "test_evidence": {
+    "authority_posture": {
+      "adapters_all_authority_locked_production_capable": true,
+      "applied_inactive_reachability": "gated on real SSHSIG verification of s2_4_install_apply_attestation_v1; no source-side input reaches it. What keeps production out of reach is key custody, not structural unreachability - this changed in W4 and is stated in the Registry and the W4 ABI rather than left implicit.",
+      "driver_none_is_typed_external_verification_pending_with_zero_mutation": true,
+      "nine_authorities_false": true,
+      "production_apply_performed": false,
+      "running_attested": false
+    },
+    "baselines": {
+      "net_tests_added_by_the_remediation_rounds": 248,
+      "w4a_commit": "55c99bb7c6d30e269134bf3468f8e448a7e6a0cb",
+      "w4b_reviewed_checkpoint": "677a12df9e6cc406a43c9128d237b2c5253b1366",
+      "whole_tree_at_emit": "5965 passed, 46 skipped",
+      "whole_tree_at_w4b_checkpoint": "5717 passed, 46 skipped"
+    },
+    "capture_note": "Locally reproducible repository/test facts only. Not ORCHESTRATOR_BOUND and not platform-attested: governed capture-command cannot host pytest on this Mac (HOME isolation), so these are direct Bash runs against the worktree. No runtime, host or effect claim is made anywhere in W4.",
+    "commands": [
+      {
+        "command": "python3 -m pytest tests/structure -q",
+        "result": "3418 passed, 6 skipped",
+        "run_by": "PM (independent re-run) and E1 (builder)"
+      },
+      {
+        "command": "python3 -m pytest program_code/ml_training/tests -q",
+        "result": "2547 passed, 40 skipped",
+        "run_by": "PM (independent re-run) and E1 (builder)"
+      },
+      {
+        "command": "python3 -m pytest tests/structure program_code/ml_training/tests -q",
+        "result": "5965 passed, 46 skipped in 547.37s",
+        "run_by": "PM (independent whole-tree re-run at the emitting tree state)"
+      },
+      {
+        "command": "agent_governance_s2_4_install.py engine-scanner-split",
+        "result": "PASS, exclusions=None, reasons=[]"
+      },
+      {
+        "command": "agent_governance_s2_4_install.py application-closure",
+        "result": "PASS, exclusions=None, reasons=[], declared_path_count=147, runtime_import_closure_size=48"
+      },
+      {
+        "command": "agent_governance.py validate",
+        "result": "PASS, roles=20"
+      }
+    ],
+    "disclosed_limits": [
+      "Six tests skip on macOS: they need Linux + systemd-run + AIML_TARGET_HOST_PROBE=1. The W3a probe's real-host behaviour is unproven here and is labelled, not hidden.",
+      "No runtime, host, PostgreSQL-production or effect evidence exists in W4. Every in-memory driver records evidence_class STRUCTURAL_ONLY.",
+      "Test attestation under governed capture requires Linux; this capture is LOCAL_REPRODUCIBLE only."
+    ],
+    "evidence_class": "LOCAL_REPRODUCIBLE",
+    "frozen_digests_byte_identical": {
+      "authorization_profiles_9_1": "sha256:79b27b7040e8a8d3af84b6a5f0c7c20e45888caaedac146428145ffea54be2dc",
+      "component_matrix_v1": "sha256:22d78882a2dace9ceb640b74b2a5dca2f2a8cc05861720f5ab25c5c9ac86c445",
+      "learning_runtime_v1": "sha256:6cf76b60a763035d26d0d4e9e0e6aa0aa8877d99966367c778420e5f63a79595",
+      "learning_runtime_v2": "sha256:58bb9cc3a827872284196f57811227d367e4ff4aed5f3b22a031df1b39904c62",
+      "s0_3_classifier": "sha256:1cf8c021b066ceeb364e968add074d263cb28d63db421fdc40620e9904d0ddbc",
+      "w0_negative_manifest": "sha256:1bd86de7b636bf57ead1a1ecfd00c9b75379ae49d1458a41bd7c22987d6f92f6"
+    },
+    "host_platform": "darwin (development machine); Linux trade-core is the runtime machine and was not contacted",
+    "schema_version": "s2_4_w4_local_test_capture_v1"
+  },
+  "w4_wave_exit_derivation": {
+    "reasons": [],
+    "status": "PASS"
+  },
+  "w4_wave_exit_self_digest": "sha256:79db18bb568b896e12718de468d15089544084b3d5fd5c36acc242d4614e7bad"
+}
