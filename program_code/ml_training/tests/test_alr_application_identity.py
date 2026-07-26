@@ -40,6 +40,23 @@ _LAUNCH_DIGEST = "sha256:" + _LAUNCH_HEX
 _LAUNCH_PREFIX = f"/opt/arcane-equilibrium/aiml/launches/{_LAUNCH_HEX}"
 
 
+@pytest.fixture(autouse=True)
+def _simulate_guard_host_ownership(monkeypatch: pytest.MonkeyPatch) -> None:
+    """P2-4:在無 root 的 checkout 上模擬 guard 的真實 host 佈署身分(唯一縫)。
+
+    mode(恰 0440)照真檔驗;只有「讀 owner uid / group 名」這條縫被替換,判定邏輯
+    不動——本 fixture 因此不可能放行 group-writable 或非 root 所有的 guard。
+    """
+    monkeypatch.setattr(
+        app_identity,
+        "guard_host_identity",
+        lambda st: (
+            app_identity.TOPOLOGY_GUARD_REQUIRED_OWNER_UID,
+            app_identity.TOPOLOGY_GUARD_REQUIRED_GROUP,
+        ),
+    )
+
+
 def _write_topology_guard(path: Path) -> dict:
     guard = {
         "schema_version": "pg_topology_runtime_guard_v1",
@@ -301,6 +318,115 @@ def test_launch_prefix_and_guard_tamper_are_refused(bundle, tmp_path: Path) -> N
     with pytest.raises(app_identity.AlrApplicationIdentityError) as error:
         app_identity.run_production_preflight(**_preflight_kwargs(bundle, guard_path))
     assert str(error.value) == "topology_guard_self_digest_mismatch"
+
+
+@pytest.mark.parametrize(
+    "posture,expected",
+    [
+        ("group_writable", "topology_guard_mode_invalid:0660"),
+        ("world_readable", "topology_guard_mode_invalid:0444"),
+        ("non_root_owner", "topology_guard_owner_invalid:1000"),
+        ("wrong_group", "topology_guard_group_invalid:staff"),
+        ("unresolved_group", "topology_guard_group_invalid:unresolved"),
+    ],
+)
+def test_guard_host_posture_drift_is_refused_before_the_guard_is_trusted(
+    bundle, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, posture: str, expected: str
+) -> None:
+    """P2-4:契約要求 root 所有、scanner 群組、mode 恰 0440——三者都必須在信任前驗過。
+
+    修前只拒 world-write 位元,於是 **group-writable(0660)** 的 guard 每次重連都通過:
+    scanner 群組內的另一個行程可以改寫 guard 值再重算其 self_digest(self_digest 只證
+    完整性,不證作者),身分閘就被對齊到攻擊者選定的叢集。
+    """
+    guard_path = tmp_path / "guard.json"
+    _write_topology_guard(guard_path)
+    if posture == "group_writable":
+        os.chmod(guard_path, 0o660)
+    elif posture == "world_readable":
+        os.chmod(guard_path, 0o444)
+    elif posture == "non_root_owner":
+        monkeypatch.setattr(
+            app_identity, "guard_host_identity", lambda st: (1000, "aiml-engine-scanner")
+        )
+    elif posture == "wrong_group":
+        monkeypatch.setattr(app_identity, "guard_host_identity", lambda st: (0, "staff"))
+    else:
+        monkeypatch.setattr(app_identity, "guard_host_identity", lambda st: (0, None))
+    with pytest.raises(app_identity.AlrApplicationIdentityError) as error:
+        app_identity.verify_topology_guard(guard_path)
+    assert str(error.value) == expected
+    # 同一姿態經 production 前置也必須被拒(重連路徑走同一個謂詞)。
+    with pytest.raises(app_identity.AlrApplicationIdentityError) as preflight_error:
+        app_identity.run_production_preflight(**_preflight_kwargs(bundle, guard_path))
+    assert str(preflight_error.value) == expected
+
+
+def test_guard_group_name_resolution_is_the_only_host_identity_seam() -> None:
+    """P2-4:host 身分只從 stat 讀,判定邏輯不可被縫替換(縫只回事實)。"""
+    fake = os.stat_result((0o100440, 1, 1, 1, 0, 0, 0, 0, 0, 0))
+    assert app_identity.guard_host_identity(fake)[0] == 0
+    assert app_identity.TOPOLOGY_GUARD_REQUIRED_MODE == 0o440
+    assert app_identity.TOPOLOGY_GUARD_REQUIRED_OWNER_UID == 0
+    assert app_identity.TOPOLOGY_GUARD_REQUIRED_GROUP == "aiml-engine-scanner"
+
+
+# --------------------------------------------------------------------------- #
+# P1-7:application root 自身的別名/重指防護
+# --------------------------------------------------------------------------- #
+def test_symlinked_application_root_is_refused(bundle, tmp_path: Path) -> None:
+    """P1-7:digest 名下的 leaf 自身是 symlink 時,``Path.is_dir()`` 會跟隨它。
+
+    修前:walk 只拒 root **以下**的 symlink,故別名指向的樹整棵通過 digest 前置,而
+    ``run_kwargs.repo_root`` 拿到的仍是那個未解析的別名——preflight 之後把別名重指到
+    另一棵樹,unit 路徑與 digest 都沒變,receipts 與 runtime 輸入卻已換人。
+    """
+    guard_path = tmp_path / "guard.json"
+    _write_topology_guard(guard_path)
+    alias = tmp_path / ("alias-" + bundle["digest"].split(":", 1)[1])
+    alias.symlink_to(bundle["root"], target_is_directory=True)
+    with pytest.raises(app_identity.AlrApplicationIdentityError) as error:
+        app_identity.run_production_preflight(
+            **_preflight_kwargs(bundle, guard_path, application_root=alias)
+        )
+    assert str(error.value) == "application_root_not_a_real_directory"
+
+
+def test_application_root_retargeted_during_the_walk_is_refused(
+    bundle, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P1-7:走訪期間 root 被換成另一個 inode → (dev,ino) 再驗必須 typed 失敗。"""
+    guard_path = tmp_path / "guard.json"
+    _write_topology_guard(guard_path)
+    root = _mutable_copy(bundle, tmp_path)
+    decoy = tmp_path / "decoy"
+    shutil.copytree(bundle["root"], decoy)
+    real_verify = app_identity.verify_application_root
+
+    def _verify_then_retarget(*args, **kwargs):
+        document = real_verify(*args, **kwargs)
+        # 走訪已完成、身分再驗之前:同名路徑換成另一個 inode(rename 交換)
+        shutil.rmtree(root)
+        os.rename(decoy, root)
+        return document
+
+    monkeypatch.setattr(app_identity, "verify_application_root", _verify_then_retarget)
+    with pytest.raises(app_identity.AlrApplicationIdentityError) as error:
+        app_identity.run_production_preflight(
+            **_preflight_kwargs(bundle, guard_path, application_root=root)
+        )
+    assert str(error.value) == "application_root_identity_changed"
+
+
+def test_verified_real_root_is_what_runtime_receives(bundle, tmp_path: Path) -> None:
+    """P1-7:run_kwargs 交給 runtime 的是**已驗身分**的實體路徑(中間段別名已解析)。"""
+    guard_path = tmp_path / "guard.json"
+    _write_topology_guard(guard_path)
+    result = app_identity.run_production_preflight(**_preflight_kwargs(bundle, guard_path))
+    assert result["run_kwargs"]["repo_root"] == Path(os.path.realpath(bundle["root"]))
+    assert result["application_root_realpath"] == str(Path(os.path.realpath(bundle["root"])))
+    identity = os.stat(bundle["root"])
+    assert result["application_root_identity"] == f"{identity.st_dev}:{identity.st_ino}"
 
 
 # --------------------------------------------------------------------------- #

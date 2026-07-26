@@ -721,6 +721,40 @@ def test_grant_sql_is_closed_and_deterministic() -> None:
         assert "TEMP" not in statement
 
 
+def test_grant_sql_revokes_the_public_inherited_temp_and_create_baseline() -> None:
+    """P1-3:``database_temp: false`` 只能由對 **PUBLIC** 的 REVOKE 讓其成真。
+
+    PG 權限相加,且正常初始化的 database 預設把 TEMPORARY(PG<15 另含 CREATE)授給
+    PUBLIC——只對 aiml_engine_scanner 收回 database 權限,該角色仍可經 PUBLIC 建 temp
+    表。生成器必須自己發出這道 REVOKE(disposable fixture 不得代勞)。
+    """
+    manifest = _load_manifest()
+    assert manifest["closed_boundary"]["database_temp"] is False
+    assert manifest["closed_boundary"]["database_create"] is False
+    assert manifest["closed_boundary"]["schema_create"] is False
+    statements = install.generate_engine_scanner_grant_sql(manifest)
+    database = manifest["database"]["name"]
+    assert (
+        f'REVOKE TEMPORARY, CREATE ON DATABASE "{database}" FROM PUBLIC' in statements
+    ), statements
+    for entry in manifest["schemas"]:
+        assert (
+            f'REVOKE CREATE ON SCHEMA "{entry["name"]}" FROM PUBLIC' in statements
+        ), statements
+    # PUBLIC 面只出現在 REVOKE;任何 GRANT ... TO PUBLIC 都是越界。
+    for statement in statements:
+        if "PUBLIC" in statement:
+            assert statement.startswith("REVOKE "), statement
+    # 該 REVOKE 必須排在角色 GRANT 之前(套用順序即語義)。
+    first_grant = next(
+        index for index, item in enumerate(statements) if item.startswith("GRANT")
+    )
+    first_public_revoke = next(
+        index for index, item in enumerate(statements) if "FROM PUBLIC" in item
+    )
+    assert first_public_revoke < first_grant
+
+
 def test_grant_sql_rejects_tampered_manifest() -> None:
     manifest = _load_manifest()
     manifest["role_name"] = "aiml_engine_scanner"

@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from copy import deepcopy
@@ -135,6 +136,76 @@ def test_partial_collision_still_writes_nothing(tmp_path) -> None:
     assert sorted(p.name for p in tmp_path.iterdir()) == [
         install.W0_DERIVATION_RECORD_FILENAME
     ]
+
+
+def test_publication_failure_leaves_no_partial_receipt_set(tmp_path, monkeypatch) -> None:
+    """P2-1:發佈途中失敗必須回滾整組——半套殘留會讓下一次重試把自己的殘骸當碰撞。
+
+    修前:逐檔依序寫入,第二個檔案的 I/O 失敗就留下第一個檔案;重試時 collision 檢查
+    看到它 → 拒絕 → 這條 lineage 再也發不出來(除非人手清理)。
+    """
+    import agent_governance_s2_4_emit_sink as sink
+
+    real_link = os.link
+    calls = {"count": 0}
+
+    def _failing_link(source, target, *args, **kwargs):
+        calls["count"] += 1
+        if calls["count"] == 2:  # 第二個 artifact 推上正位時裝置失敗
+            raise OSError(28, "No space left on device")
+        return real_link(source, target, *args, **kwargs)
+
+    monkeypatch.setattr(sink.os, "link", _failing_link)
+    result = install.emit_w0_receipts(
+        out_dir=tmp_path,
+        test_evidence=dict(_TEST_EVIDENCE),
+        review_provenance=[dict(item) for item in _REVIEW_PROVENANCE],
+    )
+    assert result["status"] == "W0_EMIT_REFUSED"
+    assert result["stage"] == "publication"
+    assert any("rolled back" in reason for reason in result["reasons"])
+    # 零殘留:既無 receipt、也無 staging/lock 檔
+    assert sorted(p.name for p in tmp_path.iterdir()) == []
+    # 復原:同一目錄下一次發射必須成功(不得把自己的殘骸看成碰撞)
+    monkeypatch.setattr(sink.os, "link", real_link)
+    recovered = install.emit_w0_receipts(
+        out_dir=tmp_path,
+        test_evidence=dict(_TEST_EVIDENCE),
+        review_provenance=[dict(item) for item in _REVIEW_PROVENANCE],
+    )
+    assert recovered["status"] == "W0_RECEIPTS_EMITTED"
+    assert (tmp_path / install.W0_ADMISSION_FILENAME).exists()
+
+
+def test_concurrent_emitters_are_serialized_by_an_exclusive_publication_lock(
+    tmp_path,
+) -> None:
+    """P2-1:分離的存在性檢查讓兩個並行發射器可以雙雙通過再交錯寫入。
+
+    獨佔建立的 lock 檔把發佈邊界串行化:第二個發射器拿不到 lock 即 typed 拒絕,
+    絕不與第一個交錯出兩條混合 lineage。
+    """
+    import agent_governance_s2_4_emit_sink as sink
+
+    held = tmp_path / sink.PUBLICATION_LOCK_NAME
+    held.write_text("31337\n", encoding="utf-8")  # 模擬另一個發射器持有中
+    blocked = install.emit_w0_receipts(
+        out_dir=tmp_path,
+        test_evidence=dict(_TEST_EVIDENCE),
+        review_provenance=[dict(item) for item in _REVIEW_PROVENANCE],
+    )
+    assert blocked["status"] == "W0_EMIT_REFUSED"
+    assert blocked["stage"] == "publication_lock"
+    assert sorted(p.name for p in tmp_path.iterdir()) == [sink.PUBLICATION_LOCK_NAME]
+    held.unlink()
+    released = install.emit_w0_receipts(
+        out_dir=tmp_path,
+        test_evidence=dict(_TEST_EVIDENCE),
+        review_provenance=[dict(item) for item in _REVIEW_PROVENANCE],
+    )
+    assert released["status"] == "W0_RECEIPTS_EMITTED"
+    # 發佈結束後 lock 必須被釋放(否則下一次發射永遠被自己擋住)
+    assert not held.exists()
 
 
 def test_cli_out_dir_is_constrained_to_the_repository_receipts_directory(

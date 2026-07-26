@@ -69,6 +69,10 @@ from aiml_gate_receipt_schema_core import (  # noqa: E402,F401
     canonical_digest,
     evidence_environment_identity_digest,
     landing_scope_identity_digest,
+    owned_path_blob_projection,
+    owned_path_blob_projection_digest,
+    owned_scope_worktree_delta,
+    resolve_commit_head,
     session_attempt_identity_digest,
 )
 from aiml_gate_receipt_classifiers import (  # noqa: E402,F401
@@ -387,23 +391,21 @@ def three_head_projection_digest(repo_root: Path = REPO_ROOT) -> str:
     })
 
 
-def w0_owned_path_diff_digest(repo_root: Path = REPO_ROOT) -> str:
+def w0_owned_path_diff_digest(
+    repo_root: Path = REPO_ROOT, *, source_head: str | None = None
+) -> str:
     """W0 owned-path 內容投影 digest(wave-exit owned_path_diff_digest 綁定的再導出;T1)。
 
-    對每個 W0 owned path 讀目前 checkout 的 blob sha256(缺檔記 None),故任一 owned 檔位元改動都會改變
-    此值——arbitrary/empty 值無法通過 W0 完成閘。與 owned_path_manifest_digest 同套 canonical_digest 機制,
-    只是綁「內容」而非「路徑集合」。此為 SOURCE-seam 內容綁定,非 runtime 認證。
+    P1-5(W2 review):每個 owned path 讀的是**被綁定 commit 的 blob**(預設 HEAD),
+    不是工作樹當下的位元組。舊機制 hash 髒 checkout:receipt 記未變的 HEAD、投影卻綁
+    髒位元組,驗證端 hash 同一棵髒樹照樣 PASS,而該 commit 的乾淨 checkout 重現不出
+    這份 receipt。改綁 commit blob 後,投影是該 commit 的函數(缺檔/非 blob 記 None),
+    任何世代 checkout 它都重算得出同值。此為 SOURCE-seam 內容綁定,非 runtime 認證。
     """
 
-    projection: dict[str, str | None] = {}
-    for rel in sorted(_W0_OWNED_PATHS):
-        try:
-            projection[rel] = "sha256:" + hashlib.sha256(
-                (repo_root / rel).read_bytes()
-            ).hexdigest()
-        except OSError:
-            projection[rel] = None
-    return canonical_digest(projection)
+    return owned_path_blob_projection_digest(
+        repo_root, _W0_OWNED_PATHS, source_head=source_head
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -515,18 +517,17 @@ def w1_exported_abi_projection(repo_root: Path = REPO_ROOT) -> dict[str, Any]:
     }
 
 
-def w1_owned_path_diff_digest(repo_root: Path = REPO_ROOT) -> str:
-    """W1 owned-path 內容投影 digest(同 :func:`w0_owned_path_diff_digest` 機制,綁 W1 面)。"""
+def w1_owned_path_diff_digest(
+    repo_root: Path = REPO_ROOT, *, source_head: str | None = None
+) -> str:
+    """W1 owned-path 內容投影 digest(同 :func:`w0_owned_path_diff_digest` 機制,綁 W1 面)。
 
-    projection: dict[str, str | None] = {}
-    for rel in sorted(_W1_OWNED_PATHS):
-        try:
-            projection[rel] = "sha256:" + hashlib.sha256(
-                (repo_root / rel).read_bytes()
-            ).hexdigest()
-        except OSError:
-            projection[rel] = None
-    return canonical_digest(projection)
+    P1-5:同樣綁 bound commit 的 blob——W0/W1/W2 三波共用同一把尺,無一例外。
+    """
+
+    return owned_path_blob_projection_digest(
+        repo_root, _W1_OWNED_PATHS, source_head=source_head
+    )
 
 
 def _trust_pin_errors(pins: Any, repo_root: Path) -> list[str]:

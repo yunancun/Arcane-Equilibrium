@@ -16,6 +16,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -259,18 +260,14 @@ def test_private_empty_evidence_directory_predicate(tmp_path) -> None:
 
 # ══════════════ base/launch manifest builders(§8.1 #2/#4)═════════════════════
 def _make_staging_tree(root: Path) -> None:
-    (root / "bin").mkdir(mode=0o755)
-    python3 = root / "bin/python3"
-    python3.write_bytes(b"#!/fake-interpreter\n")
-    os.chmod(python3, 0o555)
-    lib = root / "lib"
-    lib.mkdir(mode=0o755)
-    so_file = lib / "libssl.so.3"
-    so_file.write_bytes(b"native-bytes")
-    os.chmod(so_file, 0o555)
-    data = lib / "python312.txt"
-    data.write_bytes(b"stdlib-data")
-    os.chmod(data, 0o444)
+    """P1-2:hermetic 探針樹——interpreter 是真 ELF,PT_INTERP/DT_NEEDED 全在樹內閉合。
+
+    修前的夾具只是「名字像 .so 的隨機位元組」,builder 因此從未看過任何 loader 事實。
+    """
+    render.materialize_probe_runtime_tree(root)
+    extra = root / "lib/libssl.so.3"
+    extra.write_bytes(render.synthetic_probe_elf(soname="libssl.so.3"))
+    os.chmod(extra, 0o555)
 
 
 _BASE_KWARGS = {
@@ -288,10 +285,25 @@ def test_base_runtime_tree_manifest_builds_and_validates(tmp_path) -> None:
     assert validator.validate_aiml_artifact(manifest) == []
     assert result["base_runtime_tree_digest"] == manifest["self_digest"]
     assert manifest["interpreter_target"] == "bin/python3"
-    assert [item["path"] for item in manifest["native_libraries"]] == ["lib/libssl.so.3"]
+    assert [item["path"] for item in manifest["native_libraries"]] == [
+        "lib/ld-linux-x86-64.so.2",
+        "lib/libc.so.6",
+        "lib/libpython3.12.so.1.0",
+        "lib/libssl.so.3",
+    ]
     assert [entry["path"] for entry in manifest["entries"]] == sorted(
         entry["path"] for entry in manifest["entries"]
     )
+    # P1-2:loader 閉包綁的是真 ELF 事實(PT_INTERP/DT_NEEDED),不是副檔名清單。
+    closure = manifest["loader_closure"]
+    assert closure["derivation"] == "in_tree_elf_pt_interp_dt_needed_v1"
+    assert closure["external_dependencies"] == []
+    assert closure["undecidable_host_facts"], "未證的 host 事實必須被具名"
+    interpreter_record = next(
+        record for record in closure["binaries"] if record["path"] == "bin/python3"
+    )
+    assert interpreter_record["needed"] == ["libpython3.12.so.1.0", "libc.so.6"]
+    assert interpreter_record["interpreter"].endswith("/ld-linux-x86-64.so.2")
     # 同一樹重建 → digest 穩定(deterministic)。
     again = render.build_base_runtime_tree_manifest(tmp_path, **_BASE_KWARGS)
     assert again["base_runtime_tree_digest"] == result["base_runtime_tree_digest"]
@@ -345,47 +357,188 @@ def test_base_runtime_tree_builder_rejects_malformed_inputs(tmp_path) -> None:
 _LAUNCH_KWARGS = {
     "runtime_content_digest": "sha256:" + "e" * 64,
     "base_runtime_tree_digest": "sha256:" + "f" * 64,
-    "application_bundle_digest": "sha256:" + "c" * 64,
     "launcher_config_digest": "sha256:" + "1" * 64,
     "target_platform": "x86_64-unknown-linux-gnu",
 }
 
 
-def test_launch_bundle_manifest_builds_and_binds_independent_tree_digest(tmp_path) -> None:
+@pytest.fixture(scope="module")
+def application_package(tmp_path_factory) -> dict:
+    """自 bound commit blob 物化一棵**真的** application 包(P1-1 的被驗對象)。
+
+    位元組全部來自 HEAD 的 committed blob(與工作樹狀態無關),故其 §8.1 #3 身分是該
+    commit 的函數;launch builder 必須對這棵樹重算並與所給 digest 硬比對。
+    """
+    root = tmp_path_factory.mktemp("w2c-apps") / "package"
+    built = install.build_application_bundle_manifest(
+        materialize_root=root, require_clean_declared_paths=False
+    )
+    assert built["status"] == "BUILT", built
+    return {
+        "root": root,
+        "digest": built["application_bundle_digest"],
+        "head": built["source_head"],
+    }
+
+
+def _launch_kwargs(application_package: dict, **overrides) -> dict:
+    kwargs = {
+        **_LAUNCH_KWARGS,
+        "application_bundle_digest": application_package["digest"],
+        "application_root": application_package["root"],
+        "application_source_head": application_package["head"],
+    }
+    kwargs.update(overrides)
+    return kwargs
+
+
+def test_launch_bundle_manifest_builds_and_binds_independent_tree_digest(
+    tmp_path, application_package
+) -> None:
     _make_staging_tree(tmp_path)
-    result = render.build_launch_bundle_manifest(tmp_path, **_LAUNCH_KWARGS)
+    result = render.build_launch_bundle_manifest(
+        tmp_path, **_launch_kwargs(application_package)
+    )
     assert result["status"] == "BUILT", result
     manifest = result["manifest"]
     assert validator.validate_aiml_artifact(manifest) == []
     assert result["launch_bundle_digest"] == manifest["self_digest"]
     # launch 葉名 = digest 的 64-hex(W2b verify_launch_prefix 契約)。
     assert result["launch_leaf_name"] == manifest["self_digest"].split(":", 1)[1]
+    # P1-1:發出的 launch 身分綁的是「真的被物化的那個包」的重算身分與其 source head。
+    assert result["verified_application_bundle_digest"] == application_package["digest"]
+    assert manifest["application_source_head"] == application_package["head"]
     # 提供樹改變 → launch_tree_digest / launch_bundle_digest 都變(獨立 hash 綁樹)。
     extra = tmp_path / "lib/site.txt"
     extra.write_bytes(b"more")
     os.chmod(extra, 0o444)
-    changed = render.build_launch_bundle_manifest(tmp_path, **_LAUNCH_KWARGS)
+    changed = render.build_launch_bundle_manifest(
+        tmp_path, **_launch_kwargs(application_package)
+    )
     assert changed["launch_tree_digest"] != result["launch_tree_digest"]
     assert changed["launch_bundle_digest"] != result["launch_bundle_digest"]
 
 
-def test_launch_bundle_builder_rejects_bad_digests_and_hostile_tree(tmp_path) -> None:
+def test_launch_builder_refuses_an_unbound_application_digest(
+    tmp_path, application_package
+) -> None:
+    """P1-1:語法正確但與被物化包無關的 digest 必須被拒(舊碼原樣收下)。
+
+    修前:builder 只驗 digest 的**字串形狀**,materialized launch tree 只需含 bin/python3。
+    於是一份「BUILT」的 launch manifest 可以宣稱一個從未被審查、甚至不存在的 application
+    包;之後信任該 manifest 的 installer 會發佈一個缺包、或執行不同位元組的 launch。
+    """
+    _make_staging_tree(tmp_path)
+    foreign = render.build_launch_bundle_manifest(
+        tmp_path,
+        **_launch_kwargs(application_package, application_bundle_digest="sha256:" + "9" * 64),
+    )
+    assert foreign["status"] == "LAUNCH_BUNDLE_INVALID"
+    assert any(
+        "does not verify against application_bundle_digest" in reason
+        for reason in foreign["reasons"]
+    )
+    assert "manifest" not in foreign
+    # 包被改一個位元組(digest 仍是原值)→ 同樣拒絕:綁的是位元組不是宣告。
+    tampered_root = tmp_path / "tampered-package"
+    shutil.copytree(application_package["root"], tampered_root)
+    victim = tampered_root / "program_code/ml_training/alr_application_identity.py"
+    victim.chmod(0o644)
+    victim.write_bytes(victim.read_bytes() + b"\n# retargeted\n")
+    victim.chmod(0o444)
+    retargeted = render.build_launch_bundle_manifest(
+        tmp_path, **_launch_kwargs(application_package, application_root=tampered_root)
+    )
+    assert retargeted["status"] == "LAUNCH_BUNDLE_INVALID"
+    assert any(
+        "application_bundle_digest_mismatch" in reason for reason in retargeted["reasons"]
+    )
+
+
+def test_launch_bundle_builder_rejects_bad_digests_and_hostile_tree(
+    tmp_path, application_package
+) -> None:
     _make_staging_tree(tmp_path)
     bad = render.build_launch_bundle_manifest(
-        tmp_path, **{**_LAUNCH_KWARGS, "base_runtime_tree_digest": "nope"}
+        tmp_path, **_launch_kwargs(application_package, base_runtime_tree_digest="nope")
     )
     assert bad["status"] == "LAUNCH_BUNDLE_INVALID"
     assert any("base_runtime_tree_digest" in r for r in bad["reasons"])
     (tmp_path / "bin/python3").unlink()
-    no_interp = render.build_launch_bundle_manifest(tmp_path, **_LAUNCH_KWARGS)
+    no_interp = render.build_launch_bundle_manifest(
+        tmp_path, **_launch_kwargs(application_package)
+    )
     assert no_interp["status"] == "LAUNCH_BUNDLE_INVALID"
     assert any("bin/python3" in r for r in no_interp["reasons"])
 
 
-def test_manifest_tamper_is_rejected_by_the_central_gate(tmp_path) -> None:
+def test_non_hermetic_loader_closure_is_refused_by_both_builders(tmp_path) -> None:
+    """P1-2:任一 DT_NEEDED / PT_INTERP 解析到樹外 = host libc/loader 決定執行的機器碼。
+
+    修前:只有「檔名像 .so/.dylib」的樹內檔案被列入 native_libraries,外部 ELF loader、
+    DT_NEEDED realpath/位元組、套件身分與 loader 搜尋狀態一概不綁——host 一漂移,同一個
+    base_runtime_tree_digest 之下執行的就是別的機器碼。修後:閉包外洩即 typed 拒絕。
+    """
+    _make_staging_tree(tmp_path)
+    escaping = tmp_path / "bin/python3"
+    escaping.chmod(0o755)
+    escaping.write_bytes(
+        render.synthetic_probe_elf(
+            needed=("libc.so.6", "libcrypt.so.1"),  # libcrypt 只有 host 有
+            interpreter=render.PROBE_INTERPRETER_PATH,
+        )
+    )
+    escaping.chmod(0o555)
+    base = render.build_base_runtime_tree_manifest(tmp_path, **_BASE_KWARGS)
+    assert base["status"] == "BASE_RUNTIME_TREE_INVALID"
+    assert any(
+        "loader closure escapes the tree" in reason and "libcrypt.so.1" in reason
+        for reason in base["reasons"]
+    ), base["reasons"]
+    assert "manifest" not in base
+    digest, reasons = render.launch_tree_walk_digest(tmp_path)
+    assert digest is None
+    assert any("loader closure escapes the tree" in reason for reason in reasons)
+
+
+def test_host_loader_interpreter_is_refused(tmp_path) -> None:
+    """P1-2:PT_INTERP 指向 host 的 ld-linux(樹內無該檔)= 非 hermetic → typed 拒絕。"""
+    _make_staging_tree(tmp_path)
+    interpreter = tmp_path / "bin/python3"
+    interpreter.chmod(0o755)
+    interpreter.write_bytes(
+        render.synthetic_probe_elf(
+            needed=("libc.so.6",), interpreter="/lib64/ld-linux-x86-64.so.99"
+        )
+    )
+    interpreter.chmod(0o555)
+    result = render.build_base_runtime_tree_manifest(tmp_path, **_BASE_KWARGS)
+    assert result["status"] == "BASE_RUNTIME_TREE_INVALID"
+    assert any("PT_INTERP" in reason for reason in result["reasons"]), result["reasons"]
+
+
+def test_opaque_interpreter_bytes_are_refused(tmp_path) -> None:
+    """P1-2:interpreter 不是可解析的原生執行檔 → 無法導出其 loader 閉包 → 拒絕。"""
+    _make_staging_tree(tmp_path)
+    fake = tmp_path / "bin/python3"
+    fake.chmod(0o755)
+    fake.write_bytes(b"#!/fake-interpreter\n")  # 修前的夾具形狀
+    fake.chmod(0o555)
+    result = render.build_base_runtime_tree_manifest(tmp_path, **_BASE_KWARGS)
+    assert result["status"] == "BASE_RUNTIME_TREE_INVALID"
+    assert any(
+        "not a parsable native executable" in reason for reason in result["reasons"]
+    ), result["reasons"]
+
+
+def test_manifest_tamper_is_rejected_by_the_central_gate(
+    tmp_path, application_package
+) -> None:
     _make_staging_tree(tmp_path)
     base = render.build_base_runtime_tree_manifest(tmp_path, **_BASE_KWARGS)["manifest"]
-    launch = render.build_launch_bundle_manifest(tmp_path, **_LAUNCH_KWARGS)["manifest"]
+    launch = render.build_launch_bundle_manifest(
+        tmp_path, **_launch_kwargs(application_package)
+    )["manifest"]
     for manifest, field, value in (
         (base, "runtime_content_digest", "sha256:" + "0" * 64),
         (launch, "application_bundle_digest", "sha256:" + "0" * 64),

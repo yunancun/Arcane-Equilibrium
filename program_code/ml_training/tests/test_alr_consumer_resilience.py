@@ -34,6 +34,24 @@ from ml_training.alr_candidate_board_events import AlrEventConsumerError  # noqa
 from ml_training.aiml_gate_receipt_schema_core import resolve_facade  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _simulate_guard_host_ownership(monkeypatch: pytest.MonkeyPatch) -> None:
+    """P2-4:在無 root 的 checkout 上模擬 guard 的真實 host 佈署身分。
+
+    唯一被替換的是「讀 host 身分事實」那條縫(:func:`guard_host_identity`);判定邏輯
+    (mode 恰 0440 / owner uid 0 / group aiml-engine-scanner)一律照真跑,故本 fixture
+    無法放行任何不符姿態——drift 的專屬測試自行覆寫本縫以證明它會拒。
+    """
+    monkeypatch.setattr(
+        app_identity,
+        "guard_host_identity",
+        lambda st: (
+            app_identity.TOPOLOGY_GUARD_REQUIRED_OWNER_UID,
+            app_identity.TOPOLOGY_GUARD_REQUIRED_GROUP,
+        ),
+    )
+
+
 class _FakeDiagnostics:
     """psycopg2 的 ``error.diag``(只帶本模組會讀到的欄位)。"""
 
@@ -422,6 +440,9 @@ def test_two_hundred_outages_accumulate_no_tasks_rows_or_memory() -> None:
         "consecutive_failures",
         "connections_opened",
         "lock_busy_reconnect_retries",
+        # P2-3:復原記帳同為純量(次數 + 上一條 session 秒數),不改變有界形狀。
+        "healthy_recoveries",
+        "last_session_seconds",
         "last_backoff_seconds",
         "total_backoff_seconds",
     }
@@ -548,6 +569,81 @@ def test_lock_busy_after_a_reconnect_goes_through_bounded_backoff() -> None:
     assert outcome["telemetry"]["lock_busy_reconnect_retries"] == 2
 
 
+def test_backoff_streak_resets_after_a_demonstrably_stable_session() -> None:
+    """P2-3:相隔數小時的兩次孤立停機,不得被累加成同一條失敗串。
+
+    修前:``consecutive_failures`` 只在 run_session **正常回傳**時歸零,而 production
+    常駐 session 一路跑到下一次斷線才拋 → 第二次孤立停機從 n=2 起算,長此以往每次孤立
+    停機都吃滿 300 秒。修後:活過一個 heartbeat 週期的 session 即記一次 healthy
+    recovery,連續串歸零(累計 transient 計數保留)。
+    """
+    slept: list[float] = []
+    clock = {"now": 0.0}
+    attempts = {"count": 0}
+    state = resilience.ResidentConsumerState()
+
+    def run_session(connection: str) -> dict[str, int]:
+        attempts["count"] += 1
+        if attempts["count"] <= 2:
+            # 兩次「連上就斷」:同一串,退避 5 → 10
+            clock["now"] += 1.0
+            raise _FakeOperationalError("server closed the connection unexpectedly")
+        if attempts["count"] == 3:
+            # 一條真的活了四小時的 session,之後才斷 → 這是復原後的新一次停機
+            clock["now"] += 4 * 3600.0
+            raise _FakeOperationalError("server closed the connection unexpectedly")
+        return {"drains": 1}
+
+    outcome = resilience.run_resident_db_sessions(
+        open_connection=lambda: "conn",
+        run_session=run_session,
+        close_connection=lambda connection: None,
+        should_stop=lambda: False,
+        sleep=slept.append,
+        jitter=lambda: 1.0,
+        state=state,
+        monotonic=lambda: clock["now"],
+    )
+    assert outcome["status"] == "SESSION_COMPLETED"
+    # 第三次停機的退避回到下限,而不是 20.0(修前的累加值)
+    assert slept == [5.0, 10.0, 5.0]
+    assert state.healthy_recoveries == 1
+    assert state.last_session_seconds == pytest.approx(4 * 3600.0)
+    # 累計失敗計數保留(復原不抹掉歷史),只有「連續」串被重設
+    assert state.transient_failures == 3
+    assert outcome["telemetry"]["healthy_recoveries"] == 1
+    assert outcome["telemetry"]["transient_failures"] == 3
+
+
+def test_short_lived_sessions_never_count_as_a_recovery() -> None:
+    """反向硬邊界:撐不過一個 heartbeat 週期的 session 不算復原,退避必須繼續升。"""
+    slept: list[float] = []
+    clock = {"now": 0.0}
+    outage = {"remaining": 4}
+
+    def run_session(connection: str) -> dict[str, int]:
+        if outage["remaining"] > 0:
+            outage["remaining"] -= 1
+            # 差一秒到門檻:仍屬同一條失敗串
+            clock["now"] += resilience.RECONNECT_HEALTHY_SESSION_SECONDS - 1.0
+            raise _FakeOperationalError("server closed the connection unexpectedly")
+        return {"drains": 0}
+
+    state = resilience.ResidentConsumerState()
+    resilience.run_resident_db_sessions(
+        open_connection=lambda: "conn",
+        run_session=run_session,
+        close_connection=lambda connection: None,
+        should_stop=lambda: False,
+        sleep=slept.append,
+        jitter=lambda: 1.0,
+        state=state,
+        monotonic=lambda: clock["now"],
+    )
+    assert slept == [5.0, 10.0, 20.0, 40.0]
+    assert state.healthy_recoveries == 0
+
+
 def test_lock_busy_predicate_matches_the_code_the_consumer_actually_raises() -> None:
     """防漂移:謂詞比對的字串必須就是 consumer 那一行 raise 的 typed code。"""
     source = (
@@ -606,6 +702,9 @@ def _write_guard(tmp_path: Path, *, row: dict | None = None, **overrides) -> Pat
     guard["self_digest"] = facade.artifact_self_digest(guard)
     path = tmp_path / "topology-runtime-guard.json"
     path.write_text(json.dumps(guard, sort_keys=True), encoding="utf-8")
+    # P2-4:guard 的 host 姿態契約(root:aiml-engine-scanner 0440)是可執行閘;
+    # mode 在此為真,owner/group 由 autouse fixture 在無 root 的 checkout 上模擬。
+    os.chmod(path, 0o440)
     return path
 
 
@@ -617,6 +716,8 @@ class _IdentityConnection:
             "connected_user": "aiml_engine_scanner",
             "connected_database": "trading_ai",
             "server_version_num": "160004",
+            # P1-4:在帶身分閘讀的第四欄——連線期錯誤分類的語言前提。
+            "lc_messages": resilience.REQUIRED_LC_MESSAGES,
         }
         self.rows = rows if rows is not None else [dict(_ROW)]
         self.executed: list[str] = []
@@ -801,16 +902,19 @@ def test_connected_user_database_and_version_are_compared(tmp_path: Path) -> Non
             "connected_user": "alr_shadow",
             "connected_database": "trading_ai",
             "server_version_num": "160004",
+            "lc_messages": "C",
         },
         "cluster_identity_database_mismatch": {
             "connected_user": "aiml_engine_scanner",
             "connected_database": "postgres",
             "server_version_num": "160004",
+            "lc_messages": "C",
         },
         "cluster_identity_server_version_mismatch": {
             "connected_user": "aiml_engine_scanner",
             "connected_database": "trading_ai",
             "server_version_num": "150009",
+            "lc_messages": "C",
         },
     }
     for expected, connected in cases.items():
@@ -822,11 +926,67 @@ def test_connected_user_database_and_version_are_compared(tmp_path: Path) -> Non
             )
 
 
+def test_non_english_server_messages_are_a_permanent_topology_failure(
+    tmp_path: Path,
+) -> None:
+    """P1-4:連線期 permanent 失敗的判別材料是 server 文本,文本語言由 lc_messages 決定。
+
+    修前:production topology 契約完全不綁該設定,只有 disposable fixture 恰好設了
+    ``lc_messages='C'``。在一台 lc_messages 非英文的 server 上,認證/HBA/缺 role/缺 DB
+    的 FATAL 文本一條都不匹配 → 全被判成 transient → 常駐行程永遠重試,operator 永遠
+    等不到 exit 78。修後:在帶身分閘每次(重)連線都硬比對該設定,不符即 permanent。
+    """
+    guard_path = _write_guard(tmp_path)
+    localized = _IdentityConnection(
+        connected={
+            "connected_user": "aiml_engine_scanner",
+            "connected_database": "trading_ai",
+            "server_version_num": "160004",
+            "lc_messages": "fr_FR.UTF-8",
+        }
+    )
+    with pytest.raises(
+        resilience.AlrRuntimeIdentityError, match="cluster_identity_lc_messages_mismatch"
+    ) as failure:
+        resilience.verify_connected_cluster_identity(
+            localized, topology_guard_file=guard_path, dsn_identity=_DSN_IDENTITY
+        )
+    # permanent → production main 以 exit 78 收場(絕不無限重試)
+    assert app_identity.is_permanent_pre_db_error(failure.value)
+    assert not resilience.is_transient_db_availability_error(failure.value)
+    # 該設定真的被讀了(SQL 面而非宣告面)
+    assert any("lc_messages" in sql for sql in localized.executed)
+    # 且相符時照常放行
+    check = resilience.verify_connected_cluster_identity(
+        _IdentityConnection(), topology_guard_file=guard_path, dsn_identity=_DSN_IDENTITY
+    )
+    assert check["lc_messages"] == resilience.REQUIRED_LC_MESSAGES
+
+
+def test_connect_error_locale_contract_states_its_unverifiable_residue() -> None:
+    """P1-4:契約必須同時宣告可執行面與**誠實的**未證面(不得靜默放行)。"""
+    contract = resilience.derive_connect_error_locale_contract()
+    assert contract["required_lc_messages"] == "C"
+    assert contract["mismatch_verdict"] == "cluster_identity_lc_messages_mismatch"
+    assert contract["mismatch_disposition"] == "permanent_config_exit_78"
+    # 首次成功連線之前的連線期失敗:client 端無 SQLSTATE、無經證實的語言 → typed 未證,
+    # 留在 transient(§8.3 禁止把可恢復停機鎖成永久 78),但必須具名。
+    assert (
+        contract["unverifiable_before_first_gate"]
+        == resilience.CONNECT_ERROR_LOCALE_UNVERIFIED_CODE
+    )
+    assert contract["unverifiable_disposition"] == "transient_bounded_retry"
+    assert contract["runtime_contact"] is False
+    assert contract["message_fingerprint_count"] >= 8
+
+
 def test_tampered_guard_file_is_refused_on_every_reconnect(tmp_path: Path) -> None:
     guard_path = _write_guard(tmp_path)
     guard = json.loads(guard_path.read_text(encoding="utf-8"))
     guard["database_oid"] = 12345  # 未重簽 self_digest
+    os.chmod(guard_path, 0o640)  # 竄改者先放寬 mode 才寫得進去
     guard_path.write_text(json.dumps(guard, sort_keys=True), encoding="utf-8")
+    os.chmod(guard_path, 0o440)  # 再改回契約 mode:內容仍被 self-digest 驗抓
     with pytest.raises(resilience.AlrRuntimeIdentityError, match="topology_guard_"):
         resilience.verify_connected_cluster_identity(
             _IdentityConnection(), topology_guard_file=guard_path
@@ -1378,6 +1538,7 @@ def test_failing_rollback_never_downgrades_a_permanent_identity_mismatch(
             "connected_user": "aiml_engine_scanner",
             "connected_database": "postgres",  # 身分不符 → permanent
             "server_version_num": "160004",
+            "lc_messages": "C",
         }
     )
     with pytest.raises(

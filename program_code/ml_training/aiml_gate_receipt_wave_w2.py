@@ -36,7 +36,12 @@ _PROGRAM_CODE_DIR = REPO_ROOT / "program_code"
 if str(_PROGRAM_CODE_DIR) not in sys.path:
     sys.path.insert(0, str(_PROGRAM_CODE_DIR))
 
-from aiml_gate_receipt_schema_core import canonical_digest, resolve_facade  # noqa: E402
+from aiml_gate_receipt_schema_core import (  # noqa: E402
+    canonical_digest,
+    owned_path_blob_projection_digest,
+    owned_scope_worktree_delta,
+    resolve_facade,
+)
 
 # §10.1/§10.3:W2a+W2b+W2c 三片的 owned-path 投影(wave-exit owned_path_manifest_digest
 # 與 owned_path_diff_digest 綁定;每一路徑必須真實存在,診斷測試釘死)。
@@ -105,6 +110,9 @@ _W2_EXPORTED_ABI = {
         "agent_governance_s2_4_render.build_base_runtime_tree_manifest"
     ),
     "launch_bundle_builder": "agent_governance_s2_4_render.build_launch_bundle_manifest",
+    "application_bundle_builder": (
+        "agent_governance_s2_4_install.build_application_bundle_manifest"
+    ),
     "launch_leaf_contract": "launches/<64-hex launch_bundle_digest leaf>",
     # D1/D2:§8.3 consumer 側兩個 code-owned 契約的**名稱**面(值面在 live 折入)。
     "cluster_identity_relation": (
@@ -141,6 +149,112 @@ def _file_sha256(path: Path) -> str | None:
         return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
     except OSError:
         return None
+
+
+# --------------------------------------------------------------------------- #
+# P1-6(W2 review)builder 活探針:舊 ABI 只以**硬編字串**代表 base/launch builder、
+# 完全漏掉 application-bundle builder,而 w2_structural_errors 一個都沒執行過。後果:
+# 把三個 builder 改壞或整個刪掉,只會改變 owned-byte digest——重發一份新 receipt 之後
+# 照樣再導出 PASS。此處對三者各跑一次 deterministic 的真呼叫,並要求輸出**互相自洽**:
+#   * base:code-owned hermetic 探針樹 → BUILT,self_digest == base_runtime_tree_digest;
+#   * application:bound commit blob → BUILT,self_digest == application_bundle_digest,
+#     並物化成一棵真的 application 樹;
+#   * launch:同一棵探針樹 + 上面那棵**已物化**的 application 樹 → BUILT,且其綁定的
+#     application digest 必須等於 application builder 給出的那一個;
+#   * 反向:同一次呼叫換成一個語法正確但**無關**的 application digest 必須被拒
+#     (P1-1 的綁定是活的,不是宣告)。
+# 任一例外一律 fail-closed 記 None/非 BUILT → 投影變值 + 結構層顯式 reason。
+# --------------------------------------------------------------------------- #
+_PROBE_RUNTIME_CONTENT_DIGEST = "sha256:" + "4" * 64
+_PROBE_LAUNCHER_CONFIG_DIGEST = "sha256:" + "5" * 64
+_PROBE_FOREIGN_APPLICATION_DIGEST = "sha256:" + "6" * 64
+_PROBE_TARGET_PLATFORM = "x86_64-unknown-linux-gnu"
+_PROBE_BUILD_TOOL_VERSIONS = {"python3": "3.12.3", "uv": "0.5.0"}
+
+
+def _builder_probe(repo_root: Path) -> dict[str, Any]:
+    """三個 §8.1 builder 的活再導出(全部在 tmp 目錄;零生產路徑、零網路)。"""
+    import tempfile
+
+    import agent_governance_s2_4_install as _install
+    import agent_governance_s2_4_render as _render
+
+    probe: dict[str, Any] = {
+        "base_runtime_tree_status": None,
+        "base_runtime_tree_probe_digest": None,
+        "application_bundle_status": None,
+        "application_bundle_probe_digest": None,
+        "application_bundle_worktree_delta": None,
+        "launch_bundle_status": None,
+        "launch_bundle_probe_digest": None,
+        "launch_binds_probed_application": None,
+        "launch_foreign_application_digest_status": None,
+    }
+    with tempfile.TemporaryDirectory(prefix="aiml-w2-builder-probe-") as scratch:
+        staging = Path(scratch) / "staging"
+        application_root = Path(scratch) / "apps" / "probe"
+        _render.materialize_probe_runtime_tree(staging)
+        base = _render.build_base_runtime_tree_manifest(
+            staging,
+            runtime_content_digest=_PROBE_RUNTIME_CONTENT_DIGEST,
+            platform=_PROBE_TARGET_PLATFORM,
+            build_tool_versions=dict(_PROBE_BUILD_TOOL_VERSIONS),
+        )
+        probe["base_runtime_tree_status"] = base["status"]
+        if base["status"] != "BUILT" or base["manifest"]["self_digest"] != base.get(
+            "base_runtime_tree_digest"
+        ):
+            return probe
+        probe["base_runtime_tree_probe_digest"] = base["base_runtime_tree_digest"]
+
+        bundle = _install.build_application_bundle_manifest(
+            repo_root,
+            materialize_root=application_root,
+            require_clean_declared_paths=False,
+        )
+        probe["application_bundle_status"] = bundle["status"]
+        if bundle["status"] != "BUILT" or bundle["manifest"]["self_digest"] != bundle.get(
+            "application_bundle_digest"
+        ):
+            return probe
+        probe["application_bundle_probe_digest"] = bundle["application_bundle_digest"]
+        probe["application_bundle_worktree_delta"] = list(
+            bundle["declared_paths_worktree_delta"]
+        )
+
+        launch = _render.build_launch_bundle_manifest(
+            staging,
+            runtime_content_digest=_PROBE_RUNTIME_CONTENT_DIGEST,
+            base_runtime_tree_digest=base["base_runtime_tree_digest"],
+            application_bundle_digest=bundle["application_bundle_digest"],
+            launcher_config_digest=_PROBE_LAUNCHER_CONFIG_DIGEST,
+            target_platform=_PROBE_TARGET_PLATFORM,
+            application_root=application_root,
+            application_source_head=bundle["source_head"],
+        )
+        probe["launch_bundle_status"] = launch["status"]
+        if launch["status"] == "BUILT":
+            probe["launch_bundle_probe_digest"] = launch["launch_bundle_digest"]
+            probe["launch_binds_probed_application"] = bool(
+                launch["manifest"]["application_bundle_digest"]
+                == bundle["application_bundle_digest"]
+                and launch["verified_application_bundle_digest"]
+                == bundle["application_bundle_digest"]
+                and launch["manifest"]["base_runtime_tree_digest"]
+                == base["base_runtime_tree_digest"]
+            )
+        foreign = _render.build_launch_bundle_manifest(
+            staging,
+            runtime_content_digest=_PROBE_RUNTIME_CONTENT_DIGEST,
+            base_runtime_tree_digest=base["base_runtime_tree_digest"],
+            application_bundle_digest=_PROBE_FOREIGN_APPLICATION_DIGEST,
+            launcher_config_digest=_PROBE_LAUNCHER_CONFIG_DIGEST,
+            target_platform=_PROBE_TARGET_PLATFORM,
+            application_root=application_root,
+            application_source_head=bundle["source_head"],
+        )
+        probe["launch_foreign_application_digest_status"] = foreign["status"]
+    return probe
 
 
 def w2_exported_abi_projection(repo_root: Path = REPO_ROOT) -> dict[str, Any]:
@@ -204,12 +318,39 @@ def w2_exported_abi_projection(repo_root: Path = REPO_ROOT) -> dict[str, Any]:
         liveness_contract_digest = canonical_digest(
             _resilience.derive_consumer_liveness_contract()
         )
+        # P1-4:連線期錯誤分類的 locale 契約(值面折入 → 設定/名單漂移即 receipt 可見)。
+        connect_locale_contract_digest = canonical_digest(
+            _resilience.derive_connect_error_locale_contract()
+        )
     except Exception:  # noqa: BLE001 - 任何逸出 = fail-closed 未證
         identity_columns_digest = None
         identity_relation_name = None
         liveness_contract_digest = None
+        connect_locale_contract_digest = None
+    try:
+        builder_probe = _builder_probe(repo_root)
+    except Exception:  # noqa: BLE001 - 任何逸出 = fail-closed 未證
+        builder_probe = {
+            "base_runtime_tree_status": None,
+            "base_runtime_tree_probe_digest": None,
+            "application_bundle_status": None,
+            "application_bundle_probe_digest": None,
+            "application_bundle_worktree_delta": None,
+            "launch_bundle_status": None,
+            "launch_bundle_probe_digest": None,
+            "launch_binds_probed_application": None,
+            "launch_foreign_application_digest_status": None,
+        }
     return {
         **_W2_EXPORTED_ABI,
+        **builder_probe,
+        "connect_error_locale_contract_digest": connect_locale_contract_digest,
+        # P1-5 可見性:owned 投影已改綁 commit blob(髒工作樹不再污染任何 digest),
+        # 但「這份 receipt 是從一棵髒 owned scope 發射的」本身是事實 → 折入投影,受
+        # exported_abi_digest 綁定,乾淨 checkout 重驗時一眼可見,而不是靜默。
+        "owned_scope_worktree_delta": owned_scope_worktree_delta(
+            repo_root, _W2_OWNED_PATHS
+        ),
         "cluster_identity_relation_name": identity_relation_name,
         "cluster_identity_columns_digest": identity_columns_digest,
         "consumer_liveness_contract_digest": liveness_contract_digest,
@@ -228,12 +369,17 @@ def w2_exported_abi_projection(repo_root: Path = REPO_ROOT) -> dict[str, Any]:
     }
 
 
-def w2_owned_path_diff_digest(repo_root: Path = REPO_ROOT) -> str:
-    """W2 owned-path 內容投影 digest(同 W0/W1 機制,綁 W2 面;缺檔記 None)。"""
-    projection: dict[str, str | None] = {}
-    for rel in sorted(_W2_OWNED_PATHS):
-        projection[rel] = _file_sha256(repo_root / rel)
-    return canonical_digest(projection)
+def w2_owned_path_diff_digest(
+    repo_root: Path = REPO_ROOT, *, source_head: str | None = None
+) -> str:
+    """W2 owned-path 內容投影 digest(同 W0/W1 機制,綁 W2 面)。
+
+    P1-5(W2 review):讀的是**被綁定 commit 的 blob**,不是工作樹位元組——髒 checkout
+    再也無法讓一份「宣稱乾淨 HEAD」的 receipt 在驗證時自我對上(缺檔/非 blob 記 None)。
+    """
+    return owned_path_blob_projection_digest(
+        repo_root, _W2_OWNED_PATHS, source_head=source_head
+    )
 
 
 def w2_structural_errors(receipt: dict[str, Any], repo_root: Path = REPO_ROOT) -> list[str]:
@@ -281,6 +427,37 @@ def w2_structural_errors(receipt: dict[str, Any], repo_root: Path = REPO_ROOT) -
         )
     if projection["consumer_liveness_contract_digest"] is None:
         reasons.append("W2 consumer liveness/staleness contract cannot be re-derived")
+    if projection["connect_error_locale_contract_digest"] is None:
+        reasons.append("W2 connect-error locale contract cannot be re-derived")
+    # P1-6:三個 §8.1 builder 必須在當前 checkout 上真的跑出自洽輸出(硬編字串不算)。
+    for field, label in (
+        ("base_runtime_tree_status", "base runtime tree builder"),
+        ("application_bundle_status", "application bundle builder"),
+        ("launch_bundle_status", "launch bundle builder"),
+    ):
+        if projection[field] != "BUILT":
+            reasons.append(
+                f"W2 {label} does not re-derive BUILT on the current checkout "
+                f"(status={projection[field]})"
+            )
+    for field, label in (
+        ("base_runtime_tree_probe_digest", "base runtime tree"),
+        ("application_bundle_probe_digest", "application bundle"),
+        ("launch_bundle_probe_digest", "launch bundle"),
+    ):
+        if projection[field] is None:
+            reasons.append(f"W2 {label} builder probe digest cannot be re-derived")
+    if projection["launch_binds_probed_application"] is not True:
+        reasons.append(
+            "W2 launch bundle manifest does not bind the probed application/base "
+            "identities (application bytes are not bound to the launch identity)"
+        )
+    if projection["launch_foreign_application_digest_status"] != "LAUNCH_BUNDLE_INVALID":
+        reasons.append(
+            "W2 launch bundle builder accepts an unrelated application_bundle_digest "
+            "(the materialized application package is not verified before the launch "
+            "identity is emitted)"
+        )
     if receipt.get("owned_path_manifest_digest") != canonical_digest(sorted(_W2_OWNED_PATHS)):
         reasons.append("wave-exit owned_path_manifest_digest is not the exact W2 owned-path set")
     if receipt.get("owned_path_diff_digest") != w2_owned_path_diff_digest(repo_root):
@@ -357,4 +534,31 @@ def w2_manifest_artifact_errors(schema_version: str, artifact: dict[str, Any]) -
             for entry in artifact["entries"]
         ):
             errors.append("base runtime tree interpreter_target is absent from the entries")
+        # P1-2:loader 閉包必須排序唯一、綁到樹內既有檔案,且 interpreter 本身在閉包內。
+        closure = artifact["loader_closure"]
+        binary_paths = [record["path"] for record in closure["binaries"]]
+        if binary_paths != sorted(binary_paths) or len(binary_paths) != len(
+            set(binary_paths)
+        ):
+            errors.append("base runtime tree loader_closure binaries must be sorted and unique")
+        entry_paths = {
+            entry["path"] for entry in artifact["entries"] if entry["type"] == "file"
+        }
+        if not set(binary_paths) <= entry_paths:
+            errors.append("base runtime tree loader_closure binds a path outside the entries")
+        if artifact["interpreter_target"] not in set(binary_paths):
+            errors.append(
+                "base runtime tree loader_closure does not cover the interpreter target"
+            )
+        provided = set()
+        for record in closure["binaries"]:
+            provided.add(record["path"].rsplit("/", 1)[-1])
+            if record["soname"]:
+                provided.add(record["soname"])
+        for record in closure["binaries"]:
+            if not set(record["needed"]) <= provided:
+                errors.append(
+                    "base runtime tree loader_closure has unresolved DT_NEEDED entries"
+                )
+                break
     return errors

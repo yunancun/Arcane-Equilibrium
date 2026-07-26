@@ -22,6 +22,7 @@ from __future__ import annotations
 import math
 import random
 import re
+import time
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -35,6 +36,12 @@ from ml_training.alr_application_identity import (
 # §8.3:退避值域硬邊界(jitter 後仍必須落在 [5,300])。
 RECONNECT_MIN_BACKOFF_SECONDS = 5.0
 RECONNECT_MAX_BACKOFF_SECONDS = 300.0
+# P2-3(W2 review):一條**已證穩定**的 session(自連線建立起活過至少一個 heartbeat 週期,
+# 即 300 秒)結束於斷線時,那是「復原後的新一次停機」,不是同一條失敗串的延續。舊碼只在
+# run_session 正常回傳(收到停機訊號)時重設 consecutive_failures,而 production 常駐
+# session 一路跑到下一次斷線才拋——於是相隔數小時的孤立停機被累加成同一串,每一次孤立
+# 停機最終都吃滿 300 秒。此門檻之上即重設「連續」計數,累計計數(transient_failures)保留。
+RECONNECT_HEALTHY_SESSION_SECONDS = 300.0
 _BACKOFF_BASE = 2.0
 # 2**32 已遠超 300s 天花板;夾住指數避免 float overflow(長時間停機下 n 可以很大)。
 _BACKOFF_MAX_EXPONENT = 32
@@ -59,8 +66,22 @@ _CLUSTER_IDENTITY_SQL = (
 )
 _CONNECTED_IDENTITY_SQL = (
     "SELECT current_user AS connected_user, current_database() AS connected_database, "
-    "current_setting('server_version_num') AS server_version_num"
+    "current_setting('server_version_num') AS server_version_num, "
+    "current_setting('lc_messages') AS lc_messages"
 )
+# P1-4(W2 review):連線期失敗**沒有 SQLSTATE**(見下方 F1),唯一可判的是 server 的
+# FATAL 文本;而該文本是被 ``lc_messages`` 在地化的。若 server 的 lc_messages 不是 C/英文,
+# 認證/pg_hba/缺 role/缺 DB 這些 permanent 失敗一條都不匹配 → 被判成 transient → 常駐行程
+# 永遠重試、operator 永遠等不到 exit 78。故把該設定綁進**可執行的** topology 契約:每一次
+# (重)連線的在帶身分閘都讀 ``current_setting('lc_messages')`` 並硬比對;不符即 permanent
+# typed 失敗(``cluster_identity_`` 前綴 → production exit 78),逼 operator 修正組態。
+# 訊息指紋比對維持為次要訊號(見 _CONNECT_PERMANENT_MESSAGE_SQLSTATES)。
+REQUIRED_LC_MESSAGES = "C"
+# 誠實的殘留(source-only 不可導出):**首次**連線就失敗、且該 cluster 的 lc_messages 從未
+# 被本閘證實過時,client 端拿不到 SQLSTATE 也拿不到可信任的語言——那一則失敗無法分類。
+# 它刻意留在 transient(§8.3:可用性失敗不得退出),並由本契約顯式宣告為 typed 未證面,
+# 而不是假裝已分類。見 :func:`derive_connect_error_locale_contract`。
+CONNECT_ERROR_LOCALE_UNVERIFIED_CODE = "connect_error_locale_unverified_before_first_gate"
 # 連線/可用性類的 psycopg2 型別(OperationalError/InterfaceError 及其子類)。以型別
 # 全名比對,避免在無 psycopg2 的開發環境 import 失敗。
 _CONNECTION_DB_ERROR_TYPES = frozenset({
@@ -176,6 +197,8 @@ class ResidentConsumerState:
         "consecutive_failures",
         "connections_opened",
         "lock_busy_reconnect_retries",
+        "healthy_recoveries",
+        "last_session_seconds",
         "last_backoff_seconds",
         "total_backoff_seconds",
     )
@@ -186,6 +209,8 @@ class ResidentConsumerState:
         self.consecutive_failures = 0
         self.connections_opened = 0
         self.lock_busy_reconnect_retries = 0
+        self.healthy_recoveries = 0
+        self.last_session_seconds = 0.0
         self.last_backoff_seconds = 0.0
         self.total_backoff_seconds = 0.0
 
@@ -206,6 +231,17 @@ class ResidentConsumerState:
         self.last_backoff_seconds = float(delay_seconds)
         self.total_backoff_seconds += float(delay_seconds)
 
+    def record_healthy_recovery(self, session_seconds: float) -> None:
+        """P2-3:一條**已證穩定**的 session 之後,連續失敗串歸零(累計計數保留)。
+
+        「已證穩定」= 自連線建立起活過 :data:`RECONNECT_HEALTHY_SESSION_SECONDS`
+        (一個 heartbeat 週期,期間必然已寫過 durable 證據)。相隔數小時的孤立停機因此
+        各自從 5 秒重新退避,而不是被累加成一條永遠吃滿 300 秒的失敗串。
+        """
+        self.healthy_recoveries += 1
+        self.last_session_seconds = float(session_seconds)
+        self.consecutive_failures = 0
+
     def record_session_completed(self) -> None:
         self.sessions_completed += 1
         self.consecutive_failures = 0
@@ -218,6 +254,8 @@ class ResidentConsumerState:
             "consecutive_failures": self.consecutive_failures,
             "connections_opened": self.connections_opened,
             "lock_busy_reconnect_retries": self.lock_busy_reconnect_retries,
+            "healthy_recoveries": self.healthy_recoveries,
+            "last_session_seconds": self.last_session_seconds,
             "last_backoff_seconds": self.last_backoff_seconds,
             "total_backoff_seconds": self.total_backoff_seconds,
         }
@@ -403,6 +441,37 @@ def derive_consumer_liveness_contract() -> dict[str, Any]:
     }
 
 
+def derive_connect_error_locale_contract() -> dict[str, Any]:
+    """P1-4:連線期錯誤分類的 locale 契約(code-owned;source-only,零 runtime 接觸)。
+
+    可執行面(primary):在帶身分閘每次(重)連線都比對 ``current_setting('lc_messages')``
+    == :data:`REQUIRED_LC_MESSAGES`,不符即 permanent typed 失敗 → production exit 78。
+    次要訊號(secondary):PG 逐字 FATAL 文本指紋(``_CONNECT_PERMANENT_MESSAGE_SQLSTATES``)
+    ——連線期 libpq 不回 SQLSTATE,故它是唯一可用的判別材料,而其可用性正由上一條保證。
+
+    ⚠ typed 未證面(source-only 不可導出):在**第一次成功連線之前**,client 端既無
+    SQLSTATE 也無經證實的 server 語言,那一則連線失敗無法被誠實分類——它留在 transient
+    (§8.3 禁止把可恢復停機鎖成永久 78),並在此顯式具名為
+    :data:`CONNECT_ERROR_LOCALE_UNVERIFIED_CODE`,而不是假裝已分類。折入 W2 exported ABI
+    後,該設定或該名單漂移必然破壞 W2 導出。
+    """
+    return {
+        "schema_version": "alr_connect_error_locale_contract_v1",
+        "required_lc_messages": REQUIRED_LC_MESSAGES,
+        "verified_by": (
+            "in-band identity gate on every (re)connect: "
+            "SELECT current_setting('lc_messages')"
+        ),
+        "mismatch_verdict": "cluster_identity_lc_messages_mismatch",
+        "mismatch_disposition": "permanent_config_exit_78",
+        "secondary_signal": "verbatim PG FATAL message fingerprints",
+        "message_fingerprint_count": len(_CONNECT_PERMANENT_MESSAGE_SQLSTATES),
+        "unverifiable_before_first_gate": CONNECT_ERROR_LOCALE_UNVERIFIED_CODE,
+        "unverifiable_disposition": "transient_bounded_retry",
+        "runtime_contact": False,
+    }
+
+
 def classify_consumer_liveness(heartbeat_age_seconds: Any) -> str:
     """依契約把 heartbeat 年齡判為 ``LIVE`` / ``STALE`` / ``UNKNOWN``(純函數)。
 
@@ -477,7 +546,8 @@ def _fetch_connected_identity(connection: Any) -> dict[str, Any]:
             raise
         raise failure from exc
     return _single_identity_row(
-        rows, ("connected_user", "connected_database", "server_version_num")
+        rows,
+        ("connected_user", "connected_database", "server_version_num", "lc_messages"),
     )
 
 
@@ -542,6 +612,11 @@ def verify_connected_cluster_identity(
         if dsn_identity is not None and "user" in dsn_identity:
             if str(connected["connected_user"]) != str(dsn_identity["user"]):
                 raise AlrRuntimeIdentityError("cluster_identity_user_mismatch")
+        # P1-4:連線期失敗的唯一判別材料是 server 文本,而文本語言由 lc_messages 決定。
+        # 這條在帶檢查把「permanent 認證/組態失敗可被分類」變成可執行的 topology 契約:
+        # 不是 C 即 permanent typed 失敗(→ 78),而非讓分類器在未來某次連線期靜默失效。
+        if str(connected["lc_messages"]) != REQUIRED_LC_MESSAGES:
+            raise AlrRuntimeIdentityError("cluster_identity_lc_messages_mismatch")
         try:
             server_major = int(connected["server_version_num"]) // 10_000
         except (TypeError, ValueError) as exc:
@@ -588,6 +663,7 @@ def verify_connected_cluster_identity(
         "cluster_identity_row_digest": row_digest,
         "connected_user": str(connected["connected_user"]),
         "connected_database": str(connected["connected_database"]),
+        "lc_messages": str(connected["lc_messages"]),
     }
 
 
@@ -601,6 +677,7 @@ def run_resident_db_sessions(
     jitter: Callable[[], float] = default_jitter,
     is_transient: Callable[[BaseException], bool] = is_transient_db_availability_error,
     state: ResidentConsumerState | None = None,
+    monotonic: Callable[[], float] = time.monotonic,
 ) -> dict[str, Any]:
     """§8.3 常駐迴圈:transient DB 失敗絕不退出,關閉連線後有界退避無限重試。
 
@@ -611,12 +688,17 @@ def run_resident_db_sessions(
     - 其餘非 transient(含身分不符/typed consumer 失敗)→ 原樣上拋(production → 78);
     - 退避前/後收到停機訊號(``sleep`` 應為可中斷等待)→ 乾淨回傳、result 為 None。
 
+    P2-3(W2 review):失敗發生前若該連線已活過 :data:`RECONNECT_HEALTHY_SESSION_SECONDS`,
+    先記一次 healthy recovery 再記這次失敗——連續失敗串因此從 1 重新起算(累計失敗計數
+    不動)。``monotonic`` 可注入以令序列在測試中完全可重放。
+
     durable cursor 語義:進度全在 DB 側,行程內不保留跨 session 狀態,故重連後續讀
     自同一 durable cursor;本函數刻意不持有任何 per-attempt 佇列/緩衝。
     """
     tracker = state if state is not None else ResidentConsumerState()
     while True:
         connection: Any | None = None
+        connected_at: float | None = None
         # P2-C:「重連」= 本常駐迴圈已成功建立過連線。網路分割後我們自己上一條 backend
         # 可能還握著 server 側 advisory lock,新連線於是看到 lock-busy——那不是第二個
         # 實例,而是同一實例的殘留,崩潰三次就會把單元燒成 §8.3 禁止的永久 failed。
@@ -625,8 +707,14 @@ def run_resident_db_sessions(
         try:
             connection = open_connection()
             tracker.record_connection_opened()
+            connected_at = monotonic()
             result = run_session(connection)
         except Exception as error:  # noqa: BLE001 — 由下列謂詞精確分流
+            # P2-3:先判「這條連線是否已證穩定」;是 → 這是復原之後的**新**一次停機。
+            if connected_at is not None:
+                session_seconds = float(monotonic()) - float(connected_at)
+                if session_seconds >= RECONNECT_HEALTHY_SESSION_SECONDS:
+                    tracker.record_healthy_recovery(session_seconds)
             if is_transient(error):
                 tracker.record_transient_failure()
             elif reconnect and is_single_instance_lock_busy(error):
@@ -675,14 +763,17 @@ __all__ = [
     "CLUSTER_IDENTITY_COLUMNS",
     "CLUSTER_IDENTITY_RELATION",
     "CLUSTER_IDENTITY_RELATION_UNAVAILABLE_CODE",
+    "CONNECT_ERROR_LOCALE_UNVERIFIED_CODE",
     "CONSUMER_HEALTH_RELATION",
     "CONSUMER_HEARTBEAT_INTERVAL_SECONDS",
     "CONSUMER_LIVENESS_STALENESS_SECONDS",
     "CONSUMER_MISSED_HEARTBEATS_BEFORE_STALE",
     "DB_ERROR_SUBJECT_INFIX",
     "PERMANENT_DB_CONFIG_CODE_PREFIX",
+    "RECONNECT_HEALTHY_SESSION_SECONDS",
     "RECONNECT_MAX_BACKOFF_SECONDS",
     "RECONNECT_MIN_BACKOFF_SECONDS",
+    "REQUIRED_LC_MESSAGES",
     "SINGLE_INSTANCE_LOCK_BUSY_CODE",
     "ResidentConsumerState",
     "classify_consumer_liveness",
@@ -690,6 +781,7 @@ __all__ = [
     "cluster_identity_row_digest",
     "db_error_subject",
     "default_jitter",
+    "derive_connect_error_locale_contract",
     "derive_consumer_liveness_contract",
     "is_single_instance_lock_busy",
     "is_transient_db_availability_error",

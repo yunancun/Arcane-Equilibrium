@@ -192,8 +192,10 @@ def _bootstrap(sock_dir: str) -> None:
             f'CREATE ROLE "{ROLE}" LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD %s',
             (ROLE_PW,),
         )
-        # closed_boundary.database_temp/database_create=false 的可執行面:收回 PUBLIC 預設。
-        cur.execute(f"REVOKE TEMP, CREATE ON DATABASE {DB} FROM PUBLIC")
+        # P1-3:此處**不再**代為收回 PUBLIC 預設權限——closed_boundary.database_temp /
+        # database_create = false 必須由 generate_engine_scanner_grant_sql 自己產出的
+        # REVOKE ... FROM PUBLIC 讓其成真;fixture 預先代勞會遮住那個缺口(over-grant
+        # probe 的 CREATE TEMP TABLE 42501 於是變成 fixture 的功勞,不是 apply 路徑的)。
         for statement in install.generate_engine_scanner_grant_sql(MANIFEST):
             cur.execute(statement)
     finally:
@@ -448,7 +450,23 @@ def _write_guard(tmp_path, projection: dict, **overrides):
     guard["self_digest"] = resolve_facade().artifact_self_digest(guard)
     path = tmp_path / "topology-runtime-guard.json"
     path.write_text(json.dumps(guard, sort_keys=True), encoding="utf-8")
+    os.chmod(path, 0o440)  # P2-4:guard 的 host 姿態契約(mode 恰 0440)
     return path
+
+
+@pytest.fixture(autouse=True)
+def _simulate_guard_host_ownership(monkeypatch):
+    """P2-4:disposable cluster 跑在非 root 使用者下,以唯一縫模擬 guard 的佈署身分。"""
+    from ml_training import alr_application_identity as app_identity
+
+    monkeypatch.setattr(
+        app_identity,
+        "guard_host_identity",
+        lambda st: (
+            app_identity.TOPOLOGY_GUARD_REQUIRED_OWNER_UID,
+            app_identity.TOPOLOGY_GUARD_REQUIRED_GROUP,
+        ),
+    )
 
 
 def test_identity_gate_passes_against_the_real_cluster_row(cluster, tmp_path):
@@ -479,6 +497,46 @@ def test_identity_gate_passes_against_the_real_cluster_row(cluster, tmp_path):
     assert check["status"] == "MATCH"
     assert check["connected_user"] == ROLE
     assert check["connected_database"] == DB
+    # P1-4:連線期錯誤分類的語言前提是**從真 server 讀來的**,不是宣告的。
+    assert check["lc_messages"] == resilience.REQUIRED_LC_MESSAGES
+
+
+def test_identity_gate_refuses_a_server_whose_messages_are_not_english(cluster, tmp_path):
+    """P1-4(真 PG):server 的 lc_messages 一漂離 C,連線期 permanent 失敗就分類不出來。
+
+    連線期失敗沒有 SQLSTATE(F1),唯一判別材料是被 lc_messages 在地化的 FATAL 文本;
+    舊契約完全不綁該設定(只有本 fixture 恰好設了 C)。此處以真 cluster 把該角色的
+    lc_messages 改掉,證明在帶身分閘會 typed permanent 拒絕(→ exit 78),而不是讓分類器
+    靜默失效、讓常駐行程永遠重試。
+    """
+    from ml_training import alr_application_identity as app_identity
+    from ml_training import alr_consumer_resilience as resilience
+
+    projection = _observed_identity(cluster["socket_dir"])
+    guard_path = _write_guard(tmp_path, projection)
+    admin = _admin(cluster["socket_dir"])
+    localized = None
+    try:
+        try:
+            admin.cursor().execute(
+                f"ALTER ROLE \"{ROLE}\" SET lc_messages = 'en_US.UTF-8'"
+            )
+        except psycopg2.Error as error:  # host 無該 locale:誠實 skip,絕不假 pass
+            pytest.skip(f"host lacks the en_US.UTF-8 message locale: {error}")
+        localized = _role_connection(cluster["socket_dir"])
+        with pytest.raises(resilience.AlrRuntimeIdentityError) as failure:
+            resilience.verify_connected_cluster_identity(
+                localized, topology_guard_file=guard_path
+            )
+        assert str(failure.value) == "cluster_identity_lc_messages_mismatch"
+        assert app_identity.is_permanent_pre_db_error(failure.value)
+    finally:
+        if localized is not None:
+            localized.close()
+        try:
+            admin.cursor().execute(f"ALTER ROLE \"{ROLE}\" RESET lc_messages")
+        finally:
+            admin.close()
 
 
 def test_identity_gate_refuses_a_drifted_cluster(cluster, tmp_path):

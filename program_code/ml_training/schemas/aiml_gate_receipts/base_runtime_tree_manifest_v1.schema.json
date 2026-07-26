@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://arcane-equilibrium.local/schemas/base_runtime_tree_manifest_v1.schema.json",
   "title": "base_runtime_tree_manifest_v1",
-  "description": "S2.4 §8.1 content identity #2: canonical manifest of the ACTUAL installed staging tree created in PREPARE. Sorted immutable-tree entries bind {path, type, mode, sha256} (dirs carry null sha256; files are 0444/0555 only) plus the interpreter target (bin/python3), the native-library inventory, the unchanged S2.3 runtime_content_digest, the target platform token and the build-tool versions. self_digest IS base_runtime_tree_digest and names the immutable leaf /opt/arcane-equilibrium/aiml/runtimes/<64-hex>. Produced by agent_governance_s2_4_render.build_base_runtime_tree_manifest from a caller-provided staging root only (tmp-dir tests; no production path contact); symlinks, devices, group/other-writable entries and path escapes are typed rejections before any output. self_digest is integrity evidence only and never a runtime/production claim.",
+  "description": "S2.4 §8.1 content identity #2: canonical manifest of the ACTUAL installed staging tree created in PREPARE. Sorted immutable-tree entries bind {path, type, mode, sha256} (dirs carry null sha256; files are 0444/0555 only) plus the interpreter target (bin/python3), the native-library inventory, the resolved in-tree ELF loader closure, the unchanged S2.3 runtime_content_digest, the target platform token and the build-tool versions. loader_closure binds every in-tree ELF's PT_INTERP / DT_NEEDED / DT_SONAME / DT_RPATH / DT_RUNPATH derived from bytes alone; external_dependencies is empty by construction because a tree whose loader closure escapes it (host libc/loader) is a typed refusal, not a manifest. undecidable_host_facts names what source-only derivation cannot bind (host-resolved realpaths, inode/device identity, distribution package identity, ldconfig/LD_* search state) so the exclusion is explicit rather than silent. self_digest IS base_runtime_tree_digest and names the immutable leaf /opt/arcane-equilibrium/aiml/runtimes/<64-hex>. Produced by agent_governance_s2_4_render.build_base_runtime_tree_manifest from a caller-provided staging root only (tmp-dir tests; no production path contact); symlinks, devices, group/other-writable entries, path escapes and non-hermetic loader closures are typed rejections before any output. self_digest is integrity evidence only and never a runtime/production claim.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -14,6 +14,7 @@
     "build_tool_versions",
     "interpreter_target",
     "native_libraries",
+    "loader_closure",
     "entries",
     "self_digest"
   ],
@@ -51,6 +52,31 @@
         }
       }
     },
+    "loader_closure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "derivation",
+        "binaries",
+        "external_dependencies",
+        "undecidable_host_facts"
+      ],
+      "properties": {
+        "derivation": {"const": "in_tree_elf_pt_interp_dt_needed_v1"},
+        "binaries": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/loader_binary"}
+        },
+        "external_dependencies": {"type": "array", "maxItems": 0},
+        "undecidable_host_facts": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        }
+      }
+    },
     "entries": {
       "type": "array",
       "minItems": 1,
@@ -75,6 +101,30 @@
       "type": "string",
       "pattern": "^[A-Za-z0-9_.+\\-]+(/[A-Za-z0-9_.+\\-]+)*$",
       "not": {"pattern": "(^|/)\\.\\.(/|$)"}
+    },
+    "loader_binary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "format",
+        "machine",
+        "interpreter",
+        "soname",
+        "needed",
+        "rpath",
+        "runpath"
+      ],
+      "properties": {
+        "path": {"$ref": "#/$defs/tree_path"},
+        "format": {"enum": ["elf32", "elf64"]},
+        "machine": {"type": "integer", "minimum": 0},
+        "interpreter": {"anyOf": [{"type": "null"}, {"type": "string", "minLength": 1}]},
+        "soname": {"anyOf": [{"type": "null"}, {"type": "string", "minLength": 1}]},
+        "needed": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "rpath": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "runpath": {"type": "array", "items": {"type": "string", "minLength": 1}}
+      }
     }
   }
 }
