@@ -1583,10 +1583,14 @@ def test_the_w3_abi_hands_over_only_the_open_design_question_after_w4a() -> None
     assert "authorization_id = canonical_digest(" in w4_abi["permit_plan_binding_contract"]
     assert "idempotent replay" in w4_abi["replay_append_contract"]
     assert "INDEPENDENT postcheck verifier" in w4_abi["compensation_exactness_contract"]
-    # W4a 自身未交付的義務以同一誠實形狀繼續被記錄。
-    assert {"ENCRYPTED_BLOB_DIGEST_ORDERING", "AGGREGATE_PLAN_PAYLOAD_FULL_COMPARISON"} <= {
-        item["obligation_id"] for item in w4_abi["remaining_owned_obligations"]
-    }
+    # 未交付的義務以同一誠實形狀繼續被記錄;W4b 交付的兩項已移出,其契約改由 W4 ABI 承載。
+    remaining_ids = {item["obligation_id"] for item in w4_abi["remaining_owned_obligations"]}
+    assert "ENCRYPTED_BLOB_DIGEST_ORDERING" in remaining_ids
+    assert {"AGGREGATE_PLAN_PAYLOAD_FULL_COMPARISON", "RUNNER_WAL_LOCK_WIRING"} & (
+        remaining_ids
+    ) == set()
+    assert "zero uncompared fields" in w4_abi["aggregate_payload_comparison_contract"]
+    assert "JournalRoutedDriver" in w4_abi["runner_wal_lock_wiring_contract"]
 
 
 def test_apply_abi_projection_is_stable_and_complete() -> None:

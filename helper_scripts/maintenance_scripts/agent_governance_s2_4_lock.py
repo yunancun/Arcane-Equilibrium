@@ -719,7 +719,9 @@ def _commit_durable_ledger(store: Any, ledger: dict[str, Any]) -> dict[str, Any]
         return {"status": _journal.JOURNAL_STATUS_PRECHECK_FAILED, "reasons": destructive}
     parent_fd = None
     temp_fd = None
-    temp_basename = _journal.journal_temp_basename(store.basename, attempt=store.commits)
+    # 同 JournalStore.commit:暫存檔名數**嘗試**次數(失敗留下的同名暫存檔會讓 O_EXCL 回 EEXIST)。
+    temp_basename = _journal.journal_temp_basename(store.basename, attempt=store.attempts)
+    store.attempts += 1
     try:
         parent_fd, reasons = store._open_parent()
         if reasons:

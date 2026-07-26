@@ -502,6 +502,9 @@ class JournalStore:
         # parent 的 device/inode 在第一次開啟時綁定,其後每次落盤都重驗(置換偵測)。
         self.bound_parent: dict[str, Any] | None = None
         self.commits = 0
+        # 暫存檔名的計數器必須數**嘗試**次數而非成功次數:``openat(O_EXCL)`` 在前一次失敗留下的
+        # 同名暫存檔上會回 EEXIST,於是「失敗一次之後就再也寫不進 journal」——連終端態都落不了盤。
+        self.attempts = 0
 
     # ── 內部:parent FD 開啟 + 綁定/重驗 ────────────────────────────────────────
     def _open_parent(self) -> tuple[Any, list[str]]:
@@ -563,7 +566,8 @@ class JournalStore:
             )
         parent_fd = None
         temp_fd = None
-        temp_basename = journal_temp_basename(self.basename, attempt=self.commits)
+        temp_basename = journal_temp_basename(self.basename, attempt=self.attempts)
+        self.attempts += 1
         durability = {
             "same_filesystem_atomic_rename": False,
             "file_fsynced": False,
@@ -990,7 +994,11 @@ def reconcile_journal(
     verdict["terminal_state"] = state
     entries = journal["entries"]
     last = entries[-1]
-    if state in TERMINAL_JOURNAL_STATES:
+    # 「無需收斂」必須**兩者**成立:journal 自己宣告 terminal,且最後一筆 state 亦為終端態。
+    # 只看最後一筆 state 會 fail-open:APPLY 的共用 WAL 上,某個 row 內部的 ``VERIFIED``
+    # (那是**該 row** 的終端,不是**交易**的終端)恰好落在最後一筆時,一筆未完成的交易會被
+    # 誤判為「沒事」,於是一個新 plan 被放行,而主機上還躺著部分施作的狀態。
+    if state in TERMINAL_JOURNAL_STATES and journal.get("terminal") is True:
         verdict["status"] = RECONCILE_TERMINAL_NOTHING_TO_DO
         return verdict
     if not isinstance(observed_state_digest, str) or (

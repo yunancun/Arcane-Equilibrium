@@ -313,18 +313,94 @@ def test_w4_records_its_own_remaining_obligations_in_the_same_honest_shape() -> 
     remaining = validator._W4_EXPORTED_ABI["remaining_owned_obligations"]
     ids = [row["obligation_id"] for row in remaining]
     assert "ENCRYPTED_BLOB_DIGEST_ORDERING" in ids
+    # W4b 交付的兩項不得再被記為未提供;剩下的每一項都帶 owner wave 與可關閉條件。
+    assert {"AGGREGATE_PLAN_PAYLOAD_FULL_COMPARISON", "RUNNER_WAL_LOCK_WIRING"} & set(
+        ids
+    ) == set()
     assert {
-        "AGGREGATE_PLAN_PAYLOAD_FULL_COMPARISON",
         "OBSERVER_SPACE_PRE_STATE_DIGEST",
-        "RUNNER_WAL_LOCK_WIRING",
+        "ATTESTED_EVIDENCE_CLASS_VERIFIER",
+        "PRIOR_LINEAGE_ENTRY_IDENTITY",
+        "STARTUP_RECONCILE_LANE_PATHS",
     } <= set(ids)
     for row in remaining:
         assert set(row) >= {
             "obligation_id", "typed_status", "owner_wave", "spec_refs", "statement",
             "w4_provides",
         }
-        assert row["typed_status"] in {"OPEN_DESIGN_QUESTION", "NOT_PROVIDED_BY_W4A"}
+        assert row["typed_status"] in {
+            "OPEN_DESIGN_QUESTION", "NOT_PROVIDED_BY_W4A", "NOT_PROVIDED_BY_W4B",
+            "NOT_PROVIDED_BY_W4", "PARTIALLY_PROVIDED_BY_W4B",
+        }
         assert row["owner_wave"] and row["spec_refs"] and row["statement"]
+    # OBSERVER_SPACE_PRE_STATE_DIGEST 現在必須說清楚「什麼才算關閉」。
+    observer = next(
+        row for row in remaining if row["obligation_id"] == "OBSERVER_SPACE_PRE_STATE_DIGEST"
+    )
+    assert "What would close it" in observer["statement"]
+    assert observer["typed_status"] == "PARTIALLY_PROVIDED_BY_W4B"
+
+
+def test_w4_abi_folds_the_w4b_aggregate_contracts() -> None:
+    abi = validator._W4_EXPORTED_ABI
+    assert "apply_s2_4_install_plan(plan, authorization_set, driver)" in (
+        abi["aggregate_transaction_contract"]
+    )
+    assert "APPLIED_INACTIVE" in abi["success_identity_contract"]
+    assert "SOURCE_SIMULATION_PASS" in abi["success_identity_contract"]
+    assert "no digest/signature cycle".replace("no ", "") in (
+        abi["plan_intent_binding_contract"]
+    )
+    assert "zero uncompared fields" in abi["aggregate_payload_comparison_contract"]
+    assert "reverse order" in abi["reverse_compensation_contract"]
+    assert "RECOVERY_REQUIRED with zero new mutation" in abi["startup_reconcile_contract"]
+    assert "JournalRoutedDriver" in abi["runner_wal_lock_wiring_contract"]
+
+
+def test_w4_projection_folds_the_aggregate_and_reconcile_live_groups() -> None:
+    projection = validator.w4_exported_abi_projection()
+    assert projection["install_driver_abi"] is not None
+    aggregate = projection["aggregate_live"]
+    assert aggregate["malformed_plan_status"] == "PRECHECK_FAILED"
+    assert aggregate["malformed_plan_mutation_performed"] is False
+    assert aggregate["success_identity"] == "APPLIED_INACTIVE"
+    assert aggregate["source_lane_identity"] == "SOURCE_SIMULATION_PASS"
+    assert aggregate["apply_row_step_index"] == {
+        "HOST_IDENTITY_INSTALL": 0, "PG_ROLE_ACL_MIGRATION": 1, "CREDENTIAL_INSTALL": 2,
+        "LEARNING_RUNTIME": 3, "ENGINE_SCANNER": 5,
+    }
+    assert aggregate["payload_comparison_complete"] == {
+        "apply_aggregate": True, "pg_migration": True
+    }
+    assert aggregate["payload_uncompared_fields"] == {
+        "apply_aggregate": [], "pg_migration": []
+    }
+    assert aggregate["binding_ignores_self_referential_fields"] is True
+    assert aggregate["binding_pins_every_other_field"] is True
+    assert aggregate["forbidden_aggregate_surface_rejected"] is True
+    assert aggregate["typed_statuses_within_receipt_enum"] is True
+    reconcile = projection["reconcile_live"]
+    assert reconcile["lock_required_status"] == "INSTALL_LOCK_REQUIRED"
+    assert reconcile["source_lane_status"] == "EXTERNAL_VERIFICATION_PENDING"
+    assert reconcile["source_lane_admits_new_work"] is False
+    assert reconcile["no_paths_status"] == "RECOVERY_REQUIRED"
+    assert reconcile["admits_new_work_only_for"] == [
+        "STARTUP_RECONCILE_CLEAN", "STARTUP_RECONCILE_STEP_NOT_APPLIED"
+    ]
+    assert reconcile["routed_without_lock_refused"] is True
+
+
+def test_w4_owned_paths_cover_the_w4b_surface() -> None:
+    required = {
+        "helper_scripts/maintenance_scripts/agent_governance_s2_4_install_driver.py",
+        "helper_scripts/maintenance_scripts/agent_governance_s2_4_reconcile.py",
+        "tests/structure/s2_4_w4b_testkit.py",
+        "tests/structure/test_agent_governance_s2_4_install_driver.py",
+        "tests/structure/test_agent_governance_s2_4_crash_matrix.py",
+        "tests/structure/test_agent_governance_s2_4_pre_state_matrix.py",
+    }
+    missing = required - set(validator._W4_OWNED_PATHS)
+    assert not missing, f"W4 owned-path binding misses W4b surface members: {sorted(missing)}"
 
 
 # ── w4-emit(不實跑發射)────────────────────────────────────────────────────────
