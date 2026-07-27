@@ -429,31 +429,51 @@ S2_4_W5_REMAINING_OWNED_OBLIGATIONS: list[dict[str, Any]] = [
         ),
     },
     {
-        "obligation_id": "PROGRAM_CODE_IS_ON_THE_SCANNER_PATH_VIA_W3_AND_W4",
+        "obligation_id": "PROGRAM_CODE_IS_ON_THE_SCANNER_PATH_VIA_W2_W3_AND_W4",
         "typed_status": "PROVIDED_BY_W5_UNDER_PM_RULING",
         "owner_wave": "W5",
         "spec_refs": ["§10.1.1"],
         "statement": (
             "Making program_code/ importable widens the top-level namespace of every "
             "process that loads the facade — broker_connectors, exchange_connectors, "
-            "dashboard and ai_agents all become resolvable in the engine-scanner process. "
-            "No shadowing or hijack was ever found, but under §10.1.1 condition 4 that has "
-            "to be a decision rather than an import side effect. CORRECTION (adversarial "
-            "round 3): the previous obligation_id named W4 ALONE and was imprecise — "
-            "aiml_gate_receipt_wave_w3.py does the identical import-time insertion at lines "
-            "32-34 and was never mentioned. Both are now removed under an explicit PM "
-            "ruling: W3's one ml_training package import moved inside "
-            "program_code_on_path(), and W4 never used the path at all. §10.1.1 condition 4 "
-            "forbids GRANTING a capability the parent did not have; removing these strictly "
-            "REDUCES capability, so the change runs with the condition rather than against "
-            "it. All four occurrences W5 found (contracts leaf, W5 leaf, W3 leaf, W4 leaf) "
-            "are now closed and the process-level property IS achieved for the facade's "
-            "import closure."
+            "dashboard and ai_agents all become resolvable there. No shadowing or hijack "
+            "was ever found, but under §10.1.1 condition 4 that has to be a decision "
+            "rather than an import side effect. CORRECTION 1 (adversarial round 3): the "
+            "previous obligation_id named W4 ALONE and was imprecise — "
+            "aiml_gate_receipt_wave_w3.py does the identical import-time insertion and was "
+            "never mentioned. CORRECTION 2 (adversarial round 4): round 3 then wrote that "
+            "'all four occurrences are now closed and the process-level property IS "
+            "achieved for the facade's import closure', and that was measurably FALSE — "
+            "the sweep enumerated four occurrences and missed a FIFTH, "
+            "aiml_gate_receipt_wave_w2.py, which the facade imports at module top level "
+            "and which the runtime import closure declares. Measured at the round-3 head, "
+            "importing the facade left program_code on sys.path and all four packages "
+            "find_spec-resolvable; round 3's regression looped leaf-by-leaf over two "
+            "named leaves and never imported the facade, which is exactly how the fifth "
+            "occurrence hid. All five are now removed under an explicit PM ruling that "
+            "EXTENDS the round-3 path-scope ruling to the W2-owned leaf "
+            "aiml_gate_receipt_wave_w2.py: each package-form ml_training.* import moved "
+            "inside program_code_on_path(), and W4 never used the path at all. §10.1.1 "
+            "condition 4 forbids GRANTING a capability the parent did not have; removing "
+            "these strictly REDUCES capability, so the change runs with the condition "
+            "rather than against it. SCOPE, stated exactly because round 3 overstated it: "
+            "what is achieved is that importing the facade no longer widens the namespace "
+            "as a side effect. It is NOT a claim about every engine-scanner process. "
+            "Measured at this head: fifteen of the fifty modules the declared runtime "
+            "import closure names fail to import without program_code on sys.path ('No "
+            "module named ml_training'), so the scanner launcher must put it there for "
+            "its own reasons; and nineteen governed agent_governance_s2_4_* helper leaves "
+            "still insert it at their own import time, none of which is in the facade's "
+            "top-level import closure. Those are launcher- and helper-level decisions, "
+            "not import side effects of loading the facade, and this row does not claim "
+            "them closed."
         ),
         "w5_provides": (
-            "all four occurrences removed under the PM path-scope ruling, the correction of "
-            "the row's own W4-only naming, and a leaf-scoped regression that fails if any "
-            "of them returns"
+            "all five occurrences removed under the PM path-scope ruling extended to the "
+            "W2-owned leaf, the correction of round 3's own count and capability claim, "
+            "and a regression that imports the facade itself (not only the leaves) and "
+            "fails if program_code returns to sys.path or any of the four packages "
+            "resolves"
         ),
     },
     {
@@ -579,13 +599,29 @@ S2_4_W5_REMAINING_OWNED_OBLIGATIONS: list[dict[str, Any]] = [
             "to repeat those blob digests would add a shape rule and zero assurance, so W5 "
             "refuses to add a check that reads like a gate and is not one. What a green "
             "chain licenses is therefore SOURCE structure at a head, never 'the tests were "
-            "executed'."
+            "executed'. ROUND-4 CORRECTION to this row's own latch: the closing arm was "
+            "gated on emit_sink_accepts_fabricated_evidence, which is a VACUITY CONTROL, "
+            "not the subject. Adding a benign shape check to "
+            "agent_governance_s2_4_emit_sink.validate_emit_evidence (e.g. requiring a "
+            "'command' key) flipped that probe to False and drove the latch onto the "
+            "closing arm — 'the evidence digests are no longer shape-only; close the "
+            "obligation instead' — while only_shape_is_constrained was still True in the "
+            "same projection: a false message whose prescription deletes a still-true "
+            "honesty row. The closing arm now reads only_shape_is_constrained, which IS "
+            "the subject, and the sink probe joins the empty/secret probes as a control "
+            "whose flip is fail-closed rather than closing. AGGRAVATING and recorded "
+            "rather than fixed: agent_governance_s2_4_emit_sink.py is in _W2_OWNED_PATHS "
+            "and in no other wave's, so W5's wave exit reads a file it neither owns nor "
+            "watches for drift. Adding it to _W5_OWNED_PATHS is an owned-path scope "
+            "decision §10.4 places outside a worker's choice."
         ),
         "w5_provides": (
             "the finding, the exact structural reason it cannot be closed here, a live "
             "measurement of what actually constrains the three evidence fields (including "
-            "the positive controls proving the emit guard is not vacuous), and a latch "
-            "requiring this row while a fabricated digest still satisfies every constraint"
+            "the positive controls proving the emit guard is not vacuous), a latch "
+            "requiring this row while a fabricated digest still satisfies every "
+            "constraint, the round-4 correction of that latch's own subject, and the "
+            "record that its sink input is a W2-owned path W5 does not watch"
         ),
     },
     {

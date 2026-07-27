@@ -30,16 +30,18 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 _HELPER_DIR = REPO_ROOT / "helper_scripts" / "maintenance_scripts"
 if str(_HELPER_DIR) not in sys.path:
     sys.path.insert(0, str(_HELPER_DIR))
-# consumer 葉以 package-qualified 匯入(D1/D2 折入需要),故 program_code 必須在路徑上——
-# 本葉可被 facade 以裸模組名載入,不能假設 caller 已插入。
-_PROGRAM_CODE_DIR = REPO_ROOT / "program_code"
-if str(_PROGRAM_CODE_DIR) not in sys.path:
-    sys.path.insert(0, str(_PROGRAM_CODE_DIR))
-
+# W5 對抗審計第四輪 P1(PM path-scope ruling,延伸至本 W2-owned 葉):本葉不在 import 期把
+# ``program_code`` 放進 sys.path。它是 facade 的 top-level import,於是「載入 facade 的每一個
+# 進程」的 top-level namespace 都會多出 broker_connectors / exchange_connectors / dashboard /
+# ai_agents——那必須是決策而非 import 副作用(§10.1.1 #4)。這是第三輪掃過但漏數的**第五處**
+# (前四處:contracts 葉、W5 葉、W3 葉、W4 葉)。唯一需要 ``ml_training.*`` package 形匯入的
+# 地方在函式內,改用 ``program_code_on_path`` 就地開窗、離開時只收回自己放的那一筆;本變更
+# **縮小**能力,故與 §10.1.1 條件 4 同向而非相悖。
 from aiml_gate_receipt_schema_core import (  # noqa: E402
     canonical_digest,
     owned_path_blob_projection_digest,
     owned_scope_worktree_delta,
+    program_code_on_path,
     resolve_facade,
 )
 
@@ -309,7 +311,8 @@ def w2_exported_abi_projection(repo_root: Path = REPO_ROOT) -> dict[str, Any]:
     except Exception:  # noqa: BLE001
         template_matches = False
     try:
-        from ml_training import alr_consumer_resilience as _resilience
+        with program_code_on_path():
+            from ml_training import alr_consumer_resilience as _resilience
 
         identity_columns_digest = canonical_digest(
             list(_resilience.CLUSTER_IDENTITY_COLUMNS)

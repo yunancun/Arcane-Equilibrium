@@ -106,6 +106,23 @@ def w5_remaining_obligation_ledger() -> list[dict[str, Any]]:
     )
 
 
+def _recorded_dir(path: Path) -> str:
+    """記進 artifact 的 lineage 目錄:落在 repo 內即記 repo-relative。
+
+    W5 審計 P2:舊碼記絕對路徑,於是那一件 artifact 是八件裡唯一「換一個 checkout 就不再逐
+    位元組重現」的——同一個 head、同一批 builder,只因為 clone 在別的目錄底下就得到不同的
+    derivation record。repo 外的目錄(disposable 測試的 tmp_path)仍記絕對路徑,因為那時
+    「相對於 repo」沒有意義。W3/W4 的發射葉屬 W3/W4 owned path,本波不改,兩者的紀錄形狀
+    (同名字串欄)不變。
+    """
+
+    resolved = Path(path).resolve()
+    try:
+        return resolved.relative_to(REPO_ROOT.resolve()).as_posix()
+    except ValueError:
+        return str(resolved)
+
+
 def load_persisted_w4_receipts(w4_receipt_dir: Path) -> dict[str, Any] | None:
     """讀持久化的歷史 W4 receipts(lineage 記錄用;讀不到/畸形回 None → 發射 fail-closed)。"""
 
@@ -137,7 +154,7 @@ def load_persisted_w4_receipts(w4_receipt_dir: Path) -> dict[str, Any] | None:
         else "SELF_DIGEST_MISMATCH"
     )
     return {
-        "persisted_dir": str(w4_receipt_dir),
+        "persisted_dir": _recorded_dir(w4_receipt_dir),
         "w4_wave_exit_self_digest": w4_wave_exit["self_digest"],
         "regenerated_w0_admission_self_digest": w0_admission["self_digest"],
         "regenerated_w0_wave_exit_self_digest": w0_wave_exit["self_digest"],

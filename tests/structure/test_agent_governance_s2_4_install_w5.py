@@ -79,7 +79,8 @@ _W5_NEW = (
     "ENCODED_SECRET_SCAN_MISSES_COMPOSITE_PAYLOADS",
     "OWNED_PATH_PROJECTION_RULER_IS_NOT_UNIFORM",
     # 第三輪更名:舊 id 只點名 W4,而 W3 葉做的是**同一件事**且從未被提及。
-    "PROGRAM_CODE_IS_ON_THE_SCANNER_PATH_VIA_W3_AND_W4",
+    # 第四輪再更名:第三輪掃到四處就宣告關閉,漏了 facade top-level import 的 W2 葉(第五處)。
+    "PROGRAM_CODE_IS_ON_THE_SCANNER_PATH_VIA_W2_W3_AND_W4",
     "PR_SET_DUMPABLE_IS_DECLARED_NOT_ENFORCED",
     "S2_5_LIFECYCLE_FIXTURES_DO_NOT_EXIST",
     # W5 對抗審計第二輪(2026-07-27)新記三條:§9.2 裁決零生產呼叫端、wave-exit evidence
@@ -274,15 +275,39 @@ def test_w5_empty_evidence_lists_never_derive_pass(chain, field) -> None:
 
 # ── owned paths / exported ABI ──────────────────────────────────────────────────
 def test_w5_owned_paths_are_live_and_cover_the_w5_surface() -> None:
+    """第四輪 P2:舊版只點名 14 條裡的 5 條,於是 worker **縮小**自己的 scope 不會變紅。
+
+    §10.1.2 (d) 的三支測試都只看「§10.1 之外」的路徑,而第三輪把 owned-scope 乾淨度變成
+    承重之後,少掉一條就等於替那條路徑重開旁路——把
+    ``helper_scripts/maintenance_scripts/agent_governance_s2_4_install.py``(§10.1 逐字清單
+    上、且 W6 operator 真的會執行的那一支)從 ``_W5_OWNED_PATHS`` 拿掉,整條 124 支的 W5
+    lane 全綠。所以這裡改成**全集合**釘死:縮表與擴表都必須是兩處明示編輯,其中一處在
+    reviewer 會逐行讀的測試 diff 裡。
+    """
+
     required = {
+        "helper_scripts/maintenance_scripts/agent_governance_s2_4_install.py",
+        "helper_scripts/maintenance_scripts/agent_governance_s2_4_w5_emit.py",
+        "program_code/ml_training/aiml_gate_receipt_s2_4_contracts.py",
+        "program_code/ml_training/aiml_gate_receipt_schema_core.py",
         "program_code/ml_training/aiml_gate_receipt_validator.py",
+        "program_code/ml_training/aiml_gate_receipt_w5_obligations.py",
         "program_code/ml_training/aiml_gate_receipt_wave_w5.py",
         "program_code/ml_training/application_bundle_runtime_closure_v1.json",
+        "program_code/ml_training/schemas/aiml_gate_receipts/"
+        "s2_4_dependency_refresh_attestation_v1.schema.json",
+        "program_code/ml_training/tests/test_aiml_gate_receipt_validator_s2_4.py",
         "tests/structure/test_agent_governance_s2_4_acceptance_matrix.py",
+        "tests/structure/test_agent_governance_s2_4_install_w3.py",
         "tests/structure/test_agent_governance_s2_4_install_w5.py",
+        "tests/structure/test_agent_governance_s2_4_install_w5_emit.py",
     }
-    missing = required - set(validator._W5_OWNED_PATHS)
-    assert not missing, f"W5 owned-path binding misses W5 surface members: {sorted(missing)}"
+    assert set(validator._W5_OWNED_PATHS) == required, {
+        "narrowed_away": sorted(required - set(validator._W5_OWNED_PATHS)),
+        "added_without_updating_this_pin": sorted(
+            set(validator._W5_OWNED_PATHS) - required
+        ),
+    }
     dead = [rel for rel in validator._W5_OWNED_PATHS if not (ROOT / rel).is_file()]
     assert not dead, f"W5 owned paths contain dead entries: {dead}"
 
@@ -1098,6 +1123,40 @@ def test_a_clean_owned_scope_emits_no_worktree_reason(chain, monkeypatch) -> Non
     ]
 
 
+def _assert_wave_owned_paths_map_to_their_own_leaf() -> None:
+    """第四輪 P2:``_WAVE_OWNED_PATHS`` 的**對應關係**本身沒有被釘住。
+
+    下面那圈把 ``owned_scope_worktree_delta`` 整個 monkeypatch 掉,於是那把尺量的是「有沒有
+    接線」,不是「接到哪一條線」;把 ``"W2"`` 指去 ``_W0_OWNED_PATHS``,整條 W5 lane 照樣全綠,
+    而 W2 的 owned scope 就此無人看管(W2 擁有 operator 真正執行的那幾支腳本)。這裡逐波要求
+    「同一個物件」,並額外要求六個投影兩兩相異——後者才擋得住 W0/W1 之間的互指。
+    """
+
+    import aiml_gate_receipt_wave_w2 as wave_w2
+    import aiml_gate_receipt_wave_w3 as wave_w3
+    import aiml_gate_receipt_wave_w4 as wave_w4
+    import aiml_gate_receipt_wave_w5 as wave_w5
+
+    canonical = {
+        # W0/W1 的投影住在 facade 自身,W2..W5 住在各自的葉。
+        "W0": validator._W0_OWNED_PATHS,
+        "W1": validator._W1_OWNED_PATHS,
+        "W2": wave_w2._W2_OWNED_PATHS,
+        "W3": wave_w3._W3_OWNED_PATHS,
+        "W4": wave_w4._W4_OWNED_PATHS,
+        "W5": wave_w5._W5_OWNED_PATHS,
+    }
+    for wave, paths in canonical.items():
+        assert validator._WAVE_OWNED_PATHS[wave] is paths, (
+            f"_WAVE_OWNED_PATHS[{wave!r}] does not point at that wave's own owned-path "
+            "projection; a mis-wired row leaves that wave's owned scope unwatched"
+        )
+    seen: dict[int, str] = {}
+    for wave, paths in validator._WAVE_OWNED_PATHS.items():
+        assert id(paths) not in seen, (wave, seen[id(paths)])
+        seen[id(paths)] = wave
+
+
 def test_every_wave_exit_consumes_its_own_owned_scope_delta(chain, monkeypatch) -> None:
     """P1-D:fail-closed 的 owned-scope 消費原本**只有 W5 有**(w2/w3/w4 consumed=0)。
 
@@ -1111,6 +1170,7 @@ def test_every_wave_exit_consumes_its_own_owned_scope_delta(chain, monkeypatch) 
     receipts = {"W0": w0, "W1": w1, "W2": w2, "W3": w3, "W4": w4, "W5": w5}
     # 每一波的 owned-path 集合都真的被登記(漏一波 = 那一波無人看管)。
     assert sorted(validator._WAVE_OWNED_PATHS) == ["W0", "W1", "W2", "W3", "W4", "W5"]
+    _assert_wave_owned_paths_map_to_their_own_leaf()
     assert validator.owned_scope_reason_prefix("W5") == _OWNED_SCOPE_REASON
     for wave, receipt in receipts.items():
         prefix = validator.owned_scope_reason_prefix(wave)
@@ -1555,6 +1615,41 @@ def test_a_documentation_only_schema_edit_does_not_flip_the_evidence_latch(
     assert not any("close the obligation instead" in reason for reason in reasons), reasons
 
 
+def test_a_stricter_emit_sink_never_demands_deleting_a_still_true_evidence_row() -> None:
+    """第四輪 P2:latch-D 的誤報換了一條路徑活著——關閉臂綁在**空對照組**上。
+
+    reviewer 的變異:在 ``agent_governance_s2_4_emit_sink.validate_emit_evidence`` 加一句良性
+    形狀檢查(``if "command" not in test_evidence: raise ValueError(...)``)。它把
+    ``emit_sink_accepts_fabricated_evidence`` 翻成 False,舊碼於是掉到最後一臂,吐出
+    「the evidence digests are no longer shape-only; close the obligation instead」——而同一份
+    投影裡 ``only_shape_is_constrained`` 仍是 ``True``。訊息是假的,而它的處方是刪掉一條仍為
+    真的誠實列(這正是 P1-E 修過一次、又從另一個輸入復活的同一個誤報形)。
+    """
+
+    import aiml_gate_receipt_wave_w5 as wave_w5
+
+    stricter = dict(_EVIDENCE_MEASUREMENT, emit_sink_accepts_fabricated_evidence=False)
+    reasons = wave_w5._honest_surface_reasons(_call_site_measurement(), stricter)
+    assert not any("close the obligation instead" in r for r in reasons), reasons
+    # 對照組翻面 = 量測不再成立 → fail-closed(而不是「必須關閉」)。
+    assert any("not a real predicate" in r for r in reasons), reasons
+    # 反向:只有**主體**(schema 真的長出非形狀性約束)翻成 False 才可以要求關閉這一列。
+    subject_false = dict(_EVIDENCE_MEASUREMENT, only_shape_is_constrained=False)
+    reasons = wave_w5._honest_surface_reasons(_call_site_measurement(), subject_false)
+    assert any("close the obligation instead" in r for r in reasons), reasons
+    # 三個 sink 探針現在是同一組對照:任一翻面都走 fail-closed 臂,語義一致。
+    for probe in (
+        "emit_sink_refuses_empty_evidence",
+        "emit_sink_refuses_secret_like_evidence",
+        "emit_sink_accepts_fabricated_evidence",
+    ):
+        flipped = dict(_EVIDENCE_MEASUREMENT)
+        flipped[probe] = False
+        reasons = wave_w5._honest_surface_reasons(_call_site_measurement(), flipped)
+        assert any("not a real predicate" in r for r in reasons), (probe, reasons)
+        assert not any("close the obligation instead" in r for r in reasons), (probe, reasons)
+
+
 def test_the_wave_exit_evidence_digests_are_shape_only(chain) -> None:
     """D:整條 W0→W5 鏈在 ``sha256:111…1`` 上導出 PASS——它證不了測試跑過或審查發生過。"""
 
@@ -1618,26 +1713,50 @@ def test_expected_topology_is_caller_suppliable_and_bound_to_nothing() -> None:
     assert "hba_delta_digest" in entry["statement"]
 
 
-def test_the_w5_leaves_do_not_widen_the_top_level_namespace_at_import_time() -> None:
-    """§9.2 review P2-E:兩支 W5 葉在 import 期把 ``program_code`` 放進 sys.path。
+@pytest.mark.parametrize(
+    "leaf",
+    [
+        # 第四輪 P1:**facade 本身**必須先入列。逐葉迴圈是第五處(wave_w2)藏身的地方——
+        # 它不在被點名的葉清單裡,卻是 facade 的 top-level import,於是「載入 facade 的
+        # 進程不被加寬」這句話在 round 3 是被宣稱而非被量測的。
+        "aiml_gate_receipt_validator",
+        "aiml_gate_receipt_s2_4_contracts",
+        "aiml_gate_receipt_wave_w2",
+        "aiml_gate_receipt_wave_w3",
+        "aiml_gate_receipt_wave_w4",
+        "aiml_gate_receipt_wave_w5",
+    ],
+)
+def test_the_w5_leaves_do_not_widen_the_top_level_namespace_at_import_time(leaf) -> None:
+    """§10.1.1 #4:facade 及其 import 閉包在 import 期都不得把 ``program_code`` 放進 sys.path。
 
-    誠實邊界(見 obligation PROGRAM_CODE_IS_ON_THE_SCANNER_PATH_VIA_W4):W4 的葉仍然這麼做
-    且早於 W5,故 scanner 進程層級的性質尚未達成;本測試釘住的是 W5 自己那兩處。
+    舊版只掃兩支葉、且從不 import facade,所以第五處(``aiml_gate_receipt_wave_w2``,facade 的
+    top-level import)整輪沒被看見,而義務列卻寫著「process-level property IS achieved」。
+    現在逐項量測:路徑本身不得出現,四個 top-level 套件也不得變成 find_spec 可解析——後者才是
+    這條義務真正在講的能力面(路徑進來、套件跟著可匯入)。
+
+    誠實邊界:本測試量的是 facade 的 import 閉包。engine-scanner **launcher** 仍可能自己把
+    program_code 放上去(閉包裡有十五支模組以 package 形匯入 ml_training.*),那是決策而非
+    副作用,不在本條之內——義務列逐字寫著同一句。
     """
 
     import subprocess
 
-    for leaf in ("aiml_gate_receipt_s2_4_contracts", "aiml_gate_receipt_wave_w5"):
-        probe = subprocess.run(
-            [
-                sys.executable, "-c",
-                "import sys;sys.path.insert(0, %r);import %s;"
-                "print(%r in sys.path)" % (str(ML_ROOT), leaf, str(PROGRAM_CODE)),
-            ],
-            capture_output=True, text=True, cwd=str(ROOT),
-        )
-        assert probe.returncode == 0, probe.stderr
-        assert probe.stdout.strip() == "False", (leaf, probe.stdout)
+    probe = subprocess.run(
+        [
+            sys.executable, "-c",
+            "import sys, os, importlib.util as u;sys.path.insert(0, %r);import %s;"
+            "print(%r in [os.path.abspath(p) for p in sys.path]);"
+            "print([n for n in ('broker_connectors','exchange_connectors','dashboard',"
+            "'ai_agents') if u.find_spec(n) is not None])"
+            % (str(ML_ROOT), leaf, str(PROGRAM_CODE)),
+        ],
+        capture_output=True, text=True, cwd=str(ROOT),
+    )
+    assert probe.returncode == 0, probe.stderr
+    on_path, resolvable = probe.stdout.strip().splitlines()
+    assert on_path == "False", (leaf, probe.stdout)
+    assert resolvable == "[]", (leaf, probe.stdout)
 
 
 def test_w5_builds_a_receipt_without_writing_anything(tmp_path, chain) -> None:
@@ -1671,10 +1790,15 @@ def _design_fenced_paths(heading_prefix: str) -> list[str]:
     """
 
     lines = _DESIGN_DOC.read_text(encoding="utf-8").splitlines()
-    start = next(
-        (n for n, line in enumerate(lines) if line.startswith(heading_prefix)), None
+    # 第四輪 P2:舊碼取**第一個**符合的標題,於是文件前段再放一個 ``#### 10.1.2 `` 誘餌節,
+    # 讀到的就是誘餌而不是權威節。標題必須唯一,不唯一即拒絕解析(fail-closed)。
+    starts = [n for n, line in enumerate(lines) if line.startswith(heading_prefix)]
+    assert len(starts) == 1, (
+        f"design heading is not unique: {heading_prefix!r} matches {len(starts)} lines "
+        f"{[lines[n] for n in starts]}; a decoy section would be parsed instead of the "
+        "authoritative one"
     )
-    assert start is not None, f"design heading not found: {heading_prefix!r}"
+    start = starts[0]
     open_fence = next(
         (n for n in range(start, len(lines)) if lines[n].strip() == "```text"), None
     )
@@ -1744,3 +1868,71 @@ def test_10_1_2_b_block_is_sorted_and_duplicate_free() -> None:
     duplicates = sorted({rel for rel in named if named.count(rel) > 1})
     assert not duplicates, f"§10.1.2 (b) 具名清單有重複條目:{duplicates}"
     assert named == sorted(named), "§10.1.2 (b) 具名清單必須逐行排序"
+
+
+# §10.1.2 (d) 只約束 W3/W4/W5(「From this amendment, a wave that creates a path outside
+# §10.1's literal list must name it in the (b) block」),W0/W1/W2 的 out-of-list 路徑由
+# §10.1.1 的追認散文覆蓋。於是 W0/W1/W2 那一側**完全沒有測試在看**:新增一條 out-of-list
+# 路徑不會弄紅任何東西。把設計文件補成涵蓋 W0-W2 屬 §10.4 排除 worker 的 owned-path scope
+# 決策,所以這裡改為把**現況缺口**釘死:缺口不得長大(新增即紅),縮小則要求同步更新本表。
+# 下面每一條都是量出來的,不是抄的——重跑
+#   set(W0∪W1∪W2) - §10.1 逐字清單 - §10.1.2 (b) 具名清單
+# 即得。
+_W0_W2_OUT_OF_LIST_UNNAMED = frozenset({
+    "helper_scripts/deploy/openclaw-alr-candidate-policy.template.json",
+    "helper_scripts/maintenance_scripts/agent_governance_pg_observer_bootstrap.py",
+    "helper_scripts/maintenance_scripts/agent_governance_s2_4_emit_sink.py",
+    "helper_scripts/maintenance_scripts/agent_governance_s2_4_sql_scan.py",
+    "program_code/ml_training/aiml_gate_receipt_adoption.py",
+    "program_code/ml_training/aiml_gate_receipt_classifiers.py",
+    "program_code/ml_training/aiml_gate_receipt_wave_w2.py",
+    "program_code/ml_training/alr_application_identity.py",
+    "program_code/ml_training/alr_candidate_board_events.py",
+    "program_code/ml_training/alr_consumer_write_metrics.py",
+    "program_code/ml_training/alr_retention_runner.py",
+    "program_code/ml_training/edge_feature_schema_contract.py",
+    "program_code/ml_training/schemas/aiml_gate_receipts/"
+    "application_bundle_runtime_closure_v1.schema.json",
+    "program_code/ml_training/schemas/aiml_gate_receipts/"
+    "pg_observer_bootstrap_result_v1.schema.json",
+    "program_code/ml_training/tests/aiml_gate_receipt_validator_testkit.py",
+    "program_code/ml_training/tests/test_aiml_gate_receipt_validator_adoption.py",
+    "program_code/ml_training/tests/test_alr_application_identity.py",
+    "program_code/ml_training/tests/test_alr_candidate_board_events.py",
+    "program_code/ml_training/tests/test_alr_candidate_full_chain.py",
+    "program_code/ml_training/tests/test_alr_consumer_resilience.py",
+    "program_code/ml_training/tests/test_alr_retention_runner.py",
+    "tests/structure/test_agent_governance_pg_observer_bootstrap.py",
+    "tests/structure/test_agent_governance_s2_4_consumer_resilience_disposable.py",
+    "tests/structure/test_agent_governance_s2_4_install_application_bundle.py",
+    "tests/structure/test_agent_governance_s2_4_install_engine_scanner.py",
+    "tests/structure/test_agent_governance_s2_4_install_engine_scanner_disposable.py",
+    "tests/structure/test_agent_governance_s2_4_install_render.py",
+    "tests/structure/test_learning_runtime_manifest_source_static.py",
+    "tests/structure/test_s2_4_w0_admission.py",
+})
+
+
+def test_the_w0_w2_out_of_list_gap_is_pinned_and_cannot_grow() -> None:
+    """第四輪 P2:``_measured_out_of_list_union`` 只涵蓋 W3∪W4∪W5。
+
+    於是 W0/W1/W2 的投影可以長出一條全新的 out-of-list 路徑而不弄紅任何東西——正是 (d) 條
+    要擋的那件事,只是換一波。把它補進 (d) 的承重斷言需要在 §10.1.2 (b) 段具名 29 條路徑,
+    而 §10.4 把 owned-path scope 排除在 worker 可選之外,所以這裡不編文件、改釘缺口:
+    多一條 = 紅(未被任何具名機制覆蓋的新 scope),少一條 = 也紅(要求把本表一起收斂)。
+    """
+
+    union = (
+        set(validator._W0_OWNED_PATHS)
+        | set(validator._W1_OWNED_PATHS)
+        | set(validator._W2_OWNED_PATHS)
+    )
+    measured = (
+        union
+        - set(_design_fenced_paths("### 10.1 Exact owned-path allowlist"))
+        - set(_design_fenced_paths("#### 10.1.2 "))
+    )
+    assert measured == set(_W0_W2_OUT_OF_LIST_UNNAMED), {
+        "new_and_unnamed_anywhere": sorted(measured - _W0_W2_OUT_OF_LIST_UNNAMED),
+        "pinned_but_no_longer_measured": sorted(_W0_W2_OUT_OF_LIST_UNNAMED - measured),
+    }

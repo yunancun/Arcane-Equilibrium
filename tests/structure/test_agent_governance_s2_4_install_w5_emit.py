@@ -135,6 +135,34 @@ def test_w5_emit_refuses_when_the_persisted_w4_lineage_is_missing(tmp_path) -> N
     assert not out_dir.exists()
 
 
+def test_w5_emit_refuses_at_the_regenerated_w0_admission_stage(tmp_path, monkeypatch) -> None:
+    """E4 第四輪 P1-2:admission 段的拒絕本身從來沒有被跑過。
+
+    本檔所有負向測試都經 ``_forced_pass``,而它把 ``derive_source_admission_status`` 釘死成
+    ADMITTED;鏈段參數化又只覆蓋六個 wave-exit 段。於是 ``regenerated_w0_admission`` 這一段
+    可以整段刪掉而本檔全綠——W1/W2 的發射器有這條斷言,W5 沒有。這裡刻意**不**用
+    ``_forced_pass``:只把 admission 導出翻成 NOT_ADMITTED,其餘一律走真實中央導出,好讓
+    「停在第一段」這件事是被觀察到的,而不是被 patch 出來的。
+    """
+
+    monkeypatch.setattr(
+        validator, "derive_source_admission_status",
+        lambda receipt, **kwargs: {
+            "status": "NOT_ADMITTED", "reasons": ["forced-admission-refusal"],
+        },
+    )
+    out_dir = tmp_path / "out"
+    result = install.emit_w5_receipts(
+        out_dir=out_dir,
+        test_evidence=dict(_EMIT_TEST_EVIDENCE),
+        review_provenance=[dict(item) for item in _EMIT_REVIEW_PROVENANCE],
+    )
+    assert result["status"] == "W5_EMIT_REFUSED"
+    assert result["stage"] == "regenerated_w0_admission"
+    assert result["reasons"] == ["forced-admission-refusal"]
+    assert not out_dir.exists()
+
+
 @pytest.mark.parametrize("failing_wave", ["W0", "W1", "W2", "W3", "W4", "W5"])
 def test_w5_emit_refuses_and_writes_nothing_when_any_chain_link_does_not_derive(
     tmp_path, monkeypatch, failing_wave
@@ -353,6 +381,11 @@ def test_w5_derivation_record_states_what_the_declaration_rests_on(
     assert record["w5_wave_exit_derivation"]["status"] == "PASS"
     assert record["w5_wave_exit_self_digest"] == result["w5_wave_exit_self_digest"]
     assert record["historical_persisted_w4"]["historical_w4_integrity"] == "VERIFIED"
+    # P2:lineage 目錄以 repo-relative 記錄——八件 artifact 必須**全部**在另一個 checkout
+    # 逐位元組重現,不能有一件因為 clone 落在別的目錄而不同。
+    assert install._load_persisted_w4_receipts(install.W4_RECEIPT_DIR)["persisted_dir"] == (
+        "docs/execution_plan/ai_ml_landing/receipts/S2.4-WP4-W4"
+    )
     # replay_note 必須同時給重放配方,以及「綠鏈不等於測試跑過/有人審過」的誠實界線。
     assert "predecessor_wave_chain=(w0_wave_exit, w1_wave_exit, w2_wave_exit, w3_wave_exit)" in (
         record["replay_note"]

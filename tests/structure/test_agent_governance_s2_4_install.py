@@ -1089,19 +1089,54 @@ def test_replay_binding_defaults_to_wall_clock_and_rejects_expired(
     assert verdict["production_effect"] == "EXTERNAL_VERIFICATION_PENDING"
 
 
-def test_emitters_refuse_secret_like_evidence(tmp_path) -> None:
-    """E3 P2-4 回歸:persisted evidence 含 secret-like 內容即拒發射且不落任何檔。"""
+_POISONED_EVIDENCE = {
+    "command": "pytest -q",
+    "exit_code": 0,
+    "leak": "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8",
+}
+_CLEAN_EVIDENCE = {"command": "pytest -q", "exit_code": 0}
+_CLEAN_PROVENANCE = [{"pr": 1, "verdict": "x"}]
+# ``_validate_emit_evidence`` 擋的三件事,逐件成為一個 case(訊息各不相同,故可分辨)。
+_EMIT_EVIDENCE_REFUSALS = (
+    ("secret_like_test_evidence", _POISONED_EVIDENCE, _CLEAN_PROVENANCE, "secret-like"),
+    ("empty_test_evidence", {}, _CLEAN_PROVENANCE, "non-empty object"),
+    ("empty_review_provenance", _CLEAN_EVIDENCE, [], "non-empty list"),
+)
 
-    poisoned = {
-        "command": "pytest -q",
-        "exit_code": 0,
-        "leak": "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8",
-    }
-    with pytest.raises(ValueError, match="secret-like"):
-        install.emit_w0_receipts(
+
+@pytest.mark.parametrize(
+    "emitter_name",
+    ["emit_w0_receipts", "emit_w3_receipts", "emit_w4_receipts", "emit_w5_receipts"],
+)
+@pytest.mark.parametrize(
+    "test_evidence,review_provenance,expected",
+    [row[1:] for row in _EMIT_EVIDENCE_REFUSALS],
+    ids=[row[0] for row in _EMIT_EVIDENCE_REFUSALS],
+)
+def test_emitters_refuse_secret_like_evidence(
+    tmp_path, emitter_name, test_evidence, review_provenance, expected
+) -> None:
+    """E3 P2-4 回歸:persisted evidence 含 secret-like/空內容即拒發射且不落任何檔。
+
+    E4 第四輪 P1-1:這支測試的名字是複數,實測卻只跑 ``emit_w0_receipts`` 一支。
+    ``emit_w3/w4/w5_receipts`` 各自帶著**自己那一份** ``_validate_emit_evidence`` 呼叫,刪掉
+    其中任一份,整棵 ``tests/structure`` 仍與 pristine 逐位元組相同——一個能被刪掉而沒有東西
+    變紅的守衛,就是 §10.5 #15 宣稱「遞迴掃描**所有** artifact」時最不該存在的洞。四個發射器
+    現在逐一被跑過,名字裡的複數才成立。
+
+    ``emit_w1/w2_receipts`` 帶著同一份呼叫,由
+    ``test_agent_governance_s2_4_install_integration.py`` 的空/畸形 evidence 參數化測試守住
+    (刪除各自的呼叫即變紅),故不在此重複。
+
+    刻意用 tmp_path 當 out_dir 且不碰正式 receipts 目錄:evidence 防呆在讀任何歷史 lineage
+    之前就 raise,所以本測試對 ``receipts/`` 是零讀零寫。
+    """
+
+    with pytest.raises(ValueError, match=expected):
+        getattr(install, emitter_name)(
             out_dir=tmp_path,
-            test_evidence=poisoned,
-            review_provenance=[{"pr": 1, "verdict": "x"}],
+            test_evidence=dict(test_evidence),
+            review_provenance=[dict(item) for item in review_provenance],
         )
     assert list(tmp_path.iterdir()) == []
 
