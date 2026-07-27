@@ -3,7 +3,7 @@
     "reasons": [],
     "status": "ADMITTED"
   },
-  "admission_self_digest": "sha256:d41fd9791aa51efdadda36ceef1ecc9e6b01cd082b59057ac2928429add40623",
+  "admission_self_digest": "sha256:bfa795a458c77ee2189e2c7d08dbd1ba8166e3426abead9e6ff839b9a84edbac",
   "historical_persisted_w4": {
     "historical_source_head": "f66fe0790ee13c098ad99bbdea3c9001f76328a4",
     "historical_w4_integrity": "VERIFIED",
@@ -21,27 +21,27 @@
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w0_wave_exit_self_digest": "sha256:9c20684ad7bb1fc672c021f2627fbf264e40a3c9d837191409876013e507b41b",
+  "regenerated_w0_wave_exit_self_digest": "sha256:c5fa9fbbb5696a77f654ac5a77634ecb76d73b9a7fe766a76a356f059489c8b8",
   "regenerated_w1_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w1_wave_exit_self_digest": "sha256:7cd82a361519a1dcd4176f84431f68ddde35278eecc6f0ebd1b1d67e7795b038",
+  "regenerated_w1_wave_exit_self_digest": "sha256:573dc2bea41bd03c0893ced8eb113a333dfdfaee766f2f313035692970ffc397",
   "regenerated_w2_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w2_wave_exit_self_digest": "sha256:8ad957e6551aa4f9f2027d7f31e504340fe4eea788460396ba2fd43b773fb003",
+  "regenerated_w2_wave_exit_self_digest": "sha256:84a064cf69c09454d21ca92be6193c03084cacbfdb360475cd53399972a76660",
   "regenerated_w3_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w3_wave_exit_self_digest": "sha256:fe42703e9044b87afa1ca275c41259e720c4f39eb1e3cd36a76a5678b7e49ef3",
+  "regenerated_w3_wave_exit_self_digest": "sha256:6135e464b8b6abee2d43b0e7dc7c928edc0d377a7c7313021e9f1f4c383d30b0",
   "regenerated_w4_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w4_wave_exit_self_digest": "sha256:87d1be08e781afa0c0f91d28f459f314a010e4bd506ccf44b898eb67f7b1aa90",
+  "regenerated_w4_wave_exit_self_digest": "sha256:f830846c04df11e0b0e2dec1a23976a7e7d90e76aa0c9a96f35f2f3ccfaf2a30",
   "remaining_owned_obligation_count": 28,
   "remaining_owned_obligations": [
     {
@@ -420,10 +420,24 @@
       "role": "PM",
       "round": "adjudication",
       "verdict": "rulings recorded; SOURCE_READY not declared here"
+    },
+    {
+      "disposition": "all closed in c2a7263ce (PM ruled fix the code, not the sentence, for the false claim); the receipts were re-emitted at that head and committed as 25d501366",
+      "headline": "Every P1 was the shape this wave keeps producing. Two emitter guards had no test: deleting the _validate_emit_evidence call left tests/structure byte-identical at 3601/6, and the regenerated_w0_admission refusal stage had no test at all because every negative test forced ADMITTED. The third was a measurably false capability claim round 3 had written into the exported ABI — a fifth program_code sys.path insertion in aiml_gate_receipt_wave_w2.py meant importing the facade still resolved broker_connectors/exchange_connectors/dashboard/ai_agents. Of the P2s: §10.1.2 clause (d) did not stop a worker narrowing its own scope, _WAVE_OWNED_PATHS was unpinned, _design_fenced_paths took the first matching heading so a decoy section shadowed the authoritative one, and the latch-D false positive survived through a new vector.",
+      "role": "round-4 reviewers (two independent legs at the merged head 756a59ef7; the individual role identities were not captured in this record)",
+      "round": "round 4 — the first review of the round-3 remediation, the w5-emit emitter and the §10.1.2 amendment, none of which any reviewer had seen when they merged",
+      "verdict": "3 P1 + 6 P2; §11.2 predicate 4 NOT MET until closed"
+    },
+    {
+      "disposition": "both decoys now fail closed under a section-scoped fence-uniqueness guard, each with its own regression that goes red when its own guard is deleted; both ledgers rewritten to describe the tree they are committed in; this record corrected. Re-emission at the round-5 head is PM's step: the emitter refuses a dirty owned scope (measured W5_EMIT_REFUSED / w5_wave_exit, zero files written).",
+      "headline": "The P1 was PM's and in both ledgers: they called the eight artifacts bound to 756a59ef7 when that was only the commit they landed in (measured, all eight carried source_head=fcc44eca7... there and c2a7263ce... here), and the whole stale-receipts paragraph still said the round-4 re-emission was owed after it had been done in the same tree. P2-1: round 4 pinned heading uniqueness but _design_fenced_paths still took the first ```text fence, so a decoy fence under the authoritative heading shadowed a gutted (b) block with the whole lane green at 150 passed. P2-2: round 4's own heading-uniqueness guard had no test — a bare starts[0] left the W5 lane byte-identical at 114 passed. P2-3: this record's review_rounds re-attributed W4's tallies to W5 and no fragment came from round 4.",
+      "role": "round-5 reviewer (one leg at 25d501366, the head carrying the re-emitted receipts)",
+      "round": "round 5 — the closing round; the wave judged converged",
+      "verdict": "1 P1 + 2 P2 in the tree, plus P2-3 against this evidence record; nothing thrown at the gate logic survived"
     }
   ],
   "schema_version": "s2_4_w5_derivation_record_v1_informal",
-  "source_head": "c2a7263ce2c3a66416db61acd8d74ba264c06486",
+  "source_head": "aaee7f1a28bbe0f22cffb9feea15bf9172f1ad7d",
   "test_evidence": {
     "acceptance_matrix": {
       "headline": "36 proven / 3 partially proven / 0 unproven",
@@ -442,35 +456,42 @@
       "dependency_refresh_gate": "b78185b00",
       "emitter_and_amendment": "fcc44eca76e61359cd256f36982df6a15f6ce59f",
       "merge_base": "dda3a3f73",
-      "merged_as": "427bd0dd7 (same tree hash as 756a59ef7)",
+      "merged_as": "427bd0dd7 (same tree hash as 756a59ef7; c2a7263ce and 25d501366 are not merged)",
       "round2_remediation": "b5d546e3a",
       "round3_remediation": "a757c006f",
+      "round4_receipts_committed_at": "25d50136635d24806d827dcb4a12fc23f96130ce — the commit that CARRIES the eight artifacts; each artifact BINDS source_head=c2a7263ce2c3a66416db61acd8d74ba264c06486. Committed at and bound to are different facts; read the binding out of the artifact field.",
       "round4_remediation": "c2a7263ce2c3a66416db61acd8d74ba264c06486",
+      "round5_remediation": "uncommitted in the worktree over 25d501366 at capture time",
       "w5_sweep": "3412281ac",
-      "whole_tree_at_emit": "6167/46",
-      "whole_tree_at_merge_base": "3418+2547 = 5965/46"
+      "whole_tree_at_merge_base": "3418+2547 = 5965/46",
+      "whole_tree_at_this_capture": "6169/46"
     },
     "capture_note": "Locally reproducible repository/test facts only. NOT ORCHESTRATOR_BOUND and NOT platform-attested: governed capture-command cannot host pytest on this Mac (HOME isolation), so these are direct Bash runs. A green W0-W5 chain evidences SOURCE STRUCTURE AT A HEAD ONLY — the wave-exit evidence digests are shape-only and the chain derives PASS on sha256:111...1, so it never evidences that these tests ran. These numbers are the evidence that they ran; the chain is not.",
     "commands": [
       {
         "command": "python3 -m pytest tests/structure -q",
-        "result": "3620 passed, 6 skipped",
-        "run_by": "E1 (builder) and E4-verifier (independent, matched exactly at the prior head)"
+        "result": "3622 passed, 6 skipped",
+        "run_by": "E1 (builder), on the round-5 worktree"
       },
       {
         "command": "python3 -m pytest program_code/ml_training/tests -q",
         "result": "2547 passed, 40 skipped",
-        "run_by": "E1 and E4-verifier"
+        "run_by": "E1, on the round-5 worktree"
       },
       {
         "command": "python3 -m pytest tests/structure program_code/ml_training/tests -q",
-        "result": "6167 passed, 46 skipped (identical on the worktree and a committed clone)",
-        "run_by": "E1; PM independently measured 6128/46 at the preceding head a757c006f"
+        "result": "6169 passed, 46 skipped at the round-5 remediation, against 6167/46 at the round-4 head c2a7263ce = +2 tests, zero regressions, zero new skips",
+        "run_by": "E1; E4-verifier independently measured 6148/46 at 756a59ef7 and PM 6128/46 at a757c006f"
       },
       {
-        "command": "pytest tests/structure program_code/ml_training/tests -q (round-4 head)",
-        "result": "6167 passed, 46 skipped",
-        "run_by": "E1; E4-verifier independently measured 6148/46 at 756a59ef7 on both a worktree and a committed clone"
+        "command": "python3 -m pytest tests/structure/test_agent_governance_s2_4_install_w5.py tests/structure/test_agent_governance_s2_4_install_render.py -q",
+        "result": "the round-5 decoy-fence mutation (a second ```text fence under the authoritative #### 10.1.2 heading carrying the real 45-path list, the authoritative block gutted to one path) is 150 passed on pristine and 6 failed / 146 passed after the fix",
+        "run_by": "E1"
+      },
+      {
+        "command": "python3 -m pytest tests/structure/test_agent_governance_s2_4_install_w5.py -q",
+        "result": "replacing the heading-uniqueness assertion with a bare starts[0] is 114 passed on pristine (byte-identical to baseline) and 1 failed / 115 passed after the fix; deleting the new fence-uniqueness assertion is 1 failed on the design-doc subset",
+        "run_by": "E1"
       },
       {
         "command": "agent_governance_s2_4_install.py engine-scanner-split",
@@ -483,6 +504,10 @@
       {
         "command": "agent_governance.py validate",
         "result": "PASS, roles=20"
+      },
+      {
+        "command": "W0->W5 chain derivation on a clean committed checkout carrying this tree",
+        "result": "admission ADMITTED and W0..W5 all PASS; each of W0/W1/W2/W3/W4 tampered in turn yields W5 NOT_PASS; nine_authorities_false true on all seven artifacts"
       }
     ],
     "disclosed_limits": [
@@ -501,12 +526,12 @@
       "w0_negative_manifest": "sha256:1bd86de7b636bf57ead1a1ecfd00c9b75379ae49d1458a41bd7c22987d6f92f6"
     },
     "host_platform": "darwin (development machine); Linux trade-core is the runtime machine and was not contacted",
-    "review_rounds": "four. R1 five legs at the W4b checkpoint: 3 P0 + 16 P1. R2 two legs on that fix: 2 P0 + 9 P1, all introduced by the fix. R3 five legs at b5d546e3a: 7 P1. R4 two legs at the merged head — the first review of the round-3 remediation, the emitter and the §10.1.2 amendment: 3 P1 + 6 P2.",
+    "review_rounds": "five, enumerated as W5's OWN rounds and consistent with the S2-WP4-W5 row of PROGRESS.md. R1: two legs at 3412281ac (acceptance sweep + wave projection + W0->W5 chain) — a BLOCK on the §9.2 gate and a DONE+FAIL, remediated in b5d546e3a. R2: five legs at b5d546e3a — E3 lifted its BLOCK, E2 confirmed its four prior P1s closed across eleven mutations with zero survivors, E4-verifier matched every number and scored 35/4/0; the round's own finding was that the fix itself was the gate (owned-scope delta read against HEAD rather than the bound commit, §9.2 expiry read off two caller-authored fields, the omitted input-scope path, W5-only scope consumption, both honesty latches syntactic proxies). Remediated in a757c006f. R3: the a757c006f remediation plus the emitter, the §10.1.2 amendment and the ledger projection — none of which any reviewer had seen when they merged. R4: two legs at the merged head 756a59ef7, the first review of R3's output — 3 P1 + 6 P2; remediated in c2a7263ce, whose re-emitted receipts are the commit 25d501366. R5: at 25d501366 — 1 P1 + 2 P2 in the tree plus P2-3 against this record, and the wave judged converged because nothing thrown at the gate logic survived. The P1 was two false statements in both ledgers about receipts committed in the same tree; P2-1 was the §10.1.2 (b) fence still shadowable by a decoy ```text fence in the same section; P2-2 was R4's own heading-uniqueness guard having no test; P2-3 was this field, which had carried W4's tallies. Those tallies — 3 P0 + 16 P1 at the W4b checkpoint and 2 P0 + 9 P1 on that fix — are W4's and are recorded in the S2-WP4-W4 row of PROGRESS.md; they are not W5's.",
     "schema_version": "s2_4_w5_local_test_capture_v1"
   },
   "w5_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "w5_wave_exit_self_digest": "sha256:09241d73b25c2fb5caa4c0e4ebfb55a93a7f36ce8c1f1e0d4cd829e235da0c17"
+  "w5_wave_exit_self_digest": "sha256:58cd0c67a185750e04d4a8272c535b0840b403d6abca2c644704009bba2eab1f"
 }
