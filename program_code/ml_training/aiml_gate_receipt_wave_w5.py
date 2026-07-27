@@ -47,14 +47,17 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 _HELPER_DIR = REPO_ROOT / "helper_scripts" / "maintenance_scripts"
 if str(_HELPER_DIR) not in sys.path:
     sys.path.insert(0, str(_HELPER_DIR))
-_PROGRAM_CODE_DIR = REPO_ROOT / "program_code"
-if str(_PROGRAM_CODE_DIR) not in sys.path:
-    sys.path.insert(0, str(_PROGRAM_CODE_DIR))
+# W5 review P2-E:本葉不在 import 期把 ``program_code`` 放進 sys.path。它從來沒用過該路徑
+# (§9.2 的 package 形匯入發生在 contracts 葉的函式內),而本葉是 facade top-level import、
+# 位於 engine-scanner runtime import 閉包內——讓 broker/exchange/dashboard 在 scanner 進程
+# 中變成可匯入的 top-level 套件必須是決策而非 import 副作用(§10.1.1 #4)。
 
 from aiml_gate_receipt_schema_core import (  # noqa: E402
+    S2_4_W5_REMAINING_OWNED_OBLIGATIONS,
     canonical_digest,
     owned_path_blob_projection_digest,
     owned_scope_worktree_delta,
+    program_code_on_path,
     resolve_facade,
 )
 
@@ -238,7 +241,17 @@ _W5_EXPORTED_ABI = {
         "§9.2: an expired S2.2A/S2.3/S1.3 SOURCE identity is admitted only together with ONE "
         "current s2_4_dependency_refresh_attestation_v1 whose semantic digests the VERIFIER "
         "recomputes itself, at the exact current head, from the reviewed producer SSOT, and "
-        "which must equal BOTH the refresh's claim and the original receipt's own values. The "
+        "which must equal BOTH the refresh's claim and the original receipt's own values. Each "
+        "class's semantic set is the ATTESTED SUBJECT, not the producer file's own hash: S2.3 "
+        "reproduces the sealed runtime content identity, the native-library inventory, the lock "
+        "closure, the expected-component identities, the S1.3 negative/rollback bindings and "
+        "the committed sealed receipt it chains to; S1.3 reproduces the invariant identity/ACL "
+        "projection and the over-grant kind set; S2.2A reproduces the capture/runtime/training "
+        "contract digests. Before the second adversarial round S1.3 and S2.3-expected-identity "
+        "carried only (schema_sha256, source_sha256), and source_sha256 was byte-identical to "
+        "the producer_module_digest the refresh already bound, so 'independent replay' reduced "
+        "to 'two files are unchanged' and every one of eight subject drifts on the real shipped "
+        "S2.3 expected-identity receipt still reached DEPENDENCY_REFRESH_ADMITTED. The "
         "refresh therefore cannot be minted from the original digest alone, cannot change any "
         "semantic digest, cannot be produced inside the original's own observation window or "
         "by the same producer label, cannot refresh another refresh (closed enum) and cannot "
@@ -257,354 +270,10 @@ _W5_EXPORTED_ABI = {
         "on macOS. A green W5 licenses SOURCE_READY only, never an install claim"
     ),
     # ── §10.3 誠實面:W5 **不**提供、且不得被當成已提供的義務。 ──────────────────
-    # 每一項都帶 typed 狀態與 owner;W4 交出的十二項逐條在此重述並更新 owner/理由,
-    # 加上 W5 自審新發現的四項。任何一項被靜默刪除都會弄破本 wave 的 exported-ABI digest。
-    "remaining_owned_obligations": [
-        {
-            "obligation_id": "ENCRYPTED_BLOB_DIGEST_ORDERING",
-            "typed_status": "OPEN_DESIGN_QUESTION",
-            "owner_wave": "W6",
-            "spec_refs": ["§5.1", "§7"],
-            "statement": (
-                "CREDENTIAL_INSTALL's signed intent must carry encrypted_blob_digest, but that "
-                "digest is the hash of non-deterministic `systemd-creds encrypt` output. W5 "
-                "confirms the question is unchanged: the fail-closed encrypt-then-compare "
-                "binding still holds and no source change can decide whether the intent is "
-                "signed before or after the encryption runs. It is an operator/W6 sequencing "
-                "decision about a real host."
-            ),
-            "w5_provides": "nothing new; carried forward unchanged from W3/W4",
-        },
-        {
-            "obligation_id": "OBSERVER_SPACE_PRE_STATE_DIGEST",
-            "typed_status": "PARTIALLY_PROVIDED_BY_W4B",
-            "owner_wave": "W6B",
-            "spec_refs": ["§5.2", "§5.4", "§6"],
-            "statement": (
-                "The plan-side digest space is defined and enforced (W4b). The observer side "
-                "still needs a W6B postcheck driver contract requiring the verifier to return "
-                "canonical_digest over the SAME code-owned per-row pre-state projection shape. "
-                "W5 cannot close it: verifying that contract needs a real host observer, and no "
-                "runtime evidence exists anywhere in S2.4."
-            ),
-            "w5_provides": "nothing new; owner unchanged",
-        },
-        {
-            "obligation_id": "PRIOR_LINEAGE_ENTRY_IDENTITY",
-            "typed_status": "NOT_PROVIDED_BY_W5",
-            "owner_wave": "W6B",
-            "spec_refs": ["§5.1", "§9.1"],
-            "statement": (
-                "APPLY requires a non-empty replay ledger but cannot verify WHICH permits the "
-                "prior entries consumed, because probe_id/prepare_id are not carried in the "
-                "install plan. Closing it needs either the W6B runner threading the probe/"
-                "PREPARE authorization ids into the APPLY inputs, or a s2_4_install_plan_core_v1 "
-                "field — a schema change §10.4 forbids the worker from choosing. Unchanged."
-            ),
-            "w5_provides": "nothing new; owner unchanged",
-        },
-        {
-            "obligation_id": "PLAN_EXPIRY_OUTSIDE_SIGNED_CORE",
-            "typed_status": "PARTIALLY_PROVIDED_BY_W4B",
-            "owner_wave": "W6B",
-            "spec_refs": ["§9", "§9.2", "§10.4", "§10.5 #28"],
-            "statement": (
-                "s2_4_install_plan_v1.expires_at lives outside core, so it is not covered by the "
-                "operator signature. The reachable half is closed (expired plan refused before "
-                "any lock/mutation; every TTL bound derived from each artifact's own "
-                "expires_at). Moving expires_at inside core is a s2_4_install_plan_core_v1 "
-                "schema change §10.4 forbids. Unchanged."
-            ),
-            "w5_provides": "nothing new; owner unchanged",
-        },
-        {
-            "obligation_id": "INSTALLED_UNIT_PROBE_CORE_BINDING",
-            "typed_status": "PARTIALLY_PROVIDED_BY_W4B",
-            "owner_wave": "W6B",
-            "spec_refs": ["§6", "§10.4", "§10.5 #36"],
-            "statement": (
-                "expected_installed_unit_probe_core_digest is optional at the API and MANDATORY "
-                "for the W6 runner; omission is visible as "
-                "UNVERIFIED_NO_EXPECTED_VALUE_SUPPLIED on every verdict. Closing it means the "
-                "W6B runner always supplying it or adding a plan-core field. Unchanged."
-            ),
-            "w5_provides": "nothing new; owner unchanged",
-        },
-        {
-            "obligation_id": "EFFECT_RECEIPT_RECONCILE_BINDING",
-            "typed_status": "PARTIALLY_PROVIDED_BY_W4B",
-            "owner_wave": "W6B",
-            "spec_refs": ["§5.2", "§10.4"],
-            "statement": (
-                "s2_4_install_effect_receipt_v1 has no field for the startup-reconcile verdict "
-                "and the schema is additionalProperties:false. W4b binds all three signals into "
-                "the durable evidence set beside the journal; a consumer holding only the "
-                "receipt still cannot re-derive the reconcile verdict. Unchanged."
-            ),
-            "w5_provides": "nothing new; owner unchanged",
-        },
-        {
-            "obligation_id": "STARTUP_RECONCILE_SURFACE_ABSENT",
-            "typed_status": "OPEN_BY_DESIGN_W6_RUNNER_PRECONDITION",
-            "owner_wave": "W6",
-            "spec_refs": ["§5.2", "§10.5 #39"],
-            "statement": (
-                "A host driver not wrapped by JournalRoutedDriver has no durable journal "
-                "surface, so reconcile_before_new_intent returns "
-                "STARTUP_RECONCILE_SURFACE_ABSENT with admits_new_work=None. The W6 runner MUST "
-                "inject a journal-routed driver into the probe and PREPARE entry points. "
-                "Unchanged."
-            ),
-            "w5_provides": "nothing new; owner unchanged",
-        },
-        {
-            "obligation_id": "STARTUP_JOURNAL_PARENTS_MUST_PREEXIST",
-            "typed_status": "NOT_PROVIDED_BY_W5",
-            "owner_wave": "W6B",
-            "spec_refs": ["§5.2"],
-            "statement": (
-                "On a fresh host the three §5.2 journal parents do not exist, so startup "
-                "reconciliation returns RECOVERY_REQUIRED and nothing in S2.4 can start until "
-                "an operator pre-creates .../s2_4, .../s2_4/probes and .../s2_4/prepared "
-                "root-owned 0700. This is an OPERATOR PRECONDITION for the W6 runbook, not a "
-                "defect to be fixed by giving the journal surface a mkdir capability. "
-                "Unchanged."
-            ),
-            "w5_provides": "nothing new; owner unchanged",
-        },
-        {
-            "obligation_id": "RECEIPT_EMISSION_PENDING_IS_NOT_A_RECEIPT_RETRY",
-            "typed_status": "PARTIALLY_PROVIDED_BY_W4B",
-            "owner_wave": "W6B",
-            "spec_refs": ["§10.5 #8", "§10.5 #14"],
-            "statement": (
-                "A terminal, complete install can permanently have no receipt: the journal does "
-                "not carry the row result/postcheck digests the receipt binds, so "
-                "ALREADY_APPLIED_IDEMPOTENT cannot reconstruct it. Actually emitting the "
-                "receipt on retry is an artifact-shape decision belonging to the W6B runner. "
-                "Unchanged."
-            ),
-            "w5_provides": "nothing new; owner unchanged",
-        },
-        {
-            "obligation_id": "STRANDED_WAL_TEMP_FILES_ARE_REPORT_ONLY",
-            "typed_status": "PARTIALLY_PROVIDED_BY_W4B",
-            "owner_wave": "W6B",
-            "spec_refs": ["§5.2"],
-            "statement": (
-                "The §5.2 startup enumeration matches, lists and names stranded WAL temp "
-                "residue and blocks new work while it exists, but §5.2 forbids this surface "
-                "from renaming or removing anything, so clearing it is an operator runbook "
-                "step. Unchanged."
-            ),
-            "w5_provides": "nothing new; owner unchanged",
-        },
-        {
-            "obligation_id": "ATTESTATION_EXPIRY_AND_HOST_TIME_ARE_NOT_CROSS_CHECKED",
-            "typed_status": "PARTIALLY_PROVIDED_BY_W4B",
-            "owner_wave": "W6B",
-            "spec_refs": ["§9.1", "§10.2"],
-            "statement": (
-                "W5 reviewed this one line by line because it READS like a source fix. It is "
-                "not, and W5's first draft of this correction was itself wrong and is recorded "
-                "here rather than silently rewritten. BOTH halves W4 named are still open. "
-                "(a) Nothing compares the OBSERVED moment against attestation_expires_at: "
-                "derive_apply_attestation_status deliberately excludes the caller's now, so an "
-                "attestation whose own expiry has passed still verifies as long as its SIGNED "
-                "trusted_host_time sits inside both permit windows. (b) The attestation's "
-                "SIGNED trusted_host_time is still never reconciled with the value "
-                "driver.trusted_host_time() returned for the same transaction — verified by "
-                "reading agent_governance_s2_4_install_evidence.derive_apply_attestation_status, "
-                "which compares the signed time only against attestation_expires_at, the 900s "
-                "attestation TTL and the two permit windows. What DOES exist, and what W4's "
-                "statement omitted, is a DIFFERENT and weaker relation that W5 adds to the "
-                "record: agent_governance_s2_4_install_driver._trusted_host_time_reasons "
-                "cross-checks driver.trusted_host_time() against the observed moment under the "
-                "§9.1 PERMIT_CLOCK_SKEW_SECONDS ceiling (regression: "
-                "test_c18_the_trusted_host_time_is_cross_checked_against_the_observed_time). "
-                "That bounds the DRIVER's clock, not the attestation's signed value. The "
-                "residual is therefore smaller than W4 implied but non-zero: the signed "
-                "trusted_host_time is still bounded indirectly, because it must fall inside two "
-                "independently signed permit windows that are themselves capped at 900s. "
-                "Closing either half needs a decision about WHICH clock is authoritative for "
-                "the observed moment on a real host (§9.1 says the host's, and on a real host "
-                "the two values come from the same clock); in a source lane where both are "
-                "fixtures the question is unanswerable, and wiring the caller's now into the "
-                "freshness derivation would REVERSE the W4b property that freshness comes only "
-                "from the SIGNED trusted_host_time."
-            ),
-            "w5_provides": (
-                "the line-verified confirmation that both halves are still open (W4's statement "
-                "stands), the previously unrecorded driver-clock skew ceiling and its named "
-                "regression, the observation that the two 900s permit windows bound the residual, "
-                "and the explicit reason this is not a source change"
-            ),
-        },
-        {
-            "obligation_id": "ATTESTOR_KEY_IS_NOT_SEPARATE_FROM_THE_PERMIT_KEY",
-            "typed_status": "NOT_PROVIDED_BY_W5",
-            "owner_wave": "W6B",
-            "spec_refs": ["§9.1", "§10.2"],
-            "statement": (
-                "One physical Ed25519 key roots both the four operator permit profiles and the "
-                "apply attestation. Domain separation is namespace-level and real; CUSTODY is "
-                "not separated. The fix is a separate attestor keypair with its own pinned "
-                "fingerprint, which is a W6 key-custody decision about a real host. W5 confirms "
-                "no source change can establish it: the source lane has no key material at all."
-            ),
-            "w5_provides": "nothing new; owner unchanged",
-        },
-        {
-            "obligation_id": "REPLAY_LEDGER_CONSUME_ONCE_IS_A_FILESYSTEM_PROPERTY",
-            "typed_status": "OPEN_HONEST_BOUNDARY",
-            "owner_wave": "W6B",
-            "spec_refs": ["§9.1", "§10.5 #8"],
-            "statement": (
-                "Ledger rollback and forking are prevented by the root-owned 0700 parent, the "
-                "0600 mode and the exclusive install lock, not cryptographically. Closing it "
-                "needs a monotonic counter in trusted storage or an attestor-signed ledger "
-                "head. Unchanged."
-            ),
-            "w5_provides": "nothing new; owner unchanged",
-        },
-        {
-            "obligation_id": "STARTUP_RECONCILE_LANE_PATHS",
-            "typed_status": "NOT_PROVIDED_BY_W5",
-            "owner_wave": "W6B",
-            "spec_refs": ["§5.2"],
-            "statement": (
-                "Enumeration sees every non-terminal journal in the three parents, but the "
-                "caller's paths still decide which lane receives the independent observation "
-                "digest and per-lane ownership key. Closing that half means the W6B runner "
-                "passing the probe_id/prepare_id-derived paths it already holds. Unchanged."
-            ),
-            "w5_provides": "nothing new; owner unchanged",
-        },
-        # ── W5 自審新增的四項 ────────────────────────────────────────────────────
-        {
-            "obligation_id": "DEPENDENCY_REFRESH_RECEIPT_BINDING_ABSENT",
-            "typed_status": "NOT_PROVIDED_BY_W5",
-            "owner_wave": "PM",
-            "spec_refs": ["§3", "§10.4", "§11.3"],
-            "statement": (
-                "The §9.2 gate itself is now built and load-bearing (schema, central branch, "
-                "verifier-side recomputation, builder, tests), so §11.2's 'complete source "
-                "inventory' is no longer false and §10.5 #28's first half is PROVEN. What is "
-                "NOT closed is the receipt binding: §3 requires the terminal "
-                "s2_4_install_effect_receipt_v1 to reference 'source_admission_receipt, W0-W5 "
-                "wave-chain and DEPENDENCY-REFRESH digests', and that closed "
-                "additionalProperties:false schema has no field for them — a consumer holding "
-                "only the install receipt cannot see which refreshes admitted the expired "
-                "source identities. Adding the field is an exported-schema change §10.4 "
-                "forbids the worker from choosing, exactly like PLAN_EXPIRY_OUTSIDE_SIGNED_CORE "
-                "and EFFECT_RECEIPT_RECONCILE_BINDING. Until PM rules, the refresh verdicts are "
-                "reachable only through derive_source_dependency_admission_status at APPLY "
-                "time, never from the persisted receipt."
-            ),
-            "w5_provides": (
-                "the complete §9.2 gate (four refreshable classes, nine never-refreshable "
-                "classes, verifier-side reproduction, one-refresh rule) and the exact residual: "
-                "the terminal receipt has nowhere to carry the refresh digests §3 names"
-            ),
-        },
-        {
-            "obligation_id": "DEPENDENCY_REFRESH_REPRODUCER_NODE_IS_DECLARATIVE",
-            "typed_status": "PARTIALLY_PROVIDED_BY_W5",
-            "owner_wave": "W6",
-            "spec_refs": ["§9.1", "§9.2"],
-            "statement": (
-                "§9.2 requires an INDEPENDENT replay. W5 makes two halves of that structural "
-                "and one half declarative, and says which is which. STRUCTURAL and unforgeable: "
-                "the semantic digests are recomputed BY THE VERIFIER from the repository at the "
-                "bound head and must equal both the refresh's claim and the original's own "
-                "values, so a refresh can never be minted from the original digest; and "
-                "reproduced_at must be strictly after the original evidence's own expiry, so "
-                "the same observation cannot be restated as a refresh. DECLARATIVE: that the "
-                "reproducing NODE differs from the producing node rests on reproducer_caller "
-                "not equalling the original's producer label, which a hostile producer can "
-                "simply relabel. The source lane holds no key material at all (see "
-                "ATTESTOR_KEY_IS_NOT_SEPARATE_FROM_THE_PERMIT_KEY), so node custody cannot be "
-                "established here; closing it means a per-node attestor identity, which is a "
-                "W6 key-custody decision about real hosts. A second, smaller asymmetry is "
-                "recorded rather than hidden: source_compatibility_receipt_v1/v2 carry no "
-                "'caller' or 'platform' field at all, so for S2.2A the producer label degrades "
-                "to session_id ('S2.2A') and the platform component of the projection is null."
-            ),
-            "w5_provides": (
-                "the verifier-side recomputation and the strictly-after-expiry rule as the two "
-                "unforgeable halves, the caller inequality as the declared half, and the exact "
-                "statement of what a relabelling producer could still do"
-            ),
-        },
-        {
-            "obligation_id": "PR_SET_DUMPABLE_IS_DECLARED_NOT_ENFORCED",
-            "typed_status": "NOT_PROVIDED_BY_W5",
-            "owner_wave": "W6B",
-            "spec_refs": ["§7", "§10.5 #26"],
-            "statement": (
-                "§10.5 #26 requires PR_SET_DUMPABLE=0 to be LOAD-BEARING. It is not. "
-                "PROCESS_HARDENING_CONTRACT['pr_set_dumpable'] = 0 is a declared constant that "
-                "appears in exactly two projection dicts and in nothing else: "
-                "derive_host_credential_capability_status checks systemd_creds_available, "
-                "tpm2_available and decryption_name_verification and never looks at it, and no "
-                "driver protocol method observes it. The pre-existing test named "
-                "test_process_hardening_contract_is_load_bearing asserts the constant equals "
-                "itself, which is exactly the failure mode this wave was sent to find. The "
-                "other four clauses of #26 ARE load-bearing: --with-key=host+tpm2 is enforced "
-                "through tpm2_available, the encrypted-blob fingerprint is re-derived and "
-                "compared, the closed eight-key DSN set is enforced, and LimitCORE=0 plus the "
-                "PG*/LD*/PYTHON* scrub are enforced by the unit's byte-equality check. Closing "
-                "this one means observing prctl(PR_GET_DUMPABLE) on the applier and refusing "
-                "when it is not 0 — a driver-protocol and host-observation change, i.e. "
-                "production implementation on a real host, not a test."
-            ),
-            "w5_provides": (
-                "the finding, the exact reason the existing test is tautological, and the "
-                "honest classification of §10.5 #26 as PARTIALLY PROVEN"
-            ),
-        },
-        {
-            "obligation_id": "S2_5_LIFECYCLE_FIXTURES_DO_NOT_EXIST",
-            "typed_status": "OUT_OF_WP4_SCOPE",
-            "owner_wave": "S2.5A",
-            "spec_refs": ["§10.5 #29", "§11.3"],
-            "statement": (
-                "§10.5 #29's second clause says 'S2.5 fixtures own `enable --now`, "
-                "enabled/reboot persistence and rollback-to-disabled'. No S2.5 source or "
-                "fixture exists in this repository, so that clause has no owner in WP4 and "
-                "cannot be satisfied here. What W5 CAN and does prove is the S2.4 half: the "
-                "aggregate driver surface refuses enable/start/restart/kill, the closed "
-                "postcheck and receipt schemas carry no runtime-directory or "
-                "decrypted-credential property, and an enabled or active observation is never "
-                "a success. The clause is recorded rather than counted as covered."
-            ),
-            "w5_provides": (
-                "the S2.4 half as a live re-derivation and the explicit statement that the S2.5 "
-                "half has no owner in this work package"
-            ),
-        },
-        {
-            "obligation_id": "OWNED_PATH_PROJECTION_RULER_IS_NOT_UNIFORM",
-            "typed_status": "RECORDED_NOT_ABSORBED",
-            "owner_wave": "PM",
-            "spec_refs": ["§10.3"],
-            "statement": (
-                "W0/W1/W2 and W5 project owned-path content from the BOUND COMMIT's blobs "
-                "(owned_path_blob_projection_digest), which is the corrected form W2's review "
-                "landed after finding that a projection over working-tree bytes lets a receipt "
-                "certifying an unchanged HEAD be self-consistent on a dirty tree. W3 and W4 "
-                "still hash working-tree bytes through their own _file_sha256. Every wave "
-                "remains internally self-consistent, so no chain derivation is wrong today, but "
-                "two different rulers are in use across one receipt chain. W5 does not change "
-                "aiml_gate_receipt_wave_w3.py or _w4.py: they are W3/W4-owned files and "
-                "unifying them is a PM path-scope call, not a test-writer's."
-            ),
-            "w5_provides": (
-                "the corrected ruler for W5's own projection plus owned_scope_worktree_delta "
-                "visibility, and this explicit record of the divergence"
-            ),
-        },
-    ],
+    # 每一項都帶 typed 狀態與 owner;W4 交出的十五項逐條在此重述(owner/理由可更新,提供
+    # 等級不可軟化),加上 W5 自審新發現的九項。任一項被靜默刪除都會弄破本 wave 的
+    # exported-ABI digest。清單本體依 2000 行治理拆分住在 schema_core,物件即單一真相來源。
+    "remaining_owned_obligations": S2_4_W5_REMAINING_OWNED_OBLIGATIONS,
 }
 
 
@@ -908,6 +577,50 @@ def _schema_registration_live(repo_root: Path = REPO_ROOT) -> dict[str, Any]:
     return live
 
 
+def _producer_input_scope_live(facade: Any) -> dict[str, bool]:
+    """每一族的 producer 輸入集合是否真的蓋住該 producer 自己宣告的輸入(逐族布林)。
+
+    以 producer 的**活**常量比對而非固定數字:allowlist 日後合法長大時本鍵仍為 True,
+    但只要有人把 §9.2 的重算範圍縮小(於是物化樹與 clean-tree 閘同時看不到那些位元組),
+    對應族即翻成 False,W5 wave-exit 必破。
+    """
+
+    with program_code_on_path():
+        from ml_training import learning_runtime_manifest as _lrm  # noqa: E402 (lazy)
+
+    identity_producer = (
+        "helper_scripts/maintenance_scripts/agent_governance_identity_acl_contract.py"
+    )
+    required = {
+        "S2_2A_SOURCE_COMPATIBILITY": set(_lrm.CAPTURE_INPUTS)
+        | set(_lrm.LEARNING_CODE_INPUTS_V2)
+        | set(_lrm.MIGRATION_INPUTS)
+        | {
+            _lrm.REGIME_OOS_LABEL_CONTRACT,
+            _lrm.POLICY_TEMPLATE,
+            _lrm.DEPENDENCY_LOCK_SPEC_FILE,
+            _lrm.DEPENDENCY_LOCK_LOCK_FILE,
+        },
+        "S2_3_SEALED_BUILD": {"requirements-ml.lock", "requirements-ml.txt"},
+        # P1-A(對抗審計第二輪):expected-identity 的語義主體是 S1.3 常量投影 + lock 封閉
+        # 導出的 runtime 內容身分 + repo 內那份已提交的 sealed receipt,三者都必須在集合裡,
+        # 否則 clean-tree 閘與物化樹同時看不到它們。
+        "S2_3_EXPECTED_IDENTITY": {
+            identity_producer,
+            "docs/execution_plan/ai_ml_landing/receipts/S2.3-sealed-build-receipt-v1.json",
+            "requirements-ml.lock",
+            "requirements-ml.txt",
+        },
+    }
+    scope: dict[str, bool] = {}
+    for name, row in sorted(facade.S2_4_DEPENDENCY_REFRESH_CLASSES.items()):
+        paths = set(facade.dependency_producer_input_paths(name))
+        scope[name] = bool(paths) and row["producer_module"] in paths and (
+            required.get(name, set()) <= paths
+        )
+    return scope
+
+
 _DEPENDENCY_REFRESH_LIVE_KEYS = (
     "refreshable_classes",
     "never_refreshable_classes",
@@ -926,6 +639,10 @@ _DEPENDENCY_REFRESH_LIVE_KEYS = (
     "semantic_digest_drift_status",
     "two_refreshes_status",
     "never_refreshable_statuses",
+    "producer_input_scope_covers_the_allowlists",
+    "hand_written_original_status",
+    "original_without_self_digest_status",
+    "never_refreshable_stub_statuses",
     "refresh_carries_no_signature_field",
 )
 
@@ -1067,7 +784,43 @@ def _dependency_refresh_live(repo_root: Path = REPO_ROOT) -> dict[str, Any]:
             )["status"]
             for name in sorted(facade.S2_4_NEVER_REFRESHABLE_EVIDENCE)
         }
-        # 10) 簽章判斷的可測形:closed schema 不含任何簽章面。
+        # 10) W5 review P1-A:重算的**範圍**必須真的蓋住 producer 自己的凍結 allowlist。
+        # 這是 commit 物化 + clean-tree 閘兩者共用的同一個集合;有人把它縮小,兩半同時變弱。
+        live["producer_input_scope_covers_the_allowlists"] = _producer_input_scope_live(facade)
+        # 11) W5 review P1-C:原 receipt 未經家族驗證器認證就不得被刷新。手寫一份任何 session
+        # 都沒產過的 "original"(自帶 running_attested、自選觀測窗),以及把真 receipt 的
+        # self_digest 拿掉,兩者都必須拒——否則「reproduced_at 晚於原到期」這條反自我刷新
+        # 控制會因為 original_expires_at 落在偽造者手上而失效。
+        forged = {
+            "schema_version": "expected_identity_receipt_v1",
+            "caller": "E9:hand-written",
+            "platform": dict(_DEPENDENCY_REFRESH_PROBE_PLATFORM),
+            "observation_time": "2020-01-01T00:00:00+00:00",
+            "expires_at": "2020-01-01T00:30:00+00:00",
+            "running_attested": True,
+            **facade.reproduce_dependency_semantic_digests(
+                "S2_3_EXPECTED_IDENTITY",
+                original_schema_version="expected_identity_receipt_v1",
+                repo_root=repo_root,
+            ),
+        }
+        live["hand_written_original_status"] = _status(_build(original_receipt=forged), forged)
+        unsigned = {key: value for key, value in original.items() if key != "self_digest"}
+        live["original_without_self_digest_status"] = _status(
+            _build(original_receipt=unsigned), unsigned
+        )
+        # 12) W5 review P2-D:``evidence_class`` 只是 caller 遞交的標籤。九個永不可刷新的類別
+        # 在**沒有** refresh 時也不得因為一個兩鍵 stub 而導出 SOURCE_DEPENDENCY_FRESH。
+        live["never_refreshable_stub_statuses"] = {
+            name: facade.derive_source_dependency_admission_status(
+                evidence_class=name,
+                receipt={"expires_at": "2099-01-01T00:00:00+00:00"},
+                now=_DEPENDENCY_REFRESH_PROBE_NOW,
+                repo_root=repo_root,
+            )["status"]
+            for name in sorted(facade.S2_4_NEVER_REFRESHABLE_EVIDENCE)
+        }
+        # 13) 簽章判斷的可測形:closed schema 不含任何簽章面。
         schema = facade._load_schema(_DEPENDENCY_REFRESH_SCHEMA)
         live["refresh_carries_no_signature_field"] = not any(
             marker in name
@@ -1080,8 +833,108 @@ def _dependency_refresh_live(repo_root: Path = REPO_ROOT) -> dict[str, Any]:
     return live
 
 
+# §9.2 的 typed 裁決今天有沒有**生產**呼叫端(B 項:誠實面必須是被測量出來的,不是被宣稱的)。
+# 掃描面 = S2.4 的生產治理葉全集;§9.2 的定義/再導出住在 program_code/ml_training,測試住在
+# tests/,故此集合裡出現該名字就代表 APPLY/PREPARE 真的問了這個閘。
+_PRODUCTION_SURFACE_REL = "helper_scripts/maintenance_scripts"
+_REFRESH_ADMISSION_ENTRY = "derive_source_dependency_admission_status"
+# D 項:wave-exit 的三串 evidence digest 只被形狀約束住,任何 64 位十六進位都合法。
+_FABRICATED_EVIDENCE_DIGEST = "sha256:" + "1" * 64
+
+
+def _refresh_call_site_live(repo_root: Path = REPO_ROOT) -> dict[str, Any]:
+    """§9.2 admission 裁決在生產面的呼叫端(空集合 = 這個閘今天只被測試與 W5 投影呼叫)。"""
+
+    live: dict[str, Any] = {}
+    try:
+        surface = Path(repo_root) / _PRODUCTION_SURFACE_REL
+        callers: list[str] = []
+        for path in sorted(surface.glob("*.py")):
+            text = path.read_text(encoding="utf-8", errors="replace")
+            if f"{_REFRESH_ADMISSION_ENTRY}(" in text:
+                callers.append(f"{_PRODUCTION_SURFACE_REL}/{path.name}")
+        live["production_call_sites"] = callers
+        # 唯一真的在 APPLY 期消費 §9.2 source 身分的地方(讀 repo 固定路徑的 S2.3 artifact),
+        # 它只驗 status/self_digest/三個身分欄位,完全不導新鮮度。
+        import agent_governance_s2_4_host_identity as _host
+
+        live["apply_time_consumer"] = (
+            "agent_governance_s2_4_host_identity.s2_3_expected_identity_reasons"
+        )
+        live["apply_time_consumer_derives_freshness"] = (
+            _REFRESH_ADMISSION_ENTRY in _host.s2_3_expected_identity_reasons.__code__.co_names
+        )
+    except Exception:  # noqa: BLE001 - 任何逸出 = fail-closed 未證
+        for key in (
+            "production_call_sites",
+            "apply_time_consumer",
+            "apply_time_consumer_derives_freshness",
+        ):
+            live.setdefault(key, None)
+    return live
+
+
+def _evidence_authenticity_live() -> dict[str, Any]:
+    """§10.5 / CLAUDE 證據保證:wave-exit 的三串 evidence digest 到底被什麼擋住(誠實測量)。"""
+
+    live: dict[str, Any] = {}
+    facade = resolve_facade()
+    try:
+        schema = facade._load_schema("s2_4_wave_exit_receipt_v1")
+        defs = schema.get("$defs", {})
+        constraints: dict[str, Any] = {}
+        for field in ("test_digests", "capture_digests", "review_fragment_digests"):
+            spec = dict(schema["properties"][field])
+            item = dict(spec.get("items") or {})
+            if "$ref" in item:
+                item = dict(defs.get(str(item["$ref"]).rsplit("/", 1)[-1], {}))
+            constraints[field] = {
+                "min_items": spec.get("minItems"),
+                "item_constraint_keys": sorted(item),
+            }
+        live["wave_exit_evidence_constraints"] = constraints
+        # 形狀之外沒有任何東西:沒有 producer 身分、沒有執行憑據、沒有 orchestrator 綁定。
+        live["only_shape_is_constrained"] = all(
+            row["item_constraint_keys"] in (["pattern", "type"], ["type"])
+            for row in constraints.values()
+        )
+        import agent_governance_s2_4_emit_sink as _sink
+
+        try:
+            _sink.validate_emit_evidence(
+                {"fabricated": _FABRICATED_EVIDENCE_DIGEST},
+                [{"fabricated": _FABRICATED_EVIDENCE_DIGEST}],
+                secret_scanner=lambda _payload: False,
+            )
+            live["emit_sink_accepts_fabricated_evidence"] = True
+        except ValueError:
+            live["emit_sink_accepts_fabricated_evidence"] = False
+        # 掃描器不是恆真:空 evidence 與帶秘密的 evidence 都必須被擋(否則上面那個 True
+        # 只是「什麼都不檢查」,而不是「只檢查形狀」)。
+        for key, args in (
+            ("emit_sink_refuses_empty_evidence", ({}, [{"a": 1}], lambda _p: False)),
+            ("emit_sink_refuses_secret_like_evidence",
+             ({"a": 1}, [{"a": 1}], lambda _p: True)),
+        ):
+            try:
+                _sink.validate_emit_evidence(args[0], args[1], secret_scanner=args[2])
+                live[key] = False
+            except ValueError:
+                live[key] = True
+    except Exception:  # noqa: BLE001 - 任何逸出 = fail-closed 未證
+        for key in (
+            "wave_exit_evidence_constraints",
+            "only_shape_is_constrained",
+            "emit_sink_accepts_fabricated_evidence",
+            "emit_sink_refuses_empty_evidence",
+            "emit_sink_refuses_secret_like_evidence",
+        ):
+            live.setdefault(key, None)
+    return live
+
+
 def w5_exported_abi_projection(repo_root: Path = REPO_ROOT) -> dict[str, Any]:
-    """W5 exported-ABI 投影:code-owned 骨架 + 七組覆蓋缺口的活再導出。"""
+    """W5 exported-ABI 投影:code-owned 骨架 + 九組覆蓋缺口的活再導出。"""
 
     return {
         **_W5_EXPORTED_ABI,
@@ -1095,6 +948,8 @@ def w5_exported_abi_projection(repo_root: Path = REPO_ROOT) -> dict[str, Any]:
         "rendered_unit_negative_live": _rendered_unit_negative_live(),
         "schema_registration_live": _schema_registration_live(repo_root),
         "dependency_refresh_live": _dependency_refresh_live(repo_root),
+        "refresh_call_site_live": _refresh_call_site_live(repo_root),
+        "evidence_authenticity_live": _evidence_authenticity_live(),
     }
 
 
@@ -1192,6 +1047,20 @@ def _dependency_refresh_reasons(live: dict[str, Any]) -> list[str]:
             "SOURCE_DEPENDENCY_REJECTED",
             "§9.2 admits an expired source identity together with exactly ONE refresh",
         ),
+        (
+            "hand_written_original_status",
+            "DEPENDENCY_REFRESH_REJECTED",
+            "a hand-written 'original' that no session ever produced — carrying "
+            "running_attested and its own chosen observation window — must never be "
+            "refreshable; artifact_self_digest against the refresh's own claim is "
+            "self-referential and authenticates nothing",
+        ),
+        (
+            "original_without_self_digest_status",
+            "DEPENDENCY_REFRESH_REJECTED",
+            "an original whose own self_digest field is absent or does not bind its bytes "
+            "is not the artifact its producer emitted",
+        ),
     ):
         if live.get(key) != expected:
             reasons.append(
@@ -1220,11 +1089,111 @@ def _dependency_refresh_reasons(live: dict[str, Any]) -> list[str]:
             f"observed/authorized/re-hashed/newly signed: {admitted_by_reference} "
             "(§10.5 #28 second half / §12 #15)"
         )
+    narrowed = sorted(
+        name
+        for name, covered in (
+            live.get("producer_input_scope_covers_the_allowlists") or {}
+        ).items()
+        if covered is not True
+    )
+    if narrowed or not live.get("producer_input_scope_covers_the_allowlists"):
+        reasons.append(
+            "W5 §9.2 recomputation scope no longer covers the producer's own declared input "
+            f"allowlist for {narrowed or 'any'} class; both halves of the P1-A fix (commit "
+            "materialisation and the clean-tree gate) only see the paths in that set, so a "
+            "narrowed scope re-opens the drifted-commit / restored-working-tree admission"
+        )
+    stubs = live.get("never_refreshable_stub_statuses") or {}
+    admitted_stubs = sorted(
+        name for name, status in stubs.items() if status != "SOURCE_DEPENDENCY_REJECTED"
+    )
+    if admitted_stubs or sorted(stubs) != sorted(live.get("never_refreshable_classes") or []):
+        reasons.append(
+            "W5 derives a freshness verdict for evidence it never checked is the artifact "
+            f"evidence_class names ({admitted_stubs or 'projection unavailable'}); a "
+            "caller-supplied class label plus an expires_at is not the §9.2 evidence"
+        )
     if live.get("refresh_carries_no_signature_field") is not True:
         reasons.append(
             "W5 dependency-refresh schema grew a signature/namespace/profile surface; §9.2 "
             "requires an independent recomputation and §9.1 closes the SSHSIG profile set at "
             "four — a fifth profile is a trust-root change no WP4 worker may make (§12 #15)"
+        )
+    return reasons
+
+
+# P1-C 的具名前綴:測試據此把「工作樹髒」這一條與其他結構 reason 分開,而不是靠字串比對。
+_W5_OWNED_SCOPE_REASON = "W5 wave-exit owned scope is not at the bound source_head"
+# B / D 兩條誠實面 obligation 的識別字(在冊與否由下面的活測量決定)。
+_REFRESH_CALL_SITE_OBLIGATION = "SOURCE_IDENTITY_FRESHNESS_HAS_NO_PRODUCTION_CALL_SITE"
+_EVIDENCE_AUTHENTICITY_OBLIGATION = "EMITTED_EVIDENCE_DIGESTS_ARE_UNAUTHENTICATED"
+
+
+def _honest_surface_reasons(
+    call_sites: dict[str, Any], evidence: dict[str, Any]
+) -> list[str]:
+    """兩條誠實面義務的**雙向**閂:事實還在 → 必須在冊;事實消失 → 必須關閉。
+
+    這是 W5 對抗審計 B/D 兩項的載重形式。B:``derive_source_dependency_admission_status``
+    今天零生產呼叫端,所以「§9.2 的裁決只在 APPLY 期經此入口可達」那句話是假的;那句話被改
+    成真的之後,還必須有東西盯著它——有人日後把閘接進 APPLY,義務就得關掉,而不是讓一句
+    過期的殘留永遠掛著。D:wave-exit 的三串 evidence digest 只被形狀約束,任何 64 位十六進位
+    都通過,所以整條 W0→W5 鏈證不了測試跑過或審查發生過(packet-local artifact 無法認證自身
+    執行)。兩者都不是本波能在源碼線關掉的東西,但都必須是**被測量**的、而非被宣稱的。
+    """
+
+    reasons: list[str] = []
+    obligation_ids = {
+        row["obligation_id"] for row in _W5_EXPORTED_ABI["remaining_owned_obligations"]
+    }
+    sites = call_sites.get("production_call_sites")
+    if sites is None or call_sites.get("apply_time_consumer_derives_freshness") is None:
+        reasons.append(
+            "W5 cannot measure whether the §9.2 admission verdict has a production call "
+            "site; an unmeasurable honesty claim is not an honesty claim (fail-closed)"
+        )
+    elif not sites and call_sites.get("apply_time_consumer_derives_freshness") is False:
+        if _REFRESH_CALL_SITE_OBLIGATION not in obligation_ids:
+            reasons.append(
+                f"W5 does not record {_REFRESH_CALL_SITE_OBLIGATION} while "
+                f"{_REFRESH_ADMISSION_ENTRY} has zero production call sites and the only "
+                "APPLY-time consumer of a §9.2 source identity derives no freshness at all "
+                "(§9.2's 'the central validator accepts an expired source identity only "
+                "together with one current refresh' has no enforcement point today)"
+            )
+    elif _REFRESH_CALL_SITE_OBLIGATION in obligation_ids:
+        reasons.append(
+            f"W5 still records {_REFRESH_CALL_SITE_OBLIGATION} although the §9.2 admission "
+            f"verdict is now reached from {sites or 'an APPLY-time consumer'}; close the "
+            "obligation instead of carrying a statement that has stopped being true"
+        )
+    if evidence.get("only_shape_is_constrained") is None or (
+        evidence.get("emit_sink_accepts_fabricated_evidence") is None
+    ):
+        reasons.append(
+            "W5 cannot measure what constrains the wave-exit evidence digests (fail-closed)"
+        )
+    elif evidence.get("emit_sink_refuses_empty_evidence") is not True or (
+        evidence.get("emit_sink_refuses_secret_like_evidence") is not True
+    ):
+        reasons.append(
+            "W5 emit-evidence guard is not a real predicate (a guard that refuses nothing, "
+            "or one that refuses everything, measures nothing about the evidence)"
+        )
+    elif evidence.get("emit_sink_accepts_fabricated_evidence") is True and (
+        evidence.get("only_shape_is_constrained") is True
+    ):
+        if _EVIDENCE_AUTHENTICITY_OBLIGATION not in obligation_ids:
+            reasons.append(
+                f"W5 does not record {_EVIDENCE_AUTHENTICITY_OBLIGATION} while a fabricated "
+                "digest still satisfies every evidence constraint the wave-exit chain has; "
+                "declaring S2.4@SOURCE_READY *from* this chain would be asserting more than "
+                "the chain can carry"
+            )
+    elif _EVIDENCE_AUTHENTICITY_OBLIGATION in obligation_ids:
+        reasons.append(
+            f"W5 still records {_EVIDENCE_AUTHENTICITY_OBLIGATION} although the evidence "
+            "digests are no longer shape-only; close the obligation instead"
         )
     return reasons
 
@@ -1392,6 +1361,29 @@ def w5_structural_errors(receipt: dict[str, Any], repo_root: Path = REPO_ROOT) -
         )
     # 7) §9.2 / §10.5 #28:過期 source 身分的獨立復現閘。
     reasons.extend(_dependency_refresh_reasons(projection["dependency_refresh_live"]))
+    # 8) 誠實面必須是**被測量**出來的:§9.2 裁決的生產呼叫端與 evidence 的可認證性,兩者
+    #    今天各自的真實狀態決定對應 obligation 是否必須在冊(而不是可以被靜默刪掉)。
+    reasons.extend(_honest_surface_reasons(
+        projection["refresh_call_site_live"], projection["evidence_authenticity_live"]
+    ))
+    # 9) W5 對抗審計 P1-C:owned scope 與 bound head 的工作樹差異必須弄破 wave exit。
+    #    投影早就折了 owned_scope_worktree_delta,但沒有任何 reason 消費它,於是把 W5 自己
+    #    新寫的驗收矩陣測試清空成一行註解,W0..W5 依然全 PASS——一份綁了 source_head 的
+    #    receipt 正是在宣稱「我的 owned scope 就在那個 head 上」。不可判定同樣 fail-closed。
+    delta = projection["owned_scope_worktree_delta"]
+    if delta is None:
+        reasons.append(
+            f"{_W5_OWNED_SCOPE_REASON}: the index/worktree state of the W5 owned scope is "
+            "undecidable (git is unreadable), so the receipt cannot assert that its owned "
+            "scope is at the bound source_head (fail-closed)"
+        )
+    elif delta:
+        reasons.append(
+            f"{_W5_OWNED_SCOPE_REASON}: {delta} differ from the bound commit in the "
+            "index/worktree. The owned-path projection is taken from the commit blobs, so a "
+            "dirty owned scope is invisible in owned_path_diff_digest; a wave-exit receipt "
+            "that binds source_head is asserting its owned scope IS that head"
+        )
     if receipt.get("owned_path_manifest_digest") != canonical_digest(sorted(_W5_OWNED_PATHS)):
         reasons.append("wave-exit owned_path_manifest_digest is not the exact W5 owned-path set")
     if receipt.get("owned_path_diff_digest") != w5_owned_path_diff_digest(

@@ -56,6 +56,7 @@ import agent_governance_s2_4_credential as credential  # noqa: E402
 import agent_governance_s2_4_install_driver as runner  # noqa: E402
 import agent_governance_s2_4_render as render  # noqa: E402
 import aiml_gate_receipt_validator as validator  # noqa: E402
+import agent_governance_s2_4_topology as _topology  # noqa: E402
 import s2_4_w3b_testkit as kit  # noqa: E402
 from aiml_gate_receipt_classifiers import (  # noqa: E402
     AIML_COMPONENT_EFFECT_CLASS_MATRIX_V2,
@@ -703,7 +704,8 @@ def test_expired_runtime_topology_prepare_and_auth_evidence_route_through_the_sa
         "S2_0_EFFECT_RECEIPT",
     ]
     for name in never:
-        # 即使該證據**還沒過期**,遞交 refresh 本身就是被禁的行為。
+        # 即使該證據**還沒過期**,遞交 refresh 本身就是被禁的行為。此判定先於一切,故
+        # 它「不」依賴那份證據是否合格——refresh-by-reference 對這一列永遠非法。
         forbidden = validator.derive_source_dependency_admission_status(
             evidence_class=name,
             receipt={"expires_at": "2099-01-01T00:00:00+00:00"},
@@ -712,13 +714,39 @@ def test_expired_runtime_topology_prepare_and_auth_evidence_route_through_the_sa
         )
         assert forbidden["status"] == "DEPENDENCY_REFRESH_BY_REFERENCE_FORBIDDEN", name
         assert forbidden["refresh_admitted"] is False
-        # 過期且沒 refresh → 只能重新觀測/重簽,絕不是 FRESH。
-        stale = validator.derive_source_dependency_admission_status(
-            evidence_class=name,
-            receipt={"expires_at": "2026-07-24T00:00:00+00:00"},
-            now=_REFRESH_NOW,
-        )
-        assert stale["status"] == "DEPENDENCY_EVIDENCE_REOBSERVATION_REQUIRED", name
+        # W5 review P2-D:``evidence_class`` 是 caller 遞交的字串。一個兩鍵 stub 冠上這些
+        # 名字時,**不論**新舊都不得導出任何 §9.2 語義(它根本不是那份 artifact)。
+        for expires in ("2099-01-01T00:00:00+00:00", "2026-07-24T00:00:00+00:00"):
+            stub = validator.derive_source_dependency_admission_status(
+                evidence_class=name, receipt={"expires_at": expires}, now=_REFRESH_NOW
+            )
+            assert stub["status"] == "SOURCE_DEPENDENCY_REJECTED", (name, expires)
+            assert any("is not one of the artifacts" in r for r in stub["reasons"]), name
+    # DEPENDENCY_EVIDENCE_REOBSERVATION_REQUIRED 仍然可達,但只對**真的**是那份 artifact
+    # 的證據:以 W3b testkit 的真 pg_topology_attestation_v1 逐條走完三個 §9.2 出口。
+    fresh_topology = kit.topology_attestation()
+    expired_topology = _topology.observe_pg_topology(
+        kit.topology_observation(),
+        source_head=kit.SOURCE_HEAD, target_host=kit.HOST,
+        observed_at="2026-07-20T00:00:00+00:00",
+    )
+    assert validator.validate_aiml_artifact(fresh_topology) == []
+    assert validator.validate_aiml_artifact(expired_topology) == []
+    assert validator.derive_source_dependency_admission_status(
+        evidence_class="PG_TOPOLOGY_ATTESTATION", receipt=fresh_topology, now=_REFRESH_NOW
+    )["status"] == "SOURCE_DEPENDENCY_FRESH"
+    reobserve = validator.derive_source_dependency_admission_status(
+        evidence_class="PG_TOPOLOGY_ATTESTATION", receipt=expired_topology, now=_REFRESH_NOW
+    )
+    assert reobserve["status"] == "DEPENDENCY_EVIDENCE_REOBSERVATION_REQUIRED"
+    assert validator.derive_source_dependency_admission_status(
+        evidence_class="PG_TOPOLOGY_ATTESTATION", receipt=expired_topology,
+        refresh=refresh, now=_REFRESH_NOW,
+    )["status"] == "DEPENDENCY_REFRESH_BY_REFERENCE_FORBIDDEN"
+    # 冠錯類別的**真** artifact 一樣不通過:身分由 code-owned 表決定,不由標籤決定。
+    assert validator.derive_source_dependency_admission_status(
+        evidence_class="PREPARED_BUNDLE", receipt=fresh_topology, now=_REFRESH_NOW
+    )["status"] == "SOURCE_DEPENDENCY_REJECTED"
     # 封閉表:未知類別不預設放行。
     assert validator.derive_source_dependency_admission_status(
         evidence_class="SOMETHING_ELSE", receipt={}, now=_REFRESH_NOW
@@ -872,7 +900,9 @@ def test_both_halves_of_the_attestation_clock_obligation_are_still_open() -> Non
         for row in validator._W5_EXPORTED_ABI["remaining_owned_obligations"]
     }
     entry = obligations["ATTESTATION_EXPIRY_AND_HOST_TIME_ARE_NOT_CROSS_CHECKED"]
-    assert entry["typed_status"] == "PARTIALLY_PROVIDED_BY_W4B"
+    # 兩半都仍開 ⇒ typed_status 必須留在 W4 交出來的「未提供」等級。上一版把它軟化成
+    # PARTIALLY_PROVIDED_BY_W4B,與它自己 statement 的第一句直接矛盾(對抗審計第二輪更正)。
+    assert entry["typed_status"] == "NOT_PROVIDED_BY_W5"
     assert entry["owner_wave"] == "W6B"
     assert "BOTH halves W4 named are still open" in entry["statement"]
     assert "PERMIT_CLOCK_SKEW_SECONDS" in entry["statement"]

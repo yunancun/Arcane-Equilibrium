@@ -52,8 +52,7 @@ from aiml_gate_receipt_schema_core import (  # noqa: E402,F401
     PROGRAM_GOVERNANCE_PATHS,
     PROGRAM_REVIEW_NODES,
     PROGRAM_SCHEMA_PATHS,
-    S0_DEPENDENCY_DIGESTS,
-    S0_PREDECESSOR_CONTRACTS,
+    S0_DEPENDENCY_DIGESTS, S0_PREDECESSOR_CONTRACTS, S2_3_SEALED_BUILD_RECEIPT_REL,
     SCHEMA_DIR,
     SCHEMA_FILES,
     SourceManifestVerifier,
@@ -66,13 +65,13 @@ from aiml_gate_receipt_schema_core import (  # noqa: E402,F401
     _now_text,
     _parse_timestamp,
     artifact_self_digest,
-    canonical_digest,
+    canonical_digest, dependency_semantic_subject_values,
     evidence_environment_identity_digest,
     landing_scope_identity_digest,
     owned_path_blob_projection,
     owned_path_blob_projection_digest,
     owned_scope_worktree_delta,
-    resolve_commit_head,
+    resolve_commit_head, s1_3_identity_projection,
     session_attempt_identity_digest,
 )
 from aiml_gate_receipt_classifiers import (  # noqa: E402,F401
@@ -147,6 +146,8 @@ from aiml_gate_receipt_s2_4_contracts import (  # noqa: E402,F401
     build_s2_4_dependency_refresh_attestation,
     build_s2_4_operator_authorization,
     dependency_class_for_schema_version,
+    dependency_evidence_schema_versions,
+    dependency_producer_input_paths,
     dependency_original_observation_window,
     dependency_producer_identity,
     derive_authorization_id,
@@ -190,7 +191,8 @@ from aiml_gate_receipt_wave_w4 import (  # noqa: E402,F401
     w4_exported_abi_projection, w4_owned_path_diff_digest, w4_structural_errors,
 )
 from aiml_gate_receipt_wave_w5 import (  # noqa: E402,F401
-    _W5_EXPORTED_ABI, _W5_OWNED_PATHS, build_w5_wave_exit_receipt,
+    _W5_EXPORTED_ABI, _W5_OWNED_PATHS, _W5_OWNED_SCOPE_REASON,
+    build_w5_wave_exit_receipt,
     w5_chain_binding_errors, w5_exported_abi_projection, w5_owned_path_diff_digest,
     w5_structural_errors,
 )
