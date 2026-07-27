@@ -29,11 +29,16 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 _HELPER_DIR = REPO_ROOT / "helper_scripts" / "maintenance_scripts"
 if str(_HELPER_DIR) not in sys.path:
     sys.path.insert(0, str(_HELPER_DIR))
-_PROGRAM_CODE_DIR = REPO_ROOT / "program_code"
-if str(_PROGRAM_CODE_DIR) not in sys.path:
-    sys.path.insert(0, str(_PROGRAM_CODE_DIR))
-
-from aiml_gate_receipt_schema_core import canonical_digest  # noqa: E402
+# W5 對抗審計第三輪 P2(PM ruling):本葉不在 import 期把 ``program_code`` 放進 sys.path。
+# 它是 facade top-level import、位於 engine-scanner runtime import 閉包內,而 import 期加寬
+# top-level namespace(broker_connectors / exchange_connectors / dashboard / ai_agents 全部
+# 變成可匯入)必須是決策而非副作用(§10.1.1 #4)。唯一需要 ``ml_training.*`` package 形匯入
+# 的地方在函式內,改用 ``program_code_on_path`` 就地開窗、離開時只收回自己放的那一筆——本
+# 變更**縮小**能力,故與 §10.1.1 條件 4 同向而非相悖。
+from aiml_gate_receipt_schema_core import (  # noqa: E402
+    canonical_digest,
+    program_code_on_path,
+)
 
 _SCHEMA_DIR_REL = "program_code/ml_training/schemas/aiml_gate_receipts"
 # §10.1 + §10.1.1(2026-07-26 PM path-scope amendment):W3a+W3b 的 owned-path 投影。
@@ -378,7 +383,8 @@ def _topology_live_projection() -> dict[str, Any]:
             plan_topology_digest=attestation["self_digest"],
             binding_nonce=_W3_TOPOLOGY_BINDING_NONCE,
         )
-        from ml_training import alr_consumer_resilience as _resilience
+        with program_code_on_path():
+            from ml_training import alr_consumer_resilience as _resilience
 
         live["guard_row_digest_matches_consumer_contract"] = (
             guard["cluster_identity_row_digest"]

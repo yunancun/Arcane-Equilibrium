@@ -70,6 +70,9 @@ _W5_OWNED_PATHS = tuple(sorted((
     "program_code/ml_training/aiml_gate_receipt_s2_4_contracts.py",
     "program_code/ml_training/aiml_gate_receipt_schema_core.py",
     "program_code/ml_training/aiml_gate_receipt_validator.py",
+    # 2000 行治理拆分(第三輪):§10.3 誠實面帳本的純資料葉。它是 W5 擁有的內容,故必須
+    # 在 W5 的 owned scope 裡——否則帳本可以在 wave-exit 看不見的地方被改。
+    "program_code/ml_training/aiml_gate_receipt_w5_obligations.py",
     "program_code/ml_training/aiml_gate_receipt_wave_w5.py",
     "program_code/ml_training/application_bundle_runtime_closure_v1.json",
     "program_code/ml_training/tests/test_aiml_gate_receipt_validator_s2_4.py",
@@ -192,7 +195,25 @@ _W5_EXPORTED_ABI = {
         "identities, #12 the observer role, #15 the encoded-secret forms, #16 the four "
         "components S2.4 does not install, #29 the inactive postcheck's claim surface) are "
         "folded below as live re-derivations, so deleting the source predicate breaks this "
-        "wave exit and not only a test"
+        "wave exit and not only a test. HEADLINE CORRECTION (adversarial round 3): W5 "
+        "scored the map 36 PROVEN / 3 PARTIAL / 0 UNPROVEN. E4 independently rebuilt it and "
+        "scored 35 / 4 / 0, and W5 adopts E4's number rather than its own. The two "
+        "disagreements are #24 and #28a, and in both cases E4 was right for the same "
+        "reason: the guard named by the item had NO discriminating test, so removing the "
+        "guard left the whole tree green. #24 — agent_governance_s2_4_host_identity's "
+        "refusal of a supplied manifest whose canonical digest is not the one in the signed "
+        "intent: replacing that condition with `if False:` left 6111 passed / 46 skipped "
+        "unchanged, because the test named for it supplied uid=1/gid=1, which the §8 "
+        "identity contract rejects FIRST, so the guard was never reached. #28a — the S2.5 "
+        "lifecycle-source fold: it had no reason-level consumer and no test-level "
+        "assertion, and inverting it to a false claim left every W5-lane test green. This "
+        "round adds a discriminating regression for #24 (a manifest that passes the §8 "
+        "contract and differs only in uid/gid, so the digest binding is the only "
+        "discriminator) and a two-way reason-level consumer for #28a (plus a glob that "
+        "matches the one the test uses instead of a single guessed filename). Whether that "
+        "restores either item to PROVEN is the next reviewer's call, not W5's: this row "
+        "records the corrected score at the reviewed head and what changed, and does not "
+        "self-upgrade"
     ),
     "secret_scan_contract": (
         "assert_no_secret_material walks dicts (keys AND values), lists, tuples, str and "
@@ -255,7 +276,15 @@ _W5_EXPORTED_ABI = {
         "refresh therefore cannot be minted from the original digest alone, cannot change any "
         "semantic digest, cannot be produced inside the original's own observation window or "
         "by the same producer label, cannot refresh another refresh (closed enum) and cannot "
-        "self-declare a status. Everything §9.2 marks as freshly observed, freshly re-hashed "
+        "self-declare a status. The observation window itself is bound to the BLOB AT THE "
+        "BOUND COMMIT for the three families whose original is a committed repository "
+        "artifact: the family validator authenticates shape and not the window, so before "
+        "adversarial round 3 editing observation_time/expires_at on the real shipped "
+        "receipts and resealing self_digest skipped this entire gate — forward to "
+        "SOURCE_DEPENDENCY_FRESH, backward to SOURCE_DEPENDENCY_ADMITTED_BY_REFRESH with "
+        "zero reasons. S1.3 has no committed original and its window is therefore still "
+        "caller-chosen, which is recorded as its own obligation rather than claimed closed. "
+        "Everything §9.2 marks as freshly observed, freshly re-hashed "
         "or newly signed — S2.0 effect, PG topology, both scoped capability probes, the "
         "prepared bundle and all four operator permits — is a closed NEVER_REFRESHABLE table "
         "that returns DEPENDENCY_REFRESH_BY_REFERENCE_FORBIDDEN for any refresh at all "
@@ -270,8 +299,11 @@ _W5_EXPORTED_ABI = {
         "on macOS. A green W5 licenses SOURCE_READY only, never an install claim"
     ),
     # ── §10.3 誠實面:W5 **不**提供、且不得被當成已提供的義務。 ──────────────────
-    # 每一項都帶 typed 狀態與 owner;W4 交出的十五項逐條在此重述(owner/理由可更新,提供
-    # 等級不可軟化),加上 W5 自審新發現的九項。任一項被靜默刪除都會弄破本 wave 的
+    # 每一項都帶 typed 狀態與 owner;W4 交出的**每一項**逐條在此重述(owner/理由可更新,
+    # 提供等級不可軟化),加上 W5 逐輪自審新發現的各項。數量不在註解裡複述(舊註解寫的
+    # 「十五項/九項」在第二、三輪之後都已腐化):唯一的普查在 W5 lane 的
+    # test_the_w5_obligation_ledger_has_no_duplicate_or_unowned_row,它逐列比對 W4 的
+    # 活 ABI 與 _W5_NEW。任一項被靜默刪除都會弄破本 wave 的
     # exported-ABI digest。清單本體依 2000 行治理拆分住在 schema_core,物件即單一真相來源。
     "remaining_owned_obligations": S2_4_W5_REMAINING_OWNED_OBLIGATIONS,
 }
@@ -455,9 +487,13 @@ def _inactive_postcheck_live() -> dict[str, Any]:
             name: name in forbidden
             for name in ("enable", "enable_unit", "start", "start_unit", "restart", "kill")
         }
-        live["s2_5_lifecycle_source_absent"] = not (
-            REPO_ROOT / "docs" / "execution_plan" / "ai_ml_landing" / "design"
-        ).joinpath("S2.5-start-source-seams.md").exists()
+        # W5 對抗審計第三輪 P2-G:舊版只看一個**猜出來的**檔名
+        # (``S2.5-start-source-seams.md``),而同一件事的測試用的是 ``S2.5-*.md`` glob;
+        # 於是只有 glob 那一半真的閂得住。兩邊統一用 glob,並把命中檔名折進投影。
+        design = REPO_ROOT / "docs" / "execution_plan" / "ai_ml_landing" / "design"
+        matches = sorted(path.name for path in design.glob("S2.5-*.md"))
+        live["s2_5_lifecycle_source_files"] = matches
+        live["s2_5_lifecycle_source_absent"] = not matches
     except Exception:  # noqa: BLE001
         for key in (
             "postcheck_properties",
@@ -468,6 +504,7 @@ def _inactive_postcheck_live() -> dict[str, Any]:
             "receipt_carries_no_lifecycle_claim",
             "aggregate_forbidden_methods",
             "enable_and_start_are_forbidden",
+            "s2_5_lifecycle_source_files",
             "s2_5_lifecycle_source_absent",
         ):
             live.setdefault(key, None)
@@ -591,7 +628,17 @@ def _producer_input_scope_live(facade: Any) -> dict[str, bool]:
     identity_producer = (
         "helper_scripts/maintenance_scripts/agent_governance_identity_acl_contract.py"
     )
+    schema_dir = _SCHEMA_DIR_REL
     required = {
+        # P1-C(對抗審計第三輪):``edge_feature_schema_contract.py`` 之所以在 §9.2 的輸入
+        # 集合裡,**只**是為了讓 clean-tree 閘蓋到它——它是被 producer ``import`` 的葉,物化
+        # 樹幫不上忙(見 dependency_producer_input_paths 的同址註解)。但它先前不在本 required
+        # 集合裡,也沒有別的東西釘住它:刪掉那一行,全樹 6111/46 逐位元組不變,而「commit 已
+        # 漂移、攻擊者只在工作樹把位元組放回去」那條攻擊就重新打開。
+        "S1_3_IDENTITY_CONTRACT": {
+            identity_producer,
+            f"{schema_dir}/identity_acl_contract_receipt_v1.schema.json",
+        },
         "S2_2A_SOURCE_COMPATIBILITY": set(_lrm.CAPTURE_INPUTS)
         | set(_lrm.LEARNING_CODE_INPUTS_V2)
         | set(_lrm.MIGRATION_INPUTS)
@@ -600,8 +647,13 @@ def _producer_input_scope_live(facade: Any) -> dict[str, bool]:
             _lrm.POLICY_TEMPLATE,
             _lrm.DEPENDENCY_LOCK_SPEC_FILE,
             _lrm.DEPENDENCY_LOCK_LOCK_FILE,
+            "program_code/ml_training/edge_feature_schema_contract.py",
         },
-        "S2_3_SEALED_BUILD": {"requirements-ml.lock", "requirements-ml.txt"},
+        "S2_3_SEALED_BUILD": {
+            "requirements-ml.lock",
+            "requirements-ml.txt",
+            f"{schema_dir}/sealed_build_receipt_v1.schema.json",
+        },
         # P1-A(對抗審計第二輪):expected-identity 的語義主體是 S1.3 常量投影 + lock 封閉
         # 導出的 runtime 內容身分 + repo 內那份已提交的 sealed receipt,三者都必須在集合裡,
         # 否則 clean-tree 閘與物化樹同時看不到它們。
@@ -610,13 +662,20 @@ def _producer_input_scope_live(facade: Any) -> dict[str, bool]:
             "docs/execution_plan/ai_ml_landing/receipts/S2.3-sealed-build-receipt-v1.json",
             "requirements-ml.lock",
             "requirements-ml.txt",
+            f"{schema_dir}/expected_identity_receipt_v1.schema.json",
         },
     }
     scope: dict[str, bool] = {}
     for name, row in sorted(facade.S2_4_DEPENDENCY_REFRESH_CLASSES.items()):
         paths = set(facade.dependency_producer_input_paths(name))
-        scope[name] = bool(paths) and row["producer_module"] in paths and (
-            required.get(name, set()) <= paths
+        # 每一族都必須有一筆**具名**的 required 集合。舊碼用 ``required.get(name, set())``,
+        # 於是漏登記的族拿到空集合 = 恆真,那正是 S1.3 先前的狀態。
+        expected = required.get(name)
+        scope[name] = (
+            expected is not None
+            and bool(paths)
+            and row["producer_module"] in paths
+            and expected <= paths
         )
     return scope
 
@@ -834,12 +893,53 @@ def _dependency_refresh_live(repo_root: Path = REPO_ROOT) -> dict[str, Any]:
 
 
 # §9.2 的 typed 裁決今天有沒有**生產**呼叫端(B 項:誠實面必須是被測量出來的,不是被宣稱的)。
-# 掃描面 = S2.4 的生產治理葉全集;§9.2 的定義/再導出住在 program_code/ml_training,測試住在
-# tests/,故此集合裡出現該名字就代表 APPLY/PREPARE 真的問了這個閘。
-_PRODUCTION_SURFACE_REL = "helper_scripts/maintenance_scripts"
+#
+# W5 對抗審計第三輪 P1-E(E2/E3 同結論):舊版的量測是 ``if f"{name}(" in text`` 施於**原始
+# 檔案文字**、且只掃一個非遞迴目錄。兩個方向都壞:一則一句**註解**提到這個名字就讓
+# ``production_call_sites`` 變非空,而那條閂的另一臂寫著「close the obligation instead」——
+# 一個誤報會逼人刪掉一條仍然為真的誠實列;二則 ``program_code/`` 下的生產面完全沒被看過。
+# 現在用 AST 只數 ``ast.Call``,掃描面遞迴涵蓋治理腳本與 program_code,且任何無法解析的檔案
+# 一律把量測降成 ``None``(= 無法關閉),永遠不會變成「必須關閉」。
+_REFRESH_SCAN_ROOTS = ("helper_scripts/maintenance_scripts", "program_code")
+# §9.2 的**定義**面與本波的**量測**面本身不是呼叫端(定義 + facade re-export + 本葉)。
+# 這是唯一的排除集合,逐條具名並折進投影,縮小它即改變 exported_abi_digest。
+_REFRESH_SCAN_DEFINITION_SITES = (
+    "program_code/ml_training/aiml_gate_receipt_s2_4_contracts.py",
+    "program_code/ml_training/aiml_gate_receipt_validator.py",
+    "program_code/ml_training/aiml_gate_receipt_wave_w5.py",
+)
 _REFRESH_ADMISSION_ENTRY = "derive_source_dependency_admission_status"
 # D 項:wave-exit 的三串 evidence digest 只被形狀約束住,任何 64 位十六進位都合法。
 _FABRICATED_EVIDENCE_DIGEST = "sha256:" + "1" * 64
+# JSON Schema 的**註解**關鍵字(純文件,不約束任何值)與**形狀**關鍵字。前者出現不得改變
+# 「只被形狀約束」這個判斷;出現任何**兩者皆非**的關鍵字則是無法判定 → fail-closed。
+_JSON_SCHEMA_ANNOTATION_KEYS = frozenset({
+    "$comment", "default", "deprecated", "description", "examples", "readOnly",
+    "title", "writeOnly",
+})
+_JSON_SCHEMA_SHAPE_ONLY_KEYS = frozenset({
+    "format", "maxLength", "minLength", "pattern", "type",
+})
+
+
+def _module_calls_the_name(path: Path, name: str) -> bool | None:
+    """該 ``.py`` 檔裡有沒有**真的**呼叫 ``name``(``ast.Call``);讀不了/解析不了回 ``None``。"""
+
+    import ast
+
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError, ValueError, UnicodeDecodeError):
+        return None
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if isinstance(func, ast.Name) and func.id == name:
+            return True
+        if isinstance(func, ast.Attribute) and func.attr == name:
+            return True
+    return False
 
 
 def _refresh_call_site_live(repo_root: Path = REPO_ROOT) -> dict[str, Any]:
@@ -847,13 +947,30 @@ def _refresh_call_site_live(repo_root: Path = REPO_ROOT) -> dict[str, Any]:
 
     live: dict[str, Any] = {}
     try:
-        surface = Path(repo_root) / _PRODUCTION_SURFACE_REL
+        root = Path(repo_root)
         callers: list[str] = []
-        for path in sorted(surface.glob("*.py")):
-            text = path.read_text(encoding="utf-8", errors="replace")
-            if f"{_REFRESH_ADMISSION_ENTRY}(" in text:
-                callers.append(f"{_PRODUCTION_SURFACE_REL}/{path.name}")
-        live["production_call_sites"] = callers
+        scanned = 0
+        undecidable: list[str] = []
+        for scan_root in _REFRESH_SCAN_ROOTS:
+            for path in sorted((root / scan_root).rglob("*.py")):
+                rel = path.relative_to(root).as_posix()
+                if rel in _REFRESH_SCAN_DEFINITION_SITES:
+                    continue
+                parts = rel.split("/")
+                if "tests" in parts or "__pycache__" in parts:
+                    continue
+                scanned += 1
+                calls = _module_calls_the_name(path, _REFRESH_ADMISSION_ENTRY)
+                if calls is None:
+                    undecidable.append(rel)
+                elif calls:
+                    callers.append(rel)
+        live["production_call_site_scan_roots"] = list(_REFRESH_SCAN_ROOTS)
+        live["production_call_site_definition_sites"] = list(_REFRESH_SCAN_DEFINITION_SITES)
+        live["production_call_site_modules_scanned"] = scanned
+        live["production_call_site_undecidable_modules"] = sorted(undecidable)
+        # 任何一個檔案量測不出來 = 這個誠實宣稱量測不出來(絕不當成「沒有呼叫端」)。
+        live["production_call_sites"] = None if undecidable else sorted(callers)
         # 唯一真的在 APPLY 期消費 §9.2 source 身分的地方(讀 repo 固定路徑的 S2.3 artifact),
         # 它只驗 status/self_digest/三個身分欄位,完全不導新鮮度。
         import agent_governance_s2_4_host_identity as _host
@@ -866,6 +983,10 @@ def _refresh_call_site_live(repo_root: Path = REPO_ROOT) -> dict[str, Any]:
         )
     except Exception:  # noqa: BLE001 - 任何逸出 = fail-closed 未證
         for key in (
+            "production_call_site_scan_roots",
+            "production_call_site_definition_sites",
+            "production_call_site_modules_scanned",
+            "production_call_site_undecidable_modules",
             "production_call_sites",
             "apply_time_consumer",
             "apply_time_consumer_derives_freshness",
@@ -894,10 +1015,22 @@ def _evidence_authenticity_live() -> dict[str, Any]:
             }
         live["wave_exit_evidence_constraints"] = constraints
         # 形狀之外沒有任何東西:沒有 producer 身分、沒有執行憑據、沒有 orchestrator 綁定。
-        live["only_shape_is_constrained"] = all(
-            row["item_constraint_keys"] in (["pattern", "type"], ["type"])
-            for row in constraints.values()
-        )
+        #
+        # P1-E:舊版是**鍵集合**比對(``in (["pattern","type"], ["type"])``),於是在
+        # ``$defs/digest`` 上加一句 ``description`` 這種純文件編輯就會把它翻成 False,而那條
+        # 閂的另一臂寫著「close the obligation instead」——一個純註解會逼人刪掉一條仍為真的
+        # 誠實列。現在先剝掉 JSON Schema 的註解關鍵字,再判斷剩下的是否**全是**形狀關鍵字;
+        # 出現任何既非註解也非形狀的關鍵字 = 無法判定 → None → fail-closed(不可關閉),
+        # 而不是「必須關閉」。
+        decidable = True
+        for row in constraints.values():
+            keys = set(row["item_constraint_keys"]) - _JSON_SCHEMA_ANNOTATION_KEYS
+            row["constraining_keys"] = sorted(keys)
+            if keys - _JSON_SCHEMA_SHAPE_ONLY_KEYS:
+                # 那個關鍵字可能是真的認證性約束,也可能只是本表不認得的形狀關鍵字。兩者都
+                # **不得**被當成「已經不只是形狀」而去要求關閉義務——無法判定就是無法關閉。
+                decidable = False
+        live["only_shape_is_constrained"] = True if decidable else None
         import agent_governance_s2_4_emit_sink as _sink
 
         try:
@@ -1147,7 +1280,16 @@ def _honest_surface_reasons(
         row["obligation_id"] for row in _W5_EXPORTED_ABI["remaining_owned_obligations"]
     }
     sites = call_sites.get("production_call_sites")
-    if sites is None or call_sites.get("apply_time_consumer_derives_freshness") is None:
+    scanned = call_sites.get("production_call_site_modules_scanned")
+    # P1-E:量測失敗**或**量測含糊一律走 fail-closed 臂(= 不可關閉);「必須關閉」那一臂
+    # 只有在量測明確為「有呼叫端」時才可達。掃描面本身塌成 0 個模組同樣是量測失敗。
+    if (
+        sites is None
+        or call_sites.get("apply_time_consumer_derives_freshness") is None
+        or not isinstance(scanned, int)
+        or scanned <= 0
+        or call_sites.get("production_call_site_undecidable_modules")
+    ):
         reasons.append(
             "W5 cannot measure whether the §9.2 admission verdict has a production call "
             "site; an unmeasurable honesty claim is not an honesty claim (fail-closed)"
@@ -1213,6 +1355,9 @@ def w5_structural_errors(receipt: dict[str, Any], repo_root: Path = REPO_ROOT) -
             "(the W4 wave-exit self_digest)"
         )
     projection = w5_exported_abi_projection(repo_root)
+    obligation_ids = {
+        row["obligation_id"] for row in _W5_EXPORTED_ABI["remaining_owned_obligations"]
+    }
     if receipt.get("exported_abi_digest") != canonical_digest(projection):
         reasons.append(
             "wave-exit exported_abi_digest does not re-derive the W5 exported-ABI projection"
@@ -1255,6 +1400,16 @@ def w5_structural_errors(receipt: dict[str, Any], repo_root: Path = REPO_ROOT) -
         reasons.append(
             "W5 central gate accepts an ACL manifest naming aiml_observer_ro; S2.4 must never "
             "be able to create, drop or revoke the observer role (§10.5 #12)"
+        )
+    # P2-G(第三輪):``grant_statement_count`` 先前零消費者。一個生成不出任何 GRANT 的
+    # 序列會讓上面兩條「observer 不出現」「每一句都指向 scanner」全部真空成立。
+    if not isinstance(pg_live.get("grant_statement_count"), int) or (
+        pg_live["grant_statement_count"] <= 0
+    ):
+        reasons.append(
+            "W5 pg_acl_manifest grant sequence generates no statement at all; the "
+            "'observer is never named' and 'every statement names the scanner role' "
+            "predicates would then hold vacuously (§10.5 #12)"
         )
     if pg_live.get("observer_absent_from_generated_sql") is not True or (
         pg_live.get("every_generated_statement_names_the_scanner_role_or_public") is not True
@@ -1300,6 +1455,40 @@ def w5_structural_errors(receipt: dict[str, Any], repo_root: Path = REPO_ROOT) -
             "W5 aggregate driver surface no longer refuses enable/start/restart/kill; "
             "`enable --now` belongs to S2.5A (§10.5 #29 / §12 #7)"
         )
+    # P2-G(第三輪):以下三個折進投影的值先前**沒有任何 reason 級消費者**——把它們反轉成
+    # 假宣稱,146 支 W5 lane 測試全數仍綠。一個沒有消費者的 fold 只是裝飾品。
+    if not postcheck_live.get("aggregate_forbidden_methods"):
+        reasons.append(
+            "W5 aggregate forbidden-method inventory is empty or unreadable; "
+            "'the driver surface refuses enable/start/restart/kill' would then be vacuous"
+        )
+    for label in ("postcheck", "receipt"):
+        if not postcheck_live.get(f"{label}_properties"):
+            reasons.append(
+                f"W5 s2_4_install_{label} schema exposes no properties at all; a closed "
+                "schema with an empty property set carries no lifecycle claim only because "
+                "it carries nothing (§10.5 #29 would be satisfied vacuously)"
+            )
+    # §10.5 #29 第二句(S2.5 fixtures)在本 repo 沒有 owner —— 那是**被測量**的,而不是被
+    # 宣稱的:S2.5 source 一旦出現,對應義務必須被關掉而不是永遠掛著。
+    s2_5_absent = postcheck_live.get("s2_5_lifecycle_source_absent")
+    if s2_5_absent is None:
+        reasons.append(
+            "W5 cannot measure whether an S2.5 lifecycle source exists in this repository "
+            "(fail-closed); §10.5 #29's second clause then has an unknown owner"
+        )
+    elif s2_5_absent and "S2_5_LIFECYCLE_FIXTURES_DO_NOT_EXIST" not in obligation_ids:
+        reasons.append(
+            "W5 does not record S2_5_LIFECYCLE_FIXTURES_DO_NOT_EXIST while no S2.5 source "
+            "exists in this repository; §10.5 #29's second clause has no owner in WP4 and "
+            "must be recorded rather than counted as covered"
+        )
+    elif not s2_5_absent and "S2_5_LIFECYCLE_FIXTURES_DO_NOT_EXIST" in obligation_ids:
+        reasons.append(
+            "W5 still records S2_5_LIFECYCLE_FIXTURES_DO_NOT_EXIST although "
+            f"{postcheck_live.get('s2_5_lifecycle_source_files')} now exists; close the "
+            "obligation instead of carrying a statement that has stopped being true"
+        )
     # 5) §10.5 #11:rendered unit 的兩個禁止身分。
     unit_live = projection["rendered_unit_negative_live"]
     if unit_live.get("clean_unit_status") != "PASS":
@@ -1341,14 +1530,21 @@ def w5_structural_errors(receipt: dict[str, Any], repo_root: Path = REPO_ROOT) -
         )
     if schema_live.get("s2_4_schema_count") != len(_S2_4_SCHEMA_KEYS):
         reasons.append("W5 S2.4 schema inventory projection is not the declared set")
+    # P2-G(第三輪):``dependency_refresh_schema_key`` 先前零消費者——把它換成任意字串,
+    # 上面「缺席/存在」的兩向閂就指向一個不存在的 schema 而全樹仍綠。
+    if schema_live.get("dependency_refresh_schema_key") != _DEPENDENCY_REFRESH_SCHEMA or (
+        _DEPENDENCY_REFRESH_SCHEMA not in _S2_4_SCHEMA_KEYS
+    ):
+        reasons.append(
+            "W5 dependency-refresh schema key is not the §10.1-named "
+            f"{_DEPENDENCY_REFRESH_SCHEMA} inside the declared S2.4 inventory; the "
+            "absent/present latch below would then be pointed at a schema nobody owns"
+        )
     # 誠實邊界:缺席的那一份**必須**同時被 obligation 記著。缺席狀態一旦改變(有人把它
     # 實作了),這裡就會要求 obligation 被關閉,而不是讓一個過期的義務永遠掛著。
     absent = schema_live.get("dependency_refresh_schema_file_exists") is False and (
         schema_live.get("dependency_refresh_schema_registered") is False
     )
-    obligation_ids = {
-        row["obligation_id"] for row in _W5_EXPORTED_ABI["remaining_owned_obligations"]
-    }
     if absent and "DEPENDENCY_REFRESH_ATTESTATION_ABSENT" not in obligation_ids:
         reasons.append(
             "W5 does not record DEPENDENCY_REFRESH_ATTESTATION_ABSENT while "
@@ -1366,24 +1562,10 @@ def w5_structural_errors(receipt: dict[str, Any], repo_root: Path = REPO_ROOT) -
     reasons.extend(_honest_surface_reasons(
         projection["refresh_call_site_live"], projection["evidence_authenticity_live"]
     ))
-    # 9) W5 對抗審計 P1-C:owned scope 與 bound head 的工作樹差異必須弄破 wave exit。
-    #    投影早就折了 owned_scope_worktree_delta,但沒有任何 reason 消費它,於是把 W5 自己
-    #    新寫的驗收矩陣測試清空成一行註解,W0..W5 依然全 PASS——一份綁了 source_head 的
-    #    receipt 正是在宣稱「我的 owned scope 就在那個 head 上」。不可判定同樣 fail-closed。
-    delta = projection["owned_scope_worktree_delta"]
-    if delta is None:
-        reasons.append(
-            f"{_W5_OWNED_SCOPE_REASON}: the index/worktree state of the W5 owned scope is "
-            "undecidable (git is unreadable), so the receipt cannot assert that its owned "
-            "scope is at the bound source_head (fail-closed)"
-        )
-    elif delta:
-        reasons.append(
-            f"{_W5_OWNED_SCOPE_REASON}: {delta} differ from the bound commit in the "
-            "index/worktree. The owned-path projection is taken from the commit blobs, so a "
-            "dirty owned scope is invisible in owned_path_diff_digest; a wave-exit receipt "
-            "that binds source_head is asserting its owned scope IS that head"
-        )
+    # 9) W5 對抗審計 P1-C(第三輪 P1-D 抬進共用路徑):owned scope 與 bound commit 的內容
+    #    差異必須弄破 wave exit。本葉只保留投影可見性(``owned_scope_worktree_delta`` 仍折在
+    #    exported ABI 裡);裁決本身住在 validator 的 ``_owned_scope_delta_reasons``,W0..W5
+    #    逐波共用同一把尺——原本只有 W5 消費它,而 W2 擁有 operator 真正執行的四支腳本。
     if receipt.get("owned_path_manifest_digest") != canonical_digest(sorted(_W5_OWNED_PATHS)):
         reasons.append("wave-exit owned_path_manifest_digest is not the exact W5 owned-path set")
     if receipt.get("owned_path_diff_digest") != w5_owned_path_diff_digest(

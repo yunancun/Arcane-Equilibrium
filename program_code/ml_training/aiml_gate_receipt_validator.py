@@ -53,6 +53,8 @@ from aiml_gate_receipt_schema_core import (  # noqa: E402,F401
     PROGRAM_REVIEW_NODES,
     PROGRAM_SCHEMA_PATHS,
     S0_DEPENDENCY_DIGESTS, S0_PREDECESSOR_CONTRACTS, S2_3_SEALED_BUILD_RECEIPT_REL,
+    S2_4_COMMITTED_SOURCE_IDENTITY_PATHS,
+    S2_4_W5_REMAINING_OWNED_OBLIGATIONS,
     SCHEMA_DIR,
     SCHEMA_FILES,
     SourceManifestVerifier,
@@ -65,11 +67,19 @@ from aiml_gate_receipt_schema_core import (  # noqa: E402,F401
     _now_text,
     _parse_timestamp,
     artifact_self_digest,
-    canonical_digest, dependency_semantic_subject_values,
+    _git_head,
+    _git_is_ancestor,
+    canonical_digest, committed_source_identity_digests,
+    dependency_semantic_subject_values,
     evidence_environment_identity_digest,
+    git_blob_sha1,
+    git_failure_detail,
+    git_is_shallow_repository,
     landing_scope_identity_digest,
     owned_path_blob_projection,
     owned_path_blob_projection_digest,
+    owned_scope_delta_reasons,
+    owned_scope_reason_prefix,
     owned_scope_worktree_delta,
     resolve_commit_head, s1_3_identity_projection,
     session_attempt_identity_digest,
@@ -298,63 +308,6 @@ def w0_negative_test_manifest_digest() -> str:
     """W0 負向測試清單的正規 digest(admission negative_tests_pass 綁定的固定投影)。"""
 
     return canonical_digest(list(_W0_NEGATIVE_TEST_MANIFEST))
-
-
-def git_blob_sha1(data: bytes) -> str:
-    """Reproduce ``git hash-object`` (blob) so trust-pin blob ids re-hash offline."""
-
-    hasher = hashlib.sha1()
-    hasher.update(b"blob " + str(len(data)).encode("ascii") + b"\x00")
-    hasher.update(data)
-    return hasher.hexdigest()
-
-
-def _git_is_ancestor(repo_root: Path, ancestor: str, descendant: str) -> bool:
-    """Local-checkout ancestry proof(fail-closed)。只證 repo 拓撲,不是 runtime 認證。"""
-
-    import subprocess
-
-    if re.fullmatch(r"[0-9a-f]{40}", ancestor) is None or re.fullmatch(
-        r"[0-9a-f]{7,40}", descendant
-    ) is None:
-        return False
-    try:
-        proc = subprocess.run(
-            [
-                "git", "-C", str(repo_root), "merge-base", "--is-ancestor",
-                ancestor, descendant,
-            ],
-            capture_output=True,
-            timeout=30,
-        )
-    except (OSError, ValueError, subprocess.SubprocessError):
-        return False
-    return proc.returncode == 0
-
-
-def _git_head(repo_root: Path) -> str | None:
-    """回傳 repo_root 目前 checkout 的 HEAD 40-hex commit(fail-closed:git 錯誤回 None)。
-
-    T2:admission 的 source_head 必須「等於」目前 checkout HEAD(而非只是兩固定 predecessor 的後代)。
-    所有證據皆由目前 checkout 再導出,故若 receipt 宣稱某世代卻從另一世代導出 ADMITTED,即為漂移——
-    綁定 HEAD 令 admission 與其真正再導出的樹一致。
-    """
-
-    import subprocess
-
-    try:
-        proc = subprocess.run(
-            ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-    except (OSError, ValueError, subprocess.SubprocessError):
-        return None
-    if proc.returncode != 0:
-        return None
-    head = proc.stdout.strip()
-    return head if re.fullmatch(r"[0-9a-f]{40}", head) else None
 
 
 def _consumer_authoritative_database(repo_root: Path = REPO_ROOT) -> str | None:
@@ -780,11 +733,24 @@ def derive_source_admission_status(
                 "admission source_head is not the current checkout HEAD "
                 "(evidence is re-derived from HEAD; a claimed-generation mismatch is drift)"
             )
+        # W5 對抗審計第三輪 P2:淺 clone(CI 的預設 fetch-depth:1)上這些 commit 根本不在
+        # graft 裡,``git merge-base --is-ancestor`` 於是回非零。舊訊息說「不是祖先」,而真相
+        # 是「這個物件不在這棵樹裡」——operator 會去查一個不存在的歷史問題。先問這棵 repo 是
+        # 不是淺的,是的話把補救指令逐字說出來。
+        is_shallow = git_is_shallow_repository(repo_root)
         for name, predecessor in _PREDECESSOR_HEADS.items():
             if not _git_is_ancestor(repo_root, predecessor, source_head):
-                reasons.append(
-                    f"admission predecessor {name} is not an ancestor of source_head"
-                )
+                if is_shallow:
+                    reasons.append(
+                        f"admission predecessor {name} ({predecessor}) cannot be checked: "
+                        "this is a SHALLOW repository and the object is not in the graft, so "
+                        "ancestry is undecidable rather than false — re-run with "
+                        "`fetch-depth: 0` (actions/checkout) or `git fetch --unshallow`"
+                    )
+                else:
+                    reasons.append(
+                        f"admission predecessor {name} is not an ancestor of source_head"
+                    )
     try:
         texts = _read_three_head_texts(repo_root)
     except OSError as error:
@@ -836,6 +802,30 @@ def _nonempty_digest_list_ok(value: Any) -> bool:
         isinstance(value, list)
         and len(value) > 0
         and all(isinstance(item, str) and _DIGEST_RE.fullmatch(item) for item in value)
+    )
+
+
+# W5 對抗審計第三輪 P1-D:owned-scope 的 fail-closed 消費原本只有 W5 有(measured:
+# w2/w3/w4 consumed=0, w5 consumed=1)。逐波的 owned-path 集合在此登記,裁決本體
+# (內容定址 + fail-closed 文案)住在 schema_core.owned_scope_delta_reasons。
+_WAVE_OWNED_PATHS: dict[str, tuple[str, ...]] = {
+    "W0": _W0_OWNED_PATHS,
+    "W1": _W1_OWNED_PATHS,
+    "W2": _W2_OWNED_PATHS,
+    "W3": _W3_OWNED_PATHS,
+    "W4": _W4_OWNED_PATHS,
+    "W5": _W5_OWNED_PATHS,
+}
+
+
+def _owned_scope_delta_reasons(
+    wave: str, receipt: dict[str, Any], repo_root: Path
+) -> list[str]:
+    paths = _WAVE_OWNED_PATHS.get(wave)
+    if paths is None:
+        return []
+    return owned_scope_delta_reasons(
+        wave, paths, repo_root, source_head=receipt.get("source_head")
     )
 
 
@@ -916,6 +906,8 @@ def _wave_exit_structural_errors(
         # W6+ 各 wave 於其自身 owned path 擴充 derivation;未實作的 wave 一律 fail-closed。
         reasons.append("wave-exit derivation is only implemented for W0/W1/W2/W3/W4/W5 so far")
         return reasons
+    # P1-D:每一波都必須消費自己的 owned-scope delta,而不是只有 W5。
+    reasons.extend(_owned_scope_delta_reasons(str(wave), receipt, repo_root))
     # T1(b):test/capture/review 三類證據必為「非空」的合法 digest list——empty/arbitrary 不得導出 PASS。
     # 誠實邊界:每一支 test/capture/review 的「PLATFORM-ATTESTED 綁定」屬下游 EFFECT/closure 關切(離線
     # 結構驗無法認證其真跑過);此處只擋「空/畸形證據仍導 PASS」的洞,不冒充已認證 runtime。

@@ -31,10 +31,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 _HELPER_DIR = REPO_ROOT / "helper_scripts" / "maintenance_scripts"
 if str(_HELPER_DIR) not in sys.path:
     sys.path.insert(0, str(_HELPER_DIR))
-_PROGRAM_CODE_DIR = REPO_ROOT / "program_code"
-if str(_PROGRAM_CODE_DIR) not in sys.path:
-    sys.path.insert(0, str(_PROGRAM_CODE_DIR))
-
+# W5 對抗審計第三輪 P2(PM ruling):同 W3 葉——本葉不在 import 期把 ``program_code`` 放進
+# sys.path。它是 facade top-level import、位於 engine-scanner runtime import 閉包內,而 import
+# 期加寬 top-level namespace 必須是決策而非副作用(§10.1.1 #4);本葉根本沒有用到該路徑。
+# 移除**縮小**能力,故與 §10.1.1 條件 4 同向。
 from aiml_gate_receipt_schema_core import canonical_digest, resolve_facade  # noqa: E402
 
 _SCHEMA_DIR_REL = "program_code/ml_training/schemas/aiml_gate_receipts"

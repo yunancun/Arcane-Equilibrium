@@ -50,7 +50,22 @@ def _emit(tmp_path, **overrides):
     return install.emit_w1_receipts(**kwargs)
 
 
-def test_w1_emit_happy_path_persists_and_rederives(tmp_path) -> None:
+@pytest.fixture()
+def clean_owned_scope(monkeypatch):
+    """把「owned scope 相對 bound commit 乾淨」當作**前提**,而不是當作被證的事。
+
+    W5 對抗審計第三輪 P1-D 之後每一波的 wave-exit 都消費自己的 owned-scope 內容差異
+    (``validator._owned_scope_delta_reasons``),所以在一棵**未提交**的開發樹上那條具名
+    reason 是預期存在的。本檔這些斷言證的是鏈綁定 / 結構 / 發射路徑,不是這棵樹乾不乾淨;
+    「髒 owned scope 必須弄破該波 wave exit」的正反兩向由
+    ``test_agent_governance_s2_4_install_w5.py::
+    test_every_wave_exit_consumes_its_own_owned_scope_delta`` 逐波釘住。
+    """
+
+    monkeypatch.setattr(validator, "_owned_scope_delta_reasons", lambda *_a, **_k: [])
+
+
+def test_w1_emit_happy_path_persists_and_rederives(tmp_path, clean_owned_scope) -> None:
     result = _emit(tmp_path)
     assert result["status"] == "W1_RECEIPTS_EMITTED", result
     w1 = json.loads(
@@ -140,7 +155,7 @@ def test_w1_emit_refuses_when_regenerated_w0_wave_exit_not_pass(
     assert list(tmp_path.iterdir()) == []
 
 
-def test_w1_emit_refuses_when_w1_wave_exit_not_pass(tmp_path, monkeypatch) -> None:
+def test_w1_emit_refuses_when_w1_wave_exit_not_pass(tmp_path, monkeypatch, clean_owned_scope) -> None:
     original = validator.derive_wave_exit_status
 
     def _fail_w1_only(receipt, **kwargs):
@@ -158,7 +173,7 @@ def test_w1_emit_refuses_when_w1_wave_exit_not_pass(tmp_path, monkeypatch) -> No
     assert list(tmp_path.iterdir()) == []
 
 
-def test_w1_emit_refuses_when_central_gate_rejects(tmp_path, monkeypatch) -> None:
+def test_w1_emit_refuses_when_central_gate_rejects(tmp_path, monkeypatch, clean_owned_scope) -> None:
     monkeypatch.setattr(
         validator,
         "validate_aiml_artifact",
@@ -222,7 +237,7 @@ def _emit_w2(tmp_path, **overrides):
     return install.emit_w2_receipts(**kwargs)
 
 
-def test_w2_emit_happy_path_persists_and_rederives(tmp_path) -> None:
+def test_w2_emit_happy_path_persists_and_rederives(tmp_path, clean_owned_scope) -> None:
     result = _emit_w2(tmp_path)
     assert result["status"] == "W2_RECEIPTS_EMITTED", result
     w2 = json.loads(
@@ -278,7 +293,7 @@ def test_w2_emit_happy_path_persists_and_rederives(tmp_path) -> None:
     assert w2["test_digests"] == [validator.canonical_digest(_TEST_EVIDENCE)]
 
 
-def test_w2_emit_refuses_when_any_chain_segment_not_pass(tmp_path, monkeypatch) -> None:
+def test_w2_emit_refuses_when_any_chain_segment_not_pass(tmp_path, monkeypatch, clean_owned_scope) -> None:
     original = validator.derive_wave_exit_status
 
     def _fail_wave(wave_name, reason):
@@ -317,7 +332,7 @@ def test_w2_emit_refuses_when_any_chain_segment_not_pass(tmp_path, monkeypatch) 
     assert list(tmp_path.iterdir()) == []
 
 
-def test_w2_emit_refuses_when_central_gate_rejects(tmp_path, monkeypatch) -> None:
+def test_w2_emit_refuses_when_central_gate_rejects(tmp_path, monkeypatch, clean_owned_scope) -> None:
     # 只對 admission schema 逼出中央閘拒絕:全域拒會先毒化 W2 exported-ABI 的兩個活裁決
     # (它們也消費 validate_aiml_artifact),使拒絕發生在 w2_wave_exit 段而非 central_gate。
     original = validator.validate_aiml_artifact

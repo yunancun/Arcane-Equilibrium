@@ -44,7 +44,12 @@ from aiml_gate_receipt_schema_core import (  # noqa: E402
     artifact_self_digest,
     canonical_digest,
     S2_3_SEALED_BUILD_RECEIPT_REL,
+    S2_4_COMMITTED_SOURCE_IDENTITY_PATHS,
+    S2_4_DEPENDENCY_REFRESH_CLASSES,
+    S2_4_NEVER_REFRESHABLE_EVIDENCE,
     S2_4_NEVER_REFRESHABLE_SCHEMAS,
+    _DEPENDENCY_EVIDENCE_SUCCESS_STATUSES,
+    committed_source_identity_digests,
     dependency_semantic_subject_values,
     materialize_commit_paths,
     owned_path_blob_projection,
@@ -1098,113 +1103,6 @@ MAX_DEPENDENCY_REFRESH_TTL_SECONDS = 900
 # TTL 天花板(3600s)為同一保守窗。
 S2_2A_OBSERVATION_TTL_SECONDS = 3600
 
-# §9.2 第一列:**可**以一份獨立重算的 refresh 續命的三族 source 身分。每列宣告
-#   original_schema_versions —— 允許的原 receipt schema(封閉;不含 refresh 自身)
-#   semantic_digest_fields  —— 該族的 exact 語義**主體**集(refresh 必須逐項復現)
-#   producer_module         —— 驗證端重跑的 producer SSOT 模組(其 blob 亦被 refresh 綁)
-#
-# W5 對抗審計 P1-A:S1.3 / S2.3 兩族原本的主體集是 ("schema_sha256", "source_sha256"),而
-# ``source_sha256`` 逐位元組等於 refresh 另欄已綁的 ``producer_module_digest``(兩支
-# producer 的 source_sha256() 都是 ``_file_sha256(SOURCE_PATH)``),於是「獨立復現 producer/
-# semantic checks」退化成「兩個檔案沒變」——被證的主體一個都不在裡面。現在每一族都逐項復現
-# 該 producer **真正產出的內容**(見 schema_core 的 recompute/extract 成對投影)。
-S2_4_DEPENDENCY_REFRESH_CLASSES = {
-    "S1_3_IDENTITY_CONTRACT": {
-        "original_schema_versions": ("identity_acl_contract_receipt_v1",),
-        "semantic_digest_fields": (
-            "identity_projection_digest",
-            "negative_acl_kinds_digest",
-            "schema_sha256",
-            "source_sha256",
-        ),
-        "producer_module": (
-            "helper_scripts/maintenance_scripts/agent_governance_identity_acl_contract.py"
-        ),
-    },
-    "S2_2A_SOURCE_COMPATIBILITY": {
-        "original_schema_versions": (
-            "source_compatibility_receipt_v1",
-            "source_compatibility_receipt_v2",
-        ),
-        "semantic_digest_fields": (
-            "capture_contract_digest",
-            "learning_runtime_digest",
-            "training_contract_digest",
-        ),
-        "producer_module": "program_code/ml_training/learning_runtime_manifest.py",
-    },
-    "S2_3_EXPECTED_IDENTITY": {
-        "original_schema_versions": ("expected_identity_receipt_v1",),
-        "semantic_digest_fields": (
-            "expected_component_identities_digest",
-            "rollback_binding_digest",
-            "runtime_content_digest",
-            "s1_3_negatives_digest",
-            "schema_sha256",
-            "sealed_build_digest",
-            "source_sha256",
-        ),
-        "producer_module": (
-            "helper_scripts/maintenance_scripts/agent_governance_sealed_build.py"
-        ),
-    },
-    "S2_3_SEALED_BUILD": {
-        "original_schema_versions": ("sealed_build_receipt_v1",),
-        "semantic_digest_fields": (
-            "closure_hash",
-            "native_library_inventory_digest",
-            "runtime_content_digest",
-            "schema_sha256",
-            "source_sha256",
-        ),
-        "producer_module": (
-            "helper_scripts/maintenance_scripts/agent_governance_sealed_build.py"
-        ),
-    },
-}
-# 四族原 receipt 各自的**成功**狀態(S2.2A 兩版是 const SOURCE_READY;S2.3/S1.3 三族的
-# schema enum 是 ["PASS","FAIL"],故 FAIL 必須被顯式擋掉而不是靠 schema)。
-_DEPENDENCY_EVIDENCE_SUCCESS_STATUSES = frozenset({"PASS", "SOURCE_READY"})
-# §9.2 其餘各列:**永不**可以引用刷新的證據。值為該列自己的補救文字(§10.5 #28 後半)。
-S2_4_NEVER_REFRESHABLE_EVIDENCE = {
-    "APPLY_AGGREGATE_AUTHORIZATION": (
-        "the aggregate operator permit is newly signed only after W6A, the topology/HBA/"
-        "network evidence and the final plan core exist; it is never refreshed or chained"
-    ),
-    "CAPABILITY_PROBE_AUTHORIZATION": (
-        "a capability-probe permit is newly signed for one exact scope/core before each "
-        "probe; it cannot authorize PREPARE/APPLY or the other scope"
-    ),
-    "CAPABILITY_PROBE_RECEIPT_INSTALLED_UNIT": (
-        "the INSTALLED_UNIT capability-probe receipt is freshly authorized/observed only "
-        "after W6A against the exact rendered unit/host"
-    ),
-    "CAPABILITY_PROBE_RECEIPT_PREPARE_SANDBOX": (
-        "the PREPARE_SANDBOX capability-probe receipt is freshly authorized/observed "
-        "immediately before W6A against fixed prepare sandbox properties"
-    ),
-    "PG_MIGRATION_AUTHORIZATION": (
-        "the PG-migration operator permit is newly signed only after W6A; it is never "
-        "refreshed or chained"
-    ),
-    "PG_TOPOLOGY_ATTESTATION": (
-        "pg_topology_attestation_v1 is always freshly observed; no refresh-by-reference"
-    ),
-    "PREPARED_BUNDLE": (
-        "the prepared bundle is freshly re-hashed and inside its own expiry; otherwise "
-        "rerun PREPARE"
-    ),
-    "PREPARE_AUTHORIZATION": (
-        "the PREPARE permit is newly signed after the final prepare core and PREPARE-scope "
-        "probe receipt exist, before W6A; it is never refreshed or chained"
-    ),
-    "S2_0_EFFECT_RECEIPT": (
-        "the S2.0 effect receipt is a fresh production observation; rerun the S2.0 effect/"
-        "postcheck if expired"
-    ),
-}
-
-
 def dependency_producer_input_paths(dependency_class: Any) -> tuple[str, ...]:
     """該 §9.2 族的 producer **輸入位元組全集**(repo 相對路徑;含 producer SSOT 自身)。
 
@@ -1424,7 +1322,38 @@ def dependency_evidence_schema_versions(evidence_class: Any) -> tuple[str, ...] 
     return S2_4_NEVER_REFRESHABLE_SCHEMAS.get(evidence_class)
 
 
-def _dependency_evidence_receipt_errors(receipt: Any, expected: tuple[str, ...], *, now: Any) -> list[str]:
+def _committed_source_identity_errors(
+    receipt: dict[str, Any], dependency_class: str, repo_root: Path
+) -> list[str]:
+    """這份原 source 身分是不是 bound commit 上**那一份已提交的** artifact(P1-B)。
+
+    §9.2 的新鮮度完全由原 receipt 自帶的 ``observation_time``/``expires_at`` 決定,而那兩欄
+    在 caller 手上;家族驗證器認證形狀,不認證窗。三族的原身分在 repo 內都是已提交的固定
+    路徑,所以「它是不是那一份」是驗證端算得出來的——這才是把窗從 caller 手上拿回來的東西。
+
+    ``committed_source_identity_digests`` 回 ``None`` = 這一族在這棵樹的 bound commit 上沒有
+    可比對的已提交身分(S1.3 恆如此;隔離測試樹亦然);那時窗仍是 caller 自選的,而該殘留由
+    ``DEPENDENCY_OBSERVATION_WINDOW_IS_CALLER_AUTHORED`` 逐字記錄,不在此靜默拒。
+    """
+
+    committed = committed_source_identity_digests(dependency_class, Path(repo_root))
+    if committed is None:
+        return []
+    if artifact_self_digest(receipt) in committed:
+        return []
+    return [
+        "the supplied "
+        f"{receipt.get('schema_version')!r} is not the artifact committed at the bound "
+        f"commit ({list(S2_4_COMMITTED_SOURCE_IDENTITY_PATHS.get(dependency_class) or ())}); "
+        "§9.2's freshness verdict is read off observation_time/expires_at, which are the "
+        "caller's own fields, so a receipt that is not the committed one carries a "
+        "caller-authored observation window and no §9.2 verdict can be derived from it"
+    ]
+
+
+def _dependency_evidence_receipt_errors(
+    receipt: Any, expected: tuple[str, ...], *, now: Any, repo_root: Path = REPO_ROOT
+) -> list[str]:
     """這份 evidence 真的是它被冠上的那個 artifact 嗎(schema 身分 + 家族驗證器 + 自摘要)。
 
     W5 review P1-C/P2-D:``artifact_self_digest(x)`` 是自指的(攻擊者兩邊都遞交),只能證
@@ -1460,12 +1389,17 @@ def _dependency_evidence_receipt_errors(receipt: Any, expected: tuple[str, ...],
     # 讓 schema 過關)照樣可被刷新。§9.2 續的是「**過期**的 source 身分」,不是「失敗的觀測」:
     # 一份自陳 FAIL 的 artifact 沒有可延長的身分,只能重新觀測。只施於**可刷新**的四族
     # (never-refreshable 那九列的 artifact 例如 pg_topology_attestation_v1 根本沒有 status 欄)。
-    if dependency_class_for_schema_version(schema_version) is not None and (
+    dependency_class = dependency_class_for_schema_version(schema_version)
+    if dependency_class is not None and (
         receipt.get("status") not in _DEPENDENCY_EVIDENCE_SUCCESS_STATUSES
     ):
         errors.append(
             f"the bound source-identity receipt carries status {receipt.get('status')!r}; "
             "§9.2 extends the life of an EXPIRED identity, never of a failed observation"
+        )
+    if dependency_class is not None:
+        errors.extend(
+            _committed_source_identity_errors(receipt, dependency_class, Path(repo_root))
         )
     return errors
 
@@ -1692,7 +1626,8 @@ def derive_dependency_refresh_status(
     # 刷新控制也一起失效——它只有在 original_expires_at 不在攻擊者手上時才是結構性的。
     reasons.extend(
         _dependency_evidence_receipt_errors(
-            original_receipt, tuple(row["original_schema_versions"]), now=None
+            original_receipt, tuple(row["original_schema_versions"]), now=None,
+            repo_root=Path(repo_root),
         )
     )
     # ── §9.2「current exact head」──────────────────────────────────────────────
@@ -1926,7 +1861,9 @@ def derive_source_dependency_admission_status(
     # now=None:此處只驗「身分/結構/完整性」。牆鐘新鮮度是下面 §9.2 自己的分支要裁的事,
     # 若在此把 now 交給家族驗證器,一份**真的**但已過期的證據會被判成「不是那份 artifact」,
     # DEPENDENCY_EVIDENCE_REOBSERVATION_REQUIRED 這條 §9.2 語義就再也走不到。
-    receipt_errors = _dependency_evidence_receipt_errors(receipt, expected_schemas, now=None)
+    receipt_errors = _dependency_evidence_receipt_errors(
+        receipt, expected_schemas, now=None, repo_root=Path(repo_root)
+    )
     if receipt_errors:
         verdict["reasons"] = receipt_errors
         return verdict

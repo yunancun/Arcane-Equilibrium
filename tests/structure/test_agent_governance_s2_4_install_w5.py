@@ -7,8 +7,8 @@
   HEAD / caller 自證 status / 缺 chain)一律 NOT_PASS;
 - W5 exported-ABI 折入的六組活裁決確實可再導出——它們就是 W5 補上的六條 §10.5 覆蓋缺口,
   任何一條的 source 面被弱化,``w5_structural_errors`` 必然給出具名 reason;
-- W4 交出的十二項義務逐條被帶到 W5 且 owner 不被偷偷降級;W5 自審新增的四項以同一誠實形狀
-  記錄;
+- W4 交出的**每一項**義務(數量取自 W4 的活 ABI,不手抄)逐條被帶到 W5 且 owner 不被偷偷
+  降級;W5 逐輪自審新增的各項以同一誠實形狀記錄;
 - W5 owned-path 集合每一條都真實存在(pin 不得腐化成死路徑);
 - 「未實作 wave」的 fail-closed 邊界由 W5 推進到 W6。
 
@@ -35,6 +35,7 @@ for candidate in (HELPERS, ML_ROOT, PROGRAM_CODE):
         sys.path.insert(0, str(candidate))
 
 import agent_governance_s2_4_install as install  # noqa: E402
+import aiml_gate_receipt_schema_core as schema_core  # noqa: E402
 import aiml_gate_receipt_validator as validator  # noqa: E402
 
 _EVID = {
@@ -77,7 +78,8 @@ _W5_NEW = (
     # 掃描缺口,一條是 W5 只關掉自己那兩處、W4 那處仍開著的 import 期 namespace 加寬。
     "ENCODED_SECRET_SCAN_MISSES_COMPOSITE_PAYLOADS",
     "OWNED_PATH_PROJECTION_RULER_IS_NOT_UNIFORM",
-    "PROGRAM_CODE_IS_ON_THE_SCANNER_PATH_VIA_W4",
+    # 第三輪更名:舊 id 只點名 W4,而 W3 葉做的是**同一件事**且從未被提及。
+    "PROGRAM_CODE_IS_ON_THE_SCANNER_PATH_VIA_W3_AND_W4",
     "PR_SET_DUMPABLE_IS_DECLARED_NOT_ENFORCED",
     "S2_5_LIFECYCLE_FIXTURES_DO_NOT_EXIST",
     # W5 對抗審計第二輪(2026-07-27)新記三條:§9.2 裁決零生產呼叫端、wave-exit evidence
@@ -85,6 +87,11 @@ _W5_NEW = (
     "EMITTED_EVIDENCE_DIGESTS_ARE_UNAUTHENTICATED",
     "EXPECTED_TOPOLOGY_IS_CALLER_SUPPLIED_AND_UNSIGNED",
     "SOURCE_IDENTITY_FRESHNESS_HAS_NO_PRODUCTION_CALL_SITE",
+    # W5 對抗審計第三輪(2026-07-27)新記三條:§9.2 觀測窗對 S1.3 仍是 caller 自選、
+    # 九個 evidence class 只映到五份 schema、S1.3 的 assurance class 可在投影不變下被抬高。
+    "DEPENDENCY_OBSERVATION_WINDOW_IS_CALLER_AUTHORED",
+    "EVIDENCE_CLASS_TO_SCHEMA_MAP_IS_MANY_TO_ONE",
+    "S1_3_ASSURANCE_CLASS_IS_INFLATABLE_WITHOUT_CHANGING_THE_PROJECTION",
 )
 # 髒工作樹在 owned scope 上的具名 reason:與其他結構 reason 分開檢查,而非放寬。
 _OWNED_SCOPE_REASON = validator._W5_OWNED_SCOPE_REASON
@@ -460,8 +467,16 @@ def test_the_w5_obligation_ledger_has_no_duplicate_or_unowned_row() -> None:
         "extra": sorted(set(ids) - set(_W4_HANDOVER) - set(_W5_NEW)),
         "missing": sorted((set(_W4_HANDOVER) | set(_W5_NEW)) - set(ids)),
     }
+    # owner 必須是一個**真的**下游 owner。W5 只有在該列已由 W5 自己交付時才可以是 owner,
+    # 而那時 typed_status 必須明說是誰批准的(§10.1.1 的 path-scope 決定不是工人自己下的)。
     for row in rows:
-        assert row["owner_wave"] in {"PM", "S2.5A", "W6", "W6B"}, row["obligation_id"]
+        assert row["owner_wave"] in {"PM", "S1.3", "S2.5A", "W5", "W6", "W6B"}, (
+            row["obligation_id"]
+        )
+        if row["owner_wave"] == "W5":
+            assert row["typed_status"] == "PROVIDED_BY_W5_UNDER_PM_RULING", row[
+                "obligation_id"
+            ]
 
 
 # ── 未實作 wave 的 fail-closed 邊界推進到 W6 ────────────────────────────────────
@@ -859,6 +874,143 @@ def test_the_untouched_s2_3_identities_still_refresh_and_bind_their_subjects() -
         )
 
 
+@pytest.mark.parametrize(
+    "rel,evidence_class,move_forward,move_back",
+    [
+        (
+            _S2_3_EXPECTED, "S2_3_EXPECTED_IDENTITY",
+            {"observation_time": "2026-07-27T00:00:00+00:00",
+             "expires_at": "2026-07-27T00:30:00+00:00"},
+            {"observation_time": "2020-01-01T00:00:00+00:00",
+             "expires_at": "2020-01-01T00:30:00+00:00"},
+        ),
+        (
+            "docs/execution_plan/ai_ml_landing/receipts/S2.3-sealed-build-receipt-v1.json",
+            "S2_3_SEALED_BUILD",
+            {"observation_time": "2026-07-27T00:00:00+00:00",
+             "expires_at": "2026-07-27T00:30:00+00:00"},
+            {"observation_time": "2020-01-01T00:00:00+00:00",
+             "expires_at": "2020-01-01T00:30:00+00:00"},
+        ),
+        (
+            _S2_2A_V1, "S2_2A_SOURCE_COMPATIBILITY",
+            {"generated_at_utc": "2026-07-27T00:00:00Z"},
+            {"generated_at_utc": "2020-01-01T00:00:00Z"},
+        ),
+    ],
+)
+def test_the_observation_window_cannot_be_moved_by_editing_two_caller_fields(
+    rel, evidence_class, move_forward, move_back
+) -> None:
+    """§9.2 review 第三輪 P1-B:整個 §9.2 閘可以被「改兩個時間戳 + 重封」跳過。
+
+    ``dependency_original_observation_window`` 直接讀原 receipt 自帶的
+    ``observation_time``/``expires_at``(S2.2A 是 ``generated_at_utc``),而那是 caller 的欄位。
+    在**真的**已出貨 receipt 上把窗往前推一次,三族一律導出 ``SOURCE_DEPENDENCY_FRESH``——沒有
+    refresh、沒有復現、沒有 clean-tree 閘、沒有物化;往後推再配一份 refresh 則導出
+    ``SOURCE_DEPENDENCY_ADMITTED_BY_REFRESH`` 且零 reason。家族驗證器兩次都回 ``[]``,因為它
+    認證的是形狀,不是那個窗。
+
+    修法是把原身分綁回 bound commit 的 blob(與 P1-A 同一把尺):三族的原身分在 repo 內都是
+    已提交的固定路徑。S1.3 沒有已提交的 receipt,其窗因此**仍然**是 caller 自選的,由
+    ``DEPENDENCY_OBSERVATION_WINDOW_IS_CALLER_AUTHORED`` 逐字記錄。
+    """
+
+    import json
+
+    original = json.loads((ROOT / rel).read_text(encoding="utf-8"))
+    # 未經竄改的那一份仍走得到 §9.2 的正常出口(否則本測試證的只是「什麼都拒」)。
+    assert validator.derive_source_dependency_admission_status(
+        evidence_class=evidence_class, receipt=original, now=_NOW, repo_root=ROOT,
+    )["status"] == "SOURCE_DEPENDENCY_EXPIRED_NO_REFRESH"
+
+    forward = _reseal({**original, **move_forward})
+    assert validator.validate_aiml_artifact(forward, now=_NOW) == []  # 形狀仍然合法
+    moved = validator.derive_source_dependency_admission_status(
+        evidence_class=evidence_class, receipt=forward, now=_NOW, repo_root=ROOT,
+    )
+    assert moved["status"] == "SOURCE_DEPENDENCY_REJECTED", moved
+    assert any("committed at the bound commit" in r for r in moved["reasons"]), moved
+
+    backward = _reseal({**original, **move_back})
+    refresh = validator.build_s2_4_dependency_refresh_attestation(
+        backward, reproducer_caller="E1:S2.4:W5-window-probe",
+        reproducer_platform=dict(_PLATFORM), reproduced_at=_AT, repo_root=ROOT,
+    )
+    assert validator.derive_source_dependency_admission_status(
+        evidence_class=evidence_class, receipt=backward, refresh=refresh,
+        now=_NOW, repo_root=ROOT,
+    )["status"] == "SOURCE_DEPENDENCY_REJECTED"
+    assert validator.derive_dependency_refresh_status(
+        refresh, original_receipt=backward, now=_NOW, repo_root=ROOT
+    )["status"] == "DEPENDENCY_REFRESH_REJECTED"
+
+
+def test_the_committed_identity_table_is_code_owned_and_its_gap_is_recorded() -> None:
+    """P1-B 的誠實面:哪幾族的窗被 commit 綁住,哪一族不是,以及後者必須在冊。"""
+
+    table = validator.S2_4_COMMITTED_SOURCE_IDENTITY_PATHS
+    assert sorted(table) == sorted(validator.S2_4_DEPENDENCY_REFRESH_CLASSES)
+    for name, paths in table.items():
+        for rel in paths:
+            assert (ROOT / rel).is_file(), (name, rel)
+        digests = validator.committed_source_identity_digests(name, ROOT)
+        if paths:
+            assert digests, name
+        else:
+            # S1.3 = 一次性 disposable 觀測,repo 內沒有已提交的原身分。
+            assert digests is None, name
+    caller_authored = sorted(name for name, paths in table.items() if not paths)
+    assert caller_authored == ["S1_3_IDENTITY_CONTRACT"]
+    obligations = {
+        row["obligation_id"]: row
+        for row in validator.S2_4_W5_REMAINING_OWNED_OBLIGATIONS
+    }
+    row = obligations["DEPENDENCY_OBSERVATION_WINDOW_IS_CALLER_AUTHORED"]
+    assert row["typed_status"] == "PARTIALLY_PROVIDED_BY_W5"
+    assert "S1_3_IDENTITY_CONTRACT" in row["statement"]
+
+
+def test_the_dependency_input_scope_names_every_class_and_the_imported_leaf() -> None:
+    """P1-C:``required`` 集合漏掉被 import 的 feature 葉,而 S1.3 根本沒有 required 條目。
+
+    ``edge_feature_schema_contract.py`` 在 §9.2 輸入集合裡的**唯一**理由是讓 clean-tree 閘
+    蓋到它(物化樹幫不上被 import 的葉)。刪掉 ``dependency_producer_input_paths`` 裡那一行,
+    全樹 6111/46 逐位元組不變——沒有任何東西釘住它。S1.3 那一族靠的是
+    ``required.get(name, set())`` 的空集合,於是它的 required 恆真。
+    """
+
+    import aiml_gate_receipt_wave_w5 as wave_w5
+
+    live = validator.w5_exported_abi_projection()["dependency_refresh_live"]
+    scope = live["producer_input_scope_covers_the_allowlists"]
+    assert sorted(scope) == sorted(validator.S2_4_DEPENDENCY_REFRESH_CLASSES)
+    assert all(covered is True for covered in scope.values()), scope
+    s2_2a = validator.dependency_producer_input_paths("S2_2A_SOURCE_COMPATIBILITY")
+    assert "program_code/ml_training/edge_feature_schema_contract.py" in s2_2a
+    # 每一族都有**具名**的 required 條目(不是 .get(name, set()) 的恆真空集合)。
+    scoped = wave_w5._producer_input_scope_live(validator)
+    assert sorted(scoped) == sorted(validator.S2_4_DEPENDENCY_REFRESH_CLASSES)
+    # 縮小任何一族的輸入集合都必須弄破 wave exit,而不只是靜默變弱。
+    original = validator.dependency_producer_input_paths
+
+    def _narrowed(dependency_class):
+        return tuple(
+            rel for rel in original(dependency_class)
+            if rel != "program_code/ml_training/edge_feature_schema_contract.py"
+        )
+
+    class _Narrowed:
+        S2_4_DEPENDENCY_REFRESH_CLASSES = validator.S2_4_DEPENDENCY_REFRESH_CLASSES
+        dependency_producer_input_paths = staticmethod(_narrowed)
+
+    narrowed_scope = wave_w5._producer_input_scope_live(_Narrowed)
+    assert narrowed_scope["S2_2A_SOURCE_COMPATIBILITY"] is False, narrowed_scope
+    assert wave_w5._dependency_refresh_reasons({
+        **live, "producer_input_scope_covers_the_allowlists": narrowed_scope,
+    })
+
+
 def test_a_drifted_s1_3_identity_projection_can_never_be_refreshed() -> None:
     """§9.2 P1-A 的 S1.3 面:身分/ACL 投影是被證主體,兩個檔案雜湊不是。"""
 
@@ -903,8 +1055,8 @@ def test_a_drifted_s1_3_identity_projection_can_never_be_refreshed() -> None:
 @pytest.mark.parametrize(
     "delta,marker",
     [
-        (["tests/structure/test_agent_governance_s2_4_acceptance_matrix.py"], "differ from"),
-        (None, "undecidable"),
+        (["tests/structure/test_agent_governance_s2_4_acceptance_matrix.py"], "differ in content"),
+        (None, "git is unreadable"),
     ],
 )
 def test_a_dirty_or_undecidable_owned_scope_breaks_the_w5_wave_exit(
@@ -914,32 +1066,310 @@ def test_a_dirty_or_undecidable_owned_scope_breaks_the_w5_wave_exit(
 
     修正前:把 W5 自己新寫的驗收矩陣測試清空成一行註解,W0..W5 全數仍 PASS,而投影裡明明
     白白記著那個 delta。一份綁了 ``source_head`` 的 receipt 正是在宣稱「我的 owned scope 就
-    在那個 head 上」;不可判定同樣 fail-closed。
+    在那個 head 上」;不可判定同樣 fail-closed。第三輪 P1-D 之後裁決住在共用的 wave-exit
+    路徑(``validator._owned_scope_delta_reasons``),故本測試對著那把共用的尺。
     """
 
-    import aiml_gate_receipt_wave_w5 as wave_w5
-
     _admission, _w0, _w1, _w2, _w3, _w4, w5 = chain
-    monkeypatch.setattr(wave_w5, "owned_scope_worktree_delta", lambda *_a, **_k: delta)
+    monkeypatch.setattr(
+        schema_core, "owned_scope_worktree_delta", lambda *_a, **_k: delta
+    )
     reasons = [
-        reason for reason in validator.w5_structural_errors(w5)
+        reason for reason in validator._wave_exit_structural_errors(w5)
         if reason.startswith(_OWNED_SCOPE_REASON)
     ]
-    assert len(reasons) == 1, validator.w5_structural_errors(w5)
+    assert len(reasons) == 1, validator._wave_exit_structural_errors(w5)
     assert marker in reasons[0]
+    # 髒 scope 的 reason 必須帶祈使句(operator 拿到的是「該做什麼」,不是三句理由)。
+    if delta:
+        assert "commit or revert these paths, then re-derive" in reasons[0]
 
 
 def test_a_clean_owned_scope_emits_no_worktree_reason(chain, monkeypatch) -> None:
     """反向:owned scope 乾淨時那條 reason 必須消失(它不是一條恆真的 reason)。"""
 
+    _admission, _w0, _w1, _w2, _w3, _w4, w5 = chain
+    monkeypatch.setattr(
+        schema_core, "owned_scope_worktree_delta", lambda *_a, **_k: []
+    )
+    assert not [
+        reason for reason in validator._wave_exit_structural_errors(w5)
+        if reason.startswith(_OWNED_SCOPE_REASON)
+    ]
+
+
+def test_every_wave_exit_consumes_its_own_owned_scope_delta(chain, monkeypatch) -> None:
+    """P1-D:fail-closed 的 owned-scope 消費原本**只有 W5 有**(w2/w3/w4 consumed=0)。
+
+    W2 擁有 operator 真正執行的四支腳本(``agent_governance_s2_4_install`` / ``_render`` /
+    ``_sql_scan`` / ``_emit_sink``),所以一份綁了 ``source_head`` 的 W2 wave-exit 能從一棵
+    那四支被本地改過的樹導出 PASS。刪掉 ``_wave_exit_structural_errors`` 裡那一行接線,本
+    測試對 W0..W4 立刻轉紅。
+    """
+
+    admission, w0, w1, w2, w3, w4, w5 = chain
+    receipts = {"W0": w0, "W1": w1, "W2": w2, "W3": w3, "W4": w4, "W5": w5}
+    # 每一波的 owned-path 集合都真的被登記(漏一波 = 那一波無人看管)。
+    assert sorted(validator._WAVE_OWNED_PATHS) == ["W0", "W1", "W2", "W3", "W4", "W5"]
+    assert validator.owned_scope_reason_prefix("W5") == _OWNED_SCOPE_REASON
+    for wave, receipt in receipts.items():
+        prefix = validator.owned_scope_reason_prefix(wave)
+        for delta in ([f"{wave}/tampered.py"], None):
+            monkeypatch.setattr(
+                schema_core, "owned_scope_worktree_delta", lambda *_a, **_k: delta
+            )
+            named = [
+                reason for reason in validator._wave_exit_structural_errors(receipt)
+                if reason.startswith(prefix)
+            ]
+            assert len(named) == 1, (wave, delta, named)
+        monkeypatch.setattr(
+        schema_core, "owned_scope_worktree_delta", lambda *_a, **_k: []
+    )
+        assert not [
+            reason for reason in validator._wave_exit_structural_errors(receipt)
+            if reason.startswith(prefix)
+        ], wave
+        # 且它必須真的擋住 PASS,而不只是多印一行。
+        monkeypatch.setattr(
+            schema_core, "owned_scope_worktree_delta", lambda *_a, **_k: ["x.py"]
+        )
+        predecessors = {
+            "W0": (None, ()), "W1": (w0, ()), "W2": (w1, (w0,)), "W3": (w2, (w0, w1)),
+            "W4": (w3, (w0, w1, w2)), "W5": (w4, (w0, w1, w2, w3)),
+        }[wave]
+        assert validator.derive_wave_exit_status(
+            receipt,
+            source_admission_receipt=admission,
+            predecessor_wave_receipt=predecessors[0],
+            predecessor_wave_chain=predecessors[1],
+        )["status"] == "NOT_PASS", wave
+
+
+def test_every_folded_value_that_carries_a_claim_has_a_reason_level_consumer(
+    chain, monkeypatch
+) -> None:
+    """P2-G:折進投影卻**沒有任何 reason 消費者**的值只是裝飾品。
+
+    逐個把它反轉成假宣稱,``w5_structural_errors`` 都必須具名報出來。修正前這五個值反轉之後
+    146 支 W5 lane 測試全綠:``s2_5_lifecycle_source_absent``(連測試級斷言都沒有)、
+    ``pg_role_identity_live.grant_statement_count``、``inactive_postcheck_live`` 的兩組
+    ``*_properties`` 與 ``aggregate_forbidden_methods``、``schema_registration_live``
+    的 ``dependency_refresh_schema_key``。
+    """
+
     import aiml_gate_receipt_wave_w5 as wave_w5
 
     _admission, _w0, _w1, _w2, _w3, _w4, w5 = chain
-    monkeypatch.setattr(wave_w5, "owned_scope_worktree_delta", lambda *_a, **_k: [])
-    assert not [
-        reason for reason in validator.w5_structural_errors(w5)
-        if reason.startswith(_OWNED_SCOPE_REASON)
-    ]
+    baseline = validator.w5_exported_abi_projection()
+
+    def _with(section: str, **overrides):
+        projection = deepcopy(baseline)
+        projection[section].update(overrides)
+        monkeypatch.setattr(
+            wave_w5, "w5_exported_abi_projection", lambda *_a, **_k: projection
+        )
+        return validator.w5_structural_errors(w5)
+
+    for section, overrides, marker in (
+        ("inactive_postcheck_live", {"s2_5_lifecycle_source_files": ["S2.5-x.md"],
+                                     "s2_5_lifecycle_source_absent": False},
+         "still records S2_5_LIFECYCLE_FIXTURES_DO_NOT_EXIST"),
+        ("inactive_postcheck_live", {"s2_5_lifecycle_source_absent": None},
+         "cannot measure whether an S2.5 lifecycle source exists"),
+        ("inactive_postcheck_live", {"aggregate_forbidden_methods": []},
+         "forbidden-method inventory is empty"),
+        ("inactive_postcheck_live", {"postcheck_properties": []},
+         "exposes no properties at all"),
+        ("inactive_postcheck_live", {"receipt_properties": []},
+         "exposes no properties at all"),
+        ("pg_role_identity_live", {"grant_statement_count": 0},
+         "generates no statement at all"),
+        ("schema_registration_live", {"dependency_refresh_schema_key": "something_else"},
+         "is not the §10.1-named"),
+    ):
+        reasons = _with(section, **overrides)
+        assert any(marker in reason for reason in reasons), (section, overrides, reasons)
+
+    # 正向:未被動過的投影不得產生上述任何一條(它們不是恆真的 reason)。
+    monkeypatch.setattr(
+        wave_w5, "w5_exported_abi_projection", lambda *_a, **_k: deepcopy(baseline)
+    )
+    clean = validator.w5_structural_errors(w5)
+    for marker in (
+        "still records S2_5_LIFECYCLE_FIXTURES_DO_NOT_EXIST",
+        "forbidden-method inventory is empty",
+        "exposes no properties at all",
+        "generates no statement at all",
+        "is not the §10.1-named",
+    ):
+        assert not any(marker in reason for reason in clean), (marker, clean)
+    # 而 S2.5 的判定必須用同一個 glob(舊碼只看一個猜出來的檔名)。
+    assert baseline["inactive_postcheck_live"]["s2_5_lifecycle_source_files"] == []
+
+
+def test_no_wave_leaf_widens_the_scanner_namespace_at_import_time() -> None:
+    """P2(PM ruling):W3/W4 葉在 import 期把 ``program_code`` 放進 sys.path。
+
+    facade 的 top-level import 閉包一旦這麼做,engine-scanner 進程的 top-level namespace 就
+    多出 broker_connectors / exchange_connectors / dashboard / ai_agents。§10.1.1 條件 4 禁的
+    是**授予**父進程沒有的能力,移除它是**縮小**能力,故與該條件同向。
+    """
+
+    import ast
+
+    for rel in (
+        "program_code/ml_training/aiml_gate_receipt_s2_4_contracts.py",
+        "program_code/ml_training/aiml_gate_receipt_wave_w3.py",
+        "program_code/ml_training/aiml_gate_receipt_wave_w4.py",
+        "program_code/ml_training/aiml_gate_receipt_wave_w5.py",
+    ):
+        tree = ast.parse((ROOT / rel).read_text(encoding="utf-8"))
+        for node in tree.body:  # 只看 module 層級(函式內的開窗是允許的形)
+            dumped = ast.dump(node)
+            assert "sys.path" not in dumped.replace("'sys'", "").replace(
+                "attr='path'", ""
+            ) or "_PROGRAM_CODE_DIR" not in dumped, rel
+            assert "_PROGRAM_CODE_DIR" not in dumped, rel
+        assert "_PROGRAM_CODE_DIR" not in (ROOT / rel).read_text(encoding="utf-8"), rel
+
+
+def test_the_s1_3_assurance_class_inflation_is_pinned_where_it_is_reachable() -> None:
+    """E2/E3 分歧的實證裁決(第三輪):兩邊各對一半,而只有成對的組合走得到。
+
+    E2 對:逐項單獨漂移 ``s1_3_identity_projection`` 排除的欄位,家族驗證器逐個抓到
+    (2..16 個 error),只有 ``negative_acl_cases[].reason`` 與兩個 rotation 指紋槽存活。
+    E3 對:assurance class **確實**可以在投影逐位元組不變的情況下由 STRUCTURAL_ONLY 抬到
+    LOCAL_REPRODUCIBLE——但必須是**成對**的(socket ``mode_source`` + 對應的頂層
+    ``evidence_class``),而一次一欄的掃法找不到那個組合。E3 對 ``_evidence_ceiling`` 輸入
+    的描述在此 head 上不準確:它讀的是 ``_has_live_disposable_witness``(rotation proof 的
+    ``observation_source`` 與 socket 的 ``mode_source``),不是逐 facet 的 ``evidence_class``。
+    """
+
+    import copy
+
+    import agent_governance_identity_acl_contract as s1_3
+
+    contract = s1_3.canonical_identity_acl_contract()
+    base = s1_3.build_identity_acl_contract_receipt(
+        caller="S1.3:probe",
+        platform={"os": "darwin", "arch": "arm64", "postgres_version": "16.3"},
+        target_class="disposable_local", contract=contract,
+        observation_time="2026-07-01T00:00:00+00:00", ttl_seconds=1800,
+        evidence_class="STRUCTURAL_ONLY",
+    )
+
+    def _refresh_status(receipt):
+        refresh = validator.build_s2_4_dependency_refresh_attestation(
+            receipt, reproducer_caller="E1:S2.4:W5-s1-3-ceiling",
+            reproducer_platform=dict(_PLATFORM), reproduced_at=_AT, repo_root=ROOT,
+        )
+        return validator.derive_dependency_refresh_status(
+            refresh, original_receipt=receipt, now=_NOW, repo_root=ROOT
+        )["status"]
+
+    assert _refresh_status(base) == "DEPENDENCY_REFRESH_ADMITTED"
+    assert s1_3._evidence_ceiling(base) == "STRUCTURAL_ONLY"
+
+    # (1) E2 的結果:逐項單獨漂移全被家族驗證器抓到。
+    for mutate in (
+        lambda r: r["socket_dir_acl"][0].__setitem__("mode", "0777"),
+        lambda r: r["socket_dir_acl"][0].__setitem__("mode_source", "host_observation"),
+        lambda r: r["secret_lifecycle"]["rotation"]["old_credential_rejection_proof"]
+        .__setitem__("verdict", "ALLOWED"),
+        lambda r: r.__setitem__("evidence_class", "RUNNING_ATTESTED"),
+        lambda r: [x.__setitem__("evidence_class", "HOST_OBSERVED") for x in
+                   r["host_uid_topology"]],
+    ):
+        drifted = copy.deepcopy(base)
+        mutate(drifted)
+        drifted = _reseal(drifted)
+        assert validator.s1_3_identity_projection(drifted) == (
+            validator.s1_3_identity_projection(base)
+        )
+        assert s1_3.validate_identity_acl_contract_receipt(drifted), drifted["evidence_class"]
+        assert _refresh_status(drifted) == "DEPENDENCY_REFRESH_REJECTED"
+
+    # (2) E3 的結果:成對的 mode_source + evidence_class 是**一致的**,家族驗證器零 error,
+    #     投影逐位元組不變,而 assurance class 已被抬高。
+    inflated = copy.deepcopy(base)
+    inflated["socket_dir_acl"][0]["mode_source"] = "live_chmod_stat"
+    inflated["evidence_class"] = "LOCAL_REPRODUCIBLE"
+    inflated = _reseal(inflated)
+    assert s1_3.validate_identity_acl_contract_receipt(inflated) == []
+    assert validator.s1_3_identity_projection(inflated) == (
+        validator.s1_3_identity_projection(base)
+    )
+    assert s1_3._evidence_ceiling(inflated) == "LOCAL_REPRODUCIBLE"
+    assert s1_3._evidence_ceiling(base) == "STRUCTURAL_ONLY"
+    assert _refresh_status(inflated) == "DEPENDENCY_REFRESH_ADMITTED"
+
+    # (3) rotation 那條路走不到(live proof 另外要求新憑證已連線過)。
+    rotation = copy.deepcopy(base)
+    rotation["secret_lifecycle"]["rotation"]["old_credential_rejection_proof"][
+        "observation_source"
+    ] = "live_disposable_pg"
+    rotation["evidence_class"] = "LOCAL_REPRODUCIBLE"
+    rotation = _reseal(rotation)
+    assert s1_3.validate_identity_acl_contract_receipt(rotation) != []
+    assert _refresh_status(rotation) == "DEPENDENCY_REFRESH_REJECTED"
+
+    # (4) 後果必須在冊,且逐字說出「LOCAL_REPRODUCIBLE 只是宣稱」。
+    row = {
+        r["obligation_id"]: r for r in validator.S2_4_W5_REMAINING_OWNED_OBLIGATIONS
+    }["S1_3_ASSURANCE_CLASS_IS_INFLATABLE_WITHOUT_CHANGING_THE_PROJECTION"]
+    assert "live_chmod_stat" in row["statement"]
+    assert "negative_acl_cases[].reason" in row["statement"]
+
+
+def test_the_owned_scope_delta_is_content_addressed_not_git_status(tmp_path) -> None:
+    """P1-A:``git status`` 不是可靠的 oracle,而 ``source_head`` 也不是 HEAD。
+
+    三個各自獨立的繞道,全部在一棵自建的小 repo 上實證:
+
+    1. ``git update-index --assume-unchanged`` 讓被改過的檔案自 ``git status`` 消失;
+    2. ``--skip-worktree`` 同理;
+    3. ``git status`` 永遠比對 HEAD,故綁定的 ``source_head`` 是**前一個** commit 時,
+       「與 HEAD 無差異」被舊碼當成了「與 bound commit 無差異」。
+
+    修正前(``git status --porcelain`` 形)三個案例都回 ``[]``。
+    """
+
+    import aiml_gate_receipt_schema_core as core
+
+    mini = tmp_path / "mini"
+    (mini / "pkg").mkdir(parents=True)
+    (mini / "pkg" / "a.py").write_text("ORIGINAL\n", encoding="utf-8")
+    (mini / "pkg" / "b.py").write_text("B\n", encoding="utf-8")
+    _seed_repo(mini, [])
+    first = _git(mini, "rev-parse", "HEAD")
+    owned = ("pkg/a.py", "pkg/b.py")
+    assert core.owned_scope_worktree_delta(mini, owned) == []
+
+    # (1) assume-unchanged:git status 看不見,內容定址看得見。
+    (mini / "pkg" / "a.py").write_text("TAMPERED\n", encoding="utf-8")
+    _git(mini, "update-index", "--assume-unchanged", "pkg/a.py")
+    assert _git(mini, "status", "--porcelain") == ""
+    assert core.owned_scope_worktree_delta(mini, owned) == ["pkg/a.py"]
+    _git(mini, "update-index", "--no-assume-unchanged", "pkg/a.py")
+
+    # (2) skip-worktree:同樣看不見。
+    _git(mini, "update-index", "--skip-worktree", "pkg/a.py")
+    assert _git(mini, "status", "--porcelain") == ""
+    assert core.owned_scope_worktree_delta(mini, owned) == ["pkg/a.py"]
+    _git(mini, "update-index", "--no-skip-worktree", "pkg/a.py")
+    (mini / "pkg" / "a.py").write_text("ORIGINAL\n", encoding="utf-8")
+
+    # (3) source_head ≠ HEAD:工作樹相對 HEAD 乾淨,相對 bound commit 並不乾淨。
+    (mini / "pkg" / "b.py").write_text("B2\n", encoding="utf-8")
+    _git(mini, "add", "-A")
+    _git(mini, "commit", "-q", "-m", "second")
+    assert _git(mini, "status", "--porcelain") == ""
+    assert core.owned_scope_worktree_delta(mini, owned) == []
+    assert core.owned_scope_worktree_delta(mini, owned, source_head=first) == ["pkg/b.py"]
+
+    # 該 commit 根本沒有那個 blob → 同樣計入差異(fail-closed,不是靜默通過)。
+    assert core.owned_scope_worktree_delta(mini, ("pkg/never.py",)) == ["pkg/never.py"]
 
 
 def test_the_section_9_2_admission_verdict_has_no_production_call_site() -> None:
@@ -995,27 +1425,134 @@ def test_a_deleted_honest_obligation_breaks_the_w5_wave_exit(
     ), reasons
 
 
+def _call_site_measurement(**overrides) -> dict:
+    measured = {
+        "production_call_sites": [],
+        "production_call_site_scan_roots": ["helper_scripts/maintenance_scripts", "program_code"],
+        "production_call_site_definition_sites": [],
+        "production_call_site_modules_scanned": 717,
+        "production_call_site_undecidable_modules": [],
+        "apply_time_consumer": "x",
+        "apply_time_consumer_derives_freshness": False,
+    }
+    measured.update(overrides)
+    return measured
+
+
+_EVIDENCE_MEASUREMENT = {
+    "only_shape_is_constrained": True,
+    "emit_sink_accepts_fabricated_evidence": True,
+    "emit_sink_refuses_empty_evidence": True,
+    "emit_sink_refuses_secret_like_evidence": True,
+}
+
+
 def test_a_wired_call_site_must_close_the_obligation_instead_of_carrying_it() -> None:
     """B 的另一半閂:有人把閘接進 APPLY 之後,那條義務必須被關掉而不是永遠掛著。"""
 
     import aiml_gate_receipt_wave_w5 as wave_w5
 
     reasons = wave_w5._honest_surface_reasons(
-        {
-            "production_call_sites": [
+        _call_site_measurement(
+            production_call_sites=[
                 "helper_scripts/maintenance_scripts/agent_governance_s2_4_host_identity.py"
             ],
-            "apply_time_consumer": "x",
-            "apply_time_consumer_derives_freshness": True,
-        },
-        {
-            "only_shape_is_constrained": True,
-            "emit_sink_accepts_fabricated_evidence": True,
-            "emit_sink_refuses_empty_evidence": True,
-            "emit_sink_refuses_secret_like_evidence": True,
-        },
+            apply_time_consumer_derives_freshness=True,
+        ),
+        dict(_EVIDENCE_MEASUREMENT),
     )
     assert any("close the obligation instead" in reason for reason in reasons), reasons
+
+
+@pytest.mark.parametrize(
+    "call_site_overrides",
+    [
+        {"production_call_sites": None},
+        {"production_call_site_modules_scanned": 0},
+        {"production_call_site_undecidable_modules": ["helper_scripts/x.py"]},
+        {"apply_time_consumer_derives_freshness": None},
+    ],
+)
+def test_an_ambiguous_call_site_measurement_can_never_demand_deleting_the_row(
+    call_site_overrides,
+) -> None:
+    """P1-E:量測失敗 / 含糊**永遠**落在「不可關閉」那一臂,絕不落在「必須關閉」。
+
+    舊閂是 ``if f"{name}(" in text`` 施於原始檔案文字、非遞迴、單一目錄:一句提到該名字的
+    **註解**就讓 ``production_call_sites`` 變非空,而那條閂的下一臂寫著「close the obligation
+    instead」——於是一個誤報會逼人刪掉一條仍然為真的誠實列。反向同樣是拒絕原語:同一句註解
+    配上那一列還在冊,就強制 NOT_PASS。
+    """
+
+    import aiml_gate_receipt_wave_w5 as wave_w5
+
+    reasons = wave_w5._honest_surface_reasons(
+        _call_site_measurement(**call_site_overrides), dict(_EVIDENCE_MEASUREMENT)
+    )
+    assert any("cannot measure whether" in reason for reason in reasons), reasons
+    assert not any("close the obligation instead" in reason for reason in reasons), reasons
+
+
+def test_a_comment_mentioning_the_entry_point_is_not_a_call_site(tmp_path) -> None:
+    """P1-E 的具體誤報形:註解 / 字串 / 定義都不是呼叫,``ast.Call`` 才是。"""
+
+    import aiml_gate_receipt_wave_w5 as wave_w5
+
+    entry = wave_w5._REFRESH_ADMISSION_ENTRY
+    for source, expected in (
+        (f"# see {entry}() for the §9.2 verdict\n", False),
+        (f'DOC = "{entry}("\n', False),
+        (f"def {entry}(**kwargs):\n    return None\n", False),
+        (f"x = {entry}(evidence_class='X')\n", True),
+        (f"x = facade.{entry}(evidence_class='X')\n", True),
+    ):
+        path = tmp_path / "probe.py"
+        path.write_text(source, encoding="utf-8")
+        assert wave_w5._module_calls_the_name(path, entry) is expected, source
+    broken = tmp_path / "broken.py"
+    broken.write_text("def (:\n", encoding="utf-8")
+    assert wave_w5._module_calls_the_name(broken, entry) is None
+
+
+def test_a_documentation_only_schema_edit_does_not_flip_the_evidence_latch(
+    monkeypatch,
+) -> None:
+    """P1-E:``$defs/digest`` 加一句 ``description`` 是純文件編輯,不是認證性約束。
+
+    舊版是鍵集合比對(``in (["pattern","type"], ["type"])``),於是那句 description 會把
+    ``only_shape_is_constrained`` 翻成 False,而下一臂寫著「close the obligation instead」。
+    """
+
+    import aiml_gate_receipt_wave_w5 as wave_w5
+
+    facade = validator
+    original = facade._load_schema
+
+    def _annotated(schema_version: str):
+        schema = original(schema_version)
+        if schema_version == "s2_4_wave_exit_receipt_v1":
+            schema["$defs"]["digest"]["description"] = "a sha256 content digest"
+        return schema
+
+    monkeypatch.setattr(facade, "_load_schema", _annotated)
+    live = wave_w5._evidence_authenticity_live()
+    assert live["only_shape_is_constrained"] is True, live
+    reasons = wave_w5._honest_surface_reasons(_call_site_measurement(), live)
+    assert not any("close the obligation instead" in reason for reason in reasons), reasons
+
+    # 反向:出現一個既非註解也非形狀的關鍵字 → 無法判定 → 只能走 fail-closed 臂。
+    def _unknown(schema_version: str):
+        schema = original(schema_version)
+        if schema_version == "s2_4_wave_exit_receipt_v1":
+            schema["$defs"]["digest"]["x-attestor-binding"] = "required"
+        return schema
+
+    monkeypatch.setattr(facade, "_load_schema", _unknown)
+    live = wave_w5._evidence_authenticity_live()
+    assert live["only_shape_is_constrained"] is None, live
+    reasons = wave_w5._honest_surface_reasons(_call_site_measurement(), live)
+    assert any("cannot measure what constrains" in reason for reason in reasons), reasons
+    assert not any("close the obligation instead" in reason for reason in reasons), reasons
 
 
 def test_the_wave_exit_evidence_digests_are_shape_only(chain) -> None:

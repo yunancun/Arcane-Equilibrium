@@ -49,7 +49,22 @@ _REVIEW_PROVENANCE = [
 ]
 
 
-def test_emitted_receipts_are_evidence_only_and_centrally_derivable(tmp_path) -> None:
+@pytest.fixture()
+def clean_owned_scope(monkeypatch):
+    """把「owned scope 相對 bound commit 乾淨」當作**前提**,而不是當作被證的事。
+
+    W5 對抗審計第三輪 P1-D 之後每一波的 wave-exit 都消費自己的 owned-scope 內容差異
+    (``validator._owned_scope_delta_reasons``),所以在一棵**未提交**的開發樹上那條具名
+    reason 是預期存在的。本檔這些斷言證的是鏈綁定 / 結構 / 發射路徑,不是這棵樹乾不乾淨;
+    「髒 owned scope 必須弄破該波 wave exit」的正反兩向由
+    ``test_agent_governance_s2_4_install_w5.py::
+    test_every_wave_exit_consumes_its_own_owned_scope_delta`` 逐波釘住。
+    """
+
+    monkeypatch.setattr(validator, "_owned_scope_delta_reasons", lambda *_a, **_k: [])
+
+
+def test_emitted_receipts_are_evidence_only_and_centrally_derivable(tmp_path, clean_owned_scope) -> None:
     result = install.emit_w0_receipts(
         out_dir=tmp_path,
         test_evidence=dict(_TEST_EVIDENCE),
@@ -90,7 +105,7 @@ def test_emitted_receipts_are_evidence_only_and_centrally_derivable(tmp_path) ->
 # --------------------------------------------------------------------------- #
 # W2 P2-I(E3):receipt 不得被靜默覆蓋;CLI --out 受限於 repo receipts 目錄
 # --------------------------------------------------------------------------- #
-def test_emit_refuses_to_silently_overwrite_existing_receipts(tmp_path) -> None:
+def test_emit_refuses_to_silently_overwrite_existing_receipts(tmp_path, clean_owned_scope) -> None:
     first = install.emit_w0_receipts(
         out_dir=tmp_path,
         test_evidence=dict(_TEST_EVIDENCE),
@@ -138,7 +153,7 @@ def test_partial_collision_still_writes_nothing(tmp_path) -> None:
     ]
 
 
-def test_publication_failure_leaves_no_partial_receipt_set(tmp_path, monkeypatch) -> None:
+def test_publication_failure_leaves_no_partial_receipt_set(tmp_path, monkeypatch, clean_owned_scope) -> None:
     """P2-1:發佈途中失敗必須回滾整組——半套殘留會讓下一次重試把自己的殘骸當碰撞。
 
     修前:逐檔依序寫入,第二個檔案的 I/O 失敗就留下第一個檔案;重試時 collision 檢查
@@ -178,7 +193,7 @@ def test_publication_failure_leaves_no_partial_receipt_set(tmp_path, monkeypatch
 
 
 def test_concurrent_emitters_are_serialized_by_an_exclusive_publication_lock(
-    tmp_path,
+    tmp_path, clean_owned_scope
 ) -> None:
     """P2-1:分離的存在性檢查讓兩個並行發射器可以雙雙通過再交錯寫入。
 
@@ -510,7 +525,7 @@ def _w1_chain():
     return admission, w0, w1
 
 
-def test_w1_wave_exit_derives_pass_with_full_predecessor_chain() -> None:
+def test_w1_wave_exit_derives_pass_with_full_predecessor_chain(clean_owned_scope) -> None:
     admission, w0, w1 = _w1_chain()
     result = validator.derive_wave_exit_status(
         w1, source_admission_receipt=admission, predecessor_wave_receipt=w0
@@ -536,7 +551,7 @@ def test_w1_self_declared_status_rejected_before_derivation() -> None:
         assert validator.validate_aiml_artifact(forged) != []
 
 
-def test_w1_requires_predecessor_object_and_exact_digest_binding() -> None:
+def test_w1_requires_predecessor_object_and_exact_digest_binding(clean_owned_scope) -> None:
     admission, w0, w1 = _w1_chain()
     # 缺 predecessor 物件 → typed NOT_PASS(#27:鏈不能只靠 digest 自述)。
     result = validator.derive_wave_exit_status(w1, source_admission_receipt=admission)
@@ -627,7 +642,7 @@ def test_w1_v2_to_v1_classifier_downgrade_breaks_derivation(monkeypatch) -> None
     )
 
 
-def test_w1_source_head_must_be_current_checkout_head() -> None:
+def test_w1_source_head_must_be_current_checkout_head(clean_owned_scope) -> None:
     # #27:W1 receipt 宣稱另一世代(仍為合法 40-hex)→ 非當前 HEAD → 拒。
     admission, w0, w1 = _w1_chain()
     forged = deepcopy(w1)
@@ -665,7 +680,7 @@ def _w2_chain():
     return admission, w0, w1, w2
 
 
-def test_w2_wave_exit_derives_pass_with_full_predecessor_chain() -> None:
+def test_w2_wave_exit_derives_pass_with_full_predecessor_chain(clean_owned_scope) -> None:
     admission, w0, w1, w2 = _w2_chain()
     result = validator.derive_wave_exit_status(
         w2,
@@ -717,7 +732,7 @@ def test_w2_requires_predecessor_object_and_regenerated_w0_chain() -> None:
     assert any("does not accept a predecessor_wave_chain" in r for r in result["reasons"])
 
 
-def test_w2_tampered_w1_predecessor_breaks_derivation() -> None:
+def test_w2_tampered_w1_predecessor_breaks_derivation(clean_owned_scope) -> None:
     # (g) 功能探針負例:竄改 W1(owned-path digest)→ W1 鏈斷 → W2 NOT_PASS。
     admission, w0, w1, _w2 = _w2_chain()
     broken_w1 = deepcopy(w1)

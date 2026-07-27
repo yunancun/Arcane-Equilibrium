@@ -348,7 +348,15 @@ def artifact_self_digest(artifact: dict[str, Any]) -> str:
 # 自 bound head 讀 blob:投影因此是該 commit 的函數,任何人 checkout 它都重算得出同值。
 # fail-closed:git 不可用/commit 不存在/路徑不在該樹 → 該路徑記 None(投影變值 → 導出失敗)。
 # --------------------------------------------------------------------------- #
-def _git_stdout(repo_root: Path, arguments: list[str]) -> str | None:
+def _git_run(repo_root: Path, arguments: list[str]) -> tuple[str, str] | None:
+    """跑一次 git,回 ``(stdout, stderr)``;非零離開/無法執行回 ``None``。
+
+    W5 對抗審計第三輪 P2:舊版把 stderr 整個丟掉,於是「repo 不屬於當前 uid」這個最可能
+    的真實主機故障(git 自己會印 ``detected dubious ownership … git config --global --add
+    safe.directory <path>``)在 operator 眼裡只剩「git is unreadable」。stderr 是 git 唯一
+    給出補救指令的地方,必須被帶出來。
+    """
+
     import subprocess
 
     try:
@@ -360,7 +368,108 @@ def _git_stdout(repo_root: Path, arguments: list[str]) -> str | None:
         )
     except (OSError, ValueError, subprocess.SubprocessError):
         return None
-    return proc.stdout if proc.returncode == 0 else None
+    if proc.returncode != 0:
+        return None
+    return proc.stdout, proc.stderr
+
+
+def _git_stdout(repo_root: Path, arguments: list[str]) -> str | None:
+    outcome = _git_run(repo_root, arguments)
+    return None if outcome is None else outcome[0]
+
+
+def git_failure_detail(repo_root: Path) -> str | None:
+    """git 為什麼讀不了這棵樹(取 ``rev-parse`` 的 stderr 首行);讀得了回 ``None``。
+
+    只在 fail-closed 路徑上被呼叫,用來把 git 自己的補救指令原文帶進 typed reason。
+    """
+
+    import subprocess
+
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(repo_root), "rev-parse", "--git-dir"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except OSError as error:
+        return f"git could not be executed: {error}"
+    except (ValueError, subprocess.SubprocessError) as error:
+        return f"git invocation failed: {error}"
+    if proc.returncode == 0:
+        return None
+    first = next(
+        (line.strip() for line in proc.stderr.splitlines() if line.strip()), ""
+    )
+    return first or f"git exited {proc.returncode} with no diagnostic"
+
+
+def git_blob_sha1(data: bytes) -> str:
+    """Reproduce ``git hash-object`` (blob) so trust-pin blob ids re-hash offline."""
+
+    hasher = hashlib.sha1()
+    hasher.update(b"blob " + str(len(data)).encode("ascii") + b"\x00")
+    hasher.update(data)
+    return hasher.hexdigest()
+
+
+def _git_is_ancestor(repo_root: Path, ancestor: str, descendant: str) -> bool:
+    """Local-checkout ancestry proof(fail-closed)。只證 repo 拓撲,不是 runtime 認證。"""
+
+    import subprocess
+
+    if re.fullmatch(r"[0-9a-f]{40}", ancestor) is None or re.fullmatch(
+        r"[0-9a-f]{7,40}", descendant
+    ) is None:
+        return False
+    try:
+        proc = subprocess.run(
+            [
+                "git", "-C", str(repo_root), "merge-base", "--is-ancestor",
+                ancestor, descendant,
+            ],
+            capture_output=True,
+            timeout=30,
+        )
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return False
+    return proc.returncode == 0
+
+
+def _git_head(repo_root: Path) -> str | None:
+    """回傳 repo_root 目前 checkout 的 HEAD 40-hex commit(fail-closed:git 錯誤回 None)。
+
+    T2:admission 的 source_head 必須「等於」目前 checkout HEAD(而非只是兩固定 predecessor 的後代)。
+    所有證據皆由目前 checkout 再導出,故若 receipt 宣稱某世代卻從另一世代導出 ADMITTED,即為漂移——
+    綁定 HEAD 令 admission 與其真正再導出的樹一致。
+    """
+
+    import subprocess
+
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    head = proc.stdout.strip()
+    return head if re.fullmatch(r"[0-9a-f]{40}", head) else None
+
+
+def git_is_shallow_repository(repo_root: Path) -> bool:
+    """這棵 repo 是不是淺 clone(CI 預設 ``fetch-depth: 1``)。
+
+    W5 對抗審計第三輪 P2:淺樹上 ``merge-base --is-ancestor`` 對不在 graft 裡的物件回非零,
+    而那不是「不是祖先」,是「這裡沒有那個物件」。呼叫端據此把訊息從一個假結論換成真補救。
+    """
+
+    return (_git_stdout(repo_root, ["rev-parse", "--is-shallow-repository"]) or "").strip() == "true"
 
 
 def resolve_commit_head(repo_root: Path, source_head: str | None = None) -> str | None:
@@ -374,6 +483,23 @@ def resolve_commit_head(repo_root: Path, source_head: str | None = None) -> str 
         return None
     head = stdout.strip()
     return head if re.fullmatch(r"[0-9a-f]{40}", head) else None
+
+
+def _is_safe_repo_relative_path(rel: Any) -> bool:
+    """該字串可否安全地(a)進 ``git cat-file --batch`` 請求串流、(b)當作寫檔的相對路徑。
+
+    拒:非字串/空字串、含 ``\\n``(會把 ``--batch`` 的請求與回應串流錯開)、絕對路徑、
+    含 ``..`` 或 ``.`` 節、以及 Windows 磁碟機形。純結構判定,不碰檔案系統。
+    """
+
+    if not isinstance(rel, str) or not rel:
+        return False
+    if "\n" in rel or "\r" in rel or "\0" in rel:
+        return False
+    if rel.startswith("/") or rel.startswith("\\") or ":" in rel.split("/", 1)[0]:
+        return False
+    parts = rel.split("/")
+    return all(part not in ("", ".", "..") for part in parts)
 
 
 def commit_blob_bytes(
@@ -393,6 +519,11 @@ def commit_blob_bytes(
 
     ordered = sorted(paths)
     blobs: dict[str, bytes | None] = {rel: None for rel in ordered}
+    # W5 對抗審計第三輪 P2:``--batch`` 是換行分隔的請求串流,而 ``materialize_commit_paths``
+    # 會把回應寫成 ``target / rel``。今天每一條路徑都來自 code-owned 表,故不可達;但這裡是
+    # 驗證路徑上的一個寫檔原語,不安全的形狀必須在原語層就拒(而不是靠呼叫端全都乖)。
+    if any(not _is_safe_repo_relative_path(rel) for rel in ordered):
+        return blobs
     head = resolve_commit_head(repo_root, source_head)
     if head is None:
         return blobs
@@ -458,12 +589,19 @@ def materialize_commit_paths(
     """
 
     blobs = commit_blob_bytes(repo_root, paths, source_head=source_head)
+    root = Path(target).resolve()
     missing: list[str] = []
     for rel, payload in blobs.items():
         if payload is None:
             missing.append(rel)
             continue
-        destination = Path(target) / rel
+        destination = (root / rel).resolve()
+        # containment:寫入點必須真的落在 ``target`` 之下。``commit_blob_bytes`` 已在原語層
+        # 拒掉 ``..``/絕對路徑/換行,這裡是第二道(symlink 造成的逃逸只有 resolve 看得見)。
+        if root != destination and root not in destination.parents:
+            raise ValueError(
+                f"refusing to materialise {rel!r} outside the scratch tree {root}"
+            )
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(payload)
     return sorted(missing)
@@ -488,24 +626,41 @@ def owned_scope_worktree_delta(
     *,
     source_head: str | None = None,
 ) -> list[str] | None:
-    """owned scope 內 index/worktree 與 bound commit 的差異路徑(不可判定回 None)。
+    """owned scope 內**工作樹位元組**與 bound commit blob 不相等的路徑(不可判定回 None)。
 
     P1-5 的可見性面:投影已綁 commit blob,故髒工作樹不再污染 digest;但「這份 receipt
     是從一棵髒工作樹發射的」本身是事實,必須可被看見而不是靜默。
+
+    W5 對抗審計第三輪 P1-A(E2/E3/OPS 三方同結論):舊版用 ``git status --porcelain`` 當
+    oracle,那有三個各自獨立的洞——(1)``git status`` **永遠**比對 HEAD,而本函式收的是
+    ``source_head``,於是一份綁了非 HEAD commit 的 receipt 會拿「與 HEAD 無差異」當成
+    「與 bound commit 無差異」;(2)``git update-index --assume-unchanged`` /
+    ``--skip-worktree`` 會讓被改過的檔案在 ``git status`` 中完全消失,而 index 旗標與
+    ``core.trustctime`` 都住在正被見證的那棵樹裡面;(3)rename 記錄的 ``-z`` 形是
+    ``R  <new>\\0<old>\\0``,舊版的 ``record[3:]`` 對兩半各切一次,於是印出根本不存在的路徑。
+    改為**內容定址**:逐一 hash 工作樹位元組,與 :func:`owned_path_blob_projection` 自 bound
+    commit 取得的同一把尺比對。index 無關、git config 無關,``source_head`` 與 HEAD 的分歧
+    也在同一刀下消失。不可讀 / 該 commit 無此 blob 一律計入差異(fail-closed)。
     """
 
     ordered = sorted(paths)
     head = resolve_commit_head(repo_root, source_head)
     if head is None:
         return None
-    stdout = _git_stdout(
-        repo_root, ["status", "--porcelain", "-z", "--", *ordered]
-    )
-    if stdout is None:
-        return None
-    return sorted({
-        record[3:] for record in stdout.split("\0") if len(record) > 3
-    })
+    committed = owned_path_blob_projection(repo_root, ordered, source_head=head)
+    root = Path(repo_root)
+    delta: set[str] = set()
+    for rel in ordered:
+        expected = committed.get(rel)
+        try:
+            payload = (root / rel).read_bytes()
+        except OSError:
+            observed = None
+        else:
+            observed = "sha256:" + hashlib.sha256(payload).hexdigest()
+        if expected is None or observed is None or observed != expected:
+            delta.add(rel)
+    return sorted(delta)
 
 
 # S2.4 §9.2:每一列所指的**那份 artifact** 到底是哪個 schema(code-owned;caller 的 evidence_class
@@ -590,6 +745,209 @@ _S1_3_ROLLBACK_KEYS = (
 S2_3_SEALED_BUILD_RECEIPT_REL = (
     "docs/execution_plan/ai_ml_landing/receipts/S2.3-sealed-build-receipt-v1.json"
 )
+
+# ── §9.2 原 source 身分的**已提交**位置 —— W5 對抗審計第三輪 P1-B ───────────────────
+# §9.2 的新鮮度裁決讀的是原 receipt 自己的 ``observation_time``/``expires_at``,而那兩欄在
+# caller 手上:E2 在**真的**已出貨 receipt 上只改這兩個時間戳並重封 self_digest,家族驗證器
+# 全過,三族一律導出 SOURCE_DEPENDENCY_FRESH——整個 §9.2 閘就這樣被跳過。家族驗證器認證的是
+# 形狀,不是那個窗。這裡把窗綁回**那個 commit 的 blob**:三族的原身分在 repo 內都是已提交的
+# 固定路徑,故「這份 evidence 是不是那份被提交的 artifact」是驗證端自己算得出來的。
+#
+# S1.3 沒有已提交的 receipt(它是一次性 disposable 觀測),所以它的窗**仍然**是 caller 自選
+# 的。那個不對稱不被隱藏:見 obligation ``DEPENDENCY_OBSERVATION_WINDOW_IS_CALLER_AUTHORED``。
+S2_4_COMMITTED_SOURCE_IDENTITY_PATHS: dict[str, tuple[str, ...]] = {
+    "S1_3_IDENTITY_CONTRACT": (),
+    "S2_2A_SOURCE_COMPATIBILITY": (
+        "docs/execution_plan/ai_ml_landing/receipts/"
+        "S2.2A-source-compatibility-receipt-v1.json",
+        "docs/execution_plan/ai_ml_landing/receipts/"
+        "S2.2A-source-compatibility-receipt-v2.json",
+    ),
+    "S2_3_EXPECTED_IDENTITY": (
+        "docs/execution_plan/ai_ml_landing/receipts/S2.3-expected-identity-receipt-v1.json",
+    ),
+    "S2_3_SEALED_BUILD": (S2_3_SEALED_BUILD_RECEIPT_REL,),
+}
+
+
+# ── §9.2 可刷新 / 永不可刷新的 evidence 分類表(2000 行治理拆分:自 contracts 葉逐位元組
+# 搬入,零語義變更;contracts 逐名再導出以維持既有匯入面)────────────────────────
+# §9.2 第一列:**可**以一份獨立重算的 refresh 續命的三族 source 身分。每列宣告
+#   original_schema_versions —— 允許的原 receipt schema(封閉;不含 refresh 自身)
+#   semantic_digest_fields  —— 該族的 exact 語義**主體**集(refresh 必須逐項復現)
+#   producer_module         —— 驗證端重跑的 producer SSOT 模組(其 blob 亦被 refresh 綁)
+#
+# W5 對抗審計 P1-A:S1.3 / S2.3 兩族原本的主體集是 ("schema_sha256", "source_sha256"),而
+# ``source_sha256`` 逐位元組等於 refresh 另欄已綁的 ``producer_module_digest``(兩支
+# producer 的 source_sha256() 都是 ``_file_sha256(SOURCE_PATH)``),於是「獨立復現 producer/
+# semantic checks」退化成「兩個檔案沒變」——被證的主體一個都不在裡面。現在每一族都逐項復現
+# 該 producer **真正產出的內容**(見 schema_core 的 recompute/extract 成對投影)。
+S2_4_DEPENDENCY_REFRESH_CLASSES = {
+    "S1_3_IDENTITY_CONTRACT": {
+        "original_schema_versions": ("identity_acl_contract_receipt_v1",),
+        "semantic_digest_fields": (
+            "identity_projection_digest",
+            "negative_acl_kinds_digest",
+            "schema_sha256",
+            "source_sha256",
+        ),
+        "producer_module": (
+            "helper_scripts/maintenance_scripts/agent_governance_identity_acl_contract.py"
+        ),
+    },
+    "S2_2A_SOURCE_COMPATIBILITY": {
+        "original_schema_versions": (
+            "source_compatibility_receipt_v1",
+            "source_compatibility_receipt_v2",
+        ),
+        "semantic_digest_fields": (
+            "capture_contract_digest",
+            "learning_runtime_digest",
+            "training_contract_digest",
+        ),
+        "producer_module": "program_code/ml_training/learning_runtime_manifest.py",
+    },
+    "S2_3_EXPECTED_IDENTITY": {
+        "original_schema_versions": ("expected_identity_receipt_v1",),
+        "semantic_digest_fields": (
+            "expected_component_identities_digest",
+            "rollback_binding_digest",
+            "runtime_content_digest",
+            "s1_3_negatives_digest",
+            "schema_sha256",
+            "sealed_build_digest",
+            "source_sha256",
+        ),
+        "producer_module": (
+            "helper_scripts/maintenance_scripts/agent_governance_sealed_build.py"
+        ),
+    },
+    "S2_3_SEALED_BUILD": {
+        "original_schema_versions": ("sealed_build_receipt_v1",),
+        "semantic_digest_fields": (
+            "closure_hash",
+            "native_library_inventory_digest",
+            "runtime_content_digest",
+            "schema_sha256",
+            "source_sha256",
+        ),
+        "producer_module": (
+            "helper_scripts/maintenance_scripts/agent_governance_sealed_build.py"
+        ),
+    },
+}
+# 四族原 receipt 各自的**成功**狀態(S2.2A 兩版是 const SOURCE_READY;S2.3/S1.3 三族的
+# schema enum 是 ["PASS","FAIL"],故 FAIL 必須被顯式擋掉而不是靠 schema)。
+_DEPENDENCY_EVIDENCE_SUCCESS_STATUSES = frozenset({"PASS", "SOURCE_READY"})
+# §9.2 其餘各列:**永不**可以引用刷新的證據。值為該列自己的補救文字(§10.5 #28 後半)。
+S2_4_NEVER_REFRESHABLE_EVIDENCE = {
+    "APPLY_AGGREGATE_AUTHORIZATION": (
+        "the aggregate operator permit is newly signed only after W6A, the topology/HBA/"
+        "network evidence and the final plan core exist; it is never refreshed or chained"
+    ),
+    "CAPABILITY_PROBE_AUTHORIZATION": (
+        "a capability-probe permit is newly signed for one exact scope/core before each "
+        "probe; it cannot authorize PREPARE/APPLY or the other scope"
+    ),
+    "CAPABILITY_PROBE_RECEIPT_INSTALLED_UNIT": (
+        "the INSTALLED_UNIT capability-probe receipt is freshly authorized/observed only "
+        "after W6A against the exact rendered unit/host"
+    ),
+    "CAPABILITY_PROBE_RECEIPT_PREPARE_SANDBOX": (
+        "the PREPARE_SANDBOX capability-probe receipt is freshly authorized/observed "
+        "immediately before W6A against fixed prepare sandbox properties"
+    ),
+    "PG_MIGRATION_AUTHORIZATION": (
+        "the PG-migration operator permit is newly signed only after W6A; it is never "
+        "refreshed or chained"
+    ),
+    "PG_TOPOLOGY_ATTESTATION": (
+        "pg_topology_attestation_v1 is always freshly observed; no refresh-by-reference"
+    ),
+    "PREPARED_BUNDLE": (
+        "the prepared bundle is freshly re-hashed and inside its own expiry; otherwise "
+        "rerun PREPARE"
+    ),
+    "PREPARE_AUTHORIZATION": (
+        "the PREPARE permit is newly signed after the final prepare core and PREPARE-scope "
+        "probe receipt exist, before W6A; it is never refreshed or chained"
+    ),
+    "S2_0_EFFECT_RECEIPT": (
+        "the S2.0 effect receipt is a fresh production observation; rerun the S2.0 effect/"
+        "postcheck if expired"
+    ),
+}
+
+
+_OWNED_SCOPE_REASON_TAIL = "wave-exit owned scope is not at the bound source_head"
+
+
+def owned_scope_reason_prefix(wave: Any) -> str:
+    """該 wave 的 owned-scope reason 具名前綴(測試據此分離,而不是靠字串比對全文)。"""
+
+    return f"{wave} {_OWNED_SCOPE_REASON_TAIL}"
+
+
+def owned_scope_delta_reasons(
+    wave: Any,
+    paths: tuple[str, ...] | list[str],
+    repo_root: Path,
+    *,
+    source_head: str | None = None,
+) -> list[str]:
+    """該 wave 的 owned scope 是否真的就在它自己綁定的那個 commit 上(不可判定亦 fail-closed)。
+
+    W5 對抗審計第三輪 P1-D:這段裁決原本**只有 W5 有**(measured:w2/w3/w4 consumed=0,
+    w5 consumed=1),而 W2 擁有 operator 真正執行的四支腳本(``agent_governance_s2_4_install``
+    / ``_render`` / ``_sql_scan`` / ``_emit_sink``),於是一份綁了 ``source_head`` 的 W2
+    wave-exit 可以從一棵那四支被本地改過的樹導出 PASS。比對是**內容定址**的
+    (見 :func:`owned_scope_worktree_delta`):index 旗標(``--assume-unchanged`` /
+    ``--skip-worktree``)、``core.trustctime`` 與 ``source_head`` ≠ HEAD 三條繞道都不存在。
+    """
+
+    prefix = owned_scope_reason_prefix(wave)
+    delta = owned_scope_worktree_delta(repo_root, paths, source_head=source_head)
+    if delta is None:
+        detail = git_failure_detail(repo_root)
+        return [
+            f"{prefix}: the {wave} owned scope cannot be compared against the bound commit "
+            f"(git is unreadable: {detail or 'no diagnostic'}), so the receipt cannot assert "
+            "that its owned scope IS that commit (fail-closed)"
+        ]
+    if delta:
+        return [
+            f"{prefix}: {delta} differ in content from the bound commit. The owned-path "
+            "projection is taken from the commit blobs, so a dirty owned scope is invisible "
+            "in owned_path_diff_digest; a wave-exit receipt that binds source_head is "
+            "asserting its owned scope IS that head — commit or revert these paths, then "
+            "re-derive this receipt"
+        ]
+    return []
+
+
+def committed_source_identity_digests(
+    dependency_class: Any, repo_root: Path, *, source_head: str | None = None
+) -> list[str] | None:
+    """該族在 bound commit 上**已提交**身分的 canonical digest 集合。
+
+    回 ``None`` 表示「這一族在此 repo 沒有可比對的已提交身分」(S1.3 恆如此;一棵不含那些
+    路徑的隔離樹亦然),與「有,但一個都對不上」是兩件不同的事,故不能用空 list 代表。
+    """
+
+    paths = S2_4_COMMITTED_SOURCE_IDENTITY_PATHS.get(str(dependency_class))
+    if not paths:
+        return None
+    blobs = commit_blob_bytes(Path(repo_root), paths, source_head=source_head)
+    digests: list[str] = []
+    for rel in sorted(paths):
+        payload = blobs.get(rel)
+        if payload is None:
+            continue
+        try:
+            digests.append(artifact_self_digest(json.loads(payload.decode("utf-8"))))
+        except (ValueError, UnicodeDecodeError):
+            continue
+    return digests or None
 
 
 def s1_3_identity_projection(contract_like: Any) -> dict[str, Any]:
@@ -824,588 +1182,12 @@ def recompute_dependency_semantic_subjects(
     }
 
 
-# ── §10.3 W5 誠實面:未關閉義務帳本(pure data;由 aiml_gate_receipt_wave_w5 引用)──────
-# 2000 行治理拆分:W5 投影葉把這份純資料常量搬入本下層模組(逐位元組等值搬移,零語義變更),
-# 與 S2_4_NEVER_REFRESHABLE_SCHEMAS 同屬「S2.4 code-owned 常量表」一類。單一真相來源仍是
-# ``_W5_EXPORTED_ABI["remaining_owned_obligations"]``——它就是本清單物件本身。
-S2_4_W5_REMAINING_OWNED_OBLIGATIONS: list[dict[str, Any]] = [
-    {
-        "obligation_id": "ENCRYPTED_BLOB_DIGEST_ORDERING",
-        "typed_status": "OPEN_DESIGN_QUESTION",
-        "owner_wave": "W6",
-        "spec_refs": ["§5.1", "§7"],
-        "statement": (
-            "CREDENTIAL_INSTALL's signed intent must carry encrypted_blob_digest, but that "
-            "digest is the hash of non-deterministic `systemd-creds encrypt` output. W5 "
-            "confirms the question is unchanged: the fail-closed encrypt-then-compare "
-            "binding still holds and no source change can decide whether the intent is "
-            "signed before or after the encryption runs. It is an operator/W6 sequencing "
-            "decision about a real host."
-        ),
-        "w5_provides": "nothing new; carried forward unchanged from W3/W4",
-    },
-    {
-        "obligation_id": "OBSERVER_SPACE_PRE_STATE_DIGEST",
-        "typed_status": "PARTIALLY_PROVIDED_BY_W4B",
-        "owner_wave": "W6B",
-        "spec_refs": ["§5.2", "§5.4", "§6"],
-        "statement": (
-            "The plan-side digest space is defined and enforced (W4b). The observer side "
-            "still needs a W6B postcheck driver contract requiring the verifier to return "
-            "canonical_digest over the SAME code-owned per-row pre-state projection shape. "
-            "W5 cannot close it: verifying that contract needs a real host observer, and no "
-            "runtime evidence exists anywhere in S2.4."
-        ),
-        "w5_provides": "nothing new; owner unchanged",
-    },
-    {
-        "obligation_id": "PRIOR_LINEAGE_ENTRY_IDENTITY",
-        "typed_status": "NOT_PROVIDED_BY_W5",
-        "owner_wave": "W6B",
-        "spec_refs": ["§5.1", "§9.1"],
-        "statement": (
-            "APPLY requires a non-empty replay ledger but cannot verify WHICH permits the "
-            "prior entries consumed, because probe_id/prepare_id are not carried in the "
-            "install plan. Closing it needs either the W6B runner threading the probe/"
-            "PREPARE authorization ids into the APPLY inputs, or a s2_4_install_plan_core_v1 "
-            "field — a schema change §10.4 forbids the worker from choosing. Unchanged."
-        ),
-        "w5_provides": "nothing new; owner unchanged",
-    },
-    {
-        "obligation_id": "PLAN_EXPIRY_OUTSIDE_SIGNED_CORE",
-        "typed_status": "PARTIALLY_PROVIDED_BY_W4B",
-        "owner_wave": "W6B",
-        "spec_refs": ["§9", "§9.2", "§10.4", "§10.5 #28"],
-        "statement": (
-            "s2_4_install_plan_v1.expires_at lives outside core, so it is not covered by the "
-            "operator signature. The reachable half is closed (expired plan refused before "
-            "any lock/mutation; every TTL bound derived from each artifact's own "
-            "expires_at). Moving expires_at inside core is a s2_4_install_plan_core_v1 "
-            "schema change §10.4 forbids. Unchanged."
-        ),
-        "w5_provides": "nothing new; owner unchanged",
-    },
-    {
-        "obligation_id": "INSTALLED_UNIT_PROBE_CORE_BINDING",
-        "typed_status": "PARTIALLY_PROVIDED_BY_W4B",
-        "owner_wave": "W6B",
-        "spec_refs": ["§6", "§10.4", "§10.5 #36"],
-        "statement": (
-            "expected_installed_unit_probe_core_digest is optional at the API and MANDATORY "
-            "for the W6 runner; omission is visible as "
-            "UNVERIFIED_NO_EXPECTED_VALUE_SUPPLIED on every verdict. Closing it means the "
-            "W6B runner always supplying it or adding a plan-core field. Unchanged."
-        ),
-        "w5_provides": "nothing new; owner unchanged",
-    },
-    {
-        "obligation_id": "EFFECT_RECEIPT_RECONCILE_BINDING",
-        "typed_status": "PARTIALLY_PROVIDED_BY_W4B",
-        "owner_wave": "W6B",
-        "spec_refs": ["§5.2", "§10.4"],
-        "statement": (
-            "s2_4_install_effect_receipt_v1 has no field for the startup-reconcile verdict "
-            "and the schema is additionalProperties:false. W4b binds all three signals into "
-            "the durable evidence set beside the journal; a consumer holding only the "
-            "receipt still cannot re-derive the reconcile verdict. Unchanged."
-        ),
-        "w5_provides": "nothing new; owner unchanged",
-    },
-    {
-        "obligation_id": "STARTUP_RECONCILE_SURFACE_ABSENT",
-        "typed_status": "OPEN_BY_DESIGN_W6_RUNNER_PRECONDITION",
-        "owner_wave": "W6",
-        "spec_refs": ["§5.2", "§10.5 #39"],
-        "statement": (
-            "A host driver not wrapped by JournalRoutedDriver has no durable journal "
-            "surface, so reconcile_before_new_intent returns "
-            "STARTUP_RECONCILE_SURFACE_ABSENT with admits_new_work=None. The W6 runner MUST "
-            "inject a journal-routed driver into the probe and PREPARE entry points. "
-            "Unchanged."
-        ),
-        "w5_provides": "nothing new; owner unchanged",
-    },
-    {
-        "obligation_id": "STARTUP_JOURNAL_PARENTS_MUST_PREEXIST",
-        "typed_status": "NOT_PROVIDED_BY_W5",
-        "owner_wave": "W6B",
-        "spec_refs": ["§5.2"],
-        "statement": (
-            "On a fresh host the three §5.2 journal parents do not exist, so startup "
-            "reconciliation returns RECOVERY_REQUIRED and nothing in S2.4 can start until "
-            "an operator pre-creates .../s2_4, .../s2_4/probes and .../s2_4/prepared "
-            "root-owned 0700. This is an OPERATOR PRECONDITION for the W6 runbook, not a "
-            "defect to be fixed by giving the journal surface a mkdir capability. "
-            "Unchanged."
-        ),
-        "w5_provides": "nothing new; owner unchanged",
-    },
-    {
-        "obligation_id": "RECEIPT_EMISSION_PENDING_IS_NOT_A_RECEIPT_RETRY",
-        "typed_status": "PARTIALLY_PROVIDED_BY_W4B",
-        "owner_wave": "W6B",
-        "spec_refs": ["§10.5 #8", "§10.5 #14"],
-        "statement": (
-            "A terminal, complete install can permanently have no receipt: the journal does "
-            "not carry the row result/postcheck digests the receipt binds, so "
-            "ALREADY_APPLIED_IDEMPOTENT cannot reconstruct it. Actually emitting the "
-            "receipt on retry is an artifact-shape decision belonging to the W6B runner. "
-            "Unchanged."
-        ),
-        "w5_provides": "nothing new; owner unchanged",
-    },
-    {
-        "obligation_id": "STRANDED_WAL_TEMP_FILES_ARE_REPORT_ONLY",
-        "typed_status": "PARTIALLY_PROVIDED_BY_W4B",
-        "owner_wave": "W6B",
-        "spec_refs": ["§5.2"],
-        "statement": (
-            "The §5.2 startup enumeration matches, lists and names stranded WAL temp "
-            "residue and blocks new work while it exists, but §5.2 forbids this surface "
-            "from renaming or removing anything, so clearing it is an operator runbook "
-            "step. Unchanged."
-        ),
-        "w5_provides": "nothing new; owner unchanged",
-    },
-    {
-        # 對抗審計第二輪的更正:上一版把它由 W4 的 NOT_PROVIDED_BY_W4B 軟化成
-        # PARTIALLY_PROVIDED_BY_W4B,而它自己的 statement 逐字寫著「BOTH halves W4
-        # named are still open」。W5 沒有提供這兩半的任何一半,只是**記錄**了一條 W4 漏記
-        # 的、更弱的 driver-clock 關係;那是 w5_provides 的內容,不是 typed_status 的。
-        "obligation_id": "ATTESTATION_EXPIRY_AND_HOST_TIME_ARE_NOT_CROSS_CHECKED",
-        "typed_status": "NOT_PROVIDED_BY_W5",
-        "owner_wave": "W6B",
-        "spec_refs": ["§9.1", "§10.2"],
-        "statement": (
-            "W5 reviewed this one line by line because it READS like a source fix. It is "
-            "not, and W5's first draft of this correction was itself wrong and is recorded "
-            "here rather than silently rewritten. BOTH halves W4 named are still open. "
-            "(a) Nothing compares the OBSERVED moment against attestation_expires_at: "
-            "derive_apply_attestation_status deliberately excludes the caller's now, so an "
-            "attestation whose own expiry has passed still verifies as long as its SIGNED "
-            "trusted_host_time sits inside both permit windows. (b) The attestation's "
-            "SIGNED trusted_host_time is still never reconciled with the value "
-            "driver.trusted_host_time() returned for the same transaction — verified by "
-            "reading agent_governance_s2_4_install_evidence.derive_apply_attestation_status, "
-            "which compares the signed time only against attestation_expires_at, the 900s "
-            "attestation TTL and the two permit windows. What DOES exist, and what W4's "
-            "statement omitted, is a DIFFERENT and weaker relation that W5 adds to the "
-            "record: agent_governance_s2_4_install_driver._trusted_host_time_reasons "
-            "cross-checks driver.trusted_host_time() against the observed moment under the "
-            "§9.1 PERMIT_CLOCK_SKEW_SECONDS ceiling (regression: "
-            "test_c18_the_trusted_host_time_is_cross_checked_against_the_observed_time). "
-            "That bounds the DRIVER's clock, not the attestation's signed value. The "
-            "residual is therefore smaller than W4 implied but non-zero: the signed "
-            "trusted_host_time is still bounded indirectly, because it must fall inside two "
-            "independently signed permit windows that are themselves capped at 900s. "
-            "Closing either half needs a decision about WHICH clock is authoritative for "
-            "the observed moment on a real host (§9.1 says the host's, and on a real host "
-            "the two values come from the same clock); in a source lane where both are "
-            "fixtures the question is unanswerable, and wiring the caller's now into the "
-            "freshness derivation would REVERSE the W4b property that freshness comes only "
-            "from the SIGNED trusted_host_time."
-        ),
-        "w5_provides": (
-            "the line-verified confirmation that both halves are still open (W4's statement "
-            "stands), the previously unrecorded driver-clock skew ceiling and its named "
-            "regression, the observation that the two 900s permit windows bound the residual, "
-            "and the explicit reason this is not a source change"
-        ),
-    },
-    {
-        # 對抗審計第二輪:上一版把這一條**整列刪掉**,理由寫在測試裡(「已由 W4b 在源碼線
-        # 交付」)。W4 交出來的 typed_status 是 VERIFIER_PROVIDED_BY_W4B_ATTESTATION_PENDING
-        # ——verifier 有了,`ATTESTATION_PENDING` 那一半(在真主機上**取得**一份簽章)仍是活的
-        # 殘留,而殘留活著的義務不得因為它的前半已交付就被丟掉。
-        "obligation_id": "ATTESTED_EVIDENCE_CLASS_VERIFIER",
-        "typed_status": "VERIFIER_PROVIDED_BY_W4B_ATTESTATION_PENDING",
-        "owner_wave": "W6B",
-        "spec_refs": ["§6", "§9.1", "§10.2", "§10.5 #13", "§10.5 #14"],
-        "statement": (
-            "W4b delivered the VERIFIER: s2_4_install_apply_attestation_v1 with a distinct "
-            "attestor identity and namespace over the same §9.1 trust root, a real "
-            "signature verification, exact-plan binding, applier != verifier, row-results "
-            "equality and freshness derived only from the SIGNED trusted_host_time. What "
-            "remains open is unchanged and still live: OBTAINING a real attestation needs a "
-            "trusted host holding the §9.1 private key, so on Mac/source/disposable lanes "
-            "no attestation is produced and every driver terminates at "
-            "SOURCE_SIMULATION_PASS with all nine authorities false. W5 adds no attestation "
-            "and holds no key material, so the pending half is exactly as W4 left it. "
-            "Carried rather than dropped: a row whose residual is live is not closed by its "
-            "other half having been delivered."
-        ),
-        "w5_provides": (
-            "nothing new; carried forward unchanged from W4 with its typed status intact "
-            "after the previous W5 draft removed the row entirely"
-        ),
-    },
-    {
-        "obligation_id": "ATTESTOR_KEY_IS_NOT_SEPARATE_FROM_THE_PERMIT_KEY",
-        "typed_status": "NOT_PROVIDED_BY_W5",
-        "owner_wave": "W6B",
-        "spec_refs": ["§9.1", "§10.2"],
-        "statement": (
-            "One physical Ed25519 key roots both the four operator permit profiles and the "
-            "apply attestation. Domain separation is namespace-level and real; CUSTODY is "
-            "not separated. The fix is a separate attestor keypair with its own pinned "
-            "fingerprint, which is a W6 key-custody decision about a real host. W5 confirms "
-            "no source change can establish it: the source lane has no key material at all."
-        ),
-        "w5_provides": "nothing new; owner unchanged",
-    },
-    {
-        "obligation_id": "REPLAY_LEDGER_CONSUME_ONCE_IS_A_FILESYSTEM_PROPERTY",
-        "typed_status": "OPEN_HONEST_BOUNDARY",
-        "owner_wave": "W6B",
-        "spec_refs": ["§9.1", "§10.5 #8"],
-        "statement": (
-            "Ledger rollback and forking are prevented by the root-owned 0700 parent, the "
-            "0600 mode and the exclusive install lock, not cryptographically. Closing it "
-            "needs a monotonic counter in trusted storage or an attestor-signed ledger "
-            "head. Unchanged."
-        ),
-        "w5_provides": "nothing new; owner unchanged",
-    },
-    {
-        "obligation_id": "STARTUP_RECONCILE_LANE_PATHS",
-        "typed_status": "NOT_PROVIDED_BY_W5",
-        "owner_wave": "W6B",
-        "spec_refs": ["§5.2"],
-        "statement": (
-            "Enumeration sees every non-terminal journal in the three parents, but the "
-            "caller's paths still decide which lane receives the independent observation "
-            "digest and per-lane ownership key. Closing that half means the W6B runner "
-            "passing the probe_id/prepare_id-derived paths it already holds. Unchanged."
-        ),
-        "w5_provides": "nothing new; owner unchanged",
-    },
-    # ── W5 自審新增的四項 ────────────────────────────────────────────────────
-    {
-        "obligation_id": "DEPENDENCY_REFRESH_RECEIPT_BINDING_ABSENT",
-        "typed_status": "NOT_PROVIDED_BY_W5",
-        "owner_wave": "PM",
-        "spec_refs": ["§3", "§10.4", "§11.3"],
-        "statement": (
-            "The §9.2 gate itself is now built and load-bearing (schema, central branch, "
-            "verifier-side recomputation, builder, tests), so §11.2's 'complete source "
-            "inventory' is no longer false and §10.5 #28's first half is PROVEN. What is "
-            "NOT closed is the receipt binding: §3 requires the terminal "
-            "s2_4_install_effect_receipt_v1 to reference 'source_admission_receipt, W0-W5 "
-            "wave-chain and DEPENDENCY-REFRESH digests', and that closed "
-            "additionalProperties:false schema has no field for them — a consumer holding "
-            "only the install receipt cannot see which refreshes admitted the expired "
-            "source identities. Adding the field is an exported-schema change §10.4 "
-            "forbids the worker from choosing, exactly like PLAN_EXPIRY_OUTSIDE_SIGNED_CORE "
-            "and EFFECT_RECEIPT_RECONCILE_BINDING. Correction (adversarial round 2): the "
-            "previous wording of this row ended 'the refresh verdicts are reachable only "
-            "through derive_source_dependency_admission_status at APPLY time', which was "
-            "FALSE — nothing at APPLY time calls it. That sentence is retired and the "
-            "measured fact now lives in its own row, "
-            "SOURCE_IDENTITY_FRESHNESS_HAS_NO_PRODUCTION_CALL_SITE. What is true here is "
-            "narrower: even once a call site exists, the terminal receipt still has nowhere "
-            "to carry the refresh digests §3 names."
-        ),
-        "w5_provides": (
-            "the complete §9.2 gate (four refreshable classes, nine never-refreshable "
-            "classes, verifier-side reproduction, one-refresh rule) and the exact residual: "
-            "the terminal receipt has nowhere to carry the refresh digests §3 names"
-        ),
-    },
-    {
-        "obligation_id": "DEPENDENCY_REFRESH_REPRODUCER_NODE_IS_DECLARATIVE",
-        "typed_status": "PARTIALLY_PROVIDED_BY_W5",
-        "owner_wave": "W6",
-        "spec_refs": ["§9.1", "§9.2"],
-        "statement": (
-            "§9.2 requires an INDEPENDENT replay. W5 makes two halves of that structural "
-            "and one half declarative, and says which is which. STRUCTURAL: the semantic "
-            "digests are recomputed BY THE VERIFIER from the BLOBS OF THE BOUND COMMIT — "
-            "the producer input set is materialised out of git into a scratch tree and the "
-            "producer is run there, so the working tree is not an input — and they must "
-            "equal both the refresh's claim and the original's own values, so a refresh "
-            "can never be minted from the original digest; and reproduced_at must be "
-            "strictly after the original's own expiry, which only binds because the "
-            "original is itself validated by its family validator (a hand-written original "
-            "picks its own expiry, so before that check the strictly-after rule was "
-            "structural in appearance only). Both statements were FALSE before the W5 "
-            "adversarial review: the recomputation read Path.read_bytes() from the working "
-            "tree while the head came from git metadata, so restoring pre-drift bytes in "
-            "the working tree alone (no commit, no git add) reproduced a drifted identity "
-            "and reached DEPENDENCY_REFRESH_ADMITTED; and the original receipt was checked "
-            "only for isinstance/schema_version/self-referential digest. TWO RESIDUALS "
-            "REMAIN, both scoped: (i) materialisation covers the bytes the producer HASHES, "
-            "not the producer code the verifying PROCESS has already imported — that half "
-            "rests on the clean-tree gate over the same input set plus producer_module_digest "
-            "being taken from the bound commit, and a verifier wanting full isolation must "
-            "run FROM the clone rather than pass repo_root at it; (ii) the input set is "
-            "code-owned, and for S2.2A a missing entry fails loudly (the materialised tree "
-            "is all the producer can see, so an incomplete set raises missing_input) while "
-            "for S1.3/S2.3 an incomplete set would silently narrow only the clean-tree gate. "
-            "DECLARATIVE: that the reproducing NODE differs from the producing node rests on "
-            "reproducer_caller not equalling the original's producer label, which a hostile "
-            "producer can simply relabel. The source lane holds no key material at all (see "
-            "ATTESTOR_KEY_IS_NOT_SEPARATE_FROM_THE_PERMIT_KEY), so node custody cannot be "
-            "established here; closing it means a per-node attestor identity, which is a "
-            "W6 key-custody decision about real hosts. A second, smaller asymmetry is "
-            "recorded rather than hidden: source_compatibility_receipt_v1/v2 carry no "
-            "'caller' or 'platform' field at all, so for S2.2A the producer label degrades "
-            "to session_id ('S2.2A') and the platform component of the projection is null."
-        ),
-        "w5_provides": (
-            "the commit-bound recomputation, the clean-tree gate over the producer input "
-            "set, the family-validator authentication of the original, and the exact "
-            "statement of the two residuals and of what a relabelling producer could do"
-        ),
-    },
-    {
-        "obligation_id": "ENCODED_SECRET_SCAN_MISSES_COMPOSITE_PAYLOADS",
-        "typed_status": "RECORDED_NOT_CLOSED",
-        "owner_wave": "W6B",
-        "spec_refs": ["§10.5 #15"],
-        "statement": (
-            "assert_no_secret_material derives six encoded forms of each sentinel and looks "
-            "for them as SUBSTRINGS. That finds a payload which is exactly the encoded "
-            "secret, which is the case W5's own tests exercise. It does NOT find a "
-            "composite payload b64(prefix + secret). The arithmetic, stated so the next "
-            "reader need not rediscover it: base64 consumes three input bytes per four "
-            "output chars, so b64(prefix + secret) contains b64(secret) as a substring only "
-            "when len(prefix) % 3 == 0. Two of the three byte alignments therefore evade "
-            "the scan entirely. Closing it means adding the two shifted cores per sentinel: "
-            "for alignment a in {1, 2}, encode a filler bytes followed by the secret, drop "
-            "the first {1: 2, 2: 3} characters (those mix filler bits) and drop the last "
-            "character when (a + len(secret)) % 3 != 0 (it carries zero-padding bits the "
-            "real successor byte would supply), then match the remaining core. base32, "
-            "base85, unpadded base64, percent-encoding, \\\\uXXXX escapes and PEM line "
-            "wrapping are not covered at all and need a decode-then-rescan pass rather than "
-            "more precomputed forms. W5 SURFACED this and does NOT close it: "
-            "agent_governance_s2_4_credential.py is not a W5-owned path (§10.1.1), the "
-            "shifted cores are short for short sentinels so a minimum-core-length rule has "
-            "to be designed with the false-positive blast radius of a fail-closed scanner "
-            "in mind, and the six uncovered encodings leave the obligation open either way."
-        ),
-        "w5_provides": (
-            "the finding, the exact alignment arithmetic and the prescription (shifted "
-            "cores at prefix lengths 0/1/2 plus a decode-then-rescan pass, with a "
-            "composite-offset test at each alignment), and the honest reason it is not "
-            "closed here"
-        ),
-    },
-    {
-        "obligation_id": "PROGRAM_CODE_IS_ON_THE_SCANNER_PATH_VIA_W4",
-        "typed_status": "PARTIALLY_PROVIDED_BY_W5",
-        "owner_wave": "PM",
-        "spec_refs": ["§10.1.1"],
-        "statement": (
-            "Making program_code/ importable widens the top-level namespace of every "
-            "process that loads the facade — broker_connectors, exchange_connectors, "
-            "dashboard and ai_agents all become resolvable in the engine-scanner process. "
-            "No shadowing or hijack was found, but under §10.1.1 condition 4 that has to be "
-            "a decision rather than an import side effect. W5 removed its own two "
-            "occurrences: the contracts leaf now opens the path inside the one function "
-            "that needs the ml_training package import and removes it again, and the W5 "
-            "projection leaf never needed it at all. The process-level property is still "
-            "NOT achieved, and W5 says so rather than claiming a closure it did not reach: "
-            "aiml_gate_receipt_wave_w4.py does the same insertion at import time, it "
-            "predates W5 (it is present at the merge base e98520cad), and it is a W4-owned "
-            "path. Unifying it is the same PM path-scope call as "
-            "OWNED_PATH_PROJECTION_RULER_IS_NOT_UNIFORM."
-        ),
-        "w5_provides": (
-            "the two W5-owned occurrences removed, a leaf-scoped regression that fails if "
-            "either returns, and the line-verified statement that W4 still holds the "
-            "namespace open"
-        ),
-    },
-    {
-        "obligation_id": "PR_SET_DUMPABLE_IS_DECLARED_NOT_ENFORCED",
-        "typed_status": "NOT_PROVIDED_BY_W5",
-        "owner_wave": "W6B",
-        "spec_refs": ["§7", "§10.5 #26"],
-        "statement": (
-            "§10.5 #26 requires PR_SET_DUMPABLE=0 to be LOAD-BEARING. It is not. "
-            "PROCESS_HARDENING_CONTRACT['pr_set_dumpable'] = 0 is a declared constant that "
-            "appears in exactly two projection dicts and in nothing else: "
-            "derive_host_credential_capability_status checks systemd_creds_available, "
-            "tpm2_available and decryption_name_verification and never looks at it, and no "
-            "driver protocol method observes it. The pre-existing test named "
-            "test_process_hardening_contract_is_load_bearing asserts the constant equals "
-            "itself, which is exactly the failure mode this wave was sent to find. The "
-            "other four clauses of #26 ARE load-bearing: --with-key=host+tpm2 is enforced "
-            "through tpm2_available, the encrypted-blob fingerprint is re-derived and "
-            "compared, the closed eight-key DSN set is enforced, and LimitCORE=0 plus the "
-            "PG*/LD*/PYTHON* scrub are enforced by the unit's byte-equality check. Closing "
-            "this one means observing prctl(PR_GET_DUMPABLE) on the applier and refusing "
-            "when it is not 0 — a driver-protocol and host-observation change, i.e. "
-            "production implementation on a real host, not a test."
-        ),
-        "w5_provides": (
-            "the finding, the exact reason the existing test is tautological, and the "
-            "honest classification of §10.5 #26 as PARTIALLY PROVEN"
-        ),
-    },
-    {
-        "obligation_id": "S2_5_LIFECYCLE_FIXTURES_DO_NOT_EXIST",
-        "typed_status": "OUT_OF_WP4_SCOPE",
-        "owner_wave": "S2.5A",
-        "spec_refs": ["§10.5 #29", "§11.3"],
-        "statement": (
-            "§10.5 #29's second clause says 'S2.5 fixtures own `enable --now`, "
-            "enabled/reboot persistence and rollback-to-disabled'. No S2.5 source or "
-            "fixture exists in this repository, so that clause has no owner in WP4 and "
-            "cannot be satisfied here. What W5 CAN and does prove is the S2.4 half: the "
-            "aggregate driver surface refuses enable/start/restart/kill, the closed "
-            "postcheck and receipt schemas carry no runtime-directory or "
-            "decrypted-credential property, and an enabled or active observation is never "
-            "a success. The clause is recorded rather than counted as covered."
-        ),
-        "w5_provides": (
-            "the S2.4 half as a live re-derivation and the explicit statement that the S2.5 "
-            "half has no owner in this work package"
-        ),
-    },
-    {
-        "obligation_id": "SOURCE_IDENTITY_FRESHNESS_HAS_NO_PRODUCTION_CALL_SITE",
-        "typed_status": "NOT_PROVIDED_BY_W5",
-        "owner_wave": "PM",
-        "spec_refs": ["§8", "§9.2", "§10.1.1", "§10.4", "§10.5 #28"],
-        "statement": (
-            "§9.2 says the central validator accepts an expired source-identity receipt "
-            "only together with one current refresh attestation. That rule is implemented "
-            "(derive_source_dependency_admission_status) and has ZERO production callers: "
-            "the projection measures the whole S2.4 governance surface and finds the name "
-            "only in the two W5 test files and in this projection leaf. Measured "
-            "consequence: validate_aiml_artifact returns [] for all three genuinely "
-            "expired shipped receipts (S2.2A compatibility, S2.3 sealed-build, S2.3 "
-            "expected-identity, the latter two expiring 2026-07-24T00:30Z) with no refresh "
-            "present. W5 does NOT wire it, and says exactly why rather than shipping a "
-            "half-wiring. (1) The only APPLY-time consumer of a §9.2 source identity is "
-            "agent_governance_s2_4_host_identity.s2_3_expected_identity_reasons, called "
-            "from the HOST_IDENTITY_INSTALL row; it reads the S2.3 artifact from a fixed "
-            "repository path and checks status/self_digest/three identity fields, deriving "
-            "no freshness. That module is a W3-owned path (§10.1.1), and its verdict is "
-            "folded live into the W3 exported ABI, so adding a fail-closed freshness reason "
-            "there permanently breaks the W3 wave exit — the shipped receipts ARE expired "
-            "and nothing anywhere carries a refresh to admit them. (2) PREPARE only ever "
-            "receives the DIGESTS of these receipts (build_prepare_intent's "
-            "source_lock_closure_identity), never the objects, so §9.2's verifier-side "
-            "replay — which is defined over the ORIGINAL artifact — cannot run there "
-            "without a new plumbing field. (3) Making validate_aiml_artifact wall-clock-"
-            "expire committed build-identity receipts is the documented time bomb that "
-            "branch deliberately refuses (a fixed 30-minute TTL on committed evidence would "
-            "make every offline/CI consumer reject it), and it still could not admit a "
-            "refresh, because a single-artifact entry point has nowhere to receive one. "
-            "Closing this needs a PM decision about WHERE the refresh enters APPLY, which "
-            "is the same exported-schema question as "
-            "DEPENDENCY_REFRESH_RECEIPT_BINDING_ABSENT."
-        ),
-        "w5_provides": (
-            "the complete §9.2 gate, the measured zero-call-site fact folded live into this "
-            "wave's ABI, a two-way latch that breaks the wave exit if the row is deleted "
-            "while the fact holds OR kept once a production call site appears, and the "
-            "retirement of the false sentence that previously claimed APPLY reached it"
-        ),
-    },
-    {
-        "obligation_id": "EMITTED_EVIDENCE_DIGESTS_ARE_UNAUTHENTICATED",
-        "typed_status": "RECORDED_NOT_CLOSED",
-        "owner_wave": "PM",
-        "spec_refs": ["§10.3", "§10.5 #27", "§11.3"],
-        "statement": (
-            "The W0->W5 chain proves nothing about whether tests ran or a review happened. "
-            "validate_emit_evidence checks exactly three things — a non-empty object, a "
-            "non-empty list of non-empty objects, and a secret scan — and the wave-exit "
-            "schema constrains test_digests / capture_digests / review_fragment_digests "
-            "with minItems:1 and a sha256 hex pattern and nothing else, so the entire chain "
-            "derives PASS on sha256:111...1. This is pre-existing across W0-W4 and W5 does "
-            "not retrofit it, but it becomes load-bearing the moment S2.4@SOURCE_READY is "
-            "declared FROM the chain, which is what W5 is for. It is not closable in the "
-            "source lane, and the reason is structural rather than budgetary: a "
-            "packet-local artifact cannot authenticate its own execution. A canonical "
-            "self-digest proves integrity only — never who produced a result nor that a "
-            "command ran — so an execution claim needs ORCHESTRATOR_BOUND controller facts "
-            "or PLATFORM_OR_EXTERNAL_ATTESTED telemetry (CLAUDE.md evidence assurance). "
-            "Nor can W5 raise the bar by binding the digests to something it can recompute: "
-            "the only thing a source-lane verifier can independently recompute is "
-            "repository content, and the receipt ALREADY binds exactly that through "
-            "owned_path_diff_digest over the bound commit's blobs. Requiring test_digests "
-            "to repeat those blob digests would add a shape rule and zero assurance, so W5 "
-            "refuses to add a check that reads like a gate and is not one. What a green "
-            "chain licenses is therefore SOURCE structure at a head, never 'the tests were "
-            "executed'."
-        ),
-        "w5_provides": (
-            "the finding, the exact structural reason it cannot be closed here, a live "
-            "measurement of what actually constrains the three evidence fields (including "
-            "the positive controls proving the emit guard is not vacuous), and a latch "
-            "requiring this row while a fabricated digest still satisfies every constraint"
-        ),
-    },
-    {
-        "obligation_id": "EXPECTED_TOPOLOGY_IS_CALLER_SUPPLIED_AND_UNSIGNED",
-        "typed_status": "RECORDED_NOT_ABSORBED",
-        "owner_wave": "PM",
-        "spec_refs": ["§8.2", "§10.1.1", "§10.2", "§10.4", "§10.5 #25"],
-        "statement": (
-            "expected_topology sits in ROW_PAYLOAD_ALLOWLIST['PG_ROLE_ACL_MIGRATION'] "
-            "beside acl_manifest and topology_attestation, but unlike those two it is bound "
-            "to NOTHING: s2_4_component_effect_intent_v1's PG branch requires only "
-            "topology_attestation_digest / acl_manifest_digest / pg_migration_permit_digest "
-            "/ admin_handle_descriptor_digest, so no signature covers what the caller says "
-            "it expects. Control flow, verified line by line. A caller cannot DELETE the "
-            "check: derive_pg_topology_status calls _hba_projection_reasons, which returns "
-            "'expected signed HBA projection is missing' when expected.hba_projection is "
-            "absent, so an omitted or empty expected_topology is PG_TOPOLOGY_UNPROVEN. But "
-            "a caller CAN WEAKEN it two ways. (a) Every baseline comparison is guarded by "
-            "`expected.get(field) is not None` — listener_config_digest, proxy_config_"
-            "digest, cluster_identity_digest, source_head and target_host — so omitting a "
-            "key silently skips that drift comparison. (b) hba_projection.entries is the "
-            "caller's own list, and the attested effective rule only has to be a member of "
-            "it, so a caller can declare a wide-CIDR or trust rule acceptable. Severity is "
-            "bounded but real: the attestation itself IS digest-bound to the signed intent, "
-            "so a weakened expectation cannot substitute a different observation — it can "
-            "only stop drift from being noticed. W5 does NOT remove the key, and says why: "
-            "agent_governance_s2_4_install_driver.py is a W4-owned path and "
-            "agent_governance_s2_4_topology.py / _apply.py are W3-owned (§10.1.1); removing "
-            "it with no replacement source makes every aggregate PG row permanently "
-            "PG_TOPOLOGY_UNPROVEN and breaks the W4b test kit, because nothing else "
-            "supplies an HBA projection; and the correct replacement is plan-derived, not "
-            "code-owned — s2_4_install_plan_core_v1 ALREADY binds topology_pre_digest and "
-            "hba_delta_digest, and the signed s2_4_pg_hba_delta_v1 already carries the "
-            "exact effective_rule, so the fix is to thread that signed delta into the row "
-            "and derive expected_topology from it. That is a row-ABI/plumbing change §10.4 "
-            "puts on PM, exactly like PRIOR_LINEAGE_ENTRY_IDENTITY. Note the same shape in "
-            "the existing fixtures: _w3_topology_expected builds its 'expected' FROM the "
-            "attestation, so today even the W3 lane's baseline is self-fulfilling."
-        ),
-        "w5_provides": (
-            "the finding, the exact two weakening paths and the exact reason omission is "
-            "not one of them, the bound on its severity, and the plan-derived prescription "
-            "naming the fields that already exist"
-        ),
-    },
-    {
-        "obligation_id": "OWNED_PATH_PROJECTION_RULER_IS_NOT_UNIFORM",
-        "typed_status": "RECORDED_NOT_ABSORBED",
-        "owner_wave": "PM",
-        "spec_refs": ["§10.3"],
-        "statement": (
-            "W0/W1/W2 and W5 project owned-path content from the BOUND COMMIT's blobs "
-            "(owned_path_blob_projection_digest), which is the corrected form W2's review "
-            "landed after finding that a projection over working-tree bytes lets a receipt "
-            "certifying an unchanged HEAD be self-consistent on a dirty tree. W3 and W4 "
-            "still hash working-tree bytes through their own _file_sha256. Every wave "
-            "remains internally self-consistent, so no chain derivation is wrong today, but "
-            "two different rulers are in use across one receipt chain. W5 does not change "
-            "aiml_gate_receipt_wave_w3.py or _w4.py: they are W3/W4-owned files and "
-            "unifying them is a PM path-scope call, not a test-writer's."
-        ),
-        "w5_provides": (
-            "the corrected ruler for W5's own projection plus owned_scope_worktree_delta "
-            "visibility, and this explicit record of the divergence"
-        ),
-    },
-]
+# ── §10.3 W5 誠實面:未關閉義務帳本 ────────────────────────────────────────────
+# 2000 行治理拆分(第三輪):純資料清單移入 ``aiml_gate_receipt_w5_obligations``,本葉逐名
+# 再導出以維持既有匯入面(W5 投影葉與 validator facade 都自此取用)。零語義變更。
+from aiml_gate_receipt_w5_obligations import (  # noqa: E402
+    S2_4_W5_REMAINING_OWNED_OBLIGATIONS,
+)
 
 
 def landing_scope_identity_digest(scope: dict[str, Any]) -> str:

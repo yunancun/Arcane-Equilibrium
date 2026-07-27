@@ -134,6 +134,21 @@ def _build_wave_exit_receipt(admission: dict) -> dict:
 # ── happy path ───────────────────────────────────────────────────────────────
 
 
+@pytest.fixture()
+def clean_owned_scope(monkeypatch):
+    """把「owned scope 相對 bound commit 乾淨」當作**前提**,而不是當作被證的事。
+
+    W5 對抗審計第三輪 P1-D 之後每一波的 wave-exit 都消費自己的 owned-scope 內容差異
+    (``validator._owned_scope_delta_reasons``),所以在一棵**未提交**的開發樹上那條具名
+    reason 是預期存在的。本檔這些斷言證的是鏈綁定 / 結構 / 發射路徑,不是這棵樹乾不乾淨;
+    「髒 owned scope 必須弄破該波 wave exit」的正反兩向由
+    ``test_agent_governance_s2_4_install_w5.py::
+    test_every_wave_exit_consumes_its_own_owned_scope_delta`` 逐波釘住。
+    """
+
+    monkeypatch.setattr(validator, "_owned_scope_delta_reasons", lambda *_a, **_k: [])
+
+
 def test_source_admission_derives_admitted_on_real_receipt() -> None:
     receipt = _build_admission_receipt(_current_head())
     result = validator.derive_source_admission_status(receipt)
@@ -142,7 +157,7 @@ def test_source_admission_derives_admitted_on_real_receipt() -> None:
     assert validator.validate_aiml_artifact(receipt) == []
 
 
-def test_wave_exit_derives_pass_when_bound_admission_is_admitted() -> None:
+def test_wave_exit_derives_pass_when_bound_admission_is_admitted(clean_owned_scope) -> None:
     admission = _build_admission_receipt(_current_head())
     wave_exit = _build_wave_exit_receipt(admission)
     result = validator.derive_wave_exit_status(
@@ -153,7 +168,7 @@ def test_wave_exit_derives_pass_when_bound_admission_is_admitted() -> None:
     assert validator.validate_aiml_artifact(wave_exit) == []
 
 
-def test_central_gate_wave_exit_is_structural_only_not_w0_pass() -> None:
+def test_central_gate_wave_exit_is_structural_only_not_w0_pass(clean_owned_scope) -> None:
     # 邊界回歸釘:中央閘的 wave-exit 分支只做 STRUCTURAL-ONLY 再導出,乾淨的 [] 「不」等於 W0 PASS。
     admission = _build_admission_receipt(_current_head())
     wave_exit = _build_wave_exit_receipt(admission)
