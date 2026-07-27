@@ -1,0 +1,511 @@
+{
+  "admission_derivation": {
+    "reasons": [],
+    "status": "ADMITTED"
+  },
+  "admission_self_digest": "sha256:f3657ae2f2456de4dbf66e5c7a62cfeb8a568c472d64324f88f57c16da825406",
+  "historical_persisted_w4": {
+    "historical_source_head": "f66fe0790ee13c098ad99bbdea3c9001f76328a4",
+    "historical_w4_integrity": "VERIFIED",
+    "persisted_dir": "/Users/ncyu/Projects/TradeBot/.codex-worktrees/aiml-s2-wp4-w0/docs/execution_plan/ai_ml_landing/receipts/S2.4-WP4-W4",
+    "regenerated_w0_admission_self_digest": "sha256:adeb39b7f70e51c20db6a5175dc1b9c37d619597a2f2b28c7a2d37738781163b",
+    "regenerated_w0_wave_exit_self_digest": "sha256:cdd4516920cb6b4004dc7b551cb68818d453f7922bd78f8ec0da7e82a829c3d6",
+    "regenerated_w1_wave_exit_self_digest": "sha256:57814db9446335a57c6695d793f17ef9b7c56798796ce65b33934f20ea57776d",
+    "regenerated_w2_wave_exit_self_digest": "sha256:3d177dc0c60db298b1e1e80c8589b2f26bf890ee8c5bba35f37df8d2d10245d1",
+    "regenerated_w3_wave_exit_self_digest": "sha256:f0b54fb1088fc0e3a3b5944c32407a38223c28e3942da757bd0f150c493fb01c",
+    "w4_wave_exit_self_digest": "sha256:79db18bb568b896e12718de468d15089544084b3d5fd5c36acc242d4614e7bad"
+  },
+  "obligation_ledger_digest": "sha256:4548d5260f86b5ea3280c98e1d4fb61293de440b3c0640d96ccd862c9674e5af",
+  "obligation_ledger_note": "Enumerated from aiml_gate_receipt_wave_w5._W5_EXPORTED_ABI['remaining_owned_obligations'] at emission time, never hand-copied. This is the operator's W6 precondition list: at W6 incident time it must be readable from this artifact alone, without importing a Python module from any branch. Compare obligation_ledger_digest against canonical_digest over the live ABI list to detect a hand-edited copy. Every row is UNCLOSED at this source head; owner_wave names who must close it.",
+  "regenerated_w0_wave_exit_derivation": {
+    "reasons": [],
+    "status": "PASS"
+  },
+  "regenerated_w0_wave_exit_self_digest": "sha256:e6037ff9472152d4c5613060ae59648ce37c6fd43f25bbe9f92e93f71b139398",
+  "regenerated_w1_wave_exit_derivation": {
+    "reasons": [],
+    "status": "PASS"
+  },
+  "regenerated_w1_wave_exit_self_digest": "sha256:bba28392de5aa96c68d036bdd2bbce3078b327f602e60a322f505399231e42e5",
+  "regenerated_w2_wave_exit_derivation": {
+    "reasons": [],
+    "status": "PASS"
+  },
+  "regenerated_w2_wave_exit_self_digest": "sha256:3f227dc55e38f98a178d457369f65fc2de1360fae10a2735c0359f51fdb1fdf7",
+  "regenerated_w3_wave_exit_derivation": {
+    "reasons": [],
+    "status": "PASS"
+  },
+  "regenerated_w3_wave_exit_self_digest": "sha256:2dfbd526366b571d592694ab7b136eb332c6cf43c297ba86da36b6e02e0662de",
+  "regenerated_w4_wave_exit_derivation": {
+    "reasons": [],
+    "status": "PASS"
+  },
+  "regenerated_w4_wave_exit_self_digest": "sha256:816387391579a23d903ee40a7ee3102f0a79821850bba2e8d7693a3fc3a1071a",
+  "remaining_owned_obligation_count": 28,
+  "remaining_owned_obligations": [
+    {
+      "obligation_id": "ENCRYPTED_BLOB_DIGEST_ORDERING",
+      "owner_wave": "W6",
+      "spec_refs": [
+        "§5.1",
+        "§7"
+      ],
+      "statement": "CREDENTIAL_INSTALL's signed intent must carry encrypted_blob_digest, but that digest is the hash of non-deterministic `systemd-creds encrypt` output. W5 confirms the question is unchanged: the fail-closed encrypt-then-compare binding still holds and no source change can decide whether the intent is signed before or after the encryption runs. It is an operator/W6 sequencing decision about a real host.",
+      "typed_status": "OPEN_DESIGN_QUESTION",
+      "w5_provides": "nothing new; carried forward unchanged from W3/W4"
+    },
+    {
+      "obligation_id": "OBSERVER_SPACE_PRE_STATE_DIGEST",
+      "owner_wave": "W6B",
+      "spec_refs": [
+        "§5.2",
+        "§5.4",
+        "§6"
+      ],
+      "statement": "The plan-side digest space is defined and enforced (W4b). The observer side still needs a W6B postcheck driver contract requiring the verifier to return canonical_digest over the SAME code-owned per-row pre-state projection shape. W5 cannot close it: verifying that contract needs a real host observer, and no runtime evidence exists anywhere in S2.4.",
+      "typed_status": "PARTIALLY_PROVIDED_BY_W4B",
+      "w5_provides": "nothing new; owner unchanged"
+    },
+    {
+      "obligation_id": "PRIOR_LINEAGE_ENTRY_IDENTITY",
+      "owner_wave": "W6B",
+      "spec_refs": [
+        "§5.1",
+        "§9.1"
+      ],
+      "statement": "APPLY requires a non-empty replay ledger but cannot verify WHICH permits the prior entries consumed, because probe_id/prepare_id are not carried in the install plan. Closing it needs either the W6B runner threading the probe/PREPARE authorization ids into the APPLY inputs, or a s2_4_install_plan_core_v1 field — a schema change §10.4 forbids the worker from choosing. Unchanged.",
+      "typed_status": "NOT_PROVIDED_BY_W5",
+      "w5_provides": "nothing new; owner unchanged"
+    },
+    {
+      "obligation_id": "PLAN_EXPIRY_OUTSIDE_SIGNED_CORE",
+      "owner_wave": "W6B",
+      "spec_refs": [
+        "§9",
+        "§9.2",
+        "§10.4",
+        "§10.5 #28"
+      ],
+      "statement": "s2_4_install_plan_v1.expires_at lives outside core, so it is not covered by the operator signature. The reachable half is closed (expired plan refused before any lock/mutation; every TTL bound derived from each artifact's own expires_at). Moving expires_at inside core is a s2_4_install_plan_core_v1 schema change §10.4 forbids. Unchanged.",
+      "typed_status": "PARTIALLY_PROVIDED_BY_W4B",
+      "w5_provides": "nothing new; owner unchanged"
+    },
+    {
+      "obligation_id": "INSTALLED_UNIT_PROBE_CORE_BINDING",
+      "owner_wave": "W6B",
+      "spec_refs": [
+        "§6",
+        "§10.4",
+        "§10.5 #36"
+      ],
+      "statement": "expected_installed_unit_probe_core_digest is optional at the API and MANDATORY for the W6 runner; omission is visible as UNVERIFIED_NO_EXPECTED_VALUE_SUPPLIED on every verdict. Closing it means the W6B runner always supplying it or adding a plan-core field. Unchanged.",
+      "typed_status": "PARTIALLY_PROVIDED_BY_W4B",
+      "w5_provides": "nothing new; owner unchanged"
+    },
+    {
+      "obligation_id": "EFFECT_RECEIPT_RECONCILE_BINDING",
+      "owner_wave": "W6B",
+      "spec_refs": [
+        "§5.2",
+        "§10.4"
+      ],
+      "statement": "s2_4_install_effect_receipt_v1 has no field for the startup-reconcile verdict and the schema is additionalProperties:false. W4b binds all three signals into the durable evidence set beside the journal; a consumer holding only the receipt still cannot re-derive the reconcile verdict. Unchanged.",
+      "typed_status": "PARTIALLY_PROVIDED_BY_W4B",
+      "w5_provides": "nothing new; owner unchanged"
+    },
+    {
+      "obligation_id": "STARTUP_RECONCILE_SURFACE_ABSENT",
+      "owner_wave": "W6",
+      "spec_refs": [
+        "§5.2",
+        "§10.5 #39"
+      ],
+      "statement": "A host driver not wrapped by JournalRoutedDriver has no durable journal surface, so reconcile_before_new_intent returns STARTUP_RECONCILE_SURFACE_ABSENT with admits_new_work=None. The W6 runner MUST inject a journal-routed driver into the probe and PREPARE entry points. Unchanged.",
+      "typed_status": "OPEN_BY_DESIGN_W6_RUNNER_PRECONDITION",
+      "w5_provides": "nothing new; owner unchanged"
+    },
+    {
+      "obligation_id": "STARTUP_JOURNAL_PARENTS_MUST_PREEXIST",
+      "owner_wave": "W6B",
+      "spec_refs": [
+        "§5.2"
+      ],
+      "statement": "On a fresh host the three §5.2 journal parents do not exist, so startup reconciliation returns RECOVERY_REQUIRED and nothing in S2.4 can start until an operator pre-creates .../s2_4, .../s2_4/probes and .../s2_4/prepared root-owned 0700. This is an OPERATOR PRECONDITION for the W6 runbook, not a defect to be fixed by giving the journal surface a mkdir capability. Unchanged.",
+      "typed_status": "NOT_PROVIDED_BY_W5",
+      "w5_provides": "nothing new; owner unchanged"
+    },
+    {
+      "obligation_id": "RECEIPT_EMISSION_PENDING_IS_NOT_A_RECEIPT_RETRY",
+      "owner_wave": "W6B",
+      "spec_refs": [
+        "§10.5 #8",
+        "§10.5 #14"
+      ],
+      "statement": "A terminal, complete install can permanently have no receipt: the journal does not carry the row result/postcheck digests the receipt binds, so ALREADY_APPLIED_IDEMPOTENT cannot reconstruct it. Actually emitting the receipt on retry is an artifact-shape decision belonging to the W6B runner. Unchanged.",
+      "typed_status": "PARTIALLY_PROVIDED_BY_W4B",
+      "w5_provides": "nothing new; owner unchanged"
+    },
+    {
+      "obligation_id": "STRANDED_WAL_TEMP_FILES_ARE_REPORT_ONLY",
+      "owner_wave": "W6B",
+      "spec_refs": [
+        "§5.2"
+      ],
+      "statement": "The §5.2 startup enumeration matches, lists and names stranded WAL temp residue and blocks new work while it exists, but §5.2 forbids this surface from renaming or removing anything, so clearing it is an operator runbook step. Unchanged.",
+      "typed_status": "PARTIALLY_PROVIDED_BY_W4B",
+      "w5_provides": "nothing new; owner unchanged"
+    },
+    {
+      "obligation_id": "ATTESTATION_EXPIRY_AND_HOST_TIME_ARE_NOT_CROSS_CHECKED",
+      "owner_wave": "W6B",
+      "spec_refs": [
+        "§9.1",
+        "§10.2"
+      ],
+      "statement": "W5 reviewed this one line by line because it READS like a source fix. It is not, and W5's first draft of this correction was itself wrong and is recorded here rather than silently rewritten. BOTH halves W4 named are still open. (a) Nothing compares the OBSERVED moment against attestation_expires_at: derive_apply_attestation_status deliberately excludes the caller's now, so an attestation whose own expiry has passed still verifies as long as its SIGNED trusted_host_time sits inside both permit windows. (b) The attestation's SIGNED trusted_host_time is still never reconciled with the value driver.trusted_host_time() returned for the same transaction — verified by reading agent_governance_s2_4_install_evidence.derive_apply_attestation_status, which compares the signed time only against attestation_expires_at, the 900s attestation TTL and the two permit windows. What DOES exist, and what W4's statement omitted, is a DIFFERENT and weaker relation that W5 adds to the record: agent_governance_s2_4_install_driver._trusted_host_time_reasons cross-checks driver.trusted_host_time() against the observed moment under the §9.1 PERMIT_CLOCK_SKEW_SECONDS ceiling (regression: test_c18_the_trusted_host_time_is_cross_checked_against_the_observed_time). That bounds the DRIVER's clock, not the attestation's signed value. The residual is therefore smaller than W4 implied but non-zero: the signed trusted_host_time is still bounded indirectly, because it must fall inside two independently signed permit windows that are themselves capped at 900s. Closing either half needs a decision about WHICH clock is authoritative for the observed moment on a real host (§9.1 says the host's, and on a real host the two values come from the same clock); in a source lane where both are fixtures the question is unanswerable, and wiring the caller's now into the freshness derivation would REVERSE the W4b property that freshness comes only from the SIGNED trusted_host_time.",
+      "typed_status": "NOT_PROVIDED_BY_W5",
+      "w5_provides": "the line-verified confirmation that both halves are still open (W4's statement stands), the previously unrecorded driver-clock skew ceiling and its named regression, the observation that the two 900s permit windows bound the residual, and the explicit reason this is not a source change"
+    },
+    {
+      "obligation_id": "ATTESTED_EVIDENCE_CLASS_VERIFIER",
+      "owner_wave": "W6B",
+      "spec_refs": [
+        "§6",
+        "§9.1",
+        "§10.2",
+        "§10.5 #13",
+        "§10.5 #14"
+      ],
+      "statement": "W4b delivered the VERIFIER: s2_4_install_apply_attestation_v1 with a distinct attestor identity and namespace over the same §9.1 trust root, a real signature verification, exact-plan binding, applier != verifier, row-results equality and freshness derived only from the SIGNED trusted_host_time. What remains open is unchanged and still live: OBTAINING a real attestation needs a trusted host holding the §9.1 private key, so on Mac/source/disposable lanes no attestation is produced and every driver terminates at SOURCE_SIMULATION_PASS with all nine authorities false. W5 adds no attestation and holds no key material, so the pending half is exactly as W4 left it. Carried rather than dropped: a row whose residual is live is not closed by its other half having been delivered.",
+      "typed_status": "VERIFIER_PROVIDED_BY_W4B_ATTESTATION_PENDING",
+      "w5_provides": "nothing new; carried forward unchanged from W4 with its typed status intact after the previous W5 draft removed the row entirely"
+    },
+    {
+      "obligation_id": "ATTESTOR_KEY_IS_NOT_SEPARATE_FROM_THE_PERMIT_KEY",
+      "owner_wave": "W6B",
+      "spec_refs": [
+        "§9.1",
+        "§10.2"
+      ],
+      "statement": "One physical Ed25519 key roots both the four operator permit profiles and the apply attestation. Domain separation is namespace-level and real; CUSTODY is not separated. The fix is a separate attestor keypair with its own pinned fingerprint, which is a W6 key-custody decision about a real host. W5 confirms no source change can establish it: the source lane has no key material at all.",
+      "typed_status": "NOT_PROVIDED_BY_W5",
+      "w5_provides": "nothing new; owner unchanged"
+    },
+    {
+      "obligation_id": "REPLAY_LEDGER_CONSUME_ONCE_IS_A_FILESYSTEM_PROPERTY",
+      "owner_wave": "W6B",
+      "spec_refs": [
+        "§9.1",
+        "§10.5 #8"
+      ],
+      "statement": "Ledger rollback and forking are prevented by the root-owned 0700 parent, the 0600 mode and the exclusive install lock, not cryptographically. Closing it needs a monotonic counter in trusted storage or an attestor-signed ledger head. Unchanged.",
+      "typed_status": "OPEN_HONEST_BOUNDARY",
+      "w5_provides": "nothing new; owner unchanged"
+    },
+    {
+      "obligation_id": "STARTUP_RECONCILE_LANE_PATHS",
+      "owner_wave": "W6B",
+      "spec_refs": [
+        "§5.2"
+      ],
+      "statement": "Enumeration sees every non-terminal journal in the three parents, but the caller's paths still decide which lane receives the independent observation digest and per-lane ownership key. Closing that half means the W6B runner passing the probe_id/prepare_id-derived paths it already holds. Unchanged.",
+      "typed_status": "NOT_PROVIDED_BY_W5",
+      "w5_provides": "nothing new; owner unchanged"
+    },
+    {
+      "obligation_id": "DEPENDENCY_REFRESH_RECEIPT_BINDING_ABSENT",
+      "owner_wave": "PM",
+      "spec_refs": [
+        "§3",
+        "§10.4",
+        "§11.3"
+      ],
+      "statement": "The §9.2 gate itself is now built and load-bearing (schema, central branch, verifier-side recomputation, builder, tests), so §11.2's 'complete source inventory' is no longer false and §10.5 #28's first half is PROVEN. What is NOT closed is the receipt binding: §3 requires the terminal s2_4_install_effect_receipt_v1 to reference 'source_admission_receipt, W0-W5 wave-chain and DEPENDENCY-REFRESH digests', and that closed additionalProperties:false schema has no field for them — a consumer holding only the install receipt cannot see which refreshes admitted the expired source identities. Adding the field is an exported-schema change §10.4 forbids the worker from choosing, exactly like PLAN_EXPIRY_OUTSIDE_SIGNED_CORE and EFFECT_RECEIPT_RECONCILE_BINDING. Correction (adversarial round 2): the previous wording of this row ended 'the refresh verdicts are reachable only through derive_source_dependency_admission_status at APPLY time', which was FALSE — nothing at APPLY time calls it. That sentence is retired and the measured fact now lives in its own row, SOURCE_IDENTITY_FRESHNESS_HAS_NO_PRODUCTION_CALL_SITE. What is true here is narrower: even once a call site exists, the terminal receipt still has nowhere to carry the refresh digests §3 names.",
+      "typed_status": "NOT_PROVIDED_BY_W5",
+      "w5_provides": "the complete §9.2 gate (four refreshable classes, nine never-refreshable classes, verifier-side reproduction, one-refresh rule) and the exact residual: the terminal receipt has nowhere to carry the refresh digests §3 names"
+    },
+    {
+      "obligation_id": "DEPENDENCY_REFRESH_REPRODUCER_NODE_IS_DECLARATIVE",
+      "owner_wave": "W6",
+      "spec_refs": [
+        "§9.1",
+        "§9.2"
+      ],
+      "statement": "§9.2 requires an INDEPENDENT replay. W5 makes two halves of that structural and one half declarative, and says which is which. STRUCTURAL: the semantic digests are recomputed BY THE VERIFIER from the BLOBS OF THE BOUND COMMIT — the producer input set is materialised out of git into a scratch tree and the producer is run there, so the working tree is not an input — and they must equal both the refresh's claim and the original's own values, so a refresh can never be minted from the original digest; and reproduced_at must be strictly after the original's own expiry, which binds only for the three families whose original is a COMMITTED repository artifact, because the supplied original must equal the blob at the bound commit (S2_4_COMMITTED_SOURCE_IDENTITY_PATHS). CORRECTION (adversarial round 3): the previous wording of this row said the strictly-after rule 'only binds because the original is itself validated by its family validator'. That was FALSE and is retired rather than silently rewritten. Family validation authenticates SHAPE, not the window: E2 took the three genuinely shipped receipts, edited observation_time/expires_at and resealed self_digest, and the family validator returned [] for all three — pushing the window forward gave SOURCE_DEPENDENCY_FRESH with no refresh, no reproduction, no clean-tree gate and no materialisation, and pushing it back to 2020 with a refresh gave SOURCE_DEPENDENCY_ADMITTED_BY_REFRESH with zero reasons. A validator-passing minted original picks its own expiry just as freely as a hand-written one. Both statements were FALSE before the W5 adversarial review: the recomputation read Path.read_bytes() from the working tree while the head came from git metadata, so restoring pre-drift bytes in the working tree alone (no commit, no git add) reproduced a drifted identity and reached DEPENDENCY_REFRESH_ADMITTED; and the original receipt was checked only for isinstance/schema_version/self-referential digest. TWO RESIDUALS REMAIN, both scoped: (i) materialisation covers the bytes the producer HASHES, not the producer code the verifying PROCESS has already imported — that half rests on the clean-tree gate over the same input set plus producer_module_digest being taken from the bound commit, and a verifier wanting full isolation must run FROM the clone rather than pass repo_root at it; (ii) the input set is code-owned, and for S2.2A a missing entry fails loudly (the materialised tree is all the producer can see, so an incomplete set raises missing_input) while for S1.3/S2.3 an incomplete set would silently narrow only the clean-tree gate. DECLARATIVE: that the reproducing NODE differs from the producing node rests on reproducer_caller not equalling the original's producer label, which a hostile producer can simply relabel. The source lane holds no key material at all (see ATTESTOR_KEY_IS_NOT_SEPARATE_FROM_THE_PERMIT_KEY), so node custody cannot be established here; closing it means a per-node attestor identity, which is a W6 key-custody decision about real hosts. A second, smaller asymmetry is recorded rather than hidden: source_compatibility_receipt_v1/v2 carry no 'caller' or 'platform' field at all, so for S2.2A the producer label degrades to session_id ('S2.2A') and the platform component of the projection is null.",
+      "typed_status": "PARTIALLY_PROVIDED_BY_W5",
+      "w5_provides": "the commit-bound recomputation, the clean-tree gate over the producer input set, the family-validator authentication of the original, the commit-blob binding of the original that takes the observation window out of the caller's hands for the three committed families, the retirement of the false family-validator claim, and the exact statement of the residuals and of what a relabelling producer could do"
+    },
+    {
+      "obligation_id": "DEPENDENCY_OBSERVATION_WINDOW_IS_CALLER_AUTHORED",
+      "owner_wave": "W6",
+      "spec_refs": [
+        "§9.2",
+        "§10.5 #28"
+      ],
+      "statement": "§9.2's freshness verdict is read off the ORIGINAL receipt's own observation_time / expires_at (generated_at_utc for S2.2A), which are the caller's fields. W5 takes them out of the caller's hands for the three families whose original is a committed repository artifact: the supplied receipt must equal the blob at the bound commit, so editing two timestamps and resealing self_digest is now SOURCE_DEPENDENCY_REJECTED in both directions (forward to FRESH, backward to ADMITTED_BY_REFRESH). WHAT REMAINS OPEN, named rather than hidden: S1_3_IDENTITY_CONTRACT has NO committed original in this repository — an identity_acl_contract_receipt_v1 is a one-shot disposable observation produced at runtime — so S2_4_COMMITTED_SOURCE_IDENTITY_PATHS maps it to the empty tuple and its window stays entirely caller-chosen. The same hole exists for any verifier that points repo_root at a tree whose bound commit does not carry the receipt paths (the isolated-clone test lane does exactly this on purpose): committed_source_identity_digests returns None and the binding is skipped rather than failing closed, because failing closed there would make an isolated reproduction impossible. Closing it means either an S1.3 receipt sink with a committed home, or moving freshness onto something the caller does not author at all (an attestor-signed observation time), which is the same W6 key-custody decision as ATTESTOR_KEY_IS_NOT_SEPARATE_FROM_THE_PERMIT_KEY.",
+      "typed_status": "PARTIALLY_PROVIDED_BY_W5",
+      "w5_provides": "the commit-blob binding for the three committed families, the code-owned path table, a per-family regression driving both timestamp directions on the real shipped receipts, and the exact statement of the S1.3 and isolated-tree gaps"
+    },
+    {
+      "obligation_id": "ENCODED_SECRET_SCAN_MISSES_COMPOSITE_PAYLOADS",
+      "owner_wave": "W6B",
+      "spec_refs": [
+        "§10.5 #15"
+      ],
+      "statement": "assert_no_secret_material derives six encoded forms of each sentinel and looks for them as SUBSTRINGS. That finds a payload which is exactly the encoded secret, which is the case W5's own tests exercise. It does NOT find a composite payload b64(prefix + secret). The arithmetic, stated so the next reader need not rediscover it: base64 consumes three input bytes per four output chars, so b64(prefix + secret) contains b64(secret) as a substring only when len(prefix) % 3 == 0. Two of the three byte alignments therefore evade the scan entirely. Closing it means adding the two shifted cores per sentinel: for alignment a in {1, 2}, encode a filler bytes followed by the secret, drop the first {1: 2, 2: 3} characters (those mix filler bits) and drop the last character when (a + len(secret)) % 3 != 0 (it carries zero-padding bits the real successor byte would supply), then match the remaining core. base32, base85, unpadded base64, percent-encoding, \\\\uXXXX escapes and PEM line wrapping are not covered at all and need a decode-then-rescan pass rather than more precomputed forms. W5 SURFACED this and does NOT close it: agent_governance_s2_4_credential.py is not a W5-owned path (§10.1.1), the shifted cores are short for short sentinels so a minimum-core-length rule has to be designed with the false-positive blast radius of a fail-closed scanner in mind, and the six uncovered encodings leave the obligation open either way.",
+      "typed_status": "RECORDED_NOT_CLOSED",
+      "w5_provides": "the finding, the exact alignment arithmetic and the prescription (shifted cores at prefix lengths 0/1/2 plus a decode-then-rescan pass, with a composite-offset test at each alignment), and the honest reason it is not closed here"
+    },
+    {
+      "obligation_id": "PROGRAM_CODE_IS_ON_THE_SCANNER_PATH_VIA_W3_AND_W4",
+      "owner_wave": "W5",
+      "spec_refs": [
+        "§10.1.1"
+      ],
+      "statement": "Making program_code/ importable widens the top-level namespace of every process that loads the facade — broker_connectors, exchange_connectors, dashboard and ai_agents all become resolvable in the engine-scanner process. No shadowing or hijack was ever found, but under §10.1.1 condition 4 that has to be a decision rather than an import side effect. CORRECTION (adversarial round 3): the previous obligation_id named W4 ALONE and was imprecise — aiml_gate_receipt_wave_w3.py does the identical import-time insertion at lines 32-34 and was never mentioned. Both are now removed under an explicit PM ruling: W3's one ml_training package import moved inside program_code_on_path(), and W4 never used the path at all. §10.1.1 condition 4 forbids GRANTING a capability the parent did not have; removing these strictly REDUCES capability, so the change runs with the condition rather than against it. All four occurrences W5 found (contracts leaf, W5 leaf, W3 leaf, W4 leaf) are now closed and the process-level property IS achieved for the facade's import closure.",
+      "typed_status": "PROVIDED_BY_W5_UNDER_PM_RULING",
+      "w5_provides": "all four occurrences removed under the PM path-scope ruling, the correction of the row's own W4-only naming, and a leaf-scoped regression that fails if any of them returns"
+    },
+    {
+      "obligation_id": "PR_SET_DUMPABLE_IS_DECLARED_NOT_ENFORCED",
+      "owner_wave": "W6B",
+      "spec_refs": [
+        "§7",
+        "§10.5 #26"
+      ],
+      "statement": "§10.5 #26 requires PR_SET_DUMPABLE=0 to be LOAD-BEARING. It is not. PROCESS_HARDENING_CONTRACT['pr_set_dumpable'] = 0 is a declared constant that appears in exactly two projection dicts and in nothing else: derive_host_credential_capability_status checks systemd_creds_available, tpm2_available and decryption_name_verification and never looks at it, and no driver protocol method observes it. The pre-existing test named test_process_hardening_contract_is_load_bearing asserts the constant equals itself, which is exactly the failure mode this wave was sent to find. The other four clauses of #26 ARE load-bearing: --with-key=host+tpm2 is enforced through tpm2_available, the encrypted-blob fingerprint is re-derived and compared, the closed eight-key DSN set is enforced, and LimitCORE=0 plus the PG*/LD*/PYTHON* scrub are enforced by the unit's byte-equality check. Closing this one means observing prctl(PR_GET_DUMPABLE) on the applier and refusing when it is not 0 — a driver-protocol and host-observation change, i.e. production implementation on a real host, not a test.",
+      "typed_status": "NOT_PROVIDED_BY_W5",
+      "w5_provides": "the finding, the exact reason the existing test is tautological, and the honest classification of §10.5 #26 as PARTIALLY PROVEN"
+    },
+    {
+      "obligation_id": "S2_5_LIFECYCLE_FIXTURES_DO_NOT_EXIST",
+      "owner_wave": "S2.5A",
+      "spec_refs": [
+        "§10.5 #29",
+        "§11.3"
+      ],
+      "statement": "§10.5 #29's second clause says 'S2.5 fixtures own `enable --now`, enabled/reboot persistence and rollback-to-disabled'. No S2.5 source or fixture exists in this repository, so that clause has no owner in WP4 and cannot be satisfied here. What W5 CAN and does prove is the S2.4 half: the aggregate driver surface refuses enable/start/restart/kill, the closed postcheck and receipt schemas carry no runtime-directory or decrypted-credential property, and an enabled or active observation is never a success. The clause is recorded rather than counted as covered.",
+      "typed_status": "OUT_OF_WP4_SCOPE",
+      "w5_provides": "the S2.4 half as a live re-derivation and the explicit statement that the S2.5 half has no owner in this work package"
+    },
+    {
+      "obligation_id": "SOURCE_IDENTITY_FRESHNESS_HAS_NO_PRODUCTION_CALL_SITE",
+      "owner_wave": "PM",
+      "spec_refs": [
+        "§8",
+        "§9.2",
+        "§10.1.1",
+        "§10.4",
+        "§10.5 #28"
+      ],
+      "statement": "§9.2 says the central validator accepts an expired source-identity receipt only together with one current refresh attestation. That rule is implemented (derive_source_dependency_admission_status) and has ZERO production callers. The measurement is an AST call-site scan (ast.Call only, never raw text) over 717 modules recursively under helper_scripts/maintenance_scripts and program_code, excluding test packages and the three named definition sites — the contracts leaf that defines it, the validator facade that re-exports it, and this projection leaf that measures it. CORRECTION (adversarial round 3): the previous wording said the name appears 'only in the two W5 test files and in this projection leaf', which was imprecise — it also appears in the contracts leaf (the definition), in the validator facade (the re-export) and in this row's own text. Those are not call sites and are now excluded by name rather than by an inaccurate sentence. Measured consequence: validate_aiml_artifact returns [] for all three genuinely expired shipped receipts (S2.2A compatibility, S2.3 sealed-build, S2.3 expected-identity, the latter two expiring 2026-07-24T00:30Z) with no refresh present. W5 does NOT wire it, and says exactly why rather than shipping a half-wiring. (1) The only APPLY-time consumer of a §9.2 source identity is agent_governance_s2_4_host_identity.s2_3_expected_identity_reasons, called from the HOST_IDENTITY_INSTALL row; it reads the S2.3 artifact from a fixed repository path and checks status/self_digest/three identity fields, deriving no freshness. That module is a W3-owned path (§10.1.1), and its verdict is folded live into the W3 exported ABI, so adding a fail-closed freshness reason there permanently breaks the W3 wave exit — the shipped receipts ARE expired and nothing anywhere carries a refresh to admit them. (2) PREPARE only ever receives the DIGESTS of these receipts (build_prepare_intent's source_lock_closure_identity), never the objects, so §9.2's verifier-side replay — which is defined over the ORIGINAL artifact — cannot run there without a new plumbing field. (3) Making validate_aiml_artifact wall-clock-expire committed build-identity receipts is the documented time bomb that branch deliberately refuses (a fixed 30-minute TTL on committed evidence would make every offline/CI consumer reject it), and it still could not admit a refresh, because a single-artifact entry point has nowhere to receive one. Closing this needs a PM decision about WHERE the refresh enters APPLY, which is the same exported-schema question as DEPENDENCY_REFRESH_RECEIPT_BINDING_ABSENT.",
+      "typed_status": "NOT_PROVIDED_BY_W5",
+      "w5_provides": "the complete §9.2 gate, the measured zero-call-site fact folded live into this wave's ABI, a two-way latch that breaks the wave exit if the row is deleted while the fact holds OR kept once a production call site appears, and the retirement of the false sentence that previously claimed APPLY reached it"
+    },
+    {
+      "obligation_id": "EMITTED_EVIDENCE_DIGESTS_ARE_UNAUTHENTICATED",
+      "owner_wave": "PM",
+      "spec_refs": [
+        "§10.3",
+        "§10.5 #27",
+        "§11.3"
+      ],
+      "statement": "The W0->W5 chain proves nothing about whether tests ran or a review happened. validate_emit_evidence checks exactly three things — a non-empty object, a non-empty list of non-empty objects, and a secret scan — and the wave-exit schema constrains test_digests / capture_digests / review_fragment_digests with minItems:1 and a sha256 hex pattern and nothing else, so the entire chain derives PASS on sha256:111...1. This is pre-existing across W0-W4 and W5 does not retrofit it, but it becomes load-bearing the moment S2.4@SOURCE_READY is declared FROM the chain, which is what W5 is for. It is not closable in the source lane, and the reason is structural rather than budgetary: a packet-local artifact cannot authenticate its own execution. A canonical self-digest proves integrity only — never who produced a result nor that a command ran — so an execution claim needs ORCHESTRATOR_BOUND controller facts or PLATFORM_OR_EXTERNAL_ATTESTED telemetry (CLAUDE.md evidence assurance). Nor can W5 raise the bar by binding the digests to something it can recompute: the only thing a source-lane verifier can independently recompute is repository content, and the receipt ALREADY binds exactly that through owned_path_diff_digest over the bound commit's blobs. Requiring test_digests to repeat those blob digests would add a shape rule and zero assurance, so W5 refuses to add a check that reads like a gate and is not one. What a green chain licenses is therefore SOURCE structure at a head, never 'the tests were executed'.",
+      "typed_status": "RECORDED_NOT_CLOSED",
+      "w5_provides": "the finding, the exact structural reason it cannot be closed here, a live measurement of what actually constrains the three evidence fields (including the positive controls proving the emit guard is not vacuous), and a latch requiring this row while a fabricated digest still satisfies every constraint"
+    },
+    {
+      "obligation_id": "EXPECTED_TOPOLOGY_IS_CALLER_SUPPLIED_AND_UNSIGNED",
+      "owner_wave": "PM",
+      "spec_refs": [
+        "§8.2",
+        "§10.1.1",
+        "§10.2",
+        "§10.4",
+        "§10.5 #25"
+      ],
+      "statement": "expected_topology sits in ROW_PAYLOAD_ALLOWLIST['PG_ROLE_ACL_MIGRATION'] beside acl_manifest and topology_attestation, but unlike those two it is bound to NOTHING: s2_4_component_effect_intent_v1's PG branch requires only topology_attestation_digest / acl_manifest_digest / pg_migration_permit_digest / admin_handle_descriptor_digest, so no signature covers what the caller says it expects. Control flow, verified line by line. A caller cannot DELETE the check: derive_pg_topology_status calls _hba_projection_reasons, which returns 'expected signed HBA projection is missing' when expected.hba_projection is absent, so an omitted or empty expected_topology is PG_TOPOLOGY_UNPROVEN. The ONE weakening path, verified line by line: every baseline comparison is guarded by `expected.get(field) is not None` — listener_config_digest, proxy_config_digest, cluster_identity_digest, source_head and target_host — so omitting a key silently skips that drift comparison. CORRECTION (adversarial round 3): the previous wording of this row carried a second clause (b) claiming a caller can declare a wide-CIDR or trust rule acceptable through hba_projection.entries. That clause is FALSE and is dropped rather than silently rewritten: pg_topology_attestation_v1 pins effective_hba_rule.source to a const of 127.0.0.1/32 and effective_hba_rule.method to a const of scram-sha-256, so such a rule is refused by the closed schema before `expected` is ever consulted. The remaining clause is WORSE than the previous wording admitted, and the severity is corrected upward with it: omitting cluster_identity_digest or listener_config_digest lets a DIFFERENT PostgreSQL cluster pass as PG_TOPOLOGY_PROVEN with a drifting system_identifier, database_oid, owning_uid and executable_digest (the guards that would have caught it are at agent_governance_s2_4_topology.py:299 and :314, and they are reached only when the caller supplies the key). The attestation is still digest-bound to the signed intent, so the observation itself cannot be substituted — but 'a different cluster is accepted as the expected one' is a substitution of the SUBJECT, not merely unnoticed drift. W5 does NOT remove the key, and says why: agent_governance_s2_4_install_driver.py is a W4-owned path and agent_governance_s2_4_topology.py / _apply.py are W3-owned (§10.1.1); removing it with no replacement source makes every aggregate PG row permanently PG_TOPOLOGY_UNPROVEN and breaks the W4b test kit, because nothing else supplies an HBA projection; and the correct replacement is plan-derived, not code-owned — s2_4_install_plan_core_v1 ALREADY binds topology_pre_digest and hba_delta_digest, and the signed s2_4_pg_hba_delta_v1 already carries the exact effective_rule, so the fix is to thread that signed delta into the row and derive expected_topology from it. That is a row-ABI/plumbing change §10.4 puts on PM, exactly like PRIOR_LINEAGE_ENTRY_IDENTITY. Note the same shape in the existing fixtures: _w3_topology_expected builds its 'expected' FROM the attestation, so today even the W3 lane's baseline is self-fulfilling.",
+      "typed_status": "RECORDED_NOT_ABSORBED",
+      "w5_provides": "the finding, the ONE real weakening path (omission of a baseline key) with the different-cluster consequence named, the retraction of the false wide-CIDR/trust clause with the two schema consts that refuse it, the exact reason omitting expected_topology entirely is not a weakening, and the plan-derived prescription naming the fields that already exist"
+    },
+    {
+      "obligation_id": "EVIDENCE_CLASS_TO_SCHEMA_MAP_IS_MANY_TO_ONE",
+      "owner_wave": "PM",
+      "spec_refs": [
+        "§9.1",
+        "§9.2",
+        "§10.5 #28"
+      ],
+      "statement": "S2_4_NEVER_REFRESHABLE_SCHEMAS maps NINE evidence classes onto FIVE schemas: the four permit rows (APPLY_AGGREGATE_AUTHORIZATION, PREPARE_AUTHORIZATION, PG_MIGRATION_AUTHORIZATION, CAPABILITY_PROBE_AUTHORIZATION) all resolve to s2_4_operator_authorization_v1, and the two capability-probe rows both resolve to s2_4_capability_probe_effect_receipt_v1. _dependency_evidence_receipt_errors checks only that schema_version is IN the class's allowed tuple, so a genuine PREPARE permit presented under the label APPLY_AGGREGATE_AUTHORIZATION passes the 'is this the artifact this class names' test. The profile/scope layer that would tell them apart, _s2_4_operator_authorization_errors, is never called on this path — the table's own comment says that layer enforces it, and on THIS path it does not. Bounded severity, stated exactly: every §9.2 outcome for these nine classes is a refusal (DEPENDENCY_REFRESH_BY_REFERENCE_FORBIDDEN with any refresh, DEPENDENCY_EVIDENCE_REOBSERVATION_REQUIRED when expired), so the only thing the substitution can buy is SOURCE_DEPENDENCY_FRESH for a still-valid permit of the wrong profile — it cannot authorize anything, because no production caller consumes this verdict at all (see SOURCE_IDENTITY_FRESHNESS_HAS_NO_PRODUCTION_CALL_SITE). Closing it means threading the §9.1 profile/scope check into the class→artifact resolution, which is a PM decision about where the permit set enters §9.2.",
+      "typed_status": "RECORDED_NOT_CLOSED",
+      "w5_provides": "the finding, the exact many-to-one map, the line-verified statement that the profile layer is not on this path, and the bound on its severity"
+    },
+    {
+      "obligation_id": "S1_3_ASSURANCE_CLASS_IS_INFLATABLE_WITHOUT_CHANGING_THE_PROJECTION",
+      "owner_wave": "S1.3",
+      "spec_refs": [
+        "§9.2",
+        "§10.1.1"
+      ],
+      "statement": "s1_3_identity_projection deliberately excludes the fields that vary per observation, including the socket rows' mode/mode_source, the rotation observation proof and the two rotation slot fingerprints. Two independent reviewers disagreed about the consequence and W5 reproduced BOTH experiments. E2's result is confirmed exactly: drifting each excluded item ONE AT A TIME is caught by the S1.3 family validator (2 to 16 errors each, because it re-checks evidence_class == the strongest facet exercised), and only three survive with zero errors and a byte-identical projection — negative_acl_cases[].reason and the rotation new_fingerprint / old_fingerprint slots. E3's CONSEQUENCE is also real, and a one-field-at-a-time sweep cannot find it: setting socket_dir_acl[0].mode_source = 'live_chmod_stat' TOGETHER WITH the top-level evidence_class = 'LOCAL_REPRODUCIBLE' is a COHERENT pair — family validator 0 errors, projection byte-identical, DEPENDENCY_REFRESH_ADMITTED — so the assurance class is lifted from STRUCTURAL_ONLY to LOCAL_REPRODUCIBLE through a refresh that is defined not to change any semantic digest. E3's stated PREMISE is inaccurate at this head and is corrected rather than repeated: _evidence_ceiling does not read the per-facet evidence_class at all, it calls _has_live_disposable_witness, which keys off exactly two labels — the rotation proof's observation_source == 'live_disposable_pg' and a socket row's mode_source == 'live_chmod_stat'. The rotation route does NOT reach admission (a live rotation proof additionally requires the new credential to have connected, leaving one family error); only the socket route does. W5 does not close it: agent_governance_identity_acl_contract.py is not a W5-owned path (§10.1.1), and folding mode_source into the projection would make S1.3 permanently unrefreshable because the projection is recomputed from the code-owned canonical contract, which carries no observation labels. The consequence a consumer must act on is already written into the producer: LOCAL_REPRODUCIBLE is a CLAIM of a live observation and any S1.5/S2.4 consumer MUST re-run the disposable witness before trusting it.",
+      "typed_status": "RECORDED_NOT_CLOSED",
+      "w5_provides": "the empirical resolution of the E2/E3 disagreement with both experiments, the exact reachable configuration, the correction of the stated premise, the three genuinely surviving single-field exclusions, and a regression pinning the pair so the surface cannot silently widen"
+    },
+    {
+      "obligation_id": "OWNED_PATH_PROJECTION_RULER_IS_NOT_UNIFORM",
+      "owner_wave": "PM",
+      "spec_refs": [
+        "§10.3"
+      ],
+      "statement": "W0/W1/W2 and W5 project owned-path content from the BOUND COMMIT's blobs (owned_path_blob_projection_digest), which is the corrected form W2's review landed after finding that a projection over working-tree bytes lets a receipt certifying an unchanged HEAD be self-consistent on a dirty tree. W3 and W4 still hash working-tree bytes through their own _file_sha256. Every wave remains internally self-consistent, so no chain derivation is wrong today, but two different rulers are in use across one receipt chain. W5 does not change aiml_gate_receipt_wave_w3.py or _w4.py's own projections: they are W3/W4-owned files and unifying them is a PM path-scope call, not a test-writer's. What adversarial round 3 DID change, and what bounds the residual: the owned-scope cleanliness gate is now content-addressed for EVERY wave. owned_scope_worktree_delta hashes the working-tree bytes and compares them against the blobs of the BOUND COMMIT instead of asking `git status --porcelain`, and _wave_exit_structural_errors consumes that delta for W0..W5 rather than W5 alone. That closes three independent bypasses at once — `git status` always compared HEAD rather than the receipt's own source_head, `git update-index --assume-unchanged` / `--skip-worktree` made a modified file invisible (and both index flags plus core.trustctime live INSIDE the tree being attested), and the -z rename form `R  <new>\\0<old>\\0` was mis-sliced so the message named a path that does not exist. So a W3/W4 receipt can still be self-consistent against its own working-tree ruler, but it can no longer be DERIVED from a tree whose owned scope differs from the commit it binds.",
+      "typed_status": "RECORDED_NOT_ABSORBED",
+      "w5_provides": "the corrected ruler for W5's own projection, the content-addressed owned_scope_worktree_delta that no index flag or git config can defeat, its fail-closed consumption in the SHARED wave-exit path for W0..W5, and this explicit record of the remaining projection divergence"
+    }
+  ],
+  "replay_note": "W5 re-derivation binds source_head == checkout HEAD; to replay, checkout source_head, rebuild the in-memory W0/W1/W2/W3/W4 chain with the same builders, then run derive_wave_exit_status(w5, source_admission_receipt=admission, predecessor_wave_receipt=w4_wave_exit, predecessor_wave_chain=(w0_wave_exit, w1_wave_exit, w2_wave_exit, w3_wave_exit)). A PASS here evidences source structure at this head only: the evidence digests are shape-only (the chain derives PASS on a literal sha256:111...1), so it never evidences that any test ran or that any review happened.",
+  "review_provenance": [
+    {
+      "disposition": "the missing §10.1 owned path it found was built rather than waived",
+      "headline": "Rebuilt the §10.5 map item by item. Two items had never been tested at all, and the observer-role assertion was vacuous because the fixture manifest never named aiml_observer_ro. Refused to make the SOURCE_READY call and named three conditions that would falsify it.",
+      "role": "E4-writer",
+      "round": "W5 build",
+      "verdict": "acceptance sweep 30/7/2 -> 36/3/0"
+    },
+    {
+      "disposition": "emitter built; §10.1.2 amendment written and placed; declaration shape adopted",
+      "headline": "Ruled that §9.2 having no production call site is a W6 entry blocker and not a §11.2 blocker — reading it otherwise would make every W6-owned obligation a blocker and create an incentive to delete rows. Found W5 had no emitter and that the fact was in neither the code nor the ledger. Specified the declaration must be a conjunction with per-predicate evidence of the right class.",
+      "role": "CC",
+      "round": "exact-generation at b5d546e3a",
+      "verdict": "DRIFT + one CONFLICT scoped to §11.3/W6; SOURCE_READY NOT MET"
+    },
+    {
+      "disposition": "all P1 closed in round 3; the bundle-digest fact carried into the W6 preflight",
+      "headline": "Demonstrated end to end that the clean-tree gate reported CLEAN and returned a tampered value for a reproduction bound to a pristine commit. Found the fail-closed owned-scope check was W5-only while W2 owns the scripts a W6 operator actually executes. Flagged that application_bundle_digest changed, so any pre-W5 draft W6 artifact pinning the old value is stale.",
+      "role": "OPS",
+      "round": "exact-generation",
+      "verdict": "5 P1 + 5 P2, no P0"
+    },
+    {
+      "disposition": "both conditions closed in round 3",
+      "headline": "Judged the no-SSHSIG decision correct on the merits and could construct no exploit a signature would have prevented. Narrowed the gate exposure to S2.2A alone, the other three classes being saved by an accidental double-binding rather than by design. Found the honesty latch defeatable by a single comment.",
+      "role": "E3",
+      "round": "exact-generation",
+      "verdict": "BLOCK lifted with two conditions"
+    },
+    {
+      "disposition": "the window is now bound to the committed artifact; the false ledger sentence retired",
+      "headline": "Confirmed all four of its prior P1s genuinely closed. Then showed the §9.2 expiry decision is read off two caller-authored fields: on the real shipped receipts, editing observation_time and expires_at and resealing moved all three from EXPIRED to FRESH, skipping the entire gate the wave was built for.",
+      "role": "E2",
+      "round": "exact-generation",
+      "verdict": "DONE + FAIL; eleven mutations, zero survivors"
+    },
+    {
+      "disposition": "both closed with discriminating tests in round 3; the lower headline adopted",
+      "headline": "Matched every claimed number exactly. Found two guards whose deletion left the whole 6111-test tree green — the §9.2 input scope and the HOST_IDENTITY signed-manifest binding, the latter's named test passing for a different reason because its fixture used uid=1 which the identity contract rejects first. Scored the acceptance map one item lower than the wave scored itself.",
+      "role": "E4-verifier",
+      "round": "exact-generation, load-bearing leg",
+      "verdict": "35/4/0; 30 mutations, 3 survivors"
+    },
+    {
+      "disposition": "accepted; the amendment was corrected by PM and placed on the third attempt",
+      "headline": "Resolved the E2/E3 contradiction about the S1.3 exclusion list empirically rather than by picking a side: both were partly right, E3's consequence reachable only as a coherent pair that a one-field sweep cannot produce, E3's premise wrong at this head. Refused twice to place a PM amendment carrying a false claim, and refused to silently correct it.",
+      "role": "E1",
+      "round": "three remediation rounds",
+      "verdict": "delivered"
+    },
+    {
+      "disposition": "declaration deferred to after the exact-head merge, per CC's specified shape",
+      "headline": "Six owner=PM obligations ruled. Two of my own rulings were overturned by review — CC on whether §9.2 blocks §11.2, OPS on whether the ruler divergence could be deferred. Wrote a ratification document with a false fact in it twice and was refused both times.",
+      "role": "PM",
+      "round": "adjudication",
+      "verdict": "rulings recorded; SOURCE_READY not declared here"
+    }
+  ],
+  "schema_version": "s2_4_w5_derivation_record_v1_informal",
+  "source_head": "fcc44eca76e61359cd256f36982df6a15f6ce59f",
+  "test_evidence": {
+    "acceptance_matrix": {
+      "disagreements": [
+        "#28a and #24 — each had a load-bearing guard whose removal left the entire tree green; discriminating tests were added in round 3 but the items were deliberately NOT self-upgraded"
+      ],
+      "headline": "35 proven / 4 partially proven / 0 unproven",
+      "source": "E4-verifier's independently rebuilt map, adopted over the wave's own 36/3/0"
+    },
+    "authority_posture": {
+      "adapters_all_authority_locked_production_capable": true,
+      "applied_inactive_reachability": "gated on real SSHSIG verification of s2_4_install_apply_attestation_v1; no source-side input reaches it. What keeps production out of reach is key custody, not structural unreachability - this changed in W4 and is stated in the Registry and the W4 ABI rather than left implicit.",
+      "driver_none_is_typed_external_verification_pending_with_zero_mutation": true,
+      "nine_authorities_false": true,
+      "production_apply_performed": false,
+      "running_attested": false
+    },
+    "baselines": {
+      "dependency_refresh_gate": "b78185b00",
+      "emitter_and_amendment": "fcc44eca76e61359cd256f36982df6a15f6ce59f",
+      "merge_base": "dda3a3f73",
+      "round2_remediation": "b5d546e3a",
+      "round3_remediation": "a757c006f",
+      "w5_sweep": "3412281ac",
+      "whole_tree_at_emit": "6148/46",
+      "whole_tree_at_merge_base": "3418+2547 = 5965/46"
+    },
+    "capture_note": "Locally reproducible repository/test facts only. NOT ORCHESTRATOR_BOUND and NOT platform-attested: governed capture-command cannot host pytest on this Mac (HOME isolation), so these are direct Bash runs. A green W0-W5 chain evidences SOURCE STRUCTURE AT A HEAD ONLY — the wave-exit evidence digests are shape-only and the chain derives PASS on sha256:111...1, so it never evidences that these tests ran. These numbers are the evidence that they ran; the chain is not.",
+    "commands": [
+      {
+        "command": "python3 -m pytest tests/structure -q",
+        "result": "3601 passed, 6 skipped",
+        "run_by": "E1 (builder) and E4-verifier (independent, matched exactly at the prior head)"
+      },
+      {
+        "command": "python3 -m pytest program_code/ml_training/tests -q",
+        "result": "2547 passed, 40 skipped",
+        "run_by": "E1 and E4-verifier"
+      },
+      {
+        "command": "python3 -m pytest tests/structure program_code/ml_training/tests -q",
+        "result": "6148 passed, 46 skipped (identical on the dirty worktree and on a committed clone)",
+        "run_by": "E1; PM independently measured 6128/46 at the preceding head a757c006f"
+      },
+      {
+        "command": "pytest tests/structure/test_agent_governance_s2_4_install_w5{,_emit}.py -q",
+        "result": "124 passed in 149.11s",
+        "run_by": "PM on the committed head"
+      },
+      {
+        "command": "agent_governance_s2_4_install.py engine-scanner-split",
+        "result": "PASS, reasons=[], zero exclusions"
+      },
+      {
+        "command": "agent_governance_s2_4_install.py application-closure",
+        "result": "PASS, reasons=[], declared_path_count=150, runtime_import_closure_size=50"
+      },
+      {
+        "command": "agent_governance.py validate",
+        "result": "PASS, roles=20"
+      }
+    ],
+    "disclosed_limits": [
+      "Six tests skip on macOS: they need Linux + systemd-run + AIML_TARGET_HOST_PROBE=1. The W3a probe's real-host behaviour is unproven here, labelled not hidden.",
+      "No runtime, host, production-PostgreSQL or effect evidence exists anywhere in S2.4 and none is supposed to.",
+      "Test attestation under governed capture requires Linux; this capture is LOCAL_REPRODUCIBLE only.",
+      "The wave-exit evidence digests are unauthenticated by construction (obligation EMITTED_EVIDENCE_DIGESTS_ARE_UNAUTHENTICATED); a packet-local receipt cannot authenticate its own execution."
+    ],
+    "evidence_class": "LOCAL_REPRODUCIBLE",
+    "frozen_digests_byte_identical": {
+      "authorization_profiles_9_1": "sha256:79b27b7040e8a8d3af84b6a5f0c7c20e45888caaedac146428145ffea54be2dc",
+      "component_matrix_v1": "sha256:22d78882a2dace9ceb640b74b2a5dca2f2a8cc05861720f5ab25c5c9ac86c445",
+      "learning_runtime_v1": "sha256:6cf76b60a763035d26d0d4e9e0e6aa0aa8877d99966367c778420e5f63a79595",
+      "learning_runtime_v2": "sha256:58bb9cc3a827872284196f57811227d367e4ff4aed5f3b22a031df1b39904c62",
+      "s0_3_classifier": "sha256:1cf8c021b066ceeb364e968add074d263cb28d63db421fdc40620e9904d0ddbc",
+      "w0_negative_manifest": "sha256:1bd86de7b636bf57ead1a1ecfd00c9b75379ae49d1458a41bd7c22987d6f92f6"
+    },
+    "host_platform": "darwin (development machine); Linux trade-core is the runtime machine and was not contacted",
+    "schema_version": "s2_4_w5_local_test_capture_v1"
+  },
+  "w5_wave_exit_derivation": {
+    "reasons": [],
+    "status": "PASS"
+  },
+  "w5_wave_exit_self_digest": "sha256:d67e87c7ae5abc74dc76426af2d261763a1784d0a280109a1dd8423ec09c33d1"
+}
