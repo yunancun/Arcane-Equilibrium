@@ -4,8 +4,9 @@
 的 W5 分支委派本葉。W5 是**源碼收口波**——它不新增任何 production gate,只把「§10.5 的
 每一條驗收項到底被哪一支測試證明」這件事折成**活**投影,讓覆蓋退化必然弄破 wave-exit:
 
-- ``_W5_OWNED_PATHS``:W5 的投影葉、facade 的 W5 分支、runtime-closure 宣告面,以及
-  W5 新寫的兩支測試與被 W5 推進邊界的 W3 wave 測試;
+- ``_W5_OWNED_PATHS``:W5 的投影葉、facade 的 W5 分支、runtime-closure 宣告面、W5 新寫的
+  三支測試、被 W5 推進邊界的 W3 wave 測試,以及 §10.3 要求的 W5 發射面(install 的
+  ``w5-emit`` 與 ``agent_governance_s2_4_w5_emit``);
 - ``w5_exported_abi_projection``:折入六組**活**再導出。每一組都對應一條 W5 自審發現
   「有名字但沒有證明」的 §10.5 驗收項,任一 source 面被弱化,投影即變值:
 
@@ -65,8 +66,13 @@ _SCHEMA_DIR_REL = "program_code/ml_training/schemas/aiml_gate_receipts"
 # §10.1 + §10.1.1(2026-07-26 PM path-scope amendment):W5 的 owned-path 投影。
 # W5 只擁有「收口」面:投影葉、facade 的 W5 分支、runtime-closure 宣告(facade top-level
 # import 使本葉進入 engine-scanner runtime import 閉包)、W5 新寫的兩支測試,以及把
-# 「未實作 wave」邊界由 W5 推到 W6 的那支既有 W3 wave 測試。
+# 「未實作 wave」邊界由 W5 推到 W6 的那支既有 W3 wave 測試,以及 §10.3 要求的 W5 發射面
+# (install CLI 的 w5-emit 與其發射葉——W0-W4 每一波都有,W5 在此之前是唯一缺的)。
 _W5_OWNED_PATHS = tuple(sorted((
+    # §10.3「Every source wave emits s2_4_wave_exit_receipt_v1」的 W5 發射面。install 是
+    # §10.1 逐行列名的檔;發射葉鏡 _w3_emit/_w4_emit,由 §10.1.1 standing rule 入 scope。
+    "helper_scripts/maintenance_scripts/agent_governance_s2_4_install.py",
+    "helper_scripts/maintenance_scripts/agent_governance_s2_4_w5_emit.py",
     "program_code/ml_training/aiml_gate_receipt_s2_4_contracts.py",
     "program_code/ml_training/aiml_gate_receipt_schema_core.py",
     "program_code/ml_training/aiml_gate_receipt_validator.py",
@@ -80,6 +86,9 @@ _W5_OWNED_PATHS = tuple(sorted((
     "tests/structure/test_agent_governance_s2_4_acceptance_matrix.py",
     "tests/structure/test_agent_governance_s2_4_install_w3.py",
     "tests/structure/test_agent_governance_s2_4_install_w5.py",
+    # 2000 行治理拆分:發射器測試使 W5 主測試檔越過 2000 行,故拆為 sibling 測試檔
+    # (同 W2/W3 的 *_install_{engine_scanner,application_bundle,render}.py 作法)。
+    "tests/structure/test_agent_governance_s2_4_install_w5_emit.py",
 )))
 
 # §2:S2.4 明文**不**安裝的四個未來元件身分(§10.5 #16)。
@@ -1624,9 +1633,10 @@ def build_w5_wave_exit_receipt(
 ) -> dict[str, Any]:
     """綁定當前世代 W0/W1/W2/W3/W4 鏈與真實 test/capture/review 證據 digest 的 W5 wave-exit。
 
-    **建構 ≠ 發射**:本函式只回一個記憶體物件、不寫任何檔案。W5 不擁有發射器;持久化屬
-    PM 的收口投影(``w5-emit`` 由 PM 依既有 ``_wN_emit`` 葉的形狀另行落地)。receipt 恆
-    evidence-only:絕不自帶 status,PASS 恆由中央 validator 導出。
+    **建構 ≠ 發射**:本函式只回一個記憶體物件、不寫任何檔案。持久化面住在發射葉
+    ``agent_governance_s2_4_w5_emit``(install CLI ``w5-emit``,鏡 ``_w3_emit``/``_w4_emit``),
+    它呼叫本函式而不另建副本;實際發射正式 ``receipts/S2.4-WP4-W5/`` 是 PM 的收口動作。
+    receipt 恆 evidence-only:絕不自帶 status,PASS 恆由中央 validator 導出。
     """
 
     facade = resolve_facade()

@@ -1641,14 +1641,106 @@ def test_the_w5_leaves_do_not_widen_the_top_level_namespace_at_import_time() -> 
 
 
 def test_w5_builds_a_receipt_without_writing_anything(tmp_path, chain) -> None:
-    """W5 不擁有發射器:``build_w5_wave_exit_receipt`` 只回記憶體物件、零檔案副作用。"""
+    """建構 ≠ 發射:``build_w5_wave_exit_receipt`` 只回記憶體物件、零檔案副作用。
+
+    (本檔早先版本把「W5 不擁有發射器」也寫進這支測試。那是當時的事實,不是設計:§10.3 首句
+    要求**每個** source wave 發射 ``s2_4_wave_exit_receipt_v1``,而 W0-W4 都有持久化 receipt。
+    發射器落地後那兩條斷言被移除,builder 純度這條仍然承重——發射面必須留在發射葉裡。)
+    """
 
     admission, _w0, _w1, _w2, _w3, w4, _w5 = chain
     before = sorted(p.name for p in tmp_path.iterdir())
     receipt = validator.build_w5_wave_exit_receipt(admission, w4, **deepcopy(_EVID))
     assert receipt["wave"] == "W5"
     assert sorted(p.name for p in tmp_path.iterdir()) == before
-    assert not hasattr(install, "emit_w5_receipts")
-    assert not (
-        ROOT / "docs/execution_plan/ai_ml_landing/receipts/S2.4-WP4-W5"
-    ).exists()
+    # builder 自身仍不得攜帶任何持久化面。
+    import aiml_gate_receipt_wave_w5 as wave_w5
+
+    assert not hasattr(wave_w5, "emit_w5_receipts")
+
+
+# ── §10.1.2 (d):(b) 具名清單 vs 活 owned-path 投影 ────────────────────────────
+_DESIGN_DOC = ROOT / "docs/execution_plan/ai_ml_landing/design/S2.4-install-source-seams.md"
+
+
+def _design_fenced_paths(heading_prefix: str) -> list[str]:
+    """從設計文件某個標題底下的第一個 ```text 圍欄逐行解析路徑清單。
+
+    兩份清單都**解析**而不是抄寫:硬編副本正是本修正案要擋的漂移,一份被抄進測試的清單
+    只會在文件與測試一起改壞時保持綠燈。
+    """
+
+    lines = _DESIGN_DOC.read_text(encoding="utf-8").splitlines()
+    start = next(
+        (n for n, line in enumerate(lines) if line.startswith(heading_prefix)), None
+    )
+    assert start is not None, f"design heading not found: {heading_prefix!r}"
+    open_fence = next(
+        (n for n in range(start, len(lines)) if lines[n].strip() == "```text"), None
+    )
+    assert open_fence is not None, f"no ```text fence under {heading_prefix!r}"
+    close_fence = next(
+        (n for n in range(open_fence + 1, len(lines)) if lines[n].strip() == "```"), None
+    )
+    assert close_fence is not None, f"unterminated ```text fence under {heading_prefix!r}"
+    return [line.strip() for line in lines[open_fence + 1:close_fence] if line.strip()]
+
+
+def _measured_out_of_list_union() -> set[str]:
+    """W3∪W4∪W5 活投影,扣掉 §10.1 逐字清單 = 修正案 (b) 段該具名的那一組。"""
+
+    union = (
+        set(validator._W3_OWNED_PATHS)
+        | set(validator._W4_OWNED_PATHS)
+        | set(validator._W5_OWNED_PATHS)
+    )
+    return union - set(_design_fenced_paths("### 10.1 Exact owned-path allowlist"))
+
+
+def test_10_1_2_b_block_is_a_hard_superset_of_the_measured_owned_path_union() -> None:
+    """斷言 1(承重方向):量到的 out-of-list 路徑**每一條**都必須在 (b) 段被具名。
+
+    這是 §10.1.2 (d) 的執行面:worker 自己寫的 ``_WX_OWNED_PATHS`` 投影不能自證 scope,
+    新增一條沒有對應 (b) 條目的 out-of-list 路徑即 drift,而且必須在**測試**上變紅,
+    不是留給 review 眼力。
+    """
+
+    named = _design_fenced_paths("#### 10.1.2 ")
+    unnamed = sorted(_measured_out_of_list_union() - set(named))
+    assert not unnamed, (
+        "§10.1.2 (d):下列 owned path 在 W3/W4/W5 投影裡但沒有在 §10.1.2 (b) 段被具名——"
+        f"依 (d) 條這是 drift,需 PM 具名而非 worker 自行擴表:{unnamed}"
+    )
+
+
+def test_10_1_2_b_block_names_nothing_that_exists_but_is_unowned() -> None:
+    """斷言 2(窄反向):(b) 段裡**檔案真的存在**的條目,必須落在活投影聯集內。
+
+    為什麼是窄反向而不是全等——刪檔/改名是 §10.1.1 條件 1 允許的重構,全等之下唯一回綠的
+    路徑會變成「編設計文件」,而 §10.4 恰好把 owned-path scope 排除在 worker 可選之外;
+    全等會讓這條規則在它最可能遇到的情況下自我失效。
+
+    窄反向仍保住抗俘獲性:一個懸空的名字不能被悄悄拿去裝未經審查的內容,因為只要那個檔案
+    被重建,斷言 2 立刻重新武裝。永久刪除留下的是一個惰性名字——(a) 條已經中和了它(「Presence
+    in one is not authorising either」),而投影那一側早就有既有的
+    ``dead = [rel for rel in _WX_OWNED_PATHS if not (ROOT / rel).is_file()]`` 檢查在掃。
+    """
+
+    named = _design_fenced_paths("#### 10.1.2 ")
+    union = _measured_out_of_list_union()
+    live_but_unowned = sorted(
+        rel for rel in named if (ROOT / rel).is_file() and rel not in union
+    )
+    assert not live_but_unowned, (
+        "§10.1.2 (b) 具名了存在於磁碟但不在任何 W3/W4/W5 owned-path 投影內的路徑:"
+        f"{live_but_unowned}"
+    )
+
+
+def test_10_1_2_b_block_is_sorted_and_duplicate_free() -> None:
+    """斷言 3:(b) 段本身必須是排序且無重複的清單(可審、可 diff、不能靠重複灌水)。"""
+
+    named = _design_fenced_paths("#### 10.1.2 ")
+    duplicates = sorted({rel for rel in named if named.count(rel) > 1})
+    assert not duplicates, f"§10.1.2 (b) 具名清單有重複條目:{duplicates}"
+    assert named == sorted(named), "§10.1.2 (b) 具名清單必須逐行排序"

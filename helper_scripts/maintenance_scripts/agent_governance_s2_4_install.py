@@ -1220,6 +1220,22 @@ from agent_governance_s2_4_w4_emit import (  # noqa: E402,F401
     emit_w4_receipts,
     load_persisted_w3_receipts as _load_persisted_w3_receipts,
 )
+# W5 wave-exit 發射葉(同一姿態;CLI 於 _main 掛 w5-emit)。W5 的 builder 屬中央 validator
+# 的 W5 投影葉,故此處只再導出發射面與檔名常量,不再導出 builder。
+from agent_governance_s2_4_w5_emit import (  # noqa: E402,F401
+    W4_RECEIPT_DIR,
+    W5_DERIVATION_RECORD_FILENAME,
+    W5_RECEIPT_DIRNAME,
+    W5_REGENERATED_W0_ADMISSION_FILENAME,
+    W5_REGENERATED_W0_WAVE_EXIT_FILENAME,
+    W5_REGENERATED_W1_WAVE_EXIT_FILENAME,
+    W5_REGENERATED_W2_WAVE_EXIT_FILENAME,
+    W5_REGENERATED_W3_WAVE_EXIT_FILENAME,
+    W5_REGENERATED_W4_WAVE_EXIT_FILENAME,
+    W5_WAVE_EXIT_FILENAME,
+    emit_w5_receipts,
+    load_persisted_w4_receipts as _load_persisted_w4_receipts,
+)
 
 _APP_CLOSURE_REL = _app_identity.RUNTIME_CLOSURE_REL
 # effect-capable / broker-order / credential 的 deny 謂詞(§8.1 builder rejects)。
@@ -1902,25 +1918,17 @@ def emit_w2_receipts(
 def _main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="action", required=True)
-    emit = sub.add_parser("w0-emit", help="發射並持久化正式 W0 admission/wave-exit receipts")
-    w1_emit = sub.add_parser(
-        "w1-emit",
-        help="發射並持久化正式 W1 wave-exit receipt(記憶體重發當前世代 W0 鏈並綁定)",
-    )
-    w2_emit = sub.add_parser(
-        "w2-emit",
-        help="發射並持久化正式 W2 wave-exit receipt(記憶體重發當前世代 W0+W1 鏈並綁定)",
-    )
-    w3_emit = sub.add_parser(
-        "w3-emit",
-        help="發射並持久化正式 W3 wave-exit receipt(記憶體重發當前世代 W0+W1+W2 鏈並綁定)",
-    )
-    w4_emit = sub.add_parser(
-        "w4-emit",
-        help="發射並持久化正式 W4 wave-exit receipt(記憶體重發當前世代 W0+W1+W2+W3 鏈並綁定)",
-    )
-    for emitter in (emit, w1_emit, w2_emit, w3_emit, w4_emit):
-        # P2-I:--out 受限於 repo receipts 目錄;覆蓋既有 receipt 必須顯式宣告。
+    # 六個 wave 發射器共用同一組參數面;verb→help 是資料,新增一個 wave 不再複製四行樣板。
+    # P2-I:--out 受限於 repo receipts 目錄;覆蓋既有 receipt 必須顯式宣告。
+    for _verb, _help in (
+        ("w0-emit", "發射並持久化正式 W0 admission/wave-exit receipts"),
+        ("w1-emit", "發射並持久化正式 W1 wave-exit receipt(記憶體重發當前世代 W0 鏈並綁定)"),
+        ("w2-emit", "發射並持久化正式 W2 wave-exit receipt(記憶體重發當前世代 W0+W1 鏈並綁定)"),
+        ("w3-emit", "發射並持久化正式 W3 wave-exit receipt(記憶體重發當前世代 W0+W1+W2 鏈並綁定)"),
+        ("w4-emit", "發射並持久化正式 W4 wave-exit receipt(記憶體重發當前世代 W0+W1+W2+W3 鏈並綁定)"),
+        ("w5-emit", "發射並持久化正式 W5 wave-exit receipt(記憶體重發當前世代 W0…W4 鏈並綁定)"),
+    ):
+        emitter = sub.add_parser(_verb, help=_help)
         emitter.add_argument("--out", required=True, type=Path)
         emitter.add_argument("--test-evidence", required=True, type=Path)
         emitter.add_argument("--review-provenance", required=True, type=Path)
@@ -1958,6 +1966,7 @@ def _main(argv: list[str] | None = None) -> int:
         "w2-emit": (emit_w2_receipts, "W2_RECEIPTS_EMITTED"),
         "w3-emit": (emit_w3_receipts, "W3_RECEIPTS_EMITTED"),
         "w4-emit": (emit_w4_receipts, "W4_RECEIPTS_EMITTED"),
+        "w5-emit": (emit_w5_receipts, "W5_RECEIPTS_EMITTED"),
     }
     if args.action in emitters:
         emitter, success_status = emitters[args.action]
