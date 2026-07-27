@@ -1782,14 +1782,31 @@ def test_w5_builds_a_receipt_without_writing_anything(tmp_path, chain) -> None:
 _DESIGN_DOC = ROOT / "docs/execution_plan/ai_ml_landing/design/S2.4-install-source-seams.md"
 
 
-def _design_fenced_paths(heading_prefix: str) -> list[str]:
-    """從設計文件某個標題底下的第一個 ```text 圍欄逐行解析路徑清單。
+def _design_section_fence_opens(lines: list[str], start: int) -> list[int]:
+    """某標題所轄區段(止於下一個圍欄外的標題)內,所有 ```text 圍欄的開頭行號。"""
+
+    opens: list[int] = []
+    in_fence = False
+    for n in range(start + 1, len(lines)):
+        stripped = lines[n].strip()
+        if stripped.startswith("```"):
+            in_fence = not in_fence
+            if in_fence and stripped == "```text":
+                opens.append(n)
+        elif not in_fence and lines[n].startswith("#"):
+            break
+    return opens
+
+
+def _design_fenced_paths(heading_prefix: str, doc_text: str | None = None) -> list[str]:
+    """從設計文件某個標題所轄區段的**唯一** ```text 圍欄逐行解析路徑清單。
 
     兩份清單都**解析**而不是抄寫:硬編副本正是本修正案要擋的漂移,一份被抄進測試的清單
     只會在文件與測試一起改壞時保持綠燈。
     """
 
-    lines = _DESIGN_DOC.read_text(encoding="utf-8").splitlines()
+    text = _DESIGN_DOC.read_text(encoding="utf-8") if doc_text is None else doc_text
+    lines = text.splitlines()
     # 第四輪 P2:舊碼取**第一個**符合的標題,於是文件前段再放一個 ``#### 10.1.2 `` 誘餌節,
     # 讀到的就是誘餌而不是權威節。標題必須唯一,不唯一即拒絕解析(fail-closed)。
     starts = [n for n, line in enumerate(lines) if line.startswith(heading_prefix)]
@@ -1799,10 +1816,15 @@ def _design_fenced_paths(heading_prefix: str) -> list[str]:
         "authoritative one"
     )
     start = starts[0]
-    open_fence = next(
-        (n for n in range(start, len(lines)) if lines[n].strip() == "```text"), None
+    # 第五輪 P2:標題唯一之後誘餌就改放**第二個圍欄**——舊碼取區段內第一個 ```text 圍欄,
+    # 權威圍欄被掏空成一條路徑照樣全綠。圍欄在區段內同樣必須唯一,零個或多個都拒絕解析。
+    opens = _design_section_fence_opens(lines, start)
+    assert len(opens) == 1, (
+        f"expected exactly one ```text fence under {heading_prefix!r}, found "
+        f"{len(opens)} at lines {[n + 1 for n in opens]}; a decoy fence would shadow "
+        "the authoritative block"
     )
-    assert open_fence is not None, f"no ```text fence under {heading_prefix!r}"
+    open_fence = opens[0]
     close_fence = next(
         (n for n in range(open_fence + 1, len(lines)) if lines[n].strip() == "```"), None
     )
@@ -1868,6 +1890,41 @@ def test_10_1_2_b_block_is_sorted_and_duplicate_free() -> None:
     duplicates = sorted({rel for rel in named if named.count(rel) > 1})
     assert not duplicates, f"§10.1.2 (b) 具名清單有重複條目:{duplicates}"
     assert named == sorted(named), "§10.1.2 (b) 具名清單必須逐行排序"
+
+
+def test_10_1_2_parser_refuses_a_decoy_fence_under_the_authoritative_heading() -> None:
+    """第五輪 P2-1 的逐字重演:在唯一且權威的標題底下插第二個 ```text 圍欄(真清單的
+    複本),再把權威圍欄掏空成一條路徑。舊碼取區段內**第一個**圍欄,於是上面三支 (d)
+    測試連同整條 lane 實測 150 passed 全綠;刪掉圍欄唯一性斷言本測試即由紅轉綠。
+    """
+
+    lines = _DESIGN_DOC.read_text(encoding="utf-8").splitlines()
+    head = next(n for n, s in enumerate(lines) if s.startswith("#### 10.1.2 "))
+    opened = _design_section_fence_opens(lines, head)[0]
+    closed = next(n for n in range(opened + 1, len(lines)) if lines[n].strip() == "```")
+    real = lines[opened + 1:closed]
+    tampered = (
+        lines[:head + 1] + ["", "```text"] + real + ["```", ""]
+        + lines[head + 1:opened + 1] + real[:1] + lines[closed:]
+    )
+    # 對照組:同一支解析器讀未竄改的文字仍須給出權威的那一份清單(否則本測試會空轉綠)。
+    assert _design_fenced_paths("#### 10.1.2 ", "\n".join(lines)) == [
+        s.strip() for s in real if s.strip()
+    ]
+    with pytest.raises(AssertionError, match="exactly one ```text fence"):
+        _design_fenced_paths("#### 10.1.2 ", "\n".join(tampered))
+
+
+def test_10_1_2_parser_refuses_a_decoy_heading() -> None:
+    """第四輪加的標題唯一性斷言自己沒有任何測試(第五輪 P2-2):換成裸 ``starts[0]``,
+    整條 W5 lane 實測 114 passed 逐位元組不變。誘餌標題帶一個只剩一條路徑的圍欄即重現。
+    """
+
+    lines = _DESIGN_DOC.read_text(encoding="utf-8").splitlines()
+    head = next(n for n, s in enumerate(lines) if s.startswith("#### 10.1.2 "))
+    decoy = [lines[head], "", "```text", _design_fenced_paths("#### 10.1.2 ")[0], "```", ""]
+    with pytest.raises(AssertionError, match="heading is not unique"):
+        _design_fenced_paths("#### 10.1.2 ", "\n".join(lines[:head] + decoy + lines[head:]))
 
 
 # §10.1.2 (d) 只約束 W3/W4/W5(「From this amendment, a wave that creates a path outside
