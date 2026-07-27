@@ -406,6 +406,38 @@ def test_host_identity_manifest_must_bind_the_signed_digest(signed) -> None:
     assert driver.calls == []
 
 
+def test_host_identity_manifest_digest_is_the_only_thing_that_tells_a_from_b(signed) -> None:
+    """W5 對抗審計第三輪 P1-F:上面那支同名測試**不是**在證 digest 綁定。
+
+    它遞交的 manifest 是 ``uid=1, gid=1``,而 §8 身分契約(保留 uid 範圍)在 digest 比對
+    之後就會拒掉它——把 digest 比對整段換成 ``if False:``,全樹 6111/46 一個都不紅。
+    這裡遞交一份**同樣通過 §8 契約**、只是 uid/gid 不是被簽的那一組的 manifest:能區分 A 與 B
+    的東西只剩「manifest 的正規 digest 必須等於被簽 intent 裡的那一個」。移除該綁定後,
+    applier 會帶著 caller 自選、未被簽的 uid/gid 走到 ``create_system_account``。
+    """
+
+    signed_manifest = apply_mod.build_uid_gid_directory_manifest(uid=_UID, gid=_GID)
+    other_manifest = apply_mod.build_uid_gid_directory_manifest(uid=_UID + 7, gid=_GID + 7)
+    assert validator.canonical_digest(signed_manifest) != validator.canonical_digest(
+        other_manifest
+    )
+    # B 自己是一份合法的 §8 manifest(否則本測試證的又是契約而不是綁定)。
+    assert apply_mod._host_identity_contract_reasons(
+        other_manifest["identity"], other_manifest["static_directories"]
+    ) == []
+    intent = _intent(
+        "HOST_IDENTITY_INSTALL",
+        {"uid_gid_directory_manifest_digest": validator.canonical_digest(signed_manifest)},
+    )
+    driver = _FakeHostIdentityDriver()
+    verdict = apply_mod.apply_s2_4_host_identity(
+        intent, driver=driver, uid_gid_directory_manifest=other_manifest, **_common(signed)
+    )
+    assert verdict["status"] == "PRECHECK_FAILED", verdict
+    assert driver.calls == []
+    assert verdict["mutation_performed"] is False
+
+
 def test_host_identity_manifest_cannot_smuggle_a_worker_chosen_directory(signed) -> None:
     manifest = apply_mod.build_uid_gid_directory_manifest(uid=_UID, gid=_GID)
     manifest["static_directories"].append(

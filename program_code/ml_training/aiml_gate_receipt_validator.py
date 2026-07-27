@@ -52,8 +52,9 @@ from aiml_gate_receipt_schema_core import (  # noqa: E402,F401
     PROGRAM_GOVERNANCE_PATHS,
     PROGRAM_REVIEW_NODES,
     PROGRAM_SCHEMA_PATHS,
-    S0_DEPENDENCY_DIGESTS,
-    S0_PREDECESSOR_CONTRACTS,
+    S0_DEPENDENCY_DIGESTS, S0_PREDECESSOR_CONTRACTS, S2_3_SEALED_BUILD_RECEIPT_REL,
+    S2_4_COMMITTED_SOURCE_IDENTITY_PATHS,
+    S2_4_W5_REMAINING_OWNED_OBLIGATIONS,
     SCHEMA_DIR,
     SCHEMA_FILES,
     SourceManifestVerifier,
@@ -66,13 +67,21 @@ from aiml_gate_receipt_schema_core import (  # noqa: E402,F401
     _now_text,
     _parse_timestamp,
     artifact_self_digest,
-    canonical_digest,
+    _git_head,
+    _git_is_ancestor,
+    canonical_digest, committed_source_identity_digests,
+    dependency_semantic_subject_values,
     evidence_environment_identity_digest,
+    git_blob_sha1,
+    git_failure_detail,
+    git_is_shallow_repository,
     landing_scope_identity_digest,
     owned_path_blob_projection,
     owned_path_blob_projection_digest,
+    owned_scope_delta_reasons,
+    owned_scope_reason_prefix,
     owned_scope_worktree_delta,
-    resolve_commit_head,
+    resolve_commit_head, s1_3_identity_projection,
     session_attempt_identity_digest,
 )
 from aiml_gate_receipt_classifiers import (  # noqa: E402,F401
@@ -106,19 +115,35 @@ from aiml_gate_receipt_classifiers import (  # noqa: E402,F401
     classify_required_effects,
 )
 from aiml_gate_receipt_s2_4_contracts import (  # noqa: E402,F401
+    DEPENDENCY_EVIDENCE_REOBSERVATION_REQUIRED,
+    DEPENDENCY_REFRESH_BY_REFERENCE_FORBIDDEN,
+    DEPENDENCY_REFRESH_STATUS_ADMITTED,
+    DEPENDENCY_REFRESH_STATUS_REJECTED,
+    MAX_DEPENDENCY_REFRESH_TTL_SECONDS,
     PERMIT_PLAN_BINDING_STATUS_REJECTED,
     PERMIT_PLAN_BINDING_STATUS_VERIFIED,
+    S2_2A_OBSERVATION_TTL_SECONDS,
     S2_4_APPLY_ROW_CLASS_ORDER,
     S2_4_AUTHORIZATION_ID_DOMAIN,
     S2_4_AUTHORIZATION_ID_SELF_FIELD,
     S2_4_AUTHORIZATION_PROFILES,
+    S2_4_DEPENDENCY_REFRESH_CLASSES,
+    S2_4_DEPENDENCY_REFRESH_METHOD,
+    S2_4_DEPENDENCY_REFRESH_SCHEMA_VERSION,
+    S2_4_NEVER_REFRESHABLE_EVIDENCE,
     S2_4_OPERATOR_AUTHORIZATION_SCHEMA_VERSION,
     S2_4_OPERATOR_TRUST_ROOT_FINGERPRINT,
     S2_4_OPERATOR_TRUST_ROOT_PUBLIC_KEY,
+    S2_4_W1_SCHEMA_FILENAMES as _W1_SCHEMA_FILENAMES,
+    SOURCE_DEPENDENCY_STATUS_ADMITTED_BY_REFRESH,
+    SOURCE_DEPENDENCY_STATUS_EXPIRED_NO_REFRESH,
+    SOURCE_DEPENDENCY_STATUS_FRESH,
+    SOURCE_DEPENDENCY_STATUS_REJECTED,
     _S2_4_APPLY_INTENT_CLASS_TOKEN_FIELDS,
     _S2_4_APPLY_INTENT_COMMON_TOKEN_FIELDS,
     _S2_4_PROFILE_BY_IDENTITY,
     _SSH_SIGNATURE_ARMOR_MARKERS,
+    _dependency_refresh_structural_errors,
     _install_lineage_plan_binding_errors,
     _s2_4_authorization_payload_binding_errors,
     _s2_4_install_plan_apply_rows_errors,
@@ -128,12 +153,21 @@ from aiml_gate_receipt_s2_4_contracts import (  # noqa: E402,F401
     _s2_4_route_core_rederivation_errors,
     _sshsig_armor_body_is_strict_base64,
     authorization_payload_binding_fields,
+    build_s2_4_dependency_refresh_attestation,
     build_s2_4_operator_authorization,
+    dependency_class_for_schema_version,
+    dependency_evidence_schema_versions,
+    dependency_producer_input_paths,
+    dependency_original_observation_window,
+    dependency_producer_identity,
     derive_authorization_id,
     derive_authorization_replay_binding,
     derive_component_intent_binding,
+    derive_dependency_refresh_status,
     derive_install_lineage_status,
     derive_permit_plan_binding_status,
+    derive_source_dependency_admission_status,
+    reproduce_dependency_semantic_digests,
     s2_4_authorization_identity_digest,
     s2_4_authorization_profiles_digest,
 )
@@ -147,37 +181,30 @@ from aiml_gate_receipt_adoption import (  # noqa: E402,F401
     terminal_receipt_sink_contract,
     validate_program_adoption_receipt,
 )
-# S2.4(WP4·W2)wave 投影葉(2000 行治理拆分):owned-path/exported-ABI/manifest 補充驗
-# 下沉至 aiml_gate_receipt_wave_w2,facade 逐名 re-export;W2 的 derive 分支委派該葉。
+# S2.4(WP4·W2/W3/W4/W5)四片 wave 投影葉(2000 行治理拆分):owned-path / exported-ABI /
+# manifest 補充驗下沉至各葉,facade 逐名 re-export,對應 wave 的 derive 分支委派該葉。
+# W2=runnable application,W3=typed host driver,W4=aggregate transaction,W5=source closure
+# (W5 綁「§10.5 每一條驗收項到底被什麼證明」的六組活裁決)。
+# 版式註記(W5):四塊 import 由逐行改為逐段,純格式、無語意變動——facade 於 W4 收口時恰為
+# 2000 行(治理門檻上限),W5 的新增名若逐行排列即越線,§10.1.1 要求先擠出空間再擴充。
 from aiml_gate_receipt_wave_w2 import (  # noqa: E402,F401
-    _W2_ABI_PROBE_FIELDS,
-    _W2_EXPORTED_ABI,
-    _W2_OWNED_PATHS,
-    w2_chain_binding_errors,
-    w2_exported_abi_projection,
-    w2_manifest_artifact_errors,
-    w2_owned_path_diff_digest,
+    _W2_ABI_PROBE_FIELDS, _W2_EXPORTED_ABI, _W2_OWNED_PATHS, w2_chain_binding_errors,
+    w2_exported_abi_projection, w2_manifest_artifact_errors, w2_owned_path_diff_digest,
     w2_structural_errors,
 )
-# S2.4(WP4·W3)wave 投影葉(同一機制,綁 W3a 的 capability-probe / PG-topology 面);
-# facade 逐名 re-export,W3 的 derive 分支委派該葉。
 from aiml_gate_receipt_wave_w3 import (  # noqa: E402,F401
-    _W3_EXPORTED_ABI,
-    _W3_OWNED_PATHS,
-    w3_chain_binding_errors,
-    w3_exported_abi_projection,
-    w3_owned_path_diff_digest,
-    w3_structural_errors,
+    _W3_EXPORTED_ABI, _W3_OWNED_PATHS, w3_chain_binding_errors,
+    w3_exported_abi_projection, w3_owned_path_diff_digest, w3_structural_errors,
 )
-# S2.4(WP4·W4)wave 投影葉(同一機制,綁 W4a 的 permit/replay/lock/WAL/預算/補償面);
-# facade 逐名 re-export,W4 的 derive 分支委派該葉。
 from aiml_gate_receipt_wave_w4 import (  # noqa: E402,F401
-    _W4_EXPORTED_ABI,
-    _W4_OWNED_PATHS,
-    w4_chain_binding_errors,
-    w4_exported_abi_projection,
-    w4_owned_path_diff_digest,
-    w4_structural_errors,
+    _W4_EXPORTED_ABI, _W4_OWNED_PATHS, w4_chain_binding_errors,
+    w4_exported_abi_projection, w4_owned_path_diff_digest, w4_structural_errors,
+)
+from aiml_gate_receipt_wave_w5 import (  # noqa: E402,F401
+    _W5_EXPORTED_ABI, _W5_OWNED_PATHS, _W5_OWNED_SCOPE_REASON,
+    build_w5_wave_exit_receipt,
+    w5_chain_binding_errors, w5_exported_abi_projection, w5_owned_path_diff_digest,
+    w5_structural_errors,
 )
 
 
@@ -283,63 +310,6 @@ def w0_negative_test_manifest_digest() -> str:
     return canonical_digest(list(_W0_NEGATIVE_TEST_MANIFEST))
 
 
-def git_blob_sha1(data: bytes) -> str:
-    """Reproduce ``git hash-object`` (blob) so trust-pin blob ids re-hash offline."""
-
-    hasher = hashlib.sha1()
-    hasher.update(b"blob " + str(len(data)).encode("ascii") + b"\x00")
-    hasher.update(data)
-    return hasher.hexdigest()
-
-
-def _git_is_ancestor(repo_root: Path, ancestor: str, descendant: str) -> bool:
-    """Local-checkout ancestry proof(fail-closed)。只證 repo 拓撲,不是 runtime 認證。"""
-
-    import subprocess
-
-    if re.fullmatch(r"[0-9a-f]{40}", ancestor) is None or re.fullmatch(
-        r"[0-9a-f]{7,40}", descendant
-    ) is None:
-        return False
-    try:
-        proc = subprocess.run(
-            [
-                "git", "-C", str(repo_root), "merge-base", "--is-ancestor",
-                ancestor, descendant,
-            ],
-            capture_output=True,
-            timeout=30,
-        )
-    except (OSError, ValueError, subprocess.SubprocessError):
-        return False
-    return proc.returncode == 0
-
-
-def _git_head(repo_root: Path) -> str | None:
-    """回傳 repo_root 目前 checkout 的 HEAD 40-hex commit(fail-closed:git 錯誤回 None)。
-
-    T2:admission 的 source_head 必須「等於」目前 checkout HEAD(而非只是兩固定 predecessor 的後代)。
-    所有證據皆由目前 checkout 再導出,故若 receipt 宣稱某世代卻從另一世代導出 ADMITTED,即為漂移——
-    綁定 HEAD 令 admission 與其真正再導出的樹一致。
-    """
-
-    import subprocess
-
-    try:
-        proc = subprocess.run(
-            ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-    except (OSError, ValueError, subprocess.SubprocessError):
-        return None
-    if proc.returncode != 0:
-        return None
-    head = proc.stdout.strip()
-    return head if re.fullmatch(r"[0-9a-f]{40}", head) else None
-
-
 def _consumer_authoritative_database(repo_root: Path = REPO_ROOT) -> str | None:
     """由消費端權威 DSN 常量(alr_event_consumer._LOCAL_DSN_REQUIRED['dbname'])再導出期望 database(T7)。
 
@@ -437,42 +407,6 @@ def w0_owned_path_diff_digest(
 # 「一起」再導出 PASS/ADMITTED——admission 鏈不因跨波而鬆脫(§10.5 #27)。
 # --------------------------------------------------------------------------- #
 _W1_SCHEMA_DIR_REL = "program_code/ml_training/schemas/aiml_gate_receipts"
-# §10.1 W1 schemas-dir additions:29 支 s2_4_* + v2 classifier + topology/network 三支。
-_W1_SCHEMA_FILENAMES = (
-    "aiml_component_effect_classification_v2.schema.json",
-    "network_sandbox_capability_attestation_v1.schema.json",
-    "pg_topology_attestation_v1.schema.json",
-    "pg_topology_runtime_guard_v1.schema.json",
-    "s2_4_authorization_replay_ledger_v1.schema.json",
-    "s2_4_capability_probe_core_v1.schema.json",
-    "s2_4_capability_probe_effect_receipt_v1.schema.json",
-    "s2_4_capability_probe_intent_v1.schema.json",
-    "s2_4_capability_probe_journal_v1.schema.json",
-    "s2_4_capability_probe_postcheck_v1.schema.json",
-    "s2_4_capability_probe_rollback_v1.schema.json",
-    "s2_4_component_effect_intent_v1.schema.json",
-    "s2_4_component_effect_postcheck_v1.schema.json",
-    "s2_4_component_effect_result_v1.schema.json",
-    "s2_4_component_effect_rollback_v1.schema.json",
-    "s2_4_install_effect_receipt_v1.schema.json",
-    "s2_4_install_journal_v1.schema.json",
-    "s2_4_install_plan_core_v1.schema.json",
-    "s2_4_install_plan_v1.schema.json",
-    "s2_4_install_postcheck_v1.schema.json",
-    "s2_4_install_rollback_v1.schema.json",
-    "s2_4_install_step_result_v1.schema.json",
-    "s2_4_operator_authorization_v1.schema.json",
-    "s2_4_pg_hba_delta_v1.schema.json",
-    "s2_4_prepare_core_v1.schema.json",
-    "s2_4_prepare_effect_receipt_v1.schema.json",
-    "s2_4_prepare_intent_v1.schema.json",
-    "s2_4_prepare_journal_v1.schema.json",
-    "s2_4_prepare_postcheck_v1.schema.json",
-    "s2_4_prepare_rollback_v1.schema.json",
-    "s2_4_prepared_install_bundle_v1.schema.json",
-    "s2_4_source_admission_receipt_v1.schema.json",
-    "s2_4_wave_exit_receipt_v1.schema.json",
-)
 # §10.1 W1 owned-path 投影:registry + routing/closure/component-effects 模組 + contracts 葉
 # (與其 facade/classifiers sibling)+ schemas dir additions + install 模組與其測試。
 _W1_OWNED_PATHS = tuple(sorted(
@@ -799,11 +733,24 @@ def derive_source_admission_status(
                 "admission source_head is not the current checkout HEAD "
                 "(evidence is re-derived from HEAD; a claimed-generation mismatch is drift)"
             )
+        # W5 對抗審計第三輪 P2:淺 clone(CI 的預設 fetch-depth:1)上這些 commit 根本不在
+        # graft 裡,``git merge-base --is-ancestor`` 於是回非零。舊訊息說「不是祖先」,而真相
+        # 是「這個物件不在這棵樹裡」——operator 會去查一個不存在的歷史問題。先問這棵 repo 是
+        # 不是淺的,是的話把補救指令逐字說出來。
+        is_shallow = git_is_shallow_repository(repo_root)
         for name, predecessor in _PREDECESSOR_HEADS.items():
             if not _git_is_ancestor(repo_root, predecessor, source_head):
-                reasons.append(
-                    f"admission predecessor {name} is not an ancestor of source_head"
-                )
+                if is_shallow:
+                    reasons.append(
+                        f"admission predecessor {name} ({predecessor}) cannot be checked: "
+                        "this is a SHALLOW repository and the object is not in the graft, so "
+                        "ancestry is undecidable rather than false — re-run with "
+                        "`fetch-depth: 0` (actions/checkout) or `git fetch --unshallow`"
+                    )
+                else:
+                    reasons.append(
+                        f"admission predecessor {name} is not an ancestor of source_head"
+                    )
     try:
         texts = _read_three_head_texts(repo_root)
     except OSError as error:
@@ -855,6 +802,30 @@ def _nonempty_digest_list_ok(value: Any) -> bool:
         isinstance(value, list)
         and len(value) > 0
         and all(isinstance(item, str) and _DIGEST_RE.fullmatch(item) for item in value)
+    )
+
+
+# W5 對抗審計第三輪 P1-D:owned-scope 的 fail-closed 消費原本只有 W5 有(measured:
+# w2/w3/w4 consumed=0, w5 consumed=1)。逐波的 owned-path 集合在此登記,裁決本體
+# (內容定址 + fail-closed 文案)住在 schema_core.owned_scope_delta_reasons。
+_WAVE_OWNED_PATHS: dict[str, tuple[str, ...]] = {
+    "W0": _W0_OWNED_PATHS,
+    "W1": _W1_OWNED_PATHS,
+    "W2": _W2_OWNED_PATHS,
+    "W3": _W3_OWNED_PATHS,
+    "W4": _W4_OWNED_PATHS,
+    "W5": _W5_OWNED_PATHS,
+}
+
+
+def _owned_scope_delta_reasons(
+    wave: str, receipt: dict[str, Any], repo_root: Path
+) -> list[str]:
+    paths = _WAVE_OWNED_PATHS.get(wave)
+    if paths is None:
+        return []
+    return owned_scope_delta_reasons(
+        wave, paths, repo_root, source_head=receipt.get("source_head")
     )
 
 
@@ -928,10 +899,15 @@ def _wave_exit_structural_errors(
         # 三本 WAL journal 的 durability/corrupt/reconcile、§9 TTL 不等式與獨立補償後 postcheck
         # 的活裁決委派 wave_w4 葉再導出。
         reasons.extend(w4_structural_errors(receipt, repo_root))
+    elif wave == "W5":
+        # W5(source closure):同一機制,綁 W5 面;§10.5 六組覆蓋缺口的活裁決委派 wave_w5 葉。
+        reasons.extend(w5_structural_errors(receipt, repo_root))
     else:
-        # W5+ 各 wave 於其自身 owned path 擴充 derivation;未實作的 wave 一律 fail-closed。
-        reasons.append("wave-exit derivation is only implemented for W0/W1/W2/W3/W4 so far")
+        # W6+ 各 wave 於其自身 owned path 擴充 derivation;未實作的 wave 一律 fail-closed。
+        reasons.append("wave-exit derivation is only implemented for W0/W1/W2/W3/W4/W5 so far")
         return reasons
+    # P1-D:每一波都必須消費自己的 owned-scope delta,而不是只有 W5。
+    reasons.extend(_owned_scope_delta_reasons(str(wave), receipt, repo_root))
     # T1(b):test/capture/review 三類證據必為「非空」的合法 digest list——empty/arbitrary 不得導出 PASS。
     # 誠實邊界:每一支 test/capture/review 的「PLATFORM-ATTESTED 綁定」屬下游 EFFECT/closure 關切(離線
     # 結構驗無法認證其真跑過);此處只擋「空/畸形證據仍導 PASS」的洞,不冒充已認證 runtime。
@@ -944,11 +920,12 @@ def _wave_exit_structural_errors(
     return reasons
 
 
-# W2/W3/W4 predecessor-鏈規格 =(前導 wave, 必需 chain 長度, wave-specific 綁定謂詞);W0 無前導、W1 綁定為 inline(chain 必空),兩者不入表。
+# W2/W3/W4/W5 predecessor-鏈規格 =(前導 wave, 必需 chain 長度, wave-specific 綁定謂詞);W0 無前導、W1 綁定為 inline(chain 必空),兩者不入表。
 _WAVE_PREDECESSOR_CHAIN = {
     "W2": ("W1", 1, w2_chain_binding_errors),
     "W3": ("W2", 2, w3_chain_binding_errors),
     "W4": ("W3", 3, w4_chain_binding_errors),
+    "W5": ("W4", 4, w5_chain_binding_errors),
 }
 
 
@@ -961,7 +938,7 @@ def derive_wave_exit_status(
     predecessor_wave_receipt: Any = None,
     predecessor_wave_chain: Any = (),
 ) -> dict[str, Any]:
-    """Independently re-derive the W0/W1/W2/W3/W4 wave-exit status (§3.2/§10.3).
+    """Independently re-derive the W0/W1/W2/W3/W4/W5 wave-exit status (§3.2/§10.3).
 
     回傳 ``{"status": "PASS"|"NOT_PASS", "reasons": [...]}``。W0 的 PASS 需:綁定的
     ``source_admission_receipt`` 再導出 ADMITTED 且其 self_digest == 本 receipt 綁定的
@@ -974,7 +951,8 @@ def derive_wave_exit_status(
     ``predecessor_wave_chain=(regenerated W0 wave-exit,)`` 供 W1 遞迴綁其前導(次序=
     由舊到新、不含 ``predecessor_wave_receipt`` 本身;W0/W1 拒非空 chain)。W3 再鏡 W2:
     predecessor 是 W2 wave-exit 物件,``predecessor_wave_chain=(W0, W1)``;W4 再鏡 W3:
-    predecessor 是 W3 wave-exit 物件,``predecessor_wave_chain=(W0, W1, W2)``。caller 帶
+    predecessor 是 W3 wave-exit 物件,``predecessor_wave_chain=(W0, W1, W2)``;W5 再鏡 W4:
+    predecessor 是 W4 wave-exit 物件,``predecessor_wave_chain=(W0, W1, W2, W3)``。caller 帶
     status/pass/done 於 derivation 前即拒(§10.3/§10.5 #27)。
 
     邊界(必要非充分):中央閘 :func:`validate_aiml_artifact` 對 wave-exit 只做 STRUCTURAL-ONLY
@@ -1009,7 +987,7 @@ def derive_wave_exit_status(
         return {"status": "NOT_PASS", "reasons": _schema_errors}
     reasons = _wave_exit_structural_errors(receipt, repo_root)
     wave = receipt.get("wave")
-    if wave not in {"W0", "W1", "W2", "W3", "W4"}:
+    if wave not in {"W0", "W1", "W2", "W3", "W4", "W5"}:
         return {"status": "NOT_PASS", "reasons": reasons}
     chain = tuple(predecessor_wave_chain) if predecessor_wave_chain else ()
     if wave in {"W0", "W1"} and chain:
@@ -1928,6 +1906,20 @@ def validate_aiml_artifact(
         # same-id-different-plan)由 facade-reachable 的 derive_authorization_replay_binding /
         # _s2_4_replay_ledger_errors 執法——消費是「授權↔ledger」裁決,非裸 ledger 結構。
         errors.extend(_s2_4_operator_authorization_errors(artifact, now=now))
+    if schema_version == S2_4_DEPENDENCY_REFRESH_SCHEMA_VERSION:
+        # S2.4(WP4·W5·§9.2)dependency refresh:closed schema 之上只作**自足**驗(caller-status
+        # 拒 + self_digest + 封閉族表 + 復現值不得是原 digest 的複述 + producer 投影相異)——中央閘
+        # 手上沒有原 receipt 物件。⚠ 乾淨的 [] 「不」等於 ADMITTED:真裁決恆由
+        # derive_dependency_refresh_status(original_receipt=<原 receipt>) 於當前 head 重算後授予
+        # (鏡 wave-exit 分支的同一條誠實界線)。
+        declared = sorted(key for key in _CALLER_STATUS_KEYS if key in artifact)
+        if declared:
+            errors.append(
+                "dependency refresh attestation must not self-declare status "
+                f"({', '.join(declared)}); the central validator derives it"
+            )
+        else:
+            errors.extend(_dependency_refresh_structural_errors(artifact))
     return errors
 
 

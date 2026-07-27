@@ -1023,8 +1023,13 @@ def test_cp2b_schema_files_resolve_to_real_files() -> None:
     # W2b(§8.1)additive 註冊 application_bundle_runtime_closure_v1 +
     # application_bundle_manifest_v1 → 68;
     # W2c(§8.1 #2/#4)additive 註冊 base_runtime_tree_manifest_v1 +
-    # launch_bundle_manifest_v1 → 70。
-    assert len(SCHEMA_FILES) == 70
+    # launch_bundle_manifest_v1 → 70;
+    # W5(§9.2)additive 註冊 s2_4_dependency_refresh_attestation_v1 → 71。
+    assert len(SCHEMA_FILES) == 71
+    assert "s2_4_dependency_refresh_attestation_v1" in SCHEMA_FILES
+    assert (
+        SCHEMA_DIR / SCHEMA_FILES["s2_4_dependency_refresh_attestation_v1"]
+    ).is_file()
     assert "pg_acl_manifest_v1" in SCHEMA_FILES
     assert (SCHEMA_DIR / SCHEMA_FILES["pg_acl_manifest_v1"]).is_file()
     for w2_key in (

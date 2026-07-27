@@ -202,6 +202,18 @@ SCHEMA_FILES = {
     # agent_governance_s2_4_render(caller 提供樹;絕不觸生產路徑,不自證 runtime)。
     "base_runtime_tree_manifest_v1": "base_runtime_tree_manifest_v1.schema.json",
     "launch_bundle_manifest_v1": "launch_bundle_manifest_v1.schema.json",
+    # S2.4(WP4·W5·§9.2)——additive:dependency-freshness refresh attestation。§10.1 明列此
+    # 路徑,§9.2 令它成為「過期 S2.2A/S2.3/S1.3 **source** 身分」唯一的補救途徑。加這鍵純為
+    # schema 查找,絕不進入 aiml_effect_classifier_digest() 的六個 S0.3 常量輸入
+    # (見 :46-48/§7.2),S0.3 分類身分不動;亦不改 PROGRAM_SCHEMA_PATHS 與 v1/v2 component
+    # matrix/digest。中央閘「不」讓 caller 自證 status——委派給
+    # aiml_gate_receipt_s2_4_contracts.derive_dependency_refresh_status,由**驗證端自己**在
+    # current_source_head 上重跑該 dependency 的 producer/語義再算並與原 receipt 比對
+    # (caller 帶 status/admitted/pass/done 一律先拒)。§9.2 的硬線由同一支閘的封閉分類表
+    # 執法:runtime/topology/prepare/auth 證據永不可 refresh-by-reference。
+    "s2_4_dependency_refresh_attestation_v1": (
+        "s2_4_dependency_refresh_attestation_v1.schema.json"
+    ),
 }
 
 S0_DEPENDENCY_DIGESTS = {
@@ -336,7 +348,15 @@ def artifact_self_digest(artifact: dict[str, Any]) -> str:
 # 自 bound head 讀 blob:投影因此是該 commit 的函數,任何人 checkout 它都重算得出同值。
 # fail-closed:git 不可用/commit 不存在/路徑不在該樹 → 該路徑記 None(投影變值 → 導出失敗)。
 # --------------------------------------------------------------------------- #
-def _git_stdout(repo_root: Path, arguments: list[str]) -> str | None:
+def _git_run(repo_root: Path, arguments: list[str]) -> tuple[str, str] | None:
+    """跑一次 git,回 ``(stdout, stderr)``;非零離開/無法執行回 ``None``。
+
+    W5 對抗審計第三輪 P2:舊版把 stderr 整個丟掉,於是「repo 不屬於當前 uid」這個最可能
+    的真實主機故障(git 自己會印 ``detected dubious ownership … git config --global --add
+    safe.directory <path>``)在 operator 眼裡只剩「git is unreadable」。stderr 是 git 唯一
+    給出補救指令的地方,必須被帶出來。
+    """
+
     import subprocess
 
     try:
@@ -348,7 +368,108 @@ def _git_stdout(repo_root: Path, arguments: list[str]) -> str | None:
         )
     except (OSError, ValueError, subprocess.SubprocessError):
         return None
-    return proc.stdout if proc.returncode == 0 else None
+    if proc.returncode != 0:
+        return None
+    return proc.stdout, proc.stderr
+
+
+def _git_stdout(repo_root: Path, arguments: list[str]) -> str | None:
+    outcome = _git_run(repo_root, arguments)
+    return None if outcome is None else outcome[0]
+
+
+def git_failure_detail(repo_root: Path) -> str | None:
+    """git 為什麼讀不了這棵樹(取 ``rev-parse`` 的 stderr 首行);讀得了回 ``None``。
+
+    只在 fail-closed 路徑上被呼叫,用來把 git 自己的補救指令原文帶進 typed reason。
+    """
+
+    import subprocess
+
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(repo_root), "rev-parse", "--git-dir"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except OSError as error:
+        return f"git could not be executed: {error}"
+    except (ValueError, subprocess.SubprocessError) as error:
+        return f"git invocation failed: {error}"
+    if proc.returncode == 0:
+        return None
+    first = next(
+        (line.strip() for line in proc.stderr.splitlines() if line.strip()), ""
+    )
+    return first or f"git exited {proc.returncode} with no diagnostic"
+
+
+def git_blob_sha1(data: bytes) -> str:
+    """Reproduce ``git hash-object`` (blob) so trust-pin blob ids re-hash offline."""
+
+    hasher = hashlib.sha1()
+    hasher.update(b"blob " + str(len(data)).encode("ascii") + b"\x00")
+    hasher.update(data)
+    return hasher.hexdigest()
+
+
+def _git_is_ancestor(repo_root: Path, ancestor: str, descendant: str) -> bool:
+    """Local-checkout ancestry proof(fail-closed)。只證 repo 拓撲,不是 runtime 認證。"""
+
+    import subprocess
+
+    if re.fullmatch(r"[0-9a-f]{40}", ancestor) is None or re.fullmatch(
+        r"[0-9a-f]{7,40}", descendant
+    ) is None:
+        return False
+    try:
+        proc = subprocess.run(
+            [
+                "git", "-C", str(repo_root), "merge-base", "--is-ancestor",
+                ancestor, descendant,
+            ],
+            capture_output=True,
+            timeout=30,
+        )
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return False
+    return proc.returncode == 0
+
+
+def _git_head(repo_root: Path) -> str | None:
+    """回傳 repo_root 目前 checkout 的 HEAD 40-hex commit(fail-closed:git 錯誤回 None)。
+
+    T2:admission 的 source_head 必須「等於」目前 checkout HEAD(而非只是兩固定 predecessor 的後代)。
+    所有證據皆由目前 checkout 再導出,故若 receipt 宣稱某世代卻從另一世代導出 ADMITTED,即為漂移——
+    綁定 HEAD 令 admission 與其真正再導出的樹一致。
+    """
+
+    import subprocess
+
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    head = proc.stdout.strip()
+    return head if re.fullmatch(r"[0-9a-f]{40}", head) else None
+
+
+def git_is_shallow_repository(repo_root: Path) -> bool:
+    """這棵 repo 是不是淺 clone(CI 預設 ``fetch-depth: 1``)。
+
+    W5 對抗審計第三輪 P2:淺樹上 ``merge-base --is-ancestor`` 對不在 graft 裡的物件回非零,
+    而那不是「不是祖先」,是「這裡沒有那個物件」。呼叫端據此把訊息從一個假結論換成真補救。
+    """
+
+    return (_git_stdout(repo_root, ["rev-parse", "--is-shallow-repository"]) or "").strip() == "true"
 
 
 def resolve_commit_head(repo_root: Path, source_head: str | None = None) -> str | None:
@@ -364,25 +485,48 @@ def resolve_commit_head(repo_root: Path, source_head: str | None = None) -> str 
     return head if re.fullmatch(r"[0-9a-f]{40}", head) else None
 
 
-def owned_path_blob_projection(
+def _is_safe_repo_relative_path(rel: Any) -> bool:
+    """該字串可否安全地(a)進 ``git cat-file --batch`` 請求串流、(b)當作寫檔的相對路徑。
+
+    拒:非字串/空字串、含 ``\\n``(會把 ``--batch`` 的請求與回應串流錯開)、絕對路徑、
+    含 ``..`` 或 ``.`` 節、以及 Windows 磁碟機形。純結構判定,不碰檔案系統。
+    """
+
+    if not isinstance(rel, str) or not rel:
+        return False
+    if "\n" in rel or "\r" in rel or "\0" in rel:
+        return False
+    if rel.startswith("/") or rel.startswith("\\") or ":" in rel.split("/", 1)[0]:
+        return False
+    parts = rel.split("/")
+    return all(part not in ("", ".", "..") for part in parts)
+
+
+def commit_blob_bytes(
     repo_root: Path,
     paths: tuple[str, ...] | list[str],
     *,
     source_head: str | None = None,
-) -> dict[str, str | None]:
-    """{owned path: sha256 of its blob **at the bound commit**}(缺席/不可讀記 None)。
+) -> dict[str, bytes | None]:
+    """{path: 該路徑在 bound commit 的 blob **位元組**}(缺席/不可讀記 None)。
 
     以單一 ``git cat-file --batch`` 進程串流讀取(N 個路徑不再是 N 個子行程);
     ``<commit>:<path>`` 形的 revision 直接把路徑解析到那棵樹,故工作樹狀態完全不參與。
+    這是 P1-5 修正尺的**唯一**讀取原語:digest 投影與(W5 §9.2)commit-tree 物化都由它導出。
     """
 
     import subprocess
 
     ordered = sorted(paths)
-    projection: dict[str, str | None] = {rel: None for rel in ordered}
+    blobs: dict[str, bytes | None] = {rel: None for rel in ordered}
+    # W5 對抗審計第三輪 P2:``--batch`` 是換行分隔的請求串流,而 ``materialize_commit_paths``
+    # 會把回應寫成 ``target / rel``。今天每一條路徑都來自 code-owned 表,故不可達;但這裡是
+    # 驗證路徑上的一個寫檔原語,不安全的形狀必須在原語層就拒(而不是靠呼叫端全都乖)。
+    if any(not _is_safe_repo_relative_path(rel) for rel in ordered):
+        return blobs
     head = resolve_commit_head(repo_root, source_head)
     if head is None:
-        return projection
+        return blobs
     request = "".join(f"{head}:{rel}\n" for rel in ordered).encode("utf-8")
     try:
         proc = subprocess.run(
@@ -392,9 +536,9 @@ def owned_path_blob_projection(
             timeout=180,
         )
     except (OSError, ValueError, subprocess.SubprocessError):
-        return projection
+        return blobs
     if proc.returncode != 0:
-        return projection
+        return blobs
     stream = proc.stdout
     offset = 0
     for rel in ordered:
@@ -410,10 +554,57 @@ def owned_path_blob_projection(
             size = int(header[2])
         except ValueError:
             break
-        payload = stream[offset : offset + size]
+        blobs[rel] = stream[offset : offset + size]
         offset += size + 1  # 每筆物件後接一個換行
-        projection[rel] = "sha256:" + hashlib.sha256(payload).hexdigest()
-    return projection
+    return blobs
+
+
+def owned_path_blob_projection(
+    repo_root: Path,
+    paths: tuple[str, ...] | list[str],
+    *,
+    source_head: str | None = None,
+) -> dict[str, str | None]:
+    """{owned path: sha256 of its blob **at the bound commit**}(缺席/不可讀記 None)。"""
+
+    return {
+        rel: (None if payload is None else "sha256:" + hashlib.sha256(payload).hexdigest())
+        for rel, payload in commit_blob_bytes(
+            repo_root, paths, source_head=source_head
+        ).items()
+    }
+
+
+def materialize_commit_paths(
+    repo_root: Path,
+    paths: tuple[str, ...] | list[str],
+    target: Path,
+    *,
+    source_head: str | None = None,
+) -> list[str]:
+    """把 bound commit 的 blob 逐一寫進 ``target`` 下的同名相對路徑;回傳**缺席**路徑清單。
+
+    用途(W5 §9.2):讓 producer 在一棵「由該 commit 的 blob 組成」的樹上重跑,於是重算值
+    是那個 commit 的函式,而不是工作樹當下位元組的函式。缺席清單非空即由呼叫端 fail-closed。
+    """
+
+    blobs = commit_blob_bytes(repo_root, paths, source_head=source_head)
+    root = Path(target).resolve()
+    missing: list[str] = []
+    for rel, payload in blobs.items():
+        if payload is None:
+            missing.append(rel)
+            continue
+        destination = (root / rel).resolve()
+        # containment:寫入點必須真的落在 ``target`` 之下。``commit_blob_bytes`` 已在原語層
+        # 拒掉 ``..``/絕對路徑/換行,這裡是第二道(symlink 造成的逃逸只有 resolve 看得見)。
+        if root != destination and root not in destination.parents:
+            raise ValueError(
+                f"refusing to materialise {rel!r} outside the scratch tree {root}"
+            )
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(payload)
+    return sorted(missing)
 
 
 def owned_path_blob_projection_digest(
@@ -435,24 +626,568 @@ def owned_scope_worktree_delta(
     *,
     source_head: str | None = None,
 ) -> list[str] | None:
-    """owned scope 內 index/worktree 與 bound commit 的差異路徑(不可判定回 None)。
+    """owned scope 內**工作樹位元組**與 bound commit blob 不相等的路徑(不可判定回 None)。
 
     P1-5 的可見性面:投影已綁 commit blob,故髒工作樹不再污染 digest;但「這份 receipt
     是從一棵髒工作樹發射的」本身是事實,必須可被看見而不是靜默。
+
+    W5 對抗審計第三輪 P1-A(E2/E3/OPS 三方同結論):舊版用 ``git status --porcelain`` 當
+    oracle,那有三個各自獨立的洞——(1)``git status`` **永遠**比對 HEAD,而本函式收的是
+    ``source_head``,於是一份綁了非 HEAD commit 的 receipt 會拿「與 HEAD 無差異」當成
+    「與 bound commit 無差異」;(2)``git update-index --assume-unchanged`` /
+    ``--skip-worktree`` 會讓被改過的檔案在 ``git status`` 中完全消失,而 index 旗標與
+    ``core.trustctime`` 都住在正被見證的那棵樹裡面;(3)rename 記錄的 ``-z`` 形是
+    ``R  <new>\\0<old>\\0``,舊版的 ``record[3:]`` 對兩半各切一次,於是印出根本不存在的路徑。
+    改為**內容定址**:逐一 hash 工作樹位元組,與 :func:`owned_path_blob_projection` 自 bound
+    commit 取得的同一把尺比對。index 無關、git config 無關,``source_head`` 與 HEAD 的分歧
+    也在同一刀下消失。不可讀 / 該 commit 無此 blob 一律計入差異(fail-closed)。
     """
 
     ordered = sorted(paths)
     head = resolve_commit_head(repo_root, source_head)
     if head is None:
         return None
-    stdout = _git_stdout(
-        repo_root, ["status", "--porcelain", "-z", "--", *ordered]
-    )
-    if stdout is None:
+    committed = owned_path_blob_projection(repo_root, ordered, source_head=head)
+    root = Path(repo_root)
+    delta: set[str] = set()
+    for rel in ordered:
+        expected = committed.get(rel)
+        try:
+            payload = (root / rel).read_bytes()
+        except OSError:
+            observed = None
+        else:
+            observed = "sha256:" + hashlib.sha256(payload).hexdigest()
+        if expected is None or observed is None or observed != expected:
+            delta.add(rel)
+    return sorted(delta)
+
+
+# S2.4 §9.2:每一列所指的**那份 artifact** 到底是哪個 schema(code-owned;caller 的 evidence_class
+# 字串只是標籤)。四個 permit 列都是同一支 §9.1 授權 artifact,差別在 profile/scope,那一層
+# 由 _s2_4_operator_authorization_errors 執法;兩個 capability-probe 列是同一支終端 probe
+# effect receipt,scope 差異在其內嵌的 network_sandbox_capability_attestation_v1。
+S2_4_NEVER_REFRESHABLE_SCHEMAS: dict[str, tuple[str, ...]] = {
+    "APPLY_AGGREGATE_AUTHORIZATION": ("s2_4_operator_authorization_v1",),
+    "CAPABILITY_PROBE_AUTHORIZATION": ("s2_4_operator_authorization_v1",),
+    "CAPABILITY_PROBE_RECEIPT_INSTALLED_UNIT": ("s2_4_capability_probe_effect_receipt_v1",),
+    "CAPABILITY_PROBE_RECEIPT_PREPARE_SANDBOX": ("s2_4_capability_probe_effect_receipt_v1",),
+    "PG_MIGRATION_AUTHORIZATION": ("s2_4_operator_authorization_v1",),
+    "PG_TOPOLOGY_ATTESTATION": ("pg_topology_attestation_v1",),
+    "PREPARED_BUNDLE": ("s2_4_prepared_install_bundle_v1",),
+    "PREPARE_AUTHORIZATION": ("s2_4_operator_authorization_v1",),
+    "S2_0_EFFECT_RECEIPT": ("pg_observer_bootstrap_result_v1",),
+}
+
+
+class program_code_on_path:
+    """只在需要 ``ml_training.*`` package 匯入的那一小段開窗,離開時只收回自己放的那筆。
+
+    W5 review P2-E:``program_code`` 一旦在 import 期進 sys.path,engine-scanner 進程的
+    top-level namespace 就多出 broker/exchange/dashboard 等套件;那必須是決策而非副作用
+    (§10.1.1 #4)。本 context manager 把它縮成函式局部效果。
+    """
+
+    def __init__(self) -> None:
+        self._entry = str(Path(__file__).resolve().parents[1])
+        self._inserted = False
+
+    def __enter__(self) -> None:
+        if self._entry not in sys.path:
+            sys.path.insert(0, self._entry)
+            self._inserted = True
+
+    def __exit__(self, *_exc: Any) -> None:
+        if self._inserted and self._entry in sys.path:
+            sys.path.remove(self._entry)
+        self._inserted = False
+
+
+# ── §9.2 語義主體(semantic subject)投影 —— W5 對抗審計 P1-A ─────────────────────
+# 舊表把 S1.3 / S2.3 兩族的「語義 digest」定義成 (schema 檔雜湊, producer 檔雜湊),而後者
+# 逐位元組等於 refresh 已經另欄綁住的 ``producer_module_digest``——
+# ``agent_governance_sealed_build.source_sha256()`` 與
+# ``agent_governance_identity_acl_contract.source_sha256()`` 都是 ``_file_sha256(SOURCE_PATH)``。
+# 於是那兩族的「獨立復現 producer/semantic checks」實際上只證了「兩個檔案沒變」:被證的**主體**
+# (sealed runtime 的內容身分、S1.3 的身分/ACL 投影、expected-component 身分、鏈到的 sealed
+# receipt)一個都沒有進到比對裡,把 expected-identity receipt 的 ``runtime_content_digest`` 或
+# ``sealed_build_digest`` 換掉,復現照樣 DEPENDENCY_REFRESH_ADMITTED。
+#
+# 下面兩支函式把每一族的語義主體改成「該 producer 真正產出的內容」,並成對提供:
+#   :func:`recompute_dependency_semantic_subjects` —— 在 bound commit 物化樹上重跑 producer;
+#   :func:`dependency_semantic_subject_values`    —— 從原 receipt 的**內容**投影出同形值
+#                                                    (絕不是它自報的某個 digest 欄位)。
+# 兩邊逐欄相等才算復現成功,故任一主體漂移都必須重新觀測而不能被刷新。
+_S1_3_HOST_UID_KEYS = (
+    "component", "uid_label", "non_root", "oci_socket_access", "dbus_authority",
+    "least_privilege_caps", "production_uid_provisioned",
+)
+_S1_3_PG_ROLE_KEYS = (
+    "component", "role_name", "privilege_class", "is_superuser",
+    "forbidden_attrs_all_false", "is_reader", "writer_for_reader",
+    "production_role_provisioned",
+)
+_S1_3_AUTH_KEYS = (
+    "method", "local_only", "trust_from_anywhere", "wide_cidr", "ident_map",
+    "production_hba_installed",
+)
+_S1_3_SOCKET_KEYS = (
+    "component", "socket_dir_label", "world_readable", "world_writable",
+    "owner_uid_label", "group_label", "production_socket_provisioned",
+)
+_S1_3_ROTATION_KEYS = ("secret_slot_target", "role_target", "rotation_order")
+_S1_3_LOADING_KEYS = ("no_plaintext_ingress", "loader_kind")
+_S1_3_ROLLBACK_KEYS = (
+    "change_id", "change_kind", "pre_state_digest", "rollback_action", "recovery",
+)
+# S2.3 expected-identity 的 sealed 對象在 repo 內是一個**已提交**的固定路徑,故它是該族
+# producer 的輸入之一,可由 bound commit 物化並重算(§9.2 的復現因此蓋得到 sealed_build_digest)。
+S2_3_SEALED_BUILD_RECEIPT_REL = (
+    "docs/execution_plan/ai_ml_landing/receipts/S2.3-sealed-build-receipt-v1.json"
+)
+
+# ── §9.2 原 source 身分的**已提交**位置 —— W5 對抗審計第三輪 P1-B ───────────────────
+# §9.2 的新鮮度裁決讀的是原 receipt 自己的 ``observation_time``/``expires_at``,而那兩欄在
+# caller 手上:E2 在**真的**已出貨 receipt 上只改這兩個時間戳並重封 self_digest,家族驗證器
+# 全過,三族一律導出 SOURCE_DEPENDENCY_FRESH——整個 §9.2 閘就這樣被跳過。家族驗證器認證的是
+# 形狀,不是那個窗。這裡把窗綁回**那個 commit 的 blob**:三族的原身分在 repo 內都是已提交的
+# 固定路徑,故「這份 evidence 是不是那份被提交的 artifact」是驗證端自己算得出來的。
+#
+# S1.3 沒有已提交的 receipt(它是一次性 disposable 觀測),所以它的窗**仍然**是 caller 自選
+# 的。那個不對稱不被隱藏:見 obligation ``DEPENDENCY_OBSERVATION_WINDOW_IS_CALLER_AUTHORED``。
+S2_4_COMMITTED_SOURCE_IDENTITY_PATHS: dict[str, tuple[str, ...]] = {
+    "S1_3_IDENTITY_CONTRACT": (),
+    "S2_2A_SOURCE_COMPATIBILITY": (
+        "docs/execution_plan/ai_ml_landing/receipts/"
+        "S2.2A-source-compatibility-receipt-v1.json",
+        "docs/execution_plan/ai_ml_landing/receipts/"
+        "S2.2A-source-compatibility-receipt-v2.json",
+    ),
+    "S2_3_EXPECTED_IDENTITY": (
+        "docs/execution_plan/ai_ml_landing/receipts/S2.3-expected-identity-receipt-v1.json",
+    ),
+    "S2_3_SEALED_BUILD": (S2_3_SEALED_BUILD_RECEIPT_REL,),
+}
+
+
+# ── §9.2 可刷新 / 永不可刷新的 evidence 分類表(2000 行治理拆分:自 contracts 葉逐位元組
+# 搬入,零語義變更;contracts 逐名再導出以維持既有匯入面)────────────────────────
+# §9.2 第一列:**可**以一份獨立重算的 refresh 續命的三族 source 身分。每列宣告
+#   original_schema_versions —— 允許的原 receipt schema(封閉;不含 refresh 自身)
+#   semantic_digest_fields  —— 該族的 exact 語義**主體**集(refresh 必須逐項復現)
+#   producer_module         —— 驗證端重跑的 producer SSOT 模組(其 blob 亦被 refresh 綁)
+#
+# W5 對抗審計 P1-A:S1.3 / S2.3 兩族原本的主體集是 ("schema_sha256", "source_sha256"),而
+# ``source_sha256`` 逐位元組等於 refresh 另欄已綁的 ``producer_module_digest``(兩支
+# producer 的 source_sha256() 都是 ``_file_sha256(SOURCE_PATH)``),於是「獨立復現 producer/
+# semantic checks」退化成「兩個檔案沒變」——被證的主體一個都不在裡面。現在每一族都逐項復現
+# 該 producer **真正產出的內容**(見 schema_core 的 recompute/extract 成對投影)。
+S2_4_DEPENDENCY_REFRESH_CLASSES = {
+    "S1_3_IDENTITY_CONTRACT": {
+        "original_schema_versions": ("identity_acl_contract_receipt_v1",),
+        "semantic_digest_fields": (
+            "identity_projection_digest",
+            "negative_acl_kinds_digest",
+            "schema_sha256",
+            "source_sha256",
+        ),
+        "producer_module": (
+            "helper_scripts/maintenance_scripts/agent_governance_identity_acl_contract.py"
+        ),
+    },
+    "S2_2A_SOURCE_COMPATIBILITY": {
+        "original_schema_versions": (
+            "source_compatibility_receipt_v1",
+            "source_compatibility_receipt_v2",
+        ),
+        "semantic_digest_fields": (
+            "capture_contract_digest",
+            "learning_runtime_digest",
+            "training_contract_digest",
+        ),
+        "producer_module": "program_code/ml_training/learning_runtime_manifest.py",
+    },
+    "S2_3_EXPECTED_IDENTITY": {
+        "original_schema_versions": ("expected_identity_receipt_v1",),
+        "semantic_digest_fields": (
+            "expected_component_identities_digest",
+            "rollback_binding_digest",
+            "runtime_content_digest",
+            "s1_3_negatives_digest",
+            "schema_sha256",
+            "sealed_build_digest",
+            "source_sha256",
+        ),
+        "producer_module": (
+            "helper_scripts/maintenance_scripts/agent_governance_sealed_build.py"
+        ),
+    },
+    "S2_3_SEALED_BUILD": {
+        "original_schema_versions": ("sealed_build_receipt_v1",),
+        "semantic_digest_fields": (
+            "closure_hash",
+            "native_library_inventory_digest",
+            "runtime_content_digest",
+            "schema_sha256",
+            "source_sha256",
+        ),
+        "producer_module": (
+            "helper_scripts/maintenance_scripts/agent_governance_sealed_build.py"
+        ),
+    },
+}
+# 四族原 receipt 各自的**成功**狀態(S2.2A 兩版是 const SOURCE_READY;S2.3/S1.3 三族的
+# schema enum 是 ["PASS","FAIL"],故 FAIL 必須被顯式擋掉而不是靠 schema)。
+_DEPENDENCY_EVIDENCE_SUCCESS_STATUSES = frozenset({"PASS", "SOURCE_READY"})
+# §9.2 其餘各列:**永不**可以引用刷新的證據。值為該列自己的補救文字(§10.5 #28 後半)。
+S2_4_NEVER_REFRESHABLE_EVIDENCE = {
+    "APPLY_AGGREGATE_AUTHORIZATION": (
+        "the aggregate operator permit is newly signed only after W6A, the topology/HBA/"
+        "network evidence and the final plan core exist; it is never refreshed or chained"
+    ),
+    "CAPABILITY_PROBE_AUTHORIZATION": (
+        "a capability-probe permit is newly signed for one exact scope/core before each "
+        "probe; it cannot authorize PREPARE/APPLY or the other scope"
+    ),
+    "CAPABILITY_PROBE_RECEIPT_INSTALLED_UNIT": (
+        "the INSTALLED_UNIT capability-probe receipt is freshly authorized/observed only "
+        "after W6A against the exact rendered unit/host"
+    ),
+    "CAPABILITY_PROBE_RECEIPT_PREPARE_SANDBOX": (
+        "the PREPARE_SANDBOX capability-probe receipt is freshly authorized/observed "
+        "immediately before W6A against fixed prepare sandbox properties"
+    ),
+    "PG_MIGRATION_AUTHORIZATION": (
+        "the PG-migration operator permit is newly signed only after W6A; it is never "
+        "refreshed or chained"
+    ),
+    "PG_TOPOLOGY_ATTESTATION": (
+        "pg_topology_attestation_v1 is always freshly observed; no refresh-by-reference"
+    ),
+    "PREPARED_BUNDLE": (
+        "the prepared bundle is freshly re-hashed and inside its own expiry; otherwise "
+        "rerun PREPARE"
+    ),
+    "PREPARE_AUTHORIZATION": (
+        "the PREPARE permit is newly signed after the final prepare core and PREPARE-scope "
+        "probe receipt exist, before W6A; it is never refreshed or chained"
+    ),
+    "S2_0_EFFECT_RECEIPT": (
+        "the S2.0 effect receipt is a fresh production observation; rerun the S2.0 effect/"
+        "postcheck if expired"
+    ),
+}
+
+
+_OWNED_SCOPE_REASON_TAIL = "wave-exit owned scope is not at the bound source_head"
+
+
+def owned_scope_reason_prefix(wave: Any) -> str:
+    """該 wave 的 owned-scope reason 具名前綴(測試據此分離,而不是靠字串比對全文)。"""
+
+    return f"{wave} {_OWNED_SCOPE_REASON_TAIL}"
+
+
+def owned_scope_delta_reasons(
+    wave: Any,
+    paths: tuple[str, ...] | list[str],
+    repo_root: Path,
+    *,
+    source_head: str | None = None,
+) -> list[str]:
+    """該 wave 的 owned scope 是否真的就在它自己綁定的那個 commit 上(不可判定亦 fail-closed)。
+
+    W5 對抗審計第三輪 P1-D:這段裁決原本**只有 W5 有**(measured:w2/w3/w4 consumed=0,
+    w5 consumed=1),而 W2 擁有 operator 真正執行的四支腳本(``agent_governance_s2_4_install``
+    / ``_render`` / ``_sql_scan`` / ``_emit_sink``),於是一份綁了 ``source_head`` 的 W2
+    wave-exit 可以從一棵那四支被本地改過的樹導出 PASS。比對是**內容定址**的
+    (見 :func:`owned_scope_worktree_delta`):index 旗標(``--assume-unchanged`` /
+    ``--skip-worktree``)、``core.trustctime`` 與 ``source_head`` ≠ HEAD 三條繞道都不存在。
+    """
+
+    prefix = owned_scope_reason_prefix(wave)
+    delta = owned_scope_worktree_delta(repo_root, paths, source_head=source_head)
+    if delta is None:
+        detail = git_failure_detail(repo_root)
+        return [
+            f"{prefix}: the {wave} owned scope cannot be compared against the bound commit "
+            f"(git is unreadable: {detail or 'no diagnostic'}), so the receipt cannot assert "
+            "that its owned scope IS that commit (fail-closed)"
+        ]
+    if delta:
+        return [
+            f"{prefix}: {delta} differ in content from the bound commit. The owned-path "
+            "projection is taken from the commit blobs, so a dirty owned scope is invisible "
+            "in owned_path_diff_digest; a wave-exit receipt that binds source_head is "
+            "asserting its owned scope IS that head — commit or revert these paths, then "
+            "re-derive this receipt"
+        ]
+    return []
+
+
+def committed_source_identity_digests(
+    dependency_class: Any, repo_root: Path, *, source_head: str | None = None
+) -> list[str] | None:
+    """該族在 bound commit 上**已提交**身分的 canonical digest 集合。
+
+    回 ``None`` 表示「這一族在此 repo 沒有可比對的已提交身分」(S1.3 恆如此;一棵不含那些
+    路徑的隔離樹亦然),與「有,但一個都對不上」是兩件不同的事,故不能用空 list 代表。
+    """
+
+    paths = S2_4_COMMITTED_SOURCE_IDENTITY_PATHS.get(str(dependency_class))
+    if not paths:
         return None
-    return sorted({
-        record[3:] for record in stdout.split("\0") if len(record) > 3
+    blobs = commit_blob_bytes(Path(repo_root), paths, source_head=source_head)
+    digests: list[str] = []
+    for rel in sorted(paths):
+        payload = blobs.get(rel)
+        if payload is None:
+            continue
+        try:
+            digests.append(artifact_self_digest(json.loads(payload.decode("utf-8"))))
+        except (ValueError, UnicodeDecodeError):
+            continue
+    return digests or None
+
+
+def s1_3_identity_projection(contract_like: Any) -> dict[str, Any]:
+    """S1.3 身分/ACL 契約的 **code-owned 不變骨架**(receipt 與 canonical contract 同形)。
+
+    刻意排除「隨一次 disposable 觀測而變」的欄位——各 facet 的 ``evidence_class``、socket 的
+    ``mode``/``mode_source``、rotation 的舊憑證拒絕證明與兩個 slot 指紋:它們是那一次觀測的
+    產物,不是 S1.3 契約釘住的身分。剩下每一欄都由 ``canonical_identity_acl_contract`` 的
+    code-owned 表決定,故可在 bound commit 上原封重算。
+    """
+
+    if not isinstance(contract_like, dict):
+        return {}
+
+    def _rows(key: str, fields: tuple[str, ...]) -> list[dict[str, Any]] | None:
+        value = contract_like.get(key)
+        if not isinstance(value, list):
+            return None
+        return [
+            {field: row.get(field) for field in fields}
+            for row in value
+            if isinstance(row, dict)
+        ]
+
+    auth = contract_like.get("auth_mapping")
+    secret = contract_like.get("secret_lifecycle")
+    secret = secret if isinstance(secret, dict) else {}
+    rotation = secret.get("rotation")
+    loading = secret.get("protected_loading")
+    return {
+        "host_uid_topology": _rows("host_uid_topology", _S1_3_HOST_UID_KEYS),
+        "pg_role_topology": _rows("pg_role_topology", _S1_3_PG_ROLE_KEYS),
+        "auth_mapping": (
+            {field: auth.get(field) for field in _S1_3_AUTH_KEYS}
+            if isinstance(auth, dict) else None
+        ),
+        "socket_dir_acl": _rows("socket_dir_acl", _S1_3_SOCKET_KEYS),
+        "secret_lifecycle": {
+            "rotation": (
+                {field: rotation.get(field) for field in _S1_3_ROTATION_KEYS}
+                if isinstance(rotation, dict) else None
+            ),
+            "protected_loading": (
+                {field: loading.get(field) for field in _S1_3_LOADING_KEYS}
+                if isinstance(loading, dict) else None
+            ),
+            "plaintext_ingress": secret.get("plaintext_ingress"),
+            "production_credential_rotated": secret.get("production_credential_rotated"),
+        },
+        "rollback": _rows("rollback", _S1_3_ROLLBACK_KEYS),
+    }
+
+
+def _s1_3_negative_kinds_digest(cases: Any) -> str | None:
+    """S1.3 receipt 自帶的 negative-ACL 種類集合投影(over_grant_kind 的排序去重)。"""
+
+    if not isinstance(cases, list):
+        return None
+    kinds = sorted({
+        case.get("over_grant_kind")
+        for case in cases
+        if isinstance(case, dict) and isinstance(case.get("over_grant_kind"), str)
     })
+    return canonical_digest(kinds)
+
+
+def dependency_semantic_subject_values(
+    dependency_class: Any, receipt: Any
+) -> dict[str, Any]:
+    """從**原 receipt 自身的內容**投影出各語義主體(與重算端逐欄同形;缺項記 None)。"""
+
+    if not isinstance(receipt, dict):
+        return {}
+    name = str(dependency_class)
+    if name == "S2_2A_SOURCE_COMPATIBILITY":
+        return {
+            field: receipt.get(field)
+            for field in (
+                "capture_contract_digest", "learning_runtime_digest",
+                "training_contract_digest",
+            )
+        }
+    if name == "S1_3_IDENTITY_CONTRACT":
+        return {
+            "identity_projection_digest": canonical_digest(
+                s1_3_identity_projection(receipt)
+            ),
+            "negative_acl_kinds_digest": _s1_3_negative_kinds_digest(
+                receipt.get("negative_acl_cases")
+            ),
+            "schema_sha256": receipt.get("schema_sha256"),
+            "source_sha256": receipt.get("source_sha256"),
+        }
+    if name == "S2_3_EXPECTED_IDENTITY":
+        negatives = receipt.get("negative_acl_binding")
+        rollback = receipt.get("rollback_binding")
+        components = receipt.get("expected_component_identities")
+        return {
+            "expected_component_identities_digest": (
+                canonical_digest(components) if isinstance(components, list) else None
+            ),
+            "rollback_binding_digest": (
+                rollback.get("rollback_digest") if isinstance(rollback, dict) else None
+            ),
+            "runtime_content_digest": receipt.get("runtime_content_digest"),
+            "s1_3_negatives_digest": (
+                negatives.get("s1_3_negatives_digest")
+                if isinstance(negatives, dict) else None
+            ),
+            "schema_sha256": receipt.get("schema_sha256"),
+            "sealed_build_digest": receipt.get("sealed_build_digest"),
+            "source_sha256": receipt.get("source_sha256"),
+        }
+    inventory = receipt.get("native_library_inventory")
+    return {
+        "closure_hash": receipt.get("closure_hash"),
+        "native_library_inventory_digest": (
+            canonical_digest(inventory) if isinstance(inventory, list) else None
+        ),
+        "runtime_content_digest": receipt.get("runtime_content_digest"),
+        "schema_sha256": receipt.get("schema_sha256"),
+        "source_sha256": receipt.get("source_sha256"),
+    }
+
+
+def _helper_scripts_on_path() -> None:
+    """producer SSOT 都住在 ``helper_scripts/maintenance_scripts``;缺席時就地補上。"""
+
+    helper = str(Path(__file__).resolve().parents[2] / "helper_scripts" / "maintenance_scripts")
+    if helper not in sys.path:
+        sys.path.insert(0, helper)
+
+
+def _sealed_runtime_content_digest(sealed: Any, tree: Path) -> str:
+    """由物化樹的 lock/spec 重算 sealed runtime 的內容身分(closure + native + launch + target)。"""
+
+    closure = sealed.verify_lock_closure(
+        tree / "requirements-ml.lock", tree / "requirements-ml.txt"
+    )
+    inventory = sealed.project_native_inventory(closure)
+    return sealed.runtime_content_digest(
+        closure_hash=closure["closure_hash"],
+        isolated_launch_config=sealed._launch_block(),
+        native_lib_inventory_digest=sealed._native_inventory_digest(inventory),
+        python_version=sealed.TARGET_PYTHON_VERSION,
+        target_platform=sealed.TARGET_PLATFORM,
+    )
+
+
+def recompute_dependency_semantic_subjects(
+    dependency_class: str, original_schema_version: str, tree: Path, head: str
+) -> dict[str, str]:
+    """在**物化出來的 commit 樹**上跑各族 producer 的語義主體再算(anchor 全落在 ``tree``)。
+
+    S2.3/S1.3 的 public helper 是 module-level anchored + ``lru_cache``
+    (``source_sha256()`` 永遠 hash 它自己那顆 ``__file__``),故檔案雜湊改以各模組**自己的**
+    ``_file_sha256`` 施於物化樹的同名路徑——同一支雜湊函式、不同 anchor,語義逐字相同而
+    ``repo_root`` 真的生效(P1-B)。純常量投影(expected-component 身分、S1.3 骨架、negative
+    種類、rollback 綁定)沒有檔案輸入,由 clean-tree 閘覆蓋其 producer 程式碼那一半(P1-A 殘留 i)。
+    """
+
+    _helper_scripts_on_path()
+    if dependency_class == "S2_2A_SOURCE_COMPATIBILITY":
+        with program_code_on_path():
+            from ml_training.learning_runtime_manifest import (  # noqa: E402 (lazy)
+                build_learning_runtime_manifest as _build_v1,
+                build_learning_runtime_manifest_v2 as _build_v2,
+            )
+
+        builder = _build_v2 if original_schema_version.endswith("_v2") else _build_v1
+        # repo_source_head 顯式傳入:物化樹沒有 .git,而 head 早已由 bound commit 決定。
+        manifest = builder(tree, repo_source_head=head)
+        return {
+            "capture_contract_digest": manifest["capture_contract"]["digest"],
+            "learning_runtime_digest": manifest["self_digest"],
+            "training_contract_digest": manifest["training_contract"]["digest"],
+        }
+    if dependency_class == "S1_3_IDENTITY_CONTRACT":
+        import agent_governance_identity_acl_contract as _s1_3  # noqa: E402 (lazy)
+
+        contract = _s1_3.canonical_identity_acl_contract()
+        return {
+            "identity_projection_digest": canonical_digest(
+                s1_3_identity_projection(contract)
+            ),
+            "negative_acl_kinds_digest": _s1_3_negative_kinds_digest(
+                _s1_3.build_negative_acl_cases(contract)
+            ),
+            "schema_sha256": _s1_3._file_sha256(
+                tree / _s1_3.SCHEMA_PATH.relative_to(_s1_3.REPO_ROOT)
+            ),
+            "source_sha256": _s1_3._file_sha256(
+                tree / _s1_3.SOURCE_PATH.relative_to(_s1_3.REPO_ROOT)
+            ),
+        }
+    import agent_governance_sealed_build as _sealed  # noqa: E402 (lazy)
+
+    source_sha = _sealed._file_sha256(
+        tree / _sealed.SOURCE_PATH.relative_to(_sealed.REPO_ROOT)
+    )
+    runtime_digest = _sealed_runtime_content_digest(_sealed, tree)
+    if dependency_class == "S2_3_EXPECTED_IDENTITY":
+        sealed_receipt = json.loads(
+            (tree / S2_3_SEALED_BUILD_RECEIPT_REL).read_text(encoding="utf-8")
+        )
+        return {
+            "expected_component_identities_digest": canonical_digest(
+                _sealed.expected_component_identities()
+            ),
+            "rollback_binding_digest": _sealed._rollback_binding()["rollback_digest"],
+            "runtime_content_digest": runtime_digest,
+            "s1_3_negatives_digest": _sealed.s1_3_negatives_digest(),
+            "schema_sha256": _sealed._file_sha256(
+                tree / _sealed.EXPECTED_IDENTITY_SCHEMA_PATH.relative_to(_sealed.REPO_ROOT)
+            ),
+            "sealed_build_digest": _sealed.receipt_digest(sealed_receipt),
+            "source_sha256": source_sha,
+        }
+    closure = _sealed.verify_lock_closure(
+        tree / "requirements-ml.lock", tree / "requirements-ml.txt"
+    )
+    return {
+        "closure_hash": closure["closure_hash"],
+        "native_library_inventory_digest": _sealed._native_inventory_digest(
+            _sealed.project_native_inventory(closure)
+        ),
+        "runtime_content_digest": runtime_digest,
+        "schema_sha256": _sealed._file_sha256(
+            tree / _sealed.SEALED_SCHEMA_PATH.relative_to(_sealed.REPO_ROOT)
+        ),
+        "source_sha256": source_sha,
+    }
+
+
+# ── §10.3 W5 誠實面:未關閉義務帳本 ────────────────────────────────────────────
+# 2000 行治理拆分(第三輪):純資料清單移入 ``aiml_gate_receipt_w5_obligations``,本葉逐名
+# 再導出以維持既有匯入面(W5 投影葉與 validator facade 都自此取用)。零語義變更。
+from aiml_gate_receipt_w5_obligations import (  # noqa: E402
+    S2_4_W5_REMAINING_OWNED_OBLIGATIONS,
+)
 
 
 def landing_scope_identity_digest(scope: dict[str, Any]) -> str:

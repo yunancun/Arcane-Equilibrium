@@ -61,7 +61,22 @@ def _derive(w3, admission, w2, w0, w1):
     )
 
 
-def test_w3_wave_exit_derives_pass_with_the_full_w0_w1_w2_chain() -> None:
+@pytest.fixture()
+def clean_owned_scope(monkeypatch):
+    """把「owned scope 相對 bound commit 乾淨」當作**前提**,而不是當作被證的事。
+
+    W5 對抗審計第三輪 P1-D 之後每一波的 wave-exit 都消費自己的 owned-scope 內容差異
+    (``validator._owned_scope_delta_reasons``),所以在一棵**未提交**的開發樹上那條具名
+    reason 是預期存在的。本檔這些斷言證的是鏈綁定 / 結構 / 發射路徑,不是這棵樹乾不乾淨;
+    「髒 owned scope 必須弄破該波 wave exit」的正反兩向由
+    ``test_agent_governance_s2_4_install_w5.py::
+    test_every_wave_exit_consumes_its_own_owned_scope_delta`` 逐波釘住。
+    """
+
+    monkeypatch.setattr(validator, "_owned_scope_delta_reasons", lambda *_a, **_k: [])
+
+
+def test_w3_wave_exit_derives_pass_with_the_full_w0_w1_w2_chain(clean_owned_scope) -> None:
     admission, w0, w1, w2, w3 = _chain()
     assert _derive(w3, admission, w2, w0, w1) == {"status": "PASS", "reasons": []}
     # evidence-only:無任何 caller-status 鍵;中央閘結構驗亦全過。
@@ -190,8 +205,11 @@ def test_w3_exported_abi_projection_folds_the_six_live_verdicts() -> None:
     ]
 
 
-def test_w5_and_beyond_remain_fail_closed() -> None:
-    # W4 已於 W4a 實作(見 test_agent_governance_s2_4_install_w4.py);未實作的 wave 仍 fail-closed。
+def test_w5_shaped_receipt_carrying_a_w3_projection_is_not_pass() -> None:
+    """W5 已於 W5 實作(見 test_agent_governance_s2_4_install_w5.py),故「未實作 wave」的
+    fail-closed 邊界由 W5 推進到 W6。W3 的投影冒充 W5 依然必須 NOT_PASS——換的是**拒絕理由**
+    (由「wave 未實作」變成「W5 投影不再導出」),不是放行。"""
+
     admission, w0, w1, w2, w3 = _chain()
     forged = deepcopy(w3)
     forged["wave"] = "W5"
@@ -199,8 +217,12 @@ def test_w5_and_beyond_remain_fail_closed() -> None:
     result = _derive(forged, admission, w2, w0, w1)
     assert result["status"] == "NOT_PASS"
     assert any(
-        "only implemented for W0/W1/W2/W3/W4" in reason for reason in result["reasons"]
-    )
+        "W5 exported-ABI projection" in reason or "predecessor must be the W4" in reason
+        for reason in result["reasons"]
+    ), result["reasons"]
+    # 未實作邊界本身仍在,只是移到 W6:wave enum 封閉於 W0..W5。
+    schema = validator._load_schema("s2_4_wave_exit_receipt_v1")
+    assert schema["properties"]["wave"]["enum"] == ["W0", "W1", "W2", "W3", "W4", "W5"]
 
 
 def test_w3_emit_cli_out_dir_is_constrained_to_the_receipts_directory(tmp_path, capsys) -> None:

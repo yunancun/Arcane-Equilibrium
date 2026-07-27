@@ -52,9 +52,11 @@
     "program_code/ml_training/aiml_gate_receipt_s2_4_contracts.py",
     "program_code/ml_training/aiml_gate_receipt_schema_core.py",
     "program_code/ml_training/aiml_gate_receipt_validator.py",
+    "program_code/ml_training/aiml_gate_receipt_w5_obligations.py",
     "program_code/ml_training/aiml_gate_receipt_wave_w2.py",
     "program_code/ml_training/aiml_gate_receipt_wave_w3.py",
     "program_code/ml_training/aiml_gate_receipt_wave_w4.py",
+    "program_code/ml_training/aiml_gate_receipt_wave_w5.py",
     "program_code/ml_training/alr_application_identity.py",
     "program_code/ml_training/alr_candidate_board_events.py",
     "program_code/ml_training/alr_candidate_evidence_adapter.py",
@@ -137,6 +139,7 @@
     "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_component_effect_postcheck_v1.schema.json",
     "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_component_effect_result_v1.schema.json",
     "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_component_effect_rollback_v1.schema.json",
+    "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_dependency_refresh_attestation_v1.schema.json",
     "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_install_effect_receipt_v1.schema.json",
     "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_install_journal_v1.schema.json",
     "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_install_plan_core_v1.schema.json",
@@ -167,7 +170,7 @@
     "program_code/ml_training/schemas/aiml_gate_receipts/terminal_receipt_sink_v1.schema.json"
   ],
   "schema_version": "application_bundle_runtime_closure_v1",
-  "self_digest": "sha256:f3d56ededdca1bb06166e763c30ca059cc446e457b0003842fc3d6e532806e9d",
+  "self_digest": "sha256:f77bca8a416dec9eec26e9c10305a4725bd7c6e1d9d7d87f01e96b355832b24a",
   "sql_fingerprints": [
     "sql/migrations/V151__alr_persistence_foundation.sql",
     "sql/migrations/V152__alr_operational_artifacts.sql",

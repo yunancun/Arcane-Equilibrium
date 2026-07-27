@@ -67,7 +67,24 @@ def _derive(w4, admission, w3, w0, w1, w2):
 
 
 # ── W4 自身的結構/綁定再導出(與 predecessor 鏈狀態無關)────────────────────────
-def test_w4_structural_and_chain_binding_rederive_on_the_current_checkout() -> None:
+
+
+@pytest.fixture()
+def clean_owned_scope(monkeypatch):
+    """把「owned scope 相對 bound commit 乾淨」當作**前提**,而不是當作被證的事。
+
+    W5 對抗審計第三輪 P1-D 之後每一波的 wave-exit 都消費自己的 owned-scope 內容差異
+    (``validator._owned_scope_delta_reasons``),所以在一棵**未提交**的開發樹上那條具名
+    reason 是預期存在的。本檔這些斷言證的是鏈綁定 / 結構 / 發射路徑,不是這棵樹乾不乾淨;
+    「髒 owned scope 必須弄破該波 wave exit」的正反兩向由
+    ``test_agent_governance_s2_4_install_w5.py::
+    test_every_wave_exit_consumes_its_own_owned_scope_delta`` 逐波釘住。
+    """
+
+    monkeypatch.setattr(validator, "_owned_scope_delta_reasons", lambda *_a, **_k: [])
+
+
+def test_w4_structural_and_chain_binding_rederive_on_the_current_checkout(clean_owned_scope) -> None:
     admission, w0, w1, w2, w3, w4 = _chain()
     assert validator.w4_structural_errors(w4) == []
     assert validator._wave_exit_structural_errors(w4) == []
@@ -84,7 +101,7 @@ def test_w4_structural_and_chain_binding_rederive_on_the_current_checkout() -> N
     }
 
 
-def test_the_w4_derivation_is_wired_and_no_longer_the_unimplemented_branch() -> None:
+def test_the_w4_derivation_is_wired_and_no_longer_the_unimplemented_branch(clean_owned_scope) -> None:
     admission, w0, w1, w2, w3, w4 = _chain()
     result = _derive(w4, admission, w3, w0, w1, w2)
     assert not any(
