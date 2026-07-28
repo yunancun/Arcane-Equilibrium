@@ -87,10 +87,34 @@ S2_ADAPTER_IDS = frozenset(
 #       刻意只作 route 層宣告(其真偽閉合在 adapter 層 permit 消耗/replay ledger);由測試
 #       釘「bindings ∪ declaration_only ∪ {selector} == route inventory」把空綁定釘成刻意。
 #   postcheck_kind —— 獨立 ops_postcheck evidence 的 kind 白名單。
-#   postcheck_receipt_binding —— postcheck payload 內必等於 receipt self_digest 的 dotted
-#       欄位;None = 該 step 的三方交叉核由下方 _DELEGATED_STEP_BINDINGS 的既有硬門提供。
-_OPS_POSTCHECK_KIND = "ops_postcheck_v1"
-_OPS_POSTCHECK_RECEIPT_BINDING = "payload.effect_receipt_digest"
+#   postcheck_receipt_binding —— postcheck 內必等於 receipt self_digest 的 dotted 欄位;
+#       None = 該 step 的三方交叉核由下方 _DELEGATED_STEP_BINDINGS 的既有硬門提供。
+#
+# ── NEW-P1-A:evidence 形狀必須在 closure_packet_v1 真的可表示 ──────────────────────
+# `.codex/schemas/closure_packet_v1.schema.json` 的 `$defs/evidence` 是 additionalProperties:
+# false 且**沒有** `payload` 欄位;`kind == "ops_postcheck_v1"` 另被強制 `operation_receipt`
+# 且該物件只能是 `opsDeployPostcheck`(adapter_id const deploy_adapter_v1)或 `opsP0bPostcheck`
+# (const p0b_alr_rollforward_adapter_v1)——兩者都不是 S2 adapter。舊碼的
+# `payload.effect_receipt_digest` 因此在任何 schema-valid 封包上恆為 None(fail-closed 但
+# 功能性倒退:整條 S2 closure PASS 路徑不可滿足)。
+# 修法採可表示的先例 S1.6B target-host(`agent_governance_target_host_effects`:自訂 kind +
+# schema 允許的 `artifact` + `artifact.self_digest` ↔ wrapper `digest`):S2 用自己的
+# `s2_effect_ops_postcheck_v1` kind,綁定改走 `artifact.effect_receipt_digest`,零 registry
+# schema 改動(自訂 kind 不落在 evidence 的任何 kind-條件臂,只受 runtime scope 的
+# host/environment/observed_at/expiry 要求)。參照建構子 = build_s2_effect_ops_postcheck_evidence,
+# 由測試以真驗證器 `agent_governance_schema.schema_subset_errors` 釘住 schema-valid。
+#
+# ⚠ 已知且刻意保留的 evidence 形狀限制(S2.0 / S2.1):那兩步的既有硬門
+# (validate_pg_observer_bootstrap_binding / validate_quiesce_fence_binding)要求 ops_postcheck
+# fragment 內恰一 `kind == "command_capture_v2"` 且 `scope == "runtime"` 的 evidence,而
+# closure_packet_v1 對 `command_capture_v2` 釘死 `scope: const "test"` ⇒ 該形狀今日在封包裡
+# **不可表示**。本波不改那兩個既有 predicate 的語義(其測試為既有面),亦不放寬 registry
+# schema 的 command_capture_v2 scope const;此限制與 CC-A1/CC-B 的處置同向且無實害——S2.0 與
+# S2.1 今日皆為 closure_pass_blocked_reason step(無可達成功頂點),不可表示的 evidence 形狀
+# 只影響一個本來就不可能發生的 PASS。真 EFFECT session 要解此結,須另立 S2 專屬 capture kind
+# (鏡 target_host_verifier_command_capture_v2)或修 registry schema,屬 S2E 後續波。
+S2_OPS_POSTCHECK_KIND = "s2_effect_ops_postcheck_v1"
+_OPS_POSTCHECK_RECEIPT_BINDING = "artifact.effect_receipt_digest"
 _CAPTURE_POSTCHECK_KIND = "command_capture_v2"
 
 
@@ -117,7 +141,7 @@ def _probe_contract(*, declaration_only_claims: frozenset[str]) -> dict[str, Any
             "s2_4_probe_authorization": "authorization_digest",
         },
         "declaration_only_claims": declaration_only_claims,
-        "postcheck_kind": _OPS_POSTCHECK_KIND,
+        "postcheck_kind": S2_OPS_POSTCHECK_KIND,
         "postcheck_receipt_binding": _OPS_POSTCHECK_RECEIPT_BINDING,
     }
 
@@ -184,7 +208,7 @@ S2_STEP_RECEIPT_CONTRACTS: dict[str, dict[str, Any]] = {
         "declaration_only_claims": frozenset({
             "s2_0_effect_receipt", "s2_4_prepare_sandbox_probe_receipt",
         }),
-        "postcheck_kind": _OPS_POSTCHECK_KIND,
+        "postcheck_kind": S2_OPS_POSTCHECK_KIND,
         "postcheck_receipt_binding": _OPS_POSTCHECK_RECEIPT_BINDING,
     },
     "S2_4_W6B_PROBE": _probe_contract(
@@ -219,7 +243,7 @@ S2_STEP_RECEIPT_CONTRACTS: dict[str, dict[str, Any]] = {
             "s2_4_installed_unit_probe_receipt": "installed_unit_probe_receipt_digest",
         },
         "declaration_only_claims": frozenset({"s2_0_effect_receipt"}),
-        "postcheck_kind": _OPS_POSTCHECK_KIND,
+        "postcheck_kind": S2_OPS_POSTCHECK_KIND,
         "postcheck_receipt_binding": _OPS_POSTCHECK_RECEIPT_BINDING,
     },
     "S2_5A_START": {
@@ -241,7 +265,7 @@ S2_STEP_RECEIPT_CONTRACTS: dict[str, dict[str, Any]] = {
         "declaration_only_claims": frozenset({
             "s2_5a_start_permit", "s2_4_install_effect_receipt",
         }),
-        "postcheck_kind": _OPS_POSTCHECK_KIND,
+        "postcheck_kind": S2_OPS_POSTCHECK_KIND,
         "postcheck_receipt_binding": _OPS_POSTCHECK_RECEIPT_BINDING,
     },
     "S2_1_DRILL": {
@@ -298,7 +322,7 @@ S2_STEP_RECEIPT_CONTRACTS: dict[str, dict[str, Any]] = {
             "s2_5a_running_attestation": "pre_drill_attestation_digest",
         },
         "declaration_only_claims": frozenset({"s2_5b_final_permit"}),
-        "postcheck_kind": _OPS_POSTCHECK_KIND,
+        "postcheck_kind": S2_OPS_POSTCHECK_KIND,
         "postcheck_receipt_binding": _OPS_POSTCHECK_RECEIPT_BINDING,
     },
     "S2_2B_RUNTIME_DONE": {
@@ -317,7 +341,7 @@ S2_STEP_RECEIPT_CONTRACTS: dict[str, dict[str, Any]] = {
             "s2_5b_final_attestation": "s2_5_final_attestation_digest",
         },
         "declaration_only_claims": frozenset({"s2_2b_observation_authorization"}),
-        "postcheck_kind": _OPS_POSTCHECK_KIND,
+        "postcheck_kind": S2_OPS_POSTCHECK_KIND,
         "postcheck_receipt_binding": _OPS_POSTCHECK_RECEIPT_BINDING,
     },
 }
@@ -360,6 +384,16 @@ def _get(payload: Any, dotted_field: str) -> Any:
             return None
         value = value.get(part)
     return value
+
+
+def _artifact_self_digest(artifact: dict[str, Any]) -> str:
+    """canonical self-digest(排除 ``self_digest`` 本身);與收據家族用同一把尺。"""
+
+    if str(ML_TRAINING_DIR) not in sys.path:
+        sys.path.insert(0, str(ML_TRAINING_DIR))
+    from aiml_gate_receipt_schema_core import artifact_self_digest
+
+    return artifact_self_digest(artifact)
 
 
 def _receipt_validation_errors(receipt: dict[str, Any], *, now: Any) -> list[str]:
@@ -434,6 +468,59 @@ def build_s2_effect_evidence(receipt: dict[str, Any]) -> dict[str, Any]:
         "environment": S2_EFFECT_ENVIRONMENT,
         "source": adapter_id,
         "receipt": receipt,
+    }
+
+
+def build_s2_effect_ops_postcheck_evidence(
+    receipt: dict[str, Any],
+    *,
+    verifier_node: str,
+    observed_at: str,
+    evidence_id: str = "s2-effect-ops-postcheck",
+) -> dict[str, Any]:
+    """獨立 ops_postcheck 的參照建構子(NEW-P1-A;鏡 build_target_host_closure_evidence)。
+
+    產出 **closure_packet_v1 可表示** 的 runtime evidence:自訂 kind
+    ``s2_effect_ops_postcheck_v1`` + schema 允許的 ``artifact``,``artifact.self_digest``
+    ↔ wrapper ``digest``,``artifact.effect_receipt_digest`` ↔ effect receipt self_digest。
+    與 ``build_s2_effect_evidence`` 同樣今日無 production caller(真封包由 S2 EFFECT
+    session 鑄造),存在的意義是讓 validate 端要求的形狀有一份可被真 schema 驗證器檢查的
+    正本。S2.0/S2.1 的 postcheck 走既有硬門要求的 runtime ``command_capture_v2`` 形狀,
+    今日不可表示(見契約表註),此處 typed 拒絕而不偽造一個 S2 形狀。
+    """
+
+    step = s2_effect_step_for_receipt(receipt)
+    if step is None:
+        raise ValueError("S2 effect receipt step is not derivable")
+    contract = S2_STEP_RECEIPT_CONTRACTS[step]
+    if contract["postcheck_receipt_binding"] is None:
+        raise ValueError(
+            f"S2 {step} independent postcheck is the delegated hard gate's runtime "
+            "command_capture_v2 shape, which closure_packet_v1 pins to scope=test; it "
+            "is not representable today and is never rebuilt as an S2 postcheck artifact"
+        )
+    artifact = {
+        "schema_version": S2_OPS_POSTCHECK_KIND,
+        "status": "PASS",
+        "effect_step": step,
+        "effect_receipt_digest": receipt.get("self_digest"),
+        "verifier_node": verifier_node,
+        "source_head": receipt.get("source_head"),
+        "host": _get(receipt, contract["host_field"]),
+        "observed_at": observed_at,
+    }
+    artifact["self_digest"] = _artifact_self_digest(artifact)
+    return {
+        "id": evidence_id,
+        "scope": "runtime",
+        "kind": S2_OPS_POSTCHECK_KIND,
+        "digest": artifact["self_digest"],
+        "observed_at": observed_at,
+        "expiry": _get(receipt, contract["expiry_field"]),
+        "host": _get(receipt, contract["host_field"]),
+        "environment": S2_EFFECT_ENVIRONMENT,
+        "source": "ops_postcheck",
+        "artifact": artifact,
     }
 
 
@@ -526,6 +613,50 @@ def _delegated_binding_errors(
         ]
 
 
+def _ops_postcheck_artifact_errors(
+    postcheck: dict[str, Any],
+    receipt: dict[str, Any],
+    contract: dict[str, Any],
+) -> list[str]:
+    """獨立 ops_postcheck 的 artifact 面(NEW-P1-A)。
+
+    ``postcheck_receipt_binding is None``(S2.0/S2.1)時本函式不執法:那兩步的 postcheck
+    形狀與三方交叉核歸委派的既有硬門。其餘 step 一律要求:內嵌 artifact 為 dict、其
+    ``schema_version`` 等於 evidence kind、``self_digest`` canonical 反偽造重算成立且等於
+    wrapper ``digest``(否則 artifact 可被整段替換而 wrapper 照舊)、綁定欄位等於 effect
+    receipt 的 ``self_digest``。
+    """
+
+    receipt_binding = contract["postcheck_receipt_binding"]
+    if receipt_binding is None:
+        return []
+    artifact = postcheck.get("artifact")
+    if not isinstance(artifact, dict):
+        return [
+            "S2 ops_postcheck must embed the canonical postcheck artifact "
+            f"({contract['postcheck_kind']})"
+        ]
+    errors: list[str] = []
+    if artifact.get("schema_version") != contract["postcheck_kind"]:
+        errors.append(
+            "S2 ops_postcheck artifact schema_version does not match the evidence kind"
+        )
+    if artifact.get("self_digest") != _artifact_self_digest(artifact):
+        errors.append(
+            "S2 ops_postcheck artifact self_digest does not bind the canonical artifact"
+        )
+    if postcheck.get("digest") != artifact.get("self_digest"):
+        errors.append(
+            "S2 ops_postcheck evidence digest is not the postcheck artifact self_digest"
+        )
+    if _get(postcheck, receipt_binding) != receipt.get("self_digest"):
+        errors.append(
+            f"S2 ops_postcheck {receipt_binding} is not bound to the effect receipt "
+            "self_digest"
+        )
+    return errors
+
+
 def validate_s2_effect_binding(
     packet: dict[str, Any],
     route: dict[str, Any],
@@ -614,10 +745,16 @@ def validate_s2_effect_binding(
             except (TypeError, ValueError):
                 errors.append(f"S2 {step} intent authority timestamp is invalid")
 
-    # 獨立 ops_postcheck(applier != verifier):恰一 runtime postcheck evidence,kind 必在
-    # contract 白名單、payload 必交叉綁 receipt self_digest(E2-P1-2;鏡 P0-B 的
-    # operation_receipt cross-bind 與通用 deploy 的 effect_receipt_digest 綁定),晚於
-    # effect 完成;acceptance 必同綁 receipt + postcheck(缺一即非 PASS)。
+    # 獨立 ops_postcheck:恰一 runtime postcheck evidence,kind 必在 contract 白名單、
+    # artifact 必反偽造重算並交叉綁 receipt self_digest(NEW-P1-A 的可表示形狀,鏡
+    # target-host 的 artifact.self_digest ↔ wrapper digest 先例),晚於 effect 完成;
+    # acceptance 必同綁 receipt + postcheck(缺一即非 PASS)。
+    # 誠實界線(CC-A2 對 :582-588 舊註 overclaim 的更正):本段**不**驗 applier != verifier
+    # ——它只比 scope/source/kind 與 digest 綁定,手上沒有 node 身分比對。applier != verifier
+    # 只存在於被委派的 per-step 硬門(S2.0/S2.1 的既有 predicate、S2.5A/S2.5B 的 §6 attestation
+    # binding);s2_4 家族的收據頂層沒有 apply actor node 欄位可比,其 applier/verifier 分離
+    # 閉合在 adapter 層。舊註另稱「鏡 P0-B 的 operation_receipt cross-bind」亦為假:本段從未
+    # 觸碰 operation_receipt(那是通用 deploy/P0-B 的 ops_postcheck_v1 形狀)。
     # 註:S2.0/S2.1 的 postcheck_receipt_binding 為 None——那兩步的三方 digest 交叉核
     # (receipt 內嵌 verifier_capture_digest == evidence digest == command_capture_v2
     # record_digest,且 capture node ≠ applier)由上方委派的既有硬門提供。
@@ -636,14 +773,7 @@ def validate_s2_effect_binding(
         )
     else:
         postcheck = postchecks[0]
-        receipt_binding = contract["postcheck_receipt_binding"]
-        if receipt_binding is not None and _get(postcheck, receipt_binding) != (
-            receipt.get("self_digest")
-        ):
-            errors.append(
-                f"S2 ops_postcheck {receipt_binding} is not bound to the effect receipt "
-                "self_digest"
-            )
+        errors.extend(_ops_postcheck_artifact_errors(postcheck, receipt, contract))
         try:
             if _parse_time(str(postcheck.get("observed_at", ""))) < _parse_time(
                 str(_get(receipt, contract["observed_field"]))

@@ -151,10 +151,25 @@ def _receipt(step: str) -> dict:
 
 
 def _postcheck(step: str, receipt: dict, postcheck_id: str = "pc") -> dict:
-    """契約白名單 kind 的獨立 ops_postcheck evidence(payload 交叉綁 receipt self_digest)。"""
+    """契約白名單 kind 的獨立 ops_postcheck evidence。
+
+    NEW-P1-A 後:artifact-綁定的 step 一律取模組參照建構子的輸出(其形狀由本檔另一測試
+    以真 schema 驗證器釘成 closure_packet_v1-valid),不再手搓 `payload` 這個 schema 不
+    存在的欄位;S2.0/S2.1 走既有硬門要求的 runtime command_capture_v2 形狀(今日不可表示,
+    見模組契約表註),此處保留其最小 wrapper 供委派測試使用。
+    """
 
     contract = binding.S2_STEP_RECEIPT_CONTRACTS[step]
-    postcheck = {
+    if contract["postcheck_receipt_binding"] is not None:
+        postcheck = binding.build_s2_effect_ops_postcheck_evidence(
+            receipt,
+            verifier_node="s2_ops_postcheck",
+            observed_at=T_POST,
+            evidence_id=postcheck_id,
+        )
+        assert postcheck["kind"] == contract["postcheck_kind"]
+        return postcheck
+    return {
         "id": postcheck_id,
         "scope": "runtime",
         "source": "ops_postcheck",
@@ -162,13 +177,6 @@ def _postcheck(step: str, receipt: dict, postcheck_id: str = "pc") -> dict:
         "observed_at": T_POST,
         "expiry": T_EXPIRY,
     }
-    binding_field = contract["postcheck_receipt_binding"]
-    if binding_field is not None:
-        assert binding_field.startswith("payload.")
-        postcheck["payload"] = {
-            binding_field.split(".", 1)[1]: receipt["self_digest"]
-        }
-    return postcheck
 
 
 def _packet(step: str, receipt: dict, postcheck_id: str = "pc") -> tuple[dict, dict, dict]:
@@ -735,22 +743,69 @@ def test_ops_postcheck_kind_whitelist_rejects_a_foreign_artifact(
     evidence_by_id["pc"]["kind"] = "ops_preflight_v1"
     assert (
         "S2 closure requires exactly one independent ops_postcheck runtime evidence "
-        "of kind ops_postcheck_v1"
+        f"of kind {binding.S2_OPS_POSTCHECK_KIND}"
     ) in binding.validate_s2_effect_binding(
         packet, route, fragments, evidence_by_id, {"effect": receipt}
     )
 
 
-def test_ops_postcheck_payload_must_cross_bind_the_receipt_self_digest(
+def test_ops_postcheck_artifact_must_cross_bind_the_receipt_self_digest(
     structural_receipts,
 ) -> None:
+    """NEW-P1-A:綁定改走 schema 真有的 ``artifact``,且 artifact 本身反偽造重算。"""
+
     route, receipt, packet, fragments, evidence_by_id = _guard_case()
-    evidence_by_id["pc"]["payload"]["effect_receipt_digest"] = "sha256:" + "0" * 64
+    forged = deepcopy(evidence_by_id)
+    artifact = forged["pc"]["artifact"]
+    artifact["effect_receipt_digest"] = "sha256:" + "0" * 64
+    artifact["self_digest"] = binding._artifact_self_digest(artifact)
+    forged["pc"]["digest"] = artifact["self_digest"]
     assert (
-        "S2 ops_postcheck payload.effect_receipt_digest is not bound to the effect "
+        "S2 ops_postcheck artifact.effect_receipt_digest is not bound to the effect "
         "receipt self_digest"
     ) in binding.validate_s2_effect_binding(
-        packet, route, fragments, evidence_by_id, {"effect": receipt}
+        packet, route, fragments, forged, {"effect": receipt}
+    )
+    # artifact 內容被替換但未重封 ⇒ self_digest 反偽造重算斷。
+    tampered = deepcopy(evidence_by_id)
+    tampered["pc"]["artifact"]["verifier_node"] = "s2_apply_actor"
+    errors = binding.validate_s2_effect_binding(
+        packet, route, fragments, tampered, {"effect": receipt}
+    )
+    assert (
+        "S2 ops_postcheck artifact self_digest does not bind the canonical artifact"
+    ) in errors
+    # 重封了 artifact 卻沒更新 wrapper digest ⇒ wrapper↔artifact 綁定斷。
+    resealed = deepcopy(evidence_by_id)
+    resealed["pc"]["artifact"]["verifier_node"] = "s2_apply_actor"
+    resealed["pc"]["artifact"]["self_digest"] = binding._artifact_self_digest(
+        resealed["pc"]["artifact"]
+    )
+    assert (
+        "S2 ops_postcheck evidence digest is not the postcheck artifact self_digest"
+    ) in binding.validate_s2_effect_binding(
+        packet, route, fragments, resealed, {"effect": receipt}
+    )
+    # artifact 缺席 / 非 dict ⇒ typed fail-closed(不是靜默跳過)。
+    absent = deepcopy(evidence_by_id)
+    absent["pc"].pop("artifact")
+    assert (
+        "S2 ops_postcheck must embed the canonical postcheck artifact "
+        f"({binding.S2_OPS_POSTCHECK_KIND})"
+    ) in binding.validate_s2_effect_binding(
+        packet, route, fragments, absent, {"effect": receipt}
+    )
+    # artifact 自稱別的 schema_version ⇒ 拒。
+    mislabelled = deepcopy(evidence_by_id)
+    mislabelled["pc"]["artifact"]["schema_version"] = "target_host_ops_postcheck_v1"
+    mislabelled["pc"]["artifact"]["self_digest"] = binding._artifact_self_digest(
+        mislabelled["pc"]["artifact"]
+    )
+    mislabelled["pc"]["digest"] = mislabelled["pc"]["artifact"]["self_digest"]
+    assert (
+        "S2 ops_postcheck artifact schema_version does not match the evidence kind"
+    ) in binding.validate_s2_effect_binding(
+        packet, route, fragments, mislabelled, {"effect": receipt}
     )
 
 
@@ -1025,6 +1080,95 @@ def test_r1_claim_inventory_cross_checks_frozen_adapter_contracts() -> None:
     }
     assert s2_2b_leaf.S2_2B_STATUS_PENDING not in contract["success_statuses"]
     assert s2_2b_leaf.S2_2B_STATUS_SOURCE_PASS not in contract["success_statuses"]
+
+
+# --------------------------------------------------------------------------- #
+# NEW-P1-A:evidence 形狀必須在 closure_packet_v1 真的可表示(真驗證器,非手搓 dict)
+# --------------------------------------------------------------------------- #
+def _closure_evidence_errors(evidence: dict) -> list[str]:
+    """以真驗證器 agent_governance_schema.schema_subset_errors 驗一份 evidence wrapper。"""
+
+    from agent_governance_schema import schema_subset_errors
+
+    root = json.loads(
+        (ROOT / ".codex/schemas/closure_packet_v1.schema.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    return schema_subset_errors(evidence, root["$defs"]["evidence"], root)
+
+
+@pytest.mark.parametrize("step", PASSABLE_STEPS)
+def test_s2_effect_evidence_shapes_are_closure_packet_v1_valid(step: str) -> None:
+    """兩份 wrapper(effect receipt + 獨立 ops_postcheck)都必須是 schema-valid evidence。"""
+
+    receipt = _receipt(step)
+    assert _closure_evidence_errors(binding.build_s2_effect_evidence(receipt)) == []
+    postcheck = binding.build_s2_effect_ops_postcheck_evidence(
+        receipt, verifier_node="s2_ops_postcheck", observed_at=T_POST,
+    )
+    assert _closure_evidence_errors(postcheck) == []
+
+
+def test_pre_delta_postcheck_shapes_are_rejected_by_the_real_schema() -> None:
+    """反向釘:E2 實測 schema-invalid 的三種形狀,今日仍必須 schema-invalid。
+
+    ① `payload.*`(evidence 是 additionalProperties:false 且無 payload 欄位);
+    ② `kind == "ops_postcheck_v1"`(強制 operation_receipt,且只能是 deploy/p0b 兩個
+       adapter const,兩者都不是 S2 adapter);
+    ③ `command_capture_v2` + `scope == "runtime"`(schema 把該 kind 釘死 scope=test)。
+    ③ 同時是 S2.0/S2.1 委派硬門所要求的形狀 —— 本模組明文記錄該限制。
+    """
+
+    receipt = _receipt(GUARD_STEP)
+    postcheck = binding.build_s2_effect_ops_postcheck_evidence(
+        receipt, verifier_node="s2_ops_postcheck", observed_at=T_POST,
+    )
+    # ① 舊碼的 payload 形狀。
+    payload_shape = {key: value for key, value in postcheck.items() if key != "artifact"}
+    payload_shape["payload"] = {"effect_receipt_digest": receipt["self_digest"]}
+    assert any(
+        "unexpected property payload" in error
+        for error in _closure_evidence_errors(payload_shape)
+    )
+    # ② ops_postcheck_v1 kind:缺 operation_receipt,補上 S2 adapter 的也不在 anyOf。
+    ops_kind = deepcopy(postcheck)
+    ops_kind["kind"] = "ops_postcheck_v1"
+    assert any(
+        "missing required property operation_receipt" in error
+        for error in _closure_evidence_errors(ops_kind)
+    )
+    ops_kind["operation_receipt"] = {
+        "adapter_id": routing.S2_5_RUNTIME_START_ADAPTER_ID,
+        "effect_receipt_digest": receipt["self_digest"],
+    }
+    assert _closure_evidence_errors(ops_kind)
+    # ③ runtime scope 的 command_capture_v2(S2.0/S2.1 委派硬門要求的形狀)。
+    capture_shape = deepcopy(postcheck)
+    capture_shape["kind"] = "command_capture_v2"
+    assert any(
+        "$.scope: expected const 'test'" in error
+        for error in _closure_evidence_errors(capture_shape)
+    )
+
+
+def test_blocked_steps_capture_postcheck_limitation_is_explicit() -> None:
+    """S2.0/S2.1 的 postcheck 形狀今日不可表示 ⇒ 參照建構子 typed 拒絕 + 模組明文記錄。"""
+
+    for step in BLOCKED_STEPS:
+        receipt = _receipt(step)
+        with pytest.raises(ValueError, match="not representable today"):
+            binding.build_s2_effect_ops_postcheck_evidence(
+                receipt, verifier_node="s2_ops_postcheck", observed_at=T_POST,
+            )
+        assert binding.S2_STEP_RECEIPT_CONTRACTS[step]["postcheck_kind"] == (
+            "command_capture_v2"
+        )
+    source = (
+        HELPERS / "agent_governance_s2_effect_binding.py"
+    ).read_text(encoding="utf-8")
+    assert "已知且刻意保留的 evidence 形狀限制(S2.0 / S2.1)" in source
+    assert 'closure_packet_v1 對 `command_capture_v2` 釘死 `scope: const "test"`' in source
 
 
 def test_binding_success_sets_match_per_step_result_vocabularies() -> None:
