@@ -615,30 +615,44 @@ def test_attestation_binding_pending_branch_is_typed_not_skipped():
     assert any("not yet bound" in reason for reason in verdict["reasons"])
 
 
+def _verifier_capture(node_id: str = "ops-postcheck-verifier") -> dict:
+    """P2-3 之後的合法 capture record:record_digest 由 record bytes canonical 重算而得。"""
+
+    capture = {
+        "schema_version": "command_capture_v2",
+        "node_id": node_id,
+        "argv": ["/usr/bin/systemctl", "show",
+                 "arcane-equilibrium-aiml-engine-scanner.service", "--no-pager"],
+        "exit_code": 0,
+    }
+    capture["record_digest"] = canonical_digest(capture)
+    return capture
+
+
 def test_attestation_binding_three_way_cross_check_verifies_and_rejects():
     intent = _intent()
-    capture_digest = "sha256:" + "7" * 64
-    receipt = _running_receipt(verifier_capture_digest=capture_digest)
-    capture = {"record_digest": capture_digest, "node_id": "ops-postcheck-verifier"}
+    capture = _verifier_capture()
+    receipt = _running_receipt(verifier_capture_digest=capture["record_digest"])
     verdict = leaf.validate_s2_5_attestation_binding(
         intent=intent, ops_preflight=_ops_preflight(intent), receipt=receipt,
         verifier_capture=capture, now=NOW,
     )
     assert verdict["status"] == "S2_5_ATTESTATION_BINDING_VERIFIED", verdict
     # capture node == applier ⇒ 拒(applier 永不自證)。
+    self_capture = _verifier_capture(node_id="s2-5-start-applier")
+    self_receipt = _running_receipt(
+        verifier_capture_digest=self_capture["record_digest"]
+    )
     self_run = leaf.validate_s2_5_attestation_binding(
-        intent=intent, ops_preflight=_ops_preflight(intent), receipt=receipt,
-        verifier_capture={"record_digest": capture_digest,
-                          "node_id": "s2-5-start-applier"},
-        now=NOW,
+        intent=intent, ops_preflight=_ops_preflight(intent), receipt=self_receipt,
+        verifier_capture=self_capture, now=NOW,
     )
     assert self_run["status"] == "S2_5_ATTESTATION_BINDING_REJECTED"
     # record_digest 不等 receipt 綁定值 ⇒ 拒。
+    drifted_receipt = _running_receipt(verifier_capture_digest="sha256:" + "8" * 64)
     drifted = leaf.validate_s2_5_attestation_binding(
-        intent=intent, ops_preflight=_ops_preflight(intent), receipt=receipt,
-        verifier_capture={"record_digest": "sha256:" + "8" * 64,
-                          "node_id": "ops-postcheck-verifier"},
-        now=NOW,
+        intent=intent, ops_preflight=_ops_preflight(intent), receipt=drifted_receipt,
+        verifier_capture=capture, now=NOW,
     )
     assert drifted["status"] == "S2_5_ATTESTATION_BINDING_REJECTED"
     # 單側主張(receipt 有 digest、capture 缺席)⇒ 拒,不是 PENDING。
@@ -647,6 +661,84 @@ def test_attestation_binding_three_way_cross_check_verifies_and_rejects():
         verifier_capture=None, now=NOW,
     )
     assert one_sided["status"] == "S2_5_ATTESTATION_BINDING_REJECTED"
+
+
+def test_attestation_binding_rejects_a_self_reported_record_digest():
+    """P2-3(tranche 2)紅→綠:偽造 capture=照抄 receipt 綁定值的兩鍵 stub 必拒。
+
+    修前:capture 的 record_digest 只做字串相等比對,{"record_digest": 照抄,
+    "node_id": "x"} 可直達 VERIFIED;修後 canonical 重算三值鏈,必斷。
+    """
+
+    intent = _intent()
+    forged_digest = "sha256:" + "7" * 64
+    receipt = _running_receipt(verifier_capture_digest=forged_digest)
+    forged = {"record_digest": forged_digest, "node_id": "x"}
+    verdict = leaf.validate_s2_5_attestation_binding(
+        intent=intent, ops_preflight=_ops_preflight(intent), receipt=receipt,
+        verifier_capture=forged, now=NOW,
+    )
+    assert verdict["status"] == "S2_5_ATTESTATION_BINDING_REJECTED", verdict
+    assert any("never trusted" in reason for reason in verdict["reasons"])
+    # 非 dict capture(裸 digest 字串)⇒ fail-closed 拒。
+    bare = leaf.validate_s2_5_attestation_binding(
+        intent=intent, ops_preflight=_ops_preflight(intent), receipt=receipt,
+        verifier_capture=forged_digest, now=NOW,
+    )
+    assert bare["status"] == "S2_5_ATTESTATION_BINDING_REJECTED"
+    assert any("well-formed" in reason for reason in bare["reasons"])
+    # node_id 缺席(匿名 capture)⇒ 拒——即使 record_digest 真的由重算得出。
+    anonymous = {"schema_version": "command_capture_v2", "exit_code": 0}
+    anonymous["record_digest"] = canonical_digest(anonymous)
+    anon_receipt = _running_receipt(
+        verifier_capture_digest=anonymous["record_digest"]
+    )
+    anon = leaf.validate_s2_5_attestation_binding(
+        intent=intent, ops_preflight=_ops_preflight(intent), receipt=anon_receipt,
+        verifier_capture=anonymous, now=NOW,
+    )
+    assert anon["status"] == "S2_5_ATTESTATION_BINDING_REJECTED"
+    assert any("node_id" in reason for reason in anon["reasons"])
+    # record_digest 非 sha256 形狀(最小 record 形狀)⇒ 拒。
+    malformed = {"record_digest": "not-a-digest", "node_id": "y"}
+    bad_shape = leaf.validate_s2_5_attestation_binding(
+        intent=intent, ops_preflight=_ops_preflight(intent),
+        receipt=_running_receipt(verifier_capture_digest="sha256:" + "6" * 64),
+        verifier_capture=malformed, now=NOW,
+    )
+    assert bad_shape["status"] == "S2_5_ATTESTATION_BINDING_REJECTED"
+    assert any("sha256" in reason for reason in bad_shape["reasons"])
+
+
+def test_attestation_binding_requires_unit_inactive_confirmed_true():
+    """note-2(tranche 2)紅→綠:OPS preflight 的語義面——unit_inactive_confirmed 必須
+    為 true。false(誠實重封 self_digest)修前可過結構驗直達 PENDING/VERIFIED。"""
+
+    intent = _intent()
+    receipt = _running_receipt()
+    live_preflight = {
+        "schema_version": "s2_5_ops_preflight_fragment_v1_informal",
+        "intent_digest": intent["self_digest"],
+        "preflight": {"unit_inactive_confirmed": False},
+    }
+    live_preflight["self_digest"] = artifact_self_digest(live_preflight)
+    verdict = leaf.validate_s2_5_attestation_binding(
+        intent=intent, ops_preflight=live_preflight, receipt=receipt,
+        verifier_capture=None, now=NOW,
+    )
+    assert verdict["status"] == "S2_5_ATTESTATION_BINDING_REJECTED", verdict
+    assert any("unit_inactive_confirmed" in reason for reason in verdict["reasons"])
+    # preflight 面缺席(無 preflight 子物件)同拒。
+    faceless = {
+        "schema_version": "s2_5_ops_preflight_fragment_v1_informal",
+        "intent_digest": intent["self_digest"],
+    }
+    faceless["self_digest"] = artifact_self_digest(faceless)
+    verdict2 = leaf.validate_s2_5_attestation_binding(
+        intent=intent, ops_preflight=faceless, receipt=receipt,
+        verifier_capture=None, now=NOW,
+    )
+    assert verdict2["status"] == "S2_5_ATTESTATION_BINDING_REJECTED"
 
 
 def test_attestation_binding_rejects_broken_preflight_and_foreign_intent():

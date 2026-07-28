@@ -110,6 +110,33 @@ def test_observation_exception_with_failed_rollback_is_recovery_required(
     assert _journal_state(tmp_path, intent) == "RECOVERY_REQUIRED"
 
 
+def test_final_observation_exception_is_terminal_failed_never_an_escape(
+    tmp_path, monkeypatch
+):
+    """P2-1(tranche 2):S2.5B `_observe_and_build` 例外臂的 mutation-killer。
+
+    單獨把該臂的 try/except 拿掉(裸逸)即紅:RuntimeError 會直接逸出使本測試 error;
+    砍 journal transition 或改 terminal state 也各自紅(斷言 TERMINAL_FAILED 落盤)。
+    """
+
+    _key, intent, permit, unit, pre_drill = kit.b_side_setup(tmp_path, monkeypatch)
+    observers = kit.HarnessObserver(unit, clock=kit.frozen_clock())
+    observers.observe_running_dimensions = lambda: (_ for _ in ()).throw(
+        RuntimeError("post-drill observer backend lost")
+    )
+    verdict = lifecycle.apply_s2_5_final(
+        intent, permit, unit,
+        **kit.final_apply_kwargs(tmp_path=tmp_path, unit=unit, observers=observers),
+        s2_1_drill_receipt=kit.drill_receipt(),
+        pre_drill_attestation=pre_drill,
+    )
+    # 例外臂:typed verdict(絕不裸逸)+ journal TERMINAL_FAILED + reset 未發生。
+    assert verdict["status"] == "ATTESTATION_FAILED"
+    assert any("post-drill observation raised" in r for r in verdict["reasons"])
+    assert _journal_state(tmp_path, intent) == "TERMINAL_FAILED"
+    assert "reset_failed" not in unit.calls  # 觀測未證,watchdog reset 永不可發生。
+
+
 def test_final_post_reset_observation_exception_latches_recovery(tmp_path, monkeypatch):
     _key, intent, permit, unit, pre_drill = kit.b_side_setup(tmp_path, monkeypatch)
     observers = kit.HarnessObserver(unit, clock=kit.frozen_clock())

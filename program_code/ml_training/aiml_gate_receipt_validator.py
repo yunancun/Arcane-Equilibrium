@@ -1927,6 +1927,11 @@ def validate_aiml_artifact(
         # SOURCE-TRUTH 邊界與 never-refreshable 表在葉內(乾淨 [] 不證任何 runtime)。
         import aiml_gate_receipt_s2_5 as _s2_5_leaf
         errors.extend(_s2_5_leaf.validate_s2_5_artifact(artifact, now=now))
+    if schema_version == "ingestion_compatibility_receipt_v1":
+        # S2.2B(WP5 tranche 2)委派葉:S2.2A 三值鏈重算 + s2_5_final_attestation 全套
+        # 重驗(含 attestor 驗簽)+ V151-V160 逐項 revalidation。乾淨 [] 不證任何 runtime。
+        import aiml_gate_receipt_s2_2b as _s2_2b_leaf
+        errors.extend(_s2_2b_leaf.validate_s2_2b_artifact(artifact, now=now))
     return errors
 
 
