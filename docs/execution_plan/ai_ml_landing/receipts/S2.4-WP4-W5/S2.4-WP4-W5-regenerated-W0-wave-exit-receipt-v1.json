@@ -1,9 +1,9 @@
 {
   "capture_digests": [
-    "sha256:fe95139c4c809f4614d494cb10aac9ddd9425f33dd2bb4e07edde31270df39d0"
+    "sha256:4a05f0c906de4a2276dd22596013bde48a2a0731853ad213ced86a34653b64ae"
   ],
   "exported_abi_digest": "sha256:236cbee199c2f4a6949ac9c6e3a4d7c0f3391c9c5ecb33acf7187f2cd05ab830",
-  "owned_path_diff_digest": "sha256:75f432fd2ba889d2ebe33ee09747109faa76450025d68599a12d94a3cf19c992",
+  "owned_path_diff_digest": "sha256:0377909e7e6ea71a039c111f29a04f21f9533e8fcd70e594738213797a3959f4",
   "owned_path_manifest_digest": "sha256:00674c05406657c0a8da16003be1e6bca9a16e0891e582391c31d6fcb9969eb5",
   "predecessor_wave_receipt_digest": null,
   "production_authority_flags": {
@@ -12,15 +12,19 @@
     "running_attested": false
   },
   "review_fragment_digests": [
-    "sha256:f4892efa85fd4ded91f8d1bd4afd1d54436b9088d29cfebf12e01fe872d38ac3",
-    "sha256:48e01daf49cf0672d36177aae458822ee1d9704421b291bd2116654caf5dcc1c"
+    "sha256:cb19eed0a5ff4430f47d672721822057ffe9789f849365cfab3fb0679772879a",
+    "sha256:b0aab2a024f4120592b5aafb0f135af7032958250ceec519ffffcc6424cbeddc",
+    "sha256:4ff592f0452ceb9e9fce28aaab83eb75b57651f57453dbcad6782f3399d05430",
+    "sha256:38fbed08fab9ad93dba4c713dd17c53dd45d69292ff45dc3314cc63fb28306c5",
+    "sha256:bb8e8f2800c18d3b5ec20dc600493a9ce8c1ed0bac115410997e5001e23407d3",
+    "sha256:9b53c90dedeb57b0ea6debebbaabad6e46c42caa4d56f4ee704d8b16c353e28c"
   ],
   "schema_version": "s2_4_wave_exit_receipt_v1",
-  "self_digest": "sha256:577bb89eb9d887b274d9006aec25971f0197e7a55e21b8077b2e20a514bfcd74",
-  "source_admission_receipt_digest": "sha256:fa317bb77249d2ff78f27b6057b4364c3431a2da91789725f318abb743806c1f",
-  "source_head": "5be472193d5a23b5e3fbb76b7fc58f2068008ed1",
+  "self_digest": "sha256:08c504902c9bfac3ec7e94ec9767f3cebf71d0ba6d85a5106a77d4c82215148e",
+  "source_admission_receipt_digest": "sha256:2221e7b70ea90095b5957e46f1eb247d84758a1a915ed2923f87c78e418f158a",
+  "source_head": "cc6a8b97a9ce1d6c21361f20cf940e202eee34da",
   "test_digests": [
-    "sha256:f5a734aaba3964e8f76c7f0224b32bd6f82c3c57a18ee67fad34e58e1a9eba72"
+    "sha256:239a7742afa331c021c9c871539d16b38882f061021e2060c8aaaf73d4182c7f"
   ],
   "wave": "W0"
 }

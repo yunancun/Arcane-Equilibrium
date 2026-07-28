@@ -1,26 +1,30 @@
 {
   "capture_digests": [
-    "sha256:fe95139c4c809f4614d494cb10aac9ddd9425f33dd2bb4e07edde31270df39d0"
+    "sha256:4a05f0c906de4a2276dd22596013bde48a2a0731853ad213ced86a34653b64ae"
   ],
-  "exported_abi_digest": "sha256:c84762b5225ebea156e18af5eb50ff87223be1e9b65e4a9bbaea1d341aee4572",
-  "owned_path_diff_digest": "sha256:628fca35933a8c630111c27db8a3984463858dd6a0dcd6ea5b34b14e0863ff36",
+  "exported_abi_digest": "sha256:c95dd5e0f4d821a1c93ca8454fbb3c1490a9d144a070b93d06b4c344ffdb52ea",
+  "owned_path_diff_digest": "sha256:58b52b36e6061e716480bebb3dd4cfea40c60067f2a29033624cb84a3846463b",
   "owned_path_manifest_digest": "sha256:b887ddd300c4ee93d261fe54ef204c746ce1dc369ba30616ecb62f129090f200",
-  "predecessor_wave_receipt_digest": "sha256:b052b421a26b2a14277eb20f3358734d7ad085c2f209c669e18fa0fbf161fa6f",
+  "predecessor_wave_receipt_digest": "sha256:475ff778da089ed3654503a51db436fb24436f9b8bdcbc30053be8c8ae60d5c7",
   "production_authority_flags": {
     "nine_authorities_false": true,
     "production_apply_performed": false,
     "running_attested": false
   },
   "review_fragment_digests": [
-    "sha256:f4892efa85fd4ded91f8d1bd4afd1d54436b9088d29cfebf12e01fe872d38ac3",
-    "sha256:48e01daf49cf0672d36177aae458822ee1d9704421b291bd2116654caf5dcc1c"
+    "sha256:cb19eed0a5ff4430f47d672721822057ffe9789f849365cfab3fb0679772879a",
+    "sha256:b0aab2a024f4120592b5aafb0f135af7032958250ceec519ffffcc6424cbeddc",
+    "sha256:4ff592f0452ceb9e9fce28aaab83eb75b57651f57453dbcad6782f3399d05430",
+    "sha256:38fbed08fab9ad93dba4c713dd17c53dd45d69292ff45dc3314cc63fb28306c5",
+    "sha256:bb8e8f2800c18d3b5ec20dc600493a9ce8c1ed0bac115410997e5001e23407d3",
+    "sha256:9b53c90dedeb57b0ea6debebbaabad6e46c42caa4d56f4ee704d8b16c353e28c"
   ],
   "schema_version": "s2_4_wave_exit_receipt_v1",
-  "self_digest": "sha256:17d90b8b216d639d67695792152efa947c376abc01918672e87b396a72453bcc",
-  "source_admission_receipt_digest": "sha256:fa317bb77249d2ff78f27b6057b4364c3431a2da91789725f318abb743806c1f",
-  "source_head": "5be472193d5a23b5e3fbb76b7fc58f2068008ed1",
+  "self_digest": "sha256:e528fde6c287119b44c9b6d442ae21cdb509bf0bacf24f3a6b574aa7c4b8bea6",
+  "source_admission_receipt_digest": "sha256:2221e7b70ea90095b5957e46f1eb247d84758a1a915ed2923f87c78e418f158a",
+  "source_head": "cc6a8b97a9ce1d6c21361f20cf940e202eee34da",
   "test_digests": [
-    "sha256:f5a734aaba3964e8f76c7f0224b32bd6f82c3c57a18ee67fad34e58e1a9eba72"
+    "sha256:239a7742afa331c021c9c871539d16b38882f061021e2060c8aaaf73d4182c7f"
   ],
   "wave": "W4"
 }
