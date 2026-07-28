@@ -1,0 +1,225 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2_5_start_intent_v1.schema.json",
+  "title": "s2_5_start_intent_v1",
+  "description": "Closed top-level route-class artifact for the s2_5_start_intent route (design §5.1/§6). It contains {core, core_digest, start_id, route_surface, forbidden_surfaces, expires_at, self_digest}: the embedded unsigned s2_5_start_core_v1 is what the operator permit signs, core_digest re-derives from it and start_id = 's2-5-' + hex(core_digest). route_surface binds the phase to its exact v3 effect class (S2_5A_START -> ENGINE_SCANNER_SERVICE_START, S2_5B_FINAL -> WATCHDOG_ROLLBACK_TEST) inside the single WATCHDOG_ROLLBACK_TEST effect lineage (PM O-5). Every forbidden surface (PG write / migration / secret / credential install / host identity / PREPARE fetch-build / unit render-install / daemon-reload / broker-order) is pinned const false so a start request carrying builder/install authority is structurally rejected before node injection. No raw command, unit text, signal, pid or caller-supplied path key can appear (additionalProperties:false everywhere plus the validator's forbidden-key scan). Contract only: no runtime/production PASS is asserted.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "route_class",
+    "core",
+    "core_digest",
+    "start_id",
+    "route_surface",
+    "forbidden_surfaces",
+    "expires_at",
+    "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2_5_start_intent_v1"},
+    "route_class": {"const": "s2_5_start_intent"},
+    "core": {"$ref": "#/$defs/start_core"},
+    "core_digest": {"$ref": "#/$defs/digest"},
+    "start_id": {"$ref": "#/$defs/start_id"},
+    "route_surface": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required_effect_class",
+        "effect_lineage",
+        "runtime_effect",
+        "service",
+        "risk",
+        "runtime_claim"
+      ],
+      "properties": {
+        "required_effect_class": {
+          "enum": ["ENGINE_SCANNER_SERVICE_START", "WATCHDOG_ROLLBACK_TEST"]
+        },
+        "effect_lineage": {"const": "WATCHDOG_ROLLBACK_TEST"},
+        "runtime_effect": {"const": true},
+        "service": {"const": "installed_unit_lifecycle_only"},
+        "risk": {"enum": ["high", "critical"]},
+        "runtime_claim": {"const": true}
+      }
+    },
+    "forbidden_surfaces": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pg_write",
+        "migration",
+        "secret",
+        "credential_install",
+        "host_identity",
+        "prepare_fetch_build",
+        "unit_render_install",
+        "daemon_reload",
+        "broker_or_order"
+      ],
+      "properties": {
+        "pg_write": {"const": false},
+        "migration": {"const": false},
+        "secret": {"const": false},
+        "credential_install": {"const": false},
+        "host_identity": {"const": false},
+        "prepare_fetch_build": {"const": false},
+        "unit_render_install": {"const": false},
+        "daemon_reload": {"const": false},
+        "broker_or_order": {"const": false}
+      }
+    },
+    "expires_at": {"$ref": "#/$defs/timestamp"},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"core": {"properties": {"phase": {"const": "S2_5A_START"}}}}
+      },
+      "then": {
+        "properties": {
+          "route_surface": {
+            "properties": {
+              "required_effect_class": {"const": "ENGINE_SCANNER_SERVICE_START"}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"core": {"properties": {"phase": {"const": "S2_5B_FINAL"}}}}
+      },
+      "then": {
+        "properties": {
+          "route_surface": {
+            "properties": {
+              "required_effect_class": {"const": "WATCHDOG_ROLLBACK_TEST"}
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "git_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "start_id": {"type": "string", "pattern": "^s2-5-[0-9a-f]{64}$"},
+    "start_core": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "phase",
+        "target_host",
+        "unit_name",
+        "expected_unit_fragment_digest",
+        "s2_4_install_effect_receipt_digest",
+        "expected_launch_bundle_digest",
+        "expected_application_bundle_digest",
+        "expected_base_runtime_tree_digest",
+        "native_loader_closure_digest",
+        "s2_1_drill_receipt_digest",
+        "pre_drill_attestation_digest",
+        "attestation_window",
+        "start_budget_seconds",
+        "rollback_budget_seconds",
+        "safety_margin_seconds",
+        "authorization_profile",
+        "source_head",
+        "issued_at",
+        "expires_at"
+      ],
+      "properties": {
+        "schema_version": {"const": "s2_5_start_core_v1"},
+        "phase": {"enum": ["S2_5A_START", "S2_5B_FINAL"]},
+        "target_host": {"type": "string", "minLength": 1},
+        "unit_name": {"const": "arcane-equilibrium-aiml-engine-scanner.service"},
+        "expected_unit_fragment_digest": {"$ref": "#/$defs/digest"},
+        "s2_4_install_effect_receipt_digest": {"$ref": "#/$defs/digest"},
+        "expected_launch_bundle_digest": {"$ref": "#/$defs/digest"},
+        "expected_application_bundle_digest": {"$ref": "#/$defs/digest"},
+        "expected_base_runtime_tree_digest": {"$ref": "#/$defs/digest"},
+        "native_loader_closure_digest": {"$ref": "#/$defs/digest"},
+        "s2_1_drill_receipt_digest": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/digest"}]},
+        "pre_drill_attestation_digest": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/digest"}]},
+        "attestation_window": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["max_evidence_age_seconds", "min_samples", "sample_interval_seconds"],
+          "properties": {
+            "max_evidence_age_seconds": {"type": "integer", "minimum": 1, "maximum": 3600},
+            "min_samples": {"type": "integer", "minimum": 1, "maximum": 1000},
+            "sample_interval_seconds": {"type": "integer", "minimum": 1, "maximum": 3600}
+          }
+        },
+        "start_budget_seconds": {"type": "integer", "minimum": 1, "maximum": 3600},
+        "rollback_budget_seconds": {"type": "integer", "minimum": 1, "maximum": 3600},
+        "safety_margin_seconds": {"type": "integer", "minimum": 0, "maximum": 3600},
+        "authorization_profile": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "profile_identity",
+            "signature_namespace",
+            "attestor_identity",
+            "attestor_namespace",
+            "max_ttl_seconds"
+          ],
+          "properties": {
+            "profile_identity": {
+              "enum": ["aiml-s2-5a-start-operator-v1", "aiml-s2-5b-final-operator-v1"]
+            },
+            "signature_namespace": {
+              "enum": [
+                "arcane-equilibrium-aiml-s2-5a-start",
+                "arcane-equilibrium-aiml-s2-5b-final"
+              ]
+            },
+            "attestor_identity": {"const": "aiml-s2-5-runtime-attestor-v1"},
+            "attestor_namespace": {"const": "arcane-equilibrium-aiml-s2-5-running-attestation"},
+            "max_ttl_seconds": {"type": "integer", "minimum": 1, "maximum": 900}
+          }
+        },
+        "source_head": {"$ref": "#/$defs/git_sha"},
+        "issued_at": {"$ref": "#/$defs/timestamp"},
+        "expires_at": {"$ref": "#/$defs/timestamp"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"phase": {"const": "S2_5A_START"}}},
+          "then": {
+            "properties": {
+              "s2_1_drill_receipt_digest": {"type": "null"},
+              "pre_drill_attestation_digest": {"type": "null"},
+              "authorization_profile": {
+                "properties": {
+                  "profile_identity": {"const": "aiml-s2-5a-start-operator-v1"},
+                  "signature_namespace": {"const": "arcane-equilibrium-aiml-s2-5a-start"}
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {"properties": {"phase": {"const": "S2_5B_FINAL"}}},
+          "then": {
+            "properties": {
+              "s2_1_drill_receipt_digest": {"$ref": "#/$defs/digest"},
+              "pre_drill_attestation_digest": {"$ref": "#/$defs/digest"},
+              "authorization_profile": {
+                "properties": {
+                  "profile_identity": {"const": "aiml-s2-5b-final-operator-v1"},
+                  "signature_namespace": {"const": "arcane-equilibrium-aiml-s2-5b-final"}
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

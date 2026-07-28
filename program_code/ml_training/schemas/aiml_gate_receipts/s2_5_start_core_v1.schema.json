@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2_5_start_core_v1.schema.json",
+  "title": "s2_5_start_core_v1",
+  "description": "Closed unsigned core for the S2.5 running-attestation seam (design §5.1). The core is what an operator permit signs (it excludes derived ids / authorization objects / self_digest); start_core_digest = canonical_digest(core) and start_id = 's2-5-' + hex(start_core_digest). One core, two phases: S2_5A_START (initial enable --now + running attestation; s2_1_drill_receipt_digest and pre_drill_attestation_digest MUST be null) and S2_5B_FINAL (post-drill final attestation + watchdog reset last; both digests MUST be present). authorization_profile declares only profile/namespace/max-TTL policy — no authorization object, digest or signature is ever embedded. Contract only: no runtime/production PASS is asserted; nine authorities stay false.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "phase",
+    "target_host",
+    "unit_name",
+    "expected_unit_fragment_digest",
+    "s2_4_install_effect_receipt_digest",
+    "expected_launch_bundle_digest",
+    "expected_application_bundle_digest",
+    "expected_base_runtime_tree_digest",
+    "native_loader_closure_digest",
+    "s2_1_drill_receipt_digest",
+    "pre_drill_attestation_digest",
+    "attestation_window",
+    "start_budget_seconds",
+    "rollback_budget_seconds",
+    "safety_margin_seconds",
+    "authorization_profile",
+    "source_head",
+    "issued_at",
+    "expires_at"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2_5_start_core_v1"},
+    "phase": {"enum": ["S2_5A_START", "S2_5B_FINAL"]},
+    "target_host": {"type": "string", "minLength": 1},
+    "unit_name": {"const": "arcane-equilibrium-aiml-engine-scanner.service"},
+    "expected_unit_fragment_digest": {"$ref": "#/$defs/digest"},
+    "s2_4_install_effect_receipt_digest": {"$ref": "#/$defs/digest"},
+    "expected_launch_bundle_digest": {"$ref": "#/$defs/digest"},
+    "expected_application_bundle_digest": {"$ref": "#/$defs/digest"},
+    "expected_base_runtime_tree_digest": {"$ref": "#/$defs/digest"},
+    "native_loader_closure_digest": {"$ref": "#/$defs/digest"},
+    "s2_1_drill_receipt_digest": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/digest"}]},
+    "pre_drill_attestation_digest": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/digest"}]},
+    "attestation_window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_evidence_age_seconds", "min_samples", "sample_interval_seconds"],
+      "properties": {
+        "max_evidence_age_seconds": {"type": "integer", "minimum": 1, "maximum": 3600},
+        "min_samples": {"type": "integer", "minimum": 1, "maximum": 1000},
+        "sample_interval_seconds": {"type": "integer", "minimum": 1, "maximum": 3600}
+      }
+    },
+    "start_budget_seconds": {"type": "integer", "minimum": 1, "maximum": 3600},
+    "rollback_budget_seconds": {"type": "integer", "minimum": 1, "maximum": 3600},
+    "safety_margin_seconds": {"type": "integer", "minimum": 0, "maximum": 3600},
+    "authorization_profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile_identity",
+        "signature_namespace",
+        "attestor_identity",
+        "attestor_namespace",
+        "max_ttl_seconds"
+      ],
+      "properties": {
+        "profile_identity": {
+          "enum": ["aiml-s2-5a-start-operator-v1", "aiml-s2-5b-final-operator-v1"]
+        },
+        "signature_namespace": {
+          "enum": [
+            "arcane-equilibrium-aiml-s2-5a-start",
+            "arcane-equilibrium-aiml-s2-5b-final"
+          ]
+        },
+        "attestor_identity": {"const": "aiml-s2-5-runtime-attestor-v1"},
+        "attestor_namespace": {"const": "arcane-equilibrium-aiml-s2-5-running-attestation"},
+        "max_ttl_seconds": {"type": "integer", "minimum": 1, "maximum": 900}
+      }
+    },
+    "source_head": {"$ref": "#/$defs/git_sha"},
+    "issued_at": {"$ref": "#/$defs/timestamp"},
+    "expires_at": {"$ref": "#/$defs/timestamp"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"phase": {"const": "S2_5A_START"}}},
+      "then": {
+        "properties": {
+          "s2_1_drill_receipt_digest": {"type": "null"},
+          "pre_drill_attestation_digest": {"type": "null"},
+          "authorization_profile": {
+            "properties": {
+              "profile_identity": {"const": "aiml-s2-5a-start-operator-v1"},
+              "signature_namespace": {"const": "arcane-equilibrium-aiml-s2-5a-start"}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"phase": {"const": "S2_5B_FINAL"}}},
+      "then": {
+        "properties": {
+          "s2_1_drill_receipt_digest": {"$ref": "#/$defs/digest"},
+          "pre_drill_attestation_digest": {"$ref": "#/$defs/digest"},
+          "authorization_profile": {
+            "properties": {
+              "profile_identity": {"const": "aiml-s2-5b-final-operator-v1"},
+              "signature_namespace": {"const": "arcane-equilibrium-aiml-s2-5b-final"}
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "git_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "timestamp": {"type": "string", "format": "date-time"}
+  }
+}

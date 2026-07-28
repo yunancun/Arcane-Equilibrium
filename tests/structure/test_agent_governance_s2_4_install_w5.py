@@ -1232,9 +1232,11 @@ def test_every_folded_value_that_carries_a_claim_has_a_reason_level_consumer(
         return validator.w5_structural_errors(w5)
 
     for section, overrides, marker in (
-        ("inactive_postcheck_live", {"s2_5_lifecycle_source_files": ["S2.5-x.md"],
-                                     "s2_5_lifecycle_source_absent": False},
-         "still records S2_5_LIFECYCLE_FIXTURES_DO_NOT_EXIST"),
+        # PM O-1(2026-07-28)後 S2.5 source 已存在且 row 已標 CLOSED_BY_S2_5_SOURCE:
+        # 反向假宣稱是「S2.5 source 不存在」——row 不再是 OUT_OF_WP4_SCOPE,該臂必須具名。
+        ("inactive_postcheck_live", {"s2_5_lifecycle_source_files": [],
+                                     "s2_5_lifecycle_source_absent": True},
+         "does not record S2_5_LIFECYCLE_FIXTURES_DO_NOT_EXIST as OUT_OF_WP4_SCOPE"),
         ("inactive_postcheck_live", {"s2_5_lifecycle_source_absent": None},
          "cannot measure whether an S2.5 lifecycle source exists"),
         ("inactive_postcheck_live", {"aggregate_forbidden_methods": []},
@@ -1258,14 +1260,18 @@ def test_every_folded_value_that_carries_a_claim_has_a_reason_level_consumer(
     clean = validator.w5_structural_errors(w5)
     for marker in (
         "still records S2_5_LIFECYCLE_FIXTURES_DO_NOT_EXIST",
+        "does not record S2_5_LIFECYCLE_FIXTURES_DO_NOT_EXIST",
         "forbidden-method inventory is empty",
         "exposes no properties at all",
         "generates no statement at all",
         "is not the §10.1-named",
     ):
         assert not any(marker in reason for reason in clean), (marker, clean)
-    # 而 S2.5 的判定必須用同一個 glob(舊碼只看一個猜出來的檔名)。
-    assert baseline["inactive_postcheck_live"]["s2_5_lifecycle_source_files"] == []
+    # 而 S2.5 的判定必須用同一個 glob(舊碼只看一個猜出來的檔名)——WP5 落地後
+    # glob 必須命中 S2.5 設計正本(檔案消失=§10.5 #29 後半再度失去 owner=上方臂變紅)。
+    assert baseline["inactive_postcheck_live"]["s2_5_lifecycle_source_files"] == [
+        "S2.5-running-attestation-source-seam.md"
+    ]
 
 
 def test_no_wave_leaf_widens_the_scanner_namespace_at_import_time() -> None:

@@ -312,14 +312,26 @@ def test_the_aggregate_driver_surface_refuses_every_lifecycle_verb(verb: str) ->
     assert called == []
 
 
-def test_no_s2_5_lifecycle_source_exists_in_this_repository() -> None:
-    """§10.5 #29 的後半句(「S2.5 fixtures own `enable --now`…」)在 WP4 沒有擁有者:
-    S2.5 的 source 根本不存在。誠實記錄,而不是算成已覆蓋。"""
+def test_s2_5_lifecycle_source_now_exists_and_the_obligation_is_closed() -> None:
+    """§10.5 #29 的後半句自 2026-07-28 起**有了 owner**(本測試舊版要求的 revisit):
+    WP5 落地 S2.5 design + 三態 lifecycle fixtures,帳本 row 依 PM O-1 裁決改標
+    ``CLOSED_BY_S2_5_SOURCE``(row 保留作歷史,不刪)。三個 subject 一起釘住,任一側
+    倒退(design 消失/fixtures 消失/typed_status 軟化回 OUT_OF_WP4_SCOPE)即紅。"""
 
     design_dir = ROOT / "docs/execution_plan/ai_ml_landing/design"
-    assert not list(design_dir.glob("S2.5-*.md")), (
-        "an S2.5 design landed; §10.5 #29's second clause now has an owner and this "
-        "test plus the S2_5_LIFECYCLE_FIXTURES_DO_NOT_EXIST obligation must be revisited"
+    assert sorted(path.name for path in design_dir.glob("S2.5-*.md")) == [
+        "S2.5-running-attestation-source-seam.md"
+    ], "the S2.5 design vanished (or forked); §10.5 #29's second clause lost its owner"
+    row = next(
+        row
+        for row in validator._W5_EXPORTED_ABI["remaining_owned_obligations"]
+        if row["obligation_id"] == "S2_5_LIFECYCLE_FIXTURES_DO_NOT_EXIST"
+    )
+    assert row["typed_status"] == "CLOSED_BY_S2_5_SOURCE", row["typed_status"]
+    fixtures = ROOT / "tests/structure/test_agent_governance_s2_5_lifecycle_fixtures.py"
+    assert fixtures.is_file() and fixtures.read_text(encoding="utf-8").strip(), (
+        "the S2.5 lifecycle fixtures file is absent/empty while the ledger row claims "
+        "CLOSED_BY_S2_5_SOURCE"
     )
 
 

@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aiml_component_effect_classification_v3.schema.json",
+  "title": "Classifier-derived AIML component effect classification (S2.5 WP5 running-attestation seam)",
+  "description": "Additive sibling of aiml_component_effect_classification_v1/v2 for the two S2.5 effect classes inside the single WATCHDOG_ROLLBACK_TEST effect lineage (PM O-5): ENGINE_SCANNER_SERVICE_START (phase S2.5A, initial enable --now + running attestation) and WATCHDOG_ROLLBACK_TEST (phase S2.5B, post-drill final attestation + watchdog reset last; it also carries the lineage name, which is the PROGRESS S2.5 row's unchanged Required effect). required_effects is derived from the S2.5-leaf AIML_COMPONENT_EFFECT_CLASS_MATRIX_V3, never from the caller; a work-package touching an effectful S2.5 component surface cannot self-declare it as source-only. The frozen S0.3 classifier and the v1/v2 component matrices/schemas are NOT mutated by this sibling (bytes and digests unchanged). The central validator dispatches by exact schema_version and rejects cross-version digests. required_effects.effect_class permits NONE only so a forged source-only downgrade is representable and rejected by the recompute in validate_aiml_artifact.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "classification_id", "component_work_package_id", "classified_inputs", "classifier_digest", "required_effects", "classified_at", "self_digest"],
+  "properties": {
+    "schema_version": {"const": "aiml_component_effect_classification_v3"},
+    "classification_id": {"$ref": "#/$defs/digest"},
+    "component_work_package_id": {"type": "string", "minLength": 1},
+    "classified_inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["component_work_package_id", "component_effect_class", "declared_adapter_id", "declared_intent_fields", "owned_path_manifest", "direct_interfaces"],
+      "properties": {
+        "component_work_package_id": {"type": "string", "minLength": 1},
+        "component_effect_class": {"enum": ["ENGINE_SCANNER_SERVICE_START", "WATCHDOG_ROLLBACK_TEST"]},
+        "declared_adapter_id": {"type": "string", "minLength": 1},
+        "declared_intent_fields": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "owned_path_manifest": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "direct_interfaces": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "classifier_digest": {"$ref": "#/$defs/digest"},
+    "required_effects": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["effect_class", "status", "adapter_id", "actor_node_id", "rollback_contract", "independent_postcheck_node_id", "required_intent_fields", "adapter_binding_status"],
+        "properties": {
+          "effect_class": {"enum": ["NONE", "ENGINE_SCANNER_SERVICE_START", "WATCHDOG_ROLLBACK_TEST"]},
+          "status": {"enum": ["REQUIRED_PENDING", "NOT_REQUIRED", "SATISFIED"]},
+          "adapter_id": {"type": "string", "minLength": 1},
+          "actor_node_id": {"type": "string", "minLength": 1},
+          "rollback_contract": {"type": "string", "minLength": 1},
+          "independent_postcheck_node_id": {"type": "string", "minLength": 1},
+          "required_intent_fields": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+          "adapter_binding_status": {"enum": ["AUTHORITY_LOCKED_PRODUCTION_CAPABLE"]}
+        }
+      }
+    },
+    "classified_at": {"$ref": "#/$defs/timestamp"},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "timestamp": {"type": "string", "format": "date-time"}
+  }
+}
