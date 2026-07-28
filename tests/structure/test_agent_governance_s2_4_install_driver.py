@@ -250,6 +250,341 @@ def test_the_plan_intent_binding_has_no_digest_cycle() -> None:
     ]
 
 
+# ══════════════ S2.4-AMEND-2:plan-derived expected_topology(§10.5 #25)═════════
+def test_a_caller_supplied_expected_topology_is_refused_by_the_frozen_allowlist(fx) -> None:
+    """曾經的唯一弱化路徑:caller 遞交 expected_topology。現在是 allowlist typed 拒。"""
+
+    payloads = fx.row_payloads()
+    payloads["PG_ROLE_ACL_MIGRATION"]["expected_topology"] = kit.topology_expected(
+        fx.attestation
+    )
+    verdict = fx.apply(row_payloads=payloads)
+    assert verdict["status"] == "PRECHECK_FAILED"
+    assert any(
+        "expected_topology" in reason and "frozen row ABI allowlist" in reason
+        for reason in verdict["reasons"]
+    ), verdict["reasons"]
+    assert verdict["mutation_performed"] is False
+    assert fx.driver.calls == []
+    assert fx.row_drivers["PG_ROLE_ACL_MIGRATION"].calls == []
+
+
+def test_the_pg_expected_topology_is_derived_from_the_signed_plan(fx) -> None:
+    """正向:零 caller 基線鍵——簽章 delta + 基線 attestation 導出**全鍵** expected,
+    disposable lane 的 PG row SATISFIED(缺鍵靜默跳過已無入口)。"""
+
+    payload = fx.row_payloads()["PG_ROLE_ACL_MIGRATION"]
+    assert "expected_topology" not in payload and "hba_delta" in payload
+    derived = runner.derive_plan_expected_topology(
+        plan=fx.plan, hba_delta=fx.hba_delta, topology_attestation=fx.attestation,
+    )
+    assert derived["status"] == "PLAN_EXPECTED_TOPOLOGY_DERIVED", derived["reasons"]
+    assert sorted(derived["expected_topology"]) == [
+        "cluster_identity_digest", "hba_projection", "listener_config_digest",
+        "proxy_config_digest", "source_head", "target_host",
+    ]
+    verdict = fx.apply()
+    assert verdict["status"] == "SOURCE_SIMULATION_PASS", verdict["reasons"]
+    assert verdict["row_verdicts"]["PG_ROLE_ACL_MIGRATION"]["status"] == "SATISFIED"
+
+
+@pytest.mark.parametrize("mutation", ["absent", "tampered", "foreign_plan"])
+def test_an_absent_tampered_or_misbound_hba_delta_is_a_zero_mutation_precheck(
+    fx, mutation,
+) -> None:
+    """hba_delta 缺席 / 內容被換(binding digest 不再等 core)/ 綁到別份 plan →
+    Codex-3 hoist 後在 aggregate precheck 即 PRECHECK_FAILED:driver 未 engage、
+    HOST_IDENTITY row 未跑、零 mutation(不再靠 §5.4 補償收拾無效 plan 輸入)。"""
+
+    payloads = fx.row_payloads()
+    pg = payloads["PG_ROLE_ACL_MIGRATION"]
+    if mutation == "absent":
+        pg.pop("hba_delta")
+    elif mutation == "tampered":
+        pg["hba_delta"]["effective_rule"]["user"] = "postgres"
+        pg["hba_delta"]["self_digest"] = validator.artifact_self_digest(pg["hba_delta"])
+    else:
+        pg["hba_delta"]["plan_id"] = "s2-4-" + "9" * 64
+        pg["hba_delta"]["self_digest"] = validator.artifact_self_digest(pg["hba_delta"])
+    verdict = fx.apply(row_payloads=payloads)
+    assert verdict["status"] == "PRECHECK_FAILED", verdict["reasons"]
+    assert any("zero mutation" in reason for reason in verdict["reasons"])
+    assert verdict["driver_engaged"] is False
+    assert verdict["mutation_performed"] is False
+    assert fx.driver.calls == []
+    assert fx.row_drivers["HOST_IDENTITY_INSTALL"].calls == []
+    assert fx.row_drivers["PG_ROLE_ACL_MIGRATION"].calls == []
+    assert fx.persisted_install_journal() is None
+
+
+def test_a_signed_rule_outside_the_observed_hba_is_topology_unproven(
+    tmp_path, monkeypatch,
+) -> None:
+    """簽進 core 的投影只含另一條 rule 時,attested effective rule 落在簽章投影之外。"""
+
+    fixture = w4b.Fixture(tmp_path, monkeypatch, hba_effective_rule={
+        "source": "127.0.0.1/32", "database": "trading_ai",
+        "user": "postgres", "method": "scram-sha-256",
+    })
+    verdict = fixture.apply()
+    assert verdict["status"] == "PG_TOPOLOGY_UNPROVEN", verdict["reasons"]
+    assert any(
+        "outside the signed HBA projection" in reason for reason in verdict["reasons"]
+    )
+    assert fixture.row_drivers["PG_ROLE_ACL_MIGRATION"].calls == []
+
+
+def test_a_forged_attestation_wearing_the_signed_baseline_digest_is_refused(fx) -> None:
+    """P2-2:偽 attestation 貼上真 baseline digest(欄位等值可過)→ 葉內重算
+    ``artifact_self_digest`` 拒;單呼叫葉自此與聚合 lane 同樣 fail-closed。"""
+
+    forged = deepcopy(fx.attestation)
+    forged["cluster_identity"]["system_identifier"] = "7000000000000000002"
+    # 不重封:貼真簽章 digest 使欄位等值檢查通過,重算必不過。
+    forged["self_digest"] = fx.plan["core"]["topology_pre_digest"]
+    derived = runner.derive_plan_expected_topology(
+        plan=fx.plan, hba_delta=fx.hba_delta, topology_attestation=forged,
+    )
+    assert derived["status"] == "PLAN_EXPECTED_TOPOLOGY_UNPROVEN"
+    assert any(
+        "does not re-derive its own canonical bytes" in reason
+        for reason in derived["reasons"]
+    ), derived["reasons"]
+
+
+@pytest.mark.parametrize("bad", [
+    None,
+    "not-a-mapping",
+    {},
+    {"S2_2A_SOURCE_COMPATIBILITY": None, "S2_3_EXPECTED_IDENTITY": None},
+    {
+        "S2_2A_SOURCE_COMPATIBILITY": None, "S2_3_EXPECTED_IDENTITY": None,
+        "S2_3_SEALED_BUILD": None, "S1_3_IDENTITY_CONTRACT": None,
+    },
+    {
+        "S2_2A_SOURCE_COMPATIBILITY": "not-a-digest", "S2_3_EXPECTED_IDENTITY": None,
+        "S2_3_SEALED_BUILD": None,
+    },
+])
+def test_the_receipt_builder_refuses_a_non_admission_shaped_refresh_digest_map(
+    fx, bad,
+) -> None:
+    """P2-1:builder 只在 step (2b) admission 之後可達——None/缺鍵/多鍵/非 digest 值
+    一律 typed 契約拒,絕不靜默寫成「三族全 FRESH」的 receipt 宣稱(silent-FRESH 關閉)。"""
+
+    with pytest.raises(runner.InstallDriverContractError):
+        evidence_leaf._build_install_effect_receipt(
+            plan=fx.plan, status="SOURCE_SIMULATION_PASS",
+            authorizations=fx.authorization_set,
+            probe_receipt_digests={}, prepare_result_digest="sha256:" + "1" * 64,
+            prepare_postcheck_digest="sha256:" + "2" * 64,
+            dependency_refresh_digests=bad,
+            row_results={}, journal_digest="sha256:" + "3" * 64,
+            unit_state={"loaded": True, "disabled": True, "inactive": True},
+            evidence_class="STRUCTURAL_ONLY", trusted_host_time=kit.NOW,
+            clock=kit.frozen_clock(),
+        )
+
+
+def test_a_presented_attestation_that_is_not_the_signed_baseline_is_refused(fx) -> None:
+    """換叢集:presented attestation ≠ core.topology_pre_digest 所指的簽章前基線
+    (Codex-3 hoist 後 = precheck 零 mutation 拒)。"""
+
+    observation = kit.topology_observation()
+    observation["cluster_identity"]["system_identifier"] = "7000000000000000002"
+    payloads = fx.row_payloads()
+    payloads["PG_ROLE_ACL_MIGRATION"]["topology_attestation"] = kit.topology_attestation(
+        observation
+    )
+    verdict = fx.apply(row_payloads=payloads)
+    assert verdict["status"] == "PRECHECK_FAILED", verdict["reasons"]
+    assert any(
+        "not the signed pre-observation baseline" in reason
+        for reason in verdict["reasons"]
+    )
+    assert verdict["driver_engaged"] is False and fx.driver.calls == []
+    assert fx.row_drivers["HOST_IDENTITY_INSTALL"].calls == []
+    assert fx.row_drivers["PG_ROLE_ACL_MIGRATION"].calls == []
+
+
+def test_a_delta_bound_to_another_cluster_or_hba_is_refused(fx) -> None:
+    """Codex-1:delta 的 cluster_identity_ref / pre_hba_digest 必須等於基線 attestation
+    的觀測值——綁到別座叢集/別份 HBA 的 delta 即使被 core 簽了也導不出本叢集的基線。"""
+
+    for field, needle in (
+        ("cluster_identity_ref", "cluster_identity_ref"),
+        ("pre_hba_digest", "pre_hba_digest"),
+    ):
+        delta = w4b.build_hba_delta(fx.attestation)
+        delta[field] = "sha256:" + "9" * 64
+        delta["self_digest"] = validator.artifact_self_digest(delta)
+        plan = {
+            "plan_id": delta["plan_id"], "core_digest": delta["plan_core_digest"],
+            "core": {
+                "hba_delta_digest": runner.hba_delta_plan_binding_digest(delta),
+                "topology_pre_digest": fx.attestation["self_digest"],
+                "source_head": kit.SOURCE_HEAD, "target_host": kit.HOST,
+            },
+        }
+        derived = runner.derive_plan_expected_topology(
+            plan=plan, hba_delta=delta, topology_attestation=fx.attestation, now=kit.NOW,
+        )
+        assert derived["status"] == "PLAN_EXPECTED_TOPOLOGY_UNPROVEN", field
+        assert any(needle in reason for reason in derived["reasons"]), (
+            field, derived["reasons"],
+        )
+    # 聚合 lane 同樣零 mutation 拒(cluster 錯綁經 Fixture payload)。
+    payloads = fx.row_payloads()
+    pg = payloads["PG_ROLE_ACL_MIGRATION"]
+    pg["hba_delta"]["cluster_identity_ref"] = "sha256:" + "9" * 64
+    pg["hba_delta"]["self_digest"] = validator.artifact_self_digest(pg["hba_delta"])
+    verdict = fx.apply(row_payloads=payloads)
+    assert verdict["status"] == "PRECHECK_FAILED", verdict["reasons"]
+    assert fx.driver.calls == [] and fx.row_drivers["HOST_IDENTITY_INSTALL"].calls == []
+
+
+def test_an_expired_or_malformed_hba_delta_window_is_refused(fx) -> None:
+    """Codex-2:derive 時刻晚於 delta 的 expires_at → 拒;observed_at > expires_at 的
+    畸形窗(無 now 也)→ 拒。"""
+
+    expired = runner.derive_plan_expected_topology(
+        plan=fx.plan, hba_delta=fx.hba_delta, topology_attestation=fx.attestation,
+        now=kit.frozen_clock(30)().isoformat(),
+    )
+    assert expired["status"] == "PLAN_EXPECTED_TOPOLOGY_UNPROVEN"
+    assert any(
+        "expired at the observed moment" in reason for reason in expired["reasons"]
+    ), expired["reasons"]
+    malformed = w4b.build_hba_delta(fx.attestation)
+    malformed["observed_at"] = kit.EXPIRES
+    malformed["expires_at"] = kit.ISSUED
+    malformed["self_digest"] = validator.artifact_self_digest(malformed)
+    plan = {
+        "plan_id": malformed["plan_id"], "core_digest": malformed["plan_core_digest"],
+        "core": {
+            "hba_delta_digest": runner.hba_delta_plan_binding_digest(malformed),
+            "topology_pre_digest": fx.attestation["self_digest"],
+            "source_head": kit.SOURCE_HEAD, "target_host": kit.HOST,
+        },
+    }
+    derived = runner.derive_plan_expected_topology(
+        plan=plan, hba_delta=malformed, topology_attestation=fx.attestation,
+    )
+    assert derived["status"] == "PLAN_EXPECTED_TOPOLOGY_UNPROVEN"
+    assert any(
+        "malformed" in reason and "observation window" in reason
+        for reason in derived["reasons"]
+    ), derived["reasons"]
+    # (聚合 lane 不另演過期案:kit 的 delta 窗 == plan 窗,把 now 撥到窗後會先被 (1b)
+    # plan-expiry 擋下,斷言會真空成立;delta 窗語義由上面的葉級負向承載。)
+
+
+# ══════════════ S2.4-AMEND-1:§9.2 ingress at APPLY step (2b)════════════════════
+def test_the_apply_ingress_gates_expired_identities_through_one_refresh_each(fx) -> None:
+    """三份已提交原身分於凍結 NOW 下**真的已過期**:零 refresh → PRECHECK_FAILED 零變更
+    (含 EXPIRED_NO_REFRESH 語義);恰一份真 refresh/族 → 放行,terminal receipt 逐族記
+    該 refresh 的 self_digest(§3 的 DEPENDENCY-REFRESH 綁定)。"""
+
+    denied = fx.apply(dependency_refreshes=None)
+    assert denied["status"] == "PRECHECK_FAILED"
+    assert any("SOURCE_DEPENDENCY_EXPIRED_NO_REFRESH" in r for r in denied["reasons"])
+    assert any("§9.2" in r for r in denied["reasons"])
+    assert denied["driver_engaged"] is False and denied["mutation_performed"] is False
+    assert fx.driver.calls == [] and fx.persisted_install_journal() is None
+    refreshes = w4b.dependency_refreshes()
+    verdict = fx.apply()
+    assert verdict["status"] == "SOURCE_SIMULATION_PASS", verdict["reasons"]
+    assert verdict["receipt"]["dependency_refresh_digests"] == {
+        cls: refreshes[cls]["self_digest"]
+        for cls in evidence_leaf.S2_4_APPLY_GATED_DEPENDENCY_CLASSES
+    }
+    assert validator.validate_aiml_artifact(verdict["receipt"]) == []
+
+
+@pytest.mark.parametrize("mutation", [
+    "stale_expired", "over_ttl", "inside_original_window", "reasserted_digest",
+    "same_producer_label", "foreign_original", "semantic_drift", "two_refreshes",
+    "unknown_class",
+])
+def test_forged_or_stale_refreshes_are_refused_before_any_effect_semantics(
+    fx, mutation,
+) -> None:
+    """§9.2 的每一種禁止形都在 step (2b) typed 拒:重封時間戳、超窗、落在原窗內的復現、
+    複述原 digest、同 producer 標籤、綁到非 committed original、語義 digest 漂移、兩份
+    refresh、未知 class 鍵——一律 PRECHECK_FAILED、driver 未觸、零 mutation。"""
+
+    refreshes = w4b.dependency_refreshes()
+    target = "S2_2A_SOURCE_COMPATIBILITY"
+    row = refreshes[target]
+
+    def _reseal_identity() -> None:
+        row["reproduction"]["reproducer_identity"] = validator.dependency_producer_identity(
+            caller=row["reproduction"]["reproducer_caller"],
+            observation_time=row["reproduction"]["reproduced_at"],
+            platform=row["reproduction"]["reproducer_platform"],
+        )
+
+    if mutation == "stale_expired":
+        row["reproduction"]["reproduced_at"] = "2029-12-31T23:00:00+00:00"
+        row["expires_at"] = "2029-12-31T23:15:00+00:00"
+        _reseal_identity()
+    elif mutation == "over_ttl":
+        row["refresh_ttl_seconds"] = 901
+        row["expires_at"] = "2030-01-01T00:15:01+00:00"
+    elif mutation == "inside_original_window":
+        row["reproduction"]["reproduced_at"] = "2026-07-24T00:00:00+00:00"
+        row["expires_at"] = "2026-07-24T00:15:00+00:00"
+        _reseal_identity()
+    elif mutation == "reasserted_digest":
+        row["reproduced_semantic_digests"] = {
+            field: row["original_receipt_digest"]
+            for field in row["reproduced_semantic_digests"]
+        }
+    elif mutation == "same_producer_label":
+        row["reproduction"]["reproducer_caller"] = "S2.2A"
+        _reseal_identity()
+    elif mutation == "foreign_original":
+        row["original_receipt_digest"] = "sha256:" + "a" * 64
+    elif mutation == "semantic_drift":
+        field = sorted(row["reproduced_semantic_digests"])[0]
+        row["reproduced_semantic_digests"][field] = "sha256:" + "d" * 64
+    row["self_digest"] = validator.artifact_self_digest(row)
+    supplied: dict = dict(refreshes)
+    if mutation == "two_refreshes":
+        supplied[target] = [refreshes[target], refreshes[target]]
+    elif mutation == "unknown_class":
+        supplied["PG_TOPOLOGY_ATTESTATION"] = refreshes[target]
+    verdict = fx.apply(dependency_refreshes=supplied)
+    assert verdict["status"] == "PRECHECK_FAILED", (mutation, verdict["reasons"])
+    assert any("§9.2" in reason for reason in verdict["reasons"]), verdict["reasons"]
+    assert verdict["driver_engaged"] is False
+    assert verdict["mutation_performed"] is False
+    assert fx.driver.calls == []
+    assert fx.persisted_install_journal() is None
+
+
+def test_the_ingress_originals_are_read_from_the_bound_commit_not_the_caller(fx) -> None:
+    """caller 無從遞交/替換原身分:ingress 的封閉輸入面只有 {class: refresh};
+    原 receipt 由驗證端自 bound commit 的 committed 路徑讀出(code-owned 表最新版)。"""
+
+    import inspect
+
+    signature = inspect.signature(evidence_leaf.derive_apply_source_dependency_admissions)
+    assert sorted(signature.parameters) == ["dependency_refreshes", "now", "repo_root"]
+    for cls in evidence_leaf.S2_4_APPLY_GATED_DEPENDENCY_CLASSES:
+        original = evidence_leaf.load_committed_source_identity(cls)
+        assert isinstance(original, dict), cls
+        committed = validator.committed_source_identity_digests(cls, w4b.ROOT)
+        assert validator.artifact_self_digest(original) in committed, cls
+    # S1.3 誠實缺口:不入閘,typed 記錄。
+    assert evidence_leaf.load_committed_source_identity("S1_3_IDENTITY_CONTRACT") is None
+    admissions = evidence_leaf.derive_apply_source_dependency_admissions(
+        now=kit.NOW, dependency_refreshes=w4b.dependency_refreshes(),
+    )
+    assert admissions["status"] == "SOURCE_DEPENDENCIES_ADMITTED"
+    assert "S1_3_IDENTITY_CONTRACT" in admissions["s1_3_not_gated_reason"]
+
+
 def test_aggregate_success_requires_five_distinct_row_results() -> None:
     probes = {"PREPARE_SANDBOX": "sha256:" + "1" * 64, "INSTALLED_UNIT": "sha256:" + "2" * 64}
     prepare = "sha256:" + "3" * 64

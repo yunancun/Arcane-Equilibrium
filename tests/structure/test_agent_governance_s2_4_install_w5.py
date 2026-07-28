@@ -1438,27 +1438,18 @@ def test_the_owned_scope_delta_is_content_addressed_not_git_status(tmp_path) -> 
     assert core.owned_scope_worktree_delta(mini, ("pkg/never.py",)) == ["pkg/never.py"]
 
 
-def test_the_section_9_2_admission_verdict_has_no_production_call_site() -> None:
-    """B:§9.2 的裁決今天零生產呼叫端——這是**被測量**的事實,不是被宣稱的。"""
+def test_the_section_9_2_admission_verdict_is_wired_into_apply() -> None:
+    """B(S2.4-AMEND-1 後):§9.2 裁決的生產呼叫端 = APPLY step (2b) 的 evidence 葉,
+    且 W3 葉(host_identity)仍不導新鮮度——閘接在 W4 aggregate,不折進 W3 活 ABI。"""
 
     import agent_governance_s2_4_host_identity as host
 
     live = validator.w5_exported_abi_projection()["refresh_call_site_live"]
-    assert live["production_call_sites"] == []
+    assert live["production_call_sites"] == [
+        "helper_scripts/maintenance_scripts/agent_governance_s2_4_install_evidence.py"
+    ]
     assert live["apply_time_consumer_derives_freshness"] is False
-    # 唯一在 APPLY 期消費 §9.2 source 身分的地方:讀 repo 固定路徑的 S2.3 artifact,
-    # 只驗 status / self_digest / 三個身分欄位,對 expires_at 一個字都沒有。
-    assert host.s2_3_expected_identity_reasons() == []
     assert "expires_at" not in host.s2_3_expected_identity_reasons.__code__.co_consts
-    # 而那三份 receipt 本身是**真的過期**的,中央閘照樣零 error(§9.2 的規則今天沒有執法點)。
-    import json
-
-    for rel in (
-        _S2_2A_V1, _S2_3_EXPECTED,
-        "docs/execution_plan/ai_ml_landing/receipts/S2.3-sealed-build-receipt-v1.json",
-    ):
-        artifact = json.loads((ROOT / rel).read_text(encoding="utf-8"))
-        assert validator.validate_aiml_artifact(artifact, now=_NOW) == [], rel
 
 
 @pytest.mark.parametrize(
@@ -1513,21 +1504,30 @@ _EVIDENCE_MEASUREMENT = {
 }
 
 
-def test_a_wired_call_site_must_close_the_obligation_instead_of_carrying_it() -> None:
-    """B 的另一半閂:有人把閘接進 APPLY 之後,那條義務必須被關掉而不是永遠掛著。"""
+def test_a_wired_call_site_must_close_the_obligation_instead_of_carrying_it(
+    monkeypatch,
+) -> None:
+    """B 的另一半閂(AMEND-1 後 re-key 到 typed_status):呼叫端在而該列未標
+    CLOSED_BY_S2_4_AMEND_1_SOURCE 時,必須要求關閉而不是永遠掛著。"""
 
     import aiml_gate_receipt_wave_w5 as wave_w5
 
+    monkeypatch.setitem(wave_w5._W5_EXPORTED_ABI, "remaining_owned_obligations", [
+        {**row, "typed_status": "NOT_PROVIDED_BY_W5"}
+        if row["obligation_id"] == "SOURCE_IDENTITY_FRESHNESS_HAS_NO_PRODUCTION_CALL_SITE"
+        else row
+        for row in wave_w5._W5_EXPORTED_ABI["remaining_owned_obligations"]
+    ])
     reasons = wave_w5._honest_surface_reasons(
-        _call_site_measurement(
-            production_call_sites=[
-                "helper_scripts/maintenance_scripts/agent_governance_s2_4_host_identity.py"
-            ],
-            apply_time_consumer_derives_freshness=True,
-        ),
+        _call_site_measurement(production_call_sites=[
+            "helper_scripts/maintenance_scripts/agent_governance_s2_4_install_evidence.py"
+        ]),
         dict(_EVIDENCE_MEASUREMENT),
     )
-    assert any("close the obligation instead" in reason for reason in reasons), reasons
+    assert any(
+        "close the obligation (typed_status=CLOSED_BY_S2_4_AMEND_1_SOURCE)" in reason
+        for reason in reasons
+    ), reasons
 
 
 @pytest.mark.parametrize(
@@ -1678,16 +1678,17 @@ def test_the_wave_exit_evidence_digests_are_shape_only(chain) -> None:
     assert "ORCHESTRATOR_BOUND" in entry["statement"]
 
 
-def test_expected_topology_is_caller_suppliable_and_bound_to_nothing() -> None:
-    """E:PG row 的 ``expected_topology`` 可被 caller 弱化,且沒有任何簽章覆蓋它。"""
-
-    import json
+def test_expected_topology_is_plan_derived_and_no_longer_caller_suppliable() -> None:
+    """E(S2.4-AMEND-2 後):PG row 的 ``expected_topology`` 由簽章 plan 導出,caller 無入口。
+    原版斷言的是弱化路徑本身(allowlist 有該 key、五個缺鍵守衛靜默跳過);source 收口後
+    改釘**關閉後的形**,任一半被回退(key 回到 allowlist / 缺鍵守衛形復活)即紅。"""
 
     import agent_governance_s2_4_install_driver as runner
     import agent_governance_s2_4_topology as topology
 
-    assert "expected_topology" in runner.ROW_PAYLOAD_ALLOWLIST["PG_ROLE_ACL_MIGRATION"]
-    # 簽過的 component intent 對 PG row 只要求四個 digest,沒有 expected_topology 的位置。
+    assert "expected_topology" not in runner.ROW_PAYLOAD_ALLOWLIST["PG_ROLE_ACL_MIGRATION"]
+    assert "hba_delta" in runner.ROW_PAYLOAD_ALLOWLIST["PG_ROLE_ACL_MIGRATION"]
+    # 簽過的 component intent 對 PG row 仍只要求四個 digest(row ABI 一字不改)。
     schema = validator._load_schema("s2_4_component_effect_intent_v1")
     pg_branch = next(
         branch for branch in schema["allOf"]
@@ -1695,26 +1696,24 @@ def test_expected_topology_is_caller_suppliable_and_bound_to_nothing() -> None:
         == "PG_ROLE_ACL_MIGRATION"
     )
     required = pg_branch["then"]["properties"]["required_intent_fields"]["required"]
-    assert "expected_topology_digest" not in required
     assert sorted(required) == [
         "acl_manifest_digest", "admin_handle_descriptor_digest",
         "pg_migration_permit_digest", "topology_attestation_digest",
     ]
-    # 省略不能弱化(缺 hba_projection 即 UNPROVEN),但省略單一基線鍵可以跳過該次比對。
+    # 葉層五鍵 fail-closed:缺鍵靜默跳過的守衛形已不存在,缺鍵即具名 reason。
     source = (
         ROOT / "helper_scripts/maintenance_scripts/agent_governance_s2_4_topology.py"
     ).read_text(encoding="utf-8")
-    assert "expected signed HBA projection is missing" in source
-    assert source.count('expected.get(field) is not None') >= 2
+    assert source.count("expected.get(field) is not None") == 0
+    assert "expected baseline is missing" in source
     assert topology.derive_pg_topology_status(
         {"schema_version": "pg_topology_attestation_v1"}, expected={}, now=None
     )["status"] == topology.TOPOLOGY_STATUS_UNPROVEN
-    # 計畫端**已經**帶著正解需要的兩個欄位,故這是 plumbing 決策而非缺資料。
+    # 導出來源正是義務列點名的兩個簽章欄位(plan-derived 而非 code-owned/caller-owned)。
     plan_core = validator._load_schema("s2_4_install_plan_core_v1")
     assert {"topology_pre_digest", "hba_delta_digest"} <= set(plan_core["properties"])
-    assert "effective_rule" in json.dumps(
-        validator._load_schema("s2_4_pg_hba_delta_v1")["properties"]
-    )
+    assert callable(runner.derive_plan_expected_topology)
+    assert callable(runner.hba_delta_plan_binding_digest)
     entry = _W5_ROWS["EXPECTED_TOPOLOGY_IS_CALLER_SUPPLIED_AND_UNSIGNED"]
     assert "hba_delta_digest" in entry["statement"]
 

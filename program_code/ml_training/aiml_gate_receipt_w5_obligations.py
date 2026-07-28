@@ -272,8 +272,11 @@ S2_4_W5_REMAINING_OWNED_OBLIGATIONS: list[dict[str, Any]] = [
     },
     # ── W5 逐輪自審新增的各項(數量由 W5 lane 的帳本普查釘住,不在此複述)──────────
     {
+        # PM S2E.0 裁決(2026-07-28):typed_status 由 NOT_PROVIDED_BY_W5 改標
+        # CLOSED_BY_S2_4_AMEND_1_SOURCE——row 保留作歷史(鏡 O-1 先例:殘留歷史
+        # load-bearing 的義務不得整列刪除),原 statement 原文保留,關閉事實面 append 於後。
         "obligation_id": "DEPENDENCY_REFRESH_RECEIPT_BINDING_ABSENT",
-        "typed_status": "NOT_PROVIDED_BY_W5",
+        "typed_status": "CLOSED_BY_S2_4_AMEND_1_SOURCE",
         "owner_wave": "PM",
         "spec_refs": ["§3", "§10.4", "§11.3"],
         "statement": (
@@ -294,7 +297,13 @@ S2_4_W5_REMAINING_OWNED_OBLIGATIONS: list[dict[str, Any]] = [
             "measured fact now lives in its own row, "
             "SOURCE_IDENTITY_FRESHNESS_HAS_NO_PRODUCTION_CALL_SITE. What is true here is "
             "narrower: even once a call site exists, the terminal receipt still has nowhere "
-            "to carry the refresh digests §3 names."
+            "to carry the refresh digests §3 names. "
+            "CLOSED (2026-07-28, S2.4-AMEND-1 source): s2_4_install_effect_receipt_v1 now "
+            "carries the closed, required dependency_refresh_digests field (null = the "
+            "family was SOURCE_DEPENDENCY_FRESH at admission; a digest = the self_digest of "
+            "the one refresh that admitted the expired identity), populated from the §9.2 "
+            "APPLY ingress derive_apply_source_dependency_admissions and enforced by the "
+            "central closed schema."
         ),
         "w5_provides": (
             "the complete §9.2 gate (four refreshable classes, nine never-refreshable "
@@ -542,8 +551,10 @@ S2_4_W5_REMAINING_OWNED_OBLIGATIONS: list[dict[str, Any]] = [
         ),
     },
     {
+        # PM S2E.0 裁決(2026-07-28):typed_status 改標 CLOSED_BY_S2_4_AMEND_1_SOURCE;
+        # row 保留作歷史,W5 的雙向閂同步 re-key 到本列 typed_status(鏡 row 22 O-1 先例)。
         "obligation_id": "SOURCE_IDENTITY_FRESHNESS_HAS_NO_PRODUCTION_CALL_SITE",
-        "typed_status": "NOT_PROVIDED_BY_W5",
+        "typed_status": "CLOSED_BY_S2_4_AMEND_1_SOURCE",
         "owner_wave": "PM",
         "spec_refs": ["§8", "§9.2", "§10.1.1", "§10.4", "§10.5 #28"],
         "statement": (
@@ -582,7 +593,14 @@ S2_4_W5_REMAINING_OWNED_OBLIGATIONS: list[dict[str, Any]] = [
             "refresh, because a single-artifact entry point has nowhere to receive one. "
             "Closing this needs a PM decision about WHERE the refresh enters APPLY, which "
             "is the same exported-schema question as "
-            "DEPENDENCY_REFRESH_RECEIPT_BINDING_ABSENT."
+            "DEPENDENCY_REFRESH_RECEIPT_BINDING_ABSENT. "
+            "CLOSED (2026-07-28, S2.4-AMEND-1 source): apply_s2_4_install_plan step (2b) "
+            "now calls derive_apply_source_dependency_admissions "
+            "(agent_governance_s2_4_install_evidence) on every lane before any permit/"
+            "effect semantics — the committed originals are read from the bound commit, "
+            "the refusal is a typed PRECHECK_FAILED with zero mutation, and the W5 two-way "
+            "latch is re-keyed to this row's typed_status; the W3 leaf stays untouched "
+            "exactly as clause (1) required."
         ),
         "w5_provides": (
             "the complete §9.2 gate, the measured zero-call-site fact folded live into this "
@@ -643,8 +661,10 @@ S2_4_W5_REMAINING_OWNED_OBLIGATIONS: list[dict[str, Any]] = [
         ),
     },
     {
+        # PM S2E.0 裁決(2026-07-28):typed_status 改標 CLOSED_BY_S2_4_AMEND_2_SOURCE;
+        # row 保留作歷史(鏡 O-1 先例),原 statement 原文保留、關閉事實面 append 於後。
         "obligation_id": "EXPECTED_TOPOLOGY_IS_CALLER_SUPPLIED_AND_UNSIGNED",
-        "typed_status": "RECORDED_NOT_ABSORBED",
+        "typed_status": "CLOSED_BY_S2_4_AMEND_2_SOURCE",
         "owner_wave": "PM",
         "spec_refs": ["§8.2", "§10.1.1", "§10.2", "§10.4", "§10.5 #25"],
         "statement": (
@@ -688,7 +708,14 @@ S2_4_W5_REMAINING_OWNED_OBLIGATIONS: list[dict[str, Any]] = [
             "and derive expected_topology from it. That is a row-ABI/plumbing change §10.4 "
             "puts on PM, exactly like PRIOR_LINEAGE_ENTRY_IDENTITY. Note the same shape in "
             "the existing fixtures: _w3_topology_expected builds its 'expected' FROM the "
-            "attestation, so today even the W3 lane's baseline is self-fulfilling."
+            "attestation, so today even the W3 lane's baseline is self-fulfilling. "
+            "CLOSED (2026-07-28, S2.4-AMEND-2 source): exactly the prescribed plan-derived "
+            "fix — expected_topology left ROW_PAYLOAD_ALLOWLIST (caller supply is a typed "
+            "PRECHECK_FAILED), derive_plan_expected_topology derives the full-key baseline "
+            "from the signed core (hba_delta_digest via the no-cycle "
+            "hba_delta_plan_binding_digest + topology_pre_digest), _run_row injects it "
+            "code-owned, and the five baseline comparisons in derive_pg_topology_status "
+            "now fail closed on an omitted key."
         ),
         "w5_provides": (
             "the finding, the ONE real weakening path (omission of a baseline key) with the "
@@ -699,8 +726,10 @@ S2_4_W5_REMAINING_OWNED_OBLIGATIONS: list[dict[str, Any]] = [
         ),
     },
     {
+        # PM S2E.0 裁決(2026-07-28):typed_status 改標 CLOSED_BY_S2_4_AMEND_1_SOURCE;
+        # row 保留作歷史(鏡 O-1 先例),原 statement 原文保留、關閉事實面 append 於後。
         "obligation_id": "EVIDENCE_CLASS_TO_SCHEMA_MAP_IS_MANY_TO_ONE",
-        "typed_status": "RECORDED_NOT_CLOSED",
+        "typed_status": "CLOSED_BY_S2_4_AMEND_1_SOURCE",
         "owner_wave": "PM",
         "spec_refs": ["§9.1", "§9.2", "§10.5 #28"],
         "statement": (
@@ -722,7 +751,12 @@ S2_4_W5_REMAINING_OWNED_OBLIGATIONS: list[dict[str, Any]] = [
             "no production caller consumes this verdict at all (see "
             "SOURCE_IDENTITY_FRESHNESS_HAS_NO_PRODUCTION_CALL_SITE). Closing it means "
             "threading the §9.1 profile/scope check into the class→artifact resolution, "
-            "which is a PM decision about where the permit set enters §9.2."
+            "which is a PM decision about where the permit set enters §9.2. "
+            "CLOSED (2026-07-28, S2.4-AMEND-1 source): S2_4_EVIDENCE_CLASS_DISCRIMINATORS "
+            "(values derived from the byte-frozen §9.1 profiles, plus probe_scope for the "
+            "two probe rows) is enforced inside _dependency_evidence_receipt_errors, so a "
+            "genuine artifact of the wrong profile/scope is SOURCE_DEPENDENCY_REJECTED "
+            "instead of deriving SOURCE_DEPENDENCY_FRESH."
         ),
         "w5_provides": (
             "the finding, the exact many-to-one map, the line-verified statement that the "

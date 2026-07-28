@@ -470,6 +470,33 @@ S2_4_AUTHORIZATION_PROFILES: dict[str, dict[str, Any]] = {
 _S2_4_PROFILE_BY_IDENTITY = {
     row["profile_identity"]: row for row in S2_4_AUTHORIZATION_PROFILES.values()
 }
+# S2.4-AMEND-1(§9.1 profile threading;obligation 26):class→artifact 解析除 schema_version
+# 外再綁一個**判別欄位**。四個 permit 列共用同一份 s2_4_operator_authorization_v1、兩個
+# capability-probe 列共用同一份 probe effect receipt(many-to-one),唯一能把「這一列所指
+# 之物」分開的是 §9.1 profile_identity / probe_scope。值由凍結的
+# :data:`S2_4_AUTHORIZATION_PROFILES` **導出**(絕不手抄字串,故不可能與 byte-frozen 的
+# §9.1 profiles digest 漂移);probe 兩列的 scope 是 schema required 欄位 ``probe_scope``。
+# 表**外**的 class(四個可刷新族、PG_TOPOLOGY_ATTESTATION、PREPARED_BUNDLE、
+# S2_0_EFFECT_RECEIPT)各自的 schema_version 已一對一,無需判別欄位。
+S2_4_EVIDENCE_CLASS_DISCRIMINATORS: dict[str, tuple[str, str]] = {
+    "APPLY_AGGREGATE_AUTHORIZATION": (
+        "profile_identity",
+        S2_4_AUTHORIZATION_PROFILES["apply_aggregate"]["profile_identity"],
+    ),
+    "PREPARE_AUTHORIZATION": (
+        "profile_identity", S2_4_AUTHORIZATION_PROFILES["prepare"]["profile_identity"],
+    ),
+    "PG_MIGRATION_AUTHORIZATION": (
+        "profile_identity",
+        S2_4_AUTHORIZATION_PROFILES["pg_migration"]["profile_identity"],
+    ),
+    "CAPABILITY_PROBE_AUTHORIZATION": (
+        "profile_identity",
+        S2_4_AUTHORIZATION_PROFILES["capability_probe"]["profile_identity"],
+    ),
+    "CAPABILITY_PROBE_RECEIPT_INSTALLED_UNIT": ("probe_scope", "INSTALLED_UNIT"),
+    "CAPABILITY_PROBE_RECEIPT_PREPARE_SANDBOX": ("probe_scope", "PREPARE_SANDBOX"),
+}
 _SSH_SIGNATURE_ARMOR_MARKERS = (
     "-----BEGIN SSH SIGNATURE-----",
     "-----END SSH SIGNATURE-----",
@@ -1352,7 +1379,8 @@ def _committed_source_identity_errors(
 
 
 def _dependency_evidence_receipt_errors(
-    receipt: Any, expected: tuple[str, ...], *, now: Any, repo_root: Path = REPO_ROOT
+    receipt: Any, expected: tuple[str, ...], *, now: Any, repo_root: Path = REPO_ROOT,
+    evidence_class: Any = None,
 ) -> list[str]:
     """這份 evidence 真的是它被冠上的那個 artifact 嗎(schema 身分 + 家族驗證器 + 自摘要)。
 
@@ -1372,6 +1400,19 @@ def _dependency_evidence_receipt_errors(
             "label is never the proof of what the artifact is"
         ]
     errors: list[str] = []
+    # S2.4-AMEND-1(obligation 26):schema_version 對了不代表**是那一列所指之物**——四個
+    # permit 列 / 兩個 probe 列 many-to-one 映到同一份 schema,判別欄位在此執法。
+    discriminator = (
+        S2_4_EVIDENCE_CLASS_DISCRIMINATORS.get(evidence_class)
+        if evidence_class is not None else None
+    )
+    if discriminator is not None and receipt.get(discriminator[0]) != discriminator[1]:
+        errors.append(
+            f"the bound receipt carries {discriminator[0]}="
+            f"{receipt.get(discriminator[0])!r}, not {discriminator[1]!r}; a genuine "
+            f"artifact of the wrong §9.1 profile/scope is not the artifact "
+            f"{evidence_class} names (§9.1 / §9.2)"
+        )
     if schema_version == "identity_acl_contract_receipt_v1":
         # S1.3 的家族驗證器未登記在中央 SCHEMA_FILES(其 schema 由 SSOT 模組自持),故直接委派。
         import agent_governance_identity_acl_contract as _s1_3  # noqa: E402 (lazy)
@@ -1862,7 +1903,8 @@ def derive_source_dependency_admission_status(
     # 若在此把 now 交給家族驗證器,一份**真的**但已過期的證據會被判成「不是那份 artifact」,
     # DEPENDENCY_EVIDENCE_REOBSERVATION_REQUIRED 這條 §9.2 語義就再也走不到。
     receipt_errors = _dependency_evidence_receipt_errors(
-        receipt, expected_schemas, now=None, repo_root=Path(repo_root)
+        receipt, expected_schemas, now=None, repo_root=Path(repo_root),
+        evidence_class=evidence_class,
     )
     if receipt_errors:
         verdict["reasons"] = receipt_errors

@@ -40,10 +40,15 @@ import agent_governance_aiml_trusted_host as _trusted_host  # noqa: E402
 import agent_governance_s2_4_component as _component  # noqa: E402
 import agent_governance_s2_4_journal as _journal  # noqa: E402
 import agent_governance_s2_4_permit as _permit  # noqa: E402
-from aiml_gate_receipt_schema_core import resolve_facade  # noqa: E402
+from aiml_gate_receipt_schema_core import (  # noqa: E402
+    S2_4_COMMITTED_SOURCE_IDENTITY_PATHS,
+    commit_blob_bytes,
+    resolve_facade,
+)
 from agent_governance_s2_4_install_plan import (  # noqa: E402
     APPLY_ROW_ORDER, aggregate_rollback_digest,
 )
+from agent_governance_s2_4_reconcile import InstallDriverContractError  # noqa: E402
 
 canonical_digest = central_validator.canonical_digest
 artifact_self_digest = central_validator.artifact_self_digest
@@ -210,6 +215,123 @@ def derive_apply_remaining_ttls(
         return outcome
     outcome["status"] = TTL_DERIVATION_STATUS_DERIVED
     return outcome
+
+
+# --------------------------------------------------------------------------- #
+# 1b) §9.2 source-dependency ingress —— S2.4-AMEND-1(APPLY step (2b) 的唯一入口)
+# --------------------------------------------------------------------------- #
+# 進本閘的三族 = 有**已提交原身分**的 source-identity 族:原 receipt 由驗證端自 bound commit
+# 的 S2_4_COMMITTED_SOURCE_IDENTITY_PATHS blob 讀出,caller 只遞交 refresh、無從替換原身分;
+# forged refresh 不需要新機制——derive_dependency_refresh_status 的驗證端重算本身就使偽造
+# 不可能(caller 遞交值不參與重算)。S1.3 無已提交原身分(表映到空 tuple),窗完全
+# caller-authored;半吊子接線會製造「看似被閘、實則 caller 自選窗」的假保證,故 typed 記錄
+# 缺口而不入閘(obligation DEPENDENCY_OBSERVATION_WINDOW_IS_CALLER_AUTHORED,owner=W6)。
+S2_4_APPLY_GATED_DEPENDENCY_CLASSES = (
+    "S2_2A_SOURCE_COMPATIBILITY", "S2_3_EXPECTED_IDENTITY", "S2_3_SEALED_BUILD",
+)
+S2_4_S1_3_NOT_GATED_REASON = (
+    "S1_3_IDENTITY_CONTRACT has no committed original in this repository (its observation "
+    "window is entirely caller-authored), so gating it here would assert a guarantee the "
+    "verifier cannot derive; the gap stays typed under "
+    "DEPENDENCY_OBSERVATION_WINDOW_IS_CALLER_AUTHORED (owner W6 key-custody)"
+)
+SOURCE_DEPENDENCIES_ADMITTED = "SOURCE_DEPENDENCIES_ADMITTED"
+SOURCE_DEPENDENCIES_REJECTED = "SOURCE_DEPENDENCIES_REJECTED"
+
+
+def load_committed_source_identity(
+    dependency_class: str, *, repo_root: Path = REPO_ROOT,
+) -> dict[str, Any] | None:
+    """自 bound commit 讀回該族的**權威**已提交原身分(讀不回 ``None`` = fail-closed)。
+
+    多版並存時取表序最末者(表序即版本序:S2.2A v1→v2,最新者為現行身分)——選擇是
+    code-owned 的,caller 無從指定「用哪一份原身分」。
+    """
+
+    import json
+
+    paths = S2_4_COMMITTED_SOURCE_IDENTITY_PATHS.get(dependency_class) or ()
+    if not paths:
+        return None
+    authoritative = paths[-1]
+    payload = commit_blob_bytes(Path(repo_root), [authoritative])[authoritative]
+    if payload is None:
+        return None
+    try:
+        loaded = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return None
+    return loaded if isinstance(loaded, dict) else None
+
+
+def derive_apply_source_dependency_admissions(
+    *, repo_root: Path = REPO_ROOT, now: Any = None, dependency_refreshes: Any = None,
+) -> dict[str, Any]:
+    """§9.2 進 APPLY 的唯一 ingress(step (2b);純 precheck,零 driver、零 mutation)。
+
+    回 ``{"status": SOURCE_DEPENDENCIES_ADMITTED | SOURCE_DEPENDENCIES_REJECTED,
+    "reasons": [...],
+    "dependency_refresh_digests": {class: refresh self_digest | None},  # None = FRESH
+    "s1_3_not_gated_reason": ...}``。``dependency_refresh_digests`` 恰為 terminal
+    ``s2_4_install_effect_receipt_v1`` 的同名欄位值(§3 的 DEPENDENCY-REFRESH 綁定);
+    EXPIRED_NO_REFRESH / REJECTED 不會有 receipt,故三值(null/digest/無 receipt)窮盡。
+    §9.2 的細分 typed 狀態進 reasons;aggregate 終端沿用 PRECHECK_FAILED(§10.2 凍結
+    enum 不加不減,PRECHECK_FAILED 精確表達「第一次變更之前的 typed 拒絕」)。
+    """
+
+    verdict: dict[str, Any] = {
+        "status": SOURCE_DEPENDENCIES_REJECTED,
+        "reasons": [],
+        "dependency_refresh_digests": {
+            cls: None for cls in S2_4_APPLY_GATED_DEPENDENCY_CLASSES
+        },
+        "s1_3_not_gated_reason": S2_4_S1_3_NOT_GATED_REASON,
+    }
+    reasons: list[str] = verdict["reasons"]
+    if dependency_refreshes is not None and not isinstance(dependency_refreshes, dict):
+        reasons.append(
+            "dependency_refreshes must be a mapping of dependency class -> one refresh "
+            "attestation (§9.2)"
+        )
+        return verdict
+    supplied = dependency_refreshes if isinstance(dependency_refreshes, dict) else {}
+    unknown = sorted(set(supplied) - set(S2_4_APPLY_GATED_DEPENDENCY_CLASSES))
+    if unknown:
+        reasons.append(
+            f"dependency_refreshes names classes outside the closed APPLY-gated set "
+            f"{unknown}; never-refreshable evidence takes no refresh and S1.3 is not gated "
+            "here (§9.2 / §10.5 #28)"
+        )
+        return verdict
+    digests: dict[str, Any] = {}
+    facade = resolve_facade()
+    for cls in S2_4_APPLY_GATED_DEPENDENCY_CLASSES:
+        original = load_committed_source_identity(cls, repo_root=Path(repo_root))
+        if original is None:
+            digests[cls] = None
+            reasons.append(
+                f"{cls}: the committed source identity could not be read from the bound "
+                "commit; a §9.2 verdict is only derived over the committed artifact "
+                "(fail-closed)"
+            )
+            continue
+        outcome = facade.derive_source_dependency_admission_status(
+            evidence_class=cls, receipt=original, refresh=supplied.get(cls),
+            now=now, repo_root=Path(repo_root),
+        )
+        if outcome["status"] == facade.SOURCE_DEPENDENCY_STATUS_FRESH:
+            digests[cls] = None
+        elif outcome["status"] == facade.SOURCE_DEPENDENCY_STATUS_ADMITTED_BY_REFRESH:
+            digests[cls] = artifact_self_digest(supplied[cls])
+        else:
+            digests[cls] = None
+            detail = "; ".join(outcome["reasons"]) or "§9.2 refused the source identity"
+            reasons.append(f"{cls}: {outcome['status']} — {detail}")
+    verdict["dependency_refresh_digests"] = digests
+    if reasons:
+        return verdict
+    verdict["status"] = SOURCE_DEPENDENCIES_ADMITTED
+    return verdict
 
 
 # --------------------------------------------------------------------------- #
@@ -908,6 +1030,7 @@ def _build_install_effect_receipt(
     probe_receipt_digests: dict[str, Any],
     prepare_result_digest: str,
     prepare_postcheck_digest: str,
+    dependency_refresh_digests: dict[str, Any],
     row_results: dict[str, tuple[str, str]],
     journal_digest: str,
     unit_state: dict[str, Any],
@@ -915,6 +1038,19 @@ def _build_install_effect_receipt(
     trusted_host_time: str,
     clock: Callable[[], datetime],
 ) -> dict[str, Any]:
+    # P2-1(E2 對抗審查):silent-FRESH 預設關閉。builder 只在 step (2b) admission 之後
+    # 可達,其輸入必須**恰為** admission 導出的三 gated-class 映射(值 = None|sha256
+    # digest);None/缺鍵/多鍵/非 digest 值一律 typed 契約拒(鏡 install_evidence_set_path
+    # 的契約錯機制)——絕不把 falsy 輸入靜默寫成「三族全 FRESH」的 receipt 宣稱。
+    if not isinstance(dependency_refresh_digests, dict) or set(
+        dependency_refresh_digests
+    ) != set(S2_4_APPLY_GATED_DEPENDENCY_CLASSES) or not all(
+        value is None or (isinstance(value, str) and _DIGEST_RE.fullmatch(value))
+        for value in dependency_refresh_digests.values()
+    ):
+        raise InstallDriverContractError(
+            "install_receipt_dependency_refresh_digests_invalid"
+        )
     at = clock()
     receipt = {
         "schema_version": "s2_4_install_effect_receipt_v1",
@@ -930,6 +1066,13 @@ def _build_install_effect_receipt(
         "installed_unit_probe_receipt_digest": probe_receipt_digests["INSTALLED_UNIT"],
         "prepare_result_digest": prepare_result_digest,
         "prepare_postcheck_digest": prepare_postcheck_digest,
+        # S2.4-AMEND-1(§3/§9.2):null = 該族於 admission 時 SOURCE_DEPENDENCY_FRESH;
+        # digest = 採信該過期身分的**那一份** refresh 的 self_digest(step (2b) 導出;
+        # 形狀已由上方契約閘 fail-closed 驗過,此處只定序)。
+        "dependency_refresh_digests": {
+            cls: dependency_refresh_digests[cls]
+            for cls in S2_4_APPLY_GATED_DEPENDENCY_CLASSES
+        },
         "apply_row_results": [
             {
                 "component_effect_class": name,

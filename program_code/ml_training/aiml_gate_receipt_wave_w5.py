@@ -1290,6 +1290,18 @@ def _honest_surface_reasons(
     }
     sites = call_sites.get("production_call_sites")
     scanned = call_sites.get("production_call_site_modules_scanned")
+    # S2.4-AMEND-1(F.2-1):row 23 的雙向閂 re-key 到該列 **typed_status**(鏡 row 22 的
+    # PM O-1 先例:row 永遠 carried,「關閉」由 typed_status=CLOSED_BY_S2_4_AMEND_1_SOURCE
+    # 表達)。呼叫端存在時該列必須已關(仍在冊未關 → 紅);零呼叫端時該列必須仍記
+    # NOT_PROVIDED_BY_W5(已關卻無執法點 → 紅);量測失敗/含糊的 fail-closed 臂原樣不動。
+    call_site_row = next(
+        (
+            row for row in _W5_EXPORTED_ABI["remaining_owned_obligations"]
+            if row["obligation_id"] == _REFRESH_CALL_SITE_OBLIGATION
+        ),
+        None,
+    )
+    call_site_status = None if call_site_row is None else call_site_row.get("typed_status")
     # P1-E:量測失敗**或**量測含糊一律走 fail-closed 臂(= 不可關閉);「必須關閉」那一臂
     # 只有在量測明確為「有呼叫端」時才可達。掃描面本身塌成 0 個模組同樣是量測失敗。
     if (
@@ -1303,20 +1315,28 @@ def _honest_surface_reasons(
             "W5 cannot measure whether the §9.2 admission verdict has a production call "
             "site; an unmeasurable honesty claim is not an honesty claim (fail-closed)"
         )
-    elif not sites and call_sites.get("apply_time_consumer_derives_freshness") is False:
-        if _REFRESH_CALL_SITE_OBLIGATION not in obligation_ids:
-            reasons.append(
-                f"W5 does not record {_REFRESH_CALL_SITE_OBLIGATION} while "
-                f"{_REFRESH_ADMISSION_ENTRY} has zero production call sites and the only "
-                "APPLY-time consumer of a §9.2 source identity derives no freshness at all "
-                "(§9.2's 'the central validator accepts an expired source identity only "
-                "together with one current refresh' has no enforcement point today)"
-            )
-    elif _REFRESH_CALL_SITE_OBLIGATION in obligation_ids:
+    elif call_site_row is None:
         reasons.append(
-            f"W5 still records {_REFRESH_CALL_SITE_OBLIGATION} although the §9.2 admission "
-            f"verdict is now reached from {sites or 'an APPLY-time consumer'}; close the "
-            "obligation instead of carrying a statement that has stopped being true"
+            f"W5 does not record {_REFRESH_CALL_SITE_OBLIGATION} at all; a row whose "
+            "residual history is load-bearing is carried with a typed closure status, "
+            "never removed (PM O-1)"
+        )
+    elif not sites and call_sites.get("apply_time_consumer_derives_freshness") is False:
+        if call_site_status != "NOT_PROVIDED_BY_W5":
+            reasons.append(
+                f"W5 records {_REFRESH_CALL_SITE_OBLIGATION} as {call_site_status!r} while "
+                f"{_REFRESH_ADMISSION_ENTRY} has zero production call sites and the only "
+                "APPLY-time consumer of a §9.2 source identity derives no freshness at all; "
+                "a closed status without a wired call site asserts an enforcement point "
+                "that does not exist (fail-closed)"
+            )
+    elif call_site_status != "CLOSED_BY_S2_4_AMEND_1_SOURCE":
+        reasons.append(
+            f"W5 still records {_REFRESH_CALL_SITE_OBLIGATION} as {call_site_status!r} "
+            f"although the §9.2 admission verdict is now reached from "
+            f"{sites or 'an APPLY-time consumer'}; close the obligation "
+            "(typed_status=CLOSED_BY_S2_4_AMEND_1_SOURCE) instead of carrying a statement "
+            "that has stopped being true"
         )
     if evidence.get("only_shape_is_constrained") is None or (
         evidence.get("emit_sink_accepts_fabricated_evidence") is None

@@ -304,6 +304,31 @@ def test_missing_end_to_end_assertion_is_unproven() -> None:
     assert verdict["status"] == "PG_TOPOLOGY_UNPROVEN"
 
 
+@pytest.mark.parametrize("missing", [
+    "listener_config_digest", "proxy_config_digest", "cluster_identity_digest",
+    "source_head", "target_host",
+])
+def test_an_omitted_baseline_key_is_unproven_not_silently_skipped(missing) -> None:
+    """S2.4-AMEND-2(obligation 25):五個基線鍵逐一 fail-closed——缺鍵曾靜默跳過該次比對,
+    省略 cluster_identity_digest 就能讓另一座叢集 PG_TOPOLOGY_PROVEN。"""
+
+    attestation = _attest(_observation())
+    for absent_shape in ("popped", "none"):
+        expected = _expected(attestation)
+        if absent_shape == "popped":
+            expected.pop(missing)
+        else:
+            expected[missing] = None
+        verdict = topology.derive_pg_topology_status(
+            attestation, expected=expected, now=_NOW
+        )
+        assert verdict["status"] == "PG_TOPOLOGY_UNPROVEN", (missing, absent_shape)
+        assert any(
+            f"expected baseline is missing {missing}" in reason
+            for reason in verdict["reasons"]
+        ), (missing, absent_shape, verdict["reasons"])
+
+
 def test_expired_topology_evidence_cannot_be_refreshed_by_reference() -> None:
     attestation = _attest(_observation())
     verdict = topology.derive_pg_topology_status(
