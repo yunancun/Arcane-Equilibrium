@@ -1126,28 +1126,29 @@ def test_e16_stranded_wal_temp_files_are_enumerated_and_reported(fx) -> None:
 def test_e18_a_dropped_lock_token_cannot_be_satisfied_by_address_reuse() -> None:
     """E18:``_LIVE_LOCK_TOKENS`` 記 ``id(token)`` 時,一個 acquire 之後把 verdict 丟掉而
     未 release 的呼叫端會留下一個永久 live 的位址;CPython 把該位址配給下一個同型物件之後,
-    那個**從未被發出**的 token 就通得過 ``install_lock_is_held``,卻沒有持有任何 flock。"""
+    那個**從未被發出**的 token 就通得過 ``install_lock_is_held``,卻沒有持有任何 flock。
+
+    確定性改寫:原版靠最多 4096 次分配等 CPython 真的把舊位址配回來,在全 suite 高壓下
+    allocator 不保證重用,偶發翻紅。位址重用能騙過的前提是 membership 以**位址**為鍵,
+    故改為直接釘死兩個互補性質,皆不依賴 allocator 行為:①live-set 的登記鍵是 token 的
+    nonce **值**而非 ``id()``;②一個從未經 acquire 發出的同型 token——即位址重用場景裡
+    撿到舊位址的那個物件——無論被配置在哪個位址,都不得通過 ``install_lock_is_held``。"""
 
     held = _held()
     token = held["lock_token"]
     assert lock.install_lock_is_held(held) is True
-    stale_id = id(token)
+    # ①登記鍵必須是 nonce 值:id-keyed 的變體在此兩行確定性翻紅(set 裡是 int 位址)。
+    assert token.nonce in lock._LIVE_LOCK_TOKENS
+    assert id(token) not in lock._LIVE_LOCK_TOKENS
     stale_nonce = token.nonce
     del held, token  # acquire 過但沒有 release:登記留在 live-set 裡
     try:
-        replacement = None
-        parked = []
-        for _ in range(4096):
-            candidate = lock._InstallLockToken(lock_fd=999)
-            if id(candidate) == stale_id:
-                replacement = candidate
-                break
-            parked.append(candidate)
-        assert replacement is not None, (
-            "CPython did not reuse the freed token address in 4096 allocations; this test "
-            "cannot demonstrate the id-reuse property on this interpreter"
-        )
-        forged = {"status": lock.LOCK_STATUS_ACQUIRED, "lock_token": replacement}
+        # dropped token 的登記仍然 live——這正是原弱點場景裡被位址重用接手的那筆洩漏。
+        assert stale_nonce in lock._LIVE_LOCK_TOKENS
+        # ②從未被發出的 token(扮演恰好配置到被回收位址的新物件):nonce 是新鮮亂數、
+        # 不在 live-set 裡,故無論 ``id()`` 為何都不得判 held。
+        forged = {"status": lock.LOCK_STATUS_ACQUIRED,
+                  "lock_token": lock._InstallLockToken(lock_fd=999)}
         assert lock.install_lock_is_held(forged) is False
     finally:
         lock._LIVE_LOCK_TOKENS.discard(stale_nonce)
