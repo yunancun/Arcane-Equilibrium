@@ -173,7 +173,7 @@ closable from the board:
 
 | Work package | Scope | Status / exit |
 |---|---|---|
-| S2E.0 | S2.4-AMEND-1/2: dependency-refresh ingress/receipt/profile binding and plan-derived expected topology | SOURCE_LANDED (2026-07-28) — four-commit chain at head `cc6a8b97a` + round-8 receipt re-emission (carrier `c911ea9c1`): §9.2 refresh ingress wired into APPLY step (2b), terminal-receipt `dependency_refresh_digests`, §9.1 profile discriminators, plan-derived `expected_topology`; obligations 16/23/25/26 flipped to `CLOSED_BY_S2_4_AMEND_[12]_SOURCE`; PA design + E1 build + E2 (0 P0/0 P1, 2 P2 fixed, 7 mutations killed) + E4/CC/E3 PASS; full suite at `cc6a8b97a` measured 6337 passed/46 skipped with exactly the two PM-owned projection discriminators red, closed by the round-8 emission and the projection commit that carries this row |
+| S2E.0 | S2.4-AMEND-1/2: dependency-refresh ingress/receipt/profile binding and plan-derived expected topology | SOURCE_LANDED (2026-07-28) — commit chain ending at `f30ede361` (AMEND commits + E2 P2 fixes + PR#153 Codex fixes) + round-9 receipt re-emission (carrier `3df9d2f45`): §9.2 refresh ingress wired into APPLY step (2b), terminal-receipt `dependency_refresh_digests`, §9.1 profile discriminators, plan-derived `expected_topology`; obligations 16/23/25/26 flipped to `CLOSED_BY_S2_4_AMEND_[12]_SOURCE`; PA design + E1 build + E2 (0 P0/0 P1, 2 P2 fixed, 7 mutations killed) + E4/CC/E3 PASS; full suite at the final head `f30ede361` measured 6341 passed/46 skipped/0 failed (at `cc6a8b97a` it was 6337/46 with exactly the two PM-owned projection discriminators red, closed by the round-8 emission + projection commit; the PR#153 Codex review then returned 3 findings fixed in `f30ede361` with a fourth adjudicated into S2E.3) |
 | S2E.1 | Claim-gated routing, adapter selection, distinct OPS postcheck and closure binding for all six effect steps | ACTIVE (unlocked by S2E.0) |
 | S2E.2 | Trusted-host runners/observers, rollback/postcheck and startup recovery for S2.0/S2.4/S2.5/S2.1 | WAITING_S2E_1; may run parallel with S2E.3 if manifests are disjoint |
 | S2E.3 | S2.5 F2/F3/F4/note-1: reconcile-under-hold, split lock API, typed release, journal integrity chain | WAITING_S2E_1; may run parallel with S2E.2 |
@@ -321,16 +321,19 @@ worker from taking. Full statements are in the W5 derivation record
 hand-maintained projection carried 13 of these rows; that is the drift this generated
 section exists to prevent.
 
-**The persisted receipt set in this tree is bound to `cc6a8b97a` — the S2E.0 head
-(S2.4-AMEND-1/2 four-commit chain `223a479d7`→`e9b26e895`→`a48355a29`→`cc6a8b97a`)
-— and was committed one commit later, as `c911ea9c1` (round 8).** *Bound to*
+**The persisted receipt set in this tree is bound to `f30ede361` — the S2E.0 final
+head (S2.4-AMEND-1/2 chain `223a479d7`→`e9b26e895`→`a48355a29`→`cc6a8b97a`, round-8
+receipts `c911ea9c1`, projection `23037eb0b`, then the PR#153 Codex-review fixes
+`f30ede361`) — and was committed one commit later, as `3df9d2f45` (round 9).** *Bound to*
 and *committed at* are different facts and the artifacts state the first: each of the
-eight carries `source_head = cc6a8b97a9ce1d6c21361f20cf940e202eee34da`. Read the
+eight carries `source_head = f30ede36134f1464cef4bc025f808b931aebe180`. Read the
 binding out of the artifact field, never out of this paragraph; the discriminator regression
 `tests/structure/test_aiml_w5_receipt_binding_projection.py` mechanically requires one
 unique `source_head` across all eight artifacts and requires every claim of that form in
 `TODO.md` and this file to equal the artifacts' actual value. Superseded generations,
-each replaced rather than edited: the set bound to `5be472193` (WP5-tranche-2 head,
+each replaced rather than edited: the set bound to `cc6a8b97a` (S2E.0 AMEND head,
+committed as `c911ea9c1`, round 8, same ledger digest), before it the set bound to
+`5be472193` (WP5-tranche-2 head,
 committed as `0eb90e40c`, round 7, ledger digest `sha256:57696d69…53ea`), before it
 the set bound to `0faa6499d` (WP5 tranche-1
 ledger-closure head, committed as `0b06982e0`), before it the set bound to `aaee7f1a2`
@@ -352,13 +355,14 @@ at the head that carries it. Round 5 edited a W5-owned test path, so PM re-emitt
 the four W5-owned central-registration files (SCHEMA_FILES 78→79, the facade delegate
 branch, the runtime-closure reseal and the count pin), so PM re-emitted at `5be472193`
 (round 7); S2E.0 edited `aiml_gate_receipt_w5_obligations.py` and `…wave_w5.py`
-(W5-owned) inside its atomic commit 3, so PM re-emitted at the S2E.0 head `cc6a8b97a`
-(round 8) — the emitter enforces the rule mechanically rather than in prose
+(W5-owned) inside its atomic commit 3, so PM re-emitted at `cc6a8b97a` (round 8), and
+after the PR#153 Codex-review fixes touched further owned paths PM re-emitted at the
+round's final head `f30ede361` (round 9) — the emitter enforces the rule mechanically rather than in prose
 (`W5_EMIT_REFUSED` on a dirty owned scope with zero files written;
-`W5_RECEIPTS_EMITTED` on the clean committed head). Round 8 changes the ledger digest
-(four typed-status flips) and re-binds owned-path blobs.
+`W5_RECEIPTS_EMITTED` on the clean committed head). Round 8 changed the ledger digest
+(four typed-status flips); round 9 re-binds owned-path blobs only (ledger unchanged).
 
-W5-RECEIPT-BINDING: source_head=cc6a8b97a9ce1d6c21361f20cf940e202eee34da carrier_commit=c911ea9c12b55aa178ecdd28bcb9b5cd74efa905 artifacts=8 round=8 status=COMMITTED
+W5-RECEIPT-BINDING: source_head=f30ede36134f1464cef4bc025f808b931aebe180 carrier_commit=3df9d2f451ceb7ab66117de6e33fd882d59a9531 artifacts=8 round=9 status=COMMITTED
 
 | # | `obligation_id` | `typed_status` | `owner_wave` | Spec refs |
 |---|---|---|---|---|
