@@ -1,16 +1,23 @@
-# S2 Operator Action Packet v1 — `BLOCKED_OPERATOR_ACTION_PACKET_READY`
+# S2 Operator Action Packet v1 — `DRAFT_NOT_EXECUTABLE`
 
 - **Program**: `AIML-LONG-LIVED-LANDING-V2` · Sprint 2（runtime 修復）
-- **Packet 狀態**: `BLOCKED_OPERATOR_ACTION_PACKET_READY`（2026-07-28，PM 簽發）
+- **Packet 狀態**: `DRAFT_NOT_EXECUTABLE`（2026-07-28 獨立審核校正）
 - **Source 綁定**: 全部五個 effect-session source predicates 已 `SOURCE_READY` 並 landed
   （S2.2A PR #121、S2.3 PR #122、S2.0 PR #127、S2.1 PR #129、S2.4 PR #145/#146、
   S2.5＋S2.2B seam PR #148/#150）。本 packet 綁定其宣告 head（見 TODO marker 與
   `receipts/S2.4-WP4-W5/`：八件 artifact bound to `5be472193`、
   `obligation_ledger_digest = sha256:57696d69eb258c0202faea5541859b05e53fd1985e1b09914d34ddd08c8e53ea`、28 條未關閉義務）。
-- **這不是授權**：本文件只把「剩餘的唯一 blocker＝fresh external operator authorization」
-  收斂成一份可執行清單。九項 authority 全 false；`S1` disposable 授權**不可沿用**
+- **這不是授權，也不是可執行 packet**：本文件保留 effect DAG 與逐步草案，但
+  `S2E.0`–`S2E.5` 尚未完成；fresh external operator authorization **不是唯一
+  blocker**。九項 authority 全 false；`S1` disposable 授權**不可沿用**
   （AGENTS.md／delivery-protocol A2 明文）；每一步都要**新的、exact、typed、
   out-of-band** 授權，簽章私鑰不在 Mac 也不在 trade-core。
+
+> **禁止執行**：本版缺 S2.4-AMEND-1/2、claim-gated effect routing、trusted-host
+> runners、S2.5 durable-state hardening、S2.2B runtime-attestor execution/verification
+> 與整鏈 disposable rehearsal。Current authority 以 `TODO.md` 的
+> `S2_EFFECT_EXECUTION_READINESS_ACTIVE` 為準；完整證據與重發條件見
+> `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-28--aiml_s2_source_and_effect_readiness_audit.md`。
 
 ## Effect DAG（串行，§1.2 更正版）
 
@@ -33,7 +40,7 @@ installed+started runtime）；`S2.1@EFFECT_DONE` 不是 S2.4 predecessor。
 | 6 | `S2.5B` watchdog-reset-last＋final attestation | 同 step 4 seam（`S2_5B_FINAL`） | `S2_5B_FINAL` permit（綁 pre-drill attestation digest＋drill receipt digest） | 同 seam rollback；consumed permit 永不因 rollback 釋放 | `FINAL_ATTESTED`（supervening restart ⇒ 不可達 RESET_CLEAN） |
 | 7 | `S2.2B` ingestion compatibility revalidation（`REMOTE_READONLY`） | `agent_governance_s2_2b.py`＋`ingestion_compatibility_receipt_v1` | 消費 `S2.5B@EFFECT_DONE` 的 production `FINAL_ATTESTED` 錨（runtime attestor SSHSIG 於本步驗） | 無 mutation（readonly） | V151-V160 逐項 revalidation 全 MATCH；唯一簽發 LR1 runtime `DONE` |
 
-## Operator 前置（apply 前必須先行的 PM 修正案／深度項）
+## 重發前置（全部完成後才可重新簽發 Operator packet）
 
 1. **`S2.4-AMEND-1`**（gate step 3）：dependency-refresh 進 APPLY 的 ingress＋terminal
    receipt 的 §3 refresh-digest 欄位＋§9.1 profile 穿線（PROGRESS「W5 PM-owned
