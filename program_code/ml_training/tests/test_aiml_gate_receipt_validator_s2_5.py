@@ -387,6 +387,35 @@ def test_fixture_impersonating_platform_attested_is_structurally_rejected():
     assert validate_aiml_artifact(flipped2, now=NOW)
 
 
+def test_production_running_attested_with_forged_signature_is_rejected_at_the_gate():
+    """§8.4 刀:「RUNNING_ATTESTED 的 attestor 驗簽呼叫刪除」的紅測試(中央閘層)。
+
+    production 目標 + 結構完好的 attestor 物件 + 偽簽章 ⇒ 中央閘必拒——刪掉委派葉的
+    `_attestation_errors` 呼叫,這支測試就是那把刀的紅。
+    """
+
+    forged = _running_receipt(
+        status="RUNNING_ATTESTED",
+        target_class="production",
+        evidence_class="PLATFORM_OR_EXTERNAL_ATTESTED",
+        trusted_host_attestation={
+            "attestor_identity": "aiml-s2-5-runtime-attestor-v1",
+            "signature_namespace": "arcane-equilibrium-aiml-s2-5-running-attestation",
+            "attestation_kind": "A",
+            "intent_digest": _intent()["self_digest"],
+            "running_dimensions_digest": canonical_digest(_dimensions()),
+            "observer_gate_digest": canonical_digest(_observer_gate()),
+            "trusted_host_time": NOW,
+            "expires_at": (ANCHOR + timedelta(minutes=10)).isoformat(),
+            "signature_armored": (
+                "-----BEGIN SSH SIGNATURE-----\nZm9yZ2Vk\n-----END SSH SIGNATURE-----"
+            ),
+        },
+    )
+    errors = validate_aiml_artifact(forged, now=NOW)
+    assert any("SSH signature is invalid" in error for error in errors), errors
+
+
 # ── §5.4 option (b):各 schema 的 const-false 守衛各自 load-bearing ────────────────
 def test_success_statuses_require_fresh_observer_gate_and_passing_dimensions():
     stale_gate = _observer_gate()
