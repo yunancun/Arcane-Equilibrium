@@ -1920,6 +1920,13 @@ def validate_aiml_artifact(
             )
         else:
             errors.extend(_dependency_refresh_structural_errors(artifact))
+    if schema_version == "aiml_component_effect_classification_v3" or (
+        schema_version.startswith("s2_5_")
+    ):
+        # S2.5(WP5)委派葉:v3 分類重算 + 五個 s2_5 schema 的整合/新鮮度/attestor 驗簽面。
+        # SOURCE-TRUTH 邊界與 never-refreshable 表在葉內(乾淨 [] 不證任何 runtime)。
+        import aiml_gate_receipt_s2_5 as _s2_5_leaf
+        errors.extend(_s2_5_leaf.validate_s2_5_artifact(artifact, now=now))
     return errors
 
 
