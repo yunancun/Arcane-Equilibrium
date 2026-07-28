@@ -262,13 +262,19 @@ S2_CLAIM_KEYS_BY_STEP: dict[str, frozenset[str]] = {
             "s2_4_prepare_authorization", "s2_0_effect_receipt",
             "s2_4_prepare_sandbox_probe_receipt",
         ),
+        # s2_4_prepare_effect_receipt:綁的是 **PREPARE effect receipt 的 self_digest**
+        # (install receipt 的 prepare_result_digest 欄位真身,見
+        # agent_governance_s2_4_install_plan 對 prepare_effect_receipt["self_digest"] 的賦值),
+        # 與設計「上一步 terminal receipt digest = 下一 route claim input」一致;install
+        # receipt 頂層沒有 s2_4_prepared_install_bundle_v1 的 digest 可綁。
         "S2_4_W6B_PROBE": (
-            "s2_4_probe_authorization", "s2_0_effect_receipt", "s2_4_prepared_bundle",
+            "s2_4_probe_authorization", "s2_0_effect_receipt",
+            "s2_4_prepare_effect_receipt",
         ),
         # 雙 permit(registry s2_4_install_adapter_v1:aggregate + 窄 PG-migration profile)。
         "S2_4_W6B_APPLY": (
             "s2_4_install_authorization", "s2_4_pg_migration_authorization",
-            "s2_0_effect_receipt", "s2_4_prepared_bundle",
+            "s2_0_effect_receipt", "s2_4_prepare_effect_receipt",
             "s2_4_installed_unit_probe_receipt",
         ),
         "S2_5A_START": ("s2_5a_start_permit", "s2_4_install_effect_receipt"),
@@ -898,13 +904,23 @@ def route_task(task_facts: dict[str, Any]) -> dict[str, Any]:
     # ValueError);FORWARD 表面規則已在 _normalize_task_facts 原樣跑過,effect lane 不放鬆
     # 任何 source-lane 表面規則(例:S2.5B route 帶 pg 面照樣被 s2_5 forbidden-surface 規則拒)。
     s2_effect_step = _s2_effect_step(facts["claim_inputs"])
-    if s2_effect_step is not None and effect != (
-        S2_EFFECT_STEPS[s2_effect_step]["side_effect_class"]
-    ):
-        raise ValueError(
-            f"S2 effect step {s2_effect_step} requires side_effect_class="
-            f"{S2_EFFECT_STEPS[s2_effect_step]['side_effect_class']}"
-        )
+    if s2_effect_step is not None:
+        if effect != S2_EFFECT_STEPS[s2_effect_step]["side_effect_class"]:
+            raise ValueError(
+                f"S2 effect step {s2_effect_step} requires side_effect_class="
+                f"{S2_EFFECT_STEPS[s2_effect_step]['side_effect_class']}"
+            )
+        # E3-M-3:S2 effect lane 一律強制 authority 表面,故 constitutional_gate(CC)必進
+        # DAG。CC gate 由 surfaces ∩ {authority, live, risk, auth, hard_boundary, policy,
+        # compliance, full_audit} 觸發,而 S2 各 class 的 FORWARD 規則只要求
+        # pg|runtime_effect|service(+install 另需 secret)——沒有這條硬性要求,W6B APPLY
+        # (裝 unit + PG migration)與 S2.5A(起 production service)可在**無規範權威審查者**
+        # 的 DAG 下 admitted。鏡 P0-B effect lane 對 authority 表面的硬性要求。
+        if "authority" not in surfaces:
+            raise ValueError(
+                f"S2 effect step {s2_effect_step} requires the authority surface so the "
+                "constitutional gate is mandatory in the effect lane"
+            )
     implementation = shape in SOURCE_WRITE_SHAPES
     full_stack_implementation = bool(
         implementation

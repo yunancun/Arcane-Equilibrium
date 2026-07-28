@@ -39,20 +39,43 @@ T_START = "2026-07-28T10:00:00Z"
 T_DONE = "2026-07-28T10:05:00Z"
 T_POST = "2026-07-28T10:06:00Z"
 T_EXPIRY = "2026-07-28T10:20:00Z"
-# 與 routing 測試同形的 per-step 合法粗類 facts。
+# 與 routing 測試同形的 per-step 合法粗類 facts(effect lane 硬性要求 authority 面)。
 STEP_FACT_SHAPES = {
-    "S2_0_APPLY": {"surfaces": ["pg", "runtime_effect"], "risk": "high"},
-    "S2_4_W6A_PROBE": {"surfaces": ["runtime_effect", "service"], "risk": "high"},
-    "S2_4_W6A_PREPARE": {"surfaces": ["runtime_effect", "service"], "risk": "high"},
-    "S2_4_W6B_PROBE": {"surfaces": ["runtime_effect", "service"], "risk": "high"},
-    "S2_4_W6B_APPLY": {
-        "surfaces": ["runtime_effect", "service", "pg", "secret"], "risk": "critical",
+    "S2_0_APPLY": {"surfaces": ["authority", "pg", "runtime_effect"], "risk": "high"},
+    "S2_4_W6A_PROBE": {
+        "surfaces": ["authority", "runtime_effect", "service"], "risk": "high",
     },
-    "S2_5A_START": {"surfaces": ["runtime_effect", "service"], "risk": "high"},
-    "S2_1_DRILL": {"surfaces": ["runtime_effect", "service"], "risk": "high"},
-    "S2_5B_FINAL": {"surfaces": ["runtime_effect", "service"], "risk": "high"},
-    "S2_2B_RUNTIME_DONE": {"surfaces": ["pg", "runtime_effect"], "risk": "high"},
+    "S2_4_W6A_PREPARE": {
+        "surfaces": ["authority", "runtime_effect", "service"], "risk": "high",
+    },
+    "S2_4_W6B_PROBE": {
+        "surfaces": ["authority", "runtime_effect", "service"], "risk": "high",
+    },
+    "S2_4_W6B_APPLY": {
+        "surfaces": ["authority", "runtime_effect", "service", "pg", "secret"],
+        "risk": "critical",
+    },
+    "S2_5A_START": {
+        "surfaces": ["authority", "runtime_effect", "service"], "risk": "high",
+    },
+    "S2_1_DRILL": {
+        "surfaces": ["authority", "runtime_effect", "service"], "risk": "high",
+    },
+    "S2_5B_FINAL": {
+        "surfaces": ["authority", "runtime_effect", "service"], "risk": "high",
+    },
+    "S2_2B_RUNTIME_DONE": {
+        "surfaces": ["authority", "pg", "runtime_effect"], "risk": "high",
+    },
 }
+# CC-B:closure PASS 被 contract 明文阻塞的 step(今日 = S2_1_DRILL)不進正例參數化。
+PASSABLE_STEPS = sorted(
+    step for step in S2_EFFECT_STEPS
+    if binding.S2_STEP_RECEIPT_CONTRACTS[step]["closure_pass_blocked_reason"] is None
+)
+BLOCKED_STEPS = sorted(set(S2_EFFECT_STEPS) - set(PASSABLE_STEPS))
+# 被阻塞 step 的「最佳可得 status」——用來證明即使拿出該 status 也不換算 PASS。
+_BLOCKED_STEP_STATUS = {"S2_1_DRILL": "QUIESCED_STATIC_GUARDS_HELD"}
 
 
 def _claims(step: str) -> dict[str, str]:
@@ -97,7 +120,10 @@ def _receipt(step: str) -> dict:
         receipt["s2_5_final_attestation_digest"] = DIGEST
         return receipt
     receipt["target_host"] = "trade-core"
-    receipt[contract["status_field"]] = next(iter(contract["success_statuses"]))
+    receipt[contract["status_field"]] = (
+        next(iter(contract["success_statuses"]))
+        if contract["success_statuses"] else _BLOCKED_STEP_STATUS[step]
+    )
     receipt[contract["intent_id_field"]] = f"{step.lower()}-0001"
     receipt[contract["intent_digest_field"]] = "sha256:" + "e" * 64
     if contract["started_field"] == contract["observed_field"]:
@@ -119,15 +145,30 @@ def _receipt(step: str) -> dict:
     return receipt
 
 
-def _packet(step: str, receipt: dict, postcheck_id: str = "pc") -> tuple[dict, dict, dict]:
+def _postcheck(step: str, receipt: dict, postcheck_id: str = "pc") -> dict:
+    """契約白名單 kind 的獨立 ops_postcheck evidence(payload 交叉綁 receipt self_digest)。"""
+
     contract = binding.S2_STEP_RECEIPT_CONTRACTS[step]
     postcheck = {
         "id": postcheck_id,
         "scope": "runtime",
         "source": "ops_postcheck",
+        "kind": contract["postcheck_kind"],
         "observed_at": T_POST,
         "expiry": T_EXPIRY,
     }
+    binding_field = contract["postcheck_receipt_binding"]
+    if binding_field is not None:
+        assert binding_field.startswith("payload.")
+        postcheck["payload"] = {
+            binding_field.split(".", 1)[1]: receipt["self_digest"]
+        }
+    return postcheck
+
+
+def _packet(step: str, receipt: dict, postcheck_id: str = "pc") -> tuple[dict, dict, dict]:
+    contract = binding.S2_STEP_RECEIPT_CONTRACTS[step]
+    postcheck = _postcheck(step, receipt, postcheck_id)
     authority_refs = []
     if contract["intent_schema_version"] is not None:
         authority_refs.append({
@@ -152,12 +193,18 @@ def _packet(step: str, receipt: dict, postcheck_id: str = "pc") -> tuple[dict, d
 
 @pytest.fixture()
 def structural_receipts(monkeypatch: pytest.MonkeyPatch):
-    """結構綁定測試短路實際重算縫(真委派由 sentinel 測試另釘)。"""
+    """結構綁定測試短路兩個委派縫(真委派各由 sentinel 與 typed 負例另釘)。
+
+    * ``_receipt_validation_errors`` —— receipt 實際重算(中央 AIML 閘)。
+    * ``_delegated_binding_errors`` —— S2.0/S2.1 的既有 per-step closure 硬門(CC-A);
+      其真收據需要真 SSHSIG/丟棄式叢集,結構層測試以此縫短路。
+    """
 
     monkeypatch.setattr(binding, "_receipt_validation_errors", lambda *_a, **_k: [])
+    monkeypatch.setattr(binding, "_delegated_binding_errors", lambda *_a, **_k: [])
 
 
-@pytest.mark.parametrize("step", sorted(S2_EFFECT_STEPS))
+@pytest.mark.parametrize("step", PASSABLE_STEPS)
 def test_each_step_closure_binding_passes_with_exact_cross_bound_evidence(
     structural_receipts, step: str,
 ) -> None:
@@ -176,7 +223,7 @@ def test_each_step_closure_binding_passes_with_exact_cross_bound_evidence(
     assert validated is receipt
 
 
-@pytest.mark.parametrize("step", sorted(S2_EFFECT_STEPS))
+@pytest.mark.parametrize("step", PASSABLE_STEPS)
 def test_acceptance_missing_postcheck_binding_fails_closed(
     structural_receipts, step: str,
 ) -> None:
@@ -187,6 +234,222 @@ def test_acceptance_missing_postcheck_binding_fails_closed(
     assert (
         "S2 passed acceptance must bind the effect receipt and the "
         "independent ops_postcheck"
+    ) in binding.validate_s2_effect_binding(
+        packet, route, fragments, evidence_by_id, {"effect": receipt}
+    )
+
+
+@pytest.mark.parametrize("step", BLOCKED_STEPS)
+def test_blocked_step_never_converts_a_disposable_proof_into_a_pass(
+    structural_receipts, step: str,
+) -> None:
+    """CC-B:S2.1 的 QUIESCED_STATIC_GUARDS_HELD 是 disposable_local 邏輯證明。
+
+    quiesce_result_v1.schema.json 規定該 status ⇒ target_class=disposable_local 且
+    evidence_class=LOCAL_REPRODUCIBLE,且 boundary 無條件 production_fence_performed=false。
+    binding 絕不能在「明知未對 production 施加 fence」的收據上簽發 runtime_contact PASS。
+    """
+
+    route = _route(step)
+    receipt = _receipt(step)
+    packet, fragments, evidence_by_id = _packet(step, receipt)
+    errors = binding.validate_s2_effect_binding(
+        packet, route, fragments, evidence_by_id, {"effect": receipt}
+    )
+    assert any(
+        f"S2 {step} has no closure-admissible success status" in error
+        for error in errors
+    ), errors
+    # 該 step 的成功集為空:任何 status 都進不了 valid_receipts。
+    evidence = binding.build_s2_effect_evidence(receipt)
+    evidence_errors, validated = binding.validate_s2_effect_evidence(
+        evidence, expected_source_head=HEAD
+    )
+    assert validated is None
+    assert any(
+        f"S2 {step} has no closure-admissible success status" in error
+        for error in evidence_errors
+    ), evidence_errors
+    # 被阻塞的 step 不得順帶要求 runtime_contact/CHANGED(無可達成功頂點時那是假語義)。
+    assert not any("runtime_contact=true" in error for error in errors), errors
+    assert not any("must be CHANGED" in error for error in errors), errors
+
+
+def test_s2_1_drill_success_status_is_blocked_not_silently_dropped() -> None:
+    contract = binding.S2_STEP_RECEIPT_CONTRACTS["S2_1_DRILL"]
+    assert contract["success_statuses"] == frozenset()
+    reason = contract["closure_pass_blocked_reason"]
+    assert "quiesce_result_v1 has no production/attested success status today" in reason
+    assert "production_fence_performed=false" in reason
+    assert "QUIESCED_STATIC_GUARDS_HELD" in reason
+
+
+def test_s2_0_success_set_excludes_production_applied() -> None:
+    """CC-A:production APPLIED 需 out-of-band trusted-host 驗證,屬 S2.0 EFFECT session。"""
+
+    contract = binding.S2_STEP_RECEIPT_CONTRACTS["S2_0_APPLY"]
+    assert contract["success_statuses"] == frozenset({"APPLIED_ROLLED_BACK_EXACT"})
+    assert "APPLIED" not in contract["success_statuses"]
+    # 既有硬門的成功語義即本模組的成功集(單一權威,不各自為政)。
+    import agent_governance_pg_observer_bootstrap as observer
+
+    assert contract["success_statuses"] <= observer.RESULT_STATUSES
+
+
+def test_delegated_per_step_hard_gates_are_wired_not_bypassed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CC-A sentinel:S2.0/S2.1 一定實際呼叫既有 per-step closure predicate。"""
+
+    import agent_governance_alr_quiesce_fence as quiesce
+    import agent_governance_pg_observer_bootstrap as observer
+
+    assert binding._DELEGATED_STEP_BINDINGS == {
+        "S2_0_APPLY": observer.validate_pg_observer_bootstrap_binding,
+        "S2_1_DRILL": quiesce.validate_quiesce_fence_binding,
+    }
+    monkeypatch.setattr(binding, "_receipt_validation_errors", lambda *_a, **_k: [])
+    for step, module, attr in (
+        ("S2_0_APPLY", observer, "validate_pg_observer_bootstrap_binding"),
+        ("S2_1_DRILL", quiesce, "validate_quiesce_fence_binding"),
+    ):
+        seen: list = []
+        monkeypatch.setitem(
+            binding._DELEGATED_STEP_BINDINGS, step,
+            lambda *args, _seen=seen: _seen.append(args) or ["sentinel"],
+        )
+        route = _route(step)
+        receipt = _receipt(step)
+        packet, fragments, evidence_by_id = _packet(step, receipt)
+        errors = binding.validate_s2_effect_binding(
+            packet, route, fragments, evidence_by_id, {"effect": receipt}
+        )
+        assert "sentinel" in errors, step
+        assert seen and seen[0] == (
+            packet, route, fragments, evidence_by_id, {"effect": receipt}
+        ), step
+        assert callable(getattr(module, attr))
+
+
+@pytest.mark.parametrize(
+    ("step", "expected"),
+    [
+        (
+            "S2_0_APPLY",
+            "observer bootstrap closure requires the receipt's embedded independent postcheck",
+        ),
+        (
+            "S2_1_DRILL",
+            "quiesce fence closure requires the receipt's embedded post-unfence observation",
+        ),
+    ],
+)
+def test_delegated_hard_gate_rejects_a_receipt_without_the_embedded_postcheck(
+    monkeypatch: pytest.MonkeyPatch, step: str, expected: str,
+) -> None:
+    """CC-A 真委派負例(不 monkeypatch 委派縫):既有硬門要求的內嵌獨立 postcheck 缺席即拒。
+
+    這正是新模組完全沒有的檢查——applier != verifier 與三方 digest 交叉核的入口。
+    """
+
+    monkeypatch.setattr(binding, "_receipt_validation_errors", lambda *_a, **_k: [])
+    route = _route(step)
+    receipt = _receipt(step)
+    receipt["status"] = (
+        "APPLIED_ROLLED_BACK_EXACT" if step == "S2_0_APPLY"
+        else "QUIESCED_STATIC_GUARDS_HELD"
+    )
+    packet, fragments, evidence_by_id = _packet(step, receipt)
+    fragments["ops_preflight"] = {"evidence_refs": []}
+    errors = binding.validate_s2_effect_binding(
+        packet, route, fragments, evidence_by_id, {"effect": receipt}
+    )
+    assert expected in errors, errors
+    # 內嵌 postcheck 缺席 ⇒ 委派硬門的 acceptance 也必須拒(verifier capture 未被承認)。
+    assert any(
+        "passed acceptance must bind the effect receipt + verifier command capture" in error
+        for error in errors
+    ), errors
+
+
+@pytest.mark.parametrize(
+    ("step", "embedded_field", "expected"),
+    [
+        (
+            "S2_0_APPLY", "independent_postcheck",
+            "observer bootstrap verifier capture digest is not the three-way-bound digest",
+        ),
+        (
+            "S2_1_DRILL", "post_unfence_observation",
+            "quiesce fence verifier capture digest is not the three-way-bound digest",
+        ),
+    ],
+)
+def test_delegated_hard_gate_runs_the_three_way_capture_cross_check(
+    monkeypatch: pytest.MonkeyPatch, step: str, embedded_field: str, expected: str,
+) -> None:
+    """CC-A:receipt 內嵌 verifier_capture_digest == ops_postcheck evidence digest ==
+    內嵌 command_capture_v2.record_digest,且 capture node ≠ applier——本模組沒有這條,
+    只有被委派的既有硬門有。"""
+
+    monkeypatch.setattr(binding, "_receipt_validation_errors", lambda *_a, **_k: [])
+    bound = "sha256:" + "9" * 64
+    route = _route(step)
+    receipt = _receipt(step)
+    receipt["status"] = (
+        "APPLIED_ROLLED_BACK_EXACT" if step == "S2_0_APPLY"
+        else "QUIESCED_STATIC_GUARDS_HELD"
+    )
+    receipt["apply_actor_node"] = "s2_apply_actor"
+    receipt[embedded_field] = {
+        "verifier_node": "s2_ops_postcheck", "verifier_capture_digest": bound,
+    }
+    packet, fragments, evidence_by_id = _packet(step, receipt)
+    fragments["ops_preflight"] = {"evidence_refs": []}
+    evidence_by_id["pc"].update({
+        "digest": "sha256:" + "8" * 64,
+        "artifact": {
+            "schema_version": "command_capture_v2",
+            "node_id": "s2_apply_actor",
+            "record_digest": "sha256:" + "7" * 64,
+        },
+    })
+    errors = binding.validate_s2_effect_binding(
+        packet, route, fragments, evidence_by_id, {"effect": receipt}
+    )
+    assert expected in errors, errors
+    assert any("record_digest is not the bound digest" in error for error in errors), errors
+    assert any(
+        "capture node must differ from the applier node" in error for error in errors
+    ), errors
+
+
+def test_delegated_hard_gate_requires_the_ops_preflight_fragment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(binding, "_receipt_validation_errors", lambda *_a, **_k: [])
+    route = _route("S2_0_APPLY")
+    receipt = _receipt("S2_0_APPLY")
+    packet, fragments, evidence_by_id = _packet("S2_0_APPLY", receipt)
+    assert "observer bootstrap closure requires an OPS preflight fragment" in (
+        binding.validate_s2_effect_binding(
+            packet, route, fragments, evidence_by_id, {"effect": receipt}
+        )
+    )
+
+
+def test_delegated_hard_gate_rejects_production_applied_receipt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CC-A:即使有人把 production APPLIED 收據硬塞進 valid_receipts,委派硬門仍拒。"""
+
+    monkeypatch.setattr(binding, "_receipt_validation_errors", lambda *_a, **_k: [])
+    route = _route("S2_0_APPLY")
+    receipt = _receipt("S2_0_APPLY")
+    receipt["status"] = "APPLIED"
+    packet, fragments, evidence_by_id = _packet("S2_0_APPLY", receipt)
+    assert (
+        "observer bootstrap closure PASS requires an APPLIED_ROLLED_BACK_EXACT receipt"
     ) in binding.validate_s2_effect_binding(
         packet, route, fragments, evidence_by_id, {"effect": receipt}
     )
@@ -218,9 +481,9 @@ def test_claim_receipt_digest_binding_fails_closed(structural_receipts) -> None:
 
 
 def test_postcheck_must_not_predate_effect_completion(structural_receipts) -> None:
-    route = _route("S2_1_DRILL")
-    receipt = _receipt("S2_1_DRILL")
-    packet, fragments, evidence_by_id = _packet("S2_1_DRILL", receipt)
+    route = _route("S2_5B_FINAL")
+    receipt = _receipt("S2_5B_FINAL")
+    packet, fragments, evidence_by_id = _packet("S2_5B_FINAL", receipt)
     evidence_by_id["pc"]["observed_at"] = "2026-07-28T10:04:00Z"
     assert "S2 ops_postcheck predates the effect receipt completion" in (
         binding.validate_s2_effect_binding(

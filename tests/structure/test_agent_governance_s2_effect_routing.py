@@ -39,18 +39,34 @@ ALL_S2_ADAPTER_IDS = sorted({
     contract["adapter_id"] for contract in S2_EFFECT_STEPS.values()
 })
 # per-step 的合法粗類 facts(FORWARD 表面一致性規則的最小滿足面;install 必 critical)。
+# 每一組都帶 authority 面:S2 effect lane 硬性要求它,使 constitutional_gate(CC)必進 DAG。
 STEP_FACT_SHAPES = {
-    "S2_0_APPLY": {"surfaces": ["pg", "runtime_effect"], "risk": "high"},
-    "S2_4_W6A_PROBE": {"surfaces": ["runtime_effect", "service"], "risk": "high"},
-    "S2_4_W6A_PREPARE": {"surfaces": ["runtime_effect", "service"], "risk": "high"},
-    "S2_4_W6B_PROBE": {"surfaces": ["runtime_effect", "service"], "risk": "high"},
-    "S2_4_W6B_APPLY": {
-        "surfaces": ["runtime_effect", "service", "pg", "secret"], "risk": "critical",
+    "S2_0_APPLY": {"surfaces": ["authority", "pg", "runtime_effect"], "risk": "high"},
+    "S2_4_W6A_PROBE": {
+        "surfaces": ["authority", "runtime_effect", "service"], "risk": "high",
     },
-    "S2_5A_START": {"surfaces": ["runtime_effect", "service"], "risk": "high"},
-    "S2_1_DRILL": {"surfaces": ["runtime_effect", "service"], "risk": "high"},
-    "S2_5B_FINAL": {"surfaces": ["runtime_effect", "service"], "risk": "high"},
-    "S2_2B_RUNTIME_DONE": {"surfaces": ["pg", "runtime_effect"], "risk": "high"},
+    "S2_4_W6A_PREPARE": {
+        "surfaces": ["authority", "runtime_effect", "service"], "risk": "high",
+    },
+    "S2_4_W6B_PROBE": {
+        "surfaces": ["authority", "runtime_effect", "service"], "risk": "high",
+    },
+    "S2_4_W6B_APPLY": {
+        "surfaces": ["authority", "runtime_effect", "service", "pg", "secret"],
+        "risk": "critical",
+    },
+    "S2_5A_START": {
+        "surfaces": ["authority", "runtime_effect", "service"], "risk": "high",
+    },
+    "S2_1_DRILL": {
+        "surfaces": ["authority", "runtime_effect", "service"], "risk": "high",
+    },
+    "S2_5B_FINAL": {
+        "surfaces": ["authority", "runtime_effect", "service"], "risk": "high",
+    },
+    "S2_2B_RUNTIME_DONE": {
+        "surfaces": ["authority", "pg", "runtime_effect"], "risk": "high",
+    },
 }
 
 
@@ -182,10 +198,30 @@ def test_s2_selection_and_claim_inventory_fail_closed() -> None:
 def test_s2_selector_class_interlock_rejects_wrong_side_effect_class() -> None:
     # selector=S2_0_APPLY 但粗類是 quiesce_fence(表面規則合法)→ 互鎖 ValueError。
     facts = _facts("S2_0_APPLY")
-    facts["surfaces"] = ["runtime_effect", "service"]
+    facts["surfaces"] = ["authority", "runtime_effect", "service"]
     facts["side_effect_class"] = "quiesce_fence"
     with pytest.raises(ValueError, match="requires side_effect_class=pg_observer_bootstrap"):
         route_task(facts)
+
+
+@pytest.mark.parametrize("step", sorted(S2_EFFECT_STEPS))
+def test_s2_effect_lane_requires_the_constitutional_gate(step: str) -> None:
+    """E3-M-3:S2 effect lane 必帶 authority 面 → constitutional_gate(CC)恆在 DAG。
+
+    沒有這條硬性要求時,W6B APPLY(裝 unit + PG migration)與 S2.5A(起 production
+    service)可在**無規範權威審查者**的 DAG 下 admitted(CC gate 只由 authority/live/
+    risk/auth/hard_boundary/policy/compliance/full_audit 面或 unknown risk/uncertainty
+    觸發,而 S2 各 class 的 FORWARD 規則只要求 pg|runtime_effect|service|secret)。
+    """
+
+    route = route_task(_facts(step))
+    assert "constitutional_gate" in {node["id"] for node in route["nodes"]}
+    stripped = _facts(step)
+    stripped["surfaces"] = [
+        surface for surface in stripped["surfaces"] if surface != "authority"
+    ]
+    with pytest.raises(ValueError, match="requires the authority surface"):
+        route_task(stripped)
 
 
 def test_effect_lane_does_not_relax_source_lane_surface_rules() -> None:
