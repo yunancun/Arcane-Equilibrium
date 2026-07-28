@@ -173,8 +173,8 @@ closable from the board:
 
 | Work package | Scope | Status / exit |
 |---|---|---|
-| S2E.0 | S2.4-AMEND-1/2: dependency-refresh ingress/receipt/profile binding and plan-derived expected topology | ACTIVE; schema/ABI/negative mutations accepted |
-| S2E.1 | Claim-gated routing, adapter selection, distinct OPS postcheck and closure binding for all six effect steps | WAITING_S2E_0 |
+| S2E.0 | S2.4-AMEND-1/2: dependency-refresh ingress/receipt/profile binding and plan-derived expected topology | SOURCE_LANDED (2026-07-28) — four-commit chain at head `cc6a8b97a` + round-8 receipt re-emission (carrier `c911ea9c1`): §9.2 refresh ingress wired into APPLY step (2b), terminal-receipt `dependency_refresh_digests`, §9.1 profile discriminators, plan-derived `expected_topology`; obligations 16/23/25/26 flipped to `CLOSED_BY_S2_4_AMEND_[12]_SOURCE`; PA design + E1 build + E2 (0 P0/0 P1, 2 P2 fixed, 7 mutations killed) + E4/CC/E3 PASS; full suite at `cc6a8b97a` measured 6337 passed/46 skipped with exactly the two PM-owned projection discriminators red, closed by the round-8 emission and the projection commit that carries this row |
+| S2E.1 | Claim-gated routing, adapter selection, distinct OPS postcheck and closure binding for all six effect steps | ACTIVE (unlocked by S2E.0) |
 | S2E.2 | Trusted-host runners/observers, rollback/postcheck and startup recovery for S2.0/S2.4/S2.5/S2.1 | WAITING_S2E_1; may run parallel with S2E.3 if manifests are disjoint |
 | S2E.3 | S2.5 F2/F3/F4/note-1: reconcile-under-hold, split lock API, typed release, journal integrity chain | WAITING_S2E_1; may run parallel with S2E.2 |
 | S2E.4 | S2.2B remote-readonly observer plus runtime-attestor SSHSIG producer/verifier and executable route | WAITING_JOIN_S2E_2_S2E_3 |
@@ -205,7 +205,7 @@ unchanged and stays operator-gated.
 | 2 | S2.2A | LR1 scoped compatibility source implementation | PROGRAM | S1.6 | PM -> PA -> E1 -> E2 -> E4 -> QA -> PM | SOURCE_READY | `source_compatibility_receipt_v1` (`receipts/S2.2A-source-compatibility-receipt-v1.json`) self `sha256:a8fba423…`, `learning_runtime_digest sha256:6cf76b60…`, 10 V151-V160 fingerprints; branch `agent/aiml-s2-2a-lr1-compat`, reviewed `7054a3b0`, PR #121 merge `87a3a2503`; E2/E3 PASS + E4 PASS_WITH_CONCERNS; evidence `LOCAL_REPRODUCIBLE` (415/1 + 2259/36); receipt reproduces from checkout | `NONE` | Narrow Python local-first; exited SOURCE_READY. Runtime `DONE` is S2.2B |
 | 2 | S2.2B | LR1 runtime revalidation of exact S2.2A manifest | PROGRAM | S2.5, S2.2A@SOURCE_READY | PM -> independent OPS/E4 -> QA -> PM | SOURCE_READY | **`SOURCE_READY`** (WP5 tranche 2, PM declaration 2026-07-28, PR #150 merge `6be29043c`): `ingestion_compatibility_receipt_v1` closed schema + central leaf + builder/CLI + fixtures anchored on the real persisted S2.2A receipt and a fully re-validated `s2_5_final_attestation_v1`; runtime-`DONE` still consumes `S2.5B@EFFECT_DONE` and remains the only row that may issue the LR1 runtime DONE | `REMOTE_READONLY` | Only row that issues LR1 runtime DONE |
 | 2 | S2.3 | LR2 sealed immutable runtime build/trust chain | PROGRAM | S1.3, S1.6 | PM -> PA -> E1 -> E2 -> E4 -> CC/OPS -> QA -> PM | SOURCE_READY | `sealed_build_receipt_v1` self `sha256:169d2e6c…` (runtime_content `sha256:8b2092e8…`, closure `sha256:26307134…`, target `x86_64-unknown-linux-gnu`) + `expected_identity_receipt_v1` self `sha256:a08c6965…`; real `requirements-ml.lock` (38 pinned/0 unpinned); branch `agent/aiml-s2-3-lr2-sealed`, reviewed `73b083e9`, PR #122 merge `051df8262`; E2/E3/E4/CC/OPS + 2 Codex P2 + FA/CC final audit PASS; heavy `learning-runtime-sealed-build` CI job green (real offline install+import on Linux) | `NONE` | Runtime/build CI green; NOT a running attestation (S2.5/LR6). Central-validator registration = serialized follow-up |
-| 2 | S2.4 | Credential/PG/unit/install effects and component restore | PROGRAM | S2.0, S2.1, S2.2A@SOURCE_READY, S2.3 | PM -> OPS preflight -> E3 -> Adapter -> distinct OPS -> QA -> PM | SOURCE_READY | **`SOURCE_READY`** (WP4/W5, PM declaration 2026-07-28, PR #145 merge `e1b14b7d5`): W0–W5 chain + eight persisted receipts bound `aaee7f1a2` (carrier `456bd0c20`) + ABI-pinned obligation ledger (28 rows) + discriminator projection regression; effect route unchanged and still gated — `S2.4@EFFECT_DONE` additionally requires S2.4-AMEND-1/2 and fresh operator authorization | `CREDENTIAL_PG_UNIT_INSTALL` | Intermediate exact-head sync first |
+| 2 | S2.4 | Credential/PG/unit/install effects and component restore | PROGRAM | S2.0, S2.1, S2.2A@SOURCE_READY, S2.3 | PM -> OPS preflight -> E3 -> Adapter -> distinct OPS -> QA -> PM | SOURCE_READY | **`SOURCE_READY`** (WP4/W5, PM declaration 2026-07-28, PR #145 merge `e1b14b7d5`): W0–W5 chain + eight persisted receipts bound `aaee7f1a2` (carrier `456bd0c20`) + ABI-pinned obligation ledger (28 rows) + discriminator projection regression; effect route unchanged and still gated — the S2.4-AMEND-1/2 **source** preconditions landed in S2E.0 (head `cc6a8b97a`, 2026-07-28: §9.2 refresh ingress in APPLY, terminal-receipt refresh digests, §9.1 profile discriminators, plan-derived `expected_topology`); `S2.4@EFFECT_DONE` still requires the S2E.1-S2E.5 effect-execution readiness chain and fresh operator authorization | `CREDENTIAL_PG_UNIT_INSTALL` | Intermediate exact-head sync first |
 | 2 | S2.5 | Running attestation, watchdog-last recovery, observer/dead-man and rollback | PROGRAM | S2.4 | PM -> OPS/E3 -> E4 -> QA -> PM | SOURCE_READY | **`SOURCE_READY`** (WP5 tranche 1/1b/2, PM declaration 2026-07-28, PR #148 merge `dab875882` + PR #150 merge `6be29043c`): five closed s2_5 schemas + the replay-ledger schema, additive v3 classifier (frozen digests unchanged), lifecycle/attestation/driver leaves + CLI, three-state lifecycle fixtures, hold-style lock across the consume→persist window, §6 closure binding; effect route unchanged and still gated — `S2.5A/S2.5B@EFFECT_DONE` need fresh operator permits per the S2 operator action packet | `WATCHDOG_ROLLBACK_TEST` | Platform-attested; no CI without source change |
 | 3 | S3.1A | LR3 durable queue/controller/worker source implementation | PROGRAM | S2.3 | PM -> PA -> E1 -> E2 -> E4 -> CC/E3/OPS -> QA -> PM | PLANNED | queue source receipt | classifier-derived PG/service source | Migration/ACL/runtime CI; exits SOURCE_READY |
 | 3 | S3.1B | LR3 runtime queue/controller/worker verification | PROGRAM | S2.5, S3.1A@SOURCE_READY | PM -> independent OPS/E4 -> QA -> PM | PLANNED | `queue_recovery_receipt_v1` | `REMOTE_READONLY` | Only row that issues LR3 runtime DONE |
@@ -242,6 +242,7 @@ unchanged and stays operator-gated.
 
 | Time | Session | Event | Evidence |
 |---|---|---|---|
+| 2026-07-28 | S2E.0 | **S2.4-AMEND-1/2 landed as source (S2E.0 closed).** Four-commit chain on `agent/aiml-s2e0-amend12` at head `cc6a8b97a` (base `1255275dd`): (1) §9.1 profile discriminators — code-owned `S2_4_EVIDENCE_CLASS_DISCRIMINATORS` derived from the frozen `S2_4_AUTHORIZATION_PROFILES`, threaded into `_dependency_evidence_receipt_errors` so a genuine artifact of the wrong profile/scope is refused (obligation 26); (2) plan-derived `expected_topology` — `expected_topology` removed from the frozen row-payload allowlist, replaced by the signed `s2_4_pg_hba_delta_v1` bound to the plan core via a no-cycle binding digest, with the five baseline keys made fail-closed in `derive_pg_topology_status` (obligation 25); (3) atomic AMEND-1 — `derive_apply_source_dependency_admissions` §9.2 ingress wired into APPLY step (2b) before permit verification on every lane, terminal `s2_4_install_effect_receipt_v1` gains required closed `dependency_refresh_digests`, obligations 16/23/26 flipped with the honest-surface latch re-keyed to typed status; (4) E2-returned P2 fixes (builder fail-closed contract gate; attestation self-digest recompute). Review: E2 adversarial (0 P0/0 P1, 5+2 mutations killed), E2 delta ACCEPTED, E4 PASS (independent rerun `2 failed, 6337 passed, 46 skipped`; the exactly-two reds are the PM-owned projection discriminators closed by this round-8 emission + projection commit), CC PASS (all changes tighten fail-closed surfaces; nine authorities stay false), E3 PASS (0 confirmed; OBS-1 LOW recorded as follow-up: (2b) binds live HEAD not plan-core source_head). Round-8 W5 receipt re-emission at `cc6a8b97a` (carrier `c911ea9c1`, new ledger digest `sha256:90f9…ed208e`, count=28). Recorded residuals: refresh digest not folded into the signed plan core (defense-in-depth, W6B may revisit), S1.3 not gated (typed `s1_3_not_gated_reason`, owner W6), E2-delta P3 nit (bracket KeyError on doubly-absent digest keys in a directly-called leaf). Source only — no runtime/PG/deploy/broker effect; S2E.1 unlocked. | branch `agent/aiml-s2e0-amend12` head `cc6a8b97a`, receipts carrier `c911ea9c1`; this projection commit |
 | 2026-07-28 | S2 | **Independent effect-readiness audit supersedes the earlier packet-ready projection.** The seven narrow source-seam predicates and their landed PRs remain valid, but `BLOCKED_OPERATOR_ACTION_PACKET_READY` was disproved: AMEND-1/2 are unimplemented source work; hypothetical authorized S2.4/S2.5 routes still inject zero effect adapters; S2.5 has reconcile/lock/release/journal durability gaps; S2.2B `apply` is always pending and has no trusted observer/runtime-attestor SSHSIG execution path; 28 W5 obligations include unresolved W6/W6B source requirements. Linux read-only observation at 2026-07-28T15:55:23+02:00 found the candidate learning units `not-found/inactive/dead` and both canonical AIML roots absent. Current state is `S2_EFFECT_EXECUTION_READINESS_ACTIVE`; execute S2E.0-S2E.5 before regenerating an Operator packet. | `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-28--aiml_s2_source_and_effect_readiness_audit.md`; corrected `TODO.md`; packet v1 marked `DRAFT_NOT_EXECUTABLE` |
 | 2026-07-28 | S2 | **`S2.5@SOURCE_READY` + `S2.2B@SOURCE_READY` declared; Sprint 2 source chain converges on one `BLOCKED_OPERATOR_ACTION_PACKET_READY`** — WP5 tranche 2 (PR #150 merge `6be29043c`) closed the three carried P2s from the tranche-1b review (mutation-survivor test, hold-style lock across the whole anchor→consume→persist→journal window, no self-reported `record_digest` in the closure-binding verifier) plus notes 2/3, and built the `S2.2B` `ingestion_compatibility_receipt_v1` seam anchored on the real persisted S2.2A receipt and a fully re-validated `s2_5_final_attestation_v1` (a simulated-lane anchor never unlocks the runtime lane; one failing V151-V160 item fails the whole receipt). Independent E2 delta re-review PASS (5/5 further mutations killed; its F1 doc-residue finding fixed in the same branch; F2 reconcile-outside-the-lock-window, F3 lock-semantics conflation and F4 release observability carried to the effect lane). Round-7 W5 receipt re-emission at `5be472193` (carrier `0eb90e40c`) because the tranche necessarily touched the four W5-owned central-registration files. Measured on the committed clone: structure 3735/6 + ml_training 2571/40 = 6306/46/0; `agent_governance.py validate` PASS/roles=20. With S2.0/S2.1/S2.2A/S2.3/S2.4 already landed, **no executable S2 source work remains**: the only blocker is a fresh, exact, typed operator authorization, and it is now a single packet — `docs/execution_plan/ai_ml_landing/S2-operator-action-packet-v1.md` (serial effect DAG `S2.0→S2.4→S2.5A→S2.1→S2.5B→S2.2B`, per-step authorization/rollback/postcheck, the two prerequisite PM amendments S2.4-AMEND-1/2, and the `S2_CLOSED` criteria). Nine authorities stay false; the S1 disposable authority is not reusable; runtime remains inactive/not-found per the 2026-07-27 read-only observation. | PR #148 `dab875882`, PR #150 `6be29043c`; this commit |
 | 2026-07-28 | S2.5 | **WP5 tranche 1+1b: the S2.5 running-attestation source seam built, adversarially reviewed, remediated, and re-reviewed (source-only, zero runtime reach)** — per the PA design (`design/S2.5-running-attestation-source-seam.md`) and six PM rulings (O-1..O-6, §5.4 option b): five closed schemas + `s2_5_authorization_replay_ledger_v1`, additive v3 classifier (frozen v1/v2/S0.3 digests byte-unchanged), lifecycle/attestation/driver leaves + CLI, three-state lifecycle fixtures on an injected harness, typed-status-keyed two-way obligation latch closing `S2_5_LIFECYCLE_FIXTURES_DO_NOT_EXIST` (W5 receipts re-emitted at `0faa6499d`, carrier `0b06982e0`, round 6). Round-1 adversarial review: E2 FAIL (F1 cross-lane pre-drill anchor reached production `FINAL_ATTESTED`) and E3 FAIL (post-effect exception escape with no rollback; upstream receipts trusted by self-reported `self_digest` string; replay ledger undetectable tail-truncation and zero persistence) + P2 batch. Tranche 1b remediated all five P1 with pristine-clone red→green evidence and closed thirteen P2 (kind binding, PLATFORM⇒attestor leg, redaction, journal hardening + derived paths, non-finite rejection, secret scan, §5.3 ruling, verifier-arm negatives, status-set split, TTL budget gate, owner-fingerprint recompute, CLI docstring, forward skew cap). E2 delta re-review **PASS**: 11/12 mutations killed, all round-1 P1s confirmed closed; measured 6281/46/0 on the committed clone (structure 3712/6 + ml 2569/40). **`S2.5@SOURCE_READY` is NOT declared**: carried P2-1 (one mutation survivor test gap), P2-2 (probe-only flock probe leaves the consume→persist window without mutual exclusion; design §5.7 named the hold-style s2_4 lock reuse), P2-3 (binding verifier accepts a self-reported `record_digest`) plus three notes gate the declaration; they close in tranche 2 together with the `S2.2B` seam. Nine authorities stay false; no runtime/PG/broker/order effect exists or is granted. | branch `agent/aiml-s2-wp5-s25-seam` heads `9decbac71..dd6c10936`; E1/E2/E3/E4 reports in-session |
@@ -293,9 +294,12 @@ import aiml_gate_receipt_validator as v;\
  for r in v._W5_EXPORTED_ABI['remaining_owned_obligations']]"
 ```
 
-Every row below is **UNCLOSED** at the current W5 generation (round-5 remediation
-head `aaee7f1a2`, receipt carrier `456bd0c20`, PR #145). Review history per
-generation: what was independently reviewed at the merged head `756a59ef7` (GitHub main
+At the current W5 generation (S2E.0 head `cc6a8b97a`, round-8 receipt carrier
+`c911ea9c1`) every row below remains on the ledger; five rows now carry a
+`CLOSED_BY_*` typed status (row 22 by S2.5 source under the PM O-1 ruling, and
+rows 16/23/26 by `S2.4-AMEND-1` plus row 25 by `S2.4-AMEND-2`, both landed as
+source in S2E.0), and the remaining rows are unclosed with their named owners.
+Review history per generation: what was independently reviewed at the merged head `756a59ef7` (GitHub main
 `427bd0dd7`, same tree), by two reviewers, is the round-3 remediation, the W5 emitter
 (`agent_governance_s2_4_w5_emit.py` + the `w5-emit` CLI verb), the §10.1.2 owned-path
 amendment, and the eight then-persisted W5 artifacts — none of which had been reviewed
@@ -317,16 +321,18 @@ worker from taking. Full statements are in the W5 derivation record
 hand-maintained projection carried 13 of these rows; that is the drift this generated
 section exists to prevent.
 
-**The persisted receipt set in this tree is bound to `5be472193` — the WP5-tranche-2
-head (carrying the §10 v1/v2 ruling on top of the tranche-2 code) — and was committed
-one commit later, as `0eb90e40c`.** *Bound to*
+**The persisted receipt set in this tree is bound to `cc6a8b97a` — the S2E.0 head
+(S2.4-AMEND-1/2 four-commit chain `223a479d7`→`e9b26e895`→`a48355a29`→`cc6a8b97a`)
+— and was committed one commit later, as `c911ea9c1` (round 8).** *Bound to*
 and *committed at* are different facts and the artifacts state the first: each of the
-eight carries `source_head = 5be472193d5a23b5e3fbb76b7fc58f2068008ed1`. Read the
+eight carries `source_head = cc6a8b97a9ce1d6c21361f20cf940e202eee34da`. Read the
 binding out of the artifact field, never out of this paragraph; the discriminator regression
 `tests/structure/test_aiml_w5_receipt_binding_projection.py` mechanically requires one
 unique `source_head` across all eight artifacts and requires every claim of that form in
 `TODO.md` and this file to equal the artifacts' actual value. Superseded generations,
-each replaced rather than edited: the set bound to `0faa6499d` (WP5 tranche-1
+each replaced rather than edited: the set bound to `5be472193` (WP5-tranche-2 head,
+committed as `0eb90e40c`, round 7, ledger digest `sha256:57696d69…53ea`), before it
+the set bound to `0faa6499d` (WP5 tranche-1
 ledger-closure head, committed as `0b06982e0`), before it the set bound to `aaee7f1a2`
 (round-5 remediation head, committed as `456bd0c20`, ledger digest
 `sha256:fe3558a3…ca97`), before it the
@@ -334,23 +340,25 @@ set bound to `c2a7263ce` (round-4 remediation head, committed as `25d501366`), a
 before it the set bound to `fcc44eca7` (committed as `756a59ef7`, ledger digest
 `sha256:4548d526…e5af` — what stood here once called that set "bound to `756a59ef7`",
 which was only the commit it landed in). The current `obligation_ledger_digest` is
-`sha256:57696d69eb258c0202faea5541859b05e53fd1985e1b09914d34ddd08c8e53ea`, equal to the
-live ABI digest at this head after the WP5-tranche-1 ledger change
-(`S2_5_LIFECYCLE_FIXTURES_DO_NOT_EXIST` → `CLOSED_BY_S2_5_SOURCE` per the PM O-1
-ruling). `persisted_dir` is repo-relative and `remaining_owned_obligation_count=28`.
+`sha256:90f9261845b4782e577ef34e40369b3bcaf30381ce46d62d7246c087b3ed208e`, equal to the
+live ABI digest at this head after the S2E.0 ledger change (rows 16/23/26 →
+`CLOSED_BY_S2_4_AMEND_1_SOURCE`, row 25 → `CLOSED_BY_S2_4_AMEND_2_SOURCE`; rows kept,
+owner unchanged, statements appended not rewritten, mirroring the O-1 precedent).
+`persisted_dir` is repo-relative and `remaining_owned_obligation_count=28`.
 The standing rule: a receipt is re-emitted after the last owned-path change of a round,
 at the head that carries it. Round 5 edited a W5-owned test path, so PM re-emitted at
 `aaee7f1a2`; WP5 tranche 1 edited `aiml_gate_receipt_w5_obligations.py` (W5-owned, at
 `7e2c2c490`), so PM re-emitted at the tranche head `0faa6499d`; WP5 tranche 2 edited
 the four W5-owned central-registration files (SCHEMA_FILES 78→79, the facade delegate
 branch, the runtime-closure reseal and the count pin), so PM re-emitted at `5be472193`
-(round 7) — the emitter enforces the rule mechanically rather than in prose
+(round 7); S2E.0 edited `aiml_gate_receipt_w5_obligations.py` and `…wave_w5.py`
+(W5-owned) inside its atomic commit 3, so PM re-emitted at the S2E.0 head `cc6a8b97a`
+(round 8) — the emitter enforces the rule mechanically rather than in prose
 (`W5_EMIT_REFUSED` on a dirty owned scope with zero files written;
-`W5_RECEIPTS_EMITTED` on the clean committed head). Tranche 2 left the
-ABI untouched, so the ledger digest named above is unchanged by round 7 — the round-7
-emission re-binds owned-path blobs, not the ledger.
+`W5_RECEIPTS_EMITTED` on the clean committed head). Round 8 changes the ledger digest
+(four typed-status flips) and re-binds owned-path blobs.
 
-W5-RECEIPT-BINDING: source_head=5be472193d5a23b5e3fbb76b7fc58f2068008ed1 carrier_commit=0eb90e40c3e9a1aa5bc2678a008db7a75ea5dee1 artifacts=8 round=7 status=COMMITTED
+W5-RECEIPT-BINDING: source_head=cc6a8b97a9ce1d6c21361f20cf940e202eee34da carrier_commit=c911ea9c12b55aa178ecdd28bcb9b5cd74efa905 artifacts=8 round=8 status=COMMITTED
 
 | # | `obligation_id` | `typed_status` | `owner_wave` | Spec refs |
 |---|---|---|---|---|
@@ -369,17 +377,17 @@ W5-RECEIPT-BINDING: source_head=5be472193d5a23b5e3fbb76b7fc58f2068008ed1 carrier
 | 13 | `ATTESTOR_KEY_IS_NOT_SEPARATE_FROM_THE_PERMIT_KEY` | `NOT_PROVIDED_BY_W5` | `W6B` | `§9.1`, `§10.2` |
 | 14 | `REPLAY_LEDGER_CONSUME_ONCE_IS_A_FILESYSTEM_PROPERTY` | `OPEN_HONEST_BOUNDARY` | `W6B` | `§9.1`, `§10.5 #8` |
 | 15 | `STARTUP_RECONCILE_LANE_PATHS` | `NOT_PROVIDED_BY_W5` | `W6B` | `§5.2` |
-| 16 | `DEPENDENCY_REFRESH_RECEIPT_BINDING_ABSENT` | `NOT_PROVIDED_BY_W5` | `PM` | `§3`, `§10.4`, `§11.3` |
+| 16 | `DEPENDENCY_REFRESH_RECEIPT_BINDING_ABSENT` | `CLOSED_BY_S2_4_AMEND_1_SOURCE` | `PM` | `§3`, `§10.4`, `§11.3` |
 | 17 | `DEPENDENCY_REFRESH_REPRODUCER_NODE_IS_DECLARATIVE` | `PARTIALLY_PROVIDED_BY_W5` | `W6` | `§9.1`, `§9.2` |
 | 18 | `DEPENDENCY_OBSERVATION_WINDOW_IS_CALLER_AUTHORED` | `PARTIALLY_PROVIDED_BY_W5` | `W6` | `§9.2`, `§10.5 #28` |
 | 19 | `ENCODED_SECRET_SCAN_MISSES_COMPOSITE_PAYLOADS` | `RECORDED_NOT_CLOSED` | `W6B` | `§10.5 #15` |
 | 20 | `PROGRAM_CODE_IS_ON_THE_SCANNER_PATH_VIA_W2_W3_AND_W4` | `PROVIDED_BY_W5_UNDER_PM_RULING` | `W5` | `§10.1.1` |
 | 21 | `PR_SET_DUMPABLE_IS_DECLARED_NOT_ENFORCED` | `NOT_PROVIDED_BY_W5` | `W6B` | `§7`, `§10.5 #26` |
 | 22 | `S2_5_LIFECYCLE_FIXTURES_DO_NOT_EXIST` | `CLOSED_BY_S2_5_SOURCE` | `S2.5A` | `§10.5 #29`, `§11.3` |
-| 23 | `SOURCE_IDENTITY_FRESHNESS_HAS_NO_PRODUCTION_CALL_SITE` | `NOT_PROVIDED_BY_W5` | `PM` | `§8`, `§9.2`, `§10.1.1`, `§10.4`, `§10.5 #28` |
+| 23 | `SOURCE_IDENTITY_FRESHNESS_HAS_NO_PRODUCTION_CALL_SITE` | `CLOSED_BY_S2_4_AMEND_1_SOURCE` | `PM` | `§8`, `§9.2`, `§10.1.1`, `§10.4`, `§10.5 #28` |
 | 24 | `EMITTED_EVIDENCE_DIGESTS_ARE_UNAUTHENTICATED` | `RECORDED_NOT_CLOSED` | `PM` | `§10.3`, `§10.5 #27`, `§11.3` |
-| 25 | `EXPECTED_TOPOLOGY_IS_CALLER_SUPPLIED_AND_UNSIGNED` | `RECORDED_NOT_ABSORBED` | `PM` | `§8.2`, `§10.1.1`, `§10.2`, `§10.4`, `§10.5 #25` |
-| 26 | `EVIDENCE_CLASS_TO_SCHEMA_MAP_IS_MANY_TO_ONE` | `RECORDED_NOT_CLOSED` | `PM` | `§9.1`, `§9.2`, `§10.5 #28` |
+| 25 | `EXPECTED_TOPOLOGY_IS_CALLER_SUPPLIED_AND_UNSIGNED` | `CLOSED_BY_S2_4_AMEND_2_SOURCE` | `PM` | `§8.2`, `§10.1.1`, `§10.2`, `§10.4`, `§10.5 #25` |
+| 26 | `EVIDENCE_CLASS_TO_SCHEMA_MAP_IS_MANY_TO_ONE` | `CLOSED_BY_S2_4_AMEND_1_SOURCE` | `PM` | `§9.1`, `§9.2`, `§10.5 #28` |
 | 27 | `S1_3_ASSURANCE_CLASS_IS_INFLATABLE_WITHOUT_CHANGING_THE_PROJECTION` | `RECORDED_NOT_CLOSED` | `S1.3` | `§9.2`, `§10.1.1` |
 | 28 | `OWNED_PATH_PROJECTION_RULER_IS_NOT_UNIFORM` | `RECORDED_NOT_ABSORBED` | `PM` | `§10.3` |
 
@@ -445,6 +453,16 @@ solve rows outside its ownership.
   path-scope call scheduled for the next wave that legitimately touches those files
   (W6 intake), not a W5 obligation and not a `SOURCE_READY` blocker.
 <!-- W5-PM-OWNED-ADJUDICATION-END -->
+
+**Closure update (2026-07-28, S2E.0):** the two `separately_scheduled` amendments have
+landed as source at head `cc6a8b97a` — `S2.4-AMEND-1` closed rows 16/23/26 and
+`S2.4-AMEND-2` closed row 25 (typed statuses `CLOSED_BY_S2_4_AMEND_1_SOURCE` /
+`CLOSED_BY_S2_4_AMEND_2_SOURCE` in the live ABI; rows kept with owner `PM` and
+appended closure notes, mirroring the O-1 precedent). The classifications recorded in
+the generated block above are preserved as the adjudication history; the two
+`accepted_carry_forward` rows (24/28) remain open with their named owners. The closure
+licenses source structure only; `S2.4@EFFECT_DONE` still requires the S2E.1-S2E.5
+chain and fresh operator authorization.
 
 Net result: **0 source-closure blockers**. `S2.4-AMEND-1` (refresh ingress + terminal
 receipt refresh-digest binding + §9.1 profile threading; closes rows 16/23/26) and
