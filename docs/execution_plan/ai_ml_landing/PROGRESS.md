@@ -304,7 +304,7 @@ section exists to prevent.
 **The persisted receipt set in this tree is bound to `0faa6499d` — the WP5-tranche-1
 ledger-closure head — and was committed one commit later, as `0b06982e0`.** *Bound to*
 and *committed at* are different facts and the artifacts state the first: each of the
-eight carries `source_head = 0faa6499d0a1b7b44165e212e0c438f1374f00d4`. Read the
+eight carries `source_head = 5be472193d5a23b5e3fbb76b7fc58f2068008ed1`. Read the
 binding out of the artifact field, never out of this paragraph; the discriminator regression
 `tests/structure/test_aiml_w5_receipt_binding_projection.py` mechanically requires one
 unique `source_head` across all eight artifacts and requires every claim of that form in
@@ -326,7 +326,7 @@ at the head that carries it. Round 5 edited a W5-owned test path, so PM re-emitt
 the rule mechanically rather than in prose (`W5_EMIT_REFUSED` on a dirty owned scope
 with zero files written; `W5_RECEIPTS_EMITTED` on the clean committed head).
 
-W5-RECEIPT-BINDING: source_head=0faa6499d0a1b7b44165e212e0c438f1374f00d4 carrier_commit=0b06982e035dfa8c2ff51ba4310dd2aacb8e02ed artifacts=8 round=6 status=COMMITTED
+W5-RECEIPT-BINDING: source_head=5be472193d5a23b5e3fbb76b7fc58f2068008ed1 carrier_commit=0eb90e40c3e9a1aa5bc2678a008db7a75ea5dee1 artifacts=8 round=7 status=COMMITTED
 
 | # | `obligation_id` | `typed_status` | `owner_wave` | Spec refs |
 |---|---|---|---|---|
