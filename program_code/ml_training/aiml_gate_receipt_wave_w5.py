@@ -1324,16 +1324,23 @@ def _honest_surface_reasons(
         reasons.append(
             "W5 cannot measure what constrains the wave-exit evidence digests (fail-closed)"
         )
-    elif evidence.get("emit_sink_refuses_empty_evidence") is not True or (
-        evidence.get("emit_sink_refuses_secret_like_evidence") is not True
+    elif (
+        evidence.get("emit_sink_refuses_empty_evidence") is not True
+        or evidence.get("emit_sink_refuses_secret_like_evidence") is not True
+        # 第四輪 P2:sink 探針是**空對照組**,不是本條義務的主體。舊碼把它放在關閉臂的
+        # 判準裡,於是在 sink 加一句良性形狀檢查(如 require "command")就讓
+        # accepts_fabricated 翻 False、掉進下一臂,吐出「evidence digests are no longer
+        # shape-only; close the obligation instead」——而同一份投影裡
+        # only_shape_is_constrained 仍是 True。那句話是假的,而它的處方是刪掉一條仍為真的
+        # 誠實列。三個探針現在一起當對照:全真才代表「這個守衛真的只檢查形狀」;任一翻面
+        # 代表對照組本身變了(拒絕一切 / 拒絕不了任何東西),量測不再成立 → fail-closed。
+        or evidence.get("emit_sink_accepts_fabricated_evidence") is not True
     ):
         reasons.append(
             "W5 emit-evidence guard is not a real predicate (a guard that refuses nothing, "
             "or one that refuses everything, measures nothing about the evidence)"
         )
-    elif evidence.get("emit_sink_accepts_fabricated_evidence") is True and (
-        evidence.get("only_shape_is_constrained") is True
-    ):
+    elif evidence.get("only_shape_is_constrained") is True:
         if _EVIDENCE_AUTHENTICITY_OBLIGATION not in obligation_ids:
             reasons.append(
                 f"W5 does not record {_EVIDENCE_AUTHENTICITY_OBLIGATION} while a fabricated "
@@ -1341,6 +1348,8 @@ def _honest_surface_reasons(
                 "declaring S2.4@SOURCE_READY *from* this chain would be asserting more than "
                 "the chain can carry"
             )
+    # 只有「主體本身」被量成 False(schema 真的長出非形狀性約束)才可以要求關閉這一列;
+    # 上面第一個 if 已把 None 收走,故本臂等價於 only_shape_is_constrained is False。
     elif _EVIDENCE_AUTHENTICITY_OBLIGATION in obligation_ids:
         reasons.append(
             f"W5 still records {_EVIDENCE_AUTHENTICITY_OBLIGATION} although the evidence "

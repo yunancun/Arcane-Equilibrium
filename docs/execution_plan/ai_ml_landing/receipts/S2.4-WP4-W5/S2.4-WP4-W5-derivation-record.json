@@ -3,11 +3,11 @@
     "reasons": [],
     "status": "ADMITTED"
   },
-  "admission_self_digest": "sha256:f3657ae2f2456de4dbf66e5c7a62cfeb8a568c472d64324f88f57c16da825406",
+  "admission_self_digest": "sha256:bfa795a458c77ee2189e2c7d08dbd1ba8166e3426abead9e6ff839b9a84edbac",
   "historical_persisted_w4": {
     "historical_source_head": "f66fe0790ee13c098ad99bbdea3c9001f76328a4",
     "historical_w4_integrity": "VERIFIED",
-    "persisted_dir": "/Users/ncyu/Projects/TradeBot/.codex-worktrees/aiml-s2-wp4-w0/docs/execution_plan/ai_ml_landing/receipts/S2.4-WP4-W4",
+    "persisted_dir": "docs/execution_plan/ai_ml_landing/receipts/S2.4-WP4-W4",
     "regenerated_w0_admission_self_digest": "sha256:adeb39b7f70e51c20db6a5175dc1b9c37d619597a2f2b28c7a2d37738781163b",
     "regenerated_w0_wave_exit_self_digest": "sha256:cdd4516920cb6b4004dc7b551cb68818d453f7922bd78f8ec0da7e82a829c3d6",
     "regenerated_w1_wave_exit_self_digest": "sha256:57814db9446335a57c6695d793f17ef9b7c56798796ce65b33934f20ea57776d",
@@ -15,33 +15,33 @@
     "regenerated_w3_wave_exit_self_digest": "sha256:f0b54fb1088fc0e3a3b5944c32407a38223c28e3942da757bd0f150c493fb01c",
     "w4_wave_exit_self_digest": "sha256:79db18bb568b896e12718de468d15089544084b3d5fd5c36acc242d4614e7bad"
   },
-  "obligation_ledger_digest": "sha256:4548d5260f86b5ea3280c98e1d4fb61293de440b3c0640d96ccd862c9674e5af",
+  "obligation_ledger_digest": "sha256:fe3558a30884c051eef0f9f6f0cff688ee27cdac675ef2a5213a784e4501ca97",
   "obligation_ledger_note": "Enumerated from aiml_gate_receipt_wave_w5._W5_EXPORTED_ABI['remaining_owned_obligations'] at emission time, never hand-copied. This is the operator's W6 precondition list: at W6 incident time it must be readable from this artifact alone, without importing a Python module from any branch. Compare obligation_ledger_digest against canonical_digest over the live ABI list to detect a hand-edited copy. Every row is UNCLOSED at this source head; owner_wave names who must close it.",
   "regenerated_w0_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w0_wave_exit_self_digest": "sha256:e6037ff9472152d4c5613060ae59648ce37c6fd43f25bbe9f92e93f71b139398",
+  "regenerated_w0_wave_exit_self_digest": "sha256:c5fa9fbbb5696a77f654ac5a77634ecb76d73b9a7fe766a76a356f059489c8b8",
   "regenerated_w1_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w1_wave_exit_self_digest": "sha256:bba28392de5aa96c68d036bdd2bbce3078b327f602e60a322f505399231e42e5",
+  "regenerated_w1_wave_exit_self_digest": "sha256:573dc2bea41bd03c0893ced8eb113a333dfdfaee766f2f313035692970ffc397",
   "regenerated_w2_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w2_wave_exit_self_digest": "sha256:3f227dc55e38f98a178d457369f65fc2de1360fae10a2735c0359f51fdb1fdf7",
+  "regenerated_w2_wave_exit_self_digest": "sha256:84a064cf69c09454d21ca92be6193c03084cacbfdb360475cd53399972a76660",
   "regenerated_w3_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w3_wave_exit_self_digest": "sha256:2dfbd526366b571d592694ab7b136eb332c6cf43c297ba86da36b6e02e0662de",
+  "regenerated_w3_wave_exit_self_digest": "sha256:6135e464b8b6abee2d43b0e7dc7c928edc0d377a7c7313021e9f1f4c383d30b0",
   "regenerated_w4_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w4_wave_exit_self_digest": "sha256:816387391579a23d903ee40a7ee3102f0a79821850bba2e8d7693a3fc3a1071a",
+  "regenerated_w4_wave_exit_self_digest": "sha256:f830846c04df11e0b0e2dec1a23976a7e7d90e76aa0c9a96f35f2f3ccfaf2a30",
   "remaining_owned_obligation_count": 28,
   "remaining_owned_obligations": [
     {
@@ -258,14 +258,14 @@
       "w5_provides": "the finding, the exact alignment arithmetic and the prescription (shifted cores at prefix lengths 0/1/2 plus a decode-then-rescan pass, with a composite-offset test at each alignment), and the honest reason it is not closed here"
     },
     {
-      "obligation_id": "PROGRAM_CODE_IS_ON_THE_SCANNER_PATH_VIA_W3_AND_W4",
+      "obligation_id": "PROGRAM_CODE_IS_ON_THE_SCANNER_PATH_VIA_W2_W3_AND_W4",
       "owner_wave": "W5",
       "spec_refs": [
         "§10.1.1"
       ],
-      "statement": "Making program_code/ importable widens the top-level namespace of every process that loads the facade — broker_connectors, exchange_connectors, dashboard and ai_agents all become resolvable in the engine-scanner process. No shadowing or hijack was ever found, but under §10.1.1 condition 4 that has to be a decision rather than an import side effect. CORRECTION (adversarial round 3): the previous obligation_id named W4 ALONE and was imprecise — aiml_gate_receipt_wave_w3.py does the identical import-time insertion at lines 32-34 and was never mentioned. Both are now removed under an explicit PM ruling: W3's one ml_training package import moved inside program_code_on_path(), and W4 never used the path at all. §10.1.1 condition 4 forbids GRANTING a capability the parent did not have; removing these strictly REDUCES capability, so the change runs with the condition rather than against it. All four occurrences W5 found (contracts leaf, W5 leaf, W3 leaf, W4 leaf) are now closed and the process-level property IS achieved for the facade's import closure.",
+      "statement": "Making program_code/ importable widens the top-level namespace of every process that loads the facade — broker_connectors, exchange_connectors, dashboard and ai_agents all become resolvable there. No shadowing or hijack was ever found, but under §10.1.1 condition 4 that has to be a decision rather than an import side effect. CORRECTION 1 (adversarial round 3): the previous obligation_id named W4 ALONE and was imprecise — aiml_gate_receipt_wave_w3.py does the identical import-time insertion and was never mentioned. CORRECTION 2 (adversarial round 4): round 3 then wrote that 'all four occurrences are now closed and the process-level property IS achieved for the facade's import closure', and that was measurably FALSE — the sweep enumerated four occurrences and missed a FIFTH, aiml_gate_receipt_wave_w2.py, which the facade imports at module top level and which the runtime import closure declares. Measured at the round-3 head, importing the facade left program_code on sys.path and all four packages find_spec-resolvable; round 3's regression looped leaf-by-leaf over two named leaves and never imported the facade, which is exactly how the fifth occurrence hid. All five are now removed under an explicit PM ruling that EXTENDS the round-3 path-scope ruling to the W2-owned leaf aiml_gate_receipt_wave_w2.py: each package-form ml_training.* import moved inside program_code_on_path(), and W4 never used the path at all. §10.1.1 condition 4 forbids GRANTING a capability the parent did not have; removing these strictly REDUCES capability, so the change runs with the condition rather than against it. SCOPE, stated exactly because round 3 overstated it: what is achieved is that importing the facade no longer widens the namespace as a side effect. It is NOT a claim about every engine-scanner process. Measured at this head: fifteen of the fifty modules the declared runtime import closure names fail to import without program_code on sys.path ('No module named ml_training'), so the scanner launcher must put it there for its own reasons; and nineteen governed agent_governance_s2_4_* helper leaves still insert it at their own import time, none of which is in the facade's top-level import closure. Those are launcher- and helper-level decisions, not import side effects of loading the facade, and this row does not claim them closed.",
       "typed_status": "PROVIDED_BY_W5_UNDER_PM_RULING",
-      "w5_provides": "all four occurrences removed under the PM path-scope ruling, the correction of the row's own W4-only naming, and a leaf-scoped regression that fails if any of them returns"
+      "w5_provides": "all five occurrences removed under the PM path-scope ruling extended to the W2-owned leaf, the correction of round 3's own count and capability claim, and a regression that imports the facade itself (not only the leaves) and fails if program_code returns to sys.path or any of the four packages resolves"
     },
     {
       "obligation_id": "PR_SET_DUMPABLE_IS_DECLARED_NOT_ENFORCED",
@@ -311,9 +311,9 @@
         "§10.5 #27",
         "§11.3"
       ],
-      "statement": "The W0->W5 chain proves nothing about whether tests ran or a review happened. validate_emit_evidence checks exactly three things — a non-empty object, a non-empty list of non-empty objects, and a secret scan — and the wave-exit schema constrains test_digests / capture_digests / review_fragment_digests with minItems:1 and a sha256 hex pattern and nothing else, so the entire chain derives PASS on sha256:111...1. This is pre-existing across W0-W4 and W5 does not retrofit it, but it becomes load-bearing the moment S2.4@SOURCE_READY is declared FROM the chain, which is what W5 is for. It is not closable in the source lane, and the reason is structural rather than budgetary: a packet-local artifact cannot authenticate its own execution. A canonical self-digest proves integrity only — never who produced a result nor that a command ran — so an execution claim needs ORCHESTRATOR_BOUND controller facts or PLATFORM_OR_EXTERNAL_ATTESTED telemetry (CLAUDE.md evidence assurance). Nor can W5 raise the bar by binding the digests to something it can recompute: the only thing a source-lane verifier can independently recompute is repository content, and the receipt ALREADY binds exactly that through owned_path_diff_digest over the bound commit's blobs. Requiring test_digests to repeat those blob digests would add a shape rule and zero assurance, so W5 refuses to add a check that reads like a gate and is not one. What a green chain licenses is therefore SOURCE structure at a head, never 'the tests were executed'.",
+      "statement": "The W0->W5 chain proves nothing about whether tests ran or a review happened. validate_emit_evidence checks exactly three things — a non-empty object, a non-empty list of non-empty objects, and a secret scan — and the wave-exit schema constrains test_digests / capture_digests / review_fragment_digests with minItems:1 and a sha256 hex pattern and nothing else, so the entire chain derives PASS on sha256:111...1. This is pre-existing across W0-W4 and W5 does not retrofit it, but it becomes load-bearing the moment S2.4@SOURCE_READY is declared FROM the chain, which is what W5 is for. It is not closable in the source lane, and the reason is structural rather than budgetary: a packet-local artifact cannot authenticate its own execution. A canonical self-digest proves integrity only — never who produced a result nor that a command ran — so an execution claim needs ORCHESTRATOR_BOUND controller facts or PLATFORM_OR_EXTERNAL_ATTESTED telemetry (CLAUDE.md evidence assurance). Nor can W5 raise the bar by binding the digests to something it can recompute: the only thing a source-lane verifier can independently recompute is repository content, and the receipt ALREADY binds exactly that through owned_path_diff_digest over the bound commit's blobs. Requiring test_digests to repeat those blob digests would add a shape rule and zero assurance, so W5 refuses to add a check that reads like a gate and is not one. What a green chain licenses is therefore SOURCE structure at a head, never 'the tests were executed'. ROUND-4 CORRECTION to this row's own latch: the closing arm was gated on emit_sink_accepts_fabricated_evidence, which is a VACUITY CONTROL, not the subject. Adding a benign shape check to agent_governance_s2_4_emit_sink.validate_emit_evidence (e.g. requiring a 'command' key) flipped that probe to False and drove the latch onto the closing arm — 'the evidence digests are no longer shape-only; close the obligation instead' — while only_shape_is_constrained was still True in the same projection: a false message whose prescription deletes a still-true honesty row. The closing arm now reads only_shape_is_constrained, which IS the subject, and the sink probe joins the empty/secret probes as a control whose flip is fail-closed rather than closing. AGGRAVATING and recorded rather than fixed: agent_governance_s2_4_emit_sink.py is in _W2_OWNED_PATHS and in no other wave's, so W5's wave exit reads a file it neither owns nor watches for drift. Adding it to _W5_OWNED_PATHS is an owned-path scope decision §10.4 places outside a worker's choice.",
       "typed_status": "RECORDED_NOT_CLOSED",
-      "w5_provides": "the finding, the exact structural reason it cannot be closed here, a live measurement of what actually constrains the three evidence fields (including the positive controls proving the emit guard is not vacuous), and a latch requiring this row while a fabricated digest still satisfies every constraint"
+      "w5_provides": "the finding, the exact structural reason it cannot be closed here, a live measurement of what actually constrains the three evidence fields (including the positive controls proving the emit guard is not vacuous), a latch requiring this row while a fabricated digest still satisfies every constraint, the round-4 correction of that latch's own subject, and the record that its sink input is a W2-owned path W5 does not watch"
     },
     {
       "obligation_id": "EXPECTED_TOPOLOGY_IS_CALLER_SUPPLIED_AND_UNSIGNED",
@@ -420,17 +420,29 @@
       "role": "PM",
       "round": "adjudication",
       "verdict": "rulings recorded; SOURCE_READY not declared here"
+    },
+    {
+      "disposition": "all closed in c2a7263ce (PM ruled fix the code, not the sentence, for the false claim); the receipts were re-emitted at that head and committed as 25d501366",
+      "headline": "Every P1 was the shape this wave keeps producing. Two emitter guards had no test: deleting the _validate_emit_evidence call left tests/structure byte-identical at 3601/6, and the regenerated_w0_admission refusal stage had no test at all because every negative test forced ADMITTED. The third was a measurably false capability claim round 3 had written into the exported ABI — a fifth program_code sys.path insertion in aiml_gate_receipt_wave_w2.py meant importing the facade still resolved broker_connectors/exchange_connectors/dashboard/ai_agents. Of the P2s: §10.1.2 clause (d) did not stop a worker narrowing its own scope, _WAVE_OWNED_PATHS was unpinned, _design_fenced_paths took the first matching heading so a decoy section shadowed the authoritative one, and the latch-D false positive survived through a new vector.",
+      "role": "round-4 reviewers (two independent legs at the merged head 756a59ef7; the individual role identities were not captured in this record)",
+      "round": "round 4 — the first review of the round-3 remediation, the w5-emit emitter and the §10.1.2 amendment, none of which any reviewer had seen when they merged",
+      "verdict": "3 P1 + 6 P2; §11.2 predicate 4 NOT MET until closed"
+    },
+    {
+      "disposition": "both decoys now fail closed under a section-scoped fence-uniqueness guard, each with its own regression that goes red when its own guard is deleted; both ledgers rewritten to describe the tree they are committed in; this record corrected. Re-emission at the round-5 head is PM's step: the emitter refuses a dirty owned scope (measured W5_EMIT_REFUSED / w5_wave_exit, zero files written).",
+      "headline": "The P1 was PM's and in both ledgers: they called the eight artifacts bound to 756a59ef7 when that was only the commit they landed in (measured, all eight carried source_head=fcc44eca7... there and c2a7263ce... here), and the whole stale-receipts paragraph still said the round-4 re-emission was owed after it had been done in the same tree. P2-1: round 4 pinned heading uniqueness but _design_fenced_paths still took the first ```text fence, so a decoy fence under the authoritative heading shadowed a gutted (b) block with the whole lane green at 150 passed. P2-2: round 4's own heading-uniqueness guard had no test — a bare starts[0] left the W5 lane byte-identical at 114 passed. P2-3: this record's review_rounds re-attributed W4's tallies to W5 and no fragment came from round 4.",
+      "role": "round-5 reviewer (one leg at 25d501366, the head carrying the re-emitted receipts)",
+      "round": "round 5 — the closing round; the wave judged converged",
+      "verdict": "1 P1 + 2 P2 in the tree, plus P2-3 against this evidence record; nothing thrown at the gate logic survived"
     }
   ],
   "schema_version": "s2_4_w5_derivation_record_v1_informal",
-  "source_head": "fcc44eca76e61359cd256f36982df6a15f6ce59f",
+  "source_head": "aaee7f1a28bbe0f22cffb9feea15bf9172f1ad7d",
   "test_evidence": {
     "acceptance_matrix": {
-      "disagreements": [
-        "#28a and #24 — each had a load-bearing guard whose removal left the entire tree green; discriminating tests were added in round 3 but the items were deliberately NOT self-upgraded"
-      ],
-      "headline": "35 proven / 4 partially proven / 0 unproven",
-      "source": "E4-verifier's independently rebuilt map, adopted over the wave's own 36/3/0"
+      "headline": "36 proven / 3 partially proven / 0 unproven",
+      "reasoning": "#24 upgraded because its discriminator is now mutation-proven and fails for the digest binding rather than the identity contract. #26, #28a and #29 held PARTIAL because the obligation ledger shows they cannot close inside WP4; #29 is terminally partial for S2.4.",
+      "source": "E4-verifier's map re-scored at 756a59ef7 — NOT the wave's original 36/3/0"
     },
     "authority_posture": {
       "adapters_all_authority_locked_production_capable": true,
@@ -444,33 +456,42 @@
       "dependency_refresh_gate": "b78185b00",
       "emitter_and_amendment": "fcc44eca76e61359cd256f36982df6a15f6ce59f",
       "merge_base": "dda3a3f73",
+      "merged_as": "427bd0dd7 (same tree hash as 756a59ef7; c2a7263ce and 25d501366 are not merged)",
       "round2_remediation": "b5d546e3a",
       "round3_remediation": "a757c006f",
+      "round4_receipts_committed_at": "25d50136635d24806d827dcb4a12fc23f96130ce — the commit that CARRIES the eight artifacts; each artifact BINDS source_head=c2a7263ce2c3a66416db61acd8d74ba264c06486. Committed at and bound to are different facts; read the binding out of the artifact field.",
+      "round4_remediation": "c2a7263ce2c3a66416db61acd8d74ba264c06486",
+      "round5_remediation": "uncommitted in the worktree over 25d501366 at capture time",
       "w5_sweep": "3412281ac",
-      "whole_tree_at_emit": "6148/46",
-      "whole_tree_at_merge_base": "3418+2547 = 5965/46"
+      "whole_tree_at_merge_base": "3418+2547 = 5965/46",
+      "whole_tree_at_this_capture": "6169/46"
     },
     "capture_note": "Locally reproducible repository/test facts only. NOT ORCHESTRATOR_BOUND and NOT platform-attested: governed capture-command cannot host pytest on this Mac (HOME isolation), so these are direct Bash runs. A green W0-W5 chain evidences SOURCE STRUCTURE AT A HEAD ONLY — the wave-exit evidence digests are shape-only and the chain derives PASS on sha256:111...1, so it never evidences that these tests ran. These numbers are the evidence that they ran; the chain is not.",
     "commands": [
       {
         "command": "python3 -m pytest tests/structure -q",
-        "result": "3601 passed, 6 skipped",
-        "run_by": "E1 (builder) and E4-verifier (independent, matched exactly at the prior head)"
+        "result": "3622 passed, 6 skipped",
+        "run_by": "E1 (builder), on the round-5 worktree"
       },
       {
         "command": "python3 -m pytest program_code/ml_training/tests -q",
         "result": "2547 passed, 40 skipped",
-        "run_by": "E1 and E4-verifier"
+        "run_by": "E1, on the round-5 worktree"
       },
       {
         "command": "python3 -m pytest tests/structure program_code/ml_training/tests -q",
-        "result": "6148 passed, 46 skipped (identical on the dirty worktree and on a committed clone)",
-        "run_by": "E1; PM independently measured 6128/46 at the preceding head a757c006f"
+        "result": "6169 passed, 46 skipped at the round-5 remediation, against 6167/46 at the round-4 head c2a7263ce = +2 tests, zero regressions, zero new skips",
+        "run_by": "E1; E4-verifier independently measured 6148/46 at 756a59ef7 and PM 6128/46 at a757c006f"
       },
       {
-        "command": "pytest tests/structure/test_agent_governance_s2_4_install_w5{,_emit}.py -q",
-        "result": "124 passed in 149.11s",
-        "run_by": "PM on the committed head"
+        "command": "python3 -m pytest tests/structure/test_agent_governance_s2_4_install_w5.py tests/structure/test_agent_governance_s2_4_install_render.py -q",
+        "result": "the round-5 decoy-fence mutation (a second ```text fence under the authoritative #### 10.1.2 heading carrying the real 45-path list, the authoritative block gutted to one path) is 150 passed on pristine and 6 failed / 146 passed after the fix",
+        "run_by": "E1"
+      },
+      {
+        "command": "python3 -m pytest tests/structure/test_agent_governance_s2_4_install_w5.py -q",
+        "result": "replacing the heading-uniqueness assertion with a bare starts[0] is 114 passed on pristine (byte-identical to baseline) and 1 failed / 115 passed after the fix; deleting the new fence-uniqueness assertion is 1 failed on the design-doc subset",
+        "run_by": "E1"
       },
       {
         "command": "agent_governance_s2_4_install.py engine-scanner-split",
@@ -483,6 +504,10 @@
       {
         "command": "agent_governance.py validate",
         "result": "PASS, roles=20"
+      },
+      {
+        "command": "W0->W5 chain derivation on a clean committed checkout carrying this tree",
+        "result": "admission ADMITTED and W0..W5 all PASS; each of W0/W1/W2/W3/W4 tampered in turn yields W5 NOT_PASS; nine_authorities_false true on all seven artifacts"
       }
     ],
     "disclosed_limits": [
@@ -501,11 +526,12 @@
       "w0_negative_manifest": "sha256:1bd86de7b636bf57ead1a1ecfd00c9b75379ae49d1458a41bd7c22987d6f92f6"
     },
     "host_platform": "darwin (development machine); Linux trade-core is the runtime machine and was not contacted",
+    "review_rounds": "five, enumerated as W5's OWN rounds and consistent with the S2-WP4-W5 row of PROGRESS.md. R1: two legs at 3412281ac (acceptance sweep + wave projection + W0->W5 chain) — a BLOCK on the §9.2 gate and a DONE+FAIL, remediated in b5d546e3a. R2: five legs at b5d546e3a — E3 lifted its BLOCK, E2 confirmed its four prior P1s closed across eleven mutations with zero survivors, E4-verifier matched every number and scored 35/4/0; the round's own finding was that the fix itself was the gate (owned-scope delta read against HEAD rather than the bound commit, §9.2 expiry read off two caller-authored fields, the omitted input-scope path, W5-only scope consumption, both honesty latches syntactic proxies). Remediated in a757c006f. R3: the a757c006f remediation plus the emitter, the §10.1.2 amendment and the ledger projection — none of which any reviewer had seen when they merged. R4: two legs at the merged head 756a59ef7, the first review of R3's output — 3 P1 + 6 P2; remediated in c2a7263ce, whose re-emitted receipts are the commit 25d501366. R5: at 25d501366 — 1 P1 + 2 P2 in the tree plus P2-3 against this record, and the wave judged converged because nothing thrown at the gate logic survived. The P1 was two false statements in both ledgers about receipts committed in the same tree; P2-1 was the §10.1.2 (b) fence still shadowable by a decoy ```text fence in the same section; P2-2 was R4's own heading-uniqueness guard having no test; P2-3 was this field, which had carried W4's tallies. Those tallies — 3 P0 + 16 P1 at the W4b checkpoint and 2 P0 + 9 P1 on that fix — are W4's and are recorded in the S2-WP4-W4 row of PROGRESS.md; they are not W5's.",
     "schema_version": "s2_4_w5_local_test_capture_v1"
   },
   "w5_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "w5_wave_exit_self_digest": "sha256:d67e87c7ae5abc74dc76426af2d261763a1784d0a280109a1dd8423ec09c33d1"
+  "w5_wave_exit_self_digest": "sha256:58cd0c67a185750e04d4a8272c535b0840b403d6abca2c644704009bba2eab1f"
 }
