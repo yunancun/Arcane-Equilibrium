@@ -149,14 +149,17 @@ def build_hba_delta(
     ``hba_delta_plan_binding_digest`` 值。``effective_rule`` 可覆蓋(負向測試用:簽進 core 的
     投影外 rule 必使 attested rule 落在投影之外 → PG_TOPOLOGY_UNPROVEN)。"""
 
+    # Codex-1:pre_hba_digest 必須等於基線 attestation 觀測到的 hba_file digest
+    # (NOOP delta 的 post 與 pre 同值)。
+    observed_hba = attestation["file_identities"]["hba_file"]["digest"]
     delta = {
         "schema_version": "s2_4_pg_hba_delta_v1",
         "plan_id": "s2-4-" + "0" * 64,
         "plan_core_digest": "sha256:" + "0" * 64,
         "cluster_identity_ref": attestation["cluster_identity_digest"],
-        "pre_hba_digest": "sha256:" + "e" * 64,
+        "pre_hba_digest": observed_hba,
         "delta": {"operation": "NOOP"},
-        "post_hba_digest": "sha256:" + "e" * 64,
+        "post_hba_digest": observed_hba,
         "effective_rule": dict(
             effective_rule if effective_rule is not None
             else attestation["effective_hba_rule"]

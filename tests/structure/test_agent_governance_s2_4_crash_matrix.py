@@ -793,11 +793,6 @@ EFFECT_EDGE_INVENTORY = {
     # component 葉(row 契約機制 + 補償後獨立 postcheck)。
     "_component.compensation_with_independent_postcheck": "test_c3_* (install_driver 檔)",
     "_component.derive_compensation_status": "test_c3_* / test_e15_reverse_compensation_edge",
-    # S2.4-AMEND-2:PG row 的 plan-derived expected_topology 失敗時的 typed 拒建構點
-    # (零 driver 接觸、零 mutation,非 effect edge)。
-    "_component._verdict": (
-        "test_an_absent_tampered_or_misbound_hba_delta_is_topology_unproven (install_driver 檔)"
-    ),
     "_component.derive_recorded_evidence_class": "test_c12_* (install_driver 檔)",
     "_component.scan_serializable_surface": "§10.5 #15 秘密掃描(verdict 出境面)",
     "driver.independent_postcheck": "test_c3_* / test_e15_reverse_compensation_edge",

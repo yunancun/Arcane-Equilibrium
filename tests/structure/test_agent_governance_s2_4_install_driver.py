@@ -289,9 +289,12 @@ def test_the_pg_expected_topology_is_derived_from_the_signed_plan(fx) -> None:
 
 
 @pytest.mark.parametrize("mutation", ["absent", "tampered", "foreign_plan"])
-def test_an_absent_tampered_or_misbound_hba_delta_is_topology_unproven(fx, mutation) -> None:
-    """hba_delta 缺席 / 內容被換(binding digest 不再等 core)/ 綁到別份 plan → 一律
-    PG_TOPOLOGY_UNPROVEN,PG row driver 未被觸及。"""
+def test_an_absent_tampered_or_misbound_hba_delta_is_a_zero_mutation_precheck(
+    fx, mutation,
+) -> None:
+    """hba_delta 缺席 / 內容被換(binding digest 不再等 core)/ 綁到別份 plan →
+    Codex-3 hoist 後在 aggregate precheck 即 PRECHECK_FAILED:driver 未 engage、
+    HOST_IDENTITY row 未跑、零 mutation(不再靠 §5.4 補償收拾無效 plan 輸入)。"""
 
     payloads = fx.row_payloads()
     pg = payloads["PG_ROLE_ACL_MIGRATION"]
@@ -304,9 +307,14 @@ def test_an_absent_tampered_or_misbound_hba_delta_is_topology_unproven(fx, mutat
         pg["hba_delta"]["plan_id"] = "s2-4-" + "9" * 64
         pg["hba_delta"]["self_digest"] = validator.artifact_self_digest(pg["hba_delta"])
     verdict = fx.apply(row_payloads=payloads)
-    assert verdict["status"] == "PG_TOPOLOGY_UNPROVEN", verdict["reasons"]
-    assert any("never caller-supplied" in reason for reason in verdict["reasons"])
+    assert verdict["status"] == "PRECHECK_FAILED", verdict["reasons"]
+    assert any("zero mutation" in reason for reason in verdict["reasons"])
+    assert verdict["driver_engaged"] is False
+    assert verdict["mutation_performed"] is False
+    assert fx.driver.calls == []
+    assert fx.row_drivers["HOST_IDENTITY_INSTALL"].calls == []
     assert fx.row_drivers["PG_ROLE_ACL_MIGRATION"].calls == []
+    assert fx.persisted_install_journal() is None
 
 
 def test_a_signed_rule_outside_the_observed_hba_is_topology_unproven(
@@ -378,8 +386,9 @@ def test_the_receipt_builder_refuses_a_non_admission_shaped_refresh_digest_map(
         )
 
 
-def test_a_presented_attestation_that_is_not_the_signed_baseline_is_unproven(fx) -> None:
-    """換叢集:presented attestation ≠ core.topology_pre_digest 所指的簽章前基線。"""
+def test_a_presented_attestation_that_is_not_the_signed_baseline_is_refused(fx) -> None:
+    """換叢集:presented attestation ≠ core.topology_pre_digest 所指的簽章前基線
+    (Codex-3 hoist 後 = precheck 零 mutation 拒)。"""
 
     observation = kit.topology_observation()
     observation["cluster_identity"]["system_identifier"] = "7000000000000000002"
@@ -388,12 +397,86 @@ def test_a_presented_attestation_that_is_not_the_signed_baseline_is_unproven(fx)
         observation
     )
     verdict = fx.apply(row_payloads=payloads)
-    assert verdict["status"] == "PG_TOPOLOGY_UNPROVEN", verdict["reasons"]
+    assert verdict["status"] == "PRECHECK_FAILED", verdict["reasons"]
     assert any(
         "not the signed pre-observation baseline" in reason
         for reason in verdict["reasons"]
     )
+    assert verdict["driver_engaged"] is False and fx.driver.calls == []
+    assert fx.row_drivers["HOST_IDENTITY_INSTALL"].calls == []
     assert fx.row_drivers["PG_ROLE_ACL_MIGRATION"].calls == []
+
+
+def test_a_delta_bound_to_another_cluster_or_hba_is_refused(fx) -> None:
+    """Codex-1:delta 的 cluster_identity_ref / pre_hba_digest 必須等於基線 attestation
+    的觀測值——綁到別座叢集/別份 HBA 的 delta 即使被 core 簽了也導不出本叢集的基線。"""
+
+    for field, needle in (
+        ("cluster_identity_ref", "cluster_identity_ref"),
+        ("pre_hba_digest", "pre_hba_digest"),
+    ):
+        delta = w4b.build_hba_delta(fx.attestation)
+        delta[field] = "sha256:" + "9" * 64
+        delta["self_digest"] = validator.artifact_self_digest(delta)
+        plan = {
+            "plan_id": delta["plan_id"], "core_digest": delta["plan_core_digest"],
+            "core": {
+                "hba_delta_digest": runner.hba_delta_plan_binding_digest(delta),
+                "topology_pre_digest": fx.attestation["self_digest"],
+                "source_head": kit.SOURCE_HEAD, "target_host": kit.HOST,
+            },
+        }
+        derived = runner.derive_plan_expected_topology(
+            plan=plan, hba_delta=delta, topology_attestation=fx.attestation, now=kit.NOW,
+        )
+        assert derived["status"] == "PLAN_EXPECTED_TOPOLOGY_UNPROVEN", field
+        assert any(needle in reason for reason in derived["reasons"]), (
+            field, derived["reasons"],
+        )
+    # 聚合 lane 同樣零 mutation 拒(cluster 錯綁經 Fixture payload)。
+    payloads = fx.row_payloads()
+    pg = payloads["PG_ROLE_ACL_MIGRATION"]
+    pg["hba_delta"]["cluster_identity_ref"] = "sha256:" + "9" * 64
+    pg["hba_delta"]["self_digest"] = validator.artifact_self_digest(pg["hba_delta"])
+    verdict = fx.apply(row_payloads=payloads)
+    assert verdict["status"] == "PRECHECK_FAILED", verdict["reasons"]
+    assert fx.driver.calls == [] and fx.row_drivers["HOST_IDENTITY_INSTALL"].calls == []
+
+
+def test_an_expired_or_malformed_hba_delta_window_is_refused(fx) -> None:
+    """Codex-2:derive 時刻晚於 delta 的 expires_at → 拒;observed_at > expires_at 的
+    畸形窗(無 now 也)→ 拒。"""
+
+    expired = runner.derive_plan_expected_topology(
+        plan=fx.plan, hba_delta=fx.hba_delta, topology_attestation=fx.attestation,
+        now=kit.frozen_clock(30)().isoformat(),
+    )
+    assert expired["status"] == "PLAN_EXPECTED_TOPOLOGY_UNPROVEN"
+    assert any(
+        "expired at the observed moment" in reason for reason in expired["reasons"]
+    ), expired["reasons"]
+    malformed = w4b.build_hba_delta(fx.attestation)
+    malformed["observed_at"] = kit.EXPIRES
+    malformed["expires_at"] = kit.ISSUED
+    malformed["self_digest"] = validator.artifact_self_digest(malformed)
+    plan = {
+        "plan_id": malformed["plan_id"], "core_digest": malformed["plan_core_digest"],
+        "core": {
+            "hba_delta_digest": runner.hba_delta_plan_binding_digest(malformed),
+            "topology_pre_digest": fx.attestation["self_digest"],
+            "source_head": kit.SOURCE_HEAD, "target_host": kit.HOST,
+        },
+    }
+    derived = runner.derive_plan_expected_topology(
+        plan=plan, hba_delta=malformed, topology_attestation=fx.attestation,
+    )
+    assert derived["status"] == "PLAN_EXPECTED_TOPOLOGY_UNPROVEN"
+    assert any(
+        "malformed" in reason and "observation window" in reason
+        for reason in derived["reasons"]
+    ), derived["reasons"]
+    # (聚合 lane 不另演過期案:kit 的 delta 窗 == plan 窗,把 now 撥到窗後會先被 (1b)
+    # plan-expiry 擋下,斷言會真空成立;delta 窗語義由上面的葉級負向承載。)
 
 
 # ══════════════ S2.4-AMEND-1:§9.2 ingress at APPLY step (2b)════════════════════

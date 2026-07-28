@@ -613,6 +613,38 @@ def apply_s2_4_install_plan(
             ),
             probe_core_binding,
         )
+    # ── (4b) S2.4-AMEND-2 hoist(Codex-3):PG row 的 plan-derived expected_topology ──
+    #
+    # 原本在第二 row(PG_ROLE_ACL_MIGRATION)執行時才導出——那時 HOST_IDENTITY_INSTALL
+    # 已 mutate,無效 plan 輸入得靠 §5.4 補償收拾。前置到 precheck(driver 未 engage,
+    # driver=None 的 source lane 同樣走到):失敗即 typed PRECHECK_FAILED **零 mutation**;
+    # 成功結果傳給 row-time 注入,不重複導出。置於 (4) 之後而非 (2) 緊鄰:缺 attestation
+    # 的 payload 必須先落在 E10 的 underived-TTL-bound 拒絕上(那支既有回歸不得被本 hoist
+    # 遮蔽),兩者都在任何 driver/lock/mutation 之前。
+    pg_payload = (row_payloads or {}).get("PG_ROLE_ACL_MIGRATION") or {}
+    derived_expected = derive_plan_expected_topology(
+        plan=plan,
+        hba_delta=pg_payload.get("hba_delta") if isinstance(pg_payload, dict) else None,
+        topology_attestation=(
+            pg_payload.get("topology_attestation") if isinstance(pg_payload, dict) else None
+        ),
+        now=_iso(observed_now),
+    )
+    if derived_expected["status"] != PLAN_EXPECTED_TOPOLOGY_DERIVED:
+        return _with_probe_core_binding(
+            _verdict(
+                AGGREGATE_STATUS_PRECHECK_FAILED,
+                list(derived_expected["reasons"]) + [
+                    "the PG row's expected topology is derived from the signed plan "
+                    "(core.hba_delta_digest + core.topology_pre_digest) before any host "
+                    "contact; an invalid plan input is refused with zero mutation, never "
+                    "repaired by compensation (§8.2 / §10.5 #25)"
+                ],
+                plan_id=plan_id,
+            ),
+            probe_core_binding,
+        )
+    pg_expected_topology = derived_expected["expected_topology"]
     # ── (5) source lane:reachable 但 authority-locked ──────────────────────────
     if driver is None:
         return _with_probe_core_binding(
@@ -644,6 +676,7 @@ def apply_s2_4_install_plan(
             prepare_result_digest=inputs["prepare_result_digest"],
             prepare_postcheck_digest=inputs["prepare_postcheck_digest"],
             dependency_refresh_digests=dependency_refresh_digests,
+            pg_expected_topology=pg_expected_topology,
             ownership_evidence=ownership_evidence, now=now, tick=tick, fault=fault,
             applier_node=applier_node,
             startup_journal_paths=startup_journal_paths,
@@ -765,6 +798,7 @@ def _run_transaction_with_driver(
     prepare_result_digest: str,
     prepare_postcheck_digest: str,
     dependency_refresh_digests: dict[str, Any],
+    pg_expected_topology: dict[str, Any],
     ownership_evidence: Any,
     now: Any,
     tick: Callable[[], datetime],
@@ -813,6 +847,7 @@ def _run_transaction_with_driver(
             prepare_result_digest=prepare_result_digest,
             prepare_postcheck_digest=prepare_postcheck_digest,
             dependency_refresh_digests=dependency_refresh_digests,
+            pg_expected_topology=pg_expected_topology,
             ownership_evidence=ownership_evidence, now=now, tick=tick, fault=fault,
             applier_node=applier_node, startup_journal_paths=startup_journal_paths,
             startup_observed_state_digests=startup_observed_state_digests,
@@ -872,6 +907,7 @@ def _transaction_under_lock(
     prepare_result_digest: str,
     prepare_postcheck_digest: str,
     dependency_refresh_digests: dict[str, Any],
+    pg_expected_topology: dict[str, Any],
     ownership_evidence: Any,
     now: Any,
     tick: Callable[[], datetime],
@@ -988,6 +1024,7 @@ def _transaction_under_lock(
         probe_digests=probe_digests, prepare_result_digest=prepare_result_digest,
         prepare_postcheck_digest=prepare_postcheck_digest,
         dependency_refresh_digests=dependency_refresh_digests,
+        pg_expected_topology=pg_expected_topology,
         # §9.1:aggregate 是唯一的消費點;row 級 replay 檢查用 lock 下讀到的
         # **append 之前**的 head(同一筆交易內不重複裁決消費)。
         row_replay_ledger=_pre_append_ledger(replay),
@@ -1126,6 +1163,7 @@ def _drive_rows(
     prepare_result_digest: str,
     prepare_postcheck_digest: str,
     dependency_refresh_digests: dict[str, Any],
+    pg_expected_topology: dict[str, Any],
     row_replay_ledger: Any,
     ownership_evidence: Any,
     now: Any,
@@ -1171,6 +1209,7 @@ def _drive_rows(
             box["verdict"] = _run_row(
                 row_name, driver=driver, plan=plan, intent=component_intents[row_name],
                 authorizations=authorizations, row_payloads=row_payloads,
+                pg_expected_topology=pg_expected_topology,
                 row_replay_ledger=row_replay_ledger, ownership_evidence=ownership_evidence,
                 now=now, tick=tick,
                 # RUNNER_WAL_LOCK_WIRING:row 的 journal_transition 經同一本 WAL 落盤。
@@ -1583,6 +1622,7 @@ def _run_row(
     intent: dict[str, Any],
     authorizations: dict[str, Any],
     row_payloads: dict[str, Any],
+    pg_expected_topology: dict[str, Any],
     row_replay_ledger: Any,
     ownership_evidence: Any,
     now: Any,
@@ -1615,24 +1655,12 @@ def _run_row(
         if key in ROW_PAYLOAD_ALLOWLIST[name]
     }
     if name == "PG_ROLE_ACL_MIGRATION":
-        # S2.4-AMEND-2(obligation 25):expected_topology 由**簽章 plan** 導出後顯式注入
-        # (與 ``applier_node`` 同款 code-owned、非 caller 預設);``hba_delta`` 只作為
-        # 「core.hba_delta_digest 所指之物」被驗,不進凍結的 row ABI。row 函式簽名不動。
-        derived = derive_plan_expected_topology(
-            plan=plan, hba_delta=payload.pop("hba_delta", None),
-            topology_attestation=payload.get("topology_attestation"),
-        )
-        if derived["status"] != PLAN_EXPECTED_TOPOLOGY_DERIVED:
-            return _component._verdict(
-                _component.COMPONENT_STATUS_TOPOLOGY_UNPROVEN,
-                list(derived["reasons"]) + [
-                    "the PG row's expected topology is derived from the signed plan "
-                    "(core.hba_delta_digest + core.topology_pre_digest) and is never "
-                    "caller-supplied (§8.2 / §10.5 #25)"
-                ],
-                component_effect_class=name,
-            )
-        payload["expected_topology"] = derived["expected_topology"]
+        # S2.4-AMEND-2(obligation 25)+ Codex-3 hoist:expected_topology 已在 aggregate
+        # precheck(step (2c),driver 未 engage)由簽章 plan 導出——此處只注入前置結果
+        # (code-owned、非 caller 預設,與 ``applier_node`` 同款),不重複導出;
+        # ``hba_delta`` 仍不得 splat 進凍結的 row ABI。row 函式簽名不動。
+        payload.pop("hba_delta", None)
+        payload["expected_topology"] = pg_expected_topology
     return ROW_ENTRYPOINTS[name](
         intent, scoped, row_driver,
         now=now, clock=tick, replay_ledger=row_replay_ledger,

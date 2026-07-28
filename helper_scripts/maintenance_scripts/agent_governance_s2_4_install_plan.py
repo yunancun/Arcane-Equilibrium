@@ -357,17 +357,21 @@ def hba_delta_plan_binding_digest(delta: Any) -> str:
 
 
 def derive_plan_expected_topology(
-    *, plan: Any, hba_delta: Any, topology_attestation: Any,
+    *, plan: Any, hba_delta: Any, topology_attestation: Any, now: Any = None,
 ) -> dict[str, Any]:
     """由**簽章 plan**導出 PG row 的 ``expected_topology``(fail-closed;零 caller 基線鍵)。
 
     驗序:central closed-schema 驗 hba_delta → 去自指 binding digest 必等
     ``core.hba_delta_digest`` → 後綁回填的 ``plan_id``/``plan_core_digest`` 必等 plan 自身 →
     ``topology_attestation.self_digest`` 必等 ``core.topology_pre_digest``(presented 觀測
-    必須**是**簽章前基線)。通過後回**全鍵** expected(經 (i) fail-closed 化後無鍵可省):
+    必須**是**簽章前基線)→ delta 的 ``cluster_identity_ref``/``pre_hba_digest`` 必等基線
+    attestation 的觀測值(Codex-1:綁到別座叢集/別份 HBA 的 delta 導不出本叢集的基線)→
+    delta 自身觀測窗(Codex-2:``now`` 給定時過期即拒;``observed_at`` > ``expires_at``
+    的畸形窗無 ``now`` 也拒)。通過後回**全鍵** expected(經 (i) fail-closed 化後無鍵可省):
     三個內容 digest 取自基線 attestation、``hba_projection`` 取自簽章 delta 的
     ``effective_rule``、``source_head``/``target_host`` 取自 plan core。任一失敗回
-    ``PLAN_EXPECTED_TOPOLOGY_UNPROVEN``,聚合層映為 ``PG_TOPOLOGY_UNPROVEN``(driver 未觸)。
+    ``PLAN_EXPECTED_TOPOLOGY_UNPROVEN``;聚合層於 precheck 前置導出(Codex-3 hoist),
+    失敗即 ``PRECHECK_FAILED`` 零 mutation(driver 未 engage)。
     """
 
     outcome: dict[str, Any] = {
@@ -399,9 +403,14 @@ def derive_plan_expected_topology(
         reasons.append("the HBA delta names a different plan_id than this plan")
     if hba_delta.get("plan_core_digest") != plan.get("core_digest"):
         reasons.append("the HBA delta names a different plan_core_digest than this plan")
+    # Codex review P3 nit:雙缺鍵(attestation 無 self_digest 且 core 無 topology_pre_digest)
+    # 時 None == None 曾放行到 bracket 取值 → KeyError 穿出 typed reasons 承諾;.get + 缺值
+    # 顯式拒。
     if not isinstance(topology_attestation, dict) or topology_attestation.get(
         "self_digest"
-    ) != core.get("topology_pre_digest"):
+    ) is None or topology_attestation.get("self_digest") != core.get(
+        "topology_pre_digest"
+    ):
         reasons.append(
             "the presented pg_topology_attestation_v1 is not the signed pre-observation "
             "baseline (self_digest != core.topology_pre_digest); a different cluster's "
@@ -410,12 +419,57 @@ def derive_plan_expected_topology(
     # P2-2(E2 對抗審查):欄位等值只證「自報的 digest 等於簽章值」——偽 attestation 貼上
     # 真 digest 即可通過。本葉必須自己重算(縱深;不依賴聚合 lane 在 row 內的第二道
     # recompute):self_digest 不綁自身 canonical bytes 即拒。
-    elif artifact_self_digest(topology_attestation) != topology_attestation["self_digest"]:
+    elif artifact_self_digest(topology_attestation) != topology_attestation.get(
+        "self_digest"
+    ):
         reasons.append(
             "the presented pg_topology_attestation_v1's self_digest does not re-derive "
             "its own canonical bytes; a forged observation wearing the signed baseline "
             "digest is not the baseline"
         )
+    # ── Codex-1(P1):delta ↔ 基線 attestation 的叢集/HBA 交叉綁定 ─────────────────
+    # binding digest 只證「delta 是 core 簽的那份」,不證「那份 delta 講的是**這座**叢集、
+    # **這份** HBA」;兩欄必須等於基線 attestation 自己的觀測值。
+    if isinstance(topology_attestation, dict):
+        if hba_delta.get("cluster_identity_ref") != topology_attestation.get(
+            "cluster_identity_digest"
+        ):
+            reasons.append(
+                "the HBA delta's cluster_identity_ref does not equal the baseline "
+                "attestation's cluster_identity_digest; a delta signed for another "
+                "cluster can never derive this cluster's expected baseline"
+            )
+        observed_hba_digest = (
+            (topology_attestation.get("file_identities") or {}).get("hba_file") or {}
+        ).get("digest")
+        if observed_hba_digest is not None and hba_delta.get(
+            "pre_hba_digest"
+        ) != observed_hba_digest:
+            reasons.append(
+                "the HBA delta's pre_hba_digest does not equal the baseline attestation's "
+                "observed hba_file digest; a delta authored against another HBA state "
+                "cannot supply this baseline's signed projection"
+            )
+    # ── Codex-2(P2):delta 自身的觀測窗 ─────────────────────────────────────────
+    try:
+        delta_observed = central_validator._parse_timestamp(str(hba_delta.get("observed_at")))
+        delta_expires = central_validator._parse_timestamp(str(hba_delta.get("expires_at")))
+        if delta_observed > delta_expires:
+            reasons.append(
+                "the HBA delta's observed_at is after its own expires_at; a malformed "
+                "observation window derives nothing (fail-closed)"
+            )
+        else:
+            now_text = central_validator._now_text(now)
+            if now_text is not None and central_validator._parse_timestamp(
+                now_text
+            ) >= delta_expires:
+                reasons.append(
+                    "the signed HBA delta is expired at the observed moment; expired "
+                    "plan evidence cannot be refreshed by reference (§9.2 / §10.5 #28)"
+                )
+    except (TypeError, ValueError) as error:
+        reasons.append(f"the HBA delta timestamps are unparseable: {error}")
     if reasons:
         return outcome
     entries = [dict(hba_delta["effective_rule"])]
