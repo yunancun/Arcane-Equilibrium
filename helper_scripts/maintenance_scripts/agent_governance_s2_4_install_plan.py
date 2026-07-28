@@ -407,6 +407,15 @@ def derive_plan_expected_topology(
             "baseline (self_digest != core.topology_pre_digest); a different cluster's "
             "observation can never become its own expected baseline"
         )
+    # P2-2(E2 對抗審查):欄位等值只證「自報的 digest 等於簽章值」——偽 attestation 貼上
+    # 真 digest 即可通過。本葉必須自己重算(縱深;不依賴聚合 lane 在 row 內的第二道
+    # recompute):self_digest 不綁自身 canonical bytes 即拒。
+    elif artifact_self_digest(topology_attestation) != topology_attestation["self_digest"]:
+        reasons.append(
+            "the presented pg_topology_attestation_v1's self_digest does not re-derive "
+            "its own canonical bytes; a forged observation wearing the signed baseline "
+            "digest is not the baseline"
+        )
     if reasons:
         return outcome
     entries = [dict(hba_delta["effective_rule"])]

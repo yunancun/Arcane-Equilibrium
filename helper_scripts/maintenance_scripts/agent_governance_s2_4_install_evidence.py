@@ -48,6 +48,7 @@ from aiml_gate_receipt_schema_core import (  # noqa: E402
 from agent_governance_s2_4_install_plan import (  # noqa: E402
     APPLY_ROW_ORDER, aggregate_rollback_digest,
 )
+from agent_governance_s2_4_reconcile import InstallDriverContractError  # noqa: E402
 
 canonical_digest = central_validator.canonical_digest
 artifact_self_digest = central_validator.artifact_self_digest
@@ -1037,6 +1038,19 @@ def _build_install_effect_receipt(
     trusted_host_time: str,
     clock: Callable[[], datetime],
 ) -> dict[str, Any]:
+    # P2-1(E2 對抗審查):silent-FRESH 預設關閉。builder 只在 step (2b) admission 之後
+    # 可達,其輸入必須**恰為** admission 導出的三 gated-class 映射(值 = None|sha256
+    # digest);None/缺鍵/多鍵/非 digest 值一律 typed 契約拒(鏡 install_evidence_set_path
+    # 的契約錯機制)——絕不把 falsy 輸入靜默寫成「三族全 FRESH」的 receipt 宣稱。
+    if not isinstance(dependency_refresh_digests, dict) or set(
+        dependency_refresh_digests
+    ) != set(S2_4_APPLY_GATED_DEPENDENCY_CLASSES) or not all(
+        value is None or (isinstance(value, str) and _DIGEST_RE.fullmatch(value))
+        for value in dependency_refresh_digests.values()
+    ):
+        raise InstallDriverContractError(
+            "install_receipt_dependency_refresh_digests_invalid"
+        )
     at = clock()
     receipt = {
         "schema_version": "s2_4_install_effect_receipt_v1",
@@ -1053,9 +1067,10 @@ def _build_install_effect_receipt(
         "prepare_result_digest": prepare_result_digest,
         "prepare_postcheck_digest": prepare_postcheck_digest,
         # S2.4-AMEND-1(§3/§9.2):null = 該族於 admission 時 SOURCE_DEPENDENCY_FRESH;
-        # digest = 採信該過期身分的**那一份** refresh 的 self_digest(step (2b) 導出)。
+        # digest = 採信該過期身分的**那一份** refresh 的 self_digest(step (2b) 導出;
+        # 形狀已由上方契約閘 fail-closed 驗過,此處只定序)。
         "dependency_refresh_digests": {
-            cls: (dependency_refresh_digests or {}).get(cls)
+            cls: dependency_refresh_digests[cls]
             for cls in S2_4_APPLY_GATED_DEPENDENCY_CLASSES
         },
         "apply_row_results": [

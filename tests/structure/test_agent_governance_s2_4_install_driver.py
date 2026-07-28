@@ -326,6 +326,58 @@ def test_a_signed_rule_outside_the_observed_hba_is_topology_unproven(
     assert fixture.row_drivers["PG_ROLE_ACL_MIGRATION"].calls == []
 
 
+def test_a_forged_attestation_wearing_the_signed_baseline_digest_is_refused(fx) -> None:
+    """P2-2:偽 attestation 貼上真 baseline digest(欄位等值可過)→ 葉內重算
+    ``artifact_self_digest`` 拒;單呼叫葉自此與聚合 lane 同樣 fail-closed。"""
+
+    forged = deepcopy(fx.attestation)
+    forged["cluster_identity"]["system_identifier"] = "7000000000000000002"
+    # 不重封:貼真簽章 digest 使欄位等值檢查通過,重算必不過。
+    forged["self_digest"] = fx.plan["core"]["topology_pre_digest"]
+    derived = runner.derive_plan_expected_topology(
+        plan=fx.plan, hba_delta=fx.hba_delta, topology_attestation=forged,
+    )
+    assert derived["status"] == "PLAN_EXPECTED_TOPOLOGY_UNPROVEN"
+    assert any(
+        "does not re-derive its own canonical bytes" in reason
+        for reason in derived["reasons"]
+    ), derived["reasons"]
+
+
+@pytest.mark.parametrize("bad", [
+    None,
+    "not-a-mapping",
+    {},
+    {"S2_2A_SOURCE_COMPATIBILITY": None, "S2_3_EXPECTED_IDENTITY": None},
+    {
+        "S2_2A_SOURCE_COMPATIBILITY": None, "S2_3_EXPECTED_IDENTITY": None,
+        "S2_3_SEALED_BUILD": None, "S1_3_IDENTITY_CONTRACT": None,
+    },
+    {
+        "S2_2A_SOURCE_COMPATIBILITY": "not-a-digest", "S2_3_EXPECTED_IDENTITY": None,
+        "S2_3_SEALED_BUILD": None,
+    },
+])
+def test_the_receipt_builder_refuses_a_non_admission_shaped_refresh_digest_map(
+    fx, bad,
+) -> None:
+    """P2-1:builder 只在 step (2b) admission 之後可達——None/缺鍵/多鍵/非 digest 值
+    一律 typed 契約拒,絕不靜默寫成「三族全 FRESH」的 receipt 宣稱(silent-FRESH 關閉)。"""
+
+    with pytest.raises(runner.InstallDriverContractError):
+        evidence_leaf._build_install_effect_receipt(
+            plan=fx.plan, status="SOURCE_SIMULATION_PASS",
+            authorizations=fx.authorization_set,
+            probe_receipt_digests={}, prepare_result_digest="sha256:" + "1" * 64,
+            prepare_postcheck_digest="sha256:" + "2" * 64,
+            dependency_refresh_digests=bad,
+            row_results={}, journal_digest="sha256:" + "3" * 64,
+            unit_state={"loaded": True, "disabled": True, "inactive": True},
+            evidence_class="STRUCTURAL_ONLY", trusted_host_time=kit.NOW,
+            clock=kit.frozen_clock(),
+        )
+
+
 def test_a_presented_attestation_that_is_not_the_signed_baseline_is_unproven(fx) -> None:
     """換叢集:presented attestation ≠ core.topology_pre_digest 所指的簽章前基線。"""
 
