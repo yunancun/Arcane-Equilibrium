@@ -12,6 +12,7 @@
 
 | 文件 | 内容 |
 |------|------|
+| `execution_plan/ai_ml_landing/S2-operator-action-packet-v1.md` | S2 的單一 operator action packet（`BLOCKED_OPERATOR_ACTION_PACKET_READY`，2026-07-28）：串行 effect DAG `S2.0→S2.4→S2.5A→S2.1→S2.5B→S2.2B` 的逐步 scope／授權形制／rollback／postcheck，兩個必要前置 PM 修正案（S2.4-AMEND-1/2）與 S2_CLOSED 判準。這是清單不是授權；九項 authority 全 false，S1 disposable 授權不可沿用。 |
 | `execution_plan/ai_ml_landing/receipts/S0.3-program-adoption-receipt-v1.json` | Linux trusted-host 簽發的 S0.3 immutable receipt，digest `sha256:1a124bcaebb741a69c97e37a828e5b85c9b6499cdf053e8ef62451448878f93b`；終態 `PROGRAM_ADOPTED`，reviewed head `1a933fcc28e9f7341e023b5d401c479957c14c5f`、merge head `fed223bebd278c50b0ab3330980e66441a30c9ed`。`source_adoption_only=true`，九個 authority grants 全 false，不是 runtime-ready。 |
 | `execution_plan/ai_ml_landing/receipts/S0.3-program-adoption-finalization-attestation-v1.json` + `.sig` | Producer-signed durable finalizer PASS statement；綁定 receipt bytes/self-digest、closure digest、review/source heads、GitHub policy attestation、execution bundle 與 all-false authority limits。 |
 | `execution_plan/ai_ml_landing/receipts/S0.3-trusted-execution-bundle-v1.json` + `.sig` | Trusted input-execution index 與 SSHSIG；由 adopted source 中固定的 ED25519 public key、fingerprint、identity 和 namespace 驗證，私鑰未入 repo。 |
