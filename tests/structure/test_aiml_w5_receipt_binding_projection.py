@@ -47,7 +47,7 @@ import aiml_gate_receipt_validator as validator  # noqa: E402
 
 # round-5 remediation head——八件 persisted artifact 當前綁定的 source_head。
 # 合法 re-emission 時本常量與兩份文檔的 marker 必須在同一 commit 內一起更新。
-EXPECTED_SOURCE_HEAD = "aaee7f1a28bbe0f22cffb9feea15bf9172f1ad7d"
+EXPECTED_SOURCE_HEAD = "0faa6499d0a1b7b44165e212e0c438f1374f00d4"
 
 RECEIPT_DIR = ROOT / "docs/execution_plan/ai_ml_landing/receipts/S2.4-WP4-W5"
 TODO_PATH = ROOT / "TODO.md"
@@ -63,7 +63,7 @@ _MARKER_RE = re.compile(
 # E2 round-6 P2-2:全形等號「＝」納入,關掉蓄意規避之外最廉價的變體。
 _CLAIM_RE = re.compile(r"source_head\s*[=＝]\s*`?([0-9a-f]{7,40})")
 # 現行 receipt 世代的 round 序號;re-emission 時與 EXPECTED_SOURCE_HEAD 同 commit 更新。
-EXPECTED_ROUND = 5
+EXPECTED_ROUND = 6
 _ALLOWED_CLASSIFICATIONS = {
     "source_closure_blocker",
     "accepted_carry_forward",
