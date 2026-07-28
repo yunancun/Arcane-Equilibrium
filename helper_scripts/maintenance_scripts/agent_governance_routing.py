@@ -61,6 +61,14 @@ SIDE_EFFECT_CLASSES = {
     "s2_4_capability_probe_intent",
     "s2_4_prepare_intent",
     "s2_4_install_plan",
+    # S2.5(WP5·design §6)top-level route class(SOURCE seam;binding =
+    # AUTHORITY_LOCKED_PRODUCTION_CAPABLE)。同 pg_observer_bootstrap/quiesce_fence/s2_4_* 姿態:
+    # 此處只認得 + FORWARD-only 表面一致性驗;source lane「絕不」注入 effect 節點——真 route_task
+    # effect 節點的注入刻意延遲到 S2.5 EFFECT session(S2.5A 需 S2.4@EFFECT_DONE_INACTIVE、
+    # S2.5B 需 S2.1@EFFECT_DONE)。start 請求不得攜帶任何 PG 寫/secret/deploy(=install/PREPARE)
+    # 面(design §6 forbidden surfaces;migration/credential/host-identity token 不在封閉
+    # KNOWN_SURFACES 詞彙,以 pg+secret+deploy 覆蓋其語意,同 s2_4 route 表先例)。
+    "s2_5_start_intent",
 }
 SOURCE_WRITE_SHAPES = {
     "implementation", "feature", "change", "bug", "fix", "refactor", "migration",
@@ -91,6 +99,10 @@ QUIESCE_FENCE_ADAPTER_ID = "alr_quiesce_fence_adapter_v1"
 S2_4_CAPABILITY_PROBE_ADAPTER_ID = "s2_4_capability_probe_adapter_v1"
 S2_4_PREPARE_ADAPTER_ID = "s2_4_prepare_adapter_v1"
 S2_4_INSTALL_ADAPTER_ID = "s2_4_install_adapter_v1"
+# S2.5(WP5)design §6:兩個 effect adapter 的 route-node 身分(SOURCE 已宣告,binding =
+# AUTHORITY_LOCKED_PRODUCTION_CAPABLE;真 route_task effect 節點注入延遲到 S2.5 EFFECT session)。
+S2_5_RUNTIME_START_ADAPTER_ID = "s2_5_runtime_start_adapter_v1"
+S2_5_FINAL_ATTESTATION_ADAPTER_ID = "s2_5_final_attestation_adapter_v1"
 P0B_CLAIM_KEYS_BY_PHASE = {
     "stage": frozenset({
         "p0b_effect_adapter_selection",
@@ -516,6 +528,27 @@ def _normalize_task_facts(task_facts: dict[str, Any]) -> dict[str, Any]:
             "side_effect_class=s2_4_install_plan requires runtime_effect/service/pg/secret "
             "surfaces, runtime_claim=true, and critical risk"
         )
+    # S2.5(WP5)design §6 FORWARD-only 表面一致性(同 s2_4 probe/prepare 姿態:刻意 NOT 加
+    # 反向「裸 runtime_effect/service 表面即需此類」規則)。start/final attestation 是已安裝
+    # unit 的 lifecycle 面,不得攜帶任何 install/PREPARE/PG 寫/secret 面——pg/secret/deploy 是
+    # APPLY/install 專屬面,broker 面永遠禁(§14 硬邊界)。
+    if effect == "s2_5_start_intent":
+        if not (
+            normalized_surfaces & {"runtime_effect", "service"}
+            and normalized.get("runtime_claim") is True
+            and risk in {"high", "critical"}
+        ):
+            raise ValueError(
+                "side_effect_class=s2_5_start_intent requires a runtime_effect/service "
+                "surface, runtime_claim=true, and high or critical risk"
+            )
+        forbidden = normalized_surfaces & ({"pg", "secret", "deploy"} | BROKER_SURFACES)
+        if forbidden:
+            raise ValueError(
+                "side_effect_class=s2_5_start_intent must not carry install/PREPARE/"
+                f"broker surfaces {sorted(forbidden)}; the S2.5 lifecycle cannot reach "
+                "PG-write/secret/install authority (design §6/§14)"
+            )
     normalized["side_effect_class"] = effect
     aiml_program_adoption = aiml_program_adoption_selected(
         normalized.get("claim_inputs", {})
@@ -853,6 +886,11 @@ def route_task(task_facts: dict[str, Any]) -> dict[str, Any]:
         # 生產施加恆 fail-closed(EXTERNAL_VERIFICATION_PENDING)直到 S2.4 EFFECT session:W6A 先收
         # PREPARE_SANDBOX probe 節點、其 terminal receipt 後收 PREPARE 節點;W6B 先收 INSTALLED_UNIT
         # probe 節點、其 terminal receipt + 最終授權後只收 APPLY coordinator 節點。
+        # S2.5(WP5)s2_5_start_intent 同姿態:route class 已宣告 + FORWARD-only 表面一致性已驗,
+        # 但 SOURCE lane 刻意 NOT 注入 S2_5_RUNTIME_START_ADAPTER_ID / S2_5_FINAL_ATTESTATION_ADAPTER_ID
+        # effect 節點——真注入延遲到 S2.5 EFFECT session(S2.5A 需 S2.4@EFFECT_DONE_INACTIVE + fresh
+        # start permit;S2.5B 需 S2.1@EFFECT_DONE + fresh final permit;attested status 只由 attestor
+        # 簽章解鎖)。
         add("ops_postcheck", role="OPS", requires=postcheck_requires, reason="independent operational evidence")
         predecessor = "ops_postcheck"
     elif unsupported_effect:
