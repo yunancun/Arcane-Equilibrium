@@ -308,10 +308,10 @@ FORBIDDEN_INTENT_KEYS = frozenset({
     "argv", "command", "exec", "exec_start", "kill", "pid", "raw_command",
     "shell", "signal", "unit_text", "unit_path", "caller_path",
 })
-_S2_5_SUCCESS_STATUSES = frozenset({
-    "RUNNING_ATTESTED", "FINAL_ATTESTED", "SOURCE_SIMULATION_PASS",
-})
+# E2 F9:attested 與 simulation 兩個成功語義**分開命名**——SOURCE_SIMULATION_PASS 永不是
+# attested success,任何把 simulation 當 attested 消費的寫法在型別命名層就被擋下。
 _S2_5_ATTESTED_STATUSES = frozenset({"RUNNING_ATTESTED", "FINAL_ATTESTED"})
+_S2_5_SIMULATION_STATUSES = frozenset({"SOURCE_SIMULATION_PASS"})
 
 
 def _forbidden_key_hits(value: Any, path: str = "$") -> list[str]:
@@ -412,8 +412,14 @@ def _observer_gate_errors(receipt: dict[str, Any]) -> list[str]:
     return errors
 
 
-def _attestation_errors(receipt: dict[str, Any], now_text: str) -> list[str]:
-    """attested status 的唯一鑰匙:trusted-host attestor SSHSIG 驗簽(lazy import 驗簽葉)。"""
+def _attestation_errors(
+    receipt: dict[str, Any], now_text: str, *, expected_kind: str
+) -> list[str]:
+    """attested status 的唯一鑰匙:trusted-host attestor SSHSIG 驗簽(lazy import 驗簽葉)。
+
+    ``expected_kind`` 由中央閘按 phase 傳入(A=running/B=final;E2 F3/E3 P2-1):
+    B 簽章不可重放為 A,schema const 之上代碼級再驗一道(縱深防禦)。
+    """
 
     if str(_HELPER_DIR) not in sys.path:
         sys.path.insert(0, str(_HELPER_DIR))
@@ -425,6 +431,7 @@ def _attestation_errors(receipt: dict[str, Any], now_text: str) -> list[str]:
         running_dimensions=receipt.get("running_dimensions"),
         observer_gate=receipt.get("observer_gate"),
         now=now_text,
+        expected_kind=expected_kind,
     )
 
 
@@ -441,7 +448,7 @@ def _attestation_receipt_errors(
         )
     )
     status = artifact.get("status")
-    if status in _S2_5_SUCCESS_STATUSES:
+    if status in _S2_5_ATTESTED_STATUSES or status in _S2_5_SIMULATION_STATUSES:
         verdicts = s2_5_running_dimension_verdicts(artifact.get("running_dimensions"))
         failing = sorted(name for name, ok in verdicts.items() if not ok)
         if failing:
@@ -464,8 +471,23 @@ def _attestation_receipt_errors(
                 "WantedBy link present (PM O-6: the source-provable persistence half)"
             )
     if status in _S2_5_ATTESTED_STATUSES:
-        errors.extend(_attestation_errors(artifact, now_text))
-    if final and status in _S2_5_SUCCESS_STATUSES:
+        errors.extend(
+            _attestation_errors(artifact, now_text, expected_kind="B" if final else "A")
+        )
+    # E2 F2:PLATFORM 類 evidence_class ⇒ attested status + attestor artifact 在場。
+    # 非成功 status(PENDING/REJECTED/FAILED)自稱 PLATFORM_OR_EXTERNAL_ATTESTED 一律拒。
+    if artifact.get("evidence_class") == "PLATFORM_OR_EXTERNAL_ATTESTED" and (
+        status not in _S2_5_ATTESTED_STATUSES
+        or not isinstance(artifact.get("trusted_host_attestation"), dict)
+    ):
+        errors.append(
+            "s2_5 evidence_class PLATFORM_OR_EXTERNAL_ATTESTED requires an attested "
+            "status with the trusted-host attestor artifact in hand; a non-attested "
+            "receipt never claims platform evidence (fail-closed)"
+        )
+    if final and (
+        status in _S2_5_ATTESTED_STATUSES or status in _S2_5_SIMULATION_STATUSES
+    ):
         watchdog = artifact.get("watchdog_last") or {}
         if watchdog.get("n_restarts_after") != 0:
             errors.append(
@@ -507,6 +529,23 @@ def validate_s2_5_artifact(artifact: Any, *, now: Any = None) -> list[str]:
                 errors.append(
                     "AIML component v3 required effects differ from classifier output"
                 )
+        return errors
+    if schema_version == "s2_5_authorization_replay_ledger_v1":
+        # P1-3:closed schema 之上,逐 entry hash-chain 重算(seq/prev/digest/fsynced)
+        # + self_digest 反偽造重算(lazy import 驗簽葉的同一把尺;不另造第二套鏈驗)。
+        # ledger 無新鮮度面(consume-once 由鏈與 head-anchor 執法),故不落在 now 臂內。
+        if str(_HELPER_DIR) not in sys.path:
+            sys.path.insert(0, str(_HELPER_DIR))
+        import agent_governance_s2_5_attestation as _attestation
+
+        errors = []
+        if artifact.get("self_digest") != artifact_self_digest(artifact):
+            errors.append(
+                "s2_5 replay ledger self_digest does not bind the canonical ledger"
+            )
+        errors.extend(
+            _attestation.s2_5_replay_ledger_entry_errors(artifact.get("entries"))
+        )
         return errors
     now_text = _now_text(now)
     if now_text is None:
@@ -558,6 +597,103 @@ def validate_s2_5_artifact(artifact: Any, *, now: Any = None) -> list[str]:
     return errors
 
 
+# ── §6 closure binding(source-only;不接入 live dispatch)────────────────────────
+S2_5_BINDING_VERIFIED = "S2_5_ATTESTATION_BINDING_VERIFIED"
+S2_5_BINDING_REJECTED = "S2_5_ATTESTATION_BINDING_REJECTED"
+S2_5_BINDING_PENDING = "EXTERNAL_VERIFICATION_PENDING"
+
+
+def validate_s2_5_attestation_binding(
+    *,
+    intent: Any,
+    ops_preflight: Any,
+    receipt: Any,
+    verifier_capture: Any = None,
+    now: Any = None,
+) -> dict[str, Any]:
+    """§6 closure binding:intent digest × OPS preflight digest × receipt ×
+    ``verifier_capture_digest`` 的三方交叉(鏡 ``validate_pg_observer_bootstrap_binding``)。
+
+    source lane 的 ``verifier_capture_digest`` 可為 ``None``——那是 typed
+    ``EXTERNAL_VERIFICATION_PENDING`` 分支(欄位契約與交叉邏輯照走),**不是跳過**;
+    一側在場另一側缺席即拒。VERIFIED 只證結構綁定,不證任何 runtime(九 authority false)。
+    """
+
+    verdict: dict[str, Any] = {"status": S2_5_BINDING_REJECTED, "reasons": []}
+    reasons = verdict["reasons"]
+    if not isinstance(intent, dict) or not isinstance(receipt, dict):
+        reasons.append("s2_5 attestation binding requires the intent and receipt objects")
+        return verdict
+    intent_errors = validate_s2_5_artifact(intent, now=now)
+    if intent_errors or intent.get("schema_version") != "s2_5_start_intent_v1":
+        reasons.append(
+            "s2_5 attestation binding intent fails the central gate: "
+            + "; ".join(intent_errors or ["not an s2_5_start_intent_v1"])
+        )
+    receipt_errors = validate_s2_5_artifact(receipt, now=now)
+    if receipt_errors or receipt.get("schema_version") not in {
+        "s2_5_running_attestation_v1", "s2_5_final_attestation_v1"
+    }:
+        reasons.append(
+            "s2_5 attestation binding receipt fails the central gate: "
+            + "; ".join(receipt_errors or ["not an s2_5 attestation receipt"])
+        )
+    # 1. receipt × intent digest(exact)。
+    if receipt.get("intent_digest") != intent.get("self_digest") or (
+        receipt.get("intent_id") != intent.get("start_id")
+    ):
+        reasons.append(
+            "s2_5 attestation binding: the receipt does not bind the exact intent "
+            "(intent_digest/intent_id mismatch)"
+        )
+    # 2. OPS preflight fragment:self_digest 反偽造重算 + intent digest 綁定。
+    if not (
+        isinstance(ops_preflight, dict)
+        and bool(ops_preflight.get("self_digest"))
+        and ops_preflight.get("self_digest") == artifact_self_digest(ops_preflight)
+        and ops_preflight.get("intent_digest") == intent.get("self_digest")
+    ):
+        reasons.append(
+            "s2_5 attestation binding: the OPS preflight fragment is absent, its "
+            "self_digest does not re-derive, or it does not bind the exact intent"
+        )
+    # 3. verifier capture 三方交叉(capture node ≠ applier;record_digest 綁 receipt 欄)。
+    receipt_capture_digest = receipt.get("verifier_capture_digest")
+    if receipt_capture_digest is None and verifier_capture is None:
+        if not reasons:
+            verdict["status"] = S2_5_BINDING_PENDING
+            reasons.append(
+                "s2_5 attestation binding is structurally coherent but the independent "
+                "verifier command_capture_v2 is not yet bound (source lane honest "
+                "endpoint); EXTERNAL_VERIFICATION_PENDING, never a PASS"
+            )
+        return verdict
+    if (receipt_capture_digest is None) != (verifier_capture is None):
+        reasons.append(
+            "s2_5 attestation binding: verifier_capture_digest and the verifier "
+            "capture record must be present together (a one-sided claim is rejected)"
+        )
+        return verdict
+    if not (
+        isinstance(verifier_capture, dict)
+        and str(verifier_capture.get("record_digest") or "") == str(receipt_capture_digest)
+    ):
+        reasons.append(
+            "s2_5 attestation binding: the verifier command_capture_v2 record_digest "
+            "is not the receipt-bound verifier_capture_digest"
+        )
+    if isinstance(verifier_capture, dict) and verifier_capture.get(
+        "node_id"
+    ) == receipt.get("apply_actor_node"):
+        reasons.append(
+            "s2_5 attestation binding: the verifier capture node must differ from the "
+            "applier node (the applier can never verify itself)"
+        )
+    if not reasons:
+        verdict["status"] = S2_5_BINDING_VERIFIED
+    return verdict
+
+
 def s2_5_abi_projection() -> dict[str, Any]:
     """WP5 seam 的 code-owned 投影(phase→class 映射投影測試與 registry 對賬共用)。"""
 
@@ -574,6 +710,7 @@ def s2_5_abi_projection() -> dict[str, Any]:
                 "s2_5_running_attestation_v1",
                 "s2_5_final_attestation_v1",
                 "s2_5_rollback_drill_receipt_v1",
+                "s2_5_authorization_replay_ledger_v1",
                 "aiml_component_effect_classification_v3",
             )
             if (SCHEMA_DIR / f"{name}.schema.json").is_file()

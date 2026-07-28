@@ -39,6 +39,7 @@ import agent_governance_aiml_trusted_host as _trusted_host  # noqa: E402
 from aiml_gate_receipt_schema_core import (  # noqa: E402
     _canonical_bytes,
     _parse_timestamp,
+    artifact_self_digest,
     canonical_digest,
 )
 
@@ -63,7 +64,11 @@ S2_5_PERMIT_PROFILES = {
 MAX_S2_5_PERMIT_TTL_SECONDS = 900
 S2_5_PERMIT_CLOCK_SKEW_SECONDS = 60
 MAX_S2_5_ATTESTATION_TTL_SECONDS = 900
+# attestation 的前向偏移上限:trusted_host_time 不得晚於 now + 60s(E3:未設上限時
+# now+400d 的「未來簽章」可過——TTL 不等式只綁 trusted_host_time↔expires_at 自身)。
+S2_5_ATTESTATION_FORWARD_SKEW_SECONDS = 60
 S2_5_AUTHORIZATION_ID_PREFIX = "s2-5-auth-"
+S2_5_REPLAY_LEDGER_SCHEMA_VERSION = "s2_5_authorization_replay_ledger_v1"
 
 # §9.1 實體信任根複用(module-level 常量,測試以 throwaway key 成對 monkeypatch;
 # 真私鑰不在 Mac 也不在 trade-core)。
@@ -100,6 +105,22 @@ _PERMIT_FIELDS = (
     "sshsig_armored",
 )
 S2_5_PERMIT_SCHEMA_VERSION = "s2_5_operator_permit_v1"
+
+
+def non_finite_number_paths(value: Any, path: str = "$") -> list[str]:
+    """遞迴找出 NaN/±Infinity(E3 P2-6:canonical bytes 的 ``allow_nan=False`` 會對它們
+    raise ``ValueError``——載入面必須先給 typed reason,而不是讓例外從 fail-closed 閘逸出)。"""
+
+    hits: list[str] = []
+    if isinstance(value, float) and (value != value or value in (float("inf"), float("-inf"))):
+        return [path]
+    if isinstance(value, dict):
+        for key, child in value.items():
+            hits.extend(non_finite_number_paths(child, f"{path}.{key}"))
+    elif isinstance(value, (list, tuple)):
+        for index, child in enumerate(value):
+            hits.extend(non_finite_number_paths(child, f"{path}[{index}]"))
+    return hits
 
 
 def s2_5_permit_payload_fields(phase: str) -> tuple[str, ...]:
@@ -170,6 +191,13 @@ def verify_s2_5_operator_permit(
     errors: list[str] = []
     if not isinstance(permit, dict) or not isinstance(intent, dict):
         return ["s2_5 permit and intent must be objects"]
+    # E3 P2-6:NaN/Infinity 在 canonical bytes(allow_nan=False)上會炸;載入前先 typed 拒。
+    non_finite = non_finite_number_paths(permit)
+    if non_finite:
+        return [
+            f"s2_5 permit carries non-finite numbers at {non_finite}; NaN/Infinity have no "
+            "canonical byte form and are rejected before any digest derivation (fail-closed)"
+        ]
     if tuple(sorted(permit)) != tuple(sorted(_PERMIT_FIELDS)):
         return ["s2_5 permit fields do not match the exact contract"]
     core = intent.get("core") or {}
@@ -254,6 +282,44 @@ def verify_s2_5_operator_permit(
 
 
 # ── replay ledger(hash-chained consume-once;§5.7 路徑上的持久化由 lifecycle 葉負責)──
+def s2_5_replay_ledger_entry_errors(entries: Any) -> list[str]:
+    """entries 的 exact hash-chain 重驗:seq 自 0 單調、prev 綁前一筆、entry_digest 重算、
+    fsynced 恆 true(鏡 sibling ``s2_4_authorization_replay_ledger_v1`` 的 entry 契約)。
+
+    seq 是 fork 偵測的判別欄:兩筆「同 prev」的併發雙寫在 append-only 鏈上必然使其中
+    一筆的 seq/prev 至少一項與重算值不符——沒有 seq 時,截斷後重放的 prefix 仍是合法鏈。
+    """
+
+    if not isinstance(entries, list):
+        return ["s2_5 replay ledger entries must be a list"]
+    non_finite = non_finite_number_paths(entries)
+    if non_finite:
+        return [
+            f"s2_5 replay ledger carries non-finite numbers at {non_finite}; NaN/Infinity "
+            "have no canonical byte form and are rejected before any digest derivation"
+        ]
+    previous: str | None = None
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            return [f"s2_5 replay ledger entry {index} must be an object"]
+        expected = canonical_digest(
+            {key: value for key, value in entry.items() if key != "entry_digest"}
+        )
+        if (
+            entry.get("seq") != index
+            or entry.get("prev_entry_digest") != previous
+            or entry.get("entry_digest") != expected
+            or entry.get("fsynced") is not True
+        ):
+            return [
+                f"s2_5 replay ledger hash chain is broken at entry {index} (seq/prev/"
+                "digest/fsynced re-derivation failed; a truncated, forked or reordered "
+                "ledger is rejected fail-closed)"
+            ]
+        previous = entry["entry_digest"]
+    return []
+
+
 def derive_s2_5_replay_binding(
     permit: Any, replay_ledger: Any, *, start_id: Any
 ) -> dict[str, Any]:
@@ -275,22 +341,13 @@ def derive_s2_5_replay_binding(
             "replay ledger (fail-closed)"
         ]
         return verdict
-    previous = "sha256:" + "0" * 64
-    for index, entry in enumerate(replay_ledger["entries"]):
-        if not isinstance(entry, dict):
-            verdict["reasons"] = [f"s2_5 replay ledger entry {index} must be an object"]
-            return verdict
-        expected = canonical_digest({
-            "authorization_id": entry.get("authorization_id"),
-            "start_id": entry.get("start_id"),
-            "consumed_at": entry.get("consumed_at"),
-            "prev_entry_digest": entry.get("prev_entry_digest"),
-        })
-        if entry.get("prev_entry_digest") != previous or entry.get("entry_digest") != expected:
-            verdict["reasons"] = [
-                f"s2_5 replay ledger hash chain is broken at entry {index} (fail-closed)"
-            ]
-            return verdict
+    entries = replay_ledger["entries"]
+    chain_errors = s2_5_replay_ledger_entry_errors(entries)
+    if chain_errors:
+        verdict["reasons"] = chain_errors
+        return verdict
+    previous: str | None = None
+    for entry in entries:
         if entry.get("authorization_id") == authorization_id:
             verdict["reasons"] = [
                 "s2_5 authorization was already consumed; a consumed authorization is "
@@ -300,6 +357,7 @@ def derive_s2_5_replay_binding(
         previous = entry["entry_digest"]
     verdict["status"] = REPLAY_STATUS_VALID
     verdict["next_prev_entry_digest"] = previous
+    verdict["next_seq"] = len(entries)
     verdict["authorization_id"] = authorization_id
     verdict["start_id"] = start_id
     return verdict
@@ -314,14 +372,35 @@ def consume_s2_5_authorization(
     if binding["status"] != REPLAY_STATUS_VALID:
         raise ValueError("; ".join(binding["reasons"]))
     entry = {
+        "seq": binding["next_seq"],
         "authorization_id": binding["authorization_id"],
         "start_id": start_id,
         "consumed_at": consumed_at,
         "prev_entry_digest": binding["next_prev_entry_digest"],
+        "fsynced": True,
     }
     entry["entry_digest"] = canonical_digest(entry)
     replay_ledger["entries"].append(entry)
     return entry
+
+
+def seal_s2_5_replay_ledger(
+    replay_ledger: dict[str, Any], *, ledger_path: str
+) -> dict[str, Any]:
+    """把 in-memory chain 封成 closed ``s2_5_authorization_replay_ledger_v1`` artifact。
+
+    ``ledger_path`` 一律取呼叫端實際要寫入的路徑(鏡 s2_4 lock 葉:被讀回物件自報的
+    位置不可沿用)。``self_digest`` 是 integrity 證據,同時是 journal/receipt 釘 head 的錨。
+    """
+
+    sealed: dict[str, Any] = {
+        "schema_version": S2_5_REPLAY_LEDGER_SCHEMA_VERSION,
+        "ledger_path": str(ledger_path),
+        "entries": [dict(entry) for entry in replay_ledger.get("entries") or []],
+        "append_only": True,
+    }
+    sealed["self_digest"] = artifact_self_digest(sealed)
+    return sealed
 
 
 # ── observer/dead-man gate 與 watchdog-last 的**導出式** builder(caller 不可自證)────
@@ -422,12 +501,14 @@ def verify_s2_5_trusted_host_attestation(
     running_dimensions: Any,
     observer_gate: Any,
     now: Any,
+    expected_kind: str | None = None,
 ) -> list[str]:
     """attested status 的唯一鑰匙:無簽/壞簽/錯 fingerprint/錯 namespace/過期 全部拒。
 
-    freshness 只讀**已簽的** ``trusted_host_time``(caller 的 ``now`` 只用來擋整體過期,
-    絕不反向放寬);``running_dimensions_digest``/``observer_gate_digest`` 由 receipt 本體
-    重算比對——attestor 簽的是 exact 觀測,不是一個名字。
+    freshness 只讀**已簽的** ``trusted_host_time``(caller 的 ``now`` 只用來擋整體過期與
+    前向偏移,絕不反向放寬);``running_dimensions_digest``/``observer_gate_digest`` 由
+    receipt 本體重算比對——attestor 簽的是 exact 觀測,不是一個名字。``expected_kind``
+    由中央閘按 phase 傳入(A=running/B=final):kind 錯配即拒,B 簽章不可重放為 A。
     """
 
     if attestation is None:
@@ -444,6 +525,12 @@ def verify_s2_5_trusted_host_attestation(
     ):
         if attestation.get(field) != expected:
             errors.append(f"s2_5 attestation {field} is invalid")
+    if expected_kind is not None and attestation.get("attestation_kind") != expected_kind:
+        errors.append(
+            f"s2_5 attestation attestation_kind {attestation.get('attestation_kind')!r} "
+            f"does not match the phase-expected kind {expected_kind!r} (an A/B signature "
+            "is never replayable across phases)"
+        )
     if attestation.get("intent_digest") != intent_digest:
         errors.append("s2_5 attestation intent_digest does not bind the exact intent")
     if attestation.get("running_dimensions_digest") != canonical_digest(running_dimensions):
@@ -468,6 +555,15 @@ def verify_s2_5_trusted_host_attestation(
         )
         if moment >= expires:
             errors.append("s2_5 attestation is expired")
+        # 前向偏移上限:trusted_host_time 晚於 now+skew 的「未來簽章」拒(E3:無上限時
+        # now+400d 的簽章可過——TTL 只綁 trusted_host_time↔expires_at 自身)。
+        if trusted_time - moment > timedelta(
+            seconds=S2_5_ATTESTATION_FORWARD_SKEW_SECONDS
+        ):
+            errors.append(
+                "s2_5 attestation trusted_host_time is beyond the allowed forward clock "
+                "skew (a future-dated attestation is rejected fail-closed)"
+            )
     except (TypeError, ValueError) as error:
         errors.append(f"s2_5 attestation timestamps are unparseable: {error}")
     try:

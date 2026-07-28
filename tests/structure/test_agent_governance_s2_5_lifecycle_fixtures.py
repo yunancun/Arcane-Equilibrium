@@ -44,12 +44,13 @@ def test_enable_now_happy_path_full_chain_source_simulation_pass(tmp_path, monke
     assert unit.properties["ActiveState"] == "active"
     assert unit.properties["UnitFileState"] == "enabled"
     assert "enable_now" in unit.calls
-    # WAL:APPLYING 先寫、terminal 收尾。
-    journal = json.loads(
-        (tmp_path / "journal" / "s2_5.journal.json").read_text(encoding="utf-8")
-    )
+    # WAL:APPLYING 先寫、terminal 收尾(journal 檔名由 start_id 派生,P2-d)。
+    journal_path = lifecycle.s2_5_journal_path(tmp_path / "state", intent["start_id"])
+    journal = json.loads(journal_path.read_text(encoding="utf-8"))
     states = [entry["state"] for entry in journal["history"]]
     assert states[0] == "APPLYING" and journal["state"] == "TERMINAL_SUCCESS"
+    # P1-3:journal 釘住消費當下的 ledger head(截斷/清空自此可測)。
+    assert journal["replay_ledger_head"]["entry_count"] == 1
 
 
 # ── 場景 2:enabled / reboot-persistence(WantedBy link + manager 語義;O-6 後者)────
@@ -131,7 +132,7 @@ def test_rollback_to_disabled_restores_the_exact_s2_4_prestate(tmp_path, monkeyp
         intent2, permit2, unit2,
         **kit.apply_kwargs(
             tmp_path=tmp_path, unit=unit2, observers=observers,
-            journal_path=tmp_path / "journal" / "s2_5_4b.journal.json",
+            state_root=kit.fresh_state_root(tmp_path, "state-4b"),
             recovery_state=recovery,
         ),
     )
@@ -145,7 +146,7 @@ def test_rollback_to_disabled_restores_the_exact_s2_4_prestate(tmp_path, monkeyp
         intent3, permit3, unit3,
         **kit.apply_kwargs(
             tmp_path=tmp_path, unit=unit3,
-            journal_path=tmp_path / "journal" / "s2_5_4c.journal.json",
+            state_root=kit.fresh_state_root(tmp_path, "state-4c"),
             recovery_state=recovery,
         ),
     )
@@ -155,15 +156,8 @@ def test_rollback_to_disabled_restores_the_exact_s2_4_prestate(tmp_path, monkeyp
 
 # ── 場景 5:watchdog reset last(supervening restart ⇒ RESET_CLEAN 不可達)───────────
 def test_watchdog_reset_last_supervening_restart_blocks_reset_clean(tmp_path, monkeypatch):
-    pre_drill = {
-        "schema_version": "s2_5_running_attestation_v1",
-        "status": "SOURCE_SIMULATION_PASS",
-        "self_digest": "sha256:" + "4" * 64,
-    }
-    # 5a. 乾淨 reset:RESET_CLEAN + SOURCE_SIMULATION_PASS。
-    _key, intent, permit, unit = kit.b_side_setup(
-        tmp_path, monkeypatch, pre_drill_receipt=pre_drill
-    )
+    # 5a. 乾淨 reset:RESET_CLEAN + SOURCE_SIMULATION_PASS(pre-drill 錨=真 S2.5A receipt)。
+    _key, intent, permit, unit, pre_drill = kit.b_side_setup(tmp_path, monkeypatch)
     verdict = lifecycle.apply_s2_5_final(
         intent, permit, unit,
         **kit.final_apply_kwargs(tmp_path=tmp_path, unit=unit),
@@ -178,11 +172,7 @@ def test_watchdog_reset_last_supervening_restart_blocks_reset_clean(tmp_path, mo
     assert watchdog["unexplained_restart_detected"] is False
     assert unit.calls[-2] == "reset_failed" or "reset_failed" in unit.calls
     # 5b. reset 之後注入一次 supervening restart ⇒ RESET_CLEAN 不可達。
-    _key2, intent2, permit2, unit2 = kit.b_side_setup(
-        tmp_path, monkeypatch, pre_drill_receipt=pre_drill
-    )
-    class _RestartAfterReset(kit.SimulatedUnit):
-        pass
+    _key2, intent2, permit2, unit2, pre_drill2 = kit.b_side_setup(tmp_path, monkeypatch)
     original_reset = unit2.reset_failed
     def _reset_then_restart():
         original_reset()
@@ -192,10 +182,10 @@ def test_watchdog_reset_last_supervening_restart_blocks_reset_clean(tmp_path, mo
         intent2, permit2, unit2,
         **kit.final_apply_kwargs(
             tmp_path=tmp_path, unit=unit2,
-            journal_path=tmp_path / "journal" / "s2_5_5b.journal.json",
+            state_root=kit.fresh_state_root(tmp_path, "state-5b"),
         ),
         s2_1_drill_receipt=kit.drill_receipt(),
-        pre_drill_attestation=pre_drill,
+        pre_drill_attestation=pre_drill2,
     )
     assert verdict2["status"] == "ATTESTATION_FAILED"
     assert verdict2["rollback_receipt"]["status"] == "FAILED"

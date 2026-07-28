@@ -45,18 +45,11 @@ def test_driver_none_returns_external_verification_pending_with_zero_mutation(
     assert verdict["status"] == "EXTERNAL_VERIFICATION_PENDING"
     assert any("authority-locked" in reason for reason in verdict["reasons"])
     assert unit.calls == []  # mock driver 未被觸碰。
-    assert not (tmp_path / "journal" / "s2_5.journal.json").exists()  # 零 journal 寫入。
+    assert not (tmp_path / "state").exists()  # 零 journal/ledger 寫入(state root 未被建立)。
 
 
 def test_final_driver_none_returns_external_verification_pending(tmp_path, monkeypatch):
-    pre_drill = {
-        "schema_version": "s2_5_running_attestation_v1",
-        "status": "SOURCE_SIMULATION_PASS",
-        "self_digest": "sha256:" + "4" * 64,
-    }
-    _key, intent, permit, unit = kit.b_side_setup(
-        tmp_path, monkeypatch, pre_drill_receipt=pre_drill
-    )
+    _key, intent, permit, unit, pre_drill = kit.b_side_setup(tmp_path, monkeypatch)
     verdict = lifecycle.apply_s2_5_final(
         intent, permit, None,
         **kit.final_apply_kwargs(tmp_path=tmp_path, unit=unit),
@@ -117,15 +110,27 @@ def test_unresolved_s2_4_recovery_blocks_the_start(tmp_path, monkeypatch):
 
 
 def test_held_install_lock_blocks_the_start(tmp_path, monkeypatch):
+    # P1-5:install_lock_free 由注入 lock 介面的 flock 探測導出——持鎖 ⇒ typed 拒。
     _key, intent, permit, _unit = kit.a_side_setup(tmp_path, monkeypatch)
+    probe = kit.SimulatedLockProbe(held=True)
     verdict = lifecycle.apply_s2_5_start(
         intent, permit, UntouchableDriver(),
         **kit.apply_kwargs(
-            tmp_path=tmp_path, unit=kit.SimulatedUnit(), install_lock_free=False,
+            tmp_path=tmp_path, unit=kit.SimulatedUnit(), lock_probe=probe,
         ),
     )
     assert verdict["status"] == "REQUEST_REJECTED"
     assert any("install lock" in reason for reason in verdict["reasons"])
+    assert probe.probes == 1  # 真的探測過,不是自報。
+    # 無 lock 介面 = unproven-free ⇒ 同樣拒(caller 自報 boolean 不再是縫)。
+    verdict2 = lifecycle.apply_s2_5_start(
+        intent, permit, UntouchableDriver(),
+        **kit.apply_kwargs(
+            tmp_path=tmp_path, unit=kit.SimulatedUnit(), lock_probe=None,
+        ),
+    )
+    assert verdict2["status"] == "REQUEST_REJECTED"
+    assert any("install lock" in reason for reason in verdict2["reasons"])
 
 
 def test_live_prestate_mismatch_refuses_a_lookalike_unit(tmp_path, monkeypatch):
@@ -148,14 +153,7 @@ def test_live_prestate_mismatch_refuses_a_lookalike_unit(tmp_path, monkeypatch):
 
 # ── phase 綁定與 S2.5B 前置 ───────────────────────────────────────────────────
 def test_phase_substitution_is_rejected_by_both_appliers(tmp_path, monkeypatch):
-    pre_drill = {
-        "schema_version": "s2_5_running_attestation_v1",
-        "status": "SOURCE_SIMULATION_PASS",
-        "self_digest": "sha256:" + "4" * 64,
-    }
-    _key, intent_b, permit_b, unit = kit.b_side_setup(
-        tmp_path, monkeypatch, pre_drill_receipt=pre_drill
-    )
+    _key, intent_b, permit_b, unit, pre_drill = kit.b_side_setup(tmp_path, monkeypatch)
     verdict = lifecycle.apply_s2_5_start(
         intent_b, permit_b, UntouchableDriver(),
         **kit.apply_kwargs(tmp_path=tmp_path, unit=unit),
@@ -173,15 +171,8 @@ def test_phase_substitution_is_rejected_by_both_appliers(tmp_path, monkeypatch):
 
 
 def test_final_requires_the_exact_drill_and_pre_drill_bindings(tmp_path, monkeypatch):
-    pre_drill = {
-        "schema_version": "s2_5_running_attestation_v1",
-        "status": "SOURCE_SIMULATION_PASS",
-        "self_digest": "sha256:" + "4" * 64,
-    }
-    _key, intent, permit, unit = kit.b_side_setup(
-        tmp_path, monkeypatch, pre_drill_receipt=pre_drill
-    )
-    # 缺 drill receipt / digest 不符 / 失敗的 pre-drill attestation 三路皆拒。
+    _key, intent, permit, unit, pre_drill = kit.b_side_setup(tmp_path, monkeypatch)
+    # 缺 drill receipt / digest 不符 / 內容被竄改的 pre-drill(重算即斷)三路皆拒。
     for kwargs in (
         {"s2_1_drill_receipt": None, "pre_drill_attestation": pre_drill},
         {"s2_1_drill_receipt": dict(kit.drill_receipt(), self_digest="sha256:" + "9" * 64),
@@ -234,10 +225,7 @@ def test_replay_ledger_absent_or_consumed_authorization_is_rejected(tmp_path, mo
     unit2 = kit.SimulatedUnit()
     second = lifecycle.apply_s2_5_start(
         intent, permit, unit2,
-        **kit.apply_kwargs(
-            tmp_path=tmp_path, unit=unit2, replay_ledger=ledger,
-            journal_path=tmp_path / "journal" / "replay-2.journal.json",
-        ),
+        **kit.apply_kwargs(tmp_path=tmp_path, unit=unit2, replay_ledger=ledger),
     )
     assert second["status"] == "AUTHORIZATION_REJECTED"
     assert any("already consumed" in reason for reason in second["reasons"])
@@ -260,10 +248,11 @@ def test_verifier_must_differ_from_applier(tmp_path, monkeypatch):
 
 def test_non_terminal_or_corrupt_journal_blocks_a_new_effect(tmp_path, monkeypatch):
     _key, intent, permit, unit = kit.a_side_setup(tmp_path, monkeypatch)
-    journal_path = tmp_path / "journal" / "s2_5.journal.json"
-    journal_path.parent.mkdir(parents=True)
-    # 非終端殘留。
-    journal_path.write_text(json.dumps({
+    state_root = tmp_path / "state"
+    state_root.mkdir(parents=True)
+    # 非終端殘留(**別的** start 留下的殘留同樣擋:reconcile 掃整個 state_root)。
+    residue_path = state_root / f"s2-5-{'0' * 64}.journal.json"
+    residue_path.write_text(json.dumps({
         "schema_version": "s2_5_start_journal_v1_informal",
         "start_id": "s2-5-" + "0" * 64, "state": "APPLYING",
         "updated_at": kit.NOW, "history": [],
@@ -274,7 +263,7 @@ def test_non_terminal_or_corrupt_journal_blocks_a_new_effect(tmp_path, monkeypat
     assert verdict["status"] == "RECOVERY_REQUIRED"
     assert unit.calls == []
     # corrupt journal。
-    journal_path.write_text("{not json", encoding="utf-8")
+    residue_path.write_text("{not json", encoding="utf-8")
     verdict2 = lifecycle.apply_s2_5_start(
         intent, permit, unit, **kit.apply_kwargs(tmp_path=tmp_path, unit=unit)
     )
@@ -283,7 +272,7 @@ def test_non_terminal_or_corrupt_journal_blocks_a_new_effect(tmp_path, monkeypat
     # journal 面缺席(driver 在場)一樣 fail-closed。
     verdict3 = lifecycle.apply_s2_5_start(
         intent, permit, unit,
-        **kit.apply_kwargs(tmp_path=tmp_path, unit=unit, journal_path=None),
+        **kit.apply_kwargs(tmp_path=tmp_path, unit=unit, state_root=None),
     )
     assert verdict3["status"] == "RECOVERY_REQUIRED"
     assert unit.calls == []
@@ -322,7 +311,7 @@ def test_production_with_verified_attestor_reaches_running_attested(tmp_path, mo
         intent, kit.signed_permit(private_key, intent), preview_unit,
         **kit.apply_kwargs(
             tmp_path=tmp_path, unit=preview_unit, observers=preview_observers,
-            journal_path=tmp_path / "journal" / "preview.journal.json",
+            state_root=kit.fresh_state_root(tmp_path, "preview-state"),
         ),
     )
     assert preview["status"] == "SOURCE_SIMULATION_PASS"
@@ -338,7 +327,7 @@ def test_production_with_verified_attestor_reaches_running_attested(tmp_path, mo
         **kit.apply_kwargs(
             tmp_path=tmp_path, unit=unit, observers=observers,
             target_class="production", trusted_host_attestation=attested,
-            journal_path=tmp_path / "journal" / "prod.journal.json",
+            state_root=kit.fresh_state_root(tmp_path, "prod-state"),
         ),
     )
     assert verdict["status"] == "RUNNING_ATTESTED", verdict["reasons"]

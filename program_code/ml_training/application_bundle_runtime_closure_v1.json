@@ -159,6 +159,7 @@
     "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_prepared_install_bundle_v1.schema.json",
     "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_source_admission_receipt_v1.schema.json",
     "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_wave_exit_receipt_v1.schema.json",
+    "program_code/ml_training/schemas/aiml_gate_receipts/s2_5_authorization_replay_ledger_v1.schema.json",
     "program_code/ml_training/schemas/aiml_gate_receipts/s2_5_final_attestation_v1.schema.json",
     "program_code/ml_training/schemas/aiml_gate_receipts/s2_5_rollback_drill_receipt_v1.schema.json",
     "program_code/ml_training/schemas/aiml_gate_receipts/s2_5_running_attestation_v1.schema.json",
@@ -176,7 +177,7 @@
     "program_code/ml_training/schemas/aiml_gate_receipts/terminal_receipt_sink_v1.schema.json"
   ],
   "schema_version": "application_bundle_runtime_closure_v1",
-  "self_digest": "sha256:252403b6ab42c97380047dda7af4b83211625e8f3d785690df04a450471bd37c",
+  "self_digest": "sha256:f76cd5c285eaadf17fddb1cd24f3c9f07bf5c581b73b720e34304ea70e4f3102",
   "sql_fingerprints": [
     "sql/migrations/V151__alr_persistence_foundation.sql",
     "sql/migrations/V152__alr_operational_artifacts.sql",

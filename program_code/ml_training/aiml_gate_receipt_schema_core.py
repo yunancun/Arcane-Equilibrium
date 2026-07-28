@@ -228,6 +228,12 @@ SCHEMA_FILES = {
     "s2_5_running_attestation_v1": "s2_5_running_attestation_v1.schema.json",
     "s2_5_final_attestation_v1": "s2_5_final_attestation_v1.schema.json",
     "s2_5_rollback_drill_receipt_v1": "s2_5_rollback_drill_receipt_v1.schema.json",
+    # S2.5(WP5 tranche 1b·E3 P1-3)——additive:S2.5 自己的 hash-chained replay ledger
+    # (鏡 sibling s2_4_authorization_replay_ledger_v1;consume-once 的 durable 契約)。
+    # 同上:純 schema 查找,不進 S0.3 classifier 輸入,不動 PROGRAM_SCHEMA_PATHS。
+    "s2_5_authorization_replay_ledger_v1": (
+        "s2_5_authorization_replay_ledger_v1.schema.json"
+    ),
     "aiml_component_effect_classification_v3": (
         "aiml_component_effect_classification_v3.schema.json"
     ),

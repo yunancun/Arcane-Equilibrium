@@ -28,8 +28,10 @@ production driver 只在 S2.5 EFFECT session 由 OPS 注入。九項 authority �
 """
 from __future__ import annotations
 
+import fcntl
 import json
 import os
+import re
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -44,7 +46,11 @@ for _candidate in (HELPER_DIR, ML_TRAINING_DIR):
 
 import aiml_gate_receipt_validator as central_validator  # noqa: E402
 import agent_governance_s2_5_attestation as attestation  # noqa: E402
-from agent_governance_alr_quiesce_inventory import UNIT_NAME  # noqa: E402
+from agent_governance_alr_quiesce_inventory import (  # noqa: E402
+    UNIT_NAME,
+    compute_owner_fingerprint,
+)
+from agent_governance_s2_4_credential import redact_driver_error  # noqa: E402
 from agent_governance_s2_5_driver import S2_5_UNIT_NAME  # noqa: E402
 from aiml_gate_receipt_s2_5 import (  # noqa: E402
     S2_5_PHASE_EFFECT_CLASS,
@@ -70,6 +76,24 @@ _JOURNAL_TERMINAL_STATES = frozenset({
     "TERMINAL_SUCCESS", "TERMINAL_ROLLED_BACK", "TERMINAL_FAILED",
 })
 JOURNAL_CORRUPT = "JOURNAL_CORRUPT_RECOVERY_REQUIRED"
+# ── §5.7 的固定路徑面(worker 不得選 journal/ledger 位置;source lane 只以注入的
+# tmp state_root 觸碰)。journal 檔名唯一由 start_id regex 派生(鏡 probe_journal_path)。
+S2_5_STATE_ROOT = "/var/lib/arcane-equilibrium/aiml/install/s2_5"
+S2_5_LOCK_PATH = "/run/lock/arcane-equilibrium-aiml-s2-5-lifecycle.lock"
+S2_5_REPLAY_LEDGER_BASENAME = "authorization-replay-ledger.json"
+_S2_5_START_ID_RE = re.compile(r"^s2-5-[0-9a-f]{64}$")
+_S2_5_JOURNAL_NAME_RE = re.compile(r"^s2-5-[0-9a-f]{64}\.journal\.json$")
+# §11.21 secret-like 掃描(鏡 identity_acl_contract.PG_SECRET_LIKE_RE 形制):任何要被
+# 回傳/落盤的 reason/evidence 字串命中即整段改寫,絕不讓秘密樣態進 verdict/receipt。
+_S2_5_SECRET_LIKE_RE = re.compile(
+    r"(?:github_pat_|gh[pousr]_[A-Za-z0-9]{12,})"
+    r"|(?:access[_-]?token|auth(?:orization)?|client[_-]?secret|password|"
+    r"pgpassword|private[_-]?key)\s*[:=]"
+    r"|(?:basic|bearer)\s+[A-Za-z0-9._~+/=-]{12,}"
+    r"|postgres(?:ql)?://[^\s:/@]+:[^\s:/@]+@",
+    re.IGNORECASE,
+)
+_S2_5_SECRET_REDACTED = "<redacted: secret-like content was scrubbed from this reason>"
 
 
 class S2_5RecoveryState:
@@ -89,13 +113,15 @@ class S2_5RecoveryState:
 
 
 class S2_5RunningObserver(Protocol):
-    """獨立 verifier node 的觀測面(五維 + persistence + post-reset;fixtures 注入)。"""
+    """獨立 verifier node 的觀測面(五維 + persistence + owner 訊號 + post-reset)。"""
 
     verifier_node_id: str
 
     def observe_running_dimensions(self) -> dict[str, Any]: ...
 
     def observe_enabled_persistence(self) -> dict[str, Any]: ...
+
+    def observe_owner_signals(self) -> dict[str, Any]: ...
 
     def oldest_evidence_at(self) -> str: ...
 
@@ -195,28 +221,63 @@ def build_s2_5_start_intent(
     return intent
 
 
-# ── §5.7 WAL journal(source lane 只以 tmp-root 注入路徑觸碰)───────────────────
-def _journal_write(journal_path: Path, payload: dict[str, Any]) -> None:
-    journal_path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = journal_path.with_name(journal_path.name + ".tmp")
+# ── §5.7 路徑導出(caller 的字串永不成為 journal 檔名;source lane 只注入 state_root)──
+def s2_5_journal_path(state_root: Path | str, start_id: Any) -> Path:
+    """``<state_root>/<start_id>.journal.json``——檔名唯一由 start_id regex 派生
+    (鏡 ``probe_journal_path``:畸形 id 於此 typed 拒,caller 不得指定任意 journal 路徑)。"""
+
+    if not isinstance(start_id, str) or _S2_5_START_ID_RE.fullmatch(start_id) is None:
+        raise ValueError("s2_5 start_id is malformed; the journal path derives from it")
+    return Path(state_root) / f"{start_id}.journal.json"
+
+
+def s2_5_replay_ledger_path(state_root: Path | str) -> Path:
+    """§5.7 replay ledger 的唯一位置(state_root 下的固定 basename)。"""
+
+    return Path(state_root) / S2_5_REPLAY_LEDGER_BASENAME
+
+
+# ── §5.7 WAL journal(durable 落盤紀律鏡 s2_4 journal 葉:O_NOFOLLOW|O_EXCL 唯一暫存名
+# → file fsync → os.replace → parent-dir fsync;目錄 0700、檔案 0600)────────────────
+def _durable_write_json(target: Path, payload: dict[str, Any]) -> None:
+    parent = target.parent
+    parent.mkdir(parents=True, exist_ok=True)
+    os.chmod(parent, 0o700)
     data = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
-    fd = os.open(temp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    # 暫存名跨行程唯一(<pid hex>-<64 bit 隨機>):O_EXCL 是防競態的原子性手段,唯一性
+    # 使上一次崩潰的殘留不再撞名(s2_4 journal 葉 E16 的同一教訓)。
+    temp_path = parent / f".{target.name}.tmp.{os.getpid():x}-{os.urandom(8).hex()}"
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
+    fd = os.open(temp_path, flags, 0o600)
     try:
         os.write(fd, data)
         os.fsync(fd)
     finally:
         os.close(fd)
-    os.replace(temp_path, journal_path)
+    os.replace(temp_path, target)
+    dir_fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(dir_fd)
+    finally:
+        os.close(dir_fd)
 
 
 def _journal_transition(
-    journal_path: Path, *, start_id: str, state: str, updated_at: str
+    journal_path: Path,
+    *,
+    start_id: str,
+    state: str,
+    updated_at: str,
+    replay_ledger_head: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     history: list[dict[str, Any]] = []
+    carried_head: dict[str, Any] | None = None
     if journal_path.is_file():
         try:
             existing = json.loads(journal_path.read_text(encoding="utf-8"))
             history = list(existing.get("history") or [])
+            head = existing.get("replay_ledger_head")
+            carried_head = dict(head) if isinstance(head, dict) else None
         except (OSError, ValueError):
             history = []
     entry = {"state": state, "updated_at": updated_at}
@@ -225,50 +286,280 @@ def _journal_transition(
         "start_id": start_id,
         "state": state,
         "updated_at": updated_at,
+        # P1-3 head-anchor:journal 釘住消費當下的 ledger head(entry 總數+尾 digest+
+        # ledger self_digest),使尾部截斷與整本清空在同 start_id 重放時可測。
+        "replay_ledger_head": (
+            dict(replay_ledger_head) if replay_ledger_head is not None else carried_head
+        ),
         "history": history + [entry],
     }
-    _journal_write(journal_path, payload)
+    _durable_write_json(journal_path, payload)
     return payload
 
 
-def reconcile_s2_5_journal(journal_path: Path | None) -> dict[str, Any]:
-    """§5.2 語義:非終端殘留/corrupt journal 一律擋新 effect(fail-closed)。"""
+def reconcile_s2_5_journal(state_root: Path | str | None) -> dict[str, Any]:
+    """§5.2 語義:state_root 下**任一** journal 的非終端殘留/corrupt 一律擋新 effect。
 
-    if journal_path is None:
+    掃描整個 state_root(而非只看本 start_id 的 journal):別的 start 留下的 APPLYING
+    殘留同樣代表一台狀態不明的主機,fail-closed。
+    """
+
+    if state_root is None:
         return {
             "admits_new_work": False,
             "reasons": [
                 "s2_5 journal surface is absent; a driver-present apply requires a durable "
-                "WAL journal path (fail-closed)"
+                "WAL state root (fail-closed)"
             ],
         }
-    if not journal_path.is_file():
+    root = Path(state_root)
+    if not root.is_dir():
         return {"admits_new_work": True, "reasons": []}
-    try:
-        payload = json.loads(journal_path.read_text(encoding="utf-8"))
-        state = payload["state"]
-    except (OSError, ValueError, KeyError, TypeError):
-        return {
-            "admits_new_work": False,
-            "reasons": [
-                f"{JOURNAL_CORRUPT}: the s2_5 journal cannot be parsed; operator "
-                "investigation is required before any new effect"
-            ],
-        }
-    if state not in _JOURNAL_TERMINAL_STATES:
-        return {
-            "admits_new_work": False,
-            "reasons": [
-                f"s2_5 journal holds a non-terminal state {state!r}; §5.2 reconciles any "
-                "non-terminal journal before a new effect is accepted"
-            ],
-        }
+    for journal_path in sorted(root.glob("s2-5-*.journal.json")):
+        if _S2_5_JOURNAL_NAME_RE.fullmatch(journal_path.name) is None:
+            continue
+        try:
+            payload = json.loads(journal_path.read_text(encoding="utf-8"))
+            state = payload["state"]
+        except (OSError, ValueError, KeyError, TypeError):
+            return {
+                "admits_new_work": False,
+                "reasons": [
+                    f"{JOURNAL_CORRUPT}: the s2_5 journal {journal_path.name} cannot be "
+                    "parsed; operator investigation is required before any new effect"
+                ],
+            }
+        if state not in _JOURNAL_TERMINAL_STATES:
+            return {
+                "admits_new_work": False,
+                "reasons": [
+                    f"s2_5 journal {journal_path.name} holds a non-terminal state "
+                    f"{state!r}; §5.2 reconciles any non-terminal journal before a new "
+                    "effect is accepted"
+                ],
+            }
     return {"admits_new_work": True, "reasons": []}
 
 
+# ── P1-3 replay ledger 的鎖下持久化 + head-anchor 驗證面 ───────────────────────────
+def _persist_s2_5_replay_ledger(ledger_path: Path, replay_ledger: dict[str, Any]) -> dict[str, Any]:
+    """把 in-memory chain 封成 closed artifact 並以 journal 同紀律 durable 落盤。"""
+
+    sealed = attestation.seal_s2_5_replay_ledger(
+        replay_ledger, ledger_path=str(ledger_path)
+    )
+    _durable_write_json(ledger_path, sealed)
+    return sealed
+
+
+def _replay_ledger_head(entries: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "entry_count": len(entries),
+        "tail_entry_digest": entries[-1]["entry_digest"] if entries else None,
+    }
+
+
+def _ledger_behind_head_reasons(
+    entries: Any, head: dict[str, Any], *, anchor: str
+) -> list[str]:
+    count = head.get("entry_count")
+    tail = head.get("tail_entry_digest")
+    if not isinstance(count, int) or count <= 0 or not tail:
+        return []
+    if (
+        not isinstance(entries, list)
+        or len(entries) < count
+        or not isinstance(entries[count - 1], dict)
+        or entries[count - 1].get("entry_digest") != tail
+    ):
+        return [
+            f"s2_5 replay ledger does not contain the {anchor}-pinned head "
+            f"(entry_count={count}); a truncated or wiped ledger never re-admits a "
+            "consumed authorization (fail-closed)"
+        ]
+    return []
+
+
+def _replay_ledger_anchor_reasons(
+    journal_path: Path, ledger_path: Path, replay_ledger: Any
+) -> list[str]:
+    """head-anchor(P1-3):journal 釘的 head 與 durable ledger head 都必須被涵蓋。
+
+    截斷尾 entry/整本清空的 in-memory ledger 在此被抓——沒有 anchor 時,截斷後的 prefix
+    仍是一條合法 hash chain,consume-once 無從執法。
+    """
+
+    reasons: list[str] = []
+    entries = replay_ledger.get("entries") if isinstance(replay_ledger, dict) else None
+    # 1. 本 start_id 的 journal 釘過的 head(同 intent 重放時的錨)。
+    if journal_path.is_file():
+        try:
+            journal = json.loads(journal_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            journal = None
+        head = (journal or {}).get("replay_ledger_head")
+        if isinstance(head, dict):
+            reasons.extend(_ledger_behind_head_reasons(entries, head, anchor="journal"))
+    # 2. durable ledger 檔自身(state_root 的 exact durable head)。
+    if ledger_path.is_file():
+        try:
+            persisted = json.loads(ledger_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return reasons + [
+                "s2_5 durable replay ledger cannot be parsed; a malformed ledger blocks "
+                "any new authorization consumption (fail-closed)"
+            ]
+        if not isinstance(persisted, dict) or persisted.get(
+            "self_digest"
+        ) != central_validator.artifact_self_digest(persisted):
+            return reasons + [
+                "s2_5 durable replay ledger self_digest does not re-derive; a tampered "
+                "ledger blocks any new authorization consumption (fail-closed)"
+            ]
+        persisted_entries = persisted.get("entries") or []
+        chain_errors = attestation.s2_5_replay_ledger_entry_errors(persisted_entries)
+        if chain_errors:
+            return reasons + chain_errors
+        reasons.extend(
+            _ledger_behind_head_reasons(
+                entries, _replay_ledger_head(persisted_entries), anchor="durable-ledger"
+            )
+        )
+    return reasons
+
+
+# ── P1-5 §5.7 lock:install_lock_free 唯一由真 flock 探測導出(caller 自報不採信)────
+class S2_5FlockProbe:
+    """non-blocking exclusive ``flock`` 探測(探測即釋放;絕不 unlink/chmod lock 檔)。
+
+    production 面預設探 :data:`S2_5_LOCK_PATH`;source lane/測試注入 tmp 路徑。lock 檔
+    不存在=無人持有(lock 由取鎖者以 O_CREAT 建立);O_NOFOLLOW 拒 symlink 替身。
+    """
+
+    def __init__(self, lock_path: Path | str = S2_5_LOCK_PATH) -> None:
+        self._lock_path = Path(lock_path)
+
+    def flock_probe(self) -> dict[str, Any]:
+        try:
+            fd = os.open(
+                self._lock_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC
+            )
+        except FileNotFoundError:
+            return {"held": False, "exists": False, "lock_path": str(self._lock_path)}
+        try:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                return {"held": True, "exists": True, "lock_path": str(self._lock_path)}
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            return {"held": False, "exists": True, "lock_path": str(self._lock_path)}
+        finally:
+            os.close(fd)
+
+
+def derive_s2_5_install_lock_free(lock_probe: Any) -> tuple[bool, list[str]]:
+    """``install_lock_free`` 的唯一導出點:注入 lock 介面的真 flock 探測(E2 E1#5)。
+
+    無介面/探測逸出/held/形狀不明 一律 ``(False, typed reasons)``——自報 boolean 永不採信。
+    """
+
+    if lock_probe is None:
+        return False, [
+            "no install-lock probe interface was injected; lock freedom cannot be proved "
+            "(a caller-asserted boolean is never accepted)"
+        ]
+    if isinstance(lock_probe, bool):
+        return False, [
+            "a bare boolean is not a lock probe; install_lock_free derives only from a "
+            "real non-blocking flock probe (§5.7)"
+        ]
+    try:
+        observation = lock_probe.flock_probe()
+    except Exception as error:  # noqa: BLE001 —— 探測逸出=unproven-free,fail-closed。
+        return False, [
+            f"install-lock probe raised: {redact_driver_error(error)} (unproven-free "
+            "fails closed)"
+        ]
+    if not isinstance(observation, dict) or observation.get("held") is not False:
+        return False, [
+            "the install lock is held (or the probe observation is malformed); a live "
+            "install transaction blocks any S2.5 lifecycle effect"
+        ]
+    return True, []
+
+
+def derive_ttl_budget_status(core: Any, *, now: Any) -> dict[str, Any]:
+    """TTL 預算不等式(E1#2):``start+rollback+safety ≤ permit 剩餘 TTL`` 才可開始。
+
+    不夠時間完成 start+rollback(含 safety margin)的 effect 一開始就不該開始——
+    否則 rollback 會落在 permit 過期之後,變成無授權的 lifecycle 操作。
+    """
+
+    verdict: dict[str, Any] = {
+        "status": "TTL_BUDGET_EXCEEDED",
+        "reasons": [],
+        "required_seconds": None,
+        "remaining_seconds": None,
+    }
+    if not isinstance(core, dict):
+        verdict["reasons"] = ["s2_5 ttl budget requires the core object"]
+        return verdict
+    try:
+        required = (
+            int(core["start_budget_seconds"])
+            + int(core["rollback_budget_seconds"])
+            + int(core["safety_margin_seconds"])
+        )
+        expires = central_validator._parse_timestamp(str(core["expires_at"]))
+        remaining = (expires - _resolve_now(now)).total_seconds()
+    except (KeyError, TypeError, ValueError) as error:
+        verdict["reasons"] = [f"s2_5 ttl budget cannot be derived: {error} (fail-closed)"]
+        return verdict
+    verdict["required_seconds"] = required
+    verdict["remaining_seconds"] = remaining
+    if required <= remaining:
+        verdict["status"] = "TTL_BUDGET_OK"
+        return verdict
+    verdict["reasons"] = [
+        f"s2_5 ttl budget exceeded: start+rollback+safety requires {required}s but the "
+        f"permit window has only {remaining:.0f}s left; a start whose rollback would "
+        "outlive the permit never begins (E1#2)"
+    ]
+    return verdict
+
+
 # ── 內部小工具 ───────────────────────────────────────────────────────────────
+def _scrub_secret_text(text: Any) -> Any:
+    """reason/evidence 字串的 secret-like 掃描(§11.21/E2 F4):命中即整段改寫。"""
+
+    if isinstance(text, str) and _S2_5_SECRET_LIKE_RE.search(text) is not None:
+        return _S2_5_SECRET_REDACTED
+    return text
+
+
+def _secret_scan_errors(artifact: Any, path: str = "$") -> list[str]:
+    """遞迴掃描即將落盤/回傳的 artifact(命中回 typed error,不逸出例外)。"""
+
+    if isinstance(artifact, str):
+        if _S2_5_SECRET_LIKE_RE.search(artifact) is not None:
+            return [f"s2_5 artifact carries secret-like content at {path} (fail-closed)"]
+        return []
+    if isinstance(artifact, dict):
+        hits: list[str] = []
+        for key, value in artifact.items():
+            hits.extend(_secret_scan_errors(key, f"{path}.{key}"))
+            hits.extend(_secret_scan_errors(value, f"{path}.{key}"))
+        return hits
+    if isinstance(artifact, list):
+        hits = []
+        for index, value in enumerate(artifact):
+            hits.extend(_secret_scan_errors(value, f"{path}[{index}]"))
+        return hits
+    return []
+
+
 def _verdict(status: str, reasons: list[str], **extra: Any) -> dict[str, Any]:
-    verdict = {"status": status, "reasons": list(reasons)}
+    verdict = {"status": status, "reasons": [_scrub_secret_text(r) for r in reasons]}
     verdict.update(extra)
     return verdict
 
@@ -285,10 +576,25 @@ def _iso(moment: datetime) -> str:
     return moment.astimezone(timezone.utc).isoformat()
 
 
+def _bound_artifact_digest_ok(artifact: Any, bound_digest: Any) -> bool:
+    """P1-2/E2 F1:上游 artifact 的 digest 綁定不採信自報值——就地以
+    ``artifact_self_digest`` 重算,三值鏈相等才算在手(鏡 s2_4_install 的 W0 lineage 形制):
+    ``recompute(artifact) == artifact["self_digest"] == core 綁定值``。"""
+
+    return (
+        isinstance(artifact, dict)
+        and bool(artifact.get("self_digest"))
+        and central_validator.artifact_self_digest(artifact) == artifact["self_digest"]
+        and artifact["self_digest"] == bound_digest
+    )
+
+
 def _static_precheck_reasons(
     core: dict[str, Any],
     *,
     phase: str,
+    target_class: str,
+    now_dt: datetime,
     s2_4_install_effect_receipt: Any,
     loader_closure_observation: Any,
     s2_4_recovery_clear: Any,
@@ -299,16 +605,20 @@ def _static_precheck_reasons(
     """§3.1 靜態 precheck(零 driver 接觸)。任一缺席/不符即 typed reason。"""
 
     reasons: list[str] = []
-    # a. S2.4 APPLIED_INACTIVE receipt digest 綁定(#36 精神:綁 exact artifact 非名字)。
+    # a. S2.4 APPLIED_INACTIVE receipt digest 綁定(#36 精神:綁 exact artifact 非名字;
+    #    P1-2:self_digest 就地重算,自報 digest 的替身 stub 一律拒)。
     if not (
         isinstance(s2_4_install_effect_receipt, dict)
         and s2_4_install_effect_receipt.get("status") == "APPLIED_INACTIVE"
-        and s2_4_install_effect_receipt.get("self_digest")
-        == core.get("s2_4_install_effect_receipt_digest")
+        and _bound_artifact_digest_ok(
+            s2_4_install_effect_receipt, core.get("s2_4_install_effect_receipt_digest")
+        )
     ):
         reasons.append(
             "S2.5 precheck: the exact s2_4_install_effect_receipt_v1(status="
-            "APPLIED_INACTIVE) bound by the core digest is not in hand (fail-closed)"
+            "APPLIED_INACTIVE) bound by the core digest is not in hand or its "
+            "self_digest does not re-derive (a self-reported digest is never trusted; "
+            "fail-closed)"
         )
     # b. native-loader closure 重驗(§8.1:S2.5A 於 start 前重跑)。
     observed_closure = (
@@ -321,7 +631,7 @@ def _static_precheck_reasons(
             "S2.5 precheck: the re-derived native-loader closure digest does not equal "
             "the base manifest closure (any new path or changed byte fails closed)"
         )
-    # c. S2.4 recovery clear + install lock free(#39/#7)。
+    # c. S2.4 recovery clear + install lock free(#39/#7;lock 由真 flock 探測導出)。
     if s2_4_recovery_clear is not True:
         reasons.append(
             "S2_4_RECOVERY_UNRESOLVED: the S2.4 probe/PREPARE/APPLY journals hold "
@@ -336,25 +646,52 @@ def _static_precheck_reasons(
         if not (
             isinstance(s2_1_drill_receipt, dict)
             and str(s2_1_drill_receipt.get("status", "")).startswith("QUIESCED")
-            and s2_1_drill_receipt.get("self_digest")
-            == core.get("s2_1_drill_receipt_digest")
+            and _bound_artifact_digest_ok(
+                s2_1_drill_receipt, core.get("s2_1_drill_receipt_digest")
+            )
         ):
             reasons.append(
                 "S2.5B precheck: the exact quiesce_result_v1(status=QUIESCED_...) bound "
-                "by s2_1_drill_receipt_digest is not in hand (the drill must have "
-                "actually happened and restored)"
+                "by s2_1_drill_receipt_digest is not in hand or its self_digest does not "
+                "re-derive (the drill must have actually happened and restored)"
             )
-        if not (
+        pre_drill_ok = (
             isinstance(pre_drill_attestation, dict)
-            and pre_drill_attestation.get("schema_version") == "s2_5_running_attestation_v1"
-            and pre_drill_attestation.get("self_digest")
-            == core.get("pre_drill_attestation_digest")
-            and pre_drill_attestation.get("status")
-            in {S2_5_STATUS_RUNNING_ATTESTED, S2_5_STATUS_SIMULATION_PASS}
-        ):
+            and pre_drill_attestation.get("schema_version")
+            == "s2_5_running_attestation_v1"
+            and _bound_artifact_digest_ok(
+                pre_drill_attestation, core.get("pre_drill_attestation_digest")
+            )
+        )
+        if pre_drill_ok:
+            # P1-2:pre-drill 錨要過**全套**中央閘驗(含 RUNNING_ATTESTED 的 attestor
+            # 驗簽路徑與新鮮窗)——digest 綁定只證 bytes,不證這份 attestation 站得住。
+            central_errors = central_validator.validate_aiml_artifact(
+                pre_drill_attestation, now=_iso(now_dt)
+            )
+            if central_errors:
+                pre_drill_ok = False
+        if pre_drill_ok:
+            status = pre_drill_attestation.get("status")
+            if target_class == "production":
+                # production lane 的 S2.5B 只可錨在真 attested 的 production S2.5A 上;
+                # simulated 的 SOURCE_SIMULATION_PASS 錨永不解鎖 production final。
+                if not (
+                    status == S2_5_STATUS_RUNNING_ATTESTED
+                    and pre_drill_attestation.get("target_class") == "production"
+                ):
+                    pre_drill_ok = False
+            elif status not in {
+                S2_5_STATUS_RUNNING_ATTESTED, S2_5_STATUS_SIMULATION_PASS
+            }:
+                pre_drill_ok = False
+        if not pre_drill_ok:
             reasons.append(
                 "S2.5B precheck: the exact S2.5A s2_5_running_attestation_v1 bound by "
-                "pre_drill_attestation_digest is not in hand or was not successful"
+                "pre_drill_attestation_digest is not in hand, fails the central gate, "
+                "or is not an admissible anchor for this lane (production requires "
+                "RUNNING_ATTESTED on a production target; a simulated anchor never "
+                "unlocks a production final)"
             )
     return reasons
 
@@ -379,7 +716,11 @@ def _observe_and_build(
     observers: Any,
     clock: Callable[[], datetime],
 ) -> dict[str, Any]:
-    """讀五維 + persistence + observer gate(全由獨立 verifier 面採集)。"""
+    """讀五維 + persistence + owner 訊號 + observer gate(全由獨立 verifier 面採集)。
+
+    ``owner_fingerprint`` 在此**模組內**經 WP3 ``compute_owner_fingerprint`` 重算
+    (E1#4):caller 供值只作交叉檢查,receipt 一律載模組導出值。
+    """
 
     dimensions = observers.observe_running_dimensions()
     persistence = dict(observers.observe_enabled_persistence())
@@ -395,6 +736,9 @@ def _observe_and_build(
         "persistence": persistence,
         "observer_gate": gate,
         "verdicts": s2_5_running_dimension_verdicts(dimensions),
+        "owner_fingerprint": compute_owner_fingerprint(
+            **dict(observers.observe_owner_signals())
+        ),
     }
 
 
@@ -451,7 +795,7 @@ def _base_receipt(
             central_validator._parse_timestamp(completed_at)
             + timedelta(seconds=int(max_age))
         ),
-        "failure_reason": failure_reason,
+        "failure_reason": _scrub_secret_text(failure_reason),
         "source_head": core["source_head"],
     }
     return receipt
@@ -460,6 +804,8 @@ def _base_receipt(
 def _seal(receipt: dict[str, Any], *, now_dt: datetime) -> tuple[dict[str, Any], list[str]]:
     receipt["self_digest"] = central_validator.artifact_self_digest(receipt)
     errors = central_validator.validate_aiml_artifact(receipt, now=_iso(now_dt))
+    # §11.21/E2 F4:receipt 落盤/回傳前過 secret-like 掃描(簽章 armor 不在掃描形狀內)。
+    errors = errors + _secret_scan_errors(receipt)
     return receipt, errors
 
 
@@ -520,6 +866,7 @@ def _common_gate(
     replay_ledger: Any,
     target_class: str,
     recovery_state: S2_5RecoveryState | None,
+    lock_probe: Any,
     precheck_inputs: dict[str, Any],
 ) -> tuple[dict[str, Any] | None, dict[str, Any], datetime]:
     """step 0-6 的共用閘。回 (提前終止的 verdict | None, 導出的 precheck 旗標, now)。"""
@@ -581,17 +928,26 @@ def _common_gate(
             precheck_flags,
             now_dt,
         )
-    # step 3 —— 靜態 precheck(零 driver 接觸)。
-    static_reasons = _static_precheck_reasons(core, phase=phase, **precheck_inputs)
+    # step 3 —— 靜態 precheck(零 driver 接觸)。install_lock_free 唯一由真 flock 探測
+    # 導出(P1-5:caller 自報 boolean 不採信)。
+    install_lock_free, lock_reasons = derive_s2_5_install_lock_free(lock_probe)
+    static_reasons = _static_precheck_reasons(
+        core,
+        phase=phase,
+        target_class=target_class,
+        now_dt=now_dt,
+        install_lock_free=install_lock_free,
+        **precheck_inputs,
+    )
+    if not install_lock_free:
+        static_reasons = static_reasons + lock_reasons
     precheck_flags["loader_closure_reverified"] = not any(
         "native-loader" in reason for reason in static_reasons
     )
     precheck_flags["s2_4_recovery_clear"] = not any(
         "S2_4_RECOVERY_UNRESOLVED" in reason for reason in static_reasons
     )
-    precheck_flags["install_lock_free"] = not any(
-        "install lock" in reason for reason in static_reasons
-    )
+    precheck_flags["install_lock_free"] = bool(install_lock_free)
     if static_reasons:
         status = (
             S2_5_STATUS_RECOVERY_REQUIRED
@@ -606,6 +962,14 @@ def _common_gate(
     if authorization_reasons:
         return (
             _verdict(S2_5_STATUS_AUTHORIZATION_REJECTED, authorization_reasons),
+            precheck_flags,
+            now_dt,
+        )
+    # step 4b —— TTL 預算不等式(E1#2):不夠時間完成 start+rollback+safety 就不開始。
+    budget = derive_ttl_budget_status(core, now=now_dt)
+    if budget["status"] != "TTL_BUDGET_OK":
+        return (
+            _verdict(S2_5_STATUS_AUTHORIZATION_REJECTED, budget["reasons"]),
             precheck_flags,
             now_dt,
         )
@@ -639,9 +1003,9 @@ def apply_s2_5_start(
     s2_4_inactive_prestate: Any = None,
     loader_closure_observation: Any = None,
     s2_4_recovery_clear: Any = None,
-    install_lock_free: Any = None,
+    lock_probe: Any = None,
     recovery_state: S2_5RecoveryState | None = None,
-    journal_path: Path | None = None,
+    state_root: Path | None = None,
     observers: Any = None,
     owner_fingerprint: str | None = None,
     applier_node: str = "s2-5-start-applier",
@@ -657,11 +1021,11 @@ def apply_s2_5_start(
         replay_ledger=replay_ledger,
         target_class=target_class,
         recovery_state=recovery_state,
+        lock_probe=lock_probe,
         precheck_inputs={
             "s2_4_install_effect_receipt": s2_4_install_effect_receipt,
             "loader_closure_observation": loader_closure_observation,
             "s2_4_recovery_clear": s2_4_recovery_clear,
-            "install_lock_free": install_lock_free,
             "s2_1_drill_receipt": None,
             "pre_drill_attestation": None,
         },
@@ -671,9 +1035,11 @@ def apply_s2_5_start(
     core = intent["core"]
     clock = clock or (lambda: now_dt)
     # step 7 前置:driver 在場必須有 journal 面與獨立 observer/verifier。
-    reconcile = reconcile_s2_5_journal(journal_path)
+    reconcile = reconcile_s2_5_journal(state_root)
     if reconcile["admits_new_work"] is not True:
         return _verdict(S2_5_STATUS_RECOVERY_REQUIRED, reconcile["reasons"])
+    journal_path = s2_5_journal_path(state_root, intent["start_id"])
+    ledger_path = s2_5_replay_ledger_path(state_root)
     if observers is None or not str(getattr(observers, "verifier_node_id", "")):
         return _verdict(
             S2_5_STATUS_REQUEST_REJECTED,
@@ -692,6 +1058,10 @@ def apply_s2_5_start(
                 "before any lifecycle effect (fail-closed)"
             ],
         )
+    # P1-3 head-anchor:journal/durable ledger 釘過的 head 必須被涵蓋(截斷/清空即拒)。
+    anchor_reasons = _replay_ledger_anchor_reasons(journal_path, ledger_path, replay_ledger)
+    if anchor_reasons:
+        return _verdict(S2_5_STATUS_AUTHORIZATION_REJECTED, anchor_reasons)
     # 前態讀取(read-only):必須等於 S2.4 receipt 所證的 loaded/disabled/inactive。
     pre_properties = driver.show()
     pre_state = _unit_state_from_show(pre_properties)
@@ -724,13 +1094,17 @@ def apply_s2_5_start(
         )
     prestate_digest = central_validator.canonical_digest(dict(s2_4_inactive_prestate))
     started_at = _iso(clock())
-    # WAL:先寫 APPLYING 再動 effect(§5.2 語義)。
-    _journal_transition(
-        journal_path, start_id=intent["start_id"], state="APPLYING", updated_at=started_at
-    )
+    # §9.1:先 durable 消費 permit 並持久化 ledger,再寫 APPLYING(journal 同時釘 ledger
+    # head),之後才動 effect(§5.2 WAL 語義)。
     consumed_at = started_at
     attestation.consume_s2_5_authorization(
         replay_ledger, authorization, start_id=intent["start_id"], consumed_at=consumed_at
+    )
+    _persist_s2_5_replay_ledger(ledger_path, replay_ledger)
+    _journal_transition(
+        journal_path, start_id=intent["start_id"], state="APPLYING",
+        updated_at=started_at,
+        replay_ledger_head=_replay_ledger_head(replay_ledger["entries"]),
     )
     try:
         driver.enable_now()
@@ -749,21 +1123,52 @@ def apply_s2_5_start(
         if rollback["status"] != "RESTORED_INACTIVE" and recovery_state is not None:
             recovery_state.record(
                 start_id=intent["start_id"],
-                reasons=[f"start failed and rollback did not restore: {error!r}"],
+                reasons=[
+                    "start failed and rollback did not restore: "
+                    + redact_driver_error(error)
+                ],
             )
         return _verdict(
             S2_5_STATUS_ATTESTATION_FAILED
             if rollback["status"] == "RESTORED_INACTIVE"
             else S2_5_STATUS_RECOVERY_REQUIRED,
-            [f"enable --now failed: {error!r}"],
+            [f"enable --now failed: {redact_driver_error(error)}"],
             rollback_receipt=rollback["receipt"],
         )
-    observation = _observe_and_build(core=core, observers=observers, clock=clock)
+    # P1-1:effect 之後的**全部**觀測(五維/persistence/owner 訊號/observer-gate 時間解析)
+    # 都在 try 內——任何例外都不得裸逸,例外臂走 rollback + journal terminal + recovery 閂。
+    try:
+        observation = _observe_and_build(core=core, observers=observers, clock=clock)
+    except Exception as error:  # noqa: BLE001 —— 觀測炸掉=真實狀態不明,fail-closed。
+        reasons = [
+            "post-start observation raised and the runtime state is unproven: "
+            + redact_driver_error(error)
+        ]
+        rollback = _rollback_to_disabled(
+            intent=intent, core=core, driver=driver, pre_state=pre_state,
+            prestate_digest=prestate_digest, clock=clock,
+        )
+        restored = rollback["status"] == "RESTORED_INACTIVE"
+        _journal_transition(
+            journal_path, start_id=intent["start_id"],
+            state="TERMINAL_ROLLED_BACK" if restored else "RECOVERY_REQUIRED",
+            updated_at=_iso(clock()),
+        )
+        if recovery_state is not None:
+            recovery_state.record(start_id=intent["start_id"], reasons=reasons)
+        return _verdict(
+            S2_5_STATUS_ATTESTATION_FAILED if restored else S2_5_STATUS_RECOVERY_REQUIRED,
+            reasons
+            + ([] if restored else ["rollback-to-disabled did not restore the S2.4 pre-state"]),
+            rollback_receipt=rollback["receipt"],
+        )
     failing = sorted(
         name for name, ok in observation["verdicts"].items() if not ok
     )
     stale = observation["observer_gate"]["stale"] is not False
-    if failing or stale:
+    # E1#4:owner_fingerprint 由模組重算(_observe_and_build);caller 供值僅交叉檢查。
+    owner_mismatch = observation["owner_fingerprint"] != owner_fingerprint
+    if failing or stale or owner_mismatch:
         rollback = _rollback_to_disabled(
             intent=intent, core=core, driver=driver, pre_state=pre_state,
             prestate_digest=prestate_digest, clock=clock,
@@ -777,11 +1182,15 @@ def apply_s2_5_start(
             journal_path, start_id=intent["start_id"], state=terminal,
             updated_at=_iso(clock()),
         )
-        reasons = (
-            [f"running attestation failed on dimension(s): {failing}"]
-            if failing
-            else ["observer/dead-man gate is stale; a PASS cannot be derived"]
-        )
+        if failing:
+            reasons = [f"running attestation failed on dimension(s): {failing}"]
+        elif stale:
+            reasons = ["observer/dead-man gate is stale; a PASS cannot be derived"]
+        else:
+            reasons = [
+                "owner fingerprint cross-check failed: the module-recomputed WP3 "
+                "compute_owner_fingerprint value differs from the caller-supplied claim"
+            ]
         if rollback["status"] != "RESTORED_INACTIVE":
             if recovery_state is not None:
                 recovery_state.record(start_id=intent["start_id"], reasons=reasons)
@@ -795,7 +1204,7 @@ def apply_s2_5_start(
             adapter_id="s2_5_runtime_start_adapter_v1",
             status=S2_5_STATUS_ATTESTATION_FAILED,
             intent=intent, core=core, target_class=target_class,
-            owner_fingerprint=owner_fingerprint, observation=observation,
+            owner_fingerprint=observation["owner_fingerprint"], observation=observation,
             precheck=precheck_flags, rollback_record=rollback["receipt"],
             applier_node=applier_node, verifier_node=observers.verifier_node_id,
             trusted_host_attestation=None,
@@ -817,6 +1226,7 @@ def apply_s2_5_start(
             running_dimensions=observation["dimensions"],
             observer_gate=observation["observer_gate"],
             now=now_dt,
+            expected_kind="A",
         )
         status = (
             S2_5_STATUS_RUNNING_ATTESTED if not attestation_errors else S2_5_STATUS_PENDING
@@ -841,7 +1251,7 @@ def apply_s2_5_start(
         adapter_id="s2_5_runtime_start_adapter_v1",
         status=status,
         intent=intent, core=core, target_class=target_class,
-        owner_fingerprint=owner_fingerprint, observation=observation,
+        owner_fingerprint=observation["owner_fingerprint"], observation=observation,
         precheck=precheck_flags, rollback_record=None,
         applier_node=applier_node, verifier_node=observers.verifier_node_id,
         trusted_host_attestation=bound_attestation,
@@ -869,18 +1279,32 @@ def _rollback_to_disabled(
     prestate_digest: str,
     clock: Callable[[], datetime],
 ) -> dict[str, Any]:
-    """失敗即 rollback-to-disabled(§8.3 末段):stop + disable + 驗證回 S2.4 前態。"""
+    """失敗即 rollback-to-disabled(§8.3 末段):stop + disable + 驗證回 S2.4 前態。
+
+    §5.3(PM 詮釋,2026-07-28):identity tuple(active_state/unit_file_state/
+    stable_identity_match)不等 ⇒ ``NOT_RESTORED`` 誠實失敗;``n_restarts`` 漂移**記錄**
+    於 receipt 的 ``watchdog_last``(``unexplained_restart_detected`` 反映),不阻
+    ``RESTORED_INACTIVE``。
+    """
 
     failure: str | None = None
     try:
         driver.stop()
         driver.disable()
     except Exception as error:  # noqa: BLE001
-        failure = repr(error)
+        failure = redact_driver_error(error)
+    stable_identity_match = False
     try:
-        post_state = _unit_state_from_show(driver.show())
+        post_properties = driver.show()
+        post_state = _unit_state_from_show(post_properties)
+        # stable identity:rollback 之後的 unit 仍是 exact fragment(無替身/無 drop-in)。
+        stable_identity_match = (
+            str(post_properties.get("FragmentDigest", ""))
+            == core["expected_unit_fragment_digest"]
+            and str(post_properties.get("DropInPaths", "")) == ""
+        )
     except Exception as error:  # noqa: BLE001
-        failure = failure or repr(error)
+        failure = failure or redact_driver_error(error)
         post_state = {
             "active_state": "unknown", "unit_file_state": "unknown",
             "n_restarts": 0, "invocation_id": "none",
@@ -891,6 +1315,17 @@ def _rollback_to_disabled(
         and post_state["unit_file_state"] == "disabled"
         and post_state["active_state"] == pre_state["active_state"]
         and post_state["unit_file_state"] == pre_state["unit_file_state"]
+        and stable_identity_match is True
+    )
+    # n_restarts 漂移(supervening restart during rollback)只記錄不阻 RESTORED_INACTIVE。
+    watchdog_last = attestation.build_watchdog_last(
+        n_restarts_before=int(pre_state.get("n_restarts", 0)),
+        n_restarts_after=int(post_state.get("n_restarts", 0)),
+        invocation_id_before=str(pre_state.get("invocation_id", "none")),
+        invocation_id_after=str(post_state.get("invocation_id", "none")),
+        last_lifecycle_operation_kind="systemd_stop_disable",
+        authorized_operation_kind="systemd_stop_disable",
+        watchdog_usec="none",
     )
     status = "RESTORED_INACTIVE" if restored else "NOT_RESTORED"
     receipt = _build_rollback_receipt(
@@ -901,7 +1336,7 @@ def _rollback_to_disabled(
         pre_state=pre_state,
         post_state=post_state,
         s2_4_inactive_prestate_digest=prestate_digest,
-        watchdog_last=None,
+        watchdog_last=watchdog_last,
         observed_at=_iso(clock()),
     )
     return {"status": status, "receipt": receipt}
@@ -918,11 +1353,11 @@ def apply_s2_5_final(
     s2_4_install_effect_receipt: Any = None,
     loader_closure_observation: Any = None,
     s2_4_recovery_clear: Any = None,
-    install_lock_free: Any = None,
+    lock_probe: Any = None,
     s2_1_drill_receipt: Any = None,
     pre_drill_attestation: Any = None,
     recovery_state: S2_5RecoveryState | None = None,
-    journal_path: Path | None = None,
+    state_root: Path | None = None,
     observers: Any = None,
     owner_fingerprint: str | None = None,
     applier_node: str = "s2-5-final-applier",
@@ -938,11 +1373,11 @@ def apply_s2_5_final(
         replay_ledger=replay_ledger,
         target_class=target_class,
         recovery_state=recovery_state,
+        lock_probe=lock_probe,
         precheck_inputs={
             "s2_4_install_effect_receipt": s2_4_install_effect_receipt,
             "loader_closure_observation": loader_closure_observation,
             "s2_4_recovery_clear": s2_4_recovery_clear,
-            "install_lock_free": install_lock_free,
             "s2_1_drill_receipt": s2_1_drill_receipt,
             "pre_drill_attestation": pre_drill_attestation,
         },
@@ -951,9 +1386,11 @@ def apply_s2_5_final(
         return outcome
     core = intent["core"]
     clock = clock or (lambda: now_dt)
-    reconcile = reconcile_s2_5_journal(journal_path)
+    reconcile = reconcile_s2_5_journal(state_root)
     if reconcile["admits_new_work"] is not True:
         return _verdict(S2_5_STATUS_RECOVERY_REQUIRED, reconcile["reasons"])
+    journal_path = s2_5_journal_path(state_root, intent["start_id"])
+    ledger_path = s2_5_replay_ledger_path(state_root)
     if observers is None or not str(getattr(observers, "verifier_node_id", "")):
         return _verdict(
             S2_5_STATUS_REQUEST_REJECTED,
@@ -972,6 +1409,9 @@ def apply_s2_5_final(
                 "before any lifecycle effect (fail-closed)"
             ],
         )
+    anchor_reasons = _replay_ledger_anchor_reasons(journal_path, ledger_path, replay_ledger)
+    if anchor_reasons:
+        return _verdict(S2_5_STATUS_AUTHORIZATION_REJECTED, anchor_reasons)
     # S2.5B 的 drill 之後前態:unit 必須 enabled/active(drill restore 成功的活實例)。
     pre_properties = driver.show()
     pre_state = _unit_state_from_show(pre_properties)
@@ -990,26 +1430,48 @@ def apply_s2_5_final(
             ],
         )
     started_at = _iso(clock())
-    _journal_transition(
-        journal_path, start_id=intent["start_id"], state="APPLYING", updated_at=started_at
-    )
     attestation.consume_s2_5_authorization(
         replay_ledger, authorization, start_id=intent["start_id"], consumed_at=started_at
     )
+    _persist_s2_5_replay_ledger(ledger_path, replay_ledger)
+    _journal_transition(
+        journal_path, start_id=intent["start_id"], state="APPLYING",
+        updated_at=started_at,
+        replay_ledger_head=_replay_ledger_head(replay_ledger["entries"]),
+    )
     # 五維再證(drill 之後的新 PID/InvocationID;stable identity 的比對折在觀測面)。
-    observation = _observe_and_build(core=core, observers=observers, clock=clock)
-    failing = sorted(name for name, ok in observation["verdicts"].items() if not ok)
-    stale = observation["observer_gate"]["stale"] is not False
-    if failing or stale:
+    # P1-1:觀測例外不得裸逸——journal terminal + typed 失敗(S2.5B 無 rollback 語義)。
+    try:
+        observation = _observe_and_build(core=core, observers=observers, clock=clock)
+    except Exception as error:  # noqa: BLE001
         _journal_transition(
             journal_path, start_id=intent["start_id"], state="TERMINAL_FAILED",
             updated_at=_iso(clock()),
         )
-        reasons = (
-            [f"final attestation failed on dimension(s): {failing}"]
-            if failing
-            else ["observer/dead-man gate is stale; a PASS cannot be derived"]
+        return _verdict(
+            S2_5_STATUS_ATTESTATION_FAILED,
+            [
+                "post-drill observation raised and the runtime state is unproven: "
+                + redact_driver_error(error)
+            ],
         )
+    failing = sorted(name for name, ok in observation["verdicts"].items() if not ok)
+    stale = observation["observer_gate"]["stale"] is not False
+    owner_mismatch = observation["owner_fingerprint"] != owner_fingerprint
+    if failing or stale or owner_mismatch:
+        _journal_transition(
+            journal_path, start_id=intent["start_id"], state="TERMINAL_FAILED",
+            updated_at=_iso(clock()),
+        )
+        if failing:
+            reasons = [f"final attestation failed on dimension(s): {failing}"]
+        elif stale:
+            reasons = ["observer/dead-man gate is stale; a PASS cannot be derived"]
+        else:
+            reasons = [
+                "owner fingerprint cross-check failed: the module-recomputed WP3 "
+                "compute_owner_fingerprint value differs from the caller-supplied claim"
+            ]
         return _verdict(S2_5_STATUS_ATTESTATION_FAILED, reasons)
     # watchdog reset **last**:最後一個 lifecycle 操作是本 phase 的 reset 本身(§3/O-2)。
     try:
@@ -1021,23 +1483,47 @@ def apply_s2_5_final(
         )
         if recovery_state is not None:
             recovery_state.record(
-                start_id=intent["start_id"], reasons=[f"reset-failed failed: {error!r}"]
+                start_id=intent["start_id"],
+                reasons=[f"reset-failed failed: {redact_driver_error(error)}"],
             )
         return _verdict(
-            S2_5_STATUS_RECOVERY_REQUIRED, [f"watchdog reset failed: {error!r}"]
+            S2_5_STATUS_RECOVERY_REQUIRED,
+            [f"watchdog reset failed: {redact_driver_error(error)}"],
         )
-    post_reset = observers.observe_post_reset()
-    watchdog_last = attestation.build_watchdog_last(
-        n_restarts_before=observation["dimensions"]["unit"]["n_restarts_baseline"],
-        n_restarts_after=int(post_reset.get("n_restarts", 0)),
-        invocation_id_before=observation["dimensions"]["pid_cgroup"]["invocation_id"],
-        invocation_id_after=str(post_reset.get("invocation_id", "none")),
-        last_lifecycle_operation_kind=str(
-            post_reset.get("last_lifecycle_operation_kind", "")
-        ),
-        authorized_operation_kind="systemd_reset_failed",
-        watchdog_usec="none",
-    )
+    # P1-1:reset 之後的觀測/導出也不得裸逸——reset 已發生,乾淨與否未證 ⇒ RECOVERY。
+    try:
+        post_reset = observers.observe_post_reset()
+        watchdog_last = attestation.build_watchdog_last(
+            n_restarts_before=observation["dimensions"]["unit"]["n_restarts_baseline"],
+            n_restarts_after=int(post_reset.get("n_restarts", 0)),
+            invocation_id_before=observation["dimensions"]["pid_cgroup"]["invocation_id"],
+            invocation_id_after=str(post_reset.get("invocation_id", "none")),
+            last_lifecycle_operation_kind=str(
+                post_reset.get("last_lifecycle_operation_kind", "")
+            ),
+            authorized_operation_kind="systemd_reset_failed",
+            watchdog_usec="none",
+        )
+    except Exception as error:  # noqa: BLE001
+        _journal_transition(
+            journal_path, start_id=intent["start_id"], state="RECOVERY_REQUIRED",
+            updated_at=_iso(clock()),
+        )
+        if recovery_state is not None:
+            recovery_state.record(
+                start_id=intent["start_id"],
+                reasons=[
+                    "post-reset observation raised; the reset outcome is unproven: "
+                    + redact_driver_error(error)
+                ],
+            )
+        return _verdict(
+            S2_5_STATUS_RECOVERY_REQUIRED,
+            [
+                "post-reset observation raised; the reset outcome is unproven: "
+                + redact_driver_error(error)
+            ],
+        )
     reset_clean = (
         watchdog_last["unexplained_restart_detected"] is False
         and watchdog_last["last_transition_matches_authorized_op"] is True
@@ -1082,6 +1568,7 @@ def apply_s2_5_final(
             running_dimensions=observation["dimensions"],
             observer_gate=observation["observer_gate"],
             now=now_dt,
+            expected_kind="B",
         )
         status = (
             S2_5_STATUS_FINAL_ATTESTED if not attestation_errors else S2_5_STATUS_PENDING
@@ -1106,7 +1593,7 @@ def apply_s2_5_final(
         adapter_id="s2_5_final_attestation_adapter_v1",
         status=status,
         intent=intent, core=core, target_class=target_class,
-        owner_fingerprint=owner_fingerprint, observation=observation,
+        owner_fingerprint=observation["owner_fingerprint"], observation=observation,
         precheck=precheck_flags, rollback_record=None,
         applier_node=applier_node, verifier_node=observers.verifier_node_id,
         trusted_host_attestation=bound_attestation,

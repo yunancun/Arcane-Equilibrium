@@ -6,9 +6,12 @@ verbs(全部離線、零 runtime 接觸;design §7):
 * ``start-core``    —— 由參數組出 unsigned ``s2_5_start_core_v1`` 並列印;
 * ``start-intent``  —— 讀 core JSON 檔,組出 closed ``s2_5_start_intent_v1`` 並列印;
 * ``validate``      —— 把任一 s2_5 artifact 檔丟中央閘(``--now`` 必帶;過期 fail-closed);
-* ``apply-start`` / ``apply-final`` —— source lane 施加:**永遠 driver=None**,固定回 typed
-  ``EXTERNAL_VERIFICATION_PENDING``/typed 拒絕,零變更(真 driver 只在 S2.5 EFFECT session
-  由 OPS 注入,CLI 沒有任何注入縫)。
+* ``apply-start`` / ``apply-final`` —— source lane 施加:**永遠 driver=None**,零變更。
+  誠實終點是 typed ``EXTERNAL_VERIFICATION_PENDING``(exit 0);在那之前的任何一道閘都可能
+  以 typed ``REQUEST_REJECTED`` / ``AUTHORIZATION_REJECTED`` / ``RECOVERY_REQUIRED``
+  (recovery 閂未解、S2.4 recovery/lock 未清、journal 殘留)終止(exit 2)——「固定回
+  PENDING」不是本 CLI 的語義,拒絕臂與 recovery 臂同樣真實(真 driver 只在 S2.5 EFFECT
+  session 由 OPS 注入,CLI 沒有任何注入縫)。
 
 ⚠ 誠實邊界:本 CLI 只做離線結構/整合檢查,不能認證任何 runtime PASS;乾淨輸出「不」代表
 unit 真的 enabled/running。九項 authority 恆 false。

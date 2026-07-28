@@ -22,6 +22,7 @@ for _candidate in (HELPERS, ML_ROOT):
     if str(_candidate) not in sys.path:
         sys.path.insert(0, str(_candidate))
 
+import agent_governance_alr_quiesce_inventory as inventory  # noqa: E402
 import agent_governance_s2_5_attestation as attestation  # noqa: E402
 import agent_governance_s2_5_lifecycle as lifecycle  # noqa: E402
 import aiml_gate_receipt_validator as validator  # noqa: E402
@@ -33,15 +34,27 @@ EXPIRES = (ANCHOR + timedelta(minutes=10)).isoformat()
 HOST = "trade-core"
 SOURCE_HEAD = "0" * 40
 FRAGMENT_DIGEST = "sha256:" + "a" * 64
-S2_4_RECEIPT_DIGEST = "sha256:" + "b" * 64
 LAUNCH_DIGEST = "sha256:" + "c" * 64
 APPLICATION_DIGEST = "sha256:" + "d" * 64
 BASE_TREE_DIGEST = "sha256:" + "e" * 64
 LOADER_CLOSURE_DIGEST = "sha256:" + "f" * 64
-DRILL_DIGEST = "sha256:" + "1" * 64
 CMDLINE_DIGEST = "sha256:" + "2" * 64
-OWNER_FINGERPRINT = "sha256:" + "3" * 64
+# owner 訊號(P2-k):OWNER_FINGERPRINT 不再是自由常量——由 WP3 compute_owner_fingerprint
+# 對 harness 的標準訊號重算而得(SimulatedUnit 首次 enable 後恆為 pid 4001 / inv-1)。
+OWNER_SIGNALS = {
+    "main_pid": 4001,
+    "process_start_ticks": "1234567",
+    "boot_id": "boot-1",
+    "control_group": f"/system.slice/{lifecycle.S2_5_UNIT_NAME}",
+    "env_hash": "sha256:" + "5" * 64,
+    "invocation_id": "inv-1",
+    "cmdline_digest": CMDLINE_DIGEST,
+    "runtime_digest": "sha256:" + "6" * 64,
+    "flock_path": "/opt/aiml/run/engine_scanner/alr.lock",
+}
+OWNER_FINGERPRINT = inventory.compute_owner_fingerprint(**OWNER_SIGNALS)
 _SIGN_SEQ = [0]
+_STATE_SEQ = [0]
 
 
 def frozen_clock(offset_minutes: float = 3.0):
@@ -152,11 +165,18 @@ def start_intent(phase: str = "S2_5A_START", **core_overrides: Any) -> dict[str,
 
 
 def s2_4_receipt() -> dict[str, Any]:
-    return {
+    """P1-2:真 canonical 構造——self_digest 由 artifact_self_digest 重封(自報值不再可行)。"""
+
+    receipt = {
         "schema_version": "s2_4_install_effect_receipt_v1",
         "status": "APPLIED_INACTIVE",
-        "self_digest": S2_4_RECEIPT_DIGEST,
     }
+    receipt["self_digest"] = validator.artifact_self_digest(receipt)
+    return receipt
+
+
+# core 綁定常量由 canonical 構造導出(不再是自由 hex;上游替身在 precheck 就會被重算抓到)。
+S2_4_RECEIPT_DIGEST = s2_4_receipt()["self_digest"]
 
 
 def s2_4_prestate() -> dict[str, Any]:
@@ -169,15 +189,31 @@ def s2_4_prestate() -> dict[str, Any]:
 
 
 def drill_receipt() -> dict[str, Any]:
-    return {
+    receipt = {
         "schema_version": "quiesce_result_v1",
         "status": "QUIESCED_STATIC_GUARDS_HELD_RESTORED",
-        "self_digest": DRILL_DIGEST,
     }
+    receipt["self_digest"] = validator.artifact_self_digest(receipt)
+    return receipt
+
+
+DRILL_DIGEST = drill_receipt()["self_digest"]
 
 
 def empty_ledger() -> dict[str, Any]:
     return {"entries": []}
+
+
+class SimulatedLockProbe:
+    """§5.7 lock 介面的注入模擬(P1-5):``held`` 可注入,探測次數可斷言。"""
+
+    def __init__(self, *, held: bool = False) -> None:
+        self.held = bool(held)
+        self.probes = 0
+
+    def flock_probe(self) -> dict[str, Any]:
+        self.probes += 1
+        return {"held": self.held, "exists": True, "lock_path": "<simulated-lock>"}
 
 
 # ── §8.1 受控 unit 狀態機 harness(真實主機零接觸)─────────────────────────────────
@@ -281,6 +317,7 @@ class HarnessObserver:
         verifier_node_id: str = "s2-5-independent-verifier",
         faults: dict[str, Any] | None = None,
         post_reset_overrides: dict[str, Any] | None = None,
+        owner_signal_overrides: dict[str, Any] | None = None,
         evidence_age_seconds: int = 5,
     ) -> None:
         self.unit = unit
@@ -288,6 +325,7 @@ class HarnessObserver:
         self.verifier_node_id = verifier_node_id
         self.faults = dict(faults or {})
         self.post_reset_overrides = dict(post_reset_overrides or {})
+        self.owner_signal_overrides = dict(owner_signal_overrides or {})
         self.evidence_age_seconds = int(evidence_age_seconds)
 
     def observe_running_dimensions(self) -> dict[str, Any]:
@@ -339,6 +377,14 @@ class HarnessObserver:
             "reboot_survival_observed": None,
         }
 
+    def observe_owner_signals(self) -> dict[str, Any]:
+        properties = self.unit.show()
+        signals = dict(OWNER_SIGNALS)
+        signals["main_pid"] = int(properties["MainPID"])
+        signals["invocation_id"] = properties["InvocationID"]
+        signals.update(self.owner_signal_overrides)
+        return signals
+
     def oldest_evidence_at(self) -> str:
         return (self.clock() - timedelta(seconds=self.evidence_age_seconds)).isoformat()
 
@@ -354,6 +400,13 @@ class HarnessObserver:
         }
         observation.update(self.post_reset_overrides)
         return observation
+
+
+def fresh_state_root(tmp_path: Path, label: str = "state") -> Path:
+    """每呼叫一個新的 state_root(journal/ledger 的 durable 面按 apply 隔離)。"""
+
+    _STATE_SEQ[0] += 1
+    return tmp_path / f"{label}-{_STATE_SEQ[0]}"
 
 
 def apply_kwargs(
@@ -377,8 +430,8 @@ def apply_kwargs(
             "native_loader_closure_digest": LOADER_CLOSURE_DIGEST
         },
         "s2_4_recovery_clear": True,
-        "install_lock_free": True,
-        "journal_path": tmp_path / "journal" / "s2_5.journal.json",
+        "lock_probe": SimulatedLockProbe(),
+        "state_root": tmp_path / "state",
         "observers": observers or HarnessObserver(unit, clock=clock),
         "owner_fingerprint": OWNER_FINGERPRINT,
         "clock": clock,
@@ -406,16 +459,41 @@ def a_side_setup(tmp_path: Path, monkeypatch, **core_overrides: Any):
     return private_key, intent, permit, unit
 
 
-def b_side_setup(tmp_path: Path, monkeypatch, *, pre_drill_receipt: dict[str, Any]):
-    """S2.5B happy-path 全套(harness unit 先走完 A 側 enable)。"""
+def real_pre_drill_receipt(tmp_path: Path, private_key: Path) -> dict[str, Any]:
+    """P1-2:pre-drill 錨是**真的** S2.5A SOURCE_SIMULATION_PASS receipt(過中央閘),
+    不再是自報 digest 的三鍵 stub(pinned key 須已由 caller 安裝)。"""
+
+    intent = start_intent("S2_5A_START")
+    permit = signed_permit(private_key, intent)
+    unit = SimulatedUnit()
+    verdict = lifecycle.apply_s2_5_start(
+        intent, permit, unit,
+        **apply_kwargs(
+            tmp_path=tmp_path, unit=unit,
+            state_root=fresh_state_root(tmp_path, "pre-drill-state"),
+        ),
+    )
+    assert verdict["status"] == "SOURCE_SIMULATION_PASS", verdict["reasons"]
+    return verdict["receipt"]
+
+
+def b_side_setup(
+    tmp_path: Path, monkeypatch, *, pre_drill_receipt: dict[str, Any] | None = None
+):
+    """S2.5B happy-path 全套(harness unit 先走完 A 側 enable;回傳含 pre-drill 錨)。"""
 
     private_key, public_key, fingerprint = mint_key(tmp_path)
     install_pinned_key(monkeypatch, public_key, fingerprint)
+    pre_drill = (
+        pre_drill_receipt
+        if pre_drill_receipt is not None
+        else real_pre_drill_receipt(tmp_path, private_key)
+    )
     intent = start_intent(
         "S2_5B_FINAL",
-        pre_drill_attestation_digest=pre_drill_receipt["self_digest"],
+        pre_drill_attestation_digest=pre_drill["self_digest"],
     )
     permit = signed_permit(private_key, intent)
     unit = SimulatedUnit()
     unit.enable_now()
-    return private_key, intent, permit, unit
+    return private_key, intent, permit, unit, pre_drill

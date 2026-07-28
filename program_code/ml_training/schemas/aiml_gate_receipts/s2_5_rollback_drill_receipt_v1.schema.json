@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://arcane-equilibrium.local/schemas/s2_5_rollback_drill_receipt_v1.schema.json",
   "title": "s2_5_rollback_drill_receipt_v1",
-  "description": "Closed rollback receipt for the two S2.5 recovery drills (design §5.3). kind=ROLLBACK_TO_DISABLED proves the failed S2.5A start was fully reversed to the exact S2.4 loaded/disabled/inactive pre-state (bound by s2_4_inactive_prestate_digest); kind=WATCHDOG_RESET_LAST proves the S2.5B watchdog-last predicate (the final lifecycle operation is the authorized reset-failed itself, NRestarts baseline is zero afterwards, and no supervening/unexplained restart occurred). operation is structured (never a raw command string). The embedded watchdog_last block is written out in full here per the PM §5.4 option (b) ruling (no cross-file $ref, no byte-isomorphism coupling): in this receipt it binds the drill operation itself. A rollback that fails stays NOT_RESTORED/FAILED — an unrestored partial state is never converted into success.",
+  "description": "Closed rollback receipt for the two S2.5 recovery drills (design §5.3). kind=ROLLBACK_TO_DISABLED proves the failed S2.5A start was fully reversed to the exact S2.4 loaded/disabled/inactive pre-state (bound by s2_4_inactive_prestate_digest); kind=WATCHDOG_RESET_LAST proves the S2.5B watchdog-last predicate (the final lifecycle operation is the authorized reset-failed itself, NRestarts baseline is zero afterwards, and no supervening/unexplained restart occurred). operation is structured (never a raw command string). The embedded watchdog_last block is written out in full here per the PM §5.4 option (b) ruling (no cross-file $ref, no byte-isomorphism coupling): in this receipt it binds the drill operation itself. For ROLLBACK_TO_DISABLED the block records restart drift observed across the rollback (PM §5.3 interpretation, 2026-07-28): an identity-tuple mismatch (active_state/unit_file_state/stable identity) forces NOT_RESTORED, while pure NRestarts drift is recorded via unexplained_restart_detected without blocking RESTORED_INACTIVE. A rollback that fails stays NOT_RESTORED/FAILED — an unrestored partial state is never converted into success.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -51,7 +51,7 @@
         "properties": {
           "operation": {"properties": {"kind": {"const": "systemd_stop_disable"}}},
           "s2_4_inactive_prestate_digest": {"$ref": "#/$defs/digest"},
-          "watchdog_last": {"type": "null"},
+          "watchdog_last": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/watchdog_last"}]},
           "status": {"enum": ["RESTORED_INACTIVE", "NOT_RESTORED", "FAILED"]}
         }
       }

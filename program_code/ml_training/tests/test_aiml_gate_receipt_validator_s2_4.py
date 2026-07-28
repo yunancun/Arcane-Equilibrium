@@ -1027,8 +1027,10 @@ def test_cp2b_schema_files_resolve_to_real_files() -> None:
     # W5(§9.2)additive 註冊 s2_4_dependency_refresh_attestation_v1 → 71;
     # S2.5(WP5·design §5/§6)additive 註冊五個 s2_5 schema +
     # aiml_component_effect_classification_v3 → 77(v1/v2/S0.3 digest 逐位不變,
-    # 由 test_aiml_gate_receipt_validator_s2_5 釘住)。
-    assert len(SCHEMA_FILES) == 77
+    # 由 test_aiml_gate_receipt_validator_s2_5 釘住);
+    # S2.5(WP5 tranche 1b·E3 P1-3)additive 註冊
+    # s2_5_authorization_replay_ledger_v1 → 78。
+    assert len(SCHEMA_FILES) == 78
     assert "s2_4_dependency_refresh_attestation_v1" in SCHEMA_FILES
     assert (
         SCHEMA_DIR / SCHEMA_FILES["s2_4_dependency_refresh_attestation_v1"]

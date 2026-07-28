@@ -329,7 +329,7 @@
           "properties": {"kind": {"const": "systemd_stop_disable"}}
         },
         "s2_4_inactive_prestate_digest": {"$ref": "#/$defs/digest"},
-        "watchdog_last": {"type": "null"},
+        "watchdog_last": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/watchdog_last"}]},
         "observed_at": {"$ref": "#/$defs/timestamp"},
         "expires_at": {"$ref": "#/$defs/timestamp"},
         "source_head": {"$ref": "#/$defs/git_sha"},
@@ -345,6 +345,37 @@
         "unit_file_state": {"type": "string", "minLength": 1},
         "n_restarts": {"type": "integer", "minimum": 0},
         "invocation_id": {"type": "string", "minLength": 1}
+      }
+    },
+    "watchdog_last": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "watchdog_usec",
+        "n_restarts_before",
+        "n_restarts_after",
+        "invocation_id_before",
+        "invocation_id_after",
+        "last_lifecycle_operation",
+        "last_transition_matches_authorized_op",
+        "unexplained_restart_detected"
+      ],
+      "properties": {
+        "watchdog_usec": {"anyOf": [{"const": "none"}, {"type": "integer", "minimum": 1}]},
+        "n_restarts_before": {"type": "integer", "minimum": 0},
+        "n_restarts_after": {"type": "integer", "minimum": 0},
+        "invocation_id_before": {"type": "string", "minLength": 1},
+        "invocation_id_after": {"type": "string", "minLength": 1},
+        "last_lifecycle_operation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": {
+            "kind": {"enum": ["systemd_reset_failed", "systemd_stop_disable", "systemd_enable_now"]}
+          }
+        },
+        "last_transition_matches_authorized_op": {"type": "boolean"},
+        "unexplained_restart_detected": {"type": "boolean"}
       }
     }
   }

@@ -492,3 +492,178 @@ def test_rollback_drill_receipt_semantics_have_teeth():
     dirty_reset["post_state"]["n_restarts"] = 1
     dirty_reset["self_digest"] = artifact_self_digest(dirty_reset)
     assert validate_aiml_artifact(dirty_reset, now=NOW)
+
+
+# ── tranche 1b(E2 F2):PLATFORM 類 evidence_class ⇒ attested status + attestor 在場 ──
+def test_non_attested_status_cannot_claim_platform_evidence_class():
+    forged = _running_receipt(
+        status="EXTERNAL_VERIFICATION_PENDING",
+        target_class="production",
+        evidence_class="PLATFORM_OR_EXTERNAL_ATTESTED",
+        failure_reason="pending the trusted-host attestor",
+    )
+    errors = validate_aiml_artifact(forged, now=NOW)
+    assert any("PLATFORM_OR_EXTERNAL_ATTESTED requires" in error for error in errors)
+
+
+# ── tranche 1b(E2 F6/M4a):verifier≠applier 兩臂各自 load-bearing ──────────────────
+def test_observer_gate_verifier_equal_to_applier_is_rejected_alone():
+    # 只翻 observer_gate 臂(independent_verifier_node 維持相異)。
+    receipt = _running_receipt(
+        observer_gate=dict(_observer_gate(), verifier_node_id="s2-5-start-applier"),
+    )
+    errors = validate_aiml_artifact(receipt, now=NOW)
+    assert any("dead-man verifier" in error for error in errors)
+    assert not any(
+        error.startswith("independent_verifier_node") for error in errors
+    )
+
+
+def test_independent_verifier_equal_to_applier_is_rejected_alone():
+    # 只翻 independent_verifier_node 臂(observer_gate 維持相異)。
+    receipt = _running_receipt(independent_verifier_node="s2-5-start-applier")
+    errors = validate_aiml_artifact(receipt, now=NOW)
+    assert any(
+        "independent_verifier_node must differ" in error for error in errors
+    )
+    assert not any("dead-man verifier" in error for error in errors)
+
+
+# ── tranche 1b(E2 F9):attested 與 simulation 常量拆分 ────────────────────────────
+def test_success_status_constants_are_split_and_disjoint():
+    assert not hasattr(leaf, "_S2_5_SUCCESS_STATUSES")  # 舊合併常量已除役。
+    assert leaf._S2_5_ATTESTED_STATUSES == {"RUNNING_ATTESTED", "FINAL_ATTESTED"}
+    assert leaf._S2_5_SIMULATION_STATUSES == {"SOURCE_SIMULATION_PASS"}
+    assert not (leaf._S2_5_ATTESTED_STATUSES & leaf._S2_5_SIMULATION_STATUSES)
+
+
+# ── tranche 1b(E3 P1-3):s2_5 replay ledger schema + 鏈重驗 ───────────────────────
+def _sealed_ledger() -> dict:
+    entries = []
+    previous = None
+    for index, auth_hex in enumerate(("a", "c")):
+        entry = {
+            "seq": index,
+            "prev_entry_digest": previous,
+            "authorization_id": "s2-5-auth-" + auth_hex * 64,
+            "start_id": "s2-5-" + "b" * 64,
+            "consumed_at": NOW,
+            "fsynced": True,
+        }
+        entry["entry_digest"] = canonical_digest(entry)
+        previous = entry["entry_digest"]
+        entries.append(entry)
+    ledger = {
+        "schema_version": "s2_5_authorization_replay_ledger_v1",
+        "ledger_path": "/var/lib/arcane-equilibrium/aiml/install/s2_5/"
+        "authorization-replay-ledger.json",
+        "entries": entries,
+        "append_only": True,
+    }
+    ledger["self_digest"] = artifact_self_digest(ledger)
+    return ledger
+
+
+def test_s2_5_replay_ledger_schema_round_trips_and_rejects_tampering():
+    assert "s2_5_authorization_replay_ledger_v1" in SCHEMA_FILES
+    assert (SCHEMA_DIR / SCHEMA_FILES["s2_5_authorization_replay_ledger_v1"]).is_file()
+    ledger = _sealed_ledger()
+    assert validate_aiml_artifact(ledger) == []
+    # 尾截斷後未重封 ⇒ self_digest 重算即斷(整本清空另由 schema minItems 拒)。
+    truncated = deepcopy(ledger)
+    truncated["entries"].pop()
+    assert any(
+        "self_digest" in error for error in validate_aiml_artifact(truncated)
+    )
+    wiped = deepcopy(ledger)
+    wiped["entries"] = []
+    assert validate_aiml_artifact(wiped)
+    # seq 竄改 ⇒ 鏈重驗斷(fork/reorder 同一臂)。
+    reordered = deepcopy(ledger)
+    reordered["entries"][0]["seq"] = 1
+    reordered["self_digest"] = artifact_self_digest(reordered)
+    assert any(
+        "hash chain is broken" in error for error in validate_aiml_artifact(reordered)
+    )
+    # append_only 翻面 ⇒ closed schema 拒。
+    mutable = deepcopy(ledger)
+    mutable["append_only"] = False
+    mutable["self_digest"] = artifact_self_digest(mutable)
+    assert validate_aiml_artifact(mutable)
+
+
+# ── tranche 1b(E2 條件性 P1,E1#1):§6 closure binding ───────────────────────────
+def _ops_preflight(intent: dict) -> dict:
+    fragment = {
+        "schema_version": "s2_5_ops_preflight_fragment_v1_informal",
+        "intent_digest": intent["self_digest"],
+        "preflight": {"unit_inactive_confirmed": True},
+    }
+    fragment["self_digest"] = artifact_self_digest(fragment)
+    return fragment
+
+
+def test_attestation_binding_pending_branch_is_typed_not_skipped():
+    intent = _intent()
+    receipt = _running_receipt()
+    verdict = leaf.validate_s2_5_attestation_binding(
+        intent=intent, ops_preflight=_ops_preflight(intent), receipt=receipt,
+        verifier_capture=None, now=NOW,
+    )
+    # source lane:verifier_capture_digest 為 None ⇒ typed PENDING 分支,絕不是 PASS。
+    assert verdict["status"] == "EXTERNAL_VERIFICATION_PENDING"
+    assert any("not yet bound" in reason for reason in verdict["reasons"])
+
+
+def test_attestation_binding_three_way_cross_check_verifies_and_rejects():
+    intent = _intent()
+    capture_digest = "sha256:" + "7" * 64
+    receipt = _running_receipt(verifier_capture_digest=capture_digest)
+    capture = {"record_digest": capture_digest, "node_id": "ops-postcheck-verifier"}
+    verdict = leaf.validate_s2_5_attestation_binding(
+        intent=intent, ops_preflight=_ops_preflight(intent), receipt=receipt,
+        verifier_capture=capture, now=NOW,
+    )
+    assert verdict["status"] == "S2_5_ATTESTATION_BINDING_VERIFIED", verdict
+    # capture node == applier ⇒ 拒(applier 永不自證)。
+    self_run = leaf.validate_s2_5_attestation_binding(
+        intent=intent, ops_preflight=_ops_preflight(intent), receipt=receipt,
+        verifier_capture={"record_digest": capture_digest,
+                          "node_id": "s2-5-start-applier"},
+        now=NOW,
+    )
+    assert self_run["status"] == "S2_5_ATTESTATION_BINDING_REJECTED"
+    # record_digest 不等 receipt 綁定值 ⇒ 拒。
+    drifted = leaf.validate_s2_5_attestation_binding(
+        intent=intent, ops_preflight=_ops_preflight(intent), receipt=receipt,
+        verifier_capture={"record_digest": "sha256:" + "8" * 64,
+                          "node_id": "ops-postcheck-verifier"},
+        now=NOW,
+    )
+    assert drifted["status"] == "S2_5_ATTESTATION_BINDING_REJECTED"
+    # 單側主張(receipt 有 digest、capture 缺席)⇒ 拒,不是 PENDING。
+    one_sided = leaf.validate_s2_5_attestation_binding(
+        intent=intent, ops_preflight=_ops_preflight(intent), receipt=receipt,
+        verifier_capture=None, now=NOW,
+    )
+    assert one_sided["status"] == "S2_5_ATTESTATION_BINDING_REJECTED"
+
+
+def test_attestation_binding_rejects_broken_preflight_and_foreign_intent():
+    intent = _intent()
+    receipt = _running_receipt()
+    # OPS preflight 自報 digest(重算不符)⇒ 拒。
+    forged_preflight = _ops_preflight(intent)
+    forged_preflight["preflight"]["unit_inactive_confirmed"] = False  # 未重封。
+    verdict = leaf.validate_s2_5_attestation_binding(
+        intent=intent, ops_preflight=forged_preflight, receipt=receipt,
+        verifier_capture=None, now=NOW,
+    )
+    assert verdict["status"] == "S2_5_ATTESTATION_BINDING_REJECTED"
+    # receipt 綁的是另一份 intent ⇒ 拒。
+    foreign_intent = _intent("S2_5B_FINAL")
+    verdict2 = leaf.validate_s2_5_attestation_binding(
+        intent=foreign_intent, ops_preflight=_ops_preflight(foreign_intent),
+        receipt=receipt, verifier_capture=None, now=NOW,
+    )
+    assert verdict2["status"] == "S2_5_ATTESTATION_BINDING_REJECTED"
