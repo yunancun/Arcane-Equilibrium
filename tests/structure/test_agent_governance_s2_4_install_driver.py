@@ -250,6 +250,100 @@ def test_the_plan_intent_binding_has_no_digest_cycle() -> None:
     ]
 
 
+# ══════════════ S2.4-AMEND-2:plan-derived expected_topology(§10.5 #25)═════════
+def test_a_caller_supplied_expected_topology_is_refused_by_the_frozen_allowlist(fx) -> None:
+    """曾經的唯一弱化路徑:caller 遞交 expected_topology。現在是 allowlist typed 拒。"""
+
+    payloads = fx.row_payloads()
+    payloads["PG_ROLE_ACL_MIGRATION"]["expected_topology"] = kit.topology_expected(
+        fx.attestation
+    )
+    verdict = fx.apply(row_payloads=payloads)
+    assert verdict["status"] == "PRECHECK_FAILED"
+    assert any(
+        "expected_topology" in reason and "frozen row ABI allowlist" in reason
+        for reason in verdict["reasons"]
+    ), verdict["reasons"]
+    assert verdict["mutation_performed"] is False
+    assert fx.driver.calls == []
+    assert fx.row_drivers["PG_ROLE_ACL_MIGRATION"].calls == []
+
+
+def test_the_pg_expected_topology_is_derived_from_the_signed_plan(fx) -> None:
+    """正向:零 caller 基線鍵——簽章 delta + 基線 attestation 導出**全鍵** expected,
+    disposable lane 的 PG row SATISFIED(缺鍵靜默跳過已無入口)。"""
+
+    payload = fx.row_payloads()["PG_ROLE_ACL_MIGRATION"]
+    assert "expected_topology" not in payload and "hba_delta" in payload
+    derived = runner.derive_plan_expected_topology(
+        plan=fx.plan, hba_delta=fx.hba_delta, topology_attestation=fx.attestation,
+    )
+    assert derived["status"] == "PLAN_EXPECTED_TOPOLOGY_DERIVED", derived["reasons"]
+    assert sorted(derived["expected_topology"]) == [
+        "cluster_identity_digest", "hba_projection", "listener_config_digest",
+        "proxy_config_digest", "source_head", "target_host",
+    ]
+    verdict = fx.apply()
+    assert verdict["status"] == "SOURCE_SIMULATION_PASS", verdict["reasons"]
+    assert verdict["row_verdicts"]["PG_ROLE_ACL_MIGRATION"]["status"] == "SATISFIED"
+
+
+@pytest.mark.parametrize("mutation", ["absent", "tampered", "foreign_plan"])
+def test_an_absent_tampered_or_misbound_hba_delta_is_topology_unproven(fx, mutation) -> None:
+    """hba_delta 缺席 / 內容被換(binding digest 不再等 core)/ 綁到別份 plan → 一律
+    PG_TOPOLOGY_UNPROVEN,PG row driver 未被觸及。"""
+
+    payloads = fx.row_payloads()
+    pg = payloads["PG_ROLE_ACL_MIGRATION"]
+    if mutation == "absent":
+        pg.pop("hba_delta")
+    elif mutation == "tampered":
+        pg["hba_delta"]["effective_rule"]["user"] = "postgres"
+        pg["hba_delta"]["self_digest"] = validator.artifact_self_digest(pg["hba_delta"])
+    else:
+        pg["hba_delta"]["plan_id"] = "s2-4-" + "9" * 64
+        pg["hba_delta"]["self_digest"] = validator.artifact_self_digest(pg["hba_delta"])
+    verdict = fx.apply(row_payloads=payloads)
+    assert verdict["status"] == "PG_TOPOLOGY_UNPROVEN", verdict["reasons"]
+    assert any("never caller-supplied" in reason for reason in verdict["reasons"])
+    assert fx.row_drivers["PG_ROLE_ACL_MIGRATION"].calls == []
+
+
+def test_a_signed_rule_outside_the_observed_hba_is_topology_unproven(
+    tmp_path, monkeypatch,
+) -> None:
+    """簽進 core 的投影只含另一條 rule 時,attested effective rule 落在簽章投影之外。"""
+
+    fixture = w4b.Fixture(tmp_path, monkeypatch, hba_effective_rule={
+        "source": "127.0.0.1/32", "database": "trading_ai",
+        "user": "postgres", "method": "scram-sha-256",
+    })
+    verdict = fixture.apply()
+    assert verdict["status"] == "PG_TOPOLOGY_UNPROVEN", verdict["reasons"]
+    assert any(
+        "outside the signed HBA projection" in reason for reason in verdict["reasons"]
+    )
+    assert fixture.row_drivers["PG_ROLE_ACL_MIGRATION"].calls == []
+
+
+def test_a_presented_attestation_that_is_not_the_signed_baseline_is_unproven(fx) -> None:
+    """換叢集:presented attestation ≠ core.topology_pre_digest 所指的簽章前基線。"""
+
+    observation = kit.topology_observation()
+    observation["cluster_identity"]["system_identifier"] = "7000000000000000002"
+    payloads = fx.row_payloads()
+    payloads["PG_ROLE_ACL_MIGRATION"]["topology_attestation"] = kit.topology_attestation(
+        observation
+    )
+    verdict = fx.apply(row_payloads=payloads)
+    assert verdict["status"] == "PG_TOPOLOGY_UNPROVEN", verdict["reasons"]
+    assert any(
+        "not the signed pre-observation baseline" in reason
+        for reason in verdict["reasons"]
+    )
+    assert fx.row_drivers["PG_ROLE_ACL_MIGRATION"].calls == []
+
+
 def test_aggregate_success_requires_five_distinct_row_results() -> None:
     probes = {"PREPARE_SANDBOX": "sha256:" + "1" * 64, "INSTALLED_UNIT": "sha256:" + "2" * 64}
     prepare = "sha256:" + "3" * 64

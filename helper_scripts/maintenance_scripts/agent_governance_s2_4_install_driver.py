@@ -99,10 +99,13 @@ from agent_governance_s2_4_install_plan import (  # noqa: E402,F401
     derive_aggregate_input_status,
     derive_aggregate_success_status,
     derive_permit_payload_coverage,
+    derive_plan_expected_topology,
     derive_plan_pre_state_projection,
+    hba_delta_plan_binding_digest,
     per_row_rollback_contract,
     per_row_rollback_digest,
     pg_permit_payload_binding,
+    PLAN_EXPECTED_TOPOLOGY_DERIVED,
 )
 # 證據 artifact builders(§10.1.1 拆分至證據葉;此處逐名 re-export 保匯入面不變)。
 from agent_governance_s2_4_install_evidence import (  # noqa: E402,F401
@@ -132,8 +135,12 @@ INSTALL_EVIDENCE_TTL_SECONDS = 900
 # 一旦可被 caller 指定,那條分離就只是名義上的。此表之外的鍵一律零變更 typed 拒。
 ROW_PAYLOAD_ALLOWLIST: dict[str, tuple[str, ...]] = {
     "HOST_IDENTITY_INSTALL": ("uid_gid_directory_manifest",),
+    # S2.4-AMEND-2(obligation 25):``expected_topology`` 自 allowlist 移除——它曾是唯一不被
+    # 任何簽章綁定的 caller key;改由 ``hba_delta``(簽章 core 的 hba_delta_digest 所指之物)
+    # 進場,expected 在 ``_run_row`` 由 plan 導出後 code-owned 注入。caller 再遞交
+    # ``expected_topology`` 即走既有 allowlist typed 拒(PRECHECK_FAILED,零變更)。
     "PG_ROLE_ACL_MIGRATION": (
-        "acl_manifest", "topology_attestation", "expected_topology", "secret_handle",
+        "acl_manifest", "topology_attestation", "hba_delta", "secret_handle",
         "operation_id",
     ),
     "CREDENTIAL_INSTALL": (
@@ -1576,6 +1583,25 @@ def _run_row(
         key: value for key, value in supplied.items()
         if key in ROW_PAYLOAD_ALLOWLIST[name]
     }
+    if name == "PG_ROLE_ACL_MIGRATION":
+        # S2.4-AMEND-2(obligation 25):expected_topology 由**簽章 plan** 導出後顯式注入
+        # (與 ``applier_node`` 同款 code-owned、非 caller 預設);``hba_delta`` 只作為
+        # 「core.hba_delta_digest 所指之物」被驗,不進凍結的 row ABI。row 函式簽名不動。
+        derived = derive_plan_expected_topology(
+            plan=plan, hba_delta=payload.pop("hba_delta", None),
+            topology_attestation=payload.get("topology_attestation"),
+        )
+        if derived["status"] != PLAN_EXPECTED_TOPOLOGY_DERIVED:
+            return _component._verdict(
+                _component.COMPONENT_STATUS_TOPOLOGY_UNPROVEN,
+                list(derived["reasons"]) + [
+                    "the PG row's expected topology is derived from the signed plan "
+                    "(core.hba_delta_digest + core.topology_pre_digest) and is never "
+                    "caller-supplied (§8.2 / §10.5 #25)"
+                ],
+                component_effect_class=name,
+            )
+        payload["expected_topology"] = derived["expected_topology"]
     return ROW_ENTRYPOINTS[name](
         intent, scoped, row_driver,
         now=now, clock=tick, replay_ledger=row_replay_ledger,

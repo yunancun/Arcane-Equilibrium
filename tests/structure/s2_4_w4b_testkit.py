@@ -137,6 +137,38 @@ def installed_unit_probe_evidence(private_key: Path) -> dict[str, Any]:
     return kit.terminal_probe_evidence(private_key, scope="INSTALLED_UNIT")
 
 
+def build_hba_delta(
+    attestation: dict[str, Any], *, effective_rule: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """真構一份 ``s2_4_pg_hba_delta_v1``(NOOP delta;rule 預設 = 基線觀測的 §8.2 rule)。
+
+    ``plan_id`` / ``plan_core_digest`` 先以佔位建構;plan 生成後由
+    :meth:`Fixture.__init__` 回填並重封 ``self_digest``——binding digest 排除三個自指欄位
+    (§5.1 剪環,鏡 component intent),回填不改變 core 綁的
+    ``hba_delta_plan_binding_digest`` 值。``effective_rule`` 可覆蓋(負向測試用:簽進 core 的
+    投影外 rule 必使 attested rule 落在投影之外 → PG_TOPOLOGY_UNPROVEN)。"""
+
+    delta = {
+        "schema_version": "s2_4_pg_hba_delta_v1",
+        "plan_id": "s2-4-" + "0" * 64,
+        "plan_core_digest": "sha256:" + "0" * 64,
+        "cluster_identity_ref": attestation["cluster_identity_digest"],
+        "pre_hba_digest": "sha256:" + "e" * 64,
+        "delta": {"operation": "NOOP"},
+        "post_hba_digest": "sha256:" + "e" * 64,
+        "effective_rule": dict(
+            effective_rule if effective_rule is not None
+            else attestation["effective_hba_rule"]
+        ),
+        "reload_operation": "pg_hba_reload",
+        "rollback_projection_digest": "sha256:" + "f" * 64,
+        "observed_at": kit.ISSUED,
+        "expires_at": kit.EXPIRES,
+    }
+    delta["self_digest"] = validator.artifact_self_digest(delta)
+    return delta
+
+
 LEDGER_BASENAME = lock.REPLAY_LEDGER_PATH.rsplit("/", 1)[-1]
 INSTALL_JOURNAL_PARENT_MODE = journal.JOURNAL_PARENT_MODE
 
@@ -309,7 +341,8 @@ class Fixture:
     """一筆 aggregate 交易的全部輸入(plan / 兩張 permit / 五 row payload / 兩個 probe receipt)。"""
 
     def __init__(
-        self, tmp_path: Path, monkeypatch, *, fs: Any = None, **driver_overrides: Any
+        self, tmp_path: Path, monkeypatch, *, fs: Any = None,
+        hba_effective_rule: dict[str, Any] | None = None, **driver_overrides: Any
     ) -> None:
         private_key, public_key, fingerprint = kit.mint_key(tmp_path)
         kit.install_pinned_key(monkeypatch, public_key, fingerprint)
@@ -334,16 +367,24 @@ class Fixture:
             prepare_receipt=prepare_receipt, policy_config_hash=policy_hash,
             unit_text=self.unit_text,
         )
+        # S2.4-AMEND-2:真構簽章 HBA delta,core 綁其去自指 binding digest(取代舊佔位)。
+        self.hba_delta = build_hba_delta(
+            self.attestation, effective_rule=hba_effective_rule
+        )
         built = runner.build_s2_4_install_plan(
             component_intents=unbound,
             prepare_receipt_digest=prepare_receipt["self_digest"],
             topology_pre_digest=self.attestation["self_digest"],
-            hba_delta_digest="sha256:" + "b" * 64,
+            hba_delta_digest=runner.hba_delta_plan_binding_digest(self.hba_delta),
             source_head=kit.SOURCE_HEAD, target_host=kit.HOST,
             created_at=kit.ISSUED, expires_at=kit.EXPIRES,
         )
         self.plan = built["plan"]
         self.component_intents = built["component_intents"]
+        # 後綁回填(§5.1 剪環:兩欄被 binding digest 排除,回填不動 core 綁的值)。
+        self.hba_delta["plan_id"] = self.plan["plan_id"]
+        self.hba_delta["plan_core_digest"] = self.plan["core_digest"]
+        self.hba_delta["self_digest"] = validator.artifact_self_digest(self.hba_delta)
         self.authorization_set = self._permits()
         self.fs = fs if fs is not None else FakeDurableFs()
         seed_prior_lineage_ledger(self.fs)
@@ -395,7 +436,9 @@ class Fixture:
             "PG_ROLE_ACL_MIGRATION": {
                 "acl_manifest": deepcopy(kit.PG_ACL_MANIFEST),
                 "topology_attestation": self.attestation,
-                "expected_topology": kit.topology_expected(self.attestation),
+                # S2.4-AMEND-2:expected_topology 不再由 caller 供給;遞交簽章 delta,
+                # expected 由 _run_row 從 plan 導出後 code-owned 注入。
+                "hba_delta": deepcopy(self.hba_delta),
                 "secret_handle": pg_handle,
                 "operation_id": "w4b-op",
             },

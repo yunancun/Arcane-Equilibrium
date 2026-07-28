@@ -291,12 +291,19 @@ def derive_pg_topology_status(
     ):
         reasons.append("cluster_identity_digest does not re-derive the attested cluster identity")
     # 基線比對:listener / proxy / cluster 任一漂移即 UNPROVEN(§10.5 #25)。
+    # S2.4-AMEND-2(obligation 25):缺鍵不再靜默跳過——「省略一個基線鍵」曾是唯一的弱化
+    # 路徑(換一座叢集照樣 PROVEN);五個基線鍵自此 fail-closed,缺鍵即 reason。
     for field, label in (
         ("listener_config_digest", "runtime listener drifted from the attested baseline"),
         ("proxy_config_digest", "proxy configuration drifted from the attested baseline"),
         ("cluster_identity_digest", "PostgreSQL cluster identity does not match the baseline"),
     ):
-        if expected.get(field) is not None and attestation.get(field) != expected.get(field):
+        if expected.get(field) is None:
+            reasons.append(
+                f"expected baseline is missing {field} (fail-closed: an omitted baseline "
+                "key is not a satisfied comparison)"
+            )
+        elif attestation.get(field) != expected.get(field):
             reasons.append(label)
     for hop in attestation.get("proxy_hops") or []:
         if not isinstance(hop, dict) or not hop.get("config_digest") or not hop.get("upstream_endpoint"):
@@ -311,7 +318,12 @@ def derive_pg_topology_status(
         )
     reasons.extend(_hba_projection_reasons(attestation, expected))
     for field in ("source_head", "target_host"):
-        if expected.get(field) is not None and attestation.get(field) != expected.get(field):
+        if expected.get(field) is None:
+            reasons.append(
+                f"expected baseline is missing {field} (fail-closed: an omitted baseline "
+                "key is not a satisfied comparison)"
+            )
+        elif attestation.get(field) != expected.get(field):
             reasons.append(f"pg topology attestation {field} does not match the expected binding")
     now_text = central_validator._now_text(now)
     if now_text is not None:

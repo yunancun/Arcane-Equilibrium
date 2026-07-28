@@ -323,6 +323,108 @@ def component_intent_plan_binding_digest(intent: Any) -> str:
     })
 
 
+# ── S2.4-AMEND-2(obligation 25):plan-derived expected_topology ─────────────────
+# ``expected_topology`` 曾是 ROW_PAYLOAD_ALLOWLIST 裡唯一不被任何簽章綁定的 caller key;
+# 正解是由簽章 plan 導出:core 已綁 ``topology_pre_digest``(簽章前觀測基線)與
+# ``hba_delta_digest``(簽章 HBA delta),caller 自此不再供給任何基線鍵。
+HBA_DELTA_PLAN_BINDING_DOMAIN = (
+    "arcane-equilibrium-aiml-s2-4-hba-delta-plan-binding-v1"
+)
+# delta 帶 plan_id/plan_core_digest、core 帶 hba_delta_digest,互指必成環;core 綁的因此是
+# **去自指投影**(鏡 :func:`component_intent_plan_binding_digest` 的 §5.1 剪環作法)。
+_HBA_DELTA_SELF_REFERENTIAL_FIELDS = ("plan_id", "plan_core_digest", "self_digest")
+PLAN_EXPECTED_TOPOLOGY_DERIVED = "PLAN_EXPECTED_TOPOLOGY_DERIVED"
+PLAN_EXPECTED_TOPOLOGY_UNPROVEN = "PLAN_EXPECTED_TOPOLOGY_UNPROVEN"
+
+
+def hba_delta_plan_binding_digest(delta: Any) -> str:
+    """plan core 用來釘住一份 ``s2_4_pg_hba_delta_v1`` 的 digest(§5.1 no-cycle)。
+
+    排除三個自指欄位後的 canonical digest:其餘每一欄(pre/post HBA digest、delta 操作、
+    ``effective_rule``、reload 操作、rollback 投影、觀測窗、cluster ref)全被簽章 core 釘死。
+    """
+
+    if not isinstance(delta, dict):
+        raise InstallDriverContractError("pg_hba_delta_not_an_object")
+    return canonical_digest({
+        "domain": HBA_DELTA_PLAN_BINDING_DOMAIN,
+        "hba_delta": {
+            key: value
+            for key, value in delta.items()
+            if key not in _HBA_DELTA_SELF_REFERENTIAL_FIELDS
+        },
+    })
+
+
+def derive_plan_expected_topology(
+    *, plan: Any, hba_delta: Any, topology_attestation: Any,
+) -> dict[str, Any]:
+    """由**簽章 plan**導出 PG row 的 ``expected_topology``(fail-closed;零 caller 基線鍵)。
+
+    驗序:central closed-schema 驗 hba_delta → 去自指 binding digest 必等
+    ``core.hba_delta_digest`` → 後綁回填的 ``plan_id``/``plan_core_digest`` 必等 plan 自身 →
+    ``topology_attestation.self_digest`` 必等 ``core.topology_pre_digest``(presented 觀測
+    必須**是**簽章前基線)。通過後回**全鍵** expected(經 (i) fail-closed 化後無鍵可省):
+    三個內容 digest 取自基線 attestation、``hba_projection`` 取自簽章 delta 的
+    ``effective_rule``、``source_head``/``target_host`` 取自 plan core。任一失敗回
+    ``PLAN_EXPECTED_TOPOLOGY_UNPROVEN``,聚合層映為 ``PG_TOPOLOGY_UNPROVEN``(driver 未觸)。
+    """
+
+    outcome: dict[str, Any] = {
+        "status": PLAN_EXPECTED_TOPOLOGY_UNPROVEN,
+        "reasons": [],
+        "expected_topology": None,
+    }
+    reasons: list[str] = outcome["reasons"]
+    core = plan.get("core") if isinstance(plan, dict) else None
+    if not isinstance(core, dict):
+        reasons.append("the install plan carries no signed core object")
+        return outcome
+    if not isinstance(hba_delta, dict):
+        reasons.append(
+            "the PG row requires the signed s2_4_pg_hba_delta_v1 bound into the plan core "
+            "(core.hba_delta_digest); none was supplied"
+        )
+        return outcome
+    schema_errors = central_validator.validate_aiml_artifact(hba_delta)
+    if schema_errors:
+        reasons.extend(schema_errors)
+        return outcome
+    if hba_delta_plan_binding_digest(hba_delta) != core.get("hba_delta_digest"):
+        reasons.append(
+            "the supplied HBA delta does not re-derive the hba_delta_digest signed into the "
+            "plan core; a substituted delta is not the one the operator signed"
+        )
+    if hba_delta.get("plan_id") != plan.get("plan_id"):
+        reasons.append("the HBA delta names a different plan_id than this plan")
+    if hba_delta.get("plan_core_digest") != plan.get("core_digest"):
+        reasons.append("the HBA delta names a different plan_core_digest than this plan")
+    if not isinstance(topology_attestation, dict) or topology_attestation.get(
+        "self_digest"
+    ) != core.get("topology_pre_digest"):
+        reasons.append(
+            "the presented pg_topology_attestation_v1 is not the signed pre-observation "
+            "baseline (self_digest != core.topology_pre_digest); a different cluster's "
+            "observation can never become its own expected baseline"
+        )
+    if reasons:
+        return outcome
+    entries = [dict(hba_delta["effective_rule"])]
+    outcome["status"] = PLAN_EXPECTED_TOPOLOGY_DERIVED
+    outcome["expected_topology"] = {
+        "listener_config_digest": topology_attestation.get("listener_config_digest"),
+        "proxy_config_digest": topology_attestation.get("proxy_config_digest"),
+        "cluster_identity_digest": topology_attestation.get("cluster_identity_digest"),
+        "hba_projection": {
+            "entries": entries,
+            "projection_digest": canonical_digest(entries),
+        },
+        "source_head": core.get("source_head"),
+        "target_host": core.get("target_host"),
+    }
+    return outcome
+
+
 # ── plan builder(§5.1:plan 於 PREPARE/probe 之後才被簽;此處只組 exact 形狀) ──
 def build_s2_4_install_plan(
     *,

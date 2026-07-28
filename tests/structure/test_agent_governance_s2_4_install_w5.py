@@ -1678,16 +1678,19 @@ def test_the_wave_exit_evidence_digests_are_shape_only(chain) -> None:
     assert "ORCHESTRATOR_BOUND" in entry["statement"]
 
 
-def test_expected_topology_is_caller_suppliable_and_bound_to_nothing() -> None:
-    """E:PG row 的 ``expected_topology`` 可被 caller 弱化,且沒有任何簽章覆蓋它。"""
+def test_expected_topology_is_plan_derived_and_no_longer_caller_suppliable() -> None:
+    """E(S2.4-AMEND-2 後):PG row 的 ``expected_topology`` 由簽章 plan 導出,caller 無入口。
 
-    import json
+    本測試在 AMEND-2 之前斷言的是弱化路徑本身(allowlist 有 expected_topology、五個
+    ``expected.get(field) is not None`` 缺鍵靜默跳過);source 收口後改釘**關閉後的形**,
+    任一半被回退(key 回到 allowlist / 缺鍵守衛形復活)即紅。"""
 
     import agent_governance_s2_4_install_driver as runner
     import agent_governance_s2_4_topology as topology
 
-    assert "expected_topology" in runner.ROW_PAYLOAD_ALLOWLIST["PG_ROLE_ACL_MIGRATION"]
-    # 簽過的 component intent 對 PG row 只要求四個 digest,沒有 expected_topology 的位置。
+    assert "expected_topology" not in runner.ROW_PAYLOAD_ALLOWLIST["PG_ROLE_ACL_MIGRATION"]
+    assert "hba_delta" in runner.ROW_PAYLOAD_ALLOWLIST["PG_ROLE_ACL_MIGRATION"]
+    # 簽過的 component intent 對 PG row 仍只要求四個 digest(row ABI 一字不改)。
     schema = validator._load_schema("s2_4_component_effect_intent_v1")
     pg_branch = next(
         branch for branch in schema["allOf"]
@@ -1695,26 +1698,24 @@ def test_expected_topology_is_caller_suppliable_and_bound_to_nothing() -> None:
         == "PG_ROLE_ACL_MIGRATION"
     )
     required = pg_branch["then"]["properties"]["required_intent_fields"]["required"]
-    assert "expected_topology_digest" not in required
     assert sorted(required) == [
         "acl_manifest_digest", "admin_handle_descriptor_digest",
         "pg_migration_permit_digest", "topology_attestation_digest",
     ]
-    # 省略不能弱化(缺 hba_projection 即 UNPROVEN),但省略單一基線鍵可以跳過該次比對。
+    # 葉層五鍵 fail-closed:缺鍵靜默跳過的守衛形已不存在,缺鍵即具名 reason。
     source = (
         ROOT / "helper_scripts/maintenance_scripts/agent_governance_s2_4_topology.py"
     ).read_text(encoding="utf-8")
-    assert "expected signed HBA projection is missing" in source
-    assert source.count('expected.get(field) is not None') >= 2
+    assert source.count("expected.get(field) is not None") == 0
+    assert "expected baseline is missing" in source
     assert topology.derive_pg_topology_status(
         {"schema_version": "pg_topology_attestation_v1"}, expected={}, now=None
     )["status"] == topology.TOPOLOGY_STATUS_UNPROVEN
-    # 計畫端**已經**帶著正解需要的兩個欄位,故這是 plumbing 決策而非缺資料。
+    # 導出來源正是義務列點名的兩個簽章欄位(plan-derived 而非 code-owned/caller-owned)。
     plan_core = validator._load_schema("s2_4_install_plan_core_v1")
     assert {"topology_pre_digest", "hba_delta_digest"} <= set(plan_core["properties"])
-    assert "effective_rule" in json.dumps(
-        validator._load_schema("s2_4_pg_hba_delta_v1")["properties"]
-    )
+    assert callable(runner.derive_plan_expected_topology)
+    assert callable(runner.hba_delta_plan_binding_digest)
     entry = _W5_ROWS["EXPECTED_TOPOLOGY_IS_CALLER_SUPPLIED_AND_UNSIGNED"]
     assert "hba_delta_digest" in entry["statement"]
 
