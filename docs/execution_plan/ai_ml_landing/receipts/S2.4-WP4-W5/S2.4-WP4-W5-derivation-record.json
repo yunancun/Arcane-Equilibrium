@@ -3,7 +3,7 @@
     "reasons": [],
     "status": "ADMITTED"
   },
-  "admission_self_digest": "sha256:2221e7b70ea90095b5957e46f1eb247d84758a1a915ed2923f87c78e418f158a",
+  "admission_self_digest": "sha256:54aaa6367917b2596321aba31ada738f4904239502de13bf7f28d83456dbb79b",
   "historical_persisted_w4": {
     "historical_source_head": "f66fe0790ee13c098ad99bbdea3c9001f76328a4",
     "historical_w4_integrity": "VERIFIED",
@@ -21,27 +21,27 @@
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w0_wave_exit_self_digest": "sha256:08c504902c9bfac3ec7e94ec9767f3cebf71d0ba6d85a5106a77d4c82215148e",
+  "regenerated_w0_wave_exit_self_digest": "sha256:4a27c7833c49bcdd3918f4ed17511fb3af6bc592efe3c96536ddd3d4307c6f5a",
   "regenerated_w1_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w1_wave_exit_self_digest": "sha256:d0b62c24a712d3fdafdddca94580eb8f89f0600eb4902ec0207132c4e7b834d0",
+  "regenerated_w1_wave_exit_self_digest": "sha256:fed9764d10d5aee3f1188381202983ab90c3907ca029986b107a3a8e4abbd806",
   "regenerated_w2_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w2_wave_exit_self_digest": "sha256:2aebebd70bc85ef009256351edc5d7a497b44897e8172630986a605bf6c40ef6",
+  "regenerated_w2_wave_exit_self_digest": "sha256:49bee4f839bc16c046dd7ffb30fa9bddc8027dce559421bdd404e98a431fd9e7",
   "regenerated_w3_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w3_wave_exit_self_digest": "sha256:475ff778da089ed3654503a51db436fb24436f9b8bdcbc30053be8c8ae60d5c7",
+  "regenerated_w3_wave_exit_self_digest": "sha256:8ed07e878d2798d44ad742247dfac53d41404d4ec0c3917be3bf2969ea95f07e",
   "regenerated_w4_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w4_wave_exit_self_digest": "sha256:e528fde6c287119b44c9b6d442ae21cdb509bf0bacf24f3a6b574aa7c4b8bea6",
+  "regenerated_w4_wave_exit_self_digest": "sha256:a49352e623acc2dba896b4f618de380165e271e0fabb9ced956df2ccbeb0c22d",
   "remaining_owned_obligation_count": 28,
   "remaining_owned_obligations": [
     {
@@ -403,16 +403,16 @@
     }
   ],
   "schema_version": "s2_4_w5_derivation_record_v1_informal",
-  "source_head": "cc6a8b97a9ce1d6c21361f20cf940e202eee34da",
+  "source_head": "f30ede36134f1464cef4bc025f808b931aebe180",
   "test_evidence": {
-    "command": "python3 -m pytest -q tests/structure program_code/ml_training/tests (worktree aiml-s2e0-amend12 at cc6a8b97a)",
-    "exit_code": 1,
-    "measured_by": "E1 build run, independently re-executed by E2 (684.22s) and E4-verifier (698.93s) at the same head",
-    "summary": "2 failed, 6337 passed, 46 skipped at the S2E.0 head cc6a8b97a (baseline 1255275dd was 6306/46; +33 new cases, -2 by-design reds). The exactly-two fails are the PM-owned projection discriminators test_derivation_record_ledger_matches_the_live_abi and test_progress_ledger_obligation_section_is_the_whole_live_abi, both closed by this round-8 re-emission plus the same-round projection commit; no code defect. S2.4-AMEND-1 (section 9.2 refresh ingress into APPLY step 2b, terminal receipt dependency_refresh_digests, section 9.1 profile discriminators) and S2.4-AMEND-2 (plan-derived expected_topology from the signed hba_delta + topology_pre_digest) landed with obligations 16/23/25/26 flipped to CLOSED_BY_S2_4_AMEND_[12]_SOURCE; E2 mutations 5/5 kill + delta mutations 2/2 kill; frozen ABI digests, positional entrypoints, typed terminal enum, SCHEMA_FILES==79 all unchanged."
+    "command": "python3 -m pytest -q tests/structure program_code/ml_training/tests (worktree aiml-s2e0-amend12 at f30ede361)",
+    "exit_code": 0,
+    "measured_by": "E1 build run at f30ede361; prior-generation numbers independently re-executed by E2 (684.22s) and E4-verifier (698.93s) at cc6a8b97a",
+    "summary": "6341 passed, 46 skipped, 0 failed at the S2E.0 final head f30ede361 (baseline 1255275dd was 6306/46). Chain: S2.4-AMEND-1 (section 9.2 refresh ingress in APPLY, terminal receipt dependency_refresh_digests, section 9.1 profile discriminators) + S2.4-AMEND-2 (plan-derived expected_topology) + E2 P2 fixes (builder fail-closed contract gate, attestation self-digest recompute) + PR#153 Codex fixes (cluster_identity_ref/pre_hba_digest cross-binding, delta expiry window, derivation hoisted to aggregate precheck step 4b with zero-mutation refusal) + round-8 receipts + projection closure. Obligations 16/23/25/26 flipped to CLOSED_BY_S2_4_AMEND_[12]_SOURCE; E2 mutations 7/7 kill; frozen ABI surfaces unchanged."
   },
   "w5_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "w5_wave_exit_self_digest": "sha256:f9559b1ffd5e142036165871a462c89dccc03f26d9c9c5db8e89e8d20f38e543"
+  "w5_wave_exit_self_digest": "sha256:63b071dce657062ae36fffef035dc2379e7463494c88daa8afdea35eeaa82e3a"
 }
