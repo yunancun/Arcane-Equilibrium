@@ -910,7 +910,9 @@ def route_task(task_facts: dict[str, Any]) -> dict[str, Any]:
                 f"S2 effect step {s2_effect_step} requires side_effect_class="
                 f"{S2_EFFECT_STEPS[s2_effect_step]['side_effect_class']}"
             )
-        # E3-M-3:S2 effect lane 一律強制 authority 表面,故 constitutional_gate(CC)必進
+        # E3-M-3 / NEW-P2-C(新 route admission 規則,明文記錄於此與
+        # agent_governance_s2_effect_binding 模組 docstring):
+        # S2 effect lane 一律強制 authority 表面,故 constitutional_gate(CC)必進
         # DAG。CC gate 由 surfaces ∩ {authority, live, risk, auth, hard_boundary, policy,
         # compliance, full_audit} 觸發,而 S2 各 class 的 FORWARD 規則只要求
         # pg|runtime_effect|service(+install 另需 secret)——沒有這條硬性要求,W6B APPLY

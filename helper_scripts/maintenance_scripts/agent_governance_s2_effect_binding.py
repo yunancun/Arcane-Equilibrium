@@ -4,33 +4,43 @@
 
 * ``validate_s2_effect_evidence`` —— 一份 closure evidence wrapper 的 receipt 級驗:
   receipt 的實際重算委派中央 AIML 閘
-  ``aiml_gate_receipt_validator.validate_aiml_artifact``。**誠實界線(CC-C #1)**:中央閘
-  對 ``pg_observer_bootstrap_result_v1`` / ``quiesce_result_v1`` /
-  ``ingestion_compatibility_receipt_v1`` / ``s2_4_install_effect_receipt_v1`` 有語義委派
-  或 self_digest 反偽造分支,但對 ``s2_4_capability_probe_effect_receipt_v1`` 與
-  ``s2_4_prepare_effect_receipt_v1`` 今日**只有 closed-schema 結構驗**(無語義委派、
-  不重算 self_digest);``s2_5_running_attestation_v1`` / ``s2_5_final_attestation_v1``
-  亦無 schema_version 專屬分支。故三個 s2_4 step(W6A/W6B PROBE、W6A PREPARE)與兩個
-  S2.5 step 在中央閘實得只有結構驗——本模組在同一縫補一次 self_digest 反偽造重算作為
-  最低限度整合性,但這**不等同**語義委派:s2_4/s2_5 的語義門(permit 消耗、replay
-  ledger、attestor、trusted-host time)仍全在 adapter 層,不在 closure。
+  ``aiml_gate_receipt_validator.validate_aiml_artifact``。**誠實界線(CC-C)**:中央閘對
+  ``pg_observer_bootstrap_result_v1`` / ``quiesce_result_v1`` /
+  ``ingestion_compatibility_receipt_v1`` / ``s2_4_install_effect_receipt_v1`` 有頂層
+  schema_version 分支,對 ``s2_5_running_attestation_v1`` / ``s2_5_final_attestation_v1``
+  則以 ``startswith("s2_5_")`` **委派葉** ``aiml_gate_receipt_s2_5.validate_s2_5_artifact``
+  ——葉內逐 schema 專屬分支,第一件事就是 self_digest 反偽造重算,另有 observer_gate、
+  freshness、五 running dimension、precheck、attestor SSHSIG 驗簽(即兩個 s2_5 schema
+  **不是**「只有結構驗」)。今日真正**沒有**任何分支(=無語義委派、不重算 self_digest)
+  的只有 ``s2_4_capability_probe_effect_receipt_v1`` 與 ``s2_4_prepare_effect_receipt_v1``
+  ——三個 s2_4 step(W6A/W6B PROBE、W6A PREPARE)在中央閘實得只有 closed-schema 結構驗,
+  本模組在同一縫補一次 self_digest 反偽造重算作為最低限度整合性,但這**不等同**語義
+  委派:s2_4 的語義門(permit 消耗、replay ledger、trusted-host time)仍在 adapter 層。
   本模組另補 wrapper↔receipt 綁定、closure baseline head 綁定與 production 成功集判定
   ——``RECOVERY_REQUIRED`` / ``EXTERNAL_VERIFICATION_PENDING`` / source-simulation 頂點
   永不換算 closure PASS。
-* ``validate_s2_effect_binding`` —— closure admission。**S2.0 與 S2.1 一律先委派(不是
-  取代)既有 per-step closure 硬門**(``validate_pg_observer_bootstrap_binding`` /
-  ``validate_quiesce_fence_binding``,見 ``_DELEGATED_STEP_BINDINGS``),其 errors 併入
-  回傳;那兩個 predicate 提供本模組沒有的 operator authorization 對
-  intent_id/intent_digest/source_head 精確綁定、receipt 內嵌 independent postcheck 的
-  各自 validator 驗、``postcheck.verifier_node != receipt.apply_actor_node``、以及
-  三方 digest 交叉核(receipt 內嵌 ``verifier_capture_digest`` == ops_postcheck evidence
-  ``digest`` == 其內嵌 ``command_capture_v2.record_digest``,且 capture node_id ≠ applier)。
+* ``validate_s2_effect_binding`` —— closure admission。**四個 step 一律先委派(不是取代)
+  既有 per-step closure 硬門**(見 ``_DELEGATED_STEP_BINDINGS``:S2.0
+  ``validate_pg_observer_bootstrap_binding`` / S2.1 ``validate_quiesce_fence_binding`` /
+  S2.5A 與 S2.5B 的 §6 ``aiml_gate_receipt_s2_5.validate_s2_5_attestation_binding``,後者
+  經 ``_s2_5_attestation_binding_errors`` 適配),其 errors 併入回傳;那些 predicate 提供
+  本模組沒有的 operator authorization / intent 精確綁定、OPS preflight fragment 語義、
+  receipt 內嵌 independent postcheck 的各自 validator 驗、``verifier_node !=
+  apply_actor_node``、以及三方 digest 交叉核(receipt 內嵌 ``verifier_capture_digest`` ==
+  ops_postcheck capture evidence ``digest`` == 其內嵌 ``command_capture_v2.record_digest``,
+  且 capture node_id ≠ applier)。
   本模組自身只做 S2 共通的 route⇔receipt⇔claim 綁定:route 有該 step 的 adapter 節點
   ⇔ 恰一 valid receipt;receipt 暴露的上游/permit digest 必等於 route claim admission;
   intent authority_ref cross-bind(鏡 effects.py 通用 deploy 同型;S2.2B 無 intent
   artifact,上游錨由 claim 綁定取代——唯一合法上游 = s2_5_final_attestation_v1);獨立
-  ops_postcheck 必為 contract 白名單 kind、必晚於 effect 完成、acceptance 必同綁 receipt
-  + postcheck。
+  ops_postcheck 必為 contract 白名單 kind、artifact 反偽造重算並交叉綁 receipt
+  self_digest、必晚於 effect 完成、acceptance 必同綁 receipt + postcheck。
+
+route admission 側的新規則(NEW-P2-C,實作在 ``agent_governance_routing`` 的 S2 selector
+分支):**S2 effect lane 一律強制 ``authority`` 表面**——各 side_effect_class 的 FORWARD
+規則只要求 pg|runtime_effect|service(+install 另需 secret),沒有這條硬性要求,W6B APPLY
+(裝 unit + PG migration)與 S2.5A(起 production service)會在**無 constitutional gate**
+的 DAG 下 admitted。缺 authority 面 ⇒ typed ValueError(鏡 P0-B effect lane 的同型要求)。
 
 ⚠ SOURCE-TRUTH 邊界:route 層無法驗 head/freshness/permit 真偽是設計事實——閉合在
 adapter(SSHSIG/attestor/replay-ledger)與 closure(out-of-band 信任主機驗證)層;本
@@ -116,6 +126,13 @@ S2_ADAPTER_IDS = frozenset(
 S2_OPS_POSTCHECK_KIND = "s2_effect_ops_postcheck_v1"
 _OPS_POSTCHECK_RECEIPT_BINDING = "artifact.effect_receipt_digest"
 _CAPTURE_POSTCHECK_KIND = "command_capture_v2"
+
+# CC-A2:S2.5A/S2.5B 委派 §6 attestation binding 所需的三個載體(同樣只用 closure_packet_v1
+# 真有的欄位:evidence.artifact 與 role_fragment.payload;OPS fragment 的 payload_kind 由
+# registry 釘成 operation_review_fragment_v1,故 preflight artifact 掛在 payload 的具名鍵下)。
+S2_5_INTENT_EVIDENCE_KIND = "s2_5_start_intent_v1"
+S2_5_VERIFIER_CAPTURE_KIND = "s2_effect_verifier_command_capture_v2"
+S2_5_OPS_PREFLIGHT_PAYLOAD_KEY = "s2_5_ops_preflight"
 
 
 def _probe_contract(*, declaration_only_claims: frozenset[str]) -> dict[str, Any]:
@@ -236,6 +253,11 @@ S2_STEP_RECEIPT_CONTRACTS: dict[str, dict[str, Any]] = {
         # s2_4_prepare_effect_receipt,與設計「上一步 terminal receipt digest = 下一 route
         # claim input」一致。雙 permit(registry s2_4_install_adapter_v1:aggregate + 窄
         # PG-migration profile)各自綁到 receipt 的對應 authorization digest 欄位。
+        # E2-P2(記錄用):receipt 另有 ``prepare_sandbox_probe_receipt_digest`` /
+        # ``prepare_postcheck_digest`` 兩個上游 digest 欄位,但 W6B APPLY 的 route claim
+        # inventory **刻意沒有**對應 claim key——PREPARE_SANDBOX probe 是 W6A 那一步的
+        # claim,到 W6B APPLY 時其真偽已由 adapter 層透過 prepare_result_digest(= PREPARE
+        # effect receipt 的 self_digest)遞移閉合;在 route 層再要求一次只會製造重複宣告。
         "claim_receipt_bindings": {
             "s2_4_install_authorization": "aggregate_authorization_digest",
             "s2_4_pg_migration_authorization": "pg_authorization_digest",
@@ -261,6 +283,9 @@ S2_STEP_RECEIPT_CONTRACTS: dict[str, dict[str, Any]] = {
         # s2_5_running_attestation_v1 頂層無 permit / 上游 receipt digest 欄位
         # (s2_4_install_effect_receipt_digest 只存在於 s2_5_start_intent_v1 的
         # required_intent_fields);兩個 claim 皆 declaration-only,其消耗由 adapter 層驗。
+        # CC-A2:本 step 的硬門不止於此——委派的 §6 attestation binding 另要求 intent
+        # 載體、OPS preflight fragment(unit_inactive_confirmed 必為 true)與 verifier
+        # capture 三方核(record_digest 重算 + capture node != apply_actor_node)。
         "claim_receipt_bindings": {},
         "declaration_only_claims": frozenset({
             "s2_5a_start_permit", "s2_4_install_effect_receipt",
@@ -345,26 +370,19 @@ S2_STEP_RECEIPT_CONTRACTS: dict[str, dict[str, Any]] = {
         "postcheck_receipt_binding": _OPS_POSTCHECK_RECEIPT_BINDING,
     },
 }
-# CC-A:S2.0/S2.1 的既有 per-step closure 硬門——本模組**委派**,絕不取代。缺少它們時
-# 本模組完全沒有:operator authorization 對 intent_id/intent_digest/source_head 的精確綁定、
-# receipt 內嵌 independent postcheck 經各自 validator 驗、applier != verifier、三方 digest
-# 交叉核(內嵌 verifier_capture_digest == ops_postcheck evidence digest ==
-# command_capture_v2.record_digest 且 capture node ≠ applier)、以及 kind 白名單。
-_DELEGATED_STEP_BINDINGS = {
-    "S2_0_APPLY": pg_observer.validate_pg_observer_bootstrap_binding,
-    "S2_1_DRILL": quiesce_fence.validate_quiesce_fence_binding,
-}
 S2_RECEIPT_SCHEMA_VERSIONS = frozenset(
     contract["receipt_schema_version"]
     for contract in S2_STEP_RECEIPT_CONTRACTS.values()
 )
 # 中央 AIML 閘今日**沒有** schema_version 專屬分支(=無語義委派、不重算 self_digest)的
-# S2 receipt schema;由測試對中央閘原始碼釘住此清單,漂移即紅。
+# S2 receipt schema;由測試對中央閘**與其委派葉**的原始碼釘住此清單,漂移即紅。
+# CC-C:兩個 s2_5 attestation schema 曾被誤列於此——中央閘以 startswith("s2_5_") 委派
+# aiml_gate_receipt_s2_5.validate_s2_5_artifact,葉內對兩者各有專屬分支且第一件事就是
+# self_digest 反偽造重算(另有 observer_gate/freshness/五 dimension/precheck/attestor SSHSIG
+# 驗簽)。清單因此只剩真正無分支的兩個 s2_4 schema。
 _CENTRAL_GATE_SELF_DIGEST_GAP_SCHEMAS = frozenset({
     "s2_4_capability_probe_effect_receipt_v1",
     "s2_4_prepare_effect_receipt_v1",
-    "s2_5_running_attestation_v1",
-    "s2_5_final_attestation_v1",
 })
 
 
@@ -399,11 +417,11 @@ def _artifact_self_digest(artifact: dict[str, Any]) -> str:
 def _receipt_validation_errors(receipt: dict[str, Any], *, now: Any) -> list[str]:
     """receipt 實際重算委派中央 AIML 閘(其內對部分 schema 再委派各 per-step SSOT 葉)。
 
-    誠實界線(CC-C #1):中央閘只對部分 S2 schema 有語義委派/self_digest 反偽造分支;
-    ``s2_4_capability_probe_effect_receipt_v1`` / ``s2_4_prepare_effect_receipt_v1`` /
-    兩個 s2_5 attestation schema 今日只得 closed-schema 結構驗。此處對「中央閘不重算
-    self_digest」的 schema 補一次 canonical 反偽造重算作為最低整合性——這**不是**語義
-    委派,那些 step 的語義門仍在 adapter 層。
+    誠實界線(CC-C):中央閘對部分 S2 schema 有頂層分支、對 ``s2_5_*`` 以 startswith 委派
+    葉(葉內逐 schema 分支且重算 self_digest);今日只有
+    ``s2_4_capability_probe_effect_receipt_v1`` / ``s2_4_prepare_effect_receipt_v1`` 完全
+    沒有分支,只得 closed-schema 結構驗。此處對這兩個 schema 補一次 canonical 反偽造重算
+    作為最低整合性——這**不是**語義委派,那兩步的語義門仍在 adapter 層。
 
     測試可 monkeypatch 此縫作結構綁定測試;真委派由 sentinel 測試釘住。
     """
@@ -577,6 +595,141 @@ def validate_s2_effect_evidence(
         if evidence.get(field) != expected:
             errors.append(f"S2 effect evidence {field} is not receipt-bound")
     return errors, receipt if not errors else None
+
+
+def _s2_5_attestation_binding_errors(
+    packet: dict[str, Any],
+    route: dict[str, Any],
+    fragments_by_node: dict[str, dict[str, Any]],
+    evidence_by_id: dict[str, dict[str, Any]],
+    valid_receipts: dict[str, dict[str, Any]],
+) -> list[str]:
+    """CC-A2:S2.5A/S2.5B 委派既有 §6 硬門(``validate_s2_5_attestation_binding``)的適配層。
+
+    該 predicate 的呼叫形狀是 ``intent × ops_preflight × receipt × verifier_capture``,不是
+    closure 的五參數形狀,故此處負責從封包取出三個載體再轉譯其 verdict:
+
+    * intent —— 恰一 ``s2_5_start_intent_v1`` kind 的 evidence,``digest`` 必等於內嵌
+      artifact 的 ``self_digest``(否則 wrapper 可指向一份與 artifact 無關的 intent)。
+    * ops_preflight —— OPS ``ops_preflight`` fragment 的 ``payload`` 具名鍵(fragment 的
+      payload_kind 由 registry 釘死 operation_review_fragment_v1,故不能整個換掉)。
+    * verifier_capture —— ops_postcheck fragment 內、kind ``s2_effect_verifier_command_capture_v2``
+      的 runtime evidence,``digest`` 必等於內嵌 record 的 ``record_digest``;缺席時傳 None,
+      由 §6 自己走 typed 分支(receipt 帶 verifier_capture_digest 而 capture 缺席 = 單側主張,
+      §6 判 REJECTED;兩側皆缺 = EXTERNAL_VERIFICATION_PENDING)。
+
+    只有 ``S2_5_ATTESTATION_BINDING_VERIFIED`` 才是零錯誤;``EXTERNAL_VERIFICATION_PENDING``
+    與 ``..._REJECTED`` 一律換算成 typed closure error(PENDING 永不是 PASS)。
+    """
+
+    if str(ML_TRAINING_DIR) not in sys.path:
+        sys.path.insert(0, str(ML_TRAINING_DIR))
+    import aiml_gate_receipt_s2_5 as s2_5_leaf
+
+    errors: list[str] = []
+    receipts = [
+        receipt for receipt in valid_receipts.values()
+        if isinstance(receipt, dict)
+        and str(receipt.get("schema_version", "")).startswith("s2_5_")
+    ]
+    if len(receipts) != 1:
+        return [
+            "S2.5 attestation binding requires exactly one s2_5 attestation receipt"
+        ]
+    receipt = receipts[0]
+
+    intent: dict[str, Any] | None = None
+    intent_evidence = [
+        evidence for evidence in evidence_by_id.values()
+        if isinstance(evidence, dict)
+        and evidence.get("kind") == S2_5_INTENT_EVIDENCE_KIND
+    ]
+    if len(intent_evidence) != 1:
+        errors.append(
+            "S2.5 attestation binding requires exactly one "
+            f"{S2_5_INTENT_EVIDENCE_KIND} evidence carrying the canonical start intent"
+        )
+    else:
+        candidate = intent_evidence[0].get("artifact")
+        if not isinstance(candidate, dict) or intent_evidence[0].get("digest") != (
+            candidate.get("self_digest")
+        ):
+            errors.append(
+                "S2.5 attestation binding intent evidence digest is not bound to the "
+                "embedded start intent self_digest"
+            )
+        if isinstance(candidate, dict):
+            intent = candidate
+
+    preflight_payload = (
+        fragments_by_node.get("ops_preflight", {}) or {}
+    ).get("payload") or {}
+    ops_preflight = preflight_payload.get(S2_5_OPS_PREFLIGHT_PAYLOAD_KEY)
+    if not isinstance(ops_preflight, dict):
+        errors.append(
+            "S2.5 attestation binding requires the OPS preflight fragment payload key "
+            f"{S2_5_OPS_PREFLIGHT_PAYLOAD_KEY}"
+        )
+        ops_preflight = None
+
+    verifier_capture: dict[str, Any] | None = None
+    fragment = fragments_by_node.get("ops_postcheck", {}) or {}
+    capture_evidence = [
+        evidence_by_id[ref] for ref in fragment.get("evidence_refs", [])
+        if ref in evidence_by_id
+        and evidence_by_id[ref].get("scope") == "runtime"
+        and evidence_by_id[ref].get("source") == "ops_postcheck"
+        and evidence_by_id[ref].get("kind") == S2_5_VERIFIER_CAPTURE_KIND
+    ]
+    if len(capture_evidence) > 1:
+        errors.append(
+            "S2.5 attestation binding requires at most one "
+            f"{S2_5_VERIFIER_CAPTURE_KIND} evidence in the ops_postcheck fragment"
+        )
+    elif capture_evidence:
+        record = capture_evidence[0].get("artifact")
+        if not isinstance(record, dict) or capture_evidence[0].get("digest") != (
+            record.get("record_digest")
+        ):
+            errors.append(
+                "S2.5 attestation binding verifier capture evidence digest is not bound "
+                "to the embedded command_capture_v2 record_digest"
+            )
+        if isinstance(record, dict):
+            verifier_capture = record
+
+    verdict = s2_5_leaf.validate_s2_5_attestation_binding(
+        intent=intent,
+        ops_preflight=ops_preflight,
+        receipt=receipt,
+        verifier_capture=verifier_capture,
+        now=receipt.get("completed_at"),
+    )
+    if verdict.get("status") != s2_5_leaf.S2_5_BINDING_VERIFIED:
+        errors.append(
+            "S2.5 §6 attestation binding is not VERIFIED "
+            f"({verdict.get('status')}): "
+            + "; ".join(str(reason) for reason in verdict.get("reasons", []))
+        )
+    return errors
+
+
+# CC-A:四個 step 的既有 per-step closure 硬門——本模組**委派**,絕不取代。缺少它們時
+# 本模組完全沒有:operator authorization 對 intent_id/intent_digest/source_head 的精確綁定、
+# receipt 內嵌 independent postcheck 經各自 validator 驗、applier != verifier、三方 digest
+# 交叉核(內嵌 verifier_capture_digest == ops_postcheck evidence digest ==
+# command_capture_v2.record_digest 且 capture node ≠ applier)、以及 kind 白名單。
+# CC-A2:S2.5A/S2.5B 是「啟動 / 最終認證 production systemd service」兩步,原本只有
+# declaration-only claim(不要求 ops_preflight fragment、無 verifier_capture 三方核、無
+# applier != verifier)。既有的 §6 硬門 aiml_gate_receipt_s2_5.validate_s2_5_attestation_binding
+# (自述鏡 validate_pg_observer_bootstrap_binding)此前不在本表、全 repo 只有自己的測試呼叫,
+# 現由上方適配層接入。
+_DELEGATED_STEP_BINDINGS = {
+    "S2_0_APPLY": pg_observer.validate_pg_observer_bootstrap_binding,
+    "S2_1_DRILL": quiesce_fence.validate_quiesce_fence_binding,
+    "S2_5A_START": _s2_5_attestation_binding_errors,
+    "S2_5B_FINAL": _s2_5_attestation_binding_errors,
+}
 
 
 def _delegated_binding_errors(

@@ -337,7 +337,7 @@ def test_s2_0_and_s2_1_blocked_dispositions_are_symmetric() -> None:
 def test_delegated_per_step_hard_gates_are_wired_not_bypassed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """CC-A sentinel:S2.0/S2.1 一定實際呼叫既有 per-step closure predicate。"""
+    """CC-A/CC-A2 sentinel:四個 step 一定實際呼叫既有 per-step closure predicate。"""
 
     import agent_governance_alr_quiesce_fence as quiesce
     import agent_governance_pg_observer_bootstrap as observer
@@ -345,11 +345,15 @@ def test_delegated_per_step_hard_gates_are_wired_not_bypassed(
     assert binding._DELEGATED_STEP_BINDINGS == {
         "S2_0_APPLY": observer.validate_pg_observer_bootstrap_binding,
         "S2_1_DRILL": quiesce.validate_quiesce_fence_binding,
+        "S2_5A_START": binding._s2_5_attestation_binding_errors,
+        "S2_5B_FINAL": binding._s2_5_attestation_binding_errors,
     }
     monkeypatch.setattr(binding, "_receipt_validation_errors", lambda *_a, **_k: [])
     for step, module, attr in (
         ("S2_0_APPLY", observer, "validate_pg_observer_bootstrap_binding"),
         ("S2_1_DRILL", quiesce, "validate_quiesce_fence_binding"),
+        ("S2_5A_START", binding, "_s2_5_attestation_binding_errors"),
+        ("S2_5B_FINAL", binding, "_s2_5_attestation_binding_errors"),
     ):
         seen: list = []
         monkeypatch.setitem(
@@ -460,6 +464,203 @@ def test_delegated_hard_gate_runs_the_three_way_capture_cross_check(
     assert any(
         "capture node must differ from the applier node" in error for error in errors
     ), errors
+
+
+# --------------------------------------------------------------------------- #
+# CC-A2:S2.5A/S2.5B 委派既有 §6 attestation binding(此前不在委派表,全 repo 只有自己的
+# 測試呼叫 ⇒ 兩個「啟動/最終認證 production systemd service」的步驟實得 declaration-only)
+# --------------------------------------------------------------------------- #
+S2_5_STEPS = ("S2_5A_START", "S2_5B_FINAL")
+
+
+def _s2_5_carriers(receipt: dict) -> tuple[dict, dict, dict, dict]:
+    """§6 硬門要求的三個載體(intent evidence / OPS preflight payload / verifier capture)。"""
+
+    import aiml_gate_receipt_schema_core as core
+
+    intent = {
+        "schema_version": "s2_5_start_intent_v1",
+        "start_id": receipt["intent_id"],
+    }
+    intent["self_digest"] = core.artifact_self_digest(intent)
+    intent_evidence = {
+        "id": "s2-5-intent", "scope": "source",
+        "kind": binding.S2_5_INTENT_EVIDENCE_KIND,
+        "digest": intent["self_digest"], "artifact": intent,
+    }
+    preflight = {
+        "schema_version": "s2_5_ops_preflight_fragment_v1_informal",
+        "intent_digest": intent["self_digest"],
+        "preflight": {"unit_inactive_confirmed": True},
+    }
+    preflight["self_digest"] = core.artifact_self_digest(preflight)
+    capture = {
+        "schema_version": "command_capture_v2",
+        "node_id": "s2_ops_postcheck",
+        "argv": ["/usr/bin/systemctl", "show", "--no-pager"],
+        "exit_code": 0,
+    }
+    capture["record_digest"] = core.canonical_digest(capture)
+    capture_evidence = {
+        "id": "s2-5-verifier-capture", "scope": "runtime",
+        "source": "ops_postcheck", "kind": binding.S2_5_VERIFIER_CAPTURE_KIND,
+        "digest": capture["record_digest"], "observed_at": T_POST,
+        "expiry": T_EXPIRY, "host": "trade-core",
+        "environment": binding.S2_EFFECT_ENVIRONMENT, "artifact": capture,
+    }
+    return intent, intent_evidence, preflight, capture_evidence
+
+
+@pytest.mark.parametrize("step", S2_5_STEPS)
+def test_s2_5_delegation_passes_the_exact_carriers_to_the_section6_gate(
+    monkeypatch: pytest.MonkeyPatch, step: str,
+) -> None:
+    """委派 sentinel:四個參數必須是封包裡的**真**載體,``now`` 取 receipt 完成時刻。"""
+
+    import aiml_gate_receipt_s2_5 as s2_5_leaf
+
+    seen: list[dict] = []
+    monkeypatch.setattr(
+        s2_5_leaf, "validate_s2_5_attestation_binding",
+        lambda **kwargs: seen.append(kwargs) or {
+            "status": s2_5_leaf.S2_5_BINDING_VERIFIED, "reasons": [],
+        },
+    )
+    monkeypatch.setattr(binding, "_receipt_validation_errors", lambda *_a, **_k: [])
+    route = _route(step)
+    receipt = _receipt(step)
+    receipt["apply_actor_node"] = "s2_apply_actor"
+    packet, fragments, evidence_by_id = _packet(step, receipt)
+    intent, intent_evidence, preflight, capture_evidence = _s2_5_carriers(receipt)
+    evidence_by_id[intent_evidence["id"]] = intent_evidence
+    evidence_by_id[capture_evidence["id"]] = capture_evidence
+    fragments["ops_postcheck"]["evidence_refs"].append(capture_evidence["id"])
+    fragments["ops_preflight"] = {
+        "payload_kind": "operation_review_fragment_v1",
+        "payload": {binding.S2_5_OPS_PREFLIGHT_PAYLOAD_KEY: preflight},
+    }
+    assert binding.validate_s2_effect_binding(
+        packet, route, fragments, evidence_by_id, {"effect": receipt}
+    ) == []
+    assert len(seen) == 1
+    assert seen[0]["intent"] is intent
+    assert seen[0]["ops_preflight"] is preflight
+    assert seen[0]["receipt"] is receipt
+    assert seen[0]["verifier_capture"] is capture_evidence["artifact"]
+    assert seen[0]["now"] == receipt["completed_at"]
+
+
+@pytest.mark.parametrize("step", S2_5_STEPS)
+def test_s2_5_delegation_rejects_missing_carriers(
+    monkeypatch: pytest.MonkeyPatch, step: str,
+) -> None:
+    """載體缺席 ⇒ 逐項 typed error,且 §6 verdict 非 VERIFIED 一律換算 closure error。"""
+
+    monkeypatch.setattr(binding, "_receipt_validation_errors", lambda *_a, **_k: [])
+    route = _route(step)
+    receipt = _receipt(step)
+    packet, fragments, evidence_by_id = _packet(step, receipt)
+    errors = binding.validate_s2_effect_binding(
+        packet, route, fragments, evidence_by_id, {"effect": receipt}
+    )
+    assert (
+        "S2.5 attestation binding requires exactly one "
+        f"{binding.S2_5_INTENT_EVIDENCE_KIND} evidence carrying the canonical start "
+        "intent"
+    ) in errors
+    assert (
+        "S2.5 attestation binding requires the OPS preflight fragment payload key "
+        f"{binding.S2_5_OPS_PREFLIGHT_PAYLOAD_KEY}"
+    ) in errors
+    assert any(
+        error.startswith("S2.5 §6 attestation binding is not VERIFIED")
+        for error in errors
+    ), errors
+
+
+@pytest.mark.parametrize("step", S2_5_STEPS)
+def test_s2_5_delegation_runs_the_real_three_way_capture_cross_check(
+    monkeypatch: pytest.MonkeyPatch, step: str,
+) -> None:
+    """真委派(不 monkeypatch §6):applier == capture node、單側主張、PENDING 一律拒。"""
+
+    import aiml_gate_receipt_s2_5 as s2_5_leaf
+
+    monkeypatch.setattr(binding, "_receipt_validation_errors", lambda *_a, **_k: [])
+    route = _route(step)
+    receipt = _receipt(step)
+    packet, fragments, evidence_by_id = _packet(step, receipt)
+    intent, intent_evidence, preflight, capture_evidence = _s2_5_carriers(receipt)
+    evidence_by_id[intent_evidence["id"]] = intent_evidence
+    evidence_by_id[capture_evidence["id"]] = capture_evidence
+    fragments["ops_postcheck"]["evidence_refs"].append(capture_evidence["id"])
+    fragments["ops_preflight"] = {
+        "payload_kind": "operation_review_fragment_v1",
+        "payload": {binding.S2_5_OPS_PREFLIGHT_PAYLOAD_KEY: preflight},
+    }
+    # ① capture 在場但 receipt 未綁其 record_digest ⇒ §6 拒(單側主張)。
+    errors = binding.validate_s2_effect_binding(
+        packet, route, fragments, evidence_by_id, {"effect": receipt}
+    )
+    assert any(
+        f"is not VERIFIED ({s2_5_leaf.S2_5_BINDING_REJECTED})" in error
+        for error in errors
+    ), errors
+    # ② §6 的 reasons 必須原樣併入 closure errors(證明真的跑了葉的語義,不是形狀比對)。
+    assert any(
+        "the receipt does not bind the exact intent" in error for error in errors
+    ), errors
+    # ③ capture evidence 的 wrapper digest 與內嵌 record_digest 不符 ⇒ typed 拒。
+    drifted = deepcopy(evidence_by_id)
+    drifted[capture_evidence["id"]]["digest"] = "sha256:" + "1" * 64
+    assert (
+        "S2.5 attestation binding verifier capture evidence digest is not bound to the "
+        "embedded command_capture_v2 record_digest"
+    ) in binding.validate_s2_effect_binding(
+        packet, route, fragments, drifted, {"effect": receipt}
+    )
+    # ④ intent evidence 的 wrapper digest 與內嵌 artifact self_digest 不符 ⇒ typed 拒。
+    forged_intent = deepcopy(evidence_by_id)
+    forged_intent[intent_evidence["id"]]["digest"] = "sha256:" + "2" * 64
+    assert (
+        "S2.5 attestation binding intent evidence digest is not bound to the embedded "
+        "start intent self_digest"
+    ) in binding.validate_s2_effect_binding(
+        packet, route, fragments, forged_intent, {"effect": receipt}
+    )
+
+
+@pytest.mark.parametrize("step", S2_5_STEPS)
+def test_s2_5_external_verification_pending_is_never_a_closure_pass(
+    monkeypatch: pytest.MonkeyPatch, step: str,
+) -> None:
+    """§6 的誠實終點 EXTERNAL_VERIFICATION_PENDING 一律換算 typed closure error。"""
+
+    import aiml_gate_receipt_s2_5 as s2_5_leaf
+
+    monkeypatch.setattr(
+        s2_5_leaf, "validate_s2_5_attestation_binding",
+        lambda **_kwargs: {
+            "status": s2_5_leaf.S2_5_BINDING_PENDING,
+            "reasons": ["structurally coherent but not yet bound"],
+        },
+    )
+    monkeypatch.setattr(binding, "_receipt_validation_errors", lambda *_a, **_k: [])
+    route = _route(step)
+    receipt = _receipt(step)
+    packet, fragments, evidence_by_id = _packet(step, receipt)
+    intent, intent_evidence, preflight, capture_evidence = _s2_5_carriers(receipt)
+    evidence_by_id[intent_evidence["id"]] = intent_evidence
+    fragments["ops_preflight"] = {
+        "payload_kind": "operation_review_fragment_v1",
+        "payload": {binding.S2_5_OPS_PREFLIGHT_PAYLOAD_KEY: preflight},
+    }
+    assert (
+        "S2.5 §6 attestation binding is not VERIFIED "
+        f"({s2_5_leaf.S2_5_BINDING_PENDING}): structurally coherent but not yet bound"
+    ) in binding.validate_s2_effect_binding(
+        packet, route, fragments, evidence_by_id, {"effect": receipt}
+    )
 
 
 def test_delegated_hard_gate_requires_the_ops_preflight_fragment(
@@ -1314,15 +1515,71 @@ def test_route_metadata_schema_versions_equal_the_registry_schema_paths() -> Non
 
 
 def test_central_gate_self_digest_gap_list_is_pinned_to_the_gate_source() -> None:
-    """CC-C #1:中央閘「無 schema_version 專屬分支」的清單必與其原始碼一致(漂移即紅)。"""
+    """CC-C:gap 清單必與中央閘**及其委派葉**的原始碼一致(漂移即紅)。
 
-    gate_source = (
-        ML_ROOT / "aiml_gate_receipt_validator.py"
-    ).read_text(encoding="utf-8")
+    舊版只在頂層 validator 檔字串搜 ``schema_version == "<name>"``,看不見
+    ``startswith("s2_5_")`` 這種前綴分派 ⇒ 兩個 s2_5 attestation schema 被誤判成「無分支」,
+    docstring 與 gap 集因此變成反向 false underclaim(葉內其實逐 schema 分支且第一件事就是
+    self_digest 反偽造重算)。此版遍歷實際委派葉:先把「頂層分派語句」釘死(分派本身漂移
+    即紅),再到葉檔內找 ``schema_version == "<name>"``。
+    """
+
+    gate_source = (ML_ROOT / "aiml_gate_receipt_validator.py").read_text(
+        encoding="utf-8"
+    )
+    # 頂層 → 葉 的分派語句(dispatch 文字漂移 ⇒ 本測試先紅,而不是靜默降級為只看頂層)。
+    delegated_leaves = {
+        'schema_version.startswith("s2_5_")': "aiml_gate_receipt_s2_5.py",
+        'schema_version == "ingestion_compatibility_receipt_v1"':
+            "aiml_gate_receipt_s2_2b.py",
+    }
+    leaf_sources = []
+    for dispatch, leaf_file in delegated_leaves.items():
+        assert dispatch in gate_source, dispatch
+        assert f"import {leaf_file.removesuffix('.py')}" in gate_source, leaf_file
+        leaf_sources.append((ML_ROOT / leaf_file).read_text(encoding="utf-8"))
+
     for schema_version in binding.S2_RECEIPT_SCHEMA_VERSIONS:
-        has_branch = f'schema_version == "{schema_version}"' in gate_source
+        branch = f'schema_version == "{schema_version}"'
+        has_branch = branch in gate_source or any(
+            branch in leaf_source for leaf_source in leaf_sources
+        )
         in_gap = schema_version in binding._CENTRAL_GATE_SELF_DIGEST_GAP_SCHEMAS
         assert has_branch is not in_gap, schema_version
+    # 兩個 s2_5 schema 的分支必須真的在葉內(而非只是「不在 gap 集」),且葉內確有
+    # self_digest 反偽造重算——CC 核為屬實的 s2_4 那一半則必須留在 gap 集。
+    s2_5_source = (ML_ROOT / "aiml_gate_receipt_s2_5.py").read_text(encoding="utf-8")
+    for schema_version in ("s2_5_running_attestation_v1", "s2_5_final_attestation_v1"):
+        assert f'schema_version == "{schema_version}"' in s2_5_source
+        assert schema_version not in binding._CENTRAL_GATE_SELF_DIGEST_GAP_SCHEMAS
+    assert "self_digest does not bind the canonical receipt" in s2_5_source
+    assert binding._CENTRAL_GATE_SELF_DIGEST_GAP_SCHEMAS == frozenset({
+        "s2_4_capability_probe_effect_receipt_v1",
+        "s2_4_prepare_effect_receipt_v1",
+    })
+
+
+def test_module_docstring_no_longer_underclaims_the_s2_5_central_gate_face() -> None:
+    """CC-C:docstring 與 SCRIPT_INDEX 條目不得再宣稱兩個 s2_5 schema 只有結構驗。"""
+
+    module_source = (
+        HELPERS / "agent_governance_s2_effect_binding.py"
+    ).read_text(encoding="utf-8")
+    assert 'startswith("s2_5_")' in binding.__doc__
+    assert "attestor SSHSIG 驗簽" in binding.__doc__
+    index = (ROOT / "helper_scripts/SCRIPT_INDEX.md").read_text(encoding="utf-8")
+    entry = [
+        line for line in index.splitlines()
+        if "agent_governance_s2_effect_binding.py" in line
+    ]
+    assert len(entry) == 1, entry
+    # 漂移過的兩句(全量委派中央閘 / production 成功集判定)必須已不在條目中。
+    assert "receipt 實際重算全部委派中央 AIML 閘的 per-step SSOT 葉" not in entry[0]
+    assert "production 成功集判定" not in entry[0]
+    assert "s2_effect_ops_postcheck_v1" in entry[0]
+    assert "closure_pass_blocked_reason" in entry[0]
+    assert "validate_s2_5_attestation_binding" in entry[0]
+    assert binding.S2_OPS_POSTCHECK_KIND in module_source
 
 
 def test_s2_receipts_get_a_distinct_execution_attestation_identity() -> None:
