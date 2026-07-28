@@ -1,0 +1,191 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/ingestion_compatibility_receipt_v1.schema.json",
+  "title": "ingestion_compatibility_receipt_v1",
+  "description": "Closed S2.2B receipt (S2.5 design §10 / PROGRESS S2.2B row): the LR1 runtime revalidation of the exact S2.2A compatibility identity against a running runtime attested by s2_5_final_attestation_v1. It embeds BOTH upstream artifacts so the central gate can re-verify them in full (three-value digest chains, inner anti-forgery recompute, and — for a FINAL_ATTESTED anchor — the trusted-host attestor signature per the tranche-1b P1-2 discipline). The manifest_revalidation face carries one typed result row per V151-V160 migration fingerprint; a single non-MATCH row rejects the whole receipt. Effect class is REMOTE_READONLY (the only row that may issue the LR1 runtime DONE); the runtime-DONE lane requires PLATFORM_OR_EXTERNAL_ATTESTED evidence anchored on a production FINAL_ATTESTED final attestation plus the forward-compatible runtime_attestor block, and it consumes S2.5B@EFFECT_DONE which does not exist yet — the source lane ceiling is SOURCE_REVALIDATION_PASS at LOCAL_REPRODUCIBLE and fixtures never impersonate platform-attested evidence. Contract only: nine authorities stay false.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "session_id",
+    "effect_class",
+    "status",
+    "target_class",
+    "evidence_class",
+    "source_compatibility_receipt",
+    "source_compatibility_receipt_digest",
+    "s2_5_final_attestation",
+    "s2_5_final_attestation_digest",
+    "manifest_revalidation",
+    "runtime_attestor",
+    "boundary",
+    "failure_reason",
+    "source_head",
+    "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "ingestion_compatibility_receipt_v1"},
+    "session_id": {"const": "S2.2B"},
+    "effect_class": {"const": "REMOTE_READONLY"},
+    "status": {
+      "enum": [
+        "SOURCE_REVALIDATION_PASS",
+        "RUNTIME_COMPATIBILITY_ATTESTED",
+        "EXTERNAL_VERIFICATION_PENDING",
+        "COMPATIBILITY_REJECTED"
+      ]
+    },
+    "target_class": {"enum": ["simulated_harness", "disposable_local", "production"]},
+    "evidence_class": {
+      "enum": ["LOCAL_REPRODUCIBLE", "STRUCTURAL_ONLY", "PLATFORM_OR_EXTERNAL_ATTESTED"]
+    },
+    "source_compatibility_receipt": {
+      "type": "object",
+      "required": ["schema_version", "self_digest", "learning_runtime_digest", "migration_fingerprints"],
+      "properties": {
+        "schema_version": {
+          "enum": ["source_compatibility_receipt_v1", "source_compatibility_receipt_v2"]
+        },
+        "self_digest": {"$ref": "#/$defs/digest"},
+        "learning_runtime_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "source_compatibility_receipt_digest": {"$ref": "#/$defs/digest"},
+    "s2_5_final_attestation": {
+      "anyOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "required": ["schema_version", "self_digest", "status", "target_class"],
+          "properties": {
+            "schema_version": {"const": "s2_5_final_attestation_v1"},
+            "self_digest": {"$ref": "#/$defs/digest"}
+          }
+        }
+      ]
+    },
+    "s2_5_final_attestation_digest": {
+      "anyOf": [{"type": "null"}, {"$ref": "#/$defs/digest"}]
+    },
+    "manifest_revalidation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "application_root_learning_runtime_digest",
+        "learning_runtime_digest_match",
+        "verifier_node_id",
+        "observed_at",
+        "evidence_expires_at"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["file", "expected_fingerprint", "observed_fingerprint", "result"],
+            "properties": {
+              "file": {"type": "string", "pattern": "^V1[0-9]{2}__[a-z0-9_]+\\.sql$"},
+              "expected_fingerprint": {"$ref": "#/$defs/bare_sha256"},
+              "observed_fingerprint": {
+                "anyOf": [{"type": "null"}, {"$ref": "#/$defs/bare_sha256"}]
+              },
+              "result": {"enum": ["MATCH", "MISMATCH", "ABSENT"]}
+            }
+          }
+        },
+        "application_root_learning_runtime_digest": {
+          "anyOf": [{"type": "null"}, {"$ref": "#/$defs/digest"}]
+        },
+        "learning_runtime_digest_match": {"type": "boolean"},
+        "verifier_node_id": {"type": "string", "minLength": 1},
+        "observed_at": {"type": "string", "format": "date-time"},
+        "evidence_expires_at": {"type": "string", "format": "date-time"}
+      }
+    },
+    "runtime_attestor": {
+      "anyOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "attestor_identity",
+            "signature_namespace",
+            "attestation_kind",
+            "manifest_revalidation_digest",
+            "s2_5_final_attestation_digest",
+            "attested_at",
+            "expires_at",
+            "signature_armored"
+          ],
+          "properties": {
+            "attestor_identity": {"const": "aiml-s2-2b-ingestion-attestor-v1"},
+            "signature_namespace": {"const": "arcane-equilibrium-aiml-s2-2b-ingestion-compatibility"},
+            "attestation_kind": {"const": "INGESTION"},
+            "manifest_revalidation_digest": {"$ref": "#/$defs/digest"},
+            "s2_5_final_attestation_digest": {"$ref": "#/$defs/digest"},
+            "attested_at": {"type": "string", "format": "date-time"},
+            "expires_at": {"type": "string", "format": "date-time"},
+            "signature_armored": {"type": "string", "minLength": 1, "maxLength": 16384}
+          }
+        }
+      ]
+    },
+    "boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "remote_readonly_only",
+        "pg_write_surface_absent",
+        "fixture_impersonates_platform_attested",
+        "nine_authorities_false"
+      ],
+      "properties": {
+        "remote_readonly_only": {"const": true},
+        "pg_write_surface_absent": {"const": true},
+        "fixture_impersonates_platform_attested": {"const": false},
+        "nine_authorities_false": {"const": true}
+      }
+    },
+    "failure_reason": {"anyOf": [{"type": "null"}, {"type": "string", "minLength": 1}]},
+    "source_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "RUNTIME_COMPATIBILITY_ATTESTED"}}},
+      "then": {
+        "properties": {
+          "target_class": {"const": "production"},
+          "evidence_class": {"const": "PLATFORM_OR_EXTERNAL_ATTESTED"},
+          "s2_5_final_attestation": {"type": "object"},
+          "runtime_attestor": {"type": "object"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"status": {"const": "SOURCE_REVALIDATION_PASS"}}},
+      "then": {
+        "properties": {
+          "evidence_class": {"const": "LOCAL_REPRODUCIBLE"},
+          "s2_5_final_attestation": {"type": "object"},
+          "runtime_attestor": {"type": "null"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"evidence_class": {"const": "PLATFORM_OR_EXTERNAL_ATTESTED"}}},
+      "then": {
+        "properties": {"status": {"const": "RUNTIME_COMPATIBILITY_ATTESTED"}}
+      }
+    }
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "bare_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

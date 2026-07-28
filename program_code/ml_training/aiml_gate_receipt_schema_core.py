@@ -237,6 +237,15 @@ SCHEMA_FILES = {
     "aiml_component_effect_classification_v3": (
         "aiml_component_effect_classification_v3.schema.json"
     ),
+    # S2.2B(WP5 tranche 2·S2.5 design §10)——additive:LR1 runtime revalidation 的
+    # ingestion-compatibility receipt(effect class REMOTE_READONLY;唯一可發 LR1 runtime
+    # DONE 的 row,runtime-DONE 消費 S2.5B@EFFECT_DONE)。加這鍵純為 schema 查找,絕不進
+    # aiml_effect_classifier_digest() 的六個 S0.3 常量輸入(見 §7.2),S0.3 分類身分不動;
+    # 亦不改 PROGRAM_SCHEMA_PATHS 與 v1/v2/v3 component matrix/digest。中央閘依 exact
+    # schema_version 委派 aiml_gate_receipt_s2_2b.validate_s2_2b_artifact(S2.2A 三值鏈
+    # 重算 + s2_5_final_attestation 全套重驗含 attestor 驗簽 + V151-V160 逐項 revalidation
+    # 導出式結果)。乾淨 [] 不證任何 runtime;九項 authority 恆 false。
+    "ingestion_compatibility_receipt_v1": "ingestion_compatibility_receipt_v1.schema.json",
 }
 
 S0_DEPENDENCY_DIGESTS = {
