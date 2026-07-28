@@ -69,6 +69,12 @@ SIDE_EFFECT_CLASSES = {
     # 面(design §6 forbidden surfaces;migration/credential/host-identity token 不在封閉
     # KNOWN_SURFACES 詞彙,以 pg+secret+deploy 覆蓋其語意,同 s2_4 route 表先例)。
     "s2_5_start_intent",
+    # S2.2B(S2E.1)runtime-DONE ingestion-compatibility route class(identity-only 註冊;
+    # registry s2_2b_ingestion_compatibility_adapter_v1 恆 fail-closed
+    # EXTERNAL_VERIFICATION_PENDING,可執行 runtime observer/attestor 屬 S2E.4)。FORWARD-only
+    # 表面一致性鏡 pg_observer_bootstrap:REMOTE_READONLY 觀測面以 pg/runtime_effect 表面 +
+    # runtime_claim=true + 高/critical risk 宣告;同樣刻意 NOT 加反向規則。
+    "s2_2b_ingestion_check_intent",
 }
 SOURCE_WRITE_SHAPES = {
     "implementation", "feature", "change", "bug", "fix", "refactor", "migration",
@@ -103,6 +109,9 @@ S2_4_INSTALL_ADAPTER_ID = "s2_4_install_adapter_v1"
 # AUTHORITY_LOCKED_PRODUCTION_CAPABLE;真 route_task effect 節點注入延遲到 S2.5 EFFECT session)。
 S2_5_RUNTIME_START_ADAPTER_ID = "s2_5_runtime_start_adapter_v1"
 S2_5_FINAL_ATTESTATION_ADAPTER_ID = "s2_5_final_attestation_adapter_v1"
+# S2.2B(S2E.1):ingestion-compatibility runtime-DONE effect adapter 的 route-node 身分
+# (registry identity-only 條目;可執行 runtime observer/attestor 屬 S2E.4)。
+S2_2B_INGESTION_ADAPTER_ID = "s2_2b_ingestion_compatibility_adapter_v1"
 P0B_CLAIM_KEYS_BY_PHASE = {
     "stage": frozenset({
         "p0b_effect_adapter_selection",
@@ -158,6 +167,122 @@ P0B_CLAIM_KEYS_BY_PHASE = {
         "p0b_protected_runtime_baseline",
         "p0b_staged_candidate_board",
     }),
+}
+# ── S2E.1:六段 S2 effect DAG 的 claim-gated EFFECT-lane 判別子(組合式;鏡 P0-B 兩段式先例)──
+# side_effect_class 仍是粗類判別(FORWARD 表面一致性照舊在 _normalize_task_facts 執法);
+# 「EFFECT session」的 route 層機器可判定定義 = 下方 selector claim admission:selector 缺席 →
+# 現行 source route(零 effect 節點注入=各 registry invariant 要求的行為);selector 在場 →
+# exact-match 恰一 step + exact claim-key set + selector↔side_effect_class 互鎖,任何不符
+# typed ValueError,絕不靜默回落 source route。route 是純編譯器:只驗身分與集合,不驗真偽——
+# head/freshness/permit/attestor 全在 adapter 與 closure 層閉合。
+# W6A/W6B probe 共用 adapter id 與 side_effect_class,scope 互斥由 step 差(selector)+ adapter
+# 的 scope-bound authorization 消耗雙層保證;S2.5A/S2.5B 共用 s2_5_start_intent 亦同。
+# per-step metadata(intent/result/rollback schema versions、S2.5 actor 與 independent
+# postcheck node id)取自 registry 對應條目與 v3 矩陣(aiml_gate_receipt_s2_5),由測試釘等值。
+S2_EFFECT_SELECTION_CLAIM_KEY = "s2_effect_adapter_selection"
+S2_EFFECT_STEPS: dict[str, dict[str, Any]] = {
+    "S2_0_APPLY": {
+        "adapter_id": PG_OBSERVER_BOOTSTRAP_ADAPTER_ID,
+        "side_effect_class": "pg_observer_bootstrap",
+        "intent_schema_version": "pg_observer_bootstrap_intent_v1",
+        "result_schema_version": "pg_observer_bootstrap_result_v1",
+        "rollback_schema_version": "pg_observer_bootstrap_rollback_v1",
+    },
+    "S2_4_W6A_PROBE": {
+        "adapter_id": S2_4_CAPABILITY_PROBE_ADAPTER_ID,
+        "side_effect_class": "s2_4_capability_probe_intent",
+        "probe_scope": "PREPARE_SANDBOX",
+        "intent_schema_version": "s2_4_capability_probe_intent_v1",
+        "result_schema_version": "s2_4_capability_probe_effect_receipt_v1",
+        "rollback_schema_version": "s2_4_capability_probe_rollback_v1",
+    },
+    "S2_4_W6A_PREPARE": {
+        "adapter_id": S2_4_PREPARE_ADAPTER_ID,
+        "side_effect_class": "s2_4_prepare_intent",
+        "intent_schema_version": "s2_4_prepare_intent_v1",
+        "result_schema_version": "s2_4_prepare_effect_receipt_v1",
+        "rollback_schema_version": "s2_4_prepare_rollback_v1",
+    },
+    "S2_4_W6B_PROBE": {
+        "adapter_id": S2_4_CAPABILITY_PROBE_ADAPTER_ID,
+        "side_effect_class": "s2_4_capability_probe_intent",
+        "probe_scope": "INSTALLED_UNIT",
+        "intent_schema_version": "s2_4_capability_probe_intent_v1",
+        "result_schema_version": "s2_4_capability_probe_effect_receipt_v1",
+        "rollback_schema_version": "s2_4_capability_probe_rollback_v1",
+    },
+    "S2_4_W6B_APPLY": {
+        "adapter_id": S2_4_INSTALL_ADAPTER_ID,
+        "side_effect_class": "s2_4_install_plan",
+        "intent_schema_version": "s2_4_install_plan_v1",
+        "result_schema_version": "s2_4_install_effect_receipt_v1",
+        "rollback_schema_version": "s2_4_install_rollback_v1",
+    },
+    "S2_5A_START": {
+        "adapter_id": S2_5_RUNTIME_START_ADAPTER_ID,
+        "side_effect_class": "s2_5_start_intent",
+        "intent_schema_version": "s2_5_start_intent_v1",
+        "result_schema_version": "s2_5_running_attestation_v1",
+        "rollback_schema_version": "s2_5_rollback_drill_receipt_v1",
+        "actor_node_id": "s2_5_host_service_actor",
+        "independent_postcheck_node_id": "s2_5_running_postcheck_v1",
+    },
+    "S2_1_DRILL": {
+        "adapter_id": QUIESCE_FENCE_ADAPTER_ID,
+        "side_effect_class": "quiesce_fence",
+        "intent_schema_version": "quiesce_intent_v1",
+        "result_schema_version": "quiesce_result_v1",
+        "rollback_schema_version": "quiesce_rollback_v1",
+    },
+    "S2_5B_FINAL": {
+        "adapter_id": S2_5_FINAL_ATTESTATION_ADAPTER_ID,
+        "side_effect_class": "s2_5_start_intent",
+        "intent_schema_version": "s2_5_start_intent_v1",
+        "result_schema_version": "s2_5_final_attestation_v1",
+        "rollback_schema_version": "s2_5_rollback_drill_receipt_v1",
+        "actor_node_id": "s2_5_host_service_actor",
+        "independent_postcheck_node_id": "s2_5_final_postcheck_v1",
+    },
+    "S2_2B_RUNTIME_DONE": {
+        # identity-only:無 intent/rollback schema(registry 條目只綁既有 receipt schema);
+        # runtime observer/attestor 的可執行性屬 S2E.4,route 可判定性今日即封閉。
+        "adapter_id": S2_2B_INGESTION_ADAPTER_ID,
+        "side_effect_class": "s2_2b_ingestion_check_intent",
+        "result_schema_version": "ingestion_compatibility_receipt_v1",
+    },
+}
+# per-step exact claim inventory(§1.2-corrected DAG 次序編碼成 claim key 名:上一步 terminal
+# receipt digest = 下一 route 的 claim input;route 層 exact-set,missing/extra 皆 ValueError)。
+S2_CLAIM_KEYS_BY_STEP: dict[str, frozenset[str]] = {
+    step: frozenset({S2_EFFECT_SELECTION_CLAIM_KEY, *claims})
+    for step, claims in {
+        "S2_0_APPLY": ("s2_0_operator_authorization",),
+        "S2_4_W6A_PROBE": ("s2_4_probe_authorization", "s2_0_effect_receipt"),
+        "S2_4_W6A_PREPARE": (
+            "s2_4_prepare_authorization", "s2_0_effect_receipt",
+            "s2_4_prepare_sandbox_probe_receipt",
+        ),
+        "S2_4_W6B_PROBE": (
+            "s2_4_probe_authorization", "s2_0_effect_receipt", "s2_4_prepared_bundle",
+        ),
+        # 雙 permit(registry s2_4_install_adapter_v1:aggregate + 窄 PG-migration profile)。
+        "S2_4_W6B_APPLY": (
+            "s2_4_install_authorization", "s2_4_pg_migration_authorization",
+            "s2_0_effect_receipt", "s2_4_prepared_bundle",
+            "s2_4_installed_unit_probe_receipt",
+        ),
+        "S2_5A_START": ("s2_5a_start_permit", "s2_4_install_effect_receipt"),
+        "S2_1_DRILL": (
+            "s2_1_operator_authorization", "s2_0_effect_receipt",
+            "s2_4_install_effect_receipt", "s2_5a_running_attestation",
+        ),
+        "S2_5B_FINAL": (
+            "s2_5b_final_permit", "s2_1_drill_receipt", "s2_5a_running_attestation",
+        ),
+        "S2_2B_RUNTIME_DONE": (
+            "s2_2b_observation_authorization", "s2_5b_final_attestation",
+        ),
+    }.items()
 }
 ROUTED_WORK_NODES = {
     "implementation", "implementation_backend", "implementation_frontend",
@@ -222,6 +347,54 @@ def _p0b_effect_phase(claim_inputs: dict[str, str]) -> str | None:
             f"extra={sorted(set(claim_inputs) - expected)}"
         )
     return phase
+
+
+def s2_effect_selection_digest(step: str) -> str:
+    """回傳一個 S2 effect step 唯一可被 admission 的 selector digest。
+
+    鏡 p0b_effect_selection_digest;sibling literal `s2_effect_adapter_selection_v1`
+    (literal 非 schema 檔,欄位 {schema_version, adapter_id, step, side_effect_class}),
+    不重用也不需要 v2。
+    """
+
+    if step not in S2_EFFECT_STEPS:
+        raise ValueError(f"invalid S2 effect step: {step}")
+    contract = S2_EFFECT_STEPS[step]
+    selection = {
+        "adapter_id": contract["adapter_id"],
+        "schema_version": "s2_effect_adapter_selection_v1",
+        "side_effect_class": contract["side_effect_class"],
+        "step": step,
+    }
+    return _sha256_bytes(json.dumps(
+        selection, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8"))
+
+
+def _s2_effect_step(claim_inputs: dict[str, str]) -> str | None:
+    """鏡 _p0b_effect_phase 的 fail-closed 三態:缺席 None/裸 claim raise/不 exact raise。"""
+
+    selector = claim_inputs.get(S2_EFFECT_SELECTION_CLAIM_KEY)
+    s2_keys = set().union(*S2_CLAIM_KEYS_BY_STEP.values())
+    if selector is None:
+        if set(claim_inputs).intersection(s2_keys):
+            raise ValueError("S2 effect claim_inputs require an exact selection digest")
+        return None
+    matching = [
+        step for step in S2_EFFECT_STEPS
+        if selector == s2_effect_selection_digest(step)
+    ]
+    if len(matching) != 1:
+        raise ValueError("S2 effect adapter selection digest is invalid")
+    step = matching[0]
+    expected = S2_CLAIM_KEYS_BY_STEP[step]
+    if set(claim_inputs) != expected:
+        raise ValueError(
+            f"S2 effect selection digest for {step} requires exact claim_inputs: "
+            f"missing={sorted(expected - set(claim_inputs))} "
+            f"extra={sorted(set(claim_inputs) - expected)}"
+        )
+    return step
 
 
 def _documentation_path(path: str) -> bool:
@@ -549,6 +722,19 @@ def _normalize_task_facts(task_facts: dict[str, Any]) -> dict[str, Any]:
                 f"broker surfaces {sorted(forbidden)}; the S2.5 lifecycle cannot reach "
                 "PG-write/secret/install authority (design §6/§14)"
             )
+    # S2.2B(S2E.1)FORWARD-only 表面一致性——s2_2b_ingestion_check_intent 是 runtime-DONE 的
+    # REMOTE_READONLY 觀測面,鏡 pg_observer_bootstrap:必須帶 pg/runtime_effect 表面 +
+    # runtime_claim=true + 高/critical risk;同樣刻意 NOT 加反向「裸 pg/runtime_effect 表面即需
+    # 此類」規則(那會回歸既有 deploy/ops 路由)。
+    if effect == "s2_2b_ingestion_check_intent" and not (
+        normalized_surfaces & {"pg", "runtime_effect"}
+        and normalized.get("runtime_claim") is True
+        and risk in {"high", "critical"}
+    ):
+        raise ValueError(
+            "side_effect_class=s2_2b_ingestion_check_intent requires a pg/runtime_effect "
+            "surface, runtime_claim=true, and high or critical risk"
+        )
     normalized["side_effect_class"] = effect
     aiml_program_adoption = aiml_program_adoption_selected(
         normalized.get("claim_inputs", {})
@@ -708,6 +894,17 @@ def route_task(task_facts: dict[str, Any]) -> dict[str, Any]:
                 "P0-B effect selection requires deploy, runtime_claim=true, "
                 "authority/service/runtime_effect surfaces, and high or critical risk"
             )
+    # S2E.1:selector 命中時強制 selector↔side_effect_class 互鎖(wrong class → typed
+    # ValueError);FORWARD 表面規則已在 _normalize_task_facts 原樣跑過,effect lane 不放鬆
+    # 任何 source-lane 表面規則(例:S2.5B route 帶 pg 面照樣被 s2_5 forbidden-surface 規則拒)。
+    s2_effect_step = _s2_effect_step(facts["claim_inputs"])
+    if s2_effect_step is not None and effect != (
+        S2_EFFECT_STEPS[s2_effect_step]["side_effect_class"]
+    ):
+        raise ValueError(
+            f"S2 effect step {s2_effect_step} requires side_effect_class="
+            f"{S2_EFFECT_STEPS[s2_effect_step]['side_effect_class']}"
+        )
     implementation = shape in SOURCE_WRITE_SHAPES
     full_stack_implementation = bool(
         implementation
@@ -873,24 +1070,47 @@ def route_task(task_facts: dict[str, Any]) -> dict[str, Any]:
                 result_schema_version="target_host_effect_result_v1",
             )
             postcheck_requires = [TARGET_HOST_PROBE_ADAPTER_ID]
-        # S2.0(WP2)pg_observer_bootstrap 與 S2.1(WP3)quiesce_fence:route class(side_effect_class +
-        # 表面一致性)已宣告,但依各自 registry invariant「no route_task effect node injected before the
-        # EFFECT session」,此 SOURCE 波刻意 NOT 注入 PG_OBSERVER_BOOTSTRAP_ADAPTER_ID / QUIESCE_FENCE_ADAPTER_ID
-        # effect 節點——這兩類任務皆走 ops_preflight -> ops_postcheck(無 effect adapter),生產/live 施加恆
-        # fail-closed(EXTERNAL_VERIFICATION_PENDING)直到各自 EFFECT session 帶 exact operator SSHSIG
-        # (quiesce_fence 另需 S2.0@EFFECT_DONE,且排在 S2.4/S2.5 之後)才注入。
-        # S2.4(WP4·W1)s2_4_capability_probe_intent / s2_4_prepare_intent / s2_4_install_plan 同姿態:
-        # 三 route class 已宣告 + FORWARD-only 表面一致性已驗,但 SOURCE lane 刻意 NOT 注入
-        # S2_4_CAPABILITY_PROBE_ADAPTER_ID / S2_4_PREPARE_ADAPTER_ID / S2_4_INSTALL_ADAPTER_ID effect
-        # 節點(§4:「No effect node is injected for an ordinary source or documentation task」)——
-        # 生產施加恆 fail-closed(EXTERNAL_VERIFICATION_PENDING)直到 S2.4 EFFECT session:W6A 先收
-        # PREPARE_SANDBOX probe 節點、其 terminal receipt 後收 PREPARE 節點;W6B 先收 INSTALLED_UNIT
-        # probe 節點、其 terminal receipt + 最終授權後只收 APPLY coordinator 節點。
-        # S2.5(WP5)s2_5_start_intent 同姿態:route class 已宣告 + FORWARD-only 表面一致性已驗,
-        # 但 SOURCE lane 刻意 NOT 注入 S2_5_RUNTIME_START_ADAPTER_ID / S2_5_FINAL_ATTESTATION_ADAPTER_ID
-        # effect 節點——真注入延遲到 S2.5 EFFECT session(S2.5A 需 S2.4@EFFECT_DONE_INACTIVE + fresh
-        # start permit;S2.5B 需 S2.1@EFFECT_DONE + fresh final permit;attested status 只由 attestor
-        # 簽章解鎖)。
+        elif s2_effect_step is not None:
+            # S2E.1:S2 EFFECT lane——selector claim admission 即「EFFECT session」的 route 層
+            # 機器判定(見 S2_EFFECT_STEPS 註解與各 registry invariant)。每 sub-phase 恰一條
+            # route、恰一個 adapter 節點(per-phase 而非一 route 多節點:W6A/W6B probe 同
+            # node-id 會碰撞、closure 每 adapter 節點恰一 receipt、§1.2-corrected DAG 次序在
+            # continuation 協議下自然表達為順序 admissions——上一步 terminal receipt digest =
+            # 下一 route 的 claim input,已編碼在 S2_CLAIM_KEYS_BY_STEP)。
+            # applier(adapter 節點)!= verifier(ops_postcheck);approval 是授權非驗證。
+            contract = S2_EFFECT_STEPS[s2_effect_step]
+            approval_id = f"pm_{s2_effect_step.lower()}_approval"
+            add(
+                approval_id, role="PM", requires=["ops_preflight"],
+                reason=(
+                    f"operator/PM authorizes the exact S2 {s2_effect_step} intent; "
+                    "not verification"
+                ),
+            )
+            add(
+                contract["adapter_id"], kind="effect_adapter",
+                requires=[approval_id],
+                reason=f"claim-admitted S2 {s2_effect_step} effect seam",
+                effect_step=s2_effect_step,
+                **{
+                    key: value for key, value in contract.items()
+                    if key not in {"adapter_id", "side_effect_class"}
+                },
+            )
+            postcheck_requires = [contract["adapter_id"]]
+        # S2 六段 route class(S2.0 pg_observer_bootstrap / S2.1 quiesce_fence / S2.4 三類 /
+        # S2.5 s2_5_start_intent / S2.2B s2_2b_ingestion_check_intent)在 SOURCE lane(selector
+        # 缺席)仍「絕不」注入 effect 節點——這些任務走 ops_preflight -> ops_postcheck(中間無
+        # effect adapter),生產/live 施加恆 fail-closed(EXTERNAL_VERIFICATION_PENDING)。
+        # S2E.1 起,「EFFECT session」有了 route 層機器可判定的定義:上方 elif 分支的 selector
+        # claim admission(exact selector digest + exact per-step claim inventory + class 互鎖,
+        # 見 S2_EFFECT_STEPS/_s2_effect_step)。effect lane 注入的節點鏈為
+        # ops_preflight -> pm_<step>_approval -> <ADAPTER_ID> -> ops_postcheck;路權真偽
+        # (exact operator SSHSIG/attestor/head/freshness/replay-ledger 消耗)仍全在 adapter 與
+        # closure 層閉合——route admission 永遠不是 apply 授權(W6A 先 PREPARE_SANDBOX probe、
+        # W6B 先 INSTALLED_UNIT probe + 雙 permit;S2.5A 需 S2.4@EFFECT_DONE_INACTIVE、S2.1 需
+        # S2.4/S2.5 之後、S2.5B 需 S2.1@EFFECT_DONE;S2.2B runtime-DONE 唯一合法上游 =
+        # s2_5_final_attestation_v1,可執行 observer/attestor 屬 S2E.4)。
         add("ops_postcheck", role="OPS", requires=postcheck_requires, reason="independent operational evidence")
         predecessor = "ops_postcheck"
     elif unsupported_effect:
