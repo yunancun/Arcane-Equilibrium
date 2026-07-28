@@ -13,6 +13,7 @@ from typing import Any
 from agent_governance_schema import schema_subset_errors
 from agent_governance_effect_evidence import deploy_evidence_identity_errors
 import agent_governance_p0b_effects as p0b_effects
+import agent_governance_s2_effect_binding as s2_effect_binding
 import agent_governance_target_host_effects as target_host_effects
 
 
@@ -667,6 +668,15 @@ def validate_effect_evidence(
         return target_host_effects.validate_target_host_effect_evidence(
             evidence, expected_source_head=expected_source_head
         )
+    if isinstance(receipt, dict) and receipt.get("schema_version") in (
+        s2_effect_binding.S2_RECEIPT_SCHEMA_VERSIONS
+    ):
+        # S2E.1 六段 S2 effect DAG:委派給 sibling module(其內把 receipt 實際重算再委派
+        # 中央 AIML 閘的 per-step validators;s2_4/s2_2b receipt 無 adapter_id 欄位,故按
+        # schema_version 分派)。
+        return s2_effect_binding.validate_s2_effect_evidence(
+            evidence, expected_source_head=expected_source_head
+        )
     errors = validate_effect_receipt(receipt, require_success=True)
     if not isinstance(receipt, dict):
         return errors, None
@@ -714,6 +724,12 @@ def validate_deploy_effect_binding(
         for node in effect_nodes
     ):
         return target_host_effects.validate_target_host_effect_binding(
+            packet, route, fragments_by_node, evidence_by_id, valid_receipts
+        )
+    if any(node.get("id") in s2_effect_binding.S2_ADAPTER_IDS for node in effect_nodes):
+        # S2E.1 六段 S2 effect DAG:step 由 route claim admission 導出,委派 sibling module
+        # 執行「route 有該 adapter 節點 ⇔ 恰一 receipt」與 claim/intent/postcheck 綁定。
+        return s2_effect_binding.validate_s2_effect_binding(
             packet, route, fragments_by_node, evidence_by_id, valid_receipts
         )
     errors: list[str] = []
