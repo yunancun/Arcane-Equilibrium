@@ -60,7 +60,10 @@ _MARKER_RE = re.compile(
 )
 # 主張格式:歷史敘事禁止佔用(舊世代一律寫「bound to `<sha>`」),
 # 所以每一個命中都是「現行綁定」的主張,必須等於 artifact 實值。
-_CLAIM_RE = re.compile(r"source_head\s*=\s*`?([0-9a-f]{7,40})")
+# E2 round-6 P2-2:全形等號「＝」納入,關掉蓄意規避之外最廉價的變體。
+_CLAIM_RE = re.compile(r"source_head\s*[=＝]\s*`?([0-9a-f]{7,40})")
+# 現行 receipt 世代的 round 序號;re-emission 時與 EXPECTED_SOURCE_HEAD 同 commit 更新。
+EXPECTED_ROUND = 5
 _ALLOWED_CLASSIFICATIONS = {
     "source_closure_blocker",
     "accepted_carry_forward",
@@ -111,13 +114,14 @@ def test_receipt_binding_markers_agree_with_the_artifacts() -> None:
             "path": str(path.relative_to(ROOT)),
             "marker_count": len(markers),
         }
-        marker_head, carrier, artifacts, _round, status = markers[0]
+        marker_head, carrier, artifacts, round_no, status = markers[0]
         assert marker_head == head, {
             "path": str(path.relative_to(ROOT)),
             "marker_source_head": marker_head,
             "artifact_source_head": head,
         }
         assert int(artifacts) == count, (path.name, artifacts, count)
+        assert int(round_no) == EXPECTED_ROUND, (path.name, round_no)
         assert status == "COMMITTED", (path.name, status)
         # emitter 對髒 owned scope 硬拒 ⇒ artifact 永遠由綁定 head 之後的另一個
         # commit 承載;carrier==source_head 只可能出自手寫投影。
@@ -174,6 +178,15 @@ def test_pm_owned_projection_is_set_equal_to_the_live_abi() -> None:
         re.MULTILINE,
     )
     progress_ids = {obligation_id for obligation_id, _ in rows}
+    # E2 round-6 P2-1:set-equality 容忍重複列——merge-conflict 式的「同 id 兩列、
+    # classification 互相矛盾」曾實測為綠;列數必須等於去重後的 id 數。
+    assert len(rows) == len(progress_ids), {
+        "duplicated_ids": sorted(
+            obligation_id
+            for obligation_id in progress_ids
+            if sum(1 for row_id, _ in rows if row_id == obligation_id) > 1
+        ),
+    }
     assert progress_ids == abi_ids, {
         "missing_from_progress": sorted(abi_ids - progress_ids),
         "not_pm_owned_in_the_live_abi": sorted(progress_ids - abi_ids),
