@@ -7,6 +7,7 @@ receipt 實際重算的縫(``_receipt_validation_errors``,真身=中央 AIML 閘
 """
 from __future__ import annotations
 
+import json
 import sys
 from copy import deepcopy
 from pathlib import Path
@@ -707,3 +708,177 @@ def test_binding_success_sets_match_per_step_result_vocabularies() -> None:
         assert contract["receipt_schema_version"] == (
             S2_EFFECT_STEPS[step]["result_schema_version"]
         ), step
+
+
+# --------------------------------------------------------------------------- #
+# 契約漂移守衛(P2):欄位名/schema 版本/claim 覆蓋今日全對,但先前無任何守衛
+# --------------------------------------------------------------------------- #
+def _schema_of(schema_version: str) -> dict:
+    import aiml_gate_receipt_schema_core as core
+
+    return json.loads(
+        (core.SCHEMA_DIR / core.SCHEMA_FILES[schema_version]).read_text(encoding="utf-8")
+    )
+
+
+def _resolve_node(node) -> dict | None:
+    """解析 anyOf/allOf/oneOf 包裹;內嵌別的 typed artifact 時改以該 artifact 的正本 schema 為準
+    (巢狀處常只重述 schema_version/self_digest 兩欄,例:ingestion receipt 的
+    s2_5_final_attestation 錨)。"""
+
+    import aiml_gate_receipt_schema_core as core
+
+    if not isinstance(node, dict):
+        return None
+    properties = node.get("properties")
+    if isinstance(properties, dict):
+        const = (properties.get("schema_version") or {}).get("const")
+        if const in core.SCHEMA_FILES:
+            return _schema_of(const)
+        return node
+    for key in ("anyOf", "allOf", "oneOf"):
+        for branch in node.get(key, []):
+            resolved = _resolve_node(branch)
+            if resolved is not None:
+                return resolved
+    return None
+
+
+def _schema_has_field(schema: dict, dotted: str) -> bool:
+    node = _resolve_node(schema)
+    parts = dotted.split(".")
+    for index, part in enumerate(parts):
+        properties = node.get("properties") if isinstance(node, dict) else None
+        if not isinstance(properties, dict) or part not in properties:
+            return False
+        if index == len(parts) - 1:
+            return True
+        node = _resolve_node(properties[part])
+    return False
+
+
+def test_receipt_contract_field_names_exist_in_the_real_schemas() -> None:
+    """契約表的每個 receipt 欄位名必真存在於該 schema(防欄位改名後綁定靜默變 None)。"""
+
+    field_keys = (
+        "status_field", "started_field", "observed_field", "expiry_field", "host_field",
+        "intent_id_field", "intent_digest_field",
+    )
+    for step, contract in binding.S2_STEP_RECEIPT_CONTRACTS.items():
+        schema = _schema_of(contract["receipt_schema_version"])
+        for key in field_keys:
+            dotted = contract.get(key)
+            if dotted is None:
+                continue
+            assert _schema_has_field(schema, dotted), (step, key, dotted)
+        for claim_key, dotted in contract["claim_receipt_bindings"].items():
+            assert _schema_has_field(schema, dotted), (step, claim_key, dotted)
+
+
+def test_claim_bindings_and_declaration_only_claims_cover_the_route_inventory() -> None:
+    """E2-P2-1:空/部分綁定必須是刻意的——bindings ∪ declaration_only ∪ {selector} 恰等於
+    route claim inventory,任一新 claim 未分類即紅。"""
+
+    for step, contract in binding.S2_STEP_RECEIPT_CONTRACTS.items():
+        bound = set(contract["claim_receipt_bindings"])
+        declared = set(contract["declaration_only_claims"])
+        assert not (bound & declared), (step, sorted(bound & declared))
+        assert bound | declared | {S2_EFFECT_SELECTION_CLAIM_KEY} == set(
+            S2_CLAIM_KEYS_BY_STEP[step]
+        ), step
+    # 最高權限那一步的雙 permit 必須真綁到 receipt 欄位(E3-M-2),不得只作宣告。
+    apply_bindings = binding.S2_STEP_RECEIPT_CONTRACTS["S2_4_W6B_APPLY"][
+        "claim_receipt_bindings"
+    ]
+    assert apply_bindings["s2_4_install_authorization"] == "aggregate_authorization_digest"
+    assert apply_bindings["s2_4_pg_migration_authorization"] == "pg_authorization_digest"
+    assert apply_bindings["s2_4_prepare_effect_receipt"] == "prepare_result_digest"
+    for step in ("S2_4_W6A_PROBE", "S2_4_W6B_PROBE"):
+        assert binding.S2_STEP_RECEIPT_CONTRACTS[step]["claim_receipt_bindings"][
+            "s2_4_probe_authorization"
+        ] == "authorization_digest"
+    assert binding.S2_STEP_RECEIPT_CONTRACTS["S2_4_W6A_PREPARE"][
+        "claim_receipt_bindings"
+    ]["s2_4_prepare_authorization"] == "authorization_digest"
+    # 兩個 probe step 共用 schema 但 claim inventory 不同 → 契約子物件不得是同一個 dict。
+    w6a = binding.S2_STEP_RECEIPT_CONTRACTS["S2_4_W6A_PROBE"]
+    w6b = binding.S2_STEP_RECEIPT_CONTRACTS["S2_4_W6B_PROBE"]
+    assert w6a["claim_receipt_bindings"] is not w6b["claim_receipt_bindings"]
+    assert w6a["declaration_only_claims"] != w6b["declaration_only_claims"]
+
+
+def test_route_metadata_schema_versions_equal_the_registry_schema_paths() -> None:
+    """9 個 step 的 intent/result/rollback schema version ↔ registry `*_schema_path` 等值。"""
+
+    registry = json.loads(
+        (ROOT / ".codex/agent_registry_v1.json").read_text(encoding="utf-8")
+    )
+    adapters = registry["effect_adapters"]
+    for step, contract in S2_EFFECT_STEPS.items():
+        entry = adapters[contract["adapter_id"]]
+        # s2_4 家族兩者皆有:receipt_schema_path 才是 effect receipt(result_schema_path 是
+        # PREPARE bundle / install step result 等另一種 artifact)。
+        result_path = entry.get("receipt_schema_path") or entry["result_schema_path"]
+        expected = {
+            "result_schema_version": result_path,
+            "intent_schema_version": entry.get("intent_schema_path"),
+            "rollback_schema_version": entry.get("rollback_schema_path"),
+        }
+        for key, path in expected.items():
+            if key not in contract:
+                assert path is None or key == "result_schema_version", (step, key)
+                continue
+            assert path is not None, (step, key)
+            assert contract[key] == Path(path).name.removesuffix(".schema.json"), (
+                step, key,
+            )
+            assert (ROOT / path).is_file(), path
+
+
+def test_central_gate_self_digest_gap_list_is_pinned_to_the_gate_source() -> None:
+    """CC-C #1:中央閘「無 schema_version 專屬分支」的清單必與其原始碼一致(漂移即紅)。"""
+
+    gate_source = (
+        ML_ROOT / "aiml_gate_receipt_validator.py"
+    ).read_text(encoding="utf-8")
+    for schema_version in binding.S2_RECEIPT_SCHEMA_VERSIONS:
+        has_branch = f'schema_version == "{schema_version}"' in gate_source
+        in_gap = schema_version in binding._CENTRAL_GATE_SELF_DIGEST_GAP_SCHEMAS
+        assert has_branch is not in_gap, schema_version
+
+
+def test_s2_receipts_get_a_distinct_execution_attestation_identity() -> None:
+    """E3-M-1:S2 收據無 receipt_digest 欄位,舊碼把它們全塌成 ("...", "") 同一身分。"""
+
+    from agent_governance_execution_attestation import validate_execution_attestations
+
+    receipts = {
+        "w6a": _receipt("S2_4_W6A_PROBE"),
+        "w6b": _receipt("S2_4_W6B_PROBE"),
+        "install": _receipt("S2_4_W6B_APPLY"),
+    }
+    receipts["w6b"]["self_digest"] = "sha256:" + "d" * 64  # 與 w6a 同摘要,scope 不同
+    errors = validate_execution_attestations(
+        gate_verdict="PASS", captures={"waves": {}, "telemetry": {}},
+        observation_artifacts={}, effect_receipts=receipts, verifier=None,
+    )
+    # 三份收據 = 三個獨立身分(舊碼只會產生一條錯誤)。
+    assert len(errors) == 3, errors
+    assert all("lacks out-of-band execution attestation" in error for error in errors)
+    # digest 取自 self_digest 而非空字串。
+    assert not any("<missing>" in error for error in errors), errors
+
+    seen: list[tuple[str, str]] = []
+
+    def verifier(kind: str, digest: str, _artifact: dict) -> bool:
+        seen.append((kind, digest))
+        return True
+
+    assert validate_execution_attestations(
+        gate_verdict="PASS", captures={"waves": {}, "telemetry": {}},
+        observation_artifacts={}, effect_receipts=receipts, verifier=verifier,
+    ) == []
+    assert len(seen) == 3
+    assert {digest for _kind, digest in seen} == {
+        receipt["self_digest"] for receipt in receipts.values()
+    }

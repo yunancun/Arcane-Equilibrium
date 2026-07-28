@@ -386,7 +386,12 @@ def s2_effect_step_for_receipt(receipt: Any) -> str | None:
 
 
 def build_s2_effect_evidence(receipt: dict[str, Any]) -> dict[str, Any]:
-    """把一份 S2 receipt 包進 closure evidence envelope(不改變身分)。"""
+    """把一份 S2 receipt 包進 closure evidence envelope(不改變身分)。
+
+    ⚠ 今日**沒有 production caller**:真 evidence wrapper 由 S2 EFFECT session 的
+    closure 產生器鑄造,本函式是 ``validate_s2_effect_evidence`` 的正例建構子/參照實作
+    (測試用),故其輸出必須逐欄等於 validate 端要求的 wrapper 綁定。
+    """
 
     step = s2_effect_step_for_receipt(receipt)
     if step is None:
