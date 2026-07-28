@@ -1,24 +1,26 @@
 # AI/ML Landing Progress Ledger
 
 **Program**: `AIML-LONG-LIVED-LANDING-V2`
-**Ledger version**: 14
+**Ledger version**: 15
 **Updated**: 2026-07-28
 **Overall state**: `PROGRAM_ADOPTED` · **`S1_CLOSED`** · **every S2 effect-session
-source predicate is `SOURCE_READY`** (S2.0 + S2.1 + S2.2A + S2.3 + S2.4 + S2.5 +
-S2.2B), and Sprint 2 has converged on one `BLOCKED_OPERATOR_ACTION_PACKET_READY`
-(`S2-operator-action-packet-v1.md`) (S2.2A/S2.3: PR #121 merge
+source-seam predicate is narrowly `SOURCE_READY`** (S2.0 + S2.1 + S2.2A + S2.3 +
+S2.4 + S2.5 + S2.2B), but Sprint 2 is
+**`S2_EFFECT_EXECUTION_READINESS_ACTIVE`**. `S2-operator-action-packet-v1.md` is
+`DRAFT_NOT_EXECUTABLE`, because AMEND-1/2, governed effect-node injection,
+trusted-host runners, S2.5 durability hardening, S2.2B runtime-attestor
+execution/verification and a disposable full-DAG rehearsal remain source work
+(S2.2A/S2.3: PR #121 merge
 `87a3a2503f7ef6e47cffdac3db80bbd3b1b1762b`, PR #122 merge
 `051df8262da85123213bd0937ad03c206152f5a3`; S2.0: PR #127; S2.1: PR #129;
 S2.4: PR #145 merge `e1b14b7d5`, PM declaration 2026-07-28; all `NONE`-effect,
 no runtime/PG/broker/order effect, nine authorities stay false). **S2 is NOT
-`S2_CLOSED`**: the effect sessions `S2.0` (production PG observer bootstrap),
-`S2.1` (quiesce, dep S2.0), `S2.4` (credential/PG/unit/install), `S2.5` (running
-attestation), and the
-runtime-DONE session `S2.2B` (dep S2.5) are `BLOCKED_ON_OPERATOR_EXTERNAL_AUTHORITY`
-— they require operator-held external-admin (DB superuser-class) authority plus a
-fresh out-of-band signing action and a running runtime that a development agent
-cannot self-provide (the runtime engine is currently DOWN; four-head probe
-`engine_process_not_found`). A fresh Linux run at H_effect
+`S2_CLOSED`**: production effect progress is 0/6. Linux observation at
+2026-07-28T15:55:23+02:00 found both candidate learning units
+`not-found/inactive/dead`, and both canonical AIML install/state roots absent.
+Nine authorities remain false; no production effect may start before the S2E
+source waves close and a newly emitted packet receives fresh exact authority.
+A fresh Linux run at H_effect
 `6e1ea957af35544a844f704978366d11aa6c2364` passed all eight target-host seams
 with `binding=BINDING` and zero residue; the complete `closure_packet_v1`
 passed trusted finalization under the operator SSHSIG for fingerprint
@@ -60,14 +62,12 @@ S1.4 `7d0befd86`, S1.3 `08789982e`, S1.5 `0b2805a4d`, S1.6 `0e8e9fd9d` — each
 passing its per-session role chain (E2/E4/CC/E3/OPS/QA + fix rounds) plus a
 cross-session review round (PA integration / CC whole-body / FA spec-compliance
 all PASS). Those commits are ancestors of PR #115's H_effect.
-**Next gate**: S2.2A + S2.3 are `SOURCE_READY` (merged). The remaining S2 READY
-pool is effect-gated: `S2.0` is the unblock root — a minimal typed external-admin
-production PG observer bootstrap that requires operator-held DB-admin authority a
-development agent cannot self-provide; it unblocks `S2.1`, then the S2.4
-intermediate exact-head three-side sync + credential/unit/install effects, then
-`S2.5` running attestation, then `S2.2B` runtime revalidation (the only row that
-issues the LR1 runtime `DONE` + `ingestion_compatibility_receipt_v1`). Each still
-starts with its own W0 intake/route, effect classification and fresh authority.
+**Next gate**: execute the source-only effect-readiness sequence
+`S2E.0 → S2E.1 → (S2E.2 ∥ S2E.3) → S2E.4 → S2E.5`. Only after all six waves
+close may PM regenerate a current-head `BLOCKED_OPERATOR_ACTION_PACKET_READY`.
+The production effect DAG remains
+`S2.0→S2.4→S2.5A→S2.1→S2.5B→S2.2B` and then requires fresh exact Operator
+authority per step.
 **Canonical boundary**: S0 and S1 are closed. S1 has committed real disposable
 S1.5 evidence, a platform-attested Linux S1.6 effect, a complete validated
 closure packet, and a domain-separated operator SSHSIG. These prove the
@@ -141,9 +141,10 @@ below). Only the serial operator-gated **apply** chain
 install design — `S2.1`'s quiesce/restore drill runs *after* the S2.4 install
 and the S2.5A initial start because a real drill needs the installed+started
 runtime, so `S2.1@EFFECT_DONE` is **not** an `S2.4` predecessor; the
-`source_deps` build order above is unchanged) stays blocked, surfaced as one
-minimal `BLOCKED_OPERATOR_ACTION_PACKET_READY` after every source predicate
-lands.
+`source_deps` build order above is unchanged) stays blocked. A minimal
+`BLOCKED_OPERATOR_ACTION_PACKET_READY` may be emitted only after the additional
+S2E source-readiness waves below close; source-seam predicates alone are
+insufficient.
 
 | Session | source_deps (buildable now) | effect_deps (operator-gated apply — §1.2-corrected DAG) |
 |---|---|---|
@@ -166,7 +167,18 @@ closable from the board:
 | WP2 | `S2.0` observer-bootstrap source Adapter | DONE — reviewed head `b831f3ff0`, PR #127 merge `e86e945bf`; `S2.0` exits `SOURCE_READY` |
 | WP3 | `S2.1` quiesce/evidence/static-guard seam | DONE — reviewed head `5fe1fc11a`, final `c8e88c652` (adds `@file` CI fix + main merge), PR #129 merge `31ef0b4bc`; `S2.1` exits `SOURCE_READY` |
 | WP4 | `S2.4` per-component install seams | DONE — W0–W5 six adversarial rounds; final head `029d2adfc`, PR #145 exact-head merge `e1b14b7d5` (tree byte-identical to `029d2adfc`); `S2.4` exits `SOURCE_READY` (PM declaration 2026-07-28; effect-side preconditions S2.4-AMEND-1/2 gate `S2.4@EFFECT_DONE`) |
-| WP5 | `S2.5` running-attestation (one source package; two effect phases **S2.5A** initial start+attest / **S2.5B** post-drill attest per §1.2) + `S2.2B` `ingestion_compatibility_receipt_v1` | DONE — tranche 1/1b/2 across PR #148 merge `dab875882` and PR #150 merge `6be29043c`; `S2.5` and `S2.2B` both exit `SOURCE_READY` (PM declaration 2026-07-28). With this, every S2 effect-session source predicate is `SOURCE_READY` and the sprint converges on one `BLOCKED_OPERATOR_ACTION_PACKET_READY` |
+| WP5 | `S2.5` running-attestation (one source package; two effect phases **S2.5A** initial start+attest / **S2.5B** post-drill attest per §1.2) + `S2.2B` `ingestion_compatibility_receipt_v1` | DONE at the narrow source-seam predicate — tranche 1/1b/2 across PR #148 merge `dab875882` and PR #150 merge `6be29043c`; this does not provide effect routing, host execution, runtime-attestor verification or an executable Operator packet |
+
+**Effect-execution readiness work packages (current active sequence).**
+
+| Work package | Scope | Status / exit |
+|---|---|---|
+| S2E.0 | S2.4-AMEND-1/2: dependency-refresh ingress/receipt/profile binding and plan-derived expected topology | ACTIVE; schema/ABI/negative mutations accepted |
+| S2E.1 | Claim-gated routing, adapter selection, distinct OPS postcheck and closure binding for all six effect steps | WAITING_S2E_0 |
+| S2E.2 | Trusted-host runners/observers, rollback/postcheck and startup recovery for S2.0/S2.4/S2.5/S2.1 | WAITING_S2E_1; may run parallel with S2E.3 if manifests are disjoint |
+| S2E.3 | S2.5 F2/F3/F4/note-1: reconcile-under-hold, split lock API, typed release, journal integrity chain | WAITING_S2E_1; may run parallel with S2E.2 |
+| S2E.4 | S2.2B remote-readonly observer plus runtime-attestor SSHSIG producer/verifier and executable route | WAITING_JOIN_S2E_2_S2E_3 |
+| S2E.5 | Disposable full-DAG rehearsal; close/adjudicate all 28 obligations; regenerate current-head Operator packet | WAITING_S2E_4 |
 
 The `Dependencies` column of the Current Sessions table below remains the
 original edge list; this table is its source/effect projection. Until a
@@ -230,6 +242,7 @@ unchanged and stays operator-gated.
 
 | Time | Session | Event | Evidence |
 |---|---|---|---|
+| 2026-07-28 | S2 | **Independent effect-readiness audit supersedes the earlier packet-ready projection.** The seven narrow source-seam predicates and their landed PRs remain valid, but `BLOCKED_OPERATOR_ACTION_PACKET_READY` was disproved: AMEND-1/2 are unimplemented source work; hypothetical authorized S2.4/S2.5 routes still inject zero effect adapters; S2.5 has reconcile/lock/release/journal durability gaps; S2.2B `apply` is always pending and has no trusted observer/runtime-attestor SSHSIG execution path; 28 W5 obligations include unresolved W6/W6B source requirements. Linux read-only observation at 2026-07-28T15:55:23+02:00 found the candidate learning units `not-found/inactive/dead` and both canonical AIML roots absent. Current state is `S2_EFFECT_EXECUTION_READINESS_ACTIVE`; execute S2E.0-S2E.5 before regenerating an Operator packet. | `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-28--aiml_s2_source_and_effect_readiness_audit.md`; corrected `TODO.md`; packet v1 marked `DRAFT_NOT_EXECUTABLE` |
 | 2026-07-28 | S2 | **`S2.5@SOURCE_READY` + `S2.2B@SOURCE_READY` declared; Sprint 2 source chain converges on one `BLOCKED_OPERATOR_ACTION_PACKET_READY`** — WP5 tranche 2 (PR #150 merge `6be29043c`) closed the three carried P2s from the tranche-1b review (mutation-survivor test, hold-style lock across the whole anchor→consume→persist→journal window, no self-reported `record_digest` in the closure-binding verifier) plus notes 2/3, and built the `S2.2B` `ingestion_compatibility_receipt_v1` seam anchored on the real persisted S2.2A receipt and a fully re-validated `s2_5_final_attestation_v1` (a simulated-lane anchor never unlocks the runtime lane; one failing V151-V160 item fails the whole receipt). Independent E2 delta re-review PASS (5/5 further mutations killed; its F1 doc-residue finding fixed in the same branch; F2 reconcile-outside-the-lock-window, F3 lock-semantics conflation and F4 release observability carried to the effect lane). Round-7 W5 receipt re-emission at `5be472193` (carrier `0eb90e40c`) because the tranche necessarily touched the four W5-owned central-registration files. Measured on the committed clone: structure 3735/6 + ml_training 2571/40 = 6306/46/0; `agent_governance.py validate` PASS/roles=20. With S2.0/S2.1/S2.2A/S2.3/S2.4 already landed, **no executable S2 source work remains**: the only blocker is a fresh, exact, typed operator authorization, and it is now a single packet — `docs/execution_plan/ai_ml_landing/S2-operator-action-packet-v1.md` (serial effect DAG `S2.0→S2.4→S2.5A→S2.1→S2.5B→S2.2B`, per-step authorization/rollback/postcheck, the two prerequisite PM amendments S2.4-AMEND-1/2, and the `S2_CLOSED` criteria). Nine authorities stay false; the S1 disposable authority is not reusable; runtime remains inactive/not-found per the 2026-07-27 read-only observation. | PR #148 `dab875882`, PR #150 `6be29043c`; this commit |
 | 2026-07-28 | S2.5 | **WP5 tranche 1+1b: the S2.5 running-attestation source seam built, adversarially reviewed, remediated, and re-reviewed (source-only, zero runtime reach)** — per the PA design (`design/S2.5-running-attestation-source-seam.md`) and six PM rulings (O-1..O-6, §5.4 option b): five closed schemas + `s2_5_authorization_replay_ledger_v1`, additive v3 classifier (frozen v1/v2/S0.3 digests byte-unchanged), lifecycle/attestation/driver leaves + CLI, three-state lifecycle fixtures on an injected harness, typed-status-keyed two-way obligation latch closing `S2_5_LIFECYCLE_FIXTURES_DO_NOT_EXIST` (W5 receipts re-emitted at `0faa6499d`, carrier `0b06982e0`, round 6). Round-1 adversarial review: E2 FAIL (F1 cross-lane pre-drill anchor reached production `FINAL_ATTESTED`) and E3 FAIL (post-effect exception escape with no rollback; upstream receipts trusted by self-reported `self_digest` string; replay ledger undetectable tail-truncation and zero persistence) + P2 batch. Tranche 1b remediated all five P1 with pristine-clone red→green evidence and closed thirteen P2 (kind binding, PLATFORM⇒attestor leg, redaction, journal hardening + derived paths, non-finite rejection, secret scan, §5.3 ruling, verifier-arm negatives, status-set split, TTL budget gate, owner-fingerprint recompute, CLI docstring, forward skew cap). E2 delta re-review **PASS**: 11/12 mutations killed, all round-1 P1s confirmed closed; measured 6281/46/0 on the committed clone (structure 3712/6 + ml 2569/40). **`S2.5@SOURCE_READY` is NOT declared**: carried P2-1 (one mutation survivor test gap), P2-2 (probe-only flock probe leaves the consume→persist window without mutual exclusion; design §5.7 named the hold-style s2_4 lock reuse), P2-3 (binding verifier accepts a self-reported `record_digest`) plus three notes gate the declaration; they close in tranche 2 together with the `S2.2B` seam. Nine authorities stay false; no runtime/PG/broker/order effect exists or is granted. | branch `agent/aiml-s2-wp5-s25-seam` heads `9decbac71..dd6c10936`; E1/E2/E3/E4 reports in-session |
 | 2026-07-28 | S2.4 | **`S2.4@SOURCE_READY` declared by PM (post-merge projection; source-only, zero runtime reach)** — all six exit conditions MET at the merged generation: ① focused/adjacent suites re-run at the committed round-6 head `029d2adfc` (structure 3628/6 + ml_training 2547/40, independently reproduced by E2 on a committed clone and E4 on the clean committed worktree); ② the six PM-owned obligations adjudicated (0 source-closure blockers; S2.4-AMEND-1/2 gate `S2.4@EFFECT_DONE`); ③ the ABI-generated obligation projection live and pinned; ④ five independent exact-generation reviews (E2/E4/CC/OPS/QA) at `029d2adfc` all PASS with 0 P0/0 P1 (carried P2s closed by this projection commit: duplicate-row guard + fullwidth-equals claim variant + round-field assertion in the discriminator test, and the gate-① evidence-attribution wording); ⑤ required classified CI green at `029d2adfc`, the Codex P1 thread answered and resolved, and PR #145 merged with `--match-head-commit 029d2adfc` as `e1b14b7d5` whose tree is byte-identical to `029d2adfc`; ⑥ the eight artifacts bound to `aaee7f1a2` with carrier `456bd0c20` and no re-emission owed. Mac/GitHub/Linux `trade-core` synced ff-only to `e1b14b7d5` (sync is not deploy: learning service remains inactive/not-found per the 2026-07-27 read-only observation). The declaration licenses source structure only — nine authorities stay false; no runtime, PG, unit/service, deploy, restart, broker, order, or live effect exists or is granted. Next source dispatch: WP5 = `S2.5`, then `S2.2B`. | this commit; PR #145 `e1b14b7d5`; gate row in `TODO.md` |

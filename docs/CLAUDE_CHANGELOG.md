@@ -1,9 +1,24 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-07-24（AIML S2.2A + S2.3 `SOURCE_READY`；PROGRESS ledger v8）
+> 最後更新：2026-07-28（AIML S2 effect-readiness 獨立校正；TODO v856／PROGRESS ledger v15）
 
 ---
+
+## AIML S2 effect-readiness 獨立校正 — TODO v856（2026-07-28）
+
+獨立 source/routing/runtime 審核保留 WP1-WP5 七個 narrow `SOURCE_READY`
+predicates，但證偽「只差 Operator authorization」：AMEND-1/2 尚未落地；
+authorized S2.4/S2.5 route 仍無 effect-adapter node；S2.5 reconcile/lock/release/
+journal durability 與 S2.2B trusted observer/runtime-attestor execution 尚缺；
+28 條 ledger 仍含 W6/W6B source obligations。Linux 唯讀 observation 顯示兩個
+候選 learning unit 均 `not-found/inactive/dead`，canonical AIML roots 不存在。
+
+Current state 改為 `S2_EFFECT_EXECUTION_READINESS_ACTIVE`，新增唯一 active sequence
+`S2E.0 → S2E.1 → (S2E.2 ∥ S2E.3) → S2E.4 → S2E.5`；舊 operator packet 標為
+`DRAFT_NOT_EXECUTABLE`。只有全序列與 disposable full-DAG rehearsal 關閉後才可
+重發 `BLOCKED_OPERATOR_ACTION_PACKET_READY`；source publication 不授予任何
+production effect authority。
 
 ## AIML S2 source sessions — S2.2A + S2.3 `SOURCE_READY`（2026-07-24）
 
