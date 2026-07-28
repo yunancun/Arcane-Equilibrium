@@ -7,11 +7,13 @@ verbs(全部離線、零 runtime 接觸;design §7):
 * ``start-intent``  —— 讀 core JSON 檔,組出 closed ``s2_5_start_intent_v1`` 並列印;
 * ``validate``      —— 把任一 s2_5 artifact 檔丟中央閘(``--now`` 必帶;過期 fail-closed);
 * ``apply-start`` / ``apply-final`` —— source lane 施加:**永遠 driver=None**,零變更。
-  誠實終點是 typed ``EXTERNAL_VERIFICATION_PENDING``(exit 0);在那之前的任何一道閘都可能
-  以 typed ``REQUEST_REJECTED`` / ``AUTHORIZATION_REJECTED`` / ``RECOVERY_REQUIRED``
-  (recovery 閂未解、S2.4 recovery/lock 未清、journal 殘留)終止(exit 2)——「固定回
-  PENDING」不是本 CLI 的語義,拒絕臂與 recovery 臂同樣真實(真 driver 只在 S2.5 EFFECT
-  session 由 OPS 注入,CLI 沒有任何注入縫)。
+  note-3(tranche 2)對齊:本 CLI **沒有** permit/precheck-evidence/lock-probe 注入縫,
+  而 typed ``EXTERNAL_VERIFICATION_PENDING`` 位於 §3.1 靜態 precheck 與 §5.6 授權**之後**
+  ——所以從本 CLI 出發,apply 動詞的可達終點只有 typed ``REQUEST_REJECTED`` /
+  ``AUTHORIZATION_REJECTED`` / ``RECOVERY_REQUIRED``(exit 2)。
+  ``EXTERNAL_VERIFICATION_PENDING``(exit 0)是 lifecycle 葉的誠實終點,只在 EFFECT
+  session(OPS 以 in-process API 注入完整 precheck 證據 + 已簽 permit + lock probe,
+  driver 仍缺席)時可達;exit-0 分支保留給那條 lane,不是本 CLI 平常會走到的路。
 
 ⚠ 誠實邊界:本 CLI 只做離線結構/整合檢查,不能認證任何 runtime PASS;乾淨輸出「不」代表
 unit 真的 enabled/running。九項 authority 恆 false。
@@ -71,7 +73,9 @@ def _main(argv: list[str] | None = None) -> int:
 
     for verb in ("apply-start", "apply-final"):
         apply_parser = sub.add_parser(
-            verb, help="source lane 施加(恆 driver=None → typed PENDING/拒絕,零變更)"
+            verb,
+            help="source lane 施加(恆 driver=None;CLI 無 permit/evidence 注入縫 ⇒ "
+            "可達終點是 typed 拒絕/recovery 臂,零變更)",
         )
         apply_parser.add_argument("--intent", required=True, type=Path)
         apply_parser.add_argument("--now", required=True)

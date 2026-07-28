@@ -231,6 +231,25 @@ def test_consume_refused_under_the_lock_is_typed_not_an_escape(tmp_path, monkeyp
     assert not lifecycle.s2_5_replay_ledger_path(tmp_path / "state").exists()
 
 
+# ── note-3:CLI apply 動詞的可達終點=typed 拒絕臂(docstring 對齊的機械釘)────────────
+def test_cli_apply_reachable_endpoint_is_the_typed_rejection_arm(tmp_path, capsys):
+    """note-3(tranche 2):CLI 無 permit/precheck-evidence/lock-probe 注入縫,apply 動詞
+    從 CLI 出發永遠終止在 typed 拒絕臂(exit 2)——docstring 的說法與此釘一致。"""
+
+    import agent_governance_s2_5 as cli
+
+    intent = kit.start_intent("S2_5A_START")
+    intent_path = tmp_path / "intent.json"
+    intent_path.write_text(json.dumps(intent), encoding="utf-8")
+    code = cli._main(["apply-start", "--intent", str(intent_path), "--now", kit.NOW])
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 2
+    assert payload["status"] in {
+        "REQUEST_REJECTED", "AUTHORIZATION_REJECTED", "RECOVERY_REQUIRED",
+    }
+    assert payload["status"] != "EXTERNAL_VERIFICATION_PENDING"
+
+
 def test_journal_pin_still_binds_after_the_window(tmp_path, monkeypatch):
     # 窗閉合後 journal 的 APPLYING 已釘 ledger head(P1-3 anchor 與 P2-2 疊加不互斥)。
     _key, intent, permit, unit = kit.a_side_setup(tmp_path, monkeypatch)

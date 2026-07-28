@@ -30,6 +30,7 @@ production 不可達的原因是 key custody,不是構造不可達。九項 auth
 from __future__ import annotations
 
 import json
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -598,6 +599,8 @@ def validate_s2_5_artifact(artifact: Any, *, now: Any = None) -> list[str]:
 
 
 # ── §6 closure binding(source-only;不接入 live dispatch)────────────────────────
+# P2-3:capture record 的最小形狀尺(sha256 digest 字面)。
+_SHA256_DIGEST_RE = re.compile(r"sha256:[0-9a-f]{64}")
 S2_5_BINDING_VERIFIED = "S2_5_ATTESTATION_BINDING_VERIFIED"
 S2_5_BINDING_REJECTED = "S2_5_ATTESTATION_BINDING_REJECTED"
 S2_5_BINDING_PENDING = "EXTERNAL_VERIFICATION_PENDING"
@@ -657,6 +660,21 @@ def validate_s2_5_attestation_binding(
             "s2_5 attestation binding: the OPS preflight fragment is absent, its "
             "self_digest does not re-derive, or it does not bind the exact intent"
         )
+    else:
+        # note-2(tranche 2)語義面:preflight 不只結構自洽,還必須「說了對的話」——
+        # unit_inactive_confirmed 必須為 true 才可 VERIFIED;false/缺席=OPS 看到了一個
+        # 活的(或未證的)unit,這樣的 preflight 永不背書一個 closure。
+        preflight_face = ops_preflight.get("preflight")
+        if not (
+            isinstance(preflight_face, dict)
+            and preflight_face.get("unit_inactive_confirmed") is True
+        ):
+            reasons.append(
+                "s2_5 attestation binding: the OPS preflight fragment does not confirm "
+                "the pre-effect unit state (preflight.unit_inactive_confirmed must be "
+                "exactly true); a preflight that observed a live or unproven unit can "
+                "never bind a VERIFIED closure"
+            )
     # 3. verifier capture 三方交叉(capture node ≠ applier;record_digest 綁 receipt 欄)。
     receipt_capture_digest = receipt.get("verifier_capture_digest")
     if receipt_capture_digest is None and verifier_capture is None:
@@ -674,17 +692,50 @@ def validate_s2_5_attestation_binding(
             "capture record must be present together (a one-sided claim is rejected)"
         )
         return verdict
+    # P2-3(tranche 2):verifier capture 停止採信自報 record_digest。
+    # 非 dict 一律 fail-closed(裸 digest 字串/null artifact 不是 record);node_id 缺席拒
+    # (匿名 capture 證不了獨立 verifier);record 最小形狀驗證之上,source lane 就地以
+    # canonical 重算其 digest 三值鏈比對:recompute(record−record_digest) ==
+    # record.record_digest == receipt.verifier_capture_digest——偽造「照抄 receipt 綁定值」
+    # 的兩鍵 stub 在重算這一刀必斷。
+    if not isinstance(verifier_capture, dict):
+        reasons.append(
+            "s2_5 attestation binding: the verifier capture must be a well-formed "
+            "command_capture_v2 record object (a bare digest or non-record artifact "
+            "is rejected fail-closed)"
+        )
+        return verdict
+    capture_node = verifier_capture.get("node_id")
+    if not isinstance(capture_node, str) or not capture_node:
+        reasons.append(
+            "s2_5 attestation binding: the verifier capture carries no node_id; an "
+            "anonymous capture can never prove an independent verifier"
+        )
+    claimed_digest = verifier_capture.get("record_digest")
     if not (
-        isinstance(verifier_capture, dict)
-        and str(verifier_capture.get("record_digest") or "") == str(receipt_capture_digest)
+        isinstance(claimed_digest, str)
+        and _SHA256_DIGEST_RE.fullmatch(claimed_digest) is not None
     ):
         reasons.append(
-            "s2_5 attestation binding: the verifier command_capture_v2 record_digest "
-            "is not the receipt-bound verifier_capture_digest"
+            "s2_5 attestation binding: the verifier capture record_digest is not a "
+            "sha256 digest (minimal record shape fails closed)"
         )
-    if isinstance(verifier_capture, dict) and verifier_capture.get(
-        "node_id"
-    ) == receipt.get("apply_actor_node"):
+    else:
+        recomputed = canonical_digest({
+            key: value
+            for key, value in verifier_capture.items()
+            if key != "record_digest"
+        })
+        if not (
+            recomputed == claimed_digest
+            and claimed_digest == str(receipt_capture_digest)
+        ):
+            reasons.append(
+                "s2_5 attestation binding: the verifier capture record_digest does not "
+                "re-derive from the record bytes or is not the receipt-bound "
+                "verifier_capture_digest (a self-reported digest is never trusted)"
+            )
+    if capture_node == receipt.get("apply_actor_node"):
         reasons.append(
             "s2_5 attestation binding: the verifier capture node must differ from the "
             "applier node (the applier can never verify itself)"
