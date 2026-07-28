@@ -283,6 +283,55 @@ def test_source_lane_stays_unreachable_without_selector(effect_class: str) -> No
     assert "ops_preflight" in node_ids and "ops_postcheck" in node_ids
 
 
+def test_exact_set_rejection_names_the_missing_and_extra_claim_keys() -> None:
+    """R4:admission 次序/範圍錯誤的失敗訊息必指名缺的上游 receipt claim 與多餘的 key。"""
+
+    # 缺上游 receipt claim(S2.5A 需 S2.4 的 install effect receipt digest)。
+    missing = _facts("S2_5A_START")
+    missing["claim_inputs"].pop("s2_4_install_effect_receipt")
+    with pytest.raises(ValueError) as excinfo:
+        route_task(missing)
+    message = str(excinfo.value)
+    assert "S2 effect selection digest for S2_5A_START requires exact claim_inputs" in message
+    assert "missing=['s2_4_install_effect_receipt']" in message
+    assert "extra=[]" in message
+
+    # 多一個未 admitted 的 key(且同時缺一個)→ 兩側都逐名列出。
+    both = _facts("S2_4_W6B_APPLY")
+    both["claim_inputs"].pop("s2_4_installed_unit_probe_receipt")
+    both["claim_inputs"]["s2_5b_final_permit"] = DIGEST
+    with pytest.raises(ValueError) as excinfo:
+        route_task(both)
+    message = str(excinfo.value)
+    assert "missing=['s2_4_installed_unit_probe_receipt']" in message
+    assert "extra=['s2_5b_final_permit']" in message
+
+
+def test_property_any_admitted_selector_yields_exactly_one_effect_node() -> None:
+    """property:任一 admitted selector ⇒ route 恰含一個 effect 節點,且其身分唯一決定於 step。
+
+    (per-phase 一條 route 的理由:W6A/W6B probe 共用 node-id 會碰撞、closure 每 adapter
+    節點恰一 receipt。)
+    """
+
+    seen: set[tuple[str, str]] = set()
+    for step in S2_EFFECT_STEPS:
+        route = route_task(_facts(step))
+        effect_nodes = [
+            node for node in route["nodes"] if node["kind"] == "effect_adapter"
+        ]
+        assert len(effect_nodes) == 1, step
+        node = effect_nodes[0]
+        assert node["mandatory"] is True, step
+        assert node["id"] == S2_EFFECT_STEPS[step]["adapter_id"], step
+        assert node["effect_step"] == step, step
+        assert node["id"] in ALL_S2_ADAPTER_IDS, step
+        assert route["nodes"][-1]["id"] != node["id"], step
+        seen.add((node["id"], node["effect_step"]))
+    # 9 個 step ⇒ 9 個互異的 (adapter, step) 身分(共用 adapter id 者由 effect_step 區分)。
+    assert len(seen) == len(S2_EFFECT_STEPS)
+
+
 def test_selection_digests_are_distinct_and_step_bound() -> None:
     digests = {step: s2_effect_selection_digest(step) for step in S2_EFFECT_STEPS}
     assert len(set(digests.values())) == len(digests)

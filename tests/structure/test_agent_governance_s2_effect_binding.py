@@ -546,7 +546,233 @@ def test_source_simulation_pass_is_not_an_effect_receipt(structural_receipts) ->
     errors, validated = binding.validate_s2_effect_evidence(
         evidence, expected_source_head=HEAD
     )
-    assert validated is None and errors
+    assert validated is None
+    assert (
+        "S2 S2_5A_START receipt status 'SOURCE_SIMULATION_PASS' is not a "
+        "closure-admissible production success (RECOVERY_REQUIRED/"
+        "EXTERNAL_VERIFICATION_PENDING/source-simulation never convert to PASS)"
+    ) in errors
+
+
+# --------------------------------------------------------------------------- #
+# E2-P1-1 / E4:守衛的 targeted negative(每條 typed 拒絕分支各釘完整錯誤字串)
+# --------------------------------------------------------------------------- #
+GUARD_STEP = "S2_5A_START"
+
+
+def _guard_case(step: str = GUARD_STEP):
+    route = _route(step)
+    receipt = _receipt(step)
+    packet, fragments, evidence_by_id = _packet(step, receipt)
+    return route, receipt, packet, fragments, evidence_by_id
+
+
+def test_route_must_select_exactly_the_admitted_step_adapter_node(
+    structural_receipts,
+) -> None:
+    expected = "S2 closure route did not select exactly the admitted step adapter node"
+    route, receipt, packet, fragments, evidence_by_id = _guard_case()
+    # 零 effect 節點。
+    stripped = deepcopy(route)
+    stripped["nodes"] = [
+        node for node in stripped["nodes"] if node["kind"] != "effect_adapter"
+    ]
+    assert expected in binding.validate_s2_effect_binding(
+        packet, stripped, fragments, evidence_by_id, {"effect": receipt}
+    )
+    # 兩個 effect 節點(其一是別的 adapter)。
+    doubled = deepcopy(route)
+    doubled["nodes"].append({
+        "id": routing.S2_4_INSTALL_ADAPTER_ID, "kind": "effect_adapter",
+        "mandatory": True, "requires": [], "reason": "smuggled",
+        "effect_step": "S2_4_W6B_APPLY",
+    })
+    assert expected in binding.validate_s2_effect_binding(
+        packet, doubled, fragments, evidence_by_id, {"effect": receipt}
+    )
+    # 恰一節點但 adapter id 是別人的。
+    relabelled = deepcopy(route)
+    for node in relabelled["nodes"]:
+        if node["kind"] == "effect_adapter":
+            node["id"] = routing.S2_4_INSTALL_ADAPTER_ID
+    assert expected in binding.validate_s2_effect_binding(
+        packet, relabelled, fragments, evidence_by_id, {"effect": receipt}
+    )
+
+
+def test_route_adapter_node_effect_step_must_equal_the_claim_admission(
+    structural_receipts,
+) -> None:
+    route, receipt, packet, fragments, evidence_by_id = _guard_case()
+    # S2.5A/S2.5B 共用 adapter id 之外的唯一區別就是 effect_step;把它改標成另一 step。
+    tampered = deepcopy(route)
+    for node in tampered["nodes"]:
+        if node["kind"] == "effect_adapter":
+            node["effect_step"] = "S2_5B_FINAL"
+    assert "S2 closure route adapter node step differs from claim admission" in (
+        binding.validate_s2_effect_binding(
+            packet, tampered, fragments, evidence_by_id, {"effect": receipt}
+        )
+    )
+
+
+def test_receipt_adapter_id_must_equal_the_step_adapter(structural_receipts) -> None:
+    receipt = _receipt("S2_5A_START")
+    receipt["adapter_id"] = routing.S2_5_FINAL_ATTESTATION_ADAPTER_ID
+    evidence = binding.build_s2_effect_evidence(receipt)
+    errors, validated = binding.validate_s2_effect_evidence(
+        evidence, expected_source_head=HEAD
+    )
+    assert validated is None
+    assert "S2 effect receipt adapter_id does not match the step adapter" in errors
+
+
+@pytest.mark.parametrize("count", [0, 2])
+def test_exactly_one_independent_ops_postcheck_is_required(
+    structural_receipts, count: int,
+) -> None:
+    route, receipt, packet, fragments, evidence_by_id = _guard_case()
+    contract = binding.S2_STEP_RECEIPT_CONTRACTS[GUARD_STEP]
+    expected = (
+        "S2 closure requires exactly one independent ops_postcheck runtime evidence "
+        f"of kind {contract['postcheck_kind']}"
+    )
+    if count == 0:
+        fragments["ops_postcheck"] = {"evidence_refs": []}
+    else:
+        second = _postcheck(GUARD_STEP, receipt, "pc2")
+        evidence_by_id["pc2"] = second
+        fragments["ops_postcheck"]["evidence_refs"].append("pc2")
+    assert expected in binding.validate_s2_effect_binding(
+        packet, route, fragments, evidence_by_id, {"effect": receipt}
+    )
+
+
+def test_ops_postcheck_kind_whitelist_rejects_a_foreign_artifact(
+    structural_receipts,
+) -> None:
+    route, receipt, packet, fragments, evidence_by_id = _guard_case()
+    evidence_by_id["pc"]["kind"] = "ops_preflight_v1"
+    assert (
+        "S2 closure requires exactly one independent ops_postcheck runtime evidence "
+        "of kind ops_postcheck_v1"
+    ) in binding.validate_s2_effect_binding(
+        packet, route, fragments, evidence_by_id, {"effect": receipt}
+    )
+
+
+def test_ops_postcheck_payload_must_cross_bind_the_receipt_self_digest(
+    structural_receipts,
+) -> None:
+    route, receipt, packet, fragments, evidence_by_id = _guard_case()
+    evidence_by_id["pc"]["payload"]["effect_receipt_digest"] = "sha256:" + "0" * 64
+    assert (
+        "S2 ops_postcheck payload.effect_receipt_digest is not bound to the effect "
+        "receipt self_digest"
+    ) in binding.validate_s2_effect_binding(
+        packet, route, fragments, evidence_by_id, {"effect": receipt}
+    )
+
+
+def test_successful_effect_requires_runtime_contact_and_changed_disposition(
+    structural_receipts,
+) -> None:
+    route, receipt, packet, fragments, evidence_by_id = _guard_case()
+    without_contact = deepcopy(packet)
+    without_contact["side_effects"] = {"runtime_contact": False}
+    assert "S2 successful effect must record runtime_contact=true" in (
+        binding.validate_s2_effect_binding(
+            without_contact, route, fragments, evidence_by_id, {"effect": receipt}
+        )
+    )
+    unchanged = deepcopy(packet)
+    unchanged["disposition"] = "UNCHANGED"
+    assert "S2 successful effect closure disposition must be CHANGED" in (
+        binding.validate_s2_effect_binding(
+            unchanged, route, fragments, evidence_by_id, {"effect": receipt}
+        )
+    )
+
+
+def test_probe_scope_fallthrough_is_fail_closed() -> None:
+    """probe 兩 step 共用 schema:scope 缺失或第三值一律導不出 step(絕不猜)。"""
+
+    assert binding.s2_effect_step_for_receipt(
+        {"schema_version": "s2_4_capability_probe_effect_receipt_v1"}
+    ) is None
+    assert binding.s2_effect_step_for_receipt({
+        "schema_version": "s2_4_capability_probe_effect_receipt_v1",
+        "probe_scope": "SOME_THIRD_SCOPE",
+    }) is None
+    assert binding.s2_effect_step_for_receipt("not-a-dict") is None
+    assert binding.s2_effect_step_for_receipt({"schema_version": "unknown_v1"}) is None
+    # 兩個合法 scope 仍各自唯一導出。
+    for step, scope in (
+        ("S2_4_W6A_PROBE", "PREPARE_SANDBOX"), ("S2_4_W6B_PROBE", "INSTALLED_UNIT"),
+    ):
+        assert binding.s2_effect_step_for_receipt({
+            "schema_version": "s2_4_capability_probe_effect_receipt_v1",
+            "probe_scope": scope,
+        }) == step
+
+
+def test_binding_rejects_an_invalid_or_absent_claim_admission(
+    structural_receipts,
+) -> None:
+    route, receipt, packet, fragments, evidence_by_id = _guard_case()
+    # selector 在場但 claim set 不 exact → route 層 typed ValueError 被轉成 closure error。
+    invalid = deepcopy(route)
+    invalid["task_facts"]["claim_inputs"].pop("s2_5a_start_permit")
+    errors = binding.validate_s2_effect_binding(
+        packet, invalid, fragments, evidence_by_id, {"effect": receipt}
+    )
+    assert len(errors) == 1
+    assert errors[0].startswith("S2 closure route is invalid: ")
+    assert "requires exact claim_inputs" in errors[0]
+    # selector 缺席(source lane)→ 無 admitted step。
+    assert binding.validate_s2_effect_binding(
+        packet, {"task_facts": {"claim_inputs": {}}, "nodes": []},
+        fragments, evidence_by_id, {"effect": receipt},
+    ) == ["S2 closure route did not admit an S2 effect step"]
+
+
+def test_evidence_wrapper_rejects_a_missing_or_underivable_receipt() -> None:
+    assert binding.validate_s2_effect_evidence(
+        {"receipt": None}, expected_source_head=HEAD
+    ) == (["S2 effect evidence missing canonical receipt payload"], None)
+    errors, validated = binding.validate_s2_effect_evidence(
+        {"receipt": {"schema_version": "s2_4_capability_probe_effect_receipt_v1"}},
+        expected_source_head=HEAD,
+    )
+    assert validated is None
+    assert errors == [
+        "S2 effect receipt step is not derivable from schema_version/probe_scope"
+    ]
+    with pytest.raises(ValueError, match="S2 effect receipt step is not derivable"):
+        binding.build_s2_effect_evidence({"schema_version": "not_an_s2_receipt_v1"})
+
+
+def test_naive_or_malformed_timestamps_are_typed_rejections(structural_receipts) -> None:
+    """_parse_time 要求時區:naive/畸形時間戳走 typed 拒絕,不是裸例外也不是靜默通過。"""
+
+    route, receipt, packet, fragments, evidence_by_id = _guard_case()
+    naive = deepcopy(evidence_by_id)
+    naive["pc"] = deepcopy(evidence_by_id["pc"])
+    naive["pc"]["observed_at"] = "2026-07-28T10:06:00"  # 無時區
+    assert "S2 ops_postcheck timestamps are invalid" in (
+        binding.validate_s2_effect_binding(
+            packet, route, fragments, naive, {"effect": receipt}
+        )
+    )
+    malformed = deepcopy(packet)
+    malformed["authority_refs"][0]["observed_at"] = "not-a-timestamp"
+    assert "S2 S2_5A_START intent authority timestamp is invalid" in (
+        binding.validate_s2_effect_binding(
+            malformed, route, fragments, evidence_by_id, {"effect": receipt}
+        )
+    )
+    with pytest.raises(ValueError, match="timezone is required"):
+        binding._parse_time("2026-07-28T10:06:00")
 
 
 def test_evidence_wrapper_binding_and_head_fail_closed(structural_receipts) -> None:
@@ -579,6 +805,34 @@ def test_receipt_revalidation_truly_delegates_to_the_central_aiml_gate() -> None
     )
     assert validated is None
     assert any("S2 S2_0_APPLY receipt invalid" in error for error in errors)
+
+
+def test_self_digest_recompute_covers_the_central_gate_gap_schemas(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CC-C #1:中央閘無 self_digest 反偽造分支的 schema,由本模組在同一縫補上。"""
+
+    import aiml_gate_receipt_schema_core as core
+    import aiml_gate_receipt_validator as central
+
+    monkeypatch.setattr(central, "validate_aiml_artifact", lambda *_a, **_k: [])
+    forged = {
+        "schema_version": "s2_4_prepare_effect_receipt_v1",
+        "prepare_id": "s2-4-prepare-0001",
+        "self_digest": "sha256:" + "0" * 64,
+    }
+    assert binding._receipt_validation_errors(forged, now=T_DONE) == [
+        "receipt self_digest does not bind the canonical receipt "
+        "(the central AIML gate has no self_digest recompute for this schema)"
+    ]
+    honest = dict(forged)
+    honest["self_digest"] = core.artifact_self_digest(honest)
+    assert binding._receipt_validation_errors(honest, now=T_DONE) == []
+    # 中央閘已有自己分支的 schema 不由本模組重複執法(避免兩處各自為政)。
+    assert binding._receipt_validation_errors(
+        {"schema_version": "quiesce_result_v1", "self_digest": "sha256:" + "0" * 64},
+        now=T_DONE,
+    ) == []
 
 
 def test_effects_dispatch_delegates_s2_family_by_schema_and_node(
