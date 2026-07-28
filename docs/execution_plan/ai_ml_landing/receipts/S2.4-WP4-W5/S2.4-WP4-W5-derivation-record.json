@@ -3,7 +3,7 @@
     "reasons": [],
     "status": "ADMITTED"
   },
-  "admission_self_digest": "sha256:2a745ea2ef2961bce2af5316c885beb44fbaedcbf190420a3ac79169d53814c7",
+  "admission_self_digest": "sha256:fa317bb77249d2ff78f27b6057b4364c3431a2da91789725f318abb743806c1f",
   "historical_persisted_w4": {
     "historical_source_head": "f66fe0790ee13c098ad99bbdea3c9001f76328a4",
     "historical_w4_integrity": "VERIFIED",
@@ -21,27 +21,27 @@
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w0_wave_exit_self_digest": "sha256:bb2e5918697c585e149b71268117ae7632e1af4cb47c2bf3cd3a146ce96ba1df",
+  "regenerated_w0_wave_exit_self_digest": "sha256:577bb89eb9d887b274d9006aec25971f0197e7a55e21b8077b2e20a514bfcd74",
   "regenerated_w1_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w1_wave_exit_self_digest": "sha256:5795b231d9e1acdaf1864533448bd609c5571727ce29192bc47cbeb195f243dd",
+  "regenerated_w1_wave_exit_self_digest": "sha256:f4865e69b1f48daa4c6dfcb0dfd022055bf7590183f033484b8524d86bdf661a",
   "regenerated_w2_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w2_wave_exit_self_digest": "sha256:1baa5dee79d098bf334a7901046df6ff3e25c6d01cbe6487f1e2b7580cbe9dd7",
+  "regenerated_w2_wave_exit_self_digest": "sha256:3f6acd00729f4e76111cd56fc36cc620453952fff65154fbfad7e896a99a23fa",
   "regenerated_w3_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w3_wave_exit_self_digest": "sha256:e4192ff44fc2b723d60c66e46e21af5590ce5de49eee1caf016d37c914d4d531",
+  "regenerated_w3_wave_exit_self_digest": "sha256:b052b421a26b2a14277eb20f3358734d7ad085c2f209c669e18fa0fbf161fa6f",
   "regenerated_w4_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w4_wave_exit_self_digest": "sha256:3c47ab4b1c6365be4ff06678673cdd5dd7f92cc1d9142e7caa53daa9cd07a860",
+  "regenerated_w4_wave_exit_self_digest": "sha256:17d90b8b216d639d67695792152efa947c376abc01918672e87b396a72453bcc",
   "remaining_owned_obligation_count": 28,
   "remaining_owned_obligations": [
     {
@@ -366,31 +366,31 @@
   "replay_note": "W5 re-derivation binds source_head == checkout HEAD; to replay, checkout source_head, rebuild the in-memory W0/W1/W2/W3/W4 chain with the same builders, then run derive_wave_exit_status(w5, source_admission_receipt=admission, predecessor_wave_receipt=w4_wave_exit, predecessor_wave_chain=(w0_wave_exit, w1_wave_exit, w2_wave_exit, w3_wave_exit)). A PASS here evidences source structure at this head only: the evidence digests are shape-only (the chain derives PASS on a literal sha256:111...1), so it never evidences that any test ran or that any review happened.",
   "review_provenance": [
     {
-      "disposition": "PR #145 merged exact-head as e1b14b7d5; S2.4@SOURCE_READY declared post-merge via PR #146 (3dd27b5e2)",
-      "headline": "Reconciled the stale active-state projection to the aaee7f1a2/456bd0c20 generation, added the receipt-binding discriminator regression, and adjudicated the six PM-owned obligations (0 source-closure blockers; S2.4-AMEND-1/2 gate S2.4@EFFECT_DONE).",
-      "role": "PM",
-      "round": "W5 round 6 (PM audit closure)",
-      "verdict": "five independent exact-generation reviews (E2/E4/CC/OPS/QA) at 029d2adfc all PASS with 0 P0/0 P1"
+      "disposition": "carried P2s and notes closed by tranche 2 with red-to-green evidence; independent E2 delta review of tranche 2 is dispatched after this emission and gates the PR",
+      "headline": "All round-1 P1s (lane-mixing, exception escape, self-reported digests, ledger persistence) confirmed closed; 11/12 mutations killed; carried P2-1/P2-2/P2-3 and three notes recorded.",
+      "role": "E2",
+      "round": "WP5 tranche 1b delta re-review",
+      "verdict": "PASS at dd6c10936"
     },
     {
-      "disposition": "this emission re-binds the eight W5 receipts at the head carrying the ledger change, per the standing re-emission rule; independent E2/E3/E4 review of the WP5 branch is dispatched after this emission and gates the PR",
-      "headline": "Built the S2.5 running-attestation source seam per the PA design and six PM rulings (O-1..O-6, §5.4 option b): five closed schemas, additive v3 classifier, lifecycle/attestation/driver leaves, CLI, three-state lifecycle fixtures on an injected harness, and the typed-status-keyed two-way obligation latch closing S2_5_LIFECYCLE_FIXTURES_DO_NOT_EXIST.",
+      "disposition": "S2.5/S2.2B SOURCE_READY declarations remain PM post-merge projections; nine authorities stay false",
+      "headline": "Closed carried P2-1/P2-2 (hold-style flock across the consume->persist window)/P2-3 (no self-reported record_digest) plus notes 2/3, and built the S2.2B ingestion_compatibility_receipt_v1 source seam consuming the real persisted S2.2A v1 receipt and a fully re-validated s2_5_final_attestation_v1 anchor.",
       "role": "E1",
-      "round": "WP5 tranche 1 (S2.5 source seam)",
-      "verdict": "6247/46/1-expected-red at 0faa6499d; 10/10 mutation probes red; frozen S0.3/v1/v2 digests byte-identical"
+      "round": "WP5 tranche 2",
+      "verdict": "committed clone 6306/46/0; 8/8 mutations killed"
     }
   ],
   "schema_version": "s2_4_w5_derivation_record_v1_informal",
-  "source_head": "0faa6499d0a1b7b44165e212e0c438f1374f00d4",
+  "source_head": "5be472193d5a23b5e3fbb76b7fc58f2068008ed1",
   "test_evidence": {
-    "command": "python3 -m pytest tests/structure program_code/ml_training/tests -q (scratchpad clean committed clone at 0faa6499d)",
-    "exit_code": 1,
-    "measured_by": "E1 committed-clone runs (WP5 tranche 1) re-checked by PM before emission",
-    "summary": "6247 passed / 46 skipped / 1 failed at the pre-emission head 0faa6499d; the single red is test_aiml_w5_receipt_binding_projection.py::test_derivation_record_ledger_matches_the_live_abi, i.e. exactly the persisted-ledger-vs-live-ABI drift this emission closes (the WP5 tranche changed the S2_5_LIFECYCLE_FIXTURES_DO_NOT_EXIST row to CLOSED_BY_S2_5_SOURCE per the PM O-1 ruling). Baseline 3dd27b5e2 measured structure 3628/6; +72 tests, zero regressions, zero new skips. E1 mutation matrix 10/10 red with pristine green controls."
+    "command": "python3 -m pytest tests/structure program_code/ml_training/tests -q (scratchpad committed clone at f08a3f992; design-note head 5be472193 is doc-only on top)",
+    "exit_code": 0,
+    "measured_by": "E1 committed-clone runs (WP5 tranche 2) re-checked by PM before emission",
+    "summary": "6306 passed / 46 skipped / 0 failed at the WP5 tranche-2 head (structure 3735/6 + ml_training 2571/40; baseline dab875882 was 6281/46). Tranche 2 closed the carried P2-1/P2-2/P2-3 and notes with red-to-green evidence and built the S2.2B ingestion_compatibility_receipt_v1 source seam; 8/8 mutation probes killed. The four W5-owned files changed (schema_core SCHEMA_FILES 78->79, validator facade delegate branch, runtime-closure JSON reseal, s2_4 count pin) are the unavoidable central-registration channel, which is why this round-7 re-emission re-binds the receipts at the head carrying them."
   },
   "w5_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "w5_wave_exit_self_digest": "sha256:99ab3a05f92811ea08814a83701e35315eeb2ab0458c490abce86e387a4f499d"
+  "w5_wave_exit_self_digest": "sha256:8f800537f0f3c99c71fcad81fb82e7b70f6b4b30a448e4c8d61b4600e4032ab7"
 }
