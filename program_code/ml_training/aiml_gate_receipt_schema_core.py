@@ -214,6 +214,29 @@ SCHEMA_FILES = {
     "s2_4_dependency_refresh_attestation_v1": (
         "s2_4_dependency_refresh_attestation_v1.schema.json"
     ),
+    # S2.5(WP5·design §5/§6)——additive:running-attestation seam 的五個 typed schema 與
+    # additive v3 component-effect 分類 artifact。加這六鍵純為 schema 查找,絕不進入
+    # aiml_effect_classifier_digest() 的六個 S0.3 常量輸入(見 :46-48/§7.2),S0.3 分類身分
+    # 不動;亦不改 PROGRAM_SCHEMA_PATHS 與 v1/v2 component matrix/digest。中央閘依 exact
+    # schema_version 委派 aiml_gate_receipt_s2_5.validate_s2_5_artifact(結構/整合/新鮮度/
+    # attestor 驗簽面);五個 s2_5 artifact 全屬 §9.2 never-refreshable(runtime 觀測類:
+    # 只可重新觀測,永不可 refresh-by-reference)。乾淨 [] 只證結構,「不」證任何 unit 真的
+    # enabled/running——attested status 唯一由 trusted-host attestor SSHSIG 解鎖(key custody
+    # 鎖產線),九項 authority 恆 false。
+    "s2_5_start_core_v1": "s2_5_start_core_v1.schema.json",
+    "s2_5_start_intent_v1": "s2_5_start_intent_v1.schema.json",
+    "s2_5_running_attestation_v1": "s2_5_running_attestation_v1.schema.json",
+    "s2_5_final_attestation_v1": "s2_5_final_attestation_v1.schema.json",
+    "s2_5_rollback_drill_receipt_v1": "s2_5_rollback_drill_receipt_v1.schema.json",
+    # S2.5(WP5 tranche 1b·E3 P1-3)——additive:S2.5 自己的 hash-chained replay ledger
+    # (鏡 sibling s2_4_authorization_replay_ledger_v1;consume-once 的 durable 契約)。
+    # 同上:純 schema 查找,不進 S0.3 classifier 輸入,不動 PROGRAM_SCHEMA_PATHS。
+    "s2_5_authorization_replay_ledger_v1": (
+        "s2_5_authorization_replay_ledger_v1.schema.json"
+    ),
+    "aiml_component_effect_classification_v3": (
+        "aiml_component_effect_classification_v3.schema.json"
+    ),
 }
 
 S0_DEPENDENCY_DIGESTS = {

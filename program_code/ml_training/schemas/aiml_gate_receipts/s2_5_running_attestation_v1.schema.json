@@ -1,0 +1,382 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2_5_running_attestation_v1.schema.json",
+  "title": "s2_5_running_attestation_v1",
+  "description": "Closed S2.5A receipt (design §5.2): the initial enable --now + five-dimension running attestation over exactly the five keys S2.3 left const-false in expected_identity_receipt_v1.running_attested (unit / pid_cgroup / mount / network / pg_identity; observation_owner S2.5_LR6). Success semantics are fail-closed: RUNNING_ATTESTED is reachable ONLY for a production target with a verified trusted-host attestor signature (PLATFORM_OR_EXTERNAL_ATTESTED); SOURCE_SIMULATION_PASS is the ceiling for the simulated/disposable lanes (LOCAL_REPRODUCIBLE, trusted_host_attestation null) — a fixture impersonating a platform-attested PASS is structurally unexpressable (boundary.fixture_impersonates_platform_attested const false plus the target-class allOf). The observer_gate block is written out in full here per the PM §5.4 option (b) ruling (no cross-file $ref, no byte-isomorphism coupling); its dead-man semantics: stale evidence or an absent sample can never derive a PASS. reboot_survival_observed stays null in this seam (PM O-6): WantedBy-link + manager semantics are the source-provable half, a real reboot survival belongs to S3.4 soak. Contract only: nine authorities stay false.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "adapter_id",
+    "status",
+    "intent_id",
+    "intent_digest",
+    "target_class",
+    "target_host",
+    "unit_name",
+    "owner_fingerprint",
+    "running_dimensions",
+    "enabled_persistence",
+    "observer_gate",
+    "precheck",
+    "rollback_record",
+    "apply_actor_node",
+    "independent_verifier_node",
+    "verifier_capture_digest",
+    "trusted_host_attestation",
+    "evidence_class",
+    "boundary",
+    "started_at",
+    "completed_at",
+    "evidence_expires_at",
+    "failure_reason",
+    "source_head",
+    "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2_5_running_attestation_v1"},
+    "adapter_id": {"const": "s2_5_runtime_start_adapter_v1"},
+    "status": {
+      "enum": [
+        "RUNNING_ATTESTED",
+        "SOURCE_SIMULATION_PASS",
+        "EXTERNAL_VERIFICATION_PENDING",
+        "AUTHORIZATION_REJECTED",
+        "ATTESTATION_FAILED",
+        "RECOVERY_REQUIRED"
+      ]
+    },
+    "intent_id": {"$ref": "#/$defs/start_id"},
+    "intent_digest": {"$ref": "#/$defs/digest"},
+    "target_class": {"enum": ["simulated_harness", "disposable_local", "production"]},
+    "target_host": {"type": "string", "minLength": 1},
+    "unit_name": {"const": "arcane-equilibrium-aiml-engine-scanner.service"},
+    "owner_fingerprint": {"$ref": "#/$defs/digest"},
+    "running_dimensions": {"$ref": "#/$defs/running_dimensions"},
+    "enabled_persistence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["unit_file_state", "wanted_by_link_present", "reboot_survival_observed"],
+      "properties": {
+        "unit_file_state": {"type": "string", "minLength": 1},
+        "wanted_by_link_present": {"type": "boolean"},
+        "reboot_survival_observed": {"anyOf": [{"type": "null"}, {"type": "boolean"}]}
+      }
+    },
+    "observer_gate": {"$ref": "#/$defs/observer_gate"},
+    "precheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "inactive_prestate_verified",
+        "loader_closure_reverified",
+        "s2_4_recovery_clear",
+        "install_lock_free"
+      ],
+      "properties": {
+        "inactive_prestate_verified": {"type": "boolean"},
+        "loader_closure_reverified": {"type": "boolean"},
+        "s2_4_recovery_clear": {"type": "boolean"},
+        "install_lock_free": {"type": "boolean"}
+      }
+    },
+    "rollback_record": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/rollback_record"}]},
+    "apply_actor_node": {"type": "string", "minLength": 1},
+    "independent_verifier_node": {"type": "string", "minLength": 1},
+    "verifier_capture_digest": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/digest"}]},
+    "trusted_host_attestation": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/trusted_host_attestation"}]},
+    "evidence_class": {
+      "enum": ["LOCAL_REPRODUCIBLE", "STRUCTURAL_ONLY", "PLATFORM_OR_EXTERNAL_ATTESTED"]
+    },
+    "boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "production_started_by_source_lane",
+        "production_running_attested_without_attestor",
+        "fixture_impersonates_platform_attested",
+        "nine_authorities_false"
+      ],
+      "properties": {
+        "production_started_by_source_lane": {"const": false},
+        "production_running_attested_without_attestor": {"const": false},
+        "fixture_impersonates_platform_attested": {"const": false},
+        "nine_authorities_false": {"const": true}
+      }
+    },
+    "started_at": {"$ref": "#/$defs/timestamp"},
+    "completed_at": {"$ref": "#/$defs/timestamp"},
+    "evidence_expires_at": {"$ref": "#/$defs/timestamp"},
+    "failure_reason": {"anyOf": [{"type": "null"}, {"type": "string", "minLength": 1}]},
+    "source_head": {"$ref": "#/$defs/git_sha"},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "RUNNING_ATTESTED"}}},
+      "then": {
+        "properties": {
+          "target_class": {"const": "production"},
+          "trusted_host_attestation": {"$ref": "#/$defs/trusted_host_attestation"},
+          "evidence_class": {"const": "PLATFORM_OR_EXTERNAL_ATTESTED"},
+          "observer_gate": {"properties": {"stale": {"const": false}}},
+          "failure_reason": {"type": "null"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"status": {"const": "SOURCE_SIMULATION_PASS"}}},
+      "then": {
+        "properties": {
+          "target_class": {"enum": ["simulated_harness", "disposable_local"]},
+          "trusted_host_attestation": {"type": "null"},
+          "evidence_class": {"const": "LOCAL_REPRODUCIBLE"},
+          "observer_gate": {"properties": {"stale": {"const": false}}},
+          "failure_reason": {"type": "null"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"status": {"const": "EXTERNAL_VERIFICATION_PENDING"}}},
+      "then": {"properties": {"failure_reason": {"type": "string", "minLength": 1}}}
+    },
+    {
+      "if": {"properties": {"target_class": {"enum": ["simulated_harness", "disposable_local"]}}},
+      "then": {
+        "properties": {
+          "evidence_class": {"enum": ["LOCAL_REPRODUCIBLE", "STRUCTURAL_ONLY"]},
+          "trusted_host_attestation": {"type": "null"},
+          "enabled_persistence": {"properties": {"reboot_survival_observed": {"type": "null"}}}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "git_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "start_id": {"type": "string", "pattern": "^s2-5-[0-9a-f]{64}$"},
+    "running_dimensions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["unit", "pid_cgroup", "mount", "network", "pg_identity"],
+      "properties": {
+        "unit": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "active_state",
+            "sub_state",
+            "unit_file_state",
+            "main_pid",
+            "n_restarts_baseline",
+            "fragment_digest_match"
+          ],
+          "properties": {
+            "active_state": {"type": "string", "minLength": 1},
+            "sub_state": {"type": "string", "minLength": 1},
+            "unit_file_state": {"type": "string", "minLength": 1},
+            "main_pid": {"type": "integer", "minimum": 0},
+            "n_restarts_baseline": {"type": "integer", "minimum": 0},
+            "fragment_digest_match": {"type": "boolean"}
+          }
+        },
+        "pid_cgroup": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "cmdline_digest",
+            "control_group_match",
+            "boot_id",
+            "process_start_ticks",
+            "invocation_id"
+          ],
+          "properties": {
+            "cmdline_digest": {"$ref": "#/$defs/digest"},
+            "control_group_match": {"type": "boolean"},
+            "boot_id": {"type": "string", "minLength": 1},
+            "process_start_ticks": {"type": "string", "minLength": 1},
+            "invocation_id": {"type": "string", "minLength": 1}
+          }
+        },
+        "mount": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "launch_root_match",
+            "loader_closure_match",
+            "executable_mappings_in_manifest"
+          ],
+          "properties": {
+            "launch_root_match": {"type": "boolean"},
+            "loader_closure_match": {"type": "boolean"},
+            "executable_mappings_in_manifest": {"type": "boolean"}
+          }
+        },
+        "network": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "address_families_ok",
+            "ip_allow_loopback_only",
+            "listening_sockets_empty"
+          ],
+          "properties": {
+            "address_families_ok": {"type": "boolean"},
+            "ip_allow_loopback_only": {"type": "boolean"},
+            "listening_sockets_empty": {"type": "boolean"}
+          }
+        },
+        "pg_identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "advisory_lock_holder_count",
+            "backend_role",
+            "backend_database",
+            "session_started_seen",
+            "unclosed_session_absent",
+            "topology_guard_match"
+          ],
+          "properties": {
+            "advisory_lock_holder_count": {"type": "integer", "minimum": 0},
+            "backend_role": {"type": "string", "minLength": 1},
+            "backend_database": {"type": "string", "minLength": 1},
+            "session_started_seen": {"type": "boolean"},
+            "unclosed_session_absent": {"type": "boolean"},
+            "topology_guard_match": {"type": "boolean"}
+          }
+        }
+      }
+    },
+    "observer_gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "verifier_node_id",
+        "db_evidence_via_observer_role",
+        "max_evidence_age_seconds",
+        "oldest_evidence_at",
+        "evaluated_at",
+        "stale"
+      ],
+      "properties": {
+        "verifier_node_id": {"type": "string", "minLength": 1},
+        "db_evidence_via_observer_role": {"const": true},
+        "max_evidence_age_seconds": {"type": "integer", "minimum": 1, "maximum": 3600},
+        "oldest_evidence_at": {"$ref": "#/$defs/timestamp"},
+        "evaluated_at": {"$ref": "#/$defs/timestamp"},
+        "stale": {"type": "boolean"}
+      }
+    },
+    "trusted_host_attestation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attestor_identity",
+        "signature_namespace",
+        "attestation_kind",
+        "intent_digest",
+        "running_dimensions_digest",
+        "observer_gate_digest",
+        "trusted_host_time",
+        "expires_at",
+        "signature_armored"
+      ],
+      "properties": {
+        "attestor_identity": {"const": "aiml-s2-5-runtime-attestor-v1"},
+        "signature_namespace": {"const": "arcane-equilibrium-aiml-s2-5-running-attestation"},
+        "attestation_kind": {"const": "A"},
+        "intent_digest": {"$ref": "#/$defs/digest"},
+        "running_dimensions_digest": {"$ref": "#/$defs/digest"},
+        "observer_gate_digest": {"$ref": "#/$defs/digest"},
+        "trusted_host_time": {"$ref": "#/$defs/timestamp"},
+        "expires_at": {"$ref": "#/$defs/timestamp"},
+        "signature_armored": {"type": "string", "minLength": 1, "maxLength": 16384}
+      }
+    },
+    "rollback_record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "kind",
+        "status",
+        "intent_id",
+        "unit_name",
+        "pre_state",
+        "post_state",
+        "operation",
+        "s2_4_inactive_prestate_digest",
+        "watchdog_last",
+        "observed_at",
+        "expires_at",
+        "source_head",
+        "self_digest"
+      ],
+      "properties": {
+        "schema_version": {"const": "s2_5_rollback_drill_receipt_v1"},
+        "kind": {"const": "ROLLBACK_TO_DISABLED"},
+        "status": {"enum": ["RESTORED_INACTIVE", "NOT_RESTORED", "FAILED"]},
+        "intent_id": {"$ref": "#/$defs/start_id"},
+        "unit_name": {"const": "arcane-equilibrium-aiml-engine-scanner.service"},
+        "pre_state": {"$ref": "#/$defs/unit_state"},
+        "post_state": {"$ref": "#/$defs/unit_state"},
+        "operation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": {"kind": {"const": "systemd_stop_disable"}}
+        },
+        "s2_4_inactive_prestate_digest": {"$ref": "#/$defs/digest"},
+        "watchdog_last": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/watchdog_last"}]},
+        "observed_at": {"$ref": "#/$defs/timestamp"},
+        "expires_at": {"$ref": "#/$defs/timestamp"},
+        "source_head": {"$ref": "#/$defs/git_sha"},
+        "self_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "unit_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["active_state", "unit_file_state", "n_restarts", "invocation_id"],
+      "properties": {
+        "active_state": {"type": "string", "minLength": 1},
+        "unit_file_state": {"type": "string", "minLength": 1},
+        "n_restarts": {"type": "integer", "minimum": 0},
+        "invocation_id": {"type": "string", "minLength": 1}
+      }
+    },
+    "watchdog_last": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "watchdog_usec",
+        "n_restarts_before",
+        "n_restarts_after",
+        "invocation_id_before",
+        "invocation_id_after",
+        "last_lifecycle_operation",
+        "last_transition_matches_authorized_op",
+        "unexplained_restart_detected"
+      ],
+      "properties": {
+        "watchdog_usec": {"anyOf": [{"const": "none"}, {"type": "integer", "minimum": 1}]},
+        "n_restarts_before": {"type": "integer", "minimum": 0},
+        "n_restarts_after": {"type": "integer", "minimum": 0},
+        "invocation_id_before": {"type": "string", "minLength": 1},
+        "invocation_id_after": {"type": "string", "minLength": 1},
+        "last_lifecycle_operation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": {
+            "kind": {"enum": ["systemd_reset_failed", "systemd_stop_disable", "systemd_enable_now"]}
+          }
+        },
+        "last_transition_matches_authorized_op": {"type": "boolean"},
+        "unexplained_restart_detected": {"type": "boolean"}
+      }
+    }
+  }
+}

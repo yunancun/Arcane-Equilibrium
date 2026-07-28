@@ -1487,25 +1487,44 @@ def w5_structural_errors(receipt: dict[str, Any], repo_root: Path = REPO_ROOT) -
                 "schema with an empty property set carries no lifecycle claim only because "
                 "it carries nothing (§10.5 #29 would be satisfied vacuously)"
             )
-    # §10.5 #29 第二句(S2.5 fixtures)在本 repo 沒有 owner —— 那是**被測量**的,而不是被
-    # 宣稱的:S2.5 source 一旦出現,對應義務必須被關掉而不是永遠掛著。
+    # §10.5 #29 第二句(S2.5 fixtures)的雙向 latch——PM O-1 裁決(2026-07-28)後判準改讀
+    # typed_status 而非 row 存在與否:row 永遠 carried(W5 帳本鐵則:殘留歷史 load-bearing
+    # 的義務不得整列刪掉),「關閉」由 typed_status=CLOSED_BY_S2_5_SOURCE 表達。S2.5 source
+    # 缺席時該 row 必須仍記 OUT_OF_WP4_SCOPE;S2.5 source 一旦出現(design 檔 glob 命中),
+    # 該 row 必須改標 CLOSED 而不是留著一句已停止為真的話。
     s2_5_absent = postcheck_live.get("s2_5_lifecycle_source_absent")
+    s2_5_row = next(
+        (
+            row
+            for row in _W5_EXPORTED_ABI["remaining_owned_obligations"]
+            if row["obligation_id"] == "S2_5_LIFECYCLE_FIXTURES_DO_NOT_EXIST"
+        ),
+        None,
+    )
+    s2_5_status = None if s2_5_row is None else s2_5_row.get("typed_status")
     if s2_5_absent is None:
         reasons.append(
             "W5 cannot measure whether an S2.5 lifecycle source exists in this repository "
             "(fail-closed); §10.5 #29's second clause then has an unknown owner"
         )
-    elif s2_5_absent and "S2_5_LIFECYCLE_FIXTURES_DO_NOT_EXIST" not in obligation_ids:
+    elif s2_5_row is None:
         reasons.append(
-            "W5 does not record S2_5_LIFECYCLE_FIXTURES_DO_NOT_EXIST while no S2.5 source "
-            "exists in this repository; §10.5 #29's second clause has no owner in WP4 and "
-            "must be recorded rather than counted as covered"
+            "W5 dropped the S2_5_LIFECYCLE_FIXTURES_DO_NOT_EXIST row entirely; a row whose "
+            "residual history is load-bearing is carried with a typed closure status, "
+            "never removed (PM O-1)"
         )
-    elif not s2_5_absent and "S2_5_LIFECYCLE_FIXTURES_DO_NOT_EXIST" in obligation_ids:
+    elif s2_5_absent and s2_5_status != "OUT_OF_WP4_SCOPE":
         reasons.append(
-            "W5 still records S2_5_LIFECYCLE_FIXTURES_DO_NOT_EXIST although "
-            f"{postcheck_live.get('s2_5_lifecycle_source_files')} now exists; close the "
-            "obligation instead of carrying a statement that has stopped being true"
+            "W5 does not record S2_5_LIFECYCLE_FIXTURES_DO_NOT_EXIST as OUT_OF_WP4_SCOPE "
+            "while no S2.5 source exists in this repository; §10.5 #29's second clause has "
+            "no owner in WP4 and must be recorded rather than counted as covered"
+        )
+    elif not s2_5_absent and s2_5_status == "OUT_OF_WP4_SCOPE":
+        reasons.append(
+            "W5 still records S2_5_LIFECYCLE_FIXTURES_DO_NOT_EXIST as OUT_OF_WP4_SCOPE "
+            f"although {postcheck_live.get('s2_5_lifecycle_source_files')} now exists; "
+            "close the obligation (typed_status=CLOSED_BY_S2_5_SOURCE) instead of carrying "
+            "a statement that has stopped being true"
         )
     # 5) §10.5 #11:rendered unit 的兩個禁止身分。
     unit_live = projection["rendered_unit_negative_live"]

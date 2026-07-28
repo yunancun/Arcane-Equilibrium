@@ -608,6 +608,52 @@
       "hba_delta_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_pg_hba_delta_v1.schema.json",
       "authorization_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_operator_authorization_v1.schema.json",
       "replay_ledger_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_authorization_replay_ledger_v1.schema.json"
+    },
+    "s2_5_runtime_start_adapter_v1": {
+      "status": "AUTHORITY_LOCKED_PRODUCTION_CAPABLE",
+      "owner_session": "S2.5",
+      "authority": "PM/operator approved s2_5_start_intent_v1(phase=S2_5A_START) for the initial enable --now + five-dimension running attestation of exactly the installed arcane-equilibrium-aiml-engine-scanner.service; production is reachable but authority-locked: only a governed Linux effect driver behind the exact s2_4_install_effect_receipt_v1(status=APPLIED_INACTIVE) digest binding plus a fresh domain-separated S2.5A start permit (identity aiml-s2-5a-start-operator-v1, namespace arcane-equilibrium-aiml-s2-5a-start, §9.1 trust root) may enable --now; RUNNING_ATTESTED is unlocked ONLY by a verified trusted-host attestor signature (identity aiml-s2-5-runtime-attestor-v1, namespace arcane-equilibrium-aiml-s2-5-running-attestation), never by a driver-declared evidence_class; Mac/tests/no-driver/no-authorization return a typed fail-closed EXTERNAL_VERIFICATION_PENDING with zero mutation; nine authorities stay false",
+      "invariant": "production reachable but authority-locked; fail-closed EXTERNAL_VERIFICATION_PENDING until S2.4@EFFECT_DONE_INACTIVE receipt binding + a fresh exact S2.5A start permit are independently verified; enable/start only ever targets the constant unit name (no caller unit name/command/unit text/signal/pid/path parameter exists on the driver surface, and daemon-reload/restart/kill/mask are forbidden verbs); pre-start prechecks are mandatory and fail-closed (exact S2.4 inactive pre-state with fragment-digest equality and no drop-ins, native-loader closure re-verification, S2.4 recovery clear, install lock free); any start failure or failing attestation dimension triggers rollback-to-disabled restoring the exact S2.4 pre-state and an unrestored rollback returns RECOVERY_REQUIRED (never converted to success); the five-dimension attestation (unit/pid_cgroup/mount/network/pg_identity) is collected by an independent verifier node under a dead-man observer gate (stale or absent evidence can never derive PASS) and the DB dimension is read ONLY through the S2.0 read-only observer role; enabled/reboot persistence is proven as WantedBy-link + manager semantics only and reboot_survival_observed stays null in the source lane (a real reboot belongs to S3.4 soak); each permit is consumed once in the S2.5 hash-chained replay ledger before the first mutation and is never released by rollback; a fixture can never impersonate a platform-attested PASS (simulated/disposable lanes cap at SOURCE_SIMULATION_PASS with LOCAL_REPRODUCIBLE); the operator/attestor private key is on neither Mac nor trade-core; no secret is serialized in any artifact; nine authorities stay false; no route_task effect node or closure effect binding is injected before the S2.5 EFFECT session",
+      "implementation_paths": [
+        "helper_scripts/maintenance_scripts/agent_governance_s2_5_lifecycle.py",
+        "helper_scripts/maintenance_scripts/agent_governance_s2_5_attestation.py",
+        "helper_scripts/maintenance_scripts/agent_governance_s2_5_driver.py",
+        "helper_scripts/maintenance_scripts/agent_governance_s2_5.py"
+      ],
+      "component_paths": [
+        "program_code/ml_training/aiml_gate_receipt_validator.py",
+        "program_code/ml_training/aiml_gate_receipt_s2_5.py",
+        "helper_scripts/maintenance_scripts/agent_governance_alr_quiesce_inventory.py",
+        "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_host.py"
+      ],
+      "intent_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/s2_5_start_intent_v1.schema.json",
+      "core_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/s2_5_start_core_v1.schema.json",
+      "receipt_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/s2_5_running_attestation_v1.schema.json",
+      "rollback_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/s2_5_rollback_drill_receipt_v1.schema.json",
+      "postcheck_contract": "s2_5_running_postcheck_v1 (the §5.2 independent verifier face; no separate schema file — the verifier face is embedded in the receipt's observer_gate/independent_verifier_node fields)"
+    },
+    "s2_5_final_attestation_adapter_v1": {
+      "status": "AUTHORITY_LOCKED_PRODUCTION_CAPABLE",
+      "owner_session": "S2.5",
+      "authority": "PM/operator approved s2_5_start_intent_v1(phase=S2_5B_FINAL) for the post-drill final five-dimension attestation + watchdog reset LAST of exactly the installed arcane-equilibrium-aiml-engine-scanner.service (the WATCHDOG_ROLLBACK_TEST effect lineage carrier); production is reachable but authority-locked: only a governed Linux effect driver behind the exact S2.1 quiesce_result_v1(status=QUIESCED_...) drill receipt digest + the exact S2.5A s2_5_running_attestation_v1 digest plus a fresh domain-separated S2.5B final permit (identity aiml-s2-5b-final-operator-v1, namespace arcane-equilibrium-aiml-s2-5b-final, §9.1 trust root) may run the final attestation; FINAL_ATTESTED is unlocked ONLY by a verified trusted-host attestor signature (identity aiml-s2-5-runtime-attestor-v1, namespace arcane-equilibrium-aiml-s2-5-running-attestation), never by a driver-declared evidence_class; Mac/tests/no-driver/no-authorization return a typed fail-closed EXTERNAL_VERIFICATION_PENDING with zero mutation; nine authorities stay false",
+      "invariant": "production reachable but authority-locked; fail-closed EXTERNAL_VERIFICATION_PENDING until S2.1@EFFECT_DONE receipt binding + the S2.5A pre-drill attestation binding + a fresh exact S2.5B final permit are independently verified; the watchdog reset (systemctl reset-failed on the constant unit only) is the LAST lifecycle operation of the phase and RESET_CLEAN requires NRestarts==0 afterwards, the last transition being the authorized reset itself, and zero supervening/unexplained restarts (any supervening restart makes RESET_CLEAN unreachable); the unit carries no WatchdogSec so watchdog_usec is honestly recorded as none (sd_notify is an S3.4/LR6 candidate; this adapter never edits any unit file); the post-drill five dimensions must match the stable identity (unit + cmdline + cgroup + env-hash + digest + single advisory-lock holder; a new PID/InvocationID is expected) observed by an independent verifier node under the dead-man observer gate with the DB dimension read ONLY through the S2.0 read-only observer role; each permit is consumed once in the S2.5 hash-chained replay ledger and is never released by rollback; only s2_5_final_attestation_v1 is the legal upstream of the S2.2B runtime-DONE; a fixture can never impersonate a platform-attested PASS; the operator/attestor private key is on neither Mac nor trade-core; no secret is serialized in any artifact; nine authorities stay false; no route_task effect node or closure effect binding is injected before the S2.5 EFFECT session",
+      "implementation_paths": [
+        "helper_scripts/maintenance_scripts/agent_governance_s2_5_lifecycle.py",
+        "helper_scripts/maintenance_scripts/agent_governance_s2_5_attestation.py",
+        "helper_scripts/maintenance_scripts/agent_governance_s2_5_driver.py",
+        "helper_scripts/maintenance_scripts/agent_governance_s2_5.py"
+      ],
+      "component_paths": [
+        "program_code/ml_training/aiml_gate_receipt_validator.py",
+        "program_code/ml_training/aiml_gate_receipt_s2_5.py",
+        "helper_scripts/maintenance_scripts/agent_governance_alr_quiesce_inventory.py",
+        "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_host.py"
+      ],
+      "intent_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/s2_5_start_intent_v1.schema.json",
+      "core_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/s2_5_start_core_v1.schema.json",
+      "receipt_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/s2_5_final_attestation_v1.schema.json",
+      "rollback_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/s2_5_rollback_drill_receipt_v1.schema.json",
+      "postcheck_contract": "s2_5_final_postcheck_v1 (the §5.5 independent verifier face; no separate schema file — the verifier face is embedded in the receipt's observer_gate/independent_verifier_node fields)"
     }
   },
   "roles": {
