@@ -70,6 +70,18 @@ S2_ADAPTER_IDS = frozenset(
 #   closure_pass_blocked_reason —— 非 None 時該 step 今日**無任何**可 closure-PASS 的 status
 #       (success_statuses 必為空集),success 判定回 typed error 而非靜默通過;同時該 step
 #       不要求 runtime_contact/CHANGED(無可達的成功頂點,要求它只會製造假語義)。
+#       ── S2.0 與 S2.1 的處置對稱性(CC-A1 裁決,方案 i;CC 指「不對稱且無記錄」)──
+#       兩步同一條理由、同一種處置:各自 result schema 今日唯一可達的「成功」status
+#       (S2.0 = APPLIED_ROLLED_BACK_EXACT / S2.1 = QUIESCED_STATIC_GUARDS_HELD)都被自己的
+#       schema 釘死成 target_class=disposable_local + evidence_class=LOCAL_REPRODUCIBLE,
+#       且 boundary 明文 production_apply_performed / production_fence_performed = false
+#       ——那是拋棄式邏輯證明,不得被本模組單方換算成 production DAG 步驟的
+#       runtime_contact=true / disposition=CHANGED。真 production 頂點(S2.0 的 APPLIED /
+#       S2.1 的未來 production fence status)都需要各自 EFFECT session 的 out-of-band
+#       trusted-host 驗證,本波不可達。故兩步一律 success_statuses=frozenset() +
+#       closure_pass_blocked_reason,而非「收窄成功集」——收窄仍會讓一份拋棄式收據換到
+#       EFFECT_DONE。另見兩步 postcheck_kind 註(其 command_capture_v2 runtime 形狀今日在
+#       closure_packet_v1 亦不可表示,與本處置同向)。
 #   claim_receipt_bindings —— route claim admission ↔ receipt 頂層 digest 欄位(含 permit)。
 #   declaration_only_claims —— 該 step 的 claim 在 receipt 內**確無**對應 digest 欄位可綁,
 #       刻意只作 route 層宣告(其真偽閉合在 adapter 層 permit 消耗/replay ledger);由測試
@@ -114,15 +126,28 @@ S2_STEP_RECEIPT_CONTRACTS: dict[str, dict[str, Any]] = {
     "S2_0_APPLY": {
         "receipt_schema_version": "pg_observer_bootstrap_result_v1",
         "status_field": "status",
-        # 成功集**刻意不含** production ``APPLIED``:既有硬門
-        # validate_pg_observer_bootstrap_binding 只認 APPLIED_ROLLED_BACK_EXACT(拋棄式
-        # 邏輯證明),而把 production APPLIED 納入 closure PASS 需要「out-of-band
-        # trusted-host 驗證 runtime apply 真的發生」,那是 S2.0 EFFECT session 的工作
-        # (docs/execution_plan/ai_ml_landing/design/S2.4-W0a-authenticity-hardening.md
-        # §「Genuinely EFFECT-only, out of W0a scope」)。封包自帶的收據無法認證自己被執行
-        # (Typed Authority Matrix)。
-        "success_statuses": frozenset({"APPLIED_ROLLED_BACK_EXACT"}),
-        "closure_pass_blocked_reason": None,
+        # ── CC-A1(與 S2.1/CC-B 同型的跨類 DRIFT,不由本模組單方換算)──
+        # 舊碼把成功集收窄成 {APPLIED_ROLLED_BACK_EXACT} 仍重演同一缺陷:
+        # pg_observer_bootstrap_result_v1.schema.json 規定該 status ⇒
+        # target_class const disposable_local + evidence_class const LOCAL_REPRODUCIBLE,
+        # 且 status != APPLIED 的 else 臂 ⇒ boundary.production_apply_performed const false。
+        # 而本模組對成功 step 強制 runtime_contact=true + disposition=CHANGED、wrapper 另蓋
+        # environment=trade_core_aiml_s2——一份拋棄式收據於是可讓 DAG 全鏈前置的 S2.0 記成
+        # EFFECT_DONE。裁決(PM,方案 i,與 S2.1 對稱):本 step 今日**無**可 closure-PASS
+        # 的成功頂點。
+        "success_statuses": frozenset(),
+        "closure_pass_blocked_reason": (
+            "pg_observer_bootstrap_result_v1 has no closure-admissible production success "
+            "status today: APPLIED_ROLLED_BACK_EXACT is schema-pinned to "
+            "target_class=disposable_local / evidence_class=LOCAL_REPRODUCIBLE and its "
+            "boundary is production_apply_performed=false (the schema's non-APPLIED else "
+            "arm), so it is a throwaway logic proof and is never converted into the "
+            "runtime_contact/CHANGED semantics of a production DAG step; a production "
+            "APPLIED needs the out-of-band trusted-host verification that the runtime "
+            "apply actually happened, which is S2.0 EFFECT-session work "
+            "(design/S2.4-W0a-authenticity-hardening.md, 'Genuinely EFFECT-only, out of "
+            "W0a scope') and is unreachable in this wave"
+        ),
         "intent_schema_version": "pg_observer_bootstrap_intent_v1",
         "intent_id_field": "intent_id",
         "intent_digest_field": "intent_digest",
@@ -486,9 +511,19 @@ def _delegated_binding_errors(
     delegate = _DELEGATED_STEP_BINDINGS.get(step)
     if delegate is None:
         return []
-    return list(delegate(
-        packet, route, fragments_by_node, evidence_by_id, valid_receipts,
-    ))
+    try:
+        return list(delegate(
+            packet, route, fragments_by_node, evidence_by_id, valid_receipts,
+        ))
+    except (AttributeError, IndexError, KeyError, TypeError, ValueError) as error:
+        # NEW-P3-F:被委派者拿到畸形封包時可能拋例外(它們是為自己的 EFFECT session 寫的,
+        # 未必對任意輸入全 typed)。closure admission 不得讓裸 traceback 逸出呼叫端——鏡
+        # agent_governance_closure 對 route_task 的處理,轉成 typed error(fail-closed:
+        # 例外一律計為錯誤,絕不當成「委派通過」)。
+        return [
+            f"S2 {step} delegated per-step closure gate raised "
+            f"{type(error).__name__}: {error}"
+        ]
 
 
 def validate_s2_effect_binding(

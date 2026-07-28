@@ -69,14 +69,18 @@ STEP_FACT_SHAPES = {
         "surfaces": ["authority", "pg", "runtime_effect"], "risk": "high",
     },
 }
-# CC-B:closure PASS 被 contract 明文阻塞的 step(今日 = S2_1_DRILL)不進正例參數化。
+# CC-A1/CC-B:closure PASS 被 contract 明文阻塞的 step(今日 = S2_0_APPLY + S2_1_DRILL)
+# 不進正例參數化。
 PASSABLE_STEPS = sorted(
     step for step in S2_EFFECT_STEPS
     if binding.S2_STEP_RECEIPT_CONTRACTS[step]["closure_pass_blocked_reason"] is None
 )
 BLOCKED_STEPS = sorted(set(S2_EFFECT_STEPS) - set(PASSABLE_STEPS))
 # 被阻塞 step 的「最佳可得 status」——用來證明即使拿出該 status 也不換算 PASS。
-_BLOCKED_STEP_STATUS = {"S2_1_DRILL": "QUIESCED_STATIC_GUARDS_HELD"}
+_BLOCKED_STEP_STATUS = {
+    "S2_0_APPLY": "APPLIED_ROLLED_BACK_EXACT",
+    "S2_1_DRILL": "QUIESCED_STATIC_GUARDS_HELD",
+}
 
 
 def _claims(step: str) -> dict[str, str]:
@@ -244,11 +248,16 @@ def test_acceptance_missing_postcheck_binding_fails_closed(
 def test_blocked_step_never_converts_a_disposable_proof_into_a_pass(
     structural_receipts, step: str,
 ) -> None:
-    """CC-B:S2.1 的 QUIESCED_STATIC_GUARDS_HELD 是 disposable_local 邏輯證明。
+    """CC-A1/CC-B:兩個被阻塞 step 的「最佳可得 status」都是 disposable_local 邏輯證明。
 
-    quiesce_result_v1.schema.json 規定該 status ⇒ target_class=disposable_local 且
-    evidence_class=LOCAL_REPRODUCIBLE,且 boundary 無條件 production_fence_performed=false。
-    binding 絕不能在「明知未對 production 施加 fence」的收據上簽發 runtime_contact PASS。
+    * S2.1 ``QUIESCED_STATIC_GUARDS_HELD`` ⇒ quiesce_result_v1 規定
+      target_class=disposable_local / evidence_class=LOCAL_REPRODUCIBLE,boundary 無條件
+      production_fence_performed=false。
+    * S2.0 ``APPLIED_ROLLED_BACK_EXACT`` ⇒ pg_observer_bootstrap_result_v1 規定
+      target_class=disposable_local / evidence_class=LOCAL_REPRODUCIBLE,且 status != APPLIED
+      的 else 臂令 boundary.production_apply_performed=false。
+
+    binding 絕不能在「明知未對 production 施加」的收據上簽發 runtime_contact PASS。
     """
 
     route = _route(step)
@@ -285,16 +294,36 @@ def test_s2_1_drill_success_status_is_blocked_not_silently_dropped() -> None:
     assert "QUIESCED_STATIC_GUARDS_HELD" in reason
 
 
-def test_s2_0_success_set_excludes_production_applied() -> None:
-    """CC-A:production APPLIED 需 out-of-band trusted-host 驗證,屬 S2.0 EFFECT session。"""
+def test_s2_0_and_s2_1_blocked_dispositions_are_symmetric() -> None:
+    """CC-A1:S2.0 不得只是「收窄成功集」——那仍讓一份拋棄式收據把 S2.0 記成 EFFECT_DONE。
+
+    收窄後的 ``APPLIED_ROLLED_BACK_EXACT`` 依 schema 恆為 disposable_local/
+    LOCAL_REPRODUCIBLE 且 production_apply_performed=false,而 binding 對成功 step 強制
+    runtime_contact=true + CHANGED、wrapper 另蓋 environment ⇒ 與 S2.1(CC-B)同型缺陷。
+    處置必須對稱:兩步一律空成功集 + typed blocked reason,並在模組內明文記錄對稱性。
+    """
 
     contract = binding.S2_STEP_RECEIPT_CONTRACTS["S2_0_APPLY"]
-    assert contract["success_statuses"] == frozenset({"APPLIED_ROLLED_BACK_EXACT"})
-    assert "APPLIED" not in contract["success_statuses"]
-    # 既有硬門的成功語義即本模組的成功集(單一權威,不各自為政)。
+    reason = contract["closure_pass_blocked_reason"]
+    assert "APPLIED_ROLLED_BACK_EXACT is schema-pinned" in reason
+    assert "target_class=disposable_local" in reason
+    assert "production_apply_performed=false" in reason
+    assert "out-of-band trusted-host verification" in reason
+    assert "S2.4-W0a-authenticity-hardening.md" in reason
+    for step in ("S2_0_APPLY", "S2_1_DRILL"):
+        step_contract = binding.S2_STEP_RECEIPT_CONTRACTS[step]
+        assert step_contract["success_statuses"] == frozenset(), step
+        assert step_contract["closure_pass_blocked_reason"] is not None, step
+    # 既有硬門的成功語義仍是 S2.0 收據 status 的權威(單一權威,不各自為政)——但那是
+    # adapter/receipt 層的成功,不是 closure PASS。
     import agent_governance_pg_observer_bootstrap as observer
 
-    assert contract["success_statuses"] <= observer.RESULT_STATUSES
+    assert "APPLIED_ROLLED_BACK_EXACT" in observer.RESULT_STATUSES
+    # CC:「目前無記錄說明為何不對稱」⇒ 契約表必須明文記錄兩步的處置對稱性。
+    source = (
+        HELPERS / "agent_governance_s2_effect_binding.py"
+    ).read_text(encoding="utf-8")
+    assert "S2.0 與 S2.1 的處置對稱性" in source
 
 
 def test_delegated_per_step_hard_gates_are_wired_not_bypassed(
@@ -468,6 +497,53 @@ def test_cross_step_receipt_is_rejected_as_unrouted(structural_receipts) -> None
     assert any("exactly one S2_4_W6A_PROBE effect receipt" in error for error in errors)
 
 
+def test_two_receipts_of_the_same_step_are_rejected(structural_receipts) -> None:
+    """NEW-P2-D:``len(matching) != 1`` 的 count>1 方向(把守衛削成 ``< 1`` 即此處紅)。
+
+    兩份同 step 的**合法**收據(同一 schema、同一 scope、僅 self_digest 相異)不得換算 PASS
+    ——「恰一」是身分閘,不是「至少一」。
+    """
+
+    route = _route(GUARD_STEP)
+    receipt = _receipt(GUARD_STEP)
+    second = deepcopy(receipt)
+    second["self_digest"] = "sha256:" + "c" * 64
+    packet, fragments, evidence_by_id = _packet(GUARD_STEP, receipt)
+    errors = binding.validate_s2_effect_binding(
+        packet, route, fragments, evidence_by_id,
+        {"effect": receipt, "effect-duplicate": second},
+    )
+    assert errors == [
+        f"S2 closure PASS requires exactly one {GUARD_STEP} effect receipt"
+    ]
+    # 恰一份時同一輸入是綠的(證明紅的原因就是「第二份」)。
+    assert binding.validate_s2_effect_binding(
+        packet, route, fragments, evidence_by_id, {"effect": receipt}
+    ) == []
+
+
+def test_delegated_gate_exception_becomes_a_typed_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """NEW-P3-F:被委派謂詞拋例外時不得裸 traceback 逸出,必轉 typed error(fail-closed)。"""
+
+    def _raiser(*_args, **_kwargs):
+        raise TypeError("malformed packet")
+
+    monkeypatch.setattr(binding, "_receipt_validation_errors", lambda *_a, **_k: [])
+    monkeypatch.setitem(binding._DELEGATED_STEP_BINDINGS, "S2_0_APPLY", _raiser)
+    route = _route("S2_0_APPLY")
+    receipt = _receipt("S2_0_APPLY")
+    packet, fragments, evidence_by_id = _packet("S2_0_APPLY", receipt)
+    errors = binding.validate_s2_effect_binding(
+        packet, route, fragments, evidence_by_id, {"effect": receipt}
+    )
+    assert (
+        "S2 S2_0_APPLY delegated per-step closure gate raised TypeError: "
+        "malformed packet"
+    ) in errors
+
+
 def test_claim_receipt_digest_binding_fails_closed(structural_receipts) -> None:
     route = _route("S2_4_W6B_APPLY")
     receipt = _receipt("S2_4_W6B_APPLY")
@@ -523,13 +599,17 @@ def test_r3_route_admission_is_never_apply_authority(
 ) -> None:
     """R3 敘事型負例:route 通過(claim admission 成立)但 adapter 層拒——head/freshness/
     permit 的真偽閉合在 adapter 與 closure,route 層 typed 收據 status 不在 production
-    成功集即 closure 拒收,永不換算 PASS。"""
+    成功集即 closure 拒收,永不換算 PASS。
 
-    route = _route("S2_0_APPLY")
+    (CC-A1 後 S2.0 改由 blocked 分支拒;此處改用一個仍有可達成功頂點的 step,才驗得到
+    「成功集判定」那一條分支。)
+    """
+
+    route = _route("S2_4_W6B_APPLY")
     assert [
         node["id"] for node in route["nodes"] if node["kind"] == "effect_adapter"
-    ] == [routing.PG_OBSERVER_BOOTSTRAP_ADAPTER_ID]
-    receipt = _receipt("S2_0_APPLY")
+    ] == [routing.S2_4_INSTALL_ADAPTER_ID]
+    receipt = _receipt("S2_4_W6B_APPLY")
     receipt["status"] = status
     evidence = binding.build_s2_effect_evidence(receipt)
     errors, validated = binding.validate_s2_effect_evidence(
