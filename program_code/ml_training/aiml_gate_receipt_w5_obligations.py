@@ -504,8 +504,11 @@ S2_4_W5_REMAINING_OWNED_OBLIGATIONS: list[dict[str, Any]] = [
         ),
     },
     {
+        # PM O-1 裁決(2026-07-28):typed_status 由 OUT_OF_WP4_SCOPE 改標
+        # CLOSED_BY_S2_5_SOURCE——row 保留作歷史(殘留歷史 load-bearing 的義務不得整列
+        # 刪掉),原 statement 原文保留,關閉事實面 append 於後而非原地改寫。
         "obligation_id": "S2_5_LIFECYCLE_FIXTURES_DO_NOT_EXIST",
-        "typed_status": "OUT_OF_WP4_SCOPE",
+        "typed_status": "CLOSED_BY_S2_5_SOURCE",
         "owner_wave": "S2.5A",
         "spec_refs": ["§10.5 #29", "§11.3"],
         "statement": (
@@ -516,11 +519,26 @@ S2_4_W5_REMAINING_OWNED_OBLIGATIONS: list[dict[str, Any]] = [
             "aggregate driver surface refuses enable/start/restart/kill, the closed "
             "postcheck and receipt schemas carry no runtime-directory or "
             "decrypted-credential property, and an enabled or active observation is never "
-            "a success. The clause is recorded rather than counted as covered."
+            "a success. The clause is recorded rather than counted as covered. "
+            "CLOSED (2026-07-28, PM O-1 ruling, WP5 first tranche): the S2.5 source seam "
+            "now exists in this repository — the design "
+            "docs/execution_plan/ai_ml_landing/design/S2.5-running-attestation-source-seam.md "
+            "and the three-state lifecycle fixtures "
+            "tests/structure/test_agent_governance_s2_5_lifecycle_fixtures.py own exactly "
+            "the clause's subjects (`enable --now` happy path, enabled/reboot persistence "
+            "source half, five-dimension running failure injections, rollback-to-disabled "
+            "with the honest NOT_RESTORED failure, watchdog-reset-last with the "
+            "supervening-restart negative) on an injected unit harness with zero real-host "
+            "contact. The two-way latch now keys off this row's typed_status: an S2.5 "
+            "source present with OUT_OF_WP4_SCOPE, or an S2.5 source absent with a CLOSED "
+            "status, or the row being dropped entirely, each breaks the W5 wave exit."
         ),
         "w5_provides": (
             "the S2.4 half as a live re-derivation and the explicit statement that the S2.5 "
-            "half has no owner in this work package"
+            "half had no owner in this work package; closure evidence (2026-07-28): the "
+            "S2.5 design and the WP5 fixtures file named in the statement, plus the "
+            "typed-status-keyed two-way latch in aiml_gate_receipt_wave_w5 and "
+            "tests/structure/test_aiml_s2_5_obligation_latch.py"
         ),
     },
     {
