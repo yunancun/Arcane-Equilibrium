@@ -765,6 +765,69 @@ def test_expired_runtime_topology_prepare_and_auth_evidence_route_through_the_sa
     )["status"] == "SOURCE_DEPENDENCY_REJECTED"
 
 
+def test_a_genuine_artifact_of_the_wrong_profile_or_scope_is_not_the_named_evidence(
+    tmp_path, monkeypatch,
+) -> None:
+    """S2.4-AMEND-1(obligation 26):class→artifact 解析綁 §9.1 判別欄位,換標籤買不到 FRESH。
+
+    四個 permit 列 / 兩個 probe 列 many-to-one 映到同一份 schema;判別欄位
+    (profile_identity / probe_scope)在 ``_dependency_evidence_receipt_errors`` 執法,
+    值由凍結的 §9.1 profiles 導出而非手抄。"""
+
+    import aiml_gate_receipt_s2_4_contracts as contracts
+
+    private_key, public_key, fingerprint = kit.mint_key(tmp_path)
+    kit.install_pinned_key(monkeypatch, public_key, fingerprint)
+    prepare_permit = kit.authorization(private_key, profile_key="prepare")
+    # 真 PREPARE permit 冠 APPLY_AGGREGATE_AUTHORIZATION → REJECTED(非 FRESH)。
+    wrong = validator.derive_source_dependency_admission_status(
+        evidence_class="APPLY_AGGREGATE_AUTHORIZATION", receipt=prepare_permit, now=kit.NOW
+    )
+    assert wrong["status"] == "SOURCE_DEPENDENCY_REJECTED"
+    assert any("wrong §9.1 profile/scope" in r for r in wrong["reasons"])
+    # 正對照:正確 profile + 未過期 → FRESH(判別表不擋真身分)。
+    assert validator.derive_source_dependency_admission_status(
+        evidence_class="PREPARE_AUTHORIZATION", receipt=prepare_permit, now=kit.NOW
+    )["status"] == "SOURCE_DEPENDENCY_FRESH"
+    # probe_scope 兩向錯配 + 正對照。
+    sandbox = kit.terminal_probe_evidence(private_key)["PREPARE_SANDBOX"]["effect_receipt"]
+    mismatched = validator.derive_source_dependency_admission_status(
+        evidence_class="CAPABILITY_PROBE_RECEIPT_INSTALLED_UNIT", receipt=sandbox,
+        now=kit.NOW,
+    )
+    assert mismatched["status"] == "SOURCE_DEPENDENCY_REJECTED"
+    assert any("wrong §9.1 profile/scope" in r for r in mismatched["reasons"])
+    assert validator.derive_source_dependency_admission_status(
+        evidence_class="CAPABILITY_PROBE_RECEIPT_PREPARE_SANDBOX", receipt=sandbox,
+        now=kit.NOW,
+    )["status"] == "SOURCE_DEPENDENCY_FRESH"
+    installed = kit.terminal_probe_evidence(private_key, scope="INSTALLED_UNIT")[
+        "INSTALLED_UNIT"]["effect_receipt"]
+    assert validator.derive_source_dependency_admission_status(
+        evidence_class="CAPABILITY_PROBE_RECEIPT_PREPARE_SANDBOX", receipt=installed,
+        now=kit.NOW,
+    )["status"] == "SOURCE_DEPENDENCY_REJECTED"
+    # 判別表由凍結 §9.1 profiles 導出(不手抄),四 permit 列逐一對得上。
+    for cls, profile_key in (
+        ("APPLY_AGGREGATE_AUTHORIZATION", "apply_aggregate"),
+        ("PREPARE_AUTHORIZATION", "prepare"),
+        ("PG_MIGRATION_AUTHORIZATION", "pg_migration"),
+        ("CAPABILITY_PROBE_AUTHORIZATION", "capability_probe"),
+    ):
+        assert contracts.S2_4_EVIDENCE_CLASS_DISCRIMINATORS[cls] == (
+            "profile_identity",
+            validator.S2_4_AUTHORIZATION_PROFILES[profile_key]["profile_identity"],
+        )
+    assert sorted(contracts.S2_4_EVIDENCE_CLASS_DISCRIMINATORS) == [
+        "APPLY_AGGREGATE_AUTHORIZATION",
+        "CAPABILITY_PROBE_AUTHORIZATION",
+        "CAPABILITY_PROBE_RECEIPT_INSTALLED_UNIT",
+        "CAPABILITY_PROBE_RECEIPT_PREPARE_SANDBOX",
+        "PG_MIGRATION_AUTHORIZATION",
+        "PREPARE_AUTHORIZATION",
+    ]
+
+
 def test_exactly_one_current_refresh_admits_an_expired_source_identity(s2_2a_pair) -> None:
     """§9.2 逐字:「only together with ONE current refresh attestation」。"""
 
