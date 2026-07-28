@@ -205,15 +205,44 @@ def empty_ledger() -> dict[str, Any]:
 
 
 class SimulatedLockProbe:
-    """§5.7 lock 介面的注入模擬(P1-5):``held`` 可注入,探測次數可斷言。"""
+    """§5.7 lock 介面的注入模擬(P1-5/P2-2):``held`` 可注入,探測/取鎖/釋放次數可斷言。"""
 
     def __init__(self, *, held: bool = False) -> None:
         self.held = bool(held)
         self.probes = 0
+        self.acquires = 0
+        self.releases = 0
+        self.holding = False
 
     def flock_probe(self) -> dict[str, Any]:
         self.probes += 1
         return {"held": self.held, "exists": True, "lock_path": "<simulated-lock>"}
+
+    def acquire(self) -> dict[str, Any]:
+        self.acquires += 1
+        if self.held or self.holding:
+            return {
+                "status": lifecycle.S2_5_LOCK_HELD,
+                "lock_path": "<simulated-lock>",
+                "reasons": ["simulated: the lifecycle lock is held by another applier"],
+            }
+        self.holding = True
+        return {
+            "status": lifecycle.S2_5_LOCK_ACQUIRED,
+            "lock_path": "<simulated-lock>",
+            "reasons": [],
+        }
+
+    def release(self) -> dict[str, Any]:
+        self.releases += 1
+        released, self.holding = self.holding, False
+        return {
+            "status": (
+                lifecycle.S2_5_LOCK_RELEASED if released else lifecycle.S2_5_LOCK_NOT_HELD
+            ),
+            "lock_path": "<simulated-lock>",
+            "reasons": [],
+        }
 
 
 # ── §8.1 受控 unit 狀態機 harness(真實主機零接觸)─────────────────────────────────

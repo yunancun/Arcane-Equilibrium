@@ -429,15 +429,99 @@ def _replay_ledger_anchor_reasons(
 
 
 # ── P1-5 §5.7 lock:install_lock_free 唯一由真 flock 探測導出(caller 自報不採信)────
-class S2_5FlockProbe:
-    """non-blocking exclusive ``flock`` 探測(探測即釋放;絕不 unlink/chmod lock 檔)。
+# P2-2(tranche 2)typed lock statuses:hold-style 面鏡 s2_4 lock 葉的公開形制
+# (ACQUIRED/HELD/RELEASED/NOT_HELD/PRECHECK_FAILED),但鎖的是 S2.5 自己的 lifecycle 鎖。
+S2_5_LOCK_ACQUIRED = "S2_5_LIFECYCLE_LOCK_ACQUIRED"
+S2_5_LOCK_HELD = "S2_5_LIFECYCLE_LOCK_HELD"
+S2_5_LOCK_RELEASED = "S2_5_LIFECYCLE_LOCK_RELEASED"
+S2_5_LOCK_NOT_HELD = "S2_5_LIFECYCLE_LOCK_NOT_HELD"
+S2_5_LOCK_PRECHECK_FAILED = "S2_5_LIFECYCLE_LOCK_PRECHECK_FAILED"
 
-    production 面預設探 :data:`S2_5_LOCK_PATH`;source lane/測試注入 tmp 路徑。lock 檔
-    不存在=無人持有(lock 由取鎖者以 O_CREAT 建立);O_NOFOLLOW 拒 symlink 替身。
+
+class S2_5FlockProbe:
+    """§5.7 lifecycle 鎖的兩個面:probe-only 探測 + hold-style 取鎖(P2-2)。
+
+    * ``flock_probe``:non-blocking exclusive ``flock`` 探測(探測即釋放)——只證
+      「當下自由」,不護任何窗;
+    * ``acquire``/``release``:hold-style 交易鎖(鏡 ``agent_governance_s2_4_lock`` 的
+      acquire/release 公開形制)——取得後 fd 一直持有到 release,anchor-check→consume→
+      persist→journal 整段在鎖下,關閉「探測即釋放」與消費之間的競態窗。
+
+    production 面預設 :data:`S2_5_LOCK_PATH`;source lane/測試注入 tmp 路徑。lock 檔
+    不存在=無人持有(lock 由取鎖者以 O_CREAT 建立);O_NOFOLLOW 拒 symlink 替身;
+    lock 檔**永不** unlink/chmod(§5.2 紀律)。
     """
 
     def __init__(self, lock_path: Path | str = S2_5_LOCK_PATH) -> None:
         self._lock_path = Path(lock_path)
+        self._held_fd: int | None = None
+
+    def acquire(self) -> dict[str, Any]:
+        """hold-style 取鎖:non-blocking exclusive flock,取得後持有到 :meth:`release`。"""
+
+        if self._held_fd is not None:
+            return {
+                "status": S2_5_LOCK_HELD,
+                "lock_path": str(self._lock_path),
+                "reasons": [
+                    "this probe already holds the s2_5 lifecycle lock (a hold is "
+                    "never re-entrant)"
+                ],
+            }
+        try:
+            fd = os.open(
+                self._lock_path,
+                os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC,
+                0o600,
+            )
+        except OSError as error:
+            # symlink 替身(O_NOFOLLOW)/權限問題:unproven fail-closed,零變更。
+            return {
+                "status": S2_5_LOCK_PRECHECK_FAILED,
+                "lock_path": str(self._lock_path),
+                "reasons": [
+                    "s2_5 lifecycle lock open failed: " + redact_driver_error(error)
+                ],
+            }
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            os.close(fd)
+            return {
+                "status": S2_5_LOCK_HELD,
+                "lock_path": str(self._lock_path),
+                "reasons": [
+                    "another S2.5 applier holds the lifecycle lock (a live consume→"
+                    "persist transaction is in flight); typed rejection with zero "
+                    "consumption"
+                ],
+            }
+        self._held_fd = fd
+        return {
+            "status": S2_5_LOCK_ACQUIRED,
+            "lock_path": str(self._lock_path),
+            "reasons": [],
+        }
+
+    def release(self) -> dict[str, Any]:
+        """釋放 hold(flock UN + close fd);永不 unlink。未持有=typed NOT_HELD。"""
+
+        if self._held_fd is None:
+            return {
+                "status": S2_5_LOCK_NOT_HELD,
+                "lock_path": str(self._lock_path),
+                "reasons": ["no s2_5 lifecycle hold is held by this probe"],
+            }
+        fd, self._held_fd = self._held_fd, None
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
+        return {
+            "status": S2_5_LOCK_RELEASED,
+            "lock_path": str(self._lock_path),
+            "reasons": [],
+        }
 
     def flock_probe(self) -> dict[str, Any]:
         try:
@@ -486,6 +570,52 @@ def derive_s2_5_install_lock_free(lock_probe: Any) -> tuple[bool, list[str]]:
             "install transaction blocks any S2.5 lifecycle effect"
         ]
     return True, []
+
+
+def acquire_s2_5_lifecycle_hold(lock_probe: Any) -> tuple[bool, list[str]]:
+    """P2-2:consume→persist→journal 交易窗的 hold-style 取鎖(唯一導出點)。
+
+    probe-only 面(只有 ``flock_probe``)不足以護窗——探測即釋放,兩個 applier 可在
+    「探測自由」與「消費 permit」之間交錯而雙消費。無 hold 面/取鎖逸出/被持有/形狀
+    不明一律 ``(False, typed reasons)`` fail-closed。
+    """
+
+    acquire = getattr(lock_probe, "acquire", None)
+    if not callable(acquire):
+        return False, [
+            "the injected lock interface has no hold-style acquire; a probe-only "
+            "interface cannot guard the consume→persist window (fail-closed)"
+        ]
+    try:
+        verdict = acquire()
+    except Exception as error:  # noqa: BLE001 —— 取鎖逸出=unproven,fail-closed。
+        return False, [
+            f"s2_5 lifecycle lock acquire raised: {redact_driver_error(error)} "
+            "(an unproven hold fails closed)"
+        ]
+    if not isinstance(verdict, dict) or verdict.get("status") != S2_5_LOCK_ACQUIRED:
+        reasons = (
+            [str(r) for r in verdict.get("reasons") or []]
+            if isinstance(verdict, dict)
+            else []
+        )
+        return False, reasons or [
+            "the s2_5 lifecycle lock was not acquired (held or malformed verdict); "
+            "the consume→persist window never opens without the hold"
+        ]
+    return True, []
+
+
+def _release_s2_5_lifecycle_hold(lock_probe: Any) -> None:
+    """finally 臂的釋放。釋放失敗時 fd 仍被持有=fail-closed 方向(擋人而非放行),
+    不以第二個例外遮蔽窗內的真實 verdict/例外。"""
+
+    release = getattr(lock_probe, "release", None)
+    if callable(release):
+        try:
+            release()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def derive_ttl_budget_status(core: Any, *, now: Any) -> dict[str, Any]:
@@ -1058,54 +1188,76 @@ def apply_s2_5_start(
                 "before any lifecycle effect (fail-closed)"
             ],
         )
-    # P1-3 head-anchor:journal/durable ledger 釘過的 head 必須被涵蓋(截斷/清空即拒)。
-    anchor_reasons = _replay_ledger_anchor_reasons(journal_path, ledger_path, replay_ledger)
-    if anchor_reasons:
-        return _verdict(S2_5_STATUS_AUTHORIZATION_REJECTED, anchor_reasons)
-    # 前態讀取(read-only):必須等於 S2.4 receipt 所證的 loaded/disabled/inactive。
-    pre_properties = driver.show()
-    pre_state = _unit_state_from_show(pre_properties)
-    prestate_expected = (
-        isinstance(s2_4_inactive_prestate, dict)
-        and _unit_state_from_show({
-            "ActiveState": s2_4_inactive_prestate.get("active_state", ""),
-            "UnitFileState": s2_4_inactive_prestate.get("unit_file_state", ""),
-            "NRestarts": str(s2_4_inactive_prestate.get("n_restarts", 0)),
-            "InvocationID": s2_4_inactive_prestate.get("invocation_id", "none"),
-        })
-        == pre_state
-        and pre_state["active_state"] == "inactive"
-        and pre_state["unit_file_state"] == "disabled"
-        and str(pre_properties.get("FragmentDigest", ""))
-        == core["expected_unit_fragment_digest"]
-        and str(pre_properties.get("DropInPaths", "")) == ""
-        and str(pre_properties.get("NeedDaemonReload", "no")) == "no"
-    )
-    precheck_flags["inactive_prestate_verified"] = bool(prestate_expected)
-    if not prestate_expected:
-        return _verdict(
-            S2_5_STATUS_REQUEST_REJECTED,
-            [
-                "S2.5 precheck: the live unit pre-state does not equal the S2.4 "
-                "APPLIED_INACTIVE pre-state (loaded/disabled/inactive, exact fragment "
-                "digest, no drop-ins, no pending daemon-reload); refusing to start a "
-                "look-alike unit"
-            ],
+    # P2-2:anchor-check→前態讀取→consume→persist→journal(APPLYING)整段持 hold-style
+    # flock,release 在 finally——「探測即釋放」的 probe 只是 §3.1 的 fail-fast,護窗的是
+    # 這裡的 hold(第二個 applier 在窗內一律 typed 拒,永不雙消費)。
+    hold_ok, hold_reasons = acquire_s2_5_lifecycle_hold(lock_probe)
+    if not hold_ok:
+        return _verdict(S2_5_STATUS_REQUEST_REJECTED, hold_reasons)
+    try:
+        # P1-3 head-anchor:journal/durable ledger 釘過的 head 必須被涵蓋(截斷/清空即拒)。
+        anchor_reasons = _replay_ledger_anchor_reasons(
+            journal_path, ledger_path, replay_ledger
         )
-    prestate_digest = central_validator.canonical_digest(dict(s2_4_inactive_prestate))
-    started_at = _iso(clock())
-    # §9.1:先 durable 消費 permit 並持久化 ledger,再寫 APPLYING(journal 同時釘 ledger
-    # head),之後才動 effect(§5.2 WAL 語義)。
-    consumed_at = started_at
-    attestation.consume_s2_5_authorization(
-        replay_ledger, authorization, start_id=intent["start_id"], consumed_at=consumed_at
-    )
-    _persist_s2_5_replay_ledger(ledger_path, replay_ledger)
-    _journal_transition(
-        journal_path, start_id=intent["start_id"], state="APPLYING",
-        updated_at=started_at,
-        replay_ledger_head=_replay_ledger_head(replay_ledger["entries"]),
-    )
+        if anchor_reasons:
+            return _verdict(S2_5_STATUS_AUTHORIZATION_REJECTED, anchor_reasons)
+        # 前態讀取(read-only):必須等於 S2.4 receipt 所證的 loaded/disabled/inactive。
+        pre_properties = driver.show()
+        pre_state = _unit_state_from_show(pre_properties)
+        prestate_expected = (
+            isinstance(s2_4_inactive_prestate, dict)
+            and _unit_state_from_show({
+                "ActiveState": s2_4_inactive_prestate.get("active_state", ""),
+                "UnitFileState": s2_4_inactive_prestate.get("unit_file_state", ""),
+                "NRestarts": str(s2_4_inactive_prestate.get("n_restarts", 0)),
+                "InvocationID": s2_4_inactive_prestate.get("invocation_id", "none"),
+            })
+            == pre_state
+            and pre_state["active_state"] == "inactive"
+            and pre_state["unit_file_state"] == "disabled"
+            and str(pre_properties.get("FragmentDigest", ""))
+            == core["expected_unit_fragment_digest"]
+            and str(pre_properties.get("DropInPaths", "")) == ""
+            and str(pre_properties.get("NeedDaemonReload", "no")) == "no"
+        )
+        precheck_flags["inactive_prestate_verified"] = bool(prestate_expected)
+        if not prestate_expected:
+            return _verdict(
+                S2_5_STATUS_REQUEST_REJECTED,
+                [
+                    "S2.5 precheck: the live unit pre-state does not equal the S2.4 "
+                    "APPLIED_INACTIVE pre-state (loaded/disabled/inactive, exact fragment "
+                    "digest, no drop-ins, no pending daemon-reload); refusing to start a "
+                    "look-alike unit"
+                ],
+            )
+        prestate_digest = central_validator.canonical_digest(dict(s2_4_inactive_prestate))
+        started_at = _iso(clock())
+        # §9.1:先 durable 消費 permit 並持久化 ledger,再寫 APPLYING(journal 同時釘
+        # ledger head),之後才動 effect(§5.2 WAL 語義)。consume 在鎖下重導出 replay
+        # binding——鎖窗外先驗過的裁決在此再驗一次,競態下的第二個消費是 typed 拒。
+        consumed_at = started_at
+        try:
+            attestation.consume_s2_5_authorization(
+                replay_ledger, authorization,
+                start_id=intent["start_id"], consumed_at=consumed_at,
+            )
+        except ValueError as error:
+            return _verdict(
+                S2_5_STATUS_AUTHORIZATION_REJECTED,
+                [
+                    "s2_5 authorization consumption was refused under the lifecycle "
+                    f"lock: {error}"
+                ],
+            )
+        _persist_s2_5_replay_ledger(ledger_path, replay_ledger)
+        _journal_transition(
+            journal_path, start_id=intent["start_id"], state="APPLYING",
+            updated_at=started_at,
+            replay_ledger_head=_replay_ledger_head(replay_ledger["entries"]),
+        )
+    finally:
+        _release_s2_5_lifecycle_hold(lock_probe)
     try:
         driver.enable_now()
     except Exception as error:  # noqa: BLE001 —— effect 失敗必走 rollback,絕不轉成功。
@@ -1409,36 +1561,56 @@ def apply_s2_5_final(
                 "before any lifecycle effect (fail-closed)"
             ],
         )
-    anchor_reasons = _replay_ledger_anchor_reasons(journal_path, ledger_path, replay_ledger)
-    if anchor_reasons:
-        return _verdict(S2_5_STATUS_AUTHORIZATION_REJECTED, anchor_reasons)
-    # S2.5B 的 drill 之後前態:unit 必須 enabled/active(drill restore 成功的活實例)。
-    pre_properties = driver.show()
-    pre_state = _unit_state_from_show(pre_properties)
-    precheck_flags["inactive_prestate_verified"] = True  # S2.5B 消費的是 restore 後的活前態。
-    if not (
-        pre_state["active_state"] == "active"
-        and pre_state["unit_file_state"] == "enabled"
-        and str(pre_properties.get("FragmentDigest", ""))
-        == core["expected_unit_fragment_digest"]
-    ):
-        return _verdict(
-            S2_5_STATUS_REQUEST_REJECTED,
-            [
-                "S2.5B precheck: the post-drill unit is not the restored active/enabled "
-                "instance bound to the exact fragment digest (fail-closed)"
-            ],
+    # P2-2:與 apply_s2_5_start 同一條 hold-style 交易窗(anchor→前態→consume→persist→
+    # journal),release 在 finally。
+    hold_ok, hold_reasons = acquire_s2_5_lifecycle_hold(lock_probe)
+    if not hold_ok:
+        return _verdict(S2_5_STATUS_REQUEST_REJECTED, hold_reasons)
+    try:
+        anchor_reasons = _replay_ledger_anchor_reasons(
+            journal_path, ledger_path, replay_ledger
         )
-    started_at = _iso(clock())
-    attestation.consume_s2_5_authorization(
-        replay_ledger, authorization, start_id=intent["start_id"], consumed_at=started_at
-    )
-    _persist_s2_5_replay_ledger(ledger_path, replay_ledger)
-    _journal_transition(
-        journal_path, start_id=intent["start_id"], state="APPLYING",
-        updated_at=started_at,
-        replay_ledger_head=_replay_ledger_head(replay_ledger["entries"]),
-    )
+        if anchor_reasons:
+            return _verdict(S2_5_STATUS_AUTHORIZATION_REJECTED, anchor_reasons)
+        # S2.5B 的 drill 之後前態:unit 必須 enabled/active(drill restore 成功的活實例)。
+        pre_properties = driver.show()
+        pre_state = _unit_state_from_show(pre_properties)
+        precheck_flags["inactive_prestate_verified"] = True  # S2.5B 消費 restore 後的活前態。
+        if not (
+            pre_state["active_state"] == "active"
+            and pre_state["unit_file_state"] == "enabled"
+            and str(pre_properties.get("FragmentDigest", ""))
+            == core["expected_unit_fragment_digest"]
+        ):
+            return _verdict(
+                S2_5_STATUS_REQUEST_REJECTED,
+                [
+                    "S2.5B precheck: the post-drill unit is not the restored active/enabled "
+                    "instance bound to the exact fragment digest (fail-closed)"
+                ],
+            )
+        started_at = _iso(clock())
+        try:
+            attestation.consume_s2_5_authorization(
+                replay_ledger, authorization,
+                start_id=intent["start_id"], consumed_at=started_at,
+            )
+        except ValueError as error:
+            return _verdict(
+                S2_5_STATUS_AUTHORIZATION_REJECTED,
+                [
+                    "s2_5 authorization consumption was refused under the lifecycle "
+                    f"lock: {error}"
+                ],
+            )
+        _persist_s2_5_replay_ledger(ledger_path, replay_ledger)
+        _journal_transition(
+            journal_path, start_id=intent["start_id"], state="APPLYING",
+            updated_at=started_at,
+            replay_ledger_head=_replay_ledger_head(replay_ledger["entries"]),
+        )
+    finally:
+        _release_s2_5_lifecycle_hold(lock_probe)
     # 五維再證(drill 之後的新 PID/InvocationID;stable identity 的比對折在觀測面)。
     # P1-1:觀測例外不得裸逸——journal terminal + typed 失敗(S2.5B 無 rollback 語義)。
     try:
