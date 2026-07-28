@@ -654,6 +654,19 @@
       "receipt_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/s2_5_final_attestation_v1.schema.json",
       "rollback_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/s2_5_rollback_drill_receipt_v1.schema.json",
       "postcheck_contract": "s2_5_final_postcheck_v1 (the §5.5 independent verifier face; no separate schema file — the verifier face is embedded in the receipt's observer_gate/independent_verifier_node fields)"
+    },
+    "s2_2b_ingestion_compatibility_adapter_v1": {
+      "status": "declared_runtime_done_fail_closed_until_s2e4_observer_attestor",
+      "owner_session": "S2.2B",
+      "authority": "identity-only registration (S2E.1): the S2.2B runtime-DONE route class s2_2b_ingestion_check_intent is claim-admissible for routing, but no executable runtime observer/attestor driver exists yet; the LR1 ingestion-compatibility check is a REMOTE_READONLY observation of exactly the installed learning runtime (V151-V160 manifest revalidation + learning_runtime_digest re-derivation, derived from observed values, never caller-asserted) and can never mutate PG, service lifecycle, credentials, or any broker surface; the apply surface stays typed EXTERNAL_VERIFICATION_PENDING with zero mutation until the S2E.4 observer-attestor session binds the runtime attestor (identity aiml-s2-2b-ingestion-attestor-v1, namespace arcane-equilibrium-aiml-s2-2b-ingestion-compatibility)",
+      "invariant": "identity-only and fail-closed: the runtime-DONE apply surface returns a typed fail-closed EXTERNAL_VERIFICATION_PENDING with zero mutation (never a fake success) until the S2E.4 observer-attestor session exists; only s2_5_final_attestation_v1 is the legal upstream of the S2.2B runtime-DONE (a simulated final attestation can never anchor a production RUNTIME_COMPATIBILITY_ATTESTED); RUNTIME_COMPATIBILITY_ATTESTED is unlocked only by the runtime attestor whose execution/verification is S2E.4 (identity aiml-s2-2b-ingestion-attestor-v1, namespace arcane-equilibrium-aiml-s2-2b-ingestion-compatibility over the same §9.1 trust root) and caller observation values can never self-certify MATCH; nine authorities stay false; no route_task effect node or closure effect binding is injected before the S2.2B EFFECT session",
+      "implementation_paths": [
+        "helper_scripts/maintenance_scripts/agent_governance_s2_2b.py"
+      ],
+      "component_paths": [
+        "program_code/ml_training/aiml_gate_receipt_s2_2b.py"
+      ],
+      "receipt_schema_path": "program_code/ml_training/schemas/aiml_gate_receipts/ingestion_compatibility_receipt_v1.schema.json"
     }
   },
   "roles": {
