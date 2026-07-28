@@ -431,6 +431,82 @@ def test_progress_ledger_obligation_section_is_the_whole_live_abi() -> None:
         assert f"`{row['owner_wave']}`" in entry, obligation_id
 
 
+def test_the_refresh_call_site_latch_is_keyed_to_the_amend_1_typed_status(
+    monkeypatch,
+) -> None:
+    """S2.4-AMEND-1(F.2-1):row 23 的雙向閂 re-key 到該列 typed_status(鏡 row 22 O-1)。
+
+    三態:呼叫端在 + 已關(真實狀態)→ 零 reason;呼叫端在 + 未關 → 必須要求關閉;
+    零呼叫端 + 已關 → 紅(已關卻無執法點);量測含糊的 fail-closed 臂由既有測試釘住。"""
+
+    import aiml_gate_receipt_wave_w5 as wave_w5
+
+    measured = {
+        "production_call_sites": [
+            "helper_scripts/maintenance_scripts/agent_governance_s2_4_install_evidence.py"
+        ],
+        "production_call_site_scan_roots": [
+            "helper_scripts/maintenance_scripts", "program_code",
+        ],
+        "production_call_site_definition_sites": [],
+        "production_call_site_modules_scanned": 700,
+        "production_call_site_undecidable_modules": [],
+        "apply_time_consumer": "x",
+        "apply_time_consumer_derives_freshness": False,
+    }
+    evidence = {
+        "only_shape_is_constrained": True,
+        "emit_sink_accepts_fabricated_evidence": True,
+        "emit_sink_refuses_empty_evidence": True,
+        "emit_sink_refuses_secret_like_evidence": True,
+    }
+
+    def _with_status(status: str) -> None:
+        rows = [
+            {**row, "typed_status": status}
+            if row["obligation_id"]
+            == "SOURCE_IDENTITY_FRESHNESS_HAS_NO_PRODUCTION_CALL_SITE"
+            else row
+            for row in wave_w5._W5_EXPORTED_ABI["remaining_owned_obligations"]
+        ]
+        monkeypatch.setitem(
+            wave_w5._W5_EXPORTED_ABI, "remaining_owned_obligations", rows
+        )
+
+    # 真實狀態(呼叫端在 + CLOSED_BY_S2_4_AMEND_1_SOURCE,live 帳本即此)→ 零 reason。
+    assert wave_w5._honest_surface_reasons(dict(measured), dict(evidence)) == []
+    # 呼叫端在 + 未關 → 必須要求關閉。
+    _with_status("NOT_PROVIDED_BY_W5")
+    reasons = wave_w5._honest_surface_reasons(dict(measured), dict(evidence))
+    assert any(
+        "close the obligation (typed_status=CLOSED_BY_S2_4_AMEND_1_SOURCE)" in reason
+        for reason in reasons
+    ), reasons
+    # 零呼叫端 + 已關 → 紅(已關卻無執法點);且絕不落在「要求關閉」臂。
+    _with_status("CLOSED_BY_S2_4_AMEND_1_SOURCE")
+    zero = dict(measured, production_call_sites=[])
+    reasons = wave_w5._honest_surface_reasons(zero, dict(evidence))
+    assert any(
+        "enforcement point that does not exist" in reason for reason in reasons
+    ), reasons
+    assert not any("close the obligation" in reason for reason in reasons), reasons
+    # row 整列被刪 → 具名拒(殘留歷史 load-bearing 的義務不得整列刪除)。
+    dropped = [
+        row for row in wave_w5._W5_EXPORTED_ABI["remaining_owned_obligations"]
+        if row["obligation_id"]
+        != "SOURCE_IDENTITY_FRESHNESS_HAS_NO_PRODUCTION_CALL_SITE"
+    ]
+    monkeypatch.setitem(
+        wave_w5._W5_EXPORTED_ABI, "remaining_owned_obligations", dropped
+    )
+    reasons = wave_w5._honest_surface_reasons(dict(measured), dict(evidence))
+    assert any(
+        "W5 does not record SOURCE_IDENTITY_FRESHNESS_HAS_NO_PRODUCTION_CALL_SITE"
+        in reason
+        for reason in reasons
+    ), reasons
+
+
 def test_install_module_reexports_the_w5_emit_surface() -> None:
     for name in (
         "emit_w5_receipts",

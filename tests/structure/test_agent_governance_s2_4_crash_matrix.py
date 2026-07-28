@@ -755,6 +755,11 @@ EFFECT_EDGE_INVENTORY = {
     "_evidence.commit_install_evidence_set": "test_c20_* (install_driver 檔)",
     "_evidence.install_evidence_set_path": "test_c20_* (install_driver 檔)",
     "_evidence.derive_apply_remaining_ttls": "test_c4_* (install_driver 檔)",
+    # S2.4-AMEND-1:§9.2 ingress(step (2b))——純 precheck、零 driver、零 mutation;
+    # 拒絕形由 install_driver 檔的 ingress 測試群覆蓋。
+    "_evidence.derive_apply_source_dependency_admissions": (
+        "test_the_apply_ingress_* / test_forged_or_stale_refreshes_* (install_driver 檔)"
+    ),
     "_evidence.success_path_residue_reasons": "test_c16_* (install_driver 檔)",
     "_evidence.resolve_now": "test_c4_an_expired_plan_is_refused_before_any_host_contact",
     "_evidence.install_evidence_abi_projection": "W4 wave-exit 投影(非 effect edge)",

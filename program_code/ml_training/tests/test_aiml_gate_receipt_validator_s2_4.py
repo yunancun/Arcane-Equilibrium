@@ -678,6 +678,12 @@ def _cp2b_fixtures() -> dict:
         "installed_unit_probe_receipt_digest": _CP2B_D2,
         "prepare_result_digest": _CP2B_D,
         "prepare_postcheck_digest": _CP2B_D2,
+        # S2.4-AMEND-1(§3/§9.2):null = FRESH;digest = 採信該過期身分的 refresh self_digest。
+        "dependency_refresh_digests": {
+            "S2_2A_SOURCE_COMPATIBILITY": _CP2B_D,
+            "S2_3_EXPECTED_IDENTITY": None,
+            "S2_3_SEALED_BUILD": _CP2B_D2,
+        },
         "apply_row_results": [
             {"component_effect_class": c, "result_digest": _CP2B_D, "postcheck_digest": _CP2B_D2}
             for c in _CP2B_CLASSES
@@ -1290,6 +1296,31 @@ def test_aggregate_requires_two_probe_receipts_prepare_and_five_apply_rows() -> 
     r = derive_install_lineage_status(_lineage_receipt(apply_row_results=six))
     assert r["status"] == "NOT_SATISFIED"
     assert any("exactly five APPLY rows" in x for x in r["reasons"]), r["reasons"]
+
+
+def test_install_receipt_dependency_refresh_digests_is_closed_and_required() -> None:
+    """S2.4-AMEND-1(§3/§9.2):terminal receipt 的 refresh 綁定欄位封閉且必填。
+
+    缺欄位 / 長出表外 class 鍵 / 非 digest-or-null 值,一律中央 closed-schema 拒;
+    正向(null 與 digest 混合)由 cp2b round-trip 覆蓋。"""
+
+    receipt = deepcopy(_cp2b_fixtures()["s2_4_install_effect_receipt_v1"])
+    absent = {k: v for k, v in receipt.items() if k != "dependency_refresh_digests"}
+    absent["self_digest"] = artifact_self_digest(absent)
+    assert any(
+        "dependency_refresh_digests" in e for e in validate_aiml_artifact(absent)
+    )
+    foreign = deepcopy(receipt)
+    foreign["dependency_refresh_digests"]["S1_3_IDENTITY_CONTRACT"] = None
+    foreign["self_digest"] = artifact_self_digest(foreign)
+    assert any(
+        "S1_3_IDENTITY_CONTRACT" in e or "unexpected property" in e
+        for e in validate_aiml_artifact(foreign)
+    )
+    forged = deepcopy(receipt)
+    forged["dependency_refresh_digests"]["S2_3_SEALED_BUILD"] = "not-a-digest"
+    forged["self_digest"] = artifact_self_digest(forged)
+    assert validate_aiml_artifact(forged) != []
 
 
 def test_misordered_install_receipt_rejected_by_central_gate() -> None:

@@ -25,6 +25,7 @@ for _candidate in (HELPERS, ML_ROOT, PROGRAM_CODE, ROOT / "tests/structure"):
 import agent_governance_s2_4_apply as apply_mod  # noqa: E402
 import agent_governance_s2_4_credential as credential  # noqa: E402
 import agent_governance_s2_4_install_driver as runner  # noqa: E402
+import agent_governance_s2_4_install_evidence as evidence_leaf  # noqa: E402
 import agent_governance_s2_4_journal as journal  # noqa: E402
 import agent_governance_s2_4_lock as lock  # noqa: E402
 import agent_governance_s2_4_prepare as prepare  # noqa: E402
@@ -171,6 +172,58 @@ def build_hba_delta(
 
 LEDGER_BASENAME = lock.REPLAY_LEDGER_PATH.rsplit("/", 1)[-1]
 INSTALL_JOURNAL_PARENT_MODE = journal.JOURNAL_PARENT_MODE
+
+# ── S2.4-AMEND-1:三族已提交原身分的**真** refresh(session 內建一次)──────────────
+# 三份已出貨 receipt 在凍結 NOW(2030-01-01T00:02)下真的已過期,故 §9.2 ingress 只在
+# 「恰一份獨立重算的 refresh/族」時放行;fixture 以真 builder 承接而非弱化閘(設計風險表
+# 第一列)。reproduced_at 錨在凍結 ANCHOR(嚴格晚於原到期 2026-07),TTL 取 §9.2 上限
+# 900s,凍結 NOW 落在新窗內;建構綁**當前 HEAD** 並在 bound commit 物化樹上重算——工作樹
+# 若在三族 producer 輸入集上髒,建構自身即 typed fail-closed(S2.4 開發面與其不相交)。
+_DEPENDENCY_REFRESHES: dict[str, Any] | None = None
+
+
+def dependency_refreshes() -> dict[str, Any]:
+    global _DEPENDENCY_REFRESHES
+    if _DEPENDENCY_REFRESHES is None:
+        built: dict[str, Any] = {}
+        for cls in evidence_leaf.S2_4_APPLY_GATED_DEPENDENCY_CLASSES:
+            original = evidence_leaf.load_committed_source_identity(cls)
+            assert original is not None, cls
+            built[cls] = validator.build_s2_4_dependency_refresh_attestation(
+                original,
+                reproducer_caller="s2-4-w4b-testkit-reproducer",
+                # schema 的 platform 枚舉封閉在 {darwin, linux};其餘兩欄取凍結字面值
+                # (digest 決定性:不從 wall platform 取值)。
+                reproducer_platform={
+                    "os": "linux", "arch": "w4b-fixture", "python_version": "w4b-fixture",
+                },
+                reproduced_at=kit.ISSUED,
+            )
+        _DEPENDENCY_REFRESHES = built
+    return {cls: deepcopy(row) for cls, row in _DEPENDENCY_REFRESHES.items()}
+
+
+def wall_clock_dependency_refreshes() -> dict[str, Any]:
+    """真實牆鐘測試(E19 類 ``now=None``)用:reproduced_at = 牆鐘 − 60s(**相對**時鐘,
+    無日期腐化)。凍結錨點的 :func:`dependency_refreshes` 在牆鐘下落在未來,§9.2 會拒;
+    本組不做 session 快取(牆鐘窗 900s,快取跨 session 即腐化)。"""
+
+    from datetime import datetime, timedelta, timezone
+
+    moment = (datetime.now(timezone.utc) - timedelta(seconds=60)).isoformat()
+    built: dict[str, Any] = {}
+    for cls in evidence_leaf.S2_4_APPLY_GATED_DEPENDENCY_CLASSES:
+        original = evidence_leaf.load_committed_source_identity(cls)
+        assert original is not None, cls
+        built[cls] = validator.build_s2_4_dependency_refresh_attestation(
+            original,
+            reproducer_caller="s2-4-w4b-testkit-reproducer",
+            reproducer_platform={
+                "os": "linux", "arch": "w4b-fixture", "python_version": "w4b-fixture",
+            },
+            reproduced_at=moment,
+        )
+    return built
 
 
 class CountingFs(FakeDurableFs):
@@ -462,6 +515,8 @@ class Fixture:
             "prepare_effect_receipt": self.prepare_receipt,
             "apply_budget": dict(APPLY_BUDGET),
             "remaining_ttls": dict(REMAINING_TTLS),
+            # S2.4-AMEND-1:三份已提交原身分於凍結 NOW 下已過期,§9.2 ingress 需真 refresh。
+            "dependency_refreshes": dependency_refreshes(),
             "now": kit.NOW,
             "clock": kit.frozen_clock(),
         }

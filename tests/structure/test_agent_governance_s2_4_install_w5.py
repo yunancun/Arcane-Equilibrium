@@ -1438,27 +1438,18 @@ def test_the_owned_scope_delta_is_content_addressed_not_git_status(tmp_path) -> 
     assert core.owned_scope_worktree_delta(mini, ("pkg/never.py",)) == ["pkg/never.py"]
 
 
-def test_the_section_9_2_admission_verdict_has_no_production_call_site() -> None:
-    """B:§9.2 的裁決今天零生產呼叫端——這是**被測量**的事實,不是被宣稱的。"""
+def test_the_section_9_2_admission_verdict_is_wired_into_apply() -> None:
+    """B(S2.4-AMEND-1 後):§9.2 裁決的生產呼叫端 = APPLY step (2b) 的 evidence 葉,
+    且 W3 葉(host_identity)仍不導新鮮度——閘接在 W4 aggregate,不折進 W3 活 ABI。"""
 
     import agent_governance_s2_4_host_identity as host
 
     live = validator.w5_exported_abi_projection()["refresh_call_site_live"]
-    assert live["production_call_sites"] == []
+    assert live["production_call_sites"] == [
+        "helper_scripts/maintenance_scripts/agent_governance_s2_4_install_evidence.py"
+    ]
     assert live["apply_time_consumer_derives_freshness"] is False
-    # 唯一在 APPLY 期消費 §9.2 source 身分的地方:讀 repo 固定路徑的 S2.3 artifact,
-    # 只驗 status / self_digest / 三個身分欄位,對 expires_at 一個字都沒有。
-    assert host.s2_3_expected_identity_reasons() == []
     assert "expires_at" not in host.s2_3_expected_identity_reasons.__code__.co_consts
-    # 而那三份 receipt 本身是**真的過期**的,中央閘照樣零 error(§9.2 的規則今天沒有執法點)。
-    import json
-
-    for rel in (
-        _S2_2A_V1, _S2_3_EXPECTED,
-        "docs/execution_plan/ai_ml_landing/receipts/S2.3-sealed-build-receipt-v1.json",
-    ):
-        artifact = json.loads((ROOT / rel).read_text(encoding="utf-8"))
-        assert validator.validate_aiml_artifact(artifact, now=_NOW) == [], rel
 
 
 @pytest.mark.parametrize(
@@ -1513,21 +1504,30 @@ _EVIDENCE_MEASUREMENT = {
 }
 
 
-def test_a_wired_call_site_must_close_the_obligation_instead_of_carrying_it() -> None:
-    """B 的另一半閂:有人把閘接進 APPLY 之後,那條義務必須被關掉而不是永遠掛著。"""
+def test_a_wired_call_site_must_close_the_obligation_instead_of_carrying_it(
+    monkeypatch,
+) -> None:
+    """B 的另一半閂(AMEND-1 後 re-key 到 typed_status):呼叫端在而該列未標
+    CLOSED_BY_S2_4_AMEND_1_SOURCE 時,必須要求關閉而不是永遠掛著。"""
 
     import aiml_gate_receipt_wave_w5 as wave_w5
 
+    monkeypatch.setitem(wave_w5._W5_EXPORTED_ABI, "remaining_owned_obligations", [
+        {**row, "typed_status": "NOT_PROVIDED_BY_W5"}
+        if row["obligation_id"] == "SOURCE_IDENTITY_FRESHNESS_HAS_NO_PRODUCTION_CALL_SITE"
+        else row
+        for row in wave_w5._W5_EXPORTED_ABI["remaining_owned_obligations"]
+    ])
     reasons = wave_w5._honest_surface_reasons(
-        _call_site_measurement(
-            production_call_sites=[
-                "helper_scripts/maintenance_scripts/agent_governance_s2_4_host_identity.py"
-            ],
-            apply_time_consumer_derives_freshness=True,
-        ),
+        _call_site_measurement(production_call_sites=[
+            "helper_scripts/maintenance_scripts/agent_governance_s2_4_install_evidence.py"
+        ]),
         dict(_EVIDENCE_MEASUREMENT),
     )
-    assert any("close the obligation instead" in reason for reason in reasons), reasons
+    assert any(
+        "close the obligation (typed_status=CLOSED_BY_S2_4_AMEND_1_SOURCE)" in reason
+        for reason in reasons
+    ), reasons
 
 
 @pytest.mark.parametrize(
@@ -1680,10 +1680,8 @@ def test_the_wave_exit_evidence_digests_are_shape_only(chain) -> None:
 
 def test_expected_topology_is_plan_derived_and_no_longer_caller_suppliable() -> None:
     """E(S2.4-AMEND-2 後):PG row 的 ``expected_topology`` 由簽章 plan 導出,caller 無入口。
-
-    本測試在 AMEND-2 之前斷言的是弱化路徑本身(allowlist 有 expected_topology、五個
-    ``expected.get(field) is not None`` 缺鍵靜默跳過);source 收口後改釘**關閉後的形**,
-    任一半被回退(key 回到 allowlist / 缺鍵守衛形復活)即紅。"""
+    原版斷言的是弱化路徑本身(allowlist 有該 key、五個缺鍵守衛靜默跳過);source 收口後
+    改釘**關閉後的形**,任一半被回退(key 回到 allowlist / 缺鍵守衛形復活)即紅。"""
 
     import agent_governance_s2_4_install_driver as runner
     import agent_governance_s2_4_topology as topology

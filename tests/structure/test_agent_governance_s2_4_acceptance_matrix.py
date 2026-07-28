@@ -878,13 +878,18 @@ def test_the_dependency_refresh_residuals_are_named_precisely_not_blanketly() ->
     }
     assert "DEPENDENCY_REFRESH_ATTESTATION_ABSENT" not in obligations
     binding = obligations["DEPENDENCY_REFRESH_RECEIPT_BINDING_ABSENT"]
-    assert binding["typed_status"] == "NOT_PROVIDED_BY_W5"
+    # S2.4-AMEND-1 收口:row 保留作歷史(O-1 先例),typed_status 記關閉來源。
+    assert binding["typed_status"] == "CLOSED_BY_S2_4_AMEND_1_SOURCE"
     assert binding["owner_wave"] == "PM"
     assert "§3" in binding["spec_refs"]
-    # 殘留必須是真的:install effect receipt 至今沒有任何 refresh 欄位,且 schema 封閉。
+    # 關閉事實面:closed receipt schema 現帶必填 dependency_refresh_digests(仍封閉)。
     receipt_schema = validator._load_schema("s2_4_install_effect_receipt_v1")
     assert receipt_schema["additionalProperties"] is False
-    assert not any("refresh" in name for name in receipt_schema["properties"])
+    assert "dependency_refresh_digests" in receipt_schema["properties"]
+    assert "dependency_refresh_digests" in receipt_schema["required"]
+    assert receipt_schema["properties"]["dependency_refresh_digests"][
+        "additionalProperties"
+    ] is False
     node = obligations["DEPENDENCY_REFRESH_REPRODUCER_NODE_IS_DECLARATIVE"]
     assert node["typed_status"] == "PARTIALLY_PROVIDED_BY_W5"
     assert node["owner_wave"] == "W6"

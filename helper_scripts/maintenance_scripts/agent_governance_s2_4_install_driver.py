@@ -461,6 +461,7 @@ def apply_s2_4_install_plan(
     startup_observed_state_digests: Any = None,
     startup_task_owned_partials: Any = None,
     expected_installed_unit_probe_core_digest: Any = None,
+    dependency_refreshes: Any = None,
 ) -> dict[str, Any]:
     """§6 / §10.2:執行(或 fail-closed 拒絕)**一筆** S2.4 aggregate APPLY 交易。
 
@@ -531,6 +532,29 @@ def apply_s2_4_install_plan(
             probe_core_binding,
         )
     probe_digests = inputs["probe_receipt_digests"]
+    # ── (2b) §9.2 source-dependency ingress(S2.4-AMEND-1)──────────────────────
+    #
+    # 純 precheck(零 driver、零 mutation),在任何 effect 語義之前;放在 ``driver is None``
+    # 之前 → source lane 同樣走閘(閘在所有 lane 載重)。原身分由驗證端自 bound commit 的
+    # blob 讀出,caller 只遞交 refresh;(1b) 已解析出 ``observed_now``,新鮮度有真時刻可用。
+    admissions = _evidence.derive_apply_source_dependency_admissions(
+        repo_root=REPO_ROOT, now=_iso(observed_now),
+        dependency_refreshes=dependency_refreshes,
+    )
+    if admissions["status"] != _evidence.SOURCE_DEPENDENCIES_ADMITTED:
+        return _with_probe_core_binding(
+            _verdict(
+                AGGREGATE_STATUS_PRECHECK_FAILED,
+                list(admissions["reasons"]) + [
+                    "§9.2: an expired source identity is admitted only together with one "
+                    "current, independently reproduced refresh; forged/stale/absent "
+                    "refreshes are refused with zero mutation"
+                ],
+                plan_id=plan_id,
+            ),
+            probe_core_binding,
+        )
+    dependency_refresh_digests = admissions["dependency_refresh_digests"]
     # ── (3) 兩張 permit 的簽章/信任根 + 逐欄 payload 比對 + §9.1 TTL 上限 ────────
     #
     # E19:此處**必須**傳已解析的觀測時刻,不是 caller 的原始 ``now``。
@@ -619,6 +643,7 @@ def apply_s2_4_install_plan(
             row_payloads=row_payloads or {}, probe_digests=probe_digests,
             prepare_result_digest=inputs["prepare_result_digest"],
             prepare_postcheck_digest=inputs["prepare_postcheck_digest"],
+            dependency_refresh_digests=dependency_refresh_digests,
             ownership_evidence=ownership_evidence, now=now, tick=tick, fault=fault,
             applier_node=applier_node,
             startup_journal_paths=startup_journal_paths,
@@ -739,6 +764,7 @@ def _run_transaction_with_driver(
     probe_digests: dict[str, Any],
     prepare_result_digest: str,
     prepare_postcheck_digest: str,
+    dependency_refresh_digests: dict[str, Any],
     ownership_evidence: Any,
     now: Any,
     tick: Callable[[], datetime],
@@ -786,6 +812,7 @@ def _run_transaction_with_driver(
             row_payloads=row_payloads, probe_digests=probe_digests,
             prepare_result_digest=prepare_result_digest,
             prepare_postcheck_digest=prepare_postcheck_digest,
+            dependency_refresh_digests=dependency_refresh_digests,
             ownership_evidence=ownership_evidence, now=now, tick=tick, fault=fault,
             applier_node=applier_node, startup_journal_paths=startup_journal_paths,
             startup_observed_state_digests=startup_observed_state_digests,
@@ -844,6 +871,7 @@ def _transaction_under_lock(
     probe_digests: dict[str, Any],
     prepare_result_digest: str,
     prepare_postcheck_digest: str,
+    dependency_refresh_digests: dict[str, Any],
     ownership_evidence: Any,
     now: Any,
     tick: Callable[[], datetime],
@@ -959,6 +987,7 @@ def _transaction_under_lock(
         component_intents=component_intents, row_payloads=row_payloads,
         probe_digests=probe_digests, prepare_result_digest=prepare_result_digest,
         prepare_postcheck_digest=prepare_postcheck_digest,
+        dependency_refresh_digests=dependency_refresh_digests,
         # §9.1:aggregate 是唯一的消費點;row 級 replay 檢查用 lock 下讀到的
         # **append 之前**的 head(同一筆交易內不重複裁決消費)。
         row_replay_ledger=_pre_append_ledger(replay),
@@ -1096,6 +1125,7 @@ def _drive_rows(
     probe_digests: dict[str, Any],
     prepare_result_digest: str,
     prepare_postcheck_digest: str,
+    dependency_refresh_digests: dict[str, Any],
     row_replay_ledger: Any,
     ownership_evidence: Any,
     now: Any,
@@ -1399,7 +1429,8 @@ def _drive_rows(
     receipt = _build_install_effect_receipt(
         plan=plan, status=status, authorizations=authorizations,
         probe_receipt_digests=probe_digests, prepare_result_digest=prepare_result_digest,
-        prepare_postcheck_digest=prepare_postcheck_digest, row_results=row_results,
+        prepare_postcheck_digest=prepare_postcheck_digest,
+        dependency_refresh_digests=dependency_refresh_digests, row_results=row_results,
         journal_digest=terminal["journal"]["self_digest"],
         unit_state=residue["unit_state"], evidence_class=evidence["recorded_evidence_class"],
         trusted_host_time=trusted_host_time, clock=tick,

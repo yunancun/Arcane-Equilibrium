@@ -1164,9 +1164,14 @@ def test_e19_a_permit_outside_its_freshness_window_never_reaches_the_install_loc
 
     此處以 fixture 的凍結 permit 窗(2030-01-01 起算)配上 ``now=None``(= 真實牆鐘)重現它:
     permit 落在窗外,而每一份證據的 ``expires_at`` 仍在牆鐘之後,故 §9 的預算閘抓不到它。
+    (S2.4-AMEND-1 後 step (2b) 先於 permit 驗簽:牆鐘下需遞交牆鐘相對窗的真 refresh,
+    否則 §9.2 ingress 先以 PRECHECK_FAILED 拒掉,本測試的主體——permit 新鮮度 hoist——
+    就永遠測不到。)
     """
 
-    verdict = fx.apply(now=None)
+    verdict = fx.apply(
+        now=None, dependency_refreshes=w4b.wall_clock_dependency_refreshes(),
+    )
     assert verdict["status"] == "AUTHORIZATION_REJECTED", verdict["status"]
     assert verdict["driver_engaged"] is False
     assert verdict["mutation_performed"] is False

@@ -344,6 +344,112 @@ def test_a_presented_attestation_that_is_not_the_signed_baseline_is_unproven(fx)
     assert fx.row_drivers["PG_ROLE_ACL_MIGRATION"].calls == []
 
 
+# ══════════════ S2.4-AMEND-1:§9.2 ingress at APPLY step (2b)════════════════════
+def test_the_apply_ingress_gates_expired_identities_through_one_refresh_each(fx) -> None:
+    """三份已提交原身分於凍結 NOW 下**真的已過期**:零 refresh → PRECHECK_FAILED 零變更
+    (含 EXPIRED_NO_REFRESH 語義);恰一份真 refresh/族 → 放行,terminal receipt 逐族記
+    該 refresh 的 self_digest(§3 的 DEPENDENCY-REFRESH 綁定)。"""
+
+    denied = fx.apply(dependency_refreshes=None)
+    assert denied["status"] == "PRECHECK_FAILED"
+    assert any("SOURCE_DEPENDENCY_EXPIRED_NO_REFRESH" in r for r in denied["reasons"])
+    assert any("§9.2" in r for r in denied["reasons"])
+    assert denied["driver_engaged"] is False and denied["mutation_performed"] is False
+    assert fx.driver.calls == [] and fx.persisted_install_journal() is None
+    refreshes = w4b.dependency_refreshes()
+    verdict = fx.apply()
+    assert verdict["status"] == "SOURCE_SIMULATION_PASS", verdict["reasons"]
+    assert verdict["receipt"]["dependency_refresh_digests"] == {
+        cls: refreshes[cls]["self_digest"]
+        for cls in evidence_leaf.S2_4_APPLY_GATED_DEPENDENCY_CLASSES
+    }
+    assert validator.validate_aiml_artifact(verdict["receipt"]) == []
+
+
+@pytest.mark.parametrize("mutation", [
+    "stale_expired", "over_ttl", "inside_original_window", "reasserted_digest",
+    "same_producer_label", "foreign_original", "semantic_drift", "two_refreshes",
+    "unknown_class",
+])
+def test_forged_or_stale_refreshes_are_refused_before_any_effect_semantics(
+    fx, mutation,
+) -> None:
+    """§9.2 的每一種禁止形都在 step (2b) typed 拒:重封時間戳、超窗、落在原窗內的復現、
+    複述原 digest、同 producer 標籤、綁到非 committed original、語義 digest 漂移、兩份
+    refresh、未知 class 鍵——一律 PRECHECK_FAILED、driver 未觸、零 mutation。"""
+
+    refreshes = w4b.dependency_refreshes()
+    target = "S2_2A_SOURCE_COMPATIBILITY"
+    row = refreshes[target]
+
+    def _reseal_identity() -> None:
+        row["reproduction"]["reproducer_identity"] = validator.dependency_producer_identity(
+            caller=row["reproduction"]["reproducer_caller"],
+            observation_time=row["reproduction"]["reproduced_at"],
+            platform=row["reproduction"]["reproducer_platform"],
+        )
+
+    if mutation == "stale_expired":
+        row["reproduction"]["reproduced_at"] = "2029-12-31T23:00:00+00:00"
+        row["expires_at"] = "2029-12-31T23:15:00+00:00"
+        _reseal_identity()
+    elif mutation == "over_ttl":
+        row["refresh_ttl_seconds"] = 901
+        row["expires_at"] = "2030-01-01T00:15:01+00:00"
+    elif mutation == "inside_original_window":
+        row["reproduction"]["reproduced_at"] = "2026-07-24T00:00:00+00:00"
+        row["expires_at"] = "2026-07-24T00:15:00+00:00"
+        _reseal_identity()
+    elif mutation == "reasserted_digest":
+        row["reproduced_semantic_digests"] = {
+            field: row["original_receipt_digest"]
+            for field in row["reproduced_semantic_digests"]
+        }
+    elif mutation == "same_producer_label":
+        row["reproduction"]["reproducer_caller"] = "S2.2A"
+        _reseal_identity()
+    elif mutation == "foreign_original":
+        row["original_receipt_digest"] = "sha256:" + "a" * 64
+    elif mutation == "semantic_drift":
+        field = sorted(row["reproduced_semantic_digests"])[0]
+        row["reproduced_semantic_digests"][field] = "sha256:" + "d" * 64
+    row["self_digest"] = validator.artifact_self_digest(row)
+    supplied: dict = dict(refreshes)
+    if mutation == "two_refreshes":
+        supplied[target] = [refreshes[target], refreshes[target]]
+    elif mutation == "unknown_class":
+        supplied["PG_TOPOLOGY_ATTESTATION"] = refreshes[target]
+    verdict = fx.apply(dependency_refreshes=supplied)
+    assert verdict["status"] == "PRECHECK_FAILED", (mutation, verdict["reasons"])
+    assert any("§9.2" in reason for reason in verdict["reasons"]), verdict["reasons"]
+    assert verdict["driver_engaged"] is False
+    assert verdict["mutation_performed"] is False
+    assert fx.driver.calls == []
+    assert fx.persisted_install_journal() is None
+
+
+def test_the_ingress_originals_are_read_from_the_bound_commit_not_the_caller(fx) -> None:
+    """caller 無從遞交/替換原身分:ingress 的封閉輸入面只有 {class: refresh};
+    原 receipt 由驗證端自 bound commit 的 committed 路徑讀出(code-owned 表最新版)。"""
+
+    import inspect
+
+    signature = inspect.signature(evidence_leaf.derive_apply_source_dependency_admissions)
+    assert sorted(signature.parameters) == ["dependency_refreshes", "now", "repo_root"]
+    for cls in evidence_leaf.S2_4_APPLY_GATED_DEPENDENCY_CLASSES:
+        original = evidence_leaf.load_committed_source_identity(cls)
+        assert isinstance(original, dict), cls
+        committed = validator.committed_source_identity_digests(cls, w4b.ROOT)
+        assert validator.artifact_self_digest(original) in committed, cls
+    # S1.3 誠實缺口:不入閘,typed 記錄。
+    assert evidence_leaf.load_committed_source_identity("S1_3_IDENTITY_CONTRACT") is None
+    admissions = evidence_leaf.derive_apply_source_dependency_admissions(
+        now=kit.NOW, dependency_refreshes=w4b.dependency_refreshes(),
+    )
+    assert admissions["status"] == "SOURCE_DEPENDENCIES_ADMITTED"
+    assert "S1_3_IDENTITY_CONTRACT" in admissions["s1_3_not_gated_reason"]
+
+
 def test_aggregate_success_requires_five_distinct_row_results() -> None:
     probes = {"PREPARE_SANDBOX": "sha256:" + "1" * 64, "INSTALLED_UNIT": "sha256:" + "2" * 64}
     prepare = "sha256:" + "3" * 64
