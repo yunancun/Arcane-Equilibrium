@@ -1,7 +1,7 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-07-28（AIML S2 effect-readiness 獨立校正；TODO v856／PROGRESS ledger v15）
+> 最後更新：2026-07-29（AIML S2 W0 接手交接固化；TODO v861／PROGRESS ledger v16）
 
 ---
 
@@ -177,6 +177,8 @@ Effect Adapter 使用 direct evidence class，adaptive second-thought dissent �
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**TODO v861 AIML S2 W0 接手交接固化（2026-07-29）**：在 intake head `83dc0ec3017e541e156e557c2e2d16f1704682a3` 只校正治理投影：九個 S2 effect-readiness 拆分包已完成 5/9（`S2E.0`、`S2E.1`、`S2E.2a`、`S2E.2b-1`、`S2E.3`），唯一 ACTIVE 入口固定為 `S2E.2b-2`，後續 `S2E.2b-3 → S2E.4 → S2E.5`；production effect 仍 0/6，S2 未關閉，packet 保持 `DRAFT_NOT_EXECUTABLE`。TODO／PROGRESS／packet 明確分配 S2.5 startup recovery/anchor/runner、runtime capture/closure/attestor identity、2231/2004-line size adjudication、CodeQL #95 terminal gate 與 S2.0 lazy-GRANT/NOSUPERUSER/REVOKE/out-of-band credential 前置。本 W0 不改 production code、contracts、schemas、tests、runtime 或 W5 receipts，不重發 receipt，不 deploy/restart/PG/broker/order mutation。
 
 **TODO v851 AIML S1 terminal projection（2026-07-24）**：PR #115 exact head `da8e54148` 經 direct Codex P0/P1/P2=`0/0/0` 與全部 exact-head CI/CodeQL 全綠後，以 match-head 精確合併為 `22876b16d`。TODO/PROGRESS/正式方案/RUN_RECORD 將 immutable `S1_CLOSURE_AUTHENTICATED_PENDING_MERGE` 收據與後續 review/CI/merge 證據組合為 `S1_CLOSED`；S1.1–S1.6 全部 `DONE`，當前 Sprint 轉 S2，READY pool `S2.0 ∥ S2.2A ∥ S2.3`。九項 authority 全 false，本 projection 無 S2/runtime/PG/deploy/broker/order/live effect；合併後只做三端 ff-only 同步。
 
