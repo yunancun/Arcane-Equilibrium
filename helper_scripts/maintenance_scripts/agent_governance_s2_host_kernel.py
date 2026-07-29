@@ -14,7 +14,8 @@
 3. :func:`derive_host_target_class` —— target class 由**主機事實**導出,**絕不**收 caller 字串;
    ``unknown`` 與 ``production`` 同等對待。搭配 :func:`host_target_admission_errors`(對同一份
    導出視圖的薄准入謂詞),讓 runner 在**構造任何 driver 之前**就能 typed 拒絕。
-4. :func:`trusted_host_time` —— 施作端主機時鐘的 UTC 投影。
+4. :func:`host_wall_clock_time` —— 本機牆鐘的 UTC 讀值(純敘述性,不帶 trust 語義;
+   與 adapter driver Protocol 的 ``trusted_host_time`` 是兩件事,故刻意不同名)。
 5. :func:`assert_read_only_surface` —— 鏡 ``agent_governance_s2_4_install_driver
    .assert_no_aggregate_forbidden_surface``:物件上出現任一寫能力方法即 typed 拒,且**絕不呼叫**。
 
@@ -39,8 +40,10 @@ protocol**,那條路徑**完全不經本 kernel**。因此:本 kernel 只是**�
 * 本模組是 **L1 主機安全層**,不是證據完整性層。它只決定「今天要不要碰這台主機」;
   「即使 driver 在手也不可能 emit APPLIED」是 adapter 的 L2 閘(permit 驗簽 / trusted-host
   attestation),「封包不可 PASS」是 closure 的 L3 閘。本波對 L2/L3 **一行不動**。
-* :func:`trusted_host_time` 回的是**施作端自己的**牆鐘,**不是** attestation。真正解鎖 APPLIED 的
-  signed ``trusted_host_time`` 仍只能來自 driver 的簽章 attestation(S2.0 §9b/§9c)。
+* :func:`host_wall_clock_time` 回的是**這台主機自己的**牆鐘讀值,**不是** attestation,不承載
+  任何 trust 語義。真正解鎖 APPLIED 的 signed ``trusted_host_time`` 仍只能來自 driver 的簽章
+  attestation(S2.0 §9b/§9c);那個 ``trusted_host_time`` 是 driver Protocol 方法名兼**已簽**
+  payload 欄位名(frozen),與本 kernel 的匯出面同名只會誤導,故本 kernel 用不同名字。
 * 本模組對四個 S2 adapter 模組**零行修改**:刪掉整個 runner 家族,四個 adapter 的行為與今日
   逐位元組相同(全部 ``EXTERNAL_VERIFICATION_PENDING``)。
 """
@@ -597,14 +600,25 @@ def rehearsal_target_view_record(
 
 
 # --------------------------------------------------------------------------- #
-# (4) trusted host time
+# (4) host wall clock
 # --------------------------------------------------------------------------- #
-def trusted_host_time() -> str:
-    """施作端主機時鐘的 UTC ISO8601 投影。
+def host_wall_clock_time() -> str:
+    """本行程所在主機**牆鐘**的 UTC ISO8601 讀值。
 
-    **誠實界線**:這是**這台主機自己的**牆鐘,不是 attestation。S2.0 的 ``APPLIED`` 仍然只由
-    driver 簽章 attestation 內的 ``trusted_host_time`` 錨定新鮮度(caller 的 now 永不參與),
-    本函式**絕不**被用來冒充那個值。
+    **誠實界線(名字即語義)**:這只是一次 ``datetime.now`` 的讀值,**不是** attestation,
+    **不承載任何 trust 語義** —— 它沒有被任何金鑰簽章、沒有被任何獨立方背書、沒有防重放,
+    任何人只要能改這台主機的時鐘就能改它。合法用途只有兩種,兩種都不需要 trust:
+    (a)**敘述性**時戳欄位(``observed_at`` / postcheck 的 ``observed_at``——「這份 artifact
+    何時被寫出」);(b)當作 caller 的 ``now`` 遞給既有的 permit 驗證器,而 caller 的 ``now``
+    在該設計裡**只能收緊**(讓過期的 permit 被拒)、**永遠不能放寬**任何閘。它絕不可以被寫進
+    任何簽章 payload,也絕不可以單獨解鎖任何狀態。
+
+    與 adapter 面的 ``trusted_host_time`` **是兩件不同的事,故刻意不同名**:後者是
+    ``AggregateInstallDriver`` 等 driver Protocol 的方法名、以及簽章 attestation payload
+    (``s2_4_install_apply_attestation_v1`` / ``pg_observer_bootstrap_apply_attestation_v1``
+    / ``s2_5_*_attestation_v1``)內的**已簽欄位名**;那個值才是 S2.0/S2.4/S2.5 解鎖
+    ``APPLIED`` 的新鮮度錨(caller 的 now 永不參與)。本函式**絕不**被用來冒充那個值,
+    兩者共用同一個識別碼只會讓讀者誤以為本函式也帶 trust。
     """
 
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")

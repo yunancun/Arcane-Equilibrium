@@ -308,7 +308,7 @@ def _run_result(
     verifier_node: str,
 ) -> dict[str, Any]:
     postcheck = _ops_postcheck_projection(
-        receipt, verifier_node=verifier_node, observed_at=host_kernel.trusted_host_time()
+        receipt, verifier_node=verifier_node, observed_at=host_kernel.host_wall_clock_time()
     )
     return {
         "lane": lane,

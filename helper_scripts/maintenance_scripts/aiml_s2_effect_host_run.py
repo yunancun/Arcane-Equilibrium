@@ -142,7 +142,7 @@ def _verify_operator_authorization(
 
 def _admission(args, intent: Any, authorization: Any, signature: bytes | None) -> dict[str, Any]:
     target_view = host_kernel.derive_host_target_class()
-    now = host_kernel.trusted_host_time()
+    now = host_kernel.host_wall_clock_time()
     verification = _verify_operator_authorization(
         session=args.session, intent=intent, authorization=authorization, signature=signature,
         source_head=args.source_head, now=now,

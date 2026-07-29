@@ -432,7 +432,8 @@ class S2HostObserver:
             )
         observation = {
             "schema_version": OBSERVATION_SCHEMA_VERSION,
-            "observed_at": host_kernel.trusted_host_time(),
+            # 敘述性時戳:本機牆鐘讀值,不是 attestation、不帶 trust 語義(見 kernel docstring)。
+            "observed_at": host_kernel.host_wall_clock_time(),
             "target_class_view": host_kernel.derive_host_target_class(),
             "request_digest": _digest(request),
             "faces": observed,
