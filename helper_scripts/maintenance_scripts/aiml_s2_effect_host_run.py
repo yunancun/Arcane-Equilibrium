@@ -60,6 +60,14 @@ permit,混用只會產生一份「看起來跑過了」的 artifact。
   traceback 把 process 退成 1、卻在 ``run_summary.json`` 寫另一個號碼。**唯一沒有 artifact 的
   路徑**是 ``--out-dir`` 自己建不起來(例如 ``--out-dir /dev/null/nope``):那時沒有任何地方可以
   落盤,故收成 typed usage(exit 2)+ stderr 明文(E2 RES-7;此前那條路是裸 traceback rc=1)。
+* **summary 的出境守衛**:``run_summary.json`` 與 stdout 是同一份 summary 的兩個 sink,而 summary
+  會吸收例外訊息與主機導出的 status/reasons(全都不是本 CLI 造的字串)。兩個寫入之前一律過
+  ``host_kernel.scan_serializable_surface_for_secrets``(與 observer 那兩道同一支掃描器、同一套中央
+  判準),命中即整包丟棄:兩面都只拿到一份不含 payload 導出物的信封 + typed
+  :data:`EXIT_EGRESS_GUARD_WITHHELD`(9)。這是**形狀**掃描,不是「不含秘密」的證明。
+  **已知殘餘缺口(不在本波)**:``RUNNER_FAILED`` 路徑上的那一行 stderr 仍寫例外訊息原文,故該
+  訊息若真的帶秘密,stderr 這條診斷通道會早於本守衛看到它;收窄它會改動已文件化的
+  「``RUNNER_FAILED`` + stderr 明文」契約,屬另一次刻意決策。
 """
 
 from __future__ import annotations
@@ -107,6 +115,18 @@ EXIT_INTERNAL_ERROR = 7
 # 主機能力供應者不在」,8 的意思是「閘跑完了,結論是這台主機需要 operator 介入」。把兩者收成
 # 同一個號碼會讓自動化把「還沒開始」與「已經知道有殘留」當成同一件事。
 EXIT_RECOVERY_REQUIRED = 8
+# 頂層出境守衛開火:這一輪的 summary 帶了 secret 形的值,故**兩個 sink 都不承載它**。與 6/7
+# 刻意分開:6/7 說的是「輸入壞了 / 跑爛了」(那時 summary 本身照樣出境),9 說的是「這一輪跑
+# 成什麼樣不重要了,內容一律扣住」。自動化必須分得出這兩件事。
+EXIT_EGRESS_GUARD_WITHHELD = 9
+# 守衛開火時**取代** summary 的那份信封的 status。命名沿用家族詞彙(鏡 s2_4 component 的
+# ``SECRET_MATERIAL_LEAK_BLOCKED``、observer 的 exit 7),讓三處守衛在 artifact 上看起來是同一
+# 件事。
+EGRESS_GUARD_WITHHELD_STATUS = "SUMMARY_SECRET_LEAK_BLOCKED"
+# 信封只多帶**布林**事實(且只在原 summary 真的帶了布林時)。字串一律不跟著走,布林則結構上
+# 不可能承載一段秘密 —— 而「這一輪到底有沒有動到主機」正是守衛開火之後 operator 最不能被守衛
+# 吃掉的那個事實(本 CLI 的 s2_4 mode 是補償 lane)。
+EGRESS_GUARD_CARRIED_BOOLEAN_FACTS = ("mutation_performed", "driver_engaged", "admitted")
 # S2.4 兩個 mode 的 typed 結局 → 退出碼。表外一律 EXIT_RECOVERY_REQUIRED(fail-closed:
 # 一個沒被列舉的新終端絕不能靜默變成 0)。
 S2_4_STATUS_EXIT_CODES = {
@@ -311,6 +331,53 @@ def _s2_4_run(args) -> dict[str, Any]:
     )
 
 
+def _summary_egress_guard(summary: dict[str, Any]) -> dict[str, Any] | None:
+    """``summary`` 出境前的最後一道秘密掃描:命中回**取代**它的信封,乾淨回 ``None``。
+
+    掃描器是 SEC 家族共用的那一支(``host_kernel.scan_serializable_surface_for_secrets``,判準
+    直接取自中央的 ``SECRET_VALUE_PATTERNS``);本 CLI 不自造第二套判準。
+
+    **為什麼這裡需要一道**:``run_summary.json``(operator 讀)與 stdout(自動化讀)是本 CLI
+    最後、也是唯一同時面向兩種讀者的出口,而 summary 會吸收一整批**不是本 CLI 造的字串**——
+    ``observation_error`` / ``runner_error`` 是例外訊息(內容完全不受控)、``status`` 與
+    ``reasons`` 由 s2_4 recovery 導出。輸入側的硬邊界只保證「caller 遞不進秘密」,它不保證
+    「主機事實與例外訊息裡沒有秘密」。命中即整包丟棄,而不是照樣送出去再標一個旗標。
+
+    **信封只帶封閉列舉與布林**:``session``/``mode`` 取自 argparse 的 ``choices``(code-owned
+    封閉集,故先比對再回填,比對不過就留 ``None``),布林事實見
+    :data:`EGRESS_GUARD_CARRIED_BOOLEAN_FACTS`;理由字串、路徑、head、狀態文字一律不出境。
+    ``egress_guard_findings`` 只有**條目數**(SEC-3 的通道紀律:守衛自己的診斷不得成為第二條
+    出境路徑),誠實代價是現場只知道守衛開火、不知道命中在哪個鍵;而該數字今日結構上恆為 1。
+
+    **守衛自己失敗也是 fail-closed**:掃描器跑不起來(例如判準模組匯入失敗)就等於「無法斷言
+    這份 payload 乾淨」,那時扣住整包才是誠實的收場,絕不因為守衛壞了而放行。
+    """
+
+    try:
+        leak_reasons = host_kernel.scan_serializable_surface_for_secrets(summary)
+    except Exception:  # noqa: BLE001 - 守衛跑不起來 = 無法斷言乾淨 ⇒ 扣住整包
+        leak_reasons = ["the egress secret guard could not run over this summary"]
+    if not leak_reasons:
+        return None
+    session = summary.get("session")
+    mode = summary.get("mode")
+    withheld: dict[str, Any] = {
+        "session": session if session in SESSIONS else None,
+        "mode": mode if mode in MODES else None,
+        "status": EGRESS_GUARD_WITHHELD_STATUS,
+        "exit_code": EXIT_EGRESS_GUARD_WITHHELD,
+        "egress_guard_findings": len(leak_reasons),
+        "closure_pass_blocked": True,
+        "production_effect_performed": False,
+        "nine_authorities_false": True,
+    }
+    for key in EGRESS_GUARD_CARRIED_BOOLEAN_FACTS:
+        value = summary.get(key)
+        if isinstance(value, bool):
+            withheld[key] = value
+    return withheld
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="S2 effect trusted-host runner")
     parser.add_argument("--session", required=True, choices=SESSIONS)
@@ -469,16 +536,30 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         # 頂層 finally:不論走哪條路,``--out-dir`` 的 canonical artifact 契約都成立。
         summary["exit_code"] = exit_code
+        # 出境守衛:本 finally 是**兩個** sink 的共同出口(operator 讀的 run_summary.json 與
+        # 自動化讀的 stdout),兩面承載同一份 summary,所以守衛也只能有一道、且必須在**兩個
+        # 寫入之前**。掃描的是已經寫完 ``exit_code`` 的最終物件 —— 掃一份與出境物不同的東西
+        # 等於沒掃。命中即整包丟棄:兩面都改寫同一份不含 payload 導出物的信封。
+        withheld = _summary_egress_guard(summary)
+        emitted = summary if withheld is None else withheld
         try:
-            _canonical_write(args.out_dir / "run_summary.json", summary)
+            _canonical_write(args.out_dir / "run_summary.json", emitted)
         except OSError as error:
             # RES-7:``finally`` 內任何逸出的例外都會**取代** return value ⇒ 又變回裸 traceback
             # 退 1。out-dir 若在執行中途消失,只能誠實記在 stderr,絕不讓它吃掉退出碼。
             sys.stderr.write(f"run_summary.json could not be written: {error}\n")
         sys.stdout.write(
-            json.dumps(summary, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n"
+            json.dumps(emitted, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n"
         )
         sys.stdout.flush()
+        if withheld is not None:
+            # RES-7 講的是同一條機制的另一半:``finally`` 內的跳轉會**取代** return value。
+            # 這裡是刻意使用它——守衛開火時 process 的真實退出碼必須等於信封裡寫的那個號碼,
+            # 否則就違反本檔「artifact 的 exit_code 與 process 真實退出碼恆一致」的不變式。
+            # 誠實代價:此 return 也會吞掉一個正在飛的 ``BaseException``(例如 Ctrl-C);那條
+            # 路上 process 仍以 typed 非零收場,但中斷訊號本身不再往上傳。一般例外不受影響
+            # (上面兩個 except 已全部接住),而守衛沒開火時本 finally 一行跳轉都沒有。
+            return EXIT_EGRESS_GUARD_WITHHELD  # noqa: B012
 
 
 if __name__ == "__main__":

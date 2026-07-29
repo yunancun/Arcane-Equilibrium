@@ -257,6 +257,134 @@ def test_the_parent_egress_guard_runs_before_the_observation_is_returned():
 
 
 # --------------------------------------------------------------------------- #
+# 頂層 finally 的共同 sink:run_summary.json 與 stdout 兩面受同一道守衛
+# --------------------------------------------------------------------------- #
+def _emitted(out_dir: Path, capsys) -> tuple[dict, dict]:
+    """回 ``(落盤 summary, stdout summary)`` —— 兩面必須逐鍵相同,守衛不得只擋一面。"""
+
+    artifact = _artifacts(out_dir)["run_summary.json"]
+    streamed = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert artifact == streamed
+    return artifact, streamed
+
+
+def test_a_clean_summary_reaches_both_sinks_unchanged(tmp_path, capsys):
+    """守衛不得改寫乾淨的一輪:兩個 sink 逐鍵相同,且退出碼仍是那條路徑自己的號碼。"""
+
+    out_dir = tmp_path / "clean-summary"
+    code = cli.main([
+        "--session", "s2_0", "--mode", "probe", "--out-dir", str(out_dir),
+        "--source-head", HEAD,
+    ])
+    artifact, _streamed = _emitted(out_dir, capsys)
+    assert code == cli.EXIT_OK
+    assert artifact["status"] == "PROBED"
+    assert artifact["exit_code"] == code
+
+
+def test_a_secret_shaped_summary_is_withheld_from_both_sinks(tmp_path, monkeypatch, capsys):
+    """``observation_error`` 是一段完全不受控的例外訊息 —— 它進得了 summary,就得被最後一道擋下。"""
+
+    def _leaky(self, request):
+        raise cli.host_kernel.S2HostCommandFailed(
+            "systemctl show failed: " + _SECRET_SHAPED_PROPERTY
+        )
+
+    monkeypatch.setattr(cli.host_kernel.HostExecutionKernel, "run_observer_child", _leaky)
+    out_dir = tmp_path / "leaky-summary"
+    code = cli.main([
+        "--session", "s2_1", "--mode", "probe", "--out-dir", str(out_dir),
+        "--source-head", HEAD, "--observe",
+    ])
+    artifact, streamed = _emitted(out_dir, capsys)
+    assert code == cli.EXIT_EGRESS_GUARD_WITHHELD
+    assert artifact["status"] == cli.EGRESS_GUARD_WITHHELD_STATUS
+    # artifact 的 exit_code 與 process 真實退出碼恆一致 —— 守衛開火的路徑也不例外。
+    assert artifact["exit_code"] == code
+    assert artifact["egress_guard_findings"] >= 1
+    # 整包丟棄:髒欄位一個都不在,九 authority 的恆假宣告仍在。
+    assert "observation_error" not in artifact
+    assert "out_dir" not in artifact and "source_head" not in artifact
+    assert artifact["nine_authorities_false"] is True
+    assert artifact["closure_pass_blocked"] is True
+    # 封閉列舉可以回填(argparse choices 是 code-owned 的)。
+    assert (artifact["session"], artifact["mode"]) == ("s2_1", "probe")
+    # 兩個 sink 都不得出現那個值(stdout 由 ``_emitted`` 對齊過,這裡連原始文字一起掃)。
+    every_artifact = json.dumps(_artifacts(out_dir), ensure_ascii=False)
+    assert _SECRET_SHAPED_PROPERTY not in every_artifact
+    assert _SECRET_SHAPED_PROPERTY not in json.dumps(streamed, ensure_ascii=False)
+
+
+def test_the_withheld_envelope_keeps_only_boolean_facts(tmp_path, monkeypatch, capsys):
+    """s2_4 補償 lane:守衛可以吃掉理由字串,但不能吃掉「有沒有動到主機」這個布林事實。"""
+
+    monkeypatch.setattr(
+        cli.s2_4_recovery, "reconcile_before_s2_4_intent",
+        lambda driver, **kwargs: {
+            "status": cli.s2_4_recovery.INTENT_GATE_RECOVERY_REQUIRED,
+            "reasons": ["the host journal quoted " + _SECRET_SHAPED_PROPERTY],
+            "mutation_performed": False,
+            "driver_engaged": False,
+        },
+    )
+    out_dir = tmp_path / "leaky-verdict"
+    code = cli.main([
+        "--session", "s2_4", "--mode", "reconcile", "--out-dir", str(out_dir),
+        "--source-head", HEAD, "--lane", "probe", "--lane-id", "0" * 64,
+    ])
+    artifact, _streamed = _emitted(out_dir, capsys)
+    assert code == cli.EXIT_EGRESS_GUARD_WITHHELD
+    assert artifact["status"] == cli.EGRESS_GUARD_WITHHELD_STATUS
+    assert artifact["mutation_performed"] is False
+    assert artifact["driver_engaged"] is False
+    assert "reasons" not in artifact
+    # 只斷言本守衛管得到的兩面。``s2_4_startup_verdict.json`` 有它**自己**那道守衛(recovery 的
+    # ``_verdict`` 出境前跑 ``_component.scan_serializable_surface``),而這個測試替身正是把整支
+    # ``reconcile_before_s2_4_intent`` 換掉、連那道一起繞過的情形 —— 兩道是各自 sink 的守衛,
+    # 不是互相的備援。
+    assert _SECRET_SHAPED_PROPERTY not in json.dumps(artifact, ensure_ascii=False)
+
+
+def test_a_guard_that_cannot_run_withholds_the_summary(tmp_path, monkeypatch, capsys):
+    """掃描器自己炸掉 = 無法斷言乾淨 ⇒ 扣住整包,絕不因為守衛壞了而放行。"""
+
+    def _broken(payload):
+        raise RuntimeError("the central secret criterion is unavailable")
+
+    monkeypatch.setattr(cli.host_kernel, "scan_serializable_surface_for_secrets", _broken)
+    out_dir = tmp_path / "broken-guard"
+    code = cli.main([
+        "--session", "s2_0", "--mode", "probe", "--out-dir", str(out_dir),
+        "--source-head", HEAD,
+    ])
+    artifact, _streamed = _emitted(out_dir, capsys)
+    assert code == cli.EXIT_EGRESS_GUARD_WITHHELD
+    assert artifact["status"] == cli.EGRESS_GUARD_WITHHELD_STATUS
+
+
+def test_the_summary_guard_runs_before_both_sinks():
+    """結構釘:守衛在落盤與 stdout **兩個**寫入之前,且掃的是已寫完 exit_code 的最終物件。"""
+
+    import inspect
+
+    source = inspect.getsource(cli.main)
+    guard = source.index("_summary_egress_guard(summary)")
+    assert source.rindex('summary["exit_code"] = exit_code') < guard
+    assert guard < source.index('"run_summary.json", emitted')
+    assert guard < source.rindex("sys.stdout.write")
+
+
+def test_every_typed_exit_code_is_distinct():
+    codes = [
+        cli.EXIT_OK, cli.EXIT_USAGE, cli.EXIT_ADMISSION_REFUSED,
+        cli.EXIT_HOST_CAPABILITY_ABSENT, cli.EXIT_OBSERVATION_FAILED,
+        cli.EXIT_INPUT_INVALID, cli.EXIT_INTERNAL_ERROR, cli.EXIT_RECOVERY_REQUIRED,
+        cli.EXIT_EGRESS_GUARD_WITHHELD,
+    ]
+    assert len(set(codes)) == len(codes)
+
+
+# --------------------------------------------------------------------------- #
 # P2 #8 — bad input is a typed fail-closed, and the artifact matches the exit code
 # --------------------------------------------------------------------------- #
 def _artifact_exit_code_matches(out_dir: Path, code: int) -> None:
