@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/receipt_carrier_attestation_v1.schema.json",
+  "title": "receipt_carrier_attestation_v1",
+  "description": "Closed post-commit attestation binding a launch payload to its exact Git carrier blob and to independently verified governed-capture, signer, freshness, signature and immutable-readback identities.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "payload_schema_version",
+    "payload_digest",
+    "schema_carrier_head",
+    "schema_carrier_tree",
+    "carrier_head",
+    "carrier_tree",
+    "carrier_path",
+    "carrier_blob",
+    "governed_capture_identity",
+    "issued_at",
+    "expires_at",
+    "signer",
+    "immutable_readback",
+    "attested_core_digest",
+    "signature",
+    "attestation_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "receipt_carrier_attestation_v1"},
+    "payload_schema_version": {
+      "enum": ["s2e_launch_genesis_receipt_v1", "s2e_launch_wave_receipt_v1"]
+    },
+    "payload_digest": {"$ref": "#/$defs/digest"},
+    "schema_carrier_head": {"$ref": "#/$defs/git_sha"},
+    "schema_carrier_tree": {"$ref": "#/$defs/git_sha"},
+    "carrier_head": {"$ref": "#/$defs/git_sha"},
+    "carrier_tree": {"$ref": "#/$defs/git_sha"},
+    "carrier_path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 240,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+\\.json$"
+    },
+    "carrier_blob": {"$ref": "#/$defs/git_sha"},
+    "governed_capture_identity": {"$ref": "#/$defs/governed_capture_identity"},
+    "issued_at": {"type": "string", "format": "date-time"},
+    "expires_at": {"type": "string", "format": "date-time"},
+    "signer": {"$ref": "#/$defs/signer"},
+    "immutable_readback": {"$ref": "#/$defs/immutable_readback"},
+    "attested_core_digest": {"$ref": "#/$defs/digest"},
+    "signature": {"$ref": "#/$defs/signature"},
+    "attestation_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "git_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "governed_capture_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "record_digest",
+        "context_artifact_digest",
+        "task_contract_digest",
+        "node_id",
+        "role_id",
+        "native_agent",
+        "permission"
+      ],
+      "properties": {
+        "schema_version": {"const": "governed_capture_identity_v1"},
+        "record_digest": {"$ref": "#/$defs/digest"},
+        "context_artifact_digest": {"$ref": "#/$defs/digest"},
+        "task_contract_digest": {"$ref": "#/$defs/digest"},
+        "node_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "role_id": {"type": "string", "minLength": 1, "maxLength": 32},
+        "native_agent": {"type": "string", "minLength": 1, "maxLength": 64},
+        "permission": {"const": "read_only"}
+      }
+    },
+    "signer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "namespace", "key_fingerprint"],
+      "properties": {
+        "role": {"type": "string", "minLength": 1, "maxLength": 32},
+        "namespace": {"const": "s2e-receipt-carrier"},
+        "key_fingerprint": {
+          "type": "string",
+          "pattern": "^SHA256:[A-Za-z0-9+/=]{40,64}$"
+        }
+      }
+    },
+    "immutable_readback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["adapter", "object_id", "version_id", "readback_digest"],
+      "properties": {
+        "adapter": {
+          "enum": ["EXTERNAL_WORM_V1", "TRUSTED_HOST_SSHSIG_APPEND_ONLY_V1"]
+        },
+        "object_id": {"type": "string", "minLength": 1, "maxLength": 256},
+        "version_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "readback_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "signed_digest", "signature"],
+      "properties": {
+        "algorithm": {"const": "SSHSIG"},
+        "signed_digest": {"$ref": "#/$defs/digest"},
+        "signature": {"type": "string", "minLength": 32, "maxLength": 16384}
+      }
+    }
+  }
+}

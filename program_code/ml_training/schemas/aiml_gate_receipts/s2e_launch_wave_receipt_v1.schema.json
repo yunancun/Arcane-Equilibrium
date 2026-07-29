@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2e_launch_wave_receipt_v1.schema.json",
+  "title": "s2e_launch_wave_receipt_v1",
+  "description": "Closed source checkpoint payload for exactly one S2E launch wave. The predecessor is mandatory and is paired by the transition validator with the exact prior wave payload digest.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "launch_id",
+    "wave",
+    "predecessor",
+    "source_head",
+    "source_tree",
+    "schema_carrier_head",
+    "schema_carrier_tree",
+    "task_contract_digest",
+    "checkpoint_status",
+    "side_effect_class",
+    "production_effect_count",
+    "payload_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2e_launch_wave_receipt_v1"},
+    "launch_id": {"const": "S2E-LW1-LW5"},
+    "wave": {"enum": ["S2E-LW1", "S2E-LW2", "S2E-LW3", "S2E-LW4", "S2E-LW5"]},
+    "predecessor": {"$ref": "#/$defs/digest"},
+    "source_head": {"$ref": "#/$defs/git_sha"},
+    "source_tree": {"$ref": "#/$defs/git_sha"},
+    "schema_carrier_head": {"$ref": "#/$defs/git_sha"},
+    "schema_carrier_tree": {"$ref": "#/$defs/git_sha"},
+    "task_contract_digest": {"$ref": "#/$defs/digest"},
+    "checkpoint_status": {"const": "TASK_BRANCH_CHECKPOINT_READY"},
+    "side_effect_class": {"enum": ["SOURCE_ONLY", "DISPOSABLE_TEST"]},
+    "production_effect_count": {"const": 0},
+    "payload_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "git_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"}
+  }
+}

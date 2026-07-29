@@ -181,6 +181,20 @@ from aiml_gate_receipt_adoption import (  # noqa: E402,F401
     terminal_receipt_sink_contract,
     validate_program_adoption_receipt,
 )
+from aiml_gate_receipt_s2e_launch import (  # noqa: E402,F401
+    launch_payload_digest,
+    s2e_carrier_attestation_digest,
+    s2e_carrier_attested_core_digest,
+    validate_receipt_carrier_attestation,
+    validate_s2e_launch_genesis_receipt,
+    validate_s2e_launch_transition,
+    validate_s2e_launch_wave_receipt,
+)
+from aiml_gate_receipt_source_compatibility import (  # noqa: E402,F401
+    source_compatibility_receipt_errors as _source_compatibility_receipt_errors,
+    source_compatibility_receipt_v2_dependency_lock_errors as
+    _source_compatibility_receipt_v2_dependency_lock_errors,
+)
 # S2.4(WP4·W2/W3/W4/W5)四片 wave 投影葉(2000 行治理拆分):owned-path / exported-ABI /
 # manifest 補充驗下沉至各葉,facade 逐名 re-export,對應 wave 的 derive 分支委派該葉。
 # W2=runnable application,W3=typed host driver,W4=aggregate transaction,W5=source closure
@@ -1725,6 +1739,14 @@ def validate_aiml_artifact(
         errors.extend(_program_adoption_receipt_errors(artifact))
     if schema_version == "source_compatibility_receipt_v1":
         errors.extend(_source_compatibility_receipt_errors(artifact))
+    if schema_version == "s2e_launch_genesis_receipt_v1":
+        errors.extend(validate_s2e_launch_genesis_receipt(artifact, repo_root=REPO_ROOT))
+    if schema_version == "s2e_launch_wave_receipt_v1":
+        errors.extend(validate_s2e_launch_wave_receipt(artifact, repo_root=REPO_ROOT))
+    if schema_version == "receipt_carrier_attestation_v1":
+        errors.extend(validate_receipt_carrier_attestation(
+            artifact, payload_receipt=None, repo_root=REPO_ROOT, now=now
+        ))
     if schema_version in {"sealed_build_receipt_v1", "expected_identity_receipt_v1"}:
         # S2.3(LR2)sealed-build / expected-identity 是 BUILD-IDENTITY / source 產物
         # (content-addressed、可重算、production_running_attested=false、observation_owner=
@@ -1933,72 +1955,3 @@ def validate_aiml_artifact(
         import aiml_gate_receipt_s2_2b as _s2_2b_leaf
         errors.extend(_s2_2b_leaf.validate_s2_2b_artifact(artifact, now=now))
     return errors
-
-
-def _source_compatibility_receipt_errors(artifact: dict[str, Any]) -> list[str]:
-    """S2.2A(LR1):receipt 完整性 + 內層 digest 反偽造重算 + 身分綁定交叉檢查。
-
-    內層 capture_contract.digest / training_contract.digest / 清單 self_digest 都必須由
-    各自的 inputs / components 「重算」得出——直接沿用 SSOT 模塊的構造 helper(而非在此
-    另寫一份),使 validator 與 module 不可能分歧;否則偽造內層 inputs/components 而只重封
-    外層 self_digest 的 receipt 會誤過。
-    """
-    from ml_training.learning_runtime_manifest import (  # noqa: E402 (lazy:避免循環 import)
-        capture_contract_digest as _lrm_capture_digest,
-        manifest_self_digest as _lrm_self_digest,
-        training_contract_digest as _lrm_training_digest,
-    )
-
-    errors: list[str] = []
-    manifest = artifact["learning_runtime_manifest"]
-    capture = manifest["capture_contract"]
-    training = manifest["training_contract"]
-    if artifact["self_digest"] != artifact_self_digest(artifact):
-        errors.append("source-compatibility receipt self_digest is invalid")
-    # 內層反偽造:capture/training digest 必須由自己的 inputs/components 重算得出。
-    if capture["digest"] != _lrm_capture_digest(
-        capture["inputs"], capture["snapshot_feature_schema_version"]
-    ):
-        errors.append("capture_contract.digest does not bind its inputs")
-    if training["digest"] != _lrm_training_digest(training["components"]):
-        errors.append("training_contract.digest does not bind its components")
-    if manifest["self_digest"] != _lrm_self_digest(
-        manifest["schema_version"],
-        manifest["boundary"],
-        capture["digest"],
-        training["digest"],
-    ):
-        errors.append("learning_runtime_manifest self_digest is invalid")
-    if artifact["learning_runtime_digest"] != manifest["self_digest"]:
-        errors.append("learning_runtime_digest does not bind the manifest self_digest")
-    if artifact["capture_contract_digest"] != capture["digest"]:
-        errors.append("capture_contract_digest does not bind the manifest")
-    if artifact["training_contract_digest"] != training["digest"]:
-        errors.append("training_contract_digest does not bind the manifest")
-    if artifact["migration_fingerprints"] != training["components"]["migration_fingerprints"]:
-        errors.append("migration_fingerprints do not bind the manifest components")
-    return errors
-
-
-def _source_compatibility_receipt_v2_dependency_lock_errors(
-    artifact: dict[str, Any],
-) -> list[str]:
-    """v2 專屬:training components 的 dependency_lock 必為 {spec_digest, lock_digest} 物件。
-
-    子 digest 的 sha256 形狀由 v2 schema($defs/dependency_lock)在 schema_subset 階段強制;
-    反偽造(不可竄改 spec/lock digest 而只重封外層)由上方版本無關的
-    ``_source_compatibility_receipt_errors`` 經 training_contract.digest 綁定整個 components 保證。
-    此處僅補一道 Python 層形狀斷言(schema 已保證,故為 defense-in-depth)。
-    """
-    manifest = artifact["learning_runtime_manifest"]
-    components = manifest["training_contract"]["components"]
-    dependency_lock = components.get("dependency_lock")
-    if not isinstance(dependency_lock, dict) or set(dependency_lock) != {
-        "spec_digest",
-        "lock_digest",
-    }:
-        return [
-            "source_compatibility_receipt_v2 dependency_lock must be a "
-            "{spec_digest, lock_digest} object"
-        ]
-    return []
