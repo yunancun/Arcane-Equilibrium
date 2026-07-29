@@ -1,21 +1,30 @@
 # S2 Operator Action Packet v1 — `DRAFT_NOT_EXECUTABLE`
 
 - **Program**: `AIML-LONG-LIVED-LANDING-V2` · Sprint 2（runtime 修復）
-- **Packet 狀態**: `DRAFT_NOT_EXECUTABLE`（2026-07-28 獨立審核校正）
-- **Source 綁定**: 全部五個 effect-session source predicates 已 `SOURCE_READY` 並 landed
+- **Packet 狀態**: `DRAFT_NOT_EXECUTABLE`（2026-07-29 W0 交接校正）
+- **Source 綁定**: 全部七個 narrow source predicates 已 `SOURCE_READY` 並 landed
   （S2.2A PR #121、S2.3 PR #122、S2.0 PR #127、S2.1 PR #129、S2.4 PR #145/#146、
   S2.5＋S2.2B seam PR #148/#150）。本 packet 綁定其宣告 head（見 TODO marker 與
-  `receipts/S2.4-WP4-W5/`：八件 artifact bound to `5be472193`、
-  `obligation_ledger_digest = sha256:57696d69eb258c0202faea5541859b05e53fd1985e1b09914d34ddd08c8e53ea`、28 條未關閉義務）。
+  `receipts/S2.4-WP4-W5/`：八件 artifact bound to
+  `f30ede36134f1464cef4bc025f808b931aebe180`，carrier
+  `3df9d2f451ceb7ab66117de6e33fd882d59a9531`，
+  `obligation_ledger_digest = sha256:90f9261845b4782e577ef34e40369b3bcaf30381ce46d62d7246c087b3ed208e`；
+  28-row ledger 中五列已是 `CLOSED_BY_*`，其餘仍依 owner 關閉／裁決）。
+- **Effect-readiness**: 九個拆分包已完成 **5/9**：`S2E.0`、`S2E.1`、
+  `S2E.2a`、`S2E.2b-1`、`S2E.3`。唯一 ACTIVE 入口為
+  `S2E.2b-2`；剩餘順序 `S2E.2b-2 → S2E.2b-3 → S2E.4 → S2E.5`。
+  production effect 仍為 **0/6**，S2 未關閉。
 - **這不是授權，也不是可執行 packet**：本文件保留 effect DAG 與逐步草案，但
-  `S2E.0`–`S2E.5` 尚未完成；fresh external operator authorization **不是唯一
+  `S2E.2b-2`–`S2E.5` 尚未完成；fresh external operator authorization **不是唯一
   blocker**。九項 authority 全 false；`S1` disposable 授權**不可沿用**
   （AGENTS.md／delivery-protocol A2 明文）；每一步都要**新的、exact、typed、
   out-of-band** 授權，簽章私鑰不在 Mac 也不在 trade-core。
 
-> **禁止執行**：本版缺 S2.4-AMEND-1/2、claim-gated effect routing、trusted-host
-> runners、S2.5 durable-state hardening、S2.2B runtime-attestor execution/verification
-> 與整鏈 disposable rehearsal。Current authority 以 `TODO.md` 的
+> **禁止執行**：S2.4-AMEND-1/2、claim-gated routing、S2.0/S2.1 runners、
+> S2.5 durability hardening 與 S2.4 recovery core 已 source-landed；本版仍缺
+> 真 S2.5 host/recovery lane、S2.4 五支 row drivers 與 kernel amendments、
+> authenticated runtime capture／closure／trusted-attestor lane，以及整鏈
+> disposable rehearsal。Current authority 以 `TODO.md` 的
 > `S2_EFFECT_EXECUTION_READINESS_ACTIVE` 為準；完整證據與重發條件見
 > `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-28--aiml_s2_source_and_effect_readiness_audit.md`。
 
@@ -40,20 +49,49 @@ installed+started runtime）；`S2.1@EFFECT_DONE` 不是 S2.4 predecessor。
 | 6 | `S2.5B` watchdog-reset-last＋final attestation | 同 step 4 seam（`S2_5B_FINAL`） | `S2_5B_FINAL` permit（綁 pre-drill attestation digest＋drill receipt digest） | 同 seam rollback；consumed permit 永不因 rollback 釋放 | `FINAL_ATTESTED`（supervening restart ⇒ 不可達 RESET_CLEAN） |
 | 7 | `S2.2B` ingestion compatibility revalidation（`REMOTE_READONLY`） | `agent_governance_s2_2b.py`＋`ingestion_compatibility_receipt_v1` | 消費 `S2.5B@EFFECT_DONE` 的 production `FINAL_ATTESTED` 錨（runtime attestor SSHSIG 於本步驗） | 無 mutation（readonly） | V151-V160 逐項 revalidation 全 MATCH；唯一簽發 LR1 runtime `DONE` |
 
+## S2.0 EFFECT operator 前置（本 draft 只記錄，不授權執行）
+
+1. `pg_observer_bootstrap_adapter_v1` 的 adapter step 6 會拒絕預先存在的
+   observer role，而 observer role 於 step 7 才建立；因此
+   `GRANT <observer> TO <login>` 必須 **lazy** 執行，位置嚴格在 adapter
+   steps **7/8 之間**，不得預建 membership。
+2. 專用 login role 必須是 **`NOSUPERUSER`**；否則 42501 denial proof 無效。
+3. 授權窗口結束後必須執行對稱的 **`REVOKE <observer> FROM <login>`**，並由
+   獨立 postcheck 證明 membership 已撤回。
+4. `credential_escalation_connect` 必須由 operator **帶外配置**；不得由 repo、
+   packet、runner 或 disposable fixture 自行生成／冒充。
+
 ## 重發前置（全部完成後才可重新簽發 Operator packet）
 
-1. **`S2.4-AMEND-1`**（gate step 3）：dependency-refresh 進 APPLY 的 ingress＋terminal
-   receipt 的 §3 refresh-digest 欄位＋§9.1 profile 穿線（PROGRESS「W5 PM-owned
-   obligations adjudication」rows 16/23/26）。shipped 依賴身分已過期，無此修正案
-   step 3 無法出具 §3-conformant receipt。
-2. **`S2.4-AMEND-2`**（gate step 3 的 `PG_ROLE_ACL_MIGRATION`）：plan-derived
-   `expected_topology`（row 25）。
-3. **S2.5 effect-lane 深度項**（arm step 4 前建議收口）：reconcile 摺進鎖窗（E2
-   tranche-2 F2）、install-lock 與 lifecycle-lock 語義分離（F3）、release 失敗
-   observability（F4）、journal integrity 綁定（tranche-1b note-1）。
-4. **W6/W6B ledger**：28 條義務（`receipts/S2.4-WP4-W5/S2.4-WP4-W5-derivation-record.json`
-   `remaining_owned_obligations`）中 owner=W6(4)/W6B(15) 者屬 install-execution 波次，
-   在對應 step 的 intake 逐條消化。
+1. **已完成、不得重派**：`S2E.0` 已落地 S2.4-AMEND-1/2；`S2E.1` 已落地
+   claim-gated routing/closure binding；`S2E.2a` 已落地 trusted-host kernel、
+   observer 與 S2.0/S2.1 runners；`S2E.3` 已落地 S2.5 dual-lock/durability；
+   `S2E.2b-1` 已落地 S2.4 recovery core。這五包只有 source effect=`NONE`。
+2. **`S2E.2b-2`（唯一 ACTIVE）**：關閉 `ImportFrom` 私有穿透；
+   `runpy`／`imp`／`code`／`pdb`／`timeit`／`concurrent.futures` 除名穿透；
+   阻止 nonce/self-claimed verifier 取得 `COMPLETED_EXACT`；完成
+   `aiml_gate_receipt_validator.py` 2004-line 正式裁決；新增 S2.5 state-root
+   directory anchor/manifest 使 journal 刪除可偵測；建立合法、具授權、可重放的
+   startup recovery/repair（禁止手工刪檔）；交付真 S2.5 host runner、五維獨立
+   observer、雙 lock、封閉 kernel session 與 CLI。
+3. **`S2E.2b-3`**：交付 S2.4 五支 row drivers、逐項 kernel hard-boundary
+   amendments 與 T2 tier；不可用 raw command 或 source-simulation 冒充 host
+   execution。
+4. **`S2E.4`**：完成 approved remote-readonly observer、authenticated runtime
+   `command_capture_v2`、signed-bundle execution kind、`scope=runtime` typed
+   closure schema、exact bytes/digest + signature coverage、apply actor↔independent
+   verifier↔receipt/postcheck identity cross-binding，以及 trusted-attestor SSHSIG
+   producer/verifier 的 identity/namespace/key/freshness/trusted-clock 驗證與
+   CLI/route/closure；對 2231-line
+   `tests/structure/test_agent_governance_s2_effect_binding.py` 作明確
+   keep/split/exception size adjudication。
+5. **`S2E.5`**：在 non-production disposable target 完成六段 DAG 的 positive
+   與 forgery-negative rehearsal，證明 distinct applier/verifier，拒絕
+   caller/self-claimed capture、nonce、attestor、schema substitution；從 live ABI
+   枚舉 28-row ledger 並逐列 CLOSED 或 PM reasoned adjudication。
+6. **Terminal packet gate**：GitHub CodeQL alert #95 必須先真實修復或有證據裁決；
+   `S2E.4` 的 capture/schema/identity/attestor 條件任一未關閉時不得重發 packet。
+   上方 S2.0 EFFECT operator 前置必須原樣進入 fresh packet。
 
 ## S2_CLOSED 判準（本 packet 全部執行完的驗收）
 
@@ -65,7 +103,8 @@ platform-attested running evidence（trusted-host attestor 簽章鏈）、
 
 ## 誠實邊界
 
-source seams 的全部測試證據（committed clone 6306/46/0 於 tranche-2 head）只證
-source 結構；runtime/effect 事實需 `PLATFORM_OR_EXTERNAL_ATTESTED` 證據。本 packet
-簽發當下 runtime 現況＝2026-07-27 Linux 唯讀觀察 learning service
-`inactive`/`not-found`，未變更。
+source seams 與後續 S2E packages 的全部綠色測試證據只證 source 結構；
+runtime/effect 事實需 `PLATFORM_OR_EXTERNAL_ATTESTED` 證據。最近一次已記錄的
+runtime 現況＝2026-07-28T15:55:23+02:00 Linux 唯讀觀察：兩個候選 learning
+units 均 `not-found/inactive/dead`，兩個 canonical AIML roots 均不存在。W0
+只校正文檔並做 source sync，不 deploy、restart 或改變此 runtime 邊界。
