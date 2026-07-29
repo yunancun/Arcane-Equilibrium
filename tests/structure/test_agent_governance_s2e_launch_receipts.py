@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import inspect
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import subprocess
@@ -20,9 +21,13 @@ import agent_governance_s2e_launch_receipts as launch  # noqa: E402
 import aiml_gate_receipt_validator as validator  # noqa: E402
 
 
-TASK_CONTRACT_DIGEST = (
+LAUNCH_CONTRACT_DIGEST = (
     "sha256:f8f8b1b9884aff421bf6ef52015837f2fd86447dbd67b4be5606d43afcffd2e0"
 )
+GENERATION_TASK_CONTRACT_DIGEST = (
+    "sha256:fc295b09b791ba50a76dbf82223f14a4c26998cbf818b46e29c857e8e830e775"
+)
+NEXT_GENERATION_TASK_CONTRACT_DIGEST = "sha256:" + "4" * 64
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -63,6 +68,36 @@ def _payload_digest(receipt: dict) -> str:
     )
 
 
+def test_re_admission_changes_generation_digest_without_forking_launch_lineage(
+    tmp_path: Path,
+) -> None:
+    repo, baseline, carrier, lw1 = _repo(tmp_path)
+    genesis = launch.build_genesis_candidate(
+        repo_root=repo,
+        baseline_head=baseline,
+        schema_carrier_head=carrier,
+        launch_contract_digest=LAUNCH_CONTRACT_DIGEST,
+        generation_task_contract_digest=GENERATION_TASK_CONTRACT_DIGEST,
+    )
+    wave = launch.build_wave_candidate(
+        repo_root=repo,
+        wave="S2E-LW1",
+        source_head=lw1,
+        schema_carrier_head=carrier,
+        predecessor_receipt=genesis,
+        launch_contract_digest=LAUNCH_CONTRACT_DIGEST,
+        generation_task_contract_digest=NEXT_GENERATION_TASK_CONTRACT_DIGEST,
+    )
+
+    assert genesis["launch_contract_digest"] == wave["launch_contract_digest"]
+    assert genesis["generation_task_contract_digest"] != (
+        wave["generation_task_contract_digest"]
+    )
+    assert validator.validate_s2e_launch_transition(
+        wave, predecessor_receipt=genesis, repo_root=repo
+    ) == []
+
+
 def test_genesis_and_lw1_form_a_canonical_git_bound_chain(tmp_path: Path) -> None:
     repo, baseline, carrier, lw1 = _repo(tmp_path)
 
@@ -70,7 +105,8 @@ def test_genesis_and_lw1_form_a_canonical_git_bound_chain(tmp_path: Path) -> Non
         repo_root=repo,
         baseline_head=baseline,
         schema_carrier_head=carrier,
-        task_contract_digest=TASK_CONTRACT_DIGEST,
+        launch_contract_digest=LAUNCH_CONTRACT_DIGEST,
+        generation_task_contract_digest=GENERATION_TASK_CONTRACT_DIGEST,
     )
     assert genesis["schema_version"] == "s2e_launch_genesis_receipt_v1"
     assert genesis["predecessor"] is None
@@ -92,7 +128,8 @@ def test_genesis_and_lw1_form_a_canonical_git_bound_chain(tmp_path: Path) -> Non
         source_head=lw1,
         schema_carrier_head=carrier,
         predecessor_receipt=genesis,
-        task_contract_digest=TASK_CONTRACT_DIGEST,
+        launch_contract_digest=LAUNCH_CONTRACT_DIGEST,
+        generation_task_contract_digest=GENERATION_TASK_CONTRACT_DIGEST,
     )
     assert wave["schema_version"] == "s2e_launch_wave_receipt_v1"
     assert wave["predecessor"] == genesis["payload_digest"]
@@ -117,7 +154,8 @@ def test_lw1_through_lw5_require_the_exact_unconsumed_prior_digest(
         repo_root=repo,
         baseline_head=baseline,
         schema_carrier_head=carrier,
-        task_contract_digest=TASK_CONTRACT_DIGEST,
+        launch_contract_digest=LAUNCH_CONTRACT_DIGEST,
+        generation_task_contract_digest=GENERATION_TASK_CONTRACT_DIGEST,
     )
     predecessor = genesis
     receipts: list[dict] = []
@@ -129,7 +167,8 @@ def test_lw1_through_lw5_require_the_exact_unconsumed_prior_digest(
             source_head=head,
             schema_carrier_head=carrier,
             predecessor_receipt=predecessor,
-            task_contract_digest=TASK_CONTRACT_DIGEST,
+            launch_contract_digest=LAUNCH_CONTRACT_DIGEST,
+            generation_task_contract_digest=GENERATION_TASK_CONTRACT_DIGEST,
         )
         assert validator.validate_s2e_launch_transition(
             receipt,
@@ -160,6 +199,41 @@ def test_lw1_through_lw5_require_the_exact_unconsumed_prior_digest(
     assert any("already consumed" in error for error in replay_errors)
 
 
+def test_lw2_rejects_a_predecessor_receipt_from_a_sibling_branch(
+    tmp_path: Path,
+) -> None:
+    repo, baseline, carrier, lw1_head = _repo(tmp_path)
+    genesis = launch.build_genesis_candidate(
+        repo_root=repo,
+        baseline_head=baseline,
+        schema_carrier_head=carrier,
+        launch_contract_digest=LAUNCH_CONTRACT_DIGEST,
+        generation_task_contract_digest=GENERATION_TASK_CONTRACT_DIGEST,
+    )
+    lw1 = launch.build_wave_candidate(
+        repo_root=repo,
+        wave="S2E-LW1",
+        source_head=lw1_head,
+        schema_carrier_head=carrier,
+        predecessor_receipt=genesis,
+        launch_contract_digest=LAUNCH_CONTRACT_DIGEST,
+        generation_task_contract_digest=GENERATION_TASK_CONTRACT_DIGEST,
+    )
+    _git(repo, "checkout", "-b", "sibling", carrier)
+    sibling_head = _commit(repo, "sibling.txt", "sibling\n", "sibling checkpoint")
+
+    with pytest.raises(ValueError, match="predecessor source head"):
+        launch.build_wave_candidate(
+            repo_root=repo,
+            wave="S2E-LW2",
+            source_head=sibling_head,
+            schema_carrier_head=carrier,
+            predecessor_receipt=lw1,
+            launch_contract_digest=LAUNCH_CONTRACT_DIGEST,
+            generation_task_contract_digest=NEXT_GENERATION_TASK_CONTRACT_DIGEST,
+        )
+
+
 def test_generation_is_read_only_and_refuses_dirty_repository_bytes(
     tmp_path: Path,
 ) -> None:
@@ -172,7 +246,8 @@ def test_generation_is_read_only_and_refuses_dirty_repository_bytes(
         repo_root=repo,
         baseline_head=baseline,
         schema_carrier_head=carrier,
-        task_contract_digest=TASK_CONTRACT_DIGEST,
+        launch_contract_digest=LAUNCH_CONTRACT_DIGEST,
+        generation_task_contract_digest=GENERATION_TASK_CONTRACT_DIGEST,
     )
 
     assert _git(repo, "rev-parse", "HEAD") == before_head
@@ -187,7 +262,8 @@ def test_generation_is_read_only_and_refuses_dirty_repository_bytes(
             repo_root=repo,
             baseline_head=baseline,
             schema_carrier_head=carrier,
-            task_contract_digest=TASK_CONTRACT_DIGEST,
+            launch_contract_digest=LAUNCH_CONTRACT_DIGEST,
+            generation_task_contract_digest=GENERATION_TASK_CONTRACT_DIGEST,
         )
 
 
@@ -197,15 +273,13 @@ def _carrier_case(tmp_path: Path) -> tuple[Path, dict, dict, dict, datetime]:
         repo_root=repo,
         baseline_head=baseline,
         schema_carrier_head=schema_carrier,
-        task_contract_digest=TASK_CONTRACT_DIGEST,
+        launch_contract_digest=LAUNCH_CONTRACT_DIGEST,
+        generation_task_contract_digest=GENERATION_TASK_CONTRACT_DIGEST,
     )
     carrier_path = "receipts/S2E-W0-genesis.json"
     target = repo / carrier_path
     target.parent.mkdir(parents=True)
-    target.write_text(
-        json.dumps(genesis, ensure_ascii=False, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    target.write_bytes(validator.canonical_launch_payload_bytes(genesis))
     _git(repo, "add", carrier_path)
     _git(repo, "commit", "-m", "carry W0 genesis")
     carrier_head = _git(repo, "rev-parse", "HEAD")
@@ -216,7 +290,7 @@ def _carrier_case(tmp_path: Path) -> tuple[Path, dict, dict, dict, datetime]:
         "schema_version": "governed_capture_identity_v1",
         "record_digest": "sha256:" + "1" * 64,
         "context_artifact_digest": "sha256:" + "2" * 64,
-        "task_contract_digest": TASK_CONTRACT_DIGEST,
+        "task_contract_digest": NEXT_GENERATION_TASK_CONTRACT_DIGEST,
         "node_id": "carrier_verification",
         "role_id": "E4",
         "native_agent": "E4-verifier",
@@ -226,6 +300,11 @@ def _carrier_case(tmp_path: Path) -> tuple[Path, dict, dict, dict, datetime]:
         "schema_version": "receipt_carrier_attestation_v1",
         "payload_schema_version": genesis["schema_version"],
         "payload_digest": genesis["payload_digest"],
+        "launch_contract_digest": genesis["launch_contract_digest"],
+        "payload_generation_task_contract_digest": genesis[
+            "generation_task_contract_digest"
+        ],
+        "verification_task_contract_digest": NEXT_GENERATION_TASK_CONTRACT_DIGEST,
         "schema_carrier_head": schema_carrier,
         "schema_carrier_tree": _git(
             repo, "rev-parse", f"{schema_carrier}^{{tree}}"
@@ -234,6 +313,10 @@ def _carrier_case(tmp_path: Path) -> tuple[Path, dict, dict, dict, datetime]:
         "carrier_tree": carrier_tree,
         "carrier_path": carrier_path,
         "carrier_blob": carrier_blob,
+        "carrier_raw_digest": "sha256:"
+        + __import__("hashlib").sha256(
+            validator.canonical_launch_payload_bytes(genesis)
+        ).hexdigest(),
         "governed_capture_identity": capture_identity,
         "issued_at": issued_at.isoformat().replace("+00:00", "Z"),
         "expires_at": (issued_at + timedelta(minutes=5)).isoformat().replace(
@@ -279,13 +362,6 @@ def _carrier_errors(
         payload_receipt=genesis,
         repo_root=repo,
         now=now,
-        governed_capture_identity_verifier=lambda value: value == capture_identity,
-        signature_verifier=lambda value: (
-            value["signature"]["signed_digest"] == value["attested_core_digest"]
-        ),
-        immutable_readback_verifier=lambda value: (
-            value["immutable_readback"]["object_id"] == "s2e/w0/genesis"
-        ),
         consumed_attestation_digests=consumed or set(),
     )
 
@@ -312,7 +388,10 @@ def test_carrier_attestation_binds_exact_payload_blob_and_governed_capture(
         attestation,
         capture_identity,
         issued_at + timedelta(minutes=1),
-    ) == []
+    ) == [
+        "carrier attestation EXTERNAL_VERIFICATION_PENDING: trusted-host governed "
+        "capture, independent SSHSIG, and immutable readback evidence are required"
+    ]
 
 
 def test_launch_payload_tampering_unknown_fields_and_secret_input_fail_closed(
@@ -323,7 +402,8 @@ def test_launch_payload_tampering_unknown_fields_and_secret_input_fail_closed(
         repo_root=repo,
         baseline_head=baseline,
         schema_carrier_head=carrier,
-        task_contract_digest=TASK_CONTRACT_DIGEST,
+        launch_contract_digest=LAUNCH_CONTRACT_DIGEST,
+        generation_task_contract_digest=GENERATION_TASK_CONTRACT_DIGEST,
     )
     wave = launch.build_wave_candidate(
         repo_root=repo,
@@ -331,7 +411,8 @@ def test_launch_payload_tampering_unknown_fields_and_secret_input_fail_closed(
         source_head=lw1,
         schema_carrier_head=carrier,
         predecessor_receipt=genesis,
-        task_contract_digest=TASK_CONTRACT_DIGEST,
+        launch_contract_digest=LAUNCH_CONTRACT_DIGEST,
+        generation_task_contract_digest=GENERATION_TASK_CONTRACT_DIGEST,
     )
 
     non_null_genesis = dict(genesis)
@@ -430,7 +511,7 @@ def test_carrier_stale_cross_git_replay_and_identity_substitution_fail_closed(
     substituted_identity["governed_capture_identity"]["role_id"] = "caller"
     _reseal_carrier(substituted_identity)
     assert any(
-        "identity verifier rejected" in error
+        "EXTERNAL_VERIFICATION_PENDING" in error
         for error in _carrier_errors(
             repo,
             genesis,
@@ -467,6 +548,37 @@ def test_carrier_stale_cross_git_replay_and_identity_substitution_fail_closed(
     )
 
 
+def test_carrier_rejects_duplicate_key_secret_hidden_by_json_parsing(
+    tmp_path: Path,
+) -> None:
+    repo, genesis, attestation, capture_identity, issued_at = _carrier_case(tmp_path)
+    canonical = validator.canonical_launch_payload_bytes(genesis)
+    exploit = (
+        b'{"launch_id":"password=supersecretvalue123",'
+        + canonical.removeprefix(b"{")
+    )
+    carrier_path = attestation["carrier_path"]
+    (repo / carrier_path).write_bytes(exploit)
+    _git(repo, "add", carrier_path)
+    _git(repo, "commit", "-m", "duplicate-key carrier exploit")
+    attestation["carrier_head"] = _git(repo, "rev-parse", "HEAD")
+    attestation["carrier_tree"] = _git(repo, "rev-parse", "HEAD^{tree}")
+    attestation["carrier_blob"] = _git(repo, "rev-parse", f"HEAD:{carrier_path}")
+    _reseal_carrier(attestation)
+
+    errors = _carrier_errors(
+        repo,
+        genesis,
+        attestation,
+        capture_identity,
+        issued_at + timedelta(minutes=1),
+    )
+    assert any(
+        "duplicate JSON key" in error or "secret-like raw carrier" in error
+        for error in errors
+    )
+
+
 def test_cli_recognizes_carrier_but_cannot_self_authenticate_it(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -492,6 +604,86 @@ def test_cli_recognizes_carrier_but_cannot_self_authenticate_it(
     result = json.loads(capsys.readouterr().out)
     assert result["status"] == "FAIL"
     assert any(
-        "requires a trusted governed-capture identity verifier" in error
+        "EXTERNAL_VERIFICATION_PENDING" in error
         for error in result["errors"]
     )
+
+
+def test_carrier_validator_has_no_bool_callback_authentication_channel(
+    tmp_path: Path,
+) -> None:
+    repo, genesis, attestation, _, issued_at = _carrier_case(tmp_path)
+    parameters = inspect.signature(
+        validator.validate_receipt_carrier_attestation
+    ).parameters
+    assert "signature_verifier" not in parameters
+    assert "governed_capture_identity_verifier" not in parameters
+    assert "immutable_readback_verifier" not in parameters
+
+    with pytest.raises(TypeError):
+        validator.validate_receipt_carrier_attestation(
+            attestation,
+            payload_receipt=genesis,
+            repo_root=repo,
+            now=issued_at + timedelta(minutes=1),
+            signature_verifier=lambda _: True,
+        )
+
+
+def test_fake_trusted_host_objects_return_typed_pending_not_pass(
+    tmp_path: Path,
+) -> None:
+    repo, genesis, attestation, _, issued_at = _carrier_case(tmp_path)
+    result = validator.verify_receipt_carrier_attestation(
+        attestation,
+        payload_receipt=genesis,
+        repo_root=repo,
+        now=issued_at + timedelta(minutes=1),
+        governed_capture_record={"schema_version": "command_capture_v2"},
+        external_append_intent={"schema_version": "caller-shaped"},
+        external_append_result={"schema_version": "caller-shaped"},
+        external_readback_ack={"schema_version": "caller-shaped"},
+    )
+
+    assert result["schema_version"] == "receipt_carrier_verification_result_v1"
+    assert result["status"] == "EXTERNAL_VERIFICATION_PENDING"
+    assert result["independent_signing_key_available"] is False
+    assert result["verification_result_digest"] == validator.canonical_digest({
+        key: value
+        for key, value in result.items()
+        if key != "verification_result_digest"
+    })
+    assert any("governed command capture" in error for error in result["errors"])
+    assert any("external worm" in error for error in result["errors"])
+
+
+def test_candidates_remain_pending_and_fake_review_bundle_cannot_issue(
+    tmp_path: Path,
+) -> None:
+    repo, baseline, carrier, _ = _repo(tmp_path)
+    candidate = launch.build_genesis_candidate(
+        repo_root=repo,
+        baseline_head=baseline,
+        schema_carrier_head=carrier,
+        launch_contract_digest=LAUNCH_CONTRACT_DIGEST,
+        generation_task_contract_digest=GENERATION_TASK_CONTRACT_DIGEST,
+    )
+
+    assert candidate["checkpoint_status"] == "PENDING_REVIEW"
+    result = validator.issue_s2e_launch_receipt(
+        candidate,
+        acceptance_review_bundle={"schema_version": "caller-shaped"},
+        repo_root=repo,
+        now=datetime(2026, 7, 30, 12, 1, tzinfo=timezone.utc),
+    )
+
+    assert result["schema_version"] == "launch_receipt_issuance_result_v1"
+    assert result["status"] == "EXTERNAL_VERIFICATION_PENDING"
+    assert result["issued_receipt"] is None
+    assert result["candidate_payload_digest"] == candidate["payload_digest"]
+    assert result["issuance_result_digest"] == validator.canonical_digest({
+        key: value
+        for key, value in result.items()
+        if key != "issuance_result_digest"
+    })
+    assert any("acceptance review bundle" in error for error in result["errors"])

@@ -18,6 +18,7 @@ if str(ML_ROOT) not in sys.path:
 from aiml_gate_receipt_s2e_launch import (  # noqa: E402,F401
     build_genesis_candidate,
     build_wave_candidate,
+    issue_s2e_launch_receipt,
     validate_receipt_carrier_attestation,
     validate_s2e_launch_genesis_receipt,
     validate_s2e_launch_transition,
@@ -36,14 +37,16 @@ def _parser() -> argparse.ArgumentParser:
     genesis.add_argument("--repo-root", type=Path, default=REPO_ROOT)
     genesis.add_argument("--baseline-head", required=True)
     genesis.add_argument("--schema-carrier-head", required=True)
-    genesis.add_argument("--task-contract-digest", required=True)
+    genesis.add_argument("--launch-contract-digest", required=True)
+    genesis.add_argument("--generation-task-contract-digest", required=True)
     wave = subparsers.add_parser("generate-wave")
     wave.add_argument("--repo-root", type=Path, default=REPO_ROOT)
     wave.add_argument("--wave", required=True)
     wave.add_argument("--source-head", required=True)
     wave.add_argument("--schema-carrier-head", required=True)
     wave.add_argument("--predecessor-receipt", type=Path, required=True)
-    wave.add_argument("--task-contract-digest", required=True)
+    wave.add_argument("--launch-contract-digest", required=True)
+    wave.add_argument("--generation-task-contract-digest", required=True)
     wave.add_argument(
         "--side-effect-class",
         choices=("SOURCE_ONLY", "DISPOSABLE_TEST"),
@@ -65,7 +68,8 @@ def main(argv: list[str] | None = None) -> int:
             repo_root=args.repo_root,
             baseline_head=args.baseline_head,
             schema_carrier_head=args.schema_carrier_head,
-            task_contract_digest=args.task_contract_digest,
+            launch_contract_digest=args.launch_contract_digest,
+            generation_task_contract_digest=args.generation_task_contract_digest,
         )
         print(json.dumps(artifact, ensure_ascii=False, sort_keys=True))
         return 0
@@ -76,7 +80,8 @@ def main(argv: list[str] | None = None) -> int:
             source_head=args.source_head,
             schema_carrier_head=args.schema_carrier_head,
             predecessor_receipt=_read(args.predecessor_receipt),
-            task_contract_digest=args.task_contract_digest,
+            launch_contract_digest=args.launch_contract_digest,
+            generation_task_contract_digest=args.generation_task_contract_digest,
             side_effect_class=args.side_effect_class,
         )
         print(json.dumps(artifact, ensure_ascii=False, sort_keys=True))

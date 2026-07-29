@@ -182,10 +182,13 @@ from aiml_gate_receipt_adoption import (  # noqa: E402,F401
     validate_program_adoption_receipt,
 )
 from aiml_gate_receipt_s2e_launch import (  # noqa: E402,F401
+    canonical_launch_payload_bytes,
+    issue_s2e_launch_receipt,
     launch_payload_digest,
     s2e_carrier_attestation_digest,
     s2e_carrier_attested_core_digest,
     validate_receipt_carrier_attestation,
+    verify_receipt_carrier_attestation,
     validate_s2e_launch_genesis_receipt,
     validate_s2e_launch_transition,
     validate_s2e_launch_wave_receipt,
