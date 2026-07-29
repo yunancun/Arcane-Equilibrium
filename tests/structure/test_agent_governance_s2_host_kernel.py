@@ -57,8 +57,37 @@ APPLIER_MODULES = frozenset({
     "agent_governance_s2_5_driver",
 })
 
-FORBIDDEN_RAW_COMMAND_NAMES = ("system", "popen", "spawnl", "spawnv", "execv", "execve")
-FORBIDDEN_BUILTINS = ("eval", "exec", "compile", "__import__")
+# ── ★驗收判準★ 的兩張表:正面 import 白名單 + 名稱層 denylist ──
+# E2 的突變實證(M2/M2b/M2c)證明「只列黑名單模組」抓不到 ``from os import system`` /
+# ``importlib.import_module("sub"+"process")`` / ``getattr(_o, "sys"+"tem")``。改成**正面白名單**:
+# runner 家族只准 import 這一組宣告過的模組,任何其他 import 一律是 finding —— 於是
+# ``importlib`` / ``pty`` / ``commands`` / ``ctypes``(可 `CDLL(None).system`)全都不必逐一列黑。
+ALLOWED_STDLIB_IMPORTS = frozenset({
+    "__future__", "argparse", "base64", "datetime", "hashlib", "json", "os",
+    "pathlib", "re", "socket", "stat", "sys", "typing",
+})
+ALLOWED_THIRD_PARTY_IMPORTS = frozenset({"psycopg2"})
+GOVERNANCE_IMPORT_PREFIX = "agent_governance_"
+# 只有 kernel 可以 import 的兩個模組:``subprocess``(唯一 exec 點)與 ``ctypes``(prctl 執法;
+# 它同時也是一條 libc ``system()`` 路徑,故對其他家族成員一律禁止)。
+KERNEL_ONLY_IMPORTS = frozenset({"subprocess", "ctypes"})
+
+FORBIDDEN_RAW_COMMAND_NAMES = frozenset({
+    "system", "popen", "startfile", "fork", "forkpty",
+    "spawnl", "spawnle", "spawnlp", "spawnlpe", "spawnv", "spawnve", "spawnvp", "spawnvpe",
+    "execl", "execle", "execlp", "execlpe", "execv", "execve", "execvp", "execvpe",
+    "posix_spawn", "posix_spawnp",
+})
+FORBIDDEN_BUILTINS = frozenset({
+    "eval", "exec", "compile", "__import__", "globals", "locals", "vars",
+})
+# 動態取名的三個 builtin:名稱參數若是**算出來的**(``"sys"+"tem"`` / f-string / call)一律 finding。
+DYNAMIC_ATTRIBUTE_BUILTINS = frozenset({"getattr", "setattr", "delattr"})
+# 被字串拼接混淆出來就一定是繞過意圖的識別碼。
+OBFUSCATION_SENSITIVE_LITERALS = (
+    FORBIDDEN_RAW_COMMAND_NAMES | FORBIDDEN_BUILTINS
+    | {"subprocess", "importlib", "pty", "commands", "ctypes"}
+)
 
 
 def _present_family() -> list[Path]:
@@ -68,30 +97,89 @@ def _present_family() -> list[Path]:
 # --------------------------------------------------------------------------- #
 # (4) ★驗收判準★ — AST no-raw-command scan over the runner family
 # --------------------------------------------------------------------------- #
+def _fold_string(node: ast.AST) -> str | None:
+    """把純字面的 ``"a" + "b"`` 折成 ``"ab"``(其他形一律回 None)。"""
+
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left = _fold_string(node.left)
+        right = _fold_string(node.right)
+        if left is not None and right is not None:
+            return left + right
+    return None
+
+
 def _raw_command_findings(path: Path) -> list[str]:
+    """整個 runner 家族的 no-raw-command 掃描;kernel 之外**任何** finding 即紅。
+
+    五道:①import **正面白名單**(``subprocess``/``ctypes`` 只准 kernel);②``from <allowed>
+    import <forbidden name>``(收口 E2 的 M2:``from os import system as _s``);③屬性名層 denylist
+    (不論 receiver,故 ``libc.system`` / ``_o.system`` 都抓得到);④``getattr``/``setattr``/
+    ``delattr`` 的名稱參數不得是**算出來的**,也不得是被禁名字面(收口 M2c);⑤字面字串拼接折疊
+    (收口 ``"sub"+"process"`` 這類混淆,連帶讓 M2b 即使不 import ``importlib`` 也被抓)。
+    另加 ``shell=`` 必須是常量 ``False``。
+    """
+
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    is_kernel = path.name == KERNEL_PATH.name
+    allowed_modules = ALLOWED_STDLIB_IMPORTS | ALLOWED_THIRD_PARTY_IMPORTS
+    if is_kernel:
+        allowed_modules = allowed_modules | KERNEL_ONLY_IMPORTS
     findings: list[str] = []
+
+    def _check_module(lineno: int, module: str, rendered: str) -> None:
+        top = (module or "").split(".")[0]
+        if top.startswith(GOVERNANCE_IMPORT_PREFIX) or top in allowed_modules:
+            return
+        findings.append(f"line {lineno}: import outside the declared allowlist: {rendered}")
+
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                if alias.name.split(".")[0] in {"subprocess", "pty", "commands"}:
-                    findings.append(f"line {node.lineno}: import {alias.name}")
+                _check_module(node.lineno, alias.name, f"import {alias.name}")
         elif isinstance(node, ast.ImportFrom):
-            if (node.module or "").split(".")[0] in {"subprocess", "pty", "commands"}:
-                findings.append(f"line {node.lineno}: from {node.module} import ...")
+            module = node.module or ""
+            _check_module(node.lineno, module, f"from {module} import ...")
+            for alias in node.names:
+                if alias.name in FORBIDDEN_RAW_COMMAND_NAMES or alias.name in FORBIDDEN_BUILTINS:
+                    findings.append(
+                        f"line {node.lineno}: from {module} import {alias.name}"
+                    )
         elif isinstance(node, ast.Attribute):
-            if node.attr in FORBIDDEN_RAW_COMMAND_NAMES and isinstance(node.value, ast.Name):
-                if node.value.id in {"os", "subprocess"}:
-                    findings.append(f"line {node.lineno}: {node.value.id}.{node.attr}")
+            if node.attr in FORBIDDEN_RAW_COMMAND_NAMES:
+                findings.append(f"line {node.lineno}: attribute .{node.attr}")
         elif isinstance(node, ast.Name):
             if node.id in FORBIDDEN_BUILTINS and isinstance(node.ctx, ast.Load):
                 findings.append(f"line {node.lineno}: builtin {node.id}")
+        elif isinstance(node, ast.BinOp):
+            folded = _fold_string(node)
+            if folded in OBFUSCATION_SENSITIVE_LITERALS:
+                findings.append(
+                    f"line {node.lineno}: obfuscated identifier literal {folded!r}"
+                )
         if isinstance(node, ast.Call):
             for keyword in node.keywords:
                 if keyword.arg == "shell" and not (
                     isinstance(keyword.value, ast.Constant) and keyword.value.value is False
                 ):
                     findings.append(f"line {node.lineno}: shell= is not the constant False")
+            func = node.func
+            called = (
+                func.id if isinstance(func, ast.Name)
+                else func.attr if isinstance(func, ast.Attribute) else None
+            )
+            if called in DYNAMIC_ATTRIBUTE_BUILTINS:
+                name_arg = node.args[1] if len(node.args) >= 2 else None
+                if isinstance(name_arg, ast.Constant) and isinstance(name_arg.value, str):
+                    if name_arg.value in OBFUSCATION_SENSITIVE_LITERALS:
+                        findings.append(
+                            f"line {node.lineno}: {called}(…, {name_arg.value!r})"
+                        )
+                elif not isinstance(name_arg, ast.Name):
+                    findings.append(
+                        f"line {node.lineno}: {called}() with a computed attribute name"
+                    )
     return findings
 
 
@@ -100,28 +188,86 @@ def test_no_raw_command_outside_the_kernel():
     assert KERNEL_PATH in present
     for path in present:
         findings = _raw_command_findings(path)
-        if path == KERNEL_PATH:
-            # kernel 是唯一 exec 點:它**必須**帶 subprocess,但也只准帶 subprocess。
-            assert any("import subprocess" in item for item in findings), findings
-            residue = [item for item in findings if "import subprocess" not in item]
-            assert residue == [], residue
-        else:
-            assert findings == [], f"{path.name} carries a raw-command surface: {findings}"
+        assert findings == [], f"{path.name} carries a raw-command surface: {findings}"
 
 
-def test_the_ast_scanner_actually_catches_a_violation(tmp_path):
-    # 反例:掃描器若抓不到違規就是空轉。逐一注入四類違規,必須全部被抓到。
-    samples = {
-        "import subprocess\n": "import subprocess",
-        "import os\nos.system('x')\n": "os.system",
-        "import subprocess\nsubprocess.run(['x'], shell=True)\n": "shell=",
-        "eval('1')\n": "builtin eval",
-    }
-    for index, (source, expected) in enumerate(samples.items()):
-        path = tmp_path / f"violation_{index}.py"
-        path.write_text(source, encoding="utf-8")
-        findings = _raw_command_findings(path)
-        assert any(expected in item for item in findings), (source, findings)
+# E2 重做的三個突變(M2 / M2b / M2c)+ 既有四類 + 白名單外 import。全部必須被抓到。
+AST_SCANNER_MUTATIONS = {
+    # ── E2 的 M2:舊掃描器全綠,新掃描器必紅 ──
+    "M2_from_os_import_system": (
+        "from os import system as _s\n_s('id > /tmp/pwned')\n", "from os import system",
+    ),
+    # ── E2 的 M2b ──
+    "M2b_importlib_concat": (
+        "import importlib\nimportlib.import_module('sub' + 'process').run(['id'])\n",
+        "import outside the declared allowlist",
+    ),
+    "M2b_concat_literal_alone": (
+        "def f(m):\n    return m('sub' + 'process')\n", "obfuscated identifier literal",
+    ),
+    # ── E2 的 M2c ──
+    "M2c_getattr_computed_name": (
+        "import os\n_o = os\ngetattr(_o, 'sys' + 'tem')('id')\n",
+        "getattr() with a computed attribute name",
+    ),
+    "M2c_getattr_constant_name": (
+        "import os\ngetattr(os, 'system')('id')\n", "getattr(…, 'system')",
+    ),
+    # ── 既有四類 ──
+    "raw_import_subprocess": ("import subprocess\n", "import outside the declared allowlist"),
+    "os_system_attribute": ("import os\nos.system('x')\n", "attribute .system"),
+    "shell_true": (
+        "import subprocess\nsubprocess.run(['x'], shell=True)\n", "shell= is not the constant False",
+    ),
+    "builtin_eval": ("eval('1')\n", "builtin eval"),
+    # ── 新增的縱深:ctypes 是 libc.system 的路,pty/commands 亦然 ──
+    "ctypes_libc_system": (
+        "import ctypes\nctypes.CDLL(None).system(b'id')\n",
+        "import outside the declared allowlist",
+    ),
+    "ctypes_attribute_even_if_imported_elsewhere": (
+        "def f(libc):\n    libc.system(b'id')\n", "attribute .system",
+    ),
+    "pty_spawn": ("import pty\npty.spawn('/bin/sh')\n", "import outside the declared allowlist"),
+    "dunder_import": ("__import__('subprocess')\n", "builtin __import__"),
+}
+
+
+@pytest.mark.parametrize("mutation", sorted(AST_SCANNER_MUTATIONS))
+def test_the_ast_scanner_actually_catches_a_violation(tmp_path, mutation):
+    # 反例:掃描器若抓不到違規就是空轉。E2 突變實證的三支(M2/M2b/M2c)在此逐一釘死。
+    source, expected = AST_SCANNER_MUTATIONS[mutation]
+    path = tmp_path / f"{mutation}.py"
+    path.write_text(source, encoding="utf-8")
+    findings = _raw_command_findings(path)
+    assert any(expected in item for item in findings), (source, findings)
+
+
+def test_a_mutation_injected_into_a_real_family_file_is_caught(tmp_path):
+    """把 M2 的突變真的注進一個**家族成員的副本**,證明掃描器對真檔也紅(不只對合成樣本)。"""
+
+    for original in _present_family():
+        mutated = tmp_path / original.name
+        mutated.write_text(
+            original.read_text(encoding="utf-8")
+            + "\n\nfrom os import system as _s\n\n\ndef _pwn():\n    return _s('id')\n",
+            encoding="utf-8",
+        )
+        findings = _raw_command_findings(mutated)
+        assert any("from os import system" in item for item in findings), original.name
+
+
+def test_the_import_allowlist_is_positive_and_kernel_only_imports_are_kernel_only(tmp_path):
+    # 白名單是**正面**的:一個從未宣告過的模組(即使人畜無害)也必須被抓到 —— 這正是它比黑名單
+    # 難繞的原因。
+    sample = tmp_path / "unknown_module.py"
+    sample.write_text("import socketserver\n", encoding="utf-8")
+    assert _raw_command_findings(sample)
+    # subprocess / ctypes 只准 kernel:同一份 source 放在非 kernel 檔名下必紅。
+    for module in sorted(KERNEL_ONLY_IMPORTS):
+        elsewhere = tmp_path / f"not_the_kernel_{module}.py"
+        elsewhere.write_text(f"import {module}\n", encoding="utf-8")
+        assert _raw_command_findings(elsewhere), module
 
 
 def test_kernel_is_the_only_family_member_importing_subprocess():

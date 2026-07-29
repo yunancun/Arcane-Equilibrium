@@ -75,12 +75,9 @@ def test_no_raw_command_outside_the_kernel_for_the_complete_family():
     from test_agent_governance_s2_host_kernel import _raw_command_findings  # noqa: PLC0415
 
     for path in RUNNER_FAMILY:
-        findings = _raw_command_findings(path)
-        if path.name == "agent_governance_s2_host_kernel.py":
-            # kernel 是唯一 exec 點:必須帶 subprocess,且**只**准帶 subprocess。
-            assert findings and all("import subprocess" in item for item in findings), findings
-        else:
-            assert findings == [], f"{path.name}: {findings}"
+        # 掃描器對整個家族(含 kernel)都必須乾淨:``subprocess``/``ctypes`` 的 kernel-only 例外
+        # 由掃描器自己按檔名判定,而不是由呼叫端事後把 finding 濾掉。
+        assert _raw_command_findings(path) == [], f"{path.name}: {_raw_command_findings(path)}"
 
 
 # --------------------------------------------------------------------------- #
