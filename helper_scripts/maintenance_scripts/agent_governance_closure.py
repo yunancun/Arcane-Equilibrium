@@ -30,6 +30,9 @@ from agent_governance_effects import (
 from agent_governance_target_host_effects import (
     TARGET_HOST_CLOSURE_EVIDENCE_KINDS,
 )
+from agent_governance_s2_effect_binding import (
+    S2_CLOSURE_ATTESTED_POSTCHECK_KINDS,
+)
 from agent_governance_execution_attestation import (
     ExecutionAttestationVerifier,
     validate_execution_attestations,
@@ -206,6 +209,7 @@ def validate_closure(
     runtime_evidence: list[dict[str, Any]] = []
     valid_effect_receipts: dict[str, dict[str, Any]] = {}
     valid_observation_artifacts: dict[str, dict[str, Any]] = {}
+    independent_postcheck_artifacts: dict[str, dict[str, Any]] = {}
     for index, evidence in enumerate(evidence_items):
         if not isinstance(evidence, dict):
             errors.append(f"evidence[{index}] must be an object")
@@ -246,6 +250,13 @@ def validate_closure(
                 valid_effect_receipts[evidence_id] = receipt
         elif evidence.get("receipt") is not None:
             errors.append(f"evidence[{index}] non-effect evidence cannot carry receipt")
+        if evidence.get("kind") in S2_CLOSURE_ATTESTED_POSTCHECK_KINDS and isinstance(
+            evidence.get("artifact"), dict
+        ):
+            # Codex-2/E2-RES-3:獨立 ops_postcheck 的**確切 bytes** 必經 out-of-band host
+            # verifier(其 self_digest 是 caller 可控的 canonical 重算,自報 PASS 亦然)。
+            # 這裡只收集身分↔bytes,認證在 validate_execution_attestations。
+            independent_postcheck_artifacts[evidence_id] = evidence["artifact"]
         if (
             evidence.get("artifact") is not None
             and evidence.get("kind") not in CAPTURE_KINDS
@@ -791,6 +802,7 @@ def validate_closure(
         captures=captures,
         observation_artifacts=valid_observation_artifacts,
         effect_receipts=valid_effect_receipts,
+        independent_postcheck_artifacts=independent_postcheck_artifacts,
         verifier=execution_attestation_verifier,
     ))
     return errors

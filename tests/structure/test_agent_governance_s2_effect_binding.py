@@ -74,14 +74,15 @@ STEP_FACT_SHAPES = {
         "surfaces": ["authority", "pg", "runtime_effect"], "risk": "high",
     },
 }
-# CC-A1/CC-B:closure PASS 被 contract 明文阻塞的 step(今日 = S2_0_APPLY + S2_1_DRILL)
-# 不進正例參數化。
-PASSABLE_STEPS = sorted(
+# CC-A1/CC-B:**自身** contract 明文阻塞 closure PASS 的 step(今日 = S2_0_APPLY + S2_1_DRILL)。
+# ⚠ Codex-1 後「自身未阻塞」**不等於**「可 PASS」:effect-DAG 傳遞性阻塞令今日九步全不可 PASS
+# (S2.0 是全鏈的根)。故舊名 PASSABLE_STEPS 已改名,避免測試名目本身變成假陳述。
+SELF_UNBLOCKED_STEPS = sorted(
     step for step in S2_EFFECT_STEPS
     if binding.S2_STEP_RECEIPT_CONTRACTS[step]["closure_pass_blocked_reason"] is None
 )
-BLOCKED_STEPS = sorted(set(S2_EFFECT_STEPS) - set(PASSABLE_STEPS))
-# 被阻塞 step 的「最佳可得 status」——用來證明即使拿出該 status 也不換算 PASS。
+SELF_BLOCKED_STEPS = sorted(set(S2_EFFECT_STEPS) - set(SELF_UNBLOCKED_STEPS))
+# 自身被阻塞 step 的「最佳可得 status」——用來證明即使拿出該 status 也不換算 PASS。
 _BLOCKED_STEP_STATUS = {
     "S2_0_APPLY": "APPLIED_ROLLED_BACK_EXACT",
     "S2_1_DRILL": "QUIESCED_STATIC_GUARDS_HELD",
@@ -224,17 +225,32 @@ def structural_receipts(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(binding, "_delegated_binding_errors", lambda *_a, **_k: [])
 
 
-@pytest.mark.parametrize("step", PASSABLE_STEPS)
-def test_each_step_closure_binding_passes_with_exact_cross_bound_evidence(
+@pytest.mark.parametrize("step", SELF_UNBLOCKED_STEPS)
+def test_each_step_binding_yields_exactly_the_transitive_block_and_no_other_error(
     structural_receipts, step: str,
 ) -> None:
+    """Codex-1 後的正例形態:逐欄交叉綁定完全正確時,error 集合**恰等於**傳遞性阻塞集。
+
+    舊版斷言 ``== []``(= 該 step 可 closure-PASS),那正是 Codex-1 的 P1:W6A probe 能在零
+    已驗證 S2.0 前置下 PASS。現在改成 exact-set 斷言,兩件事同時被釘住:
+
+    * 傳遞性阻塞真的發生(少一條即紅);
+    * 其餘每一個綁定面(route 節點、claim↔receipt digest、intent authority、獨立 postcheck、
+      acceptance、runtime_contact/CHANGED)仍然乾淨——任何一面回歸都會多出一條 error 而紅。
+      故本測試對「非阻塞面」的覆蓋力與舊版 ``== []`` 相同。
+    """
+
     route = _route(step)
     receipt = _receipt(step)
     packet, fragments, evidence_by_id = _packet(step, receipt)
+    expected = binding.s2_closure_block_errors(step)
+    assert expected, step  # 今日九步全部至少一條(S2.0 是全鏈的根)
     assert binding.validate_s2_effect_binding(
         packet, route, fragments, evidence_by_id, {"effect": receipt}
-    ) == []
+    ) == expected
 
+    # 收據級驗刻意**不**帶傳遞性阻塞:一份 W6A probe 收據本身可以完全合法,不可 PASS 的是
+    # 「在未驗證 S2.0 前置下的那個 closure」(見模組內誠實界線註)。
     evidence = binding.build_s2_effect_evidence(receipt)
     errors, validated = binding.validate_s2_effect_evidence(
         evidence, expected_source_head=HEAD
@@ -243,7 +259,7 @@ def test_each_step_closure_binding_passes_with_exact_cross_bound_evidence(
     assert validated is receipt
 
 
-@pytest.mark.parametrize("step", PASSABLE_STEPS)
+@pytest.mark.parametrize("step", SELF_UNBLOCKED_STEPS)
 def test_acceptance_missing_postcheck_binding_fails_closed(
     structural_receipts, step: str,
 ) -> None:
@@ -259,7 +275,134 @@ def test_acceptance_missing_postcheck_binding_fails_closed(
     )
 
 
-@pytest.mark.parametrize("step", BLOCKED_STEPS)
+# --------------------------------------------------------------------------- #
+# Codex-1:effect-DAG 傳遞性阻塞(未驗證的上游前置 ⇒ 下游亦不可 closure-PASS)
+# --------------------------------------------------------------------------- #
+def test_w6a_probe_cannot_closure_pass_without_a_verified_s2_0(
+    structural_receipts,
+) -> None:
+    """Codex-1 的原始攻擊面:一個 **authorized** W6A probe,所有綁定逐欄正確、封包無其他瑕疵。
+
+    route 對 ``s2_0_effect_receipt`` 只驗「存在且是合法 sha256」(contract 明標 declaration-
+    only),``run_s2_4_capability_probe()`` 也不收 S2.0 receipt/digest ⇒ 修前這個封包 closure
+    PASS,繞過已宣告的 effect DAG。修後必回一條明述阻塞鏈的 typed error。
+    """
+
+    step = "S2_4_W6A_PROBE"
+    route = _route(step)
+    receipt = _receipt(step)
+    packet, fragments, evidence_by_id = _packet(step, receipt)
+    errors = binding.validate_s2_effect_binding(
+        packet, route, fragments, evidence_by_id, {"effect": receipt}
+    )
+    assert errors, "authorized W6A probe must not closure-PASS without a verified S2.0"
+    assert errors[0].startswith(
+        "S2 S2_4_W6A_PROBE cannot reach a closure PASS: its effect-DAG upstream "
+        "S2_0_APPLY is blocked ("
+    ), errors
+    # 阻塞鏈必須把**上游自己的**理由原文帶出(不是一句無資訊的「upstream blocked」)。
+    assert binding.S2_STEP_RECEIPT_CONTRACTS["S2_0_APPLY"][
+        "closure_pass_blocked_reason"
+    ] in errors[0]
+    # W6A probe 自身的 contract 沒有 closure_pass_blocked_reason —— 阻塞純粹來自 DAG 上游。
+    assert binding.S2_STEP_RECEIPT_CONTRACTS[step]["closure_pass_blocked_reason"] is None
+    # 真 dispatch 路徑(agent_governance_effects,無 sentinel)同樣拒。
+    assert errors == effects.validate_deploy_effect_binding(
+        packet, route, fragments, evidence_by_id, {"effect": receipt}
+    )
+
+
+def test_effect_dag_upstream_table_is_derived_from_the_route_claim_inventory() -> None:
+    """上游表必須是 route claim inventory 的導出物,且逐 step 等於已宣告的 §1.2 DAG 次序。"""
+
+    # ① claim key 分類是封閉集:上游收據/認證 claim(`_receipt`/`_attestation` 尾碼)必在
+    #    producer 表內,其餘(authorization/permit/selector)必不在。新增 claim key 未分類即紅。
+    all_claim_keys = set().union(*S2_CLAIM_KEYS_BY_STEP.values())
+    upstream_claim_keys = {
+        key for key in all_claim_keys if key.endswith(("_receipt", "_attestation"))
+    }
+    assert set(binding._UPSTREAM_RECEIPT_CLAIM_PRODUCERS) == upstream_claim_keys
+    assert set(binding._UPSTREAM_RECEIPT_CLAIM_PRODUCERS.values()) <= set(S2_EFFECT_STEPS)
+
+    # ② 直接上游 = 該 step route claim inventory 內的上游 claim 的產出者(不得手抄)。
+    for step in S2_EFFECT_STEPS:
+        assert binding._direct_upstream_steps(step) == {
+            binding._UPSTREAM_RECEIPT_CLAIM_PRODUCERS[key]
+            for key in S2_CLAIM_KEYS_BY_STEP[step] if key in upstream_claim_keys
+        }, step
+
+    # ③ 傳遞閉包的字面期望(產生器與斷言不共用同一段邏輯:此處是硬編正本)。
+    assert binding.S2_EFFECT_DAG_UPSTREAM_STEPS == {
+        "S2_0_APPLY": frozenset(),
+        "S2_4_W6A_PROBE": frozenset({"S2_0_APPLY"}),
+        "S2_4_W6A_PREPARE": frozenset({"S2_0_APPLY", "S2_4_W6A_PROBE"}),
+        "S2_4_W6B_PROBE": frozenset({
+            "S2_0_APPLY", "S2_4_W6A_PROBE", "S2_4_W6A_PREPARE",
+        }),
+        "S2_4_W6B_APPLY": frozenset({
+            "S2_0_APPLY", "S2_4_W6A_PROBE", "S2_4_W6A_PREPARE", "S2_4_W6B_PROBE",
+        }),
+        "S2_5A_START": frozenset({
+            "S2_0_APPLY", "S2_4_W6A_PROBE", "S2_4_W6A_PREPARE", "S2_4_W6B_PROBE",
+            "S2_4_W6B_APPLY",
+        }),
+        "S2_1_DRILL": frozenset({
+            "S2_0_APPLY", "S2_4_W6A_PROBE", "S2_4_W6A_PREPARE", "S2_4_W6B_PROBE",
+            "S2_4_W6B_APPLY", "S2_5A_START",
+        }),
+        "S2_5B_FINAL": frozenset({
+            "S2_0_APPLY", "S2_4_W6A_PROBE", "S2_4_W6A_PREPARE", "S2_4_W6B_PROBE",
+            "S2_4_W6B_APPLY", "S2_5A_START", "S2_1_DRILL",
+        }),
+        "S2_2B_RUNTIME_DONE": frozenset({
+            "S2_0_APPLY", "S2_4_W6A_PROBE", "S2_4_W6A_PREPARE", "S2_4_W6B_PROBE",
+            "S2_4_W6B_APPLY", "S2_5A_START", "S2_1_DRILL", "S2_5B_FINAL",
+        }),
+    }
+    # ④ 契約表回填的欄位就是同一份導出物(消費端只有一個權威)。
+    for step, contract in binding.S2_STEP_RECEIPT_CONTRACTS.items():
+        assert contract["effect_dag_upstream_steps"] == (
+            binding.S2_EFFECT_DAG_UPSTREAM_STEPS[step]
+        ), step
+    # ⑤ 無 step 是自己的上游(DAG 非環),且上游關係嚴格反自反。
+    for step, upstream in binding.S2_EFFECT_DAG_UPSTREAM_STEPS.items():
+        assert step not in upstream, step
+
+
+def test_no_s2_step_can_closure_pass_today() -> None:
+    """誠實後果:S2.0 是全鏈的根且今日 blocked ⇒ **九步全部**不可 closure-PASS。
+
+    這不是缺陷而是正確結果 —— S2 closure lane 不該在根前置不可驗證時讓下游可 PASS。此測試
+    刻意把後果釘死:哪天有人「讓某一步又能 PASS」,必須同時面對這個斷言。
+    """
+
+    blocked_by_step = {
+        step: binding.s2_closure_block_errors(step) for step in S2_EFFECT_STEPS
+    }
+    assert all(blocked_by_step.values()), blocked_by_step
+    assert len(blocked_by_step) == 9
+    # 自身阻塞的兩步 + 其餘七步的傳遞性阻塞(全部溯到同一個根 S2_0_APPLY)。
+    assert SELF_BLOCKED_STEPS == ["S2_0_APPLY", "S2_1_DRILL"]
+    for step in SELF_UNBLOCKED_STEPS:
+        assert all(
+            "cannot reach a closure PASS" in error for error in blocked_by_step[step]
+        ), step
+        assert any(
+            "upstream S2_0_APPLY is blocked" in error for error in blocked_by_step[step]
+        ), step
+    # S2.5B/S2.2B 在 S2.1 下游 ⇒ 兩條阻塞鏈(根 + drill),不得只報一條。
+    for step in ("S2_5B_FINAL", "S2_2B_RUNTIME_DONE"):
+        assert [
+            "S2_0_APPLY" in error for error in blocked_by_step[step]
+        ].count(True) == 1, step
+        assert [
+            "S2_1_DRILL" in error for error in blocked_by_step[step]
+        ].count(True) == 1, step
+    # docstring 必須誠實記錄此後果(不得只在測試裡知道)。
+    assert "今日沒有任何一個 S2 step 能 closure PASS" in binding.__doc__
+
+
+@pytest.mark.parametrize("step", SELF_BLOCKED_STEPS)
 def test_blocked_step_never_converts_a_disposable_proof_into_a_pass(
     structural_receipts, step: str,
 ) -> None:
@@ -578,9 +721,11 @@ def test_s2_5_delegation_passes_the_exact_carriers_to_the_section6_gate(
     evidence_by_id[capture_evidence["id"]] = capture_evidence
     fragments["ops_postcheck"]["evidence_refs"].append(capture_evidence["id"])
     fragments["ops_preflight"] = _ops_preflight_fragment(preflight)
+    # Codex-1:S2.5A/S2.5B 亦被 effect-DAG 上游(S2.0;S2.5B 另加 S2.1)傳遞性阻塞,故此處
+    # 期望「恰等於阻塞集」而非 [] —— 委派面本身仍必須零額外 error。
     assert binding.validate_s2_effect_binding(
         packet, route, fragments, evidence_by_id, {"effect": receipt}
-    ) == []
+    ) == binding.s2_closure_block_errors(step)
     assert len(seen) == 1
     assert seen[0]["intent"] is intent
     assert seen[0]["ops_preflight"] is preflight
@@ -872,13 +1017,14 @@ def test_two_receipts_of_the_same_step_are_rejected(structural_receipts) -> None
         packet, route, fragments, evidence_by_id,
         {"effect": receipt, "effect-duplicate": second},
     )
-    assert errors == [
+    blocked = binding.s2_closure_block_errors(GUARD_STEP)
+    assert errors == blocked + [
         f"S2 closure PASS requires exactly one {GUARD_STEP} effect receipt"
     ]
-    # 恰一份時同一輸入是綠的(證明紅的原因就是「第二份」)。
+    # 恰一份時同一輸入只剩傳遞性阻塞(證明多出來那條的原因就是「第二份」)。
     assert binding.validate_s2_effect_binding(
         packet, route, fragments, evidence_by_id, {"effect": receipt}
-    ) == []
+    ) == blocked
 
 
 def test_delegated_gate_exception_becomes_a_typed_error(
@@ -1161,7 +1307,7 @@ def test_ops_postcheck_artifact_must_cross_bind_the_receipt_self_digest(
 
 
 @pytest.mark.parametrize("status", ["FAIL", "REJECTED"])
-@pytest.mark.parametrize("step", PASSABLE_STEPS)
+@pytest.mark.parametrize("step", SELF_UNBLOCKED_STEPS)
 def test_ops_postcheck_artifact_status_must_be_pass(
     structural_receipts, step: str, status: str,
 ) -> None:
@@ -1181,10 +1327,11 @@ def test_ops_postcheck_artifact_status_must_be_pass(
     artifact["status"] = status
     artifact["self_digest"] = binding._artifact_self_digest(artifact)  # 合法重封
     evidence_by_id["pc"]["digest"] = artifact["self_digest"]
-    # 唯一的錯誤就是 status:所有 digest/欄位面都仍然全綠(證明擋住它的是 status 判定本身)。
+    # 傳遞性阻塞(Codex-1,今日九步全有)之外的唯一錯誤就是 status:所有 digest/欄位面都仍然
+    # 全綠(證明擋住它的是 status 判定本身,而不是別的面順帶紅)。
     assert binding.validate_s2_effect_binding(
         packet, route, fragments, evidence_by_id, {"effect": receipt}
-    ) == [
+    ) == binding.s2_closure_block_errors(step) + [
         "S2 ops_postcheck artifact status must be PASS (an independent postcheck "
         "that reports its own failure never endorses a closure PASS)"
     ], step
@@ -1585,7 +1732,7 @@ def _closure_fragment_errors(fragment: dict) -> list[str]:
     )
 
 
-@pytest.mark.parametrize("step", PASSABLE_STEPS)
+@pytest.mark.parametrize("step", SELF_UNBLOCKED_STEPS)
 def test_s2_effect_evidence_shapes_are_closure_packet_v1_valid(step: str) -> None:
     """兩份 wrapper(effect receipt + 獨立 ops_postcheck)都必須是 schema-valid evidence。"""
 
@@ -1675,7 +1822,7 @@ def test_pre_delta_postcheck_shapes_are_rejected_by_the_real_schema() -> None:
 def test_blocked_steps_capture_postcheck_limitation_is_explicit() -> None:
     """S2.0/S2.1 的 postcheck 形狀今日不可表示 ⇒ 參照建構子 typed 拒絕 + 模組明文記錄。"""
 
-    for step in BLOCKED_STEPS:
+    for step in SELF_BLOCKED_STEPS:
         receipt = _receipt(step)
         with pytest.raises(ValueError, match="not representable today"):
             binding.build_s2_effect_ops_postcheck_evidence(
@@ -1710,7 +1857,7 @@ def test_binding_success_sets_match_per_step_result_vocabularies() -> None:
         assert contract["success_statuses"] == frozenset(), step
         assert _BLOCKED_STEP_STATUS[step] in module.RESULT_STATUSES, step
         assert _BLOCKED_STEP_STATUS[step] in contract["closure_pass_blocked_reason"], step
-    for step in PASSABLE_STEPS:
+    for step in SELF_UNBLOCKED_STEPS:
         contract = binding.S2_STEP_RECEIPT_CONTRACTS[step]
         assert contract["success_statuses"], step
         assert contract["closure_pass_blocked_reason"] is None, step
@@ -1927,7 +2074,8 @@ def test_s2_receipts_get_a_distinct_execution_attestation_identity() -> None:
     receipts["w6b"]["self_digest"] = "sha256:" + "d" * 64  # 與 w6a 同摘要,scope 不同
     errors = validate_execution_attestations(
         gate_verdict="PASS", captures={"waves": {}, "telemetry": {}},
-        observation_artifacts={}, effect_receipts=receipts, verifier=None,
+        observation_artifacts={}, effect_receipts=receipts,
+        independent_postcheck_artifacts={}, verifier=None,
     )
     # 三份收據 = 三個獨立身分(舊碼只會產生一條錯誤)。
     assert len(errors) == 3, errors
@@ -1943,9 +2091,141 @@ def test_s2_receipts_get_a_distinct_execution_attestation_identity() -> None:
 
     assert validate_execution_attestations(
         gate_verdict="PASS", captures={"waves": {}, "telemetry": {}},
-        observation_artifacts={}, effect_receipts=receipts, verifier=verifier,
+        observation_artifacts={}, effect_receipts=receipts,
+        independent_postcheck_artifacts={}, verifier=verifier,
     ) == []
     assert len(seen) == 3
     assert {digest for _kind, digest in seen} == {
         receipt["self_digest"] for receipt in receipts.values()
     }
+
+
+# --------------------------------------------------------------------------- #
+# Codex-2 / E2-RES-3:獨立 ops_postcheck 的確切 bytes 必經 out-of-band host verifier
+# --------------------------------------------------------------------------- #
+def _attestation_case(step: str = "S2_4_W6B_APPLY") -> tuple[dict, dict]:
+    """一份 effect receipt + 其真參照建構子產出的獨立 postcheck artifact。"""
+
+    receipt = _receipt(step)
+    postcheck = binding.build_s2_effect_ops_postcheck_evidence(
+        receipt, verifier_node="s2_ops_postcheck", observed_at=T_POST,
+    )
+    return receipt, postcheck["artifact"]
+
+
+def test_independent_postcheck_bytes_must_be_host_attested() -> None:
+    """Codex-2:自封的 PASS postcheck 不再能背書 closure —— 其確切 bytes 必經 host verifier。
+
+    攻擊面(修前):S2.4 家族與 S2.2B 的 closure 只憑 caller 可控的 canonical self-digest +
+    自報 ``PASS`` 接受這份 artifact,OPS fragment 又只綁它的 evidence ID ⇒ 拿到真 effect
+    receipt 後,封包產生者可以用同一個 evidence ID 換上一份新鮮自封的 PASS postcheck,宣稱獨立
+    運維驗證跑過(含 W6B 安裝與 PG migration 之後)。
+    """
+
+    from agent_governance_execution_attestation import validate_execution_attestations
+
+    receipt, artifact = _attestation_case()
+    common = {
+        "gate_verdict": "PASS", "captures": {"waves": {}, "telemetry": {}},
+        "observation_artifacts": {}, "effect_receipts": {"effect": receipt},
+    }
+    # ① 無 verifier(離線 CLI):收據與 postcheck 各一條,postcheck 以自己的 kind 具名。
+    errors = validate_execution_attestations(
+        **common, independent_postcheck_artifacts={"pc": artifact}, verifier=None,
+    )
+    assert len(errors) == 2, errors
+    assert (
+        "closure PASS lacks out-of-band execution attestation for "
+        f"{binding.S2_OPS_POSTCHECK_KIND} {artifact['self_digest']}"
+    ) in errors
+
+    # ② verifier 只認證 effect receipt(= 修前的實際覆蓋面)⇒ postcheck 仍擋住 PASS。
+    receipt_only = validate_execution_attestations(
+        **common, independent_postcheck_artifacts={"pc": artifact},
+        verifier=lambda kind, _digest, _artifact: kind == "effect_adapter_result_v1",
+    )
+    assert receipt_only == [
+        "closure PASS lacks out-of-band execution attestation for "
+        f"{binding.S2_OPS_POSTCHECK_KIND} {artifact['self_digest']}"
+    ]
+
+    # ③ 兩者都被認證才乾淨,且 verifier 收到的是 artifact 的**確切 bytes**(非重建物)。
+    seen: list[tuple[str, str, int]] = []
+
+    def verifier(kind: str, digest: str, payload: dict) -> bool:
+        seen.append((kind, digest, id(payload)))
+        return True
+
+    assert validate_execution_attestations(
+        **common, independent_postcheck_artifacts={"pc": artifact}, verifier=verifier,
+    ) == []
+    assert (
+        binding.S2_OPS_POSTCHECK_KIND, artifact["self_digest"], id(artifact),
+    ) in seen
+
+
+def test_independent_postcheck_identity_never_collapses_into_the_effect_receipt() -> None:
+    """dedup identity:postcheck 與 effect receipt 即使同摘要也必是兩個候選(兩條 error)。"""
+
+    from agent_governance_execution_attestation import validate_execution_attestations
+
+    receipt, artifact = _attestation_case()
+    artifact = deepcopy(artifact)
+    artifact["self_digest"] = receipt["self_digest"]  # 蓄意同摘要
+    errors = validate_execution_attestations(
+        gate_verdict="PASS", captures={"waves": {}, "telemetry": {}},
+        observation_artifacts={}, effect_receipts={"effect": receipt},
+        independent_postcheck_artifacts={"pc": artifact}, verifier=None,
+    )
+    assert len(errors) == 2, errors
+    assert {error.rsplit(" ", 2)[-2] for error in errors} == {
+        "effect_adapter_result_v1", binding.S2_OPS_POSTCHECK_KIND,
+    }
+    # 兩份 postcheck 都缺 self_digest 時,身分仍由 effect_step/verifier_node 分開。
+    first = {"schema_version": binding.S2_OPS_POSTCHECK_KIND, "effect_step": "A"}
+    second = {"schema_version": binding.S2_OPS_POSTCHECK_KIND, "effect_step": "B"}
+    assert len(validate_execution_attestations(
+        gate_verdict="PASS", captures={"waves": {}, "telemetry": {}},
+        observation_artifacts={}, effect_receipts={},
+        independent_postcheck_artifacts={"a": first, "b": second}, verifier=None,
+    )) == 2
+
+
+def test_closure_routes_the_postcheck_artifact_into_execution_attestation() -> None:
+    """封包→closure 的真實接線:evidence 內的 postcheck artifact 必真的送去 host verifier。
+
+    只斷言「候選枚舉有這個 kind」不足以證明 production 路徑會送它;此處直接跑
+    ``validate_closure``(其餘欄位刻意殘缺,只取本條 error 是否出現)。
+    """
+
+    import agent_governance_closure as closure
+
+    _receipt_obj, artifact = _attestation_case()
+    packet = {field: {} for field in closure.CLOSURE_REQUIRED_FIELDS}
+    packet.update({
+        "schema_version": "closure_packet_v1", "task_id": "s2e1-codex2",
+        "work_status": "DONE", "gate_verdict": "PASS", "disposition": "CHANGED",
+        "confidence": "high", "adjudicated_at": T_ADJUDICATED,
+        "authority_refs": [], "acceptance": [], "role_fragments": [], "checks": [],
+        "unverified": [], "skipped_roles": [], "next_action": None,
+        "evidence": [{
+            "id": "pc", "scope": "runtime", "kind": binding.S2_OPS_POSTCHECK_KIND,
+            "digest": artifact["self_digest"], "observed_at": T_POST,
+            "expiry": T_EXPIRY, "host": "trade-core",
+            "environment": binding.S2_EFFECT_ENVIRONMENT, "source": "ops_postcheck",
+            "artifact": artifact,
+        }],
+    })
+    errors = closure.validate_closure(packet)
+    assert (
+        "closure PASS lacks out-of-band execution attestation for "
+        f"{binding.S2_OPS_POSTCHECK_KIND} {artifact['self_digest']}"
+    ) in errors
+    # 同一封包若不帶 artifact(= 無 bytes 可認證)則不憑空製造候選。
+    without = deepcopy(packet)
+    without["evidence"][0].pop("artifact")
+    assert not any(
+        binding.S2_OPS_POSTCHECK_KIND in error
+        and "lacks out-of-band execution attestation" in error
+        for error in closure.validate_closure(without)
+    )

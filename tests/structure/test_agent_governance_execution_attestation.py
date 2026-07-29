@@ -38,6 +38,7 @@ def test_packet_local_execution_self_digests_cannot_support_pass() -> None:
         captures=captures,
         observation_artifacts=observations,
         effect_receipts=effects,
+        independent_postcheck_artifacts={},
         verifier=None,
     )
 
@@ -61,6 +62,7 @@ def test_trusted_host_capability_is_exact_digest_bound_and_fail_closed() -> None
         captures=captures,
         observation_artifacts=observations,
         effect_receipts=effects,
+        independent_postcheck_artifacts={},
         verifier=verifier,
     ) == []
 
@@ -70,6 +72,7 @@ def test_trusted_host_capability_is_exact_digest_bound_and_fail_closed() -> None
         captures=captures,
         observation_artifacts=observations,
         effect_receipts=effects,
+        independent_postcheck_artifacts={},
         verifier=verifier,
     ) == [
         "closure PASS lacks out-of-band execution attestation for "
@@ -84,5 +87,6 @@ def test_non_pass_verdict_does_not_claim_execution_authenticity() -> None:
         captures=captures,
         observation_artifacts=observations,
         effect_receipts=effects,
+        independent_postcheck_artifacts={},
         verifier=None,
     ) == []

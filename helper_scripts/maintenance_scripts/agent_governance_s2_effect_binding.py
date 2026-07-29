@@ -29,12 +29,29 @@
   apply_actor_node``、以及三方 digest 交叉核(receipt 內嵌 ``verifier_capture_digest`` ==
   ops_postcheck capture evidence ``digest`` == 其內嵌 ``command_capture_v2.record_digest``,
   且 capture node_id ≠ applier)。
-  本模組自身只做 S2 共通的 route⇔receipt⇔claim 綁定:route 有該 step 的 adapter 節點
+  本模組自身只做 S2 共通的 route⇔receipt⇔claim 綁定 **與 effect-DAG 傳遞性阻塞**
+  (見下):route 有該 step 的 adapter 節點
   ⇔ 恰一 valid receipt;receipt 暴露的上游/permit digest 必等於 route claim admission;
   intent authority_ref cross-bind(鏡 effects.py 通用 deploy 同型;S2.2B 無 intent
   artifact,上游錨由 claim 綁定取代——唯一合法上游 = s2_5_final_attestation_v1);獨立
   ops_postcheck 必為 contract 白名單 kind、artifact 反偽造重算並交叉綁 receipt
   self_digest、必晚於 effect 完成、acceptance 必同綁 receipt + postcheck。
+
+── effect-DAG 傳遞性阻塞(Codex-1;誠實後果:今日**九步全部**不可 closure-PASS)──────
+``closure_pass_blocked_reason`` 原本只擋「該 step 自己」。但 S2 是一條 DAG,``S2_4_W6A_PROBE``
+的 route claim inventory 帶著 ``s2_0_effect_receipt``——而 route 層只驗它「是一個合法 sha256
+且與 receipt 欄位對得上」,contract 明標 declaration-only,``run_s2_4_capability_probe()`` 也
+不收 S2.0 receipt/digest。於是一個 authorized W6A probe 可以在**沒有任何已驗證 S2.0 前置**的
+情況下 closure-PASS,繞過已宣告的 effect DAG。處置:**任何 step 只要其 effect-DAG 傳遞上游
+含一個帶 ``closure_pass_blocked_reason`` 的 step,該 step 自身亦不可 closure-PASS**(typed
+error 明述阻塞鏈)。上游表不手抄——從既有 route claim inventory(``S2_CLAIM_KEYS_BY_STEP``)
+導出,見 ``_UPSTREAM_RECEIPT_CLAIM_PRODUCERS``。
+
+實務後果誠實記錄:S2.0 是全鏈的根且今日 blocked,S2.1 亦 blocked ⇒
+**今日沒有任何一個 S2 step 能 closure PASS**(八步因 S2.0 傳遞性阻塞,S2.0 自身直接阻塞;
+S2.5B/S2.2B 另加 S2.1 一條鏈)。這是正確的——S2 closure
+lane 不該在根前置不可驗證時讓下游可 PASS。解除方式不是放寬本模組,而是各自 EFFECT session
+的 out-of-band trusted-host 驗證讓 S2.0/S2.1 真的取得 production 成功頂點。
 
 route admission 側的新規則(NEW-P2-C,實作在 ``agent_governance_routing`` 的 S2 selector
 分支):**S2 effect lane 一律強制 ``authority`` 表面**——各 side_effect_class 的 FORWARD
@@ -66,6 +83,7 @@ from typing import Any
 import agent_governance_alr_quiesce_fence as quiesce_fence
 import agent_governance_pg_observer_bootstrap as pg_observer
 from agent_governance_routing import (
+    S2_CLAIM_KEYS_BY_STEP,
     S2_EFFECT_STEPS,
     _s2_effect_step,
 )
@@ -100,6 +118,9 @@ S2_ADAPTER_IDS = frozenset(
 #       closure_pass_blocked_reason,而非「收窄成功集」——收窄仍會讓一份拋棄式收據換到
 #       EFFECT_DONE。另見兩步 postcheck_kind 註(其 command_capture_v2 runtime 形狀今日在
 #       closure_packet_v1 亦不可表示,與本處置同向)。
+#   effect_dag_upstream_steps —— 該 step 的 effect-DAG **傳遞**上游 step 集合(Codex-1);
+#       由下方 ``_UPSTREAM_RECEIPT_CLAIM_PRODUCERS`` × route claim inventory 導出後回填,
+#       **不在字面表內手抄**。上游若有任一 blocked step,本 step 亦不可 closure-PASS。
 #   claim_receipt_bindings —— route claim admission ↔ receipt 頂層 digest 欄位(含 permit)。
 #   declaration_only_claims —— 該 step 的 claim 在 receipt 內**確無**對應 digest 欄位可綁,
 #       刻意只作 route 層宣告(其真偽閉合在 adapter 層 permit 消耗/replay ledger);由測試
@@ -132,6 +153,20 @@ S2_ADAPTER_IDS = frozenset(
 # 只影響一個本來就不可能發生的 PASS。真 EFFECT session 要解此結,須另立 S2 專屬 capture kind
 # (鏡 target_host_verifier_command_capture_v2)或修 registry schema,屬 S2E 後續波。
 S2_OPS_POSTCHECK_KIND = "s2_effect_ops_postcheck_v1"
+# ── Codex-2 / E2-RES-3:獨立 postcheck 的**確切 bytes** 必經 out-of-band host verifier ──
+# 本模組(與委派的 §6 硬門)對這份 artifact 只做 caller 可控的 canonical self-digest 重算 +
+# 自報 ``status == PASS``;OPS fragment 也只綁它的 evidence ID。故拿到真 effect receipt 後,
+# 封包產生者可以用**同一個 evidence ID** 換上一份新鮮自封的 PASS postcheck,宣稱獨立運維驗證
+# 跑過(含 W6B 安裝與 PG migration 之後)——self_digest 只證「這份內容沒被改過」,永不證
+# 「誰產生了它 / 它真的跑過」(CLAUDE Typed Authority Matrix)。修法:把這個 kind 掛進
+# closure 的 execution-attestation 候選枚舉(closure 端收集,
+# agent_governance_execution_attestation 端認證),與 effect receipt 同樣必須被 host verifier
+# 認證,否則 closure 不得 PASS。
+# ⚠ 誠實殘留:今日的 S0.3/S1 signed-bundle verifier
+# (agent_governance_aiml_trusted_host.ALLOWED_EXECUTION_KINDS)不含本 kind ⇒ 該 verifier 認證
+# 不了它。這是 fail-closed 方向(等同「S2 lane 今日不可 PASS」的其他理由),不是靜默放行;
+# 要讓真 S2 EFFECT session 可 PASS,須另行(經審)擴充該 verifier 表面,不由本波單方放寬。
+S2_CLOSURE_ATTESTED_POSTCHECK_KINDS = frozenset({S2_OPS_POSTCHECK_KIND})
 _OPS_POSTCHECK_RECEIPT_BINDING = "artifact.effect_receipt_digest"
 _CAPTURE_POSTCHECK_KIND = "command_capture_v2"
 # ── NEW-P3-H:postcheck artifact 的 exact field set(先例 target_host POSTCHECK_FIELDS)──
@@ -389,6 +424,86 @@ S2_STEP_RECEIPT_CONTRACTS: dict[str, dict[str, Any]] = {
         "postcheck_receipt_binding": _OPS_POSTCHECK_RECEIPT_BINDING,
     },
 }
+
+# ── Codex-1:effect-DAG 傳遞性阻塞的上游表 ─────────────────────────────────────────
+# 每個「上游收據/認證」claim key ↔ 產出該收據的 step。claim key 命名本身就編碼了
+# §1.2-corrected DAG 次序(「上一步 terminal receipt digest = 下一 route 的 claim input」,
+# 見 agent_governance_routing.S2_CLAIM_KEYS_BY_STEP 註),故 per-step 的上游集合一律**從既有
+# route claim inventory 導出**而非在契約表手抄:route 增刪一個上游 claim,本表自動跟隨。
+# 其餘 claim key 都是 authorization/permit(非上游 step 產物),由測試以
+# 「`_receipt`/`_attestation` 尾碼 ⇔ 在本表內」的封閉集守衛釘住,新 claim key 未分類即紅。
+_UPSTREAM_RECEIPT_CLAIM_PRODUCERS: dict[str, str] = {
+    "s2_0_effect_receipt": "S2_0_APPLY",
+    "s2_4_prepare_sandbox_probe_receipt": "S2_4_W6A_PROBE",
+    "s2_4_prepare_effect_receipt": "S2_4_W6A_PREPARE",
+    "s2_4_installed_unit_probe_receipt": "S2_4_W6B_PROBE",
+    "s2_4_install_effect_receipt": "S2_4_W6B_APPLY",
+    "s2_5a_running_attestation": "S2_5A_START",
+    "s2_1_drill_receipt": "S2_1_DRILL",
+    "s2_5b_final_attestation": "S2_5B_FINAL",
+}
+
+
+def _direct_upstream_steps(step: str) -> set[str]:
+    """該 step 的**直接**上游 step(= 其 route claim inventory 內的上游收據 claim 的產出者)。"""
+
+    return {
+        _UPSTREAM_RECEIPT_CLAIM_PRODUCERS[claim_key]
+        for claim_key in S2_CLAIM_KEYS_BY_STEP[step]
+        if claim_key in _UPSTREAM_RECEIPT_CLAIM_PRODUCERS
+    }
+
+
+def _transitive_upstream_steps(step: str) -> frozenset[str]:
+    """傳遞閉包;visited 集讓 claim inventory 萬一成環也只是收斂,不會無限遞迴。"""
+
+    seen: set[str] = set()
+    pending = list(_direct_upstream_steps(step))
+    while pending:
+        current = pending.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        pending.extend(_direct_upstream_steps(current))
+    return frozenset(seen)
+
+
+S2_EFFECT_DAG_UPSTREAM_STEPS: dict[str, frozenset[str]] = {
+    step: _transitive_upstream_steps(step) for step in S2_STEP_RECEIPT_CONTRACTS
+}
+for _step, _upstream_steps in S2_EFFECT_DAG_UPSTREAM_STEPS.items():
+    S2_STEP_RECEIPT_CONTRACTS[_step]["effect_dag_upstream_steps"] = _upstream_steps
+
+
+def s2_closure_block_errors(step: str) -> list[str]:
+    """該 step 今日**不可 closure-PASS** 的全部 typed 理由(自身 + effect-DAG 傳遞上游)。
+
+    自身面 = 既有 ``closure_pass_blocked_reason``(CC-A1/CC-B:成功集為空,disposable 模擬件
+    永不換算 EFFECT PASS)。傳遞面(Codex-1)= 上游任一 step 被阻塞時,本 step 也不可 PASS
+    ——route 對上游 receipt claim 只驗「是合法 sha256」,adapter 亦不收上游 receipt,故沒有這
+    條時一個 authorized W6A probe 能在零已驗證 S2.0 前置下 closure-PASS,繞過已宣告的 DAG。
+
+    誠實後果:S2.0 是全鏈的根且今日 blocked ⇒ 今日**九步全部**回非空列表(= 零步可 PASS)。
+    遍歷序取契約表宣告序(= DAG 次序),讓阻塞鏈的輸出穩定可比。
+    """
+
+    errors: list[str] = []
+    blocked = S2_STEP_RECEIPT_CONTRACTS[step]["closure_pass_blocked_reason"]
+    if blocked is not None:
+        errors.append(f"S2 {step} has no closure-admissible success status: {blocked}")
+    upstream_steps = S2_STEP_RECEIPT_CONTRACTS[step]["effect_dag_upstream_steps"]
+    for upstream in S2_STEP_RECEIPT_CONTRACTS:
+        if upstream == step or upstream not in upstream_steps:
+            continue
+        reason = S2_STEP_RECEIPT_CONTRACTS[upstream]["closure_pass_blocked_reason"]
+        if reason is not None:
+            errors.append(
+                f"S2 {step} cannot reach a closure PASS: its effect-DAG upstream "
+                f"{upstream} is blocked ({reason})"
+            )
+    return errors
+
+
 S2_RECEIPT_SCHEMA_VERSIONS = frozenset(
     contract["receipt_schema_version"]
     for contract in S2_STEP_RECEIPT_CONTRACTS.values()
@@ -588,6 +703,12 @@ def validate_s2_effect_evidence(
         # CC-B:該 step 今日無任何可 closure-PASS 的 status;走到 success 判定必回 typed
         # error(絕不靜默把 disposable 模擬件換算成 EFFECT PASS)。
         errors.append(f"S2 {step} has no closure-admissible success status: {blocked}")
+        # 誠實界線(Codex-1):本函式是**收據級**驗,只執法「這份收據自己」的可 closure-PASS
+        # 性;effect-DAG 傳遞性阻塞屬 closure admission(它要 route 的 claim admission 才
+        # 知道 DAG 位置),一律在 validate_s2_effect_binding 執法。一份 W6A probe 收據本身
+        # 可以完全合法 —— 不可 PASS 的是「在未驗證 S2.0 前置下的那個 closure」,把它記成
+        # 「收據無效」會是假陳述。無旁路風險:closure 對任何 S2 receipt 必經
+        # validate_s2_effect_binding(route 無該 adapter 節點時通用分支以 unrouted 拒收)。
     elif status not in contract["success_statuses"]:
         # route admission 永遠不是 apply 授權:RECOVERY_REQUIRED /
         # EXTERNAL_VERIFICATION_PENDING / source-simulation 頂點在 closure 一律拒。
@@ -914,9 +1035,10 @@ def validate_s2_effect_binding(
     errors: list[str] = list(_delegated_binding_errors(
         step, packet, route, fragments_by_node, evidence_by_id, valid_receipts,
     ))
+    # CC-A1/CC-B(自身)+ Codex-1(effect-DAG 傳遞上游):兩者皆令本 step 不可 closure-PASS。
+    # 今日 S2.0 是全鏈的根且 blocked ⇒ 九步全部在此拿到非空列表(誠實後果,見模組 docstring)。
     blocked = contract["closure_pass_blocked_reason"]
-    if blocked is not None:
-        errors.append(f"S2 {step} has no closure-admissible success status: {blocked}")
+    errors.extend(s2_closure_block_errors(step))
     effect_nodes = [
         node for node in route.get("nodes", [])
         if node.get("kind") == "effect_adapter" and node.get("mandatory")
@@ -1032,6 +1154,9 @@ def validate_s2_effect_binding(
     if blocked is None:
         # CC-B:closure PASS 被阻塞的 step 不得要求 runtime_contact/CHANGED——那會在無可達
         # 成功頂點的情況下逼出假的 runtime-contact 語義。
+        # Codex-1:此處刻意只看**自身** blocked,不看傳遞上游——被傳遞阻塞的 step 自己的
+        # effect 確實接觸過 runtime(收據是真 production 頂點),要求 runtime_contact=true 仍
+        # 是誠實記錄;不可 PASS 由上方 typed 阻塞鏈負責,不靠削弱這兩條記帳要求。
         if packet.get("side_effects", {}).get("runtime_contact") is not True:
             errors.append("S2 successful effect must record runtime_contact=true")
         if packet.get("disposition") != "CHANGED":
