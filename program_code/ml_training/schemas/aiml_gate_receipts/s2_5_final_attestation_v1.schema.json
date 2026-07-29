@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://arcane-equilibrium.local/schemas/s2_5_final_attestation_v1.schema.json",
   "title": "s2_5_final_attestation_v1",
-  "description": "Closed S2.5B receipt (design §5.5): the post-drill final five-dimension attestation plus the watchdog-reset-LAST predicate. It must bind the S2.1 drill effect receipt (s2_1_drill_receipt_digest) and the S2.5A initial attestation (pre_drill_attestation_digest); stable_identity_match asserts the S2.1-style stable identity across the drill (unit + cmdline + cgroup + env-hash + digest + single advisory-lock holder; a NEW PID/InvocationID is expected). The watchdog_last and observer_gate blocks are written out in full here per the PM §5.4 option (b) ruling (no cross-file $ref, no byte-isomorphism coupling); in this schema watchdog_last binds the reset-last predicate: the final lifecycle transition is the authorized reset-failed itself, NRestarts is zero afterwards and any supervening restart makes success unreachable. FINAL_ATTESTED is reachable ONLY for a production target with a verified trusted-host attestor signature; SOURCE_SIMULATION_PASS is the source-lane ceiling. Only this artifact is the legal upstream of the S2.2B runtime-DONE (design §10). Contract only: nine authorities stay false.",
+  "description": "Closed S2.5B receipt (design §5.5): the post-drill final five-dimension attestation plus the watchdog-reset-LAST predicate. It must bind the S2.1 drill effect receipt (s2_1_drill_receipt_digest) and the S2.5A initial attestation (pre_drill_attestation_digest); stable_identity_match asserts the S2.1-style stable identity across the drill (unit + cmdline + cgroup + env-hash + digest + single advisory-lock holder; a NEW PID/InvocationID is expected). The watchdog_last and observer_gate blocks are written out in full here per the PM §5.4 option (b) ruling (no cross-file $ref, no byte-isomorphism coupling); in this schema watchdog_last binds the reset-last predicate: the final lifecycle transition is the authorized reset-failed itself, NRestarts is zero afterwards and any supervening restart makes success unreachable. FINAL_ATTESTED is reachable ONLY for a production target with a verified trusted-host attestor signature; SOURCE_SIMULATION_PASS is the source-lane ceiling. Only this artifact is the legal upstream of the S2.2B runtime-DONE (design §10). lock_window (S2E.3 F4) is the typed evidence that THIS process's lifecycle hold was acquired and released: a success status requires hold_acquired=true, hold_released=true and release_status=S2_5_LIFECYCLE_LOCK_RELEASED, so a swallowed release failure can no longer hide behind a PASS. It proves the in-process acquire/release symmetry only - never that the lock file was untampered or that no second applier exists on another host. Contract only: nine authorities stay false.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -24,6 +24,7 @@
     "stable_identity_match",
     "observer_gate",
     "precheck",
+    "lock_window",
     "rollback_record",
     "apply_actor_node",
     "independent_verifier_node",
@@ -88,6 +89,23 @@
         "loader_closure_reverified": {"type": "boolean"},
         "s2_4_recovery_clear": {"type": "boolean"},
         "install_lock_free": {"type": "boolean"}
+      }
+    },
+    "lock_window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hold_acquired", "hold_released", "release_status"],
+      "properties": {
+        "hold_acquired": {"type": "boolean"},
+        "hold_released": {"type": "boolean"},
+        "release_status": {
+          "enum": [
+            "S2_5_LIFECYCLE_LOCK_RELEASED",
+            "S2_5_LIFECYCLE_LOCK_NOT_HELD",
+            "S2_5_LIFECYCLE_LOCK_RELEASE_FAILED",
+            "S2_5_LIFECYCLE_LOCK_RELEASE_UNTYPED"
+          ]
+        }
       }
     },
     "rollback_record": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/reset_record"}]},

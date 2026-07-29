@@ -177,6 +177,12 @@ def _running_receipt(status: str = "SOURCE_SIMULATION_PASS", **overrides) -> dic
             "inactive_prestate_verified": True, "loader_closure_reverified": True,
             "s2_4_recovery_clear": True, "install_lock_free": True,
         },
+        # S2E.3 F4:鎖窗 typed 關閉的證據(成功臂的硬條件)。
+        "lock_window": {
+            "hold_acquired": True,
+            "hold_released": True,
+            "release_status": "S2_5_LIFECYCLE_LOCK_RELEASED",
+        },
         "rollback_record": None,
         "apply_actor_node": "s2-5-start-applier",
         "independent_verifier_node": "s2-5-independent-verifier",
