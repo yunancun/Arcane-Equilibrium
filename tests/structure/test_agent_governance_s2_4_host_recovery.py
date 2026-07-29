@@ -894,3 +894,63 @@ def test_an_unclean_release_downgrades_the_gate_without_borrowing_a_receipt_stat
     assert verdict["status"] not in runner.AGGREGATE_TYPED_STATUSES or (
         verdict["status"] == "RECOVERY_REQUIRED"
     )
+
+
+# --------------------------------------------------------------------------- #
+# C5 §F-0.2:「補完就重跑」是一道自己打不開的門
+# --------------------------------------------------------------------------- #
+def test_the_aggregate_compensate_verdict_never_promises_a_re_run(fx):
+    """`install_driver` 的 COMPENSATE 分支過去說 runner「compensates **and re-runs**」。
+
+    那句話與同一個函式下方的程式碼直接矛盾:permit 已 durable 消費、終端 ``COMPENSATED``
+    被明文拒絕當作完成證據,所以同一份 plan 結構上永遠不能重跑。照著它建的 runner 會撞上
+    一道自己打不開的門,故 verdict 的 reason(那是**程式碼**,不是註解)必須自己說清楚。
+    """
+
+    persisted = _crash(fx, "PG_ROLE_ACL_MIGRATION:post_effect_pre_observation")
+    verdict = fx.apply(
+        startup_task_owned_partials={"install": True},
+        startup_observed_state_digests={"install": _PARTIAL_STATE},
+        ownership_evidence=_ownership(persisted),
+    )
+    assert verdict["status"] == runner.AGGREGATE_STATUS_RECOVERY_REQUIRED
+    assert verdict["reconcile"]["status"] == reconcile_leaf.RECONCILE_STATUS_COMPENSATE
+    joined = " ".join(verdict["reasons"])
+    assert "compensates and re-runs" not in joined
+    assert "does NOT make this plan runnable again" in joined
+    assert "compensate_s2_4_startup_residue" in joined
+    assert "mint a NEW signed plan with fresh permits" in joined
+
+
+@pytest.mark.parametrize("terminal_state", ["COMPENSATED", "FAILED"])
+def test_a_terminal_non_verified_journal_is_never_readable_as_completed(fx, terminal_state):
+    """`_load_terminal_journal` 的判準:只有終端 ``VERIFIED`` 證明第一次執行真的完成。
+
+    ``COMPENSATED`` 的意思是本次 task-owned delta 已被逆序移除(安裝**沒有**發生),
+    ``FAILED`` 的意思是補償無法被證明為 exact(§5.4 記下確切殘留)——把任一個讀成
+    ``ALREADY_APPLIED_IDEMPOTENT`` 會對 on-call 謊報一次不存在的安裝。
+    """
+
+    persisted = _crash(fx, "PG_ROLE_ACL_MIGRATION:post_effect_pre_observation")
+    entries = [dict(entry) for entry in persisted["entries"]]
+    entries.append({
+        "seq": len(entries), "state": terminal_state, "step_index": 0,
+        "pre_state_digest": fx.plan["core"]["pre_state_digest"],
+        "post_state_digest": fx.plan["core"]["pre_state_digest"],
+        "fsynced": True, "recorded_at": kit.ISSUED,
+        "entry_source": journal.ENTRY_SOURCE_AGGREGATE,
+        "component_effect_class": journal.ENTRY_SCOPE_AGGREGATE_TRANSACTION,
+    })
+    closed = journal.build_install_journal(
+        plan_id=fx.plan["plan_id"], plan_core_digest=fx.plan["core_digest"],
+        idempotency_key=fx.plan["plan_id"],
+        expected_pre_state_digest=persisted["expected_pre_state_digest"],
+        aggregate_rollback_digest=persisted["aggregate_rollback_digest"],
+        entries=entries, terminal=True,
+    )
+    basename = journal.install_journal_path(fx.plan["plan_id"]).rsplit("/", 1)[-1]
+    fx.fs.files[basename] = validator._canonical_bytes(closed)
+    loaded = runner._load_terminal_journal(fx.fs, fx.plan["plan_id"])
+    assert loaded["status"] == runner.APPLY_JOURNAL_UNPROVEN
+    assert loaded["terminal_state"] == terminal_state
+    assert any("not 'VERIFIED'" in reason for reason in loaded["reasons"])
