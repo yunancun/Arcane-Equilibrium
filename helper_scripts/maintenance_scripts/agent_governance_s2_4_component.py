@@ -156,6 +156,9 @@ _ALL_FALSE_PRODUCTION_FLAGS = {
     "production_apply_performed": False,
     "running_attested": False,
 }
+# S2E.2b-1 P2-4:九 authority 恆 false 的那張表是**跨元件共用的單一正本**(每個出境面都得
+# 帶它);由本 owner 模組公開再匯出,取代跨模組的私有名穿透(零行為改動)。
+ALL_FALSE_PRODUCTION_FLAGS = _ALL_FALSE_PRODUCTION_FLAGS
 # §5.3/§5.4:ownership_evidence 的封閉形狀——每個 subject 都必須帶 digest 形狀的 receipt +
 # journal 綁定。裸 ``{}`` / ``{"x": {}}`` / 非 digest 字串一律不成立(絕不把
 # PREEXISTING_UNOWNED_STATE 換成放行)。

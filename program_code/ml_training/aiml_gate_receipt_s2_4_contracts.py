@@ -964,6 +964,11 @@ def _s2_4_replay_ledger_errors(artifact: dict[str, Any]) -> list[str]:
     return errors
 
 
+# S2E.2b-1 P2-4:S2.4 §5.4 的啟動補償 runner 必須用**同一支** chain 重算(絕不另抄一份判準)。
+# 由本 owner 模組公開再匯出,取代跨模組的私有名穿透(零行為改動)。
+s2_4_replay_ledger_errors = _s2_4_replay_ledger_errors
+
+
 def derive_authorization_replay_binding(
     authorization: Any,
     replay_ledger: Any,

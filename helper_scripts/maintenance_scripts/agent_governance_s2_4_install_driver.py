@@ -940,14 +940,30 @@ def _transaction_under_lock(
         extra: list[str] = []
         if reconcile["status"] == RECONCILE_STATUS_COMPENSATE:
             # 誠實面:aggregate **不**執行啟動補償。它把 typed 收斂結果原樣交出,由持有
-            # 三段生命週期的 W6 runner 依 §5.4 逆序補償後再重跑;所以「startup reconcile
-            # 會逆序補償」這句話在本進入點上並不成立(見 startup_reconcile_contract)。
+            # 三段生命週期的 runner 依 §5.4 逆序補償;所以「startup reconcile 會逆序補償」
+            # 這句話在本進入點上並不成立(見 startup_reconcile_contract)。
+            #
+            # 更正(前一版寫 runner「compensates **and re-runs**」——那句話與下方的程式碼直接
+            # 矛盾,而照著它建的 runner 會撞上一道自己打不開的門):**補償成功之後,同一份
+            # plan 在結構上永遠不能重跑。** 三條獨立證據:①兩張 permit 已 durable 消費,且
+            # 消費紀錄永不因 rollback 釋放(registry `s2_4_install_adapter_v1.invariant` 明文);
+            # ②重跑同 plan → `IDEMPOTENT_REPLAY` → :func:`_load_terminal_journal` 讀到終端
+            # `COMPENSATED` 並**明文拒**把它讀成已完成 → 本函式回 `RECOVERY_REQUIRED`;
+            # ③補償若不 exact,終端是 `FAILED`,而 `reconcile_journal` 對終端 `FAILED` 一律回
+            # `RECOVERY_REQUIRED` 並封鎖一切新 probe/prepare/plan。
+            # ⇒ 逆序補償買到的是「把主機狀態不明換成主機已證回到前態」,**不是**把 lane 打開;
+            # 下一步永遠是 operator 簽一份新 plan 配新 permit。
             extra = [
                 "startup reconciliation found a task-owned partial with a valid journal "
                 "ownership binding; the aggregate APPLY entry point does NOT itself run the "
-                "§5.4 reverse compensation — it returns RECOVERY_REQUIRED with the typed "
-                "lane verdict so the W6 runner (which owns probe/PREPARE/APPLY) compensates "
-                "and re-runs. Zero new mutation was performed here"
+                "§5.4 reverse compensation — it returns RECOVERY_REQUIRED with the typed lane "
+                "verdict so the runner that owns probe/PREPARE/APPLY compensates "
+                "(agent_governance_s2_4_host_recovery.compensate_s2_4_startup_residue). That "
+                "compensation does NOT make this plan runnable again: both permits are already "
+                "durably consumed and a terminal COMPENSATED journal is explicitly refused as "
+                "proof of completion, so a re-run of this exact plan lands on RECOVERY_REQUIRED "
+                "and an operator must mint a NEW signed plan with fresh permits. Zero new "
+                "mutation was performed here"
             ]
         return _verdict(
             mapped, list(reconcile["reasons"]) + extra, plan_id=plan_id,
@@ -1708,6 +1724,13 @@ def _terminal_journal(
     if verdict["status"] != _journal.JOURNAL_STATUS_COMMITTED:
         return None
     return verdict["journal"]
+
+
+# S2E.2b-1 P2-4:設計只批准 ``_fold_lock_release`` 一處私有跨模組穿透。啟動補償 runner 另需的
+# 三支由本 owner 模組逐名公開再匯出(零行為改動、零新面)。
+observe_residue = _observe_residue
+build_install_rollback = _build_install_rollback
+terminal_journal = _terminal_journal
 
 
 def _compensate_transaction(

@@ -1,6 +1,8 @@
 """S2E.2a:S2 effect 受信主機 runner 的 CLI(``--out-dir`` canonical artifact 契約)。
 
-三個 mode,全部 fail-closed:
+五個 mode,全部 fail-closed;每個 session 只認得自己那組(:data:`SESSION_MODES`)——S2.0/S2.1
+的輸入是 typed intent + operator SSHSIG,S2.4 的輸入是簽過的 install plan / lane id / 兩張已燒
+permit,混用只會產生一份「看起來跑過了」的 artifact。
 
 ``probe``
     只導出**主機事實**(``derive_host_target_class`` + kernel ABI 投影),可選再以進程分離的唯讀
@@ -24,6 +26,21 @@
     ``HOST_CAPABILITY_SUPPLIER_ABSENT`` 非零退出,零主機接觸。這與 adapter 的 ``driver=None`` 是
     同一種誠實:閘可達,但沒有 driver 可跑。
 
+``reconcile``(僅 ``--session s2_4``)
+    §5.2 的「接受新 probe / PREPARE intent 之前先收斂任何非終端 journal」。要 ``--lane`` 與
+    ``--lane-id``;lane id 一律經 journal 葉的導出函式重算,caller 字串永不 join 進 state root。
+
+``compensate``(僅 ``--session s2_4``)
+    §5.4 的啟動逆序補償。要簽過的 ``--plan-file``、五份 ``--component-intents-file``,以及
+    **兩張** permit(``--apply-aggregate-permit`` / ``--pg-migration-permit``)——那次 APPLY 是
+    atomically 消費兩張的,所以它的 undo 不可能只由其中一張授權。
+
+    兩個 S2.4 mode 今日 driver 恆為 ``None``:S2.4 的 aggregate host driver 需要 systemd 觀測面
+    與五支 row driver,兩者都不在 recovery core 的範圍內。故這條 CLI 跑得到的是「輸入站不站得
+    住」與「主機面在不在」兩層——兩者都是真閘、都能真的紅,而且都不碰主機。退出碼另有
+    :data:`EXIT_RECOVERY_REQUIRED`(8),與 4 刻意分開:4 是「還沒開始」,8 是「閘跑完了,結論
+    是這台主機需要 operator 介入」。
+
 **誠實界線。**
 
 * 本 CLI 的拒絕是 **L1 主機安全層**:它只決定「今天要不要碰這台主機」。證據完整性由 adapter 的
@@ -43,6 +60,14 @@
   traceback 把 process 退成 1、卻在 ``run_summary.json`` 寫另一個號碼。**唯一沒有 artifact 的
   路徑**是 ``--out-dir`` 自己建不起來(例如 ``--out-dir /dev/null/nope``):那時沒有任何地方可以
   落盤,故收成 typed usage(exit 2)+ stderr 明文(E2 RES-7;此前那條路是裸 traceback rc=1)。
+* **summary 的出境守衛**:``run_summary.json`` 與 stdout 是同一份 summary 的兩個 sink,而 summary
+  會吸收例外訊息與主機導出的 status/reasons(全都不是本 CLI 造的字串)。兩個寫入之前一律過
+  ``host_kernel.scan_serializable_surface_for_secrets``(與 observer 那兩道同一支掃描器、同一套中央
+  判準),命中即整包丟棄:兩面都只拿到一份不含 payload 導出物的信封 + typed
+  :data:`EXIT_EGRESS_GUARD_WITHHELD`(9)。這是**形狀**掃描,不是「不含秘密」的證明。
+  **已知殘餘缺口(不在本波)**:``RUNNER_FAILED`` 路徑上的那一行 stderr 仍寫例外訊息原文,故該
+  訊息若真的帶秘密,stderr 這條診斷通道會早於本守衛看到它;收窄它會改動已文件化的
+  「``RUNNER_FAILED`` + stderr 明文」契約,屬另一次刻意決策。
 """
 
 from __future__ import annotations
@@ -61,12 +86,21 @@ for _candidate in (_HERE, _REPO_ROOT / "program_code" / "ml_training"):
 
 import agent_governance_s2_0_host_runner as s2_0_runner  # noqa: E402
 import agent_governance_s2_1_host_runner as s2_1_runner  # noqa: E402
+import agent_governance_s2_4_host_recovery as s2_4_recovery  # noqa: E402
 import agent_governance_s2_host_kernel as host_kernel  # noqa: E402
 import agent_governance_s2_host_observer as host_observer  # noqa: E402
 
 
-SESSIONS = ("s2_0", "s2_1")
-MODES = ("probe", "admit", "apply")
+SESSIONS = ("s2_0", "s2_1", "s2_4")
+MODES = ("probe", "admit", "apply", "reconcile", "compensate")
+# 每個 session 只認得自己的 mode。S2.0/S2.1 的 `admit`/`apply` 走各自 adapter 的 operator
+# SSHSIG validator;S2.4 的兩個 mode 走的是 §5.2/§5.4 的啟動路徑,兩組輸入完全不同,
+# 混用只會產生一份「看起來跑過了」的 artifact。
+SESSION_MODES = {
+    "s2_0": ("probe", "admit", "apply"),
+    "s2_1": ("probe", "admit", "apply"),
+    "s2_4": ("reconcile", "compensate"),
+}
 
 EXIT_OK = 0
 EXIT_USAGE = 2
@@ -77,6 +111,30 @@ EXIT_OBSERVATION_FAILED = 5
 # 未捕捉的 traceback 把 process 退成 1、卻在 artifact 裡寫另一個號碼(E2 P2 #8)。
 EXIT_INPUT_INVALID = 6
 EXIT_INTERNAL_ERROR = 7
+# §5.2/§5.4 的 typed 非成功(RECOVERY_REQUIRED 家族)。它與 4 刻意不同:4 的意思是「閘可達但
+# 主機能力供應者不在」,8 的意思是「閘跑完了,結論是這台主機需要 operator 介入」。把兩者收成
+# 同一個號碼會讓自動化把「還沒開始」與「已經知道有殘留」當成同一件事。
+EXIT_RECOVERY_REQUIRED = 8
+# 頂層出境守衛開火:這一輪的 summary 帶了 secret 形的值,故**兩個 sink 都不承載它**。與 6/7
+# 刻意分開:6/7 說的是「輸入壞了 / 跑爛了」(那時 summary 本身照樣出境),9 說的是「這一輪跑
+# 成什麼樣不重要了,內容一律扣住」。自動化必須分得出這兩件事。
+EXIT_EGRESS_GUARD_WITHHELD = 9
+# 守衛開火時**取代** summary 的那份信封的 status。命名沿用家族詞彙(鏡 s2_4 component 的
+# ``SECRET_MATERIAL_LEAK_BLOCKED``、observer 的 exit 7),讓三處守衛在 artifact 上看起來是同一
+# 件事。
+EGRESS_GUARD_WITHHELD_STATUS = "SUMMARY_SECRET_LEAK_BLOCKED"
+# 信封只多帶**布林**事實(且只在原 summary 真的帶了布林時)。字串一律不跟著走,布林則結構上
+# 不可能承載一段秘密 —— 而「這一輪到底有沒有動到主機」正是守衛開火之後 operator 最不能被守衛
+# 吃掉的那個事實(本 CLI 的 s2_4 mode 是補償 lane)。
+EGRESS_GUARD_CARRIED_BOOLEAN_FACTS = ("mutation_performed", "driver_engaged", "admitted")
+# S2.4 兩個 mode 的 typed 結局 → 退出碼。表外一律 EXIT_RECOVERY_REQUIRED(fail-closed:
+# 一個沒被列舉的新終端絕不能靜默變成 0)。
+S2_4_STATUS_EXIT_CODES = {
+    s2_4_recovery.STARTUP_COMPENSATION_COMPLETED_EXACT: EXIT_OK,
+    s2_4_recovery.STARTUP_COMPENSATION_NOT_APPLICABLE: EXIT_OK,
+    s2_4_recovery.INTENT_GATE_ADMITTED: EXIT_OK,
+    s2_4_recovery.STARTUP_COMPENSATION_PENDING: EXIT_HOST_CAPABILITY_ABSENT,
+}
 
 HEAD_LENGTH = 40
 _HEX = set("0123456789abcdef")
@@ -247,6 +305,79 @@ def _observation(args, target_view: dict[str, Any]) -> dict[str, Any]:
     return observation
 
 
+def _s2_4_run(args) -> dict[str, Any]:
+    """S2.4 的兩個啟動 mode。**driver 恆為 ``None``**,故零主機接觸。
+
+    這不是「還沒接上」的殘缺:S2.4 的 aggregate host driver 需要 systemd 觀測面與五支 row
+    driver,而那兩樣都不在本波範圍內(本波是 recovery core,零新主機能力)。今日這條 CLI 因此
+    只跑得到「plan / lane id / permit 這些**輸入**站不站得住」與「主機面在不在」這兩層——兩者
+    都是真的閘、都能真的紅,而且都不需要碰主機。
+    """
+
+    if args.mode == "reconcile":
+        return s2_4_recovery.reconcile_before_s2_4_intent(
+            None, lane=str(args.lane), lane_id=args.lane_id
+        )
+    plan = _load_json(args.plan_file, label="plan-file")
+    intents = _load_json(args.component_intents_file, label="component-intents-file")
+    authorizations = {
+        "apply_aggregate": _load_json(
+            args.apply_aggregate_permit, label="apply-aggregate-permit"
+        ),
+        "pg_migration": _load_json(args.pg_migration_permit, label="pg-migration-permit"),
+    }
+    return s2_4_recovery.compensate_s2_4_startup_residue(
+        plan, authorizations, None, component_intents=intents
+    )
+
+
+def _summary_egress_guard(summary: dict[str, Any]) -> dict[str, Any] | None:
+    """``summary`` 出境前的最後一道秘密掃描:命中回**取代**它的信封,乾淨回 ``None``。
+
+    掃描器是 SEC 家族共用的那一支(``host_kernel.scan_serializable_surface_for_secrets``,判準
+    直接取自中央的 ``SECRET_VALUE_PATTERNS``);本 CLI 不自造第二套判準。
+
+    **為什麼這裡需要一道**:``run_summary.json``(operator 讀)與 stdout(自動化讀)是本 CLI
+    最後、也是唯一同時面向兩種讀者的出口,而 summary 會吸收一整批**不是本 CLI 造的字串**——
+    ``observation_error`` / ``runner_error`` 是例外訊息(內容完全不受控)、``status`` 與
+    ``reasons`` 由 s2_4 recovery 導出。輸入側的硬邊界只保證「caller 遞不進秘密」,它不保證
+    「主機事實與例外訊息裡沒有秘密」。命中即整包丟棄,而不是照樣送出去再標一個旗標。
+
+    **信封只帶封閉列舉與布林**:``session``/``mode`` 取自 argparse 的 ``choices``(code-owned
+    封閉集,故先比對再回填,比對不過就留 ``None``),布林事實見
+    :data:`EGRESS_GUARD_CARRIED_BOOLEAN_FACTS`;理由字串、路徑、head、狀態文字一律不出境。
+    ``egress_guard_findings`` 只有**條目數**(SEC-3 的通道紀律:守衛自己的診斷不得成為第二條
+    出境路徑),誠實代價是現場只知道守衛開火、不知道命中在哪個鍵;而該數字今日結構上恆為 1。
+
+    **守衛自己失敗也是 fail-closed**:掃描器跑不起來(例如判準模組匯入失敗)就等於「無法斷言
+    這份 payload 乾淨」,那時扣住整包才是誠實的收場,絕不因為守衛壞了而放行。
+    """
+
+    try:
+        leak_reasons = host_kernel.scan_serializable_surface_for_secrets(summary)
+    except Exception:  # noqa: BLE001 - 守衛跑不起來 = 無法斷言乾淨 ⇒ 扣住整包
+        leak_reasons = ["the egress secret guard could not run over this summary"]
+    if not leak_reasons:
+        return None
+    session = summary.get("session")
+    mode = summary.get("mode")
+    withheld: dict[str, Any] = {
+        "session": session if session in SESSIONS else None,
+        "mode": mode if mode in MODES else None,
+        "status": EGRESS_GUARD_WITHHELD_STATUS,
+        "exit_code": EXIT_EGRESS_GUARD_WITHHELD,
+        "egress_guard_findings": len(leak_reasons),
+        "closure_pass_blocked": True,
+        "production_effect_performed": False,
+        "nine_authorities_false": True,
+    }
+    for key in EGRESS_GUARD_CARRIED_BOOLEAN_FACTS:
+        value = summary.get(key)
+        if isinstance(value, bool):
+            withheld[key] = value
+    return withheld
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="S2 effect trusted-host runner")
     parser.add_argument("--session", required=True, choices=SESSIONS)
@@ -259,12 +390,38 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--allow-production", action="store_true")
     parser.add_argument("--production-confirm", default=None)
     parser.add_argument("--observe", action="store_true")
+    # ── S2.4 §5.2/§5.4 的啟動 mode ──
+    parser.add_argument("--lane", choices=s2_4_recovery.INTENT_GATE_LANES)
+    parser.add_argument("--lane-id", default=None)
+    parser.add_argument("--plan-file", type=Path)
+    parser.add_argument("--component-intents-file", type=Path)
+    parser.add_argument("--apply-aggregate-permit", type=Path)
+    parser.add_argument("--pg-migration-permit", type=Path)
     args = parser.parse_args(argv)
 
     if not _is_head(args.source_head):
         parser.error("--source-head must be exact lowercase 40-hex")
+    if args.mode not in SESSION_MODES[args.session]:
+        parser.error(
+            f"--session {args.session} supports only "
+            f"{list(SESSION_MODES[args.session])}; --mode {args.mode} belongs to another "
+            "session's input contract"
+        )
     if args.mode in ("admit", "apply") and args.intent_file is None:
         parser.error(f"--mode {args.mode} requires --intent-file")
+    if args.mode == "reconcile" and (args.lane is None or args.lane_id is None):
+        parser.error("--mode reconcile requires --lane and --lane-id")
+    if args.mode == "compensate" and (
+        args.plan_file is None
+        or args.component_intents_file is None
+        or args.apply_aggregate_permit is None
+        or args.pg_migration_permit is None
+    ):
+        parser.error(
+            "--mode compensate requires --plan-file, --component-intents-file and BOTH "
+            "--apply-aggregate-permit / --pg-migration-permit (§5.4 reverse compensation is "
+            "the undo of an APPLY that atomically consumed both permits)"
+        )
 
     # E2 RES-7:``mkdir`` 原本在 ``try:`` **之外** ⇒ ``--out-dir /dev/null/nope`` 會產生一個裸
     # traceback、process rc=1、零 artifact,與本檔 docstring「絕不讓一個裸 traceback 把 process
@@ -296,6 +453,21 @@ def main(argv: list[str] | None = None) -> int:
         _canonical_write(args.out_dir / "target_class_view.json", target_view)
         _canonical_write(args.out_dir / "kernel_abi.json", host_kernel.kernel_abi_projection())
         summary["target_class"] = target_view["target_class"]
+
+        if args.mode in ("reconcile", "compensate"):
+            verdict = _s2_4_run(args)
+            _canonical_write(args.out_dir / "s2_4_startup_verdict.json", verdict)
+            summary["status"] = verdict["status"]
+            summary["reasons"] = verdict["reasons"]
+            summary["mutation_performed"] = bool(verdict.get("mutation_performed"))
+            summary["driver_engaged"] = bool(verdict.get("driver_engaged"))
+            summary["new_obligations"] = list(verdict.get("new_obligations") or [])
+            # 表外一律 EXIT_RECOVERY_REQUIRED:一個沒被列舉的新終端絕不能靜默變成 0。
+            exit_code = S2_4_STATUS_EXIT_CODES.get(
+                verdict["status"], EXIT_RECOVERY_REQUIRED
+            )
+            summary["exit_code"] = exit_code
+            return exit_code
 
         if args.mode == "probe":
             exit_code = EXIT_OK
@@ -364,16 +536,30 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         # 頂層 finally:不論走哪條路,``--out-dir`` 的 canonical artifact 契約都成立。
         summary["exit_code"] = exit_code
+        # 出境守衛:本 finally 是**兩個** sink 的共同出口(operator 讀的 run_summary.json 與
+        # 自動化讀的 stdout),兩面承載同一份 summary,所以守衛也只能有一道、且必須在**兩個
+        # 寫入之前**。掃描的是已經寫完 ``exit_code`` 的最終物件 —— 掃一份與出境物不同的東西
+        # 等於沒掃。命中即整包丟棄:兩面都改寫同一份不含 payload 導出物的信封。
+        withheld = _summary_egress_guard(summary)
+        emitted = summary if withheld is None else withheld
         try:
-            _canonical_write(args.out_dir / "run_summary.json", summary)
+            _canonical_write(args.out_dir / "run_summary.json", emitted)
         except OSError as error:
             # RES-7:``finally`` 內任何逸出的例外都會**取代** return value ⇒ 又變回裸 traceback
             # 退 1。out-dir 若在執行中途消失,只能誠實記在 stderr,絕不讓它吃掉退出碼。
             sys.stderr.write(f"run_summary.json could not be written: {error}\n")
         sys.stdout.write(
-            json.dumps(summary, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n"
+            json.dumps(emitted, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n"
         )
         sys.stdout.flush()
+        if withheld is not None:
+            # RES-7 講的是同一條機制的另一半:``finally`` 內的跳轉會**取代** return value。
+            # 這裡是刻意使用它——守衛開火時 process 的真實退出碼必須等於信封裡寫的那個號碼,
+            # 否則就違反本檔「artifact 的 exit_code 與 process 真實退出碼恆一致」的不變式。
+            # 誠實代價:此 return 也會吞掉一個正在飛的 ``BaseException``(例如 Ctrl-C);那條
+            # 路上 process 仍以 typed 非零收場,但中斷訊號本身不再往上傳。一般例外不受影響
+            # (上面兩個 except 已全部接住),而守衛沒開火時本 finally 一行跳轉都沒有。
+            return EXIT_EGRESS_GUARD_WITHHELD  # noqa: B012
 
 
 if __name__ == "__main__":
