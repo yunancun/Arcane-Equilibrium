@@ -147,7 +147,6 @@ GOVERNANCE_IMPORTS_BY_FILE: dict[str, frozenset[str]] = {
         "agent_governance_s2_0_host_runner",
         "agent_governance_s2_1_host_runner",
         "agent_governance_s2_4_host_recovery",
-        "agent_governance_s2_4_host_storage",
         "agent_governance_s2_host_kernel",
         "agent_governance_s2_host_observer",
     }),

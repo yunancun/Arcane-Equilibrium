@@ -954,3 +954,162 @@ def test_a_terminal_non_verified_journal_is_never_readable_as_completed(fx, term
     assert loaded["status"] == runner.APPLY_JOURNAL_UNPROVEN
     assert loaded["terminal_state"] == terminal_state
     assert any("not 'VERIFIED'" in reason for reason in loaded["reasons"])
+
+
+# --------------------------------------------------------------------------- #
+# C7:CLI 的 s2_4 session(artifact 的 exit_code 與 process 真實退出碼恆一致)
+# --------------------------------------------------------------------------- #
+import aiml_s2_effect_host_run as cli  # noqa: E402
+
+
+_HEAD = "0" * 40
+
+
+def _run_cli(tmp_path, name, *extra):
+    out = tmp_path / name
+    code = cli.main(["--out-dir", str(out), "--source-head", _HEAD, *extra])
+    summary = json.loads((out / "run_summary.json").read_text(encoding="utf-8"))
+    # ★驗收判準★ 落盤 artifact 的 exit_code 與 process 真實退出碼恆一致。
+    assert summary["exit_code"] == code, (name, summary)
+    return code, summary, out
+
+
+def _write(path, value):
+    path.write_text(json.dumps(value, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+    return path
+
+
+def test_the_cli_reconcile_mode_is_authority_locked_and_writes_its_verdict(tmp_path):
+    code, summary, out = _run_cli(
+        tmp_path, "ok", "--session", "s2_4", "--mode", "reconcile",
+        "--lane", "probe", "--lane-id", _PROBE_ID,
+    )
+    assert code == cli.EXIT_HOST_CAPABILITY_ABSENT
+    assert summary["status"] == recovery.INTENT_GATE_PENDING
+    assert summary["mutation_performed"] is False
+    verdict = json.loads((out / "s2_4_startup_verdict.json").read_text(encoding="utf-8"))
+    assert verdict["schema_version"] == recovery.INTENT_GATE_SCHEMA_VERSION
+    assert verdict["lane_path"] == journal.probe_journal_path(_PROBE_ID)
+
+
+def test_the_cli_reconcile_mode_refuses_a_caller_path_segment(tmp_path):
+    code, summary, _out = _run_cli(
+        tmp_path, "bad-lane", "--session", "s2_4", "--mode", "reconcile",
+        "--lane", "prepare", "--lane-id", "../../etc/passwd",
+    )
+    assert code == cli.EXIT_RECOVERY_REQUIRED
+    assert summary["status"] == recovery.INTENT_GATE_RECOVERY_REQUIRED
+
+
+def test_the_cli_compensate_mode_is_authority_locked_on_a_real_plan(fx, tmp_path):
+    code, summary, out = _run_cli(
+        tmp_path, "compensate", "--session", "s2_4", "--mode", "compensate",
+        "--plan-file", str(_write(tmp_path / "plan.json", fx.plan)),
+        "--component-intents-file",
+        str(_write(tmp_path / "intents.json", fx.component_intents)),
+        "--apply-aggregate-permit",
+        str(_write(tmp_path / "agg.json", fx.authorization_set["apply_aggregate"])),
+        "--pg-migration-permit",
+        str(_write(tmp_path / "pg.json", fx.authorization_set["pg_migration"])),
+    )
+    assert code == cli.EXIT_HOST_CAPABILITY_ABSENT
+    assert summary["status"] == recovery.STARTUP_COMPENSATION_PENDING
+    assert summary["driver_engaged"] is False
+    verdict = json.loads((out / "s2_4_startup_verdict.json").read_text(encoding="utf-8"))
+    assert verdict["schema_version"] == recovery.STARTUP_COMPENSATION_SCHEMA_VERSION
+    assert verdict["emits_effect_receipt"] is False
+
+
+def test_the_cli_compensate_mode_refuses_a_plan_that_is_not_an_install_plan(tmp_path):
+    code, summary, _out = _run_cli(
+        tmp_path, "bad-plan", "--session", "s2_4", "--mode", "compensate",
+        "--plan-file", str(_write(tmp_path / "plan.json", {"schema_version": "nope"})),
+        "--component-intents-file", str(_write(tmp_path / "intents.json", {})),
+        "--apply-aggregate-permit", str(_write(tmp_path / "agg.json", {})),
+        "--pg-migration-permit", str(_write(tmp_path / "pg.json", {})),
+    )
+    assert code == cli.EXIT_RECOVERY_REQUIRED
+    assert summary["status"] == recovery.STARTUP_COMPENSATION_RECOVERY_REQUIRED
+
+
+def test_unreadable_cli_input_stays_typed_input_invalid(tmp_path):
+    code, summary, _out = _run_cli(
+        tmp_path, "unreadable", "--session", "s2_4", "--mode", "compensate",
+        "--plan-file", str(tmp_path / "absent.json"),
+        "--component-intents-file", str(_write(tmp_path / "intents.json", {})),
+        "--apply-aggregate-permit", str(_write(tmp_path / "agg.json", {})),
+        "--pg-migration-permit", str(_write(tmp_path / "pg.json", {})),
+    )
+    assert code == cli.EXIT_INPUT_INVALID
+    assert summary["status"] == "INPUT_INVALID"
+
+
+@pytest.mark.parametrize("session,mode", [
+    ("s2_0", "reconcile"), ("s2_0", "compensate"),
+    ("s2_1", "reconcile"), ("s2_1", "compensate"),
+    ("s2_4", "probe"), ("s2_4", "admit"), ("s2_4", "apply"),
+])
+def test_each_session_only_accepts_its_own_modes(fx, tmp_path, session, mode):
+    """每一組都餵**該 mode 完整合法的**輸入,於是唯一能擋下它的就是 session↔mode 那道閘。
+
+    (只餵 ``--session``/``--mode`` 會讓「缺 --lane」這種別的閘先擋下來,測試就會因為錯的理由
+    而綠。)
+    """
+
+    complete = {
+        "probe": [],
+        "admit": ["--intent-file", str(_write(tmp_path / "intent.json", {}))],
+        "apply": ["--intent-file", str(_write(tmp_path / "intent.json", {}))],
+        "reconcile": ["--lane", "probe", "--lane-id", _PROBE_ID],
+        "compensate": [
+            "--plan-file", str(_write(tmp_path / "plan.json", fx.plan)),
+            "--component-intents-file",
+            str(_write(tmp_path / "intents.json", fx.component_intents)),
+            "--apply-aggregate-permit",
+            str(_write(tmp_path / "agg.json", fx.authorization_set["apply_aggregate"])),
+            "--pg-migration-permit",
+            str(_write(tmp_path / "pg.json", fx.authorization_set["pg_migration"])),
+        ],
+    }[mode]
+    with pytest.raises(SystemExit) as caught:
+        cli.main([
+            "--out-dir", str(tmp_path / "x"), "--source-head", _HEAD,
+            "--session", session, "--mode", mode, *complete,
+        ])
+    assert caught.value.code == cli.EXIT_USAGE
+
+
+@pytest.mark.parametrize("extra", [
+    ("--session", "s2_4", "--mode", "reconcile"),
+    ("--session", "s2_4", "--mode", "reconcile", "--lane", "probe"),
+    ("--session", "s2_4", "--mode", "compensate"),
+])
+def test_the_s2_4_modes_require_their_whole_input_set(tmp_path, extra):
+    with pytest.raises(SystemExit) as caught:
+        cli.main(["--out-dir", str(tmp_path / "y"), "--source-head", _HEAD, *extra])
+    assert caught.value.code == cli.EXIT_USAGE
+
+
+def test_no_typed_non_success_status_can_map_to_a_zero_exit_code():
+    """表外一律 EXIT_RECOVERY_REQUIRED:一個沒被列舉的新終端絕不能靜默變成 0。"""
+
+    successes = {
+        recovery.STARTUP_COMPENSATION_COMPLETED_EXACT,
+        recovery.STARTUP_COMPENSATION_NOT_APPLICABLE,
+        recovery.INTENT_GATE_ADMITTED,
+    }
+    every = set(recovery.STARTUP_COMPENSATION_TYPED_STATUSES) | set(
+        recovery.INTENT_GATE_TYPED_STATUSES
+    )
+    for status in every:
+        code = cli.S2_4_STATUS_EXIT_CODES.get(status, cli.EXIT_RECOVERY_REQUIRED)
+        assert (code == cli.EXIT_OK) is (status in successes), status
+    # 未來新增的終端(表外)預設落在 8,不是 0。
+    assert cli.S2_4_STATUS_EXIT_CODES.get(
+        "A_STATUS_NOBODY_ENUMERATED_YET", cli.EXIT_RECOVERY_REQUIRED
+    ) == cli.EXIT_RECOVERY_REQUIRED
+    assert cli.EXIT_RECOVERY_REQUIRED not in {
+        cli.EXIT_OK, cli.EXIT_USAGE, cli.EXIT_ADMISSION_REFUSED,
+        cli.EXIT_HOST_CAPABILITY_ABSENT, cli.EXIT_OBSERVATION_FAILED,
+        cli.EXIT_INPUT_INVALID, cli.EXIT_INTERNAL_ERROR,
+    }
