@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import ast
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -530,6 +531,7 @@ def test_forbidden_read_only_surface_covers_the_four_adapter_mutators():
 # --------------------------------------------------------------------------- #
 def _force_host(monkeypatch, *, platform, hostname, writable, roots):
     monkeypatch.setattr(kernel.sys, "platform", platform)
+    monkeypatch.setattr(kernel, "_observed_nodename", lambda: hostname)
     monkeypatch.setattr(kernel.socket, "gethostname", lambda: hostname)
     monkeypatch.setattr(kernel, "_writable", lambda path: writable)
     monkeypatch.setattr(kernel, "_present", lambda path: roots)
@@ -681,7 +683,90 @@ def test_process_hardening_is_observed_and_load_bearing():
     else:
         assert observation["enforced"] is False
         assert observation["observed_dumpable"] is None
-        assert "not a target host" in observation["reason"]
+        # P2 #7:舊理由字串宣稱「the kernel executes no host command here」是**假的**
+        # ——這條路徑確實會 exec(observer child)。新字串必須誠實。
+        assert "executes no host command" not in observation["reason"]
+        assert "cannot be observed on this platform" in observation["reason"]
+        assert "may still execute here" in observation["reason"]
+
+
+def test_process_hardening_is_re_observed_on_every_execution(monkeypatch):
+    """P2 #10:快取會讓「執法」只發生一次;每次 exec 前都必須真的重新觀測。"""
+
+    observations = {"count": 0}
+
+    def _count(*, force: bool = False):
+        observations["count"] += 1
+        assert force is True, "run() must force a fresh observation, never reuse the cache"
+        return {"enforced": True, "observed_dumpable": 0, "reason": None}
+
+    class _Completed:
+        returncode = 0
+        stdout = b""
+        stderr = b""
+
+    monkeypatch.setattr(kernel, "enforce_process_hardening", _count)
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: _Completed())
+    host = kernel.HostExecutionKernel(session=kernel.SESSION_S2_1_QUIESCE_READ)
+    allowed = sorted(kernel.SESSION_ARGV_ALLOWLISTS[kernel.SESSION_S2_1_QUIESCE_READ])[0]
+    host.run(list(allowed))
+    host.run(list(allowed))
+    assert observations["count"] == 2
+
+
+# --------------------------------------------------------------------------- #
+# P2 #7 — the read-only observation face also passes an L1 gate (a weaker one)
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("target_class,allow,refused", [
+    (kernel.TARGET_CLASS_NON_TARGET, False, False),
+    (kernel.TARGET_CLASS_DISPOSABLE_CANDIDATE, False, False),
+    (kernel.TARGET_CLASS_PRODUCTION, False, True),
+    (kernel.TARGET_CLASS_UNKNOWN, False, True),      # unknown 同等對待
+    (kernel.TARGET_CLASS_PRODUCTION, True, False),
+    (kernel.TARGET_CLASS_UNKNOWN, True, False),
+])
+def test_read_only_observation_admission(target_class, allow, refused):
+    errors = kernel.host_observation_admission_errors(
+        {"target_class": target_class, "reason": "x"}, allow_production=allow
+    )
+    assert bool(errors) is refused
+
+
+def test_the_observation_gate_is_deliberately_weaker_than_the_apply_gate():
+    # 觀測面不需要 SSHSIG / --production-confirm(觀測正是拿到 permit 之前要做的事),但 apply 面
+    # 在同一份 view 上仍然需要三條件 —— 兩者絕不可被混為一談。
+    view = {"target_class": kernel.TARGET_CLASS_PRODUCTION, "reason": "x"}
+    assert kernel.host_observation_admission_errors(view, allow_production=True) == []
+    assert kernel.host_target_admission_errors(
+        view, allow_production=True, production_confirm=None, intent_digest=DIGEST,
+        operator_authorization_verified=False,
+    )
+
+
+# --------------------------------------------------------------------------- #
+# P2 #12 — hostname is derived from the same source as S1.6B
+# --------------------------------------------------------------------------- #
+def test_hostname_comes_from_the_same_source_as_the_s1_6b_preflight():
+    import agent_governance_target_host_probe as th
+    import inspect
+
+    # S1.6B 用 os.uname().nodename;kernel 必須同源(否則同一台主機會有兩個身分)。
+    assert "os.uname().nodename" in inspect.getsource(th.preflight_target_host)
+    assert kernel._observed_nodename() == os.uname().nodename
+
+
+@pytest.mark.parametrize("hostname,expected", [
+    ("trade-core", kernel.TARGET_CLASS_PRODUCTION),
+    ("trade-core.internal", kernel.TARGET_CLASS_PRODUCTION),   # FQDN nodename 仍是同一台
+    ("trade-core-staging", kernel.TARGET_CLASS_NON_TARGET),    # 前綴相同但不是同一個 label
+    ("some-laptop.trade-core", kernel.TARGET_CLASS_NON_TARGET),
+])
+def test_fqdn_nodename_still_resolves_to_the_pinned_target(monkeypatch, hostname, expected):
+    monkeypatch.setattr(kernel.sys, "platform", "linux")
+    monkeypatch.setattr(kernel, "_observed_nodename", lambda: hostname)
+    monkeypatch.setattr(kernel, "_writable", lambda path: True)
+    monkeypatch.setattr(kernel, "_present", lambda path: True)
+    assert kernel.derive_host_target_class()["target_class"] == expected
 
 
 def test_process_hardening_refusal_blocks_execution(monkeypatch):

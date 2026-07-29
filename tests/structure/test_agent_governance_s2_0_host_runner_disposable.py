@@ -4,7 +4,7 @@ T0(恆跑,含 Mac):production/unknown 全路徑 typed 拒且 **driver 未被構�
 ``ObserverBootstrapHostDriver.constructions`` 計數器斷言);``--allow-production`` 單獨不足;
 rehearsal 恆拒在 production target class 上執行;rehearsal driver 永不宣稱 PLATFORM_ATTESTED。
 
-T1(需 ``initdb``/``pg_ctl``/``psycopg2``,缺任一則**整個模組誠實 SKIP**):對一個真的
+T1(需 ``initdb``/``pg_ctl``/``psycopg2``,缺任一則**只有 T1 那幾支**誠實 SKIP、T0 恆跑):對一個真的
 ``initdb`` 拋棄式叢集,以 runner 的 ``ObserverBootstrapHostDriver`` 走 **S2.0 adapter 的 production
 gate**(§6 step 2→9),證明三段:
 
@@ -422,13 +422,17 @@ def test_ops_postcheck_uses_the_s2e1_builder_and_records_its_typed_refusal():
 # --------------------------------------------------------------------------- #
 # T1 — real disposable cluster rehearsal
 # --------------------------------------------------------------------------- #
-psycopg2 = pytest.importorskip(
-    "psycopg2", reason="psycopg2 driver is required for the S2.0 host runner rehearsal"
-)
+# E2 P2 #5:``pytest.importorskip`` 原本在**模組層** ⇒ psycopg2 缺席時連 T0 的 production 拒絕
+# 矩陣(恆該跑、且完全不需要 PG 的那 33+ 個)都會整批消失。改成模組層只做「可選 import」,
+# 缺席的代價僅落在 T1 的 skipif 上,T0 於是真的恆跑。
+try:  # pragma: no cover - 依主機而定
+    import psycopg2
+except ImportError:  # pragma: no cover - 依主機而定
+    psycopg2 = None
 
 disposable = pytest.mark.skipif(
-    not (INITDB and PG_CTL),
-    reason="initdb/pg_ctl are absent; the S2.0 host runner rehearsal cannot run",
+    not (INITDB and PG_CTL and psycopg2 is not None),
+    reason="initdb/pg_ctl/psycopg2 are absent; the S2.0 host runner rehearsal cannot run",
 )
 
 
@@ -448,8 +452,8 @@ def _run(cmd, *, logfile, timeout):
 
 @pytest.fixture(scope="module")
 def cluster():
-    if not (INITDB and PG_CTL):
-        pytest.skip("initdb/pg_ctl are absent")
+    if not (INITDB and PG_CTL and psycopg2 is not None):
+        pytest.skip("initdb/pg_ctl/psycopg2 are absent")
     tmp = tempfile.mkdtemp(prefix="aiml_s2e2_s20_")
     data_dir = os.path.join(tmp, "data")
     sock_dir = os.path.join(tmp, "sock")

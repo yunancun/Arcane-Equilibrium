@@ -125,6 +125,138 @@ def test_probe_mode_with_observe_runs_the_process_separated_observer(tmp_path):
     )
 
 
+def test_observe_on_a_production_grade_host_needs_an_explicit_acknowledgement(tmp_path, monkeypatch):
+    """P2 #7:observer 面原本完全不過 L1,直接對真主機發 ``systemctl show``。"""
+
+    monkeypatch.setattr(
+        cli.host_kernel, "derive_host_target_class",
+        lambda: {"target_class": kernel.TARGET_CLASS_PRODUCTION, "reason": "forced", "facts": {}},
+    )
+
+    def _must_not_spawn(*args, **kwargs):  # pragma: no cover - 必須永不被呼叫
+        raise AssertionError("the observer child must not spawn on a refused L1 observation")
+
+    monkeypatch.setattr(
+        cli.host_kernel.HostExecutionKernel, "run_observer_child", _must_not_spawn
+    )
+    out_dir = tmp_path / "refused"
+    code = cli.main([
+        "--session", "s2_1", "--mode", "probe", "--out-dir", str(out_dir),
+        "--source-head", HEAD, "--observe",
+    ])
+    summary = _artifacts(out_dir)["run_summary.json"]
+    assert code == cli.EXIT_OBSERVATION_FAILED
+    assert summary["status"] == "OBSERVATION_FAILED"
+    assert "refused by the L1 host gate" in summary["observation_error"]
+    assert "observation.json" not in _artifacts(out_dir)
+
+
+@pytest.mark.parametrize("target_class", [
+    kernel.TARGET_CLASS_PRODUCTION, kernel.TARGET_CLASS_UNKNOWN,
+])
+def test_observe_is_admitted_once_production_is_acknowledged(tmp_path, monkeypatch, target_class):
+    monkeypatch.setattr(
+        cli.host_kernel, "derive_host_target_class",
+        lambda: {"target_class": target_class, "reason": "forced", "facts": {}},
+    )
+    spawned = {"count": 0}
+
+    def _spawn(self, request):
+        spawned["count"] += 1
+        raise cli.host_kernel.S2HostCommandFailed("no systemctl on this development machine")
+
+    monkeypatch.setattr(cli.host_kernel.HostExecutionKernel, "run_observer_child", _spawn)
+    out_dir = tmp_path / "acknowledged"
+    cli.main([
+        "--session", "s2_1", "--mode", "probe", "--out-dir", str(out_dir),
+        "--source-head", HEAD, "--observe", "--allow-production",
+    ])
+    # L1 放行(child 真的被起了),失敗理由是主機本身而不是閘。
+    assert spawned["count"] == 1
+    summary = _artifacts(out_dir)["run_summary.json"]
+    assert "refused by the L1 host gate" not in summary["observation_error"]
+
+
+# --------------------------------------------------------------------------- #
+# P2 #8 — bad input is a typed fail-closed, and the artifact matches the exit code
+# --------------------------------------------------------------------------- #
+def _artifact_exit_code_matches(out_dir: Path, code: int) -> None:
+    assert _artifacts(out_dir)["run_summary.json"]["exit_code"] == code
+
+
+def test_a_malformed_intent_file_is_typed_and_the_artifact_matches_the_exit_code(tmp_path):
+    intent_file = tmp_path / "intent.json"
+    intent_file.write_text("{ not json at all", encoding="utf-8")
+    out_dir = tmp_path / "out"
+    code = cli.main([
+        "--session", "s2_0", "--mode", "admit", "--out-dir", str(out_dir),
+        "--source-head", HEAD, "--intent-file", str(intent_file),
+    ])
+    summary = _artifacts(out_dir)["run_summary.json"]
+    assert code == cli.EXIT_INPUT_INVALID
+    assert summary["status"] == "INPUT_INVALID"
+    assert "not valid JSON" in summary["input_error"]
+    _artifact_exit_code_matches(out_dir, code)
+
+
+def test_an_absent_intent_file_is_typed_not_a_traceback(tmp_path):
+    out_dir = tmp_path / "out"
+    code = cli.main([
+        "--session", "s2_0", "--mode", "admit", "--out-dir", str(out_dir),
+        "--source-head", HEAD, "--intent-file", str(tmp_path / "nope.json"),
+    ])
+    assert code == cli.EXIT_INPUT_INVALID
+    assert "not readable" in _artifacts(out_dir)["run_summary.json"]["input_error"]
+    _artifact_exit_code_matches(out_dir, code)
+
+
+def test_an_unreadable_operator_signature_is_typed(tmp_path):
+    permit = tmp_path / "permit.json"
+    permit.write_text(json.dumps({"totally": "bogus"}), encoding="utf-8")
+    out_dir = tmp_path / "out"
+    code = cli.main([
+        "--session", "s2_0", "--mode", "admit", "--out-dir", str(out_dir),
+        "--source-head", HEAD, "--intent-file", str(_write_intent(tmp_path, _intent())),
+        "--operator-permit", str(permit), "--operator-signature", str(tmp_path / "absent.sig"),
+    ])
+    assert code == cli.EXIT_INPUT_INVALID
+    _artifact_exit_code_matches(out_dir, code)
+
+
+def test_a_permit_without_a_signature_is_an_admission_refusal(tmp_path, monkeypatch):
+    _force_target_class(monkeypatch, kernel.TARGET_CLASS_DISPOSABLE_CANDIDATE)
+    permit = tmp_path / "permit.json"
+    permit.write_text(json.dumps({"totally": "bogus"}), encoding="utf-8")
+    out_dir = tmp_path / "out"
+    code = cli.main([
+        "--session", "s2_0", "--mode", "admit", "--out-dir", str(out_dir),
+        "--source-head", HEAD, "--intent-file", str(_write_intent(tmp_path, _intent())),
+        "--operator-permit", str(permit),
+    ])
+    assert code == cli.EXIT_ADMISSION_REFUSED
+    assert any(
+        "must be supplied together" in reason
+        for reason in _artifacts(out_dir)["admission.json"]["refusal_reasons"]
+    )
+
+
+def test_an_unexpected_failure_is_loud_and_still_leaves_a_consistent_artifact(tmp_path, monkeypatch):
+    def _boom(*args, **kwargs):
+        raise RuntimeError("injected internal failure")
+
+    monkeypatch.setattr(cli, "_admission", _boom)
+    out_dir = tmp_path / "out"
+    code = cli.main([
+        "--session", "s2_0", "--mode", "admit", "--out-dir", str(out_dir),
+        "--source-head", HEAD, "--intent-file", str(_write_intent(tmp_path, _intent())),
+    ])
+    summary = _artifacts(out_dir)["run_summary.json"]
+    assert code == cli.EXIT_INTERNAL_ERROR
+    assert summary["status"] == "RUNNER_FAILED"
+    assert "injected internal failure" in summary["runner_error"]
+    _artifact_exit_code_matches(out_dir, code)
+
+
 def test_bad_source_head_is_a_usage_error(tmp_path):
     with pytest.raises(SystemExit) as error:
         cli.main([
@@ -337,52 +469,34 @@ MAX_ARG_STRLEN = 128 * 1024
 
 
 def test_registry_tracked_bytes_leave_headroom_under_the_execve_single_argument_cap():
-    """PR#129 的 ``E2BIG`` 前例的**可重現**量測:只量 tracked 檔身。
+    """PR#129 的 ``E2BIG`` 前例的**可重現**量測:只量 tracked 檔身(E2 P2 #14 的處置)。
 
-    E2 指出「compiled context artifact 大小隨工作樹狀態變動(未追蹤/未提交檔會進 baseline)」
-    ⇒ 那個數字不可作為可重現的迴歸釘。本測試改量唯一真正被 registry append 推大的 tracked
-    檔:``.codex/agent_registry_v1.json``(S2E.2a 前 96035 → 後 96675,+640 bytes),與工作樹
-    髒度完全無關。上限是 Linux ``execve`` 的 ``MAX_ARG_STRLEN``(128 KiB = 131072)。
+    原測試以 ``capture_repository_baseline()`` + ``compile_context()`` 量 artifact bytes 並釘
+    8 KiB 餘裕。E2 指出該量測**不可重現**:``compile_context`` 會把當下工作樹的 diff / inventory
+    納入,未提交與未追蹤檔都會推高它。這不是理論顧慮 —— 本次修復期間同一支測試實測:
+
+    ==================================  ==========
+    工作樹狀態                            E1 artifact
+    ==================================  ==========
+    乾淨 @ ``9dfb4d27f``                  115030
+    修復進行中(3 個 source 檔已改)        124107
+    修復進行中(source + 4 個 test 檔)     137488  ← 已越過 131072
+    ==================================  ==========
+
+    也就是說連「< MAX_ARG_STRLEN」這條硬上限在髒樹上都會紅,它量的是**工作樹**而不是 source。
+    故改量唯一真正被 S2E.2a 的 registry append 推大的 tracked 檔:
+    ``.codex/agent_registry_v1.json``(S2E.2a 前 96035 → 後 96675,+640 bytes),與工作樹髒度
+    完全無關、逐位元組可重現。
+
+    代理關係:乾淨樹上 artifact ≈ registry + ~18 KiB(115030 vs 96675)⇒ 釘住 registry ≤ 104 KiB
+    等價於在乾淨樹上把 artifact 壓在 ~122 KiB 以下,仍在 ``MAX_ARG_STRLEN``(128 KiB = 131072)
+    之內。canonical 慣例本來就是以 ``@file`` 傳 context artifact 而非塞進單一 argv 元素。
     """
 
     registry_bytes = len((ROOT / ".codex/agent_registry_v1.json").read_bytes())
     assert registry_bytes < MAX_ARG_STRLEN, registry_bytes
-    # registry 自身留 ≥ 24 KiB 餘裕:任何一次把它推到 100 KiB 以上的成長都必須被重新評估。
+    # registry 自身留 ≥ 24 KiB 餘裕:任何一次把它推到 104 KiB 以上的成長都必須被重新評估。
     assert MAX_ARG_STRLEN - registry_bytes > 24 * 1024, registry_bytes
-
-
-def test_compiled_context_artifact_stays_under_the_execve_cap():
-    """compiled artifact 的硬上限(**不是**可重現的餘裕釘)。
-
-    ``compile_context`` 會納入當下工作樹的 diff/inventory ⇒ 量到的 bytes 依樹狀態而變
-    (乾淨樹 @ ``9dfb4d27f``:E1 115030 / E2 115022 / OPS 112727 / PM 95597;髒樹會更大)。
-    故此處只釘「絕不越過 ``MAX_ARG_STRLEN``」這條真正的硬邊界,並把量測當時的樹狀態寫進失敗
-    訊息,讓任何一次紅都能被重現與歸因。canonical 慣例本來就是以 ``@file`` 傳 context artifact
-    而非塞進單一 argv 元素。
-    """
-
-    from agent_governance_context import capture_repository_baseline
-    from agent_governance_execution import compile_context, materialize_context_artifact
-    from agent_governance_routing import route_task
-
-    scope = ["helper_scripts/maintenance_scripts/agent_governance_s2_host_kernel.py"]
-    baseline = capture_repository_baseline(root=ROOT)
-    routed = route_task({
-        "task_shape": "implementation", "surfaces": ["governance"], "risk": "medium",
-        "uncertainty": "low", "side_effect_class": "repo_write",
-        "objective": "measure the compiled context artifact size after the registry append",
-        "scope": scope, "dirty_scope": scope, "verification_scope": scope,
-        "acceptance_criteria": ["registry growth leaves execve headroom"],
-        "hard_stops": ["no runtime mutation"],
-        "baseline": baseline,
-        "direct_interfaces": ["agent_governance_s2_host_kernel"],
-        "previous_failure": "PR#129 registry growth crossed MAX_ARG_STRLEN and raised E2BIG",
-    })
-    artifact = materialize_context_artifact(
-        compile_context("E1", routed["task_facts"], root=ROOT)
-    )
-    size = len(json.dumps(artifact, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
-    assert size < MAX_ARG_STRLEN, {"artifact_bytes": size, "tree_state": baseline}
 
 
 def test_cli_runs_as_a_script_and_makes_no_host_contact(tmp_path):

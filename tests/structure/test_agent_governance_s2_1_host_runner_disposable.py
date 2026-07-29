@@ -327,13 +327,19 @@ def test_dsn_stat_reads_identity_only_and_never_opens_the_credential(tmp_path):
         missing.dsn_stat()
 
 
+def _locus(path) -> str:
+    """真實 ``/proc/locks`` 第 6 欄的形:``<major hex>:<minor hex>:<inode dec>``。"""
+
+    info = os.stat(path)
+    return f"{os.major(info.st_dev):02x}:{os.minor(info.st_dev):02x}:{info.st_ino}"
+
+
 def test_flock_held_is_read_only_and_parses_proc_locks(tmp_path):
     lock = tmp_path / "consumer.lock"
     lock.write_text("", encoding="utf-8")
-    inode = os.stat(lock).st_ino
     locks = tmp_path / "locks"
     locks.write_text(
-        f"1: FLOCK  ADVISORY  WRITE 4242 fd:01:{inode} 0 EOF\n", encoding="utf-8"
+        f"1: FLOCK  ADVISORY  WRITE 4242 {_locus(lock)} 0 EOF\n", encoding="utf-8"
     )
     probe = runner.QuiesceHostProbe(
         executor=_RecordingExecutor(), proc_root=str(tmp_path),
@@ -353,6 +359,50 @@ def test_flock_held_is_read_only_and_parses_proc_locks(tmp_path):
     ).flock_held() is None
 
 
+def test_flock_held_requires_the_device_to_match_not_just_the_inode(tmp_path):
+    """E2 P2 #11 前半:跨檔案系統的 inode 碰撞不得被誤判成 held。"""
+
+    lock = tmp_path / "consumer.lock"
+    lock.write_text("", encoding="utf-8")
+    info = os.stat(lock)
+    locks = tmp_path / "locks"
+    # 同 inode、**不同 device**(major+1)⇒ 那不是我們的檔案。
+    locks.write_text(
+        f"1: FLOCK  ADVISORY  WRITE 4242 {os.major(info.st_dev) + 1:02x}:"
+        f"{os.minor(info.st_dev):02x}:{info.st_ino} 0 EOF\n",
+        encoding="utf-8",
+    )
+    probe = runner.QuiesceHostProbe(
+        executor=_RecordingExecutor(), proc_root=str(tmp_path),
+        flock_path=str(lock), locks_path=str(locks),
+    )
+    assert probe.flock_held() is False
+
+
+def test_flock_held_survives_the_waiter_arrow_prefix(tmp_path):
+    """E2 P2 #11 後半:``->`` 前綴的 waiter 行會把欄位推移一格,解析必須先正規化。"""
+
+    lock = tmp_path / "consumer.lock"
+    lock.write_text("", encoding="utf-8")
+    locus = _locus(lock)
+    locks = tmp_path / "locks"
+    # 第一行是等待者(``->``),第二行才是真正持有者;若不剝 ``->``,第一行會被讀成
+    # ``fields[5] == "WRITE"`` 之類的錯欄位。
+    locks.write_text(
+        f"1: -> FLOCK  ADVISORY  WRITE 9999 {locus} 0 EOF\n"
+        f"1: FLOCK  ADVISORY  WRITE 4242 {locus} 0 EOF\n",
+        encoding="utf-8",
+    )
+    probe = runner.QuiesceHostProbe(
+        executor=_RecordingExecutor(), proc_root=str(tmp_path),
+        flock_path=str(lock), locks_path=str(locks),
+    )
+    assert probe.flock_held() is True
+    # 只有 waiter 而沒有 holder 時,欄位仍必須被正確對齊(而不是解析到別的欄位後誤判)。
+    locks.write_text(f"1: -> FLOCK  ADVISORY  WRITE 9999 fd:01:999 0 EOF\n", encoding="utf-8")
+    assert probe.flock_held() is False
+
+
 def test_ops_postcheck_uses_the_s2e1_builder_and_records_its_typed_refusal():
     receipt = q.apply_quiesce_fence(
         _intent("sha256:" + "0" * 64), None, None, now=NOW, source_head=HEAD,
@@ -367,13 +417,17 @@ def test_ops_postcheck_uses_the_s2e1_builder_and_records_its_typed_refusal():
 # --------------------------------------------------------------------------- #
 # T1 — real disposable cluster + simulated systemd host
 # --------------------------------------------------------------------------- #
-psycopg2 = pytest.importorskip(
-    "psycopg2", reason="psycopg2 driver is required for the S2.1 host runner rehearsal"
-)
+# E2 P2 #5:``pytest.importorskip`` 原本在**模組層** ⇒ psycopg2 缺席時連 T0 的 production 拒絕
+# 矩陣(恆該跑、且完全不需要 PG 的那 33+ 個)都會整批消失。改成模組層只做「可選 import」,
+# 缺席的代價僅落在 T1 的 skipif 上,T0 於是真的恆跑。
+try:  # pragma: no cover - 依主機而定
+    import psycopg2
+except ImportError:  # pragma: no cover - 依主機而定
+    psycopg2 = None
 
 disposable = pytest.mark.skipif(
-    not (INITDB and PG_CTL),
-    reason="initdb/pg_ctl are absent; the S2.1 host runner rehearsal cannot run",
+    not (INITDB and PG_CTL and psycopg2 is not None),
+    reason="initdb/pg_ctl/psycopg2 are absent; the S2.1 host runner rehearsal cannot run",
 )
 
 
@@ -393,8 +447,8 @@ def _run(cmd, *, logfile, timeout):
 
 @pytest.fixture(scope="module")
 def cluster():
-    if not (INITDB and PG_CTL):
-        pytest.skip("initdb/pg_ctl are absent")
+    if not (INITDB and PG_CTL and psycopg2 is not None):
+        pytest.skip("initdb/pg_ctl/psycopg2 are absent")
     tmp = tempfile.mkdtemp(prefix="aiml_s2e2_s21_")
     data_dir = os.path.join(tmp, "data")
     sock_dir = os.path.join(tmp, "sock")
@@ -589,9 +643,12 @@ class _SimulatedSystemdHost:
         self._materialize(pid)
 
     def _write_locks(self, *, held: bool) -> None:
-        inode = os.stat(self.lock_path).st_ino
+        # 真實 ``/proc/locks`` 的 locus 欄:``<major hex>:<minor hex>:<inode dec>``
+        # (device 也必須對得上,見 QuiesceHostProbe.flock_held)。
+        info = os.stat(self.lock_path)
+        locus = f"{os.major(info.st_dev):02x}:{os.minor(info.st_dev):02x}:{info.st_ino}"
         self.locks_path.write_text(
-            f"1: FLOCK  ADVISORY  WRITE {self.pid} fd:01:{inode} 0 EOF\n" if held else "",
+            f"1: FLOCK  ADVISORY  WRITE {self.pid} {locus} 0 EOF\n" if held else "",
             encoding="utf-8",
         )
 

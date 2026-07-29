@@ -129,12 +129,32 @@ class QuiesceHostProbe:
         }
 
     # -- read-only flock corroboration via /proc/locks ---------------------- #
+    @staticmethod
+    def _locks_row(line: str) -> list[str] | None:
+        """把一行 ``/proc/locks`` 正規化成 ``[type, kind, mode, pid, locus, start, end]``。
+
+        E2 P2 #11 的第二半:等待者(waiter)行的形是 ``N: -> FLOCK ...``,那個 ``->`` 前綴會把
+        所有欄位往後推一格,使「固定看 ``fields[5]``」讀到錯的東西。此處先剝掉序號欄,再剝掉可選
+        的 ``->``,欄位位置才是穩定的。
+        """
+
+        fields = line.split()
+        if not fields or not fields[0].endswith(":"):
+            return None
+        rest = fields[1:]
+        if rest and rest[0] == "->":
+            rest = rest[1:]
+        return rest if len(rest) >= 5 else None
+
     def flock_held(self) -> bool | None:
-        """由 ``/proc/locks`` 的 FLOCK 條目比對 lock 檔 inode 判定;**絕不**自己去取鎖。
+        """由 ``/proc/locks`` 的 FLOCK 條目比對 lock 檔 **device + inode** 判定;**絕不**自己去取鎖。
 
         取鎖(即使 ``LOCK_NB`` 後立刻釋放)會擾動真 owner 的重取,故此面只用純唯讀來源。
         無法判定時回 ``None``(``build_owner_inventory`` 把 flock 當佐證訊號,權威證據是 PG
         advisory lock)。
+
+        E2 P2 #11:第 6 欄是 ``<major>:<minor>:<inode>``(major/minor 為 **16 進位**),原本只比
+        inode ⇒ 跨檔案系統的 inode 碰撞會誤判成 ``True``。現在 device 與 inode 必須同時相符。
         """
 
         if not self._flock_path:
@@ -147,14 +167,19 @@ class QuiesceHostProbe:
             raw = Path(self._locks_path).read_text(encoding="utf-8", errors="replace")
         except OSError:
             return None
-        needle = f"{info.st_ino}"
+        expected = (os.major(info.st_dev), os.minor(info.st_dev), int(info.st_ino))
         for line in raw.splitlines():
-            fields = line.split()
-            if len(fields) < 6 or "FLOCK" not in fields:
+            row = self._locks_row(line)
+            if row is None or row[0] != "FLOCK":
                 continue
-            # /proc/locks 的第 6 欄形如 ``<major>:<minor>:<inode>``。
-            locus = fields[5].split(":")
-            if len(locus) == 3 and locus[2] == needle:
+            locus = row[4].split(":")
+            if len(locus) != 3:
+                continue
+            try:
+                observed = (int(locus[0], 16), int(locus[1], 16), int(locus[2]))
+            except ValueError:
+                continue
+            if observed == expected:
                 return True
         return False
 

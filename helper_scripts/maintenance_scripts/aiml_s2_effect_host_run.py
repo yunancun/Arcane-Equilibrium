@@ -4,7 +4,12 @@
 
 ``probe``
     只導出**主機事實**(``derive_host_target_class`` + kernel ABI 投影),可選再以進程分離的唯讀
-    observer 取一份觀測。零 driver、零 adapter 呼叫、零主機變更。任何主機都能跑。
+    observer 取一份觀測。零 driver、零 adapter 呼叫、零主機變更。任何主機都能跑,但 ``--observe``
+    **也要過 L1**(``host_observation_admission_errors``):``production`` / ``unknown`` 需要一次
+    顯式 ``--allow-production`` 承認,否則 observer 子行程根本不被 spawn。該閘刻意比 apply 面弱
+    一級(不要 SSHSIG / 不要 ``--production-confirm``),理由寫在 kernel 的謂詞 docstring:觀測面
+    的每條 argv 都在唯讀 allowlist 內、結構上不可能變更狀態,而觀測正是「拿到 permit 之前」要做
+    的事。
 
 ``admit``
     對一份 typed intent(+ 可選的 operator permit/signature)跑完整的 §E.2 准入矩陣並落盤裁決。
@@ -30,6 +35,10 @@
 * 任何 rehearsal / probe 的綠都**不是** closure PASS,也**不是** EFFECT 進展:S2E.1 已把 S2.0 與
   S2.1 標成 closure-PASS-blocked,PR#154 的 effect-DAG 傳遞阻塞使九步全不可 PASS;九 authority
   恆 false,runtime 恆 inactive。
+* 壞輸入一律 typed fail-closed,且**落盤 artifact 的 ``exit_code`` 與 process 的真實退出碼恆
+  一致**:不可讀 / 非 JSON 的 ``--intent-file`` / ``--operator-permit`` / ``--operator-signature``
+  → ``INPUT_INVALID``(exit 6);任何未預期例外 → ``RUNNER_FAILED``(exit 7)+ stderr 明文,絕不讓一個裸
+  traceback 把 process 退成 1、卻在 ``run_summary.json`` 寫另一個號碼。
 """
 
 from __future__ import annotations
@@ -60,6 +69,10 @@ EXIT_USAGE = 2
 EXIT_ADMISSION_REFUSED = 3
 EXIT_HOST_CAPABILITY_ABSENT = 4
 EXIT_OBSERVATION_FAILED = 5
+# 壞輸入(不可讀 / 非 JSON / 形不對的 intent·permit·signature)一律 typed fail-closed;絕不讓一個
+# 未捕捉的 traceback 把 process 退成 1、卻在 artifact 裡寫另一個號碼(E2 P2 #8)。
+EXIT_INPUT_INVALID = 6
+EXIT_INTERNAL_ERROR = 7
 
 HEAD_LENGTH = 40
 _HEX = set("0123456789abcdef")
@@ -76,10 +89,30 @@ def _is_head(value: Any) -> bool:
     return len(text) == HEAD_LENGTH and set(text) <= _HEX
 
 
-def _load_json(path: Path | None) -> Any:
+class CliInputError(ValueError):
+    """Raised when a caller-supplied file is missing / unreadable / not canonical JSON."""
+
+
+def _load_json(path: Path | None, *, label: str) -> Any:
     if path is None:
         return None
-    return json.loads(path.read_text(encoding="utf-8"))
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError as error:
+        raise CliInputError(f"--{label} is not readable: {error}") from error
+    try:
+        return json.loads(raw)
+    except (ValueError, UnicodeDecodeError) as error:
+        raise CliInputError(f"--{label} is not valid JSON: {error}") from error
+
+
+def _load_bytes(path: Path | None, *, label: str) -> bytes | None:
+    if path is None:
+        return None
+    try:
+        return path.read_bytes()
+    except OSError as error:
+        raise CliInputError(f"--{label} is not readable: {error}") from error
 
 
 def _verify_operator_authorization(
@@ -118,8 +151,15 @@ def _admission(args, intent: Any, authorization: Any, signature: bytes | None) -
         intent_digest=intent_digest,
         operator_authorization_verified=bool(verification["verified"]),
     )
-    if isinstance(intent, dict) and intent.get("source_head") != args.source_head:
+    if not isinstance(intent, dict):
+        errors.append("--intent-file must contain a typed intent object")
+    elif intent.get("source_head") != args.source_head:
         errors.append("--source-head must equal the intent source_head")
+    # permit 與 signature 必須成對出現:單獨一份永遠無法構成一次已驗證的 operator 授權。
+    if (args.operator_permit is None) != (args.operator_signature is None):
+        errors.append(
+            "--operator-permit and --operator-signature must be supplied together"
+        )
     return {
         "session": args.session,
         "observed_at": now,
@@ -138,7 +178,22 @@ def _admission(args, intent: Any, authorization: Any, signature: bytes | None) -
     }
 
 
-def _observation(args) -> dict[str, Any]:
+def _observation(args, target_view: dict[str, Any]) -> dict[str, Any]:
+    """唯讀觀測面 —— **也要過 L1**(E2 P2 #7),只是刻意比 apply 面弱一級並寫明理由。
+
+    ``production`` / ``unknown`` 需要一次顯式 ``--allow-production`` 承認才會真的碰主機;不需要
+    綁 intent digest 的 SSHSIG,因為觀測面的每條 argv 都在唯讀 allowlist 內、結構上不可能變更狀態,
+    而觀測正是「拿到 permit 之前」要做的事(理由字串一併落盤,不靠讀者記憶)。
+    """
+
+    admission_errors = host_kernel.host_observation_admission_errors(
+        target_view, allow_production=bool(args.allow_production)
+    )
+    if admission_errors:
+        raise host_observer.S2HostObserverError(
+            "the read-only observation is refused by the L1 host gate: "
+            + "; ".join(admission_errors)
+        )
     kernel = host_kernel.HostExecutionKernel(
         session=host_kernel.SESSION_S2_HOST_OBSERVER_CHILD
     )
@@ -206,7 +261,7 @@ def main(argv: list[str] | None = None) -> int:
             summary["status"] = "PROBED"
             if args.observe:
                 try:
-                    observation = _observation(args)
+                    observation = _observation(args, target_view)
                 except (host_kernel.S2HostKernelError, host_observer.S2HostObserverError,
                         ValueError) as error:
                     summary["status"] = "OBSERVATION_FAILED"
@@ -218,11 +273,9 @@ def main(argv: list[str] | None = None) -> int:
             summary["exit_code"] = exit_code
             return exit_code
 
-        intent = _load_json(args.intent_file)
-        authorization = _load_json(args.operator_permit)
-        signature = (
-            args.operator_signature.read_bytes() if args.operator_signature is not None else None
-        )
+        intent = _load_json(args.intent_file, label="intent-file")
+        authorization = _load_json(args.operator_permit, label="operator-permit")
+        signature = _load_bytes(args.operator_signature, label="operator-signature")
         admission = _admission(args, intent, authorization, signature)
         _canonical_write(args.out_dir / "admission.json", admission)
         summary["admitted"] = admission["admitted"]
@@ -253,6 +306,19 @@ def main(argv: list[str] | None = None) -> int:
         }
         exit_code = EXIT_HOST_CAPABILITY_ABSENT
         summary["exit_code"] = exit_code
+        return exit_code
+    except CliInputError as error:
+        # 壞 --intent-file / --operator-permit / --operator-signature:typed fail-closed,且
+        # artifact 的 exit_code 與 process 的真實退出碼一致(E2 P2 #8)。
+        summary["status"] = "INPUT_INVALID"
+        summary["input_error"] = str(error)
+        exit_code = EXIT_INPUT_INVALID
+        return exit_code
+    except Exception as error:  # noqa: BLE001 - fail loud:記錄後以 typed 退出碼收場,絕不裸逸
+        summary["status"] = "RUNNER_FAILED"
+        summary["runner_error"] = f"{type(error).__name__}: {error}"
+        exit_code = EXIT_INTERNAL_ERROR
+        sys.stderr.write(f"S2 host runner failed: {type(error).__name__}: {error}\n")
         return exit_code
     finally:
         # 頂層 finally:不論走哪條路,``--out-dir`` 的 canonical artifact 契約都成立。

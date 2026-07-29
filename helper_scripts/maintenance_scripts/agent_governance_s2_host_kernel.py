@@ -18,10 +18,15 @@
 5. :func:`assert_read_only_surface` —— 鏡 ``agent_governance_s2_4_install_driver
    .assert_no_aggregate_forbidden_surface``:物件上出現任一寫能力方法即 typed 拒,且**絕不呼叫**。
 
-外加一件與 exec 不可分割的執法::func:`enforce_process_hardening` 在**任何**主機指令執行之前真的
-跑 ``prctl(PR_SET_DUMPABLE, 0)`` 並回讀 ``PR_GET_DUMPABLE`` 確認為 0,不為 0 即拒絕執行(W5
-obligation ``PR_SET_DUMPABLE_IS_DECLARED_NOT_ENFORCED`` 指出該常量今日只出現在兩個投影 dict、
-無任何 driver 觀測它;本 kernel 是第一處真的觀測並執法它的地方)。
+外加一件與 exec 不可分割的執法::func:`enforce_process_hardening` 在**每一次**主機指令執行之前真的
+跑 ``prctl(PR_SET_DUMPABLE, 0)`` 並回讀 ``PR_GET_DUMPABLE`` 確認為 0,不為 0 即拒絕執行。
+
+**W5 obligation #21 的誠實措辭(必讀)。** ``PR_SET_DUMPABLE_IS_DECLARED_NOT_ENFORCED`` 的原文要求
+是「observing prctl(PR_GET_DUMPABLE) on the applier and refusing when it is not 0 —— a
+driver-protocol and host-observation change」,而它指的 applier 是 **S2.4/S2.5 的 driver
+protocol**,那條路徑**完全不經本 kernel**。因此:本 kernel 只是**提供可翻 #21 的證據**(repo 內
+第一處真的觀測並拒絕的實作),**obligation 本身仍 OPEN**,批次裁決留給 S2E.5。本波對 W5 ledger
+零編輯。
 
 **誠實界線(必讀)。**
 
@@ -255,13 +260,16 @@ _HARDENING_CACHE: dict[str, Any] | None = None
 def enforce_process_hardening(*, force: bool = False) -> dict[str, Any]:
     """真的執法 ``PR_SET_DUMPABLE=0``:設定 → 回讀 → 不為 0 即拒絕跑任何主機指令。
 
-    W5 obligation ``PR_SET_DUMPABLE_IS_DECLARED_NOT_ENFORCED`` 的原文要求是「observing
-    prctl(PR_GET_DUMPABLE) on the applier and refusing when it is not 0」。本函式即是那個觀測 +
-    拒絕,且被 :meth:`HostExecutionKernel.run` 在**第一次** exec 之前無條件呼叫。
+    本函式是那個「觀測 + 拒絕」,且被 :meth:`HostExecutionKernel.run` /
+    :meth:`HostExecutionKernel.run_observer_child` 在**每一次** exec 之前以 ``force=True`` 呼叫
+    ——E2 P2 #10:快取會使觀測只發生一次,那樣的話「執法」在第二條指令起就只是一份舊紀錄。
+    ``force=False`` 只保留給純查詢用途。
 
-    誠實界線:非 Linux 主機沒有 prctl,回 ``enforced=False`` 並註明理由;但非 Linux 主機的
-    ``derive_host_target_class`` 恆為 ``non_target``,runner 在那裡就已經拒絕跑真主機指令,
-    故此處不構成一個「在 Mac 上被靜默略過的閘」。
+    誠實界線(E2 P2 #7:原本的理由字串是**假的**):非 Linux 主機沒有 prctl,回
+    ``enforced=False``;但本行程**仍然會**在此 session 執行 allowlisted 指令(例如唯讀 observer
+    child),所以絕不可把這份觀測讀成「這裡沒有 exec,所以不必執法」。真正把生產主機擋在外面的
+    是 :func:`derive_host_target_class`(非 Linux 恆為 ``non_target``)與 L1 准入謂詞,不是這一行
+    理由字串。
     """
 
     global _HARDENING_CACHE
@@ -272,8 +280,9 @@ def enforce_process_hardening(*, force: bool = False) -> dict[str, Any]:
             "enforced": False,
             "observed_dumpable": None,
             "reason": (
-                "prctl(PR_SET_DUMPABLE) is a Linux facility; this host is not a target host and "
-                "the kernel executes no host command here"
+                "prctl(PR_SET_DUMPABLE) is a Linux facility and cannot be observed on this "
+                "platform; allowlisted commands may still execute here, so this is an honest "
+                "NOT-ENFORCED observation, not a claim that nothing executes"
             ),
         }
         _HARDENING_CACHE = observation
@@ -337,6 +346,35 @@ def _present(path: str) -> bool | None:
         return None
 
 
+def _observed_nodename() -> str:
+    """與 S1.6B **同一個來源**取主機名(E2 P2 #12)。
+
+    ``agent_governance_target_host_probe.preflight_target_host`` 用的是 ``os.uname().nodename``;
+    本 kernel 原本用 ``socket.gethostname()``,兩者在部分設定下會不一致 ⇒ 同一台主機可能被兩個
+    S2/S1 元件判成不同身分。統一成 ``os.uname().nodename``(缺該 API 的平台退回
+    ``socket.gethostname()``)。
+    """
+
+    uname = getattr(os, "uname", None)
+    if uname is not None:
+        try:
+            return str(uname().nodename)
+        except OSError:  # pragma: no cover - 依平台而定
+            pass
+    return socket.gethostname()
+
+
+def _hostname_labels(hostname: str) -> tuple[str, ...]:
+    """``trade-core`` 與 ``trade-core.internal`` 都視為同一台 target(FQDN nodename 護欄)。
+
+    誠實界線:這**只**會把一台原本落 ``non_target``(=無條件拒絕)的主機移進三條件 production
+    閘,絕不會放寬任何既有的 production 准入 —— production 仍需 ``--allow-production`` + 已驗證
+    operator SSHSIG + ``--production-confirm`` 三者並存。
+    """
+
+    return tuple({hostname, hostname.split(".")[0]})
+
+
 def derive_host_target_class() -> dict[str, Any]:
     """由**主機事實**導出 target class;**絕不**接受 caller 傳入的 target_class 字串。
 
@@ -355,7 +393,9 @@ def derive_host_target_class() -> dict[str, Any]:
 
     facts: dict[str, Any] = {
         "platform": sys.platform,
-        "hostname": socket.gethostname(),
+        # 主機名與 S1.6B 同源(``os.uname().nodename``);兩者一併落盤以便任何漂移可被看見。
+        "hostname": _observed_nodename(),
+        "hostname_via_socket": socket.gethostname(),
         "systemd_system_unit_dir": SYSTEMD_SYSTEM_UNIT_DIR,
         "systemd_system_unit_dir_writable": None,
         "canonical_install_roots": list(CANONICAL_INSTALL_ROOTS),
@@ -368,7 +408,7 @@ def derive_host_target_class() -> dict[str, Any]:
             "reason": "platform is not linux; this is not an S2 target host",
             "facts": facts,
         }
-    if facts["hostname"] not in TARGET_HOSTNAMES:
+    if not set(_hostname_labels(str(facts["hostname"]))) & TARGET_HOSTNAMES:
         return {
             "target_class": TARGET_CLASS_NON_TARGET,
             "reason": (
@@ -466,6 +506,38 @@ def host_target_admission_errors(
             "verbatim (paste/typo guard)"
         )
     return errors
+
+
+def host_observation_admission_errors(
+    target_view: dict[str, Any], *, allow_production: bool
+) -> list[str]:
+    """**唯讀觀測**面的 L1 准入謂詞(E2 P2 #7:observer 面原本完全不過 L1)。
+
+    原本 ``probe --observe`` 直接對真主機發 ``systemctl show``,連一道 L1 都沒過。現在它也過 L1,
+    但**刻意**比 :func:`host_target_admission_errors` 弱一級,而且理由必須寫清楚:
+
+    * 觀測面的每一條 argv 都在**唯讀** session 的封閉 allowlist 內(``show -p <封閉屬性集>`` 與
+      ``list-units``),結構上不可能變更主機狀態,故它不需要、也不該需要一份綁 intent digest 的
+      operator SSHSIG —— 觀測正是「拿到 permit 之前」要做的事。
+    * 但它仍然是**真的主機接觸**,所以在 ``production`` / ``unknown`` 上必須有一次顯式的
+      ``--allow-production`` 承認;``unknown`` 一如既往與 ``production`` 同等對待。
+    * ``non_target`` **放行**:那台主機上的觀測只會打到不存在的 ``systemctl``(typed 失敗),
+      擋它沒有安全收益,反而會讓 Mac 上的結構測試失去唯一一條真子行程路徑。
+    """
+
+    target_class = target_view.get("target_class")
+    if target_class in (TARGET_CLASS_NON_TARGET, TARGET_CLASS_DISPOSABLE_CANDIDATE):
+        return []
+    if target_class not in PRODUCTION_GRADE_TARGET_CLASSES:
+        return [
+            f"S2 host observer cannot classify this host (target_class={target_class!r})"
+        ]
+    if not allow_production:
+        return [
+            f"a read-only observation on target_class={target_class} requires an explicit "
+            "--allow-production acknowledgement (unknown is treated exactly like production)"
+        ]
+    return []
 
 
 # rehearsal lane 的拒絕集合:``unknown`` 與 ``production`` **同等對待**(排練絕不在可能是生產的
@@ -639,7 +711,7 @@ class HostExecutionKernel:
             request, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False,
         ).encode("utf-8")
         argv = observer_child_argv(base64.b64encode(payload).decode("ascii"))
-        enforce_process_hardening()
+        enforce_process_hardening(force=True)
         self.calls.append(tuple(argv))
         return self._execute(argv)
 
@@ -647,7 +719,7 @@ class HostExecutionKernel:
         """Execute exactly one allowlisted argv and return its redacted stdout."""
 
         candidate = assert_session_argv(self.session, argv)
-        enforce_process_hardening()
+        enforce_process_hardening(force=True)
         self.calls.append(candidate)
         return self._execute(list(candidate))
 
