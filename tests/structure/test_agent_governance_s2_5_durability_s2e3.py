@@ -662,3 +662,27 @@ def test_journal_and_ledger_share_one_hash_chain_verifier():
     source = (HELPERS / "agent_governance_s2_5_attestation.py").read_text(encoding="utf-8")
     assert source.count("def _hash_chain_errors(") == 1
     assert source.count("_hash_chain_errors(entries, label=") == 2
+
+
+# ── C7:2000 行硬上限逼出的 WAL 葉拆分(零語義變更的機械釘)────────────────────────
+def test_the_wal_leaf_is_the_single_home_of_the_durability_substrate():
+    """拆分後 lifecycle 的名字必須**就是** WAL 葉的同一個物件(不得日後分岔成兩份)。"""
+
+    import agent_governance_s2_5_wal as wal
+
+    for name in (
+        "_durable_write_json", "_journal_transition", "_journal_payload_errors",
+        "reconcile_s2_5_journal", "s2_5_journal_path", "s2_5_replay_ledger_path",
+        "_persist_s2_5_replay_ledger", "_replay_ledger_anchor_reasons",
+        "_ledger_behind_head_reasons", "_flock_free_observation",
+        "S2_4InstallLockFreeProbe", "S2_5LifecycleLockHold",
+        "derive_s2_4_install_lock_free", "acquire_s2_5_lifecycle_hold",
+        "_release_s2_5_lifecycle_hold", "_lock_resource_separation_reasons",
+        "_lock_window_evidence",
+    ):
+        assert getattr(lifecycle, name) is getattr(wal, name), name
+    # 斷鏈狀態常量在兩葉之間不得漂移(import 期 assert 的測試面對照)。
+    assert lifecycle.S2_5_STATUS_RECOVERY_REQUIRED == wal.JOURNAL_RECOVERY_REQUIRED_STATE
+    # 兩葉都必須留在 repo 的 2000 行硬上限之內。
+    for leaf in ("agent_governance_s2_5_lifecycle.py", "agent_governance_s2_5_wal.py"):
+        assert len((HELPERS / leaf).read_text(encoding="utf-8").splitlines()) <= 2000, leaf
