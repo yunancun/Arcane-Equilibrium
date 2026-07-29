@@ -68,10 +68,28 @@ ALLOWED_STDLIB_IMPORTS = frozenset({
     "pathlib", "re", "socket", "stat", "sys", "typing",
 })
 ALLOWED_THIRD_PARTY_IMPORTS = frozenset({"psycopg2"})
-GOVERNANCE_IMPORT_PREFIX = "agent_governance_"
-# 只有 kernel 可以 import 的兩個模組:``subprocess``(唯一 exec 點)與 ``ctypes``(prctl 執法;
-# 它同時也是一條 libc ``system()`` 路徑,故對其他家族成員一律禁止)。
-KERNEL_ONLY_IMPORTS = frozenset({"subprocess", "ctypes"})
+# E2 RES-5:原本是 ``GOVERNANCE_IMPORT_PREFIX = "agent_governance_"`` 的**無條件前綴放行**,而
+# ``agent_governance_command_capture_v2`` 本身就是一個 ``subprocess.run`` 執行器 —— 於是「import
+# 它 + ``capture_command(argv)``」這條 exec 路徑在五個檔案上全綠(E2 的 N16 探針)。前綴是名字,
+# 不是能力。改成**顯式模組列**:只有這八個治理模組被放行,新增任何一個都必須在這裡明說。
+ALLOWED_GOVERNANCE_IMPORTS = frozenset({
+    "agent_governance_alr_quiesce_fence",
+    "agent_governance_alr_quiesce_inventory",
+    "agent_governance_pg_observer_bootstrap",
+    "agent_governance_s2_0_host_runner",
+    "agent_governance_s2_1_host_runner",
+    "agent_governance_s2_effect_binding",
+    "agent_governance_s2_host_kernel",
+    "agent_governance_s2_host_observer",
+})
+# 只有 kernel 可以 import 的三個模組:``subprocess``(唯一 exec 點)、``ctypes``(prctl 執法;
+# 它同時也是一條 libc ``system()`` 路徑)、以及 ``agent_governance_command_capture_v2``
+# —— 後者**本身就是一個 exec 器**(``capture_command`` 內有 ``subprocess.run``),kernel 只從它
+# 導出 ``SAFE_INHERITED_ENVIRONMENT`` 與 ``_redact_preview`` 兩個純值/純函式(不另造第二套規則),
+# 但對其他家族成員它是一條完整的 exec 路徑,故一律禁止(E2 RES-5 的 N16 探針)。
+KERNEL_ONLY_IMPORTS = frozenset({
+    "subprocess", "ctypes", "agent_governance_command_capture_v2",
+})
 
 FORBIDDEN_RAW_COMMAND_NAMES = frozenset({
     "system", "popen", "startfile", "fork", "forkpty",
@@ -114,8 +132,10 @@ def _fold_string(node: ast.AST) -> str | None:
 def _raw_command_findings(path: Path) -> list[str]:
     """整個 runner 家族的 no-raw-command 掃描;kernel 之外**任何** finding 即紅。
 
-    五道:①import **正面白名單**(``subprocess``/``ctypes`` 只准 kernel);②``from <allowed>
-    import <forbidden name>``(收口 E2 的 M2:``from os import system as _s``);③屬性名層 denylist
+    五道:①import **正面白名單**(``subprocess``/``ctypes`` 只准 kernel;治理模組是**顯式八項**
+    而非 ``agent_governance_`` 前綴放行 —— E2 RES-5:前綴會放行
+    ``agent_governance_command_capture_v2``,而它自己就是一個 ``subprocess.run`` 執行器);
+    ②``from <allowed> import <forbidden name>``(收口 E2 的 M2:``from os import system as _s``);③屬性名層 denylist
     (不論 receiver,故 ``libc.system`` / ``_o.system`` 都抓得到);④``getattr``/``setattr``/
     ``delattr`` 的名稱參數不得是**算出來的**,也不得是被禁名字面(收口 M2c);⑤字面字串拼接折疊
     (收口 ``"sub"+"process"`` 這類混淆,連帶讓 M2b 即使不 import ``importlib`` 也被抓)。
@@ -124,14 +144,16 @@ def _raw_command_findings(path: Path) -> list[str]:
 
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     is_kernel = path.name == KERNEL_PATH.name
-    allowed_modules = ALLOWED_STDLIB_IMPORTS | ALLOWED_THIRD_PARTY_IMPORTS
+    allowed_modules = (
+        ALLOWED_STDLIB_IMPORTS | ALLOWED_THIRD_PARTY_IMPORTS | ALLOWED_GOVERNANCE_IMPORTS
+    )
     if is_kernel:
         allowed_modules = allowed_modules | KERNEL_ONLY_IMPORTS
     findings: list[str] = []
 
     def _check_module(lineno: int, module: str, rendered: str) -> None:
         top = (module or "").split(".")[0]
-        if top.startswith(GOVERNANCE_IMPORT_PREFIX) or top in allowed_modules:
+        if top in allowed_modules:
             return
         findings.append(f"line {lineno}: import outside the declared allowlist: {rendered}")
 
@@ -231,6 +253,16 @@ AST_SCANNER_MUTATIONS = {
     ),
     "pty_spawn": ("import pty\npty.spawn('/bin/sh')\n", "import outside the declared allowlist"),
     "dunder_import": ("__import__('subprocess')\n", "builtin __import__"),
+    # ── E2 的 N16(RES-5):前綴放行下這條 exec 路徑在五個檔案上全綠 ──
+    "N16_governance_prefix_exec_module": (
+        "import agent_governance_command_capture_v2 as cap\n"
+        "cap.capture_command(['/bin/sh', '-c', 'id'])\n",
+        "import outside the declared allowlist",
+    ),
+    "N16_governance_prefix_from_import": (
+        "from agent_governance_command_capture_v2 import capture_command\n",
+        "import outside the declared allowlist",
+    ),
 }
 
 

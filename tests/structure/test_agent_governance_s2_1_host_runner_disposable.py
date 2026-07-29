@@ -261,6 +261,79 @@ def test_production_lane_refuses_foreign_capability_objects(monkeypatch):
     assert "fence_ops=" in str(error.value)
 
 
+def test_production_lane_refuses_a_subclass_that_drops_the_counters(monkeypatch):
+    """RES-4:``isinstance`` 收子類別 ⇒ 覆寫 ``stop()`` 不加計數器仍過閘,零值又被當成事實。"""
+
+    _force_derived(monkeypatch, PRODUCTION_VIEWS[0])
+    intent = _intent("sha256:" + "0" * 64, target_class="production")
+
+    class _SilentFenceOps(runner.QuiesceFenceOps):
+        def stop(self):  # pragma: no cover - 必須永不被呼叫
+            raise AssertionError("a counter-dropping subclass must be refused before any call")
+
+    def _factory():
+        return {
+            "host_probe": runner.QuiesceHostProbe(
+                executor=kernel.HostExecutionKernel(session=kernel.SESSION_S2_1_QUIESCE_READ),
+                proc_root="/proc",
+            ),
+            "fence_ops": _SilentFenceOps(
+                executor=kernel.HostExecutionKernel(
+                    session=kernel.SESSION_S2_1_QUIESCE_FENCE, allow_mutation=True
+                )
+            ),
+            "db_observer": runner.QuiesceDbObserver(None),
+        }
+
+    with pytest.raises(runner.S2_1HostRunnerError) as error:
+        runner.run_quiesce_fence_on_host(
+            intent, None, None, now=NOW, source_head=HEAD, capability_factory=_factory,
+            allow_production=True, production_confirm=intent["self_digest"],
+            operator_authorization_verified=True,
+        )
+    assert "expected exactly QuiesceFenceOps" in str(error.value)
+
+
+def test_production_lane_refuses_an_executor_that_is_not_the_host_kernel(monkeypatch):
+    """RES-4:``QuiesceFenceOps._run`` 只斷言 argv,真 exec 交給 executor ⇒ 它必須是 kernel 本尊。
+
+    注入一個裸執行器就把 ``shell=False`` / sanitized env / timeout / 每次 exec 前的 prctl 執法
+    全部丟掉,而 argv 斷言照樣綠 —— 生產 lane 因此把 executor 釘死。
+    """
+
+    _force_derived(monkeypatch, PRODUCTION_VIEWS[0])
+    intent = _intent("sha256:" + "0" * 64, target_class="production")
+
+    def _factory():
+        return {
+            "host_probe": runner.QuiesceHostProbe(
+                executor=_RecordingExecutor(), proc_root="/proc"
+            ),
+            "fence_ops": runner.QuiesceFenceOps(executor=_RecordingExecutor()),
+            "db_observer": runner.QuiesceDbObserver(None),
+        }
+
+    with pytest.raises(runner.S2_1HostRunnerError) as error:
+        runner.run_quiesce_fence_on_host(
+            intent, None, None, now=NOW, source_head=HEAD, capability_factory=_factory,
+            allow_production=True, production_confirm=intent["self_digest"],
+            operator_authorization_verified=True,
+        )
+    message = str(error.value)
+    assert "only executes through the HostExecutionKernel" in message
+    assert "host_probe executor=" in message and "fence_ops executor=" in message
+
+
+def test_the_rehearsal_lane_still_accepts_the_injected_simulator():
+    """誠實界線:RES-4 的 executor 釘只套在生產 lane;排練面的模擬器仍必須進得來。"""
+
+    probe = runner.QuiesceHostProbe(executor=_RecordingExecutor(), proc_root="/proc")
+    fence_ops = runner.QuiesceFenceOps(executor=_RecordingExecutor())
+    runner._require_runner_capabilities(probe, fence_ops, runner.QuiesceDbObserver(None))
+    with pytest.raises(runner.S2_1HostRunnerError):
+        runner._require_kernel_executors(probe, fence_ops)
+
+
 def test_unobservable_fence_is_reported_as_null_never_as_zero():
     """RUN-3 的核心:``0`` / ``[]`` 只能出現在**真的觀測過**的情形,否則必須是 ``null``。"""
 

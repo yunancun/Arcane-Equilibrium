@@ -75,10 +75,48 @@ class ObserverBootstrapHostDriver:
     進該 adapter 的 ``implementation_paths`` ⇒ 由 runner 自己發 ``GRANT <observer> TO <session>`` /
     ``REVOKE`` 會在該 invariant 的**字面**下把 observer 角色的成員圖改寫,且會逼「independent
     verifier」持有一條 **admin 寫連線**(與設計 §B.2「observer 結構上不持有任何寫能力」直接衝突)。
-    故 assumable session 一律由**供裝者**提供:T1 由拋棄式叢集 harness 預先建立,生產面由
-    operator 的 peer/ident 映射預先建立(``invariant`` 的 ``peer/ident local auth`` 那一句)。
-    runner 這邊只發一條 session 局部、非 DDL、不持久的 ``SET ROLE``——與 adapter 自己的
-    ``probe_observer_set_role_denied`` 同形,且識別碼一律經 ``_safe_ident`` 白名單。
+    故 assumable session 一律由**供裝者**提供,runner 這邊只發一條 session 局部、非 DDL、不持久的
+    ``SET ROLE``——與 adapter 自己的 ``probe_observer_set_role_denied`` 同形,且識別碼一律經
+    ``_safe_ident`` 白名單。
+
+    ``observer_session_connect`` 的**真實供裝時序(E2 在真 PG 16.14 上實證,更正前一版敘述)。**
+    前一版本寫「T1 由 harness 預先建立、生產面由 operator 的 peer/ident 映射預先建立」——那句
+    **被證偽**,而且是**結構上不可能**的:
+
+    * ``GRANT "<observer>" TO "<login>"`` 在 observer 角色存在之前一律
+      ``UndefinedObject: role "<observer>" does not exist``;而 observer 角色要到 adapter 的
+      **step 7**(``create_read_only_observer``)才被建立,adapter 的 **step 6** 又硬拒任何**既存**
+      的 observer 角色(``refusing to adopt or rotate a pre-existing role``)⇒ 這筆 membership
+      **不可能預先建立**。
+    * 沒有 membership 的**非 superuser** 登入角色直接 ``SET ROLE <observer>`` 一律
+      ``InsufficientPrivilege``。
+
+    ⇒ **peer/ident 只解決「認證」,不解決「membership」。** 正確時序是 **lazy**:供裝者必須在
+    adapter **step 7 之後、step 8(**``independent_read_only_proof``**)之前**才發那一條
+    ``GRANT <observer> TO <login>``。本 driver 在 step 8 才呼叫 ``observer_session_connect()``,
+    正是為了讓供裝者能在那一刻(而不是更早)完成它。T1 的
+    ``_provisioned_observer_session()`` 今日就是這樣 lazy 做的;生產面同理。
+
+    **生產面 operator 前置(供裝 ``observer_session_connect`` /
+    ``credential_escalation_connect`` 所需,缺任一項本 driver 一律 typed raise、絕不偽造 proof)。**
+
+    1. 一個**專用登入角色**(下稱 ``<login>``),必須 ``NOSUPERUSER``(另建議 ``NOCREATEROLE``)。
+       superuser 的 session 可以 ``SET ROLE`` 任何角色,``probe_observer_set_role_denied`` 就永遠
+       拿不到真的 42501 —— 那會把「拒絕證明」變成假的。``NOCREATEROLE`` 則使它無法自行補授
+       membership。
+    2. ``<login>`` 對目標 database 有 ``CONNECT``(peer/ident 本地認證即可),T1 另授
+       ``USAGE ON SCHEMA <observed_schema>`` 作為參照供裝。
+    3. **membership 必須 lazy 授予**:``GRANT <observer_role> TO <login>`` 只能在 step 7 之後、
+       step 8 之前發出;runner 這邊一行都不發。窗後的
+       ``REVOKE <observer_role> FROM <login>`` 同樣是 operator 的職責(runner **刻意沒有**撤權
+       路徑,見 RUN-2(c) 的 fail-loud 處置)。
+    4. ``credential_escalation_connect`` 這個能力**也要供裝**:它必須是一次會被 PG 以
+       ``28P01``/``28000`` 拒絕的連線嘗試(T1 用同一個 ``<login>`` 配錯密碼)。這要求 ``<login>``
+       有一條**密碼型**認證入口可打(``scram-sha-256``);observer 角色自己仍然是
+       ``NOLOGIN`` + peer/ident 無密碼(``generate_observer_grant_sql`` 對非 peer/ident 的
+       ``auth_mapping`` 恆 fail-closed),兩者是**不同角色**,故此前置不放寬 observer 的
+       no-password-ingress 邊界。若這條入口無法供裝,``independent_read_only_proof`` 會 typed
+       raise —— 絕不偽造一個 28P01。
     """
 
     #: 建構計數器 —— 「production 拒絕時 driver 未被構造」以此為可機證的斷言。
@@ -248,9 +286,12 @@ def _observed_driver_calls(driver: Any) -> list[str] | None:
 
     E2 RUN-3:``getattr(driver, "calls", [])`` 會把一個確實被呼叫過的注入物件記成空序列,
     等於把零值當成事實發出。無法觀測時只能誠實發 ``null``。
+
+    E2 RES-4(同源):比對用 ``type(x) is`` 而非 ``isinstance`` —— 一個覆寫方法但不 append
+    ``self.calls`` 的子類別能通過 ``isinstance``,零值又會被當成事實。
     """
 
-    if isinstance(driver, ObserverBootstrapHostDriver):
+    if type(driver) is ObserverBootstrapHostDriver:
         return list(driver.calls)
     return None
 
@@ -333,11 +374,11 @@ def run_observer_bootstrap_on_host(
         operator_authorization_verified=operator_authorization_verified,
     )
     driver = driver_factory()
-    if not isinstance(driver, ObserverBootstrapHostDriver):
+    if type(driver) is not ObserverBootstrapHostDriver:
         raise S2_0HostRunnerError(
-            "the S2.0 production lane only drives the runner's own ObserverBootstrapHostDriver; "
-            f"an unobservable {type(driver).__name__!r} capability is refused (its call sequence "
-            "could never be reported honestly)"
+            "the S2.0 production lane only drives the runner's own ObserverBootstrapHostDriver "
+            f"(exact type); an unobservable {type(driver).__name__!r} capability is refused (its "
+            "call sequence could never be reported honestly)"
         )
     surface_errors = host_kernel.assert_read_only_surface(
         driver, forbidden={"enable_now", "restart", "mask", "unmask", "daemon_reload", "kill"}
@@ -393,9 +434,10 @@ def rehearse_observer_bootstrap(
             "refusing to rehearse the S2.0 apply: " + "; ".join(refusals)
         )
     view = host_kernel.rehearsal_target_view_record(derived, target_view)
-    if not isinstance(driver, ObserverBootstrapHostDriver):
+    if type(driver) is not ObserverBootstrapHostDriver:
         raise S2_0HostRunnerError(
-            "the S2.0 rehearsal lane only drives the runner's own ObserverBootstrapHostDriver"
+            "the S2.0 rehearsal lane only drives the runner's own ObserverBootstrapHostDriver "
+            "(exact type)"
         )
     if driver.evidence_class == pg_observer.PRODUCTION_APPLIED_EVIDENCE_CLASS:
         raise S2_0HostRunnerError(

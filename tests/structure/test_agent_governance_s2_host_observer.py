@@ -176,6 +176,71 @@ def test_observer_child_exits_nonzero_on_an_inadmissible_request():
 
 
 # --------------------------------------------------------------------------- #
+# RES-6:L1 觀測閘必須在 ``main()`` 裡,而不是只在 CLI 裡
+# --------------------------------------------------------------------------- #
+def _encoded(request: dict) -> str:
+    import base64
+
+    return base64.b64encode(
+        json.dumps(request, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).decode("ascii")
+
+
+@pytest.mark.parametrize("target_class", [
+    kernel.TARGET_CLASS_PRODUCTION,
+    kernel.TARGET_CLASS_UNKNOWN,
+])
+def test_main_refuses_a_production_grade_host_without_an_acknowledgement(
+    monkeypatch, capsys, target_class
+):
+    """直接跑這個腳本(不經 CLI)在生產級主機上必須零觀測、零 exec。"""
+
+    monkeypatch.setattr(
+        observer_module.host_kernel, "derive_host_target_class",
+        lambda: {"target_class": target_class, "reason": "forced"},
+    )
+
+    def _never(*args, **kwargs):  # pragma: no cover - 必須永不被呼叫
+        raise AssertionError("no host executor may be constructed before the L1 gate passes")
+
+    monkeypatch.setattr(observer_module.host_kernel, "HostExecutionKernel", _never)
+    request = {
+        "schema_version": observer_module.REQUEST_SCHEMA_VERSION,
+        "faces": [observer_module.FACE_UNIT_STATE],
+    }
+    code = observer_module.main(["--request-base64", _encoded(request)])
+    assert code == observer_module.EXIT_OBSERVATION_NOT_ADMITTED
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "refused by the L1 host gate" in captured.err
+
+
+def test_main_admits_the_same_host_once_the_acknowledgement_is_present(monkeypatch):
+    """同一份 production view 上,一次顯式承認就放行 —— 與 CLI 那道閘逐字同義。"""
+
+    monkeypatch.setattr(
+        observer_module.host_kernel, "derive_host_target_class",
+        lambda: {"target_class": kernel.TARGET_CLASS_PRODUCTION, "reason": "forced"},
+    )
+    request = {
+        "schema_version": observer_module.REQUEST_SCHEMA_VERSION,
+        "faces": [observer_module.FACE_FILE_IDENTITY],
+        "path_keys": ["unit_fragment"],
+        "allow_production": True,
+    }
+    assert observer_module.main(["--request-base64", _encoded(request)]) == 0
+
+
+def test_a_non_bool_acknowledgement_is_inadmissible():
+    errors = observer_module.validate_observation_request({
+        "schema_version": observer_module.REQUEST_SCHEMA_VERSION,
+        "faces": [observer_module.FACE_PROCESS_IDENTITY],
+        "allow_production": "true",
+    })
+    assert any("allow_production must be a bool" in item for item in errors)
+
+
+# --------------------------------------------------------------------------- #
 # face 1 — unit state
 # --------------------------------------------------------------------------- #
 def test_unit_state_face_issues_exactly_the_owner_show_command():

@@ -271,6 +271,10 @@ def _require_runner_capabilities(probe: Any, fence_ops: Any, db_observer: Any) -
     收下任意物件會讓 ``stop_calls`` / ``fence_argv`` 這些欄位在物件**確實**動過主機時仍被寫成
     ``0`` / ``[]`` —— 零值被當成事實發出。runner 存在的理由正是提供可觀測的主機面,故非自有類別
     一律拒絕,而不是靜默降級成不可觀測。
+
+    E2 RES-4:比對用 ``type(x) is klass`` 而**不是** ``isinstance``。一個覆寫 ``stop()`` 但不加
+    計數器的子類別能通過 ``isinstance``,於是 ``stop_calls`` 又回到「零值被當成事實」——那正是
+    RUN-3 要收的洞,不能從子類別這條路重新打開。
     """
 
     expected = (
@@ -279,14 +283,42 @@ def _require_runner_capabilities(probe: Any, fence_ops: Any, db_observer: Any) -
         ("db_observer", db_observer, QuiesceDbObserver),
     )
     wrong = [
-        f"{name}={type(value).__name__!r} (expected {klass.__name__})"
+        f"{name}={type(value).__name__!r} (expected exactly {klass.__name__})"
         for name, value, klass in expected
-        if not isinstance(value, klass)
+        if type(value) is not klass
     ]
     if wrong:
         raise S2_1HostRunnerError(
             "the S2.1 host runner only drives its own capability classes; refusing unobservable "
             "capabilities " + "; ".join(wrong)
+        )
+
+
+def _require_kernel_executors(probe: QuiesceHostProbe, fence_ops: QuiesceFenceOps) -> None:
+    """**生產 lane 專用**:兩個 exec 面背後必須是真的 :class:`HostExecutionKernel`(E2 RES-4)。
+
+    ``QuiesceFenceOps._run`` 自己只做 ``assert_session_argv``(argv 是不是那條),真正的 exec 交給
+    注入的 ``executor``。於是 ``shell=False`` / sanitized env / 固定 timeout / 每次 exec 前的
+    ``prctl(PR_SET_DUMPABLE)`` 執法**全部**是 kernel 的性質,而不是 runner 的性質 —— 注入一個裸
+    的執行器包裝就把那四項一起丟了,而 argv 斷言照樣綠。生產 lane 因此把 executor 釘死成 kernel
+    本尊(``type(x) is``,子類別可覆寫 ``_execute``,同樣不收)。
+
+    rehearsal lane **刻意不套這道**:那條 lane 的 host 面本來就是注入的模擬器,誠實界線已寫明
+    「不證明任何真 systemd 事實」。把模擬器擋掉不會增加安全,只會讓非 Linux 主機上再也證不出
+    拒絕矩陣。
+    """
+
+    wrong = [
+        f"{name} executor={type(executor).__name__!r}"
+        for name, executor in (
+            ("host_probe", probe._executor), ("fence_ops", fence_ops._executor),
+        )
+        if type(executor) is not host_kernel.HostExecutionKernel
+    ]
+    if wrong:
+        raise S2_1HostRunnerError(
+            "the S2.1 production lane only executes through the HostExecutionKernel (shell=False, "
+            "sanitized env, fixed timeout, per-exec prctl enforcement); refusing " + "; ".join(wrong)
         )
 
 
@@ -356,7 +388,9 @@ def run_quiesce_fence_on_host(
 
     ``capability_factory`` 回一個 ``{"host_probe", "fence_ops", "db_observer"}`` 字典,且**只有在
     host admission 通過之後**才被呼叫 —— 被拒時 fence 能力根本不存在,主機零接觸;三個能力都必須
-    是 runner 自有類別(RUN-3)。
+    是 runner 自有類別(RUN-3,且比對 exact type),兩個 exec 面背後的 ``executor`` 還必須是真的
+    :class:`agent_governance_s2_host_kernel.HostExecutionKernel`(RES-4:否則 ``shell=False`` /
+    sanitized env / timeout / prctl 執法在真 fence 路徑上一項都不成立)。
     """
 
     view = host_kernel.derive_host_target_class()
@@ -372,6 +406,7 @@ def run_quiesce_fence_on_host(
     fence_ops = capabilities["fence_ops"]
     db_observer = capabilities["db_observer"]
     _require_runner_capabilities(probe, fence_ops, db_observer)
+    _require_kernel_executors(probe, fence_ops)
     surface_errors = host_kernel.assert_read_only_surface(probe)
     surface_errors.extend(host_kernel.assert_read_only_surface(db_observer))
     if surface_errors:

@@ -499,6 +499,119 @@ def test_registry_tracked_bytes_leave_headroom_under_the_execve_single_argument_
     assert MAX_ARG_STRLEN - registry_bytes > 24 * 1024, registry_bytes
 
 
+# 這支硬邊界釘量的是 **source**(乾淨工作樹)而不是當下的編輯狀態,故必須有一道「樹必須乾淨」的
+# 前置。E2 的 M-1:FIX-3 把本測試**綠著刪掉**且未在 commit body 揭露 —— 刪除本身可辯護(髒樹會誤
+# 紅),不揭露不可辯護。本波以「前置 + 誠實 skip 理由」把它復原,使它在 CI / 乾淨 HEAD 上恆跑,
+# 在編輯中的髒樹上誠實 SKIP 而不是誤紅,也不是消失。
+_EXECVE_CAP_MEASURED_ROLES = ("E1", "E2", "OPS", "PM")
+
+
+def _worktree_dirt() -> str | None:
+    """乾淨回 ``None``;否則回一句可讀的「為什麼這棵樹不能拿來量 source」。"""
+
+    try:
+        completed = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=str(ROOT), capture_output=True, text=True, check=False, timeout=120,
+        )
+    except OSError as error:  # pragma: no cover - 無 git 的環境
+        return f"git is not invocable here ({error})"
+    if completed.returncode != 0:  # pragma: no cover - 非 git 樹 / 壞倉庫
+        return f"git status failed (rc={completed.returncode}): {completed.stderr.strip()[:200]}"
+    dirty = [line for line in completed.stdout.splitlines() if line.strip()]
+    if dirty:
+        return f"{len(dirty)} uncommitted/untracked path(s), first: {dirty[0].strip()!r}"
+    return None
+
+
+def test_compiled_context_artifact_stays_under_the_execve_cap():
+    """compiled artifact 的**硬邊界**釘(``MAX_ARG_STRLEN``;不是可重現的餘裕釘)。
+
+    ``compile_context`` 會把當下工作樹的 diff / inventory 納入 ⇒ 量到的 bytes 依樹狀態而變。
+    本次修復期間同一支測試實測 115030 → 124107 → 137488(最後一個已越過 131072),也就是說在
+    **髒樹**上它量的是工作樹而不是 source,會誤紅。處置**不是**刪掉它,而是加一道前置:
+
+    * 工作樹不乾淨 ⇒ ``pytest.skip`` 並把髒度逐字寫進 skip 理由(fail loud,不靜默通過);
+    * 工作樹乾淨 ⇒ 真的量,且對 E2 實測過的四個角色**逐一**釘住 ``< MAX_ARG_STRLEN``。
+
+    乾淨 HEAD ``50a224af4`` 上的實測(E1 與 E2 兩台各自獨立跑出同一組數字):
+    E1 115468 / E2 115460 / OPS 113033 / PM 95905,registry 檔身 96675 —— 全部 < 131072。
+    canonical 慣例本來就是以 ``@file`` 傳 context artifact 而非塞進單一 argv 元素。
+    """
+
+    dirt = _worktree_dirt()
+    if dirt is not None:
+        pytest.skip(
+            "the execve hard-cap measurement only means anything on a clean worktree "
+            f"(compile_context ingests the working-tree diff): {dirt}"
+        )
+
+    from agent_governance_context import capture_repository_baseline
+    from agent_governance_execution import compile_context, materialize_context_artifact
+    from agent_governance_routing import route_task
+
+    scope = ["helper_scripts/maintenance_scripts/agent_governance_s2_host_kernel.py"]
+    baseline = capture_repository_baseline(root=ROOT)
+    routed = route_task({
+        "task_shape": "implementation", "surfaces": ["governance"], "risk": "medium",
+        "uncertainty": "low", "side_effect_class": "repo_write",
+        "objective": "measure the compiled context artifact size after the registry append",
+        "scope": scope, "dirty_scope": scope, "verification_scope": scope,
+        "acceptance_criteria": ["registry growth leaves execve headroom"],
+        "hard_stops": ["no runtime mutation"],
+        "baseline": baseline,
+        "direct_interfaces": ["agent_governance_s2_host_kernel"],
+        "previous_failure": "PR#129 registry growth crossed MAX_ARG_STRLEN and raised E2BIG",
+    })
+    measured: dict[str, int] = {}
+    for role in _EXECVE_CAP_MEASURED_ROLES:
+        artifact = materialize_context_artifact(
+            compile_context(role, routed["task_facts"], root=ROOT)
+        )
+        measured[role] = len(
+            json.dumps(artifact, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        )
+    assert max(measured.values()) < MAX_ARG_STRLEN, {
+        "measured": measured, "cap": MAX_ARG_STRLEN, "tree_state": baseline,
+    }
+
+
+def test_an_uncreatable_out_dir_is_a_typed_usage_exit_not_a_bare_traceback(tmp_path):
+    """RES-7:``mkdir`` 原本在 ``try:`` 之外 ⇒ 裸 traceback + rc=1 + 零 artifact。
+
+    out-dir 建不起來時**沒有任何地方**可以落盤,那是誠實的物理限制;但收場必須是 typed usage
+    exit + 一行 stderr,而不是一個 traceback 把 process 退成 1(那與本檔 docstring 字面衝突)。
+    """
+
+    blocked = tmp_path / "not_a_dir"
+    blocked.write_text("i am a file", encoding="utf-8")
+    completed = subprocess.run(
+        [sys.executable, str(HELPERS / "aiml_s2_effect_host_run.py"),
+         "--session", "s2_1", "--mode", "probe", "--out-dir", str(blocked / "nope"),
+         "--source-head", HEAD],
+        capture_output=True, text=True, check=False,
+    )
+    assert completed.returncode == cli.EXIT_USAGE, (completed.returncode, completed.stderr)
+    assert "Traceback" not in completed.stderr, completed.stderr
+    assert "--out-dir is not creatable" in completed.stderr
+    assert completed.stdout == ""
+
+
+def test_the_summary_write_failure_never_replaces_the_exit_code(tmp_path, monkeypatch):
+    """RES-7 的另一半:``finally`` 內逸出的例外會**取代** return value ⇒ 又變回裸 traceback。"""
+
+    out_dir = tmp_path / "out"
+
+    def _explode(path, value):
+        raise OSError("the artifact directory vanished mid-run")
+
+    monkeypatch.setattr(cli, "_canonical_write", _explode)
+    code = cli.main([
+        "--session", "s2_1", "--mode", "probe", "--out-dir", str(out_dir), "--source-head", HEAD,
+    ])
+    assert code == cli.EXIT_INTERNAL_ERROR
+
+
 def test_cli_runs_as_a_script_and_makes_no_host_contact(tmp_path):
     out_dir = tmp_path / "out"
     completed = subprocess.run(

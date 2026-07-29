@@ -9,7 +9,9 @@
     顯式 ``--allow-production`` 承認,否則 observer 子行程根本不被 spawn。該閘刻意比 apply 面弱
     一級(不要 SSHSIG / 不要 ``--production-confirm``),理由寫在 kernel 的謂詞 docstring:觀測面
     的每條 argv 都在唯讀 allowlist 內、結構上不可能變更狀態,而觀測正是「拿到 permit 之前」要做
-    的事。
+    的事。**同一道閘也下沉到 observer 的 ``main()``**(E2 RES-6):那個腳本是獨立進入點,「不經
+    本 CLI 直接跑它」是完全合法的路徑,故承認隨 request 傳下去、child 自己再判一次 ——
+    「否則子行程根本不被 spawn」只是**本 CLI 路徑上**的說法,不是那個進入點的全部保護。
 
 ``admit``
     對一份 typed intent(+ 可選的 operator permit/signature)跑完整的 §E.2 准入矩陣並落盤裁決。
@@ -38,7 +40,9 @@
 * 壞輸入一律 typed fail-closed,且**落盤 artifact 的 ``exit_code`` 與 process 的真實退出碼恆
   一致**:不可讀 / 非 JSON 的 ``--intent-file`` / ``--operator-permit`` / ``--operator-signature``
   → ``INPUT_INVALID``(exit 6);任何未預期例外 → ``RUNNER_FAILED``(exit 7)+ stderr 明文,絕不讓一個裸
-  traceback 把 process 退成 1、卻在 ``run_summary.json`` 寫另一個號碼。
+  traceback 把 process 退成 1、卻在 ``run_summary.json`` 寫另一個號碼。**唯一沒有 artifact 的
+  路徑**是 ``--out-dir`` 自己建不起來(例如 ``--out-dir /dev/null/nope``):那時沒有任何地方可以
+  落盤,故收成 typed usage(exit 2)+ stderr 明文(E2 RES-7;此前那條路是裸 traceback rc=1)。
 """
 
 from __future__ import annotations
@@ -201,6 +205,9 @@ def _observation(args, target_view: dict[str, Any]) -> dict[str, Any]:
         "schema_version": host_observer.REQUEST_SCHEMA_VERSION,
         "faces": [host_observer.FACE_FILE_IDENTITY, host_observer.FACE_PROCESS_IDENTITY],
         "path_keys": sorted(host_observer.CANONICAL_OBSERVABLE_PATHS),
+        # child 的 ``main()`` 自己也過同一道 L1 閘(RES-6),故承認必須隨 request 傳下去 ——
+        # 否則 CLI 這邊放行、child 那邊自己拒,兩道閘會不一致。
+        "allow_production": bool(args.allow_production),
     }
     if args.session == "s2_1":
         request["faces"] = [
@@ -236,7 +243,18 @@ def main(argv: list[str] | None = None) -> int:
     if args.mode in ("admit", "apply") and args.intent_file is None:
         parser.error(f"--mode {args.mode} requires --intent-file")
 
-    args.out_dir.mkdir(parents=True, exist_ok=True)
+    # E2 RES-7:``mkdir`` 原本在 ``try:`` **之外** ⇒ ``--out-dir /dev/null/nope`` 會產生一個裸
+    # traceback、process rc=1、零 artifact,與本檔 docstring「絕不讓一個裸 traceback 把 process
+    # 退成 1」字面衝突。out-dir 建不起來時**沒有任何地方**可以落盤(那是誠實的物理限制),所以
+    # 正確的收場是 typed usage 退出 + stderr 明文,而不是 traceback。
+    try:
+        args.out_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as error:
+        sys.stderr.write(
+            f"--out-dir is not creatable ({error}); no artifact can be written there and this "
+            "runner refuses to continue without its artifact contract\n"
+        )
+        return EXIT_USAGE
     summary: dict[str, Any] = {
         "session": args.session,
         "mode": args.mode,
@@ -323,7 +341,12 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         # 頂層 finally:不論走哪條路,``--out-dir`` 的 canonical artifact 契約都成立。
         summary["exit_code"] = exit_code
-        _canonical_write(args.out_dir / "run_summary.json", summary)
+        try:
+            _canonical_write(args.out_dir / "run_summary.json", summary)
+        except OSError as error:
+            # RES-7:``finally`` 內任何逸出的例外都會**取代** return value ⇒ 又變回裸 traceback
+            # 退 1。out-dir 若在執行中途消失,只能誠實記在 stderr,絕不讓它吃掉退出碼。
+            sys.stderr.write(f"run_summary.json could not be written: {error}\n")
         sys.stdout.write(
             json.dumps(summary, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n"
         )

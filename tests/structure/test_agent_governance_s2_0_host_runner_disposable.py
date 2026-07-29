@@ -29,6 +29,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -278,16 +279,39 @@ def test_rehearsal_driver_may_never_claim_platform_attested():
 # --------------------------------------------------------------------------- #
 # RUN-2:零 role membership DDL、識別碼一律過 _safe_ident
 # --------------------------------------------------------------------------- #
-def _executed_statement_literals(module) -> list[str]:
-    """AST 掃出 runner 模組**實際送進 cursor.execute() 的字面 SQL**(不看註解/docstring)。"""
+# E2 RES-3:原掃描器只比對 ``.execute``、且只看直接的 attribute call ⇒ 兩條逃逸形全綠:
+#   ``cur.executemany("GRANT %s TO %s", rows)``   (方法名不同)
+#   ``run = cur.execute; run(f'GRANT ...')``      (先綁成別名再呼叫)
+# 前者以方法名集合收口;後者以「任何把 execute 家族綁成名字的動作即記一筆違規證據」收口 —— 別名
+# 一旦存在,這支掃描器就再也證不出「只發過一條 SET」,故它必須紅而不是靜默漏掉。
+_EXECUTE_METHOD_NAMES = frozenset({"execute", "executemany", "executescript"})
 
-    tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
+
+def _source_of(module) -> str:
+    return Path(module.__file__).read_text(encoding="utf-8")
+
+
+def _executed_statement_literals(module) -> list[str]:
+    """AST 掃出 runner 模組**實際送進 cursor.execute()/executemany() 的字面 SQL**(不看註解)。"""
+
+    tree = ast.parse(_source_of(module))
     literals: list[str] = []
     for node in ast.walk(tree):
+        # ①別名綁定:``run = cur.execute`` / ``run := cur.execute`` 一律當違規證據。
+        if isinstance(node, (ast.Assign, ast.AnnAssign, ast.NamedExpr)):
+            bound = node.value
+            if (
+                isinstance(bound, ast.Attribute) and bound.attr in _EXECUTE_METHOD_NAMES
+            ):  # pragma: no cover - 現況零命中;命中即紅
+                literals.append(f"<execute alias bound at line {node.lineno}>")
+            continue
         if not isinstance(node, ast.Call):
             continue
         func = node.func
-        if not (isinstance(func, ast.Attribute) and func.attr == "execute") or not node.args:
+        if not (isinstance(func, ast.Attribute) and func.attr in _EXECUTE_METHOD_NAMES):
+            continue
+        if not node.args:  # pragma: no cover - 無參數的 execute 也不該存在
+            literals.append(f"<{func.attr}() with no statement at line {node.lineno}>")
             continue
         statement = node.args[0]
         if isinstance(statement, ast.Constant) and isinstance(statement.value, str):
@@ -312,9 +336,31 @@ def test_the_runner_never_issues_role_membership_ddl():
         upper = statement.upper()
         assert "GRANT" not in upper and "REVOKE" not in upper, statement
     # 撤權路徑不存在 ⇒ 不可能有「撤權失敗被 except: pass 吞掉」這回事(fail loud)。
-    source = Path(runner.__file__).read_text(encoding="utf-8")
+    source = _source_of(runner)
     assert "except Exception" not in source
     assert "pass\n" not in source
+
+
+# RES-3 的反例:掃描器抓不到的逃逸形 = 上面那支測試在空轉。兩條 E2 指名的形逐一釘死。
+SQL_SCANNER_ESCAPES = {
+    "executemany_grant": 'def f(cur):\n    cur.executemany("GRANT %s TO %s", [])\n',
+    "aliased_execute": (
+        "def f(cur):\n    run = cur.execute\n    run(f'GRANT \"a\" TO \"b\"')\n"
+    ),
+    "walrus_aliased_execute": (
+        "def f(cur):\n    (run := cur.execute)\n    run('GRANT a TO b')\n"
+    ),
+}
+
+
+@pytest.mark.parametrize("escape", sorted(SQL_SCANNER_ESCAPES))
+def test_the_sql_scanner_catches_the_known_escapes(tmp_path, escape):
+    sample = tmp_path / f"{escape}.py"
+    sample.write_text(SQL_SCANNER_ESCAPES[escape], encoding="utf-8")
+    statements = _executed_statement_literals(SimpleNamespace(__file__=str(sample)))
+    assert statements, escape
+    # 逐字重跑上面那支測試的判準:它必須**紅**,不能靜默漏掉。
+    assert [item.split()[0] for item in statements] != ["SET"], statements
 
 
 def test_the_driver_holds_no_admin_write_connection_for_the_proof(monkeypatch):
@@ -569,9 +615,15 @@ def _provisioned_observer_session(sock):
 
     RUN-2(b) 的處置:role membership DDL 屬於「誰供裝這台主機」的職責 —— T1 由本拋棄式叢集
     harness 供裝(鏡既有先例 ``test_agent_governance_pg_observer_bootstrap_disposable.py``),
-    生產面由 operator 的 peer/ident 映射供裝。runner 自己**一行 membership DDL 都不發**,也因此
-    不需要持有 admin 寫連線 ⇒ ``pg_observer_bootstrap_adapter_v1.invariant`` 的
-    ``no role membership`` 對 runner 這條 implementation path 逐字成立。
+    生產面由 operator 供裝。runner 自己**一行 membership DDL 都不發**,也因此不需要持有 admin
+    寫連線 ⇒ ``pg_observer_bootstrap_adapter_v1.invariant`` 的 ``no role membership`` 對 runner
+    這條 implementation path 逐字成立。
+
+    **時序是 lazy,不是「預先建立」(E2 在真 PG 16.14 上證偽了前一版敘述)。** 本函式是在
+    adapter 的 **step 8**(``independent_read_only_proof``)才被呼叫的,那條 ``GRANT`` 也才在
+    那一刻發出 —— 因為 observer 角色要到 **step 7** 才存在(step 6 又硬拒既存的 observer 角色),
+    所以它**不可能**在 apply 之前就建好。生產面同理:peer/ident 只解決認證,不解決 membership,
+    operator 必須在 step 7 之後、step 8 之前補這一條 GRANT。
 
     ``ASSUME`` 刻意是**非 superuser** 登入角色:superuser 的 session 可以 ``SET ROLE`` 任何角色,
     於是 ``probe_observer_set_role_denied`` 根本得不到真的 42501 —— 那會把拒絕證明變成假的。

@@ -66,6 +66,9 @@ import agent_governance_s2_host_kernel as host_kernel  # noqa: E402
 OBSERVATION_SCHEMA_VERSION = "s2_host_observation_v1"
 REQUEST_SCHEMA_VERSION = "s2_host_observation_request_v1"
 
+# ``main()`` 的 L1 觀測閘退出碼(E2 RES-6):production/unknown 上沒有顯式承認 ⇒ 零觀測、零 exec。
+EXIT_OBSERVATION_NOT_ADMITTED = 6
+
 FACE_UNIT_STATE = "unit_state"
 FACE_PG_ACL = "pg_acl"
 FACE_FILE_IDENTITY = "file_identity"
@@ -452,6 +455,8 @@ def validate_observation_request(request: Any) -> list[str]:
         errors.append("the pg_acl face requires a pg object")
     if FACE_FILE_IDENTITY in (faces or []) and not isinstance(request.get("path_keys"), list):
         errors.append("the file_identity face requires a path_keys list of code-owned keys")
+    if "allow_production" in request and not isinstance(request["allow_production"], bool):
+        errors.append("allow_production must be a bool acknowledgement (absent means false)")
     return errors
 
 
@@ -475,6 +480,20 @@ def validate_observation(observation: Any) -> list[str]:
 # process-separated entrypoint (spawned by HostExecutionKernel.run_observer_child)
 # --------------------------------------------------------------------------- #
 def main(argv: list[str] | None = None) -> int:
+    """獨立進入點:``python3 -E <this file> --request-base64 <token>``。
+
+    **L1 觀測閘就在這裡(E2 RES-6)。** 先前這道閘只存在於 CLI(``aiml_s2_effect_host_run``)的
+    ``_observation()``,於是「直接跑這個檔」這條完全合法的進入點在生產主機上會**毫無承認地**發出
+    ``systemctl show`` —— CLI docstring 那句「否則 observer 子行程根本不被 spawn」只對 CLI 路徑
+    成立。現在閘下沉到本函式:target class 一律當場由 :func:`derive_host_target_class` 從**主機
+    事實**導出(caller 遞不進 view),``production`` / ``unknown`` 需要 request 裡一次顯式的
+    ``allow_production: true`` 承認,否則零觀測、零 exec、typed 退出 6。
+
+    誠實界線:``allow_production`` 是一次**顯式承認**,不是授權 —— 它與 CLI 的
+    ``--allow-production`` 旗標同性質(自我宣告),擋的是「不小心在生產主機上跑起來」而不是一個
+    刻意的操作者。真正不可自我宣告的是 ``target_class`` 本身,那一項恆為導出值。
+    """
+
     parser = argparse.ArgumentParser(description="S2 read-only host observer (process-separated)")
     parser.add_argument("--request-base64", required=True)
     args = parser.parse_args(argv)
@@ -483,6 +502,19 @@ def main(argv: list[str] | None = None) -> int:
     except (ValueError, UnicodeDecodeError):
         sys.stderr.write("observation request is not canonical base64 JSON\n")
         return 3
+    if not isinstance(request, dict):
+        sys.stderr.write("observation request must be an object\n")
+        return 3
+    admission_errors = host_kernel.host_observation_admission_errors(
+        host_kernel.derive_host_target_class(),
+        allow_production=request.get("allow_production") is True,
+    )
+    if admission_errors:
+        sys.stderr.write(
+            "read-only observation refused by the L1 host gate: "
+            + "; ".join(admission_errors) + "\n"
+        )
+        return EXIT_OBSERVATION_NOT_ADMITTED
     executor = None
     if FACE_UNIT_STATE in (request.get("faces") or []):
         executor = host_kernel.HostExecutionKernel(
