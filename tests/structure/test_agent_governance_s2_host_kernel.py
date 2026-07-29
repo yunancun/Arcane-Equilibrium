@@ -43,8 +43,27 @@ RUNNER_FAMILY = (
     HELPERS / "agent_governance_s2_host_observer.py",
     HELPERS / "agent_governance_s2_0_host_runner.py",
     HELPERS / "agent_governance_s2_1_host_runner.py",
+    HELPERS / "agent_governance_s2_4_host_storage.py",
+    HELPERS / "agent_governance_s2_4_host_recovery.py",
     HELPERS / "aiml_s2_effect_host_run.py",
 )
+# S2E.2b-1:``RUNNER_FAMILY`` 過去是**純手維護**的 tuple,而它同時是 AST no-raw-command 掃描的
+# 唯一對象(:func:`_present_family`)⇒ 一個新 runner 檔只要忘了加進來,就完全不被掃描,任何新的
+# exec 面都能全綠落地。手維護的表本身不是問題,**沒有任何東西比對它與磁碟上的事實**才是。以下
+# 兩張 glob 把「長得像 S2 受信主機 runner 的檔案」由檔案系統導出,再要求它是 family 的子集。
+RUNNER_FAMILY_GLOBS = ("agent_governance_s2_*host_*.py", "aiml_s2_*host_run*.py")
+# glob 是形狀判準,不是語義判準:S2.4 的 row driver **protocol 葉**恰好也叫 ``…_host_identity``,
+# 但它不是 runner(沒有 lane、沒有主機能力、其匯入面由 S2.4 wave 治理)。故此處允許顯式除名,
+# 但除名**只**豁免 per-file import 白名單那一項:被除名的檔案仍要通過 raw-command 掃描的其餘
+# 每一道,且一律不得碰 :data:`KERNEL_ONLY_IMPORTS`(見
+# ``test_every_file_that_looks_like_an_s2_host_runner_is_scanned``)。於是「把新 runner 塞進除名表」
+# 換不到任何 exec 能力,只換到一次必須寫明理由的顯式動作。
+NON_RUNNER_HOST_LEAVES = {
+    "agent_governance_s2_4_host_identity.py": (
+        "S2.4 HOST_IDENTITY_INSTALL row 的 typed driver Protocol 與純導出葉;它不驅動任何 lane、"
+        "不持有主機能力,匯入面屬 s2_4_install_adapter_v1 的 component_paths 治理範圍"
+    ),
+}
 # 四個 S2 effect adapter 的 apply 進入點 + 其驅動葉:observer/kernel 的 import closure 不得含它們。
 APPLIER_MODULES = frozenset({
     "agent_governance_pg_observer_bootstrap",
@@ -64,24 +83,71 @@ APPLIER_MODULES = frozenset({
 # runner 家族只准 import 這一組宣告過的模組,任何其他 import 一律是 finding —— 於是
 # ``importlib`` / ``pty`` / ``commands`` / ``ctypes``(可 `CDLL(None).system`)全都不必逐一列黑。
 ALLOWED_STDLIB_IMPORTS = frozenset({
-    "__future__", "argparse", "base64", "datetime", "hashlib", "json", "os",
+    "__future__", "argparse", "base64", "datetime", "fcntl", "hashlib", "json", "os",
     "pathlib", "re", "socket", "stat", "sys", "typing",
 })
 ALLOWED_THIRD_PARTY_IMPORTS = frozenset({"psycopg2"})
 # E2 RES-5:原本是 ``GOVERNANCE_IMPORT_PREFIX = "agent_governance_"`` 的**無條件前綴放行**,而
 # ``agent_governance_command_capture_v2`` 本身就是一個 ``subprocess.run`` 執行器 —— 於是「import
 # 它 + ``capture_command(argv)``」這條 exec 路徑在五個檔案上全綠(E2 的 N16 探針)。前綴是名字,
-# 不是能力。改成**顯式模組列**:只有這八個治理模組被放行,新增任何一個都必須在這裡明說。
-ALLOWED_GOVERNANCE_IMPORTS = frozenset({
-    "agent_governance_alr_quiesce_fence",
-    "agent_governance_alr_quiesce_inventory",
-    "agent_governance_pg_observer_bootstrap",
-    "agent_governance_s2_0_host_runner",
-    "agent_governance_s2_1_host_runner",
-    "agent_governance_s2_effect_binding",
-    "agent_governance_s2_host_kernel",
-    "agent_governance_s2_host_observer",
-})
+# 不是能力。改成**顯式模組列**:新增任何一個都必須在這裡明說。
+#
+# S2E.2b-1:再從「全家族共用一個集合」改成 **per-file**。共用集合有一個結構性的副作用——S2.4 的
+# 啟動補償 runner 需要 import 多個 applier 模組(``agent_governance_s2_4_install_driver`` 等),
+# 而把它們塞進共用集合等於**同時**允許 observer 與 kernel import applier;
+# ``test_kernel_import_closure_excludes_every_applier_module`` 只覆蓋 kernel,於是 E2 RES-5 收掉的
+# 那個洞會從側門回到 observer 上。白名單是**能力**宣告,能力屬於檔案,不屬於家族。
+#
+# 未列名的檔案(含合成突變樣本)其治理白名單為**空集**——fail-closed:新 family 檔的第一個治理
+# import 就必須在此顯式宣告。
+GOVERNANCE_IMPORTS_BY_FILE: dict[str, frozenset[str]] = {
+    "agent_governance_s2_host_kernel.py": frozenset({
+        "agent_governance_alr_quiesce_inventory",
+    }),
+    "agent_governance_s2_host_observer.py": frozenset({
+        "agent_governance_alr_quiesce_inventory",
+        "agent_governance_s2_host_kernel",
+    }),
+    "agent_governance_s2_0_host_runner.py": frozenset({
+        "agent_governance_pg_observer_bootstrap",
+        "agent_governance_s2_effect_binding",
+        "agent_governance_s2_host_kernel",
+    }),
+    "agent_governance_s2_1_host_runner.py": frozenset({
+        "agent_governance_alr_quiesce_fence",
+        "agent_governance_alr_quiesce_inventory",
+        "agent_governance_s2_effect_binding",
+        "agent_governance_s2_host_kernel",
+    }),
+    # S2.4 §5.2 的 POSIX 檔案/lock driver:只需 journal/lock 兩葉的**常量**(路徑、mode、
+    # open flags),不 import 任何 applier。
+    "agent_governance_s2_4_host_storage.py": frozenset({
+        "agent_governance_s2_4_journal",
+        "agent_governance_s2_4_lock",
+    }),
+    # S2.4 §5.4 的啟動逆序補償器:它是唯一需要 applier 匯入面的 family 成員(補償要重用
+    # aggregate 交易葉的 rollback 契約、殘留觀測與 lock-release 折入政策,絕不另抄一份)。
+    "agent_governance_s2_4_host_recovery.py": frozenset({
+        "agent_governance_s2_4_component",
+        "agent_governance_s2_4_host_storage",
+        "agent_governance_s2_4_install_driver",
+        "agent_governance_s2_4_install_evidence",
+        "agent_governance_s2_4_install_plan",
+        "agent_governance_s2_4_journal",
+        "agent_governance_s2_4_lock",
+        "agent_governance_s2_4_reconcile",
+    }),
+    "aiml_s2_effect_host_run.py": frozenset({
+        "agent_governance_alr_quiesce_fence",
+        "agent_governance_pg_observer_bootstrap",
+        "agent_governance_s2_0_host_runner",
+        "agent_governance_s2_1_host_runner",
+        "agent_governance_s2_4_host_recovery",
+        "agent_governance_s2_4_host_storage",
+        "agent_governance_s2_host_kernel",
+        "agent_governance_s2_host_observer",
+    }),
+}
 # 只有 kernel 可以 import 的三個模組:``subprocess``(唯一 exec 點)、``ctypes``(prctl 執法;
 # 它同時也是一條 libc ``system()`` 路徑)、以及 ``agent_governance_command_capture_v2``
 # —— 後者**本身就是一個 exec 器**(``capture_command`` 內有 ``subprocess.run``),kernel 只從它
@@ -129,30 +195,50 @@ def _fold_string(node: ast.AST) -> str | None:
     return None
 
 
-def _raw_command_findings(path: Path) -> list[str]:
+def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
     """整個 runner 家族的 no-raw-command 掃描;kernel 之外**任何** finding 即紅。
 
-    五道:①import **正面白名單**(``subprocess``/``ctypes`` 只准 kernel;治理模組是**顯式八項**
-    而非 ``agent_governance_`` 前綴放行 —— E2 RES-5:前綴會放行
-    ``agent_governance_command_capture_v2``,而它自己就是一個 ``subprocess.run`` 執行器);
-    ②``from <allowed> import <forbidden name>``(收口 E2 的 M2:``from os import system as _s``);③屬性名層 denylist
-    (不論 receiver,故 ``libc.system`` / ``_o.system`` 都抓得到);④``getattr``/``setattr``/
-    ``delattr`` 的名稱參數不得是**算出來的**,也不得是被禁名字面(收口 M2c);⑤字面字串拼接折疊
-    (收口 ``"sub"+"process"`` 這類混淆,連帶讓 M2b 即使不 import ``importlib`` 也被抓)。
-    另加 ``shell=`` 必須是常量 ``False``。
+    五道:①import **正面白名單**(``subprocess``/``ctypes`` 只准 kernel;治理模組是
+    :data:`GOVERNANCE_IMPORTS_BY_FILE` 的 **per-file** 顯式列,而非 ``agent_governance_`` 前綴
+    放行 —— E2 RES-5:前綴會放行 ``agent_governance_command_capture_v2``,而它自己就是一個
+    ``subprocess.run`` 執行器);②``from <allowed> import <forbidden name>``(收口 E2 的 M2:
+    ``from os import system as _s``);③屬性名層 denylist(不論 receiver,故 ``libc.system`` /
+    ``_o.system`` 都抓得到);④``getattr``/``setattr``/``delattr`` 的名稱參數不得是**算出來的**,
+    也不得是被禁名字面(收口 M2c);⑤字面字串拼接折疊(收口 ``"sub"+"process"`` 這類混淆,連帶
+    讓 M2b 即使不 import ``importlib`` 也被抓)。另加 ``shell=`` 必須是常量 ``False``。
+
+    ``exec_family=False`` 只給 :data:`NON_RUNNER_HOST_LEAVES` 用,關掉兩件**只對 exec 家族成立**
+    的判準:①per-file import 白名單(那些檔案的匯入面由別的 wave 治理);②``shell=`` 必須是常量
+    ``False``——它是 ``subprocess`` **呼叫形狀**的規則,而 S2.4 的 host-identity row driver 把
+    POSIX 帳號的**登入 shell** 當一個同名欄位傳給 ``create_system_account``。關掉它是**可證安全**
+    的:被除名的檔案一律不得 import :data:`KERNEL_ONLY_IMPORTS`(下方 ``_check_module`` 仍執法),
+    也一律過不了 raw-command 名稱 denylist / builtin denylist / 動態取名 / 字面拼接四道,故它根本
+    沒有任何 shell 可以到達。
     """
 
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     is_kernel = path.name == KERNEL_PATH.name
-    allowed_modules = (
-        ALLOWED_STDLIB_IMPORTS | ALLOWED_THIRD_PARTY_IMPORTS | ALLOWED_GOVERNANCE_IMPORTS
-    )
-    if is_kernel:
-        allowed_modules = allowed_modules | KERNEL_ONLY_IMPORTS
+    allowed_modules: frozenset[str] | None = None
+    if exec_family:
+        allowed_modules = (
+            ALLOWED_STDLIB_IMPORTS
+            | ALLOWED_THIRD_PARTY_IMPORTS
+            # 未列名 = 空集(fail-closed);family 成員的每一個治理 import 都必須顯式宣告。
+            | GOVERNANCE_IMPORTS_BY_FILE.get(path.name, frozenset())
+        )
+        if is_kernel:
+            allowed_modules = allowed_modules | KERNEL_ONLY_IMPORTS
     findings: list[str] = []
 
     def _check_module(lineno: int, module: str, rendered: str) -> None:
         top = (module or "").split(".")[0]
+        if allowed_modules is None:
+            # 除名檔案:只擋 kernel 專屬的三個 exec 路徑模組,不管其餘匯入面。
+            if top in KERNEL_ONLY_IMPORTS:
+                findings.append(
+                    f"line {lineno}: kernel-only module outside the kernel: {rendered}"
+                )
+            return
         if top in allowed_modules:
             return
         findings.append(f"line {lineno}: import outside the declared allowlist: {rendered}")
@@ -183,7 +269,7 @@ def _raw_command_findings(path: Path) -> list[str]:
                 )
         if isinstance(node, ast.Call):
             for keyword in node.keywords:
-                if keyword.arg == "shell" and not (
+                if exec_family and keyword.arg == "shell" and not (
                     isinstance(keyword.value, ast.Constant) and keyword.value.value is False
                 ):
                     findings.append(f"line {node.lineno}: shell= is not the constant False")
@@ -212,6 +298,95 @@ def test_no_raw_command_outside_the_kernel():
     for path in present:
         findings = _raw_command_findings(path)
         assert findings == [], f"{path.name} carries a raw-command surface: {findings}"
+
+
+# --------------------------------------------------------------------------- #
+# S2E.2b-1 (a) — RUNNER_FAMILY 由檔案系統**導出**比對,不是純手抄
+# --------------------------------------------------------------------------- #
+def _unscanned_runner_candidates(helpers_dir: Path, family_names: set[str]) -> list[str]:
+    """磁碟上「長得像 S2 受信主機 runner」但不在掃描家族、也未被顯式除名的檔案。"""
+
+    discovered = {
+        path.name for glob in RUNNER_FAMILY_GLOBS for path in helpers_dir.glob(glob)
+    }
+    return sorted(discovered - family_names - set(NON_RUNNER_HOST_LEAVES))
+
+
+def test_every_file_that_looks_like_an_s2_host_runner_is_scanned():
+    # 反例式判準:family 表若漏了一個新 runner,這裡必紅(該檔在漏加之前完全不被 AST 掃描,
+    # 於是任何新的 exec 面都能全綠落地 —— 那正是本測試存在的理由)。
+    unscanned = _unscanned_runner_candidates(HELPERS, {path.name for path in RUNNER_FAMILY})
+    assert unscanned == [], (
+        f"{unscanned} match the S2 host-runner shape but are neither in RUNNER_FAMILY (so the "
+        "AST no-raw-command scan never looks at them) nor declared in NON_RUNNER_HOST_LEAVES"
+    )
+
+
+def test_a_declared_non_runner_leaf_is_still_denied_every_exec_path():
+    # 除名不是逃生門:它只豁免 per-file import 白名單與 ``shell=`` 呼叫形狀兩項,exec 能力面
+    # (raw-command 名稱 / builtin / 動態取名 / 字面拼接 / kernel-only 模組)一道都不放。
+    for name, reason in NON_RUNNER_HOST_LEAVES.items():
+        path = HELPERS / name
+        assert path.is_file(), name
+        assert reason.strip(), name
+        assert _raw_command_findings(path, exec_family=False) == [], name
+        assert "subprocess" not in path.read_text(encoding="utf-8"), name
+
+
+def test_the_exec_family_exemption_never_admits_a_kernel_only_module(tmp_path):
+    for module in sorted(KERNEL_ONLY_IMPORTS):
+        path = tmp_path / f"exempt_{module}.py"
+        path.write_text(f"import {module}\n", encoding="utf-8")
+        findings = _raw_command_findings(path, exec_family=False)
+        assert any("kernel-only module outside the kernel" in item for item in findings), module
+
+
+def test_the_family_derivation_is_red_when_a_new_runner_is_left_out(tmp_path):
+    # 突變:一個新的 runner 檔落在 helpers 目錄卻沒進 family 表。
+    (tmp_path / "agent_governance_s2_9_host_runner.py").write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / "aiml_s2_other_host_run.py").write_text("x = 1\n", encoding="utf-8")
+    assert _unscanned_runner_candidates(tmp_path, set()) == [
+        "agent_governance_s2_9_host_runner.py", "aiml_s2_other_host_run.py"
+    ]
+    # 對照:同樣兩個檔案一旦進表就不再是 finding(判準是「有沒有被掃描」,不是檔名黑名單)。
+    assert _unscanned_runner_candidates(
+        tmp_path,
+        {"agent_governance_s2_9_host_runner.py", "aiml_s2_other_host_run.py"},
+    ) == []
+
+
+# --------------------------------------------------------------------------- #
+# S2E.2b-1 (b) — 治理 import 白名單是 per-file 的能力宣告
+# --------------------------------------------------------------------------- #
+def test_the_governance_import_allowlist_is_per_file_not_family_wide(tmp_path):
+    """S2.4 補償 runner 需要的 applier 匯入面,絕不因此在 observer / kernel 上也成立。"""
+
+    applier = sorted(APPLIER_MODULES & GOVERNANCE_IMPORTS_BY_FILE[
+        "agent_governance_s2_4_host_recovery.py"
+    ])
+    assert applier, "the S2.4 recovery runner is expected to declare applier imports"
+    source = "".join(f"import {module}\n" for module in applier)
+    # 同一份 source 放在補償 runner 的檔名下:合法(它宣告過這些能力)。
+    admitted = tmp_path / "agent_governance_s2_4_host_recovery.py"
+    admitted.write_text(source, encoding="utf-8")
+    assert _raw_command_findings(admitted) == []
+    # 放在任何**沒有**宣告它們的 family 成員檔名下:一律 finding。
+    for name in ("agent_governance_s2_host_observer.py", "agent_governance_s2_host_kernel.py",
+                 "agent_governance_s2_0_host_runner.py"):
+        elsewhere = tmp_path / name
+        elsewhere.write_text(source, encoding="utf-8")
+        assert _raw_command_findings(elsewhere), name
+
+
+def test_every_governance_allowlist_entry_belongs_to_a_family_member():
+    # per-file 表不得長出「沒有對應檔案」的條目(那是一張永遠不被執行的宣告)。
+    family_names = {path.name for path in RUNNER_FAMILY}
+    assert set(GOVERNANCE_IMPORTS_BY_FILE) <= family_names, sorted(
+        set(GOVERNANCE_IMPORTS_BY_FILE) - family_names
+    )
+    # 沒有任何檔案被允許 import kernel-only 的三個 exec 路徑模組。
+    for name, modules in GOVERNANCE_IMPORTS_BY_FILE.items():
+        assert not (modules & KERNEL_ONLY_IMPORTS), name
 
 
 # E2 重做的三個突變(M2 / M2b / M2c)+ 既有四類 + 白名單外 import。全部必須被抓到。
@@ -274,6 +449,18 @@ def test_the_ast_scanner_actually_catches_a_violation(tmp_path, mutation):
     path.write_text(source, encoding="utf-8")
     findings = _raw_command_findings(path)
     assert any(expected in item for item in findings), (source, findings)
+
+
+@pytest.mark.parametrize("mutation", sorted(AST_SCANNER_MUTATIONS))
+def test_a_declared_non_runner_leaf_is_scanned_by_the_same_exec_rules(tmp_path, mutation):
+    # 反例:除名檔案若被塞進任何一條 exec 路徑,``exec_family=False`` 這條路徑也必須抓到它。
+    # (唯二被關掉的判準是 import 白名單與 ``shell=`` 呼叫形狀,故該兩類突變在此跳過。)
+    source, expected = AST_SCANNER_MUTATIONS[mutation]
+    if expected in {"import outside the declared allowlist", "shell= is not the constant False"}:
+        pytest.skip("this rule is deliberately exec-family-only; see _raw_command_findings")
+    path = tmp_path / f"{mutation}.py"
+    path.write_text(source, encoding="utf-8")
+    assert any(expected in item for item in _raw_command_findings(path, exec_family=False))
 
 
 def test_a_mutation_injected_into_a_real_family_file_is_caught(tmp_path):
