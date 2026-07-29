@@ -267,6 +267,9 @@ def test_wiped_ledger_rejects_reconsumption_via_the_journal_pin(tmp_path, monkey
     )
     assert first["status"] == "SOURCE_SIMULATION_PASS"
     # 攻擊:整本清空——連 durable ledger 檔一併刪除;journal 釘的 head 仍在 ⇒ 拒。
+    # note-1(S2E.3)之後偵測**提前**到 reconcile:終端 journal 宣稱的 ledger head 必須被
+    # durable ledger 涵蓋,故 typed status 由 AUTHORIZATION_REJECTED 前移為 RECOVERY_REQUIRED
+    # (擋得更早、語義更誠實:整本被清空=主機狀態不明);「永不重新放行」的保證不變。
     lifecycle.s2_5_replay_ledger_path(tmp_path / "state").unlink()
     unit2 = kit.SimulatedUnit()
     second = lifecycle.apply_s2_5_start(
@@ -275,8 +278,9 @@ def test_wiped_ledger_rejects_reconsumption_via_the_journal_pin(tmp_path, monkey
             tmp_path=tmp_path, unit=unit2, replay_ledger=kit.empty_ledger(),
         ),
     )
-    assert second["status"] == "AUTHORIZATION_REJECTED", second
+    assert second["status"] == "RECOVERY_REQUIRED", second
     assert any("journal" in reason for reason in second["reasons"])
+    assert any("truncated or wiped" in reason for reason in second["reasons"])
     assert unit2.calls == []
 
 
@@ -315,13 +319,22 @@ def test_tampered_durable_ledger_blocks_new_consumption(tmp_path, monkeypatch):
     persisted = json.loads(ledger_path.read_text(encoding="utf-8"))
     persisted["entries"] = []
     ledger_path.write_text(json.dumps(persisted), encoding="utf-8")
+    # anchor 層的 self_digest 重算守衛本身仍在(直接釘住,避免被下方前移的偵測遮蔽)。
+    anchor_reasons = lifecycle._replay_ledger_anchor_reasons(
+        lifecycle.s2_5_journal_path(tmp_path / "state", intent["start_id"]),
+        ledger_path,
+        kit.empty_ledger(),
+    )
+    assert any("self_digest" in reason for reason in anchor_reasons), anchor_reasons
+    # note-1(S2E.3):終端 journal 釘的 head 未被 durable ledger 涵蓋 ⇒ reconcile 先擋
+    # (RECOVERY_REQUIRED);零 effect 的保證不變。
     private_key2, intent2, permit2, unit2 = kit.a_side_setup(tmp_path, monkeypatch)
     second = lifecycle.apply_s2_5_start(
         intent2, permit2, unit2,
         **kit.apply_kwargs(tmp_path=tmp_path, unit=unit2),
     )
-    assert second["status"] == "AUTHORIZATION_REJECTED"
-    assert any("self_digest" in reason for reason in second["reasons"])
+    assert second["status"] == "RECOVERY_REQUIRED", second
+    assert any("terminal-journal" in reason for reason in second["reasons"])
     assert unit2.calls == []
 
 

@@ -312,14 +312,12 @@ def test_residue_still_blocks_when_the_hold_is_obtained_cleanly(tmp_path, monkey
     """對照組:殘留在**乾淨取鎖**的路徑上同樣擋(reconcile 不是被 hold 順序偷換掉的)。"""
 
     state_root = kit.fresh_state_root(tmp_path, "residue-state")
-    state_root.mkdir(parents=True)
-    (state_root / f"s2-5-{'1' * 64}.journal.json").write_text(
-        '{"schema_version": "s2_5_start_journal_v1_informal", "start_id": "s2-5-'
-        + "1" * 64
-        + '", "state": "APPLYING", "updated_at": "'
-        + kit.NOW
-        + '", "history": []}',
-        encoding="utf-8",
+    residue_id = "s2-5-" + "1" * 64
+    # 以**真的** `_journal_transition` 產生殘留(v2 鏈完整),否則擋下它的會是 schema 版本
+    # 而不是「非終端狀態」那條守衛。
+    lifecycle._journal_transition(
+        lifecycle.s2_5_journal_path(state_root, residue_id),
+        start_id=residue_id, state="APPLYING", updated_at=kit.NOW,
     )
     _key, intent, permit, unit = kit.a_side_setup(tmp_path, monkeypatch)
     verdict = lifecycle.apply_s2_5_start(
@@ -529,3 +527,138 @@ def test_a_success_receipt_without_a_proven_lock_window_is_rejected_centrally(
         {k: v for k, v in stripped.items() if k != "self_digest"}
     )
     assert validator.validate_aiml_artifact(stripped, now=kit.NOW)
+
+
+# ── note-1:journal 的完整性鏈(per-entry digest + self_digest + 尾錨)────────────────
+def _successful_start(tmp_path, monkeypatch, state_root):
+    _key, intent, permit, unit = kit.a_side_setup(tmp_path, monkeypatch)
+    verdict = lifecycle.apply_s2_5_start(
+        intent, permit, unit,
+        **kit.apply_kwargs(tmp_path=tmp_path, unit=unit, state_root=state_root),
+    )
+    assert verdict["status"] == "SOURCE_SIMULATION_PASS", verdict["reasons"]
+    return intent, lifecycle.s2_5_journal_path(state_root, intent["start_id"])
+
+
+def _reseal(payload: dict) -> dict:
+    import aiml_gate_receipt_validator as validator
+
+    payload = dict(payload)
+    payload.pop("self_digest", None)
+    payload["self_digest"] = validator.artifact_self_digest(payload)
+    return payload
+
+
+def test_a_single_edited_history_entry_is_caught(tmp_path, monkeypatch):
+    """修前唯一的 journal 內容是 state/updated_at,改一筆 APPLYING→TERMINAL_SUCCESS 無痕。"""
+
+    state_root = kit.fresh_state_root(tmp_path, "note1-edit")
+    _intent, journal_path = _successful_start(tmp_path, monkeypatch, state_root)
+    payload = json.loads(journal_path.read_text(encoding="utf-8"))
+    payload["history"][0]["state"] = "TERMINAL_SUCCESS"  # 單 entry 改而不重算全鏈。
+    journal_path.write_text(json.dumps(_reseal(payload)), encoding="utf-8")
+    reconcile = lifecycle.reconcile_s2_5_journal(state_root)
+    assert reconcile["admits_new_work"] is False
+    assert any("hash chain is broken" in r for r in reconcile["reasons"]), reconcile
+
+
+def test_a_truncated_history_without_resealing_is_caught(tmp_path, monkeypatch):
+    """截尾而不重封 self_digest ⇒ self_digest 重算即斷。"""
+
+    state_root = kit.fresh_state_root(tmp_path, "note1-truncate")
+    _intent, journal_path = _successful_start(tmp_path, monkeypatch, state_root)
+    payload = json.loads(journal_path.read_text(encoding="utf-8"))
+    payload["history"] = payload["history"][:1]
+    journal_path.write_text(json.dumps(payload), encoding="utf-8")  # 不重封。
+    reconcile = lifecycle.reconcile_s2_5_journal(state_root)
+    assert reconcile["admits_new_work"] is False
+    assert any("self_digest does not re-derive" in r for r in reconcile["reasons"])
+
+
+def test_a_forged_self_digest_over_a_rewritten_header_is_caught(tmp_path, monkeypatch):
+    """把 top-level state 改成 TERMINAL_SUCCESS 並重封 self_digest ⇒ 尾錨一致性抓下來。"""
+
+    state_root = kit.fresh_state_root(tmp_path, "note1-header")
+    residue_id = "s2-5-" + "2" * 64
+    journal_path = lifecycle.s2_5_journal_path(state_root, residue_id)
+    lifecycle._journal_transition(
+        journal_path, start_id=residue_id, state="APPLYING", updated_at=kit.NOW
+    )
+    payload = json.loads(journal_path.read_text(encoding="utf-8"))
+    payload["state"] = "TERMINAL_SUCCESS"
+    journal_path.write_text(json.dumps(_reseal(payload)), encoding="utf-8")
+    reconcile = lifecycle.reconcile_s2_5_journal(state_root)
+    assert reconcile["admits_new_work"] is False
+    assert any("do not equal the tail entry" in r for r in reconcile["reasons"])
+
+
+def test_a_self_consistent_journal_incompatible_with_the_ledger_is_caught(
+    tmp_path, monkeypatch
+):
+    """journal 完全自洽、但整本 durable ledger 被清空 ⇒ 終端 head 未被涵蓋 ⇒ 擋。"""
+
+    state_root = kit.fresh_state_root(tmp_path, "note1-ledger")
+    _intent, journal_path = _successful_start(tmp_path, monkeypatch, state_root)
+    assert lifecycle.reconcile_s2_5_journal(state_root)["admits_new_work"] is True
+    lifecycle.s2_5_replay_ledger_path(state_root).unlink()
+    reconcile = lifecycle.reconcile_s2_5_journal(state_root)
+    assert reconcile["admits_new_work"] is False
+    assert any("terminal-journal" in r for r in reconcile["reasons"]), reconcile
+
+
+def test_a_broken_history_is_never_silently_reset(tmp_path):
+    """修前:讀不懂的 journal 讓 history 直接歸零、歷史消失不留痕。現在必須留痕且強制 RECOVERY。"""
+
+    state_root = kit.fresh_state_root(tmp_path, "note1-reset")
+    residue_id = "s2-5-" + "3" * 64
+    journal_path = lifecycle.s2_5_journal_path(state_root, residue_id)
+    lifecycle._journal_transition(
+        journal_path, start_id=residue_id, state="APPLYING", updated_at=kit.NOW
+    )
+    journal_path.write_text("{not json", encoding="utf-8")
+    payload = lifecycle._journal_transition(
+        journal_path, start_id=residue_id, state="TERMINAL_SUCCESS", updated_at=kit.NOW
+    )
+    assert payload["integrity_broken"] is True
+    assert payload["prior_payload_digest"]              # 舊 bytes 的 digest 被留痕。
+    assert payload["state"] == "RECOVERY_REQUIRED"      # 絕不由本次 transition 洗白成功。
+    assert lifecycle.reconcile_s2_5_journal(state_root)["admits_new_work"] is False
+
+
+def test_a_v1_shaped_journal_is_rejected_not_upgraded(tmp_path):
+    """反向釘:不存在 v1 讀取相容分支(那會是一條可被利用的降級縫)。"""
+
+    state_root = kit.fresh_state_root(tmp_path, "note1-v1")
+    state_root.mkdir(parents=True)
+    residue_id = "s2-5-" + "4" * 64
+    (state_root / f"{residue_id}.journal.json").write_text(
+        json.dumps({
+            "schema_version": "s2_5_start_journal_v1_informal",
+            "start_id": residue_id,
+            "state": "TERMINAL_SUCCESS",
+            "updated_at": kit.NOW,
+            "replay_ledger_head": None,
+            "history": [{"state": "TERMINAL_SUCCESS", "updated_at": kit.NOW}],
+        }),
+        encoding="utf-8",
+    )
+    reconcile = lifecycle.reconcile_s2_5_journal(state_root)
+    assert reconcile["admits_new_work"] is False
+    assert any("no v1 downgrade branch" in r for r in reconcile["reasons"]), reconcile
+
+
+def test_journal_and_ledger_share_one_hash_chain_verifier():
+    """反雙尺:journal 與 ledger 的鏈驗必須是同一把尺(label adapter 之外零分歧)。"""
+
+    import agent_governance_s2_5_attestation as attestation
+
+    broken = [{"seq": 1, "prev_entry_digest": None, "entry_digest": "x", "fsynced": True}]
+    ledger_errors = attestation.s2_5_replay_ledger_entry_errors(broken)
+    journal_errors = attestation.s2_5_journal_entry_errors(broken)
+    assert ledger_errors and journal_errors
+    assert ledger_errors[0].replace("s2_5 replay ledger", "<chain>") == (
+        journal_errors[0].replace("s2_5 start journal", "<chain>")
+    )
+    source = (HELPERS / "agent_governance_s2_5_attestation.py").read_text(encoding="utf-8")
+    assert source.count("def _hash_chain_errors(") == 1
+    assert source.count("_hash_chain_errors(entries, label=") == 2

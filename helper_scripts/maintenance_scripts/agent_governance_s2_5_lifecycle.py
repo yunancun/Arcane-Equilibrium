@@ -79,6 +79,9 @@ _JOURNAL_TERMINAL_STATES = frozenset({
     "TERMINAL_SUCCESS", "TERMINAL_ROLLED_BACK", "TERMINAL_FAILED",
 })
 JOURNAL_CORRUPT = "JOURNAL_CORRUPT_RECOVERY_REQUIRED"
+# note-1:journal payload v2 —— per-entry hash chain + top-level self_digest。v1 形狀
+# (無 digest 無鏈)刻意**不**再被讀取:留一條 v1 相容路徑等同留一個降級縫。
+S2_5_JOURNAL_SCHEMA_VERSION = "s2_5_start_journal_v2_informal"
 # ── §5.7 的固定路徑面(worker 不得選 journal/ledger 位置;source lane 只以注入的
 # tmp state_root 觸碰)。journal 檔名唯一由 start_id regex 派生(鏡 probe_journal_path)。
 S2_5_STATE_ROOT = "/var/lib/arcane-equilibrium/aiml/install/s2_5"
@@ -265,6 +268,48 @@ def _durable_write_json(target: Path, payload: dict[str, Any]) -> None:
         os.close(dir_fd)
 
 
+def _journal_payload_errors(payload: Any, *, start_id: str | None = None) -> list[str]:
+    """note-1:一份 journal payload 的完整性重驗(self_digest + hash chain + 尾錨一致)。
+
+    **刻意沒有 v1 讀取相容分支**:v1 形狀既無 per-entry digest 也無 self_digest,保留
+    「讀得懂 v1」正是一個可被利用的降級縫(把 v2 換成 v1 形狀即繞過全部鏈驗)。
+    repo 內無任何 ``*.journal.json``、production state_root 亦不存在 ⇒ 零遷移代價。
+    """
+
+    if not isinstance(payload, dict):
+        return ["s2_5 journal payload must be an object"]
+    if payload.get("schema_version") != S2_5_JOURNAL_SCHEMA_VERSION:
+        return [
+            f"s2_5 journal declares schema_version {payload.get('schema_version')!r}; "
+            f"only {S2_5_JOURNAL_SCHEMA_VERSION} is read (there is no v1 downgrade branch)"
+        ]
+    if payload.get("append_only") is not True:
+        return ["s2_5 journal must declare append_only"]
+    if payload.get("self_digest") != central_validator.artifact_self_digest(payload):
+        return [
+            "s2_5 journal self_digest does not re-derive; the payload was rewritten "
+            "without resealing (fail-closed)"
+        ]
+    if start_id is not None and payload.get("start_id") != start_id:
+        return ["s2_5 journal start_id does not bind this apply"]
+    history = payload.get("history")
+    chain_errors = attestation.s2_5_journal_entry_errors(history)
+    if chain_errors:
+        return chain_errors
+    if not history:
+        return ["s2_5 journal history is empty; every transition appends one entry"]
+    tail = history[-1]
+    if (
+        tail.get("state") != payload.get("state")
+        or tail.get("updated_at") != payload.get("updated_at")
+    ):
+        return [
+            "s2_5 journal top-level state/updated_at do not equal the tail entry; a "
+            "header rewritten over an intact chain is rejected (fail-closed)"
+        ]
+    return []
+
+
 def _journal_transition(
     journal_path: Path,
     *,
@@ -272,21 +317,59 @@ def _journal_transition(
     state: str,
     updated_at: str,
     replay_ledger_head: dict[str, Any] | None = None,
+    lock_release_status: str | None = None,
 ) -> dict[str, Any]:
+    """note-1:**驗證後追加,永不靜默重置**。
+
+    修前:讀不懂的 journal 讓 ``history`` 直接歸零(281-282),歷史消失不留痕。現在壞
+    payload 會開新鏈但打上 ``integrity_broken``/``prior_payload_digest``,且 state 強制
+    ``RECOVERY_REQUIRED`` —— 一次無聲的歷史清洗因此不再可能。
+    """
+
     history: list[dict[str, Any]] = []
     carried_head: dict[str, Any] | None = None
+    integrity_broken = False
+    prior_payload_digest: str | None = None
     if journal_path.is_file():
         try:
-            existing = json.loads(journal_path.read_text(encoding="utf-8"))
-            history = list(existing.get("history") or [])
-            head = existing.get("replay_ledger_head")
-            carried_head = dict(head) if isinstance(head, dict) else None
-        except (OSError, ValueError):
-            history = []
-    entry = {"state": state, "updated_at": updated_at}
+            raw = journal_path.read_text(encoding="utf-8")
+        except OSError:
+            raw = None
+            integrity_broken = True
+        else:
+            try:
+                existing = json.loads(raw)
+            except ValueError:
+                existing = None
+            if _journal_payload_errors(existing, start_id=start_id):
+                integrity_broken = True
+                prior_payload_digest = central_validator.canonical_digest(
+                    {"prior_journal_bytes": raw}
+                )
+            else:
+                history = list(existing["history"])
+                head = existing.get("replay_ledger_head")
+                carried_head = dict(head) if isinstance(head, dict) else None
+    if integrity_broken:
+        # 開新鏈(舊 bytes 已不可信),但把「發生過一次斷鏈」與舊 bytes 的 digest 留在檔上;
+        # state 強制 RECOVERY_REQUIRED —— 斷鏈的主機狀態不明,絕不由本次 transition 洗白。
+        history = []
+        state = S2_5_STATUS_RECOVERY_REQUIRED
+    entry: dict[str, Any] = {
+        "seq": len(history),
+        "state": state,
+        "updated_at": updated_at,
+        "lock_release_status": lock_release_status,
+        "prev_entry_digest": history[-1]["entry_digest"] if history else None,
+        "fsynced": True,
+    }
+    entry["entry_digest"] = central_validator.canonical_digest(entry)
     payload = {
-        "schema_version": "s2_5_start_journal_v1_informal",
+        "schema_version": S2_5_JOURNAL_SCHEMA_VERSION,
         "start_id": start_id,
+        "append_only": True,
+        "integrity_broken": integrity_broken,
+        "prior_payload_digest": prior_payload_digest,
         "state": state,
         "updated_at": updated_at,
         # P1-3 head-anchor:journal 釘住消費當下的 ledger head(entry 總數+尾 digest+
@@ -296,8 +379,37 @@ def _journal_transition(
         ),
         "history": history + [entry],
     }
+    payload["self_digest"] = central_validator.artifact_self_digest(payload)
     _durable_write_json(journal_path, payload)
     return payload
+
+
+def _terminal_journal_ledger_anchor_reasons(
+    root: Path, payload: dict[str, Any], journal_name: str
+) -> list[str]:
+    """note-1:終端 journal 宣稱的 ledger head 必須真的存在於 durable ledger。
+
+    自洽的 journal 仍可能與 ledger 不相容(整本 ledger 被清空/截尾而 journal 未動)。
+    複用既有的 :func:`_ledger_behind_head_reasons`——不為此另造第二把尺。
+    """
+
+    head = payload.get("replay_ledger_head")
+    if not isinstance(head, dict):
+        return []
+    ledger_path = s2_5_replay_ledger_path(root)
+    entries: Any = None
+    if ledger_path.is_file():
+        try:
+            persisted = json.loads(ledger_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            persisted = None
+        if isinstance(persisted, dict):
+            entries = persisted.get("entries")
+    return [
+        f"s2_5 journal {journal_name} is terminal but its pinned replay-ledger head is "
+        f"not covered by the durable ledger: {reason}"
+        for reason in _ledger_behind_head_reasons(entries, head, anchor="terminal-journal")
+    ]
 
 
 def reconcile_s2_5_journal(state_root: Path | str | None) -> dict[str, Any]:
@@ -305,6 +417,15 @@ def reconcile_s2_5_journal(state_root: Path | str | None) -> dict[str, Any]:
 
     掃描整個 state_root(而非只看本 start_id 的 journal):別的 start 留下的 APPLYING
     殘留同樣代表一台狀態不明的主機,fail-closed。
+
+    note-1 之後這裡是**主要的 tamper 偵測器**:每份 journal 過 self_digest + hash chain +
+    尾錨一致性,`integrity_broken` 留痕一律擋,終端 journal 釘的 ledger head 必須被
+    durable ledger 涵蓋。
+
+    ⚠ 誠實偵測邊界:關得掉=單 entry 改而不重算全鏈 / 截尾而不重封 self_digest / 自洽但與
+    ledger head 不相容 / 壞 journal 靜默歸零;**關不掉**=具 state_root write 權限者同時且
+    一致地重寫 journal + ledger(self-digest 只證 integrity,不證作者)。此修的定位是把
+    「無聲改寫」降級為「必須做一次一致的多檔改寫」。
     """
 
     if state_root is None:
@@ -323,15 +444,29 @@ def reconcile_s2_5_journal(state_root: Path | str | None) -> dict[str, Any]:
             continue
         try:
             payload = json.loads(journal_path.read_text(encoding="utf-8"))
-            state = payload["state"]
-        except (OSError, ValueError, KeyError, TypeError):
+        except (OSError, ValueError):
+            payload = None
+        payload_errors = _journal_payload_errors(payload)
+        if payload_errors:
             return {
                 "admits_new_work": False,
                 "reasons": [
-                    f"{JOURNAL_CORRUPT}: the s2_5 journal {journal_path.name} cannot be "
-                    "parsed; operator investigation is required before any new effect"
+                    f"{JOURNAL_CORRUPT}: the s2_5 journal {journal_path.name} does not "
+                    "re-derive; operator investigation is required before any new effect "
+                    "(" + "; ".join(payload_errors) + ")"
                 ],
             }
+        if payload.get("integrity_broken") is True:
+            return {
+                "admits_new_work": False,
+                "reasons": [
+                    f"{JOURNAL_CORRUPT}: the s2_5 journal {journal_path.name} records a "
+                    "broken integrity chain (prior_payload_digest="
+                    f"{payload.get('prior_payload_digest')}); the history was reset once "
+                    "and the host state is unproven"
+                ],
+            }
+        state = payload["state"]
         if state not in _JOURNAL_TERMINAL_STATES:
             return {
                 "admits_new_work": False,
@@ -341,6 +476,11 @@ def reconcile_s2_5_journal(state_root: Path | str | None) -> dict[str, Any]:
                     "effect is accepted"
                 ],
             }
+        anchor_reasons = _terminal_journal_ledger_anchor_reasons(
+            root, payload, journal_path.name
+        )
+        if anchor_reasons:
+            return {"admits_new_work": False, "reasons": anchor_reasons}
     return {"admits_new_work": True, "reasons": []}
 
 
@@ -1522,11 +1662,22 @@ def apply_s2_5_start(
                 ],
             )
         _persist_s2_5_replay_ledger(ledger_path, replay_ledger)
-        _journal_transition(
+        applying = _journal_transition(
             journal_path, start_id=intent["start_id"], state="APPLYING",
             updated_at=started_at,
             replay_ledger_head=_replay_ledger_head(replay_ledger["entries"]),
         )
+        if applying["integrity_broken"] is True:
+            # note-1:WAL 寫入時才發現前一份 journal 斷鏈(與窗內 reconcile 的競態殘餘)。
+            # 歷史已被留痕地重開,主機狀態不明 ⇒ 絕不進效果窗。
+            return _verdict(
+                S2_5_STATUS_RECOVERY_REQUIRED,
+                [
+                    f"{JOURNAL_CORRUPT}: the s2_5 journal integrity chain was broken at "
+                    "the APPLYING write (prior_payload_digest="
+                    f"{applying['prior_payload_digest']}); no effect is attempted"
+                ],
+            )
         carried.update(
             pre_state=pre_state, prestate_digest=prestate_digest, started_at=started_at
         )
@@ -1557,6 +1708,7 @@ def apply_s2_5_start(
         _journal_transition(
             journal_path, start_id=intent["start_id"], state="RECOVERY_REQUIRED",
             updated_at=_iso(clock()),
+            lock_release_status=lock_window["release_status"],
         )
         if recovery_state is not None:
             recovery_state.record(start_id=intent["start_id"], reasons=reasons)
@@ -1942,11 +2094,22 @@ def apply_s2_5_final(
                 ],
             )
         _persist_s2_5_replay_ledger(ledger_path, replay_ledger)
-        _journal_transition(
+        applying = _journal_transition(
             journal_path, start_id=intent["start_id"], state="APPLYING",
             updated_at=started_at,
             replay_ledger_head=_replay_ledger_head(replay_ledger["entries"]),
         )
+        if applying["integrity_broken"] is True:
+            # note-1:WAL 寫入時才發現前一份 journal 斷鏈(與窗內 reconcile 的競態殘餘)。
+            # 歷史已被留痕地重開,主機狀態不明 ⇒ 絕不進效果窗。
+            return _verdict(
+                S2_5_STATUS_RECOVERY_REQUIRED,
+                [
+                    f"{JOURNAL_CORRUPT}: the s2_5 journal integrity chain was broken at "
+                    "the APPLYING write (prior_payload_digest="
+                    f"{applying['prior_payload_digest']}); no effect is attempted"
+                ],
+            )
         carried.update(pre_state=pre_state, started_at=started_at)
         return None
 
@@ -1974,6 +2137,7 @@ def apply_s2_5_final(
         _journal_transition(
             journal_path, start_id=intent["start_id"], state="RECOVERY_REQUIRED",
             updated_at=_iso(clock()),
+            lock_release_status=lock_window["release_status"],
         )
         if recovery_state is not None:
             recovery_state.record(start_id=intent["start_id"], reasons=reasons)

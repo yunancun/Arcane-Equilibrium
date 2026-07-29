@@ -282,26 +282,29 @@ def verify_s2_5_operator_permit(
 
 
 # ── replay ledger(hash-chained consume-once;§5.7 路徑上的持久化由 lifecycle 葉負責)──
-def s2_5_replay_ledger_entry_errors(entries: Any) -> list[str]:
-    """entries 的 exact hash-chain 重驗:seq 自 0 單調、prev 綁前一筆、entry_digest 重算、
-    fsynced 恆 true(鏡 sibling ``s2_4_authorization_replay_ledger_v1`` 的 entry 契約)。
+def _hash_chain_errors(entries: Any, *, label: str) -> list[str]:
+    """append-only hash chain 的**唯一**重驗器:seq 自 0 單調、prev 綁前一筆、entry_digest
+    重算、fsynced 恆 true(鏡 sibling ``s2_4_authorization_replay_ledger_v1`` 的 entry 契約)。
 
     seq 是 fork 偵測的判別欄:兩筆「同 prev」的併發雙寫在 append-only 鏈上必然使其中
     一筆的 seq/prev 至少一項與重算值不符——沒有 seq 時,截斷後重放的 prefix 仍是合法鏈。
+
+    note-1:replay ledger 與 start journal 共用這把尺(各自的 ``*_entry_errors`` 只是 label
+    adapter)——**絕不**為 journal 另造第二套鏈驗,否則兩份 durable 證據的強度會悄悄分歧。
     """
 
     if not isinstance(entries, list):
-        return ["s2_5 replay ledger entries must be a list"]
+        return [f"{label} entries must be a list"]
     non_finite = non_finite_number_paths(entries)
     if non_finite:
         return [
-            f"s2_5 replay ledger carries non-finite numbers at {non_finite}; NaN/Infinity "
+            f"{label} carries non-finite numbers at {non_finite}; NaN/Infinity "
             "have no canonical byte form and are rejected before any digest derivation"
         ]
     previous: str | None = None
     for index, entry in enumerate(entries):
         if not isinstance(entry, dict):
-            return [f"s2_5 replay ledger entry {index} must be an object"]
+            return [f"{label} entry {index} must be an object"]
         expected = canonical_digest(
             {key: value for key, value in entry.items() if key != "entry_digest"}
         )
@@ -312,12 +315,28 @@ def s2_5_replay_ledger_entry_errors(entries: Any) -> list[str]:
             or entry.get("fsynced") is not True
         ):
             return [
-                f"s2_5 replay ledger hash chain is broken at entry {index} (seq/prev/"
+                f"{label} hash chain is broken at entry {index} (seq/prev/"
                 "digest/fsynced re-derivation failed; a truncated, forked or reordered "
-                "ledger is rejected fail-closed)"
+                "chain is rejected fail-closed)"
             ]
         previous = entry["entry_digest"]
     return []
+
+
+def s2_5_replay_ledger_entry_errors(entries: Any) -> list[str]:
+    """replay ledger entries 的 exact hash-chain 重驗(共用 :func:`_hash_chain_errors`)。"""
+
+    return _hash_chain_errors(entries, label="s2_5 replay ledger")
+
+
+def s2_5_journal_entry_errors(entries: Any) -> list[str]:
+    """§5.7 start journal history 的 exact hash-chain 重驗(與 ledger **同一把尺**)。
+
+    note-1:修前 journal 只有 ``state``/``updated_at`` 兩欄,沒有 per-entry digest/chain,
+    具 state_root write 權限者可把 APPLYING 改寫成 TERMINAL_SUCCESS 而 reconcile 看不見。
+    """
+
+    return _hash_chain_errors(entries, label="s2_5 start journal")
 
 
 def derive_s2_5_replay_binding(
