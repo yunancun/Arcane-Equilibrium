@@ -32,7 +32,8 @@
   ``run_observer_child`` 以 sanitized env 啟動),輸出只經 stdout 的 canonical JSON,且該唯一出口
   在寫出之前必須通過 kernel 的 :func:`agent_governance_s2_host_kernel
   .scan_serializable_surface_for_secrets`(命中即零 stdout + typed 退出
-  :data:`EXIT_OBSERVATION_SECRET_LEAK_BLOCKED`)。
+  :data:`EXIT_OBSERVATION_SECRET_LEAK_BLOCKED`)。**通道分離**:stdout 是資料通道,stderr 只是
+  診斷通道 —— 守衛命中時 stderr 只寫固定訊息 + 條目數,理由字串(鍵名 trail)一個 fd 都不出境。
 * **L3 OS 身分分離:本波不提供**。真 uid 分離需主機側供裝(獨立 unix user),屬 operator/W6B。
   S2E.2a 提供「相異 process + 相異 object capability」,**不**提供相異 OS uid;W5 ledger 的
   ``ATTESTOR_KEY_IS_NOT_SEPARATE_FROM_THE_PERMIT_KEY`` 因此被**縮小**但未關閉。
@@ -71,7 +72,8 @@ REQUEST_SCHEMA_VERSION = "s2_host_observation_request_v1"
 
 # ``main()`` 的 L1 觀測閘退出碼(E2 RES-6):production/unknown 上沒有顯式承認 ⇒ 零觀測、零 exec。
 EXIT_OBSERVATION_NOT_ADMITTED = 6
-# ``main()`` 的出境秘密掃描退出碼:observation 命中中央 secret scanner ⇒ 整包丟棄、**零 stdout**。
+# ``main()`` 的出境秘密掃描退出碼:observation 命中中央 secret scanner ⇒ 整包丟棄、**零 stdout**,
+# 且 stderr 只留固定診斷訊息(理由字串不進任何通道)。
 EXIT_OBSERVATION_SECRET_LEAK_BLOCKED = 7
 
 FACE_UNIT_STATE = "unit_state"
@@ -543,11 +545,20 @@ def main(argv: list[str] | None = None) -> int:
     # scanner。輸入側的硬邊界只保證「caller 遞不進秘密」(PG 面拒任何 DSN 形、檔案面只收 code-owned
     # key),它**不**保證「主機事實裡沒有秘密」—— unit 的 ``Environment=``、role 的 ``rolconfig``、
     # ACL 文字全是主機給的字串,今日對它們零機械保證。命中即整包丟棄:零 stdout、typed 退出,
-    # 絕不寫出被判定含 secret 的內容(理由只帶鍵名 trail,不帶值)。
+    # 絕不寫出被判定含 secret 的內容;守衛的理由字串(只帶鍵名 trail、不帶值)也不出境,見下。
     leak_reasons = host_kernel.scan_serializable_surface_for_secrets(observation)
     if leak_reasons:
+        # 通道分離(SEC-3):stderr 是本 child 的**診斷通道**,不是資料通道 —— 命中時它只寫人類可讀
+        # 的固定訊息 + 守衛回報的條目數,**絕不**寫守衛的理由字串。理由字串雖然只帶鍵名 trail 不帶
+        # 值(見 kernel 的 ``_secret_trails``),但它仍是由「已被判定含 secret 的那份 payload」導出
+        # 的內容;把它寫進診斷通道,等於讓這道守衛自己成為第二條出境路徑。命中時**兩個 fd 都不帶
+        # payload 導出物**才是這道閘的完整語義。誠實代價:鍵名 trail 從此不出現在 child 的任何通道,
+        # 現場只知道「守衛開火了」,不知道命中在哪個鍵;而條目數今日恆為 1(掃描器結構上只回一條
+        # 彙總理由),所以那個數字目前只證明「開火了」,不是命中點的計數。
         sys.stderr.write(
-            "read-only observation withheld: " + "; ".join(leak_reasons[:3]) + "\n"
+            "read-only observation withheld by the egress secret guard: "
+            f"{len(leak_reasons)} finding(s); the key trails stay inside the guard and never "
+            "reach this diagnostic channel\n"
         )
         return EXIT_OBSERVATION_SECRET_LEAK_BLOCKED
     sys.stdout.write(

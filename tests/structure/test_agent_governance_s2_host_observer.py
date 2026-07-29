@@ -284,9 +284,10 @@ def test_main_withholds_an_observation_carrying_secret_shaped_host_facts(monkeyp
     # 絕不寫出被判定含 secret 的內容:一個位元組都沒有。
     assert captured.out == ""
     assert "observation withheld" in captured.err
-    # 理由只帶鍵名 trail,值本身絕不入 stderr(否則守衛自己就是第二條洩漏路徑)。
-    assert "faces.unit_state.properties.Environment" in captured.err
+    # 值本身絕不入 stderr,**鍵名 trail 也不入**:守衛的理由字串是由已被判定含 secret 的那份
+    # payload 導出的內容,寫進診斷通道等於讓守衛自己成為第二條出境路徑(SEC-3 通道分離)。
     assert _SECRET_SHAPED_PROPERTY not in captured.err
+    assert "faces.unit_state.properties.Environment" not in captured.err
 
 
 def test_main_emits_a_clean_observation_unchanged(monkeypatch, capsys):
@@ -303,6 +304,52 @@ def test_main_emits_a_clean_observation_unchanged(monkeypatch, capsys):
     assert captured.err == ""
     assert json.loads(captured.out) == clean
     assert observer_module.validate_observation(json.loads(captured.out)) == []
+
+
+def test_the_withhold_diagnostic_is_a_log_channel_not_a_data_channel(monkeypatch, capsys):
+    """通道分離(SEC-3):命中時 stdout 零位元組,stderr **只有**固定訊息 + 條目數。
+
+    這條與上一條的分工:上一條證「被判定含 secret 的值不出境」,這一條證「連守衛自己導出的鍵名
+    trail 也不出境」——命中點刻意放在一個獨特鍵名下,故它證的是通道語義,不是某個字串的巧合。
+    """
+
+    body = _observation_with("ALR_SOURCE_HEAD=" + "0" * 40)
+    properties = body["faces"][observer_module.FACE_UNIT_STATE]["properties"]
+    properties["UniquelyNamedHostFact"] = _SECRET_SHAPED_PROPERTY
+    body.pop("self_digest")
+    body["self_digest"] = observer_module._digest(body)
+    # 前置條件:這份 payload 真的會命中,且守衛的理由字串確實帶著那個獨特鍵名。
+    reasons = kernel.scan_serializable_surface_for_secrets(body)
+    assert reasons and "UniquelyNamedHostFact" in reasons[0]
+
+    _install_observer_returning(monkeypatch, body)
+    code = observer_module.main(["--request-base64", _encoded({
+        "schema_version": observer_module.REQUEST_SCHEMA_VERSION,
+        "faces": [observer_module.FACE_FILE_IDENTITY], "path_keys": ["unit_fragment"],
+    })])
+    captured = capsys.readouterr()
+    assert code == observer_module.EXIT_OBSERVATION_SECRET_LEAK_BLOCKED
+    assert captured.out == ""
+    # 診斷通道逐字釘死:任何 payload 導出物重新流回 stderr 都會讓這條變紅。
+    assert captured.err == (
+        "read-only observation withheld by the egress secret guard: "
+        f"{len(reasons)} finding(s); the key trails stay inside the guard and never "
+        "reach this diagnostic channel\n"
+    )
+    assert "UniquelyNamedHostFact" not in captured.err
+    assert reasons[0] not in captured.err
+
+
+def test_the_withhold_branch_never_writes_a_guard_reason_to_the_diagnostic_channel():
+    """結構釘:命中分支只准把 ``leak_reasons`` 用在真值判斷與**計數**上,不准寫出它的內容。"""
+
+    import inspect
+
+    source = inspect.getsource(observer_module.main)
+    branch = source[source.index("leak_reasons = host_kernel"):]
+    assert "join(leak_reasons" not in branch
+    assert "leak_reasons[" not in branch
+    assert "len(leak_reasons)" in branch
 
 
 def test_the_egress_guard_runs_before_the_stdout_write(monkeypatch):
