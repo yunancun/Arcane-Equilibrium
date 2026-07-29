@@ -82,9 +82,12 @@ APPLIER_MODULES = frozenset({
 # ``importlib.import_module("sub"+"process")`` / ``getattr(_o, "sys"+"tem")``。改成**正面白名單**:
 # runner 家族只准 import 這一組宣告過的模組,任何其他 import 一律是 finding —— 於是
 # ``importlib`` / ``pty`` / ``commands`` / ``ctypes``(可 `CDLL(None).system`)全都不必逐一列黑。
+# ``fcntl``(``flock``)與 ``errno``(``EWOULDBLOCK``/``ELOOP``/``ENOTDIR`` 的**具名**常量;
+# 硬編數值在 Linux 與 darwin 上不同)是 S2.4 POSIX file/lock driver 的最小需求;兩者都沒有
+# 任何行程生成能力。
 ALLOWED_STDLIB_IMPORTS = frozenset({
-    "__future__", "argparse", "base64", "datetime", "fcntl", "hashlib", "json", "os",
-    "pathlib", "re", "socket", "stat", "sys", "typing",
+    "__future__", "argparse", "base64", "datetime", "errno", "fcntl", "hashlib", "json",
+    "os", "pathlib", "re", "socket", "stat", "sys", "typing",
 })
 ALLOWED_THIRD_PARTY_IMPORTS = frozenset({"psycopg2"})
 # E2 RES-5:原本是 ``GOVERNANCE_IMPORT_PREFIX = "agent_governance_"`` 的**無條件前綴放行**,而
