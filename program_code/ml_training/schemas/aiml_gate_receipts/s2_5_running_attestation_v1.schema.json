@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://arcane-equilibrium.local/schemas/s2_5_running_attestation_v1.schema.json",
   "title": "s2_5_running_attestation_v1",
-  "description": "Closed S2.5A receipt (design §5.2): the initial enable --now + five-dimension running attestation over exactly the five keys S2.3 left const-false in expected_identity_receipt_v1.running_attested (unit / pid_cgroup / mount / network / pg_identity; observation_owner S2.5_LR6). Success semantics are fail-closed: RUNNING_ATTESTED is reachable ONLY for a production target with a verified trusted-host attestor signature (PLATFORM_OR_EXTERNAL_ATTESTED); SOURCE_SIMULATION_PASS is the ceiling for the simulated/disposable lanes (LOCAL_REPRODUCIBLE, trusted_host_attestation null) — a fixture impersonating a platform-attested PASS is structurally unexpressable (boundary.fixture_impersonates_platform_attested const false plus the target-class allOf). The observer_gate block is written out in full here per the PM §5.4 option (b) ruling (no cross-file $ref, no byte-isomorphism coupling); its dead-man semantics: stale evidence or an absent sample can never derive a PASS. reboot_survival_observed stays null in this seam (PM O-6): WantedBy-link + manager semantics are the source-provable half, a real reboot survival belongs to S3.4 soak. Contract only: nine authorities stay false.",
+  "description": "Closed S2.5A receipt (design §5.2): the initial enable --now + five-dimension running attestation over exactly the five keys S2.3 left const-false in expected_identity_receipt_v1.running_attested (unit / pid_cgroup / mount / network / pg_identity; observation_owner S2.5_LR6). Success semantics are fail-closed: RUNNING_ATTESTED is reachable ONLY for a production target with a verified trusted-host attestor signature (PLATFORM_OR_EXTERNAL_ATTESTED); SOURCE_SIMULATION_PASS is the ceiling for the simulated/disposable lanes (LOCAL_REPRODUCIBLE, trusted_host_attestation null) — a fixture impersonating a platform-attested PASS is structurally unexpressable (boundary.fixture_impersonates_platform_attested const false plus the target-class allOf). The observer_gate block is written out in full here per the PM §5.4 option (b) ruling (no cross-file $ref, no byte-isomorphism coupling); its dead-man semantics: stale evidence or an absent sample can never derive a PASS. reboot_survival_observed stays null in this seam (PM O-6): WantedBy-link + manager semantics are the source-provable half, a real reboot survival belongs to S3.4 soak. lock_window (S2E.3 F4) is the typed evidence that THIS process's lifecycle hold was acquired and released: a success status requires hold_acquired=true, hold_released=true and release_status=S2_5_LIFECYCLE_LOCK_RELEASED, so a swallowed release failure can no longer hide behind a PASS. It proves the in-process acquire/release symmetry only - never that the lock file was untampered or that no second applier exists on another host. Contract only: nine authorities stay false.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -19,6 +19,7 @@
     "enabled_persistence",
     "observer_gate",
     "precheck",
+    "lock_window",
     "rollback_record",
     "apply_actor_node",
     "independent_verifier_node",
@@ -78,6 +79,23 @@
         "loader_closure_reverified": {"type": "boolean"},
         "s2_4_recovery_clear": {"type": "boolean"},
         "install_lock_free": {"type": "boolean"}
+      }
+    },
+    "lock_window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hold_acquired", "hold_released", "release_status"],
+      "properties": {
+        "hold_acquired": {"type": "boolean"},
+        "hold_released": {"type": "boolean"},
+        "release_status": {
+          "enum": [
+            "S2_5_LIFECYCLE_LOCK_RELEASED",
+            "S2_5_LIFECYCLE_LOCK_NOT_HELD",
+            "S2_5_LIFECYCLE_LOCK_RELEASE_FAILED",
+            "S2_5_LIFECYCLE_LOCK_RELEASE_UNTYPED"
+          ]
+        }
       }
     },
     "rollback_record": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/rollback_record"}]},

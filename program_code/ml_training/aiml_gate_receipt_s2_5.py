@@ -471,6 +471,20 @@ def _attestation_receipt_errors(
                 "s2_5 attestation success requires UnitFileState=enabled and the "
                 "WantedBy link present (PM O-6: the source-provable persistence half)"
             )
+        # S2E.3 F4:成功 ⇒ 鎖窗必須被 typed 關閉。修前 release 失敗被 `except: pass` 吞掉,
+        # 效果窗照常開始且 receipt 上完全看不出來;此規則是「鎖窗已正常釋放」的最小可驗證形狀。
+        lock_window = artifact.get("lock_window") or {}
+        if not (
+            lock_window.get("hold_acquired") is True
+            and lock_window.get("hold_released") is True
+            and lock_window.get("release_status") == "S2_5_LIFECYCLE_LOCK_RELEASED"
+        ):
+            errors.append(
+                "s2_5 attestation success requires a typed-closed lifecycle lock window "
+                "(hold_acquired/hold_released true and release_status="
+                "S2_5_LIFECYCLE_LOCK_RELEASED); an unreleased or swallowed release never "
+                "yields a PASS"
+            )
     if status in _S2_5_ATTESTED_STATUSES:
         errors.extend(
             _attestation_errors(artifact, now_text, expected_kind="B" if final else "A")

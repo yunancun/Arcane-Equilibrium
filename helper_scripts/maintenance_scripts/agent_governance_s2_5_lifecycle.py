@@ -439,6 +439,17 @@ S2_5_LOCK_HELD = "S2_5_LIFECYCLE_LOCK_HELD"
 S2_5_LOCK_RELEASED = "S2_5_LIFECYCLE_LOCK_RELEASED"
 S2_5_LOCK_NOT_HELD = "S2_5_LIFECYCLE_LOCK_NOT_HELD"
 S2_5_LOCK_PRECHECK_FAILED = "S2_5_LIFECYCLE_LOCK_PRECHECK_FAILED"
+# F4:release 也是 typed outcome(修前它回 None、無 release 面靜默忽略、例外 `pass`,
+# 於是「鎖窗有沒有被正常關閉」在 verdict/receipt 上完全不可見)。
+S2_5_LOCK_RELEASE_FAILED = "S2_5_LIFECYCLE_LOCK_RELEASE_FAILED"
+S2_5_LOCK_RELEASE_UNTYPED = "S2_5_LIFECYCLE_LOCK_RELEASE_UNTYPED"
+# receipt/verdict 上 lock_window.release_status 的封閉集(schema enum 與此逐字同源)。
+S2_5_LOCK_RELEASE_STATUSES = (
+    S2_5_LOCK_RELEASED,
+    S2_5_LOCK_NOT_HELD,
+    S2_5_LOCK_RELEASE_FAILED,
+    S2_5_LOCK_RELEASE_UNTYPED,
+)
 
 
 def _flock_free_observation(lock_path: Path | str) -> dict[str, Any]:
@@ -682,16 +693,72 @@ def acquire_s2_5_lifecycle_hold(lifecycle_lock: Any) -> tuple[bool, list[str]]:
     return True, []
 
 
-def _release_s2_5_lifecycle_hold(lifecycle_lock: Any) -> None:
-    """finally 臂的釋放。釋放失敗時 fd 仍被持有=fail-closed 方向(擋人而非放行),
-    不以第二個例外遮蔽窗內的真實 verdict/例外。"""
+def _release_s2_5_lifecycle_hold(lifecycle_lock: Any) -> dict[str, Any]:
+    """finally 臂的釋放,回 **typed outcome**(F4)。
+
+    修前此函式回 ``None``:無 release 面靜默忽略、``except Exception: pass``,且呼叫點在
+    ``finally`` 又不接回傳值 ⇒ release 失敗完全不可見,而效果窗照常開始。現在三種失敗
+    形狀各有 typed status,由呼叫端收斂成 ``RECOVERY_REQUIRED``(不新增 verdict status)。
+
+    仍不以第二個例外遮蔽窗內的真實 verdict/例外——釋放失敗時 fd 仍被持有=fail-closed
+    方向(擋人而非放行)。
+    """
 
     release = getattr(lifecycle_lock, "release", None)
-    if callable(release):
-        try:
-            release()
-        except Exception:  # noqa: BLE001
-            pass
+    if not callable(release):
+        return {
+            "status": S2_5_LOCK_RELEASE_UNTYPED,
+            "reasons": [
+                "the injected lifecycle lock has no release face; the hold window cannot "
+                "be proved closed (fail-closed)"
+            ],
+        }
+    try:
+        verdict = release()
+    except Exception as error:  # noqa: BLE001 —— 釋放逸出=鎖窗未證關閉。
+        return {
+            "status": S2_5_LOCK_RELEASE_FAILED,
+            "reasons": [
+                "s2_5 lifecycle lock release raised: " + redact_driver_error(error)
+            ],
+        }
+    status = verdict.get("status") if isinstance(verdict, dict) else None
+    if status not in {S2_5_LOCK_RELEASED, S2_5_LOCK_NOT_HELD}:
+        return {
+            "status": S2_5_LOCK_RELEASE_UNTYPED,
+            "reasons": [
+                "s2_5 lifecycle lock release returned a malformed or unknown verdict; "
+                "the hold window cannot be proved closed (fail-closed)"
+            ],
+        }
+    if status == S2_5_LOCK_NOT_HELD:
+        return {
+            "status": S2_5_LOCK_NOT_HELD,
+            "reasons": [
+                "s2_5 lifecycle lock release reports no hold was held; the window this "
+                "applier believed it owned is unaccounted for (fail-closed)"
+            ],
+        }
+    return {"status": S2_5_LOCK_RELEASED, "reasons": []}
+
+
+def _lock_window_evidence(
+    *, hold_acquired: bool, release: dict[str, Any] | None
+) -> dict[str, Any]:
+    """F4 的最小可驗證形狀:「本行程的鎖窗被 typed 關閉」的三欄證據。
+
+    ⚠ honesty:這證明的是**本行程**的 acquire/release 對稱地走完,**不**證明 lock 檔沒被
+    root 竄改、也不證明別的主機上沒有第二個 applier。
+    """
+
+    status = (
+        release["status"] if isinstance(release, dict) else S2_5_LOCK_NOT_HELD
+    )
+    return {
+        "hold_acquired": bool(hold_acquired),
+        "hold_released": status == S2_5_LOCK_RELEASED,
+        "release_status": status,
+    }
 
 
 def derive_ttl_budget_status(core: Any, *, now: Any) -> dict[str, Any]:
@@ -1037,6 +1104,7 @@ def _base_receipt(
     owner_fingerprint: str,
     observation: dict[str, Any],
     precheck: dict[str, bool],
+    lock_window: dict[str, Any],
     rollback_record: Any,
     applier_node: str,
     verifier_node: str,
@@ -1061,6 +1129,9 @@ def _base_receipt(
         "enabled_persistence": observation["persistence"],
         "observer_gate": observation["observer_gate"],
         "precheck": dict(precheck),
+        # F4:鎖窗證據隨 receipt 落地——closure 消費者因此拿得到「本行程的 hold 被 typed
+        # 關閉」的可驗證形狀,而不是只能相信 applier 沒吞掉 release 失敗。
+        "lock_window": dict(lock_window),
         "rollback_record": rollback_record,
         "apply_actor_node": applier_node,
         "independent_verifier_node": verifier_node,
@@ -1368,8 +1439,15 @@ def apply_s2_5_start(
                 "any s2_5 journal residue was therefore never observed under the hold; "
                 "re-run once the lock is released to obtain the reconcile verdict"
             ],
+            lock_window=_lock_window_evidence(hold_acquired=False, release=None),
         )
-    try:
+    # F4:窗體不再直接 return 出 applier——它回「窗內 typed 拒絕 verdict | None(穿透)」,
+    # 穿透值放進 ``carried``。每一個窗出口因此都能在 finally 取得 release 的 typed 結果
+    # 之後被統一處理(窗內拒絕 → verdict 帶 lock_window;穿透但 release 未證關閉 →
+    # journal RECOVERY_REQUIRED 且 enable --now 永不開始)。
+    carried: dict[str, Any] = {}
+
+    def _transaction_window() -> dict[str, Any] | None:
         # F2:reconcile 是**窗內第一件事**。窗外的裁決是舊觀測——另一個 applier 可能在本
         # applier 的窗外 reconcile 之後才寫下 APPLYING 並進入(鎖已釋放的)效果窗;等本
         # applier 取得 hold 時,手上那份「乾淨」早已過時,於是兩個 applier 依次進效果窗。
@@ -1449,8 +1527,42 @@ def apply_s2_5_start(
             updated_at=started_at,
             replay_ledger_head=_replay_ledger_head(replay_ledger["entries"]),
         )
+        carried.update(
+            pre_state=pre_state, prestate_digest=prestate_digest, started_at=started_at
+        )
+        return None
+
+    try:
+        window_verdict = _transaction_window()
     finally:
-        _release_s2_5_lifecycle_hold(lifecycle_lock)
+        release = _release_s2_5_lifecycle_hold(lifecycle_lock)
+    lock_window = _lock_window_evidence(hold_acquired=True, release=release)
+    if window_verdict is not None:
+        # 窗內拒絕:verdict 帶鎖窗證據;release 若未證關閉,其 typed 理由一併併入。
+        window_verdict["lock_window"] = lock_window
+        if not lock_window["hold_released"]:
+            window_verdict["reasons"] = (
+                list(window_verdict["reasons"]) + release["reasons"]
+            )
+        return window_verdict
+    pre_state = carried["pre_state"]
+    prestate_digest = carried["prestate_digest"]
+    started_at = carried["started_at"]
+    if not lock_window["hold_released"]:
+        # 穿透但鎖窗未證關閉:effect **絕不**開始(修前這裡照常 enable --now)。
+        reasons = release["reasons"] + [
+            "the s2_5 lifecycle hold was not provably released; no enable --now is "
+            "attempted while the lock window is unaccounted for (fail-closed)"
+        ]
+        _journal_transition(
+            journal_path, start_id=intent["start_id"], state="RECOVERY_REQUIRED",
+            updated_at=_iso(clock()),
+        )
+        if recovery_state is not None:
+            recovery_state.record(start_id=intent["start_id"], reasons=reasons)
+        return _verdict(
+            S2_5_STATUS_RECOVERY_REQUIRED, reasons, lock_window=lock_window
+        )
     try:
         driver.enable_now()
     except Exception as error:  # noqa: BLE001 —— effect 失敗必走 rollback,絕不轉成功。
@@ -1550,7 +1662,8 @@ def apply_s2_5_start(
             status=S2_5_STATUS_ATTESTATION_FAILED,
             intent=intent, core=core, target_class=target_class,
             owner_fingerprint=observation["owner_fingerprint"], observation=observation,
-            precheck=precheck_flags, rollback_record=rollback["receipt"],
+            precheck=precheck_flags, lock_window=lock_window,
+            rollback_record=rollback["receipt"],
             applier_node=applier_node, verifier_node=observers.verifier_node_id,
             trusted_host_attestation=None,
             evidence_class="STRUCTURAL_ONLY",
@@ -1597,7 +1710,7 @@ def apply_s2_5_start(
         status=status,
         intent=intent, core=core, target_class=target_class,
         owner_fingerprint=observation["owner_fingerprint"], observation=observation,
-        precheck=precheck_flags, rollback_record=None,
+        precheck=precheck_flags, lock_window=lock_window, rollback_record=None,
         applier_node=applier_node, verifier_node=observers.verifier_node_id,
         trusted_host_attestation=bound_attestation,
         evidence_class=evidence_class,
@@ -1776,8 +1889,12 @@ def apply_s2_5_final(
                 "any s2_5 journal residue was therefore never observed under the hold; "
                 "re-run once the lock is released to obtain the reconcile verdict"
             ],
+            lock_window=_lock_window_evidence(hold_acquired=False, release=None),
         )
-    try:
+    # F4:與 start 同一個窗體形制(窗內拒絕 verdict | None 穿透;穿透值放進 ``carried``)。
+    carried: dict[str, Any] = {}
+
+    def _transaction_window() -> dict[str, Any] | None:
         # F2/F2b:與 start 同——reconcile 與 install-lock 重探都在窗內(窗外裁決是舊觀測)。
         reconcile = reconcile_s2_5_journal(state_root)
         if reconcile["admits_new_work"] is not True:
@@ -1830,8 +1947,39 @@ def apply_s2_5_final(
             updated_at=started_at,
             replay_ledger_head=_replay_ledger_head(replay_ledger["entries"]),
         )
+        carried.update(pre_state=pre_state, started_at=started_at)
+        return None
+
+    try:
+        window_verdict = _transaction_window()
     finally:
-        _release_s2_5_lifecycle_hold(lifecycle_lock)
+        release = _release_s2_5_lifecycle_hold(lifecycle_lock)
+    lock_window = _lock_window_evidence(hold_acquired=True, release=release)
+    if window_verdict is not None:
+        window_verdict["lock_window"] = lock_window
+        if not lock_window["hold_released"]:
+            window_verdict["reasons"] = (
+                list(window_verdict["reasons"]) + release["reasons"]
+            )
+        return window_verdict
+    pre_state = carried["pre_state"]
+    started_at = carried["started_at"]
+    if not lock_window["hold_released"]:
+        # 穿透但鎖窗未證關閉:S2.5B 的 reset/觀測**絕不**開始。
+        reasons = release["reasons"] + [
+            "the s2_5 lifecycle hold was not provably released; no post-drill "
+            "observation or watchdog reset is attempted while the lock window is "
+            "unaccounted for (fail-closed)"
+        ]
+        _journal_transition(
+            journal_path, start_id=intent["start_id"], state="RECOVERY_REQUIRED",
+            updated_at=_iso(clock()),
+        )
+        if recovery_state is not None:
+            recovery_state.record(start_id=intent["start_id"], reasons=reasons)
+        return _verdict(
+            S2_5_STATUS_RECOVERY_REQUIRED, reasons, lock_window=lock_window
+        )
     # 五維再證(drill 之後的新 PID/InvocationID;stable identity 的比對折在觀測面)。
     # P1-1:觀測例外不得裸逸——journal terminal + typed 失敗(S2.5B 無 rollback 語義)。
     try:
@@ -1987,7 +2135,7 @@ def apply_s2_5_final(
         status=status,
         intent=intent, core=core, target_class=target_class,
         owner_fingerprint=observation["owner_fingerprint"], observation=observation,
-        precheck=precheck_flags, rollback_record=None,
+        precheck=precheck_flags, lock_window=lock_window, rollback_record=None,
         applier_node=applier_node, verifier_node=observers.verifier_node_id,
         trusted_host_attestation=bound_attestation,
         evidence_class=evidence_class,

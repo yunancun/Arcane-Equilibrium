@@ -13,6 +13,7 @@
 """
 from __future__ import annotations
 
+import json
 import sys
 from datetime import timedelta
 from pathlib import Path
@@ -382,3 +383,149 @@ def test_install_lock_taken_after_the_fail_fast_probe_is_caught_inside_the_windo
     assert probe.probes == 2      # 窗外 fail-fast 一次 + 窗內權威一次。
     assert unit.calls == []
     assert ledger["entries"] == []  # 窗內拒絕在 consume 之前。
+
+
+# ── F4:release 是 typed outcome,鎖窗證據進 verdict/receipt ──────────────────────────
+def _journal_state(state_root: Path, intent: dict) -> str:
+    return json.loads(
+        lifecycle.s2_5_journal_path(state_root, intent["start_id"]).read_text(
+            encoding="utf-8"
+        )
+    )["state"]
+
+
+def test_release_failure_blocks_the_effect_window_instead_of_being_swallowed(
+    tmp_path, monkeypatch
+):
+    """修前:release 例外被 `except Exception: pass` 吞掉、回傳值不被接,enable --now 照跑。"""
+
+    _key, intent, permit, unit = kit.a_side_setup(tmp_path, monkeypatch)
+    state_root = kit.fresh_state_root(tmp_path, "release-fail-state")
+    recovery = lifecycle.S2_5RecoveryState()
+    verdict = lifecycle.apply_s2_5_start(
+        intent, permit, unit,
+        **kit.apply_kwargs(
+            tmp_path=tmp_path, unit=unit, state_root=state_root, recovery_state=recovery,
+            lifecycle_lock=kit.SimulatedLifecycleLock(fail_release=True),
+        ),
+    )
+    assert verdict["status"] == "RECOVERY_REQUIRED", verdict
+    assert verdict["lock_window"] == {
+        "hold_acquired": True,
+        "hold_released": False,
+        "release_status": lifecycle.S2_5_LOCK_RELEASE_FAILED,
+    }
+    assert "enable_now" not in unit.calls   # 效果窗永不開始。
+    assert "receipt" not in verdict          # 無 receipt(絕不轉成功)。
+    assert _journal_state(state_root, intent) == "RECOVERY_REQUIRED"
+    assert recovery.unresolved is not None
+
+
+def test_a_lock_without_a_release_face_is_typed_untyped_not_ignored(tmp_path, monkeypatch):
+    """無 release 面:修前 `callable(release)` 為假就靜默跳過;現在是 typed RELEASE_UNTYPED。"""
+
+    class _NoReleaseFace:
+        lock_path = "/tmp/s2-5-testkit/no-release-face.lock"
+
+        def acquire(self):
+            return {
+                "status": lifecycle.S2_5_LOCK_ACQUIRED,
+                "lock_path": self.lock_path,
+                "reasons": [],
+            }
+
+    _key, intent, permit, unit = kit.a_side_setup(tmp_path, monkeypatch)
+    verdict = lifecycle.apply_s2_5_start(
+        intent, permit, unit,
+        **kit.apply_kwargs(tmp_path=tmp_path, unit=unit, lifecycle_lock=_NoReleaseFace()),
+    )
+    assert verdict["status"] == "RECOVERY_REQUIRED", verdict
+    assert verdict["lock_window"]["release_status"] == lifecycle.S2_5_LOCK_RELEASE_UNTYPED
+    assert "enable_now" not in unit.calls
+
+
+def test_window_rejection_paths_also_carry_the_lock_window(tmp_path, monkeypatch):
+    """窗內拒絕(前態不符)也帶鎖窗證據——F4 覆蓋的是**每一個**窗出口。"""
+
+    _key, intent, permit, unit = kit.a_side_setup(tmp_path, monkeypatch)
+    unit.enable_now()  # 前態已 active ⇒ 窗內 REQUEST_REJECTED。
+    verdict = lifecycle.apply_s2_5_start(
+        intent, permit, unit, **kit.apply_kwargs(tmp_path=tmp_path, unit=unit)
+    )
+    assert verdict["status"] == "REQUEST_REJECTED"
+    assert verdict["lock_window"] == {
+        "hold_acquired": True,
+        "hold_released": True,
+        "release_status": lifecycle.S2_5_LOCK_RELEASED,
+    }
+    # hold 根本沒取到的路徑同樣帶(hold_acquired=False)。
+    _k2, intent2, permit2, unit2 = kit.a_side_setup(tmp_path, monkeypatch)
+    held = lifecycle.apply_s2_5_start(
+        intent2, permit2, unit2,
+        **kit.apply_kwargs(
+            tmp_path=tmp_path, unit=unit2,
+            lifecycle_lock=kit.SimulatedLifecycleLock(held=True),
+        ),
+    )
+    assert held["lock_window"]["hold_acquired"] is False
+
+
+def test_final_release_failure_blocks_the_reset(tmp_path, monkeypatch):
+    """S2.5B 同形:鎖窗未證關閉 ⇒ 觀測/watchdog reset 都不發生。"""
+
+    _key, intent, permit, unit, pre_drill = kit.b_side_setup(tmp_path, monkeypatch)
+    state_root = kit.fresh_state_root(tmp_path, "final-release-fail")
+    verdict = lifecycle.apply_s2_5_final(
+        intent, permit, unit,
+        **kit.final_apply_kwargs(
+            tmp_path=tmp_path, unit=unit, state_root=state_root,
+            lifecycle_lock=kit.SimulatedLifecycleLock(fail_release=True),
+        ),
+        s2_1_drill_receipt=kit.drill_receipt(),
+        pre_drill_attestation=pre_drill,
+    )
+    assert verdict["status"] == "RECOVERY_REQUIRED", verdict
+    assert verdict["lock_window"]["hold_released"] is False
+    assert "reset_failed" not in unit.calls
+    assert _journal_state(state_root, intent) == "RECOVERY_REQUIRED"
+
+
+def test_a_success_receipt_without_a_proven_lock_window_is_rejected_centrally(
+    tmp_path, monkeypatch
+):
+    """中央閘硬門:成功 receipt 必須帶「鎖窗已 typed 關閉」的三欄證據。"""
+
+    import aiml_gate_receipt_validator as validator
+
+    _key, intent, permit, unit = kit.a_side_setup(tmp_path, monkeypatch)
+    verdict = lifecycle.apply_s2_5_start(
+        intent, permit, unit, **kit.apply_kwargs(tmp_path=tmp_path, unit=unit)
+    )
+    assert verdict["status"] == "SOURCE_SIMULATION_PASS", verdict["reasons"]
+    receipt = verdict["receipt"]
+    assert receipt["lock_window"]["release_status"] == lifecycle.S2_5_LOCK_RELEASED
+    assert validator.validate_aiml_artifact(receipt, now=kit.NOW) == []
+    for forged_window in (
+        {
+            "hold_acquired": True,
+            "hold_released": False,
+            "release_status": lifecycle.S2_5_LOCK_RELEASE_FAILED,
+        },
+        {
+            "hold_acquired": False,
+            "hold_released": False,
+            "release_status": lifecycle.S2_5_LOCK_NOT_HELD,
+        },
+    ):
+        forged = dict(receipt, lock_window=forged_window)
+        forged["self_digest"] = validator.artifact_self_digest(
+            {k: v for k, v in forged.items() if k != "self_digest"}
+        )
+        errors = validator.validate_aiml_artifact(forged, now=kit.NOW)
+        assert any("typed-closed lifecycle lock window" in e for e in errors), errors
+    # lock_window 整個拿掉 ⇒ closed schema 直接拒(必填欄)。
+    stripped = {k: v for k, v in receipt.items() if k != "lock_window"}
+    stripped["self_digest"] = validator.artifact_self_digest(
+        {k: v for k, v in stripped.items() if k != "self_digest"}
+    )
+    assert validator.validate_aiml_artifact(stripped, now=kit.NOW)
