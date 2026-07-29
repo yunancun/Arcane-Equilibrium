@@ -1,8 +1,9 @@
 # 玄衡 TODO - 活躍派發佇列
 
-**版本** v861 | **校正日期** 2026-07-29 | **W0 intake source 基線** `83dc0ec3017e541e156e557c2e2d16f1704682a3`
-**來源／runtime 指針**：S0=`PROGRAM_ADOPTED`；S1=`S1_CLOSED`；S2 七個窄義 source seams 已 landed。2026-07-28T15:55:23+02:00 Linux 兩個候選 learning units 均 `not-found/inactive/dead`，兩個 canonical AIML roots 均不存在；source sync 不等於 deploy。
-**當前唯一 AI/ML 派發**：`S2_EFFECT_EXECUTION_READINESS_ACTIVE`，九個 effect-readiness 拆分包已完成 **5/9**：`S2E.0`、`S2E.1`、`S2E.2a`、`S2E.2b-1`、`S2E.3`。唯一 ACTIVE 入口是 **`S2E.2b-2`**；後續只按 `S2E.2b-2 → S2E.2b-3 → S2E.4 → S2E.5` 前進，不重派已完成包。production effect 仍為 **0/6**，S2 未關閉。舊 `S2-operator-action-packet-v1.md` 保持 `DRAFT_NOT_EXECUTABLE`；fresh Operator authorization 不是唯一 blocker。詳見 §「S2E 當前 ACTIVE 派發」；九項 authority 全 false，S1 disposable authority 不可沿用。
+**版本** v862 | **校正日期** 2026-07-29 | **W0 intake source 基線** `83dc0ec3017e541e156e557c2e2d16f1704682a3` | **W1-W5 launch audit 基線** `815eff545980d9a51fbbb084eaf46c5ab4a67f15`
+**來源／runtime 指針**：S0=`PROGRAM_ADOPTED`；S1=`S1_CLOSED`；S2 七個窄義 source seams 已 landed。2026-07-29 Linux 唯讀複核：`openclaw-learning.service` 與 `arcane-equilibrium-aiml-engine-scanner.service` 均 `not-found/inactive`，兩個 canonical AIML roots 均不存在；source sync 不等於 deploy。
+**W0 驗證結論**：`SOURCE_SYNCED_WITH_REVIEW_DEBT`，不是完整 PASS。PR #160 已 exact-head merge，Mac／GitHub／Linux source 均為 `815eff545980d9a51fbbb084eaf46c5ab4a67f15`，但 merge 後 review 留下 2 個 P1＋1 個 P2：S2.0 lazy membership mutation 尚無 Adapter、S2E.4 未逐項承接全部 S2E.1 residual、CodeQL #95 缺 durable evidence pin。三項分別綁入 `S2E-LW4`／`S2E-LW5`；舊 packet 的 out-of-band `GRANT/REVOKE` 指示不得執行。
+**當前唯一 AI/ML 派發**：`S2_EFFECT_EXECUTION_READINESS_ACTIVE`，九個 effect-readiness 拆分包已完成 **5/9**：`S2E.0`、`S2E.1`、`S2E.2a`、`S2E.2b-1`、`S2E.3`。唯一 ACTIVE 入口是 **`S2E.2b-2`**；後續只按 `S2E.2b-2 → S2E.2b-3 → S2E.4 → S2E.5` 前進，不重派已完成包。W0 source/ledger projection 為 `admitted_production_effect_receipt_count=0/6`、九項 authority artifacts 均 false；這是 W0 scope 的 machine projection，不是全局 runtime 不存在性證明。S2 未關閉，舊 `S2-operator-action-packet-v1.md` 保持 `DRAFT_NOT_EXECUTABLE`；fresh Operator authorization 不是唯一 blocker，S1 disposable authority 不可沿用。
 <details>
 <summary>已關閉的 S2.4/WP4/W5 歷史投影（非 ACTIVE 派發）</summary>
 
@@ -21,6 +22,7 @@
 
 | Operator 命令 | Agent 必須執行的範圍 | 停止點 |
 |---|---|---|
+| `開始並完成S2E-LW1-LW5` | 精確觸發下方 launch waves `S2E-LW1 → S2E-LW2 → S2E-LW3 → S2E-LW4 → S2E-LW5`。這不是已關閉的歷史 `WP1-WP5`，也不是每個 Session 內部的 Route／Build／Review／Fix／Verify `W1-W5`。從 current generation 最早未完成 launch wave 開始，在同一 finite task 內連續完成其餘 waves、全鏈對抗複驗、publication、terminal projection 與 source 三端同步。 | 正常終態只能是 current-head `BLOCKED_OPERATOR_ACTION_PACKET_READY`，同時 `task_issued_authority_count=0/9`、`admitted_production_effect_receipt_count=0/6`、`production_runtime_effect_performed_by_task=false`、沒有 fresh `PLATFORM_OR_EXTERNAL_ATTESTED` observation 時 `runtime_state=UNVERIFIED_NOT_OBSERVED`、`packet_execution_receipt_absent_within_task_scope=true`、`S2_CLOSED=false`；或 `OPERATOR_STOP_NOW`／有 current machine evidence 且無其他 READY source work 的 hard blocker。單一 commit、checkpoint、PR、CI、wave 或 review 完成不得停止。 |
 | `開始並完成S2E` | 從 current projection 的最早未完成包繼續；本版精確入口為 `S2E.2b-2`，依序完成 `S2E.2b-2 → S2E.2b-3 → S2E.4 → S2E.5`，包含 review/fix/publication 與 disposable rehearsal；不重派五個已完成包，不執行 production effect。 | 只在 S2E.5 關閉並重發 machine-checkable Operator packet、`OPERATOR_STOP_NOW`，或無可自行解除且有新證據的 hard blocker 停止。 |
 | `開始並完成S<n>`（空格可有可無），例如 `開始並完成S1` | 精確觸發 `AIML-LONG-LIVED-LANDING-V2` 的完整 Sprint n；不是優先級 Pn、不是 IBKR 的 W*-Sn、也不是單一 Session。先核實並完成 hard predecessor，再連續完成目標 Sprint 的全部 Session。 | 只可在目標 Sprint exit、`OPERATOR_STOP_NOW` 或不可自行解除的外部／authority hard blocker 停止；不得因單一 commit、測試、報告或 Session 完成而提前退出。 |
 | `推進 S<n>`，例如 `推進 S1` | `S1` 代表完整 Sprint 1，不是 S1.1。先完成尚未關閉的 hard predecessor，再依本看板執行 S1 全部 Session。 | S1 exit 或不可自行解除的 hard blocker；不得自行進 S2。 |
@@ -63,6 +65,99 @@
 | 工程並行上限 | 最多 2 個 path/effect manifest 互斥的 writer Session；不互斥則串行。 |
 | 最終同步 | 本 TODO 校正完成後依 `.codex/SYNC.md` 做一次 **source-only** Mac／GitHub／Linux ff-only exact-head sync；先執行 canonical `/Users/ncyu/Projects/TradeBot/srv` main clean guard，保留全部 unrelated `memory/` dirty/untracked 檔，禁止 stash/reset/clean/absorb。guard 失敗即回傳 `STOP_MAC_MAIN_SYNC` 且不得宣稱三端同步完成。不得把未 merge 的 W5 tree 複製到 Linux；W5 合併時須再做其 own exact-head sync。任何 sync 都不等於 deploy/rebuild/restart/runtime attestation；整個 AIML program 的 terminal final sync 仍只在 S8.4 執行。 |
 
+### `S2E-LW1-LW5` 有界 launch map
+
+這五個 ID 是本次剩餘 S2E source 工作的**唯一 launch-wave 別名**，不得縮寫成
+`W1-W5`。固定依賴為 `LW1 → LW2 → LW3 → LW4 → LW5`；shared kernel／route／closure
+writer 全部串行，只有凍結 exact generation 後的 read-only reviewer 可並行。
+
+`S2E-LW1` 必須先建立並審核共用 closed `s2e_launch_genesis_receipt_v1`／
+`s2e_launch_wave_receipt_v1` schema、generator、validator，再由該 tooling 對 W0 exact
+head 發行 genesis；只有 genesis 可用 `predecessor=null`，LW1-LW5 各 receipt 必須精確
+引用前一 receipt digest。genesis 必須分別綁 W0 `baseline_head/tree` 與 tooling
+`schema_carrier_head/tree`，並證明 schema carrier 是 baseline descendant；不得把兩者混成
+同一 self-referential head。每個 wave 都只能由 code-owned validator 在 current task-branch
+source head 重算 acceptance predicates 後發行 `TASK_BRANCH_CHECKPOINT_READY` receipt。
+所有 source predicates／evidence 必須從指定 commit 的 Git blobs 重放，owned paths clean，
+並記錄 bound head/tree。receipt payload 不得自引用自己的 carrier commit；payload digest
+只能由 post-commit external `receipt_carrier_attestation_v1` 或下一代 receipt 綁定 carrier
+head/tree 及 ancestry。carrier attestation 必須綁 schema/tooling head、payload digest、
+carrier head/tree、signer/role、trusted time/freshness、immutable readback 與 signature，
+transition gate 重新驗證且拒 caller-supplied attestation；禁止用 dirty worktree bytes 冒充
+所綁 head。
+
+receipt 的 test／mutation／review evidence 只接受 governed capture/workflow receipt：
+provider schema、exact command/argv、exit code、stdout/stderr digest、bound source head、
+actor/role、trusted time window、signature 與 immutable readback 全部可重驗；手填、複製或
+僅形狀正確的 digest 一律拒絕。receipt 必須記錄 `side_effect_class=SOURCE_ONLY` 或
+`DISPOSABLE_TEST`、`production_effect_count=0`；每個 disposable effect 另綁 typed
+intent/result/postcheck/rollback receipt，不得用 `effect=NONE` 抹掉真實 test effect。
+manual TODO/status flip、caller-supplied predicate、stale receipt、缺 predecessor 不得解鎖
+下一 wave。修復 finding 後須在新 head 重發受影響 receipt。task-branch receipt 只容許同一
+task 內 Advance，**不等於** canonical `SOURCE_LANDED`。LW5 candidate freeze 前必須在同一
+reviewed candidate head 重算 LW1-LW5 全部 acceptance predicates，發行 consolidated
+cross-wave receipt；只驗舊 receipt digest、未重放 live predicate 不得進 publication。
+
+| Launch wave | 對應 package／狀態 | 必做工程與機械 exit |
+|---|---|---|
+| `S2E-LW1` | `S2E.2b-2A`／**ACTIVE**；非 package 終態 | 修 private-penetration guard：逐檔正向 import/capability allowlist 同時覆蓋 `Import`、`ImportFrom`、alias、star import 與 dynamic execution surface，`runpy`／`imp`／`code`／`pdb`／`timeit`／`concurrent.futures` 不得靠除名逃逸。建立 closed `s2_5_recovery_intent_v1` 家族，綁 unresolved state、state-root identity、**由不同 owner/capability 控制且位於可替換 state root 之外**的 trusted anchor、exact journal set/head、replay-ledger head、generation/previous-root、pre-state、允許動作、consume-once signed TTL authorization、rollback 與獨立 postcheck；anchor 必須使用 append-only/WORM，或使用同時綁獨立 key identity、外部 monotonic counter/append-only head、trusted freshness window、latest-generation immutable readback 的 trusted-host SSHSIG，單一簽章不能防 rollback；同一 writer 可 coherent rewrite 或舊合法 anchor 可重放時只能得 `UNVERIFIED`。manifest 在雙 lock 下按 write→fsync→atomic replace→directory fsync 更新，missing/extra/unlink/rename/duplicate/fork/corrupt manifest、整 root replacement、stale/cross-root replay、自由文字 `resolve()`、手工刪檔或重啟清閂全部 fail closed。每步 actor/verifier 身分必由 kernel/admission/capture 導出，不可由 caller 提供，並交叉綁 step、head、host、node、permission、process/uid/cgroup、receipt/postcheck；改名冒充、同一受限身分、caller nonce、跨 step replay 不得取得 `COMPLETED_EXACT`。`aiml_gate_receipt_validator.py` 2004 行只可實際拆分，或在 `docs/references/2000_line_exception_registry.md` 正式登記 path／owner／理由／拆分 trigger／review evidence 並由結構測試執法。exit=`S2E_2B_2A_SECURITY_RECOVERY_READY`，且須由 current-head `s2e_launch_wave_receipt_v1` transition gate 確認；**不得**翻轉 `S2E.2b-2`。 |
+| `S2E-LW2` | `S2E.2b-2B`／WAITING_LW1；唯一可關閉 `S2E.2b-2` | 消費 LW1 exact interface digest，交付 production host runner 及**獨立、code-owned、不可由 caller 選 unit/path 的 disposable systemd target profile**；manager/root/unit/state-root identity 全固定，`production`／`unknown` target 在 driver 構造前 fail closed。接真 `TypedSystemdDriver` injection、unit／pid-cgroup／mount／network／PG identity 五維獨立 observer、S2.4 install-lock probe＋S2.5 lifecycle-lock hold、closed kernel session、CLI 與 authorized startup recovery。於 disposable target 真跑 start→observe→fault→recovery→rollback，逐 fault window 零 residue、可重放；每項 effect 都必須是 `DISPOSABLE_TEST` typed intent/result/postcheck/rollback chain，缺真 disposable target 不得以 fake runner/source simulation 關包。task-branch exit=`S2E_2B_2B_HOST_RUNNER_CHECKPOINT_READY`；只有 final reviewed head exact-merge 且 publication receipt 驗證後才投影 `S2E.2b-2=SOURCE_LANDED`。 |
+| `S2E-LW3` | `S2E.2b-3`／WAITING_LW2 | 串行交付 `HOST_IDENTITY_INSTALL`、`PG_ROLE_ACL_MIGRATION`、`CREDENTIAL_INSTALL`、`LEARNING_RUNTIME`、`ENGINE_SCANNER` 五支 host row driver；逐項以最窄 typed capability 修正 `daemon-reload`、`systemd-creds` FD/binary stdout、`useradd` variable argv、T2 `--user`＋env 等 kernel hard boundary，每項先 fail-first mutation，再由獨立 CC/E3 裁決，不得一次放寬全域 argv/env。`AggregateInstallDriver` 必須按 code-owned fixed order 執行五 row，對每個 fault window逆序補償並由獨立 T1/T2 重觀測；所有 host mutation 都綁 `DISPOSABLE_TEST` typed effect chain，在 LW5 packet-ready 前 **T2 不得 SKIP**。task-branch exit=`S2E_2B_3_ROW_DRIVERS_CHECKPOINT_READY`。 |
+| `S2E-LW4` | `S2E.4`／WAITING_LW3 | 建 approved S2.2B remote-readonly observer、**獨立 S2 runtime-capture evidence kind**、domain-separated signer/finalizer、typed closure、trusted-host runtime-attestor SSHSIG producer/verifier 與 CLI/route/closure；不得放寬既有 test-only `command_capture_v2` 冒充 runtime。證據 DAG 必須無環：raw capture payload → capture digest/signature → postcheck/receipt → final bundle signature；底層 capture 覆蓋 exact argv/stdout/stderr/result、host/head/step、actor/verifier identity 與時間窗，但**不得**反向引用上層 receipt/postcheck digest，最終 bundle 才交叉綁全部 digest，並 exact-consume、拒缺／多／重複項。必須逐項關閉或以 machine evidence 拒絕 W0/PR#160 與 S2E.1 的全部 residual：S2.4 probe/prepare 中央語義 branches；gap-list 從 live gate 導出；runtime capture/signed-bundle kind 可表示；`verifier_capture_digest` 納入 final bundle signature；trusted `evaluation_timestamp` 單調性；S2.5 postcheck verifier↔receipt verifier；S2.4 四步與 S2.2B 的 applier≠verifier source proof；NEW-P2-F 機械等式；CC D-1..D-5 與 E2 RES-1..RES-5 不得靜默 carry。S2.0/S2.1 必須新增**只在 platform-attested evidence 成立時**可表示的 production success path，使從 live `S2_EFFECT_STEPS` 導出的九步皆存在非空但 authority-locked 的 closure path。lazy membership 必須納入新或重審後的 typed Adapter：固定 `NOSUPERUSER` login、`GRANT` 嚴格位於 adapter steps 7/8、對稱 `REVOKE`＋獨立 postcheck，caller 不得任選 `connect_as`；舊 packet 的帶外 mutation 指示作廢。permit 與 attestor 至少須使用不同 public-key identity／namespace，source 不得僅靠宣告聲稱 custody 已分離；production closure 另強制 `key_custody_attestation_v1`，只接受 platform-attested provisioning/ACL/HSM identity，未有該證據時 custody=`UNVERIFIED_PENDING_OPERATOR` 且不得解鎖 effect。attestor 主動採集 observation，拒 caller-authored observation。S2.2B SSHSIG 必綁 attestor identity/namespace/key fingerprint/trusted time/expiry、head/host、S2.5B final digest、V151-V160 exact bytes/digests、learning-runtime digest 與 verifier capture/identity。2231 行 effect-binding test 遵同一 split/registry＋結構測試規則。task-branch exit=`S2E_4_RUNTIME_CLOSURE_CHECKPOINT_READY`。 |
+| `S2E-LW5` | `S2E.5`／WAITING_LW4 | 從 live `S2_EFFECT_STEPS` 導出並在 non-production disposable target 排練 **6 個業務階段／9 個 routed effect steps**，不可只測六個 headline；rehearsal 必須與 production live registry 在 `(step_id, adapter_id, executable entrypoint, intent/result/rollback schema, capability projection)` 集合完全相等，只允許 target profile 由 production 換成 disposable，平行 mock harness 不算。正向路徑、逐 step fault/rollback/postcheck、caller/self-claimed capture/nonce/attestor/schema/identity substitution 全部有 mutation proof；每步綁 `DISPOSABLE_TEST` typed effect chain。另發 `DISPOSABLE_DAG_REHEARSAL_PASS` typed receipt，必須 `production_effect=false` 且永不換算任何 `EFFECT_DONE`。obligations 的 ID／數量由 current live ABI 動態導出（W0 基線為 28，禁止硬編）；每項有固定 `obligation_class` 與 `closure_policy` enum，`SECURITY/RUNTIME/ROLLBACK/ATTESTOR/DURABILITY` 永遠 `PACKET_BLOCKING`，不得重分類或文字豁免；其餘逐條 CLOSED 或具 machine evidence 的 PM adjudication。建立 closed `s2_operator_action_packet_v1` JSON schema＋generator＋validator，以 live registry 導出九步順序、source head、授權形制、rollback/postcheck 與前置；Markdown 只能由 JSON render，不是 authority。generator 必須機械斷言 `task_issued_authority_count=0/9`、`admitted_production_effect_receipt_count=0/6`、`production_runtime_effect_performed_by_task=false`、沒有 fresh `PLATFORM_OR_EXTERNAL_ATTESTED` observation 時 `runtime_state=UNVERIFIED_NOT_OBSERVED`、`packet_execution_receipt_absent_within_task_scope=true`，且禁止輸出 `S2_CLOSED`／`EFFECT_DONE`／runtime-ready／deploy-ready；只有 authenticated S2 signed bundle 才能產生 `PLATFORM_OR_EXTERNAL_ATTESTED`。CodeQL pin：alert `95`、rule `py/clear-text-storage-sensitive-data`、high、`helper_scripts/maintenance_scripts/agent_governance_terminal_receipt_sink.py:510`、W0 head `815eff545980d9a51fbbb084eaf46c5ab4a67f15` 時為 open、analysis key=`dynamic/github-code-scanning/codeql:analyze`、W0 CodeQL CLI=`2.26.1`；evidence package 必綁 alert/rule/ref/full 40-char commit/location、CodeQL bundle/CLI/query-pack versions、analysis/workflow run IDs、source→guard→sink trace、negative regression 與 GitHub API response digest。final head 必須真修復並由 exact-head CodeQL 證明；只有 machine-proven `false_positive` 可在 fresh explicit authority 下，附同一證據與 exact dismissal reason/comment 取得 GitHub dismissal receipt，`accepted_risk`／`won't_fix` 仍為 packet blocker。先達 task-branch `S2E_LW5_IMPLEMENTATION_READY`，再 push candidate PR 取得 reviewed-head CodeQL／required-CI evidence；修復會改 head 時重跑。exact-head merge 與三端同步後，governed finalizer 發行 packet／publication receipt；只有該 receipt 綁定 `reviewed_head`、`reviewed_tree`、`merge_head`、`merge_tree`、ancestry/tree-equivalence、三端 heads 與 CodeQL evidence 後，才可進 terminal projection；尚未完成 projection 時不得宣稱整體 exit。 |
+
+**執行／publication 契約**：這是一個 finite multi-wave task，不是 `/loop`。預設使用一個
+non-main linked worktree、一個 feature branch、一張 writer lease；每個 LW 可拆成多個 bounded
+clean local checkpoints，但 checkpoint/role fragment/測試 PASS 不是停點。LW5 達
+`S2E_LW5_IMPLEMENTATION_READY` 後 push candidate PR，凍結 `reviewed_head`，讓 classifier
+決定 required CI 並取得該 head 的 CodeQL evidence；禁止手動觸發非必要 heavy CI。final
+cross-wave 對抗鏈至少包含 PA integration、E2 mutation/security、E4 regression、CC/E3
+authority、OPS source/runtime boundary、QA acceptance；P0/P1 必修，影響安全／closure 的
+P2 亦必修，修復後只針對 finding IDs 做 delta recheck。任何修復若改 head，必須重建受影響
+的 wave receipts／ABI ledger／CodeQL／test evidence，再更新 reviewed head。
+
+final reviewed head 只能 exact-head merge；post-merge verifier 必須證明 `reviewed_head` 是
+`merge_head` 的 ancestry 且 `reviewed_tree == merge_tree`，再依 `.codex/SYNC.md` 完成
+Mac／GitHub／Linux source heads 等值，最後才由不寫 repository 的 governed finalizer 發行
+`s2e_publication_receipt_v1`／Operator packet。允許的 durable sink adapter 只有
+`EXTERNAL_WORM_V1`，或具獨立 signer、monotonic anchor 與 immutable readback 的
+`TRUSTED_HOST_SSHSIG_APPEND_ONLY_V1`；本地 chmod-only sink 不合格。sink receipt 必須綁
+adapter/schema version、authority ref、retention mode、object/version ID、readback digest、
+key identity/signature 與 failure state。finalizer 以 `(merge_head, merge_tree, packet_digest)`
+作 idempotency key；重試只可讀回同一 receipt，conflicting payload fail closed，並以測試覆蓋
+sync 後／sink publish 前 crash recovery。沒有合格 sink 時停在
+`BLOCKED_FINALIZATION_SINK_UNAVAILABLE`，不得偽造 terminal packet。
+
+publication receipt 成立後，唯一可選工作改為 `POST_PUBLICATION_PROJECTION_ONLY`：
+先釋放 implementation lease，以 merged main 作 fresh baseline 重新 route/admit，建立新的
+projection-only branch／linked worktree／writer lease。該 PR 只能把 TODO／PROGRESS 的
+S2E packages 投影為 `SOURCE_LANDED_PENDING_TERMINAL_RECEIPT`，overall status 為
+`PENDING_TERMINAL_RECEIPT`，並綁 implementation `reviewed_head/merge_head`、publication
+receipt digest 與 packet digest；不得預先寫 `BLOCKED_OPERATOR_ACTION_PACKET_READY`，
+不得改 production code 或重跑 LW1-LW5。
+projection candidate 經 classifier-required checks、exact-head merge、tree/ancestry 驗證與
+Mac/GitHub/Linux source sync 後，finalizer 以同一 sink 追加
+`s2e_terminal_projection_receipt_v1` 與 terminal packet wrapper；wrapper 必須機械綁定
+publication receipt digest、projection reviewed/merge head/tree ancestry-equivalence、
+Mac/GitHub/Linux final heads，以及 `terminal_projection_head/tree → implementation
+executable-manifest digest → implementation merge head/tree → Operator packet digest`；
+不得把 pre-projection packet 直接冒充 current-head packet。sink 不可達、receipt fork、
+同一 idempotency key 多份 payload、任一 final head 不等值都 fail closed。selector 必須先驗
+sink receipts 再讀 TODO：valid publication receipt＋缺 projection receipt 時只派 projection；
+valid projection receipt＋wrapper 時才組合出 `BLOCKED_OPERATOR_ACTION_PACKET_READY` 並
+不得再派 S2E。須有 regression 機械證明 crash-window `PENDING_TERMINAL_RECEIPT` 與 terminal
+狀態均不會回選 LW1。正常 exit 只在 terminal projection receipt 與 wrapper 均成立後。
+
+若 guard 或可審查性要求分 PR，PM 必須記錄 machine reason；每個 split boundary 皆須依序
+完成 post-push SHA、current-head review、classifier required CI、exact-head merge、
+Mac/Linux ff-only sync、舊 lease release，再以 merged head 作 fresh baseline 重新
+route/admit、建新 worktree/branch/lease。中間 boundary 必須由獨立
+`s2e_split_publication_receipt_v1` 綁 predecessor wave/carrier receipt、reviewed/merge
+head-tree equivalence、三端 sync、`production_effect_count=0` 與 next-wave ID；不得誤用只在
+LW5 才產生的 terminal publication receipt。code-owned continuation gate 驗證該 receipt 後
+回傳 `ADVANCE`，才可進下一 wave。任一 clean-main／Linux guard 失敗即依 `.codex/SYNC.md`
+停止，不得跳過同步、沿用 stale lease 或宣稱下一 wave 已正式 landed。
+
 ### S2E 當前 ACTIVE 派發
 
 此表是 S2 的唯一可選 queue。`SOURCE_READY` 的 WP1-WP5 與
@@ -75,12 +170,13 @@
 | `S2E.2a` | **SOURCE_LANDED 2026-07-29** | S2E.1（已收口） | 已建 trusted-host kernel／read-only observer 與真實 S2.0/S2.1 runners；S2.0/S2.1 在 throwaway PostgreSQL 完成 apply→independent postcheck→compensate→byte-for-byte restoration。S2.4 只達 source simulation，S2.5 無真 systemd disposable target，兩者未在此包冒充完成。 | 已收口（PR #156 merge `5486a6183`）；pure-addition、四個 adapter modules byte-identical。production 無 authority，零 production effect。 |
 | `S2E.3` | **SOURCE_LANDED 2026-07-29** | S2E.1（已收口） | 修 S2.5 F2/F3/F4/note-1：reconcile 納入 lifecycle hold、install-lock probe 與 lifecycle-lock hold 分離、release failure typed、journal self-digest/hash-chain。 | 已收口（PR #155 merge `94a9f514b`）；競態、crash、release failure、tail truncation/history rewrite mutations 全被殺。無當前派發。 |
 | `S2E.2b-1` | **SOURCE_LANDED 2026-07-29** | S2E.2a ＋ S2E.3（皆已收口） | 已落地 S2.4 recovery core：POSIX file/lock drivers、受 consumed-plan ledger 約束的 startup 逆序補償器、journal-routed driver injection；**零新增 host capability**，五支 row driver 與 T2 kernel amendments 留在 `S2E.2b-3`，S2.5 runner 留在 `S2E.2b-2`。 | 已收口（PR #158 merge `521c813c5`）；15 個 fault windows 只落 `COMPLETED_EXACT`／`RECOVERY_REQUIRED`。CLI 的兩個 S2.4 mode 仍無 aggregate host driver，未宣稱 disposable full rehearsal。 |
-| `S2E.2b-2` | **ACTIVE / P0 — 唯一當前入口** | S2E.2b-1（已收口） | 建真 S2.5 host runner：driver、五維獨立 observer、S2.4 install lock＋S2.5 lifecycle lock 雙 lock、封閉 kernel session 與 CLI；提供合法、具授權、可重放的 startup recovery/repair 路徑，禁止靠手工刪檔。同步關閉：私有穿透守衛的 `ImportFrom` 洞；`runpy`／`imp`／`code`／`pdb`／`timeit`／`concurrent.futures` 除名穿透；nonce／self-claimed verifier 仍可取得 `COMPLETED_EXACT`；S2.5 state-root 目錄 anchor/manifest 缺口（刪除 journal 必須可偵測）；`aiml_gate_receipt_validator.py` **2004 行**的正式 size 裁決。 | 所列穿透與 self-claim mutations 全拒；刪除 journal、wrong/missing anchor、手工 repair、單 lock、同一 applier/verifier、未封閉 kernel/CLI 均 fail closed；真 host runner 走授權 startup recovery 並可重放；2004-line validator 有正式裁決。production authority 缺失時仍 fail closed。 |
-| `S2E.2b-3` | WAITING_S2E_2b_2 / P0 | S2E.2b-2 | S2.4 五支 row driver ＋各自所需的 kernel 能力修正案 ＋ T2 tier。每項都是硬邊界修正案,應有自己的對抗輪。 | 五支 row driver 可建;kernel 修正案經獨立審查;T2 誠實 SKIP 或真跑。 |
-| `S2E.4` | WAITING_S2E_2b_3 / P0 | S2E.2b-3 | 建 S2.2B approved remote-readonly observer 與 trusted-host runtime-attestor SSHSIG producer/verifier；讓 runtime `command_capture_v2`、signed-bundle execution kind、`scope=runtime` typed closure schema 可表示且互相綁定；把 apply actor、independent verifier、receipt/postcheck identity 對 S2.4／S2.5／S2.2B cross-bind；驗證 key／namespace／identity／freshness，接上 CLI／route／closure；對 2231 行 `tests/structure/test_agent_governance_s2_effect_binding.py` 作明確 keep/split/exception size adjudication。 | Caller JSON、自簽／偽 signature、wrong key/namespace、stale capture、applier=verifier、identity substitution、任一 V151-V160 mismatch 全拒；valid disposable chain 可達 runtime-compatible；2231-line test 有正式裁決。 |
-| `S2E.5` | WAITING_S2E_4 / P0 | S2E.4 | 在非 production disposable target rehearsal 完整六段 DAG；證明 distinct applier/verifier 並拒 caller/self-claimed capture、nonce、attestor、schema substitution；從 live ABI 枚舉 28 obligations 並逐條 CLOSED 或 PM reasoned adjudication；確認 2231-line size 裁決已關閉；GitHub CodeQL alert #95 在 terminal packet 前必須真實修復或具證據裁決；其後才重發 current-head packet。 | 零未解 source P0/P1、完整 rollback/postcheck、closure／attestor 身分證據、2231-line 與 CodeQL #95 兩項明確裁決、packet machine-checkable；此時才可轉 `BLOCKED_OPERATOR_ACTION_PACKET_READY`。 |
+| `S2E.2b-2` | **ACTIVE / P0 — 唯一當前入口** | S2E.2b-1（已收口） | 精確拆成 `S2E-LW1` security/recovery 非終態與 `S2E-LW2` host-runner task-branch checkpoint；完整 scope／exit 以上方 launch map 為準。LW1 不得冒充 package closure，LW2 只能解鎖同 task 的 LW3；只有 final reviewed head exact-merge＋publication receipt 才可正式翻轉。 | `S2E_2B_2A_SECURITY_RECOVERY_READY` 只解鎖 LW2；`S2E_2B_2B_HOST_RUNNER_CHECKPOINT_READY` 只解鎖 LW3；post-merge publication receipt 才投影本 package `SOURCE_LANDED`。production authority 缺失時仍 fail closed。 |
+| `S2E.2b-3` | WAITING_S2E_2b_2 / P0 | S2E.2b-2 | 由 `S2E-LW3` 串行完成五支 row driver、逐項 kernel hard-boundary amendment、aggregate fixed-order integration、逐 fault-window 反序補償與 T1/T2 independent re-observation。 | 五支 driver 必須在真 disposable target 可執行；每項 kernel amendment 獨立審查；packet-ready 前 T2 **不得 SKIP**。 |
+| `S2E.4` | WAITING_S2E_2b_3 / P0 | S2E.2b-3 | 由 `S2E-LW4` 關閉 W0/PR#160 與 S2E.1 全部 residual；建立 S2 專屬 runtime-capture evidence kind、domain-separated signer/finalizer 與 schema-valid closure，**不得**只把 test-only `command_capture_v2` 的 `scope` 放寬。補齊 S2.0/S2.1 platform-attested success representation、lazy membership typed Adapter、S2.2B remote observer/SSHSIG、kernel-derived actor/verifier identities、不同 attestor public-key identity，以及 effect-time `key_custody_attestation_v1` gate 與 2231-line size 裁決。 | 從 live `S2_EFFECT_STEPS` 導出的九步均有 authority-locked、platform-attested 才可達的 production closure path；未有 platform custody evidence 時誠實保持 `UNVERIFIED_PENDING_OPERATOR`；caller JSON/self-digest-only/test→runtime relabel、同 OS identity、wrong key/namespace、stale/future、跨 step/host replay、任一 V151-V160 mismatch 全拒。 |
+| `S2E.5` | WAITING_S2E_4 / P0 | S2E.4 | 由 `S2E-LW5` 在 non-production disposable target rehearsal 6 個業務階段／9 個 live routed steps；obligations ID/count 從 current ABI 動態導出；生成 `DISPOSABLE_DAG_REHEARSAL_PASS` 非 production receipt，以及 closed `s2_operator_action_packet_v1` JSON schema/generator/validator＋衍生 Markdown。CodeQL #95 以 exact reviewed-head evidence package 修復或正式裁決。 | task branch 先到 `S2E_LW5_IMPLEMENTATION_READY`；零未解 source P0/P1，安全／runtime／rollback／attestor blocker 不得文字豁免。implementation exact-head merge/sync、durable publication receipt、projection-only PR merge/sync 與 terminal projection receipt 全成立後，才可轉 `BLOCKED_OPERATOR_ACTION_PACKET_READY`。 |
 
-**停止規則**：完成單一 commit/PR/test/wave 不得停止。只在 S2E.5 exit、
+**停止規則**：完成單一 commit/PR/test/wave 不得停止。只在 terminal projection receipt
+驗證後的 S2E.5 exit、
 `OPERATOR_STOP_NOW`，或同一不可自行解除 blocker 具 current machine evidence 且
 不存在其他 READY source work 時停止。S2E 全程不得 production PG/deploy/restart/
 credential/broker/order/live；CI 只跑 classifier 判定 required 的 workflow。

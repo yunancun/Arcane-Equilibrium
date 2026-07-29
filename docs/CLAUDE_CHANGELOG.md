@@ -1,9 +1,39 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-07-29（AIML S2 W0 接手交接固化；TODO v861／PROGRESS ledger v16）
+> 最後更新：2026-07-29（AIML S2E-LW1-LW5 launch contract；TODO v862／PROGRESS ledger v16）
 
 ---
+
+## AIML S2E-LW1-LW5 launch contract — TODO v862（2026-07-29）
+
+W0 的 source merge／三端 source head／本地治理回歸成立，但 PR #160 merge 後仍有
+2 個 P1＋1 個 P2，故校正為 `SOURCE_SYNCED_WITH_REVIEW_DEBT`，不宣稱完整 PASS。
+TODO 新增不與歷史 WP1-WP5 或 Session 內部 W1-W5 衝突的
+`S2E-LW1 → S2E-LW2 → S2E-LW3 → S2E-LW4 → S2E-LW5` 有界派發：
+security/recovery、S2.5 host runner、S2.4 row drivers、runtime
+capture/closure/attestor、full disposable DAG/operator packet。對抗複驗補入
+6 個業務階段／9 個 routed steps、kernel-derived actor/verifier identity、
+durable root manifest、獨立 attestor custody、S2.0/S2.1 platform-attested
+success representation、S2 專屬 runtime capture、dynamic obligation set、
+closed launch-wave receipt chain／JSON operator packet，以及 CodeQL #95
+full-head／toolchain／analysis-run evidence gate。trusted anchor 改為不同
+owner/capability 的 append-only/WORM 或 trusted-host SSHSIG；production key
+custody 只接受 platform attestation，不能由 source 宣告。
+第二輪對抗複驗再補 W0 genesis、Git-blob replay、governed evidence capture、
+production/disposable effect 分類、production registry set-equality、無環 evidence
+DAG、fixed blocking obligation enum、approved durable sink／idempotent recovery。
+publication 採 implementation-ready candidate PR → reviewed-head CodeQL/required
+CI → implementation exact-head merge/tree-equivalence → 三端 source sync →
+durable publication receipt → fresh-custody projection-only PR／sync →
+`PENDING_TERMINAL_RECEIPT` → terminal projection receipt/wrapper；task-branch
+checkpoint 不得提前冒充 canonical `SOURCE_LANDED`。receipt evidence 由 Git blobs
+與 governed capture 重放，carrier attestation 與 payload 分離以避免 hash 自引用；
+split PR 使用獨立 boundary receipt。
+正常終態僅為 `BLOCKED_OPERATOR_ACTION_PACKET_READY`；
+`task_issued_authority_count=0/9`、`admitted_production_effect_receipt_count=0/6`、
+task 不產生 production runtime effect，但誠實記錄 disposable test effects；未有
+fresh runtime observation 時記錄 `UNVERIFIED_NOT_OBSERVED`，`S2_CLOSED=false`。
 
 ## AIML S2 effect-readiness 獨立校正 — TODO v856（2026-07-28）
 
