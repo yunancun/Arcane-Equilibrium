@@ -686,3 +686,173 @@ def test_the_wal_leaf_is_the_single_home_of_the_durability_substrate():
     # 兩葉都必須留在 repo 的 2000 行硬上限之內。
     for leaf in ("agent_governance_s2_5_lifecycle.py", "agent_governance_s2_5_wal.py"):
         assert len((HELPERS / leaf).read_text(encoding="utf-8").splitlines()) <= 2000, leaf
+
+
+# ── E2 review 收口(P1-1 sticky / P2-3 檔名綁定 / P2-4 三方 pin / P2-7 verdict 契約)──
+def test_a_broken_history_stays_broken_across_further_transitions(tmp_path):
+    """P1-1:斷鏈留痕必須 **sticky**——修前「再 append 一次」就把留痕洗掉。
+
+    反例(E2 實測):斷鏈後寫出的那一份本身是合法 v2 payload,下一次 transition 的
+    ``_journal_payload_errors`` 回空 ⇒ ``integrity_broken`` 歸 False、``prior_payload_digest``
+    歸 None、state 直接被寫成 ``TERMINAL_SUCCESS``,reconcile 隨即放行。
+    """
+
+    state_root = kit.fresh_state_root(tmp_path, "note1-sticky")
+    residue_id = "s2-5-" + "5" * 64
+    journal_path = lifecycle.s2_5_journal_path(state_root, residue_id)
+    lifecycle._journal_transition(
+        journal_path, start_id=residue_id, state="APPLYING", updated_at=kit.NOW
+    )
+    journal_path.write_text("{not json", encoding="utf-8")
+    broken = lifecycle._journal_transition(
+        journal_path, start_id=residue_id, state="TERMINAL_SUCCESS", updated_at=kit.NOW
+    )
+    assert broken["integrity_broken"] is True
+    payload = broken
+    for _ in range(2):  # 關鍵:**連續**兩次 transition,每一次都不得洗白。
+        payload = lifecycle._journal_transition(
+            journal_path, start_id=residue_id, state="TERMINAL_SUCCESS",
+            updated_at=kit.NOW,
+        )
+        assert payload["integrity_broken"] is True
+        assert payload["prior_payload_digest"] == broken["prior_payload_digest"]
+        assert payload["state"] == "RECOVERY_REQUIRED"
+        assert payload["history"][-1]["state"] == "RECOVERY_REQUIRED"
+    # sticky 續帶時 history 是續 append(不是每次重新歸零),軌跡可稽核。
+    assert [entry["seq"] for entry in payload["history"]] == [0, 1, 2]
+    reconcile = lifecycle.reconcile_s2_5_journal(state_root)
+    assert reconcile["admits_new_work"] is False
+    assert any("broken integrity chain" in r for r in reconcile["reasons"]), reconcile
+
+
+def test_a_terminal_journal_copied_under_another_start_id_is_rejected(
+    tmp_path, monkeypatch
+):
+    """P2-3:reconcile 的 payload 驗必須帶**由檔名導出**的 start_id。
+
+    修前 ``_journal_payload_errors(payload)`` 不帶 start_id ⇒ 把 A 的 TERMINAL_SUCCESS
+    journal 原樣複製成 B 的合法檔名(內容完全自洽、ledger 尾錨也對得上)即通過。
+    """
+
+    state_root = kit.fresh_state_root(tmp_path, "note1-copy")
+    _intent, journal_path = _successful_start(tmp_path, monkeypatch, state_root)
+    assert lifecycle.reconcile_s2_5_journal(state_root)["admits_new_work"] is True
+    other_id = "s2-5-" + "6" * 64
+    lifecycle.s2_5_journal_path(state_root, other_id).write_text(
+        journal_path.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    reconcile = lifecycle.reconcile_s2_5_journal(state_root)
+    assert reconcile["admits_new_work"] is False
+    assert any("does not bind this apply" in r for r in reconcile["reasons"]), reconcile
+
+
+def test_the_release_status_enum_is_pinned_three_ways(tmp_path, monkeypatch):
+    """P2-4:``S2_5_LOCK_RELEASE_STATUSES`` 曾是零引用死常量,註解宣稱的同源性無執法點。
+
+    三方=常量 ↔ 兩個 schema 的 enum ↔ 中央閘成功臂實際採用的值。
+    """
+
+    import agent_governance_s2_5_wal as wal
+    import aiml_gate_receipt_validator as validator
+
+    schema_dir = ML_ROOT / "schemas/aiml_gate_receipts"
+    for name in (
+        "s2_5_running_attestation_v1.schema.json",
+        "s2_5_final_attestation_v1.schema.json",
+    ):
+        block = json.loads((schema_dir / name).read_text(encoding="utf-8"))[
+            "properties"
+        ]["lock_window"]
+        assert tuple(block["properties"]["release_status"]["enum"]) == (
+            wal.S2_5_LOCK_RELEASE_STATUSES
+        ), name
+        assert block["additionalProperties"] is False, name
+    _key, intent, permit, unit = kit.a_side_setup(tmp_path, monkeypatch)
+    verdict = lifecycle.apply_s2_5_start(
+        intent, permit, unit, **kit.apply_kwargs(tmp_path=tmp_path, unit=unit)
+    )
+    receipt = verdict["receipt"]
+    for status in wal.S2_5_LOCK_RELEASE_STATUSES + ("S2_5_LIFECYCLE_LOCK_INVENTED",):
+        forged = dict(
+            receipt,
+            lock_window={
+                "hold_acquired": True, "hold_released": True, "release_status": status,
+            },
+        )
+        forged["self_digest"] = validator.artifact_self_digest(
+            {k: v for k, v in forged.items() if k != "self_digest"}
+        )
+        errors = validator.validate_aiml_artifact(forged, now=kit.NOW)
+        # 封閉集之外連 schema 都過不了;集內也只有 RELEASED 過得了成功臂。
+        assert (errors == []) is (status == wal.S2_5_LOCK_RELEASED), (status, errors)
+    # 常量同時是 evidence 建構的白名單:未來新增而未同步 schema 的狀態收斂成 UNTYPED。
+    assert wal._lock_window_evidence(
+        hold_acquired=True, release={"status": "S2_5_LIFECYCLE_LOCK_INVENTED"}
+    )["release_status"] == wal.S2_5_LOCK_RELEASE_UNTYPED
+
+
+def test_the_lock_window_rides_every_verdict_after_the_hold_point(tmp_path, monkeypatch):
+    """P2-7:verdict 層的 ``lock_window`` 契約——取鎖點之後恆帶,之前恆不帶。
+
+    修前只有窗內拒絕/hold 未取得兩條路徑帶,成功臂與 effect 後的失敗臂都不帶,於是
+    verdict 消費者無法一致地讀「本次 apply 的鎖窗有沒有被 typed 關閉」。
+    """
+
+    _key, intent, permit, unit = kit.a_side_setup(tmp_path, monkeypatch)
+    ok = lifecycle.apply_s2_5_start(
+        intent, permit, unit, **kit.apply_kwargs(tmp_path=tmp_path, unit=unit)
+    )
+    assert ok["status"] == "SOURCE_SIMULATION_PASS", ok["reasons"]
+    assert ok["lock_window"] == ok["receipt"]["lock_window"] == {
+        "hold_acquired": True,
+        "hold_released": True,
+        "release_status": lifecycle.S2_5_LOCK_RELEASED,
+    }
+    # effect 之後才失敗的臂(維度 fail → rollback → ATTESTATION_FAILED)同樣帶。
+    _k2, intent2, permit2, unit2 = kit.a_side_setup(tmp_path, monkeypatch)
+    observers = kit.HarnessObserver(
+        unit2, clock=kit.frozen_clock(), faults={"network.listening_sockets_empty": False}
+    )
+    failed = lifecycle.apply_s2_5_start(
+        intent2, permit2, unit2,
+        **kit.apply_kwargs(
+            tmp_path=tmp_path, unit=unit2, observers=observers,
+            state_root=kit.fresh_state_root(tmp_path, "p2-7-failed"),
+        ),
+    )
+    assert failed["status"] == "ATTESTATION_FAILED", failed["reasons"]
+    assert failed["lock_window"]["hold_released"] is True
+    # 取鎖點**之前**的拒絕不帶——填一個形式合法的 NOT_HELD 等於捏造沒發生過的鎖窗。
+    _k3, intent3, permit3, unit3 = kit.a_side_setup(tmp_path, monkeypatch)
+    shared = kit.SimulatedLifecycleLock()
+    pre_hold = lifecycle.apply_s2_5_start(
+        intent3, permit3, unit3,
+        **kit.apply_kwargs(
+            tmp_path=tmp_path, unit=unit3,
+            install_lock_probe=shared, lifecycle_lock=shared,
+            state_root=kit.fresh_state_root(tmp_path, "p2-7-pre-hold"),
+        ),
+    )
+    assert pre_hold["status"] == "REQUEST_REJECTED", pre_hold
+    assert "lock_window" not in pre_hold, pre_hold
+
+
+def test_the_wal_leaf_has_a_script_index_entry(tmp_path):
+    """P1-3:CLAUDE.md §七 的 convention 在此有執法點(修前新葉漏登記全量仍綠)。"""
+
+    index = (ROOT / "helper_scripts/SCRIPT_INDEX.md").read_text(encoding="utf-8")
+    rows = {
+        leaf: [line for line in index.splitlines() if f"/{leaf}`" in line]
+        for leaf in (
+            "agent_governance_s2_5_wal.py", "agent_governance_s2_5_lifecycle.py",
+        )
+    }
+    for leaf, matched in rows.items():
+        assert len(matched) == 1, (leaf, matched)
+    # lifecycle 條目不得再宣稱 §5.7 的 WAL journal 住在該葉(C7 之後不成立)。
+    assert "§5.7 WAL journal(APPLYING 先寫)" not in rows[
+        "agent_governance_s2_5_lifecycle.py"
+    ][0]
+    assert "agent_governance_s2_5_wal.py" in rows[
+        "agent_governance_s2_5_lifecycle.py"
+    ][0]

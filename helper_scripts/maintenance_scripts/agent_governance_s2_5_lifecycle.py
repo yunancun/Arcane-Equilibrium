@@ -326,6 +326,14 @@ def _secret_scan_errors(artifact: Any, path: str = "$") -> list[str]:
 
 
 def _verdict(status: str, reasons: list[str], **extra: Any) -> dict[str, Any]:
+    """applier verdict 的唯一建構點(``status`` + 已去識別的 ``reasons`` + 選配證據)。
+
+    E2 P2-7:``lock_window`` 的出現與否是**契約**,不是隨手加的欄位——一旦本次 apply 走到
+    取鎖點,之後的**每一個**出口(hold 未取得 / 窗內拒絕 / 效果後失敗 / 成功)都帶三欄鎖窗
+    證據;取鎖點**之前**的純 precheck/授權拒絕一律不帶,因為當下根本沒有鎖窗存在,填一個
+    形式上合法的 ``NOT_HELD`` 等於捏造一段沒發生過的鎖窗。
+    """
+
     verdict = {"status": status, "reasons": [_scrub_secret_text(r) for r in reasons]}
     verdict.update(extra)
     return verdict
@@ -1097,6 +1105,7 @@ def apply_s2_5_start(
             else S2_5_STATUS_RECOVERY_REQUIRED,
             [f"enable --now failed: {redact_driver_error(error)}"],
             rollback_receipt=rollback["receipt"],
+            lock_window=lock_window,
         )
     # P1-1:effect 之後的**全部**觀測(五維/persistence/owner 訊號/observer-gate 時間解析)
     # 都在 try 內——任何例外都不得裸逸,例外臂走 rollback + journal terminal + recovery 閂。
@@ -1124,6 +1133,7 @@ def apply_s2_5_start(
             reasons
             + ([] if restored else ["rollback-to-disabled did not restore the S2.4 pre-state"]),
             rollback_receipt=rollback["receipt"],
+            lock_window=lock_window,
         )
     failing = sorted(
         name for name, ok in observation["verdicts"].items() if not ok
@@ -1161,6 +1171,7 @@ def apply_s2_5_start(
                 S2_5_STATUS_RECOVERY_REQUIRED,
                 reasons + ["rollback-to-disabled did not restore the S2.4 pre-state"],
                 rollback_receipt=rollback["receipt"],
+                lock_window=lock_window,
             )
         receipt = _base_receipt(
             schema_version="s2_5_running_attestation_v1",
@@ -1179,7 +1190,7 @@ def apply_s2_5_start(
         receipt, errors = _seal(receipt, now_dt=now_dt)
         return _verdict(
             S2_5_STATUS_ATTESTATION_FAILED, reasons + errors, receipt=receipt,
-            rollback_receipt=rollback["receipt"],
+            rollback_receipt=rollback["receipt"], lock_window=lock_window,
         )
     # 全維通過:成功語義按 lane 收斂(simulated/disposable 頂點是 SOURCE_SIMULATION_PASS)。
     completed_at = _iso(clock())
@@ -1226,12 +1237,15 @@ def apply_s2_5_start(
     receipt, errors = _seal(receipt, now_dt=now_dt)
     if errors:
         # 自產 receipt 過不了中央閘 = 實作缺陷,fail-closed 絕不回成功。
-        return _verdict(S2_5_STATUS_ATTESTATION_FAILED, errors, receipt=receipt)
+        return _verdict(
+            S2_5_STATUS_ATTESTATION_FAILED, errors, receipt=receipt,
+            lock_window=lock_window,
+        )
     _journal_transition(
         journal_path, start_id=intent["start_id"], state="TERMINAL_SUCCESS",
         updated_at=completed_at,
     )
-    return _verdict(status, [], receipt=receipt)
+    return _verdict(status, [], receipt=receipt, lock_window=lock_window)
 
 
 def _rollback_to_disabled(
@@ -1513,6 +1527,7 @@ def apply_s2_5_final(
                 "post-drill observation raised and the runtime state is unproven: "
                 + redact_driver_error(error)
             ],
+            lock_window=lock_window,
         )
     failing = sorted(name for name, ok in observation["verdicts"].items() if not ok)
     stale = observation["observer_gate"]["stale"] is not False
@@ -1531,7 +1546,9 @@ def apply_s2_5_final(
                 "owner fingerprint cross-check failed: the module-recomputed WP3 "
                 "compute_owner_fingerprint value differs from the caller-supplied claim"
             ]
-        return _verdict(S2_5_STATUS_ATTESTATION_FAILED, reasons)
+        return _verdict(
+            S2_5_STATUS_ATTESTATION_FAILED, reasons, lock_window=lock_window
+        )
     # watchdog reset **last**:最後一個 lifecycle 操作是本 phase 的 reset 本身(§3/O-2)。
     try:
         driver.reset_failed()
@@ -1548,6 +1565,7 @@ def apply_s2_5_final(
         return _verdict(
             S2_5_STATUS_RECOVERY_REQUIRED,
             [f"watchdog reset failed: {redact_driver_error(error)}"],
+            lock_window=lock_window,
         )
     # P1-1:reset 之後的觀測/導出也不得裸逸——reset 已發生,乾淨與否未證 ⇒ RECOVERY。
     try:
@@ -1582,6 +1600,7 @@ def apply_s2_5_final(
                 "post-reset observation raised; the reset outcome is unproven: "
                 + redact_driver_error(error)
             ],
+            lock_window=lock_window,
         )
     reset_clean = (
         watchdog_last["unexplained_restart_detected"] is False
@@ -1619,6 +1638,7 @@ def apply_s2_5_final(
                 "unreachable)"
             ],
             rollback_receipt=reset_receipt,
+            lock_window=lock_window,
         )
     if target_class == "production":
         attestation_errors = attestation.verify_s2_5_trusted_host_attestation(
@@ -1667,9 +1687,15 @@ def apply_s2_5_final(
     receipt["stable_identity_match"] = stable_identity_match
     receipt, errors = _seal(receipt, now_dt=now_dt)
     if errors:
-        return _verdict(S2_5_STATUS_ATTESTATION_FAILED, errors, receipt=receipt)
+        return _verdict(
+            S2_5_STATUS_ATTESTATION_FAILED, errors, receipt=receipt,
+            lock_window=lock_window,
+        )
     _journal_transition(
         journal_path, start_id=intent["start_id"], state="TERMINAL_SUCCESS",
         updated_at=completed_at,
     )
-    return _verdict(status, [], receipt=receipt, reset_receipt=reset_receipt)
+    return _verdict(
+        status, [], receipt=receipt, reset_receipt=reset_receipt,
+        lock_window=lock_window,
+    )

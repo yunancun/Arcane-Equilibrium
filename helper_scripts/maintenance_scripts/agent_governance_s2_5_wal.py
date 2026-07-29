@@ -157,15 +157,22 @@ def _journal_transition(
     replay_ledger_head: dict[str, Any] | None = None,
     lock_release_status: str | None = None,
 ) -> dict[str, Any]:
-    """note-1:**驗證後追加,永不靜默重置**。
+    """note-1:**驗證後追加,永不靜默重置**;斷鏈留痕 **sticky**。
 
     修前:讀不懂的 journal 讓 ``history`` 直接歸零(281-282),歷史消失不留痕。現在壞
     payload 會開新鏈但打上 ``integrity_broken``/``prior_payload_digest``,且 state 強制
     ``RECOVERY_REQUIRED`` —— 一次無聲的歷史清洗因此不再可能。
+
+    E2 P1-1:留痕必須**跨越後續每一次 append**。斷鏈後寫出的那一份自己是一份合法 v2
+    payload,若旗標只在「本次讀到壞 bytes」時成立,連續兩次 transition 就足以把
+    ``RECOVERY_REQUIRED`` 洗成 ``TERMINAL_SUCCESS`` 並讓 ``prior_payload_digest`` 歸 None
+    —— 那正是本函式宣稱要擋的事。旗標因此只由 operator 面的重建結束,絕不由再一次
+    transition 自癒。
     """
 
     history: list[dict[str, Any]] = []
     carried_head: dict[str, Any] | None = None
+    chain_broken_now = False
     integrity_broken = False
     prior_payload_digest: str | None = None
     if journal_path.is_file():
@@ -173,14 +180,14 @@ def _journal_transition(
             raw = journal_path.read_text(encoding="utf-8")
         except OSError:
             raw = None
-            integrity_broken = True
+            chain_broken_now = True
         else:
             try:
                 existing = json.loads(raw)
             except ValueError:
                 existing = None
             if _journal_payload_errors(existing, start_id=start_id):
-                integrity_broken = True
+                chain_broken_now = True
                 prior_payload_digest = central_validator.canonical_digest(
                     {"prior_journal_bytes": raw}
                 )
@@ -188,10 +195,21 @@ def _journal_transition(
                 history = list(existing["history"])
                 head = existing.get("replay_ledger_head")
                 carried_head = dict(head) if isinstance(head, dict) else None
+                if existing.get("integrity_broken") is True:
+                    # sticky:合法但已留痕的 payload,旗標與舊 bytes 的 digest 一律續帶。
+                    integrity_broken = True
+                    carried_digest = existing.get("prior_payload_digest")
+                    prior_payload_digest = (
+                        carried_digest if isinstance(carried_digest, str) else None
+                    )
+    integrity_broken = integrity_broken or chain_broken_now
     if integrity_broken:
-        # 開新鏈(舊 bytes 已不可信),但把「發生過一次斷鏈」與舊 bytes 的 digest 留在檔上;
-        # state 強制 RECOVERY_REQUIRED —— 斷鏈的主機狀態不明,絕不由本次 transition 洗白。
-        history = []
+        # 本次才讀到壞 bytes ⇒ 開新鏈(舊 bytes 已不可信),但把「發生過一次斷鏈」與舊
+        # bytes 的 digest 留在檔上;sticky 續帶時 history 本身仍是合法鏈,續 append 保住
+        # 可稽核軌跡。兩條路徑的 state 都強制 RECOVERY_REQUIRED —— 斷鏈的主機狀態不明,
+        # 絕不由本次 transition 洗白。
+        if chain_broken_now:
+            history = []
         state = JOURNAL_RECOVERY_REQUIRED_STATE
     entry: dict[str, Any] = {
         "seq": len(history),
@@ -261,9 +279,13 @@ def reconcile_s2_5_journal(state_root: Path | str | None) -> dict[str, Any]:
     durable ledger 涵蓋。
 
     ⚠ 誠實偵測邊界:關得掉=單 entry 改而不重算全鏈 / 截尾而不重封 self_digest / 自洽但與
-    ledger head 不相容 / 壞 journal 靜默歸零;**關不掉**=具 state_root write 權限者同時且
-    一致地重寫 journal + ledger(self-digest 只證 integrity,不證作者)。此修的定位是把
-    「無聲改寫」降級為「必須做一次一致的多檔改寫」。
+    ledger head 不相容 / 壞 journal 靜默歸零 / 一份終端 journal 被複製成另一個 start_id 的
+    檔名(P2-3:start_id 由檔名導出並驗);**關不掉**兩項——(1)具 state_root write 權限者
+    同時且一致地重寫 journal + ledger(self-digest 只證 integrity,不證作者);(2)**把
+    journal 檔整個 ``unlink``**:state_root 目錄層沒有 anchor/manifest,「少一個檔」與「從未
+    存在」無法區分,單一次刪除即讓本函式放行且不留痕。故此修的定位只到「把無聲**改寫**降級
+    為必須做一次一致的多檔改寫」——**刪除**仍只需一次 unlink,真解(目錄層 anchor/manifest
+    + startup recovery)屬 host-runner 波,不在本 tranche。
     """
 
     if state_root is None:
@@ -284,7 +306,12 @@ def reconcile_s2_5_journal(state_root: Path | str | None) -> dict[str, Any]:
             payload = json.loads(journal_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             payload = None
-        payload_errors = _journal_payload_errors(payload)
+        # E2 P2-3:start_id 必須由**檔名**導出並一併驗。不帶 start_id 時,把 A 的
+        # TERMINAL_SUCCESS journal 原樣複製成 B 的合法檔名即可通過(內容完全自洽),
+        # 一份終端 journal 因此能被複製成任意 start_id 的「已完成」證據。
+        payload_errors = _journal_payload_errors(
+            payload, start_id=journal_path.name[: -len(".journal.json")]
+        )
         if payload_errors:
             return {
                 "admits_new_work": False,
@@ -421,7 +448,10 @@ S2_5_LOCK_PRECHECK_FAILED = "S2_5_LIFECYCLE_LOCK_PRECHECK_FAILED"
 # 於是「鎖窗有沒有被正常關閉」在 verdict/receipt 上完全不可見)。
 S2_5_LOCK_RELEASE_FAILED = "S2_5_LIFECYCLE_LOCK_RELEASE_FAILED"
 S2_5_LOCK_RELEASE_UNTYPED = "S2_5_LIFECYCLE_LOCK_RELEASE_UNTYPED"
-# receipt/verdict 上 lock_window.release_status 的封閉集(schema enum 與此逐字同源)。
+# receipt/verdict 上 lock_window.release_status 的封閉集:兩個 s2_5 attestation schema 的
+# enum、中央閘成功臂採用的字面量與此三方逐字同源,由
+# ``test_the_release_status_enum_is_pinned_three_ways`` 執法(E2 P2-4:此常量原本零引用,
+# 註解宣稱的同源性沒有任何執法點),並在 :func:`_lock_window_evidence` 就地當白名單用。
 S2_5_LOCK_RELEASE_STATUSES = (
     S2_5_LOCK_RELEASED,
     S2_5_LOCK_NOT_HELD,
@@ -732,6 +762,10 @@ def _lock_window_evidence(
     status = (
         release["status"] if isinstance(release, dict) else S2_5_LOCK_NOT_HELD
     )
+    if status not in S2_5_LOCK_RELEASE_STATUSES:
+        # 封閉集之外的狀態一律收斂成 UNTYPED:receipt 的 enum 只認這四個,任何未來新增
+        # 的 release status 若沒同步進 schema,寧可 fail-closed 也不寫出過不了閘的欄位。
+        status = S2_5_LOCK_RELEASE_UNTYPED
     return {
         "hold_acquired": bool(hold_acquired),
         "hold_released": status == S2_5_LOCK_RELEASED,
